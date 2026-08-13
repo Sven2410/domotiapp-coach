@@ -1,0 +1,36 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "DomotiApp Coach",
+        "description": "Adds the DomotiApp Coach dashboard to the sidebar.",
+        "data": {
+          "home_path": "Path of the home dashboard",
+          "demo_mode": "Demo mode (simulated values)"
+        },
+        "data_description": {
+          "home_path": "Where the Home button in the header navigates to, for customers running Kiosk Mode.",
+          "demo_mode": "Show simulated values instead of real sensor data."
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "DomotiApp Coach is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "DomotiApp Coach",
+        "data": {
+          "home_path": "Path of the home dashboard",
+          "demo_mode": "Demo mode (simulated values)"
+        },
+        "data_description": {
+          "home_path": "Where the Home button in the header navigates to, for customers running Kiosk Mode.",
+          "demo_mode": "Show simulated values instead of real sensor data."
+        }
+      }
+    }
+  }
+}

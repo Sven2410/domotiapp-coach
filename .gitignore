@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# Local design harness, never shipped to Home Assistant
+custom_components/domotiapp_coach/frontend/preview.html
