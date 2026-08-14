@@ -21,8 +21,14 @@ export const NAV_ITEMS = [
   { id: "apparaten", label: "Apparaten", icon: "devices" },
   { id: "strategie", label: "Strategie", icon: "compass" },
   { id: "installatie", label: "Installatie", icon: "plug" },
-  { id: "instellingen", label: "Instellingen", icon: "sliders" },
+  // Points straight at raw entities, so it is for the installer only. Customers
+  // do get Installatie, where the same configuration is shown in their terms.
+  { id: "instellingen", label: "Instellingen", icon: "sliders", adminOnly: true },
 ];
+
+/** The sections this user may open. */
+export const navItemsFor = (isAdmin) =>
+  NAV_ITEMS.filter((item) => isAdmin || !item.adminOnly);
 
 const LOGO_URL = new URL("../img/domotitech-mark.png", import.meta.url).href;
 
@@ -221,6 +227,11 @@ class DacHeader extends DacElement {
     }
   `;
 
+  constructor() {
+    super();
+    this.isAdmin_ = true;
+  }
+
   set active(value) {
     if (this.active_ === value) return;
     this.active_ = value;
@@ -231,8 +242,24 @@ class DacHeader extends DacElement {
     return this.active_;
   }
 
+  /** Rebuild the bar when the user's rights become known. */
+  set isAdmin(value) {
+    const next = value !== false;
+    if (next === this.isAdmin_ && this.rendered_) return;
+    this.isAdmin_ = next;
+    if (!this.rendered_) return;
+
+    // Rebuilt rather than hidden, so the sliding highlight measures against the
+    // pills that are actually there.
+    this.observer_?.disconnect();
+    this.shadowRoot.replaceChildren();
+    this.rendered_ = false;
+    this.connectedCallback();
+    this.syncActive_();
+  }
+
   render() {
-    const pills = NAV_ITEMS.map(
+    const pills = navItemsFor(this.isAdmin_).map(
       (item) => `
         <button class="pill" type="button" data-id="${item.id}">
           ${icons[item.icon]}<span>${item.label}</span>

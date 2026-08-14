@@ -100,11 +100,6 @@ class DacViewSettings extends DacEditorElement {
               </label>
             </div>
 
-            <div class="row">
-              <label>Energieprijs</label>
-              <dac-entity-picker id="src-price" data-key="price"></dac-entity-picker>
-              <span class="sub">In euro of centen per kWh — de coach leest de eenheid van de sensor.</span>
-            </div>
           </div>
         </section>
 
@@ -162,9 +157,8 @@ class DacViewSettings extends DacEditorElement {
     bind("price-high", (v) => (this.draft_.thresholds.price.high = Number(v)));
 
     for (const picker of this.pickers_()) {
-      picker.filter = picker.dataset.key === "price" ? "price" : "power";
-      picker.placeholder =
-        picker.dataset.key === "price" ? "Zoek een prijssensor…" : "Zoek een vermogenssensor…";
+      picker.filter = "power";
+      picker.placeholder = "Zoek een vermogenssensor…";
       picker.addEventListener("dac-entity-change", (ev) => {
         this.draft_.sources[picker.dataset.key] = ev.detail.value;
         this.syncSaveBar_();
@@ -186,16 +180,11 @@ class DacViewSettings extends DacEditorElement {
     }
 
     this.wireSaveBar_();
-    this.onHass_();
     this.paint_();
   }
 
   pickers_() {
     return this.$$("dac-entity-picker");
-  }
-
-  onHass_() {
-    for (const picker of this.pickers_()) picker.hass = this.hass_;
   }
 
   paint_() {
@@ -210,9 +199,9 @@ class DacViewSettings extends DacEditorElement {
     this.$("#price-high").value = d.thresholds.price.high;
 
     for (const picker of this.pickers_()) {
-      picker.hass = this.hass_;
       picker.value = d.sources[picker.dataset.key] ?? "";
     }
+    this.onFeed_();
 
     this.paintGridMode_();
     this.syncSaveBar_();

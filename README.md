@@ -23,9 +23,10 @@ het dashboard draait op je eigen sensoren zodra je ze gekoppeld hebt.
 | 2 | Adviseren — rekenen met tarieven, opwek en verbruik | in aanbouw |
 | 3 | Sturen — apparaten schakelen op zonneoverschot en prijs | gepland |
 
-> Zolang er geen sensoren gekoppeld zijn draait het Overzicht op een
-> gesimuleerde woning, zodat het dashboard meteen iets laat zien. Dat staat er
-> dan bij op de coachkaart.
+> Zonder gekoppelde sensoren toont het Overzicht streepjes en vertelt de coach
+> wat er nog ontbreekt. Er worden nooit getallen verzonnen: een dashboard dat
+> het gat opvult met iets plausibels is erger dan een dashboard dat toegeeft dat
+> het het niet weet.
 
 ---
 
@@ -55,15 +56,32 @@ Alles staat in het paneel onder **Instellingen**, niet in het configuratiescherm
 van Home Assistant. Klanten draaien dit op hun telefoon achter Kiosk Mode, waar
 de instellingen van HA niet bereikbaar zijn.
 
-| Kopje | Wat je er instelt |
-|-------|-------------------|
-| **Navigatie** | Waar de **Home**-knop naartoe gaat. Standaard `/lovelace/0`. |
-| **Energiebronnen** | De sensoren voor opwek, verbruik, meterstand en prijs. |
-| **Drempelwaarden** | Waar de kleuren omslaan voor zelfbenutting en energieprijs. |
+De secties in de header verdelen het zo:
 
-Apparaten hebben hun eigen sectie **Apparaten** in de header, niet een kopje
-onder Instellingen: ze krijgen er gaandeweg meer instellingen bij dan in één
-kopje passen.
+| Sectie | Wat je er instelt | Wie |
+|--------|-------------------|-----|
+| **Apparaten** | Welke apparaten als bol in de energiestroom verschijnen. | beheerder |
+| **Installatie** | Naam van de woning, aantal fasen, hoofdzekering, maximaal netvermogen, en het energiecontract. | klant leest mee, beheerder wijzigt |
+| **Instellingen** | Waar de Home-knop naartoe gaat, welke sensoren de meetwaarden leveren, en de drempelwaarden voor de kleuren. | alleen beheerder |
+
+**Installatie** is met opzet leesbaar voor de klant en alleen te wijzigen door
+een beheerder: de gegevens daar bepalen wat de coach adviseert, dus een klant
+die ziet dat zijn zekering of tarief niet klopt en dat meldt is meer waard dan
+een klant die het scherm niet mag zien. **Instellingen** wijst rechtstreeks naar
+entiteiten en is daarom helemaal verborgen voor klanten.
+
+### Aansluiting
+
+Het maximale netvermogen volgt uit fasen × hoofdzekering × 230 V — 3 × 25 A geeft
+17,250 kW, 1 × 25 A geeft 5,750 kW — maar is aan te passen voor een begrensde of
+verzwaarde aansluiting.
+
+### Contract
+
+Een **vast** contract is een all-in prijs, een terugleververgoeding en
+terugleverkosten. Bij een **dynamisch** contract kies je tussen één sensor die de
+all-in prijs al levert, of de kale marktprijs waarbij de coach zelf
+energiebelasting en leveranciersopslag optelt en er btw overheen rekent.
 
 Wijzigen mag alleen een beheerder; meekijken mag iedereen. Een wijziging op de
 ene telefoon komt vanzelf door op een tablet die openstaat.
@@ -146,6 +164,9 @@ twee van de zes paren zitten dicht op hun ondergrens.
 - De integratie registreert het paneel met `panel_custom.async_register_panel`
   en serveert de frontend vanaf een eigen statisch pad.
 - Instellingen staan in HA-storage en gaan over een eigen websocket-API.
+- Live waarden komen **niet** uit de `hass`-property die het paneel krijgt
+  aangereikt, maar uit een eigen abonnement op `state_changed` (`state-feed.js`).
+  Zie de toelichting in dat bestand.
 - Vereist Home Assistant 2025.6 of nieuwer.
 
 ```
@@ -157,18 +178,19 @@ custom_components/domotiapp_coach/
 ├── websocket.py           lezen en schrijven vanuit het paneel
 ├── brand/                 icon.png, logo.png
 └── frontend/
-    ├── domotiapp-coach-panel.js   entry point, routing
+    ├── domotiapp-coach-panel.js   entry point, routing, rechten
     ├── img/               logo in de header
     └── src/
         ├── base.js        mini-basisklasse voor de components
         ├── theme.js       design tokens
         ├── format.js      eenheden en getalweergave
-        ├── data-source.js live bron plus simulatie
+        ├── state-feed.js  eigen abonnement op statuswijzigingen
+        ├── data-source.js meetwaarden en prijsberekening
         ├── devices.js     apparaattypes
         ├── header.js      header met navigatie en Home-knop
         ├── icons.js
         ├── components/    stat-tile, energy-flow, entity-picker
-        └── views/         overzicht, apparaten, instellingen, placeholders
+        └── views/         overzicht, apparaten, installatie, instellingen
 ```
 
 ---

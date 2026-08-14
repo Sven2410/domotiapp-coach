@@ -17,13 +17,6 @@ export const SECTIONS = {
     body: "Kies wat voor jou telt: de laagste rekening, zoveel mogelijk eigen zon gebruiken, of je accu sparen. De coach rekent je keuzes door en legt uit waarom hij iets adviseert.",
     phase: 2,
   },
-  installatie: {
-    icon: "plug",
-    title: "Installatie",
-    lead: "Je woning, je meterkast, je opwek.",
-    body: "Hier koppel je de sensoren aan de coach en leg je vast wat er in huis staat: panelen, accu, warmtepomp, laadpaal en je contract. Zonder deze gegevens kan de coach niet rekenen.",
-    phase: 1,
-  },
 };
 
 const PHASES = [

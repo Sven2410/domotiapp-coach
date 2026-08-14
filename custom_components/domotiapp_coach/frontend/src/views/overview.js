@@ -5,17 +5,20 @@
  * underneath are what it is reasoning from. Nothing above it competes for the
  * position: no greeting, no clock, no badges.
  *
- * Values come from the customer's own sensors once they are mapped under
- * Instellingen, and from a simulated house until then.
+ * Every value comes from the customer's own sensors. Nothing here invents a
+ * number: with no sensors mapped the tiles show dashes and the coach says what
+ * is missing, because a dashboard that fills the gap with something plausible
+ * is worse than one that admits it does not know.
  */
 
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
-import { DemoSource, LiveSource } from "../data-source.js";
+import { LiveSource } from "../data-source.js";
 import { level, levelTone, percent, power, powerText, price as fmtPrice } from "../format.js";
 import "../components/stat-tile.js";
 import "../components/energy-flow.js";
 
+/** Heartbeat for the sparklines; live values also arrive on their own events. */
 const REFRESH_MS = 2000;
 
 /** Surplus worth acting on, in watts -- roughly a dishwasher. */
@@ -38,7 +41,17 @@ function advise(r, thresholds, configured) {
       tag: "Instellen",
       title: "Koppel je sensoren",
       body:
-        "Je ziet nu voorbeeldwaarden van een gesimuleerde woning. Ga naar Instellingen en kies onder Energiebronnen welke sensoren je opwek, verbruik en meterstand meten — daarna rekent de coach op je eigen huis.",
+        "De coach weet nog niet welke sensoren jouw opwek, verbruik en meterstand meten. Ga naar Instellingen en kies ze onder Energiebronnen — daarna vult dit scherm zich met je eigen cijfers.",
+    };
+  }
+
+  if (r.solar === null && r.grid === null) {
+    return {
+      tone: "var(--dac-warn)",
+      tag: "Let op",
+      title: "Geen meetwaarden",
+      body:
+        "De gekozen sensoren geven op dit moment niets bruikbaars terug. Controleer onder Instellingen of ze nog bestaan en of ze een waarde hebben.",
     };
   }
 
@@ -129,6 +142,14 @@ class DacViewOverview extends DacElement {
       transition: color 500ms ease, background 500ms ease, border-color 500ms ease;
     }
     .coach-mark .icon { width: 19px; height: 19px; }
+    .coach-where {
+      display: flex; flex-direction: column; gap: 1px; min-width: 0;
+    }
+    .coach-where .home {
+      font-size: 13px; font-weight: 600; color: var(--dac-ink);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .coach-where .home[hidden] { display: none; }
     .coach-tag {
       margin-left: auto;
       padding: 5px 11px;
@@ -153,13 +174,6 @@ class DacViewOverview extends DacElement {
       line-height: 1.62;
       color: var(--dac-ink-2);
     }
-    .coach .demo-note {
-      margin-top: 14px;
-      display: inline-flex; align-items: center; gap: 7px;
-      font-size: 12px; color: var(--dac-ink-3);
-    }
-    .coach .demo-note .icon { width: 14px; height: 14px; }
-    .coach .demo-note[hidden] { display: none; }
 
     /* ---- tiles ---- */
     .tiles {
@@ -197,17 +211,22 @@ class DacViewOverview extends DacElement {
 
   constructor() {
     super();
-    this.demo_ = new DemoSource();
-    this.live_ = new LiveSource();
+    this.source_ = new LiveSource();
     this.settings_ = null;
   }
 
-  set hass(value) {
-    this.hass_ = value;
+  /** @param {import("../state-feed.js").StateFeed} feed */
+  set stateFeed(feed) {
+    this.unsubscribe_?.();
+    this.feed_ = feed;
+    // Values arrive on their own events, so the dashboard follows the house
+    // rather than waiting for the next beat of a timer.
+    this.unsubscribe_ = feed?.subscribe(() => this.requestTick_());
   }
 
   set settings(value) {
     this.settings_ = value;
+    if (this.rendered_) this.tick_();
   }
 
   render() {
@@ -218,14 +237,14 @@ class DacViewOverview extends DacElement {
         <article class="card coach" id="coach">
           <div class="coach-top">
             <div class="coach-mark">${icons.spark}</div>
-            <div class="eyebrow">Energiecoach</div>
+            <div class="coach-where">
+              <span class="home" id="home-name" hidden></span>
+              <span class="eyebrow">Energiecoach</span>
+            </div>
             <span class="coach-tag" id="coach-tag">Rustig</span>
           </div>
           <h1 id="coach-title">Je woning draait rustig</h1>
           <p id="coach-body"></p>
-          <span class="demo-note" id="demo-note" hidden>
-            ${icons.warning}<span>Voorbeeldwaarden — er zijn nog geen sensoren gekoppeld</span>
-          </span>
         </article>
 
         <section class="tiles" aria-label="Live meetwaarden">
@@ -267,18 +286,39 @@ class DacViewOverview extends DacElement {
 
   disconnectedCallback() {
     clearInterval(this.timer_);
+    this.unsubscribe_?.();
+  }
+
+  /**
+   * Coalesce the burst of events a single meter reading produces.
+   *
+   * A three-phase meter fires several state_changed events within milliseconds;
+   * redrawing per event would recompute the whole view five times for one
+   * change and stutter the sparklines.
+   */
+  requestTick_() {
+    if (this.pending_) return;
+    this.pending_ = true;
+    setTimeout(() => {
+      this.pending_ = false;
+      if (this.rendered_) this.tick_();
+    }, 250);
   }
 
   tick_() {
+    if (!this.feed_) return;
+
     const configured = LiveSource.isConfigured(this.settings_);
-    const source = configured ? this.live_ : this.demo_;
-    const r = configured ? source.sample(this.hass_, this.settings_) : source.sample();
+    const r = this.source_.sample(this.feed_, this.settings_);
     const thresholds = this.settings_?.thresholds ?? {
       self_use: { low: 30, high: 70 },
       price: { low: 0.2, high: 0.3 },
     };
 
-    this.$("#demo-note").hidden = configured;
+    const homeName = (this.settings_?.installation?.home_name ?? "").trim();
+    const nameEl = this.$("#home-name");
+    nameEl.textContent = homeName;
+    nameEl.hidden = !homeName;
 
     const exporting = (r.grid ?? 0) < 0;
 
@@ -287,8 +327,8 @@ class DacViewOverview extends DacElement {
       icon: "sun",
       label: "Opwek zon",
       ...power(r.solar),
-      sub: (r.solar ?? 0) > 50 ? "Zonnepanelen leveren nu" : "Geen opbrengst",
-      series: source.series("solar"),
+      sub: this.sub_(r.solar, (v) => (v > 50 ? "Zonnepanelen leveren nu" : "Geen opbrengst")),
+      series: this.source_.series("solar"),
     });
 
     this.tiles_.house.update({
@@ -296,17 +336,17 @@ class DacViewOverview extends DacElement {
       icon: "house",
       label: "Verbruik woning",
       ...power(r.house),
-      sub: (r.house ?? 0) > 2000 ? "Zware verbruiker actief" : "Basisverbruik",
-      series: source.series("house"),
+      sub: this.sub_(r.house, (v) => (v > 2000 ? "Zware verbruiker actief" : "Basisverbruik")),
+      series: this.source_.series("house"),
     });
 
     this.tiles_.grid.update({
       tone: exporting ? "var(--dac-grid-out)" : "var(--dac-grid-in)",
       icon: "grid",
-      label: exporting ? "Naar het net" : "Van het net",
+      label: r.grid === null ? "Net" : exporting ? "Naar het net" : "Van het net",
       ...power(r.grid),
-      sub: exporting ? "Je levert terug" : "Je koopt in",
-      series: source.series("grid"),
+      sub: this.sub_(r.grid, () => (exporting ? "Je levert terug" : "Je koopt in")),
+      series: this.source_.series("grid"),
     });
 
     // Zelfbenutting is a share, not a rate, so it wears the status scale rather
@@ -319,9 +359,15 @@ class DacViewOverview extends DacElement {
       ...percent(r.selfUse),
       sub:
         r.selfUse === null
-          ? "Geen opwek op dit moment"
-          : { good: "Je gebruikt je zon goed", warn: "Een deel gaat naar het net", bad: "Het meeste gaat naar het net" }[selfLevel],
-      series: source.series("selfUse"),
+          ? configured
+            ? "Geen opwek op dit moment"
+            : "Nog niet ingesteld"
+          : {
+              good: "Je gebruikt je zon goed",
+              warn: "Een deel gaat naar het net",
+              bad: "Het meeste gaat naar het net",
+            }[selfLevel],
+      series: this.source_.series("selfUse"),
     });
 
     const priceLevel = level(r.price, thresholds.price, true);
@@ -332,13 +378,19 @@ class DacViewOverview extends DacElement {
       ...fmtPrice(r.price),
       sub:
         r.price === null
-          ? "Geen prijssensor gekoppeld"
+          ? "Nog geen contract ingevuld"
           : { good: "Laag tarief", warn: "Gemiddeld tarief", bad: "Hoog tarief" }[priceLevel],
-      series: source.series("price"),
+      series: this.source_.series("price"),
     });
 
     this.flow_.update(r);
     this.updateCoach_(advise(r, thresholds, configured));
+  }
+
+  /** Supporting line for a tile, or an honest blank when there is no reading. */
+  sub_(value, describe) {
+    if (value === null || !Number.isFinite(value)) return "Geen meetwaarde";
+    return describe(value);
   }
 
   updateCoach_(advice) {

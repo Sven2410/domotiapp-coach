@@ -16,7 +16,11 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from .const import (
+    CONTRACT_DYNAMIC,
+    CONTRACT_FIXED,
     DEVICE_TYPES,
+    DYNAMIC_ALL_IN,
+    DYNAMIC_MARKET,
     EVENT_SETTINGS_UPDATED,
     GRID_MODE_SIGNED,
     GRID_MODE_SPLIT,
@@ -25,6 +29,9 @@ from .storage import async_get_store
 
 # An entity id, or "" for "not configured yet".
 _ENTITY = vol.Any("", vol.Match(r"^[a-z_]+\.[a-zA-Z0-9_]+$"))
+
+# A euro amount per kWh. Negative is real: market prices go below zero.
+_EURO = vol.All(vol.Coerce(float), vol.Range(-100, 100))
 
 _DEVICE = vol.Schema(
     {
@@ -47,7 +54,38 @@ _SETTINGS = vol.Schema(
                 vol.Optional("grid_export"): _ENTITY,
                 vol.Optional("grid_signed"): _ENTITY,
                 vol.Optional("grid_signed_invert"): bool,
-                vol.Optional("price"): _ENTITY,
+            }
+        ),
+        vol.Optional("installation"): vol.Schema(
+            {
+                vol.Optional("home_name"): str,
+                vol.Optional("phases"): vol.In([1, 3]),
+                vol.Optional("fuse_amps"): vol.All(vol.Coerce(float), vol.Range(1, 1000)),
+                vol.Optional("max_grid_watts"): vol.All(vol.Coerce(float), vol.Range(0, 1_000_000)),
+                vol.Optional("max_grid_auto"): bool,
+            }
+        ),
+        vol.Optional("contract"): vol.Schema(
+            {
+                vol.Optional("type"): vol.In([CONTRACT_FIXED, CONTRACT_DYNAMIC]),
+                vol.Optional("fixed"): vol.Schema(
+                    {
+                        vol.Optional("all_in_price"): _EURO,
+                        vol.Optional("feed_in_tariff"): _EURO,
+                        vol.Optional("feed_in_costs"): _EURO,
+                    }
+                ),
+                vol.Optional("dynamic"): vol.Schema(
+                    {
+                        vol.Optional("source"): vol.In([DYNAMIC_ALL_IN, DYNAMIC_MARKET]),
+                        vol.Optional("all_in_entity"): _ENTITY,
+                        vol.Optional("market_entity"): _ENTITY,
+                        vol.Optional("energy_tax"): _EURO,
+                        vol.Optional("supplier_markup"): _EURO,
+                        vol.Optional("vat_percent"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
+                        vol.Optional("feed_in_costs"): _EURO,
+                    }
+                ),
             }
         ),
         vol.Optional("devices"): [_DEVICE],

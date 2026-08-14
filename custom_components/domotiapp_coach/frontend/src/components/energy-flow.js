@@ -117,6 +117,23 @@ class DacEnergyFlow extends DacElement {
     .flow.reverse { animation-direction: reverse; }
     @keyframes dash { to { stroke-dashoffset: -16; } }
 
+    /* Which way the energy goes is information, not decoration, so it is drawn
+       as well as animated. Without this the diagram is unreadable for anyone
+       with animations turned off -- which on Windows is a single accessibility
+       setting away, and is how it reached us. */
+    .arrow { stroke: none; transition: fill 400ms ease, opacity 300ms ease; }
+    .arrow.idle { opacity: 0; }
+
+    @media (prefers-reduced-motion: reduce) {
+      /* The blanket rule in base.css freezes every animation on the page. Here
+         that would stop the only moving thing that carries meaning, so the flow
+         keeps going -- just calmly. */
+      .flow {
+        animation-duration: var(--speed-calm, 6s) !important;
+        animation-iteration-count: infinite !important;
+      }
+    }
+
     .node .halo { fill: var(--tone); opacity: 0.10; transition: opacity 500ms ease; }
     .node .disc {
       fill: rgba(18, 18, 15, 0.94);
@@ -242,6 +259,7 @@ class DacEnergyFlow extends DacElement {
       return `
         <path class="track" d="${d(s)}"/>
         <path class="flow" id="flow-${id}" d="${d(s)}" stroke="${tone}"/>
+        <path class="arrow" id="arrow-${id}" d="M-5.5 -5 L5.5 0 L-5.5 5 Z" fill="${tone}"/>
       `;
     };
 
@@ -275,6 +293,19 @@ class DacEnergyFlow extends DacElement {
       dev1: this.$("#flow-dev1"),
       dev2: this.$("#flow-dev2"),
     };
+    this.arrows_ = {
+      solar: this.$("#arrow-solar"),
+      grid: this.$("#arrow-grid"),
+      dev1: this.$("#arrow-dev1"),
+      dev2: this.$("#arrow-dev2"),
+    };
+    // Kept so the arrowheads can be placed and rotated along each link.
+    this.segments_ = {
+      solar: segment(L.sun, L.house),
+      grid: segment(L.grid, L.house),
+      dev1: segment(L.house, L.dev1),
+      dev2: segment(L.house, L.dev2),
+    };
     this.links_ = {
       dev1: this.flows_.dev1.previousElementSibling,
       dev2: this.flows_.dev2.previousElementSibling,
@@ -304,9 +335,8 @@ class DacEnergyFlow extends DacElement {
       exporting ? "grid" : "grid"
     );
 
-    this.setFlow_(this.flows_.solar, reading.solar, false);
-    this.setFlow_(this.flows_.grid, gridPower, exporting);
-    this.flows_.grid.setAttribute("stroke", gridTone);
+    this.setFlow_("solar", reading.solar, false);
+    this.setFlow_("grid", gridPower, exporting, gridTone);
 
     this.updateDevices_(reading.devices);
   }
@@ -323,6 +353,7 @@ class DacEnergyFlow extends DacElement {
 
       node.classList.toggle("hidden", !shown);
       this.flows_[slot].classList.toggle("idle", !shown);
+      this.arrows_[slot].classList.toggle("idle", !shown);
       this.links_[slot].style.display = shown ? "" : "none";
 
       if (!shown) {
@@ -337,7 +368,7 @@ class DacEnergyFlow extends DacElement {
       node.querySelector("[data-icon]").innerHTML = icons[iconKey];
       node.classList.toggle("clickable", rolled > 0);
       this.setNode_(slot, device.watts, label);
-      this.setFlow_(this.flows_[slot], device.watts, false);
+      this.setFlow_(slot, device.watts, false);
     }
 
     // Keep an open roll-up in step with the numbers behind it.
@@ -358,14 +389,57 @@ class DacEnergyFlow extends DacElement {
     node.querySelector(".halo").style.opacity = (0.05 + level * 0.16).toFixed(3);
   }
 
-  setFlow_(path, watts, reverse) {
+  /**
+   * @param {string} id which link
+   * @param {number|null} watts
+   * @param {boolean} reverse true when the energy runs against the drawn path
+   * @param {string} [tone] stroke colour, when the link changes colour
+   */
+  setFlow_(id, watts, reverse, tone) {
+    const path = this.flows_[id];
+    const arrow = this.arrows_[id];
     const idle = !Number.isFinite(watts) || Math.abs(watts) < 50;
+
     path.classList.toggle("idle", idle);
     path.classList.toggle("reverse", !!reverse);
+    arrow.classList.toggle("idle", idle);
+    if (tone) {
+      path.setAttribute("stroke", tone);
+      arrow.setAttribute("fill", tone);
+    }
     if (idle) return;
+
     // 200 W crawls at ~3.1s per dash cycle, 7 kW races at ~0.45s.
     const speed = Math.max(0.45, 3.2 - Math.min(Math.abs(watts), 7000) * 0.0004);
-    path.style.setProperty("--speed", `${speed.toFixed(2)}s`);
+
+    // Rewriting animation-duration restarts the animation in Chrome. The power
+    // wobbles a little on every meter reading, so writing this on every tick
+    // meant the dashes reset before they had moved -- the animation reported
+    // itself as running with its currentTime pinned at zero, and the flow sat
+    // still. Quantised, and only written when the bucket actually changes.
+    const bucket = (Math.round(speed * 4) / 4).toFixed(2);
+    if (path.dataset.speed !== bucket) {
+      path.dataset.speed = bucket;
+      path.style.setProperty("--speed", `${bucket}s`);
+      // With animations turned down the same movement is kept, slowed to
+      // something that reads as a drift rather than a stream.
+      path.style.setProperty("--speed-calm", `${Math.max(2.5, Number(bucket) * 2.6).toFixed(2)}s`);
+    }
+
+    this.placeArrow_(id, reverse);
+  }
+
+  /** Put the arrowhead along the link, pointing the way the energy goes. */
+  placeArrow_(id, reverse) {
+    const s = this.segments_[id];
+    const arrow = this.arrows_[id];
+    // Just past the middle, so it does not collide with either node's label.
+    const t = 0.56;
+    const x = s.x1 + (s.x2 - s.x1) * t;
+    const y = s.y1 + (s.y2 - s.y1) * t;
+    let angle = (Math.atan2(s.y2 - s.y1, s.x2 - s.x1) * 180) / Math.PI;
+    if (reverse) angle += 180;
+    arrow.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${angle.toFixed(1)})`);
   }
 
   /** Show what got folded into a summed bubble. */

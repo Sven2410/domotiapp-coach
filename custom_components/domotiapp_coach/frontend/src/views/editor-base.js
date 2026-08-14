@@ -10,6 +10,9 @@
 import { DacElement } from "../base.js";
 import { icons } from "../icons.js";
 
+/** How long a confirmation stays up. Long enough to notice, then gone. */
+const TOAST_MS = 3200;
+
 /** Deep clone that does not need structuredClone to be present. */
 export const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -118,6 +121,53 @@ export const editorCss = /* css */ `
     .savebar .status { display: none; }
     .savebar button { flex: 1 1 0; white-space: nowrap; text-align: center; }
   }
+
+  /* ---- confirmation ----
+     The save bar slides away on success, and a control disappearing is not a
+     confirmation -- it reads the same as the change being discarded. This says
+     so in as many words, and stays long enough to be read. */
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 84px;
+    z-index: 40;
+    transform: translate(-50%, 14px);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 18px;
+    border-radius: var(--dac-radius-pill);
+    background: #171714;
+    border: 1px solid var(--dac-border-hi);
+    box-shadow: 0 20px 44px -18px rgba(0,0,0,0.95);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--dac-ink);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 220ms ease, transform 220ms cubic-bezier(0.22,0.61,0.36,1);
+    white-space: nowrap;
+    max-width: calc(100vw - 32px);
+  }
+  .toast.on { opacity: 1; transform: translate(-50%, 0); }
+  .toast .icon { width: 17px; height: 17px; flex: 0 0 auto; }
+  .toast.ok { border-color: rgba(12,163,12,0.45); }
+  .toast.ok .icon { color: var(--dac-good); }
+  .toast.fail { border-color: rgba(208,59,59,0.5); white-space: normal; }
+  .toast.fail .icon { color: var(--dac-bad); }
+
+  /* ---- read only ----
+     Customers may look at their installation and question it; only an admin
+     changes it. */
+  :host([readonly]) input,
+  :host([readonly]) select,
+  :host([readonly]) textarea { pointer-events: none; opacity: 0.55; }
+  :host([readonly]) .segmented button,
+  :host([readonly]) button.add,
+  :host([readonly]) .device-head button.remove,
+  :host([readonly]) label.check { pointer-events: none; opacity: 0.55; }
+  :host([readonly]) dac-entity-picker { pointer-events: none; opacity: 0.6; }
+  :host([readonly]) .savebar { display: none; }
 `;
 
 export const adminNoticeHtml = /* html */ `
@@ -132,6 +182,9 @@ export const saveBarHtml = /* html */ `
     <span class="status" id="save-status"></span>
     <button type="button" id="revert">Ongedaan maken</button>
     <button type="button" class="primary" id="save">Opslaan</button>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span id="toast-icon"></span><span id="toast-text"></span>
   </div>
 `;
 
@@ -163,7 +216,32 @@ export class DacEditorElement extends DacElement {
 
   set hass(value) {
     this.hass_ = value;
-    if (this.rendered_) this.onHass_();
+    if (this.rendered_) {
+      this.applyPermissions_();
+      this.onHass_();
+    }
+  }
+
+  /** @param {import("../state-feed.js").StateFeed} feed */
+  set stateFeed(value) {
+    this.feed_ = value;
+    if (this.rendered_) this.onFeed_();
+  }
+
+  /** Whether this user may change anything here. */
+  canEdit_() {
+    return this.hass_?.user?.is_admin !== false;
+  }
+
+  applyPermissions_() {
+    this.toggleAttribute("readonly", !this.canEdit_());
+    const notice = this.$("#admin-notice");
+    if (notice) notice.hidden = this.canEdit_();
+  }
+
+  /** Push the state feed into every entity picker on the page. */
+  onFeed_() {
+    for (const picker of this.$$("dac-entity-picker")) picker.stateFeed = this.feed_;
   }
 
   set settings(value) {
@@ -191,6 +269,8 @@ export class DacEditorElement extends DacElement {
   paint_() {}
 
   wireSaveBar_() {
+    this.applyPermissions_();
+    this.onFeed_();
     this.$("#save").addEventListener("click", () => this.save_());
     this.$("#revert").addEventListener("click", () => {
       this.draft_ = clone(this.saved_);
@@ -201,10 +281,9 @@ export class DacEditorElement extends DacElement {
 
   syncSaveBar_() {
     const dirty = this.dirty_();
-    const canSave = this.hass_?.user?.is_admin !== false;
-    const notice = this.$("#admin-notice");
-    if (notice) notice.hidden = canSave;
-    this.$("#savebar").classList.toggle("on", dirty);
+    const canSave = this.canEdit_();
+    this.applyPermissions_();
+    this.$("#savebar").classList.toggle("on", dirty && canSave);
     this.$("#save").disabled = !canSave;
     this.$("#save-status").textContent = dirty ? "Niet-opgeslagen wijzigingen" : "";
   }
@@ -223,13 +302,34 @@ export class DacEditorElement extends DacElement {
       this.saved_ = clone(saved);
       this.draft_ = clone(saved);
       this.fire("dac-settings-saved", { settings: saved });
-      status.textContent = "Opgeslagen";
-      setTimeout(() => this.syncSaveBar_(), 1600);
+      status.textContent = "";
+      this.toast_("Opgeslagen", true);
     } catch (error) {
-      status.textContent = `Opslaan mislukt: ${error?.message ?? error}`;
+      status.textContent = "";
+      this.toast_(`Opslaan mislukt — ${error?.message ?? error}`, false);
     } finally {
       button.disabled = false;
       this.$("#savebar").classList.toggle("on", this.dirty_());
     }
+  }
+
+  /**
+   * Say what happened.
+   * @param {string} message
+   * @param {boolean} ok
+   */
+  toast_(message, ok) {
+    const toast = this.$("#toast");
+    if (!toast) return;
+
+    this.$("#toast-icon").innerHTML = ok ? icons.check : icons.warning;
+    this.$("#toast-text").textContent = message;
+    toast.classList.remove("ok", "fail");
+    toast.classList.add("on", ok ? "ok" : "fail");
+
+    clearTimeout(this.toastTimer_);
+    // A failure stays until it is replaced: it is the only place the reason
+    // appears, and three seconds is not enough to read an error and act on it.
+    if (ok) this.toastTimer_ = setTimeout(() => toast.classList.remove("on"), TOAST_MS);
   }
 }

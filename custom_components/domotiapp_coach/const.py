@@ -48,6 +48,19 @@ DEVICE_TYPES: Final = [
 GRID_MODE_SPLIT: Final = "split"
 GRID_MODE_SIGNED: Final = "signed"
 
+# --- Contract --------------------------------------------------------------
+CONTRACT_FIXED: Final = "fixed"
+CONTRACT_DYNAMIC: Final = "dynamic"
+
+# A dynamic contract either has one entity that already carries the all-in
+# price, or a market price that still needs tax, markup and VAT applied.
+DYNAMIC_ALL_IN: Final = "all_in"
+DYNAMIC_MARKET: Final = "market"
+
+# Nominal voltage per phase, used to turn the main fuse into a power ceiling.
+# 3 x 25 A -> 17250 W, 1 x 25 A -> 5750 W.
+GRID_VOLTAGE: Final = 230
+
 # --- Default settings ------------------------------------------------------
 # The panel falls back to simulated values while `sources` is still empty, so a
 # fresh install shows a working dashboard before any sensor is mapped.
@@ -68,7 +81,36 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # all of them. Without this the diagram runs exactly backwards, and it
         # looks plausible enough that nobody questions it.
         "grid_signed_invert": False,
-        "price": "",
+    },
+    "installation": {
+        "home_name": "",
+        # 1 or 3. With the main fuse it gives the connection's power ceiling.
+        "phases": 3,
+        "fuse_amps": 25,
+        # Derived from phases x fuse x 230 V while `max_grid_auto` holds, but
+        # editable: a customer with a limited or reinforced connection knows
+        # better than the arithmetic does.
+        "max_grid_watts": 17250,
+        "max_grid_auto": True,
+    },
+    "contract": {
+        "type": CONTRACT_FIXED,
+        "fixed": {
+            "all_in_price": 0.28,
+            "feed_in_tariff": 0.07,
+            "feed_in_costs": 0.0,
+        },
+        "dynamic": {
+            "source": DYNAMIC_ALL_IN,
+            # One entity that already includes tax, markup and VAT.
+            "all_in_entity": "",
+            # Or the bare market price, with the rest added here.
+            "market_entity": "",
+            "energy_tax": 0.1088,
+            "supplier_markup": 0.02,
+            "vat_percent": 21,
+            "feed_in_costs": 0.0,
+        },
     },
     "devices": [],
     "thresholds": {
