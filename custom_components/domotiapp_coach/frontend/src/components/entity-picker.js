@@ -179,9 +179,37 @@ class DacEntityPicker extends DacElement {
     this.rows_ = [];
   }
 
+  /**
+   * The live state feed. Preferred over `hass` for the same reason the rest of
+   * the panel uses it: the reading shown under a chosen entity is the check
+   * that it is the right sensor, so it has to be the current one.
+   *
+   * @param {import("../state-feed.js").StateFeed} value
+   */
+  set stateFeed(value) {
+    this.unsubscribe_?.();
+    this.feed_ = value;
+    this.unsubscribe_ = value?.subscribe((id) => {
+      if (id === this.value_ && this.rendered_) this.paintChosen_();
+    });
+    if (this.rendered_) this.paintChosen_();
+  }
+
   set hass(value) {
     this.hass_ = value;
     if (this.rendered_) this.paintChosen_();
+  }
+
+  /** State object for an entity, from the feed when there is one. */
+  state_(entityId) {
+    if (!entityId) return undefined;
+    return this.feed_ ? this.feed_.get(entityId) : this.hass_?.states?.[entityId];
+  }
+
+  /** Every entity id we can offer. */
+  allIds_() {
+    if (this.feed_) return this.feed_.ids();
+    return Object.keys(this.hass_?.states ?? {});
   }
 
   /** @param {"power"|"price"|"all"} value */
@@ -263,25 +291,25 @@ class DacEntityPicker extends DacElement {
 
   disconnectedCallback() {
     this.closeList_();
+    this.unsubscribe_?.();
   }
 
   // --- data --------------------------------------------------------------
 
   friendly_(id) {
-    return this.hass_?.states?.[id]?.attributes?.friendly_name || id;
+    return this.state_(id)?.attributes?.friendly_name || id;
   }
 
   /** Entities split into preferred (matching the filter) and the rest. */
   candidates_(query) {
-    const states = this.hass_?.states ?? {};
     const match = MATCHERS[this.filter_];
     const q = query.trim().toLowerCase();
 
     const preferred = [];
     const other = [];
 
-    for (const id of Object.keys(states)) {
-      const attrs = states[id].attributes ?? {};
+    for (const id of this.allIds_()) {
+      const attrs = this.state_(id)?.attributes ?? {};
       const name = attrs.friendly_name || "";
       if (q && !id.toLowerCase().includes(q) && !name.toLowerCase().includes(q)) continue;
 
@@ -429,7 +457,7 @@ class DacEntityPicker extends DacElement {
     this.$("#chosen-id").textContent = this.value_;
 
     const now = this.$("#chosen-now");
-    const state = this.hass_?.states?.[this.value_];
+    const state = this.state_(this.value_);
 
     if (!state) {
       now.textContent = "bestaat niet";

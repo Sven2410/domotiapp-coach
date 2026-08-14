@@ -5,26 +5,38 @@
  * own chrome: header, navigation and routing. Home Assistant passes in `hass`,
  * `narrow`, `route` and `panel`.
  *
- * Settings live in HA storage rather than in the panel config, so they are
- * fetched once over the websocket API and refreshed whenever another device
- * saves -- a wall tablet picks up a change made on a phone without a reload.
+ * Live values do not come from that `hass` object. The panel subscribes to
+ * `state_changed` itself and keeps its own feed -- see state-feed.js for why.
+ *
+ * Settings live in HA storage, fetched once over the websocket API and
+ * refreshed whenever another device saves, so a wall tablet picks up a change
+ * made on a phone without a reload.
  *
  * Everything is plain ES modules and standard web components -- no build step,
  * which is what keeps the repository installable straight from HACS.
  */
 
 import { DacElement, define } from "./src/base.js";
-import { NAV_ITEMS } from "./src/header.js";
+import { StateFeed } from "./src/state-feed.js";
+import { navItemsFor } from "./src/header.js";
 import { SECTIONS } from "./src/views/placeholder.js";
 import "./src/header.js";
 import "./src/views/overview.js";
 import "./src/views/devices.js";
+import "./src/views/installation.js";
 import "./src/views/settings.js";
 import "./src/views/placeholder.js";
 
 const DEFAULT_VIEW = "overzicht";
-const VIEW_IDS = NAV_ITEMS.map((item) => item.id);
 const EVENT_SETTINGS_UPDATED = "domotiapp_coach_settings_updated";
+
+/** Sections that are built; anything else falls back to the placeholder. */
+const BUILT = {
+  overzicht: "dac-view-overview",
+  apparaten: "dac-view-devices",
+  installatie: "dac-view-installation",
+  instellingen: "dac-view-settings",
+};
 
 class DomotiAppCoachPanel extends DacElement {
   static css = /* css */ `
@@ -64,16 +76,20 @@ class DomotiAppCoachPanel extends DacElement {
     this.views_ = new Map();
     this.active_ = DEFAULT_VIEW;
     this.settings_ = null;
+    this.feed_ = new StateFeed();
   }
 
   // --- properties set by Home Assistant ---------------------------------
 
   set hass(value) {
     this.hass_ = value;
-    // Views read live entity states straight off hass, so every one of them
-    // needs the new object -- not just the visible one, or a cached view shows
-    // stale numbers the moment it is opened again.
+    // Seeds the feed and, the first time, starts the subscription that keeps it
+    // current regardless of whether this property is ever set again.
+    this.feed_.connect(value);
+
     for (const view of this.views_.values()) view.hass = value;
+    if (this.rendered_) this.$("dac-header").isAdmin = this.isAdmin_();
+
     this.loadSettings_();
   }
 
@@ -96,6 +112,11 @@ class DomotiAppCoachPanel extends DacElement {
     this.config_ = value?.config ?? {};
   }
 
+  /** Unknown rights are treated as admin: HA itself gates the panel. */
+  isAdmin_() {
+    return this.hass_?.user?.is_admin !== false;
+  }
+
   // --- settings ----------------------------------------------------------
 
   /** Fetch the settings once, then follow them over the event bus. */
@@ -106,8 +127,6 @@ class DomotiAppCoachPanel extends DacElement {
     try {
       this.applySettings_(await this.hass_.callWS({ type: "domotiapp_coach/settings/get" }));
     } catch (error) {
-      // Not fatal: the views fall back to demo values, which is exactly what an
-      // unconfigured install shows anyway.
       console.warn("[DomotiApp Coach] kon instellingen niet laden", error);
     }
 
@@ -142,12 +161,13 @@ class DomotiAppCoachPanel extends DacElement {
   afterRender() {
     const header = this.$("dac-header");
     header.toggleAttribute("narrow", !!this.narrow_);
+    header.isAdmin = this.isAdmin_();
     header.addEventListener("dac-navigate", (ev) => this.navigate_(ev.detail.id));
     header.addEventListener("dac-home", () => this.goHome_());
     header.addEventListener("dac-menu", () => this.fire("hass-toggle-menu"));
 
-    // A save from the settings view is applied straight away rather than waiting
-    // for the round trip over the event bus.
+    // A save from an editor is applied straight away rather than waiting for the
+    // round trip over the event bus.
     this.addEventListener("dac-settings-saved", (ev) => this.applySettings_(ev.detail.settings));
 
     this.loadSettings_();
@@ -156,12 +176,17 @@ class DomotiAppCoachPanel extends DacElement {
 
   disconnectedCallback() {
     this.unsubscribe_?.();
+    this.feed_.disconnect();
   }
 
   /** Read the active section from the panel route and show it. */
   syncRoute_() {
     const segment = (this.route_?.path || "").replace(/^\/+|\/+$/g, "");
-    const next = VIEW_IDS.includes(segment) ? segment : DEFAULT_VIEW;
+    const allowed = navItemsFor(this.isAdmin_()).map((item) => item.id);
+    // A customer who types or bookmarks the settings path lands on Overzicht
+    // rather than on a screen they are not meant to have.
+    const next = allowed.includes(segment) ? segment : DEFAULT_VIEW;
+
     if (this.rendered_ && next === this.shown_) return;
 
     this.active_ = next;
@@ -184,8 +209,8 @@ class DomotiAppCoachPanel extends DacElement {
     // The class has to come off once it has played. A filling animation leaves
     // an identity `transform` behind rather than `none`, and any transform --
     // identity included -- makes the element a containing block for `position:
-    // fixed`. That silently pins the settings save bar to the bottom of the
-    // document instead of the bottom of the screen.
+    // fixed`. That silently pins a save bar to the bottom of the document
+    // instead of the bottom of the screen.
     view.addEventListener("animationend", () => view.classList.remove("enter"), { once: true });
 
     // Views are cached, so without this a section opened from halfway down the
@@ -199,12 +224,6 @@ class DomotiAppCoachPanel extends DacElement {
   viewFor_(id) {
     if (this.views_.has(id)) return this.views_.get(id);
 
-    const BUILT = {
-      overzicht: "dac-view-overview",
-      apparaten: "dac-view-devices",
-      instellingen: "dac-view-settings",
-    };
-
     let el;
     if (BUILT[id]) {
       el = document.createElement(BUILT[id]);
@@ -214,6 +233,7 @@ class DomotiAppCoachPanel extends DacElement {
     }
 
     el.hass = this.hass_;
+    el.stateFeed = this.feed_;
     el.settings = this.settings_;
 
     this.views_.set(id, el);

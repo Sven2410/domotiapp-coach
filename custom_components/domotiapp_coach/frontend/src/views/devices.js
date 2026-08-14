@@ -57,10 +57,6 @@ class DacViewDevices extends DacEditorElement {
     this.paint_();
   }
 
-  onHass_() {
-    for (const picker of this.$$("dac-entity-picker")) picker.hass = this.hass_;
-  }
-
   paint_() {
     if (!this.draft_ || !this.rendered_) return;
     this.paintDevices_();
@@ -121,7 +117,7 @@ class DacViewDevices extends DacEditorElement {
       const index = Number(picker.dataset.index);
       picker.filter = "power";
       picker.placeholder = "Zoek een vermogenssensor…";
-      picker.hass = this.hass_;
+      picker.stateFeed = this.feed_;
       picker.value = devices[index].entity ?? "";
       picker.addEventListener("dac-entity-change", (ev) => {
         this.draft_.devices[index].entity = ev.detail.value;
