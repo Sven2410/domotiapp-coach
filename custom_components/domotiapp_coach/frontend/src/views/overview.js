@@ -13,6 +13,7 @@
 
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
+import { deviceLabel, releaseCopy, typeMeta } from "../devices.js";
 import { LiveSource } from "../data-source.js";
 import { level, levelTone, percent, power, powerText, price as fmtPrice } from "../format.js";
 import "../components/stat-tile.js";
@@ -251,6 +252,78 @@ class DacViewOverview extends DacElement {
       .phase-row .values { grid-column: 2; gap: 10px; font-size: 12px; }
     }
 
+    /* ---- steerable devices ---- */
+    .panel-sub { margin: 8px 0 0; font-size: 13px; line-height: 1.55; color: var(--dac-ink-2); max-width: 70ch; }
+
+    .steer-grid {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+    }
+
+    .steer {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 14px 15px 15px;
+      border-radius: var(--dac-radius-sm);
+      border: 1px solid var(--dac-border);
+      background: rgba(255,255,255,0.022);
+    }
+
+    .steer-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .steer-head .chip {
+      width: 34px; height: 34px; flex: 0 0 auto;
+      display: grid; place-items: center;
+      border-radius: 11px;
+      color: var(--dac-accent-hi);
+      background: var(--dac-accent-soft);
+      border: 1px solid rgba(25,143,217,0.28);
+    }
+    .steer-head .chip .icon { width: 18px; height: 18px; }
+    .steer-name {
+      flex: 1 1 auto; min-width: 0;
+      font-size: 14.5px; font-weight: 600;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .steer-now { flex: 0 0 auto; font-size: 13px; font-weight: 600; color: var(--dac-ink-2); }
+
+    .steer-rows { display: grid; gap: 6px; }
+    .steer-rows div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .steer-rows .k { font-size: 12.5px; color: var(--dac-ink-3); }
+    .steer-rows .v {
+      font-size: 12.5px; font-weight: 500; color: var(--dac-ink);
+      font-variant-numeric: tabular-nums; text-align: right;
+    }
+
+    button.release {
+      margin-top: auto;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 11px 16px;
+      min-height: 44px;
+      border-radius: var(--dac-radius-pill);
+      border: 1px solid var(--dac-border-hi);
+      background: var(--dac-surface);
+      color: var(--dac-ink-2);
+      font: inherit; font-size: 13.5px; font-weight: 500;
+      cursor: pointer;
+      transition: border-color 200ms ease, background 200ms ease, color 200ms ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button.release:hover { color: var(--dac-ink); border-color: rgba(25,143,217,0.55); }
+    button.release[aria-pressed="true"] {
+      border-color: rgba(12,163,12,0.5);
+      background: rgba(12,163,12,0.14);
+      color: var(--dac-ink);
+      font-weight: 600;
+    }
+    button.release .mark { display: grid; color: var(--dac-good); }
+    button.release .mark .icon { width: 16px; height: 16px; }
+
+    .steer-hint { margin: 0; font-size: 12px; line-height: 1.45; color: var(--dac-ink-3); }
+    .steer-hint:empty { display: none; }
+
     .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
     .legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dac-ink-2); }
     .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; flex: 0 0 auto; }
@@ -315,6 +388,15 @@ class DacViewOverview extends DacElement {
             <h2 id="phases-title">Belasting van je aansluiting</h2>
           </div>
           <div class="phase-rows" id="phase-rows"></div>
+        </article>
+
+        <article class="card panel steerable" id="steerable" hidden>
+          <div class="panel-head">
+            <div class="eyebrow">Sturing</div>
+            <h2>Aanstuurbare apparaten</h2>
+          </div>
+          <p class="panel-sub">Wat de coach straks zelf mag inschakelen. Een apparaat draait alleen mee als je het hier vrijgeeft — een lege vaatwasser is niets waard, hoeveel zon er ook is.</p>
+          <div class="steer-grid" id="steer-grid"></div>
         </article>
 
         <article class="card panel">
@@ -478,6 +560,7 @@ class DacViewOverview extends DacElement {
     });
 
     this.updatePhases_(r, alertAt);
+    this.updateSteerable_(r.devices);
     this.flow_.update(r);
     this.updateLegend_();
     this.updateCoach_(advise(r, thresholds, configured, alertAt));
@@ -561,6 +644,132 @@ class DacViewOverview extends DacElement {
           </div>`;
       })
       .join("");
+  }
+
+  /**
+   * The devices the coach may steer, and whether they are released for it.
+   *
+   * Same card as the one behind a bubble on the diagram, but standing still:
+   * the bubbles only exist while something is running, and a dishwasher has to
+   * be releasable exactly when it is *not* running yet.
+   *
+   * Steering itself does not exist yet. What does exist is the customer's half
+   * of it: nobody but the person in the kitchen knows the machine is loaded and
+   * shut.
+   */
+  updateSteerable_(devices) {
+    const card = this.$("#steerable");
+    const list = (devices ?? []).filter((device) => device.controllable);
+
+    card.hidden = !list.length;
+    if (!list.length) return;
+
+    // Rebuilt only when the set of devices changes: the button in each card
+    // must survive the two-second refresh, and a control that is replaced under
+    // a finger is a control that misses the tap.
+    const key = list.map((device) => device.id).join("|");
+    if (key !== this.steerKey_) {
+      this.steerKey_ = key;
+      this.buildSteerable_(list);
+    }
+    this.fillSteerable_(list);
+  }
+
+  buildSteerable_(list) {
+    this.$("#steer-grid").innerHTML = list
+      .map(
+        (device, slot) => `
+        <article class="steer" data-slot="${slot}">
+          <div class="steer-head">
+            <span class="chip">${icons[typeMeta(device.type).icon]}</span>
+            <span class="steer-name" data-name="${slot}"></span>
+            <span class="steer-now tnum" data-now="${slot}"></span>
+          </div>
+          <div class="steer-rows" data-rows="${slot}"></div>
+          <button class="release" type="button" data-release="${slot}" aria-pressed="false">
+            <span class="mark" data-mark="${slot}"></span>
+            <span data-release-text="${slot}"></span>
+          </button>
+          <p class="steer-hint" data-hint="${slot}"></p>
+        </article>`
+      )
+      .join("");
+
+    for (const button of this.$$("[data-release]")) {
+      button.addEventListener("click", () => this.toggleReady_(Number(button.dataset.release)));
+    }
+  }
+
+  fillSteerable_(list) {
+    this.steerDevices_ = list;
+    const ready = new Set(this.settings_?.ready_devices ?? []);
+
+    list.forEach((device, slot) => {
+      const copy = releaseCopy(device);
+      const on = ready.has(device.id);
+
+      // Names and readings are the customer's own, so they go in as text.
+      this.$(`[data-name="${slot}"]`).textContent = deviceLabel(device);
+      this.$(`[data-now="${slot}"]`).textContent = powerText(device.watts);
+
+      const rows = this.$(`[data-rows="${slot}"]`);
+      rows.replaceChildren(
+        ...(device.details ?? []).map((row) => {
+          const line = document.createElement("div");
+          const key = document.createElement("span");
+          key.className = "k";
+          key.textContent = row.label;
+          const value = document.createElement("span");
+          value.className = "v";
+          value.textContent = row.text;
+          line.append(key, value);
+          return line;
+        })
+      );
+
+      const button = this.$(`[data-release="${slot}"]`);
+      button.setAttribute("aria-pressed", String(on));
+      this.$(`[data-mark="${slot}"]`).innerHTML = on ? icons.check : "";
+      this.$(`[data-release-text="${slot}"]`).textContent = on ? "Vrijgegeven" : copy.label;
+      this.$(`[data-hint="${slot}"]`).textContent = on ? "" : copy.hint;
+    });
+  }
+
+  /**
+   * Release a device, or take that back.
+   *
+   * Written through its own websocket command, which is the one thing here a
+   * customer may change without being an administrator.
+   */
+  async toggleReady_(slot) {
+    const device = this.steerDevices_?.[slot];
+    if (!device || !this.hass) return;
+
+    const ready = new Set(this.settings_?.ready_devices ?? []);
+    const next = !ready.has(device.id);
+
+    // Shown straight away rather than after the round trip: a button that waits
+    // for the server before it moves reads as a button that did not work.
+    if (next) ready.add(device.id);
+    else ready.delete(device.id);
+    this.settings_ = { ...this.settings_, ready_devices: [...ready] };
+    this.fillSteerable_(this.steerDevices_);
+
+    try {
+      await this.hass.callWS({
+        type: "domotiapp_coach/device/ready",
+        device_id: device.id,
+        ready: next,
+      });
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de vrijgave niet opslaan", error);
+      // Put it back: pretending it worked would have the customer believe the
+      // machine is released when it is not.
+      if (next) ready.delete(device.id);
+      else ready.add(device.id);
+      this.settings_ = { ...this.settings_, ready_devices: [...ready] };
+      this.fillSteerable_(this.steerDevices_);
+    }
   }
 
   /** Supporting line for a tile, or an honest blank when there is no reading. */

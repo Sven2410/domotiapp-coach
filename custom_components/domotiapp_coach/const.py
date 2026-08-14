@@ -160,6 +160,15 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         },
     },
     "devices": [],
+    # Device ids the customer has released for steering right now: the
+    # dishwasher is loaded and its door is shut, the car may charge. Kept as a
+    # list rather than a map on purpose -- the storage prunes dictionaries
+    # against these defaults, which would empty a free-form map on every load.
+    #
+    # It is state rather than configuration, but it belongs here all the same:
+    # it has to survive a restart (a dishwasher stays loaded) and reach every
+    # open panel over the same event.
+    "ready_devices": [],
     "thresholds": {
         # Zelfbenutting in percent: below `low` is bad, above `high` is good.
         "self_use": {"low": 30, "high": 70},

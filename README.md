@@ -105,10 +105,29 @@ te bedienen.
 
 Bij een **laadpaal** kies je eerst het merk, want welke gegevens een paal levert
 verschilt per fabrikant en lang niet elke paal kan gestart of gepauzeerd worden.
-Easee is uitgewerkt: status, reden geen stroomvraag, levensduurverbruik,
-maximale limiet en stroom. Zaptec, Wallbox, Zappi en Peblar staan in de lijst
-maar hebben nog geen eigen velden. Draait een apparaat, dan is zijn bol op het
-overzicht aan te klikken voor precies die gegevens.
+Easee is uitgewerkt: de Easee-integratie zelf (daar komt het `device_id` uit dat
+`easee.action_command` nodig heeft), status, reden geen stroomvraag,
+levensduurverbruik, maximale limiet en stroom, plus de woorden voor starten,
+stoppen, pauzeren en hervatten. Die woorden staan voorgevuld op wat Easee vandaag
+gebruikt en zijn aan te passen. Zaptec, Wallbox, Zappi en Peblar staan in de
+lijst maar hebben nog geen eigen velden. Draait een apparaat, dan is zijn bol op
+het overzicht aan te klikken voor precies die gegevens.
+
+### Aanstuurbare apparaten
+
+Alles wat op "mag aangestuurd worden" staat, komt op het overzicht in een eigen
+kaart met dezelfde gegevens en één knop: **vrijgeven**. Daarmee zegt de klant dat
+het apparaat nú mee mag doen — de vaatwasser is ingeruimd en de klep zit dicht,
+de auto hangt eraan. Zonder die knop zou de coach straks een lege vaatwasser
+laten spoelen omdat de zon toevallig schijnt, en dat is de enige informatie die
+geen sensor kan leveren.
+
+Vrijgeven mag iedereen die in Home Assistant is ingelogd, ook een niet-beheerder:
+degene die in de keuken staat is nooit de installateur.
+
+> Sturen zelf zit er nog niet in. Wat er nu staat is de voorbereiding: de
+> gegevens, de opdrachten en de vrijgave. Er wordt nog niets naar een apparaat
+> gestuurd.
 
 ### Contract
 

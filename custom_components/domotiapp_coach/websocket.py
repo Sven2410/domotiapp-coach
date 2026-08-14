@@ -73,6 +73,13 @@ _DEVICE = _schema(
         # Free-form on purpose: adding a brand should not need a schema change
         # here as well as in the panel.
         vol.Optional("entities", default=dict): {vol.Match(r"^[a-z0-9_]+$"): _ENTITY},
+        # The Home Assistant device this thing is, when its brand is steered
+        # through a service that wants a device rather than an entity -- Easee's
+        # action_command is one.
+        vol.Optional("device_id", default=""): str,
+        # What to send for start, stop, pause and resume. The words differ per
+        # brand and even per firmware, so they are typed in rather than baked in.
+        vol.Optional("actions", default=dict): {vol.Match(r"^[a-z0-9_]+$"): str},
     }
 )
 
@@ -146,6 +153,7 @@ _SETTINGS = _schema(
             }
         ),
         vol.Optional("devices"): [_DEVICE],
+        vol.Optional("ready_devices"): [str],
         vol.Optional("thresholds"): _schema(
             {
                 vol.Optional("self_use"): _schema(
@@ -199,8 +207,47 @@ async def async_set_settings(
     connection.send_result(msg["id"], settings)
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/device/ready",
+        vol.Required("device_id"): str,
+        vol.Required("ready"): bool,
+    }
+)
+@websocket_api.async_response
+async def async_set_device_ready(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Release a device for steering, or take that release back.
+
+    Deliberately not admin-only, unlike everything else that writes here. This
+    is the customer saying "the dishwasher is loaded and shut" -- the one person
+    who can know that is whoever is standing in the kitchen, and they are not
+    the installer.
+
+    The new list is worked out here rather than sent by the panel, so a stale
+    dashboard cannot undo somebody else's release by handing back the list it
+    happened to be holding.
+    """
+    store = async_get_store(hass)
+    settings = await store.async_load()
+
+    ready = set(settings.get("ready_devices") or [])
+    if msg["ready"]:
+        ready.add(msg["device_id"])
+    else:
+        ready.discard(msg["device_id"])
+
+    settings = await store.async_save({"ready_devices": sorted(ready)})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], settings)
+
+
 @callback
 def async_register(hass: HomeAssistant) -> None:
     """Register the panel's websocket commands."""
     websocket_api.async_register_command(hass, async_get_settings)
     websocket_api.async_register_command(hass, async_set_settings)
+    websocket_api.async_register_command(hass, async_set_device_ready)
