@@ -79,16 +79,19 @@ class DacStatTile extends DacElement {
       align-items: baseline;
       gap: 7px;
       margin-top: 6px;
+      /* "€ 0,264 / kWh" breaks over two lines in a phone-width tile and reads
+         as a rendering fault. The number scales down instead of wrapping. */
+      white-space: nowrap;
     }
     .num {
-      font-size: 40px;
-      font-weight: 300;
-      line-height: 1;
+      font-size: clamp(24px, 6.5vw, 40px);
+      font-weight: 400;
+      line-height: 1.05;
       letter-spacing: -0.02em;
       color: var(--dac-ink);
       font-variant-numeric: tabular-nums;
     }
-    .unit { font-size: 14px; font-weight: 500; color: var(--dac-ink-2); }
+    .unit { font-size: 14px; font-weight: 500; color: var(--dac-ink-2); white-space: nowrap; }
 
     .sub {
       margin-top: 10px;
@@ -105,8 +108,11 @@ class DacStatTile extends DacElement {
     .body { margin-top: auto; }
 
     @media (max-width: 520px) {
-      .num { font-size: 34px; }
-      .spark { width: 78px; }
+      .tile { padding: 14px 14px 16px; gap: 10px; }
+      .spark { width: 64px; height: 30px; }
+      .chip { width: 34px; height: 34px; }
+      .chip .icon { width: 18px; height: 18px; }
+      .sub { font-size: 12px; }
     }
   `;
 
@@ -164,9 +170,12 @@ class DacStatTile extends DacElement {
     const area = this.$(".spark path.area");
     const head = this.$(".spark circle.head");
 
-    if (series.length < 2) {
+    // Under a handful of samples the "line" is a flat bar spanning the whole
+    // box, which reads as a broken graphic rather than as a young one.
+    if (series.length < 5) {
       line.setAttribute("d", "");
       area.setAttribute("d", "");
+      head.setAttribute("cx", "-10");
       return;
     }
 

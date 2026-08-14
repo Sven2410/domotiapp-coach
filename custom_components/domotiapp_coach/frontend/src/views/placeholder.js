@@ -31,13 +31,6 @@ export const SECTIONS = {
     body: "Hier koppel je de sensoren aan de coach en leg je vast wat er in huis staat: panelen, accu, warmtepomp, laadpaal en je contract. Zonder deze gegevens kan de coach niet rekenen.",
     phase: 1,
   },
-  instellingen: {
-    icon: "sliders",
-    title: "Instellingen",
-    lead: "Tarieven, doelen en weergave.",
-    body: "Stel je energiecontract en terugleververgoeding in, bepaal welke tegels je wilt zien en hoe de coach je aanspreekt.",
-    phase: 1,
-  },
 };
 
 const PHASES = [
@@ -70,18 +63,17 @@ class DacViewPlaceholder extends DacElement {
 
     h1 {
       margin: 26px 0 0;
-      font-family: var(--dac-display);
-      font-weight: 300;
-      font-size: clamp(34px, 5vw, 52px);
-      line-height: 1.05;
+      font-weight: 600;
+      font-size: clamp(24px, 4vw, 34px);
+      letter-spacing: -0.01em;
+      line-height: 1.15;
     }
     .lead {
       margin: 14px auto 0;
-      max-width: 42ch;
-      font-family: var(--dac-display);
-      font-style: italic;
-      font-size: clamp(19px, 2.4vw, 24px);
-      line-height: 1.35;
+      max-width: 46ch;
+      font-size: clamp(15px, 2vw, 17px);
+      font-weight: 500;
+      line-height: 1.45;
       color: var(--dac-accent-hi);
     }
     .body {
@@ -112,8 +104,8 @@ class DacViewPlaceholder extends DacElement {
       color: var(--dac-ink-3);
     }
     .step .l { margin-top: 4px; font-size: 13.5px; font-weight: 500; color: var(--dac-ink-2); }
-    .step[data-state="done"] { border-color: rgba(5,168,105,0.35); }
-    .step[data-state="done"] .n { color: var(--dac-surplus); }
+    .step[data-state="done"] { border-color: rgba(12,163,12,0.38); }
+    .step[data-state="done"] .n { color: var(--dac-good); }
     .step[data-state="here"] {
       border-color: rgba(25,143,217,0.45);
       background: var(--dac-accent-soft);
