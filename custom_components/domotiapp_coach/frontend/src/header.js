@@ -38,6 +38,10 @@ class DacHeader extends DacElement {
       position: sticky;
       top: 0;
       z-index: 20;
+      /* Behind a Dynamic Island or a notch there is no room for anything
+         readable, so the header's own background fills that strip and the bar
+         starts below it. Zero everywhere that has no cutout. */
+      padding-top: var(--dac-safe-t);
       background: linear-gradient(180deg, rgba(12,12,10,0.96) 0%, rgba(12,12,10,0.82) 100%);
       backdrop-filter: blur(22px) saturate(150%);
       -webkit-backdrop-filter: blur(22px) saturate(150%);
@@ -60,7 +64,8 @@ class DacHeader extends DacElement {
       max-width: var(--dac-maxw);
       margin: 0 auto;
       min-height: var(--dac-header-h);
-      padding: 0 20px;
+      /* In landscape the island eats a strip down one side of the screen. */
+      padding: 0 max(20px, var(--dac-safe-r)) 0 max(20px, var(--dac-safe-l));
       display: flex;
       align-items: center;
       gap: 16px;
@@ -200,7 +205,11 @@ class DacHeader extends DacElement {
 
     /* ---- responsive ---- */
     @media (max-width: 1080px) {
-      .bar { flex-wrap: wrap; padding: 10px 16px 0; gap: 10px; }
+      .bar {
+        flex-wrap: wrap;
+        padding: 10px max(16px, var(--dac-safe-r)) 0 max(16px, var(--dac-safe-l));
+        gap: 10px;
+      }
       .brand { order: 1; margin-right: auto; }
       .actions { order: 2; }
       nav { order: 3; flex-basis: 100%; justify-content: flex-start; }
@@ -208,7 +217,7 @@ class DacHeader extends DacElement {
 
     @media (max-width: 640px) {
       :host([narrow]) button.icon-only { display: inline-flex; }
-      .bar { padding: 8px 12px 0; }
+      .bar { padding: 8px max(12px, var(--dac-safe-r)) 0 max(12px, var(--dac-safe-l)); }
       .brand img { width: 30px; height: 30px; }
       .brand-1, .brand-2 { font-size: 14px; }
       button.ghost span { display: none; }

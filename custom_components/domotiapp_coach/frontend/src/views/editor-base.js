@@ -20,7 +20,7 @@ export const editorCss = /* css */ `
   .wrap {
     max-width: 860px;
     margin: 0 auto;
-    padding: 24px 22px 140px;
+    padding: 24px max(22px, var(--dac-safe-r)) 140px max(22px, var(--dac-safe-l));
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -42,7 +42,10 @@ export const editorCss = /* css */ `
   section .hint { margin: 8px 0 0; font-size: 13px; line-height: 1.55; color: var(--dac-ink-2); }
 
   .fields { margin-top: 18px; display: grid; gap: 14px; }
-  .row { display: grid; gap: 6px; }
+  /* align-content, not the default stretch: two fields side by side where only
+     one carries a hint line would otherwise hand the spare height to the other
+     one's input, leaving two boxes of different sizes that do not line up. */
+  .row { display: grid; gap: 6px; align-content: start; }
   .row > label { font-size: 13px; font-weight: 500; color: var(--dac-ink); }
   .row > .sub { font-size: 12px; color: var(--dac-ink-3); line-height: 1.45; }
 
@@ -56,6 +59,10 @@ export const editorCss = /* css */ `
     font: inherit;
     font-size: 14px;
     min-height: 44px;
+  }
+  /* See theme.js: below 16px iOS zooms the page in on focus and stays there. */
+  @media (pointer: coarse) {
+    input[type="text"], input[type="number"], select, textarea { font-size: 16px; }
   }
   input:focus, select:focus { border-color: var(--dac-accent-hi); outline: none; }
   select { appearance: none; background-image: none; }
@@ -83,7 +90,7 @@ export const editorCss = /* css */ `
     position: fixed;
     left: 0; right: 0; bottom: 0;
     z-index: 30;
-    padding: 12px 22px calc(12px + env(safe-area-inset-bottom));
+    padding: 12px max(22px, var(--dac-safe-r)) calc(12px + var(--dac-safe-b)) max(22px, var(--dac-safe-l));
     background: linear-gradient(0deg, rgba(12,12,10,0.98) 60%, rgba(12,12,10,0.0));
     display: flex; align-items: center; gap: 12px; justify-content: flex-end;
     transform: translateY(120%);
@@ -110,9 +117,9 @@ export const editorCss = /* css */ `
   .savebar button.primary:disabled { opacity: 0.55; cursor: default; }
 
   @media (max-width: 640px) {
-    .wrap { padding: 16px 12px 150px; }
+    .wrap { padding: 16px max(12px, var(--dac-safe-r)) 150px max(12px, var(--dac-safe-l)); }
     section.card { padding: 16px 14px 18px; }
-    .savebar { padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); }
+    .savebar { padding: 12px max(12px, var(--dac-safe-r)) calc(12px + var(--dac-safe-b)) max(12px, var(--dac-safe-l)); }
   }
 
   @media (max-width: 560px) {
@@ -195,7 +202,7 @@ export const editorCss = /* css */ `
 `;
 
 export const adminNoticeHtml = /* html */ `
-  <div class="notice" id="admin-notice" hidden>
+  <div class="notice admin-notice" hidden>
     ${icons.warning}
     <span>Je bent geen beheerder in Home Assistant, dus je kunt dit wel bekijken maar niet opslaan.</span>
   </div>
@@ -261,8 +268,9 @@ export class DacEditorElement extends DacElement {
 
   applyPermissions_() {
     this.toggleAttribute("readonly", !this.canEdit_());
-    const notice = this.$("#admin-notice");
-    if (notice) notice.hidden = this.canEdit_();
+    // A screen may carry the notice more than once -- a sub-screen needs it as
+    // much as the list it was opened from.
+    for (const notice of this.$$(".admin-notice")) notice.hidden = this.canEdit_();
   }
 
   /** Push the state feed into every entity picker on the page. */
@@ -293,6 +301,9 @@ export class DacEditorElement extends DacElement {
 
   /** Subclasses fill their controls from `this.draft_`. */
   paint_() {}
+
+  /** Runs after a save went through. Nothing to do for most screens. */
+  afterSave_() {}
 
   wireSaveBar_() {
     this.applyPermissions_();
@@ -331,6 +342,7 @@ export class DacEditorElement extends DacElement {
       this.fire("dac-settings-saved", { settings: saved });
       status.textContent = "";
       this.toast_("Opgeslagen", true);
+      this.afterSave_();
     } catch (error) {
       status.textContent = "";
       this.toast_(`Opslaan mislukt — ${error?.message ?? error}`, false);

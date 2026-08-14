@@ -63,6 +63,15 @@ export const tokens = /* css */ `
                        0 18px 40px -24px rgba(0, 0, 0, 0.9);
   --dac-header-h:      64px;
   --dac-maxw:          1440px;
+
+  /* What the screen itself takes: the notch or Dynamic Island at the top, the
+     home indicator at the bottom, and -- in landscape -- a strip on the side the
+     island sits. Named here so every screen can keep clear of it the same way;
+     they resolve to 0px anywhere that has no such cutouts. */
+  --dac-safe-t:        env(safe-area-inset-top, 0px);
+  --dac-safe-r:        env(safe-area-inset-right, 0px);
+  --dac-safe-b:        env(safe-area-inset-bottom, 0px);
+  --dac-safe-l:        env(safe-area-inset-left, 0px);
 `;
 
 /** Styles shared by every component in the panel. */
@@ -86,6 +95,14 @@ export const baseCss = /* css */ `
 
   /* Numerals must line up as values change -- never let them jitter. */
   .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+  /* iOS zooms the page in when a field it focuses has type smaller than 16px,
+     and it does not zoom back out afterwards -- which is what left the dashboard
+     scrollable sideways on a phone. Only touch devices need the larger type; on
+     a mouse the fields keep their own size. */
+  @media (pointer: coarse) {
+    input, select, textarea { font-size: 16px; }
+  }
 
   :focus-visible {
     outline: 2px solid var(--dac-accent-hi);
