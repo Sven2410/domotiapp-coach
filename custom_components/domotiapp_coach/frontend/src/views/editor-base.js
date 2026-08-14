@@ -71,6 +71,36 @@ export const editorCss = /* css */ `
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   @media (max-width: 560px) { .two { grid-template-columns: 1fr; } }
 
+  /* ---- checkbox ----
+     Shared, because every settings screen has these and three copies of the
+     same block is how one screen ends up with the label running on inline. */
+  label.check {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+    padding: 12px 14px;
+    border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border);
+    background: rgba(255,255,255,0.022);
+    cursor: pointer;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--dac-ink-2);
+  }
+  label.check input {
+    width: 18px; height: 18px; flex: 0 0 auto; margin: 1px 0 0;
+    accent-color: var(--dac-accent-hi);
+    cursor: pointer;
+  }
+  label.check strong {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--dac-ink);
+    margin-bottom: 2px;
+  }
+  label.check:has(input:checked) { border-color: rgba(25,143,217,0.5); background: var(--dac-accent-soft); }
+
   .notice {
     margin-top: 14px;
     padding: 12px 14px;

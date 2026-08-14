@@ -4,11 +4,17 @@ This lives in the integration rather than in the panel because the warning has
 to arrive when nobody is looking at the dashboard -- which is most of the time,
 and exactly when a heavy load goes unnoticed.
 
-The interval the customer sets is what keeps it from becoming noise: load swings
-across any threshold dozens of times an hour, and a warning that repeats itself
-is one people switch off. It is deliberately *only* the interval and not a
-"fires once on the way in" rule -- a connection that stays overloaded for an
-hour is still worth a second word about.
+Two settings keep it from becoming noise, and they answer different questions.
+
+The hold time answers "is this real": switching on an oven, a motor starting,
+an induction hob stepping up -- all of them throw a spike of a second or two
+that no fuse minds and that is over before anyone could act on it. Nothing is
+sent until the load has stayed over the line for the configured time.
+
+The interval answers "have I said this already": load swings across any
+threshold dozens of times an hour. It is deliberately *only* an interval and
+not a "fires once on the way in" rule -- a connection that stays overloaded for
+an hour is still worth a second word about.
 """
 
 from __future__ import annotations
@@ -19,7 +25,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.core import Event, HomeAssistant, State, callback
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
 from .const import EVENT_SETTINGS_UPDATED, GRID_MODE_SIGNED
@@ -76,6 +82,10 @@ class LoadMonitor:
         self._unsubscribe_states = None
         self._unsubscribe_settings = None
         self._last_sent: datetime | None = None
+        # When the load first went over the line and stayed there. Cleared the
+        # moment it drops back below, which is what makes a spike a spike.
+        self._above_since: datetime | None = None
+        self._cancel_recheck = None
 
     async def async_start(self) -> None:
         """Load the settings and begin watching."""
@@ -94,6 +104,7 @@ class LoadMonitor:
         if self._unsubscribe_settings:
             self._unsubscribe_settings()
             self._unsubscribe_settings = None
+        self._async_cancel_recheck()
 
     @callback
     def _async_settings_changed(self, event: Event) -> None:
@@ -102,6 +113,10 @@ class LoadMonitor:
         if not settings:
             return
         self._settings = settings
+        # A threshold that just moved says nothing about how long the load has
+        # been over the *new* line, so the clock starts again.
+        self._above_since = None
+        self._async_cancel_recheck()
         # A changed sensor list means the old subscription is watching the wrong
         # entities.
         self._resubscribe()
@@ -145,23 +160,49 @@ class LoadMonitor:
 
     @callback
     def _async_state_changed(self, event: Event) -> None:
+        """A watched sensor moved; look again."""
+        self._async_evaluate()
+
+    @callback
+    def _async_cancel_recheck(self) -> None:
+        """Drop a pending look-again."""
+        if self._cancel_recheck:
+            self._cancel_recheck()
+            self._cancel_recheck = None
+
+    @callback
+    def _async_evaluate(self, _now: datetime | None = None) -> None:
         """Recompute the load and decide whether to say something."""
+        self._async_cancel_recheck()
+
         alert = self._settings.get("strategy", {}).get("load_alert", {})
-        if not alert.get("enabled"):
-            return
-
-        reading = self.async_current_load()
-        if reading.percent is None:
-            return
-
         threshold = float(alert.get("threshold_percent") or 0)
-        if threshold <= 0:
+        reading = self.async_current_load()
+
+        if not alert.get("enabled") or threshold <= 0 or reading.percent is None:
+            self._above_since = None
             return
 
         if reading.percent < threshold:
+            # Back under the line: whatever was building up did not last.
+            self._above_since = None
             return
 
         now = dt_util.utcnow()
+        if self._above_since is None:
+            self._above_since = now
+
+        hold = timedelta(seconds=int(alert.get("min_duration_seconds") or 0))
+        waited = now - self._above_since
+        if waited < hold:
+            # A load that sits still produces no state changes, so waiting for
+            # the next event could mean waiting forever. Come back by the clock
+            # instead, at the moment the hold time is up.
+            self._cancel_recheck = async_call_later(
+                self.hass, (hold - waited).total_seconds(), self._async_evaluate
+            )
+            return
+
         interval = timedelta(minutes=int(alert.get("min_interval_minutes") or 30))
         if self._last_sent is not None and now - self._last_sent < interval:
             return
@@ -262,8 +303,19 @@ class LoadMonitor:
         else:
             detail = f"Je trekt {reading.watts / 1000:.2f} kW uit het net".replace(".", ",")
 
+        # How long it has been going on is the difference between "act on this"
+        # and "you missed a spike", so it goes in the message.
+        held = ""
+        if self._above_since is not None:
+            seconds = int((dt_util.utcnow() - self._above_since).total_seconds())
+            held = (
+                f" en dat al {seconds} seconden"
+                if seconds < 90
+                else f" en dat al {round(seconds / 60)} minuten"
+            )
+
         message = (
-            f"{where}je aansluiting zit op {reading.percent:.0f}% "
+            f"{where}je aansluiting zit op {reading.percent:.0f}%{held} "
             f"(waarschuwing vanaf {threshold:.0f}%). {detail}. "
             "Zet iets zwaars uit of wacht ermee."
         )

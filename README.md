@@ -60,7 +60,7 @@ De secties in de header verdelen het zo:
 
 | Sectie | Wat je er instelt | Wie |
 |--------|-------------------|-----|
-| **Apparaten** | Welke apparaten als bol in de energiestroom verschijnen. Opgeslagen apparaten staan ingeklapt op één regel; tik er een aan om hem te bewerken. | beheerder |
+| **Apparaten** | Welke apparaten als bol in de energiestroom verschijnen, met hun sensoren en of ze gestuurd mogen worden. Opgeslagen apparaten staan ingeklapt op één regel; tik er een aan om hem te bewerken. | beheerder |
 | **Strategie** | Meldingen: waar de coach uit zichzelf voor waarschuwt, en wie dat bericht krijgt. Elke melding is één regel; tik hem aan om hem in te stellen. | beheerder |
 | **Installatie** | Naam van de woning, aantal fasen, hoofdzekering, maximaal netvermogen, en het energiecontract. | klant leest mee, beheerder wijzigt |
 | **Instellingen** | Waar de Home-knop naartoe gaat, welke sensoren de meetwaarden leveren, de fasen, en de drempelwaarden voor de kleuren. | alleen beheerder |
@@ -86,9 +86,29 @@ en een gemiddelde verbergt precies dat geval. Zonder fasesensoren wordt het
 totale netvermogen tegen het maximum gelegd.
 
 Onder **Strategie** kun je daar een melding aan hangen: vanaf welk percentage,
-naar welke `notify`-diensten (dat zijn de telefoons waarop de HA-app is
-ingelogd) en hoe vaak dat hoogstens mag. Die melding wordt door de integratie
-zelf verstuurd, dus ook als niemand het dashboard open heeft.
+hoe lang dat moet aanhouden, naar welke `notify`-diensten (dat zijn de telefoons
+waarop de HA-app is ingelogd) en hoe vaak dat hoogstens mag. Die melding wordt
+door de integratie zelf verstuurd, dus ook als niemand het dashboard open heeft.
+
+De aanhoudtijd is er tegen valse meldingen: een oven die aanslaat of een motor
+die start geeft een piek van een seconde waar geen zekering van uit gaat en waar
+je niets aan kunt doen. Standaard staat hij op een minuut — een zekering die net
+boven zijn waarde belast wordt, houdt dat het grootste deel van een uur vol, dus
+je bent nog ruim op tijd.
+
+### Apparaten
+
+Elk apparaat heeft een vermogenssensor; dat is wat het op de energiestroom zet.
+Daarnaast geef je per apparaat aan of de coach het straks mag **aansturen** —
+veel apparaten hangen alleen aan een meetstekker en zijn wel te volgen maar niet
+te bedienen.
+
+Bij een **laadpaal** kies je eerst het merk, want welke gegevens een paal levert
+verschilt per fabrikant en lang niet elke paal kan gestart of gepauzeerd worden.
+Easee is uitgewerkt: status, reden geen stroomvraag, levensduurverbruik,
+maximale limiet en stroom. Zaptec, Wallbox, Zappi en Peblar staan in de lijst
+maar hebben nog geen eigen velden. Draait een apparaat, dan is zijn bol op het
+overzicht aan te klikken voor precies die gegevens.
 
 ### Contract
 

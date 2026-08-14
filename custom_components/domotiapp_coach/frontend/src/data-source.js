@@ -16,6 +16,7 @@
  * export (naar het net).
  */
 
+import { brandFields } from "./devices.js";
 import { toWatts } from "./format.js";
 
 const PHASES = ["l1", "l2", "l3"];
@@ -96,6 +97,47 @@ function readNumber(feed, entityId) {
   if (!usable(state)) return null;
   const value = Number(state.state);
   return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The extra readings a device carries, ready to be shown.
+ *
+ * These are the brand's own entities -- a charger's status, its limit, what it
+ * has ever delivered. They are read here rather than in the diagram so that the
+ * bubble stays something that only draws what it is handed.
+ *
+ * A sensor that says nothing gets a dash, never a plausible-looking number.
+ */
+function deviceDetails(feed, device) {
+  const rows = [];
+
+  for (const field of brandFields(device)) {
+    const entityId = device.entities?.[field.key];
+    if (!entityId) continue;
+
+    const state = feed.get(entityId);
+    if (!usable(state)) {
+      rows.push({ label: field.label, text: "—" });
+      continue;
+    }
+
+    const raw = String(state.state);
+    const number = Number(raw);
+    const unit = state.attributes?.unit_of_measurement;
+    // A brand may report words rather than numbers; those are translated where
+    // we know them and passed through where we do not.
+    const text =
+      field.values?.[raw] ??
+      (Number.isFinite(number)
+        ? `${number.toLocaleString("nl-NL", { maximumFractionDigits: 2 })}${unit ? ` ${unit}` : ""}`
+        // A word we have no translation for is still shown -- readable, but
+        // recognisably the sensor's own wording rather than something invented.
+        : raw.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()));
+
+    rows.push({ label: field.label, text });
+  }
+
+  return rows;
 }
 
 /**
@@ -254,6 +296,7 @@ export class LiveSource {
     const devices = (settings?.devices ?? []).map((device) => ({
       ...device,
       watts: readPower(feed, device.entity),
+      details: deviceDetails(feed, device),
     }));
 
     const phases = readPhases(feed, sources);
