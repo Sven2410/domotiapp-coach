@@ -59,8 +59,11 @@ de instellingen van HA niet bereikbaar zijn.
 |-------|-------------------|
 | **Navigatie** | Waar de **Home**-knop naartoe gaat. Standaard `/lovelace/0`. |
 | **Energiebronnen** | De sensoren voor opwek, verbruik, meterstand en prijs. |
-| **Apparaten** | Welke apparaten als bol in de energiestroom verschijnen. |
 | **Drempelwaarden** | Waar de kleuren omslaan voor zelfbenutting en energieprijs. |
+
+Apparaten hebben hun eigen sectie **Apparaten** in de header, niet een kopje
+onder Instellingen: ze krijgen er gaandeweg meer instellingen bij dan in één
+kopje passen.
 
 Wijzigen mag alleen een beheerder; meekijken mag iedereen. Een wijziging op de
 ene telefoon komt vanzelf door op een tablet die openstaat.
@@ -164,8 +167,8 @@ custom_components/domotiapp_coach/
         ├── devices.js     apparaattypes
         ├── header.js      header met navigatie en Home-knop
         ├── icons.js
-        ├── components/    stat-tile, energy-flow
-        └── views/         overzicht, instellingen, placeholders
+        ├── components/    stat-tile, energy-flow, entity-picker
+        └── views/         overzicht, apparaten, instellingen, placeholders
 ```
 
 ---

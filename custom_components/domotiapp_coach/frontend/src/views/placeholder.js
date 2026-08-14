@@ -10,13 +10,6 @@ import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
 
 export const SECTIONS = {
-  apparaten: {
-    icon: "devices",
-    title: "Apparaten",
-    lead: "Alles wat energie kost of oplevert, op één plek.",
-    body: "Per apparaat zie je straks wat het verbruikt, wat het je kost en hoeveel daarvan uit je eigen zon komt. Vanaf fase 3 kan de coach ze ook aansturen op zonneoverschot.",
-    phase: 2,
-  },
   strategie: {
     icon: "compass",
     title: "Strategie",

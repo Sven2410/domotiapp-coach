@@ -18,6 +18,7 @@ import { NAV_ITEMS } from "./src/header.js";
 import { SECTIONS } from "./src/views/placeholder.js";
 import "./src/header.js";
 import "./src/views/overview.js";
+import "./src/views/devices.js";
 import "./src/views/settings.js";
 import "./src/views/placeholder.js";
 
@@ -198,14 +199,18 @@ class DomotiAppCoachPanel extends DacElement {
   viewFor_(id) {
     if (this.views_.has(id)) return this.views_.get(id);
 
+    const BUILT = {
+      overzicht: "dac-view-overview",
+      apparaten: "dac-view-devices",
+      instellingen: "dac-view-settings",
+    };
+
     let el;
-    if (id === "overzicht") {
-      el = document.createElement("dac-view-overview");
-    } else if (id === "instellingen") {
-      el = document.createElement("dac-view-settings");
+    if (BUILT[id]) {
+      el = document.createElement(BUILT[id]);
     } else {
       el = document.createElement("dac-view-placeholder");
-      el.section = SECTIONS[id] ? id : "apparaten";
+      el.section = SECTIONS[id] ? id : "strategie";
     }
 
     el.hass = this.hass_;
