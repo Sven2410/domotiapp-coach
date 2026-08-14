@@ -39,6 +39,24 @@ export const CHARGER_BRANDS = [
   {
     id: "easee",
     label: "Easee",
+    // Easee is steered through `easee.action_command`, which wants the device
+    // rather than an entity -- so the integration's own device is picked here
+    // and its id is what gets sent.
+    device: {
+      domain: "easee",
+      label: "Easee-integratie",
+      hint: "Kies je laadpaal zoals hij in Home Assistant staat. Daar komt het device-id uit dat easee.action_command nodig heeft.",
+    },
+    service: "easee.action_command",
+    field: "action_command",
+    // The words differ per brand and even per firmware, so they are typed in
+    // rather than baked in. These are what Easee uses today.
+    actions: [
+      { key: "start", label: "Starten", fallback: "start" },
+      { key: "stop", label: "Stoppen", fallback: "stop" },
+      { key: "pause", label: "Pauzeren", fallback: "pause" },
+      { key: "resume", label: "Hervatten", fallback: "resume" },
+    ],
     fields: [
       {
         key: "status",
@@ -109,6 +127,50 @@ export const brandMeta = (device) =>
 /** The extra entity fields this device asks for, beyond its power sensor. */
 export const brandFields = (device) => brandMeta(device)?.fields ?? [];
 
+/** The start/stop/pause/resume commands this brand takes, if any. */
+export const brandActions = (device) => brandMeta(device)?.actions ?? [];
+
+/** The integration device this brand is steered through, if it works that way. */
+export const brandDevice = (device) => brandMeta(device)?.device;
+
+/**
+ * What the customer presses to say a device may run right now.
+ *
+ * A dishwasher is the case that makes this necessary: it can be switched on at
+ * any moment the sun is out, and doing that to an empty one with its door open
+ * is worse than not steering at all. Only whoever is standing in the kitchen
+ * knows, so only they can say so.
+ */
+export function releaseCopy(device) {
+  switch (device?.type) {
+    case "vaatwasser":
+      return {
+        label: "Ingeruimd en dicht",
+        hint: "Zet dit aan als de vaatwasser vol staat en de klep dicht zit. Anders zou de coach hem leeg kunnen laten spoelen.",
+      };
+    case "wasmachine":
+      return {
+        label: "Gevuld en dicht",
+        hint: "Zet dit aan als de was erin zit en de deur dicht is.",
+      };
+    case "droger":
+      return {
+        label: "Gevuld en dicht",
+        hint: "Zet dit aan als de droger gevuld is en de deur dicht is.",
+      };
+    case "laadpaal":
+      return {
+        label: "Mag laden",
+        hint: "Zet dit aan als de auto eraan hangt en opgeladen mag worden.",
+      };
+    default:
+      return {
+        label: "Mag meedraaien",
+        hint: "Zet dit aan als de coach dit apparaat nu mag inschakelen.",
+      };
+  }
+}
+
 /**
  * What still has to be filled in before this device can be steered.
  *
@@ -119,9 +181,15 @@ export const brandFields = (device) => brandMeta(device)?.fields ?? [];
  */
 export function missingForControl(device) {
   if (!device?.controllable) return [];
-  return brandFields(device)
+
+  const missing = brandFields(device)
     .filter((field) => field.needed && !device.entities?.[field.key])
     .map((field) => field.label);
+
+  const wanted = brandDevice(device);
+  if (wanted && !device.device_id) missing.unshift(wanted.label);
+
+  return missing;
 }
 
 const BY_ID = new Map(DEVICE_TYPES.map((t) => [t.id, t]));

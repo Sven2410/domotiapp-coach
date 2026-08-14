@@ -13,6 +13,8 @@ import { icons } from "../icons.js";
 import {
   CHARGER_BRANDS,
   DEVICE_TYPES,
+  brandActions,
+  brandDevice,
   brandFields,
   brandMeta,
   deviceLabel,
@@ -80,6 +82,8 @@ class DacViewDevices extends DacEditorElement {
         brand: "",
         controllable: false,
         entities: {},
+        device_id: "",
+        actions: {},
       };
       this.draft_.devices.push(device);
       // A new device has nothing filled in yet, so it opens on its fields.
@@ -98,6 +102,52 @@ class DacViewDevices extends DacEditorElement {
     if (!this.draft_ || !this.rendered_) return;
     this.paintDevices_();
     this.syncSaveBar_();
+  }
+
+  onHass_() {
+    this.loadIntegrationDevices_();
+  }
+
+  onConnect() {
+    this.loadIntegrationDevices_();
+  }
+
+  /**
+   * Home Assistant's device registry, fetched once.
+   *
+   * Newer frontends hand the panel `hass.devices` outright; older ones do not,
+   * so the websocket is the fallback. Either way a failure is not fatal -- the
+   * dropdown says so and everything else on the screen keeps working.
+   */
+  async loadIntegrationDevices_() {
+    if (this.haDevices_ || this.loadingDevices_ || !this.hass_) return;
+    this.loadingDevices_ = true;
+
+    try {
+      const known = Object.values(this.hass_.devices ?? {});
+      this.haDevices_ = known.length
+        ? known
+        : await this.hass_.callWS({ type: "config/device_registry/list" });
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de apparaten van Home Assistant niet lezen", error);
+      this.haDevices_ = [];
+    }
+
+    this.loadingDevices_ = false;
+    if (this.rendered_ && this.draft_) this.paintDevices_();
+  }
+
+  /** The registry devices belonging to one integration. */
+  integrationDevices_(domain) {
+    return (this.haDevices_ ?? [])
+      .filter((device) =>
+        (device.identifiers ?? []).some(([owner]) => owner === domain)
+      )
+      .map((device) => ({
+        id: device.id,
+        label: device.name_by_user || device.name || device.id,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, "nl"));
   }
 
   /** Everything is filled in and stored, so the list goes back to being a list. */
@@ -159,7 +209,71 @@ class DacViewDevices extends DacEditorElement {
         ? `<p class="sub">Voor dit merk zijn de velden nog niet uitgewerkt — vermogen wordt wel meegenomen.</p>`
         : "";
 
-    return `${brandRow}${power}${extra}${note}`;
+    return `${brandRow}${this.integrationHtml_(device, index)}${power}${extra}${this.actionsHtml_(device, index)}${note}`;
+  }
+
+  /**
+   * The Home Assistant device behind a brand that is steered per device.
+   *
+   * Easee's `action_command` takes a device id, not an entity, so the
+   * integration's own device is picked here. The list comes from Home
+   * Assistant's device registry, filtered to that integration -- typing a
+   * device id by hand is not something to ask of anybody.
+   */
+  integrationHtml_(device, index) {
+    const wanted = brandDevice(device);
+    if (!wanted) return "";
+
+    const found = this.integrationDevices_(wanted.domain);
+    const options = found
+      .map(
+        (d) =>
+          `<option value="${d.id}"${d.id === device.device_id ? " selected" : ""}>${d.label}</option>`
+      )
+      .join("");
+
+    const empty = !found.length
+      ? `<span class="sub warn">Home Assistant kent nog geen ${wanted.label}. Installeer die integratie eerst.</span>`
+      : "";
+
+    return `
+      <div class="row">
+        <label for="hadev-${index}">${wanted.label}</label>
+        <select id="hadev-${index}" data-field="device_id" data-index="${index}"${found.length ? "" : " disabled"}>
+          <option value=""${device.device_id ? "" : " selected"}>Kies je laadpaal…</option>
+          ${options}
+        </select>
+        <span class="sub">${wanted.hint}</span>
+        ${empty}
+      </div>`;
+  }
+
+  /** The words this brand wants for start, stop, pause and resume. */
+  actionsHtml_(device, index) {
+    const actions = brandActions(device);
+    if (!actions.length) return "";
+
+    const brand = brandMeta(device);
+    const fields = actions
+      .map(
+        (action) => `
+        <div class="row">
+          <label for="act-${index}-${action.key}">${action.label}</label>
+          <input type="text" id="act-${index}-${action.key}"
+                 data-action="${action.key}" data-index="${index}"
+                 value="${(device.actions?.[action.key] ?? action.fallback).replace(/"/g, "&quot;")}"
+                 placeholder="${action.fallback}" autocomplete="off"
+                 autocapitalize="off" spellcheck="false">
+        </div>`
+      )
+      .join("");
+
+    return `
+      <div class="row">
+        <label>Opdrachten</label>
+        <span class="sub">Wat er naar <code>${brand.service}</code> gestuurd wordt als <code>${brand.field}</code>. De ingevulde woorden zijn wat Easee vandaag gebruikt; wijkt jouw paal af, dan pas je ze hier aan. Er wordt nog niets verstuurd — dit is de voorbereiding op het sturen zelf.</span>
+        <div class="two commands">${fields}</div>
+      </div>`;
   }
 
   /** Whether the coach may act on this device once it can. */
@@ -330,6 +444,16 @@ class DacViewDevices extends DacEditorElement {
       });
     }
 
+    for (const input of list.querySelectorAll("[data-action]")) {
+      const index = Number(input.dataset.index);
+      const key = input.dataset.action;
+      input.addEventListener("input", () => {
+        const device = this.draft_.devices[index];
+        device.actions = { ...(device.actions ?? {}), [key]: input.value.trim() };
+        this.syncSaveBar_();
+      });
+    }
+
     for (const el of list.querySelectorAll("[data-field]")) {
       const index = Number(el.dataset.index);
       const field = el.dataset.field;
@@ -340,10 +464,13 @@ class DacViewDevices extends DacEditorElement {
 
         if (field === "controllable") {
           device.controllable = el.checked;
-          this.paintMissing_(index);
-          this.paintSummary_(index);
         } else {
           device[field] = el.value;
+        }
+
+        if (field === "controllable" || field === "device_id") {
+          this.paintMissing_(index);
+          this.paintSummary_(index);
         }
 
         if (field === "type" || field === "brand") {
@@ -419,6 +546,14 @@ DacViewDevices.css = /* css */ `
 
   /* The notice sits in the field grid, which already spaces its rows. */
   .device .fields .notice { margin-top: 0; }
+  .sub.warn { color: var(--dac-warn); }
+  .commands { margin-top: 2px; }
+  .commands input { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.94em;
+    color: var(--dac-ink-2);
+  }
   .device .fields > .sub { margin: 0; font-size: 12px; color: var(--dac-ink-3); line-height: 1.45; }
 
   .device-head .chip {
