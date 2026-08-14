@@ -158,6 +158,12 @@ export const icons = {
   // ---- interface ----------------------------------------------------------
 
   arrowRight: svg(`<path d="M4.5 12h14M13 6.5l5.5 5.5-5.5 5.5"/>`),
+  arrowLeft: svg(`<path d="M19.5 12h-14M11 6.5 5.5 12l5.5 5.5"/>`),
+  chevronRight: svg(`<path d="m9.5 5.5 6.5 6.5-6.5 6.5"/>`),
+  bell: svg(
+    `<path d="M18 9.4a6 6 0 1 0-12 0c0 5.2-2 6.6-2 6.6h16s-2-1.4-2-6.6Z"/>
+     <path d="M13.7 19.4a2 2 0 0 1-3.4 0"/>`
+  ),
   check: svg(`<path d="m4.8 12.6 4.6 4.6 9.8-10"/>`),
   close: svg(`<path d="M6 6l12 12M18 6 6 18"/>`),
   plus: svg(`<path d="M12 5v14M5 12h14"/>`),

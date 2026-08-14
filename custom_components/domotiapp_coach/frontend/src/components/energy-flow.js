@@ -377,6 +377,21 @@ class DacEnergyFlow extends DacElement {
     if (this.openSlot_ && !this.$("#detail").hidden) this.openDetail_(this.openSlot_, true);
   }
 
+  /**
+   * What the device bubbles are showing right now, in slot order.
+   *
+   * The key printed under the diagram has to describe the diagram, so it asks
+   * rather than deciding for a second time which appliances made it in.
+   *
+   * @returns {Array<{tone: string, label: string}>} empty when nothing is running
+   */
+  get bubbles() {
+    return (this.slots_ ?? []).map((device, index) => ({
+      tone: index === 0 ? "var(--dac-device-1)" : "var(--dac-device-2)",
+      label: device.rolled?.length ? `+ ${device.rolled.length} andere` : deviceLabel(device),
+    }));
+  }
+
   setNode_(id, value, name, tone) {
     const node = this.nodes_[id];
     if (tone) node.style.setProperty("--tone", tone);

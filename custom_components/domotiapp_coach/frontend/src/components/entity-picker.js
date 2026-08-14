@@ -72,6 +72,8 @@ class DacEntityPicker extends DacElement {
       outline: none;
     }
     input::placeholder { color: var(--dac-ink-3); }
+    /* See theme.js: below 16px iOS zooms the page in on focus and stays there. */
+    @media (pointer: coarse) { input { font-size: 16px; } }
 
     button {
       flex: 0 0 auto;

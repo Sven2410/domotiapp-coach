@@ -162,7 +162,9 @@ class DomotiAppCoachPanel extends DacElement {
     const header = this.$("dac-header");
     header.toggleAttribute("narrow", !!this.narrow_);
     header.isAdmin = this.isAdmin_();
-    header.addEventListener("dac-navigate", (ev) => this.navigate_(ev.detail.id));
+    // On the panel, not on the header: a view opening one of its own sub-screens
+    // sends the same event, and it has to be routed the same way.
+    this.addEventListener("dac-navigate", (ev) => this.navigate_(ev.detail.id));
     header.addEventListener("dac-home", () => this.goHome_());
     header.addEventListener("dac-menu", () => this.fire("hass-toggle-menu"));
 
@@ -182,19 +184,26 @@ class DomotiAppCoachPanel extends DacElement {
 
   /** Read the active section from the panel route and show it. */
   syncRoute_() {
-    const segment = (this.route_?.path || "").replace(/^\/+|\/+$/g, "");
+    const path = (this.route_?.path || "").replace(/^\/+|\/+$/g, "");
+    const [segment, ...rest] = path.split("/");
     const allowed = navItemsFor(this.isAdmin_()).map((item) => item.id);
     // A customer who types or bookmarks the settings path lands on Overzicht
     // rather than on a screen they are not meant to have.
     const next = allowed.includes(segment) ? segment : DEFAULT_VIEW;
 
-    if (this.rendered_ && next === this.shown_) return;
+    // Anything past the section belongs to the section itself: Strategie uses it
+    // to open one notification. Keeping it in the path rather than in a variable
+    // is what makes the phone's back gesture close such a sub-screen -- behind
+    // Kiosk Mode there is no other way back.
+    const sub = next === segment ? rest.join("/") : "";
 
     this.active_ = next;
     if (!this.rendered_) return;
 
     this.$("dac-header").active = next;
-    this.showView_(next);
+    if (next !== this.shown_) this.showView_(next);
+    // Harmless on the screens that have no sub-screens: they never read it.
+    this.viewFor_(next).subroute = sub;
   }
 
   showView_(id) {

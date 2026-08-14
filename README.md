@@ -60,8 +60,8 @@ De secties in de header verdelen het zo:
 
 | Sectie | Wat je er instelt | Wie |
 |--------|-------------------|-----|
-| **Apparaten** | Welke apparaten als bol in de energiestroom verschijnen. | beheerder |
-| **Strategie** | Waar de coach uit zichzelf voor waarschuwt, en wie dat bericht krijgt. | beheerder |
+| **Apparaten** | Welke apparaten als bol in de energiestroom verschijnen. Opgeslagen apparaten staan ingeklapt op één regel; tik er een aan om hem te bewerken. | beheerder |
+| **Strategie** | Meldingen: waar de coach uit zichzelf voor waarschuwt, en wie dat bericht krijgt. Elke melding is één regel; tik hem aan om hem in te stellen. | beheerder |
 | **Installatie** | Naam van de woning, aantal fasen, hoofdzekering, maximaal netvermogen, en het energiecontract. | klant leest mee, beheerder wijzigt |
 | **Instellingen** | Waar de Home-knop naartoe gaat, welke sensoren de meetwaarden leveren, de fasen, en de drempelwaarden voor de kleuren. | alleen beheerder |
 

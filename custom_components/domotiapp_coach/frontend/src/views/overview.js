@@ -132,7 +132,7 @@ class DacViewOverview extends DacElement {
     .wrap {
       max-width: var(--dac-maxw);
       margin: 0 auto;
-      padding: 24px 22px 64px;
+      padding: 24px max(22px, var(--dac-safe-r)) calc(64px + var(--dac-safe-b)) max(22px, var(--dac-safe-l));
       display: flex;
       flex-direction: column;
       gap: 18px;
@@ -256,7 +256,10 @@ class DacViewOverview extends DacElement {
     .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; flex: 0 0 auto; }
 
     @media (max-width: 640px) {
-      .wrap { padding: 16px 12px 48px; gap: 14px; }
+      .wrap {
+        padding: 16px max(12px, var(--dac-safe-r)) calc(48px + var(--dac-safe-b)) max(12px, var(--dac-safe-l));
+        gap: 14px;
+      }
       .coach { padding: 18px 16px 20px; }
       .coach h1 { font-size: 21px; margin-top: 14px; }
       .coach p { font-size: 14px; }
@@ -320,14 +323,7 @@ class DacViewOverview extends DacElement {
             <h2>Energiestroom</h2>
           </div>
           <div class="flow-holder"><dac-energy-flow id="flow"></dac-energy-flow></div>
-          <div class="legend">
-            <span><i style="background: var(--dac-solar)"></i> Zon</span>
-            <span><i style="background: var(--dac-house)"></i> Woning</span>
-            <span><i style="background: var(--dac-grid-in)"></i> Van het net</span>
-            <span><i style="background: var(--dac-grid-out)"></i> Naar het net</span>
-            <span><i style="background: var(--dac-device-1)"></i> Apparaat</span>
-            <span><i style="background: var(--dac-device-2)"></i> Apparaat</span>
-          </div>
+          <div class="legend" id="legend"></div>
         </article>
       </div>
     `;
@@ -483,7 +479,45 @@ class DacViewOverview extends DacElement {
 
     this.updatePhases_(r, alertAt);
     this.flow_.update(r);
+    this.updateLegend_();
     this.updateCoach_(advise(r, thresholds, configured, alertAt));
+  }
+
+  /**
+   * The key under the diagram, listing only what the diagram is drawing.
+   *
+   * The device bubbles come and go with what is switched on, so a fixed
+   * "Apparaat / Apparaat" pair described two circles that are usually not there
+   * and named neither of them when they were. The two grid entries do stay:
+   * they are the two states of one link, and which of them applies flips within
+   * seconds -- a key that flickers along with it is harder to read than one that
+   * explains both colours.
+   */
+  updateLegend_() {
+    const entries = [
+      { tone: "var(--dac-solar)", label: "Zon" },
+      { tone: "var(--dac-house)", label: "Woning" },
+      { tone: "var(--dac-grid-in)", label: "Van het net" },
+      { tone: "var(--dac-grid-out)", label: "Naar het net" },
+      ...this.flow_.bubbles,
+    ];
+
+    // Rebuilt only when it would actually read differently: this runs on every
+    // meter reading.
+    const key = entries.map((entry) => entry.label).join("|");
+    if (key === this.legendKey_) return;
+    this.legendKey_ = key;
+
+    this.$("#legend").replaceChildren(
+      ...entries.map((entry) => {
+        const item = document.createElement("span");
+        const swatch = document.createElement("i");
+        swatch.style.background = entry.tone;
+        // Device names are the customer's own text, so it goes in as text.
+        item.append(swatch, document.createTextNode(` ${entry.label}`));
+        return item;
+      })
+    );
   }
 
   /** The per-phase card, when the customer has phase sensors and wants them. */

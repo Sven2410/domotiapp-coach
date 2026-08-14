@@ -113,6 +113,7 @@ class DacViewInstallation extends DacEditorElement {
                 <div class="row">
                   <label for="fx-feedin">Terugleververgoeding (€ per kWh)</label>
                   <input type="number" id="fx-feedin" min="0" step="0.001" inputmode="decimal">
+                  <span class="sub">Wat je krijgt voor wat je teruglevert.</span>
                 </div>
               </div>
               <div class="row">
