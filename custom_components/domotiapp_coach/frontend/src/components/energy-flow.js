@@ -214,9 +214,15 @@ class DacEnergyFlow extends DacElement {
   afterRender() {
     this.build_();
 
+    this.$("#detail-close").addEventListener("click", () => {
+      this.$("#detail").hidden = true;
+    });
+  }
+
+  onConnect() {
     // The two layouts are different drawings, not one drawing scaled: at phone
     // width the wide one puts 11px labels under 20px circles.
-    this.observer_ = new ResizeObserver(([entry]) => {
+    this.observer_ ??= new ResizeObserver(([entry]) => {
       const next = entry.contentRect.width < NARROW_AT ? "narrow" : "wide";
       if (next === this.mode_) return;
       this.mode_ = next;
@@ -224,13 +230,9 @@ class DacEnergyFlow extends DacElement {
       if (this.reading_) this.update(this.reading_);
     });
     this.observer_.observe(this);
-
-    this.$("#detail-close").addEventListener("click", () => {
-      this.$("#detail").hidden = true;
-    });
   }
 
-  disconnectedCallback() {
+  onDisconnect() {
     this.observer_?.disconnect();
   }
 

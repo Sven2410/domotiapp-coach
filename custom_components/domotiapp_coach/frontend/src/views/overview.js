@@ -27,6 +27,9 @@ const SURPLUS_W = 1500;
 /** Import worth mentioning, in watts. */
 const HEAVY_IMPORT_W = 2500;
 
+const nl = (value, digits) =>
+  value.toLocaleString("nl-NL", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
 /**
  * Rule-based advice -- the first, deliberately simple version of the coach.
  *
@@ -34,7 +37,7 @@ const HEAVY_IMPORT_W = 2500;
  * a warning about an expensive hour, because acting on it makes the warning
  * moot.
  */
-function advise(r, thresholds, configured) {
+function advise(r, thresholds, configured, alertAt) {
   if (!configured) {
     return {
       tone: "var(--dac-accent-hi)",
@@ -52,6 +55,20 @@ function advise(r, thresholds, configured) {
       title: "Geen meetwaarden",
       body:
         "De gekozen sensoren geven op dit moment niets bruikbaars terug. Controleer onder Instellingen of ze nog bestaan en of ze een waarde hebben.",
+    };
+  }
+
+  // A connection being pushed towards its fuse outranks anything about money:
+  // the others cost you, this one trips the house.
+  if (r.load !== null && r.load >= alertAt) {
+    return {
+      tone: "var(--dac-bad)",
+      tag: "Let op",
+      title: "Je aansluiting wordt zwaar belast",
+      body:
+        r.loadBasis === "phase"
+          ? `Fase ${r.loadWorstPhase} zit op ${percent(r.load).value}% van je hoofdzekering. Zet iets zwaars uit of wacht ermee, anders loop je kans dat de zekering eruit gaat.`
+          : `Je trekt nu ${percent(r.load).value}% van wat je aansluiting aankan. Zet iets zwaars uit of wacht ermee.`,
     };
   }
 
@@ -195,6 +212,44 @@ class DacViewOverview extends DacElement {
     .flow-holder { margin-top: 12px; display: block; }
     .flow-holder dac-energy-flow { display: block; width: 100%; max-width: 700px; margin: 0 auto; }
 
+    /* ---- per phase ---- */
+    .phases[hidden] { display: none; }
+    .phase-rows { margin-top: 14px; display: grid; gap: 10px; }
+    .phase-row {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 14px;
+    }
+    .phase-row .name { font-size: 13px; font-weight: 700; color: var(--dac-ink-2); letter-spacing: 0.06em; }
+    .phase-row .bar {
+      position: relative;
+      height: 8px;
+      border-radius: 99px;
+      background: rgba(255,255,255,0.07);
+      overflow: hidden;
+    }
+    .phase-row .bar i {
+      position: absolute;
+      inset: 0 auto 0 0;
+      border-radius: 99px;
+      background: var(--tone, var(--dac-ink-3));
+      transition: width 500ms cubic-bezier(0.22,0.61,0.36,1), background 400ms ease;
+    }
+    .phase-row .values {
+      display: flex;
+      gap: 12px;
+      font-size: 12.5px;
+      color: var(--dac-ink-2);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .phase-row .values b { color: var(--dac-ink); font-weight: 600; }
+    @media (max-width: 560px) {
+      .phase-row { grid-template-columns: 30px minmax(0, 1fr); row-gap: 4px; }
+      .phase-row .values { grid-column: 2; gap: 10px; font-size: 12px; }
+    }
+
     .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
     .legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dac-ink-2); }
     .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; flex: 0 0 auto; }
@@ -217,11 +272,10 @@ class DacViewOverview extends DacElement {
 
   /** @param {import("../state-feed.js").StateFeed} feed */
   set stateFeed(feed) {
-    this.unsubscribe_?.();
     this.feed_ = feed;
     // Values arrive on their own events, so the dashboard follows the house
     // rather than waiting for the next beat of a timer.
-    this.unsubscribe_ = feed?.subscribe(() => this.requestTick_());
+    if (this.isConnected) this.listen_();
   }
 
   set settings(value) {
@@ -248,8 +302,16 @@ class DacViewOverview extends DacElement {
         </article>
 
         <section class="tiles" aria-label="Live meetwaarden">
-          ${tile("t-solar")}${tile("t-house")}${tile("t-grid")}${tile("t-self")}${tile("t-price")}
+          ${tile("t-solar")}${tile("t-house")}${tile("t-grid")}${tile("t-load")}${tile("t-self")}${tile("t-price")}
         </section>
+
+        <article class="card panel phases" id="phases" hidden>
+          <div class="panel-head">
+            <div class="eyebrow">Per fase</div>
+            <h2 id="phases-title">Belasting van je aansluiting</h2>
+          </div>
+          <div class="phase-rows" id="phase-rows"></div>
+        </article>
 
         <article class="card panel">
           <div class="panel-head">
@@ -277,16 +339,31 @@ class DacViewOverview extends DacElement {
       grid: this.$("#t-grid"),
       self: this.$("#t-self"),
       price: this.$("#t-price"),
+      load: this.$("#t-load"),
     };
     this.flow_ = this.$("#flow");
+  }
 
+  onConnect() {
+    // Both of these have to come back on every attach. The view is cached and
+    // swapped in and out of the panel, and starting them once meant the
+    // dashboard stopped updating the first time it was navigated away from.
+    this.listen_();
     this.tick_();
+    clearInterval(this.timer_);
     this.timer_ = setInterval(() => this.tick_(), REFRESH_MS);
   }
 
-  disconnectedCallback() {
+  onDisconnect() {
     clearInterval(this.timer_);
+    this.timer_ = null;
     this.unsubscribe_?.();
+    this.unsubscribe_ = null;
+  }
+
+  listen_() {
+    this.unsubscribe_?.();
+    this.unsubscribe_ = this.feed_?.subscribe(() => this.requestTick_());
   }
 
   /**
@@ -383,8 +460,69 @@ class DacViewOverview extends DacElement {
       series: this.source_.series("price"),
     });
 
+    // The alert threshold is the one number that says "too much" here, so the
+    // tile turns on the same boundary the notification uses rather than a
+    // second, quietly different one.
+    const alertAt = Number(this.settings_?.strategy?.load_alert?.threshold_percent) || 80;
+    const loadBounds = { low: Math.round(alertAt * 0.75), high: alertAt };
+    const loadLevel = level(r.load, loadBounds, true);
+    this.tiles_.load.update({
+      tone: levelTone(loadLevel),
+      icon: "plug",
+      label: "Belastbaarheid",
+      ...percent(r.load),
+      sub:
+        r.load === null
+          ? "Aansluiting nog niet ingevuld"
+          : r.loadBasis === "phase"
+            ? `Zwaarst belaste fase (${r.loadWorstPhase})`
+            : "Van het maximale netvermogen",
+      series: this.source_.series("load"),
+    });
+
+    this.updatePhases_(r, alertAt);
     this.flow_.update(r);
-    this.updateCoach_(advise(r, thresholds, configured));
+    this.updateCoach_(advise(r, thresholds, configured, alertAt));
+  }
+
+  /** The per-phase card, when the customer has phase sensors and wants them. */
+  updatePhases_(r, alertAt) {
+    const card = this.$("#phases");
+    const show = Boolean(r.phases) && this.settings_?.sources?.phases_on_overview;
+    card.hidden = !show;
+    if (!show) return;
+
+    const fuse = Number(this.settings_?.installation?.fuse_amps) || 0;
+    this.$("#phases-title").textContent = fuse
+      ? `Belasting per fase, tegen ${fuse} A`
+      : "Belasting per fase";
+
+    this.$("#phase-rows").innerHTML = r.phases
+      .map((phase) => {
+        const pct =
+          fuse > 0 && Number.isFinite(phase.current)
+            ? Math.min((phase.current / fuse) * 100, 100)
+            : 0;
+        const tone = levelTone(
+          level(fuse > 0 && Number.isFinite(phase.current) ? (phase.current / fuse) * 100 : null,
+            { low: Math.round(alertAt * 0.75), high: alertAt }, true)
+        );
+        const bits = [];
+        if (Number.isFinite(phase.current)) bits.push(`<b>${nl(phase.current, 1)}</b> A`);
+        if (Number.isFinite(phase.power)) {
+          const { value, unit } = power(phase.power);
+          bits.push(`<b>${value}</b> ${unit}`);
+        }
+        if (Number.isFinite(phase.voltage)) bits.push(`<b>${nl(phase.voltage, 0)}</b> V`);
+
+        return `
+          <div class="phase-row" style="--tone: ${tone}">
+            <span class="name">${phase.label}</span>
+            <span class="bar"><i style="width: ${pct.toFixed(1)}%"></i></span>
+            <span class="values">${bits.join("") || "—"}</span>
+          </div>`;
+      })
+      .join("");
   }
 
   /** Supporting line for a tile, or an honest blank when there is no reading. */

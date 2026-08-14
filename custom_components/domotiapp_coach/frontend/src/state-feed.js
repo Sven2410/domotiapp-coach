@@ -80,10 +80,16 @@ export class StateFeed {
     return () => this.listeners_.delete(listener);
   }
 
+  /**
+   * Drop the subscription to Home Assistant.
+   *
+   * Listeners are kept. They belong to components that get detached and
+   * reattached all the time, and throwing them away on a detach means nothing
+   * ever hears about a change again.
+   */
   disconnect() {
     this.unsubscribe_?.();
     this.unsubscribe_ = null;
     this.connecting_ = null;
-    this.listeners_.clear();
   }
 }

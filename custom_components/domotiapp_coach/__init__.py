@@ -21,6 +21,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.loader import async_get_integration
 
 from . import websocket
+from .monitor import LoadMonitor
 from .const import (
     DOMAIN,
     FRONTEND_DIR,
@@ -38,6 +39,7 @@ _LOGGER = logging.getLogger(__name__)
 # only be registered once per Home Assistant run.
 _STATIC_PATH_KEY = "static_registered"
 _WEBSOCKET_KEY = "websocket_registered"
+_MONITOR_KEY = "load_monitor"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -47,6 +49,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _async_register_websocket(hass)
     await _async_register_static_path(hass)
     await _async_register_panel(hass, version)
+    await _async_start_monitor(hass)
 
     return True
 
@@ -54,7 +57,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry and remove the sidebar panel."""
     frontend.async_remove_panel(hass, PANEL_URL_PATH)
+
+    monitor: LoadMonitor | None = hass.data.get(DOMAIN, {}).pop(_MONITOR_KEY, None)
+    if monitor:
+        monitor.async_stop()
+
     return True
+
+
+async def _async_start_monitor(hass: HomeAssistant) -> None:
+    """Start watching the load on the connection.
+
+    This runs in the integration rather than in the panel because the warning
+    has to arrive when nobody has the dashboard open -- which is most of the
+    time, and exactly when a heavy load goes unnoticed.
+    """
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get(_MONITOR_KEY):
+        return
+
+    monitor = LoadMonitor(hass)
+    await monitor.async_start()
+    domain_data[_MONITOR_KEY] = monitor
 
 
 async def _async_frontend_version(hass: HomeAssistant) -> str:

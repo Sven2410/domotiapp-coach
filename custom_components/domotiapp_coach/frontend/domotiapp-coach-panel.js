@@ -19,21 +19,21 @@
 import { DacElement, define } from "./src/base.js";
 import { StateFeed } from "./src/state-feed.js";
 import { navItemsFor } from "./src/header.js";
-import { SECTIONS } from "./src/views/placeholder.js";
 import "./src/header.js";
 import "./src/views/overview.js";
 import "./src/views/devices.js";
+import "./src/views/strategy.js";
 import "./src/views/installation.js";
 import "./src/views/settings.js";
-import "./src/views/placeholder.js";
 
 const DEFAULT_VIEW = "overzicht";
 const EVENT_SETTINGS_UPDATED = "domotiapp_coach_settings_updated";
 
-/** Sections that are built; anything else falls back to the placeholder. */
+/** Which element renders which section. */
 const BUILT = {
   overzicht: "dac-view-overview",
   apparaten: "dac-view-devices",
+  strategie: "dac-view-strategy",
   installatie: "dac-view-installation",
   instellingen: "dac-view-settings",
 };
@@ -174,9 +174,10 @@ class DomotiAppCoachPanel extends DacElement {
     this.syncRoute_();
   }
 
-  disconnectedCallback() {
-    this.unsubscribe_?.();
-    this.feed_.disconnect();
+  onDisconnect() {
+    // The feed deliberately survives: Home Assistant detaches and reattaches
+    // this panel routinely, and tearing the subscription down here is what left
+    // the dashboard frozen after the first time round.
   }
 
   /** Read the active section from the panel route and show it. */
@@ -224,13 +225,8 @@ class DomotiAppCoachPanel extends DacElement {
   viewFor_(id) {
     if (this.views_.has(id)) return this.views_.get(id);
 
-    let el;
-    if (BUILT[id]) {
-      el = document.createElement(BUILT[id]);
-    } else {
-      el = document.createElement("dac-view-placeholder");
-      el.section = SECTIONS[id] ? id : "strategie";
-    }
+    // Every section is built, and syncRoute_ only ever passes an allowed id.
+    const el = document.createElement(BUILT[id] ?? BUILT[DEFAULT_VIEW]);
 
     el.hass = this.hass_;
     el.stateFeed = this.feed_;
