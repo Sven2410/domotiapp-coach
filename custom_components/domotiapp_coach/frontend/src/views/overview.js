@@ -245,6 +245,7 @@ class DacViewOverview extends DacElement {
       white-space: nowrap;
     }
     .phase-row .values b { color: var(--dac-ink); font-weight: 600; }
+    .phase-row .values .none { color: var(--dac-ink-3); font-style: italic; }
     @media (max-width: 560px) {
       .phase-row { grid-template-columns: 30px minmax(0, 1fr); row-gap: 4px; }
       .phase-row .values { grid-column: 2; gap: 10px; font-size: 12px; }
@@ -497,16 +498,19 @@ class DacViewOverview extends DacElement {
       ? `Belasting per fase, tegen ${fuse} A`
       : "Belasting per fase";
 
+    const bounds = { low: Math.round(alertAt * 0.75), high: alertAt };
+
     this.$("#phase-rows").innerHTML = r.phases
       .map((phase) => {
-        const pct =
-          fuse > 0 && Number.isFinite(phase.current)
-            ? Math.min((phase.current / fuse) * 100, 100)
-            : 0;
-        const tone = levelTone(
-          level(fuse > 0 && Number.isFinite(phase.current) ? (phase.current / fuse) * 100 : null,
-            { low: Math.round(alertAt * 0.75), high: alertAt }, true)
-        );
+        // The bar follows the amps, measured or worked out from the power, so a
+        // customer who mapped only one of the two still gets a reading.
+        const share =
+          fuse > 0 && Number.isFinite(phase.amps) ? (phase.amps / fuse) * 100 : null;
+        const pct = share === null ? 0 : Math.min(share, 100);
+        const tone = levelTone(level(share, bounds, true));
+
+        // Only what is actually measured is printed. A derived value would look
+        // like a reading from a sensor that is not there.
         const bits = [];
         if (Number.isFinite(phase.current)) bits.push(`<b>${nl(phase.current, 1)}</b> A`);
         if (Number.isFinite(phase.power)) {
@@ -519,7 +523,7 @@ class DacViewOverview extends DacElement {
           <div class="phase-row" style="--tone: ${tone}">
             <span class="name">${phase.label}</span>
             <span class="bar"><i style="width: ${pct.toFixed(1)}%"></i></span>
-            <span class="values">${bits.join("") || "—"}</span>
+            <span class="values">${bits.join("") || "<span class=\"none\">geen meetwaarde</span>"}</span>
           </div>`;
       })
       .join("");

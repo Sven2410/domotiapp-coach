@@ -20,6 +20,9 @@ import { toWatts } from "./format.js";
 
 const PHASES = ["l1", "l2", "l3"];
 
+/** Nominal voltage, used when a phase reports power but not volts. */
+const NOMINAL_VOLTS = 230;
+
 const HISTORY = 60;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -95,18 +98,41 @@ function readNumber(feed, entityId) {
   return Number.isFinite(value) ? value : null;
 }
 
-/** Per-phase current, power and voltage, when the customer has them mapped. */
+/**
+ * What a phase is drawing, in amps.
+ *
+ * Every one of the three fields is optional -- a customer may have only power
+ * per phase, or only current. With power but no current the amps follow from
+ * P/U, using the measured voltage when there is one and the nominal 230 V when
+ * there is not. That keeps a partly-filled installation useful instead of
+ * showing an empty bar.
+ */
+export function phaseAmps(phase) {
+  if (Number.isFinite(phase?.current)) return phase.current;
+  if (!Number.isFinite(phase?.power)) return null;
+  const volts = Number.isFinite(phase.voltage) && phase.voltage > 0 ? phase.voltage : NOMINAL_VOLTS;
+  return phase.power / volts;
+}
+
+/** Per-phase current, power and voltage, whichever of them are mapped. */
 function readPhases(feed, sources) {
   if (!sources.phases_enabled) return null;
   const config = sources.phases ?? {};
 
-  const rows = PHASES.map((key) => ({
-    key,
-    label: key.toUpperCase(),
-    current: readNumber(feed, config[key]?.current),
-    power: readPower(feed, config[key]?.power),
-    voltage: readNumber(feed, config[key]?.voltage),
-  }));
+  const rows = PHASES.map((key) => {
+    const row = {
+      key,
+      label: key.toUpperCase(),
+      current: readNumber(feed, config[key]?.current),
+      power: readPower(feed, config[key]?.power),
+      voltage: readNumber(feed, config[key]?.voltage),
+    };
+    row.amps = phaseAmps(row);
+    // True when the amps were worked out rather than measured, so the display
+    // can be honest about it.
+    row.ampsDerived = row.amps !== null && !Number.isFinite(row.current);
+    return row;
+  });
 
   return rows.some((row) => row.current !== null || row.power !== null || row.voltage !== null)
     ? rows
@@ -132,11 +158,11 @@ export function loadOf(phases, importW, installation) {
   const fuse = Number(installation?.fuse_amps) || 0;
 
   if (phases && fuse > 0) {
-    const currents = phases.filter((p) => Number.isFinite(p.current));
-    if (currents.length) {
-      const worst = currents.reduce((a, b) => (b.current > a.current ? b : a));
+    const loaded = phases.filter((p) => Number.isFinite(p.amps));
+    if (loaded.length) {
+      const worst = loaded.reduce((a, b) => (b.amps > a.amps ? b : a));
       return {
-        percent: clamp((worst.current / fuse) * 100, 0, 999),
+        percent: clamp((worst.amps / fuse) * 100, 0, 999),
         basis: "phase",
         worst: worst.label,
       };
