@@ -149,12 +149,36 @@ export const editorCss = /* css */ `
     white-space: nowrap;
     max-width: calc(100vw - 32px);
   }
-  .toast.on { opacity: 1; transform: translate(-50%, 0); }
+  .toast.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
   .toast .icon { width: 17px; height: 17px; flex: 0 0 auto; }
   .toast.ok { border-color: rgba(12,163,12,0.45); }
   .toast.ok .icon { color: var(--dac-good); }
-  .toast.fail { border-color: rgba(208,59,59,0.5); white-space: normal; }
-  .toast.fail .icon { color: var(--dac-bad); }
+  .toast.fail {
+    border-color: rgba(208,59,59,0.5);
+    white-space: normal;
+    align-items: flex-start;
+    max-width: min(560px, calc(100vw - 32px));
+    border-radius: var(--dac-radius-sm);
+    line-height: 1.5;
+  }
+  .toast.fail .icon { color: var(--dac-bad); margin-top: 2px; }
+  /* An error message is the one thing here worth copying -- into a search, or
+     into a message to whoever installed this. */
+  .toast #toast-text { user-select: text; -webkit-user-select: text; cursor: text; }
+  .toast button.dismiss {
+    flex: 0 0 auto;
+    margin: -4px -6px -4px 2px;
+    padding: 6px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--dac-ink-3);
+    cursor: pointer;
+    line-height: 0;
+  }
+  .toast button.dismiss:hover { color: var(--dac-ink); background: rgba(255,255,255,0.07); }
+  .toast button.dismiss .icon { width: 14px; height: 14px; }
+  .toast.ok button.dismiss { display: none; }
 
   /* ---- read only ----
      Customers may look at their installation and question it; only an admin
@@ -184,7 +208,9 @@ export const saveBarHtml = /* html */ `
     <button type="button" class="primary" id="save">Opslaan</button>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite">
-    <span id="toast-icon"></span><span id="toast-text"></span>
+    <span id="toast-icon"></span>
+    <span id="toast-text"></span>
+    <button type="button" class="dismiss" id="toast-dismiss" aria-label="Sluiten">${icons.close}</button>
   </div>
 `;
 
@@ -271,6 +297,7 @@ export class DacEditorElement extends DacElement {
   wireSaveBar_() {
     this.applyPermissions_();
     this.onFeed_();
+    this.$("#toast-dismiss").addEventListener("click", () => this.hideToast_());
     this.$("#save").addEventListener("click", () => this.save_());
     this.$("#revert").addEventListener("click", () => {
       this.draft_ = clone(this.saved_);
@@ -328,8 +355,20 @@ export class DacEditorElement extends DacElement {
     toast.classList.add("on", ok ? "ok" : "fail");
 
     clearTimeout(this.toastTimer_);
-    // A failure stays until it is replaced: it is the only place the reason
-    // appears, and three seconds is not enough to read an error and act on it.
+    // A failure stays put: it is the only place the reason appears, and three
+    // seconds is not enough to read an error, let alone copy it. It goes when
+    // it is dismissed or when this section is left.
     if (ok) this.toastTimer_ = setTimeout(() => toast.classList.remove("on"), TOAST_MS);
+  }
+
+  hideToast_() {
+    clearTimeout(this.toastTimer_);
+    this.$("#toast")?.classList.remove("on");
+  }
+
+  onDisconnect() {
+    // Leaving the section clears it. A stale error hanging over a screen the
+    // customer has already moved on from is just confusing.
+    this.hideToast_();
   }
 }

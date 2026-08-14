@@ -27,13 +27,26 @@ from .const import (
 )
 from .storage import async_get_store
 
+
+def _schema(mapping: dict) -> vol.Schema:
+    """A settings schema that drops fields it does not recognise.
+
+    Rejecting them instead looks tidy until a setting is removed: the panel
+    hands whole sections back when it saves, so a customer whose stored settings
+    still carry a field from an older version could not save anything at all
+    until the storage had been cleaned. Dropping is the forgiving half; the
+    storage prunes the leftovers on load.
+    """
+    return vol.Schema(mapping, extra=vol.REMOVE_EXTRA)
+
+
 # An entity id, or "" for "not configured yet".
 _ENTITY = vol.Any("", vol.Match(r"^[a-z_]+\.[a-zA-Z0-9_]+$"))
 
 # A euro amount per kWh. Negative is real: market prices go below zero.
 _EURO = vol.All(vol.Coerce(float), vol.Range(-100, 100))
 
-_PHASE = vol.Schema(
+_PHASE = _schema(
     {
         vol.Optional("current"): _ENTITY,
         vol.Optional("power"): _ENTITY,
@@ -41,7 +54,7 @@ _PHASE = vol.Schema(
     }
 )
 
-_DEVICE = vol.Schema(
+_DEVICE = _schema(
     {
         vol.Required("id"): str,
         vol.Required("type"): vol.In(DEVICE_TYPES),
@@ -50,10 +63,10 @@ _DEVICE = vol.Schema(
     }
 )
 
-_SETTINGS = vol.Schema(
+_SETTINGS = _schema(
     {
-        vol.Optional("navigation"): vol.Schema({vol.Optional("home_path"): str}),
-        vol.Optional("sources"): vol.Schema(
+        vol.Optional("navigation"): _schema({vol.Optional("home_path"): str}),
+        vol.Optional("sources"): _schema(
             {
                 vol.Optional("solar"): _ENTITY,
                 vol.Optional("grid_mode"): vol.In([GRID_MODE_SPLIT, GRID_MODE_SIGNED]),
@@ -63,14 +76,14 @@ _SETTINGS = vol.Schema(
                 vol.Optional("grid_signed_invert"): bool,
                 vol.Optional("phases_enabled"): bool,
                 vol.Optional("phases_on_overview"): bool,
-                vol.Optional("phases"): vol.Schema(
+                vol.Optional("phases"): _schema(
                     {vol.Optional(phase): _PHASE for phase in ("l1", "l2", "l3")}
                 ),
             }
         ),
-        vol.Optional("strategy"): vol.Schema(
+        vol.Optional("strategy"): _schema(
             {
-                vol.Optional("load_alert"): vol.Schema(
+                vol.Optional("load_alert"): _schema(
                     {
                         vol.Optional("enabled"): bool,
                         vol.Optional("threshold_percent"): vol.All(
@@ -84,7 +97,7 @@ _SETTINGS = vol.Schema(
                 ),
             }
         ),
-        vol.Optional("installation"): vol.Schema(
+        vol.Optional("installation"): _schema(
             {
                 vol.Optional("home_name"): str,
                 vol.Optional("phases"): vol.In([1, 3]),
@@ -93,17 +106,17 @@ _SETTINGS = vol.Schema(
                 vol.Optional("max_grid_auto"): bool,
             }
         ),
-        vol.Optional("contract"): vol.Schema(
+        vol.Optional("contract"): _schema(
             {
                 vol.Optional("type"): vol.In([CONTRACT_FIXED, CONTRACT_DYNAMIC]),
-                vol.Optional("fixed"): vol.Schema(
+                vol.Optional("fixed"): _schema(
                     {
                         vol.Optional("all_in_price"): _EURO,
                         vol.Optional("feed_in_tariff"): _EURO,
                         vol.Optional("feed_in_costs"): _EURO,
                     }
                 ),
-                vol.Optional("dynamic"): vol.Schema(
+                vol.Optional("dynamic"): _schema(
                     {
                         vol.Optional("source"): vol.In([DYNAMIC_ALL_IN, DYNAMIC_MARKET]),
                         vol.Optional("all_in_entity"): _ENTITY,
@@ -117,15 +130,15 @@ _SETTINGS = vol.Schema(
             }
         ),
         vol.Optional("devices"): [_DEVICE],
-        vol.Optional("thresholds"): vol.Schema(
+        vol.Optional("thresholds"): _schema(
             {
-                vol.Optional("self_use"): vol.Schema(
+                vol.Optional("self_use"): _schema(
                     {
                         vol.Optional("low"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
                         vol.Optional("high"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
                     }
                 ),
-                vol.Optional("price"): vol.Schema(
+                vol.Optional("price"): _schema(
                     {
                         vol.Optional("low"): vol.All(vol.Coerce(float), vol.Range(0, 10)),
                         vol.Optional("high"): vol.All(vol.Coerce(float), vol.Range(0, 10)),

@@ -31,6 +31,9 @@ _LOGGER = logging.getLogger(__name__)
 # problem, and guessing kW where it means W is a factor of a thousand.
 _POWER_TO_WATT = {"w": 1.0, "kw": 1_000.0, "mw": 1_000_000.0}
 
+# Used when a phase reports power but not volts.
+_NOMINAL_VOLTS = 230.0
+
 
 def _number(state: State | None) -> float | None:
     """Read a state as a plain float, or None when it says nothing useful."""
@@ -125,9 +128,12 @@ class LoadMonitor:
 
         if sources.get("phases_enabled"):
             for phase in ("l1", "l2", "l3"):
-                entity = (sources.get("phases", {}).get(phase, {}) or {}).get("current")
-                if entity:
-                    entities.append(entity)
+                config = sources.get("phases", {}).get(phase, {}) or {}
+                # Power and voltage matter too: a phase mapped with only power
+                # still drives the calculation.
+                for kind in ("current", "power", "voltage"):
+                    if config.get(kind):
+                        entities.append(config[kind])
 
         if sources.get("grid_mode") == GRID_MODE_SIGNED:
             if sources.get("grid_signed"):
@@ -163,6 +169,30 @@ class LoadMonitor:
         self._last_sent = now
         self.hass.async_create_task(self._async_notify(reading, threshold, alert))
 
+    def _phase_amps(self, config: dict[str, Any]) -> float | None:
+        """What a phase is drawing, in amps.
+
+        Each of the three fields is optional -- a customer may have mapped only
+        power per phase, or only current. With power but no current the amps
+        follow from P/U, using the measured voltage when there is one. Kept in
+        step with `phaseAmps` in data-source.js, which does the same sum for the
+        dashboard.
+        """
+        states = self.hass.states
+
+        amps = _number(states.get(config.get("current", ""))) if config.get("current") else None
+        if amps is not None:
+            return amps
+
+        watts = _watts(states.get(config.get("power", ""))) if config.get("power") else None
+        if watts is None:
+            return None
+
+        volts = _number(states.get(config.get("voltage", ""))) if config.get("voltage") else None
+        if volts is None or volts <= 0:
+            volts = _NOMINAL_VOLTS
+        return watts / volts
+
     @callback
     def async_current_load(self) -> LoadReading:
         """Work out how hard the connection is being worked.
@@ -184,8 +214,8 @@ class LoadMonitor:
             worst_label: str | None = None
             worst_amps: float | None = None
             for phase in ("l1", "l2", "l3"):
-                entity = (sources.get("phases", {}).get(phase, {}) or {}).get("current")
-                amps = _number(states.get(entity)) if entity else None
+                config = sources.get("phases", {}).get(phase, {}) or {}
+                amps = self._phase_amps(config)
                 if amps is None:
                     continue
                 if worst_amps is None or amps > worst_amps:

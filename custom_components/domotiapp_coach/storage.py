@@ -17,6 +17,29 @@ from homeassistant.helpers.storage import Store
 from .const import DEFAULT_SETTINGS, DOMAIN, STORAGE_KEY, STORAGE_VERSION
 
 
+def _prune(defaults: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    """Drop keys that the current version no longer knows about.
+
+    Settings written by an older version keep their old fields forever
+    otherwise, and the panel hands the whole section back when it saves -- so a
+    field that was removed here turns into "extra keys not allowed" on the next
+    save, and the customer cannot save anything at all. Pruning on load is what
+    makes removing a setting a safe thing to do.
+
+    Only dictionaries are walked. Lists (the device list) are the caller's own
+    shape and are validated on the way in instead.
+    """
+    out: dict[str, Any] = {}
+    for key, default in defaults.items():
+        if key not in data:
+            out[key] = copy.deepcopy(default)
+        elif isinstance(default, dict) and isinstance(data[key], dict):
+            out[key] = _prune(default, data[key])
+        else:
+            out[key] = copy.deepcopy(data[key])
+    return out
+
+
 def _merge(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
     """Deep-merge `incoming` onto `base`, returning a new dict.
 
@@ -47,14 +70,15 @@ class SettingsStore:
         if self._data is None:
             stored = await self._store.async_load() or {}
             # Defaults are merged in on every load, so a settings file written by
-            # an older version still gains the keys a newer one expects.
-            self._data = _merge(DEFAULT_SETTINGS, stored)
+            # an older version still gains the keys a newer one expects -- and
+            # pruned afterwards, so it loses the ones that are gone.
+            self._data = _prune(DEFAULT_SETTINGS, _merge(DEFAULT_SETTINGS, stored))
         return copy.deepcopy(self._data)
 
     async def async_save(self, changes: dict[str, Any]) -> dict[str, Any]:
         """Merge `changes` into the settings, persist them and return the result."""
         current = await self.async_load()
-        self._data = _merge(current, changes)
+        self._data = _prune(DEFAULT_SETTINGS, _merge(current, changes))
         await self._store.async_save(self._data)
         return copy.deepcopy(self._data)
 
