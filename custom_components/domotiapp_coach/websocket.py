@@ -33,6 +33,14 @@ _ENTITY = vol.Any("", vol.Match(r"^[a-z_]+\.[a-zA-Z0-9_]+$"))
 # A euro amount per kWh. Negative is real: market prices go below zero.
 _EURO = vol.All(vol.Coerce(float), vol.Range(-100, 100))
 
+_PHASE = vol.Schema(
+    {
+        vol.Optional("current"): _ENTITY,
+        vol.Optional("power"): _ENTITY,
+        vol.Optional("voltage"): _ENTITY,
+    }
+)
+
 _DEVICE = vol.Schema(
     {
         vol.Required("id"): str,
@@ -48,12 +56,32 @@ _SETTINGS = vol.Schema(
         vol.Optional("sources"): vol.Schema(
             {
                 vol.Optional("solar"): _ENTITY,
-                vol.Optional("house"): _ENTITY,
                 vol.Optional("grid_mode"): vol.In([GRID_MODE_SPLIT, GRID_MODE_SIGNED]),
                 vol.Optional("grid_import"): _ENTITY,
                 vol.Optional("grid_export"): _ENTITY,
                 vol.Optional("grid_signed"): _ENTITY,
                 vol.Optional("grid_signed_invert"): bool,
+                vol.Optional("phases_enabled"): bool,
+                vol.Optional("phases_on_overview"): bool,
+                vol.Optional("phases"): vol.Schema(
+                    {vol.Optional(phase): _PHASE for phase in ("l1", "l2", "l3")}
+                ),
+            }
+        ),
+        vol.Optional("strategy"): vol.Schema(
+            {
+                vol.Optional("load_alert"): vol.Schema(
+                    {
+                        vol.Optional("enabled"): bool,
+                        vol.Optional("threshold_percent"): vol.All(
+                            vol.Coerce(float), vol.Range(1, 200)
+                        ),
+                        vol.Optional("targets"): [str],
+                        vol.Optional("min_interval_minutes"): vol.All(
+                            vol.Coerce(int), vol.Range(1, 1440)
+                        ),
+                    }
+                ),
             }
         ),
         vol.Optional("installation"): vol.Schema(

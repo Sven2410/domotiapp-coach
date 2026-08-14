@@ -187,12 +187,17 @@ class DacEntityPicker extends DacElement {
    * @param {import("../state-feed.js").StateFeed} value
    */
   set stateFeed(value) {
-    this.unsubscribe_?.();
     this.feed_ = value;
-    this.unsubscribe_ = value?.subscribe((id) => {
+    this.listen_();
+    if (this.rendered_) this.paintChosen_();
+  }
+
+  /** (Re)attach to the feed. Safe to call repeatedly. */
+  listen_() {
+    this.unsubscribe_?.();
+    this.unsubscribe_ = this.feed_?.subscribe((id) => {
       if (id === this.value_ && this.rendered_) this.paintChosen_();
     });
-    if (this.rendered_) this.paintChosen_();
   }
 
   set hass(value) {
@@ -289,9 +294,17 @@ class DacEntityPicker extends DacElement {
     this.paint_();
   }
 
-  disconnectedCallback() {
+  onConnect() {
+    // Reattached elements have to pick their subscription back up, or the
+    // reading under a chosen entity quietly stops following it.
+    this.listen_();
+    if (this.rendered_) this.paintChosen_();
+  }
+
+  onDisconnect() {
     this.closeList_();
     this.unsubscribe_?.();
+    this.unsubscribe_ = null;
   }
 
   // --- data --------------------------------------------------------------

@@ -49,18 +49,12 @@ class DacViewSettings extends DacEditorElement {
 
         <section class="card">
           <h2>${icons.grid} Energiebronnen</h2>
-          <p class="hint">Welke sensoren meten je opwek, je verbruik en je meterstand. Of de sensor in watt of kilowatt meet maakt niet uit — dat rekent de coach zelf om.</p>
+          <p class="hint">Welke sensoren meten je opwek en je meterstand. Of de sensor in watt of kilowatt meet maakt niet uit — dat rekent de coach zelf om. Het verbruik van de woning wordt hieruit berekend.</p>
           <div class="fields">
             <div class="row">
               <label>Opwek zonnepanelen</label>
               <dac-entity-picker id="src-solar" data-key="solar"></dac-entity-picker>
             </div>
-            <div class="row">
-              <label>Verbruik woning</label>
-              <dac-entity-picker id="src-house" data-key="house"></dac-entity-picker>
-              <span class="sub">Laat je dit leeg, dan rekent de coach het verbruik uit je opwek en je meterstand.</span>
-            </div>
-
             <div class="row">
               <label>Hoe meet je slimme meter?</label>
               <div class="segmented" id="grid-mode">
@@ -100,6 +94,51 @@ class DacViewSettings extends DacEditorElement {
               </label>
             </div>
 
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>${icons.plug} Fasen</h2>
+          <p class="hint">Heeft de meter van deze klant losse waarden per fase, vul ze dan hier in. Daarmee wordt de belastbaarheid per fase berekend in plaats van op het totaal — en een zekering gaat eruit op de zwaarste fase, niet op het gemiddelde.</p>
+          <div class="fields">
+            <label class="check" for="phases-enabled">
+              <input type="checkbox" id="phases-enabled">
+              <span>
+                <strong>Fasen beschikbaar</strong>
+                Aanzetten als deze woning per fase meet.
+              </span>
+            </label>
+
+            <div id="phase-fields" class="fields">
+              ${["l1", "l2", "l3"]
+                .map(
+                  (phase) => `
+                <div class="phase-block">
+                  <div class="phase-title">${phase.toUpperCase()}</div>
+                  <div class="row">
+                    <label>Stroom (A)</label>
+                    <dac-entity-picker data-phase="${phase}" data-kind="current"></dac-entity-picker>
+                  </div>
+                  <div class="row">
+                    <label>Vermogen</label>
+                    <dac-entity-picker data-phase="${phase}" data-kind="power"></dac-entity-picker>
+                  </div>
+                  <div class="row">
+                    <label>Spanning (V)</label>
+                    <dac-entity-picker data-phase="${phase}" data-kind="voltage"></dac-entity-picker>
+                  </div>
+                </div>`
+                )
+                .join("")}
+
+              <label class="check" for="phases-overview">
+                <input type="checkbox" id="phases-overview">
+                <span>
+                  <strong>Tonen op het overzicht</strong>
+                  Zet er een kaart bij met de belasting per fase.
+                </span>
+              </label>
+            </div>
           </div>
         </section>
 
@@ -156,11 +195,36 @@ class DacViewSettings extends DacEditorElement {
     bind("price-low", (v) => (this.draft_.thresholds.price.low = Number(v)));
     bind("price-high", (v) => (this.draft_.thresholds.price.high = Number(v)));
 
-    for (const picker of this.pickers_()) {
+    for (const picker of this.$$("dac-entity-picker[data-key]")) {
       picker.filter = "power";
       picker.placeholder = "Zoek een vermogenssensor…";
       picker.addEventListener("dac-entity-change", (ev) => {
         this.draft_.sources[picker.dataset.key] = ev.detail.value;
+        this.syncSaveBar_();
+      });
+    }
+
+    for (const picker of this.$$("dac-entity-picker[data-phase]")) {
+      const { phase, kind } = picker.dataset;
+      picker.filter = kind === "power" ? "power" : "all";
+      picker.placeholder =
+        kind === "current" ? "Zoek een stroomsensor…"
+        : kind === "voltage" ? "Zoek een spanningssensor…"
+        : "Zoek een vermogenssensor…";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        this.draft_.sources.phases[phase][kind] = ev.detail.value;
+        this.syncSaveBar_();
+      });
+    }
+
+    for (const [id, apply] of [
+      ["phases-enabled", (on) => (this.draft_.sources.phases_enabled = on)],
+      ["phases-overview", (on) => (this.draft_.sources.phases_on_overview = on)],
+    ]) {
+      const box = this.$(`#${id}`);
+      box.addEventListener("change", () => {
+        apply(box.checked);
+        this.paintPhases_();
         this.syncSaveBar_();
       });
     }
@@ -183,10 +247,6 @@ class DacViewSettings extends DacEditorElement {
     this.paint_();
   }
 
-  pickers_() {
-    return this.$$("dac-entity-picker");
-  }
-
   paint_() {
     if (!this.draft_ || !this.rendered_) return;
     const d = this.draft_;
@@ -198,13 +258,24 @@ class DacViewSettings extends DacEditorElement {
     this.$("#price-low").value = d.thresholds.price.low;
     this.$("#price-high").value = d.thresholds.price.high;
 
-    for (const picker of this.pickers_()) {
+    for (const picker of this.$$("dac-entity-picker[data-key]")) {
       picker.value = d.sources[picker.dataset.key] ?? "";
     }
+    for (const picker of this.$$("dac-entity-picker[data-phase]")) {
+      const { phase, kind } = picker.dataset;
+      picker.value = d.sources.phases?.[phase]?.[kind] ?? "";
+    }
+    this.$("#phases-enabled").checked = Boolean(d.sources.phases_enabled);
+    this.$("#phases-overview").checked = Boolean(d.sources.phases_on_overview);
     this.onFeed_();
 
     this.paintGridMode_();
+    this.paintPhases_();
     this.syncSaveBar_();
+  }
+
+  paintPhases_() {
+    this.$("#phase-fields").style.display = this.draft_.sources.phases_enabled ? "" : "none";
   }
 
   paintGridMode_() {
@@ -264,6 +335,22 @@ DacViewSettings.css = /* css */ `
   }
   label.check strong { display: block; font-size: 13px; font-weight: 600; color: var(--dac-ink); margin-bottom: 2px; }
   label.check:has(input:checked) { border-color: rgba(25,143,217,0.5); background: var(--dac-accent-soft); }
+
+  /* ---- phases ---- */
+  .phase-block {
+    padding: 14px;
+    border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border);
+    background: rgba(255,255,255,0.022);
+    display: grid;
+    gap: 12px;
+  }
+  .phase-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--dac-accent-hi);
+  }
 `;
 
 define("dac-view-settings", DacViewSettings);

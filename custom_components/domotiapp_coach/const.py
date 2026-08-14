@@ -72,7 +72,9 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     },
     "sources": {
         "solar": "",
-        "house": "",
+        # House consumption is never configured: it follows from generation and
+        # the meter, and one less mandatory sensor is one less thing to get
+        # wrong at a customer.
         "grid_mode": GRID_MODE_SPLIT,
         "grid_import": "",
         "grid_export": "",
@@ -81,6 +83,16 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # all of them. Without this the diagram runs exactly backwards, and it
         # looks plausible enough that nobody questions it.
         "grid_signed_invert": False,
+        # Per-phase detail, when the customer's meter offers it. With phase
+        # currents the load on the connection can be judged per phase, which is
+        # what actually trips a fuse -- an average never does.
+        "phases_enabled": False,
+        "phases_on_overview": False,
+        "phases": {
+            "l1": {"current": "", "power": "", "voltage": ""},
+            "l2": {"current": "", "power": "", "voltage": ""},
+            "l3": {"current": "", "power": "", "voltage": ""},
+        },
     },
     "installation": {
         "home_name": "",
@@ -110,6 +122,19 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             "supplier_markup": 0.02,
             "vat_percent": 21,
             "feed_in_costs": 0.0,
+        },
+    },
+    "strategy": {
+        # Warn when the connection is being pushed towards its limit. The
+        # interval matters as much as the threshold: load swings across the
+        # trigger point constantly, so without it one busy hour would send a
+        # stream of notifications.
+        "load_alert": {
+            "enabled": False,
+            "threshold_percent": 80,
+            # notify service names without their domain, e.g. "mobile_app_sven".
+            "targets": [],
+            "min_interval_minutes": 30,
         },
     },
     "devices": [],

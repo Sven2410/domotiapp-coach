@@ -301,15 +301,18 @@ class DacHeader extends DacElement {
       );
     }
 
-    // The sliding highlight is measured, so it has to be re-measured whenever
-    // the bar reflows (window resize, sidebar collapse, orientation change).
-    this.observer_ = new ResizeObserver(() => this.syncActive_());
-    this.observer_.observe(this.$("nav"));
-
     this.syncActive_();
   }
 
-  disconnectedCallback() {
+  onConnect() {
+    // The sliding highlight is measured, so it has to be re-measured whenever
+    // the bar reflows (window resize, sidebar collapse, orientation change).
+    this.observer_ ??= new ResizeObserver(() => this.syncActive_());
+    this.observer_.observe(this.$("nav"));
+    this.syncActive_();
+  }
+
+  onDisconnect() {
     this.observer_?.disconnect();
   }
 

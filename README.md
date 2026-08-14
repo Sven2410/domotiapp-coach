@@ -61,8 +61,9 @@ De secties in de header verdelen het zo:
 | Sectie | Wat je er instelt | Wie |
 |--------|-------------------|-----|
 | **Apparaten** | Welke apparaten als bol in de energiestroom verschijnen. | beheerder |
+| **Strategie** | Waar de coach uit zichzelf voor waarschuwt, en wie dat bericht krijgt. | beheerder |
 | **Installatie** | Naam van de woning, aantal fasen, hoofdzekering, maximaal netvermogen, en het energiecontract. | klant leest mee, beheerder wijzigt |
-| **Instellingen** | Waar de Home-knop naartoe gaat, welke sensoren de meetwaarden leveren, en de drempelwaarden voor de kleuren. | alleen beheerder |
+| **Instellingen** | Waar de Home-knop naartoe gaat, welke sensoren de meetwaarden leveren, de fasen, en de drempelwaarden voor de kleuren. | alleen beheerder |
 
 **Installatie** is met opzet leesbaar voor de klant en alleen te wijzigen door
 een beheerder: de gegevens daar bepalen wat de coach adviseert, dus een klant
@@ -75,6 +76,19 @@ entiteiten en is daarom helemaal verborgen voor klanten.
 Het maximale netvermogen volgt uit fasen × hoofdzekering × 230 V — 3 × 25 A geeft
 17,250 kW, 1 × 25 A geeft 5,750 kW — maar is aan te passen voor een begrensde of
 verzwaarde aansluiting.
+
+### Belastbaarheid
+
+Het overzicht laat zien hoe hard je aansluiting wordt gewerkt. Zijn er
+sensoren per fase ingevuld, dan rekent de coach met de **zwaarst belaste fase**
+tegen de hoofdzekering — een zekering gaat eruit op de fase die overbelast is,
+en een gemiddelde verbergt precies dat geval. Zonder fasesensoren wordt het
+totale netvermogen tegen het maximum gelegd.
+
+Onder **Strategie** kun je daar een melding aan hangen: vanaf welk percentage,
+naar welke `notify`-diensten (dat zijn de telefoons waarop de HA-app is
+ingelogd) en hoe vaak dat hoogstens mag. Die melding wordt door de integratie
+zelf verstuurd, dus ook als niemand het dashboard open heeft.
 
 ### Contract
 
@@ -176,6 +190,7 @@ custom_components/domotiapp_coach/
 ├── const.py
 ├── storage.py             opslag van de instellingen
 ├── websocket.py           lezen en schrijven vanuit het paneel
+├── monitor.py             bewaakt de belasting en stuurt de melding
 ├── brand/                 icon.png, logo.png
 └── frontend/
     ├── domotiapp-coach-panel.js   entry point, routing, rechten
@@ -190,7 +205,8 @@ custom_components/domotiapp_coach/
         ├── header.js      header met navigatie en Home-knop
         ├── icons.js
         ├── components/    stat-tile, energy-flow, entity-picker
-        └── views/         overzicht, apparaten, installatie, instellingen
+        └── views/         overzicht, apparaten, strategie, installatie,
+                           instellingen (editor-base deelt hun opslaglogica)
 ```
 
 ---

@@ -18,6 +18,8 @@
 
 import { toWatts } from "./format.js";
 
+const PHASES = ["l1", "l2", "l3"];
+
 const HISTORY = 60;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -82,6 +84,71 @@ export function priceNow(feed, contract) {
   const markup = Number(dynamic.supplier_markup) || 0;
   const vat = Number(dynamic.vat_percent) || 0;
   return (market + tax + markup) * (1 + vat / 100);
+}
+
+/** Read a plain numeric entity, in whatever unit it reports. */
+function readNumber(feed, entityId) {
+  if (!entityId) return null;
+  const state = feed.get(entityId);
+  if (!usable(state)) return null;
+  const value = Number(state.state);
+  return Number.isFinite(value) ? value : null;
+}
+
+/** Per-phase current, power and voltage, when the customer has them mapped. */
+function readPhases(feed, sources) {
+  if (!sources.phases_enabled) return null;
+  const config = sources.phases ?? {};
+
+  const rows = PHASES.map((key) => ({
+    key,
+    label: key.toUpperCase(),
+    current: readNumber(feed, config[key]?.current),
+    power: readPower(feed, config[key]?.power),
+    voltage: readNumber(feed, config[key]?.voltage),
+  }));
+
+  return rows.some((row) => row.current !== null || row.power !== null || row.voltage !== null)
+    ? rows
+    : null;
+}
+
+/**
+ * How hard the connection is being worked, as a percentage.
+ *
+ * With per-phase currents this is the *heaviest* phase against the main fuse,
+ * not the average: a fuse blows on the phase that is overloaded, and averaging
+ * three phases hides exactly the case worth warning about.
+ *
+ * Without phase sensors it falls back to total grid power against the
+ * connection's ceiling, which is the same question at lower resolution.
+ *
+ * Only import counts. Feeding back also loads the connection, but the ceiling a
+ * customer cares about -- and the one their fuse enforces -- is what they draw.
+ *
+ * @returns {{percent: number|null, basis: "phase"|"power"|null, worst: string|null}}
+ */
+export function loadOf(phases, importW, installation) {
+  const fuse = Number(installation?.fuse_amps) || 0;
+
+  if (phases && fuse > 0) {
+    const currents = phases.filter((p) => Number.isFinite(p.current));
+    if (currents.length) {
+      const worst = currents.reduce((a, b) => (b.current > a.current ? b : a));
+      return {
+        percent: clamp((worst.current / fuse) * 100, 0, 999),
+        basis: "phase",
+        worst: worst.label,
+      };
+    }
+  }
+
+  const ceiling = Number(installation?.max_grid_watts) || 0;
+  if (ceiling > 0 && Number.isFinite(importW)) {
+    return { percent: clamp((importW / ceiling) * 100, 0, 999), basis: "power", worst: null };
+  }
+
+  return { percent: null, basis: null, worst: null };
 }
 
 /** Rolling history, for the sparklines. */
@@ -153,16 +220,18 @@ export class LiveSource {
 
     const grid = importW === null ? null : importW - exportW;
 
-    // The house sensor is optional: with solar and the grid known, consumption
-    // follows from them, and one less mandatory sensor is one less thing to get
-    // wrong at a customer.
-    let house = readPower(feed, sources.house);
-    if (house === null && solar !== null && grid !== null) house = solar + grid;
+    // Consumption is always derived, never configured: it is exactly generation
+    // plus whatever the meter says, so asking for a third sensor only adds a
+    // way for the three to disagree.
+    const house = solar !== null && grid !== null ? solar + grid : null;
 
     const devices = (settings?.devices ?? []).map((device) => ({
       ...device,
       watts: readPower(feed, device.entity),
     }));
+
+    const phases = readPhases(feed, sources);
+    const load = loadOf(phases, importW, settings?.installation);
 
     const reading = {
       solar,
@@ -173,6 +242,10 @@ export class LiveSource {
       selfUse: selfUseOf(solar, exportW),
       price: priceNow(feed, settings?.contract),
       devices,
+      phases,
+      load: load.percent,
+      loadBasis: load.basis,
+      loadWorstPhase: load.worst,
     };
 
     this.history_.push(reading);
@@ -188,6 +261,6 @@ export class LiveSource {
     const s = settings?.sources ?? {};
     const grid =
       s.grid_mode === "signed" ? s.grid_signed : s.grid_import || s.grid_export;
-    return Boolean(s.solar || s.house || grid);
+    return Boolean(s.solar || grid);
   }
 }
