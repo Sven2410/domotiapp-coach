@@ -3,34 +3,11 @@
     "step": {
       "user": {
         "title": "DomotiApp Coach",
-        "description": "Voegt het DomotiApp Coach dashboard toe aan de zijbalk.",
-        "data": {
-          "home_path": "Pad van het hoofddashboard",
-          "demo_mode": "Demomodus (gesimuleerde waarden)"
-        },
-        "data_description": {
-          "home_path": "Waar de Home-knop in de header naartoe navigeert, voor klanten die Kiosk Mode gebruiken.",
-          "demo_mode": "Toon gesimuleerde waarden in plaats van echte sensordata."
-        }
+        "description": "Voegt het DomotiApp Coach dashboard toe aan de zijbalk. Sensoren, drempelwaarden en de link naar je eigen dashboard stel je in het paneel zelf in, onder Instellingen."
       }
     },
     "abort": {
       "already_configured": "DomotiApp Coach is al ingesteld."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "DomotiApp Coach",
-        "data": {
-          "home_path": "Pad van het hoofddashboard",
-          "demo_mode": "Demomodus (gesimuleerde waarden)"
-        },
-        "data_description": {
-          "home_path": "Waar de Home-knop in de header naartoe navigeert, voor klanten die Kiosk Mode gebruiken.",
-          "demo_mode": "Toon gesimuleerde waarden in plaats van echte sensordata."
-        }
-      }
     }
   }
 }

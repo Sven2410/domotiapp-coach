@@ -3,6 +3,10 @@
 Registers a standalone sidebar panel that serves the DomotiApp Coach dashboard.
 The dashboard itself is a plain ES-module web component (no build step), which
 keeps the repository directly installable through HACS.
+
+Everything configurable lives in the panel's own Instellingen section, reached
+over the websocket API in websocket.py -- so adding the integration asks nothing
+and a customer can change settings from their phone.
 """
 
 from __future__ import annotations
@@ -16,11 +20,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.loader import async_get_integration
 
+from . import websocket
 from .const import (
-    CONF_DEMO_MODE,
-    CONF_HOME_PATH,
-    DEFAULT_DEMO_MODE,
-    DEFAULT_HOME_PATH,
     DOMAIN,
     FRONTEND_DIR,
     PANEL_COMPONENT_NAME,
@@ -33,19 +34,20 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Static paths survive a config entry reload, so they may only be registered
-# once per Home Assistant run.
-_STATIC_PATH_KEY = f"{DOMAIN}_static_registered"
+# Static paths and websocket commands survive a config entry reload, so they may
+# only be registered once per Home Assistant run.
+_STATIC_PATH_KEY = "static_registered"
+_WEBSOCKET_KEY = "websocket_registered"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up DomotiApp Coach from a config entry."""
     version = await _async_frontend_version(hass)
 
+    _async_register_websocket(hass)
     await _async_register_static_path(hass)
-    await _async_register_panel(hass, entry, version)
+    await _async_register_panel(hass, version)
 
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
 
@@ -55,20 +57,26 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Re-register the panel when the options change."""
-    await hass.config_entries.async_reload(entry.entry_id)
-
-
 async def _async_frontend_version(hass: HomeAssistant) -> str:
     """Return the integration version, used to bust the frontend cache."""
     integration = await async_get_integration(hass, DOMAIN)
     return str(integration.version or "0")
 
 
+def _async_register_websocket(hass: HomeAssistant) -> None:
+    """Register the settings websocket commands once."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get(_WEBSOCKET_KEY):
+        return
+
+    websocket.async_register(hass)
+    domain_data[_WEBSOCKET_KEY] = True
+
+
 async def _async_register_static_path(hass: HomeAssistant) -> None:
     """Expose the frontend directory under URL_BASE."""
-    if hass.data.get(_STATIC_PATH_KEY):
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get(_STATIC_PATH_KEY):
         return
 
     frontend_path = Path(__file__).parent / FRONTEND_DIR
@@ -83,18 +91,14 @@ async def _async_register_static_path(hass: HomeAssistant) -> None:
             )
         ]
     )
-    hass.data[_STATIC_PATH_KEY] = True
+    domain_data[_STATIC_PATH_KEY] = True
     _LOGGER.debug("Serving DomotiApp Coach frontend from %s", frontend_path)
 
 
-async def _async_register_panel(
-    hass: HomeAssistant, entry: ConfigEntry, version: str
-) -> None:
+async def _async_register_panel(hass: HomeAssistant, version: str) -> None:
     """Add the DomotiApp Coach panel to the sidebar."""
     # A reload re-registers the panel, so drop any previous registration first.
     frontend.async_remove_panel(hass, PANEL_URL_PATH)
-
-    options = {**entry.data, **entry.options}
 
     await panel_custom.async_register_panel(
         hass,
@@ -104,10 +108,5 @@ async def _async_register_panel(
         sidebar_title=PANEL_TITLE,
         sidebar_icon=PANEL_ICON,
         require_admin=False,
-        config={
-            "version": version,
-            "asset_base": URL_BASE,
-            CONF_HOME_PATH: options.get(CONF_HOME_PATH, DEFAULT_HOME_PATH),
-            CONF_DEMO_MODE: options.get(CONF_DEMO_MODE, DEFAULT_DEMO_MODE),
-        },
+        config={"version": version, "asset_base": URL_BASE},
     )

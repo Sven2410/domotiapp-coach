@@ -6,6 +6,11 @@
  * which hides the HA header and sidebar and takes away tab navigation -- so the
  * header carries both the section navigation and an explicit way back to the
  * home dashboard.
+ *
+ * On a phone the five sections do not fit side by side, so the navigation drops
+ * to its own scrollable row under the brand and the active pill is scrolled into
+ * view. Most customers open this on a phone, so that row is the layout that
+ * matters, not the desktop one.
  */
 
 import { DacElement, define } from "./base.js";
@@ -19,13 +24,15 @@ export const NAV_ITEMS = [
   { id: "instellingen", label: "Instellingen", icon: "sliders" },
 ];
 
+const LOGO_URL = new URL("../img/domotitech-mark.png", import.meta.url).href;
+
 class DacHeader extends DacElement {
   static css = /* css */ `
     :host {
       position: sticky;
       top: 0;
       z-index: 20;
-      background: linear-gradient(180deg, rgba(12,12,10,0.94) 0%, rgba(12,12,10,0.76) 100%);
+      background: linear-gradient(180deg, rgba(12,12,10,0.96) 0%, rgba(12,12,10,0.82) 100%);
       backdrop-filter: blur(22px) saturate(150%);
       -webkit-backdrop-filter: blur(22px) saturate(150%);
       border-bottom: 1px solid var(--dac-border);
@@ -47,43 +54,46 @@ class DacHeader extends DacElement {
       max-width: var(--dac-maxw);
       margin: 0 auto;
       min-height: var(--dac-header-h);
-      padding: 0 22px;
+      padding: 0 20px;
       display: flex;
       align-items: center;
-      gap: 18px;
+      gap: 16px;
     }
 
     /* ---- brand ---- */
     .brand {
       display: flex;
       align-items: center;
-      gap: 11px;
+      gap: 10px;
       flex: 0 0 auto;
       user-select: none;
+      min-width: 0;
     }
-    .mark {
+    .brand img {
       width: 34px;
       height: 34px;
-      display: grid;
-      place-items: center;
-      border-radius: 11px;
-      color: #fff;
-      background: linear-gradient(145deg, var(--dac-accent-hi), var(--dac-accent) 70%, #01507a);
-      box-shadow: 0 0 0 1px rgba(25,143,217,0.35), 0 6px 18px -6px var(--dac-accent-glow);
+      flex: 0 0 auto;
+      object-fit: contain;
+      display: block;
     }
-    .mark .icon { width: 19px; height: 19px; }
-    .brand-text { display: flex; align-items: baseline; gap: 6px; line-height: 1; }
+    .brand-text {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+      line-height: 1.1;
+      white-space: nowrap;
+      min-width: 0;
+    }
     .brand-1 {
       font-size: 15px;
       font-weight: 600;
-      letter-spacing: 0.015em;
+      letter-spacing: 0.01em;
       color: var(--dac-ink);
     }
     .brand-2 {
-      font-family: var(--dac-display);
-      font-style: italic;
-      font-weight: 400;
-      font-size: 21px;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
       color: var(--dac-accent-hi);
     }
 
@@ -95,6 +105,7 @@ class DacHeader extends DacElement {
       justify-content: center;
       gap: 2px;
       overflow-x: auto;
+      overscroll-behavior-x: contain;
       scrollbar-width: none;
       -webkit-overflow-scrolling: touch;
       padding: 4px 0;
@@ -132,11 +143,11 @@ class DacHeader extends DacElement {
       font: inherit;
       font-size: 13.5px;
       font-weight: 500;
-      letter-spacing: 0.005em;
       color: var(--dac-ink-2);
       cursor: pointer;
       white-space: nowrap;
       transition: color 200ms ease;
+      -webkit-tap-highlight-color: transparent;
     }
     button.pill .icon { width: 17px; height: 17px; opacity: 0.75; transition: opacity 200ms ease; }
     button.pill:hover { color: var(--dac-ink); }
@@ -161,6 +172,7 @@ class DacHeader extends DacElement {
       font-weight: 500;
       cursor: pointer;
       transition: border-color 200ms ease, color 200ms ease, background 200ms ease;
+      -webkit-tap-highlight-color: transparent;
     }
     button.ghost .icon { width: 18px; height: 18px; }
     button.ghost:hover {
@@ -182,17 +194,30 @@ class DacHeader extends DacElement {
 
     /* ---- responsive ---- */
     @media (max-width: 1080px) {
-      .bar { flex-wrap: wrap; padding: 10px 16px 0; gap: 12px; }
+      .bar { flex-wrap: wrap; padding: 10px 16px 0; gap: 10px; }
       .brand { order: 1; margin-right: auto; }
       .actions { order: 2; }
       nav { order: 3; flex-basis: 100%; justify-content: flex-start; }
     }
+
     @media (max-width: 640px) {
       :host([narrow]) button.icon-only { display: inline-flex; }
-      .brand-1 { font-size: 14px; }
-      .brand-2 { font-size: 19px; }
+      .bar { padding: 8px 12px 0; }
+      .brand img { width: 30px; height: 30px; }
+      .brand-1, .brand-2 { font-size: 14px; }
       button.ghost span { display: none; }
       button.ghost { padding: 9px; }
+      button.pill { padding: 8px 12px; font-size: 13px; }
+      /* Fade the right edge so it reads as "more sections that way". */
+      nav {
+        padding-right: 14px;
+        mask-image: linear-gradient(90deg, #000 calc(100% - 22px), transparent 100%);
+        -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 22px), transparent 100%);
+      }
+    }
+
+    @media (max-width: 380px) {
+      .brand-text { display: none; }
     }
   `;
 
@@ -220,7 +245,7 @@ class DacHeader extends DacElement {
           ${icons.menu}
         </button>
         <div class="brand">
-          <div class="mark">${icons.bolt}</div>
+          <img src="${LOGO_URL}" alt="DomotiTech" draggable="false">
           <div class="brand-text">
             <span class="brand-1">DomotiApp</span>
             <span class="brand-2">Coach</span>
@@ -250,10 +275,9 @@ class DacHeader extends DacElement {
     }
 
     // The sliding highlight is measured, so it has to be re-measured whenever
-    // the bar reflows (window resize, sidebar collapse, font swap).
+    // the bar reflows (window resize, sidebar collapse, orientation change).
     this.observer_ = new ResizeObserver(() => this.syncActive_());
     this.observer_.observe(this.$("nav"));
-    document.fonts?.ready.then(() => this.syncActive_());
 
     this.syncActive_();
   }
@@ -285,6 +309,14 @@ class DacHeader extends DacElement {
     bg.classList.add("on");
     bg.style.width = `${target.offsetWidth}px`;
     bg.style.transform = `translateX(${target.offsetLeft}px)`;
+
+    // On a phone the row scrolls, so the active section has to be brought into
+    // view or navigating can leave the highlight off screen.
+    const nav = this.$("nav");
+    if (nav.scrollWidth > nav.clientWidth) {
+      const left = target.offsetLeft - (nav.clientWidth - target.offsetWidth) / 2;
+      nav.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
+    }
   }
 }
 

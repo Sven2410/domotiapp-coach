@@ -14,18 +14,18 @@ hetzelfde werkt zodra de integratie geïnstalleerd is.
 
 ## Status
 
-**Fase 1 — Uitlezen.** Op dit moment staat de opzet er: de header met navigatie
-en het Overzicht met de live meetwaarden.
+**Fase 1 — Uitlezen.** De header, het Overzicht en de instellingen staan er, en
+het dashboard draait op je eigen sensoren zodra je ze gekoppeld hebt.
 
 | Fase | Wat het doet | Status |
 |------|--------------|--------|
-| 1 | Uitlezen — sensoren tonen, live beeld van de woning | in aanbouw |
-| 2 | Adviseren — rekenen met tarieven, opwek en verbruik | gepland |
+| 1 | Uitlezen — sensoren tonen, live beeld van de woning | werkend |
+| 2 | Adviseren — rekenen met tarieven, opwek en verbruik | in aanbouw |
 | 3 | Sturen — apparaten schakelen op zonneoverschot en prijs | gepland |
 
-> De waarden in het Overzicht zijn nu **gesimuleerd** (demomodus), zodat het
-> ontwerp beoordeeld kan worden voordat er sensoren gekoppeld zijn. Dat is
-> zichtbaar aan het label *Demodata* in het dashboard.
+> Zolang er geen sensoren gekoppeld zijn draait het Overzicht op een
+> gesimuleerde woning, zodat het dashboard meteen iets laat zien. Dat staat er
+> dan bij op de coachkaart.
 
 ---
 
@@ -39,6 +39,7 @@ en het Overzicht met de live meetwaarden.
 4. Home Assistant herstarten
 5. **Instellingen → Apparaten & diensten → Integratie toevoegen → DomotiApp Coach**
 
+Het toevoegen vraagt niets: alles stel je daarna in het paneel zelf in.
 Na het toevoegen verschijnt **DomotiApp Coach** in de zijbalk.
 
 ### Handmatig
@@ -50,12 +51,33 @@ je Home Assistant configuratie en herstart.
 
 ## Instellingen
 
-Via **Configureren** op de integratie:
+Alles staat in het paneel onder **Instellingen**, niet in het configuratiescherm
+van Home Assistant. Klanten draaien dit op hun telefoon achter Kiosk Mode, waar
+de instellingen van HA niet bereikbaar zijn.
 
-| Optie | Betekenis |
-|-------|-----------|
-| Pad van het hoofddashboard | Waar de **Home**-knop in de header naartoe gaat. Standaard `/lovelace/0`. |
-| Demomodus | Gesimuleerde waarden tonen in plaats van echte sensordata. |
+| Kopje | Wat je er instelt |
+|-------|-------------------|
+| **Navigatie** | Waar de **Home**-knop naartoe gaat. Standaard `/lovelace/0`. |
+| **Energiebronnen** | De sensoren voor opwek, verbruik, meterstand en prijs. |
+| **Apparaten** | Welke apparaten als bol in de energiestroom verschijnen. |
+| **Drempelwaarden** | Waar de kleuren omslaan voor zelfbenutting en energieprijs. |
+
+Wijzigen mag alleen een beheerder; meekijken mag iedereen. Een wijziging op de
+ene telefoon komt vanzelf door op een tablet die openstaat.
+
+### Slimme meter
+
+Twee patronen worden ondersteund, in te stellen onder Energiebronnen:
+
+- **Afzonderlijk** — twee sensoren, energieverbruik en energieproductie, waarvan
+  er altijd één op nul staat.
+- **Gecombineerd** — één sensor die negatief wordt zodra je teruglevert.
+
+### Eenheden
+
+Of een sensor in W, kW of MW meet maakt niet uit: de integratie leest de eenheid
+van de entiteit en rekent alles om. In beeld wordt per waarde gekozen — onder
+een kilowatt in watt, daarboven in kW.
 
 ---
 
@@ -88,18 +110,30 @@ tap_action:
 
 ## Ontwerp
 
-Het dashboard volgt de huisstijl van [domotitech.nl](https://domotitech.nl):
-een warme, bijna zwarte achtergrond, Cormorant Garamond voor de koppen,
-Raleway voor de interface en `#026FA1` als accentkleur.
+Donkere achtergrond met `#026FA1` als accentkleur, en het eigen lettertype van
+Home Assistant — er worden geen fonts meegeleverd en er gaat geen verkeer naar
+een externe CDN.
 
-De vier energiestromen (opwek, verbruik, net, overschot) hebben een vaste
-kleurset die getoetst is op kleurcontrast en kleurenblindheid tegen de donkere
-achtergrond. Elke stroom heeft daarnaast een eigen icoon en tekstlabel, zodat
-kleur nooit de enige drager van betekenis is. Vervang die kleuren niet zonder
-opnieuw te toetsen.
+De kleuren van de energiestromen zijn niet met de hand gekozen maar doorgerekend
+tegen de donkere achtergrond, op lichtheid, verzadiging, contrast en
+onderscheidbaarheid bij kleurenblindheid — en getoetst in beide netstanden,
+omdat inkoop en teruglevering nooit tegelijk in beeld zijn.
 
-Fonts worden meegeleverd (SIL Open Font License), dus het paneel werkt ook
-zonder internetverbinding en er gaat geen verkeer naar een externe CDN.
+| Rol | Kleur |
+|-----|-------|
+| Zon | `#dc7300` oranje |
+| Verbruik woning | `#235efa` blauw |
+| Van het net | `#129be4` lichter blauw |
+| Naar het net | `#bc10c8` paars |
+| Apparaatbol 1 | `#fd0774` roze |
+| Apparaatbol 2 | `#039580` teal |
+
+Rood en groen zijn bewust géén stroomkleur: die zijn gereserveerd voor status
+(duur/kritiek en goed). Elke stroom heeft daarnaast een eigen icoon en
+tekstlabel, zodat kleur nooit de enige drager van betekenis is.
+
+**Vervang deze kleuren niet zonder opnieuw te toetsen** — de marges zijn krap en
+twee van de zes paren zitten dicht op hun ondergrens.
 
 ---
 
@@ -108,24 +142,30 @@ zonder internetverbinding en er gaat geen verkeer naar een externe CDN.
 - Geen buildstap: het paneel bestaat uit gewone ES-modules en web components.
 - De integratie registreert het paneel met `panel_custom.async_register_panel`
   en serveert de frontend vanaf een eigen statisch pad.
+- Instellingen staan in HA-storage en gaan over een eigen websocket-API.
 - Vereist Home Assistant 2025.6 of nieuwer.
 
 ```
 custom_components/domotiapp_coach/
 ├── __init__.py            paneel- en assetregistratie
-├── config_flow.py         setup en opties
+├── config_flow.py         setup (vraagt niets)
 ├── const.py
+├── storage.py             opslag van de instellingen
+├── websocket.py           lezen en schrijven vanuit het paneel
+├── brand/                 icon.png, logo.png
 └── frontend/
     ├── domotiapp-coach-panel.js   entry point, routing
-    ├── fonts/
+    ├── img/               logo in de header
     └── src/
         ├── base.js        mini-basisklasse voor de components
         ├── theme.js       design tokens
+        ├── format.js      eenheden en getalweergave
+        ├── data-source.js live bron plus simulatie
+        ├── devices.js     apparaattypes
         ├── header.js      header met navigatie en Home-knop
         ├── icons.js
-        ├── demo-data.js   simulatie voor fase 1
         ├── components/    stat-tile, energy-flow
-        └── views/         overzicht, placeholders
+        └── views/         overzicht, instellingen, placeholders
 ```
 
 ---
