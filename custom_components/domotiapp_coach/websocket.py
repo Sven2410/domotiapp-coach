@@ -16,6 +16,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from .const import (
+    CHARGER_BRANDS,
     CONTRACT_DYNAMIC,
     CONTRACT_FIXED,
     DEVICE_TYPES,
@@ -59,7 +60,19 @@ _DEVICE = _schema(
         vol.Required("id"): str,
         vol.Required("type"): vol.In(DEVICE_TYPES),
         vol.Optional("name", default=""): str,
+        # The power sensor. Every device has one, whatever it is -- it is what
+        # puts the device on the energy flow at all.
         vol.Optional("entity", default=""): _ENTITY,
+        # Chargers only, "" until one is picked.
+        vol.Optional("brand", default=""): vol.In([*CHARGER_BRANDS, ""]),
+        # Whether the coach may steer this device once steering exists. Plenty
+        # of appliances sit on a smart plug that can only measure, so this is a
+        # choice per device rather than a property of the type.
+        vol.Optional("controllable", default=False): bool,
+        # Whatever else the brand offers, keyed by the panel's own field names.
+        # Free-form on purpose: adding a brand should not need a schema change
+        # here as well as in the panel.
+        vol.Optional("entities", default=dict): {vol.Match(r"^[a-z0-9_]+$"): _ENTITY},
     }
 )
 
@@ -92,6 +105,9 @@ _SETTINGS = _schema(
                         vol.Optional("targets"): [str],
                         vol.Optional("min_interval_minutes"): vol.All(
                             vol.Coerce(int), vol.Range(1, 1440)
+                        ),
+                        vol.Optional("min_duration_seconds"): vol.All(
+                            vol.Coerce(int), vol.Range(0, 3600)
                         ),
                     }
                 ),

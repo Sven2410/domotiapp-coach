@@ -24,6 +24,16 @@ import {
 const INTERVALS = [5, 10, 15, 30, 60, 120, 240];
 
 /**
+ * How long the load has to hold before anything is sent, in seconds.
+ *
+ * An oven element, a motor starting, an induction hob stepping up: all of them
+ * throw a spike of a second or two that no fuse minds and that is over before
+ * anyone could act on it. Nothing under five seconds is offered, because
+ * everything under five seconds is one of those.
+ */
+const HOLDS = [5, 10, 30, 60, 120, 300];
+
+/**
  * The notifications, in the order they are listed.
  *
  * `summary` is what the customer reads instead of opening it, so it has to
@@ -43,6 +53,7 @@ const ALERTS = [
       const parts = [`vanaf ${Number(alert.threshold_percent) || 0}%`];
       const count = (alert.targets ?? []).length;
       parts.push(count ? (count === 1 ? "1 ontvanger" : `${count} ontvangers`) : "niemand geselecteerd");
+      parts.push(`na ${holdLabel(alert.min_duration_seconds ?? 60)}`);
       parts.push(`hoogstens eens per ${label(alert.min_interval_minutes)}`);
       return { text: parts.join(" · "), warn: count === 0 };
     },
@@ -138,6 +149,14 @@ class DacViewStrategy extends DacEditorElement {
               </div>
 
               <div class="row">
+                <label for="alert-hold">Pas melden als het aanhoudt</label>
+                <select id="alert-hold">
+                  ${HOLDS.map((s) => `<option value="${s}">${holdLabel(s)}</option>`).join("")}
+                </select>
+                <span class="sub">Een oven of een motor die aanslaat geeft een piek van een seconde waar geen zekering van uit gaat en waar je niets aan kunt doen. Pas als de belasting zo lang boven de grens blijft, krijg je bericht.</span>
+              </div>
+
+              <div class="row">
                 <label for="alert-interval">Niet vaker dan eens per</label>
                 <select id="alert-interval">
                   ${INTERVALS.map((m) => `<option value="${m}">${label(m)}</option>`).join("")}
@@ -176,6 +195,11 @@ class DacViewStrategy extends DacEditorElement {
     this.$("#alert-threshold").addEventListener("input", (ev) => {
       this.alert_().threshold_percent = Number(ev.target.value);
       this.paintHint_();
+      this.afterChange_();
+    });
+
+    this.$("#alert-hold").addEventListener("change", (ev) => {
+      this.alert_().min_duration_seconds = Number(ev.target.value);
       this.afterChange_();
     });
 
@@ -238,6 +262,7 @@ class DacViewStrategy extends DacEditorElement {
 
     this.$("#alert-enabled").checked = Boolean(alert.enabled);
     this.$("#alert-threshold").value = alert.threshold_percent;
+    this.$("#alert-hold").value = String(alert.min_duration_seconds ?? 60);
     this.$("#alert-interval").value = String(alert.min_interval_minutes);
 
     this.paintEnabled_();
@@ -327,6 +352,14 @@ class DacViewStrategy extends DacEditorElement {
     if (!count) return "Niemand geselecteerd — er wordt dan niets verstuurd.";
     return count === 1 ? "1 ontvanger" : `${count} ontvangers`;
   }
+}
+
+/** "na ..." in words. */
+function holdLabel(seconds) {
+  const value = Number(seconds) || 0;
+  if (value < 60) return `${value} seconden`;
+  const minutes = value / 60;
+  return minutes === 1 ? "1 minuut" : `${minutes} minuten`;
 }
 
 /** "eens per ..." in words. */
@@ -439,27 +472,6 @@ DacViewStrategy.css = /* css */ `
   /* The settings pane opens on its own card, so the first block sits straight
      under the heading rather than under a hint that is no longer there. */
   .fields.first { margin-top: 0; }
-
-  label.check {
-    display: flex;
-    align-items: flex-start;
-    gap: 11px;
-    padding: 12px 14px;
-    border-radius: var(--dac-radius-sm);
-    border: 1px solid var(--dac-border);
-    background: rgba(255,255,255,0.022);
-    cursor: pointer;
-    font-size: 12.5px;
-    line-height: 1.5;
-    color: var(--dac-ink-2);
-  }
-  label.check input {
-    width: 18px; height: 18px; flex: 0 0 auto; margin: 1px 0 0;
-    accent-color: var(--dac-accent-hi);
-    cursor: pointer;
-  }
-  label.check strong { display: block; font-size: 13px; font-weight: 600; color: var(--dac-ink); margin-bottom: 2px; }
-  label.check:has(input:checked) { border-color: rgba(25,143,217,0.5); background: var(--dac-accent-soft); }
 
   label.check.target span { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
   label.check.target strong { font-family: var(--dac-font); font-size: 13.5px; }

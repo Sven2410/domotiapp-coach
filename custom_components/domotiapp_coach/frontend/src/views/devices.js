@@ -10,7 +10,15 @@
 
 import { define } from "../base.js";
 import { icons } from "../icons.js";
-import { DEVICE_TYPES, deviceLabel, typeMeta } from "../devices.js";
+import {
+  CHARGER_BRANDS,
+  DEVICE_TYPES,
+  brandFields,
+  brandMeta,
+  deviceLabel,
+  missingForControl,
+  typeMeta,
+} from "../devices.js";
 import {
   DacEditorElement,
   adminNoticeHtml,
@@ -20,6 +28,10 @@ import {
 import "../components/entity-picker.js";
 
 const uid = () => `dev-${Math.random().toString(36).slice(2, 9)}`;
+
+/** "ontbreekt nog: Status" / "ontbreken nog: Status en Stroom". */
+const missingText = (missing) =>
+  `${missing.length > 1 ? "ontbreken" : "ontbreekt"} nog: ${missing.join(" en ")}`;
 
 class DacViewDevices extends DacEditorElement {
   static sections = ["devices"];
@@ -60,7 +72,15 @@ class DacViewDevices extends DacEditorElement {
 
   afterRender() {
     this.$("#add-device").addEventListener("click", () => {
-      const device = { id: uid(), type: "laadpaal", name: "", entity: "" };
+      const device = {
+        id: uid(),
+        type: "laadpaal",
+        name: "",
+        entity: "",
+        brand: "",
+        controllable: false,
+        entities: {},
+      };
       this.draft_.devices.push(device);
       // A new device has nothing filled in yet, so it opens on its fields.
       this.open_.add(device.id);
@@ -87,6 +107,93 @@ class DacViewDevices extends DacEditorElement {
     this.paintDevices_();
   }
 
+  /**
+   * The entity fields for one device.
+   *
+   * A charger is asked for its brand first and nothing else: which entities it
+   * has is a brand question, and a screen full of fields that only apply to
+   * somebody else's charger helps nobody. Everything else goes straight to its
+   * power sensor, which every device has -- it is what puts it on the energy
+   * flow at all.
+   */
+  chargerHtml_(device, index) {
+    const isCharger = device.type === "laadpaal";
+    const brand = brandMeta(device);
+
+    const brandRow = !isCharger
+      ? ""
+      : `
+        <div class="row">
+          <label for="brand-${index}">Merk</label>
+          <select id="brand-${index}" data-field="brand" data-index="${index}">
+            <option value=""${device.brand ? "" : " selected"}>Kies een merk…</option>
+            ${CHARGER_BRANDS.map(
+              (b) => `<option value="${b.id}"${b.id === device.brand ? " selected" : ""}>${b.label}</option>`
+            ).join("")}
+          </select>
+          <span class="sub">Welke gegevens een laadpaal levert, hangt van het merk af. Kies er een en de bijbehorende velden verschijnen.</span>
+        </div>`;
+
+    // A charger without a brand has nothing to ask for yet.
+    if (isCharger && !brand) return brandRow;
+
+    const power = `
+      <div class="row">
+        <label>Vermogenssensor</label>
+        <dac-entity-picker data-power data-index="${index}"></dac-entity-picker>
+      </div>`;
+
+    const extra = brandFields(device)
+      .map(
+        (field) => `
+        <div class="row">
+          <label>${field.label}</label>
+          <dac-entity-picker data-entity-key="${field.key}" data-index="${index}"></dac-entity-picker>
+          <span class="sub">${field.hint}${field.needed ? " Nodig zodra de coach mag sturen." : ""}</span>
+        </div>`
+      )
+      .join("");
+
+    const note =
+      isCharger && !extra
+        ? `<p class="sub">Voor dit merk zijn de velden nog niet uitgewerkt — vermogen wordt wel meegenomen.</p>`
+        : "";
+
+    return `${brandRow}${power}${extra}${note}`;
+  }
+
+  /** Whether the coach may act on this device once it can. */
+  controlHtml_(device, index) {
+    // Nothing to decide yet on a charger whose brand is still unknown.
+    if (device.type === "laadpaal" && !brandMeta(device)) return "";
+
+    const missing = missingForControl(device);
+    return `
+      <label class="check" for="control-${index}">
+        <input type="checkbox" id="control-${index}" data-field="controllable" data-index="${index}"
+               ${device.controllable ? "checked" : ""}>
+        <span>
+          <strong>De coach mag dit apparaat aansturen</strong>
+          Een apparaat dat alleen op een meetstekker zit, kun je wel volgen maar niet sturen. Zet dit alleen aan bij apparaten die echt te bedienen zijn — sturen zelf komt in een volgende stap.
+        </span>
+      </label>
+      <div class="notice"${missing.length ? "" : " hidden"} data-missing="${index}">
+        ${icons.warning}
+        <span>Om te kunnen sturen ${missingText(missing)}.</span>
+      </div>`;
+  }
+
+  /** Say on the spot what steering this device would still need. */
+  paintMissing_(index) {
+    const notice = this.$(`[data-missing="${index}"]`);
+    if (!notice) return;
+    const missing = missingForControl(this.draft_.devices[index]);
+    notice.hidden = !missing.length;
+    if (missing.length) {
+      notice.querySelector("span").textContent = `Om te kunnen sturen ${missingText(missing)}.`;
+    }
+  }
+
   /** Keep the folded-shut line in step while the card is open. */
   paintSummary_(index) {
     const line = this.$(`[data-summary="${index}"]`);
@@ -98,14 +205,24 @@ class DacViewDevices extends DacEditorElement {
 
   /** How a device reads when it is folded shut. */
   summary_(device) {
+    // Whatever is missing outranks everything else: a device that cannot be
+    // steered while it is set to be steered is the one thing worth saying on a
+    // folded-shut line.
+    const missing = missingForControl(device);
+    if (missing.length) return { text: `voor sturing ${missingText(missing)}`, warn: true };
+    if (device.type === "laadpaal" && !device.brand) {
+      return { text: "nog geen merk gekozen", warn: true };
+    }
+
     // The sensor is the one thing worth checking without opening the card: it is
     // what decides whether this device shows up on the overview at all. The type
     // only earns a place when the heading above it is a name of the customer's
     // own, otherwise it would say the same word twice.
     const what = device.entity || "nog geen vermogenssensor";
-    const named = (device.name ?? "").trim();
+    const brand = brandMeta(device)?.label;
+    const prefix = brand ?? ((device.name ?? "").trim() ? typeMeta(device.type).label : "");
     return {
-      text: named ? `${typeMeta(device.type).label} · ${what}` : what,
+      text: prefix ? `${prefix} · ${what}` : what,
       warn: !device.entity,
     };
   }
@@ -159,10 +276,8 @@ class DacViewDevices extends DacEditorElement {
                        autocomplete="off">
               </div>
             </div>
-            <div class="row">
-              <label>Vermogenssensor</label>
-              <dac-entity-picker data-index="${index}"></dac-entity-picker>
-            </div>
+            ${this.chargerHtml_(device, index)}
+            ${this.controlHtml_(device, index)}
           </div>
         </section>`;
       })
@@ -184,7 +299,7 @@ class DacViewDevices extends DacEditorElement {
       });
     }
 
-    for (const picker of list.querySelectorAll("dac-entity-picker")) {
+    for (const picker of list.querySelectorAll("dac-entity-picker[data-power]")) {
       const index = Number(picker.dataset.index);
       picker.filter = "power";
       picker.placeholder = "Zoek een vermogenssensor…";
@@ -197,19 +312,50 @@ class DacViewDevices extends DacEditorElement {
       });
     }
 
+    for (const picker of list.querySelectorAll("dac-entity-picker[data-entity-key]")) {
+      const index = Number(picker.dataset.index);
+      const key = picker.dataset.entityKey;
+      // Not a power filter: a status or a limit is anything but watts, and the
+      // filter is a ranking rather than a restriction anyway.
+      picker.filter = "all";
+      picker.placeholder = "Zoek een entiteit…";
+      picker.stateFeed = this.feed_;
+      picker.value = devices[index].entities?.[key] ?? "";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        const device = this.draft_.devices[index];
+        device.entities = { ...(device.entities ?? {}), [key]: ev.detail.value };
+        this.paintMissing_(index);
+        this.paintSummary_(index);
+        this.syncSaveBar_();
+      });
+    }
+
     for (const el of list.querySelectorAll("[data-field]")) {
       const index = Number(el.dataset.index);
       const field = el.dataset.field;
-      el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
-        this.draft_.devices[index][field] = el.value;
-        if (field === "type") {
-          // The icon and the heading follow the type, but redrawing on every
-          // keystroke in the name field would throw the caret away.
+      const event = el.type === "checkbox" ? "change" : el.tagName === "SELECT" ? "change" : "input";
+
+      el.addEventListener(event, () => {
+        const device = this.draft_.devices[index];
+
+        if (field === "controllable") {
+          device.controllable = el.checked;
+          this.paintMissing_(index);
+          this.paintSummary_(index);
+        } else {
+          device[field] = el.value;
+        }
+
+        if (field === "type" || field === "brand") {
+          // Both decide which fields belong here at all, so the card is redrawn.
+          // The name field is not: redrawing on every keystroke would throw the
+          // caret away.
           this.paintDevices_();
         } else if (field === "name") {
-          const title = list.querySelector(`[data-title="${index}"]`);
-          title.textContent = deviceLabel(this.draft_.devices[index]);
+          list.querySelector(`[data-title="${index}"]`).textContent = deviceLabel(device);
+          this.paintSummary_(index);
         }
+
         this.syncSaveBar_();
       });
     }
@@ -270,6 +416,10 @@ DacViewDevices.css = /* css */ `
   }
   .device.open .chev .icon { transform: rotate(90deg); }
   .device-head button.toggle:hover .chev { color: var(--dac-ink-2); }
+
+  /* The notice sits in the field grid, which already spaces its rows. */
+  .device .fields .notice { margin-top: 0; }
+  .device .fields > .sub { margin: 0; font-size: 12px; color: var(--dac-ink-3); line-height: 1.45; }
 
   .device-head .chip {
     width: 36px; height: 36px; flex: 0 0 auto;

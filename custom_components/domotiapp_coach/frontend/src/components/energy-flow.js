@@ -203,7 +203,7 @@ class DacEnergyFlow extends DacElement {
       <div id="stage"></div>
       <div class="detail" id="detail" hidden>
         <div class="detail-head">
-          <span>Ook aan</span>
+          <span id="detail-title">Ook aan</span>
           <button type="button" id="detail-close" aria-label="Sluiten">${icons.close}</button>
         </div>
         <ul id="detail-list"></ul>
@@ -368,7 +368,9 @@ class DacEnergyFlow extends DacElement {
       const iconKey = rolled ? "overig" : typeMeta(device.type).icon;
 
       node.querySelector("[data-icon]").innerHTML = icons[iconKey];
-      node.classList.toggle("clickable", rolled > 0);
+      // Openable when there is more to say: what got folded into a summed
+      // bubble, or the extra readings a brand offers.
+      node.classList.toggle("clickable", rolled > 0 || (device.details?.length ?? 0) > 0);
       this.setNode_(slot, device.watts, label);
       this.setFlow_(slot, device.watts, false);
     }
@@ -459,21 +461,48 @@ class DacEnergyFlow extends DacElement {
     arrow.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${angle.toFixed(1)})`);
   }
 
-  /** Show what got folded into a summed bubble. */
+  /**
+   * Open a bubble.
+   *
+   * Two different things live behind one tap. A summed bubble says what got
+   * folded into it. A real device shows what it is doing beyond the watts --
+   * for a charger that is its status, its limit and what it has delivered,
+   * which is the part a customer actually wants to see while the car is on it.
+   */
   openDetail_(slot, keepOpen = false) {
     const index = slot === "dev1" ? 0 : 1;
     const device = this.slots_?.[index];
-    const rolled = device?.rolled;
-    if (!rolled?.length) return;
+    if (!device) return;
+
+    const rolled = device.rolled ?? [];
+    const rows = rolled.length
+      ? rolled.map((dev) => ({ k: deviceLabel(dev), v: powerText(dev.watts) }))
+      : [
+          { k: "Vermogen", v: powerText(device.watts) },
+          ...(device.details ?? []).map((row) => ({ k: row.label, v: row.text })),
+        ];
+
+    // One row would just be the number already printed inside the bubble.
+    if (rows.length < 2) return;
 
     const detail = this.$("#detail");
     this.openSlot_ = slot;
-    this.$("#detail-list").innerHTML = rolled
-      .map(
-        (dev) =>
-          `<li><span class="k">${deviceLabel(dev)}</span><span class="v">${powerText(dev.watts)}</span></li>`
-      )
-      .join("");
+    this.$("#detail-title").textContent = rolled.length ? "Ook aan" : deviceLabel(device);
+
+    // Values come from the customer's own sensors, so they go in as text.
+    this.$("#detail-list").replaceChildren(
+      ...rows.map((row) => {
+        const item = document.createElement("li");
+        const key = document.createElement("span");
+        key.className = "k";
+        key.textContent = row.k;
+        const value = document.createElement("span");
+        value.className = "v";
+        value.textContent = row.v;
+        item.append(key, value);
+        return item;
+      })
+    );
     if (!keepOpen) detail.hidden = false;
   }
 }

@@ -42,6 +42,21 @@ DEVICE_TYPES: Final = [
     "overig",
 ]
 
+# --- Charger brands --------------------------------------------------------
+# Which extra entities a charging point offers depends entirely on its brand:
+# not every charger can be started, stopped or paused, and the ones that can do
+# not agree on how. Picking the brand is what decides which fields are asked
+# for. Only Easee is filled in so far; the rest are listed so a customer can
+# already say what they have.
+CHARGER_BRANDS: Final = [
+    "easee",
+    "zaptec",
+    "wallbox",
+    "zappi",
+    "peblar",
+    "overig",
+]
+
 # --- Grid metering patterns ------------------------------------------------
 # Customers have one of two: a pair of sensors where one is always zero, or a
 # single sensor that goes negative while feeding back into the grid.
@@ -135,6 +150,13 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             # notify service names without their domain, e.g. "mobile_app_sven".
             "targets": [],
             "min_interval_minutes": 30,
+            # How long the load has to stay over the line before anything is
+            # sent. An oven element or a motor starting produces a spike of a
+            # second or two that no fuse minds and nobody can act on, and a
+            # notification for it is exactly the kind people switch off. A
+            # minute still leaves plenty of room: a fuse carrying a little over
+            # its rating holds for the better part of an hour.
+            "min_duration_seconds": 60,
         },
     },
     "devices": [],
