@@ -174,8 +174,12 @@ bereikbaar.
 
 ### Wanneer een apparaat mag draaien
 
-Onder **Strategie** staat per aanstuurbaar apparaat binnen welke grenzen de
-coach mag werken. Drie tijden, elk apart en elk optioneel:
+Onder **Strategie** staat per apparaat dat een programma draait — vaatwasser,
+wasmachine, droger — binnen welke grenzen de coach mag werken. Inplannen kan
+zodra de coach het apparaat mag aansturen; staat dat nog uit, dan staat het er
+wel bij met de reden erbij, zodat je niet hoeft te raden waarom het ontbreekt.
+
+Drie tijden, elk apart en elk optioneel:
 
 - **Niet eerder dan** — hiervóór begint hij er niet aan, hoe goedkoop de stroom
   ook is.

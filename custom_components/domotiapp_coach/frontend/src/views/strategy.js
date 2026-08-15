@@ -14,6 +14,8 @@
 import { define } from "../base.js";
 import { icons } from "../icons.js";
 import {
+  PROGRAM_TYPES,
+  brandsFor,
   canHaveDeadline,
   deviceLabel,
   deviceLabelMap,
@@ -194,7 +196,7 @@ class DacViewStrategy extends DacEditorElement {
 
         <section class="card" id="devices-card" hidden>
           <h2>${icons.devices} Apparaten</h2>
-          <p class="hint">Wanneer een apparaat uiterlijk klaar moet zijn. Daarbinnen zoekt de coach het goedkoopste moment om te starten — zonder zo'n tijd is later altijd goedkoper en zou hij nooit beginnen.</p>
+          <p class="hint">Binnen welke grenzen een apparaat mag draaien. Daarbinnen zoekt de coach het goedkoopste moment om te starten — zonder enige grens is later altijd goedkoper en zou hij nooit beginnen. Inplannen kan zodra de coach het apparaat mag aansturen; dat zet je aan bij Apparaten.</p>
           <div class="links" id="device-links"></div>
         </section>
       </div>
@@ -523,9 +525,15 @@ class DacViewStrategy extends DacEditorElement {
     this.syncSaveBar_();
   }
 
-  /** One line per appliance that can be planned, with what it is set to. */
+  /**
+   * One line per appliance that runs a programme, planned or not yet.
+   *
+   * The ones that cannot be planned yet are listed too, greyed out and with the
+   * reason. Leaving them out was worse: you add a dishwasher under Apparaten,
+   * come here, and the whole card is missing with nothing to say why.
+   */
   paintDeviceLinks_() {
-    const devices = this.deadlineDevices_();
+    const devices = this.planCandidates_();
     const holder = this.$("#device-links");
     this.$("#devices-card").hidden = !devices.length;
     if (!devices.length) {
@@ -535,10 +543,11 @@ class DacViewStrategy extends DacEditorElement {
       holder.replaceChildren();
       return;
     }
+
     holder.innerHTML = devices
-      .map(
-        (device, index) => `
-        <button class="link" type="button" data-device="${index}">
+      .map((device, index) => {
+        const ready = canHaveDeadline(device);
+        const body = `
           <span class="mark">${icons[typeMeta(device.type).icon]}</span>
           <span class="body">
             <span class="head">
@@ -546,10 +555,12 @@ class DacViewStrategy extends DacEditorElement {
               <span class="state" data-device-state="${index}"></span>
             </span>
             <span class="sum" data-device-sum="${index}"></span>
-          </span>
-          <span class="chev">${icons.chevronRight}</span>
-        </button>`
-      )
+          </span>`;
+
+        return ready
+          ? `<button class="link" type="button" data-device="${index}">${body}<span class="chev">${icons.chevronRight}</span></button>`
+          : `<div class="link off">${body}</div>`;
+      })
       .join("");
 
     // Numbered over the whole device list, not just the plannable ones, so
@@ -557,25 +568,42 @@ class DacViewStrategy extends DacEditorElement {
     const labels = deviceLabelMap(this.draft_?.devices);
 
     devices.forEach((device, index) => {
+      const ready = canHaveDeadline(device);
       const plan = this.planFor_(device.id);
-      const times = this.planTimes_(plan);
-      const on = Boolean(plan.enabled && times.length);
+      const on = ready && Boolean(plan.enabled && this.planTimes_(plan).length);
 
       // Names are the customer's own text, so they go in as text.
       holder.querySelector(`[data-device-name="${index}"]`).textContent =
         labels.get(device.id) ?? deviceLabel(device);
 
       const state = holder.querySelector(`[data-device-state="${index}"]`);
-      state.textContent = on ? "Aan" : "Uit";
+      state.textContent = ready ? (on ? "Aan" : "Uit") : "Kan nog niet";
       state.classList.toggle("on", on);
 
-      holder.querySelector(`[data-device-sum="${index}"]`).textContent = planSummary_(plan, on);
+      holder.querySelector(`[data-device-sum="${index}"]`).textContent = ready
+        ? planSummary_(plan, on)
+        : this.whyNot_(device);
     });
 
     for (const link of holder.querySelectorAll("[data-device]")) {
       const device = devices[Number(link.dataset.device)];
       link.addEventListener("click", () => this.open_(`klaar/${device.id}`));
     }
+  }
+
+  /** Every device that runs a programme, whether it can be steered yet or not. */
+  planCandidates_() {
+    return (this.draft_?.devices ?? []).filter((device) =>
+      PROGRAM_TYPES.includes(device.type)
+    );
+  }
+
+  /** What is standing between this appliance and being planned. */
+  whyNot_(device) {
+    if (brandsFor(device.type).length && !device.brand) {
+      return "Kies eerst een merk bij Apparaten.";
+    }
+    return "Zet bij Apparaten aan dat de coach dit apparaat mag aansturen.";
   }
 
   /** The deadline sub-screen, for whichever appliance it was opened for. */
@@ -974,6 +1002,40 @@ DacViewStrategy.css = /* css */ `
   button.link .chev { flex: 0 0 auto; display: grid; color: var(--dac-ink-3); }
   button.link .chev .icon { width: 18px; height: 18px; }
   button.link:hover .chev { color: var(--dac-ink-2); }
+
+  /* An appliance that cannot be planned yet is still listed -- greyed out, not
+     clickable, with the reason where the settings would have been. */
+  .link.off {
+    display: flex; align-items: center; gap: 13px;
+    width: 100%;
+    padding: 13px 14px;
+    border-radius: var(--dac-radius-sm);
+    border: 1px dashed var(--dac-border);
+    background: transparent;
+    color: var(--dac-ink-3);
+  }
+  .link.off .mark {
+    flex: 0 0 auto;
+    width: 36px; height: 36px;
+    display: grid; place-items: center;
+    border-radius: 11px;
+    color: var(--dac-ink-3);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--dac-border);
+  }
+  .link.off .mark .icon { width: 19px; height: 19px; }
+  .link.off .body { flex: 1 1 auto; min-width: 0; display: grid; gap: 3px; }
+  .link.off .head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .link.off .title { font-size: 14.5px; font-weight: 600; color: var(--dac-ink-2); }
+  .link.off .sum { font-size: 12.5px; line-height: 1.4; }
+  .link.off .state {
+    flex: 0 0 auto;
+    padding: 2px 9px;
+    border-radius: var(--dac-radius-pill);
+    border: 1px solid var(--dac-border);
+    font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+    color: var(--dac-ink-3);
+  }
 
   /* The settings pane opens on its own card, so the first block sits straight
      under the heading rather than under a hint that is no longer there. */
