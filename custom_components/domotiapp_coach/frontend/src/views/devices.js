@@ -38,9 +38,14 @@ import "../components/entity-picker.js";
 
 const uid = () => `dev-${Math.random().toString(36).slice(2, 9)}`;
 
-/** "ontbreekt nog: Status" / "ontbreken nog: Status en Stroom". */
-const missingText = (missing) =>
-  `${missing.length > 1 ? "ontbreken" : "ontbreekt"} nog: ${missing.join(" en ")}`;
+/** "ontbreekt nog: Status" / "ontbreken nog: Status, Programma en Starten". */
+const missingText = (missing) => {
+  const list =
+    missing.length > 1
+      ? `${missing.slice(0, -1).join(", ")} en ${missing.at(-1)}`
+      : missing.join("");
+  return `${missing.length > 1 ? "ontbreken" : "ontbreekt"} nog: ${list}`;
+};
 
 class DacViewDevices extends DacEditorElement {
   static sections = ["devices"];
