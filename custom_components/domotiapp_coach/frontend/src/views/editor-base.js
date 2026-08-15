@@ -487,6 +487,40 @@ export class DacEditorElement extends DacElement {
   }
 
   /**
+   * Persist one explicit slice, leaving the rest of the draft where it is.
+   *
+   * For the handful of actions that carry their own confirmation and are done
+   * the moment they are confirmed -- deleting a device is the one. Asking "weet
+   * je het zeker", getting a yes, and then still waiting for the save bar is one
+   * question too many, and it leaves the screen showing a device that the
+   * customer considers gone.
+   *
+   * What is sent is built by the caller from what is already stored, never from
+   * the draft, so half-finished edits elsewhere on the screen stay unsaved.
+   *
+   * @param {Record<string, unknown>} sections
+   * @param {string} message
+   */
+  async persist_(sections, message) {
+    try {
+      const saved = await this.hass_.callWS({
+        type: "domotiapp_coach/settings/set",
+        settings: sections,
+      });
+      this.saved_ = clone(saved);
+      // Everything the customer had not touched follows the server; the rest of
+      // the draft is left alone and keeps the save bar up on its own merits.
+      if (!this.dirty_()) this.draft_ = clone(saved);
+      this.fire("dac-settings-saved", { settings: saved });
+      this.toast_(message, true);
+    } catch (error) {
+      this.toast_(`Opslaan mislukt — ${error?.message ?? error}`, false);
+    } finally {
+      this.syncSaveBar_();
+    }
+  }
+
+  /**
    * Say what happened.
    * @param {string} message
    * @param {boolean} ok

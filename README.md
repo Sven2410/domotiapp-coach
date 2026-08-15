@@ -136,9 +136,11 @@ piekvermogen en of ze te verschuiven zijn — Eco 50 °C duurt ruim 3,5 uur en k
 opgaven van de fabrikant, geen metingen; ze staan erbij zodat de coach straks kan
 uitrekenen wanneer een programma moet beginnen om op tijd klaar te zijn.
 
-Een apparaat verwijderen vraagt om een bevestiging. De opslagbalk kan het ook
-nog terugdraaien, maar de prullenbak zit naast de regel die je aantikt om een
-apparaat te openen — en daar hangt een scherm vol entiteiten achter.
+Een apparaat verwijderen vraagt om een bevestiging: de prullenbak zit naast de
+regel die je aantikt om een apparaat te openen, en daar hangt een scherm vol
+entiteiten achter. Die vraag wordt één keer gesteld en dan is het klaar —
+verwijderen slaat zichzelf op. Andere wijzigingen die je nog aan het maken bent,
+blijven staan tot je op Opslaan drukt.
 
 Je kunt er meerdere van hetzelfde type hebben. Twee vaatwassers zijn twee
 aparte apparaten met elk hun eigen entiteiten, hun eigen vrijgaveknop en hun

@@ -665,26 +665,39 @@ class DacViewDevices extends DacEditorElement {
   /**
    * Ask before a device disappears.
    *
-   * The save bar can still undo it, but the two are not the same reassurance:
-   * the bin sits right next to the line you tap to open a device, so the tap
+   * The bin sits right next to the line you tap to open a device, so the tap
    * that removes something is exactly the tap you make by accident -- and a
    * device carries a screen full of entities somebody sat down to fill in.
+   *
+   * The question is asked once and then it is done: a confirmation followed by
+   * a save bar is the same question twice, and it leaves the customer looking at
+   * a screen that still lists what they just deleted.
    */
   askRemove_(index) {
     const device = this.draft_.devices[index];
-    if (!device) return;
+    // The bin is already unclickable for a customer; this is the second lock,
+    // because from here removal goes straight through to Home Assistant.
+    if (!device || !this.canEdit_()) return;
 
     this.removing_ = device.id;
     this.$("#confirm-title").textContent = this.labelFor_(device);
-    this.$("#confirm-sub").textContent = device.entity
-      ? `Dit apparaat verdwijnt uit de lijst, met alles wat je eraan gekoppeld hebt. Opslaan maakt het definitief; tot die tijd kun je het onderaan nog terugdraaien.`
-      : `Dit apparaat verdwijnt uit de lijst. Opslaan maakt het definitief; tot die tijd kun je het onderaan nog terugdraaien.`;
+    this.$("#confirm-sub").textContent = this.storedDevices_().some(
+      (stored) => stored.id === device.id
+    )
+      ? "Dit apparaat verdwijnt uit de lijst, met alles wat je eraan gekoppeld hebt en met zijn tijden onder Strategie. Verwijderen gaat meteen door en is niet terug te draaien."
+      : "Dit apparaat is nog niet opgeslagen, dus het verdwijnt gewoon weer uit de lijst.";
     this.$("#confirm").showModal();
+  }
+
+  /** The devices as Home Assistant has them, without anything unsaved. */
+  storedDevices_() {
+    return this.saved_?.devices ?? [];
   }
 
   /** Remove the device the dialog was opened for, by id rather than position. */
   confirmRemove_() {
-    const index = this.draft_.devices.findIndex((device) => device.id === this.removing_);
+    const id = this.removing_;
+    const index = this.draft_.devices.findIndex((device) => device.id === id);
     this.$("#confirm").close();
     this.removing_ = null;
     if (index < 0) return;
@@ -692,6 +705,19 @@ class DacViewDevices extends DacEditorElement {
     this.draft_.devices.splice(index, 1);
     this.paintDevices_();
     this.syncSaveBar_();
+
+    // A device that was never saved has nothing to remove on the other end --
+    // dropping it from the draft is the whole job, and there is nothing left to
+    // press a save button for.
+    const stored = this.storedDevices_();
+    if (!stored.some((device) => device.id === id)) return;
+
+    // Built from what is stored rather than from the draft, so a half-filled
+    // entity somewhere else on the screen does not get saved along with it.
+    this.persist_(
+      { devices: stored.filter((device) => device.id !== id) },
+      "Apparaat verwijderd"
+    );
   }
 }
 
