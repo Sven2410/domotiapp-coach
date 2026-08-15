@@ -16,8 +16,8 @@
  * export (naar het net).
  */
 
-import { brandFields } from "./devices.js";
-import { toWatts } from "./format.js";
+import { brandFields, programFor } from "./devices.js";
+import { countdown, duration, toWatts } from "./format.js";
 
 const PHASES = ["l1", "l2", "l3"];
 
@@ -127,6 +127,7 @@ function deviceDetails(feed, device) {
     // A brand may report words rather than numbers; those are translated where
     // we know them and passed through where we do not.
     const text =
+      (field.format === "countdown" ? countdown(raw, unit) : null) ??
       field.values?.[raw] ??
       (Number.isFinite(number)
         ? `${number.toLocaleString("nl-NL", { maximumFractionDigits: 2 })}${unit ? ` ${unit}` : ""}`
@@ -135,6 +136,22 @@ function deviceDetails(feed, device) {
         : raw.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()));
 
     rows.push({ label: field.label, text });
+
+    // What the selected program costs to run comes from the panel's own table
+    // rather than from a sensor, so it is spelled out as an estimate. It is the
+    // number the coach will plan with, and seeing it is how you catch it being
+    // the wrong program.
+    if (field.key === "program") {
+      const program = programFor(raw);
+      if (program) {
+        rows.push({
+          label: "Duurt ongeveer",
+          text: `${duration(program.minutes)} · ${program.kwh.toLocaleString("nl-NL", {
+            minimumFractionDigits: 2,
+          })} kWh`,
+        });
+      }
+    }
   }
 
   return rows;

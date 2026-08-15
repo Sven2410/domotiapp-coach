@@ -14,15 +14,15 @@
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
 import {
-  brandActions,
   canCommand,
-  commandCall,
+  deviceCommands,
   deviceLabel,
   releaseCopy,
   typeMeta,
 } from "../devices.js";
 import { LiveSource } from "../data-source.js";
 import { level, levelTone, percent, power, powerText, price as fmtPrice } from "../format.js";
+import { sheetCss } from "../theme.js";
 import "../components/stat-tile.js";
 import "../components/energy-flow.js";
 
@@ -391,41 +391,7 @@ class DacViewOverview extends DacElement {
     .steer-hint:empty { display: none; }
 
     /* ---- manual control ---- */
-    /*
-     * A native <dialog>, so Escape, the backdrop and the focus trap are the
-     * browser's job rather than ours. On a phone it sits against the bottom
-     * edge, where a thumb is.
-     */
-    dialog.sheet {
-      width: min(430px, calc(100vw - 24px));
-      max-width: none;
-      padding: 20px 20px 18px;
-      border: 1px solid var(--dac-border-hi);
-      border-radius: var(--dac-radius);
-      background: var(--dac-bg-raise);
-      color: var(--dac-ink);
-      box-shadow: 0 30px 70px rgba(0,0,0,0.55);
-    }
-    dialog.sheet::backdrop { background: rgba(0,0,0,0.58); }
-
-    .sheet-head { display: flex; align-items: flex-start; gap: 12px; }
-    .sheet-head h3 { margin: 2px 0 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
-    .sheet-head .eyebrow { font-size: 11px; }
-    .sheet-close {
-      margin-left: auto; flex: 0 0 auto;
-      width: 38px; height: 38px;
-      display: grid; place-items: center;
-      border-radius: var(--dac-radius-pill);
-      border: 1px solid var(--dac-border);
-      background: transparent;
-      color: var(--dac-ink-2);
-      cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
-    }
-    .sheet-close:hover { color: var(--dac-ink); border-color: var(--dac-border-hi); }
-    .sheet-close .icon { width: 17px; height: 17px; }
-
-    .sheet-sub { margin: 10px 0 0; font-size: 13px; line-height: 1.55; color: var(--dac-ink-2); }
+    ${sheetCss}
 
     .cmd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
     .cmd {
@@ -450,20 +416,6 @@ class DacViewOverview extends DacElement {
     .cmd.care { grid-column: 1 / -1; }
     .cmd.care .icon { color: var(--dac-warn); }
     .cmd-note { grid-column: 1 / -1; margin: -2px 0 0; font-size: 12px; line-height: 1.45; color: var(--dac-ink-3); }
-
-    .sheet-status { margin: 14px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--dac-ink-2); min-height: 1.45em; }
-    .sheet-status.good { color: var(--dac-good); }
-    .sheet-status.bad { color: var(--dac-bad); }
-
-    @media (max-width: 560px) {
-      dialog.sheet {
-        width: 100vw;
-        margin: auto 0 0;
-        border-radius: var(--dac-radius) var(--dac-radius) 0 0;
-        border-bottom: none;
-        padding-bottom: calc(18px + var(--dac-safe-b));
-      }
-    }
 
     .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
     .legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dac-ink-2); }
@@ -1045,7 +997,7 @@ class DacViewOverview extends DacElement {
     if (!device || !canCommand(device)) return;
 
     this.manualDevice_ = device;
-    this.manualActions_ = brandActions(device);
+    this.manualActions_ = deviceCommands(device);
 
     this.$("#manual-title").textContent = deviceLabel(device);
     this.$("#manual-sub").textContent =
@@ -1083,7 +1035,7 @@ class DacViewOverview extends DacElement {
     const device = this.manualDevice_;
     if (!action || !device || !this.hass || this.sending_) return;
 
-    const { domain, service, data } = commandCall(device, action);
+    const { domain, service, data } = action.call;
 
     this.sending_ = true;
     this.setManualButtons_(true);

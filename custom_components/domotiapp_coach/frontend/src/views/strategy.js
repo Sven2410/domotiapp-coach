@@ -13,6 +13,8 @@
 
 import { define } from "../base.js";
 import { icons } from "../icons.js";
+import { canHaveDeadline, deviceLabel, programFor, typeMeta } from "../devices.js";
+import { duration } from "../format.js";
 import {
   DacEditorElement,
   adminNoticeHtml,
@@ -66,6 +68,7 @@ class DacViewStrategy extends DacEditorElement {
   constructor() {
     super();
     this.pane_ = "";
+    this.paneDevice_ = "";
   }
 
   set hass(value) {
@@ -74,16 +77,31 @@ class DacViewStrategy extends DacEditorElement {
   }
 
   /**
-   * Which notification is open, from the path.
+   * Which sub-screen is open, from the path.
    *
    * Routing it rather than keeping it in a variable is what makes the phone's
    * own back gesture close the sub-screen. Customers run Kiosk Mode and have no
    * browser chrome, so back is the only way out they always have.
+   *
+   * Two shapes: a notification by name, and a device's deadline as
+   * `klaar/<device id>` -- one pane serving every appliance, because the
+   * appliances are the customer's and there is no static markup for them.
    */
   set subroute(value) {
-    const next = ALERTS.some((alert) => alert.id === value) ? value : "";
-    if (next === this.pane_) return;
-    this.pane_ = next;
+    const path = String(value ?? "");
+    const [head, rest] = [path.split("/")[0], path.split("/").slice(1).join("/")];
+
+    let pane = "";
+    let device = "";
+    if (ALERTS.some((alert) => alert.id === head)) pane = head;
+    else if (head === "klaar" && rest) {
+      pane = "klaar";
+      device = rest;
+    }
+
+    if (pane === this.pane_ && device === this.paneDevice_) return;
+    this.pane_ = pane;
+    this.paneDevice_ = device;
     if (this.rendered_) this.paintPane_();
   }
 
@@ -117,6 +135,49 @@ class DacViewStrategy extends DacEditorElement {
           <h2>${icons.bell} Meldingen</h2>
           <p class="hint">Berichten die je op je telefoon krijgt, ook als het dashboard dicht staat. Tik een melding aan om hem in te stellen.</p>
           <div class="links">${rows}</div>
+        </section>
+
+        <section class="card" id="devices-card" hidden>
+          <h2>${icons.devices} Apparaten</h2>
+          <p class="hint">Wanneer een apparaat uiterlijk klaar moet zijn. Daarbinnen zoekt de coach het goedkoopste moment om te starten — zonder zo'n tijd is later altijd goedkoper en zou hij nooit beginnen.</p>
+          <div class="links" id="device-links"></div>
+        </section>
+      </div>
+
+      <div class="wrap pane" data-pane="klaar" hidden>
+        <button class="back" type="button">${icons.arrowLeft}<span>Strategie</span></button>
+
+        ${adminNoticeHtml}
+
+        <header class="intro">
+          <div class="eyebrow" id="klaar-eyebrow">Apparaat</div>
+          <h1 id="klaar-title"></h1>
+          <p id="klaar-intro"></p>
+        </header>
+
+        <section class="card">
+          <div class="fields first">
+            <label class="check" for="klaar-enabled">
+              <input type="checkbox" id="klaar-enabled">
+              <span>
+                <strong>Uiterlijk klaar op een vaste tijd</strong>
+                Zonder dit heeft de coach geen reden om te beginnen: er komt altijd nog een goedkoper moment.
+              </span>
+            </label>
+
+            <div id="klaar-fields" class="fields">
+              <div class="row">
+                <label for="klaar-time">Klaar om</label>
+                <input type="time" id="klaar-time" step="300">
+                <span class="sub" id="klaar-hint"></span>
+              </div>
+
+              <div class="notice">
+                ${icons.warning}
+                <span>Vrijgeven blijft nodig. De coach start dit apparaat alleen als je op het overzicht hebt aangegeven dat het mag draaien — een tijd instellen is niet hetzelfde als toestemming geven.</span>
+              </div>
+            </div>
+          </div>
         </section>
       </div>
 
@@ -208,18 +269,59 @@ class DacViewStrategy extends DacEditorElement {
       this.afterChange_();
     });
 
+    this.$("#klaar-enabled").addEventListener("change", (ev) => {
+      const deadline = this.deadlineFor_(this.paneDevice_, true);
+      deadline.enabled = ev.target.checked;
+      // Switching it on with no time set would leave the coach with a rule it
+      // cannot act on, so it starts at a time somebody would plausibly pick.
+      if (deadline.enabled && !deadline.time) deadline.time = "07:00";
+      this.paintKlaar_();
+      this.afterChange_();
+    });
+
+    this.$("#klaar-time").addEventListener("input", (ev) => {
+      this.deadlineFor_(this.paneDevice_, true).time = ev.target.value;
+      this.paintKlaarHint_();
+      this.afterChange_();
+    });
+
     this.wireSaveBar_();
     this.paintPane_();
     this.paint_();
   }
 
-  /** Open a notification, or the list when the id is empty. */
+  /** Open a sub-screen, or the list when the id is empty. */
   open_(id) {
     this.fire("dac-navigate", { id: id ? `strategie/${id}` : "strategie" });
   }
 
   alert_() {
     return this.draft_.strategy.load_alert;
+  }
+
+  /** The devices that can have a time by which they must be finished. */
+  deadlineDevices_() {
+    return (this.draft_?.devices ?? []).filter(canHaveDeadline);
+  }
+
+  /**
+   * The deadline for one device.
+   *
+   * A list rather than a map keyed by device id, because the storage prunes
+   * dictionaries against its defaults and would empty a free-form map on every
+   * load. `create` is false while only reading: adding an empty entry just
+   * because a screen was opened would light up the save bar for nothing.
+   */
+  deadlineFor_(deviceId, create = false) {
+    const strategy = this.draft_.strategy;
+    if (!Array.isArray(strategy.deadlines)) strategy.deadlines = [];
+
+    const found = strategy.deadlines.find((entry) => entry.device === deviceId);
+    if (found || !create) return found ?? { device: deviceId, enabled: false, time: "" };
+
+    const fresh = { device: deviceId, enabled: false, time: "" };
+    strategy.deadlines.push(fresh);
+    return fresh;
   }
 
   /** The summary on the list is part of the same edit, so it follows along. */
@@ -251,6 +353,7 @@ class DacViewStrategy extends DacEditorElement {
     if (!this.rendered_) return;
     this.$("#pane-list").hidden = Boolean(this.pane_);
     for (const pane of this.$$(".pane")) pane.hidden = pane.dataset.pane !== this.pane_;
+    if (this.pane_ === "klaar") this.paintKlaar_();
     // Opening a notification from halfway down the list would otherwise start
     // halfway down its settings.
     window.scrollTo({ top: 0 });
@@ -268,8 +371,120 @@ class DacViewStrategy extends DacEditorElement {
     this.paintEnabled_();
     this.paintTargets_();
     this.paintHint_();
+    this.paintDeviceLinks_();
     this.paintSummaries_();
+    if (this.pane_ === "klaar") this.paintKlaar_();
     this.syncSaveBar_();
+  }
+
+  /** One line per appliance that can be planned, with what it is set to. */
+  paintDeviceLinks_() {
+    const devices = this.deadlineDevices_();
+    this.$("#devices-card").hidden = !devices.length;
+    if (!devices.length) return;
+
+    const holder = this.$("#device-links");
+    holder.innerHTML = devices
+      .map(
+        (device, index) => `
+        <button class="link" type="button" data-device="${index}">
+          <span class="mark">${icons[typeMeta(device.type).icon]}</span>
+          <span class="body">
+            <span class="head">
+              <span class="title" data-device-name="${index}"></span>
+              <span class="state" data-device-state="${index}"></span>
+            </span>
+            <span class="sum" data-device-sum="${index}"></span>
+          </span>
+          <span class="chev">${icons.chevronRight}</span>
+        </button>`
+      )
+      .join("");
+
+    devices.forEach((device, index) => {
+      const deadline = this.deadlineFor_(device.id);
+      const on = Boolean(deadline.enabled && deadline.time);
+
+      // Names are the customer's own text, so they go in as text.
+      holder.querySelector(`[data-device-name="${index}"]`).textContent = deviceLabel(device);
+
+      const state = holder.querySelector(`[data-device-state="${index}"]`);
+      state.textContent = on ? "Aan" : "Uit";
+      state.classList.toggle("on", on);
+
+      holder.querySelector(`[data-device-sum="${index}"]`).textContent = on
+        ? `Uiterlijk klaar om ${deadline.time}`
+        : "Geen tijd ingesteld — de coach laat dit apparaat met rust.";
+    });
+
+    for (const link of holder.querySelectorAll("[data-device]")) {
+      const device = devices[Number(link.dataset.device)];
+      link.addEventListener("click", () => this.open_(`klaar/${device.id}`));
+    }
+  }
+
+  /** The deadline sub-screen, for whichever appliance it was opened for. */
+  paintKlaar_() {
+    if (!this.draft_ || !this.rendered_) return;
+
+    const device = this.deadlineDevices_().find((item) => item.id === this.paneDevice_);
+    // The device may be gone, or the draft may not be in yet; either way there
+    // is nothing to edit, so the list is the honest place to be.
+    if (!device) {
+      if (this.draft_) this.open_("");
+      return;
+    }
+
+    const deadline = this.deadlineFor_(device.id);
+    this.$("#klaar-eyebrow").textContent = typeMeta(device.type).label;
+    this.$("#klaar-title").textContent = deviceLabel(device);
+    this.$("#klaar-intro").textContent =
+      "Zeg tot wanneer de coach de tijd heeft. Binnen die ruimte kiest hij zelf het goedkoopste moment om te starten — bij zon op het dak, of bij een laag tarief.";
+
+    this.$("#klaar-enabled").checked = Boolean(deadline.enabled);
+    this.$("#klaar-time").value = deadline.time || "";
+    this.$("#klaar-fields").style.display = deadline.enabled ? "" : "none";
+    this.paintKlaarHint_();
+  }
+
+  /**
+   * What the chosen time means for the appliance in front of you.
+   *
+   * The program's length comes from the panel's own table of specifications, so
+   * it is spelled out as an estimate -- the point is that "klaar om 07:00"
+   * turns into a moment the machine has to be started, which is the thing that
+   * decides whether the time is realistic at all.
+   */
+  paintKlaarHint_() {
+    const hint = this.$("#klaar-hint");
+    const device = this.deadlineDevices_().find((item) => item.id === this.paneDevice_);
+    const deadline = device ? this.deadlineFor_(device.id) : null;
+
+    if (!deadline?.time) {
+      hint.textContent = "Kies een tijd. De coach zorgt dat het programma dan afgelopen is.";
+      return;
+    }
+
+    const program = this.selectedProgram_(device);
+    if (!program) {
+      hint.textContent = `Het programma is dan afgelopen, niet pas begonnen. Hoe lang het duurt leest de coach van het apparaat af.`;
+      return;
+    }
+
+    const [hours, minutes] = deadline.time.split(":").map(Number);
+    const start = new Date();
+    start.setHours(hours, minutes - program.minutes, 0, 0);
+    const clockText = start.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" });
+
+    hint.textContent =
+      `${program.label} duurt ongeveer ${duration(program.minutes)}, dus starten moet uiterlijk om ${clockText}.`;
+  }
+
+  /** The program the appliance has standing by, if the panel knows it. */
+  selectedProgram_(device) {
+    const entityId = device?.entities?.program;
+    if (!entityId || !this.feed_) return undefined;
+    return programFor(this.feed_.get(entityId)?.state);
   }
 
   paintSummaries_() {
@@ -478,6 +693,10 @@ DacViewStrategy.css = /* css */ `
 
   #targets { display: grid; gap: 8px; }
   .empty { margin: 0; font-size: 13px; color: var(--dac-ink-3); line-height: 1.55; }
+
+  /* A clock is four characters wide; a field the width of the card invites the
+     idea that something longer belongs in it. */
+  #klaar-time { max-width: 190px; }
 `;
 
 define("dac-view-strategy", DacViewStrategy);

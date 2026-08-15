@@ -97,7 +97,7 @@ class DacViewInstallation extends DacEditorElement {
                 </button>
                 <button type="button" data-type="dynamic" aria-pressed="false">
                   <strong>Dynamisch</strong>
-                  Een prijs die per uur meebeweegt met de markt.
+                  Een prijs die per uur of per kwartier meebeweegt met de markt.
                 </button>
               </div>
             </div>
@@ -125,6 +125,21 @@ class DacViewInstallation extends DacEditorElement {
 
             <!-- dynamisch -->
             <div id="dynamic-fields" class="fields">
+              <div class="row">
+                <label>Hoe vaak verandert de prijs?</label>
+                <div class="segmented" id="dynamic-interval">
+                  <button type="button" data-interval="hour" aria-pressed="false">
+                    <strong>Per uur</strong>
+                    Eén prijs per klokuur.
+                  </button>
+                  <button type="button" data-interval="quarter" aria-pressed="false">
+                    <strong>Per kwartier</strong>
+                    Vier prijzen per uur.
+                  </button>
+                </div>
+                <span class="sub">Kijk op je contract of in de app van je leverancier. Dit is de lengte van de blokken waarin de coach straks plant — met kwartieren komt hij dichter bij het goedkoopste moment, maar alleen als je leverancier ook zo afrekent.</span>
+              </div>
+
               <div class="row">
                 <label>Waar komt de prijs vandaan?</label>
                 <div class="segmented" id="dynamic-source">
@@ -245,6 +260,14 @@ class DacViewInstallation extends DacEditorElement {
       });
     }
 
+    for (const button of this.$$("#dynamic-interval button")) {
+      button.addEventListener("click", () => {
+        this.draft_.contract.dynamic.interval = button.dataset.interval;
+        this.paintContract_();
+        this.afterChange_();
+      });
+    }
+
     for (const [id, key] of [
       ["dyn-allin", "all_in_entity"],
       ["dyn-market", "market_entity"],
@@ -324,6 +347,11 @@ class DacViewInstallation extends DacEditorElement {
     const source = contract.dynamic.source;
     for (const button of this.$$("#dynamic-source button")) {
       button.setAttribute("aria-pressed", String(button.dataset.source === source));
+    }
+
+    const interval = contract.dynamic.interval ?? "hour";
+    for (const button of this.$$("#dynamic-interval button")) {
+      button.setAttribute("aria-pressed", String(button.dataset.interval === interval));
     }
     // With an all-in entity the tax, markup and VAT fields are not just unused,
     // they are misleading: the price already contains them.

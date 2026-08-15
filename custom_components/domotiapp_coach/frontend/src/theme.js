@@ -120,6 +120,87 @@ export const baseCss = /* css */ `
 `;
 
 /**
+ * A dialog that asks something and gets out of the way.
+ *
+ * A native `<dialog>`, so Escape, the backdrop and the focus trap are the
+ * browser's job rather than ours. On a phone it sits against the bottom edge,
+ * where a thumb is. Shared because there are two of them now -- manual control
+ * on the overview and the delete confirmation under Apparaten -- and a panel
+ * where two dialogs look different is a panel that looks unfinished.
+ */
+export const sheetCss = /* css */ `
+  dialog.sheet {
+    width: min(430px, calc(100vw - 24px));
+    max-width: none;
+    padding: 20px 20px 18px;
+    border: 1px solid var(--dac-border-hi);
+    border-radius: var(--dac-radius);
+    background: var(--dac-bg-raise);
+    color: var(--dac-ink);
+    box-shadow: 0 30px 70px rgba(0,0,0,0.55);
+  }
+  dialog.sheet::backdrop { background: rgba(0,0,0,0.58); }
+
+  .sheet-head { display: flex; align-items: flex-start; gap: 12px; }
+  .sheet-head h3 { margin: 2px 0 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  .sheet-head .eyebrow { font-size: 11px; }
+  .sheet-close {
+    margin-left: auto; flex: 0 0 auto;
+    width: 38px; height: 38px;
+    display: grid; place-items: center;
+    border-radius: var(--dac-radius-pill);
+    border: 1px solid var(--dac-border);
+    background: transparent;
+    color: var(--dac-ink-2);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .sheet-close:hover { color: var(--dac-ink); border-color: var(--dac-border-hi); }
+  .sheet-close .icon { width: 17px; height: 17px; }
+
+  .sheet-sub { margin: 10px 0 0; font-size: 13px; line-height: 1.55; color: var(--dac-ink-2); }
+
+  .sheet-status { margin: 14px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--dac-ink-2); min-height: 1.45em; }
+  .sheet-status.good { color: var(--dac-good); }
+  .sheet-status.bad { color: var(--dac-bad); }
+
+  /* Two buttons that mean opposite things, so they never sit under a thumb in
+     the same place: the one that undoes nothing is on the left. */
+  .sheet-buttons { display: flex; gap: 8px; margin-top: 18px; }
+  .sheet-buttons button {
+    flex: 1 1 0;
+    min-height: 46px;
+    padding: 12px 16px;
+    border-radius: var(--dac-radius-pill);
+    border: 1px solid var(--dac-border-hi);
+    background: var(--dac-surface);
+    color: var(--dac-ink-2);
+    font: inherit; font-size: 14px; font-weight: 500;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: border-color 180ms ease, background 180ms ease, color 180ms ease;
+  }
+  .sheet-buttons button:hover { color: var(--dac-ink); border-color: rgba(25,143,217,0.55); }
+  .sheet-buttons button.danger {
+    border-color: rgba(208,59,59,0.5);
+    background: rgba(208,59,59,0.12);
+    color: var(--dac-ink);
+    font-weight: 600;
+  }
+  .sheet-buttons button.danger:hover { border-color: var(--dac-bad); background: rgba(208,59,59,0.2); }
+
+  @media (max-width: 560px) {
+    dialog.sheet {
+      width: 100vw;
+      margin: auto 0 0;
+      border-radius: var(--dac-radius) var(--dac-radius) 0 0;
+      border-bottom: none;
+      padding-bottom: calc(18px + var(--dac-safe-b));
+    }
+  }
+`;
+
+/**
  * Build a constructable stylesheet once per component class.
  * @param {string} css
  * @returns {CSSStyleSheet}
