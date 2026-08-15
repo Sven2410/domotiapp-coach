@@ -16,7 +16,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from .const import (
-    CHARGER_BRANDS,
+    ALL_BRANDS,
     CONTRACT_DYNAMIC,
     CONTRACT_FIXED,
     DEVICE_TYPES,
@@ -25,6 +25,8 @@ from .const import (
     EVENT_SETTINGS_UPDATED,
     GRID_MODE_SIGNED,
     GRID_MODE_SPLIT,
+    PRICE_INTERVAL_HOUR,
+    PRICE_INTERVAL_QUARTER,
 )
 from .storage import async_get_store
 
@@ -63,8 +65,9 @@ _DEVICE = _schema(
         # The power sensor. Every device has one, whatever it is -- it is what
         # puts the device on the energy flow at all.
         vol.Optional("entity", default=""): _ENTITY,
-        # Chargers only, "" until one is picked.
-        vol.Optional("brand", default=""): vol.In([*CHARGER_BRANDS, ""]),
+        # Types that have brands (chargers, dishwashers), "" until one is
+        # picked. Which brands belong to which type is the panel's business.
+        vol.Optional("brand", default=""): vol.In([*ALL_BRANDS, ""]),
         # Whether the coach may steer this device once steering exists. Plenty
         # of appliances sit on a smart plug that can only measure, so this is a
         # choice per device rather than a property of the type.
@@ -80,6 +83,17 @@ _DEVICE = _schema(
         # What to send for start, stop, pause and resume. The words differ per
         # brand and even per firmware, so they are typed in rather than baked in.
         vol.Optional("actions", default=dict): {vol.Match(r"^[a-z0-9_]+$"): str},
+    }
+)
+
+# When an appliance has to be finished, per device. "" for the time means the
+# customer has not picked one yet, which is not the same as a deadline that is
+# switched off.
+_DEADLINE = _schema(
+    {
+        vol.Required("device"): str,
+        vol.Optional("enabled", default=False): bool,
+        vol.Optional("time", default=""): vol.Any("", vol.Match(r"^([01]\d|2[0-3]):[0-5]\d$")),
     }
 )
 
@@ -118,6 +132,7 @@ _SETTINGS = _schema(
                         ),
                     }
                 ),
+                vol.Optional("deadlines"): [_DEADLINE],
             }
         ),
         vol.Optional("installation"): _schema(
@@ -142,6 +157,9 @@ _SETTINGS = _schema(
                 vol.Optional("dynamic"): _schema(
                     {
                         vol.Optional("source"): vol.In([DYNAMIC_ALL_IN, DYNAMIC_MARKET]),
+                        vol.Optional("interval"): vol.In(
+                            [PRICE_INTERVAL_HOUR, PRICE_INTERVAL_QUARTER]
+                        ),
                         vol.Optional("all_in_entity"): _ENTITY,
                         vol.Optional("market_entity"): _ENTITY,
                         vol.Optional("energy_tax"): _EURO,

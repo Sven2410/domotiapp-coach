@@ -128,6 +128,88 @@ export function percent(value) {
   return { value: num(Math.round(value), 0), unit: "%" };
 }
 
+/**
+ * A length of time in words: "45 min", "1 u 45 min", "3 u".
+ *
+ * Minutes rather than seconds throughout, because everything measured in these
+ * terms -- a wash programme, a charge, the time until something is done -- is
+ * planned in minutes and a ticking second count reads as more precision than
+ * the appliance actually has.
+ */
+export function duration(minutes) {
+  const total = Math.round(Number(minutes));
+  if (!Number.isFinite(total) || total < 0) return "—";
+  if (total < 60) return `${total} min`;
+
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  return rest ? `${hours} u ${rest} min` : `${hours} u`;
+}
+
+/** A time of day from a Date, as "21:30". */
+export const clock = (date) =>
+  date.toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" });
+
+/**
+ * An ISO timestamp, or null for anything else.
+ *
+ * Matched on the shape rather than handed to `new Date` on spec: that
+ * constructor accepts far more than it should -- "16" becomes a date -- and a
+ * sensor reading that happens to be a bare number must never be mistaken for a
+ * moment in time.
+ */
+function asDate(raw) {
+  if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(String(raw))) return null;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * "nog 1 u 45 min (klaar om 21:30)" from whatever the appliance reports.
+ *
+ * Home Connect gives the moment the program finishes, as a timestamp; other
+ * integrations give the minutes or seconds left. Both are the same question,
+ * and the answer people want is how long they still have to wait.
+ *
+ * Returns null when the value is neither, so the caller can fall back to
+ * showing it as it came.
+ */
+export function countdown(raw, unit) {
+  const number = Number(raw);
+  if (raw !== "" && Number.isFinite(number)) {
+    const minutes = unit === "s" || unit === "sec" ? number / 60 : number;
+    return minutes <= 0 ? "Klaar" : `nog ${duration(minutes)}`;
+  }
+
+  const end = asDate(raw);
+  if (!end) return null;
+
+  const minutes = (end.getTime() - Date.now()) / 60_000;
+  if (minutes <= 0) return "Klaar";
+  return `nog ${duration(minutes)} (klaar om ${clock(end)})`;
+}
+
+/**
+ * A moment in words: "vandaag 08:00", "14-08 21:30".
+ *
+ * Entities whose state is a timestamp are common -- every button reports when
+ * it was last pressed -- and a raw ISO string in a badge is unreadable at
+ * exactly the moment it is meant to help: checking you picked the right one.
+ */
+export function moment(raw) {
+  const date = asDate(raw);
+  if (!date) return null;
+
+  const today = new Date();
+  const sameDay =
+    date.getDate() === today.getDate() &&
+    date.getMonth() === today.getMonth() &&
+    date.getFullYear() === today.getFullYear();
+
+  if (sameDay) return `vandaag ${clock(date)}`;
+  return `${date.toLocaleDateString(LOCALE, { day: "2-digit", month: "2-digit" })} ${clock(date)}`;
+}
+
 /** Format euro amounts. */
 export function euro(value) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";

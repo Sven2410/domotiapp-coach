@@ -113,6 +113,26 @@ Easee vandaag gebruikt en zijn aan te passen. Zaptec, Wallbox, Zappi en Peblar s
 lijst maar hebben nog geen eigen velden. Draait een apparaat, dan is zijn bol op
 het overzicht aan te klikken voor precies die gegevens.
 
+Bij een **vaatwasser** gaat het net zo. **Home Connect** is uitgewerkt — dat is
+wat Bosch, Siemens, Neff, Gaggenau en Constructa allemaal gebruiken — met de
+status, het geselecteerde programma, de resterende tijd en de deurstand, plus de
+knop waarmee gestart wordt. Miele en LG staan in de lijst maar hebben nog geen
+velden.
+
+De deurstand is er **alleen om te laten zien**. Of de vaatwasser mag draaien,
+zegt de klant zelf met de vrijgaveknop: een deur die dichtvalt betekent niet dat
+de machine ingeruimd is.
+
+Van de Home Connect-programma's kent het paneel de duur, het verbruik, het
+piekvermogen en of ze te verschuiven zijn — Eco 50 °C duurt ruim 3,5 uur en kost
+0,80 kWh, Voorspoelen is 15 minuten en heeft geen zin om te plannen. Dat zijn
+opgaven van de fabrikant, geen metingen; ze staan erbij zodat de coach straks kan
+uitrekenen wanneer een programma moet beginnen om op tijd klaar te zijn.
+
+Een apparaat verwijderen vraagt om een bevestiging. De opslagbalk kan het ook
+nog terugdraaien, maar de prullenbak zit naast de regel die je aantikt om een
+apparaat te openen — en daar hangt een scherm vol entiteiten achter.
+
 ### Aanstuurbare apparaten
 
 Alles wat op "mag aangestuurd worden" staat, komt op het overzicht in een eigen
@@ -137,12 +157,30 @@ bereikbaar.
 > De coach stuurt nog niet uit zichzelf. Handmatige besturing is een mens op de
 > knop; wanneer de coach zelf mag ingrijpen is de volgende stap.
 
+### Uiterlijk klaar om
+
+Onder **Strategie** staat per aanstuurbaar apparaat wanneer het klaar moet zijn.
+Binnen die ruimte zoekt de coach straks het goedkoopste moment om te starten —
+zonder zo'n tijd is later altijd goedkoper en zou hij nooit beginnen.
+
+Het scherm rekent meteen terug: staat Eco 50 °C klaar en moet de vaatwasser om
+07:00 klaar zijn, dan staat eronder dat starten uiterlijk om 03:15 moet. Zo zie
+je op de plek waar je de tijd invult of hij haalbaar is.
+
+Vrijgeven blijft daarnaast nodig. Een tijd instellen is niet hetzelfde als
+toestemming geven.
+
 ### Contract
 
 Een **vast** contract is een all-in prijs, een terugleververgoeding en
 terugleverkosten. Bij een **dynamisch** contract kies je tussen één sensor die de
 all-in prijs al levert, of de kale marktprijs waarbij de coach zelf
 energiebelasting en leveranciersopslag optelt en er btw overheen rekent.
+
+Bij dynamisch geef je er ook bij of de prijs **per uur of per kwartier**
+verandert. Dat is niet uit de sensor af te leiden — een uurprijs ziet er precies
+hetzelfde uit als een kwartierprijs die een uur lang gelijk blijft — en het is de
+blokgrootte waarin de coach straks plant.
 
 Wijzigen mag alleen een beheerder; meekijken mag iedereen. Een wijziging op de
 ene telefoon komt vanzelf door op een tablet die openstaat.

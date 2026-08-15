@@ -20,7 +20,7 @@
 
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
-import { power, toWatts } from "../format.js";
+import { countdown, moment, power, toWatts } from "../format.js";
 
 /** How many options to render at once -- enough to browse, not enough to lag. */
 const MAX_OPTIONS = 60;
@@ -216,6 +216,12 @@ class DacEntityPicker extends DacElement {
    */
   set values(map) {
     this.values_ = map ?? null;
+    if (this.rendered_) this.paintChosen_();
+  }
+
+  /** "countdown" for a sensor that says when something will be finished. */
+  set format(value) {
+    this.format_ = value ?? null;
     if (this.rendered_) this.paintChosen_();
   }
 
@@ -506,8 +512,15 @@ class DacEntityPicker extends DacElement {
       const { value, unit: shown } = power(watts);
       now.textContent = `${value} ${shown}`;
     } else {
+      // A timestamp is the odd one out: half the entities in Home Assistant
+      // report one (every button carries when it was last pressed), and a raw
+      // ISO string is unreadable at exactly the moment this badge is meant to
+      // help -- checking that the right entity was picked.
       now.textContent =
-        this.values_?.[state.state] ?? (unit ? `${state.state} ${unit}` : state.state);
+        (this.format_ === "countdown" ? countdown(state.state, unit) : null) ??
+        this.values_?.[state.state] ??
+        moment(state.state) ??
+        (unit ? `${state.state} ${unit}` : state.state);
     }
   }
 }

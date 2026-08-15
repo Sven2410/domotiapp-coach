@@ -11,22 +11,28 @@
 import { define } from "../base.js";
 import { icons } from "../icons.js";
 import {
-  CHARGER_BRANDS,
   DEVICE_TYPES,
+  DISHWASHER_PROGRAMS,
+  PLAN_LABELS,
   brandActions,
+  brandButtons,
   brandDevice,
+  brandEntityFields,
   brandFields,
   brandMeta,
+  brandsFor,
   deviceLabel,
   missingForControl,
   typeMeta,
 } from "../devices.js";
+import { duration } from "../format.js";
 import {
   DacEditorElement,
   adminNoticeHtml,
   editorCss,
   saveBarHtml,
 } from "./editor-base.js";
+import { sheetCss } from "../theme.js";
 import "../components/entity-picker.js";
 
 const uid = () => `dev-${Math.random().toString(36).slice(2, 9)}`;
@@ -68,6 +74,21 @@ class DacViewDevices extends DacEditorElement {
         <button class="add" type="button" id="add-device">${icons.plus} Apparaat toevoegen</button>
       </div>
 
+      <dialog class="sheet" id="confirm" aria-labelledby="confirm-title">
+        <div class="sheet-head">
+          <div>
+            <div class="eyebrow">Verwijderen</div>
+            <h3 id="confirm-title"></h3>
+          </div>
+          <button class="sheet-close" type="button" id="confirm-close" aria-label="Sluiten">${icons.close}</button>
+        </div>
+        <p class="sheet-sub" id="confirm-sub"></p>
+        <div class="sheet-buttons">
+          <button type="button" id="confirm-no">Laat staan</button>
+          <button type="button" class="danger" id="confirm-yes">Verwijderen</button>
+        </div>
+      </dialog>
+
       ${saveBarHtml}
     `;
   }
@@ -94,6 +115,15 @@ class DacViewDevices extends DacEditorElement {
       this.$$(".device").at(-1)?.scrollIntoView({ block: "center", behavior: "smooth" });
     });
 
+    const confirm = this.$("#confirm");
+    this.$("#confirm-yes").addEventListener("click", () => this.confirmRemove_());
+    for (const id of ["#confirm-no", "#confirm-close"]) {
+      this.$(id).addEventListener("click", () => confirm.close());
+    }
+    confirm.addEventListener("close", () => {
+      this.removing_ = null;
+    });
+
     this.wireSaveBar_();
     this.paint_();
   }
@@ -102,6 +132,13 @@ class DacViewDevices extends DacEditorElement {
     if (!this.draft_ || !this.rendered_) return;
     this.paintDevices_();
     this.syncSaveBar_();
+  }
+
+  onDisconnect() {
+    super.onDisconnect();
+    // A modal that is detached loses its place in the top layer, so it would
+    // come back as a panel stuck in the middle of the page.
+    this.$("#confirm")?.close();
   }
 
   onHass_() {
@@ -160,32 +197,33 @@ class DacViewDevices extends DacEditorElement {
   /**
    * The entity fields for one device.
    *
-   * A charger is asked for its brand first and nothing else: which entities it
-   * has is a brand question, and a screen full of fields that only apply to
-   * somebody else's charger helps nobody. Everything else goes straight to its
-   * power sensor, which every device has -- it is what puts it on the energy
-   * flow at all.
+   * Anything with brands is asked for its brand first and nothing else: which
+   * entities it has is a brand question, and a screen full of fields that only
+   * apply to somebody else's appliance helps nobody. Everything else goes
+   * straight to its power sensor, which every device has -- it is what puts it
+   * on the energy flow at all.
    */
-  chargerHtml_(device, index) {
-    const isCharger = device.type === "laadpaal";
+  brandHtml_(device, index) {
+    const brands = brandsFor(device.type);
     const brand = brandMeta(device);
+    const what = typeMeta(device.type).label.toLowerCase();
 
-    const brandRow = !isCharger
+    const brandRow = !brands.length
       ? ""
       : `
         <div class="row">
           <label for="brand-${index}">Merk</label>
           <select id="brand-${index}" data-field="brand" data-index="${index}">
             <option value=""${device.brand ? "" : " selected"}>Kies een merk…</option>
-            ${CHARGER_BRANDS.map(
+            ${brands.map(
               (b) => `<option value="${b.id}"${b.id === device.brand ? " selected" : ""}>${b.label}</option>`
             ).join("")}
           </select>
-          <span class="sub">Welke gegevens een laadpaal levert, hangt van het merk af. Kies er een en de bijbehorende velden verschijnen.</span>
+          <span class="sub">Welke gegevens een ${what} levert, hangt van het merk af. Kies er een en de bijbehorende velden verschijnen.${brands.some((b) => b.note) ? ` ${brands.filter((b) => b.note).map((b) => b.note).join(" ")}` : ""}</span>
         </div>`;
 
-    // A charger without a brand has nothing to ask for yet.
-    if (isCharger && !brand) return brandRow;
+    // Something with brands but none picked has nothing to ask for yet.
+    if (brands.length && !brand) return brandRow;
 
     const power = `
       <div class="row">
@@ -205,11 +243,73 @@ class DacViewDevices extends DacEditorElement {
       .join("");
 
     const note =
-      isCharger && !extra
+      brands.length && !extra
         ? `<p class="sub">Voor dit merk zijn de velden nog niet uitgewerkt — vermogen wordt wel meegenomen.</p>`
         : "";
 
-    return `${brandRow}${this.integrationHtml_(device, index)}${power}${extra}${this.actionsHtml_(device, index)}${note}`;
+    return `${brandRow}${this.integrationHtml_(device, index)}${power}${extra}${this.buttonsHtml_(device, index)}${this.actionsHtml_(device, index)}${this.programsHtml_(device)}${note}`;
+  }
+
+  /**
+   * The entities this brand is steered through.
+   *
+   * Separate from the readings above: these are the ones that make something
+   * happen, and the customer picking them should know that is what they are.
+   */
+  buttonsHtml_(device, index) {
+    const buttons = brandButtons(device);
+    if (!buttons.length) return "";
+
+    const rows = buttons
+      .map(
+        (button) => `
+        <div class="row">
+          <label>${button.label}</label>
+          <dac-entity-picker data-entity-key="${button.key}" data-index="${index}"></dac-entity-picker>
+          <span class="sub">${button.hint}${button.needed ? " Nodig zodra de coach mag sturen." : ""}</span>
+        </div>`
+      )
+      .join("");
+
+    return `
+      <div class="row">
+        <label>Bediening</label>
+        <span class="sub">Wat er ingedrukt wordt om dit apparaat te laten lopen. Dit is wat de knoppen onder Handmatige besturing op het overzicht doen; de coach doet het nog niet uit zichzelf.</span>
+        <div class="fields">${rows}</div>
+      </div>`;
+  }
+
+  /**
+   * What the panel already knows about this brand's programs.
+   *
+   * Shown because it is what the coach will plan with: the customer should be
+   * able to see that the numbers exist, and that they are specifications rather
+   * than something measured at their house.
+   */
+  programsHtml_(device) {
+    if (brandMeta(device)?.id !== "home_connect" || device.type !== "vaatwasser") return "";
+
+    const rows = DISHWASHER_PROGRAMS.map(
+      (program) => `
+      <tr>
+        <td>${program.label}</td>
+        <td class="tnum">${duration(program.minutes)}</td>
+        <td class="tnum">${program.kwh.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} kWh</td>
+        <td>${PLAN_LABELS[program.plan]}</td>
+      </tr>`
+    ).join("");
+
+    return `
+      <div class="row">
+        <label>Bekende programma's</label>
+        <span class="sub">Wat een programma ongeveer duurt en kost staat in het paneel, zodat de coach straks kan uitrekenen wanneer hij hem het beste kan laten draaien. Dit zijn opgaven van de fabrikant, geen metingen bij jou thuis.</span>
+        <div class="table-scroll">
+          <table class="programs">
+            <thead><tr><th>Programma</th><th>Duur</th><th>Energie</th><th>Verschuiven</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
   }
 
   /**
@@ -278,8 +378,8 @@ class DacViewDevices extends DacEditorElement {
 
   /** Whether the coach may act on this device once it can. */
   controlHtml_(device, index) {
-    // Nothing to decide yet on a charger whose brand is still unknown.
-    if (device.type === "laadpaal" && !brandMeta(device)) return "";
+    // Nothing to decide yet on an appliance whose brand is still unknown.
+    if (brandsFor(device.type).length && !brandMeta(device)) return "";
 
     const missing = missingForControl(device);
     return `
@@ -288,7 +388,7 @@ class DacViewDevices extends DacEditorElement {
                ${device.controllable ? "checked" : ""}>
         <span>
           <strong>De coach mag dit apparaat aansturen</strong>
-          Een apparaat dat alleen op een meetstekker zit, kun je wel volgen maar niet sturen. Zet dit alleen aan bij apparaten die echt te bedienen zijn — sturen zelf komt in een volgende stap.
+          Een apparaat dat alleen op een meetstekker zit, kun je wel volgen maar niet sturen. Zet dit alleen aan bij apparaten die echt te bedienen zijn. Ze komen dan op het overzicht te staan, met een vrijgaveknop en handmatige besturing.
         </span>
       </label>
       <div class="notice"${missing.length ? "" : " hidden"} data-missing="${index}">
@@ -390,7 +490,7 @@ class DacViewDevices extends DacEditorElement {
                        autocomplete="off">
               </div>
             </div>
-            ${this.chargerHtml_(device, index)}
+            ${this.brandHtml_(device, index)}
             ${this.controlHtml_(device, index)}
           </div>
         </section>`;
@@ -437,7 +537,9 @@ class DacViewDevices extends DacEditorElement {
       // A charger reports its status in English keys whatever the language Home
       // Assistant is set to, so the check "is this the right sensor?" is only
       // useful if it reads the same here as on the overview.
-      picker.values = brandFields(devices[index]).find((field) => field.key === key)?.values;
+      const meta = brandEntityFields(devices[index]).find((field) => field.key === key);
+      picker.values = meta?.values;
+      picker.format = meta?.format;
       picker.value = devices[index].entities?.[key] ?? "";
       picker.addEventListener("dac-entity-change", (ev) => {
         const device = this.draft_.devices[index];
@@ -492,19 +594,73 @@ class DacViewDevices extends DacEditorElement {
     }
 
     for (const button of list.querySelectorAll("[data-remove]")) {
-      button.addEventListener("click", () => {
-        this.draft_.devices.splice(Number(button.dataset.remove), 1);
-        this.paintDevices_();
-        this.syncSaveBar_();
-      });
+      button.addEventListener("click", () => this.askRemove_(Number(button.dataset.remove)));
     }
+  }
+
+  /**
+   * Ask before a device disappears.
+   *
+   * The save bar can still undo it, but the two are not the same reassurance:
+   * the bin sits right next to the line you tap to open a device, so the tap
+   * that removes something is exactly the tap you make by accident -- and a
+   * device carries a screen full of entities somebody sat down to fill in.
+   */
+  askRemove_(index) {
+    const device = this.draft_.devices[index];
+    if (!device) return;
+
+    this.removing_ = device.id;
+    this.$("#confirm-title").textContent = deviceLabel(device);
+    this.$("#confirm-sub").textContent = device.entity
+      ? `Dit apparaat verdwijnt uit de lijst, met alles wat je eraan gekoppeld hebt. Opslaan maakt het definitief; tot die tijd kun je het onderaan nog terugdraaien.`
+      : `Dit apparaat verdwijnt uit de lijst. Opslaan maakt het definitief; tot die tijd kun je het onderaan nog terugdraaien.`;
+    this.$("#confirm").showModal();
+  }
+
+  /** Remove the device the dialog was opened for, by id rather than position. */
+  confirmRemove_() {
+    const index = this.draft_.devices.findIndex((device) => device.id === this.removing_);
+    this.$("#confirm").close();
+    this.removing_ = null;
+    if (index < 0) return;
+
+    this.draft_.devices.splice(index, 1);
+    this.paintDevices_();
+    this.syncSaveBar_();
   }
 }
 
 DacViewDevices.css = /* css */ `
   ${editorCss}
+  ${sheetCss}
 
   #device-list { display: flex; flex-direction: column; gap: 12px; }
+
+  /* The programme table is wider than a phone; it scrolls inside its own box
+     rather than making the page scroll sideways. */
+  .table-scroll { overflow-x: auto; margin-top: 8px; }
+  table.programs {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+  table.programs th, table.programs td {
+    padding: 7px 14px 7px 0;
+    text-align: left;
+    border-bottom: 1px solid var(--dac-border);
+  }
+  table.programs th {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--dac-ink-3);
+  }
+  table.programs td { color: var(--dac-ink-2); }
+  table.programs td:first-child { color: var(--dac-ink); font-weight: 500; }
+  table.programs tr:last-child td { border-bottom: 0; }
 
   /* Folded shut a device is one line, so the card is only as tall as that line;
      open, it gets the room its fields need. */

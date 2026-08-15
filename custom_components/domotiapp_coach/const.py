@@ -57,6 +57,22 @@ CHARGER_BRANDS: Final = [
     "overig",
 ]
 
+# --- Dishwasher brands -----------------------------------------------------
+# Same reasoning as the chargers: what a dishwasher reports and how it is
+# started differs per brand. Home Connect covers Bosch, Siemens, Neff,
+# Gaggenau and Constructa in one, because they all speak the same API.
+DISHWASHER_BRANDS: Final = [
+    "home_connect",
+    "miele",
+    "lg",
+    "overig",
+]
+
+# Every brand id the panel may send, whatever the device type. Kept as one set
+# so the websocket schema does not have to know which brands belong to which
+# type -- the panel decides that, and it only ever sends one it offered.
+ALL_BRANDS: Final = sorted({*CHARGER_BRANDS, *DISHWASHER_BRANDS})
+
 # --- Grid metering patterns ------------------------------------------------
 # Customers have one of two: a pair of sensors where one is always zero, or a
 # single sensor that goes negative while feeding back into the grid.
@@ -71,6 +87,13 @@ CONTRACT_DYNAMIC: Final = "dynamic"
 # price, or a market price that still needs tax, markup and VAT applied.
 DYNAMIC_ALL_IN: Final = "all_in"
 DYNAMIC_MARKET: Final = "market"
+
+# How often a dynamic price changes. The Dutch market is moving from hourly to
+# quarter-hourly settlement, and suppliers are following at their own pace, so
+# it is the customer who knows which one their contract is on. It decides the
+# block size the coach plans in.
+PRICE_INTERVAL_HOUR: Final = "hour"
+PRICE_INTERVAL_QUARTER: Final = "quarter"
 
 # Nominal voltage per phase, used to turn the main fuse into a power ceiling.
 # 3 x 25 A -> 17250 W, 1 x 25 A -> 5750 W.
@@ -129,6 +152,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         },
         "dynamic": {
             "source": DYNAMIC_ALL_IN,
+            # Hourly or quarter-hourly. Not derivable from the price sensor:
+            # a sensor that only publishes hourly prices looks exactly the same
+            # as a quarter-hourly one that happens to be flat for an hour.
+            "interval": PRICE_INTERVAL_HOUR,
             # One entity that already includes tax, markup and VAT.
             "all_in_entity": "",
             # Or the bare market price, with the rest added here.
@@ -158,6 +185,15 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             # its rating holds for the better part of an hour.
             "min_duration_seconds": 60,
         },
+        # By when an appliance has to be finished. One entry per device that
+        # has one, as a list rather than a map keyed by device id: the storage
+        # prunes dictionaries against these defaults, which would empty a
+        # free-form map on every load.
+        #
+        # The deadline is what turns "run this when power is cheap" into a
+        # question with an answer. Without one the cheapest moment is always
+        # later, so nothing would ever start.
+        "deadlines": [],
     },
     "devices": [],
     # Device ids the customer has released for steering right now: the

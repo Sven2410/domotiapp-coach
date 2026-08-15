@@ -49,7 +49,7 @@ export const editorCss = /* css */ `
   .row > label { font-size: 13px; font-weight: 500; color: var(--dac-ink); }
   .row > .sub { font-size: 12px; color: var(--dac-ink-3); line-height: 1.45; }
 
-  input[type="text"], input[type="number"], select {
+  input[type="text"], input[type="number"], input[type="time"], select {
     width: 100%;
     padding: 10px 12px;
     border-radius: var(--dac-radius-sm);
@@ -62,7 +62,7 @@ export const editorCss = /* css */ `
   }
   /* See theme.js: below 16px iOS zooms the page in on focus and stays there. */
   @media (pointer: coarse) {
-    input[type="text"], input[type="number"], select, textarea { font-size: 16px; }
+    input[type="text"], input[type="number"], input[type="time"], select, textarea { font-size: 16px; }
   }
   input:focus, select:focus { border-color: var(--dac-accent-hi); outline: none; }
   select { appearance: none; background-image: none; }
