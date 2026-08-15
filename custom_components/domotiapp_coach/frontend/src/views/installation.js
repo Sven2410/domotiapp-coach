@@ -160,6 +160,11 @@ class DacViewInstallation extends DacEditorElement {
                 <span class="sub">Deze prijs wordt ongewijzigd overgenomen.</span>
               </div>
 
+              <div class="notice" id="dyn-missing" hidden>
+                ${icons.warning}
+                <span id="dyn-missing-text"></span>
+              </div>
+
               <div id="dyn-market-fields" class="fields">
                 <div class="row">
                   <label>Marktprijssensor</label>
@@ -277,6 +282,7 @@ class DacViewInstallation extends DacEditorElement {
       picker.placeholder = "Zoek een prijssensor…";
       picker.addEventListener("dac-entity-change", (ev) => {
         this.draft_.contract.dynamic[key] = ev.detail.value;
+        this.paintContract_();
         this.afterChange_();
       });
     }
@@ -357,6 +363,19 @@ class DacViewInstallation extends DacEditorElement {
     // they are misleading: the price already contains them.
     this.$("#dyn-allin-row").style.display = source === "all_in" ? "" : "none";
     this.$("#dyn-market-fields").style.display = source === "market" ? "" : "none";
+
+    // A dynamic contract without the sensor it is supposed to read leaves the
+    // price tile on a dash forever, and nothing on this screen would say why.
+    const entity =
+      source === "all_in" ? contract.dynamic.all_in_entity : contract.dynamic.market_entity;
+    const notice = this.$("#dyn-missing");
+    notice.hidden = !dynamic || Boolean(entity);
+    if (!notice.hidden) {
+      this.$("#dyn-missing-text").textContent =
+        source === "all_in"
+          ? "Er is nog geen all-in prijssensor gekozen, dus de energieprijs blijft leeg op het overzicht."
+          : "Er is nog geen marktprijssensor gekozen, dus de energieprijs blijft leeg op het overzicht.";
+    }
   }
 
   /** The two places the arithmetic is spelled out, so it can be checked. */
@@ -384,26 +403,6 @@ class DacViewInstallation extends DacEditorElement {
 DacViewInstallation.css = /* css */ `
   ${editorCss}
 
-  .segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  @media (max-width: 560px) { .segmented { grid-template-columns: 1fr; } }
-  .segmented button {
-    padding: 12px 14px;
-    border-radius: var(--dac-radius-sm);
-    border: 1px solid var(--dac-border-hi);
-    background: rgba(255,255,255,0.03);
-    color: var(--dac-ink-2);
-    font: inherit;
-    font-size: 13.5px;
-    text-align: left;
-    cursor: pointer;
-    transition: border-color 200ms ease, background 200ms ease, color 200ms ease;
-  }
-  .segmented button strong { display: block; font-weight: 600; color: var(--dac-ink); margin-bottom: 3px; }
-  .segmented button[aria-pressed="true"] {
-    border-color: rgba(25,143,217,0.6);
-    background: var(--dac-accent-soft);
-    color: var(--dac-ink);
-  }
 
 `;
 

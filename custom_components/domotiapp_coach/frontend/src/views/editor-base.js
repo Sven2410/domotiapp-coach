@@ -45,7 +45,8 @@ export const editorCss = /* css */ `
   /* align-content, not the default stretch: two fields side by side where only
      one carries a hint line would otherwise hand the spare height to the other
      one's input, leaving two boxes of different sizes that do not line up. */
-  .row { display: grid; gap: 6px; align-content: start; }
+  .fields, .row { min-width: 0; }
+  .row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; }
   .row > label { font-size: 13px; font-weight: 500; color: var(--dac-ink); }
   .row > .sub { font-size: 12px; color: var(--dac-ink-3); line-height: 1.45; }
 
@@ -64,12 +65,18 @@ export const editorCss = /* css */ `
   @media (pointer: coarse) {
     input[type="text"], input[type="number"], input[type="time"], select, textarea { font-size: 16px; }
   }
+  @supports (-webkit-touch-callout: none) {
+    input[type="text"], input[type="number"], input[type="time"], select, textarea { font-size: 16px; }
+  }
   input:focus, select:focus { border-color: var(--dac-accent-hi); outline: none; }
   select { appearance: none; background-image: none; }
   select option { background: #12120f; color: var(--dac-ink); }
 
-  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  @media (max-width: 560px) { .two { grid-template-columns: 1fr; } }
+  /* minmax(0, 1fr) rather than 1fr: a bare 1fr column never shrinks below the
+     min-content of what is in it, so one wide child pushes the whole column --
+     and with it the page -- past the edge of a phone. */
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+  @media (max-width: 560px) { .two { grid-template-columns: minmax(0, 1fr); } }
 
   /* ---- checkbox ----
      Shared, because every settings screen has these and three copies of the
@@ -92,6 +99,10 @@ export const editorCss = /* css */ `
     accent-color: var(--dac-accent-hi);
     cursor: pointer;
   }
+  /* The text half has to be allowed to shrink and to break. Some of these
+     labels carry an entity or service name -- one unbreakable word wide enough
+     to push the whole row off a narrow phone. */
+  label.check span { min-width: 0; overflow-wrap: anywhere; }
   label.check strong {
     display: block;
     font-size: 13px;
@@ -115,6 +126,31 @@ export const editorCss = /* css */ `
   .notice .icon { width: 16px; height: 16px; flex: 0 0 auto; color: var(--dac-warn); margin-top: 1px; }
   .notice[hidden] { display: none; }
 
+  /* ---- segmented choice ----
+     Two or three mutually exclusive options with a line of explanation each.
+     Shared: Installatie picks a contract with it and Strategie picks how a
+     schedule repeats, and two copies is how they drift apart. */
+  .segmented { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  @media (max-width: 560px) { .segmented { grid-template-columns: minmax(0, 1fr); } }
+  .segmented button {
+    padding: 12px 14px;
+    border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border-hi);
+    background: rgba(255,255,255,0.03);
+    color: var(--dac-ink-2);
+    font: inherit;
+    font-size: 13.5px;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 200ms ease, background 200ms ease, color 200ms ease;
+  }
+  .segmented button strong { display: block; font-weight: 600; color: var(--dac-ink); margin-bottom: 3px; }
+  .segmented button[aria-pressed="true"] {
+    border-color: rgba(25,143,217,0.6);
+    background: var(--dac-accent-soft);
+    color: var(--dac-ink);
+  }
+
   /* ---- save bar ---- */
   .savebar {
     position: fixed;
@@ -128,6 +164,7 @@ export const editorCss = /* css */ `
   }
   .savebar.on { transform: none; }
   .savebar .status { margin-right: auto; font-size: 13px; color: var(--dac-ink-2); }
+  .savebar .status.blocked { color: var(--dac-warn); }
   .savebar button {
     padding: 11px 20px;
     border-radius: var(--dac-radius-pill);
@@ -154,8 +191,18 @@ export const editorCss = /* css */ `
 
   @media (max-width: 560px) {
     /* At phone width the status line and two labels fight for one row and all
-       three wrap. The buttons are what has to stay readable. */
+       three wrap. The buttons are what has to stay readable -- except when the
+       status is the reason the save button will not work, which then gets a
+       line of its own above them. */
+    .savebar { flex-wrap: wrap; }
     .savebar .status { display: none; }
+    .savebar .status.blocked {
+      display: block;
+      flex: 1 0 100%;
+      margin: 0 0 2px;
+      font-size: 12.5px;
+      line-height: 1.4;
+    }
     .savebar button { flex: 1 1 0; white-space: nowrap; text-align: center; }
   }
 
@@ -326,6 +373,24 @@ export class DacEditorElement extends DacElement {
     return JSON.stringify(this.slice_(this.draft_)) !== JSON.stringify(this.slice_(this.saved_));
   }
 
+  /**
+   * Reasons this screen may not be saved, in words the customer can act on.
+   *
+   * Only for settings that promise something the coach cannot deliver: a device
+   * marked steerable without the entities to steer it, a notification switched
+   * on with nobody to send it to. Those save cleanly and then quietly do
+   * nothing, which is the worst of both -- the screen says it is arranged and
+   * the house behaves as if it is not.
+   *
+   * Anything that is merely unfinished is not a blocker. Half an installation
+   * has to be savable, or filling it in over two evenings is impossible.
+   *
+   * @returns {string[]}
+   */
+  blockers_() {
+    return [];
+  }
+
   /** Hook for subclasses that need to push `hass` into child components. */
   onHass_() {}
 
@@ -350,13 +415,29 @@ export class DacEditorElement extends DacElement {
   syncSaveBar_() {
     const dirty = this.dirty_();
     const canSave = this.canEdit_();
+    const blockers = this.blockers_();
     this.applyPermissions_();
+
+    // The bar still comes up when something is blocking: it is where the reason
+    // is written, and a save bar that hides itself when you have made a mistake
+    // leaves you with a screen that will not save and no idea why.
     this.$("#savebar").classList.toggle("on", dirty && canSave);
-    this.$("#save").disabled = !canSave;
-    this.$("#save-status").textContent = dirty ? "Niet-opgeslagen wijzigingen" : "";
+    this.$("#save").disabled = !canSave || blockers.length > 0;
+    this.$("#save-status").textContent = blockers.length
+      ? blockers[0]
+      : dirty
+        ? "Niet-opgeslagen wijzigingen"
+        : "";
+    this.$("#save-status").classList.toggle("blocked", blockers.length > 0);
   }
 
   async save_() {
+    const blockers = this.blockers_();
+    if (blockers.length) {
+      this.toast_(blockers[0], false);
+      return;
+    }
+
     const status = this.$("#save-status");
     const button = this.$("#save");
     button.disabled = true;

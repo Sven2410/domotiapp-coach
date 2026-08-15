@@ -98,10 +98,11 @@ je bent nog ruim op tijd.
 
 ### Apparaten
 
-Elk apparaat heeft een vermogenssensor; dat is wat het op de energiestroom zet.
-Daarnaast geef je per apparaat aan of de coach het straks mag **aansturen** —
-veel apparaten hangen alleen aan een meetstekker en zijn wel te volgen maar niet
-te bedienen.
+Een apparaat kan een vermogenssensor hebben; dat is wat het op de energiestroom
+zet. Verplicht is die niet — lang niet elke vaatwasser meet zijn eigen verbruik,
+en zonder sensor valt er nog steeds prima mee te plannen. Daarnaast geef je per
+apparaat aan of de coach het straks mag **aansturen** — veel apparaten hangen
+alleen aan een meetstekker en zijn wel te volgen maar niet te bedienen.
 
 Bij een **laadpaal** kies je eerst het merk, want welke gegevens een paal levert
 verschilt per fabrikant en lang niet elke paal kan gestart of gepauzeerd worden.
@@ -116,8 +117,14 @@ het overzicht aan te klikken voor precies die gegevens.
 Bij een **vaatwasser** gaat het net zo. **Home Connect** is uitgewerkt — dat is
 wat Bosch, Siemens, Neff, Gaggenau en Constructa allemaal gebruiken — met de
 status, het geselecteerde programma, de resterende tijd en de deurstand, plus de
-knop waarmee gestart wordt. Miele en LG staan in de lijst maar hebben nog geen
-velden.
+knoppen waarmee gestart en gestopt wordt. Miele en LG staan in de lijst maar
+hebben nog geen velden.
+
+Integraties spellen dezelfde waarde niet hetzelfde. Home Assistant's eigen Home
+Connect-integratie meldt `ready`; de alternatieve meldt
+`BSH.Common.EnumType.OperationState.Ready`. Het paneel herkent beide vormen —
+per merk hoeven alleen de woorden zelf te worden opgegeven, niet elke spelling
+ervan.
 
 De deurstand is er **alleen om te laten zien**. Of de vaatwasser mag draaien,
 zegt de klant zelf met de vrijgaveknop: een deur die dichtvalt betekent niet dat
@@ -150,18 +157,32 @@ niet-beheerder: degene die in de keuken staat is nooit de installateur.
 
 Kan een apparaat opdrachten aan, dan staat er ook **Handmatige besturing**. Die
 opent een venster met de opdrachten van dat merk — bij Easee starten, stoppen,
-pauzeren, hervatten en herstarten — en verstuurt de opdracht meteen. Herstarten
+pauzeren, hervatten en herstarten; bij een vaatwasser starten en stoppen, met
+een keuzelijst voor het programma — en verstuurt de opdracht meteen. Herstarten
 staat apart: dat breekt een lopende laadsessie af en de paal is daarna even niet
 bereikbaar.
 
 > De coach stuurt nog niet uit zichzelf. Handmatige besturing is een mens op de
 > knop; wanneer de coach zelf mag ingrijpen is de volgende stap.
 
-### Uiterlijk klaar om
+### Wanneer een apparaat mag draaien
 
-Onder **Strategie** staat per aanstuurbaar apparaat wanneer het klaar moet zijn.
-Binnen die ruimte zoekt de coach straks het goedkoopste moment om te starten —
-zonder zo'n tijd is later altijd goedkoper en zou hij nooit beginnen.
+Onder **Strategie** staat per aanstuurbaar apparaat binnen welke grenzen de
+coach mag werken. Drie tijden, elk apart en elk optioneel:
+
+- **Niet eerder dan** — hiervóór begint hij er niet aan, hoe goedkoop de stroom
+  ook is.
+- **Uiterlijk starten om** — op deze tijd start hij hoe dan ook.
+- **Uiterlijk klaar om** — hier rekent hij de starttijd van terug.
+
+Alleen invullen wat je belangrijk vindt. Wie alleen wil dat de vaatwasser vóór
+het ontbijt klaar is, vult één tijd in en laat de rest leeg. Minstens één van de
+drie is wel nodig: zonder enige grens is later altijd goedkoper en begint de
+coach nooit.
+
+Dat kan **elke dag hetzelfde** of **per dag**, want een zaterdag is geen
+dinsdag. Per dag zijn het dezelfde drie tijden, en dagen die je uitvinkt slaat
+hij over.
 
 Het scherm rekent meteen terug: staat Eco 50 °C klaar en moet de vaatwasser om
 07:00 klaar zijn, dan staat eronder dat starten uiterlijk om 03:15 moet. Zo zie
@@ -169,6 +190,17 @@ je op de plek waar je de tijd invult of hij haalbaar is.
 
 Vrijgeven blijft daarnaast nodig. Een tijd instellen is niet hetzelfde als
 toestemming geven.
+
+### Wat niet opgeslagen kan worden
+
+Instellingen die iets beloven wat niet kan gebeuren, blokkeren het opslaan; de
+reden staat in de balk onderin. Dat zijn er twee: een apparaat dat op
+"aansturen" staat zonder de entiteiten die daarvoor nodig zijn, en de melding
+Zware belasting zonder ontvanger. Allebei sloegen ze eerder gewoon op en deden
+daarna niets.
+
+Wat alleen nog niet af is, blokkeert niets. Een installatie moet over twee
+avonden ingevuld kunnen worden.
 
 ### Contract
 

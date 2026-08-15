@@ -65,7 +65,10 @@ export const CHARGER_BRANDS = [
         fallback: "reboot",
         icon: "reboot",
         care: true,
-        hint: "Start de laadpaal opnieuw op. Een lopende laadsessie stopt daarmee; de paal is een halve minuut niet bereikbaar.",
+        // `note` is what stands under the button in the manual controls; a
+        // `hint` belongs to the settings screen and would read as instructions
+        // from another room here.
+        note: "Start de laadpaal opnieuw op. Een lopende laadsessie stopt daarmee; de paal is een halve minuut niet bereikbaar.",
       },
     ],
     fields: [
@@ -214,29 +217,66 @@ export const PLAN_LABELS = {
 };
 
 /**
- * Every spelling a program arrives in, pointing at the same program.
+ * The same value, however an integration chose to spell it.
  *
- * Home Assistant's own Home Connect integration reports
- * `dishcare_dishwasher_program_eco_50`; the alternative integration reports
- * `Dishcare.Dishwasher.Program.Eco50`. Both are the customer's dishwasher
- * saying "Eco 50", so both have to land on the same row.
+ * The appliance world has no agreement here at all. Home Assistant's own Home
+ * Connect integration reports `ready` and `dishcare_dishwasher_program_eco_50`;
+ * the alternative integration reports the raw API names
+ * `BSH.Common.EnumType.OperationState.Ready` and
+ * `Dishcare.Dishwasher.Program.Eco50`; a third might send `Ready` or
+ * `READY`. All of them are the same machine saying the same thing.
+ *
+ * Stripping everything that is not a letter or a digit and lower-casing gets
+ * the two long forms to agree with each other; taking the part after the last
+ * dot gets the qualified names to agree with the short ones. Between them
+ * every spelling seen so far lands on the same key, and a brand added later
+ * only has to list the words themselves.
  */
-const PROGRAM_BY_VALUE = new Map(
+const squash = (raw) => String(raw ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+const tail = (raw) => squash(String(raw ?? "").split(".").pop());
+
+/** Index a brand's value map by every spelling its keys could arrive in. */
+function spellings(values) {
+  const index = new Map();
+  for (const [key, label] of Object.entries(values ?? {})) {
+    index.set(squash(key), label);
+    index.set(tail(key), label);
+  }
+  return index;
+}
+
+/** Look one value up, trying the exact word first and the spellings after. */
+export function valueLabel(values, raw) {
+  if (!values) return undefined;
+  const exact = values[raw];
+  if (exact !== undefined) return exact;
+
+  // Built once per map and kept on the map itself: these are module constants,
+  // and rebuilding the index for every reading of every sensor is work that
+  // repeats a few times a second.
+  let index = SPELLING_CACHE.get(values);
+  if (!index) {
+    index = spellings(values);
+    SPELLING_CACHE.set(values, index);
+  }
+  return index.get(squash(raw)) ?? index.get(tail(raw));
+}
+
+const SPELLING_CACHE = new WeakMap();
+
+/** What to show instead of a raw program value. */
+export const DISHWASHER_PROGRAM_VALUES = Object.fromEntries(
   DISHWASHER_PROGRAMS.flatMap((program) => [
-    [`dishcare_dishwasher_program_${program.key}`, program],
-    [`Dishcare.Dishwasher.Program.${program.alias}`, program],
-    [program.key, program],
-    [program.alias, program],
+    [`dishcare_dishwasher_program_${program.key}`, program.label],
+    [`Dishcare.Dishwasher.Program.${program.alias}`, program.label],
   ])
 );
 
-/** The program behind a sensor value, or undefined for one we do not know. */
-export const programFor = (raw) => PROGRAM_BY_VALUE.get(String(raw ?? ""));
+const PROGRAM_BY_LABEL = new Map(DISHWASHER_PROGRAMS.map((program) => [program.label, program]));
 
-/** What to show instead of a raw program value, for every spelling of it. */
-const PROGRAM_VALUES = Object.fromEntries(
-  [...PROGRAM_BY_VALUE].map(([value, program]) => [value, program.label])
-);
+/** The program behind a sensor value, or undefined for one we do not know. */
+export const programFor = (raw) =>
+  PROGRAM_BY_LABEL.get(valueLabel(DISHWASHER_PROGRAM_VALUES, raw));
 
 export const DISHWASHER_BRANDS = [
   {
@@ -269,7 +309,7 @@ export const DISHWASHER_BRANDS = [
         hint: "Welk programma klaarstaat. Daar hangt aan vast hoe lang het duurt en wat het kost — die gegevens zitten in het paneel.",
         filter: "all",
         needed: true,
-        values: PROGRAM_VALUES,
+        values: DISHWASHER_PROGRAM_VALUES,
       },
       {
         key: "remaining",
@@ -307,7 +347,19 @@ export const DISHWASHER_BRANDS = [
         hint: "De knop die het geselecteerde programma start. Bij Home Connect heet die meestal \"Start\" of \"Start/Pauze\". De vaatwasser moet wel op afstand gestart mogen worden.",
         filter: "all",
       },
+      {
+        key: "stop",
+        label: "Stoppen",
+        icon: "stop",
+        care: true,
+        hint: "De knop die een lopend programma afbreekt. Optioneel: zonder deze knop kan de coach een programma wel starten maar niet meer terugdraaien.",
+        note: "Breekt het lopende programma af. De vaatwasser begint daarna weer van voren af aan.",
+        filter: "all",
+      },
     ],
+    // The program is set through the same entity that reports it, as long as
+    // that entity is one you can write to. Nothing extra to fill in for it.
+    programField: "program",
   },
   { id: "miele", label: "Miele", fields: [] },
   { id: "lg", label: "LG", fields: [] },
@@ -400,8 +452,27 @@ export function deviceCommands(device) {
   return commands;
 }
 
+/**
+ * The entity that both reports and sets the program, when there is one.
+ *
+ * Only entities you can actually write to count: plenty of integrations expose
+ * the selected program as a read-only sensor next to a `select` that changes
+ * it, and offering a dropdown that silently does nothing is worse than not
+ * offering one.
+ */
+export function programChooser(device) {
+  const key = brandMeta(device)?.programField;
+  const entityId = key ? device?.entities?.[key] : undefined;
+  if (!entityId) return undefined;
+
+  const domain = entityId.split(".")[0];
+  if (domain !== "select" && domain !== "input_select") return undefined;
+  return { entityId, domain };
+}
+
 /** Whether there is anything to send to this device at all. */
-export const canCommand = (device) => deviceCommands(device).length > 0;
+export const canCommand = (device) =>
+  deviceCommands(device).length > 0 || Boolean(programChooser(device));
 
 /**
  * What the customer presses to say a device may run right now.

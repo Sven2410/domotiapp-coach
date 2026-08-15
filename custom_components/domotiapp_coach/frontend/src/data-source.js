@@ -16,7 +16,7 @@
  * export (naar het net).
  */
 
-import { brandFields, programFor } from "./devices.js";
+import { brandFields, programFor, valueLabel } from "./devices.js";
 import { countdown, duration, toWatts } from "./format.js";
 
 const PHASES = ["l1", "l2", "l3"];
@@ -128,7 +128,7 @@ function deviceDetails(feed, device) {
     // we know them and passed through where we do not.
     const text =
       (field.format === "countdown" ? countdown(raw, unit) : null) ??
-      field.values?.[raw] ??
+      valueLabel(field.values, raw) ??
       (Number.isFinite(number)
         ? `${number.toLocaleString("nl-NL", { maximumFractionDigits: 2 })}${unit ? ` ${unit}` : ""}`
         // A word we have no translation for is still shown -- readable, but

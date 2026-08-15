@@ -86,14 +86,34 @@ _DEVICE = _schema(
     }
 )
 
-# When an appliance has to be finished, per device. "" for the time means the
-# customer has not picked one yet, which is not the same as a deadline that is
-# switched off.
-_DEADLINE = _schema(
+# A time of day, or "" for "the customer does not care about this one" -- which
+# is not the same as a schedule that is switched off.
+_TIME = vol.Any("", vol.Match(r"^([01]\d|2[0-3]):[0-5]\d$"))
+
+_WINDOW = {
+    vol.Optional("not_before", default=""): _TIME,
+    vol.Optional("start_by", default=""): _TIME,
+    vol.Optional("done_by", default=""): _TIME,
+}
+
+# One weekday of a per-day schedule. 0 is Monday, the way a week is written
+# down here.
+_PLAN_DAY = _schema(
+    {
+        vol.Required("day"): vol.All(vol.Coerce(int), vol.Range(0, 6)),
+        vol.Optional("enabled", default=True): bool,
+        **_WINDOW,
+    }
+)
+
+# When an appliance may run, per device.
+_SCHEDULE = _schema(
     {
         vol.Required("device"): str,
         vol.Optional("enabled", default=False): bool,
-        vol.Optional("time", default=""): vol.Any("", vol.Match(r"^([01]\d|2[0-3]):[0-5]\d$")),
+        vol.Optional("per_day", default=False): bool,
+        vol.Optional("window"): _schema(dict(_WINDOW)),
+        vol.Optional("days", default=list): vol.All([_PLAN_DAY], vol.Length(max=7)),
     }
 )
 
@@ -132,7 +152,7 @@ _SETTINGS = _schema(
                         ),
                     }
                 ),
-                vol.Optional("deadlines"): [_DEADLINE],
+                vol.Optional("schedules"): [_SCHEDULE],
             }
         ),
         vol.Optional("installation"): _schema(

@@ -14,7 +14,7 @@
 import { define } from "../base.js";
 import { icons } from "../icons.js";
 import { canHaveDeadline, deviceLabel, programFor, typeMeta } from "../devices.js";
-import { duration } from "../format.js";
+import { clock, duration } from "../format.js";
 import {
   DacEditorElement,
   adminNoticeHtml,
@@ -34,6 +34,55 @@ const INTERVALS = [5, 10, 15, 30, 60, 120, 240];
  * everything under five seconds is one of those.
  */
 const HOLDS = [5, 10, 30, 60, 120, 300];
+
+/** Monday first, the way a week is written down here. */
+const DAYS = ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"];
+const DAYS_SHORT = ["ma", "di", "wo", "do", "vr", "za", "zo"];
+
+/**
+ * The three edges of a planning window, all optional.
+ *
+ * They answer different questions and a customer usually cares about one of
+ * them: never before bedtime, started before I leave, finished before I get
+ * up. Insisting on all three would be asking for answers nobody has.
+ */
+const TIMES = [
+  {
+    key: "not_before",
+    label: "Niet eerder dan",
+    short: "Niet eerder dan",
+    hint: "Vóór deze tijd begint de coach er niet aan, hoe goedkoop de stroom ook is.",
+  },
+  {
+    key: "start_by",
+    label: "Uiterlijk starten om",
+    short: "Starten vóór",
+    hint: "Op deze tijd start hij hoe dan ook, ook als het dan een duur moment is.",
+  },
+  {
+    key: "done_by",
+    label: "Uiterlijk klaar om",
+    short: "Klaar om",
+    hint: "Hier rekent de coach de starttijd van terug, met de duur van het programma dat klaarstaat.",
+  },
+];
+
+/** The one line under a device's name on the list. */
+function planSummary_(plan, on) {
+  if (!on) return "Niet ingepland — de coach laat dit apparaat met rust.";
+
+  if (plan.per_day) {
+    const days = plan.days
+      .filter((day) => day.enabled && (day.not_before || day.start_by || day.done_by))
+      .map((day) => DAYS_SHORT[day.day]);
+    return `Per dag · ${days.join(", ")}`;
+  }
+
+  const parts = TIMES.filter((time) => plan.window[time.key]).map(
+    (time) => `${time.short.toLowerCase()} ${plan.window[time.key]}`
+  );
+  return `Elke dag · ${parts.join(" · ")}`;
+}
 
 /**
  * The notifications, in the order they are listed.
@@ -160,17 +209,30 @@ class DacViewStrategy extends DacEditorElement {
             <label class="check" for="klaar-enabled">
               <input type="checkbox" id="klaar-enabled">
               <span>
-                <strong>Uiterlijk klaar op een vaste tijd</strong>
-                Zonder dit heeft de coach geen reden om te beginnen: er komt altijd nog een goedkoper moment.
+                <strong>Plan dit apparaat in</strong>
+                Zonder dit laat de coach het apparaat met rust; je bedient het dan zelf.
               </span>
             </label>
 
             <div id="klaar-fields" class="fields">
               <div class="row">
-                <label for="klaar-time">Klaar om</label>
-                <input type="time" id="klaar-time" step="300">
-                <span class="sub" id="klaar-hint"></span>
+                <label>Voor welke dagen?</label>
+                <div class="segmented" id="klaar-mode">
+                  <button type="button" data-mode="same" aria-pressed="false">
+                    <strong>Elke dag hetzelfde</strong>
+                    Eén stel tijden voor de hele week.
+                  </button>
+                  <button type="button" data-mode="per-day" aria-pressed="false">
+                    <strong>Per dag</strong>
+                    In het weekend andere tijden dan doordeweeks.
+                  </button>
+                </div>
               </div>
+
+              <div id="klaar-same" class="fields"></div>
+              <div id="klaar-days" class="plan-days"></div>
+
+              <p class="sub" id="klaar-hint"></p>
 
               <div class="notice">
                 ${icons.warning}
@@ -270,20 +332,28 @@ class DacViewStrategy extends DacEditorElement {
     });
 
     this.$("#klaar-enabled").addEventListener("change", (ev) => {
-      const deadline = this.deadlineFor_(this.paneDevice_, true);
-      deadline.enabled = ev.target.checked;
-      // Switching it on with no time set would leave the coach with a rule it
-      // cannot act on, so it starts at a time somebody would plausibly pick.
-      if (deadline.enabled && !deadline.time) deadline.time = "07:00";
+      const plan = this.planFor_(this.paneDevice_, true);
+      plan.enabled = ev.target.checked;
+      // Switching it on with nothing filled in would leave the coach with a
+      // rule it cannot act on, so one time is offered to start from.
+      if (plan.enabled && !this.planTimes_(plan).length) plan.window.done_by = "07:00";
       this.paintKlaar_();
       this.afterChange_();
     });
 
-    this.$("#klaar-time").addEventListener("input", (ev) => {
-      this.deadlineFor_(this.paneDevice_, true).time = ev.target.value;
-      this.paintKlaarHint_();
-      this.afterChange_();
-    });
+    for (const button of this.$$("#klaar-mode button")) {
+      button.addEventListener("click", () => {
+        const plan = this.planFor_(this.paneDevice_, true);
+        plan.per_day = button.dataset.mode === "per-day";
+        // Moving to per-day starts from what was already set for every day, so
+        // the switch is a starting point rather than an empty form.
+        if (plan.per_day && !plan.days.length) {
+          plan.days = DAYS.map((_, day) => ({ day, enabled: true, ...plan.window }));
+        }
+        this.paintKlaar_();
+        this.afterChange_();
+      });
+    }
 
     this.wireSaveBar_();
     this.paintPane_();
@@ -299,29 +369,78 @@ class DacViewStrategy extends DacEditorElement {
     return this.draft_.strategy.load_alert;
   }
 
-  /** The devices that can have a time by which they must be finished. */
+  /** The devices that can be planned. */
   deadlineDevices_() {
     return (this.draft_?.devices ?? []).filter(canHaveDeadline);
   }
 
   /**
-   * The deadline for one device.
+   * The schedule for one device.
    *
    * A list rather than a map keyed by device id, because the storage prunes
    * dictionaries against its defaults and would empty a free-form map on every
    * load. `create` is false while only reading: adding an empty entry just
    * because a screen was opened would light up the save bar for nothing.
    */
-  deadlineFor_(deviceId, create = false) {
+  planFor_(deviceId, create = false) {
     const strategy = this.draft_.strategy;
-    if (!Array.isArray(strategy.deadlines)) strategy.deadlines = [];
+    if (!Array.isArray(strategy.schedules)) strategy.schedules = [];
 
-    const found = strategy.deadlines.find((entry) => entry.device === deviceId);
-    if (found || !create) return found ?? { device: deviceId, enabled: false, time: "" };
+    const fresh = () => ({
+      device: deviceId,
+      enabled: false,
+      per_day: false,
+      window: { not_before: "", start_by: "", done_by: "" },
+      days: [],
+    });
 
-    const fresh = { device: deviceId, enabled: false, time: "" };
-    strategy.deadlines.push(fresh);
-    return fresh;
+    let found = strategy.schedules.find((entry) => entry.device === deviceId);
+    if (!found) {
+      if (!create) return fresh();
+      found = fresh();
+      strategy.schedules.push(found);
+    }
+
+    // Settings written by an older version, or by hand, may be missing a half.
+    found.window ??= { not_before: "", start_by: "", done_by: "" };
+    found.days ??= [];
+    return found;
+  }
+
+  /** The windows a schedule actually uses: one, or one per active day. */
+  planWindows_(plan) {
+    if (!plan.per_day) return [plan.window];
+    return plan.days.filter((day) => day.enabled);
+  }
+
+  /** Every time that is filled in, across the whole schedule. */
+  planTimes_(plan) {
+    return this.planWindows_(plan)
+      .flatMap((window) => [window?.not_before, window?.start_by, window?.done_by])
+      .filter(Boolean);
+  }
+
+  /**
+   * Two settings here promise something and then do nothing.
+   *
+   * A notification with nobody to send it to is switched on and silent. A
+   * schedule with no times in it has no window to plan inside, so the coach
+   * would never pick a moment. Both look arranged on screen and are not.
+   */
+  blockers_() {
+    const out = [];
+    const alert = this.draft_?.strategy?.load_alert;
+    if (alert?.enabled && !(alert.targets ?? []).length) {
+      out.push("Zware belasting staat aan, maar er is niemand geselecteerd om het bericht naar te sturen.");
+    }
+
+    for (const device of this.deadlineDevices_()) {
+      const plan = this.planFor_(device.id);
+      if (plan.enabled && !this.planTimes_(plan).length) {
+        out.push(`${deviceLabel(device)} is ingepland, maar er staat geen enkele tijd in.`);
+      }
+    }
+    return out;
   }
 
   /** The summary on the list is part of the same edit, so it follows along. */
@@ -402,8 +521,9 @@ class DacViewStrategy extends DacEditorElement {
       .join("");
 
     devices.forEach((device, index) => {
-      const deadline = this.deadlineFor_(device.id);
-      const on = Boolean(deadline.enabled && deadline.time);
+      const plan = this.planFor_(device.id);
+      const times = this.planTimes_(plan);
+      const on = Boolean(plan.enabled && times.length);
 
       // Names are the customer's own text, so they go in as text.
       holder.querySelector(`[data-device-name="${index}"]`).textContent = deviceLabel(device);
@@ -412,9 +532,7 @@ class DacViewStrategy extends DacEditorElement {
       state.textContent = on ? "Aan" : "Uit";
       state.classList.toggle("on", on);
 
-      holder.querySelector(`[data-device-sum="${index}"]`).textContent = on
-        ? `Uiterlijk klaar om ${deadline.time}`
-        : "Geen tijd ingesteld — de coach laat dit apparaat met rust.";
+      holder.querySelector(`[data-device-sum="${index}"]`).textContent = planSummary_(plan, on);
     });
 
     for (const link of holder.querySelectorAll("[data-device]")) {
@@ -435,20 +553,133 @@ class DacViewStrategy extends DacEditorElement {
       return;
     }
 
-    const deadline = this.deadlineFor_(device.id);
+    const plan = this.planFor_(device.id);
     this.$("#klaar-eyebrow").textContent = typeMeta(device.type).label;
     this.$("#klaar-title").textContent = deviceLabel(device);
     this.$("#klaar-intro").textContent =
-      "Zeg tot wanneer de coach de tijd heeft. Binnen die ruimte kiest hij zelf het goedkoopste moment om te starten — bij zon op het dak, of bij een laag tarief.";
+      "Zeg binnen welke grenzen de coach mag werken. Vul alleen in wat je belangrijk vindt — elk van de drie tijden mag leeg blijven.";
 
-    this.$("#klaar-enabled").checked = Boolean(deadline.enabled);
-    this.$("#klaar-time").value = deadline.time || "";
-    this.$("#klaar-fields").style.display = deadline.enabled ? "" : "none";
+    this.$("#klaar-enabled").checked = Boolean(plan.enabled);
+    this.$("#klaar-fields").style.display = plan.enabled ? "" : "none";
+
+    for (const button of this.$$("#klaar-mode button")) {
+      button.setAttribute(
+        "aria-pressed",
+        String((button.dataset.mode === "per-day") === Boolean(plan.per_day))
+      );
+    }
+
+    this.$("#klaar-same").hidden = Boolean(plan.per_day);
+    this.$("#klaar-days").hidden = !plan.per_day;
+
+    if (plan.per_day) this.paintPlanDays_(plan);
+    else this.paintPlanWindow_(plan);
+
     this.paintKlaarHint_();
   }
 
+  /** The three times, for a schedule that is the same every day. */
+  paintPlanWindow_(plan) {
+    const holder = this.$("#klaar-same");
+    holder.innerHTML = TIMES.map(
+      (time) => `
+      <div class="row">
+        <label for="w-${time.key}">${time.label}</label>
+        <div class="time-field">
+          <input type="time" id="w-${time.key}" step="300" data-window="${time.key}">
+          <button type="button" class="wipe" data-wipe="${time.key}" aria-label="${time.label} leegmaken">${icons.close}</button>
+        </div>
+        <span class="sub">${time.hint}</span>
+      </div>`
+    ).join("");
+
+    for (const time of TIMES) {
+      const input = holder.querySelector(`[data-window="${time.key}"]`);
+      input.value = plan.window[time.key] || "";
+      input.addEventListener("input", () => {
+        this.planFor_(this.paneDevice_, true).window[time.key] = input.value;
+        this.paintKlaarHint_();
+        this.afterChange_();
+      });
+      holder.querySelector(`[data-wipe="${time.key}"]`).addEventListener("click", () => {
+        this.planFor_(this.paneDevice_, true).window[time.key] = "";
+        input.value = "";
+        this.paintKlaarHint_();
+        this.afterChange_();
+      });
+    }
+  }
+
+  /** The same three times, once per weekday. */
+  paintPlanDays_(plan) {
+    const holder = this.$("#klaar-days");
+    holder.innerHTML = DAYS.map(
+      (name, day) => `
+      <div class="plan-day">
+        <label class="check day" for="d-${day}">
+          <input type="checkbox" id="d-${day}" data-day="${day}">
+          <span><strong>${name}</strong></span>
+        </label>
+        <div class="day-times" data-times="${day}">
+          ${TIMES.map(
+            (time) => `
+            <div class="row">
+              <label for="d-${day}-${time.key}">${time.short}</label>
+              <div class="time-field">
+                <input type="time" id="d-${day}-${time.key}" step="300" data-day-time="${day}:${time.key}">
+                <button type="button" class="wipe" data-day-wipe="${day}:${time.key}" aria-label="${time.label} leegmaken">${icons.close}</button>
+              </div>
+            </div>`
+          ).join("")}
+        </div>
+      </div>`
+    ).join("");
+
+    for (let day = 0; day < DAYS.length; day += 1) {
+      const entry = this.planDay_(plan, day);
+      const box = holder.querySelector(`[data-day="${day}"]`);
+      box.checked = Boolean(entry.enabled);
+      holder.querySelector(`[data-times="${day}"]`).style.display = entry.enabled ? "" : "none";
+
+      box.addEventListener("change", () => {
+        this.planDay_(this.planFor_(this.paneDevice_, true), day).enabled = box.checked;
+        this.paintKlaar_();
+        this.afterChange_();
+      });
+
+      for (const time of TIMES) {
+        const input = holder.querySelector(`[data-day-time="${day}:${time.key}"]`);
+        input.value = entry[time.key] || "";
+        input.addEventListener("input", () => {
+          this.planDay_(this.planFor_(this.paneDevice_, true), day)[time.key] = input.value;
+          this.paintKlaarHint_();
+          this.afterChange_();
+        });
+        holder
+          .querySelector(`[data-day-wipe="${day}:${time.key}"]`)
+          .addEventListener("click", () => {
+            this.planDay_(this.planFor_(this.paneDevice_, true), day)[time.key] = "";
+            input.value = "";
+            this.paintKlaarHint_();
+            this.afterChange_();
+          });
+      }
+    }
+  }
+
+  /** One weekday of a schedule, added on demand. */
+  planDay_(plan, day) {
+    let entry = plan.days.find((item) => item.day === day);
+    if (!entry) {
+      entry = { day, enabled: true, not_before: "", start_by: "", done_by: "" };
+      plan.days.push(entry);
+      plan.days.sort((a, b) => a.day - b.day);
+    }
+    return entry;
+  }
+
   /**
-   * What the chosen time means for the appliance in front of you.
+   * What the chosen times mean for the appliance in front of you.
    *
    * The program's length comes from the panel's own table of specifications, so
    * it is spelled out as an estimate -- the point is that "klaar om 07:00"
@@ -458,26 +689,36 @@ class DacViewStrategy extends DacEditorElement {
   paintKlaarHint_() {
     const hint = this.$("#klaar-hint");
     const device = this.deadlineDevices_().find((item) => item.id === this.paneDevice_);
-    const deadline = device ? this.deadlineFor_(device.id) : null;
+    if (!device) return;
 
-    if (!deadline?.time) {
-      hint.textContent = "Kies een tijd. De coach zorgt dat het programma dan afgelopen is.";
+    const plan = this.planFor_(device.id);
+    if (!this.planTimes_(plan).length) {
+      hint.textContent =
+        "Nog geen tijd ingevuld. Zolang er geen enkele grens staat, is later altijd goedkoper en begint de coach nooit.";
       return;
     }
 
     const program = this.selectedProgram_(device);
+    const doneBy = plan.per_day
+      ? plan.days.find((day) => day.enabled && day.done_by)?.done_by
+      : plan.window.done_by;
+
+    if (!doneBy) {
+      hint.textContent =
+        "De coach kiest binnen deze grenzen het goedkoopste moment om te starten.";
+      return;
+    }
     if (!program) {
-      hint.textContent = `Het programma is dan afgelopen, niet pas begonnen. Hoe lang het duurt leest de coach van het apparaat af.`;
+      hint.textContent =
+        "Klaar om is het einde van het programma, niet het begin. Hoe lang het duurt leest de coach van het apparaat af.";
       return;
     }
 
-    const [hours, minutes] = deadline.time.split(":").map(Number);
+    const [hours, minutes] = doneBy.split(":").map(Number);
     const start = new Date();
     start.setHours(hours, minutes - program.minutes, 0, 0);
-    const clockText = start.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" });
 
-    hint.textContent =
-      `${program.label} duurt ongeveer ${duration(program.minutes)}, dus starten moet uiterlijk om ${clockText}.`;
+    hint.textContent = `${program.label} duurt ongeveer ${duration(program.minutes)}, dus starten moet uiterlijk om ${clock(start)}.`;
   }
 
   /** The program the appliance has standing by, if the panel knows it. */
@@ -526,8 +767,15 @@ class DacViewStrategy extends DacEditorElement {
     if (!this.rendered_ || !this.draft_) return;
 
     const holder = this.$("#targets");
-    const available = this.targets_();
     const chosen = new Set(this.alert_().targets ?? []);
+    // A phone that was reinstalled, renamed or removed leaves its notify
+    // service behind in the settings and nowhere else. The notification then
+    // fails in the integration's log and nobody ever finds out, so the stale
+    // name is listed here rather than quietly kept: it is checked, it says
+    // what is wrong with it, and unchecking is how you get rid of it.
+    const known = this.targets_();
+    const stale = [...chosen].filter((name) => !known.includes(name));
+    const available = [...known, ...stale];
 
     if (!available.length) {
       holder.innerHTML = `<p class="empty">Er zijn nog geen notify-diensten in Home Assistant. Die verschijnen zodra de mobiele app op een telefoon is ingelogd.</p>`;
@@ -538,11 +786,11 @@ class DacViewStrategy extends DacEditorElement {
     holder.innerHTML = available
       .map(
         (name) => `
-        <label class="check target" for="tgt-${name}">
+        <label class="check target${stale.includes(name) ? " gone" : ""}" for="tgt-${name}">
           <input type="checkbox" id="tgt-${name}" data-target="${name}"${chosen.has(name) ? " checked" : ""}>
           <span>
             <strong>${this.prettyTarget_(name)}</strong>
-            notify.${name}
+            notify.${name}${stale.includes(name) ? " — bestaat niet meer in Home Assistant" : ""}
           </span>
         </label>`
       )
@@ -563,9 +811,14 @@ class DacViewStrategy extends DacEditorElement {
   }
 
   targetsHint_() {
-    const count = (this.alert_().targets ?? []).length;
-    if (!count) return "Niemand geselecteerd — er wordt dan niets verstuurd.";
-    return count === 1 ? "1 ontvanger" : `${count} ontvangers`;
+    const chosen = this.alert_().targets ?? [];
+    if (!chosen.length) return "Niemand geselecteerd — er wordt dan niets verstuurd.";
+
+    const known = this.targets_();
+    const stale = chosen.filter((name) => !known.includes(name)).length;
+    const base = chosen.length === 1 ? "1 ontvanger" : `${chosen.length} ontvangers`;
+    if (!stale) return base;
+    return `${base}, waarvan ${stale === 1 ? "één die niet meer bestaat" : `${stale} die niet meer bestaan`}. Vink die uit, anders mislukt de melding.`;
   }
 }
 
@@ -690,13 +943,55 @@ DacViewStrategy.css = /* css */ `
 
   label.check.target span { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
   label.check.target strong { font-family: var(--dac-font); font-size: 13.5px; }
+  label.check.target.gone { border-color: rgba(250,178,25,0.45); background: rgba(250,178,25,0.08); }
+  label.check.target.gone:has(input:checked) { border-color: rgba(250,178,25,0.45); background: rgba(250,178,25,0.08); }
+  label.check.target.gone span { color: var(--dac-warn); }
 
   #targets { display: grid; gap: 8px; }
   .empty { margin: 0; font-size: 13px; color: var(--dac-ink-3); line-height: 1.55; }
 
+  /* ---- planning ---- */
   /* A clock is four characters wide; a field the width of the card invites the
      idea that something longer belongs in it. */
-  #klaar-time { max-width: 190px; }
+  .time-field { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .time-field input[type="time"] { max-width: 170px; }
+  .time-field .wipe {
+    flex: 0 0 auto;
+    width: 34px; height: 34px;
+    display: grid; place-items: center;
+    padding: 0;
+    border: 1px solid var(--dac-border);
+    border-radius: var(--dac-radius-pill);
+    background: transparent;
+    color: var(--dac-ink-3);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .time-field .wipe:hover { color: var(--dac-ink); border-color: var(--dac-border-hi); }
+  .time-field .wipe .icon { width: 13px; height: 13px; }
+
+  .plan-days { display: grid; gap: 10px; }
+  .plan-days[hidden], #klaar-same[hidden] { display: none; }
+  .plan-day {
+    padding: 12px 14px 14px;
+    border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border);
+    background: rgba(255,255,255,0.022);
+    min-width: 0;
+  }
+  .plan-day label.check.day {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    margin-bottom: 10px;
+  }
+  .plan-day label.check.day:has(input:checked) { background: transparent; border: 0; }
+  .plan-day .day-times {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(0, 210px));
+    gap: 10px;
+  }
+  .plan-day .day-times label { font-size: 12px; color: var(--dac-ink-3); font-weight: 500; }
 `;
 
 define("dac-view-strategy", DacViewStrategy);
