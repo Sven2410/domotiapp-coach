@@ -185,15 +185,24 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             # its rating holds for the better part of an hour.
             "min_duration_seconds": 60,
         },
-        # By when an appliance has to be finished. One entry per device that
-        # has one, as a list rather than a map keyed by device id: the storage
-        # prunes dictionaries against these defaults, which would empty a
-        # free-form map on every load.
+        # When an appliance may run. One entry per device, as a list rather
+        # than a map keyed by device id: the storage prunes dictionaries
+        # against these defaults, which would empty a free-form map on every
+        # load. Nested dictionaries inside a list item are left alone, so the
+        # shape of an entry is free.
         #
-        # The deadline is what turns "run this when power is cheap" into a
-        # question with an answer. Without one the cheapest moment is always
-        # later, so nothing would ever start.
-        "deadlines": [],
+        # Three times, all optional and all meaning something different:
+        # `not_before` is the earliest it may start, `start_by` the latest it
+        # may start, `done_by` the moment it has to be finished. A customer who
+        # only cares about one of them fills in one of them.
+        #
+        # At least one of the three is what turns "run this when power is
+        # cheap" into a question with an answer. Without any of them the
+        # cheapest moment is always later, so nothing would ever start.
+        #
+        # `per_day` swaps the single window for one per weekday, because
+        # weekends are not weekdays.
+        "schedules": [],
     },
     "devices": [],
     # Device ids the customer has released for steering right now: the

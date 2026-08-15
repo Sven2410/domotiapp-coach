@@ -14,11 +14,14 @@
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
 import {
+  DISHWASHER_PROGRAM_VALUES,
   canCommand,
   deviceCommands,
   deviceLabel,
+  programChooser,
   releaseCopy,
   typeMeta,
+  valueLabel,
 } from "../devices.js";
 import { LiveSource } from "../data-source.js";
 import { level, levelTone, percent, power, powerText, price as fmtPrice } from "../format.js";
@@ -275,6 +278,7 @@ class DacViewOverview extends DacElement {
       gap: 8px;
       margin-top: 14px;
       overflow-x: auto;
+      overscroll-behavior-x: contain;
       scrollbar-width: none;
       scroll-snap-type: x proximity;
       padding-bottom: 2px;
@@ -393,7 +397,7 @@ class DacViewOverview extends DacElement {
     /* ---- manual control ---- */
     ${sheetCss}
 
-    .cmd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
+    .cmd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; margin-top: 16px; }
     .cmd {
       display: flex; align-items: center; gap: 10px;
       min-height: 50px;
@@ -416,6 +420,27 @@ class DacViewOverview extends DacElement {
     .cmd.care { grid-column: 1 / -1; }
     .cmd.care .icon { color: var(--dac-warn); }
     .cmd-note { grid-column: 1 / -1; margin: -2px 0 0; font-size: 12px; line-height: 1.45; color: var(--dac-ink-3); }
+
+    .cmd-pick { display: grid; gap: 6px; margin-top: 16px; min-width: 0; }
+    .cmd-pick[hidden] { display: none; }
+    .cmd-pick label { font-size: 13px; font-weight: 500; color: var(--dac-ink); }
+    .cmd-pick select {
+      width: 100%;
+      min-width: 0;
+      min-height: 46px;
+      padding: 11px 12px;
+      border-radius: var(--dac-radius-sm);
+      border: 1px solid var(--dac-border-hi);
+      background: rgba(255,255,255,0.04);
+      color: var(--dac-ink);
+      font: inherit; font-size: 14px;
+      appearance: none;
+    }
+    .cmd-pick select:disabled { opacity: 0.45; }
+    .cmd-pick select option { background: #12120f; color: var(--dac-ink); }
+    .cmd-pick .cmd-note { margin: 0; }
+    @media (pointer: coarse) { .cmd-pick select { font-size: 16px; } }
+    @supports (-webkit-touch-callout: none) { .cmd-pick select { font-size: 16px; } }
 
     .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
     .legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dac-ink-2); }
@@ -511,6 +536,11 @@ class DacViewOverview extends DacElement {
             <button class="sheet-close" type="button" id="manual-close" aria-label="Sluiten">${icons.close}</button>
           </div>
           <p class="sheet-sub" id="manual-sub"></p>
+          <div class="cmd-pick" id="manual-pick" hidden>
+            <label for="manual-program">Programma</label>
+            <select id="manual-program"></select>
+            <p class="cmd-note" id="manual-program-note"></p>
+          </div>
           <div class="cmd-grid" id="manual-grid"></div>
           <p class="sheet-status" id="manual-status" role="status" aria-live="polite"></p>
         </dialog>
@@ -531,6 +561,9 @@ class DacViewOverview extends DacElement {
 
     const sheet = this.$("#manual");
     this.$("#manual-close").addEventListener("click", () => sheet.close());
+    this.$("#manual-program").addEventListener("change", (event) =>
+      this.chooseProgram_(event.target.value)
+    );
     // Tapping the darkened area closes it. The hit test is on coordinates
     // rather than the target alone, because a click on the dialog's own padding
     // also reports the dialog as its target.
@@ -1003,6 +1036,7 @@ class DacViewOverview extends DacElement {
     this.$("#manual-sub").textContent =
       "Deze opdrachten gaan rechtstreeks naar het apparaat. De coach stuurt nog niets uit zichzelf.";
     this.setManualStatus_("", "");
+    this.paintProgramPicker_(device);
 
     // Labels and hints are the panel's own text, not the customer's, so they go
     // in as markup along with their icons.
@@ -1012,7 +1046,7 @@ class DacViewOverview extends DacElement {
         <button class="cmd${action.care ? " care" : ""}" type="button" data-cmd="${index}">
           ${icons[action.icon] ?? ""}<span>${action.label}</span>
         </button>
-        ${action.hint ? `<p class="cmd-note">${action.hint}</p>` : ""}`
+        ${action.note ? `<p class="cmd-note">${action.note}</p>` : ""}`
       )
       .join("");
 
@@ -1023,6 +1057,73 @@ class DacViewOverview extends DacElement {
     }
 
     this.$("#manual").showModal();
+  }
+
+  /**
+   * The program dropdown, when the appliance has one that can be written to.
+   *
+   * The options are the machine's own -- read off the entity rather than out of
+   * the panel's table, because what a particular dishwasher offers is a fact
+   * about that dishwasher. The table only supplies the names, and anything not
+   * in it keeps the wording the appliance used.
+   */
+  paintProgramPicker_(device) {
+    const holder = this.$("#manual-pick");
+    const select = this.$("#manual-program");
+    const chooser = programChooser(device);
+
+    holder.hidden = !chooser;
+    if (!chooser) return;
+
+    const state = this.feed_?.get(chooser.entityId);
+    const options = state?.attributes?.options ?? [];
+    this.programEntity_ = chooser.entityId;
+
+    select.replaceChildren(
+      ...options.map((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        // Names come from the appliance, so they go in as text.
+        option.textContent = valueLabel(DISHWASHER_PROGRAM_VALUES, value) ?? value;
+        option.selected = value === state?.state;
+        return option;
+      })
+    );
+
+    select.disabled = !options.length;
+    this.$("#manual-program-note").textContent = options.length
+      ? "Kiezen zet het programma klaar; starten doe je met de knop eronder."
+      : "Deze entiteit geeft geen keuzes terug, dus er valt hier niets te kiezen.";
+  }
+
+  /** Put the chosen program on the machine. */
+  async chooseProgram_(value) {
+    if (!this.programEntity_ || !this.hass || this.sending_) return;
+
+    this.sending_ = true;
+    this.setManualButtons_(true);
+    this.setManualStatus_("Programma instellen…", "");
+
+    const [domain] = this.programEntity_.split(".");
+    try {
+      await this.hass.callService(domain, "select_option", {
+        entity_id: this.programEntity_,
+        option: value,
+      });
+      this.setManualStatus_("Programma ingesteld.", "good");
+    } catch (error) {
+      console.warn("[DomotiApp Coach] programma instellen mislukt", error);
+      this.setManualStatus_(
+        `Het programma instellen is niet gelukt: ${error?.message || "het apparaat gaf geen antwoord"}.`,
+        "bad"
+      );
+      // Back to what the machine actually has, so the dropdown never shows a
+      // program that was never set.
+      this.paintProgramPicker_(this.manualDevice_);
+    } finally {
+      this.sending_ = false;
+      this.setManualButtons_(false);
+    }
   }
 
   /**
@@ -1065,6 +1166,8 @@ class DacViewOverview extends DacElement {
   /** One command at a time -- two in flight would race in the charger. */
   setManualButtons_(busy) {
     for (const button of this.$$("#manual-grid .cmd")) button.disabled = busy;
+    const select = this.$("#manual-program");
+    if (!this.$("#manual-pick").hidden) select.disabled = busy || !select.options.length;
   }
 
   /** Supporting line for a tile, or an honest blank when there is no reading. */

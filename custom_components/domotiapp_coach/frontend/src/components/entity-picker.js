@@ -21,6 +21,7 @@
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
 import { countdown, moment, power, toWatts } from "../format.js";
+import { valueLabel } from "../devices.js";
 
 /** How many options to render at once -- enough to browse, not enough to lag. */
 const MAX_OPTIONS = 60;
@@ -44,7 +45,17 @@ const MATCHERS = {
 
 class DacEntityPicker extends DacElement {
   static css = /* css */ `
-    :host { display: block; position: relative; }
+    /*
+     * min-width: 0 is not cosmetic.
+     *
+     * A grid or flex item defaults to a minimum size of its own min-content,
+     * and this one's min-content is a text field plus two buttons -- about
+     * 270px. Inside a 1fr column on a narrow phone that silently widened the
+     * whole column past the screen, and the page could be panned sideways ever
+     * after. It is the same trap for every component that gets dropped into a
+     * settings row, so it is fixed here rather than at each call site.
+     */
+    :host { display: block; position: relative; min-width: 0; }
 
     .field {
       display: flex;
@@ -74,6 +85,7 @@ class DacEntityPicker extends DacElement {
     input::placeholder { color: var(--dac-ink-3); }
     /* See theme.js: below 16px iOS zooms the page in on focus and stays there. */
     @media (pointer: coarse) { input { font-size: 16px; } }
+    @supports (-webkit-touch-callout: none) { input { font-size: 16px; } }
 
     button {
       flex: 0 0 auto;
@@ -518,7 +530,7 @@ class DacEntityPicker extends DacElement {
       // help -- checking that the right entity was picked.
       now.textContent =
         (this.format_ === "countdown" ? countdown(state.state, unit) : null) ??
-        this.values_?.[state.state] ??
+        valueLabel(this.values_, state.state) ??
         moment(state.state) ??
         (unit ? `${state.state} ${unit}` : state.state);
     }

@@ -187,6 +187,30 @@ class DacViewDevices extends DacEditorElement {
       .sort((a, b) => a.label.localeCompare(b.label, "nl"));
   }
 
+  /**
+   * A device may not be marked steerable without the means to steer it.
+   *
+   * Saving it worked before, and then nothing happened: the box stayed ticked,
+   * the device turned up on the overview with a vrijgaveknop, and the commands
+   * it needed were never there. Better to refuse the save and say which field
+   * is missing, on the card that is missing it.
+   */
+  blockers_() {
+    const broken = (this.draft_?.devices ?? [])
+      .map((device) => ({ device, missing: missingForControl(device) }))
+      .filter((entry) => entry.missing.length);
+
+    if (!broken.length) return [];
+
+    const [first] = broken;
+    if (broken.length === 1) {
+      return [`${deviceLabel(first.device)}: om te kunnen sturen ${missingText(first.missing)}.`];
+    }
+    return [
+      `${broken.length} apparaten kunnen nog niet gestuurd worden, om te beginnen ${deviceLabel(first.device)}.`,
+    ];
+  }
+
   /** Everything is filled in and stored, so the list goes back to being a list. */
   afterSave_() {
     if (!this.open_.size) return;
@@ -417,27 +441,43 @@ class DacViewDevices extends DacEditorElement {
     line.classList.toggle("warn", warn);
   }
 
+  /** Whether another device is already reading the same power sensor. */
+  sharesSensor_(device) {
+    return (this.draft_?.devices ?? []).some(
+      (other) => other !== device && other.entity && other.entity === device.entity
+    );
+  }
+
   /** How a device reads when it is folded shut. */
   summary_(device) {
     // Whatever is missing outranks everything else: a device that cannot be
     // steered while it is set to be steered is the one thing worth saying on a
     // folded-shut line.
     const missing = missingForControl(device);
-    if (missing.length) return { text: `voor sturing ${missingText(missing)}`, warn: true };
-    if (device.type === "laadpaal" && !device.brand) {
+    if (missing.length) return { text: `om te kunnen sturen ${missingText(missing)}`, warn: true };
+    if (brandsFor(device.type).length && !device.brand) {
       return { text: "nog geen merk gekozen", warn: true };
+    }
+    // Two devices on one power sensor means the energy flow counts those watts
+    // twice, and the second bubble is a copy of the first. Almost always a
+    // sensor picked in a hurry.
+    if (device.entity && this.sharesSensor_(device)) {
+      return { text: `${device.entity} zit al op een ander apparaat`, warn: true };
     }
 
     // The sensor is the one thing worth checking without opening the card: it is
-    // what decides whether this device shows up on the overview at all. The type
-    // only earns a place when the heading above it is a name of the customer's
-    // own, otherwise it would say the same word twice.
-    const what = device.entity || "nog geen vermogenssensor";
+    // what decides whether this device shows up in the energy flow. Not having
+    // one is a fair choice rather than a mistake -- plenty of appliances are
+    // worth steering without being metered -- so it is stated plainly and not
+    // in the warning colour. The type only earns a place when the heading above
+    // it is a name of the customer's own, otherwise it would say the same word
+    // twice.
+    const what = device.entity || "geen vermogenssensor";
     const brand = brandMeta(device)?.label;
     const prefix = brand ?? ((device.name ?? "").trim() ? typeMeta(device.type).label : "");
     return {
       text: prefix ? `${prefix} · ${what}` : what,
-      warn: !device.entity,
+      warn: false,
     };
   }
 
@@ -639,7 +679,7 @@ DacViewDevices.css = /* css */ `
 
   /* The programme table is wider than a phone; it scrolls inside its own box
      rather than making the page scroll sideways. */
-  .table-scroll { overflow-x: auto; margin-top: 8px; }
+  .table-scroll { overflow-x: auto; overscroll-behavior-x: contain; margin-top: 8px; }
   table.programs {
     width: 100%;
     border-collapse: collapse;

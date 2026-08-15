@@ -103,6 +103,13 @@ export const baseCss = /* css */ `
   @media (pointer: coarse) {
     input, select, textarea { font-size: 16px; }
   }
+  /* Belt and braces for iOS, where the zoom happens and where the pointer media
+     query is not always the coarse one -- an iPad with a trackpad reports fine,
+     and the same webview still zooms. -webkit-touch-callout only exists on
+     Safari's mobile engine, so nothing else is affected. */
+  @supports (-webkit-touch-callout: none) {
+    input, select, textarea { font-size: 16px; }
+  }
 
   :focus-visible {
     outline: 2px solid var(--dac-accent-hi);

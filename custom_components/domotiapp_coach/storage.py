@@ -57,6 +57,65 @@ def _merge(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _forget_removed_devices(data: dict[str, Any]) -> dict[str, Any]:
+    """Drop everything that points at a device that no longer exists.
+
+    Two settings name a device rather than containing it: the list of devices
+    the customer has released for steering, and the schedules that say when an
+    appliance may run. Delete the dishwasher under Apparaten and both would
+    stay behind -- invisible, because every screen only lists what is still
+    there, and quietly back in force the day a new device happened to be given
+    the same id.
+
+    Done here rather than in the panel because the panel saves one section at a
+    time: the screen that removes a device is not the screen that owns the
+    schedules, and it must not send that section along.
+    """
+    known = {device.get("id") for device in data.get("devices", []) if isinstance(device, dict)}
+
+    data["ready_devices"] = [item for item in data.get("ready_devices", []) if item in known]
+
+    strategy = data.get("strategy")
+    if isinstance(strategy, dict):
+        strategy["schedules"] = [
+            entry
+            for entry in strategy.get("schedules", [])
+            if isinstance(entry, dict) and entry.get("device") in known
+        ]
+
+    return data
+
+
+def _migrate(stored: dict[str, Any]) -> dict[str, Any]:
+    """Bring a settings file written by an older version up to date.
+
+    Runs before the defaults are merged in, so it works on exactly what was on
+    disk. Without this the rename below would simply drop the customer's
+    setting on the floor: pruning removes keys the current version does not
+    know, and it cannot tell a removed setting from a renamed one.
+    """
+    strategy = stored.get("strategy")
+    if not isinstance(strategy, dict):
+        return stored
+
+    # v0.9.0 had a single "klaar om" time per device; v0.10.0 has a window of
+    # three times, of which that one is `done_by`.
+    if "deadlines" in strategy and "schedules" not in strategy:
+        strategy["schedules"] = [
+            {
+                "device": entry.get("device", ""),
+                "enabled": bool(entry.get("enabled")),
+                "per_day": False,
+                "window": {"not_before": "", "start_by": "", "done_by": entry.get("time", "")},
+                "days": [],
+            }
+            for entry in strategy.get("deadlines", [])
+            if isinstance(entry, dict) and entry.get("device")
+        ]
+
+    return stored
+
+
 class SettingsStore:
     """Load, cache and save the panel's settings."""
 
@@ -68,17 +127,19 @@ class SettingsStore:
     async def async_load(self) -> dict[str, Any]:
         """Return the settings, filling in anything a newer version added."""
         if self._data is None:
-            stored = await self._store.async_load() or {}
+            stored = _migrate(await self._store.async_load() or {})
             # Defaults are merged in on every load, so a settings file written by
             # an older version still gains the keys a newer one expects -- and
             # pruned afterwards, so it loses the ones that are gone.
-            self._data = _prune(DEFAULT_SETTINGS, _merge(DEFAULT_SETTINGS, stored))
+            self._data = _forget_removed_devices(
+                _prune(DEFAULT_SETTINGS, _merge(DEFAULT_SETTINGS, stored))
+            )
         return copy.deepcopy(self._data)
 
     async def async_save(self, changes: dict[str, Any]) -> dict[str, Any]:
         """Merge `changes` into the settings, persist them and return the result."""
         current = await self.async_load()
-        self._data = _prune(DEFAULT_SETTINGS, _merge(current, changes))
+        self._data = _forget_removed_devices(_prune(DEFAULT_SETTINGS, _merge(current, changes)))
         await self._store.async_save(self._data)
         return copy.deepcopy(self._data)
 
