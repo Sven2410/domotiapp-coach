@@ -18,6 +18,7 @@ import {
   canCommand,
   deviceCommands,
   deviceLabel,
+  deviceLabelMap,
   programChooser,
   releaseCopy,
   typeMeta,
@@ -818,6 +819,9 @@ class DacViewOverview extends DacElement {
    */
   updateSteerable_(devices) {
     const card = this.$("#steerable");
+    // Numbered over every device, not just the steerable ones, so two
+    // dishwashers keep the same numbers here as under Strategie.
+    this.labels_ = deviceLabelMap(devices);
     const list = (devices ?? []).filter((device) => device.controllable);
 
     card.hidden = !list.length;
@@ -832,6 +836,11 @@ class DacViewOverview extends DacElement {
       this.buildSteerable_(list);
     }
     this.fillSteerable_(list);
+  }
+
+  /** This device's name, with two of a kind told apart. */
+  labelFor_(device) {
+    return this.labels_?.get(device.id) ?? deviceLabel(device);
   }
 
   buildSteerable_(list) {
@@ -901,7 +910,7 @@ class DacViewOverview extends DacElement {
       const on = ready.has(device.id);
 
       // Names and readings are the customer's own, so they go in as text.
-      this.$(`[data-name="${slot}"]`).textContent = deviceLabel(device);
+      this.$(`[data-name="${slot}"]`).textContent = this.labelFor_(device);
       this.$(`[data-now="${slot}"]`).textContent = powerText(device.watts);
 
       const rows = this.$(`[data-rows="${slot}"]`);
@@ -931,7 +940,7 @@ class DacViewOverview extends DacElement {
 
       const name = this.$(`[data-tab-name="${slot}"]`);
       if (name) {
-        name.textContent = deviceLabel(device);
+        name.textContent = this.labelFor_(device);
         this.$(`[data-tab-dot="${slot}"]`).classList.toggle("on", on);
         this.$(`[data-tab-state="${slot}"]`).textContent = on ? " — vrijgegeven" : "";
       }
@@ -1032,7 +1041,7 @@ class DacViewOverview extends DacElement {
     this.manualDevice_ = device;
     this.manualActions_ = deviceCommands(device);
 
-    this.$("#manual-title").textContent = deviceLabel(device);
+    this.$("#manual-title").textContent = this.labelFor_(device);
     this.$("#manual-sub").textContent =
       "Deze opdrachten gaan rechtstreeks naar het apparaat. De coach stuurt nog niets uit zichzelf.";
     this.setManualStatus_("", "");

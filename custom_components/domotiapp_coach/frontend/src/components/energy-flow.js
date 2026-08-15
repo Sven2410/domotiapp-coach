@@ -23,7 +23,7 @@
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
 import { power, powerText } from "../format.js";
-import { ACTIVE_WATTS, deviceLabel, typeMeta } from "../devices.js";
+import { ACTIVE_WATTS, deviceLabel, deviceLabelMap, typeMeta } from "../devices.js";
 
 /** Below this width the wide layout stops being legible and it goes portrait. */
 const NARROW_AT = 470;
@@ -343,8 +343,16 @@ class DacEnergyFlow extends DacElement {
     this.updateDevices_(reading.devices);
   }
 
+  /** This device's name, with two of a kind told apart. */
+  labelFor_(device) {
+    return this.labels_?.get(device.id) ?? deviceLabel(device);
+  }
+
   /** Fill the two device slots and hide whatever is left over. */
   updateDevices_(devices) {
+    // Numbered over the whole list before anything is filtered or summed, so a
+    // bubble carries the same name as the card it opens.
+    this.labels_ = deviceLabelMap(devices);
     const { slots } = chooseBubbles(devices);
     this.slots_ = slots;
 
@@ -364,7 +372,7 @@ class DacEnergyFlow extends DacElement {
       }
 
       const rolled = device.rolled?.length ?? 0;
-      const label = rolled ? `+ ${rolled} andere` : deviceLabel(device);
+      const label = rolled ? `+ ${rolled} andere` : this.labelFor_(device);
       const iconKey = rolled ? "overig" : typeMeta(device.type).icon;
 
       node.querySelector("[data-icon]").innerHTML = icons[iconKey];
@@ -390,7 +398,7 @@ class DacEnergyFlow extends DacElement {
   get bubbles() {
     return (this.slots_ ?? []).map((device, index) => ({
       tone: index === 0 ? "var(--dac-device-1)" : "var(--dac-device-2)",
-      label: device.rolled?.length ? `+ ${device.rolled.length} andere` : deviceLabel(device),
+      label: device.rolled?.length ? `+ ${device.rolled.length} andere` : this.labelFor_(device),
     }));
   }
 
@@ -476,7 +484,7 @@ class DacEnergyFlow extends DacElement {
 
     const rolled = device.rolled ?? [];
     const rows = rolled.length
-      ? rolled.map((dev) => ({ k: deviceLabel(dev), v: powerText(dev.watts) }))
+      ? rolled.map((dev) => ({ k: this.labelFor_(dev), v: powerText(dev.watts) }))
       : [
           { k: "Vermogen", v: powerText(device.watts) },
           ...(device.details ?? []).map((row) => ({ k: row.label, v: row.text })),
@@ -487,7 +495,7 @@ class DacEnergyFlow extends DacElement {
 
     const detail = this.$("#detail");
     this.openSlot_ = slot;
-    this.$("#detail-title").textContent = rolled.length ? "Ook aan" : deviceLabel(device);
+    this.$("#detail-title").textContent = rolled.length ? "Ook aan" : this.labelFor_(device);
 
     // Values come from the customer's own sensors, so they go in as text.
     this.$("#detail-list").replaceChildren(

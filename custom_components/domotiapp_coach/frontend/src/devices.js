@@ -559,6 +559,37 @@ export function deviceLabel(device) {
 }
 
 /**
+ * Labels for a whole list, with duplicates told apart.
+ *
+ * Two dishwashers with no names of their own are both "Vaatwasser", and on a
+ * list where each row is a thing you can set separately that is unusable. They
+ * get a number, in the order they were added -- not a guess at which is which,
+ * just enough to see that they are two. Giving them names is the better answer
+ * and the screens say so; this is what happens until somebody does.
+ */
+export function deviceLabelMap(devices) {
+  const labels = deviceLabels(devices);
+  return new Map((devices ?? []).map((device, index) => [device.id, labels[index]]));
+}
+
+export function deviceLabels(devices) {
+  const counts = new Map();
+  for (const device of devices ?? []) {
+    const label = deviceLabel(device);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+
+  const seen = new Map();
+  return (devices ?? []).map((device) => {
+    const label = deviceLabel(device);
+    if (counts.get(label) === 1) return label;
+    const nth = (seen.get(label) ?? 0) + 1;
+    seen.set(label, nth);
+    return `${label} ${nth}`;
+  });
+}
+
+/**
  * Power above which a device counts as running.
  *
  * Standby draw is real -- a dishwasher sitting idle still reports a few watts --

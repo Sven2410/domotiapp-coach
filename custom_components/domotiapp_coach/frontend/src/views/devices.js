@@ -22,6 +22,7 @@ import {
   brandMeta,
   brandsFor,
   deviceLabel,
+  deviceLabelMap,
   missingForControl,
   typeMeta,
 } from "../devices.js";
@@ -204,10 +205,10 @@ class DacViewDevices extends DacEditorElement {
 
     const [first] = broken;
     if (broken.length === 1) {
-      return [`${deviceLabel(first.device)}: om te kunnen sturen ${missingText(first.missing)}.`];
+      return [`${this.labelFor_(first.device)}: om te kunnen sturen ${missingText(first.missing)}.`];
     }
     return [
-      `${broken.length} apparaten kunnen nog niet gestuurd worden, om te beginnen ${deviceLabel(first.device)}.`,
+      `${broken.length} apparaten kunnen nog niet gestuurd worden, om te beginnen ${this.labelFor_(first.device)}.`,
     ];
   }
 
@@ -441,6 +442,24 @@ class DacViewDevices extends DacEditorElement {
     line.classList.toggle("warn", warn);
   }
 
+  /**
+   * This device's name, with two of a kind told apart.
+   *
+   * Two dishwashers added without names are both "Vaatwasser", and this list is
+   * where you would be deleting one of them.
+   */
+  labelFor_(device) {
+    return deviceLabelMap(this.draft_?.devices).get(device.id) ?? deviceLabel(device);
+  }
+
+  /** Whether another device would read exactly the same on a list. */
+  sharesLabel_(device) {
+    const label = deviceLabel(device);
+    return (this.draft_?.devices ?? []).some(
+      (other) => other !== device && deviceLabel(other) === label
+    );
+  }
+
   /** Whether another device is already reading the same power sensor. */
   sharesSensor_(device) {
     return (this.draft_?.devices ?? []).some(
@@ -528,6 +547,11 @@ class DacViewDevices extends DacEditorElement {
                        value="${(device.name ?? "").replace(/"/g, "&quot;")}"
                        placeholder="${device.type === "overig" ? "Bijvoorbeeld: serverkast" : "optioneel"}"
                        autocomplete="off">
+                ${
+                  this.sharesLabel_(device)
+                    ? `<span class="sub">Er staan er twee van dit type. Zonder eigen naam heten ze hier en op het overzicht "${typeMeta(device.type).label} 1" en "${typeMeta(device.type).label} 2"; met een naam weet je meteen welke welke is.</span>`
+                    : ""
+                }
               </div>
             </div>
             ${this.brandHtml_(device, index)}
@@ -540,7 +564,7 @@ class DacViewDevices extends DacEditorElement {
     // Names are the customer's own text and the entity id comes from Home
     // Assistant, so neither goes in through innerHTML.
     for (const [index, device] of devices.entries()) {
-      list.querySelector(`[data-title="${index}"]`).textContent = deviceLabel(device);
+      list.querySelector(`[data-title="${index}"]`).textContent = this.labelFor_(device);
       list.querySelector(`[data-summary="${index}"]`).textContent = this.summary_(device).text;
     }
 
@@ -625,7 +649,7 @@ class DacViewDevices extends DacEditorElement {
           // caret away.
           this.paintDevices_();
         } else if (field === "name") {
-          list.querySelector(`[data-title="${index}"]`).textContent = deviceLabel(device);
+          list.querySelector(`[data-title="${index}"]`).textContent = this.labelFor_(device);
           this.paintSummary_(index);
         }
 
@@ -651,7 +675,7 @@ class DacViewDevices extends DacEditorElement {
     if (!device) return;
 
     this.removing_ = device.id;
-    this.$("#confirm-title").textContent = deviceLabel(device);
+    this.$("#confirm-title").textContent = this.labelFor_(device);
     this.$("#confirm-sub").textContent = device.entity
       ? `Dit apparaat verdwijnt uit de lijst, met alles wat je eraan gekoppeld hebt. Opslaan maakt het definitief; tot die tijd kun je het onderaan nog terugdraaien.`
       : `Dit apparaat verdwijnt uit de lijst. Opslaan maakt het definitief; tot die tijd kun je het onderaan nog terugdraaien.`;
