@@ -248,7 +248,7 @@ class DacViewDevices extends DacEditorElement {
       </div>`;
   }
 
-  /** The words this brand wants for start, stop, pause and resume. */
+  /** The words this brand wants for start, stop, pause, resume and reboot. */
   actionsHtml_(device, index) {
     const actions = brandActions(device);
     if (!actions.length) return "";
@@ -271,7 +271,7 @@ class DacViewDevices extends DacEditorElement {
     return `
       <div class="row">
         <label>Opdrachten</label>
-        <span class="sub">Wat er naar <code>${brand.service}</code> gestuurd wordt als <code>${brand.field}</code>. De ingevulde woorden zijn wat Easee vandaag gebruikt; wijkt jouw paal af, dan pas je ze hier aan. Er wordt nog niets verstuurd — dit is de voorbereiding op het sturen zelf.</span>
+        <span class="sub">Wat er naar <code>${brand.service}</code> gestuurd wordt als <code>${brand.field}</code>. De ingevulde woorden zijn wat Easee vandaag gebruikt; wijkt jouw paal af, dan pas je ze hier aan. Dit is wat de knoppen onder Handmatige besturing op het overzicht versturen; de coach stuurt nog niet uit zichzelf.</span>
         <div class="two commands">${fields}</div>
       </div>`;
   }
@@ -434,6 +434,10 @@ class DacViewDevices extends DacEditorElement {
       picker.filter = "all";
       picker.placeholder = "Zoek een entiteit…";
       picker.stateFeed = this.feed_;
+      // A charger reports its status in English keys whatever the language Home
+      // Assistant is set to, so the check "is this the right sensor?" is only
+      // useful if it reads the same here as on the overview.
+      picker.values = brandFields(devices[index]).find((field) => field.key === key)?.values;
       picker.value = devices[index].entities?.[key] ?? "";
       picker.addEventListener("dac-entity-change", (ev) => {
         const device = this.draft_.devices[index];

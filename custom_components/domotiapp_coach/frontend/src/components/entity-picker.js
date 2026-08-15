@@ -207,6 +207,18 @@ class DacEntityPicker extends DacElement {
     if (this.rendered_) this.paintChosen_();
   }
 
+  /**
+   * Dutch for a sensor that answers in words.
+   *
+   * Optional, and only for the reading shown under the chosen entity: an
+   * integration that reports `not_requesting_current` should read the same here
+   * as it does on the overview.
+   */
+  set values(map) {
+    this.values_ = map ?? null;
+    if (this.rendered_) this.paintChosen_();
+  }
+
   /** State object for an entity, from the feed when there is one. */
   state_(entityId) {
     if (!entityId) return undefined;
@@ -494,7 +506,8 @@ class DacEntityPicker extends DacElement {
       const { value, unit: shown } = power(watts);
       now.textContent = `${value} ${shown}`;
     } else {
-      now.textContent = unit ? `${state.state} ${unit}` : state.state;
+      now.textContent =
+        this.values_?.[state.state] ?? (unit ? `${state.state} ${unit}` : state.state);
     }
   }
 }

@@ -173,6 +173,20 @@ export const icons = {
      <path d="M6.4 6.6 7.3 19a1.4 1.4 0 0 0 1.4 1.3h6.6a1.4 1.4 0 0 0 1.4-1.3l.9-12.4"/>`
   ),
   search: svg(`<circle cx="11" cy="11" r="6.6"/><path d="m16 16 4.4 4.4"/>`),
+
+  // ---- manual control ------------------------------------------------------
+  // Each command gets its own shape: on a row of buttons that all do something
+  // to the same charger, colour and label alone are not enough to tell them
+  // apart at a glance.
+
+  play: svg(`<path d="M8 5.4 19 12 8 18.6z"/>`),
+  stop: svg(`<rect x="6.4" y="6.4" width="11.2" height="11.2" rx="1.8"/>`),
+  pause: svg(`<path d="M9.4 5.6v12.8M14.6 5.6v12.8"/>`),
+  resume: svg(`<path d="M5.4 5.6v12.8"/><path d="M9.4 5.4 19.4 12l-10 6.6z"/>`),
+  reboot: svg(
+    `<path d="M20 12a8 8 0 1 1-2.6-5.9"/>
+     <path d="M20.4 4.2v4.6h-4.6"/>`
+  ),
   warning: svg(
     `<path d="M12 3.6 21.2 19.4H2.8z"/>
      <path d="M12 9.6v4.4"/>

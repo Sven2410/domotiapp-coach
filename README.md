@@ -108,26 +108,34 @@ verschilt per fabrikant en lang niet elke paal kan gestart of gepauzeerd worden.
 Easee is uitgewerkt: de Easee-integratie zelf (daar komt het `device_id` uit dat
 `easee.action_command` nodig heeft), status, reden geen stroomvraag,
 levensduurverbruik, maximale limiet en stroom, plus de woorden voor starten,
-stoppen, pauzeren en hervatten. Die woorden staan voorgevuld op wat Easee vandaag
-gebruikt en zijn aan te passen. Zaptec, Wallbox, Zappi en Peblar staan in de
+stoppen, pauzeren, hervatten en herstarten. Die woorden staan voorgevuld op wat
+Easee vandaag gebruikt en zijn aan te passen. Zaptec, Wallbox, Zappi en Peblar staan in de
 lijst maar hebben nog geen eigen velden. Draait een apparaat, dan is zijn bol op
 het overzicht aan te klikken voor precies die gegevens.
 
 ### Aanstuurbare apparaten
 
 Alles wat op "mag aangestuurd worden" staat, komt op het overzicht in een eigen
-kaart met dezelfde gegevens en één knop: **vrijgeven**. Daarmee zegt de klant dat
-het apparaat nú mee mag doen — de vaatwasser is ingeruimd en de klep zit dicht,
-de auto hangt eraan. Zonder die knop zou de coach straks een lege vaatwasser
-laten spoelen omdat de zon toevallig schijnt, en dat is de enige informatie die
-geen sensor kan leveren.
+kaart met dezelfde gegevens. Boven de kaarten staan de namen op een rij: je kiest
+er één en die kaart staat er, in plaats van alle kaarten onder elkaar — op een
+telefoon scrol je anders langs het hele rijtje voordat je bij de energiestroom
+bent.
 
-Vrijgeven mag iedereen die in Home Assistant is ingelogd, ook een niet-beheerder:
-degene die in de keuken staat is nooit de installateur.
+Elke kaart heeft een knop **vrijgeven**. Daarmee zegt de klant dat het apparaat
+nú mee mag doen — de vaatwasser is ingeruimd en de klep zit dicht, de auto hangt
+eraan. Zonder die knop zou de coach straks een lege vaatwasser laten spoelen
+omdat de zon toevallig schijnt, en dat is de enige informatie die geen sensor kan
+leveren. Vrijgeven mag iedereen die in Home Assistant is ingelogd, ook een
+niet-beheerder: degene die in de keuken staat is nooit de installateur.
 
-> Sturen zelf zit er nog niet in. Wat er nu staat is de voorbereiding: de
-> gegevens, de opdrachten en de vrijgave. Er wordt nog niets naar een apparaat
-> gestuurd.
+Kan een apparaat opdrachten aan, dan staat er ook **Handmatige besturing**. Die
+opent een venster met de opdrachten van dat merk — bij Easee starten, stoppen,
+pauzeren, hervatten en herstarten — en verstuurt de opdracht meteen. Herstarten
+staat apart: dat breekt een lopende laadsessie af en de paal is daarna even niet
+bereikbaar.
+
+> De coach stuurt nog niet uit zichzelf. Handmatige besturing is een mens op de
+> knop; wanneer de coach zelf mag ingrijpen is de volgende stap.
 
 ### Contract
 
