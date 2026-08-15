@@ -13,7 +13,14 @@
 
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
-import { deviceLabel, releaseCopy, typeMeta } from "../devices.js";
+import {
+  brandActions,
+  canCommand,
+  commandCall,
+  deviceLabel,
+  releaseCopy,
+  typeMeta,
+} from "../devices.js";
 import { LiveSource } from "../data-source.js";
 import { level, levelTone, percent, power, powerText, price as fmtPrice } from "../format.js";
 import "../components/stat-tile.js";
@@ -255,11 +262,63 @@ class DacViewOverview extends DacElement {
     /* ---- steerable devices ---- */
     .panel-sub { margin: 8px 0 0; font-size: 13px; line-height: 1.55; color: var(--dac-ink-2); max-width: 70ch; }
 
-    .steer-grid {
-      margin-top: 16px;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 12px;
+    /*
+     * One card at a time, chosen from a row of names.
+     *
+     * Underneath each other they turned the overview into a column you had to
+     * scroll past on a phone before reaching the energy flow -- and the device
+     * you wanted was reliably the last one. The row scrolls sideways; the cards
+     * do not stack.
+     */
+    .steer-tabs {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      scroll-snap-type: x proximity;
+      padding-bottom: 2px;
+    }
+    .steer-tabs::-webkit-scrollbar { display: none; }
+    .steer-tabs[hidden] { display: none; }
+
+    .steer-tab {
+      flex: 0 0 auto;
+      scroll-snap-align: start;
+      display: inline-flex; align-items: center; gap: 8px;
+      min-height: 38px;
+      padding: 8px 14px;
+      border-radius: var(--dac-radius-pill);
+      border: 1px solid var(--dac-border);
+      background: transparent;
+      color: var(--dac-ink-2);
+      font: inherit; font-size: 13px; font-weight: 500;
+      white-space: nowrap;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: color 180ms ease, border-color 180ms ease, background 180ms ease;
+    }
+    .steer-tab:hover { color: var(--dac-ink); border-color: var(--dac-border-hi); }
+    .steer-tab[aria-selected="true"] {
+      color: var(--dac-ink); font-weight: 600;
+      border-color: rgba(25,143,217,0.55);
+      background: var(--dac-accent-soft);
+    }
+    /* Released or not, visible without opening the card. */
+    .steer-tab .dot {
+      width: 7px; height: 7px; flex: 0 0 auto;
+      border-radius: 50%;
+      background: var(--dac-ink-3);
+    }
+    .steer-tab .dot.on { background: var(--dac-good); }
+
+    .steer-grid { margin-top: 12px; display: grid; gap: 12px; }
+    .steer[hidden] { display: none; }
+
+    .sr {
+      position: absolute; width: 1px; height: 1px;
+      margin: -1px; padding: 0; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap;
     }
 
     .steer {
@@ -297,8 +356,13 @@ class DacViewOverview extends DacElement {
       font-variant-numeric: tabular-nums; text-align: right;
     }
 
-    button.release {
+    .steer-actions {
       margin-top: auto;
+      display: flex; flex-wrap: wrap; gap: 8px;
+    }
+    .steer-actions button { flex: 1 1 170px; }
+
+    button.release, button.manual {
       display: flex; align-items: center; justify-content: center; gap: 8px;
       padding: 11px 16px;
       min-height: 44px;
@@ -311,7 +375,9 @@ class DacViewOverview extends DacElement {
       transition: border-color 200ms ease, background 200ms ease, color 200ms ease;
       -webkit-tap-highlight-color: transparent;
     }
-    button.release:hover { color: var(--dac-ink); border-color: rgba(25,143,217,0.55); }
+    button.release:hover, button.manual:hover { color: var(--dac-ink); border-color: rgba(25,143,217,0.55); }
+    button.manual .icon { width: 16px; height: 16px; color: var(--dac-accent-hi); }
+    button.manual[hidden] { display: none; }
     button.release[aria-pressed="true"] {
       border-color: rgba(12,163,12,0.5);
       background: rgba(12,163,12,0.14);
@@ -323,6 +389,81 @@ class DacViewOverview extends DacElement {
 
     .steer-hint { margin: 0; font-size: 12px; line-height: 1.45; color: var(--dac-ink-3); }
     .steer-hint:empty { display: none; }
+
+    /* ---- manual control ---- */
+    /*
+     * A native <dialog>, so Escape, the backdrop and the focus trap are the
+     * browser's job rather than ours. On a phone it sits against the bottom
+     * edge, where a thumb is.
+     */
+    dialog.sheet {
+      width: min(430px, calc(100vw - 24px));
+      max-width: none;
+      padding: 20px 20px 18px;
+      border: 1px solid var(--dac-border-hi);
+      border-radius: var(--dac-radius);
+      background: var(--dac-bg-raise);
+      color: var(--dac-ink);
+      box-shadow: 0 30px 70px rgba(0,0,0,0.55);
+    }
+    dialog.sheet::backdrop { background: rgba(0,0,0,0.58); }
+
+    .sheet-head { display: flex; align-items: flex-start; gap: 12px; }
+    .sheet-head h3 { margin: 2px 0 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+    .sheet-head .eyebrow { font-size: 11px; }
+    .sheet-close {
+      margin-left: auto; flex: 0 0 auto;
+      width: 38px; height: 38px;
+      display: grid; place-items: center;
+      border-radius: var(--dac-radius-pill);
+      border: 1px solid var(--dac-border);
+      background: transparent;
+      color: var(--dac-ink-2);
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .sheet-close:hover { color: var(--dac-ink); border-color: var(--dac-border-hi); }
+    .sheet-close .icon { width: 17px; height: 17px; }
+
+    .sheet-sub { margin: 10px 0 0; font-size: 13px; line-height: 1.55; color: var(--dac-ink-2); }
+
+    .cmd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
+    .cmd {
+      display: flex; align-items: center; gap: 10px;
+      min-height: 50px;
+      padding: 12px 14px;
+      border-radius: var(--dac-radius-sm);
+      border: 1px solid var(--dac-border-hi);
+      background: var(--dac-surface);
+      color: var(--dac-ink);
+      font: inherit; font-size: 14px; font-weight: 500;
+      text-align: left;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: border-color 180ms ease, background 180ms ease;
+    }
+    .cmd:hover:not(:disabled) { border-color: rgba(25,143,217,0.55); background: var(--dac-surface-hi); }
+    .cmd:disabled { opacity: 0.45; cursor: default; }
+    .cmd .icon { width: 18px; height: 18px; flex: 0 0 auto; color: var(--dac-accent-hi); }
+    /* Rebooting drops whatever the charger is doing, so it gets its own row and
+       its own colour rather than sitting in the grid as a fifth equal. */
+    .cmd.care { grid-column: 1 / -1; }
+    .cmd.care .icon { color: var(--dac-warn); }
+    .cmd-note { grid-column: 1 / -1; margin: -2px 0 0; font-size: 12px; line-height: 1.45; color: var(--dac-ink-3); }
+
+    .sheet-status { margin: 14px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--dac-ink-2); min-height: 1.45em; }
+    .sheet-status.good { color: var(--dac-good); }
+    .sheet-status.bad { color: var(--dac-bad); }
+
+    @media (max-width: 560px) {
+      dialog.sheet {
+        width: 100vw;
+        margin: auto 0 0;
+        border-radius: var(--dac-radius) var(--dac-radius) 0 0;
+        border-bottom: none;
+        padding-bottom: calc(18px + var(--dac-safe-b));
+      }
+    }
 
     .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
     .legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dac-ink-2); }
@@ -395,7 +536,8 @@ class DacViewOverview extends DacElement {
             <div class="eyebrow">Sturing</div>
             <h2>Aanstuurbare apparaten</h2>
           </div>
-          <p class="panel-sub">Wat de coach straks zelf mag inschakelen. Een apparaat draait alleen mee als je het hier vrijgeeft — een lege vaatwasser is niets waard, hoeveel zon er ook is.</p>
+          <p class="panel-sub">Wat de coach straks zelf mag inschakelen.</p>
+          <div class="steer-tabs" id="steer-tabs" role="tablist" aria-label="Aanstuurbare apparaten" hidden></div>
           <div class="steer-grid" id="steer-grid"></div>
         </article>
 
@@ -407,6 +549,19 @@ class DacViewOverview extends DacElement {
           <div class="flow-holder"><dac-energy-flow id="flow"></dac-energy-flow></div>
           <div class="legend" id="legend"></div>
         </article>
+
+        <dialog class="sheet" id="manual" aria-labelledby="manual-title">
+          <div class="sheet-head">
+            <div>
+              <div class="eyebrow">Handmatige besturing</div>
+              <h3 id="manual-title"></h3>
+            </div>
+            <button class="sheet-close" type="button" id="manual-close" aria-label="Sluiten">${icons.close}</button>
+          </div>
+          <p class="sheet-sub" id="manual-sub"></p>
+          <div class="cmd-grid" id="manual-grid"></div>
+          <p class="sheet-status" id="manual-status" role="status" aria-live="polite"></p>
+        </dialog>
       </div>
     `;
   }
@@ -421,6 +576,22 @@ class DacViewOverview extends DacElement {
       load: this.$("#t-load"),
     };
     this.flow_ = this.$("#flow");
+
+    const sheet = this.$("#manual");
+    this.$("#manual-close").addEventListener("click", () => sheet.close());
+    // Tapping the darkened area closes it. The hit test is on coordinates
+    // rather than the target alone, because a click on the dialog's own padding
+    // also reports the dialog as its target.
+    sheet.addEventListener("click", (event) => {
+      if (event.target !== sheet) return;
+      const box = sheet.getBoundingClientRect();
+      const inside =
+        event.clientX >= box.left &&
+        event.clientX <= box.right &&
+        event.clientY >= box.top &&
+        event.clientY <= box.bottom;
+      if (!inside) sheet.close();
+    });
   }
 
   onConnect() {
@@ -438,6 +609,9 @@ class DacViewOverview extends DacElement {
     this.timer_ = null;
     this.unsubscribe_?.();
     this.unsubscribe_ = null;
+    // A modal that is detached loses its place in the top layer, so it would
+    // come back as a panel stuck in the middle of the page.
+    this.$("#manual")?.close();
   }
 
   listen_() {
@@ -676,20 +850,46 @@ class DacViewOverview extends DacElement {
   }
 
   buildSteerable_(list) {
+    // Whatever the sheet was pointing at may be exactly what just changed, so
+    // it closes rather than keeping a device that no longer exists on screen.
+    this.$("#manual").close();
+
+    // The chooser is only worth its space from two devices on; with one, the
+    // card underneath already says which device this is.
+    const tabs = this.$("#steer-tabs");
+    tabs.hidden = list.length < 2;
+    tabs.innerHTML = list
+      .map(
+        (device, slot) => `
+        <button class="steer-tab" type="button" role="tab" id="steer-tab-${slot}"
+                data-tab="${slot}" aria-controls="steer-panel-${slot}" aria-selected="false">
+          <span class="dot" data-tab-dot="${slot}"></span>
+          <span data-tab-name="${slot}"></span>
+          <span class="sr" data-tab-state="${slot}"></span>
+        </button>`
+      )
+      .join("");
+
     this.$("#steer-grid").innerHTML = list
       .map(
         (device, slot) => `
-        <article class="steer" data-slot="${slot}">
+        <article class="steer" data-slot="${slot}" id="steer-panel-${slot}"
+                 role="tabpanel" aria-labelledby="steer-tab-${slot}">
           <div class="steer-head">
             <span class="chip">${icons[typeMeta(device.type).icon]}</span>
             <span class="steer-name" data-name="${slot}"></span>
             <span class="steer-now tnum" data-now="${slot}"></span>
           </div>
           <div class="steer-rows" data-rows="${slot}"></div>
-          <button class="release" type="button" data-release="${slot}" aria-pressed="false">
-            <span class="mark" data-mark="${slot}"></span>
-            <span data-release-text="${slot}"></span>
-          </button>
+          <div class="steer-actions">
+            <button class="release" type="button" data-release="${slot}" aria-pressed="false">
+              <span class="mark" data-mark="${slot}"></span>
+              <span data-release-text="${slot}"></span>
+            </button>
+            <button class="manual" type="button" data-manual="${slot}" hidden>
+              ${icons.sliders}<span>Handmatige besturing</span>
+            </button>
+          </div>
           <p class="steer-hint" data-hint="${slot}"></p>
         </article>`
       )
@@ -697,6 +897,13 @@ class DacViewOverview extends DacElement {
 
     for (const button of this.$$("[data-release]")) {
       button.addEventListener("click", () => this.toggleReady_(Number(button.dataset.release)));
+    }
+    for (const button of this.$$("[data-manual]")) {
+      button.addEventListener("click", () => this.openManual_(Number(button.dataset.manual)));
+    }
+    for (const tab of this.$$("[data-tab]")) {
+      tab.addEventListener("click", () => this.selectSteer_(Number(tab.dataset.tab)));
+      tab.addEventListener("keydown", (event) => this.stepSteer_(event, Number(tab.dataset.tab)));
     }
   }
 
@@ -732,7 +939,60 @@ class DacViewOverview extends DacElement {
       this.$(`[data-mark="${slot}"]`).innerHTML = on ? icons.check : "";
       this.$(`[data-release-text="${slot}"]`).textContent = on ? "Vrijgegeven" : copy.label;
       this.$(`[data-hint="${slot}"]`).textContent = on ? "" : copy.hint;
+
+      // Only where there is something to send to: a brand that takes commands,
+      // and the Home Assistant device to send them to.
+      this.$(`[data-manual="${slot}"]`).hidden = !canCommand(device);
+
+      const name = this.$(`[data-tab-name="${slot}"]`);
+      if (name) {
+        name.textContent = deviceLabel(device);
+        this.$(`[data-tab-dot="${slot}"]`).classList.toggle("on", on);
+        this.$(`[data-tab-state="${slot}"]`).textContent = on ? " — vrijgegeven" : "";
+      }
     });
+
+    this.paintSteerChoice_();
+  }
+
+  /** Show the chosen device, remembering it across the refresh. */
+  paintSteerChoice_() {
+    const list = this.steerDevices_ ?? [];
+    if (!list.length) return;
+
+    let index = list.findIndex((device) => device.id === this.steerActive_);
+    if (index < 0) index = 0;
+    this.steerActive_ = list[index].id;
+
+    list.forEach((_, slot) => {
+      const chosen = slot === index;
+      this.$(`[data-slot="${slot}"]`).hidden = !chosen;
+      const tab = this.$(`[data-tab="${slot}"]`);
+      if (tab) {
+        tab.setAttribute("aria-selected", String(chosen));
+        tab.tabIndex = chosen ? 0 : -1;
+      }
+    });
+  }
+
+  selectSteer_(slot) {
+    const device = this.steerDevices_?.[slot];
+    if (!device) return;
+    this.steerActive_ = device.id;
+    this.paintSteerChoice_();
+  }
+
+  /** Arrow keys walk the row, the way a tablist is expected to behave. */
+  stepSteer_(event, slot) {
+    const step = { ArrowRight: 1, ArrowLeft: -1, Home: -Infinity, End: Infinity }[event.key];
+    if (step === undefined) return;
+    event.preventDefault();
+
+    const count = this.steerDevices_?.length ?? 0;
+    const next =
+      step === -Infinity ? 0 : step === Infinity ? count - 1 : (slot + step + count) % count;
+    this.selectSteer_(next);
+    this.$(`[data-tab="${next}"]`)?.focus();
   }
 
   /**
@@ -770,6 +1030,89 @@ class DacViewOverview extends DacElement {
       this.settings_ = { ...this.settings_, ready_devices: [...ready] };
       this.fillSteerable_(this.steerDevices_);
     }
+  }
+
+  /**
+   * Manual control: the same commands the coach will use, with a person on the
+   * button.
+   *
+   * It lives behind a press rather than on the card, because these are the only
+   * controls in the panel that change something in the house -- and a row of
+   * them under a live reading is a row you hit while scrolling.
+   */
+  openManual_(slot) {
+    const device = this.steerDevices_?.[slot];
+    if (!device || !canCommand(device)) return;
+
+    this.manualDevice_ = device;
+    this.manualActions_ = brandActions(device);
+
+    this.$("#manual-title").textContent = deviceLabel(device);
+    this.$("#manual-sub").textContent =
+      "Deze opdrachten gaan rechtstreeks naar het apparaat. De coach stuurt nog niets uit zichzelf.";
+    this.setManualStatus_("", "");
+
+    // Labels and hints are the panel's own text, not the customer's, so they go
+    // in as markup along with their icons.
+    this.$("#manual-grid").innerHTML = this.manualActions_
+      .map(
+        (action, index) => `
+        <button class="cmd${action.care ? " care" : ""}" type="button" data-cmd="${index}">
+          ${icons[action.icon] ?? ""}<span>${action.label}</span>
+        </button>
+        ${action.hint ? `<p class="cmd-note">${action.hint}</p>` : ""}`
+      )
+      .join("");
+
+    for (const button of this.$$("#manual-grid .cmd")) {
+      button.addEventListener("click", () =>
+        this.sendCommand_(this.manualActions_[Number(button.dataset.cmd)])
+      );
+    }
+
+    this.$("#manual").showModal();
+  }
+
+  /**
+   * Send one command, and say what came of it.
+   *
+   * Nothing is assumed to have worked: the charger is the only one who knows,
+   * and a failed call has to read as failed rather than as silence.
+   */
+  async sendCommand_(action) {
+    const device = this.manualDevice_;
+    if (!action || !device || !this.hass || this.sending_) return;
+
+    const { domain, service, data } = commandCall(device, action);
+
+    this.sending_ = true;
+    this.setManualButtons_(true);
+    this.setManualStatus_(`${action.label}…`, "");
+
+    try {
+      await this.hass.callService(domain, service, data);
+      this.setManualStatus_(`${action.label} verstuurd.`, "good");
+    } catch (error) {
+      console.warn("[DomotiApp Coach] opdracht mislukt", error);
+      this.setManualStatus_(
+        `${action.label} is niet gelukt: ${error?.message || "het apparaat gaf geen antwoord"}.`,
+        "bad"
+      );
+    } finally {
+      this.sending_ = false;
+      this.setManualButtons_(false);
+    }
+  }
+
+  setManualStatus_(text, tone) {
+    const line = this.$("#manual-status");
+    line.textContent = text;
+    line.className = `sheet-status${tone ? ` ${tone}` : ""}`;
+  }
+
+  /** One command at a time -- two in flight would race in the charger. */
+  setManualButtons_(busy) {
+    for (const button of this.$$("#manual-grid .cmd")) button.disabled = busy;
   }
 
   /** Supporting line for a tile, or an honest blank when there is no reading. */

@@ -52,10 +52,21 @@ export const CHARGER_BRANDS = [
     // The words differ per brand and even per firmware, so they are typed in
     // rather than baked in. These are what Easee uses today.
     actions: [
-      { key: "start", label: "Starten", fallback: "start" },
-      { key: "stop", label: "Stoppen", fallback: "stop" },
-      { key: "pause", label: "Pauzeren", fallback: "pause" },
-      { key: "resume", label: "Hervatten", fallback: "resume" },
+      { key: "start", label: "Starten", fallback: "start", icon: "play" },
+      { key: "stop", label: "Stoppen", fallback: "stop", icon: "stop" },
+      { key: "pause", label: "Pauzeren", fallback: "pause", icon: "pause" },
+      { key: "resume", label: "Hervatten", fallback: "resume", icon: "resume" },
+      // Rebooting is a different kind of thing from the other four: it drops
+      // whatever the charger is doing and brings the box back up, so it stands
+      // apart in the manual controls rather than in the row with them.
+      {
+        key: "reboot",
+        label: "Herstarten",
+        fallback: "reboot",
+        icon: "reboot",
+        care: true,
+        hint: "Start de laadpaal opnieuw op. Een lopende laadsessie stopt daarmee; de paal is een halve minuut niet bereikbaar.",
+      },
     ],
     fields: [
       {
@@ -64,15 +75,35 @@ export const CHARGER_BRANDS = [
         hint: "Waar de paal mee bezig is: aangesloten, aan het laden, klaar.",
         filter: "all",
         needed: true,
-        // The Easee integration reports these as words. Anything it sends that
-        // is not in this list is shown as it comes, rather than hidden.
+        // The Easee integration reports these as English keys, whatever the
+        // language Home Assistant is set to -- the panel reads the raw state,
+        // not the translated one the frontend shows. So the whole list the
+        // integration can send is spelled out here; anything outside it still
+        // gets shown as it comes, rather than hidden.
         values: {
-          disconnected: "Niet aangesloten",
-          awaiting_start: "Wacht op start",
-          ready_to_charge: "Klaar om te laden",
+          authenticating: "Bezig met authenticeren",
+          awaiting_authentication: "Wacht op authenticatie",
+          awaiting_authorization: "Wacht op goedkeuring",
+          awaiting_load_balancing: "Wacht op load balancing",
+          awaiting_scheduled_start: "Wacht op geplande start",
+          awaiting_smart_start: "Wacht op slimme start",
+          awaiting_start: "Wacht tot het laden begint",
           charging: "Aan het laden",
-          completed: "Klaar",
-          error: "Storing",
+          completed: "Laden voltooid",
+          de_authorizing: "Goedkeuring intrekken",
+          disconnected: "Geen auto aangesloten",
+          erratic_ev: "Auto reageert onverwacht",
+          error: "Fout bij laden",
+          error_dead_powerboard: "Fout: defecte voedingsprint",
+          error_overcurrent: "Fout: overbelasting",
+          error_pen_fault: "Fout: PEN-fout in de aarde-nulleider",
+          error_temperature_too_high: "Fout: temperatuur te hoog",
+          offline: "Offline",
+          paused_due_to_equalizer: "Onderbroken door de Equalizer",
+          ready_to_charge: "Gereed om te laden",
+          searching_for_master: "Zoekt de master",
+          start_charging: "Start met laden",
+          stop_charging: "Stopt met laden",
         },
       },
       {
@@ -81,12 +112,41 @@ export const CHARGER_BRANDS = [
         hint: "Waarom er niet geladen wordt terwijl de auto eraan hangt.",
         filter: "all",
         values: {
-          no_reason: "Geen belemmering",
+          car_not_charging: "De auto laadt niet",
+          charger_disabled: "Lader uitgeschakeld",
+          charger_in_error_state: "Lader in foutstatus",
+          circuit_fuse_too_low: "Zekering te laag",
+          eq_too_low_current: "Equalizerstroom te laag",
+          ev_behaving_erratic: "Auto reageert onverwacht",
+          illegal_grid_type: "Ongeldig nettype",
+          limited_by_cable_rating: "Begrensd door de laadkabel",
+          limited_by_car: "Begrensd door de auto",
+          limited_by_charger_dynamic_limit: "Dynamisch begrensd door de lader",
+          limited_by_charger_max_limit: "Begrensd door de maximale limiet van de lader",
+          limited_by_circuit_dynamic_limit: "Dynamisch begrensd door het stroomcircuit",
+          limited_by_circuit_fuse: "Begrensd door de zekering",
+          limited_by_circuit_max_limit: "Begrensd door de maximale limiet van het stroomcircuit",
+          limited_by_equalizer: "Begrensd door de Equalizer",
+          limited_by_load_balancing: "Begrensd door load balancing",
+          limited_by_local_adjustment: "Begrensd door een lokale instelling",
+          limited_by_offline_setting: "Begrensd door de offline-instelling",
+          limited_by_schedule: "Begrensd door het laadschema",
+          max_charger_current_too_low: "Maximale limiet van de lader te laag",
+          max_circuit_current_too_low: "Maximale limiet van het stroomcircuit te laag",
+          max_dynamic_charger_current_too_low: "Dynamische limiet van de lader te laag",
+          max_dynamic_circuit_current_too_low: "Dynamische limiet van het stroomcircuit te laag",
+          max_dynamic_offline_fallback_circuit_current_too_low:
+            "Dynamische offline-terugvallimiet te laag",
+          no_current_request: "Geen stroomvraag",
+          none: "Geen",
+          not_connected_to_master: "Niet verbonden met de master",
+          not_requesting_current: "Geen stroomvraag",
+          ok: "Geen belemmering",
+          pending_authorization: "Wacht op goedkeuring",
+          pending_schedule: "Wacht op het laadschema",
+          phase_not_connected: "Fase niet aangesloten",
           undefined: "Onbekend",
-          loadbalancing_circuit_limit: "Begrensd door de groep",
-          loadbalancing_charger_limit: "Begrensd door de paal",
-          charger_limit: "Begrensd door de paal",
-          circuit_limit: "Begrensd door de groep",
+          waiting_in_fully: "Wacht af",
           waiting_in_queue: "Wacht op zijn beurt",
         },
       },
@@ -127,11 +187,35 @@ export const brandMeta = (device) =>
 /** The extra entity fields this device asks for, beyond its power sensor. */
 export const brandFields = (device) => brandMeta(device)?.fields ?? [];
 
-/** The start/stop/pause/resume commands this brand takes, if any. */
+/** The start/stop/pause/resume/reboot commands this brand takes, if any. */
 export const brandActions = (device) => brandMeta(device)?.actions ?? [];
 
 /** The integration device this brand is steered through, if it works that way. */
 export const brandDevice = (device) => brandMeta(device)?.device;
+
+/**
+ * Whether a command can actually be sent to this device right now.
+ *
+ * Both halves have to be there: a brand that takes commands at all, and the
+ * Home Assistant device to send them to. Without the second one the service
+ * call would fail, and a button that cannot work should not be on screen.
+ */
+export const canCommand = (device) =>
+  Boolean(brandMeta(device)?.service && brandActions(device).length && device?.device_id);
+
+/**
+ * A command as it goes out over the wire.
+ *
+ * The word is the customer's own: brands and even firmware versions disagree on
+ * what to call these, so what is typed in wins and the brand's default is only
+ * the starting point.
+ */
+export function commandCall(device, action) {
+  const brand = brandMeta(device);
+  const [domain, service] = brand.service.split(".");
+  const word = (device.actions?.[action.key] ?? action.fallback).trim() || action.fallback;
+  return { domain, service, data: { device_id: device.device_id, [brand.field]: word } };
+}
 
 /**
  * What the customer presses to say a device may run right now.
