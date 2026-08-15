@@ -13,7 +13,13 @@
 
 import { define } from "../base.js";
 import { icons } from "../icons.js";
-import { canHaveDeadline, deviceLabel, programFor, typeMeta } from "../devices.js";
+import {
+  canHaveDeadline,
+  deviceLabel,
+  deviceLabelMap,
+  programFor,
+  typeMeta,
+} from "../devices.js";
 import { clock, duration } from "../format.js";
 import {
   DacEditorElement,
@@ -374,6 +380,16 @@ class DacViewStrategy extends DacEditorElement {
     return (this.draft_?.devices ?? []).filter(canHaveDeadline);
   }
 
+  /** A schedule for a device that no longer exists is nothing but a leftover. */
+  reconcile_() {
+    const schedules = this.draft_?.strategy?.schedules;
+    if (!Array.isArray(schedules)) return;
+
+    const known = new Set((this.draft_?.devices ?? []).map((device) => device.id));
+    const kept = schedules.filter((entry) => known.has(entry.device));
+    if (kept.length !== schedules.length) this.draft_.strategy.schedules = kept;
+  }
+
   /**
    * The schedule for one device.
    *
@@ -384,9 +400,7 @@ class DacViewStrategy extends DacEditorElement {
    */
   planFor_(deviceId, create = false) {
     const strategy = this.draft_.strategy;
-    if (!Array.isArray(strategy.schedules)) strategy.schedules = [];
-
-    const fresh = () => ({
+    const blank = () => ({
       device: deviceId,
       enabled: false,
       per_day: false,
@@ -394,11 +408,23 @@ class DacViewStrategy extends DacEditorElement {
       days: [],
     });
 
-    let found = strategy.schedules.find((entry) => entry.device === deviceId);
+    const found = (strategy.schedules ?? []).find((entry) => entry.device === deviceId);
+
+    // Reading must not write. Filling in a missing half, or creating the list
+    // itself, would count as an unsaved change -- so merely opening the screen
+    // would raise the save bar and, worse, stop it accepting settings saved
+    // anywhere else.
+    if (!create) {
+      if (!found) return blank();
+      const base = blank();
+      return { ...base, ...found, window: { ...base.window, ...(found.window ?? {}) }, days: found.days ?? [] };
+    }
+
+    if (!Array.isArray(strategy.schedules)) strategy.schedules = [];
     if (!found) {
-      if (!create) return fresh();
-      found = fresh();
-      strategy.schedules.push(found);
+      const created = blank();
+      strategy.schedules.push(created);
+      return created;
     }
 
     // Settings written by an older version, or by hand, may be missing a half.
@@ -437,7 +463,8 @@ class DacViewStrategy extends DacEditorElement {
     for (const device of this.deadlineDevices_()) {
       const plan = this.planFor_(device.id);
       if (plan.enabled && !this.planTimes_(plan).length) {
-        out.push(`${deviceLabel(device)} is ingepland, maar er staat geen enkele tijd in.`);
+        const label = deviceLabelMap(this.draft_?.devices).get(device.id) ?? deviceLabel(device);
+        out.push(`${label} is ingepland, maar er staat geen enkele tijd in.`);
       }
     }
     return out;
@@ -499,10 +526,15 @@ class DacViewStrategy extends DacEditorElement {
   /** One line per appliance that can be planned, with what it is set to. */
   paintDeviceLinks_() {
     const devices = this.deadlineDevices_();
-    this.$("#devices-card").hidden = !devices.length;
-    if (!devices.length) return;
-
     const holder = this.$("#device-links");
+    this.$("#devices-card").hidden = !devices.length;
+    if (!devices.length) {
+      // Emptied rather than just hidden: a row left behind here is a device
+      // that no longer exists, waiting to reappear the moment another one is
+      // added.
+      holder.replaceChildren();
+      return;
+    }
     holder.innerHTML = devices
       .map(
         (device, index) => `
@@ -520,13 +552,18 @@ class DacViewStrategy extends DacEditorElement {
       )
       .join("");
 
+    // Numbered over the whole device list, not just the plannable ones, so
+    // "Vaatwasser 2" means the same thing here as on the overview.
+    const labels = deviceLabelMap(this.draft_?.devices);
+
     devices.forEach((device, index) => {
       const plan = this.planFor_(device.id);
       const times = this.planTimes_(plan);
       const on = Boolean(plan.enabled && times.length);
 
       // Names are the customer's own text, so they go in as text.
-      holder.querySelector(`[data-device-name="${index}"]`).textContent = deviceLabel(device);
+      holder.querySelector(`[data-device-name="${index}"]`).textContent =
+        labels.get(device.id) ?? deviceLabel(device);
 
       const state = holder.querySelector(`[data-device-state="${index}"]`);
       state.textContent = on ? "Aan" : "Uit";
@@ -555,7 +592,8 @@ class DacViewStrategy extends DacEditorElement {
 
     const plan = this.planFor_(device.id);
     this.$("#klaar-eyebrow").textContent = typeMeta(device.type).label;
-    this.$("#klaar-title").textContent = deviceLabel(device);
+    this.$("#klaar-title").textContent =
+      deviceLabelMap(this.draft_?.devices).get(device.id) ?? deviceLabel(device);
     this.$("#klaar-intro").textContent =
       "Zeg binnen welke grenzen de coach mag werken. Vul alleen in wat je belangrijk vindt — elk van de drie tijden mag leeg blijven.";
 

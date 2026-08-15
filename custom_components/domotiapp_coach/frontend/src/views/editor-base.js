@@ -358,13 +358,36 @@ export class DacEditorElement extends DacElement {
   set settings(value) {
     if (!value) return;
     this.saved_ = clone(value);
-    // A save from another device must not overwrite what is being typed here;
-    // only adopt it when there is nothing unsaved.
-    if (!this.dirty_()) {
-      this.draft_ = clone(value);
-      if (this.rendered_) this.paint_();
+
+    if (this.draft_ && this.dirty_()) {
+      // Everything this screen does not own is context, not a draft: the device
+      // list on Strategie, the connection behind its threshold hint. Holding a
+      // stale copy of it is how a device deleted under Apparaten kept its row
+      // here, and the screen had no way to know it was looking at the past.
+      for (const key of Object.keys(value)) {
+        if (!this.constructor.sections.includes(key)) this.draft_[key] = clone(value[key]);
+      }
+      // With the new context in hand the screen can drop what it was holding on
+      // to that no longer exists -- which is often the only reason it counted as
+      // unsaved at all.
+      this.reconcile_();
     }
+
+    // A save from another device must not overwrite what is being typed here;
+    // only adopt the whole document when there is nothing unsaved.
+    if (!this.dirty_()) this.draft_ = clone(value);
+    if (this.rendered_) this.paint_();
   }
+
+  /**
+   * Drop anything in this screen's own sections that points at something gone.
+   *
+   * The integration does the same on the way in, so this is not about keeping
+   * the file clean -- it is about the draft in front of you agreeing with it,
+   * so the save bar does not sit there offering to save a device that was
+   * deleted three screens ago.
+   */
+  reconcile_() {}
 
   dirty_() {
     if (!this.draft_) return false;

@@ -140,6 +140,11 @@ Een apparaat verwijderen vraagt om een bevestiging. De opslagbalk kan het ook
 nog terugdraaien, maar de prullenbak zit naast de regel die je aantikt om een
 apparaat te openen — en daar hangt een scherm vol entiteiten achter.
 
+Je kunt er meerdere van hetzelfde type hebben. Twee vaatwassers zijn twee
+aparte apparaten met elk hun eigen entiteiten, hun eigen vrijgaveknop en hun
+eigen tijden onder Strategie. Zonder eigen naam heten ze "Vaatwasser 1" en
+"Vaatwasser 2"; een naam is duidelijker en het scherm zegt dat er ook bij.
+
 ### Aanstuurbare apparaten
 
 Alles wat op "mag aangestuurd worden" staat, komt op het overzicht in een eigen
