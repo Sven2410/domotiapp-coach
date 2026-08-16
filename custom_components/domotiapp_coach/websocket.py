@@ -133,6 +133,16 @@ _SETTINGS = _schema(
                 vol.Optional("phases"): _schema(
                     {vol.Optional(phase): _PHASE for phase in ("l1", "l2", "l3")}
                 ),
+                vol.Optional("meters"): _schema(
+                    {
+                        vol.Optional("import_low"): _ENTITY,
+                        vol.Optional("import_high"): _ENTITY,
+                        vol.Optional("export_low"): _ENTITY,
+                        vol.Optional("export_high"): _ENTITY,
+                        vol.Optional("gas_enabled"): bool,
+                        vol.Optional("gas"): _ENTITY,
+                    }
+                ),
             }
         ),
         vol.Optional("strategy"): _schema(

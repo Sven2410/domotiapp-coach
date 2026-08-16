@@ -266,14 +266,21 @@ export const editorCss = /* css */ `
 
   /* ---- read only ----
      Customers may look at their installation and question it; only an admin
-     changes it. */
+     changes it.
+
+     Everything that changes something is locked, and the exceptions are listed
+     rather than the other way round. Naming the controls to lock meant every
+     button added later was unlocked by default -- which is how a customer could
+     still empty a time field on Strategie. Reading, unfolding a card and
+     stepping into a sub-screen stay open: they change nothing. */
   :host([readonly]) input,
   :host([readonly]) select,
-  :host([readonly]) textarea { pointer-events: none; opacity: 0.55; }
-  :host([readonly]) .segmented button,
-  :host([readonly]) button.add,
-  :host([readonly]) .device-head button.remove,
-  :host([readonly]) label.check { pointer-events: none; opacity: 0.55; }
+  :host([readonly]) textarea,
+  :host([readonly]) label.check,
+  :host([readonly]) button:not(.link):not(.back):not(.toggle):not(.dismiss):not(.sheet-close) {
+    pointer-events: none;
+    opacity: 0.55;
+  }
   :host([readonly]) dac-entity-picker { pointer-events: none; opacity: 0.6; }
   :host([readonly]) .savebar { display: none; }
 `;
@@ -479,7 +486,7 @@ export class DacEditorElement extends DacElement {
       this.afterSave_();
     } catch (error) {
       status.textContent = "";
-      this.toast_(`Opslaan mislukt — ${error?.message ?? error}`, false);
+      this.toast_(`Opslaan mislukt: ${error?.message ?? error}`, false);
     } finally {
       button.disabled = false;
       this.$("#savebar").classList.toggle("on", this.dirty_());
@@ -514,7 +521,7 @@ export class DacEditorElement extends DacElement {
       this.fire("dac-settings-saved", { settings: saved });
       this.toast_(message, true);
     } catch (error) {
-      this.toast_(`Opslaan mislukt — ${error?.message ?? error}`, false);
+      this.toast_(`Opslaan mislukt: ${error?.message ?? error}`, false);
     } finally {
       this.syncSaveBar_();
     }

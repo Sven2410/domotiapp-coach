@@ -34,7 +34,7 @@ class DacViewInstallation extends DacEditorElement {
         <header class="intro">
           <div class="eyebrow">Installatie</div>
           <h1>Je woning, je aansluiting, je contract</h1>
-          <p>Hier staat waar de coach mee rekent. Klopt er iets niet, geef het dan door aan je installateur — wijzigen kan alleen een beheerder.</p>
+          <p>Hier staat waar de coach mee rekent. Klopt er iets niet, geef het dan door aan je installateur. Wijzigen kan alleen een beheerder.</p>
         </header>
 
         ${adminNoticeHtml}
@@ -137,7 +137,7 @@ class DacViewInstallation extends DacEditorElement {
                     Vier prijzen per uur.
                   </button>
                 </div>
-                <span class="sub">Kijk op je contract of in de app van je leverancier. Dit is de lengte van de blokken waarin de coach straks plant — met kwartieren komt hij dichter bij het goedkoopste moment, maar alleen als je leverancier ook zo afrekent.</span>
+                <span class="sub">Kijk op je contract of in de app van je leverancier. Dit is de lengte van de blokken waarin de coach straks plant. Met kwartieren komt hij dichter bij het goedkoopste moment, maar alleen als je leverancier ook zo afrekent.</span>
               </div>
 
               <div class="row">
@@ -390,7 +390,7 @@ class DacViewInstallation extends DacEditorElement {
     // Once it has been overridden, showing the formula would claim an arithmetic
     // the number no longer follows.
     this.$("#max-grid-hint").textContent = inst.max_grid_auto
-      ? `${phases} × ${fuse} A × ${VOLTAGE} V — ${kw(computed)} kW`
+      ? `${phases} × ${fuse} A × ${VOLTAGE} V = ${kw(computed)} kW`
       : `Handmatig ingesteld op ${kw(Number(inst.max_grid_watts) || 0)} kW; berekend zou ${kw(computed)} kW zijn`;
 
     const d = this.draft_.contract.dynamic;

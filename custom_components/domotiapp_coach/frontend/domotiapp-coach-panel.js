@@ -166,7 +166,9 @@ class DomotiAppCoachPanel extends DacElement {
     // sends the same event, and it has to be routed the same way.
     this.addEventListener("dac-navigate", (ev) => this.navigate_(ev.detail.id));
     header.addEventListener("dac-home", () => this.goHome_());
-    header.addEventListener("dac-menu", () => this.fire("hass-toggle-menu"));
+    // Deliberately no button that opens Home Assistant's sidebar. Customers run
+    // Kiosk Mode precisely so they cannot get to the rest of the system, and a
+    // hamburger in our own header handed it back to them.
 
     // A save from an editor is applied straight away rather than waiting for the
     // round trip over the event bus.

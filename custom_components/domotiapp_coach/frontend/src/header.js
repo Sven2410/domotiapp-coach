@@ -192,17 +192,6 @@ class DacHeader extends DacElement {
       background: var(--dac-accent-soft);
     }
 
-    button.icon-only {
-      display: none;
-      padding: 9px;
-      border-radius: 12px;
-      border: 1px solid var(--dac-border);
-      background: transparent;
-      color: var(--dac-ink-2);
-      cursor: pointer;
-    }
-    button.icon-only .icon { width: 20px; height: 20px; }
-
     /* ---- responsive ---- */
     @media (max-width: 1080px) {
       .bar {
@@ -216,7 +205,6 @@ class DacHeader extends DacElement {
     }
 
     @media (max-width: 640px) {
-      :host([narrow]) button.icon-only { display: inline-flex; }
       .bar { padding: 8px max(12px, var(--dac-safe-r)) 0 max(12px, var(--dac-safe-l)); }
       .brand img { width: 30px; height: 30px; }
       .brand-1, .brand-2 { font-size: 14px; }
@@ -277,9 +265,6 @@ class DacHeader extends DacElement {
 
     return `
       <div class="bar">
-        <button class="icon-only" type="button" id="menu" title="Menu" aria-label="Menu">
-          ${icons.menu}
-        </button>
         <div class="brand">
           <img src="${LOGO_URL}" alt="DomotiTech" draggable="false">
           <div class="brand-text">
@@ -302,7 +287,6 @@ class DacHeader extends DacElement {
 
   afterRender() {
     this.$("#home").addEventListener("click", () => this.fire("dac-home"));
-    this.$("#menu").addEventListener("click", () => this.fire("dac-menu"));
 
     for (const pill of this.$$("button.pill")) {
       pill.addEventListener("click", () =>

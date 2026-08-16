@@ -162,9 +162,17 @@ export const CHARGER_BRANDS = [
       {
         key: "max_limit",
         label: "Maximale limiet lader",
-        hint: "Hoeveel ampère de paal maximaal mag leveren. Hier stuurt de coach straks op.",
+        hint: "Hoeveel ampère de paal maximaal mag leveren. Dit is de bovengrens die vastligt.",
         filter: "all",
         needed: true,
+      },
+      {
+        key: "dynamic_limit",
+        label: "Dynamisch limiet lader",
+        // Not `needed`: the coach cannot write to it yet, and marking it
+        // required would block saving a charger that works fine today.
+        hint: "De limiet die van moment tot moment mag meebewegen, in ampère. Hij staat op 0 zolang er niet geladen wordt. Hier gaat de coach straks op sturen. Hij blijft altijd onder de maximale limiet.",
+        filter: "all",
       },
       {
         key: "current",
@@ -199,7 +207,7 @@ export const CHARGER_BRANDS = [
  */
 export const DISHWASHER_PROGRAMS = [
   { key: "eco_50", alias: "Eco50", label: "Eco 50 °C", minutes: 225, kwh: 0.8, peakW: 2100, peakMinutes: 40, plan: "ideal" },
-  { key: "auto_2", alias: "Auto2", label: "Auto 45–65 °C", minutes: 135, kwh: 1.15, peakW: 2100, peakMinutes: 35, plan: "variable" },
+  { key: "auto_2", alias: "Auto2", label: "Auto 45 tot 65 °C", minutes: 135, kwh: 1.15, peakW: 2100, peakMinutes: 35, plan: "variable" },
   { key: "intensiv_70", alias: "Intensiv70", label: "Intensief 70 °C", minutes: 145, kwh: 1.4, peakW: 2100, peakMinutes: 50, plan: "yes" },
   { key: "kurz_60", alias: "Kurz60", label: "Express 60 °C", minutes: 60, kwh: 1.05, peakW: 2200, peakMinutes: 30, plan: "yes" },
   { key: "night_wash", alias: "NightWash", label: "Nacht Was", minutes: 210, kwh: 1.0, peakW: 1600, peakMinutes: 55, plan: "yes" },
@@ -306,7 +314,7 @@ export const DISHWASHER_BRANDS = [
       {
         key: "program",
         label: "Geselecteerd programma",
-        hint: "Welk programma klaarstaat. Daar hangt aan vast hoe lang het duurt en wat het kost — die gegevens zitten in het paneel.",
+        hint: "Welk programma klaarstaat. Daar hangt aan vast hoe lang het duurt en wat het kost. Die gegevens zitten in het paneel.",
         filter: "all",
         needed: true,
         values: DISHWASHER_PROGRAM_VALUES,
@@ -351,7 +359,10 @@ export const DISHWASHER_BRANDS = [
         key: "stop",
         label: "Stoppen",
         icon: "stop",
-        care: true,
+        // Not `care`: stopping is the plain opposite of starting and belongs
+        // next to it. That flag is for the thing that stands apart -- a reboot
+        // that drops a running session -- and using it here pushed Stoppen onto
+        // its own row under Starten.
         hint: "De knop die een lopend programma afbreekt. Optioneel: zonder deze knop kan de coach een programma wel starten maar niet meer terugdraaien.",
         note: "Breekt het lopende programma af. De vaatwasser begint daarna weer van voren af aan.",
         filter: "all",
@@ -534,17 +545,27 @@ export function missingForControl(device) {
 }
 
 /**
- * The device types that run a program with a length, and so can have a time by
- * which they must be finished.
+ * The device types that run a program of a known length.
  *
- * A charger does not belong here: a car is done when it is full, and how long
- * that takes is a question about the car rather than about the programme.
+ * The length is what lets the panel work back from "done by" to "start by", so
+ * this list is about the sum, not about permission to plan.
  */
 export const PROGRAM_TYPES = ["vaatwasser", "wasmachine", "droger"];
 
+/**
+ * The device types that can be given a time window at all.
+ *
+ * A charger has no programme and no fixed length -- a car is done when it is
+ * full, and how long that takes is a question about the car. It still belongs
+ * here: "the car has to be charged by seven" is exactly the kind of boundary
+ * that makes cheap night-time charging possible, and without a deadline later
+ * is always cheaper and the coach would never begin.
+ */
+export const SCHEDULABLE_TYPES = [...PROGRAM_TYPES, "laadpaal"];
+
 /** Whether "must be finished by" means anything for this device. */
 export const canHaveDeadline = (device) =>
-  Boolean(device?.controllable) && PROGRAM_TYPES.includes(device?.type);
+  Boolean(device?.controllable) && SCHEDULABLE_TYPES.includes(device?.type);
 
 const BY_ID = new Map(DEVICE_TYPES.map((t) => [t.id, t]));
 
@@ -594,6 +615,9 @@ export function deviceLabels(devices) {
  *
  * Standby draw is real -- a dishwasher sitting idle still reports a few watts --
  * so a bare "> 0" would show every device as active forever and the two bubbles
- * would never mean anything.
+ * would never mean anything. But it is small: appliances idle at half a watt to
+ * about five, and a dishwasher filling or draining sits in the low tens. At 20
+ * that phase was invisible, which reads as a broken sensor rather than as a
+ * quiet one.
  */
-export const ACTIVE_WATTS = 20;
+export const ACTIVE_WATTS = 10;

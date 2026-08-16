@@ -30,6 +30,25 @@ class DacStatTile extends DacElement {
     }
     .tile:hover { border-color: var(--dac-border-hi); transform: translateY(-2px); }
 
+    /* A tile that opens something says so with an arrow rather than by moving
+       under the cursor: half these tiles are read on a wall tablet, where there
+       is no cursor to hover with. */
+    :host([actionable]) { cursor: pointer; }
+    :host([actionable]:focus-visible) { outline: none; }
+    :host([actionable]:focus-visible) .tile { border-color: var(--tone); }
+    .go {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      color: var(--dac-ink-3);
+      line-height: 0;
+      opacity: 0;
+      transition: opacity 200ms ease, color 200ms ease;
+    }
+    :host([actionable]) .go { opacity: 0.75; }
+    :host([actionable]) .tile:hover .go { color: var(--tone); opacity: 1; }
+    .go .icon { width: 15px; height: 15px; }
+
     /* Faint wash of the stream colour, top-right. */
     .tile::before {
       content: "";
@@ -141,8 +160,42 @@ class DacStatTile extends DacElement {
           </div>
           <div class="sub"><span class="dot"></span><span class="sub-text"></span></div>
         </div>
+        <span class="go" aria-hidden="true">${icons.chevronRight}</span>
       </div>
     `;
+  }
+
+  /**
+   * Make the whole tile open something.
+   *
+   * Passing null takes it back to being a read-out -- which is what happens the
+   * moment the thing behind it stops existing, such as a supplier that has not
+   * published tomorrow's prices yet.
+   *
+   * @param {(() => void)|null} handler
+   */
+  set action(handler) {
+    this.action_ = handler ?? null;
+    this.toggleAttribute("actionable", Boolean(handler));
+
+    if (handler) {
+      // Announced and reachable as a button, without wrapping the tile in one:
+      // the value inside it is the button's own name.
+      this.setAttribute("role", "button");
+      this.setAttribute("tabindex", "0");
+    } else {
+      this.removeAttribute("role");
+      this.removeAttribute("tabindex");
+    }
+
+    if (this.wired_) return;
+    this.wired_ = true;
+    this.addEventListener("click", () => this.action_?.());
+    this.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      this.action_?.();
+    });
   }
 
   /**

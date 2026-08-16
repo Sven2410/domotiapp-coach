@@ -274,7 +274,7 @@ class DacViewDevices extends DacEditorElement {
 
     const note =
       brands.length && !extra
-        ? `<p class="sub">Voor dit merk zijn de velden nog niet uitgewerkt — vermogen wordt wel meegenomen.</p>`
+        ? `<p class="sub">Voor dit merk zijn de velden nog niet uitgewerkt. Het vermogen wordt wel meegenomen.</p>`
         : "";
 
     return `${brandRow}${this.integrationHtml_(device, index)}${power}${extra}${this.buttonsHtml_(device, index)}${this.actionsHtml_(device, index)}${this.programsHtml_(device)}${note}`;

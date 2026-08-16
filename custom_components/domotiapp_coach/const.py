@@ -131,6 +131,22 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             "l2": {"current": "", "power": "", "voltage": ""},
             "l3": {"current": "", "power": "", "voltage": ""},
         },
+        # The meter readings themselves: the four counters a Dutch smart meter
+        # keeps for electricity, plus gas. These are totals rather than a rate,
+        # so nothing on the dashboard computes with them -- they are what a
+        # customer copies onto a supplier's website, and having them on the
+        # overview saves a trip to the meter cupboard.
+        #
+        # Gas has its own switch because plenty of houses no longer have it,
+        # and an empty gas line on the card reads as a broken sensor.
+        "meters": {
+            "import_low": "",
+            "import_high": "",
+            "export_low": "",
+            "export_high": "",
+            "gas_enabled": False,
+            "gas": "",
+        },
     },
     "installation": {
         "home_name": "",
