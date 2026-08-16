@@ -159,6 +159,13 @@ _SETTINGS = _schema(
                 vol.Optional("phases"): _schema(
                     {vol.Optional(phase): _PHASE for phase in ("l1", "l2", "l3")}
                 ),
+                vol.Optional("solar_forecast"): _schema(
+                    {
+                        vol.Optional("remaining_today"): _ENTITY,
+                        vol.Optional("tomorrow"): _ENTITY,
+                        vol.Optional("peak_today"): _ENTITY,
+                    }
+                ),
                 vol.Optional("meters"): _schema(
                     {
                         vol.Optional("import_low"): _ENTITY,

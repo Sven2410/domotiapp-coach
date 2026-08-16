@@ -17,7 +17,7 @@
  */
 
 import { brandFields, programFor, valueLabel } from "./devices.js";
-import { countdown, duration, toWatts } from "./format.js";
+import { countdown, duration, toKwh, toWatts } from "./format.js";
 
 const PHASES = ["l1", "l2", "l3"];
 
@@ -200,6 +200,45 @@ export function priceForecast(feed, contract) {
 /** The entry covering a moment, or undefined when the forecast does not reach it. */
 export const priceAt = (forecast, when = new Date()) =>
   forecast.find((row) => when >= row.start && when < row.end);
+
+/**
+ * What the sun is expected to bring, from whichever forecast is mapped.
+ *
+ * Deliberately three plain numbers and no hour-by-hour curve. Forecast.Solar
+ * and Solcast publish day totals, a peak time and the current and next hour as
+ * separate sensors; there is no list per hour to read. That turns out not to
+ * matter, because a forecast answers a different question than a measurement
+ * does. "Is it worth waiting" is a question about today and tomorrow as a
+ * whole, and while the coach is actually regulating it uses the meter, not the
+ * forecast: what the panels really produce is a fact, and the forecast is an
+ * estimate that was made this morning.
+ *
+ * Deriving a curve from the day total and the peak time would be inventing
+ * numbers, which this panel does not do.
+ *
+ * @returns {{remainingToday: number|null, tomorrow: number|null,
+ *            peakToday: Date|null, has: boolean}}
+ */
+export function solarForecast(feed, sources) {
+  const config = sources?.solar_forecast ?? {};
+
+  const kwh = (entityId) => {
+    const state = feed.get(entityId);
+    if (!usable(state)) return null;
+    return toKwh(state.state, state.attributes?.unit_of_measurement);
+  };
+
+  const peakState = feed.get(config.peak_today);
+  const peak = usable(peakState) ? new Date(peakState.state) : null;
+
+  const out = {
+    remainingToday: kwh(config.remaining_today),
+    tomorrow: kwh(config.tomorrow),
+    peakToday: peak && !Number.isNaN(peak.getTime()) ? peak : null,
+  };
+  out.has = out.remainingToday !== null || out.tomorrow !== null;
+  return out;
+}
 
 /** The meter counters, in the order a Dutch meter lists them. */
 const METERS = [
