@@ -117,6 +117,23 @@ _SCHEDULE = _schema(
     }
 )
 
+# One person's arrangement of the overview. The card ids are the panel's own
+# business, so they are matched on shape rather than listed here: a card added
+# to the dashboard should not need a change on this side as well.
+_LAYOUT_CARD = _schema(
+    {
+        vol.Required("id"): vol.Match(r"^[a-z0-9_-]{1,32}$"),
+        vol.Optional("hidden", default=False): bool,
+    }
+)
+
+_LAYOUT = _schema(
+    {
+        vol.Required("user"): str,
+        vol.Optional("cards", default=list): vol.All([_LAYOUT_CARD], vol.Length(max=40)),
+    }
+)
+
 _SETTINGS = _schema(
     {
         vol.Optional("navigation"): _schema({vol.Optional("home_path"): str}),
@@ -202,6 +219,7 @@ _SETTINGS = _schema(
         ),
         vol.Optional("devices"): [_DEVICE],
         vol.Optional("ready_devices"): [str],
+        vol.Optional("layouts"): [_LAYOUT],
         vol.Optional("thresholds"): _schema(
             {
                 vol.Optional("self_use"): _schema(
@@ -293,9 +311,48 @@ async def async_set_device_ready(
     connection.send_result(msg["id"], settings)
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/layout/set",
+        vol.Required("cards"): vol.All([_LAYOUT_CARD], vol.Length(max=40)),
+    }
+)
+@websocket_api.async_response
+async def async_set_layout(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Store how this person wants their overview laid out.
+
+    Not admin-only: how you want your own dashboard arranged is nobody else's
+    decision, and the people who use this every day are exactly the ones who are
+    not administrators.
+
+    Whose entry gets written is taken from the connection rather than from the
+    message, so a panel can only ever rearrange the dashboard of the person
+    logged into it.
+    """
+    store = async_get_store(hass)
+    settings = await store.async_load()
+
+    user_id = connection.user.id
+    layouts = [
+        entry
+        for entry in (settings.get("layouts") or [])
+        if isinstance(entry, dict) and entry.get("user") != user_id
+    ]
+    layouts.append({"user": user_id, "cards": msg["cards"]})
+
+    settings = await store.async_save({"layouts": layouts})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], settings)
+
+
 @callback
 def async_register(hass: HomeAssistant) -> None:
     """Register the panel's websocket commands."""
     websocket_api.async_register_command(hass, async_get_settings)
     websocket_api.async_register_command(hass, async_set_settings)
     websocket_api.async_register_command(hass, async_set_device_ready)
+    websocket_api.async_register_command(hass, async_set_layout)
