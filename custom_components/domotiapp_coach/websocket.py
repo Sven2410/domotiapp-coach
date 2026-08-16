@@ -221,6 +221,7 @@ _SETTINGS = _schema(
                 vol.Optional("fuse_amps"): vol.All(vol.Coerce(float), vol.Range(1, 1000)),
                 vol.Optional("max_grid_watts"): vol.All(vol.Coerce(float), vol.Range(0, 1_000_000)),
                 vol.Optional("max_grid_auto"): bool,
+                vol.Optional("load_balancer"): bool,
             }
         ),
         vol.Optional("contract"): _schema(

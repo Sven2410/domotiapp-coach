@@ -48,7 +48,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     version = await _async_frontend_version(hass)
 
     _async_register_websocket(hass)
-    await _async_register_static_path(hass)
+    await _async_register_static_path(hass, version)
     await _async_register_panel(hass, version)
     await _async_start_monitor(hass)
     _async_start_coach(hass)
@@ -115,8 +115,27 @@ def _async_register_websocket(hass: HomeAssistant) -> None:
     domain_data[_WEBSOCKET_KEY] = True
 
 
-async def _async_register_static_path(hass: HomeAssistant) -> None:
-    """Expose the frontend directory under URL_BASE."""
+def asset_base(version: str) -> str:
+    """Where this build of the panel is served from.
+
+    The version is in the path and not in a query string, and that difference is
+    the whole point. The panel is a graph of ES modules that import each other by
+    relative path, and a relative import resolves against the URL of the module
+    doing the importing. Versioning only the entry point therefore versions only
+    the entry point: every module under it keeps the same URL from one release to
+    the next, and a browser that already has one is perfectly entitled to go on
+    using it. That is how a customer ends up with a panel that is half new after
+    an update, which is the kind of thing that looks like a bug in the panel and
+    is nearly impossible to diagnose from a distance.
+
+    With the version in the path, a new release is simply a new set of URLs and
+    the question does not arise.
+    """
+    return f"{URL_BASE}/{version}"
+
+
+async def _async_register_static_path(hass: HomeAssistant, version: str) -> None:
+    """Expose the frontend directory under a URL that carries the version."""
     domain_data = hass.data.setdefault(DOMAIN, {})
     if domain_data.get(_STATIC_PATH_KEY):
         return
@@ -124,17 +143,19 @@ async def _async_register_static_path(hass: HomeAssistant) -> None:
     frontend_path = Path(__file__).parent / FRONTEND_DIR
     await hass.http.async_register_static_paths(
         [
-            StaticPathConfig(
-                URL_BASE,
-                str(frontend_path),
-                # Assets are versioned through a query string; skipping the
-                # long-lived cache headers keeps upgrades predictable.
-                cache_headers=False,
-            )
+            # The versioned path first, so it wins over the plain one.
+            StaticPathConfig(asset_base(version), str(frontend_path), cache_headers=True),
+            # And the plain path as well, purely so that a browser still holding
+            # a page from before this release can finish what it was doing
+            # instead of breaking halfway. Nothing new points at it, and without
+            # the long-lived cache headers it is always revalidated.
+            StaticPathConfig(URL_BASE, str(frontend_path), cache_headers=False),
         ]
     )
     domain_data[_STATIC_PATH_KEY] = True
-    _LOGGER.debug("Serving DomotiApp Coach frontend from %s", frontend_path)
+    _LOGGER.debug(
+        "Serving DomotiApp Coach frontend %s from %s", version, frontend_path
+    )
 
 
 async def _async_register_panel(hass: HomeAssistant, version: str) -> None:
@@ -146,9 +167,9 @@ async def _async_register_panel(hass: HomeAssistant, version: str) -> None:
         hass,
         frontend_url_path=PANEL_URL_PATH,
         webcomponent_name=PANEL_COMPONENT_NAME,
-        module_url=f"{URL_BASE}/{PANEL_FILENAME}?v={version}",
+        module_url=f"{asset_base(version)}/{PANEL_FILENAME}",
         sidebar_title=PANEL_TITLE,
         sidebar_icon=PANEL_ICON,
         require_admin=False,
-        config={"version": version, "asset_base": URL_BASE},
+        config={"version": version, "asset_base": asset_base(version)},
     )

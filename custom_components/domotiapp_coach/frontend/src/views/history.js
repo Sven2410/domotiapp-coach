@@ -23,6 +23,8 @@ import { deviceLabel, deviceLabelMap } from "../devices.js";
 /** Het merkteken op het rapport. */
 const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
 import { tariff } from "../data-source.js";
+import { afleveren } from "../pdf.js";
+import { reportPdf } from "../report.js";
 import {
   PERIODS,
   combine,
@@ -58,65 +60,6 @@ function bucketLabel(period, date) {
   return String(date.getDate());
 }
 
-/**
- * De opmaak van het rapport.
- *
- * Licht, want papier is wit en het donkere thema van het scherm is daar
- * onleesbaar. Wel dezelfde kleuren voor dezelfde dingen, zodat wie het scherm
- * kent de grafiek herkent. Punten in plaats van pixels: dat is de maat die een
- * printer aanhoudt.
- */
-const REPORT_CSS = `
-  @page { size: A4; margin: 15mm 14mm; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: #fff; color: #1a1a18;
-    font: 11pt/1.5 "Segoe UI", system-ui, sans-serif;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
-  }
-  header { display: flex; align-items: center; gap: 14px; border-bottom: 2px solid #026FA1; padding-bottom: 12px; }
-  header img { width: 46px; height: 46px; }
-  .merk { font-size: 15pt; font-weight: 600; }
-  .merk span { color: #026FA1; }
-  .waar { font-size: 10pt; color: #55534e; }
-  header .rechts { margin-left: auto; text-align: right; }
-  header .rechts .titel { font-size: 13pt; font-weight: 600; }
-  header .rechts .sub { font-size: 9.5pt; color: #55534e; }
-
-  h2 { font-size: 11.5pt; margin: 20px 0 9px; page-break-after: avoid; }
-  .cellen { display: flex; flex-wrap: wrap; gap: 9px; }
-  .cel { flex: 1 1 120px; padding: 9px 11px; border: 1px solid #e2ded6; border-radius: 8px; }
-  .cel span { display: block; font-size: 8pt; letter-spacing: 0.08em; text-transform: uppercase; color: #6b6862; }
-  .cel strong { font-size: 13pt; font-weight: 600; }
-
-  svg { width: 100%; height: auto; }
-  .zero { stroke: #c9c4ba; }
-  .b.own { fill: #dc7300; }
-  .b.bought { fill: #0f7fbb; }
-  .b.sold { fill: #a30fae; }
-  .b.gas { fill: #b57d00; }
-  .b.dim { opacity: 1; }
-  .tick { fill: #6b6862; font-family: inherit; font-size: 10px; }
-  .hit, .now-line, .flag { display: none; }
-
-  .legenda { display: flex; gap: 16px; margin-top: 8px; font-size: 9pt; color: #55534e; }
-  .legenda i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; }
-
-  table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 9pt; }
-  th, td { padding: 4px 8px; border-bottom: 1px solid #e8e4dc; text-align: left; }
-  th { font-size: 8pt; letter-spacing: 0.06em; text-transform: uppercase; color: #6b6862; }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  tbody tr:nth-child(even) { background: #faf8f4; }
-  tfoot td { font-weight: 600; border-top: 2px solid #d8d3c9; border-bottom: none; }
-  table { page-break-inside: auto; }
-  tr { page-break-inside: avoid; }
-
-  .voet { margin-top: 18px; padding-top: 9px; border-top: 1px solid #e2ded6; font-size: 8.5pt; color: #6b6862; display: flex; }
-  .voet .rechts { margin-left: auto; }
-  .uitleg { font-size: 9pt; color: #55534e; margin-top: 7px; }
-  .cel em { display: block; font-size: 8pt; font-style: normal; color: #6b6862; margin-top: 2px; }
-  em.schat { font-style: normal; font-size: 8pt; color: #8a867e; }
-`;
 
 class DacViewHistory extends DacElement {
   constructor() {
@@ -552,24 +495,15 @@ class DacViewHistory extends DacElement {
   }
 
   /**
-   * Deze periode als rapport, om te bewaren of door te sturen.
+   * Alles wat er in het rapport komt, uitgerekend en al opgemaakt als tekst.
    *
-   * Via het afdrukvenster van de browser, waar "Bewaren als pdf" een van de
-   * bestemmingen is. Dat scheelt een bibliotheek van honderden kilobytes in een
-   * paneel dat bewust zonder bouwstap draait, en het levert een betere pdf op:
-   * de grafiek gaat als vectortekening mee en blijft scherp op elk formaat.
-   *
-   * Op papier is het donkere thema onbruikbaar, dus het rapport is licht. Wel
-   * dezelfde kleuren voor dezelfde dingen, zodat wie het scherm kent de grafiek
-   * meteen herkent.
-   *
-   * In een eigen iframe en niet in een nieuw venster: dat laatste vangen
-   * popupblokkers weg, en in de app van Home Assistant is het helemaal de vraag
-   * of het opengaat.
+   * De opmaak zelf staat in report.js. Hier gebeurt het rekenwerk en verder
+   * niets, zodat een verandering aan de bladspiegel nooit per ongeluk een getal
+   * verandert en andersom.
    */
-  reportHtml_() {
+  reportData_() {
     const rows = this.rowsShown_ ?? [];
-    if (!rows.length) return "";
+    if (!rows.length) return null;
 
     const prices = this.prices_ ?? new Map();
     const rate = tariff(this.feed_, this.settings_?.contract);
@@ -583,10 +517,7 @@ class DacViewHistory extends DacElement {
       this.period_
     ];
 
-    const cel = (label, waarde, sub) =>
-      `<div class="cel"><span>${label}</span><strong>${waarde}</strong>${
-        sub ? `<em>${sub}</em>` : ""
-      }</div>`;
+    const cel = (label, waarde) => ({ label, waarde });
 
     const kwh = (value) => {
       if (value === null || value === undefined) return "";
@@ -605,21 +536,17 @@ class DacViewHistory extends DacElement {
     if (gas.size) kop.push("Gas");
     if (rate.buy !== null) kop.push("Prijs", "Kosten");
 
-    const regels = rows
-      .map((row) => {
-        const prijs = prijsBij(row);
-        const cellen = [bucketTitle(this.period_, row.start)];
-        if (hasSolar) cellen.push(kwh(row.own + row.sold), kwh(row.used), kwh(row.own));
-        cellen.push(kwh(row.bought), kwh(row.sold));
-        if (gas.size) cellen.push(`${nl(gas.get(row.start.getTime()) ?? 0, 2)} m³`);
-        if (rate.buy !== null) {
-          cellen.push(prijs === null ? "" : euro(prijs), euro(row.bought * (prijs ?? 0)));
-        }
-        return `<tr>${cellen
-          .map((c, i) => `<td${i ? ' class="num"' : ""}>${c}</td>`)
-          .join("")}</tr>`;
-      })
-      .join("");
+    const regels = rows.map((row) => {
+      const prijs = prijsBij(row);
+      const cellen = [bucketTitle(this.period_, row.start)];
+      if (hasSolar) cellen.push(kwh(row.own + row.sold), kwh(row.used), kwh(row.own));
+      cellen.push(kwh(row.bought), kwh(row.sold));
+      if (gas.size) cellen.push(`${nl(gas.get(row.start.getTime()) ?? 0, 2)} m³`);
+      if (rate.buy !== null) {
+        cellen.push(prijs === null ? "" : euro(prijs), euro(row.bought * (prijs ?? 0)));
+      }
+      return cellen;
+    });
 
     const som = (key) => rows.reduce((total, row) => total + row[key], 0);
     const totaalCellen = ["Totaal"];
@@ -639,132 +566,120 @@ class DacViewHistory extends DacElement {
     // een zin die zegt waarom.
     const aandeelKlopt = Boolean(totals.used) && samen <= totals.used * 1.02;
 
-    const apparatenHtml = !apparaten.length
-      ? ""
-      : [
-          "<h2>Per apparaat</h2>",
-          '<table><thead><tr><th>Apparaat</th><th class="num">Verbruik</th>',
-          rate.buy === null ? "" : '<th class="num">Kosten</th>',
-          aandeelKlopt ? '<th class="num">Aandeel</th>' : "",
-          "</tr></thead><tbody>",
-          apparaten
-            .map(
-              (device) =>
-                `<tr><td>${device.label}${
-                  device.exact ? "" : ' <em class="schat">bij benadering</em>'
-                }</td><td class="num">${kwh(device.kwh)}</td>${
-                  rate.buy === null ? "" : `<td class="num">${euro(device.euro)}</td>`
-                }${
-                  aandeelKlopt
-                    ? `<td class="num">${Math.round((device.kwh / totals.used) * 100)} %</td>`
-                    : ""
-                }</tr>`
-            )
-            .join(""),
-          "</tbody></table>",
-          '<p class="uitleg">Van apparaten zonder eigen energieteller wordt het verbruik afgeleid uit het gemiddelde vermogen. Dat is nauwkeurig genoeg om te zien waar je stroom heen gaat, maar het is geen meterstand. Vul bij Apparaten een energieteller in als je die hebt, dan klopt het tot op de komma.' +
-            (aandeelKlopt
-              ? ""
-              : " Deze schattingen tellen samen op tot meer dan het verbruik van de woning, dus staat er geen aandeel bij.") +
-            "</p>",
-        ].join("");
+    const apparaatKop = ["Apparaat", "Verbruik"];
+    if (rate.buy !== null) apparaatKop.push("Kosten");
+    if (aandeelKlopt) apparaatKop.push("Aandeel");
 
-    const html = [
-      '<!doctype html><html lang="nl"><head><meta charset="utf-8">',
-      `<title>${periode}</title><style>${REPORT_CSS}</style></head><body>`,
+    const apparaatRijen = apparaten.map((device) => {
+      const cellen = [
+        device.exact ? device.label : `${device.label} (bij benadering)`,
+        kwh(device.kwh),
+      ];
+      if (rate.buy !== null) cellen.push(euro(device.euro));
+      if (aandeelKlopt) cellen.push(`${Math.round((device.kwh / totals.used) * 100)} %`);
+      return cellen;
+    });
 
-      "<header>",
-      `<img src="${LOGO_URL}" alt="">`,
-      '<div><div class="merk">DomotiApp <span>Coach</span></div>',
-      woning ? `<div class="waar">${woning}</div>` : "",
-      "</div>",
-      `<div class="rechts"><div class="titel">${periode}</div><div class="sub">${korrel}</div></div>`,
-      "</header>",
+    const apparaatUitleg =
+      "Van apparaten zonder eigen energieteller wordt het verbruik afgeleid uit het " +
+      "gemiddelde vermogen. Dat is nauwkeurig genoeg om te zien waar je stroom heen gaat, " +
+      "maar het is geen meterstand. Vul bij Apparaten een energieteller in als je die hebt, " +
+      "dan klopt het tot op de komma." +
+      (aandeelKlopt
+        ? ""
+        : " Deze schattingen tellen samen op tot meer dan het verbruik van de woning, dus staat er geen aandeel bij.");
 
-      "<h2>Energie</h2>",
-      '<div class="cellen">',
-      hasSolar ? cel("Opgewekt", kwh(totals.solar)) : "",
-      hasSolar ? cel("Verbruikt", kwh(totals.used)) : "",
+    const energieVakjes = [
+      hasSolar ? cel("Opgewekt", kwh(totals.solar)) : null,
+      hasSolar ? cel("Verbruikt", kwh(totals.used)) : null,
       cel("Van het net", kwh(totals.bought)),
       cel("Naar het net", kwh(totals.sold)),
       totals.selfUse === null || totals.selfUse === undefined
-        ? ""
+        ? null
         : cel("Zelf gebruikt", `${percent(totals.selfUse).value} %`),
-      gas.size ? cel("Gas", `${nl([...gas.values()].reduce((a, b) => a + b, 0), 1)} m³`) : "",
-      "</div>",
+      gas.size
+        ? cel("Gas", `${nl([...gas.values()].reduce((a, b) => a + b, 0), 1)} m³`)
+        : null,
+    ].filter(Boolean);
 
+    const geldVakjes =
       rate.buy === null
-        ? ""
+        ? []
         : [
-            "<h2>In geld</h2>",
-            '<div class="cellen">',
-            hasSolar ? cel("Eigen zon bespaarde", euro(waarde("own"))) : "",
+            hasSolar ? cel("Eigen zon bespaarde", euro(waarde("own"))) : null,
             cel("Stroom gekocht voor", euro(waarde("bought"))),
             rate.feedIn === null
-              ? ""
-              : cel("Teruglevering leverde", euro(Math.max(0, (totals.sold ?? 0) * rate.feedIn))),
-            "</div>",
-            `<p class="uitleg">${this.$("#money-note").textContent}</p>`,
-          ].join(""),
+              ? null
+              : cel(
+                  "Teruglevering leverde",
+                  euro(Math.max(0, (totals.sold ?? 0) * rate.feedIn))
+                ),
+          ].filter(Boolean);
 
-      "<h2>Verloop</h2>",
-      this.$("#stage svg")?.outerHTML ?? "",
-      '<div class="legenda">',
-      hasSolar ? '<span><i style="background:#dc7300"></i>Eigen zon gebruikt</span>' : "",
-      '<span><i style="background:#0f7fbb"></i>Van het net</span>',
-      '<span><i style="background:#a30fae"></i>Naar het net</span>',
-      "</div>",
-
-      apparatenHtml,
-
-      "<h2>Alle cijfers</h2>",
-      "<table><thead><tr>",
-      kop.map((k, i) => `<th${i ? ' class="num"' : ""}>${k}</th>`).join(""),
-      "</tr></thead><tbody>",
-      regels,
-      "</tbody><tfoot><tr>",
-      totaalCellen.map((c, i) => `<td${i ? ' class="num"' : ""}>${c}</td>`).join(""),
-      "</tr></tfoot></table>",
-
-      '<div class="voet">',
-      `<span>Gemaakt op ${new Date().toLocaleDateString("nl-NL", {
+    return {
+      logoUrl: LOGO_URL,
+      woning,
+      periode,
+      korrel,
+      metZon: hasSolar,
+      gemaakt: new Date().toLocaleDateString("nl-NL", {
         day: "numeric",
         month: "long",
         year: "numeric",
-      })}</span>`,
-      '<span class="rechts">domotitech.nl</span>',
-      "</div></body></html>",
-    ].join("");
-
-    return html;
+      }),
+      energie: energieVakjes,
+      geld: geldVakjes,
+      geldUitleg: geldVakjes.length ? this.$("#money-note").textContent : "",
+      verloop: rows.map((row) => ({
+        label: bucketLabel(this.period_, row.start),
+        own: row.own,
+        bought: row.bought,
+        sold: row.sold,
+      })),
+      apparaten: { kop: apparaatKop, rijen: apparaatRijen, uitleg: apparaatUitleg },
+      cijfers: { kop, rijen: regels, totaal: totaalCellen },
+    };
   }
 
-  /** Het rapport naar het afdrukvenster, waar "bewaren als pdf" een keuze is. */
-  report_() {
-    const html = this.reportHtml_();
-    if (!html) return;
+  /**
+   * Het rapport als pdf, en dan het bestand naar de klant toe.
+   *
+   * Het ging eerst via het afdrukvenster van de browser. Dat werkt op een pc,
+   * maar op een telefoon niet: in de app van Home Assistant bestaat dat venster
+   * niet en op iOS werkt afdrukken vanuit een frame sowieso niet. Nu wordt de
+   * pdf zelf gemaakt, zie pdf.js, en gaat hij als bestand naar buiten. Daarmee
+   * werkt het op elk apparaat op dezelfde manier.
+   */
+  async report_() {
+    const knop = this.$("#report");
+    if (knop?.disabled) return;
 
-    const frame = document.createElement("iframe");
-    frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0";
-    document.body.appendChild(frame);
+    const gegevens = this.reportData_();
+    if (!gegevens) return;
 
-    const doc = frame.contentDocument;
-    doc.open();
-    doc.write(html);
-    doc.close();
+    const label = knop?.querySelector("span");
+    const oud = label?.textContent;
+    if (knop) knop.disabled = true;
+    if (label) label.textContent = "Bezig";
 
-    // Wachten tot het logo binnen is, anders staat er een lege plek op papier.
-    const printen = () => {
-      frame.contentWindow.focus();
-      frame.contentWindow.print();
-      setTimeout(() => frame.remove(), 1000);
-    };
-    const logo = doc.querySelector("img");
-    if (logo && !logo.complete) {
-      logo.addEventListener("load", printen, { once: true });
-      logo.addEventListener("error", printen, { once: true });
-    } else {
-      setTimeout(printen, 60);
+    try {
+      const blob = await reportPdf(gegevens);
+      const naam = `DomotiApp Coach ${gegevens.periode}.pdf`.replace(/[\\/:*?"<>|]/g, "-");
+      const uitkomst = await afleveren(blob, naam);
+      if (label && uitkomst === "mislukt") label.textContent = "Niet gelukt";
+      else if (label) label.textContent = oud;
+    } catch (fout) {
+      console.error("[DomotiApp Coach] het rapport kon niet gemaakt worden", fout);
+      if (label) label.textContent = "Niet gelukt";
+    } finally {
+      if (knop) knop.disabled = false;
+      // Een knop die "Niet gelukt" blijft zeggen is na een minuut alleen nog
+      // maar in de weg, dus die komt vanzelf weer terug op zijn eigen woord.
+      if (label && label.textContent !== oud) {
+        setTimeout(() => {
+          label.textContent = oud;
+        }, 4000);
+      }
     }
   }
 

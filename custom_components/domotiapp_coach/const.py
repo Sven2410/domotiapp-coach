@@ -210,6 +210,11 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # better than the arithmetic does.
         "max_grid_watts": 17250,
         "max_grid_auto": True,
+        # Whether something else already guards this fuse in hardware, such as
+        # an Easee Equalizer. It changes how much room the coach leaves under
+        # the fuse: with a balancer present it gives way first, so the balancer
+        # never has to intervene at all.
+        "load_balancer": False,
     },
     "contract": {
         "type": CONTRACT_FIXED,

@@ -81,6 +81,18 @@ class DacViewInstallation extends DacEditorElement {
                 Uit fasen × zekering × 230 V. Zet dit uit als je aansluiting begrensd of juist verzwaard is.
               </span>
             </label>
+
+            <label class="check" for="balancer">
+              <input type="checkbox" id="balancer">
+              <span>
+                <strong>Er zit een lastbewaker op de aansluiting</strong>
+                Zoals een Easee Equalizer. Die bewaakt dezelfde zekering en kan het laden zelf
+                terugschroeven. Staat dit aan, dan houdt de coach een ruimere marge aan en stapt
+                hij als eerste terug, zodat de lastbewaker een vangnet blijft dat niet hoeft in
+                te grijpen. Meet je lastbewaker de fasen, kies die sensoren dan hieronder bij de
+                stroom per fase; dat is de zuiverste meting die je hebt.
+              </span>
+            </label>
           </div>
         </section>
 
@@ -240,6 +252,11 @@ class DacViewInstallation extends DacEditorElement {
       this.afterChange_();
     });
 
+    this.$("#balancer").addEventListener("change", (ev) => {
+      this.draft_.installation.load_balancer = ev.target.checked;
+      this.afterChange_();
+    });
+
     for (const button of this.$$("#phases button")) {
       button.addEventListener("click", () => {
         this.draft_.installation.phases = Number(button.dataset.phases);
@@ -313,6 +330,7 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#fuse").value = inst.fuse_amps;
     this.$("#max-grid").value = inst.max_grid_watts;
     this.$("#max-auto").checked = Boolean(inst.max_grid_auto);
+    this.$("#balancer").checked = Boolean(inst.load_balancer);
 
     this.$("#fx-price").value = contract.fixed.all_in_price;
     this.$("#fx-feedin").value = contract.fixed.feed_in_tariff;
