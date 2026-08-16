@@ -68,14 +68,14 @@ export const CHARGER_BRANDS = [
         // `note` is what stands under the button in the manual controls; a
         // `hint` belongs to the settings screen and would read as instructions
         // from another room here.
-        note: "Start de laadpaal opnieuw op. Een lopende laadsessie stopt daarmee; de paal is een halve minuut niet bereikbaar.",
+        note: "Start de laadpaal opnieuw op. Een lopende laadsessie stopt daarmee; de lader is een halve minuut niet bereikbaar.",
       },
     ],
     fields: [
       {
         key: "status",
         label: "Status",
-        hint: "Waar de paal mee bezig is: aangesloten, aan het laden, klaar.",
+        hint: "Waar de lader mee bezig is: aangesloten, aan het laden, klaar.",
         filter: "all",
         needed: true,
         // The Easee integration reports these as English keys, whatever the
@@ -156,13 +156,13 @@ export const CHARGER_BRANDS = [
       {
         key: "lifetime_energy",
         label: "Levensduur verbruik",
-        hint: "Alles wat deze paal ooit geladen heeft, in kWh.",
+        hint: "Alles wat deze lader ooit geladen heeft, in kWh.",
         filter: "all",
       },
       {
         key: "max_limit",
         label: "Maximale limiet lader",
-        hint: "Hoeveel ampère de paal maximaal mag leveren. Dit is de bovengrens die vastligt.",
+        hint: "Hoeveel ampère de lader maximaal mag leveren. Dit is de bovengrens die vastligt.",
         filter: "all",
         needed: true,
       },
@@ -177,7 +177,7 @@ export const CHARGER_BRANDS = [
       {
         key: "current",
         label: "Stroom",
-        hint: "Wat de paal op dit moment levert, in ampère.",
+        hint: "Wat de lader op dit moment levert, in ampère.",
         filter: "all",
       },
     ],
@@ -501,7 +501,7 @@ export const hasCars = (device) => CAR_TYPES.includes(device?.type);
 export const CAR_PHASES = [
   { id: "one", label: "Eén fase", blurb: "Laagste stap ongeveer 1,4 kW." },
   { id: "three", label: "Drie fasen", blurb: "Laagste stap ongeveer 4,1 kW." },
-  { id: "both", label: "Allebei", blurb: "De paal schakelt zelf terug naar één fase." },
+  { id: "both", label: "Allebei", blurb: "De lader schakelt zelf terug naar één fase." },
 ];
 
 /**

@@ -440,6 +440,17 @@ export async function jpegVan(url, maxBreedte = 600) {
   return { data, w: breed, h: hoog };
 }
 
+/** Een blob als base64, om over de websocket te passen. */
+export function base64Van(blob) {
+  return new Promise((klaar, mis) => {
+    const lezer = new FileReader();
+    lezer.onerror = () => mis(lezer.error);
+    // Komt eruit als "data:application/pdf;base64,JVBERi0...".
+    lezer.onload = () => klaar(String(lezer.result).split(",")[1] ?? "");
+    lezer.readAsDataURL(blob);
+  });
+}
+
 /**
  * Het bestand bij de klant afleveren, op de manier die dit apparaat aankan.
  *

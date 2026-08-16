@@ -8,6 +8,9 @@ writing is admin-only, so a household member cannot silently repoint the meter.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -15,6 +18,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
+from . import report
 from .const import (
     ALL_BRANDS,
     GOALS,
@@ -457,9 +461,54 @@ def async_coach_approve(
     connection.send_result(msg["id"], coach.state)
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/report/store",
+        vol.Required("pdf"): str,
+        vol.Required("filename"): str,
+    }
+)
+@callback
+def async_store_report(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Neem een rapport aan en zeg waar het op te halen is.
+
+    Het paneel maakt de pdf zelf en zou hem in de browser kunnen aanbieden, maar
+    een webweergave kan een `blob:` niet downloaden en levert dan een bestand op
+    dat niet open gaat. Dus komt hij hierlangs en gaat hij als een gewone
+    download naar buiten. Zie report.py.
+
+    Niet alleen voor beheerders: wie het rapport mag zien, mag het bewaren.
+    """
+    try:
+        pdf = base64.b64decode(msg["pdf"], validate=True)
+    except (ValueError, binascii.Error):
+        connection.send_error(msg["id"], "invalid_format", "Dit is geen leesbaar rapport.")
+        return
+
+    if not pdf.startswith(b"%PDF-"):
+        connection.send_error(msg["id"], "invalid_format", "Dit is geen pdf.")
+        return
+    if len(pdf) > report.MAX_BYTES:
+        connection.send_error(msg["id"], "too_large", "Dit rapport is te groot.")
+        return
+
+    # De naam komt uit de browser en belandt in een kopregel, dus alles wat daar
+    # een tweede regel van zou kunnen maken gaat eruit.
+    filename = re.sub(r'[\r\n"\\]', "", msg["filename"]).strip() or "rapport.pdf"
+
+    connection.send_result(
+        msg["id"], {"url": report.async_put(hass, pdf, filename[:120])}
+    )
+
+
 @callback
 def async_register(hass: HomeAssistant) -> None:
     """Register the panel's websocket commands."""
+    websocket_api.async_register_command(hass, async_store_report)
     websocket_api.async_register_command(hass, async_get_settings)
     websocket_api.async_register_command(hass, async_set_settings)
     websocket_api.async_register_command(hass, async_set_device_ready)
