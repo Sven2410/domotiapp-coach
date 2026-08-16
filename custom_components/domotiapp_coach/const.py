@@ -244,6 +244,12 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # it has to survive a restart (a dishwasher stays loaded) and reach every
     # open panel over the same event.
     "ready_devices": [],
+    # Which car is hanging on which charging point right now. State rather than
+    # configuration, like `ready_devices`: it changes when somebody plugs in a
+    # different car, it has to survive a restart, and whoever is standing in the
+    # driveway is not an administrator. A list for the same reason as the rest:
+    # storage.py prunes dictionaries against these defaults.
+    "active_cars": [],
     "thresholds": {
         # Zelfbenutting in percent: below `low` is bad, above `high` is good.
         "self_use": {"low": 30, "high": 70},

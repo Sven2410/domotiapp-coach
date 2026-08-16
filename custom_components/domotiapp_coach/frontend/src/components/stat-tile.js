@@ -201,7 +201,15 @@ class DacStatTile extends DacElement {
 
     if (this.wired_) return;
     this.wired_ = true;
-    this.addEventListener("click", () => this.action_?.());
+    this.addEventListener("click", (event) => {
+      // Een tik met een vinger laat de tegel op iOS gefocust achter, en de
+      // markering die daarbij hoort blijft dan om de tegel staan nadat het
+      // scherm dat hij opende alweer dicht is. Een klik met een muis of vinger
+      // heeft detail > 0; met Enter of spatie is dat 0, en dan blijft de focus
+      // juist wel staan, want die toetsenbordgebruiker moet zien waar hij is.
+      if (event.detail > 0) this.blur();
+      this.action_?.();
+    });
     this.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();

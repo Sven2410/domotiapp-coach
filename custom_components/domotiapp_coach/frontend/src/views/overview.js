@@ -16,6 +16,7 @@ import { icons } from "../icons.js";
 import {
   DISHWASHER_PROGRAM_VALUES,
   canCommand,
+  carsFor,
   deviceCommands,
   deviceLabel,
   deviceLabelMap,
@@ -393,6 +394,11 @@ class DacViewOverview extends DacElement {
     }
     .steer-actions button { flex: 1 1 170px; }
 
+    /* Voor de eigen display-regel hieronder uit, anders wint die van het
+       hidden-attribuut en blijft een verborgen knop gewoon staan. Dat is wat
+       een laadpaal een vrijgaveknop gaf die er niet hoort te zijn. */
+    button.release[hidden], button.manual[hidden] { display: none; }
+
     button.release, button.manual {
       display: flex; align-items: center; justify-content: center; gap: 8px;
       padding: 11px 16px;
@@ -447,6 +453,27 @@ class DacViewOverview extends DacElement {
     .cmd.care { grid-column: 1 / -1; }
     .cmd.care .icon { color: var(--dac-warn); }
     .cmd-note { grid-column: 1 / -1; margin: -2px 0 0; font-size: 12px; line-height: 1.45; color: var(--dac-ink-3); }
+
+    /* De autokeuze staat boven de knoppen: eerst zeggen wat er hangt, dan pas
+       wat ermee moet gebeuren. */
+    /* Op een eigen regel boven de knoppen: eerst zeggen welke auto er hangt,
+       dan pas wat ermee moet gebeuren. flex-basis 100% haalt hem uit de rij. */
+    .car-pick { display: grid; gap: 6px; margin: 14px 0 0; flex: 1 1 100%; }
+    .car-pick[hidden] { display: none; }
+    .car-pick label { font-size: 12.5px; color: var(--dac-ink-2); }
+    .car-pick select {
+      padding: 10px 12px;
+      border-radius: var(--dac-radius-sm);
+      border: 1px solid var(--dac-border-hi);
+      background: rgba(255,255,255,0.04);
+      color: var(--dac-ink);
+      font: inherit; font-size: 14px;
+      min-height: 44px;
+      width: 100%;
+    }
+    .car-pick select option { background: #12120f; color: var(--dac-ink); }
+    @media (pointer: coarse) { .car-pick select { font-size: 16px; } }
+    @supports (-webkit-touch-callout: none) { .car-pick select { font-size: 16px; } }
 
     .cmd-pick { display: grid; gap: 6px; margin-top: 16px; min-width: 0; }
     .cmd-pick[hidden] { display: none; }
@@ -1238,6 +1265,28 @@ class DacViewOverview extends DacElement {
     line.replaceChildren(mark, text);
   }
 
+  /** Which car this charging point is set to, if any. */
+  activeCar_(deviceId) {
+    return (this.settings_?.active_cars ?? []).find((entry) => entry.device === deviceId)?.car;
+  }
+
+  /** Remember which car is plugged in, for everybody looking at this house. */
+  async chooseCar_(slot, carId) {
+    const device = this.steerDevices_?.[slot];
+    if (!device || !this.hass) return;
+
+    try {
+      const settings = await this.hass.callWS({
+        type: "domotiapp_coach/device/car",
+        device_id: device.id,
+        car: carId,
+      });
+      this.fire("dac-settings-saved", { settings });
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de auto niet onthouden", error);
+    }
+  }
+
   /**
    * The meter counters, when there are any to show.
    *
@@ -1470,6 +1519,10 @@ class DacViewOverview extends DacElement {
           </div>
           <div class="steer-rows" data-rows="${slot}"></div>
           <div class="steer-actions">
+            <div class="car-pick" data-car-pick="${slot}" hidden>
+              <label for="car-${slot}">Welke auto hangt eraan?</label>
+              <select id="car-${slot}" data-car-select="${slot}"></select>
+            </div>
             <button class="release" type="button" data-release="${slot}" aria-pressed="false">
               <span class="mark" data-mark="${slot}"></span>
               <span data-release-text="${slot}"></span>
@@ -1483,6 +1536,11 @@ class DacViewOverview extends DacElement {
       )
       .join("");
 
+    for (const select of this.$$("[data-car-select]")) {
+      select.addEventListener("change", () =>
+        this.chooseCar_(Number(select.dataset.carSelect), select.value)
+      );
+    }
     for (const button of this.$$("[data-release]")) {
       button.addEventListener("click", () => this.toggleReady_(Number(button.dataset.release)));
     }
@@ -1521,6 +1579,29 @@ class DacViewOverview extends DacElement {
           return line;
         })
       );
+
+      // Welke auto er hangt. De coach rekent met de accu en het aantal fasen
+      // van die auto, en een gast staat er altijd bij zonder instellen.
+      const cars = carsFor(device);
+      const pick = this.$(`[data-car-pick="${slot}"]`);
+      pick.hidden = cars.length < 2;
+      if (!pick.hidden) {
+        const select = this.$(`[data-car-select="${slot}"]`);
+        const chosen = this.activeCar_(device.id);
+        const key = cars.map((car) => `${car.id}:${car.name}`).join("|");
+        if (select.dataset.key !== key) {
+          select.dataset.key = key;
+          select.replaceChildren(
+            ...cars.map((car) => {
+              const option = document.createElement("option");
+              option.value = car.id;
+              option.textContent = car.name?.trim() || (car.guest ? "Gast" : "Naamloze auto");
+              return option;
+            })
+          );
+        }
+        select.value = chosen ?? cars[0]?.id ?? "";
+      }
 
       // Only where somebody has to say so. A charger is released by plugging
       // the cable in, and asking again on the dashboard added a step without
