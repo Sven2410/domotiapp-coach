@@ -699,6 +699,12 @@ class DacViewStrategy extends DacEditorElement {
     this.$("#alert-hold").value = String(alert.min_duration_seconds ?? 60);
     this.$("#alert-interval").value = String(alert.min_interval_minutes);
 
+    // Hoort hier en niet alleen in de klikafhandelaars. Stond hij daar alleen,
+    // dan waren het niveau en het doel na een herlaadbeurt allebei nergens
+    // aangevinkt: opgeslagen was het wel, maar het scherm liet niet zien wat er
+    // stond. Dat is niet te onderscheiden van instellingen die verdwenen zijn,
+    // en zo is het ook gemeld.
+    this.paintLevel_();
     this.paintEnabled_();
     this.paintTargets_();
     this.paintHint_();

@@ -1274,11 +1274,17 @@ class DacViewOverview extends DacElement {
 
     const parts = [];
     if (sun.remainingToday !== null) {
-      parts.push(
-        sun.remainingToday < 0.2
-          ? "Vandaag komt er vrijwel niets meer bij"
-          : `Vandaag komt er nog ongeveer ${nl(sun.remainingToday, 1)} kWh bij`
-      );
+      // Drie gevallen en niet twee. "Vrijwel niets meer" stond er ook nog om
+      // elf uur 's avonds, en dan is het niet vrijwel niets maar helemaal
+      // niets: de zon is onder. Een zin die op dat moment doet alsof er nog
+      // iets aankomt, klopt gewoon niet.
+      if (sun.remainingToday < 0.05) {
+        parts.push("Vandaag levert de zon niets meer op");
+      } else if (sun.remainingToday < 0.2) {
+        parts.push("Vandaag komt er nog maar weinig bij");
+      } else {
+        parts.push(`Vandaag komt er nog ongeveer ${nl(sun.remainingToday, 1)} kWh bij`);
+      }
     }
     // Only worth naming while it is still ahead: at eight in the evening
     // "the peak is at 13:00" is a fact about this afternoon.

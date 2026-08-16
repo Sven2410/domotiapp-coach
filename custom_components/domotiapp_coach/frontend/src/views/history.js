@@ -23,7 +23,7 @@ import { deviceLabel, deviceLabelMap } from "../devices.js";
 /** Het merkteken op het rapport. */
 const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
 import { tariff } from "../data-source.js";
-import { afleveren } from "../pdf.js";
+import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
 import {
   PERIODS,
@@ -35,6 +35,14 @@ import {
   periodStart,
   withStatistics,
 } from "../statistics.js";
+
+/** Waar de terugknop je heen brengt, per tijdvak. */
+const NOW_LABEL = {
+  day: "Vandaag",
+  week: "Deze week",
+  month: "Deze maand",
+  year: "Dit jaar",
+};
 
 /** Drawing units; the chart measures itself in pixels like the price chart. */
 const MIN_W = 240;
@@ -107,6 +115,7 @@ class DacViewHistory extends DacElement {
             ${icons.compass}<span>Rapport</span>
           </button>
           <div class="stepper">
+            <button type="button" class="now" id="now" hidden></button>
             <button type="button" id="prev" aria-label="Vorige">${icons.arrowLeft}</button>
             <span id="period-label"></span>
             <button type="button" id="next" aria-label="Volgende">${icons.arrowRight}</button>
@@ -153,6 +162,11 @@ class DacViewHistory extends DacElement {
     this.$("#report").addEventListener("click", () => this.report_());
     this.$("#prev").addEventListener("click", () => this.step_(-1));
     this.$("#next").addEventListener("click", () => this.step_(1));
+    this.$("#now").addEventListener("click", () => {
+      if (this.offset_ === 0) return;
+      this.offset_ = 0;
+      this.load_();
+    });
 
     // Een muis meldt zich af zodra hij de grafiek verlaat; een vinger niet. Dus
     // telt hier een tik ergens anders op het scherm als afmelden, anders blijft
@@ -271,6 +285,15 @@ class DacViewHistory extends DacElement {
       periodStart(this.period_, this.offset_)
     );
     this.$("#next").disabled = this.offset_ >= 0;
+
+    // Terug naar nu, in één tik. Een datum vertelt je namelijk niet of het de
+    // datum van vandaag is: wie een paar weken teruggebladerd heeft, moet
+    // anders eerst uitrekenen hoe vaak hij op het pijltje moet drukken. De knop
+    // draagt de naam van waar hij je heen brengt en verdwijnt zodra je er bent.
+    const nu = this.$("#now");
+    nu.textContent = NOW_LABEL[this.period_] ?? "Nu";
+    nu.title = `Terug naar ${(NOW_LABEL[this.period_] ?? "nu").toLowerCase()}`;
+    nu.hidden = this.offset_ === 0;
   }
 
   paint_() {
@@ -665,7 +688,7 @@ class DacViewHistory extends DacElement {
     try {
       const blob = await reportPdf(gegevens);
       const naam = `DomotiApp Coach ${gegevens.periode}.pdf`.replace(/[\\/:*?"<>|]/g, "-");
-      const uitkomst = await afleveren(blob, naam);
+      const uitkomst = await this.bezorg_(blob, naam);
       if (label && uitkomst === "mislukt") label.textContent = "Niet gelukt";
       else if (label) label.textContent = oud;
     } catch (fout) {
@@ -681,6 +704,37 @@ class DacViewHistory extends DacElement {
         }, 4000);
       }
     }
+  }
+
+  /**
+   * De pdf bij de klant krijgen.
+   *
+   * Langs Home Assistant en niet rechtstreeks uit de browser. Het paneel maakt
+   * de pdf hier ter plekke, dus een downloadkoppeling naar een `blob:` lag voor
+   * de hand, en op een computer werkt dat ook. In de Home Assistant app niet:
+   * dat is een webweergave en geen browser, en die kan zo'n adres niet zelf
+   * ophalen. Er kwam dan wel een bestand uit, maar het ging niet open.
+   *
+   * Via de omweg wordt het een gewoon webadres met een gewone pdf erachter, en
+   * dat kan elk apparaat aan. Lukt de omweg niet, dan alsnog rechtstreeks: op
+   * een computer is dat prima, en een rapport dat je niet krijgt is slechter
+   * dan een rapport dat langs de oude weg komt.
+   */
+  async bezorg_(blob, naam) {
+    try {
+      const { url } = await this.hass_.callWS({
+        type: "domotiapp_coach/report/store",
+        pdf: await base64Van(blob),
+        filename: naam,
+      });
+      if (url) {
+        window.location.assign(url);
+        return "gedownload";
+      }
+    } catch (fout) {
+      console.warn("[DomotiApp Coach] rapport kon niet via Home Assistant, nu rechtstreeks", fout);
+    }
+    return afleveren(blob, naam);
   }
 
   /** Wat elk apparaat deze periode verbruikte, van groot naar klein. */
@@ -878,7 +932,13 @@ class DacViewHistory extends DacElement {
 
     const gasStage = this.$("#gas-stage");
     const W = Math.max(MIN_W, Math.round(gasStage.getBoundingClientRect().width) || MIN_W);
-    const H = 90;
+    // Ruimte onderaan voor de tijdschaal. Die stond er eerst niet, waardoor je
+    // wel zag dat er een piek was maar niet wanneer, en dat is bij gas nu juist
+    // de vraag: stookte ik 's ochtends of 's avonds. De stroomgrafiek erboven
+    // heeft die schaal wel, dus zonder deze staan er twee grafieken onder
+    // elkaar waarvan de x-as verschillend leest.
+    const BOTTOM = 90;
+    const H = BOTTOM + BOTTOM_PAD;
     const top = Math.max(...rows.map((row) => row.value), 0.001);
     const colW = Math.min(W / rows.length, 64);
     const inset = (W - colW * rows.length) / 2;
@@ -886,23 +946,37 @@ class DacViewHistory extends DacElement {
 
     const bars = rows
       .map((row, index) => {
-        const height = (row.value / (top * 1.05)) * (H - 8);
+        const height = (row.value / (top * 1.05)) * (BOTTOM - 8);
         if (height <= 0.4) return "";
         const x = inset + index * colW + (colW - barW) / 2;
-        return `<path class="b gas" d="${block(x, barW, H - height, height, Math.min(4, barW / 2))}"/>`;
+        return `<path class="b gas" d="${block(x, barW, BOTTOM - height, height, Math.min(4, barW / 2))}"/>`;
       })
+      .join("");
+
+    // Dezelfde overslagregel als bij stroom, zodat de bijschriften van de twee
+    // grafieken op precies dezelfde momenten staan en je ze kunt vergelijken.
+    const every = Math.max(1, Math.ceil(rows.length / Math.max(4, Math.floor(W / 46))));
+    const ticks = rows
+      .map((row, index) =>
+        index % every === 0
+          ? `<text class="tick" x="${inset + index * colW + colW / 2}" y="${H - 6}" text-anchor="middle">${bucketLabel(
+              this.period_,
+              row.start
+            )}</text>`
+          : ""
+      )
       .join("");
 
     const hits = rows
       .map(
         (row, index) =>
           `<rect class="hit" data-index="${index}" x="${inset + index * colW}" y="0"
-                 width="${colW}" height="${H}"/>`
+                 width="${colW}" height="${BOTTOM}"/>`
       )
       .join("");
 
     gasStage.innerHTML = `
-      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gasverbruik per periode">${bars}${hits}</svg>
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gasverbruik per periode">${bars}${ticks}${hits}</svg>
     `;
 
     // Net als de stroomgrafiek: aanwijzen zet de kop erboven op die ene balk.
@@ -1031,6 +1105,13 @@ DacViewHistory.css = /* css */ `
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
+  .stepper button.now {
+    width: auto; height: 34px; padding: 0 14px;
+    font: inherit; font-size: 12.5px; font-weight: 600;
+    color: var(--dac-ink-2);
+    white-space: nowrap;
+  }
+  .stepper button.now[hidden] { display: none; }
   .stepper button:hover:not(:disabled) { color: var(--dac-ink); border-color: var(--dac-border-hi); }
   .stepper button:disabled { opacity: 0.3; cursor: default; }
   .stepper .icon { width: 16px; height: 16px; }

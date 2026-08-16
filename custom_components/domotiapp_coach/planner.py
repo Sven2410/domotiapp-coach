@@ -430,7 +430,7 @@ def _decide(
     ceiling = ceiling_amps(grid, car, charger)
 
     if not charger.connected:
-        return Decision(False, 0, "Er hangt geen auto aan de paal.", rule="disconnected")
+        return Decision(False, 0, "Er hangt geen auto aan de lader.", rule="disconnected")
 
     if ceiling < MIN_AMPS:
         return Decision(
@@ -444,7 +444,7 @@ def _decide(
         return Decision(
             True,
             ceiling,
-            "Er hangt een gast aan de paal, dus die laadt meteen.",
+            "Er hangt een gast aan de lader, dus die laadt meteen.",
             plan="Laadt door tot de kabel eruit gaat.",
             rule="guest",
         )

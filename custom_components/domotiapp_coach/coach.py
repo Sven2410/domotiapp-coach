@@ -354,13 +354,30 @@ class ChargerCoach:
             if entry.get("device") != device.get("id"):
                 continue
             times = entry.get("window") or {}
+            aan = bool(entry.get("enabled"))
+
             if entry.get("per_day"):
-                for day in entry.get("days") or []:
-                    if day.get("day") == now.weekday() and day.get("enabled"):
-                        times = day
-                        break
+                # Alleen de dag van vandaag telt, en staat die uit dan geldt er
+                # vandaag geen schema. Eerder viel hij dan terug op de algemene
+                # tijden, waardoor een zaterdag die uitdrukkelijk uit stond toch
+                # een klaar-tijd van zondagochtend kreeg: de coach ging dan 's
+                # nachts op dure uren laden voor een afspraak die de klant nooit
+                # gemaakt had.
+                vandaag = next(
+                    (
+                        day
+                        for day in entry.get("days") or []
+                        if day.get("day") == now.weekday()
+                    ),
+                    None,
+                )
+                if vandaag is not None and vandaag.get("enabled"):
+                    times = vandaag
+                else:
+                    aan = False
+
             window = Window(
-                enabled=bool(entry.get("enabled")),
+                enabled=aan,
                 not_before=_time(times.get("not_before")),
                 start_by=_time(times.get("start_by")),
                 done_by=_time(times.get("done_by")),
