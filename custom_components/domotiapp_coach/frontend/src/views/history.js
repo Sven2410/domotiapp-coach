@@ -17,7 +17,8 @@
 
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
-import { energy, percent } from "../format.js";
+import { energy, euro, percent } from "../format.js";
+import { tariff } from "../data-source.js";
 import {
   PERIODS,
   combine,
@@ -64,6 +65,12 @@ class DacViewHistory extends DacElement {
     if (first && this.rendered_) this.load_();
   }
 
+  /** @param {import("../state-feed.js").StateFeed} value */
+  set stateFeed(value) {
+    this.feed_ = value;
+    if (this.rendered_) this.paint_();
+  }
+
   set settings(value) {
     const before = JSON.stringify(value?.sources?.meters ?? {});
     const changed = before !== this.metersKey_;
@@ -100,6 +107,15 @@ class DacViewHistory extends DacElement {
           <div id="stage"></div>
           <div class="legend" id="legend"></div>
           <p class="note" id="note"></p>
+        </section>
+
+        <section class="card money" id="money-card" hidden>
+          <div class="panel-head">
+            <div class="eyebrow">In geld</div>
+            <h2>Wat je zon opleverde</h2>
+          </div>
+          <div class="totals" id="money"></div>
+          <p class="note" id="money-note"></p>
         </section>
 
         <section class="card gas" id="gas-card" hidden>
@@ -237,6 +253,7 @@ class DacViewHistory extends DacElement {
       : "";
 
     this.paintChart_();
+    this.paintMoney_();
     this.paintGas_();
   }
 
@@ -467,6 +484,75 @@ class DacViewHistory extends DacElement {
     );
   }
 
+  /**
+   * The same period in euros.
+   *
+   * Only the parts that can be worked out from what the customer filled in. The
+   * big one is the sun they used themselves: every kilowatt-hour off their own
+   * roof is one they did not have to buy, and it is worth far more than the
+   * same kilowatt-hour exported, which is exactly what makes using it worth
+   * anything at all.
+   *
+   * No tariff history is kept anywhere, so a dynamic contract is reckoned with
+   * today's average and the screen says so. Guessing at what a kilowatt-hour
+   * cost last February would put a precise-looking number on nothing.
+   */
+  paintMoney_() {
+    const card = this.$("#money-card");
+    const rows = this.rowsShown_ ?? [];
+    const rate = tariff(this.feed_, this.settings_?.contract);
+
+    if (!rows.length || rate.buy === null) {
+      card.hidden = true;
+      return;
+    }
+
+    const own = rows.reduce((total, row) => total + row.own, 0);
+    const bought = rows.reduce((total, row) => total + row.bought, 0);
+    const sold = rows.reduce((total, row) => total + row.sold, 0);
+
+    // Alle drie als positief bedrag, met het label dat de richting draagt. Een
+    // minteken voor een euroteken leest als een fout, en met "gekocht voor" is
+    // er niets uit te leggen.
+    const cells = [
+      { label: "Eigen zon bespaarde", value: euro(own * rate.buy), tone: "var(--dac-solar)" },
+      { label: "Stroom gekocht voor", value: euro(bought * rate.buy), tone: "var(--dac-grid-in)" },
+    ];
+    if (rate.feedIn !== null) {
+      cells.push({
+        label: "Teruglevering leverde",
+        value: euro(Math.max(0, sold * rate.feedIn)),
+        tone: "var(--dac-grid-out)",
+      });
+    }
+
+    card.hidden = false;
+    this.$("#money").replaceChildren(
+      ...cells.map((cell) => {
+        const box = document.createElement("div");
+        box.className = "total";
+        box.style.setProperty("--tone", cell.tone);
+
+        const label = document.createElement("span");
+        label.className = "t-label";
+        label.textContent = cell.label;
+
+        const value = document.createElement("span");
+        value.className = "t-value";
+        value.textContent = cell.value;
+
+        box.append(label, value);
+        return box;
+      })
+    );
+
+    this.$("#money-note").textContent =
+      `Gerekend met ${rate.basis} van ${euro(rate.buy)} per kWh.` +
+      (rate.feedIn === null
+        ? " Wat je voor teruglevering krijgt staat er niet bij: bij een all-in prijsentiteit is de kale marktprijs niet af te leiden."
+        : "");
+  }
+
   paintGas_() {
     const rows = this.rows_?.gas ?? [];
     const card = this.$("#gas-card");
@@ -626,6 +712,7 @@ DacViewHistory.css = /* css */ `
   .legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dac-ink-2); }
   .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: 0 0 auto; }
 
+  .money .totals { margin: 16px 0 0; }
   .note { margin: 12px 0 0; font-size: 13px; line-height: 1.5; color: var(--dac-ink-2); }
   .note:empty { display: none; }
 

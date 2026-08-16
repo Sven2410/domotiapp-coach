@@ -240,6 +240,62 @@ export function solarForecast(feed, sources) {
   return out;
 }
 
+/**
+ * What a kWh is worth in both directions, as far as this panel can know it.
+ *
+ * A fixed contract is exact: the customer typed the number in. A dynamic one is
+ * an average over the prices that happen to be published, which is today and
+ * sometimes tomorrow -- so it is honest about being an average of today rather
+ * than of the period being looked at. Nobody keeps a year of tariffs, and
+ * pretending otherwise would put a precise-looking figure on a guess.
+ *
+ * `feedIn` is what actually lands: the tariff minus the costs the supplier
+ * charges over what is fed back. On plenty of contracts that is close to zero,
+ * and that is exactly why using your own sun is worth so much more than
+ * exporting it.
+ *
+ * @returns {{buy: number|null, feedIn: number, basis: string}}
+ */
+export function tariff(feed, contract) {
+  const fixed = contract?.type !== "dynamic";
+
+  if (fixed) {
+    const value = Number(contract?.fixed?.all_in_price);
+    return {
+      buy: Number.isFinite(value) ? value : null,
+      feedIn:
+        (Number(contract?.fixed?.feed_in_tariff) || 0) -
+        (Number(contract?.fixed?.feed_in_costs) || 0),
+      basis: "je vaste tarief",
+    };
+  }
+
+  const mean = (rows) => {
+    const today = rows.filter((row) => row.start.toDateString() === new Date().toDateString());
+    const used = today.length ? today : rows;
+    return used.length ? used.reduce((total, row) => total + row.price, 0) / used.length : null;
+  };
+
+  const dynamic = contract?.dynamic ?? {};
+
+  // What a dynamic contract pays for export is the bare market price, so it is
+  // only known when the market price is what was mapped. With an all-in entity
+  // there is no way to get back to it, and a number is left out rather than
+  // guessed at.
+  let feedIn = null;
+  if (dynamic.source === "market") {
+    const market = mean(
+      readSchedule(feed.get(dynamic.market_entity)?.attributes ?? {}).map((row) => ({
+        start: row.start,
+        price: row.value,
+      }))
+    );
+    if (market !== null) feedIn = market - (Number(dynamic.feed_in_costs) || 0);
+  }
+
+  return { buy: mean(priceForecast(feed, contract)), feedIn, basis: "het gemiddelde tarief van vandaag" };
+}
+
 /** The meter counters, in the order a Dutch meter lists them. */
 const METERS = [
   { key: "import_low", label: "Geleverd laag" },
