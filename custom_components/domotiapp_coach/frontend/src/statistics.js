@@ -197,6 +197,77 @@ export async function fetchPrices(hass, entityId, period, start) {
   return out;
 }
 
+/**
+ * How much a device used per bucket, whichever way it can be told.
+ *
+ * With an energy counter it is the same `change` as any meter, and exact. With
+ * only a power sensor -- which is what every device here has, because that is
+ * what puts it on the energy flow -- the average watts over a bucket times the
+ * length of that bucket is the energy. That is an approximation: Home Assistant
+ * averages the samples it took, so a kettle that was on for four minutes of an
+ * hour is caught less precisely than a charger that ran all evening. Good
+ * enough to say what a dishwasher costs in a month, not a meter reading, and
+ * the report says so.
+ *
+ * @returns {Promise<Map<string, {rows: Map<number, number>, exact: boolean}>>}
+ */
+export async function fetchDevices(hass, devices, period, start) {
+  const out = new Map();
+  if (!hass || !devices.length) return out;
+
+  const bucket = PERIODS.find((item) => item.id === period)?.bucket ?? "day";
+  const hours = { hour: 1, day: 24, month: 730 }[bucket] ?? 24;
+
+  const counters = devices.filter((device) => device.energy);
+  const meters = devices.filter((device) => !device.energy && device.power);
+
+  const ask = async (ids, types) => {
+    if (!ids.length) return {};
+    try {
+      return (
+        (await hass.callWS({
+          type: "recorder/statistics_during_period",
+          start_time: start.toISOString(),
+          end_time: periodEnd(period, start).toISOString(),
+          statistic_ids: ids,
+          period: bucket,
+          types,
+          units: { energy: "kWh", power: "W" },
+        })) ?? {}
+      );
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon het verbruik per apparaat niet ophalen", error);
+      return {};
+    }
+  };
+
+  const [sums, means] = await Promise.all([
+    ask(counters.map((device) => device.energy), ["change"]),
+    ask(meters.map((device) => device.power), ["mean"]),
+  ]);
+
+  for (const device of counters) {
+    const rows = new Map();
+    for (const row of sums[device.energy] ?? []) {
+      if (row.change === null || row.change === undefined) continue;
+      rows.set(new Date(row.start).getTime(), Number(row.change));
+    }
+    if (rows.size) out.set(device.id, { rows, exact: true });
+  }
+
+  for (const device of meters) {
+    const rows = new Map();
+    for (const row of means[device.power] ?? []) {
+      if (row.mean === null || row.mean === undefined) continue;
+      // Gemiddeld vermogen maal de lengte van het vak, van watt naar kWh.
+      rows.set(new Date(row.start).getTime(), (Number(row.mean) * hours) / 1000);
+    }
+    if (rows.size) out.set(device.id, { rows, exact: false });
+  }
+
+  return out;
+}
+
 /** Add up several counters into one series, bucket by bucket. */
 export function combine(series, ids) {
   const total = new Map();

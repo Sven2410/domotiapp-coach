@@ -108,6 +108,7 @@ class DacViewDevices extends DacEditorElement {
         type: "laadpaal",
         name: "",
         entity: "",
+        energy_entity: "",
         brand: "",
         controllable: false,
         entities: {},
@@ -545,6 +546,11 @@ class DacViewDevices extends DacEditorElement {
             </div>
           </div>
           <div class="row">
+            <label>Accupercentage van de auto</label>
+            <dac-entity-picker data-car-entity="${index}:${slot}"></dac-entity-picker>
+            <span class="sub">Optioneel. Staat de auto in Home Assistant, wijs dan de sensor aan die zegt hoe vol hij is; dan weet de coach zelf hoeveel er nog in moet. Zonder deze vraagt hij het aan jou.</span>
+          </div>
+          <div class="row">
             <label>Laadt op</label>
             <div class="segmented three">
               ${CAR_PHASES.map(
@@ -624,6 +630,11 @@ class DacViewDevices extends DacEditorElement {
                 }
               </div>
             </div>
+            <div class="row">
+              <label>Energieteller (optioneel)</label>
+              <dac-entity-picker data-energy="${index}"></dac-entity-picker>
+              <span class="sub">De teller van dit apparaat in kWh, als die er is. Daarmee klopt het verbruik in je rapport tot op de komma; zonder wordt het afgeleid uit het gemiddelde vermogen.</span>
+            </div>
             ${this.brandHtml_(device, index)}
             ${this.carsHtml_(device, index)}
             ${this.controlHtml_(device, index)}
@@ -645,7 +656,29 @@ class DacViewDevices extends DacEditorElement {
       input.addEventListener("input", () => {
         const car = this.draft_.devices[index].cars[slot];
         car[key] = key === "name" ? input.value : Number(input.value) || 0;
-        this.afterChange_();
+        this.syncSaveBar_();
+      });
+    }
+
+    for (const picker of list.querySelectorAll("[data-energy]")) {
+      const index = Number(picker.dataset.energy);
+      picker.filter = "all";
+      picker.placeholder = "Zoek een energieteller…";
+      picker.value = this.draft_.devices[index].energy_entity ?? "";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        this.draft_.devices[index].energy_entity = ev.detail.value;
+        this.syncSaveBar_();
+      });
+    }
+
+    for (const picker of list.querySelectorAll("[data-car-entity]")) {
+      const [index, slot] = picker.dataset.carEntity.split(":").map(Number);
+      picker.filter = "all";
+      picker.placeholder = "Zoek het accupercentage…";
+      picker.value = this.draft_.devices[index].cars[slot].soc_entity ?? "";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        this.draft_.devices[index].cars[slot].soc_entity = ev.detail.value;
+        this.syncSaveBar_();
       });
     }
 
@@ -654,7 +687,7 @@ class DacViewDevices extends DacEditorElement {
       button.addEventListener("click", () => {
         this.draft_.devices[Number(index)].cars[Number(slot)].phases = phases;
         this.paintDevices_();
-        this.afterChange_();
+        this.syncSaveBar_();
       });
     }
 
@@ -668,9 +701,10 @@ class DacViewDevices extends DacEditorElement {
           capacity_kwh: 0,
           phases: "three",
           max_amps: 0,
+          soc_entity: "",
         });
         this.paintDevices_();
-        this.afterChange_();
+        this.syncSaveBar_();
       });
     }
 
@@ -679,7 +713,7 @@ class DacViewDevices extends DacEditorElement {
       button.addEventListener("click", () => {
         this.draft_.devices[index].cars.splice(slot, 1);
         this.paintDevices_();
-        this.afterChange_();
+        this.syncSaveBar_();
       });
     }
 
@@ -837,6 +871,19 @@ class DacViewDevices extends DacEditorElement {
 }
 
 DacViewDevices.css = /* css */ `
+  /* Een blok is een onderwerp binnen de kaart, met lucht eromheen en een lijn
+     erboven; zonder dat plakt de knop eronder tegen het volgende blok aan. */
+  .block {
+    display: grid;
+    gap: 8px;
+    padding-top: 16px;
+    margin-top: 4px;
+    border-top: 1px solid var(--dac-border);
+  }
+  .block-title { font-size: 13px; font-weight: 600; color: var(--dac-ink); }
+  .block > .sub { font-size: 12px; line-height: 1.5; color: var(--dac-ink-3); margin: 0; }
+  .block button.add { margin-top: 4px; }
+
   /* ---- auto's bij een laadpaal ----
      Elk profiel in een eigen kader, want het zijn losse dingen met dezelfde
      velden; zonder kader lopen twee auto's in elkaar over. */

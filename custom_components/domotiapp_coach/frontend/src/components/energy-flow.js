@@ -162,6 +162,9 @@ class DacEnergyFlow extends DacElement {
     text { font-family: var(--dac-font); }
     .n-value { font-size: 20px; font-weight: 500; fill: var(--dac-ink); font-variant-numeric: tabular-nums; }
     .n-unit  { font-size: 11px; font-weight: 600; fill: var(--dac-ink-3); }
+    /* Het icoon van een satelliet is kleiner dan dat van de woning: de bol is
+       kleiner en moet er ook nog een getal in kwijt. */
+    .node:not(.big) .icon { width: 18px; height: 18px; }
     .n-name  {
       font-size: 11.5px;
       font-weight: 600;
@@ -263,14 +266,22 @@ class DacEnergyFlow extends DacElement {
       iconKey,
       { big = false, labelAbove = false, labelInside = false } = {}
     ) => `
-      <g class="node" id="node-${id}" style="--tone: ${tone}">
+      <g class="node${big ? " big" : ""}" id="node-${id}" style="--tone: ${tone}">
         <circle class="halo" cx="${pos.x}" cy="${pos.y}" r="${pos.r + 15}"/>
         <circle class="disc" cx="${pos.x}" cy="${pos.y}" r="${pos.r}"/>
-        <foreignObject x="${pos.x - 14}" y="${pos.y - pos.r + 12}" width="28" height="28">
+        <foreignObject x="${pos.x - 14}" y="${pos.y - pos.r + (big ? 12 : 8)}" width="28" height="28">
           <div xmlns="http://www.w3.org/1999/xhtml" class="icon-wrap" data-icon>${icons[iconKey]}</div>
         </foreignObject>
-        <text class="${big ? "h-value" : "n-value"}" x="${pos.x}" y="${pos.y + (big ? 14 : 11)}" text-anchor="middle">—</text>
-        <text class="${big ? "h-unit" : "n-unit"}" x="${pos.x}" y="${pos.y + (big ? 33 : 26)}" text-anchor="middle"></text>
+        ${
+          big
+            ? `<text class="h-value" x="${pos.x}" y="${pos.y + 14}" text-anchor="middle">—</text>
+               <text class="h-unit" x="${pos.x}" y="${pos.y + 33}" text-anchor="middle"></text>`
+            : // Waarde en eenheid op één regel. Drie regels onder elkaar passen
+              // niet in een bol van deze maat: op een telefoon liep het icoon
+              // dwars door de cijfers heen. Bij elkaar leest "248 W" bovendien
+              // als één ding, wat het ook is.
+              `<text class="n-value" x="${pos.x}" y="${pos.y + 13}" text-anchor="middle">—<tspan class="n-unit" dx="3"></tspan></text>`
+        }
         <text class="n-name" x="${pos.x}"
               y="${
                 labelInside
@@ -454,8 +465,17 @@ class DacEnergyFlow extends DacElement {
     if (tone) node.style.setProperty("--tone", tone);
 
     const { value: text, unit } = power(value);
-    node.querySelector("text.n-value, text.h-value").textContent = text;
-    node.querySelector("text.n-unit, text.h-unit").textContent = unit;
+    const cell = node.querySelector("text.n-value, text.h-value");
+    const tspan = cell.querySelector("tspan");
+    if (tspan) {
+      // Alleen de eerste tekstnode bijwerken, anders verdwijnt de eenheid die
+      // als tspan achter het getal staat.
+      cell.firstChild.nodeValue = text;
+      tspan.textContent = unit;
+    } else {
+      cell.textContent = text;
+      node.querySelector("text.h-unit").textContent = unit;
+    }
     node.querySelector("text.n-name").textContent = name;
 
     // The halo brightens with activity, so an idle node visibly goes quiet.
