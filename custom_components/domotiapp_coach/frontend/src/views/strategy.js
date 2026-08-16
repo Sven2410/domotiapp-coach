@@ -78,6 +78,52 @@ const TIMES = [
   },
 ];
 
+
+/**
+ * Hoever de coach mag gaan.
+ *
+ * Geen strategie maar een mate van vertrouwen, en dat zijn twee vragen: een
+ * strategie zegt waar hij op mikt, dit zegt hoeveel hij zelf mag. Voorstellen
+ * is de stap die er in de praktijk toe doet: daarmee kun je een week meekijken
+ * of de sommen kloppen voordat je hem loslaat.
+ */
+const LEVELS = [
+  {
+    key: "read",
+    label: "Alleen uitlezen",
+    blurb: "Je ziet wat je huis doet. De coach zegt en doet verder niets.",
+  },
+  {
+    key: "advise",
+    label: "Adviseren",
+    blurb: "Hij vertelt wat er te winnen valt, maar raakt niets aan.",
+  },
+  {
+    key: "propose",
+    label: "Voorstellen",
+    blurb: "Hij rekent het uit en laat het zien. Pas als jij ja zegt, voert hij het uit.",
+  },
+  {
+    key: "steer",
+    label: "Zelf sturen",
+    blurb: "Hij doet het en vertelt achteraf wat hij gedaan heeft.",
+  },
+];
+
+/** Waar hij op mikt zodra hij mag. */
+const GOALS = [
+  {
+    key: "cost",
+    label: "Laagste kosten",
+    blurb: "Alles omgerekend naar euro's. Je eigen zon gebruiken wint daarbij meestal vanzelf.",
+  },
+  {
+    key: "solar",
+    label: "Zoveel mogelijk eigen zon",
+    blurb: "Ook als inkopen op dat moment goedkoper zou zijn.",
+  },
+];
+
 /**
  * Who goes first when the connection cannot carry everything at once.
  *
@@ -247,6 +293,35 @@ class DacViewStrategy extends DacEditorElement {
         </header>
 
         ${adminNoticeHtml}
+
+        <section class="card">
+          <h2>${icons.compass} Hoeveel doet de coach zelf?</h2>
+          <p class="hint">Van alleen meekijken tot zelf schakelen. Begin gerust bij Voorstellen: dan zie je precies wat hij zou doen en gebeurt er niets zonder jouw akkoord.</p>
+          <div class="fields">
+            <div class="segmented levels" id="level">
+              ${LEVELS.map(
+                (item) => `
+                <button type="button" data-level="${item.key}" aria-pressed="false">
+                  <strong>${item.label}</strong>
+                  ${item.blurb}
+                </button>`
+              ).join("")}
+            </div>
+
+            <div class="row" id="goal-row">
+              <label>Waar mikt hij op?</label>
+              <div class="segmented" id="goal">
+                ${GOALS.map(
+                  (item) => `
+                  <button type="button" data-goal="${item.key}" aria-pressed="false">
+                    <strong>${item.label}</strong>
+                    ${item.blurb}
+                  </button>`
+                ).join("")}
+              </div>
+            </div>
+          </div>
+        </section>
 
         <section class="card">
           <h2>${icons.bell} Meldingen</h2>
@@ -438,6 +513,21 @@ class DacViewStrategy extends DacEditorElement {
           plan.days = DAYS.map((_, day) => ({ day, enabled: true, ...plan.window }));
         }
         this.paintKlaar_();
+        this.afterChange_();
+      });
+    }
+
+    for (const button of this.$$("#level button")) {
+      button.addEventListener("click", () => {
+        this.draft_.strategy.level = button.dataset.level;
+        this.paintLevel_();
+        this.afterChange_();
+      });
+    }
+    for (const button of this.$$("#goal button")) {
+      button.addEventListener("click", () => {
+        this.draft_.strategy.goal = button.dataset.goal;
+        this.paintLevel_();
         this.afterChange_();
       });
     }
@@ -978,6 +1068,23 @@ class DacViewStrategy extends DacEditorElement {
     return programFor(this.feed_.get(entityId)?.state);
   }
 
+
+  /** Het niveau en het doel, en of dat doel er op dit niveau toe doet. */
+  paintLevel_() {
+    const level = this.draft_?.strategy?.level ?? "propose";
+    const goal = this.draft_?.strategy?.goal ?? "cost";
+
+    for (const button of this.$$("#level button")) {
+      button.setAttribute("aria-pressed", String(button.dataset.level === level));
+    }
+    for (const button of this.$$("#goal button")) {
+      button.setAttribute("aria-pressed", String(button.dataset.goal === goal));
+    }
+    // Waar hij op mikt telt pas als hij iets mag doen; bij alleen uitlezen is
+    // het een keuze zonder gevolg.
+    this.$("#goal-row").style.display = level === "read" ? "none" : "";
+  }
+
   paintSummaries_() {
     if (!this.draft_ || !this.rendered_) return;
     for (const alert of ALERTS) {
@@ -1092,6 +1199,11 @@ DacViewStrategy.css = /* css */ `
   ${editorCss}
 
   .pane[hidden], #pane-list[hidden] { display: none; }
+
+  /* Vier keuzes onder elkaar: het zijn zinnen, geen knoppen, en naast elkaar
+     wordt elke zin een kolom van drie woorden breed. */
+  .segmented.levels { grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 720px) { .segmented.levels { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
   /* Three choices side by side rather than the usual two. On a phone they go
      under each other, like every other segmented choice here. */

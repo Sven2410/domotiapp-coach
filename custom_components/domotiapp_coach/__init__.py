@@ -21,6 +21,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.loader import async_get_integration
 
 from . import websocket
+from .coach import async_get_coach
 from .monitor import LoadMonitor
 from .const import (
     DOMAIN,
@@ -50,6 +51,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _async_register_static_path(hass)
     await _async_register_panel(hass, version)
     await _async_start_monitor(hass)
+    _async_start_coach(hass)
 
     return True
 
@@ -61,6 +63,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     monitor: LoadMonitor | None = hass.data.get(DOMAIN, {}).pop(_MONITOR_KEY, None)
     if monitor:
         monitor.async_stop()
+
+    coach = hass.data.get(DOMAIN, {}).pop("coach", None)
+    if coach:
+        coach.async_stop()
 
     return True
 
@@ -79,6 +85,18 @@ async def _async_start_monitor(hass: HomeAssistant) -> None:
     monitor = LoadMonitor(hass)
     await monitor.async_start()
     domain_data[_MONITOR_KEY] = monitor
+
+
+def _async_start_coach(hass: HomeAssistant) -> None:
+    """Start the round that steers the charging points.
+
+    Here rather than in the panel for the same reason as the load monitor: a car
+    has to start charging at two in the morning, and nobody is looking at a
+    dashboard at two in the morning. It also has to survive a restart without
+    anybody noticing, which it does by reading the state of the installation
+    rather than remembering its own.
+    """
+    async_get_coach(hass).async_start()
 
 
 async def _async_frontend_version(hass: HomeAssistant) -> str:
