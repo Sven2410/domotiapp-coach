@@ -1,6 +1,12 @@
 /**
- * Live energy flow: the house in the middle, the sun above it, the grid to its
- * left, and up to two device bubbles on the far side.
+ * Live energy flow: the house in the middle, with four arms off it -- the sun
+ * above, the grid to the left, and up to two device bubbles to the right and
+ * below.
+ *
+ * The four satellites sit on the house's own axes, at the same distance and the
+ * same size, so the drawing reads as a cross rather than as nodes scattered
+ * around a circle. Anything off-axis looks like a mistake at a glance, which is
+ * how it was reported.
  *
  * Every connection is a straight line. A curve implies a route the electricity
  * does not take, and at a glance it also makes the two halves of the grid link
@@ -36,25 +42,32 @@ const NARROW_AT = 470;
  * `cy - r - 15`. Put two nodes a comfortable-looking distance apart and the
  * label of one lands inside the halo of the other, which is what makes the link
  * between them disappear.
+ *
+ * `width` is what the drawing needs; `height` is what it needs with the fourth
+ * arm in use and `heightShort` without. The house keeps its own name inside its
+ * circle -- the arm pointing down would otherwise run straight through a label
+ * sitting under it.
  */
 const LAYOUTS = {
   wide: {
-    viewBox: "0 0 640 470",
-    sun: { x: 320, y: 74, r: 44 },
-    grid: { x: 78, y: 254, r: 44 },
-    house: { x: 320, y: 254, r: 78 },
-    dev1: { x: 562, y: 132, r: 40 },
-    dev2: { x: 562, y: 366, r: 40 },
+    width: 560,
+    height: 566,
+    heightShort: 382,
+    sun: { x: 280, y: 80, r: 42 },
+    grid: { x: 80, y: 278, r: 42 },
+    house: { x: 280, y: 278, r: 76 },
+    dev1: { x: 480, y: 278, r: 42 },
+    dev2: { x: 280, y: 476, r: 42 },
   },
   narrow: {
-    viewBox: "0 0 360 590",
-    sun: { x: 190, y: 68, r: 38 },
-    grid: { x: 56, y: 240, r: 38 },
-    house: { x: 190, y: 240, r: 66 },
-    // Wide apart on purpose: the two links leave the house downwards, and any
-    // closer together they run straight through the "Woning" label.
-    dev1: { x: 86, y: 470, r: 36 },
-    dev2: { x: 294, y: 470, r: 36 },
+    width: 366,
+    height: 486,
+    heightShort: 336,
+    sun: { x: 183, y: 80, r: 34 },
+    grid: { x: 53, y: 244, r: 34 },
+    house: { x: 183, y: 244, r: 62 },
+    dev1: { x: 313, y: 244, r: 34 },
+    dev2: { x: 183, y: 408, r: 34 },
   },
 };
 
@@ -241,8 +254,15 @@ class DacEnergyFlow extends DacElement {
     const L = LAYOUTS[this.mode_];
 
     // The sun sits directly above the house, so its name goes above it: below,
-    // it would land on the very line it is describing.
-    const node = (id, pos, tone, iconKey, { big = false, labelAbove = false } = {}) => `
+    // it would land on the very line it is describing. The house names itself
+    // inside its circle for the same reason, one arm further round.
+    const node = (
+      id,
+      pos,
+      tone,
+      iconKey,
+      { big = false, labelAbove = false, labelInside = false } = {}
+    ) => `
       <g class="node" id="node-${id}" style="--tone: ${tone}">
         <circle class="halo" cx="${pos.x}" cy="${pos.y}" r="${pos.r + 15}"/>
         <circle class="disc" cx="${pos.x}" cy="${pos.y}" r="${pos.r}"/>
@@ -252,7 +272,13 @@ class DacEnergyFlow extends DacElement {
         <text class="${big ? "h-value" : "n-value"}" x="${pos.x}" y="${pos.y + (big ? 14 : 11)}" text-anchor="middle">—</text>
         <text class="${big ? "h-unit" : "n-unit"}" x="${pos.x}" y="${pos.y + (big ? 33 : 26)}" text-anchor="middle"></text>
         <text class="n-name" x="${pos.x}"
-              y="${labelAbove ? pos.y - pos.r - 16 : pos.y + pos.r + 24}" text-anchor="middle"></text>
+              y="${
+                labelInside
+                  ? pos.y + 50
+                  : labelAbove
+                    ? pos.y - pos.r - 16
+                    : pos.y + pos.r + 24
+              }" text-anchor="middle"></text>
       </g>
     `;
 
@@ -266,7 +292,7 @@ class DacEnergyFlow extends DacElement {
     };
 
     this.$("#stage").innerHTML = `
-      <svg viewBox="${L.viewBox}" role="img"
+      <svg viewBox="0 0 ${L.width} ${L.height}" role="img"
            aria-label="Live energiestroom tussen zon, net, woning en apparaten">
         <g id="links">
           ${link("solar", L.sun, L.house, "var(--dac-solar)")}
@@ -276,11 +302,12 @@ class DacEnergyFlow extends DacElement {
         </g>
         ${node("solar", L.sun, "var(--dac-solar)", "sun", { labelAbove: true })}
         ${node("grid", L.grid, "var(--dac-grid-in)", "grid")}
-        ${node("house", L.house, "var(--dac-house)", "house", { big: true })}
+        ${node("house", L.house, "var(--dac-house)", "house", { big: true, labelInside: true })}
         ${node("dev1", L.dev1, "var(--dac-device-1)", "overig")}
         ${node("dev2", L.dev2, "var(--dac-device-2)", "overig")}
       </svg>
     `;
+    this.svg_ = this.$("svg");
 
     this.nodes_ = {
       solar: this.$("#node-solar"),
@@ -312,6 +339,7 @@ class DacEnergyFlow extends DacElement {
       dev1: this.flows_.dev1.previousElementSibling,
       dev2: this.flows_.dev2.previousElementSibling,
     };
+    this.height_ = L.height;
 
     for (const slot of ["dev1", "dev2"]) {
       this.nodes_[slot].addEventListener("click", () => this.openDetail_(slot));
@@ -383,8 +411,27 @@ class DacEnergyFlow extends DacElement {
       this.setFlow_(slot, device.watts, false);
     }
 
+    this.fitHeight_(Boolean(slots[1]));
+
     // Keep an open roll-up in step with the numbers behind it.
     if (this.openSlot_ && !this.$("#detail").hidden) this.openDetail_(this.openSlot_, true);
+  }
+
+  /**
+   * Trim the drawing to the arms that are in use.
+   *
+   * The arm pointing down only fills when a second appliance is running, which
+   * for most houses is most of the time it is not. Leaving its space reserved
+   * would put a permanent hole under the house. The width is untouched, so the
+   * drawing never changes size -- only the empty space below it goes.
+   */
+  fitHeight_(hasDown) {
+    const L = LAYOUTS[this.mode_];
+    const height = hasDown ? L.height : L.heightShort;
+    if (this.height_ === height) return;
+
+    this.height_ = height;
+    this.svg_.setAttribute("viewBox", `0 0 ${L.width} ${height}`);
   }
 
   /**
@@ -425,7 +472,11 @@ class DacEnergyFlow extends DacElement {
   setFlow_(id, watts, reverse, tone) {
     const path = this.flows_[id];
     const arrow = this.arrows_[id];
-    const idle = !Number.isFinite(watts) || Math.abs(watts) < 50;
+    // The same threshold that decides a bubble exists at all. They used to
+    // differ -- a bubble from 20 W, a flow from 50 -- which drew an appliance
+    // hanging off the house with nothing running to it, and that reads as a
+    // fault rather than as a small load.
+    const idle = !Number.isFinite(watts) || Math.abs(watts) < ACTIVE_WATTS;
 
     path.classList.toggle("idle", idle);
     path.classList.toggle("reverse", !!reverse);

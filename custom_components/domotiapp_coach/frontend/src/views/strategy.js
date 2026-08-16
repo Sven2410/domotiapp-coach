@@ -15,6 +15,7 @@ import { define } from "../base.js";
 import { icons } from "../icons.js";
 import {
   PROGRAM_TYPES,
+  SCHEDULABLE_TYPES,
   brandsFor,
   canHaveDeadline,
   deviceLabel,
@@ -22,6 +23,7 @@ import {
   programFor,
   typeMeta,
 } from "../devices.js";
+import { priceForecast } from "../data-source.js";
 import { clock, duration } from "../format.js";
 import {
   DacEditorElement,
@@ -71,13 +73,13 @@ const TIMES = [
     key: "done_by",
     label: "Uiterlijk klaar om",
     short: "Klaar om",
-    hint: "Hier rekent de coach de starttijd van terug, met de duur van het programma dat klaarstaat.",
+    hint: "Hier rekent de coach van terug wanneer hij moet beginnen. Bij een programma gebruikt hij de duur die eronder staat.",
   },
 ];
 
 /** The one line under a device's name on the list. */
 function planSummary_(plan, on) {
-  if (!on) return "Niet ingepland — de coach laat dit apparaat met rust.";
+  if (!on) return "Niet ingepland. De coach laat dit apparaat met rust.";
 
   if (plan.per_day) {
     const days = plan.days
@@ -91,6 +93,19 @@ function planSummary_(plan, on) {
   );
   return `Elke dag · ${parts.join(" · ")}`;
 }
+
+/** The next moment the clock reads this time, today or tomorrow. */
+function nextAt(time, from = new Date()) {
+  const [hours, minutes] = String(time).split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+
+  const at = new Date(from);
+  at.setHours(hours, minutes, 0, 0);
+  if (at <= from) at.setDate(at.getDate() + 1);
+  return at;
+}
+
+const sameDayAsToday = (date) => date.toDateString() === new Date().toDateString();
 
 /**
  * The notifications, in the order they are listed.
@@ -107,7 +122,7 @@ const ALERTS = [
     blurb: "Een bericht zodra je aansluiting te zwaar belast wordt.",
     summary(view) {
       const alert = view.alert_();
-      if (!alert.enabled) return { text: "Uit — je krijgt hier geen bericht van.", warn: false };
+      if (!alert.enabled) return { text: "Uit. Je krijgt hier geen bericht van.", warn: false };
 
       const parts = [`vanaf ${Number(alert.threshold_percent) || 0}%`];
       const count = (alert.targets ?? []).length;
@@ -196,7 +211,7 @@ class DacViewStrategy extends DacEditorElement {
 
         <section class="card" id="devices-card" hidden>
           <h2>${icons.devices} Apparaten</h2>
-          <p class="hint">Binnen welke grenzen een apparaat mag draaien. Daarbinnen zoekt de coach het goedkoopste moment om te starten — zonder enige grens is later altijd goedkoper en zou hij nooit beginnen. Inplannen kan zodra de coach het apparaat mag aansturen; dat zet je aan bij Apparaten.</p>
+          <p class="hint">Binnen welke grenzen een apparaat mag draaien. Daarbinnen zoekt de coach het goedkoopste moment om te starten. Zonder enige grens is later altijd goedkoper en zou hij nooit beginnen. Inplannen kan zodra de coach het apparaat mag aansturen; dat zet je aan bij Apparaten.</p>
           <div class="links" id="device-links"></div>
         </section>
       </div>
@@ -242,9 +257,14 @@ class DacViewStrategy extends DacEditorElement {
 
               <p class="sub" id="klaar-hint"></p>
 
+              <div class="notice" id="klaar-horizon" hidden>
+                ${icons.warning}
+                <span id="klaar-horizon-text"></span>
+              </div>
+
               <div class="notice">
                 ${icons.warning}
-                <span>Vrijgeven blijft nodig. De coach start dit apparaat alleen als je op het overzicht hebt aangegeven dat het mag draaien — een tijd instellen is niet hetzelfde als toestemming geven.</span>
+                <span>Vrijgeven blijft nodig. De coach start dit apparaat alleen als je op het overzicht hebt aangegeven dat het mag draaien. Een tijd instellen is niet hetzelfde als toestemming geven.</span>
               </div>
             </div>
           </div>
@@ -591,10 +611,10 @@ class DacViewStrategy extends DacEditorElement {
     }
   }
 
-  /** Every device that runs a programme, whether it can be steered yet or not. */
+  /** Every device that can be given a time window, steerable yet or not. */
   planCandidates_() {
     return (this.draft_?.devices ?? []).filter((device) =>
-      PROGRAM_TYPES.includes(device.type)
+      SCHEDULABLE_TYPES.includes(device.type)
     );
   }
 
@@ -623,7 +643,7 @@ class DacViewStrategy extends DacEditorElement {
     this.$("#klaar-title").textContent =
       deviceLabelMap(this.draft_?.devices).get(device.id) ?? deviceLabel(device);
     this.$("#klaar-intro").textContent =
-      "Zeg binnen welke grenzen de coach mag werken. Vul alleen in wat je belangrijk vindt — elk van de drie tijden mag leeg blijven.";
+      "Zeg binnen welke grenzen de coach mag werken. Vul alleen in wat je belangrijk vindt, want elk van de drie tijden mag leeg blijven.";
 
     this.$("#klaar-enabled").checked = Boolean(plan.enabled);
     this.$("#klaar-fields").style.display = plan.enabled ? "" : "none";
@@ -641,7 +661,67 @@ class DacViewStrategy extends DacEditorElement {
     if (plan.per_day) this.paintPlanDays_(plan);
     else this.paintPlanWindow_(plan);
 
+    this.paintKlaarNotes_();
+  }
+
+  /** Both explanations under the times: the sum, and the price horizon. */
+  paintKlaarNotes_() {
     this.paintKlaarHint_();
+    this.paintHorizon_();
+  }
+
+  /**
+   * Warn when the deadline lies past the last price the supplier has published.
+   *
+   * A dynamic tariff is only known a day ahead: today's prices in full and
+   * tomorrow's from somewhere in the afternoon. Ask to be finished by seven
+   * tomorrow evening and there is simply no price for the hours the coach would
+   * be choosing between, so it can only plan on what it has. That is worth
+   * saying out loud -- from the settings screen it looks like a plan that is
+   * complete.
+   *
+   * It corrects itself: the moment tomorrow's prices land the warning goes.
+   */
+  paintHorizon_() {
+    const notice = this.$("#klaar-horizon");
+    notice.hidden = true;
+    if (!this.feed_) return;
+
+    const device = this.deadlineDevices_().find((item) => item.id === this.paneDevice_);
+    if (!device) return;
+
+    const plan = this.planFor_(device.id);
+    if (!plan.enabled) return;
+
+    const deadlines = plan.per_day
+      ? plan.days.filter((day) => day.enabled && day.done_by).map((day) => day.done_by)
+      : [plan.window.done_by].filter(Boolean);
+    if (!deadlines.length) return;
+
+    const forecast = priceForecast(this.feed_, this.draft_?.contract);
+    const horizon = forecast[forecast.length - 1]?.end;
+    if (!horizon) return;
+
+    const beyond = deadlines.filter((time) => {
+      const at = nextAt(time);
+      return at && at > horizon;
+    });
+    if (!beyond.length) return;
+
+    // A list that runs to midnight ends *on* the next day at 00:00, which reads
+    // as "known until tomorrow" when it means the opposite. The last moment
+    // actually covered is what the sentence is about.
+    const last = new Date(horizon.getTime() - 1);
+    const day = sameDayAsToday(last) ? "vandaag" : "morgen";
+    const when =
+      horizon.getHours() === 0 && horizon.getMinutes() === 0
+        ? `het einde van ${day}`
+        : `${day} ${clock(horizon)}`;
+    notice.hidden = false;
+    this.$("#klaar-horizon-text").textContent =
+      `De prijzen zijn bekend tot ${when}. Een klaar-tijd daarna kan de coach niet doorrekenen. ` +
+      "hij plant dan met wat hij weet, en dat is zelden het goedkoopste moment. " +
+      "De prijzen voor de volgende dag komen meestal in de loop van de middag binnen; daarna klopt de planning weer.";
   }
 
   /** The three times, for a schedule that is the same every day. */
@@ -664,13 +744,13 @@ class DacViewStrategy extends DacEditorElement {
       input.value = plan.window[time.key] || "";
       input.addEventListener("input", () => {
         this.planFor_(this.paneDevice_, true).window[time.key] = input.value;
-        this.paintKlaarHint_();
+        this.paintKlaarNotes_();
         this.afterChange_();
       });
       holder.querySelector(`[data-wipe="${time.key}"]`).addEventListener("click", () => {
         this.planFor_(this.paneDevice_, true).window[time.key] = "";
         input.value = "";
-        this.paintKlaarHint_();
+        this.paintKlaarNotes_();
         this.afterChange_();
       });
     }
@@ -718,7 +798,7 @@ class DacViewStrategy extends DacEditorElement {
         input.value = entry[time.key] || "";
         input.addEventListener("input", () => {
           this.planDay_(this.planFor_(this.paneDevice_, true), day)[time.key] = input.value;
-          this.paintKlaarHint_();
+          this.paintKlaarNotes_();
           this.afterChange_();
         });
         holder
@@ -726,7 +806,7 @@ class DacViewStrategy extends DacEditorElement {
           .addEventListener("click", () => {
             this.planDay_(this.planFor_(this.paneDevice_, true), day)[time.key] = "";
             input.value = "";
-            this.paintKlaarHint_();
+            this.paintKlaarNotes_();
             this.afterChange_();
           });
       }
@@ -772,6 +852,13 @@ class DacViewStrategy extends DacEditorElement {
     if (!doneBy) {
       hint.textContent =
         "De coach kiest binnen deze grenzen het goedkoopste moment om te starten.";
+      return;
+    }
+    // A charger has no programme to work back from: how long a car takes
+    // depends on the car, how empty it is and what the charger may deliver.
+    // Promising a start time here would be a number nobody can stand behind.
+    if (!PROGRAM_TYPES.includes(device.type)) {
+      hint.textContent = `De auto moet om ${doneBy} opgeladen zijn. Hoe lang dat duurt hangt van de auto af, dus de coach begint zo vroeg als nodig is en laadt bij voorkeur op de goedkoopste uren daarvoor.`;
       return;
     }
     if (!program) {
@@ -856,7 +943,7 @@ class DacViewStrategy extends DacEditorElement {
           <input type="checkbox" id="tgt-${name}" data-target="${name}"${chosen.has(name) ? " checked" : ""}>
           <span>
             <strong>${this.prettyTarget_(name)}</strong>
-            notify.${name}${stale.includes(name) ? " — bestaat niet meer in Home Assistant" : ""}
+            notify.${name}${stale.includes(name) ? " (bestaat niet meer in Home Assistant)" : ""}
           </span>
         </label>`
       )
@@ -878,7 +965,7 @@ class DacViewStrategy extends DacEditorElement {
 
   targetsHint_() {
     const chosen = this.alert_().targets ?? [];
-    if (!chosen.length) return "Niemand geselecteerd — er wordt dan niets verstuurd.";
+    if (!chosen.length) return "Niemand geselecteerd, er wordt dan niets verstuurd.";
 
     const known = this.targets_();
     const stale = chosen.filter((name) => !known.includes(name)).length;

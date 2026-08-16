@@ -24,11 +24,12 @@ import {
   typeMeta,
   valueLabel,
 } from "../devices.js";
-import { LiveSource } from "../data-source.js";
+import { LiveSource, meterReadings, priceForecast } from "../data-source.js";
 import { level, levelTone, percent, power, powerText, price as fmtPrice } from "../format.js";
 import { sheetCss } from "../theme.js";
 import "../components/stat-tile.js";
 import "../components/energy-flow.js";
+import "../components/price-chart.js";
 
 /** Heartbeat for the sparklines; live values also arrive on their own events. */
 const REFRESH_MS = 2000;
@@ -56,7 +57,7 @@ function advise(r, thresholds, configured, alertAt) {
       tag: "Instellen",
       title: "Koppel je sensoren",
       body:
-        "De coach weet nog niet welke sensoren jouw opwek, verbruik en meterstand meten. Ga naar Instellingen en kies ze onder Energiebronnen — daarna vult dit scherm zich met je eigen cijfers.",
+        "De coach weet nog niet welke sensoren jouw opwek, verbruik en meterstand meten. Ga naar Instellingen en kies ze onder Energiebronnen. Daarna vult dit scherm zich met je eigen cijfers.",
     };
   }
 
@@ -89,7 +90,7 @@ function advise(r, thresholds, configured, alertAt) {
       tone: "var(--dac-grid-out)",
       tag: "Kans",
       title: "Gebruik je overschot",
-      body: `Je levert nu ${powerText(r.exportW)} terug aan het net. Zet de vaatwasser, de wasmachine of de laadpaal aan — dan gebruik je stroom die je anders voor een lagere prijs weggeeft.`,
+      body: `Je levert nu ${powerText(r.exportW)} terug aan het net. Zet de vaatwasser, de wasmachine of de laadpaal aan. Dan gebruik je stroom die je anders voor een lagere prijs weggeeft.`,
     };
   }
 
@@ -443,6 +444,40 @@ class DacViewOverview extends DacElement {
     @media (pointer: coarse) { .cmd-pick select { font-size: 16px; } }
     @supports (-webkit-touch-callout: none) { .cmd-pick select { font-size: 16px; } }
 
+    /* The price chart needs the room: 48 bars in a 430px sheet is a comb. */
+    dialog.sheet.wide { width: min(760px, calc(100vw - 24px)); }
+
+    /* ---- meter readings ----
+       Five counters at most, so they get a row each rather than a tile: the
+       number is long, it is read digit by digit against the meter itself, and
+       tabular figures under one another are what makes that possible. */
+    .meter-rows {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+    }
+    .meter-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: var(--dac-radius-sm);
+      border: 1px solid var(--dac-border);
+      background: rgba(255,255,255,0.022);
+      min-width: 0;
+    }
+    .meter-row .k { font-size: 12.5px; color: var(--dac-ink-2); min-width: 0; }
+    .meter-row .v {
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--dac-ink);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .meter-row .u { font-size: 11.5px; font-weight: 600; color: var(--dac-ink-3); margin-left: 5px; }
+
     .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
     .legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dac-ink-2); }
     .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; flex: 0 0 auto; }
@@ -509,6 +544,15 @@ class DacViewOverview extends DacElement {
           <div class="phase-rows" id="phase-rows"></div>
         </article>
 
+        <article class="card panel meters" id="meters" hidden>
+          <div class="panel-head">
+            <div class="eyebrow">Standen</div>
+            <h2>Je meter</h2>
+          </div>
+          <p class="panel-sub">De tellers zoals ze op je meter staan.</p>
+          <div class="meter-rows" id="meter-rows"></div>
+        </article>
+
         <article class="card panel steerable" id="steerable" hidden>
           <div class="panel-head">
             <div class="eyebrow">Sturing</div>
@@ -545,6 +589,18 @@ class DacViewOverview extends DacElement {
           <div class="cmd-grid" id="manual-grid"></div>
           <p class="sheet-status" id="manual-status" role="status" aria-live="polite"></p>
         </dialog>
+
+        <dialog class="sheet wide" id="prices" aria-labelledby="prices-title">
+          <div class="sheet-head">
+            <div>
+              <div class="eyebrow">Dynamisch tarief</div>
+              <h3 id="prices-title">Wat stroom kost</h3>
+            </div>
+            <button class="sheet-close" type="button" id="prices-close" aria-label="Sluiten">${icons.close}</button>
+          </div>
+          <dac-price-chart id="price-chart"></dac-price-chart>
+          <p class="sheet-sub" id="prices-note"></p>
+        </dialog>
       </div>
     `;
   }
@@ -565,9 +621,20 @@ class DacViewOverview extends DacElement {
     this.$("#manual-program").addEventListener("change", (event) =>
       this.chooseProgram_(event.target.value)
     );
-    // Tapping the darkened area closes it. The hit test is on coordinates
-    // rather than the target alone, because a click on the dialog's own padding
-    // also reports the dialog as its target.
+    this.closeOnBackdrop_(sheet);
+
+    const prices = this.$("#prices");
+    this.$("#prices-close").addEventListener("click", () => prices.close());
+    this.closeOnBackdrop_(prices);
+  }
+
+  /**
+   * Tapping the darkened area closes a sheet.
+   *
+   * The hit test is on coordinates rather than on the target alone, because a
+   * click on the dialog's own padding also reports the dialog as its target.
+   */
+  closeOnBackdrop_(sheet) {
     sheet.addEventListener("click", (event) => {
       if (event.target !== sheet) return;
       const box = sheet.getBoundingClientRect();
@@ -598,6 +665,7 @@ class DacViewOverview extends DacElement {
     // A modal that is detached loses its place in the top layer, so it would
     // come back as a panel stuck in the middle of the page.
     this.$("#manual")?.close();
+    this.$("#prices")?.close();
   }
 
   listen_() {
@@ -699,6 +767,14 @@ class DacViewOverview extends DacElement {
       series: this.source_.series("price"),
     });
 
+    // What the supplier has published ahead. Only worth opening when there is
+    // more than one price in it: on a fixed contract the chart would be one
+    // flat line saying what the tile already says.
+    this.forecast_ = priceForecast(this.feed_, this.settings_?.contract);
+    this.priceBounds_ = thresholds.price;
+    this.tiles_.price.action = this.forecast_.length > 1 ? () => this.openPrices_() : null;
+    if (this.$("#prices").open) this.drawPrices_();
+
     // The alert threshold is the one number that says "too much" here, so the
     // tile turns on the same boundary the notification uses rather than a
     // second, quietly different one.
@@ -719,11 +795,90 @@ class DacViewOverview extends DacElement {
       series: this.source_.series("load"),
     });
 
+    this.updateMeters_();
     this.updatePhases_(r, alertAt);
     this.updateSteerable_(r.devices);
     this.flow_.update(r);
     this.updateLegend_();
     this.updateCoach_(advise(r, thresholds, configured, alertAt));
+  }
+
+  /**
+   * The meter counters, when there are any to show.
+   *
+   * The whole card disappears when nothing is mapped: a house with no meter
+   * sensors gets no empty frame, and one without gas gets four rows rather than
+   * five with a hole where gas would be.
+   */
+  updateMeters_() {
+    const rows = meterReadings(this.feed_, this.settings_?.sources);
+    this.$("#meters").hidden = !rows.length;
+    if (!rows.length) return;
+
+    // The frame is rebuilt only when the set of counters changes; the numbers
+    // themselves are written into the cells that are already there, several
+    // times a second.
+    const key = rows.map((row) => row.key).join("|");
+    if (key !== this.meterKey_) {
+      this.meterKey_ = key;
+      this.$("#meter-rows").replaceChildren(
+        ...rows.map((row) => {
+          const item = document.createElement("div");
+          item.className = "meter-row";
+
+          const label = document.createElement("span");
+          label.className = "k";
+          label.textContent = row.label;
+
+          const value = document.createElement("span");
+          value.className = "v";
+          value.dataset.meter = row.key;
+
+          item.append(label, value);
+          return item;
+        })
+      );
+    }
+
+    for (const row of rows) {
+      const cell = this.$(`[data-meter="${row.key}"]`);
+      cell.textContent = row.value;
+
+      const unit = document.createElement("span");
+      unit.className = "u";
+      unit.textContent = row.unit;
+      cell.append(unit);
+    }
+  }
+
+  /**
+   * Open the price forecast behind the Energieprijs tile.
+   *
+   * Shown before it is drawn, deliberately: the chart measures itself, and a
+   * dialog that is still closed measures zero.
+   */
+  openPrices_() {
+    this.$("#prices").showModal();
+    this.drawPrices_();
+  }
+
+  drawPrices_() {
+    const forecast = this.forecast_ ?? [];
+    this.$("#price-chart").update({ forecast, thresholds: this.priceBounds_ });
+
+    const last = forecast[forecast.length - 1]?.end;
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(23, 0, 0, 0);
+
+    // Suppliers publish the next day somewhere in the afternoon, so a list that
+    // stops tonight is normal rather than broken -- and saying so beats leaving
+    // somebody wondering why tomorrow is missing.
+    this.$("#prices-note").textContent = !last
+      ? ""
+      : last >= tomorrow
+        ? "De prijzen van je leverancier voor vandaag en morgen."
+        : "Alleen vandaag is bekend. De prijzen voor morgen komen meestal in de loop van de middag binnen.";
   }
 
   /**
@@ -942,7 +1097,7 @@ class DacViewOverview extends DacElement {
       if (name) {
         name.textContent = this.labelFor_(device);
         this.$(`[data-tab-dot="${slot}"]`).classList.toggle("on", on);
-        this.$(`[data-tab-state="${slot}"]`).textContent = on ? " — vrijgegeven" : "";
+        this.$(`[data-tab-state="${slot}"]`).textContent = on ? " (vrijgegeven)" : "";
       }
     });
 

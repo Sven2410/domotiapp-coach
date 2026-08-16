@@ -59,14 +59,28 @@ function readPrice(feed, entityId) {
 }
 
 /**
+ * A bare market price turned into what it actually costs.
+ *
+ * Energy tax and the supplier's markup are added first and VAT goes over the
+ * lot, which is the order the Dutch bill uses. Getting it wrong is a couple of
+ * cents per kWh in every piece of advice the coach gives.
+ *
+ * Both figures are entered without VAT, the way they are quoted on a contract.
+ */
+function allInFrom(market, dynamic) {
+  const tax = Number(dynamic?.energy_tax) || 0;
+  const markup = Number(dynamic?.supplier_markup) || 0;
+  const vat = Number(dynamic?.vat_percent) || 0;
+  return (market + tax + markup) * (1 + vat / 100);
+}
+
+/**
  * What a kWh costs right now, from the contract rather than from a single
  * sensor.
  *
  * A fixed contract is a number the installer typed in. A dynamic one is either
  * an entity that already carries the all-in price, or a bare market price that
- * still needs energy tax and the supplier's markup added and VAT applied over
- * the lot -- which is the order the Dutch bill uses, and getting it wrong is a
- * couple of cents per kWh in the coach's advice.
+ * still has to be worked out.
  *
  * @returns {number|null} euro per kWh
  */
@@ -82,12 +96,155 @@ export function priceNow(feed, contract) {
   if (dynamic.source === "all_in") return readPrice(feed, dynamic.all_in_entity);
 
   const market = readPrice(feed, dynamic.market_entity);
-  if (market === null) return null;
+  return market === null ? null : allInFrom(market, dynamic);
+}
 
-  const tax = Number(dynamic.energy_tax) || 0;
-  const markup = Number(dynamic.supplier_markup) || 0;
-  const vat = Number(dynamic.vat_percent) || 0;
-  return (market + tax + markup) * (1 + vat / 100);
+/**
+ * The price list a dynamic-tariff entity carries in its attributes.
+ *
+ * Suppliers publish tomorrow's prices in the early afternoon and every
+ * integration hangs them off the entity in its own shape. There is no standard
+ * at all, so the shapes seen in the wild are all tried in turn:
+ *
+ * - `prices: [{from, till, price}]`      Frank Energie
+ * - `raw_today` + `raw_tomorrow`         Nord Pool: `[{start, end, value}]`
+ * - `data: [{startsAt, total}]`          Tibber, EnergyZero and friends
+ * - `today` + `tomorrow: [number]`       one bare number per hour from midnight
+ *
+ * Anything else yields nothing, and the panel says it has no forecast rather
+ * than inventing one.
+ *
+ * @returns {Array<{start: Date, end: Date|null, value: number}>}
+ */
+function readSchedule(attributes) {
+  const rows = [];
+
+  const push = (start, end, value) => {
+    const from = start instanceof Date ? start : new Date(start);
+    const till = end === null || end === undefined ? null : new Date(end);
+    const number = Number(value);
+    if (Number.isNaN(from.getTime()) || !Number.isFinite(number)) return;
+    rows.push({ start: from, end: till && !Number.isNaN(till.getTime()) ? till : null, value: number });
+  };
+
+  const list = (raw) => (Array.isArray(raw) ? raw : []);
+
+  for (const entry of list(attributes?.prices)) {
+    push(entry?.from ?? entry?.start, entry?.till ?? entry?.end, entry?.price ?? entry?.value);
+  }
+
+  for (const entry of [...list(attributes?.raw_today), ...list(attributes?.raw_tomorrow)]) {
+    push(entry?.start, entry?.end, entry?.value ?? entry?.price);
+  }
+
+  for (const entry of list(attributes?.data)) {
+    push(
+      entry?.startsAt ?? entry?.start ?? entry?.from ?? entry?.datetime,
+      entry?.endsAt ?? entry?.end ?? entry?.till,
+      entry?.total ?? entry?.price ?? entry?.value
+    );
+  }
+
+  // Bare hourly numbers carry no timestamps of their own: they are 24 values
+  // starting at local midnight, and tomorrow's list follows on from today's.
+  if (!rows.length) {
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const bare = [...list(attributes?.today), ...list(attributes?.tomorrow)];
+    bare.forEach((value, index) => {
+      if (value === null) return;
+      push(new Date(midnight.getTime() + index * 3_600_000), null, value);
+    });
+  }
+
+  return rows.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * The price per interval for as far ahead as the supplier publishes.
+ *
+ * The same conversion the current price goes through is applied to every entry,
+ * so a chart of the forecast and the number on the tile cannot disagree: cents
+ * become euros, and a bare market price gets tax, markup and VAT.
+ *
+ * Entries without an end time inherit the gap to the next one, falling back to
+ * the interval the customer said their contract uses.
+ *
+ * @returns {Array<{start: Date, end: Date, price: number}>} empty when the
+ *   contract is fixed or the entity publishes nothing.
+ */
+export function priceForecast(feed, contract) {
+  if (contract?.type !== "dynamic") return [];
+
+  const dynamic = contract.dynamic ?? {};
+  const allIn = dynamic.source === "all_in";
+  const state = feed.get(allIn ? dynamic.all_in_entity : dynamic.market_entity);
+  if (!usable(state)) return [];
+
+  const rows = readSchedule(state.attributes);
+  if (!rows.length) return [];
+
+  const unit = String(state.attributes?.unit_of_measurement ?? "").toLowerCase();
+  const scale = unit.includes("ct") || unit.includes("cent") ? 0.01 : 1;
+  const fallback = dynamic.interval === "quarter" ? 900_000 : 3_600_000;
+
+  return rows.map((row, index) => {
+    const next = rows[index + 1];
+    const end =
+      row.end ?? (next ? next.start : new Date(row.start.getTime() + fallback));
+    const value = row.value * scale;
+    return { start: row.start, end, price: allIn ? value : allInFrom(value, dynamic) };
+  });
+}
+
+/** The entry covering a moment, or undefined when the forecast does not reach it. */
+export const priceAt = (forecast, when = new Date()) =>
+  forecast.find((row) => when >= row.start && when < row.end);
+
+/** The meter counters, in the order a Dutch meter lists them. */
+const METERS = [
+  { key: "import_low", label: "Geleverd laag" },
+  { key: "import_high", label: "Geleverd hoog" },
+  { key: "export_low", label: "Teruggeleverd laag" },
+  { key: "export_high", label: "Teruggeleverd hoog" },
+  { key: "gas", label: "Gas" },
+];
+
+/**
+ * The meter readings, exactly as the meter reports them.
+ *
+ * Deliberately not converted. Everywhere else in this panel a reading is
+ * normalised, because a diagram has to add watts to watts. A meter reading is
+ * not a measurement to compute with: it is the number a customer copies onto a
+ * supplier's website, and it has to match the meter digit for digit. Rounding
+ * 12345,678 to 12346 kWh would make it useless for the one job it has.
+ *
+ * Only entities that are filled in and reporting something appear. A counter
+ * that is missing is left out rather than shown as a dash, because the card is
+ * a list of what this meter has rather than of what it might have.
+ *
+ * @returns {Array<{key: string, label: string, value: string, unit: string}>}
+ */
+export function meterReadings(feed, sources) {
+  const config = sources?.meters ?? {};
+
+  return METERS.filter((meter) => meter.key !== "gas" || config.gas_enabled)
+    .map((meter) => {
+      const state = feed.get(config[meter.key]);
+      if (!usable(state)) return null;
+
+      const number = Number(state.state);
+      if (!Number.isFinite(number)) return null;
+
+      // Kept at the meter's own precision, up to three decimals: gas runs to
+      // three and electricity to three on most Dutch meters.
+      return {
+        ...meter,
+        value: number.toLocaleString("nl-NL", { maximumFractionDigits: 3 }),
+        unit: state.attributes?.unit_of_measurement ?? "",
+      };
+    })
+    .filter(Boolean);
 }
 
 /** Read a plain numeric entity, in whatever unit it reports. */

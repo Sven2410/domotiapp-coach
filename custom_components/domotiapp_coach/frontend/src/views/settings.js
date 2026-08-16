@@ -30,7 +30,7 @@ class DacViewSettings extends DacEditorElement {
         <header class="intro">
           <div class="eyebrow">Instellingen</div>
           <h1>Zo weet de coach wat je huis doet</h1>
-          <p>Alles wat hier staat, bepaalt waar de cijfers op het overzicht vandaan komen. Je hoeft niet alles in te vullen — zonder gekoppelde sensoren blijft het dashboard voorbeeldwaarden tonen.</p>
+          <p>Alles wat hier staat, bepaalt waar de cijfers op het overzicht vandaan komen. Je hoeft niet alles in te vullen. Zonder gekoppelde sensoren blijven de cijfers leeg.</p>
         </header>
 
         ${adminNoticeHtml}
@@ -49,7 +49,7 @@ class DacViewSettings extends DacEditorElement {
 
         <section class="card">
           <h2>${icons.grid} Energiebronnen</h2>
-          <p class="hint">Welke sensoren meten je opwek en je meterstand. Of de sensor in watt of kilowatt meet maakt niet uit — dat rekent de coach zelf om. Het verbruik van de woning wordt hieruit berekend.</p>
+          <p class="hint">Welke sensoren meten je opwek en je meterstand. Of de sensor in watt of kilowatt meet maakt niet uit, dat rekent de coach zelf om. Het verbruik van de woning wordt hieruit berekend.</p>
           <div class="fields">
             <div class="row">
               <label>Opwek zonnepanelen</label>
@@ -99,7 +99,7 @@ class DacViewSettings extends DacEditorElement {
 
         <section class="card">
           <h2>${icons.plug} Fasen</h2>
-          <p class="hint">Heeft de meter van deze klant losse waarden per fase, vul ze dan hier in. Daarmee wordt de belastbaarheid per fase berekend in plaats van op het totaal — en een zekering gaat eruit op de zwaarste fase, niet op het gemiddelde.</p>
+          <p class="hint">Heeft de meter van deze klant losse waarden per fase, vul ze dan hier in. Daarmee wordt de belastbaarheid per fase berekend in plaats van op het totaal. Een zekering gaat er immers uit op de zwaarste fase en niet op het gemiddelde.</p>
           <div class="fields">
             <label class="check" for="phases-enabled">
               <input type="checkbox" id="phases-enabled">
@@ -143,7 +143,45 @@ class DacViewSettings extends DacEditorElement {
         </section>
 
         <section class="card">
-          <h2>${icons.gauge} Drempelwaarden</h2>
+          <h2>${icons.gauge} Meterstanden</h2>
+          <p class="hint">De tellers van je slimme meter, zoals ze op de meter zelf staan. Vul in wat je hebt; alleen de ingevulde standen komen op het overzicht te staan. Dit zijn totalen in kWh en m³, dus geen vermogens.</p>
+          <div class="fields">
+            <div class="two">
+              <div class="row">
+                <label>Geleverd, laag tarief</label>
+                <dac-entity-picker data-meter="import_low"></dac-entity-picker>
+              </div>
+              <div class="row">
+                <label>Geleverd, hoog tarief</label>
+                <dac-entity-picker data-meter="import_high"></dac-entity-picker>
+              </div>
+              <div class="row">
+                <label>Teruggeleverd, laag tarief</label>
+                <dac-entity-picker data-meter="export_low"></dac-entity-picker>
+              </div>
+              <div class="row">
+                <label>Teruggeleverd, hoog tarief</label>
+                <dac-entity-picker data-meter="export_high"></dac-entity-picker>
+              </div>
+            </div>
+
+            <label class="check" for="gas-enabled">
+              <input type="checkbox" id="gas-enabled">
+              <span>
+                <strong>Deze woning gebruikt gas</strong>
+                Staat dit uit, dan blijft gas van het overzicht weg.
+              </span>
+            </label>
+
+            <div class="row" id="gas-field">
+              <label>Gasmeter (m³)</label>
+              <dac-entity-picker data-meter="gas"></dac-entity-picker>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>${icons.sliders} Drempelwaarden</h2>
           <p class="hint">Waar de kleuren omslaan van groen naar oranje naar rood.</p>
           <div class="fields">
             <div class="row">
@@ -217,14 +255,31 @@ class DacViewSettings extends DacEditorElement {
       });
     }
 
+    // Meter readings are counters in kWh or m3, so the picker looks for energy
+    // rather than power: a customer searching "verbruik" otherwise gets the
+    // watts they already mapped above.
+    for (const picker of this.$$("dac-entity-picker[data-meter]")) {
+      picker.filter = "all";
+      picker.placeholder =
+        picker.dataset.meter === "gas" ? "Zoek je gasmeter…" : "Zoek een meterstand…";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        // Created on demand: settings written before this section existed have
+        // no `meters` at all until the server merges its defaults in.
+        (this.draft_.sources.meters ??= {})[picker.dataset.meter] = ev.detail.value;
+        this.syncSaveBar_();
+      });
+    }
+
     for (const [id, apply] of [
       ["phases-enabled", (on) => (this.draft_.sources.phases_enabled = on)],
       ["phases-overview", (on) => (this.draft_.sources.phases_on_overview = on)],
+      ["gas-enabled", (on) => ((this.draft_.sources.meters ??= {}).gas_enabled = on)],
     ]) {
       const box = this.$(`#${id}`);
       box.addEventListener("change", () => {
         apply(box.checked);
         this.paintPhases_();
+        this.paintGas_();
         this.syncSaveBar_();
       });
     }
@@ -267,15 +322,25 @@ class DacViewSettings extends DacEditorElement {
     }
     this.$("#phases-enabled").checked = Boolean(d.sources.phases_enabled);
     this.$("#phases-overview").checked = Boolean(d.sources.phases_on_overview);
+
+    for (const picker of this.$$("dac-entity-picker[data-meter]")) {
+      picker.value = d.sources.meters?.[picker.dataset.meter] ?? "";
+    }
+    this.$("#gas-enabled").checked = Boolean(d.sources.meters?.gas_enabled);
     this.onFeed_();
 
     this.paintGridMode_();
     this.paintPhases_();
+    this.paintGas_();
     this.syncSaveBar_();
   }
 
   paintPhases_() {
     this.$("#phase-fields").style.display = this.draft_.sources.phases_enabled ? "" : "none";
+  }
+
+  paintGas_() {
+    this.$("#gas-field").style.display = this.draft_.sources.meters?.gas_enabled ? "" : "none";
   }
 
   paintGridMode_() {
