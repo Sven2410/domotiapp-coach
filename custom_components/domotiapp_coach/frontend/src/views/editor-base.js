@@ -317,6 +317,19 @@ export class DacEditorElement extends DacElement {
    */
   static sections = [];
 
+  /**
+   * The websocket command this screen saves through.
+   *
+   * Writing settings is an administrator's job, with one exception: the
+   * strategy belongs to whoever lives in the house. That screen points this at
+   * a command of its own that is not admin-only and accepts nothing but its own
+   * section.
+   */
+  static saveCommand = "domotiapp_coach/settings/set";
+
+  /** What the command carries the payload under. */
+  static savePayload = "settings";
+
   constructor() {
     super();
     this.draft_ = null;
@@ -343,6 +356,17 @@ export class DacEditorElement extends DacElement {
   set stateFeed(value) {
     this.feed_ = value;
     if (this.rendered_) this.onFeed_();
+  }
+
+  /**
+   * What goes over the wire.
+   *
+   * The general command takes a whole settings document; a screen with a
+   * command of its own takes just its section, so it unwraps here.
+   */
+  payload_(sections) {
+    const keys = this.constructor.sections;
+    return this.constructor.savePayload === "settings" ? sections : sections[keys[0]];
   }
 
   /** Whether this user may change anything here. */
@@ -475,8 +499,8 @@ export class DacEditorElement extends DacElement {
 
     try {
       const saved = await this.hass_.callWS({
-        type: "domotiapp_coach/settings/set",
-        settings: this.slice_(this.draft_),
+        type: this.constructor.saveCommand,
+        [this.constructor.savePayload]: this.payload_(this.slice_(this.draft_)),
       });
       this.saved_ = clone(saved);
       this.draft_ = clone(saved);
@@ -511,8 +535,8 @@ export class DacEditorElement extends DacElement {
   async persist_(sections, message) {
     try {
       const saved = await this.hass_.callWS({
-        type: "domotiapp_coach/settings/set",
-        settings: sections,
+        type: this.constructor.saveCommand,
+        [this.constructor.savePayload]: this.payload_(sections),
       });
       this.saved_ = clone(saved);
       // Everything the customer had not touched follows the server; the rest of
