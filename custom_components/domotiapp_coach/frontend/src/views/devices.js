@@ -664,6 +664,7 @@ class DacViewDevices extends DacEditorElement {
       const index = Number(picker.dataset.energy);
       picker.filter = "all";
       picker.placeholder = "Zoek een energieteller…";
+      picker.stateFeed = this.feed_;
       picker.value = this.draft_.devices[index].energy_entity ?? "";
       picker.addEventListener("dac-entity-change", (ev) => {
         this.draft_.devices[index].energy_entity = ev.detail.value;
@@ -675,6 +676,7 @@ class DacViewDevices extends DacEditorElement {
       const [index, slot] = picker.dataset.carEntity.split(":").map(Number);
       picker.filter = "all";
       picker.placeholder = "Zoek het accupercentage…";
+      picker.stateFeed = this.feed_;
       picker.value = this.draft_.devices[index].cars[slot].soc_entity ?? "";
       picker.addEventListener("dac-entity-change", (ev) => {
         this.draft_.devices[index].cars[slot].soc_entity = ev.detail.value;

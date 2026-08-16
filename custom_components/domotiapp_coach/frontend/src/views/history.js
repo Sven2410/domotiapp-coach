@@ -160,14 +160,9 @@ class DacViewHistory extends DacElement {
               (item) => `<button type="button" data-period="${item.id}" aria-pressed="false">${item.label}</button>`
             ).join("")}
           </div>
-          <div class="exports">
-            <button type="button" class="download" id="report" title="Een rapport om te bewaren of te printen">
-              ${icons.compass}<span>Rapport</span>
-            </button>
-            <button type="button" class="download" id="download" title="De cijfers als tabel">
-              ${icons.arrowRight}<span>Tabel</span>
-            </button>
-          </div>
+          <button type="button" class="download" id="report" title="Een rapport om te bewaren of te printen">
+            ${icons.compass}<span>Rapport</span>
+          </button>
           <div class="stepper">
             <button type="button" id="prev" aria-label="Vorige">${icons.arrowLeft}</button>
             <span id="period-label"></span>
@@ -213,7 +208,6 @@ class DacViewHistory extends DacElement {
       });
     }
     this.$("#report").addEventListener("click", () => this.report_());
-    this.$("#download").addEventListener("click", () => this.download_());
     this.$("#prev").addEventListener("click", () => this.step_(-1));
     this.$("#next").addEventListener("click", () => this.step_(1));
 
@@ -800,66 +794,6 @@ class DacViewHistory extends DacElement {
       .sort((a, b) => b.kwh - a.kwh);
   }
 
-  /**
-   * Deze periode als bestand, in een vorm die je in Excel kunt openen.
-   *
-   * Puntkomma's als scheidingsteken en komma's als decimaalteken, want dat is
-   * wat een Nederlandse Excel verwacht; met punten en komma's andersom belandt
-   * een heel jaar in één kolom. De kolomnamen staan er voluit boven, met hun
-   * eenheid, zodat het blad ook los van dit scherm te lezen is.
-   */
-  download_() {
-    const rows = this.rowsShown_ ?? [];
-    if (!rows.length) return;
-
-    const prices = this.prices_ ?? new Map();
-    const rate = tariff(this.feed_, this.settings_?.contract);
-    const hasSolar = this.meters_().solar.length > 0;
-    const gas = new Map((this.rows_?.gas ?? []).map((row) => [row.start.getTime(), row.value]));
-
-    const getal = (value) =>
-      value === null || value === undefined || !Number.isFinite(value)
-        ? ""
-        : value.toFixed(3).replace(".", ",");
-
-    const kop = ["Periode"];
-    if (hasSolar) kop.push("Opgewekt (kWh)", "Verbruikt (kWh)", "Eigen zon gebruikt (kWh)");
-    kop.push("Van het net (kWh)", "Naar het net (kWh)");
-    if (gas.size) kop.push("Gas (m3)");
-    if (rate.buy !== null) kop.push("Prijs (euro per kWh)", "Kosten inkoop (euro)");
-
-    const lijnen = [kop.join(";")];
-    for (const row of rows) {
-      const prijs = prices.get(row.start.getTime()) ?? rate.buy;
-      const kolommen = [bucketTitle(this.period_, row.start)];
-      if (hasSolar) {
-        kolommen.push(getal(row.own + row.sold), getal(row.used), getal(row.own));
-      }
-      kolommen.push(getal(row.bought), getal(row.sold));
-      if (gas.size) kolommen.push(getal(gas.get(row.start.getTime()) ?? 0));
-      if (rate.buy !== null) kolommen.push(getal(prijs), getal(row.bought * (prijs ?? 0)));
-      lijnen.push(kolommen.join(";"));
-    }
-
-    const naam = `domotiapp-${this.period_}-${periodStart(this.period_, this.offset_)
-      .toISOString()
-      .slice(0, 10)}.csv`;
-
-    // Met een byte order mark ervoor, anders leest Excel de euro's en de
-    // accenten als onzin.
-    const bom = String.fromCharCode(0xfeff);
-    const einde = String.fromCharCode(13) + String.fromCharCode(10);
-    const blob = new Blob([bom + lijnen.join(einde)], {
-      type: "text/csv;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = naam;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
   /** Terug naar de cijfers van de hele periode. */
   clearPick_() {
     if (this.totals_) this.paintTotals_(this.totals_);
@@ -1164,8 +1098,6 @@ DacViewHistory.css = /* css */ `
   button.download:hover { color: var(--dac-ink); border-color: var(--dac-border-hi); }
   /* Het pijltje wijst omlaag: het bestand komt naar je toe. */
   button.download .icon { width: 15px; height: 15px; transform: rotate(90deg); }
-
-  .exports { display: flex; gap: 8px; }
 
   .stepper { display: flex; align-items: center; gap: 6px; margin-left: auto; min-width: 0; }
   .stepper span {

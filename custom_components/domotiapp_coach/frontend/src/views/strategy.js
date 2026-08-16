@@ -20,6 +20,7 @@ import {
   canHaveDeadline,
   deviceLabel,
   deviceLabelMap,
+  needsRelease,
   programFor,
   typeMeta,
 } from "../devices.js";
@@ -320,7 +321,7 @@ class DacViewStrategy extends DacEditorElement {
                 <span id="klaar-horizon-text"></span>
               </div>
 
-              <div class="notice">
+              <div class="notice" id="klaar-release" hidden>
                 ${icons.warning}
                 <span>Vrijgeven blijft nodig. De coach start dit apparaat alleen als je op het overzicht hebt aangegeven dat het mag draaien. Een tijd instellen is niet hetzelfde als toestemming geven.</span>
               </div>
@@ -752,6 +753,10 @@ class DacViewStrategy extends DacEditorElement {
 
     if (plan.per_day) this.paintPlanDays_(plan);
     else this.paintPlanWindow_(plan);
+
+    // Alleen waar iemand het apparaat nog moet vrijgeven. Een laadpaal niet:
+    // de kabel erin steken is daar de toestemming.
+    this.$("#klaar-release").hidden = !needsRelease(device);
 
     this.paintKlaarNotes_();
   }
