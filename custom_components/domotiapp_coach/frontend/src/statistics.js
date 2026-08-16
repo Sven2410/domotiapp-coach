@@ -155,6 +155,48 @@ export async function fetchPeriod(hass, ids, period, start) {
   return out;
 }
 
+/**
+ * The average price per bucket, from the same statistics.
+ *
+ * Home Assistant keeps these for any sensor that calls itself a measurement,
+ * and a price sensor does. So there is no need to reckon a whole year with
+ * today's tariff: the tariff of that day is on disk.
+ *
+ * How exact it is depends on the period, and the screen says so. Over a day the
+ * buckets are hours and a dynamic price is constant within the hour, so the sum
+ * is exact. Over a week or a month a day's average is multiplied by that day's
+ * consumption, which misses the fact that a house uses more at expensive hours.
+ * Over a year the same applies per month.
+ *
+ * @returns {Promise<Map<number, number>>} bucket start in milliseconds to price
+ */
+export async function fetchPrices(hass, entityId, period, start) {
+  const out = new Map();
+  if (!entityId || !hass) return out;
+
+  const bucket = PERIODS.find((item) => item.id === period)?.bucket ?? "day";
+
+  try {
+    const result = await hass.callWS({
+      type: "recorder/statistics_during_period",
+      start_time: start.toISOString(),
+      end_time: periodEnd(period, start).toISOString(),
+      statistic_ids: [entityId],
+      period: bucket,
+      types: ["mean"],
+    });
+
+    for (const row of result?.[entityId] ?? []) {
+      if (row.mean === null || row.mean === undefined) continue;
+      out.set(new Date(row.start).getTime(), Number(row.mean));
+    }
+  } catch (error) {
+    console.warn("[DomotiApp Coach] kon de prijsgeschiedenis niet ophalen", error);
+  }
+
+  return out;
+}
+
 /** Add up several counters into one series, bucket by bucket. */
 export function combine(series, ids) {
   const total = new Map();
