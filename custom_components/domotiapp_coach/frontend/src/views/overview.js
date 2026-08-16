@@ -25,6 +25,13 @@ import {
   valueLabel,
 } from "../devices.js";
 import { LiveSource, meterReadings, priceForecast } from "../data-source.js";
+import {
+  OVERVIEW_CARDS,
+  defaultLayout,
+  effectiveLayout,
+  resetLayout,
+  saveLayout,
+} from "../layout.js";
 import { level, levelTone, percent, power, powerText, price as fmtPrice } from "../format.js";
 import { sheetCss } from "../theme.js";
 import "../components/stat-tile.js";
@@ -447,6 +454,132 @@ class DacViewOverview extends DacElement {
     /* The price chart needs the room: 48 bars in a 430px sheet is a comb. */
     dialog.sheet.wide { width: min(760px, calc(100vw - 24px)); }
 
+    /* ---- arranging the overview ----
+       The whole mode is off to one side of normal use: a quiet link under the
+       last card, and while it is on the cards themselves grow a handle. */
+    .arrange-link {
+      align-self: center;
+      margin-top: 4px;
+      padding: 9px 16px;
+      border-radius: var(--dac-radius-pill);
+      border: 1px solid var(--dac-border);
+      background: transparent;
+      color: var(--dac-ink-3);
+      font: inherit; font-size: 13px;
+      display: inline-flex; align-items: center; gap: 8px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: color 200ms ease, border-color 200ms ease;
+    }
+    .arrange-link:hover { color: var(--dac-ink-2); border-color: var(--dac-border-hi); }
+    .arrange-link .icon { width: 15px; height: 15px; }
+    :host([arranging]) .arrange-link { display: none; }
+
+    /* Cards keep their own look while being arranged; only a bar is added on
+       top of them, so you are moving the thing you recognise. */
+    :host([arranging]) [data-card] { position: relative; }
+    :host([arranging]) [data-card].dragging {
+      z-index: 5;
+      cursor: grabbing;
+      box-shadow: 0 24px 50px -18px rgba(0,0,0,0.9);
+    }
+    /* A card the customer switched off stays in view while arranging, faded,
+       so it can be switched back on. Outside this mode it is simply gone.
+       Written as "not while arranging" rather than switching display on and
+       off: these cards do not agree on what display they have (the tiles are a
+       grid), and handing them all "block" would flatten that one. */
+    :host(:not([arranging])) [data-card][data-off] { display: none; }
+    :host([arranging]) [data-card][data-off] { opacity: 0.4; }
+
+    .card-edit {
+      position: absolute;
+      inset: 0 0 auto 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      border-radius: var(--dac-radius) var(--dac-radius) 0 0;
+      background: linear-gradient(180deg, rgba(12,12,10,0.96), rgba(12,12,10,0.72) 70%, transparent);
+      backdrop-filter: blur(2px);
+    }
+    .card-edit .name {
+      font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+      color: var(--dac-ink-2);
+      margin-right: auto;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .card-edit button {
+      width: 34px; height: 34px; flex: 0 0 auto;
+      display: grid; place-items: center;
+      border-radius: 10px;
+      border: 1px solid var(--dac-border-hi);
+      background: rgba(18,18,15,0.9);
+      color: var(--dac-ink-2);
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .card-edit button:hover:not(:disabled) { color: var(--dac-ink); border-color: var(--dac-accent-hi); }
+    .card-edit button:disabled { opacity: 0.3; cursor: default; }
+    .card-edit button.grip { cursor: grab; touch-action: none; }
+    .card-edit button.off { border-color: rgba(250,178,25,0.45); color: var(--dac-warn); }
+    .card-edit .icon { width: 16px; height: 16px; }
+
+    /* Room for the bar, so it never sits on top of a card's own heading. The
+       cards carry different padding, so this is added on the card itself
+       rather than as a margin on whatever happens to be first inside it. */
+    :host([arranging]) [data-card] { padding-top: 54px; }
+
+    .arrange-bar {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      z-index: 30;
+      padding: 12px max(22px, var(--dac-safe-r)) calc(12px + var(--dac-safe-b)) max(22px, var(--dac-safe-l));
+      background: linear-gradient(0deg, rgba(12,12,10,0.98) 60%, rgba(12,12,10,0));
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .arrange-bar[hidden] { display: none; }
+    /* Room to scroll past the bar, so the last card is not stuck behind it. */
+    :host([arranging]) .wrap { padding-bottom: calc(150px + var(--dac-safe-b)); }
+    .arrange-bar .where {
+      margin-right: auto;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12.5px; color: var(--dac-ink-2);
+      min-width: 0;
+    }
+    .arrange-bar select {
+      padding: 9px 12px;
+      border-radius: var(--dac-radius-sm);
+      border: 1px solid var(--dac-border-hi);
+      background: rgba(255,255,255,0.04);
+      color: var(--dac-ink);
+      font: inherit; font-size: 13px;
+      min-height: 42px;
+    }
+    .arrange-bar select option { background: #12120f; color: var(--dac-ink); }
+    @media (pointer: coarse) { .arrange-bar select { font-size: 16px; } }
+    @supports (-webkit-touch-callout: none) { .arrange-bar select { font-size: 16px; } }
+    .arrange-bar button {
+      padding: 11px 20px;
+      border-radius: var(--dac-radius-pill);
+      border: 1px solid var(--dac-border-hi);
+      background: var(--dac-surface);
+      color: var(--dac-ink-2);
+      font: inherit; font-size: 14px; font-weight: 500;
+      cursor: pointer;
+      min-height: 44px;
+    }
+    .arrange-bar button.primary {
+      border-color: transparent;
+      background: var(--dac-accent);
+      color: #fff;
+      font-weight: 600;
+    }
+    @media (max-width: 560px) {
+      .arrange-bar .where { flex-basis: 100%; margin: 0 0 2px; }
+      .arrange-bar button { flex: 1 1 0; padding: 11px 12px; }
+    }
+
     /* ---- meter readings ----
        Five counters at most, so they get a row each rather than a tile: the
        number is long, it is read digit by digit against the meter itself, and
@@ -511,7 +644,11 @@ class DacViewOverview extends DacElement {
 
   set settings(value) {
     this.settings_ = value;
-    if (this.rendered_) this.tick_();
+    if (!this.rendered_) return;
+    // The arrangement travels with the settings, so a change made on a phone
+    // reaches the tablet in the hall without a reload.
+    this.applyLayout_();
+    this.tick_();
   }
 
   render() {
@@ -519,7 +656,7 @@ class DacViewOverview extends DacElement {
 
     return `
       <div class="wrap">
-        <article class="card coach" id="coach">
+        <article class="card coach" id="coach" data-card="coach">
           <div class="coach-top">
             <div class="coach-mark">${icons.spark}</div>
             <div class="coach-where">
@@ -532,11 +669,11 @@ class DacViewOverview extends DacElement {
           <p id="coach-body"></p>
         </article>
 
-        <section class="tiles" aria-label="Live meetwaarden">
+        <section class="tiles" aria-label="Live meetwaarden" data-card="tiles">
           ${tile("t-solar")}${tile("t-house")}${tile("t-grid")}${tile("t-load")}${tile("t-self")}${tile("t-price")}
         </section>
 
-        <article class="card panel phases" id="phases" hidden>
+        <article class="card panel phases" id="phases" data-card="phases" hidden>
           <div class="panel-head">
             <div class="eyebrow">Per fase</div>
             <h2 id="phases-title">Belasting van je aansluiting</h2>
@@ -544,7 +681,7 @@ class DacViewOverview extends DacElement {
           <div class="phase-rows" id="phase-rows"></div>
         </article>
 
-        <article class="card panel meters" id="meters" hidden>
+        <article class="card panel meters" id="meters" data-card="meters" hidden>
           <div class="panel-head">
             <div class="eyebrow">Standen</div>
             <h2>Je meter</h2>
@@ -553,7 +690,7 @@ class DacViewOverview extends DacElement {
           <div class="meter-rows" id="meter-rows"></div>
         </article>
 
-        <article class="card panel steerable" id="steerable" hidden>
+        <article class="card panel steerable" id="steerable" data-card="steerable" hidden>
           <div class="panel-head">
             <div class="eyebrow">Sturing</div>
             <h2>Aanstuurbare apparaten</h2>
@@ -563,7 +700,7 @@ class DacViewOverview extends DacElement {
           <div class="steer-grid" id="steer-grid"></div>
         </article>
 
-        <article class="card panel">
+        <article class="card panel" id="flow-card" data-card="flow">
           <div class="panel-head">
             <div class="eyebrow">Realtime</div>
             <h2>Energiestroom</h2>
@@ -571,6 +708,22 @@ class DacViewOverview extends DacElement {
           <div class="flow-holder"><dac-energy-flow id="flow"></dac-energy-flow></div>
           <div class="legend" id="legend"></div>
         </article>
+
+        <button class="arrange-link" type="button" id="arrange-open">
+          ${icons.sliders} Indeling aanpassen
+        </button>
+
+        <div class="arrange-bar" id="arrange-bar" hidden>
+          <div class="where">
+            <label for="arrange-scope">Geldt voor</label>
+            <select id="arrange-scope">
+              <option value="user">mij, op elk scherm</option>
+              <option value="device">alleen dit scherm</option>
+            </select>
+          </div>
+          <button type="button" id="arrange-reset">Standaard terugzetten</button>
+          <button type="button" class="primary" id="arrange-done">Klaar</button>
+        </div>
 
         <dialog class="sheet" id="manual" aria-labelledby="manual-title">
           <div class="sheet-head">
@@ -626,6 +779,223 @@ class DacViewOverview extends DacElement {
     const prices = this.$("#prices");
     this.$("#prices-close").addEventListener("click", () => prices.close());
     this.closeOnBackdrop_(prices);
+
+    this.$("#arrange-open").addEventListener("click", () => this.startArranging_());
+    this.$("#arrange-done").addEventListener("click", () => this.stopArranging_());
+    this.$("#arrange-reset").addEventListener("click", () => this.resetArrangement_());
+    this.$("#arrange-scope").addEventListener("change", () => this.storeArrangement_());
+
+    this.applyLayout_();
+  }
+
+  // --- arranging the overview -------------------------------------------
+
+  /** Put the cards in the order this person chose, and hide what they hid. */
+  applyLayout_() {
+    // Not while somebody is rearranging: settings arrive on every save from
+    // every open panel, and adopting one mid-drag would pull the cards out
+    // from under the finger holding them.
+    if (this.arranging_) return;
+
+    const { cards, scope } = effectiveLayout(this.settings_, this.hass?.user?.id);
+    this.layout_ = cards;
+    this.scope_ = scope;
+    if (this.rendered_) this.$("#arrange-scope").value = scope;
+    this.paintLayout_();
+  }
+
+  paintLayout_() {
+    this.layout_.forEach((card, index) => {
+      const el = this.$(`[data-card="${card.id}"]`);
+      if (!el) return;
+      // Order rather than moving nodes: the cards are live and hold their own
+      // state, and reordering the DOM under them means rebuilding a diagram
+      // and a set of tabs every time somebody drags something.
+      el.style.order = String(index + 1);
+      el.toggleAttribute("data-off", card.hidden);
+    });
+
+    if (this.arranging_) this.paintCardBars_();
+  }
+
+  startArranging_() {
+    this.arranging_ = true;
+    this.toggleAttribute("arranging", true);
+    this.$("#arrange-bar").hidden = false;
+    this.paintCardBars_();
+  }
+
+  stopArranging_() {
+    this.arranging_ = false;
+    this.toggleAttribute("arranging", false);
+    this.$("#arrange-bar").hidden = true;
+    for (const bar of this.$$(".card-edit")) bar.remove();
+  }
+
+  /**
+   * The handle on each card.
+   *
+   * Dragging is offered but never the only way: it is the one interaction that
+   * fails silently for anyone using a keyboard, and on a phone it competes with
+   * the scroll. The arrows do the same job and always work.
+   */
+  paintCardBars_() {
+    const order = this.layout_;
+
+    order.forEach((card, index) => {
+      const el = this.$(`[data-card="${card.id}"]`);
+      if (!el) return;
+
+      const meta = OVERVIEW_CARDS.find((item) => item.id === card.id);
+      let bar = el.querySelector(":scope > .card-edit");
+      if (!bar) {
+        bar = document.createElement("div");
+        bar.className = "card-edit";
+        bar.innerHTML = `
+          <button type="button" class="grip" aria-label="Verslepen" title="Verslepen">${icons.menu}</button>
+          <span class="name"></span>
+          <button type="button" data-move="-1" aria-label="Omhoog">${icons.arrowLeft}</button>
+          <button type="button" data-move="1" aria-label="Omlaag">${icons.arrowRight}</button>
+          <button type="button" data-toggle-card aria-label="Tonen of verbergen">${icons.check}</button>
+        `;
+        // The arrows are the horizontal icons turned a quarter, which keeps one
+        // pair of icons rather than two that have to stay in step.
+        bar.querySelector('[data-move="-1"]').style.transform = "rotate(90deg)";
+        bar.querySelector('[data-move="1"]').style.transform = "rotate(90deg)";
+        el.prepend(bar);
+
+        bar.querySelector(".grip").addEventListener("pointerdown", (ev) =>
+          this.startDrag_(ev, card.id)
+        );
+        for (const button of bar.querySelectorAll("[data-move]")) {
+          button.addEventListener("click", () =>
+            this.moveCard_(card.id, Number(button.dataset.move))
+          );
+        }
+        bar.querySelector("[data-toggle-card]").addEventListener("click", () =>
+          this.toggleCard_(card.id)
+        );
+      }
+
+      bar.querySelector(".name").textContent = meta?.label ?? card.id;
+      bar.querySelector('[data-move="-1"]').disabled = index === 0;
+      bar.querySelector('[data-move="1"]').disabled = index === order.length - 1;
+
+      const eye = bar.querySelector("[data-toggle-card]");
+      eye.classList.toggle("off", card.hidden);
+      eye.innerHTML = card.hidden ? icons.close : icons.check;
+      eye.title = card.hidden ? "Verborgen, tik om te tonen" : "Zichtbaar, tik om te verbergen";
+    });
+  }
+
+  moveCard_(id, delta) {
+    const from = this.layout_.findIndex((card) => card.id === id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= this.layout_.length) return;
+
+    const [moved] = this.layout_.splice(from, 1);
+    this.layout_.splice(to, 0, moved);
+    this.paintLayout_();
+    this.storeArrangement_();
+  }
+
+  toggleCard_(id) {
+    const card = this.layout_.find((item) => item.id === id);
+    if (!card) return;
+    card.hidden = !card.hidden;
+    this.paintLayout_();
+    this.storeArrangement_();
+  }
+
+  /**
+   * Drag a card to a new place.
+   *
+   * Pointer events rather than HTML5 drag and drop, which does not exist on a
+   * touch screen at all. The card follows the finger; the others stay put until
+   * it passes the middle of one, and then the two swap.
+   */
+  startDrag_(event, id) {
+    event.preventDefault();
+    const el = this.$(`[data-card="${id}"]`);
+    if (!el) return;
+
+    const grip = event.currentTarget;
+    grip.setPointerCapture(event.pointerId);
+
+    const startY = event.clientY;
+    el.classList.add("dragging");
+
+    // Every swap moves the card's own resting place, so the offset it is drawn
+    // with has to be corrected by exactly the distance it just jumped. Kept
+    // across moves: recomputing it from the pointer alone would snap the card
+    // back to where it started the moment the finger moved again.
+    let settled = 0;
+
+    const move = (ev) => {
+      const dy = ev.clientY - startY;
+      el.style.transform = `translateY(${dy + settled}px)`;
+
+      // Keep swapping while the card is past the next neighbour, rather than
+      // one place per event: a quick flick delivers few move events, and one
+      // step each would leave the card lagging behind the finger.
+      for (;;) {
+        const index = this.layout_.findIndex((card) => card.id === id);
+        const step = dy + settled < 0 ? -1 : 1;
+        const other = this.layout_[index + step];
+        if (!other) break;
+
+        const box = this.$(`[data-card="${other.id}"]`)?.getBoundingClientRect();
+        if (!box) break;
+
+        const self = el.getBoundingClientRect();
+        const passed =
+          step < 0
+            ? self.top < box.top + box.height / 2
+            : self.bottom > box.bottom - box.height / 2;
+        if (!passed) break;
+
+        const before = el.getBoundingClientRect().top;
+        const [moved] = this.layout_.splice(index, 1);
+        this.layout_.splice(index + step, 0, moved);
+        this.paintLayout_();
+        settled += before - el.getBoundingClientRect().top;
+        el.style.transform = `translateY(${dy + settled}px)`;
+      }
+    };
+
+    const stop = () => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", stop);
+      grip.removeEventListener("pointercancel", stop);
+      el.classList.remove("dragging");
+      el.style.transform = "";
+      this.paintLayout_();
+      this.storeArrangement_();
+    };
+
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", stop);
+    grip.addEventListener("pointercancel", stop);
+  }
+
+  async storeArrangement_() {
+    const scope = this.$("#arrange-scope").value;
+    this.scope_ = scope;
+    try {
+      await saveLayout(this.hass, this.layout_, scope);
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de indeling niet bewaren", error);
+    }
+  }
+
+  async resetArrangement_() {
+    this.layout_ = defaultLayout();
+    this.paintLayout_();
+    try {
+      await resetLayout(this.hass);
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de indeling niet herstellen", error);
+    }
   }
 
   /**
