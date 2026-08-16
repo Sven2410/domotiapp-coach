@@ -18,6 +18,7 @@ import { icons } from "./icons.js";
 
 export const NAV_ITEMS = [
   { id: "overzicht", label: "Overzicht", icon: "gauge" },
+  { id: "historie", label: "Historie", icon: "gauge" },
   { id: "apparaten", label: "Apparaten", icon: "devices", adminOnly: true },
   { id: "strategie", label: "Strategie", icon: "compass" },
   { id: "installatie", label: "Installatie", icon: "plug" },

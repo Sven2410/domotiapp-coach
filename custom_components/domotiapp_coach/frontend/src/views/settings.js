@@ -168,6 +168,11 @@ class DacViewSettings extends DacEditorElement {
           <h2>${icons.gauge} Meterstanden</h2>
           <p class="hint">De tellers van je slimme meter, zoals ze op de meter zelf staan. Vul in wat je hebt; alleen de ingevulde standen komen op het overzicht te staan. Dit zijn totalen in kWh en m³, dus geen vermogens.</p>
           <div class="fields">
+            <div class="row">
+              <label>Opwek totaal (teller)</label>
+              <dac-entity-picker data-meter="solar_total"></dac-entity-picker>
+              <span class="sub">De teller van je omvormer in kWh, niet het vermogen. Zonder deze kan het paneel niet terugkijken op wat je hebt opgewekt.</span>
+            </div>
             <div class="two">
               <div class="row">
                 <label>Geleverd, laag tarief</label>

@@ -150,6 +150,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # Gas has its own switch because plenty of houses no longer have it,
         # and an empty gas line on the card reads as a broken sensor.
         "meters": {
+            # The generation counter, in kWh. Not the same thing as the power
+            # sensor above: that one says what the panels do right now, and a
+            # counter is what makes it possible to look back at a week.
+            "solar_total": "",
             "import_low": "",
             "import_high": "",
             "export_low": "",
