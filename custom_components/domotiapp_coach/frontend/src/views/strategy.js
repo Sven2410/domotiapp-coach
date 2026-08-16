@@ -77,21 +77,43 @@ const TIMES = [
   },
 ];
 
+/**
+ * Who goes first when the connection cannot carry everything at once.
+ *
+ * Three steps and no more. A number from one to ten reads as precision that is
+ * not there, and in a house with four steerable appliances the only question
+ * that ever comes up is which one waits.
+ */
+const PRIORITIES = [
+  { key: "high", label: "Hoog", blurb: "Gaat voor de rest." },
+  { key: "mid", label: "Middel", blurb: "De gewone stand." },
+  { key: "low", label: "Laag", blurb: "Wacht op de anderen." },
+];
+
+const priorityLabel = (key) =>
+  PRIORITIES.find((item) => item.key === key)?.label ?? "Middel";
+
 /** The one line under a device's name on the list. */
 function planSummary_(plan, on) {
   if (!on) return "Niet ingepland. De coach laat dit apparaat met rust.";
+
+  // Priority is only worth a word when it is not the ordinary one; on a list
+  // where every row says "middel" the word stops carrying anything.
+  const voorrang = plan.priority && plan.priority !== "mid"
+    ? ` · voorrang ${priorityLabel(plan.priority).toLowerCase()}`
+    : "";
 
   if (plan.per_day) {
     const days = plan.days
       .filter((day) => day.enabled && (day.not_before || day.start_by || day.done_by))
       .map((day) => DAYS_SHORT[day.day]);
-    return `Per dag · ${days.join(", ")}`;
+    return `Per dag · ${days.join(", ")}${voorrang}`;
   }
 
   const parts = TIMES.filter((time) => plan.window[time.key]).map(
     (time) => `${time.short.toLowerCase()} ${plan.window[time.key]}`
   );
-  return `Elke dag · ${parts.join(" · ")}`;
+  return `Elke dag · ${parts.join(" · ")}${voorrang}`;
 }
 
 /** The next moment the clock reads this time, today or tomorrow. */
@@ -239,6 +261,20 @@ class DacViewStrategy extends DacEditorElement {
 
             <div id="klaar-fields" class="fields">
               <div class="row">
+                <label>Wie gaat voor?</label>
+                <div class="segmented three" id="klaar-priority">
+                  ${PRIORITIES.map(
+                    (item) => `
+                    <button type="button" data-priority="${item.key}" aria-pressed="false">
+                      <strong>${item.label}</strong>
+                      ${item.blurb}
+                    </button>`
+                  ).join("")}
+                </div>
+                <span class="sub">Past niet alles tegelijk binnen je aansluiting, dan begint de coach met wat het hoogst staat. Twee apparaten met dezelfde voorrang gaan op volgorde van hun eigen tijden.</span>
+              </div>
+
+              <div class="row">
                 <label>Voor welke dagen?</label>
                 <div class="segmented" id="klaar-mode">
                   <button type="button" data-mode="same" aria-pressed="false">
@@ -383,6 +419,14 @@ class DacViewStrategy extends DacEditorElement {
       });
     }
 
+    for (const button of this.$$("#klaar-priority button")) {
+      button.addEventListener("click", () => {
+        this.planFor_(this.paneDevice_, true).priority = button.dataset.priority;
+        this.paintKlaar_();
+        this.afterChange_();
+      });
+    }
+
     this.wireSaveBar_();
     this.paintPane_();
     this.paint_();
@@ -426,6 +470,7 @@ class DacViewStrategy extends DacEditorElement {
       device: deviceId,
       enabled: false,
       per_day: false,
+      priority: "mid",
       window: { not_before: "", start_by: "", done_by: "" },
       days: [],
     });
@@ -452,6 +497,7 @@ class DacViewStrategy extends DacEditorElement {
     // Settings written by an older version, or by hand, may be missing a half.
     found.window ??= { not_before: "", start_by: "", done_by: "" };
     found.days ??= [];
+    found.priority ??= "mid";
     return found;
   }
 
@@ -495,6 +541,10 @@ class DacViewStrategy extends DacEditorElement {
   /** The summary on the list is part of the same edit, so it follows along. */
   afterChange_() {
     this.paintSummaries_();
+    // The device list carries the same settings in one line, so it has to
+    // follow along: change a time in the sub-screen, step back, and the row
+    // would otherwise still describe what it said before.
+    this.paintDeviceLinks_();
     this.syncSaveBar_();
   }
 
@@ -652,6 +702,13 @@ class DacViewStrategy extends DacEditorElement {
       button.setAttribute(
         "aria-pressed",
         String((button.dataset.mode === "per-day") === Boolean(plan.per_day))
+      );
+    }
+
+    for (const button of this.$$("#klaar-priority button")) {
+      button.setAttribute(
+        "aria-pressed",
+        String(button.dataset.priority === (plan.priority ?? "mid"))
       );
     }
 
@@ -995,6 +1052,11 @@ DacViewStrategy.css = /* css */ `
   ${editorCss}
 
   .pane[hidden], #pane-list[hidden] { display: none; }
+
+  /* Three choices side by side rather than the usual two. On a phone they go
+     under each other, like every other segmented choice here. */
+  .segmented.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 560px) { .segmented.three { grid-template-columns: minmax(0, 1fr); } }
 
   /* ---- back to the list ---- */
   button.back {

@@ -33,9 +33,20 @@ class DacStatTile extends DacElement {
     /* A tile that opens something says so with an arrow rather than by moving
        under the cursor: half these tiles are read on a wall tablet, where there
        is no cursor to hover with. */
-    :host([actionable]) { cursor: pointer; }
-    :host([actionable]:focus-visible) { outline: none; }
-    :host([actionable]:focus-visible) .tile { border-color: var(--tone); }
+    /* The browser's own focus ring is switched off unconditionally, not just
+       for :focus-visible. On iOS a tap leaves the tile focused and Safari draws
+       a heavy blue rectangle around it that stays there after the sheet is
+       closed again. Keyboard users are not left without: the tile marks itself
+       with its own colour below. */
+    :host([actionable]) {
+      cursor: pointer;
+      outline: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    :host([actionable]:focus-visible) .tile {
+      border-color: var(--tone);
+      box-shadow: var(--dac-shadow), 0 0 0 2px color-mix(in srgb, var(--tone) 55%, transparent);
+    }
     .go {
       position: absolute;
       right: 12px;

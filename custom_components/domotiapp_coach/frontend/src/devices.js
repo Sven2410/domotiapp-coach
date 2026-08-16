@@ -486,13 +486,24 @@ export const canCommand = (device) =>
   deviceCommands(device).length > 0 || Boolean(programChooser(device));
 
 /**
- * What the customer presses to say a device may run right now.
+ * The device types that need somebody to say they may run.
  *
  * A dishwasher is the case that makes this necessary: it can be switched on at
  * any moment the sun is out, and doing that to an empty one with its door open
  * is worse than not steering at all. Only whoever is standing in the kitchen
  * knows, so only they can say so.
+ *
+ * A charger deliberately is not on this list. Plugging the cable in is the
+ * permission: nobody connects a car they do not want charged, and a charger
+ * with no cable in it cannot start whatever anybody says. Asking for a second
+ * yes on the dashboard was a step that only ever cost a walk to the phone.
  */
+export const RELEASE_TYPES = ["vaatwasser", "wasmachine", "droger"];
+
+/** Whether this device waits for the customer before the coach may start it. */
+export const needsRelease = (device) => RELEASE_TYPES.includes(device?.type);
+
+/** What the customer presses to say a device may run right now. */
 export function releaseCopy(device) {
   switch (device?.type) {
     case "vaatwasser":
@@ -509,11 +520,6 @@ export function releaseCopy(device) {
       return {
         label: "Gevuld en dicht",
         hint: "Zet dit aan als de droger gevuld is en de deur dicht is.",
-      };
-    case "laadpaal":
-      return {
-        label: "Mag laden",
-        hint: "Zet dit aan als de auto eraan hangt en opgeladen mag worden.",
       };
     default:
       return {
@@ -613,11 +619,10 @@ export function deviceLabels(devices) {
 /**
  * Power above which a device counts as running.
  *
- * Standby draw is real -- a dishwasher sitting idle still reports a few watts --
- * so a bare "> 0" would show every device as active forever and the two bubbles
- * would never mean anything. But it is small: appliances idle at half a watt to
- * about five, and a dishwasher filling or draining sits in the low tens. At 20
- * that phase was invisible, which reads as a broken sensor rather than as a
- * quiet one.
+ * Standby draw is real, so a bare "> 0" would show every device as active
+ * forever and the bubbles would stop meaning anything. But the line has to sit
+ * under the smallest thing worth seeing, and that is smaller than it sounds: a
+ * tablet charger doing its job draws about five watts. Three leaves standby out
+ * and lets everything that is actually running in.
  */
-export const ACTIVE_WATTS = 10;
+export const ACTIVE_WATTS = 3;

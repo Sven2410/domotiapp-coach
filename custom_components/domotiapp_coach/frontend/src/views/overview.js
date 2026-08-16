@@ -19,6 +19,7 @@ import {
   deviceCommands,
   deviceLabel,
   deviceLabelMap,
+  needsRelease,
   programChooser,
   releaseCopy,
   typeMeta,
@@ -451,13 +452,25 @@ class DacViewOverview extends DacElement {
     @media (pointer: coarse) { .cmd-pick select { font-size: 16px; } }
     @supports (-webkit-touch-callout: none) { .cmd-pick select { font-size: 16px; } }
 
-    /* The price chart needs the room: 48 bars in a 430px sheet is a comb. */
+    /* The price chart needs the room: 48 bars in a 430px sheet is a comb.
+       On a phone it must hand that width back, because a sheet there is not a
+       floating card but a page sliding up from the bottom edge. Being more
+       specific than the shared rule, this one also won inside its media query,
+       and the sheet came out narrow and stuck against the left edge -- which is
+       what a customer sees as "the card is not in the middle". */
     dialog.sheet.wide { width: min(760px, calc(100vw - 24px)); }
+    @media (max-width: 560px) {
+      dialog.sheet.wide { width: 100vw; }
+    }
 
     /* ---- arranging the overview ----
        The whole mode is off to one side of normal use: a quiet link under the
        last card, and while it is on the cards themselves grow a handle. */
     .arrange-link {
+      /* Behind every card. The cards are ordered from 1 upwards, and anything
+         without an order of its own sits at 0 -- which put this link above the
+         coach card instead of under the last one. */
+      order: 100;
       align-self: center;
       margin-top: 4px;
       padding: 9px 16px;
@@ -725,7 +738,7 @@ class DacViewOverview extends DacElement {
           <button type="button" class="primary" id="arrange-done">Klaar</button>
         </div>
 
-        <dialog class="sheet" id="manual" aria-labelledby="manual-title">
+        <dialog class="sheet" id="manual" tabindex="-1" aria-labelledby="manual-title">
           <div class="sheet-head">
             <div>
               <div class="eyebrow">Handmatige besturing</div>
@@ -743,7 +756,7 @@ class DacViewOverview extends DacElement {
           <p class="sheet-status" id="manual-status" role="status" aria-live="polite"></p>
         </dialog>
 
-        <dialog class="sheet wide" id="prices" aria-labelledby="prices-title">
+        <dialog class="sheet wide" id="prices" tabindex="-1" aria-labelledby="prices-title">
           <div class="sheet-head">
             <div>
               <div class="eyebrow">Dynamisch tarief</div>
@@ -1228,7 +1241,11 @@ class DacViewOverview extends DacElement {
    * dialog that is still closed measures zero.
    */
   openPrices_() {
-    this.$("#prices").showModal();
+    const sheet = this.$("#prices");
+    sheet.showModal();
+    // Away from the close button, which is what a dialog focuses by default
+    // and what iOS then rings in blue.
+    sheet.focus();
     this.drawPrices_();
   }
 
@@ -1453,11 +1470,16 @@ class DacViewOverview extends DacElement {
         })
       );
 
+      // Only where somebody has to say so. A charger is released by plugging
+      // the cable in, and asking again on the dashboard added a step without
+      // adding a decision.
+      const asks = needsRelease(device);
       const button = this.$(`[data-release="${slot}"]`);
+      button.hidden = !asks;
       button.setAttribute("aria-pressed", String(on));
       this.$(`[data-mark="${slot}"]`).innerHTML = on ? icons.check : "";
       this.$(`[data-release-text="${slot}"]`).textContent = on ? "Vrijgegeven" : copy.label;
-      this.$(`[data-hint="${slot}"]`).textContent = on ? "" : copy.hint;
+      this.$(`[data-hint="${slot}"]`).textContent = asks ? (on ? "" : copy.hint) : "";
 
       // Only where there is something to send to: a brand that takes commands,
       // and the Home Assistant device to send them to.
@@ -1466,8 +1488,10 @@ class DacViewOverview extends DacElement {
       const name = this.$(`[data-tab-name="${slot}"]`);
       if (name) {
         name.textContent = this.labelFor_(device);
-        this.$(`[data-tab-dot="${slot}"]`).classList.toggle("on", on);
-        this.$(`[data-tab-state="${slot}"]`).textContent = on ? " (vrijgegeven)" : "";
+        // The dot says "released", so it only means anything on the devices
+        // that are waiting for that.
+        this.$(`[data-tab-dot="${slot}"]`).classList.toggle("on", asks && on);
+        this.$(`[data-tab-state="${slot}"]`).textContent = asks && on ? " (vrijgegeven)" : "";
       }
     });
 
@@ -1590,7 +1614,9 @@ class DacViewOverview extends DacElement {
       );
     }
 
-    this.$("#manual").showModal();
+    const sheet = this.$("#manual");
+    sheet.showModal();
+    sheet.focus();
   }
 
   /**

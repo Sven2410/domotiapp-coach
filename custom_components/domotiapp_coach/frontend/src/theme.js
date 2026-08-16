@@ -139,6 +139,9 @@ export const sheetCss = /* css */ `
   dialog.sheet {
     width: min(430px, calc(100vw - 24px));
     max-width: none;
+    /* Spelled out rather than left to the browser's own dialog styling, so
+       that a sheet which sets its own width still ends up in the middle. */
+    margin: auto;
     padding: 20px 20px 18px;
     border: 1px solid var(--dac-border-hi);
     border-radius: var(--dac-radius);
@@ -147,6 +150,13 @@ export const sheetCss = /* css */ `
     box-shadow: 0 30px 70px rgba(0,0,0,0.55);
   }
   dialog.sheet::backdrop { background: rgba(0,0,0,0.58); }
+  /* A dialog hands focus to the first thing in it, which is the close button,
+     and iOS then draws a blue ring around it the moment the sheet opens. The
+     sheet itself takes the focus instead: screen readers still land inside it,
+     and nothing is ringed that nobody asked for. */
+  dialog.sheet:focus { outline: none; }
+  .sheet-close:focus { outline: none; }
+  .sheet-close:focus-visible { border-color: var(--dac-accent-hi); color: var(--dac-ink); }
 
   .sheet-head { display: flex; align-items: flex-start; gap: 12px; }
   .sheet-head h3 { margin: 2px 0 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }

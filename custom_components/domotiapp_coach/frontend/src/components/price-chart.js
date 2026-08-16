@@ -409,9 +409,46 @@ class DacPriceChart extends DacElement {
       hit.addEventListener("pointerenter", () => this.pick_(index));
       hit.addEventListener("pointerdown", () => this.pick_(index));
     }
-    // Leaving the chart puts it back on the interval that is running, so it
-    // never sits pointing at an hour nobody asked about.
-    svg.addEventListener("pointerleave", () => this.pick_(nowIndex));
+
+    // Only a mouse puts the read-out back on the current interval when it
+    // leaves. A finger fires pointerleave the instant it lifts off, which threw
+    // away the very price the customer had just tapped on -- the tap looked
+    // like it did nothing at all. A tapped bar therefore stays selected until
+    // another one is tapped.
+    svg.addEventListener("pointerleave", (event) => {
+      if (event.pointerType === "mouse") this.pick_(nowIndex);
+    });
+
+    // Slide along the chart to read it off. On a phone a bar is about ten
+    // pixels wide, which is a third of what a fingertip can reliably hit, so
+    // hitting one exactly must not be the only way in: put a finger down
+    // anywhere and drag, and the read-out follows.
+    const at = (event) => {
+      const box = svg.getBoundingClientRect();
+      const x = ((event.clientX - box.left) / box.width) * W;
+      return Math.min(rows.length - 1, Math.max(0, Math.floor(x / colW)));
+    };
+
+    svg.addEventListener("pointerdown", (event) => {
+      // Reading comes first and capturing second, inside a try: capture throws
+      // for a pointer the browser no longer considers active, and doing it the
+      // other way round meant one failed call swallowed the tap entirely.
+      this.scrubbing_ = true;
+      this.pick_(at(event));
+      try {
+        svg.setPointerCapture(event.pointerId);
+      } catch {
+        // Without capture the chart still follows a finger that stays on it.
+      }
+    });
+    svg.addEventListener("pointermove", (event) => {
+      if (this.scrubbing_) this.pick_(at(event));
+    });
+    for (const done of ["pointerup", "pointercancel"]) {
+      svg.addEventListener(done, () => {
+        this.scrubbing_ = false;
+      });
+    }
   }
 
   /** Show one interval in the read-out and outline its bar. */

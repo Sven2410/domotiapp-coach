@@ -64,7 +64,15 @@ class DomotiAppCoachPanel extends DacElement {
 
     main { display: block; }
 
-    .enter { animation: enter 320ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+    /* Fill mode "backwards" rather than "both", and that is not a detail. With
+       "both" the animation leaves its end state behind as an identity
+       transform, and any transform -- identity included -- makes the element
+       the containing block for everything fixed or in the top layer inside it.
+       That is what put the price sheet against the left edge of the screen
+       instead of in the middle of it. With "backwards" only the starting state
+       is held, before the animation runs, and afterwards the element carries no
+       transform at all. */
+    .enter { animation: enter 320ms cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
     @keyframes enter {
       from { opacity: 0; transform: translateY(10px); }
       to   { opacity: 1; transform: none; }
@@ -218,12 +226,14 @@ class DomotiAppCoachPanel extends DacElement {
     void view.offsetWidth;
     view.classList.add("enter");
 
-    // The class has to come off once it has played. A filling animation leaves
-    // an identity `transform` behind rather than `none`, and any transform --
-    // identity included -- makes the element a containing block for `position:
-    // fixed`. That silently pins a save bar to the bottom of the document
-    // instead of the bottom of the screen.
-    view.addEventListener("animationend", () => view.classList.remove("enter"), { once: true });
+    // The class comes off once it has played, on a timer rather than on the
+    // animation's own event. `animationend` never fires when the animation does
+    // not run -- a hidden tab pauses it, and with animations turned down in the
+    // operating system it is over before it starts -- and the class would then
+    // sit there for good. The css no longer depends on this being removed; it
+    // is housekeeping, not the fix.
+    clearTimeout(this.enterTimer_);
+    this.enterTimer_ = setTimeout(() => view.classList.remove("enter"), 400);
 
     // Views are cached, so without this a section opened from halfway down the
     // previous one starts halfway down itself.

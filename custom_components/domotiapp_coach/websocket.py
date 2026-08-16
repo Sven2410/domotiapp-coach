@@ -112,6 +112,11 @@ _SCHEDULE = _schema(
         vol.Required("device"): str,
         vol.Optional("enabled", default=False): bool,
         vol.Optional("per_day", default=False): bool,
+        # Who goes first when two appliances want the same room on the
+        # connection. Not a schedule, but it belongs with one: both answer
+        # "when may this run", and splitting them over two screens would mean
+        # setting up one appliance in two places.
+        vol.Optional("priority", default="mid"): vol.In(["low", "mid", "high"]),
         vol.Optional("window"): _schema(dict(_WINDOW)),
         vol.Optional("days", default=list): vol.All([_PLAN_DAY], vol.Length(max=7)),
     }
