@@ -99,6 +99,44 @@ PRICE_INTERVAL_QUARTER: Final = "quarter"
 # 3 x 25 A -> 17250 W, 1 x 25 A -> 5750 W.
 GRID_VOLTAGE: Final = 230
 
+# --- How much the coach may do on its own ----------------------------------
+# Not a strategy but a level of trust, and they are different questions: a
+# strategy says what to aim for, this says how far the coach may go on its own.
+# "Voorstellen" is the one that matters most in practice -- it is what lets
+# somebody watch the sums be right for a week before letting go.
+LEVEL_READ: Final = "read"
+LEVEL_ADVISE: Final = "advise"
+LEVEL_PROPOSE: Final = "propose"
+LEVEL_STEER: Final = "steer"
+LEVELS: Final = [LEVEL_READ, LEVEL_ADVISE, LEVEL_PROPOSE, LEVEL_STEER]
+
+# What the coach optimises for once it is allowed to act.
+GOAL_COST: Final = "cost"
+GOAL_SOLAR: Final = "solar"
+GOALS: Final = [GOAL_COST, GOAL_SOLAR]
+
+# Fired after every round, so an open panel can show what was decided without
+# writing anything to disk a minute at a time.
+EVENT_DECISION: Final = f"{DOMAIN}_decision"
+
+# --- Steering a charging point ---------------------------------------------
+# How each brand is told what to do. The dynamic limit is the safe way in: it
+# sits under the charger's own maximum, so a mistake there cannot ask for more
+# than the installation allows. The words for start and stop differ per brand
+# and even per firmware, so what the customer typed in wins over these.
+CHARGER_CONTROL: Final = {
+    "easee": {
+        "limit_service": ("easee", "set_charger_dynamic_limit"),
+        "limit_field": "current",
+        # Nought means "until further notice". A limit that expires would fall
+        # back to the charger's own maximum, which is the wrong way to fail.
+        "limit_extra": {"time_to_live": 0},
+        "command_service": ("easee", "action_command"),
+        "command_field": "action_command",
+        "words": {"start": "start", "stop": "stop", "pause": "pause", "resume": "resume"},
+    },
+}
+
 # --- Default settings ------------------------------------------------------
 # The panel falls back to simulated values while `sources` is still empty, so a
 # fresh install shows a working dashboard before any sensor is mapped.
@@ -197,6 +235,16 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         },
     },
     "strategy": {
+        # How far the coach may go on its own. It starts at "propose": it works
+        # out what it would do and shows it, and only acts once somebody agrees.
+        # Nobody should have to trust an automation they have never seen be
+        # right.
+        "level": LEVEL_PROPOSE,
+        # What it aims for when it does act. Lowest cost reckons everything in
+        # euros, which by itself already prefers using your own sun over
+        # exporting it; "solar" insists on the sun even when buying would be
+        # cheaper.
+        "goal": GOAL_COST,
         # Warn when the connection is being pushed towards its limit. The
         # interval matters as much as the threshold: load swings across the
         # trigger point constantly, so without it one busy hour would send a

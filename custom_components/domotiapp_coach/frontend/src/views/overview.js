@@ -454,6 +454,38 @@ class DacViewOverview extends DacElement {
     .cmd.care .icon { color: var(--dac-warn); }
     .cmd-note { grid-column: 1 / -1; margin: -2px 0 0; font-size: 12px; line-height: 1.45; color: var(--dac-ink-3); }
 
+    /* Wat de coach doet of van plan is. Boven de knoppen, want het is het
+       antwoord op de vraag waarmee iemand naar deze kaart komt. */
+    .coach-says {
+      flex: 1 1 100%;
+      margin: 14px 0 0;
+      padding: 12px 14px;
+      border-radius: var(--dac-radius-sm);
+      border: 1px solid rgba(25,143,217,0.35);
+      background: var(--dac-accent-soft);
+      display: grid;
+      gap: 6px;
+    }
+    .coach-says[hidden] { display: none; }
+    .says-head { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; color: var(--dac-ink); }
+    .says-mark { line-height: 0; margin-top: 2px; color: var(--dac-accent-hi); flex: 0 0 auto; }
+    .says-mark .icon { width: 16px; height: 16px; }
+    .says-plan { margin: 0 0 0 25px; font-size: 12.5px; line-height: 1.5; color: var(--dac-ink-2); }
+    .says-plan:empty { display: none; }
+    .says-yes {
+      justify-self: start;
+      margin: 4px 0 0 25px;
+      padding: 9px 18px;
+      border-radius: var(--dac-radius-pill);
+      border: 0;
+      background: var(--dac-accent);
+      color: #fff;
+      font: inherit; font-size: 13.5px; font-weight: 600;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .says-yes[hidden] { display: none; }
+
     /* De autokeuze staat boven de knoppen: eerst zeggen wat er hangt, dan pas
        wat ermee moet gebeuren. */
     /* Op een eigen regel boven de knoppen: eerst zeggen welke auto er hangt,
@@ -1072,6 +1104,7 @@ class DacViewOverview extends DacElement {
     // swapped in and out of the panel, and starting them once meant the
     // dashboard stopped updating the first time it was navigated away from.
     this.listen_();
+    this.followCoach_();
     this.tick_();
     clearInterval(this.timer_);
     this.timer_ = setInterval(() => this.tick_(), REFRESH_MS);
@@ -1263,6 +1296,84 @@ class DacViewOverview extends DacElement {
 
     line.hidden = false;
     line.replaceChildren(mark, text);
+  }
+
+
+  /**
+   * Volgen wat de coach besluit.
+   *
+   * Twee wegen naar hetzelfde: eenmalig ophalen wat er al besloten is, en
+   * daarna meeluisteren op de gebeurtenis die na elke ronde afgaat. Zonder dat
+   * eerste zou een net geopend dashboard tot een minuut lang niets te zeggen
+   * hebben, en zonder dat tweede zou het daarna nooit meer bijwerken.
+   */
+  async followCoach_() {
+    if (!this.hass || this.coachWired_) return;
+    this.coachWired_ = true;
+
+    try {
+      this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
+      if (this.rendered_) this.updateSteerable_(this.lastDevices_ ?? []);
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de stand van de coach niet ophalen", error);
+    }
+
+    try {
+      this.coachOff_ = await this.hass.connection.subscribeEvents((event) => {
+        const data = event?.data;
+        if (!data?.device) return;
+        this.coach_ = { ...(this.coach_ ?? {}), [data.device]: data };
+        if (this.rendered_) this.updateSteerable_(this.lastDevices_ ?? []);
+      }, "domotiapp_coach_decision");
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de coach niet volgen", error);
+    }
+  }
+
+  /** Ja zeggen tegen wat de coach voorstelt, voor deze laadbeurt. */
+  async approve_(slot) {
+    const device = this.steerDevices_?.[slot];
+    if (!device || !this.hass) return;
+
+    try {
+      this.coach_ = await this.hass.callWS({
+        type: "domotiapp_coach/coach/approve",
+        device_id: device.id,
+        approve: true,
+      });
+      this.updateSteerable_(this.lastDevices_ ?? []);
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon het akkoord niet doorgeven", error);
+    }
+  }
+
+  /**
+   * Wat de coach van dit apparaat zegt, op zijn kaart.
+   *
+   * Alleen waar hij ook echt iets te zeggen heeft. Bij "alleen uitlezen" staat
+   * er niets, want dan is er niets besloten; bij "voorstellen" staat er een
+   * knop, want dan wacht hij op je.
+   */
+  paintCoach_(slot, device) {
+    const blok = this.$(`[data-coach="${slot}"]`);
+    const besluit = this.coach_?.[device.id];
+
+    if (!besluit || besluit.level === "read") {
+      blok.hidden = true;
+      return;
+    }
+
+    blok.hidden = false;
+    this.$(`[data-coach-mark="${slot}"]`).innerHTML = besluit.charge
+      ? icons.spark
+      : icons.compass;
+    this.$(`[data-coach-reason="${slot}"]`).textContent = besluit.reason ?? "";
+    this.$(`[data-coach-plan="${slot}"]`).textContent = besluit.plan ?? "";
+
+    const knop = this.$(`[data-coach-yes="${slot}"]`);
+    const vraagt = besluit.level === "propose" && !besluit.approved && besluit.charge;
+    knop.hidden = !vraagt;
+    knop.textContent = vraagt ? "Ja, doe maar" : "";
   }
 
   /** Which car this charging point is set to, if any. */
@@ -1519,6 +1630,14 @@ class DacViewOverview extends DacElement {
           </div>
           <div class="steer-rows" data-rows="${slot}"></div>
           <div class="steer-actions">
+            <div class="coach-says" data-coach="${slot}" hidden>
+              <div class="says-head">
+                <span class="says-mark" data-coach-mark="${slot}"></span>
+                <span data-coach-reason="${slot}"></span>
+              </div>
+              <p class="says-plan" data-coach-plan="${slot}"></p>
+              <button type="button" class="says-yes" data-coach-yes="${slot}" hidden></button>
+            </div>
             <div class="car-pick" data-car-pick="${slot}" hidden>
               <label for="car-${slot}">Welke auto hangt eraan?</label>
               <select id="car-${slot}" data-car-select="${slot}"></select>
@@ -1536,6 +1655,9 @@ class DacViewOverview extends DacElement {
       )
       .join("");
 
+    for (const button of this.$$("[data-coach-yes]")) {
+      button.addEventListener("click", () => this.approve_(Number(button.dataset.coachYes)));
+    }
     for (const select of this.$$("[data-car-select]")) {
       select.addEventListener("change", () =>
         this.chooseCar_(Number(select.dataset.carSelect), select.value)
@@ -1555,6 +1677,7 @@ class DacViewOverview extends DacElement {
 
   fillSteerable_(list) {
     this.steerDevices_ = list;
+    this.lastDevices_ = list;
     const ready = new Set(this.settings_?.ready_devices ?? []);
 
     list.forEach((device, slot) => {
@@ -1579,6 +1702,8 @@ class DacViewOverview extends DacElement {
           return line;
         })
       );
+
+      this.paintCoach_(slot, device);
 
       // Welke auto er hangt. De coach rekent met de accu en het aantal fasen
       // van die auto, en een gast staat er altijd bij zonder instellen.

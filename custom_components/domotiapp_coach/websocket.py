@@ -17,6 +17,8 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import (
     ALL_BRANDS,
+    GOALS,
+    LEVELS,
     CONTRACT_DYNAMIC,
     CONTRACT_FIXED,
     DEVICE_TYPES,
@@ -154,6 +156,8 @@ _SCHEDULE = _schema(
 
 _STRATEGY = _schema(
     {
+        vol.Optional("level"): vol.In(LEVELS),
+        vol.Optional("goal"): vol.In(GOALS),
         vol.Optional("load_alert"): _schema(
             {
                 vol.Optional("enabled"): bool,
@@ -407,6 +411,51 @@ async def async_set_active_car(
     connection.send_result(msg["id"], settings)
 
 
+@websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/coach/state"})
+@callback
+def async_coach_state(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """What the coach decided the last time it looked.
+
+    The panel follows along on the event bus after this, but a dashboard that
+    was just opened would otherwise stare at nothing for up to a minute.
+    """
+    from .coach import async_get_coach
+
+    connection.send_result(msg["id"], async_get_coach(hass).state)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/coach/approve",
+        vol.Required("device_id"): str,
+        vol.Required("approve"): bool,
+    }
+)
+@callback
+def async_coach_approve(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Say yes to what the coach proposed, for this session.
+
+    Not admin-only: agreeing that the car may charge tonight is a decision of
+    whoever is standing in the driveway, exactly like releasing a dishwasher.
+    """
+    from .coach import async_get_coach
+
+    coach = async_get_coach(hass)
+    if msg["approve"]:
+        coach.async_approve(msg["device_id"])
+    else:
+        coach.async_withdraw(msg["device_id"])
+    connection.send_result(msg["id"], coach.state)
+
+
 @callback
 def async_register(hass: HomeAssistant) -> None:
     """Register the panel's websocket commands."""
@@ -415,3 +464,5 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_set_device_ready)
     websocket_api.async_register_command(hass, async_set_strategy)
     websocket_api.async_register_command(hass, async_set_active_car)
+    websocket_api.async_register_command(hass, async_coach_state)
+    websocket_api.async_register_command(hass, async_coach_approve)
