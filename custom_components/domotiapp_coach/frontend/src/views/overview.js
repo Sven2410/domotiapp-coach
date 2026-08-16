@@ -25,7 +25,7 @@ import {
   typeMeta,
   valueLabel,
 } from "../devices.js";
-import { LiveSource, meterReadings, priceForecast } from "../data-source.js";
+import { LiveSource, meterReadings, priceForecast, solarForecast } from "../data-source.js";
 import {
   OVERVIEW_CARDS,
   defaultLayout,
@@ -33,7 +33,7 @@ import {
   resetLayout,
   saveLayout,
 } from "../layout.js";
-import { level, levelTone, percent, power, powerText, price as fmtPrice } from "../format.js";
+import { clock, level, levelTone, percent, power, powerText, price as fmtPrice } from "../format.js";
 import { sheetCss } from "../theme.js";
 import "../components/stat-tile.js";
 import "../components/energy-flow.js";
@@ -198,6 +198,23 @@ class DacViewOverview extends DacElement {
       transition: color 500ms ease, background 500ms ease;
       white-space: nowrap;
     }
+    /* De verwachting staat apart van het advies: het advies gaat over nu, dit
+       gaat over straks, en door elkaar heen lezen ze als één zin die zichzelf
+       tegenspreekt. */
+    .coach-sun {
+      margin: 12px 0 0;
+      padding-top: 12px;
+      border-top: 1px solid var(--dac-border);
+      font-size: 13.5px;
+      line-height: 1.55;
+      color: var(--dac-ink-3);
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+    }
+    .coach-sun[hidden] { display: none; }
+    .coach-sun .icon { width: 16px; height: 16px; flex: 0 0 auto; color: var(--dac-solar); margin-top: 2px; }
+
     .coach h1 {
       margin: 16px 0 0;
       font-size: clamp(22px, 3.2vw, 30px);
@@ -630,7 +647,24 @@ class DacViewOverview extends DacElement {
         gap: 14px;
       }
       .coach { padding: 18px 16px 20px; }
-      .coach h1 { font-size: 21px; margin-top: 14px; }
+      /* De verwachting staat apart van het advies: het advies gaat over nu, dit
+       gaat over straks, en door elkaar heen lezen ze als één zin die zichzelf
+       tegenspreekt. */
+    .coach-sun {
+      margin: 12px 0 0;
+      padding-top: 12px;
+      border-top: 1px solid var(--dac-border);
+      font-size: 13.5px;
+      line-height: 1.55;
+      color: var(--dac-ink-3);
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+    }
+    .coach-sun[hidden] { display: none; }
+    .coach-sun .icon { width: 16px; height: 16px; flex: 0 0 auto; color: var(--dac-solar); margin-top: 2px; }
+
+    .coach h1 { font-size: 21px; margin-top: 14px; }
       .coach p { font-size: 14px; }
       .panel { padding: 16px 14px 18px; }
       .tiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
@@ -676,6 +710,7 @@ class DacViewOverview extends DacElement {
           </div>
           <h1 id="coach-title">Je woning draait rustig</h1>
           <p id="coach-body"></p>
+          <p class="coach-sun" id="coach-sun" hidden></p>
         </article>
 
         <section class="tiles" aria-label="Live meetwaarden" data-card="tiles">
@@ -1153,12 +1188,54 @@ class DacViewOverview extends DacElement {
       series: this.source_.series("load"),
     });
 
+    this.updateSun_();
     this.updateMeters_();
     this.updatePhases_(r, alertAt);
     this.updateSteerable_(r.devices);
     this.flow_.update(r);
     this.updateLegend_();
     this.updateCoach_(advise(r, thresholds, configured, alertAt));
+  }
+
+  /**
+   * What the sun is expected to bring, under the advice.
+   *
+   * Its own line rather than part of the advice, because it answers a different
+   * question: the advice is about now, this is about later, and read as one
+   * paragraph they contradict each other on any afternoon with a cloud in it.
+   */
+  updateSun_() {
+    const line = this.$("#coach-sun");
+    const sun = solarForecast(this.feed_, this.settings_?.sources);
+    if (!sun.has) {
+      line.hidden = true;
+      return;
+    }
+
+    const parts = [];
+    if (sun.remainingToday !== null) {
+      parts.push(
+        sun.remainingToday < 0.2
+          ? "Vandaag komt er vrijwel niets meer bij"
+          : `Vandaag komt er nog ongeveer ${nl(sun.remainingToday, 1)} kWh bij`
+      );
+    }
+    // Only worth naming while it is still ahead: at eight in the evening
+    // "the peak is at 13:00" is a fact about this afternoon.
+    if (sun.peakToday && sun.peakToday > new Date()) {
+      parts.push(`met de meeste zon rond ${clock(sun.peakToday)}`);
+    }
+    if (sun.tomorrow !== null) {
+      parts.push(`morgen ongeveer ${nl(sun.tomorrow, 1)} kWh`);
+    }
+
+    const mark = document.createElement("span");
+    mark.innerHTML = icons.sun;
+    const text = document.createElement("span");
+    text.textContent = `${parts.join(", ")}.`;
+
+    line.hidden = false;
+    line.replaceChildren(mark, text);
   }
 
   /**

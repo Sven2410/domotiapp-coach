@@ -131,6 +131,16 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             "l2": {"current": "", "power": "", "voltage": ""},
             "l3": {"current": "", "power": "", "voltage": ""},
         },
+        # What the sun is expected to bring. Not a measurement but a forecast,
+        # and it is used for a different question than the meters are: not "what
+        # is happening" but "is it worth waiting". Forecast.Solar and Solcast
+        # both publish this as plain sensors, so it is entity fields rather than
+        # an integration this panel talks to itself.
+        "solar_forecast": {
+            "remaining_today": "",
+            "tomorrow": "",
+            "peak_today": "",
+        },
         # The meter readings themselves: the four counters a Dutch smart meter
         # keeps for electricity, plus gas. These are totals rather than a rate,
         # so nothing on the dashboard computes with them -- they are what a

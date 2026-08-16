@@ -98,6 +98,28 @@ class DacViewSettings extends DacEditorElement {
         </section>
 
         <section class="card">
+          <h2>${icons.sun} Zonverwachting</h2>
+          <p class="hint">Wat er vandaag en morgen aan zon verwacht wordt. Daarmee kan de coach besluiten of het de moeite is om te wachten, of dat hij beter vannacht op de goedkope uren kan draaien. Integraties als Forecast.Solar en Solcast leveren deze waarden als sensoren; vul in wat je hebt.</p>
+          <div class="fields">
+            <div class="two">
+              <div class="row">
+                <label>Verwacht vandaag nog</label>
+                <dac-entity-picker data-forecast="remaining_today"></dac-entity-picker>
+              </div>
+              <div class="row">
+                <label>Verwacht morgen</label>
+                <dac-entity-picker data-forecast="tomorrow"></dac-entity-picker>
+              </div>
+            </div>
+            <div class="row">
+              <label>Tijdstip hoogste opwek vandaag</label>
+              <dac-entity-picker data-forecast="peak_today"></dac-entity-picker>
+              <span class="sub">Optioneel. Hiermee kan de coach zeggen rond welk uur het overschot het grootst is.</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
           <h2>${icons.plug} Fasen</h2>
           <p class="hint">Heeft de meter van deze klant losse waarden per fase, vul ze dan hier in. Daarmee wordt de belastbaarheid per fase berekend in plaats van op het totaal. Een zekering gaat er immers uit op de zwaarste fase en niet op het gemiddelde.</p>
           <div class="fields">
@@ -258,6 +280,16 @@ class DacViewSettings extends DacEditorElement {
     // Meter readings are counters in kWh or m3, so the picker looks for energy
     // rather than power: a customer searching "verbruik" otherwise gets the
     // watts they already mapped above.
+    for (const picker of this.$$("dac-entity-picker[data-forecast]")) {
+      picker.filter = "all";
+      picker.placeholder =
+        picker.dataset.forecast === "peak_today" ? "Zoek een tijdstip…" : "Zoek een verwachting in kWh…";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        (this.draft_.sources.solar_forecast ??= {})[picker.dataset.forecast] = ev.detail.value;
+        this.syncSaveBar_();
+      });
+    }
+
     for (const picker of this.$$("dac-entity-picker[data-meter]")) {
       picker.filter = "all";
       picker.placeholder =
@@ -323,6 +355,19 @@ class DacViewSettings extends DacEditorElement {
     this.$("#phases-enabled").checked = Boolean(d.sources.phases_enabled);
     this.$("#phases-overview").checked = Boolean(d.sources.phases_on_overview);
 
+    for (const picker of this.$$("dac-entity-picker[data-forecast]")) {
+      picker.filter = "all";
+      picker.placeholder =
+        picker.dataset.forecast === "peak_today" ? "Zoek een tijdstip…" : "Zoek een verwachting in kWh…";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        (this.draft_.sources.solar_forecast ??= {})[picker.dataset.forecast] = ev.detail.value;
+        this.syncSaveBar_();
+      });
+    }
+
+    for (const picker of this.$$("dac-entity-picker[data-forecast]")) {
+      picker.value = d.sources.solar_forecast?.[picker.dataset.forecast] ?? "";
+    }
     for (const picker of this.$$("dac-entity-picker[data-meter]")) {
       picker.value = d.sources.meters?.[picker.dataset.meter] ?? "";
     }
