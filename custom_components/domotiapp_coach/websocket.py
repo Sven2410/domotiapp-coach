@@ -168,6 +168,7 @@ _SETTINGS = _schema(
                 ),
                 vol.Optional("meters"): _schema(
                     {
+                        vol.Optional("solar_total"): _ENTITY,
                         vol.Optional("import_low"): _ENTITY,
                         vol.Optional("import_high"): _ENTITY,
                         vol.Optional("export_low"): _ENTITY,
