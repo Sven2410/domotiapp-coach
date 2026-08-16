@@ -38,6 +38,19 @@ MIN_AMPS = 6
 # thing that trips it.
 FUSE_MARGIN_AMPS = 2.0
 
+# The margin to keep when the installation has a load balancer of its own, such
+# as an Easee Equalizer. Such a box guards the very same fuse, from the hardware
+# side, and it cannot be switched off or argued with. Two regulators on one fuse
+# is only a problem when they both act at the same moment, so the coach takes
+# the wider margin and steps back first. The balancer then stays what it was
+# meant to be: a net that never has to catch anything.
+BALANCER_MARGIN_AMPS = 3.0
+
+# A charger that has just been told to charge takes a moment to get there, and
+# the car ramps up as well. Before this has passed, what is measured says
+# nothing about what the session will do.
+RAMP_MINUTES = 3
+
 # Mains voltage per phase, the same figure the rest of the panel reckons with.
 VOLTS = 230
 
@@ -77,6 +90,9 @@ class Grid:
     # Subtracted before working out what is left, or the coach would take its
     # own charging for household load and keep turning itself down.
     charger_amps: float = 0.0
+    # How much room to leave under the fuse. Wider when a load balancer guards
+    # the same fuse, so the coach is the one that gives way.
+    margin_amps: float = FUSE_MARGIN_AMPS
 
 
 @dataclass
@@ -103,6 +119,16 @@ class Charger:
     charging: bool = False
     # When the current session started, to honour the minimum run.
     started_at: datetime | None = None
+    # What is really flowing. Not the same thing as what was asked for: a load
+    # balancer on the connection, or the car itself, can hold the charger below
+    # the limit the coach set.
+    actual_amps: float = 0.0
+    # A load balancer has put the session on hold. Asking again changes nothing;
+    # only waiting does.
+    paused_by_balancer: bool = False
+    # Why the charger is not drawing what it could, in the brand's own wording.
+    # Empty when the installation has no sensor for it.
+    no_current_reason: str = ""
 
 
 @dataclass
@@ -157,9 +183,54 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
 
     if grid.phase_amps:
         household = max(grid.phase_amps) - grid.charger_amps
-        limits.append(grid.fuse_amps - max(0.0, household) - FUSE_MARGIN_AMPS)
+        limits.append(grid.fuse_amps - max(0.0, household) - grid.margin_amps)
 
     return int(max(0, min(limits)))
+
+
+# The words the Easee reports when something other than the coach is holding the
+# charger down. Kept as a set of the brand's own strings rather than translated,
+# because this is read from a sensor and never shown as it is.
+HELD_BACK_REASONS = frozenset(
+    {
+        "limited_by_equalizer",
+        "eq_too_low_current",
+        "limited_by_load_balancing",
+        "limited_by_circuit_dynamic_limit",
+        "limited_by_circuit_fuse",
+        "limited_by_circuit_max_limit",
+        "max_circuit_current_too_low",
+        "max_dynamic_circuit_current_too_low",
+        "awaiting_load_balancing",
+    }
+)
+
+
+def held_back(charger: Charger) -> bool:
+    """Whether something outside the coach is keeping this charger down."""
+    return charger.no_current_reason in HELD_BACK_REASONS
+
+
+def charging_pace(now: datetime, charger: Charger, wanted: int) -> int:
+    """What this charger is really going to draw, not what it was asked for.
+
+    Asking is not the same as getting. A load balancer on the connection holds
+    the charger under the limit the coach set, and a car that is nearly full
+    tapers off by itself. Either way the deadline sum goes wrong in the one
+    direction that matters: the coach believes it has hours in hand, waits for a
+    cheaper one, and the car is not full in the morning.
+
+    So once a session has settled, the measured current is what counts. During
+    the first few minutes it is not: everything is still ramping up and reading
+    that as the pace would have the coach charge far earlier than it needs to.
+    """
+    if not charger.charging or charger.started_at is None or charger.actual_amps <= 0:
+        return wanted
+    if now - charger.started_at < timedelta(minutes=RAMP_MINUTES):
+        return wanted
+    if charger.actual_amps >= wanted - STEP_AMPS:
+        return wanted
+    return max(MIN_AMPS, int(charger.actual_amps))
 
 
 def energy_needed_kwh(car: Car) -> float | None:
@@ -288,6 +359,58 @@ def decide(
     window: Window,
     goal: str = "cost",
 ) -> Decision:
+    """What to do with this charging point, and how to say it.
+
+    The rules are in `_decide`. What happens here is the last word about them:
+    a load balancer on the connection can overrule the coach without asking, and
+    when it does, the customer should read that rather than a plan that is not
+    being carried out.
+
+    Note what is *not* done here. The coach never withdraws its request when it
+    is being held back. It keeps asking, because the balancer works on the
+    lowest of all the limits and the moment it lets go, the request has to be
+    standing already. Lowering it would mean charging slowly for another minute
+    for no reason at all.
+    """
+    decision = _decide(now, prices, grid, car, charger, window, goal)
+
+    if not decision.charge:
+        return decision
+
+    if charger.paused_by_balancer:
+        return Decision(
+            True,
+            decision.amps,
+            "De lastbewaking van je aansluiting heeft het laden stilgelegd. "
+            "Zodra er ruimte is, gaat hij vanzelf verder.",
+            plan=decision.plan,
+            rule="balancer-paused",
+        )
+
+    if held_back(charger) and charger.charging and charger.actual_amps > 0:
+        held = int(charger.actual_amps)
+        if held < decision.amps - STEP_AMPS:
+            return Decision(
+                True,
+                decision.amps,
+                f"De lastbewaking houdt het laden op {held} A, want je aansluiting "
+                f"zit vol. De coach vraagt {decision.amps} A en pakt die zodra het kan.",
+                plan=decision.plan,
+                rule=f"{decision.rule}+held-back",
+            )
+
+    return decision
+
+
+def _decide(
+    now: datetime,
+    prices: list[dict],
+    grid: Grid,
+    car: Car,
+    charger: Charger,
+    window: Window,
+    goal: str = "cost",
+) -> Decision:
     """What to do with this charging point, this minute.
 
     The rules are tried in order and the first that fits wins, which is what
@@ -349,7 +472,10 @@ def decide(
         )
 
     # --- the deadline outranks everything ---------------------------------
-    needed = hours_needed(car, ceiling)
+    # Reckoned with what the charger really manages, not with what it is about
+    # to be asked for. Being held back by a load balancer makes charging take
+    # longer, and the only sound answer to that is to begin sooner.
+    needed = hours_needed(car, charging_pace(now, charger, ceiling))
     if window.enabled and end and needed is not None:
         slack = (end - now).total_seconds() / 3600 - needed
         if slack <= 0.25:

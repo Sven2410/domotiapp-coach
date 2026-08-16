@@ -31,6 +31,8 @@ from .const import (
     LEVEL_STEER,
 )
 from .planner import (
+    BALANCER_MARGIN_AMPS,
+    FUSE_MARGIN_AMPS,
     Car,
     Charger,
     Decision,
@@ -38,6 +40,7 @@ from .planner import (
     Window,
     amps_for,
     decide,
+    held_back,
     should_send,
 )
 from .storage import async_get_store
@@ -50,6 +53,14 @@ INTERVAL = timedelta(seconds=60)
 
 # How long to wait for the charger to confirm a new limit before starting.
 CONFIRM_SECONDS = 15
+
+# How often to prod a charging point that is not doing what was asked. Some of
+# the reasons it might not are outside the coach's reach altogether: a load
+# balancer holding the session, a car that has decided it is full, a brand with
+# its own idea of when a schedule applies. Repeating the command every minute
+# changes none of them and only fills a log, but never repeating it at all means
+# a car stands still all night because the decision happened not to change.
+NUDGE_INTERVAL = timedelta(minutes=5)
 
 
 def _number(hass: HomeAssistant, entity_id: str | None) -> float | None:
@@ -105,6 +116,8 @@ class ChargerCoach:
         # asking. Somebody who agreed to one charge did not agree to every
         # charge from now on.
         self._approved: set[str] = set()
+        # When a charging point that was not following was last prodded.
+        self._nudged: dict[str, datetime] = {}
 
     @callback
     def async_start(self) -> None:
@@ -181,15 +194,49 @@ class ChargerCoach:
 
         if not may_act:
             return
-        if not should_send(self._last.get(device_id), decision):
-            return
+
+        # The dead band holds only while the charging point is doing what it was
+        # asked. When it is not, the command has to go again, or a car stands
+        # still all night purely because the decision happened not to change:
+        # that is exactly what a load balancer letting go looks like from here.
+        # Prodding is on a timer of its own, because some of the reasons a
+        # charger does not follow cannot be argued with by asking twice.
+        following = decision.charge == charger.charging
+        if following:
+            self._nudged.pop(device_id, None)
+            if not should_send(self._last.get(device_id), decision):
+                return
+        elif charger.paused_by_balancer or held_back(charger):
+            # Not following, and saying why: something outside the coach is
+            # holding it. Ask again now and then, so a charger that quietly let
+            # go is picked back up, but not every minute. Repeating a command at
+            # a load balancer changes nothing and only fills its log.
+            if not self._nudge_due(device_id, now):
+                return
+        else:
+            # Not following and no reason given. That is the case where asking
+            # again is exactly the right thing, so do it on the next round: this
+            # is what a balancer letting go looks like from here, and a car that
+            # waits five minutes for it has waited four too many.
+            self._nudged.pop(device_id, None)
 
         if await self._apply(device, charger, decision):
             self._last[device_id] = decision
-            if decision.charge:
+            # A session that a balancer is holding has not begun, so it must not
+            # be stamped as begun: doing so would run the minimum out while
+            # nothing charges, and have the coach read a standstill as its pace.
+            if decision.charge and not charger.paused_by_balancer:
                 self._since.setdefault(device_id, now)
-            else:
+            elif not decision.charge:
                 self._since.pop(device_id, None)
+
+    def _nudge_due(self, device_id: str, now: datetime) -> bool:
+        """Whether it is time to prod a charging point that is not following."""
+        last = self._nudged.get(device_id)
+        if last is not None and now - last < NUDGE_INTERVAL:
+            return False
+        self._nudged[device_id] = now
+        return True
 
     def _prices(self, settings: dict[str, Any]) -> list[dict]:
         """The published price list, in the shape the planner wants.
@@ -272,6 +319,14 @@ class ChargerCoach:
             phase_amps=phases,
             fuse_amps=float(installation.get("fuse_amps") or 25),
             charger_amps=charger_amps,
+            # An installation with a balancer of its own guards the same fuse in
+            # hardware. The coach widens its margin so it is the one to give way
+            # and the two never reach for the same amp at the same second.
+            margin_amps=(
+                BALANCER_MARGIN_AMPS
+                if installation.get("load_balancer")
+                else FUSE_MARGIN_AMPS
+            ),
         )
 
         # --- the charging point ---
@@ -281,6 +336,9 @@ class ChargerCoach:
             connected=bool(status) and "disconnect" not in status,
             charging="charging" in status,
             started_at=self._since.get(device.get("id", "")),
+            actual_amps=charger_amps,
+            paused_by_balancer="equalizer" in status or "load_balancing" in status,
+            no_current_reason=_text(self.hass, entities.get("no_current_reason")),
         )
         # After a restart nothing is known about when this session began. Taking
         # it as "just now" only means waiting out the minimum run once.
@@ -394,6 +452,18 @@ class ChargerCoach:
             },
             blocking=True,
         )
+
+        if charger.paused_by_balancer:
+            # The limit above is still worth sending: it is our standing request
+            # and the balancer works on the lowest of all the limits, so it has
+            # to be in place for the moment room appears. Starting is not worth
+            # sending. The charger is being held by something that does not
+            # listen to us, and asking again every minute only fills its log.
+            _LOGGER.debug(
+                "laadpaal %s wordt tegengehouden door de lastbewaking; niet gestart",
+                device.get("id"),
+            )
+            return True
 
         if not charger.charging:
             if not await self._confirmed(device, decision.amps):
