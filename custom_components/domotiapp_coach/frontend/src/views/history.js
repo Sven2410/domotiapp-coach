@@ -23,6 +23,7 @@ import {
   PERIODS,
   combine,
   fetchPeriod,
+  fetchPrices,
   periodLabel,
   periodStart,
   withStatistics,
@@ -94,6 +95,9 @@ class DacViewHistory extends DacElement {
               (item) => `<button type="button" data-period="${item.id}" aria-pressed="false">${item.label}</button>`
             ).join("")}
           </div>
+          <button type="button" class="download" id="download" title="Deze periode als bestand">
+            ${icons.arrowRight}<span>Downloaden</span>
+          </button>
           <div class="stepper">
             <button type="button" id="prev" aria-label="Vorige">${icons.arrowLeft}</button>
             <span id="period-label"></span>
@@ -138,8 +142,21 @@ class DacViewHistory extends DacElement {
         this.load_();
       });
     }
+    this.$("#download").addEventListener("click", () => this.download_());
     this.$("#prev").addEventListener("click", () => this.step_(-1));
     this.$("#next").addEventListener("click", () => this.step_(1));
+
+    // Een muis meldt zich af zodra hij de grafiek verlaat; een vinger niet. Dus
+    // telt hier een tik ergens anders op het scherm als afmelden, anders blijft
+    // er op een telefoon een dag geselecteerd staan die niemand meer bedoelde.
+    this.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "mouse") return;
+      const path = event.composedPath();
+      if (!path.some((node) => node?.id === "stage" || node?.id === "gas-stage")) {
+        this.clearPick_();
+        this.clearGasPick_();
+      }
+    });
 
     this.load_();
   }
@@ -165,6 +182,19 @@ class DacViewHistory extends DacElement {
     if (this.offset_ + direction > 0) return;
     this.offset_ += direction;
     this.load_();
+  }
+
+  /**
+   * The entity whose price history to use, if there is one.
+   *
+   * Only for a dynamic contract: a fixed one is a number the customer typed in,
+   * and that is exact for every day of the year without asking anybody.
+   */
+  priceEntity_() {
+    const contract = this.settings_?.contract;
+    if (contract?.type !== "dynamic") return "";
+    const dynamic = contract.dynamic ?? {};
+    return dynamic.source === "all_in" ? dynamic.all_in_entity : dynamic.market_entity;
   }
 
   /** Which counters this installation has, in the roles the chart needs. */
@@ -200,8 +230,12 @@ class DacViewHistory extends DacElement {
       this.have_ = await withStatistics(this.hass_, ids);
     }
 
-    const series = await fetchPeriod(this.hass_, ids, this.period_, start);
+    const [series, prices] = await Promise.all([
+      fetchPeriod(this.hass_, ids, this.period_, start),
+      fetchPrices(this.hass_, this.priceEntity_(), this.period_, start),
+    ]);
     if (run !== this.run_) return;
+    this.prices_ = prices;
 
     this.rows_ = {
       solar: combine(series, roles.solar),
@@ -440,9 +474,74 @@ class DacViewHistory extends DacElement {
     }
     svg.addEventListener("pointerleave", (event) => {
       if (event.pointerType !== "mouse") return;
-      this.paintTotals_(this.totals_);
-      for (const bar of svg.querySelectorAll(".b")) bar.classList.remove("dim");
+      this.clearPick_();
     });
+  }
+
+  /**
+   * Deze periode als bestand, in een vorm die je in Excel kunt openen.
+   *
+   * Puntkomma's als scheidingsteken en komma's als decimaalteken, want dat is
+   * wat een Nederlandse Excel verwacht; met punten en komma's andersom belandt
+   * een heel jaar in één kolom. De kolomnamen staan er voluit boven, met hun
+   * eenheid, zodat het blad ook los van dit scherm te lezen is.
+   */
+  download_() {
+    const rows = this.rowsShown_ ?? [];
+    if (!rows.length) return;
+
+    const prices = this.prices_ ?? new Map();
+    const rate = tariff(this.feed_, this.settings_?.contract);
+    const hasSolar = this.meters_().solar.length > 0;
+    const gas = new Map((this.rows_?.gas ?? []).map((row) => [row.start.getTime(), row.value]));
+
+    const getal = (value) =>
+      value === null || value === undefined || !Number.isFinite(value)
+        ? ""
+        : value.toFixed(3).replace(".", ",");
+
+    const kop = ["Periode"];
+    if (hasSolar) kop.push("Opgewekt (kWh)", "Verbruikt (kWh)", "Eigen zon gebruikt (kWh)");
+    kop.push("Van het net (kWh)", "Naar het net (kWh)");
+    if (gas.size) kop.push("Gas (m3)");
+    if (rate.buy !== null) kop.push("Prijs (euro per kWh)", "Kosten inkoop (euro)");
+
+    const lijnen = [kop.join(";")];
+    for (const row of rows) {
+      const prijs = prices.get(row.start.getTime()) ?? rate.buy;
+      const kolommen = [bucketTitle(this.period_, row.start)];
+      if (hasSolar) {
+        kolommen.push(getal(row.own + row.sold), getal(row.used), getal(row.own));
+      }
+      kolommen.push(getal(row.bought), getal(row.sold));
+      if (gas.size) kolommen.push(getal(gas.get(row.start.getTime()) ?? 0));
+      if (rate.buy !== null) kolommen.push(getal(prijs), getal(row.bought * (prijs ?? 0)));
+      lijnen.push(kolommen.join(";"));
+    }
+
+    const naam = `domotiapp-${this.period_}-${periodStart(this.period_, this.offset_)
+      .toISOString()
+      .slice(0, 10)}.csv`;
+
+    // Met een byte order mark ervoor, anders leest Excel de euro's en de
+    // accenten als onzin.
+    const bom = String.fromCharCode(0xfeff);
+    const einde = String.fromCharCode(13) + String.fromCharCode(10);
+    const blob = new Blob([bom + lijnen.join(einde)], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = naam;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  /** Terug naar de cijfers van de hele periode. */
+  clearPick_() {
+    if (this.totals_) this.paintTotals_(this.totals_);
+    for (const bar of this.$$("#stage .b")) bar.classList.remove("dim");
   }
 
   paintTotals_(totals, title) {
@@ -525,9 +624,18 @@ class DacViewHistory extends DacElement {
       return;
     }
 
+    // Per bucket met de prijs van dat moment, als die er is. Anders valt het
+    // terug op één tarief voor de hele periode.
+    const prices = this.prices_ ?? new Map();
+    const perBucket = prices.size > 0;
+    const priceAt = (row) => (perBucket ? prices.get(row.start.getTime()) ?? rate.buy : rate.buy);
+
     const own = rows.reduce((total, row) => total + row.own, 0);
     const bought = rows.reduce((total, row) => total + row.bought, 0);
     const sold = rows.reduce((total, row) => total + row.sold, 0);
+
+    const ownValue = rows.reduce((total, row) => total + row.own * priceAt(row), 0);
+    const boughtValue = rows.reduce((total, row) => total + row.bought * priceAt(row), 0);
 
     // Alle drie als positief bedrag, met het label dat de richting draagt. Een
     // minteken voor een euroteken leest als een fout, en met "gekocht voor" is
@@ -536,9 +644,9 @@ class DacViewHistory extends DacElement {
     // Zonder opwekteller is er geen eigen zon om te tellen, en een nul is dan
     // geen uitkomst maar een gemis.
     if (this.meters_().solar.length) {
-      cells.push({ label: "Eigen zon bespaarde", value: euro(own * rate.buy), tone: "var(--dac-solar)" });
+      cells.push({ label: "Eigen zon bespaarde", value: euro(ownValue), tone: "var(--dac-solar)" });
     }
-    cells.push({ label: "Stroom gekocht voor", value: euro(bought * rate.buy), tone: "var(--dac-grid-in)" });
+    cells.push({ label: "Stroom gekocht voor", value: euro(boughtValue), tone: "var(--dac-grid-in)" });
     if (rate.feedIn !== null) {
       cells.push({
         label: "Teruglevering leverde",
@@ -567,17 +675,22 @@ class DacViewHistory extends DacElement {
       })
     );
 
-    // Bij een vast tarief klopt dit tot op de cent. Bij een dynamisch tarief is
-    // het een schatting, en hoe langer de periode hoe ruwer, want van oude
-    // uurtarieven bewaart niemand een geschiedenis.
-    const schatting = rate.basis !== "je vaste tarief";
-    const grover = schatting && this.period_ !== "day";
+    // Hoe hard dit getal is verschilt per geval, en dat hoort erbij te staan.
+    const vast = rate.basis === "je vaste tarief";
+    const uitleg = vast
+      ? `Gerekend met je vaste tarief van ${euro(rate.buy)} per kWh.`
+      : perBucket
+        ? this.period_ === "day"
+          ? "Gerekend met de werkelijke prijs van elk uur, uit de geschiedenis die Home Assistant bewaart."
+          : `Gerekend met de werkelijke ${
+              this.period_ === "year" ? "maandgemiddelden" : "daggemiddelden"
+            } uit de geschiedenis die Home Assistant bewaart. Binnen zo'n ${
+              this.period_ === "year" ? "maand" : "dag"
+            } wisselt de prijs nog, dus het is een benadering en geen factuur.`
+        : `Gerekend met ${rate.basis}, ${euro(rate.buy)} per kWh. Van deze prijsentiteit bewaart Home Assistant nog geen geschiedenis.`;
 
     this.$("#money-note").textContent =
-      `Gerekend met ${rate.basis}, ${euro(rate.buy)} per kWh.` +
-      (grover
-        ? ` Voor een hele ${{ week: "week", month: "maand", year: "jaar" }[this.period_]} is dat een ruwe schatting: oude uurtarieven worden nergens bewaard, dus er valt alleen met het tarief van nu te rekenen.`
-        : "") +
+      uitleg +
       (rate.feedIn === null
         ? " Wat teruglevering opbrengt staat er niet bij, want bij een all-in prijsentiteit is de kale marktprijs er niet uit te halen."
         : "");
@@ -649,11 +762,16 @@ class DacViewHistory extends DacElement {
         this.gasScrub_ = false;
       });
     }
+    this.gasWhole_ = heel;
     svg.addEventListener("pointerleave", (event) => {
       if (event.pointerType !== "mouse") return;
-      this.$("#gas-total").textContent = heel;
-      for (const bar of svg.querySelectorAll(".b")) bar.classList.remove("dim");
+      this.clearGasPick_();
     });
+  }
+
+  clearGasPick_() {
+    if (this.gasWhole_) this.$("#gas-total").textContent = this.gasWhole_;
+    for (const bar of this.$$("#gas-stage .b")) bar.classList.remove("dim");
   }
 }
 
@@ -709,6 +827,21 @@ DacViewHistory.css = /* css */ `
     background: var(--dac-accent-soft);
     color: var(--dac-ink);
   }
+
+  button.download {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 16px;
+    border-radius: var(--dac-radius-pill);
+    border: 1px solid var(--dac-border);
+    background: transparent;
+    color: var(--dac-ink-2);
+    font: inherit; font-size: 13.5px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button.download:hover { color: var(--dac-ink); border-color: var(--dac-border-hi); }
+  /* Het pijltje wijst omlaag: het bestand komt naar je toe. */
+  button.download .icon { width: 15px; height: 15px; transform: rotate(90deg); }
 
   .stepper { display: flex; align-items: center; gap: 6px; margin-left: auto; min-width: 0; }
   .stepper span {
