@@ -122,20 +122,24 @@ _SCHEDULE = _schema(
     }
 )
 
-# One person's arrangement of the overview. The card ids are the panel's own
-# business, so they are matched on shape rather than listed here: a card added
-# to the dashboard should not need a change on this side as well.
-_LAYOUT_CARD = _schema(
+_STRATEGY = _schema(
     {
-        vol.Required("id"): vol.Match(r"^[a-z0-9_-]{1,32}$"),
-        vol.Optional("hidden", default=False): bool,
-    }
-)
-
-_LAYOUT = _schema(
-    {
-        vol.Required("user"): str,
-        vol.Optional("cards", default=list): vol.All([_LAYOUT_CARD], vol.Length(max=40)),
+        vol.Optional("load_alert"): _schema(
+            {
+                vol.Optional("enabled"): bool,
+                vol.Optional("threshold_percent"): vol.All(
+                    vol.Coerce(float), vol.Range(1, 200)
+                ),
+                vol.Optional("targets"): [str],
+                vol.Optional("min_interval_minutes"): vol.All(
+                    vol.Coerce(int), vol.Range(1, 1440)
+                ),
+                vol.Optional("min_duration_seconds"): vol.All(
+                    vol.Coerce(int), vol.Range(0, 3600)
+                ),
+            }
+        ),
+        vol.Optional("schedules"): [_SCHEDULE],
     }
 )
 
@@ -167,26 +171,7 @@ _SETTINGS = _schema(
                 ),
             }
         ),
-        vol.Optional("strategy"): _schema(
-            {
-                vol.Optional("load_alert"): _schema(
-                    {
-                        vol.Optional("enabled"): bool,
-                        vol.Optional("threshold_percent"): vol.All(
-                            vol.Coerce(float), vol.Range(1, 200)
-                        ),
-                        vol.Optional("targets"): [str],
-                        vol.Optional("min_interval_minutes"): vol.All(
-                            vol.Coerce(int), vol.Range(1, 1440)
-                        ),
-                        vol.Optional("min_duration_seconds"): vol.All(
-                            vol.Coerce(int), vol.Range(0, 3600)
-                        ),
-                    }
-                ),
-                vol.Optional("schedules"): [_SCHEDULE],
-            }
-        ),
+        vol.Optional("strategy"): _STRATEGY,
         vol.Optional("installation"): _schema(
             {
                 vol.Optional("home_name"): str,
@@ -224,7 +209,6 @@ _SETTINGS = _schema(
         ),
         vol.Optional("devices"): [_DEVICE],
         vol.Optional("ready_devices"): [str],
-        vol.Optional("layouts"): [_LAYOUT],
         vol.Optional("thresholds"): _schema(
             {
                 vol.Optional("self_use"): _schema(
@@ -318,38 +302,28 @@ async def async_set_device_ready(
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "domotiapp_coach/layout/set",
-        vol.Required("cards"): vol.All([_LAYOUT_CARD], vol.Length(max=40)),
+        vol.Required("type"): "domotiapp_coach/strategy/set",
+        vol.Required("strategy"): _STRATEGY,
     }
 )
 @websocket_api.async_response
-async def async_set_layout(
+async def async_set_strategy(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Store how this person wants their overview laid out.
+    """Save the strategy, admin or not.
 
-    Not admin-only: how you want your own dashboard arranged is nobody else's
-    decision, and the people who use this every day are exactly the ones who are
-    not administrators.
+    Everything else about this installation is the installer's: which sensor
+    measures what, how heavy the connection is, what the contract costs. The
+    strategy is not. When the dishwasher has to be finished, which appliance
+    goes first and who gets a notification are decisions of whoever lives in the
+    house, and they are usually not an administrator in Home Assistant.
 
-    Whose entry gets written is taken from the connection rather than from the
-    message, so a panel can only ever rearrange the dashboard of the person
-    logged into it.
+    Only this one section is accepted here. Everything else still goes through
+    the admin-only command.
     """
-    store = async_get_store(hass)
-    settings = await store.async_load()
-
-    user_id = connection.user.id
-    layouts = [
-        entry
-        for entry in (settings.get("layouts") or [])
-        if isinstance(entry, dict) and entry.get("user") != user_id
-    ]
-    layouts.append({"user": user_id, "cards": msg["cards"]})
-
-    settings = await store.async_save({"layouts": layouts})
+    settings = await async_get_store(hass).async_save({"strategy": msg["strategy"]})
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
     connection.send_result(msg["id"], settings)
 
@@ -360,4 +334,4 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_get_settings)
     websocket_api.async_register_command(hass, async_set_settings)
     websocket_api.async_register_command(hass, async_set_device_ready)
-    websocket_api.async_register_command(hass, async_set_layout)
+    websocket_api.async_register_command(hass, async_set_strategy)

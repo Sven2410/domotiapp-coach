@@ -140,6 +140,8 @@ class DacPriceChart extends DacElement {
       font-size: 13px;
       line-height: 1.5;
       color: var(--dac-ink-2);
+      display: grid;
+      gap: 2px;
     }
     .note:empty { display: none; }
 
@@ -392,16 +394,17 @@ class DacPriceChart extends DacElement {
       </svg>
     `;
 
-    // Where the coach would put a programme, in words. It was a label on the
-    // bar itself first, which collides with everything: the cheapest hour is
-    // often the one running, and a short bar puts its label in the middle of
-    // the field.
-    const best = rows[cheapest];
-    this.$("#note").textContent = !best
-      ? ""
-      : `Goedkoopst${cheapest === nowIndex ? " is nu" : ` ${whenText(best.start, this.now_)}`}: ${
-          fmtPrice(best.price).value
-        } per kWh.`;
+    // The two extremes in words. As labels on the bars they collide with
+    // everything: the cheapest hour is often the one running, and a short bar
+    // puts its label in the middle of the field.
+    //
+    // Over the whole published list, not over the bars that happen to be drawn:
+    // on a phone the hours already spent are left out of the picture, and
+    // "cheapest of today and tomorrow" then quietly meant something else.
+    this.$("#note").replaceChildren(
+      this.extreme_("Goedkoopst", (a, b) => b.price < a.price),
+      this.extreme_("Duurst", (a, b) => b.price > a.price)
+    );
 
     const svg = this.$("svg");
     for (const hit of svg.querySelectorAll(".hit")) {
@@ -451,6 +454,27 @@ class DacPriceChart extends DacElement {
     }
   }
 
+  /**
+   * One line naming the cheapest or the dearest interval.
+   *
+   * @param {string} label
+   * @param {(a: object, b: object) => boolean} better true when b beats a
+   */
+  extreme_(label, better) {
+    const line = document.createElement("span");
+    const rows = this.rows_ ?? [];
+    if (!rows.length) return line;
+
+    const pick = rows.reduce((a, b) => (better(a, b) ? b : a));
+    const running = this.now_ >= pick.start && this.now_ < pick.end;
+    const day = sameDay(pick.start, this.now_) ? "vandaag" : dayName(pick.start).toLowerCase();
+
+    line.textContent = `${label}: ${running ? "nu" : `${day} ${clock(pick.start)}`}, ${
+      fmtPrice(pick.price).value
+    } per kWh.`;
+    return line;
+  }
+
   /** Show one interval in the read-out and outline its bar. */
   pick_(index) {
     const row = this.shown_?.[index];
@@ -494,12 +518,6 @@ function barPath(x, w, base, height, up, r) {
     `L${(x + w).toFixed(1)} ${base.toFixed(1)}`,
     "Z",
   ].join(" ");
-}
-
-/** "om 14:00" for today, "morgen om 12:00" for anything else. */
-function whenText(date, now) {
-  const day = sameDay(date, now) ? "" : `${dayName(date).toLowerCase()} `;
-  return `${day}om ${clock(date)}`;
 }
 
 const DAYS = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];

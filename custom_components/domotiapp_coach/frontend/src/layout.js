@@ -1,25 +1,23 @@
 /**
- * How one person wants the overview arranged.
+ * How this screen shows the overview.
  *
- * Two places to keep it, because a household has both cases. What somebody
- * chooses is normally about them: they should find their own arrangement on
- * their phone, on the tablet in the hall and on the laptop alike, so it lives
- * with their Home Assistant user in the panel's settings. But a wall tablet in
- * the kitchen is a screen with a job rather than a person, and there the
- * arrangement belongs to the device. That one is kept in the browser itself and
- * wins over the account, because a screen that was deliberately set up a certain
- * way must not be rearranged from somebody's phone.
+ * Per screen, deliberately, and not per person. Hanging it on the Home
+ * Assistant user sounds tidier until you look at a real household: everybody
+ * shares one account, or one person has the panel open on three devices at
+ * once. Then rearranging the dashboard on your own laptop silently rearranges
+ * the phone in somebody else's pocket. A wall tablet in the hall is a screen
+ * with a job rather than a person, and the kitchen tablet should stay the way
+ * the kitchen wants it.
  *
- * Writing goes through a command of its own that is not admin-only: how you
- * want your own dashboard is not an installer's decision, and the people who
- * use this every day are exactly the ones who are not administrators.
+ * So it lives in this browser and nowhere else. Nothing to save on the server,
+ * nothing that can reach another device, and nothing to ask the customer about.
  */
 
 /**
  * The cards on the overview, in the order a fresh install shows them.
  *
- * Order matters here: it is the default arrangement, and it is also what a card
- * added in a later version falls back to. `label` is what the customer sees
+ * Order matters here: it is the default arrangement, and it is also where a
+ * card added in a later version ends up. `label` is what the customer sees
  * while rearranging, so it names the card rather than the code behind it.
  */
 export const OVERVIEW_CARDS = [
@@ -33,8 +31,7 @@ export const OVERVIEW_CARDS = [
 
 const KNOWN = new Set(OVERVIEW_CARDS.map((card) => card.id));
 
-/** Where a device-bound arrangement is kept. */
-const LOCAL_KEY = "dac-overview-layout";
+const KEY = "dac-overview-layout";
 
 /** The default: everything, in the order above. */
 export const defaultLayout = () =>
@@ -43,10 +40,10 @@ export const defaultLayout = () =>
 /**
  * Clean up a stored arrangement and fill in whatever it does not mention.
  *
- * A card that was added in a later version is not in anybody's stored layout,
- * and dropping it would mean a new feature silently never appears for existing
- * customers. So unknown ids are thrown away and missing ones are appended in
- * their default order, visible.
+ * A card added in a later version is in nobody's stored layout, and dropping it
+ * would mean a new feature silently never appears for existing customers. So
+ * unknown ids are thrown away and missing ones are appended in their default
+ * order, visible.
  */
 function reconcile(cards) {
   const seen = new Set();
@@ -65,53 +62,32 @@ function reconcile(cards) {
   return out;
 }
 
-/** The arrangement kept in this browser, or null when there is none. */
-export function localLayout() {
+/** The arrangement to draw on this screen. */
+export function effectiveLayout() {
   try {
-    const raw = localStorage.getItem(LOCAL_KEY);
-    return raw ? reconcile(JSON.parse(raw)) : null;
+    const raw = localStorage.getItem(KEY);
+    return reconcile(raw ? JSON.parse(raw) : null);
   } catch {
     // Private mode, a full quota, a half-written value: none of it is worth
     // breaking the dashboard over.
-    return null;
+    return defaultLayout();
   }
 }
 
-/**
- * The arrangement to draw, and where it came from.
- *
- * @returns {{cards: Array<{id: string, hidden: boolean}>, scope: "device"|"user"}}
- */
-export function effectiveLayout(settings, userId) {
-  const local = localLayout();
-  if (local) return { cards: local, scope: "device" };
-
-  const mine = (settings?.layouts ?? []).find((entry) => entry?.user === userId);
-  return { cards: reconcile(mine?.cards), scope: "user" };
-}
-
-/**
- * Store an arrangement.
- *
- * `scope` decides where: "device" writes it into this browser only, "user"
- * writes it to the account and clears the local one, so choosing "everywhere"
- * on a tablet actually takes effect there instead of being shadowed forever by
- * the copy it left behind.
- */
-export async function saveLayout(hass, cards, scope) {
-  const clean = reconcile(cards);
-
-  if (scope === "device") {
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(clean));
-    return;
+/** Remember this arrangement on this screen. */
+export function saveLayout(cards) {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(reconcile(cards)));
+  } catch {
+    // Nothing to be done, and nothing worth interrupting the customer for.
   }
-
-  localStorage.removeItem(LOCAL_KEY);
-  await hass?.callWS({ type: "domotiapp_coach/layout/set", cards: clean });
 }
 
-/** Forget both copies, back to the arrangement this panel ships with. */
-export async function resetLayout(hass) {
-  localStorage.removeItem(LOCAL_KEY);
-  await hass?.callWS({ type: "domotiapp_coach/layout/set", cards: defaultLayout() });
+/** Forget it, back to the arrangement this panel ships with. */
+export function resetLayout() {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    // As above.
+  }
 }

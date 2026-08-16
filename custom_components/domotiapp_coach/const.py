@@ -230,18 +230,6 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # it has to survive a restart (a dishwasher stays loaded) and reach every
     # open panel over the same event.
     "ready_devices": [],
-    # How each person wants the overview laid out: which cards they see and in
-    # what order. One entry per Home Assistant user.
-    #
-    # A list rather than a map keyed by user id, for the same reason as
-    # `ready_devices`: the storage prunes dictionaries against these defaults,
-    # which would empty a free-form map on every load.
-    #
-    # This is the customer's own preference rather than configuration, so it is
-    # written through its own command that is not admin-only, and everybody can
-    # only ever write their own entry. A tablet in the hall that wants its own
-    # arrangement keeps that one locally in the browser instead; see the panel.
-    "layouts": [],
     "thresholds": {
         # Zelfbenutting in percent: below `low` is bad, above `high` is good.
         "self_use": {"low": 30, "high": 70},

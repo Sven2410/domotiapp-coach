@@ -159,6 +159,28 @@ const ALERTS = [
 class DacViewStrategy extends DacEditorElement {
   static sections = ["strategy"];
 
+  // Its own command, and one that is not admin-only. When the dishwasher has to
+  // be finished and which appliance goes first are decisions of whoever lives
+  // in the house, and that is usually not an administrator in Home Assistant.
+  static saveCommand = "domotiapp_coach/strategy/set";
+  static savePayload = "strategy";
+
+  /** Everyone, hence the command above. */
+  canEdit_() {
+    return true;
+  }
+
+  /**
+   * Whether this user can reach Apparaten at all.
+   *
+   * Customers cannot: that section is hidden for them. So every sentence here
+   * that sends somebody to it has to say something else to them, or it points
+   * at a screen they will never find.
+   */
+  isAdmin_() {
+    return this.hass_?.user?.is_admin !== false;
+  }
+
   constructor() {
     super();
     this.pane_ = "";
@@ -233,7 +255,7 @@ class DacViewStrategy extends DacEditorElement {
 
         <section class="card" id="devices-card" hidden>
           <h2>${icons.devices} Apparaten</h2>
-          <p class="hint">Binnen welke grenzen een apparaat mag draaien. Daarbinnen zoekt de coach het goedkoopste moment om te starten. Zonder enige grens is later altijd goedkoper en zou hij nooit beginnen. Inplannen kan zodra de coach het apparaat mag aansturen; dat zet je aan bij Apparaten.</p>
+          <p class="hint" id="devices-hint"></p>
           <div class="links" id="device-links"></div>
         </section>
       </div>
@@ -604,6 +626,16 @@ class DacViewStrategy extends DacEditorElement {
    */
   paintDeviceLinks_() {
     const devices = this.planCandidates_();
+
+    // The last sentence differs per reader: an installer is sent to Apparaten,
+    // a customer cannot go there and would be looking for a section that is not
+    // in their menu.
+    this.$("#devices-hint").textContent =
+      "Binnen welke grenzen een apparaat mag draaien. Daarbinnen zoekt de coach het goedkoopste moment om te starten. Zonder enige grens is later altijd goedkoper en zou hij nooit beginnen. " +
+      (this.isAdmin_()
+        ? "Inplannen kan zodra de coach het apparaat mag aansturen; dat zet je aan bij Apparaten."
+        : "Inplannen kan zodra je installateur het apparaat aanstuurbaar heeft gemaakt.");
+
     const holder = this.$("#device-links");
     this.$("#devices-card").hidden = !devices.length;
     if (!devices.length) {
@@ -670,6 +702,9 @@ class DacViewStrategy extends DacEditorElement {
 
   /** What is standing between this appliance and being planned. */
   whyNot_(device) {
+    if (!this.isAdmin_()) {
+      return "Dit apparaat is nog niet klaar om aangestuurd te worden. Je installateur kan dat instellen.";
+    }
     if (brandsFor(device.type).length && !device.brand) {
       return "Kies eerst een merk bij Apparaten.";
     }

@@ -452,6 +452,14 @@ class DacViewOverview extends DacElement {
     @media (pointer: coarse) { .cmd-pick select { font-size: 16px; } }
     @supports (-webkit-touch-callout: none) { .cmd-pick select { font-size: 16px; } }
 
+    /* The panel draws a blue ring around whatever has the keyboard focus, and
+       Safari on iOS counts an ordinary tap as keyboard focus. On the tiles that
+       left a heavy blue rectangle behind after every tap. They mark themselves
+       in their own colour instead. It has to be switched off here rather than
+       inside the tile: a rule from the outer tree beats :host, however specific
+       that one is. */
+    dac-stat-tile:focus-visible { outline: none; }
+
     /* The price chart needs the room: 48 bars in a 430px sheet is a comb.
        On a phone it must hand that width back, because a sheet there is not a
        floating card but a page sliding up from the bottom edge. Being more
@@ -560,18 +568,6 @@ class DacViewOverview extends DacElement {
       font-size: 12.5px; color: var(--dac-ink-2);
       min-width: 0;
     }
-    .arrange-bar select {
-      padding: 9px 12px;
-      border-radius: var(--dac-radius-sm);
-      border: 1px solid var(--dac-border-hi);
-      background: rgba(255,255,255,0.04);
-      color: var(--dac-ink);
-      font: inherit; font-size: 13px;
-      min-height: 42px;
-    }
-    .arrange-bar select option { background: #12120f; color: var(--dac-ink); }
-    @media (pointer: coarse) { .arrange-bar select { font-size: 16px; } }
-    @supports (-webkit-touch-callout: none) { .arrange-bar select { font-size: 16px; } }
     .arrange-bar button {
       padding: 11px 20px;
       border-radius: var(--dac-radius-pill);
@@ -727,13 +723,7 @@ class DacViewOverview extends DacElement {
         </button>
 
         <div class="arrange-bar" id="arrange-bar" hidden>
-          <div class="where">
-            <label for="arrange-scope">Geldt voor</label>
-            <select id="arrange-scope">
-              <option value="user">mij, op elk scherm</option>
-              <option value="device">alleen dit scherm</option>
-            </select>
-          </div>
+          <span class="where">Deze indeling geldt op dit scherm.</span>
           <button type="button" id="arrange-reset">Standaard terugzetten</button>
           <button type="button" class="primary" id="arrange-done">Klaar</button>
         </div>
@@ -796,7 +786,6 @@ class DacViewOverview extends DacElement {
     this.$("#arrange-open").addEventListener("click", () => this.startArranging_());
     this.$("#arrange-done").addEventListener("click", () => this.stopArranging_());
     this.$("#arrange-reset").addEventListener("click", () => this.resetArrangement_());
-    this.$("#arrange-scope").addEventListener("change", () => this.storeArrangement_());
 
     this.applyLayout_();
   }
@@ -805,15 +794,11 @@ class DacViewOverview extends DacElement {
 
   /** Put the cards in the order this person chose, and hide what they hid. */
   applyLayout_() {
-    // Not while somebody is rearranging: settings arrive on every save from
-    // every open panel, and adopting one mid-drag would pull the cards out
-    // from under the finger holding them.
+    // Not while somebody is rearranging: adopting a stored arrangement mid-drag
+    // would pull the cards out from under the finger holding them.
     if (this.arranging_) return;
 
-    const { cards, scope } = effectiveLayout(this.settings_, this.hass?.user?.id);
-    this.layout_ = cards;
-    this.scope_ = scope;
-    if (this.rendered_) this.$("#arrange-scope").value = scope;
+    this.layout_ = effectiveLayout();
     this.paintLayout_();
   }
 
@@ -991,24 +976,14 @@ class DacViewOverview extends DacElement {
     grip.addEventListener("pointercancel", stop);
   }
 
-  async storeArrangement_() {
-    const scope = this.$("#arrange-scope").value;
-    this.scope_ = scope;
-    try {
-      await saveLayout(this.hass, this.layout_, scope);
-    } catch (error) {
-      console.warn("[DomotiApp Coach] kon de indeling niet bewaren", error);
-    }
+  storeArrangement_() {
+    saveLayout(this.layout_);
   }
 
-  async resetArrangement_() {
+  resetArrangement_() {
+    resetLayout();
     this.layout_ = defaultLayout();
     this.paintLayout_();
-    try {
-      await resetLayout(this.hass);
-    } catch (error) {
-      console.warn("[DomotiApp Coach] kon de indeling niet herstellen", error);
-    }
   }
 
   /**
