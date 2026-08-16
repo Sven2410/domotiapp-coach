@@ -486,6 +486,39 @@ export const canCommand = (device) =>
   deviceCommands(device).length > 0 || Boolean(programChooser(device));
 
 /**
+ * The device types that charge a car, and so keep profiles.
+ *
+ * A profile is what the coach needs to plan with: how big the battery is, what
+ * the car can take, and on how many phases it charges. Six amps is 1,4 kW on
+ * one phase and 4,1 kW on three, so that last one decides whether charging on
+ * surplus is fine-grained or coarse.
+ */
+export const CAR_TYPES = ["laadpaal"];
+
+export const hasCars = (device) => CAR_TYPES.includes(device?.type);
+
+/** How a car takes its power, and what that means for the lowest step. */
+export const CAR_PHASES = [
+  { id: "one", label: "Eén fase", blurb: "Laagste stap ongeveer 1,4 kW." },
+  { id: "three", label: "Drie fasen", blurb: "Laagste stap ongeveer 4,1 kW." },
+  { id: "both", label: "Allebei", blurb: "De paal schakelt zelf terug naar één fase." },
+];
+
+/**
+ * The profile for a guest's car.
+ *
+ * Always there and nothing to fill in. A guest charges straight away and until
+ * the cable comes out: they came to visit, not to wait for the cheapest hour.
+ * It is a profile rather than a switch of its own so there is one mechanism
+ * deciding what the charger does, instead of two that can disagree.
+ */
+export const GUEST_CAR = { id: "__guest__", name: "Gast", guest: true };
+
+/** Every profile that can be chosen at this device, guests included. */
+export const carsFor = (device) =>
+  hasCars(device) ? [...(device.cars ?? []), GUEST_CAR] : [];
+
+/**
  * The device types that need somebody to say they may run.
  *
  * A dishwasher is the case that makes this necessary: it can be switched on at

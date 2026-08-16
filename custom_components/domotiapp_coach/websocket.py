@@ -57,6 +57,25 @@ _PHASE = _schema(
     }
 )
 
+# One car that charges at this point. A household has one or two, and a guest
+# is not one of them: that is a fixed profile the panel offers by itself.
+_CAR = _schema(
+    {
+        vol.Required("id"): str,
+        vol.Optional("name", default=""): str,
+        # Battery size in kWh. What makes it possible to work out how many hours
+        # are still needed, together with what the customer says is left in it.
+        vol.Optional("capacity_kwh", default=0): vol.All(
+            vol.Coerce(float), vol.Range(0, 500)
+        ),
+        # Whether the car charges on one phase, on three, or can do both. It
+        # decides the floor: six amps is 1,4 kW on one phase and 4,1 on three.
+        vol.Optional("phases", default="three"): vol.In(["one", "three", "both"]),
+        # Some cars stop at 16 A however thick the cable is.
+        vol.Optional("max_amps", default=0): vol.All(vol.Coerce(float), vol.Range(0, 100)),
+    }
+)
+
 _DEVICE = _schema(
     {
         vol.Required("id"): str,
@@ -83,6 +102,8 @@ _DEVICE = _schema(
         # What to send for start, stop, pause and resume. The words differ per
         # brand and even per firmware, so they are typed in rather than baked in.
         vol.Optional("actions", default=dict): {vol.Match(r"^[a-z0-9_]+$"): str},
+        # The cars that charge here, for the device types that have them.
+        vol.Optional("cars", default=list): vol.All([_CAR], vol.Length(max=8)),
     }
 )
 
@@ -217,6 +238,9 @@ _SETTINGS = _schema(
         ),
         vol.Optional("devices"): [_DEVICE],
         vol.Optional("ready_devices"): [str],
+        vol.Optional("active_cars"): [
+            _schema({vol.Required("device"): str, vol.Required("car"): str})
+        ],
         vol.Optional("thresholds"): _schema(
             {
                 vol.Optional("self_use"): _schema(
@@ -336,6 +360,44 @@ async def async_set_strategy(
     connection.send_result(msg["id"], settings)
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/device/car",
+        vol.Required("device_id"): str,
+        vol.Required("car"): str,
+    }
+)
+@websocket_api.async_response
+async def async_set_active_car(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Say which car is on this charging point now.
+
+    Not admin-only, for the same reason releasing a dishwasher is not: the
+    person plugging a car in is whoever is standing in the driveway.
+
+    The new list is worked out here rather than sent by the panel, so a
+    dashboard that has been open all afternoon cannot undo a change somebody
+    made on their phone five minutes ago.
+    """
+    store = async_get_store(hass)
+    settings = await store.async_load()
+
+    cars = [
+        entry
+        for entry in (settings.get("active_cars") or [])
+        if isinstance(entry, dict) and entry.get("device") != msg["device_id"]
+    ]
+    if msg["car"]:
+        cars.append({"device": msg["device_id"], "car": msg["car"]})
+
+    settings = await store.async_save({"active_cars": cars})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], settings)
+
+
 @callback
 def async_register(hass: HomeAssistant) -> None:
     """Register the panel's websocket commands."""
@@ -343,3 +405,4 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_set_settings)
     websocket_api.async_register_command(hass, async_set_device_ready)
     websocket_api.async_register_command(hass, async_set_strategy)
+    websocket_api.async_register_command(hass, async_set_active_car)

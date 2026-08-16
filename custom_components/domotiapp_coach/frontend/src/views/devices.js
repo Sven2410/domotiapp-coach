@@ -11,6 +11,7 @@
 import { define } from "../base.js";
 import { icons } from "../icons.js";
 import {
+  CAR_PHASES,
   DEVICE_TYPES,
   DISHWASHER_PROGRAMS,
   PLAN_LABELS,
@@ -23,6 +24,7 @@ import {
   brandsFor,
   deviceLabel,
   deviceLabelMap,
+  hasCars,
   missingForControl,
   typeMeta,
 } from "../devices.js";
@@ -505,6 +507,69 @@ class DacViewDevices extends DacEditorElement {
     };
   }
 
+  /**
+   * The cars that charge at this point.
+   *
+   * Their own little list rather than fields on the device, because a household
+   * has one car or two and the coach needs different sums for each: a battery
+   * of 58 kWh is not one of 77, and a car that can drop to one phase can follow
+   * the sun far more closely than one that cannot.
+   */
+  carsHtml_(device, index) {
+    if (!hasCars(device)) return "";
+
+    const cars = device.cars ?? [];
+    const rows = cars
+      .map(
+        (car, slot) => `
+        <div class="car" data-car="${index}:${slot}">
+          <div class="car-head">
+            <input type="text" data-car-field="name" data-car-index="${index}:${slot}"
+                   value="${(car.name ?? "").replace(/"/g, "&quot;")}"
+                   placeholder="Bijvoorbeeld: de blauwe" autocomplete="off">
+            <button type="button" class="remove" data-car-remove="${index}:${slot}" aria-label="Auto verwijderen">${icons.trash}</button>
+          </div>
+          <div class="two">
+            <div class="row">
+              <label>Accu (kWh)</label>
+              <input type="number" min="0" max="500" step="1" inputmode="decimal"
+                     data-car-field="capacity_kwh" data-car-index="${index}:${slot}"
+                     value="${car.capacity_kwh || ""}" placeholder="bijvoorbeeld 58">
+            </div>
+            <div class="row">
+              <label>Hoogste stroom (A)</label>
+              <input type="number" min="0" max="100" step="1" inputmode="numeric"
+                     data-car-field="max_amps" data-car-index="${index}:${slot}"
+                     value="${car.max_amps || ""}" placeholder="optioneel">
+              <span class="sub">Alleen invullen als de auto zelf lager blijft dan je paal aankan.</span>
+            </div>
+          </div>
+          <div class="row">
+            <label>Laadt op</label>
+            <div class="segmented three">
+              ${CAR_PHASES.map(
+                (item) => `
+                <button type="button" data-car-phases="${index}:${slot}:${item.id}"
+                        aria-pressed="${(car.phases ?? "three") === item.id}">
+                  <strong>${item.label}</strong>
+                  ${item.blurb}
+                </button>`
+              ).join("")}
+            </div>
+          </div>
+        </div>`
+      )
+      .join("");
+
+    return `
+      <div class="block">
+        <div class="block-title">Auto's</div>
+        <p class="sub">Welke auto's hier laden. Op het overzicht kies je welke er op dat moment aan hangt, en de coach rekent met de accu en het aantal fasen van die auto. Een gast hoef je niet toe te voegen; die staat er altijd bij en laadt meteen.</p>
+        <div class="cars">${rows}</div>
+        <button class="add" type="button" data-car-add="${index}">${icons.plus} Auto toevoegen</button>
+      </div>`;
+  }
+
   paintDevices_() {
     const list = this.$("#device-list");
     const devices = this.draft_.devices ?? [];
@@ -560,6 +625,7 @@ class DacViewDevices extends DacEditorElement {
               </div>
             </div>
             ${this.brandHtml_(device, index)}
+            ${this.carsHtml_(device, index)}
             ${this.controlHtml_(device, index)}
           </div>
         </section>`;
@@ -571,6 +637,50 @@ class DacViewDevices extends DacEditorElement {
     for (const [index, device] of devices.entries()) {
       list.querySelector(`[data-title="${index}"]`).textContent = this.labelFor_(device);
       list.querySelector(`[data-summary="${index}"]`).textContent = this.summary_(device).text;
+    }
+
+    for (const input of list.querySelectorAll("[data-car-field]")) {
+      const [index, slot] = input.dataset.carIndex.split(":").map(Number);
+      const key = input.dataset.carField;
+      input.addEventListener("input", () => {
+        const car = this.draft_.devices[index].cars[slot];
+        car[key] = key === "name" ? input.value : Number(input.value) || 0;
+        this.afterChange_();
+      });
+    }
+
+    for (const button of list.querySelectorAll("[data-car-phases]")) {
+      const [index, slot, phases] = button.dataset.carPhases.split(":");
+      button.addEventListener("click", () => {
+        this.draft_.devices[Number(index)].cars[Number(slot)].phases = phases;
+        this.paintDevices_();
+        this.afterChange_();
+      });
+    }
+
+    for (const button of list.querySelectorAll("[data-car-add]")) {
+      button.addEventListener("click", () => {
+        const device = this.draft_.devices[Number(button.dataset.carAdd)];
+        device.cars ??= [];
+        device.cars.push({
+          id: `car-${Math.random().toString(36).slice(2, 9)}`,
+          name: "",
+          capacity_kwh: 0,
+          phases: "three",
+          max_amps: 0,
+        });
+        this.paintDevices_();
+        this.afterChange_();
+      });
+    }
+
+    for (const button of list.querySelectorAll("[data-car-remove]")) {
+      const [index, slot] = button.dataset.carRemove.split(":").map(Number);
+      button.addEventListener("click", () => {
+        this.draft_.devices[index].cars.splice(slot, 1);
+        this.paintDevices_();
+        this.afterChange_();
+      });
     }
 
     for (const toggle of list.querySelectorAll("[data-toggle]")) {
@@ -727,6 +837,37 @@ class DacViewDevices extends DacEditorElement {
 }
 
 DacViewDevices.css = /* css */ `
+  /* ---- auto's bij een laadpaal ----
+     Elk profiel in een eigen kader, want het zijn losse dingen met dezelfde
+     velden; zonder kader lopen twee auto's in elkaar over. */
+  .cars { display: grid; gap: 12px; margin-top: 12px; }
+  .car {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border);
+    background: rgba(255,255,255,0.022);
+  }
+  .car-head { display: flex; align-items: center; gap: 10px; }
+  .car-head input { flex: 1 1 auto; min-width: 0; }
+  .car-head button.remove {
+    flex: 0 0 auto;
+    width: 40px; height: 40px;
+    display: grid; place-items: center;
+    border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border);
+    background: transparent;
+    color: var(--dac-ink-3);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .car-head button.remove:hover { color: var(--dac-bad); border-color: rgba(208,59,59,0.5); }
+  .car-head button.remove .icon { width: 16px; height: 16px; }
+
+  .segmented.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 720px) { .segmented.three { grid-template-columns: minmax(0, 1fr); } }
+
   ${editorCss}
   ${sheetCss}
 

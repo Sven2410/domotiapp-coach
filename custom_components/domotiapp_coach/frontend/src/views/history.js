@@ -248,9 +248,19 @@ class DacViewHistory extends DacElement {
     const missing = [...roles.solar, ...roles.import, ...roles.export].filter(
       (id) => this.have_ && !this.have_.has(id)
     );
-    note.textContent = missing.length
-      ? `Van ${missing.length === 1 ? "één teller" : `${missing.length} tellers`} houdt Home Assistant geen geschiedenis bij. Dat gebeurt alleen bij sensoren die zichzelf als oplopende totaalstand aanbieden.`
-      : "";
+
+    const zinnen = [];
+    if (!roles.solar.length) {
+      zinnen.push(
+        "Je opwekteller staat nog niet ingesteld, dus je ziet hier alleen wat er van het net kwam en wat er naar het net ging. Vul bij Instellingen onder Meterstanden de teller van je omvormer in, dan komen je opwek, je verbruik en je zelfbenutting er ook bij te staan."
+      );
+    }
+    if (missing.length) {
+      zinnen.push(
+        `Van ${missing.length === 1 ? "één teller" : `${missing.length} tellers`} houdt Home Assistant geen geschiedenis bij. Dat gebeurt alleen bij sensoren die zichzelf als oplopende totaalstand aanbieden.`
+      );
+    }
+    note.textContent = zinnen.join(" ");
 
     this.paintChart_();
     this.paintMoney_();
@@ -293,13 +303,20 @@ class DacViewHistory extends DacElement {
     }
 
     const sum = (key) => rows.reduce((total, row) => total + row[key], 0);
+    // Zonder opwekteller is er geen opwek en dus ook geen verbruik: verbruik is
+    // opwek plus inkoop min teruglevering, en die eerste term ontbreekt dan.
+    // Eerder rekende dit toch door, waarmee "opgewekt" gelijk werd aan wat er
+    // naar het net ging en zelfbenutting altijd op nul stond. Beter niets tonen
+    // dan een getal dat nergens op slaat.
+    const hasSolar = this.meters_().solar.length > 0;
     const totals = {
-      solar: sum("own") + sum("sold"),
-      used: sum("used"),
+      solar: hasSolar ? sum("own") + sum("sold") : null,
+      used: hasSolar ? sum("used") : null,
       bought: sum("bought"),
       sold: sum("sold"),
     };
-    totals.selfUse = totals.solar > 0 ? (sum("own") / totals.solar) * 100 : null;
+    totals.selfUse =
+      hasSolar && totals.solar > 0 ? (sum("own") / totals.solar) * 100 : null;
 
     this.paintTotals_(totals);
     this.paintLegend_();
@@ -431,12 +448,13 @@ class DacViewHistory extends DacElement {
   paintTotals_(totals, title) {
     this.$("#totals-title").textContent = title ?? "";
 
-    const rows = [
-      { label: "Opgewekt", value: energy(totals.solar), tone: "var(--dac-solar)" },
-      { label: "Verbruikt", value: energy(totals.used), tone: "var(--dac-house)" },
-      { label: "Van het net", value: energy(totals.bought), tone: "var(--dac-grid-in)" },
-      { label: "Naar het net", value: energy(totals.sold), tone: "var(--dac-grid-out)" },
-    ];
+    const rows = [];
+    if (totals.solar !== null) {
+      rows.push({ label: "Opgewekt", value: energy(totals.solar), tone: "var(--dac-solar)" });
+      rows.push({ label: "Verbruikt", value: energy(totals.used), tone: "var(--dac-house)" });
+    }
+    rows.push({ label: "Van het net", value: energy(totals.bought), tone: "var(--dac-grid-in)" });
+    rows.push({ label: "Naar het net", value: energy(totals.sold), tone: "var(--dac-grid-out)" });
     if (totals.selfUse !== null) {
       rows.push({ label: "Zelf gebruikt", value: percent(totals.selfUse), tone: "var(--dac-good)" });
     }
@@ -514,10 +532,13 @@ class DacViewHistory extends DacElement {
     // Alle drie als positief bedrag, met het label dat de richting draagt. Een
     // minteken voor een euroteken leest als een fout, en met "gekocht voor" is
     // er niets uit te leggen.
-    const cells = [
-      { label: "Eigen zon bespaarde", value: euro(own * rate.buy), tone: "var(--dac-solar)" },
-      { label: "Stroom gekocht voor", value: euro(bought * rate.buy), tone: "var(--dac-grid-in)" },
-    ];
+    const cells = [];
+    // Zonder opwekteller is er geen eigen zon om te tellen, en een nul is dan
+    // geen uitkomst maar een gemis.
+    if (this.meters_().solar.length) {
+      cells.push({ label: "Eigen zon bespaarde", value: euro(own * rate.buy), tone: "var(--dac-solar)" });
+    }
+    cells.push({ label: "Stroom gekocht voor", value: euro(bought * rate.buy), tone: "var(--dac-grid-in)" });
     if (rate.feedIn !== null) {
       cells.push({
         label: "Teruglevering leverde",
@@ -546,10 +567,19 @@ class DacViewHistory extends DacElement {
       })
     );
 
+    // Bij een vast tarief klopt dit tot op de cent. Bij een dynamisch tarief is
+    // het een schatting, en hoe langer de periode hoe ruwer, want van oude
+    // uurtarieven bewaart niemand een geschiedenis.
+    const schatting = rate.basis !== "je vaste tarief";
+    const grover = schatting && this.period_ !== "day";
+
     this.$("#money-note").textContent =
-      `Gerekend met ${rate.basis} van ${euro(rate.buy)} per kWh.` +
+      `Gerekend met ${rate.basis}, ${euro(rate.buy)} per kWh.` +
+      (grover
+        ? ` Voor een hele ${{ week: "week", month: "maand", year: "jaar" }[this.period_]} is dat een ruwe schatting: oude uurtarieven worden nergens bewaard, dus er valt alleen met het tarief van nu te rekenen.`
+        : "") +
       (rate.feedIn === null
-        ? " Wat je voor teruglevering krijgt staat er niet bij: bij een all-in prijsentiteit is de kale marktprijs niet af te leiden."
+        ? " Wat teruglevering opbrengt staat er niet bij, want bij een all-in prijsentiteit is de kale marktprijs er niet uit te halen."
         : "");
   }
 
@@ -579,9 +609,51 @@ class DacViewHistory extends DacElement {
       })
       .join("");
 
+    const hits = rows
+      .map(
+        (row, index) =>
+          `<rect class="hit" data-index="${index}" x="${inset + index * colW}" y="0"
+                 width="${colW}" height="${H}"/>`
+      )
+      .join("");
+
     gasStage.innerHTML = `
-      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gasverbruik per periode">${bars}</svg>
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gasverbruik per periode">${bars}${hits}</svg>
     `;
+
+    // Net als de stroomgrafiek: aanwijzen zet de kop erboven op die ene balk.
+    const svg = gasStage.querySelector("svg");
+    const heel = `${nl(total, 1)} m³ verbruikt`;
+    const at = (event) => {
+      const box = svg.getBoundingClientRect();
+      const x = ((event.clientX - box.left) / box.width) * W;
+      return Math.min(rows.length - 1, Math.max(0, Math.floor((x - inset) / colW)));
+    };
+    const pick = (index) => {
+      const row = rows[index];
+      if (!row) return;
+      this.$("#gas-total").textContent = `${nl(row.value, 1)} m³ op ${bucketTitle(this.period_, row.start)}`;
+      for (const bar of svg.querySelectorAll(".b")) bar.classList.add("dim");
+      svg.querySelectorAll(".b")[index]?.classList.remove("dim");
+    };
+
+    svg.addEventListener("pointerdown", (event) => {
+      this.gasScrub_ = true;
+      pick(at(event));
+    });
+    svg.addEventListener("pointermove", (event) => {
+      if (this.gasScrub_ || event.pointerType === "mouse") pick(at(event));
+    });
+    for (const done of ["pointerup", "pointercancel"]) {
+      svg.addEventListener(done, () => {
+        this.gasScrub_ = false;
+      });
+    }
+    svg.addEventListener("pointerleave", (event) => {
+      if (event.pointerType !== "mouse") return;
+      this.$("#gas-total").textContent = heel;
+      for (const bar of svg.querySelectorAll(".b")) bar.classList.remove("dim");
+    });
   }
 }
 
