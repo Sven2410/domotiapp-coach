@@ -73,6 +73,11 @@ _CAR = _schema(
         vol.Optional("phases", default="three"): vol.In(["one", "three", "both"]),
         # Some cars stop at 16 A however thick the cable is.
         vol.Optional("max_amps", default=0): vol.All(vol.Coerce(float), vol.Range(0, 100)),
+        # The car's own state of charge, when Home Assistant knows it. With it
+        # the coach works out how much still has to go in; without it the
+        # customer says so, and without that it simply charges the cheapest
+        # hours until the car stops by itself.
+        vol.Optional("soc_entity", default=""): _ENTITY,
     }
 )
 
@@ -84,6 +89,10 @@ _DEVICE = _schema(
         # The power sensor. Every device has one, whatever it is -- it is what
         # puts the device on the energy flow at all.
         vol.Optional("entity", default=""): _ENTITY,
+        # An energy counter for this device, in kWh. Optional: without one the
+        # history is worked out from the average power, which is close enough
+        # for a report but not a meter reading.
+        vol.Optional("energy_entity", default=""): _ENTITY,
         # Types that have brands (chargers, dishwashers), "" until one is
         # picked. Which brands belong to which type is the panel's business.
         vol.Optional("brand", default=""): vol.In([*ALL_BRANDS, ""]),

@@ -18,10 +18,15 @@
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
 import { energy, euro, percent } from "../format.js";
+import { deviceLabel, deviceLabelMap } from "../devices.js";
+
+/** Het merkteken op het rapport. */
+const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
 import { tariff } from "../data-source.js";
 import {
   PERIODS,
   combine,
+  fetchDevices,
   fetchPeriod,
   fetchPrices,
   periodLabel,
@@ -52,6 +57,66 @@ function bucketLabel(period, date) {
   if (period === "year") return date.toLocaleDateString("nl-NL", { month: "short" }).replace(".", "");
   return String(date.getDate());
 }
+
+/**
+ * De opmaak van het rapport.
+ *
+ * Licht, want papier is wit en het donkere thema van het scherm is daar
+ * onleesbaar. Wel dezelfde kleuren voor dezelfde dingen, zodat wie het scherm
+ * kent de grafiek herkent. Punten in plaats van pixels: dat is de maat die een
+ * printer aanhoudt.
+ */
+const REPORT_CSS = `
+  @page { size: A4; margin: 15mm 14mm; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #fff; color: #1a1a18;
+    font: 11pt/1.5 "Segoe UI", system-ui, sans-serif;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  header { display: flex; align-items: center; gap: 14px; border-bottom: 2px solid #026FA1; padding-bottom: 12px; }
+  header img { width: 46px; height: 46px; }
+  .merk { font-size: 15pt; font-weight: 600; }
+  .merk span { color: #026FA1; }
+  .waar { font-size: 10pt; color: #55534e; }
+  header .rechts { margin-left: auto; text-align: right; }
+  header .rechts .titel { font-size: 13pt; font-weight: 600; }
+  header .rechts .sub { font-size: 9.5pt; color: #55534e; }
+
+  h2 { font-size: 11.5pt; margin: 20px 0 9px; page-break-after: avoid; }
+  .cellen { display: flex; flex-wrap: wrap; gap: 9px; }
+  .cel { flex: 1 1 120px; padding: 9px 11px; border: 1px solid #e2ded6; border-radius: 8px; }
+  .cel span { display: block; font-size: 8pt; letter-spacing: 0.08em; text-transform: uppercase; color: #6b6862; }
+  .cel strong { font-size: 13pt; font-weight: 600; }
+
+  svg { width: 100%; height: auto; }
+  .zero { stroke: #c9c4ba; }
+  .b.own { fill: #dc7300; }
+  .b.bought { fill: #0f7fbb; }
+  .b.sold { fill: #a30fae; }
+  .b.gas { fill: #b57d00; }
+  .b.dim { opacity: 1; }
+  .tick { fill: #6b6862; font-family: inherit; font-size: 10px; }
+  .hit, .now-line, .flag { display: none; }
+
+  .legenda { display: flex; gap: 16px; margin-top: 8px; font-size: 9pt; color: #55534e; }
+  .legenda i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 9pt; }
+  th, td { padding: 4px 8px; border-bottom: 1px solid #e8e4dc; text-align: left; }
+  th { font-size: 8pt; letter-spacing: 0.06em; text-transform: uppercase; color: #6b6862; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tbody tr:nth-child(even) { background: #faf8f4; }
+  tfoot td { font-weight: 600; border-top: 2px solid #d8d3c9; border-bottom: none; }
+  table { page-break-inside: auto; }
+  tr { page-break-inside: avoid; }
+
+  .voet { margin-top: 18px; padding-top: 9px; border-top: 1px solid #e2ded6; font-size: 8.5pt; color: #6b6862; display: flex; }
+  .voet .rechts { margin-left: auto; }
+  .uitleg { font-size: 9pt; color: #55534e; margin-top: 7px; }
+  .cel em { display: block; font-size: 8pt; font-style: normal; color: #6b6862; margin-top: 2px; }
+  em.schat { font-style: normal; font-size: 8pt; color: #8a867e; }
+`;
 
 class DacViewHistory extends DacElement {
   constructor() {
@@ -95,9 +160,14 @@ class DacViewHistory extends DacElement {
               (item) => `<button type="button" data-period="${item.id}" aria-pressed="false">${item.label}</button>`
             ).join("")}
           </div>
-          <button type="button" class="download" id="download" title="Deze periode als bestand">
-            ${icons.arrowRight}<span>Downloaden</span>
-          </button>
+          <div class="exports">
+            <button type="button" class="download" id="report" title="Een rapport om te bewaren of te printen">
+              ${icons.compass}<span>Rapport</span>
+            </button>
+            <button type="button" class="download" id="download" title="De cijfers als tabel">
+              ${icons.arrowRight}<span>Tabel</span>
+            </button>
+          </div>
           <div class="stepper">
             <button type="button" id="prev" aria-label="Vorige">${icons.arrowLeft}</button>
             <span id="period-label"></span>
@@ -142,6 +212,7 @@ class DacViewHistory extends DacElement {
         this.load_();
       });
     }
+    this.$("#report").addEventListener("click", () => this.report_());
     this.$("#download").addEventListener("click", () => this.download_());
     this.$("#prev").addEventListener("click", () => this.step_(-1));
     this.$("#next").addEventListener("click", () => this.step_(1));
@@ -230,12 +301,20 @@ class DacViewHistory extends DacElement {
       this.have_ = await withStatistics(this.hass_, ids);
     }
 
-    const [series, prices] = await Promise.all([
+    const apparaten = (this.settings_?.devices ?? []).map((device) => ({
+      id: device.id,
+      power: device.entity,
+      energy: device.energy_entity,
+    }));
+
+    const [series, prices, devices] = await Promise.all([
       fetchPeriod(this.hass_, ids, this.period_, start),
       fetchPrices(this.hass_, this.priceEntity_(), this.period_, start),
+      fetchDevices(this.hass_, apparaten, this.period_, start),
     ]);
     if (run !== this.run_) return;
     this.prices_ = prices;
+    this.devices_ = devices;
 
     this.rows_ = {
       solar: combine(series, roles.solar),
@@ -476,6 +555,249 @@ class DacViewHistory extends DacElement {
       if (event.pointerType !== "mouse") return;
       this.clearPick_();
     });
+  }
+
+  /**
+   * Deze periode als rapport, om te bewaren of door te sturen.
+   *
+   * Via het afdrukvenster van de browser, waar "Bewaren als pdf" een van de
+   * bestemmingen is. Dat scheelt een bibliotheek van honderden kilobytes in een
+   * paneel dat bewust zonder bouwstap draait, en het levert een betere pdf op:
+   * de grafiek gaat als vectortekening mee en blijft scherp op elk formaat.
+   *
+   * Op papier is het donkere thema onbruikbaar, dus het rapport is licht. Wel
+   * dezelfde kleuren voor dezelfde dingen, zodat wie het scherm kent de grafiek
+   * meteen herkent.
+   *
+   * In een eigen iframe en niet in een nieuw venster: dat laatste vangen
+   * popupblokkers weg, en in de app van Home Assistant is het helemaal de vraag
+   * of het opengaat.
+   */
+  reportHtml_() {
+    const rows = this.rowsShown_ ?? [];
+    if (!rows.length) return "";
+
+    const prices = this.prices_ ?? new Map();
+    const rate = tariff(this.feed_, this.settings_?.contract);
+    const hasSolar = this.meters_().solar.length > 0;
+    const gas = new Map((this.rows_?.gas ?? []).map((row) => [row.start.getTime(), row.value]));
+    const totals = this.totals_ ?? {};
+
+    const woning = (this.settings_?.installation?.home_name ?? "").trim();
+    const periode = periodLabel(this.period_, periodStart(this.period_, this.offset_));
+    const korrel = { day: "Per uur", week: "Per dag", month: "Per dag", year: "Per maand" }[
+      this.period_
+    ];
+
+    const cel = (label, waarde, sub) =>
+      `<div class="cel"><span>${label}</span><strong>${waarde}</strong>${
+        sub ? `<em>${sub}</em>` : ""
+      }</div>`;
+
+    const kwh = (value) => {
+      if (value === null || value === undefined) return "";
+      const { value: getal, unit } = energy(value);
+      return `${getal} ${unit}`;
+    };
+
+    const prijsBij = (row) => prices.get(row.start.getTime()) ?? rate.buy;
+    const waarde = (key) =>
+      rows.reduce((total, row) => total + row[key] * (prijsBij(row) ?? 0), 0);
+
+    // ---- de tabel per tijdvak ----
+    const kop = ["Periode"];
+    if (hasSolar) kop.push("Opgewekt", "Verbruikt", "Eigen zon");
+    kop.push("Van het net", "Naar het net");
+    if (gas.size) kop.push("Gas");
+    if (rate.buy !== null) kop.push("Prijs", "Kosten");
+
+    const regels = rows
+      .map((row) => {
+        const prijs = prijsBij(row);
+        const cellen = [bucketTitle(this.period_, row.start)];
+        if (hasSolar) cellen.push(kwh(row.own + row.sold), kwh(row.used), kwh(row.own));
+        cellen.push(kwh(row.bought), kwh(row.sold));
+        if (gas.size) cellen.push(`${nl(gas.get(row.start.getTime()) ?? 0, 2)} m³`);
+        if (rate.buy !== null) {
+          cellen.push(prijs === null ? "" : euro(prijs), euro(row.bought * (prijs ?? 0)));
+        }
+        return `<tr>${cellen
+          .map((c, i) => `<td${i ? ' class="num"' : ""}>${c}</td>`)
+          .join("")}</tr>`;
+      })
+      .join("");
+
+    const som = (key) => rows.reduce((total, row) => total + row[key], 0);
+    const totaalCellen = ["Totaal"];
+    if (hasSolar) totaalCellen.push(kwh(som("own") + som("sold")), kwh(som("used")), kwh(som("own")));
+    totaalCellen.push(kwh(som("bought")), kwh(som("sold")));
+    if (gas.size) {
+      totaalCellen.push(`${nl([...gas.values()].reduce((a, b) => a + b, 0), 2)} m³`);
+    }
+    if (rate.buy !== null) totaalCellen.push("", euro(waarde("bought")));
+
+    // ---- de tabel per apparaat ----
+    const apparaten = this.deviceRows_();
+    const samen = apparaten.reduce((total, device) => total + device.kwh, 0);
+    // Een aandeel heeft alleen betekenis als de delen in het geheel passen.
+    // Schattingen uit gemiddeld vermogen kunnen te hoog uitvallen, en dan komt
+    // er "172 %" te staan, wat niemand kan plaatsen. Dan liever geen kolom en
+    // een zin die zegt waarom.
+    const aandeelKlopt = Boolean(totals.used) && samen <= totals.used * 1.02;
+
+    const apparatenHtml = !apparaten.length
+      ? ""
+      : [
+          "<h2>Per apparaat</h2>",
+          '<table><thead><tr><th>Apparaat</th><th class="num">Verbruik</th>',
+          rate.buy === null ? "" : '<th class="num">Kosten</th>',
+          aandeelKlopt ? '<th class="num">Aandeel</th>' : "",
+          "</tr></thead><tbody>",
+          apparaten
+            .map(
+              (device) =>
+                `<tr><td>${device.label}${
+                  device.exact ? "" : ' <em class="schat">bij benadering</em>'
+                }</td><td class="num">${kwh(device.kwh)}</td>${
+                  rate.buy === null ? "" : `<td class="num">${euro(device.euro)}</td>`
+                }${
+                  aandeelKlopt
+                    ? `<td class="num">${Math.round((device.kwh / totals.used) * 100)} %</td>`
+                    : ""
+                }</tr>`
+            )
+            .join(""),
+          "</tbody></table>",
+          '<p class="uitleg">Van apparaten zonder eigen energieteller wordt het verbruik afgeleid uit het gemiddelde vermogen. Dat is nauwkeurig genoeg om te zien waar je stroom heen gaat, maar het is geen meterstand. Vul bij Apparaten een energieteller in als je die hebt, dan klopt het tot op de komma.' +
+            (aandeelKlopt
+              ? ""
+              : " Deze schattingen tellen samen op tot meer dan het verbruik van de woning, dus staat er geen aandeel bij.") +
+            "</p>",
+        ].join("");
+
+    const html = [
+      '<!doctype html><html lang="nl"><head><meta charset="utf-8">',
+      `<title>${periode}</title><style>${REPORT_CSS}</style></head><body>`,
+
+      "<header>",
+      `<img src="${LOGO_URL}" alt="">`,
+      '<div><div class="merk">DomotiApp <span>Coach</span></div>',
+      woning ? `<div class="waar">${woning}</div>` : "",
+      "</div>",
+      `<div class="rechts"><div class="titel">${periode}</div><div class="sub">${korrel}</div></div>`,
+      "</header>",
+
+      "<h2>Energie</h2>",
+      '<div class="cellen">',
+      hasSolar ? cel("Opgewekt", kwh(totals.solar)) : "",
+      hasSolar ? cel("Verbruikt", kwh(totals.used)) : "",
+      cel("Van het net", kwh(totals.bought)),
+      cel("Naar het net", kwh(totals.sold)),
+      totals.selfUse === null || totals.selfUse === undefined
+        ? ""
+        : cel("Zelf gebruikt", `${percent(totals.selfUse).value} %`),
+      gas.size ? cel("Gas", `${nl([...gas.values()].reduce((a, b) => a + b, 0), 1)} m³`) : "",
+      "</div>",
+
+      rate.buy === null
+        ? ""
+        : [
+            "<h2>In geld</h2>",
+            '<div class="cellen">',
+            hasSolar ? cel("Eigen zon bespaarde", euro(waarde("own"))) : "",
+            cel("Stroom gekocht voor", euro(waarde("bought"))),
+            rate.feedIn === null
+              ? ""
+              : cel("Teruglevering leverde", euro(Math.max(0, (totals.sold ?? 0) * rate.feedIn))),
+            "</div>",
+            `<p class="uitleg">${this.$("#money-note").textContent}</p>`,
+          ].join(""),
+
+      "<h2>Verloop</h2>",
+      this.$("#stage svg")?.outerHTML ?? "",
+      '<div class="legenda">',
+      hasSolar ? '<span><i style="background:#dc7300"></i>Eigen zon gebruikt</span>' : "",
+      '<span><i style="background:#0f7fbb"></i>Van het net</span>',
+      '<span><i style="background:#a30fae"></i>Naar het net</span>',
+      "</div>",
+
+      apparatenHtml,
+
+      "<h2>Alle cijfers</h2>",
+      "<table><thead><tr>",
+      kop.map((k, i) => `<th${i ? ' class="num"' : ""}>${k}</th>`).join(""),
+      "</tr></thead><tbody>",
+      regels,
+      "</tbody><tfoot><tr>",
+      totaalCellen.map((c, i) => `<td${i ? ' class="num"' : ""}>${c}</td>`).join(""),
+      "</tr></tfoot></table>",
+
+      '<div class="voet">',
+      `<span>Gemaakt op ${new Date().toLocaleDateString("nl-NL", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })}</span>`,
+      '<span class="rechts">domotitech.nl</span>',
+      "</div></body></html>",
+    ].join("");
+
+    return html;
+  }
+
+  /** Het rapport naar het afdrukvenster, waar "bewaren als pdf" een keuze is. */
+  report_() {
+    const html = this.reportHtml_();
+    if (!html) return;
+
+    const frame = document.createElement("iframe");
+    frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0";
+    document.body.appendChild(frame);
+
+    const doc = frame.contentDocument;
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    // Wachten tot het logo binnen is, anders staat er een lege plek op papier.
+    const printen = () => {
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+      setTimeout(() => frame.remove(), 1000);
+    };
+    const logo = doc.querySelector("img");
+    if (logo && !logo.complete) {
+      logo.addEventListener("load", printen, { once: true });
+      logo.addEventListener("error", printen, { once: true });
+    } else {
+      setTimeout(printen, 60);
+    }
+  }
+
+  /** Wat elk apparaat deze periode verbruikte, van groot naar klein. */
+  deviceRows_() {
+    const stats = this.devices_ ?? new Map();
+    if (!stats.size) return [];
+
+    const prices = this.prices_ ?? new Map();
+    const rate = tariff(this.feed_, this.settings_?.contract);
+    const labels = deviceLabelMap(this.settings_?.devices);
+
+    return (this.settings_?.devices ?? [])
+      .map((device) => {
+        const found = stats.get(device.id);
+        if (!found) return null;
+
+        let kwh = 0;
+        let cost = 0;
+        for (const [time, value] of found.rows) {
+          kwh += value;
+          cost += value * (prices.get(time) ?? rate.buy ?? 0);
+        }
+        return { label: labels.get(device.id) ?? deviceLabel(device), kwh, euro: cost, exact: found.exact };
+      })
+      .filter((row) => row && row.kwh > 0.01)
+      .sort((a, b) => b.kwh - a.kwh);
   }
 
   /**
@@ -842,6 +1164,8 @@ DacViewHistory.css = /* css */ `
   button.download:hover { color: var(--dac-ink); border-color: var(--dac-border-hi); }
   /* Het pijltje wijst omlaag: het bestand komt naar je toe. */
   button.download .icon { width: 15px; height: 15px; transform: rotate(90deg); }
+
+  .exports { display: flex; gap: 8px; }
 
   .stepper { display: flex; align-items: center; gap: 6px; margin-left: auto; min-width: 0; }
   .stepper span {
