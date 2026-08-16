@@ -35,12 +35,14 @@ from .planner import (
     FUSE_MARGIN_AMPS,
     Car,
     Charger,
+    DayWindow,
     Decision,
     Grid,
     Window,
     amps_for,
     decide,
     held_back,
+    resolve_window,
     should_send,
 )
 from .storage import async_get_store
@@ -349,42 +351,48 @@ class ChargerCoach:
         car = self._car(settings, device, charger)
 
         # --- when it may run ---
-        window = Window()
-        for entry in (settings.get("strategy") or {}).get("schedules") or []:
-            if entry.get("device") != device.get("id"):
-                continue
-            times = entry.get("window") or {}
-            aan = bool(entry.get("enabled"))
-
-            if entry.get("per_day"):
-                # Alleen de dag van vandaag telt, en staat die uit dan geldt er
-                # vandaag geen schema. Eerder viel hij dan terug op de algemene
-                # tijden, waardoor een zaterdag die uitdrukkelijk uit stond toch
-                # een klaar-tijd van zondagochtend kreeg: de coach ging dan 's
-                # nachts op dure uren laden voor een afspraak die de klant nooit
-                # gemaakt had.
-                vandaag = next(
-                    (
-                        day
-                        for day in entry.get("days") or []
-                        if day.get("day") == now.weekday()
-                    ),
-                    None,
-                )
-                if vandaag is not None and vandaag.get("enabled"):
-                    times = vandaag
-                else:
-                    aan = False
-
-            window = Window(
-                enabled=aan,
-                not_before=_time(times.get("not_before")),
-                start_by=_time(times.get("start_by")),
-                done_by=_time(times.get("done_by")),
-            )
-            break
+        window = resolve_window(now, self._days(settings, device))
 
         return grid, car, charger, window
+
+    @staticmethod
+    def _days(settings: dict[str, Any], device: dict[str, Any]) -> dict[int, DayWindow]:
+        """Het schema van dit apparaat, per weekdag.
+
+        Elke dag hetzelfde levert zeven gelijke dagen op; per dag levert alleen
+        de dagen op die de klant heeft aangezet. De planner rekent het daarna om
+        naar twee momenten, en dat is waar het vooruitkijken gebeurt: een
+        weekend zonder eisen erin telt niet als "niets te doen" maar als "tijd
+        om het goedkoopste moment uit te zoeken".
+        """
+        for entry in (settings.get("strategy") or {}).get("schedules") or []:
+            if entry.get("device") != device.get("id") or not entry.get("enabled"):
+                continue
+
+            if not entry.get("per_day"):
+                times = entry.get("window") or {}
+                elke_dag = DayWindow(
+                    enabled=True,
+                    not_before=_time(times.get("not_before")),
+                    start_by=_time(times.get("start_by")),
+                    done_by=_time(times.get("done_by")),
+                )
+                return dict.fromkeys(range(7), elke_dag)
+
+            uit: dict[int, DayWindow] = {}
+            for day in entry.get("days") or []:
+                weekdag = day.get("day")
+                if not isinstance(weekdag, int) or not 0 <= weekdag <= 6:
+                    continue
+                uit[weekdag] = DayWindow(
+                    enabled=bool(day.get("enabled")),
+                    not_before=_time(day.get("not_before")),
+                    start_by=_time(day.get("start_by")),
+                    done_by=_time(day.get("done_by")),
+                )
+            return uit
+
+        return {}
 
     def _car(
         self, settings: dict[str, Any], device: dict[str, Any], charger: Charger
