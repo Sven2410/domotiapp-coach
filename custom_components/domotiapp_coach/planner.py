@@ -51,6 +51,11 @@ BALANCER_MARGIN_AMPS = 3.0
 # nothing about what the session will do.
 RAMP_MINUTES = 3
 
+# Hoe ver vooruit er naar de eerstvolgende klaar-tijd wordt gezocht. Een week,
+# want een schema herhaalt zich per week: staat er dan nog niets, dan staat er
+# helemaal niets.
+LOOKAHEAD_DAYS = 8
+
 # Mains voltage per phase, the same figure the rest of the panel reckons with.
 VOLTS = 230
 
@@ -132,13 +137,32 @@ class Charger:
 
 
 @dataclass
-class Window:
-    """When this device may run, from the schedule."""
+class DayWindow:
+    """Wat er op één weekdag is afgesproken."""
 
-    enabled: bool = False
+    enabled: bool = True
     not_before: time | None = None
     start_by: time | None = None
     done_by: time | None = None
+
+
+@dataclass
+class Window:
+    """Wanneer dit apparaat mag draaien, als momenten en niet als kloktijden.
+
+    Momenten, want de vraag "welke herhaling van elf uur" is niet te
+    beantwoorden zonder het hele schema erbij. Met elke dag hetzelfde is het die
+    van vanavond. Met een schema per dag kan het die van overmorgen zijn: wie
+    zaterdag inplugt terwijl er pas maandag om zes uur iets klaar hoeft te zijn,
+    heeft een deadline die twee dagen verderop ligt en een heel weekend om de
+    goedkoopste uren uit te zoeken.
+    """
+
+    enabled: bool = False
+    # Vanaf wanneer er geladen mag worden, of None als er geen ondergrens is.
+    opens: datetime | None = None
+    # Wanneer het klaar moet zijn.
+    deadline: datetime | None = None
 
 
 @dataclass
@@ -262,40 +286,57 @@ def _at(day: datetime, moment: time | None) -> datetime | None:
     return day.replace(hour=moment.hour, minute=moment.minute, second=0, microsecond=0)
 
 
-def window_bounds(now: datetime, window: Window) -> tuple[datetime | None, datetime | None]:
-    """The window this schedule describes, as two moments around `now`.
+def resolve_window(now: datetime, days: dict[int, DayWindow]) -> Window:
+    """Het schema omrekenen naar twee momenten: vanaf wanneer, en waarvoor.
 
-    A schedule is two times on a clock, and a clock repeats. Which of the
-    repetitions is meant is decided here, and it is easy to get wrong: at two in
-    the morning the window that matters is the one that opened at eleven
-    *yesterday*, not the one that opens tonight. Looking only at today put the
-    coach to sleep for the entire night it was supposed to be charging in.
+    `days` is per weekdag (0 is maandag) wat er die dag moet gebeuren. Staat er
+    elke dag hetzelfde, dan zitten er zeven dezelfde in; is het per dag
+    ingesteld, dan staan alleen de dagen erin die de klant heeft aangezet.
 
-    So all three candidates are laid out -- yesterday's, today's and tomorrow's
-    -- and the one containing `now` wins. If none does, the next one to come is
-    returned, because that is what "you may charge from eleven" means.
+    **De klaar-tijd hoort bij zijn eigen dag.** "Maandag klaar om 06:00" is
+    maandagochtend zes uur. De coach zoekt vooruit naar de eerstvolgende
+    klaar-tijd die nog moet komen, tot een week ver. Daarmee is het antwoord op
+    zaterdag inpluggen met alleen maandag als eis: maandag 06:00, en dus een
+    heel weekend om de goedkoopste uren uit te kiezen.
 
-    A window that ends before it starts runs through the night, which is the
-    ordinary case: not before eleven, finished by seven.
+    **Vanaf-wanneer bindt alleen als zijn eigen dag aan staat.** Dat is het
+    enige stukje dat niet rechtstreeks uit de instelling volgt, en het is de
+    kern van wat hier gevraagd werd. "Niet voor elf uur" hoort bij de avond waar
+    het op staat. Ligt die avond op een dag die de klant heeft uitgezet, dan is
+    er die dag niets afgesproken en geldt de ondergrens dus ook niet. Zonder die
+    regel lag het hele weekend dicht en stond de auto tot zondagavond elf uur
+    stil, terwijl er juist twee dagen waren om het goedkoopste moment te zoeken.
+
+    Zonder ingeschakelde dag met een klaar-tijd komt er geen venster uit, en dan
+    laadt de coach gewoon op de goedkoopste uren die hij ziet.
     """
-    if window.not_before is None and window.done_by is None:
-        return None, None
+    if not days:
+        return Window()
 
-    spans = []
-    for days in (-1, 0, 1):
-        basis = now + timedelta(days=days)
-        start = _at(basis, window.not_before)
-        end = _at(basis, window.done_by)
-        if start and end and end <= start:
-            end += timedelta(days=1)
-        spans.append((start, end))
+    for offset in range(LOOKAHEAD_DAYS):
+        basis = now + timedelta(days=offset)
+        day = days.get(basis.weekday())
+        if day is None or not day.enabled or day.done_by is None:
+            continue
 
-    for start, end in spans:
-        if (start is None or start <= now) and (end is None or now < end):
-            return start, end
+        deadline = _at(basis, day.done_by)
+        if deadline is None or deadline <= now:
+            continue
 
-    ahead = [(start, end) for start, end in spans if start and start > now]
-    return min(ahead, key=lambda span: span[0]) if ahead else spans[1]
+        opens = _at(basis, day.not_before)
+        # Ligt "vanaf" na "klaar om", dan gaat het over de avond ervoor: niet
+        # voor elf uur, klaar om zeven, is de nacht ertussen.
+        if opens is not None and opens >= deadline:
+            opens -= timedelta(days=1)
+        # En hij bindt alleen als er op die dag iets is afgesproken.
+        if opens is not None:
+            avond = days.get(opens.weekday())
+            if avond is None or not avond.enabled:
+                opens = None
+
+        return Window(enabled=True, opens=opens, deadline=deadline)
+
+    return Window()
 
 
 def cheapest_hours(
@@ -460,7 +501,8 @@ def _decide(
                 rule="min-run",
             )
 
-    start, end = window_bounds(now, window) if window.enabled else (None, None)
+    start = window.opens if window.enabled else None
+    end = window.deadline if window.enabled else None
 
     if window.enabled and start and now < start:
         return Decision(
