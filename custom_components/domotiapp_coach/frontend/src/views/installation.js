@@ -166,10 +166,23 @@ class DacViewInstallation extends DacEditorElement {
                 </div>
               </div>
 
-              <div class="row" id="dyn-allin-row">
-                <label>All-in prijssensor</label>
-                <dac-entity-picker id="dyn-allin"></dac-entity-picker>
-                <span class="sub">Deze prijs wordt ongewijzigd overgenomen.</span>
+              <div id="dyn-allin-row">
+                <div class="row">
+                  <label>All-in prijssensor</label>
+                  <dac-entity-picker id="dyn-allin"></dac-entity-picker>
+                  <span class="sub">Deze prijs wordt ongewijzigd overgenomen.</span>
+                </div>
+                <div class="row">
+                  <label>Marktprijssensor (voor teruglevering)</label>
+                  <dac-entity-picker id="dyn-market-feed"></dac-entity-picker>
+                  <span class="sub">
+                    De kale marktprijs, zonder belasting en btw. Dit is wat teruglevering
+                    opbrengt, en in een all-in prijs zit die niet meer. Vul je hem in, dan
+                    kan de coach uitrekenen wanneer het goedkoper is om je eigen zon te
+                    gebruiken dan om op een goedkoop uur te wachten. Laat je hem leeg, dan
+                    laadt hij op zon alleen als de zon het grotendeels zelf dekt.
+                  </span>
+                </div>
               </div>
 
               <div class="notice" id="dyn-missing" hidden>
@@ -293,6 +306,7 @@ class DacViewInstallation extends DacEditorElement {
     for (const [id, key] of [
       ["dyn-allin", "all_in_entity"],
       ["dyn-market", "market_entity"],
+      ["dyn-market-feed", "market_entity"],
     ]) {
       const picker = this.$(`#${id}`);
       picker.filter = "price";
@@ -380,6 +394,7 @@ class DacViewInstallation extends DacEditorElement {
     // With an all-in entity the tax, markup and VAT fields are not just unused,
     // they are misleading: the price already contains them.
     this.$("#dyn-allin-row").style.display = source === "all_in" ? "" : "none";
+    this.$("#dyn-market-feed").value = contract.dynamic.market_entity ?? "";
     this.$("#dyn-market-fields").style.display = source === "market" ? "" : "none";
 
     // A dynamic contract without the sensor it is supposed to read leaves the

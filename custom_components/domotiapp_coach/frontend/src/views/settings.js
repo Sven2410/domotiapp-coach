@@ -111,6 +111,22 @@ class DacViewSettings extends DacEditorElement {
                 <dac-entity-picker data-forecast="tomorrow"></dac-entity-picker>
               </div>
             </div>
+            <div class="two">
+              <div class="row">
+                <label>Verwacht dit uur</label>
+                <dac-entity-picker data-forecast="this_hour"></dac-entity-picker>
+              </div>
+              <div class="row">
+                <label>Verwacht volgend uur</label>
+                <dac-entity-picker data-forecast="next_hour"></dac-entity-picker>
+              </div>
+              <span class="sub">
+                In kWh over dat uur. Dit zijn de twee die de coach echt gebruikt om te
+                beslissen: moet hij nu stroom bijkopen om op de zon te laden terwijl er
+                volgend uur veel meer aankomt, dan wacht hij dat uur af. Met alleen
+                dagtotalen kan hij dat niet weten.
+              </span>
+            </div>
             <div class="row">
               <label>Tijdstip hoogste opwek vandaag</label>
               <dac-entity-picker data-forecast="peak_today"></dac-entity-picker>

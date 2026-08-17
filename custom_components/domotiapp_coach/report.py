@@ -31,6 +31,11 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 
+try:  # Home Assistant 2024.6 en nieuwer
+    from homeassistant.components.http import KEY_HASS
+except ImportError:  # pragma: no cover - oudere uitvoeringen
+    KEY_HASS = "hass"  # type: ignore[assignment]
+
 _LOGGER = logging.getLogger(__name__)
 
 # Hoe lang een adres blijft werken. Ruim genoeg voor een telefoon die er even
@@ -75,7 +80,7 @@ def async_put(hass: HomeAssistant, pdf: bytes, filename: str) -> str:
 
 
 class ReportView(HomeAssistantView):
-    """Serveert één rapport, één keer.
+    """Serveert één rapport, zolang het adres geldig is.
 
     Het adres is niet te raden en is alleen te krijgen door er over een
     aangemelde websocket om te vragen. Zelf vraagt deze weg niet nog eens om
@@ -83,8 +88,11 @@ class ReportView(HomeAssistantView):
     van de app, en die stuurt de aanmeldgegevens van het paneel niet mee. Een weg
     die dat wel eist, is precies de weg die op een telefoon niets oplevert.
 
-    Wat het veilig houdt is dat het adres eenmalig is, na vijf minuten vervalt,
-    en verdwijnt zodra het is opgehaald.
+    Wat het veilig houdt is dat het adres niet te raden is en na vijf minuten
+    vervalt. Eenmalig gebruik zou strenger klinken maar is juist onbetrouwbaar:
+    een downloadbeheerder op een telefoon vraagt een adres vaak twee keer op,
+    eerst om te kijken wat er staat en dan pas om het op te halen. Dan zou de
+    tweede keer niets meer opleveren en dat is precies de keer die telt.
     """
 
     url = URL
@@ -92,11 +100,12 @@ class ReportView(HomeAssistantView):
     requires_auth = False
 
     async def get(self, request: web.Request, token: str) -> web.Response:
-        """Geef de pdf terug, en vergeet hem daarna."""
-        reports = _reports(request.app["hass"])
-        report = reports.pop(token, None)
+        """Geef de pdf terug."""
+        reports = _reports(request.app[KEY_HASS])
+        report = reports.get(token)
 
         if report is None or report["expires"] <= time.monotonic():
+            reports.pop(token, None)
             return web.Response(status=404, text="Dit rapport is niet meer beschikbaar.")
 
         return web.Response(

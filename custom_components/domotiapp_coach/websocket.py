@@ -202,6 +202,8 @@ _SETTINGS = _schema(
                         vol.Optional("remaining_today"): _ENTITY,
                         vol.Optional("tomorrow"): _ENTITY,
                         vol.Optional("peak_today"): _ENTITY,
+                        vol.Optional("this_hour"): _ENTITY,
+                        vol.Optional("next_hour"): _ENTITY,
                     }
                 ),
                 vol.Optional("meters"): _schema(
@@ -505,6 +507,31 @@ def async_store_report(
     )
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/coach/boost",
+        vol.Required("device_id"): str,
+        vol.Required("boost"): bool,
+    }
+)
+@callback
+def async_coach_boost(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Snelladen aan of uit zetten.
+
+    Niet alleen voor beheerders. Wie eerder weg moet dan gepland is degene die
+    in de auto stapt, en die staat meestal niet als beheerder in Home Assistant.
+    Het gaat bovendien om deze ene sessie: de kabel eruit en het staat weer uit.
+    """
+    from .coach import async_get_coach
+
+    async_get_coach(hass).async_boost(msg["device_id"], msg["boost"])
+    connection.send_result(msg["id"], {"boost": msg["boost"]})
+
+
 @callback
 def async_register(hass: HomeAssistant) -> None:
     """Register the panel's websocket commands."""
@@ -516,3 +543,4 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_set_active_car)
     websocket_api.async_register_command(hass, async_coach_state)
     websocket_api.async_register_command(hass, async_coach_approve)
+    websocket_api.async_register_command(hass, async_coach_boost)
