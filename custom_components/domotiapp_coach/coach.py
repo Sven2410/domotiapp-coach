@@ -14,6 +14,7 @@ the two apart.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import asdict
 from datetime import datetime, time, timedelta
@@ -37,6 +38,7 @@ from .const import (
 from .planner import (
     BALANCER_MARGIN_AMPS,
     FUSE_MARGIN_AMPS,
+    FUSE_MARGIN_SHARE,
     Car,
     Charger,
     DayWindow,
@@ -98,6 +100,25 @@ FOREVER_RULES = frozenset({"no-room", "user-hold"})
 # er niets tegen te houden, en bij een volle auto zou een 0 die blijft staan de
 # volgende auto in de weg zitten.
 NO_WRITE_RULES = frozenset({"disconnected", "complete"})
+
+# Hoe lang een ronde hoogstens mag duren. Ruim boven wat hij nodig heeft (de
+# bevestiging van een limiet duurt hooguit een seconde of vijftien per apparaat)
+# en ruim onder de ronde zelf, zodat een vastgelopen opdracht de coach niet stil
+# kan leggen. Zie de reden bij het afbreken zelf.
+ROUND_TIMEOUT = timedelta(seconds=45)
+
+# Hoe vaak de coach nakijkt of hij zelf nog draait, en na hoe lang stilte hij
+# daar een melding over stuurt. Een aparte klok met opzet: gaat er iets mis in de
+# ronde zelf, dan moet degene die dat opmerkt er niet in vastzitten.
+WATCHDOG_INTERVAL = timedelta(minutes=5)
+WATCHDOG_SILENCE = timedelta(minutes=10)
+
+# Hoe vaak een te hoge fasestroom hoogstens een extra ronde mag opleveren. Een
+# meter meldt zich elke seconde, en een huis dat vol zit doet dat een tijdlang
+# achter elkaar; zonder deze grens zou de coach zichzelf de hele avond op hol
+# laten brengen. Vijftien seconden is vier keer sneller dan de klok en rustig
+# genoeg voor de laadpaal.
+HURRY_INTERVAL = timedelta(seconds=15)
 
 
 def _number(hass: HomeAssistant, entity_id: str | None) -> float | None:
@@ -176,13 +197,28 @@ class ChargerCoach:
         self._running = False
         # De statussensoren waar we op meeluisteren, en hoe we dat weer opzeggen.
         self._watched: set[str] = set()
+        self._watched_phases: set[str] = set()
         self._unwatch = None
+        # Vanaf welke fasestroom het haast wordt, en wanneer dat voor het laatst
+        # gold. Beide worden elke ronde bijgewerkt.
+        self._urgent_above: float | None = None
+        self._last_urgent: datetime | None = None
+        # Wanneer er voor het laatst een ronde helemaal is afgelopen, en of daar
+        # al over gemeld is. Dit is wat de wachthond leest.
+        self._last_round: datetime | None = None
+        self._warned_silent = False
+        self._cancel_watchdog = None
 
     @callback
     def async_start(self) -> None:
         """Begin the minute-by-minute round."""
         if self._cancel is None:
             self._cancel = async_track_time_interval(self.hass, self._tick, INTERVAL)
+        if self._cancel_watchdog is None:
+            self._last_round = dt_util.utcnow()
+            self._cancel_watchdog = async_track_time_interval(
+                self.hass, self._async_watchdog, WATCHDOG_INTERVAL
+            )
 
     @callback
     def async_stop(self) -> None:
@@ -196,10 +232,73 @@ class ChargerCoach:
         if self._cancel is not None:
             self._cancel()
             self._cancel = None
+        if self._cancel_watchdog is not None:
+            self._cancel_watchdog()
+            self._cancel_watchdog = None
         if self._unwatch is not None:
             self._unwatch()
             self._unwatch = None
         self._watched = set()
+
+    async def _async_watchdog(self, now: datetime | None = None) -> None:
+        """Kijken of de coach zelf nog draait, en het zeggen als dat niet zo is.
+
+        Een limiet die de coach heeft weggeschreven blijft staan tot hij hem
+        weghaalt. Dat is met opzet, want het is de veilige kant: valt de coach
+        weg, dan laadt de auto door op een stroom die de paal eerder heeft
+        aangenomen. Maar het betekent ook dat een coach die stilvalt niets
+        oplevert wat je zou opvallen. Er wordt geladen, of er wordt niet
+        geladen, en beide zien er normaal uit.
+
+        Dus zegt hij het zelf. Eén melding per stilte, niet elke vijf minuten,
+        en zodra hij weer loopt is de stand weer schoon.
+        """
+        moment = now or dt_util.utcnow()
+        stil = self._last_round is None or moment - self._last_round > WATCHDOG_SILENCE
+
+        if not stil:
+            self._warned_silent = False
+            return
+        if self._warned_silent:
+            return
+
+        self._warned_silent = True
+        minuten = (
+            "onbekend hoe lang"
+            if self._last_round is None
+            else f"al {int((moment - self._last_round).total_seconds() // 60)} minuten"
+        )
+        _LOGGER.error("de coach heeft %s geen ronde afgemaakt", minuten)
+        await self._async_tell(
+            f"De coach heeft {minuten} niets meer beslist. Wat er nu op je "
+            "laadpaal staat blijft staan tot hij weer draait. Kijk in het "
+            "logboek van Home Assistant wat er misging."
+        )
+
+    async def _async_tell(self, message: str) -> None:
+        """Een melding sturen aan wie de klant daarvoor heeft uitgekozen.
+
+        Dezelfde ontvangers als de waarschuwing over de belasting, want het is
+        dezelfde vraag: er is iets waar je iets mee moet en niemand kijkt naar
+        het scherm.
+        """
+        try:
+            settings = await async_get_store(self.hass).async_load()
+        except Exception:  # noqa: BLE001 - een stille coach is erger dan een lege melding
+            _LOGGER.exception("kon de instellingen niet lezen voor een melding")
+            return
+
+        alert = (settings.get("strategy") or {}).get("load_alert") or {}
+        for target in alert.get("targets") or []:
+            try:
+                await self.hass.services.async_call(
+                    "notify",
+                    target,
+                    {"title": "DomotiApp Coach", "message": message},
+                    blocking=False,
+                )
+            except Exception:  # noqa: BLE001 - één slechte ontvanger is niet alle
+                _LOGGER.exception("Kon melding niet versturen naar notify.%s", target)
 
     @callback
     def async_refresh(self) -> None:
@@ -212,6 +311,41 @@ class ChargerCoach:
         nog een minuut op zijn scherm te lezen dat hij zelf gepauzeerd heeft.
         """
         self.hass.async_create_task(self._tick())
+
+    def _watch_phases(self, settings: dict[str, Any], steerable: bool) -> None:
+        """Welke fasesensoren er zijn, en vanaf welke stroom het haast wordt.
+
+        De grens is dezelfde als waar de planner mee rekent: de zekering min de
+        marge eronder. Komt een fase daarboven, dan is er voor de laadpaal niets
+        meer over en hoort hij terug, nu en niet over een minuut.
+
+        Zonder stuurbare laadpaal wordt er niets bewaakt: er is dan niets om
+        terug te regelen, en meeluisteren met een meter die elke seconde meldt
+        kost dan alleen maar.
+        """
+        sources = settings.get("sources") or {}
+        installation = settings.get("installation") or {}
+
+        entities: set[str] = set()
+        if steerable and sources.get("phases_enabled"):
+            for key in ("l1", "l2", "l3"):
+                phase = (sources.get("phases") or {}).get(key) or {}
+                # Alleen echte stroomsensoren. Uit vermogen en spanning valt het
+                # ook te herleiden, maar dat is werk voor een ronde en niet voor
+                # een melding die tien keer per seconde langskomt.
+                if phase.get("current"):
+                    entities.add(phase["current"])
+
+        self._watched_phases = entities
+        if not entities:
+            self._urgent_above = None
+            return
+
+        zekering = float(installation.get("fuse_amps") or 25)
+        marge = (
+            BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
+        )
+        self._urgent_above = zekering - max(marge, zekering * FUSE_MARGIN_SHARE)
 
     def _watch(self, entity_ids: set[str]) -> None:
         """Meeluisteren met de statussensoren van de laadpalen.
@@ -234,11 +368,51 @@ class ChargerCoach:
 
     @callback
     def _async_state_changed(self, event) -> None:
-        """Een laadpaal die van toestand wisselt is reden om opnieuw te kijken."""
+        """Een wisseling waar de coach iets mee moet.
+
+        Twee soorten. Een laadpaal die van toestand wisselt is er altijd een: de
+        kabel gaat erin of eruit, het laden begint of stopt, en dan hoort er een
+        vers besluit te komen in plaats van bij de volgende minuut.
+
+        En de fasestromen, maar alleen als ze te hoog worden. Dat is de haast:
+        een minuut is snel genoeg om een smeltveiligheid voor te blijven, maar
+        het maakt die minuut wel het enige dat tussen een vol huis en een
+        gesprongen zekering staat. Wordt het krap, dan kijkt hij binnen een
+        seconde. Wordt het niet krap, dan gebeurt er hier niets, want anders
+        draait de coach een ronde bij elke meterpuls.
+        """
+        entity = event.data.get("entity_id")
         old = event.data.get("old_state")
         new = event.data.get("new_state")
-        if old is None or new is None or old.state == new.state:
+        if new is None:
             return
+
+        if entity in self._watched_phases:
+            self._async_phase_changed(new)
+            return
+
+        if old is None or old.state == new.state:
+            return
+        self.async_refresh()
+
+    @callback
+    def _async_phase_changed(self, new) -> None:
+        """Een fasestroom die over de grens komt, en niet te vaak."""
+        if self._urgent_above is None:
+            return
+        try:
+            amps = float(new.state)
+        except (TypeError, ValueError):
+            return
+        if amps < self._urgent_above:
+            return
+
+        nu = dt_util.utcnow()
+        if self._last_urgent is not None and nu - self._last_urgent < HURRY_INTERVAL:
+            return
+        self._last_urgent = nu
+        _LOGGER.debug("fasestroom %.1f A boven %.1f A, meteen opnieuw kijken",
+                      amps, self._urgent_above)
         self.async_refresh()
 
     async def _tick(self, now: datetime | None = None) -> None:
@@ -253,7 +427,20 @@ class ChargerCoach:
             return
         self._running = True
         try:
-            await self._round(now)
+            async with asyncio.timeout(ROUND_TIMEOUT.total_seconds()):
+                await self._round(now)
+            self._last_round = dt_util.utcnow()
+        except TimeoutError:
+            # De gevaarlijkste storing die er is, want hij is stil: hangt een
+            # opdracht naar de laadpaal, dan zou de vlag hierboven blijven staan
+            # en werd elke volgende ronde overgeslagen. De coach leefde dan nog
+            # wel, maar besliste niets meer, en er werd gewoon geladen. Met een
+            # harde grens eromheen kan dat niet: hij breekt af, meldt het, en
+            # probeert het een minuut later opnieuw.
+            _LOGGER.error(
+                "een ronde duurde langer dan %s seconden en is afgebroken",
+                int(ROUND_TIMEOUT.total_seconds()),
+            )
         finally:
             self._running = False
 
@@ -273,12 +460,14 @@ class ChargerCoach:
             for device in settings.get("devices") or []
             if device.get("type") == "laadpaal" and device.get("controllable")
         ]
+        self._watch_phases(settings, bool(chargers))
         self._watch(
             {
                 entity
                 for device in chargers
                 if (entity := (device.get("entities") or {}).get("status"))
             }
+            | self._watched_phases
         )
 
         for device in chargers:
