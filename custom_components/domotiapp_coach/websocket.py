@@ -233,6 +233,7 @@ _SETTINGS = _schema(
         vol.Optional("contract"): _schema(
             {
                 vol.Optional("type"): vol.In([CONTRACT_FIXED, CONTRACT_DYNAMIC]),
+                vol.Optional("netting"): bool,
                 vol.Optional("fixed"): _schema(
                     {
                         vol.Optional("all_in_price"): _EURO,

@@ -227,6 +227,16 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     },
     "contract": {
         "type": CONTRACT_FIXED,
+        # Of teruggeleverde stroom nog gesaldeerd wordt. Dat is geen strategie
+        # maar één getal: bij salderen is een teruggeleverde kWh precies zoveel
+        # waard als een ingekochte, dus wordt de terugleververgoeding de
+        # inkoopprijs, min de kosten die de leverancier erover rekent. De sommen
+        # eronder veranderen niet; er komt alleen een ander bedrag in.
+        #
+        # Het staat als vinkje en niet als iets meetbaars, want het is een
+        # afspraak met je leverancier en geen sensor. De regeling loopt af op
+        # 1 januari 2027, dus dit vinkje gaat vanzelf uit de praktijk verdwijnen.
+        "netting": False,
         "fixed": {
             "all_in_price": 0.28,
             "feed_in_tariff": 0.07,
