@@ -50,6 +50,18 @@ const SURPLUS_W = 1500;
 // wiebelt hoort geen zin op te leveren.
 const TRICKLE_W = 100;
 
+// Na hoeveel minuten stilte de kaart zegt dat de coach niet meer denkt. Hij
+// hoort elke minuut te beslissen, dus tien minuten is geen drukte maar stilte.
+const COACH_SILENT_MINUTES = 10;
+
+/** Hoe lang geleden een beslissing genomen is, in hele minuten. */
+function minutenGeleden(stempel) {
+  if (!stempel) return null;
+  const toen = new Date(stempel).getTime();
+  if (Number.isNaN(toen)) return null;
+  return Math.max(0, Math.round((Date.now() - toen) / 60000));
+}
+
 /** Import worth mentioning, in watts. */
 const HEAVY_IMPORT_W = 2500;
 
@@ -1451,7 +1463,15 @@ class DacViewOverview extends DacElement {
     this.$(`[data-coach-mark="${slot}"]`).innerHTML = besluit.charge
       ? icons.spark
       : icons.compass;
-    this.$(`[data-coach-reason="${slot}"]`).textContent = besluit.reason ?? "";
+    // Een coach die stilvalt levert niets op wat opvalt: wat er op de laadpaal
+    // staat blijft staan, en dat ziet er precies zo uit als een coach die zijn
+    // werk doet. Dus zegt de kaart het, en blijft zijn laatste besluit erbij
+    // staan zodat je ziet waar hij was toen het stilviel.
+    const stil = minutenGeleden(besluit.at);
+    this.$(`[data-coach-reason="${slot}"]`).textContent =
+      stil !== null && stil >= COACH_SILENT_MINUTES
+        ? `De coach heeft ${stil} minuten niets beslist. Dit vond hij het laatst: ${besluit.reason ?? ""}`
+        : (besluit.reason ?? "");
     this.$(`[data-coach-plan="${slot}"]`).textContent = besluit.plan ?? "";
 
     // Wat de knop doet is niet "begin met laden" maar "de coach mag dit

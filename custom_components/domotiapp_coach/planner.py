@@ -33,10 +33,23 @@ from datetime import datetime, time, timedelta
 # same number because it is in the standard the cars speak.
 MIN_AMPS = 6
 
-# Room left under the fuse. A minute of overshoot is harmless, but a household
-# that switches on an oven while the car is at the ceiling should not be the
-# thing that trips it.
+# Room left under the fuse, als ondergrens. A minute of overshoot is harmless,
+# but a household that switches on an oven while the car is at the ceiling
+# should not be the thing that trips it.
+#
+# Twee ampère dekt trouwens geen oven; een oven is er tien tot zestien. Wat de
+# marge werkelijk redt is dat een smeltveiligheid bij een overschrijding van een
+# paar procent uren doet voordat hij komt, en de coach binnen een minuut heeft
+# teruggeregeld. Dat werkt, maar het maakt die minuut wel veiligheidskritisch, en
+# daarom staat er een snellere weg naast (zie `HAAST_SECONDEN` in coach.py).
 FUSE_MARGIN_AMPS = 2.0
+
+# En als aandeel van de zekering, want twee ampère betekent niet overal
+# hetzelfde. Op een aansluiting van 25 A is dat acht procent en ruim genoeg; op
+# 80 A is het nog maar twee en een half procent en dus veel te krap voor een
+# huis dat in één klap een paar kilowatt bijschakelt. De marge is daarom het
+# grootste van de twee.
+FUSE_MARGIN_SHARE = 0.08
 
 # The margin to keep when the installation has a load balancer of its own, such
 # as an Easee Equalizer. Such a box guards the very same fuse, from the hardware
@@ -300,9 +313,19 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
 
     if grid.phase_amps:
         household = max(grid.phase_amps) - grid.charger_amps
-        limits.append(grid.fuse_amps - max(0.0, household) - grid.margin_amps)
+        limits.append(grid.fuse_amps - max(0.0, household) - fuse_margin(grid))
 
     return int(max(0, min(limits)))
+
+
+def fuse_margin(grid: Grid) -> float:
+    """Hoeveel ruimte er onder de zekering vrij blijft.
+
+    Een vast aantal ampère of een aandeel van de zekering, en het grootste van
+    de twee wint. Zie `FUSE_MARGIN_SHARE` voor waarom een vast getal alleen niet
+    volstaat.
+    """
+    return max(grid.margin_amps, grid.fuse_amps * FUSE_MARGIN_SHARE)
 
 
 # The words the Easee reports when something other than the coach is holding the
