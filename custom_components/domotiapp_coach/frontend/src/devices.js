@@ -49,13 +49,41 @@ export const CHARGER_BRANDS = [
     },
     service: "easee.action_command",
     field: "action_command",
+    // De tweede dienst: die schrijft een getal in plaats van een woord. Hier
+    // gaan pauzeren en hervatten doorheen, en straks ook de coach zelf.
+    limitService: "easee.set_charger_dynamic_limit",
     // The words differ per brand and even per firmware, so they are typed in
     // rather than baked in. These are what Easee uses today.
     actions: [
       { key: "start", label: "Starten", fallback: "start", icon: "play" },
       { key: "stop", label: "Stoppen", fallback: "stop", icon: "stop" },
-      { key: "pause", label: "Pauzeren", fallback: "pause", icon: "pause" },
-      { key: "resume", label: "Hervatten", fallback: "resume", icon: "resume" },
+      // Pauzeren en hervatten gaan niet als opdracht maar als limiet, en dat is
+      // geen voorkeur maar een meting. Het commando `pause` schrijft bij Easee
+      // zelf een 0 in de dynamische laderlimiet en die staat na ongeveer een
+      // minuut vanzelf weer terug, waarna de auto verder laadt. Als opdracht is
+      // pauzeren dus onbetrouwbaar. Diezelfde 0 met houdbaarheid oneindig blijft
+      // wel staan, en laat de goedkeuring met rust: gemeten aan een echte paal
+      // op 17-08-2026 bleef de reden op `max_dynamic_charger_current_too_low`
+      // staan en sprong hij niet naar `pending_authorization`, zoals bij stop.
+      //
+      // Daarom hebben deze twee geen woord dat de klant kan invullen: er valt
+      // niets te spellen aan een getal.
+      {
+        key: "pause",
+        label: "Pauzeren",
+        icon: "pause",
+        limit: { current: 0, time_to_live: 0 },
+      },
+      {
+        key: "resume",
+        label: "Hervatten",
+        icon: "resume",
+        // "max" wordt vlak voor het versturen opgezocht: de maximale limiet van
+        // de lader zelf. Is die niet uit te lezen, dan 32, want de laderlimiet
+        // begrenst dat alsnog. Zo geeft hervatten de paal terug wat hij aankan
+        // en niet een getal dat wij verzinnen.
+        limit: { current: "max", time_to_live: 0 },
+      },
       // Rebooting is a different kind of thing from the other four: it drops
       // whatever the charger is doing and brings the box back up, so it stands
       // apart in the manual controls rather than in the row with them.
@@ -435,7 +463,7 @@ function pressCall(entityId) {
  * Commands whose half is missing are left out rather than shown broken -- a
  * button that cannot work should not be on screen.
  */
-export function deviceCommands(device) {
+export function deviceCommands(device, readNumber) {
   const brand = brandMeta(device);
   if (!brand) return [];
 
@@ -444,6 +472,27 @@ export function deviceCommands(device) {
   if (brand.service && device?.device_id) {
     const [domain, service] = brand.service.split(".");
     for (const action of brand.actions ?? []) {
+      if (action.limit) {
+        // Een getal in plaats van een woord. `readNumber` is er om "max" op te
+        // zoeken bij de lader zelf; wie hem niet meegeeft krijgt de 32 die de
+        // laderlimiet toch begrenst.
+        if (!brand.limitService) continue;
+        const [limitDomain, limitService] = brand.limitService.split(".");
+        const current =
+          action.limit.current === "max"
+            ? readNumber?.(device?.entities?.max_limit) || 32
+            : action.limit.current;
+        commands.push({
+          ...action,
+          call: {
+            domain: limitDomain,
+            service: limitService,
+            data: { ...action.limit, device_id: device.device_id, current },
+          },
+        });
+        continue;
+      }
+
       // The word is the customer's own: brands and even firmware versions
       // disagree on what to call these, so what is typed in wins and the
       // brand's default is only the starting point.
