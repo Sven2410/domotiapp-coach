@@ -114,6 +114,17 @@ class DacViewInstallation extends DacEditorElement {
               </div>
             </div>
 
+            <label class="check" for="netting">
+              <input type="checkbox" id="netting">
+              <span>
+                <strong>Je levert nog gesaldeerd terug</strong>
+                Dan streept elke teruggeleverde kWh weg tegen een ingekochte, en is hij dus
+                precies je inkoopprijs waard in plaats van je terugleververgoeding. De coach
+                rekent daar dan mee, en dat verandert wat het waard is om je eigen zon te
+                gebruiken. De regeling loopt af op 1 januari 2027.
+              </span>
+            </label>
+
             <!-- vast -->
             <div id="fixed-fields" class="fields">
               <div class="two">
@@ -265,6 +276,11 @@ class DacViewInstallation extends DacEditorElement {
       this.afterChange_();
     });
 
+    this.$("#netting").addEventListener("change", (ev) => {
+      this.draft_.contract.netting = ev.target.checked;
+      this.afterChange_();
+    });
+
     this.$("#balancer").addEventListener("change", (ev) => {
       this.draft_.installation.load_balancer = ev.target.checked;
       this.afterChange_();
@@ -345,6 +361,7 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#max-grid").value = inst.max_grid_watts;
     this.$("#max-auto").checked = Boolean(inst.max_grid_auto);
     this.$("#balancer").checked = Boolean(inst.load_balancer);
+    this.$("#netting").checked = Boolean(this.draft_.contract.netting);
 
     this.$("#fx-price").value = contract.fixed.all_in_price;
     this.$("#fx-feedin").value = contract.fixed.feed_in_tariff;

@@ -46,6 +46,10 @@ const REFRESH_MS = 2000;
 /** Surplus worth acting on, in watts -- roughly a dishwasher. */
 const SURPLUS_W = 1500;
 
+// Waaronder teruglevering ruis is en geen overschot. Een meter die om nul heen
+// wiebelt hoort geen zin op te leveren.
+const TRICKLE_W = 100;
+
 /** Import worth mentioning, in watts. */
 const HEAVY_IMPORT_W = 2500;
 
@@ -136,6 +140,19 @@ function advise(r, thresholds, configured, alertAt) {
       tag: "Signaal",
       title: "Veel vraag uit het net",
       body: `Je woning trekt nu ${powerText(r.importW)} uit het net terwijl de zon weinig levert. Kijk of er iets aan staat dat kan wachten.`,
+    };
+  }
+
+  // Wel overschot, maar te weinig om iets mee te doen. Dat is geen "er gebeurt
+  // niets": er gaat stroom naar het net waar je minder voor krijgt dan hij je
+  // kost. Zeggen dat er niets aan de hand is terwijl de klant ziet dat hij
+  // teruglevert, is precies waarvan iemand denkt dat de coach niet oplet.
+  if ((r.exportW ?? 0) > TRICKLE_W) {
+    return {
+      tone: "var(--dac-accent-hi)",
+      tag: "Rustig",
+      title: "Je levert een beetje terug",
+      body: `Je levert nu ${powerText(r.exportW)} terug. Dat is te weinig om iets zwaars mee te draaien, dus de coach laat het zo.`,
     };
   }
 
@@ -1437,10 +1454,16 @@ class DacViewOverview extends DacElement {
     this.$(`[data-coach-reason="${slot}"]`).textContent = besluit.reason ?? "";
     this.$(`[data-coach-plan="${slot}"]`).textContent = besluit.plan ?? "";
 
+    // Wat de knop doet is niet "begin met laden" maar "de coach mag dit
+    // apparaat sturen". Zolang er niets gebeurt komt dat op hetzelfde neer.
+    // Laadt de auto al, dan valt er niets te beginnen en leest "Ja, doe maar"
+    // als een vraag over iets dat allang aan de gang is.
     const knop = this.$(`[data-coach-yes="${slot}"]`);
     const vraagt = besluit.level === "propose" && !besluit.approved && besluit.charge;
     knop.hidden = !vraagt;
-    knop.textContent = vraagt ? "Ja, doe maar" : "";
+    knop.textContent = vraagt
+      ? (besluit.charging ? "Ja, neem het over" : "Ja, doe maar")
+      : "";
 
     // Snelladen alleen aanbieden waar de coach ook echt kan sturen en er een
     // auto aan hangt. Een knop die niets kan doen is erger dan geen knop.

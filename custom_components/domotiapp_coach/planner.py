@@ -97,6 +97,19 @@ STEP_AMPS = 1
 # actually lands in the battery.
 CHARGE_EFFICIENCY = 0.9
 
+# Hoeveel goedkoper het ene moment moet zijn dan het andere voordat het meetelt.
+# Een tiende cent per kWh, want dat is ook de fijnheid waarmee het paneel prijzen
+# opschrijft: is het verschil kleiner, dan staan er twee gelijke bedragen op het
+# scherm en zou de klant een keuze lezen die nergens op slaat.
+#
+# Dit is geen verfijning maar een reparatie. Bij een vast contract is de prijs
+# van nu en de prijs van straks hetzelfde getal, en dan hangt "is dit goedkoper"
+# af van de laatste cijfers achter de komma van een deling die wiskundig precies
+# nul verschil oplevert. Viel dat de verkeerde kant op, dan besloot de coach dat
+# hij op zon laadde terwijl er geen zon was, en pakte hij de zuinige zonstroom in
+# plaats van het volle vermogen.
+PRICE_MARGIN = 0.001
+
 
 # --- What the coach is told -----------------------------------------------
 
@@ -747,7 +760,7 @@ def _decide(
         if straks is None:
             straks = tariff.buy if tariff.buy is not None else koop
 
-        if nu_kost < straks:
+        if nu_kost < straks - PRICE_MARGIN:
             # Nu laden kost minder dan wachten op een goedkoop uur. Maar er is
             # een derde mogelijkheid die geen van beide is: wachten op meer zon.
             # Moet er nu nog bijgekocht worden en zegt de verwachting dat het
@@ -811,10 +824,50 @@ def _decide(
             hold_minutes=MIN_HOLD_MINUTES,
         )
 
-    # --- the cheap hours ---------------------------------------------------
+    # --- een vast contract -------------------------------------------------
+    #
+    # Zonder prijslijst is er geen goedkoop uur om op te wachten: elk uur van de
+    # dag kost hetzelfde. Er is wél iets anders om op te wachten, en dat is het
+    # enige wat een vast contract goedkoper kan maken: je eigen zon. Bij een
+    # gebruikelijk vast contract is een zelf gebruikte kWh al gauw twintig cent
+    # meer waard dan een teruggeleverde, dus een auto die 's ochtends bewolkt
+    # vollaadt terwijl de middag zonnig wordt, kost een paar euro per keer.
+    #
+    # Wachten mag alleen als de coach ook kan weten dat hij het haalt, en dat
+    # kan hij precies dan als er een klaar-tijd staat én bekend is hoeveel er
+    # nog in de auto moet. De regel die daarop let staat hierboven en rekent met
+    # de werkelijk gemeten laadstroom, dus die grijpt vanzelf in op het laatste
+    # moment dat nog past. Meer is er niet nodig: geen voorspelling, geen
+    # aanname over hoeveel zon er straks over is.
+    #
+    # Ontbreekt een van die twee, dan laadt hij zoals hij altijd deed. Liever een
+    # keer te duur dan één keer een auto die 's ochtends niet weg kan.
     if not prices:
-        # Without a price list there is nothing to choose between, so a fixed
-        # tariff simply charges inside its window.
+        if tariff.buy is None:
+            # Geen prijslijst én geen vast bedrag: dan weet de coach helemaal
+            # niet wat stroom kost. Dat is geen vast contract maar een gat, en
+            # het hoort niet stilletjes te lijken op een normale beslissing.
+            # Zo ziet een prijssensor eruit die even niets levert, of een
+            # contract dat nog niet is ingevuld. Laden doet hij wel, want een
+            # lege auto is erger dan een dure, maar hij zegt erbij waarom hij
+            # niets beters kan.
+            return Decision(
+                True,
+                ceiling,
+                "Er komen geen prijzen binnen, dus hij laadt gewoon binnen je tijden. "
+                "Kijk bij Installatie of je prijssensor het nog doet.",
+                rule="no-prices",
+            )
+
+        if window.enabled and end and needed is not None and _zon_verwacht(sun, car):
+            return Decision(
+                False,
+                0,
+                "Alles kost hetzelfde bij een vast contract, dus hij wacht op je eigen zon.",
+                plan=f"Komt die niet, dan laadt hij alsnog op tijd voor {_clock(end)}.",
+                rule="wait-for-sun",
+                hold_minutes=_hold_until(now, end),
+            )
         return Decision(
             True,
             ceiling,
@@ -894,6 +947,32 @@ def _beter_straks(
 # omdat er niets te beschermen valt, en één omdat wachten daar gevaarlijk is:
 # een aansluiting die vol zit, zit vol.
 NEVER_HOLD = frozenset({"disconnected", "complete", "user-hold", "no-room"})
+
+
+def _zon_verwacht(sun: Sun, car: Car) -> bool:
+    """Of er vandaag genoeg zon aankomt om überhaupt op te wachten.
+
+    Dit is een poortje en geen som. Zegt de verwachting dat er vandaag minder
+    opgewekt wordt dan er nog in de auto moet, dan valt er niets te halen en is
+    wachten alleen maar uitstel: dan kan hij net zo goed nu laden, op een moment
+    dat de rest van het huis nog rustig is.
+
+    Er wordt bewust niet geprobeerd te schatten hoeveel daarvan overblijft nadat
+    het huis zijn deel heeft gehad. Dat zou een verzonnen getal zijn, en het is
+    niet nodig: waar het echt om gaat, namelijk of de auto op tijd vol is, wordt
+    door de klaar-tijd bewaakt en niet door deze schatting.
+
+    **Zonder verwachting wordt er niet gewacht.** Wachten moet een reden hebben,
+    en "ik weet het niet" is er geen. Wie geen zonverwachting heeft ingevuld
+    houdt dus precies het gedrag dat hij gewend was. Dat scheelt bovendien een
+    vervelend randgeval: 's nachts om twee uur is er niets om op te wachten, en
+    dan is het beter om te laden terwijl het huis nog rustig is dan om tot het
+    laatste moment te blijven staan.
+    """
+    if sun.remaining_kwh is None:
+        return False
+    nodig = energy_needed_kwh(car)
+    return nodig is None or sun.remaining_kwh >= nodig
 
 
 def _keep_alive(

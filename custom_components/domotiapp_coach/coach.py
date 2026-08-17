@@ -21,7 +21,10 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ServiceNotFound
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_time_interval,
+)
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -67,10 +70,16 @@ CONFIRM_SECONDS = 15
 # a car stands still all night because the decision happened not to change.
 NUDGE_INTERVAL = timedelta(minutes=5)
 
-# Over hoeveel rondes het overschot wordt gladgestreken voor er omhoog wordt
+# Over hoeveel tijd het overschot wordt gladgestreken voor er omhoog wordt
 # gestuurd. Drie minuten is lang genoeg om een wolk te laten passeren en kort
 # genoeg om een opklaring niet te missen.
-SMOOTH_SAMPLES = 3
+#
+# Uitdrukkelijk een tijd en geen aantal metingen. Dat was het eerst wel, en dat
+# klopte zolang er precies één ronde per minuut liep. Sinds een kabel of een
+# statuswissel ook een ronde start, kunnen drie metingen binnen drie seconden
+# vallen, en dan hangt een meting van vlak vóór het inpluggen nog in het venster
+# en ziet de coach geen zon terwijl het dak vol ligt.
+SMOOTH_WINDOW = timedelta(minutes=3)
 
 # Hoe ruim voor het einde een lopende pauze opnieuw wordt weggeschreven. Vijf
 # minuten is vier ronden speling, dus een gemiste ronde laat de auto niet
@@ -147,7 +156,7 @@ class ChargerCoach:
         # When a charging point that was not following was last prodded.
         self._nudged: dict[str, datetime] = {}
         # De laatste metingen van het overschot, per apparaat, om op te dempen.
-        self._zon: dict[str, list[float]] = {}
+        self._zon: dict[str, list[tuple[datetime, float]]] = {}
         # Wie er op snelladen staat. Net als een akkoord niet bewaard over een
         # herstart heen en afgelopen zodra de kabel eruit gaat: snelladen is
         # iets voor nu, niet iets wat stilletjes blijft staan.
@@ -162,6 +171,12 @@ class ChargerCoach:
         # niet opnieuw verstuurt: zonder deze klok zou een pauze van drie uur
         # verlopen omdat er niets veranderde, en ging de auto vanzelf laden.
         self._pause_until: dict[str, datetime] = {}
+        # Draait er op dit moment een ronde? Er kan er maar één tegelijk, want
+        # een ronde stuurt opdrachten en twee tegelijk zouden elkaar overschrijven.
+        self._running = False
+        # De statussensoren waar we op meeluisteren, en hoe we dat weer opzeggen.
+        self._watched: set[str] = set()
+        self._unwatch = None
 
     @callback
     def async_start(self) -> None:
@@ -181,9 +196,69 @@ class ChargerCoach:
         if self._cancel is not None:
             self._cancel()
             self._cancel = None
+        if self._unwatch is not None:
+            self._unwatch()
+            self._unwatch = None
+        self._watched = set()
+
+    @callback
+    def async_refresh(self) -> None:
+        """Nu meteen een ronde draaien, in plaats van tot de volgende minuut wachten.
+
+        Een minuut is snel genoeg om een zekering voor te blijven, maar veel te
+        traag als er iemand naar zit te kijken. Wie op pauze drukt en een halve
+        minuut niets ziet gebeuren, concludeert dat de knop stuk is en gaat
+        zoeken naar een andere manier. En wie de kabel eruit trekt, hoort niet
+        nog een minuut op zijn scherm te lezen dat hij zelf gepauzeerd heeft.
+        """
+        self.hass.async_create_task(self._tick())
+
+    def _watch(self, entity_ids: set[str]) -> None:
+        """Meeluisteren met de statussensoren van de laadpalen.
+
+        Zodat een kabel die erin gaat of eruit komt binnen een seconde een verse
+        beslissing oplevert in plaats van bij de volgende ronde. De lijst
+        verandert alleen als er apparaten bij komen of af gaan, dus dit doet
+        vrijwel nooit iets.
+        """
+        if entity_ids == self._watched:
+            return
+        if self._unwatch is not None:
+            self._unwatch()
+            self._unwatch = None
+        self._watched = entity_ids
+        if entity_ids:
+            self._unwatch = async_track_state_change_event(
+                self.hass, sorted(entity_ids), self._async_state_changed
+            )
+
+    @callback
+    def _async_state_changed(self, event) -> None:
+        """Een laadpaal die van toestand wisselt is reden om opnieuw te kijken."""
+        old = event.data.get("old_state")
+        new = event.data.get("new_state")
+        if old is None or new is None or old.state == new.state:
+            return
+        self.async_refresh()
 
     async def _tick(self, now: datetime | None = None) -> None:
-        """One round: look, think, act."""
+        """One round: look, think, act.
+
+        Er kan er maar één tegelijk lopen. Een ronde wordt niet alleen door de
+        klok gestart maar ook door een druk op een knop en door een laadpaal die
+        van toestand wisselt, en twee rondes die tegelijk opdrachten sturen
+        zouden elkaar in de weg zitten.
+        """
+        if self._running:
+            return
+        self._running = True
+        try:
+            await self._round(now)
+        finally:
+            self._running = False
+
+    async def _round(self, now: datetime | None) -> None:
+        """Wat er in één ronde gebeurt."""
         try:
             settings = await async_get_store(self.hass).async_load()
         except Exception:  # noqa: BLE001 - never let a bad read stop the timer
@@ -193,9 +268,20 @@ class ChargerCoach:
         level = (settings.get("strategy") or {}).get("level", LEVEL_PROPOSE)
         moment = dt_util.as_local(now or dt_util.utcnow()).replace(tzinfo=None)
 
-        for device in settings.get("devices") or []:
-            if device.get("type") != "laadpaal" or not device.get("controllable"):
-                continue
+        chargers = [
+            device
+            for device in settings.get("devices") or []
+            if device.get("type") == "laadpaal" and device.get("controllable")
+        ]
+        self._watch(
+            {
+                entity
+                for device in chargers
+                if (entity := (device.get("entities") or {}).get("status"))
+            }
+        )
+
+        for device in chargers:
             try:
                 await self._one(moment, settings, device, level)
             except ServiceNotFound as fout:
@@ -267,6 +353,10 @@ class ChargerCoach:
         self.state[device_id]["approved"] = device_id in self._approved
         self.state[device_id]["boost"] = device_id in self._boost
         self.state[device_id]["paused"] = device_id in self._paused
+        # Of de paal op dit moment werkelijk laadt. Niet voor een besluit maar
+        # voor de kaart: een akkoord vragen leest anders als de auto al loopt.
+        # Dan begint er niets, dan wordt er iets overgenomen.
+        self.state[device_id]["charging"] = charger.charging
         self.hass.bus.async_fire(
             EVENT_DECISION, {"device": device_id, **self.state[device_id]}
         )
@@ -311,7 +401,7 @@ class ChargerCoach:
             elif not decision.charge:
                 self._since.pop(device_id, None)
 
-    def _smooth(self, device_id: str, surplus: float) -> float:
+    def _smooth(self, device_id: str, surplus: float, now: datetime) -> float:
         """Het overschot, ontdaan van het gerimpel van een enkele minuut.
 
         Een wolk die voor de zon schuift, een waterkoker die aangaat: het
@@ -327,9 +417,10 @@ class ChargerCoach:
         metingen gerekend, en voor omlaag met de meting van nu.
         """
         recent = self._zon.setdefault(device_id, [])
-        recent.append(surplus)
-        del recent[:-SMOOTH_SAMPLES]
-        return min(recent)
+        recent.append((now, surplus))
+        grens = now - SMOOTH_WINDOW
+        recent[:] = [meting for meting in recent if meting[0] >= grens]
+        return min(waarde for _, waarde in recent)
 
     def _following(
         self, device: dict[str, Any], charger: Charger, decision: Decision
@@ -422,6 +513,7 @@ class ChargerCoach:
         dynamic = contract.get("dynamic") or {}
         all_in = dynamic.get("source") == "all_in"
         kosten = float(dynamic.get("feed_in_costs") or 0)
+        salderen = bool(contract.get("netting"))
 
         markt = self._slots(dynamic.get("market_entity"))
         inkoop = self._slots(dynamic.get("all_in_entity")) if all_in else markt
@@ -431,12 +523,21 @@ class ChargerCoach:
         rows: list[dict] = []
         for start, (end, prijs) in inkoop.items():
             terug = None
-            if all_in:
+            if not all_in:
+                prijs = self._all_in(prijs, dynamic)
+
+            if salderen:
+                # Salderen betekent dat een teruggeleverde kWh wegstreept tegen
+                # een ingekochte, dus is hij precies de inkoopprijs waard. Er is
+                # dan geen marktprijssensor voor nodig: het antwoord staat al in
+                # de prijs die er is.
+                terug = prijs - kosten
+            elif all_in:
                 if start in markt:
                     terug = markt[start][1] - kosten
             else:
-                terug = prijs - kosten
-                prijs = self._all_in(prijs, dynamic)
+                terug = markt[start][1] - kosten if start in markt else None
+
             rows.append({"start": start, "end": end, "price": prijs, "feed_in": terug})
         return sorted(rows, key=lambda item: item["start"])
 
@@ -461,18 +562,31 @@ class ChargerCoach:
 
     @staticmethod
     def _tariff(settings: dict[str, Any]) -> Tariff:
-        """Wat een kWh kost en opbrengt als de prijslijst niets zegt."""
+        """Wat een kWh kost en opbrengt als de prijslijst niets zegt.
+
+        Bij een vast contract staat het hele jaar hetzelfde getal, dus is er geen
+        lijst en is dit alles wat de coach heeft. Juist daar telt het zwaar: het
+        verschil tussen inkopen en terugleveren is bij een vast contract de enige
+        reden die er is om het ene moment boven het andere te verkiezen.
+        """
         contract = settings.get("contract") or {}
         if contract.get("type") == "dynamic":
             return Tariff()
 
         fixed = contract.get("fixed") or {}
         prijs = fixed.get("all_in_price")
-        return Tariff(
-            buy=float(prijs) if prijs is not None else None,
-            feed_in=float(fixed.get("feed_in_tariff") or 0)
-            - float(fixed.get("feed_in_costs") or 0),
-        )
+        koop = float(prijs) if prijs is not None else None
+        kosten = float(fixed.get("feed_in_costs") or 0)
+
+        if contract.get("netting"):
+            # Salderen: wat je teruglevert streept weg tegen wat je inkoopt, dus
+            # is het de inkoopprijs waard. Het ingevulde terugleverbedrag geldt
+            # dan niet; dat is pas aan de orde boven wat je zelf verbruikt.
+            terug = None if koop is None else koop - kosten
+        else:
+            terug = float(fixed.get("feed_in_tariff") or 0) - kosten
+
+        return Tariff(buy=koop, feed_in=terug)
 
     @staticmethod
     def _all_in(market: float, dynamic: dict[str, Any]) -> float:
@@ -520,7 +634,7 @@ class ChargerCoach:
 
         laadvermogen = _number(self.hass, device.get("entity")) or 0.0
         surplus = max(0.0, netto + laadvermogen if compleet else max(0.0, netto))
-        surplus = self._smooth(device.get("id", ""), surplus)
+        surplus = self._smooth(device.get("id", ""), surplus, now)
 
         phases = []
         for key in ("l1", "l2", "l3"):
@@ -673,11 +787,13 @@ class ChargerCoach:
     def async_approve(self, device_id: str) -> None:
         """The customer agreed to this charging session."""
         self._approved.add(device_id)
+        self.async_refresh()
 
     @callback
     def async_withdraw(self, device_id: str) -> None:
         """And can take that back."""
         self._approved.discard(device_id)
+        self.async_refresh()
 
     @callback
     def async_boost(self, device_id: str, on: bool) -> None:
@@ -689,6 +805,7 @@ class ChargerCoach:
             self._paused.discard(device_id)
         else:
             self._boost.discard(device_id)
+        self.async_refresh()
 
     @callback
     def async_boosting(self, device_id: str) -> bool:
@@ -709,6 +826,7 @@ class ChargerCoach:
             self._boost.discard(device_id)
         else:
             self._paused.discard(device_id)
+        self.async_refresh()
 
     @callback
     def async_paused(self, device_id: str) -> bool:
