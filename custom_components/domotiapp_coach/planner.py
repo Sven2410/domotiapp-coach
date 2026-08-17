@@ -70,6 +70,25 @@ SURPLUS_SLACK = 0.9
 # cycles.
 MIN_RUN_MINUTES = 10
 
+# Hoeveel ronden achtereen de ladder "stoppen" moet zeggen voordat er echt
+# gestopt wordt. Een wolk duurt een minuut of twee, en daarvoor hoort een sessie
+# niet af te breken.
+#
+# Dit staat los van de minimale looptijd hierboven en dat is geen dubbelop. De
+# minimale looptijd beschermt alleen het bégin van een sessie; daarna kon één
+# meting een sessie afbreken die al een uur liep. Samen begrenzen ze ook meteen
+# hoe vaak er geschakeld kan worden: tien minuten draaien plus drie minuten
+# uitstel plus een ronde maakt veertien minuten per cyclus, dus hooguit vier per
+# uur. Een aparte teller daarvoor zou een mechanisme zijn dat zijn werk al gedaan
+# ziet.
+STOP_ROUNDS = 3
+
+# De grenzen van een pauze die met een houdbaarheidsduur wordt weggeschreven.
+# Korter dan een kwartier is niet de moeite en zou kunnen verlopen tussen twee
+# ronden door; langer dan achttien uur neemt de laadpaal niet aan.
+MIN_HOLD_MINUTES = 15
+MAX_HOLD_MINUTES = 1080
+
 # Only bother re-commanding when the difference is worth it; anything smaller is
 # below what a car itself regulates to.
 STEP_AMPS = 1
@@ -133,9 +152,18 @@ class Charger:
     # balancer on the connection, or the car itself, can hold the charger below
     # the limit the coach set.
     actual_amps: float = 0.0
+    # De auto is vol. De kabel hangt er nog, maar er valt niets meer te laden en
+    # dus ook niets meer te beslissen. Zonder deze viel een volle auto door naar
+    # de zon- of prijsregel en stond er op de kaart dat hij nu het goedkoopst
+    # laadt terwijl er niets gebeurt.
+    complete: bool = False
     # De bewoner heeft gezegd dat het nu moet, hoe duur het ook is. Voor wie
     # eerder weg moet dan gepland; makkelijker dan een schema omgooien.
     boost: bool = False
+    # En het omgekeerde: de bewoner heeft zelf op pauze gedrukt. Dat is geen
+    # advies maar een opdracht, dus de coach houdt zijn handen thuis tot het
+    # weer uit gaat of de kabel eruit komt.
+    paused_by_user: bool = False
     # A load balancer has put the session on hold. Asking again changes nothing;
     # only waiting does.
     paused_by_balancer: bool = False
@@ -219,6 +247,16 @@ class Decision:
     plan: str = ""
     # Which of the rules got us here, for the log rather than for the screen.
     rule: str = ""
+    # Of dit een sessie is die tegen de ladder in wordt aangehouden. Alleen om
+    # te tellen hoe lang dat al duurt; de klant leest het in `reason`.
+    holding: bool = False
+    # Hoe lang de coach van plan is deze pauze vast te houden, in minuten, of
+    # None voor "tot nader order". Dat is geen tekst maar een getal dat de
+    # laadpaal meekrijgt: valt de coach weg, dan bepaalt dit of de auto blijft
+    # staan of vanzelf weer gaat laden. Bij wachten op een goedkoop uur mag hij
+    # verlopen, want doorladen is dan hooguit duur. Bij een volle aansluiting
+    # niet, want dan is doorladen gevaarlijk.
+    hold_minutes: int | None = None
 
 
 # --- The sums -------------------------------------------------------------
@@ -484,6 +522,20 @@ def _clock(moment: datetime) -> str:
     return moment.strftime("%H:%M")
 
 
+def _hold_until(now: datetime, moment: datetime | None) -> int:
+    """Hoeveel minuten een pauze mee moet gaan om tot `moment` te reiken.
+
+    Binnen de grenzen die een laadpaal aanneemt. Zonder moment wordt het de
+    ondergrens: dan is er geen plan om op te wachten en is een korte pauze die
+    elke ronde opnieuw beoordeeld wordt eerlijker dan een lange die niemand
+    onderbouwd heeft.
+    """
+    if moment is None:
+        return MIN_HOLD_MINUTES
+    minuten = int((moment - now).total_seconds() // 60)
+    return max(MIN_HOLD_MINUTES, min(MAX_HOLD_MINUTES, minuten))
+
+
 # --- The decision ---------------------------------------------------------
 
 
@@ -497,6 +549,7 @@ def decide(
     goal: str = "cost",
     tariff: Tariff = Tariff(),
     sun: Sun = Sun(),
+    holding: int = 0,
 ) -> Decision:
     """What to do with this charging point, and how to say it.
 
@@ -504,6 +557,16 @@ def decide(
     a load balancer on the connection can overrule the coach without asking, and
     when it does, the customer should read that rather than a plan that is not
     being carried out.
+
+    En hier staat ook het omgekeerde: een lopende sessie wordt niet meteen
+    afgebroken als de ladder van gedachten verandert. Dat is met opzet geen
+    sport in de ladder maar een filter erna, want het gaat over de vraag óf er
+    gestopt wordt en niet over hoe hard er geladen wordt. Toen het wel een sport
+    was, greep hij bij een verse zonnesessie het volle plafond en werd er tien
+    minuten lang bijgekocht terwijl het dak vol zon lag.
+
+    `holding` is hoeveel ronden er al tegen de ladder in wordt doorgeladen; de
+    laag die de sensoren leest houdt dat bij.
 
     Note what is *not* done here. The coach never withdraws its request when it
     is being held back. It keeps asking, because the balancer works on the
@@ -514,7 +577,7 @@ def decide(
     decision = _decide(now, prices, grid, car, charger, window, goal, tariff, sun)
 
     if not decision.charge:
-        return decision
+        return _keep_alive(now, grid, car, charger, decision, holding)
 
     if charger.paused_by_balancer:
         return Decision(
@@ -558,12 +621,15 @@ def _decide(
     makes the outcome explainable: there is always exactly one reason.
 
     1. No cable, nothing to decide.
-    2. A guest charges, full stop.
-    3. Outside the window the coach keeps its hands off.
-    4. The deadline is close enough that waiting would miss it.
-    5. There is surplus from the roof worth using.
-    6. This hour is one of the cheap ones the plan picked.
-    7. Otherwise: wait.
+    2. De auto is vol; er valt niets meer te kiezen.
+    3. De bewoner heeft zelf gepauzeerd.
+    4. De aansluiting zit vol.
+    5. A guest charges, full stop.
+    6. Outside the window the coach keeps its hands off.
+    7. The deadline is close enough that waiting would miss it.
+    8. There is surplus from the roof worth using.
+    9. This hour is one of the cheap ones the plan picked.
+    10. Otherwise: wait.
 
     Above all of them sits the ceiling, so no rule can ever ask for more than
     the fuse, the charger or the car allows.
@@ -572,6 +638,23 @@ def _decide(
 
     if not charger.connected:
         return Decision(False, 0, "Er hangt geen auto aan de lader.", rule="disconnected")
+
+    if charger.complete:
+        # Er hangt nog een kabel, maar de auto neemt niets meer af. Zonder deze
+        # sport viel dat door naar de zon- of prijsregel en stond er op de kaart
+        # dat dit het goedkoopste moment is om te laden, terwijl er niets
+        # gebeurde. Dat ondermijnt precies het vertrouwen dat één reden per
+        # besluit moet opbouwen.
+        return Decision(False, 0, "De auto is vol.", rule="complete", hold_minutes=MIN_HOLD_MINUTES)
+
+    if charger.paused_by_user:
+        return Decision(
+            False,
+            0,
+            "Je hebt het laden zelf gepauzeerd.",
+            plan="Blijft stilstaan tot je het hervat of de kabel eruit gaat.",
+            rule="user-hold",
+        )
 
     if ceiling < MIN_AMPS:
         return Decision(
@@ -602,17 +685,6 @@ def _decide(
             rule="guest",
         )
 
-    # Once running, keep running for a bit. Cars mind being interrupted more
-    # than the electricity bill minds a few extra minutes.
-    if charger.charging and charger.started_at is not None:
-        if now - charger.started_at < timedelta(minutes=MIN_RUN_MINUTES):
-            return Decision(
-                True,
-                min(ceiling, _running_amps(grid, car, ceiling, goal)),
-                "Net begonnen met laden.",
-                rule="min-run",
-            )
-
     start = window.opens if window.enabled else None
     end = window.deadline if window.enabled else None
 
@@ -623,6 +695,7 @@ def _decide(
             f"Laden mag vanaf {_clock(start)}.",
             plan=f"Begint na {_clock(start)}, op het goedkoopste moment dat past.",
             rule="too-early",
+            hold_minutes=_hold_until(now, start),
         )
 
     # --- the deadline outranks everything ---------------------------------
@@ -690,6 +763,7 @@ def _decide(
                     f"goedkoper dan er nu stroom bij te kopen.",
                     plan="Wacht op de zon die eraan komt.",
                     rule="wait-for-forecast",
+                    hold_minutes=MIN_HOLD_MINUTES,
                 )
 
             dekt = grid.surplus_w >= trekt
@@ -734,6 +808,7 @@ def _decide(
             "Er is te weinig overschot om op te laden.",
             plan="Wacht op de zon; als de klaar-tijd in zicht komt, laadt hij alsnog.",
             rule="wait-for-sun",
+            hold_minutes=MIN_HOLD_MINUTES,
         )
 
     # --- the cheap hours ---------------------------------------------------
@@ -765,6 +840,10 @@ def _decide(
         "Het is nu niet het goedkoopste moment om te laden.",
         plan=_describe(plan_hours),
         rule="wait-for-price",
+        # Tot het eerste uur dat hij van plan is te gebruiken. Verloopt de pauze
+        # doordat de coach wegvalt, dan laadt de auto vanaf dat moment gewoon
+        # door, en dat is precies het goede antwoord: duurder, maar wel vol.
+        hold_minutes=_hold_until(now, plan_hours[0]["start"] if plan_hours else None),
     )
 
 
@@ -811,12 +890,64 @@ def _beter_straks(
     return True
 
 
-def _running_amps(grid: Grid, car: Car, ceiling: int, goal: str) -> int:
-    """What to hold while the minimum run is being served out."""
-    surplus = int(amps_for(grid.surplus_w, car.phases))
-    if goal == "solar":
-        return max(MIN_AMPS, min(ceiling, surplus))
-    return ceiling
+# De uitkomsten waarbij een lopende sessie wél meteen mag stoppen. Drie ervan
+# omdat er niets te beschermen valt, en één omdat wachten daar gevaarlijk is:
+# een aansluiting die vol zit, zit vol.
+NEVER_HOLD = frozenset({"disconnected", "complete", "user-hold", "no-room"})
+
+
+def _keep_alive(
+    now: datetime,
+    grid: Grid,
+    car: Car,
+    charger: Charger,
+    decision: Decision,
+    holding: int,
+) -> Decision:
+    """Een sessie die loopt niet meteen afbreken omdat de ladder omslaat.
+
+    Twee redenen om door te laden, en ze staan naast elkaar.
+
+    **Net begonnen.** Cars dislike being interrupted, and a few of them stop
+    asking for current altogether after a handful of cycles.
+
+    **Even geduld.** Daarna kon één meting een sessie afbreken die al een uur
+    liep. Bij half bewolkt weer stopt en start hij dan om de paar minuten, en dat
+    is precies het gedrag waar de minimale looptijd voor bedoeld was. Dus moet de
+    ladder het een paar ronden achter elkaar volhouden voordat er echt gestopt
+    wordt.
+
+    **Op de laagste stand die kan.** Doorladen gebeurt hier niet om op te
+    schieten maar om de sessie in leven te houden, en dan is het goedkoopste
+    genoeg: wat het overschot draagt, met de ondergrens van de lader eronder.
+    """
+    if decision.rule in NEVER_HOLD:
+        return decision
+    if not charger.charging or charger.started_at is None:
+        return decision
+
+    net_begonnen = now - charger.started_at < timedelta(minutes=MIN_RUN_MINUTES)
+    if not net_begonnen and holding >= STOP_ROUNDS:
+        return decision
+
+    ceiling = ceiling_amps(grid, car, charger)
+    if ceiling < MIN_AMPS:
+        return decision
+
+    amps = max(MIN_AMPS, min(ceiling, int(amps_for(grid.surplus_w, car.phases))))
+    reason = (
+        "Net begonnen met laden, dus hij houdt het nog even vol op de laagste stand."
+        if net_begonnen
+        else "Hij laadt nog even door op de laagste stand. Een auto stopt niet graag steeds."
+    )
+    return Decision(
+        True,
+        amps,
+        reason,
+        plan=decision.plan,
+        rule=f"{decision.rule}+hold",
+        holding=True,
+    )
 
 
 def _describe(hours: list[dict]) -> str:

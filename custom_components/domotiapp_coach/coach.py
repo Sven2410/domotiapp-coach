@@ -72,6 +72,24 @@ NUDGE_INTERVAL = timedelta(minutes=5)
 # genoeg om een opklaring niet te missen.
 SMOOTH_SAMPLES = 3
 
+# Hoe ruim voor het einde een lopende pauze opnieuw wordt weggeschreven. Vijf
+# minuten is vier ronden speling, dus een gemiste ronde laat de auto niet
+# onbedoeld aanslaan.
+PAUSE_REFRESH = timedelta(minutes=5)
+
+# De uitkomsten waarbij een pauze blijft staan tot de coach hem zelf weghaalt.
+# Bij een volle aansluiting zou aflopen betekenen dat de paal terugvalt op zijn
+# eigen maximum terwijl het huis al te veel trekt, en bij een pauze van de
+# bewoner zou het betekenen dat zijn eigen opdracht na een tijdje vervalt.
+# Overal elders is aflopen juist het goede antwoord: dan laadt de auto door, en
+# duur is beter dan leeg.
+FOREVER_RULES = frozenset({"no-room", "user-hold"})
+
+# En de uitkomsten waarbij er helemaal niets naar de paal gaat. Zonder kabel valt
+# er niets tegen te houden, en bij een volle auto zou een 0 die blijft staan de
+# volgende auto in de weg zitten.
+NO_WRITE_RULES = frozenset({"disconnected", "complete"})
+
 
 def _number(hass: HomeAssistant, entity_id: str | None) -> float | None:
     """A sensor read as a plain number, or None when it says nothing useful."""
@@ -134,6 +152,16 @@ class ChargerCoach:
         # herstart heen en afgelopen zodra de kabel eruit gaat: snelladen is
         # iets voor nu, niet iets wat stilletjes blijft staan.
         self._boost: set[str] = set()
+        # En wie er met de hand op pauze staat. Zelfde levensduur, tegengestelde
+        # bedoeling.
+        self._paused: set[str] = set()
+        # Hoeveel ronden een sessie al tegen de ladder in wordt aangehouden.
+        self._holding: dict[str, int] = {}
+        # Tot wanneer de pauze die er staat geldig is, voor zover die een
+        # houdbaarheid heeft. Nodig omdat de dode band een ongewijzigd besluit
+        # niet opnieuw verstuurt: zonder deze klok zou een pauze van drie uur
+        # verlopen omdat er niets veranderde, en ging de auto vanzelf laden.
+        self._pause_until: dict[str, datetime] = {}
 
     @callback
     def async_start(self) -> None:
@@ -201,6 +229,13 @@ class ChargerCoach:
         decision = decide(
             now, self._prices(settings), grid, car, charger, window, goal,
             self._tariff(settings), self._sun(settings),
+            holding=self._holding.get(device_id, 0),
+        )
+        # Bijhouden hoe lang een sessie al tegen de ladder in wordt aangehouden.
+        # Zodra de ladder het weer eens is met wat er gebeurt, staat de teller
+        # op nul en heeft de volgende wolk weer zijn volle uitstel.
+        self._holding[device_id] = (
+            self._holding.get(device_id, 0) + 1 if decision.holding else 0
         )
 
         # Remembered before anything is sent, so the panel can show what the
@@ -223,11 +258,15 @@ class ChargerCoach:
         if not charger.connected:
             self._approved.discard(device_id)
             self._boost.discard(device_id)
+            self._paused.discard(device_id)
             self._zon.pop(device_id, None)
+            self._holding.pop(device_id, None)
+            self._pause_until.pop(device_id, None)
 
         self.state[device_id]["applied"] = may_act
         self.state[device_id]["approved"] = device_id in self._approved
         self.state[device_id]["boost"] = device_id in self._boost
+        self.state[device_id]["paused"] = device_id in self._paused
         self.hass.bus.async_fire(
             EVENT_DECISION, {"device": device_id, **self.state[device_id]}
         )
@@ -241,10 +280,12 @@ class ChargerCoach:
         # that is exactly what a load balancer letting go looks like from here.
         # Prodding is on a timer of its own, because some of the reasons a
         # charger does not follow cannot be argued with by asking twice.
-        following = decision.charge == charger.charging
+        following = self._following(device, charger, decision)
         if following:
             self._nudged.pop(device_id, None)
-            if not should_send(self._last.get(device_id), decision):
+            if not should_send(self._last.get(device_id), decision) and not (
+                self._pause_expiring(device_id, now)
+            ):
                 return
         elif charger.paused_by_balancer or held_back(charger):
             # Not following, and saying why: something outside the coach is
@@ -260,7 +301,7 @@ class ChargerCoach:
             # waits five minutes for it has waited four too many.
             self._nudged.pop(device_id, None)
 
-        if await self._apply(device, charger, decision):
+        if await self._apply(device, charger, decision, now):
             self._last[device_id] = decision
             # A session that a balancer is holding has not begun, so it must not
             # be stamped as begun: doing so would run the minimum out while
@@ -289,6 +330,46 @@ class ChargerCoach:
         recent.append(surplus)
         del recent[:-SMOOTH_SAMPLES]
         return min(recent)
+
+    def _following(
+        self, device: dict[str, Any], charger: Charger, decision: Decision
+    ) -> bool:
+        """Of de laadpaal doet wat er gevraagd is.
+
+        Voor laden is dat simpel: laadt hij. Voor niet laden juist niet, en daar
+        zat een fout in. "Hij laadt nu niet" is namelijk niet hetzelfde als "hij
+        gaat niet laden": een paal die op goedkeuring staat te wachten met een
+        limiet van 32 erin begint zodra de auto erom vraagt. De coach zag dan
+        geen verschil met wat hij wilde en stuurde dus niets, waarna de auto ging
+        laden op een moment dat hij dat juist niet wilde. Wie zijn auto inplugt en
+        meteen op pauze drukt, kreeg zo een knop die niets deed.
+
+        Dus telt voor niet laden of onze nul er werkelijk staat, en niet of de
+        paal toevallig stilstaat. Kan die limiet niet teruggelezen worden, dan
+        blijft alleen de oude, zwakkere vraag over.
+        """
+        if decision.charge:
+            return charger.charging
+        if decision.rule in NO_WRITE_RULES:
+            return True
+
+        limiet = _number(self.hass, (device.get("entities") or {}).get("dynamic_limit"))
+        if limiet is None:
+            return not charger.charging
+        return limiet < 0.5
+
+    def _pause_expiring(self, device_id: str, now: datetime) -> bool:
+        """Of de pauze die er staat bijna verlopen is en opnieuw moet.
+
+        Een pauze wordt weggeschreven met de tijd die hij bedoeld is te duren,
+        want dat is wat er moet gebeuren als de coach wegvalt: bij wachten op een
+        goedkoop uur mag hij aflopen, en dan laadt de auto gewoon door. Maar
+        zolang de coach er wél is, moet die pauze niet halverwege omvallen omdat
+        het besluit toevallig niet veranderde. Vandaar dat hij ruim voor het
+        einde nog eens gezet wordt.
+        """
+        einde = self._pause_until.get(device_id)
+        return einde is not None and now >= einde - PAUSE_REFRESH
 
     def _nudge_due(self, device_id: str, now: datetime) -> bool:
         """Whether it is time to prod a charging point that is not following."""
@@ -477,7 +558,12 @@ class ChargerCoach:
             charging="charging" in status,
             started_at=self._since.get(device.get("id", "")),
             actual_amps=charger_amps,
+            # De paal zegt het zelf als de auto vol is, en dat is beter dan het
+            # afleiden uit een stroom die bijna nul is: dat laatste lijkt sprekend
+            # op een auto die om een andere reden niets vraagt.
+            complete="complete" in status,
             boost=device.get("id", "") in self._boost,
+            paused_by_user=device.get("id", "") in self._paused,
             paused_by_balancer="equalizer" in status or "load_balancing" in status,
             no_current_reason=_text(self.hass, entities.get("no_current_reason")),
         )
@@ -598,6 +684,9 @@ class ChargerCoach:
         """Snelladen aan of uit: laden op vol vermogen, ongeacht de prijs."""
         if on:
             self._boost.add(device_id)
+            # Twee tegengestelde opdrachten van dezelfde persoon: de laatste
+            # telt. Anders zou snelladen aanstaan terwijl er niets gebeurt.
+            self._paused.discard(device_id)
         else:
             self._boost.discard(device_id)
 
@@ -606,8 +695,28 @@ class ChargerCoach:
         """Of snelladen op dit moment aanstaat."""
         return device_id in self._boost
 
+    @callback
+    def async_pause(self, device_id: str, on: bool) -> None:
+        """Met de hand pauzeren of hervatten.
+
+        Anders dan de knoppen bij Handmatige besturing gaat dit niet langs de
+        coach heen maar erdoorheen: hij weet ervan en houdt zijn handen thuis.
+        Zonder dat zette de klant het laden stil en zette de coach het een minuut
+        later weer aan, en dan is het een knop die niet werkt.
+        """
+        if on:
+            self._paused.add(device_id)
+            self._boost.discard(device_id)
+        else:
+            self._paused.discard(device_id)
+
+    @callback
+    def async_paused(self, device_id: str) -> bool:
+        """Of de bewoner op dit moment zelf gepauzeerd heeft."""
+        return device_id in self._paused
+
     async def _apply(
-        self, device: dict[str, Any], charger: Charger, decision: Decision
+        self, device: dict[str, Any], charger: Charger, decision: Decision, now: datetime
     ) -> bool:
         """Send it, in the order the hardware wants.
 
@@ -615,27 +724,23 @@ class ChargerCoach:
         the charger really took the new limit. Blindly waiting a fixed second or
         two is either too short on a slow evening or wasted the rest of the
         time, and the panel already reads the limit back anyway.
+
+        **Er wordt nooit een stopcommando gestuurd.** Dat is geen voorkeur maar
+        een meting aan een echte paal: een stop haalt de goedkeuring van de
+        sessie eraf, en die moet daarna opnieuw gegeven worden. Niet laden gaat
+        daarom langs dezelfde weg als wel laden, namelijk de limiet, met een 0
+        erin. De sessie blijft dan gewoon goedgekeurd en hervatten is niets meer
+        dan een gewoon getal terugschrijven.
         """
         control = CHARGER_CONTROL.get(device.get("brand", ""))
         if not control or not device.get("device_id"):
             return False
 
         if not decision.charge:
-            if charger.charging:
-                await self._command(device, control, "stop")
-            return True
+            return await self._pause(device, control, charger, decision, now)
 
-        limit_domain, limit_service = control["limit_service"]
-        await self.hass.services.async_call(
-            limit_domain,
-            limit_service,
-            {
-                "device_id": device["device_id"],
-                control["limit_field"]: decision.amps,
-                **control.get("limit_extra", {}),
-            },
-            blocking=True,
-        )
+        self._pause_until.pop(device.get("id", ""), None)
+        await self._limit(device, control, decision.amps, 0)
 
         if charger.paused_by_balancer:
             # The limit above is still worth sending: it is our standing request
@@ -664,6 +769,52 @@ class ChargerCoach:
                 )
             await self._command(device, control, "start")
 
+        return True
+
+    async def _limit(
+        self, device: dict[str, Any], control: dict[str, Any], amps: int, minutes: int
+    ) -> None:
+        """De dynamische limiet zetten, met de houdbaarheid die erbij hoort.
+
+        `minutes` is 0 voor "tot nader order". Dat is het gewone geval voor een
+        limiet waarop geladen wordt: valt de coach weg, dan laadt de auto door op
+        een stroom die de paal eerder heeft aangenomen, en dat is veilig. Voor
+        een 0 ligt het andersom en staat de afweging bij `FOREVER_RULES`.
+        """
+        domain, service = control["limit_service"]
+        await self.hass.services.async_call(
+            domain,
+            service,
+            {
+                "device_id": device["device_id"],
+                control["limit_field"]: amps,
+                control["ttl_field"]: minutes,
+            },
+            blocking=True,
+        )
+
+    async def _pause(
+        self,
+        device: dict[str, Any],
+        control: dict[str, Any],
+        charger: Charger,
+        decision: Decision,
+        now: datetime,
+    ) -> bool:
+        """Niet laden, en dat vasthouden zonder de sessie op te breken."""
+        device_id = device.get("id", "")
+
+        if not charger.connected or decision.rule in NO_WRITE_RULES:
+            self._pause_until.pop(device_id, None)
+            return True
+
+        minutes = 0 if decision.rule in FOREVER_RULES else (decision.hold_minutes or 0)
+        await self._limit(device, control, 0, minutes)
+
+        if minutes:
+            self._pause_until[device_id] = now + timedelta(minutes=minutes)
+        else:
+            self._pause_until.pop(device_id, None)
         return True
 
     async def _confirmed(self, device: dict[str, Any], amps: int) -> bool:

@@ -128,9 +128,13 @@ CHARGER_CONTROL: Final = {
     "easee": {
         "limit_service": ("easee", "set_charger_dynamic_limit"),
         "limit_field": "current",
-        # Nought means "until further notice". A limit that expires would fall
-        # back to the charger's own maximum, which is the wrong way to fail.
-        "limit_extra": {"time_to_live": 0},
+        # De houdbaarheid van die limiet, in minuten, waarbij 0 oneindig is en
+        # 1080 het hoogste dat de paal aanneemt. Dit is geen instelling maar een
+        # antwoord per geval op de vraag: wat moet er gebeuren als de coach
+        # wegvalt terwijl dit getal er staat? Bij een stroom om op te laden is
+        # doorladen veilig, dus oneindig. Bij een 0 hangt het ervan af waarom er
+        # gepauzeerd wordt; dat staat in coach.py bij `FOREVER_RULES`.
+        "ttl_field": "time_to_live",
         "command_service": ("easee", "action_command"),
         "command_field": "action_command",
         "words": {"start": "start", "stop": "stop", "pause": "pause", "resume": "resume"},

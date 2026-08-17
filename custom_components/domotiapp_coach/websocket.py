@@ -532,6 +532,31 @@ def async_coach_boost(
     connection.send_result(msg["id"], {"boost": msg["boost"]})
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/coach/pause",
+        vol.Required("device_id"): str,
+        vol.Required("paused"): bool,
+    }
+)
+@callback
+def async_coach_pause(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Het laden met de hand stilzetten of hervatten.
+
+    Om dezelfde reden geen beheerdersrecht als snelladen: dit is iets van de
+    bewoner die bij de auto staat. En net als een akkoord duurt het precies zo
+    lang als de kabel erin zit.
+    """
+    from .coach import async_get_coach
+
+    async_get_coach(hass).async_pause(msg["device_id"], msg["paused"])
+    connection.send_result(msg["id"], {"paused": msg["paused"]})
+
+
 @callback
 def async_register(hass: HomeAssistant) -> None:
     """Register the panel's websocket commands."""
@@ -544,3 +569,4 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_coach_state)
     websocket_api.async_register_command(hass, async_coach_approve)
     websocket_api.async_register_command(hass, async_coach_boost)
+    websocket_api.async_register_command(hass, async_coach_pause)
