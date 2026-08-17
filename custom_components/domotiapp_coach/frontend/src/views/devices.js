@@ -381,9 +381,16 @@ class DacViewDevices extends DacEditorElement {
       </div>`;
   }
 
-  /** The words this brand wants for start, stop, pause, resume and reboot. */
+  /**
+   * The words this brand wants for start, stop and reboot.
+   *
+   * Alleen de opdrachten die echt een woord zijn. Pauzeren en hervatten
+   * schrijven een getal in de dynamische laderlimiet en hebben hier dus niets
+   * te zoeken: een invulveld voor een woord dat nergens heen gaat, is een veld
+   * waar iemand ooit iets in typt en zich afvraagt waarom er niets gebeurt.
+   */
   actionsHtml_(device, index) {
-    const actions = brandActions(device);
+    const actions = brandActions(device).filter((action) => action.fallback);
     if (!actions.length) return "";
 
     const brand = brandMeta(device);
@@ -404,7 +411,7 @@ class DacViewDevices extends DacEditorElement {
     return `
       <div class="row">
         <label>Opdrachten</label>
-        <span class="sub">Wat er naar <code>${brand.service}</code> gestuurd wordt als <code>${brand.field}</code>. De ingevulde woorden zijn wat Easee vandaag gebruikt; wijkt jouw paal af, dan pas je ze hier aan. Dit is wat de knoppen onder Handmatige besturing op het overzicht versturen; de coach stuurt nog niet uit zichzelf.</span>
+        <span class="sub">Wat er naar <code>${brand.service}</code> gestuurd wordt als <code>${brand.field}</code>. De ingevulde woorden zijn wat Easee vandaag gebruikt; wijkt jouw paal af, dan pas je ze hier aan. Pauzeren en hervatten staan er niet bij: die schrijven een getal in de dynamische laderlimiet en hebben geen woord nodig.</span>
         <div class="two commands">${fields}</div>
       </div>`;
   }

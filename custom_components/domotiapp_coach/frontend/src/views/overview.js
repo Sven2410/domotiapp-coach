@@ -1899,11 +1899,18 @@ class DacViewOverview extends DacElement {
     if (!device || !canCommand(device)) return;
 
     this.manualDevice_ = device;
-    this.manualActions_ = deviceCommands(device);
+    // Met een lezer erbij, want hervatten schrijft de maximale limiet van de
+    // lader zelf terug en dat getal staat in een sensor.
+    this.manualActions_ = deviceCommands(device, (entityId) => {
+      const value = Number(this.feed_?.get(entityId)?.state);
+      return Number.isFinite(value) && value > 0 ? value : undefined;
+    });
 
     this.$("#manual-title").textContent = this.labelFor_(device);
     this.$("#manual-sub").textContent =
-      "Deze opdrachten gaan rechtstreeks naar het apparaat. De coach stuurt nog niets uit zichzelf.";
+      "Deze opdrachten gaan rechtstreeks naar het apparaat, langs de coach om. "
+      + "Pauzeren blijft staan tot je hervat, maar stuurt de coach wel, dus die "
+      + "kan het binnen een minuut weer overnemen.";
     this.setManualStatus_("", "");
     this.paintProgramPicker_(device);
 
