@@ -107,6 +107,11 @@ class Car:
     capacity_kwh: float = 0.0
     # 1 or 3. For a car that can do both this is what is being measured now.
     phases: int = 3
+    # Of dat aantal ook echt gemeten is. Een auto die allebei kan, verraadt zich
+    # pas als hij laadt: vermogen gedeeld door stroom is dan ongeveer een of
+    # ongeveer drie. Zolang hij stilstaat is het een aanname, en dat maakt
+    # verschil voor hoe lang laden gaat duren.
+    phases_certain: bool = True
     # What the car itself accepts, 0 when unknown.
     max_amps: float = 0.0
     # 0 to 100, or None when nobody knows.
@@ -128,6 +133,9 @@ class Charger:
     # balancer on the connection, or the car itself, can hold the charger below
     # the limit the coach set.
     actual_amps: float = 0.0
+    # De bewoner heeft gezegd dat het nu moet, hoe duur het ook is. Voor wie
+    # eerder weg moet dan gepland; makkelijker dan een schema omgooien.
+    boost: bool = False
     # A load balancer has put the session on hold. Asking again changes nothing;
     # only waiting does.
     paused_by_balancer: bool = False
@@ -163,6 +171,40 @@ class Window:
     opens: datetime | None = None
     # Wanneer het klaar moet zijn.
     deadline: datetime | None = None
+
+
+@dataclass
+class Sun:
+    """Wat de verwachting zegt dat er aan zon aankomt.
+
+    Niet wat er nu gemeten wordt, dat staat in `Grid`. Dit is de voorspelling,
+    en die beantwoordt een andere vraag: niet "hoeveel is er" maar "is wachten
+    de moeite". Alles mag None zijn; zonder verwachting kijkt de coach gewoon
+    alleen naar het heden, zoals hij altijd deed.
+    """
+
+    # Verwacht gemiddeld vermogen dit uur en het uur erna, in watt.
+    now_w: float | None = None
+    next_w: float | None = None
+    # Wat er vandaag nog aan komt, in kWh.
+    remaining_kwh: float | None = None
+
+
+@dataclass
+class Tariff:
+    """Wat een kWh kost en opbrengt, als de prijslijst het niet zegt.
+
+    Bij een vast contract staat het hele jaar hetzelfde getal en is er geen
+    lijst. Bij een dynamisch contract staat de inkoopprijs per uur in de lijst
+    en is `feed_in` wat teruglevering opbrengt.
+
+    Allebei mogen None zijn en dat betekent "niet bekend", niet "nul". Het
+    verschil is groot: nul zou zeggen dat teruglevering niets opbrengt, en dan
+    lijkt bijkopen om de zon te gebruiken aantrekkelijker dan het is.
+    """
+
+    buy: float | None = None
+    feed_in: float | None = None
 
 
 @dataclass
@@ -271,12 +313,66 @@ def energy_needed_kwh(car: Car) -> float | None:
     return missing / CHARGE_EFFICIENCY
 
 
+def charge_cost(watts: float, surplus_w: float, buy: float, feed_in: float) -> float:
+    """Wat een kWh in de auto kost als je nu laadt, alles meegerekend.
+
+    Twee posten. De zon die je zelf gebruikt kost je wat je er anders voor had
+    gekregen: de terugleververgoeding, na aftrek van de kosten die je
+    leverancier daarover rekent. Wat er aan die zon tekortkomt koop je in tegen
+    de prijs van dit moment.
+
+    Zo wordt "laden op de zon" een bedrag per kWh dat je naast andere uren kunt
+    leggen, en dat is de enige eerlijke manier om te beslissen. Levert de zon
+    genoeg, dan komt er de terugleververgoeding uit en dat is bijna altijd het
+    goedkoopste moment van de dag. Levert hij bijna niets, dan komt de
+    inkoopprijs eruit en wint een goedkoop nachtuur vanzelf.
+    """
+    power = max(watts, 1.0) / 1000.0
+    eigen = min(max(0.0, surplus_w) / 1000.0, power)
+    gekocht = power - eigen
+    return (eigen * feed_in + gekocht * buy) / power
+
+
+def cheapest_price(prices: list[dict], since: datetime, until: datetime | None) -> float | None:
+    """De laagste prijs die er tussen nu en de klaar-tijd nog aankomt."""
+    usable = [
+        row["price"]
+        for row in prices
+        if row["end"] > since and (until is None or row["start"] < until)
+    ]
+    return min(usable) if usable else None
+
+
+def min_phases(car: Car) -> int:
+    """Het minste aantal fasen waarop deze auto kan laden.
+
+    Bij een auto die allebei kan, is dat er één, ook als er op dit moment op
+    drie geladen wordt: hij kán terug. Dat getal is nodig waar de vraag is
+    hoe wéinig er nodig is om te beginnen.
+    """
+    return 1 if not car.phases_certain else car.phases
+
+
 def hours_needed(car: Car, amps: int) -> float | None:
-    """How long that takes at this current."""
+    """Hoe lang dat duurt bij deze stroom.
+
+    Het aantal fasen doet in drie sommen mee, en per som is een andere keuze de
+    gunstigste. Hier gaat het om tijd, en dan telt het traagste dat kan: een
+    auto die allebei kan en stilstaat, kan straks eenfasig blijken en dan duurt
+    het drie keer zo lang. Neem je hier drie fasen aan, dan boekt de coach twee
+    goedkope uren voor werk waar er vijf nodig zijn en staat de auto 's ochtends
+    halfvol. Te vroeg beginnen kost een paar cent, te laat beginnen kost iemand
+    zijn rit.
+
+    Waar het om de ondergrens van de zon gaat is juist het snelste bereikbare de
+    gunstigste aanname (zie `min_phases`), en waar het om de te vragen stroom
+    gaat het zwaarste, want te veel vragen betekent inkopen. Alle drie corrigeren
+    zichzelf zodra er stroom loopt: dan is het aantal fasen te meten.
+    """
     energy = energy_needed_kwh(car)
     if energy is None or amps <= 0:
         return None
-    return energy / (watts_for(amps, car.phases) / 1000.0)
+    return energy / (watts_for(amps, min_phases(car)) / 1000.0)
 
 
 def _at(day: datetime, moment: time | None) -> datetime | None:
@@ -399,6 +495,8 @@ def decide(
     charger: Charger,
     window: Window,
     goal: str = "cost",
+    tariff: Tariff = Tariff(),
+    sun: Sun = Sun(),
 ) -> Decision:
     """What to do with this charging point, and how to say it.
 
@@ -413,7 +511,7 @@ def decide(
     standing already. Lowering it would mean charging slowly for another minute
     for no reason at all.
     """
-    decision = _decide(now, prices, grid, car, charger, window, goal)
+    decision = _decide(now, prices, grid, car, charger, window, goal, tariff, sun)
 
     if not decision.charge:
         return decision
@@ -451,6 +549,8 @@ def _decide(
     charger: Charger,
     window: Window,
     goal: str = "cost",
+    tariff: Tariff = Tariff(),
+    sun: Sun = Sun(),
 ) -> Decision:
     """What to do with this charging point, this minute.
 
@@ -479,6 +579,18 @@ def _decide(
             0,
             "Je aansluiting is te zwaar belast om te laden. Zodra er ruimte is, gaat hij verder.",
             rule="no-room",
+        )
+
+    if charger.boost:
+        # Boven de prijs en boven het schema, want de bewoner weet iets wat de
+        # coach niet weet: dat hij zo weg moet. Wel onder de zekering, want die
+        # weet iets wat de bewoner niet weet.
+        return Decision(
+            True,
+            ceiling,
+            f"Snelladen staat aan, dus hij laadt op {ceiling} A, ongeacht de prijs.",
+            plan="Blijft op vol vermogen tot je het uitzet of de kabel eruit gaat.",
+            rule="boost",
         )
 
     if car.guest:
@@ -529,20 +641,91 @@ def _decide(
                 rule="deadline",
             )
 
-    # --- own sun --------------------------------------------------------
-    surplus_amps = int(amps_for(grid.surplus_w, car.phases))
-    floor_watts = watts_for(MIN_AMPS, car.phases)
-    if grid.surplus_w >= floor_watts * SURPLUS_SLACK:
-        amps = max(MIN_AMPS, min(ceiling, surplus_amps))
+    # --- eigen zon --------------------------------------------------------
+    #
+    # Twee manieren om hier te beslissen, en welke het wordt hangt af van wat er
+    # bekend is. Kent de coach zowel de inkoopprijs als wat teruglevering
+    # opbrengt, dan rekent hij het gewoon uit. Kent hij dat niet, dan valt hij
+    # terug op de vuistregel: alleen laden als de zon het grotendeels zelf dekt.
+    # Een verzonnen getal is hier erger dan een voorzichtige regel.
+    #
+    # De ondergrens hangt aan het mínste dat deze auto kan. Kan hij eenfasig,
+    # dan is 1,4 kW al genoeg om te beginnen; eist de coach 4,1 kW omdat hij
+    # voor de zekerheid van drie fasen uitgaat, dan blijft een halve
+    # ochtendzon onbenut terwijl de auto er prima op had kunnen laden.
+    amps = max(MIN_AMPS, min(ceiling, int(amps_for(grid.surplus_w, car.phases))))
+    trekt = watts_for(amps, car.phases)
+    genoeg_zon = grid.surplus_w >= watts_for(MIN_AMPS, min_phases(car)) * SURPLUS_SLACK
+
+    nu_prijs = price_now(prices, now)
+    koop = nu_prijs["price"] if nu_prijs else tariff.buy
+    terug = (nu_prijs or {}).get("feed_in")
+    if terug is None:
+        terug = tariff.feed_in
+
+    if goal != "solar" and koop is not None and terug is not None:
+        # De som die de klant zelf zou maken: wat kost een kWh in de auto als ik
+        # nu op de zon laad, en is er straks een uur dat goedkoper is? Zonder die
+        # vergelijking bleef een halve kilowatt zon liggen omdat er net niet
+        # genoeg was om zonder bijkopen te draaien, terwijl een paar honderd watt
+        # bijkopen goedkoper is dan een heel uur van het net.
+        nu_kost = charge_cost(trekt, grid.surplus_w, koop, terug)
+        straks = cheapest_price(prices, now, end)
+        if straks is None:
+            straks = tariff.buy if tariff.buy is not None else koop
+
+        if nu_kost < straks:
+            # Nu laden kost minder dan wachten op een goedkoop uur. Maar er is
+            # een derde mogelijkheid die geen van beide is: wachten op meer zon.
+            # Moet er nu nog bijgekocht worden en zegt de verwachting dat het
+            # volgende uur flink beter is, dan is een uur geduld de goedkoopste
+            # zet van de drie. Alleen als de klaar-tijd dat toelaat, en die
+            # regel staat hierboven al, dus als we hier komen is er tijd.
+            if _beter_straks(grid.surplus_w, trekt, sun, now, end, needed):
+                komt = f"{(sun.next_w or 0) / 1000:.1f}".replace(".", ",")
+                return Decision(
+                    False,
+                    0,
+                    f"Over een uur wordt er {komt} kW zon verwacht, dus dan is laden "
+                    f"goedkoper dan er nu stroom bij te kopen.",
+                    plan="Wacht op de zon die eraan komt.",
+                    rule="wait-for-forecast",
+                )
+
+            dekt = grid.surplus_w >= trekt
+            hoeveel = f"{grid.surplus_w / 1000:.1f}".replace(".", ",")
+            uitleg = (
+                f"Je levert {hoeveel} kW terug, dus die gaat nu in de auto"
+                if dekt
+                else f"Je levert {hoeveel} kW terug. Dat net aanvullen is goedkoper dan wachten"
+            )
+            return Decision(
+                True,
+                amps,
+                f"{uitleg}: {_euro(nu_kost)} per kWh tegen {_euro(straks)} straks.",
+                plan="Loopt mee met wat de zon geeft.",
+                rule="surplus",
+            )
+    elif genoeg_zon:
+        hoeveel = f"{grid.surplus_w / 1000:.1f}".replace(".", ",")
         return Decision(
             True,
             amps,
-            f"Je levert {grid.surplus_w / 1000:.1f} kW terug, dus die gaat nu in de auto.".replace(
-                ".", ",", 1
-            ),
+            f"Je levert {hoeveel} kW terug, dus die gaat nu in de auto.",
             plan="Loopt mee met wat de zon geeft.",
             rule="surplus",
         )
+
+    if goal == "solar" and genoeg_zon:
+        hoeveel = f"{grid.surplus_w / 1000:.1f}".replace(".", ",")
+        return Decision(
+            True,
+            amps,
+            f"Je levert {hoeveel} kW terug, dus die gaat nu in de auto.",
+            plan="Loopt mee met wat de zon geeft.",
+            rule="surplus",
+        )
+
 
     if goal == "solar":
         return Decision(
@@ -583,6 +766,49 @@ def _decide(
         plan=_describe(plan_hours),
         rule="wait-for-price",
     )
+
+
+# Hoeveel beter het volgende uur moet zijn voordat wachten de moeite is. Onder
+# deze verhouding is het verschil kleiner dan de onzekerheid van de verwachting
+# zelf, en dan is een uur stilstaan puur verlies.
+FORECAST_BETTER = 1.4
+
+
+def _beter_straks(
+    surplus_w: float,
+    trekt_w: float,
+    sun: Sun,
+    now: datetime,
+    end: datetime | None,
+    needed: float | None,
+) -> bool:
+    """Of wachten op de zon van het volgende uur beter is dan nu bijkopen.
+
+    Drie voorwaarden, en ze moeten alle drie kloppen.
+
+    Er moet nu écht bijgekocht worden. Dekt de zon het al, dan valt er niets te
+    winnen door te wachten; dan is laden nu al zo goedkoop als het wordt.
+
+    Het volgende uur moet duidelijk beter zijn, niet een beetje. Een verwachting
+    is geen meting, en een uur stilstaan voor tien procent meer zon is een uur
+    stilstaan voor niets.
+
+    En er moet tijd zijn. Een uur wachten mag de klaar-tijd niet in gevaar
+    brengen, dus na dat uur moet er nog ruim genoeg over zijn om vol te laden.
+    """
+    if sun.next_w is None or surplus_w >= trekt_w:
+        return False
+
+    beter = sun.next_w >= max(surplus_w, sun.now_w or 0.0) * FORECAST_BETTER
+    if not beter or sun.next_w < trekt_w * SURPLUS_SLACK:
+        return False
+
+    if end is not None and needed is not None:
+        over = (end - now).total_seconds() / 3600 - 1.0
+        if over < needed + 0.25:
+            return False
+
+    return True
 
 
 def _running_amps(grid: Grid, car: Car, ceiling: int, goal: str) -> int:

@@ -719,6 +719,13 @@ class DacViewHistory extends DacElement {
    * dat kan elk apparaat aan. Lukt de omweg niet, dan alsnog rechtstreeks: op
    * een computer is dat prima, en een rapport dat je niet krijgt is slechter
    * dan een rapport dat langs de oude weg komt.
+   *
+   * Met een koppeling en niet met `location.assign`. Dat laatste navigeert de
+   * hele pagina weg, en op een computer valt dat niet op omdat de download
+   * meteen begint en de pagina blijft staan. In de Home Assistant app wel: daar
+   * ging het paneel eraan en bleef het logo staan met "clean cache and reload"
+   * eronder. Een koppeling die zijn eigen venster opent laat het paneel met
+   * rust.
    */
   async bezorg_(blob, naam) {
     try {
@@ -728,7 +735,15 @@ class DacViewHistory extends DacElement {
         filename: naam,
       });
       if (url) {
-        window.location.assign(url);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = naam;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.style.display = "none";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
         return "gedownload";
       }
     } catch (fout) {

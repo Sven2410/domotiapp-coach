@@ -20,6 +20,7 @@ from datetime import datetime, time, timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ServiceNotFound
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
@@ -38,6 +39,8 @@ from .planner import (
     DayWindow,
     Decision,
     Grid,
+    Sun,
+    Tariff,
     Window,
     amps_for,
     decide,
@@ -63,6 +66,11 @@ CONFIRM_SECONDS = 15
 # changes none of them and only fills a log, but never repeating it at all means
 # a car stands still all night because the decision happened not to change.
 NUDGE_INTERVAL = timedelta(minutes=5)
+
+# Over hoeveel rondes het overschot wordt gladgestreken voor er omhoog wordt
+# gestuurd. Drie minuten is lang genoeg om een wolk te laten passeren en kort
+# genoeg om een opklaring niet te missen.
+SMOOTH_SAMPLES = 3
 
 
 def _number(hass: HomeAssistant, entity_id: str | None) -> float | None:
@@ -120,6 +128,12 @@ class ChargerCoach:
         self._approved: set[str] = set()
         # When a charging point that was not following was last prodded.
         self._nudged: dict[str, datetime] = {}
+        # De laatste metingen van het overschot, per apparaat, om op te dempen.
+        self._zon: dict[str, list[float]] = {}
+        # Wie er op snelladen staat. Net als een akkoord niet bewaard over een
+        # herstart heen en afgelopen zodra de kabel eruit gaat: snelladen is
+        # iets voor nu, niet iets wat stilletjes blijft staan.
+        self._boost: set[str] = set()
 
     @callback
     def async_start(self) -> None:
@@ -156,6 +170,19 @@ class ChargerCoach:
                 continue
             try:
                 await self._one(moment, settings, device, level)
+            except ServiceNotFound as fout:
+                # Gebeurt bij het opstarten: de coach draait al voordat de
+                # integratie van het merk zijn diensten heeft klaargezet. Geen
+                # reden voor een foutmelding met een spoor erbij; de volgende
+                # ronde is hij er wel. Zou hij er nooit komen, dan blijft deze
+                # regel elke minuut terugkomen en dat is precies het signaal.
+                _LOGGER.warning(
+                    "%s kan nog niet aangestuurd worden: %s bestaat niet (nog niet geladen?)",
+                    device.get("name") or device.get("id"),
+                    fout.translation_placeholders.get("service", "de opdracht")
+                    if getattr(fout, "translation_placeholders", None)
+                    else "de opdracht",
+                )
             except Exception:  # noqa: BLE001 - one broken device is not all of them
                 _LOGGER.exception("kon %s niet beoordelen", device.get("id"))
 
@@ -171,7 +198,10 @@ class ChargerCoach:
         grid, car, charger, window = self._read(now, settings, device)
         goal = (settings.get("strategy") or {}).get("goal", "cost")
 
-        decision = decide(now, self._prices(settings), grid, car, charger, window, goal)
+        decision = decide(
+            now, self._prices(settings), grid, car, charger, window, goal,
+            self._tariff(settings), self._sun(settings),
+        )
 
         # Remembered before anything is sent, so the panel can show what the
         # coach would do even at a level where it does nothing.
@@ -184,15 +214,23 @@ class ChargerCoach:
         may_act = level == LEVEL_STEER or (
             level == LEVEL_PROPOSE and device_id in self._approved
         )
+        # Eerst opruimen, dan pas opschrijven wat de stand is. Andersom bleef er
+        # op de kaart nog een minuut "snelladen staat aan" staan nadat de kabel
+        # er al uit was, en dat leest als een knop die blijft hangen.
+        #
+        # Een akkoord duurt zolang de auto aan de kabel hangt, en snelladen ook:
+        # de auto waarvoor het bedoeld was staat er dan niet meer.
+        if not charger.connected:
+            self._approved.discard(device_id)
+            self._boost.discard(device_id)
+            self._zon.pop(device_id, None)
+
         self.state[device_id]["applied"] = may_act
         self.state[device_id]["approved"] = device_id in self._approved
+        self.state[device_id]["boost"] = device_id in self._boost
         self.hass.bus.async_fire(
             EVENT_DECISION, {"device": device_id, **self.state[device_id]}
         )
-
-        # An agreement lasts as long as the car is on the cable.
-        if not charger.connected:
-            self._approved.discard(device_id)
 
         if not may_act:
             return
@@ -232,6 +270,26 @@ class ChargerCoach:
             elif not decision.charge:
                 self._since.pop(device_id, None)
 
+    def _smooth(self, device_id: str, surplus: float) -> float:
+        """Het overschot, ontdaan van het gerimpel van een enkele minuut.
+
+        Een wolk die voor de zon schuift, een waterkoker die aangaat: het
+        overschot springt de hele dag heen en weer. Een coach die daar elke
+        minuut achteraan loopt, stuurt de laadpaal grijs en levert er niets voor
+        terug, want de auto merkt er niets van.
+
+        Omhoog gaat langzaam en omlaag gaat meteen. Dat is met opzet niet
+        symmetrisch: te veel vragen betekent inkopen tegen de dagprijs, en dat is
+        een fout die geld kost. Te weinig vragen betekent een beetje zon
+        exporteren die je ook zelf had kunnen gebruiken, en dat kost hooguit het
+        verschil. Dus wordt er voor omhoog met het laagste van de laatste paar
+        metingen gerekend, en voor omlaag met de meting van nu.
+        """
+        recent = self._zon.setdefault(device_id, [])
+        recent.append(surplus)
+        del recent[:-SMOOTH_SAMPLES]
+        return min(recent)
+
     def _nudge_due(self, device_id: str, now: datetime) -> bool:
         """Whether it is time to prod a charging point that is not following."""
         last = self._nudged.get(device_id)
@@ -240,24 +298,13 @@ class ChargerCoach:
         self._nudged[device_id] = now
         return True
 
-    def _prices(self, settings: dict[str, Any]) -> list[dict]:
-        """The published price list, in the shape the planner wants.
-
-        Read from the same entity the panel charts, so the two can never
-        disagree about what an hour costs.
-        """
-        contract = settings.get("contract") or {}
-        if contract.get("type") != "dynamic":
-            return []
-
-        dynamic = contract.get("dynamic") or {}
-        all_in = dynamic.get("source") == "all_in"
-        entity_id = dynamic.get("all_in_entity") if all_in else dynamic.get("market_entity")
+    def _slots(self, entity_id: str | None) -> dict[datetime, tuple[datetime, float]]:
+        """De blokken uit een prijsentiteit, op begintijd."""
         state = self.hass.states.get(entity_id) if entity_id else None
         if state is None:
-            return []
+            return {}
 
-        rows: list[dict] = []
+        uit: dict[datetime, tuple[datetime, float]] = {}
         for row in state.attributes.get("prices") or []:
             try:
                 start = dt_util.parse_datetime(row["from"])
@@ -267,16 +314,84 @@ class ChargerCoach:
                 continue
             if start is None or end is None:
                 continue
-            if not all_in:
-                price = self._all_in(price, dynamic)
-            rows.append(
-                {
-                    "start": dt_util.as_local(start).replace(tzinfo=None),
-                    "end": dt_util.as_local(end).replace(tzinfo=None),
-                    "price": price,
-                }
+            uit[dt_util.as_local(start).replace(tzinfo=None)] = (
+                dt_util.as_local(end).replace(tzinfo=None),
+                price,
             )
+        return uit
+
+    def _prices(self, settings: dict[str, Any]) -> list[dict]:
+        """De prijslijst, met per blok wat het kost én wat teruglevering opbrengt.
+
+        Uit dezelfde entiteit die het paneel tekent, zodat de twee het nooit
+        oneens kunnen zijn over wat een uur kost.
+
+        Wat teruglevering opbrengt is de kale marktprijs min de kosten die de
+        leverancier daarover rekent. Bij een all-in prijssensor zit die kale
+        prijs er niet meer in, en dan is hij er ook niet uit te halen. Daarom mag
+        de marktprijssensor er los bij: hij is dan alleen voor de teruglevering,
+        en zonder die sensor blijft de opbrengst gewoon onbekend. Onbekend is
+        hier beter dan aangenomen, want op een aangenomen bedrag zou de coach
+        gaan bijkopen.
+        """
+        contract = settings.get("contract") or {}
+        if contract.get("type") != "dynamic":
+            return []
+
+        dynamic = contract.get("dynamic") or {}
+        all_in = dynamic.get("source") == "all_in"
+        kosten = float(dynamic.get("feed_in_costs") or 0)
+
+        markt = self._slots(dynamic.get("market_entity"))
+        inkoop = self._slots(dynamic.get("all_in_entity")) if all_in else markt
+        if not inkoop:
+            return []
+
+        rows: list[dict] = []
+        for start, (end, prijs) in inkoop.items():
+            terug = None
+            if all_in:
+                if start in markt:
+                    terug = markt[start][1] - kosten
+            else:
+                terug = prijs - kosten
+                prijs = self._all_in(prijs, dynamic)
+            rows.append({"start": start, "end": end, "price": prijs, "feed_in": terug})
         return sorted(rows, key=lambda item: item["start"])
+
+    def _sun(self, settings: dict[str, Any]) -> Sun:
+        """De zonverwachting, voor zover die is ingevuld.
+
+        De uurwaarden komen in kWh over dat uur binnen, wat hetzelfde is als het
+        gemiddelde vermogen in kW. Vandaar de vermenigvuldiging: de rest van de
+        coach rekent in watt.
+        """
+        bron = (settings.get("sources") or {}).get("solar_forecast") or {}
+
+        def uur(sleutel: str) -> float | None:
+            kwh = _number(self.hass, bron.get(sleutel))
+            return None if kwh is None else kwh * 1000.0
+
+        return Sun(
+            now_w=uur("this_hour"),
+            next_w=uur("next_hour"),
+            remaining_kwh=_number(self.hass, bron.get("remaining_today")),
+        )
+
+    @staticmethod
+    def _tariff(settings: dict[str, Any]) -> Tariff:
+        """Wat een kWh kost en opbrengt als de prijslijst niets zegt."""
+        contract = settings.get("contract") or {}
+        if contract.get("type") == "dynamic":
+            return Tariff()
+
+        fixed = contract.get("fixed") or {}
+        prijs = fixed.get("all_in_price")
+        return Tariff(
+            buy=float(prijs) if prijs is not None else None,
+            feed_in=float(fixed.get("feed_in_tariff") or 0)
+            - float(fixed.get("feed_in_costs") or 0),
+        )
 
     @staticmethod
     def _all_in(market: float, dynamic: dict[str, Any]) -> float:
@@ -295,13 +410,36 @@ class ChargerCoach:
         entities = device.get("entities") or {}
 
         # --- what the grid is doing ---
+        #
+        # Wat er naar het net gaat is geen vaste waarde maar een gevolg van wat
+        # de coach zelf doet, en dat is de valkuil. Lever je 5 kW terug en gaat
+        # de laadpaal aan, dan is die 5 kW weg. De coach zou dan meten dat er
+        # geen zon meer over is, de laadpaal uitzetten, de 5 kW terugzien, en
+        # weer aangaan. Elke minuut opnieuw, de hele middag.
+        #
+        # Daarom wordt hier niet gemeten wat er nú naar het net gaat, maar wat
+        # er naar het net zou gaan als de laadpaal uit stond: het net saldo plus
+        # wat de paal op dit moment zelf trekt. Dat getal verandert niet doordat
+        # de coach iets doet, en daarmee is het kringetje open.
+        # Optellen mag alleen als het saldo echt bekend is. Met één sensor die
+        # alleen teruglevering meet, weet de coach niet of er tegelijk wordt
+        # ingekocht, en dan zou hij bij 2 kW inkoop en 4 kW laden concluderen dat
+        # er 4 kW zon over is. Liever de rauwe teruglevering dan een optelsom van
+        # iets wat hij niet kan zien.
         if sources.get("grid_mode") == "signed":
             signed = _number(self.hass, sources.get("grid_signed")) or 0.0
             if sources.get("grid_signed_invert"):
                 signed = -signed
-            surplus = max(0.0, -signed)
+            netto, compleet = -signed, True
         else:
-            surplus = _number(self.hass, sources.get("grid_export")) or 0.0
+            export = _number(self.hass, sources.get("grid_export"))
+            invoer = _number(self.hass, sources.get("grid_import"))
+            netto = (export or 0.0) - (invoer or 0.0)
+            compleet = export is not None and invoer is not None
+
+        laadvermogen = _number(self.hass, device.get("entity")) or 0.0
+        surplus = max(0.0, netto + laadvermogen if compleet else max(0.0, netto))
+        surplus = self._smooth(device.get("id", ""), surplus)
 
         phases = []
         for key in ("l1", "l2", "l3"):
@@ -339,6 +477,7 @@ class ChargerCoach:
             charging="charging" in status,
             started_at=self._since.get(device.get("id", "")),
             actual_amps=charger_amps,
+            boost=device.get("id", "") in self._boost,
             paused_by_balancer="equalizer" in status or "load_balancing" in status,
             no_current_reason=_text(self.hass, entities.get("no_current_reason")),
         )
@@ -416,14 +555,21 @@ class ChargerCoach:
             return Car(phases=3)
 
         phases = {"one": 1, "three": 3}.get(profile.get("phases"), 3)
+        zeker = True
         if profile.get("phases") == "both":
             # A car that switches phases tells on itself: power divided by
-            # current is roughly one phase or roughly three.
-            phases = self._measured_phases(device) or 3
+            # current is roughly one phase or roughly three. Standing still it
+            # says nothing, and then three is the safe guess for how much of the
+            # sun to take but the dangerous one for how long charging will last.
+            # See hours_needed for what is done with that.
+            gemeten = self._measured_phases(device)
+            phases = gemeten or 3
+            zeker = gemeten is not None
 
         return Car(
             capacity_kwh=float(profile.get("capacity_kwh") or 0),
             phases=phases,
+            phases_certain=zeker,
             max_amps=float(profile.get("max_amps") or 0),
             soc_percent=_number(self.hass, profile.get("soc_entity")),
         )
@@ -446,6 +592,19 @@ class ChargerCoach:
     def async_withdraw(self, device_id: str) -> None:
         """And can take that back."""
         self._approved.discard(device_id)
+
+    @callback
+    def async_boost(self, device_id: str, on: bool) -> None:
+        """Snelladen aan of uit: laden op vol vermogen, ongeacht de prijs."""
+        if on:
+            self._boost.add(device_id)
+        else:
+            self._boost.discard(device_id)
+
+    @callback
+    def async_boosting(self, device_id: str) -> bool:
+        """Of snelladen op dit moment aanstaat."""
+        return device_id in self._boost
 
     async def _apply(
         self, device: dict[str, Any], charger: Charger, decision: Decision

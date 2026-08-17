@@ -399,7 +399,7 @@ class DacViewOverview extends DacElement {
        een laadpaal een vrijgaveknop gaf die er niet hoort te zijn. */
     button.release[hidden], button.manual[hidden] { display: none; }
 
-    button.release, button.manual {
+    button.release, button.manual, button.boost {
       display: flex; align-items: center; justify-content: center; gap: 8px;
       padding: 11px 16px;
       min-height: 44px;
@@ -411,6 +411,12 @@ class DacViewOverview extends DacElement {
       cursor: pointer;
       transition: border-color 200ms ease, background 200ms ease, color 200ms ease;
       -webkit-tap-highlight-color: transparent;
+    }
+    button.boost[hidden] { display: none; }
+    /* Aan is een stand en geen actie, dus die is te zien zonder de tekst te lezen. */
+    button.boost[aria-pressed="true"] {
+      border-color: var(--dac-accent-hi);
+      color: var(--dac-accent-hi);
     }
     button.release:hover, button.manual:hover { color: var(--dac-ink); border-color: rgba(25,143,217,0.55); }
     button.manual .icon { width: 16px; height: 16px; color: var(--dac-accent-hi); }
@@ -1354,6 +1360,31 @@ class DacViewOverview extends DacElement {
   }
 
   /**
+   * Snelladen aan of uit.
+   *
+   * Voor wie eerder weg moet dan gepland. Dat is makkelijker dan het schema
+   * omgooien en daarna niet vergeten het terug te zetten: dit gaat vanzelf uit
+   * zodra de kabel eruit gaat.
+   */
+  async toggleBoost_(slot) {
+    const device = this.steerDevices_?.[slot];
+    if (!device || !this.hass) return;
+
+    const aan = !this.coach_?.[device.id]?.boost;
+    try {
+      await this.hass.callWS({
+        type: "domotiapp_coach/coach/boost",
+        device_id: device.id,
+        boost: aan,
+      });
+      this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
+      this.updateSteerable_(this.lastDevices_ ?? []);
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon snelladen niet omzetten", error);
+    }
+  }
+
+  /**
    * Wat de coach van dit apparaat zegt, op zijn kaart.
    *
    * Alleen waar hij ook echt iets te zeggen heeft. Bij "alleen uitlezen" staat
@@ -1380,6 +1411,16 @@ class DacViewOverview extends DacElement {
     const vraagt = besluit.level === "propose" && !besluit.approved && besluit.charge;
     knop.hidden = !vraagt;
     knop.textContent = vraagt ? "Ja, doe maar" : "";
+
+    // Snelladen alleen aanbieden waar de coach ook echt kan sturen en er een
+    // auto aan hangt. Een knop die niets kan doen is erger dan geen knop.
+    const boost = this.$(`[data-boost="${slot}"]`);
+    const kan = besluit.rule !== "disconnected" && besluit.level !== "advise";
+    boost.hidden = !kan;
+    boost.setAttribute("aria-pressed", String(Boolean(besluit.boost)));
+    this.$(`[data-boost-text="${slot}"]`).textContent = besluit.boost
+      ? "Snelladen staat aan"
+      : "Snelladen";
   }
 
   /** Which car this charging point is set to, if any. */
@@ -1652,6 +1693,9 @@ class DacViewOverview extends DacElement {
               <span class="mark" data-mark="${slot}"></span>
               <span data-release-text="${slot}"></span>
             </button>
+            <button class="boost" type="button" data-boost="${slot}" aria-pressed="false" hidden>
+              ${icons.bolt}<span data-boost-text="${slot}">Snelladen</span>
+            </button>
             <button class="manual" type="button" data-manual="${slot}" hidden>
               ${icons.sliders}<span>Handmatige besturing</span>
             </button>
@@ -1663,6 +1707,9 @@ class DacViewOverview extends DacElement {
 
     for (const button of this.$$("[data-coach-yes]")) {
       button.addEventListener("click", () => this.approve_(Number(button.dataset.coachYes)));
+    }
+    for (const button of this.$$("[data-boost]")) {
+      button.addEventListener("click", () => this.toggleBoost_(Number(button.dataset.boost)));
     }
     for (const select of this.$$("[data-car-select]")) {
       select.addEventListener("change", () =>

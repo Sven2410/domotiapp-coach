@@ -178,6 +178,11 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             "remaining_today": "",
             "tomorrow": "",
             "peak_today": "",
+            # Wat er dit uur en het uur erna verwacht wordt, in kWh. Hiermee kan
+            # de coach beslissen dat een uur wachten goedkoper is dan nu stroom
+            # bijkopen; met alleen dagtotalen kan dat niet.
+            "this_hour": "",
+            "next_hour": "",
         },
         # The meter readings themselves: the four counters a Dutch smart meter
         # keeps for electricity, plus gas. These are totals rather than a rate,
