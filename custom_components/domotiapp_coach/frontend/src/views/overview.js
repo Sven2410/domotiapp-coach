@@ -419,7 +419,10 @@ class DacViewOverview extends DacElement {
       color: var(--dac-accent-hi);
     }
     button.release:hover, button.manual:hover { color: var(--dac-ink); border-color: rgba(25,143,217,0.55); }
-    button.manual .icon { width: 16px; height: 16px; color: var(--dac-accent-hi); }
+    /* Een icoon zonder maat is geen klein icoon maar een enorm icoon: het svg
+       rekt zich uit tot alles wat de knop hem geeft. Vandaar dat alle drie de
+       knoppen hier staan en niet alleen degene waar het is opgevallen. */
+    button.manual .icon, button.boost .icon { width: 16px; height: 16px; color: var(--dac-accent-hi); }
     button.manual[hidden] { display: none; }
     button.release[aria-pressed="true"] {
       border-color: rgba(12,163,12,0.5);
@@ -1385,6 +1388,33 @@ class DacViewOverview extends DacElement {
   }
 
   /**
+   * Het laden stilzetten of hervatten.
+   *
+   * Dit gaat via de coach en niet rechtstreeks naar de paal, en dat is het hele
+   * punt: zet je het laden zelf stil, dan hoort de coach het een minuut later
+   * niet weer aan te zetten. Hij schrijft er een nul voor in de laderlimiet en
+   * laat die staan, dus de goedkeuring van de sessie blijft intact en hervatten
+   * is niet meer dan een gewoon getal terugschrijven.
+   */
+  async togglePause_(slot) {
+    const device = this.steerDevices_?.[slot];
+    if (!device || !this.hass) return;
+
+    const aan = !this.coach_?.[device.id]?.paused;
+    try {
+      await this.hass.callWS({
+        type: "domotiapp_coach/coach/pause",
+        device_id: device.id,
+        paused: aan,
+      });
+      this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
+      this.updateSteerable_(this.lastDevices_ ?? []);
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon het pauzeren niet omzetten", error);
+    }
+  }
+
+  /**
    * Wat de coach van dit apparaat zegt, op zijn kaart.
    *
    * Alleen waar hij ook echt iets te zeggen heeft. Bij "alleen uitlezen" staat
@@ -1421,6 +1451,13 @@ class DacViewOverview extends DacElement {
     this.$(`[data-boost-text="${slot}"]`).textContent = besluit.boost
       ? "Snelladen staat aan"
       : "Snelladen";
+
+    const pauze = this.$(`[data-pause="${slot}"]`);
+    pauze.hidden = !kan;
+    pauze.setAttribute("aria-pressed", String(Boolean(besluit.paused)));
+    this.$(`[data-pause-text="${slot}"]`).textContent = besluit.paused
+      ? "Gepauzeerd"
+      : "Pauzeren";
   }
 
   /** Which car this charging point is set to, if any. */
@@ -1696,6 +1733,9 @@ class DacViewOverview extends DacElement {
             <button class="boost" type="button" data-boost="${slot}" aria-pressed="false" hidden>
               ${icons.bolt}<span data-boost-text="${slot}">Snelladen</span>
             </button>
+            <button class="boost" type="button" data-pause="${slot}" aria-pressed="false" hidden>
+              ${icons.pause}<span data-pause-text="${slot}">Pauzeren</span>
+            </button>
             <button class="manual" type="button" data-manual="${slot}" hidden>
               ${icons.sliders}<span>Handmatige besturing</span>
             </button>
@@ -1707,6 +1747,9 @@ class DacViewOverview extends DacElement {
 
     for (const button of this.$$("[data-coach-yes]")) {
       button.addEventListener("click", () => this.approve_(Number(button.dataset.coachYes)));
+    }
+    for (const button of this.$$("[data-pause]")) {
+      button.addEventListener("click", () => this.togglePause_(Number(button.dataset.pause)));
     }
     for (const button of this.$$("[data-boost]")) {
       button.addEventListener("click", () => this.toggleBoost_(Number(button.dataset.boost)));
