@@ -328,6 +328,11 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # verder en hoeft er niet elk uur opnieuw iets ingevuld te worden. Vervalt
     # zodra de kabel eruit gaat: het percentage hoorde bij die auto en die rit.
     "car_soc": [],
+    # De knoppen van de bewoner per laadpunt: een akkoord, snelladen, een pauze.
+    # Opdrachten van een mens, dus ze horen een herstart van Home Assistant te
+    # overleven. Ze gelden voor de sessie die er dan hangt: de kabel eruit wist
+    # ze, en na twaalf uur zonder toezicht vervallen ze vanzelf.
+    "sessions": [],
     "thresholds": {
         # Zelfbenutting in percent: below `low` is bad, above `high` is good.
         "self_use": {"low": 30, "high": 70},
