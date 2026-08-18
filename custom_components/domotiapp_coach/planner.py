@@ -665,6 +665,7 @@ def decide(
     waking: bool = False,
     asking_seconds: float = 0.0,
     must_finish: bool = False,
+    overdue: bool = False,
 ) -> Decision:
     """What to do with this charging point, and how to say it.
 
@@ -692,7 +693,7 @@ def decide(
     for no reason at all.
     """
     decision = _decide(
-        now, prices, grid, car, charger, window, goal, tariff, sun, must_finish
+        now, prices, grid, car, charger, window, goal, tariff, sun, must_finish, overdue
     )
 
     if not decision.charge:
@@ -783,6 +784,7 @@ def _decide(
     tariff: Tariff = Tariff(),
     sun: Sun = Sun(),
     must_finish: bool = False,
+    overdue: bool = False,
 ) -> Decision:
     """What to do with this charging point, this minute.
 
@@ -915,6 +917,22 @@ def _decide(
     soc_unknown = needed is None
     if soc_unknown:
         needed = hours_needed(car, pace, assume_empty=True)
+
+    # De klaar-tijd is verstreken en de auto is niet vol. Dan is er niets meer te
+    # plannen: de afspraak is al gebroken en het enige dat nog telt is dat hij vol
+    # raakt. Sven op 18-08-2026: "de auto moet wel vol zitten, dat wint altijd. De
+    # coach plant alleen in om geld te besparen."
+    #
+    # Dit staat bewust onder de pauze, snelladen en de zekering: een opdracht van
+    # de bewoner en de veiligheid van de aansluiting gaan hier nog steeds voor.
+    if overdue:
+        return Decision(
+            True,
+            ceiling,
+            "De klaar-tijd is voorbij en de auto is nog niet vol, dus hij laadt door.",
+            plan="Blijft op vol vermogen tot de auto vol is.",
+            rule="overdue",
+        )
 
     # `must_finish` betekent: deze sessie is al eerder tegen de klaar-tijd
     # aangelopen en blijft daarom op vol vermogen. Zonder dat sloeg hij elke

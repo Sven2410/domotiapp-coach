@@ -219,6 +219,10 @@ class ChargerCoach:
         # auto doet niets". Een tijdstip en geen teller: een ronde is niet altijd
         # een minuut, want een statuswissel van de paal start er ook een.
         self._asking_since: dict[str, datetime] = {}
+        # Laadpunten waarvan de klaar-tijd verstreken is terwijl de auto niet vol
+        # was. Die laden door tot ze vol zijn, want vol worden weegt zwaarder dan
+        # goedkoop laden. Vervalt zodra de auto vol is of de kabel eruit gaat.
+        self._te_laat: set[str] = set()
         # Wat er in deze laadbeurt gebeurd is: wanneer hij begon, hoeveel er in
         # ging en waar de tijd aan op is gegaan. Alleen om het achteraf te
         # kunnen navertellen, nooit om een besluit op te nemen.
@@ -593,6 +597,20 @@ class ChargerCoach:
         # Wekken mag zolang de auto aan de kabel hangt, niet laadt en de poging
         # van deze sessie nog openstaat. Dat de coach ook wíl laden weet de
         # planner zelf; hier gaat het alleen over of het nog mag.
+        # Is de klaar-tijd voorbijgegaan terwijl de auto niet vol is? Te zien aan
+        # een klaar-tijd die opschuift: die van vandaag is dan verstreken en de
+        # eerstvolgende ligt verder weg. Dit moet vóór het besluit gebeuren, want
+        # anders schrijft hij eerst nog één keer een 0 naar de paal.
+        mikpunt = (self._sessie.get(device_id) or {}).get("mikpunt")
+        if (
+            mikpunt is not None
+            and window.deadline != mikpunt
+            and mikpunt <= now
+            and charger.connected
+            and not charger.complete
+        ):
+            self._te_laat.add(device_id)
+
         # Werkt hij al toe naar deze klaar-tijd? Een andere klaar-tijd is een
         # andere afspraak, dus dan telt het besluit van daarnet niet meer.
         must_finish = bool(
@@ -615,8 +633,11 @@ class ChargerCoach:
                 else 0.0
             ),
             must_finish=must_finish,
+            overdue=device_id in self._te_laat,
         )
 
+        if decision.rule == "complete":
+            self._te_laat.discard(device_id)
         if decision.rule.startswith("deadline") and window.deadline is not None:
             self._deadline_for[device_id] = window.deadline
         elif not decision.charge or decision.rule in ("boost", "complete"):
@@ -677,6 +698,7 @@ class ChargerCoach:
             self._wake_until.pop(device_id, None)
             self._asking_since.pop(device_id, None)
             self._deadline_for.pop(device_id, None)
+            self._te_laat.discard(device_id)
             self._soc_asked.discard(device_id)
             self._warned.discard(device_id)
             # Wat er over deze sessie bewaard is gaat mee weg. Een opgegeven
@@ -1224,6 +1246,7 @@ class ChargerCoach:
                 "laatst": now,
                 "kwijt": {},
                 "doel": window.deadline if window.enabled else None,
+                "mikpunt": window.deadline if window.enabled else None,
                 "gemeld": set(),
             },
         )
@@ -1238,6 +1261,8 @@ class ChargerCoach:
                 if sleutel in decision.rule:
                     sessie["kwijt"][sleutel] = sessie["kwijt"].get(sleutel, 0.0) + stap
                     break
+
+        sessie["mikpunt"] = window.deadline if window.enabled else None
 
         if charger.charging and sessie["begon"] is None:
             sessie["begon"] = now
@@ -1321,11 +1346,7 @@ class ChargerCoach:
         await self._async_tell(
             f"De auto aan {naam} was om {vorig:%H:%M} nog niet vol.{stand}"
             + (f" Er ging {waarom}." if waarom else "")
-            + (
-                f" Hij laadt verder voor {_wanneer(now, doel)}."
-                if doel is not None
-                else " Hij laadt verder zodra het gunstig is."
-            )
+            + " Hij laadt door tot hij vol is."
         )
 
     async def _async_ask_soc(self, device: dict[str, Any], decision: Decision) -> None:
