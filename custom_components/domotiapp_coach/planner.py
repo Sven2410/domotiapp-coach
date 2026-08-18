@@ -596,6 +596,25 @@ def _clock(moment: datetime) -> str:
     return moment.strftime("%H:%M")
 
 
+def _hold_until_start(now: datetime, end: datetime | None, needed: float | None) -> int:
+    """Hoe lang een pauze mag staan als de coach zelf zou wegvallen.
+
+    Dit is het vangnet voor het geval dat Home Assistant niet meer terugkomt.
+    Een 0 in de laadpaal met een houdbaarheid blijft precies zo lang staan als
+    hier staat; daarna valt de paal terug op zijn eigen maximum en laadt de auto
+    gewoon door.
+
+    Laten aflopen op de klaar-tijd zou daarom fout zijn: dan begint de auto pas
+    te laden op het moment dat hij vol had moeten zijn. Het hoort af te lopen op
+    het laatste moment dat nog past, want dat is precies wanneer de coach zelf
+    zou zijn begonnen als hij er nog was geweest.
+    """
+    if end is None:
+        return MIN_HOLD_MINUTES
+    laatste = end - timedelta(hours=needed) if needed else end
+    return _hold_until(now, laatste)
+
+
 def _hold_until(now: datetime, moment: datetime | None) -> int:
     """Hoeveel minuten een pauze mee moet gaan om tot `moment` te reiken.
 
@@ -974,7 +993,7 @@ def _decide(
             "Geef je accustand door, dan kiest hij het gunstigste moment.",
             plan=f"Begint hoe dan ook op tijd voor {_clock(end)}, uitgaand van een lege accu.",
             rule="no-soc",
-            hold_minutes=_hold_until(now, end),
+            hold_minutes=_hold_until_start(now, end, needed),
             needs_soc=True,
         )
 
@@ -1039,7 +1058,7 @@ def _decide(
                 reden,
                 plan=f"Vult de rest op tijd bij voor {_clock(end)}.",
                 rule="wait-for-sun",
-                hold_minutes=_hold_until(now, end),
+                hold_minutes=_hold_until_start(now, end, needed),
                 needs_soc=soc_unknown,
             )
         return Decision(

@@ -60,10 +60,10 @@ def _merge(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
 def _forget_removed_devices(data: dict[str, Any]) -> dict[str, Any]:
     """Drop everything that points at a device that no longer exists.
 
-    Two settings name a device rather than containing it: the list of devices
-    the customer has released for steering, and the schedules that say when an
-    appliance may run. Delete the dishwasher under Apparaten and both would
-    stay behind -- invisible, because every screen only lists what is still
+    Several settings name a device rather than containing it: the list of
+    devices released for steering, the schedules that say when an appliance may
+    run, and what is remembered about the session at a charging point. Delete
+    the dishwasher under Apparaten and they would all stay behind -- invisible, because every screen only lists what is still
     there, and quietly back in force the day a new device happened to be given
     the same id.
 
@@ -74,6 +74,16 @@ def _forget_removed_devices(data: dict[str, Any]) -> dict[str, Any]:
     known = {device.get("id") for device in data.get("devices", []) if isinstance(device, dict)}
 
     data["ready_devices"] = [item for item in data.get("ready_devices", []) if item in known]
+
+    # Hetzelfde geldt voor wat er per laadpunt over de lopende sessie bewaard
+    # is: welke auto eraan hangt, wat de bewoner over de accustand zei en welke
+    # knoppen aanstonden. Verdwijnt het apparaat, dan hoort dat mee weg.
+    for sleutel in ("active_cars", "car_soc", "sessions"):
+        data[sleutel] = [
+            entry
+            for entry in data.get(sleutel, [])
+            if isinstance(entry, dict) and entry.get("device") in known
+        ]
 
     strategy = data.get("strategy")
     if isinstance(strategy, dict):

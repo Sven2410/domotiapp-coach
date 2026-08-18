@@ -115,6 +115,13 @@ ROUND_TIMEOUT = timedelta(seconds=45)
 WATCHDOG_INTERVAL = timedelta(minutes=5)
 WATCHDOG_SILENCE = timedelta(minutes=10)
 
+# Hoe lang een akkoord, snelladen of een pauze blijft gelden zonder dat de coach
+# ernaar heeft kunnen kijken. Twaalf uur dekt een nacht en een werkdag, en is
+# kort genoeg dat een opdracht van eergisteren nooit op de auto van vandaag
+# terechtkomt. Het uittrekken van de kabel wist ze altijd meteen; dit geldt
+# alleen voor wat er tijdens een herstart gebeurd kan zijn.
+SESSION_MEMORY = timedelta(hours=12)
+
 # Hoe vaak een te hoge fasestroom hoogstens een extra ronde mag opleveren. Een
 # meter meldt zich elke seconde, en een huis dat vol zit doet dat een tijdlang
 # achter elkaar; zonder deze grens zou de coach zichzelf de hele avond op hol
@@ -196,6 +203,9 @@ class ChargerCoach:
         # afneemt. Daarmee weet de kaart het verschil tussen "begint zo" en
         # "de auto doet niets".
         self._asking: dict[str, int] = {}
+        # Of de knoppen van de bewoner al teruggehaald zijn uit de opslag. Eén
+        # keer per opstart, bij de eerste ronde.
+        self._restored = False
         # Wanneer er voor het laatst om een accustand is gevraagd, per apparaat.
         # Eén melding per sessie is genoeg; vaker is zeuren en dan zet iemand de
         # meldingen uit.
@@ -465,6 +475,8 @@ class ChargerCoach:
             _LOGGER.exception("kon de instellingen niet lezen")
             return
 
+        self._restore(settings)
+
         level = (settings.get("strategy") or {}).get("level", LEVEL_PROPOSE)
         moment = dt_util.as_local(now or dt_util.utcnow()).replace(tzinfo=None)
 
@@ -575,11 +587,13 @@ class ChargerCoach:
             self._woken.discard(device_id)
             self._asking.pop(device_id, None)
             self._soc_asked.discard(device_id)
-            # Een opgegeven accustand hoort bij de auto die eraan hing. Blijft
-            # hij staan, dan rekent de coach morgen met het percentage van
-            # gisteren terwijl er honderd kilometer tussen zit, en dat is de
-            # gevaarlijke kant op: hij denkt dan dat er weinig in hoeft.
-            await self._async_forget_soc(settings, device_id)
+            # Wat er over deze sessie bewaard is gaat mee weg. Een opgegeven
+            # accustand hoort bij de auto die eraan hing: blijft die staan, dan
+            # rekent de coach morgen met het percentage van gisteren terwijl er
+            # honderd kilometer tussen zit, en dat is de gevaarlijke kant op.
+            # Voor de knoppen geldt hetzelfde: wie de kabel eruit trekt, heeft
+            # niets meer goedgekeurd of gepauzeerd.
+            await self._async_forget(settings, device_id)
 
         self.state[device_id]["applied"] = may_act
         self.state[device_id]["approved"] = device_id in self._approved
@@ -1083,19 +1097,28 @@ class ChargerCoach:
             )
         await self._async_tell(bericht)
 
-    async def _async_forget_soc(self, settings: dict[str, Any], device_id: str) -> None:
-        """De opgegeven accustand vergeten zodra de kabel eruit is."""
-        rows = [
-            row
-            for row in (settings.get("car_soc") or [])
-            if isinstance(row, dict) and row.get("device") != device_id
-        ]
-        if len(rows) == len(settings.get("car_soc") or []):
+    async def _async_forget(self, settings: dict[str, Any], device_id: str) -> None:
+        """Alles wat over deze sessie bewaard was vergeten, in één keer.
+
+        In één schrijfbeurt, want dit gebeurt bij elke ronde dat er geen kabel
+        in zit en twee schrijfbeurten per minuut is twee keer te veel. Staat er
+        niets meer, dan wordt er ook niets geschreven.
+        """
+        wijziging = {}
+        for sleutel in ("car_soc", "sessions"):
+            rows = [
+                row
+                for row in (settings.get(sleutel) or [])
+                if isinstance(row, dict) and row.get("device") != device_id
+            ]
+            if len(rows) != len(settings.get(sleutel) or []):
+                wijziging[sleutel] = rows
+        if not wijziging:
             return
         try:
-            saved = await async_get_store(self.hass).async_save({"car_soc": rows})
+            saved = await async_get_store(self.hass).async_save(wijziging)
         except Exception:  # noqa: BLE001 - een vergeten percentage is geen reden om te stoppen
-            _LOGGER.exception("kon de opgegeven accustand niet vergeten")
+            _LOGGER.exception("kon de gegevens van de vorige sessie niet vergeten")
             return
         self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
 
@@ -1108,16 +1131,86 @@ class ChargerCoach:
             return None
         return 3 if amps_for(watts, 1) / amps > 2 else 1
 
+    def _restore(self, settings: dict[str, Any]) -> None:
+        """De knoppen van de bewoner terughalen na een herstart.
+
+        Een akkoord, snelladen en een pauze zijn opdrachten van een mens, en die
+        horen niet te verdampen omdat Home Assistant vannacht toevallig opnieuw
+        opstartte. Zonder dit stond een auto die op "adviseren" was goedgekeurd
+        's ochtends leeg, want de coach was zijn akkoord kwijt en niemand was
+        wakker om opnieuw op de knop te drukken.
+
+        Ze verlopen wel, en om twee redenen. Een opdracht van gisteren gaat niet
+        over de auto die er nu hangt, en na een herstart kan de coach niet zien
+        of de kabel er tussendoor uit is geweest. Het uittrekken van de kabel
+        wist ze sowieso; dit is het vangnet voor wat hij niet gezien heeft.
+        """
+        if self._restored:
+            return
+        self._restored = True
+
+        grens = dt_util.utcnow() - SESSION_MEMORY
+        for row in settings.get("sessions") or []:
+            if not isinstance(row, dict) or not row.get("device"):
+                continue
+            stempel = dt_util.parse_datetime(str(row.get("at") or ""))
+            if stempel is None or stempel < grens:
+                continue
+            device_id = str(row["device"])
+            if row.get("approved"):
+                self._approved.add(device_id)
+            if row.get("boost"):
+                self._boost.add(device_id)
+            if row.get("paused"):
+                self._paused.add(device_id)
+
+    def _remember(self, device_id: str) -> None:
+        """Vastleggen wat er nu voor dit apparaat aan staat.
+
+        Wegschrijven duurt even en de knop moet meteen reageren, dus het gaat
+        als eigen taak de wachtrij in. De ronde die er meteen achteraan komt
+        leest de vlaggen uit het geheugen en niet uit de opslag, dus die hoeft
+        er niet op te wachten.
+        """
+        self.hass.async_create_task(self._async_remember(device_id))
+
+    async def _async_remember(self, device_id: str) -> None:
+        """Het schrijfwerk van `_remember`."""
+        aan = {
+            "approved": device_id in self._approved,
+            "boost": device_id in self._boost,
+            "paused": device_id in self._paused,
+        }
+        try:
+            store = async_get_store(self.hass)
+            settings = await store.async_load()
+            rows = [
+                row
+                for row in (settings.get("sessions") or [])
+                if isinstance(row, dict) and row.get("device") != device_id
+            ]
+            if any(aan.values()):
+                rows.append(
+                    {"device": device_id, **aan, "at": dt_util.utcnow().isoformat()}
+                )
+            saved = await store.async_save({"sessions": rows})
+        except Exception:  # noqa: BLE001 - een knop die werkt gaat voor op onthouden
+            _LOGGER.exception("kon de stand van de knoppen niet bewaren")
+            return
+        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+
     @callback
     def async_approve(self, device_id: str) -> None:
         """The customer agreed to this charging session."""
         self._approved.add(device_id)
+        self._remember(device_id)
         self.async_refresh()
 
     @callback
     def async_withdraw(self, device_id: str) -> None:
         """And can take that back."""
         self._approved.discard(device_id)
+        self._remember(device_id)
         self.async_refresh()
 
     @callback
@@ -1130,6 +1223,7 @@ class ChargerCoach:
             self._paused.discard(device_id)
         else:
             self._boost.discard(device_id)
+        self._remember(device_id)
         self.async_refresh()
 
     @callback
@@ -1151,6 +1245,7 @@ class ChargerCoach:
             self._boost.discard(device_id)
         else:
             self._paused.discard(device_id)
+        self._remember(device_id)
         self.async_refresh()
 
     @callback
