@@ -122,6 +122,11 @@ WATCHDOG_SILENCE = timedelta(minutes=10)
 # alleen voor wat er tijdens een herstart gebeurd kan zijn.
 SESSION_MEMORY = timedelta(hours=12)
 
+# Hoe lang de wekstroom blijft staan. Een minuut, dus in de praktijk één ronde,
+# maar uitgedrukt in tijd omdat een statuswissel van de laadpaal ook een ronde
+# start: op ronden geteld stond de wekstroom er soms maar drie seconden.
+WAKE_WINDOW = timedelta(seconds=60)
+
 # Hoe vaak een te hoge fasestroom hoogstens een extra ronde mag opleveren. Een
 # meter meldt zich elke seconde, en een huis dat vol zit doet dat een tijdlang
 # achter elkaar; zonder deze grens zou de coach zichzelf de hele avond op hol
@@ -199,10 +204,15 @@ class ChargerCoach:
         # Of de wekpoging van deze sessie nog openstaat. Eén per sessie, dus
         # zodra hij gedaan is blijft dit staan tot de kabel eruit gaat.
         self._woken: set[str] = set()
-        # Hoeveel ronden er al stroom wordt aangeboden zonder dat de auto iets
-        # afneemt. Daarmee weet de kaart het verschil tussen "begint zo" en
-        # "de auto doet niets".
-        self._asking: dict[str, int] = {}
+        # Sinds wanneer er stroom wordt aangeboden zonder dat de auto iets
+        # afneemt. Daarmee weet de kaart het verschil tussen "begint zo" en "de
+        # auto doet niets". Een tijdstip en geen teller: een ronde is niet altijd
+        # een minuut, want een statuswissel van de paal start er ook een.
+        self._asking_since: dict[str, datetime] = {}
+        # Tot wanneer de wekstroom blijft staan. Om dezelfde reden een klok: op
+        # ronden geteld kon de wekpoging na drie seconden alweer voorbij zijn,
+        # en daar wordt geen auto wakker van.
+        self._wake_until: dict[str, datetime] = {}
         # Of de knoppen van de bewoner al teruggehaald zijn uit de opslag. Eén
         # keer per opstart, bij de eerste ronde.
         self._restored = False
@@ -565,30 +575,37 @@ class ChargerCoach:
         # Wekken mag zolang de auto aan de kabel hangt, niet laadt en de poging
         # van deze sessie nog openstaat. Dat de coach ook wíl laden weet de
         # planner zelf; hier gaat het alleen over of het nog mag.
-        waking = (
-            charger.connected and not charger.charging and device_id not in self._woken
+        wektijd = self._wake_until.get(device_id)
+        waking = charger.connected and not charger.charging and (
+            device_id not in self._woken or (wektijd is not None and now < wektijd)
         )
         decision = decide(
             now, self._prices(settings), grid, car, charger, window, goal,
             self._tariff(settings), self._sun(settings),
             holding=self._holding.get(device_id, 0),
             waking=waking,
-            asking_rounds=self._asking.get(device_id, 0),
+            asking_seconds=(
+                (now - self._asking_since[device_id]).total_seconds()
+                if device_id in self._asking_since
+                else 0.0
+            ),
         )
         # De wekpoging is verbruikt zodra hij verstuurd is, en het aanbieden
         # begint te tellen zodra de coach stroom vraagt terwijl er niets loopt.
         if decision.rule.endswith("+wake"):
             self._woken.add(device_id)
+            self._wake_until.setdefault(device_id, now + WAKE_WINDOW)
         elif not decision.charge:
             # Een sessie die bewust stilgezet wordt, mag straks opnieuw gewekt
             # worden. Dat is geen tweede poging binnen dezelfde start maar een
             # nieuwe start, en juist daar bleek de auto niet wakker te worden:
             # na hervatten van een pauze deed hij op 6 A weer niets.
             self._woken.discard(device_id)
+            self._wake_until.pop(device_id, None)
         if decision.charge and charger.connected and not charger.charging:
-            self._asking[device_id] = self._asking.get(device_id, 0) + 1
+            self._asking_since.setdefault(device_id, now)
         else:
-            self._asking.pop(device_id, None)
+            self._asking_since.pop(device_id, None)
         # Bijhouden hoe lang een sessie al tegen de ladder in wordt aangehouden.
         # Zodra de ladder het weer eens is met wat er gebeurt, staat de teller
         # op nul en heeft de volgende wolk weer zijn volle uitstel.
@@ -621,7 +638,8 @@ class ChargerCoach:
             self._holding.pop(device_id, None)
             self._pause_until.pop(device_id, None)
             self._woken.discard(device_id)
-            self._asking.pop(device_id, None)
+            self._wake_until.pop(device_id, None)
+            self._asking_since.pop(device_id, None)
             self._soc_asked.discard(device_id)
             self._warned.discard(device_id)
             # Wat er over deze sessie bewaard is gaat mee weg. Een opgegeven
