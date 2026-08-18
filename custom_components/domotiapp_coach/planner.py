@@ -95,6 +95,13 @@ MIN_RUN_MINUTES = 10
 # hele middag stilstaat.
 WAKE_AMPS = 10
 
+# Hoe lang een auto de tijd krijgt voordat de kaart zegt dat hij niets afneemt.
+# In seconden en niet in ronden, want een ronde is niet altijd een minuut: een
+# statuswissel van de paal start er ook een. Op ronden geteld stond er drie
+# seconden na het aanbod al "de auto neemt nog niets af", terwijl hij twintig
+# seconden later gewoon begon.
+WAITING_SECONDS = 60
+
 # Hoeveel ronden achtereen de ladder "stoppen" moet zeggen voordat er echt
 # gestopt wordt. Een wolk duurt een minuut of twee, en daarvoor hoort een sessie
 # niet af te breken.
@@ -656,7 +663,7 @@ def decide(
     sun: Sun = Sun(),
     holding: int = 0,
     waking: bool = False,
-    asking_rounds: int = 0,
+    asking_seconds: float = 0.0,
 ) -> Decision:
     """What to do with this charging point, and how to say it.
 
@@ -673,10 +680,9 @@ def decide(
     minuten lang bijgekocht terwijl het dak vol zon lag.
 
     `holding` is hoeveel ronden er al tegen de ladder in wordt doorgeladen; de
-    laag die de sensoren leest houdt dat bij. `waking` en `asking_rounds` gaan
+    laag die de sensoren leest houdt dat bij. `waking` en `asking_seconds` gaan
     over hetzelfde soort geheugen: of de wekpoging van deze sessie nog openstaat,
-    en hoeveel ronden de coach al stroom aanbiedt zonder dat de auto iets
-    afneemt.
+    en hoe lang de coach al stroom aanbiedt zonder dat de auto iets afneemt.
 
     Note what is *not* done here. The coach never withdraws its request when it
     is being held back. It keeps asking, because the balancer works on the
@@ -713,7 +719,7 @@ def decide(
             )
 
     if charger.connected and not charger.charging:
-        return _wake(grid, car, charger, decision, waking, asking_rounds)
+        return _wake(grid, car, charger, decision, waking, asking_seconds)
 
     return decision
 
@@ -724,7 +730,7 @@ def _wake(
     charger: Charger,
     decision: Decision,
     waking: bool,
-    asking_rounds: int,
+    asking_seconds: float,
 ) -> Decision:
     """De auto staat stil terwijl de coach stroom aanbiedt.
 
@@ -749,7 +755,7 @@ def _wake(
 
     # Hier komt alleen een besluit om te laden langs, want een besluit om niet te
     # laden is hierboven al afgehandeld.
-    if asking_rounds >= 1:
+    if asking_seconds >= WAITING_SECONDS:
         return Decision(
             True,
             decision.amps,
