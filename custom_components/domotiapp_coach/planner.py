@@ -664,6 +664,7 @@ def decide(
     holding: int = 0,
     waking: bool = False,
     asking_seconds: float = 0.0,
+    must_finish: bool = False,
 ) -> Decision:
     """What to do with this charging point, and how to say it.
 
@@ -690,7 +691,9 @@ def decide(
     standing already. Lowering it would mean charging slowly for another minute
     for no reason at all.
     """
-    decision = _decide(now, prices, grid, car, charger, window, goal, tariff, sun)
+    decision = _decide(
+        now, prices, grid, car, charger, window, goal, tariff, sun, must_finish
+    )
 
     if not decision.charge:
         return _keep_alive(now, grid, car, charger, decision, holding)
@@ -779,6 +782,7 @@ def _decide(
     goal: str = "cost",
     tariff: Tariff = Tariff(),
     sun: Sun = Sun(),
+    must_finish: bool = False,
 ) -> Decision:
     """What to do with this charging point, this minute.
 
@@ -912,9 +916,20 @@ def _decide(
     if soc_unknown:
         needed = hours_needed(car, pace, assume_empty=True)
 
+    # `must_finish` betekent: deze sessie is al eerder tegen de klaar-tijd
+    # aangelopen en blijft daarom op vol vermogen. Zonder dat sloeg hij elke
+    # minuut om, en dat is geen theorie: op 18-08-2026 wisselde hij twintig
+    # minuten lang om de minuut tussen 14 en 6 A.
+    #
+    # De oorzaak is een kringetje. Op vol vermogen meet de coach een snel tempo,
+    # dus lijkt er tijd zat en valt hij terug op de zonregel; op 6 A meet hij een
+    # traag tempo, dus lijkt de klaar-tijd in gevaar en gaat hij weer vol. Beide
+    # metingen kloppen, en juist daarom is het antwoord niet nog een som maar een
+    # besluit dat blijft staan: wie op het laatste moment begonnen is, kan niet
+    # halverwege gas terugnemen zonder alsnog te laat te zijn.
     if window.enabled and end and needed is not None:
         slack = (end - now).total_seconds() / 3600 - needed
-        if slack <= 0.25:
+        if slack <= 0.25 or must_finish:
             return Decision(
                 True,
                 ceiling,

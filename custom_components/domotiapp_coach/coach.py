@@ -209,6 +209,10 @@ class ChargerCoach:
         # auto doet niets". Een tijdstip en geen teller: een ronde is niet altijd
         # een minuut, want een statuswissel van de paal start er ook een.
         self._asking_since: dict[str, datetime] = {}
+        # Naar welke klaar-tijd een sessie op vol vermogen aan het toewerken is.
+        # Zodra hij daaraan begonnen is, blijft hij dat doen tot de auto vol is
+        # of de klaar-tijd verandert: terugnemen betekent alsnog te laat.
+        self._deadline_for: dict[str, datetime] = {}
         # Tot wanneer de wekstroom blijft staan. Om dezelfde reden een klok: op
         # ronden geteld kon de wekpoging na drie seconden alweer voorbij zijn,
         # en daar wordt geen auto wakker van.
@@ -575,6 +579,13 @@ class ChargerCoach:
         # Wekken mag zolang de auto aan de kabel hangt, niet laadt en de poging
         # van deze sessie nog openstaat. Dat de coach ook wíl laden weet de
         # planner zelf; hier gaat het alleen over of het nog mag.
+        # Werkt hij al toe naar deze klaar-tijd? Een andere klaar-tijd is een
+        # andere afspraak, dus dan telt het besluit van daarnet niet meer.
+        must_finish = bool(
+            window.enabled
+            and window.deadline is not None
+            and self._deadline_for.get(device_id) == window.deadline
+        )
         wektijd = self._wake_until.get(device_id)
         waking = charger.connected and not charger.charging and (
             device_id not in self._woken or (wektijd is not None and now < wektijd)
@@ -589,7 +600,16 @@ class ChargerCoach:
                 if device_id in self._asking_since
                 else 0.0
             ),
+            must_finish=must_finish,
         )
+
+        if decision.rule.startswith("deadline") and window.deadline is not None:
+            self._deadline_for[device_id] = window.deadline
+        elif not decision.charge or decision.rule in ("boost", "complete"):
+            # Een volle auto, een opdracht van de bewoner of een besluit om te
+            # stoppen maakt de race naar de klaar-tijd irrelevant. Bij de
+            # eerstvolgende ronde wordt gewoon opnieuw gerekend.
+            self._deadline_for.pop(device_id, None)
         # De wekpoging is verbruikt zodra hij verstuurd is, en het aanbieden
         # begint te tellen zodra de coach stroom vraagt terwijl er niets loopt.
         if decision.rule.endswith("+wake"):
@@ -640,6 +660,7 @@ class ChargerCoach:
             self._woken.discard(device_id)
             self._wake_until.pop(device_id, None)
             self._asking_since.pop(device_id, None)
+            self._deadline_for.pop(device_id, None)
             self._soc_asked.discard(device_id)
             self._warned.discard(device_id)
             # Wat er over deze sessie bewaard is gaat mee weg. Een opgegeven
