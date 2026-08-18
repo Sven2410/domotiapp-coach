@@ -83,6 +83,18 @@ SURPLUS_SLACK = 0.9
 # cycles.
 MIN_RUN_MINUTES = 10
 
+# De stroom waarmee een auto wakker wordt gemaakt. Gemeten bij een Ford aan een
+# Easee op 18-08-2026: op 6 A aangeboden bleef de paal minutenlang op
+# `awaiting_start` staan met nul watt, en binnen twintig seconden na een ruimer
+# aanbod liep hij. Terugzakken naar 6 A daarna was geen probleem, dus het is het
+# wakker worden dat meer vraagt, niet het laden zelf.
+#
+# Eén ronde lang, en één poging per sessie. Twee keer heen en weer is precies het
+# pendelen dat een auto na een stuk of wat pogingen helemaal laat afhaken, en de
+# paar minuten bijkopen die dit hooguit kost wegen niet op tegen een auto die de
+# hele middag stilstaat.
+WAKE_AMPS = 10
+
 # Hoeveel ronden achtereen de ladder "stoppen" moet zeggen voordat er echt
 # gestopt wordt. Een wolk duurt een minuut of twee, en daarvoor hoort een sessie
 # niet af te breken.
@@ -283,6 +295,11 @@ class Decision:
     # verlopen, want doorladen is dan hooguit duur. Bij een volle aansluiting
     # niet, want dan is doorladen gevaarlijk.
     hold_minutes: int | None = None
+    # Of dit besluit genomen is zonder te weten hoe vol de auto is. Dan is er
+    # gerekend met het slechtste geval, een lege accu, en kan de bewoner het
+    # beter maken door zijn accustand door te geven. De kaart en de melding
+    # hangen hieraan.
+    needs_soc: bool = False
 
 
 # --- The sums -------------------------------------------------------------
@@ -387,6 +404,23 @@ def energy_needed_kwh(car: Car) -> float | None:
     return missing / CHARGE_EFFICIENCY
 
 
+def worst_case_kwh(car: Car) -> float | None:
+    """Hoeveel er in moet als niemand weet hoe vol de auto is.
+
+    Het slechtste geval, en dat is hier het enige eerlijke antwoord: een lege
+    accu. Daarmee kan de coach wél uitrekenen hoe laat hij uiterlijk moet
+    beginnen, zonder één verzonnen getal, want de capaciteit staat gewoon in het
+    autoprofiel.
+
+    Dat is geen reden om vroeg te gaan laden. Het is een uiterste
+    startmoment, meer niet: tot dat moment wacht hij, en ondertussen vraagt hij
+    de bewoner om de accustand, waarmee het meteen scherper wordt.
+    """
+    if car.guest or not car.capacity_kwh:
+        return None
+    return car.capacity_kwh / CHARGE_EFFICIENCY
+
+
 def charge_cost(watts: float, surplus_w: float, buy: float, feed_in: float) -> float:
     """Wat een kWh in de auto kost als je nu laadt, alles meegerekend.
 
@@ -427,7 +461,7 @@ def min_phases(car: Car) -> int:
     return 1 if not car.phases_certain else car.phases
 
 
-def hours_needed(car: Car, amps: int) -> float | None:
+def hours_needed(car: Car, amps: int, assume_empty: bool = False) -> float | None:
     """Hoe lang dat duurt bij deze stroom.
 
     Het aantal fasen doet in drie sommen mee, en per som is een andere keuze de
@@ -442,8 +476,12 @@ def hours_needed(car: Car, amps: int) -> float | None:
     gunstigste aanname (zie `min_phases`), en waar het om de te vragen stroom
     gaat het zwaarste, want te veel vragen betekent inkopen. Alle drie corrigeren
     zichzelf zodra er stroom loopt: dan is het aantal fasen te meten.
+
+    Met `assume_empty` wordt gerekend alsof de accu leeg is. Dat is wat er
+    overblijft als de accustand onbekend is, en het levert het uiterste
+    startmoment op.
     """
-    energy = energy_needed_kwh(car)
+    energy = worst_case_kwh(car) if assume_empty else energy_needed_kwh(car)
     if energy is None or amps <= 0:
         return None
     return energy / (watts_for(amps, min_phases(car)) / 1000.0)
@@ -586,6 +624,8 @@ def decide(
     tariff: Tariff = Tariff(),
     sun: Sun = Sun(),
     holding: int = 0,
+    waking: bool = False,
+    asking_rounds: int = 0,
 ) -> Decision:
     """What to do with this charging point, and how to say it.
 
@@ -602,7 +642,10 @@ def decide(
     minuten lang bijgekocht terwijl het dak vol zon lag.
 
     `holding` is hoeveel ronden er al tegen de ladder in wordt doorgeladen; de
-    laag die de sensoren leest houdt dat bij.
+    laag die de sensoren leest houdt dat bij. `waking` en `asking_rounds` gaan
+    over hetzelfde soort geheugen: of de wekpoging van deze sessie nog openstaat,
+    en hoeveel ronden de coach al stroom aanbiedt zonder dat de auto iets
+    afneemt.
 
     Note what is *not* done here. The coach never withdraws its request when it
     is being held back. It keeps asking, because the balancer works on the
@@ -635,7 +678,56 @@ def decide(
                 f"zit vol. De coach vraagt {decision.amps} A en pakt die zodra het kan.",
                 plan=decision.plan,
                 rule=f"{decision.rule}+held-back",
+                needs_soc=decision.needs_soc,
             )
+
+    if charger.connected and not charger.charging:
+        return _wake(grid, car, charger, decision, waking, asking_rounds)
+
+    return decision
+
+
+def _wake(
+    grid: Grid,
+    car: Car,
+    charger: Charger,
+    decision: Decision,
+    waking: bool,
+    asking_rounds: int,
+) -> Decision:
+    """De auto staat stil terwijl de coach stroom aanbiedt.
+
+    Twee dingen horen daarbij, en ze volgen op elkaar. Eerst één ronde een
+    ruimer aanbod, want een aantal auto's wordt niet wakker van het minimum.
+    Werkt dat niet, dan hoort de kaart dat te zeggen in plaats van te beloven
+    dat er met de zon wordt meegelopen terwijl er nul watt loopt.
+    """
+    if waking:
+        amps = min(ceiling_amps(grid, car, charger), max(decision.amps, WAKE_AMPS))
+        if amps > decision.amps:
+            return Decision(
+                True,
+                amps,
+                f"De auto is nog niet begonnen, dus hij biedt even {amps} A aan om hem "
+                "wakker te maken.",
+                plan="Zakt terug naar het zuinige tempo zodra de auto laadt.",
+                rule=f"{decision.rule}+wake",
+                holding=decision.holding,
+                needs_soc=decision.needs_soc,
+            )
+
+    # Hier komt alleen een besluit om te laden langs, want een besluit om niet te
+    # laden is hierboven al afgehandeld.
+    if asking_rounds >= 1:
+        return Decision(
+            True,
+            decision.amps,
+            f"De paal biedt {decision.amps} A aan, maar de auto neemt nog niets af.",
+            plan="Kijk of het laden in de auto zelf is uitgesteld of geblokkeerd.",
+            rule=f"{decision.rule}+waiting-for-car",
+            holding=decision.holding,
+            needs_soc=decision.needs_soc,
+        )
 
     return decision
 
@@ -738,16 +830,33 @@ def _decide(
     # Reckoned with what the charger really manages, not with what it is about
     # to be asked for. Being held back by a load balancer makes charging take
     # longer, and the only sound answer to that is to begin sooner.
-    needed = hours_needed(car, charging_pace(now, charger, ceiling))
+    #
+    # Weet niemand hoe vol de auto is, dan wordt er gerekend alsof hij leeg is.
+    # Dat verandert niets aan de volgorde van de ladder en het is geen reden om
+    # eerder te gaan laden; het levert alleen een uiterste startmoment op, zodat
+    # een vergeten accustand nooit een lege auto oplevert. Elke sport die
+    # hieronder staat weet dat het een aanname is en zegt dat ook.
+    pace = charging_pace(now, charger, ceiling)
+    needed = hours_needed(car, pace)
+    soc_unknown = needed is None
+    if soc_unknown:
+        needed = hours_needed(car, pace, assume_empty=True)
+
     if window.enabled and end and needed is not None:
         slack = (end - now).total_seconds() / 3600 - needed
         if slack <= 0.25:
             return Decision(
                 True,
                 ceiling,
-                f"Nu doorladen, anders is de auto om {_clock(end)} niet vol.",
+                (
+                    f"Je hebt niet doorgegeven hoe vol de auto is, dus hij gaat uit "
+                    f"van een lege accu en laadt nu door om {_clock(end)} te halen."
+                    if soc_unknown
+                    else f"Nu doorladen, anders is de auto om {_clock(end)} niet vol."
+                ),
                 plan="Laadt op vol vermogen tot de auto klaar is.",
                 rule="deadline",
+                needs_soc=soc_unknown,
             )
 
     # --- eigen zon --------------------------------------------------------
@@ -847,6 +956,28 @@ def _decide(
             hold_minutes=MIN_HOLD_MINUTES,
         )
 
+    # --- niemand weet hoe vol de auto is -----------------------------------
+    #
+    # Vanaf hier zou er stroom uit het net gekocht worden, en dat mag niet op
+    # een aanname. Zon is iets anders: die staat hierboven en gaat er altijd in,
+    # want gratis stroom benutten kan nooit verkeerd zijn.
+    #
+    # Wachten kan alleen als er een klaar-tijd is om op terug te vallen. Die is
+    # er, want de sport hierboven rekent dan met een lege accu uit wanneer hij
+    # uiterlijk moet beginnen. Zo staat er nooit een lege auto en wordt er toch
+    # niets vroeg gekocht op een getal dat niemand heeft ingevuld.
+    if soc_unknown and window.enabled and end:
+        return Decision(
+            False,
+            0,
+            "Hij weet niet hoe vol de auto is, dus hij wacht met laden uit het net. "
+            "Geef je accustand door, dan kiest hij het gunstigste moment.",
+            plan=f"Begint hoe dan ook op tijd voor {_clock(end)}, uitgaand van een lege accu.",
+            rule="no-soc",
+            hold_minutes=_hold_until(now, end),
+            needs_soc=True,
+        )
+
     # --- een vast contract -------------------------------------------------
     #
     # Zonder prijslijst is er geen goedkoop uur om op te wachten: elk uur van de
@@ -882,14 +1013,34 @@ def _decide(
                 rule="no-prices",
             )
 
-        if window.enabled and end and needed is not None and _zon_verwacht(sun, car):
+        if window.enabled and end and needed is not None:
+            # Wachten is hier nooit duurder dan nu laden, want bij een vast
+            # contract kost elk uur hetzelfde. Het enige dat verandert is
+            # hoeveel eigen zon er nog in gaat, en dat kan alleen maar meer
+            # worden. De klaar-tijdregel hierboven grijpt vanzelf in op het
+            # laatste moment dat nog past, dus dit kan zonder risico.
+            #
+            # Hier stond eerder een poortje dat de zonverwachting vergeleek met
+            # wat er nog in de auto moest, en dat was een klif: op 18-08-2026
+            # zakte de verwachting van 6,6 naar 6,3 kWh en sprong de coach van
+            # volledig wachten naar vol vermogen uit het net, een halve euro in
+            # dertig minuten. De verwachting hoort de tekst te bepalen en niet
+            # het gedrag.
+            if _zon_verwacht(sun, car):
+                reden = "Alles kost hetzelfde bij een vast contract, dus hij wacht op je eigen zon."
+            else:
+                reden = (
+                    "Er komt vandaag minder zon dan er nog in moet, maar wachten kost je "
+                    "niets bij een vast contract. Dus hij pakt de zon die er is."
+                )
             return Decision(
                 False,
                 0,
-                "Alles kost hetzelfde bij een vast contract, dus hij wacht op je eigen zon.",
-                plan=f"Komt die niet, dan laadt hij alsnog op tijd voor {_clock(end)}.",
+                reden,
+                plan=f"Vult de rest op tijd bij voor {_clock(end)}.",
                 rule="wait-for-sun",
                 hold_minutes=_hold_until(now, end),
+                needs_soc=soc_unknown,
             )
         return Decision(
             True,
@@ -898,6 +1049,9 @@ def _decide(
             rule="fixed-tariff",
         )
 
+    # Zonder accustand staat hier het slechtste geval, en dat is beter dan het
+    # alternatief: bij nul uren pakt `cheapest_hours` álle uren als "goedkoop"
+    # en laadt de coach dus meteen, ook op het duurste uur van de nacht.
     plan_hours = cheapest_hours(prices, max(now, start) if start else now, end, needed or 0)
     current = price_now(prices, now)
 
@@ -908,6 +1062,7 @@ def _decide(
             f"Dit is een van de goedkoopste uren: {_euro(current['price'])} per kWh.",
             plan=_describe(plan_hours),
             rule="cheap-hour",
+            needs_soc=soc_unknown,
         )
 
     return Decision(
@@ -916,6 +1071,7 @@ def _decide(
         "Het is nu niet het goedkoopste moment om te laden.",
         plan=_describe(plan_hours),
         rule="wait-for-price",
+        needs_soc=soc_unknown,
         # Tot het eerste uur dat hij van plan is te gebruiken. Verloopt de pauze
         # doordat de coach wegvalt, dan laadt de auto vanaf dat moment gewoon
         # door, en dat is precies het goede antwoord: duurder, maar wel vol.
