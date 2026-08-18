@@ -155,6 +155,11 @@ class Grid:
     # How much room to leave under the fuse. Wider when a load balancer guards
     # the same fuse, so the coach is the one that gives way.
     margin_amps: float = FUSE_MARGIN_AMPS
+    # Ruimte die in dezelfde ronde al aan een ánder laadpunt is toegezegd en die
+    # nog niet in de fasemeting zit. Bij twee palen op één zekering rekenden ze
+    # allebei dezelfde ampères als vrij, en samen namen ze dus twee keer wat er
+    # één keer was.
+    reserved_amps: float = 0.0
 
 
 @dataclass
@@ -300,6 +305,11 @@ class Decision:
     # beter maken door zijn accustand door te geven. De kaart en de melding
     # hangen hieraan.
     needs_soc: bool = False
+    # Of een opdracht van de bewoner zelf op het punt staat de klaar-tijd te
+    # kosten. De coach zet die opdracht niet opzij, want het is zijn huis, maar
+    # zwijgen hoort hier ook niet: dan staat de auto morgen leeg en is er niets
+    # kapot om naar te wijzen.
+    deadline_risk: bool = False
 
 
 # --- The sums -------------------------------------------------------------
@@ -330,7 +340,9 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
 
     if grid.phase_amps:
         household = max(grid.phase_amps) - grid.charger_amps
-        limits.append(grid.fuse_amps - max(0.0, household) - fuse_margin(grid))
+        limits.append(
+            grid.fuse_amps - max(0.0, household) - fuse_margin(grid) - grid.reserved_amps
+        )
 
     return int(max(0, min(limits)))
 
@@ -794,13 +806,46 @@ def _decide(
         # besluit moet opbouwen.
         return Decision(False, 0, "De auto is vol.", rule="complete", hold_minutes=MIN_HOLD_MINUTES)
 
-    if charger.paused_by_user:
+    # Wat de accustand zegt telt net zo goed als wat de paal zegt. Een auto op
+    # 100% hoeft niets meer, en zonder deze sport viel dat door naar de
+    # prijsregel: die pakt bij "niets nodig" alle uren als goedkoop en zet dus
+    # vol vermogen op een auto die niets meer aanneemt.
+    rest = energy_needed_kwh(car)
+    if rest is not None and rest <= 0:
         return Decision(
             False,
             0,
-            "Je hebt het laden zelf gepauzeerd.",
+            "De auto is vol volgens zijn accustand.",
+            rule="complete",
+            hold_minutes=MIN_HOLD_MINUTES,
+        )
+
+    if charger.paused_by_user:
+        # Een pauze is een opdracht en geen advies, dus die blijft staan. Maar
+        # als hij de klaar-tijd gaat kosten, hoort dat er wel bij te staan: hij
+        # is de enige die de auto morgen leeg kan laten staan zonder dat er iets
+        # kapot is.
+        eind = window.deadline if window.enabled else None
+        tempo = charging_pace(now, charger, ceiling)
+        uren = hours_needed(car, tempo)
+        if uren is None:
+            uren = hours_needed(car, tempo, assume_empty=True)
+        krap = bool(
+            eind and uren is not None and (eind - now).total_seconds() / 3600 - uren <= 0.25
+        )
+        return Decision(
+            False,
+            0,
+            "Je hebt het laden zelf gepauzeerd."
+            + (
+                f" Zo haalt de auto {_clock(eind)} niet meer: hervat het laden of "
+                "verzet je klaar-tijd."
+                if krap
+                else ""
+            ),
             plan="Blijft stilstaan tot je het hervat of de kabel eruit gaat.",
             rule="user-hold",
+            deadline_risk=krap,
         )
 
     if ceiling < MIN_AMPS:
@@ -985,7 +1030,10 @@ def _decide(
     # er, want de sport hierboven rekent dan met een lege accu uit wanneer hij
     # uiterlijk moet beginnen. Zo staat er nooit een lege auto en wordt er toch
     # niets vroeg gekocht op een getal dat niemand heeft ingevuld.
-    if soc_unknown and window.enabled and end:
+    # `needed` staat hier op het slechtste geval; is dat None, dan is zelfs dat
+    # niet te berekenen omdat de accucapaciteit ontbreekt. Dan is wachten geen
+    # optie, want er is geen moment waarop hij alsnog zou beginnen.
+    if soc_unknown and needed is not None and window.enabled and end:
         return Decision(
             False,
             0,

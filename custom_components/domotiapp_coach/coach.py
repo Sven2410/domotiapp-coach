@@ -206,6 +206,9 @@ class ChargerCoach:
         # Of de knoppen van de bewoner al teruggehaald zijn uit de opslag. Eén
         # keer per opstart, bij de eerste ronde.
         self._restored = False
+        # Wie er al gewaarschuwd is dat zijn eigen pauze de klaar-tijd kost. Eén
+        # keer per sessie, net als de vraag om een accustand.
+        self._warned: set[str] = set()
         # Wanneer er voor het laatst om een accustand is gevraagd, per apparaat.
         # Eén melding per sessie is genoeg; vaker is zeuren en dan zet iemand de
         # meldingen uit.
@@ -451,8 +454,13 @@ class ChargerCoach:
         self._running = True
         try:
             async with asyncio.timeout(ROUND_TIMEOUT.total_seconds()):
-                await self._round(now)
-            self._last_round = dt_util.utcnow()
+                gelukt = await self._round(now)
+            # Alleen een ronde die er werkelijk doorheen kwam telt als teken van
+            # leven. Anders zwijgt de wachthond terwijl de coach al een uur geen
+            # besluit meer neemt omdat zijn instellingen niet te lezen zijn: een
+            # stille coach die er van buiten uitziet als een werkende.
+            if gelukt:
+                self._last_round = dt_util.utcnow()
         except TimeoutError:
             # De gevaarlijkste storing die er is, want hij is stil: hangt een
             # opdracht naar de laadpaal, dan zou de vlag hierboven blijven staan
@@ -467,13 +475,13 @@ class ChargerCoach:
         finally:
             self._running = False
 
-    async def _round(self, now: datetime | None) -> None:
-        """Wat er in één ronde gebeurt."""
+    async def _round(self, now: datetime | None) -> bool:
+        """Wat er in één ronde gebeurt, en of dat gelukt is."""
         try:
             settings = await async_get_store(self.hass).async_load()
         except Exception:  # noqa: BLE001 - never let a bad read stop the timer
             _LOGGER.exception("kon de instellingen niet lezen")
-            return
+            return False
 
         self._restore(settings)
 
@@ -495,9 +503,19 @@ class ChargerCoach:
             | self._watched_phases
         )
 
+        # Twee laadpunten op één zekering zagen allebei dezelfde vrije ampères
+        # en namen ze allebei. Wat de een krijgt telt daarom mee als bezet voor
+        # wie er in deze ronde na hem komt.
+        #
+        # Dan doet de volgorde er ineens toe, en die mag niet afhangen van wie
+        # er toevallig het eerst is toegevoegd. De voorrang die de klant per
+        # apparaat heeft ingesteld bepaalt hem: is er te weinig ruimte voor
+        # allebei, dan krijgt de auto die je nodig hebt hem.
+        chargers.sort(key=lambda device: self._priority(settings, device))
+        vergeven = 0.0
         for device in chargers:
             try:
-                await self._one(moment, settings, device, level)
+                vergeven += await self._one(moment, settings, device, level, vergeven)
             except ServiceNotFound as fout:
                 # Gebeurt bij het opstarten: de coach draait al voordat de
                 # integratie van het merk zijn diensten heeft klaargezet. Geen
@@ -514,16 +532,34 @@ class ChargerCoach:
             except Exception:  # noqa: BLE001 - one broken device is not all of them
                 _LOGGER.exception("kon %s niet beoordelen", device.get("id"))
 
+        return True
+
+    @staticmethod
+    def _priority(settings: dict[str, Any], device: dict[str, Any]) -> int:
+        """Wie er voorgaat als er te weinig ruimte is voor allebei."""
+        rang = {"high": 0, "mid": 1, "low": 2}
+        for entry in (settings.get("strategy") or {}).get("schedules") or []:
+            if isinstance(entry, dict) and entry.get("device") == device.get("id"):
+                return rang.get(entry.get("priority", "mid"), 1)
+        return 1
+
     async def _one(
         self,
         now: datetime,
         settings: dict[str, Any],
         device: dict[str, Any],
         level: str,
-    ) -> None:
-        """Look at one charging point and act on what the planner says."""
+        reserved: float = 0.0,
+    ) -> float:
+        """Look at one charging point and act on what the planner says.
+
+        Geeft terug hoeveel ampère er méér gevraagd is dan deze paal op dit
+        moment trekt. Dat is de ruimte die het volgende laadpunt in deze ronde
+        niet meer als vrij mag zien: de fasemeting kent hem nog niet, want de
+        auto is nog niet begonnen met trekken.
+        """
         device_id = device.get("id", "")
-        grid, car, charger, window = self._read(now, settings, device)
+        grid, car, charger, window = self._read(now, settings, device, reserved)
         goal = (settings.get("strategy") or {}).get("goal", "cost")
 
         # Wekken mag zolang de auto aan de kabel hangt, niet laadt en de poging
@@ -587,6 +623,7 @@ class ChargerCoach:
             self._woken.discard(device_id)
             self._asking.pop(device_id, None)
             self._soc_asked.discard(device_id)
+            self._warned.discard(device_id)
             # Wat er over deze sessie bewaard is gaat mee weg. Een opgegeven
             # accustand hoort bij de auto die eraan hing: blijft die staan, dan
             # rekent de coach morgen met het percentage van gisteren terwijl er
@@ -607,11 +644,27 @@ class ChargerCoach:
             EVENT_DECISION, {"device": device_id, **self.state[device_id]}
         )
 
+        # Wat deze paal straks méér gaat trekken dan nu. Alleen als de coach
+        # ook werkelijk mag sturen, want anders gaat er niets naar de paal en is
+        # er dus ook niets gereserveerd.
+        claim = (
+            max(0.0, decision.amps - charger.actual_amps)
+            if may_act and decision.charge
+            else 0.0
+        )
+
         if not may_act:
-            return
+            return 0.0
 
         if decision.needs_soc:
             await self._async_ask_soc(device, decision)
+
+        if decision.deadline_risk and device_id not in self._warned:
+            self._warned.add(device_id)
+            await self._async_tell(
+                f"De pauze op {device.get('name') or 'de laadpaal'} staat nog aan, en zo "
+                "is de auto niet op tijd vol. Hervat het laden of verzet je klaar-tijd."
+            )
 
         # The dead band holds only while the charging point is doing what it was
         # asked. When it is not, the command has to go again, or a car stands
@@ -625,14 +678,14 @@ class ChargerCoach:
             if not should_send(self._last.get(device_id), decision) and not (
                 self._pause_expiring(device_id, now)
             ):
-                return
+                return claim
         elif charger.paused_by_balancer or held_back(charger):
             # Not following, and saying why: something outside the coach is
             # holding it. Ask again now and then, so a charger that quietly let
             # go is picked back up, but not every minute. Repeating a command at
             # a load balancer changes nothing and only fills its log.
             if not self._nudge_due(device_id, now):
-                return
+                return claim
         else:
             # Not following and no reason given. That is the case where asking
             # again is exactly the right thing, so do it on the next round: this
@@ -649,6 +702,8 @@ class ChargerCoach:
                 self._since.setdefault(device_id, now)
             elif not decision.charge:
                 self._since.pop(device_id, None)
+
+        return claim
 
     def _smooth(self, device_id: str, surplus: float, now: datetime) -> float:
         """Het overschot, ontdaan van het gerimpel van een enkele minuut.
@@ -846,7 +901,11 @@ class ChargerCoach:
         return (market + tax + markup) * (1 + vat / 100)
 
     def _read(
-        self, now: datetime, settings: dict[str, Any], device: dict[str, Any]
+        self,
+        now: datetime,
+        settings: dict[str, Any],
+        device: dict[str, Any],
+        reserved: float = 0.0,
     ) -> tuple[Grid, Car, Charger, Window]:
         """Everything the planner needs, gathered from the installation."""
         sources = settings.get("sources") or {}
@@ -900,6 +959,9 @@ class ChargerCoach:
 
         grid = Grid(
             surplus_w=surplus,
+            # Wat een eerder laadpunt in deze ronde al toegezegd heeft gekregen
+            # en nog niet in de fasemeting staat.
+            reserved_amps=reserved,
             phase_amps=phases,
             fuse_amps=float(installation.get("fuse_amps") or 25),
             charger_amps=charger_amps,
