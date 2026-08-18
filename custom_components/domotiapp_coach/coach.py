@@ -156,6 +156,16 @@ def _text(hass: HomeAssistant, entity_id: str | None) -> str:
     return "" if state is None else str(state.state).lower()
 
 
+def _wanneer(now: datetime, moment: datetime) -> str:
+    """"06:00" of "morgen om 06:00", zodat een tijdstip niet twee dingen kan zijn."""
+    if moment.date() == now.date():
+        return f"{moment:%H:%M}"
+    if moment.date() == (now + timedelta(days=1)).date():
+        return f"morgen om {moment:%H:%M}"
+    dagen = ("maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag")
+    return f"{dagen[moment.weekday()]} om {moment:%H:%M}"
+
+
 def _time(value: str | None) -> time | None:
     """"07:00" as a time, or None."""
     if not value:
@@ -209,6 +219,10 @@ class ChargerCoach:
         # auto doet niets". Een tijdstip en geen teller: een ronde is niet altijd
         # een minuut, want een statuswissel van de paal start er ook een.
         self._asking_since: dict[str, datetime] = {}
+        # Wat er in deze laadbeurt gebeurd is: wanneer hij begon, hoeveel er in
+        # ging en waar de tijd aan op is gegaan. Alleen om het achteraf te
+        # kunnen navertellen, nooit om een besluit op te nemen.
+        self._sessie: dict[str, dict[str, Any]] = {}
         # Naar welke klaar-tijd een sessie op vol vermogen aan het toewerken is.
         # Zodra hij daaraan begonnen is, blijft hij dat doen tot de auto vol is
         # of de klaar-tijd verandert: terugnemen betekent alsnog te laat.
@@ -626,6 +640,8 @@ class ChargerCoach:
             self._asking_since.setdefault(device_id, now)
         else:
             self._asking_since.pop(device_id, None)
+        self._bijhouden(now, device, charger, window, decision)
+
         # Bijhouden hoe lang een sessie al tegen de ladder in wordt aangehouden.
         # Zodra de ladder het weer eens is met wat er gebeurt, staat de teller
         # op nul en heeft de volgende wolk weer zijn volle uitstel.
@@ -694,6 +710,8 @@ class ChargerCoach:
 
         if not may_act:
             return 0.0
+
+        await self._async_verslag(now, device, car, charger, window, decision)
 
         if decision.needs_soc:
             await self._async_ask_soc(device, decision)
@@ -1168,6 +1186,147 @@ class ChargerCoach:
             geladen = max(0.0, meter - float(since)) * CHARGE_EFFICIENCY
             percent += geladen / capacity * 100.0
         return min(100.0, percent)
+
+    # Waar de tijd aan opging, in woorden die een bewoner herkent. Zelfstandig
+    # geformuleerd, zodat er "20 minuten naar ..." voor kan staan zonder dat het
+    # kromme taal wordt.
+    VERTRAGING = {
+        "user-hold": "de pauze die je zelf aanzette",
+        "no-room": "een aansluiting die vol zat",
+        "held-back": "de lastbewaking van je aansluiting",
+        "balancer-paused": "de lastbewaking van je aansluiting",
+        "waiting-for-car": "een auto die geen stroom afnam",
+        "no-soc": "wachten op je accustand",
+        "wait-for-sun": "wachten op je eigen zon",
+        "wait-for-price": "wachten op een goedkoper uur",
+        "too-early": "de tijden die je hebt ingesteld",
+    }
+
+    def _bijhouden(
+        self,
+        now: datetime,
+        device: dict[str, Any],
+        charger: Charger,
+        window: Window,
+        decision: Decision,
+    ) -> None:
+        """Onthouden wat er in deze laadbeurt gebeurt, om het na te kunnen vertellen."""
+        device_id = device.get("id", "")
+        if not charger.connected:
+            self._sessie.pop(device_id, None)
+            return
+
+        sessie = self._sessie.setdefault(
+            device_id,
+            {
+                "begon": None,
+                "meter": None,
+                "laatst": now,
+                "kwijt": {},
+                "doel": window.deadline if window.enabled else None,
+                "gemeld": set(),
+            },
+        )
+
+        # Tijd toeschrijven aan wat er op dat moment aan de hand was. Het verschil
+        # met de vorige ronde en niet één minuut, want een ronde kan ook door een
+        # knop of een statuswissel gestart zijn.
+        stap = (now - sessie["laatst"]).total_seconds() / 60
+        sessie["laatst"] = now
+        if 0 < stap <= 10:
+            for sleutel in self.VERTRAGING:
+                if sleutel in decision.rule:
+                    sessie["kwijt"][sleutel] = sessie["kwijt"].get(sleutel, 0.0) + stap
+                    break
+
+        if charger.charging and sessie["begon"] is None:
+            sessie["begon"] = now
+            sessie["meter"] = _number(
+                self.hass, (device.get("entities") or {}).get("lifetime_energy")
+            )
+
+    def _geladen(self, device: dict[str, Any], sessie: dict[str, Any]) -> float | None:
+        """Hoeveel kWh er deze beurt in is gegaan, als de paal een teller heeft."""
+        meter = _number(self.hass, (device.get("entities") or {}).get("lifetime_energy"))
+        if meter is None or sessie.get("meter") is None:
+            return None
+        return max(0.0, meter - float(sessie["meter"]))
+
+    def _waarom(self, sessie: dict[str, Any]) -> str:
+        """De twee dingen waar de meeste tijd aan op is gegaan, in gewone taal."""
+        kwijt = [
+            (minuten, self.VERTRAGING[sleutel])
+            for sleutel, minuten in (sessie.get("kwijt") or {}).items()
+            if minuten >= 2 and sleutel in self.VERTRAGING
+        ]
+        if not kwijt:
+            return ""
+        kwijt.sort(reverse=True)
+        stukken = [f"{int(minuten)} minuten naar {tekst}" for minuten, tekst in kwijt[:2]]
+        return " en ".join(stukken)
+
+    async def _async_verslag(
+        self,
+        now: datetime,
+        device: dict[str, Any],
+        car: Car,
+        charger: Charger,
+        window: Window,
+        decision: Decision,
+    ) -> None:
+        """Vertellen hoe het afliep, en waarom het langer duurde dan afgesproken.
+
+        Twee momenten. Als de auto vol is, want dan is de vraag "hoe laat was
+        hij klaar" en niet "wat doet hij nu". En als de klaar-tijd voorbijgaat
+        terwijl hij niet vol is, want dat is precies het geval waarin iemand
+        anders zou denken dat de coach niets gedaan heeft.
+        """
+        device_id = device.get("id", "")
+        sessie = self._sessie.get(device_id)
+        if not sessie:
+            return
+
+        naam = device.get("name") or "de laadpaal"
+        gemeld: set[str] = sessie["gemeld"]
+
+        # De auto is vol.
+        if decision.rule == "complete" and "vol" not in gemeld and sessie["begon"]:
+            gemeld.add("vol")
+            geladen = self._geladen(device, sessie)
+            hoeveel = f", {geladen:.1f} kWh".replace(".", ",") if geladen else ""
+            waarom = self._waarom(sessie)
+            await self._async_tell(
+                f"De auto aan {naam} is vol. Geladen van "
+                f"{sessie['begon']:%H:%M} tot {now:%H:%M}{hoeveel}."
+                + (f" Daarvan ging {waarom}." if waarom else "")
+            )
+            return
+
+        # De klaar-tijd is verstreken en de auto is niet vol. Te zien aan een
+        # nieuwe klaar-tijd: die van vandaag is dan voorbij en de eerstvolgende
+        # ligt morgen.
+        doel = window.deadline if window.enabled else None
+        vorig = sessie.get("doel")
+        sessie["doel"] = doel
+        if vorig is None or doel == vorig or vorig > now or "laat" in gemeld:
+            return
+
+        gemeld.add("laat")
+        stand = (
+            f" Hij staat nu op {int(car.soc_percent)}%."
+            if car.soc_percent is not None
+            else ""
+        )
+        waarom = self._waarom(sessie)
+        await self._async_tell(
+            f"De auto aan {naam} was om {vorig:%H:%M} nog niet vol.{stand}"
+            + (f" Er ging {waarom}." if waarom else "")
+            + (
+                f" Hij laadt verder voor {_wanneer(now, doel)}."
+                if doel is not None
+                else " Hij laadt verder zodra het gunstig is."
+            )
+        )
 
     async def _async_ask_soc(self, device: dict[str, Any], decision: Decision) -> None:
         """Vragen hoe vol de auto is, want zonder dat kan de coach niets plannen.
