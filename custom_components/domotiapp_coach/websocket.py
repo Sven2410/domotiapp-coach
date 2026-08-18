@@ -419,6 +419,72 @@ async def async_set_active_car(
     connection.send_result(msg["id"], settings)
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/device/soc",
+        vol.Required("device_id"): str,
+        vol.Required("car"): str,
+        # None wist de opgave weer.
+        vol.Required("percent"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(0, 100))),
+    }
+)
+@websocket_api.async_response
+async def async_set_car_soc(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Doorgeven hoe vol de auto is die eraan hangt.
+
+    Net als het kiezen van een auto geen beheerderswerk: degene die het weet is
+    degene die naast de auto staat.
+
+    De meterstand van de laadpaal wordt er hier bij gezet en niet door het
+    paneel meegestuurd. Daarmee telt de coach zelf verder zodra er stroom loopt,
+    en hoeft er hooguit één keer per sessie iets ingevuld te worden. Dat het hier
+    gebeurt en niet in de browser is met opzet: de stand van dat moment is een
+    feit van de installatie, geen invoer van een scherm dat een minuut oud kan zijn.
+    """
+    store = async_get_store(hass)
+    settings = await store.async_load()
+
+    device = next(
+        (
+            row
+            for row in (settings.get("devices") or [])
+            if isinstance(row, dict) and row.get("id") == msg["device_id"]
+        ),
+        None,
+    )
+    meter = None
+    if device:
+        state = hass.states.get((device.get("entities") or {}).get("lifetime_energy") or "")
+        if state is not None:
+            try:
+                meter = float(state.state)
+            except (TypeError, ValueError):
+                meter = None
+
+    rows = [
+        row
+        for row in (settings.get("car_soc") or [])
+        if isinstance(row, dict) and row.get("device") != msg["device_id"]
+    ]
+    if msg["percent"] is not None:
+        rows.append(
+            {
+                "device": msg["device_id"],
+                "car": msg["car"],
+                "percent": float(msg["percent"]),
+                "meter": meter,
+            }
+        )
+
+    settings = await store.async_save({"car_soc": rows})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], settings)
+
+
 @websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/coach/state"})
 @callback
 def async_coach_state(
@@ -567,6 +633,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_set_device_ready)
     websocket_api.async_register_command(hass, async_set_strategy)
     websocket_api.async_register_command(hass, async_set_active_car)
+    websocket_api.async_register_command(hass, async_set_car_soc)
     websocket_api.async_register_command(hass, async_coach_state)
     websocket_api.async_register_command(hass, async_coach_approve)
     websocket_api.async_register_command(hass, async_coach_boost)

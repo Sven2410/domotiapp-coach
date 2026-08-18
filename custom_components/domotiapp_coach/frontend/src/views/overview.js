@@ -75,7 +75,14 @@ const nl = (value, digits) =>
  * a warning about an expensive hour, because acting on it makes the warning
  * moot.
  */
-function advise(r, thresholds, configured, alertAt) {
+/** Wat er op dit moment met het net gebeurt, in één zin achter een advies. */
+function netZin(r) {
+  if ((r.exportW ?? 0) > TRICKLE_W) return `Er gaat nog ${powerText(r.exportW)} naar het net.`;
+  if ((r.importW ?? 0) > TRICKLE_W) return `Je haalt er ${powerText(r.importW)} bij uit het net.`;
+  return "Je gebruikt vrijwel precies wat je zelf opwekt.";
+}
+
+function advise(r, thresholds, configured, alertAt, sturing) {
   if (!configured) {
     return {
       tone: "var(--dac-accent-hi)",
@@ -107,6 +114,31 @@ function advise(r, thresholds, configured, alertAt) {
         r.loadBasis === "phase"
           ? `Fase ${r.loadWorstPhase} zit op ${percent(r.load).value}% van je hoofdzekering. Zet iets zwaars uit of wacht ermee, anders loop je kans dat de zekering eruit gaat.`
           : `Je trekt nu ${percent(r.load).value}% van wat je aansluiting aankan. Zet iets zwaars uit of wacht ermee.`,
+    };
+  }
+
+  // Wat de coach zélf doet gaat voor op wat de meter zegt. Wie ziet dat de auto
+  // laadt en leest dat de coach "het zo laat", gelooft de kaart niet meer: het
+  // getal op de meter is dan wat er ná het laden nog overblijft, en dat leest
+  // als een coach die niets doet terwijl hij juist aan het werk is.
+  // Ook een paal die stroom aanbiedt terwijl de auto niets afneemt hoort hier:
+  // "gebruik je overschot, zet de laadpaal aan" is dan onuitvoerbaar advies,
+  // want hij staat al aan.
+  // En een coach die iets van de bewoner nodig heeft ook: dat is het enige
+  // waar die op dat moment iets aan kan doen.
+  if (sturing?.wants || sturing?.needsSoc) {
+    const titel = sturing.charging
+      ? `${sturing.name} laadt op ${sturing.amps} A`
+      : sturing.needsSoc
+        ? `${sturing.name} wacht op je accustand`
+        : `${sturing.name} wacht op de auto`;
+    return {
+      tone: sturing.needsSoc ? "var(--dac-warn)" : "var(--dac-accent-hi)",
+      tag: sturing.needsSoc ? "Doe iets" : "Aan het werk",
+      title: titel,
+      body: sturing.charging
+        ? `${sturing.reason} ${netZin(r)}`.trim()
+        : `${sturing.reason} ${sturing.plan}`.trim(),
     };
   }
 
@@ -152,6 +184,18 @@ function advise(r, thresholds, configured, alertAt) {
       tag: "Signaal",
       title: "Veel vraag uit het net",
       body: `Je woning trekt nu ${powerText(r.importW)} uit het net terwijl de zon weinig levert. Kijk of er iets aan staat dat kan wachten.`,
+    };
+  }
+
+  // Er hangt een auto aan de lader en de coach houdt hem bewust in. Dat is een
+  // besluit en geen stilte, dus het hoort hier te staan in plaats van "er is
+  // niets dat om actie vraagt".
+  if (sturing) {
+    return {
+      tone: "var(--dac-accent-hi)",
+      tag: "Aan het werk",
+      title: `${sturing.name} staat klaar`,
+      body: `${sturing.reason} ${sturing.plan}`.trim(),
     };
   }
 
@@ -544,6 +588,36 @@ class DacViewOverview extends DacElement {
     .car-pick select option { background: #12120f; color: var(--dac-ink); }
     @media (pointer: coarse) { .car-pick select { font-size: 16px; } }
     @supports (-webkit-touch-callout: none) { .car-pick select { font-size: 16px; } }
+
+    .soc-row { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+    .soc-input {
+      flex: 1 1 90px;
+      min-width: 0;
+      min-height: 44px;
+      padding: 10px 12px;
+      border-radius: var(--dac-radius-sm);
+      border: 1px solid var(--dac-border-hi);
+      background: rgba(255,255,255,0.04);
+      color: var(--dac-ink);
+      font: inherit; font-size: 14px;
+    }
+    /* Twee klassen diep, anders wint de regel voor knoppen in steer-actions
+       met zijn flex 1 1 170px en wordt de knop net zo breed als het veld. */
+    .soc-row .soc-save {
+      flex: 0 0 auto;
+      min-height: 44px;
+      padding: 10px 16px;
+      border-radius: var(--dac-radius-pill);
+      border: 1px solid var(--dac-border-hi);
+      background: var(--dac-surface-hi);
+      color: var(--dac-ink);
+      font: inherit; font-size: 14px; font-weight: 500;
+      cursor: pointer;
+    }
+    .soc-row .soc-save:hover { border-color: var(--dac-accent-hi); }
+    .soc-hint { margin: 0; font-size: 12px; color: var(--dac-ink-2); }
+    @media (pointer: coarse) { .soc-input { font-size: 16px; } }
+    @supports (-webkit-touch-callout: none) { .soc-input { font-size: 16px; } }
 
     .cmd-pick { display: grid; gap: 6px; margin-top: 16px; min-width: 0; }
     .cmd-pick[hidden] { display: none; }
@@ -1292,7 +1366,7 @@ class DacViewOverview extends DacElement {
     this.updateSteerable_(r.devices);
     this.flow_.update(r);
     this.updateLegend_();
-    this.updateCoach_(advise(r, thresholds, configured, alertAt));
+    this.updateCoach_(advise(r, thresholds, configured, alertAt, this.steeringNow_()));
   }
 
   /**
@@ -1508,6 +1582,36 @@ class DacViewOverview extends DacElement {
     return (this.settings_?.active_cars ?? []).find((entry) => entry.device === deviceId)?.car;
   }
 
+  /**
+   * Wat de coach op dit moment zelf stuurt, of null als hij niets onderhanden
+   * heeft.
+   *
+   * Alleen besluiten die ook werkelijk uitgevoerd worden tellen mee. Op het
+   * niveau "adviseren" zonder akkoord doet de coach niets, en dan zou het
+   * bovenaan zetten dat hij aan het werk is precies de loze belofte zijn die
+   * hier nergens hoort te staan.
+   */
+  steeringNow_() {
+    for (const device of this.lastDevices_ ?? []) {
+      const besluit = this.coach_?.[device.id];
+      if (!besluit || !besluit.applied) continue;
+      if (besluit.rule === "disconnected" || besluit.rule === "complete") continue;
+      if (besluit.paused) continue;
+      return {
+        name: this.labelFor_(device),
+        amps: besluit.amps,
+        // Of hij stroom vráágt, en of die ook werkelijk loopt. Dat verschil is
+        // precies wat er op de kaart hoort te staan.
+        wants: Boolean(besluit.charge),
+        needsSoc: Boolean(besluit.needs_soc),
+        charging: Boolean(besluit.charge && besluit.charging),
+        reason: besluit.reason ?? "",
+        plan: besluit.plan ?? "",
+      };
+    }
+    return null;
+  }
+
   /** Remember which car is plugged in, for everybody looking at this house. */
   async chooseCar_(slot, carId) {
     const device = this.steerDevices_?.[slot];
@@ -1522,6 +1626,38 @@ class DacViewOverview extends DacElement {
       this.fire("dac-settings-saved", { settings });
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de auto niet onthouden", error);
+    }
+  }
+
+  /**
+   * Doorgeven hoe vol de auto is die eraan hangt.
+   *
+   * Alleen nodig bij auto's die het zelf niet aan Home Assistant vertellen. Het
+   * staat hier op de kaart en niet bij de instellingen, want het verandert elke
+   * dag en degene die het weet staat naast de auto.
+   */
+  async saveSoc_(slot) {
+    const device = this.steerDevices_?.[slot];
+    if (!device || !this.hass) return;
+
+    const field = this.$(`[data-soc-input="${slot}"]`);
+    const cars = carsFor(device);
+    const car = this.activeCar_(device.id) ?? cars[0]?.id ?? "";
+    const raw = String(field.value ?? "").trim();
+    const percent = raw === "" ? null : Math.min(100, Math.max(0, Number(raw)));
+    if (percent !== null && !Number.isFinite(percent)) return;
+
+    try {
+      const settings = await this.hass.callWS({
+        type: "domotiapp_coach/device/soc",
+        device_id: device.id,
+        car,
+        percent,
+      });
+      field.dataset.stand = String(percent ?? "");
+      this.fire("dac-settings-saved", { settings });
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de accustand niet doorgeven", error);
     }
   }
 
@@ -1769,6 +1905,16 @@ class DacViewOverview extends DacElement {
               <label for="car-${slot}">Welke auto hangt eraan?</label>
               <select id="car-${slot}" data-car-select="${slot}"></select>
             </div>
+            <div class="car-pick soc-pick" data-soc-pick="${slot}" hidden>
+              <label for="soc-${slot}">Hoe vol is de auto nu?</label>
+              <div class="soc-row">
+                <input id="soc-${slot}" class="soc-input tnum" type="number" min="0" max="100"
+                       step="1" inputmode="numeric" enterkeyhint="done"
+                       data-soc-input="${slot}" placeholder="%">
+                <button type="button" class="soc-save" data-soc-save="${slot}">Doorgeven</button>
+              </div>
+              <p class="soc-hint" data-soc-hint="${slot}"></p>
+            </div>
             <button class="release" type="button" data-release="${slot}" aria-pressed="false">
               <span class="mark" data-mark="${slot}"></span>
               <span data-release-text="${slot}"></span>
@@ -1801,6 +1947,14 @@ class DacViewOverview extends DacElement {
       select.addEventListener("change", () =>
         this.chooseCar_(Number(select.dataset.carSelect), select.value)
       );
+    }
+    for (const button of this.$$("[data-soc-save]")) {
+      button.addEventListener("click", () => this.saveSoc_(Number(button.dataset.socSave)));
+    }
+    for (const field of this.$$("[data-soc-input]")) {
+      field.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") this.saveSoc_(Number(field.dataset.socInput));
+      });
     }
     for (const button of this.$$("[data-release]")) {
       button.addEventListener("click", () => this.toggleReady_(Number(button.dataset.release)));
@@ -1865,6 +2019,36 @@ class DacViewOverview extends DacElement {
           );
         }
         select.value = chosen ?? cars[0]?.id ?? "";
+      }
+
+      // Hoe vol die auto is. Alleen vragen waar de auto het zelf niet vertelt,
+      // waar de capaciteit bekend is (anders zegt een percentage niets) en
+      // terwijl er werkelijk een kabel in zit.
+      const socPick = this.$(`[data-soc-pick="${slot}"]`);
+      const gekozen = cars.find((car) => car.id === (this.activeCar_(device.id) ?? cars[0]?.id));
+      const oordeel = this.coach_?.[device.id];
+      const hangt = Boolean(oordeel) && oordeel.rule !== "disconnected";
+      socPick.hidden = !(
+        hangt &&
+        gekozen &&
+        !gekozen.guest &&
+        !gekozen.soc_entity &&
+        Number(gekozen.capacity_kwh) > 0
+      );
+      if (!socPick.hidden) {
+        const opgave = (this.settings_?.car_soc ?? []).find((row) => row?.device === device.id);
+        const field = this.$(`[data-soc-input="${slot}"]`);
+        const stand = opgave?.percent ?? "";
+        // Niet overschrijven terwijl iemand aan het typen is.
+        if (this.shadowRoot?.activeElement !== field && field.dataset.stand !== String(stand)) {
+          field.dataset.stand = String(stand);
+          field.value = stand;
+        }
+        this.$(`[data-soc-hint="${slot}"]`).textContent = opgave
+          ? "De coach telt zelf verder met wat de paal erin doet."
+          : oordeel?.needs_soc
+            ? "Hier wacht de coach op. Zonder dit gaat hij uit van een lege accu."
+            : "Geef dit door, dan kan de coach het gunstigste moment kiezen.";
       }
 
       // Only where somebody has to say so. A charger is released by plugging

@@ -322,6 +322,12 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # driveway is not an administrator. A list for the same reason as the rest:
     # storage.py prunes dictionaries against these defaults.
     "active_cars": [],
+    # Wat de bewoner zelf heeft opgegeven over hoe vol zijn auto zit, voor auto's
+    # die dat niet aan Home Assistant vertellen. Per opgave wordt de stand van de
+    # kilowattuurteller van de laadpaal bewaard, want daarmee telt de coach zelf
+    # verder en hoeft er niet elk uur opnieuw iets ingevuld te worden. Vervalt
+    # zodra de kabel eruit gaat: het percentage hoorde bij die auto en die rit.
+    "car_soc": [],
     "thresholds": {
         # Zelfbenutting in percent: below `low` is bad, above `high` is good.
         "self_use": {"low": 30, "high": 70},

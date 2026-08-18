@@ -32,11 +32,13 @@ from .const import (
     CHARGER_CONTROL,
     DOMAIN,
     EVENT_DECISION,
+    EVENT_SETTINGS_UPDATED,
     LEVEL_PROPOSE,
     LEVEL_STEER,
 )
 from .planner import (
     BALANCER_MARGIN_AMPS,
+    CHARGE_EFFICIENCY,
     FUSE_MARGIN_AMPS,
     FUSE_MARGIN_SHARE,
     Car,
@@ -187,6 +189,17 @@ class ChargerCoach:
         self._paused: set[str] = set()
         # Hoeveel ronden een sessie al tegen de ladder in wordt aangehouden.
         self._holding: dict[str, int] = {}
+        # Of de wekpoging van deze sessie nog openstaat. Eén per sessie, dus
+        # zodra hij gedaan is blijft dit staan tot de kabel eruit gaat.
+        self._woken: set[str] = set()
+        # Hoeveel ronden er al stroom wordt aangeboden zonder dat de auto iets
+        # afneemt. Daarmee weet de kaart het verschil tussen "begint zo" en
+        # "de auto doet niets".
+        self._asking: dict[str, int] = {}
+        # Wanneer er voor het laatst om een accustand is gevraagd, per apparaat.
+        # Eén melding per sessie is genoeg; vaker is zeuren en dan zet iemand de
+        # meldingen uit.
+        self._soc_asked: set[str] = set()
         # Tot wanneer de pauze die er staat geldig is, voor zover die een
         # houdbaarheid heeft. Nodig omdat de dode band een ongewijzigd besluit
         # niet opnieuw verstuurt: zonder deze klok zou een pauze van drie uur
@@ -501,11 +514,33 @@ class ChargerCoach:
         grid, car, charger, window = self._read(now, settings, device)
         goal = (settings.get("strategy") or {}).get("goal", "cost")
 
+        # Wekken mag zolang de auto aan de kabel hangt, niet laadt en de poging
+        # van deze sessie nog openstaat. Dat de coach ook wíl laden weet de
+        # planner zelf; hier gaat het alleen over of het nog mag.
+        waking = (
+            charger.connected and not charger.charging and device_id not in self._woken
+        )
         decision = decide(
             now, self._prices(settings), grid, car, charger, window, goal,
             self._tariff(settings), self._sun(settings),
             holding=self._holding.get(device_id, 0),
+            waking=waking,
+            asking_rounds=self._asking.get(device_id, 0),
         )
+        # De wekpoging is verbruikt zodra hij verstuurd is, en het aanbieden
+        # begint te tellen zodra de coach stroom vraagt terwijl er niets loopt.
+        if decision.rule.endswith("+wake"):
+            self._woken.add(device_id)
+        elif not decision.charge:
+            # Een sessie die bewust stilgezet wordt, mag straks opnieuw gewekt
+            # worden. Dat is geen tweede poging binnen dezelfde start maar een
+            # nieuwe start, en juist daar bleek de auto niet wakker te worden:
+            # na hervatten van een pauze deed hij op 6 A weer niets.
+            self._woken.discard(device_id)
+        if decision.charge and charger.connected and not charger.charging:
+            self._asking[device_id] = self._asking.get(device_id, 0) + 1
+        else:
+            self._asking.pop(device_id, None)
         # Bijhouden hoe lang een sessie al tegen de ladder in wordt aangehouden.
         # Zodra de ladder het weer eens is met wat er gebeurt, staat de teller
         # op nul en heeft de volgende wolk weer zijn volle uitstel.
@@ -537,6 +572,14 @@ class ChargerCoach:
             self._zon.pop(device_id, None)
             self._holding.pop(device_id, None)
             self._pause_until.pop(device_id, None)
+            self._woken.discard(device_id)
+            self._asking.pop(device_id, None)
+            self._soc_asked.discard(device_id)
+            # Een opgegeven accustand hoort bij de auto die eraan hing. Blijft
+            # hij staan, dan rekent de coach morgen met het percentage van
+            # gisteren terwijl er honderd kilometer tussen zit, en dat is de
+            # gevaarlijke kant op: hij denkt dan dat er weinig in hoeft.
+            await self._async_forget_soc(settings, device_id)
 
         self.state[device_id]["applied"] = may_act
         self.state[device_id]["approved"] = device_id in self._approved
@@ -552,6 +595,9 @@ class ChargerCoach:
 
         if not may_act:
             return
+
+        if decision.needs_soc:
+            await self._async_ask_soc(device, decision)
 
         # The dead band holds only while the charging point is doing what it was
         # asked. When it is not, the command has to go again, or a car stands
@@ -955,13 +1001,103 @@ class ChargerCoach:
             phases = gemeten or 3
             zeker = gemeten is not None
 
+        # De auto zelf gaat voor. Zegt hij niets, dan telt wat de bewoner heeft
+        # opgegeven, bijgewerkt met wat de paal er sindsdien in heeft gedaan.
+        soc = _number(self.hass, profile.get("soc_entity"))
+        if soc is None:
+            soc = self._typed_soc(settings, device, profile)
+
         return Car(
             capacity_kwh=float(profile.get("capacity_kwh") or 0),
             phases=phases,
             phases_certain=zeker,
             max_amps=float(profile.get("max_amps") or 0),
-            soc_percent=_number(self.hass, profile.get("soc_entity")),
+            soc_percent=soc,
         )
+
+    def _typed_soc(
+        self,
+        settings: dict[str, Any],
+        device: dict[str, Any],
+        profile: dict[str, Any],
+    ) -> float | None:
+        """Wat de bewoner opgaf, plus wat er sindsdien in is gegaan.
+
+        Zo hoeft er hooguit één keer per sessie iets ingevuld te worden. De
+        teller van de laadpaal telt alles wat hij ooit geleverd heeft, dus het
+        verschil met de stand van toen is precies wat er daarna in deze auto is
+        gegaan. Daar gaat het laadrendement nog af, want niet alles wat de paal
+        levert komt in de accu terecht.
+        """
+        capacity = float(profile.get("capacity_kwh") or 0)
+        if not capacity:
+            return None
+
+        entry = next(
+            (
+                row
+                for row in (settings.get("car_soc") or [])
+                if isinstance(row, dict)
+                and row.get("device") == device.get("id")
+                and row.get("car") == profile.get("id")
+            ),
+            None,
+        )
+        if entry is None or entry.get("percent") is None:
+            return None
+
+        percent = float(entry["percent"])
+        meter = _number(self.hass, (device.get("entities") or {}).get("lifetime_energy"))
+        since = entry.get("meter")
+        if meter is not None and since is not None:
+            geladen = max(0.0, meter - float(since)) * CHARGE_EFFICIENCY
+            percent += geladen / capacity * 100.0
+        return min(100.0, percent)
+
+    async def _async_ask_soc(self, device: dict[str, Any], decision: Decision) -> None:
+        """Vragen hoe vol de auto is, want zonder dat kan de coach niets plannen.
+
+        Twee momenten en niet meer. Eén keer als hij het merkt, want dan is er
+        nog tijd om er iets mee te doen, en één keer als het vangnet ingrijpt,
+        want dan gebeurt er iets dat de bewoner had kunnen voorkomen. Vaker is
+        zeuren, en wie gezeurd wordt zet zijn meldingen uit.
+        """
+        device_id = device.get("id", "")
+        naam = device.get("name") or "de laadpaal"
+        merk = f"{device_id}:deadline" if decision.rule == "deadline" else device_id
+        if merk in self._soc_asked:
+            return
+        self._soc_asked.add(merk)
+
+        if decision.rule == "deadline":
+            bericht = (
+                f"De accustand van de auto aan {naam} is nog steeds niet doorgegeven, "
+                "dus de coach gaat uit van een lege accu en laadt nu door om op tijd "
+                "klaar te zijn."
+            )
+        else:
+            bericht = (
+                f"De coach wil de auto aan {naam} gaan laden, maar weet niet hoe vol "
+                "hij is. Geef de accustand door op de laadpaalkaart, dan laadt hij op "
+                "het gunstigste moment."
+            )
+        await self._async_tell(bericht)
+
+    async def _async_forget_soc(self, settings: dict[str, Any], device_id: str) -> None:
+        """De opgegeven accustand vergeten zodra de kabel eruit is."""
+        rows = [
+            row
+            for row in (settings.get("car_soc") or [])
+            if isinstance(row, dict) and row.get("device") != device_id
+        ]
+        if len(rows) == len(settings.get("car_soc") or []):
+            return
+        try:
+            saved = await async_get_store(self.hass).async_save({"car_soc": rows})
+        except Exception:  # noqa: BLE001 - een vergeten percentage is geen reden om te stoppen
+            _LOGGER.exception("kon de opgegeven accustand niet vergeten")
+            return
+        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
 
     def _measured_phases(self, device: dict[str, Any]) -> int | None:
         """One phase or three, worked out from what the charger reports."""
