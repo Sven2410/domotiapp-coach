@@ -359,6 +359,22 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
     return int(max(0, min(limits)))
 
 
+def fuse_limited(grid: Grid, car: Car, charger: Charger) -> bool:
+    """Whether the fuse is what is holding the charge down, not the charger or the car.
+
+    Worth telling apart, because they read completely differently. "Snelladen
+    staat aan, dus hij laadt op 8 A" sounds like a broken button; "meer past er
+    nu niet onder je zekering" is an answer. Sven op 20-08-2026, die precies dat
+    vroeg toen hij snelladen aanzette en er 8 A uit kwam.
+    """
+    if not grid.phase_amps:
+        return False
+    household = max(0.0, max(grid.phase_amps) - grid.charger_amps)
+    room = grid.fuse_amps - household - fuse_margin(grid) - grid.reserved_amps
+    hardware = [charger.max_amps] + ([car.max_amps] if car.max_amps else [])
+    return room < min(hardware)
+
+
 def fuse_margin(grid: Grid) -> float:
     """Hoeveel ruimte er onder de zekering vrij blijft.
 
@@ -965,7 +981,12 @@ def _decide(
         return Decision(
             True,
             ceiling,
-            f"Snelladen staat aan, dus hij laadt op {ceiling} A, ongeacht de prijs.",
+            (
+                f"Snelladen staat aan, dus hij laadt op {ceiling} A. Meer past er nu "
+                "niet onder je zekering. Zodra je huis minder vraagt, gaat hij omhoog."
+                if fuse_limited(grid, car, charger)
+                else f"Snelladen staat aan, dus hij laadt op {ceiling} A, ongeacht de prijs."
+            ),
             plan="Blijft op vol vermogen tot je het uitzet of de kabel eruit gaat.",
             rule="boost",
         )
