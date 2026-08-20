@@ -220,6 +220,11 @@ class Charger:
     # Why the charger is not drawing what it could, in the brand's own wording.
     # Empty when the installation has no sensor for it.
     no_current_reason: str = ""
+    # The limit that is standing on the charger right now, as it reads back.
+    # Needed to tell the coach's own throttle apart from anything else that
+    # holds the charger down; see `throttled_by_coach`. None when the
+    # installation has no sensor for it.
+    limit_amps: float | None = None
 
 
 @dataclass
@@ -387,6 +392,34 @@ def held_back(charger: Charger) -> bool:
     return charger.no_current_reason in HELD_BACK_REASONS
 
 
+# The word the Easee reports when the coach's own dynamic limit is the binding
+# one. Only used as a fallback: reading the limit itself is brand independent.
+OWN_LIMIT_REASON = "limited_by_charger_dynamic_limit"
+
+
+def throttled_by_coach(charger: Charger) -> bool:
+    """Whether the coach's own limit is the thing keeping this charger down.
+
+    This is the difference between "it cannot go faster" and "I am not asking
+    for faster", and mixing the two up is expensive. Op 20-08-2026 stond er om
+    15:48 een auto op 12% aan de paal, zonvolgend op 6 A. De klaar-tijdsom
+    rekende met die gemeten 6 A, zag dat 06:00 zo niet gehaald werd en zette hem
+    tot de volgende ochtend op vol vermogen. Op 14 A had hij pas om 23:46 hoeven
+    beginnen: ruim acht uur later, en al die tijd was er zon of een goedkoop uur
+    te pakken geweest.
+
+    Reading the limit that stands on the charger settles it without knowing the
+    brand: draw it to within a step and nothing else is in the way, because the
+    only thing the charger is respecting is what the coach put there. Without
+    that sensor the brand's own wording is the next best answer, and without
+    that too the caller falls back on the measured current, which is what it
+    always did.
+    """
+    if charger.limit_amps is not None:
+        return charger.actual_amps >= charger.limit_amps - STEP_AMPS
+    return charger.no_current_reason == OWN_LIMIT_REASON
+
+
 def charging_pace(now: datetime, charger: Charger, wanted: int) -> int:
     """What this charger is really going to draw, not what it was asked for.
 
@@ -399,12 +432,20 @@ def charging_pace(now: datetime, charger: Charger, wanted: int) -> int:
     So once a session has settled, the measured current is what counts. During
     the first few minutes it is not: everything is still ramping up and reading
     that as the pace would have the coach charge far earlier than it needs to.
+
+    And neither does it count while the coach is its own brake. A charging point
+    that is following the sun draws six amps because it was told to, not because
+    that is all it can do, and reading that back as the pace is how the coach
+    talks itself into charging at full power all afternoon. See
+    `throttled_by_coach`.
     """
     if not charger.charging or charger.started_at is None or charger.actual_amps <= 0:
         return wanted
     if now - charger.started_at < timedelta(minutes=RAMP_MINUTES):
         return wanted
     if charger.actual_amps >= wanted - STEP_AMPS:
+        return wanted
+    if throttled_by_coach(charger):
         return wanted
     return max(MIN_AMPS, int(charger.actual_amps))
 

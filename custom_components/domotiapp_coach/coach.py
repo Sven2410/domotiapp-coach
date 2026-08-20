@@ -1070,6 +1070,9 @@ class ChargerCoach:
             paused_by_user=device.get("id", "") in self._paused,
             paused_by_balancer="equalizer" in status or "load_balancing" in status,
             no_current_reason=_text(self.hass, entities.get("no_current_reason")),
+            # Wat er op de paal staat, zodat de klaar-tijdsom kan zien of de
+            # coach zelf de rem is. Zie `throttled_by_coach` in planner.py.
+            limit_amps=_number(self.hass, entities.get("dynamic_limit")),
         )
         # After a restart nothing is known about when this session began. Taking
         # it as "just now" only means waiting out the minimum run once.
