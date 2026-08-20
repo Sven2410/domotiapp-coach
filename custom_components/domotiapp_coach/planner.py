@@ -656,6 +656,20 @@ def _clock(moment: datetime) -> str:
     return moment.strftime("%H:%M")
 
 
+# Hoeveel tijd er bovenop de laadtijd over moet blijven voordat de coach het
+# nog verantwoord vindt om te wachten. Onder dit kwartier gaat hij door tot de
+# auto vol is. Staat hier met een naam omdat zowel de regel als de tekst op de
+# kaart hem gebruikt, en die twee mogen nooit uit elkaar lopen.
+DEADLINE_SLACK_HOURS = 0.25
+
+
+def _latest_start(end: datetime | None, needed: float | None) -> datetime | None:
+    """Het moment waarop de coach uiterlijk begint om op tijd vol te zijn."""
+    if end is None or needed is None:
+        return None
+    return end - timedelta(hours=needed + DEADLINE_SLACK_HOURS)
+
+
 def _hold_until_start(now: datetime, end: datetime | None, needed: float | None) -> int:
     """Hoe lang een pauze mag staan als de coach zelf zou wegvallen.
 
@@ -884,7 +898,9 @@ def _decide(
         if uren is None:
             uren = hours_needed(car, tempo, assume_empty=True)
         krap = bool(
-            eind and uren is not None and (eind - now).total_seconds() / 3600 - uren <= 0.25
+            eind
+            and uren is not None
+            and (eind - now).total_seconds() / 3600 - uren <= DEADLINE_SLACK_HOURS
         )
         return Decision(
             False,
@@ -988,7 +1004,7 @@ def _decide(
     # halverwege gas terugnemen zonder alsnog te laat te zijn.
     if window.enabled and end and needed is not None:
         slack = (end - now).total_seconds() / 3600 - needed
-        if slack <= 0.25 or must_finish:
+        if slack <= DEADLINE_SLACK_HOURS or must_finish:
             return Decision(
                 True,
                 ceiling,
@@ -1180,11 +1196,21 @@ def _decide(
                     "Er komt vandaag minder zon dan er nog in moet, maar wachten kost je "
                     "niets bij een vast contract. Dus hij pakt de zon die er is."
                 )
+            # Wanneer hij weer begint hoort erbij te staan. Zonder dat leest
+            # een paal die stilvalt als een paal die kapot is, en dan is de
+            # eerste vraag "hoezo is hij gestopt" in plaats van "mooi, hij
+            # wacht". Sven op 20-08-2026, precies die vraag.
+            begint = _latest_start(end, needed)
             return Decision(
                 False,
                 0,
                 reden,
-                plan=f"Vult de rest op tijd bij voor {_clock(end)}.",
+                plan=(
+                    f"Begint uiterlijk om {_clock(begint)} en is op tijd vol "
+                    f"voor {_clock(end)}."
+                    if begint and begint > now
+                    else f"Vult de rest op tijd bij voor {_clock(end)}."
+                ),
                 rule="wait-for-sun",
                 hold_minutes=_hold_until_start(now, end, needed),
                 needs_soc=soc_unknown,
@@ -1263,7 +1289,7 @@ def _beter_straks(
 
     if end is not None and needed is not None:
         over = (end - now).total_seconds() / 3600 - 1.0
-        if over < needed + 0.25:
+        if over < needed + DEADLINE_SLACK_HOURS:
             return False
 
     return True
