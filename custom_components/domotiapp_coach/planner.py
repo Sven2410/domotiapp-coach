@@ -662,12 +662,45 @@ def _clock(moment: datetime) -> str:
 # kaart hem gebruikt, en die twee mogen nooit uit elkaar lopen.
 DEADLINE_SLACK_HOURS = 0.25
 
+# Wanneer het huis tot rust komt. Bij een vast contract kost elk uur hetzelfde,
+# dus zodra de zon niets meer oplevert is er niets om nog langer op te wachten.
+# Wachten tot het laatste moment dat nog past levert dan geen cent op en laat
+# een kwartier speling over, en dat is te weinig. Acht uur 's avonds is de tijd
+# waarop koken, wassen en douchen achter de rug zijn, dus dan belast het laden
+# de aansluiting ook het minst. Sven op 20-08-2026.
+EVENING_START = time(20, 0)
+
+# Hoe lang een klaar-tijd na die avond nog mag liggen om er nog bij te horen.
+# Meer dan een halve dag betekent dat er een hele daglichtperiode tussen zit, en
+# dan is er wel degelijk zon om op te wachten en gaat de avondregel niet op.
+EVENING_NIGHT_HOURS = 12
+
 
 def _latest_start(end: datetime | None, needed: float | None) -> datetime | None:
     """Het moment waarop de coach uiterlijk begint om op tijd vol te zijn."""
     if end is None or needed is None:
         return None
     return end - timedelta(hours=needed + DEADLINE_SLACK_HOURS)
+
+
+def _evening_before(end: datetime | None) -> datetime | None:
+    """De avond die hoort bij deze klaar-tijd, of niets als die er niet is.
+
+    De laatste acht uur 's avonds vóór de klaar-tijd, en alleen als die
+    klaar-tijd in dezelfde nacht valt. Klaar om zes uur 's ochtends hoort bij de
+    avond ervoor; klaar om zeven uur 's avonds hoort bij niets, want tussen die
+    twee ligt een hele dag zon.
+    """
+    if end is None:
+        return None
+    avond = _at(end, EVENING_START)
+    if avond is None:
+        return None
+    if avond >= end:
+        avond -= timedelta(days=1)
+    if (end - avond) > timedelta(hours=EVENING_NIGHT_HOURS):
+        return None
+    return avond
 
 
 def _hold_until_start(now: datetime, end: datetime | None, needed: float | None) -> int:
@@ -1189,6 +1222,23 @@ def _decide(
             # volledig wachten naar vol vermogen uit het net, een halve euro in
             # dertig minuten. De verwachting hoort de tekst te bepalen en niet
             # het gedrag.
+            # Wachten houdt op zodra het huis tot rust komt. De zon levert dan
+            # niets meer op, elk uur kost hetzelfde, en doorschuiven naar het
+            # laatste moment dat nog past laat maar een kwartier speling over.
+            # Een echte zonnestraal na achten pakt de zonregel hierboven nog
+            # steeds, want die staat boven deze.
+            avond = _evening_before(end)
+            if avond is not None and now >= avond:
+                return Decision(
+                    True,
+                    ceiling,
+                    "De zon levert niets meer op en de piek van het avondeten is "
+                    "voorbij, dus dit is het rustigste moment om te laden.",
+                    plan=f"Laadt door tot de auto vol is, op tijd voor {_clock(end)}.",
+                    rule="evening",
+                    needs_soc=soc_unknown,
+                )
+
             if _zon_verwacht(sun, car):
                 reden = "Alles kost hetzelfde bij een vast contract, dus hij wacht op je eigen zon."
             else:
@@ -1200,7 +1250,8 @@ def _decide(
             # een paal die stilvalt als een paal die kapot is, en dan is de
             # eerste vraag "hoezo is hij gestopt" in plaats van "mooi, hij
             # wacht". Sven op 20-08-2026, precies die vraag.
-            begint = _latest_start(end, needed)
+            momenten = [m for m in (avond, _latest_start(end, needed)) if m and m > now]
+            begint = min(momenten) if momenten else None
             return Decision(
                 False,
                 0,
@@ -1208,11 +1259,14 @@ def _decide(
                 plan=(
                     f"Begint uiterlijk om {_clock(begint)} en is op tijd vol "
                     f"voor {_clock(end)}."
-                    if begint and begint > now
+                    if begint
                     else f"Vult de rest op tijd bij voor {_clock(end)}."
                 ),
                 rule="wait-for-sun",
-                hold_minutes=_hold_until_start(now, end, needed),
+                hold_minutes=(
+                    _hold_until(now, begint) if begint
+                    else _hold_until_start(now, end, needed)
+                ),
                 needs_soc=soc_unknown,
             )
         return Decision(
