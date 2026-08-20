@@ -129,6 +129,12 @@ STEP_AMPS = 1
 # actually lands in the battery.
 CHARGE_EFFICIENCY = 0.9
 
+# Vanaf welke accustand "vol" ook echt vol heet. Een paal die `completed` meldt
+# zegt alleen dat de auto niets meer aanneemt, en dat is iets anders: een auto
+# met een laadgrens op 80% stopt daar ook. Onder deze grens noemt de coach het
+# percentage in plaats van het woord vol.
+FULL_PERCENT = 99.0
+
 # Hoeveel goedkoper het ene moment moet zijn dan het andere voordat het meetelt.
 # Een tiende cent per kWh, want dat is ook de fijnheid waarmee het paneel prijzen
 # opschrijft: is het verschil kleiner, dan staan er twee gelijke bedragen op het
@@ -920,7 +926,18 @@ def _decide(
         # dat dit het goedkoopste moment is om te laden, terwijl er niets
         # gebeurde. Dat ondermijnt precies het vertrouwen dat één reden per
         # besluit moet opbouwen.
-        return Decision(False, 0, "De auto is vol.", rule="complete", hold_minutes=MIN_HOLD_MINUTES)
+        return Decision(
+            False,
+            0,
+            "De auto is vol."
+            if car.soc_percent is None or car.soc_percent >= FULL_PERCENT
+            else (
+                f"De auto laadt niet verder en staat op {int(car.soc_percent)}%. "
+                "Mogelijk staat er een laadgrens in de auto."
+            ),
+            rule="complete",
+            hold_minutes=MIN_HOLD_MINUTES,
+        )
 
     # Wat de accustand zegt telt net zo goed als wat de paal zegt. Een auto op
     # 100% hoeft niets meer, en zonder deze sport viel dat door naar de

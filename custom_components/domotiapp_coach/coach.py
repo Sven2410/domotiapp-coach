@@ -51,6 +51,7 @@ from .planner import (
     Window,
     amps_for,
     decide,
+    FULL_PERCENT,
     held_back,
     resolve_window,
     should_send,
@@ -1241,6 +1242,7 @@ class ChargerCoach:
             self._sessie.pop(device_id, None)
             return
 
+        vers = device_id not in self._sessie
         sessie = self._sessie.setdefault(
             device_id,
             {
@@ -1251,8 +1253,20 @@ class ChargerCoach:
                 "doel": window.deadline if window.enabled else None,
                 "mikpunt": window.deadline if window.enabled else None,
                 "gemeld": set(),
+                "ingestapt": False,
             },
         )
+        if vers:
+            # Laadt hij al bij de allereerste ronde, dan is deze beurt eerder
+            # begonnen dan de coach kan weten: Home Assistant is midden in de
+            # laadbeurt herstart. Normaal ziet hij de kabel er eerst in gaan en
+            # pas een ronde later stroom lopen.
+            #
+            # Dit onthouden is het verschil tussen een verslag dat klopt en een
+            # dat liegt. Op 20-08-2026 herstartte Sven om 20:57 en las hij daarna
+            # "Geladen van 20:58 tot 21:32, 3,1 kWh", terwijl de auto vanaf 19:18
+            # aan de kabel hing en er 5,2 kWh in was gegaan.
+            sessie["ingestapt"] = charger.charging
 
         # Tijd toeschrijven aan wat er op dat moment aan de hand was. Het verschil
         # met de vorige ronde en niet één minuut, want een ronde kan ook door een
@@ -1321,12 +1335,34 @@ class ChargerCoach:
         if decision.rule == "complete" and "vol" not in gemeld and sessie["begon"]:
             gemeld.add("vol")
             geladen = self._geladen(device, sessie)
-            hoeveel = f", {geladen:.1f} kWh".replace(".", ",") if geladen else ""
+            kwh = f"{geladen:.1f} kWh".replace(".", ",") if geladen else ""
             waarom = self._waarom(sessie)
+            # "Vol" is wat de paal zegt, niet altijd wat de accu doet. Stopt een
+            # auto op 80% omdat daar een laadgrens in staat, dan is "de auto is
+            # vol" onwaar en leest het als een coach die niet weet wat hij doet.
+            # Weet hij de accustand, dan zegt hij die gewoon. Sven op 20-08-2026.
+            klaar = (
+                f"De auto aan {naam} is vol."
+                if car.soc_percent is None or car.soc_percent >= FULL_PERCENT
+                else (
+                    f"De auto aan {naam} laadt niet verder en staat op "
+                    f"{int(car.soc_percent)}%. Mogelijk staat er een laadgrens in "
+                    "de auto."
+                )
+            )
+            # Is de coach midden in de laadbeurt ingestapt, dan weet hij niet
+            # hoe laat die begon en hoort hij dat ook niet te suggereren.
+            begon = sessie["begon"]
+            if sessie.get("ingestapt") and kwh:
+                verloop = f" Sinds {begon:%H:%M} ging er {kwh} in, en toen liep hij al."
+            elif sessie.get("ingestapt"):
+                verloop = f" Hij liep al toen de coach om {begon:%H:%M} begon te kijken."
+            elif kwh:
+                verloop = f" Geladen van {begon:%H:%M} tot {now:%H:%M}, {kwh}."
+            else:
+                verloop = f" Geladen van {begon:%H:%M} tot {now:%H:%M}."
             await self._async_tell(
-                f"De auto aan {naam} is vol. Geladen van "
-                f"{sessie['begon']:%H:%M} tot {now:%H:%M}{hoeveel}."
-                + (f" Daarvan ging {waarom}." if waarom else "")
+                klaar + verloop + (f" Daarvan ging {waarom}." if waarom else "")
             )
             return
 
