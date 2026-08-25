@@ -1142,6 +1142,35 @@ def _decide(
                     hold_minutes=MIN_HOLD_MINUTES,
                 )
 
+            # En dezelfde vraag over de hele dag in plaats van over één uur.
+            if _zon_dekt_vandaag(
+                grid.surplus_w, trekt, sun, car, koop, terug, now, end, needed
+            ):
+                komt = f"{sun.remaining_kwh:.1f}".replace(".", ",")
+                moet = f"{energy_needed_kwh(car):.1f}".replace(".", ",")
+                # Wanneer hij uiterlijk begint hoort erbij, en dat is bij een
+                # vast contract de avondregel en niet het allerlaatste moment
+                # dat nog past. Zonder prijslijst is er geen goedkoop uur om op
+                # te wachten, dus dan is acht uur 's avonds het antwoord.
+                avond = _evening_before(end) if not prices else None
+                momenten = [
+                    m for m in (avond, _latest_start(end, needed)) if m and m > now
+                ]
+                begint = min(momenten) if momenten else None
+                return Decision(
+                    False,
+                    0,
+                    f"Er komt vandaag nog {komt} kWh zon en er moet er {moet} in, "
+                    "dus daar wacht hij op in plaats van stroom bij te kopen.",
+                    plan=(
+                        f"Begint zodra je dak genoeg geeft, uiterlijk om {_clock(begint)}."
+                        if begint
+                        else "Begint zodra je dak genoeg geeft."
+                    ),
+                    rule="wait-for-sun-today",
+                    hold_minutes=MIN_HOLD_MINUTES,
+                )
+
             dekt = grid.surplus_w >= trekt
             hoeveel = f"{grid.surplus_w / 1000:.1f}".replace(".", ",")
             uitleg = (
@@ -1362,6 +1391,67 @@ def _decide(
 # deze verhouding is het verschil kleiner dan de onzekerheid van de verwachting
 # zelf, en dan is een uur stilstaan puur verlies.
 FORECAST_BETTER = 1.4
+
+
+def _zon_dekt_vandaag(
+    surplus_w: float,
+    trekt_w: float,
+    sun: Sun,
+    car: Car,
+    koop: float | None,
+    terug: float | None,
+    now: datetime,
+    end: datetime | None,
+    needed: float | None,
+) -> bool:
+    """Of de zon van vandaag alles nog dekt, zodat bijkopen nu zonde is.
+
+    `_beter_straks` hierboven kijkt één uur vooruit en eist dat dat ene uur de
+    laadstroom bijna helemaal dekt. Dat is te kort door de bocht voor een auto
+    die er de hele dag over mag doen: om negen uur is een halve kilowatt zon
+    genoeg om de coach te laten beginnen, waarna hij er drie kilowatt uit het net
+    bij koopt terwijl diezelfde kilowatturen om één uur gratis van het dak waren
+    gekomen. Sven op 25-08-2026: "zo goedkoop mogelijk".
+
+    De som is die van de klant zelf. Komt er vandaag nog meer zon dan er in de
+    auto moet, dan is elke kWh die hij nu bijkoopt een kWh die hij straks voor
+    niets had gehad. Dan is wachten het goedkoopst. Blijft de zon achter bij wat
+    er nog in moet, dan is het omgekeerde waar: dan is elke kWh die nu niet
+    gebruikt wordt teruggeleverd voor een fractie van wat hij kost, en dan hoort
+    hij te pakken wat er is, ook met bijkopen.
+
+    Vier redenen om het niet te doen, en ze zijn er allemaal een van "dan valt er
+    niets te winnen":
+
+    Er wordt niet noemenswaardig bijgekocht. Dekt de zon het laden zo goed als
+    helemaal, dan valt er niets te winnen. `SURPLUS_SLACK` is dezelfde marge
+    waarmee hierboven bepaald wordt of het overschot genoeg is om op te laden:
+    een lopende sessie stilzetten omdat er twintig watt bijgekocht wordt, kost
+    meer dan het opbrengt.
+
+    Eigen zon is niet meer waard dan teruglevering. Bij saldering krijg je voor
+    een teruggeleverde kWh net zoveel als een gekochte kost, en dan maakt het
+    niet uit of hij hem nu gebruikt of straks. `PRICE_MARGIN` is dezelfde
+    ondergrens die de prijsvergelijking hierboven gebruikt.
+
+    Er is geen klaar-tijd. Wachten mag alleen als er iets is om op terug te
+    vallen; zonder afgesproken moment is er geen regel die hem alsnog aanzet.
+
+    Er is geen verwachting, of de tijd is te krap. Zonder verwachting is er niets
+    om op te wachten, en `_zon_verwacht` is dezelfde meetlat als bij het vaste
+    contract: geen tweede definitie van "genoeg zon".
+    """
+    if surplus_w >= trekt_w * SURPLUS_SLACK:
+        return False
+
+    if koop is None or terug is None or koop - terug <= PRICE_MARGIN:
+        return False
+
+    if end is None or needed is None or not _zon_verwacht(sun, car):
+        return False
+
+    over = (end - now).total_seconds() / 3600
+    return over >= needed + DEADLINE_SLACK_HOURS
 
 
 def _beter_straks(
