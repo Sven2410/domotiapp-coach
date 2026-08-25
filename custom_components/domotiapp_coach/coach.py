@@ -104,6 +104,17 @@ FOREVER_RULES = frozenset({"no-room", "user-hold"})
 # volgende auto in de weg zitten.
 NO_WRITE_RULES = frozenset({"disconnected", "complete"})
 
+# Hoe lang het verslag wacht op een accustand die bij deze laadbeurt hoort.
+# Een auto meldt zijn percentage niet op commando: Svens Ford stopte op
+# 25-08-2026 om 14:44 op 80% terwijl de app nog 70% zei, en werkte pas ruim een
+# minuut later bij. De melding was toen al de deur uit met het oude getal, en
+# juist bij een auto die zelf op 80% stopt is dat percentage het interessantste
+# van het hele bericht. Drie minuten is ruim genoeg voor die ene verversing en
+# kort genoeg dat het bericht nog bij de laadbeurt hoort. Komt er niets, dan
+# gaat het verslag alsnog: te laat melden is erger dan een getal dat een ronde
+# oud is.
+SOC_SETTLE = timedelta(minutes=3)
+
 # Hoe lang een ronde hoogstens mag duren. Ruim boven wat hij nodig heeft (de
 # bevestiging van een limiet duurt hooguit een seconde of vijftien per apparaat)
 # en ruim onder de ronde zelf, zodat een vastgelopen opdracht de coach niet stil
@@ -1255,6 +1266,12 @@ class ChargerCoach:
                 "mikpunt": window.deadline if window.enabled else None,
                 "gemeld": set(),
                 "ingestapt": False,
+                # Wanneer de auto zijn accustand voor het laatst wijzigde, en
+                # vanaf wanneer hij niet verder laadt. Samen bepalen ze of het
+                # percentage in het verslag bij deze beurt hoort.
+                "soc_gezien": None,
+                "soc_moment": None,
+                "klaar_sinds": None,
             },
         )
         if vers:
@@ -1308,6 +1325,30 @@ class ChargerCoach:
         stukken = [f"{int(minuten)} minuten naar {tekst}" for minuten, tekst in kwijt[:2]]
         return " en ".join(stukken)
 
+    def _soc_bezonken(
+        self, now: datetime, sessie: dict[str, Any], car: Car
+    ) -> bool:
+        """Of de accustand hoort bij de laadbeurt die net is afgelopen.
+
+        Een auto meldt zich op zijn eigen tempo. Stopt hij met laden en staat de
+        app nog op het percentage van een half uur geleden, dan zou het verslag
+        een getal noemen dat de bewoner op de kaart al gecorrigeerd ziet staan.
+        Dus wacht het bericht tot de auto zich één keer heeft gemeld sinds hij
+        ophield, of tot `SOC_SETTLE` voorbij is.
+
+        Zonder accustand valt er niets te wachten: dan noemt het verslag geen
+        percentage en is er ook niets dat verouderen kan.
+        """
+        if car.soc_percent is None:
+            return True
+        klaar = sessie.get("klaar_sinds")
+        if klaar is None:
+            return True
+        moment = sessie.get("soc_moment")
+        if moment is not None and moment >= klaar:
+            return True
+        return now - klaar >= SOC_SETTLE
+
     async def _async_verslag(
         self,
         now: datetime,
@@ -1332,8 +1373,16 @@ class ChargerCoach:
         naam = device.get("name") or "de laadpaal"
         gemeld: set[str] = sessie["gemeld"]
 
+        if car.soc_percent != sessie.get("soc_gezien"):
+            sessie["soc_gezien"] = car.soc_percent
+            sessie["soc_moment"] = now
+
         # De auto is vol.
         if decision.rule == "complete" and "vol" not in gemeld and sessie["begon"]:
+            if sessie.get("klaar_sinds") is None:
+                sessie["klaar_sinds"] = now
+            if not self._soc_bezonken(now, sessie, car):
+                return
             gemeld.add("vol")
             geladen = self._geladen(device, sessie)
             kwh = f"{geladen:.1f} kWh".replace(".", ",") if geladen else ""
