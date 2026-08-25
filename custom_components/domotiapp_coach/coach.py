@@ -1224,6 +1224,7 @@ class ChargerCoach:
         "waiting-for-car": "een auto die geen stroom afnam",
         "no-soc": "wachten op je accustand",
         "wait-for-sun": "wachten op je eigen zon",
+        "wait-for-sun-today": "wachten op je eigen zon",
         "wait-for-price": "wachten op een goedkoper uur",
         "too-early": "de tijden die je hebt ingesteld",
     }
