@@ -1267,12 +1267,26 @@ def _decide(
             # steeds, want die staat boven deze.
             avond = _evening_before(end)
             if avond is not None and now >= avond:
+                # En dan op de ondergrens, niet op vol vermogen. Tussen acht uur
+                # 's avonds en de klaar-tijd zit een hele nacht, terwijl een lege
+                # auto op 6 A driefasig in ruim twee en een half uur vol is. Bij
+                # een vast contract kost dat wachten niets, en de lagere piek
+                # scheelt je aansluiting alles: 4 kW in plaats van 11 kW, en dus
+                # ruimte voor de wasmachine die er om negen uur bij komt. Sven
+                # vroeg dit op 25-08-2026, de dag dat zijn paal voor het eerst
+                # driefasig laadde en het verschil dus echt ging tellen.
+                #
+                # Redt hij het zo niet, dan is dat geen probleem van deze sport:
+                # de klaar-tijdregel hierboven rekent met wat er nog kán en
+                # grijpt vanzelf in op het laatste moment dat nog past.
+                rustig = min(ceiling, MIN_AMPS)
                 return Decision(
                     True,
-                    ceiling,
+                    rustig,
                     "De zon levert niets meer op en de piek van het avondeten is "
-                    "voorbij, dus dit is het rustigste moment om te laden.",
-                    plan=f"Laadt door tot de auto vol is, op tijd voor {_clock(end)}.",
+                    f"voorbij. Hij vult rustig aan op {rustig} A, want er is tijd "
+                    "genoeg en zo belast hij je aansluiting het minst.",
+                    plan=f"Laadt rustig door tot de auto vol is, op tijd voor {_clock(end)}.",
                     rule="evening",
                     needs_soc=soc_unknown,
                 )
