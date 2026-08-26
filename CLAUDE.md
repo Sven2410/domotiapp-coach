@@ -51,6 +51,14 @@ python tests/test_coach.py       # 62 op de bedrading, met een nagebouwde HA
 Home Assistant hoeft er niet voor te draaien; de handvol namen die `coach.py`
 eruit gebruikt worden nagemaakt. **Draai ze allebei voor elke uitgave.**
 
+**Python 3.11 of nieuwer.** `coach.py` gebruikt `asyncio.timeout`, dat pas in
+3.11 bestaat. Op macOS levert Apple bij zijn ontwikkelaarsgereedschappen nog een
+3.9 mee, en die viel op 26-08-2026 midden in proef 9 om met een `AttributeError`
+die eruitzag als een bug in de coach. Dat is het niet: Home Assistant zelf draait
+op 3.13. Oplossing daar is `brew install python`, en dan **een nieuw
+terminalvenster**, want een venster dat al openstond kent de nieuwe Python niet.
+De proeven controleren dit nu zelf en zeggen het in één zin.
+
 Bij een rode proef: verdenk eerst de proef en dan pas de code. Van de zeventien
 "fouten" die de scenario's ooit opleverden waren er vijftien van het harnas.
 
