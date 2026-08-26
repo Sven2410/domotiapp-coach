@@ -92,10 +92,25 @@ backtick sluit de string af. Controleren met
 Nagemeten op 26-08-2026, met een knop op een bekende plek en een luisteraar die
 opschreef waar de klik landde.
 
-1. **Zonder schermafdruk vooraf landt er geen enkele klik.** Het tabblad staat op
-   `visibilityState: hidden` en er komt geen enkel `click`-event door, ook niet
-   op de goede plek. Nul geregistreerde kliks. Een schermafdruk nemen maakt het
-   tabblad wakker, en daarna landen kliks wel.
+1. **Stel eerst vast of er iets is aangekomen, voor je iets over een knop
+   concludeert.** Hang een luisteraar op en lees `composedPath()`:
+
+   ```js
+   window.__kliks = [];
+   document.addEventListener("click", (e) =>
+     window.__kliks.push({x: e.clientX, y: e.clientY, op: e.composedPath()[0]?.tagName,
+                          echt: e.isTrusted}), true);
+   ```
+
+   Nul kliks betekent iets anders dan een klik die ergens anders landde, en dat
+   verschil bepaalt wat je repareert. In mijn meting van 26-08-2026 kwam er
+   zonder schermafdruk vooraf **geen enkel** event door (`visibilityState:
+   hidden`), en landde dezelfde klik na een schermafdruk wel. De lovelace-sessie
+   mat op diezelfde dag het tegenovergestelde: bij haar kwam er wél een echt
+   event door, alleen op `HTML` in plaats van op de knop. Het is dus geen
+   algemene regel maar iets om per geval vast te stellen. Een schermafdruk nemen
+   is hoe dan ook verstandig: die maakt het tabblad wakker en geeft je meteen de
+   coordinaten van punt 2.
 2. **Klik in de coordinaten van die schermafdruk, niet in CSS-pixels.** De
    viewport was 1920 breed en de schermafdruk 1456; een klik op (531, 25) raakte
    de knop die op de schermafdruk op (531, 25) staat, niet die op CSS (531, 25).
