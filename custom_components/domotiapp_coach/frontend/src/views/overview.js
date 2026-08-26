@@ -554,6 +554,19 @@ class DacViewOverview extends DacElement {
     .says-mark .icon { width: 16px; height: 16px; }
     .says-plan { margin: 0 0 0 25px; font-size: 12.5px; line-height: 1.5; color: var(--dac-ink-2); }
     .says-plan:empty { display: none; }
+    /* Iets aan de installatie dat de bewoner zelf moet verhelpen. Apart van de
+       reden, want het gaat niet over dit besluit maar over elke laadbeurt. */
+    .says-tip {
+      margin: 2px 0 0 25px;
+      padding: 8px 10px;
+      border-radius: var(--dac-radius-sm);
+      border: 1px solid rgba(217,143,25,0.35);
+      background: rgba(217,143,25,0.10);
+      font-size: 12.5px;
+      line-height: 1.5;
+      color: var(--dac-ink);
+    }
+    .says-tip[hidden] { display: none; }
     .says-yes {
       justify-self: start;
       margin: 4px 0 0 25px;
@@ -1548,6 +1561,12 @@ class DacViewOverview extends DacElement {
         : (besluit.reason ?? "");
     this.$(`[data-coach-plan="${slot}"]`).textContent = besluit.plan ?? "";
 
+    // Wat de coach ziet maar niet kan sturen: een laderlimiet die elke
+    // laadbeurt op één fase zet. Alleen tonen als hij het werkelijk meet.
+    const tip = this.$(`[data-coach-tip="${slot}"]`);
+    tip.textContent = besluit.tip ?? "";
+    tip.hidden = !besluit.tip;
+
     // Wat de knop doet is niet "begin met laden" maar "de coach mag dit
     // apparaat sturen". Zolang er niets gebeurt komt dat op hetzelfde neer.
     // Laadt de auto al, dan valt er niets te beginnen en leest "Ja, doe maar"
@@ -1899,6 +1918,7 @@ class DacViewOverview extends DacElement {
                 <span data-coach-reason="${slot}"></span>
               </div>
               <p class="says-plan" data-coach-plan="${slot}"></p>
+              <p class="says-tip" data-coach-tip="${slot}" hidden></p>
               <button type="button" class="says-yes" data-coach-yes="${slot}" hidden></button>
             </div>
             <div class="car-pick" data-car-pick="${slot}" hidden>
