@@ -87,6 +87,30 @@ Geen backticks in CSS-commentaar; de stijlen staan in een template literal en ee
 backtick sluit de string af. Controleren met
 `node --check custom_components/domotiapp_coach/frontend/src/views/overview.js`.
 
+### Klikken in de browser: eerst een schermafdruk, dan de coordinaten daarvan
+
+Nagemeten op 26-08-2026, met een knop op een bekende plek en een luisteraar die
+opschreef waar de klik landde.
+
+1. **Zonder schermafdruk vooraf landt er geen enkele klik.** Het tabblad staat op
+   `visibilityState: hidden` en er komt geen enkel `click`-event door, ook niet
+   op de goede plek. Nul geregistreerde kliks. Een schermafdruk nemen maakt het
+   tabblad wakker, en daarna landen kliks wel.
+2. **Klik in de coordinaten van die schermafdruk, niet in CSS-pixels.** De
+   viewport was 1920 breed en de schermafdruk 1456; een klik op (531, 25) raakte
+   de knop die op de schermafdruk op (531, 25) staat, niet die op CSS (531, 25).
+3. **Die verhouding is geen vast getal.** In dezelfde sessie was hij eerst 0,817
+   (1568 van 1920) en daarna 0,758 (1456 van 1920), want het venster was
+   veranderd. Reken hem uit als schermafdrukbreedte gedeeld door
+   `window.innerWidth`, of lees de plek gewoon van de verse schermafdruk af.
+
+**Meet daarom bij voorkeur met `getBoundingClientRect` en `getComputedStyle` via
+`javascript_tool`**, want die geven CSS-pixels en zijn niet van dit alles
+afhankelijk. Klikken alleen waar het echt om de klik gaat.
+
+De lovelace-sessie liep hier op dezelfde dag twee keer in, beide keren met de
+conclusie "die knop doet niets".
+
 ## Meekijken in een echte installatie
 
 `tools/ha.py` leest alleen. Hij zoekt een tokenbestand in `~/dev/tokens/` of
