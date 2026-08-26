@@ -11,3 +11,7 @@ Thumbs.db
 
 # Local design harness, never shipped to Home Assistant
 custom_components/domotiapp_coach/frontend/preview.html
+
+# Tokens horen hier nooit te staan, ook niet per ongeluk.
+tokens/
+*token*.txt
