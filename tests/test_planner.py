@@ -20,6 +20,20 @@ planner = importlib.util.module_from_spec(spec)
 sys.modules["planner"] = planner
 spec.loader.exec_module(planner)
 
+# Home Assistant draait op een verse Python en `coach.py` gebruikt dingen die
+# daarbij horen, zoals `asyncio.timeout` (3.11). Apple levert bij zijn
+# ontwikkelaarsgereedschappen nog een 3.9 mee, en die geeft midden in een proef
+# een AttributeError die eruitziet als een bug in de coach. Dat is het niet.
+if sys.version_info < (3, 11):
+    raise SystemExit(
+        "Deze proeven willen Python 3.11 of nieuwer; hier draait "
+        f"{sys.version_info.major}.{sys.version_info.minor} "
+        f"vanuit {sys.executable}. "
+        "Op macOS: `brew install python`, daarna een nieuw terminalvenster. "
+        "Home Assistant zelf draait op 3.13, dus de coach ziet een 3.9 nooit."
+    )
+
+
 from planner import (  # noqa: E402
     Car, Charger, Decision, Grid, Sun, Tariff, Window, decide, MIN_AMPS,
 )
