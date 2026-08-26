@@ -1,29 +1,58 @@
-"""Live meekijken aan Svens paal tijdens de fasetest. Leest alleen, schrijft nooit.
+"""Live meekijken aan een laadpaal. Leest alleen, schrijft nooit.
 
 Alles gaat in live.log; alleen betekenisvolle overgangen gaan naar stdout,
 want dat zijn de dingen waar ik iets van moet vinden.
+
+Welke entiteiten erbij horen wordt aan het paneel zelf gevraagd
+(`domotiapp_coach/settings/get`) in plaats van hier opgeschreven. Dat is niet
+alleen handiger bij een klant, het is ook nodig: deze repo is publiek, en een
+entiteitnaam van een auto draagt bij sommige merken het chassisnummer met zich
+mee. Zulke namen horen niet in code die iedereen kan lezen.
+
+Wat je zelf nog kunt meegeven zijn de sensoren die niet uit het paneel komen:
+
+    python tools/live.py --extra zon=sensor.omvormer_vermogen
 """
 import sys, time, datetime
 import ha
+import ws
 
-E = {
-    "status": "sensor.laadpaal_status",
-    "watt": "sensor.laadpaal_vermogen",
-    "amp": "sensor.emytx4ma_stroom",
-    "limiet": "sensor.emytx4ma_dynamisch_laadgrens_van_lader",
-    "circuit": "sensor.emytx4ma_dynamic_laadgrens_van_stroomcircuit",
-    "reden": "sensor.emytx4ma_reden_geen_stroom",
-    "fasemode": "sensor.emytx4ma_fase_mode",
-    "volt": "sensor.emytx4ma_voltage",
-    "soc": "sensor.fcq_wf0cxxsk1sx003660_soc",
-    "plug": "sensor.fcq_wf0cxxsk1sx003660_elvehplug",
-    "sessie": "sensor.laadpaal_sessie_energie",
-    "teller": "sensor.laadpaal_levensduur_verbruik",
-    "l1": "sensor.electricity_meter_stroom_fase_l1",
-    "l2": "sensor.electricity_meter_stroom_fase_l2",
-    "l3": "sensor.electricity_meter_stroom_fase_l3",
-    "zon": "sensor.solaredge_i1_ac_power",
-}
+
+def entiteiten():
+    """De sensoren van deze installatie, uit de instellingen van het paneel."""
+    inst = ws.WS().vraag("domotiapp_coach/settings/get")
+    uit = {}
+    for apparaat in inst.get("devices") or []:
+        if apparaat.get("type") != "laadpaal":
+            continue
+        ent = apparaat.get("entities") or {}
+        uit.update({
+            "status": ent.get("status"),
+            "watt": apparaat.get("entity"),
+            "amp": ent.get("current"),
+            "limiet": ent.get("dynamic_limit"),
+            "maxlimiet": ent.get("max_limit"),
+            "reden": ent.get("no_current_reason"),
+            "teller": ent.get("lifetime_energy"),
+        })
+        for auto in apparaat.get("cars") or []:
+            if auto.get("soc_entity"):
+                uit["soc"] = auto["soc_entity"]
+    bronnen = inst.get("sources") or {}
+    uit["afname"] = bronnen.get("grid_import")
+    uit["terug"] = bronnen.get("grid_export")
+    for fase in ("l1", "l2", "l3"):
+        uit[fase] = ((bronnen.get("phases") or {}).get(fase) or {}).get("current")
+
+    for arg in sys.argv[1:]:
+        if "=" in arg:
+            naam, ent = arg.split("=", 1)
+            uit[naam.lstrip("-")] = ent
+
+    return {k: v for k, v in uit.items() if v}
+
+
+E = entiteiten()
 
 def num(st, key):
     try:
