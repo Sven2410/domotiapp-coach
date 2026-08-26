@@ -35,6 +35,7 @@ from .const import (
     EVENT_SETTINGS_UPDATED,
     LEVEL_PROPOSE,
     LEVEL_STEER,
+    PHASE_START_AMPS,
 )
 from .planner import (
     BALANCER_MARGIN_AMPS,
@@ -253,6 +254,10 @@ class ChargerCoach:
         # Wie er al gewaarschuwd is dat zijn eigen pauze de klaar-tijd kost. Eén
         # keer per sessie, net als de vraag om een accustand.
         self._warned: set[str] = set()
+        # Wie er al gewezen is op een laderlimiet die zijn laadbeurten op één
+        # fase zet. Ook één keer per sessie: het is een instelling in de app van
+        # de paal, en die verandert niet doordat je het twee keer zegt.
+        self._getipt: set[str] = set()
         # Wanneer er voor het laatst om een accustand is gevraagd, per apparaat.
         # Eén melding per sessie is genoeg; vaker is zeuren en dan zet iemand de
         # meldingen uit.
@@ -673,7 +678,7 @@ class ChargerCoach:
             self._asking_since.setdefault(device_id, now)
         else:
             self._asking_since.pop(device_id, None)
-        self._bijhouden(now, device, charger, window, decision)
+        self._bijhouden(now, device, car, charger, window, decision)
 
         # Bijhouden hoe lang een sessie al tegen de ladder in wordt aangehouden.
         # Zodra de ladder het weer eens is met wat er gebeurt, staat de teller
@@ -690,6 +695,12 @@ class ChargerCoach:
             "level": level,
             "applied": level == LEVEL_STEER,
         }
+        # Iets dat alleen de bewoner zelf kan verhelpen, en dat losstaat van
+        # het besluit van deze ronde. Het gaat dus naast de reden op de kaart
+        # en niet erin.
+        tip = self._fasetip(settings, device, charger)
+        self.state[device_id]["tip"] = tip
+
         may_act = level == LEVEL_STEER or (
             level == LEVEL_PROPOSE and device_id in self._approved
         )
@@ -713,6 +724,7 @@ class ChargerCoach:
             self._te_laat.discard(device_id)
             self._soc_asked.discard(device_id)
             self._warned.discard(device_id)
+            self._getipt.discard(device_id)
             # Wat er over deze sessie bewaard is gaat mee weg. Een opgegeven
             # accustand hoort bij de auto die eraan hing: blijft die staan, dan
             # rekent de coach morgen met het percentage van gisteren terwijl er
@@ -749,6 +761,10 @@ class ChargerCoach:
 
         if decision.needs_soc:
             await self._async_ask_soc(device, decision)
+
+        if tip and device_id not in self._getipt:
+            self._getipt.add(device_id)
+            await self._async_tell(f"{device.get('name') or 'De laadpaal'}: {tip}")
 
         if decision.deadline_risk and device_id not in self._warned:
             self._warned.add(device_id)
@@ -1138,10 +1154,15 @@ class ChargerCoach:
 
         return {}
 
-    def _car(
-        self, settings: dict[str, Any], device: dict[str, Any], charger: Charger
-    ) -> Car:
-        """The car that is plugged in, as far as anybody has said."""
+    def _chosen_car(
+        self, settings: dict[str, Any], device: dict[str, Any]
+    ) -> tuple[str, dict[str, Any] | None]:
+        """Welke auto er aan dit laadpunt hangt: de keuze, en het profiel erbij.
+
+        De keuze is `__guest__` voor een auto die hier niet woont, en dan is er
+        geen profiel om bij te zoeken. Heeft niemand ooit gekozen terwijl er
+        precies één auto bekend is, dan is dat hem.
+        """
         chosen = ""
         for entry in settings.get("active_cars") or []:
             if entry.get("device") == device.get("id"):
@@ -1149,13 +1170,23 @@ class ChargerCoach:
                 break
 
         if chosen == "__guest__":
-            return Car(guest=True, phases=3)
+            return chosen, None
 
         cars = device.get("cars") or []
         profile = next((car for car in cars if car.get("id") == chosen), None)
         if profile is None and len(cars) == 1:
-            # One car and nobody ever chose: that is the one.
             profile = cars[0]
+        return chosen, profile
+
+    def _car(
+        self, settings: dict[str, Any], device: dict[str, Any], charger: Charger
+    ) -> Car:
+        """The car that is plugged in, as far as anybody has said."""
+        chosen, profile = self._chosen_car(settings, device)
+
+        if chosen == "__guest__":
+            return Car(guest=True, phases=3)
+
         if profile is None:
             return Car(phases=3)
 
@@ -1176,6 +1207,8 @@ class ChargerCoach:
         soc = _number(self.hass, profile.get("soc_entity"))
         if soc is None:
             soc = self._typed_soc(settings, device, profile)
+        if soc is None:
+            soc = self._onthouden_soc(device, profile)
 
         return Car(
             capacity_kwh=float(profile.get("capacity_kwh") or 0),
@@ -1184,6 +1217,35 @@ class ChargerCoach:
             max_amps=float(profile.get("max_amps") or 0),
             soc_percent=soc,
         )
+
+    def _onthouden_soc(
+        self, device: dict[str, Any], profile: dict[str, Any]
+    ) -> float | None:
+        """De laatste accustand van deze laadbeurt, bijgewerkt tot nu.
+
+        Een auto die zijn percentage even niet doorgeeft is geen auto waarvan
+        niemand de stand kent. Hij hangt nog aan dezelfde kabel, want zodra die
+        eruit gaat is de hele laadbeurt vergeten. Dus telt wat hij het laatst
+        zei, plus wat de paal er sindsdien in heeft gedaan, net als bij een
+        stand die met de hand is opgegeven.
+
+        Dit repareert een melding die op 25-08-2026 om 15:45 langskwam: de
+        Ford-integratie viel een minuut weg en de kaart zei "De auto is vol"
+        terwijl de bus op 80% stond. Diezelfde avond om 20:04 vroeg de coach om
+        een accustand die hij eerder op de avond gewoon gezien had.
+        """
+        sessie = self._sessie.get(device.get("id", "")) or {}
+        percent = sessie.get("soc_gezien")
+        if percent is None:
+            return None
+
+        capacity = float(profile.get("capacity_kwh") or 0)
+        meter = _number(self.hass, (device.get("entities") or {}).get("lifetime_energy"))
+        sinds = sessie.get("soc_meter")
+        if capacity and meter is not None and sinds is not None:
+            geladen = max(0.0, meter - float(sinds)) * CHARGE_EFFICIENCY
+            percent = float(percent) + geladen / capacity * 100.0
+        return min(100.0, float(percent))
 
     def _typed_soc(
         self,
@@ -1244,6 +1306,7 @@ class ChargerCoach:
         self,
         now: datetime,
         device: dict[str, Any],
+        car: Car,
         charger: Charger,
         window: Window,
         decision: Decision,
@@ -1271,7 +1334,16 @@ class ChargerCoach:
                 # percentage in het verslag bij deze beurt hoort.
                 "soc_gezien": None,
                 "soc_moment": None,
+                "soc_meter": None,
                 "klaar_sinds": None,
+                # Wat de coach zelf aan energie langs heeft zien komen, en welk
+                # deel daarvan de teller van de paal al verwerkt had. Samen
+                # maken ze het verslag compleet; zie `_geladen`.
+                "gemeten_kwh": 0.0,
+                "meter_stand": None,
+                "meter_kwh": 0.0,
+                "watt": 0.0,
+                "liep": False,
             },
         )
         if vers:
@@ -1297,20 +1369,59 @@ class ChargerCoach:
                     sessie["kwijt"][sleutel] = sessie["kwijt"].get(sleutel, 0.0) + stap
                     break
 
+        meter = _number(self.hass, (device.get("entities") or {}).get("lifetime_energy"))
+
+        # De laatste accustand van deze laadbeurt vasthouden, met de meterstand
+        # van dat moment erbij. Een percentage dat wegvalt is geen nieuw
+        # percentage: de auto hangt nog aan dezelfde kabel en kan dus niet
+        # weggereden zijn. Zie `_onthouden_soc` voor wat ermee gebeurt.
+        if car.soc_percent is not None and car.soc_percent != sessie.get("soc_gezien"):
+            sessie["soc_gezien"] = car.soc_percent
+            sessie["soc_moment"] = now
+            sessie["soc_meter"] = meter
+
+        # Zelf meten wat er langskomt, want de levensduurteller van de paal
+        # loopt achter. Bij Sven werkte hij op 25-08-2026 maar één keer per uur
+        # bij en sprong hij toen met 3,5 kWh ineens, dus het verslag miste het
+        # laatste half uur van de beurt. Wat de teller al verwerkt heeft blijft
+        # van de teller; alleen de staart daarna komt uit deze som.
+        #
+        # Gerekend met het vermogen van de vórige ronde, want dat is het
+        # vermogen dat er in de minuut ertussen werkelijk stond. Met het
+        # vermogen van nu schuift de hele meting een ronde op: de eerste minuut
+        # telt dan mee terwijl er nog niets liep, en de laatste valt weg. En
+        # alleen als hij toen ook laadde, want een vermogenssensor die na
+        # afloop op zijn laatste waarde blijft hangen zou anders doortellen.
+        if sessie.get("liep") and 0 < stap <= 10:
+            sessie["gemeten_kwh"] += sessie.get("watt", 0.0) / 1000.0 * stap / 60.0
+        sessie["watt"] = _number(self.hass, device.get("entity")) or 0.0
+        sessie["liep"] = charger.charging
+        if meter is not None and meter != sessie.get("meter_stand"):
+            sessie["meter_stand"] = meter
+            sessie["meter_kwh"] = sessie["gemeten_kwh"]
+
         sessie["mikpunt"] = window.deadline if window.enabled else None
 
         if charger.charging and sessie["begon"] is None:
             sessie["begon"] = now
-            sessie["meter"] = _number(
-                self.hass, (device.get("entities") or {}).get("lifetime_energy")
-            )
+            sessie["meter"] = meter
+            sessie["meter_kwh"] = sessie["gemeten_kwh"]
 
     def _geladen(self, device: dict[str, Any], sessie: dict[str, Any]) -> float | None:
-        """Hoeveel kWh er deze beurt in is gegaan, als de paal een teller heeft."""
+        """Hoeveel kWh er deze beurt in is gegaan.
+
+        De teller van de paal is de maat, want die is geijkt. Alleen loopt hij
+        achter: hij verwerkt met sprongen, en wat er ná zijn laatste stap nog
+        in ging staat er nog niet in. Dat laatste stuk komt uit wat de coach
+        zelf aan vermogen langs zag komen, en is dus ook gemeten en niet
+        aangenomen. Heeft de paal helemaal geen teller, dan is die eigen meting
+        alles wat er is, en dat is nog altijd beter dan zwijgen.
+        """
+        staart = max(0.0, sessie.get("gemeten_kwh", 0.0) - sessie.get("meter_kwh", 0.0))
         meter = _number(self.hass, (device.get("entities") or {}).get("lifetime_energy"))
         if meter is None or sessie.get("meter") is None:
-            return None
-        return max(0.0, meter - float(sessie["meter"]))
+            return staart or None
+        return max(0.0, meter - float(sessie["meter"])) + staart
 
     def _waarom(self, sessie: dict[str, Any]) -> str:
         """De twee dingen waar de meeste tijd aan op is gegaan, in gewone taal."""
@@ -1372,10 +1483,6 @@ class ChargerCoach:
 
         naam = device.get("name") or "de laadpaal"
         gemeld: set[str] = sessie["gemeld"]
-
-        if car.soc_percent != sessie.get("soc_gezien"):
-            sessie["soc_gezien"] = car.soc_percent
-            sessie["soc_moment"] = now
 
         # De auto is vol.
         if decision.rule == "complete" and "vol" not in gemeld and sessie["begon"]:
@@ -1491,6 +1598,40 @@ class ChargerCoach:
             _LOGGER.exception("kon de gegevens van de vorige sessie niet vergeten")
             return
         self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+
+    def _fasetip(
+        self, settings: dict[str, Any], device: dict[str, Any], charger: Charger
+    ) -> str:
+        """Zeggen dat de laderlimiet laadsnelheid kost, als dat werkelijk zo is.
+
+        De paal kiest bij het starten van een beurt zelf hoeveel fasen hij
+        pakt, en gaat daarbij af op zijn eigen maximale limiet. Staat die te
+        laag, dan laadt elke beurt eenfasig. Bij Sven kostte dat een week lang
+        stilletjes een factor drie: 3,1 kW waar 10,9 kW kon, en niets in het
+        paneel dat er iets over zei. De limiet die de coach schrijft telt in die
+        keuze niet mee, dus dit is met sturen niet op te lossen en is het enige
+        wat overblijft: het zeggen.
+
+        Alleen zeggen wat gezien is. Er loopt stroom over één fase terwijl de
+        laderlimiet onder `PHASE_START_AMPS` staat, aan een merk waar dat aan
+        gemeten is. Een auto die zelf maar één fase kan, kan er niets aan doen
+        en krijgt dus niets te lezen.
+        """
+        if device.get("brand") != "easee" or not charger.charging:
+            return ""
+        if not charger.max_amps or charger.max_amps >= PHASE_START_AMPS:
+            return ""
+        _, profile = self._chosen_car(settings, device)
+        if profile is not None and profile.get("phases") == "one":
+            return ""
+        if self._measured_phases(device) != 1:
+            return ""
+        return (
+            "Hij laadt op één fase, want de maximale limiet van je lader staat "
+            f"op {charger.max_amps:.0f} A. Op {PHASE_START_AMPS:.0f} A of hoger "
+            "begint elke laadbeurt op drie fasen, en gaat er ongeveer drie keer "
+            "zoveel in per uur."
+        )
 
     def _measured_phases(self, device: dict[str, Any]) -> int | None:
         """One phase or three, worked out from what the charger reports."""

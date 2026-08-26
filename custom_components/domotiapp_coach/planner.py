@@ -1147,7 +1147,11 @@ def _decide(
                 grid.surplus_w, trekt, sun, car, koop, terug, now, end, needed
             ):
                 komt = f"{sun.remaining_kwh:.1f}".replace(".", ",")
-                moet = f"{energy_needed_kwh(car):.1f}".replace(".", ",")
+                # Hoeveel er nog in moet weet hij lang niet altijd: `_zon_verwacht`
+                # laat een onbekende accustand er bewust doorheen, want "ik weet
+                # het niet" is geen reden om te laden. Dan noemt de zin dat getal
+                # gewoon niet, in plaats van er een te verzinnen.
+                nodig = energy_needed_kwh(car)
                 # Wanneer hij uiterlijk begint hoort erbij, en dat is bij een
                 # vast contract de avondregel en niet het allerlaatste moment
                 # dat nog past. Zonder prijslijst is er geen goedkoop uur om op
@@ -1160,8 +1164,14 @@ def _decide(
                 return Decision(
                     False,
                     0,
-                    f"Er komt vandaag nog {komt} kWh zon en er moet er {moet} in, "
-                    "dus daar wacht hij op in plaats van stroom bij te kopen.",
+                    (
+                        f"Er komt vandaag nog {komt} kWh zon en er moet er "
+                        f"{f'{nodig:.1f}'.replace('.', ',')} in, dus daar wacht hij "
+                        "op in plaats van stroom bij te kopen."
+                        if nodig is not None
+                        else f"Er komt vandaag nog {komt} kWh zon, dus daar wacht "
+                        "hij op in plaats van nu stroom bij te kopen."
+                    ),
                     plan=(
                         f"Begint zodra je dak genoeg geeft, uiterlijk om {_clock(begint)}."
                         if begint

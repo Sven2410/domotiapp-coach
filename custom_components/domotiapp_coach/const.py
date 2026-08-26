@@ -119,6 +119,15 @@ GOALS: Final = [GOAL_COST, GOAL_SOLAR]
 # writing anything to disk a minute at a time.
 EVENT_DECISION: Final = f"{DOMAIN}_decision"
 
+# Vanaf welke maximale laderlimiet een paal in fasemodus `auto` een laadbeurt
+# op drie fasen begint. Gemeten aan Svens Easee op 25-08-2026: op 14 A koos hij
+# bij elke start één fase (13,85 A, 3.125 W), en op 16 A koos dezelfde paal met
+# dezelfde auto meteen drie fasen (15,45 A, 10.855 W). Waar de grens tussen die
+# twee precies ligt is niet ingekaderd en Easee noemt zelf nergens een getal,
+# dus dit is de laagste waarde waarvan bekend is dat het goed gaat. Het is
+# meteen de fabrieksinstelling van de paal.
+PHASE_START_AMPS: Final = 16.0
+
 # --- Steering a charging point ---------------------------------------------
 # How each brand is told what to do. The dynamic limit is the safe way in: it
 # sits under the charger's own maximum, so a mistake there cannot ask for more
