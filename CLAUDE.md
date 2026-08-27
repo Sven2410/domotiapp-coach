@@ -97,6 +97,13 @@ Serveer altijd met `Cache-Control: no-store` (dat doet `serve.py`), want Chrome
 houdt ES-modules anders vast en dan meet je een oude versie. Ververs met een
 unieke querystring (`?v=2`) als het in een iframe draait.
 
+**Meten of iets verborgen is: kijk naar `getComputedStyle(el).display`, niet
+naar `el.hidden`.** Het attribuut `hidden` is niets meer dan een regel van de
+browser zelf en verliest van elke `display` die in de eigen stijlen staat. Elke
+klasse die een `display` krijgt hoort dus een eigen `[hidden]`-regel te hebben.
+Op 27-08-2026 kostte dat een ronde: de nieuwe pop-up had er geen, en `el.hidden`
+stond keurig op `true` terwijl het blok gewoon in beeld stond.
+
 Meet smalle schermen op **320 én 280 px**, niet alleen 390: zodra iOS inzoomt op
 een invoerveld wordt de viewport smaller en komt echte overflow er alsnog uit.
 
