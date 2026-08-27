@@ -933,6 +933,78 @@ eenfasig, _ = asyncio.run(ronde(coach21c, inst21c, nu=dt.datetime(2026, 8, 25, 1
 print(f"  eenfasige auto: tip={eenfasig['tip']!r}")
 controle("een eenfasige auto krijgt geen verwijt", not eenfasig["tip"], f"{eenfasig['tip']}")
 
+print("=== 22. de kabel eruit tijdens het laden levert een verslag op ===")
+# Sven op 20-08-2026: hij trok de kabel er twee keer uit tijdens het laden en
+# hoorde niets. Er kwam alleen een verslag bij "vol" en bij een gemiste
+# klaar-tijd. Afgesproken op 26-08-2026: dezelfde vorm als bij vol, met zijn
+# eigen zin als voorbeeld: "afgekoppeld om 19:12, er ging 4,2 kWh in".
+los = instellingen()
+los["strategy"]["schedules"][0]["window"]["done_by"] = "23:00"
+hass22, _, coach22 = bouw(huis(status="ready_to_charge", teruglevering=0.0,
+                               afname=1800.0), los)
+# Eerst de kabel erin en nog geen stroom, zoals het in het echt gaat.
+asyncio.run(ronde(coach22, los, nu=dt.datetime(2026, 8, 20, 18, 59)))
+hass22.states.zet("sensor.laadpaal_status", "charging")
+hass22.states.zet("sensor.laadpaal_stroom", "13.5")
+hass22.states.zet("sensor.laadpaal_vermogen", "3070")
+for minuut in range(0, 13):
+    asyncio.run(ronde(coach22, los, nu=dt.datetime(2026, 8, 20, 19, minuut)))
+# En dan gaat de kabel eruit, midden in de laadbeurt.
+hass22.states.zet("sensor.laadpaal_status", "disconnected")
+hass22.states.zet("sensor.laadpaal_stroom", "0")
+hass22.states.zet("sensor.laadpaal_vermogen", "0")
+hass22.states.zet("sensor.laadpaal_teller", "104.2")
+_, verstuurd = asyncio.run(ronde(coach22, los, nu=dt.datetime(2026, 8, 20, 19, 12)))
+meldingen = [d[2]["message"] for d in verstuurd if d[0] == "notify"]
+print(f"  {meldingen}")
+controle("nu komt er wel een verslag", bool(meldingen), f"{meldingen}")
+controle("in Svens eigen bewoording",
+         any("afgekoppeld om 19:12, er ging" in m and "kWh in" in m for m in meldingen),
+         f"{meldingen}")
+controle("en met de begintijd erbij",
+         any("sinds 19:00" in m for m in meldingen), f"{meldingen}")
+controle("en zonder verwijt dat hij niet vol was",
+         not any("niet vol" in m for m in meldingen), f"{meldingen}")
+
+# Eén keer en niet elke ronde, want de kabel blijft eruit.
+_, nogmaals = asyncio.run(ronde(coach22, los, nu=dt.datetime(2026, 8, 20, 19, 13)))
+controle("en maar één keer",
+         not [d for d in nogmaals if d[0] == "notify"], f"{nogmaals}")
+
+# Een kabel die eruit gaat zonder dat er ooit stroom liep is geen laadbeurt, en
+# daar valt niets over na te vertellen.
+hass22b, _, coach22b = bouw(huis(status="ready_to_charge", teruglevering=0.0,
+                                 afname=1800.0), los)
+asyncio.run(ronde(coach22b, los, nu=dt.datetime(2026, 8, 20, 19, 0)))
+hass22b.states.zet("sensor.laadpaal_status", "disconnected")
+_, leeg = asyncio.run(ronde(coach22b, los, nu=dt.datetime(2026, 8, 20, 19, 1)))
+print(f"  kabel eruit zonder geladen te hebben: {[d[2]['message'] for d in leeg if d[0] == 'notify']}")
+controle("een beurt zonder stroom levert geen verslag op",
+         not [d for d in leeg if d[0] == "notify"], f"{leeg}")
+
+# En een auto die vol was en daarna van de kabel gaat, heeft zijn verslag al
+# gehad. Twee berichten over dezelfde beurt is er een te veel.
+vol = instellingen()
+vol["strategy"]["schedules"][0]["window"]["done_by"] = "23:00"
+hass22c, _, coach22c = bouw(huis(status="ready_to_charge", teruglevering=0.0,
+                                 afname=1800.0), vol)
+asyncio.run(ronde(coach22c, vol, nu=dt.datetime(2026, 8, 20, 19, 0)))
+hass22c.states.zet("sensor.laadpaal_status", "charging")
+hass22c.states.zet("sensor.laadpaal_stroom", "13.5")
+hass22c.states.zet("sensor.laadpaal_vermogen", "3070")
+asyncio.run(ronde(coach22c, vol, nu=dt.datetime(2026, 8, 20, 19, 1)))
+hass22c.states.zet("sensor.laadpaal_status", "completed")
+hass22c.states.zet("sensor.laadpaal_teller", "103.0")
+_, klaarmelding = asyncio.run(ronde(coach22c, vol, nu=dt.datetime(2026, 8, 20, 19, 20)))
+controle("eerst het verslag dat hij vol is",
+         any("is vol" in d[2]["message"] for d in klaarmelding if d[0] == "notify"),
+         f"{klaarmelding}")
+hass22c.states.zet("sensor.laadpaal_status", "disconnected")
+_, daarna = asyncio.run(ronde(coach22c, vol, nu=dt.datetime(2026, 8, 20, 19, 25)))
+print(f"  vol en daarna de kabel eruit: {[d[2]['message'] for d in daarna if d[0] == 'notify']}")
+controle("en daarna geen tweede over dezelfde beurt",
+         not [d for d in daarna if d[0] == "notify"], f"{daarna}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

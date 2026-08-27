@@ -240,6 +240,10 @@ class ChargerCoach:
         # ging en waar de tijd aan op is gegaan. Alleen om het achteraf te
         # kunnen navertellen, nooit om een besluit op te nemen.
         self._sessie: dict[str, dict[str, Any]] = {}
+        # Laadbeurten waarvan de kabel eruit is en waar nog een verslag over
+        # hoort te komen. Staat los van `_sessie`, want die is dan al opgeruimd
+        # en mag ook niet blijven staan: een nieuwe kabel is een nieuwe beurt.
+        self._afscheid: dict[str, tuple[datetime, dict[str, Any]]] = {}
         # Naar welke klaar-tijd een sessie op vol vermogen aan het toewerken is.
         # Zodra hij daaraan begonnen is, blijft hij dat doen tot de auto vol is
         # of de klaar-tijd verandert: terugnemen betekent alsnog te laat.
@@ -1314,10 +1318,27 @@ class ChargerCoach:
         """Onthouden wat er in deze laadbeurt gebeurt, om het na te kunnen vertellen."""
         device_id = device.get("id", "")
         if not charger.connected:
-            self._sessie.pop(device_id, None)
+            # De kabel is eruit. Voordat deze beurt wordt vergeten gaat hij naar
+            # `_afscheid`, want er hoort nog een verslag over. Sven trok hem er
+            # op 20-08-2026 twee keer uit tijdens het laden en hoorde niets: er
+            # kwam alleen iets bij "vol" en bij een gemiste klaar-tijd.
+            #
+            # Alleen als er ook werkelijk geladen is, en alleen als er nog niets
+            # over gezegd is: een auto die vol was en daarna van de kabel gaat
+            # heeft zijn verslag al gehad.
+            beurt = self._sessie.pop(device_id, None)
+            if beurt and beurt.get("begon") and "vol" not in beurt.get("gemeld", set()):
+                self._afscheid[device_id] = (now, beurt)
             return
 
         vers = device_id not in self._sessie
+        if vers:
+            # Er hangt weer een kabel. Is er nog een afscheid blijven staan van
+            # de vorige beurt, dan is dat er een die nooit verteld is omdat de
+            # coach niet mocht sturen. Die hoort niet alsnog binnen te komen bij
+            # een volgende auto; dan gaat het bericht over de verkeerde beurt.
+            self._afscheid.pop(device_id, None)
+
         sessie = self._sessie.setdefault(
             device_id,
             {
@@ -1471,17 +1492,28 @@ class ChargerCoach:
     ) -> None:
         """Vertellen hoe het afliep, en waarom het langer duurde dan afgesproken.
 
-        Twee momenten. Als de auto vol is, want dan is de vraag "hoe laat was
-        hij klaar" en niet "wat doet hij nu". En als de klaar-tijd voorbijgaat
+        Drie momenten. Als de auto vol is, want dan is de vraag "hoe laat was
+        hij klaar" en niet "wat doet hij nu". Als de klaar-tijd voorbijgaat
         terwijl hij niet vol is, want dat is precies het geval waarin iemand
-        anders zou denken dat de coach niets gedaan heeft.
+        anders zou denken dat de coach niets gedaan heeft. En als de kabel eruit
+        gaat terwijl er geladen werd, want dan is de beurt net zo goed afgelopen
+        en is dezelfde vraag aan de orde.
         """
         device_id = device.get("id", "")
+        naam = device.get("name") or "de laadpaal"
+
+        # De kabel is eruit gegaan. Deze staat vooraan omdat de beurt dan al uit
+        # `_sessie` gehaald is en de controle hieronder er dus overheen zou
+        # lopen.
+        afscheid = self._afscheid.pop(device_id, None)
+        if afscheid:
+            await self._async_afgekoppeld(device, naam, *afscheid)
+            return
+
         sessie = self._sessie.get(device_id)
         if not sessie:
             return
 
-        naam = device.get("name") or "de laadpaal"
         gemeld: set[str] = sessie["gemeld"]
 
         # De auto is vol.
@@ -1543,6 +1575,45 @@ class ChargerCoach:
             f"De auto aan {naam} was om {vorig:%H:%M} nog niet vol.{stand}"
             + (f" Er ging {waarom}." if waarom else "")
             + " Hij laadt door tot hij vol is."
+        )
+
+    async def _async_afgekoppeld(
+        self,
+        device: dict[str, Any],
+        naam: str,
+        moment: datetime,
+        sessie: dict[str, Any],
+    ) -> None:
+        """Vertellen hoe het afliep toen de kabel eruit ging.
+
+        Dezelfde vorm als het verslag bij een volle auto, want het is dezelfde
+        vraag: wanneer hield het op en hoeveel is erin gegaan. Afgesproken met
+        Sven op 26-08-2026, met zijn eigen zin als voorbeeld: "afgekoppeld om
+        19:12, er ging 4,2 kWh in".
+
+        Wat er niet in staat is een oordeel. De kabel eruit trekken is een
+        gewone handeling en geen storing, dus er hoort geen "maar hij was nog
+        niet vol" bij; dat weet de bewoner zelf.
+        """
+        geladen = self._geladen(device, sessie)
+        kwh = f"{geladen:.1f} kWh".replace(".", ",") if geladen else ""
+        begon = sessie.get("begon")
+
+        # Is de coach midden in de laadbeurt ingestapt, dan weet hij niet hoe
+        # laat die begon en hoort hij dat ook niet te suggereren. Zelfde
+        # afweging als bij het verslag hierboven.
+        if sessie.get("ingestapt") and kwh:
+            verloop = f", er ging {kwh} in sinds {begon:%H:%M}, en toen liep hij al."
+        elif kwh:
+            verloop = f", er ging {kwh} in sinds {begon:%H:%M}."
+        else:
+            verloop = "."
+
+        waarom = self._waarom(sessie)
+        await self._async_tell(
+            f"De auto aan {naam} is afgekoppeld om {moment:%H:%M}"
+            + verloop
+            + (f" Er ging {waarom}." if waarom else "")
         )
 
     async def _async_ask_soc(self, device: dict[str, Any], decision: Decision) -> None:
