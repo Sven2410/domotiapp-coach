@@ -12,9 +12,14 @@ Gebruik:
     ha.kies("klant-jansen")          # overstappen naar een andere
     ha.get("/api/config")
 
-Het tokenbestand is vormvrij: het eerste dat op een JWT lijkt is het token, en
-het eerste dat op een adres lijkt is de host. Zo blijft een bestand dat met de
-hand is volgeplakt gewoon werken.
+Het tokenbestand is vormvrij: wat op een JWT lijkt is het token, en alles wat op
+een adres lijkt is een adres. Zo blijft een bestand dat met de hand is
+volgeplakt gewoon werken. Er mogen er meerdere in; ze worden geprobeerd in de
+volgorde waarin ze er staan, zodat hetzelfde bestand op locatie en op afstand
+werkt.
+
+Een sessie kijkt naar één installatie. Staat `HA_VAST=1`, dan weigert hij een
+overstap naar een andere; zie `_slot`.
 """
 
 import json
@@ -41,10 +46,30 @@ OUDE_PADEN = [
 JWT = re.compile(r"ey[A-Za-z0-9_\-\.]{40,}")
 ADRES = re.compile(r"(?:https?://)?(\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9\-\.]+\.[a-z]{2,})(?::(\d+))?")
 
+# Een sessie kijkt naar één installatie en niet naar twee. start.sh zet dit
+# zodra er gekozen is. Zonder dit slot is HA_INSTALLATIE een suggestie: een
+# script of een sessie kan er dan omheen door HA_TOKEN_FILE te zetten of naar
+# een andere naam over te stappen, en dan wordt er zonder waarschuwing bij de
+# verkeerde installatie gekeken. Bewust te doorbreken met HA_VAST=0 voor een
+# eenmalige vergelijking.
+VAST = os.environ.get("HA_VAST", "") not in ("", "0")
+
+
+def _slot(wat: str) -> None:
+    """Weigeren van een uitstapje naar een andere installatie."""
+    hier = os.environ.get("HA_INSTALLATIE", "thuis")
+    raise SystemExit(
+        f"[ha] Deze sessie staat vast op '{hier}', en {wat}.\n"
+        f"[ha] Is dat wel de bedoeling, zet er dan HA_VAST=0 voor. Anders:\n"
+        f"[ha] sluit deze sessie af en start hem op de andere installatie."
+    )
+
 
 def zoek_bestand(naam: str) -> pathlib.Path:
     """Het tokenbestand van deze installatie, of een uitleg waarom niet."""
     eigen = os.environ.get("HA_TOKEN_FILE")
+    if eigen and VAST:
+        _slot("HA_TOKEN_FILE zou daarlangs gaan")
     if eigen:
         pad = pathlib.Path(eigen)
         if pad.exists():
@@ -69,8 +94,8 @@ def zoek_bestand(naam: str) -> pathlib.Path:
     )
 
 
-def lees(naam: str) -> tuple[str, str]:
-    """Het token en de host uit het bestand van deze installatie."""
+def lees(naam: str) -> "tuple[str, list[str]]":
+    """Het token en alle adressen uit het bestand van deze installatie."""
     tekst = zoek_bestand(naam).read_text(encoding="utf-8", errors="ignore")
 
     jwt = JWT.search(tekst)
@@ -140,7 +165,7 @@ SCHEMA = schema_van(HOST)
 _gekozen = len(ADRESSEN) == 1
 
 
-def _meld(naam: str) -> None:
+def _meld(naam: str, waar: str = "") -> None:
     """Eén regel naar stderr: tegen welke installatie er gemeten wordt.
 
     Zonder dit schrijft een logger die een uur meeloopt stilzwijgend de
@@ -150,13 +175,16 @@ def _meld(naam: str) -> None:
     """
     if os.environ.get("HA_STIL"):
         return
-    if os.environ.get("HA_TOKEN_FILE"):
+    if waar:
+        pass
+    elif os.environ.get("HA_TOKEN_FILE"):
         waar = "uit HA_TOKEN_FILE"
     elif os.environ.get("HA_INSTALLATIE"):
         waar = "uit HA_INSTALLATIE"
     else:
         waar = "standaard, HA_INSTALLATIE is niet gezet"
-    print(f"[ha] installatie: {naam} ({waar})", file=sys.stderr)
+    slot = ", vastgezet voor deze sessie" if VAST else ""
+    print(f"[ha] installatie: {naam} ({waar}{slot})", file=sys.stderr)
 
 
 _meld(NAAM)
@@ -204,12 +232,14 @@ def host() -> str:
 def kies(naam: str) -> str:
     """Overstappen naar een andere installatie, binnen hetzelfde script."""
     global NAAM, TOKEN, ADRESSEN, HOST, SCHEMA, _gekozen
+    if VAST and naam != NAAM:
+        _slot(f"overstappen naar '{naam}' hoort daar niet bij")
     NAAM = naam
     TOKEN, ADRESSEN = lees(naam)
     HOST = ADRESSEN[0]
     SCHEMA = schema_van(HOST)
     _gekozen = len(ADRESSEN) == 1
-    _meld(naam)
+    _meld(naam, "door het script gekozen")
     return HOST
 
 
