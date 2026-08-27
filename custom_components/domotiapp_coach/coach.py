@@ -29,6 +29,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    NETTING_ENDS,
     CHARGER_CONTROL,
     DOMAIN,
     EVENT_DECISION,
@@ -929,6 +930,20 @@ class ChargerCoach:
             )
         return uit
 
+    @staticmethod
+    def _salderen(contract: dict[str, Any], now: datetime | None = None) -> bool:
+        """Of er op dit moment nog gesaldeerd wordt.
+
+        Het vinkje van de klant én de datum. De regeling loopt af op
+        `NETTING_ENDS`, en zonder die grens zou de coach na de jaarwisseling
+        maandenlang een belastingteruggave blijven inrekenen die niet meer
+        bestaat. Het vinkje blijft staan; het telt alleen niet meer mee.
+        """
+        if not contract.get("netting"):
+            return False
+        vandaag = dt_util.as_local(now or dt_util.utcnow()).date()
+        return vandaag < NETTING_ENDS
+
     def _prices(self, settings: dict[str, Any]) -> list[dict]:
         """De prijslijst, met per blok wat het kost én wat teruglevering opbrengt.
 
@@ -950,7 +965,16 @@ class ChargerCoach:
         dynamic = contract.get("dynamic") or {}
         all_in = dynamic.get("source") == "all_in"
         kosten = float(dynamic.get("feed_in_costs") or 0)
-        salderen = bool(contract.get("netting"))
+        salderen = self._salderen(contract)
+        # De opslag van de leverancier zit wel in wat je betaalt en niet in wat
+        # je terugkrijgt. Bij salderen streept de energiebelasting weg tegen die
+        # bij afname, maar die opslag niet: die betaal je per ingekochte kWh en
+        # krijg je nergens terug. Zonder deze aftrek stond de terugleveropbrengst
+        # er ruim twee cent te hoog in en leek eigen zon gebruiken even duur als
+        # het weggeven ervan. Gevonden op 27-08-2026, uit Svens eigen nota.
+        opslag = float(dynamic.get("supplier_markup") or 0) * (
+            1 + float(dynamic.get("vat_percent") or 0) / 100
+        )
 
         markt = self._slots(dynamic.get("market_entity"))
         inkoop = self._slots(dynamic.get("all_in_entity")) if all_in else markt
@@ -965,10 +989,11 @@ class ChargerCoach:
 
             if salderen:
                 # Salderen betekent dat een teruggeleverde kWh wegstreept tegen
-                # een ingekochte, dus is hij precies de inkoopprijs waard. Er is
-                # dan geen marktprijssensor voor nodig: het antwoord staat al in
-                # de prijs die er is.
-                terug = prijs - kosten
+                # een ingekochte. Wat je daarmee bespaart is de inkoopprijs min
+                # de opslag van je leverancier, want die opslag hangt aan de
+                # afname en niet aan de kWh. Er is geen marktprijssensor voor
+                # nodig: het antwoord staat al in de prijs die er is.
+                terug = prijs - opslag - kosten
             elif all_in:
                 if start in markt:
                     terug = markt[start][1] - kosten
@@ -1015,7 +1040,7 @@ class ChargerCoach:
         koop = float(prijs) if prijs is not None else None
         kosten = float(fixed.get("feed_in_costs") or 0)
 
-        if contract.get("netting"):
+        if ChargerCoach._salderen(contract):
             # Salderen: wat je teruglevert streept weg tegen wat je inkoopt, dus
             # is het de inkoopprijs waard. Het ingevulde terugleverbedrag geldt
             # dan niet; dat is pas aan de orde boven wat je zelf verbruikt.

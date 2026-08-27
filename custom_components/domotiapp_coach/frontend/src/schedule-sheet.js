@@ -159,6 +159,13 @@ const css = /* css */ `
      onder de rand door te lopen. */
   dialog.sheet { max-height: calc(100vh - 24px); overflow-y: auto; }
 
+  /* Het attribuut hidden is niets meer dan een regel van de browser zelf, en
+     die verliest van elke display die hier staat. Zonder deze regels bleef de
+     lege waarschuwing staan en stonden de tijden van elke dag én die per dag
+     tegelijk in beeld. Sven zag dat op 27-08-2026. Elke klasse hieronder die
+     een display krijgt, hoort er dus eentje te hebben. */
+  [hidden] { display: none !important; }
+
   .fields { display: grid; gap: 16px; margin-top: 16px; }
   .row { display: grid; gap: 7px; }
   .row > label { font-size: 13px; font-weight: 500; color: var(--dac-ink); }

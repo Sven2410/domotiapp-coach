@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from typing import Any, Final
 
 DOMAIN: Final = "domotiapp_coach"
@@ -149,6 +151,19 @@ CHARGER_CONTROL: Final = {
         "words": {"start": "start", "stop": "stop", "pause": "pause", "resume": "resume"},
     },
 }
+
+# Wanneer de salderingsregeling afloopt. Op die datum vervalt het wegstrepen
+# van teruglevering tegen afname, en daarmee de reden waarom een teruggeleverde
+# kWh nu bijna evenveel waard is als een gekochte.
+#
+# Het staat hier als datum en niet als iets dat de klant moet aanzetten, want
+# het is landelijk geregeld en op de dag zelf verandert het voor iedereen
+# tegelijk. Zonder deze grens zou de coach na de jaarwisseling maandenlang een
+# belastingteruggave blijven inrekenen die niet meer bestaat, en dat merk je
+# pas op de eindafrekening. Het vinkje van de klant blijft staan; het telt
+# alleen niet meer mee.
+NETTING_ENDS = date(2027, 1, 1)
+
 
 # --- Default settings ------------------------------------------------------
 # The panel falls back to simulated values while `sources` is still empty, so a
