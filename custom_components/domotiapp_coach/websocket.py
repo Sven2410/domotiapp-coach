@@ -515,7 +515,13 @@ async def async_set_car_soc(
     )
     meter = None
     if device:
-        state = hass.states.get((device.get("entities") or {}).get("lifetime_energy") or "")
+        # Het merkveld eerst en anders de Energieteller. Die twee vroegen om
+        # dezelfde sensor, en alleen Easee heeft dat merkveld; zie `_teller` in
+        # coach.py voor het hele verhaal.
+        entiteit = (device.get("entities") or {}).get("lifetime_energy") or device.get(
+            "energy_entity"
+        )
+        state = hass.states.get(entiteit or "")
         if state is not None:
             try:
                 meter = float(state.state)

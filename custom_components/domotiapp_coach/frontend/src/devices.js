@@ -182,12 +182,6 @@ export const CHARGER_BRANDS = [
         },
       },
       {
-        key: "lifetime_energy",
-        label: "Levensduur verbruik",
-        hint: "Alles wat deze lader ooit geladen heeft, in kWh.",
-        filter: "all",
-      },
-      {
         key: "max_limit",
         label: "Maximale limiet lader",
         hint: "Hoeveel ampère de lader maximaal mag leveren. Dit is de bovengrens die vastligt.",

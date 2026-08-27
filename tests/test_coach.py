@@ -1156,6 +1156,63 @@ uit = schema_bijwerken(None, "d1", enabled=True)
 controle("zonder strategie ontstaat er gewoon een",
          uit["schedules"][0]["device"] == "d1", f"{uit}")
 
+print("=== 25. de kWh-teller mag ook in het algemene veld staan ===")
+# Sven op 27-08-2026, tijdens een installatie bij een klant: "Energieteller
+# (optioneel)" en "Levensduur verbruik" wezen naar dezelfde sensor en hij typte
+# hem twee keer.
+#
+# Wat eronder zat was erger. Alleen Easee had dat merkveld; Zaptec, Wallbox,
+# Zappi en Peblar hebben geen enkel merkveld. Bij die klanten kwam er dus nooit
+# een teller binnen, ook niet als de Energieteller keurig was ingevuld, en viel
+# het verslag terug op wat de coach zelf aan vermogen langs zag komen.
+
+# Een paal zonder merkveld, met de teller in het algemene veld. Zo staat een
+# Zaptec of een Wallbox erbij.
+ZONDER_MERKVELD = dict(
+    LAADPAAL,
+    brand="zaptec",
+    energy_entity="sensor.laadpaal_teller",
+    entities={k: v for k, v in LAADPAAL["entities"].items() if k != "lifetime_energy"},
+)
+anders = instellingen(devices=[ZONDER_MERKVELD])
+anders["strategy"]["schedules"][0]["window"]["done_by"] = "23:00"
+hass25, _, coach25 = bouw(huis(status="ready_to_charge", teruglevering=0.0,
+                               afname=1800.0), anders)
+asyncio.run(ronde(coach25, anders, paal=ZONDER_MERKVELD, nu=dt.datetime(2026, 8, 20, 19, 0)))
+hass25.states.zet("sensor.laadpaal_status", "charging")
+hass25.states.zet("sensor.laadpaal_stroom", "13.5")
+hass25.states.zet("sensor.laadpaal_vermogen", "3070")
+asyncio.run(ronde(coach25, anders, paal=ZONDER_MERKVELD, nu=dt.datetime(2026, 8, 20, 19, 1)))
+hass25.states.zet("sensor.laadpaal_status", "completed")
+hass25.states.zet("sensor.laadpaal_teller", "106.5")
+_, verstuurd = asyncio.run(
+    ronde(coach25, anders, paal=ZONDER_MERKVELD, nu=dt.datetime(2026, 8, 20, 19, 20))
+)
+meldingen = [d[2]["message"] for d in verstuurd if d[0] == "notify"]
+print(f"  merk zonder eigen veld: {meldingen}")
+controle("de geijkte teller telt ook zonder merkveld mee",
+         any("6,5 kWh" in m for m in meldingen), f"{meldingen}")
+
+# En het merkveld blijft voorgaan, want bestaande installaties hebben dat
+# ingevuld en die mogen hier niets van merken. Staan ze allebei en wijzen ze
+# naar iets anders, dan wint het merkveld.
+BEIDE = dict(LAADPAAL, energy_entity="sensor.andere_teller")
+hass25b, _, coach25b = bouw(
+    dict(huis(status="ready_to_charge", teruglevering=0.0, afname=1800.0),
+         **{"sensor.andere_teller": "500.0"}),
+    instellingen(devices=[BEIDE]),
+)
+controle("het merkveld gaat voor",
+         coach25b._teller(BEIDE) == 100.0, f"{coach25b._teller(BEIDE)}")
+
+# Staat er nergens een teller, dan valt hij terug op zijn eigen meting en niet
+# op een uitzondering.
+GEEN = dict(LAADPAAL, energy_entity="",
+            entities={k: v for k, v in LAADPAAL["entities"].items()
+                      if k != "lifetime_energy"})
+controle("zonder enige teller geeft hij niets terug in plaats van om te vallen",
+         coach25b._teller(GEEN) is None, f"{coach25b._teller(GEEN)}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

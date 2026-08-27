@@ -1266,7 +1266,7 @@ class ChargerCoach:
             return None
 
         capacity = float(profile.get("capacity_kwh") or 0)
-        meter = _number(self.hass, (device.get("entities") or {}).get("lifetime_energy"))
+        meter = self._teller(device)
         sinds = sessie.get("soc_meter")
         if capacity and meter is not None and sinds is not None:
             geladen = max(0.0, meter - float(sinds)) * CHARGE_EFFICIENCY
@@ -1305,7 +1305,7 @@ class ChargerCoach:
             return None
 
         percent = float(entry["percent"])
-        meter = _number(self.hass, (device.get("entities") or {}).get("lifetime_energy"))
+        meter = self._teller(device)
         since = entry.get("meter")
         if meter is not None and since is not None:
             geladen = max(0.0, meter - float(since)) * CHARGE_EFFICIENCY
@@ -1412,7 +1412,7 @@ class ChargerCoach:
                     sessie["kwijt"][sleutel] = sessie["kwijt"].get(sleutel, 0.0) + stap
                     break
 
-        meter = _number(self.hass, (device.get("entities") or {}).get("lifetime_energy"))
+        meter = self._teller(device)
 
         # De laatste accustand van deze laadbeurt vasthouden, met de meterstand
         # van dat moment erbij. Een percentage dat wegvalt is geen nieuw
@@ -1461,7 +1461,7 @@ class ChargerCoach:
         alles wat er is, en dat is nog altijd beter dan zwijgen.
         """
         staart = max(0.0, sessie.get("gemeten_kwh", 0.0) - sessie.get("meter_kwh", 0.0))
-        meter = _number(self.hass, (device.get("entities") or {}).get("lifetime_energy"))
+        meter = self._teller(device)
         if meter is None or sessie.get("meter") is None:
             return staart or None
         return max(0.0, meter - float(sessie["meter"])) + staart
@@ -1691,6 +1691,29 @@ class ChargerCoach:
             _LOGGER.exception("kon de gegevens van de vorige sessie niet vergeten")
             return
         self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+
+    def _teller(self, device: dict[str, Any]) -> float | None:
+        """De geijkte kWh-teller van dit apparaat, hoe hij ook ingevuld is.
+
+        Twee velden vroegen om hetzelfde. Bij een Easee vult de installateur
+        onder Merk "Levensduur verbruik" in, en bij Apparaten staat daarnaast
+        "Energieteller (optioneel)" die naar dezelfde sensor wijst. Sven merkte
+        dat op 27-08-2026 bij een klant: hij typte hem twee keer.
+
+        Erger dan het dubbele typen was wat eronder zat. Alleen Easee heeft dat
+        merkveld; Zaptec, Wallbox, Zappi en Peblar hebben geen enkel merkveld.
+        Bij die klanten kwam er dus nooit een teller binnen, ook niet als de
+        Energieteller keurig was ingevuld, en viel het verslag terug op wat de
+        coach zelf aan vermogen langs zag komen. Dat werkt, maar de geijkte
+        teller ligt er dan ongebruikt naast.
+
+        Het merkveld eerst, want bestaande installaties hebben dat ingevuld en
+        die mogen hier niets van merken.
+        """
+        entiteit = (device.get("entities") or {}).get("lifetime_energy") or device.get(
+            "energy_entity"
+        )
+        return _number(self.hass, entiteit)
 
     def _fasetip(
         self, settings: dict[str, Any], device: dict[str, Any], charger: Charger
