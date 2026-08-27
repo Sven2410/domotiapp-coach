@@ -21,7 +21,9 @@ def _frame(payload: bytes, opcode: int = 1) -> bytes:
 
 class WS:
     def __init__(self):
-        host, port = ha.HOST.rsplit(":", 1)
+        # ha.host() zoekt zo nodig eerst uit welk adres uit het tokenbestand
+        # antwoord geeft: thuis het eigen netwerk, onderweg Nabu Casa.
+        host, port = ha.host().rsplit(":", 1)
         self.s = socket.create_connection((host, int(port)), timeout=20)
         if ha.SCHEMA == "https":
             # Een installatie die op naam bereikbaar is draait wel met een
@@ -31,9 +33,12 @@ class WS:
             self.s = ssl.create_default_context().wrap_socket(
                 self.s, server_hostname=host
             )
+        # De standaardpoort hoort niet in de Host-header: de omgekeerde proxy
+        # van Nabu Casa kijkt daarnaar.
+        kop = host if port in ("443", "80") else ha.HOST
         key = base64.b64encode(os.urandom(16)).decode()
         self.s.sendall(
-            f"GET /api/websocket HTTP/1.1\r\nHost: {ha.HOST}\r\nUpgrade: websocket\r\n"
+            f"GET /api/websocket HTTP/1.1\r\nHost: {kop}\r\nUpgrade: websocket\r\n"
             f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
             f"Sec-WebSocket-Version: 13\r\n\r\n".encode()
         )
