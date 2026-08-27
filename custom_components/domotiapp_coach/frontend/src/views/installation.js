@@ -207,22 +207,31 @@ class DacViewInstallation extends DacEditorElement {
                   <dac-entity-picker id="dyn-market"></dac-entity-picker>
                   <span class="sub">De kale marktprijs, zonder belasting en btw.</span>
                 </div>
-                <div class="two">
-                  <div class="row">
-                    <label for="dyn-tax">Energiebelasting (€ per kWh)</label>
-                    <input type="number" id="dyn-tax" min="0" step="0.0001" inputmode="decimal">
-                  </div>
-                  <div class="row">
-                    <label for="dyn-markup">Opslag leverancier (€ per kWh)</label>
-                    <input type="number" id="dyn-markup" min="0" step="0.0001" inputmode="decimal">
-                  </div>
+                <div class="row">
+                  <label for="dyn-tax">Energiebelasting (€ per kWh)</label>
+                  <input type="number" id="dyn-tax" min="0" step="0.0001" inputmode="decimal">
+                  <span class="sub">Wat de overheid per kWh heft. Dit tarief verandert elk jaar op 1 januari, dus kijk het na op je jaarnota.</span>
+                </div>
+                <div class="row">
+                  <span class="sub" id="dyn-formula"></span>
+                </div>
+              </div>
+
+              <!-- De opslag en de btw staan buiten dat blok, want ze zijn ook
+                   nodig bij een all-in sensor. Salderen streept de
+                   energiebelasting weg tegen die bij afname, maar de opslag
+                   niet: die betaal je per ingekochte kWh en krijg je nergens
+                   terug. Zonder dit veld zou daar een standaardwaarde voor
+                   gebruikt worden die niemand heeft ingevuld. -->
+              <div class="two">
+                <div class="row">
+                  <label for="dyn-markup">Opslag leverancier (€ per kWh)</label>
+                  <input type="number" id="dyn-markup" min="0" step="0.0001" inputmode="decimal">
+                  <span class="sub" id="dyn-markup-hint"></span>
                 </div>
                 <div class="row">
                   <label for="dyn-vat">Btw (%)</label>
                   <input type="number" id="dyn-vat" min="0" max="100" step="1" inputmode="numeric">
-                </div>
-                <div class="row">
-                  <span class="sub" id="dyn-formula"></span>
                 </div>
               </div>
 
@@ -413,6 +422,11 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#dyn-allin-row").style.display = source === "all_in" ? "" : "none";
     this.$("#dyn-market-feed").value = contract.dynamic.market_entity ?? "";
     this.$("#dyn-market-fields").style.display = source === "market" ? "" : "none";
+    // De opslag doet er bij allebei de bronnen toe, maar om een andere reden.
+    this.$("#dyn-markup-hint").textContent =
+      source === "market"
+        ? "Wat je leverancier per kWh bovenop de marktprijs rekent. Zit in je inkoopprijs, en telt niet mee in wat teruglevering opbrengt."
+        : "Wat je leverancier per kWh bovenop de marktprijs rekent. Je all-in sensor kent dit bedrag al; de coach heeft het los nodig om uit te rekenen wat teruglevering je oplevert als je saldeert.";
 
     // A dynamic contract without the sensor it is supposed to read leaves the
     // price tile on a dash forever, and nothing on this screen would say why.
