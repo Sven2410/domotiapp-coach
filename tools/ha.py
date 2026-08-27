@@ -76,44 +76,109 @@ def lees(naam: str) -> tuple[str, str]:
     if not jwt:
         raise ValueError(f"In het tokenbestand van '{naam}' staat geen token.")
 
-    # Het token is zelf een reeks punten en letters, dus zoek de host in wat
-    # eromheen staat. Anders leest hij een stuk van het token als adres.
+    # Het token is zelf een reeks punten en letters, dus zoek de adressen in
+    # wat eromheen staat. Anders leest hij een stuk van het token als adres.
     rest = tekst.replace(jwt.group(0), " ")
-    adres = ADRES.search(rest)
-    if not adres:
+    adressen = [_host(m) for m in ADRES.finditer(rest)]
+    if not adressen:
         raise ValueError(
             f"In het tokenbestand van '{naam}' staat geen adres. Zet het IP of de "
             "hostnaam van Home Assistant op een eigen regel."
         )
-    host = adres.group(1) + ":" + (adres.group(2) or "8123")
-    return jwt.group(0), host
+    # Dubbele eruit, volgorde houden: die volgorde is de voorkeur.
+    uniek = list(dict.fromkeys(adressen))
+    return jwt.group(0), uniek
 
+
+def _host(m: "re.Match") -> str:
+    """Een gevonden adres als host:poort.
+
+    Een poort erbij verzinnen mag alleen bij een kaal IP, want daar is 8123 de
+    gewoonte. Nabu Casa draait op 443 en niet op 8123: stond er 8123 achter een
+    nabu.casa-naam, dan gaf dat een verbindingsfout die eruitzag als een
+    verkeerd token.
+    """
+    naam, poort = m.group(1), m.group(2)
+    if poort:
+        return f"{naam}:{poort}"
+    kaal_ip = re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", naam)
+    return f"{naam}:8123" if kaal_ip else f"{naam}:443"
+
+
+def schema_van(host: str) -> str:
+    """Https overal behalve op een kaal IP: een Home Assistant op het eigen
+    netwerk draait meestal zonder certificaat, en dan geeft https een SSL-fout.
+    """
+    return "http" if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}:\d+", host) else "https"
+
+
+# Hoe lang een adres de tijd krijgt om te laten weten dat het bestaat. Kort,
+# want het thuisadres wordt ook geprobeerd als je niet thuis bent.
+PROBE_SECONDEN = 4
 
 NAAM = os.environ.get("HA_INSTALLATIE", "thuis")
-TOKEN, HOST = lees(NAAM)
+TOKEN, ADRESSEN = lees(NAAM)
 
-# Https alleen waar het geen kaal IP is: een Home Assistant op het thuisnetwerk
-# draait meestal zonder certificaat, en dan geeft https een SSL-fout.
-SCHEMA = "http" if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}:\d+", HOST) else "https"
+HOST = ADRESSEN[0]
+SCHEMA = schema_van(HOST)
+# Met één adres valt er niets te kiezen, en dan blijft de foutmelding bij een
+# mislukte verbinding die van de verbinding zelf in plaats van een opsomming.
+_gekozen = len(ADRESSEN) == 1
+
+
+def _haal(host: str, path: str, timeout: int):
+    req = urllib.request.Request(
+        f"{schema_van(host)}://{host}{path}",
+        headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode())
+
+
+def verbind() -> str:
+    """Het eerste adres uit het bestand dat antwoord geeft.
+
+    Zo werkt hetzelfde bestand thuis op het eigen netwerk en onderweg via Nabu
+    Casa, zonder dat er iets omgezet hoeft te worden. De volgorde in het bestand
+    is de voorkeur: zet het adres op het eigen netwerk bovenaan, want dat is
+    sneller en het verkeer blijft binnen.
+    """
+    global HOST, SCHEMA, _gekozen
+    fouten = []
+    for host in ADRESSEN:
+        try:
+            _haal(host, "/api/", PROBE_SECONDEN)
+        except Exception as e:  # noqa: BLE001 - elke reden telt als "niet deze"
+            fouten.append(f"  {schema_van(host)}://{host} -> {e}")
+            continue
+        HOST, SCHEMA, _gekozen = host, schema_van(host), True
+        return HOST
+    raise ConnectionError(
+        f"Geen van de adressen van '{NAAM}' gaf antwoord:\n" + "\n".join(fouten)
+    )
+
+
+def host() -> str:
+    """Het adres dat werkt, zo nodig eerst opgezocht."""
+    if not _gekozen:
+        verbind()
+    return HOST
 
 
 def kies(naam: str) -> str:
     """Overstappen naar een andere installatie, binnen hetzelfde script."""
-    global NAAM, TOKEN, HOST, SCHEMA
+    global NAAM, TOKEN, ADRESSEN, HOST, SCHEMA, _gekozen
     NAAM = naam
-    TOKEN, HOST = lees(naam)
-    SCHEMA = "http" if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}:\d+", HOST) else "https"
+    TOKEN, ADRESSEN = lees(naam)
+    HOST = ADRESSEN[0]
+    SCHEMA = schema_van(HOST)
+    _gekozen = len(ADRESSEN) == 1
     return HOST
 
 
 def get(path: str):
     """Een GET op de REST-API. Alleen lezen; er is bewust geen post."""
-    req = urllib.request.Request(
-        f"{SCHEMA}://{HOST}{path}",
-        headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return json.loads(r.read().decode())
+    return _haal(host(), path, 20)
 
 
 def states() -> dict:
@@ -124,6 +189,10 @@ def states() -> dict:
 if __name__ == "__main__":
     print(f"installatie : {NAAM}")
     print(f"bestand     : {zoek_bestand(NAAM)}")
-    print(f"adres       : {SCHEMA}://{HOST}")
+    if len(ADRESSEN) > 1:
+        print(f"adressen    : {len(ADRESSEN)}, in volgorde van voorkeur")
+        for a in ADRESSEN:
+            print(f"              {schema_van(a)}://{a}")
     alles = states()
+    print(f"verbonden   : {SCHEMA}://{HOST}")
     print(f"bereikbaar  : ja, {len(alles)} entiteiten")
