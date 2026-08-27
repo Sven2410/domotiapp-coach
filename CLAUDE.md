@@ -138,13 +138,37 @@ tokens/klant-naam.txt
 
 Adres op de ene regel, het long-lived token op de andere. **Die bestanden horen
 op geen enkele remote, ook niet op een privérepo.** Maak op een nieuwe machine
-gewoon een nieuw token aan in Home Assistant (Profiel → Beveiliging).
+gewoon een nieuw token aan in Home Assistant (Profiel → Beveiliging), of laat
+`dev/tokens/nieuw.sh` het bestand aanleggen.
+
+Er mogen **twee adressen** in: dat op het eigen netwerk en dat van buitenaf.
+`ha.py` probeert ze in die volgorde en houdt het eerste dat antwoord geeft, vier
+seconden per poging. Zo werkt hetzelfde bestand op locatie en op afstand. Let op
+de poort: een kaal IP krijgt 8123 en http, een hostnaam krijgt https en zonder
+poort erbij is dat 443, wat Nabu Casa gebruikt.
 
 ```
 python tools/ha.py                                   # werkt de verbinding?
 HA_INSTALLATIE=klant-naam python tools/ha.py         # een andere installatie
 python tools/logboek.py 2026-08-29T06:00             # tijdlijn uit de recorder
 python tools/besluiten.py                            # live meeluisteren
+```
+
+**Welke installatie het is, moet altijd zichtbaar zijn.** Elk stuk gereedschap
+dat `ha` importeert schrijft daarom één regel naar stderr:
+
+```
+[ha] installatie: klant-jansen (uit HA_INSTALLATIE)
+```
+
+Zonder dat schrijft een logger die een uur meeloopt stilzwijgend de verkeerde
+installatie mee, en dat merk je pas achteraf. `HA_STIL=1` zet die regel uit voor
+een script met een eigen kop. Voor een hele sessie kies je de installatie bij
+het opstarten, in plaats van bij elk commando:
+
+```
+./start.sh coach klant-jansen      # macOS
+start.cmd coach klant-jansen       # Windows
 ```
 
 `logboek.py` vraagt aan het paneel zelf welke entiteiten erbij horen, dus hij
