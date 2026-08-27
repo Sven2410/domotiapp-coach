@@ -36,6 +36,7 @@ commit, tag en breng uit.
 | `monitor.py` | de zekeringbewaking en de wachthond |
 | `report.py` | het pdf-rapport |
 | `frontend/src/` | het paneel, ES-modules zonder buildstap |
+| `frontend/src/schedule-sheet.js` | het schema van één apparaat, als pop-up achter zijn kaart |
 
 De scheiding tussen `planner.py` en `coach.py` is de kern: het denkwerk is los
 te draaien tegen een hele dag echte historie voordat er ook maar iets geschakeld
@@ -66,6 +67,22 @@ Een proefopzet die begint met een paal die al laadt is geen gewone laadbeurt maa
 een herstart middenin, en daar gedraagt de coach zich bewust anders. Doe eerst
 één ronde met de kabel erin en nog geen stroom.
 
+### Waar het schema van een apparaat staat
+
+Sinds 27-08-2026 staat dat bij het apparaat zelf en niet meer in Strategie. Op de
+kaart in Overzicht: de schuif die het schema aan en uit zet, en de keuzelijst
+wie er voorgaat. Achter de knop Schema: de tijden en het per-dag-werk, in
+`schedule-sheet.js`. Alles gaat langs één commando,
+`domotiapp_coach/device/schedule`, dat precies dat ene apparaat aanraakt en de
+nieuwe lijst zelf uitrekent.
+
+**Strategie gaat alleen nog over de coach zelf**: hoeveel hij mag doen, waar hij
+op mikt, en de meldingen. Zet daar geen apparaten meer in.
+
+Het schuifje is geen apart begrip: het is de `enabled` die elk schema al had.
+Staat hij uit, dan slaat `_days` in `coach.py` het schema over en vervalt in
+`planner.py` de hele klaar-tijdtak.
+
 ## Het paneel bekijken
 
 ```
@@ -83,9 +100,17 @@ unieke querystring (`?v=2`) als het in een iframe draait.
 Meet smalle schermen op **320 én 280 px**, niet alleen 390: zodra iOS inzoomt op
 een invoerveld wordt de viewport smaller en komt echte overflow er alsnog uit.
 
-Geen backticks in CSS-commentaar; de stijlen staan in een template literal en een
-backtick sluit de string af. Controleren met
-`node --check custom_components/domotiapp_coach/frontend/src/views/overview.js`.
+**Geen backticks in CSS-commentaar.** De stijlen staan in een template literal
+en een backtick sluit de string af. `node --check` vangt dat **niet**: op
+27-08-2026 gaf hij groen op een bestand dat de browser weigerde met "Unexpected
+identifier". Controleren met:
+
+```
+python tools/stijlcheck.py     # alle stijlblokken van het paneel
+```
+
+Die zoekt het echte kenmerk op: een stijlblok dat middenin een commentaar
+ophoudt. `node --check` blijft nuttig voor gewone tikfouten, maar hier niet.
 
 ### Klikken in de browser: eerst een schermafdruk, dan de coordinaten daarvan
 

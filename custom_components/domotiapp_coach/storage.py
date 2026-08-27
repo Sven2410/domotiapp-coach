@@ -22,15 +22,27 @@ def schema_bijwerken(
     device_id: str,
     *,
     enabled: bool | None = None,
+    priority: str | None = None,
+    per_day: bool | None = None,
     window: dict[str, str] | None = None,
+    days: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Het schema van één apparaat bijwerken, en verder niets aanraken.
 
-    Los van de handler eronder zodat er een proef op kan zonder een draaiende
-    Home Assistant. Wat hier telt is wat er níét gebeurt: de schema's van andere
-    apparaten blijven staan, en `days` en `per_day` worden nooit aangeraakt.
-    Een kaart die per dag ingestelde tijden zou vereenvoudigen tot één rij,
-    schrijft met één tikje de zaterdag over de zondag heen.
+    Sinds 27-08-2026 staat het schema van een apparaat niet meer in Strategie
+    maar op zijn eigen kaart: de schuif en de voorrang op de kaart zelf, de
+    tijden in een pop-up erachter. Alles wat over één apparaat gaat komt dus
+    langs hier.
+
+    Los van de handler in websocket.py zodat er een proef op kan zonder een
+    draaiende Home Assistant. Wat hier telt is wat er níét gebeurt: alleen het
+    genoemde apparaat verandert, alleen de meegestuurde velden veranderen, en
+    het meegegeven `strategy` blijft zoals het was.
+
+    `window` en `days` staan bewust naast elkaar in de opslag, ook als er maar
+    één van de twee gebruikt wordt. Wie overstapt naar per dag en zich bedenkt,
+    vindt zijn oude tijden dan nog staan; weggooien wat er niet gebruikt wordt
+    zou dat kosten zonder dat het iets oplevert.
     """
     uit = dict(strategy or {})
     schedules = [
@@ -39,18 +51,22 @@ def schema_bijwerken(
 
     entry = next((row for row in schedules if row.get("device") == device_id), None)
     if entry is None:
-        # Nog nooit iets ingesteld voor dit apparaat. Dan is de schuif zelf het
-        # eerste wat eraan gebeurt, en hoort er een schema te ontstaan.
+        # Nog nooit iets ingesteld voor dit apparaat. Dan is de schuif of de
+        # pop-up het eerste wat eraan gebeurt, en hoort er een schema te
+        # ontstaan.
         entry = {"device": device_id, "enabled": False, "per_day": False}
         schedules.append(entry)
 
     if enabled is not None:
         entry["enabled"] = bool(enabled)
-
-    # Alleen bij een schema dat elke dag hetzelfde is; anders staan de tijden in
-    # `days` en zou dit ze stilzwijgend buitenspel zetten.
-    if window is not None and not entry.get("per_day"):
+    if priority is not None:
+        entry["priority"] = priority
+    if per_day is not None:
+        entry["per_day"] = bool(per_day)
+    if window is not None:
         entry["window"] = dict(window)
+    if days is not None:
+        entry["days"] = [dict(day) for day in days]
 
     uit["schedules"] = schedules
     return uit
