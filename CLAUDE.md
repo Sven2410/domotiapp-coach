@@ -154,6 +154,29 @@ python tools/logboek.py 2026-08-29T06:00             # tijdlijn uit de recorder
 python tools/besluiten.py                            # live meeluisteren
 ```
 
+### Eén sessie kijkt naar één installatie
+
+**De installatie waarop de sessie gestart is, is de installatie waar het over
+gaat.** Vraagt Sven naar "mijn laadpaal" terwijl de sessie op een klant staat,
+dan bedoelt hij de laadpaal van die klant, want daar is hij mee bezig. Ga daar
+niet zelf van afwijken, en kijk er nooit "even ook" naast bij een andere
+installatie om te vergelijken.
+
+Daar hoort dit bij:
+
+- **Zet `HA_INSTALLATIE` niet zelf om** en gebruik geen `HA_TOKEN_FILE` om er
+  omheen te gaan. `start.sh` zet `HA_VAST=1`, en dan weigert `ha.py` allebei met
+  een uitleg. Wil Sven uitdrukkelijk twee installaties vergelijken, dan mag
+  `HA_VAST=0` ervoor, en zeg er dan bij dat je dat doet.
+- **De entiteit-id's in de privénotities zijn die van Svens eigen huis.** Bij een
+  klant heten ze anders. Zoek ze op met `/api/states` of via `logboek.py`, die
+  het aan het paneel zelf vraagt, in plaats van ze aan te nemen.
+- Klopt de installatie niet met wat Sven wil, zeg dat dan en laat hem de sessie
+  opnieuw starten. Stiekem omschakelen is erger dan een ronde vertraging.
+
+Dit staat hier omdat het op 27-08-2026 misging: een sessie was op een klant
+gestart en las toch Svens eigen laadpaal uit.
+
 **Welke installatie het is, moet altijd zichtbaar zijn.** Elk stuk gereedschap
 dat `ha` importeert schrijft daarom één regel naar stderr:
 
