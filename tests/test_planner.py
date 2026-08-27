@@ -726,6 +726,75 @@ d = vast_besluit(dt.datetime(2026, 8, 20, 18, 48))
 controle("'s avonds is er niets veranderd",
          not d.charge and d.rule == "wait-for-sun", d.rule)
 
+print("=== 33. de trage meter van de paal kost geen ampere meer ===")
+# Svens meting van 20-08-2026. Hij zette snelladen aan, de coach schreef 16 A,
+# de paal trok op, en de fasemeting van het huis stond al op 16 terwijl de paal
+# zelf nog 2,7 A meldde. Die 13,3 A werd aan het huis toegerekend terwijl het de
+# auto zelf was, en er kwam 8 A uit. Een ronde later klopte het.
+#
+# Goedgekeurd op 26-08-2026 met de voorwaarde erbij: repareren door af te
+# trekken wat de coach zelf gevraagd heeft, nooit door de marge te verkleinen.
+OPTREKKEN = Grid(surplus_w=0.0, phase_amps=[16.0, 3.0, 3.0], fuse_amps=25.0,
+                 charger_amps=2.7, margin_amps=3.0)
+VRAAGT_16 = Charger(max_amps=16.0, connected=True, charging=True,
+                    actual_amps=2.7, limit_amps=16.0, boost=True)
+LEEG = Car(capacity_kwh=77.0, phases=1, phases_certain=True, soc_percent=20.0)
+
+controle("de coach ziet dat de meter achterloopt",
+         planner.meter_loopt_achter(OPTREKKEN, VRAAGT_16))
+plafond = planner.ceiling_amps(OPTREKKEN, LEEG, VRAAGT_16)
+print(f"  paal meet 2,7 A terwijl L1 op 16 staat  plafond: {plafond} A")
+controle("hij zakt niet meer naar 8 A", plafond == 16, f"{plafond} A")
+controle("en zegt niet dat het de zekering is",
+         not planner.fuse_limited(OPTREKKEN, LEEG, VRAAGT_16))
+
+# De marge is onaangeroerd gebleven. Dat is de voorwaarde, dus die hoort
+# vastgelegd te zijn en niet aangenomen.
+controle("de marge is niet verkleind",
+         planner.fuse_margin(OPTREKKEN) == 3.0, planner.fuse_margin(OPTREKKEN))
+
+# De veiligheidsrail: zolang de meter achterloopt is een deel van de som een
+# aanname, en daarop mag er nooit meer gevraagd worden dan er al gevraagd was.
+# Hier zou de kale som 22 A toestaan; dat mag niet, want die 22 is nergens op
+# gemeten.
+KLEIN_GEVRAAGD = Charger(max_amps=32.0, connected=True, charging=True,
+                         actual_amps=2.7, limit_amps=10.0)
+plafond = planner.ceiling_amps(OPTREKKEN, Car(capacity_kwh=77.0, phases=1), KLEIN_GEVRAAGD)
+print(f"  gevraagd 10 A, kale som zou 22 A geven  plafond: {plafond} A")
+controle("de correctie schroeft nooit op", plafond == 10, f"{plafond} A")
+
+# Zodra de meter bij is verandert er niets meer: dan is het weer de gewone som,
+# en een huis dat werkelijk zwaarder wordt drukt het plafond gewoon omlaag.
+BIJ = Grid(surplus_w=0.0, phase_amps=[16.0, 3.0, 3.0], fuse_amps=25.0,
+           charger_amps=16.0, margin_amps=3.0)
+MEET_16 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=16.0,
+                  limit_amps=16.0)
+controle("bijgelopen meter geeft geen correctie meer",
+         not planner.meter_loopt_achter(BIJ, MEET_16))
+controle("en dan is het plafond weer de gewone som",
+         planner.ceiling_amps(BIJ, LEEG, MEET_16) == 16)
+
+ZWAARDER = Grid(surplus_w=0.0, phase_amps=[28.0, 3.0, 3.0], fuse_amps=25.0,
+                charger_amps=16.0, margin_amps=3.0)
+zakt = planner.ceiling_amps(ZWAARDER, LEEG, MEET_16)
+print(f"  huis trekt er 12 A bij, paal meet mee  plafond: {zakt} A")
+controle("een zwaarder huis drukt het plafond nog steeds omlaag", zakt == 10, f"{zakt} A")
+
+# Zonder de sensor die de staande limiet teruggeeft is er niets om mee te
+# vergelijken, en dan blijft het precies zoals het was. Geen stilzwijgende
+# aanname bij een merk dat dit niet meldt.
+GEEN_SENSOR = Charger(max_amps=16.0, connected=True, charging=True,
+                      actual_amps=2.7, limit_amps=None)
+controle("zonder de limietsensor verandert er niets, dus 8 A zoals op 20-08",
+         planner.ceiling_amps(OPTREKKEN, LEEG, GEEN_SENSOR) == 8,
+         f"{planner.ceiling_amps(OPTREKKEN, LEEG, GEEN_SENSOR)} A")
+
+# En een paal die stilstaat trekt niet op, dus daar valt niets te corrigeren.
+STILSTAAND = Charger(max_amps=16.0, connected=True, charging=False,
+                     actual_amps=0.0, limit_amps=16.0)
+controle("een stilstaande paal krijgt geen correctie",
+         not planner.meter_loopt_achter(OPTREKKEN, STILSTAAND))
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

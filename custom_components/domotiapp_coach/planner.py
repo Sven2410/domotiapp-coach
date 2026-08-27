@@ -343,6 +343,40 @@ def watts_for(amps: float, phases: int) -> float:
     return amps * VOLTS * max(1, phases)
 
 
+def meter_loopt_achter(grid: Grid, charger: Charger) -> bool:
+    """Of de eigen meter van de paal nog niet bij is met wat er gevraagd is.
+
+    Wat er bij Sven op 20-08-2026 misging. Hij zette snelladen aan, de coach
+    schreef 16 A, de paal trok op, en de fasemeting van het huis stond al op 16
+    terwijl de paal zelf nog 2,7 A meldde. Het verschil van 13,3 A werd toen aan
+    het huis toegerekend terwijl het de auto zelf was, en er kwam 8 A uit. Een
+    ronde later klopte het weer.
+
+    Alleen waar terwijl de paal optrekt: er is meer gevraagd dan hij zegt af te
+    nemen, en dat verschil is groter dan een stap. Zonder de sensor die de
+    staande limiet teruggeeft is er niets om mee te vergelijken, en dan blijft
+    het zoals het was.
+    """
+    if not charger.charging or charger.limit_amps is None:
+        return False
+    return charger.limit_amps - grid.charger_amps > STEP_AMPS
+
+
+def charger_share(grid: Grid, charger: Charger) -> float:
+    """Hoeveel ampère van de zwaarste fase van de laadpaal zelf is.
+
+    Normaal is dat gewoon wat de paal meet. Loopt zijn meter achter, dan telt
+    wat de coach zelf gevraagd heeft, want dat is het enige getal waarvan hij
+    zeker weet dat het niet van het huis komt. Nooit meer dan er op die fase
+    werkelijk loopt: meer aan de paal toerekenen dan er stroomt zou het huis
+    stroom teruggeven die er niet is.
+    """
+    if not meter_loopt_achter(grid, charger):
+        return grid.charger_amps
+    zwaarste = max(grid.phase_amps) if grid.phase_amps else 0.0
+    return max(grid.charger_amps, min(charger.limit_amps, zwaarste))
+
+
 def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
     """The most this charger may draw right now, whatever the reason to charge.
 
@@ -357,10 +391,20 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
         limits.append(car.max_amps)
 
     if grid.phase_amps:
-        household = max(grid.phase_amps) - grid.charger_amps
-        limits.append(
+        household = max(grid.phase_amps) - charger_share(grid, charger)
+        ruimte = (
             grid.fuse_amps - max(0.0, household) - fuse_margin(grid) - grid.reserved_amps
         )
+        if meter_loopt_achter(grid, charger):
+            # De veiligheidsrail. Zolang de meter achterloopt is een deel van
+            # deze som een aanname, en op een aanname mag er nooit méér gevraagd
+            # worden dan er al gevraagd wás. Zo kan de correctie een onnodige
+            # stap terug voorkomen, maar nooit een stap vooruit rechtvaardigen;
+            # opschroeven wacht tot de paal het zelf bevestigt, en dat is één
+            # ronde later. De marge blijft dus onaangeroerd, zoals afgesproken
+            # met Sven op 26-08-2026.
+            ruimte = min(ruimte, charger.limit_amps)
+        limits.append(ruimte)
 
     return int(max(0, min(limits)))
 
@@ -375,7 +419,7 @@ def fuse_limited(grid: Grid, car: Car, charger: Charger) -> bool:
     """
     if not grid.phase_amps:
         return False
-    household = max(0.0, max(grid.phase_amps) - grid.charger_amps)
+    household = max(0.0, max(grid.phase_amps) - charger_share(grid, charger))
     room = grid.fuse_amps - household - fuse_margin(grid) - grid.reserved_amps
     hardware = [charger.max_amps] + ([car.max_amps] if car.max_amps else [])
     return room < min(hardware)
