@@ -116,6 +116,18 @@ NO_WRITE_RULES = frozenset({"disconnected", "complete"})
 # oud is.
 SOC_SETTLE = timedelta(minutes=3)
 
+# Hoe vaak de waarschuwing terugkomt dat een eigen pauze de klaar-tijd gaat
+# kosten. Sven op 26-08-2026: de pauze zelf blijft winnen, want het is zijn huis
+# en zijn knop, maar één keer waarschuwen is te weinig. Wie het bericht om elf
+# uur 's avonds wegveegt en om zeven uur naar een lege auto loopt, is niet
+# geholpen.
+#
+# Een uur, en dat is een keuze van mij en niet een meting: kort genoeg om er nog
+# iets aan te kunnen doen, lang genoeg om geen gezeur te worden. Hij komt alleen
+# terug zolang het risico er werkelijk is, en houdt dus vanzelf op zodra de
+# pauze eraf gaat, de klaar-tijd verzet wordt of de kabel eruit komt.
+PAUSE_WARN_AGAIN = timedelta(hours=1)
+
 # Hoe lang een ronde hoogstens mag duren. Ruim boven wat hij nodig heeft (de
 # bevestiging van een limiet duurt hooguit een seconde of vijftien per apparaat)
 # en ruim onder de ronde zelf, zodat een vastgelopen opdracht de coach niet stil
@@ -255,9 +267,11 @@ class ChargerCoach:
         # Of de knoppen van de bewoner al teruggehaald zijn uit de opslag. Eén
         # keer per opstart, bij de eerste ronde.
         self._restored = False
-        # Wie er al gewaarschuwd is dat zijn eigen pauze de klaar-tijd kost. Eén
-        # keer per sessie, net als de vraag om een accustand.
-        self._warned: set[str] = set()
+        # Wanneer er voor het laatst gewaarschuwd is dat een eigen pauze de
+        # klaar-tijd gaat kosten, per apparaat. Een moment en geen vinkje, want
+        # deze waarschuwing komt terug zolang het risico er is; zie
+        # `PAUSE_WARN_AGAIN`.
+        self._warned: dict[str, datetime] = {}
         # Wie er al gewezen is op een laderlimiet die zijn laadbeurten op één
         # fase zet. Ook één keer per sessie: het is een instelling in de app van
         # de paal, en die verandert niet doordat je het twee keer zegt.
@@ -727,7 +741,7 @@ class ChargerCoach:
             self._deadline_for.pop(device_id, None)
             self._te_laat.discard(device_id)
             self._soc_asked.discard(device_id)
-            self._warned.discard(device_id)
+            self._warned.pop(device_id, None)
             self._getipt.discard(device_id)
             # Wat er over deze sessie bewaard is gaat mee weg. Een opgegeven
             # accustand hoort bij de auto die eraan hing: blijft die staan, dan
@@ -770,8 +784,16 @@ class ChargerCoach:
             self._getipt.add(device_id)
             await self._async_tell(f"{device.get('name') or 'De laadpaal'}: {tip}")
 
-        if decision.deadline_risk and device_id not in self._warned:
-            self._warned.add(device_id)
+        # De pauze van de bewoner wint, ook van de klaar-tijd: het is zijn huis
+        # en zijn knop. Maar de waarschuwing komt terug zolang het risico er is,
+        # want één keer is te weinig om een lege auto mee te voorkomen.
+        # Verdwijnt het risico, dan vervalt de klok en begint hij bij een
+        # volgende keer weer opnieuw.
+        gewaarschuwd = self._warned.get(device_id)
+        if not decision.deadline_risk:
+            self._warned.pop(device_id, None)
+        elif gewaarschuwd is None or now - gewaarschuwd >= PAUSE_WARN_AGAIN:
+            self._warned[device_id] = now
             await self._async_tell(
                 f"De pauze op {device.get('name') or 'de laadpaal'} staat nog aan, en zo "
                 "is de auto niet op tijd vol. Hervat het laden of verzet je klaar-tijd."

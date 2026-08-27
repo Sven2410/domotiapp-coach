@@ -1005,6 +1005,66 @@ print(f"  vol en daarna de kabel eruit: {[d[2]['message'] for d in daarna if d[0
 controle("en daarna geen tweede over dezelfde beurt",
          not [d for d in daarna if d[0] == "notify"], f"{daarna}")
 
+print("=== 23. de waarschuwing bij een eigen pauze komt terug ===")
+# Sven op 26-08-2026: de pauze zelf blijft winnen van de klaar-tijd, want het is
+# zijn huis en zijn knop. Maar één keer waarschuwen is te weinig. Wie het
+# bericht om elf uur 's avonds wegveegt en om zeven uur naar een lege auto
+# loopt, is niet geholpen.
+krap = instellingen()
+krap["strategy"]["schedules"][0]["window"]["done_by"] = "06:00"
+krap["car_soc"] = [{"device": "dev-laadpaal", "car": "car-1", "percent": 10.0,
+                    "meter": 100.0}]
+hass23, _, coach23 = bouw(huis(status="charging", stroom=13.5, vermogen=3070.0,
+                               teruglevering=0.0, afname=1800.0), krap)
+coach23.async_pause("dev-laadpaal", True)
+
+
+def pauzeronde(uur, minuut):
+    """De meldingen over de pauze uit één ronde.
+
+    Alleen die over de pauze, en dat is met opzet. `async_pause` zet niet
+    alleen de knop om maar draait ook meteen zelf een ronde, en die gebruikt de
+    échte klok van de machine in plaats van het tijdstip uit deze proef. Wat
+    die ronde verstuurt komt pas boven water bij de eerstvolgende `ronde()`
+    hieronder, want die wacht de lopende taken af nadat hij de lijst geleegd
+    heeft. Er kan dus een verslag tussen zitten dat over een heel andere dag
+    gaat. Dat is een eigenaardigheid van het harnas en niet van de coach; het
+    kostte op 27-08-2026 een halfuur om dat vast te stellen.
+    """
+    _, verstuurd = asyncio.run(
+        ronde(coach23, krap, nu=dt.datetime(2026, 8, 21, uur, minuut))
+    )
+    return [d[2]["message"] for d in verstuurd
+            if d[0] == "notify" and "De pauze op" in d[2]["message"]]
+
+
+eerste = pauzeronde(2, 0)
+print(f"  02:00  {eerste}")
+controle("hij waarschuwt dat de pauze de klaar-tijd kost",
+         any("pauze" in m and "niet op tijd vol" in m for m in eerste), f"{eerste}")
+controle("en blijft gepauzeerd, want het is zijn knop",
+         coach23.state["dev-laadpaal"]["rule"] == "user-hold",
+         coach23.state["dev-laadpaal"]["rule"])
+
+# Binnen het uur niet nog een keer: dat is zeuren, en wie gezeurd wordt zet zijn
+# meldingen uit.
+binnen_het_uur = pauzeronde(2, 30)
+controle("binnen het uur zwijgt hij", not binnen_het_uur, f"{binnen_het_uur}")
+
+# Maar een uur later wel, want het risico staat er nog steeds.
+later = pauzeronde(3, 1)
+print(f"  03:01  {later}")
+controle("een uur later komt hij terug",
+         any("pauze" in m and "niet op tijd vol" in m for m in later), f"{later}")
+
+# En zodra de pauze eraf gaat houdt het vanzelf op.
+coach23.async_pause("dev-laadpaal", False)
+na_pauze = pauzeronde(4, 30)
+print(f"  na het hervatten  {na_pauze}")
+controle("zonder pauze geen pauzewaarschuwing meer", not na_pauze, f"{na_pauze}")
+controle("en de klok is vergeten, dus een volgende keer begint opnieuw",
+         "dev-laadpaal" not in coach23._warned, f"{coach23._warned}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
