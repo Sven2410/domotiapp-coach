@@ -730,7 +730,6 @@ DacViewStrategy.css = /* css */ `
   .time-field .wipe .icon { width: 13px; height: 13px; }
 
   .plan-days { display: grid; gap: 10px; }
-  .plan-days[hidden], #klaar-same[hidden] { display: none; }
   .plan-day {
     padding: 12px 14px 14px;
     border-radius: var(--dac-radius-sm);

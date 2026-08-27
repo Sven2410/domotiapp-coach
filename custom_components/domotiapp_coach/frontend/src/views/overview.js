@@ -2041,7 +2041,7 @@ class DacViewOverview extends DacElement {
               </div>
               <p class="plan-note" data-plan-note="${slot}"></p>
               <label class="plan-prio" data-plan-prio-row="${slot}">
-                <span>Wie gaat voor?</span>
+                <span>Prioriteit</span>
                 <select data-plan-prio="${slot}">
                   ${PRIORITIES.map(
                     (item) => `<option value="${item.key}">${item.label}</option>`

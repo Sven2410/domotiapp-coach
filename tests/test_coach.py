@@ -139,8 +139,20 @@ def controle(naam, gelukt, uitleg=""):
 
 
 class Staat:
+    """Een toestand, met attributen als de proef die nodig heeft.
+
+    Een gewone waarde blijft een string, zoals overal hierboven. Een prijslijst
+    zit bij Home Assistant in de attributen en niet in de toestand zelf, en
+    daarvoor mag een waarde ook een dict zijn met `state` en `attributes`.
+    """
+
     def __init__(self, waarde):
-        self.state = waarde
+        if isinstance(waarde, dict):
+            self.state = waarde.get("state", "")
+            self.attributes = dict(waarde.get("attributes") or {})
+        else:
+            self.state = waarde
+            self.attributes = {}
 
 
 class Staten:
@@ -1212,6 +1224,85 @@ GEEN = dict(LAADPAAL, energy_entity="",
                       if k != "lifetime_energy"})
 controle("zonder enige teller geeft hij niets terug in plaats van om te vallen",
          coach25b._teller(GEEN) is None, f"{coach25b._teller(GEEN)}")
+
+print("=== 26. wat teruglevering opbrengt bij salderen ===")
+# Uit Svens eigen nota van Frank, nagerekend op 27-08-2026. Wat er op de
+# factuur staat zijn kale commodityprijzen; de energiebelasting staat als vast
+# maandbedrag apart, geheven over het gesaldeerde jaarvolume. Daaruit volgt dat
+# de belasting bij teruglevering wegstreept tegen die bij afname.
+#
+# De opslag van de leverancier doet dat niet: die betaal je per ingekochte kWh
+# en krijg je nergens terug. Zonder die aftrek stond de terugleveropbrengst er
+# ruim twee cent te hoog in.
+#
+# Thuis bij Sven: vast contract, salderen aan. Bij de klant: dynamisch,
+# salderen tot 1 januari 2027.
+
+VOOR_2027 = dt.datetime(2026, 8, 27, 12, 0)
+NA_2027 = dt.datetime(2027, 1, 1, 12, 0)
+
+
+def klok(moment):
+    """dt_util.utcnow van het harnas laten wijzen waar de proef wil."""
+    return moment
+
+
+# --- het vaste contract van Sven -----------------------------------------
+VAST = {
+    "type": "fixed",
+    "netting": True,
+    "fixed": {"all_in_price": 0.24171, "feed_in_tariff": 0.0721,
+              "feed_in_costs": 0.052756},
+}
+tar = coachmod.ChargerCoach._tariff({"contract": VAST})
+print(f"  vast, salderen aan: koop {tar.buy}, terug {tar.feed_in:.4f}")
+controle("bij salderen is teruglevering de inkoopprijs min de kosten",
+         abs(tar.feed_in - (0.24171 - 0.052756)) < 1e-9, f"{tar.feed_in}")
+
+zonder = coachmod.ChargerCoach._tariff({"contract": dict(VAST, netting=False)})
+controle("zonder salderen is het de terugleververgoeding min de kosten",
+         abs(zonder.feed_in - (0.0721 - 0.052756)) < 1e-9, f"{zonder.feed_in}")
+print(f"  verschil voor Sven: {tar.feed_in - zonder.feed_in:.4f} euro per kWh")
+
+# --- het dynamische contract van de klant --------------------------------
+DYN = {
+    "type": "dynamic",
+    "netting": True,
+    "dynamic": {"source": "all_in", "interval": "hour",
+                "all_in_entity": "sensor.prijs", "market_entity": "sensor.markt",
+                "energy_tax": 0.1088, "supplier_markup": 0.02, "vat_percent": 21.0,
+                "feed_in_costs": 0.0},
+}
+controle("op 27-08-2026 wordt er nog gesaldeerd",
+         coachmod.ChargerCoach._salderen(DYN, VOOR_2027) is True)
+controle("op 1 januari 2027 niet meer, ook al staat het vinkje aan",
+         coachmod.ChargerCoach._salderen(DYN, NA_2027) is False)
+controle("en zonder vinkje sowieso niet",
+         coachmod.ChargerCoach._salderen(dict(DYN, netting=False), VOOR_2027) is False)
+
+# En dan de prijslijst zelf, want dat is de code die veranderd is. Eén blok van
+# een uur, met een all-in prijs van 30 cent.
+PRIJSLIJST = {
+    "state": "0.30",
+    "attributes": {"prices": [
+        {"from": "2026-08-27T12:00:00+02:00", "till": "2026-08-27T13:00:00+02:00",
+         "price": 0.30},
+    ]},
+}
+hass26, _, coach26 = bouw({"sensor.prijs": PRIJSLIJST}, instellingen())
+
+rijen = coach26._prices({"contract": DYN})
+print(f"  prijslijst bij salderen: koop {rijen[0]['price']}, terug {rijen[0]['feed_in']:.4f}")
+controle("de inkoopprijs blijft de all-in prijs", rijen[0]["price"] == 0.30, f"{rijen[0]}")
+controle("en teruglevering is die prijs min de opslag met btw",
+         abs(rijen[0]["feed_in"] - (0.30 - 0.0242)) < 1e-9, f"{rijen[0]}")
+
+# Zonder opslag ingevuld verandert er niets, dus wie dat veld leeg laat krijgt
+# geen aftrek uit de lucht.
+geen_opslag = {"contract": dict(DYN, dynamic=dict(DYN["dynamic"], supplier_markup=0))}
+controle("zonder opslag is teruglevering de hele inkoopprijs",
+         abs(coach26._prices(geen_opslag)[0]["feed_in"] - 0.30) < 1e-9,
+         f"{coach26._prices(geen_opslag)[0]}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
