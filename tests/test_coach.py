@@ -559,16 +559,18 @@ def zes_rondes(vanaf_uur, vanaf_minuut):
     return regels
 
 
-vroeg = zes_rondes(16, 45)
-print("  16:45  " + "  ".join(f"{r}:{a}A" for r, a in vroeg))
-controle("om kwart voor vijf blijft hij op de zon",
+# Klaar om 19:00 is een klaar-tijd overdag, en die krijgt sinds 27-08-2026 een
+# uur speling in plaats van een kwartier (proef 32 in test_planner.py). De
+# tijden hieronder zijn daarop gezet: er moet 4,4 kWh in, op 14 A eenfasig duurt
+# dat 1,36 uur, dus met het uur erbij is 16:38 het laatste moment dat nog past.
+vroeg = zes_rondes(15, 30)
+print("  15:30  " + "  ".join(f"{r}:{a}A" for r, a in vroeg))
+controle("ruim op tijd blijft hij op de zon",
          all(naam == "surplus" for naam, _ in vroeg), f"{vroeg}")
 
-# En op het laatste moment dat nog past grijpt hij wél in. Er moet 4,4 kWh in,
-# op 14 A eenfasig duurt dat 1,36 uur, dus vanaf ongeveer 17:24 is er geen
-# ruimte meer om op een wolk te wachten.
-laatst = zes_rondes(17, 22)
-print("  17:22  " + "  ".join(f"{r}:{a}A" for r, a in laatst))
+# En op het laatste moment dat nog past grijpt hij wél in.
+laatst = zes_rondes(16, 45)
+print("  16:45  " + "  ".join(f"{r}:{a}A" for r, a in laatst))
 namen = [r for r, _ in laatst]
 controle("op het laatste moment gaat hij vol", "deadline" in namen, f"{laatst}")
 vanaf = namen.index("deadline")
@@ -581,7 +583,7 @@ controle("en valt daarna niet meer terug",
 echte = planner.throttled_by_coach
 planner.throttled_by_coach = lambda charger: False
 try:
-    oud = zes_rondes(16, 45)
+    oud = zes_rondes(15, 30)
 finally:
     planner.throttled_by_coach = echte
 print("  zoals het was: " + "  ".join(f"{r}:{a}A" for r, a in oud))
@@ -590,7 +592,11 @@ controle("de proef vangt de fout ook echt",
 
 print("=== 15. hij vertelt hoe het afliep als de auto vol is ===")
 klaar = instellingen()
-klaar["strategy"]["schedules"][0]["window"]["done_by"] = "19:00"
+# Klaar om elf uur 's avonds en niet om zeven uur: het gaat hier om de zin die
+# vertelt waar de tijd bleef, en dan moet hij om vijf uur ook werkelijk staan te
+# wachten op de zon. Bij een klaar-tijd overdag valt vijf uur binnen het uur
+# speling en gaat hij vol vermogen, en dan is er geen wachttijd te melden.
+klaar["strategy"]["schedules"][0]["window"]["done_by"] = "23:00"
 klaar["car_soc"] = [{"device": "dev-laadpaal", "car": "car-1", "percent": 80.0,
                      "meter": 100.0}]
 waarden = huis(status="charging", stroom=13.5, vermogen=3070.0, teruglevering=0.0,

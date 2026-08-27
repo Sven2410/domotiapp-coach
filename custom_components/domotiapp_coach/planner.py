@@ -684,6 +684,14 @@ def _clock(moment: datetime) -> str:
 # kaart hem gebruikt, en die twee mogen nooit uit elkaar lopen.
 DEADLINE_SLACK_HOURS = 0.25
 
+# En hoeveel het er zijn bij een klaar-tijd overdag. Een kwartier is daar te
+# krap, en dat komt doordat de avondregel hieronder er niet bij helpt: die zet
+# een auto met een klaar-tijd 's nachts al om acht uur 's avonds aan, ruim voor
+# het laatste moment dat nog past. Overdag is er geen avond die erbij hoort, en
+# dan is dat kwartier het enige dat er tussen de auto en een gemiste afspraak
+# staat. Svens eigen getal, gevraagd en gegeven op 26-08-2026.
+DEADLINE_SLACK_DAY_HOURS = 1.0
+
 # Wanneer het huis tot rust komt. Bij een vast contract kost elk uur hetzelfde,
 # dus zodra de zon niets meer oplevert is er niets om nog langer op te wachten.
 # Wachten tot het laatste moment dat nog past levert dan geen cent op en laat
@@ -698,11 +706,25 @@ EVENING_START = time(20, 0)
 EVENING_NIGHT_HOURS = 12
 
 
+def _slack_hours(end: datetime | None) -> float:
+    """Hoeveel speling deze klaar-tijd hoort te krijgen.
+
+    Geen nieuw begrip: het hangt aan de avond die bij de klaar-tijd hoort, en
+    dat is precies dezelfde vraag die `_evening_before` hieronder beantwoordt.
+    Hoort er een avond bij, dan zet de avondregel de auto daar al aan en is een
+    kwartier genoeg. Hoort er geen avond bij, dan staat er niets tussen de auto
+    en een gemiste afspraak, en dan is het een uur.
+    """
+    if end is None:
+        return DEADLINE_SLACK_HOURS
+    return DEADLINE_SLACK_HOURS if _evening_before(end) else DEADLINE_SLACK_DAY_HOURS
+
+
 def _latest_start(end: datetime | None, needed: float | None) -> datetime | None:
     """Het moment waarop de coach uiterlijk begint om op tijd vol te zijn."""
     if end is None or needed is None:
         return None
-    return end - timedelta(hours=needed + DEADLINE_SLACK_HOURS)
+    return end - timedelta(hours=needed + _slack_hours(end))
 
 
 def _evening_before(end: datetime | None) -> datetime | None:
@@ -740,7 +762,7 @@ def _hold_until_start(now: datetime, end: datetime | None, needed: float | None)
     """
     if end is None:
         return MIN_HOLD_MINUTES
-    laatste = end - timedelta(hours=needed) if needed else end
+    laatste = _latest_start(end, needed) or end
     return _hold_until(now, laatste)
 
 
@@ -966,7 +988,7 @@ def _decide(
         krap = bool(
             eind
             and uren is not None
-            and (eind - now).total_seconds() / 3600 - uren <= DEADLINE_SLACK_HOURS
+            and (eind - now).total_seconds() / 3600 - uren <= _slack_hours(eind)
         )
         return Decision(
             False,
@@ -1075,7 +1097,7 @@ def _decide(
     # halverwege gas terugnemen zonder alsnog te laat te zijn.
     if window.enabled and end and needed is not None:
         slack = (end - now).total_seconds() / 3600 - needed
-        if slack <= DEADLINE_SLACK_HOURS or must_finish:
+        if slack <= _slack_hours(end) or must_finish:
             return Decision(
                 True,
                 ceiling,
@@ -1461,7 +1483,7 @@ def _zon_dekt_vandaag(
         return False
 
     over = (end - now).total_seconds() / 3600
-    return over >= needed + DEADLINE_SLACK_HOURS
+    return over >= needed + _slack_hours(end)
 
 
 def _beter_straks(
@@ -1495,7 +1517,7 @@ def _beter_straks(
 
     if end is not None and needed is not None:
         over = (end - now).total_seconds() / 3600 - 1.0
-        if over < needed + DEADLINE_SLACK_HOURS:
+        if over < needed + _slack_hours(end):
             return False
 
     return True

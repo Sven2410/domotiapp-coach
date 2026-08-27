@@ -666,6 +666,66 @@ d = ochtend_besluit(soc=30.0)
 controle("met accustand noemt hij beide getallen",
          "18,0 kWh" in d.reason and "15,3" in d.reason, d.reason)
 
+print("=== 32. een klaar-tijd overdag krijgt een uur speling ===")
+# Sven op 26-08-2026, zijn eigen getal. Een kwartier is te krap bij een
+# klaar-tijd overdag, en dat komt doordat de avondregel daar niet bij helpt:
+# die zet een auto met een klaar-tijd 's nachts al om acht uur 's avonds aan,
+# ruim voor het laatste moment dat nog past. Overdag is er geen avond die
+# erbij hoort, en dan is dat kwartier het enige vangnet.
+#
+# Het is bewust geen nieuw begrip: de vraag "hoort er een avond bij" is
+# dezelfde die `_evening_before` al beantwoordde.
+for uur, verwacht in ((6, 0.25), (8, 0.25), (12, 1.0), (19, 1.0), (21, 0.25), (23, 0.25)):
+    eind_ = dt.datetime(2026, 8, 20, uur, 0)
+    gekregen = planner._slack_hours(eind_)
+    controle(f"klaar om {uur:02d}:00 krijgt {verwacht} uur speling",
+             gekregen == verwacht, f"{gekregen} uur")
+
+# En dat komt ook werkelijk in het laatste startmoment terecht.
+controle("overdag begint hij een uur voor het krap wordt",
+         planner._latest_start(dt.datetime(2026, 8, 20, 19, 0), 2.0)
+         == dt.datetime(2026, 8, 20, 16, 0))
+controle("'s nachts blijft het een kwartier",
+         planner._latest_start(dt.datetime(2026, 8, 21, 6, 0), 2.0)
+         == dt.datetime(2026, 8, 21, 3, 45))
+
+# Zonder klaar-tijd valt er niets te rekenen, en dan hoort het kwartier te
+# blijven staan in plaats van dat er een uur uit de lucht komt vallen.
+controle("zonder klaar-tijd blijft het kwartier",
+         planner._slack_hours(None) == planner.DEADLINE_SLACK_HOURS)
+
+# Het vangnet voor het geval Home Assistant niet meer terugkomt hoorde volgens
+# zijn eigen uitleg al af te lopen op "het laatste moment dat nog past", maar
+# rekende zonder speling. Nu loopt hij gelijk met wat de coach zelf zou doen.
+minuten = planner._hold_until_start(
+    dt.datetime(2026, 8, 20, 12, 0), dt.datetime(2026, 8, 20, 18, 0), 2.0
+)
+controle("de pauze bij een onbekende accustand loopt af als de coach zou beginnen",
+         minuten == 180, f"{minuten} min")
+
+# En dan de sport zelf. De getallen zijn zo gekozen dat er 27 minuten over
+# blijven: meer dan een kwartier, dus onder de oude regel ging hij overdag nog
+# wachten, en minder dan een uur, dus nu grijpt de klaar-tijdregel in. Met een
+# ruimere marge zou deze proef niets bewijzen, want dan valt hij allebei de
+# kanten op hetzelfde uit.
+# Eigen net en paal, want die van hierboven geven een ander plafond en dan
+# valt de speling net buiten het bereik waar deze proef iets bewijst.
+GROTE_AUTO = Car(capacity_kwh=77.0, phases=3, phases_certain=True, soc_percent=80.0)
+RUIM_NET = Grid(surplus_w=0.0, phase_amps=[3.0, 2.0, 2.0], fuse_amps=25.0)
+RUIME_PAAL = Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.0)
+d = decide(dt.datetime(2026, 8, 20, 13, 0), [], RUIM_NET, GROTE_AUTO, RUIME_PAAL,
+           Window(enabled=True, opens=None, deadline=dt.datetime(2026, 8, 20, 15, 0)),
+           tariff=VAST, sun=ZON_RUIM)
+print(f"  klaar om 15:00 met 27 min over  {d.rule}: {d.amps} A")
+controle("overdag grijpt de klaar-tijd nu een uur eerder in",
+         d.charge and d.rule == "deadline", f"{d.rule} {d.amps} A")
+
+# Dezelfde krapte 's nachts verandert niet: daar blijft het kwartier gelden en
+# staat de avondregel er al boven.
+d = vast_besluit(dt.datetime(2026, 8, 20, 18, 48))
+controle("'s avonds is er niets veranderd",
+         not d.charge and d.rule == "wait-for-sun", d.rule)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
