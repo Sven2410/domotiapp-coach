@@ -34,7 +34,7 @@ from .const import (
     PRICE_INTERVAL_HOUR,
     PRICE_INTERVAL_QUARTER,
 )
-from .storage import async_get_store
+from .storage import async_get_store, schema_bijwerken
 
 
 def _schema(mapping: dict) -> vol.Schema:
@@ -383,6 +383,56 @@ async def async_set_strategy(
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): "domotiapp_coach/device/schedule",
+        vol.Required("device_id"): str,
+        vol.Optional("enabled"): bool,
+        # Alle drie de tijden tegelijk, en alleen bij een schema dat elke dag
+        # hetzelfde is. Alle drie, want `_WINDOW` vult een ontbrekende tijd aan
+        # met een lege string en dat wist hem: een half venster sturen zou de
+        # twee andere tijden weggooien. De kaart toont ze ook alle drie, dus er
+        # is niets dat maar één tijd zou willen sturen.
+        vol.Optional("window"): _schema(dict(_WINDOW)),
+    }
+)
+@websocket_api.async_response
+async def async_set_device_schedule(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Het schema van één apparaat, vanaf de kaart in Overzicht.
+
+    Hetzelfde vinkje als in Strategie, alleen op een tweede plek. Uit betekent
+    dat de coach zelf bepaalt wanneer er gedraaid wordt en puur naar het
+    gunstigste moment kijkt; `_days` in coach.py slaat een schema dat uit staat
+    over, waarna in planner.py de hele klaar-tijdtak vervalt.
+
+    Geen beheerderswerk, om dezelfde reden als de andere twee hierboven: wie
+    weet dat de vaatwasser vanavond klaar moet zijn, is degene die hem heeft
+    ingeruimd.
+
+    Eén apparaat en verder niets. De andere schema's blijven staan, en `days`
+    en `per_day` worden hier nooit aangeraakt: een kaart die per dag ingestelde
+    tijden zou vereenvoudigen tot één rij, schrijft met één tikje de zaterdag
+    over de zondag heen. De kaart toont daarom "per dag ingesteld" en wijst naar
+    Strategie. Om diezelfde reden wordt de nieuwe lijst hier uitgerekend en niet
+    door het paneel meegestuurd.
+    """
+    store = async_get_store(hass)
+    settings = await store.async_load()
+    strategy = schema_bijwerken(
+        settings.get("strategy"),
+        msg["device_id"],
+        enabled=msg.get("enabled"),
+        window=msg.get("window"),
+    )
+    settings = await store.async_save({"strategy": strategy})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], settings)
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): "domotiapp_coach/device/car",
         vol.Required("device_id"): str,
         vol.Required("car"): str,
@@ -632,6 +682,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_set_settings)
     websocket_api.async_register_command(hass, async_set_device_ready)
     websocket_api.async_register_command(hass, async_set_strategy)
+    websocket_api.async_register_command(hass, async_set_device_schedule)
     websocket_api.async_register_command(hass, async_set_active_car)
     websocket_api.async_register_command(hass, async_set_car_soc)
     websocket_api.async_register_command(hass, async_coach_state)

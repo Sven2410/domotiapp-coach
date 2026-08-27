@@ -16,6 +16,7 @@ import { icons } from "../icons.js";
 import {
   DISHWASHER_PROGRAM_VALUES,
   canCommand,
+  canHaveDeadline,
   carsFor,
   deviceCommands,
   deviceLabel,
@@ -629,6 +630,103 @@ class DacViewOverview extends DacElement {
     }
     .soc-row .soc-save:hover { border-color: var(--dac-accent-hi); }
     .soc-hint { margin: 0; font-size: 12px; color: var(--dac-ink-2); }
+
+    /* Het schema van dit apparaat, met de schuif die het in zijn geheel aan en
+       uit zet. Boven een streep, want het gaat over morgen en de rest van de
+       kaart over nu. */
+    .plan-pick {
+      flex: 1 1 100%;
+      display: grid; gap: 10px;
+      margin: 14px 0 0; padding-top: 13px;
+      border-top: 1px solid var(--dac-border);
+    }
+    .plan-pick[hidden] { display: none; }
+    .plan-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 10px; min-width: 0;
+    }
+    .plan-head .plan-title { font-size: 12.5px; font-weight: 600; color: var(--dac-ink-2); }
+
+    /* Een knop en geen checkbox: een echte checkbox is per browser anders
+       opgemaakt en die van iOS negeert de helft van wat hier staat. */
+    /* Twee klassen diep, net als bij .soc-save hierboven: anders wint de regel
+       voor knoppen in steer-actions met zijn flex 1 1 170px en wordt de schuif
+       zo breed als de kaart. */
+    .plan-pick .plan-toggle {
+      flex: 0 0 auto;
+      width: 46px; min-width: 46px; height: 27px; padding: 0;
+      border-radius: var(--dac-radius-pill);
+      border: 1px solid var(--dac-border-hi);
+      background: rgba(255,255,255,0.04);
+      cursor: pointer;
+      position: relative;
+      transition: background 120ms linear, border-color 120ms linear;
+    }
+    .plan-toggle .knob {
+      position: absolute; top: 3px; left: 3px;
+      width: 19px; height: 19px;
+      border-radius: 50%;
+      background: var(--dac-ink-3);
+      transition: transform 120ms linear, background 120ms linear;
+    }
+    .plan-toggle[aria-checked="true"] {
+      background: var(--dac-accent-soft);
+      border-color: rgba(25,143,217,0.55);
+    }
+    .plan-toggle[aria-checked="true"] .knob {
+      transform: translateX(19px);
+      background: var(--dac-accent-hi);
+    }
+    .plan-toggle:disabled { opacity: 0.4; cursor: default; }
+
+    .plan-times { display: grid; gap: 8px; }
+    .plan-times[hidden] { display: none; }
+    /* Op 280 px past een label niet meer naast een tijdveld en hoort het
+       eronder te gaan staan in plaats van de kaart breder te maken. De
+       ondergrenzen op de tekst en het veld staan er zodat alle drie de rijen
+       tegelijk afbreken: zonder die op de tekst bleef "Klaar om" naast zijn
+       veld staan terwijl "Uiterlijk starten" eronder sprong, en dan staan er
+       drie rijen die niet op elkaar lijken. */
+    .plan-times label {
+      display: flex; flex-wrap: wrap; align-items: center;
+      justify-content: space-between; gap: 6px 10px;
+      font-size: 12.5px; color: var(--dac-ink-2);
+    }
+    .plan-times label span { flex: 1 1 84px; min-width: 84px; }
+    .plan-times input[type="time"] {
+      flex: 0 1 118px; min-width: 110px; max-width: 150px;
+      min-height: 40px;
+      padding: 8px 10px;
+      border-radius: var(--dac-radius-sm);
+      border: 1px solid var(--dac-border-hi);
+      background: rgba(255,255,255,0.04);
+      color: var(--dac-ink);
+      font: inherit; font-size: 14px;
+      font-variant-numeric: tabular-nums;
+    }
+    @media (pointer: coarse) { .plan-times input[type="time"] { font-size: 16px; } }
+    @supports (-webkit-touch-callout: none) {
+      .plan-times input[type="time"] { font-size: 16px; }
+    }
+
+    .plan-note { margin: 0; font-size: 12px; color: var(--dac-ink-2); }
+    .plan-note[hidden] { display: none; }
+    /* Twee klassen diep, anders wint de regel voor knoppen in steer-actions
+       en wordt deze knop even breed als de kaart. */
+    .plan-pick .plan-link {
+      justify-self: start;
+      flex: 0 0 auto;
+      min-height: 40px;
+      padding: 8px 14px;
+      border-radius: var(--dac-radius-pill);
+      border: 1px solid var(--dac-border-hi);
+      background: var(--dac-surface-hi);
+      color: var(--dac-ink);
+      font: inherit; font-size: 13px; font-weight: 500;
+      cursor: pointer;
+    }
+    .plan-pick .plan-link:hover { border-color: var(--dac-accent-hi); }
+    .plan-link[hidden] { display: none; }
     @media (pointer: coarse) { .soc-input { font-size: 16px; } }
     @supports (-webkit-touch-callout: none) { .soc-input { font-size: 16px; } }
 
@@ -1935,6 +2033,30 @@ class DacViewOverview extends DacElement {
               </div>
               <p class="soc-hint" data-soc-hint="${slot}"></p>
             </div>
+            <div class="plan-pick" data-plan="${slot}" hidden>
+              <div class="plan-head">
+                <span class="plan-title" id="plan-title-${slot}">Schema</span>
+                <button type="button" class="plan-toggle" role="switch" aria-checked="false"
+                        aria-labelledby="plan-title-${slot}" data-plan-toggle="${slot}">
+                  <span class="knob"></span>
+                </button>
+              </div>
+              <div class="plan-times" data-plan-times="${slot}">
+                <label><span>Niet voor</span>
+                  <input type="time" data-plan-time="${slot}:not_before">
+                </label>
+                <label><span>Uiterlijk starten</span>
+                  <input type="time" data-plan-time="${slot}:start_by">
+                </label>
+                <label><span>Klaar om</span>
+                  <input type="time" data-plan-time="${slot}:done_by">
+                </label>
+              </div>
+              <p class="plan-note" data-plan-note="${slot}" hidden></p>
+              <button type="button" class="plan-link" data-plan-link="${slot}" hidden>
+                Openen in Strategie
+              </button>
+            </div>
             <button class="release" type="button" data-release="${slot}" aria-pressed="false">
               <span class="mark" data-mark="${slot}"></span>
               <span data-release-text="${slot}"></span>
@@ -1975,6 +2097,22 @@ class DacViewOverview extends DacElement {
       field.addEventListener("keydown", (event) => {
         if (event.key === "Enter") this.saveSoc_(Number(field.dataset.socInput));
       });
+    }
+    for (const button of this.$$("[data-plan-toggle]")) {
+      button.addEventListener("click", () =>
+        this.toggleSchedule_(Number(button.dataset.planToggle))
+      );
+    }
+    for (const field of this.$$("[data-plan-time]")) {
+      // `change` en niet `input`: dat vuurt pas als de tijd af is. Bij `input`
+      // gaat er een opslag de deur uit zodra iemand het eerste cijfer van het
+      // uur intypt, en die schrijft dan een half getal weg.
+      field.addEventListener("change", () =>
+        this.saveScheduleTimes_(Number(String(field.dataset.planTime).split(":")[0]))
+      );
+    }
+    for (const button of this.$$("[data-plan-link]")) {
+      button.addEventListener("click", () => this.openSchedule_(Number(button.dataset.planLink)));
     }
     for (const button of this.$$("[data-release]")) {
       button.addEventListener("click", () => this.toggleReady_(Number(button.dataset.release)));
@@ -2071,6 +2209,8 @@ class DacViewOverview extends DacElement {
             : "Geef dit door, dan kan de coach het gunstigste moment kiezen.";
       }
 
+      this.fillSchedule_(slot, device);
+
       // Only where somebody has to say so. A charger is released by plugging
       // the cable in, and asking again on the dashboard added a step without
       // adding a decision.
@@ -2097,6 +2237,119 @@ class DacViewOverview extends DacElement {
     });
 
     this.paintSteerChoice_();
+  }
+
+  /** Het schema van dit apparaat, zoals het in Strategie staat. */
+  scheduleFor_(deviceId) {
+    return (this.settings_?.strategy?.schedules ?? []).find(
+      (entry) => entry?.device === deviceId
+    );
+  }
+
+  /**
+   * Het kopje Schema op de kaart.
+   *
+   * Hetzelfde vinkje als in Strategie, alleen op een tweede plek: elk schema
+   * had al een `enabled`, en met dat vinkje uit vervalt in planner.py de hele
+   * klaar-tijdtak en kijkt de coach puur naar het gunstigste moment. Het is dus
+   * geen nieuw begrip maar dezelfde schakelaar.
+   *
+   * Staat het per dag ingesteld, dan toont de kaart dat niet vereenvoudigd. Drie
+   * velden waar zeven dagen achter zitten, betekent dat één tikje de zaterdag
+   * over de zondag heen schrijft. Dan alleen de schuif, en verder een knop naar
+   * Strategie; die blijft de volledige editor.
+   */
+  fillSchedule_(slot, device) {
+    const blok = this.$(`[data-plan="${slot}"]`);
+    if (!blok) return;
+
+    blok.hidden = !canHaveDeadline(device);
+    if (blok.hidden) return;
+
+    const schema = this.scheduleFor_(device.id);
+    const aan = Boolean(schema?.enabled);
+    const perDag = Boolean(schema?.per_day);
+
+    const schuif = this.$(`[data-plan-toggle="${slot}"]`);
+    schuif.setAttribute("aria-checked", String(aan));
+
+    this.$(`[data-plan-times="${slot}"]`).hidden = perDag || !aan;
+    this.$(`[data-plan-link="${slot}"]`).hidden = !perDag;
+
+    const notitie = this.$(`[data-plan-note="${slot}"]`);
+    notitie.hidden = false;
+    if (perDag) {
+      notitie.textContent = "Per dag ingesteld.";
+    } else if (aan) {
+      notitie.hidden = true;
+    } else {
+      notitie.textContent =
+        "Uit: de coach bepaalt zelf wanneer, en kijkt puur naar het gunstigste moment.";
+    }
+
+    if (perDag || !aan) return;
+
+    const venster = schema?.window ?? {};
+    for (const sleutel of ["not_before", "start_by", "done_by"]) {
+      const veld = this.$(`[data-plan-time="${slot}:${sleutel}"]`);
+      const staat = String(venster[sleutel] ?? "");
+      // Niet overschrijven terwijl iemand aan het invullen is; de kaart
+      // ververst elke twee seconden.
+      if (this.shadowRoot?.activeElement === veld) continue;
+      if (veld.value !== staat) veld.value = staat;
+    }
+  }
+
+  /** De schuif om: het hele schema aan of uit. */
+  toggleSchedule_(slot) {
+    const device = this.steerDevices_?.[slot];
+    if (!device) return;
+    const schuif = this.$(`[data-plan-toggle="${slot}"]`);
+    const nieuw = schuif.getAttribute("aria-checked") !== "true";
+    // Meteen omzetten, want de bevestiging komt pas terug als de server het
+    // opgeschreven heeft en een schakelaar die een halve seconde blijft hangen
+    // leest als een schakelaar die het niet deed.
+    schuif.setAttribute("aria-checked", String(nieuw));
+    this.saveSchedule_(device, { enabled: nieuw });
+  }
+
+  /** De drie tijden zoals ze nu op de kaart staan. */
+  saveScheduleTimes_(slot) {
+    const device = this.steerDevices_?.[slot];
+    if (!device) return;
+    const window_ = {};
+    for (const sleutel of ["not_before", "start_by", "done_by"]) {
+      window_[sleutel] = String(
+        this.$(`[data-plan-time="${slot}:${sleutel}"]`)?.value ?? ""
+      );
+    }
+    // Alle drie tegelijk: de server vult een ontbrekende tijd aan met leeg, en
+    // een half venster sturen zou de andere twee wissen.
+    this.saveSchedule_(device, { window: window_ });
+  }
+
+  async saveSchedule_(device, patch) {
+    if (!this.hass) return;
+    try {
+      const settings = await this.hass.callWS({
+        type: "domotiapp_coach/device/schedule",
+        device_id: device.id,
+        ...patch,
+      });
+      this.fire("dac-settings-saved", { settings });
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon het schema niet opslaan", error);
+      // Terugdraaien wat er op het scherm al omging, anders staat er iets dat
+      // nergens is opgeschreven.
+      this.fillSteerable_(this.steerDevices_ ?? []);
+    }
+  }
+
+  /** Naar de volledige editor van dit apparaat in Strategie. */
+  openSchedule_(slot) {
+    const device = this.steerDevices_?.[slot];
+    if (!device) return;
+    this.fire("dac-navigate", { id: `strategie/klaar/${device.id}` });
   }
 
   /** Show the chosen device, remembering it across the refresh. */

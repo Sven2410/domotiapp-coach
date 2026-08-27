@@ -17,6 +17,45 @@ from homeassistant.helpers.storage import Store
 from .const import DEFAULT_SETTINGS, DOMAIN, STORAGE_KEY, STORAGE_VERSION
 
 
+def schema_bijwerken(
+    strategy: dict[str, Any] | None,
+    device_id: str,
+    *,
+    enabled: bool | None = None,
+    window: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Het schema van één apparaat bijwerken, en verder niets aanraken.
+
+    Los van de handler eronder zodat er een proef op kan zonder een draaiende
+    Home Assistant. Wat hier telt is wat er níét gebeurt: de schema's van andere
+    apparaten blijven staan, en `days` en `per_day` worden nooit aangeraakt.
+    Een kaart die per dag ingestelde tijden zou vereenvoudigen tot één rij,
+    schrijft met één tikje de zaterdag over de zondag heen.
+    """
+    uit = dict(strategy or {})
+    schedules = [
+        dict(entry) for entry in (uit.get("schedules") or []) if isinstance(entry, dict)
+    ]
+
+    entry = next((row for row in schedules if row.get("device") == device_id), None)
+    if entry is None:
+        # Nog nooit iets ingesteld voor dit apparaat. Dan is de schuif zelf het
+        # eerste wat eraan gebeurt, en hoort er een schema te ontstaan.
+        entry = {"device": device_id, "enabled": False, "per_day": False}
+        schedules.append(entry)
+
+    if enabled is not None:
+        entry["enabled"] = bool(enabled)
+
+    # Alleen bij een schema dat elke dag hetzelfde is; anders staan de tijden in
+    # `days` en zou dit ze stilzwijgend buitenspel zetten.
+    if window is not None and not entry.get("per_day"):
+        entry["window"] = dict(window)
+
+    uit["schedules"] = schedules
+    return uit
+
+
 def _prune(defaults: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     """Drop keys that the current version no longer knows about.
 
