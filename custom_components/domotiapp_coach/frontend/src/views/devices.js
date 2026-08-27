@@ -640,7 +640,7 @@ class DacViewDevices extends DacEditorElement {
             <div class="row">
               <label>Energieteller (optioneel)</label>
               <dac-entity-picker data-energy="${index}"></dac-entity-picker>
-              <span class="sub">De teller van dit apparaat in kWh, als die er is. Daarmee klopt het verbruik in je rapport tot op de komma; zonder wordt het afgeleid uit het gemiddelde vermogen.</span>
+              <span class="sub">De teller van dit apparaat in kWh, als die er is. Bij een laadpaal is dat de teller van alles wat hij ooit geladen heeft. Daarmee klopt het verbruik in je rapport tot op de komma en klopt het aantal kWh in het verslag na een laadbeurt; zonder wordt allebei afgeleid uit het gemiddelde vermogen.</span>
             </div>
             ${this.brandHtml_(device, index)}
             ${this.carsHtml_(device, index)}
