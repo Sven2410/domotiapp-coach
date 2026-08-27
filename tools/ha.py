@@ -21,6 +21,7 @@ import json
 import os
 import pathlib
 import re
+import sys
 import urllib.request
 
 # Waar een tokenbestand kan staan, in volgorde van voorkeur. Alles buiten de
@@ -117,13 +118,48 @@ def schema_van(host: str) -> str:
 PROBE_SECONDEN = 4
 
 NAAM = os.environ.get("HA_INSTALLATIE", "thuis")
-TOKEN, ADRESSEN = lees(NAAM)
+
+try:
+    TOKEN, ADRESSEN = lees(NAAM)
+except (FileNotFoundError, ValueError) as _reden:
+    # Een naam die niet bestaat is bijna altijd een typefout, en dan help je
+    # meer met de lijst die er wel is dan met een traceback van tien regels.
+    print(f"[ha] {_reden}", file=sys.stderr)
+    _aanwezig = sorted(
+        {p.stem for m in MAPPEN if m.is_dir() for p in m.glob("*.txt")}
+    )
+    if _aanwezig:
+        print("[ha] wel aanwezig: " + ", ".join(_aanwezig), file=sys.stderr)
+    print(f"[ha] aanmaken met: cd tokens && ./nieuw.sh {NAAM}", file=sys.stderr)
+    raise SystemExit(1) from None
 
 HOST = ADRESSEN[0]
 SCHEMA = schema_van(HOST)
 # Met één adres valt er niets te kiezen, en dan blijft de foutmelding bij een
 # mislukte verbinding die van de verbinding zelf in plaats van een opsomming.
 _gekozen = len(ADRESSEN) == 1
+
+
+def _meld(naam: str) -> None:
+    """Eén regel naar stderr: tegen welke installatie er gemeten wordt.
+
+    Zonder dit schrijft een logger die een uur meeloopt stilzwijgend de
+    verkeerde installatie mee, en dat merk je pas achteraf. Naar stderr en niet
+    naar stdout, zodat het doorpijpen van een tool blijft werken. Uit te zetten
+    met HA_STIL=1, voor als een script zijn eigen kop schrijft.
+    """
+    if os.environ.get("HA_STIL"):
+        return
+    if os.environ.get("HA_TOKEN_FILE"):
+        waar = "uit HA_TOKEN_FILE"
+    elif os.environ.get("HA_INSTALLATIE"):
+        waar = "uit HA_INSTALLATIE"
+    else:
+        waar = "standaard, HA_INSTALLATIE is niet gezet"
+    print(f"[ha] installatie: {naam} ({waar})", file=sys.stderr)
+
+
+_meld(NAAM)
 
 
 def _haal(host: str, path: str, timeout: int):
@@ -173,6 +209,7 @@ def kies(naam: str) -> str:
     HOST = ADRESSEN[0]
     SCHEMA = schema_van(HOST)
     _gekozen = len(ADRESSEN) == 1
+    _meld(naam)
     return HOST
 
 
