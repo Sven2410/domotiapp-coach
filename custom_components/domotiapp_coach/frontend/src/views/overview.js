@@ -29,6 +29,12 @@ import {
 } from "../devices.js";
 import { LiveSource, meterReadings, priceForecast, solarForecast } from "../data-source.js";
 import {
+  PRIORITIES,
+  planFor,
+  planSummary,
+  planTimes,
+} from "../schedule-sheet.js";
+import {
   OVERVIEW_CARDS,
   defaultLayout,
   effectiveLayout,
@@ -679,54 +685,44 @@ class DacViewOverview extends DacElement {
     }
     .plan-toggle:disabled { opacity: 0.4; cursor: default; }
 
-    .plan-times { display: grid; gap: 8px; }
-    .plan-times[hidden] { display: none; }
-    /* Op 280 px past een label niet meer naast een tijdveld en hoort het
-       eronder te gaan staan in plaats van de kaart breder te maken. De
-       ondergrenzen op de tekst en het veld staan er zodat alle drie de rijen
-       tegelijk afbreken: zonder die op de tekst bleef "Klaar om" naast zijn
-       veld staan terwijl "Uiterlijk starten" eronder sprong, en dan staan er
-       drie rijen die niet op elkaar lijken. */
-    .plan-times label {
-      display: flex; flex-wrap: wrap; align-items: center;
-      justify-content: space-between; gap: 6px 10px;
-      font-size: 12.5px; color: var(--dac-ink-2);
-    }
-    .plan-times label span { flex: 1 1 84px; min-width: 84px; }
-    .plan-times input[type="time"] {
-      flex: 0 1 118px; min-width: 110px; max-width: 150px;
-      min-height: 40px;
-      padding: 8px 10px;
+    .plan-note { margin: 0; font-size: 12px; line-height: 1.5; color: var(--dac-ink-2); }
+
+    /* Wie er voorgaat. Alleen zichtbaar zolang het schema aan staat, want met
+       een uitgezet schema valt er niets te verdelen. */
+    .plan-prio { display: grid; gap: 6px; }
+    .plan-prio[hidden] { display: none; }
+    .plan-prio span { font-size: 12.5px; color: var(--dac-ink-2); }
+    .plan-prio select {
+      padding: 10px 12px;
       border-radius: var(--dac-radius-sm);
       border: 1px solid var(--dac-border-hi);
       background: rgba(255,255,255,0.04);
       color: var(--dac-ink);
       font: inherit; font-size: 14px;
-      font-variant-numeric: tabular-nums;
+      min-height: 44px;
+      width: 100%;
     }
-    @media (pointer: coarse) { .plan-times input[type="time"] { font-size: 16px; } }
-    @supports (-webkit-touch-callout: none) {
-      .plan-times input[type="time"] { font-size: 16px; }
-    }
+    .plan-prio select option { background: #12120f; color: var(--dac-ink); }
+    @media (pointer: coarse) { .plan-prio select { font-size: 16px; } }
+    @supports (-webkit-touch-callout: none) { .plan-prio select { font-size: 16px; } }
 
-    .plan-note { margin: 0; font-size: 12px; color: var(--dac-ink-2); }
-    .plan-note[hidden] { display: none; }
-    /* Twee klassen diep, anders wint de regel voor knoppen in steer-actions
-       en wordt deze knop even breed als de kaart. */
+    /* Twee klassen diep, net als bij .soc-save en de schuif hierboven: anders
+       wint de regel voor knoppen in steer-actions met zijn flex 1 1 170px. Hier
+       is die volle breedte juist goed, maar de hoogte en de vorm niet. */
     .plan-pick .plan-link {
-      justify-self: start;
-      flex: 0 0 auto;
-      min-height: 40px;
-      padding: 8px 14px;
+      width: 100%;
+      min-height: 44px;
+      padding: 10px 16px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
       border-radius: var(--dac-radius-pill);
       border: 1px solid var(--dac-border-hi);
       background: var(--dac-surface-hi);
       color: var(--dac-ink);
-      font: inherit; font-size: 13px; font-weight: 500;
+      font: inherit; font-size: 14px; font-weight: 500;
       cursor: pointer;
     }
     .plan-pick .plan-link:hover { border-color: var(--dac-accent-hi); }
-    .plan-link[hidden] { display: none; }
+    .plan-pick .plan-link .icon { width: 16px; height: 16px; }
     @media (pointer: coarse) { .soc-input { font-size: 16px; } }
     @supports (-webkit-touch-callout: none) { .soc-input { font-size: 16px; } }
 
@@ -1062,6 +1058,8 @@ class DacViewOverview extends DacElement {
           <div class="cmd-grid" id="manual-grid"></div>
           <p class="sheet-status" id="manual-status" role="status" aria-live="polite"></p>
         </dialog>
+
+        <dac-schedule-sheet id="plan-sheet"></dac-schedule-sheet>
 
         <dialog class="sheet wide" id="prices" tabindex="-1" aria-labelledby="prices-title">
           <div class="sheet-head">
@@ -2041,20 +2039,17 @@ class DacViewOverview extends DacElement {
                   <span class="knob"></span>
                 </button>
               </div>
-              <div class="plan-times" data-plan-times="${slot}">
-                <label><span>Niet voor</span>
-                  <input type="time" data-plan-time="${slot}:not_before">
-                </label>
-                <label><span>Uiterlijk starten</span>
-                  <input type="time" data-plan-time="${slot}:start_by">
-                </label>
-                <label><span>Klaar om</span>
-                  <input type="time" data-plan-time="${slot}:done_by">
-                </label>
-              </div>
-              <p class="plan-note" data-plan-note="${slot}" hidden></p>
-              <button type="button" class="plan-link" data-plan-link="${slot}" hidden>
-                Openen in Strategie
+              <p class="plan-note" data-plan-note="${slot}"></p>
+              <label class="plan-prio" data-plan-prio-row="${slot}">
+                <span>Wie gaat voor?</span>
+                <select data-plan-prio="${slot}">
+                  ${PRIORITIES.map(
+                    (item) => `<option value="${item.key}">${item.label}</option>`
+                  ).join("")}
+                </select>
+              </label>
+              <button type="button" class="plan-link" data-plan-link="${slot}">
+                ${icons.sliders} Schema instellen
               </button>
             </div>
             <button class="release" type="button" data-release="${slot}" aria-pressed="false">
@@ -2103,12 +2098,9 @@ class DacViewOverview extends DacElement {
         this.toggleSchedule_(Number(button.dataset.planToggle))
       );
     }
-    for (const field of this.$$("[data-plan-time]")) {
-      // `change` en niet `input`: dat vuurt pas als de tijd af is. Bij `input`
-      // gaat er een opslag de deur uit zodra iemand het eerste cijfer van het
-      // uur intypt, en die schrijft dan een half getal weg.
-      field.addEventListener("change", () =>
-        this.saveScheduleTimes_(Number(String(field.dataset.planTime).split(":")[0]))
+    for (const select of this.$$("[data-plan-prio]")) {
+      select.addEventListener("change", () =>
+        this.savePriority_(Number(select.dataset.planPrio), select.value)
       );
     }
     for (const button of this.$$("[data-plan-link]")) {
@@ -2239,64 +2231,46 @@ class DacViewOverview extends DacElement {
     this.paintSteerChoice_();
   }
 
-  /** Het schema van dit apparaat, zoals het in Strategie staat. */
-  scheduleFor_(deviceId) {
-    return (this.settings_?.strategy?.schedules ?? []).find(
-      (entry) => entry?.device === deviceId
-    );
-  }
-
   /**
    * Het kopje Schema op de kaart.
    *
-   * Hetzelfde vinkje als in Strategie, alleen op een tweede plek: elk schema
-   * had al een `enabled`, en met dat vinkje uit vervalt in planner.py de hele
-   * klaar-tijdtak en kijkt de coach puur naar het gunstigste moment. Het is dus
-   * geen nieuw begrip maar dezelfde schakelaar.
+   * Sinds 27-08-2026 staat het schema van een apparaat bij het apparaat zelf en
+   * niet meer in Strategie. Op de kaart staat wat je vaak gebruikt: de schuif
+   * die het schema in zijn geheel aan en uit zet, en wie er voorgaat als niet
+   * alles tegelijk past. De tijden en het per-dag-werk staan achter de knop, in
+   * een pop-up, want die stel je één keer in en kijk je daarna zelden meer aan.
    *
-   * Staat het per dag ingesteld, dan toont de kaart dat niet vereenvoudigd. Drie
-   * velden waar zeven dagen achter zitten, betekent dat één tikje de zaterdag
-   * over de zondag heen schrijft. Dan alleen de schuif, en verder een knop naar
-   * Strategie; die blijft de volledige editor.
+   * Het schuifje is geen nieuw begrip: elk schema had al een `enabled`, en met
+   * dat vinkje uit slaat `_days` in coach.py het schema over, waarna in
+   * planner.py de hele klaar-tijdtak vervalt en de coach puur naar het
+   * gunstigste moment kijkt. Dat staat er ook zo als hij uit staat, want anders
+   * leest een uitgezet schema als een coach die niets doet.
    */
   fillSchedule_(slot, device) {
     const blok = this.$(`[data-plan="${slot}"]`);
     if (!blok) return;
 
+    // Alleen waar een schema ergens op slaat: een apparaat dat de coach mag
+    // aansturen én dat de planner kan inplannen. Een boiler is wel stuurbaar
+    // maar heeft geen klaar-tijd om van terug te rekenen, en een schuif die
+    // nergens op aangrijpt is erger dan geen schuif.
     blok.hidden = !canHaveDeadline(device);
     if (blok.hidden) return;
 
-    const schema = this.scheduleFor_(device.id);
-    const aan = Boolean(schema?.enabled);
-    const perDag = Boolean(schema?.per_day);
+    const plan = planFor(this.settings_, device.id);
+    this.$(`[data-plan-toggle="${slot}"]`).setAttribute(
+      "aria-checked",
+      String(Boolean(plan.enabled))
+    );
+    this.$(`[data-plan-note="${slot}"]`).textContent = planSummary(plan);
 
-    const schuif = this.$(`[data-plan-toggle="${slot}"]`);
-    schuif.setAttribute("aria-checked", String(aan));
-
-    this.$(`[data-plan-times="${slot}"]`).hidden = perDag || !aan;
-    this.$(`[data-plan-link="${slot}"]`).hidden = !perDag;
-
-    const notitie = this.$(`[data-plan-note="${slot}"]`);
-    notitie.hidden = false;
-    if (perDag) {
-      notitie.textContent = "Per dag ingesteld.";
-    } else if (aan) {
-      notitie.hidden = true;
-    } else {
-      notitie.textContent =
-        "Uit: de coach bepaalt zelf wanneer, en kijkt puur naar het gunstigste moment.";
-    }
-
-    if (perDag || !aan) return;
-
-    const venster = schema?.window ?? {};
-    for (const sleutel of ["not_before", "start_by", "done_by"]) {
-      const veld = this.$(`[data-plan-time="${slot}:${sleutel}"]`);
-      const staat = String(venster[sleutel] ?? "");
-      // Niet overschrijven terwijl iemand aan het invullen is; de kaart
-      // ververst elke twee seconden.
-      if (this.shadowRoot?.activeElement === veld) continue;
-      if (veld.value !== staat) veld.value = staat;
+    // Voorrang gaat over wie er wacht als er te weinig ruimte is. Staat het
+    // schema uit, dan doet de coach niets met dit apparaat en valt er ook niets
+    // te verdelen.
+    this.$(`[data-plan-prio-row="${slot}"]`).hidden = !plan.enabled;
+    const keuze = this.$(`[data-plan-prio="${slot}"]`);
+    if (this.shadowRoot?.activeElement !== keuze) {
+      keuze.value = plan.priority ?? "mid";
     }
   }
 
@@ -2307,25 +2281,25 @@ class DacViewOverview extends DacElement {
     const schuif = this.$(`[data-plan-toggle="${slot}"]`);
     const nieuw = schuif.getAttribute("aria-checked") !== "true";
     // Meteen omzetten, want de bevestiging komt pas terug als de server het
-    // opgeschreven heeft en een schakelaar die een halve seconde blijft hangen
+    // opgeschreven heeft, en een schakelaar die een halve seconde blijft hangen
     // leest als een schakelaar die het niet deed.
     schuif.setAttribute("aria-checked", String(nieuw));
-    this.saveSchedule_(device, { enabled: nieuw });
+
+    // Aanzetten terwijl er niets ingevuld staat, laat de coach achter met een
+    // regel waar hij niets mee kan: zonder enkele grens is later altijd
+    // goedkoper en begint hij nooit. Dan hoort er één tijd bij als vertrekpunt.
+    // Kwam mee uit Strategie toen het schema op 27-08-2026 naar de kaart ging.
+    const plan = planFor(this.settings_, device.id);
+    const patch = { enabled: nieuw };
+    if (nieuw && !planTimes(plan).length && !plan.per_day) {
+      patch.window = { ...plan.window, done_by: "07:00" };
+    }
+    this.saveSchedule_(device, patch);
   }
 
-  /** De drie tijden zoals ze nu op de kaart staan. */
-  saveScheduleTimes_(slot) {
+  savePriority_(slot, waarde) {
     const device = this.steerDevices_?.[slot];
-    if (!device) return;
-    const window_ = {};
-    for (const sleutel of ["not_before", "start_by", "done_by"]) {
-      window_[sleutel] = String(
-        this.$(`[data-plan-time="${slot}:${sleutel}"]`)?.value ?? ""
-      );
-    }
-    // Alle drie tegelijk: de server vult een ontbrekende tijd aan met leeg, en
-    // een half venster sturen zou de andere twee wissen.
-    this.saveSchedule_(device, { window: window_ });
+    if (device) this.saveSchedule_(device, { priority: waarde });
   }
 
   async saveSchedule_(device, patch) {
@@ -2345,11 +2319,15 @@ class DacViewOverview extends DacElement {
     }
   }
 
-  /** Naar de volledige editor van dit apparaat in Strategie. */
+  /** De pop-up met de tijden en het per-dag-werk. */
   openSchedule_(slot) {
     const device = this.steerDevices_?.[slot];
     if (!device) return;
-    this.fire("dac-navigate", { id: `strategie/klaar/${device.id}` });
+    const sheet = this.$("#plan-sheet");
+    sheet.hass = this.hass;
+    sheet.settings = this.settings_;
+    sheet.feed = this.feed_;
+    sheet.open(device, this.labelFor_(device));
   }
 
   /** Show the chosen device, remembering it across the refresh. */

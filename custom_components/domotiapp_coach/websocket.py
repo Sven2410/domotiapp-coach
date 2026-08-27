@@ -385,13 +385,15 @@ async def async_set_strategy(
     {
         vol.Required("type"): "domotiapp_coach/device/schedule",
         vol.Required("device_id"): str,
+        # Alleen wat er verandert wordt meegestuurd; de rest blijft staan.
         vol.Optional("enabled"): bool,
-        # Alle drie de tijden tegelijk, en alleen bij een schema dat elke dag
-        # hetzelfde is. Alle drie, want `_WINDOW` vult een ontbrekende tijd aan
-        # met een lege string en dat wist hem: een half venster sturen zou de
-        # twee andere tijden weggooien. De kaart toont ze ook alle drie, dus er
-        # is niets dat maar één tijd zou willen sturen.
+        vol.Optional("priority"): vol.In(["low", "mid", "high"]),
+        vol.Optional("per_day"): bool,
+        # Alle drie de tijden tegelijk, want `_WINDOW` vult een ontbrekende tijd
+        # aan met een lege string en dat wist hem: een half venster sturen zou
+        # de twee andere weggooien.
         vol.Optional("window"): _schema(dict(_WINDOW)),
+        vol.Optional("days"): vol.All([_PLAN_DAY], vol.Length(max=7)),
     }
 )
 @websocket_api.async_response
@@ -400,23 +402,25 @@ async def async_set_device_schedule(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Het schema van één apparaat, vanaf de kaart in Overzicht.
+    """Het schema van één apparaat, vanaf zijn eigen kaart in Overzicht.
 
-    Hetzelfde vinkje als in Strategie, alleen op een tweede plek. Uit betekent
-    dat de coach zelf bepaalt wanneer er gedraaid wordt en puur naar het
-    gunstigste moment kijkt; `_days` in coach.py slaat een schema dat uit staat
-    over, waarna in planner.py de hele klaar-tijdtak vervalt.
+    Sinds 27-08-2026 staan de schema's niet meer in Strategie. De schuif en de
+    voorrang staan op de kaart zelf, en de knop Schema opent een pop-up met de
+    tijden en het per-dag-werk. Alles wat over één apparaat gaat komt dus langs
+    dit commando.
 
-    Geen beheerderswerk, om dezelfde reden als de andere twee hierboven: wie
+    Uit betekent dat de coach zelf bepaalt wanneer er gedraaid wordt en puur
+    naar het gunstigste moment kijkt: `_days` in coach.py slaat een schema dat
+    uit staat over, waarna in planner.py de hele klaar-tijdtak vervalt.
+
+    Geen beheerderswerk, om dezelfde reden als de twee commando's hieronder: wie
     weet dat de vaatwasser vanavond klaar moet zijn, is degene die hem heeft
     ingeruimd.
 
-    Eén apparaat en verder niets. De andere schema's blijven staan, en `days`
-    en `per_day` worden hier nooit aangeraakt: een kaart die per dag ingestelde
-    tijden zou vereenvoudigen tot één rij, schrijft met één tikje de zaterdag
-    over de zondag heen. De kaart toont daarom "per dag ingesteld" en wijst naar
-    Strategie. Om diezelfde reden wordt de nieuwe lijst hier uitgerekend en niet
-    door het paneel meegestuurd.
+    Eén apparaat en verder niets, en alleen de velden die meegestuurd zijn. De
+    nieuwe lijst wordt hier uitgerekend en niet door het paneel meegestuurd, zodat
+    een dashboard dat een uur openstaat niet ongemerkt terugdraait wat er
+    ondertussen op een telefoon veranderd is.
     """
     store = async_get_store(hass)
     settings = await store.async_load()
@@ -424,7 +428,10 @@ async def async_set_device_schedule(
         settings.get("strategy"),
         msg["device_id"],
         enabled=msg.get("enabled"),
+        priority=msg.get("priority"),
+        per_day=msg.get("per_day"),
         window=msg.get("window"),
+        days=msg.get("days"),
     )
     settings = await store.async_save({"strategy": strategy})
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})

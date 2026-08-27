@@ -1066,9 +1066,14 @@ controle("en de klok is vergeten, dus een volgende keer begint opnieuw",
          "dev-laadpaal" not in coach23._warned, f"{coach23._warned}")
 
 print("=== 24. het schema van de kaart raakt alleen dat ene apparaat ===")
-# Punt 5 van 26-08-2026: een kopje Schema op de apparaatkaart in Overzicht, met
-# een schuifje. Hetzelfde vinkje als in Strategie, alleen op een tweede plek.
-# Wat hier telt is wat er niet gebeurt: de rest blijft staan.
+# Op 27-08-2026 zijn de schema's uit Strategie gehaald en bij het apparaat zelf
+# gezet: de schuif en de voorrang op de kaart, de tijden in een pop-up erachter.
+# Alles wat over één apparaat gaat komt daardoor langs deze ene functie.
+#
+# Waar het hier om gaat is wat er níét gebeurt. Wie de vaatwasser instelt hoort
+# de laadpaal ongemoeid te laten, en wie alleen de schuif omzet hoort zijn
+# tijden terug te vinden.
+#
 # De samenvoeging staat in storage.py en niet in websocket.py, zodat er een
 # proef op kan zonder een draaiende Home Assistant: websocket.py sleept
 # voluptuous en de hele websocket-API mee, en die staan hier niet.
@@ -1077,59 +1082,73 @@ schema_bijwerken = storage.schema_bijwerken
 STRAT = {
     "level": "steer",
     "schedules": [
-        {"device": "d1", "enabled": True, "per_day": False,
-         "window": {"not_before": "23:00", "start_by": "", "done_by": "07:00"}},
-        {"device": "d2", "enabled": True, "per_day": True, "days": [
-            {"day": 5, "enabled": True, "done_by": "10:00"},
-            {"day": 6, "enabled": True, "done_by": "12:00"},
-        ]},
+        {"device": "d1", "enabled": True, "per_day": False, "priority": "mid",
+         "window": {"not_before": "23:00", "start_by": "", "done_by": "07:00"},
+         "days": []},
+        {"device": "d2", "enabled": True, "per_day": True, "priority": "low",
+         "window": {"not_before": "22:00", "start_by": "", "done_by": "06:00"},
+         "days": [
+             {"day": 5, "enabled": True, "done_by": "10:00"},
+             {"day": 6, "enabled": True, "done_by": "12:00"},
+         ]},
     ],
 }
 
+
+def d(uit, apparaat):
+    return next(s for s in uit["schedules"] if s["device"] == apparaat)
+
+
 # De schuif uit voor d1.
 uit = schema_bijwerken(STRAT, "d1", enabled=False)
-d1 = next(s for s in uit["schedules"] if s["device"] == "d1")
-print(f"  d1 uit: enabled={d1['enabled']}, tijden={d1.get('window')}")
-controle("de schuif zet het schema uit", d1["enabled"] is False, f"{d1}")
+print(f"  d1 uit: enabled={d(uit,'d1')['enabled']}, tijden={d(uit,'d1').get('window')}")
+controle("de schuif zet het schema uit", d(uit, "d1")["enabled"] is False, f"{d(uit,'d1')}")
 controle("en laat de tijden staan, zodat aanzetten ze terugbrengt",
-         d1.get("window", {}).get("done_by") == "07:00", f"{d1}")
+         d(uit, "d1")["window"]["done_by"] == "07:00", f"{d(uit,'d1')}")
 controle("het andere apparaat blijft ongemoeid",
-         next(s for s in uit["schedules"] if s["device"] == "d2") ==
-         STRAT["schedules"][1], f"{uit}")
+         d(uit, "d2") == STRAT["schedules"][1], f"{uit}")
 controle("en de rest van de strategie ook", uit["level"] == "steer", f"{uit}")
 controle("het origineel is niet gewijzigd",
          STRAT["schedules"][0]["enabled"] is True, f"{STRAT}")
 
-# Nieuwe tijden voor d1.
+# De voorrang staat op de kaart en gaat langs dezelfde weg.
+uit = schema_bijwerken(STRAT, "d1", priority="high")
+print(f"  d1 voorrang: {d(uit,'d1')['priority']}")
+controle("de voorrang komt erin", d(uit, "d1")["priority"] == "high", f"{d(uit,'d1')}")
+controle("en raakt de rest van dat schema niet",
+         d(uit, "d1")["window"] == STRAT["schedules"][0]["window"], f"{d(uit,'d1')}")
+
+# De pop-up stuurt de drie tijden als geheel.
 uit = schema_bijwerken(
     STRAT, "d1", window={"not_before": "", "start_by": "", "done_by": "08:30"}
 )
-d1 = next(s for s in uit["schedules"] if s["device"] == "d1")
-print(f"  d1 nieuwe tijden: {d1['window']}")
+print(f"  d1 nieuwe tijden: {d(uit,'d1')['window']}")
 controle("de drie tijden komen er als geheel in",
-         d1["window"] == {"not_before": "", "start_by": "", "done_by": "08:30"},
-         f"{d1}")
+         d(uit, "d1")["window"] == {"not_before": "", "start_by": "", "done_by": "08:30"},
+         f"{d(uit,'d1')}")
 
-# En dit is waar het om gaat: een schema dat per dag is ingesteld laat zich
-# niet vanaf de kaart tot één rij vereenvoudigen. Anders schrijft één tikje
-# de zaterdag over de zondag heen.
-uit = schema_bijwerken(
-    STRAT, "d2", enabled=False,
-    window={"not_before": "", "start_by": "", "done_by": "09:00"},
-)
-d2 = next(s for s in uit["schedules"] if s["device"] == "d2")
-print(f"  d2 per dag: enabled={d2['enabled']}, window={d2.get('window')}, dagen={len(d2['days'])}")
-controle("de schuif werkt ook bij een schema per dag", d2["enabled"] is False, f"{d2}")
-controle("maar de tijden worden niet overschreven", "window" not in d2, f"{d2}")
-controle("en de dagen blijven staan",
-         d2["days"] == STRAT["schedules"][1]["days"], f"{d2}")
+# Per dag mag nu wél vanaf de kaart, want de pop-up ís de volledige editor.
+# Tot vanochtend weigerde dit, omdat de kaart toen drie velden toonde waar zeven
+# dagen achter zaten; dat gevaar is er niet meer.
+nieuwe_dagen = [{"day": i, "enabled": i < 5, "not_before": "", "start_by": "",
+                 "done_by": "07:00"} for i in range(7)]
+uit = schema_bijwerken(STRAT, "d2", per_day=True, days=nieuwe_dagen)
+print(f"  d2 zeven dagen: {len(d(uit,'d2')['days'])}, weekend uit")
+controle("de dagen komen erin", len(d(uit, "d2")["days"]) == 7, f"{d(uit,'d2')}")
+controle("met het weekend uit",
+         [x["enabled"] for x in d(uit, "d2")["days"]] == [True]*5 + [False]*2,
+         f"{d(uit,'d2')['days']}")
+controle("en het venster van elke dag blijft bewaard voor als hij terugschakelt",
+         d(uit, "d2")["window"]["done_by"] == "06:00", f"{d(uit,'d2')}")
+controle("het origineel is nog steeds niet gewijzigd",
+         len(STRAT["schedules"][1]["days"]) == 2, f"{STRAT}")
 
 # Een apparaat waar nog nooit iets voor is ingesteld krijgt een schema.
 uit = schema_bijwerken(STRAT, "d9", enabled=True)
-d9 = next(s for s in uit["schedules"] if s["device"] == "d9")
-print(f"  d9 nieuw: {d9}")
+print(f"  d9 nieuw: {d(uit,'d9')}")
 controle("een apparaat zonder schema krijgt er een",
-         d9["enabled"] is True and d9["per_day"] is False, f"{d9}")
+         d(uit, "d9")["enabled"] is True and d(uit, "d9")["per_day"] is False,
+         f"{d(uit,'d9')}")
 controle("en de bestaande twee staan er nog", len(uit["schedules"]) == 3, f"{uit}")
 
 # Helemaal zonder strategie moet het ook niet omvallen.

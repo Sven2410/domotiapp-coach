@@ -14,19 +14,6 @@
 import { define } from "../base.js";
 import { icons } from "../icons.js";
 import {
-  PROGRAM_TYPES,
-  SCHEDULABLE_TYPES,
-  brandsFor,
-  canHaveDeadline,
-  deviceLabel,
-  deviceLabelMap,
-  needsRelease,
-  programFor,
-  typeMeta,
-} from "../devices.js";
-import { priceForecast } from "../data-source.js";
-import { clock, duration } from "../format.js";
-import {
   DacEditorElement,
   adminNoticeHtml,
   editorCss,
@@ -45,39 +32,6 @@ const INTERVALS = [5, 10, 15, 30, 60, 120, 240];
  * everything under five seconds is one of those.
  */
 const HOLDS = [5, 10, 30, 60, 120, 300];
-
-/** Monday first, the way a week is written down here. */
-const DAYS = ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"];
-const DAYS_SHORT = ["ma", "di", "wo", "do", "vr", "za", "zo"];
-
-/**
- * The three edges of a planning window, all optional.
- *
- * They answer different questions and a customer usually cares about one of
- * them: never before bedtime, started before I leave, finished before I get
- * up. Insisting on all three would be asking for answers nobody has.
- */
-const TIMES = [
-  {
-    key: "not_before",
-    label: "Niet eerder dan",
-    short: "Niet eerder dan",
-    hint: "Vóór deze tijd begint de coach er niet aan, hoe goedkoop de stroom ook is.",
-  },
-  {
-    key: "start_by",
-    label: "Uiterlijk starten om",
-    short: "Starten vóór",
-    hint: "Op deze tijd start hij hoe dan ook, ook als het dan een duur moment is.",
-  },
-  {
-    key: "done_by",
-    label: "Uiterlijk klaar om",
-    short: "Klaar om",
-    hint: "Hier rekent de coach van terug wanneer hij moet beginnen. Bij een programma gebruikt hij de duur die eronder staat.",
-  },
-];
-
 
 /**
  * Hoever de coach mag gaan.
@@ -123,58 +77,6 @@ const GOALS = [
     blurb: "Ook als inkopen op dat moment goedkoper zou zijn.",
   },
 ];
-
-/**
- * Who goes first when the connection cannot carry everything at once.
- *
- * Three steps and no more. A number from one to ten reads as precision that is
- * not there, and in a house with four steerable appliances the only question
- * that ever comes up is which one waits.
- */
-const PRIORITIES = [
-  { key: "high", label: "Hoog", blurb: "Gaat voor de rest." },
-  { key: "mid", label: "Middel", blurb: "De gewone stand." },
-  { key: "low", label: "Laag", blurb: "Wacht op de anderen." },
-];
-
-const priorityLabel = (key) =>
-  PRIORITIES.find((item) => item.key === key)?.label ?? "Middel";
-
-/** The one line under a device's name on the list. */
-function planSummary_(plan, on) {
-  if (!on) return "Niet ingepland. De coach laat dit apparaat met rust.";
-
-  // Priority is only worth a word when it is not the ordinary one; on a list
-  // where every row says "middel" the word stops carrying anything.
-  const voorrang = plan.priority && plan.priority !== "mid"
-    ? ` · voorrang ${priorityLabel(plan.priority).toLowerCase()}`
-    : "";
-
-  if (plan.per_day) {
-    const days = plan.days
-      .filter((day) => day.enabled && (day.not_before || day.start_by || day.done_by))
-      .map((day) => DAYS_SHORT[day.day]);
-    return `Per dag · ${days.join(", ")}${voorrang}`;
-  }
-
-  const parts = TIMES.filter((time) => plan.window[time.key]).map(
-    (time) => `${time.short.toLowerCase()} ${plan.window[time.key]}`
-  );
-  return `Elke dag · ${parts.join(" · ")}${voorrang}`;
-}
-
-/** The next moment the clock reads this time, today or tomorrow. */
-function nextAt(time, from = new Date()) {
-  const [hours, minutes] = String(time).split(":").map(Number);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-
-  const at = new Date(from);
-  at.setHours(hours, minutes, 0, 0);
-  if (at <= from) at.setDate(at.getDate() + 1);
-  return at;
-}
-
-const sameDayAsToday = (date) => date.toDateString() === new Date().toDateString();
 
 /**
  * The notifications, in the order they are listed.
@@ -231,7 +133,6 @@ class DacViewStrategy extends DacEditorElement {
   constructor() {
     super();
     this.pane_ = "";
-    this.paneDevice_ = "";
   }
 
   set hass(value) {
@@ -251,20 +152,14 @@ class DacViewStrategy extends DacEditorElement {
    * appliances are the customer's and there is no static markup for them.
    */
   set subroute(value) {
-    const path = String(value ?? "");
-    const [head, rest] = [path.split("/")[0], path.split("/").slice(1).join("/")];
+    // Alleen nog de meldingen. De schema's van apparaten zijn op 27-08-2026
+    // naar de kaart van het apparaat zelf verhuisd, dus `klaar/<apparaat>`
+    // bestaat hier niet meer.
+    const head = String(value ?? "").split("/")[0];
+    const pane = ALERTS.some((alert) => alert.id === head) ? head : "";
 
-    let pane = "";
-    let device = "";
-    if (ALERTS.some((alert) => alert.id === head)) pane = head;
-    else if (head === "klaar" && rest) {
-      pane = "klaar";
-      device = rest;
-    }
-
-    if (pane === this.pane_ && device === this.paneDevice_) return;
+    if (pane === this.pane_) return;
     this.pane_ = pane;
-    this.paneDevice_ = device;
     if (this.rendered_) this.paintPane_();
   }
 
@@ -329,80 +224,6 @@ class DacViewStrategy extends DacEditorElement {
           <div class="links">${rows}</div>
         </section>
 
-        <section class="card" id="devices-card" hidden>
-          <h2>${icons.devices} Apparaten</h2>
-          <p class="hint" id="devices-hint"></p>
-          <div class="links" id="device-links"></div>
-        </section>
-      </div>
-
-      <div class="wrap pane" data-pane="klaar" hidden>
-        <button class="back" type="button">${icons.arrowLeft}<span>Strategie</span></button>
-
-        ${adminNoticeHtml}
-
-        <header class="intro">
-          <div class="eyebrow" id="klaar-eyebrow">Apparaat</div>
-          <h1 id="klaar-title"></h1>
-          <p id="klaar-intro"></p>
-        </header>
-
-        <section class="card">
-          <div class="fields first">
-            <label class="check" for="klaar-enabled">
-              <input type="checkbox" id="klaar-enabled">
-              <span>
-                <strong>Plan dit apparaat in</strong>
-                Zonder dit laat de coach het apparaat met rust; je bedient het dan zelf.
-              </span>
-            </label>
-
-            <div id="klaar-fields" class="fields">
-              <div class="row">
-                <label>Wie gaat voor?</label>
-                <div class="segmented three" id="klaar-priority">
-                  ${PRIORITIES.map(
-                    (item) => `
-                    <button type="button" data-priority="${item.key}" aria-pressed="false">
-                      <strong>${item.label}</strong>
-                      ${item.blurb}
-                    </button>`
-                  ).join("")}
-                </div>
-                <span class="sub">Past niet alles tegelijk binnen je aansluiting, dan begint de coach met wat het hoogst staat. Twee apparaten met dezelfde voorrang gaan op volgorde van hun eigen tijden.</span>
-              </div>
-
-              <div class="row">
-                <label>Voor welke dagen?</label>
-                <div class="segmented" id="klaar-mode">
-                  <button type="button" data-mode="same" aria-pressed="false">
-                    <strong>Elke dag hetzelfde</strong>
-                    Eén stel tijden voor de hele week.
-                  </button>
-                  <button type="button" data-mode="per-day" aria-pressed="false">
-                    <strong>Per dag</strong>
-                    In het weekend andere tijden dan doordeweeks.
-                  </button>
-                </div>
-              </div>
-
-              <div id="klaar-same" class="fields"></div>
-              <div id="klaar-days" class="plan-days"></div>
-
-              <p class="sub" id="klaar-hint"></p>
-
-              <div class="notice" id="klaar-horizon" hidden>
-                ${icons.warning}
-                <span id="klaar-horizon-text"></span>
-              </div>
-
-              <div class="notice" id="klaar-release" hidden>
-                ${icons.warning}
-                <span>Vrijgeven blijft nodig. De coach start dit apparaat alleen als je op het overzicht hebt aangegeven dat het mag draaien. Een tijd instellen is niet hetzelfde als toestemming geven.</span>
-              </div>
-            </div>
-          </div>
-        </section>
       </div>
 
       <div class="wrap pane" data-pane="belasting" hidden>
@@ -493,30 +314,6 @@ class DacViewStrategy extends DacEditorElement {
       this.afterChange_();
     });
 
-    this.$("#klaar-enabled").addEventListener("change", (ev) => {
-      const plan = this.planFor_(this.paneDevice_, true);
-      plan.enabled = ev.target.checked;
-      // Switching it on with nothing filled in would leave the coach with a
-      // rule it cannot act on, so one time is offered to start from.
-      if (plan.enabled && !this.planTimes_(plan).length) plan.window.done_by = "07:00";
-      this.paintKlaar_();
-      this.afterChange_();
-    });
-
-    for (const button of this.$$("#klaar-mode button")) {
-      button.addEventListener("click", () => {
-        const plan = this.planFor_(this.paneDevice_, true);
-        plan.per_day = button.dataset.mode === "per-day";
-        // Moving to per-day starts from what was already set for every day, so
-        // the switch is a starting point rather than an empty form.
-        if (plan.per_day && !plan.days.length) {
-          plan.days = DAYS.map((_, day) => ({ day, enabled: true, ...plan.window }));
-        }
-        this.paintKlaar_();
-        this.afterChange_();
-      });
-    }
-
     for (const button of this.$$("#level button")) {
       button.addEventListener("click", () => {
         this.draft_.strategy.level = button.dataset.level;
@@ -528,14 +325,6 @@ class DacViewStrategy extends DacEditorElement {
       button.addEventListener("click", () => {
         this.draft_.strategy.goal = button.dataset.goal;
         this.paintLevel_();
-        this.afterChange_();
-      });
-    }
-
-    for (const button of this.$$("#klaar-priority button")) {
-      button.addEventListener("click", () => {
-        this.planFor_(this.paneDevice_, true).priority = button.dataset.priority;
-        this.paintKlaar_();
         this.afterChange_();
       });
     }
@@ -554,11 +343,6 @@ class DacViewStrategy extends DacEditorElement {
     return this.draft_.strategy.load_alert;
   }
 
-  /** The devices that can be planned. */
-  deadlineDevices_() {
-    return (this.draft_?.devices ?? []).filter(canHaveDeadline);
-  }
-
   /** A schedule for a device that no longer exists is nothing but a leftover. */
   reconcile_() {
     const schedules = this.draft_?.strategy?.schedules;
@@ -567,64 +351,6 @@ class DacViewStrategy extends DacEditorElement {
     const known = new Set((this.draft_?.devices ?? []).map((device) => device.id));
     const kept = schedules.filter((entry) => known.has(entry.device));
     if (kept.length !== schedules.length) this.draft_.strategy.schedules = kept;
-  }
-
-  /**
-   * The schedule for one device.
-   *
-   * A list rather than a map keyed by device id, because the storage prunes
-   * dictionaries against its defaults and would empty a free-form map on every
-   * load. `create` is false while only reading: adding an empty entry just
-   * because a screen was opened would light up the save bar for nothing.
-   */
-  planFor_(deviceId, create = false) {
-    const strategy = this.draft_.strategy;
-    const blank = () => ({
-      device: deviceId,
-      enabled: false,
-      per_day: false,
-      priority: "mid",
-      window: { not_before: "", start_by: "", done_by: "" },
-      days: [],
-    });
-
-    const found = (strategy.schedules ?? []).find((entry) => entry.device === deviceId);
-
-    // Reading must not write. Filling in a missing half, or creating the list
-    // itself, would count as an unsaved change -- so merely opening the screen
-    // would raise the save bar and, worse, stop it accepting settings saved
-    // anywhere else.
-    if (!create) {
-      if (!found) return blank();
-      const base = blank();
-      return { ...base, ...found, window: { ...base.window, ...(found.window ?? {}) }, days: found.days ?? [] };
-    }
-
-    if (!Array.isArray(strategy.schedules)) strategy.schedules = [];
-    if (!found) {
-      const created = blank();
-      strategy.schedules.push(created);
-      return created;
-    }
-
-    // Settings written by an older version, or by hand, may be missing a half.
-    found.window ??= { not_before: "", start_by: "", done_by: "" };
-    found.days ??= [];
-    found.priority ??= "mid";
-    return found;
-  }
-
-  /** The windows a schedule actually uses: one, or one per active day. */
-  planWindows_(plan) {
-    if (!plan.per_day) return [plan.window];
-    return plan.days.filter((day) => day.enabled);
-  }
-
-  /** Every time that is filled in, across the whole schedule. */
-  planTimes_(plan) {
-    return this.planWindows_(plan)
-      .flatMap((window) => [window?.not_before, window?.start_by, window?.done_by])
-      .filter(Boolean);
   }
 
   /**
@@ -641,23 +367,12 @@ class DacViewStrategy extends DacEditorElement {
       out.push("Zware belasting staat aan, maar er is niemand geselecteerd om het bericht naar te sturen.");
     }
 
-    for (const device of this.deadlineDevices_()) {
-      const plan = this.planFor_(device.id);
-      if (plan.enabled && !this.planTimes_(plan).length) {
-        const label = deviceLabelMap(this.draft_?.devices).get(device.id) ?? deviceLabel(device);
-        out.push(`${label} is ingepland, maar er staat geen enkele tijd in.`);
-      }
-    }
     return out;
   }
 
   /** The summary on the list is part of the same edit, so it follows along. */
   afterChange_() {
     this.paintSummaries_();
-    // The device list carries the same settings in one line, so it has to
-    // follow along: change a time in the sub-screen, step back, and the row
-    // would otherwise still describe what it said before.
-    this.paintDeviceLinks_();
     this.syncSaveBar_();
   }
 
@@ -684,7 +399,6 @@ class DacViewStrategy extends DacEditorElement {
     if (!this.rendered_) return;
     this.$("#pane-list").hidden = Boolean(this.pane_);
     for (const pane of this.$$(".pane")) pane.hidden = pane.dataset.pane !== this.pane_;
-    if (this.pane_ === "klaar") this.paintKlaar_();
     // Opening a notification from halfway down the list would otherwise start
     // halfway down its settings.
     window.scrollTo({ top: 0 });
@@ -708,370 +422,8 @@ class DacViewStrategy extends DacEditorElement {
     this.paintEnabled_();
     this.paintTargets_();
     this.paintHint_();
-    this.paintDeviceLinks_();
     this.paintSummaries_();
-    if (this.pane_ === "klaar") this.paintKlaar_();
     this.syncSaveBar_();
-  }
-
-  /**
-   * One line per appliance that runs a programme, planned or not yet.
-   *
-   * The ones that cannot be planned yet are listed too, greyed out and with the
-   * reason. Leaving them out was worse: you add a dishwasher under Apparaten,
-   * come here, and the whole card is missing with nothing to say why.
-   */
-  paintDeviceLinks_() {
-    const devices = this.planCandidates_();
-
-    // The last sentence differs per reader: an installer is sent to Apparaten,
-    // a customer cannot go there and would be looking for a section that is not
-    // in their menu.
-    this.$("#devices-hint").textContent =
-      "Binnen welke grenzen een apparaat mag draaien. Daarbinnen zoekt de coach het goedkoopste moment om te starten. Zonder enige grens is later altijd goedkoper en zou hij nooit beginnen. " +
-      (this.isAdmin_()
-        ? "Inplannen kan zodra de coach het apparaat mag aansturen; dat zet je aan bij Apparaten."
-        : "Inplannen kan zodra je installateur het apparaat aanstuurbaar heeft gemaakt.");
-
-    const holder = this.$("#device-links");
-    this.$("#devices-card").hidden = !devices.length;
-    if (!devices.length) {
-      // Emptied rather than just hidden: a row left behind here is a device
-      // that no longer exists, waiting to reappear the moment another one is
-      // added.
-      holder.replaceChildren();
-      return;
-    }
-
-    holder.innerHTML = devices
-      .map((device, index) => {
-        const ready = canHaveDeadline(device);
-        const body = `
-          <span class="mark">${icons[typeMeta(device.type).icon]}</span>
-          <span class="body">
-            <span class="head">
-              <span class="title" data-device-name="${index}"></span>
-              <span class="state" data-device-state="${index}"></span>
-            </span>
-            <span class="sum" data-device-sum="${index}"></span>
-          </span>`;
-
-        return ready
-          ? `<button class="link" type="button" data-device="${index}">${body}<span class="chev">${icons.chevronRight}</span></button>`
-          : `<div class="link off">${body}</div>`;
-      })
-      .join("");
-
-    // Numbered over the whole device list, not just the plannable ones, so
-    // "Vaatwasser 2" means the same thing here as on the overview.
-    const labels = deviceLabelMap(this.draft_?.devices);
-
-    devices.forEach((device, index) => {
-      const ready = canHaveDeadline(device);
-      const plan = this.planFor_(device.id);
-      const on = ready && Boolean(plan.enabled && this.planTimes_(plan).length);
-
-      // Names are the customer's own text, so they go in as text.
-      holder.querySelector(`[data-device-name="${index}"]`).textContent =
-        labels.get(device.id) ?? deviceLabel(device);
-
-      const state = holder.querySelector(`[data-device-state="${index}"]`);
-      state.textContent = ready ? (on ? "Aan" : "Uit") : "Kan nog niet";
-      state.classList.toggle("on", on);
-
-      holder.querySelector(`[data-device-sum="${index}"]`).textContent = ready
-        ? planSummary_(plan, on)
-        : this.whyNot_(device);
-    });
-
-    for (const link of holder.querySelectorAll("[data-device]")) {
-      const device = devices[Number(link.dataset.device)];
-      link.addEventListener("click", () => this.open_(`klaar/${device.id}`));
-    }
-  }
-
-  /** Every device that can be given a time window, steerable yet or not. */
-  planCandidates_() {
-    return (this.draft_?.devices ?? []).filter((device) =>
-      SCHEDULABLE_TYPES.includes(device.type)
-    );
-  }
-
-  /** What is standing between this appliance and being planned. */
-  whyNot_(device) {
-    if (!this.isAdmin_()) {
-      return "Dit apparaat is nog niet klaar om aangestuurd te worden. Je installateur kan dat instellen.";
-    }
-    if (brandsFor(device.type).length && !device.brand) {
-      return "Kies eerst een merk bij Apparaten.";
-    }
-    return "Zet bij Apparaten aan dat de coach dit apparaat mag aansturen.";
-  }
-
-  /** The deadline sub-screen, for whichever appliance it was opened for. */
-  paintKlaar_() {
-    if (!this.draft_ || !this.rendered_) return;
-
-    const device = this.deadlineDevices_().find((item) => item.id === this.paneDevice_);
-    // The device may be gone, or the draft may not be in yet; either way there
-    // is nothing to edit, so the list is the honest place to be.
-    if (!device) {
-      if (this.draft_) this.open_("");
-      return;
-    }
-
-    const plan = this.planFor_(device.id);
-    this.$("#klaar-eyebrow").textContent = typeMeta(device.type).label;
-    this.$("#klaar-title").textContent =
-      deviceLabelMap(this.draft_?.devices).get(device.id) ?? deviceLabel(device);
-    this.$("#klaar-intro").textContent =
-      "Zeg binnen welke grenzen de coach mag werken. Vul alleen in wat je belangrijk vindt, want elk van de drie tijden mag leeg blijven.";
-
-    this.$("#klaar-enabled").checked = Boolean(plan.enabled);
-    this.$("#klaar-fields").style.display = plan.enabled ? "" : "none";
-
-    for (const button of this.$$("#klaar-mode button")) {
-      button.setAttribute(
-        "aria-pressed",
-        String((button.dataset.mode === "per-day") === Boolean(plan.per_day))
-      );
-    }
-
-    for (const button of this.$$("#klaar-priority button")) {
-      button.setAttribute(
-        "aria-pressed",
-        String(button.dataset.priority === (plan.priority ?? "mid"))
-      );
-    }
-
-    this.$("#klaar-same").hidden = Boolean(plan.per_day);
-    this.$("#klaar-days").hidden = !plan.per_day;
-
-    if (plan.per_day) this.paintPlanDays_(plan);
-    else this.paintPlanWindow_(plan);
-
-    // Alleen waar iemand het apparaat nog moet vrijgeven. Een laadpaal niet:
-    // de kabel erin steken is daar de toestemming.
-    this.$("#klaar-release").hidden = !needsRelease(device);
-
-    this.paintKlaarNotes_();
-  }
-
-  /** Both explanations under the times: the sum, and the price horizon. */
-  paintKlaarNotes_() {
-    this.paintKlaarHint_();
-    this.paintHorizon_();
-  }
-
-  /**
-   * Warn when the deadline lies past the last price the supplier has published.
-   *
-   * A dynamic tariff is only known a day ahead: today's prices in full and
-   * tomorrow's from somewhere in the afternoon. Ask to be finished by seven
-   * tomorrow evening and there is simply no price for the hours the coach would
-   * be choosing between, so it can only plan on what it has. That is worth
-   * saying out loud -- from the settings screen it looks like a plan that is
-   * complete.
-   *
-   * It corrects itself: the moment tomorrow's prices land the warning goes.
-   */
-  paintHorizon_() {
-    const notice = this.$("#klaar-horizon");
-    notice.hidden = true;
-    if (!this.feed_) return;
-
-    const device = this.deadlineDevices_().find((item) => item.id === this.paneDevice_);
-    if (!device) return;
-
-    const plan = this.planFor_(device.id);
-    if (!plan.enabled) return;
-
-    const deadlines = plan.per_day
-      ? plan.days.filter((day) => day.enabled && day.done_by).map((day) => day.done_by)
-      : [plan.window.done_by].filter(Boolean);
-    if (!deadlines.length) return;
-
-    const forecast = priceForecast(this.feed_, this.draft_?.contract);
-    const horizon = forecast[forecast.length - 1]?.end;
-    if (!horizon) return;
-
-    const beyond = deadlines.filter((time) => {
-      const at = nextAt(time);
-      return at && at > horizon;
-    });
-    if (!beyond.length) return;
-
-    // A list that runs to midnight ends *on* the next day at 00:00, which reads
-    // as "known until tomorrow" when it means the opposite. The last moment
-    // actually covered is what the sentence is about.
-    const last = new Date(horizon.getTime() - 1);
-    const day = sameDayAsToday(last) ? "vandaag" : "morgen";
-    const when =
-      horizon.getHours() === 0 && horizon.getMinutes() === 0
-        ? `het einde van ${day}`
-        : `${day} ${clock(horizon)}`;
-    notice.hidden = false;
-    this.$("#klaar-horizon-text").textContent =
-      `De prijzen zijn bekend tot ${when}. Een klaar-tijd daarna kan de coach niet doorrekenen. ` +
-      "hij plant dan met wat hij weet, en dat is zelden het goedkoopste moment. " +
-      "De prijzen voor de volgende dag komen meestal in de loop van de middag binnen; daarna klopt de planning weer.";
-  }
-
-  /** The three times, for a schedule that is the same every day. */
-  paintPlanWindow_(plan) {
-    const holder = this.$("#klaar-same");
-    holder.innerHTML = TIMES.map(
-      (time) => `
-      <div class="row">
-        <label for="w-${time.key}">${time.label}</label>
-        <div class="time-field">
-          <input type="time" id="w-${time.key}" step="300" data-window="${time.key}">
-          <button type="button" class="wipe" data-wipe="${time.key}" aria-label="${time.label} leegmaken">${icons.close}</button>
-        </div>
-        <span class="sub">${time.hint}</span>
-      </div>`
-    ).join("");
-
-    for (const time of TIMES) {
-      const input = holder.querySelector(`[data-window="${time.key}"]`);
-      input.value = plan.window[time.key] || "";
-      input.addEventListener("input", () => {
-        this.planFor_(this.paneDevice_, true).window[time.key] = input.value;
-        this.paintKlaarNotes_();
-        this.afterChange_();
-      });
-      holder.querySelector(`[data-wipe="${time.key}"]`).addEventListener("click", () => {
-        this.planFor_(this.paneDevice_, true).window[time.key] = "";
-        input.value = "";
-        this.paintKlaarNotes_();
-        this.afterChange_();
-      });
-    }
-  }
-
-  /** The same three times, once per weekday. */
-  paintPlanDays_(plan) {
-    const holder = this.$("#klaar-days");
-    holder.innerHTML = DAYS.map(
-      (name, day) => `
-      <div class="plan-day">
-        <label class="check day" for="d-${day}">
-          <input type="checkbox" id="d-${day}" data-day="${day}">
-          <span><strong>${name}</strong></span>
-        </label>
-        <div class="day-times" data-times="${day}">
-          ${TIMES.map(
-            (time) => `
-            <div class="row">
-              <label for="d-${day}-${time.key}">${time.short}</label>
-              <div class="time-field">
-                <input type="time" id="d-${day}-${time.key}" step="300" data-day-time="${day}:${time.key}">
-                <button type="button" class="wipe" data-day-wipe="${day}:${time.key}" aria-label="${time.label} leegmaken">${icons.close}</button>
-              </div>
-            </div>`
-          ).join("")}
-        </div>
-      </div>`
-    ).join("");
-
-    for (let day = 0; day < DAYS.length; day += 1) {
-      const entry = this.planDay_(plan, day);
-      const box = holder.querySelector(`[data-day="${day}"]`);
-      box.checked = Boolean(entry.enabled);
-      holder.querySelector(`[data-times="${day}"]`).style.display = entry.enabled ? "" : "none";
-
-      box.addEventListener("change", () => {
-        this.planDay_(this.planFor_(this.paneDevice_, true), day).enabled = box.checked;
-        this.paintKlaar_();
-        this.afterChange_();
-      });
-
-      for (const time of TIMES) {
-        const input = holder.querySelector(`[data-day-time="${day}:${time.key}"]`);
-        input.value = entry[time.key] || "";
-        input.addEventListener("input", () => {
-          this.planDay_(this.planFor_(this.paneDevice_, true), day)[time.key] = input.value;
-          this.paintKlaarNotes_();
-          this.afterChange_();
-        });
-        holder
-          .querySelector(`[data-day-wipe="${day}:${time.key}"]`)
-          .addEventListener("click", () => {
-            this.planDay_(this.planFor_(this.paneDevice_, true), day)[time.key] = "";
-            input.value = "";
-            this.paintKlaarNotes_();
-            this.afterChange_();
-          });
-      }
-    }
-  }
-
-  /** One weekday of a schedule, added on demand. */
-  planDay_(plan, day) {
-    let entry = plan.days.find((item) => item.day === day);
-    if (!entry) {
-      entry = { day, enabled: true, not_before: "", start_by: "", done_by: "" };
-      plan.days.push(entry);
-      plan.days.sort((a, b) => a.day - b.day);
-    }
-    return entry;
-  }
-
-  /**
-   * What the chosen times mean for the appliance in front of you.
-   *
-   * The program's length comes from the panel's own table of specifications, so
-   * it is spelled out as an estimate -- the point is that "klaar om 07:00"
-   * turns into a moment the machine has to be started, which is the thing that
-   * decides whether the time is realistic at all.
-   */
-  paintKlaarHint_() {
-    const hint = this.$("#klaar-hint");
-    const device = this.deadlineDevices_().find((item) => item.id === this.paneDevice_);
-    if (!device) return;
-
-    const plan = this.planFor_(device.id);
-    if (!this.planTimes_(plan).length) {
-      hint.textContent =
-        "Nog geen tijd ingevuld. Zolang er geen enkele grens staat, is later altijd goedkoper en begint de coach nooit.";
-      return;
-    }
-
-    const program = this.selectedProgram_(device);
-    const doneBy = plan.per_day
-      ? plan.days.find((day) => day.enabled && day.done_by)?.done_by
-      : plan.window.done_by;
-
-    if (!doneBy) {
-      hint.textContent =
-        "De coach kiest binnen deze grenzen het goedkoopste moment om te starten.";
-      return;
-    }
-    // A charger has no programme to work back from: how long a car takes
-    // depends on the car, how empty it is and what the charger may deliver.
-    // Promising a start time here would be a number nobody can stand behind.
-    if (!PROGRAM_TYPES.includes(device.type)) {
-      hint.textContent = `De auto moet om ${doneBy} opgeladen zijn. Hoe lang dat duurt hangt van de auto af, dus de coach begint zo vroeg als nodig is en laadt bij voorkeur op de goedkoopste uren daarvoor.`;
-      return;
-    }
-    if (!program) {
-      hint.textContent =
-        "Klaar om is het einde van het programma, niet het begin. Hoe lang het duurt leest de coach van het apparaat af.";
-      return;
-    }
-
-    const [hours, minutes] = doneBy.split(":").map(Number);
-    const start = new Date();
-    start.setHours(hours, minutes - program.minutes, 0, 0);
-
-    hint.textContent = `${program.label} duurt ongeveer ${duration(program.minutes)}, dus starten moet uiterlijk om ${clock(start)}.`;
-  }
-
-  /** The program the appliance has standing by, if the panel knows it. */
-  selectedProgram_(device) {
-    const entityId = device?.entities?.program;
-    if (!entityId || !this.feed_) return undefined;
-    return programFor(this.feed_.get(entityId)?.state);
   }
 
 
