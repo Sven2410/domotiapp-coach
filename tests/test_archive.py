@@ -44,6 +44,8 @@ helpers = types.ModuleType("homeassistant.helpers")
 gebeurtenis = types.ModuleType("homeassistant.helpers.event")
 gebeurtenis.async_track_state_change_event = lambda *a, **k: (lambda: None)
 gebeurtenis.async_track_time_interval = lambda *a, **k: (lambda: None)
+starthulp = types.ModuleType("homeassistant.helpers.start")
+starthulp.async_at_started = lambda *a, **k: (lambda: None)
 opslag = types.ModuleType("homeassistant.helpers.storage")
 opslag.Store = type("Store", (), {"__init__": lambda self, *a, **k: None})
 
@@ -60,6 +62,7 @@ sys.modules.update({
     "homeassistant.core": core,
     "homeassistant.helpers": helpers,
     "homeassistant.helpers.event": gebeurtenis,
+    "homeassistant.helpers.start": starthulp,
     "homeassistant.helpers.storage": opslag,
     "homeassistant.util": util,
     "homeassistant.util.dt": dtutil,

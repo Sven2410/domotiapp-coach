@@ -54,6 +54,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
 )
+from homeassistant.helpers.start import async_at_started
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, EVENT_SETTINGS_UPDATED
@@ -85,6 +86,12 @@ PURGE = timedelta(hours=24)
 # een ruimere instelling nog ligt. Verder terug bestaat alleen per uur, en van
 # uurblokken kwartieren maken zou getallen opleveren die nooit gemeten zijn.
 CATCHUP = timedelta(days=14)
+
+# Hoe lang er geprobeerd wordt de inhaalslag alsnog te doen. Bij het opstarten
+# van Home Assistant is de recorder er vaak nog niet, en dat is precies wanneer
+# deze code voor het eerst draait. Na een dag houdt het op: de blokjes van toen
+# zijn dan toch opgeruimd.
+CATCHUP_GIVE_UP = timedelta(hours=24)
 
 _TABEL = """
 CREATE TABLE IF NOT EXISTS kwartieren (
@@ -217,6 +224,11 @@ class Archive:
         self._meters: dict[str, _Meter] = {}
         self._uit: list[Any] = []
         self._laatste_purge: datetime | None = None
+        # Wat er nog uit Home Assistant overgenomen moet worden, en sinds
+        # wanneer dat probeersel loopt. Zie `_async_inhalen`.
+        self._inhalen: set[str] = set()
+        self._inhalen_sinds: datetime | None = None
+        self._inhalen_gemeld = False
 
     # --- opzetten en afbreken ---------------------------------------------
 
@@ -224,6 +236,12 @@ class Archive:
         """De tabel klaarzetten en gaan luisteren."""
         await self.hass.async_add_executor_job(self._maak_tabel)
         await self._async_volg()
+
+        # De inhaalslag pas als Home Assistant helemaal op is. Deze code draait
+        # bij het opstarten, en dan is de recorder er vaak nog niet; dat was op
+        # 28-08-2026 precies waarom er bij de eerste klant niets overgenomen
+        # werd. Draait hij al, dan gaat dit meteen af.
+        self._uit.append(async_at_started(self.hass, self._async_opgestart))
 
         self._uit.append(
             self.hass.bus.async_listen(EVENT_SETTINGS_UPDATED, self._async_instellingen)
@@ -239,6 +257,12 @@ class Archive:
         self._uit = []
 
     # --- welke sensoren -----------------------------------------------------
+
+    async def _async_opgestart(self, _hass: HomeAssistant | None = None) -> None:
+        """Home Assistant is helemaal op; nu pas kan de recorder bevraagd worden."""
+        await self._async_inhalen(
+            dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
+        )
 
     async def _async_instellingen(self, _event: Event | None = None) -> None:
         """De instellingen zijn gewijzigd, dus mogelijk ook wat er gevolgd wordt."""
@@ -263,7 +287,10 @@ class Archive:
             self._lees(self._meters[entity_id], nu)
 
         if nieuwe:
-            await self._async_inhalen(nieuwe, nu)
+            self._inhalen.update(nieuwe)
+            if self._inhalen_sinds is None:
+                self._inhalen_sinds = nu
+            await self._async_inhalen(nu)
 
         # Eén luisteraar voor alles, opnieuw opgehangen. Losse luisteraars per
         # sensor bijhouden is meer boekhouding dan het waard is.
@@ -301,7 +328,7 @@ class Archive:
 
     # --- de inhaalslag bij de eerste keer -----------------------------------
 
-    async def _async_inhalen(self, entity_ids: list[str], nu: datetime) -> None:
+    async def _async_inhalen(self, nu: datetime) -> None:
         """Wat Home Assistant zelf nog heeft alsnog overnemen.
 
         Anders begint de geschiedenis pas op de dag dat de klant bijwerkt, en
@@ -318,16 +345,41 @@ class Archive:
         Loopt dit stuk, om wat voor reden dan ook, dan is dat geen ramp: dan
         begint de geschiedenis gewoon bij nu.
         """
+        if not self._inhalen:
+            return
+
+        # Na een dag proberen houdt het op. Wat er dan nog niet is, komt er niet
+        # meer: de vijfminutenblokken van toen zijn inmiddels opgeruimd.
+        if self._inhalen_sinds is not None and nu - self._inhalen_sinds > CATCHUP_GIVE_UP:
+            _LOGGER.warning(
+                "geschiedenis: de inhaalslag is opgegeven voor %s; "
+                "de geschiedenis begint vanaf nu",
+                ", ".join(sorted(self._inhalen)),
+            )
+            self._inhalen.clear()
+            return
+
         alleen_lege = await self.hass.async_add_executor_job(
-            self._zonder_regels, entity_ids
+            self._zonder_regels, sorted(self._inhalen)
         )
         if not alleen_lege:
+            self._inhalen.clear()
             return
 
         try:
             rijen = await self._async_uit_recorder(alleen_lege, nu)
         except Exception as fout:  # noqa: BLE001 - de recorder-API wisselt per versie
-            _LOGGER.debug("de inhaalslag ging niet door: %s", fout)
+            # Eén keer melden en dan blijven proberen. Bij het opstarten van
+            # Home Assistant is de recorder er vaak nog niet, en dat is precies
+            # het moment waarop deze code voor het eerst draait; dat is dus een
+            # reden om het straks nog eens te doen en niet om te stoppen.
+            if not self._inhalen_gemeld:
+                self._inhalen_gemeld = True
+                _LOGGER.warning(
+                    "geschiedenis: de inhaalslag lukte nog niet (%s); "
+                    "hij wordt bij de volgende ronde opnieuw geprobeerd",
+                    fout,
+                )
             return
 
         if rijen:
@@ -337,6 +389,7 @@ class Archive:
                 len(rijen),
                 ", ".join(alleen_lege),
             )
+        self._inhalen.difference_update(alleen_lege)
 
     def _zonder_regels(self, entity_ids: list[str]) -> list[str]:
         """Welke van deze sensoren nog helemaal niets in de opslag hebben."""
@@ -360,8 +413,10 @@ class Archive:
             statistics_during_period,
         )
 
-        begin = dt_util.as_utc(dt_util.as_local(nu - CATCHUP))
-        einde = dt_util.as_utc(dt_util.as_local(nu))
+        # `nu` is naïef lokaal. `as_local` van Home Assistant leest een naïeve
+        # tijd als UTC, dus die eerst een tijdzone geven en dan pas omrekenen.
+        einde = dt_util.as_utc(nu.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE))
+        begin = einde - CATCHUP
         gevonden = await get_instance(self.hass).async_add_executor_job(
             statistics_during_period,
             self.hass,
@@ -472,6 +527,10 @@ class Archive:
                         seconden,
                     )
                 )
+
+        # De recorder is bij het opstarten vaak nog niet zover, en juist dan
+        # draait de inhaalslag voor het eerst. Dus elke ronde nog een poging.
+        await self._async_inhalen(nu)
 
         opruimen = self._laatste_purge is None or nu - self._laatste_purge >= PURGE
         if opruimen:
