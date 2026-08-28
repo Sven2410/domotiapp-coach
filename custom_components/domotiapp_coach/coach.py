@@ -59,6 +59,7 @@ from .planner import (
     should_send,
 )
 from .storage import async_get_store
+from .units import to_kwh, to_watts
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -172,6 +173,26 @@ def _number(hass: HomeAssistant, entity_id: str | None) -> float | None:
         return float(state.state)
     except (TypeError, ValueError):
         return None
+
+
+def _unit(hass: HomeAssistant, entity_id: str | None) -> str | None:
+    """De eenheid die deze entiteit zelf opgeeft."""
+    state = hass.states.get(entity_id) if entity_id else None
+    return None if state is None else state.attributes.get("unit_of_measurement")
+
+
+def _watts(hass: HomeAssistant, entity_id: str | None) -> float | None:
+    """Een vermogenssensor in watt, wat hij zichzelf ook noemt.
+
+    Alles wat vermogen is gaat hierlangs en niet langs `_number`. Zie
+    `units.py` voor waarom dat een klant een laadbeurt kon kosten.
+    """
+    return to_watts(_number(hass, entity_id), _unit(hass, entity_id))
+
+
+def _kwh(hass: HomeAssistant, entity_id: str | None) -> float | None:
+    """Een energiesensor in kilowattuur, wat hij zichzelf ook noemt."""
+    return to_kwh(_number(hass, entity_id), _unit(hass, entity_id))
 
 
 def _text(hass: HomeAssistant, entity_id: str | None) -> str:
@@ -1013,13 +1034,13 @@ class ChargerCoach:
         bron = (settings.get("sources") or {}).get("solar_forecast") or {}
 
         def uur(sleutel: str) -> float | None:
-            kwh = _number(self.hass, bron.get(sleutel))
+            kwh = _kwh(self.hass, bron.get(sleutel))
             return None if kwh is None else kwh * 1000.0
 
         return Sun(
             now_w=uur("this_hour"),
             next_w=uur("next_hour"),
-            remaining_kwh=_number(self.hass, bron.get("remaining_today")),
+            remaining_kwh=_kwh(self.hass, bron.get("remaining_today")),
         )
 
     @staticmethod
@@ -1088,17 +1109,17 @@ class ChargerCoach:
         # er 4 kW zon over is. Liever de rauwe teruglevering dan een optelsom van
         # iets wat hij niet kan zien.
         if sources.get("grid_mode") == "signed":
-            signed = _number(self.hass, sources.get("grid_signed")) or 0.0
+            signed = _watts(self.hass, sources.get("grid_signed")) or 0.0
             if sources.get("grid_signed_invert"):
                 signed = -signed
             netto, compleet = -signed, True
         else:
-            export = _number(self.hass, sources.get("grid_export"))
-            invoer = _number(self.hass, sources.get("grid_import"))
+            export = _watts(self.hass, sources.get("grid_export"))
+            invoer = _watts(self.hass, sources.get("grid_import"))
             netto = (export or 0.0) - (invoer or 0.0)
             compleet = export is not None and invoer is not None
 
-        laadvermogen = _number(self.hass, device.get("entity")) or 0.0
+        laadvermogen = _watts(self.hass, device.get("entity")) or 0.0
         surplus = max(0.0, netto + laadvermogen if compleet else max(0.0, netto))
         surplus = self._smooth(device.get("id", ""), surplus, now)
 
@@ -1107,7 +1128,7 @@ class ChargerCoach:
             phase = (sources.get("phases") or {}).get(key) or {}
             amps = _number(self.hass, phase.get("current"))
             if amps is None:
-                watts = _number(self.hass, phase.get("power"))
+                watts = _watts(self.hass, phase.get("power"))
                 volts = _number(self.hass, phase.get("voltage")) or 230
                 amps = watts / volts if watts is not None and volts else None
             if amps is not None:
@@ -1462,7 +1483,7 @@ class ChargerCoach:
         # afloop op zijn laatste waarde blijft hangen zou anders doortellen.
         if sessie.get("liep") and 0 < stap <= 10:
             sessie["gemeten_kwh"] += sessie.get("watt", 0.0) / 1000.0 * stap / 60.0
-        sessie["watt"] = _number(self.hass, device.get("entity")) or 0.0
+        sessie["watt"] = _watts(self.hass, device.get("entity")) or 0.0
         sessie["liep"] = charger.charging
         if meter is not None and meter != sessie.get("meter_stand"):
             sessie["meter_stand"] = meter
@@ -1738,7 +1759,7 @@ class ChargerCoach:
         entiteit = (device.get("entities") or {}).get("lifetime_energy") or device.get(
             "energy_entity"
         )
-        return _number(self.hass, entiteit)
+        return _kwh(self.hass, entiteit)
 
     def _fasetip(
         self, settings: dict[str, Any], device: dict[str, Any], charger: Charger
@@ -1777,7 +1798,7 @@ class ChargerCoach:
     def _measured_phases(self, device: dict[str, Any]) -> int | None:
         """One phase or three, worked out from what the charger reports."""
         entities = device.get("entities") or {}
-        watts = _number(self.hass, device.get("entity"))
+        watts = _watts(self.hass, device.get("entity"))
         amps = _number(self.hass, entities.get("current"))
         if not watts or not amps or amps < 1:
             return None

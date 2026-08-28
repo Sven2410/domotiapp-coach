@@ -30,12 +30,9 @@ from homeassistant.util import dt as dt_util
 
 from .const import EVENT_SETTINGS_UPDATED, GRID_MODE_SIGNED
 from .storage import async_get_store
+from .units import to_watts
 
 _LOGGER = logging.getLogger(__name__)
-
-# Same normalisation as the frontend: what a sensor calls itself is not our
-# problem, and guessing kW where it means W is a factor of a thousand.
-_POWER_TO_WATT = {"w": 1.0, "kw": 1_000.0, "mw": 1_000_000.0}
 
 # Used when a phase reports power but not volts.
 _NOMINAL_VOLTS = 230.0
@@ -52,12 +49,14 @@ def _number(state: State | None) -> float | None:
 
 
 def _watts(state: State | None) -> float | None:
-    """Read a state as watts, whatever unit it reports."""
-    value = _number(state)
-    if value is None:
+    """Read a state as watts, whatever unit it reports.
+
+    Dezelfde omrekening als de coach en het paneel, uit `units.py`, zodat de
+    drie het nooit oneens kunnen worden over wat een kilowatt is.
+    """
+    if state is None:
         return None
-    unit = str(state.attributes.get("unit_of_measurement", "")).strip().lower()
-    return value * _POWER_TO_WATT.get(unit, 1.0)
+    return to_watts(_number(state), state.attributes.get("unit_of_measurement"))
 
 
 @dataclass
