@@ -17,6 +17,7 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.util import dt as dt_util
 
 from . import report
 from .const import (
@@ -548,6 +549,41 @@ async def async_set_car_soc(
     connection.send_result(msg["id"], settings)
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/history/quarters",
+        vol.Required("entity_ids"): [str],
+        vol.Required("start"): str,
+        vol.Required("end"): str,
+    }
+)
+@websocket_api.async_response
+async def async_history_quarters(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Het laagste, de piek en het gemiddelde per kwartier, uit de eigen opslag.
+
+    De recorder van Home Assistant bewaart fijner dan een uur maar tien dagen.
+    Dit gaat twee jaar terug, en dat is precies waarvoor `archive.py` bestaat.
+    """
+    from .archive import async_get_archive
+
+    start = dt_util.parse_datetime(msg["start"])
+    einde = dt_util.parse_datetime(msg["end"])
+    if start is None or einde is None:
+        connection.send_error(msg["id"], "invalid_format", "start of end is geen tijd")
+        return
+
+    rijen = await async_get_archive(hass).async_lees(
+        msg["entity_ids"],
+        dt_util.as_local(start).replace(tzinfo=None),
+        dt_util.as_local(einde).replace(tzinfo=None),
+    )
+    connection.send_result(msg["id"], rijen)
+
+
 @websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/coach/state"})
 @callback
 def async_coach_state(
@@ -698,6 +734,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_set_device_schedule)
     websocket_api.async_register_command(hass, async_set_active_car)
     websocket_api.async_register_command(hass, async_set_car_soc)
+    websocket_api.async_register_command(hass, async_history_quarters)
     websocket_api.async_register_command(hass, async_coach_state)
     websocket_api.async_register_command(hass, async_coach_approve)
     websocket_api.async_register_command(hass, async_coach_boost)
