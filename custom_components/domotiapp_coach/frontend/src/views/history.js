@@ -245,15 +245,21 @@ class DacViewHistory extends DacElement {
         </header>
 
         <div class="controls">
-          <div class="segmented" id="periods">
+          <div class="keuze">
+            <span class="keuze-kop">Periode</span>
+            <div class="segmented" id="periods">
             ${PERIODS.map(
               (item) => `<button type="button" data-period="${item.id}" aria-pressed="false">${item.label}</button>`
             ).join("")}
+            </div>
           </div>
-          <div class="segmented detail" id="korrels" title="Hoe fijn het verloop in het rapport komt te staan">
-            ${KORREL_KNOPPEN.map(
-              (item) => `<button type="button" data-korrel="${item.id}" aria-pressed="false">${item.label}</button>`
-            ).join("")}
+          <div class="keuze">
+            <span class="keuze-kop">Verloop in het rapport</span>
+            <div class="segmented detail" id="korrels" title="Hoe fijn het verloop in het rapport komt te staan">
+              ${KORREL_KNOPPEN.map(
+                (item) => `<button type="button" data-korrel="${item.id}" aria-pressed="false">${item.label}</button>`
+              ).join("")}
+            </div>
           </div>
           <button type="button" class="download" id="report" title="Een rapport om te bewaren of te printen">
             ${icons.compass}<span>Rapport</span>
@@ -724,9 +730,19 @@ class DacViewHistory extends DacElement {
 
     const woning = (this.settings_?.installation?.home_name ?? "").trim();
     const periode = periodLabel(this.period_, periodStart(this.period_, this.offset_));
-    const korrel = { day: "Per uur", week: "Per dag", month: "Per dag", year: "Per maand" }[
+    // Er staan twee fijnheden in dit rapport en die zijn niet hetzelfde: de
+    // grafiek en Alle cijfers volgen de periode, het verloop volgt wat de klant
+    // gekozen heeft. "Per uur" in de kop terwijl er Kwartier aanstond leest als
+    // een fout, ook al klopte het over de grafiek. Dus staat er nu bij waar het
+    // over gaat.
+    const grafiekKorrel = { day: "uur", week: "dag", month: "dag", year: "maand" }[
       this.period_
     ];
+    const detailKorrel = KORRELS[this.korrel_id()]?.kop.toLowerCase();
+    const korrel =
+      detailKorrel && detailKorrel !== grafiekKorrel
+        ? `Grafiek per ${grafiekKorrel}, verloop per ${detailKorrel}`
+        : `Per ${grafiekKorrel}`;
 
     const cel = (label, waarde) => ({ label, waarde });
 
@@ -1371,8 +1387,18 @@ DacViewHistory.css = /* css */ `
   .intro h1 { margin: 6px 0 0; font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
   .intro p { margin: 8px 0 0; font-size: 14px; line-height: 1.6; color: var(--dac-ink-2); max-width: 70ch; }
 
-  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  /* Uitlijnen op de onderkant, want de knoppenrijen dragen nu een opschrift en
+     de knop Rapport en de bladerpijlen niet. Op de bovenkant uitlijnen zou die
+     laatste twee boven de knoppen laten zweven. */
+  .controls { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
 
+  /* Twee rijen knoppen naast elkaar zijn niet uit zichzelf te onderscheiden.
+     Zonder opschrift lijkt Maand bij Periode en bij Verloop hetzelfde ding. */
+  .keuze { display: flex; flex-direction: column; gap: 4px; }
+  .keuze-kop {
+    font-size: 11px; font-weight: 600; letter-spacing: .02em;
+    color: var(--dac-ink-3); text-transform: uppercase;
+  }
   .segmented { display: flex; gap: 6px; flex-wrap: wrap; }
   .segmented.detail button[disabled] { opacity: .4; cursor: default; }
   .korrel-note { margin: -4px 0 12px; }
