@@ -33,7 +33,9 @@ def entiteiten():
             "limiet": ent.get("dynamic_limit"),
             "maxlimiet": ent.get("max_limit"),
             "reden": ent.get("no_current_reason"),
-            "teller": ent.get("lifetime_energy"),
+            # De levensduurteller staat bij het apparaat zelf zodra het paneel
+            # hem daar heeft staan; ouder werk zette hem tussen de entiteiten.
+            "teller": ent.get("lifetime_energy") or apparaat.get("energy_entity"),
         })
         for auto in apparaat.get("cars") or []:
             if auto.get("soc_entity"):
@@ -68,7 +70,8 @@ def attr(st, key, naam):
 
 
 def txt(st, key):
-    s = st.get(E[key])
+    # Niet elke installatie heeft elke sensor; een ontbrekende naam is geen fout.
+    s = st.get(E.get(key))
     return s["state"] if s else "?"
 
 def meet(st):
