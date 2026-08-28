@@ -106,6 +106,11 @@ CREATE TABLE IF NOT EXISTS kwartieren (
 """
 
 
+# Vóór deze datum bestond er geen meting die hier thuishoort. Een tijdstempel
+# die eronder valt komt uit een rekenfout en niet uit een meter.
+ONDERGRENS = datetime(2015, 1, 1)
+
+
 def bucket_start(moment: datetime) -> datetime:
     """Het begin van het kwartier waar dit moment in valt."""
     return moment.replace(
@@ -447,12 +452,26 @@ class Archive:
                 if gem is None:
                     continue
                 ruw = blokje["start"]
+                # De recorder geeft hier seconden sinds 1970, als kommagetal.
+                # Het websocketcommando van Home Assistant geeft voor hetzelfde
+                # veld milliseconden, en die vorm had ik overgenomen. Daardoor
+                # kwamen alle kwartieren in januari 1970 terecht en veegde de
+                # eerste opruimronde ze meteen weer weg: nul regels, geen fout,
+                # niets in het logboek. Gevonden bij de eerste klant op
+                # 28-08-2026, door de broncode van zijn HA-versie erbij te halen.
                 moment = dt_util.as_local(
-                    dt_util.utc_from_timestamp(ruw / 1000)
+                    dt_util.utc_from_timestamp(ruw)
                     if isinstance(ruw, (int, float))
                     else ruw
                 ).replace(tzinfo=None)
-                sleutel = (entity_id, bucket_start(moment))
+                begin = bucket_start(moment)
+                if begin < ONDERGRENS:
+                    # Een tijdstempel die nergens op slaat is geen meting. Liever
+                    # overslaan dan een regel wegschrijven die niemand kan
+                    # plaatsen; precies deze regel had de fout hierboven meteen
+                    # aan het licht gebracht.
+                    continue
+                sleutel = (entity_id, begin)
                 emmer = emmers.setdefault(sleutel, [None, None, 0.0, 0.0])
                 laag = blokje.get("min")
                 hoog = blokje.get("max")
