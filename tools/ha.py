@@ -9,7 +9,7 @@ Gebruik:
 
     import ha
     ha.states()                      # de installatie uit HA_INSTALLATIE, of "thuis"
-    ha.kies("klant-jansen")          # overstappen naar een andere
+    ha.kies("jansen")          # overstappen naar een andere
     ha.get("/api/config")
 
 Het tokenbestand is vormvrij: wat op een JWT lijkt is het token, en alles wat op
