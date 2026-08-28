@@ -42,7 +42,17 @@ import {
   resetLayout,
   saveLayout,
 } from "../layout.js";
-import { clock, level, levelTone, percent, power, powerText, price as fmtPrice } from "../format.js";
+import {
+  clock,
+  level,
+  levelTone,
+  percent,
+  power,
+  powerText,
+  price as fmtPrice,
+  signedPower,
+  zonderMinNul,
+} from "../format.js";
 import { sheetCss } from "../theme.js";
 import "../components/stat-tile.js";
 import "../components/energy-flow.js";
@@ -1930,15 +1940,26 @@ class DacViewOverview extends DacElement {
         // customer who mapped only one of the two still gets a reading.
         const share =
           fuse > 0 && Number.isFinite(phase.amps) ? (phase.amps / fuse) * 100 : null;
-        const pct = share === null ? 0 : Math.min(share, 100);
+        // Teruglevering laadt de zekering niet zoals afname dat doet, en een
+        // balk kan sowieso niet korter dan niets. Zonder deze bodem werd het
+        // `width: -0.1%`, en dat is geen breedte maar ongeldige CSS.
+        const pct = share === null ? 0 : Math.min(Math.max(share, 0), 100);
         const tone = levelTone(level(share, bounds, true));
 
         // Only what is actually measured is printed. A derived value would look
         // like a reading from a sensor that is not there.
+        //
+        // Hier houden de getallen hun teken, anders dan elders in het paneel:
+        // op deze kaart staat er geen pijl en geen kleur bij, en dan is de min
+        // het enige dat zegt dat die fase juist terugleverde. Stond het teken
+        // wel bij de ampères en niet bij de watts, dan spraken de twee getallen
+        // op een regel elkaar tegen.
         const bits = [];
-        if (Number.isFinite(phase.current)) bits.push(`<b>${nl(phase.current, 1)}</b> A`);
+        if (Number.isFinite(phase.current)) {
+          bits.push(`<b>${nl(zonderMinNul(phase.current, 1), 1)}</b> A`);
+        }
         if (Number.isFinite(phase.power)) {
-          const { value, unit } = power(phase.power);
+          const { value, unit } = signedPower(phase.power);
           bits.push(`<b>${value}</b> ${unit}`);
         }
         if (Number.isFinite(phase.voltage)) bits.push(`<b>${nl(phase.voltage, 0)}</b> V`);

@@ -93,6 +93,38 @@ export function power(watts) {
   return { value: num(abs / 1_000, 2), unit: "kW" };
 }
 
+/**
+ * Hetzelfde vermogen, maar met het teken erbij.
+ *
+ * `power` laat het teken weg, en op de meeste plekken in het paneel klopt dat:
+ * daar zegt een kleur of een pijl al welke kant het op gaat. Op de fasekaart
+ * staat het getal alleen, en dan is het teken het enige dat de richting nog
+ * vertelt.
+ *
+ * Het teken komt er alleen bij als er na afronden ook werkelijk iets staat. Een
+ * meting van -0,4 W is "0 W" en niet "-0 W": een min voor een nul leest als een
+ * fout terwijl er niets fout is.
+ */
+export function signedPower(watts) {
+  const uit = power(watts);
+  if (!Number.isFinite(watts) || watts > -0.5) return uit;
+  return { value: `-${uit.value}`, unit: uit.unit };
+}
+
+/**
+ * Afronden zonder dat er een negatieve nul overblijft.
+ *
+ * Een stroom van -0,017 A wordt op een decimaal "-0,0", en dat is precies zo'n
+ * getal waar een klant over belt. Gevonden bij de eerste woning met een P1 die
+ * per fase een teken meegeeft.
+ */
+export function zonderMinNul(value, digits = 1) {
+  if (!Number.isFinite(value)) return value;
+  const factor = 10 ** digits;
+  const afgerond = Math.round(value * factor) / factor;
+  return afgerond === 0 ? 0 : afgerond;
+}
+
 /** The same reading as one string, for labels and sentences. */
 export function powerText(watts) {
   const { value, unit } = power(watts);
