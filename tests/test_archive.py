@@ -53,8 +53,13 @@ util = types.ModuleType("homeassistant.util")
 dtutil = types.ModuleType("homeassistant.util.dt")
 dtutil.now = lambda: dt.datetime.now()
 dtutil.utcnow = lambda: dt.datetime.now(dt.timezone.utc)
-dtutil.as_local = lambda moment: moment
 dtutil.parse_datetime = lambda w: dt.datetime.fromisoformat(w)
+dtutil.utc_from_timestamp = lambda ts: dt.datetime.fromtimestamp(ts, dt.timezone.utc)
+dtutil.as_utc = lambda m: m.astimezone(dt.timezone.utc)
+dtutil.DEFAULT_TIME_ZONE = dt.datetime.now().astimezone().tzinfo
+# Zoals Home Assistant het doet: een tijd met zone naar lokale tijd, en een
+# naieve tijd als UTC lezen.
+dtutil.as_local = lambda m: m.astimezone() if m.tzinfo else m
 util.dt = dtutil
 
 sys.modules.update({
@@ -276,6 +281,28 @@ leeg = {"sensor.proef": [ms(0, 1.0, 2.0, None), ms(5, 50.0, 400.0, 200.0)]}
 uit = archive.Archive.kwartieren_uit_blokjes(leeg)
 controle("een blokje zonder gemiddelde wordt overgeslagen",
          len(uit) == 1 and uit[0][5] == 300.0, f"{uit}")
+
+print("=== 9. de recorder telt in seconden, niet in milliseconden ===")
+# Deze proef bestaat omdat het bij de eerste klant precies hier misging. Het
+# websocketcommando van Home Assistant geeft `start` in milliseconden, de
+# Python-API in seconden. Die vorm had ik overgenomen, en dus kwamen alle
+# kwartieren in januari 1970 terecht; de eerste opruimronde veegde ze weg en er
+# stond nul in de opslag zonder dat er iets fout leek te gaan.
+sec = dt.datetime(2026, 8, 28, 14, 0).timestamp()
+uit = archive.Archive.kwartieren_uit_blokjes(
+    {"sensor.proef": [{"start": sec, "min": 10.0, "max": 90.0, "mean": 50.0}]}
+)
+controle("een tijdstempel in seconden landt op het goede kwartier",
+         bool(uit) and uit[0][1] == int(sec), f"{uit}")
+if uit:
+    print(f"  {sec:.0f} -> {dt.datetime.fromtimestamp(uit[0][1]):%d-%m-%Y %H:%M}")
+
+# En de ondergrens vangt de fout die dit was, mocht hij ooit terugkomen.
+in_ms = {"sensor.proef": [{"start": sec * 1000 / 1_000_000, "min": 1.0, "max": 2.0,
+                           "mean": 1.5}]}
+controle("een tijdstempel uit 1970 wordt niet weggeschreven",
+         archive.Archive.kwartieren_uit_blokjes(in_ms) == [],
+         f"{archive.Archive.kwartieren_uit_blokjes(in_ms)}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
