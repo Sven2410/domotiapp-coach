@@ -415,6 +415,14 @@ export async function reportPdf(gegevens) {
     vel.uitleg(gegevens.apparaten.uitleg);
   }
 
+  if (gegevens.vermogen?.rijen?.length) {
+    // Bewust na "Per apparaat" en voor "Alle cijfers": eerst waar de stroom
+    // heen ging, dan hoe hard het ging, dan de tabel voor wie het narekent.
+    vel.kop("Vermogen en pieken");
+    schrijfTabel(pdf, vel, gegevens.vermogen.kop, gegevens.vermogen.rijen);
+    vel.uitleg(gegevens.vermogen.uitleg);
+  }
+
   if (gegevens.cijfers?.rijen?.length) {
     vel.kop("Alle cijfers");
     schrijfTabel(

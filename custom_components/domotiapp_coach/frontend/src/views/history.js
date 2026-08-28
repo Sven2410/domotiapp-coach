@@ -17,7 +17,7 @@
 
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
-import { energy, euro, percent } from "../format.js";
+import { energy, euro, percent, power } from "../format.js";
 import { deviceLabel, deviceLabelMap } from "../devices.js";
 
 /** Het merkteken op het rapport. */
@@ -31,8 +31,11 @@ import {
   fetchDevices,
   fetchPeriod,
   fetchPrices,
+  periodEnd,
   periodLabel,
   periodStart,
+  quarters,
+  samenvatting,
   withStatistics,
 } from "../statistics.js";
 
@@ -59,6 +62,19 @@ function bucketTitle(period, date) {
   }
   if (period === "year") return date.toLocaleDateString("nl-NL", { month: "long", year: "numeric" });
   return date.toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long" });
+}
+
+/**
+ * Wanneer een piek viel, zo kort als in deze periode nog eenduidig is.
+ *
+ * Op een dagrapport is de klok genoeg. Over een week of langer is het tijdstip
+ * zonder de dag erbij niets waard: "19:45" zegt dan niet welke avond.
+ */
+function piekMoment(period, date) {
+  const klok = date.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" });
+  if (period === "day") return klok;
+  const dag = date.toLocaleDateString("nl-NL", { day: "numeric", month: "short" });
+  return `${dag.replace(".", "")} ${klok}`;
 }
 
 /** What each bucket is called under the chart. */
@@ -524,7 +540,7 @@ class DacViewHistory extends DacElement {
    * niets, zodat een verandering aan de bladspiegel nooit per ongeluk een getal
    * verandert en andersom.
    */
-  reportData_() {
+  async reportData_() {
     const rows = this.rowsShown_ ?? [];
     if (!rows.length) return null;
 
@@ -660,7 +676,77 @@ class DacViewHistory extends DacElement {
         sold: row.sold,
       })),
       apparaten: { kop: apparaatKop, rijen: apparaatRijen, uitleg: apparaatUitleg },
+      vermogen: await this.vermogenRijen_(),
       cijfers: { kop, rijen: regels, totaal: totaalCellen },
+    };
+  }
+
+  /**
+   * Het laagste, het gemiddelde en de piek per sensor, uit de eigen opslag.
+   *
+   * Een som in kWh zegt hoeveel er door de meter ging; dit zegt hoe hard het
+   * op zijn zwaarst ging, en dat is een andere vraag. Een huis dat over een dag
+   * netjes binnen zijn aansluiting blijft kan er om zeven uur 's avonds vlak
+   * tegenaan hebben gezeten, en dat is precies wat er niet in een dagtotaal te
+   * zien is.
+   *
+   * De piek is de hoogste waarde die de sensor zelf gemeld heeft, dus zo scherp
+   * als de meter van deze klant is.
+   */
+  async vermogenRijen_() {
+    const bronnen = this.settings_?.sources ?? {};
+    const namen = deviceLabelMap(this.settings_?.devices ?? []);
+
+    const wilde = [
+      { entity: bronnen.grid_import, label: "Van het net" },
+      { entity: bronnen.grid_export, label: "Naar het net" },
+      { entity: bronnen.solar, label: "Zon" },
+      ...(this.settings_?.devices ?? []).map((device) => ({
+        entity: device.entity,
+        label: namen.get(device.id) ?? deviceLabel(device),
+      })),
+    ].filter((rij) => rij.entity);
+
+    if (!wilde.length) return null;
+
+    const start = periodStart(this.period_, this.offset_);
+    const gevonden = await quarters(
+      this.hass_,
+      wilde.map((rij) => rij.entity),
+      start,
+      periodEnd(this.period_, start)
+    );
+
+    const watt = (value) => {
+      if (!Number.isFinite(value)) return "";
+      const { value: getal, unit } = power(value);
+      return `${getal} ${unit}`;
+    };
+
+    const rijen = [];
+    for (const { entity, label } of wilde) {
+      const vat = samenvatting(gevonden.get(entity));
+      if (!vat) continue;
+      rijen.push([
+        label,
+        watt(vat.laagste),
+        watt(vat.gemiddeld),
+        watt(vat.piek),
+        vat.piekOp ? piekMoment(this.period_, vat.piekOp) : "",
+      ]);
+    }
+
+    if (!rijen.length) return null;
+
+    return {
+      kop: ["", "Laagste", "Gemiddeld", "Piek", "Piek op"],
+      rijen,
+      uitleg:
+        "Per kwartier wordt het laagste, het gemiddelde en de piek bewaard, twee jaar lang. " +
+        "De piek is de hoogste waarde die de sensor zelf gemeld heeft, dus zo scherp als je " +
+        "meter meet. Het gemiddelde weegt naar tijd en niet naar het aantal metingen. " +
+        "Deze geschiedenis begint op de dag dat de coach hem is gaan bijhouden; wat daarvoor " +
+        "ligt is overgenomen uit Home Assistant voor zover dat er nog was.",
     };
   }
 
@@ -677,7 +763,7 @@ class DacViewHistory extends DacElement {
     const knop = this.$("#report");
     if (knop?.disabled) return;
 
-    const gegevens = this.reportData_();
+    const gegevens = await this.reportData_();
     if (!gegevens) return;
 
     const label = knop?.querySelector("span");

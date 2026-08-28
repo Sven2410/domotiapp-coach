@@ -283,3 +283,81 @@ export function combine(series, ids) {
     .sort((a, b) => a[0] - b[0])
     .map(([time, value]) => ({ start: new Date(time), value }));
 }
+
+/**
+ * Het laagste, de piek en het gemiddelde per kwartier, uit de eigen opslag.
+ *
+ * De recorder van Home Assistant bewaart fijner dan een uur maar tien dagen.
+ * Wat hier uitkomt gaat twee jaar terug, per kwartier, en het is het enige dat
+ * over vorig jaar nog vorm heeft. Zie `archive.py` voor wat er bewaard wordt.
+ *
+ * Waarden zijn watt, ongeacht wat de sensor van de klant zichzelf noemt.
+ *
+ * @returns {Promise<Map<string, {start: Date, laagste: number, piek: number,
+ *   gemiddeld: number, seconden: number}[]>>}
+ */
+export async function quarters(hass, entityIds, start, end) {
+  const uit = new Map();
+  const wanted = [...new Set(entityIds.filter(Boolean))];
+  if (!wanted.length) return uit;
+
+  try {
+    const result = await hass.callWS({
+      type: "domotiapp_coach/history/quarters",
+      entity_ids: wanted,
+      start: start.toISOString(),
+      end: end.toISOString(),
+    });
+    for (const [id, rows] of Object.entries(result ?? {})) {
+      uit.set(
+        id,
+        (rows ?? []).map((row) => ({
+          start: new Date(row.start * 1000),
+          laagste: Number(row.laagste),
+          piek: Number(row.piek),
+          gemiddeld: Number(row.gemiddeld),
+          seconden: Number(row.seconden),
+        }))
+      );
+    }
+  } catch (error) {
+    // Een installatie die nog niet bijgewerkt is kent dit commando niet. Dan
+    // blijft de piekentabel gewoon weg in plaats van dat het rapport stukloopt.
+    console.warn("[DomotiApp Coach] kon de kwartieren niet ophalen", error);
+  }
+
+  return uit;
+}
+
+/**
+ * Eén sensor over een hele periode samenvatten: laagste, piek en gemiddelde.
+ *
+ * Het gemiddelde weegt naar de tijd die elk kwartier werkelijk gedekt heeft, en
+ * niet naar het aantal kwartieren. Een kwartier waarin de sensor tien minuten
+ * weg was telt dus voor een derde mee, en niet voor een heel.
+ *
+ * @returns {{laagste: number, piek: number, gemiddeld: number, piekOp: Date}|null}
+ */
+export function samenvatting(rows) {
+  if (!rows?.length) return null;
+
+  let laagste = Infinity;
+  let piek = -Infinity;
+  let piekOp = null;
+  let gewogen = 0;
+  let seconden = 0;
+
+  for (const row of rows) {
+    if (!Number.isFinite(row.gemiddeld) || row.seconden <= 0) continue;
+    if (row.laagste < laagste) laagste = row.laagste;
+    if (row.piek > piek) {
+      piek = row.piek;
+      piekOp = row.start;
+    }
+    gewogen += row.gemiddeld * row.seconden;
+    seconden += row.seconden;
+  }
+
+  if (!seconden) return null;
+  return { laagste, piek, gemiddeld: gewogen / seconden, piekOp };
+}

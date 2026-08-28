@@ -21,6 +21,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.loader import async_get_integration
 
 from . import report, websocket
+from .archive import async_get_archive
 from .coach import async_get_coach
 from .monitor import LoadMonitor
 from .const import (
@@ -41,6 +42,7 @@ _LOGGER = logging.getLogger(__name__)
 _STATIC_PATH_KEY = "static_registered"
 _WEBSOCKET_KEY = "websocket_registered"
 _MONITOR_KEY = "load_monitor"
+_ARCHIVE_KEY = "archive_started"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -52,6 +54,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _async_register_static_path(hass, version)
     await _async_register_panel(hass, version)
     await _async_start_monitor(hass)
+    await _async_start_archive(hass)
     _async_start_coach(hass)
 
     return True
@@ -68,6 +71,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coach = hass.data.get(DOMAIN, {}).pop("coach", None)
     if coach:
         coach.async_stop()
+
+    archive = hass.data.get(DOMAIN, {}).pop("archive", None)
+    if archive:
+        archive.async_stop()
+    hass.data.get(DOMAIN, {}).pop(_ARCHIVE_KEY, None)
 
     return True
 
@@ -86,6 +94,21 @@ async def _async_start_monitor(hass: HomeAssistant) -> None:
     monitor = LoadMonitor(hass)
     await monitor.async_start()
     domain_data[_MONITOR_KEY] = monitor
+
+
+async def _async_start_archive(hass: HomeAssistant) -> None:
+    """Begin de eigen geschiedenis bij te houden.
+
+    Home Assistant bewaart fijner dan een uur maar tien dagen. Hier gaat het
+    per kwartier twee jaar terug, met het laagste, de piek en het gemiddelde,
+    zodat het rapport ook over vorig jaar nog vorm heeft. Zie `archive.py`.
+    """
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get(_ARCHIVE_KEY):
+        return
+
+    await async_get_archive(hass).async_start()
+    domain_data[_ARCHIVE_KEY] = True
 
 
 def _async_start_coach(hass: HomeAssistant) -> None:
