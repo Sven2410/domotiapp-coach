@@ -3,19 +3,78 @@
 Alles gaat in live.log; alleen betekenisvolle overgangen gaan naar stdout,
 want dat zijn de dingen waar ik iets van moet vinden.
 
-Welke entiteiten erbij horen wordt aan het paneel zelf gevraagd
-(`domotiapp_coach/settings/get`) in plaats van hier opgeschreven. Dat is niet
-alleen handiger bij een klant, het is ook nodig: deze repo is publiek, en een
-entiteitnaam van een auto draagt bij sommige merken het chassisnummer met zich
-mee. Zulke namen horen niet in code die iedereen kan lezen.
+**Hij moet bij elke klant draaien zonder dat er iets ingetypt wordt.** Daarom
+zoekt hij zijn sensoren zelf op, in deze volgorde:
 
-Wat je zelf nog kunt meegeven zijn de sensoren die niet uit het paneel komen:
+1. **Het paneel** (`domotiapp_coach/settings/get`) voor alles wat de coach zelf
+   leest. Wat hij stuurt hoort te zijn wat je meet.
+2. **Het entiteitenregister van Home Assistant** voor de rest van de paal: de
+   sessie, de spanning, de fasemodus, de kabel. Dat gaat op `translation_key`
+   en niet op de naam van de entiteit, want die naam is vertaald: dezelfde
+   Easee heet hier `sensor.1_fase_mode` en bij een Engelse installatie
+   `sensor.x_phase_mode`. De `translation_key` is bij beide `phase_mode`.
+3. **Wat je zelf meegeeft** wint van allebei.
 
-    python tools/live.py --extra zon=sensor.omvormer_vermogen
+Zo staan er ook geen entiteitnamen in dit bestand. Dat is niet alleen netjes
+maar nodig: deze repo is publiek, en een entiteitnaam van een auto draagt bij
+sommige merken het chassisnummer met zich mee.
+
+    python tools/live.py                       # zoekt alles zelf op
+    python tools/live.py live.log 3600         # logbestand en hoeveel seconden
+    python tools/live.py live.log 3600 zon=sensor.omvormer_vermogen
 """
 import sys, time, datetime
 import ha
 import ws
+
+
+# Wat een merk zijn sensoren noemt, op de `translation_key` uit het
+# entiteitenregister. Die sleutel is de enige naam die niet meevertaalt en niet
+# per installatie verschilt, dus het is de enige waar je op mag zoeken.
+#
+# Alleen wat het paneel zelf niet weet staat hier; de rest komt uit de
+# instellingen, zodat meten en sturen niet uit elkaar kunnen lopen.
+MERKSENSOREN = {
+    "easee": {
+        "sessie": "session_energy",
+        "volt": "voltage",
+        "fasemode": "phase_mode",
+        "plug": "cable_locked",
+        "circuit": "dynamic_circuit_limit",
+        # Vangnet voor een paneel waar deze nog niet ingevuld zijn.
+        "status": "easee_status",
+        "watt": "power",
+        "amp": "current",
+        "limiet": "dynamic_charger_limit",
+        "maxlimiet": "max_charger_limit",
+        "reden": "easee_reason_no_current",
+        "teller": "lifetime_energy",
+    },
+}
+
+
+def _register(device_id):
+    """De entiteiten van dit HA-apparaat, op `translation_key`.
+
+    Het register opvragen mag alleen een beheerder. Kan het niet, dan is dat
+    geen reden om te stoppen: dan draait hij op wat het paneel weet, en de
+    kolommen die daarbuiten vallen blijven leeg.
+    """
+    if not device_id:
+        return {}
+    try:
+        rijen = ws.WS().vraag("config/entity_registry/list")
+    except Exception as e:
+        print(f"[entiteitenregister niet te lezen: {e}]", file=sys.stderr)
+        return {}
+    uit = {}
+    for rij in rijen:
+        if rij.get("device_id") != device_id or rij.get("disabled_by"):
+            continue
+        sleutel = rij.get("translation_key")
+        if sleutel:
+            uit[sleutel] = rij.get("entity_id")
+    return uit
 
 
 def entiteiten():
@@ -40,12 +99,21 @@ def entiteiten():
         for auto in apparaat.get("cars") or []:
             if auto.get("soc_entity"):
                 uit["soc"] = auto["soc_entity"]
+
+        # De rest van de paal, opgezocht bij het merk dat de klant heeft. Wat
+        # het paneel al wist blijft staan; dit vult alleen de gaten.
+        register = _register(apparaat.get("device_id"))
+        for naam, sleutel in MERKSENSOREN.get(apparaat.get("brand"), {}).items():
+            if not uit.get(naam) and register.get(sleutel):
+                uit[naam] = register[sleutel]
     bronnen = inst.get("sources") or {}
     uit["afname"] = bronnen.get("grid_import")
     uit["terug"] = bronnen.get("grid_export")
+    uit["zon"] = bronnen.get("solar")
     for fase in ("l1", "l2", "l3"):
         uit[fase] = ((bronnen.get("phases") or {}).get(fase) or {}).get("current")
 
+    # Wat je zelf meegeeft wint, want dat is het enige dat een mens intypt.
     for arg in sys.argv[1:]:
         if "=" in arg:
             naam, ent = arg.split("=", 1)
@@ -55,6 +123,17 @@ def entiteiten():
 
 
 E = entiteiten()
+
+# Zeggen wat hij gevonden heeft en wat niet, want een lege kolom is anders niet
+# van een sensor van nul te onderscheiden.
+_alles = ["status", "watt", "amp", "limiet", "maxlimiet", "reden", "teller",
+          "sessie", "soc", "volt", "fasemode", "plug", "circuit", "zon",
+          "afname", "terug",
+          "l1", "l2", "l3"]
+_mist = [k for k in _alles if k not in E]
+print(f"[live] {len(E)} sensoren gevonden"
+      + (f"; niet gevonden: {', '.join(_mist)}" if _mist else ""), file=sys.stderr)
+
 
 def num(st, key):
     try:
@@ -92,6 +171,7 @@ def regel(st):
     return (
         f"{datetime.datetime.now():%H:%M:%S} "
         f"{txt(st,'status'):<22} limiet={txt(st,'limiet'):>5} "
+        f"circuit={txt(st,'circuit'):>5} "
         f"A={a:5.2f} W={w:7.0f} {f:<8} "
         f"L1={num(st,'l1') or 0:4.1f} L2={num(st,'l2') or 0:4.1f} L3={num(st,'l3') or 0:4.1f} "
         f"soc={soc if soc is not None else '?'} "
