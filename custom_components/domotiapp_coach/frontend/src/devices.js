@@ -702,3 +702,48 @@ export function deviceLabels(devices) {
  * and lets everything that is actually running in.
  */
 export const ACTIVE_WATTS = 3;
+
+/**
+ * De apparaten van deze klant opsommen, zoals je ze zou uitspreken.
+ *
+ * "de vaatwasser, de wasmachine of de laadpaal". Zonder deze lijst stond er een
+ * vaste zin met een vaatwasser en een wasmachine erin, en bij een klant die er
+ * geen van beide heeft las dat als een coach die het over iemand anders huis
+ * heeft. Gevonden bij een klant op 28-08-2026, die alleen een laadpaal heeft.
+ *
+ * Alleen wat de klant zelf heeft ingevuld komt erin, met de naam die hij eraan
+ * gaf. Heeft hij niets ingevuld, dan komt er niets: dan is er geen apparaat om
+ * te noemen en hoort de zin dat ook niet te doen.
+ *
+ * @param {Array} devices de apparaten uit de instellingen
+ * @param {string} voegwoord "of" bij een keuze, "en" bij een opsomming
+ * @returns {string} de opsomming, of "" als er niets is
+ */
+export function apparatenZin(devices, voegwoord = "of") {
+  const namen = (devices ?? [])
+    .map((device) => {
+      const eigen = (device?.name || "").trim();
+      // Een naam die de klant zelf getypt heeft blijft staan zoals hij hem
+      // schreef: "Bosch" verkleinen tot "de bosch" leest als een tikfout, en
+      // het is zijn woord en niet het mijne. Alleen het woord dat wij er zelf
+      // bij verzinnen als hij niets invulde ("Laadpaal") gaat naar
+      // kleine letters, want dat staat middenin een zin.
+      const soort = typeMeta(device?.type).label;
+      // Vulde hij precies het soortwoord in ("Laadpaal"), dan is dat geen naam
+      // maar hetzelfde woord met een hoofdletter omdat het in een lijst stond.
+      // Middenin een zin hoort dat klein. Bij Van den Dam las het anders als
+      // "Zet de Laadpaal aan."
+      if (!eigen || eigen.toLowerCase() === soort.toLowerCase()) {
+        return soort.toLowerCase();
+      }
+      return eigen;
+    })
+    .filter(Boolean)
+    // Twee keer dezelfde naam in één zin leest als een tikfout.
+    .filter((naam, i, alle) => alle.indexOf(naam) === i);
+
+  if (!namen.length) return "";
+  if (namen.length === 1) return `de ${namen[0]}`;
+  const laatste = namen[namen.length - 1];
+  return `de ${namen.slice(0, -1).join(", de ")} ${voegwoord} de ${laatste}`;
+}
