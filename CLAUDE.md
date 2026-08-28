@@ -45,12 +45,18 @@ wordt. Zet daar niets in dat `hass` nodig heeft.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 82 controles op het denkwerk
-python tests/test_coach.py       # 62 op de bedrading, met een nagebouwde HA
+python tests/test_planner.py     # 104 controles op het denkwerk
+python tests/test_coach.py       # 109 op de bedrading, met een nagebouwde HA
+python tests/test_archive.py     # 37 op de kwartieropslag
+node   tests/test_rapport.mjs    # 7 op het rapport en de tekens in het paneel
 ```
 
+Die laatste draait het paneel in node, met een nagemaakte browser eromheen: de
+module registreert zich als custom element en de proef pakt de prototype. Zo is
+het rapport na te meten zonder scherm.
+
 Home Assistant hoeft er niet voor te draaien; de handvol namen die `coach.py`
-eruit gebruikt worden nagemaakt. **Draai ze allebei voor elke uitgave.**
+eruit gebruikt worden nagemaakt. **Draai ze alle vier voor elke uitgave.**
 
 **Python 3.11 of nieuwer.** `coach.py` gebruikt `asyncio.timeout`, dat pas in
 3.11 bestaat. Op macOS levert Apple bij zijn ontwikkelaarsgereedschappen nog een

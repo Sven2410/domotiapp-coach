@@ -17,7 +17,7 @@
 
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
-import { energy, euro, percent, power } from "../format.js";
+import { energy, euro, percent, signedPower } from "../format.js";
 import { deviceLabel, deviceLabelMap } from "../devices.js";
 
 /** Het merkteken op het rapport. */
@@ -64,10 +64,17 @@ function bucketTitle(period, date) {
   return date.toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long" });
 }
 
-/** Een vermogen als tekst, met de eenheid die er bij de grootte past. */
+/**
+ * Een vermogen als tekst, met de eenheid die er bij de grootte past.
+ *
+ * Met het teken erbij, anders dan op de meeste plekken in het paneel. In een
+ * tabel staat er geen pijl en geen kleur naast, en bij een netmeter die met een
+ * teken werkt is dat het enige verschil tussen zes kilowatt afnemen en zes
+ * kilowatt terugleveren.
+ */
 function watt(value) {
   if (!Number.isFinite(value)) return "";
-  const { value: getal, unit } = power(value);
+  const { value: getal, unit } = signedPower(value);
   return `${getal} ${unit}`;
 }
 
@@ -150,6 +157,56 @@ const REGELS = {
   month: { quarter: 2976, hour: 744, day: 31 },
   year: { quarter: 35040, hour: 8760, day: 365, month: 12 },
 };
+
+/**
+ * De netmeter, in de vorm waarin deze woning hem heeft.
+ *
+ * Twee soorten, en het rapport hoort ze allebei te kunnen. Serieel uitgelezen
+ * geeft twee aparte meters, een voor wat er binnenkomt en een voor wat er
+ * teruggaat, allebei altijd positief. Een P1 met een teken is er een: positief
+ * is afname en negatief is teruglevering, en dan is een tweede regel er niet en
+ * zou "Van het net" ook niet meer kloppen.
+ *
+ * Welke van de twee het is staat in `grid_mode`, dezelfde keuze die
+ * `data-source.js` maakt voor het scherm. Zonder deze tak viel bij een meter
+ * met een teken het net helemaal uit het rapport: `grid_import` en
+ * `grid_export` zijn dan leeg, en die twee regels vielen weg zonder dat er iets
+ * voor terugkwam.
+ */
+function netBronnen(bronnen) {
+  if (bronnen.grid_mode === "signed") {
+    return [
+      {
+        entity: bronnen.grid_signed,
+        label: "Het net",
+        omkeren: Boolean(bronnen.grid_signed_invert),
+      },
+    ];
+  }
+  return [
+    { entity: bronnen.grid_import, label: "Van het net" },
+    { entity: bronnen.grid_export, label: "Naar het net" },
+  ];
+}
+
+/**
+ * Een reeks kwartieren omdraaien, voor een meter die de andere kant op telt.
+ *
+ * `archive.py` bewaart wat de sensor zelf zei en past het vinkje van de klant
+ * niet toe; dat gebeurt overal pas bij het lezen. Hier dus ook, anders staat
+ * afname bij zo'n meter als teruglevering in het rapport.
+ *
+ * Het laagste en de piek wisselen daarbij van plek: het laagste van min wordt
+ * de hoogste van plus.
+ */
+function omgekeerd(rows) {
+  return (rows ?? []).map((row) => ({
+    ...row,
+    laagste: -row.piek,
+    piek: -row.laagste,
+    gemiddeld: -row.gemiddeld,
+  }));
+}
 
 /**
  * Kwartieren samenvoegen tot de tijdvakken van deze korrel.
@@ -880,8 +937,7 @@ class DacViewHistory extends DacElement {
     const bronnen = this.settings_?.sources ?? {};
     const namen = deviceLabelMap(this.settings_?.devices ?? []);
     return [
-      { entity: bronnen.grid_import, label: "Van het net" },
-      { entity: bronnen.grid_export, label: "Naar het net" },
+      ...netBronnen(bronnen),
       { entity: bronnen.solar, label: "Zon" },
       ...(this.settings_?.devices ?? []).map((device) => ({
         entity: device.entity,
@@ -921,10 +977,30 @@ class DacViewHistory extends DacElement {
       periodEnd(this.period_, start)
     );
 
+    // Een meter die andersom telt wordt hier rechtgezet, en niet verderop:
+    // daarachter rekenen de samenvatting en het verloop allebei met dezelfde
+    // rijen, en dan kan er maar een van de twee vergeten worden.
+    for (const rij of wilde) {
+      if (rij.omkeren) gevonden.set(rij.entity, omgekeerd(gevonden.get(rij.entity)));
+    }
+
     return {
       samenvatting: this.vermogenSamenvatting_(wilde, gevonden),
       detail: this.vermogenDetail_(wilde, gevonden),
     };
+  }
+
+  /**
+   * Wat het teken bij Het net betekent, als deze woning er een heeft.
+   *
+   * Bij twee losse meters staat het al in de namen: van het net en naar het
+   * net. Bij een meter met een teken is er een regel en zegt het teken de
+   * richting, en dan hoort er bij te staan welke.
+   */
+  tekenUitleg_() {
+    return this.settings_?.sources?.grid_mode === "signed"
+      ? " Bij Het net is een plus wat er van het net kwam en een min wat er naartoe ging."
+      : "";
   }
 
   /** Eén regel per apparaat: hoe zwaar was deze periode. */
@@ -951,7 +1027,8 @@ class DacViewHistory extends DacElement {
         "De piek is de hoogste waarde die de sensor zelf gemeld heeft, dus zo scherp als je " +
         "meter meet. Het gemiddelde weegt naar tijd en niet naar het aantal metingen. " +
         "Deze geschiedenis begint op de dag dat de coach hem is gaan bijhouden; wat daarvoor " +
-        "ligt is overgenomen uit Home Assistant voor zover dat er nog was.",
+        "ligt is overgenomen uit Home Assistant voor zover dat er nog was." +
+        this.tekenUitleg_(),
     };
   }
 
@@ -979,7 +1056,7 @@ class DacViewHistory extends DacElement {
       korrel: korrel.kop,
       kop: [korrel.kop, "Laagste", "Gemiddeld", "Piek"],
       tabellen,
-      uitleg: korrel.uitleg,
+      uitleg: korrel.uitleg + this.tekenUitleg_(),
     };
   }
 
