@@ -19,6 +19,7 @@ import {
   canHaveDeadline,
   carsFor,
   deviceCommands,
+  apparatenZin,
   deviceLabel,
   deviceLabelMap,
   needsRelease,
@@ -89,7 +90,7 @@ function netZin(r) {
   return "Je gebruikt vrijwel precies wat je zelf opwekt.";
 }
 
-function advise(r, thresholds, configured, alertAt, sturing) {
+function advise(r, thresholds, configured, alertAt, sturing, devices) {
   if (!configured) {
     return {
       tone: "var(--dac-accent-hi)",
@@ -154,7 +155,13 @@ function advise(r, thresholds, configured, alertAt, sturing) {
       tone: "var(--dac-grid-out)",
       tag: "Kans",
       title: "Gebruik je overschot",
-      body: `Je levert nu ${powerText(r.exportW)} terug aan het net. Zet de vaatwasser, de wasmachine of de laadpaal aan. Dan gebruik je stroom die je anders voor een lagere prijs weggeeft.`,
+      body: (() => {
+        const apparaten = apparatenZin(devices);
+        const zet = apparaten
+          ? `Zet ${apparaten} aan.`
+          : "Zet iets aan dat toch nog moet draaien.";
+        return `Je levert nu ${powerText(r.exportW)} terug aan het net. ${zet} Dan gebruik je stroom die je anders voor een lagere prijs weggeeft.`;
+      })(),
     };
   }
 
@@ -172,7 +179,13 @@ function advise(r, thresholds, configured, alertAt, sturing) {
       tone: "var(--dac-good)",
       tag: "Kans",
       title: "Goedkoop moment",
-      body: `Met ${fmtPrice(r.price).value} per kWh zit je onder je normale tarief. Een goed moment om te laden of alvast voor te verwarmen.`,
+      body: (() => {
+        const apparaten = apparatenZin(devices, "en");
+        const wat = apparaten
+          ? `Een goed moment voor ${apparaten}.`
+          : "Een goed moment om iets zwaars te laten draaien.";
+        return `Met ${fmtPrice(r.price).value} per kWh zit je onder je normale tarief. ${wat}`;
+      })(),
     };
   }
 
@@ -1475,7 +1488,9 @@ class DacViewOverview extends DacElement {
     this.updateSteerable_(r.devices);
     this.flow_.update(r);
     this.updateLegend_();
-    this.updateCoach_(advise(r, thresholds, configured, alertAt, this.steeringNow_()));
+    this.updateCoach_(
+      advise(r, thresholds, configured, alertAt, this.steeringNow_(), this.settings_?.devices)
+    );
   }
 
   /**
