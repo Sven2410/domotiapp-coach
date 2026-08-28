@@ -64,6 +64,124 @@ function bucketTitle(period, date) {
   return date.toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long" });
 }
 
+/** Een vermogen als tekst, met de eenheid die er bij de grootte past. */
+function watt(value) {
+  if (!Number.isFinite(value)) return "";
+  const { value: getal, unit } = power(value);
+  return `${getal} ${unit}`;
+}
+
+/**
+ * Hoe fijn het verloop per periode wordt getoond.
+ *
+ * Op een dag is dat het kwartier waarin het bewaard wordt; fijner bestaat niet
+ * en grover zou de pieken uitsmeren. Over een maand zouden kwartieren bijna
+ * drieduizend regels per apparaat opleveren, en dat is geen rapport meer maar
+ * een gegevensbestand. De piek blijft in elk tijdvak de echte piek: bij het
+ * samenvoegen wordt de hoogste van de kwartieren genomen en niet een nieuw
+ * gemiddelde.
+ */
+const KORRELS = {
+  quarter: {
+    kop: "Kwartier",
+    sleutel: (d) => d.getTime(),
+    label: (d) => d.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }),
+    uitleg:
+      "Elk kwartier van deze dag, met het laagste, het gemiddelde en de piek. De piek is de " +
+      "hoogste waarde die de sensor binnen dat kwartier gemeld heeft, dus zo scherp als je " +
+      "meter meet. Kwartieren waarin de sensor niets liet horen staan er niet in.",
+  },
+  hour: {
+    kop: "Uur",
+    sleutel: (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()).getTime(),
+    label: (d) =>
+      `${d.toLocaleDateString("nl-NL", { weekday: "short" }).replace(".", "")} ` +
+      `${String(d.getHours()).padStart(2, "0")}:00`,
+    uitleg:
+      "Elk uur van deze week, samengesteld uit de kwartieren eronder. De piek is de hoogste " +
+      "waarde binnen dat uur. Wil je het fijner of grover, kies dan een andere korrel boven de grafiek.",
+  },
+  day: {
+    kop: "Dag",
+    sleutel: (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(),
+    label: (d) => d.toLocaleDateString("nl-NL", { weekday: "short", day: "numeric", month: "short" })
+      .replace(/\./g, ""),
+    uitleg:
+      "Elke dag van deze maand, samengesteld uit de kwartieren eronder. De piek is de hoogste " +
+      "waarde die er die dag in een kwartier stond. Wil je het fijner of grover, kies dan een andere korrel boven de grafiek.",
+  },
+  month: {
+    kop: "Maand",
+    sleutel: (d) => new Date(d.getFullYear(), d.getMonth()).getTime(),
+    label: (d) => d.toLocaleDateString("nl-NL", { month: "long" }),
+    uitleg:
+      "Elke maand van dit jaar, samengesteld uit de kwartieren eronder. De piek is de hoogste " +
+      "waarde die er die maand in een kwartier stond.",
+  },
+};
+
+/** De knoppen waarmee de klant de fijnheid kiest, van fijn naar grof. */
+const KORREL_KNOPPEN = [
+  { id: "quarter", label: "Kwartier" },
+  { id: "hour", label: "Uur" },
+  { id: "day", label: "Dag" },
+  { id: "month", label: "Maand" },
+];
+
+/** Wat er bij een periode past zolang de klant zelf niets aanwijst. */
+const STANDAARD_KORREL = {
+  day: "quarter",
+  week: "hour",
+  month: "day",
+  year: "month",
+};
+
+/**
+ * Hoeveel regels een keuze ongeveer oplevert, per apparaat.
+ *
+ * Ruwe getallen, want een maand heeft 28 tot 31 dagen en dat verschil doet er
+ * hier niet toe: het gaat erom of het tien regels worden of tienduizend. Een
+ * lege plek betekent dat die keuze bij die periode niets oplevert, en dan gaat
+ * de knop uit; een jaar per maand is zinnig, een dag per maand is één regel.
+ */
+const REGELS = {
+  day: { quarter: 96, hour: 24 },
+  week: { quarter: 672, hour: 168, day: 7 },
+  month: { quarter: 2976, hour: 744, day: 31 },
+  year: { quarter: 35040, hour: 8760, day: 365, month: 12 },
+};
+
+/**
+ * Kwartieren samenvoegen tot de tijdvakken van deze korrel.
+ *
+ * Het laagste en de piek gaan mee zoals ze zijn: dat zijn gemeten waarden en
+ * die worden niet opnieuw uitgerekend. Het gemiddelde weegt naar de tijd die
+ * elk kwartier werkelijk gedekt heeft, dus een kwartier waarin de sensor tien
+ * minuten weg was telt voor een derde mee.
+ */
+function vakken(rows, korrel) {
+  const uit = new Map();
+  for (const row of rows) {
+    if (!Number.isFinite(row.gemiddeld) || row.seconden <= 0) continue;
+    const sleutel = korrel.sleutel(row.start);
+    const vak = uit.get(sleutel) ?? {
+      start: new Date(sleutel),
+      laagste: Infinity,
+      piek: -Infinity,
+      gewogen: 0,
+      seconden: 0,
+    };
+    vak.laagste = Math.min(vak.laagste, row.laagste);
+    vak.piek = Math.max(vak.piek, row.piek);
+    vak.gewogen += row.gemiddeld * row.seconden;
+    vak.seconden += row.seconden;
+    uit.set(sleutel, vak);
+  }
+  return [...uit.values()]
+    .sort((a, b) => a.start - b.start)
+    .map((vak) => ({ ...vak, gemiddeld: vak.gewogen / vak.seconden }));
+}
+
 /**
  * Wanneer een piek viel, zo kort als in deze periode nog eenduidig is.
  *
@@ -90,6 +208,11 @@ class DacViewHistory extends DacElement {
     super();
     this.period_ = "week";
     this.offset_ = 0;
+    // Hoe fijn het verloop in het rapport komt te staan. Leeg betekent: kies
+    // wat bij de periode past. Zodra de klant zelf iets aanwijst blijft die
+    // keuze staan, ook als hij van periode wisselt: iemand die pieken per
+    // kwartier wil zien, wil dat over een week net zo goed als over een dag.
+    this.korrel_ = "";
   }
 
   set hass(value) {
@@ -127,6 +250,11 @@ class DacViewHistory extends DacElement {
               (item) => `<button type="button" data-period="${item.id}" aria-pressed="false">${item.label}</button>`
             ).join("")}
           </div>
+          <div class="segmented detail" id="korrels" title="Hoe fijn het verloop in het rapport komt te staan">
+            ${KORREL_KNOPPEN.map(
+              (item) => `<button type="button" data-korrel="${item.id}" aria-pressed="false">${item.label}</button>`
+            ).join("")}
+          </div>
           <button type="button" class="download" id="report" title="Een rapport om te bewaren of te printen">
             ${icons.compass}<span>Rapport</span>
           </button>
@@ -137,6 +265,8 @@ class DacViewHistory extends DacElement {
             <button type="button" id="next" aria-label="Volgende">${icons.arrowRight}</button>
           </div>
         </div>
+
+        <p class="note korrel-note" id="korrel-note"></p>
 
         <section class="card" id="card">
           <div class="totals-title" id="totals-title"></div>
@@ -173,6 +303,14 @@ class DacViewHistory extends DacElement {
         this.period_ = button.dataset.period;
         this.offset_ = 0;
         this.load_();
+      });
+    }
+    for (const button of this.$$("#korrels button")) {
+      button.addEventListener("click", () => {
+        // Nog eens op dezelfde knop laat de keuze weer los, en dan volgt hij
+        // de periode. Zonder die weg terug zit je eraan vast.
+        this.korrel_ = this.korrel_ === button.dataset.korrel ? "" : button.dataset.korrel;
+        this.paintKorrel_();
       });
     }
     this.$("#report").addEventListener("click", () => this.report_());
@@ -292,7 +430,39 @@ class DacViewHistory extends DacElement {
     this.paint_();
   }
 
+  /** Welke fijnheid er gekozen is, en wat dat aan regels gaat kosten. */
+  korrel_id() {
+    return this.korrel_ || STANDAARD_KORREL[this.period_];
+  }
+
+  paintKorrel_() {
+    const gekozen = this.korrel_id();
+    for (const button of this.$$("#korrels button")) {
+      const id = button.dataset.korrel;
+      button.setAttribute("aria-pressed", String(id === gekozen));
+      // Zeggen wat het gaat kosten voordat er iemand op Rapport drukt. Bij een
+      // jaar per kwartier zijn dat tienduizenden regels, en dat is geen reden
+      // om het te verbieden maar wel om het niet te verzwijgen.
+      const regels = REGELS[this.period_]?.[id];
+      button.title = regels
+        ? `Ongeveer ${nl(regels, 0)} regels per apparaat in het rapport`
+        : "";
+      button.disabled = !regels;
+    }
+    const uitleg = this.$("#korrel-note");
+    if (uitleg) {
+      const regels = REGELS[this.period_]?.[gekozen] ?? 0;
+      const apparaten = Math.max(1, this.vermogenBronnen_().length);
+      uitleg.textContent = regels
+        ? `Het rapport krijgt het verloop per ${KORRELS[gekozen].kop.toLowerCase()}: ` +
+          `ongeveer ${nl(regels * apparaten, 0)} regels over ${apparaten} ` +
+          `${apparaten === 1 ? "apparaat" : "apparaten"}.`
+        : "";
+    }
+  }
+
   paintPeriod_() {
+    this.paintKorrel_();
     for (const button of this.$$("#periods button")) {
       button.setAttribute("aria-pressed", String(button.dataset.period === this.period_));
     }
@@ -544,6 +714,8 @@ class DacViewHistory extends DacElement {
     const rows = this.rowsShown_ ?? [];
     if (!rows.length) return null;
 
+    const vermogen = await this.vermogen_();
+
     const prices = this.prices_ ?? new Map();
     const rate = tariff(this.feed_, this.settings_?.contract);
     const hasSolar = this.meters_().solar.length > 0;
@@ -676,28 +848,22 @@ class DacViewHistory extends DacElement {
         sold: row.sold,
       })),
       apparaten: { kop: apparaatKop, rijen: apparaatRijen, uitleg: apparaatUitleg },
-      vermogen: await this.vermogenRijen_(),
+      vermogen: vermogen.samenvatting,
+      vermogenDetail: vermogen.detail,
       cijfers: { kop, rijen: regels, totaal: totaalCellen },
     };
   }
 
   /**
-   * Het laagste, het gemiddelde en de piek per sensor, uit de eigen opslag.
+   * Welke sensoren er in het vermogensdeel horen, met hun naam.
    *
-   * Een som in kWh zegt hoeveel er door de meter ging; dit zegt hoe hard het
-   * op zijn zwaarst ging, en dat is een andere vraag. Een huis dat over een dag
-   * netjes binnen zijn aansluiting blijft kan er om zeven uur 's avonds vlak
-   * tegenaan hebben gezeten, en dat is precies wat er niet in een dagtotaal te
-   * zien is.
-   *
-   * De piek is de hoogste waarde die de sensor zelf gemeld heeft, dus zo scherp
-   * als de meter van deze klant is.
+   * Het net, de zon en elk apparaat dat de klant gekoppeld heeft. Precies wat
+   * hij zelf heeft ingevuld, in de volgorde waarin hij ernaar kijkt.
    */
-  async vermogenRijen_() {
+  vermogenBronnen_() {
     const bronnen = this.settings_?.sources ?? {};
     const namen = deviceLabelMap(this.settings_?.devices ?? []);
-
-    const wilde = [
+    return [
       { entity: bronnen.grid_import, label: "Van het net" },
       { entity: bronnen.grid_export, label: "Naar het net" },
       { entity: bronnen.solar, label: "Zon" },
@@ -706,8 +872,30 @@ class DacViewHistory extends DacElement {
         label: namen.get(device.id) ?? deviceLabel(device),
       })),
     ].filter((rij) => rij.entity);
+  }
 
-    if (!wilde.length) return null;
+  /**
+   * Het vermogensdeel van het rapport: een samenvatting en de tabellen erachter.
+   *
+   * Een som in kWh zegt hoeveel er door de meter ging; dit zegt hoe hard het op
+   * zijn zwaarst ging, en dat is een andere vraag. Een huis dat over een dag
+   * netjes binnen zijn aansluiting blijft kan er om zeven uur 's avonds vlak
+   * tegenaan hebben gezeten, en dat is precies wat er niet in een dagtotaal te
+   * zien is.
+   *
+   * Twee lagen, want dat zijn twee verschillende vragen. De samenvatting is
+   * "hoe zwaar was deze periode": één regel per apparaat. Daarachter staat het
+   * verloop: per tijdvak het laagste, het gemiddelde en de piek, per apparaat
+   * een eigen tabel.
+   *
+   * De fijnheid volgt de gekozen periode, net als bij Alle cijfers. Op een dag
+   * is dat het kwartier waarin het bewaard wordt; over een maand zouden dat
+   * bijna drieduizend regels zijn en dat is geen rapport meer maar een
+   * gegevensbestand.
+   */
+  async vermogen_() {
+    const wilde = this.vermogenBronnen_();
+    if (!wilde.length) return { samenvatting: null, detail: null };
 
     const start = periodStart(this.period_, this.offset_);
     const gevonden = await quarters(
@@ -717,12 +905,14 @@ class DacViewHistory extends DacElement {
       periodEnd(this.period_, start)
     );
 
-    const watt = (value) => {
-      if (!Number.isFinite(value)) return "";
-      const { value: getal, unit } = power(value);
-      return `${getal} ${unit}`;
+    return {
+      samenvatting: this.vermogenSamenvatting_(wilde, gevonden),
+      detail: this.vermogenDetail_(wilde, gevonden),
     };
+  }
 
+  /** Eén regel per apparaat: hoe zwaar was deze periode. */
+  vermogenSamenvatting_(wilde, gevonden) {
     const rijen = [];
     for (const { entity, label } of wilde) {
       const vat = samenvatting(gevonden.get(entity));
@@ -735,7 +925,6 @@ class DacViewHistory extends DacElement {
         vat.piekOp ? piekMoment(this.period_, vat.piekOp) : "",
       ]);
     }
-
     if (!rijen.length) return null;
 
     return {
@@ -747,6 +936,34 @@ class DacViewHistory extends DacElement {
         "meter meet. Het gemiddelde weegt naar tijd en niet naar het aantal metingen. " +
         "Deze geschiedenis begint op de dag dat de coach hem is gaan bijhouden; wat daarvoor " +
         "ligt is overgenomen uit Home Assistant voor zover dat er nog was.",
+    };
+  }
+
+  /** Het verloop per tijdvak, met per apparaat een eigen tabel. */
+  vermogenDetail_(wilde, gevonden) {
+    const korrel = KORRELS[this.korrel_id()];
+    if (!korrel) return null;
+
+    const tabellen = [];
+    for (const { entity, label } of wilde) {
+      const rijen = [];
+      for (const vak of vakken(gevonden.get(entity) ?? [], korrel)) {
+        rijen.push([
+          korrel.label(vak.start),
+          watt(vak.laagste),
+          watt(vak.gemiddeld),
+          watt(vak.piek),
+        ]);
+      }
+      if (rijen.length) tabellen.push({ naam: label, rijen });
+    }
+    if (!tabellen.length) return null;
+
+    return {
+      korrel: korrel.kop,
+      kop: [korrel.kop, "Laagste", "Gemiddeld", "Piek"],
+      tabellen,
+      uitleg: korrel.uitleg,
     };
   }
 
@@ -1157,6 +1374,9 @@ DacViewHistory.css = /* css */ `
   .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
   .segmented { display: flex; gap: 6px; flex-wrap: wrap; }
+  .segmented.detail button[disabled] { opacity: .4; cursor: default; }
+  .korrel-note { margin: -4px 0 12px; }
+  .korrel-note:empty { display: none; }
   .segmented button {
     padding: 9px 16px;
     border-radius: var(--dac-radius-pill);

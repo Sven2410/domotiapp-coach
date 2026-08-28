@@ -81,6 +81,26 @@ class Vel {
   }
 
   /** Een stuk uitleg in kleine letters. */
+  /**
+   * De naam boven een tabel die bij een grotere kop hoort.
+   *
+   * Kleiner dan een kop en groter dan een tabelregel, want dit is geen nieuw
+   * onderwerp maar het volgende apparaat binnen hetzelfde onderwerp. Hij houdt
+   * zich vast aan wat eronder komt: een naam onderaan een bladzijde met zijn
+   * tabel op de volgende is precies waar dit klasje voor bestaat.
+   */
+  tussenkop(tekst) {
+    this.ruimte(60);
+    this.y += 6;
+    this.pdf.text(MARGE, this.y + 8, tekst, {
+      size: 10,
+      bold: true,
+      color: KLEUR.inkt,
+    });
+    this.y += 18;
+    return this;
+  }
+
   uitleg(tekst) {
     if (!tekst) return;
     const regels = wrap(tekst, 8, BREEDTE);
@@ -247,7 +267,7 @@ function schrijfGrafiek(pdf, vel, rijen, metZon) {
  * Zonder die herhaling is een tabel van een heel jaar op de tweede bladzijde een
  * raadsel: twaalf kolommen getallen waar niet meer bij staat wat ze betekenen.
  */
-function schrijfTabel(pdf, vel, kop, rijen, totaal) {
+function schrijfTabel(pdf, vel, kop, rijen, totaal, naam = "") {
   const regel = 16;
   const { breedtes, maat } = kolommen(kop, rijen, totaal);
   const xVan = (i) => MARGE + breedtes.slice(0, i).reduce((a, b) => a + b, 0);
@@ -270,7 +290,20 @@ function schrijfTabel(pdf, vel, kop, rijen, totaal) {
     });
   };
 
+  // Een tabel van tien bladzijden is precies waarom dit erbij hoort: wie op
+  // blad vijf kijkt moet nog kunnen zien welk apparaat hij leest. De naam komt
+  // daarom boven elke herhaalde kop terug, met erbij dat het een vervolg is.
+  let eerste = true;
   const schrijfKop = () => {
+    if (naam && !eerste) {
+      pdf.text(MARGE, vel.y + 8, `${naam} (vervolg)`, {
+        size: 9,
+        bold: true,
+        color: KLEUR.zacht,
+      });
+      vel.y += 16;
+    }
+    eerste = false;
     pdf.rect(MARGE, vel.y, BREEDTE, regel + 4, { fill: KLEUR.vlak, radius: 3 });
     vel.y += 3;
     schrijfRij(kop, { size: maat, bold: true, color: KLEUR.zacht });
@@ -357,10 +390,27 @@ function kolommen(kop, rijen, totaal) {
 /** Hoe smal de naamkolom hoogstens mag worden voor hij onleesbaar wordt. */
 const NAAM_MINIMAAL = 60;
 
+/**
+ * Hoeveel een tekst over de kolombreedte mag zijn voor hij toch past.
+ *
+ * De breedste cel van een kolom bepaalt hoe breed die kolom wordt: de gemeten
+ * breedte plus twee keer de kantlijn. Bij het schrijven wordt diezelfde
+ * kantlijn er weer af gehaald, en `(x + 12) - 12` is in drijvendekommagetallen
+ * niet altijd precies `x`. Daardoor viel de breedste cel van een kolom net
+ * buiten zijn eigen kolom en kreeg hij een beletselteken.
+ *
+ * Dat gebeurde alleen als de breedste cel een getal was en niet de kop, want
+ * een vetgedrukte kop is meestal breder. Zo stond er in het maandrapport van
+ * 28-08-2026 bij elke dag "€ 0,…" in plaats van "€ 0,28": de prijskolom was op
+ * de punt af zo breed als die tekst. Een honderdste punt speling is
+ * onzichtbaar op papier en ruim genoeg voor dit soort verschil.
+ */
+const SPELING = 0.01;
+
 /** Tekst die niet past, met een beletselteken erachter. */
 function inkorten(tekst, maat, breedte, vet = false) {
   const woord = String(tekst ?? "");
-  if (textWidth(woord, maat, vet) <= breedte) return woord;
+  if (textWidth(woord, maat, vet) <= breedte + SPELING) return woord;
 
   let uit = woord;
   while (uit.length > 1 && textWidth(`${uit}…`, maat, vet) > breedte) {
@@ -421,6 +471,18 @@ export async function reportPdf(gegevens) {
     vel.kop("Vermogen en pieken");
     schrijfTabel(pdf, vel, gegevens.vermogen.kop, gegevens.vermogen.rijen);
     vel.uitleg(gegevens.vermogen.uitleg);
+  }
+
+  if (gegevens.vermogenDetail?.tabellen?.length) {
+    // Per apparaat een eigen tabel, want dertien kolommen naast elkaar leest
+    // niemand. De kop staat er één keer boven en daarna draagt elke tabel zijn
+    // eigen naam.
+    vel.kop(`Verloop per ${gegevens.vermogenDetail.korrel.toLowerCase()}`);
+    vel.uitleg(gegevens.vermogenDetail.uitleg);
+    for (const tabel of gegevens.vermogenDetail.tabellen) {
+      vel.tussenkop(tabel.naam);
+      schrijfTabel(pdf, vel, gegevens.vermogenDetail.kop, tabel.rijen, null, tabel.naam);
+    }
   }
 
   if (gegevens.cijfers?.rijen?.length) {
