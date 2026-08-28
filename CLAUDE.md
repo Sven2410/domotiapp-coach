@@ -165,8 +165,14 @@ conclusie "die knop doet niets".
 
 ```
 tokens/thuis.txt
-tokens/klant-naam.txt
+tokens/jansen.txt
 ```
+
+**Een installatie heet naar de achternaam, zonder voorvoegsel.** Dus
+`jansen.txt` en niet `klant-jansen.txt`. Dat is Svens afspraak; hij noemt zijn
+klanten bij de achternaam en wil dat terugzien in de bestandsnaam, in
+`HA_INSTALLATIE` en in de kop van elk stuk gereedschap. Een tussenvoegsel wordt
+een streepje: `van-den-dam`.
 
 Adres op de ene regel, het long-lived token op de andere. **Die bestanden horen
 op geen enkele remote, ook niet op een privérepo.** Maak op een nieuwe machine
@@ -181,7 +187,7 @@ poort erbij is dat 443, wat Nabu Casa gebruikt.
 
 ```
 python tools/ha.py                                   # werkt de verbinding?
-HA_INSTALLATIE=klant-naam python tools/ha.py         # een andere installatie
+HA_INSTALLATIE=jansen python tools/ha.py         # een andere installatie
 python tools/logboek.py 2026-08-29T06:00             # tijdlijn uit de recorder
 python tools/besluiten.py                            # live meeluisteren
 ```
@@ -213,7 +219,7 @@ gestart en las toch Svens eigen laadpaal uit.
 dat `ha` importeert schrijft daarom één regel naar stderr:
 
 ```
-[ha] installatie: klant-jansen (uit HA_INSTALLATIE)
+[ha] installatie: jansen (uit HA_INSTALLATIE)
 ```
 
 Zonder dat schrijft een logger die een uur meeloopt stilzwijgend de verkeerde
@@ -222,8 +228,8 @@ een script met een eigen kop. Voor een hele sessie kies je de installatie bij
 het opstarten, in plaats van bij elk commando:
 
 ```
-./start.sh coach klant-jansen      # macOS
-start.cmd coach klant-jansen       # Windows
+./start.sh coach jansen      # macOS
+start.cmd coach jansen       # Windows
 ```
 
 `logboek.py` vraagt aan het paneel zelf welke entiteiten erbij horen, dus hij
