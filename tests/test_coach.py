@@ -1305,5 +1305,81 @@ controle("zonder opslag is teruglevering de hele inkoopprijs",
          f"{coach26._prices(geen_opslag)[0]}")
 
 print()
+print("=== eenheden: kW is geen W, en Wh is geen kWh ===")
+
+# Een klant wiens netmeter in kW rapporteert kreeg een coach die met een
+# duizend keer te klein getal rekende: overschot nooit boven nul, dus nooit
+# laden op eigen zon, en een laadverslag dat niet klopte. Zonder foutmelding,
+# want een getal is een getal. Het paneel liet ondertussen het goede getal zien,
+# want dat rekende wel om. Gevonden bij een klant op 28-08-2026.
+#
+# De proef is de vergelijking: hetzelfde huis, twee keer, met dezelfde meting in
+# een andere eenheid. Er hoort niets van te merken zijn.
+
+
+def met_eenheid(waarde, eenheid):
+    return {"state": str(waarde), "attributes": {"unit_of_measurement": eenheid}}
+
+
+inst27 = instellingen()
+
+in_watt = huis(status="charging", stroom=10.0, vermogen=6900.0,
+               afname=0.0, teruglevering=1500.0, teller=100.0)
+in_kilowatt = dict(
+    in_watt,
+    **{
+        "sensor.laadpaal_vermogen": met_eenheid(6.9, "kW"),
+        "sensor.afname": met_eenheid(0.0, "kW"),
+        "sensor.teruglevering": met_eenheid(1.5, "kW"),
+        "sensor.laadpaal_teller": met_eenheid(100_000.0, "Wh"),
+    },
+)
+
+nu27 = dt.datetime(2026, 8, 18, 14, 37)
+_, _, coach27 = bouw(in_watt, inst27)
+_, _, coach28 = bouw(in_kilowatt, inst27)
+grid_w, _, _, _ = coach27._read(nu27, inst27, LAADPAAL)
+grid_kw, _, _, _ = coach28._read(nu27, inst27, LAADPAAL)
+
+print(f"  overschot in W: {grid_w.surplus_w:.0f}   gemeld in kW: {grid_kw.surplus_w:.0f}")
+controle("een netmeter in kW geeft hetzelfde overschot als een in W",
+         abs(grid_w.surplus_w - grid_kw.surplus_w) < 1e-6,
+         f"{grid_w.surplus_w} tegen {grid_kw.surplus_w}")
+controle("en het is niet toevallig allebei nul", grid_w.surplus_w > 0,
+         f"{grid_w.surplus_w}")
+
+controle("een levensduurteller in Wh telt in kWh",
+         abs((coach28._teller(LAADPAAL) or 0) - 100.0) < 1e-9,
+         f"{coach28._teller(LAADPAAL)}")
+controle("en een in kWh blijft wat hij is",
+         abs((coach27._teller(LAADPAAL) or 0) - 100.0) < 1e-9,
+         f"{coach27._teller(LAADPAAL)}")
+
+# Een sensor zonder eenheid mag niet als kilo gelezen worden: dat zou een meting
+# duizendvoudig opblazen en dat herkent niemand als een eenheidsprobleem.
+zonder = dict(in_watt, **{"sensor.afname": {"state": "450", "attributes": {}}})
+_, _, coach29 = bouw(zonder, inst27)
+grid_zonder, _, _, _ = coach29._read(nu27, inst27, LAADPAAL)
+_, _, coach30 = bouw(dict(in_watt, **{"sensor.afname": "450"}), inst27)
+grid_kaal, _, _, _ = coach30._read(nu27, inst27, LAADPAAL)
+controle("een sensor zonder eenheid wordt als watt gelezen",
+         abs(grid_zonder.surplus_w - grid_kaal.surplus_w) < 1e-6,
+         f"{grid_zonder.surplus_w} tegen {grid_kaal.surplus_w}")
+
+# De zonverwachting komt in kWh over dat uur binnen. Een verwachting in Wh mag
+# niet duizend keer te laag uitpakken.
+inst28 = instellingen()
+inst28["sources"]["solar_forecast"] = {"remaining_today": "sensor.zon_rest",
+                                       "this_hour": "sensor.zon_uur"}
+in_kwh = dict(in_watt, **{"sensor.zon_uur": met_eenheid(2.0, "kWh")})
+in_wh = dict(in_watt, **{"sensor.zon_uur": met_eenheid(2000.0, "Wh")})
+zon_kwh = bouw(in_kwh, inst28)[2]._sun(inst28)
+zon_wh = bouw(in_wh, inst28)[2]._sun(inst28)
+controle("een zonverwachting in Wh geeft hetzelfde vermogen als een in kWh",
+         abs(zon_kwh.now_w - zon_wh.now_w) < 1e-6, f"{zon_kwh.now_w} tegen {zon_wh.now_w}")
+controle("en dat is 2 kWh over het uur, dus 2000 W", abs(zon_kwh.now_w - 2000.0) < 1e-6,
+         f"{zon_kwh.now_w}")
+
+print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
