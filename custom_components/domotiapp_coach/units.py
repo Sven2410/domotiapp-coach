@@ -56,6 +56,32 @@ def to_watts(value: float | None, unit: str | None) -> float | None:
     return None if value is None else value * _factor(POWER_TO_WATT, unit)
 
 
+def hour_to_watts(value: float | None, unit: str | None) -> float | None:
+    """Een verwachting over een uur in watt, of het nu vermogen of energie is.
+
+    Zonvoorspellers zijn het hierover niet eens. Forecast.Solar levert het
+    gemiddelde vermogen over dat uur (`W`, device_class power), andere leveren
+    de energie die er in dat uur in gaat (`kWh`, device_class energy). Over
+    precies een uur is dat hetzelfde getal in een andere eenheid, en juist
+    daarom is het verschil een factor duizend die niemand opmerkt.
+
+    Bij Van den Dam stond op 29-08-2026 een vermogenssensor in het veld
+    "volgend uur". Die 1874 W werd als 1874 kWh gelezen en dus als 1.874.000 W
+    doorgegeven. Op de kaart stond "over een uur wordt er 1874,0 kW zon
+    verwacht", en erger: `_beter_straks` koos met zo'n vooruitzicht altijd voor
+    wachten, zodat de coach op de goedkoopste uren stil bleef staan.
+
+    Een eenheid die we niet kennen blijft als energie gelezen worden, want dat
+    was het altijd al en dat is wat de meeste van deze sensoren melden.
+    """
+    if value is None:
+        return None
+    if str(unit or "").strip().lower() in POWER_TO_WATT:
+        return to_watts(value, unit)
+    kwh = to_kwh(value, unit)
+    return None if kwh is None else kwh * 1000.0
+
+
 def to_kwh(value: float | None, unit: str | None) -> float | None:
     """Een meting in kilowattuur, wat de sensor zelf ook zegt te rapporteren."""
     return None if value is None else value * _factor(ENERGY_TO_KWH, unit)

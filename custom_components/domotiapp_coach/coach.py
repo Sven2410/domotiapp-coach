@@ -59,7 +59,7 @@ from .planner import (
     should_send,
 )
 from .storage import async_get_store
-from .units import to_kwh, to_watts
+from .units import hour_to_watts, to_kwh, to_watts
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1050,15 +1050,16 @@ class ChargerCoach:
     def _sun(self, settings: dict[str, Any]) -> Sun:
         """De zonverwachting, voor zover die is ingevuld.
 
-        De uurwaarden komen in kWh over dat uur binnen, wat hetzelfde is als het
-        gemiddelde vermogen in kW. Vandaar de vermenigvuldiging: de rest van de
-        coach rekent in watt.
+        De uurwaarden mogen in kWh over dat uur binnenkomen of als het gemiddelde
+        vermogen over dat uur; welke van de twee het is staat in de eenheid van
+        de sensor zelf. Zie `hour_to_watts` in units.py voor wat er misging toen
+        dat niet werd nagekeken. De rest van de coach rekent in watt.
         """
         bron = (settings.get("sources") or {}).get("solar_forecast") or {}
 
         def uur(sleutel: str) -> float | None:
-            kwh = _kwh(self.hass, bron.get(sleutel))
-            return None if kwh is None else kwh * 1000.0
+            entity_id = bron.get(sleutel)
+            return hour_to_watts(_number(self.hass, entity_id), _unit(self.hass, entity_id))
 
         return Sun(
             now_w=uur("this_hour"),
