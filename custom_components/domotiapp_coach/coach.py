@@ -51,6 +51,7 @@ from .planner import (
     Sun,
     Tariff,
     Window,
+    STEP_AMPS,
     amps_for,
     decide,
     FULL_PERCENT,
@@ -77,6 +78,13 @@ CONFIRM_SECONDS = 15
 # changes none of them and only fills a log, but never repeating it at all means
 # a car stands still all night because the decision happened not to change.
 NUDGE_INTERVAL = timedelta(minutes=5)
+
+# Hoe lang de fasemeting van het huis na mag ijlen op een paal die net gestopt
+# is. Bij Van den Dam stond op 29-08-2026 om 11:27:06 `regel=no-room` op de
+# kaart met de kabel er al uit: de paal meldde nul, het huis nog twaalf ampère.
+# Een minuut is ruim genoeg voor een P1 of een seriële meter en kort genoeg om
+# een huis dat werkelijk bijschakelt niet te missen.
+METER_NAIJL = timedelta(minutes=1)
 
 # Over hoeveel tijd het overschot wordt gladgestreken voor er omhoog wordt
 # gestuurd. Drie minuten is lang genoeg om een wolk te laten passeren en kort
@@ -270,6 +278,13 @@ class ChargerCoach:
         self._approved: set[str] = set()
         # When a charging point that was not following was last prodded.
         self._nudged: dict[str, datetime] = {}
+        # Per laadpunt de laatste stroom die er werkelijk liep, met het moment
+        # erbij. Alleen om de na-ijl van de fasemeting op te vangen als de paal
+        # net gestopt is; zie `_read`.
+        self._laatste_stroom: dict[str, tuple[float, datetime]] = {}
+        # De laatste bruikbare status per laadpunt, zodat een entiteit die even
+        # wegvalt niet als een losgekoppelde kabel leest. Zie `_read`.
+        self._laatste_status: dict[str, str] = {}
         # De laatste metingen van het overschot, per apparaat, om op te dempen.
         self._zon: dict[str, list[tuple[datetime, float]]] = {}
         # Wie er op snelladen staat. Net als een akkoord niet bewaard over een
@@ -1160,7 +1175,24 @@ class ChargerCoach:
 
         charger_amps = _number(self.hass, entities.get("current")) or 0.0
 
+        # Wat deze paal kort geleden nog trok. De fasemeting van het huis loopt
+        # achter op de paal, dus vlak na het stoppen draagt zij zijn stroom nog
+        # terwijl hij zelf al op nul staat. Zonder dit geheugen wordt dat aan het
+        # huis toegerekend en meldt de coach dat de aansluiting vol zit terwijl er
+        # niets loopt. Zie `meter_loopt_achter` in planner.py.
+        device_id = device.get("id", "")
+        recent = self._laatste_stroom.get(device_id)
+        if charger_amps > STEP_AMPS:
+            self._laatste_stroom[device_id] = (charger_amps, now)
+            recent_amps = charger_amps
+        elif recent is not None and now - recent[1] <= METER_NAIJL:
+            recent_amps = recent[0]
+        else:
+            self._laatste_stroom.pop(device_id, None)
+            recent_amps = 0.0
+
         grid = Grid(
+            recent_charger_amps=recent_amps,
             surplus_w=surplus,
             # Wat een eerder laadpunt in deze ronde al toegezegd heeft gekregen
             # en nog niet in de fasemeting staat.
@@ -1179,7 +1211,27 @@ class ChargerCoach:
         )
 
         # --- the charging point ---
-        status = _text(self.hass, entities.get("status"))
+        # Wat de paal zelf zegt te doen. Zegt hij even níets, dan telt wat hij
+        # het laatst wél zei.
+        #
+        # Onbekend is niet hetzelfde als losgekoppeld, en dat verschil is duur.
+        # `connected` hieronder is onwaar zodra deze tekst leeg is, en `_text`
+        # geeft een lege string zodra de entiteit er niet is. Trekt een
+        # integratie kort zijn entiteiten in, bijvoorbeeld bij een herverbinding,
+        # dan las de coach dat als een kabel die eruit gaat: hij stuurde een
+        # verslag en wiste de hele sessie, dus het akkoord, snelladen, de
+        # opgegeven accustand en de klaar-tijd waar hij aan werkte.
+        #
+        # Sven kreeg op 29-08-2026 om 19:54 zo'n verslag terwijl de paal die hele
+        # avond op `awaiting_start` stond. Of het toen precies hierdoor kwam is
+        # achteraf niet te bewijzen, maar een sensor die niets zegt mag sowieso
+        # geen afkoppeling betekenen.
+        gemeld = _text(self.hass, entities.get("status"))
+        if gemeld in ("", "unknown", "unavailable", "none"):
+            status = self._laatste_status.get(device_id, "")
+        else:
+            status = gemeld
+            self._laatste_status[device_id] = status
         charger = Charger(
             max_amps=_number(self.hass, entities.get("max_limit")) or 16.0,
             connected=bool(status) and "disconnect" not in status,
@@ -1385,6 +1437,7 @@ class ChargerCoach:
         "held-back": "de lastbewaking van je aansluiting",
         "balancer-paused": "de lastbewaking van je aansluiting",
         "waiting-for-car": "een auto die geen stroom afnam",
+        "waiting-for-auth": "een paal die op goedkeuring wachtte",
         "no-soc": "wachten op je accustand",
         "wait-for-sun": "wachten op je eigen zon",
         "wait-for-sun-today": "wachten op je eigen zon",

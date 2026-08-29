@@ -173,6 +173,12 @@ class Grid:
     # allebei dezelfde ampères als vrij, en samen namen ze dus twee keer wat er
     # één keer was.
     reserved_amps: float = 0.0
+    # Wat de paal kort geleden nog trok, voor het geval hij net gestopt is. De
+    # fasemeting van het huis loopt achter, dus die draagt die stroom nog even
+    # terwijl de paal zelf al op nul staat. Zonder dit wordt dat aan het huis
+    # toegerekend en denkt de coach dat de aansluiting vol zit. Zie
+    # `meter_loopt_achter`.
+    recent_charger_amps: float = 0.0
 
 
 @dataclass
@@ -353,10 +359,32 @@ def meter_loopt_achter(grid: Grid, charger: Charger) -> bool:
     nemen, en dat verschil is groter dan een stap. Zonder de sensor die de
     staande limiet teruggeeft is er niets om mee te vergelijken, en dan blijft
     het zoals het was.
+
+    **En dezelfde na-ijl bestaat bij het afbouwen.** Die kant stond er niet in.
+    Stopt de paal, dan staat zijn eigen meter meteen op nul terwijl de
+    fasemeting van het huis zijn stroom nog een halve minuut meedraagt. Dat
+    verschil werd dan aan het huis toegerekend, en de coach meldde dat de
+    aansluiting te zwaar belast was terwijl er niets liep. Gezien bij Van den Dam
+    op 29-08-2026 om 11:27:06, met de kabel er al uit: `regel=no-room`.
     """
-    if not charger.charging or charger.limit_amps is None:
+    if charger.limit_amps is None:
         return False
+    if not charger.charging:
+        return grid.recent_charger_amps > STEP_AMPS
     return charger.limit_amps - grid.charger_amps > STEP_AMPS
+
+
+def gevraagde_amps(grid: Grid, charger: Charger) -> float:
+    """Het getal waarvan zeker is dat het van de paal komt en niet van het huis.
+
+    Terwijl hij optrekt is dat de limiet die de coach erop gezet heeft. Is hij
+    net gestopt, dan staat die limiet op nul terwijl de fasemeting zijn stroom
+    nog draagt, en dan is het wat hij zojuist nog trok. Zonder dat onderscheid
+    knijpt de rail in `ceiling_amps` op een nul die niets betekent.
+    """
+    if charger.charging and charger.limit_amps is not None:
+        return charger.limit_amps
+    return grid.recent_charger_amps
 
 
 def charger_share(grid: Grid, charger: Charger) -> float:
@@ -371,7 +399,7 @@ def charger_share(grid: Grid, charger: Charger) -> float:
     if not meter_loopt_achter(grid, charger):
         return grid.charger_amps
     zwaarste = max(grid.phase_amps) if grid.phase_amps else 0.0
-    return max(grid.charger_amps, min(charger.limit_amps, zwaarste))
+    return max(grid.charger_amps, min(gevraagde_amps(grid, charger), zwaarste))
 
 
 def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
@@ -400,7 +428,7 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
             # opschroeven wacht tot de paal het zelf bevestigt, en dat is één
             # ronde later. De marge blijft dus onaangeroerd, zoals afgesproken
             # met Sven op 26-08-2026.
-            ruimte = min(ruimte, charger.limit_amps)
+            ruimte = min(ruimte, gevraagde_amps(grid, charger))
         limits.append(ruimte)
 
     return int(max(0, min(limits)))
@@ -453,6 +481,13 @@ HELD_BACK_REASONS = frozenset(
 def held_back(charger: Charger) -> bool:
     """Whether something outside the coach is keeping this charger down."""
     return charger.no_current_reason in HELD_BACK_REASONS
+
+
+# Wat een paal meldt zolang de laadbeurt nog goedgekeurd moet worden. Dit staat
+# bewust níet in HELD_BACK_REASONS: dat zou de coach op de rustige herhaalklok
+# zetten, en juist het elke ronde opnieuw sturen is wat de paal bij Van den Dam
+# op 29-08-2026 aan de praat kreeg. Het is alleen bedoeld om het goede te zeggen.
+AUTHORISATION_REASONS = frozenset({"pending_authorization", "awaiting_authorization"})
 
 
 # The word the Easee reports when the coach's own dynamic limit is the binding
@@ -924,6 +959,24 @@ def _wake(
     # Hier komt alleen een besluit om te laden langs, want een besluit om niet te
     # laden is hierboven al afgehandeld.
     if asking_seconds >= WAITING_SECONDS:
+        # Een paal die op goedkeuring staat te wachten is iets anders dan een
+        # auto die niets afneemt, en het advies eronder verschilt ook: bij het
+        # eerste valt er in de auto niets na te kijken. De coach blijft het in
+        # allebei de gevallen elke ronde opnieuw proberen, want juist dat kreeg
+        # de paal bij Van den Dam op 29-08-2026 alsnog aan de praat; alleen de
+        # tekst stuurde je toen de verkeerde kant op.
+        if charger.no_current_reason in AUTHORISATION_REASONS:
+            return Decision(
+                True,
+                decision.amps,
+                f"De paal wacht op goedkeuring en biedt nog niets aan. Hij vraagt "
+                f"om {decision.amps} A zodra hij mag.",
+                plan="De coach blijft het proberen. Staat de paal op privé, dan "
+                     "hoort hij dit zelf goed te keuren.",
+                rule=f"{decision.rule}+waiting-for-auth",
+                holding=decision.holding,
+                needs_soc=decision.needs_soc,
+            )
         return Decision(
             True,
             decision.amps,
