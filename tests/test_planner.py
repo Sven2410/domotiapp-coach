@@ -64,7 +64,7 @@ def venster(now, klaar="06:00"):
 
 
 def sven_auto(soc=70.0, capaciteit=19.7):
-    return Car(capacity_kwh=capaciteit, phases=1, phases_certain=True, soc_percent=soc)
+    return Car(capacity_kwh=capaciteit, phases=1, soc_percent=soc)
 
 
 def paal(laadt=True, amps=6.0, aangesloten=True):
@@ -229,7 +229,7 @@ controle("een lege accu kost meer tijd, dus korter wachten", 7.5 < uren < 9.5,
 print("=== 15. auto zonder ingevulde accucapaciteit: gewoon laden ===")
 # Zonder capaciteit valt er niets te berekenen, ook geen slechtste geval. Dan
 # mag hij niet blijven wachten op iets wat nooit komt.
-kaal = Car(capacity_kwh=0, phases=1, phases_certain=True, soc_percent=None)
+kaal = Car(capacity_kwh=0, phases=1, soc_percent=None)
 d = decide(nu, [], NET_LEEG, kaal, paal(laadt=False), venster(nu), tariff=VAST, sun=ZON_KRAP)
 print(f"  {d.rule}: laden={d.charge} {d.amps} A")
 controle("blijft niet eeuwig wachten", d.charge and d.rule == "fixed-tariff",
@@ -569,7 +569,7 @@ def ochtend_besluit(net=HALVE_ZON, zon=DAG_KOMT, soc=30.0, tarief=VAST,
                     klaar=KLAAR_MORGEN, nu=OCHTEND, prijzen=None):
     venster_ = Window(enabled=True, opens=None, deadline=klaar) if klaar else Window()
     return decide(nu, prijzen or [], net,
-                  Car(capacity_kwh=19.7, phases=3, phases_certain=True, soc_percent=soc),
+                  Car(capacity_kwh=19.7, phases=3, soc_percent=soc),
                   Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.0),
                   venster_, tariff=tarief, sun=zon)
 
@@ -710,7 +710,7 @@ controle("de pauze bij een onbekende accustand loopt af als de coach zou beginne
 # kanten op hetzelfde uit.
 # Eigen net en paal, want die van hierboven geven een ander plafond en dan
 # valt de speling net buiten het bereik waar deze proef iets bewijst.
-GROTE_AUTO = Car(capacity_kwh=77.0, phases=3, phases_certain=True, soc_percent=80.0)
+GROTE_AUTO = Car(capacity_kwh=77.0, phases=3, soc_percent=80.0)
 RUIM_NET = Grid(surplus_w=0.0, phase_amps=[3.0, 2.0, 2.0], fuse_amps=25.0)
 RUIME_PAAL = Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.0)
 d = decide(dt.datetime(2026, 8, 20, 13, 0), [], RUIM_NET, GROTE_AUTO, RUIME_PAAL,
@@ -738,7 +738,7 @@ OPTREKKEN = Grid(surplus_w=0.0, phase_amps=[16.0, 3.0, 3.0], fuse_amps=25.0,
                  charger_amps=2.7, margin_amps=3.0)
 VRAAGT_16 = Charger(max_amps=16.0, connected=True, charging=True,
                     actual_amps=2.7, limit_amps=16.0, boost=True)
-LEEG = Car(capacity_kwh=77.0, phases=1, phases_certain=True, soc_percent=20.0)
+LEEG = Car(capacity_kwh=77.0, phases=1, soc_percent=20.0)
 
 controle("de coach ziet dat de meter achterloopt",
          planner.meter_loopt_achter(OPTREKKEN, VRAAGT_16))
@@ -794,6 +794,33 @@ STILSTAAND = Charger(max_amps=16.0, connected=True, charging=False,
                      actual_amps=0.0, limit_amps=16.0)
 controle("een stilstaande paal krijgt geen correctie",
          not planner.meter_loopt_achter(OPTREKKEN, STILSTAAND))
+
+print()
+print("=== het aantal fasen staat vast en wordt niet meer aangenomen ===")
+# De bus van Van den Dam, 29-08-2026: 65 kWh, 12,5% vol, aan een paal van 16 A.
+# Zolang de keuze "allebei" bestond rekende deze som met een fase, want een auto
+# die kan wisselen verraadt zich pas als hij laadt. Dat gaf 17,2 uur, waarna de
+# klaar-tijdregel om 11:13 aansloeg en de coach op 16 A van het net laadde
+# terwijl er zon lag. Driefasig is het 5,7 uur en had hij tot 01:07 de tijd.
+BUS_3F = Car(capacity_kwh=65.0, phases=3, soc_percent=12.5)
+BUS_1F = Car(capacity_kwh=65.0, phases=1, soc_percent=12.5)
+drie = planner.hours_needed(BUS_3F, 16)
+een = planner.hours_needed(BUS_1F, 16)
+print(f"  65 kWh op 12,5%, 16 A: driefasig {drie:.2f} uur, eenfasig {een:.2f} uur")
+controle("driefasig rekent met drie fasen", abs(drie - 5.72) < 0.01, f"{drie}")
+controle("eenfasig met een", abs(een - 17.17) < 0.01, f"{een}")
+controle("en dat scheelt precies een factor drie", abs(een / drie - 3.0) < 1e-6,
+         f"{een / drie}")
+
+# En de ondergrens van de zonregel hangt aan hetzelfde getal: driefasig kan niet
+# onder de 4,1 kW beginnen. Sven op 29-08-2026, gevraagd en akkoord: "het is niet
+# erg dan 3 fase op ongeveer 4 kW laden, we moeten gebruikmaken van de zon."
+controle("driefasig begint pas bij 4.140 W overschot",
+         planner.watts_for(planner.MIN_AMPS, 3) == 4140.0,
+         f"{planner.watts_for(planner.MIN_AMPS, 3)}")
+controle("en eenfasig al bij 1.380 W",
+         planner.watts_for(planner.MIN_AMPS, 1) == 1380.0,
+         f"{planner.watts_for(planner.MIN_AMPS, 1)}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

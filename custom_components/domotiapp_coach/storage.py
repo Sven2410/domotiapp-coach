@@ -159,6 +159,19 @@ def _migrate(stored: dict[str, Any]) -> dict[str, Any]:
     setting on the floor: pruning removes keys the current version does not
     know, and it cannot tell a removed setting from a renamed one.
     """
+    # v0.43.0 kent nog maar twee fasekeuzes. "Allebei" bestond omdat een auto
+    # die kan wisselen zich pas verraadt als hij laadt, maar dat maakte elke
+    # voorspelling het traagste geval: 17 uur waar er 6 nodig waren. Sven op
+    # 29-08-2026: "het is gewoon 1 of 3 fase, dat is beter." Ze worden driefasig,
+    # want dat is wat er aan een driefasige paal gebeurt. Klopt dat niet, dan
+    # zegt `_fasetip` het zodra er een keer stroom loopt.
+    for device in stored.get("devices") or []:
+        if not isinstance(device, dict):
+            continue
+        for car in device.get("cars") or []:
+            if isinstance(car, dict) and car.get("phases") == "both":
+                car["phases"] = "three"
+
     strategy = stored.get("strategy")
     if not isinstance(strategy, dict):
         return stored

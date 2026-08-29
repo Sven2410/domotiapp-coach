@@ -16,7 +16,7 @@ spec.loader.exec_module(P)
 
 VAST = P.Tariff(buy=0.24171, feed_in=0.0721 - 0.052756)
 KLAAR = dt.datetime(2026, 8, 27, 6, 0)          # de volgende ochtend
-auto = P.Car(capacity_kwh=19.7, phases=3, phases_certain=True, soc_percent=30.0)
+auto = P.Car(capacity_kwh=19.7, phases=3, soc_percent=30.0)
 
 # tijd, overschot in W, zon nu in W, zon volgend uur in W, verwachting vandaag
 dag = [

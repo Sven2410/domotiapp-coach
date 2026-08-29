@@ -1286,17 +1286,12 @@ class ChargerCoach:
         if profile is None:
             return Car(phases=3)
 
+        # Eén fase of drie, en niets ertussenin. "Allebei" bestond hier ook, en
+        # dan werd het aantal fasen gemeten zolang er stroom liep en anders
+        # aangenomen. Dat maakte elke voorspelling het traagste geval en zette de
+        # coach op de verkeerde momenten aan het werk. Klopt de keuze niet met
+        # wat er gemeten wordt, dan zegt `_fasetip` dat; zie daar.
         phases = {"one": 1, "three": 3}.get(profile.get("phases"), 3)
-        zeker = True
-        if profile.get("phases") == "both":
-            # A car that switches phases tells on itself: power divided by
-            # current is roughly one phase or roughly three. Standing still it
-            # says nothing, and then three is the safe guess for how much of the
-            # sun to take but the dangerous one for how long charging will last.
-            # See hours_needed for what is done with that.
-            gemeten = self._measured_phases(device)
-            phases = gemeten or 3
-            zeker = gemeten is not None
 
         # De auto zelf gaat voor. Zegt hij niets, dan telt wat de bewoner heeft
         # opgegeven, bijgewerkt met wat de paal er sindsdien in heeft gedaan.
@@ -1309,7 +1304,6 @@ class ChargerCoach:
         return Car(
             capacity_kwh=float(profile.get("capacity_kwh") or 0),
             phases=phases,
-            phases_certain=zeker,
             max_amps=float(profile.get("max_amps") or 0),
             soc_percent=soc,
         )
@@ -1803,21 +1797,51 @@ class ChargerCoach:
         gemeten is. Een auto die zelf maar één fase kan, kan er niets aan doen
         en krijgt dus niets te lezen.
         """
-        if device.get("brand") != "easee" or not charger.charging:
+        if not charger.charging:
             return ""
-        if not charger.max_amps or charger.max_amps >= PHASE_START_AMPS:
+        gemeten = self._measured_phases(device)
+        if gemeten is None:
             return ""
         _, profile = self._chosen_car(settings, device)
-        if profile is not None and profile.get("phases") == "one":
-            return ""
-        if self._measured_phases(device) != 1:
-            return ""
-        return (
-            "Hij laadt op één fase, want de maximale limiet van je lader staat "
-            f"op {charger.max_amps:.0f} A. Op {PHASE_START_AMPS:.0f} A of hoger "
-            "begint elke laadbeurt op drie fasen, en gaat er ongeveer drie keer "
-            "zoveel in per uur."
-        )
+        staat_op = (profile or {}).get("phases")
+
+        # 1. De laderlimiet houdt hem op één fase. Dit gaat vóór het profiel,
+        # want dan is de instelling niet fout maar de paal de oorzaak.
+        if (
+            device.get("brand") == "easee"
+            and charger.max_amps
+            and charger.max_amps < PHASE_START_AMPS
+            and staat_op != "one"
+            and gemeten == 1
+        ):
+            return (
+                "Hij laadt op één fase, want de maximale limiet van je lader staat "
+                f"op {charger.max_amps:.0f} A. Op {PHASE_START_AMPS:.0f} A of hoger "
+                "begint elke laadbeurt op drie fasen, en gaat er ongeveer drie keer "
+                "zoveel in per uur."
+            )
+
+        # 2. Het profiel klopt niet met wat er gemeten wordt. Dit is het vangnet
+        # dat in de plaats komt van de keuze "allebei": daar werd het aantal
+        # fasen gemeten in plaats van ingesteld, en de prijs daarvan was dat elke
+        # voorspelling het traagste geval nam. Nu staat het vast en wordt de
+        # meting gebruikt waar hij hoort: om te zeggen dat de instelling niet
+        # klopt, in plaats van er stilletjes omheen te rekenen.
+        if staat_op == "three" and gemeten == 1:
+            return (
+                "Dit profiel staat op driefasig, maar er wordt op één fase geladen. "
+                "Laden duurt daardoor ongeveer drie keer zo lang als de coach denkt, "
+                "en dan kan hij te laat beginnen. Zet de auto op eenfasig bij "
+                "Apparaten."
+            )
+        if staat_op == "one" and gemeten == 3:
+            return (
+                "Dit profiel staat op eenfasig, maar er wordt op drie fasen geladen. "
+                "De coach rekent daardoor met een auto die veel trager is dan hij "
+                "werkelijk is en begint onnodig vroeg. Zet de auto op driefasig bij "
+                "Apparaten."
+            )
+        return ""
 
     def _measured_phases(self, device: dict[str, Any]) -> int | None:
         """One phase or three, worked out from what the charger reports."""

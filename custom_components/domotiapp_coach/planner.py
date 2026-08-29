@@ -180,13 +180,10 @@ class Car:
     """The profile of the car that is plugged in."""
 
     capacity_kwh: float = 0.0
-    # 1 or 3. For a car that can do both this is what is being measured now.
+    # 1 of 3, en dat staat vast: het is een keuze in het autoprofiel en geen
+    # meting. Er was een derde mogelijkheid, "allebei", en die maakte elke som
+    # hieronder het traagste geval.
     phases: int = 3
-    # Of dat aantal ook echt gemeten is. Een auto die allebei kan, verraadt zich
-    # pas als hij laadt: vermogen gedeeld door stroom is dan ongeveer een of
-    # ongeveer drie. Zolang hij stilstaat is het een aanname, en dat maakt
-    # verschil voor hoe lang laden gaat duren.
-    phases_certain: bool = True
     # What the car itself accepts, 0 when unknown.
     max_amps: float = 0.0
     # 0 to 100, or None when nobody knows.
@@ -577,31 +574,22 @@ def cheapest_price(prices: list[dict], since: datetime, until: datetime | None) 
     return min(usable) if usable else None
 
 
-def min_phases(car: Car) -> int:
-    """Het minste aantal fasen waarop deze auto kan laden.
-
-    Bij een auto die allebei kan, is dat er één, ook als er op dit moment op
-    drie geladen wordt: hij kán terug. Dat getal is nodig waar de vraag is
-    hoe wéinig er nodig is om te beginnen.
-    """
-    return 1 if not car.phases_certain else car.phases
-
-
 def hours_needed(car: Car, amps: int, assume_empty: bool = False) -> float | None:
     """Hoe lang dat duurt bij deze stroom.
 
-    Het aantal fasen doet in drie sommen mee, en per som is een andere keuze de
-    gunstigste. Hier gaat het om tijd, en dan telt het traagste dat kan: een
-    auto die allebei kan en stilstaat, kan straks eenfasig blijken en dan duurt
-    het drie keer zo lang. Neem je hier drie fasen aan, dan boekt de coach twee
-    goedkope uren voor werk waar er vijf nodig zijn en staat de auto 's ochtends
-    halfvol. Te vroeg beginnen kost een paar cent, te laat beginnen kost iemand
-    zijn rit.
+    Het aantal fasen staat in het autoprofiel en is geen aanname meer, dus deze
+    som rekent er gewoon mee. Dat was anders zolang "allebei" bestond: dan werd
+    hier het traagste geval genomen, want een auto die kan wisselen verraadt zich
+    pas als hij laadt, en drie fasen aannemen die er één blijken te zijn levert
+    een auto op die 's ochtends halfvol staat.
 
-    Waar het om de ondergrens van de zon gaat is juist het snelste bereikbare de
-    gunstigste aanname (zie `min_phases`), en waar het om de te vragen stroom
-    gaat het zwaarste, want te veel vragen betekent inkopen. Alle drie corrigeren
-    zichzelf zodra er stroom loopt: dan is het aantal fasen te meten.
+    De prijs daarvan was hoog. Bij Van den Dam stond op 29-08-2026 een bus van
+    65 kWh op 12%: met "allebei" rekende deze som 17,2 uur en sloeg de
+    klaar-tijdregel om 11:13 al aan, waarna hij op 16 A van het net laadde
+    terwijl er zon lag. Met driefasig is het 5,7 uur en had hij tot 01:07 de tijd.
+
+    Klopt de keuze in het profiel niet met wat er werkelijk gebeurt, dan is dat
+    te zien zodra er stroom loopt en zegt `_fasetip` in coach.py het.
 
     Met `assume_empty` wordt gerekend alsof de accu leeg is. Dat is wat er
     overblijft als de accustand onbekend is, en het levert het uiterste
@@ -610,7 +598,7 @@ def hours_needed(car: Car, amps: int, assume_empty: bool = False) -> float | Non
     energy = worst_case_kwh(car) if assume_empty else energy_needed_kwh(car)
     if energy is None or amps <= 0:
         return None
-    return energy / (watts_for(amps, min_phases(car)) / 1000.0)
+    return energy / (watts_for(amps, car.phases) / 1000.0)
 
 
 def _at(day: datetime, moment: time | None) -> datetime | None:
@@ -1170,7 +1158,7 @@ def _decide(
     # ochtendzon onbenut terwijl de auto er prima op had kunnen laden.
     amps = max(MIN_AMPS, min(ceiling, int(amps_for(grid.surplus_w, car.phases))))
     trekt = watts_for(amps, car.phases)
-    genoeg_zon = grid.surplus_w >= watts_for(MIN_AMPS, min_phases(car)) * SURPLUS_SLACK
+    genoeg_zon = grid.surplus_w >= watts_for(MIN_AMPS, car.phases) * SURPLUS_SLACK
 
     nu_prijs = price_now(prices, now)
     koop = nu_prijs["price"] if nu_prijs else tariff.buy
