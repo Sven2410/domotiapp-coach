@@ -195,6 +195,29 @@ def _kwh(hass: HomeAssistant, entity_id: str | None) -> float | None:
     return to_kwh(_number(hass, entity_id), _unit(hass, entity_id))
 
 
+def _tijdstip(waarde: Any) -> datetime | None:
+    """Een tijdstip uit een attribuut, of het nu tekst is of al een datetime.
+
+    Een integratie mag in een attribuut zetten wat hij wil, en een `datetime`
+    komt daar net zo vaak in voor als een ISO-string. Over de API van Home
+    Assistant is dat verschil niet te zien, want daar wordt alles tot tekst
+    geserialiseerd; binnen HA staat het echte object er nog.
+
+    `dt_util.parse_datetime` wil alleen tekst en geeft op een `datetime` een
+    TypeError. Die viel in `_slots` stilletjes weg in de `except`, waardoor er
+    per blok een regel werd overgeslagen zonder spoor in enig logboek. Bij Van
+    den Dam sneuvelden op 29-08-2026 zo alle 24 uurblokken tegelijk en zei de
+    coach dat er geen prijzen binnenkwamen, terwijl zijn sensor gewoon gevuld
+    was. Hij laadde daardoor op vol vermogen van het net terwijl hij op de zon
+    had horen te wachten.
+    """
+    if isinstance(waarde, datetime):
+        return waarde
+    if isinstance(waarde, str):
+        return dt_util.parse_datetime(waarde)
+    return None
+
+
 def _text(hass: HomeAssistant, entity_id: str | None) -> str:
     """A sensor read as its raw state, lower-cased for comparing."""
     if not entity_id:
@@ -938,8 +961,8 @@ class ChargerCoach:
         uit: dict[datetime, tuple[datetime, float]] = {}
         for row in state.attributes.get("prices") or []:
             try:
-                start = dt_util.parse_datetime(row["from"])
-                end = dt_util.parse_datetime(row["till"])
+                start = _tijdstip(row["from"])
+                end = _tijdstip(row["till"])
                 price = float(row["price"])
             except (KeyError, TypeError, ValueError):
                 continue
