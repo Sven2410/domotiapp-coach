@@ -1409,6 +1409,58 @@ controle("een netmeter in kW geeft hetzelfde overschot als een in W",
 controle("en het is niet toevallig allebei nul", grid_w.surplus_w > 0,
          f"{grid_w.surplus_w}")
 
+# Dezelfde vraag voor de zonverwachting, en daar was het antwoord fout. De ene
+# voorspeller geeft het gemiddelde vermogen over dat uur (W), de andere de
+# energie die er in dat uur in gaat (kWh). Over precies een uur is dat hetzelfde
+# getal, alleen niet dezelfde eenheid.
+#
+# Bij Van den Dam stond op 29-08-2026 een vermogenssensor in "volgend uur". Die
+# 1874 W werd als 1874 kWh gelezen en dus als 1.874.000 W doorgegeven: op de
+# kaart "over een uur wordt er 1874,0 kW zon verwacht", en `_beter_straks` koos
+# met zo'n vooruitzicht altijd voor wachten. De coach stond daardoor stil op de
+# goedkoopste uren van de dag. Gevonden door Sven, op zijn eigen kaart.
+ZON_VELDEN = {"this_hour": "sensor.zon_nu", "next_hour": "sensor.zon_straks",
+              "remaining_today": "sensor.zon_rest"}
+inst_zon = instellingen()
+inst_zon["sources"]["solar_forecast"] = ZON_VELDEN
+
+zon_in_kwh = dict(huis(), **{
+    "sensor.zon_nu": met_eenheid(3.155, "kWh"),
+    "sensor.zon_straks": met_eenheid(1.874, "kWh"),
+    "sensor.zon_rest": met_eenheid(7.329, "kWh"),
+})
+zon_in_watt = dict(huis(), **{
+    "sensor.zon_nu": met_eenheid(3155, "W"),
+    "sensor.zon_straks": met_eenheid(1874, "W"),
+    "sensor.zon_rest": met_eenheid(7.329, "kWh"),
+})
+_, _, coach29 = bouw(zon_in_kwh, inst_zon)
+_, _, coach30 = bouw(zon_in_watt, inst_zon)
+zon_kwh = coach29._sun(inst_zon)
+zon_w = coach30._sun(inst_zon)
+print(f"  zon volgend uur, gemeld in kWh: {zon_kwh.next_w:.0f} W   gemeld in W: {zon_w.next_w:.0f} W")
+controle("een zonverwachting in W geeft hetzelfde als dezelfde in kWh",
+         abs(zon_kwh.next_w - zon_w.next_w) < 1e-6,
+         f"{zon_kwh.next_w} tegen {zon_w.next_w}")
+controle("en het is werkelijk 1874 W en geen 1874 kW",
+         abs(zon_w.next_w - 1874.0) < 1e-6, f"{zon_w.next_w}")
+controle("het huidige uur gaat net zo goed",
+         abs(zon_kwh.now_w - zon_w.now_w) < 1e-6, f"{zon_kwh.now_w} tegen {zon_w.now_w}")
+controle("en wat er vandaag nog komt blijft in kWh",
+         abs(zon_w.remaining_kwh - 7.329) < 1e-6, f"{zon_w.remaining_kwh}")
+
+# Een sensor zonder eenheid blijft gelezen worden als kWh over dat uur, want zo
+# stond het er altijd al. Gokken op vermogen zou een bestaande installatie stil
+# zetten, en dat is erger dan hem laten zoals hij was.
+zon_zonder = dict(huis(), **{
+    "sensor.zon_straks": {"state": "1.874", "attributes": {}},
+    "sensor.zon_rest": met_eenheid(7.329, "kWh"),
+})
+_, _, coach31 = bouw(zon_zonder, inst_zon)
+controle("zonder eenheid blijft het kWh over dat uur",
+         abs(coach31._sun(inst_zon).next_w - 1874.0) < 1e-6,
+         f"{coach31._sun(inst_zon).next_w}")
+
 controle("een levensduurteller in Wh telt in kWh",
          abs((coach28._teller(LAADPAAL) or 0) - 100.0) < 1e-9,
          f"{coach28._teller(LAADPAAL)}")
