@@ -792,8 +792,35 @@ controle("zonder de limietsensor verandert er niets, dus 8 A zoals op 20-08",
 # En een paal die stilstaat trekt niet op, dus daar valt niets te corrigeren.
 STILSTAAND = Charger(max_amps=16.0, connected=True, charging=False,
                      actual_amps=0.0, limit_amps=16.0)
-controle("een stilstaande paal krijgt geen correctie",
+controle("een stilstaande paal die net niets trok krijgt geen correctie",
          not planner.meter_loopt_achter(OPTREKKEN, STILSTAAND))
+
+# En dezelfde na-ijl de andere kant op, die er niet in zat. Stopt de paal, dan
+# staat zijn eigen meter meteen op nul terwijl de fasemeting van het huis zijn
+# stroom nog even meedraagt. Dat werd aan het huis toegerekend, en de coach
+# meldde dat de aansluiting te zwaar belast was terwijl er niets liep. Gezien bij
+# Van den Dam op 29-08-2026 om 11:27:06, met de kabel er al uit: regel=no-room.
+AFBOUWEND = Grid(surplus_w=0.0, phase_amps=[16.0, 3.0, 3.0], fuse_amps=25.0,
+                 charger_amps=0.0, margin_amps=3.0, recent_charger_amps=16.0)
+NET_GESTOPT = Charger(max_amps=16.0, connected=True, charging=False,
+                      actual_amps=0.0, limit_amps=0.0)
+controle("een paal die net gestopt is krijgt de correctie wel",
+         planner.meter_loopt_achter(AFBOUWEND, NET_GESTOPT))
+print(f"  16 A op de zwaarste fase, paal net gestopt: "
+      f"plafond {planner.ceiling_amps(AFBOUWEND, LEEG, NET_GESTOPT)} A")
+controle("en dan zakt het plafond niet naar nul",
+         planner.ceiling_amps(AFBOUWEND, LEEG, NET_GESTOPT) > 0,
+         f"{planner.ceiling_amps(AFBOUWEND, LEEG, NET_GESTOPT)} A")
+controle("de aansluiting heet dan ook niet vol",
+         not planner.fuse_limited(AFBOUWEND, LEEG, NET_GESTOPT))
+
+# Maar een huis dat werkelijk zwaar belast is, blijft zwaar belast: zonder een
+# paal die net stroom trok valt er niets te corrigeren.
+ZWAAR_HUIS = Grid(surplus_w=0.0, phase_amps=[16.0, 3.0, 3.0], fuse_amps=25.0,
+                  charger_amps=0.0, margin_amps=3.0, recent_charger_amps=0.0)
+controle("een huis dat echt vol zit wordt niet weggepoetst",
+         planner.ceiling_amps(ZWAAR_HUIS, LEEG, NET_GESTOPT) == 6,
+         f"{planner.ceiling_amps(ZWAAR_HUIS, LEEG, NET_GESTOPT)} A")
 
 print()
 print("=== het aantal fasen staat vast en wordt niet meer aangenomen ===")

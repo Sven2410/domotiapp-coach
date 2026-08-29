@@ -1027,6 +1027,47 @@ controle("en met de begintijd erbij",
 controle("en zonder verwijt dat hij niet vol was",
          not any("niet vol" in m for m in meldingen), f"{meldingen}")
 
+# Maar een statussensor die even niets zegt is géén kabel die eruit gaat.
+# `_text` geeft een lege string zodra de entiteit er niet is, en `connected` was
+# daarmee onwaar. Trekt een integratie kort zijn entiteiten in, bijvoorbeeld bij
+# een herverbinding, dan stuurde de coach een verslag en wiste hij de hele
+# sessie: het akkoord, snelladen, de opgegeven accustand en de klaar-tijd waar
+# hij aan werkte. Sven kreeg op 29-08-2026 om 19:54 zo'n verslag terwijl de paal
+# die hele avond op `awaiting_start` stond.
+weg = instellingen()
+weg["strategy"]["schedules"][0]["window"]["done_by"] = "23:00"
+hass22b, _, coach22b = bouw(huis(status="ready_to_charge", teruglevering=0.0,
+                                 afname=1800.0), weg)
+asyncio.run(ronde(coach22b, weg, nu=dt.datetime(2026, 8, 20, 18, 59)))
+hass22b.states.zet("sensor.laadpaal_status", "charging")
+hass22b.states.zet("sensor.laadpaal_stroom", "13.5")
+hass22b.states.zet("sensor.laadpaal_vermogen", "3070")
+for minuut in range(0, 13):
+    asyncio.run(ronde(coach22b, weg, nu=dt.datetime(2026, 8, 20, 19, minuut)))
+
+for ontbreekt, hoe in ((None, "de entiteit is weg"), ("unavailable", "unavailable"),
+                       ("unknown", "unknown")):
+    hass22b.states.zet("sensor.laadpaal_status", ontbreekt)
+    besluit22b, verstuurd22b = asyncio.run(
+        ronde(coach22b, weg, nu=dt.datetime(2026, 8, 20, 19, 13))
+    )
+    stil = [d[2]["message"] for d in verstuurd22b if d[0] == "notify"]
+    print(f"  {hoe}: regel={besluit22b['rule']}, meldingen={stil}")
+    controle(f"{hoe} leest niet als een losgekoppelde kabel",
+             besluit22b["rule"] != "disconnected", f"{besluit22b['rule']}")
+    controle(f"{hoe} levert dus ook geen afkoppelverslag op",
+             not any("afgekoppeld" in m for m in stil), f"{stil}")
+    hass22b.states.zet("sensor.laadpaal_status", "charging")
+
+# En als de sensor wél zegt dat de kabel eruit is, gebeurt het nog steeds.
+hass22b.states.zet("sensor.laadpaal_status", "disconnected")
+hass22b.states.zet("sensor.laadpaal_stroom", "0")
+hass22b.states.zet("sensor.laadpaal_vermogen", "0")
+_, echt_los = asyncio.run(ronde(coach22b, weg, nu=dt.datetime(2026, 8, 20, 19, 20)))
+controle("een sensor die het wél zegt levert nog gewoon een verslag op",
+         any("afgekoppeld" in d[2]["message"] for d in echt_los if d[0] == "notify"),
+         f"{[d for d in echt_los if d[0] == 'notify']}")
+
 # Eén keer en niet elke ronde, want de kabel blijft eruit.
 _, nogmaals = asyncio.run(ronde(coach22, los, nu=dt.datetime(2026, 8, 20, 19, 13)))
 controle("en maar één keer",
