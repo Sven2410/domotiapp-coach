@@ -544,7 +544,6 @@ export const hasCars = (device) => CAR_TYPES.includes(device?.type);
 export const CAR_PHASES = [
   { id: "one", label: "Eén fase", blurb: "Laagste stap ongeveer 1,4 kW." },
   { id: "three", label: "Drie fasen", blurb: "Laagste stap ongeveer 4,1 kW." },
-  { id: "both", label: "Allebei", blurb: "De lader schakelt zelf terug naar één fase." },
 ];
 
 /**

@@ -77,7 +77,7 @@ _CAR = _schema(
         ),
         # Whether the car charges on one phase, on three, or can do both. It
         # decides the floor: six amps is 1,4 kW on one phase and 4,1 on three.
-        vol.Optional("phases", default="three"): vol.In(["one", "three", "both"]),
+        vol.Optional("phases", default="three"): vol.In(["one", "three"]),
         # Some cars stop at 16 A however thick the cable is.
         vol.Optional("max_amps", default=0): vol.All(vol.Coerce(float), vol.Range(0, 100)),
         # The car's own state of charge, when Home Assistant knows it. With it

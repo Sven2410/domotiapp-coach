@@ -963,6 +963,37 @@ eenfasig, _ = asyncio.run(ronde(coach21c, inst21c, nu=dt.datetime(2026, 8, 25, 1
 print(f"  eenfasige auto: tip={eenfasig['tip']!r}")
 controle("een eenfasige auto krijgt geen verwijt", not eenfasig["tip"], f"{eenfasig['tip']}")
 
+# En het vangnet dat in de plaats komt van de keuze "allebei". Die bestond omdat
+# een auto die kan wisselen zich pas verraadt als hij laadt, en de prijs ervan
+# was dat elke voorspelling het traagste geval nam: bij Van den Dam 17,2 uur
+# waar er 5,7 nodig waren. Het aantal fasen staat nu vast in het profiel, en de
+# meting wordt gebruikt om te zeggen dat die keuze niet klopt.
+#
+# De laderlimiet staat hier op 16 A, dus de tip hierboven kan het niet zijn.
+hass21.states.zet("sensor.laadpaal_max", "16")
+hass21.states.zet("sensor.laadpaal_vermogen", "3070")
+hass21.states.zet("sensor.laadpaal_stroom", "13.5")
+mis3, _ = asyncio.run(
+    ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 13, 4))
+)
+print(f"  profiel driefasig, gemeten eenfasig: tip={mis3['tip']!r}")
+controle("een profiel op driefasig dat eenfasig laadt wordt gemeld",
+         "eenfasig" in mis3["tip"] and "driefasig" in mis3["tip"], f"{mis3['tip']}")
+
+# En andersom, want die kant kost geen lege auto maar wel onnodig vroeg laden.
+inst21d = instellingen()
+huis21d = huis(status="ready_to_charge", teruglevering=0.0, afname=1800.0)
+hass21d, _, coach21d = bouw(huis21d, inst21d)
+asyncio.run(ronde(coach21d, inst21d, nu=dt.datetime(2026, 8, 25, 13, 5)))
+hass21d.states.zet("sensor.laadpaal_status", "charging")
+hass21d.states.zet("sensor.laadpaal_max", "16")
+hass21d.states.zet("sensor.laadpaal_stroom", "15.45")
+hass21d.states.zet("sensor.laadpaal_vermogen", "10855")
+mis1, _ = asyncio.run(ronde(coach21d, inst21d, nu=dt.datetime(2026, 8, 25, 13, 6)))
+print(f"  profiel eenfasig, gemeten driefasig: tip={mis1['tip']!r}")
+controle("en een profiel op eenfasig dat driefasig laadt ook",
+         "driefasig" in mis1["tip"] and "eenfasig" in mis1["tip"], f"{mis1['tip']}")
+
 print("=== 22. de kabel eruit tijdens het laden levert een verslag op ===")
 # Sven op 20-08-2026: hij trok de kabel er twee keer uit tijdens het laden en
 # hoorde niets. Er kwam alleen een verslag bij "vol" en bij een gemiste
@@ -1180,6 +1211,33 @@ controle("een apparaat zonder schema krijgt er een",
          d(uit, "d9")["enabled"] is True and d(uit, "d9")["per_day"] is False,
          f"{d(uit,'d9')}")
 controle("en de bestaande twee staan er nog", len(uit["schedules"]) == 3, f"{uit}")
+
+# De fasekeuze "allebei" bestaat niet meer. Wat er bij klanten op schijf staat
+# moet dus omgezet worden, en niet weggegooid: `_prune` kent de sleutel wel maar
+# de waarde niet, en een profiel dat stilletijes op de standaard terugvalt is
+# net zo fout als een dat blijft staan. Driefasig, want dat is wat er aan een
+# driefasige paal gebeurt; klopt dat niet, dan zegt `_fasetip` het zodra er een
+# keer stroom loopt. Sven op 29-08-2026.
+oud_op_schijf = {
+    "devices": [
+        {"id": "dev-1", "cars": [
+            {"id": "car-a", "phases": "both"},
+            {"id": "car-b", "phases": "one"},
+        ]},
+        {"id": "dev-2", "cars": [{"id": "car-c", "phases": "three"}]},
+        {"id": "dev-3"},
+    ],
+}
+gemigreerd = storage._migrate(oud_op_schijf)
+fasen = [c["phases"] for d in gemigreerd["devices"] for c in d.get("cars", [])]
+print(f"  fasen na migratie: {fasen}")
+controle("een profiel op 'allebei' wordt driefasig", fasen[0] == "three", f"{fasen}")
+controle("en de rest blijft staan zoals hij stond",
+         fasen[1] == "one" and fasen[2] == "three", f"{fasen}")
+controle("een apparaat zonder auto's laat hem niet omvallen",
+         len(gemigreerd["devices"]) == 3, f"{gemigreerd}")
+controle("en instellingen zonder apparaten ook niet",
+         storage._migrate({}) == {}, f"{storage._migrate({})}")
 
 # Helemaal zonder strategie moet het ook niet omvallen.
 uit = schema_bijwerken(None, "d1", enabled=True)
