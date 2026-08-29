@@ -81,9 +81,20 @@ dtutil.as_local = lambda moment: moment
 
 
 def _lees_tijd(waarde):
+    """Zoals `dt_util.parse_datetime` van Home Assistant: die wil tekst.
+
+    Op iets anders dan een string geeft de echte een TypeError. Dat verschil
+    stond hier weggepoetst met `except TypeError: return None`, en daarmee was
+    dit harnas vergevingsgezinder dan de werkelijkheid. Een `datetime` in een
+    attribuut kwam er zo ongemerkt doorheen, en juist daarop liep het bij Van
+    den Dam op 29-08-2026 stuk: de hele prijslijst sneuvelde en de coach zei dat
+    er geen prijzen binnenkwamen.
+    """
+    if not isinstance(waarde, str):
+        raise TypeError(f"parse_datetime wil tekst, kreeg {type(waarde).__name__}")
     try:
         return dt.datetime.fromisoformat(waarde)
-    except (TypeError, ValueError):
+    except ValueError:
         return None
 
 
@@ -323,6 +334,13 @@ def bouw(waarden, inst):
     store = NepStore(inst)
     hass.data["domotiapp_coach"] = {"store": store}
     coach = coachmod.ChargerCoach(hass)
+    # `_sleep` staat in coach.py met "waiting that a test can shortcut", maar dat
+    # gebeurde nergens. Bevestigt een nagebouwde paal zijn limiet niet, dan wacht
+    # `_bevestig` vijftien echte seconden, per paal en per ronde. De proeven met
+    # twee laadpunten liepen daardoor tegen de minuut, en dat leest als een hang.
+    # Overslaan verandert de uitkomst niet: er wordt dezelfde sensor even vaak
+    # gelezen, alleen zonder de klok.
+    coach._sleep = lambda seconds: asyncio.sleep(0)
     return hass, store, coach
 
 
@@ -1303,6 +1321,49 @@ geen_opslag = {"contract": dict(DYN, dynamic=dict(DYN["dynamic"], supplier_marku
 controle("zonder opslag is teruglevering de hele inkoopprijs",
          abs(coach26._prices(geen_opslag)[0]["feed_in"] - 0.30) < 1e-9,
          f"{coach26._prices(geen_opslag)[0]}")
+
+# Dezelfde lijst, maar met echte datetime-objecten in `from` en `till` in plaats
+# van tekst. Een integratie mag dat, en over de API van Home Assistant is het
+# verschil onzichtbaar omdat daar alles tot tekst geserialiseerd wordt. Binnen
+# HA staat het object er nog, en `parse_datetime` struikelt erover.
+#
+# Bij Van den Dam gebeurde dat op 29-08-2026 met alle 24 uurblokken tegelijk.
+# De coach zei "er komen geen prijzen binnen" en laadde op vol vermogen van het
+# net, terwijl hij op de zon had horen te wachten. Geen enkele foutmelding: de
+# TypeError werd per blok opgevangen en de regel overgeslagen.
+PRIJSLIJST_DATETIME = {
+    "state": "0.30",
+    "attributes": {"prices": [
+        {"from": dt.datetime.fromisoformat("2026-08-27T12:00:00+02:00"),
+         "till": dt.datetime.fromisoformat("2026-08-27T13:00:00+02:00"),
+         "price": 0.30},
+    ]},
+}
+hass27, _, coach27 = bouw({"sensor.prijs": PRIJSLIJST_DATETIME}, instellingen())
+rijen_dt = coach27._prices({"contract": DYN})
+print(f"  prijslijst met datetime-objecten: {len(rijen_dt)} blok(ken)")
+controle("een prijslijst met datetime-objecten levert net zo goed blokken op",
+         len(rijen_dt) == 1, f"{len(rijen_dt)} blokken uit 1 rij")
+controle("met dezelfde inkoopprijs als bij tekst",
+         bool(rijen_dt) and rijen_dt[0]["price"] == 0.30, f"{rijen_dt}")
+controle("en met dezelfde begintijd",
+         bool(rijen_dt) and rijen_dt[0]["start"] == rijen[0]["start"],
+         f"{rijen_dt[0]['start'] if rijen_dt else None} tegen {rijen[0]['start']}")
+
+# En een rij waar werkelijk niets van te maken is blijft overgeslagen worden, in
+# plaats van de hele ronde om te gooien. Onbruikbaar is niet hetzelfde als fataal.
+PRIJSLIJST_ROMMEL = {
+    "state": "0.30",
+    "attributes": {"prices": [
+        {"from": 12345, "till": None, "price": 0.30},
+        {"from": "2026-08-27T12:00:00+02:00", "till": "2026-08-27T13:00:00+02:00",
+         "price": 0.30},
+    ]},
+}
+hass28, _, coach28 = bouw({"sensor.prijs": PRIJSLIJST_ROMMEL}, instellingen())
+rommel = coach28._prices({"contract": DYN})
+controle("een onleesbare rij wordt overgeslagen, de rest blijft staan",
+         len(rommel) == 1, f"{len(rommel)} blokken")
 
 print()
 print("=== eenheden: kW is geen W, en Wh is geen kWh ===")
