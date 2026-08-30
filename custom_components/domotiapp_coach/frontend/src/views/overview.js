@@ -35,6 +35,7 @@ import {
   planSummary,
   planTimes,
 } from "../schedule-sheet.js";
+import "../plan-ahead-sheet.js";
 import {
   OVERVIEW_CARDS,
   defaultLayout,
@@ -481,6 +482,15 @@ class DacViewOverview extends DacElement {
       font-size: 14.5px; font-weight: 600;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    /* De naam van de auto naast die van de laadpaal, en duidelijk ondergeschikt:
+       de kaart gaat over het apparaat en de auto hangt eraan. Krimpt als eerste
+       weg op een smal scherm, want de laadpaal is de kop. */
+    .steer-car {
+      flex: 0 1 auto; min-width: 0;
+      font-size: 12.5px; color: var(--dac-ink-3);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .steer-car[hidden] { display: none; }
     .steer-now { flex: 0 0 auto; font-size: 13px; font-weight: 600; color: var(--dac-ink-2); }
 
     .steer-rows { display: grid; gap: 6px; }
@@ -1083,6 +1093,7 @@ class DacViewOverview extends DacElement {
         </dialog>
 
         <dac-schedule-sheet id="plan-sheet"></dac-schedule-sheet>
+        <dac-plan-ahead-sheet id="ahead-sheet"></dac-plan-ahead-sheet>
 
         <dialog class="sheet wide" id="prices" tabindex="-1" aria-labelledby="prices-title">
           <div class="sheet-head">
@@ -1715,6 +1726,19 @@ class DacViewOverview extends DacElement {
     this.$(`[data-pause-text="${slot}"]`).textContent = besluit.paused
       ? "Gepauzeerd"
       : "Pauzeren";
+
+    // De tijdlijn alleen aanbieden waar de coach er een heeft. Een apparaat dat
+    // de coach niet plant, of een kaart zonder kabel, levert een leeg scherm op
+    // en dat is erger dan geen knop.
+    const vooruit = this.$(`[data-ahead="${slot}"]`);
+    vooruit.hidden = !besluit.plan_ahead || besluit.rule === "disconnected";
+
+    // En bijwerken terwijl hij openstaat, want de coach denkt elke minuut
+    // opnieuw en een tijdlijn van vijf minuten geleden is een verkeerde.
+    const device = this.steerDevices_?.[slot];
+    if (device && this.aheadFor_ === device.id) {
+      this.$("#ahead-sheet").update(besluit);
+    }
   }
 
   /** Which car this charging point is set to, if any. */
@@ -2040,6 +2064,7 @@ class DacViewOverview extends DacElement {
           <div class="steer-head">
             <span class="chip">${icons[typeMeta(device.type).icon]}</span>
             <span class="steer-name" data-name="${slot}"></span>
+            <span class="steer-car" data-car-one="${slot}" hidden></span>
             <span class="steer-now tnum" data-now="${slot}"></span>
           </div>
           <div class="steer-rows" data-rows="${slot}"></div>
@@ -2088,6 +2113,9 @@ class DacViewOverview extends DacElement {
                 ${icons.sliders} Schema instellen
               </button>
             </div>
+            <button type="button" class="plan-link ahead" data-ahead="${slot}">
+              ${icons.compass} Wat gaat hij doen
+            </button>
             <button class="release" type="button" data-release="${slot}" aria-pressed="false">
               <span class="mark" data-mark="${slot}"></span>
               <span data-release-text="${slot}"></span>
@@ -2142,6 +2170,9 @@ class DacViewOverview extends DacElement {
     for (const button of this.$$("[data-plan-link]")) {
       button.addEventListener("click", () => this.openSchedule_(Number(button.dataset.planLink)));
     }
+    for (const button of this.$$("[data-ahead]")) {
+      button.addEventListener("click", () => this.openAhead_(Number(button.dataset.ahead)));
+    }
     for (const button of this.$$("[data-release]")) {
       button.addEventListener("click", () => this.toggleReady_(Number(button.dataset.release)));
     }
@@ -2189,6 +2220,15 @@ class DacViewOverview extends DacElement {
       const cars = carsFor(device);
       const pick = this.$(`[data-car-pick="${slot}"]`);
       pick.hidden = cars.length < 2;
+
+      // Met één auto is er niets te kiezen, maar zijn naam hoort er wel te
+      // staan. Zonder dit was een naam die je invulde nergens meer te zien: de
+      // kop toont de laadpaal en de keuzelijst is dan verborgen. Sven op
+      // 30-08-2026, die precies daarover viel.
+      const enige = this.$(`[data-car-one="${slot}"]`);
+      const alleen = cars.length === 1 ? (cars[0].name ?? "").trim() : "";
+      enige.hidden = !alleen;
+      enige.textContent = alleen;
       if (!pick.hidden) {
         const select = this.$(`[data-car-select="${slot}"]`);
         const chosen = this.activeCar_(device.id);
@@ -2353,6 +2393,20 @@ class DacViewOverview extends DacElement {
       // nergens is opgeschreven.
       this.fillSteerable_(this.steerDevices_ ?? []);
     }
+  }
+
+  /**
+   * De pop-up met de tijdlijn tot de auto vol moet zijn.
+   *
+   * Alles wat erin staat komt uit het besluit van de coach zelf, dus hier wordt
+   * niets uitgerekend. Zie `plan-ahead-sheet.js` voor waarom dat een eis is en
+   * geen gemak.
+   */
+  openAhead_(slot) {
+    const device = this.steerDevices_?.[slot];
+    if (!device) return;
+    this.aheadFor_ = device.id;
+    this.$("#ahead-sheet").open(this.labelFor_(device), this.coach_?.[device.id]);
   }
 
   /** De pop-up met de tijden en het per-dag-werk. */

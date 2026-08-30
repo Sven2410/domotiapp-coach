@@ -246,6 +246,129 @@ proef("de rij hangt aan het vinkje van de lastbewaker", () => {
   assert.equal(rij.style.display, "");
 });
 
+// --- de tijdlijn op de laadpaalkaart ---------------------------------------
+//
+// Sven vroeg er op 30-08-2026 om: zien wat de coach van plan is tot de auto vol
+// moet zijn. Het scherm rekent zelf niets uit; alles komt uit `timeline()` in
+// planner.py. Wat hier beproefd wordt is dus of het staat wat er gestuurd is.
+
+await import("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js");
+const Vooruit = geregistreerd.get("dac-plan-ahead-sheet");
+assert.ok(Vooruit, "de tijdlijn-pop-up hoort zich te registreren");
+
+/** Een nagemaakt element met alleen de knopen die `paint_` aanraakt. */
+function vooruitScherm(planAhead) {
+  const knopen = new Map();
+  const maak = () => {
+    const kinderen = [];
+    return {
+      className: "",
+      style: {},
+      textContent: "",
+      classList: { add(naam) { this.klassen.push(naam); }, klassen: [] },
+      kinderen,
+      append(...items) { kinderen.push(...items); },
+      replaceChildren(...items) { kinderen.length = 0; kinderen.push(...items); },
+    };
+  };
+  for (const id of ["#vooruit-title", "#vooruit-nu", "#vooruit-kop", "#vooruit-uren", "#vooruit-voet"]) {
+    knopen.set(id, maak());
+  }
+  globalThis.document.createElement = () => {
+    const el = maak();
+    el.classList = {
+      klassen: [],
+      add(naam) { this.klassen.push(naam); el.className = this.klassen.join(" "); },
+    };
+    return el;
+  };
+
+  const el = Object.create(Vooruit.prototype);
+  el.$ = (kiezer) => knopen.get(kiezer) ?? null;
+  el.label_ = "Laadpaal";
+  el.reason_ = "Het is nu niet het goedkoopste moment om te laden.";
+  el.plan_ = planAhead;
+  return { el, knopen };
+}
+
+/** De tijdlijn zoals de coach hem voor Van den Dam die nacht uitrekende. */
+const NACHT = {
+  deadline: "2026-08-30T07:00:00",
+  latest_start: "2026-08-30T03:07:00",
+  expected_done: "2026-08-30T07:00:00",
+  kwh_needed: 37.2,
+  hours_needed: 3.37,
+  amps: 16,
+  note: "",
+  blocks: [
+    { start: "2026-08-29T22:00:00", end: "2026-08-29T23:00:00", price: 0.3106,
+      charging: false, why: "duurder dan wat hij nodig heeft" },
+    { start: "2026-08-30T03:00:00", end: "2026-08-30T04:00:00", price: 0.2215,
+      charging: true, why: "een van de goedkoopste uren" },
+    { start: "2026-08-30T04:00:00", end: "2026-08-30T05:00:00", price: 0.2113,
+      charging: true, why: "een van de goedkoopste uren" },
+  ],
+};
+
+proef("de kop toont wat er nog in moet en wanneer hij begint", () => {
+  const { el, knopen } = vooruitScherm(NACHT);
+  el.paint_();
+  const tekst = knopen.get("#vooruit-kop").kinderen
+    .flatMap((vak) => vak.kinderen.map((kind) => kind.textContent))
+    .join(" | ");
+  assert.match(tekst, /37,2 kWh/, "het aantal kilowattuur hoort erin");
+  assert.match(tekst, /op 16 A/, "en de stroom waar het op gerekend is");
+  assert.match(tekst, /3 u 22 m/, "de laadtijd als uren en minuten");
+  assert.match(tekst, /03:07/, "het uiterste startmoment");
+  assert.match(tekst, /klaar om 07:00/, "en de klaar-tijd");
+});
+
+proef("elk uur staat er met zijn prijs en of hij laadt", () => {
+  const { el, knopen } = vooruitScherm(NACHT);
+  el.paint_();
+  const rijen = knopen.get("#vooruit-uren").kinderen;
+  assert.equal(rijen.length, 3, "drie blokken, drie regels");
+
+  const eerste = rijen[0].kinderen.map((kind) => kind.textContent);
+  assert.deepEqual(eerste, ["22:00", "€ 0,311", "Wachten, duurder dan wat hij nodig heeft"]);
+  assert.ok(!rijen[0].className.includes("laadt"), "een wachtuur krijgt geen kleur");
+
+  const derde = rijen[2].kinderen.map((kind) => kind.textContent);
+  assert.deepEqual(derde, ["04:00", "€ 0,211", "Laden, een van de goedkoopste uren"]);
+  assert.ok(rijen[2].className.includes("laadt"), "een laaduur wel");
+});
+
+proef("zonder plan staat er waarom, en geen leeg scherm", () => {
+  const { el, knopen } = vooruitScherm(null);
+  el.paint_();
+  const rijen = knopen.get("#vooruit-uren").kinderen;
+  assert.equal(rijen.length, 1);
+  assert.match(rijen[0].textContent, /nog geen plan/);
+});
+
+proef("bij een vast tarief staat de uitleg en niet een lege lijst", () => {
+  const vast = { ...NACHT, blocks: [], note: "Je hebt een vast tarief, dus elk uur kost hetzelfde." };
+  const { el, knopen } = vooruitScherm(vast);
+  el.paint_();
+  const rijen = knopen.get("#vooruit-uren").kinderen;
+  assert.equal(rijen.length, 1);
+  assert.match(rijen[0].textContent, /vast tarief/);
+  // De sommen erboven blijven wel staan: die kloppen ook zonder prijzenlijst.
+  const kop = knopen.get("#vooruit-kop").kinderen;
+  assert.equal(kop.length, 4);
+});
+
+proef("een onbekende accustand geeft een streepje en geen nul", () => {
+  const leeg = { ...NACHT, kwh_needed: null, hours_needed: null, latest_start: null };
+  const { el, knopen } = vooruitScherm(leeg);
+  el.paint_();
+  const tekst = knopen.get("#vooruit-kop").kinderen
+    .flatMap((vak) => vak.kinderen.map((kind) => kind.textContent))
+    .join(" | ");
+  assert.match(tekst, /–/, "onbekend hoort een streepje te zijn");
+  assert.ok(!tekst.includes("0,0 kWh"), "en zeker geen verzonnen nul");
+});
+
 // --- draaien ----------------------------------------------------------------
 
 let goed = 0;

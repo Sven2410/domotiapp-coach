@@ -2042,6 +2042,176 @@ controle("een huis dat er zonder de paal al overheen gaat wekt wel",
 controle("en dan staat erbij welk deel van de laadpaal komt",
          any("12.0 A van de laadpaal" in m for m in beide38), f"{beide38}")
 
+print("=== 39. een meter die even zwijgt meet geen nul ===")
+# Bij Van den Dam viel de P1-meter op 30-08-2026 om 11:07, 11:09 en 11:15
+# telkens een paar seconden weg. `_read` rekende dan `netto = 0` uit, de coach
+# concludeerde dat er geen zon over was en zette het laden op de zonregel stil.
+# Twee keer een kwartier, midden op een zonnige ochtend.
+#
+# Dit geldt voor elke sensor waarvan een ontbrekende waarde als nul zou lezen.
+inst39 = instellingen()
+zonnig = huis(status="charging", stroom=13.5, vermogen=9200.0,
+              teruglevering=6000.0, afname=0.0)
+hass39, _, coach39 = bouw(zonnig, inst39)
+
+nu39 = dt.datetime(2026, 8, 30, 11, 5)
+grid39, _, _, _ = coach39._read(nu39, inst39, LAADPAAL)
+print(f"  meter doet het:            surplus {grid39.surplus_w:.0f} W")
+controle("met een werkende meter telt de paal gewoon mee",
+         grid39.surplus_w > 14000, f"{grid39.surplus_w}")
+
+# En dan valt de hele P1-meter weg, precies zoals bij hem.
+for entiteit in ("sensor.teruglevering", "sensor.afname"):
+    hass39.states.zet(entiteit, "unavailable")
+weg39, _, _, _ = coach39._read(dt.datetime(2026, 8, 30, 11, 7), inst39, LAADPAAL)
+print(f"  meter weg, binnen de naijl: surplus {weg39.surplus_w:.0f} W")
+controle("een meter die even zwijgt houdt zijn laatste waarde",
+         weg39.surplus_w > 14000, f"{weg39.surplus_w}")
+
+# Blijft hij weg, dan is onbekend ook echt onbekend. Doorrekenen met een getal
+# van een half uur oud is erger dan zeggen dat je het niet weet.
+lang39, _, _, _ = coach39._read(dt.datetime(2026, 8, 30, 11, 20), inst39, LAADPAAL)
+print(f"  meter een kwartier weg:     surplus {lang39.surplus_w:.0f} W")
+controle("maar na de naijl rekent hij niet door met oude getallen",
+         lang39.surplus_w == 0.0, f"{lang39.surplus_w}")
+
+# En dan zegt hij het, want een paal die op een zonnige middag stilstaat zonder
+# uitleg leest als kapot.
+tip39 = coach39._nettip(dt.datetime(2026, 8, 30, 11, 20))
+print(f"  tip: {tip39}")
+# Sinds 11:07, want dat was de laatste ronde waarin de meter er nog was, en niet
+# sinds het moment waarop de naijl verliep.
+controle("en hij zegt dat hij de netmeting niet kan lezen",
+         "netmeting" in tip39 and "13 minuten" in tip39, f"{tip39}")
+
+# Komt de meter terug, dan is er niets meer aan de hand.
+hass39.states.zet("sensor.teruglevering", "6000.0")
+hass39.states.zet("sensor.afname", "0.0")
+terug39, _, _, _ = coach39._read(dt.datetime(2026, 8, 30, 11, 21), inst39, LAADPAAL)
+controle("en zodra hij terug is telt hij weer gewoon mee",
+         terug39.surplus_w > 14000, f"{terug39.surplus_w}")
+controle("en zwijgt de coach erover", not coach39._nettip(dt.datetime(2026, 8, 30, 11, 21)),
+         f"{coach39._nettip(dt.datetime(2026, 8, 30, 11, 21))}")
+
+# Het vermogen van de paal zit in dezelfde som en is het gemeenst: valt hij weg,
+# dan ziet de coach zijn eigen laden aan voor huisverbruik. Zonder dit zou het
+# overschot van 15,2 kW instorten naar 6 kW en zou de coach zichzelf uitpraten.
+hass39.states.zet("sensor.laadpaal_vermogen", "unavailable")
+paalweg, _, _, _ = coach39._read(dt.datetime(2026, 8, 30, 11, 22), inst39, LAADPAAL)
+print(f"  vermogen van de paal weg:   surplus {paalweg.surplus_w:.0f} W")
+controle("een vermogenssensor die wegvalt praat de coach niet uit zijn eigen zon",
+         paalweg.surplus_w > 14000, f"{paalweg.surplus_w}")
+
+# Ook de fasestromen. Vallen die weg, dan zou `phase_amps` leeg raken en zou de
+# hele zekeringcontrole verdwijnen, en dat is de gevaarlijke kant.
+hass40 = bouw(huis(status="charging", stroom=13.5, vermogen=9200.0), inst39)
+hass40, _, coach40 = hass40
+vol40, _, _, _ = coach40._read(dt.datetime(2026, 8, 30, 11, 0), inst39, LAADPAAL)
+controle("met werkende fasesensoren staat de zekeringcontrole aan",
+         len(vol40.phase_amps) == 3, f"{vol40.phase_amps}")
+for fase in ("sensor.l1", "sensor.l2", "sensor.l3"):
+    hass40.states.zet(fase, "unavailable")
+kort40, _, _, _ = coach40._read(dt.datetime(2026, 8, 30, 11, 1), inst39, LAADPAAL)
+print(f"  fasen weg, binnen de naijl: {kort40.phase_amps}")
+controle("fasen die even wegvallen laten de zekeringcontrole staan",
+         len(kort40.phase_amps) == 3, f"{kort40.phase_amps}")
+
+# Een enkele meting die tekst is in plaats van een getal telt net zo goed als
+# niets, en dat is bij een P1-integratie de gewone manier van wegvallen.
+hass41 = bouw(huis(status="charging", stroom=13.5, vermogen=9200.0), inst39)
+hass41, _, coach41 = hass41
+coach41._read(dt.datetime(2026, 8, 30, 11, 0), inst39, LAADPAAL)
+hass41.states.zet("sensor.l3", "unknown")
+onbekend, _, _, _ = coach41._read(dt.datetime(2026, 8, 30, 11, 1), inst39, LAADPAAL)
+controle("`unknown` telt net zo goed als weg", len(onbekend.phase_amps) == 3,
+         f"{onbekend.phase_amps}")
+
+print("=== 40. de naam die je een auto geeft komt ook ergens terug ===")
+# Sven op 30-08-2026: "ik heb de naam aangepast bij de auto maar in het
+# overzicht staat de naam nog verkeerd en neemt hij het niet mee." Die naam
+# werd nergens gebruikt: de kaart toont de laadpaal en elke melding zei "de
+# auto". Nu praat de coach over de auto zoals de bewoner hem noemt.
+FORD = dict(LAADPAAL["cars"][0], name="de blauwe bus", capacity_kwh=65.0)
+PAAL40 = dict(LAADPAAL, cars=[FORD])
+inst40 = instellingen(devices=[PAAL40])
+inst40["strategy"]["schedules"][0]["window"]["done_by"] = "23:00"
+hass40n, _, coach40n = bouw(huis(status="ready_to_charge", teruglevering=0.0,
+                                 afname=1800.0), inst40)
+_, auto40, _, _ = coach40n._read(dt.datetime(2026, 8, 20, 19, 0), inst40, PAAL40)
+print(f"  de coach kent hem als: {auto40.name!r}")
+controle("de naam komt uit het profiel", auto40.name == "de blauwe bus",
+         f"{auto40.name!r}")
+
+asyncio.run(ronde(coach40n, inst40, paal=PAAL40, nu=dt.datetime(2026, 8, 20, 19, 0)))
+hass40n.states.zet("sensor.laadpaal_status", "charging")
+hass40n.states.zet("sensor.laadpaal_stroom", "13.5")
+hass40n.states.zet("sensor.laadpaal_vermogen", "3070")
+for minuut in range(1, 6):
+    asyncio.run(ronde(coach40n, inst40, paal=PAAL40, nu=dt.datetime(2026, 8, 20, 19, minuut)))
+hass40n.states.zet("sensor.laadpaal_status", "disconnected")
+hass40n.states.zet("sensor.laadpaal_stroom", "0")
+hass40n.states.zet("sensor.laadpaal_vermogen", "0")
+asyncio.run(ronde(coach40n, inst40, paal=PAAL40, nu=dt.datetime(2026, 8, 20, 19, 6)))
+_, los40 = asyncio.run(ronde(coach40n, inst40, paal=PAAL40, nu=dt.datetime(2026, 8, 20, 19, 7)))
+bericht40 = [d[2]["message"] for d in los40 if d[0] == "notify"]
+print(f"  {bericht40}")
+controle("en de melding gebruikt hem",
+         any(m.startswith("De blauwe bus aan Laadpaal is afgekoppeld") for m in bericht40),
+         f"{bericht40}")
+
+# Zonder naam blijft het "de auto", want dat is wat het is. Een lege naam mag
+# nooit een lege plek in een zin worden.
+GEEN_NAAM = dict(LAADPAAL["cars"][0], name="   ")
+PAAL40B = dict(LAADPAAL, cars=[GEEN_NAAM])
+inst40b = instellingen(devices=[PAAL40B])
+inst40b["strategy"]["schedules"][0]["window"]["done_by"] = "23:00"
+hass40b, _, coach40b = bouw(huis(status="ready_to_charge", teruglevering=0.0,
+                                 afname=1800.0), inst40b)
+asyncio.run(ronde(coach40b, inst40b, paal=PAAL40B, nu=dt.datetime(2026, 8, 20, 19, 0)))
+hass40b.states.zet("sensor.laadpaal_status", "charging")
+hass40b.states.zet("sensor.laadpaal_stroom", "13.5")
+hass40b.states.zet("sensor.laadpaal_vermogen", "3070")
+for minuut in range(1, 6):
+    asyncio.run(ronde(coach40b, inst40b, paal=PAAL40B, nu=dt.datetime(2026, 8, 20, 19, minuut)))
+hass40b.states.zet("sensor.laadpaal_status", "disconnected")
+hass40b.states.zet("sensor.laadpaal_stroom", "0")
+hass40b.states.zet("sensor.laadpaal_vermogen", "0")
+asyncio.run(ronde(coach40b, inst40b, paal=PAAL40B, nu=dt.datetime(2026, 8, 20, 19, 6)))
+_, los40b = asyncio.run(ronde(coach40b, inst40b, paal=PAAL40B, nu=dt.datetime(2026, 8, 20, 19, 7)))
+bericht40b = [d[2]["message"] for d in los40b if d[0] == "notify"]
+print(f"  {bericht40b}")
+controle("zonder naam blijft het de auto",
+         any(m.startswith("De auto aan Laadpaal is afgekoppeld") for m in bericht40b),
+         f"{bericht40b}")
+
+print("=== 41. de tijdlijn gaat mee naar het paneel ===")
+# Alles wat het scherm toont komt uit deze stand, want een scherm dat zijn eigen
+# sommen doet loopt uit de pas met wat de coach werkelijk doet.
+inst41 = instellingen(
+    devices=[PAAL40],
+    car_soc=[{"device": "dev-laadpaal", "car": "car-1", "percent": 48.5, "meter": 100.0}],
+)
+inst41["strategy"]["schedules"][0]["window"]["done_by"] = "07:00"
+hass41n, _, coach41n = bouw(huis(status="ready_to_charge", teruglevering=0.0,
+                                 afname=1800.0), inst41)
+besluit41, _ = asyncio.run(
+    ronde(coach41n, inst41, paal=PAAL40, nu=dt.datetime(2026, 8, 29, 20, 30))
+)
+plan41 = besluit41.get("plan_ahead")
+print(f"  klaar-tijd {plan41['deadline']}, uiterlijk {plan41['latest_start']}, "
+      f"{plan41['amps']} A")
+controle("de stand draagt een tijdlijn", plan41 is not None, f"{besluit41.keys()}")
+controle("met de klaar-tijd erin", "07:00" in (plan41["deadline"] or ""),
+         f"{plan41['deadline']}")
+controle("en met een uiterste startmoment",
+         plan41["latest_start"] is not None, f"{plan41}")
+controle("alles als tekst, zodat het over de websocket kan",
+         all(isinstance(plan41[k], (str, type(None)))
+             for k in ("deadline", "latest_start", "expected_done")),
+         f"{plan41}")
+controle("en de blokken zijn een lijst", isinstance(plan41["blocks"], list),
+         f"{type(plan41['blocks'])}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
