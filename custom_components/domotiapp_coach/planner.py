@@ -448,7 +448,22 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
             # opschroeven wacht tot de paal het zelf bevestigt, en dat is één
             # ronde later. De marge blijft dus onaangeroerd, zoals afgesproken
             # met Sven op 26-08-2026.
-            ruimte = min(ruimte, gevraagde_amps(grid, charger))
+            #
+            # **Maar hij mag nooit onder de ondergrens duwen.** Deze rail zegt
+            # "niet meer dan je al vroeg", en dat is iets anders dan "stop".
+            # Stopt een paal die op 5,5 A liep, dan is `gevraagde_amps` 5,5, en
+            # zonder deze grens komt het plafond op 5 uit: onder `MIN_AMPS`, dus
+            # `no-room`, dus "je aansluiting is te zwaar belast" terwijl het huis
+            # zeven ampère trok en de zekering 25 A is.
+            #
+            # Precies dat gebeurde bij Van den Dam op 30-08-2026 om 12:47:36 en
+            # om 15:02:58. Beide keren stond er een ronde lang dat de aansluiting
+            # vol zat, met de fasen op 5, 5 en 7. Ik heb er die dag twee keer
+            # naar gezocht in de meting terwijl het de rail zelf was.
+            #
+            # Of er werkelijk geen ruimte is, beslist de som over de fasen
+            # hierboven. Die staat er nog en wint gewoon als hij lager uitkomt.
+            ruimte = min(ruimte, max(gevraagde_amps(grid, charger), float(MIN_AMPS)))
         limits.append(ruimte)
 
     return int(max(0, min(limits)))

@@ -76,7 +76,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 182 controles op het denkwerk
+python tests/test_planner.py     # 187 controles op het denkwerk
 python tests/test_coach.py       # 197 op de bedrading, met een nagebouwde HA
 python tests/test_archive.py     # 37 op de kwartieropslag
 node   tests/test_rapport.mjs    # 17 op het rapport en op het paneel
