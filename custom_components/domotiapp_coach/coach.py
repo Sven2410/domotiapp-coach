@@ -1338,11 +1338,19 @@ class ChargerCoach:
         )
         apparaat = [kwartieren(e) for e in apparaten]
 
+        # Een meter met een teken meet één getal, en of plus inkoop of
+        # teruglevering betekent verschilt per merk. Dat vinkje staat al bij
+        # Instellingen en wordt overal elders gelezen; hier stond het niet, en
+        # dan zou een woning met een omgekeerde meter een huisverbruik krijgen
+        # met het verkeerde teken. Zie ook `_read` en `monitor.py`.
+        omgekeerd = bool(bronnen.get("grid_signed_invert"))
+
         per_uur: dict[int, list[float]] = {}
         for stempel in sorted(set(zonnen) | set(binnen) | set(getekende)):
             if getekende:
-                # Een meter met een teken meet één getal: plus is inkoop.
                 net = getekende.get(stempel, 0.0)
+                if omgekeerd:
+                    net = -net
             else:
                 net = binnen.get(stempel, 0.0) - buiten.get(stempel, 0.0)
             watt = zonnen.get(stempel, 0.0) + net
