@@ -849,6 +849,87 @@ controle("en eenfasig al bij 1.380 W",
          planner.watts_for(planner.MIN_AMPS, 1) == 1380.0,
          f"{planner.watts_for(planner.MIN_AMPS, 1)}")
 
+print("=== 34. een volle aansluiting zet een lopende beurt niet meer uit ===")
+# Bij Van den Dam meldde de huismeter op 30-08-2026 om 04:28:56 een enkel sample
+# van 27 A op L3. De coach schreef 0 A, de paal stond achtenzeventig seconden
+# uit, en de Ford beeindigde zijn laadbeurt en kwam er die hele dag niet meer
+# uit: om 09:37 stond de auto nog op 69,5%.
+#
+# De marge is comfort en geen natuurkunde. Een beurt afbreken om die marge te
+# sparen kost meer dan hij oplevert, dus zolang `MIN_AMPS` er ook zonder marge
+# nog bij past laadt hij door op de laagste stand. De grens zelf blijft heilig.
+nu34 = middag(4, 28)
+KRAP = Grid(surplus_w=0.0, phase_amps=[3.0, 3.0, 30.0], fuse_amps=25.0,
+            charger_amps=12.0, margin_amps=3.0)
+LAADT = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=12.0,
+                started_at=middag(3, 0), limit_amps=12.0)
+print(f"  huis 18 A eigen last: plafond {planner.ceiling_amps(KRAP, LEEG, LAADT)} A, "
+      f"zonder marge {planner.nood_ruimte(KRAP, LAADT):.0f} A")
+controle("onder de marge past er niets meer",
+         planner.ceiling_amps(KRAP, LEEG, LAADT) < MIN_AMPS,
+         f"{planner.ceiling_amps(KRAP, LEEG, LAADT)}")
+controle("zonder de marge nog wel",
+         planner.nood_ruimte(KRAP, LAADT) >= MIN_AMPS,
+         f"{planner.nood_ruimte(KRAP, LAADT)}")
+
+krap = decide(nu34, [], KRAP, LEEG, LAADT, venster(nu34), tariff=VAST, sun=ZON_KRAP)
+print(f"  {krap.rule}: laden={krap.charge} {krap.amps} A  {krap.reason}")
+controle("dus hij blijft laden op de laagste stand",
+         krap.charge and krap.amps == MIN_AMPS, f"{krap.rule} {krap.amps}")
+controle("met een eigen regel, zodat het logboek het verschil laat zien",
+         krap.rule == "tight", f"{krap.rule}")
+
+# Maar een huis dat er zelf overheen gaat wint nog steeds: 22 A eigen last plus
+# zes ampere past niet onder 25.
+VOL = Grid(surplus_w=0.0, phase_amps=[3.0, 3.0, 34.0], fuse_amps=25.0,
+           charger_amps=12.0, margin_amps=3.0)
+vol = decide(nu34, [], VOL, LEEG, LAADT, venster(nu34), tariff=VAST, sun=ZON_KRAP)
+print(f"  huis 22 A eigen last: {vol.rule}: {vol.amps} A")
+controle("een huis dat er zelf overheen gaat zet hem wel uit",
+         not vol.charge and vol.amps == 0, f"{vol.rule} {vol.amps}")
+controle("en heet dan gewoon no-room", vol.rule == "no-room", f"{vol.rule}")
+
+# En een paal die nog niet laadt begint er niet aan. De uitzondering gaat over
+# een auto die je niet wilt laten stoppen, niet over een auto die stilstaat.
+STAAT_STIL = Charger(max_amps=16.0, connected=True, charging=False,
+                     actual_amps=0.05, limit_amps=0.0)
+stil = decide(nu34, [], KRAP, LEEG, STAAT_STIL, venster(nu34), tariff=VAST, sun=ZON_KRAP)
+print(f"  paal die stilstaat: {stil.rule}: {stil.amps} A")
+controle("een paal die stilstaat begint er niet aan", not stil.charge,
+         f"{stil.rule} {stil.amps}")
+
+print("=== 35. de lastbewaker is de echte grens, niet de zekering ===")
+# De Equalizer van Van den Dam staat op 20 A terwijl de zekering 25 A is. De
+# coach deed 25 min 3 marge is 22 en vroeg dus de hele nacht twee ampere meer
+# dan de bewaker toestond. In het logboek van 30-08-2026 staat daarom uur na uur
+# `limited_by_equalizer`: precies het omgekeerde van wat de bredere marge bij een
+# lastbewaker bedoelt, want de coach hoort als eerste opzij te gaan.
+RUSTIG = Grid(surplus_w=0.0, phase_amps=[1.0, 2.0, 10.0], fuse_amps=25.0,
+              charger_amps=0.0, margin_amps=3.0)
+MET_BEWAKER = Grid(surplus_w=0.0, phase_amps=[1.0, 2.0, 10.0], fuse_amps=25.0,
+                   charger_amps=0.0, margin_amps=3.0, balancer_amps=20.0)
+zonder = planner.ceiling_amps(RUSTIG, LEEG, STAAT_STIL)
+met = planner.ceiling_amps(MET_BEWAKER, LEEG, STAAT_STIL)
+print(f"  huis 10 A op de zwaarste fase: zonder bewaker {zonder} A, met {met} A")
+controle("zonder bewakersensor blijft de zekering de grens",
+         planner.net_grens(RUSTIG) == 25.0, f"{planner.net_grens(RUSTIG)}")
+controle("met een bewaker die lager staat, wint hij",
+         planner.net_grens(MET_BEWAKER) == 20.0, f"{planner.net_grens(MET_BEWAKER)}")
+controle("en dat scheelt precies die vijf ampere", zonder - met == 5, f"{zonder} en {met}")
+
+# Een bewaker die hoger staat dan de zekering verandert niets: de zekering smelt
+# dan als eerste.
+RUIM = Grid(surplus_w=0.0, phase_amps=[1.0, 2.0, 10.0], fuse_amps=25.0,
+            charger_amps=0.0, margin_amps=3.0, balancer_amps=40.0)
+controle("een bewaker die ruimer staat dan de zekering telt niet",
+         planner.net_grens(RUIM) == 25.0, f"{planner.net_grens(RUIM)}")
+
+# En de marge als aandeel hangt mee aan de echte grens en niet aan de zekering.
+GROOT = Grid(surplus_w=0.0, phase_amps=[10.0], fuse_amps=80.0, charger_amps=0.0,
+             margin_amps=3.0, balancer_amps=50.0)
+controle("de marge als aandeel rekent over de echte grens",
+         abs(planner.fuse_margin(GROOT) - 4.0) < 1e-9, f"{planner.fuse_margin(GROOT)}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

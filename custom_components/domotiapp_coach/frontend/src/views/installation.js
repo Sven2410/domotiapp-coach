@@ -93,6 +93,16 @@ class DacViewInstallation extends DacEditorElement {
                 stroom per fase; dat is de zuiverste meting die je hebt.
               </span>
             </label>
+
+            <div class="row" id="balancer-row">
+              <label>Grenssensor van je lastbewaker</label>
+              <dac-entity-picker id="balancer-limit"></dac-entity-picker>
+              <span class="sub">
+                Optioneel, en alleen als je bewaker zijn eigen grens meldt. Een Easee Equalizer
+                doet dat. Staat die grens lager dan je hoofdzekering, dan is hij de echte grens:
+                de coach vraagt er dan niet meer overheen en hoeft de bewaker nooit in te grijpen.
+              </span>
+            </div>
           </div>
         </section>
 
@@ -292,6 +302,7 @@ class DacViewInstallation extends DacEditorElement {
 
     this.$("#balancer").addEventListener("change", (ev) => {
       this.draft_.installation.load_balancer = ev.target.checked;
+      this.paintBalancer_();
       this.afterChange_();
     });
 
@@ -328,6 +339,15 @@ class DacViewInstallation extends DacEditorElement {
       });
     }
 
+    const balancer = this.$("#balancer-limit");
+    balancer.filter = "current";
+    balancer.placeholder = "Zoek een stroomsensor…";
+    balancer.addEventListener("dac-entity-change", (ev) => {
+      this.draft_.installation.balancer_entity = ev.detail.value;
+      this.paintBalancer_();
+      this.afterChange_();
+    });
+
     for (const [id, key] of [
       ["dyn-allin", "all_in_entity"],
       ["dyn-market", "market_entity"],
@@ -352,6 +372,19 @@ class DacViewInstallation extends DacEditorElement {
     this.syncSaveBar_();
   }
 
+  /**
+   * De grenssensor hoort alleen bij een installatie die een lastbewaker heeft.
+   *
+   * Verborgen met een klasse en niet met `hidden` alleen: het attribuut is een
+   * regel van de browser zelf en verliest van elke `display` in de eigen
+   * stijlen. Zie de regel voor `.row` hierboven.
+   */
+  paintBalancer_() {
+    const row = this.$("#balancer-row");
+    row.hidden = !this.draft_.installation.load_balancer;
+    row.style.display = this.draft_.installation.load_balancer ? "" : "none";
+  }
+
   /** Keep the power ceiling in step with the fuse while it is automatic. */
   recalculate_() {
     const inst = this.draft_.installation;
@@ -370,6 +403,8 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#max-grid").value = inst.max_grid_watts;
     this.$("#max-auto").checked = Boolean(inst.max_grid_auto);
     this.$("#balancer").checked = Boolean(inst.load_balancer);
+    this.$("#balancer-limit").value = inst.balancer_entity ?? "";
+    this.paintBalancer_();
     this.$("#netting").checked = Boolean(this.draft_.contract.netting);
 
     this.$("#fx-price").value = contract.fixed.all_in_price;

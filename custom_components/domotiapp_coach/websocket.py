@@ -229,6 +229,7 @@ _SETTINGS = _schema(
                 vol.Optional("max_grid_watts"): vol.All(vol.Coerce(float), vol.Range(0, 1_000_000)),
                 vol.Optional("max_grid_auto"): bool,
                 vol.Optional("load_balancer"): bool,
+                vol.Optional("balancer_entity"): str,
             }
         ),
         vol.Optional("contract"): _schema(

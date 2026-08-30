@@ -28,7 +28,7 @@ from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
-from .const import EVENT_SETTINGS_UPDATED, GRID_MODE_SIGNED
+from .const import EVENT_SETTINGS_UPDATED, GRID_MODE_SIGNED, LEVEL_STEER
 from .storage import async_get_store
 from .units import to_watts
 
@@ -69,6 +69,11 @@ class LoadReading:
     amps: float | None = None
     watts: float | None = None
     entities: list[str] = field(default_factory=list)
+    # Wat de coach op dit moment zelf aan het laden is, in dezelfde eenheid als
+    # `amps` of `watts`, en wat de aansluiting zonder dat zou doen. Zie
+    # `_coach_aandeel`.
+    eigen: float = 0.0
+    zonder_coach: float | None = None
 
 
 class LoadMonitor:
@@ -182,7 +187,14 @@ class LoadMonitor:
             self._above_since = None
             return
 
-        if reading.percent < threshold:
+        # Getoetst wordt de belasting zónder wat de coach zelf aan het laden en
+        # aan het terugregelen is; zie `_coach_aandeel`. De melding noemt straks
+        # wel het echte getal, want dat is wat er op de kaart staat.
+        gemeten = reading.zonder_coach
+        if gemeten is None:
+            gemeten = reading.percent
+
+        if gemeten < threshold:
             # Back under the line: whatever was building up did not last.
             self._above_since = None
             return
@@ -208,6 +220,45 @@ class LoadMonitor:
 
         self._last_sent = now
         self.hass.async_create_task(self._async_notify(reading, threshold, alert))
+
+    def _coach_aandeel(self, in_watt: bool) -> float:
+        """Wat er van deze belasting van de coach zelf is.
+
+        De waarschuwing bestaat om te zeggen dat er iets zwaars aanstaat waar je
+        niets van weet. Een laadpaal die de coach op ditzelfde moment aan het
+        terugregelen is, is precies dat niet.
+
+        Bij Van den Dam kreeg Sven in de nacht van 30-08-2026 drie meldingen,
+        om 03:02, 03:32 en 04:22, telkens met "zet iets zwaars uit of wacht
+        ermee". Het zware ding was zijn eigen auto, en de coach stond op dat
+        moment al op 12 A in plaats van 16. Om vier uur 's nachts gewekt worden
+        voor iets dat de coach zelf doet en zelf oplost is verkeerd.
+
+        Alleen op Sturen, en alleen voor palen die de coach mag sturen. Kan hij
+        er niet bij, dan is de laadpaal net zo goed een apparaat waar de bewoner
+        zelf iets aan moet doen, en dan hoort de melding gewoon te komen.
+
+        Een driefasige paal meldt zijn stroom per fase, dus dat getal hoort er
+        op elke fase net zo hard af; een eenfasige belast er één. Van de
+        zwaarste fase aftrekken klopt dus in beide gevallen. Dezelfde redenering
+        als `charger_share` in planner.py.
+        """
+        if (self._settings.get("strategy") or {}).get("level") != LEVEL_STEER:
+            return 0.0
+
+        states = self.hass.states
+        totaal = 0.0
+        for device in self._settings.get("devices") or []:
+            if device.get("type") != "laadpaal" or not device.get("controllable"):
+                continue
+            if in_watt:
+                waarde = _watts(states.get(device.get("entity") or ""))
+            else:
+                entity = (device.get("entities") or {}).get("current")
+                waarde = _number(states.get(entity)) if entity else None
+            if waarde and waarde > 0:
+                totaal += waarde
+        return totaal
 
     def _phase_amps(self, config: dict[str, Any]) -> float | None:
         """What a phase is drawing, in amps.
@@ -263,11 +314,14 @@ class LoadMonitor:
                     worst_label = phase.upper()
 
             if worst_amps is not None:
+                eigen = min(self._coach_aandeel(in_watt=False), worst_amps)
                 return LoadReading(
                     percent=(worst_amps / fuse) * 100,
                     basis="phase",
                     worst_phase=worst_label,
                     amps=worst_amps,
+                    eigen=eigen,
+                    zonder_coach=((worst_amps - eigen) / fuse) * 100,
                 )
 
         ceiling = float(installation.get("max_grid_watts") or 0)
@@ -284,7 +338,14 @@ class LoadMonitor:
         else:
             import_w = max(0.0, _watts(states.get(sources.get("grid_import", ""))) or 0.0)
 
-        return LoadReading(percent=(import_w / ceiling) * 100, basis="power", watts=import_w)
+        eigen = min(self._coach_aandeel(in_watt=True), import_w)
+        return LoadReading(
+            percent=(import_w / ceiling) * 100,
+            basis="power",
+            watts=import_w,
+            eigen=eigen,
+            zonder_coach=((import_w - eigen) / ceiling) * 100,
+        )
 
     async def _async_notify(
         self, reading: LoadReading, threshold: float, alert: dict[str, Any]
@@ -297,10 +358,21 @@ class LoadMonitor:
         home = (self._settings.get("installation", {}).get("home_name") or "").strip()
         where = f"{home}: " if home else ""
 
+        # Komt er een deel van de laadpaal, dan staat dat erbij. Zonder dat
+        # klopt het getal op de telefoon niet met wat er op de kaart staat, en
+        # dan is de eerste gedachte "wat staat er in vredesnaam aan". Een paal
+        # die niets doet meldt zijn rustverbruik in honderdsten en die hoort
+        # hier niet als "0,0 A van de laadpaal" te verschijnen.
         if reading.basis == "phase":
             detail = f"Fase {reading.worst_phase} trekt {reading.amps:.1f} A"
+            if reading.eigen >= 0.5:
+                detail += f", waarvan {reading.eigen:.1f} A van de laadpaal"
         else:
             detail = f"Je trekt {reading.watts / 1000:.2f} kW uit het net".replace(".", ",")
+            if reading.eigen >= 50:
+                detail += (
+                    f", waarvan {reading.eigen / 1000:.2f} kW van de laadpaal"
+                ).replace(".", ",")
 
         # How long it has been going on is the difference between "act on this"
         # and "you missed a spike", so it goes in the message.

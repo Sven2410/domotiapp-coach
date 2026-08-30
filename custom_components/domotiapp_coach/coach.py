@@ -86,6 +86,55 @@ NUDGE_INTERVAL = timedelta(minutes=5)
 # een huis dat werkelijk bijschakelt niet te missen.
 METER_NAIJL = timedelta(minutes=1)
 
+# Hoe lang een paal moet volhouden dat er geen kabel in zit voor de coach hem
+# gelooft.
+#
+# Een Easee die zijn laadbeurt opnieuw opstart doorloopt de hele keten:
+# `disconnected`, `awaiting_authorization`, `pending_authorization`,
+# `waiting_in_queue`, `charging`. Dat duurt bij Van den Dam ongeveer twee
+# seconden en gebeurde in de nacht van 30-08-2026 drie keer, twee daarvan
+# binnen tien seconden nadat de coach zelf zijn grens omlaag schreef. Elke keer
+# las de coach dat als de kabel eruit: verslag versturen, en het akkoord,
+# snelladen, de accustand en de klaar-tijd weggooien. Eén laadbeurt werd zo in
+# vieren geknipt, en de vier verslagen telden samen 19,8 kWh terwijl er 13,65
+# in ging.
+#
+# Dit staat naast de reparatie van v0.43.1, die over een sensor ging die even
+# niets zei. Dit is een sensor die wél iets zei, alleen niet lang genoeg om het
+# te geloven.
+#
+# Een halve minuut, en dat is een keuze en geen meting: lang genoeg voor elke
+# herstart die ik gezien heb, en kort genoeg dat een echte kabel eruit nog
+# steeds binnen een ronde opgemerkt wordt. Het verslag noemt het moment waarop
+# de paal het voor het eerst zei, niet het moment waarop de coach het geloofde.
+KABEL_ONTDREUN = timedelta(seconds=30)
+
+# Over hoeveel tijd de fasestromen worden gladgestreken voor er een besluit op
+# valt. De huismeter van Van den Dam meldt elke dertig seconden en gooit er af
+# en toe één sample uit dat nergens bij hoort; zie `nood_ruimte` in planner.py.
+# Een mediaan over anderhalve minuut haalt zo'n enkele uitschieter eruit en
+# laat een huis dat werkelijk bijschakelt er binnen twee metingen door.
+#
+# De metingen komen niet uit de ronde maar uit de luisteraar op de fasesensoren,
+# want een ronde per minuut levert nooit genoeg punten voor een mediaan.
+FASE_VENSTER = timedelta(seconds=90)
+
+# Vanaf welke stroom de fasemeting van een laadpunt iets betekent, en hoe vers
+# de twee sensoren van elkaar moeten zijn. Zie `_measured_phases`.
+FASEMETING_AMPS = 5.0
+FASEMETING_VERS = timedelta(seconds=10)
+
+# Hoe vaak achter elkaar dezelfde uitkomst nodig is voor de coach er iets over
+# zegt. Drie ronden, dus in de praktijk drie minuten stabiel laden.
+FASEMETING_RONDEN = 3
+
+# Hoe lang de coach stroom aanbiedt aan een auto die niets afneemt voor hij er
+# iets over zegt, en alleen als de klaar-tijd erdoor in gevaar komt. Bij Van den
+# Dam gaf de Ford er op 30-08-2026 om 04:34 de brui aan; het eerste bericht
+# daarover kwam om 07:00, toen de klaar-tijd al voorbij was. Twintig minuten is
+# ruim langer dan elke auto nodig heeft om wakker te worden.
+STIL_AANBOD = timedelta(minutes=20)
+
 # Over hoeveel tijd het overschot wordt gladgestreken voor er omhoog wordt
 # gestuurd. Drie minuten is lang genoeg om een wolk te laten passeren en kort
 # genoeg om een opklaring niet te missen.
@@ -168,6 +217,18 @@ WAKE_WINDOW = timedelta(seconds=60)
 # laten brengen. Vijftien seconden is vier keer sneller dan de klok en rustig
 # genoeg voor de laadpaal.
 HURRY_INTERVAL = timedelta(seconds=15)
+
+
+def _moment(now: datetime | None = None) -> datetime:
+    """De klok waar de coach mee rekent: lokale tijd, zonder tijdzone erbij.
+
+    Eén functie, want alles wat de coach onthoudt wordt met alles vergeleken.
+    De ronde rekende hierin en de luisteraar op de fasesensoren in UTC mét
+    tijdzone, en die twee vergelijkt Python niet: dat is een `TypeError` midden
+    in een ronde, en dus een coach die stilvalt. Gevonden bij het nalezen, niet
+    in het echt, en dat is het soort dat je maar één keer wilt hebben.
+    """
+    return dt_util.as_local(now or dt_util.utcnow()).replace(tzinfo=None)
 
 
 def _number(hass: HomeAssistant, entity_id: str | None) -> float | None:
@@ -285,8 +346,27 @@ class ChargerCoach:
         # De laatste bruikbare status per laadpunt, zodat een entiteit die even
         # wegvalt niet als een losgekoppelde kabel leest. Zie `_read`.
         self._laatste_status: dict[str, str] = {}
+        # Sinds wanneer een paal zegt dat er geen kabel in zit. Pas als hij dat
+        # `KABEL_ONTDREUN` lang volhoudt telt het, en dan is dít het moment dat
+        # in het verslag komt. Zie `_read`.
+        self._los_sinds: dict[str, datetime] = {}
+        # Aan welke palen ooit een kabel gezien is. Alleen daar valt er iets te
+        # ontdreunen: een paal die nog nooit bezet was is gewoon leeg.
+        self._was_verbonden: set[str] = set()
+        # De fasestromen zoals de meter ze meldt, met het moment erbij, om een
+        # enkele uitschieter uit te kunnen middelen. Per entiteit, want de drie
+        # fasen melden niet tegelijk. Zie `FASE_VENSTER`.
+        self._fase_historie: dict[str, list[tuple[datetime, float]]] = {}
+        # Wat de fasemeting van een laadpunt de laatste ronden opleverde, als
+        # (aantal fasen, hoe vaak achter elkaar). Zie `_measured_phases`.
+        self._fasen_gemeten: dict[str, tuple[int, int]] = {}
         # De laatste metingen van het overschot, per apparaat, om op te dempen.
         self._zon: dict[str, list[tuple[datetime, float]]] = {}
+        # Wat de coach zelf aan energie langs zag komen, per apparaat en dus
+        # over laadbeurten heen. Met de stand van de teller van de paal erbij en
+        # hoeveel er zelf gemeten was toen die voor het laatst stapte. Zie
+        # `_geladen`.
+        self._eigen: dict[str, dict[str, Any]] = {}
         # Wie er op snelladen staat. Net als een akkoord niet bewaard over een
         # herstart heen en afgelopen zodra de kabel eruit gaat: snelladen is
         # iets voor nu, niet iets wat stilletjes blijft staan.
@@ -494,7 +574,14 @@ class ChargerCoach:
             self._urgent_above = None
             return
 
+        # Dezelfde grens als waar de planner mee rekent, dus ook hier de
+        # laagste van de zekering en de lastbewaker. Zie `net_grens` daar: staat
+        # de bewaker lager, dan is de zekering een getal dat nooit gehaald wordt
+        # en zou de haast pas aanslaan als het allang te laat is.
         zekering = float(installation.get("fuse_amps") or 25)
+        bewaker = _number(self.hass, installation.get("balancer_entity"))
+        if bewaker and bewaker > 0:
+            zekering = min(zekering, bewaker)
         marge = (
             BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
         )
@@ -550,17 +637,32 @@ class ChargerCoach:
 
     @callback
     def _async_phase_changed(self, new) -> None:
-        """Een fasestroom die over de grens komt, en niet te vaak."""
-        if self._urgent_above is None:
-            return
+        """Een fasestroom die over de grens komt, en niet te vaak.
+
+        Elke meting wordt hier ook bewaard, ook de rustige. Dat is het enige
+        punt in de coach waar ze binnenkomen op het tempo van de meter zelf, en
+        zonder een handvol punten valt er niets glad te strijken. Zie
+        `FASE_VENSTER`.
+        """
         try:
             amps = float(new.state)
         except (TypeError, ValueError):
             return
+
+        # Dezelfde klok als de ronde, want `_gladde_fase` zet deze stempels
+        # naast de tijd van die ronde. Zie `_moment`.
+        nu = _moment()
+        historie = self._fase_historie.setdefault(new.entity_id, [])
+        historie.append((nu, amps))
+        grens = nu - FASE_VENSTER
+        while historie and historie[0][0] < grens:
+            historie.pop(0)
+
+        if self._urgent_above is None:
+            return
         if amps < self._urgent_above:
             return
 
-        nu = dt_util.utcnow()
         if self._last_urgent is not None and nu - self._last_urgent < HURRY_INTERVAL:
             return
         self._last_urgent = nu
@@ -613,7 +715,7 @@ class ChargerCoach:
         self._restore(settings)
 
         level = (settings.get("strategy") or {}).get("level", LEVEL_PROPOSE)
-        moment = dt_util.as_local(now or dt_util.utcnow()).replace(tzinfo=None)
+        moment = _moment(now)
 
         chargers = [
             device
@@ -776,7 +878,7 @@ class ChargerCoach:
         # Iets dat alleen de bewoner zelf kan verhelpen, en dat losstaat van
         # het besluit van deze ronde. Het gaat dus naast de reden op de kaart
         # en niet erin.
-        tip = self._fasetip(settings, device, charger)
+        tip = self._fasetip(settings, device, charger) or self._bewakertip(settings)
         self.state[device_id]["tip"] = tip
 
         may_act = level == LEVEL_STEER or (
@@ -1118,6 +1220,32 @@ class ChargerCoach:
         vat = float(dynamic.get("vat_percent") or 0)
         return (market + tax + markup) * (1 + vat / 100)
 
+    def _gladde_fase(
+        self, entity_id: str | None, amps: float, now: datetime
+    ) -> float:
+        """De fasestroom zonder de enkele uitschieter die er niet bij hoort.
+
+        De mediaan van wat deze fase binnen `FASE_VENSTER` gemeld heeft.
+        Uitdrukkelijk de mediaan en niet het gemiddelde: een gemiddelde laat één
+        sample van 27 A over drie metingen nog altijd vijf ampère doortellen,
+        een mediaan gooit hem weg. Een huis dat werkelijk bijschakelt heeft
+        binnen twee metingen de meerderheid en komt er dus gewoon door.
+
+        Minder dan drie metingen is geen mediaan maar een gok, en dan telt wat
+        de sensor nu zegt. Dat is ook het geval vlak na een herstart, en dat
+        hoort zo: liever een ronde te voorzichtig dan een ronde te laat.
+
+        Alleen voor fasen die als stroomsensor zijn ingevuld. Een fase die uit
+        vermogen en spanning wordt herleid komt niet langs de luisteraar en
+        heeft dus geen historie; die blijft rauw.
+        """
+        historie = self._fase_historie.get(entity_id or "") or []
+        grens = now - FASE_VENSTER
+        waarden = sorted(waarde for stempel, waarde in historie if stempel >= grens)
+        if len(waarden) < 3:
+            return amps
+        return waarden[len(waarden) // 2]
+
     def _read(
         self,
         now: datetime,
@@ -1166,7 +1294,9 @@ class ChargerCoach:
         for key in ("l1", "l2", "l3"):
             phase = (sources.get("phases") or {}).get(key) or {}
             amps = _number(self.hass, phase.get("current"))
-            if amps is None:
+            if amps is not None:
+                amps = self._gladde_fase(phase.get("current"), amps, now)
+            else:
                 watts = _watts(self.hass, phase.get("power"))
                 volts = _number(self.hass, phase.get("voltage")) or 230
                 amps = watts / volts if watts is not None and volts else None
@@ -1208,6 +1338,11 @@ class ChargerCoach:
                 if installation.get("load_balancer")
                 else FUSE_MARGIN_AMPS
             ),
+            # Waar de lastbewaker zelf op staat, als de klant die sensor heeft
+            # ingevuld. Zie `net_grens` in planner.py: staat hij lager dan de
+            # zekering, dan is híj de grens en heeft het geen zin er overheen te
+            # vragen.
+            balancer_amps=_number(self.hass, installation.get("balancer_entity")),
         )
 
         # --- the charging point ---
@@ -1232,9 +1367,34 @@ class ChargerCoach:
         else:
             status = gemeld
             self._laatste_status[device_id] = status
+
+        # En een paal die wél iets zegt, alleen niet lang genoeg om het te
+        # geloven. Een Easee die zijn laadbeurt opnieuw opstart meldt twee
+        # seconden `disconnected` en gaat daarna gewoon door met laden. Zie
+        # `KABEL_ONTDREUN` voor wat dat bij Van den Dam kostte.
+        #
+        # Het moment dat hier onthouden wordt is het moment dat straks in het
+        # verslag komt: de kabel ging eruit toen de paal het zei, niet toen de
+        # coach het geloofde.
+        zegt_los = (not status) or "disconnect" in status
+        if not zegt_los:
+            self._los_sinds.pop(device_id, None)
+            self._was_verbonden.add(device_id)
+            verbonden = True
+        elif device_id not in self._was_verbonden:
+            # Er is aan deze paal nog nooit een kabel gezien, dus er valt ook
+            # niets te ontdreunen. Een coach die net opstart bij een lege paal
+            # hoort niet een halve minuut te doen alsof er een auto hangt.
+            verbonden = False
+        else:
+            sinds = self._los_sinds.setdefault(device_id, now)
+            verbonden = now - sinds < KABEL_ONTDREUN
+            if not verbonden:
+                self._was_verbonden.discard(device_id)
+
         charger = Charger(
             max_amps=_number(self.hass, entities.get("max_limit")) or 16.0,
-            connected=bool(status) and "disconnect" not in status,
+            connected=verbonden,
             charging="charging" in status,
             started_at=self._since.get(device.get("id", "")),
             actual_amps=charger_amps,
@@ -1467,7 +1627,11 @@ class ChargerCoach:
             # heeft zijn verslag al gehad.
             beurt = self._sessie.pop(device_id, None)
             if beurt and beurt.get("begon") and "vol" not in beurt.get("gemeld", set()):
-                self._afscheid[device_id] = (now, beurt)
+                # Het moment waarop de paal het zei, niet het moment waarop de
+                # coach het na `KABEL_ONTDREUN` geloofde. Anders staat er in het
+                # verslag een tijd die een halve minuut naast de werkelijkheid
+                # ligt.
+                self._afscheid[device_id] = (self._los_sinds.get(device_id) or now, beurt)
             return
 
         vers = device_id not in self._sessie
@@ -1496,14 +1660,11 @@ class ChargerCoach:
                 "soc_moment": None,
                 "soc_meter": None,
                 "klaar_sinds": None,
-                # Wat de coach zelf aan energie langs heeft zien komen, en welk
-                # deel daarvan de teller van de paal al verwerkt had. Samen
-                # maken ze het verslag compleet; zie `_geladen`.
-                "gemeten_kwh": 0.0,
-                "meter_stand": None,
-                "meter_kwh": 0.0,
-                "watt": 0.0,
-                "liep": False,
+                # Waar deze beurt in de doorlopende eigen meting van dit
+                # apparaat begon, en wat het ijkpunt opleverde. Zie `_geladen`.
+                "eigen_bij_begin": 0.0,
+                "geijkt": False,
+                "ijk_kwh": 0.0,
             },
         )
         if vers:
@@ -1531,6 +1692,24 @@ class ChargerCoach:
 
         meter = self._teller(device)
 
+        # De eigen meting hoort bij het apparaat en niet bij de laadbeurt.
+        #
+        # Dat is een reparatie. Stond hij in de beurt, dan begon hij bij elke
+        # nieuwe beurt weer op nul, en dan is er niets meer om de eerste stap
+        # van de teller mee te verdelen: die stap dekt immers ook tijd van vóór
+        # deze beurt. Bij Van den Dam kostte dat op 30-08-2026 een verslag van
+        # 10,0 kWh over vierentwintig minuten, waar er 3,34 in ging.
+        eigen = self._eigen.setdefault(
+            device_id,
+            {
+                "kwh": 0.0,
+                "watt": 0.0,
+                "liep": False,
+                "meter_stand": None,
+                "meter_bij": 0.0,
+            },
+        )
+
         # De laatste accustand van deze laadbeurt vasthouden, met de meterstand
         # van dat moment erbij. Een percentage dat wegvalt is geen nieuw
         # percentage: de auto hangt nog aan dezelfde kabel en kan dus niet
@@ -1552,20 +1731,49 @@ class ChargerCoach:
         # telt dan mee terwijl er nog niets liep, en de laatste valt weg. En
         # alleen als hij toen ook laadde, want een vermogenssensor die na
         # afloop op zijn laatste waarde blijft hangen zou anders doortellen.
-        if sessie.get("liep") and 0 < stap <= 10:
-            sessie["gemeten_kwh"] += sessie.get("watt", 0.0) / 1000.0 * stap / 60.0
-        sessie["watt"] = _watts(self.hass, device.get("entity")) or 0.0
-        sessie["liep"] = charger.charging
-        if meter is not None and meter != sessie.get("meter_stand"):
-            sessie["meter_stand"] = meter
-            sessie["meter_kwh"] = sessie["gemeten_kwh"]
+        if eigen["liep"] and 0 < stap <= 10:
+            eigen["kwh"] += eigen["watt"] / 1000.0 * stap / 60.0
+        eigen["watt"] = _watts(self.hass, device.get("entity")) or 0.0
+        eigen["liep"] = charger.charging
+
+        if meter is not None and meter != eigen["meter_stand"]:
+            vorige_stand = eigen["meter_stand"]
+            vorige_bij = eigen["meter_bij"]
+            eigen["meter_stand"] = meter
+            eigen["meter_bij"] = eigen["kwh"]
+            # De eerste stap ná het begin van deze beurt valt met één been aan
+            # elke kant ervan: hij dekt de tijd vanaf de vorige stap, en die lag
+            # vóór het begin. Alleen het deel dat bij deze beurt hoort telt mee,
+            # en de eigen meting weet welk deel dat is. Vanaf hier is de teller
+            # weer de maat. Zie `_geladen`.
+            if (
+                sessie["begon"] is not None
+                and not sessie["geijkt"]
+                and vorige_stand is not None
+            ):
+                stap_kwh = max(0.0, meter - float(vorige_stand))
+                heel = eigen["kwh"] - vorige_bij
+                onze = eigen["kwh"] - sessie["eigen_bij_begin"]
+                # Heeft de coach in die tijd zelf niets gemeten, dan is er
+                # niets om mee te verdelen en gaat de hele stap naar deze beurt.
+                # Dat is wat hij vóór het ijkpunt altijd al deed, en zonder
+                # eigen meting valt het niet beter te weten.
+                sessie["ijk_kwh"] = (
+                    stap_kwh * max(0.0, min(1.0, onze / heel))
+                    if heel > 1e-9
+                    else stap_kwh
+                )
+                sessie["meter"] = meter
+                sessie["geijkt"] = True
 
         sessie["mikpunt"] = window.deadline if window.enabled else None
 
         if charger.charging and sessie["begon"] is None:
             sessie["begon"] = now
-            sessie["meter"] = meter
-            sessie["meter_kwh"] = sessie["gemeten_kwh"]
+            sessie["meter"] = eigen["meter_stand"]
+            sessie["eigen_bij_begin"] = eigen["kwh"]
+            sessie["geijkt"] = False
+            sessie["ijk_kwh"] = 0.0
 
     def _geladen(self, device: dict[str, Any], sessie: dict[str, Any]) -> float | None:
         """Hoeveel kWh er deze beurt in is gegaan.
@@ -1576,15 +1784,46 @@ class ChargerCoach:
         zelf aan vermogen langs zag komen, en is dus ook gemeten en niet
         aangenomen. Heeft de paal helemaal geen teller, dan is die eigen meting
         alles wat er is, en dat is nog altijd beter dan zwijgen.
+
+        **En de kop loopt net zo goed voor.** Die kant stond er niet in. De
+        teller stond bij het begin van de beurt stil op een stand van misschien
+        wel een uur oud, en de eerste stap daarna bevat dus ook energie van vóór
+        deze beurt. Bij Van den Dam sprong hij op 30-08-2026 om 04:02:45 in één
+        keer 9,35 kWh, over de periode vanaf 02:55. De beurt die om 03:43 begon
+        nam die hele sprong mee en meldde 10,0 kWh over vierentwintig minuten,
+        wat 25 kW zou zijn. Er was 3,34 kWh in gegaan.
+
+        Vandaar het ijkpunt. Tot de eerste stap ná het begin telt de eigen
+        meting, want die is wél bij, en vanaf dat punt weer de teller. Zo hoort
+        elke kWh bij precies één beurt.
         """
-        staart = max(0.0, sessie.get("gemeten_kwh", 0.0) - sessie.get("meter_kwh", 0.0))
+        eigen = self._eigen.get(device.get("id", "")) or {}
+        # Waar de staart begint. Zolang de teller nog niet gestapt is sinds deze
+        # beurt begon is dat het begin van de beurt, want alles ervoor was van
+        # een andere. Daarna is het de laatste stap.
+        basis = (
+            eigen.get("meter_bij", 0.0)
+            if sessie.get("geijkt")
+            else sessie.get("eigen_bij_begin", 0.0)
+        )
+        staart = max(0.0, eigen.get("kwh", 0.0) - basis)
         meter = self._teller(device)
         if meter is None or sessie.get("meter") is None:
             return staart or None
-        return max(0.0, meter - float(sessie["meter"])) + staart
+        eerder = sessie.get("ijk_kwh", 0.0) if sessie.get("geijkt") else 0.0
+        return eerder + max(0.0, meter - float(sessie["meter"])) + staart
 
     def _waarom(self, sessie: dict[str, Any]) -> str:
-        """De twee dingen waar de meeste tijd aan op is gegaan, in gewone taal."""
+        """De twee dingen waar de meeste tijd aan op is gegaan, in gewone taal.
+
+        Met de periode erbij, en dat is een reparatie. Deze minuten tellen vanaf
+        het moment dat de kabel erin ging, terwijl de kWh in dezelfde zin vanaf
+        het begin van het laden telt. Sven kreeg op 30-08-2026 om 03:43: "er
+        ging 6,9 kWh in sinds 03:00. Er ging 381 minuten naar wachten op een
+        goedkoper uur." Dat leest als 381 minuten binnen drieënveertig, terwijl
+        het klopte: de kabel zat er sinds 20:37 in. Elk getal was goed en de zin
+        was onzin.
+        """
         kwijt = [
             (minuten, self.VERTRAGING[sleutel])
             for sleutel, minuten in (sessie.get("kwijt") or {}).items()
@@ -1594,7 +1833,14 @@ class ChargerCoach:
             return ""
         kwijt.sort(reverse=True)
         stukken = [f"{int(minuten)} minuten naar {tekst}" for minuten, tekst in kwijt[:2]]
-        return " en ".join(stukken)
+        # Is de coach midden in de laadbeurt ingestapt, dan weet hij niet hoe
+        # lang de kabel er al in zat en zegt hij wat hij wél weet.
+        sinds = (
+            "Sinds de coach begon te kijken"
+            if sessie.get("ingestapt")
+            else "Sinds de kabel erin ging"
+        )
+        return f"{sinds} is er " + " en ".join(stukken) + " gegaan"
 
     def _soc_bezonken(
         self, now: datetime, sessie: dict[str, Any], car: Car
@@ -1655,6 +1901,41 @@ class ChargerCoach:
 
         gemeld: set[str] = sessie["gemeld"]
 
+        # De coach biedt stroom aan en er komt niets. Dit is het bericht dat bij
+        # Van den Dam had moeten komen: de Ford hield op 30-08-2026 om 04:34 op
+        # met laden en kwam daar zelf niet meer uit, maar het eerste woord
+        # daarover was het verslag van 07:00, toen de klaar-tijd al voorbij was
+        # en de auto op 69% stond. Twee en een half uur waarin niemand iets kon
+        # doen omdat niemand het wist.
+        #
+        # Alleen als er een klaar-tijd is die nog moet komen, want zonder
+        # afspraak is een auto die niets afneemt geen probleem maar een keuze
+        # van de auto. En één keer per laadbeurt.
+        biedt_aan = decision.charge and charger.connected and not charger.charging
+        sinds = self._asking_since.get(device_id)
+        if (
+            biedt_aan
+            and sinds is not None
+            and now - sinds >= STIL_AANBOD
+            and window.enabled
+            and window.deadline is not None
+            and window.deadline > now
+            and "stil" not in gemeld
+        ):
+            gemeld.add("stil")
+            minuten = int((now - sinds).total_seconds() // 60)
+            stand = (
+                f" Hij staat op {int(car.soc_percent)}%."
+                if car.soc_percent is not None
+                else ""
+            )
+            await self._async_tell(
+                f"De auto aan {naam} neemt al {minuten} minuten geen stroom af "
+                f"terwijl de coach hem aanbiedt.{stand} Zo wordt "
+                f"{window.deadline:%H:%M} niet gehaald. Meestal helpt het om de "
+                "kabel er even uit te trekken en er weer in te doen."
+            )
+
         # De auto is vol.
         if decision.rule == "complete" and "vol" not in gemeld and sessie["begon"]:
             if sessie.get("klaar_sinds") is None:
@@ -1690,7 +1971,7 @@ class ChargerCoach:
             else:
                 verloop = f" Geladen van {begon:%H:%M} tot {now:%H:%M}."
             await self._async_tell(
-                klaar + verloop + (f" Daarvan ging {waarom}." if waarom else "")
+                klaar + verloop + (f" {waarom}." if waarom else "")
             )
             return
 
@@ -1712,7 +1993,7 @@ class ChargerCoach:
         waarom = self._waarom(sessie)
         await self._async_tell(
             f"De auto aan {naam} was om {vorig:%H:%M} nog niet vol.{stand}"
-            + (f" Er ging {waarom}." if waarom else "")
+            + (f" {waarom}." if waarom else "")
             + " Hij laadt door tot hij vol is."
         )
 
@@ -1752,7 +2033,7 @@ class ChargerCoach:
         await self._async_tell(
             f"De auto aan {naam} is afgekoppeld om {moment:%H:%M}"
             + verloop
-            + (f" Er ging {waarom}." if waarom else "")
+            + (f" {waarom}." if waarom else "")
         )
 
     async def _async_ask_soc(self, device: dict[str, Any], decision: Decision) -> None:
@@ -1851,8 +2132,9 @@ class ChargerCoach:
         en krijgt dus niets te lezen.
         """
         if not charger.charging:
+            self._fasen_gemeten.pop(device.get("id", ""), None)
             return ""
-        gemeten = self._measured_phases(device)
+        gemeten = self._fasen_stabiel(device)
         if gemeten is None:
             return ""
         _, profile = self._chosen_car(settings, device)
@@ -1897,13 +2179,88 @@ class ChargerCoach:
         return ""
 
     def _measured_phases(self, device: dict[str, Any]) -> int | None:
-        """One phase or three, worked out from what the charger reports."""
+        """One phase or three, worked out from what the charger reports.
+
+        De som is een verhouding: het vermogen gedeeld door de stroom is bij
+        drie fasen ongeveer drie keer de spanning en bij één fase ongeveer één
+        keer. Die som klopt alleen als de twee getallen bij hetzelfde moment
+        horen, en dat is precies wat er misging.
+
+        Bij Van den Dam meldde de Easee op 30-08-2026 om 04:28:17 een stroom van
+        2,20 A terwijl het vermogen nog de 782 W van drie seconden eerder was.
+        Dat is een verhouding van 1,54 en dus "één fase", en zo kreeg Sven te
+        lezen dat zijn auto eenfasig laadde terwijl alle drie de fasen van het
+        huis netjes samen elf ampère zakten zodra de paal uitging.
+
+        Drie eisen dus, en ze gaan allemaal over of de meting iets betekent.
+        Genoeg stroom, want onder een paar ampère is elke verhouding ruis. De
+        twee sensoren binnen `FASEMETING_VERS` van elkaar, want anders vergelijk
+        je twee momenten. En een uitkomst die niet tussen wal en schip valt: bij
+        een verhouding tussen 1,5 en 2,5 zegt de coach liever niets.
+        """
         entities = device.get("entities") or {}
+        vermogen = self.hass.states.get(device.get("entity") or "")
+        stroom = self.hass.states.get(entities.get("current") or "")
+        if vermogen is None or stroom is None:
+            return None
+
         watts = _watts(self.hass, device.get("entity"))
         amps = _number(self.hass, entities.get("current"))
-        if not watts or not amps or amps < 1:
+        if not watts or not amps or amps < FASEMETING_AMPS:
             return None
-        return 3 if amps_for(watts, 1) / amps > 2 else 1
+
+        # Twee sensoren van dezelfde paal die niet tegelijk gemeld hebben zeggen
+        # samen niets. Tijdens het optrekken lopen ze seconden uit elkaar en dan
+        # is de verhouding een vergelijking tussen nu en daarnet.
+        if abs(vermogen.last_updated - stroom.last_updated) > FASEMETING_VERS:
+            return None
+
+        verhouding = amps_for(watts, 1) / amps
+        if verhouding > 2.5:
+            return 3
+        if verhouding < 1.5:
+            return 1
+        return None
+
+    def _bewakertip(self, settings: dict[str, Any]) -> str:
+        """Zeggen dat de lastbewaker lager staat dan de hoofdzekering.
+
+        Dan is de zekering een getal dat nooit gehaald wordt en rekent de coach
+        met de bewaker. Dat is de goede uitkomst, maar het hoort wel op het
+        scherm te staan: bij Van den Dam stond de Equalizer op 20 A terwijl de
+        zekering 25 A is, en niemand wist dat. Vier ampère is bij zestien een
+        kwart van de laadsnelheid.
+        """
+        installation = settings.get("installation") or {}
+        grens = _number(self.hass, installation.get("balancer_entity"))
+        zekering = float(installation.get("fuse_amps") or 25)
+        if grens is None or grens <= 0 or grens >= zekering:
+            return ""
+        return (
+            f"Je lastbewaker staat op {grens:.0f} A en je hoofdzekering op "
+            f"{zekering:.0f} A. De coach houdt {grens:.0f} A aan, want daarboven "
+            "knijpt de bewaker toch. Hoort dat hoger te staan, dan is dat een "
+            "instelling in de app van je lastbewaker."
+        )
+
+    def _fasen_stabiel(self, device: dict[str, Any]) -> int | None:
+        """Dezelfde fasemeting, maar pas als hij `FASEMETING_RONDEN` lang staat.
+
+        Een enkele ronde is nooit genoeg om iemand te vertellen dat zijn
+        instelling niet klopt. Een meting die weifelt zet de teller op nul, dus
+        er wordt alleen iets gezegd over een paal die er al minuten stabiel bij
+        staat.
+        """
+        device_id = device.get("id", "")
+        gemeten = self._measured_phases(device)
+        if gemeten is None:
+            self._fasen_gemeten.pop(device_id, None)
+            return None
+
+        vorig, keer = self._fasen_gemeten.get(device_id, (0, 0))
+        keer = keer + 1 if vorig == gemeten else 1
+        self._fasen_gemeten[device_id] = (gemeten, keer)
+        return gemeten if keer >= FASEMETING_RONDEN else None
 
     def _restore(self, settings: dict[str, Any]) -> None:
         """De knoppen van de bewoner terughalen na een herstart.

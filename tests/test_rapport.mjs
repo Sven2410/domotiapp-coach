@@ -205,6 +205,47 @@ proef("een stroom van -0,017 A wordt 0,0 en niet -0,0", () => {
   assert.equal(zonderMinNul(-1.461, 1), -1.5);
 });
 
+// --- de grenssensor van de lastbewaker in het installatiescherm -------------
+//
+// Bij Van den Dam staat de Easee Equalizer op 20 A terwijl de hoofdzekering
+// 25 A is. De coach vroeg daardoor de hele nacht van 30-08-2026 twee ampere
+// meer dan de bewaker toestond en las uur na uur `limited_by_equalizer`. De
+// bewaker meldt zijn grens gewoon in een sensor, dus die is nu in te vullen.
+
+await import("../custom_components/domotiapp_coach/frontend/src/views/installation.js");
+const Installatie = geregistreerd.get("dac-view-installation");
+assert.ok(Installatie, "het installatiescherm hoort zich te registreren");
+
+proef("het installatiescherm heeft een veld voor de grens van de lastbewaker", () => {
+  const html = Object.create(Installatie.prototype).render();
+  assert.ok(
+    html.includes('<dac-entity-picker id="balancer-limit">'),
+    "er hoort een kiezer voor de grenssensor te staan"
+  );
+  assert.ok(
+    html.includes('id="balancer-row"'),
+    "en die hoort in een rij te zitten die te verbergen is"
+  );
+});
+
+proef("de rij hangt aan het vinkje van de lastbewaker", () => {
+  const rij = { hidden: false, style: {} };
+  const el = Object.create(Installatie.prototype);
+  el.$ = (kiezer) => (kiezer === "#balancer-row" ? rij : null);
+
+  el.draft_ = { installation: { load_balancer: false } };
+  el.paintBalancer_();
+  // `hidden` alleen is niet genoeg: dat attribuut verliest van elke `display`
+  // die in de eigen stijlen staat, en `.row` heeft er een. Zie CLAUDE.md.
+  assert.equal(rij.hidden, true);
+  assert.equal(rij.style.display, "none");
+
+  el.draft_ = { installation: { load_balancer: true } };
+  el.paintBalancer_();
+  assert.equal(rij.hidden, false);
+  assert.equal(rij.style.display, "");
+});
+
 // --- draaien ----------------------------------------------------------------
 
 let goed = 0;
