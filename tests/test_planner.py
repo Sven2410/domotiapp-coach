@@ -1495,6 +1495,54 @@ for schijf in duurste41:
 controle("en dat is aantoonbaar minder dan de duurste manier",
          kosten41 < slechtst, f"{kosten41:.2f} tegen {slechtst:.2f}")
 
+print("=== 44. de veiligheidsrail mag afremmen maar niet stoppen ===")
+# Twee keer op 30-08-2026 stond er bij Van den Dam een ronde lang "je aansluiting
+# is te zwaar belast om te laden", om 12:47:36 en om 15:02:58. De fasen stonden
+# op dat moment op 5, 5 en 7 ampere en de zekering is 25. Ik heb er die dag twee
+# keer naar gezocht in de meting; het was de rail zelf.
+#
+# De paal was net gestopt op 5,5 A. Zolang de fasemeting nog naijlt, knijpt de
+# rail het plafond af op wat er al gevraagd wás, en dat is dan 5,5. Dat is onder
+# de ondergrens van een paal, dus kwam er `no-room` uit: stoppen, terwijl de
+# rail alleen bedoeld is om niet omhóóg te gaan.
+nu44 = middag(15, 3)
+RUSTIG44 = Grid(surplus_w=0.0, phase_amps=[5.0, 5.0, 7.0], fuse_amps=25.0,
+                charger_amps=0.167, recent_charger_amps=5.556, margin_amps=3.0)
+NET_GESTOPT = Charger(max_amps=16.0, connected=True, charging=False,
+                      actual_amps=0.167, limit_amps=6.0)
+
+controle("de meter loopt inderdaad na", planner.meter_loopt_achter(RUSTIG44, NET_GESTOPT))
+plafond44 = planner.ceiling_amps(RUSTIG44, LEEG, NET_GESTOPT)
+print(f"  huis 7 A op de zwaarste fase, paal net gestopt op 5,5 A: plafond {plafond44} A")
+controle("de rail duwt het plafond niet onder de ondergrens",
+         plafond44 >= MIN_AMPS, f"{plafond44} A")
+
+d44 = decide(nu44, [], RUSTIG44, LEEG, NET_GESTOPT, venster(nu44),
+             tariff=VAST, sun=ZON_KRAP)
+print(f"  {d44.rule}: laden={d44.charge} {d44.amps} A")
+controle("dus geen 'te zwaar belast' meer bij een rustig huis",
+         d44.rule != "no-room", f"{d44.rule}")
+
+# En de rail doet nog wel waar hij voor is: hij houdt een optrekkende paal tegen
+# die anders op een naijlende meting omhoog zou springen. Svens getallen van
+# 20-08-2026: de paal meldt 2,7 A terwijl L1 al op 16 staat.
+OPTREKKEND = Grid(surplus_w=0.0, phase_amps=[16.0, 3.0, 2.0], fuse_amps=25.0,
+                  charger_amps=2.7, margin_amps=2.0)
+TREKT_OP = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=2.7,
+                   limit_amps=10.0)
+plafond44b = planner.ceiling_amps(OPTREKKEND, LEEG, TREKT_OP)
+print(f"  paal trekt op naar 10 A, meter loopt na: plafond {plafond44b} A")
+controle("hij blijft afremmen op wat er al gevraagd was", plafond44b == 10,
+         f"{plafond44b} A")
+
+# En een huis dat werkelijk vol zit wint nog steeds van de rail.
+VOL44 = Grid(surplus_w=0.0, phase_amps=[5.0, 5.0, 24.0], fuse_amps=25.0,
+             charger_amps=0.167, recent_charger_amps=5.556, margin_amps=3.0)
+plafond44c = planner.ceiling_amps(VOL44, LEEG, NET_GESTOPT)
+print(f"  huis 24 A op de zwaarste fase: plafond {plafond44c} A")
+controle("een huis dat er zelf overheen gaat wint van de rail",
+         plafond44c < MIN_AMPS, f"{plafond44c} A")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
