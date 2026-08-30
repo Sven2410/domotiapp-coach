@@ -45,10 +45,12 @@ wordt. Zet daar niets in dat `hass` nodig heeft.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 104 controles op het denkwerk
-python tests/test_coach.py       # 109 op de bedrading, met een nagebouwde HA
+python tests/test_planner.py     # 152 controles op het denkwerk
+python tests/test_coach.py       # 189 op de bedrading, met een nagebouwde HA
 python tests/test_archive.py     # 37 op de kwartieropslag
-node   tests/test_rapport.mjs    # 7 op het rapport en de tekens in het paneel
+node   tests/test_rapport.mjs    # 14 op het rapport en op het paneel
+node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
+python tools/stijlcheck.py       # backticks in css-commentaar
 ```
 
 Die laatste draait het paneel in node, met een nagemaakte browser eromheen: de
@@ -56,7 +58,7 @@ module registreert zich als custom element en de proef pakt de prototype. Zo is
 het rapport na te meten zonder scherm.
 
 Home Assistant hoeft er niet voor te draaien; de handvol namen die `coach.py`
-eruit gebruikt worden nagemaakt. **Draai ze alle vier voor elke uitgave.**
+eruit gebruikt worden nagemaakt. **Draai ze allemaal voor elke uitgave.**
 
 **Python 3.11 of nieuwer.** `coach.py` gebruikt `asyncio.timeout`, dat pas in
 3.11 bestaat. Op macOS levert Apple bij zijn ontwikkelaarsgereedschappen nog een
@@ -113,17 +115,28 @@ stond keurig op `true` terwijl het blok gewoon in beeld stond.
 Meet smalle schermen op **320 én 280 px**, niet alleen 390: zodra iOS inzoomt op
 een invoerveld wordt de viewport smaller en komt echte overflow er alsnog uit.
 
-**Geen backticks in CSS-commentaar.** De stijlen staan in een template literal
-en een backtick sluit de string af. `node --check` vangt dat **niet**: op
-27-08-2026 gaf hij groen op een bestand dat de browser weigerde met "Unexpected
-identifier". Controleren met:
+**`node --check` is niet genoeg, en twee keer heeft dat een zwart paneel
+gekost.** Draai deze twee erbij, altijd, voor je iets aan het paneel oplevert:
 
 ```
-python tools/stijlcheck.py     # alle stijlblokken van het paneel
+node   tools/laadcheck.mjs     # laadt elke module in zoals de browser dat doet
+python tools/stijlcheck.py     # backticks in css-commentaar
 ```
 
-Die zoekt het echte kenmerk op: een stijlblok dat middenin een commentaar
-ophoudt. `node --check` blijft nuttig voor gewone tikfouten, maar hier niet.
+`laadcheck.mjs` is de belangrijkste van de drie. Op 30-08-2026 stond er een
+tweede `const device` in een functie die er al een in zijn parameters had. Dat is
+een `SyntaxError`, dus een module die niet laadt, dus een paneel dat helemaal
+zwart blijft. `node --check` gaf groen: die leest een bestand met `import` erin
+niet als de module die het is. Sven keek naar een zwart scherm en dacht dat zijn
+herstart mislukt was.
+
+`stijlcheck.py` gaat over iets anders. De stijlen staan in een template literal
+en een backtick sluit de string af; op 27-08-2026 gaf `node --check` daar ook
+groen op een bestand dat de browser weigerde met "Unexpected identifier". Die
+zoekt het echte kenmerk op: een stijlblok dat middenin een commentaar ophoudt.
+
+Drie controles die elkaar niet vervangen. `node --check` blijft nuttig voor
+gewone tikfouten.
 
 ### Klikken in de browser: eerst een schermafdruk, dan de coordinaten daarvan
 
