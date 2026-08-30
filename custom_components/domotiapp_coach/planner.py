@@ -550,6 +550,19 @@ HELD_BACK_REASONS = frozenset(
 )
 
 
+# En welke daarvan over de lastbewaker van de aansluiting gaan en niet over de
+# eigen groep van de lader. Alleen bij deze eerste zegt de bewakersensor iets
+# over dezelfde vraag, en kan hij dus tegenspreken wat de paal meldt.
+BALANCER_REASONS = frozenset(
+    {
+        "limited_by_equalizer",
+        "eq_too_low_current",
+        "limited_by_load_balancing",
+        "awaiting_load_balancing",
+    }
+)
+
+
 def held_back(charger: Charger) -> bool:
     """Whether something outside the coach is keeping this charger down."""
     return charger.no_current_reason in HELD_BACK_REASONS
@@ -1116,8 +1129,28 @@ def decide(
         )
 
     if held_back(charger) and charger.charging and charger.actual_amps > 0:
+        # Zegt de bewaker zélf dat hij ruimer staat dan de coach vraagt, dan kan
+        # hij niet degene zijn die knijpt en is de reden die de paal meldt ouder
+        # dan het getal ernaast. Zwijgen is dan beter dan een zin met twee
+        # getallen die elkaar tegenspreken.
+        #
+        # Sven op 30-08-2026, tijdens een herstart: "de equalizer staat op 18 A
+        # maar de coach zegt dat de lastbewaking op 7 A zit?" Allebei waar en
+        # toch onzin. De 7 was de gemeten stroom van dat moment; de reden
+        # `limited_by_equalizer` kwam van een sensor die er vijf minuten over
+        # deed om bij te werken. Dezelfde fout als bij de fasemeting: twee
+        # metingen uit twee momenten in één zin.
+        #
+        # Alleen voor de redenen die over de bewaker gaan. Een groep die vol
+        # zit is iets anders en daar zegt die sensor niets over.
+        vrij = beschikbaar_van_bewaker(grid)
+        zwijgen = (
+            charger.no_current_reason in BALANCER_REASONS
+            and vrij is not None
+            and vrij >= decision.amps
+        )
         held = int(charger.actual_amps)
-        if held < decision.amps - STEP_AMPS:
+        if not zwijgen and held < decision.amps - STEP_AMPS:
             return Decision(
                 True,
                 decision.amps,

@@ -1070,6 +1070,60 @@ controle("en de sommen staan er nog steeds",
          plan36e.hours_needed is not None and plan36e.latest_start is not None,
          f"{plan36e}")
 
+print("=== 37. twee getallen uit twee momenten in een zin ===")
+# Sven op 30-08-2026, tijdens het herstarten: "de equalizer staat op 18 A maar
+# de coach zegt dat de lastbewaking op 7 A zit?" Allebei waar en toch onzin. De
+# 7 was de gemeten stroom van dat moment; de reden `limited_by_equalizer` kwam
+# van `sensor.1_reden_geen_stroom`, en die was op dat moment vijf minuten oud.
+# De Easee meldt zijn sensoren niet allemaal tegelijk.
+nu37 = middag(12, 10)
+KNIJPT = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=7.3,
+                 started_at=middag(11, 0), limit_amps=10.0,
+                 no_current_reason="limited_by_equalizer")
+NET37 = Grid(surplus_w=0.0, phase_amps=[5.0, 6.0, 10.0], fuse_amps=25.0,
+             charger_amps=7.3, margin_amps=3.0)
+
+# Zonder de sensor van de bewaker is de gemeten stroom het enige dat er is, en
+# dan blijft het zoals het was.
+zonder37 = decide(nu37, [], NET37, LEEG, KNIJPT, venster(nu37), tariff=VAST, sun=ZON_RUIM)
+print(f"  zonder bewakersensor: {zonder37.rule}: {zonder37.reason}")
+controle("zonder bewakersensor blijft de melding staan",
+         zonder37.rule.endswith("+held-back"), f"{zonder37.rule}")
+
+# Maar zegt de bewaker zelf dat hij 18 A vrijgeeft terwijl de coach er 10 vraagt,
+# dan kan hij niet degene zijn die knijpt.
+RUIM37 = Grid(surplus_w=0.0, phase_amps=[5.0, 6.0, 10.0], fuse_amps=25.0,
+              charger_amps=7.3, margin_amps=3.0, balancer_amps=18.0)
+ruim37 = decide(nu37, [], RUIM37, LEEG, KNIJPT, venster(nu37), tariff=VAST, sun=ZON_RUIM)
+print(f"  bewaker geeft 18 A vrij: {ruim37.rule}: {ruim37.reason}")
+controle("een bewaker die ruim vrijgeeft krijgt de schuld niet",
+         not ruim37.rule.endswith("+held-back"), f"{ruim37.rule}")
+controle("en er staat geen getal in dat van een ander moment komt",
+         "7 A" not in ruim37.reason, f"{ruim37.reason}")
+
+# Een groep die vol zit is iets anders dan de bewaker, en daar zegt die sensor
+# niets over. Die melding blijft dus gewoon staan.
+GROEP = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=7.3,
+                started_at=middag(11, 0), limit_amps=10.0,
+                no_current_reason="limited_by_circuit_fuse")
+groep37 = decide(nu37, [], RUIM37, LEEG, GROEP, venster(nu37), tariff=VAST, sun=ZON_RUIM)
+print(f"  groep vol, bewaker ruim: {groep37.rule}")
+controle("een volle groep wordt nog steeds gemeld",
+         groep37.rule.endswith("+held-back"), f"{groep37.rule}")
+
+# En met de sensor erbij is de bewaker sowieso geen verrassing meer: de coach
+# vraagt nooit meer dan er vrij is, dus knijpt hij ook nooit meer. Dat is precies
+# waar die sensor voor is. Wat er dan overblijft is een paal die minder trekt dan
+# er gevraagd is, en daar heeft de bewaker geen schuld aan.
+KRAP37 = Grid(surplus_w=0.0, phase_amps=[5.0, 6.0, 10.0], fuse_amps=25.0,
+              charger_amps=7.3, margin_amps=3.0, balancer_amps=8.0)
+krap37 = decide(nu37, [], KRAP37, LEEG, KNIJPT, venster(nu37), tariff=VAST, sun=ZON_RUIM)
+print(f"  bewaker geeft 8 A vrij: {krap37.rule}: {krap37.amps} A")
+controle("de coach vraagt niet meer dan de bewaker vrijgeeft",
+         krap37.amps <= 8, f"{krap37.amps}")
+controle("en geeft de bewaker dus ook de schuld niet",
+         not krap37.rule.endswith("+held-back"), f"{krap37.rule}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
