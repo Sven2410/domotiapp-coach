@@ -1748,6 +1748,37 @@ def _decide(
             needs_soc=soc_unknown,
         )
 
+    # Een laadbeurt die loopt wordt niet onderbroken voor een prijsverschil dat
+    # er niet is.
+    #
+    # Gezien bij Van den Dam op 30-08-2026. De accu liep van 70 naar 72 procent,
+    # waardoor er nog maar twee uur nodig waren in plaats van drie, en het uur
+    # van dat moment viel uit de lijst. Het verschil met het duurste uur dat er
+    # nog wél in stond: 0,1281 tegen 0,1278, oftewel drie tienden van een cent
+    # per kWh. Over twintig kilowattuur is dat zes cent, en daarvoor zou de paal
+    # uitgaan en straks weer aan.
+    #
+    # Dat is de verkeerde ruil, en niet alleen op geld. Dezelfde nacht ervoor
+    # ging de Ford na achtenzeventig seconden stilstand slapen en kwam hij de
+    # hele dag niet meer terug. Een auto stopt niet graag steeds, en een uur dat
+    # praktisch evenveel kost is geen reden om het te vragen.
+    #
+    # `PRICE_MARGIN` is dezelfde marge waarmee de zonregel al werkt: onder dit
+    # verschil zijn twee prijzen op het scherm hetzelfde getal.
+    if current and charger.charging and plan_hours:
+        duurste = max(row["price"] for row in plan_hours)
+        if current["price"] <= duurste + PRICE_MARGIN:
+            return Decision(
+                True,
+                ceiling,
+                f"Dit uur kost {_euro(current['price'])} per kWh en dat scheelt "
+                "niets met de uren die hij gepland had, dus hij laadt door in "
+                "plaats van te stoppen en zo weer te beginnen.",
+                plan=_describe(plan_hours),
+                rule="cheap-hour+near",
+                needs_soc=soc_unknown,
+            )
+
     return Decision(
         False,
         0,
