@@ -113,9 +113,6 @@ LEVEL_STEER: Final = "steer"
 LEVELS: Final = [LEVEL_READ, LEVEL_ADVISE, LEVEL_PROPOSE, LEVEL_STEER]
 
 # What the coach optimises for once it is allowed to act.
-GOAL_COST: Final = "cost"
-GOAL_SOLAR: Final = "solar"
-GOALS: Final = [GOAL_COST, GOAL_SOLAR]
 
 # Fired after every round, so an open panel can show what was decided without
 # writing anything to disk a minute at a time.
@@ -297,7 +294,6 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # euros, which by itself already prefers using your own sun over
         # exporting it; "solar" insists on the sun even when buying would be
         # cheaper.
-        "goal": GOAL_COST,
         # Warn when the connection is being pushed towards its limit. The
         # interval matters as much as the threshold: load swings across the
         # trigger point constantly, so without it one busy hour would send a

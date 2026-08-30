@@ -22,7 +22,6 @@ from homeassistant.util import dt as dt_util
 from . import report
 from .const import (
     ALL_BRANDS,
-    GOALS,
     LEVELS,
     CONTRACT_DYNAMIC,
     CONTRACT_FIXED,
@@ -162,7 +161,6 @@ _SCHEDULE = _schema(
 _STRATEGY = _schema(
     {
         vol.Optional("level"): vol.In(LEVELS),
-        vol.Optional("goal"): vol.In(GOALS),
         vol.Optional("load_alert"): _schema(
             {
                 vol.Optional("enabled"): bool,

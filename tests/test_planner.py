@@ -35,7 +35,7 @@ if sys.version_info < (3, 11):
 
 
 from planner import (  # noqa: E402
-    Car, Charger, Decision, Grid, Sun, Tariff, Window, decide, MIN_AMPS,
+    Car, Charger, Decision, Forecast, Grid, Sun, Tariff, Window, decide, MIN_AMPS,
 )
 
 FOUT = 0
@@ -63,6 +63,15 @@ def venster(now, klaar="06:00"):
     return Window(enabled=True, opens=None, deadline=einde)
 
 
+def kromme(dag, eerste_uur, waarden, huis=0.0):
+    """Een zonverwachting per uur, en wat het huis er zelf van opmaakt."""
+    zon = {}
+    for i, kwh in enumerate(waarden):
+        zon[dag.replace(hour=0, minute=0, second=0, microsecond=0)
+            + dt.timedelta(hours=eerste_uur + i)] = kwh
+    return Forecast(solar_kwh=zon, house_kwh={u: huis for u in range(24)})
+
+
 def sven_auto(soc=70.0, capaciteit=19.7):
     return Car(capacity_kwh=capaciteit, phases=1, soc_percent=soc)
 
@@ -83,28 +92,39 @@ ZON_KRAP = Sun(remaining_kwh=6.3, now_w=1700.0, next_w=1600.0)
 ZON_RUIM = Sun(remaining_kwh=20.0, now_w=3000.0, next_w=3200.0)
 
 
-print("=== 1. vast contract, zon schiet tekort, klaar-tijd morgenvroeg ===")
+print("=== 1. vast contract, er komt vanmiddag nog zon ===")
+# De klif van 14:37: bij een vast contract sprong de coach naar vol vermogen en
+# kocht hij uren in terwijl er die middag nog zon aankwam. Sinds 30-08-2026 is
+# er geen sport meer die dat beslist maar een vergelijking: bij een vast tarief
+# kost elk uur hetzelfde, dus zijn de zonschijven de goedkoopste van allemaal en
+# worden die het eerst gepakt.
 nu = middag(14, 37)
-d = decide(nu, [], NET_LEEG, sven_auto(), paal(), venster(nu), tariff=VAST, sun=ZON_KRAP)
+# Vanaf 15:00 nog vier uur zon, samen ruim genoeg voor de 6,6 kWh die erin moet.
+MIDDAGZON = kromme(nu, 15, [2.5, 2.5, 2.0, 1.5])
+d = decide(nu, [], NET_LEEG, sven_auto(), paal(), venster(nu), tariff=VAST,
+           sun=ZON_KRAP, forecast=MIDDAGZON)
 print(f"  {d.rule}: laden={d.charge} {d.amps} A  {d.reason}")
-# Een lopende sessie wordt niet meteen afgebroken: drie ronden hysterese op de
-# laagste stand hoort erbij. Waar het om gaat is dat hij niet naar vol vermogen
-# springt, want dat was de klif van 14:37.
-controle("geen vol vermogen meer", "fixed-tariff" not in d.rule and d.amps <= 6,
-         f"kreeg {d.rule} met {d.amps} A")
-controle("dit was de klif van 14:37", "wait-for-sun" in d.rule)
+# Een lopende sessie wordt niet meteen afgebroken: `_keep_alive` houdt hem drie
+# ronden op de laagste stand. Waar het om gaat is dat hij niet naar vol vermogen
+# springt.
+controle("geen vol vermogen meer", d.amps <= 6, f"kreeg {d.rule} met {d.amps} A")
 
-d2 = decide(nu, [], NET_LEEG, sven_auto(), paal(), venster(nu), tariff=VAST, sun=ZON_KRAP,
-            holding=3)
+d2 = decide(nu, [], NET_LEEG, sven_auto(), paal(), venster(nu), tariff=VAST,
+            sun=ZON_KRAP, forecast=MIDDAGZON, holding=3)
 print(f"  na drie ronden hysterese: {d2.rule} laden={d2.charge}")
-controle("stopt na de hysterese", not d2.charge and d2.rule == "wait-for-sun",
-         f"kreeg {d2.rule}")
+controle("stopt na de hysterese", not d2.charge, f"kreeg {d2.rule}")
+controle("en zegt wanneer hij dan wel begint", "15:00" in d2.plan or "15:00" in d2.reason,
+         f"{d2.reason} / {d2.plan}")
 
-print("=== 2. zelfde, maar zon belooft genoeg ===")
-d = decide(nu, [], NET_LEEG, sven_auto(), paal(), venster(nu), tariff=VAST, sun=ZON_RUIM)
-print(f"  {d.rule}: {d.reason}")
-controle("wacht op de zon", d.rule.startswith("wait-for-sun") and d.amps <= 6,
-         f"kreeg {d.rule} met {d.amps} A")
+print("=== 2. zonder zon op komst geldt de avondregel ===")
+# Is er niets meer van het dak te verwachten, dan is elk uur even duur en valt er
+# op prijs niets te kiezen. Dan blijft Svens afspraak van 20-08-2026 over: wacht
+# tot acht uur, want dan zijn de pieken van koken voorbij.
+d = decide(nu, [], NET_LEEG, sven_auto(), paal(), venster(nu), tariff=VAST,
+           sun=ZON_KRAP, forecast=Forecast(), holding=3)
+print(f"  {d.rule}: laden={d.charge} {d.amps} A  {d.reason}")
+controle("hij wacht tot de avond", not d.charge, f"kreeg {d.rule} met {d.amps} A")
+controle("en zegt waarom", "20:00" in d.reason and "koken" in d.reason, d.reason)
 
 print("=== 3. vast contract zonder accustand: wachten, niet laden ===")
 d = decide(nu, [], NET_LEEG, sven_auto(soc=None), paal(laadt=False), venster(nu), tariff=VAST, sun=ZON_KRAP)
@@ -131,7 +151,15 @@ controle("laadt zoals vroeger", d.charge and d.rule == "fixed-tariff", f"kreeg {
 
 print("=== 6. wekstroom: auto hangt eraan maar neemt niets af ===")
 zonnig = Grid(surplus_w=1500.0, phase_amps=[2.0, 2.0, 2.0], fuse_amps=25.0, charger_amps=0.0)
-d = decide(nu, [], zonnig, sven_auto(), paal(laadt=False), venster(nu),
+# Dit uur duur, vannacht goedkoop. Dan pakt de vergelijking alleen de zon van nu
+# en is het aanbod de ondergrens, en dat is de opstelling waarin een wekstroom
+# betekenis heeft: op vol vermogen valt er niets te verhogen.
+DUUR_NU = []
+for _u in range(20):
+    _start = middag(14, 0) + dt.timedelta(hours=_u)
+    DUUR_NU.append({"start": _start, "end": _start + dt.timedelta(hours=1),
+                    "price": 0.40 if _u < 6 else 0.10, "feed_in": 0.05})
+d = decide(nu, DUUR_NU, zonnig, sven_auto(), paal(laadt=False), venster(nu),
            tariff=VAST, sun=ZON_RUIM, waking=True)
 print(f"  {d.rule}: {d.amps} A  {d.reason}")
 controle("biedt 10 A aan", d.charge and d.amps == 10, f"kreeg {d.amps} A via {d.rule}")
@@ -198,25 +226,26 @@ d = decide(nu, [], NET_LEEG, sven_auto(), p, venster(nu), tariff=VAST, sun=ZON_R
 controle("snelladen blijft snelladen", d.rule == "boost" and d.charge and d.amps == 14,
          f"kreeg {d.rule} {d.amps} A")
 
-print("=== 12. de zonregel doet nog gewoon zijn werk ===")
-d = decide(nu, [], zonnig, sven_auto(), paal(laadt=True, amps=5.7), venster(nu),
+print("=== 12. de zon van nu wordt gepakt als het net duurder is ===")
+d = decide(nu, DUUR_NU, zonnig, sven_auto(), paal(laadt=True, amps=5.7), venster(nu),
            tariff=VAST, sun=ZON_RUIM)
 print(f"  {d.rule}: {d.amps} A  {d.reason}")
 controle("laadt op de zon", d.charge and d.rule.startswith("surplus"), f"kreeg {d.rule}")
+controle("en niet meer dan het dak geeft", d.amps <= 6, f"{d.amps} A")
 
 print("=== 13. valt de coach weg, dan loopt de pauze af op het laatste startmoment ===")
+# De 0 die naar de paal gaat krijgt een houdbaarheid: precies tot het moment
+# waarop de coach zelf weer zou beginnen. Valt Home Assistant om, dan laadt de
+# paal vanaf dat moment gewoon zelf door. Duurder, maar wel vol.
 nu = middag(14, 37)
 d = decide(nu, [], NET_LEEG, sven_auto(), paal(laadt=False), venster(nu),
-           tariff=VAST, sun=ZON_RUIM)
-# De 0 in de laadpaal krijgt precies de houdbaarheid tot het moment waarop de
-# coach zelf weer zou beginnen. Valt Home Assistant om, dan gaat de paal vanaf
-# dat moment gewoon zelf laden. Sinds de avondregel is dat acht uur 's avonds,
-# dus vanaf 14:37 is dat 5,4 uur en niet meer de hele nacht.
+           tariff=VAST, sun=ZON_RUIM, forecast=MIDDAGZON, holding=3)
 uren = d.hold_minutes / 60
-print(f"  {d.rule}: pauze {d.hold_minutes} minuten ({uren:.1f} uur)")
-controle("loopt af op het moment dat de coach zelf zou beginnen",
-         d.hold_minutes == 323, f"{d.hold_minutes} minuten")
-controle("en dus ruim vóór de klaar-tijd", uren < 15.4, f"{uren:.1f} uur")
+print(f"  {d.rule}: pauze {d.hold_minutes} minuten ({uren:.2f} uur), begint {d.plan}")
+controle("hij wacht op de zon van straks", not d.charge, f"{d.rule}")
+controle("en de pauze loopt af op het uur dat hij gekozen heeft",
+         d.hold_minutes == 23, f"{d.hold_minutes} minuten")
+controle("dus ruim vóór de klaar-tijd", uren < 15.4, f"{uren:.2f} uur")
 
 print("=== 14. zonder accustand hetzelfde, maar met een lege accu gerekend ===")
 d = decide(nu, [], NET_LEEG, sven_auto(soc=None), paal(laadt=False), venster(nu),
@@ -453,7 +482,7 @@ print(f"  {genoemd:%H:%M} min een minuut: {net_ervoor.rule}   "
 controle("een minuut ervoor wacht hij nog", net_ervoor.rule == "wait-for-sun",
          net_ervoor.rule)
 controle("en een minuut erna gaat hij",
-         net_erna.rule == "evening" and net_erna.charge, net_erna.rule)
+         net_erna.rule == "easy-pace" and net_erna.charge, net_erna.rule)
 
 print("=== 26. vast contract: wachten houdt op om acht uur 's avonds ===")
 # Sven op 20-08-2026: "op een vast contract is een kwartier speling niet
@@ -479,7 +508,7 @@ controle("en noemt acht uur, niet half twee", "20:00" in d.plan, d.plan)
 
 d = vast_besluit(dt.datetime(2026, 8, 20, 20, 0))
 print(f"  20:00  {d.rule}: {d.amps} A  {d.reason}")
-controle("om acht uur gaat hij", d.charge and d.rule == "evening" and d.amps == 6,
+controle("om acht uur gaat hij", d.charge and d.rule == "easy-pace" and d.amps == 6,
          f"{d.rule} {d.amps} A")
 # Sven op 25-08-2026: op een vast contract is de nacht lang genoeg, dus de
 # aansluiting hoeft er niet vol voor open. 6 A driefasig is ruim 4 kW en dat is
@@ -493,7 +522,7 @@ controle("en hij zegt waarom hij rustig aan doet", "aansluiting" in d.reason, d.
 d = vast_besluit(dt.datetime(2026, 8, 21, 1, 0))
 print(f"  01:00  {d.rule}: {d.amps} A")
 controle("'s nachts geen kwartier speling meer",
-         d.charge and d.rule == "evening", f"{d.rule}")
+         d.charge and d.rule == "easy-pace", f"{d.rule}")
 
 # En het vangnet eronder: rustig aan mag alleen zolang het past. Een lege auto
 # om vier uur 's nachts haalt zes uur niet op 6 A, dus dan hoort de klaar-tijd te
@@ -508,8 +537,10 @@ print("=== 27. maar een klaar-tijd overdag heeft geen avond ===")
 # Klaar om zeven uur 's avonds: tussen de avond ervoor en die klaar-tijd ligt
 # een hele dag zon. Dan hoort hij gewoon te wachten, met de klaar-tijd als
 # vangnet, en niet om acht uur 's avonds daarvoor al vol te lopen.
-d = vast_besluit(dt.datetime(2026, 8, 20, 14, 0),
-                 eind=dt.datetime(2026, 8, 20, 19, 0), soc=80.0, zon=ZON_RUIM)
+MIDDAG_ZON = kromme(dt.datetime(2026, 8, 20), 15, [2.0, 2.0, 1.5, 1.0])
+d = decide(dt.datetime(2026, 8, 20, 14, 0), [], DONKER, sven_auto(soc=80.0), STIL,
+           Window(enabled=True, opens=None, deadline=dt.datetime(2026, 8, 20, 19, 0)),
+           tariff=VAST, sun=ZON_RUIM, forecast=MIDDAG_ZON, holding=3)
 print(f"  klaar om 19:00, nu 14:00  {d.rule}: {d.plan}")
 controle("overdag wacht hij op de zon", not d.charge and d.rule == "wait-for-sun", d.rule)
 controle("en de avondregel bemoeit zich er niet mee", "20:00" not in d.plan, d.plan)
@@ -566,28 +597,44 @@ DAG_IS_OP = Sun(remaining_kwh=2.0, now_w=2200.0, next_w=2600.0)
 
 
 def ochtend_besluit(net=HALVE_ZON, zon=DAG_KOMT, soc=30.0, tarief=VAST,
-                    klaar=KLAAR_MORGEN, nu=OCHTEND, prijzen=None):
+                    klaar=KLAAR_MORGEN, nu=OCHTEND, prijzen=None,
+                    voorspeld=None, holding=0):
     venster_ = Window(enabled=True, opens=None, deadline=klaar) if klaar else Window()
     return decide(nu, prijzen or [], net,
                   Car(capacity_kwh=19.7, phases=3, soc_percent=soc),
                   Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.0),
-                  venster_, tariff=tarief, sun=zon)
+                  venster_, tariff=tarief, sun=zon,
+                  forecast=voorspeld or Forecast(), holding=holding)
 
 
-d = ochtend_besluit()
-print(f"  09:00 met 0,9 kW over en een zonnige dag  {d.rule}: {d.plan}")
+# De verwachting is sinds 30-08-2026 een kromme per uur en geen enkel getal
+# meer. Achttien kilowattuur over de dag, met de top rond het middaguur.
+DAG_KROMME = kromme(OCHTEND, 10, [1.5, 2.2, 2.8, 3.0, 2.8, 2.2, 1.8, 1.2, 0.5], huis=0.3)
+DAG_LEEG = kromme(OCHTEND, 10, [0.2, 0.2, 0.2, 0.2], huis=0.3)
+
+d = ochtend_besluit(voorspeld=DAG_KROMME, holding=3)
+print(f"  09:00 met 0,9 kW over en een zonnige dag  {d.rule}: {d.reason}")
 controle("hij wacht op de zon van vandaag",
-         not d.charge and d.rule == "wait-for-sun-today", f"{d.rule} {d.amps} A")
-controle("en noemt beide getallen", "18,0 kWh" in d.reason and "15,3" in d.reason, d.reason)
-controle("en zegt wanneer hij uiterlijk begint", "20:00" in d.plan, d.plan)
+         not d.charge and d.rule == "wait-for-sun", f"{d.rule} {d.amps} A")
+controle("en zegt hoe laat hij begint", "1" in d.plan and "Van plan" in d.plan, d.plan)
 
-# Maar alleen als er iets te wachten valt. Zakt de verwachting onder wat er nog
-# in moet, dan is elke kWh die nu niet gebruikt wordt teruggeleverd voor een
-# fractie van wat hij kost, en dan hoort hij te pakken wat er is.
-d = ochtend_besluit(zon=DAG_IS_OP)
-print(f"  zelfde ochtend, maar de dag is op  {d.rule}: {d.amps} A")
-controle("te weinig zon op komst: dan wel bijkopen",
+# Belooft de dag te weinig, dan valt er op de zon niets te wachten en pakt hij
+# wat er nu is. **Dit is bewust anders dan voor 30-08-2026.** De oude ladder
+# wachtte dan tot acht uur; de vergelijking rekent het uit en komt op iets
+# anders uit.
+#
+# Op een vast contract zonder salderen brengt een teruggeleverde kWh 0,019 op en
+# kost een ingekochte 0,242. Laden op de ondergrens met 0,9 kW zon erbij kost
+# dus (0,9 x 0,019 + 3,2 x 0,242) / 4,1 = 0,19 per kWh, tegen 0,242 vanavond.
+# Die 0,9 kW is straks weg, en de 3,2 die je erbij koopt kost vanavond precies
+# hetzelfde. Wachten laat dus geld liggen.
+d = ochtend_besluit(voorspeld=DAG_LEEG)
+print(f"  zelfde ochtend, maar de dag is op  {d.rule}: {d.amps} A  {d.reason}")
+controle("te weinig zon op komst: dan pakt hij wat er is",
          d.charge and d.rule == "surplus", f"{d.rule} {d.amps} A")
+controle("op de ondergrens, want meer geeft het dak niet", d.amps == MIN_AMPS,
+         f"{d.amps} A")
+controle("en hij zegt dat de ondergrens meetelt", "ondergrens" in d.reason, d.reason)
 
 # Dekt de zon het laden al, dan valt er niets te wachten.
 d = ochtend_besluit(net=VOLLE_ZON)
@@ -595,10 +642,10 @@ print(f"  zelfde ochtend met 6 kW over  {d.rule}: {d.amps} A")
 controle("genoeg overschot: gewoon laden", d.charge and d.rule == "surplus",
          f"{d.rule} {d.amps} A")
 
-# Zonder verwachting is er niets om op te wachten.
+# Zonder verwachting is er niets om op te wachten, en de zon van nu telt gewoon.
 d = ochtend_besluit(zon=Sun(remaining_kwh=None, now_w=2200.0, next_w=2600.0))
 print(f"  zonder zonverwachting  {d.rule}: {d.amps} A")
-controle("geen verwachting, geen wachten", d.charge, f"{d.rule} {d.amps} A")
+controle("zonder verwachting pakt hij de zon van nu", d.charge, f"{d.rule} {d.amps} A")
 
 # En zonder klaar-tijd is er geen vangnet om op terug te vallen.
 d = ochtend_besluit(klaar=None)
@@ -640,10 +687,12 @@ for u in range(48):
     start = dt.datetime(2026, 8, 26, 0, 0) + dt.timedelta(hours=u)
     dyn.append({"start": start, "end": start + dt.timedelta(hours=1),
                 "price": 0.34, "feed_in": 0.05})
-d = ochtend_besluit(tarief=Tariff(buy=0.34, feed_in=0.05), prijzen=dyn)
+# Met genoeg overschot om er zelf op te laden, want onder de ondergrens van de
+# paal bestaat "op de zon laden" niet.
+d = ochtend_besluit(net=VOLLE_ZON, tarief=Tariff(buy=0.34, feed_in=0.05), prijzen=dyn)
 print(f"  dynamisch contract  {d.rule}: {d.amps} A")
-controle("ook met prijzen wacht hij op eigen zon",
-         not d.charge and d.rule == "wait-for-sun-today", f"{d.rule} {d.amps} A")
+controle("ook met prijzen gaat de zon van nu er in",
+         d.charge and d.amps >= 8, f"{d.rule} {d.amps} A")
 
 print("=== 31. wachten op de zon van vandaag zonder te weten hoeveel er in moet ===")
 # Gevonden door proef 21 in test_coach.py, in v0.34.0 van 25-08-2026. De poort
@@ -659,12 +708,10 @@ controle(
     "er moet er" not in d.reason,
     d.reason,
 )
-controle("maar zegt wel wat er aan zon komt", "18,0 kWh" in d.reason, d.reason)
-
-# Met een accustand blijft de zin staan zoals hij was.
-d = ochtend_besluit(soc=30.0)
-controle("met accustand noemt hij beide getallen",
-         "18,0 kWh" in d.reason and "15,3" in d.reason, d.reason)
+# Met een accustand rekent hij gewoon door.
+d = ochtend_besluit(soc=30.0, net=VOLLE_ZON)
+controle("met accustand noemt hij de zon die er is",
+         "6,0 kW zon over" in d.reason, d.reason)
 
 print("=== 32. een klaar-tijd overdag krijgt een uur speling ===")
 # Sven op 26-08-2026, zijn eigen getal. Een kwartier is te krap bij een
@@ -982,7 +1029,7 @@ PAAL36 = Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.05
 VENSTER36 = Window(enabled=True, opens=None, deadline=dt.datetime(2026, 8, 30, 7, 0))
 nu36 = dt.datetime(2026, 8, 29, 20, 30)
 
-plan36 = planner.timeline(nu36, prijzen36, BUS, PAAL36, VENSTER36, 16)
+plan36 = planner.timeline(nu36, prijzen36, NET_LEEG, BUS, PAAL36, VENSTER36, 16)
 print(f"  nog {plan36.kwh_needed:.1f} kWh, {plan36.hours_needed:.2f} uur op "
       f"{plan36.amps} A, uiterlijk beginnen {plan36.latest_start:%H:%M}, "
       f"vol rond {plan36.expected_done:%H:%M}")
@@ -1020,7 +1067,7 @@ besluit36 = decide(nu36, prijzen36, NET_LEEG, BUS, PAAL36, VENSTER36,
 nu36b = dt.datetime(2026, 8, 30, 3, 30)
 besluit36b = decide(nu36b, prijzen36, NET_LEEG, BUS, PAAL36, VENSTER36,
                     tariff=VAST, sun=ZON_KRAP)
-plan36b = planner.timeline(nu36b, prijzen36, BUS, PAAL36, VENSTER36, 16)
+plan36b = planner.timeline(nu36b, prijzen36, NET_LEEG, BUS, PAAL36, VENSTER36, 16)
 nu_blok = [blok for blok in plan36b.blocks if blok.start.hour == 3]
 nu_blok20 = [blok for blok in plan36.blocks if blok.start.hour == 20]
 print(f"  om 20:30: {besluit36.rule} laden={besluit36.charge};  "
@@ -1045,7 +1092,7 @@ controle("voorbije uren staan er niet meer in",
 # van dat ze zomaar ontbreken.
 VENSTER36C = Window(enabled=True, opens=dt.datetime(2026, 8, 30, 1, 0),
                     deadline=dt.datetime(2026, 8, 30, 7, 0))
-plan36c = planner.timeline(nu36, prijzen36, BUS, PAAL36, VENSTER36C, 16)
+plan36c = planner.timeline(nu36, prijzen36, NET_LEEG, BUS, PAAL36, VENSTER36C, 16)
 vroeg = [blok for blok in plan36c.blocks if blok.start.hour in (21, 22, 23, 0)]
 print(f"  met een begintijd van 01:00: {vroeg[0].why if vroeg else 'geen'}")
 controle("uren voor de begintijd staan erin met hun reden",
@@ -1055,17 +1102,23 @@ controle("uren voor de begintijd staan erin met hun reden",
 # Zonder accustand valt er niets te rekenen, en dan zegt hij dat in plaats van
 # een tijdlijn te verzinnen.
 GEEN_SOC = Car(capacity_kwh=65.0, phases=3, soc_percent=None)
-plan36d = planner.timeline(nu36, prijzen36, GEEN_SOC, PAAL36, VENSTER36, 16)
+plan36d = planner.timeline(nu36, prijzen36, NET_LEEG, GEEN_SOC, PAAL36, VENSTER36, 16)
 print(f"  zonder accustand: {plan36d.note}")
 controle("zonder accustand zegt hij waarom de lijst zo lang is",
          "accustand" in plan36d.note, f"{plan36d.note}")
 
-# En bij een vast contract bestaan er geen goedkope uren om te tonen.
-plan36e = planner.timeline(nu36, [], BUS, PAAL36, VENSTER36, 16)
-print(f"  vast tarief: {plan36e.note}")
-controle("bij een vast tarief staat er geen prijzenlijst", not plan36e.blocks,
-         f"{plan36e.blocks}")
-controle("maar wel waarom niet", "vast tarief" in plan36e.note, f"{plan36e.note}")
+# En bij een vast contract staat er sinds 30-08-2026 ook een tijdlijn. Elk uur
+# kost hetzelfde, dus wat er te kiezen valt is wannéér, en dat is precies wat de
+# lijst laat zien.
+plan36e = planner.timeline(nu36, [], NET_LEEG, BUS, PAAL36, VENSTER36, 16, VAST)
+uren36e = [blok for blok in plan36e.blocks if blok.charging]
+print(f"  vast tarief: {len(plan36e.blocks)} uren, laadt in "
+      f"{[b.start.hour for b in uren36e]}")
+controle("bij een vast tarief staat er ook een tijdlijn", bool(plan36e.blocks),
+         f"{plan36e.note}")
+controle("en alle uren kosten hetzelfde",
+         len({round(b.price, 6) for b in plan36e.blocks}) == 1,
+         f"{ {b.price for b in plan36e.blocks} }")
 controle("en de sommen staan er nog steeds",
          plan36e.hours_needed is not None and plan36e.latest_start is not None,
          f"{plan36e}")
@@ -1219,23 +1272,228 @@ for uur, prijs in ((13, 0.1277), (14, 0.1278), (15, 0.1288), (16, 0.1296),
     prijzen39.append({"start": start, "end": start + dt.timedelta(hours=1),
                       "price": prijs, "feed_in": prijs - 0.0242})
 
+# Met dit uur duur en de nacht goedkoop pakt de vergelijking alleen de zon van
+# nu, en dat is de zin waar het hier om gaat.
+DUUR39 = [dict(rij, price=0.40, feed_in=0.05) if rij["start"].hour == 13 else rij
+          for rij in prijzen39]
 BUS39 = Car(capacity_kwh=65.0, phases=3, soc_percent=76.5)
-d39 = decide(nu39, prijzen39, NET39, BUS39, LAADT39, venster(nu39),
-             tariff=VAST, sun=ZON_KRAP)
+RUIM39 = Grid(surplus_w=5000.0, phase_amps=[5.0, 6.0, 6.0], fuse_amps=25.0,
+              charger_amps=6.3)
+d39 = decide(nu39, DUUR39, RUIM39, BUS39, LAADT39, venster(nu39),
+             tariff=VAST, sun=ZON_KRAP, holding=planner.STOP_ROUNDS)
 print(f"  {d39.rule}: {d39.reason}")
 controle("hij zegt dat er zon over is", "zon over" in d39.reason, f"{d39.reason}")
 controle("en niet dat je teruglevert terwijl je inkoopt",
          "levert" not in d39.reason, f"{d39.reason}")
 
-# En als de zon het helemaal dekt is het nog steeds dezelfde zin, want het is
-# nog steeds hetzelfde getal.
-RUIM39 = Grid(surplus_w=5000.0, phase_amps=[5.0, 6.0, 6.0], fuse_amps=25.0,
-              charger_amps=6.3)
-d39b = decide(nu39, prijzen39, RUIM39, BUS39, LAADT39, venster(nu39),
-              tariff=VAST, sun=ZON_KRAP)
-print(f"  met 5 kW over: {d39b.reason}")
-controle("ook als de zon het helemaal dekt", "zon over" in d39b.reason
+# En met te weinig zon om zelf op te laden is het nog steeds dezelfde zin, want
+# het is nog steeds hetzelfde getal. Dan zit het bijkopen in de prijs: 0,7 kW
+# zon a 0,02 plus 3,5 kW net a 0,30 is 0,256 per kWh. Dit uur is dus te duur om
+# vol te laden (0,30 tegen 0,28 straks) en tegelijk goedkoop genoeg om er op de
+# ondergrens doorheen te gaan, want die 0,7 kW is straks weg.
+VLOER39 = []
+for uur in range(13, 19):
+    start = dt.datetime(2026, 8, 18, uur, 0)
+    VLOER39.append({"start": start, "end": start + dt.timedelta(hours=1),
+                    "price": 0.30 if uur == 13 else 0.28, "feed_in": 0.02})
+d39b = decide(nu39, VLOER39, NET39, BUS39, LAADT39, venster(nu39),
+              tariff=VAST, sun=ZON_KRAP, holding=planner.STOP_ROUNDS)
+print(f"  met 0,7 kW over: {d39b.rule}: {d39b.amps} A  {d39b.reason}")
+controle("ook onder de ondergrens van de paal", "zon over" in d39b.reason
          and "levert" not in d39b.reason, f"{d39b.reason}")
+controle("en dan op de ondergrens", d39b.amps == MIN_AMPS, f"{d39b.amps} A")
+
+print("=== 40. alle scenario's tegen elkaar, met Van den Dams eigen cijfers ===")
+# Sven op 30-08-2026: "lage kosten en zoveel mogelijk zon moet uit de strategie.
+# Het eindoel is altijd lage kosten. Dus alle scenario's moeten vergeleken worden
+# met elkaar: lage prijs met zon, hoge prijs met zon, laden op een later tijdstip
+# als de prijs gunstiger is. Belangrijk is kijken naar forecast."
+#
+# De prijzen en de zonverwachting hieronder zijn die van zijn installatie op
+# 30-08-2026 om 13:30, uit `sensor.current_electricity_price_all_in` en uit de
+# uurkromme van het energiedashboard. Het huisverbruik is de mediaan over drie
+# dagen uit zijn eigen meters.
+MIDDAG40 = [
+    (13, 0.1277, 2.47), (14, 0.1278, 2.38), (15, 0.1288, 1.83), (16, 0.1296, 1.55),
+    (17, 0.1976, 1.28), (18, 0.3190, 0.96), (19, 0.3517, 0.59), (20, 0.3629, 0.31),
+    (21, 0.3626, 0.0), (22, 0.3486, 0.0), (23, 0.3323, 0.0),
+]
+NACHT40 = [
+    (0, 0.3384), (1, 0.3197), (2, 0.3017), (3, 0.2870), (4, 0.2801),
+    (5, 0.2842), (6, 0.3106),
+]
+OPSLAG40 = 0.0242  # wat de leverancier houdt; bij salderen is dit het hele verschil
+
+prijzen40, zon40 = [], {}
+for uur, prijs, zon in MIDDAG40:
+    start = dt.datetime(2026, 8, 30, uur, 0)
+    prijzen40.append({"start": start, "end": start + dt.timedelta(hours=1),
+                      "price": prijs, "feed_in": prijs - OPSLAG40})
+    zon40[start] = zon
+for uur, prijs in NACHT40:
+    start = dt.datetime(2026, 8, 31, uur, 0)
+    prijzen40.append({"start": start, "end": start + dt.timedelta(hours=1),
+                      "price": prijs, "feed_in": prijs - OPSLAG40})
+
+HUIS40 = {0: 1.5, 1: 1.3, 2: 1.2, 3: 1.1, 4: 1.0, 5: 1.1, 6: 1.3, 7: 1.0, 8: 0.8,
+          9: 1.0, 10: 1.2, 11: 1.3, 12: 1.2, 13: 1.63, 14: 3.09, 15: 2.59,
+          16: 2.54, 17: 1.39, 18: 1.31, 19: 1.63, 20: 1.10, 21: 1.58, 22: 1.76,
+          23: 1.35}
+VOORSPELD40 = Forecast(solar_kwh=zon40, house_kwh=HUIS40)
+
+nu40 = dt.datetime(2026, 8, 30, 13, 30)
+KLAAR40 = Window(enabled=True, opens=None, deadline=dt.datetime(2026, 8, 31, 7, 0))
+BUS40 = Car(capacity_kwh=65.0, phases=3, soc_percent=77.5)
+NET40 = Grid(surplus_w=900.0, phase_amps=[5.0, 6.0, 6.0], fuse_amps=25.0,
+             charger_amps=15.0)
+LAADT40 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=15.0,
+                  started_at=dt.datetime(2026, 8, 30, 13, 0), limit_amps=16.0)
+
+d40 = decide(nu40, prijzen40, NET40, BUS40, LAADT40, KLAAR40,
+             tariff=VAST, sun=ZON_KRAP, forecast=VOORSPELD40)
+print(f"  13:30  {d40.rule}: laden={d40.charge} {d40.amps} A")
+print(f"    {d40.reason}")
+print(f"    {d40.plan}")
+controle("hij laadt nu, want dit is een van de goedkoopste uren",
+         d40.charge and d40.rule == "cheap-hour", f"{d40.rule} {d40.amps} A")
+controle("en op vol vermogen, want elk uur dat hij hier laat liggen kost meer",
+         d40.amps == 16, f"{d40.amps} A")
+
+# De tijdlijn hoort hetzelfde te zeggen, want hij rekent met dezelfde schijven.
+plan40 = planner.timeline(nu40, prijzen40, NET40, BUS40, LAADT40, KLAAR40, 16,
+                          VAST, VOORSPELD40)
+laadt40 = [blok.start.hour for blok in plan40.blocks if blok.charging]
+print(f"  de tijdlijn laadt in de uren: {laadt40}")
+controle("de tijdlijn zegt hetzelfde als het besluit", 13 in laadt40, f"{laadt40}")
+controle("en pakt de goedkoopste uren van de middag",
+         set(laadt40) <= {13, 14, 15, 16}, f"{laadt40}")
+controle("dus niet de dure avond", not any(u in laadt40 for u in (18, 19, 20, 21)),
+         f"{laadt40}")
+controle("en ook niet de nacht, die is duurder dan de middag",
+         not any(u in laadt40 for u in (2, 3, 4, 5)), f"{laadt40}")
+
+print("--- hoge prijs met zon: alleen de zon, niet bijkopen ---")
+# Om half zeven 's avonds kost stroom 0,319 en ligt er nog 5 kW op het dak.
+# Bijkopen op dat uur is de duurste manier die er is; die 5 kW zelf gebruiken is
+# de goedkoopste. Dan hoort hij precies dat te doen en niet meer.
+#
+# **Zonder salderen**, want dat verandert de uitkomst volledig en dat is precies
+# wat de vergelijking laat zien. Met salderen is een teruggeleverde kWh bijna de
+# inkoopprijs waard, en dan is je eigen zon om zes uur 's avonds duurder dan een
+# nachtuur: dan hoort hij hem terug te leveren en 's nachts te laden. Zonder
+# salderen brengt teruglevering een fractie op en wint eigen gebruik altijd.
+ZONDER_SALDEREN = [dict(rij, feed_in=0.05) for rij in prijzen40]
+avond40 = dt.datetime(2026, 8, 30, 18, 30)
+ZONNIG40 = Grid(surplus_w=5000.0, phase_amps=[5.0, 6.0, 6.0], fuse_amps=25.0,
+                charger_amps=6.0)
+d40b = decide(avond40, ZONDER_SALDEREN, ZONNIG40, BUS40, LAADT40, KLAAR40,
+              tariff=VAST, sun=ZON_KRAP, forecast=VOORSPELD40,
+              holding=planner.STOP_ROUNDS)
+print(f"  18:30 met 5 kW over, zonder salderen  {d40b.rule}: {d40b.amps} A")
+print(f"    {d40b.reason}")
+controle("op een duur uur pakt hij alleen de zon",
+         d40b.charge and d40b.rule == "surplus", f"{d40b.rule} {d40b.amps} A")
+controle("en niet het volle plafond", d40b.amps < 16, f"{d40b.amps} A")
+
+# En met salderen komt er iets anders uit, en dat is geen fout maar de som.
+d40b2 = decide(avond40, prijzen40, ZONNIG40, BUS40, LAADT40, KLAAR40,
+               tariff=VAST, sun=ZON_KRAP, forecast=VOORSPELD40,
+               holding=planner.STOP_ROUNDS)
+print(f"  zelfde moment mét salderen: {d40b2.rule}")
+controle("met salderen is je eigen avondzon duurder dan een nachtuur",
+         not d40b2.charge, f"{d40b2.rule}")
+
+print("--- laden op een later tijdstip als de prijs gunstiger is ---")
+# Om acht uur 's avonds is er geen zon meer en kost stroom 0,363, terwijl de
+# nacht op 0,28 zit. Dan hoort hij te wachten en te zeggen tot wanneer.
+laat40 = dt.datetime(2026, 8, 30, 20, 30)
+DONKER40 = Grid(surplus_w=0.0, phase_amps=[5.0, 6.0, 6.0], fuse_amps=25.0,
+                charger_amps=0.0)
+STIL40 = Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.05)
+d40c = decide(laat40, prijzen40, DONKER40, BUS40, STIL40, KLAAR40,
+              tariff=VAST, sun=ZON_KRAP, forecast=VOORSPELD40)
+print(f"  20:30  {d40c.rule}: {d40c.reason}")
+controle("hij wacht op de goedkope nacht", not d40c.charge, f"{d40c.rule}")
+controle("en zegt tot wanneer", "04:00" in d40c.reason or "0" in d40c.reason,
+         d40c.reason)
+controle("de pauze loopt af op dat moment, niet later",
+         d40c.hold_minutes is not None and d40c.hold_minutes <= 8 * 60,
+         f"{d40c.hold_minutes}")
+
+print("--- en de klaar-tijd wint nog steeds van elke som ---")
+krap40 = dt.datetime(2026, 8, 31, 5, 30)
+LEEG40 = Car(capacity_kwh=65.0, phases=3, soc_percent=20.0)
+d40d = decide(krap40, prijzen40, DONKER40, LEEG40, STIL40, KLAAR40,
+              tariff=VAST, sun=ZON_KRAP, forecast=VOORSPELD40)
+print(f"  05:30 met een lege auto  {d40d.rule}: {d40d.amps} A")
+controle("de klaar-tijd gaat voor de prijs", d40d.charge and d40d.rule == "deadline",
+         f"{d40d.rule} {d40d.amps} A")
+
+print("=== 41. de schijven zelf ===")
+# De opzet van de vergelijking, los. Twee schijven per uur: wat het dak geeft en
+# wat je daarboven van het net moet halen.
+schijven41 = planner.schijven(nu40, prijzen40, NET40, BUS40, 16, None,
+                              KLAAR40.deadline, VAST, VOORSPELD40)
+dit_uur = [s for s in schijven41 if s.start.hour == 13 and s.start.day == 30]
+print(f"  13:00 levert {len(dit_uur)} schijven: "
+      + ", ".join(f"{s.kind} {s.kwh:.2f} kWh a {s.price:.4f}" for s in dit_uur))
+# Het uur waar we middenin zitten telt maar een half uur, en 0,9 kW zon is te
+# weinig voor de ondergrens van een driefasige paal. Dan is het een vloerschijf:
+# de ondergrens, met het bijkopen in de prijs verwerkt.
+controle("een uur levert een zonschijf en een netschijf",
+         {s.kind for s in dit_uur} == {"vloer", "net"}, f"{[s.kind for s in dit_uur]}")
+controle("de zonschijf is goedkoper dan de netschijf",
+         min(s.price for s in dit_uur if s.solar)
+         < min(s.price for s in dit_uur if not s.solar))
+controle("en samen zijn ze het plafond van het halve uur dat er nog van over is",
+         abs(sum(s.kwh for s in dit_uur) - planner.watts_for(16, 3) / 1000 / 2) < 0.01,
+         f"{sum(s.kwh for s in dit_uur)}")
+
+# En een uur dat nog moet komen met echt overschot levert een gewone zonschijf.
+RUIM41 = Forecast(solar_kwh={dt.datetime(2026, 8, 30, 15, 0): 9.0},
+                  house_kwh={15: 1.0})
+schijven41b = planner.schijven(nu40, prijzen40, NET40, BUS40, 16, None,
+                               KLAAR40.deadline, VAST, RUIM41)
+straks = [s for s in schijven41b if s.start.hour == 15 and s.start.day == 30]
+print(f"  15:00 met 8 kWh over: "
+      + ", ".join(f"{s.kind} {s.kwh:.2f} kWh a {s.price:.4f}" for s in straks))
+controle("een uur met genoeg zon levert een echte zonschijf",
+         {s.kind for s in straks} == {"zon", "net"}, f"{[s.kind for s in straks]}")
+controle("en die is zo groot als het dak geeft",
+         abs(next(s.kwh for s in straks if s.kind == "zon") - 8.0) < 0.01,
+         f"{[s.kwh for s in straks]}")
+
+# Na de klaar-tijd bestaat er niets meer, en voor de begintijd ook niet.
+VANAF41 = dt.datetime(2026, 8, 30, 23, 0)
+met_begin = planner.schijven(nu40, prijzen40, NET40, BUS40, 16, VANAF41,
+                             KLAAR40.deadline, VAST, VOORSPELD40)
+controle("voor de begintijd bestaat er geen enkele schijf",
+         all(s.end > VANAF41 for s in met_begin),
+         f"{[s.start for s in met_begin if s.end <= VANAF41]}")
+controle("en na de klaar-tijd ook niet",
+         all(s.start < KLAAR40.deadline for s in schijven41))
+
+# En de kern: van goedkoop naar duur vullen tot er genoeg in zit.
+gekozen41 = planner.goedkoopste(schijven41, 10.0)
+totaal41 = sum(kwh for _, kwh in gekozen41)
+kosten41 = sum(schijf.price * kwh for schijf, kwh in gekozen41)
+print(f"  10 kWh kost EUR {kosten41:.2f}, oftewel {kosten41 / totaal41:.4f} per kWh")
+controle("hij pakt precies wat er nodig is", abs(totaal41 - 10.0) < 0.02, f"{totaal41}")
+controle("en niets duurders dan nodig",
+         kosten41 / totaal41 < 0.13, f"{kosten41 / totaal41}")
+
+# Het bewijs dat gulzig hier optimaal is: elke andere keuze van dezelfde
+# hoeveelheid kost meer. Hier nagerekend tegen de duurste tien kilowattuur.
+duurste41 = sorted(schijven41, key=lambda s: -s.price)
+rest, slechtst = 10.0, 0.0
+for schijf in duurste41:
+    if rest <= 0:
+        break
+    pak = min(schijf.kwh, rest)
+    rest -= pak
+    slechtst += pak * schijf.price
+controle("en dat is aantoonbaar minder dan de duurste manier",
+         kosten41 < slechtst, f"{kosten41:.2f} tegen {slechtst:.2f}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

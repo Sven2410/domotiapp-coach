@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
@@ -38,6 +38,7 @@ from .const import (
     LEVEL_STEER,
     PHASE_START_AMPS,
 )
+from .archive import async_get_archive
 from .planner import (
     BALANCER_MARGIN_AMPS,
     CHARGE_EFFICIENCY,
@@ -47,6 +48,7 @@ from .planner import (
     Charger,
     DayWindow,
     Decision,
+    Forecast,
     Grid,
     Sun,
     Tariff,
@@ -159,6 +161,34 @@ FASEMETING_RONDEN = 3
 # daarover kwam om 07:00, toen de klaar-tijd al voorbij was. Twintig minuten is
 # ruim langer dan elke auto nodig heeft om wakker te worden.
 STIL_AANBOD = timedelta(minutes=20)
+
+# Hoe vaak het huisverbruik en de zonverwachting opnieuw worden opgehaald. Het
+# eerste is een som over dagen en verandert niet binnen een uur; het tweede komt
+# van een dienst die zelf een paar keer per dag ververst. Elke ronde opnieuw
+# vragen zou een databaselezing per minuut betekenen voor een getal dat niet
+# beweegt.
+HUIS_VERVERSEN = timedelta(hours=1)
+ZON_VERVERSEN = timedelta(minutes=30)
+
+# Over hoeveel dagen het huisverbruik wordt gemeten. Een week vangt het verschil
+# tussen doordeweeks en weekend en is kort genoeg om een seizoen te volgen.
+HUIS_VENSTER = timedelta(days=7)
+
+
+def _mediaan(waarden: list[float]) -> float:
+    """De middelste waarde.
+
+    Bewust de mediaan en niet het gemiddelde: één keer wassen tilt een
+    gemiddelde over een week heen op, en dan denkt de coach dat het huis elke
+    dag om dat uur zwaar is. Svens keuze op 30-08-2026, uit drie mogelijkheden.
+    """
+    if not waarden:
+        return 0.0
+    op_volgorde = sorted(waarden)
+    midden = len(op_volgorde) // 2
+    if len(op_volgorde) % 2:
+        return op_volgorde[midden]
+    return (op_volgorde[midden - 1] + op_volgorde[midden]) / 2.0
 
 # Over hoeveel tijd het overschot wordt gladgestreken voor er omhoog wordt
 # gestuurd. Drie minuten is lang genoeg om een wolk te laten passeren en kort
@@ -399,6 +429,14 @@ class ChargerCoach:
         # hoeveel er zelf gemeten was toen die voor het laatst stapte. Zie
         # `_geladen`.
         self._eigen: dict[str, dict[str, Any]] = {}
+        # Wat het huis zelf gebruikt per uur van de dag, en de zonverwachting per
+        # uur. Samen bepalen ze hoeveel er in een komend uur voor de auto
+        # overblijft. Zie `_async_huisverbruik` en `_async_zonkromme`.
+        self._huis_kwh: dict[int, float] = {}
+        self._huis_tot: datetime | None = None
+        self._zon_kwh: dict[datetime, float] = {}
+        self._zon_geschat = True
+        self._zon_tot: datetime | None = None
         # Wie er op snelladen staat. Net als een akkoord niet bewaard over een
         # herstart heen en afgelopen zodra de kabel eruit gaat: snelladen is
         # iets voor nu, niet iets wat stilletjes blijft staan.
@@ -765,6 +803,13 @@ class ChargerCoach:
         # er toevallig het eerst is toegevoegd. De voorrang die de klant per
         # apparaat heeft ingesteld bepaalt hem: is er te weinig ruimte voor
         # allebei, dan krijgt de auto die je nodig hebt hem.
+        # De twee dingen die de vergelijking over de komende uren nodig heeft.
+        # Allebei op een eigen klok: ze bewegen niet per minuut en het zijn de
+        # enige twee plekken waar de coach naar de database of naar een dienst
+        # buiten zichzelf kijkt.
+        await self._async_huisverbruik(settings, moment)
+        await self._async_zonkromme(settings, moment)
+
         chargers.sort(key=lambda device: self._priority(settings, device))
         vergeven = 0.0
         for device in chargers:
@@ -814,7 +859,6 @@ class ChargerCoach:
         """
         device_id = device.get("id", "")
         grid, car, charger, window = self._read(now, settings, device, reserved)
-        goal = (settings.get("strategy") or {}).get("goal", "cost")
 
         # Wekken mag zolang de auto aan de kabel hangt, niet laadt en de poging
         # van deze sessie nog openstaat. Dat de coach ook wíl laden weet de
@@ -845,8 +889,13 @@ class ChargerCoach:
             device_id not in self._woken or (wektijd is not None and now < wektijd)
         )
         decision = decide(
-            now, self._prices(settings), grid, car, charger, window, goal,
+            now, self._prices(settings), grid, car, charger, window,
             self._tariff(settings), self._sun(settings),
+            Forecast(
+                solar_kwh=self._zon_kwh,
+                house_kwh=self._huis_kwh,
+                estimated=self._zon_geschat,
+            ),
             holding=self._holding.get(device_id, 0),
             waking=waking,
             asking_seconds=(
@@ -1216,6 +1265,221 @@ class ChargerCoach:
             next_w=uur("next_hour"),
             remaining_kwh=_kwh(self.hass, bron.get("remaining_today")),
         )
+
+    def _piek(self, settings: dict[str, Any]) -> datetime | None:
+        """Wanneer het dak vandaag zijn hoogste punt haalt, als dat bekend is.
+
+        Alleen om de schatting hieronder een vorm te geven. Elke zonvoorspeller
+        levert dit als een tijdstip; staat er niets, dan wordt er niet geschat.
+        """
+        bron = (settings.get("sources") or {}).get("solar_forecast") or {}
+        rauw = _text(self.hass, bron.get("peak_today"))
+        moment = dt_util.parse_datetime(rauw) if rauw else None
+        return None if moment is None else _moment(moment)
+
+    async def _async_huisverbruik(self, settings: dict[str, Any], now: datetime) -> None:
+        """Wat het huis zelf gebruikt, per uur van de dag, uit de eigen opslag.
+
+        Dit is het tweede getal dat de vergelijking nodig heeft. De
+        zonverwachting zegt wat het dak gaat leveren; pas als je weet wat het
+        huis daarvan zelf opmaakt, weet je hoeveel er voor de auto overblijft.
+
+        Uit `archive.py`, en dus uit de kwartieren die de coach zelf al bijhoudt:
+        `zon + inkoop - teruglevering - alle apparaten`. Geen nieuwe sensor, geen
+        binnenkant van Home Assistant, en bij elke klant dezelfde som. Alles staat
+        daar in watt, wat de sensor zichzelf ook noemt.
+
+        **De mediaan en niet het gemiddelde.** Sven koos die op 30-08-2026 nadat
+        ik hem de drie mogelijkheden voorlegde. Bij Van den Dam zei het gemiddelde
+        voor dat uur 1,63 kWh terwijl het huis er op dat moment 0,5 gebruikte:
+        één keer wassen tilt een gemiddelde over dagen heen op. De mediaan is
+        daar niet gevoelig voor, en de werkelijke sturing loopt hoe dan ook op de
+        meting van dat moment. De verwachting bepaalt alleen wélke uren gekozen
+        worden.
+        """
+        if self._huis_tot is not None and now < self._huis_tot:
+            return
+        self._huis_tot = now + HUIS_VERVERSEN
+
+        bronnen = settings.get("sources") or {}
+        zon = bronnen.get("solar")
+        erin = bronnen.get("grid_import")
+        eruit = bronnen.get("grid_export")
+        getekend = bronnen.get("grid_signed")
+        apparaten = [
+            device.get("entity") for device in settings.get("devices") or [] if device.get("entity")
+        ]
+        wanted = [e for e in [zon, erin, eruit, getekend, *apparaten] if e]
+        if not wanted:
+            return
+
+        einde = dt_util.utcnow()
+        try:
+            rijen = await async_get_archive(self.hass).async_lees(
+                wanted, einde - HUIS_VENSTER, einde
+            )
+        except Exception:  # noqa: BLE001 - zonder geschiedenis rekent hij gewoon zonder
+            _LOGGER.exception("kon de eigen geschiedenis niet lezen voor het huisverbruik")
+            return
+
+        def kwartieren(entity_id: str | None) -> dict[int, float]:
+            if not entity_id:
+                return {}
+            return {
+                int(rij["start"]): float(rij.get("gemiddeld") or 0.0)
+                for rij in rijen.get(entity_id, [])
+            }
+
+        zonnen, binnen, buiten, getekende = (
+            kwartieren(zon),
+            kwartieren(erin),
+            kwartieren(eruit),
+            kwartieren(getekend),
+        )
+        apparaat = [kwartieren(e) for e in apparaten]
+
+        per_uur: dict[int, list[float]] = {}
+        for stempel in sorted(set(zonnen) | set(binnen) | set(getekende)):
+            if getekende:
+                # Een meter met een teken meet één getal: plus is inkoop.
+                net = getekende.get(stempel, 0.0)
+            else:
+                net = binnen.get(stempel, 0.0) - buiten.get(stempel, 0.0)
+            watt = zonnen.get(stempel, 0.0) + net
+            for reeks in apparaat:
+                watt -= reeks.get(stempel, 0.0)
+            uur = dt_util.as_local(
+                datetime.fromtimestamp(stempel, tz=timezone.utc)
+            ).hour
+            per_uur.setdefault(uur, []).append(max(0.0, watt))
+
+        # Vier kwartieren maken een uur, en de opslag staat in watt. Het
+        # gemiddelde vermogen over een uur ís het aantal kilowattuur van dat uur.
+        self._huis_kwh = {
+            uur: _mediaan(waarden) / 1000.0 for uur, waarden in per_uur.items() if waarden
+        }
+        _LOGGER.debug("huisverbruik per uur bijgewerkt: %s", self._huis_kwh)
+
+    async def _async_zonkromme(self, settings: dict[str, Any], now: datetime) -> None:
+        """De zonverwachting per uur, zo precies als deze woning hem heeft.
+
+        Twee bronnen, en de eerste die iets oplevert wint.
+
+        **De voorspelling van het energiedashboard.** Elke zonvoorspeller die
+        aan het energiedashboard hangt levert daar een uurkromme, en Home
+        Assistant ontsluit ze allemaal op dezelfde manier. Dat is dus geen
+        Forecast.Solar-truc: Solcast doet het net zo. Nagemeten bij Van den Dam
+        op 30-08-2026: veertien uur vooruit, per uur, in wattuur.
+
+        **En anders wat de klant zelf heeft ingevuld.** Dit uur en het volgende
+        staan al onder Zonverwachting en zijn dus echte getallen. Wat er die dag
+        verder nog aankomt is één getal, en dat wordt over de resterende
+        daglichturen verdeeld met de piek als top. Dat is een schatting en geen
+        meting, en `geschat` staat daarom in de uitkomst zodat het scherm het
+        erbij kan zetten.
+
+        Levert geen van beide iets, dan zijn er geen zonschijven voor de uren die
+        nog moeten komen. De coach kiest dan op prijs, plus de zon die hij op dit
+        moment wérkelijk meet. Dat is precies wat hij deed voordat dit bestond.
+        """
+        if self._zon_tot is not None and now < self._zon_tot:
+            return
+        self._zon_tot = now + ZON_VERVERSEN
+
+        kromme = await self._async_zon_uit_dashboard()
+        if kromme:
+            self._zon_kwh, self._zon_geschat = kromme, False
+            return
+
+        self._zon_kwh, self._zon_geschat = self._zon_uit_sensoren(settings, now), True
+
+    async def _async_zon_uit_dashboard(self) -> dict[datetime, float]:
+        """De uurkromme die het energiedashboard van Home Assistant zelf toont.
+
+        Precies de weg die dat dashboard ook loopt: de voorkeuren zeggen welke
+        integraties een zonvoorspelling leveren, en elk van die integraties heeft
+        een `energy`-platform met `async_get_solar_forecast`. Dat is de afspraak
+        waar Forecast.Solar en Solcast zich allebei aan houden.
+
+        Alles zit in een vangnet. Verandert Home Assistant hier iets aan, dan
+        valt de coach terug op de sensoren van de klant in plaats van om te
+        vallen. Een zonverwachting is nuttig, niet noodzakelijk.
+        """
+        try:
+            from homeassistant.components.energy.data import async_get_manager
+            from homeassistant.loader import async_get_integration
+
+            manager = await async_get_manager(self.hass)
+            uit: dict[datetime, float] = {}
+            for bron in (manager.data or {}).get("energy_sources") or []:
+                if bron.get("type") != "solar":
+                    continue
+                for entry_id in bron.get("config_entry_solar_forecast") or []:
+                    entry = self.hass.config_entries.async_get_entry(entry_id)
+                    if entry is None:
+                        continue
+                    integratie = await async_get_integration(self.hass, entry.domain)
+                    platform = await integratie.async_get_platform("energy")
+                    voorspeld = await platform.async_get_solar_forecast(self.hass, entry_id)
+                    for stempel, wh in ((voorspeld or {}).get("wh_hours") or {}).items():
+                        moment = dt_util.parse_datetime(str(stempel))
+                        if moment is None:
+                            continue
+                        uur = _moment(moment).replace(minute=0, second=0, microsecond=0)
+                        uit[uur] = uit.get(uur, 0.0) + float(wh) / 1000.0
+            return uit
+        except Exception:  # noqa: BLE001 - een voorspelling is nuttig, niet noodzakelijk
+            _LOGGER.debug("geen uurkromme uit het energiedashboard", exc_info=True)
+            return {}
+
+    def _zon_uit_sensoren(
+        self, settings: dict[str, Any], now: datetime
+    ) -> dict[datetime, float]:
+        """Een kromme uit de vier getallen die de klant zelf heeft ingevuld.
+
+        Dit uur en het volgende zijn metingen en gaan er ongewijzigd in. Wat er
+        vandaag verder nog aankomt is één getal; dat wordt over de resterende
+        daglichturen verdeeld met een driehoek waarvan de top op het piekmoment
+        ligt. Een vlakke verdeling zou zeggen dat zes uur 's avonds evenveel
+        oplevert als het middaguur, en dat is aantoonbaar onwaar.
+
+        Het is en blijft een schatting. Daarom zegt het scherm dat erbij, en
+        daarom stuurt de coach nog steeds op wat hij op dit moment wérkelijk
+        meet.
+        """
+        zon = self._sun(settings)
+        uur = now.replace(minute=0, second=0, microsecond=0)
+        uit: dict[datetime, float] = {}
+
+        if zon.now_w:
+            uit[uur] = zon.now_w / 1000.0
+        if zon.next_w:
+            uit[uur + timedelta(hours=1)] = zon.next_w / 1000.0
+
+        rest = (zon.remaining_kwh or 0.0) - sum(uit.values())
+        piek = self._piek(settings)
+        if rest <= 0 or piek is None:
+            return uit
+
+        # De uren die vandaag nog komen na het uur dat we al kennen. De
+        # daglengte volgt uit de piek: even lang na de piek als ervoor, en dat
+        # klopt op een dag na de zonnewende beter dan elke vaste aanname.
+        eind = piek + (piek - uur) if piek > uur else piek + timedelta(hours=1)
+        uren = []
+        stap = uur + timedelta(hours=2)
+        while stap < eind and stap.date() == uur.date():
+            uren.append(stap)
+            stap += timedelta(hours=1)
+        if not uren:
+            return uit
+
+        # Een driehoek met de top op de piek. De gewichten zijn de afstand tot
+        # het einde van de dag, dus hoe dichter bij de piek hoe zwaarder.
+        gewichten = [max(0.1, (eind - u).total_seconds() / 3600.0) for u in uren]
+        totaal = sum(gewichten)
+        for u, gewicht in zip(uren, gewichten):
+            uit[u] = rest * gewicht / totaal
+        return uit
 
     @staticmethod
     def _tariff(settings: dict[str, Any]) -> Tariff:
@@ -2358,10 +2622,17 @@ class ChargerCoach:
         plan = timeline(
             now,
             self._prices(settings),
+            grid,
             car,
             charger,
             window,
             ceiling_amps(grid, car, charger),
+            self._tariff(settings),
+            Forecast(
+                solar_kwh=self._zon_kwh,
+                house_kwh=self._huis_kwh,
+                estimated=self._zon_geschat,
+            ),
         )
 
         def klok(moment: datetime | None) -> str | None:
@@ -2375,6 +2646,7 @@ class ChargerCoach:
             "hours_needed": plan.hours_needed,
             "amps": plan.amps,
             "note": plan.note,
+            "estimated": plan.estimated,
             "blocks": [
                 {
                     "start": klok(blok.start),
@@ -2382,6 +2654,8 @@ class ChargerCoach:
                     "price": blok.price,
                     "charging": blok.charging,
                     "why": blok.why,
+                    "solar_kwh": blok.solar_kwh,
+                    "kwh": blok.kwh,
                 }
                 for blok in plan.blocks
             ],

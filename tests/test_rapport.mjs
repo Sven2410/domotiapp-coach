@@ -302,11 +302,11 @@ const NACHT = {
   note: "",
   blocks: [
     { start: "2026-08-29T22:00:00", end: "2026-08-29T23:00:00", price: 0.3106,
-      charging: false, why: "duurder dan wat hij nodig heeft" },
+      charging: false, why: "duurder dan wat hij nodig heeft", solar_kwh: 0, kwh: 0 },
     { start: "2026-08-30T03:00:00", end: "2026-08-30T04:00:00", price: 0.2215,
-      charging: true, why: "een van de goedkoopste uren" },
+      charging: true, why: "een van de goedkoopste uren", solar_kwh: 0, kwh: 11.0 },
     { start: "2026-08-30T04:00:00", end: "2026-08-30T05:00:00", price: 0.2113,
-      charging: true, why: "een van de goedkoopste uren" },
+      charging: true, why: "een van de goedkoopste uren", solar_kwh: 2.4, kwh: 11.0 },
   ],
 };
 
@@ -330,11 +330,17 @@ proef("elk uur staat er met zijn prijs en of hij laadt", () => {
   assert.equal(rijen.length, 3, "drie blokken, drie regels");
 
   const eerste = rijen[0].kinderen.map((kind) => kind.textContent);
-  assert.deepEqual(eerste, ["22:00", "€ 0,311", "Wachten, duurder dan wat hij nodig heeft"]);
+  assert.deepEqual(eerste,
+    ["22:00", "€ 0,311", "", "Wachten, duurder dan wat hij nodig heeft"]);
   assert.ok(!rijen[0].className.includes("laadt"), "een wachtuur krijgt geen kleur");
 
+  // Een uur zonder zon krijgt een lege kolom en geen streepje: een kolom vol
+  // streepjes leest als een storing.
+  assert.equal(rijen[1].kinderen[2].textContent, "", "geen zon, geen tekst");
+
   const derde = rijen[2].kinderen.map((kind) => kind.textContent);
-  assert.deepEqual(derde, ["04:00", "€ 0,211", "Laden, een van de goedkoopste uren"]);
+  assert.deepEqual(derde,
+    ["04:00", "€ 0,211", "2,4 kWh zon", "Laden, een van de goedkoopste uren"]);
   assert.ok(rijen[2].className.includes("laadt"), "een laaduur wel");
 });
 

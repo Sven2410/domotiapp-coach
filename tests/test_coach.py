@@ -11,6 +11,7 @@ import datetime as dt
 import importlib.util
 import pathlib
 import sys
+import tempfile
 import types
 
 # Home Assistant draait op een verse Python en `coach.py` gebruikt dingen die
@@ -68,6 +69,9 @@ class ServiceNotFound(Exception):  # noqa: D101
 excepties.ServiceNotFound = ServiceNotFound
 
 helpers = types.ModuleType("homeassistant.helpers")
+helpers.__path__ = []
+start = types.ModuleType("homeassistant.helpers.start")
+start.async_at_started = lambda *a, **k: (lambda: None)
 gebeurtenis = types.ModuleType("homeassistant.helpers.event")
 gebeurtenis.async_track_state_change_event = lambda *a, **k: (lambda: None)
 gebeurtenis.async_track_time_interval = lambda *a, **k: (lambda: None)
@@ -122,6 +126,7 @@ sys.modules.update({
     "homeassistant.exceptions": excepties,
     "homeassistant.helpers": helpers,
     "homeassistant.helpers.event": gebeurtenis,
+    "homeassistant.helpers.start": start,
     "homeassistant.helpers.storage": opslag,
     "homeassistant.util": util,
     "homeassistant.util.dt": dtutil,
@@ -229,13 +234,32 @@ class Bus:
         self.gebeurtenissen.append((soort, data))
 
 
+class NepConfig:
+    """Net genoeg van `hass.config` voor het archief.
+
+    Het archief legt een sqlite-bestand aan naast de configuratie. In de proeven
+    mag dat nergens landen, dus wijst dit naar een map die weggegooid mag worden.
+    """
+
+    def __init__(self):
+        self.config_dir = tempfile.mkdtemp(prefix="domotiapp-proef-")
+
+    def path(self, *delen):
+        return str(pathlib.Path(self.config_dir, *delen))
+
+
 class NepHass:
     def __init__(self, waarden):
+        self.config = NepConfig()
         self.states = Staten(waarden)
         self.services = Diensten()
         self.bus = Bus()
         self.data = {}
         self.taken = []
+
+    async def async_add_executor_job(self, func, *args):
+        """Zoals Home Assistant het doet, maar zonder aparte draad."""
+        return func(*args)
 
     def async_create_task(self, coro):
         """Zoals HA het doet: erbij zetten en doorgaan.
@@ -630,8 +654,12 @@ def zes_rondes(vanaf_uur, vanaf_minuut):
 # dat 1,36 uur, dus met het uur erbij is 16:38 het laatste moment dat nog past.
 vroeg = zes_rondes(15, 30)
 print("  15:30  " + "  ".join(f"{r}:{a}A" for r, a in vroeg))
-controle("ruim op tijd blijft hij op de zon",
-         all(naam == "surplus" for naam, _ in vroeg), f"{vroeg}")
+# Sinds 30-08-2026 heet dit `easy-pace` in plaats van `surplus`: bij een vast
+# tarief kost elk uur hetzelfde, dus doet hij het rustig aan met de zon erin.
+# Waar het om gaat is dat hij niet naar vol vermogen springt.
+controle("ruim op tijd blijft hij rustig",
+         all(naam in ("surplus", "easy-pace") and amps <= planner.MIN_AMPS
+             for naam, amps in vroeg), f"{vroeg}")
 
 # En op het laatste moment dat nog past grijpt hij wél in.
 laatst = zes_rondes(16, 45)
