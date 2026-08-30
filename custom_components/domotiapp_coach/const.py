@@ -248,10 +248,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # the fuse: with a balancer present it gives way first, so the balancer
         # never has to intervene at all.
         "load_balancer": False,
-        # De sensor waarin die lastbewaker zijn eigen grens meldt, als hij dat
-        # doet. Een Easee Equalizer heeft er een. Staat die grens lager dan de
-        # hoofdzekering, dan is hij de echte grens en heeft het geen zin om er
-        # overheen te vragen; zie `net_grens` in planner.py.
+        # De sensor waarin die lastbewaker meldt hoeveel hij op dit moment
+        # vrijgeeft voor het laden. Een Easee Equalizer heeft er een. Dat is een
+        # restwaarde en geen tweede zekering: het huisverbruik zit er al af, de
+        # laadpaal zelf niet. Zie `beschikbaar_van_bewaker` in planner.py.
         "balancer_entity": "",
     },
     "contract": {
