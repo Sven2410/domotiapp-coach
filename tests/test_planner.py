@@ -1124,6 +1124,71 @@ controle("de coach vraagt niet meer dan de bewaker vrijgeeft",
 controle("en geeft de bewaker dus ook de schuld niet",
          not krap37.rule.endswith("+held-back"), f"{krap37.rule}")
 
+print("=== 38. een lopende beurt stopt niet voor een verschil dat er niet is ===")
+# Gezien bij Van den Dam op 30-08-2026, met zijn eigen prijzen. Om 12:05 stond de
+# accu op 70% en waren er drie uur nodig: 12, 13 en 14 uur zaten in de lijst en
+# hij begon te laden. Tien minuten later stond hij op 72%, waren er nog maar twee
+# uur nodig, en viel het uur van dat moment eruit. Verschil met het duurste uur
+# dat er nog wel in stond: 0,1281 tegen 0,1278.
+MIDDAG = [(30, 12, 0.1281), (30, 13, 0.1277), (30, 14, 0.1278), (30, 15, 0.1288),
+          (30, 16, 0.1296), (30, 17, 0.1976), (30, 18, 0.3190), (30, 19, 0.3517),
+          (30, 23, 0.2600), (31, 3, 0.1500), (31, 4, 0.1450), (31, 5, 0.1480)]
+prijzen38 = []
+for dag, uur, prijs in MIDDAG:
+    start = dt.datetime(2026, 8, dag, uur, 0)
+    prijzen38.append({"start": start, "end": start + dt.timedelta(hours=1), "price": prijs})
+
+BUS38 = Car(capacity_kwh=65.0, phases=3, soc_percent=72.0)
+VENSTER38 = Window(enabled=True, opens=None, deadline=dt.datetime(2026, 8, 31, 7, 0))
+nu38 = dt.datetime(2026, 8, 30, 12, 15)
+NET38 = Grid(surplus_w=0.0, phase_amps=[5.0, 6.0, 7.0], fuse_amps=25.0, charger_amps=6.3)
+
+LAADT38 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=6.3,
+                  started_at=dt.datetime(2026, 8, 30, 12, 5), limit_amps=6.0)
+loopt = decide(nu38, prijzen38, NET38, BUS38, LAADT38, VENSTER38,
+               tariff=VAST, sun=ZON_KRAP)
+print(f"  paal laadt al: {loopt.rule}: {loopt.charge} {loopt.amps} A")
+print(f"    {loopt.reason}")
+controle("een lopende beurt gaat door op een uur dat niets duurder is",
+         loopt.charge, f"{loopt.rule} {loopt.amps}")
+controle("en zegt waarom", "scheelt niets" in loopt.reason, f"{loopt.reason}")
+
+# Maar hij begint er niet aan. Starten kost niets, dus daar mag de prijs gewoon
+# de doorslag geven.
+STAAT_STIL38 = Charger(max_amps=16.0, connected=True, charging=False,
+                       actual_amps=0.05, limit_amps=0.0)
+stil38 = decide(nu38, prijzen38, NET38, BUS38, STAAT_STIL38, VENSTER38,
+                tariff=VAST, sun=ZON_KRAP)
+print(f"  paal staat stil: {stil38.rule}: {stil38.charge}")
+controle("maar een paal die stilstaat begint er niet aan",
+         not stil38.charge, f"{stil38.rule}")
+
+# En een uur dat werkelijk duurder is stopt hem nog steeds. Dat is het deelladen
+# dat op 29-08 voor het eerst in het echt gezien is: een deel rond de goedkope
+# middagprijzen, stoppen zodra het duur wordt, de rest 's nachts.
+# De paal loopt dan al ruim langer dan `MIN_RUN_MINUTES` en de hysterese is op,
+# anders zou die hem alsnog even aanhouden en meet de proef iets anders.
+nu38b = dt.datetime(2026, 8, 30, 17, 15)
+LAADT38B = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=13.0,
+                   started_at=dt.datetime(2026, 8, 30, 16, 0), limit_amps=16.0)
+duur = decide(nu38b, prijzen38, NET38, BUS38, LAADT38B, VENSTER38,
+              tariff=VAST, sun=ZON_KRAP, holding=planner.STOP_ROUNDS)
+print(f"  om 17:00 op 0,1976 tegen 0,145 's nachts: {duur.rule}: {duur.charge}")
+controle("een uur dat werkelijk duurder is stopt hem wel",
+         not duur.charge, f"{duur.rule} {duur.amps}")
+
+# De grens is dezelfde als waarmee de zonregel al werkt, en die is klein: een
+# cent per kWh is wel een reden om te stoppen.
+CENT = [dict(rij) for rij in prijzen38]
+CENT[0]["price"] = 0.1378
+LANG38 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=6.3,
+                 started_at=dt.datetime(2026, 8, 30, 11, 0), limit_amps=6.0)
+merkbaar = decide(nu38, CENT, NET38, BUS38, LANG38, VENSTER38,
+                  tariff=VAST, sun=ZON_KRAP, holding=planner.STOP_ROUNDS)
+print(f"  een cent duurder: {merkbaar.rule}: {merkbaar.charge}")
+controle("een cent duurder is wel een reden om te stoppen",
+         not merkbaar.charge, f"{merkbaar.rule}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
