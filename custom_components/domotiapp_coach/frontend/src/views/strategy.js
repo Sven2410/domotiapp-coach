@@ -64,20 +64,6 @@ const LEVELS = [
   },
 ];
 
-/** Waar hij op mikt zodra hij mag. */
-const GOALS = [
-  {
-    key: "cost",
-    label: "Laagste kosten",
-    blurb: "Alles omgerekend naar euro's. Je eigen zon gebruiken wint daarbij meestal vanzelf.",
-  },
-  {
-    key: "solar",
-    label: "Zoveel mogelijk eigen zon",
-    blurb: "Ook als inkopen op dat moment goedkoper zou zijn.",
-  },
-];
-
 /**
  * The notifications, in the order they are listed.
  *
@@ -203,18 +189,12 @@ class DacViewStrategy extends DacEditorElement {
               ).join("")}
             </div>
 
-            <div class="row" id="goal-row">
-              <label>Waar mikt hij op?</label>
-              <div class="segmented" id="goal">
-                ${GOALS.map(
-                  (item) => `
-                  <button type="button" data-goal="${item.key}" aria-pressed="false">
-                    <strong>${item.label}</strong>
-                    ${item.blurb}
-                  </button>`
-                ).join("")}
-              </div>
-            </div>
+            <p class="hint">
+              Waar hij op mikt staat vast: zo min mogelijk geld uitgeven. De coach legt
+              alle manieren om je auto vol te krijgen naast elkaar, van je eigen zon tot
+              elk uur tussen nu en je klaar-tijd, en kiest de goedkoopste. Je eigen zon
+              wint daarbij vanzelf zodra hij goedkoper is dan het net.
+            </p>
           </div>
         </section>
 
@@ -321,14 +301,6 @@ class DacViewStrategy extends DacEditorElement {
         this.afterChange_();
       });
     }
-    for (const button of this.$$("#goal button")) {
-      button.addEventListener("click", () => {
-        this.draft_.strategy.goal = button.dataset.goal;
-        this.paintLevel_();
-        this.afterChange_();
-      });
-    }
-
     this.wireSaveBar_();
     this.paintPane_();
     this.paint_();
@@ -427,20 +399,19 @@ class DacViewStrategy extends DacEditorElement {
   }
 
 
-  /** Het niveau en het doel, en of dat doel er op dit niveau toe doet. */
+  /**
+   * Het niveau: hoeveel de coach zelf mag doen.
+   *
+   * De keuze tussen laagste kosten en zoveel mogelijk zon stond hier ook, en die
+   * is weg. Sven op 30-08-2026: "het eindoel is altijd lage kosten." Sindsdien
+   * legt de coach alle manieren naast elkaar en wint zon vanzelf zodra hij
+   * goedkoper is; een knop die dat overrulet zou alleen maar geld kosten.
+   */
   paintLevel_() {
     const level = this.draft_?.strategy?.level ?? "propose";
-    const goal = this.draft_?.strategy?.goal ?? "cost";
-
     for (const button of this.$$("#level button")) {
       button.setAttribute("aria-pressed", String(button.dataset.level === level));
     }
-    for (const button of this.$$("#goal button")) {
-      button.setAttribute("aria-pressed", String(button.dataset.goal === goal));
-    }
-    // Waar hij op mikt telt pas als hij iets mag doen; bij alleen uitlezen is
-    // het een keuze zonder gevolg.
-    this.$("#goal-row").style.display = level === "read" ? "none" : "";
   }
 
   paintSummaries_() {

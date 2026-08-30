@@ -268,6 +268,13 @@ class Window:
     enabled: bool = False
     # Vanaf wanneer er geladen mag worden, of None als er geen ondergrens is.
     opens: datetime | None = None
+    # Wanneer hij hoe dan ook begint, ook als het dan duur is. Dit stond in het
+    # schemascherm, werd opgeslagen, en werd door niemand gelezen: `start_by`
+    # zat wel in `DayWindow` maar kwam nooit in een `Window` terecht en dus
+    # nooit in een besluit. Gevonden op 30-08-2026 bij het herbouwen van de
+    # sturing. Het scherm belooft "op deze tijd start hij hoe dan ook", en dat
+    # doet hij nu.
+    start_by: datetime | None = None
     # Wanneer het klaar moet zijn.
     deadline: datetime | None = None
 
@@ -776,7 +783,16 @@ def resolve_window(now: datetime, days: dict[int, DayWindow]) -> Window:
             if avond is None or not avond.enabled:
                 opens = None
 
-        return Window(enabled=True, opens=opens, deadline=deadline)
+        # "Uiterlijk starten om" hoort bij dezelfde nacht als de klaar-tijd, dus
+        # precies zoals "niet eerder dan": ligt hij erna, dan gaat hij over de
+        # avond ervoor.
+        uiterlijk = _at(basis, day.start_by)
+        if uiterlijk is not None and uiterlijk >= deadline:
+            uiterlijk -= timedelta(days=1)
+
+        return Window(
+            enabled=True, opens=opens, start_by=uiterlijk, deadline=deadline
+        )
 
     return Window()
 
@@ -817,6 +833,262 @@ def cheapest_hours(
 # --- de tijdlijn ------------------------------------------------------------
 
 
+# --- alle manieren om een kilowattuur in de auto te krijgen -----------------
+
+# Onder deze hoeveelheid is een schijf het rekenen niet waard. Een honderdste
+# kilowattuur is drie seconden laden.
+SCHIJF_MINIMUM = 0.01
+
+
+@dataclass
+class Schijf:
+    """Eén manier om kilowattuur in de auto te krijgen, met wat die kost.
+
+    Elk uur levert er twee: wat er uit de eigen zon kan, en wat er daarboven van
+    het net moet komen. Ze staan los omdat ze verschillend kosten, en juist die
+    twee prijzen naast elkaar leggen is het hele idee.
+    """
+
+    start: datetime
+    end: datetime
+    # Wat een kilowattuur via deze manier kost.
+    price: float
+    # Hoeveel er via deze manier past.
+    kwh: float
+    # Welke van de drie dit is:
+    #
+    #   "zon"   het dak geeft genoeg om er op eigen kracht op te laden
+    #   "vloer" het dak geeft wél iets maar te weinig voor de ondergrens van de
+    #           paal, dus de prijs is een mengsel van zon en bijkopen
+    #   "net"   alles boven de zon, tegen de prijs van dat uur
+    kind: str = "net"
+
+    @property
+    def solar(self) -> bool:
+        """Of hier eigen zon in zit, in welke verhouding dan ook."""
+        return self.kind in ("zon", "vloer")
+
+
+@dataclass
+class Forecast:
+    """Wat er van de komende uren verwacht wordt.
+
+    Twee dingen, allebei uit metingen en niet uit een aanname. De zon komt uit de
+    voorspelling die aan het energiedashboard van Home Assistant hangt, en het
+    huisverbruik uit de eigen meters van de woning. Zie `_zonkromme` en
+    `_huisverbruik` in coach.py.
+
+    Allebei mogen leeg zijn. Dan zijn er geen zonschijven voor de uren die nog
+    moeten komen en kiest de coach op prijs alleen, precies zoals hij deed
+    voordat dit bestond. Het uur waar we nú in zitten heeft de voorspelling niet
+    nodig: daar wordt gemeten.
+    """
+
+    # De verwachte opbrengst per uur, in kWh, met het beginmoment als sleutel.
+    solar_kwh: dict[datetime, float] = field(default_factory=dict)
+    # Wat het huis zelf gebruikt, per uur van de dag, in kWh.
+    house_kwh: dict[int, float] = field(default_factory=dict)
+    # Of de zon per uur uit een echte uurkromme komt of over de dag verdeeld is.
+    estimated: bool = False
+
+
+def _vlakke_blokken(
+    now: datetime, end: datetime | None, tariff: Tariff
+) -> list[dict]:
+    """Uurblokken tegen één vaste prijs, voor een contract zonder prijslijst.
+
+    Zo hoeft er maar één som te bestaan. Bij een vast tarief kost elk uur
+    hetzelfde en is de zon het enige dat de ene keuze van de andere onderscheidt,
+    en dat komt er vanzelf uit: de zonschijven zijn dan de goedkoopste van
+    allemaal en worden het eerst gepakt. De avondregel die hier vroeger voor
+    stond is daarmee overbodig geworden in plaats van weggehaald.
+    """
+    if tariff.buy is None:
+        return []
+    grens = end or (now + PLAN_HORIZON)
+    blokken = []
+    uur = now.replace(minute=0, second=0, microsecond=0)
+    while uur < grens:
+        blokken.append(
+            {
+                "start": uur,
+                "end": uur + timedelta(hours=1),
+                "price": tariff.buy,
+                "feed_in": tariff.feed_in,
+            }
+        )
+        uur += timedelta(hours=1)
+    return blokken
+
+
+def schijven(
+    now: datetime,
+    prices: list[dict],
+    grid: Grid,
+    car: Car,
+    ceiling: int,
+    start: datetime | None,
+    end: datetime | None,
+    tariff: Tariff = Tariff(),
+    forecast: Forecast = Forecast(),
+) -> list[Schijf]:
+    """Alle manieren om tussen nu en de klaar-tijd te laden, met hun prijs.
+
+    Per uurblok twee schijven. De eerste is wat er uit de eigen zon kan, en die
+    kost wat je er anders voor gekregen had; bij salderen is dat de inkoopprijs
+    min wat je leverancier houdt. De tweede is de rest tot het plafond van de
+    paal, en die kost de prijs van dat uur.
+
+    Voor het blok waar we nú in zitten is de zon geen voorspelling maar de
+    meting van dit moment. Dat is het verschil tussen sturen en gokken: wat er
+    werkelijk uit het dak komt weegt zwaarder dan wat er verwacht werd.
+
+    Buiten je begintijd bestaat er niets, en na de klaar-tijd ook niet. Zo zit
+    het schema in dezelfde som en niet in een sport ernaast.
+    """
+    blokken = prices or _vlakke_blokken(now, end, tariff)
+    vermogen_kw = watts_for(ceiling, car.phases) / 1000.0
+    if not blokken or vermogen_kw <= 0:
+        return []
+
+    vanaf = max(now, start) if start else now
+
+    # De avondregel, en die gaat niet over prijs.
+    #
+    # Sven op 20-08-2026: "op een vast contract is een kwartier speling niet
+    # voldoende. Ik wil dat wanneer het niet meer rendabel is van de zon, hij
+    # vanaf 20 uur gaat laden. Dan heb je de grote pieken van het koken achter
+    # de rug en belast je het ook niet zo veel."
+    #
+    # Bij een vast tarief kost elk uur hetzelfde, dus de vergelijking is
+    # onverschillig tussen zes uur en acht uur en pakt het vroegste. Daarmee zou
+    # deze afspraak verdwijnen, en het is er een over de aansluiting en niet over
+    # geld. Hij staat er dus als voorwaarde in: vóór de avond komt er niets van
+    # het net bij.
+    #
+    # **Alleen voor het net.** Zon die er nú is blijft gewoon beschikbaar, want
+    # die belast de aansluiting niet en kost niets. Dat is precies het verschil
+    # dat de oude sport ook maakte.
+    #
+    # Bij een dynamisch contract is dit overbodig: daar is de avondpiek vanzelf
+    # het duurste uur van de dag en kiest de som hem toch al niet.
+    netto_vanaf = vanaf
+    if not prices:
+        avond = _evening_before(end)
+        if avond is not None and avond > vanaf:
+            netto_vanaf = avond
+    uit: list[Schijf] = []
+    for rij in blokken:
+        if rij["end"] <= vanaf or (end is not None and rij["start"] >= end):
+            continue
+        van = max(rij["start"], vanaf)
+        tot = min(rij["end"], end) if end is not None else rij["end"]
+        deel = (tot - van).total_seconds() / 3600.0
+        if deel <= 0:
+            continue
+        plafond_kwh = vermogen_kw * deel
+
+        if rij["start"] <= now < rij["end"]:
+            over = max(0.0, grid.surplus_w) / 1000.0 * deel
+        else:
+            heel = (rij["end"] - rij["start"]).total_seconds() / 3600.0
+            verwacht = forecast.solar_kwh.get(rij["start"], 0.0)
+            thuis = forecast.house_kwh.get(rij["start"].hour, 0.0)
+            over = max(0.0, verwacht - thuis) * (deel / heel if heel else 1.0)
+
+        terug = rij.get("feed_in")
+        if terug is None:
+            terug = tariff.feed_in
+
+        # Zonder een terugleverwaarde is niet te zeggen dat de zon goedkoper is,
+        # en dan gaat het hele blok als net de lijst in. Liever geen voorkeur dan
+        # een verzonnen voorkeur.
+        # Een paal levert niets onder `MIN_AMPS`. Geeft het dak minder dan dat,
+        # dan bestaat "op die zon laden" niet: je koopt er onvermijdelijk bij.
+        # Dat is geen reden om die zon weg te gooien maar om hem in de prijs te
+        # verwerken, en dat is precies wat `charge_cost` doet. Een uur met 0,9 kW
+        # zon en een vast tarief komt zo op 0,19 uit in plaats van op 0,24, en
+        # dat is het eerlijke getal om naast een nachtuur te leggen.
+        #
+        # Zonder terugleverwaarde valt er niets te mengen en gaat alles als net
+        # de lijst in. Liever geen voorkeur dan een verzonnen voorkeur.
+        vloer_kwh = watts_for(MIN_AMPS, car.phases) / 1000.0 * deel
+        gedekt = 0.0
+        if terug is not None and over > SCHIJF_MINIMUM:
+            if over >= vloer_kwh * SURPLUS_SLACK:
+                gedekt = min(over, plafond_kwh)
+                if gedekt > SCHIJF_MINIMUM:
+                    uit.append(Schijf(rij["start"], rij["end"], terug, gedekt, "zon"))
+            else:
+                gedekt = min(vloer_kwh, plafond_kwh)
+                gemengd = charge_cost(
+                    watts_for(MIN_AMPS, car.phases),
+                    over / deel * 1000.0 if deel else 0.0,
+                    rij["price"],
+                    terug,
+                )
+                if gedekt > SCHIJF_MINIMUM:
+                    uit.append(
+                        Schijf(rij["start"], rij["end"], gemengd, gedekt, "vloer")
+                    )
+
+        if plafond_kwh - gedekt > SCHIJF_MINIMUM and rij["end"] > netto_vanaf:
+            uit.append(
+                Schijf(rij["start"], rij["end"], rij["price"], plafond_kwh - gedekt)
+            )
+    return uit
+
+
+def goedkoopste(alle: list[Schijf], nodig_kwh: float) -> list[tuple[Schijf, float]]:
+    """De goedkoopste manier om `nodig_kwh` binnen te krijgen.
+
+    Sorteren op prijs en van onder af vullen. Dat is niet zomaar een redelijke
+    aanpak maar aantoonbaar de beste: elke schijf is deelbaar en kost overal
+    hetzelfde per kilowattuur, en dan is dit het gebroken-knapzakprobleem. Daar
+    is gulzig van goedkoop naar duur bewijsbaar optimaal.
+
+    Wat eruit komt staat op tijd gesorteerd, want het wordt gelezen als een plan
+    en een plan loopt vooruit.
+    """
+    rest = max(0.0, nodig_kwh)
+    uit: list[tuple[Schijf, float]] = []
+    for schijf in sorted(alle, key=lambda s: (s.price, s.start)):
+        if rest <= SCHIJF_MINIMUM:
+            break
+        pak = min(schijf.kwh, rest)
+        rest -= pak
+        uit.append((schijf, pak))
+    return sorted(uit, key=lambda paar: paar[0].start)
+
+
+def _uren_van(gekozen: list[tuple[Schijf, float]]) -> list[dict]:
+    """De gekozen schijven als uren, voor `_describe`.
+
+    Twee schijven van hetzelfde uur zijn één uur op het scherm, en de prijs die
+    erbij hoort is wat dat uur gemiddeld kost.
+    """
+    per_uur: dict[datetime, list[tuple[Schijf, float]]] = {}
+    for schijf, kwh in gekozen:
+        per_uur.setdefault(schijf.start, []).append((schijf, kwh))
+
+    uit = []
+    for start in sorted(per_uur):
+        rijen = per_uur[start]
+        totaal = sum(kwh for _, kwh in rijen)
+        prijs = (
+            sum(schijf.price * kwh for schijf, kwh in rijen) / totaal
+            if totaal
+            else rijen[0][0].price
+        )
+        uit.append({"start": start, "end": rijen[0][0].end, "price": prijs})
+    return uit
+
+
+def _kwh(waarde: float) -> str:
+    """Kilowattuur zoals het paneel ze schrijft."""
+    return f"{waarde:.1f} kWh".replace(".", ",")
+
+
 @dataclass
 class Blok:
     """Eén blok in de tijdlijn, meestal een uur lang."""
@@ -829,6 +1101,10 @@ class Blok:
     charging: bool = False
     # In één woord waarom, voor de kolom ernaast.
     why: str = ""
+    # Hoeveel er in dit uur uit de eigen zon kan, en hoeveel hij er in totaal
+    # van plan is te laden.
+    solar_kwh: float = 0.0
+    kwh: float = 0.0
 
 
 @dataclass
@@ -855,6 +1131,10 @@ class Plan:
     blocks: list[Blok] = field(default_factory=list)
     # Waarom er geen blokken zijn, als die er niet zijn.
     note: str = ""
+    # Of de zon per uur een meting is of een schatting. Zie `_zonkromme` in
+    # coach.py: staat er geen uurkromme klaar, dan wordt de dagverwachting over
+    # de daglichturen verdeeld, en dat hoort het scherm te zeggen.
+    estimated: bool = False
 
 
 # Hoe ver een tijdlijn vooruit kijkt als er geen klaar-tijd is. Dan is er geen
@@ -866,80 +1146,108 @@ PLAN_HORIZON = timedelta(hours=24)
 def timeline(
     now: datetime,
     prices: list[dict],
+    grid: Grid,
     car: Car,
     charger: Charger,
     window: Window,
     ceiling: int,
+    tariff: Tariff = Tariff(),
+    forecast: Forecast = Forecast(),
 ) -> Plan:
     """De hele tijdlijn tot de auto vol moet zijn.
 
     Bedoeld voor het scherm en niet voor een besluit: hier wordt niets gestuurd.
-    Maar hij rekent wél met dezelfde functies, zodat wat er staat klopt met wat
-    er gebeurt.
+    **Maar hij rekent met precies dezelfde schijven als het besluit van deze
+    minuut**, dus wat er staat is wat er gebeurt. Een tijdlijn die iets anders
+    zegt dan wat de coach doet laat de bewoner op het verkeerde wachten, en dat
+    is erger dan geen tijdlijn.
 
     Sven op 30-08-2026: "ik wil zien wat de coach van plan is met hele tijdlijn
-    tot dat hij vol moet zijn." Dat is precies de vraag die een coach die uren
-    stilstaat oproept, en tot nu toe stond het antwoord alleen in één zin op de
-    kaart.
+    tot dat hij vol moet zijn."
     """
     einde = window.deadline if window.enabled else None
     begin = window.opens if window.enabled else None
     amps = max(MIN_AMPS, ceiling if ceiling >= MIN_AMPS else int(charger.max_amps or 0))
 
     kwh = energy_needed_kwh(car)
-    uren = hours_needed(car, amps)
     plan = Plan(
         deadline=einde,
-        latest_start=_latest_start(einde, uren),
+        latest_start=_latest_start(einde, hours_needed(car, amps)),
         kwh_needed=kwh,
-        hours_needed=uren,
+        hours_needed=hours_needed(car, amps),
         amps=amps,
+        estimated=forecast.estimated,
     )
 
-    if not prices:
+    alle = schijven(now, prices, grid, car, amps, begin, einde, tariff, forecast)
+    if not alle:
         plan.note = (
-            "Je hebt een vast tarief, dus elk uur kost hetzelfde. De coach kijkt "
-            "naar je eigen zon en naar de tijden die je hebt ingesteld."
+            "Er zijn nog geen prijzen bekend, en er is ook geen vast bedrag "
+            "ingevuld. Kijk de prijssensor na bij Installatie."
+        )
+        return plan
+    if kwh is None:
+        plan.note = (
+            "Zonder accustand weet de coach niet hoeveel er nog in moet. Geef hem "
+            "door, dan staat hier het plan."
         )
         return plan
 
-    # Precies dezelfde aanroep als in `decide`, met dezelfde grenzen. Loopt dit
-    # uit elkaar, dan liegt het scherm.
-    gekozen = cheapest_hours(prices, max(now, begin) if begin else now, einde, uren or 0)
-    gekozen_starts = {row["start"] for row in gekozen}
+    gekozen = goedkoopste(alle, kwh)
+    genomen: dict[datetime, float] = {}
+    for schijf, hoeveel in gekozen:
+        genomen[schijf.start] = genomen.get(schijf.start, 0.0) + hoeveel
 
+    # Eén regel per uur, want dat is hoe je het leest. Over de blokken en niet
+    # over de schijven, want een uur waar helemaal geen schijf van bestaat is
+    # juist het interessante geval: dat ligt voor je begintijd, en dat hoort er
+    # met die reden bij te staan in plaats van gewoon te ontbreken.
+    per_uur: dict[datetime, list[Schijf]] = {}
+    for schijf in alle:
+        per_uur.setdefault(schijf.start, []).append(schijf)
+
+    blokken = prices or _vlakke_blokken(now, einde, tariff)
     grens = einde or (now + PLAN_HORIZON)
-    for row in prices:
-        if row["end"] <= now or row["start"] >= grens:
+    for rij in blokken:
+        if rij["end"] <= now or rij["start"] >= grens:
             continue
-        if begin and row["end"] <= begin:
-            why, laadt = "voor je begintijd", False
-        elif row["start"] in gekozen_starts:
-            why, laadt = "een van de goedkoopste uren", True
+        start = rij["start"]
+        schijven_hier = per_uur.get(start, [])
+        laadt = genomen.get(start, 0.0) > SCHIJF_MINIMUM
+        zonschijf = next((s for s in schijven_hier if s.solar), None)
+        netschijf = next((s for s in schijven_hier if not s.solar), None)
+        if laadt:
+            waarom = (
+                "je eigen zon is hier het goedkoopst"
+                if zonschijf is not None and netschijf is None
+                else "een van de goedkoopste manieren"
+            )
+        elif begin is not None and rij["end"] <= begin:
+            waarom = "voor je begintijd"
+        elif not schijven_hier:
+            waarom = "buiten je tijden"
         else:
-            why, laadt = "duurder dan wat hij nodig heeft", False
+            waarom = "duurder dan wat hij nodig heeft"
+
         plan.blocks.append(
             Blok(
-                start=row["start"],
-                end=row["end"],
-                price=row["price"],
+                start=start,
+                end=rij["end"],
+                price=rij["price"],
                 charging=laadt,
-                why=why,
+                why=waarom,
+                solar_kwh=zonschijf.kwh if zonschijf is not None else 0.0,
+                kwh=genomen.get(start, 0.0),
             )
         )
 
-    laatste = [blok for blok in plan.blocks if blok.charging]
-    plan.expected_done = laatste[-1].end if laatste else None
-
+    geladen = [blok for blok in plan.blocks if blok.charging]
+    plan.expected_done = geladen[-1].end if geladen else None
     if not plan.blocks:
-        plan.note = "Er zijn nog geen prijzen bekend voor deze periode."
-    elif uren is None:
-        plan.note = (
-            "Zonder accustand weet de coach niet hoeveel er nog in moet, dus hij "
-            "pakt alle uren die passen. Geef je accustand door, dan wordt dit "
-            "een kortere lijst."
-        )
+        plan.note = "Er is niets te plannen voor deze periode."
     return plan
+
+
 
 def price_now(prices: list[dict], now: datetime) -> dict | None:
     """The slot `now` falls in."""
@@ -1068,199 +1376,6 @@ def _hold_until(now: datetime, moment: datetime | None) -> int:
 
 
 # --- The decision ---------------------------------------------------------
-
-
-# --- alle manieren om een kilowattuur in de auto te krijgen -----------------
-
-# Onder deze hoeveelheid is een schijf het rekenen niet waard. Een honderdste
-# kilowattuur is drie seconden laden.
-SCHIJF_MINIMUM = 0.01
-
-
-@dataclass
-class Schijf:
-    """Eén manier om kilowattuur in de auto te krijgen, met wat die kost.
-
-    Elk uur levert er twee: wat er uit de eigen zon kan, en wat er daarboven van
-    het net moet komen. Ze staan los omdat ze verschillend kosten, en juist die
-    twee prijzen naast elkaar leggen is het hele idee.
-    """
-
-    start: datetime
-    end: datetime
-    # Wat een kilowattuur via deze manier kost.
-    price: float
-    # Hoeveel er via deze manier past.
-    kwh: float
-    # Of dit de eigen zon is of het net.
-    solar: bool = False
-
-
-@dataclass
-class Forecast:
-    """Wat er van de komende uren verwacht wordt.
-
-    Twee dingen, allebei uit metingen en niet uit een aanname. De zon komt uit de
-    voorspelling die aan het energiedashboard van Home Assistant hangt, en het
-    huisverbruik uit de eigen meters van de woning. Zie `_zonkromme` en
-    `_huisverbruik` in coach.py.
-
-    Allebei mogen leeg zijn. Dan zijn er geen zonschijven voor de uren die nog
-    moeten komen en kiest de coach op prijs alleen, precies zoals hij deed
-    voordat dit bestond. Het uur waar we nú in zitten heeft de voorspelling niet
-    nodig: daar wordt gemeten.
-    """
-
-    # De verwachte opbrengst per uur, in kWh, met het beginmoment als sleutel.
-    solar_kwh: dict[datetime, float] = field(default_factory=dict)
-    # Wat het huis zelf gebruikt, per uur van de dag, in kWh.
-    house_kwh: dict[int, float] = field(default_factory=dict)
-
-
-def _vlakke_blokken(
-    now: datetime, end: datetime | None, tariff: Tariff
-) -> list[dict]:
-    """Uurblokken tegen één vaste prijs, voor een contract zonder prijslijst.
-
-    Zo hoeft er maar één som te bestaan. Bij een vast tarief kost elk uur
-    hetzelfde en is de zon het enige dat de ene keuze van de andere onderscheidt,
-    en dat komt er vanzelf uit: de zonschijven zijn dan de goedkoopste van
-    allemaal en worden het eerst gepakt. De avondregel die hier vroeger voor
-    stond is daarmee overbodig geworden in plaats van weggehaald.
-    """
-    if tariff.buy is None:
-        return []
-    grens = end or (now + PLAN_HORIZON)
-    blokken = []
-    uur = now.replace(minute=0, second=0, microsecond=0)
-    while uur < grens:
-        blokken.append(
-            {
-                "start": uur,
-                "end": uur + timedelta(hours=1),
-                "price": tariff.buy,
-                "feed_in": tariff.feed_in,
-            }
-        )
-        uur += timedelta(hours=1)
-    return blokken
-
-
-def schijven(
-    now: datetime,
-    prices: list[dict],
-    grid: Grid,
-    car: Car,
-    ceiling: int,
-    start: datetime | None,
-    end: datetime | None,
-    tariff: Tariff = Tariff(),
-    forecast: Forecast = Forecast(),
-) -> list[Schijf]:
-    """Alle manieren om tussen nu en de klaar-tijd te laden, met hun prijs.
-
-    Per uurblok twee schijven. De eerste is wat er uit de eigen zon kan, en die
-    kost wat je er anders voor gekregen had; bij salderen is dat de inkoopprijs
-    min wat je leverancier houdt. De tweede is de rest tot het plafond van de
-    paal, en die kost de prijs van dat uur.
-
-    Voor het blok waar we nú in zitten is de zon geen voorspelling maar de
-    meting van dit moment. Dat is het verschil tussen sturen en gokken: wat er
-    werkelijk uit het dak komt weegt zwaarder dan wat er verwacht werd.
-
-    Buiten je begintijd bestaat er niets, en na de klaar-tijd ook niet. Zo zit
-    het schema in dezelfde som en niet in een sport ernaast.
-    """
-    blokken = prices or _vlakke_blokken(now, end, tariff)
-    vermogen_kw = watts_for(ceiling, car.phases) / 1000.0
-    if not blokken or vermogen_kw <= 0:
-        return []
-
-    vanaf = max(now, start) if start else now
-    uit: list[Schijf] = []
-    for rij in blokken:
-        if rij["end"] <= vanaf or (end is not None and rij["start"] >= end):
-            continue
-        van = max(rij["start"], vanaf)
-        tot = min(rij["end"], end) if end is not None else rij["end"]
-        deel = (tot - van).total_seconds() / 3600.0
-        if deel <= 0:
-            continue
-        plafond_kwh = vermogen_kw * deel
-
-        if rij["start"] <= now < rij["end"]:
-            over = max(0.0, grid.surplus_w) / 1000.0 * deel
-        else:
-            heel = (rij["end"] - rij["start"]).total_seconds() / 3600.0
-            verwacht = forecast.solar_kwh.get(rij["start"], 0.0)
-            thuis = forecast.house_kwh.get(rij["start"].hour, 0.0)
-            over = max(0.0, verwacht - thuis) * (deel / heel if heel else 1.0)
-
-        terug = rij.get("feed_in")
-        if terug is None:
-            terug = tariff.feed_in
-
-        # Zonder een terugleverwaarde is niet te zeggen dat de zon goedkoper is,
-        # en dan gaat het hele blok als net de lijst in. Liever geen voorkeur dan
-        # een verzonnen voorkeur.
-        uit_zon = min(over, plafond_kwh) if terug is not None else 0.0
-        if uit_zon > SCHIJF_MINIMUM:
-            uit.append(Schijf(rij["start"], rij["end"], terug, uit_zon, True))
-        if plafond_kwh - uit_zon > SCHIJF_MINIMUM:
-            uit.append(
-                Schijf(rij["start"], rij["end"], rij["price"], plafond_kwh - uit_zon)
-            )
-    return uit
-
-
-def goedkoopste(alle: list[Schijf], nodig_kwh: float) -> list[tuple[Schijf, float]]:
-    """De goedkoopste manier om `nodig_kwh` binnen te krijgen.
-
-    Sorteren op prijs en van onder af vullen. Dat is niet zomaar een redelijke
-    aanpak maar aantoonbaar de beste: elke schijf is deelbaar en kost overal
-    hetzelfde per kilowattuur, en dan is dit het gebroken-knapzakprobleem. Daar
-    is gulzig van goedkoop naar duur bewijsbaar optimaal.
-
-    Wat eruit komt staat op tijd gesorteerd, want het wordt gelezen als een plan
-    en een plan loopt vooruit.
-    """
-    rest = max(0.0, nodig_kwh)
-    uit: list[tuple[Schijf, float]] = []
-    for schijf in sorted(alle, key=lambda s: (s.price, s.start)):
-        if rest <= SCHIJF_MINIMUM:
-            break
-        pak = min(schijf.kwh, rest)
-        rest -= pak
-        uit.append((schijf, pak))
-    return sorted(uit, key=lambda paar: paar[0].start)
-
-
-def _uren_van(gekozen: list[tuple[Schijf, float]]) -> list[dict]:
-    """De gekozen schijven als uren, voor `_describe`.
-
-    Twee schijven van hetzelfde uur zijn één uur op het scherm, en de prijs die
-    erbij hoort is wat dat uur gemiddeld kost.
-    """
-    per_uur: dict[datetime, list[tuple[Schijf, float]]] = {}
-    for schijf, kwh in gekozen:
-        per_uur.setdefault(schijf.start, []).append((schijf, kwh))
-
-    uit = []
-    for start in sorted(per_uur):
-        rijen = per_uur[start]
-        totaal = sum(kwh for _, kwh in rijen)
-        prijs = (
-            sum(schijf.price * kwh for schijf, kwh in rijen) / totaal
-            if totaal
-            else rijen[0][0].price
-        )
-        uit.append({"start": start, "end": rijen[0][0].end, "price": prijs})
-    return uit
-
-
-def _kwh(waarde: float) -> str:
-    """Kilowattuur zoals het paneel ze schrijft."""
-    return f"{waarde:.1f} kWh".replace(".", ",")
 
 
 def decide(
@@ -1592,6 +1707,24 @@ def _decide(
             hold_minutes=_hold_until(now, start),
         )
 
+    # De bewoner heeft gezegd: op deze tijd begint hij, wat het ook kost. Dat is
+    # een afspraak en geen som, dus die staat boven de vergelijking en niet erin.
+    # Onder de zekering en onder een eigen pauze, want die gaan nog steeds voor.
+    if (
+        window.enabled
+        and window.start_by is not None
+        and now >= window.start_by
+        and (window.deadline is None or now < window.deadline)
+    ):
+        return Decision(
+            True,
+            ceiling,
+            f"Je hebt ingesteld dat hij uiterlijk om {_clock(window.start_by)} "
+            "begint, dus hij laadt nu.",
+            plan="Laadt door tot de auto vol is.",
+            rule="start-by",
+        )
+
     # --- the deadline outranks everything ---------------------------------
     # Reckoned with what the charger really manages, not with what it is about
     # to be asked for. Being held back by a load balancer makes charging take
@@ -1742,14 +1875,56 @@ def _decide(
         (s for s, _ in gekozen if not s.solar and s.start <= now < s.end), None
     )
     nu_zon = next((s for s, _ in gekozen if s.solar and s.start <= now < s.end), None)
+    nu_vloer = nu_zon is not None and nu_zon.kind == "vloer"
     uren = _uren_van(gekozen)
 
     if nu_net is not None:
         # Dit uur zit met zijn netschijf in het plan, dus er is geen goedkopere
-        # manier om deze kilowattuur binnen te krijgen. Vol vermogen.
+        # manier om deze kilowattuur binnen te krijgen.
+        #
+        # Hoe hard hangt af van of er iets te winnen is met haasten. Kosten alle
+        # uren hetzelfde, dan levert vol vermogen geen cent op en is het
+        # rustigste tempo dat de klaar-tijd nog haalt beter voor de aansluiting.
+        # Sven op 20-08-2026, over de avond: "dan belast je het ook niet zo
+        # veel." Verschillen de uren wel, dan is elk uur dat je in een goedkoop
+        # blok wegneemt er een die je duurder terugkrijgt, en gaat hij vol.
+        netschijven = [schijf for schijf in alle if not schijf.solar]
+        prijzen = {round(schijf.price, 6) for schijf in netschijven}
+        vlak = len(prijzen) == 1
+        amps = ceiling
+        if vlak:
+            beschikbaar = sum(
+                (schijf.end - schijf.start).total_seconds() / 3600.0
+                for schijf in netschijven
+            )
+            if beschikbaar > 0:
+                rustig = amps_for(nodig_kwh / beschikbaar * 1000.0, car.phases)
+                amps = max(MIN_AMPS, min(ceiling, int(rustig)))
+
+        # Nooit langzamer dan het dak op dit moment geeft. Rustig aan doen is
+        # goed voor de aansluiting, maar niet ten koste van zon die anders het
+        # net op gaat: die is nu gratis en straks weg.
+        if nu_zon is not None:
+            amps = max(amps, amps_zon)
+
+        if vlak and amps < ceiling:
+            return Decision(
+                True,
+                amps,
+                "Elk uur kost hetzelfde, dus haasten levert niets op. Hij laadt "
+                f"rustig door en is op tijd klaar; zo belast hij je aansluiting "
+                "het minst.",
+                plan=_describe(uren),
+                # Een eigen naam, want dit is niet "dit uur is goedkoop" maar
+                # "alle uren zijn even duur". Op het scherm leest dat als een
+                # coach die bewust rustig aan doet in plaats van een die niet
+                # doorheeft dat hij harder kan.
+                rule="easy-pace",
+            )
+
         return Decision(
             True,
-            ceiling,
+            amps,
             f"Dit uur kost {_euro(nu_net.price)} per kWh en dat is een van de "
             f"goedkoopste manieren om de {_kwh(nodig_kwh)} erin te krijgen.",
             plan=_describe(uren),
@@ -1777,29 +1952,56 @@ def _decide(
             )
 
     if nu_zon is not None:
-        # Alleen de zon van dit uur is goedkoop genoeg. Bijkopen zou duurder
-        # zijn dan een uur dat nog komt, dus hij pakt precies wat het dak geeft.
+        # De zon van dit uur is goedkoop genoeg. Geeft het dak genoeg om er zelf
+        # op te laden, dan loopt hij daarmee mee; geeft het minder, dan is de
+        # ondergrens van de paal het antwoord en zit het bijkopen al in de prijs
+        # waarop dit uur gekozen is.
         hoeveel = f"{grid.surplus_w / 1000:.1f}".replace(".", ",")
         return Decision(
             True,
-            amps_zon,
-            f"Er is {hoeveel} kW zon over en die is goedkoper dan het net. De rest "
-            "haalt hij op een uur dat minder kost.",
+            MIN_AMPS if nu_vloer else amps_zon,
+            (
+                f"Er is {hoeveel} kW zon over. Met de ondergrens van je paal erbij "
+                "is dit uur goedkoper dan wachten op het net."
+                if nu_vloer
+                else f"Er is {hoeveel} kW zon over en die is goedkoper dan het net. "
+                "De rest haalt hij op een uur dat minder kost."
+            ),
             plan=_describe(uren),
             rule="surplus",
         )
 
+    # Waarom hij wacht hangt af van wat er straks goedkoper is, en dat verschil
+    # hoort op de kaart te staan. "Niet het goedkoopste moment" is bij een vast
+    # tarief onzin: daar kost elk uur hetzelfde en wacht hij op de avond of op
+    # de zon.
     begint = uren[0]["start"] if uren else None
+    eerste = gekozen[0][0] if gekozen else None
+    if begint is None:
+        reden, regel = "Het is nu niet het goedkoopste moment om te laden.", "wait-for-price"
+    elif eerste is not None and eerste.solar:
+        reden = (
+            f"Hij wacht op je eigen zon van {_clock(begint)}; die is goedkoper dan "
+            "wat het net op dit moment kost."
+        )
+        regel = "wait-for-sun"
+    elif not prices:
+        reden = (
+            f"Hij wacht tot {_clock(begint)}. Elk uur kost hetzelfde, en dan zijn "
+            "de pieken van koken en wassen voorbij en belast het laden je "
+            "aansluiting het minst."
+        )
+        regel = "wait-for-sun"
+    else:
+        reden = f"Stroom is straks goedkoper dan nu, dus hij wacht tot {_clock(begint)}."
+        regel = "wait-for-price"
+
     return Decision(
         False,
         0,
-        (
-            f"Stroom is straks goedkoper dan nu, dus hij wacht tot {_clock(begint)}."
-            if begint
-            else "Het is nu niet het goedkoopste moment om te laden."
-        ),
+        reden,
         plan=_describe(uren),
-        rule="wait-for-price",
+        rule=regel,
         # Tot het eerste uur dat hij van plan is te gebruiken. Verloopt de pauze
         # doordat de coach wegvalt, dan laadt de auto vanaf dat moment gewoon
         # door, en dat is precies het goede antwoord: duurder, maar wel vol.

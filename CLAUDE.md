@@ -49,10 +49,27 @@ De scheiding tussen `planner.py` en `coach.py` is de kern: het denkwerk is los
 te draaien tegen een hele dag echte historie voordat er ook maar iets geschakeld
 wordt. Zet daar niets in dat `hass` nodig heeft.
 
+**Sinds 30-08-2026 is er geen ladder van regels meer maar een vergelijking.**
+Elk uur tussen nu en de klaar-tijd levert twee manieren om een kilowattuur in de
+auto te krijgen: uit je eigen zon, tegen wat je er anders voor gekregen had, of
+van het net, tegen de prijs van dat uur. Alle manieren op een hoop, sorteren op
+prijs, van onder af vullen tot er genoeg in zit. Zie `schijven` en `goedkoopste`
+in planner.py; dat laatste is het gebroken-knapzakprobleem en dus aantoonbaar
+optimaal.
+
+Wat daar niet in zit zijn de dingen die niet over geld gaan, en die staan er nog
+gewoon boven: de kabel, de zekering, de lastbewaker, een eigen pauze, snelladen,
+de klaar-tijd en de avondregel. Zie de opsomming in `_decide`.
+
+Sven op 30-08-2026: "het eindoel is altijd lage kosten, zo min mogelijk geld
+uitgeven, en dat moet optimaal gestuurd worden. Dus alle scenario's moeten
+vergeleken worden met elkaar." De keuze tussen laagste kosten en zoveel mogelijk
+zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
+
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 155 controles op het denkwerk
+python tests/test_planner.py     # 182 controles op het denkwerk
 python tests/test_coach.py       # 189 op de bedrading, met een nagebouwde HA
 python tests/test_archive.py     # 37 op de kwartieropslag
 node   tests/test_rapport.mjs    # 17 op het rapport en op het paneel

@@ -47,7 +47,7 @@ const css = /* css */ `
 
   .uur {
     display: grid;
-    grid-template-columns: 56px 74px 1fr;
+    grid-template-columns: 56px 74px 62px 1fr;
     align-items: center;
     gap: 10px;
     padding: 9px 11px;
@@ -66,6 +66,12 @@ const css = /* css */ `
 
   .uur .tijd { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--dac-ink-1); }
   .uur .prijs { font-variant-numeric: tabular-nums; color: var(--dac-ink-2); }
+  /* Hoeveel er van dit uur uit je eigen dak kan komen. Alleen ingevuld waar er
+     iets staat, want een kolom vol streepjes leest als een storing. */
+  .uur .zon {
+    font-variant-numeric: tabular-nums; font-size: 12px;
+    color: var(--dac-warn);
+  }
   .uur .wat { color: var(--dac-ink-3); font-size: 12.5px; }
   .uur.laadt .wat { color: var(--dac-ink-2); }
 
@@ -82,7 +88,7 @@ const css = /* css */ `
   /* Onder de 360 px vallen drie kolommen om. De reden mag dan onder de tijd
      staan; wat er niet mag is dat de kaart zijwaarts gaat schuiven. */
   @media (max-width: 360px) {
-    .uur { grid-template-columns: 52px 1fr; }
+    .uur { grid-template-columns: 52px 68px 1fr; }
     .uur .wat { grid-column: 1 / -1; }
   }
 `;
@@ -233,11 +239,16 @@ export class DacPlanAheadSheet extends DacElement {
       const prijs = document.createElement("span");
       prijs.className = "prijs";
       prijs.textContent = euro(blok.price);
+      const zon = document.createElement("span");
+      zon.className = "zon";
+      zon.textContent = blok.solar_kwh > 0.05
+        ? `${Number(blok.solar_kwh).toFixed(1).replace(".", ",")} kWh zon`
+        : "";
       const wat = document.createElement("span");
       wat.className = "wat";
       wat.textContent = blok.charging ? `Laden, ${blok.why}` : `Wachten, ${blok.why}`;
 
-      rij.append(tijd, prijs, wat);
+      rij.append(tijd, prijs, zon, wat);
       uurlijst.append(rij);
     }
 
@@ -251,10 +262,16 @@ export class DacPlanAheadSheet extends DacElement {
       return;
     }
 
+    const geschat = plan.estimated
+      ? " De zon per uur is een schatting: er staat geen uurverwachting klaar, dus " +
+        "de dagverwachting is over de daglichturen verdeeld."
+      : "";
     this.$("#vooruit-voet").textContent =
-      plan.note ||
-      "Dit is wat de coach nu van plan is. Verandert je accustand of de prijs, dan " +
-        "rekent hij het bij de volgende ronde opnieuw uit.";
+      (plan.note ||
+        "Dit is wat de coach nu van plan is. Hij vergelijkt elk uur tot je klaar-tijd, " +
+          "en per uur wat je eigen zon kost tegen wat het net kost. Verandert je " +
+          "accustand, de prijs of de verwachting, dan rekent hij het opnieuw uit.") +
+      geschat;
   }
 }
 
