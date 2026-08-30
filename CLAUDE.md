@@ -17,6 +17,13 @@ commit, tag en breng uit.
   dus zonder release krijgt niemand de update.
 - **Testen vóór opleveren.** Sven installeert meteen bij zichzelf; alles wat ik
   zelf had kunnen zien kost hem een ronde. Meld eerlijk wat niet getest is.
+- **Niets van één installatie in de code.** Elke sensor komt uit de instellingen
+  van de klant, nooit uit een naam in de broncode. Proef 42 in `test_coach.py`
+  leest de eigen bron en valt om zodra er een entiteitnaam of een merknaam van
+  één woning in staat; in een uitleg mag hij wel, want daar is het een bewijsstuk.
+  Vraag bij een nieuwe regel altijd welke installatievormen er zijn en dek ze
+  allemaal: een gesplitste meter én een meter met een teken, in allebei de
+  richtingen, met en zonder zonnepanelen. Proef 43 doet dat voor het huisverbruik.
 - **Nooit verzonnen getallen.** Elk getal in de code of op het scherm komt uit
   een meting, uit een instelling van de klant of uit een som die daarop rust.
   Weet de coach iets niet, dan zegt hij dat in plaats van iets aan te nemen.
@@ -70,7 +77,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 182 controles op het denkwerk
-python tests/test_coach.py       # 189 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 197 op de bedrading, met een nagebouwde HA
 python tests/test_archive.py     # 37 op de kwartieropslag
 node   tests/test_rapport.mjs    # 17 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

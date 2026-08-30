@@ -2240,6 +2240,134 @@ controle("alles als tekst, zodat het over de websocket kan",
 controle("en de blokken zijn een lijst", isinstance(plan41["blocks"], list),
          f"{type(plan41['blocks'])}")
 
+print("=== 42. niets van één installatie zit in de code ===")
+# Sven op 30-08-2026: "je hebt toch niet iets van mij thuis hard gecodeerd? Het
+# moet wel universeel zijn." Deze proef dwingt dat af in plaats van het te
+# beloven: hij leest de eigen broncode en valt om zodra er een entiteitnaam in
+# staat. Elke sensor hoort uit de instellingen van de klant te komen.
+import re as _re
+
+BRONMAP = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
+VERBODEN = _re.compile(
+    r"[\"'](?:sensor|binary_sensor|switch|number|button|select|input_[a-z]+)\.[a-z0-9_]+[\"']"
+)
+
+gevonden = []
+for pad in sorted(BRONMAP.glob("*.py")):
+    for nummer, regel in enumerate(pad.read_text(encoding="utf-8").split("\n"), 1):
+        # Alleen echte code. Een entiteitnaam in een uitleg is een bewijsstuk en
+        # geen aanname; die mag blijven staan.
+        kaal = regel.strip()
+        if kaal.startswith("#") or kaal.startswith('"""') or kaal.startswith("*"):
+            continue
+        for treffer in VERBODEN.findall(regel):
+            gevonden.append(f"{pad.name}:{nummer} {treffer}")
+
+print(f"  {len(list(BRONMAP.glob('*.py')))} bestanden nagelezen, "
+      f"{len(gevonden)} vaste entiteitnamen")
+controle("geen enkele entiteitnaam staat vast in de code", not gevonden,
+         "; ".join(gevonden[:5]))
+
+# En hetzelfde voor de merknamen van deze ene woning.
+EIGEN = _re.compile(r"(solaredge|electricity_meter|qpl3u7p4|fcq_)", _re.IGNORECASE)
+sporen = []
+for pad in sorted(BRONMAP.glob("*.py")):
+    for nummer, regel in enumerate(pad.read_text(encoding="utf-8").split("\n"), 1):
+        kaal = regel.strip()
+        if kaal.startswith("#") or kaal.startswith('"""'):
+            continue
+        if EIGEN.search(regel):
+            sporen.append(f"{pad.name}:{nummer}")
+print(f"  en {len(sporen)} verwijzingen naar de merken van één woning")
+controle("geen merknaam van één installatie in de code", not sporen,
+         "; ".join(sporen[:5]))
+
+print("=== 43. het huisverbruik werkt bij elke soort meter ===")
+# De som is `zon + inkoop - teruglevering - alle apparaten`, en die moet kloppen
+# bij een gesplitste meter én bij een meter met een teken, in allebei de
+# richtingen. Het vinkje `grid_signed_invert` stond al overal en ontbrak hier.
+
+
+def huis_uit(bronnen, rijen, apparaten=()):
+    """Het huisverbruik per uur, met een nagemaakt archief."""
+    inst = instellingen()
+    inst["sources"] = dict(inst["sources"], **bronnen)
+    inst["devices"] = [dict(LAADPAAL, entity=e) for e in apparaten] or []
+    _, _, coach = bouw(huis(), inst)
+
+    class NepArchief:
+        async def async_lees(self, ids, start, einde):
+            return {e: rijen.get(e, []) for e in ids}
+
+    coachmod.async_get_archive = lambda hass: NepArchief()
+    coach._huis_tot = None
+    asyncio.run(coach._async_huisverbruik(inst, dt.datetime(2026, 8, 30, 12, 0)))
+    return coach._huis_kwh
+
+
+# Eén kwartier om 12:00, in seconden sinds 1970. Het harnas rekent niet om naar
+# lokale tijd, dus het uur in de uitkomst is hier gewoon 12.
+STEMPEL = int(dt.datetime(2026, 8, 30, 12, 0, tzinfo=dt.timezone.utc).timestamp())
+
+
+def kwartier(watt):
+    return [{"start": STEMPEL, "gemiddeld": watt}]
+
+
+# Gesplitste meter: 2 kW zon, 1 kW inkoop, 0 teruglevering, 2,5 kW laadpaal.
+# Het huis gebruikt dan 2 + 1 - 0 - 2,5 = 0,5 kW.
+gesplitst = huis_uit(
+    {"grid_mode": "split", "grid_import": "sensor.in", "grid_export": "sensor.uit",
+     "grid_signed": "", "solar": "sensor.zon"},
+    {"sensor.zon": kwartier(2000), "sensor.in": kwartier(1000),
+     "sensor.uit": kwartier(0), "sensor.paal": kwartier(2500)},
+    apparaten=["sensor.paal"],
+)
+print(f"  gesplitste meter: {gesplitst}")
+controle("de gesplitste meter rekent goed",
+         abs(gesplitst.get(12, 0) - 0.5) < 0.01, f"{gesplitst}")
+
+# Meter met een teken, plus is inkoop: hetzelfde antwoord.
+getekend = huis_uit(
+    {"grid_mode": "signed", "grid_signed": "sensor.net", "grid_signed_invert": False,
+     "grid_import": "", "grid_export": "", "solar": "sensor.zon"},
+    {"sensor.zon": kwartier(2000), "sensor.net": kwartier(1000),
+     "sensor.paal": kwartier(2500)},
+    apparaten=["sensor.paal"],
+)
+print(f"  meter met een teken: {getekend}")
+controle("een meter met een teken geeft hetzelfde",
+         abs(getekend.get(12, 0) - 0.5) < 0.01, f"{getekend}")
+
+# En dezelfde meter die andersom telt: plus is dan teruglevering.
+omgekeerd = huis_uit(
+    {"grid_mode": "signed", "grid_signed": "sensor.net", "grid_signed_invert": True,
+     "grid_import": "", "grid_export": "", "solar": "sensor.zon"},
+    {"sensor.zon": kwartier(2000), "sensor.net": kwartier(-1000),
+     "sensor.paal": kwartier(2500)},
+    apparaten=["sensor.paal"],
+)
+print(f"  omgekeerde meter: {omgekeerd}")
+controle("en een meter die andersom telt ook",
+         abs(omgekeerd.get(12, 0) - 0.5) < 0.01, f"{omgekeerd}")
+
+# Zonder zonnepanelen, zonder apparaten: dan is het huis gewoon de inkoop.
+kaal = huis_uit(
+    {"grid_mode": "split", "grid_import": "sensor.in", "grid_export": "sensor.uit",
+     "grid_signed": "", "solar": ""},
+    {"sensor.in": kwartier(800), "sensor.uit": kwartier(0)},
+)
+print(f"  woning zonder zon: {kaal}")
+controle("zonder zonnepanelen is het huis de inkoop",
+         abs(kaal.get(12, 0) - 0.8) < 0.01, f"{kaal}")
+
+# En de mediaan, niet het gemiddelde. Svens keuze van 30-08-2026: één keer
+# wassen tilt een gemiddelde over een week heen op.
+controle("de mediaan van 1, 1, 1 en 9 is 1", coachmod._mediaan([1.0, 1.0, 1.0, 9.0]) == 1.0,
+         f"{coachmod._mediaan([1.0, 1.0, 1.0, 9.0])}")
+controle("en van 1, 2, 3 is 2", coachmod._mediaan([3.0, 1.0, 2.0]) == 2.0,
+         f"{coachmod._mediaan([3.0, 1.0, 2.0])}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
