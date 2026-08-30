@@ -574,14 +574,7 @@ class ChargerCoach:
             self._urgent_above = None
             return
 
-        # Dezelfde grens als waar de planner mee rekent, dus ook hier de
-        # laagste van de zekering en de lastbewaker. Zie `net_grens` daar: staat
-        # de bewaker lager, dan is de zekering een getal dat nooit gehaald wordt
-        # en zou de haast pas aanslaan als het allang te laat is.
         zekering = float(installation.get("fuse_amps") or 25)
-        bewaker = _number(self.hass, installation.get("balancer_entity"))
-        if bewaker and bewaker > 0:
-            zekering = min(zekering, bewaker)
         marge = (
             BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
         )
@@ -878,7 +871,9 @@ class ChargerCoach:
         # Iets dat alleen de bewoner zelf kan verhelpen, en dat losstaat van
         # het besluit van deze ronde. Het gaat dus naast de reden op de kaart
         # en niet erin.
-        tip = self._fasetip(settings, device, charger) or self._bewakertip(settings)
+        tip = self._fasetip(settings, device, charger) or self._bewakertip(
+            settings, device, charger
+        )
         self.state[device_id]["tip"] = tip
 
         may_act = level == LEVEL_STEER or (
@@ -1338,10 +1333,9 @@ class ChargerCoach:
                 if installation.get("load_balancer")
                 else FUSE_MARGIN_AMPS
             ),
-            # Waar de lastbewaker zelf op staat, als de klant die sensor heeft
-            # ingevuld. Zie `net_grens` in planner.py: staat hij lager dan de
-            # zekering, dan is híj de grens en heeft het geen zin er overheen te
-            # vragen.
+            # Wat de lastbewaker op dit moment vrijgeeft, als de klant die
+            # sensor heeft ingevuld. Zie `beschikbaar_van_bewaker` in planner.py:
+            # dat is een restwaarde en geen tweede zekering.
             balancer_amps=_number(self.hass, installation.get("balancer_entity")),
         )
 
@@ -2222,25 +2216,31 @@ class ChargerCoach:
             return 1
         return None
 
-    def _bewakertip(self, settings: dict[str, Any]) -> str:
-        """Zeggen dat de lastbewaker lager staat dan de hoofdzekering.
+    def _bewakertip(
+        self, settings: dict[str, Any], device: dict[str, Any], charger: Charger
+    ) -> str:
+        """Zeggen dat het de lastbewaker is die de snelheid bepaalt.
 
-        Dan is de zekering een getal dat nooit gehaald wordt en rekent de coach
-        met de bewaker. Dat is de goede uitkomst, maar het hoort wel op het
-        scherm te staan: bij Van den Dam stond de Equalizer op 20 A terwijl de
-        zekering 25 A is, en niemand wist dat. Vier ampère is bij zestien een
-        kwart van de laadsnelheid.
+        Niet zomaar zodra die sensor er is, want dan staat het er altijd. Alleen
+        als hij werkelijk de laagste van de plafonds is: de paal kan meer, de
+        auto wil meer, en er past onder de zekering ook meer, maar de bewaker
+        geeft niet meer vrij.
+
+        Dat is de vraag die iemand zich dan stelt. Bij Van den Dam stond in het
+        logboek van de nacht van 30-08-2026 uur na uur `limited_by_equalizer`
+        terwijl er nergens op het scherm iets over te vinden was.
         """
         installation = settings.get("installation") or {}
-        grens = _number(self.hass, installation.get("balancer_entity"))
-        zekering = float(installation.get("fuse_amps") or 25)
-        if grens is None or grens <= 0 or grens >= zekering:
+        vrij = _number(self.hass, installation.get("balancer_entity"))
+        if vrij is None or vrij <= 0:
+            return ""
+        if not charger.max_amps or vrij >= charger.max_amps:
             return ""
         return (
-            f"Je lastbewaker staat op {grens:.0f} A en je hoofdzekering op "
-            f"{zekering:.0f} A. De coach houdt {grens:.0f} A aan, want daarboven "
-            "knijpt de bewaker toch. Hoort dat hoger te staan, dan is dat een "
-            "instelling in de app van je lastbewaker."
+            f"Je lastbewaker geeft op dit moment {vrij:.0f} A vrij en je lader "
+            f"kan {charger.max_amps:.0f} A. Meer vraagt de coach dus niet: "
+            "daarboven knijpt de bewaker toch. Dat getal beweegt mee met wat de "
+            "rest van je huis gebruikt."
         )
 
     def _fasen_stabiel(self, device: dict[str, Any]) -> int | None:

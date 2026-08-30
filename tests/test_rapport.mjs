@@ -207,16 +207,16 @@ proef("een stroom van -0,017 A wordt 0,0 en niet -0,0", () => {
 
 // --- de grenssensor van de lastbewaker in het installatiescherm -------------
 //
-// Bij Van den Dam staat de Easee Equalizer op 20 A terwijl de hoofdzekering
-// 25 A is. De coach vroeg daardoor de hele nacht van 30-08-2026 twee ampere
-// meer dan de bewaker toestond en las uur na uur `limited_by_equalizer`. De
-// bewaker meldt zijn grens gewoon in een sensor, dus die is nu in te vullen.
+// De Easee Equalizer bij Van den Dam meldt in een sensor hoeveel hij op dit
+// moment vrijgeeft voor het laden. De coach vroeg daar de hele nacht van
+// 30-08-2026 overheen en las uur na uur `limited_by_equalizer`, dus die sensor
+// is nu in te vullen.
 
 await import("../custom_components/domotiapp_coach/frontend/src/views/installation.js");
 const Installatie = geregistreerd.get("dac-view-installation");
 assert.ok(Installatie, "het installatiescherm hoort zich te registreren");
 
-proef("het installatiescherm heeft een veld voor de grens van de lastbewaker", () => {
+proef("het installatiescherm heeft een veld voor wat de lastbewaker vrijgeeft", () => {
   const html = Object.create(Installatie.prototype).render();
   assert.ok(
     html.includes('<dac-entity-picker id="balancer-limit">'),

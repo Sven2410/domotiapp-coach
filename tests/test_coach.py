@@ -1860,42 +1860,51 @@ controle("vers en boven de drempel wordt het gewoon gemeten",
          coach35._measured_phases(LAADPAAL) == 3,
          f"{coach35._measured_phases(LAADPAAL)}")
 
-print("--- d. de lastbewaker is de echte grens, niet de zekering ---")
-# De Equalizer van Van den Dam staat op 20 A terwijl de zekering 25 A is. De
-# coach rekende 25 min 3 is 22 en vroeg dus de hele nacht twee ampere meer dan
-# de bewaker toestond: uur na uur `limited_by_equalizer` in het logboek.
+print("--- d. wat de lastbewaker vrijgeeft is een restwaarde ---")
+# `sensor.1_equalizer_limiet` bij Van den Dam meldt niet een instelling maar wat
+# er ná het huisverbruik overblijft voor de paal. Nagemeten op 29-08-2026: om
+# 16:50 stond hij op 18 A terwijl de paal 15 trok en het huis er zelf 5 bijhad,
+# om 17:20 met een leeg huis op 20. v0.44.0 las dat als een tweede zekering en
+# trok het huisverbruik er daarmee twee keer vanaf.
 inst36 = instellingen()
 inst36["installation"]["balancer_entity"] = "sensor.equalizer"
 huis36 = dict(huis(status="charging", stroom=12.0, vermogen=8200.0,
                    teruglevering=0.0, afname=1800.0),
-              **{"sensor.equalizer": "20", "sensor.l1": "1", "sensor.l2": "2",
+              **{"sensor.equalizer": "8", "sensor.l1": "1", "sensor.l2": "2",
                  "sensor.l3": "13"})
 hass36, _, coach36 = bouw(huis36, inst36)
 grid36, car36, charger36, _ = coach36._read(
     dt.datetime(2026, 8, 30, 4, 0), inst36, LAADPAAL
 )
 plafond36 = planner.ceiling_amps(grid36, car36, charger36)
-print(f"  bewaker 20 A, zekering 25 A: plafond {plafond36} A")
-controle("de laagste van de twee is de grens", planner.net_grens(grid36) == 20.0,
-         f"{planner.net_grens(grid36)}")
-controle("en de coach vraagt er niet meer overheen", plafond36 <= 20 - 3,
+print(f"  bewaker geeft 8 A vrij: plafond {plafond36} A")
+controle("de coach vraagt niet meer dan de bewaker vrijgeeft", plafond36 == 8,
          f"{plafond36}")
+controle("en het huisverbruik gaat er niet nog eens vanaf",
+         plafond36 >= planner.MIN_AMPS, f"{plafond36}")
 
 # Zonder die sensor blijft alles zoals het was.
 inst36b = instellingen()
 hass36b, _, coach36b = bouw(huis36, inst36b)
-grid36b, _, _, _ = coach36b._read(dt.datetime(2026, 8, 30, 4, 0), inst36b, LAADPAAL)
-controle("zonder grenssensor telt de zekering", planner.net_grens(grid36b) == 25.0,
-         f"{planner.net_grens(grid36b)}")
+grid36b, car36b, charger36b, _ = coach36b._read(
+    dt.datetime(2026, 8, 30, 4, 0), inst36b, LAADPAAL
+)
+controle("zonder die sensor verandert er niets",
+         grid36b.balancer_amps is None, f"{grid36b.balancer_amps}")
 
-# En het staat op de kaart, want vier ampere van de zestien is een kwart van de
-# laadsnelheid en niemand wist ervan.
-tip36 = coach36._bewakertip(inst36)
+# En het staat op de kaart, maar alleen als de bewaker werkelijk de laagste van
+# de plafonds is. Anders staat er altijd iets en leest niemand het meer.
+tip36 = coach36._bewakertip(inst36, LAADPAAL, charger36)
 print(f"  tip: {tip36}")
-controle("de coach zegt dat de bewaker lager staat",
-         "20 A" in tip36 and "25 A" in tip36, f"{tip36}")
-controle("en zwijgt als hij niet lager staat", not coach36b._bewakertip(inst36b),
-         f"{coach36b._bewakertip(inst36b)}")
+controle("de coach zegt dat de bewaker de snelheid bepaalt",
+         "8 A" in tip36 and "14 A" in tip36, f"{tip36}")
+
+huis36c = dict(huis36, **{"sensor.equalizer": "32"})
+hass36c, _, coach36c = bouw(huis36c, inst36)
+_, _, charger36c, _ = coach36c._read(dt.datetime(2026, 8, 30, 4, 0), inst36, LAADPAAL)
+controle("en zwijgt als de bewaker meer vrijgeeft dan de lader kan",
+         not coach36c._bewakertip(inst36, LAADPAAL, charger36c),
+         f"{coach36c._bewakertip(inst36, LAADPAAL, charger36c)}")
 
 print("--- e. de minuten in het verslag horen bij een andere periode dan de kWh ---")
 # "er ging 6,9 kWh in sinds 03:00. Er ging 381 minuten naar wachten op een

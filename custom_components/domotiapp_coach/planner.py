@@ -179,8 +179,8 @@ class Grid:
     # toegerekend en denkt de coach dat de aansluiting vol zit. Zie
     # `meter_loopt_achter`.
     recent_charger_amps: float = 0.0
-    # Waar de lastbewaker van de installatie zelf op staat, als hij dat meldt.
-    # Zie `net_grens`.
+    # Hoeveel de lastbewaker van de installatie op dit moment vrijgeeft voor
+    # het laden, als hij dat meldt. Zie `beschikbaar_van_bewaker`.
     balancer_amps: float | None = None
 
 
@@ -417,11 +417,17 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
     limits = [charger.max_amps]
     if car.max_amps:
         limits.append(car.max_amps)
+    # En wat de lastbewaker vrijgeeft, als hij dat meldt. Dat is een eigen
+    # plafond en geen tweede zekering: het huisverbruik zit er al af. Zie
+    # `beschikbaar_van_bewaker`.
+    bewaker = beschikbaar_van_bewaker(grid)
+    if bewaker is not None:
+        limits.append(bewaker)
 
     if grid.phase_amps:
         household = max(grid.phase_amps) - charger_share(grid, charger)
         ruimte = (
-            net_grens(grid) - max(0.0, household) - fuse_margin(grid) - grid.reserved_amps
+            grid.fuse_amps - max(0.0, household) - fuse_margin(grid) - grid.reserved_amps
         )
         if meter_loopt_achter(grid, charger):
             # De veiligheidsrail. Zolang de meter achterloopt is een deel van
@@ -460,7 +466,7 @@ def nood_ruimte(grid: Grid, charger: Charger) -> float:
     if not grid.phase_amps:
         return float("inf")
     household = max(0.0, max(grid.phase_amps) - charger_share(grid, charger))
-    return net_grens(grid) - household - grid.reserved_amps
+    return grid.fuse_amps - household - grid.reserved_amps
 
 
 def fuse_limited(grid: Grid, car: Car, charger: Charger) -> bool:
@@ -474,40 +480,52 @@ def fuse_limited(grid: Grid, car: Car, charger: Charger) -> bool:
     if not grid.phase_amps:
         return False
     household = max(0.0, max(grid.phase_amps) - charger_share(grid, charger))
-    room = net_grens(grid) - household - fuse_margin(grid) - grid.reserved_amps
+    room = grid.fuse_amps - household - fuse_margin(grid) - grid.reserved_amps
     hardware = [charger.max_amps] + ([car.max_amps] if car.max_amps else [])
     return room < min(hardware)
 
 
-def net_grens(grid: Grid) -> float:
-    """Het aantal ampère per fase waar deze aansluiting werkelijk op afknijpt.
+def beschikbaar_van_bewaker(grid: Grid) -> float | None:
+    """Wat de lastbewaker op dit moment vrijgeeft voor het laden.
 
-    Meestal de hoofdzekering. Maar zit er een lastbewaker op die zelf een lagere
-    grens hanteert, dan is híj de eerste die knijpt en is de zekering een getal
-    dat nooit gehaald wordt. De laagste van de twee is dus de echte grens.
+    **Dit is geen grens van de aansluiting maar een restwaarde**, en dat verschil
+    is precies waar v0.44.0 de fout in ging. Daar werd dit getal als een tweede
+    zekering behandeld, en dan gaat het huisverbruik er twee keer vanaf.
 
-    Bij Van den Dam stond de Equalizer op 20 A terwijl de zekering 25 A is. De
-    coach rekende 25 min 3 marge = 22 en vroeg dus de hele nacht twee ampère
-    meer dan de bewaker toestond. In het logboek van 30-08-2026 staat daarom uur
-    na uur `limited_by_equalizer`: precies het omgekeerde van wat
-    `BALANCER_MARGIN_AMPS` bedoelt, want de coach hoort als eerste opzij te
-    gaan en deed het als laatste.
+    Nagemeten bij Van den Dam op 30-08-2026, met `sensor.1_equalizer_limiet`:
 
-    Meldt de bewaker niets, dan blijft het zoals het was.
+    | moment | bewaker meldt | paal trok | huis zelf |
+    |---|---|---|---|
+    | 29-08 16:50 | 18 A | 15,0 A | ongeveer 5 A |
+    | 29-08 17:20 | 20 A | 3,7 A | ongeveer 0 A |
+    | 30-08 11:15 | 17 A | 0 A | ongeveer 5 A |
+
+    Twee dingen staan daarmee vast. Het getal beweegt mee met wat het huis
+    trekt, dus het huisverbruik zit er al af. En de paal zelf telt er niet in
+    mee: om 16:50 trok hij vijftien ampère terwijl er achttien beschikbaar
+    stond. Dat tweede is het belangrijkst, want het betekent dat er geen
+    kringetje ontstaat waarin de coach zijn eigen laden voor huisverbruik
+    aanziet en zichzelf naar beneden praat. Dezelfde valkuil als bij het
+    overschot; zie `_read` in coach.py.
+
+    Er gaat geen marge af. De bewaker rekent zelf al over de zekering en past
+    zijn getal live aan, dus vragen wat hij vrijgeeft is per definitie niet meer
+    dan hij toestaat. De marge in `fuse_margin` gaat over het huis dat zo meteen
+    iets bijschakelt, en die staat er nog gewoon naast.
     """
     if grid.balancer_amps is None or grid.balancer_amps <= 0:
-        return grid.fuse_amps
-    return min(grid.fuse_amps, grid.balancer_amps)
+        return None
+    return grid.balancer_amps
 
 
 def fuse_margin(grid: Grid) -> float:
-    """Hoeveel ruimte er onder de grens van de aansluiting vrij blijft.
+    """Hoeveel ruimte er onder de zekering vrij blijft.
 
-    Een vast aantal ampère of een aandeel van die grens, en het grootste van de
-    twee wint. Zie `FUSE_MARGIN_SHARE` voor waarom een vast getal alleen niet
+    Een vast aantal ampère of een aandeel van de zekering, en het grootste van
+    de twee wint. Zie `FUSE_MARGIN_SHARE` voor waarom een vast getal alleen niet
     volstaat.
     """
-    return max(grid.margin_amps, net_grens(grid) * FUSE_MARGIN_SHARE)
+    return max(grid.margin_amps, grid.fuse_amps * FUSE_MARGIN_SHARE)
 
 
 # The words the Easee reports when something other than the coach is holding the
@@ -1143,7 +1161,15 @@ def _decide(
     if ceiling < MIN_AMPS:
         # Een auto die al laadt gaat niet uit voor de marge alleen. Zie
         # `nood_ruimte` voor waarom dat onderscheid er is.
-        if charger.charging and nood_ruimte(grid, charger) >= MIN_AMPS:
+        # En alleen als het de marge onder de zekering is die knijpt. Zegt de
+        # lastbewaker zelf dat er niets meer in kan, of kan de paal of de auto
+        # niet lager, dan valt er niets aan te houden.
+        bewaker = beschikbaar_van_bewaker(grid)
+        if (
+            charger.charging
+            and nood_ruimte(grid, charger) >= MIN_AMPS
+            and (bewaker is None or bewaker >= MIN_AMPS)
+        ):
             return Decision(
                 True,
                 MIN_AMPS,

@@ -95,12 +95,14 @@ class DacViewInstallation extends DacEditorElement {
             </label>
 
             <div class="row" id="balancer-row">
-              <label>Grenssensor van je lastbewaker</label>
+              <label>Sensor: wat je lastbewaker vrijgeeft</label>
               <dac-entity-picker id="balancer-limit"></dac-entity-picker>
               <span class="sub">
-                Optioneel, en alleen als je bewaker zijn eigen grens meldt. Een Easee Equalizer
-                doet dat. Staat die grens lager dan je hoofdzekering, dan is hij de echte grens:
-                de coach vraagt er dan niet meer overheen en hoeft de bewaker nooit in te grijpen.
+                Optioneel, en alleen als je bewaker meldt hoeveel hij op dit moment vrijgeeft
+                voor het laden. Bij een Easee Equalizer heet die sensor "Equalizer limiet".
+                Dat getal beweegt mee met wat de rest van je huis gebruikt: het is wat er
+                overblijft, niet je hoofdzekering. Vul je hem in, dan vraagt de coach er nooit
+                meer overheen en hoeft je bewaker niet in te grijpen.
               </span>
             </div>
           </div>

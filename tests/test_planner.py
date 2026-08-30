@@ -898,37 +898,58 @@ print(f"  paal die stilstaat: {stil.rule}: {stil.amps} A")
 controle("een paal die stilstaat begint er niet aan", not stil.charge,
          f"{stil.rule} {stil.amps}")
 
-print("=== 35. de lastbewaker is de echte grens, niet de zekering ===")
-# De Equalizer van Van den Dam staat op 20 A terwijl de zekering 25 A is. De
-# coach deed 25 min 3 marge is 22 en vroeg dus de hele nacht twee ampere meer
-# dan de bewaker toestond. In het logboek van 30-08-2026 staat daarom uur na uur
-# `limited_by_equalizer`: precies het omgekeerde van wat de bredere marge bij een
-# lastbewaker bedoelt, want de coach hoort als eerste opzij te gaan.
+print("=== 35. wat de lastbewaker vrijgeeft is een restwaarde, geen tweede zekering ===")
+# Nagemeten bij Van den Dam met `sensor.1_equalizer_limiet`. Op 29-08-2026 om
+# 16:50 meldde die 18 A terwijl de paal 15 A trok en het huis er zelf ongeveer 5
+# bijhad; om 17:20 met een leeg huis stond hij op 20. Het getal beweegt dus mee
+# met het huis, en de paal zelf telt er niet in mee.
+#
+# v0.44.0 behandelde dit als een tweede zekering en trok het huisverbruik er
+# daarmee twee keer vanaf. Het is een eigen plafond naast de som over de fasen.
 RUSTIG = Grid(surplus_w=0.0, phase_amps=[1.0, 2.0, 10.0], fuse_amps=25.0,
               charger_amps=0.0, margin_amps=3.0)
 MET_BEWAKER = Grid(surplus_w=0.0, phase_amps=[1.0, 2.0, 10.0], fuse_amps=25.0,
-                   charger_amps=0.0, margin_amps=3.0, balancer_amps=20.0)
+                   charger_amps=0.0, margin_amps=3.0, balancer_amps=8.0)
+STAAT_STIL = Charger(max_amps=16.0, connected=True, charging=False,
+                     actual_amps=0.05, limit_amps=0.0)
 zonder = planner.ceiling_amps(RUSTIG, LEEG, STAAT_STIL)
 met = planner.ceiling_amps(MET_BEWAKER, LEEG, STAAT_STIL)
-print(f"  huis 10 A op de zwaarste fase: zonder bewaker {zonder} A, met {met} A")
-controle("zonder bewakersensor blijft de zekering de grens",
-         planner.net_grens(RUSTIG) == 25.0, f"{planner.net_grens(RUSTIG)}")
-controle("met een bewaker die lager staat, wint hij",
-         planner.net_grens(MET_BEWAKER) == 20.0, f"{planner.net_grens(MET_BEWAKER)}")
-controle("en dat scheelt precies die vijf ampere", zonder - met == 5, f"{zonder} en {met}")
+print(f"  huis 10 A op de zwaarste fase: zonder bewaker {zonder} A, met een die 8 vrijgeeft {met} A")
+controle("zonder bewakersensor verandert er niets", zonder == 12, f"{zonder}")
+controle("wat de bewaker vrijgeeft is het plafond", met == 8, f"{met}")
 
-# Een bewaker die hoger staat dan de zekering verandert niets: de zekering smelt
-# dan als eerste.
+# En het huisverbruik gaat er niet nog eens vanaf. Dat was de fout: 8 min 10 min
+# marge is niets, en dan had de coach hier helemaal niet meer geladen.
+controle("het huisverbruik wordt niet twee keer afgetrokken", met >= planner.MIN_AMPS,
+         f"{met}")
+
+# Geeft de bewaker meer vrij dan er onder de zekering past, dan blijft de eigen
+# som van de coach leidend. De laagste van alle plafonds wint, zoals altijd.
 RUIM = Grid(surplus_w=0.0, phase_amps=[1.0, 2.0, 10.0], fuse_amps=25.0,
             charger_amps=0.0, margin_amps=3.0, balancer_amps=40.0)
-controle("een bewaker die ruimer staat dan de zekering telt niet",
-         planner.net_grens(RUIM) == 25.0, f"{planner.net_grens(RUIM)}")
+controle("een bewaker die ruim vrijgeeft verandert niets",
+         planner.ceiling_amps(RUIM, LEEG, STAAT_STIL) == 12,
+         f"{planner.ceiling_amps(RUIM, LEEG, STAAT_STIL)}")
 
-# En de marge als aandeel hangt mee aan de echte grens en niet aan de zekering.
+# En de marge onder de zekering hangt aan de zekering en niet aan de bewaker:
+# die twee gaan over verschillende dingen.
 GROOT = Grid(surplus_w=0.0, phase_amps=[10.0], fuse_amps=80.0, charger_amps=0.0,
-             margin_amps=3.0, balancer_amps=50.0)
-controle("de marge als aandeel rekent over de echte grens",
-         abs(planner.fuse_margin(GROOT) - 4.0) < 1e-9, f"{planner.fuse_margin(GROOT)}")
+             margin_amps=3.0, balancer_amps=10.0)
+controle("de marge blijft over de zekering rekenen",
+         abs(planner.fuse_margin(GROOT) - 6.4) < 1e-9, f"{planner.fuse_margin(GROOT)}")
+
+# Zegt de bewaker dat er niets meer in kan, dan valt er ook niets aan te houden:
+# dan is `tight` niet aan de orde en gaat de paal gewoon uit.
+DICHT = Grid(surplus_w=0.0, phase_amps=[3.0, 3.0, 30.0], fuse_amps=25.0,
+             charger_amps=12.0, margin_amps=3.0, balancer_amps=2.0)
+LAADT_NOG = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=12.0,
+                    started_at=middag(3, 0), limit_amps=12.0)
+nu35 = middag(4, 28)
+dicht = decide(nu35, [], DICHT, LEEG, LAADT_NOG, venster(nu35), tariff=VAST, sun=ZON_KRAP)
+print(f"  bewaker geeft 2 A vrij: {dicht.rule}: {dicht.amps} A")
+controle("een bewaker die niets vrijgeeft houdt hem niet op de laagste stand",
+         not dicht.charge, f"{dicht.rule} {dicht.amps}")
+
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
