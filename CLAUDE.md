@@ -22,6 +22,13 @@ commit, tag en breng uit.
   Weet de coach iets niet, dan zegt hij dat in plaats van iets aan te nemen.
 - **Lees zijn klacht letterlijk.** Hij beschrijft wat hij zag, niet wat er
   technisch misging. Vraag je af wat hij verwáchtte te zien.
+- **Koppel alles terug in de chat**, niet alleen de conclusie. De gemeten regels,
+  de tijdstippen en de getallen erbij, ook als ze mijn eigen conclusie
+  tegenspreken. Draait er een monitor, laat dan zien wat erin staat. Hij
+  beoordeelt en beslist, en dat kan alleen met de meting eronder. Gevraagd op
+  30-08-2026, nadat ik een monitor aanzette, er zelf uit las en hem alleen de
+  uitkomst gaf; diezelfde dag citeerde ik ook een regel van tien minuten oud als
+  de stand van nu, en met de hele reeks erbij had hij dat meteen gezien.
 - Niets bouwen zonder zijn seintje. Wat er op de lijst staat betekent niet dat
   het aan mag.
 
