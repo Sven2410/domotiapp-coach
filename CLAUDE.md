@@ -48,7 +48,7 @@ wordt. Zet daar niets in dat `hass` nodig heeft.
 python tests/test_planner.py     # 152 controles op het denkwerk
 python tests/test_coach.py       # 189 op de bedrading, met een nagebouwde HA
 python tests/test_archive.py     # 37 op de kwartieropslag
-node   tests/test_rapport.mjs    # 14 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 17 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

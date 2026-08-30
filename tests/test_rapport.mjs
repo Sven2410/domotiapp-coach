@@ -369,6 +369,90 @@ proef("een onbekende accustand geeft een streepje en geen nul", () => {
   assert.ok(!tekst.includes("0,0 kWh"), "en zeker geen verzonnen nul");
 });
 
+// --- de knoppenrij op de laadpaalkaart --------------------------------------
+//
+// Op 30-08-2026 kreeg de nieuwe knop "Wat gaat hij doen" de klasse `plan-link`,
+// en die stijlen staan onder `.plan-pick`. Buiten dat blok kreeg de knop dus
+// helemaal geen vorm: het pictogram werd op ware grootte getekend, de rij groeide
+// mee, en Snelladen en Pauzeren werden reusachtige cirkels omdat hun
+// pillevorm de hoogte van de rij overnam. Sven: "waarom is dit ineens zo groot?"
+//
+// Elke knop in die rij hoort dus een klasse te hebben die de stijlen ook echt
+// vormgeven, en een die verborgen kan worden hoort een eigen `[hidden]`-regel
+// te hebben. Dat laatste is dezelfde regel als in CLAUDE.md.
+
+await import("../custom_components/domotiapp_coach/frontend/src/views/overview.js");
+const Overzicht = geregistreerd.get("dac-view-overview");
+assert.ok(Overzicht, "het overzicht hoort zich te registreren");
+
+/** De kaarten van de stuurbare apparaten, als platte html. */
+function steerHtml() {
+  const knopen = new Map();
+  const maak = () => ({ hidden: false, innerHTML: "", close() {}, style: {} });
+  for (const id of ["#steerable", "#steer-tabs", "#steer-grid", "#manual"]) {
+    knopen.set(id, maak());
+  }
+  const el = Object.create(Overzicht.prototype);
+  el.$ = (kiezer) => knopen.get(kiezer) ?? maak();
+  el.$$ = () => [];
+  el.labels_ = new Map([["dev-1", "Laadpaal"]]);
+  el.buildSteerable_([
+    { id: "dev-1", type: "laadpaal", name: "Laadpaal", controllable: true, cars: [] },
+  ]);
+  return knopen.get("#steer-grid").innerHTML;
+}
+
+/** De stijlen van het overzicht, zoals de browser ze krijgt. */
+const stijlen = Overzicht.css;
+
+proef("elke knop in de actierij heeft een klasse die vorm geeft", () => {
+  const html = steerHtml();
+  const rij = html.slice(html.indexOf('class="steer-actions"'));
+  const einde = rij.indexOf('class="steer-hint"');
+  const blok = einde > 0 ? rij.slice(0, einde) : rij;
+
+  // Alleen de knoppen die rechtstreeks in de rij staan. Wat in een eigen blok
+  // zit, zoals `.plan-pick`, heeft zijn eigen stijlen.
+  const knoppen = [...blok.matchAll(/<button[^>]*>/g)].map((m) => m[0]);
+  assert.ok(knoppen.length >= 4, `verwacht een handvol knoppen, kreeg ${knoppen.length}`);
+
+  const gevormd = ["release", "manual", "boost", "plan-toggle", "plan-link", "soc-save",
+                   "says-yes"];
+  for (const knop of knoppen) {
+    const klasse = /class="([^"]*)"/.exec(knop)?.[1] ?? "";
+    assert.ok(
+      klasse.split(/\s+/).some((naam) => gevormd.includes(naam)),
+      `knop zonder vormgevende klasse: ${knop}`
+    );
+  }
+});
+
+proef("een knop die verborgen kan worden heeft een eigen hidden-regel", () => {
+  const html = steerHtml();
+  const knoppen = [...html.matchAll(/<button[^>]*\shidden[^>]*>/g)].map((m) => m[0]);
+  assert.ok(knoppen.length >= 2, "er horen verborgen knoppen te zijn");
+
+  for (const knop of knoppen) {
+    const klasse = (/class="([^"]*)"/.exec(knop)?.[1] ?? "").split(/\s+/)[0];
+    if (!klasse) continue;
+    // Het attribuut `hidden` is een regel van de browser zelf en verliest van
+    // elke `display` in de eigen stijlen. Zie CLAUDE.md.
+    assert.match(
+      stijlen,
+      new RegExp(String.raw`(?:button)?\.${klasse}\[hidden\]`),
+      `.${klasse} krijgt een display maar heeft geen [hidden]-regel`
+    );
+  }
+});
+
+proef("de tijdlijnknop staat in de rij en is verborgen tot er een plan is", () => {
+  const html = steerHtml();
+  assert.match(html, /data-ahead="0"/, "de knop hoort er te staan");
+  const knop = /<button[^>]*data-ahead="0"[^>]*>/.exec(html)[0];
+  assert.match(knop, /class="boost"/, "met dezelfde vorm als de andere actieknoppen");
+  assert.match(knop, /\shidden/, "en verborgen tot de coach een tijdlijn heeft");
+});
+
 // --- draaien ----------------------------------------------------------------
 
 let goed = 0;
