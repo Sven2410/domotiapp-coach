@@ -675,7 +675,10 @@ print("=== 32. een klaar-tijd overdag krijgt een uur speling ===")
 #
 # Het is bewust geen nieuw begrip: de vraag "hoort er een avond bij" is
 # dezelfde die `_evening_before` al beantwoordde.
-for uur, verwacht in ((6, 0.25), (8, 0.25), (12, 1.0), (19, 1.0), (21, 0.25), (23, 0.25)):
+# Het half uur is Svens eigen getal, gegeven op 30-08-2026: "stel je 7 uur in,
+# dan moet hij eigenlijk uiterlijk om 6.30 klaar zijn." Het stond op een
+# kwartier, en dat was van mij.
+for uur, verwacht in ((6, 0.5), (8, 0.5), (12, 1.0), (19, 1.0), (21, 0.5), (23, 0.5)):
     eind_ = dt.datetime(2026, 8, 20, uur, 0)
     gekregen = planner._slack_hours(eind_)
     controle(f"klaar om {uur:02d}:00 krijgt {verwacht} uur speling",
@@ -685,13 +688,19 @@ for uur, verwacht in ((6, 0.25), (8, 0.25), (12, 1.0), (19, 1.0), (21, 0.25), (2
 controle("overdag begint hij een uur voor het krap wordt",
          planner._latest_start(dt.datetime(2026, 8, 20, 19, 0), 2.0)
          == dt.datetime(2026, 8, 20, 16, 0))
-controle("'s nachts blijft het een kwartier",
+controle("'s nachts is het een half uur",
          planner._latest_start(dt.datetime(2026, 8, 21, 6, 0), 2.0)
-         == dt.datetime(2026, 8, 21, 3, 45))
+         == dt.datetime(2026, 8, 21, 3, 30))
 
-# Zonder klaar-tijd valt er niets te rekenen, en dan hoort het kwartier te
+# Svens eigen voorbeeld van 30-08-2026: klaar om 07:00 hoort uiterlijk 06:30 te
+# betekenen. Met een auto die er nog niets in hoeft is dat precies de speling.
+controle("klaar om 07:00 betekent uiterlijk 06:30 vol",
+         planner._latest_start(dt.datetime(2026, 8, 21, 7, 0), 0.0)
+         == dt.datetime(2026, 8, 21, 6, 30))
+
+# Zonder klaar-tijd valt er niets te rekenen, en dan hoort de gewone speling te
 # blijven staan in plaats van dat er een uur uit de lucht komt vallen.
-controle("zonder klaar-tijd blijft het kwartier",
+controle("zonder klaar-tijd blijft de gewone speling",
          planner._slack_hours(None) == planner.DEADLINE_SLACK_HOURS)
 
 # Het vangnet voor het geval Home Assistant niet meer terugkomt hoorde volgens
@@ -950,6 +959,116 @@ print(f"  bewaker geeft 2 A vrij: {dicht.rule}: {dicht.amps} A")
 controle("een bewaker die niets vrijgeeft houdt hem niet op de laagste stand",
          not dicht.charge, f"{dicht.rule} {dicht.amps}")
 
+
+print("=== 36. de tijdlijn tot de auto vol moet zijn ===")
+# Sven op 30-08-2026: "ik wil zien wat de coach van plan is met hele tijdlijn tot
+# dat hij vol moet zijn." De opzet hieronder is zijn eigen nacht van 29 op 30
+# augustus: een bus van 65 kWh op 48,5%, driefasig, klaar om 07:00, met de
+# echte prijzen van die nacht.
+NACHT = [
+    (20, 0.3563), (21, 0.3350), (22, 0.3106), (23, 0.2811),
+    (0, 0.2599), (1, 0.2451), (2, 0.2333), (3, 0.2215),
+    (4, 0.2113), (5, 0.2154), (6, 0.2155),
+]
+prijzen36 = []
+for uur, prijs in NACHT:
+    dag = 29 if uur >= 20 else 30
+    start = dt.datetime(2026, 8, dag, uur, 0)
+    prijzen36.append({"start": start, "end": start + dt.timedelta(hours=1), "price": prijs})
+
+BUS = Car(capacity_kwh=65.0, phases=3, soc_percent=48.5)
+PAAL36 = Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.05,
+                 limit_amps=0.0)
+VENSTER36 = Window(enabled=True, opens=None, deadline=dt.datetime(2026, 8, 30, 7, 0))
+nu36 = dt.datetime(2026, 8, 29, 20, 30)
+
+plan36 = planner.timeline(nu36, prijzen36, BUS, PAAL36, VENSTER36, 16)
+print(f"  nog {plan36.kwh_needed:.1f} kWh, {plan36.hours_needed:.2f} uur op "
+      f"{plan36.amps} A, uiterlijk beginnen {plan36.latest_start:%H:%M}, "
+      f"vol rond {plan36.expected_done:%H:%M}")
+for blok in plan36.blocks:
+    print(f"    {blok.start:%H:%M}  {blok.price:.4f}  "
+          f"{'laden ' if blok.charging else '      '} {blok.why}")
+
+controle("hij weet hoeveel er nog in moet", abs(plan36.kwh_needed - 37.2) < 0.5,
+         f"{plan36.kwh_needed}")
+controle("en hoe lang dat duurt", abs(plan36.hours_needed - 3.37) < 0.05,
+         f"{plan36.hours_needed}")
+
+# Vier uur nodig, dus de vier goedkoopste vóór 07:00: 03, 04, 05 en 06.
+laadt = [blok.start.hour for blok in plan36.blocks if blok.charging]
+print(f"  laadt in de uren: {laadt}")
+controle("hij pakt de vier goedkoopste uren voor de klaar-tijd",
+         laadt == [3, 4, 5, 6], f"{laadt}")
+controle("en slaat de dure avond over",
+         not any(blok.charging for blok in plan36.blocks if blok.start.hour >= 20),
+         f"{[b.start.hour for b in plan36.blocks if b.charging]}")
+
+# De speling van een half uur zit erin: 07:00 min 3,37 uur laden min 0,5 uur.
+# 07:00 min 3,37 uur laden min een half uur speling is 03:07.
+controle("uiterlijk beginnen heeft de speling er al af",
+         abs((plan36.latest_start - dt.datetime(2026, 8, 30, 3, 7)).total_seconds()) < 60,
+         f"{plan36.latest_start}")
+controle("en hij verwacht vol te zijn voor de klaar-tijd",
+         plan36.expected_done <= plan36.deadline, f"{plan36.expected_done}")
+
+# De tijdlijn moet hetzelfde zeggen als het besluit van dat moment, anders gaat
+# de bewoner op het verkeerde wachten. Om 20:30 wacht de coach, om 03:30 laadt
+# hij, en de tijdlijn hoort dat allebei te weten.
+besluit36 = decide(nu36, prijzen36, NET_LEEG, BUS, PAAL36, VENSTER36,
+                   tariff=VAST, sun=ZON_KRAP)
+nu36b = dt.datetime(2026, 8, 30, 3, 30)
+besluit36b = decide(nu36b, prijzen36, NET_LEEG, BUS, PAAL36, VENSTER36,
+                    tariff=VAST, sun=ZON_KRAP)
+plan36b = planner.timeline(nu36b, prijzen36, BUS, PAAL36, VENSTER36, 16)
+nu_blok = [blok for blok in plan36b.blocks if blok.start.hour == 3]
+nu_blok20 = [blok for blok in plan36.blocks if blok.start.hour == 20]
+print(f"  om 20:30: {besluit36.rule} laden={besluit36.charge};  "
+      f"om 03:30: {besluit36b.rule} laden={besluit36b.charge}")
+# Waar het om gaat is niet welke regel het wordt maar of de tijdlijn en het
+# besluit het eens zijn over laden of niet. Om 03:30 is de coach al voorbij zijn
+# uiterste startmoment, dus dan wint de klaar-tijdregel van de prijsregel; de
+# tijdlijn hoort daar hetzelfde te zeggen.
+controle("om 20:30 zegt de tijdlijn hetzelfde als het besluit",
+         nu_blok20 and nu_blok20[0].charging == besluit36.charge,
+         f"{besluit36.rule} / {nu_blok20}")
+controle("en om 03:30 ook",
+         nu_blok and nu_blok[0].charging == besluit36b.charge,
+         f"{besluit36b.rule} / {nu_blok}")
+
+# Een uur dat al voorbij is hoort er niet meer in te staan.
+controle("voorbije uren staan er niet meer in",
+         all(blok.end > nu36b for blok in plan36b.blocks),
+         f"{[b.start.hour for b in plan36b.blocks]}")
+
+# Een begintijd knipt de uren ervoor eruit, en dat hoort er te staan in plaats
+# van dat ze zomaar ontbreken.
+VENSTER36C = Window(enabled=True, opens=dt.datetime(2026, 8, 30, 1, 0),
+                    deadline=dt.datetime(2026, 8, 30, 7, 0))
+plan36c = planner.timeline(nu36, prijzen36, BUS, PAAL36, VENSTER36C, 16)
+vroeg = [blok for blok in plan36c.blocks if blok.start.hour in (21, 22, 23, 0)]
+print(f"  met een begintijd van 01:00: {vroeg[0].why if vroeg else 'geen'}")
+controle("uren voor de begintijd staan erin met hun reden",
+         vroeg and all(b.why == "voor je begintijd" and not b.charging for b in vroeg),
+         f"{[(b.start.hour, b.why) for b in vroeg]}")
+
+# Zonder accustand valt er niets te rekenen, en dan zegt hij dat in plaats van
+# een tijdlijn te verzinnen.
+GEEN_SOC = Car(capacity_kwh=65.0, phases=3, soc_percent=None)
+plan36d = planner.timeline(nu36, prijzen36, GEEN_SOC, PAAL36, VENSTER36, 16)
+print(f"  zonder accustand: {plan36d.note}")
+controle("zonder accustand zegt hij waarom de lijst zo lang is",
+         "accustand" in plan36d.note, f"{plan36d.note}")
+
+# En bij een vast contract bestaan er geen goedkope uren om te tonen.
+plan36e = planner.timeline(nu36, [], BUS, PAAL36, VENSTER36, 16)
+print(f"  vast tarief: {plan36e.note}")
+controle("bij een vast tarief staat er geen prijzenlijst", not plan36e.blocks,
+         f"{plan36e.blocks}")
+controle("maar wel waarom niet", "vast tarief" in plan36e.note, f"{plan36e.note}")
+controle("en de sommen staan er nog steeds",
+         plan36e.hours_needed is not None and plan36e.latest_start is not None,
+         f"{plan36e}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

@@ -199,6 +199,10 @@ class Car:
     soc_percent: float | None = None
     # A guest charges straight away and until the cable comes out.
     guest: bool = False
+    # Hoe de bewoner deze auto genoemd heeft. Alleen om erover te praten, nooit
+    # om mee te rekenen. Zonder dit was een naam die je invulde nergens meer te
+    # zien: de kaart toont de laadpaal en de meldingen zeiden "de auto".
+    name: str = ""
 
 
 @dataclass
@@ -796,6 +800,134 @@ def cheapest_hours(
     return sorted(chosen, key=lambda row: row["start"])
 
 
+
+# --- de tijdlijn ------------------------------------------------------------
+
+
+@dataclass
+class Blok:
+    """Eén blok in de tijdlijn, meestal een uur lang."""
+
+    start: datetime
+    end: datetime
+    # De all-in prijs van dat blok, of None bij een vast contract.
+    price: float | None = None
+    # Of de coach van plan is er in te laden.
+    charging: bool = False
+    # In één woord waarom, voor de kolom ernaast.
+    why: str = ""
+
+
+@dataclass
+class Plan:
+    """Wat de coach van plan is tot de auto vol moet zijn.
+
+    Alles hieronder komt uit dezelfde sommen als het besluit van deze minuut.
+    Dat is de eis: een tijdlijn die iets anders zegt dan wat de coach doet is
+    erger dan geen tijdlijn, want dan gaat de bewoner op het verkeerde wachten.
+    Vandaar dat `blocks` uit `cheapest_hours` komt, met precies dezelfde grenzen
+    als in `decide`.
+    """
+
+    # Wanneer de auto vol moet zijn, en het moment waarop de coach dan uiterlijk
+    # begint. Dat laatste heeft de speling er al af; zie `DEADLINE_SLACK_HOURS`.
+    deadline: datetime | None = None
+    latest_start: datetime | None = None
+    # Wat er nog in moet en hoe lang dat duurt op de stroom die er nu past.
+    kwh_needed: float | None = None
+    hours_needed: float | None = None
+    amps: int = 0
+    # Het einde van het laatste blok waarin hij van plan is te laden.
+    expected_done: datetime | None = None
+    blocks: list[Blok] = field(default_factory=list)
+    # Waarom er geen blokken zijn, als die er niet zijn.
+    note: str = ""
+
+
+# Hoe ver een tijdlijn vooruit kijkt als er geen klaar-tijd is. Dan is er geen
+# einde om naartoe te rekenen en zijn de blokken alleen nog "wat kost het per
+# uur"; een etmaal is dan wat er aan prijzen bekend is en niet meer.
+PLAN_HORIZON = timedelta(hours=24)
+
+
+def timeline(
+    now: datetime,
+    prices: list[dict],
+    car: Car,
+    charger: Charger,
+    window: Window,
+    ceiling: int,
+) -> Plan:
+    """De hele tijdlijn tot de auto vol moet zijn.
+
+    Bedoeld voor het scherm en niet voor een besluit: hier wordt niets gestuurd.
+    Maar hij rekent wél met dezelfde functies, zodat wat er staat klopt met wat
+    er gebeurt.
+
+    Sven op 30-08-2026: "ik wil zien wat de coach van plan is met hele tijdlijn
+    tot dat hij vol moet zijn." Dat is precies de vraag die een coach die uren
+    stilstaat oproept, en tot nu toe stond het antwoord alleen in één zin op de
+    kaart.
+    """
+    einde = window.deadline if window.enabled else None
+    begin = window.opens if window.enabled else None
+    amps = max(MIN_AMPS, ceiling if ceiling >= MIN_AMPS else int(charger.max_amps or 0))
+
+    kwh = energy_needed_kwh(car)
+    uren = hours_needed(car, amps)
+    plan = Plan(
+        deadline=einde,
+        latest_start=_latest_start(einde, uren),
+        kwh_needed=kwh,
+        hours_needed=uren,
+        amps=amps,
+    )
+
+    if not prices:
+        plan.note = (
+            "Je hebt een vast tarief, dus elk uur kost hetzelfde. De coach kijkt "
+            "naar je eigen zon en naar de tijden die je hebt ingesteld."
+        )
+        return plan
+
+    # Precies dezelfde aanroep als in `decide`, met dezelfde grenzen. Loopt dit
+    # uit elkaar, dan liegt het scherm.
+    gekozen = cheapest_hours(prices, max(now, begin) if begin else now, einde, uren or 0)
+    gekozen_starts = {row["start"] for row in gekozen}
+
+    grens = einde or (now + PLAN_HORIZON)
+    for row in prices:
+        if row["end"] <= now or row["start"] >= grens:
+            continue
+        if begin and row["end"] <= begin:
+            why, laadt = "voor je begintijd", False
+        elif row["start"] in gekozen_starts:
+            why, laadt = "een van de goedkoopste uren", True
+        else:
+            why, laadt = "duurder dan wat hij nodig heeft", False
+        plan.blocks.append(
+            Blok(
+                start=row["start"],
+                end=row["end"],
+                price=row["price"],
+                charging=laadt,
+                why=why,
+            )
+        )
+
+    laatste = [blok for blok in plan.blocks if blok.charging]
+    plan.expected_done = laatste[-1].end if laatste else None
+
+    if not plan.blocks:
+        plan.note = "Er zijn nog geen prijzen bekend voor deze periode."
+    elif uren is None:
+        plan.note = (
+            "Zonder accustand weet de coach niet hoeveel er nog in moet, dus hij "
+            "pakt alle uren die passen. Geef je accustand door, dan wordt dit "
+            "een kortere lijst."
+        )
+    return plan
+
 def price_now(prices: list[dict], now: datetime) -> dict | None:
     """The slot `now` falls in."""
     for row in prices:
@@ -814,10 +946,17 @@ def _clock(moment: datetime) -> str:
 
 
 # Hoeveel tijd er bovenop de laadtijd over moet blijven voordat de coach het
-# nog verantwoord vindt om te wachten. Onder dit kwartier gaat hij door tot de
+# nog verantwoord vindt om te wachten. Onder deze speling gaat hij door tot de
 # auto vol is. Staat hier met een naam omdat zowel de regel als de tekst op de
 # kaart hem gebruikt, en die twee mogen nooit uit elkaar lopen.
-DEADLINE_SLACK_HOURS = 0.25
+#
+# Een half uur. Dat was een kwartier, en dat kwartier was mijn getal en niet dat
+# van Sven; op 30-08-2026 zei hij wat hij bedoelde: "stel je 7 uur in, dan moet
+# hij eigenlijk uiterlijk om 6.30 klaar zijn." Een kwartier is ook te krap voor
+# wat er in de praktijk tussen komt: een auto die niet meteen opstart, een
+# lastbewaker die knijpt, een integratie die even wegvalt. Alle drie gezien in
+# één nacht.
+DEADLINE_SLACK_HOURS = 0.5
 
 # En hoeveel het er zijn bij een klaar-tijd overdag. Een kwartier is daar te
 # krap, en dat komt doordat de avondregel hieronder er niet bij helpt: die zet

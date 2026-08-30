@@ -53,7 +53,9 @@ from .planner import (
     Window,
     STEP_AMPS,
     amps_for,
+    ceiling_amps,
     decide,
+    timeline,
     FULL_PERCENT,
     held_back,
     resolve_window,
@@ -108,6 +110,29 @@ METER_NAIJL = timedelta(minutes=1)
 # steeds binnen een ronde opgemerkt wordt. Het verslag noemt het moment waarop
 # de paal het voor het eerst zei, niet het moment waarop de coach het geloofde.
 KABEL_ONTDREUN = timedelta(seconds=30)
+
+# Hoe lang de laatste bruikbare meting van een sensor blijft gelden als die
+# sensor even niets zegt.
+#
+# Dit is dezelfde fout als bij de status van de laadpaal, maar dan in de
+# meetkant, en die tak was niet nagekeken. Bij Van den Dam viel de P1-meter op
+# 30-08-2026 om 11:07, 11:09 en 11:15 telkens een paar seconden weg. Zodra
+# `grid_import` en `grid_export` allebei `unavailable` zijn, rekent `_read`
+# `netto = 0` uit en concludeert de coach dat er geen zon over is. Op de zonregel
+# betekent dat stoppen, en zo stond het laden die ochtend twee keer een kwartier
+# stil zonder dat er iets aan de hand was.
+#
+# Het geldt voor élke sensor waarvan een ontbrekende waarde als nul zou lezen:
+# de netmeting, de fasestromen en het vermogen van de paal zelf. Dat laatste is
+# het gemeenste, want dat gaat in de som die het kringetje openhoudt: valt hij
+# weg, dan ziet de coach zijn eigen laden aan voor huisverbruik en praat hij
+# zichzelf uit.
+#
+# Vijf minuten, en dat is een keuze. Lang genoeg voor elke herverbinding die ik
+# gezien heb, en kort genoeg dat een integratie die werkelijk stuk is niet een
+# half uur met oude getallen doorrekent. Daarna weet de coach het niet meer, en
+# dan zegt hij dat ook.
+MEETNAIJL = timedelta(minutes=5)
 
 # Over hoeveel tijd de fasestromen worden gladgestreken voor er een besluit op
 # valt. De huismeter van Van den Dam meldt elke dertig seconden en gooit er af
@@ -346,6 +371,13 @@ class ChargerCoach:
         # De laatste bruikbare status per laadpunt, zodat een entiteit die even
         # wegvalt niet als een losgekoppelde kabel leest. Zie `_read`.
         self._laatste_status: dict[str, str] = {}
+        # En hetzelfde voor de metingen: per entiteit de laatste bruikbare
+        # waarde met het moment erbij. Zie `_volgehouden` en `MEETNAIJL`.
+        self._laatste_meting: dict[str, tuple[float, datetime]] = {}
+        # De laatste ronde waarin de netmeting wél te lezen was, en sinds
+        # wanneer hij zwijgt. Alleen om het te kunnen zeggen; zie `_nettip`.
+        self._net_gezien: datetime | None = None
+        self._net_stil_sinds: datetime | None = None
         # Sinds wanneer een paal zegt dat er geen kabel in zit. Pas als hij dat
         # `KABEL_ONTDREUN` lang volhoudt telt het, en dan is dít het moment dat
         # in het verslag komt. Zie `_read`.
@@ -867,12 +899,18 @@ class ChargerCoach:
             "at": now.isoformat(),
             "level": level,
             "applied": level == LEVEL_STEER,
+            # De hele tijdlijn tot de auto vol moet zijn. Uit dezelfde sommen
+            # als het besluit hierboven, want een tijdlijn die iets anders zegt
+            # dan wat de coach doet laat de bewoner op het verkeerde wachten.
+            "plan_ahead": self._tijdlijn(now, settings, grid, car, charger, window),
         }
         # Iets dat alleen de bewoner zelf kan verhelpen, en dat losstaat van
         # het besluit van deze ronde. Het gaat dus naast de reden op de kaart
         # en niet erin.
-        tip = self._fasetip(settings, device, charger) or self._bewakertip(
-            settings, device, charger
+        tip = (
+            self._nettip(now)
+            or self._fasetip(settings, device, charger)
+            or self._bewakertip(settings, device, charger)
         )
         self.state[device_id]["tip"] = tip
 
@@ -1215,6 +1253,32 @@ class ChargerCoach:
         vat = float(dynamic.get("vat_percent") or 0)
         return (market + tax + markup) * (1 + vat / 100)
 
+    def _volgehouden(
+        self, entity_id: str | None, waarde: float | None, now: datetime
+    ) -> float | None:
+        """De laatste bruikbare meting van deze sensor, als hij even niets zegt.
+
+        Een sensor die `unavailable` of `unknown` meldt, of die er even helemaal
+        niet is, heeft geen waarde nul. Hij heeft geen waarde. Dat verschil is
+        precies waar het op 30-08-2026 bij Van den Dam op misging: de P1-meter
+        viel drie keer een paar seconden weg, de coach rekende de zon uit op nul
+        en zette het laden stil. Zie `MEETNAIJL`.
+
+        Blijft hij langer weg dan die naijl, dan geeft dit niets terug, en dan is
+        onbekend ook echt onbekend. Doorrekenen met een getal van een half uur
+        oud is erger dan zeggen dat je het niet weet.
+        """
+        if not entity_id:
+            return waarde
+        if waarde is not None:
+            self._laatste_meting[entity_id] = (waarde, now)
+            return waarde
+        eerder = self._laatste_meting.get(entity_id)
+        if eerder is None or now - eerder[1] > MEETNAIJL:
+            self._laatste_meting.pop(entity_id, None)
+            return None
+        return eerder[0]
+
     def _gladde_fase(
         self, entity_id: str | None, amps: float, now: datetime
     ) -> float:
@@ -1270,35 +1334,74 @@ class ChargerCoach:
         # ingekocht, en dan zou hij bij 2 kW inkoop en 4 kW laden concluderen dat
         # er 4 kW zon over is. Liever de rauwe teruglevering dan een optelsom van
         # iets wat hij niet kan zien.
+        # Elke meting hieronder gaat langs `_volgehouden`. Een sensor die even
+        # niets zegt houdt zijn laatste waarde; een die echt weg is geeft niets
+        # terug, en dan rekent de coach niet door met een nul die hij verzonnen
+        # heeft. Zie `MEETNAIJL`.
         if sources.get("grid_mode") == "signed":
-            signed = _watts(self.hass, sources.get("grid_signed")) or 0.0
-            if sources.get("grid_signed_invert"):
+            bron = sources.get("grid_signed")
+            signed = self._volgehouden(bron, _watts(self.hass, bron), now)
+            if signed is not None and sources.get("grid_signed_invert"):
                 signed = -signed
-            netto, compleet = -signed, True
+            netto = None if signed is None else -signed
+            compleet = signed is not None
         else:
-            export = _watts(self.hass, sources.get("grid_export"))
-            invoer = _watts(self.hass, sources.get("grid_import"))
-            netto = (export or 0.0) - (invoer or 0.0)
+            uit = sources.get("grid_export")
+            in_ = sources.get("grid_import")
+            export = self._volgehouden(uit, _watts(self.hass, uit), now)
+            invoer = self._volgehouden(in_, _watts(self.hass, in_), now)
             compleet = export is not None and invoer is not None
+            netto = (export - invoer) if compleet else (export if invoer is None else None)
 
-        laadvermogen = _watts(self.hass, device.get("entity")) or 0.0
-        surplus = max(0.0, netto + laadvermogen if compleet else max(0.0, netto))
-        surplus = self._smooth(device.get("id", ""), surplus, now)
+        # Het vermogen van de paal zit in dezelfde som, en juist die houdt het
+        # kringetje open: zonder hem ziet de coach zijn eigen laden aan voor
+        # huisverbruik. Valt hij weg, dan telt de laatste waarde die er wél was.
+        laadvermogen = self._volgehouden(
+            device.get("entity"), _watts(self.hass, device.get("entity")), now
+        )
+
+        # De netmeting is niet te lezen. Dan is de zon onbekend en niet nul, dus
+        # er wordt niet op gestuurd; de prijs- en klaar-tijdregels werken gewoon
+        # door. En de coach zegt het, want stilstand zonder reden leest als kapot.
+        if netto is None or (compleet and laadvermogen is None):
+            # Sinds wanneer hij zwijgt is niet dit moment maar de laatste ronde
+            # waarin hij er nog was: de naijl hierboven heeft er al een paar
+            # minuten overheen gelaten voordat het hier terechtkomt.
+            self._net_stil_sinds = self._net_stil_sinds or self._net_gezien or now
+            surplus = 0.0
+            self._zon.pop(device.get("id", ""), None)
+        else:
+            self._net_gezien = now
+            self._net_stil_sinds = None
+            surplus = max(
+                0.0,
+                netto + (laadvermogen or 0.0) if compleet else max(0.0, netto),
+            )
+            surplus = self._smooth(device.get("id", ""), surplus, now)
 
         phases = []
         for key in ("l1", "l2", "l3"):
             phase = (sources.get("phases") or {}).get(key) or {}
-            amps = _number(self.hass, phase.get("current"))
+            amps = self._volgehouden(
+                phase.get("current"), _number(self.hass, phase.get("current")), now
+            )
             if amps is not None:
                 amps = self._gladde_fase(phase.get("current"), amps, now)
             else:
-                watts = _watts(self.hass, phase.get("power"))
+                watts = self._volgehouden(
+                    phase.get("power"), _watts(self.hass, phase.get("power")), now
+                )
                 volts = _number(self.hass, phase.get("voltage")) or 230
                 amps = watts / volts if watts is not None and volts else None
             if amps is not None:
                 phases.append(amps)
 
-        charger_amps = _number(self.hass, entities.get("current")) or 0.0
+        charger_amps = (
+            self._volgehouden(
+                entities.get("current"), _number(self.hass, entities.get("current")), now
+            )
+            or 0.0
+        )
 
         # Wat deze paal kort geleden nog trok. De fasemeting van het huis loopt
         # achter op de paal, dus vlak na het stoppen draagt zij zijn stroom nog
@@ -1487,7 +1590,7 @@ class ChargerCoach:
         chosen, profile = self._chosen_car(settings, device)
 
         if chosen == "__guest__":
-            return Car(guest=True, phases=3)
+            return Car(guest=True, phases=3, name="Gast")
 
         if profile is None:
             return Car(phases=3)
@@ -1508,6 +1611,7 @@ class ChargerCoach:
             soc = self._onthouden_soc(device, profile)
 
         return Car(
+            name=str(profile.get("name") or "").strip(),
             capacity_kwh=float(profile.get("capacity_kwh") or 0),
             phases=phases,
             max_amps=float(profile.get("max_amps") or 0),
@@ -1807,6 +1911,21 @@ class ChargerCoach:
         eerder = sessie.get("ijk_kwh", 0.0) if sessie.get("geijkt") else 0.0
         return eerder + max(0.0, meter - float(sessie["meter"])) + staart
 
+    @staticmethod
+    def _hoe_heet(car: Car | None) -> str:
+        """Hoe de coach deze auto noemt in een zin.
+
+        Heeft de bewoner er een naam aan gegeven, dan is dat de naam. Anders
+        blijft het "de auto", want dat is wat het is.
+
+        Dit stond er niet, en daardoor was een naam die je invulde nergens meer
+        terug te vinden: de kaart toonde de laadpaal en elke melding zei "de
+        auto". Sven op 30-08-2026: "ik heb de naam aangepast bij de auto maar in
+        het overzicht staat de naam nog verkeerd en neemt hij het niet mee."
+        """
+        naam = ((car.name if car else "") or "").strip()
+        return naam if naam else "de auto"
+
     def _waarom(self, sessie: dict[str, Any]) -> str:
         """De twee dingen waar de meeste tijd aan op is gegaan, in gewone taal.
 
@@ -1886,7 +2005,7 @@ class ChargerCoach:
         # lopen.
         afscheid = self._afscheid.pop(device_id, None)
         if afscheid:
-            await self._async_afgekoppeld(device, naam, *afscheid)
+            await self._async_afgekoppeld(device, naam, car, *afscheid)
             return
 
         sessie = self._sessie.get(device_id)
@@ -1924,7 +2043,8 @@ class ChargerCoach:
                 else ""
             )
             await self._async_tell(
-                f"De auto aan {naam} neemt al {minuten} minuten geen stroom af "
+                f"{self._hoe_heet(car).capitalize()} aan {naam} neemt al {minuten} "
+                "minuten geen stroom af "
                 f"terwijl de coach hem aanbiedt.{stand} Zo wordt "
                 f"{window.deadline:%H:%M} niet gehaald. Meestal helpt het om de "
                 "kabel er even uit te trekken en er weer in te doen."
@@ -1945,10 +2065,11 @@ class ChargerCoach:
             # vol" onwaar en leest het als een coach die niet weet wat hij doet.
             # Weet hij de accustand, dan zegt hij die gewoon. Sven op 20-08-2026.
             klaar = (
-                f"De auto aan {naam} is vol."
+                f"{self._hoe_heet(car).capitalize()} aan {naam} is vol."
                 if car.soc_percent is None or car.soc_percent >= FULL_PERCENT
                 else (
-                    f"De auto aan {naam} laadt niet verder en staat op "
+                    f"{self._hoe_heet(car).capitalize()} aan {naam} laadt niet verder en "
+                    f"staat op "
                     f"{int(car.soc_percent)}%. Mogelijk staat er een laadgrens in "
                     "de auto."
                 )
@@ -1986,7 +2107,8 @@ class ChargerCoach:
         )
         waarom = self._waarom(sessie)
         await self._async_tell(
-            f"De auto aan {naam} was om {vorig:%H:%M} nog niet vol.{stand}"
+            f"{self._hoe_heet(car).capitalize()} aan {naam} was om {vorig:%H:%M} "
+            f"nog niet vol.{stand}"
             + (f" {waarom}." if waarom else "")
             + " Hij laadt door tot hij vol is."
         )
@@ -1995,6 +2117,7 @@ class ChargerCoach:
         self,
         device: dict[str, Any],
         naam: str,
+        car: Car,
         moment: datetime,
         sessie: dict[str, Any],
     ) -> None:
@@ -2025,7 +2148,8 @@ class ChargerCoach:
 
         waarom = self._waarom(sessie)
         await self._async_tell(
-            f"De auto aan {naam} is afgekoppeld om {moment:%H:%M}"
+            f"{self._hoe_heet(car).capitalize()} aan {naam} is afgekoppeld om "
+            f"{moment:%H:%M}"
             + verloop
             + (f" {waarom}." if waarom else "")
         )
@@ -2215,6 +2339,73 @@ class ChargerCoach:
         if verhouding < 1.5:
             return 1
         return None
+
+    def _tijdlijn(
+        self,
+        now: datetime,
+        settings: dict[str, Any],
+        grid: Grid,
+        car: Car,
+        charger: Charger,
+        window: Window,
+    ) -> dict[str, Any]:
+        """De tijdlijn van de planner, klaar om over de websocket te gaan.
+
+        Alleen de vertaalslag: momenten worden tekst en de blokken een lijst.
+        Het denkwerk staat in `timeline` in planner.py, want dat is los te
+        draaien tegen een hele dag echte prijzen.
+        """
+        plan = timeline(
+            now,
+            self._prices(settings),
+            car,
+            charger,
+            window,
+            ceiling_amps(grid, car, charger),
+        )
+
+        def klok(moment: datetime | None) -> str | None:
+            return None if moment is None else moment.isoformat()
+
+        return {
+            "deadline": klok(plan.deadline),
+            "latest_start": klok(plan.latest_start),
+            "expected_done": klok(plan.expected_done),
+            "kwh_needed": plan.kwh_needed,
+            "hours_needed": plan.hours_needed,
+            "amps": plan.amps,
+            "note": plan.note,
+            "blocks": [
+                {
+                    "start": klok(blok.start),
+                    "end": klok(blok.end),
+                    "price": blok.price,
+                    "charging": blok.charging,
+                    "why": blok.why,
+                }
+                for blok in plan.blocks
+            ],
+        }
+
+    def _nettip(self, now: datetime) -> str:
+        """Zeggen dat de netmeting er niet is, want dat verklaart de stilstand.
+
+        Zonder netmeting is er geen zon te zien, en dan valt de zonregel weg.
+        Prijs en klaar-tijd werken gewoon door, dus de coach doet nog van alles,
+        maar wie op een zonnige middag naar een stilstaande paal kijkt heeft
+        recht op de reden. Deze staat vóór de andere tips: een meting die er niet
+        is maakt de rest van wat de kaart zegt minder waard.
+        """
+        if self._net_stil_sinds is None:
+            return ""
+        minuten = int((now - self._net_stil_sinds).total_seconds() // 60)
+        if minuten < 1:
+            return ""
+        return (
+            f"De coach kan je netmeting al {minuten} minuten niet lezen, dus hij "
+            "ziet niet hoeveel zon er over is en stuurt alleen op prijs en op je "
+            "klaar-tijd. Kijk of de integratie van je slimme meter nog draait."
+        )
 
     def _bewakertip(
         self, settings: dict[str, Any], device: dict[str, Any], charger: Charger
