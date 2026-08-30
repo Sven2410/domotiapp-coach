@@ -44,6 +44,20 @@ class HomeAssistant:  # noqa: D101
 core.HomeAssistant = HomeAssistant
 core.callback = lambda func: func
 
+
+class Event:  # noqa: D101
+    pass
+
+
+class State:  # noqa: D101
+    pass
+
+
+# `monitor.py` leest deze twee alleen als typenaam, maar zonder dat ze bestaan
+# laadt de module niet.
+core.Event = Event
+core.State = State
+
 excepties = types.ModuleType("homeassistant.exceptions")
 
 
@@ -57,6 +71,7 @@ helpers = types.ModuleType("homeassistant.helpers")
 gebeurtenis = types.ModuleType("homeassistant.helpers.event")
 gebeurtenis.async_track_state_change_event = lambda *a, **k: (lambda: None)
 gebeurtenis.async_track_time_interval = lambda *a, **k: (lambda: None)
+gebeurtenis.async_call_later = lambda *a, **k: (lambda: None)
 opslag = types.ModuleType("homeassistant.helpers.storage")
 
 
@@ -133,6 +148,7 @@ laad("const")
 planner = laad("planner")
 storage = laad("storage")
 coachmod = laad("coach")
+monitormod = laad("monitor")
 
 # --- een huis om in te meten ------------------------------------------------
 
@@ -157,25 +173,44 @@ class Staat:
     daarvoor mag een waarde ook een dict zijn met `state` en `attributes`.
     """
 
-    def __init__(self, waarde):
+    def __init__(self, waarde, last_updated=None):
         if isinstance(waarde, dict):
             self.state = waarde.get("state", "")
             self.attributes = dict(waarde.get("attributes") or {})
         else:
             self.state = waarde
             self.attributes = {}
+        # Home Assistant zet dit op elke toestand en de coach leest het: twee
+        # sensoren van dezelfde paal die niet tegelijk gemeld hebben zeggen
+        # samen niets over het aantal fasen. Zonder dit veld hier was het harnas
+        # weer vergevingsgezinder dan de werkelijkheid.
+        self.last_updated = last_updated or dt.datetime.now(dt.timezone.utc)
+        self.last_changed = self.last_updated
 
 
 class Staten:
     def __init__(self, waarden):
         self.waarden = dict(waarden)
+        self.stempels = {}
 
     def get(self, entity_id):
         waarde = self.waarden.get(entity_id)
-        return None if waarde is None else Staat(waarde)
+        if waarde is None:
+            return None
+        return Staat(waarde, self.stempels.get(entity_id))
 
-    def zet(self, entity_id, waarde):
+    def zet(self, entity_id, waarde, last_updated=None):
         self.waarden[entity_id] = waarde
+        if last_updated is not None:
+            self.stempels[entity_id] = last_updated
+        else:
+            self.stempels.pop(entity_id, None)
+
+    def verouder(self, entity_id, seconden):
+        """Deze sensor deed er zoveel seconden geleden voor het laatst iets."""
+        self.stempels[entity_id] = dt.datetime.now(dt.timezone.utc) - dt.timedelta(
+            seconds=seconden
+        )
 
 
 class Diensten:
@@ -835,7 +870,10 @@ controle("en er gaat niets de deur uit om een accustand", not vraag19, f"{vraag1
 
 # De kabel eruit wist het wel, want morgen hangt er misschien een andere auto.
 hass19.states.zet("sensor.laadpaal_status", "disconnected")
-asyncio.run(ronde(coach19, inst19, paal=PAAL19, nu=dt.datetime(2026, 8, 25, 20, 5)))
+# Twee ronden, want één meting `disconnected` is sinds v0.43.2 nog geen kabel
+# die eruit gaat; zie `KABEL_ONTDREUN`.
+for tijd in (dt.datetime(2026, 8, 25, 20, 5), dt.datetime(2026, 8, 25, 20, 5, 40)):
+    asyncio.run(ronde(coach19, inst19, paal=PAAL19, nu=tijd))
 hass19.states.zet("sensor.laadpaal_status", "ready_to_charge")
 opnieuw, _ = asyncio.run(ronde(coach19, inst19, paal=PAAL19, nu=dt.datetime(2026, 8, 25, 20, 6)))
 print(f"  na de kabel eruit: {opnieuw['rule']}  needs_soc={opnieuw['needs_soc']}")
@@ -921,8 +959,21 @@ asyncio.run(ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 12, 
 hass21.states.zet("sensor.laadpaal_status", "charging")
 hass21.states.zet("sensor.laadpaal_stroom", "13.5")
 hass21.states.zet("sensor.laadpaal_vermogen", "3070")
+# Een enkele ronde is niet genoeg: de twee sensoren van een Easee melden tijdens
+# het optrekken seconden na elkaar, en dan is de verhouding een vergelijking
+# tussen nu en daarnet. Bij Van den Dam leverde dat op 30-08-2026 om 04:28 een
+# valse melding op terwijl de auto keurig driefasig laadde. Er moet dus een
+# aantal ronden hetzelfde uit komen; zie `FASEMETING_RONDEN`.
+for minuut in (51, 52):
+    tussendoor, niets21 = asyncio.run(
+        ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 12, minuut))
+    )
+    controle(f"na {minuut - 50} ronde nog geen oordeel", not tussendoor["tip"],
+             f"{tussendoor['tip']}")
+    controle(f"en ook nog geen melding na {minuut - 50} ronde",
+             not [d for d in niets21 if d[0] == "notify"], f"{niets21}")
 besluit21, verstuurd21 = asyncio.run(
-    ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 12, 51))
+    ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 12, 53))
 )
 tips21 = [d[2]["message"] for d in verstuurd21 if d[0] == "notify"]
 print(f"  kaart: {besluit21['tip']}")
@@ -933,7 +984,7 @@ controle(
 )
 controle("en een keer op de telefoon", len(tips21) == 1 and "16 A" in tips21[0], f"{tips21}")
 _, nogmaals21 = asyncio.run(
-    ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 12, 52))
+    ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 12, 54))
 )
 controle(
     "maar niet elke minuut opnieuw",
@@ -945,8 +996,10 @@ controle(
 hass21.states.zet("sensor.laadpaal_max", "16")
 hass21.states.zet("sensor.laadpaal_vermogen", "10855")
 hass21.states.zet("sensor.laadpaal_stroom", "15.45")
+for minuut in (56, 57):
+    asyncio.run(ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 12, minuut)))
 driefasig, _ = asyncio.run(
-    ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 12, 56))
+    ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 12, 58))
 )
 print(f"  op 16 A driefasig: tip={driefasig['tip']!r}")
 controle("driefasig zegt hij niets", not driefasig["tip"], f"{driefasig['tip']}")
@@ -959,7 +1012,9 @@ asyncio.run(ronde(coach21c, inst21c, nu=dt.datetime(2026, 8, 25, 12, 50)))
 hass21c.states.zet("sensor.laadpaal_status", "charging")
 hass21c.states.zet("sensor.laadpaal_stroom", "13.5")
 hass21c.states.zet("sensor.laadpaal_vermogen", "3070")
-eenfasig, _ = asyncio.run(ronde(coach21c, inst21c, nu=dt.datetime(2026, 8, 25, 12, 51)))
+for minuut in (51, 52):
+    asyncio.run(ronde(coach21c, inst21c, nu=dt.datetime(2026, 8, 25, 12, minuut)))
+eenfasig, _ = asyncio.run(ronde(coach21c, inst21c, nu=dt.datetime(2026, 8, 25, 12, 53)))
 print(f"  eenfasige auto: tip={eenfasig['tip']!r}")
 controle("een eenfasige auto krijgt geen verwijt", not eenfasig["tip"], f"{eenfasig['tip']}")
 
@@ -973,8 +1028,10 @@ controle("een eenfasige auto krijgt geen verwijt", not eenfasig["tip"], f"{eenfa
 hass21.states.zet("sensor.laadpaal_max", "16")
 hass21.states.zet("sensor.laadpaal_vermogen", "3070")
 hass21.states.zet("sensor.laadpaal_stroom", "13.5")
+for minuut in (4, 5):
+    asyncio.run(ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 13, minuut)))
 mis3, _ = asyncio.run(
-    ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 13, 4))
+    ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 13, 6))
 )
 print(f"  profiel driefasig, gemeten eenfasig: tip={mis3['tip']!r}")
 controle("een profiel op driefasig dat eenfasig laadt wordt gemeld",
@@ -989,7 +1046,9 @@ hass21d.states.zet("sensor.laadpaal_status", "charging")
 hass21d.states.zet("sensor.laadpaal_max", "16")
 hass21d.states.zet("sensor.laadpaal_stroom", "15.45")
 hass21d.states.zet("sensor.laadpaal_vermogen", "10855")
-mis1, _ = asyncio.run(ronde(coach21d, inst21d, nu=dt.datetime(2026, 8, 25, 13, 6)))
+for minuut in (6, 7):
+    asyncio.run(ronde(coach21d, inst21d, nu=dt.datetime(2026, 8, 25, 13, minuut)))
+mis1, _ = asyncio.run(ronde(coach21d, inst21d, nu=dt.datetime(2026, 8, 25, 13, 8)))
 print(f"  profiel eenfasig, gemeten driefasig: tip={mis1['tip']!r}")
 controle("en een profiel op eenfasig dat driefasig laadt ook",
          "driefasig" in mis1["tip"] and "eenfasig" in mis1["tip"], f"{mis1['tip']}")
@@ -1015,7 +1074,10 @@ hass22.states.zet("sensor.laadpaal_status", "disconnected")
 hass22.states.zet("sensor.laadpaal_stroom", "0")
 hass22.states.zet("sensor.laadpaal_vermogen", "0")
 hass22.states.zet("sensor.laadpaal_teller", "104.2")
-_, verstuurd = asyncio.run(ronde(coach22, los, nu=dt.datetime(2026, 8, 20, 19, 12)))
+_, meteen22 = asyncio.run(ronde(coach22, los, nu=dt.datetime(2026, 8, 20, 19, 12)))
+controle("één meting `disconnected` is nog geen kabel die eruit gaat",
+         not [d for d in meteen22 if d[0] == "notify"], f"{meteen22}")
+_, verstuurd = asyncio.run(ronde(coach22, los, nu=dt.datetime(2026, 8, 20, 19, 13)))
 meldingen = [d[2]["message"] for d in verstuurd if d[0] == "notify"]
 print(f"  {meldingen}")
 controle("nu komt er wel een verslag", bool(meldingen), f"{meldingen}")
@@ -1063,13 +1125,14 @@ for ontbreekt, hoe in ((None, "de entiteit is weg"), ("unavailable", "unavailabl
 hass22b.states.zet("sensor.laadpaal_status", "disconnected")
 hass22b.states.zet("sensor.laadpaal_stroom", "0")
 hass22b.states.zet("sensor.laadpaal_vermogen", "0")
-_, echt_los = asyncio.run(ronde(coach22b, weg, nu=dt.datetime(2026, 8, 20, 19, 20)))
+asyncio.run(ronde(coach22b, weg, nu=dt.datetime(2026, 8, 20, 19, 20)))
+_, echt_los = asyncio.run(ronde(coach22b, weg, nu=dt.datetime(2026, 8, 20, 19, 21)))
 controle("een sensor die het wél zegt levert nog gewoon een verslag op",
          any("afgekoppeld" in d[2]["message"] for d in echt_los if d[0] == "notify"),
          f"{[d for d in echt_los if d[0] == 'notify']}")
 
 # Eén keer en niet elke ronde, want de kabel blijft eruit.
-_, nogmaals = asyncio.run(ronde(coach22, los, nu=dt.datetime(2026, 8, 20, 19, 13)))
+_, nogmaals = asyncio.run(ronde(coach22, los, nu=dt.datetime(2026, 8, 20, 19, 14)))
 controle("en maar één keer",
          not [d for d in nogmaals if d[0] == "notify"], f"{nogmaals}")
 
@@ -1079,10 +1142,12 @@ hass22b, _, coach22b = bouw(huis(status="ready_to_charge", teruglevering=0.0,
                                  afname=1800.0), los)
 asyncio.run(ronde(coach22b, los, nu=dt.datetime(2026, 8, 20, 19, 0)))
 hass22b.states.zet("sensor.laadpaal_status", "disconnected")
-_, leeg = asyncio.run(ronde(coach22b, los, nu=dt.datetime(2026, 8, 20, 19, 1)))
-print(f"  kabel eruit zonder geladen te hebben: {[d[2]['message'] for d in leeg if d[0] == 'notify']}")
+asyncio.run(ronde(coach22b, los, nu=dt.datetime(2026, 8, 20, 19, 1)))
+_, leeg = asyncio.run(ronde(coach22b, los, nu=dt.datetime(2026, 8, 20, 19, 2)))
+leegmeldingen = [d[2]["message"] for d in leeg if d[0] == "notify"]
+print(f"  kabel eruit zonder geladen te hebben: {leegmeldingen}")
 controle("een beurt zonder stroom levert geen verslag op",
-         not [d for d in leeg if d[0] == "notify"], f"{leeg}")
+         not any("afgekoppeld" in m for m in leegmeldingen), f"{leegmeldingen}")
 
 # En een auto die vol was en daarna van de kabel gaat, heeft zijn verslag al
 # gehad. Twee berichten over dezelfde beurt is er een te veel.
@@ -1591,6 +1656,382 @@ controle("een zonverwachting in Wh geeft hetzelfde vermogen als een in kWh",
          abs(zon_kwh.now_w - zon_wh.now_w) < 1e-6, f"{zon_kwh.now_w} tegen {zon_wh.now_w}")
 controle("en dat is 2 kWh over het uur, dus 2000 W", abs(zon_kwh.now_w - 2000.0) < 1e-6,
          f"{zon_kwh.now_w}")
+
+print("=== 33. de nacht van 30-08-2026 bij Van den Dam ===")
+# Alles hieronder is nagemeten uit de recorder van die installatie. Vier dingen
+# gingen er mis en ze hebben dezelfde vorm: de coach nam een enkele meting voor
+# waar zonder te kijken of hij ergens bij hoorde.
+
+print("--- a. twee seconden `disconnected` is geen kabel die eruit gaat ---")
+# Een Easee die zijn laadbeurt opnieuw opstart doorloopt de hele keten
+# `disconnected`, `awaiting_authorization`, `waiting_in_queue`, `charging`, en
+# dat duurt ongeveer twee seconden. Dat gebeurde die nacht drie keer, twee ervan
+# binnen tien seconden nadat de coach zelf zijn grens omlaag schreef. Elke keer
+# ging het akkoord, de accustand en de klaar-tijd eruit en kwam er een verslag.
+inst33 = instellingen()
+inst33["strategy"]["schedules"][0]["window"]["done_by"] = "07:00"
+hass33, _, coach33 = bouw(huis(status="ready_to_charge", teruglevering=0.0,
+                               afname=1800.0), inst33)
+asyncio.run(ronde(coach33, inst33, nu=dt.datetime(2026, 8, 30, 3, 0)))
+hass33.states.zet("sensor.laadpaal_status", "charging")
+hass33.states.zet("sensor.laadpaal_stroom", "13.5")
+hass33.states.zet("sensor.laadpaal_vermogen", "9200")
+for minuut in range(1, 43):
+    asyncio.run(ronde(coach33, inst33, nu=dt.datetime(2026, 8, 30, 3, minuut)))
+
+# 03:43:46 meldt de paal `disconnected`, 03:43:51 laadt hij weer.
+hass33.states.zet("sensor.laadpaal_status", "disconnected")
+_, blip = asyncio.run(ronde(coach33, inst33, nu=dt.datetime(2026, 8, 30, 3, 43, 46)))
+hass33.states.zet("sensor.laadpaal_status", "charging")
+verder, _ = asyncio.run(ronde(coach33, inst33, nu=dt.datetime(2026, 8, 30, 3, 43, 51)))
+blipmeldingen = [d[2]["message"] for d in blip if d[0] == "notify"]
+print(f"  na de blip: regel={verder['rule']}, meldingen={blipmeldingen}")
+controle("een blip levert geen afkoppelverslag op",
+         not any("afgekoppeld" in m for m in blipmeldingen), f"{blipmeldingen}")
+controle("en de laadbeurt loopt gewoon door", verder["rule"] != "disconnected",
+         f"{verder['rule']}")
+
+# En de beurt is niet in tweeen geknipt, dus het verslag straks gaat over een
+# beurt die om 03:01 begon en telt de kWh een keer.
+for minuut in range(44, 50):
+    asyncio.run(ronde(coach33, inst33, nu=dt.datetime(2026, 8, 30, 3, minuut)))
+hass33.states.zet("sensor.laadpaal_status", "disconnected")
+hass33.states.zet("sensor.laadpaal_stroom", "0")
+hass33.states.zet("sensor.laadpaal_vermogen", "0")
+asyncio.run(ronde(coach33, inst33, nu=dt.datetime(2026, 8, 30, 3, 50)))
+_, eind33 = asyncio.run(ronde(coach33, inst33, nu=dt.datetime(2026, 8, 30, 3, 51)))
+verslag33 = [d[2]["message"] for d in eind33 if d[0] == "notify"]
+print(f"  {verslag33}")
+controle("de kabel die er echt uit gaat levert nog steeds een verslag op",
+         any("afgekoppeld" in m for m in verslag33), f"{verslag33}")
+controle("over een beurt die om 03:01 begon",
+         any("sinds 03:01" in m for m in verslag33), f"{verslag33}")
+controle("en met het moment waarop de paal het zei, niet waarop de coach het geloofde",
+         any("afgekoppeld om 03:50" in m for m in verslag33), f"{verslag33}")
+
+print("--- b. een meterpiek zet de paal niet meer op nul ---")
+# Om 04:28:56 meldde de huismeter een enkel sample van 27 A op L3; tien seconden
+# ervoor en dertig erna stond hij op 10. De coach schreef 0 A, de paal stond
+# achtenzeventig seconden uit, en de Ford beeindigde zijn laadbeurt en kwam er
+# die hele dag niet meer uit.
+inst34 = instellingen()
+inst34["strategy"]["schedules"][0]["window"]["done_by"] = "07:00"
+hass34, _, coach34 = bouw(huis(status="ready_to_charge", teruglevering=0.0,
+                               afname=1800.0), inst34)
+asyncio.run(ronde(coach34, inst34, nu=dt.datetime(2026, 8, 30, 4, 20)))
+hass34.states.zet("sensor.laadpaal_status", "charging")
+hass34.states.zet("sensor.laadpaal_stroom", "12")
+hass34.states.zet("sensor.laadpaal_vermogen", "8200")
+hass34.states.zet("sensor.l3", "22")
+for minuut in range(21, 28):
+    asyncio.run(ronde(coach34, inst34, nu=dt.datetime(2026, 8, 30, 4, minuut)))
+
+# Huis 30 min 12 van de paal is 18 A eigen last. Onder de marge past er dan
+# niets meer (25 min 18 min 3 is 4), zonder de marge nog wel (25 min 18 is 7).
+hass34.states.zet("sensor.l3", "30")
+piek, _ = asyncio.run(ronde(coach34, inst34, nu=dt.datetime(2026, 8, 30, 4, 28)))
+print(f"  met L3 op 30 A: {piek['rule']} {piek['amps']} A")
+controle("een volle fase zet een lopende beurt niet meer uit", piek["amps"] > 0,
+         f"{piek['rule']} {piek['amps']}")
+controle("hij zakt naar de laagste stand", piek["amps"] == planner.MIN_AMPS,
+         f"{piek['amps']}")
+
+# Maar een huis dat werkelijk over de zekering gaat wint nog steeds: 26 A huis
+# plus zes ampere past niet onder 25.
+hass34.states.zet("sensor.laadpaal_status", "ready_to_charge")
+hass34.states.zet("sensor.laadpaal_stroom", "0.01")
+hass34.states.zet("sensor.laadpaal_vermogen", "0")
+hass34.states.zet("sensor.l3", "32")
+for seconde in (0, 20, 40):
+    vol34, _ = asyncio.run(
+        ronde(coach34, inst34, nu=dt.datetime(2026, 8, 30, 4, 29, seconde))
+    )
+print(f"  huis alleen al op 32 A: {vol34['rule']} {vol34['amps']} A")
+controle("een huis dat er zelf overheen gaat wint wel", vol34["amps"] == 0,
+         f"{vol34['rule']} {vol34['amps']}")
+
+# En de piek zelf hoort er al uit te vallen voordat de som eraan begint. De
+# huismeter van Van den Dam meldt elke dertig seconden; op 30-08-2026 om
+# 04:28:56 gaf hij een enkel sample van 27 A op een fase die ervoor en erna op
+# 10 stond. Die metingen komen binnen op de luisteraar en niet in de ronde, dus
+# ze worden hier zo gevoerd.
+class Meting:
+    def __init__(self, entity_id, state):
+        self.entity_id = entity_id
+        self.state = state
+
+
+# De stempels van de luisteraar en de tijd van de ronde moeten van dezelfde
+# klok komen, anders is het vergelijken ervan een `TypeError` midden in een
+# ronde. Vandaar dat hier `_moment` gebruikt wordt en niet `utcnow`.
+nu34 = coachmod._moment()
+_, _, coach34b = bouw(huis(), instellingen())
+for waarde in ("10", "10", "27", "10"):
+    coach34b._async_phase_changed(Meting("sensor.l3", waarde))
+glad = coach34b._gladde_fase("sensor.l3", 10.0, nu34)
+print(f"  10, 10, 27, 10 wordt {glad} A")
+controle("een enkele uitschieter valt eruit", glad == 10.0, f"{glad}")
+
+# Maar een huis dat werkelijk bijschakelt heeft binnen twee metingen de
+# meerderheid en komt er gewoon door.
+for waarde in ("24", "24"):
+    coach34b._async_phase_changed(Meting("sensor.l3", waarde))
+stijgt = coach34b._gladde_fase("sensor.l3", 24.0, coachmod._moment())
+print(f"  en na twee keer 24 wordt het {stijgt} A")
+controle("een echte stijging komt er wel doorheen", stijgt >= 24.0, f"{stijgt}")
+
+# En zonder genoeg metingen is er niets glad te strijken, dus telt wat de sensor
+# nu zegt. Liever een ronde te voorzichtig dan een ronde te laat.
+_, _, coach34c = bouw(huis(), instellingen())
+coach34c._async_phase_changed(Meting("sensor.l3", "27"))
+kaal = coach34c._gladde_fase("sensor.l3", 27.0, coachmod._moment())
+controle("te weinig metingen laat de meting staan", kaal == 27.0, f"{kaal}")
+
+# En de hele weg erlangs, zoals hij in het echt loopt: de luisteraar vult de
+# historie en de ronde leest hem. Dat is de plek waar de twee klokken elkaar
+# tegenkomen.
+inst34d = instellingen()
+inst34d["strategy"]["schedules"][0]["window"]["done_by"] = "07:00"
+huis34d = huis(status="ready_to_charge", teruglevering=0.0, afname=1800.0)
+hass34d, _, coach34d = bouw(huis34d, inst34d)
+asyncio.run(ronde(coach34d, inst34d, nu=coachmod._moment()))
+hass34d.states.zet("sensor.laadpaal_status", "charging")
+hass34d.states.zet("sensor.laadpaal_stroom", "12")
+hass34d.states.zet("sensor.laadpaal_vermogen", "8200")
+for waarde in ("10", "10", "10"):
+    coach34d._async_phase_changed(Meting("sensor.l3", waarde))
+# En dan die ene uitschieter, ook in de sensor zelf.
+coach34d._async_phase_changed(Meting("sensor.l3", "40"))
+hass34d.states.zet("sensor.l3", "40")
+langs, _ = asyncio.run(ronde(coach34d, inst34d, nu=coachmod._moment()))
+print(f"  door de hele keten heen: {langs['rule']} {langs['amps']} A")
+controle("de ronde rekent met de gladgestreken fase en niet met de piek",
+         langs["amps"] > 0, f"{langs['rule']} {langs['amps']}")
+
+# En het tegenbewijs: dezelfde piek zonder historie eronder zet hem wel uit.
+# Dat is precies wat er bij Van den Dam gebeurde, en het laat zien dat het de
+# demping is die het verschil maakt en niet iets anders in de opstelling.
+hass34e, _, coach34e = bouw(huis34d, instellingen())
+inst34e = instellingen()
+inst34e["strategy"]["schedules"][0]["window"]["done_by"] = "07:00"
+asyncio.run(ronde(coach34e, inst34e, nu=coachmod._moment()))
+hass34e.states.zet("sensor.laadpaal_status", "charging")
+hass34e.states.zet("sensor.laadpaal_stroom", "12")
+hass34e.states.zet("sensor.laadpaal_vermogen", "8200")
+hass34e.states.zet("sensor.l3", "40")
+kaal34, _ = asyncio.run(ronde(coach34e, inst34e, nu=coachmod._moment()))
+print(f"  dezelfde piek zonder demping: {kaal34['rule']} {kaal34['amps']} A")
+controle("zonder demping zou dezelfde piek hem wel hebben uitgezet",
+         kaal34["rule"] == "no-room", f"{kaal34['rule']} {kaal34['amps']}")
+
+print("--- c. de fasemeting midden in het optrekken zegt niets ---")
+# Om 04:28:17 meldde de Easee 2,20 A terwijl het vermogen nog de 782 W van drie
+# seconden eerder was: verhouding 1,54, dus "een fase". De auto laadde driefasig.
+inst35 = instellingen()
+hass35, _, coach35 = bouw(huis(status="ready_to_charge", teruglevering=0.0,
+                               afname=1800.0), inst35)
+asyncio.run(ronde(coach35, inst35, nu=dt.datetime(2026, 8, 30, 4, 27)))
+hass35.states.zet("sensor.laadpaal_status", "charging")
+hass35.states.zet("sensor.laadpaal_max", "16")
+hass35.states.zet("sensor.laadpaal_stroom", "2.2")
+hass35.states.zet("sensor.laadpaal_vermogen", "782")
+optrekken, _ = asyncio.run(ronde(coach35, inst35, nu=dt.datetime(2026, 8, 30, 4, 28)))
+print(f"  optrekkend op 2,2 A: tip={optrekken['tip']!r}")
+controle("onder de meetdrempel wordt er niets over de fasen gezegd",
+         not optrekken["tip"], f"{optrekken['tip']}")
+controle("en de meting zelf zegt niets",
+         coach35._measured_phases(LAADPAAL) is None,
+         f"{coach35._measured_phases(LAADPAAL)}")
+
+# Genoeg stroom, maar de twee sensoren van dezelfde paal melden seconden uit
+# elkaar. Ook dan is de verhouding een vergelijking tussen nu en daarnet.
+hass35.states.zet("sensor.laadpaal_stroom", "13.5")
+hass35.states.zet("sensor.laadpaal_vermogen", "9300")
+hass35.states.verouder("sensor.laadpaal_vermogen", 30)
+print(f"  vermogen 30 s ouder dan de stroom: {coach35._measured_phases(LAADPAAL)}")
+controle("twee sensoren die niet tegelijk gemeld hebben zeggen samen niets",
+         coach35._measured_phases(LAADPAAL) is None,
+         f"{coach35._measured_phases(LAADPAAL)}")
+
+# Vers en stabiel: dan is 9300 W bij 13,5 A driefasig, en dat klopt met de meting
+# van Van den Dam waar alle drie de fasen samen elf ampere zakten.
+hass35.states.zet("sensor.laadpaal_vermogen", "9300")
+controle("vers en boven de drempel wordt het gewoon gemeten",
+         coach35._measured_phases(LAADPAAL) == 3,
+         f"{coach35._measured_phases(LAADPAAL)}")
+
+print("--- d. de lastbewaker is de echte grens, niet de zekering ---")
+# De Equalizer van Van den Dam staat op 20 A terwijl de zekering 25 A is. De
+# coach rekende 25 min 3 is 22 en vroeg dus de hele nacht twee ampere meer dan
+# de bewaker toestond: uur na uur `limited_by_equalizer` in het logboek.
+inst36 = instellingen()
+inst36["installation"]["balancer_entity"] = "sensor.equalizer"
+huis36 = dict(huis(status="charging", stroom=12.0, vermogen=8200.0,
+                   teruglevering=0.0, afname=1800.0),
+              **{"sensor.equalizer": "20", "sensor.l1": "1", "sensor.l2": "2",
+                 "sensor.l3": "13"})
+hass36, _, coach36 = bouw(huis36, inst36)
+grid36, car36, charger36, _ = coach36._read(
+    dt.datetime(2026, 8, 30, 4, 0), inst36, LAADPAAL
+)
+plafond36 = planner.ceiling_amps(grid36, car36, charger36)
+print(f"  bewaker 20 A, zekering 25 A: plafond {plafond36} A")
+controle("de laagste van de twee is de grens", planner.net_grens(grid36) == 20.0,
+         f"{planner.net_grens(grid36)}")
+controle("en de coach vraagt er niet meer overheen", plafond36 <= 20 - 3,
+         f"{plafond36}")
+
+# Zonder die sensor blijft alles zoals het was.
+inst36b = instellingen()
+hass36b, _, coach36b = bouw(huis36, inst36b)
+grid36b, _, _, _ = coach36b._read(dt.datetime(2026, 8, 30, 4, 0), inst36b, LAADPAAL)
+controle("zonder grenssensor telt de zekering", planner.net_grens(grid36b) == 25.0,
+         f"{planner.net_grens(grid36b)}")
+
+# En het staat op de kaart, want vier ampere van de zestien is een kwart van de
+# laadsnelheid en niemand wist ervan.
+tip36 = coach36._bewakertip(inst36)
+print(f"  tip: {tip36}")
+controle("de coach zegt dat de bewaker lager staat",
+         "20 A" in tip36 and "25 A" in tip36, f"{tip36}")
+controle("en zwijgt als hij niet lager staat", not coach36b._bewakertip(inst36b),
+         f"{coach36b._bewakertip(inst36b)}")
+
+print("--- e. de minuten in het verslag horen bij een andere periode dan de kWh ---")
+# "er ging 6,9 kWh in sinds 03:00. Er ging 381 minuten naar wachten op een
+# goedkoper uur." Allebei waar, samen in een zin onzin: de kWh tellen vanaf het
+# laden, de minuten vanaf de kabel.
+zin = coach33._waarom({"kwijt": {"wait-for-price": 381.0}, "ingestapt": False})
+print(f"  {zin}")
+controle("de periode staat erbij", zin.startswith("Sinds de kabel erin ging"), zin)
+ingestapt = coach33._waarom({"kwijt": {"wait-for-price": 381.0}, "ingestapt": True})
+controle("en na een herstart zegt hij wat hij zelf gezien heeft",
+         ingestapt.startswith("Sinds de coach begon te kijken"), ingestapt)
+
+print("--- f. een auto die niets afneemt terwijl de klaar-tijd nadert ---")
+# De Ford hield om 04:34 op en het eerste woord daarover was het verslag van
+# 07:00, toen de klaar-tijd al voorbij was. Tweeeneenhalf uur waarin niemand
+# iets kon doen omdat niemand het wist.
+inst37 = instellingen()
+inst37["strategy"]["schedules"][0]["window"]["done_by"] = "07:00"
+hass37, _, coach37 = bouw(huis(status="ready_to_charge", teruglevering=0.0,
+                               afname=1800.0), inst37)
+asyncio.run(ronde(coach37, inst37, nu=dt.datetime(2026, 8, 30, 4, 30)))
+hass37.states.zet("sensor.laadpaal_status", "charging")
+hass37.states.zet("sensor.laadpaal_stroom", "13.5")
+hass37.states.zet("sensor.laadpaal_vermogen", "9200")
+asyncio.run(ronde(coach37, inst37, nu=dt.datetime(2026, 8, 30, 4, 31)))
+# En dan neemt de auto niets meer af, terwijl de paal aanbiedt.
+hass37.states.zet("sensor.laadpaal_status", "ready_to_charge")
+hass37.states.zet("sensor.laadpaal_stroom", "0.01")
+hass37.states.zet("sensor.laadpaal_vermogen", "0")
+stil37 = []
+for minuut in range(32, 60):
+    _, uit = asyncio.run(ronde(coach37, inst37, nu=dt.datetime(2026, 8, 30, 4, minuut)))
+    stil37 += [d[2]["message"] for d in uit if d[0] == "notify"
+               and "geen stroom af" in d[2]["message"]]
+print(f"  {stil37}")
+controle("hij zegt het voordat de klaar-tijd voorbij is", len(stil37) == 1, f"{stil37}")
+controle("met de klaar-tijd erbij", bool(stil37) and "07:00" in stil37[0], f"{stil37}")
+controle("en met wat je eraan kunt doen", bool(stil37) and "kabel" in stil37[0],
+         f"{stil37}")
+
+print("=== 38. de lastwaarschuwing gaat niet over het laden van de coach zelf ===")
+# Sven kreeg in de nacht van 30-08-2026 drie meldingen, om 03:02 op 84%, om
+# 03:32 op 80% en om 04:22 op 88%, telkens met "zet iets zwaars uit of wacht
+# ermee". Die getallen klopten: zijn huis heeft in de nacht ongeveer 10 A
+# basislast op L3, en met de paal erbij is dat 22 A van de 25.
+#
+# Maar het zware ding was zijn eigen auto, en de coach stond op datzelfde moment
+# al terug te regelen van 16 naar 12 A. Om vier uur in de nacht gewekt worden
+# voor iets dat de coach zelf doet en zelf oplost is verkeerd.
+
+
+def bewaker(inst, waarden):
+    """Een lastbewaking met een nagebouwd huis eromheen."""
+    hass = NepHass(waarden)
+    monitor = monitormod.LoadMonitor(hass)
+    monitor._settings = inst
+    return hass, monitor
+
+
+def waarschuwing(hass, monitor):
+    """Een ronde van de bewaking, en wat er de deur uit ging."""
+    hass.services.verstuurd.clear()
+    monitor._above_since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)
+    monitor._last_sent = None
+    monitor._async_evaluate()
+    asyncio.run(hass.afmaken())
+    return [d[2]["message"] for d in hass.services.verstuurd if d[0] == "notify"]
+
+
+inst38 = instellingen()
+inst38["strategy"]["load_alert"] = {
+    "enabled": True,
+    "threshold_percent": 80.0,
+    "targets": ["mobile_app_iphone"],
+    "min_interval_minutes": 30,
+    "min_duration_seconds": 60,
+}
+
+# Een huis dat zelf 22 A op L3 trekt, zonder laadpaal. Dat is 88% van 25 A en
+# daar hoort de melding gewoon te komen.
+huis38 = dict(huis(status="ready_to_charge", stroom=0.01, vermogen=0.0),
+              **{"sensor.l1": "1", "sensor.l2": "2", "sensor.l3": "22"})
+hass38, monitor38 = bewaker(inst38, huis38)
+eigen38 = waarschuwing(hass38, monitor38)
+print(f"  huis alleen: {eigen38}")
+controle("een zwaar huis levert nog steeds een waarschuwing op",
+         any("88%" in m for m in eigen38), f"{eigen38}")
+
+# Dezelfde 22 A, maar nu komt er 12 A van de laadpaal die de coach stuurt. Het
+# huis zelf zit op 10 A, dus 40%, en dat is geen melding waard.
+huis38b = dict(huis(status="charging", stroom=12.0, vermogen=8200.0),
+               **{"sensor.l1": "13", "sensor.l2": "14", "sensor.l3": "22"})
+hass38b, monitor38b = bewaker(inst38, huis38b)
+stil38 = waarschuwing(hass38b, monitor38b)
+meting38 = monitor38b.async_current_load()
+print(f"  met de laadpaal erin: kaart {meting38.percent:.0f}%, "
+      f"zonder de coach {meting38.zonder_coach:.0f}%, meldingen {stil38}")
+controle("het laden van de coach zelf wekt niemand meer", not stil38, f"{stil38}")
+controle("maar de kaart laat wel de echte belasting zien",
+         abs(meting38.percent - 88.0) < 0.01, f"{meting38.percent}")
+
+# Kan de coach er niet bij, dan is de laadpaal net zo goed een apparaat waar de
+# bewoner zelf iets aan moet doen, en dan hoort de melding wel te komen.
+inst38c = dict(inst38, strategy=dict(inst38["strategy"], level="advise"))
+hass38c, monitor38c = bewaker(inst38c, huis38b)
+advies38 = waarschuwing(hass38c, monitor38c)
+print(f"  op Adviseren: {advies38}")
+controle("op een niveau waarop de coach niets stuurt komt hij wel",
+         any("88%" in m for m in advies38), f"{advies38}")
+
+# Net zo voor een paal die niet stuurbaar is.
+inst38d = instellingen(devices=[dict(LAADPAAL, controllable=False)])
+inst38d["strategy"]["load_alert"] = inst38["strategy"]["load_alert"]
+hass38d, monitor38d = bewaker(inst38d, huis38b)
+vast38 = waarschuwing(hass38d, monitor38d)
+print(f"  onstuurbare paal: {vast38}")
+controle("en voor een paal die de coach niet mag sturen ook",
+         any("88%" in m for m in vast38), f"{vast38}")
+
+# Een paal die stilstaat meldt zijn rustverbruik in honderdsten van een ampere,
+# en dat hoort niet als "0,0 A van de laadpaal" in het bericht te komen.
+controle("een stilstaande paal wordt niet genoemd",
+         not any("van de laadpaal" in m for m in eigen38), f"{eigen38}")
+
+# Zit het huis er zelf al overheen terwijl de paal ook laadt, dan komt de
+# melding wel, en dan staat erbij hoeveel ervan de laadpaal is. Zonder dat klopt
+# het getal op de telefoon niet met wat er op de kaart staat.
+huis38e = dict(huis(status="charging", stroom=12.0, vermogen=8200.0),
+               **{"sensor.l1": "13", "sensor.l2": "14", "sensor.l3": "34"})
+hass38e, monitor38e = bewaker(inst38, huis38e)
+beide38 = waarschuwing(hass38e, monitor38e)
+print(f"  huis 22 A plus paal 12 A: {beide38}")
+controle("een huis dat er zonder de paal al overheen gaat wekt wel",
+         bool(beide38), f"{beide38}")
+controle("en dan staat erbij welk deel van de laadpaal komt",
+         any("12.0 A van de laadpaal" in m for m in beide38), f"{beide38}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

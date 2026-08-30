@@ -179,6 +179,9 @@ class Grid:
     # toegerekend en denkt de coach dat de aansluiting vol zit. Zie
     # `meter_loopt_achter`.
     recent_charger_amps: float = 0.0
+    # Waar de lastbewaker van de installatie zelf op staat, als hij dat meldt.
+    # Zie `net_grens`.
+    balancer_amps: float | None = None
 
 
 @dataclass
@@ -418,7 +421,7 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
     if grid.phase_amps:
         household = max(grid.phase_amps) - charger_share(grid, charger)
         ruimte = (
-            grid.fuse_amps - max(0.0, household) - fuse_margin(grid) - grid.reserved_amps
+            net_grens(grid) - max(0.0, household) - fuse_margin(grid) - grid.reserved_amps
         )
         if meter_loopt_achter(grid, charger):
             # De veiligheidsrail. Zolang de meter achterloopt is een deel van
@@ -434,6 +437,32 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
     return int(max(0, min(limits)))
 
 
+def nood_ruimte(grid: Grid, charger: Charger) -> float:
+    """Wat er onder de grens van de aansluiting past als de marge er niet was.
+
+    De marge is comfort en geen natuurkunde. Hij staat er zodat een huis dat een
+    oven aanzet de coach vóór is, niet omdat de laatste ampères eronder
+    gevaarlijk zouden zijn. Een laadbeurt helemaal afbreken om die marge te
+    sparen kost meer dan hij oplevert: een auto die uitgezet wordt komt daar
+    lang niet altijd zelf weer uit.
+
+    Gemeten bij Van den Dam in de nacht van 30-08-2026. De huismeter meldt daar
+    elke dertig seconden en gaf om 04:28:56 één sample van 27 A op L3; tien
+    seconden ervoor en dertig erna stond hij op 10. Op dat ene getal schreef de
+    coach 0 A. De paal stond achtenzeventig seconden uit, de Ford beëindigde
+    zijn laadbeurt, en die kwam de rest van de dag niet meer terug: de auto
+    stond om 09:37 nog steeds op 69,5%.
+
+    Dit tweede getal wordt daarom alleen gebruikt om een auto die al laadt op de
+    laagste stand aan te houden. De grens zelf blijft heilig: past `MIN_AMPS` er
+    ook zonder marge niet meer bij, dan gaat hij alsnog uit.
+    """
+    if not grid.phase_amps:
+        return float("inf")
+    household = max(0.0, max(grid.phase_amps) - charger_share(grid, charger))
+    return net_grens(grid) - household - grid.reserved_amps
+
+
 def fuse_limited(grid: Grid, car: Car, charger: Charger) -> bool:
     """Whether the fuse is what is holding the charge down, not the charger or the car.
 
@@ -445,19 +474,40 @@ def fuse_limited(grid: Grid, car: Car, charger: Charger) -> bool:
     if not grid.phase_amps:
         return False
     household = max(0.0, max(grid.phase_amps) - charger_share(grid, charger))
-    room = grid.fuse_amps - household - fuse_margin(grid) - grid.reserved_amps
+    room = net_grens(grid) - household - fuse_margin(grid) - grid.reserved_amps
     hardware = [charger.max_amps] + ([car.max_amps] if car.max_amps else [])
     return room < min(hardware)
 
 
-def fuse_margin(grid: Grid) -> float:
-    """Hoeveel ruimte er onder de zekering vrij blijft.
+def net_grens(grid: Grid) -> float:
+    """Het aantal ampère per fase waar deze aansluiting werkelijk op afknijpt.
 
-    Een vast aantal ampère of een aandeel van de zekering, en het grootste van
-    de twee wint. Zie `FUSE_MARGIN_SHARE` voor waarom een vast getal alleen niet
+    Meestal de hoofdzekering. Maar zit er een lastbewaker op die zelf een lagere
+    grens hanteert, dan is híj de eerste die knijpt en is de zekering een getal
+    dat nooit gehaald wordt. De laagste van de twee is dus de echte grens.
+
+    Bij Van den Dam stond de Equalizer op 20 A terwijl de zekering 25 A is. De
+    coach rekende 25 min 3 marge = 22 en vroeg dus de hele nacht twee ampère
+    meer dan de bewaker toestond. In het logboek van 30-08-2026 staat daarom uur
+    na uur `limited_by_equalizer`: precies het omgekeerde van wat
+    `BALANCER_MARGIN_AMPS` bedoelt, want de coach hoort als eerste opzij te
+    gaan en deed het als laatste.
+
+    Meldt de bewaker niets, dan blijft het zoals het was.
+    """
+    if grid.balancer_amps is None or grid.balancer_amps <= 0:
+        return grid.fuse_amps
+    return min(grid.fuse_amps, grid.balancer_amps)
+
+
+def fuse_margin(grid: Grid) -> float:
+    """Hoeveel ruimte er onder de grens van de aansluiting vrij blijft.
+
+    Een vast aantal ampère of een aandeel van die grens, en het grootste van de
+    twee wint. Zie `FUSE_MARGIN_SHARE` voor waarom een vast getal alleen niet
     volstaat.
     """
-    return max(grid.margin_amps, grid.fuse_amps * FUSE_MARGIN_SHARE)
+    return max(grid.margin_amps, net_grens(grid) * FUSE_MARGIN_SHARE)
 
 
 # The words the Easee reports when something other than the coach is holding the
@@ -1091,6 +1141,16 @@ def _decide(
         )
 
     if ceiling < MIN_AMPS:
+        # Een auto die al laadt gaat niet uit voor de marge alleen. Zie
+        # `nood_ruimte` voor waarom dat onderscheid er is.
+        if charger.charging and nood_ruimte(grid, charger) >= MIN_AMPS:
+            return Decision(
+                True,
+                MIN_AMPS,
+                "Je aansluiting zit bijna vol, dus hij laadt door op de laagste stand.",
+                plan="Gaat weer omhoog zodra er ruimte is.",
+                rule="tight",
+            )
         return Decision(
             False,
             0,
@@ -1611,7 +1671,7 @@ def _beter_straks(
 # De uitkomsten waarbij een lopende sessie wél meteen mag stoppen. Drie ervan
 # omdat er niets te beschermen valt, en één omdat wachten daar gevaarlijk is:
 # een aansluiting die vol zit, zit vol.
-NEVER_HOLD = frozenset({"disconnected", "complete", "user-hold", "no-room"})
+NEVER_HOLD = frozenset({"disconnected", "complete", "user-hold", "no-room", "tight"})
 
 
 def _zon_verwacht(sun: Sun, car: Car) -> bool:

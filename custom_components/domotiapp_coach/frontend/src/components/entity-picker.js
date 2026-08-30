@@ -40,6 +40,7 @@ let openPicker = null;
 const MATCHERS = {
   power: (attrs, unit) => POWER_UNITS.has(unit) || attrs.device_class === "power",
   price: (attrs, unit) => attrs.device_class === "monetary" || unit.includes("/kwh"),
+  current: (attrs, unit) => unit === "a" || attrs.device_class === "current",
   all: () => true,
 };
 
