@@ -1189,6 +1189,54 @@ print(f"  een cent duurder: {merkbaar.rule}: {merkbaar.charge}")
 controle("een cent duurder is wel een reden om te stoppen",
          not merkbaar.charge, f"{merkbaar.rule}")
 
+print("=== 39. de coach zegt niet dat je teruglevert terwijl je inkoopt ===")
+# Sven op 30-08-2026: "de coach zegt je levert nu 0,7 kW terug maar ik lever
+# helemaal niks terug." Hij had gelijk, en de meter ook.
+#
+# De rauwe getallen van dat moment, om 13:11:46 bij Van den Dam:
+#
+#   afname          3.683 W
+#   teruglevering       0 W
+#   zon             1.157 W
+#   laadpaal        4.338 W
+#
+# Het overschot dat de coach gebruikt is 0 - 3683 + 4338 = 655 W. Dat is wat er
+# teruggeleverd zou worden als de paal uit stond, en dat getal is met opzet zo:
+# zonder de paal eruit te rekenen ziet de coach zijn eigen laden aan voor
+# huisverbruik en praat hij zichzelf uit zijn eigen zon. Zie `_read` in coach.py.
+#
+# Maar dan mag er niet "je levert 0,7 kW terug" op de kaart staan, want dat is
+# iets anders dan er gebeurt.
+nu39 = middag(13, 11)
+NET39 = Grid(surplus_w=655.0, phase_amps=[5.0, 6.0, 6.0], fuse_amps=25.0,
+             charger_amps=6.3)
+LAADT39 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=6.3,
+                  started_at=middag(13, 0), limit_amps=6.0)
+prijzen39 = []
+for uur, prijs in ((13, 0.1277), (14, 0.1278), (15, 0.1288), (16, 0.1296),
+                   (17, 0.1976), (18, 0.3190)):
+    start = dt.datetime(2026, 8, 18, uur, 0)
+    prijzen39.append({"start": start, "end": start + dt.timedelta(hours=1),
+                      "price": prijs, "feed_in": prijs - 0.0242})
+
+BUS39 = Car(capacity_kwh=65.0, phases=3, soc_percent=76.5)
+d39 = decide(nu39, prijzen39, NET39, BUS39, LAADT39, venster(nu39),
+             tariff=VAST, sun=ZON_KRAP)
+print(f"  {d39.rule}: {d39.reason}")
+controle("hij zegt dat er zon over is", "zon over" in d39.reason, f"{d39.reason}")
+controle("en niet dat je teruglevert terwijl je inkoopt",
+         "levert" not in d39.reason, f"{d39.reason}")
+
+# En als de zon het helemaal dekt is het nog steeds dezelfde zin, want het is
+# nog steeds hetzelfde getal.
+RUIM39 = Grid(surplus_w=5000.0, phase_amps=[5.0, 6.0, 6.0], fuse_amps=25.0,
+              charger_amps=6.3)
+d39b = decide(nu39, prijzen39, RUIM39, BUS39, LAADT39, venster(nu39),
+              tariff=VAST, sun=ZON_KRAP)
+print(f"  met 5 kW over: {d39b.reason}")
+controle("ook als de zon het helemaal dekt", "zon over" in d39b.reason
+         and "levert" not in d39b.reason, f"{d39b.reason}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
