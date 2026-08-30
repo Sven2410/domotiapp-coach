@@ -2114,9 +2114,6 @@ class DacViewOverview extends DacElement {
                 ${icons.sliders} Schema instellen
               </button>
             </div>
-            <button type="button" class="plan-link ahead" data-ahead="${slot}">
-              ${icons.compass} Wat gaat hij doen
-            </button>
             <button class="release" type="button" data-release="${slot}" aria-pressed="false">
               <span class="mark" data-mark="${slot}"></span>
               <span data-release-text="${slot}"></span>
@@ -2129,6 +2126,12 @@ class DacViewOverview extends DacElement {
             </button>
             <button class="manual" type="button" data-manual="${slot}" hidden>
               ${icons.sliders}<span>Handmatige besturing</span>
+            </button>
+            <!-- Achteraan, want dit is de enige knop die niets doet: hij laat
+                 alleen zien wat er al besloten is. Dezelfde vorm als de rest,
+                 anders breekt hij de rij. -->
+            <button class="boost" type="button" data-ahead="${slot}" hidden>
+              ${icons.compass}<span>Wat gaat hij doen</span>
             </button>
           </div>
           <p class="steer-hint" data-hint="${slot}"></p>
