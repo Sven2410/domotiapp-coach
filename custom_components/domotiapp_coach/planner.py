@@ -1549,9 +1549,10 @@ def _decide(
             dekt = grid.surplus_w >= trekt
             hoeveel = f"{grid.surplus_w / 1000:.1f}".replace(".", ",")
             uitleg = (
-                f"Je levert {hoeveel} kW terug, dus die gaat nu in de auto"
+                f"Er is {hoeveel} kW zon over, dus die gaat nu in de auto"
                 if dekt
-                else f"Je levert {hoeveel} kW terug. Dat net aanvullen is goedkoper dan wachten"
+                else f"Er is {hoeveel} kW zon over. Dat net aanvullen is goedkoper "
+                "dan wachten"
             )
             return Decision(
                 True,
@@ -1565,7 +1566,7 @@ def _decide(
         return Decision(
             True,
             amps,
-            f"Je levert {hoeveel} kW terug, dus die gaat nu in de auto.",
+            f"Er is {hoeveel} kW zon over, dus die gaat nu in de auto.",
             plan="Loopt mee met wat de zon geeft.",
             rule="surplus",
         )
@@ -1575,7 +1576,7 @@ def _decide(
         return Decision(
             True,
             amps,
-            f"Je levert {hoeveel} kW terug, dus die gaat nu in de auto.",
+            f"Er is {hoeveel} kW zon over, dus die gaat nu in de auto.",
             plan="Loopt mee met wat de zon geeft.",
             rule="surplus",
         )
