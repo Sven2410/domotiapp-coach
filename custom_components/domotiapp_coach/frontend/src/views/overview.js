@@ -1734,9 +1734,10 @@ class DacViewOverview extends DacElement {
     vooruit.hidden = !besluit.plan_ahead || besluit.rule === "disconnected";
 
     // En bijwerken terwijl hij openstaat, want de coach denkt elke minuut
-    // opnieuw en een tijdlijn van vijf minuten geleden is een verkeerde.
-    const device = this.steerDevices_?.[slot];
-    if (device && this.aheadFor_ === device.id) {
+    // opnieuw en een tijdlijn van vijf minuten geleden is een verkeerde. Het
+    // apparaat staat hier al in de parameter; er een tweede `device` naast
+    // zetten is een `SyntaxError` en dus een zwart paneel.
+    if (this.aheadFor_ === device.id) {
       this.$("#ahead-sheet").update(besluit);
     }
   }
