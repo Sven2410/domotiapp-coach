@@ -274,6 +274,89 @@ paal_traag = vast_zonnig.kopie(
     gebeurtenissen=[("07:05", "soc_opgeven", 30)],
 )
 
+# --- Van den Dam, het weekend van 04-09-2026 -----------------------------------
+#
+# De eerste echte laadbeurt met v0.47.x, nagebouwd met zijn eigen cijfers zoals
+# ze vrijdagavond 21:21 in Home Assistant stonden: de all-in prijzen van
+# vrijdag en zaterdag, de zonkromme van het energiedashboard voor zaterdag
+# (lokale uren), het huisverbruik als mediaan per uur over de week ervoor uit
+# de eigen opslag, de Ford op 8,5%, de Equalizer, zaterdag uitgevinkt en
+# zondag klaar om 06:00. Zondag zelf kende niemand nog; die staat hier als
+# een aanname en er is een variant met een dure zondagnacht.
+VDD_HUIS_W = {
+    0: 1138, 1: 1052, 2: 1026, 3: 1355, 4: 949, 5: 723, 6: 640, 7: 972,
+    8: 1029, 9: 1048, 10: 970, 11: 986, 12: 972, 13: 1300, 14: 1419, 15: 1263,
+    16: 1576, 17: 1589, 18: 1322, 19: 1299, 20: 1507, 21: 1244, 22: 1809, 23: 1085,
+}
+VDD_ZON_KWH = {
+    7: 0.54, 8: 1.12, 9: 1.56, 10: 1.88, 11: 2.28, 12: 2.64, 13: 2.68,
+    14: 2.42, 15: 2.0, 16: 1.64, 17: 1.24, 18: 0.73, 19: 0.34,
+}
+VDD_VRIJDAG = [
+    0.3018, 0.2790, 0.2694, 0.2690, 0.2600, 0.2609, 0.2899, 0.3133,
+    0.3141, 0.2957, 0.2574, 0.2048, 0.1870, 0.1694, 0.1776, 0.1779,
+    0.1872, 0.2141, 0.2829, 0.3032, 0.3117, 0.3159, 0.3098, 0.2993,
+]
+VDD_ZATERDAG = [
+    0.2320, 0.2321, 0.2243, 0.2047, 0.2010, 0.2026, 0.2198, 0.2070,
+    0.1835, 0.1320, 0.1287, 0.1244, 0.1182, 0.1123, 0.1137, 0.1210,
+    0.1269, 0.1858, 0.3105, 0.3616, 0.3918, 0.4000, 0.3902, 0.3666,
+]
+# Zondag: een aanname, de zaterdag met een iets duurdere nacht.
+VDD_ZONDAG = [
+    0.2500, 0.2450, 0.2400, 0.2300, 0.2250, 0.2280, 0.2350, 0.2200,
+    0.1900, 0.1500, 0.1400, 0.1350, 0.1300, 0.1250, 0.1280, 0.1350,
+    0.1400, 0.1950, 0.3200, 0.3700, 0.3900, 0.4000, 0.3900, 0.3600,
+]
+VDD_ZONDAG_DUUR = [0.31] * 8 + VDD_ZONDAG[8:]
+FORD = Auto(naam="Ford", capaciteit_kwh=65.0, soc=8.5, fasen=3, max_amps=16.0)
+VDD_PRIJZEN = {"2026-09-04": VDD_VRIJDAG, "2026-09-05": VDD_ZATERDAG, "2026-09-06": VDD_ZONDAG}
+
+van_den_dam = Scenario(
+    "van-den-dam",
+    "vrijdag 19:01 erin op 8,5%, zaterdag uit, zondag klaar om 06:00, met zijn eigen prijzen, zon en huis",
+    contract="dynamisch-salderen",
+    zon=Zon(kromme=VDD_ZON_KWH), huis=Huis(profiel=VDD_HUIS_W, verdeling=(0.25, 0.15, 0.6)),
+    auto=FORD, paal=Paal(teller_interval_min=60),
+    prijzen=Prijzen(per_dag=VDD_PRIJZEN),
+    begin="2026-09-04 18:55", kabel_erin="19:01", klaar_om="06:00", dagen_uit=(5,),
+    duur_uren=36, equalizer=True, zekering=25.0, aansluiting_fasen=3,
+)
+vdd_bewolkt = van_den_dam.kopie(
+    naam="van-den-dam-bewolkt", uitleg="hetzelfde, maar zaterdag valt de zon tegen: een derde van de verwachting",
+    zon=Zon(kromme=VDD_ZON_KWH, wolken="bewolkt", voorspeld="helder"),
+)
+vdd_geen_zon = van_den_dam.kopie(
+    naam="van-den-dam-geen-zon", uitleg="hetzelfde, zaterdag helemaal dicht terwijl helder voorspeld was",
+    zon=Zon(kromme=VDD_ZON_KWH, wolken="geen", voorspeld="helder"),
+)
+vdd_dure_zondag = van_den_dam.kopie(
+    naam="van-den-dam-dure-zondagnacht", uitleg="hetzelfde, maar de zondagnacht wordt 0,31: dan moet zaterdagmiddag het werk doen",
+    prijzen=Prijzen(per_dag={**VDD_PRIJZEN, "2026-09-06": VDD_ZONDAG_DUUR}),
+)
+vdd_wekken = van_den_dam.kopie(
+    naam="van-den-dam-ford-wekken", uitleg="hetzelfde, de Ford wil 10 A om wakker te worden",
+    auto=replace(FORD, wek_amps=10.0),
+)
+vdd_koken = van_den_dam.kopie(
+    naam="van-den-dam-oven", uitleg="hetzelfde, zaterdag om 12:30 een uur lang 3 kW erbij op de zware fase",
+    gebeurtenissen=[("12:30", "oven", 60)],
+)
+vdd_p1_weg = van_den_dam.kopie(
+    naam="van-den-dam-p1-weg", uitleg="hetzelfde, de P1 valt zaterdag om 11:00 een kwartier weg",
+    gebeurtenissen=[("11:00", "p1_weg", 15)],
+)
+vdd_prijzen_laat = van_den_dam.kopie(
+    naam="van-den-dam-prijzen-laat", uitleg="hetzelfde, de prijzen van zondag komen pas om 15:30",
+    prijzen=Prijzen(bekend_om="15:30", per_dag=VDD_PRIJZEN),
+)
+vdd_geen_soc = van_den_dam.kopie(
+    naam="van-den-dam-geen-accustand", uitleg="hetzelfde, de Ford meldt zijn accustand niet",
+    auto=replace(FORD, meldt_soc=False),
+)
+VAN_DEN_DAM = [van_den_dam, vdd_bewolkt, vdd_geen_zon, vdd_dure_zondag, vdd_wekken,
+               vdd_koken, vdd_p1_weg, vdd_prijzen_laat, vdd_geen_soc]
+
 ALLE = [
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
@@ -286,6 +369,7 @@ ALLE = [
     p1_weg, p1_lang_weg, paal_traag,
     tien_uur, tien_uur_zon, tien_uur_valt_tegen, tien_uur_vast, equalizer, prijzen_weg,
     weekend, weekend_geen_zon,
+    *VAN_DEN_DAM,
 ]
 
 

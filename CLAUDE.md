@@ -158,6 +158,16 @@ die regel bestaat, en een controle in `test_virtueel.py` op wat de bewoner ervan
 merkt: kilowattuur, kosten, of de klaar-tijd gehaald is, en welke meldingen er
 kwamen.
 
+**Een echte woning nabouwen** kan sinds 04-09-2026 met drie velden: `Zon(kromme=...)`
+met de uurkromme van het energiedashboard in kWh per lokaal uur, `Huis(profiel=...)`
+met de mediaan van het huisverbruik in watt per uur uit de eigen opslag
+(`domotiapp_coach/history/quarters`), en `Prijzen(per_dag={"2026-09-05": [...]})`
+met de all-in prijzen zoals de klant ze zag. Let op: het energiedashboard en de
+prijssensor geven hun uren in UTC; twee uur erbij voor de lokale lijst. De negen
+`van-den-dam-*`-scenario's zijn zo gebouwd, uit de stand van vrijdagavond
+04-09-2026, en `test_virtueel.py` meet er de vijf controlepunten van die
+laadbeurt op na.
+
 Elk scenario meldt ook een **optimum**: wat dezelfde laadbeurt gekost had als
 de coach de hele dag vooraf had gekend. Dezelfde som als `goedkoopste`, met de
 werkelijke zon en alle prijzen. Zit de coach daar ver boven, dan is er iets te

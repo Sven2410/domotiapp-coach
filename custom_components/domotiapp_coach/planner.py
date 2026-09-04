@@ -2271,6 +2271,24 @@ def _decide(
                 # Een tiende ampère is de nauwkeurigheid waarmee een paal een
                 # limiet volgt; die hoort geen hele ampère extra te kosten.
                 amps = max(MIN_AMPS, min(ceiling, math.ceil(rustig - 0.1)))
+                # En niet elke minuut een ampère op en neer. De auto volgt de
+                # limiet met een minuut vertraging, en een tempo dat elke ronde
+                # opnieuw uit de meting komt, jaagt daar achteraan: 14, 15, 14,
+                # 15, drieëndertig opdrachten in één uur naar de paal. Gezien in
+                # het virtuele huis met Van den Dams cijfers op 04-09-2026.
+                # Scheelt het nieuwe tempo één ampère met wat er al staat, dan
+                # blijft staan wat er staat; naar boven afronden vangt de rest.
+                # Twee ampère speling, want de slingering is er een van twee:
+                # op 14 A loopt hij achter en zegt de som 16, op 16 A loopt hij
+                # voor en zegt de som 14. Het tempo dat werkelijk klopt zit
+                # ertussen, en dat haalt de afronding naar boven eruit.
+                huidig = int(charger.limit_amps or 0)
+                if (
+                    charger.charging
+                    and abs(amps - huidig) <= 2
+                    and MIN_AMPS <= huidig <= ceiling
+                ):
+                    amps = huidig
 
         # Nooit langzamer dan het dak op dit moment geeft. Rustig aan doen is
         # goed voor de aansluiting, maar niet ten koste van zon die anders het
