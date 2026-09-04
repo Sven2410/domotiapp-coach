@@ -149,6 +149,15 @@ FULL_PERCENT = 99.0
 # plaats van het volle vermogen.
 PRICE_MARGIN = 0.001
 
+# Hoeveel duurder het uur waar een lopende beurt in zit mag zijn dan de uren
+# van het plan voordat hij ervoor stopt. Een halve cent per kilowattuur: een
+# hele cent is wel een reden om te stoppen (proef 40 in test_planner.py), een
+# paar tiende cent niet. Een stop is niet gratis: een auto die uitgezet wordt
+# komt daar niet altijd zelf weer uit (zie `nood_ruimte`), en in het virtuele
+# huis stopte en startte hij op een zondagochtend vier keer omdat het uur van
+# dat moment steeds een paar tiende cent duurder was dan het volgende zonuur.
+STOP_MARGIN = 0.005
+
 
 # --- What the coach is told -----------------------------------------------
 
@@ -1059,10 +1068,18 @@ def schijven(
                 gedekt = min(over, plafond_kwh)
                 if gedekt > SCHIJF_MINIMUM:
                     uit.append(Schijf(rij["start"], rij["end"], terug, gedekt, "zon"))
-            elif in_evening_peak(rij["start"]) or alleen_zon:
+            elif in_evening_peak(rij["start"]):
                 # Bijkopen tot de ondergrens is ook net, en in de avondpiek
                 # komt er niets van het net bij. De zon van dat uur is dan te
                 # weinig om alleen op te laden, dus dat uur bestaat niet.
+                #
+                # Buiten de avondpiek telt zo'n uur wél, ook als de prijzen
+                # tot de klaar-tijd nog niet bekend zijn (`alleen_zon`). Sven
+                # op 05-09-2026: "het kan toch zijn dat je wel wat opwekt om
+                # 14 uur en dan is vaak de prijs ook goedkoop; dat weegt
+                # zwaarder dan op een iets goedkopere prijs laden in de
+                # nacht." Een uur met zon is een zonuur, ook als er net bij
+                # moet; een uur zonder zon wacht op de prijzen.
                 pass
             else:
                 gedekt = min(vloer_kwh, plafond_kwh)
@@ -2007,6 +2024,10 @@ def _decide(
     # uit. De prijzen van morgen komen rond 13:00, en vanaf dat moment plant
     # hij de nacht gewoon. De klaar-tijdregel hierboven en `capaciteit_kwh`
     # blijven het vangnet.
+    #
+    # "Zon" is hier elk uur waarin het dak iets geeft, ook als dat te weinig is
+    # om zonder net op te laden: de bijmenging tot de ondergrens hoort erbij,
+    # tegen de bekende prijs van dat uur. Zie de vloer in `schijven`.
     horizon = max((rij["end"] for rij in prices), default=None)
     alleen_zon = bool(prices) and einde_plan is not None and horizon < einde_plan
     alle = schijven(
@@ -2160,7 +2181,7 @@ def _decide(
     if nu_net is None and charger.charging:
         netprijzen = [s.price for s, _ in gekozen if not s.solar]
         hier = next((s for s in alle if s.start <= now < s.end and not s.solar), None)
-        if netprijzen and hier is not None and hier.price <= max(netprijzen) + PRICE_MARGIN:
+        if netprijzen and hier is not None and hier.price <= max(netprijzen) + STOP_MARGIN:
             return Decision(
                 True,
                 ceiling,
@@ -2191,6 +2212,25 @@ def _decide(
                     plan=_describe(uren),
                     rule="cheap-hour+reserve",
                 )
+
+    # Een lopende beurt op zon stopt evenmin voor een verschil dat er niet is.
+    # Het uur waar hij in zit is dan net iets duurder dan het volgende zonuur,
+    # bijvoorbeeld omdat de ochtend nog weinig geeft; dat is geen reden om de
+    # auto uit te zetten en over een uur weer te wekken.
+    if nu_zon is None and charger.charging:
+        hier_zon = next((s for s in alle if s.solar and s.start <= now < s.end), None)
+        duurste = max((s.price for s, _ in gekozen), default=None)
+        if hier_zon is not None and duurste is not None and hier_zon.price <= duurste + STOP_MARGIN:
+            hoeveel = f"{grid.surplus_w / 1000:.1f}".replace(".", ",")
+            return Decision(
+                True,
+                MIN_AMPS if hier_zon.kind == "vloer" else amps_zon,
+                f"Er is {hoeveel} kW zon over, en dit uur scheelt bijna niets met de "
+                "uren die hij gepland had, dus hij laadt door in plaats van te stoppen "
+                "en zo weer te beginnen.",
+                plan=_describe(uren),
+                rule="surplus+near",
+            )
 
     if nu_zon is not None:
         # De zon van dit uur is goedkoop genoeg. Geeft het dak genoeg om er zelf
