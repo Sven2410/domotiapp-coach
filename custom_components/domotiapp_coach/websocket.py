@@ -583,6 +583,20 @@ async def async_history_quarters(
     connection.send_result(msg["id"], rijen)
 
 
+@websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/notifications/list"})
+@websocket_api.async_response
+async def async_notifications_list(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Alles wat de coach ooit gemeld heeft, de nieuwste eerst."""
+    from .storage import async_get_meldingen
+
+    items = await async_get_meldingen(hass).async_list()
+    connection.send_result(msg["id"], list(reversed(items)))
+
+
 @websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/coach/state"})
 @callback
 def async_coach_state(
@@ -735,6 +749,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_set_car_soc)
     websocket_api.async_register_command(hass, async_history_quarters)
     websocket_api.async_register_command(hass, async_coach_state)
+    websocket_api.async_register_command(hass, async_notifications_list)
     websocket_api.async_register_command(hass, async_coach_approve)
     websocket_api.async_register_command(hass, async_coach_boost)
     websocket_api.async_register_command(hass, async_coach_pause)

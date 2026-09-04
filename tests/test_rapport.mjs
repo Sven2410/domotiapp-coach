@@ -441,6 +441,64 @@ proef("een onbekende accustand geeft een streepje en geen nul", () => {
   assert.ok(!tekst.includes("0,0 kWh"), "en zeker geen verzonnen nul");
 });
 
+// --- het meldingenscherm -----------------------------------------------------
+//
+// Sven op 04-09-2026: "daarom wil ik ook een soort geschiedenis meldingen
+// scherm." De lijst komt van de server, de nieuwste eerst, en wordt per dag
+// gegroepeerd: Vandaag, Gisteren, en daarna de dag bij naam.
+
+const { groepeer, dagkop } = await import(
+  "../custom_components/domotiapp_coach/frontend/src/views/notifications.js"
+);
+const Meldingen = geregistreerd.get("dac-view-notifications");
+assert.ok(Meldingen, "het meldingenscherm hoort zich te registreren");
+
+proef("meldingen worden per dag gegroepeerd, de nieuwste eerst", () => {
+  const nu = new Date(2026, 8, 6, 8, 0);
+  const groepen = groepeer([
+    { at: "2026-09-06T04:44:00", message: "Ford aan Laadpaal is vol." },
+    { at: "2026-09-05T13:40:00", message: "De accustand van Ford meldt al 10 minuten niets." },
+    { at: "2026-09-05T11:10:00", message: "De status van Laadpaal meldt al 10 minuten niets." },
+    { at: "2026-09-04T19:01:00", message: "De coach wil laden maar weet niet hoe vol hij is." },
+    { at: "", message: "zonder tijd hoort er niet in" },
+  ], nu);
+  assert.deepEqual(groepen.map((g) => g.kop), ["Vandaag", "Gisteren", "vrijdag 4 september"]);
+  assert.deepEqual(groepen[1].rijen.map((r) => r.tijd), ["13:40", "11:10"]);
+  assert.equal(groepen[0].rijen[0].tekst, "Ford aan Laadpaal is vol.");
+  assert.equal(dagkop(new Date(2025, 11, 24), nu), "woensdag 24 december 2025", "een ander jaar krijgt het jaar erbij");
+});
+
+proef("het scherm tekent een kop per dag en een rij per melding", () => {
+  const knopen = new Map();
+  const maak = () => {
+    const kinderen = [];
+    return {
+      className: "", textContent: "", kinderen,
+      append(...items) { kinderen.push(...items); },
+      replaceChildren(...items) { kinderen.length = 0; kinderen.push(...items); },
+    };
+  };
+  knopen.set("#lijst", maak());
+  globalThis.document.createElement = () => maak();
+  const el = Object.create(Meldingen.prototype);
+  el.$ = (kiezer) => knopen.get(kiezer) ?? null;
+  el.geladen_ = true;
+  el.items_ = [
+    { at: "2026-09-05T13:40:00", message: "De accustand van Ford meldt al 10 minuten niets." },
+    { at: "2026-09-05T11:10:00", message: "De status van Laadpaal meldt al 10 minuten niets." },
+  ];
+  el.paint_();
+  const lijst = knopen.get("#lijst").kinderen;
+  assert.equal(lijst.length, 3, "een dagkop en twee rijen");
+  assert.equal(lijst[0].className, "dag");
+  assert.deepEqual(lijst[1].kinderen.map((k) => k.textContent),
+    ["13:40", "De accustand van Ford meldt al 10 minuten niets."]);
+
+  el.items_ = [];
+  el.paint_();
+  assert.match(knopen.get("#lijst").kinderen[0].textContent, /nog niets gemeld/, "leeg is een zin, geen leeg scherm");
+});
+
 // --- de knoppenrij op de laadpaalkaart --------------------------------------
 //
 // Op 30-08-2026 kreeg de nieuwe knop "Wat gaat hij doen" de klasse `plan-link`,

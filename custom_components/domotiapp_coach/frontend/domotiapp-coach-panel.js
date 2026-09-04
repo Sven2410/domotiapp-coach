@@ -22,6 +22,7 @@ import { navItemsFor } from "./src/header.js";
 import "./src/header.js";
 import "./src/views/overview.js";
 import "./src/views/history.js";
+import "./src/views/notifications.js";
 import "./src/views/devices.js";
 import "./src/views/strategy.js";
 import "./src/views/installation.js";
@@ -34,6 +35,7 @@ const EVENT_SETTINGS_UPDATED = "domotiapp_coach_settings_updated";
 const BUILT = {
   overzicht: "dac-view-overview",
   historie: "dac-view-history",
+  meldingen: "dac-view-notifications",
   apparaten: "dac-view-devices",
   strategie: "dac-view-strategy",
   installatie: "dac-view-installation",
