@@ -110,15 +110,15 @@ Easee is uitgewerkt: de Easee-integratie zelf (daar komt het `device_id` uit dat
 `easee.action_command` nodig heeft), status, reden geen stroomvraag,
 levensduurverbruik, maximale limiet en stroom, plus de woorden voor starten,
 stoppen, pauzeren, hervatten en herstarten. Die woorden staan voorgevuld op wat
-Easee vandaag gebruikt en zijn aan te passen. Zaptec, Wallbox, Zappi en Peblar staan in de
-lijst maar hebben nog geen eigen velden. Draait een apparaat, dan is zijn bol op
-het overzicht aan te klikken voor precies die gegevens.
+Easee vandaag gebruikt en zijn aan te passen. Een paal van een ander merk kies
+je als "Overig": die kan de coach volgen maar niet sturen. Draait een apparaat,
+dan is zijn bol op het overzicht aan te klikken voor precies die gegevens.
 
 Bij een **vaatwasser** gaat het net zo. **Home Connect** is uitgewerkt — dat is
 wat Bosch, Siemens, Neff, Gaggenau en Constructa allemaal gebruiken — met de
 status, het geselecteerde programma, de resterende tijd en de deurstand, plus de
-knoppen waarmee gestart en gestopt wordt. Miele en LG staan in de lijst maar
-hebben nog geen velden.
+knoppen waarmee gestart en gestopt wordt. Een vaatwasser van een ander merk
+kies je als "Overig".
 
 Integraties spellen dezelfde waarde niet hetzelfde. Home Assistant's eigen Home
 Connect-integratie meldt `ready`; de alternatieve meldt

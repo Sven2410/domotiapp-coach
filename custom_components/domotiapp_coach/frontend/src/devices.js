@@ -32,8 +32,9 @@ export const DEVICE_TYPES = [
  * `needed` marks the ones the coach cannot steer without; they are only ever
  * insisted on once steering is switched on for that device.
  *
- * Only Easee is worked out. The rest are listed because a customer should be
- * able to say what they have before we get round to their brand.
+ * Only Easee is supported, and "overig" for a charger that is watched but not
+ * steered. Sven took the other brands out on 04-09-2026: a brand in a list
+ * reads as a promise, and there was none behind it.
  */
 export const CHARGER_BRANDS = [
   {
@@ -204,10 +205,6 @@ export const CHARGER_BRANDS = [
       },
     ],
   },
-  { id: "zaptec", label: "Zaptec", fields: [] },
-  { id: "wallbox", label: "Wallbox", fields: [] },
-  { id: "zappi", label: "Zappi", fields: [] },
-  { id: "peblar", label: "Peblar", fields: [] },
   { id: "overig", label: "Overig", fields: [] },
 ];
 
@@ -394,8 +391,6 @@ export const DISHWASHER_BRANDS = [
     // that entity is one you can write to. Nothing extra to fill in for it.
     programField: "program",
   },
-  { id: "miele", label: "Miele", fields: [] },
-  { id: "lg", label: "LG", fields: [] },
   { id: "overig", label: "Overig", fields: [] },
 ];
 

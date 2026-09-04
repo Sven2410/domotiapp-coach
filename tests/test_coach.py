@@ -1117,16 +1117,16 @@ print("=== 25. de kWh-teller mag ook in het algemene veld staan ===")
 # (optioneel)" en "Levensduur verbruik" wezen naar dezelfde sensor en hij typte
 # hem twee keer.
 #
-# Wat eronder zat was erger. Alleen Easee had dat merkveld; Zaptec, Wallbox,
-# Zappi en Peblar hebben geen enkel merkveld. Bij die klanten kwam er dus nooit
-# een teller binnen, ook niet als de Energieteller keurig was ingevuld, en viel
-# het verslag terug op wat de coach zelf aan vermogen langs zag komen.
+# Wat eronder zat was erger. Alleen Easee had dat merkveld; een paal van een
+# ander merk ("overig", sinds 04-09-2026 het enige andere dat er nog in de lijst
+# staat) heeft geen enkel merkveld. Bij die klanten kwam er dus nooit een
+# teller binnen, ook niet als de Energieteller keurig was ingevuld, en viel het
+# verslag terug op wat de coach zelf aan vermogen langs zag komen.
 
-# Een paal zonder merkveld, met de teller in het algemene veld. Zo staat een
-# Zaptec of een Wallbox erbij.
+# Een paal zonder merkveld, met de teller in het algemene veld.
 ZONDER_MERKVELD = dict(
     LAADPAAL,
-    brand="zaptec",
+    brand="overig",
     energy_entity="sensor.laadpaal_teller",
     entities={k: v for k, v in LAADPAAL["entities"].items() if k != "lifetime_energy"},
 )
