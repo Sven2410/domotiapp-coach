@@ -964,6 +964,7 @@ def schijven(
     tariff: Tariff = Tariff(),
     forecast: Forecast = Forecast(),
     ceiling_later: int | None = None,
+    alleen_zon: bool = False,
 ) -> list[Schijf]:
     """Alle manieren om tussen nu en de klaar-tijd te laden, met hun prijs.
 
@@ -980,11 +981,6 @@ def schijven(
     het schema in dezelfde som en niet in een sport ernaast.
     """
     blokken = prices or _vlakke_blokken(now, end, tariff)
-    # Zonder klaar-tijd tellen alleen de prijzen die er echt zijn. Een geschatte
-    # dag erachter zou anders altijd net zo goedkoop lijken als vandaag, en dan
-    # verschuift het goedkoopste moment elke dag een dag; de auto werd nooit vol.
-    if end is None:
-        blokken = [rij for rij in blokken if not rij.get("estimated")]
     vermogen_kw = watts_for(ceiling, car.phases) / 1000.0
     # Voor de uren die nog komen geldt wat paal en auto kunnen, niet wat er op
     # dit moment onder de zekering of de lastbewaker past. Zie `structural_ceiling`.
@@ -1063,7 +1059,7 @@ def schijven(
                 gedekt = min(over, plafond_kwh)
                 if gedekt > SCHIJF_MINIMUM:
                     uit.append(Schijf(rij["start"], rij["end"], terug, gedekt, "zon"))
-            elif in_evening_peak(rij["start"]):
+            elif in_evening_peak(rij["start"]) or alleen_zon:
                 # Bijkopen tot de ondergrens is ook net, en in de avondpiek
                 # komt er niets van het net bij. De zon van dat uur is dan te
                 # weinig om alleen op te laden, dus dat uur bestaat niet.
@@ -1085,11 +1081,60 @@ def schijven(
             plafond_kwh - gedekt > SCHIJF_MINIMUM
             and rij["end"] > netto_vanaf
             and not in_evening_peak(rij["start"])
+            and not alleen_zon
         ):
             uit.append(
                 Schijf(rij["start"], rij["end"], rij["price"], plafond_kwh - gedekt)
             )
     return uit
+
+
+def capaciteit_kwh(
+    now: datetime,
+    start: datetime | None,
+    end: datetime | None,
+    grid: Grid,
+    car: Car,
+    ceiling_later: int,
+    forecast: Forecast = Forecast(),
+    vast: bool = False,
+) -> float:
+    """Hoeveel er tot `end` nog in kan, wat de prijzen ook zijn.
+
+    Voor de klaar-tijdregel. Die mag niet afhangen van welke prijzen al bekend
+    zijn: een weekend waarin er alleen op zon geladen wordt omdat de prijzen
+    van maandag er nog niet zijn (zie `alleen_zon` in `_decide`) is geen reden
+    om zaterdagochtend al op vol vermogen te gaan. Wel afhankelijk van wat er
+    wérkelijk dicht is: de avondpiek, en bij een vast contract de avond voor
+    de klaar-tijd. Daar telt alleen de zon die er dan verwacht wordt.
+    """
+    if end is None:
+        return float("inf")
+    vanaf = max(now, start) if start else now
+    avond = _evening_before(end) if vast else None
+    vermogen = watts_for(ceiling_later, car.phases) / 1000.0
+    som = 0.0
+    uur = now.replace(minute=0, second=0, microsecond=0)
+    while uur < end:
+        volgend = uur + timedelta(hours=1)
+        van = max(uur, vanaf)
+        tot = min(volgend, end)
+        deel = (tot - van).total_seconds() / 3600.0
+        if deel > 0:
+            net_mag = not in_evening_peak(uur) and (avond is None or volgend > avond)
+            if net_mag:
+                som += vermogen * deel
+            else:
+                if uur <= now < volgend:
+                    over = max(0.0, grid.surplus_w) / 1000.0 * deel
+                else:
+                    over = max(
+                        0.0,
+                        forecast.solar_kwh.get(uur, 0.0) - forecast.house_kwh.get(uur.hour, 0.0),
+                    ) * deel
+                som += min(over, vermogen * deel)
+        uur = volgend
+    return som
 
 
 def goedkoopste(alle: list[Schijf], nodig_kwh: float) -> list[tuple[Schijf, float]]:
@@ -1158,9 +1203,6 @@ class Blok:
     # van plan is te laden.
     solar_kwh: float = 0.0
     kwh: float = 0.0
-    # Of de prijs van dit blok een schatting is: de prijs van hetzelfde uur van
-    # vandaag, zolang die van morgen nog niet bekend is. Zie `_prices`.
-    estimated: bool = False
 
 
 @dataclass
@@ -1237,10 +1279,20 @@ def timeline(
         estimated=forecast.estimated,
     )
 
+    horizon = max((rij["end"] for rij in prices), default=None)
+    alleen_zon = bool(prices) and einde is not None and horizon < einde
     alle = schijven(
         now, prices, grid, car, amps, begin, einde, tariff, forecast,
-        ceiling_later=structural_ceiling(car, charger) or amps,
+        ceiling_later=structural_ceiling(car, charger) or amps, alleen_zon=alleen_zon,
     )
+    if alleen_zon:
+        plan.note = (
+            "De prijzen tot je klaar-tijd zijn nog niet bekend. Tot die binnenkomen, "
+            "meestal rond 13:00, laadt hij alleen op je eigen zon; daarna plant hij "
+            "de rest."
+        )
+    if not alle and alleen_zon:
+        return plan
     if not alle:
         plan.note = (
             "Er zijn nog geen prijzen bekend, en er is ook geen vast bedrag "
@@ -1299,7 +1351,6 @@ def timeline(
                 why=waarom,
                 solar_kwh=zonschijf.kwh if zonschijf is not None else 0.0,
                 kwh=genomen.get(start, 0.0),
-                estimated=bool(rij.get("estimated")),
             )
         )
 
@@ -1948,10 +1999,30 @@ def _decide(
             needs_soc=soc_unknown,
         )
 
+    # Reiken de bekende prijzen niet tot het einde van het plan, dan komt er tot
+    # ze er zijn alleen zon in. Sven op 04-09-2026, over een zondag die in het
+    # schema uitgevinkt is en een klaar-tijd op maandag 06:00: "dan moet hij
+    # echt puur op zonne-energie laden totdat de prijzen ook bekend zijn." Geen
+    # geschatte prijzen dus; die stonden hier een middag lang en zijn er weer
+    # uit. De prijzen van morgen komen rond 13:00, en vanaf dat moment plant
+    # hij de nacht gewoon. De klaar-tijdregel hierboven en `capaciteit_kwh`
+    # blijven het vangnet.
+    horizon = max((rij["end"] for rij in prices), default=None)
+    alleen_zon = bool(prices) and einde_plan is not None and horizon < einde_plan
     alle = schijven(
         now, prices, grid, car, ceiling, start, einde_plan, tariff, forecast,
-        ceiling_later=structureel,
+        ceiling_later=structureel, alleen_zon=alleen_zon,
     )
+    if not alle and alleen_zon:
+        return Decision(
+            False,
+            0,
+            f"De prijzen tot {_clock(end)} zijn nog niet bekend, dus tot die "
+            "binnenkomen laadt hij alleen op je eigen zon, en die is er nu niet.",
+            plan="Plant de nacht zodra de prijzen er zijn, meestal rond 13:00.",
+            rule="wait-for-prices",
+            hold_minutes=_hold_until_start(now, end, needed),
+        )
     if not alle:
         # Geen prijzen en geen vast bedrag: dan weet de coach niet wat stroom
         # kost. Dat is geen vast contract maar een gat, en het hoort niet
@@ -1990,7 +2061,9 @@ def _decide(
     # uur vóór de klaar-tijd af moet zijn. Zonder deze regel rekende hij bij een
     # kabel om 17:00 alsof hij tot 23:00 vol vermogen had en wachtte hij tot
     # het te laat was.
-    if end is not None and sum(schijf.kwh for schijf in alle) < nodig_kwh:
+    if end is not None and capaciteit_kwh(
+        now, start, einde_plan, grid, car, structureel, forecast, vast=not prices
+    ) < nodig_kwh:
         return Decision(
             True,
             ceiling,
@@ -2145,7 +2218,14 @@ def _decide(
     # de zon.
     begint = uren[0]["start"] if uren else None
     eerste = gekozen[0][0] if gekozen else None
-    if begint is None:
+    if alleen_zon:
+        reden = (
+            f"De prijzen tot {_clock(end)} zijn nog niet bekend, dus tot die "
+            "binnenkomen laadt hij alleen op je eigen zon."
+            + (f" De volgende zon verwacht hij om {_clock(begint)}." if begint else "")
+        )
+        regel = "wait-for-prices"
+    elif begint is None:
         reden, regel = "Het is nu niet het goedkoopste moment om te laden.", "wait-for-price"
     elif eerste is not None and eerste.solar:
         reden = (

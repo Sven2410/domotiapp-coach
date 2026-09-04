@@ -238,9 +238,7 @@ export class DacPlanAheadSheet extends DacElement {
       tijd.textContent = klok(blok.start);
       const prijs = document.createElement("span");
       prijs.className = "prijs";
-      // Een prijs van morgen die nog niet bekend is, is die van hetzelfde uur
-      // van vandaag. Dat hoort erbij te staan, anders leest het als zekerheid.
-      prijs.textContent = euro(blok.price) + (blok.estimated ? " (geschat)" : "");
+      prijs.textContent = euro(blok.price);
       const zon = document.createElement("span");
       zon.className = "zon";
       zon.textContent = blok.solar_kwh > 0.05
@@ -264,15 +262,10 @@ export class DacPlanAheadSheet extends DacElement {
       return;
     }
 
-    const geschat =
-      (plan.estimated
-        ? " De zon per uur is een schatting: er staat geen uurverwachting klaar, dus " +
-          "de dagverwachting is over de daglichturen verdeeld."
-        : "") +
-      ((plan.blocks ?? []).some((blok) => blok.estimated)
-        ? " De prijzen van morgen zijn nog niet bekend; tot die binnenkomen rekent " +
-          "hij met die van vandaag, en die uren staan als geschat gemarkeerd."
-        : "");
+    const geschat = plan.estimated
+      ? " De zon per uur is een schatting: er staat geen uurverwachting klaar, dus " +
+        "de dagverwachting is over de daglichturen verdeeld."
+      : "";
     this.$("#vooruit-voet").textContent =
       (plan.note ||
         "Dit is wat de coach nu van plan is. Hij vergelijkt elk uur tot je klaar-tijd, " +

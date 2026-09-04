@@ -1266,9 +1266,7 @@ PRIJSLIJST_DATETIME = {
     ]},
 }
 hass27, _, coach27 = bouw({"sensor.prijs": PRIJSLIJST_DATETIME}, instellingen())
-# Alleen de echte blokken; sinds 04-09-2026 hangt de coach er een geschatte dag
-# achteraan, en die telt hier niet mee.
-rijen_dt = [r for r in coach27._prices({"contract": DYN}) if not r.get("estimated")]
+rijen_dt = coach27._prices({"contract": DYN})
 print(f"  prijslijst met datetime-objecten: {len(rijen_dt)} blok(ken)")
 controle("een prijslijst met datetime-objecten levert net zo goed blokken op",
          len(rijen_dt) == 1, f"{len(rijen_dt)} blokken uit 1 rij")
@@ -1289,7 +1287,7 @@ PRIJSLIJST_ROMMEL = {
     ]},
 }
 hass28, _, coach28 = bouw({"sensor.prijs": PRIJSLIJST_ROMMEL}, instellingen())
-rommel = [r for r in coach28._prices({"contract": DYN}) if not r.get("estimated")]
+rommel = coach28._prices({"contract": DYN})
 controle("een onleesbare rij wordt overgeslagen, de rest blijft staan",
          len(rommel) == 1, f"{len(rommel)} blokken")
 

@@ -240,6 +240,18 @@ equalizer = tien_uur.kopie(
     naam="equalizer-knijpt", uitleg="3x25 A met een Equalizer; van 13:30 tot 15:00 trekt het huis 7 kW en knijpt hij de paal",
     equalizer=True, huis=Huis(extra=[("13:30", "15:00", 7000.0)]),
 )
+# Svens tweede voorbeeld: zondag uitgevinkt, dus klaar op maandag 06:00. Tot
+# de prijzen van maandag er zijn (zondag rond 13:00) alleen zon.
+weekend = tien_uur.kopie(
+    naam="weekend-zondag-uit",
+    uitleg="zaterdag 10:00 erin, zondag uitgevinkt, klaar maandag 06:00: tot zondag 13:00 alleen zon",
+    zon=Zon(wolken="helder"), voorspeller="dashboard",
+    begin="2026-09-12 09:55", kabel_erin="10:00", duur_uren=44, dagen_uit=(6,),
+)
+weekend_geen_zon = weekend.kopie(
+    naam="weekend-zondag-uit-geen-zon", uitleg="hetzelfde zonder panelen: niets tot zondag 13:00, dan plannen",
+    zon=Zon(wolken="geen"), voorspeller="geen",
+)
 prijzen_weg = tien_uur.kopie(
     naam="prijzen-weg-bij-inpluggen", uitleg="de prijssensor zwijgt de eerste twintig minuten na het inpluggen",
     gebeurtenissen=[("10:00", "prijzen_weg", 20)],
@@ -273,6 +285,7 @@ ALLE = [
     pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,
     p1_weg, p1_lang_weg, paal_traag,
     tien_uur, tien_uur_zon, tien_uur_valt_tegen, tien_uur_vast, equalizer, prijzen_weg,
+    weekend, weekend_geen_zon,
 ]
 
 
