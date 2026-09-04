@@ -376,10 +376,38 @@ proef("elk uur staat er met zijn prijs en of hij laadt", () => {
   // streepjes leest als een storing.
   assert.equal(rijen[1].kinderen[2].textContent, "", "geen zon, geen tekst");
 
+  // Een server van vóór v0.47.5 stuurt geen stroom per blok mee; dan staat de
+  // zon in de kolom, zoals het was.
   const derde = rijen[2].kinderen.map((kind) => kind.textContent);
   assert.deepEqual(derde,
     ["04:00", "€ 0,211", "2,4 kWh zon", "Laden, een van de goedkoopste uren"]);
   assert.ok(rijen[2].className.includes("laadt"), "een laaduur wel");
+});
+
+// Sven op 04-09-2026, over "4,1 kWh zon" bij een dak van 2,4: "dat weet je toch
+// niet. Laat sowieso zien hoeveel ampère hij laadt en kW."
+proef("een laaduur zegt hoe hard, en hoeveel daarvan zon is", () => {
+  const met = { ...NACHT, blocks: [
+    { start: "2026-08-30T09:00:00", end: "2026-08-30T10:00:00", price: 0.132,
+      charging: true, why: "wat zon, aangevuld tot de ondergrens van je paal",
+      solar_kwh: 1.2, kwh: 4.14, amps: 6, kw: 4.14 },
+    { start: "2026-08-30T03:00:00", end: "2026-08-30T04:00:00", price: 0.2215,
+      charging: true, why: "een van de goedkoopste manieren",
+      solar_kwh: 0, kwh: 11.0, amps: 16, kw: 11.04 },
+    { start: "2026-08-30T08:00:00", end: "2026-08-30T09:00:00", price: 0.18,
+      charging: false, why: "duurder dan wat hij nodig heeft",
+      solar_kwh: 0.4, kwh: 0, amps: 0, kw: 0 },
+  ] };
+  const { el, knopen } = vooruitScherm(met);
+  el.paint_();
+  const rijen = knopen.get("#vooruit-uren").kinderen.map((rij) =>
+    rij.kinderen.map((kind) => kind.textContent));
+  assert.deepEqual(rijen[0], ["09:00", "€ 0,132", "6 A",
+    "Laden op 4,1 kW, waarvan 1,2 kWh zon: wat zon, aangevuld tot de ondergrens van je paal"]);
+  assert.deepEqual(rijen[1], ["03:00", "€ 0,222", "16 A",
+    "Laden op 11,0 kW: een van de goedkoopste manieren"]);
+  assert.deepEqual(rijen[2], ["08:00", "€ 0,180", "0,4 kWh zon",
+    "Wachten, duurder dan wat hij nodig heeft"]);
 });
 
 proef("zonder plan staat er waarom, en geen leeg scherm", () => {

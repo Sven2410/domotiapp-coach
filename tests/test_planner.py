@@ -1161,6 +1161,33 @@ controle("terwijl expected_done wel het einde van het laatste zonuur is",
          plan36f.expected_done is not None and plan36f.expected_done.hour == max(uren36f) + 1,
          f"{plan36f.expected_done}")
 
+# Sven op 04-09-2026, over een rij "4,1 kWh zon" bij een dak van 2,4 kWh: "dat
+# weet je toch niet. Laat sowieso zien hoeveel ampère hij laadt en kW." Het
+# zonaandeel is wat het dak geeft, het totaal is wat er in de auto gaat, en
+# de stroom en het vermogen staan erbij.
+laadt36f = [b for b in plan36f.blocks if b.charging]
+for b in laadt36f:
+    print(f"    {b.start:%H:%M}  {b.solar_kwh:.1f} zon van {b.kwh:.1f} kWh  "
+          f"{b.amps} A  {b.kw:.1f} kW  {b.why}")
+vloer36f = [b for b in laadt36f if b.solar_kwh + 0.05 < b.kwh]
+controle("in een vloer-uur is het zonaandeel kleiner dan wat er in gaat",
+         vloer36f and all(0 < b.solar_kwh < b.kwh for b in vloer36f),
+         f"{[(b.solar_kwh, b.kwh) for b in laadt36f]}")
+controle("en het zonaandeel is wat het dak geeft, niet de vloer",
+         any(abs(b.solar_kwh - 1.0) < 0.05 for b in laadt36f),
+         f"{[round(b.solar_kwh, 2) for b in laadt36f]}")
+controle("een vloer-uur is 6 A op driefasig 4,1 kW",
+         all(b.amps == MIN_AMPS and abs(b.kw - 4.14) < 0.05 for b in vloer36f),
+         f"{[(b.amps, b.kw) for b in vloer36f]}")
+controle("en zegt dat het aangevuld wordt",
+         all("aangevuld" in b.why for b in vloer36f), f"{[b.why for b in vloer36f]}")
+zon36f = [b for b in laadt36f if b.solar_kwh + 0.05 >= b.kwh]
+controle("een echt zonuur laadt op wat het dak geeft en zegt dat",
+         zon36f and all(b.amps >= MIN_AMPS and "eigen zon" in b.why for b in zon36f),
+         f"{[(b.amps, b.why) for b in zon36f]}")
+controle("een wachtuur heeft geen stroom",
+         all(b.amps == 0 and b.kw == 0 for b in plan36f.blocks if not b.charging))
+
 print("=== 37. twee getallen uit twee momenten in een zin ===")
 # Sven op 30-08-2026, tijdens het herstarten: "de equalizer staat op 18 A maar
 # de coach zegt dat de lastbewaking op 7 A zit?" Allebei waar en toch onzin. De

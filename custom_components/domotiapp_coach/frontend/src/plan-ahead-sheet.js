@@ -282,14 +282,29 @@ export class DacPlanAheadSheet extends DacElement {
       const prijs = document.createElement("span");
       prijs.className = "prijs";
       prijs.textContent = euro(blok.price);
-      const zon = document.createElement("span");
-      zon.className = "zon";
-      zon.textContent = blok.solar_kwh > 0.05
+      // In een laaduur staat er hoe hard: de stroom in de kolom, het vermogen
+      // en het zonaandeel in de zin. "4,1 kWh zon" stond er over een uur
+      // waarin het dak 2,4 gaf: dat was wat er in de auto ging, zon plus net.
+      // Sven op 04-09-2026: "laat sowieso zien hoeveel ampère hij laadt en
+      // kW." Een server van vóór v0.47.5 stuurt geen amps mee; dan blijft de
+      // zonkolom zoals hij was.
+      const zonTekst = blok.solar_kwh > 0.05
         ? `${Number(blok.solar_kwh).toFixed(1).replace(".", ",")} kWh zon`
         : "";
+      const zon = document.createElement("span");
+      zon.className = "zon";
       const wat = document.createElement("span");
       wat.className = "wat";
-      wat.textContent = blok.charging ? `Laden, ${blok.why}` : `Wachten, ${blok.why}`;
+      if (blok.charging && blok.amps) {
+        zon.textContent = `${blok.amps} A`;
+        const kw = `${Number(blok.kw).toFixed(1).replace(".", ",")} kW`;
+        wat.textContent = zonTekst
+          ? `Laden op ${kw}, waarvan ${zonTekst}: ${blok.why}`
+          : `Laden op ${kw}: ${blok.why}`;
+      } else {
+        zon.textContent = zonTekst;
+        wat.textContent = blok.charging ? `Laden, ${blok.why}` : `Wachten, ${blok.why}`;
+      }
 
       rij.append(tijd, prijs, zon, wat);
       uurlijst.append(rij);
