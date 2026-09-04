@@ -300,10 +300,13 @@ class Prijzen:
     def all_in(self, moment: dt.datetime) -> float:
         return (self.kaal(moment) + self.energiebelasting + self.opslag) * (1 + self.btw / 100)
 
-    def lijst(self, nu: dt.datetime, all_in: bool) -> list[dict]:
+    def lijst(self, nu: dt.datetime, all_in: bool, tot_dag: dt.date | None = None) -> list[dict]:
         dagen = [nu.date()]
         if nu.hour + nu.minute / 60 >= _uur(self.bekend_om):
             dagen.append(nu.date() + dt.timedelta(days=1))
+        # Voor het optimum: alles tot en met een dag, alsof alles al bekend was.
+        while tot_dag is not None and dagen[-1] < tot_dag:
+            dagen.append(dagen[-1] + dt.timedelta(days=1))
         uit = []
         for dag in dagen:
             for uur in range(24):
@@ -338,6 +341,9 @@ class Scenario:
     stap_seconden: int = 60
     kabel_erin: str | None = "07:00"    # op de eerste dag; None: hangt er al
     klaar_om: str | None = "06:00"
+    # Weekdagen (0 is maandag) die in het schema uitgevinkt zijn. Dan schuift de
+    # klaar-tijd naar de eerstvolgende dag die wel aan staat.
+    dagen_uit: tuple = ()
     niet_voor: str | None = None
     uiterlijk_starten: str | None = None
     schema_aan: bool = True
@@ -555,12 +561,17 @@ def instellingen(s: Scenario) -> dict:
                 "device": "paal",
                 "enabled": s.schema_aan,
                 "priority": "high",
+                "per_day": bool(s.dagen_uit),
                 "window": {
                     "not_before": s.niet_voor or "",
                     "start_by": s.uiterlijk_starten or "",
                     "done_by": s.klaar_om or "",
                 },
-                "days": [],
+                "days": [
+                    {"day": dag, "enabled": dag not in s.dagen_uit,
+                     "not_before": "", "start_by": "", "done_by": s.klaar_om or ""}
+                    for dag in range(7)
+                ] if s.dagen_uit else [],
             }],
         },
         "active_cars": [{"device": "paal", "car": "auto"}],
@@ -834,11 +845,7 @@ def optimum(s: Scenario, coach, inst, kabel_in: dt.datetime) -> float | None:
         capacity_kwh=auto.capaciteit_kwh, phases=auto.fasen, soc_percent=auto.soc))
     if nodig is None:
         return None
-    einde = None
-    if s.klaar_om and s.schema_aan:
-        einde = dt.datetime.combine(kabel_in.date(), dt.time(*map(int, s.klaar_om.split(":"))))
-        if einde <= kabel_in:
-            einde += dt.timedelta(days=1)
+    einde = klaar_tijd_na(s, kabel_in)
     grens = einde or (kabel_in + dt.timedelta(hours=s.duur_uren))
     zon = {}
     huis = {}
@@ -848,10 +855,10 @@ def optimum(s: Scenario, coach, inst, kabel_in: dt.datetime) -> float | None:
         huis[t.hour] = sum(w.huis.watt(t + dt.timedelta(minutes=m)) for m in range(0, 60, 5)) / 12 / 1000
         t += dt.timedelta(hours=1)
     if s.contract.startswith("dynamisch"):
-        # Alle prijzen bekend: de lijst zoals hij er na `bekend_om` uitziet.
+        # Alle prijzen bekend, tot en met de dag van de klaar-tijd.
         for sleutel, all_in in ((E["prijs"], True), (E["markt"], False)):
             coach.hass.states.zet(sleutel, {"state": "0", "attributes": {
-                "prices": w.prijzen.lijst(kabel_in.replace(hour=23), all_in)}})
+                "prices": w.prijzen.lijst(kabel_in.replace(hour=23), all_in, grens.date())}})
     prijzen = coach._prices(inst)
     tarief = coach._tariff(inst)
     fasen = min(auto.fasen, s.paal.fasen)
@@ -894,11 +901,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
         gebeurtenissen.append((_moment_op(wereld.nu, s.kabel_erin), "kabel_in", None))
     gebeurtenissen.sort(key=lambda g: g[0])
     kabel_in = wereld.nu if s.kabel_erin is None else _moment_op(wereld.nu, s.kabel_erin)
-    if s.klaar_om and s.schema_aan:
-        klaar = dt.datetime.combine(kabel_in.date(), dt.time(*map(int, s.klaar_om.split(":"))))
-        if klaar <= kabel_in:
-            klaar += dt.timedelta(days=1)
-        verloop.klaar_tijd = klaar
+    verloop.klaar_tijd = klaar_tijd_na(s, kabel_in)
 
     vorige = (None, None)
     laatste_ronde = None
@@ -988,6 +991,21 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
     except Exception as fout:  # noqa: BLE001 - het optimum is een maatstaf, geen proef
         verloop.fouten.append(f"optimum niet te bepalen: {fout!r}")
     return verloop
+
+
+def klaar_tijd_na(s: Scenario, moment: dt.datetime) -> dt.datetime | None:
+    """De eerstvolgende klaar-tijd na dit moment, met de uitgevinkte dagen erin."""
+    if not s.klaar_om or not s.schema_aan:
+        return None
+    h, m = map(int, s.klaar_om.split(":"))
+    for offset in range(8):
+        dag = moment.date() + dt.timedelta(days=offset)
+        if dag.weekday() in s.dagen_uit:
+            continue
+        klaar = dt.datetime.combine(dag, dt.time(h, m))
+        if klaar > moment:
+            return klaar
+    return None
 
 
 def _moment_op(begin: dt.datetime, tijd: str) -> dt.datetime:

@@ -71,8 +71,13 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    het goedkoopste moment. Andere apparaten houden alle drie.
 6. **Nooit blind laden.** Zonder accustand wacht hij op de bewoner, zonder
    prijzen wacht hij op de prijssensor, allebei met de klaar-tijd als vangnet.
-   Zolang de prijzen van morgen nog niet binnen zijn, gelden die van vandaag
-   als schatting, herkenbaar als `estimated` in de tijdlijn.
+   Reiken de bekende prijzen niet tot een uur vóór de klaar-tijd, dan komt er
+   tot ze er zijn alleen zon in: geen geschatte prijzen, geen net
+   (`alleen_zon` in planner.py). Met zondag uitgevinkt en klaar-tijd maandag
+   06:00 laadt hij dus het hele weekend op zon, en plant hij de nacht zodra
+   de prijzen van maandag zondag rond 13:00 binnen zijn. De klaar-tijdregel
+   rekent daarbij met wat er fysiek nog in kan (`capaciteit_kwh`), niet met
+   wat er aan prijzen bekend is.
 
 ## Hoe het in elkaar zit
 
@@ -113,7 +118,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 187 controles op het denkwerk
 python tests/test_coach.py       # 196 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 450 op hele laadbeurten in het virtuele huis
+python tests/test_virtueel.py    # 473 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 37 op de kwartieropslag
 node   tests/test_rapport.mjs    # 17 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

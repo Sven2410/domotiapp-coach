@@ -1248,32 +1248,12 @@ class ChargerCoach:
                 terug = markt[start][1] - kosten if start in markt else None
 
             rows.append({"start": start, "end": end, "price": prijs, "feed_in": terug})
-        rows.sort(key=lambda item: item["start"])
-
-        # De prijzen van morgen komen rond 13:00 binnen. Tot die tijd ziet een
-        # plan met een klaar-tijd de volgende ochtend alleen de dag van vandaag,
-        # en dan zijn de uren die er wél zijn per definitie de goedkoopste. Zo
-        # begon hij om 11:00 te laden terwijl de nacht goedkoper was, en dat is
-        # wat Sven zag: "wanneer ik de auto inplugde ging hij gelijk laden."
-        #
-        # Daarom gaat er een dag achteraan: elk uur dat nog niet bekend is
-        # krijgt de prijs van hetzelfde uur van de laatste bekende dag, met
-        # `estimated` erbij zodat de tijdlijn het kan zeggen. Geen verzonnen
-        # getal maar een gemeten prijs van een dag eerder, en zodra de echte
-        # binnenkomen winnen die. Het uur waar we nu in zitten is altijd echt.
-        if rows:
-            laatste_einde = rows[-1]["end"]
-            laatste_dag = [row for row in rows if row["start"] >= laatste_einde - timedelta(days=1)]
-            for row in laatste_dag:
-                rows.append(
-                    {
-                        **row,
-                        "start": row["start"] + timedelta(days=1),
-                        "end": row["end"] + timedelta(days=1),
-                        "estimated": True,
-                    }
-                )
-        return rows
+        # Verder dan de lijst reikt weet de coach niets, en dat hoort zo.
+        # Er stond hier op 04-09-2026 een middag lang een geschatte dag
+        # achteraan (de prijzen van vandaag nog eens voor morgen); Sven wil
+        # geen gegokte prijzen. Reikt de lijst niet tot de klaar-tijd, dan
+        # laadt hij tot die tijd alleen op zon. Zie `alleen_zon` in planner.py.
+        return sorted(rows, key=lambda item: item["start"])
 
     def _sun(self, settings: dict[str, Any]) -> Sun:
         """De zonverwachting, voor zover die is ingevuld.
@@ -2741,7 +2721,6 @@ class ChargerCoach:
                     "why": blok.why,
                     "solar_kwh": blok.solar_kwh,
                     "kwh": blok.kwh,
-                    "estimated": blok.estimated,
                 }
                 for blok in plan.blocks
             ],

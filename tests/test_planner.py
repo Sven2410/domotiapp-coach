@@ -1296,11 +1296,14 @@ controle("en niet dat je teruglevert terwijl je inkoopt",
 # zon a 0,02 plus 3,5 kW net a 0,30 is 0,256 per kWh. Dit uur is dus te duur om
 # vol te laden (0,30 tegen 0,28 straks) en tegelijk goedkoop genoeg om er op de
 # ondergrens doorheen te gaan, want die 0,7 kW is straks weg.
+# De lijst loopt door tot de klaar-tijd, want sinds 04-09-2026 komt er zonder
+# de prijzen tot een uur voor de klaar-tijd alleen zon in, en dus ook geen
+# bijmenging tot de ondergrens.
 VLOER39 = []
-for uur in range(13, 19):
-    start = dt.datetime(2026, 8, 18, uur, 0)
+for stap in range(17):
+    start = dt.datetime(2026, 8, 18, 13, 0) + dt.timedelta(hours=stap)
     VLOER39.append({"start": start, "end": start + dt.timedelta(hours=1),
-                    "price": 0.30 if uur == 13 else 0.28, "feed_in": 0.02})
+                    "price": 0.30 if stap == 0 else 0.28, "feed_in": 0.02})
 d39b = decide(nu39, VLOER39, NET39, BUS39, LAADT39, venster(nu39),
               tariff=VAST, sun=ZON_KRAP, holding=planner.STOP_ROUNDS)
 print(f"  met 0,7 kW over: {d39b.rule}: {d39b.amps} A  {d39b.reason}")
