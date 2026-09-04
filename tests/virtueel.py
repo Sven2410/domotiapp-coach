@@ -59,11 +59,24 @@ class Zon:
     wolken: str = "helder"      # helder | bewolkt | wisselend | middag-dicht | geen
     voorspeld: str | None = None  # None: de voorspelling klopt
     zaad: int = 1
+    # Een echte uurkromme, kWh per uur van de dag, zoals het energiedashboard
+    # hem geeft. Dan is dit het heldere dak en niet de sinus; `wolken` en
+    # `voorspeld` werken er net zo op. Voor een scenario dat een echte woning
+    # nabouwt, zoals Van den Dam op 04-09-2026.
+    kromme: dict[int, float] | None = None
 
     PATRONEN = {"helder": 1.0, "bewolkt": 0.3, "geen": 0.0}
 
     def helder_kw(self, moment: dt.datetime) -> float:
         u = moment.hour + moment.minute / 60 + moment.second / 3600
+        if self.kromme is not None:
+            # Het gemiddelde van een uur hoort in het midden van dat uur; daar
+            # tussen rechtdoor, zodat de minuten geen trap zijn.
+            links = int(u - 0.5) if u >= 0.5 else -1
+            a = self.kromme.get(links, 0.0) if links >= 0 else 0.0
+            b = self.kromme.get(links + 1, 0.0) if links + 1 <= 23 else 0.0
+            f = u - 0.5 - links
+            return max(0.0, a + (b - a) * f)
         if not self.opkomst < u < self.onder:
             return 0.0
         x = (u - self.opkomst) / (self.onder - self.opkomst)
@@ -97,6 +110,9 @@ class Zon:
         return som / stappen
 
     def piek_moment(self, dag: dt.date) -> dt.datetime:
+        if self.kromme:
+            top = max(self.kromme, key=self.kromme.get)
+            return dt.datetime.combine(dag, dt.time(0)) + dt.timedelta(hours=top + 0.5)
         midden = (self.opkomst + self.onder) / 2
         return dt.datetime.combine(dag, dt.time(0)) + dt.timedelta(hours=midden)
 
@@ -116,16 +132,23 @@ class Huis:
     extra: list[tuple[str, str, float]] = field(default_factory=list)
     # Hoe het verbruik over de fasen valt. Koken zit op de eerste.
     verdeling: tuple[float, float, float] = (0.5, 0.3, 0.2)
+    # Een echt profiel, watt per uur van de dag, in plaats van basis, ochtend,
+    # koken en avond. Uit de mediaan van een echte woning; zie Van den Dam in
+    # scenarios.py.
+    profiel: dict[int, float] | None = None
 
     def watt(self, moment: dt.datetime, dag_offset: int = 0) -> float:
         u = moment.hour + moment.minute / 60
-        w = self.basis_w
-        if 7.0 <= u < 8.5:
-            w += self.ochtend_w
-        if 17.5 <= u < 19.0:
-            w += self.koken_w
-        if 19.0 <= u < 23.0:
-            w += self.avond_w
+        if self.profiel is not None:
+            w = self.profiel.get(moment.hour, self.basis_w)
+        else:
+            w = self.basis_w
+            if 7.0 <= u < 8.5:
+                w += self.ochtend_w
+            if 17.5 <= u < 19.0:
+                w += self.koken_w
+            if 19.0 <= u < 23.0:
+                w += self.avond_w
         if dag_offset == 0:
             for van, tot, extra in self.extra:
                 if _uur(van) <= u < _uur(tot):
@@ -293,11 +316,21 @@ class Prijzen:
     opslag: float = 0.02
     btw: float = 21.0
     terugleverkosten: float = 0.0
+    # Echte all-in prijzen per dag, "2026-09-05": [24 prijzen]. Een dag die
+    # hier niet in staat valt terug op `markt`. Zo draait een scenario op
+    # precies de prijzen die een klant op dat moment zag.
+    per_dag: dict[str, list[float]] | None = None
 
     def kaal(self, moment: dt.datetime) -> float:
+        dag = (self.per_dag or {}).get(moment.date().isoformat())
+        if dag is not None:
+            return dag[moment.hour] / (1 + self.btw / 100) - self.energiebelasting - self.opslag
         return self.markt[moment.hour]
 
     def all_in(self, moment: dt.datetime) -> float:
+        dag = (self.per_dag or {}).get(moment.date().isoformat())
+        if dag is not None:
+            return dag[moment.hour]
         return (self.kaal(moment) + self.energiebelasting + self.opslag) * (1 + self.btw / 100)
 
     def lijst(self, nu: dt.datetime, all_in: bool, tot_dag: dt.date | None = None) -> list[dict]:

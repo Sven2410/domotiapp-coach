@@ -419,6 +419,121 @@ if (vl := v("prijzen-weg-bij-inpluggen")):
              f"{sorted({r.regel for r in regels_in(vl, '10:00', '10:20')})}")
     controle("prijzen weg: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
+# --- Van den Dam, het weekend van 04-09-2026 -----------------------------------
+#
+# De eerste echte laadbeurt met v0.47.x, nagebouwd met zijn eigen cijfers (zie
+# scenarios.py). Dit zijn de vijf dingen die in de notities staan om in het
+# echt vast te stellen, plus wat de varianten laten zien.
+
+VDD_ZATERDAG = virtueel.dt.date(2026, 9, 5)
+VDD_ZATERDAG_13 = virtueel.dt.datetime(2026, 9, 5, 13, 0)
+VDD_ZONDAG_05 = virtueel.dt.datetime(2026, 9, 6, 5, 0)
+
+
+def vdd_basis(vl, naam):
+    """Wat in elke Van den Dam-variant hoort te gelden."""
+    vrijdagnacht = [r for r in vl.regels if r.tijd < virtueel.dt.datetime(2026, 9, 5, 7, 0)]
+    controle(f"{naam}: vrijdagnacht 0 A", not any(r.paal_w > 0 for r in vrijdagnacht),
+             f"{[r.tijd.strftime('%H:%M') for r in vrijdagnacht if r.paal_w > 0][:3]}")
+    controle(f"{naam}: en zegt waarom, met zaterdag en zondag erin",
+             any(r.regel == "wait-for-prices" and "Zaterdag staat in je schema uit" in r.reden
+                 and "zondag om 06:00" in r.reden for r in vrijdagnacht),
+             f"{next((r.reden for r in vrijdagnacht if r.regel == 'wait-for-prices'), '')}")
+    # Een paar minuten nalopen na 17:00 hoort erbij: de coach houdt een
+    # lopende beurt drie ronden op de ondergrens vast (`STOP_ROUNDS`) en de
+    # auto volgt met een minuut vertraging. Dezelfde marge als hierboven.
+    controle(f"{naam}: niets van het net in de avondpiek",
+             vl.net_kwh_tussen("17:03", "20:00") < 0.1,
+             f"{vl.net_kwh_tussen('17:03', '20:00'):.2f} kWh tussen 17:03 en 20:00")
+    controle(f"{naam}: onder de zekering", vl.hoogste_fase <= 25.0, f"{vl.hoogste_fase:.1f} A")
+    controle(f"{naam}: een uur voor zondag 06:00 vol",
+             gehaald(vl) and vl.klaar_op is not None and vl.klaar_op <= VDD_ZONDAG_05,
+             f"vol om {vl.klaar_op}, {vl.soc_bij_klaar_tijd}")
+    controle(f"{naam}: geen valse 'nog niet vol'", not meldingen(vl, "nog niet vol"),
+             f"{meldingen(vl, 'nog niet vol')}")
+    controle(f"{naam}: precies een verslag", len(meldingen(vl, "is vol")) == 1,
+             f"{meldingen(vl, 'is vol')}")
+
+
+if (vl := v("van-den-dam")):
+    vdd_basis(vl, "vdd")
+    zaterdag = [r for r in vl.regels if r.tijd.date() == VDD_ZATERDAG]
+    ochtend = [r for r in zaterdag if r.tijd < VDD_ZATERDAG_13]
+    controle("vdd: zaterdagochtend begint pas als het dak iets overhoudt",
+             all(r.over_w > 0 for r in ochtend if r.paal_w > 0), "laadde zonder overschot")
+    controle("vdd: en dan op de ondergrens van 6 A",
+             ochtend and max(r.paal_amps for r in ochtend) <= 10.01 and
+             sum(1 for r in ochtend if 5.9 <= r.paal_amps <= 6.1) > 200,
+             f"hoogste {max((r.paal_amps for r in ochtend), default=0):.0f} A")
+    controle("vdd: om 13:00 komen de prijzen en gaat hij vol",
+             any(r.regel == "cheap-hour" and r.paal_amps >= 15
+                 for r in zaterdag if 13 <= r.tijd.hour < 17),
+             f"{sorted({r.regel for r in zaterdag if 13 <= r.tijd.hour < 17})}")
+    controle("vdd: de coach vraagt nooit meer dan de Equalizer vrijgeeft",
+             all(r.amps <= 16 for r in vl.regels), f"{max(r.amps for r in vl.regels)} A")
+    controle("vdd: nooit in no-room gevallen", not any(r.regel.startswith("no-room") for r in vl.regels), "")
+    controle("vdd: een handvol opdrachten, geen gehamer op de Easee",
+             len(vl.opdrachten) <= 25, f"{len(vl.opdrachten)} opdrachten")
+    controle("vdd: niet ver van het optimum",
+             vl.optimum is not None and vl.kosten <= vl.optimum + 0.60,
+             f"kosten {vl.kosten:.2f}, optimum {vl.optimum}")
+
+for naam in ("van-den-dam-bewolkt", "van-den-dam-geen-zon"):
+    if (vl := v(naam)):
+        vdd_basis(vl, naam[12:])
+        controle(f"{naam[12:]}: zonder overschot niets voor 13:00",
+                 not any(r.paal_w > 0 for r in vl.regels if r.tijd < VDD_ZATERDAG_13), "")
+        controle(f"{naam[12:]}: daarna de goedkope middag en nacht", vl.geladen_kwh > 60,
+                 f"{vl.geladen_kwh:.1f} kWh")
+
+if (vl := v("van-den-dam-dure-zondagnacht")):
+    vdd_basis(vl, "dure zondag")
+    zaterdag = [r for r in vl.regels if r.tijd.date() == VDD_ZATERDAG]
+    controle("dure zondag: zaterdagmiddag doet het werk",
+             sum(r.paal_w for r in zaterdag if 13 <= r.tijd.hour < 17) * vl.stap_uur / 1000 > 40,
+             f"{sum(r.paal_w for r in zaterdag if 13 <= r.tijd.hour < 17) * vl.stap_uur / 1000:.1f} kWh")
+    controle("dure zondag: en de dure nacht wordt niet gebruikt",
+             sum(r.paal_w for r in vl.regels if r.tijd.date() > VDD_ZATERDAG and r.tijd.hour >= 1) * vl.stap_uur / 1000 < 1,
+             "laadde in de dure zondagnacht")
+
+if (vl := v("van-den-dam-ford-wekken")):
+    vdd_basis(vl, "wekken")
+    controle("wekken: op 10 A gewekt en daarna terug naar 6 A",
+             any(r.regel.endswith("+wake") and r.amps == 10 for r in vl.regels)
+             and any(r.regel == "surplus" and r.amps == 6 for r in vl.regels), "")
+
+if (vl := v("van-den-dam-oven")):
+    vdd_basis(vl, "oven")
+    controle("oven: tijdens de oven op zaterdagochtend geen net zonder zon",
+             vl.net_kwh_tussen("12:34", "13:00") < 0.05, f"{vl.net_kwh_tussen('12:34', '13:00'):.2f} kWh")
+    controle("oven: de Equalizer wordt gemeld, niet bevochten",
+             meldingen(vl, "lastbewaker") and len(vl.opdrachten) <= 60, f"{len(vl.opdrachten)} opdrachten")
+
+if (vl := v("van-den-dam-p1-weg")):
+    vdd_basis(vl, "p1 weg")
+    controle("p1 weg: melding over de netmeting", bool(meldingen(vl, "netmeting")), "")
+    controle("p1 weg: en daarna gewoon verder op zon",
+             any(r.regel == "surplus" for r in regels_in(vl, "11:15", "12:00")), "")
+
+if (vl := v("van-den-dam-prijzen-laat")):
+    vdd_basis(vl, "prijzen laat")
+    controle("prijzen laat: tot 15:30 alleen zon",
+             all(r.paal_amps <= 6.01 for r in vl.regels
+                 if r.tijd.date() == VDD_ZATERDAG and r.tijd < virtueel.dt.datetime(2026, 9, 5, 15, 30)), "")
+    controle("prijzen laat: daarna vol tot de avondpiek",
+             any(r.paal_amps >= 15 for r in regels_in(vl, "15:30", "17:00")), "")
+    # Het laatste uur, zondag 04:00 tot 05:00, moet op een rustig tempo en niet
+    # met een opdracht per minuut. Gezien op 04-09-2026: 33 opdrachten in dat
+    # uur, 14 en 15 A om en om, omdat de auto een minuut achterloopt op de
+    # limiet en het tempo elke ronde opnieuw uit de meting werd uitgerekend.
+    laatste_uur = [o for o in vl.opdrachten if o[0] >= virtueel.dt.datetime(2026, 9, 6, 4, 0)]
+    controle("prijzen laat: geen opdracht per minuut in het laatste uur",
+             len(laatste_uur) <= 8, f"{len(laatste_uur)} opdrachten na 04:00")
+
+if (vl := v("van-den-dam-geen-accustand")):
+    controle("geen accustand: vraagt erom", bool(meldingen(vl, "weet niet hoe vol")), "")
+    controle("geen accustand: en laadt op tijd toch vol via het vangnet", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
 # --- storingen ---------------------------------------------------------------
 
 print("=== storingen ===")
