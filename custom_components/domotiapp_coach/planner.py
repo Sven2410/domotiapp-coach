@@ -287,6 +287,12 @@ class Window:
     start_by: datetime | None = None
     # Wanneer het klaar moet zijn.
     deadline: datetime | None = None
+    # De dagen die de klant heeft uitgezet tussen nu en de klaar-tijd, bij hun
+    # naam. Alleen voor de uitleg op de kaart: "zaterdag staat in je schema
+    # uit, dus hij moet zondag om 06:00 vol zijn." Zonder dat las Sven op
+    # 04-09-2026 "de prijzen tot 06:00 zijn nog niet bekend" als morgenochtend,
+    # en die prijzen waren er wel; de klaar-tijd was zondag.
+    skipped: tuple[str, ...] = ()
 
 
 @dataclass
@@ -787,9 +793,12 @@ def resolve_window(now: datetime, days: dict[int, DayWindow]) -> Window:
     if not days:
         return Window()
 
+    overgeslagen: list[str] = []
     for offset in range(LOOKAHEAD_DAYS):
         basis = now + timedelta(days=offset)
         day = days.get(basis.weekday())
+        if day is not None and not day.enabled:
+            overgeslagen.append(DAGNAMEN[basis.weekday()])
         if day is None or not day.enabled or day.done_by is None:
             continue
 
@@ -816,7 +825,8 @@ def resolve_window(now: datetime, days: dict[int, DayWindow]) -> Window:
             uiterlijk -= timedelta(days=1)
 
         return Window(
-            enabled=True, opens=opens, start_by=uiterlijk, deadline=deadline
+            enabled=True, opens=opens, start_by=uiterlijk, deadline=deadline,
+            skipped=tuple(overgeslagen),
         )
 
     return Window()
@@ -1316,11 +1326,11 @@ def timeline(
         ceiling_later=structural_ceiling(car, charger) or amps, alleen_zon=alleen_zon,
     )
     plan.solar_only = alleen_zon
-    if alleen_zon:
+    if alleen_zon and klaar is not None:
         plan.note = (
-            "De prijzen tot je klaar-tijd zijn nog niet bekend. Tot die binnenkomen, "
-            "meestal rond 13:00, laadt hij alleen op je eigen zon; daarna plant hij "
-            "de rest."
+            _prijzen_onbekend(window, klaar, now)
+            + f". Tot die binnenkomen, meestal {_dagnaam(klaar - timedelta(days=1), now)} rond "
+            "13:00, laadt hij alleen op je eigen zon; daarna plant hij de rest."
         )
     if not alle and alleen_zon:
         return plan
@@ -1409,6 +1419,75 @@ def _euro(value: float) -> str:
 
 def _clock(moment: datetime) -> str:
     return moment.strftime("%H:%M")
+
+
+DAGNAMEN = ("maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag")
+
+
+def _dagnaam(moment: datetime, now: datetime) -> str:
+    """Vandaag, morgen, of de naam van de dag."""
+    verschil = (moment.date() - now.date()).days
+    if verschil <= 0:
+        return "vandaag"
+    if verschil == 1:
+        return "morgen"
+    return DAGNAMEN[moment.weekday()]
+
+
+def _wanneer(moment: datetime, now: datetime) -> str:
+    """Een tijdstip zoals je het op de kaart leest: "06:00", of "zondag 06:00".
+
+    Vandaag en morgen krijgen alleen de klok, want "06:00" leest vanzelf als
+    de eerstvolgende zes uur. Verder weg hoort de dag erbij. Op vrijdagavond
+    04-09-2026 stond er bij Van den Dam "de prijzen tot 06:00 zijn nog niet
+    bekend" terwijl zaterdag uit stond en de klaar-tijd zondag was; de prijzen
+    van zaterdag 06:00 waren er wel, en Sven las het als een fout.
+    """
+    if (moment.date() - now.date()).days <= 1:
+        return _clock(moment)
+    return f"{DAGNAMEN[moment.weekday()]} {_clock(moment)}"
+
+
+def _prijzen_komen(end: datetime | None, now: datetime) -> str:
+    """Wanneer de prijzen tot de klaar-tijd er zijn: de middag ervoor."""
+    if end is None:
+        return "Plant de rest zodra de prijzen er zijn, meestal rond 13:00."
+    # De prijzen van een dag komen de middag ervoor. Een klaar-tijd van
+    # zondag 06:00 valt in de dag die zaterdag 13:00 bekend wordt.
+    dag = _dagnaam(end - timedelta(days=1), now)
+    return f"Plant de rest zodra de prijzen er zijn, meestal {dag} rond 13:00."
+
+
+def _prijzen_onbekend(window: Window, end: datetime, now: datetime) -> str:
+    """Het begin van de wachtzin: tot wanneer de prijzen ontbreken, en waarom
+    de klaar-tijd zo ver weg ligt als er dagen uit staan.
+
+    Met een uitgezette dag: "Zaterdag staat in je schema uit, dus hij moet
+    zondag om 06:00 vol zijn. De prijzen tot dan zijn nog niet bekend". Zonder:
+    "De prijzen tot zondag 06:00 zijn nog niet bekend". Niet twee keer "zondag
+    06:00" in één adem.
+    """
+    uitleg = _uitgezet(window, now)
+    if uitleg:
+        return uitleg + "De prijzen tot dan zijn nog niet bekend"
+    return f"De prijzen tot {_wanneer(end, now)} zijn nog niet bekend"
+
+
+def _uitgezet(window: Window, now: datetime) -> str:
+    """Waarom de klaar-tijd zo ver weg ligt, als er dagen uit staan."""
+    if not window.skipped or window.deadline is None:
+        return ""
+    dagen = list(window.skipped)
+    if len(dagen) == 1:
+        welke = dagen[0].capitalize()
+        staat = "staat"
+    else:
+        welke = (", ".join(dagen[:-1]) + " en " + dagen[-1]).capitalize()
+        staat = "staan"
+    return (
+        f"{welke} {staat} in je schema uit, dus hij moet "
+        f"{_dagnaam(window.deadline, now)} om {_clock(window.deadline)} vol zijn. "
+    )
 
 
 # Hoeveel tijd er bovenop de laadtijd over moet blijven voordat de coach het
@@ -1951,9 +2030,9 @@ def _decide(
                 ceiling,
                 (
                     f"Je hebt niet doorgegeven hoe vol de auto is, dus hij gaat uit "
-                    f"van een lege accu en laadt nu door om {_clock(end)} te halen."
+                    f"van een lege accu en laadt nu door om {_wanneer(end, now)} te halen."
                     if soc_unknown
-                    else f"Nu doorladen, anders is de auto om {_clock(end)} niet vol."
+                    else f"Nu doorladen, anders is de auto om {_wanneer(end, now)} niet vol."
                 ),
                 plan="Laadt op vol vermogen tot de auto klaar is.",
                 rule="deadline",
@@ -2011,7 +2090,7 @@ def _decide(
                 "Hij weet niet hoe vol de auto is, dus hij wacht met laden uit het "
                 "net. Geef je accustand door, dan kiest hij het gunstigste moment.",
                 plan=(
-                    f"Begint hoe dan ook op tijd voor {_clock(end)}, uitgaand van "
+                    f"Begint hoe dan ook op tijd voor {_wanneer(end, now)}, uitgaand van "
                     "een lege accu."
                 ),
                 rule="no-soc",
@@ -2053,9 +2132,10 @@ def _decide(
         return Decision(
             False,
             0,
-            f"De prijzen tot {_clock(end)} zijn nog niet bekend, dus tot die "
-            "binnenkomen laadt hij alleen op je eigen zon, en die is er nu niet.",
-            plan="Plant de nacht zodra de prijzen er zijn, meestal rond 13:00.",
+            _prijzen_onbekend(window, end, now)
+            + ", dus tot die binnenkomen laadt hij alleen op je eigen zon, en die "
+            "is er nu niet.",
+            plan=_prijzen_komen(end, now),
             rule="wait-for-prices",
             hold_minutes=_hold_until_start(now, end, needed),
         )
@@ -2078,7 +2158,7 @@ def _decide(
                     0,
                     "Er komen geen prijzen binnen, dus hij wacht met laden uit het "
                     "net. Controleer de prijssensor bij Installatie.",
-                    plan=f"Begint hoe dan ook op tijd voor {_clock(end)}.",
+                    plan=f"Begint hoe dan ook op tijd voor {_wanneer(end, now)}.",
                     rule="no-prices",
                     hold_minutes=_hold_until_start(now, end, needed),
                 )
@@ -2104,7 +2184,7 @@ def _decide(
             True,
             ceiling,
             f"Wat er nog in moet past niet meer in de uren die overblijven, dus hij "
-            f"laadt nu door om {_clock(end)} te halen.",
+            f"laadt nu door om {_wanneer(end, now)} te halen.",
             plan="Laadt op vol vermogen tot de auto klaar is.",
             rule="deadline",
         )
@@ -2223,7 +2303,7 @@ def _decide(
                     ceiling,
                     f"Dit uur kost {_euro(hier.price)} per kWh, iets meer dan de uren "
                     f"die hij gepland had, maar stoppen laat te weinig speling over "
-                    f"voor {_clock(end)}. Dus hij laadt door.",
+                    f"voor {_wanneer(end, now)}. Dus hij laadt door.",
                     plan=_describe(uren),
                     rule="cheap-hour+reserve",
                 )
@@ -2275,8 +2355,8 @@ def _decide(
     eerste = gekozen[0][0] if gekozen else None
     if alleen_zon:
         reden = (
-            f"De prijzen tot {_clock(end)} zijn nog niet bekend, dus tot die "
-            "binnenkomen laadt hij alleen op je eigen zon."
+            _prijzen_onbekend(window, end, now)
+            + ", dus tot die binnenkomen laadt hij alleen op je eigen zon."
             + (f" De volgende zon verwacht hij om {_clock(begint)}." if begint else "")
         )
         regel = "wait-for-prices"
