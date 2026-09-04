@@ -2710,6 +2710,8 @@ class ChargerCoach:
             "kwh_needed": plan.kwh_needed,
             "hours_needed": plan.hours_needed,
             "amps": plan.amps,
+            "planned_kwh": plan.planned_kwh,
+            "solar_only": plan.solar_only,
             "note": plan.note,
             "estimated": plan.estimated,
             "blocks": [

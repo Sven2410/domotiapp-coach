@@ -102,6 +102,28 @@ const klok = (iso) => {
     : `${String(moment.getHours()).padStart(2, "0")}:${String(moment.getMinutes()).padStart(2, "0")}`;
 };
 
+// Een tijdstip met de dag erbij zodra het niet vandaag is. Een plan dat over
+// het weekend loopt zegt anders "uiterlijk beginnen 22:36" en dan zoek je op
+// de verkeerde avond. Zonder dag als het wel vandaag is, want "vr 22:36" leest
+// op vrijdag als een raadsel.
+const DAGEN = ["zo", "ma", "di", "wo", "do", "vr", "za"];
+const wanneer = (iso) => {
+  if (!iso) return "–";
+  const moment = new Date(iso);
+  if (Number.isNaN(moment.getTime())) return "–";
+  const vandaag = new Date();
+  const zelfde =
+    moment.getFullYear() === vandaag.getFullYear() &&
+    moment.getMonth() === vandaag.getMonth() &&
+    moment.getDate() === vandaag.getDate();
+  return zelfde ? klok(iso) : `${DAGEN[moment.getDay()]} ${klok(iso)}`;
+};
+
+const kwh = (value) =>
+  value === null || value === undefined
+    ? "–"
+    : `${Number(value).toFixed(1).replace(".", ",")} kWh`;
+
 const euro = (value) =>
   value === null || value === undefined
     ? ""
@@ -196,15 +218,36 @@ export class DacPlanAheadSheet extends DacElement {
       return;
     }
 
+    // "Op vol vermogen" is een som en geen plan: zo lang zou het duren als
+    // hij nu op alles wat er past door zou laden, en daar komt "uiterlijk
+    // beginnen" uit. Het plan zelf staat in de uren eronder en gaat meestal
+    // langzamer, want de goedkoopste uren zijn zelden aaneengesloten. Sven op
+    // 04-09-2026, met "laadtijd 6 u 23 m op 15 A" naast acht uur op 6 A:
+    // "mij lijkt het toch logisch dynamisch te laden".
+    //
+    // En "vol rond" alleen als het plan het hele tekort dekt. Dekt het minder,
+    // dan staat er wat er gepland is en waarom de rest ontbreekt; zie
+    // `planned_kwh` in planner.py. Een server van vóór v0.47.3 stuurt dat veld
+    // niet mee, en dan blijft het bij "vol rond" zoals het was.
+    const nodig = Number(plan.kwh_needed);
+    const gepland = Number(plan.planned_kwh);
+    const tekort =
+      plan.planned_kwh !== null && plan.planned_kwh !== undefined &&
+      Number.isFinite(nodig) && gepland > 0 && gepland + 0.05 < nodig;
+    const laatste = tekort
+      ? ["Gepland", kwh(gepland),
+          plan.solar_only
+            ? `van ${kwh(nodig)}; de rest zodra de prijzen er zijn`
+            : `van ${kwh(nodig)}; meer past er niet vóór de klaar-tijd`]
+      : ["Vol rond", wanneer(plan.expected_done),
+          plan.deadline ? `klaar om ${wanneer(plan.deadline)}` : "geen klaar-tijd"];
+
     for (const [label, waarde, bij] of [
-      ["Nog te laden", plan.kwh_needed === null || plan.kwh_needed === undefined
-        ? "–"
-        : `${Number(plan.kwh_needed).toFixed(1).replace(".", ",")} kWh`,
-        plan.amps ? `op ${plan.amps} A` : ""],
-      ["Laadtijd", uren(plan.hours_needed), ""],
-      ["Uiterlijk beginnen", klok(plan.latest_start), "speling zit erin"],
-      ["Vol rond", klok(plan.expected_done),
-        plan.deadline ? `klaar om ${klok(plan.deadline)}` : "geen klaar-tijd"],
+      ["Nog te laden", kwh(plan.kwh_needed), ""],
+      ["Op vol vermogen", uren(plan.hours_needed),
+        plan.amps ? `${plan.amps} A, zoals het nu past` : ""],
+      ["Uiterlijk beginnen", wanneer(plan.latest_start), "met een uur speling"],
+      laatste,
     ]) {
       const vak = document.createElement("div");
       vak.className = "vak";

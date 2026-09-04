@@ -1975,6 +1975,9 @@ controle("alles als tekst, zodat het over de websocket kan",
          f"{plan41}")
 controle("en de blokken zijn een lijst", isinstance(plan41["blocks"], list),
          f"{type(plan41['blocks'])}")
+controle("en hij zegt hoeveel er gepland staat, en of dat alleen zon is",
+         isinstance(plan41.get("planned_kwh"), float)
+         and isinstance(plan41.get("solar_only"), bool), f"{plan41}")
 
 print("=== 42. niets van één installatie zit in de code ===")
 # Sven op 30-08-2026: "je hebt toch niet iets van mij thuis hard gecodeerd? Het

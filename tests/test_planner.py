@@ -1128,6 +1128,39 @@ controle("en de sommen staan er nog steeds",
          plan36e.hours_needed is not None and plan36e.latest_start is not None,
          f"{plan36e}")
 
+# Wat er gepland staat hoort het tekort te dekken, anders is "vol rond" geen
+# belofte. Bij Van den Dam stond op 04-09-2026 "Vol rond 17:00" boven acht
+# zonblokken van samen 33 van de 66 kWh: de prijzen tot zondag 06:00 waren er
+# nog niet, dus alleen zon. Sven las het als een belofte. Het plan telt sinds
+# v0.47.3 mee wat het gepland heeft, en zegt of dat alleen zon is.
+controle("het volledige plan dekt wat er nog in moet",
+         abs(plan36.planned_kwh - plan36.kwh_needed) < 0.1,
+         f"{plan36.planned_kwh} van {plan36.kwh_needed}")
+controle("en is dan niet alleen zon", not plan36.solar_only)
+# De prijzen lopen tot zondagavond, de klaar-tijd is maandag 07:00. Met een
+# terugleverprijs erbij, want zonder die valt er niets te mengen en bestaat er
+# geen zonschijf.
+prijzen36f = [dict(rij, feed_in=0.02) for rij in prijzen36]
+for uur in range(7, 24):
+    start = dt.datetime(2026, 8, 30, uur, 0)
+    prijzen36f.append({"start": start, "end": start + dt.timedelta(hours=1),
+                       "price": 0.25, "feed_in": 0.02})
+VENSTER36F = Window(enabled=True, opens=None, deadline=dt.datetime(2026, 8, 31, 7, 0))
+plan36f = planner.timeline(nu36, prijzen36f, NET_LEEG, BUS, PAAL36, VENSTER36F, 16,
+                           forecast=kromme(dt.datetime(2026, 8, 30), 9,
+                                           [1.0, 3.0, 5.0, 5.0, 4.0, 2.0]))
+uren36f = [b.start.hour for b in plan36f.blocks if b.charging]
+print(f"  klaar-tijd voorbij de prijzen: {plan36f.planned_kwh:.1f} van "
+      f"{plan36f.kwh_needed:.1f} kWh gepland, in {uren36f}")
+controle("reiken de prijzen niet tot de klaar-tijd, dan is het plan alleen zon",
+         plan36f.solar_only, f"{plan36f.note}")
+controle("en dekt het minder dan het tekort",
+         0 < plan36f.planned_kwh < plan36f.kwh_needed - 1,
+         f"{plan36f.planned_kwh} van {plan36f.kwh_needed}")
+controle("terwijl expected_done wel het einde van het laatste zonuur is",
+         plan36f.expected_done is not None and plan36f.expected_done.hour == max(uren36f) + 1,
+         f"{plan36f.expected_done}")
+
 print("=== 37. twee getallen uit twee momenten in een zin ===")
 # Sven op 30-08-2026, tijdens het herstarten: "de equalizer staat op 18 A maar
 # de coach zegt dat de lastbewaking op 7 A zit?" Allebei waar en toch onzin. De
