@@ -419,6 +419,10 @@ class ChargerCoach:
         # enkele uitschieter uit te kunnen middelen. Per entiteit, want de drie
         # fasen melden niet tegelijk. Zie `FASE_VENSTER`.
         self._fase_historie: dict[str, list[tuple[datetime, float]]] = {}
+        # Wat elke paal in de vorige ronde trok, en wanneer er voor het laatst
+        # een paal een stap omlaag deed. Zie `_gladde_fase`.
+        self._stroom_vorige: dict[str, float] = {}
+        self._daling: datetime | None = None
         # Wat de fasemeting van een laadpunt de laatste ronden opleverde, als
         # (aantal fasen, hoe vaak achter elkaar). Zie `_measured_phases`.
         self._fasen_gemeten: dict[str, tuple[int, int]] = {}
@@ -1244,7 +1248,32 @@ class ChargerCoach:
                 terug = markt[start][1] - kosten if start in markt else None
 
             rows.append({"start": start, "end": end, "price": prijs, "feed_in": terug})
-        return sorted(rows, key=lambda item: item["start"])
+        rows.sort(key=lambda item: item["start"])
+
+        # De prijzen van morgen komen rond 13:00 binnen. Tot die tijd ziet een
+        # plan met een klaar-tijd de volgende ochtend alleen de dag van vandaag,
+        # en dan zijn de uren die er wél zijn per definitie de goedkoopste. Zo
+        # begon hij om 11:00 te laden terwijl de nacht goedkoper was, en dat is
+        # wat Sven zag: "wanneer ik de auto inplugde ging hij gelijk laden."
+        #
+        # Daarom gaat er een dag achteraan: elk uur dat nog niet bekend is
+        # krijgt de prijs van hetzelfde uur van de laatste bekende dag, met
+        # `estimated` erbij zodat de tijdlijn het kan zeggen. Geen verzonnen
+        # getal maar een gemeten prijs van een dag eerder, en zodra de echte
+        # binnenkomen winnen die. Het uur waar we nu in zitten is altijd echt.
+        if rows:
+            laatste_einde = rows[-1]["end"]
+            laatste_dag = [row for row in rows if row["start"] >= laatste_einde - timedelta(days=1)]
+            for row in laatste_dag:
+                rows.append(
+                    {
+                        **row,
+                        "start": row["start"] + timedelta(days=1),
+                        "end": row["end"] + timedelta(days=1),
+                        "estimated": True,
+                    }
+                )
+        return rows
 
     def _sun(self, settings: dict[str, Any]) -> Sun:
         """De zonverwachting, voor zover die is ingevuld.
@@ -1572,6 +1601,15 @@ class ChargerCoach:
         """
         historie = self._fase_historie.get(entity_id or "") or []
         grens = now - FASE_VENSTER
+        # Deed een paal net een stap omlaag, dan tellen alleen de metingen van
+        # daarna. De metingen van ervoor dragen zijn oude stroom nog, en een
+        # mediaan daarover rekent die aan het huis toe: in het virtuele huis
+        # ging een bus op een 1x25 A-aansluiting daardoor van 6 A naar
+        # "no-room" en bleef hij de hele oventijd uit, terwijl 24,3 A gewoon
+        # paste. Zijn er nog geen drie nieuwe, dan telt wat de sensor nu zegt,
+        # en dat is op dat moment ook de waarheid.
+        if self._daling is not None and self._daling > grens:
+            grens = self._daling
         waarden = sorted(waarde for stempel, waarde in historie if stempel >= grens)
         if len(waarden) < 3:
             return amps
@@ -1662,6 +1700,21 @@ class ChargerCoach:
             )
             surplus = self._smooth(device.get("id", ""), surplus, now)
 
+        charger_amps = (
+            self._volgehouden(
+                entities.get("current"), _number(self.hass, entities.get("current")), now
+            )
+            or 0.0
+        )
+        # Een stap omlaag van deze paal maakt de fasemetingen van daarvoor
+        # onbruikbaar voor de mediaan: daar zit zijn oude stroom nog in, en die
+        # zou als huisverbruik gelden. Zie `_gladde_fase`.
+        device_id = device.get("id", "")
+        vorige_stroom = self._stroom_vorige.get(device_id)
+        if vorige_stroom is not None and charger_amps < vorige_stroom - STEP_AMPS:
+            self._daling = now
+        self._stroom_vorige[device_id] = charger_amps
+
         phases = []
         for key in ("l1", "l2", "l3"):
             phase = (sources.get("phases") or {}).get(key) or {}
@@ -1679,19 +1732,11 @@ class ChargerCoach:
             if amps is not None:
                 phases.append(amps)
 
-        charger_amps = (
-            self._volgehouden(
-                entities.get("current"), _number(self.hass, entities.get("current")), now
-            )
-            or 0.0
-        )
-
         # Wat deze paal kort geleden nog trok. De fasemeting van het huis loopt
         # achter op de paal, dus vlak na het stoppen draagt zij zijn stroom nog
         # terwijl hij zelf al op nul staat. Zonder dit geheugen wordt dat aan het
         # huis toegerekend en meldt de coach dat de aansluiting vol zit terwijl er
         # niets loopt. Zie `meter_loopt_achter` in planner.py.
-        device_id = device.get("id", "")
         recent = self._laatste_stroom.get(device_id)
         if charger_amps > STEP_AMPS:
             self._laatste_stroom[device_id] = (charger_amps, now)
@@ -1813,6 +1858,19 @@ class ChargerCoach:
         weekend zonder eisen erin telt niet als "niets te doen" maar als "tijd
         om het goedkoopste moment uit te zoeken".
         """
+        # Een laadpaal kent alleen "klaar om". Sven op 04-09-2026: "niet eerder
+        # dan en starten voor moet er helemaal uit." De coach kiest zelf het
+        # goedkoopste moment; een begintijd zou hem alleen van de zon afhouden
+        # en een starttijd zou hem laten laden terwijl het duur is. Het paneel
+        # vraagt er bij een laadpaal niet meer om; wat er van vroeger nog in de
+        # instellingen staat telt hier niet mee.
+        alleen_klaar = device.get("type") == "laadpaal"
+
+        def tijd(bron: dict[str, Any], sleutel: str) -> time | None:
+            if alleen_klaar and sleutel != "done_by":
+                return None
+            return _time(bron.get(sleutel))
+
         for entry in (settings.get("strategy") or {}).get("schedules") or []:
             if entry.get("device") != device.get("id") or not entry.get("enabled"):
                 continue
@@ -1821,9 +1879,9 @@ class ChargerCoach:
                 times = entry.get("window") or {}
                 elke_dag = DayWindow(
                     enabled=True,
-                    not_before=_time(times.get("not_before")),
-                    start_by=_time(times.get("start_by")),
-                    done_by=_time(times.get("done_by")),
+                    not_before=tijd(times, "not_before"),
+                    start_by=tijd(times, "start_by"),
+                    done_by=tijd(times, "done_by"),
                 )
                 return dict.fromkeys(range(7), elke_dag)
 
@@ -1834,9 +1892,9 @@ class ChargerCoach:
                     continue
                 uit[weekdag] = DayWindow(
                     enabled=bool(day.get("enabled")),
-                    not_before=_time(day.get("not_before")),
-                    start_by=_time(day.get("start_by")),
-                    done_by=_time(day.get("done_by")),
+                    not_before=tijd(day, "not_before"),
+                    start_by=tijd(day, "start_by"),
+                    done_by=tijd(day, "done_by"),
                 )
             return uit
 
@@ -2683,6 +2741,7 @@ class ChargerCoach:
                     "why": blok.why,
                     "solar_kwh": blok.solar_kwh,
                     "kwh": blok.kwh,
+                    "estimated": blok.estimated,
                 }
                 for blok in plan.blocks
             ],

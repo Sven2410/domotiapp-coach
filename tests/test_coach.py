@@ -385,12 +385,14 @@ def zes_rondes(vanaf_uur, vanaf_minuut):
     return regels
 
 
-# Klaar om 19:00 is een klaar-tijd overdag, en die krijgt sinds 27-08-2026 een
-# uur speling in plaats van een kwartier (proef 32 in test_planner.py). De
-# tijden hieronder zijn daarop gezet: er moet 4,4 kWh in, op 14 A eenfasig duurt
-# dat 1,36 uur, dus met het uur erbij is 16:38 het laatste moment dat nog past.
-vroeg = zes_rondes(15, 30)
-print("  15:30  " + "  ".join(f"{r}:{a}A" for r, a in vroeg))
+# Klaar om 19:00 krijgt een uur speling (proef 32 in test_planner.py). Er moet
+# 4,4 kWh in, op 14 A eenfasig duurt dat 1,36 uur, dus met het uur erbij is
+# 16:38 het laatste moment dat nog past. Half twee is ruim op tijd; half vier
+# was dat tot 04-09-2026 ook, maar sindsdien komt er tussen 17:00 en 20:00
+# niets van het net bij (de avondpiek), en dan is half vier al het moment om
+# de middag vol te benutten.
+vroeg = zes_rondes(13, 30)
+print("  13:30  " + "  ".join(f"{r}:{a}A" for r, a in vroeg))
 # Sinds 30-08-2026 heet dit `easy-pace` in plaats van `surplus`: bij een vast
 # tarief kost elk uur hetzelfde, dus doet hij het rustig aan met de zon erin.
 # Waar het om gaat is dat hij niet naar vol vermogen springt. Sinds 04-09-2026
@@ -409,21 +411,11 @@ vanaf = namen.index("deadline")
 controle("en valt daarna niet meer terug",
          all(naam == "deadline" for naam in namen[vanaf:]), f"{laatst}")
 
-# Het bewijs dat deze proef de fout ook echt vangt: met de rekenwijze van vóór
-# de reparatie, die de eigen rem van de coach aanziet voor het maximum van de
-# paal, slaat hij om tien voor vier al om. Dat is een uur voor het laatste
-# moment dat past. (Om half vier nog net niet: het rustige tempo is sinds
-# 04-09-2026 9 A in plaats van 6, en op 8,6 A gemeten is de speling om half
-# vier nog een paar minuten groter dan het uur.)
-echte = planner.throttled_by_coach
-planner.throttled_by_coach = lambda charger: False
-try:
-    oud = zes_rondes(15, 50)
-finally:
-    planner.throttled_by_coach = echte
-print("  zoals het was: " + "  ".join(f"{r}:{a}A" for r, a in oud))
-controle("de proef vangt de fout ook echt",
-         any(naam == "deadline" for naam, _ in oud), f"{oud}")
+# Tot 04-09-2026 stond hier een tegenproef die `throttled_by_coach` uitzette
+# om te laten zien dat de coach dan om kwart voor vijf al omsloeg. Sinds het
+# rustige tempo meegroeit met de middag (en de avondpiek dicht is) vraagt de
+# coach in dat venster zelf al meer dan 6 A, en dan is er geen verschil meer
+# te laten zien. De functie zelf wordt los beproefd in test_planner.py.
 
 print("=== 15. hij vertelt hoe het afliep als de auto vol is ===")
 klaar = instellingen()
@@ -1274,7 +1266,9 @@ PRIJSLIJST_DATETIME = {
     ]},
 }
 hass27, _, coach27 = bouw({"sensor.prijs": PRIJSLIJST_DATETIME}, instellingen())
-rijen_dt = coach27._prices({"contract": DYN})
+# Alleen de echte blokken; sinds 04-09-2026 hangt de coach er een geschatte dag
+# achteraan, en die telt hier niet mee.
+rijen_dt = [r for r in coach27._prices({"contract": DYN}) if not r.get("estimated")]
 print(f"  prijslijst met datetime-objecten: {len(rijen_dt)} blok(ken)")
 controle("een prijslijst met datetime-objecten levert net zo goed blokken op",
          len(rijen_dt) == 1, f"{len(rijen_dt)} blokken uit 1 rij")
@@ -1295,7 +1289,7 @@ PRIJSLIJST_ROMMEL = {
     ]},
 }
 hass28, _, coach28 = bouw({"sensor.prijs": PRIJSLIJST_ROMMEL}, instellingen())
-rommel = coach28._prices({"contract": DYN})
+rommel = [r for r in coach28._prices({"contract": DYN}) if not r.get("estimated")]
 controle("een onleesbare rij wordt overgeslagen, de rest blijft staan",
          len(rommel) == 1, f"{len(rommel)} blokken")
 

@@ -508,19 +508,23 @@ controle("en noemt acht uur, niet half twee", "20:00" in d.plan, d.plan)
 
 d = vast_besluit(dt.datetime(2026, 8, 20, 20, 0))
 print(f"  20:00  {d.rule}: {d.amps} A  {d.reason}")
-controle("om acht uur gaat hij", d.charge and d.rule == "easy-pace" and d.amps == 6,
-         f"{d.rule} {d.amps} A")
 # Sven op 25-08-2026: op een vast contract is de nacht lang genoeg, dus de
-# aansluiting hoeft er niet vol voor open. 6 A driefasig is ruim 4 kW en dat is
-# een derde van wat vol vermogen trekt.
-controle("en dan op de ondergrens, niet op vol vermogen", d.amps == MIN_AMPS,
-         f"{d.amps} A tegen ondergrens {MIN_AMPS} A")
+# aansluiting hoeft er niet vol voor open. Sinds 04-09-2026 is rustig het
+# laagste hele aantal ampère dat een uur vóór de klaar-tijd klaar is: 13,1 kWh
+# tussen 20:00 en 05:00 is 6,3 A, dus 7. Op 6 A was hij om 05:00 niet klaar en
+# moest de klaar-tijdregel het laatste uur op vol vermogen redden.
+controle("om acht uur gaat hij", d.charge and d.rule == "easy-pace" and d.amps == 7,
+         f"{d.rule} {d.amps} A")
+controle("en dan rustig, niet op vol vermogen", d.amps < 14,
+         f"{d.amps} A tegen vol vermogen 14 A")
 controle("en hij zegt waarom hij rustig aan doet", "aansluiting" in d.reason, d.reason)
 
-# En het gat dat dit dicht: wie om een uur 's nachts inplugt kreeg een kwartier
-# speling. Nu laadt hij meteen, want de avondpiek is dan allang voorbij.
-d = vast_besluit(dt.datetime(2026, 8, 21, 1, 0))
-print(f"  01:00  {d.rule}: {d.amps} A")
+# En het gat dat dit dicht: wie 's nachts inplugt kreeg een kwartier speling.
+# Nu laadt hij meteen, want de avondpiek is dan allang voorbij. Om middernacht
+# en niet om één uur: om één uur past 13,1 kWh op 14 A niet meer een uur vóór
+# 06:00, en dan hoort de klaar-tijdregel te winnen (zie de proef eronder).
+d = vast_besluit(dt.datetime(2026, 8, 21, 0, 0))
+print(f"  00:00  {d.rule}: {d.amps} A")
 controle("'s nachts geen kwartier speling meer",
          d.charge and d.rule == "easy-pace", f"{d.rule}")
 
@@ -722,10 +726,10 @@ print("=== 32. een klaar-tijd overdag krijgt een uur speling ===")
 #
 # Het is bewust geen nieuw begrip: de vraag "hoort er een avond bij" is
 # dezelfde die `_evening_before` al beantwoordde.
-# Het half uur is Svens eigen getal, gegeven op 30-08-2026: "stel je 7 uur in,
-# dan moet hij eigenlijk uiterlijk om 6.30 klaar zijn." Het stond op een
-# kwartier, en dat was van mij.
-for uur, verwacht in ((6, 0.5), (8, 0.5), (12, 1.0), (19, 1.0), (21, 0.5), (23, 0.5)):
+# Sinds 04-09-2026 is het overal een uur. Sven: "De eindtijd is heel
+# belangrijk. Een uur daarvoor moet hij altijd klaar zijn." Daarvoor was het
+# een half uur 's nachts (zijn getal van 30-08) en een uur overdag.
+for uur, verwacht in ((6, 1.0), (8, 1.0), (12, 1.0), (19, 1.0), (21, 1.0), (23, 1.0)):
     eind_ = dt.datetime(2026, 8, 20, uur, 0)
     gekregen = planner._slack_hours(eind_)
     controle(f"klaar om {uur:02d}:00 krijgt {verwacht} uur speling",
@@ -735,15 +739,15 @@ for uur, verwacht in ((6, 0.5), (8, 0.5), (12, 1.0), (19, 1.0), (21, 0.5), (23, 
 controle("overdag begint hij een uur voor het krap wordt",
          planner._latest_start(dt.datetime(2026, 8, 20, 19, 0), 2.0)
          == dt.datetime(2026, 8, 20, 16, 0))
-controle("'s nachts is het een half uur",
+controle("'s nachts is het ook een uur",
          planner._latest_start(dt.datetime(2026, 8, 21, 6, 0), 2.0)
-         == dt.datetime(2026, 8, 21, 3, 30))
+         == dt.datetime(2026, 8, 21, 3, 0))
 
-# Svens eigen voorbeeld van 30-08-2026: klaar om 07:00 hoort uiterlijk 06:30 te
-# betekenen. Met een auto die er nog niets in hoeft is dat precies de speling.
-controle("klaar om 07:00 betekent uiterlijk 06:30 vol",
+# Svens eis van 04-09-2026: klaar om 07:00 betekent uiterlijk 06:00 vol. Met
+# een auto die er nog niets in hoeft is dat precies de speling.
+controle("klaar om 07:00 betekent uiterlijk 06:00 vol",
          planner._latest_start(dt.datetime(2026, 8, 21, 7, 0), 0.0)
-         == dt.datetime(2026, 8, 21, 6, 30))
+         == dt.datetime(2026, 8, 21, 6, 0))
 
 # Zonder klaar-tijd valt er niets te rekenen, en dan hoort de gewone speling te
 # blijven staan in plaats van dat er een uur uit de lucht komt vallen.
@@ -1042,19 +1046,20 @@ controle("hij weet hoeveel er nog in moet", abs(plan36.kwh_needed - 37.2) < 0.5,
 controle("en hoe lang dat duurt", abs(plan36.hours_needed - 3.37) < 0.05,
          f"{plan36.hours_needed}")
 
-# Vier uur nodig, dus de vier goedkoopste vóór 07:00: 03, 04, 05 en 06.
+# Vier uur nodig, dus de vier goedkoopste vóór 06:00, want het plan eindigt
+# een uur vóór de klaar-tijd (Sven, 04-09-2026): 02, 03, 04 en 05.
 laadt = [blok.start.hour for blok in plan36.blocks if blok.charging]
 print(f"  laadt in de uren: {laadt}")
 controle("hij pakt de vier goedkoopste uren voor de klaar-tijd",
-         laadt == [3, 4, 5, 6], f"{laadt}")
+         laadt == [2, 3, 4, 5], f"{laadt}")
 controle("en slaat de dure avond over",
          not any(blok.charging for blok in plan36.blocks if blok.start.hour >= 20),
          f"{[b.start.hour for b in plan36.blocks if b.charging]}")
 
-# De speling van een half uur zit erin: 07:00 min 3,37 uur laden min 0,5 uur.
-# 07:00 min 3,37 uur laden min een half uur speling is 03:07.
+# De speling van een uur zit erin: 07:00 min 3,37 uur laden min een uur is
+# 02:37.
 controle("uiterlijk beginnen heeft de speling er al af",
-         abs((plan36.latest_start - dt.datetime(2026, 8, 30, 3, 7)).total_seconds()) < 60,
+         abs((plan36.latest_start - dt.datetime(2026, 8, 30, 2, 37)).total_seconds()) < 60,
          f"{plan36.latest_start}")
 controle("en hij verwacht vol te zijn voor de klaar-tijd",
          plan36.expected_done <= plan36.deadline, f"{plan36.expected_done}")

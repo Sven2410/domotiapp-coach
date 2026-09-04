@@ -937,6 +937,22 @@ def _vlakke_blokken(
     return blokken
 
 
+def structural_ceiling(car: Car, charger: Charger) -> int:
+    """Wat deze paal en deze auto samen kunnen, los van dit moment.
+
+    Het plafond van `ceiling_amps` is van nú: de zekering, de lastbewaker, wat
+    het huis op dit moment trekt. Dat hoort niet in de uren die nog komen. Toen
+    dat wel zo was, knijpte een Equalizer om 13:30 de paal naar 9 A, rekende de
+    coach met die 9 A voor de hele nacht, zag dat het dan niet meer paste en
+    zette de klaar-tijdregel aan terwijl er tijd zat was. Gezien in het
+    virtuele huis op 04-09-2026.
+    """
+    plafond = charger.max_amps
+    if car.max_amps:
+        plafond = min(plafond, car.max_amps)
+    return int(max(0, plafond))
+
+
 def schijven(
     now: datetime,
     prices: list[dict],
@@ -947,6 +963,7 @@ def schijven(
     end: datetime | None,
     tariff: Tariff = Tariff(),
     forecast: Forecast = Forecast(),
+    ceiling_later: int | None = None,
 ) -> list[Schijf]:
     """Alle manieren om tussen nu en de klaar-tijd te laden, met hun prijs.
 
@@ -963,7 +980,17 @@ def schijven(
     het schema in dezelfde som en niet in een sport ernaast.
     """
     blokken = prices or _vlakke_blokken(now, end, tariff)
+    # Zonder klaar-tijd tellen alleen de prijzen die er echt zijn. Een geschatte
+    # dag erachter zou anders altijd net zo goedkoop lijken als vandaag, en dan
+    # verschuift het goedkoopste moment elke dag een dag; de auto werd nooit vol.
+    if end is None:
+        blokken = [rij for rij in blokken if not rij.get("estimated")]
     vermogen_kw = watts_for(ceiling, car.phases) / 1000.0
+    # Voor de uren die nog komen geldt wat paal en auto kunnen, niet wat er op
+    # dit moment onder de zekering of de lastbewaker past. Zie `structural_ceiling`.
+    vermogen_later_kw = watts_for(
+        ceiling if ceiling_later is None else ceiling_later, car.phases
+    ) / 1000.0
     if not blokken or vermogen_kw <= 0:
         return []
 
@@ -1002,9 +1029,10 @@ def schijven(
         deel = (tot - van).total_seconds() / 3600.0
         if deel <= 0:
             continue
-        plafond_kwh = vermogen_kw * deel
+        nu_blok = rij["start"] <= now < rij["end"]
+        plafond_kwh = (vermogen_kw if nu_blok else vermogen_later_kw) * deel
 
-        if rij["start"] <= now < rij["end"]:
+        if nu_blok:
             over = max(0.0, grid.surplus_w) / 1000.0 * deel
         else:
             heel = (rij["end"] - rij["start"]).total_seconds() / 3600.0
@@ -1035,6 +1063,11 @@ def schijven(
                 gedekt = min(over, plafond_kwh)
                 if gedekt > SCHIJF_MINIMUM:
                     uit.append(Schijf(rij["start"], rij["end"], terug, gedekt, "zon"))
+            elif in_evening_peak(rij["start"]):
+                # Bijkopen tot de ondergrens is ook net, en in de avondpiek
+                # komt er niets van het net bij. De zon van dat uur is dan te
+                # weinig om alleen op te laden, dus dat uur bestaat niet.
+                pass
             else:
                 gedekt = min(vloer_kwh, plafond_kwh)
                 gemengd = charge_cost(
@@ -1048,7 +1081,11 @@ def schijven(
                         Schijf(rij["start"], rij["end"], gemengd, gedekt, "vloer")
                     )
 
-        if plafond_kwh - gedekt > SCHIJF_MINIMUM and rij["end"] > netto_vanaf:
+        if (
+            plafond_kwh - gedekt > SCHIJF_MINIMUM
+            and rij["end"] > netto_vanaf
+            and not in_evening_peak(rij["start"])
+        ):
             uit.append(
                 Schijf(rij["start"], rij["end"], rij["price"], plafond_kwh - gedekt)
             )
@@ -1121,6 +1158,9 @@ class Blok:
     # van plan is te laden.
     solar_kwh: float = 0.0
     kwh: float = 0.0
+    # Of de prijs van dit blok een schatting is: de prijs van hetzelfde uur van
+    # vandaag, zolang die van morgen nog niet bekend is. Zie `_prices`.
+    estimated: bool = False
 
 
 @dataclass
@@ -1181,21 +1221,26 @@ def timeline(
     Sven op 30-08-2026: "ik wil zien wat de coach van plan is met hele tijdlijn
     tot dat hij vol moet zijn."
     """
-    einde = window.deadline if window.enabled else None
+    klaar = window.deadline if window.enabled else None
+    # De tijdlijn eindigt waar het plan eindigt: een uur voor de klaar-tijd.
+    einde = plan_end(klaar)
     begin = window.opens if window.enabled else None
     amps = max(MIN_AMPS, ceiling if ceiling >= MIN_AMPS else int(charger.max_amps or 0))
 
     kwh = energy_needed_kwh(car)
     plan = Plan(
-        deadline=einde,
-        latest_start=_latest_start(einde, hours_needed(car, amps)),
+        deadline=klaar,
+        latest_start=_latest_start(klaar, hours_needed(car, amps)),
         kwh_needed=kwh,
         hours_needed=hours_needed(car, amps),
         amps=amps,
         estimated=forecast.estimated,
     )
 
-    alle = schijven(now, prices, grid, car, amps, begin, einde, tariff, forecast)
+    alle = schijven(
+        now, prices, grid, car, amps, begin, einde, tariff, forecast,
+        ceiling_later=structural_ceiling(car, charger) or amps,
+    )
     if not alle:
         plan.note = (
             "Er zijn nog geen prijzen bekend, en er is ook geen vast bedrag "
@@ -1254,6 +1299,7 @@ def timeline(
                 why=waarom,
                 solar_kwh=zonschijf.kwh if zonschijf is not None else 0.0,
                 kwh=genomen.get(start, 0.0),
+                estimated=bool(rij.get("estimated")),
             )
         )
 
@@ -1287,21 +1333,20 @@ def _clock(moment: datetime) -> str:
 # auto vol is. Staat hier met een naam omdat zowel de regel als de tekst op de
 # kaart hem gebruikt, en die twee mogen nooit uit elkaar lopen.
 #
-# Een half uur. Dat was een kwartier, en dat kwartier was mijn getal en niet dat
-# van Sven; op 30-08-2026 zei hij wat hij bedoelde: "stel je 7 uur in, dan moet
-# hij eigenlijk uiterlijk om 6.30 klaar zijn." Een kwartier is ook te krap voor
-# wat er in de praktijk tussen komt: een auto die niet meteen opstart, een
-# lastbewaker die knijpt, een integratie die even wegvalt. Alle drie gezien in
-# één nacht.
-DEADLINE_SLACK_HOURS = 0.5
-
-# En hoeveel het er zijn bij een klaar-tijd overdag. Een kwartier is daar te
-# krap, en dat komt doordat de avondregel hieronder er niet bij helpt: die zet
-# een auto met een klaar-tijd 's nachts al om acht uur 's avonds aan, ruim voor
-# het laatste moment dat nog past. Overdag is er geen avond die erbij hoort, en
-# dan is dat kwartier het enige dat er tussen de auto en een gemiste afspraak
-# staat. Svens eigen getal, gevraagd en gegeven op 26-08-2026.
-DEADLINE_SLACK_DAY_HOURS = 1.0
+# Een uur, altijd. Sven op 04-09-2026: "De eindtijd is heel belangrijk. Een
+# uur daarvoor moet hij altijd klaar zijn." Daarvoor was het een half uur 's
+# nachts en een uur overdag, en daarvoor een kwartier; elk van die getallen was
+# te krap voor wat er in de praktijk tussen komt: een auto die niet meteen
+# opstart, een lastbewaker die knijpt, een integratie die even wegvalt.
+#
+# Dit ene getal doet twee dingen die bij elkaar horen. Het plan (`schijven`)
+# eindigt een uur vóór de klaar-tijd, dus de coach rekent nooit op het laatste
+# uur. En de klaar-tijdregel grijpt in zodra er minder dan dit uur over is
+# bovenop wat er nog nodig is. Zo kunnen die twee elkaar niet tegenspreken;
+# toen het plan tot de klaar-tijd liep en de regel een half uur eiste, stopte
+# de coach om 00:13 voor een goedkoper uur en zette de regel hem om 00:17 weer
+# aan.
+DEADLINE_SLACK_HOURS = 1.0
 
 # Wanneer het huis tot rust komt. Bij een vast contract kost elk uur hetzelfde,
 # dus zodra de zon niets meer oplevert is er niets om nog langer op te wachten.
@@ -1311,6 +1356,22 @@ DEADLINE_SLACK_DAY_HOURS = 1.0
 # de aansluiting ook het minst. Sven op 20-08-2026.
 EVENING_START = time(20, 0)
 
+# En wanneer die avondpiek begint. Tussen deze twee tijden komt er bij geen
+# enkel contract iets van het net bij, ook niet bij een dynamisch contract
+# waar de som het toch al zelden zou kiezen. Sven op 04-09-2026, over een auto
+# die om tien uur 's ochtends aan de kabel gaat: "dan ergens stoppen voor de
+# avondpiek, want we hadden gezegd dat hij pas na 20 uur weer mag laden." De
+# klaar-tijdregel staat hier nog boven: past het anders niet meer, dan laadt
+# hij. Zon blijft in de avondpiek gewoon beschikbaar, want die belast de
+# aansluiting niet. Vijf uur is een aanname van mij en geen meting; Sven kan
+# hem verzetten.
+EVENING_PEAK_START = time(17, 0)
+
+
+def in_evening_peak(moment: datetime) -> bool:
+    """Of dit blok in de avondpiek valt."""
+    return EVENING_PEAK_START <= moment.time() < EVENING_START
+
 # Hoe lang een klaar-tijd na die avond nog mag liggen om er nog bij te horen.
 # Meer dan een halve dag betekent dat er een hele daglichtperiode tussen zit, en
 # dan is er wel degelijk zon om op te wachten en gaat de avondregel niet op.
@@ -1318,17 +1379,24 @@ EVENING_NIGHT_HOURS = 12
 
 
 def _slack_hours(end: datetime | None) -> float:
-    """Hoeveel speling deze klaar-tijd hoort te krijgen.
+    """Hoeveel speling deze klaar-tijd krijgt: een uur, zie `DEADLINE_SLACK_HOURS`.
 
-    Geen nieuw begrip: het hangt aan de avond die bij de klaar-tijd hoort, en
-    dat is precies dezelfde vraag die `_evening_before` hieronder beantwoordt.
-    Hoort er een avond bij, dan zet de avondregel de auto daar al aan en is een
-    kwartier genoeg. Hoort er geen avond bij, dan staat er niets tussen de auto
-    en een gemiste afspraak, en dan is het een uur.
+    Tot 04-09-2026 hing dit af van of er een avond bij de klaar-tijd hoorde.
+    Sven wil het overal hetzelfde, en de functie blijft staan omdat elke plek
+    die met de klaar-tijd rekent hierlangs hoort te gaan en niet langs het getal.
+    """
+    return DEADLINE_SLACK_HOURS
+
+
+def plan_end(end: datetime | None) -> datetime | None:
+    """Het moment waarop het plan af hoort te zijn: de klaar-tijd min de speling.
+
+    Alles wat vooruit plant rekent hiermee en niet met de klaar-tijd zelf. Het
+    laatste uur is van de bewoner, niet van de coach.
     """
     if end is None:
-        return DEADLINE_SLACK_HOURS
-    return DEADLINE_SLACK_HOURS if _evening_before(end) else DEADLINE_SLACK_DAY_HOURS
+        return None
+    return end - timedelta(hours=_slack_hours(end))
 
 
 def _latest_start(end: datetime | None, needed: float | None) -> datetime | None:
@@ -1712,6 +1780,9 @@ def _decide(
 
     start = window.opens if window.enabled else None
     end = window.deadline if window.enabled else None
+    # Alles wat vooruit plant mikt een uur vóór de klaar-tijd. De regels die
+    # over de klaar-tijd zelf gaan rekenen hieronder met `end`.
+    einde_plan = plan_end(end)
 
     if window.enabled and start and now < start:
         return Decision(
@@ -1751,7 +1822,12 @@ def _decide(
     # eerder te gaan laden; het levert alleen een uiterste startmoment op, zodat
     # een vergeten accustand nooit een lege auto oplevert. Elke sport die
     # hieronder staat weet dat het een aanname is en zegt dat ook.
-    pace = charging_pace(now, charger, ceiling)
+    # Het tempo waarmee de klaar-tijdsom rekent is wat paal en auto kunnen,
+    # niet het plafond van deze minuut: een lastbewaker die even knijpt of een
+    # oven die even aanstaat zegt niets over de uren die nog komen. Wat de paal
+    # werkelijk trekt telt wel mee, zie `charging_pace`.
+    structureel = structural_ceiling(car, charger)
+    pace = charging_pace(now, charger, structureel)
     needed = hours_needed(car, pace)
     soc_unknown = needed is None
     if soc_unknown:
@@ -1872,11 +1948,33 @@ def _decide(
             needs_soc=soc_unknown,
         )
 
-    alle = schijven(now, prices, grid, car, ceiling, start, end, tariff, forecast)
+    alle = schijven(
+        now, prices, grid, car, ceiling, start, einde_plan, tariff, forecast,
+        ceiling_later=structureel,
+    )
     if not alle:
         # Geen prijzen en geen vast bedrag: dan weet de coach niet wat stroom
         # kost. Dat is geen vast contract maar een gat, en het hoort niet
         # stilletjes te lijken op een gewone beslissing.
+        #
+        # Is er een klaar-tijd en tijd genoeg, dan wacht hij, net als bij een
+        # onbekende accustand: kopen zonder te weten wat het kost is precies
+        # wat een dynamisch contract niet wil. Een prijssensor die bij het
+        # inpluggen even niets zegt zette de auto anders meteen op vol vermogen,
+        # en dat is wat Sven zag: "wanneer ik de auto inplugde ging hij gelijk
+        # laden." Sinds 04-09-2026.
+        if window.enabled and end and needed is not None:
+            slack = (end - now).total_seconds() / 3600 - needed
+            if slack > _slack_hours(end):
+                return Decision(
+                    False,
+                    0,
+                    "Er komen geen prijzen binnen, dus hij wacht met laden uit het "
+                    "net. Controleer de prijssensor bij Installatie.",
+                    plan=f"Begint hoe dan ook op tijd voor {_clock(end)}.",
+                    rule="no-prices",
+                    hold_minutes=_hold_until_start(now, end, needed),
+                )
         return Decision(
             True,
             ceiling,
@@ -1884,6 +1982,22 @@ def _decide(
             "Controleer de prijssensor bij Installatie.",
             plan="Laadt door tot de auto vol is.",
             rule="fixed-tariff",
+        )
+
+    # Past het niet meer in wat er nog aan uren over is, dan is er niets te
+    # kiezen. Dit is dezelfde vraag als de klaar-tijdregel hierboven, maar dan
+    # met wat het plan wél weet: dat de avondpiek dicht is en dat het plan een
+    # uur vóór de klaar-tijd af moet zijn. Zonder deze regel rekende hij bij een
+    # kabel om 17:00 alsof hij tot 23:00 vol vermogen had en wachtte hij tot
+    # het te laat was.
+    if end is not None and sum(schijf.kwh for schijf in alle) < nodig_kwh:
+        return Decision(
+            True,
+            ceiling,
+            f"Wat er nog in moet past niet meer in de uren die overblijven, dus hij "
+            f"laadt nu door om {_clock(end)} te halen.",
+            plan="Laadt op vol vermogen tot de auto klaar is.",
+            rule="deadline",
         )
 
     gekozen = goedkoopste(alle, nodig_kwh)
@@ -1919,14 +2033,9 @@ def _decide(
             # virtuele huis op 04-09-2026.
             vermogen_kw = watts_for(ceiling, car.phases) / 1000.0
             beschikbaar = sum(schijf.kwh for schijf in netschijven) / vermogen_kw
-            # Mikken op de klaar-tijd mín de speling die de klaar-tijdregel
-            # eist, want anders komt die regel er hoe dan ook tussen: een tempo
-            # dat precies op 06:00 uitkomt heeft nul speling, en nul is minder
-            # dan een kwartier. Dan schoot hij het laatste uur alsnog naar vol
-            # vermogen, en dat is geen rustig tempo maar een sprint met een
-            # aanloop. Gezien in het virtuele huis op 04-09-2026.
-            if end is not None:
-                beschikbaar -= _slack_hours(end)
+            # De schijven lopen al tot een uur vóór de klaar-tijd (zie
+            # `plan_end`), dus dit tempo is er een dat met dat uur speling
+            # klaar is.
             if beschikbaar > 0:
                 rustig = amps_for(nodig_kwh / beschikbaar * 1000.0, car.phases)
                 # Naar boven afronden, want naar beneden is elke ronde net iets
@@ -1988,6 +2097,27 @@ def _decide(
                 plan=_describe(uren),
                 rule="cheap-hour+near",
             )
+
+        # En hij stopt ook niet als de uren die overblijven maar nét genoeg
+        # zijn. Een plan zonder reserve is een plan dat bij de eerste oven
+        # omvalt: om 00:12 stopte hij voor een uur dat 0,6 cent goedkoper was,
+        # om 01:00 zette de klaar-tijdregel hem weer aan, en toen om 02:00 de
+        # oven aanging was de speling op en was hij om 05:18 vol in plaats van
+        # om 05:00. Blijft er na dit uur minder dan een uur laden over aan
+        # ruimte, dan laadt hij door. Gezien in het virtuele huis, 04-09-2026.
+        if hier is not None and end is not None:
+            later = sum(s.kwh for s in alle if s.start >= hier.end or s.solar)
+            uur_kwh = watts_for(structureel, car.phases) / 1000.0
+            if later - nodig_kwh < uur_kwh:
+                return Decision(
+                    True,
+                    ceiling,
+                    f"Dit uur kost {_euro(hier.price)} per kWh, iets meer dan de uren "
+                    f"die hij gepland had, maar stoppen laat te weinig speling over "
+                    f"voor {_clock(end)}. Dus hij laadt door.",
+                    plan=_describe(uren),
+                    rule="cheap-hour+reserve",
+                )
 
     if nu_zon is not None:
         # De zon van dit uur is goedkoop genoeg. Geeft het dak genoeg om er zelf

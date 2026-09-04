@@ -100,6 +100,21 @@ for naam, vl in V.items():
     if vl.klaar_op is not None and s.auto.laadgrens >= 100 and s.auto.meldt_soc:
         controle(f"{naam}: precies één keer 'is vol' gemeld",
                  len(meldingen(vl, "is vol")) == 1, f"{meldingen(vl, 'is vol')}")
+    # Sven op 04-09-2026: "De eindtijd is heel belangrijk. Een uur daarvoor
+    # moet hij altijd klaar zijn." Vijf minuten speling voor de aanloop.
+    if gehaald(vl) and vl.klaar_tijd is not None and vl.klaar_op is not None:
+        controle(f"{naam}: een uur voor de klaar-tijd al vol",
+                 vl.klaar_op <= vl.klaar_tijd - virtueel.dt.timedelta(minutes=55),
+                 f"vol om {vl.klaar_op:%H:%M}, klaar-tijd {vl.klaar_tijd:%H:%M}")
+    # En nooit van het net in de avondpiek, welk contract ook. Alleen snelladen
+    # en een klaar-tijd die anders niet gehaald wordt gaan daar overheen. Een
+    # halve kilowattuur speling: de coach houdt een lopende beurt drie ronden
+    # op de ondergrens aan voordat hij stopt (`_keep_alive`), en dat is bij een
+    # driefasige auto 0,4 kWh over de grens heen.
+    if naam not in ("snelladen", "vast-onhaalbare-klaar-tijd", "eenfase-krappe-zekering"):
+        controle(f"{naam}: niets van het net in de avondpiek",
+                 vl.net_kwh_tussen("17:00", "20:00") < 0.6,
+                 f"{vl.net_kwh_tussen('17:00', '20:00'):.2f} kWh tussen 17:00 en 20:00")
 
 # --- vast contract: zon voor net, net pas na de avondpiek ---------------------
 
@@ -170,7 +185,7 @@ if (vl := v("vast-geen-klaar-tijd")):
              f"vol {vl.klaar_op}, net {vl.uit_net_kwh:.2f}")
 
 if (vl := v("vast-krappe-klaar-tijd")):
-    controle("krap: meteen vol vermogen", vl.regels[6].regel.startswith("deadline"), vl.regels[6].regel)
+    controle("krap: meteen vol vermogen", vl.regels[6].amps == 16, f"{vl.regels[6].regel} {vl.regels[6].amps} A")
     controle("krap: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
 if (vl := v("vast-onhaalbare-klaar-tijd")):
@@ -297,16 +312,70 @@ if (vl := v("kabel-eruit-middenin")):
              any("8," in m for m in meldingen(vl, "is vol")), f"{meldingen(vl, 'is vol')}")
     controle("kabel eruit: op tijd vol", gehaald(vl), "")
 
-if (vl := v("niet-voor-23")):
-    controle("niet voor 23: niets ervoor", not laadt_tussen(vl, "07:00", "23:00"), "")
-    controle("niet voor 23: rustig tempo, geen sprint",
-             not vl.regels_met("deadline"), "de klaar-tijdregel moest het redden")
-    controle("niet voor 23: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+if (vl := v("oude-begintijd-genegeerd")) and (vz := v("vast-zonnig")):
+    controle("oude tijden: een laadpaal kent alleen 'klaar om', dus zelfde dag als zonder",
+             abs(vl.geladen_kwh - vz.geladen_kwh) < 0.2 and vl.klaar_op == vz.klaar_op,
+             f"vol om {vl.klaar_op}, zonder oude tijden {vz.klaar_op}")
+    controle("oude tijden: geen too-early of start-by",
+             not vl.regels_met("too-early") and not vl.regels_met("start-by"), "")
 
-if (vl := v("uiterlijk-starten-22")):
-    controle("uiterlijk starten: wacht op de prijs tot tien uur", not laadt_tussen(vl, "18:30", "22:00"), "")
-    controle("uiterlijk starten: om tien uur vol vermogen, wat het ook kost",
-             any(r.regel.startswith("start-by") and r.amps == 16 for r in regels_in(vl, "22:00", "22:05")), "")
+# --- Svens voorbeeld van 04-09-2026 ----------------------------------------------
+
+print("=== om tien uur erin, klaar om zes ===")
+if (vl := v("tien-uur-erin-dynamisch")):
+    controle("tien uur: niet meteen laden bij het inpluggen",
+             not laadt_tussen(vl, "10:00", "13:00"), "laadde tussen 10:00 en 13:00")
+    controle("tien uur: de goedkope middag pakken", laadt_tussen(vl, "13:05", "17:00"), "")
+    controle("tien uur: stoppen voor de avondpiek", not laadt_tussen(vl, "17:05", "20:00"), "")
+    controle("tien uur: en 's nachts de rest", laadt_tussen(vl, "00:00", "05:00"), "")
+    controle("tien uur: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    controle("tien uur: binnen een dubbeltje van het optimum",
+             vl.optimum is not None and vl.kosten <= vl.optimum + 0.10,
+             f"kosten {vl.kosten:.2f}, optimum {vl.optimum}")
+
+if (vl := v("tien-uur-erin-zon")):
+    controle("tien uur met zon: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    controle("tien uur met zon: de zon van de middag gebruikt", vl.uit_zon_kwh > 25, f"{vl.uit_zon_kwh:.1f}")
+    # Vijftien cent op 68 kWh: de ochtendzon gaat er op de ondergrens in, met
+    # een beetje dure ochtendstroom erbij; het optimum weet dat de middag alles
+    # gedekt had.
+    controle("tien uur met zon: binnen vijftien cent van het optimum",
+             vl.optimum is not None and vl.kosten <= vl.optimum + 0.15,
+             f"kosten {vl.kosten:.2f}, optimum {vl.optimum}")
+
+if (vl := v("tien-uur-zon-valt-tegen")) and (vz := v("tien-uur-erin-zon")):
+    controle("zon valt tegen: toch op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    controle("zon valt tegen: meer van het net dan bij een dak dat het wel doet",
+             vl.uit_net_kwh > vz.uit_net_kwh + 5, f"{vl.uit_net_kwh:.1f} tegen {vz.uit_net_kwh:.1f}")
+
+if (vl := v("tien-uur-erin-vast")):
+    controle("tien uur vast: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    controle("tien uur vast: de zon gebruikt", vl.uit_zon_kwh > 25, f"{vl.uit_zon_kwh:.1f}")
+    controle("tien uur vast: vóór acht uur hooguit de ondergrens bijgekocht",
+             all(r.paal_amps <= 6.01 for r in regels_in(vl, "00:00", "20:00") if r.paal_w > r.over_w + 50),
+             f"{vl.net_kwh_tussen('10:00', '20:00'):.2f} kWh van het net voor acht uur")
+
+if (vl := v("equalizer-knijpt")):
+    geknepen = regels_in(vl, "13:35", "15:00")
+    # De bewaker meldt wat hij vrijgeeft, en de coach vraagt niet meer dan dat:
+    # dan valt er niets als "geknepen" te melden, want de coach knijpt zelf mee.
+    controle("equalizer: de coach vraagt niet meer dan de bewaker vrijgeeft",
+             all(r.amps <= 10 for r in geknepen), f"hoogste vraag {max(r.amps for r in geknepen)} A")
+    controle("equalizer: de paal blijft onder wat de bewaker vrijgeeft",
+             all(r.paal_amps <= 10 for r in geknepen), f"hoogste {max(r.paal_amps for r in geknepen):.0f} A")
+    controle("equalizer: en daarna weer vol",
+             any(r.paal_amps >= 15 for r in regels_in(vl, "15:05", "16:00")), "")
+    controle("equalizer: de coach vecht er niet tegen",
+             len([o for o in vl.opdrachten if virtueel.dt.time(13, 35) <= o[0].time() < virtueel.dt.time(15, 0)]) <= 6,
+             f"{len(vl.opdrachten)} opdrachten")
+    controle("equalizer: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
+if (vl := v("prijzen-weg-bij-inpluggen")):
+    controle("prijzen weg: niet blind gaan laden", not laadt_tussen(vl, "10:00", "10:20"), "")
+    controle("prijzen weg: zegt dat hij wacht op prijzen",
+             any(r.regel == "no-prices" for r in regels_in(vl, "10:00", "10:20")),
+             f"{sorted({r.regel for r in regels_in(vl, '10:00', '10:20')})}")
+    controle("prijzen weg: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
 # --- storingen ---------------------------------------------------------------
 

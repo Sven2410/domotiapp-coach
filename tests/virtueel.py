@@ -345,6 +345,9 @@ class Scenario:
     aansluiting_fasen: int = 3
     zekering: float = 25.0
     lastbewaker: bool = False
+    # Een Easee Equalizer: houdt de som van huis en paal zelf onder de zekering,
+    # meldt hoeveel hij vrijgeeft, en de paal zegt waarom hij geknepen wordt.
+    equalizer: bool = False
     voorspeller: str = "dashboard"      # dashboard | sensoren | geen
     vast_prijs: float = 0.28
     vast_teruglevering: float = 0.07
@@ -452,6 +455,8 @@ E = {
     "net": "sensor.v_net",
     "l1": "sensor.v_l1", "l2": "sensor.v_l2", "l3": "sensor.v_l3",
     "soc": "sensor.v_auto_soc",
+    "equalizer": "sensor.v_equalizer",
+    "reden": "sensor.v_paal_reden",
     "prijs": "sensor.v_prijs",
     "markt": "sensor.v_markt",
     "zon_rest": "sensor.v_zon_rest",
@@ -524,6 +529,7 @@ def instellingen(s: Scenario) -> dict:
                 "max_limit": E["max"],
                 "dynamic_limit": E["dyn"],
                 "lifetime_energy": E["teller"],
+                "no_current_reason": E["reden"] if s.equalizer else "",
             },
             "cars": [{
                 "id": "auto",
@@ -537,7 +543,8 @@ def instellingen(s: Scenario) -> dict:
         "installation": {
             "phases": s.aansluiting_fasen,
             "fuse_amps": s.zekering,
-            "load_balancer": s.lastbewaker,
+            "load_balancer": s.lastbewaker or s.equalizer,
+            "balancer_entity": E["equalizer"] if s.equalizer else "",
         },
         "sources": bronnen,
         "contract": contract,
@@ -578,7 +585,10 @@ class Wereld:
         self.prijzen = dataclasses.replace(s.prijzen)
         self.nu = dt.datetime.fromisoformat(s.begin)
         self.p1_weg_tot: dt.datetime | None = None
+        self.prijzen_weg_tot: dt.datetime | None = None
         self.oven_tot: dt.datetime | None = None
+        self.equalizer_vrij: float | None = None
+        self.reden = ""
         self.oven_w = 3000.0
         if s.kabel_erin is None:
             self.paal.kabel = True
@@ -596,7 +606,22 @@ class Wereld:
         if self.oven_tot is not None and nu < self.oven_tot:
             self.huis_w += self.oven_w
         self.paal.stap(nu)
-        self.auto.stap(self.paal.aanbod(), self.paal.gestart, self.s.stap_seconden)
+        aanbod = self.paal.aanbod()
+        # De Equalizer zit tussen de paal en de auto: hij laat nooit meer door
+        # dan er naast het huis onder de zekering past, en zegt dat erbij.
+        self.reden = ""
+        if self.s.equalizer:
+            huis = self.huis.per_fase(self.huis_w, self.s.aansluiting_fasen)
+            vrij = self.s.zekering - max(huis) / VOLT
+            self.equalizer_vrij = max(0.0, vrij)
+            if vrij < MIN_AMPS:
+                if aanbod >= MIN_AMPS:
+                    self.reden = "eq_too_low_current"
+                aanbod = 0.0
+            elif aanbod > vrij:
+                self.reden = "limited_by_equalizer"
+                aanbod = math.floor(vrij)
+        self.auto.stap(aanbod, self.paal.gestart, self.s.stap_seconden)
         self.paal_fasen = min(self.auto.fasen, self.paal.fasen)
         self.paal_w = self.auto.trekt_amps * VOLT * self.paal_fasen
 
@@ -646,8 +671,15 @@ class Wereld:
 
         soc = self.auto.gemelde_soc(nu)
         z(E["soc"], "unavailable" if soc is None else w(str(soc), "%"))
+        if self.s.equalizer:
+            z(E["equalizer"], w(f"{self.equalizer_vrij:.1f}", "A"))
+            z(E["reden"], self.reden or "none")
 
-        if self.s.contract.startswith("dynamisch"):
+        prijzen_weg = self.prijzen_weg_tot is not None and nu < self.prijzen_weg_tot
+        if self.s.contract.startswith("dynamisch") and prijzen_weg:
+            z(E["prijs"], weg)
+            z(E["markt"], weg)
+        elif self.s.contract.startswith("dynamisch"):
             z(E["prijs"], {"state": f"{self.prijzen.all_in(nu):.5f}",
                            "attributes": {"unit_of_measurement": "€/kWh",
                                           "prices": self.prijzen.lijst(nu, True)}})
@@ -737,6 +769,9 @@ class Wereld:
         if actie == "p1_weg":
             self.p1_weg_tot = self.nu + dt.timedelta(minutes=int(arg))
             return f"de P1-meter valt {arg} minuten weg"
+        if actie == "prijzen_weg":
+            self.prijzen_weg_tot = self.nu + dt.timedelta(minutes=int(arg))
+            return f"de prijssensor valt {arg} minuten weg"
         if actie == "oven":
             self.oven_tot = self.nu + dt.timedelta(minutes=int(arg))
             return f"de oven gaat {arg} minuten aan ({self.oven_w:.0f} W)"
