@@ -2546,7 +2546,7 @@ class ChargerCoach:
         dat op 27-08-2026 bij een klant: hij typte hem twee keer.
 
         Erger dan het dubbele typen was wat eronder zat. Alleen Easee heeft dat
-        merkveld; Zaptec, Wallbox, Zappi en Peblar hebben geen enkel merkveld.
+        merkveld; een paal van een ander merk ("overig") heeft geen enkel merkveld.
         Bij die klanten kwam er dus nooit een teller binnen, ook niet als de
         Energieteller keurig was ingevuld, en viel het verslag terug op wat de
         coach zelf aan vermogen langs zag komen. Dat werkt, maar de geijkte

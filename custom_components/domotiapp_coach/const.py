@@ -48,25 +48,21 @@ DEVICE_TYPES: Final = [
 # Which extra entities a charging point offers depends entirely on its brand:
 # not every charger can be started, stopped or paused, and the ones that can do
 # not agree on how. Picking the brand is what decides which fields are asked
-# for. Only Easee is filled in so far; the rest are listed so a customer can
-# already say what they have.
+# for. Only Easee is supported; "overig" is for a charger the coach can watch
+# but not steer. Sven on 04-09-2026: the other brands came out of the list,
+# because a brand in a list reads as a promise, and there was none.
 CHARGER_BRANDS: Final = [
     "easee",
-    "zaptec",
-    "wallbox",
-    "zappi",
-    "peblar",
     "overig",
 ]
 
 # --- Dishwasher brands -----------------------------------------------------
 # Same reasoning as the chargers: what a dishwasher reports and how it is
 # started differs per brand. Home Connect covers Bosch, Siemens, Neff,
-# Gaggenau and Constructa in one, because they all speak the same API.
+# Gaggenau and Constructa in one, because they all speak the same API. It is
+# the only one supported; same decision as the chargers, 04-09-2026.
 DISHWASHER_BRANDS: Final = [
     "home_connect",
-    "miele",
-    "lg",
     "overig",
 ]
 
