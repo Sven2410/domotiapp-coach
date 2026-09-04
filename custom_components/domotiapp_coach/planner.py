@@ -897,6 +897,12 @@ class Schijf:
     #           paal, dus de prijs is een mengsel van zon en bijkopen
     #   "net"   alles boven de zon, tegen de prijs van dat uur
     kind: str = "net"
+    # Hoeveel van `kwh` werkelijk van het dak komt. Bij "zon" alles, bij
+    # "vloer" alleen wat er over is (de rest is bijkopen), bij "net" niets.
+    # Voor de tijdlijn: die zei "4,1 kWh zon" over een uur waarin het dak 2,4
+    # gaf en het huis een deel opat. Sven op 04-09-2026: "dat weet je toch
+    # niet." De 4,1 was wat er in de auto ging, zon plus net.
+    zon_kwh: float = 0.0
 
     @property
     def solar(self) -> bool:
@@ -1077,7 +1083,9 @@ def schijven(
             if over >= vloer_kwh * SURPLUS_SLACK:
                 gedekt = min(over, plafond_kwh)
                 if gedekt > SCHIJF_MINIMUM:
-                    uit.append(Schijf(rij["start"], rij["end"], terug, gedekt, "zon"))
+                    uit.append(
+                        Schijf(rij["start"], rij["end"], terug, gedekt, "zon", gedekt)
+                    )
             elif in_evening_peak(rij["start"]):
                 # Bijkopen tot de ondergrens is ook net, en in de avondpiek
                 # komt er niets van het net bij. De zon van dat uur is dan te
@@ -1101,7 +1109,8 @@ def schijven(
                 )
                 if gedekt > SCHIJF_MINIMUM:
                     uit.append(
-                        Schijf(rij["start"], rij["end"], gemengd, gedekt, "vloer")
+                        Schijf(rij["start"], rij["end"], gemengd, gedekt, "vloer",
+                               min(over, gedekt))
                     )
 
         if (
@@ -1226,10 +1235,15 @@ class Blok:
     charging: bool = False
     # In één woord waarom, voor de kolom ernaast.
     why: str = ""
-    # Hoeveel er in dit uur uit de eigen zon kan, en hoeveel hij er in totaal
-    # van plan is te laden.
+    # Hoeveel er in dit uur werkelijk van het dak verwacht wordt, na het huis,
+    # en hoeveel hij er in totaal van plan is te laden. Bij een vloer-uur is
+    # het tweede meer dan het eerste: de rest is bijkopen.
     solar_kwh: float = 0.0
     kwh: float = 0.0
+    # En hoe hard dat is, gemiddeld over het blok: de stroom en het vermogen.
+    # Sven op 04-09-2026: "laat sowieso zien hoeveel ampère hij laadt en kW."
+    amps: int = 0
+    kw: float = 0.0
 
 
 @dataclass
@@ -1371,11 +1385,14 @@ def timeline(
         zonschijf = next((s for s in schijven_hier if s.solar), None)
         netschijf = next((s for s in schijven_hier if not s.solar), None)
         if laadt:
-            waarom = (
-                "je eigen zon is hier het goedkoopst"
-                if zonschijf is not None and netschijf is None
-                else "een van de goedkoopste manieren"
-            )
+            if zonschijf is not None and netschijf is None:
+                waarom = (
+                    "wat zon, aangevuld tot de ondergrens van je paal"
+                    if zonschijf.kind == "vloer"
+                    else "je eigen zon is hier het goedkoopst"
+                )
+            else:
+                waarom = "een van de goedkoopste manieren"
         elif begin is not None and rij["end"] <= begin:
             waarom = "voor je begintijd"
         elif not schijven_hier:
@@ -1383,6 +1400,13 @@ def timeline(
         else:
             waarom = "duurder dan wat hij nodig heeft"
 
+        # Het tempo over het deel van het blok dat nog komt: het uur waar we
+        # in zitten is korter dan een uur.
+        van = max(start, now)
+        tot = min(rij["end"], grens)
+        duur = max(0.0, (tot - van).total_seconds() / 3600.0)
+        kwh_blok = genomen.get(start, 0.0)
+        kw = kwh_blok / duur if duur > 0 else 0.0
         plan.blocks.append(
             Blok(
                 start=start,
@@ -1390,8 +1414,10 @@ def timeline(
                 price=rij["price"],
                 charging=laadt,
                 why=waarom,
-                solar_kwh=zonschijf.kwh if zonschijf is not None else 0.0,
-                kwh=genomen.get(start, 0.0),
+                solar_kwh=zonschijf.zon_kwh if zonschijf is not None else 0.0,
+                kwh=kwh_blok,
+                amps=int(round(amps_for(kw * 1000.0, car.phases))) if laadt else 0,
+                kw=round(kw, 2) if laadt else 0.0,
             )
         )
 

@@ -2723,6 +2723,8 @@ class ChargerCoach:
                     "why": blok.why,
                     "solar_kwh": blok.solar_kwh,
                     "kwh": blok.kwh,
+                    "amps": blok.amps,
+                    "kw": blok.kw,
                 }
                 for blok in plan.blocks
             ],
