@@ -39,6 +39,41 @@ commit, tag en breng uit.
 - Niets bouwen zonder zijn seintje. Wat er op de lijst staat betekent niet dat
   het aan mag.
 
+## De eisen van Sven
+
+Vastgelegd op 04-09-2026, in zijn woorden, en hard: elke regel in de coach
+hoort hieraan te voldoen en elke nieuwe regel wordt hieraan getoetst. Het
+virtuele huis (`tests/test_virtueel.py`) meet ze na.
+
+1. **Zo min mogelijk kosten.** "Als er bespaard kan worden, doe dat." Alle
+   manieren om een kilowattuur in de auto te krijgen worden tegen elkaar
+   gezet, zon en net, met teruglevering en salderen erin. Bij een vast
+   contract is laden op eigen zon goedkoper en hoeft er niet naar een prijs
+   gekeken te worden; bij een dynamisch contract telt alles mee.
+2. **De klaar-tijd is heilig, en een uur daarvoor is hij klaar.** Het plan
+   eindigt een uur vóór de klaar-tijd (`plan_end`), de klaar-tijdregel grijpt
+   in zodra er minder dan dat uur over is bovenop wat er nog nodig is, en een
+   lopende beurt stopt niet voor een goedkoper uur als er daarna geen uur
+   reserve overblijft (`cheap-hour+reserve`).
+3. **Geen fasewissel.** Een auto laadt op één fase of op drie, zoals het
+   autoprofiel zegt, en de coach wisselt dat nooit: dat beschadigt het relais.
+   Hij moduleert van 6 A tot het maximum van de paal, op het aantal fasen dat
+   er is. Er staat nergens code die een fasemodus schrijft; dat hoort zo te
+   blijven.
+4. **Niets van het net in de avondpiek**, van `EVENING_PEAK_START` (17:00,
+   een aanname van mij) tot `EVENING_START` (20:00), bij elk contract. Bij een
+   vast contract komt er bovendien vóór 20:00 helemaal niets van het net bij
+   op de avond die bij de klaar-tijd hoort. Zon blijft altijd beschikbaar,
+   want die belast de aansluiting niet. Alleen de klaar-tijdregel en snelladen
+   gaan hier overheen.
+5. **Het schema van een laadpaal kent alleen "klaar om".** "Niet eerder dan"
+   en "uiterlijk starten" zijn er voor een laadpaal uit; de coach kiest zelf
+   het goedkoopste moment. Andere apparaten houden alle drie.
+6. **Nooit blind laden.** Zonder accustand wacht hij op de bewoner, zonder
+   prijzen wacht hij op de prijssensor, allebei met de klaar-tijd als vangnet.
+   Zolang de prijzen van morgen nog niet binnen zijn, gelden die van vandaag
+   als schatting, herkenbaar als `estimated` in de tijdlijn.
+
 ## Hoe het in elkaar zit
 
 | bestand | wat het doet |
@@ -77,8 +112,8 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 187 controles op het denkwerk
-python tests/test_coach.py       # 197 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 317 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 196 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 450 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 37 op de kwartieropslag
 node   tests/test_rapport.mjs    # 17 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
@@ -157,7 +192,9 @@ een herstart middenin, en daar gedraagt de coach zich bewust anders. Doe eerst
 Sinds 27-08-2026 staat dat bij het apparaat zelf en niet meer in Strategie. Op de
 kaart in Overzicht: de schuif die het schema aan en uit zet, en de keuzelijst
 wie er voorgaat. Achter de knop Schema: de tijden en het per-dag-werk, in
-`schedule-sheet.js`. Alles gaat langs één commando,
+`schedule-sheet.js`. Voor een laadpaal is dat sinds 04-09-2026 alleen nog
+"klaar om" (`timesFor` in dat bestand); `_days` in coach.py negeert de andere
+twee voor een laadpaal, ook als ze nog in oude instellingen staan. Alles gaat langs één commando,
 `domotiapp_coach/device/schedule`, dat precies dat ene apparaat aanraakt en de
 nieuwe lijst zelf uitrekent.
 

@@ -67,6 +67,18 @@ export const PRIORITIES = [
   { key: "low", label: "Laag", blurb: "Wacht op de anderen." },
 ];
 
+/**
+ * Welke van de drie tijden dit apparaat kent.
+ *
+ * Een laadpaal alleen "klaar om". Sven op 04-09-2026: "niet eerder dan en
+ * starten voor moet er helemaal uit." De coach zoekt zelf het goedkoopste
+ * moment tussen nu en de klaar-tijd; een begintijd houdt hem alleen van de zon
+ * af en een starttijd laat hem laden terwijl het duur is. Andere apparaten
+ * houden alle drie.
+ */
+export const timesFor = (device) =>
+  device?.type === "laadpaal" ? TIMES.filter((time) => time.key === "done_by") : TIMES;
+
 export const priorityLabel = (key) =>
   PRIORITIES.find((item) => item.key === key)?.label ?? "Middel";
 
@@ -378,10 +390,13 @@ export class DacScheduleSheet extends DacElement {
     this.paintNotes_();
   }
 
-  /** De drie tijden, voor een schema dat elke dag hetzelfde is. */
+  /** De tijden die dit apparaat kent, voor een schema dat elke dag hetzelfde is. */
   paintWindow_(plan) {
     const holder = this.$("#plan-same");
-    if (holder.dataset.built !== "1") {
+    const TIMES = timesFor(this.device_);
+    // Eén keer bouwen per soort apparaat: een laadpaal heeft één veld, de rest
+    // drie, en hetzelfde scherm gaat voor allebei open.
+    if (holder.dataset.built !== this.device_.type) {
       holder.innerHTML = TIMES.map(
         (time) => `
         <div class="row">
@@ -394,7 +409,7 @@ export class DacScheduleSheet extends DacElement {
           <span class="sub">${time.hint}</span>
         </div>`
       ).join("");
-      holder.dataset.built = "1";
+      holder.dataset.built = this.device_.type;
 
       for (const time of TIMES) {
         const input = holder.querySelector(`[data-window="${time.key}"]`);
@@ -416,10 +431,11 @@ export class DacScheduleSheet extends DacElement {
     }
   }
 
-  /** Dezelfde drie tijden, één keer per weekdag. */
+  /** Dezelfde tijden, één keer per weekdag. */
   paintDays_(plan) {
     const holder = this.$("#plan-days");
-    if (holder.dataset.built !== "1") {
+    const TIMES = timesFor(this.device_);
+    if (holder.dataset.built !== this.device_.type) {
       holder.innerHTML = DAYS.map(
         (name, day) => `
         <div class="plan-day">
@@ -443,7 +459,7 @@ export class DacScheduleSheet extends DacElement {
           </div>
         </div>`
       ).join("");
-      holder.dataset.built = "1";
+      holder.dataset.built = this.device_.type;
 
       for (let day = 0; day < DAYS.length; day += 1) {
         holder.querySelector(`[data-day="${day}"]`).addEventListener("change", () =>
@@ -609,8 +625,10 @@ export class DacScheduleSheet extends DacElement {
 
   saveWindow_() {
     const holder = this.$("#plan-same");
-    const window_ = {};
-    for (const time of TIMES) {
+    // Alle drie de sleutels gaan mee, en wat dit apparaat niet kent gaat leeg:
+    // zo raakt een laadpaal een oude begintijd kwijt zodra er iets bewaard wordt.
+    const window_ = { not_before: "", start_by: "", done_by: "" };
+    for (const time of timesFor(this.device_)) {
       window_[time.key] = holder.querySelector(`[data-window="${time.key}"]`).value || "";
     }
     this.save_({ window: window_ });
@@ -620,8 +638,14 @@ export class DacScheduleSheet extends DacElement {
     const holder = this.$("#plan-days");
     const days = [];
     for (let day = 0; day < DAYS.length; day += 1) {
-      const entry = { day, enabled: holder.querySelector(`[data-day="${day}"]`).checked };
-      for (const time of TIMES) {
+      const entry = {
+        day,
+        enabled: holder.querySelector(`[data-day="${day}"]`).checked,
+        not_before: "",
+        start_by: "",
+        done_by: "",
+      };
+      for (const time of timesFor(this.device_)) {
         entry[time.key] =
           holder.querySelector(`[data-day-time="${day}:${time.key}"]`).value || "";
       }
