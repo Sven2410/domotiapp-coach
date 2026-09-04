@@ -78,11 +78,57 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 187 controles op het denkwerk
 python tests/test_coach.py       # 197 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 317 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 37 op de kwartieropslag
 node   tests/test_rapport.mjs    # 17 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```
+
+De nagebouwde Home Assistant staat in `tests/harnas.py` en wordt door
+`test_coach.py` en het virtuele huis gedeeld.
+
+### Het virtuele huis
+
+Sinds 04-09-2026 hoeft er geen lege bus meer aan een echte paal te hangen om
+een laadbeurt te beproeven. `tests/virtueel.py` is een huis met een zon die
+opkomt en ondergaat, een huis dat kookt, een auto die voller wordt van wat de
+paal hem geeft, een meter die dat ziet, en een prijslijst die om 13:00 de dag
+van morgen leert. De echte `coach.py` draait er elke minuut een ronde in en
+krijgt alleen terug wat zijn eigen opdrachten teweegbrengen. Een nacht duurt
+een seconde.
+
+```
+python tests/virtueel.py                   # de lijst van scenario's
+python tests/virtueel.py vast-zonnig       # één scenario, per minuut, met de reden erbij
+python tests/virtueel.py vast-zonnig kort  # dezelfde dag in blokken
+python tests/virtueel.py alles             # alle scenario's, één regel per stuk
+```
+
+De scenario's staan in `tests/scenarios.py`, langs de assen die er bij klanten
+zijn: vast of dynamisch, met of zonder salderen, zonnig, bewolkt, wisselend of
+zonder panelen, een gesplitste meter of een meter met een teken, een krappe
+zekering, een auto die niet wakker wordt, een bewoner die pauzeert, een P1 die
+wegvalt. **Voeg bij elke nieuwe regel een scenario toe** dat laat zien waarom
+die regel bestaat, en een controle in `test_virtueel.py` op wat de bewoner ervan
+merkt: kilowattuur, kosten, of de klaar-tijd gehaald is, en welke meldingen er
+kwamen.
+
+Elk scenario meldt ook een **optimum**: wat dezelfde laadbeurt gekost had als
+de coach de hele dag vooraf had gekend. Dezelfde som als `goedkoopste`, met de
+werkelijke zon en alle prijzen. Zit de coach daar ver boven, dan is er iets te
+vinden.
+
+Wat er op de eerste dag uit kwam: een valse melding "nog niet vol" over een
+auto die vol was, een tip die de verkeerde minuten telde, en een rustig tempo
+dat door het uur heen zakte en met een sprint eindigde. Alle drie in v0.46.3.
+Wat er nog open staat: zie de notities van 04-09-2026.
+
+Het huis is nagemaakt en dus niet de waarheid over een echte Easee of een echte
+Ford: wekken, de minimale stroom, faseomschakeling en netwerkhaperingen blijven
+dingen om aan een echte paal te zien. Wel is de teller van de paal er even traag
+als in het echt (eens per uur), en volgt de auto een limiet met een minuut
+aanloop.
 
 Die laatste draait het paneel in node, met een nagemaakte browser eromheen: de
 module registreert zich als custom element en de proef pakt de prototype. Zo is

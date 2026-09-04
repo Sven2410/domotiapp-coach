@@ -24,6 +24,7 @@ re-commanded every second stops charging altogether.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 
@@ -1908,13 +1909,35 @@ def _decide(
         vlak = len(prijzen) == 1
         amps = ceiling
         if vlak:
-            beschikbaar = sum(
-                (schijf.end - schijf.start).total_seconds() / 3600.0
-                for schijf in netschijven
-            )
+            # Hoeveel uur er nog van het net te laden valt. Uit de inhoud van
+            # de schijven en niet uit hun begin- en eindtijd, want die zijn
+            # van het hele uurblok, ook voor het blok waar we nu middenin
+            # zitten. Op de tijden gerekend telde 00:52 nog als een vol uur,
+            # dus zakte het tempo door het uur heen van 8 naar 6 A en sprong
+            # het op het hele uur weer op; het tekort dat zo opliep moest de
+            # klaar-tijdregel om 05:20 met een sprint goedmaken. Gezien in het
+            # virtuele huis op 04-09-2026.
+            vermogen_kw = watts_for(ceiling, car.phases) / 1000.0
+            beschikbaar = sum(schijf.kwh for schijf in netschijven) / vermogen_kw
+            # Mikken op de klaar-tijd mín de speling die de klaar-tijdregel
+            # eist, want anders komt die regel er hoe dan ook tussen: een tempo
+            # dat precies op 06:00 uitkomt heeft nul speling, en nul is minder
+            # dan een kwartier. Dan schoot hij het laatste uur alsnog naar vol
+            # vermogen, en dat is geen rustig tempo maar een sprint met een
+            # aanloop. Gezien in het virtuele huis op 04-09-2026.
+            if end is not None:
+                beschikbaar -= _slack_hours(end)
             if beschikbaar > 0:
                 rustig = amps_for(nodig_kwh / beschikbaar * 1000.0, car.phases)
-                amps = max(MIN_AMPS, min(ceiling, int(rustig)))
+                # Naar boven afronden, want naar beneden is elke ronde net iets
+                # te langzaam. Dat tekort stapelt op tot de klaar-tijdregel het
+                # laatste uur op vol vermogen moet redden, en dan was het geen
+                # rustig tempo maar een sprint met een aanloop. Gezien in het
+                # virtuele huis op 04-09-2026: zeven uur op 8 en 9 A, en om
+                # 04:01 alsnog naar 16 A.
+                # Een tiende ampère is de nauwkeurigheid waarmee een paal een
+                # limiet volgt; die hoort geen hele ampère extra te kosten.
+                amps = max(MIN_AMPS, min(ceiling, math.ceil(rustig - 0.1)))
 
         # Nooit langzamer dan het dak op dit moment geeft. Rustig aan doen is
         # goed voor de aansluiting, maar niet ten koste van zon die anders het

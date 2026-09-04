@@ -1,0 +1,330 @@
+"""Controles op hele laadbeurten in het virtuele huis.
+
+Elk scenario uit `scenarios.py` draait één keer helemaal door, en daarna wordt
+er gekeken of de coach deed wat er van hem verwacht wordt: op tijd vol, geen
+zekering over de kop, zon vóór net bij een vast contract, de goedkoopste uren
+bij een dynamisch contract, en de juiste meldingen op het juiste moment.
+
+Wat hier gemeten wordt is wat de bewoner merkt. Niet welke regel er in de
+planner won, maar hoeveel kilowattuur er wanneer uit welk bron kwam, en of de
+klaar-tijd gehaald is.
+
+    python tests/test_virtueel.py             # alles, met de samenvatting per scenario
+    python tests/test_virtueel.py vast        # alleen de scenario's met "vast" in de naam
+"""
+
+import sys
+
+import scenarios
+import virtueel
+from virtueel import draai, samenvatting
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+FOUT = 0
+GOED = 0
+
+
+def controle(naam, gelukt, uitleg=""):
+    global FOUT, GOED
+    if gelukt:
+        GOED += 1
+    else:
+        FOUT += 1
+        print(f"  FOUT  {naam}: {uitleg}")
+
+
+filter_ = sys.argv[1] if len(sys.argv) > 1 else ""
+V = {}
+for sc in scenarios.ALLE:
+    if filter_ and filter_ not in sc.naam:
+        continue
+    V[sc.naam] = draai(sc)
+    print(samenvatting(V[sc.naam]))
+print()
+
+
+def v(naam):
+    return V.get(naam)
+
+
+def gehaald(verloop):
+    if verloop.klaar_tijd is None:
+        return True
+    grens = min(verloop.scenario.auto.laadgrens, virtueel.planner.FULL_PERCENT)
+    return verloop.soc_bij_klaar_tijd is not None and verloop.soc_bij_klaar_tijd >= grens
+
+
+def meldingen(verloop, tekst):
+    return [m for _, m in verloop.meldingen if tekst in m]
+
+
+def regels_in(verloop, van, tot):
+    """De regels tussen twee kloktijden, elke dag van de proef."""
+    return [
+        r for r in verloop.regels
+        if virtueel._uur(van) <= r.tijd.hour + r.tijd.minute / 60 < virtueel._uur(tot)
+    ]
+
+
+def laadt_tussen(verloop, van, tot):
+    return any(r.paal_w > 0 for r in regels_in(verloop, van, tot))
+
+
+# --- voor elk scenario --------------------------------------------------------
+
+print("=== elk scenario: geen valse meldingen, geen onbekende regel, zekering heel ===")
+for naam, vl in V.items():
+    s = vl.scenario
+    controle(f"{naam}: elke ronde gaf een besluit",
+             not [r for r in vl.regels if r.regel in ("?", "")], "")
+    controle(f"{naam}: geen fouten in het harnas", not vl.fouten, "; ".join(vl.fouten))
+    # Een auto die vol is, is niet te laat. Tot 04-09-2026 kwam er elke ochtend
+    # "was om 06:00 nog niet vol, hij staat nu op 100%".
+    if gehaald(vl) and vl.klaar_tijd is not None:
+        controle(f"{naam}: geen 'nog niet vol' over een auto die op tijd vol was",
+                 not meldingen(vl, "nog niet vol"), f"{meldingen(vl, 'nog niet vol')}")
+    # Hooguit een minuut boven de zekering. Dat is wat de coach nodig heeft:
+    # de fasemeting wordt over anderhalve minuut gladgestreken (zie
+    # `_gladde_fase` in coach.py), dus een echte sprong in het huisverbruik
+    # heeft daar pas na een halve minuut de meerderheid. Een zekering houdt
+    # dat; een coach die het langer laat lopen is fout.
+    over = [r for r in vl.regels if max(r.fase_amps) > s.zekering]
+    controle(f"{naam}: de zekering wordt hooguit een minuut overschreden",
+             len(over) * vl.stap_uur * 60 <= 1.0, f"{len(over) * vl.stap_uur * 60:.1f} minuten boven "
+             f"{s.zekering} A, hoogste {vl.hoogste_fase:.1f} A")
+    # Alleen als de auto zijn accustand zelf meldt. Met een opgegeven stand
+    # rekent de coach met de teller van de paal, en die loopt bij een Easee
+    # tot een uur achter; dan zegt het verslag "staat op 87%" over een auto
+    # die vol is. Dat staat open, zie waar-gebleven.md van 04-09-2026.
+    if vl.klaar_op is not None and s.auto.laadgrens >= 100 and s.auto.meldt_soc:
+        controle(f"{naam}: precies één keer 'is vol' gemeld",
+                 len(meldingen(vl, "is vol")) == 1, f"{meldingen(vl, 'is vol')}")
+
+# --- vast contract: zon voor net, net pas na de avondpiek ---------------------
+
+print("=== vast contract ===")
+if (vl := v("vast-zonnig")):
+    controle("zonnig: alles uit de zon", vl.uit_net_kwh < 0.3, f"net {vl.uit_net_kwh:.2f} kWh")
+    controle("zonnig: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    controle("zonnig: één keer aan, één keer uit", vl.wissels() <= 2, f"{vl.wissels()} wissels")
+    controle("zonnig: niet duurder dan het optimum plus een cent",
+             vl.optimum is not None and vl.kosten <= vl.optimum + 0.02,
+             f"kosten {vl.kosten:.2f}, optimum {vl.optimum}")
+    controle("zonnig: de coach begint zodra er genoeg zon over is, zonder eerst bij te kopen",
+             not laadt_tussen(vl, "07:00", "08:30"), "laadde al voor 08:30")
+
+if (vl := v("vast-bewolkt")):
+    controle("bewolkt: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    # Vóór acht uur komt er alleen net bij als aanvulling onder de ondergrens
+    # van de paal: er is zon, alleen niet genoeg voor 6 A, en dan is bijkopen
+    # tot die 6 A goedkoper dan die zon weggeven en 's nachts alles kopen. Zie
+    # `charge_cost` en de "vloer" in `schijven`. Nooit méér dan dat.
+    controle("bewolkt: vóór de avondpiek hooguit de ondergrens bijgekocht",
+             all(r.paal_amps <= 6.01 for r in regels_in(vl, "00:00", "20:00") if r.paal_w > r.over_w + 50),
+             f"{vl.net_kwh_tussen('00:00', '20:00'):.2f} kWh van het net voor acht uur")
+    controle("bewolkt: de zon die er was is gebruikt", vl.uit_zon_kwh > 5, f"{vl.uit_zon_kwh:.1f}")
+    controle("bewolkt: na acht uur rustig aan", bool(vl.regels_met("easy-pace")), "geen easy-pace")
+    controle("bewolkt: rustig aan is nooit vol vermogen",
+             all(r.amps < 16 for r in vl.regels_met("easy-pace")), "16 A in easy-pace")
+
+if (vl := v("vast-geen-panelen")):
+    controle("geen panelen: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    controle("geen panelen: niets voor acht uur 's avonds",
+             not laadt_tussen(vl, "07:00", "20:00"), "laadde overdag")
+    controle("geen panelen: rustig tempo", bool(vl.regels_met("easy-pace")), "geen easy-pace")
+    controle("geen panelen: rustig aan haalt de klaar-tijd zonder sprint",
+             not vl.regels_met("deadline"), "de klaar-tijdregel moest het redden")
+
+if (vl := v("vast-wisselend")):
+    controle("wisselend: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    controle("wisselend: niet elke wolk een stop", vl.wissels() <= 8, f"{vl.wissels()} wissels")
+    controle("wisselend: nauwelijks van het net", vl.uit_net_kwh < 1.5, f"{vl.uit_net_kwh:.2f}")
+
+if (vl := v("vast-salderen")):
+    controle("salderen: eigen zon blijft goedkoper dan het net", vl.uit_net_kwh < 0.3,
+             f"net {vl.uit_net_kwh:.2f}")
+    controle("salderen: op tijd vol", gehaald(vl), "")
+
+if (vl := v("vast-avond-erin")):
+    controle("avond erin: wacht tot acht uur", not laadt_tussen(vl, "18:30", "20:00"), "")
+    controle("avond erin: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
+if (vl := v("vast-grote-auto")):
+    controle("grote auto: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    controle("grote auto: de zon van de hele dag gebruikt", vl.uit_zon_kwh > 30, f"{vl.uit_zon_kwh:.1f}")
+    controle("grote auto: vóór de avond hooguit de ondergrens bijgekocht",
+             all(r.paal_amps <= 6.01 for r in regels_in(vl, "00:00", "20:00") if r.paal_w > r.over_w + 50),
+             f"{vl.net_kwh_tussen('00:00', '20:00'):.2f} kWh van het net voor acht uur")
+
+for naam in ("vast-zonder-voorspelling", "vast-sensor-voorspelling"):
+    if (vl := v(naam)):
+        controle(f"{naam}: alles uit de zon", vl.uit_net_kwh < 0.3, f"net {vl.uit_net_kwh:.2f}")
+        controle(f"{naam}: op tijd vol", gehaald(vl), "")
+
+if (vl := v("vast-voorspelling-mis")):
+    controle("voorspelling mis: de klaar-tijd wordt toch gehaald", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
+if (vl := v("vast-geen-klaar-tijd")):
+    controle("geen klaar-tijd: toch vol op zon", vl.klaar_op is not None and vl.uit_net_kwh < 0.3,
+             f"vol {vl.klaar_op}, net {vl.uit_net_kwh:.2f}")
+
+if (vl := v("vast-krappe-klaar-tijd")):
+    controle("krap: meteen vol vermogen", vl.regels[6].regel.startswith("deadline"), vl.regels[6].regel)
+    controle("krap: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
+if (vl := v("vast-onhaalbare-klaar-tijd")):
+    controle("onhaalbaar: laadt door na de klaar-tijd", bool(vl.regels_met("overdue")), "")
+    controle("onhaalbaar: zegt één keer dat het niet gehaald is",
+             len(meldingen(vl, "17:00 nog niet vol")) == 1, f"{meldingen(vl, 'nog niet vol')}")
+    controle("onhaalbaar: en daarna dat hij vol is", len(meldingen(vl, "is vol")) == 1, "")
+
+# --- dynamisch contract: zon, prijs, teruglevering en salderen tegen elkaar ---
+
+print("=== dynamisch contract ===")
+for naam in ("dynamisch-zonnig", "dynamisch-markt", "dynamisch-negatief-middag",
+             "dynamisch-prijzen-laat", "dynamisch-salderen"):
+    if (vl := v(naam)):
+        controle(f"{naam}: alles uit de zon", vl.uit_net_kwh < 0.3, f"net {vl.uit_net_kwh:.2f}")
+        controle(f"{naam}: op tijd vol", gehaald(vl), "")
+        controle(f"{naam}: binnen twee cent van het optimum",
+                 vl.optimum is not None and vl.kosten <= vl.optimum + 0.02,
+                 f"kosten {vl.kosten:.2f}, optimum {vl.optimum}")
+
+if (vl := v("dynamisch-zonnig")) and (vm := v("dynamisch-markt")):
+    controle("kale marktprijs en all-in geven hetzelfde besluit",
+             abs(vl.kosten - vm.kosten) < 0.01, f"{vl.kosten:.3f} tegen {vm.kosten:.3f}")
+
+for naam in ("dynamisch-bewolkt", "dynamisch-geen-panelen", "dynamisch-avond-erin",
+             "dynamisch-grote-auto"):
+    if (vl := v(naam)):
+        controle(f"{naam}: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+        controle(f"{naam}: niets van het net in de dure avonduren",
+                 vl.net_kwh_tussen("17:00", "21:00") < 0.1, f"{vl.net_kwh_tussen('17:00', '21:00'):.2f} kWh")
+        controle(f"{naam}: binnen een dubbeltje van het optimum",
+                 vl.optimum is not None and vl.kosten <= vl.optimum + 0.10,
+                 f"kosten {vl.kosten:.2f}, optimum {vl.optimum}")
+
+if (vl := v("dynamisch-bewolkt")):
+    controle("dynamisch bewolkt: de zon die er was is gebruikt", vl.uit_zon_kwh > 5, f"{vl.uit_zon_kwh:.1f}")
+
+if (vl := v("dynamisch-geen-klaar-tijd")):
+    controle("dynamisch zonder klaar-tijd: wordt uiteindelijk vol op zon",
+             vl.klaar_op is not None and vl.uit_net_kwh < 0.3, f"vol {vl.klaar_op}")
+
+# --- de meter en de aansluiting ----------------------------------------------
+
+print("=== meter en aansluiting ===")
+if (vz := v("vast-zonnig")):
+    for naam in ("meter-met-teken", "meter-teken-omgekeerd", "met-lastbewaker"):
+        if (vl := v(naam)):
+            controle(f"{naam}: zelfde uitkomst als met een gesplitste meter",
+                     abs(vl.geladen_kwh - vz.geladen_kwh) < 0.2 and vl.uit_net_kwh < 0.3,
+                     f"{vl.geladen_kwh:.1f} tegen {vz.geladen_kwh:.1f}, net {vl.uit_net_kwh:.2f}")
+
+if (vl := v("eenfase-krappe-zekering")):
+    controle("krappe zekering: tijdens het koken terug naar de laagste stand",
+             all(r.paal_amps <= 6.01 for r in regels_in(vl, "17:35", "19:00")),
+             f"hoogste {max(r.paal_amps for r in regels_in(vl, '17:35', '19:00')):.0f} A")
+    controle("krappe zekering: maar niet uit", any(r.paal_amps > 0 for r in regels_in(vl, "18:00", "19:00")), "")
+    controle("krappe zekering: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
+if (vl := v("oven-tijdens-laden")):
+    controle("oven: binnen een meetstap terug",
+             all(max(r.fase_amps) <= vl.scenario.zekering for r in regels_in(vl, "02:01", "02:30")),
+             f"hoogste {max(max(r.fase_amps) for r in regels_in(vl, '02:01', '02:30')):.1f} A")
+    controle("oven: na de oven weer verder", laadt_tussen(vl, "02:35", "04:00"), "")
+    controle("oven: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
+# --- de auto -----------------------------------------------------------------
+
+print("=== de auto ===")
+if (vl := v("accustand-onbekend")):
+    controle("accustand onbekend: vraagt er één keer om",
+             len(meldingen(vl, "Geef de accustand door")) == 1, f"{meldingen(vl, 'accustand')}")
+    controle("accustand onbekend: koopt niets van het net zonder te weten",
+             vl.uit_net_kwh < 0.3, f"{vl.uit_net_kwh:.2f}")
+    controle("accustand onbekend: zon gaat er wel in", vl.uit_zon_kwh > 10, f"{vl.uit_zon_kwh:.1f}")
+
+if (vl := v("accustand-opgegeven")):
+    controle("accustand opgegeven: daarna geen no-soc meer",
+             not [r for r in regels_in(vl, "07:31", "23:59") if "no-soc" in r.regel], "")
+    controle("accustand opgegeven: op tijd vol", gehaald(vl), "")
+
+if (vl := v("accustand-traag")):
+    controle("trage app: geen extra wissels", vl.wissels() <= 2, f"{vl.wissels()}")
+    controle("trage app: op tijd vol", gehaald(vl), "")
+
+if (vl := v("laadgrens-80")):
+    controle("laadgrens: zegt dat de auto niet verder laadt op 80%",
+             bool(meldingen(vl, "staat op 80%")), f"{[m for _, m in vl.meldingen]}")
+    controle("laadgrens: zegt niet dat hij vol is", not meldingen(vl, "is vol"), "")
+    controle("laadgrens: geen 'nog niet vol' in de ochtend", not meldingen(vl, "nog niet vol"), "")
+
+if (vl := v("bijna-vol")):
+    controle("bijna vol: laadt het restje", 0.5 < vl.geladen_kwh < 2.0, f"{vl.geladen_kwh:.2f}")
+    controle("bijna vol: één melding", len(meldingen(vl, "is vol")) == 1, "")
+
+if (vl := v("auto-wordt-niet-wakker")):
+    controle("slapende auto: meldt dat hij geen stroom afneemt",
+             bool(meldingen(vl, "geen stroom af")), "")
+    controle("slapende auto: komt alsnog vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
+# --- de bewoner --------------------------------------------------------------
+
+print("=== de bewoner ===")
+if (vl := v("pauze-van-bewoner")):
+    controle("pauze: niets tussen twaalf en drie", not laadt_tussen(vl, "12:01", "15:00"), "")
+    controle("pauze: daarna weer verder", laadt_tussen(vl, "15:02", "17:00"), "")
+    controle("pauze: op tijd vol", gehaald(vl), "")
+
+if (vl := v("pauze-vergeten")):
+    controle("pauze vergeten: blijft staan", not laadt_tussen(vl, "12:01", "23:59"), "")
+    controle("pauze vergeten: waarschuwt dat de klaar-tijd in gevaar komt",
+             len(meldingen(vl, "pauze")) >= 1, f"{meldingen(vl, 'pauze')}")
+    controle("pauze vergeten: en meldt om zes uur dat hij niet vol is",
+             len(meldingen(vl, "06:00 nog niet vol")) == 1, f"{meldingen(vl, 'nog niet vol')}")
+
+if (vl := v("snelladen")):
+    controle("snelladen: vanaf negen uur vol vermogen",
+             all(r.amps == 16 for r in regels_in(vl, "09:02", "12:00") if r.status != "completed"), "")
+    controle("snelladen: ongeacht de zon", vl.uit_net_kwh > 0.5, f"{vl.uit_net_kwh:.2f}")
+
+if (vl := v("kabel-eruit-middenin")):
+    controle("kabel eruit: verslag met wat er in ging",
+             bool(meldingen(vl, "afgekoppeld om 13:10")), f"{[m for _, m in vl.meldingen]}")
+    controle("kabel eruit: de tweede beurt telt alleen zichzelf",
+             any("8," in m for m in meldingen(vl, "is vol")), f"{meldingen(vl, 'is vol')}")
+    controle("kabel eruit: op tijd vol", gehaald(vl), "")
+
+if (vl := v("niet-voor-23")):
+    controle("niet voor 23: niets ervoor", not laadt_tussen(vl, "07:00", "23:00"), "")
+    controle("niet voor 23: rustig tempo, geen sprint",
+             not vl.regels_met("deadline"), "de klaar-tijdregel moest het redden")
+    controle("niet voor 23: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
+if (vl := v("uiterlijk-starten-22")):
+    controle("uiterlijk starten: wacht op de prijs tot tien uur", not laadt_tussen(vl, "18:30", "22:00"), "")
+    controle("uiterlijk starten: om tien uur vol vermogen, wat het ook kost",
+             any(r.regel.startswith("start-by") and r.amps == 16 for r in regels_in(vl, "22:00", "22:05")), "")
+
+# --- storingen ---------------------------------------------------------------
+
+print("=== storingen ===")
+if (vl := v("p1-valt-weg")):
+    controle("P1 drie minuten weg: laadt gewoon door", vl.wissels() <= 2, f"{vl.wissels()} wissels")
+    controle("P1 drie minuten weg: geen melding", not meldingen(vl, "netmeting"), "")
+
+if (vl := v("p1-lang-weg")):
+    controle("P1 lang weg: zegt het, met de juiste duur",
+             any("6 minuten" in m for m in meldingen(vl, "netmeting")), f"{meldingen(vl, 'netmeting')}")
+    controle("P1 lang weg: gaat verder zodra de meter terug is", laadt_tussen(vl, "12:25", "13:30"), "")
+    controle("P1 lang weg: op tijd vol", gehaald(vl), "")
+
+if (vl := v("teller-per-uur")):
+    controle("teller per uur: op tijd vol", gehaald(vl), "")
+    controle("teller per uur: het verslag noemt de echte hoeveelheid",
+             any("15," in m for m in meldingen(vl, "Geladen van")), f"{[m for _, m in vl.meldingen]}")
+
+print(f"\n{GOED} goed, {FOUT} fout")
+sys.exit(1 if FOUT else 0)
