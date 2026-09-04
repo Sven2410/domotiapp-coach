@@ -1610,9 +1610,16 @@ class ChargerCoach:
         # niets zegt houdt zijn laatste waarde; een die echt weg is geeft niets
         # terug, en dan rekent de coach niet door met een nul die hij verzonnen
         # heeft. Zie `MEETNAIJL`.
+        # `vers` is of de meter op dit moment werkelijk iets zegt. Een waarde die
+        # nog wordt vastgehouden telt voor het besluit, maar niet als teken van
+        # leven: anders begint de klok van `_nettip` pas te lopen als het
+        # vasthouden ophoudt en zegt de kaart "al 1 minuten" over een meter die
+        # er al zes minuten niet is.
         if sources.get("grid_mode") == "signed":
             bron = sources.get("grid_signed")
-            signed = self._volgehouden(bron, _watts(self.hass, bron), now)
+            gemeten = _watts(self.hass, bron)
+            vers = gemeten is not None
+            signed = self._volgehouden(bron, gemeten, now)
             if signed is not None and sources.get("grid_signed_invert"):
                 signed = -signed
             netto = None if signed is None else -signed
@@ -1620,8 +1627,11 @@ class ChargerCoach:
         else:
             uit = sources.get("grid_export")
             in_ = sources.get("grid_import")
-            export = self._volgehouden(uit, _watts(self.hass, uit), now)
-            invoer = self._volgehouden(in_, _watts(self.hass, in_), now)
+            export_gemeten = _watts(self.hass, uit)
+            invoer_gemeten = _watts(self.hass, in_)
+            vers = export_gemeten is not None and (in_ is None or invoer_gemeten is not None)
+            export = self._volgehouden(uit, export_gemeten, now)
+            invoer = self._volgehouden(in_, invoer_gemeten, now)
             compleet = export is not None and invoer is not None
             netto = (export - invoer) if compleet else (export if invoer is None else None)
 
@@ -1643,7 +1653,8 @@ class ChargerCoach:
             surplus = 0.0
             self._zon.pop(device.get("id", ""), None)
         else:
-            self._net_gezien = now
+            if vers:
+                self._net_gezien = now
             self._net_stil_sinds = None
             surplus = max(
                 0.0,
@@ -2370,6 +2381,14 @@ class ChargerCoach:
         sessie["doel"] = doel
         if vorig is None or doel == vorig or vorig > now or "laat" in gemeld:
             return
+        # Een auto die vol is, is niet te laat. Zonder deze regel kwam er elke
+        # ochtend om de klaar-tijd "was om 06:00 nog niet vol, hij staat nu op
+        # 100%" over een auto die de avond ervoor al als vol gemeld was: de
+        # klaar-tijd schuift dan gewoon een dag op en dat leest hier als een
+        # gemiste afspraak. Gevonden in het virtuele huis op 04-09-2026, in elk
+        # scenario waarin de kabel na het vol laden bleef zitten.
+        if decision.rule == "complete" or "vol" in gemeld:
+            return
 
         gemeld.add("laat")
         stand = (
@@ -2683,8 +2702,9 @@ class ChargerCoach:
         minuten = int((now - self._net_stil_sinds).total_seconds() // 60)
         if minuten < 1:
             return ""
+        duur = "een minuut" if minuten == 1 else f"{minuten} minuten"
         return (
-            f"De coach kan je netmeting al {minuten} minuten niet lezen, dus hij "
+            f"De coach kan je netmeting al {duur} niet lezen, dus hij "
             "ziet niet hoeveel zon er over is en stuurt alleen op prijs en op je "
             "klaar-tijd. Kijk of de integratie van je slimme meter nog draait."
         )
