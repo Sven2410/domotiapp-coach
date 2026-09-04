@@ -33,6 +33,7 @@ from .const import (
     CHARGER_CONTROL,
     DOMAIN,
     EVENT_DECISION,
+    EVENT_NOTIFICATION,
     EVENT_SETTINGS_UPDATED,
     LEVEL_PROPOSE,
     LEVEL_STEER,
@@ -63,10 +64,18 @@ from .planner import (
     resolve_window,
     should_send,
 )
-from .storage import async_get_store
+from .storage import async_get_meldingen, async_get_store
 from .units import hour_to_watts, to_kwh, to_watts
 
 _LOGGER = logging.getLogger(__name__)
+
+# Hoe lang een sensor niets mag zeggen voordat de bewoner het hoort. Bij het
+# opstarten van Home Assistant is van alles een paar minuten `unavailable`, en
+# een Ford-app of een Easee-cloud hapert wel eens een paar minuten; daar hoeft
+# niemand voor gewekt te worden. Tien minuten is wel een storing. Sven op
+# 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat moet wel
+# gemeld worden."
+SENSOR_STIL = timedelta(minutes=10)
 
 # How often to think. A minute is often enough to catch a kettle before a fuse
 # minds, and rare enough that a car is never re-commanded into giving up.
@@ -437,6 +446,9 @@ class ChargerCoach:
         # uur. Samen bepalen ze hoeveel er in een komend uur voor de auto
         # overblijft. Zie `_async_huisverbruik` en `_async_zonkromme`.
         self._huis_kwh: dict[int, float] = {}
+        # Per sensor sinds wanneer hij niets zegt, en welke daarvan al gemeld zijn.
+        self._sensor_stil: dict[str, datetime] = {}
+        self._sensor_gemeld: set[str] = set()
         self._huis_tot: datetime | None = None
         self._zon_kwh: dict[datetime, float] = {}
         self._zon_geschat = True
@@ -606,6 +618,90 @@ class ChargerCoach:
                 )
             except Exception:  # noqa: BLE001 - één slechte ontvanger is niet alle
                 _LOGGER.exception("Kon melding niet versturen naar notify.%s", target)
+
+        # En in de geschiedenis, ook als er geen ontvanger is ingesteld: het
+        # paneel toont wat er gemeld is, en een telefoon vergeet dat zodra de
+        # melding weggeveegd is.
+        try:
+            entry = await async_get_meldingen(self.hass).async_add(message, _moment(None))
+            self.hass.bus.async_fire(EVENT_NOTIFICATION, entry)
+        except Exception:  # noqa: BLE001 - de geschiedenis mag de melding zelf niet kosten
+            _LOGGER.exception("kon de melding niet in de geschiedenis zetten")
+
+    def _sensoren(self, settings: dict[str, Any]) -> dict[str, str]:
+        """Elke sensor waar de coach op rekent, met hoe de bewoner hem kent.
+
+        De slimme meter zelf staat er niet in: die heeft zijn eigen zin op de
+        kaart en zijn eigen melding (`_nettip`), na vijf minuten, want zonder
+        netmeting valt de zonregel meteen weg.
+        """
+        uit: dict[str, str] = {}
+        bronnen = settings.get("sources") or {}
+        if bronnen.get("solar"):
+            uit[bronnen["solar"]] = "de zonnesensor"
+        for fase, velden in (bronnen.get("phases") or {}).items():
+            if isinstance(velden, dict) and velden.get("current"):
+                uit[velden["current"]] = f"de stroommeting van fase {str(fase).upper()}"
+        installation = settings.get("installation") or {}
+        if installation.get("load_balancer") and installation.get("balancer_entity"):
+            uit[installation["balancer_entity"]] = "je lastbewaker"
+        contract = settings.get("contract") or {}
+        if contract.get("type") == "dynamic":
+            dynamic = contract.get("dynamic") or {}
+            if dynamic.get("source") == "all_in" and dynamic.get("all_in_entity"):
+                uit[dynamic["all_in_entity"]] = "je prijssensor"
+            elif dynamic.get("market_entity"):
+                uit[dynamic["market_entity"]] = "je marktprijssensor"
+        for device in settings.get("devices") or []:
+            naam = device.get("name") or "een apparaat"
+            if device.get("entity"):
+                uit[device["entity"]] = f"het vermogen van {naam}"
+            entities = device.get("entities") or {}
+            for sleutel, wat in (
+                ("status", "de status"),
+                ("current", "de stroommeting"),
+                ("dynamic_limit", "de dynamische laadgrens"),
+                ("max_limit", "de laderlimiet"),
+            ):
+                if entities.get(sleutel):
+                    uit[entities[sleutel]] = f"{wat} van {naam}"
+            for car in device.get("cars") or []:
+                if car.get("soc_entity"):
+                    uit[car["soc_entity"]] = f"de accustand van {car.get('name') or 'de auto'}"
+        return uit
+
+    async def _async_sensorwacht(self, settings: dict[str, Any], now: datetime) -> None:
+        """Zeggen welke sensor al `SENSOR_STIL` niets zegt, en wanneer hij terug is.
+
+        Eén melding per storing en één als hij weer doet, niet elke ronde. Wat
+        de coach ondertussen doet staat per sensor al elders: zonder accustand
+        telt hij door op wat hij het laatst wist (`_onthouden_soc`), zonder
+        status houdt hij de laatste (`_laatste_status`), zonder prijzen wacht
+        hij (`no-prices`), zonder lastbewaker rekent hij op de zekering. Dit is
+        alleen de melding dat er iets stuk is, want daar kijkt niemand naar.
+        """
+        for entity_id, naam in self._sensoren(settings).items():
+            state = self.hass.states.get(entity_id)
+            stil = state is None or state.state in ("unknown", "unavailable", "")
+            sinds = self._sensor_stil.get(entity_id)
+            if not stil:
+                if entity_id in self._sensor_gemeld:
+                    self._sensor_gemeld.discard(entity_id)
+                    await self._async_tell(f"{naam[0].upper()}{naam[1:]} doet het weer.")
+                self._sensor_stil.pop(entity_id, None)
+                continue
+            if sinds is None:
+                self._sensor_stil[entity_id] = now
+                continue
+            if entity_id in self._sensor_gemeld or now - sinds < SENSOR_STIL:
+                continue
+            self._sensor_gemeld.add(entity_id)
+            minuten = int((now - sinds).total_seconds() // 60)
+            await self._async_tell(
+                f"{naam[0].upper()}{naam[1:]} ({entity_id}) meldt al {minuten} minuten "
+                "niets. De coach rekent zolang zonder. Kijk of de integratie erachter "
+                "nog draait."
+            )
 
     @callback
     def async_refresh(self) -> None:
@@ -812,6 +908,7 @@ class ChargerCoach:
         # enige twee plekken waar de coach naar de database of naar een dienst
         # buiten zichzelf kijkt.
         await self._async_huisverbruik(settings, moment)
+        await self._async_sensorwacht(settings, moment)
         await self._async_zonkromme(settings, moment)
 
         chargers.sort(key=lambda device: self._priority(settings, device))

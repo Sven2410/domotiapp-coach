@@ -632,6 +632,8 @@ class Wereld:
         self.prijzen_weg_tot: dt.datetime | None = None
         self.oven_tot: dt.datetime | None = None
         self.equalizer_vrij: float | None = None
+        # Sensoren die tijdelijk `unavailable` zijn, met tot wanneer.
+        self.weg: dict[str, dt.datetime] = {}
         self.reden = ""
         self.oven_w = 3000.0
         if s.kabel_erin is None:
@@ -718,6 +720,14 @@ class Wereld:
         if self.s.equalizer:
             z(E["equalizer"], w(f"{self.equalizer_vrij:.1f}", "A"))
             z(E["reden"], self.reden or "none")
+
+        # Een sensor die even niets zegt, wat de rest ook doet. Na de andere
+        # sensoren, zodat dit wint.
+        for naam, tot in list(self.weg.items()):
+            if nu < tot:
+                z(E[naam], weg)
+            else:
+                del self.weg[naam]
 
         prijzen_weg = self.prijzen_weg_tot is not None and nu < self.prijzen_weg_tot
         if self.s.contract.startswith("dynamisch") and prijzen_weg:
@@ -822,6 +832,10 @@ class Wereld:
         if actie == "paal_max":
             self.paal.max_amps = float(arg)
             return f"de paal staat nu op maximaal {arg} A"
+        if actie == "sensor_weg":
+            naam, minuten = arg
+            self.weg[naam] = self.nu + dt.timedelta(minutes=int(minuten))
+            return f"de sensor {E[naam]} ({naam}) valt {minuten} minuten weg"
         raise ValueError(f"onbekende gebeurtenis {actie}")
 
 
@@ -946,13 +960,30 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
             self.entity_id = entity_id
             self.state = state
 
+    def nieuwe_coach():
+        """Zoals Home Assistant hem na een herstart neerzet: leeg geheugen,
+        dezelfde opslag, dezelfde sensoren."""
+        c = coachmod.ChargerCoach(hass)
+        c._sleep = lambda seconds: asyncio.sleep(0)
+        c._async_zon_uit_dashboard = wereld.zonkromme
+        return c
+
     async def lus():
-        nonlocal vorige, laatste_ronde
+        nonlocal vorige, laatste_ronde, coach
         while wereld.nu < einde:
             nu = wereld.nu
             while gebeurtenissen and gebeurtenissen[0][0] <= nu:
                 _, actie, arg = gebeurtenissen.pop(0)
-                tekst = wereld.gebeurtenis(actie, arg, coach, inst)
+                if actie == "herstart":
+                    # Een onverwachte herstart van Home Assistant: de coach
+                    # verliest alles wat hij in zijn hoofd had en begint
+                    # opnieuw uit de opslag. Sven op 04-09-2026: "ook
+                    # onverwachte herstarten."
+                    coach = nieuwe_coach()
+                    laatste_ronde = None
+                    tekst = "Home Assistant herstart: de coach begint met een leeg geheugen"
+                else:
+                    tekst = wereld.gebeurtenis(actie, arg, coach, inst)
                 if toon:
                     print(f"{nu:%a %H:%M}  >> {tekst}")
                 # Een knop of een kabel wekt de coach meteen, net als in HA.
@@ -1042,12 +1073,16 @@ def klaar_tijd_na(s: Scenario, moment: dt.datetime) -> dt.datetime | None:
 
 
 def _moment_op(begin: dt.datetime, tijd: str) -> dt.datetime:
-    """"13:10" op de eerste dag waarop dat nog komt."""
+    """"13:10" op de eerste dag waarop dat nog komt; "+1 04:20" een dag later."""
+    dagen = 0
+    if " " in tijd:
+        offset, tijd = tijd.split()
+        dagen = int(offset)
     h, m = map(int, tijd.split(":"))
     moment = begin.replace(hour=h, minute=m, second=0, microsecond=0)
     if moment < begin:
         moment += dt.timedelta(days=1)
-    return moment
+    return moment + dt.timedelta(days=dagen)
 
 
 def _toon_regel(r: Regel) -> None:

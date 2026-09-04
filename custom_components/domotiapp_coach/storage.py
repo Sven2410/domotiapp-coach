@@ -8,13 +8,23 @@ adding the integration asks nothing at all.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import copy
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .const import DEFAULT_SETTINGS, DOMAIN, STORAGE_KEY, STORAGE_VERSION
+from .const import (
+    DEFAULT_SETTINGS,
+    DOMAIN,
+    MELDINGEN_KEY,
+    MELDINGEN_MAX,
+    MELDINGEN_VERSION,
+    STORAGE_KEY,
+    STORAGE_VERSION,
+)
 
 
 def schema_bijwerken(
@@ -228,3 +238,41 @@ def async_get_store(hass: HomeAssistant) -> SettingsStore:
     if "store" not in domain_data:
         domain_data["store"] = SettingsStore(hass)
     return domain_data["store"]
+
+
+class MeldingenStore:
+    """De meldingen die de coach verstuurd heeft, op volgorde, de laatste achteraan.
+
+    Los van de instellingen, want die gaan bij elke wijziging in hun geheel over
+    de websocket en driehonderd meldingen horen daar niet in mee. Eén bestand,
+    nooit groter dan `MELDINGEN_MAX` regels; de oudste valt eraf.
+    """
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._store: Store[dict[str, Any]] = Store(hass, MELDINGEN_VERSION, MELDINGEN_KEY)
+        self._items: list[dict[str, Any]] | None = None
+
+    async def async_list(self) -> list[dict[str, Any]]:
+        if self._items is None:
+            data = await self._store.async_load()
+            items = (data or {}).get("items") if isinstance(data, dict) else None
+            self._items = [
+                item for item in (items or []) if isinstance(item, dict) and item.get("message")
+            ]
+        return list(self._items)
+
+    async def async_add(self, message: str, at: datetime) -> dict[str, Any]:
+        items = await self.async_list()
+        entry = {"at": at.replace(microsecond=0).isoformat(), "message": message}
+        items.append(entry)
+        self._items = items[-MELDINGEN_MAX:]
+        await self._store.async_save({"items": self._items})
+        return entry
+
+
+def async_get_meldingen(hass: HomeAssistant) -> MeldingenStore:
+    """De ene geschiedenis van deze installatie, net als `async_get_store`."""
+    data = hass.data.setdefault(DOMAIN, {})
+    if "meldingen" not in data:
+        data["meldingen"] = MeldingenStore(hass)
+    return data["meldingen"]

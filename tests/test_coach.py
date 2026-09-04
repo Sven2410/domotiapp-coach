@@ -1979,6 +1979,62 @@ controle("en hij zegt hoeveel er gepland staat, en of dat alleen zon is",
          isinstance(plan41.get("planned_kwh"), float)
          and isinstance(plan41.get("solar_only"), bool), f"{plan41}")
 
+print("=== 41b. elke melding komt in de geschiedenis, en een stille sensor wordt gemeld ===")
+# Sven op 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat
+# moet wel gemeld worden. Daarom wil ik ook een soort geschiedenis meldingen
+# scherm." De geschiedenis is een eigen opslag naast de instellingen, en het
+# paneel leest hem over `domotiapp_coach/notifications/list`.
+async_get_meldingen = storage.async_get_meldingen
+
+inst41b = instellingen()
+inst41b["devices"][0]["cars"][0]["soc_entity"] = "sensor.ford_soc"
+hass41b, _, coach41b = bouw(huis(status="charging", stroom=6.0, vermogen=4100.0), inst41b)
+hass41b.states.zet("sensor.ford_soc", "40")
+asyncio.run(coach41b._async_tell("proefmelding"))
+geschiedenis = asyncio.run(async_get_meldingen(hass41b).async_list())
+print(f"  geschiedenis: {geschiedenis}")
+controle("een melding staat daarna in de geschiedenis",
+         len(geschiedenis) == 1 and geschiedenis[0]["message"] == "proefmelding"
+         and "T" in geschiedenis[0]["at"], f"{geschiedenis}")
+controle("en het paneel hoort het meteen, via de eventbus",
+         any(soort == "domotiapp_coach_notification" and data.get("message") == "proefmelding"
+             for soort, data in hass41b.bus.gebeurtenissen), f"{hass41b.bus.gebeurtenissen}")
+
+# De wachter draait in `_round`, per ronde van de klok; `ronde()` hierboven
+# roept `_one` aan, dus hier gaat hij los.
+t0 = dt.datetime(2026, 9, 5, 13, 30)
+
+
+def wacht(minuten):
+    hass41b.services.verstuurd.clear()
+    asyncio.run(coach41b._async_sensorwacht(inst41b, t0 + dt.timedelta(minutes=minuten)))
+    return [d[2]["message"] for d in hass41b.services.verstuurd if d[0] == "notify"]
+
+
+asyncio.run(ronde(coach41b, inst41b, nu=t0))
+wacht(0)
+hass41b.states.zet("sensor.ford_soc", "unavailable")
+te_vroeg = wacht(1) + wacht(5)
+controle("vijf minuten stilte is nog geen melding", not te_vroeg, f"{te_vroeg}")
+stil = wacht(11)
+print(f"  na elf minuten: {stil}")
+controle("na tien minuten wel, met de naam van de sensor erin",
+         len(stil) == 1 and "accustand van Ford" in stil[0] and "sensor.ford_soc" in stil[0], f"{stil}")
+controle("en niet nog een keer", not wacht(12), "")
+besluit41b, _ = asyncio.run(ronde(coach41b, inst41b, nu=t0 + dt.timedelta(minutes=12)))
+controle("ondertussen laadt hij gewoon door op de laatst bekende stand",
+         besluit41b["charge"], f"{besluit41b}")
+hass41b.states.zet("sensor.ford_soc", "44")
+weer = wacht(13)
+controle("terug: één melding dat hij het weer doet",
+         len(weer) == 1 and "accustand van Ford" in weer[0], f"{weer}")
+controle("en daarna stil", not wacht(14), "")
+geschiedenis = asyncio.run(async_get_meldingen(hass41b).async_list())
+controle("en alles staat in de geschiedenis, op volgorde",
+         [g["message"][:12] for g in geschiedenis][:1] == ["proefmelding"]
+         and any("meldt al" in g["message"] for g in geschiedenis)
+         and any("doet het weer" in g["message"] for g in geschiedenis), f"{geschiedenis}")
+
 print("=== 42. niets van één installatie zit in de code ===")
 # Sven op 30-08-2026: "je hebt toch niet iets van mij thuis hard gecodeerd? Het
 # moet wel universeel zijn." Deze proef dwingt dat af in plaats van het te

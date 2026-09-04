@@ -469,6 +469,13 @@ if (vl := v("van-den-dam")):
              any(r.regel == "cheap-hour" and r.paal_amps >= 15
                  for r in zaterdag if 13 <= r.tijd.hour < 17),
              f"{sorted({r.regel for r in zaterdag if 13 <= r.tijd.hour < 17})}")
+    # Sven op 04-09-2026: "check inderdaad of na 13 uur de coach de prijzen
+    # binnenhaalt." De prijssensor krijgt om 13:00 de dag van morgen, en de
+    # eerstvolgende ronde hoort er al naar te handelen.
+    eerste_net = next((r for r in zaterdag if r.regel == "cheap-hour"), None)
+    controle("vdd: en handelt binnen een minuut na 13:00 naar de nieuwe prijzen",
+             eerste_net is not None and eerste_net.tijd <= VDD_ZATERDAG_13 + virtueel.dt.timedelta(minutes=1),
+             f"{eerste_net.tijd if eerste_net else None}")
     controle("vdd: de coach vraagt nooit meer dan de Equalizer vrijgeeft",
              all(r.amps <= 16 for r in vl.regels), f"{max(r.amps for r in vl.regels)} A")
     controle("vdd: nooit in no-room gevallen", not any(r.regel.startswith("no-room") for r in vl.regels), "")
@@ -533,6 +540,72 @@ if (vl := v("van-den-dam-prijzen-laat")):
 if (vl := v("van-den-dam-geen-accustand")):
     controle("geen accustand: vraagt erom", bool(meldingen(vl, "weet niet hoe vol")), "")
     controle("geen accustand: en laadt op tijd toch vol via het vangnet", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
+# Onverwachte herstarten van Home Assistant. De coach begint elke keer met een
+# leeg geheugen en dezelfde opslag, en de laadbeurt hoort daar niets van te
+# merken: geen dubbele meldingen, geen andere beslissing, op tijd vol.
+if (vl := v("van-den-dam-herstart")) and (basis := v("van-den-dam")):
+    vdd_basis(vl, "herstart")
+    controle("herstart: dezelfde laadbeurt als zonder herstarts",
+             abs(vl.kosten - basis.kosten) < 0.10 and abs(vl.geladen_kwh - basis.geladen_kwh) < 0.5,
+             f"kosten {vl.kosten:.2f} tegen {basis.kosten:.2f}, {vl.geladen_kwh:.1f} tegen {basis.geladen_kwh:.1f} kWh")
+    na_10_30 = regels_in(vl, "10:30", "10:34")
+    controle("herstart tijdens het laden op zon: binnen drie minuten weer op 6 A",
+             any(r.regel == "surplus" and r.amps == 6 for r in na_10_30 if r.tijd.date() == VDD_ZATERDAG),
+             f"{[(r.tijd.strftime('%H:%M'), r.regel, r.amps) for r in na_10_30]}")
+    na_13_05 = regels_in(vl, "13:05", "13:08")
+    controle("herstart net na de prijzen: meteen weer op de goedkope middag",
+             any(r.regel == "cheap-hour" and r.amps >= 15 for r in na_13_05 if r.tijd.date() == VDD_ZATERDAG),
+             f"{[(r.tijd.strftime('%H:%M'), r.regel, r.amps) for r in na_13_05]}")
+    controle("herstart: geen enkele valse melding",
+             not meldingen(vl, "niet lezen") and not meldingen(vl, "meldt al") and not meldingen(vl, "niets meer beslist"),
+             f"{[m for _, m in vl.meldingen]}")
+    # Bekend en niet verholpen: na de herstart om 04:20 kent de coach het begin
+    # van de beurt niet meer en zegt het verslag "sinds 04:20 ... en toen liep
+    # hij al". Eerlijk, maar onvolledig. Zie de notities van 04-09-2026.
+    controle("herstart: het verslag zegt eerlijk dat hij midden in de beurt instapte",
+             any("liep hij al" in m for m in meldingen(vl, "is vol")), f"{meldingen(vl, 'is vol')}")
+
+# Een sensor die wegvalt wordt na tien minuten gemeld, en als hij terug is ook.
+# Sven op 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat
+# moet wel gemeld worden." Ondertussen laadt de coach gewoon door op wat hij
+# het laatst wist.
+for naam, sensor, wat, van, tot in (
+    ("van-den-dam-accustand-weg", "accustand van Ford", "cheap-hour", "13:30", "14:15"),
+    ("van-den-dam-status-weg", "status van Laadpaal", "surplus", "11:00", "11:20"),
+    ("van-den-dam-zonsensor-weg", "zonnesensor", "surplus", "10:00", "10:20"),
+    ("van-den-dam-equalizer-weg", "lastbewaker", "cheap-hour", "14:00", "14:30"),
+):
+    if not (vl := v(naam)):
+        continue
+    kort = naam[12:]
+    vdd_basis(vl, kort)
+    stil = meldingen(vl, "meldt al 10 minuten niets")
+    controle(f"{kort}: na tien minuten één melding dat de sensor niets zegt",
+             len(stil) == 1 and sensor in stil[0], f"{stil}")
+    weer = meldingen(vl, "doet het weer")
+    controle(f"{kort}: en één als hij terug is", len(weer) == 1 and sensor in weer[0], f"{weer}")
+    tijdens = [r for r in regels_in(vl, van, tot) if r.tijd.date() == VDD_ZATERDAG]
+    controle(f"{kort}: ondertussen laadt hij gewoon door",
+             tijdens and all(r.paal_w > 0 for r in tijdens[3:]) and any(r.regel == wat for r in tijdens),
+             f"{sorted({r.regel for r in tijdens})}, laagste {min((r.paal_w for r in tijdens), default=0):.0f} W")
+    controle(f"{kort}: en is even goedkoop uit als zonder storing",
+             (basis := v("van-den-dam")) is not None and abs(vl.kosten - basis.kosten) < 0.10,
+             f"{vl.kosten:.2f}")
+
+if (vl := v("van-den-dam-prijssensor-weg-om-13")):
+    vdd_basis(vl, "prijssensor weg om 13")
+    controle("prijssensor weg: gemeld na tien minuten, om 13:00",
+             any(t.time() == virtueel.dt.time(13, 0) and "prijssensor" in m for t, m in vl.meldingen),
+             f"{[(t.strftime('%H:%M'), m[:40]) for t, m in vl.meldingen]}")
+    controle("prijssensor weg: zonder prijzen niets van het net",
+             not laadt_tussen(vl, "12:54", "13:39"), "laadde zonder prijzen")
+    na = [r for r in regels_in(vl, "13:40", "13:43") if r.tijd.date() == VDD_ZATERDAG]
+    controle("prijssensor weg: zodra hij terug is, meteen de prijzen van zondag en vol",
+             any(r.regel == "cheap-hour" and r.amps >= 15 for r in na),
+             f"{[(r.tijd.strftime('%H:%M'), r.regel, r.amps) for r in na]}")
+    controle("prijssensor weg: en gemeld dat hij het weer doet",
+             any("prijssensor doet het weer" in m for _, m in vl.meldingen), "")
 
 # --- storingen ---------------------------------------------------------------
 

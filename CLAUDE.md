@@ -95,6 +95,7 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
 | `report.py` | het pdf-rapport |
 | `frontend/src/` | het paneel, ES-modules zonder buildstap |
 | `frontend/src/schedule-sheet.js` | het schema van één apparaat, als pop-up achter zijn kaart |
+| `frontend/src/views/notifications.js` | Meldingen: alles wat de coach ooit stuurde, uit `MeldingenStore` in storage.py |
 
 De scheiding tussen `planner.py` en `coach.py` is de kern: het denkwerk is los
 te draaien tegen een hele dag echte historie voordat er ook maar iets geschakeld
@@ -120,11 +121,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 187 controles op het denkwerk
-python tests/test_coach.py       # 196 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 475 op hele laadbeurten in het virtuele huis
+python tests/test_planner.py     # 212 controles op het denkwerk
+python tests/test_coach.py       # 206 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 726 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 37 op de kwartieropslag
-node   tests/test_rapport.mjs    # 17 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 21 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```
@@ -167,6 +168,16 @@ prijssensor geven hun uren in UTC; twee uur erbij voor de lokale lijst. De negen
 `van-den-dam-*`-scenario's zijn zo gebouwd, uit de stand van vrijdagavond
 04-09-2026, en `test_virtueel.py` meet er de vijf controlepunten van die
 laadbeurt op na.
+
+Twee gebeurtenissen die er sinds 04-09-2026 's avonds bij horen: `("10:30",
+"herstart", None)` zet een nieuwe coach neer met een leeg geheugen en dezelfde
+opslag, zoals Home Assistant dat na een herstart doet; `("13:30", "sensor_weg",
+("soc", 45))` maakt één sensor zoveel minuten `unavailable` (namen: de sleutels
+van `E` in virtueel.py). Een tijd mag een dag vooruit: `"+1 04:20"`. De coach
+meldt elke sensor die hij gebruikt na tien minuten stilte één keer, en één keer
+als hij terug is (`_async_sensorwacht` in coach.py, `SENSOR_STIL`); de slimme
+meter heeft zijn eigen melding na vijf minuten (`_nettip`). Elke melding gaat
+ook in de geschiedenis (`domotiapp_coach/notifications/list`, tab Meldingen).
 
 Elk scenario meldt ook een **optimum**: wat dezelfde laadbeurt gekost had als
 de coach de hele dag vooraf had gekend. Dezelfde som als `goedkoopste`, met de

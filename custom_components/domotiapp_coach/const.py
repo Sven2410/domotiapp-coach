@@ -29,6 +29,15 @@ STORAGE_VERSION: Final = 1
 # Fired on the event bus after a save, so every open panel refreshes itself.
 EVENT_SETTINGS_UPDATED: Final = f"{DOMAIN}_settings_updated"
 
+# Elke melding die de coach naar de telefoon stuurt gaat ook hierlangs, zodat
+# het paneel een geschiedenis kan tonen. Sven op 04-09-2026: "daarom wil ik
+# ook een soort geschiedenis meldingen scherm." Een melding op een telefoon is
+# weg zodra hij weggeveegd is; hier blijft hij staan.
+EVENT_NOTIFICATION: Final = f"{DOMAIN}_notification"
+MELDINGEN_KEY: Final = f"{DOMAIN}.meldingen"
+MELDINGEN_VERSION: Final = 1
+MELDINGEN_MAX: Final = 300
+
 # --- Device types ----------------------------------------------------------
 # "overig" carries a free-text name; the rest are named by their type.
 DEVICE_TYPES: Final = [

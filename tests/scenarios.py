@@ -354,8 +354,44 @@ vdd_geen_soc = van_den_dam.kopie(
     naam="van-den-dam-geen-accustand", uitleg="hetzelfde, de Ford meldt zijn accustand niet",
     auto=replace(FORD, meldt_soc=False),
 )
+# Sven op 04-09-2026, laat: "ook onverwachte herstarten, en wat als een sensor
+# ineens niet meer beschikbaar is. Dat moet wel gemeld worden."
+vdd_herstart = van_den_dam.kopie(
+    naam="van-den-dam-herstart",
+    uitleg="Home Assistant herstart vijf keer: vr 23:00, za 04:20, za 10:30 op zon, za 13:05 net na de prijzen, zo 04:20 in het laatste uur",
+    gebeurtenissen=[("23:00", "herstart", None), ("04:20", "herstart", None),
+                    ("10:30", "herstart", None), ("13:05", "herstart", None),
+                    ("+1 04:20", "herstart", None)],
+)
+vdd_soc_weg = van_den_dam.kopie(
+    naam="van-den-dam-accustand-weg",
+    uitleg="de accustand van de Ford is zaterdag van 13:30 tot 14:15 niet beschikbaar, midden in het laden",
+    gebeurtenissen=[("13:30", "sensor_weg", ("soc", 45))],
+)
+vdd_status_weg = van_den_dam.kopie(
+    naam="van-den-dam-status-weg",
+    uitleg="de status van de Easee is zaterdag van 11:00 tot 11:20 niet beschikbaar, tijdens het laden op zon",
+    gebeurtenissen=[("11:00", "sensor_weg", ("status", 20))],
+)
+vdd_zon_weg = van_den_dam.kopie(
+    naam="van-den-dam-zonsensor-weg",
+    uitleg="de zonnesensor is zaterdag van 10:00 tot 10:20 niet beschikbaar",
+    gebeurtenissen=[("10:00", "sensor_weg", ("zon", 20))],
+)
+vdd_equalizer_weg = van_den_dam.kopie(
+    naam="van-den-dam-equalizer-weg",
+    uitleg="de Equalizer-sensor is zaterdag van 14:00 tot 14:30 niet beschikbaar, tijdens het laden op 16 A",
+    gebeurtenissen=[("14:00", "sensor_weg", ("equalizer", 30))],
+)
+vdd_prijzen_weg_13 = van_den_dam.kopie(
+    naam="van-den-dam-prijssensor-weg-om-13",
+    uitleg="de prijssensor valt van 12:50 tot 13:40 weg, precies als de prijzen van zondag komen",
+    gebeurtenissen=[("12:50", "prijzen_weg", 50)],
+)
 VAN_DEN_DAM = [van_den_dam, vdd_bewolkt, vdd_geen_zon, vdd_dure_zondag, vdd_wekken,
-               vdd_koken, vdd_p1_weg, vdd_prijzen_laat, vdd_geen_soc]
+               vdd_koken, vdd_p1_weg, vdd_prijzen_laat, vdd_geen_soc,
+               vdd_herstart, vdd_soc_weg, vdd_status_weg, vdd_zon_weg, vdd_equalizer_weg,
+               vdd_prijzen_weg_13]
 
 ALLE = [
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
