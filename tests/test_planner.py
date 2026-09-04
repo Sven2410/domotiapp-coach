@@ -1584,6 +1584,72 @@ print(f"  huis 24 A op de zwaarste fase: plafond {plafond44c} A")
 controle("een huis dat er zelf overheen gaat wint van de rail",
          plafond44c < MIN_AMPS, f"{plafond44c} A")
 
+print("=== 45. een klaar-tijd die verder weg is dan morgen krijgt zijn dag ===")
+# Sven op vrijdagavond 04-09-2026, met zaterdag uitgevinkt en zondag klaar om
+# 06:00: "er staat prijzen tot 06:00 zijn nog niet bekend maar dat is wel zo,
+# want morgen is het zaterdag en dan is 06:00 al wel bekend. Er moet iets komen
+# staan dat zaterdag niet ingepland staat en dan zondag pas vol moet."
+vrijdag = dt.datetime(2026, 9, 4, 20, 34)
+zes = dt.time(6, 0)
+dagen45 = {d: planner.DayWindow(enabled=(d != 5), done_by=zes) for d in range(7)}
+venster45 = planner.resolve_window(vrijdag, dagen45)
+print(f"  klaar-tijd {venster45.deadline}, overgeslagen {venster45.skipped}")
+controle("de klaar-tijd is zondag 06:00",
+         venster45.deadline == dt.datetime(2026, 9, 6, 6, 0), f"{venster45.deadline}")
+controle("en het venster weet dat zaterdag uit staat",
+         venster45.skipped == ("zaterdag",), f"{venster45.skipped}")
+controle("een dag die gewoon voorbij is telt niet als overgeslagen",
+         planner.resolve_window(vrijdag, {d: planner.DayWindow(done_by=zes) for d in range(7)}).skipped == (),
+         "vrijdag 06:00 is al geweest en is geen uitgezette dag")
+
+controle("vandaag en morgen krijgen alleen de klok",
+         planner._wanneer(dt.datetime(2026, 9, 5, 6, 0), vrijdag) == "06:00"
+         and planner._wanneer(dt.datetime(2026, 9, 4, 23, 0), vrijdag) == "23:00")
+controle("overmorgen krijgt de dag erbij",
+         planner._wanneer(dt.datetime(2026, 9, 6, 6, 0), vrijdag) == "zondag 06:00",
+         planner._wanneer(dt.datetime(2026, 9, 6, 6, 0), vrijdag))
+
+# De prijzen lopen tot zaterdagavond, dus niet tot zondag 06:00: alleen zon.
+prijzen45 = []
+for stap in range(28):
+    start = dt.datetime(2026, 9, 4, 20, 0) + dt.timedelta(hours=stap)
+    prijzen45.append({"start": start, "end": start + dt.timedelta(hours=1),
+                      "price": 0.25, "feed_in": 0.02})
+d45 = decide(vrijdag, prijzen45, NET_LEEG, Car(capacity_kwh=65.0, phases=3, soc_percent=8.5),
+             paal(laadt=False, amps=0.0), venster45,
+             forecast=kromme(dt.datetime(2026, 9, 5), 9, [1.0, 3.0, 5.0, 5.0, 4.0, 2.0]))
+print(f"  {d45.rule}: {d45.reason} | {d45.plan}")
+controle("hij wacht op de prijzen", d45.rule == "wait-for-prices", d45.rule)
+controle("en zegt eerst dat zaterdag uit staat en hij zondag vol moet zijn",
+         d45.reason.startswith("Zaterdag staat in je schema uit, dus hij moet zondag om 06:00 vol zijn."),
+         d45.reason)
+controle("en zegt niet nog een keer zondag 06:00 in dezelfde adem",
+         "De prijzen tot dan zijn nog niet bekend" in d45.reason
+         and d45.reason.count("zondag") == 1, d45.reason)
+# Zonder zonverwachting is er niets te plannen, en dan zegt hij wanneer de
+# prijzen komen: de middag vóór de klaar-tijd, dus zaterdag, dus morgen.
+d45b = decide(vrijdag, prijzen45, NET_LEEG, Car(capacity_kwh=65.0, phases=3, soc_percent=8.5),
+              paal(laadt=False, amps=0.0), venster45)
+print(f"  zonder zon: {d45b.rule}: {d45b.reason} | {d45b.plan}")
+controle("zonder zon wacht hij ook", d45b.rule == "wait-for-prices", d45b.rule)
+controle("en zegt wanneer die prijzen komen: de middag ervoor",
+         "meestal morgen rond 13:00" in d45b.plan, d45b.plan)
+# Zonder uitgezette dag staat de klaar-tijd gewoon met zijn dag in de zin.
+d45c = decide(vrijdag, prijzen45, NET_LEEG, Car(capacity_kwh=65.0, phases=3, soc_percent=8.5),
+              paal(laadt=False, amps=0.0), Window(enabled=True, deadline=venster45.deadline))
+controle("zonder uitgezette dag noemt hij de klaar-tijd met zijn dag",
+         d45c.reason.startswith("De prijzen tot zondag 06:00 zijn nog niet bekend"), d45c.reason)
+
+plan45 = planner.timeline(vrijdag, prijzen45, NET_LEEG,
+                          Car(capacity_kwh=65.0, phases=3, soc_percent=8.5),
+                          paal(laadt=False, amps=0.0), venster45, 16,
+                          forecast=kromme(dt.datetime(2026, 9, 5), 9, [1.0, 3.0, 5.0, 5.0, 4.0, 2.0]))
+print(f"  tijdlijn: {plan45.note}")
+controle("de tijdlijn zegt hetzelfde",
+         plan45.note.startswith("Zaterdag staat in je schema uit")
+         and "zondag om 06:00" in plan45.note and "morgen rond 13:00" in plan45.note,
+         plan45.note)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
