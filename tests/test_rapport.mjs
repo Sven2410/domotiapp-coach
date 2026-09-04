@@ -317,10 +317,48 @@ proef("de kop toont wat er nog in moet en wanneer hij begint", () => {
     .flatMap((vak) => vak.kinderen.map((kind) => kind.textContent))
     .join(" | ");
   assert.match(tekst, /37,2 kWh/, "het aantal kilowattuur hoort erin");
-  assert.match(tekst, /op 16 A/, "en de stroom waar het op gerekend is");
-  assert.match(tekst, /3 u 22 m/, "de laadtijd als uren en minuten");
-  assert.match(tekst, /03:07/, "het uiterste startmoment");
-  assert.match(tekst, /klaar om 07:00/, "en de klaar-tijd");
+  assert.match(tekst, /Op vol vermogen/, "de laadtijd heet wat hij is: een som op vol vermogen");
+  assert.match(tekst, /16 A/, "met de stroom waar het op gerekend is");
+  assert.match(tekst, /3 u 22 m/, "als uren en minuten");
+  // Die nacht is niet vandaag, dus de dag hoort erbij: "zo 03:07".
+  assert.match(tekst, /zo 03:07/, "het uiterste startmoment, met de dag erbij");
+  assert.match(tekst, /klaar om zo 07:00/, "en de klaar-tijd");
+  // Een server van voor v0.47.3 stuurt geen `planned_kwh` mee; dan blijft het
+  // bij "vol rond" zoals het was.
+  assert.match(tekst, /Vol rond/, "zonder planned_kwh staat er gewoon vol rond");
+});
+
+// Bij Van den Dam op 04-09-2026: "Vol rond 17:00" boven acht zonblokken van
+// samen 33 van de 66 kWh, want de prijzen tot zondag 06:00 waren er nog niet.
+// Sven las dat als een belofte. Dekt het plan het tekort niet, dan staat er
+// wat er gepland is en waarom de rest ontbreekt.
+proef("dekt het plan het tekort niet, dan staat er gepland en geen vol rond", () => {
+  const half = { ...NACHT, kwh_needed: 66.1, planned_kwh: 33.1, solar_only: true };
+  const { el, knopen } = vooruitScherm(half);
+  el.paint_();
+  const tekst = knopen.get("#vooruit-kop").kinderen
+    .flatMap((vak) => vak.kinderen.map((kind) => kind.textContent))
+    .join(" | ");
+  assert.match(tekst, /Gepland \| 33,1 kWh/, "wat er gepland staat");
+  assert.match(tekst, /van 66,1 kWh; de rest zodra de prijzen er zijn/, "en waarom niet alles");
+  assert.ok(!tekst.includes("Vol rond"), "geen belofte die het plan niet waarmaakt");
+  assert.ok(!tekst.includes("07:00"), "en ook niet het einde van het laatste zonuur");
+
+  const krap = { ...half, solar_only: false };
+  const scherm2 = vooruitScherm(krap);
+  scherm2.el.paint_();
+  const tekst2 = scherm2.knopen.get("#vooruit-kop").kinderen
+    .flatMap((vak) => vak.kinderen.map((kind) => kind.textContent))
+    .join(" | ");
+  assert.match(tekst2, /meer past er niet vóór de klaar-tijd/, "zonder zon-reden is het de ruimte");
+
+  const vol = { ...NACHT, planned_kwh: 37.2 };
+  const scherm3 = vooruitScherm(vol);
+  scherm3.el.paint_();
+  const tekst3 = scherm3.knopen.get("#vooruit-kop").kinderen
+    .flatMap((vak) => vak.kinderen.map((kind) => kind.textContent))
+    .join(" | ");
+  assert.match(tekst3, /Vol rond \| zo 07:00/, "dekt het plan alles, dan wel vol rond");
 });
 
 proef("elk uur staat er met zijn prijs en of hij laadt", () => {

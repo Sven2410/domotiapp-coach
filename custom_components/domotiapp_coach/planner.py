@@ -1241,8 +1241,21 @@ class Plan:
     kwh_needed: float | None = None
     hours_needed: float | None = None
     amps: int = 0
-    # Het einde van het laatste blok waarin hij van plan is te laden.
+    # Het einde van het laatste blok waarin hij van plan is te laden. Alleen
+    # een belofte als `planned_kwh` het hele tekort dekt; zie daar.
     expected_done: datetime | None = None
+    # Hoeveel er in de blokken hieronder gepland staat. Is dat minder dan
+    # `kwh_needed`, dan is `expected_done` niet het moment waarop hij vol is
+    # maar het einde van wat hij nú al kan plannen. In de alleen-zon-stand is
+    # dat de helft: bij Van den Dam stond op 04-09-2026 "Vol rond 17:00" boven
+    # acht zonblokken van samen 33 van de 66 kWh, en Sven las dat als een
+    # belofte. Het scherm zegt sindsdien wat er gepland is en niet wanneer hij
+    # vol is, zolang die twee niet hetzelfde zijn.
+    planned_kwh: float = 0.0
+    # Of de blokken alleen zon bevatten omdat de prijzen tot de klaar-tijd nog
+    # niet bekend zijn. Dan komt de rest van het plan rond 13:00, en dat is een
+    # andere uitleg dan "meer past er niet".
+    solar_only: bool = False
     blocks: list[Blok] = field(default_factory=list)
     # Waarom er geen blokken zijn, als die er niet zijn.
     note: str = ""
@@ -1302,6 +1315,7 @@ def timeline(
         now, prices, grid, car, amps, begin, einde, tariff, forecast,
         ceiling_later=structural_ceiling(car, charger) or amps, alleen_zon=alleen_zon,
     )
+    plan.solar_only = alleen_zon
     if alleen_zon:
         plan.note = (
             "De prijzen tot je klaar-tijd zijn nog niet bekend. Tot die binnenkomen, "
@@ -1373,6 +1387,7 @@ def timeline(
 
     geladen = [blok for blok in plan.blocks if blok.charging]
     plan.expected_done = geladen[-1].end if geladen else None
+    plan.planned_kwh = sum(genomen.values())
     if not plan.blocks:
         plan.note = "Er is niets te plannen voor deze periode."
     return plan
