@@ -1188,6 +1188,19 @@ controle("een echt zonuur laadt op wat het dak geeft en zegt dat",
 controle("een wachtuur heeft geen stroom",
          all(b.amps == 0 and b.kw == 0 for b in plan36f.blocks if not b.charging))
 
+# Bij Van den Dam op 04-09-2026 om 21:21 trok fase 3 zestien ampère door het
+# huis, en de kop zei "op vol vermogen 15 u 58 m op 6 A, uiterlijk beginnen
+# zaterdag 13:02". De klaar-tijdregel rekent met wat paal en auto kunnen, en
+# de kop hoort hetzelfde te zeggen. Het uur van nu houdt wel het plafond van nu.
+plan36g = planner.timeline(nu36, prijzen36, NET_LEEG, BUS, PAAL36, VENSTER36, 6)
+print(f"  krap plafond van nu (6 A): kop {plan36g.amps} A, {plan36g.hours_needed:.2f} uur, "
+      f"uiterlijk {plan36g.latest_start:%H:%M}")
+controle("de kop rekent met wat paal en auto kunnen, niet met dit moment",
+         plan36g.amps == 16 and abs(plan36g.hours_needed - plan36.hours_needed) < 0.01,
+         f"{plan36g.amps} A, {plan36g.hours_needed}")
+controle("dus uiterlijk beginnen verschuift niet door een piek in het huis",
+         plan36g.latest_start == plan36.latest_start, f"{plan36g.latest_start}")
+
 print("=== 37. twee getallen uit twee momenten in een zin ===")
 # Sven op 30-08-2026, tijdens het herstarten: "de equalizer staat op 18 A maar
 # de coach zegt dat de lastbewaking op 7 A zit?" Allebei waar en toch onzin. De

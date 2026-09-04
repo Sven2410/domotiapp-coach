@@ -1322,14 +1322,23 @@ def timeline(
     einde = plan_end(klaar)
     begin = window.opens if window.enabled else None
     amps = max(MIN_AMPS, ceiling if ceiling >= MIN_AMPS else int(charger.max_amps or 0))
+    # De sommen in de kop, "op vol vermogen" en "uiterlijk beginnen", rekenen
+    # met wat paal en auto kunnen en niet met wat er op dit moment onder de
+    # zekering past: dat is wat de klaar-tijdregel zelf ook doet (zie
+    # `structural_ceiling`). Bij Van den Dam trok fase 3 op 04-09-2026 om 21:21
+    # zestien ampère door het huis, en toen stond er "op vol vermogen 15 u 58 m
+    # op 6 A, uiterlijk beginnen zaterdag 13:02" boven een plan dat om 09:00
+    # begon. Het plafond van nu blijft wél gelden voor het uur waar we in
+    # zitten; dat gaat via `amps` naar `schijven`.
+    structureel = structural_ceiling(car, charger) or amps
 
     kwh = energy_needed_kwh(car)
     plan = Plan(
         deadline=klaar,
-        latest_start=_latest_start(klaar, hours_needed(car, amps)),
+        latest_start=_latest_start(klaar, hours_needed(car, structureel)),
         kwh_needed=kwh,
-        hours_needed=hours_needed(car, amps),
-        amps=amps,
+        hours_needed=hours_needed(car, structureel),
+        amps=structureel,
         estimated=forecast.estimated,
     )
 
@@ -1337,7 +1346,7 @@ def timeline(
     alleen_zon = bool(prices) and einde is not None and horizon < einde
     alle = schijven(
         now, prices, grid, car, amps, begin, einde, tariff, forecast,
-        ceiling_later=structural_ceiling(car, charger) or amps, alleen_zon=alleen_zon,
+        ceiling_later=structureel, alleen_zon=alleen_zon,
     )
     plan.solar_only = alleen_zon
     if alleen_zon and klaar is not None:

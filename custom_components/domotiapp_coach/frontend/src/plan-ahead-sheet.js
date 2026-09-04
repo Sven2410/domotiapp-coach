@@ -245,7 +245,7 @@ export class DacPlanAheadSheet extends DacElement {
     for (const [label, waarde, bij] of [
       ["Nog te laden", kwh(plan.kwh_needed), ""],
       ["Op vol vermogen", uren(plan.hours_needed),
-        plan.amps ? `${plan.amps} A, zoals het nu past` : ""],
+        plan.amps ? `${plan.amps} A, wat paal en auto kunnen` : ""],
       ["Uiterlijk beginnen", wanneer(plan.latest_start), "met een uur speling"],
       laatste,
     ]) {
