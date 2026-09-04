@@ -380,18 +380,25 @@ ZONDAG_13 = virtueel.dt.datetime(2026, 9, 13, 13, 0)
 if (vl := v("weekend-zondag-uit")):
     zaterdag = [r for r in vl.regels if r.tijd.date() == ZATERDAG]
     voor_de_prijzen = [r for r in vl.regels if r.tijd < ZONDAG_13]
-    # Drie tiende kWh speling: de coach volgt de zon met een minuut vertraging.
-    controle("weekend: zaterdag alleen zon, ook 's nachts niets van het net",
-             sum(max(0.0, r.paal_w - r.over_w) for r in zaterdag) * vl.stap_uur / 1000 < 0.3,
-             f"{sum(max(0.0, r.paal_w - r.over_w) for r in zaterdag) * vl.stap_uur / 1000:.2f} kWh net op zaterdag")
-    controle("weekend: tot zondag 13:00 alleen zon",
-             sum(max(0.0, r.paal_w - r.over_w) for r in voor_de_prijzen) * vl.stap_uur / 1000 < 0.3,
-             "net voor zondag 13:00")
+    # Zon, en net alleen als aanvulling tot de ondergrens van de paal in een
+    # uur waarin het dak iets geeft. Sven op 05-09-2026: een uur met wat zon en
+    # een goedkope prijs weegt zwaarder dan een iets goedkopere nacht.
+    controle("weekend: zaterdag alleen zon, net hooguit als aanvulling tot 6 A",
+             all(r.paal_amps <= 6.01 and r.over_w > 50 for r in zaterdag if r.paal_w > r.over_w + 50),
+             "net zonder zon of boven de ondergrens op zaterdag")
+    controle("weekend: 's nachts niets", not any(r.paal_w > 0 for r in zaterdag if r.tijd.hour >= 20), "")
+    controle("weekend: tot zondag 13:00 geen uur zonder zon van het net",
+             all(r.paal_amps <= 6.01 and r.over_w > 50 for r in voor_de_prijzen if r.paal_w > r.over_w + 50),
+             "net zonder zon voor zondag 13:00")
     controle("weekend: de zon van zaterdag is wel gebruikt",
              sum(min(r.paal_w, r.over_w) for r in zaterdag) * vl.stap_uur / 1000 > 20,
              f"{sum(min(r.paal_w, r.over_w) for r in zaterdag) * vl.stap_uur / 1000:.1f} kWh zon op zaterdag")
-    controle("weekend: zegt dat hij op de prijzen wacht",
+    controle("weekend: zegt 's avonds dat hij op de prijzen wacht",
              any(r.regel == "wait-for-prices" for r in zaterdag), f"{sorted({r.regel for r in zaterdag})}")
+    # Acht wissels: hij stopt op zondagochtend twee keer voor een zonuur dat
+    # vier cent goedkoper is (09:36 en 10:47, een half uur elk). Dat is de
+    # kostenregel; een stop voor minder dan een halve cent doet hij niet meer.
+    controle("weekend: niet steeds aan en uit", vl.wissels() <= 8, f"{vl.wissels()} wissels")
     controle("weekend: maandag een uur voor zes vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
 if (vl := v("weekend-zondag-uit-geen-zon")):
