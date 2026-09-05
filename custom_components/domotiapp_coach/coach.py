@@ -2235,7 +2235,14 @@ class ChargerCoach:
         dan geen ijkpunt.
         """
         open_beurt = self._beurt_open.pop(device_id, None)
-        if open_beurt is not None and open_beurt.get("resumed"):
+        basis_oud = (open_beurt or {}).get("baseline") or {}
+        zonder_maat = (
+            open_beurt is not None
+            and float(basis_oud.get("kwh") or 0.0) + 0.5 < float(open_beurt.get("kwh") or 0.0)
+        )
+        if open_beurt is not None and (
+            open_beurt.get("resumed") or open_beurt.get("ref_price") is None or zonder_maat
+        ):
             # Een beurt die een vorige coach al hervat had zonder het echte
             # inplugmoment (v0.49.x: met de prijs van het herstartuur als
             # ijkpunt, of zonder). Opnieuw beginnen en terugrekenen vanaf het
