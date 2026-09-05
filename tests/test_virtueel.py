@@ -71,6 +71,30 @@ def laadt_tussen(verloop, van, tot):
     return any(r.paal_w > 0 for r in regels_in(verloop, van, tot))
 
 
+# Sinds 05-09-2026 mag een bekend uur dat goedkoper is dan het gemiddelde van
+# alle bekende uren ook van het net, zolang de prijzen tot de klaar-tijd er nog
+# niet zijn. Sven, na een ochtend wachten bij Van den Dam: "nu hebben we dus
+# niks bespaard." De coach middelt over alles wat hij kent; hier benaderd als
+# alle uren tot en met de dag van de regel.
+def gemiddelde_tot(verloop, datum):
+    per_uur = {}
+    for r in verloop.regels:
+        if r.tijd.date() <= datum and r.prijs is not None:
+            per_uur.setdefault((r.tijd.date(), r.tijd.hour), r.prijs)
+    return sum(per_uur.values()) / len(per_uur) if per_uur else None
+
+
+def onder_gemiddelde(verloop, r):
+    g = gemiddelde_tot(verloop, r.tijd.date())
+    return g is not None and r.prijs is not None and r.prijs < g
+
+
+def net_onder_gemiddelde(verloop, regels):
+    """Meer van het net dan de ondergrens alleen in uren onder het gemiddelde."""
+    return all(onder_gemiddelde(verloop, r) for r in regels
+               if r.paal_w > r.over_w + 50 and r.paal_amps > 6.01)
+
+
 # --- voor elk scenario --------------------------------------------------------
 
 print("=== elk scenario: geen valse meldingen, geen onbekende regel, zekering heel ===")
@@ -328,14 +352,20 @@ if (vl := v("oude-begintijd-genegeerd")) and (vz := v("vast-zonnig")):
 
 print("=== om tien uur erin, klaar om zes ===")
 if (vl := v("tien-uur-erin-dynamisch")):
+    # 10:00 en 11:00 liggen boven het gemiddelde van de dag, 12:00 eronder.
     controle("tien uur: niet meteen laden bij het inpluggen",
-             not laadt_tussen(vl, "10:00", "13:00"), "laadde tussen 10:00 en 13:00")
+             not laadt_tussen(vl, "10:00", "12:00"), "laadde tussen 10:00 en 12:00")
+    controle("tien uur: voor de prijzen alleen uren onder het gemiddelde",
+             net_onder_gemiddelde(vl, [r for r in vl.regels if r.tijd.hour < 13]), "")
     controle("tien uur: de goedkope middag pakken", laadt_tussen(vl, "13:05", "17:00"), "")
     controle("tien uur: stoppen voor de avondpiek", not laadt_tussen(vl, "17:05", "20:00"), "")
     controle("tien uur: en 's nachts de rest", laadt_tussen(vl, "00:00", "05:00"), "")
     controle("tien uur: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
-    controle("tien uur: binnen een dubbeltje van het optimum",
-             vl.optimum is not None and vl.kosten <= vl.optimum + 0.10,
+    # Zestig cent: het uur van 12:00 ligt onder het gemiddelde van de dag maar
+    # boven de nacht die hij nog niet kende. Dat is de prijs van de regel; bij
+    # Van den Dam bespaarde dezelfde regel op 05-09-2026 twee euro.
+    controle("tien uur: binnen zestig cent van het optimum",
+             vl.optimum is not None and vl.kosten <= vl.optimum + 0.60,
              f"kosten {vl.kosten:.2f}, optimum {vl.optimum}")
 
 if (vl := v("tien-uur-erin-zon")):
@@ -383,13 +413,15 @@ if (vl := v("weekend-zondag-uit")):
     # Zon, en net alleen als aanvulling tot de ondergrens van de paal in een
     # uur waarin het dak iets geeft. Sven op 05-09-2026: een uur met wat zon en
     # een goedkope prijs weegt zwaarder dan een iets goedkopere nacht.
-    controle("weekend: zaterdag alleen zon, net hooguit als aanvulling tot 6 A",
-             all(r.paal_amps <= 6.01 and r.over_w > 50 for r in zaterdag if r.paal_w > r.over_w + 50),
-             "net zonder zon of boven de ondergrens op zaterdag")
+    controle("weekend: zaterdag zon, net als aanvulling tot 6 A of in een uur onder het gemiddelde",
+             all((r.paal_amps <= 6.01 and r.over_w > 50) or onder_gemiddelde(vl, r)
+                 for r in zaterdag if r.paal_w > r.over_w + 50),
+             "net zonder zon of boven de ondergrens in een uur boven het gemiddelde")
     controle("weekend: 's nachts niets", not any(r.paal_w > 0 for r in zaterdag if r.tijd.hour >= 20), "")
-    controle("weekend: tot zondag 13:00 geen uur zonder zon van het net",
-             all(r.paal_amps <= 6.01 and r.over_w > 50 for r in voor_de_prijzen if r.paal_w > r.over_w + 50),
-             "net zonder zon voor zondag 13:00")
+    controle("weekend: tot zondag 13:00 van het net alleen als aanvulling of onder het gemiddelde",
+             all((r.paal_amps <= 6.01 and r.over_w > 50) or onder_gemiddelde(vl, r)
+                 for r in voor_de_prijzen if r.paal_w > r.over_w + 50),
+             "net zonder zon voor zondag 13:00 in een uur boven het gemiddelde")
     controle("weekend: de zon van zaterdag is wel gebruikt",
              sum(min(r.paal_w, r.over_w) for r in zaterdag) * vl.stap_uur / 1000 > 20,
              f"{sum(min(r.paal_w, r.over_w) for r in zaterdag) * vl.stap_uur / 1000:.1f} kWh zon op zaterdag")
@@ -402,8 +434,8 @@ if (vl := v("weekend-zondag-uit")):
     controle("weekend: maandag een uur voor zes vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
 if (vl := v("weekend-zondag-uit-geen-zon")):
-    controle("weekend zonder zon: niets tot zondag 13:00",
-             not any(r.paal_w > 0 for r in vl.regels if r.tijd < ZONDAG_13), "laadde voor zondag 13:00")
+    controle("weekend zonder zon: voor zondag 13:00 alleen uren onder het gemiddelde",
+             net_onder_gemiddelde(vl, [r for r in vl.regels if r.tijd < ZONDAG_13]), "")
     controle("weekend zonder zon: daarna de goedkope uren", vl.geladen_kwh > 60, f"{vl.geladen_kwh:.1f}")
     controle("weekend zonder zon: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
     # Een euro: het optimum kent zaterdagmiddag al, de coach mag die van Sven
@@ -462,9 +494,8 @@ if (vl := v("van-den-dam")):
     ochtend = [r for r in zaterdag if r.tijd < VDD_ZATERDAG_13]
     controle("vdd: zaterdagochtend begint pas als het dak iets overhoudt",
              all(r.over_w > 0 for r in ochtend if r.paal_w > 0), "laadde zonder overschot")
-    controle("vdd: en dan op de ondergrens van 6 A",
-             ochtend and max(r.paal_amps for r in ochtend) <= 10.01 and
-             sum(1 for r in ochtend if 5.9 <= r.paal_amps <= 6.1) > 200,
+    controle("vdd: en dan op de ondergrens van 6 A, of vol in een uur onder het gemiddelde",
+             ochtend and all(r.paal_amps <= 10.01 or onder_gemiddelde(vl, r) for r in ochtend),
              f"hoogste {max((r.paal_amps for r in ochtend), default=0):.0f} A")
     controle("vdd: om 13:00 komen de prijzen en gaat hij vol",
              any(r.regel == "cheap-hour" and r.paal_amps >= 15
@@ -489,17 +520,17 @@ if (vl := v("van-den-dam")):
 for naam in ("van-den-dam-bewolkt", "van-den-dam-geen-zon"):
     if (vl := v(naam)):
         vdd_basis(vl, naam[12:])
-        controle(f"{naam[12:]}: zonder overschot niets voor 13:00",
-                 not any(r.paal_w > 0 for r in vl.regels if r.tijd < VDD_ZATERDAG_13), "")
+        controle(f"{naam[12:]}: zonder overschot voor 13:00 alleen uren onder het gemiddelde",
+                 net_onder_gemiddelde(vl, [r for r in vl.regels if r.tijd < VDD_ZATERDAG_13]), "")
         controle(f"{naam[12:]}: daarna de goedkope middag en nacht", vl.geladen_kwh > 60,
                  f"{vl.geladen_kwh:.1f} kWh")
 
 if (vl := v("van-den-dam-dure-zondagnacht")):
     vdd_basis(vl, "dure zondag")
     zaterdag = [r for r in vl.regels if r.tijd.date() == VDD_ZATERDAG]
-    controle("dure zondag: zaterdagmiddag doet het werk",
-             sum(r.paal_w for r in zaterdag if 13 <= r.tijd.hour < 17) * vl.stap_uur / 1000 > 40,
-             f"{sum(r.paal_w for r in zaterdag if 13 <= r.tijd.hour < 17) * vl.stap_uur / 1000:.1f} kWh")
+    controle("dure zondag: zaterdag doet het werk",
+             sum(r.paal_w for r in zaterdag if 8 <= r.tijd.hour < 17) * vl.stap_uur / 1000 > 40,
+             f"{sum(r.paal_w for r in zaterdag if 8 <= r.tijd.hour < 17) * vl.stap_uur / 1000:.1f} kWh")
     controle("dure zondag: en de dure nacht wordt niet gebruikt",
              sum(r.paal_w for r in vl.regels if r.tijd.date() > VDD_ZATERDAG and r.tijd.hour >= 1) * vl.stap_uur / 1000 < 1,
              "laadde in de dure zondagnacht")
@@ -515,21 +546,26 @@ if (vl := v("van-den-dam-oven")):
     # De oven gaat om 12:30 aan; de coach houdt de beurt eerst `STOP_ROUNDS`
     # ronden op de ondergrens vast (tien sinds 05-09-2026, Svens "wekken doe
     # maar per 10 min") en de auto volgt met een minuut. Daarna niets meer.
-    controle("oven: tijdens de oven op zaterdagochtend geen net zonder zon",
-             vl.net_kwh_tussen("12:42", "13:00") < 0.05, f"{vl.net_kwh_tussen('12:42', '13:00'):.2f} kWh")
+    # Het uur van 12:00 ligt onder het gemiddelde van de dag, dus sinds
+    # 05-09-2026 mag hij daar gewoon van het net; de oven maakt dat niet anders.
+    controle("oven: tijdens de oven van het net alleen in een uur onder het gemiddelde",
+             net_onder_gemiddelde(vl, [r for r in regels_in(vl, "12:42", "13:00")
+                                       if r.tijd.date() == VDD_ZATERDAG]),
+             f"{vl.net_kwh_tussen('12:42', '13:00'):.2f} kWh")
     controle("oven: de Equalizer wordt gemeld, niet bevochten",
              meldingen(vl, "lastbewaker") and len(vl.opdrachten) <= 60, f"{len(vl.opdrachten)} opdrachten")
 
 if (vl := v("van-den-dam-p1-weg")):
     vdd_basis(vl, "p1 weg")
     controle("p1 weg: melding over de netmeting", bool(meldingen(vl, "netmeting")), "")
-    controle("p1 weg: en daarna gewoon verder op zon",
-             any(r.regel == "surplus" for r in regels_in(vl, "11:15", "12:00")), "")
+    controle("p1 weg: en daarna gewoon verder",
+             any(r.paal_w > 0 and r.regel.split("+")[0] in ("surplus", "cheap-hour")
+                 for r in regels_in(vl, "11:15", "12:00")), "")
 
 if (vl := v("van-den-dam-prijzen-laat")):
     vdd_basis(vl, "prijzen laat")
-    controle("prijzen laat: tot 15:30 alleen zon",
-             all(r.paal_amps <= 6.01 for r in vl.regels
+    controle("prijzen laat: tot 15:30 alleen zon en uren onder het gemiddelde",
+             all(r.paal_amps <= 6.01 or onder_gemiddelde(vl, r) for r in vl.regels
                  if r.tijd.date() == VDD_ZATERDAG and r.tijd < virtueel.dt.datetime(2026, 9, 5, 15, 30)), "")
     controle("prijzen laat: daarna vol tot de avondpiek",
              any(r.paal_amps >= 15 for r in regels_in(vl, "15:30", "17:00")), "")
@@ -554,8 +590,8 @@ if (vl := v("van-den-dam-herstart")) and (basis := v("van-den-dam")):
              abs(vl.kosten - basis.kosten) < 0.10 and abs(vl.geladen_kwh - basis.geladen_kwh) < 0.5,
              f"kosten {vl.kosten:.2f} tegen {basis.kosten:.2f}, {vl.geladen_kwh:.1f} tegen {basis.geladen_kwh:.1f} kWh")
     na_10_30 = regels_in(vl, "10:30", "10:34")
-    controle("herstart tijdens het laden op zon: binnen drie minuten weer op 6 A",
-             any(r.regel == "surplus" and r.amps == 6 for r in na_10_30 if r.tijd.date() == VDD_ZATERDAG),
+    controle("herstart tijdens het laden: binnen drie minuten weer aan het laden",
+             any(r.paal_w > 0 and r.amps >= 6 for r in na_10_30 if r.tijd.date() == VDD_ZATERDAG),
              f"{[(r.tijd.strftime('%H:%M'), r.regel, r.amps) for r in na_10_30]}")
     na_13_05 = regels_in(vl, "13:05", "13:08")
     controle("herstart net na de prijzen: meteen weer op de goedkope middag",
@@ -576,8 +612,8 @@ if (vl := v("van-den-dam-herstart")) and (basis := v("van-den-dam")):
 # het laatst wist.
 for naam, sensor, wat, van, tot in (
     ("van-den-dam-accustand-weg", "accustand van Ford", "cheap-hour", "13:30", "14:15"),
-    ("van-den-dam-status-weg", "status van Laadpaal", "surplus", "11:00", "11:20"),
-    ("van-den-dam-zonsensor-weg", "zonnesensor", "surplus", "10:00", "10:20"),
+    ("van-den-dam-status-weg", "status van Laadpaal", "cheap-hour", "11:00", "11:20"),
+    ("van-den-dam-zonsensor-weg", "zonnesensor", "cheap-hour", "10:03", "10:20"),
     ("van-den-dam-equalizer-weg", "lastbewaker", "cheap-hour", "14:00", "14:30"),
 ):
     if not (vl := v(naam)):
@@ -591,7 +627,8 @@ for naam, sensor, wat, van, tot in (
     controle(f"{kort}: en één als hij terug is", len(weer) == 1 and sensor in weer[0], f"{weer}")
     tijdens = [r for r in regels_in(vl, van, tot) if r.tijd.date() == VDD_ZATERDAG]
     controle(f"{kort}: ondertussen laadt hij gewoon door",
-             tijdens and all(r.paal_w > 0 for r in tijdens[3:]) and any(r.regel == wat for r in tijdens),
+             tijdens and all(r.paal_w > 0 for r in tijdens[3:])
+             and any(r.regel.split("+")[0] == wat for r in tijdens),
              f"{sorted({r.regel for r in tijdens})}, laagste {min((r.paal_w for r in tijdens), default=0):.0f} W")
     controle(f"{kort}: en is even goedkoop uit als zonder storing",
              (basis := v("van-den-dam")) is not None and abs(vl.kosten - basis.kosten) < 0.10,
