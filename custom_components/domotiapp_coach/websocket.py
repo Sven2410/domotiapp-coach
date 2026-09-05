@@ -768,6 +768,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_history_quarters)
     websocket_api.async_register_command(hass, async_coach_state)
     websocket_api.async_register_command(hass, async_notifications_list)
+    websocket_api.async_register_command(hass, async_savings_list)
     websocket_api.async_register_command(hass, async_coach_approve)
     websocket_api.async_register_command(hass, async_coach_boost)
     websocket_api.async_register_command(hass, async_coach_pause)
