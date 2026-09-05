@@ -10,7 +10,7 @@ Welke sensoren dat zijn komt uit het paneel en het entiteitenregister, op
 dezelfde manier als in live.py. Valt de verbinding weg, dan haakt hij opnieuw
 aan en zegt hoe lang hij weg was.
 """
-import datetime, sys, time, ws
+import datetime, re, sys, time, ws
 
 MERKSENSOREN = {
     "easee": ("session_energy", "voltage", "phase_mode", "cable_locked",
@@ -37,28 +37,22 @@ def schrijf(regel):
 def entiteiten(w):
     inst = w.vraag("domotiapp_coach/settings/get")
     uit = set()
-    apparaten = []
-    for apparaat in inst.get("devices") or []:
-        if apparaat.get("entity"):
-            uit.add(apparaat["entity"])
-        for v in (apparaat.get("entities") or {}).values():
-            if isinstance(v, str) and "." in v:
-                uit.add(v)
-        if apparaat.get("energy_entity"):
-            uit.add(apparaat["energy_entity"])
-        for auto in apparaat.get("cars") or []:
-            if auto.get("soc_entity"):
-                uit.add(auto["soc_entity"])
-        apparaten.append((apparaat.get("device_id"), apparaat.get("brand")))
-    bronnen = inst.get("sources") or {}
-    for k, v in bronnen.items():
-        if isinstance(v, str) and "." in v:
-            uit.add(v)
-    for fase in (bronnen.get("phases") or {}).values():
-        if isinstance(fase, dict):
-            for v in fase.values():
-                if isinstance(v, str) and "." in v:
-                    uit.add(v)
+
+    # Elke entiteit-id waar dan ook in de instellingen: bronnen, prijs,
+    # lastbewaker, zonverwachting, meters, auto's. Zo mist hij er geen als
+    # er een nieuw veld bij komt.
+    def loop(x):
+        if isinstance(x, dict):
+            for v in x.values():
+                loop(v)
+        elif isinstance(x, list):
+            for v in x:
+                loop(v)
+        elif isinstance(x, str) and re.match(r"^[a-z_]+\.[a-z0-9_]+$", x):
+            uit.add(x)
+
+    loop(inst)
+    apparaten = [(a.get("device_id"), a.get("brand")) for a in inst.get("devices") or []]
     # De rest van de paal uit het register, op translation_key.
     try:
         rijen = w.vraag("config/entity_registry/list")
