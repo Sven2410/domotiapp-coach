@@ -439,9 +439,10 @@ def vdd_basis(vl, naam):
              any(r.regel == "wait-for-prices" and "Zaterdag staat in je schema uit" in r.reden
                  and "zondag om 06:00" in r.reden for r in vrijdagnacht),
              f"{next((r.reden for r in vrijdagnacht if r.regel == 'wait-for-prices'), '')}")
-    # Een paar minuten nalopen na 17:00 hoort erbij: de coach houdt een
-    # lopende beurt drie ronden op de ondergrens vast (`STOP_ROUNDS`) en de
-    # auto volgt met een minuut vertraging. Dezelfde marge als hierboven.
+    # Een paar minuten nalopen na 17:00 hoort erbij: de auto volgt de limiet
+    # met een minuut vertraging. Sinds 05-09-2026 houdt de coach een lopende
+    # beurt in de avondpiek niet meer vast (`_keep_alive`), want met tien
+    # ronden `STOP_ROUNDS` was dat een kilowattuur uit de piek.
     controle(f"{naam}: niets van het net in de avondpiek",
              vl.net_kwh_tussen("17:03", "20:00") < 0.1,
              f"{vl.net_kwh_tussen('17:03', '20:00'):.2f} kWh tussen 17:03 en 20:00")
@@ -511,8 +512,11 @@ if (vl := v("van-den-dam-ford-wekken")):
 
 if (vl := v("van-den-dam-oven")):
     vdd_basis(vl, "oven")
+    # De oven gaat om 12:30 aan; de coach houdt de beurt eerst `STOP_ROUNDS`
+    # ronden op de ondergrens vast (tien sinds 05-09-2026, Svens "wekken doe
+    # maar per 10 min") en de auto volgt met een minuut. Daarna niets meer.
     controle("oven: tijdens de oven op zaterdagochtend geen net zonder zon",
-             vl.net_kwh_tussen("12:34", "13:00") < 0.05, f"{vl.net_kwh_tussen('12:34', '13:00'):.2f} kWh")
+             vl.net_kwh_tussen("12:42", "13:00") < 0.05, f"{vl.net_kwh_tussen('12:42', '13:00'):.2f} kWh")
     controle("oven: de Equalizer wordt gemeld, niet bevochten",
              meldingen(vl, "lastbewaker") and len(vl.opdrachten) <= 60, f"{len(vl.opdrachten)} opdrachten")
 

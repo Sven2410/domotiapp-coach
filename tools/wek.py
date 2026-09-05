@@ -42,8 +42,10 @@ def besluiten():
 
 def meldingen():
     try:
+        # Sinds v0.48.1 staan de besluiten ook in de geschiedenis; die komen
+        # al via besluiten.log en tellen hier niet mee.
         return [r.rstrip() for r in open(MELDINGEN, encoding="utf-8", errors="replace")
-                if "  MELDING  " in r]
+                if "  MELDING  " in r and '"kind": "besluit"' not in r]
     except FileNotFoundError:
         return []
 

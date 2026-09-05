@@ -110,8 +110,8 @@ print(f"  {d.rule}: laden={d.charge} {d.amps} A  {d.reason}")
 controle("geen vol vermogen meer", d.amps <= 6, f"kreeg {d.rule} met {d.amps} A")
 
 d2 = decide(nu, [], NET_LEEG, sven_auto(), paal(), venster(nu), tariff=VAST,
-            sun=ZON_KRAP, forecast=MIDDAGZON, holding=3)
-print(f"  na drie ronden hysterese: {d2.rule} laden={d2.charge}")
+            sun=ZON_KRAP, forecast=MIDDAGZON, holding=planner.STOP_ROUNDS)
+print(f"  na de hysterese (STOP_ROUNDS ronden): {d2.rule} laden={d2.charge}")
 controle("stopt na de hysterese", not d2.charge, f"kreeg {d2.rule}")
 controle("en zegt wanneer hij dan wel begint", "15:00" in d2.plan or "15:00" in d2.reason,
          f"{d2.reason} / {d2.plan}")
@@ -121,7 +121,7 @@ print("=== 2. zonder zon op komst geldt de avondregel ===")
 # op prijs niets te kiezen. Dan blijft Svens afspraak van 20-08-2026 over: wacht
 # tot acht uur, want dan zijn de pieken van koken voorbij.
 d = decide(nu, [], NET_LEEG, sven_auto(), paal(), venster(nu), tariff=VAST,
-           sun=ZON_KRAP, forecast=Forecast(), holding=3)
+           sun=ZON_KRAP, forecast=Forecast(), holding=planner.STOP_ROUNDS)
 print(f"  {d.rule}: laden={d.charge} {d.amps} A  {d.reason}")
 controle("hij wacht tot de avond", not d.charge, f"kreeg {d.rule} met {d.amps} A")
 controle("en zegt waarom", "20:00" in d.reason and "koken" in d.reason, d.reason)
@@ -239,7 +239,7 @@ print("=== 13. valt de coach weg, dan loopt de pauze af op het laatste startmome
 # paal vanaf dat moment gewoon zelf door. Duurder, maar wel vol.
 nu = middag(14, 37)
 d = decide(nu, [], NET_LEEG, sven_auto(), paal(laadt=False), venster(nu),
-           tariff=VAST, sun=ZON_RUIM, forecast=MIDDAGZON, holding=3)
+           tariff=VAST, sun=ZON_RUIM, forecast=MIDDAGZON, holding=planner.STOP_ROUNDS)
 uren = d.hold_minutes / 60
 print(f"  {d.rule}: pauze {d.hold_minutes} minuten ({uren:.2f} uur), begint {d.plan}")
 controle("hij wacht op de zon van straks", not d.charge, f"{d.rule}")
@@ -544,7 +544,7 @@ print("=== 27. maar een klaar-tijd overdag heeft geen avond ===")
 MIDDAG_ZON = kromme(dt.datetime(2026, 8, 20), 15, [2.0, 2.0, 1.5, 1.0])
 d = decide(dt.datetime(2026, 8, 20, 14, 0), [], DONKER, sven_auto(soc=80.0), STIL,
            Window(enabled=True, opens=None, deadline=dt.datetime(2026, 8, 20, 19, 0)),
-           tariff=VAST, sun=ZON_RUIM, forecast=MIDDAG_ZON, holding=3)
+           tariff=VAST, sun=ZON_RUIM, forecast=MIDDAG_ZON, holding=planner.STOP_ROUNDS)
 print(f"  klaar om 19:00, nu 14:00  {d.rule}: {d.plan}")
 controle("overdag wacht hij op de zon", not d.charge and d.rule == "wait-for-sun", d.rule)
 controle("en de avondregel bemoeit zich er niet mee", "20:00" not in d.plan, d.plan)
@@ -616,7 +616,7 @@ def ochtend_besluit(net=HALVE_ZON, zon=DAG_KOMT, soc=30.0, tarief=VAST,
 DAG_KROMME = kromme(OCHTEND, 10, [1.5, 2.2, 2.8, 3.0, 2.8, 2.2, 1.8, 1.2, 0.5], huis=0.3)
 DAG_LEEG = kromme(OCHTEND, 10, [0.2, 0.2, 0.2, 0.2], huis=0.3)
 
-d = ochtend_besluit(voorspeld=DAG_KROMME, holding=3)
+d = ochtend_besluit(voorspeld=DAG_KROMME, holding=planner.STOP_ROUNDS)
 print(f"  09:00 met 0,9 kW over en een zonnige dag  {d.rule}: {d.reason}")
 controle("hij wacht op de zon van vandaag",
          not d.charge and d.rule == "wait-for-sun", f"{d.rule} {d.amps} A")

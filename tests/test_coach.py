@@ -1570,6 +1570,11 @@ controle("te weinig metingen laat de meting staan", kaal == 27.0, f"{kaal}")
 # tegenkomen.
 inst34d = instellingen()
 inst34d["strategy"]["schedules"][0]["window"]["done_by"] = "07:00"
+# Met een accustand, want zonder is het `no-soc`, en die regel wordt sinds
+# 05-09-2026 niet meer vastgehouden (nooit blind laden). De proef gaat over
+# de gladgestreken fase en niet over het vasthouden.
+inst34d["car_soc"] = [{"device": "dev-laadpaal", "car": "car-1", "percent": 40.0,
+                       "at": coachmod._moment().isoformat()}]
 huis34d = huis(status="ready_to_charge", teruglevering=0.0, afname=1800.0)
 hass34d, _, coach34d = bouw(huis34d, inst34d)
 asyncio.run(ronde(coach34d, inst34d, nu=coachmod._moment()))

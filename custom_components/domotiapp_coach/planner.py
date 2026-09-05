@@ -104,17 +104,23 @@ WAKE_AMPS = 10
 WAITING_SECONDS = 60
 
 # Hoeveel ronden achtereen de ladder "stoppen" moet zeggen voordat er echt
-# gestopt wordt. Een wolk duurt een minuut of twee, en daarvoor hoort een sessie
+# gestopt wordt. Een wolk duurt een paar minuten, en daarvoor hoort een sessie
 # niet af te breken.
 #
 # Dit staat los van de minimale looptijd hierboven en dat is geen dubbelop. De
 # minimale looptijd beschermt alleen het bégin van een sessie; daarna kon één
 # meting een sessie afbreken die al een uur liep. Samen begrenzen ze ook meteen
-# hoe vaak er geschakeld kan worden: tien minuten draaien plus drie minuten
-# uitstel plus een ronde maakt veertien minuten per cyclus, dus hooguit vier per
-# uur. Een aparte teller daarvoor zou een mechanisme zijn dat zijn werk al gedaan
-# ziet.
-STOP_ROUNDS = 3
+# hoe vaak er geschakeld kan worden: tien minuten draaien plus tien minuten
+# uitstel plus een ronde maakt eenentwintig minuten per cyclus, dus hooguit
+# drie per uur. Een aparte teller daarvoor zou een mechanisme zijn dat zijn werk
+# al gedaan ziet.
+#
+# Tien, en niet drie. Sven op 05-09-2026, na een ochtend wisselend weer bij
+# Van den Dam waarin de Ford om 10:10 en om 10:37 stopte en telkens opnieuw
+# gewekt moest worden: "wekken doe maar per 10 min." Elke minuut vasthouden
+# kost hooguit de ondergrens van de paal van het net; elke wekpoging is een
+# auto die op een dag ophoudt met luisteren.
+STOP_ROUNDS = 10
 
 # De grenzen van een pauze die met een houdbaarheidsduur wordt weggeschreven.
 # Korter dan een kwartier is niet de moeite en zou kunnen verlopen tussen twee
@@ -2551,7 +2557,13 @@ def _beter_straks(
 # De uitkomsten waarbij een lopende sessie wél meteen mag stoppen. Drie ervan
 # omdat er niets te beschermen valt, en één omdat wachten daar gevaarlijk is:
 # een aansluiting die vol zit, zit vol.
-NEVER_HOLD = frozenset({"disconnected", "complete", "user-hold", "no-room", "tight"})
+# Regels waar een lopende beurt niet tegenin wordt vastgehouden. De laatste
+# twee zijn Svens zesde eis, nooit blind laden: valt de prijssensor of de
+# accustand weg, dan is elke minuut doorladen een minuut zonder te weten wat
+# het kost of of het nog past. Met tien ronden uitstel was dat te veel.
+NEVER_HOLD = frozenset(
+    {"disconnected", "complete", "user-hold", "no-room", "tight", "no-prices", "no-soc"}
+)
 
 
 def _zon_verwacht(sun: Sun, car: Car) -> bool:
@@ -2616,6 +2628,13 @@ def _keep_alive(
 
     ceiling = ceiling_amps(grid, car, charger)
     if ceiling < MIN_AMPS:
+        return decision
+
+    # In de avondpiek komt er niets van het net bij, ook niet om een sessie
+    # in leven te houden: met tien minuten uitstel zou dat elke avond om 17:00
+    # een kilowattuur uit de piek zijn. Draagt de zon de ondergrens, dan mag
+    # het wel, want die belast de aansluiting niet.
+    if in_evening_peak(now) and amps_for(grid.surplus_w, car.phases) < MIN_AMPS:
         return decision
 
     amps = max(MIN_AMPS, min(ceiling, int(amps_for(grid.surplus_w, car.phases))))
