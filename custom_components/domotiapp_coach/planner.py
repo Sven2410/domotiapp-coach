@@ -1047,6 +1047,20 @@ def schijven(
         avond = _evening_before(end)
         if avond is not None and avond > vanaf:
             netto_vanaf = avond
+
+    # Reiken de prijzen niet tot de klaar-tijd (`alleen_zon`), dan komt er
+    # van het net alleen iets bij in een uur dat goedkoper is dan het
+    # gemiddelde van alle uren die wél bekend zijn. Een bekend uur van vandaag
+    # is geen gok over morgen; de onbekende uren zijn bij een klaar-tijd in de
+    # vroege ochtend nachturen, en die zijn zelden goedkoper dan een goedkoop
+    # daguur. Sven op 05-09-2026, nadat de coach bij Van den Dam van 08:00
+    # (0,184) tot 13:24 op de prijzen van zondag wachtte en de laatste 11 kWh
+    # daardoor 's nachts tegen 0,304 moest halen: "nu hebben we dus niks
+    # bespaard", en de regel mocht eraan. Een uur boven het gemiddelde wacht
+    # nog steeds op de prijzen van morgen.
+    gemiddeld_bekend = (
+        sum(rij["price"] for rij in prices) / len(prices) if prices else None
+    )
     uit: list[Schijf] = []
     for rij in blokken:
         if rij["end"] <= vanaf or (end is not None and rij["start"] >= end):
@@ -1123,7 +1137,10 @@ def schijven(
             plafond_kwh - gedekt > SCHIJF_MINIMUM
             and rij["end"] > netto_vanaf
             and not in_evening_peak(rij["start"])
-            and not alleen_zon
+            and (
+                not alleen_zon
+                or (gemiddeld_bekend is not None and rij["price"] < gemiddeld_bekend)
+            )
         ):
             uit.append(
                 Schijf(rij["start"], rij["end"], rij["price"], plafond_kwh - gedekt)
@@ -1199,6 +1216,59 @@ def goedkoopste(alle: list[Schijf], nodig_kwh: float) -> list[tuple[Schijf, floa
         rest -= pak
         uit.append((schijf, pak))
     return sorted(uit, key=lambda paar: paar[0].start)
+
+
+def _restje_naar_achteren(
+    genomen: dict[datetime, float], alle: list[Schijf]
+) -> dict[datetime, float]:
+    """Wat er werkelijk gebeurt met een restje vóór een vol uur.
+
+    De knapzak vult van goedkoop naar duur, en het duurste uur dat hij nog
+    aanraakt is vaak maar voor een deel nodig: 0,2 kWh om 03:00 naast een vol
+    uur om 04:00. De coach begint dat uur toch op vol vermogen, en stopt daarna
+    niet meer: stoppen zou te weinig speling overlaten voor de klaar-tijd
+    (`cheap-hour+reserve`), en Sven op 04-09-2026: "een uur daarvoor moet hij
+    altijd klaar zijn." Het restje schuift dus naar het eind van de reeks: het
+    uur van 03:00 gaat vol, en van 04:00 blijft een paar minuten over. Zo
+    zegt de tijdlijn wat de coach gaat doen, en niet een gemiddelde van 0 A.
+    Sven op 05-09-2026: "waarom staat er bij 3 uur geen A maar is wel groen",
+    en later "nu staat er ineens 2 A, dat is helemaal niet de bedoeling".
+
+    Alleen voor uren zonder zon: overdag is het tempo van de zon en niet van
+    de paal.
+    """
+    uit = dict(genomen)
+    ruimte = {}
+    for schijf in alle:
+        ruimte[schijf.start] = ruimte.get(schijf.start, 0.0) + schijf.kwh
+    zon_uren = {schijf.start for schijf in alle if schijf.solar}
+    uur = timedelta(hours=1)
+
+    for start in sorted(uit):
+        if start in zon_uren or uit[start] <= SCHIJF_MINIMUM:
+            continue
+        vol = ruimte.get(start, 0.0)
+        tekort = vol - uit[start]
+        volgende = start + uur
+        volgende_vol = (
+            uit.get(volgende, 0.0) > SCHIJF_MINIMUM
+            and uit[volgende] >= ruimte.get(volgende, 0.0) - SCHIJF_MINIMUM
+        )
+        if tekort <= SCHIJF_MINIMUM or not volgende_vol:
+            continue
+        # Dit uur gaat vol; het verschil komt van het eind van de reeks af.
+        uit[start] = vol
+        laatste = volgende
+        while uit.get(laatste + uur, 0.0) > SCHIJF_MINIMUM and (laatste + uur) not in zon_uren:
+            laatste += uur
+        while tekort > SCHIJF_MINIMUM and laatste > start:
+            weg = min(tekort, uit.get(laatste, 0.0))
+            uit[laatste] = uit.get(laatste, 0.0) - weg
+            tekort -= weg
+            if uit[laatste] <= SCHIJF_MINIMUM:
+                uit.pop(laatste, None)
+                laatste -= uur
+    return uit
 
 
 def _uren_van(gekozen: list[tuple[Schijf, float]]) -> list[dict]:
@@ -1358,8 +1428,9 @@ def timeline(
     if alleen_zon and klaar is not None:
         plan.note = (
             _prijzen_onbekend(window, klaar, now)
-            + f". Tot die binnenkomen, meestal {_dagnaam(klaar - timedelta(days=1), now)} rond "
-            "13:00, laadt hij alleen op je eigen zon; daarna plant hij de rest."
+            + f". Tot die binnenkomen, meestal {_dagnaam(klaar - timedelta(days=1), now)} tussen "
+            "13:00 en 15:00, laadt hij alleen op je eigen zon en op uren die goedkoper "
+            "zijn dan het gemiddelde van wat hij al kent; daarna plant hij de rest."
         )
     if not alle and alleen_zon:
         return plan
@@ -1380,6 +1451,11 @@ def timeline(
     genomen: dict[datetime, float] = {}
     for schijf, hoeveel in gekozen:
         genomen[schijf.start] = genomen.get(schijf.start, 0.0) + hoeveel
+    genomen = _restje_naar_achteren(genomen, alle)
+    ruimte_per_uur: dict[datetime, float] = {}
+    for schijf in alle:
+        ruimte_per_uur[schijf.start] = ruimte_per_uur.get(schijf.start, 0.0) + schijf.kwh
+    klaar_om: datetime | None = None
 
     # Eén regel per uur, want dat is hoe je het leest. Over de blokken en niet
     # over de schijven, want een uur waar helemaal geen schijf van bestaat is
@@ -1422,6 +1498,24 @@ def timeline(
         duur = max(0.0, (tot - van).total_seconds() / 3600.0)
         kwh_blok = genomen.get(start, 0.0)
         kw = kwh_blok / duur if duur > 0 else 0.0
+        blok_amps = int(round(amps_for(kw * 1000.0, car.phases))) if laadt else 0
+        # Het staartje van een reeks neturen (zie `_restje_naar_achteren`): de
+        # paal laadt dan niet het hele uur zachtjes, wat hij onder de
+        # ondergrens niet eens kan, maar op vol vermogen tot hij vol is. Dus
+        # de stroom die hij dan vraagt, en wanneer hij klaar is.
+        vorige = genomen.get(start - timedelta(hours=1), 0.0)
+        if (
+            laadt and zonschijf is None and netschijf is not None
+            and kwh_blok < ruimte_per_uur.get(start, 0.0) - SCHIJF_MINIMUM
+            and vorige >= ruimte_per_uur.get(start - timedelta(hours=1), 0.0) - SCHIJF_MINIMUM
+            and vorige > SCHIJF_MINIMUM
+        ):
+            blok_ceiling = amps if start <= now < rij["end"] else structureel
+            blok_amps = blok_ceiling
+            kw = watts_for(blok_ceiling, car.phases) / 1000.0
+            klaar_om = van + timedelta(hours=kwh_blok / kw) if kw > 0 else rij["end"]
+            klaar_om = klaar_om.replace(second=0, microsecond=0)
+            waarom = f"nog {_kwh(kwh_blok)}, vol rond {_clock(klaar_om)}"
         plan.blocks.append(
             Blok(
                 start=start,
@@ -1431,13 +1525,15 @@ def timeline(
                 why=waarom,
                 solar_kwh=zonschijf.zon_kwh if zonschijf is not None else 0.0,
                 kwh=kwh_blok,
-                amps=int(round(amps_for(kw * 1000.0, car.phases))) if laadt else 0,
+                amps=blok_amps,
                 kw=round(kw, 2) if laadt else 0.0,
             )
         )
 
     geladen = [blok for blok in plan.blocks if blok.charging]
     plan.expected_done = geladen[-1].end if geladen else None
+    if klaar_om is not None and geladen and geladen[-1].start <= klaar_om <= geladen[-1].end:
+        plan.expected_done = klaar_om
     plan.planned_kwh = sum(genomen.values())
     if not plan.blocks:
         plan.note = "Er is niets te plannen voor deze periode."
@@ -1492,11 +1588,13 @@ def _wanneer(moment: datetime, now: datetime) -> str:
 def _prijzen_komen(end: datetime | None, now: datetime) -> str:
     """Wanneer de prijzen tot de klaar-tijd er zijn: de middag ervoor."""
     if end is None:
-        return "Plant de rest zodra de prijzen er zijn, meestal rond 13:00."
+        return "Plant de rest zodra de prijzen er zijn, meestal tussen 13:00 en 15:00."
     # De prijzen van een dag komen de middag ervoor. Een klaar-tijd van
-    # zondag 06:00 valt in de dag die zaterdag 13:00 bekend wordt.
+    # zondag 06:00 valt in de dag die zaterdag rond 13:00 bekend wordt; bij
+    # Van den Dam kwamen ze op 05-09-2026 om 13:24, en Sven: "op internet
+    # staat dat de energieprijzen tussen 13 en 15 bekend kunnen worden."
     dag = _dagnaam(end - timedelta(days=1), now)
-    return f"Plant de rest zodra de prijzen er zijn, meestal {dag} rond 13:00."
+    return f"Plant de rest zodra de prijzen er zijn, meestal {dag} tussen 13:00 en 15:00."
 
 
 def _prijzen_onbekend(window: Window, end: datetime, now: datetime) -> str:
@@ -2174,8 +2272,9 @@ def _decide(
             False,
             0,
             _prijzen_onbekend(window, end, now)
-            + ", dus tot die binnenkomen laadt hij alleen op je eigen zon, en die "
-            "is er nu niet.",
+            + ", dus tot die binnenkomen laadt hij alleen op je eigen zon en op uren "
+            "die goedkoper zijn dan het gemiddelde van wat hij al kent, en die zijn "
+            "er nu niet.",
             plan=_prijzen_komen(end, now),
             rule="wait-for-prices",
             hold_minutes=_hold_until_start(now, end, needed),
@@ -2413,10 +2512,17 @@ def _decide(
     begint = uren[0]["start"] if uren else None
     eerste = gekozen[0][0] if gekozen else None
     if alleen_zon:
+        if begint is None:
+            straks = ""
+        elif eerste is not None and eerste.solar:
+            straks = f" De volgende zon verwacht hij om {_clock(begint)}."
+        else:
+            straks = f" Het eerstvolgende goedkope uur is {_clock(begint)}."
         reden = (
             _prijzen_onbekend(window, end, now)
-            + ", dus tot die binnenkomen laadt hij alleen op je eigen zon."
-            + (f" De volgende zon verwacht hij om {_clock(begint)}." if begint else "")
+            + ", dus tot die binnenkomen laadt hij alleen op je eigen zon en op uren "
+            "die goedkoper zijn dan het gemiddelde van wat hij al kent."
+            + straks
         )
         regel = "wait-for-prices"
     elif begint is None:

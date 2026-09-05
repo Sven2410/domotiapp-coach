@@ -1140,7 +1140,10 @@ controle("en is dan niet alleen zon", not plan36.solar_only)
 # De prijzen lopen tot zondagavond, de klaar-tijd is maandag 07:00. Met een
 # terugleverprijs erbij, want zonder die valt er niets te mengen en bestaat er
 # geen zonschijf.
-prijzen36f = [dict(rij, feed_in=0.02) for rij in prijzen36]
+# Alle bekende uren even duur, want sinds 05-09-2026 mag een bekend uur dat
+# goedkoper is dan het gemiddelde wél meedoen (zie proef 46); hier gaat het
+# om de vloer-uren, en die bestaan alleen als er geen goedkoop netuur is.
+prijzen36f = [dict(rij, price=0.25, feed_in=0.02) for rij in prijzen36]
 for uur in range(7, 24):
     start = dt.datetime(2026, 8, 30, uur, 0)
     prijzen36f.append({"start": start, "end": start + dt.timedelta(hours=1),
@@ -1673,7 +1676,7 @@ d45b = decide(vrijdag, prijzen45, NET_LEEG, Car(capacity_kwh=65.0, phases=3, soc
 print(f"  zonder zon: {d45b.rule}: {d45b.reason} | {d45b.plan}")
 controle("zonder zon wacht hij ook", d45b.rule == "wait-for-prices", d45b.rule)
 controle("en zegt wanneer die prijzen komen: de middag ervoor",
-         "meestal morgen rond 13:00" in d45b.plan, d45b.plan)
+         "meestal morgen tussen 13:00 en 15:00" in d45b.plan, d45b.plan)
 # Zonder uitgezette dag staat de klaar-tijd gewoon met zijn dag in de zin.
 d45c = decide(vrijdag, prijzen45, NET_LEEG, Car(capacity_kwh=65.0, phases=3, soc_percent=8.5),
               paal(laadt=False, amps=0.0), Window(enabled=True, deadline=venster45.deadline))
@@ -1687,8 +1690,95 @@ plan45 = planner.timeline(vrijdag, prijzen45, NET_LEEG,
 print(f"  tijdlijn: {plan45.note}")
 controle("de tijdlijn zegt hetzelfde",
          plan45.note.startswith("Zaterdag staat in je schema uit")
-         and "zondag om 06:00" in plan45.note and "morgen rond 13:00" in plan45.note,
+         and "zondag om 06:00" in plan45.note and "morgen tussen 13:00 en 15:00" in plan45.note,
          plan45.note)
+
+print("=== 46. een bekend uur onder het gemiddelde mag, ook zonder de prijzen van morgen ===")
+# Sven op 05-09-2026, na een ochtend waarin de coach bij Van den Dam van 08:00
+# (0,184) tot 13:24 op de prijzen van zondag wachtte en de laatste 11 kWh
+# daardoor 's nachts tegen 0,304 moest halen: "nu hebben we dus niks bespaard."
+# Een bekend uur van vandaag is geen gok: ligt het onder het gemiddelde van
+# wat hij kent, dan mag het mee. Erboven wacht hij nog steeds.
+prijzen46 = [dict(rij) for rij in prijzen45]
+for rij in prijzen46:
+    if rij["start"] == dt.datetime(2026, 9, 5, 8, 0):
+        rij["price"] = 0.18
+PAAL46 = Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.05)
+FORD46 = Car(capacity_kwh=65.0, phases=3, soc_percent=8.5)
+d46 = decide(dt.datetime(2026, 9, 5, 8, 30), prijzen46, NET_LEEG, FORD46, PAAL46, venster45)
+print(f"  za 08:30 op 0,18: {d46.rule} {d46.amps} A  {d46.reason}")
+controle("een bekend uur onder het gemiddelde laadt, op vol vermogen",
+         d46.rule == "cheap-hour" and d46.amps == 16, f"{d46.rule} {d46.amps}")
+d46b = decide(dt.datetime(2026, 9, 4, 22, 30), prijzen46, NET_LEEG, FORD46, PAAL46, venster45)
+print(f"  vr 22:30 op 0,25: {d46b.rule}  {d46b.reason}")
+controle("een uur op of boven het gemiddelde wacht op de prijzen",
+         d46b.rule == "wait-for-prices" and not d46b.charge, d46b.rule)
+controle("en zegt dat goedkope bekende uren wel meedoen, en welk dat is",
+         "goedkoper zijn dan het gemiddelde" in d46b.reason and "08:00" in d46b.reason,
+         d46b.reason)
+plan46 = planner.timeline(dt.datetime(2026, 9, 4, 22, 30), prijzen46, NET_LEEG, FORD46,
+                          PAAL46, venster45, 16)
+acht = next((b for b in plan46.blocks if b.start == dt.datetime(2026, 9, 5, 8, 0)), None)
+controle("de tijdlijn plant dat uur op vol vermogen",
+         acht is not None and acht.charging and acht.amps == 16, f"{acht}")
+controle("en de andere bekende uren niet",
+         [b.start.hour for b in plan46.blocks if b.charging] == [8],
+         f"{[b.start.hour for b in plan46.blocks if b.charging]}")
+controle("en het plan heet nog steeds alleen-zon, want de rest komt met de prijzen",
+         plan46.solar_only, f"{plan46.solar_only}")
+
+print("=== 47. een restje vóór een vol uur: het uur gaat vol, het staartje zegt wanneer hij klaar is ===")
+# Sven op 05-09-2026 over de tijdlijn van zaterdag: "waarom staat er bij 3 uur
+# geen A maar is wel groen", en later "nu staat er ineens 2 A, dat is helemaal
+# niet de bedoeling, hij mag niet onder de 6 A." De knapzak had 0,5 kWh in het
+# uur van 03:00 gelegd naast een vol uur om 04:00, en de kaart deelde dat door
+# een uur. Wat de coach werkelijk doet: om 03:00 op vol vermogen beginnen en
+# doorladen, want stoppen laat te weinig speling over (cheap-hour+reserve, en
+# Sven op 04-09-2026: "een uur daarvoor moet hij altijd klaar zijn"). Dus vol
+# rond 04:03, en dat hoort de kaart te zeggen.
+prijzen47 = []
+for stap, prijs in enumerate([0.38, 0.38, 0.38, 0.38, 0.34, 0.34, 0.34, 0.328, 0.304, 0.3039]):
+    start = dt.datetime(2026, 9, 5, 20, 0) + dt.timedelta(hours=stap)
+    prijzen47.append({"start": start, "end": start + dt.timedelta(hours=1),
+                      "price": prijs, "feed_in": 0.02})
+venster47 = Window(enabled=True, deadline=dt.datetime(2026, 9, 6, 6, 0))
+# Zo'n 11,5 kWh nodig (de som rekent verliezen mee): een vol uur en een restje
+# van een halve kWh.
+FORD47 = Car(capacity_kwh=65.0, phases=3, soc_percent=84.08)
+nodig47 = planner.energy_needed_kwh(FORD47)
+print(f"  nodig: {nodig47:.2f} kWh")
+d47 = decide(dt.datetime(2026, 9, 6, 3, 0, 30), prijzen47, NET_LEEG, FORD47, PAAL46, venster47)
+print(f"  zo 03:00: {d47.rule} {d47.amps} A")
+controle("om 03:00 begint hij op vol vermogen", d47.charge and d47.amps == 16 and d47.rule == "cheap-hour",
+         f"{d47.rule} {d47.amps}")
+PAAL47 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=15.8,
+                 started_at=dt.datetime(2026, 9, 6, 3, 0), limit_amps=16.0)
+FORD47B = Car(capacity_kwh=65.0, phases=3, soc_percent=85.0)
+d47b = decide(dt.datetime(2026, 9, 6, 3, 6), prijzen47, NET_LEEG, FORD47B, PAAL47, venster47)
+print(f"  zo 03:06, het restje is binnen: {d47b.rule} {d47b.amps} A  {d47b.reason}")
+controle("en stopt daarna niet voor het uur speling",
+         d47b.charge and d47b.amps == 16 and d47b.rule.startswith("cheap-hour"), f"{d47b.rule}")
+plan47 = planner.timeline(dt.datetime(2026, 9, 6, 2, 30), prijzen47, NET_LEEG, FORD47,
+                          PAAL46, venster47, 16)
+for b in plan47.blocks:
+    if b.charging:
+        print(f"    {b.start:%H:%M}  {b.amps} A  {b.kw:.1f} kW  {b.kwh:.2f} kWh  {b.why}")
+drie = next((b for b in plan47.blocks if b.start.hour == 3), None)
+vier = next((b for b in plan47.blocks if b.start.hour == 4), None)
+controle("het blok van 03:00 gaat vol, op vol vermogen",
+         drie is not None and drie.charging and drie.amps == 16 and abs(drie.kwh - 11.04) < 0.05,
+         f"{drie}")
+controle("het blok van 04:00 is het staartje en zegt wanneer hij vol is",
+         vier is not None and vier.charging and vier.amps == 16 and vier.why.startswith("nog 0,5 kWh, vol rond 04:0"),
+         f"{vier}")
+controle("en het plan verwacht hem dan ook op dat moment vol",
+         plan47.expected_done is not None and plan47.expected_done.hour == 4 and plan47.expected_done.minute < 5,
+         f"{plan47.expected_done}")
+controle("geen enkel laadblok staat onder de ondergrens",
+         all(b.amps >= MIN_AMPS for b in plan47.blocks if b.charging),
+         f"{[(b.start.hour, b.amps) for b in plan47.blocks if b.charging]}")
+controle("en het plan dekt nog steeds precies wat er in moet",
+         abs(plan47.planned_kwh - nodig47) < 0.1, f"{plan47.planned_kwh} van {nodig47}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
