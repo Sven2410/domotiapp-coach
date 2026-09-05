@@ -189,6 +189,7 @@ def main():
     log.write(f"\n=== start {datetime.datetime.now():%d-%m %H:%M:%S} ===\n")
     vorig_regel = None
     vorig_kern = None
+    fouten = 0
     while time.time() < einde:
         try:
             st = ha.states()
@@ -217,7 +218,24 @@ def main():
                 print(f"[{' | '.join(wat)}] {r}", flush=True)
             vorig_kern = kern
         except Exception as e:
-            log.write(f"{datetime.datetime.now():%H:%M:%S} FOUT {e}\n")
+            # Een foutregel per storing, en na een halve minuut opnieuw
+            # kiezen tussen de adressen: thuis kan weggevallen zijn terwijl
+            # Nabu Casa het nog doet, of andersom.
+            fouten += 1
+            if fouten == 1:
+                log.write(f"{datetime.datetime.now():%H:%M:%S} FOUT {e}\n")
+                print(f"[verbinding weg: {e}]", flush=True)
+            elif fouten % 6 == 0:
+                try:
+                    ha.verbind()
+                except Exception as e2:  # noqa: BLE001
+                    log.write(f"{datetime.datetime.now():%H:%M:%S} FOUT nog steeds: {e2}\n")
+            time.sleep(5)
+            continue
+        if fouten:
+            log.write(f"{datetime.datetime.now():%H:%M:%S} verbinding terug na {fouten * 5} s\n")
+            print(f"[verbinding terug na {fouten * 5} s]", flush=True)
+            fouten = 0
         time.sleep(5)
     print("[einde meting]", flush=True)
 
