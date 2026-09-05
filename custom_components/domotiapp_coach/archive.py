@@ -93,6 +93,14 @@ CATCHUP = timedelta(days=14)
 # zijn dan toch opgeruimd.
 CATCHUP_GIVE_UP = timedelta(hours=24)
 
+# Hoe ver terug er na een herstart naar gaten gezocht wordt, vanaf hoeveel
+# seconden een kwartier als vol geldt, en hoe lang er na de start nog elke
+# ronde naar gaten gekeken wordt (de recorder maakt zijn blokjes per vijf
+# minuten, dus het laatste uur is pas na een tijdje compleet).
+GATEN_VENSTER = timedelta(hours=24)
+GAT = 840.0
+GATEN_NA_START = timedelta(hours=2)
+
 _TABEL = """
 CREATE TABLE IF NOT EXISTS kwartieren (
     entity_id TEXT NOT NULL,
@@ -234,6 +242,10 @@ class Archive:
         self._inhalen: set[str] = set()
         self._inhalen_sinds: datetime | None = None
         self._inhalen_gemeld = False
+        # Wanneer deze start was, voor het aanvullen van gaten rond een
+        # herstart. Zie `_async_gaten_vullen`.
+        self._gestart: datetime | None = None
+        self._gaten_gemeld = False
 
     # --- opzetten en afbreken ---------------------------------------------
 
@@ -254,6 +266,19 @@ class Archive:
         self._uit.append(
             async_track_time_interval(self.hass, self._async_wegschrijven, FLUSH)
         )
+        # Gaat Home Assistant uit, dan eerst alles naar schijf, ook het
+        # lopende kwartier. Anders raakt tot een half uur kwijt, plus het
+        # kwartier waar we in zaten. Bij Van den Dam kostte dat op 05-09-2026
+        # bij vijf herstarten samen zes van de vijftig kilowattuur van een
+        # laadbeurt: kwartier 10:30 ontbrak, 13:45 had 44 seconden.
+        self._uit.append(
+            self.hass.bus.async_listen_once("homeassistant_stop", self._async_afsluiten)
+        )
+        self._gestart = dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
+
+    async def _async_afsluiten(self, _event: Event | None = None) -> None:
+        """Home Assistant gaat uit: alles wat in het geheugen staat naar schijf."""
+        await self._async_wegschrijven(None, alles=True)
 
     def async_stop(self) -> None:
         """Alles loslaten. Wat nog in het geheugen staat gaat verloren."""
@@ -265,9 +290,9 @@ class Archive:
 
     async def _async_opgestart(self, _hass: HomeAssistant | None = None) -> None:
         """Home Assistant is helemaal op; nu pas kan de recorder bevraagd worden."""
-        await self._async_inhalen(
-            dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
-        )
+        nu = dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
+        await self._async_inhalen(nu)
+        await self._async_gaten_vullen(nu)
 
     async def _async_instellingen(self, _event: Event | None = None) -> None:
         """De instellingen zijn gewijzigd, dus mogelijk ook wat er gevolgd wordt."""
@@ -396,6 +421,99 @@ class Archive:
             )
         self._inhalen.difference_update(alleen_lege)
 
+    # --- gaten rond een herstart --------------------------------------------
+
+    async def _async_gaten_vullen(self, nu: datetime) -> None:
+        """Kwartieren die ontbreken of half zijn alsnog uit de recorder halen.
+
+        Bij een herstart van Home Assistant raakte tot een half uur aan
+        kwartieren kwijt (zie `_async_afsluiten`), en wat er vóór deze versie
+        al kwijt was komt zo alsnog terug. De recorder heeft van dezelfde
+        sensoren vijfminutenblokken; die zijn grover dan de eigen meting maar
+        wel echt gemeten, en drie ervan zijn een heel kwartier. Alleen
+        kwartieren die er niet zijn of korter dan `GAT` gedekt zijn worden
+        vervangen, en alleen door een regel die méér seconden dekt.
+        """
+        ids = sorted(self._meters)
+        if not ids:
+            return
+        # De laatste twee kwartieren niet: daar is de recorder zelf nog niet
+        # klaar mee, en daar loopt de eigen meting nog.
+        tot = bucket_start(nu) - BUCKET
+        van = nu - GATEN_VENSTER
+        try:
+            bestaand = await self.hass.async_add_executor_job(
+                self._lees_seconden, ids, van, tot
+            )
+        except sqlite3.Error as fout:
+            _LOGGER.warning("de geschiedenis kon niet worden gelezen: %s", fout)
+            return
+        kandidaten = self.gaten(ids, bestaand, van, tot)
+        if not kandidaten:
+            return
+        vroegste = datetime.fromtimestamp(min(start for _, start in kandidaten))
+        try:
+            rijen = await self._async_uit_recorder_tussen(ids, vroegste, tot + BUCKET)
+        except Exception as fout:  # noqa: BLE001 - de recorder-API wisselt per versie
+            if not self._gaten_gemeld:
+                self._gaten_gemeld = True
+                _LOGGER.warning("geschiedenis: gaten aanvullen lukte nog niet (%s)", fout)
+            return
+        aanvullen = self.aanvullingen(kandidaten, bestaand, rijen)
+        if not aanvullen:
+            return
+        try:
+            await self.hass.async_add_executor_job(self._schrijf, aanvullen, False, nu)
+        except sqlite3.Error as fout:
+            _LOGGER.warning("de geschiedenis kon niet worden weggeschreven: %s", fout)
+            return
+        _LOGGER.info("geschiedenis: %d kwartieren aangevuld uit Home Assistant", len(aanvullen))
+
+    def _lees_seconden(
+        self, entity_ids: list[str], van: datetime, tot: datetime
+    ) -> dict[tuple[str, int], float]:
+        """Per kwartier hoeveel seconden er al gedekt zijn."""
+        vragen = ",".join("?" for _ in entity_ids)
+        with sqlite3.connect(self._pad) as db:
+            return {
+                (rij[0], int(rij[1])): float(rij[2])
+                for rij in db.execute(
+                    f"SELECT entity_id, start, seconden FROM kwartieren "
+                    f"WHERE entity_id IN ({vragen}) AND start >= ? AND start < ?",
+                    (*entity_ids, int(van.timestamp()), int(tot.timestamp())),
+                )
+            }
+
+    @staticmethod
+    def gaten(
+        entity_ids: list[str],
+        bestaand: dict[tuple[str, int], float],
+        van: datetime,
+        tot: datetime,
+    ) -> set[tuple[str, int]]:
+        """Welke kwartieren tussen `van` en `tot` ontbreken of half zijn."""
+        uit: set[tuple[str, int]] = set()
+        start = bucket_start(van)
+        while start < tot:
+            stempel = int(start.timestamp())
+            for entity_id in entity_ids:
+                if bestaand.get((entity_id, stempel), 0.0) < GAT:
+                    uit.add((entity_id, stempel))
+            start += BUCKET
+        return uit
+
+    @staticmethod
+    def aanvullingen(
+        kandidaten: set[tuple[str, int]],
+        bestaand: dict[tuple[str, int], float],
+        rijen: list[tuple[str, int, float, float, float, float]],
+    ) -> list[tuple[str, int, float, float, float, float]]:
+        """Alleen de gevraagde kwartieren, en alleen als de recorder meer dekt."""
+        return [
+            rij for rij in rijen
+            if (rij[0], rij[1]) in kandidaten and rij[5] > bestaand.get((rij[0], rij[1]), 0.0)
+        ]
+
     def _zonder_regels(self, entity_ids: list[str]) -> list[str]:
         """Welke van deze sensoren nog helemaal niets in de opslag hebben."""
         with sqlite3.connect(self._pad) as db:
@@ -413,15 +531,21 @@ class Archive:
         self, entity_ids: list[str], nu: datetime
     ) -> list[tuple[str, int, float, float, float, float]]:
         """De vijfminutenblokken van de recorder, samengevat per kwartier."""
+        return await self._async_uit_recorder_tussen(entity_ids, nu - CATCHUP, nu)
+
+    async def _async_uit_recorder_tussen(
+        self, entity_ids: list[str], van: datetime, tot: datetime
+    ) -> list[tuple[str, int, float, float, float, float]]:
+        """De vijfminutenblokken tussen twee lokale momenten, per kwartier."""
         from homeassistant.components.recorder import get_instance
         from homeassistant.components.recorder.statistics import (
             statistics_during_period,
         )
 
-        # `nu` is naïef lokaal. `as_local` van Home Assistant leest een naïeve
-        # tijd als UTC, dus die eerst een tijdzone geven en dan pas omrekenen.
-        einde = dt_util.as_utc(nu.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE))
-        begin = einde - CATCHUP
+        # Naïef lokaal. `as_local` van Home Assistant leest een naïeve tijd
+        # als UTC, dus die eerst een tijdzone geven en dan pas omrekenen.
+        einde = dt_util.as_utc(tot.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE))
+        begin = dt_util.as_utc(van.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE))
         gevonden = await get_instance(self.hass).async_add_executor_job(
             statistics_during_period,
             self.hass,
@@ -529,12 +653,22 @@ class Archive:
 
     # --- wegschrijven -------------------------------------------------------
 
-    async def _async_wegschrijven(self, _now: datetime | None = None) -> None:
-        """De afgesloten kwartieren naar schijf, en af en toe opruimen."""
+    async def _async_wegschrijven(
+        self, _now: datetime | None = None, alles: bool = False
+    ) -> None:
+        """De afgesloten kwartieren naar schijf, en af en toe opruimen.
+
+        Met `alles` ook het lopende kwartier, als een halve regel: dat is
+        voor het uitgaan van Home Assistant. Een halve regel is beter dan
+        geen, en `_async_gaten_vullen` maakt hem straks vol als de recorder
+        meer heeft.
+        """
         nu = dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
         rijen: list[tuple[str, int, float, float, float, float]] = []
         for meter in self._meters.values():
             meter.tot(nu)
+            if alles:
+                meter._sluit()
             for start, laagste, piek, gemiddeld, seconden in meter.oogst():
                 rijen.append(
                     (
@@ -550,6 +684,10 @@ class Archive:
         # De recorder is bij het opstarten vaak nog niet zover, en juist dan
         # draait de inhaalslag voor het eerst. Dus elke ronde nog een poging.
         await self._async_inhalen(nu)
+        # En de gaten rond de herstart, zolang de recorder zijn blokjes van
+        # het laatste uur nog aan het maken is.
+        if not alles and self._gestart is not None and nu - self._gestart <= GATEN_NA_START:
+            await self._async_gaten_vullen(nu)
 
         opruimen = self._laatste_purge is None or nu - self._laatste_purge >= PURGE
         if opruimen:

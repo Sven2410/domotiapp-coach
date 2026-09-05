@@ -220,9 +220,17 @@ class Diensten:
 class Bus:
     def __init__(self):
         self.gebeurtenissen = []
+        self.luisteraars = []
 
     def async_fire(self, soort, data):
         self.gebeurtenissen.append((soort, data))
+
+    def async_listen_once(self, soort, wat):
+        """Zoals in Home Assistant: geeft een functie terug die weer afmeldt."""
+        self.luisteraars.append((soort, wat))
+        return lambda: None
+
+    async_listen = async_listen_once
 
 
 class NepConfig:
