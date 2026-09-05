@@ -318,6 +318,15 @@ class BeurtenStore:
         """De beurten die nog lopen, voor na een herstart."""
         return [item for item in await self.async_list() if not item.get("complete")]
 
+    async def async_remove(self, entry_id: str) -> None:
+        """Een regel weghalen, bijvoorbeeld als het terugrekenen het
+        inplugmoment en dus de sleutel van een lopende beurt verandert."""
+        items = await self.async_list()
+        rest = [item for item in items if item.get("id") != entry_id]
+        if len(rest) != len(items):
+            self._items = rest
+            await self._store.async_save({"items": self._items})
+
 
 def async_get_beurten(hass: HomeAssistant) -> BeurtenStore:
     """De ene lijst laadbeurten van deze installatie."""

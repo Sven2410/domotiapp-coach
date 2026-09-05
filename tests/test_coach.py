@@ -2262,6 +2262,48 @@ controle("zonder ijkpunt en zonder besparing",
 controle("maar met de kilowatturen en wat ze kostten",
          b48b and b48b[0]["kwh"] > 0.1 and b48b[0]["paid"] > 0, f"{b48b}")
 
+print("=== 48c. na een herstart rekent hij terug uit de recorder en de kwartieropslag ===")
+# Sven op 05-09-2026: "kan je niet historisch terugrekenen?" De recorder weet
+# wanneer de kabel erin ging, de kwartieropslag wat de paal en het net daarna
+# deden. Hier nagemaakt: kabel erin om 13:37, een uur op 4,14 kW met 1,5 kW
+# teruglevering ernaast, en de coach die om 14:37 instapt.
+hass48c, _, coach48c = bouw(huis(status="charging", stroom=6.0, vermogen=4140.0,
+                                 teruglevering=1500.0), inst48)
+plug48c = t48 - dt.timedelta(hours=1)
+
+async def geschiedenis48c(entity_id, start, einde):
+    if entity_id == "sensor.laadpaal_status":
+        return [(plug48c - dt.timedelta(hours=2), "disconnected"),
+                (plug48c, "awaiting_start"),
+                (plug48c + dt.timedelta(minutes=1), "charging")]
+    return []
+
+async def kwartieren48c(entity_ids, start, einde):
+    uit = {e: [] for e in entity_ids}
+    for i in range(4):
+        begin = int((plug48c + dt.timedelta(minutes=15 * i)).timestamp())
+        for e, w in (("sensor.laadpaal_vermogen", 4140.0), ("sensor.teruglevering", 1500.0),
+                     ("sensor.afname", 0.0)):
+            if e in uit:
+                uit[e].append({"start": begin, "laagste": w, "piek": w, "gemiddeld": w, "seconden": 900})
+    return uit
+
+coach48c._async_geschiedenis = geschiedenis48c
+coach48c._async_kwartieren = kwartieren48c
+asyncio.run(ronde(coach48c, inst48, t48))
+asyncio.run(hass48c.afmaken())          # het terugrekenen loopt als taak
+asyncio.run(ronde(coach48c, inst48, t48 + dt.timedelta(minutes=1)))
+asyncio.run(hass48c.afmaken())
+b48c = asyncio.run(coachmod.async_get_beurten(hass48c).async_list())
+print(f"  {[(b['plugged_at'], b['kwh'], b['solar_kwh'], b['paid'], b['ref_cost'], b['saved'], b['resumed']) for b in b48c]}")
+controle("het inplugmoment komt uit de recorder",
+         len(b48c) == 1 and b48c[0]["plugged_at"] == plug48c.isoformat(), f"{b48c}")
+controle("het uur van vóór de herstart telt mee: 4,14 kWh, bijna allemaal zon",
+         b48c and abs(b48c[0]["kwh"] - 4.14 - 0.069) < 0.05 and b48c[0]["solar_kwh"] > 4.0, f"{b48c}")
+controle("met een ijkpunt en een besparing, en niet meer als hervat",
+         b48c and b48c[0]["ref_cost"] is not None and b48c[0]["saved"] is not None
+         and b48c[0]["saved"] >= 0 and not b48c[0]["resumed"], f"{b48c}")
+
 print("=== 49. elk paneelcommando is ook aangemeld ===")
 # Op 05-09-2026 stond domotiapp_coach/savings/list keurig in websocket.py en
 # antwoordde Home Assistant "Unknown command": de functie was er, de regel in

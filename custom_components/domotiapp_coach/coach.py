@@ -63,6 +63,7 @@ from .planner import (
     held_back,
     resolve_window,
     should_send,
+    watts_for,
 )
 from .storage import async_get_beurten, async_get_meldingen, async_get_store
 from .units import hour_to_watts, to_kwh, to_watts
@@ -2234,10 +2235,24 @@ class ChargerCoach:
         dan geen ijkpunt.
         """
         open_beurt = self._beurt_open.pop(device_id, None)
+        if open_beurt is not None and open_beurt.get("resumed") and open_beurt.get("ref_price") is None:
+            # Een beurt die een vorige coach al hervat had zonder inplugmoment
+            # (v0.49.x). Opnieuw beginnen en terugrekenen vanaf het echte
+            # inpluggen; de opslag dekt ook wat die vorige coach al telde, dus
+            # zijn tellers gaan niet dubbel mee. Zijn regel gaat straks weg.
+            koop, terug = None, None
+            return {
+                "ingeplugd": now, "ijk_prijs": None, "ijk_terug": None,
+                "kwh": 0.0, "zon_kwh": 0.0, "betaald": 0.0, "onbekend_kwh": 0.0,
+                "basis_kwh": 0.0, "basis_kosten": 0.0, "basis_onbekend": 0.0,
+                "basis_punten": [], "basis_uur": None,
+                "terugrekenen": True, "opruimen": [open_beurt.get("id")], "bewaard": None,
+            }
         if open_beurt is not None:
             ingeplugd = _tijdstip(open_beurt.get("plugged_at"))
             if ingeplugd is not None:
                 ingeplugd = ingeplugd.replace(tzinfo=None)
+            basis = open_beurt.get("baseline") or {}
             return {
                 "ingeplugd": ingeplugd or now,
                 "ijk_prijs": open_beurt.get("ref_price"),
@@ -2246,10 +2261,18 @@ class ChargerCoach:
                 "zon_kwh": float(open_beurt.get("solar_kwh") or 0.0),
                 "betaald": float(open_beurt.get("paid") or 0.0),
                 "onbekend_kwh": float(open_beurt.get("unknown_kwh") or 0.0),
+                "basis_kwh": float(basis.get("kwh") or 0.0),
+                "basis_kosten": float(basis.get("cost") or 0.0),
+                "basis_onbekend": float(basis.get("unknown_kwh") or 0.0),
+                "basis_punten": [list(p) for p in (basis.get("points") or [])],
+                "basis_uur": None,
+                "terugrekenen": False,
                 "bewaard": None,
             }
         koop, terug = self._prijs_nu(settings, now) if settings is not None else (None, None)
         if ingestapt:
+            # Het inplugmoment is onbekend; `_async_terugrekenen` zoekt het
+            # straks op in de recorder en vult de tellers van vóór nu aan.
             koop, terug = None, None
         return {
             "ingeplugd": now,
@@ -2259,8 +2282,79 @@ class ChargerCoach:
             "zon_kwh": 0.0,
             "betaald": 0.0,
             "onbekend_kwh": 0.0,
+            # Wat dezelfde tijd op vol vermogen vanaf het inpluggen gekost had:
+            # de maat waartegen bespaard wordt. Zie `_basis_bij`.
+            "basis_kwh": 0.0,
+            "basis_kosten": 0.0,
+            "basis_onbekend": 0.0,
+            "basis_punten": [],
+            "basis_uur": None,
+            "terugrekenen": ingestapt,
             "bewaard": None,
         }
+
+    def _basis_bij(
+        self,
+        geld: dict[str, Any],
+        stap_min: float,
+        cap_w: float,
+        grid: Grid | None,
+        settings: dict[str, Any],
+        now: datetime,
+    ) -> None:
+        """De maat waartegen bespaard wordt, per ronde bijgeteld.
+
+        Sven op 05-09-2026: "bereken die prijs wanneer die gestopt is en
+        gewacht heeft met laden op een goedkoop moment. Dus de prijs vanaf het
+        inpluggen." En: "een min getal bij besparen kan helemaal niet." Dus:
+        wat dezelfde kilowatturen gekost hadden als de paal vanaf het
+        inpluggen gewoon op vol vermogen was doorgegaan, uur na uur tegen de
+        prijs van dat uur, met de zon die er toen over was. Dat loopt hier als
+        een tweede teller mee, elke ronde, ook als de coach zelf niets doet:
+        want dan had die andere paal wél geladen. Per uur een ijkpunt
+        (`basis_punten`), zodat voor elke hoeveelheid kilowatturen af te lezen
+        is wat ze op die manier gekost hadden.
+        """
+        if stap_min <= 0 or cap_w <= 0:
+            return
+        if geld.get("basis_uur") is not None and geld["basis_uur"] != now.hour:
+            geld.setdefault("basis_punten", []).append(
+                [round(geld.get("basis_kwh", 0.0), 3), round(geld.get("basis_kosten", 0.0), 4)]
+            )
+        geld["basis_uur"] = now.hour
+        kwh_stap = cap_w / 1000.0 * stap_min / 60.0
+        over_w = max(0.0, grid.surplus_w) if grid is not None else 0.0
+        zon_deel = min(1.0, over_w / cap_w)
+        koop, terug = self._prijs_nu(settings, now)
+        geld["basis_kwh"] = geld.get("basis_kwh", 0.0) + kwh_stap
+        if koop is None:
+            geld["basis_onbekend"] = geld.get("basis_onbekend", 0.0) + kwh_stap
+            return
+        geld["basis_kosten"] = geld.get("basis_kosten", 0.0) + kwh_stap * (
+            (1.0 - zon_deel) * koop + zon_deel * (terug if terug is not None else 0.0)
+        )
+
+    @staticmethod
+    def _basis_kosten_voor(geld: dict[str, Any], kwh: float) -> float | None:
+        """Wat `kwh` op vol vermogen vanaf het inpluggen gekost had."""
+        punten = [tuple(p) for p in geld.get("basis_punten") or []]
+        punten.append((geld.get("basis_kwh", 0.0), geld.get("basis_kosten", 0.0)))
+        if kwh <= 0:
+            return 0.0
+        vorig = (0.0, 0.0)
+        for k, c in punten:
+            if k >= kwh:
+                if k - vorig[0] <= 1e-9:
+                    return c
+                return vorig[1] + (c - vorig[1]) * (kwh - vorig[0]) / (k - vorig[0])
+            vorig = (k, c)
+        # De maat is nog niet zo ver als de coach: dan doortrekken tegen de
+        # laatste prijs die de maat kende. Kan alleen als de paal harder ging
+        # dan zijn eigen maximum, en dat is een afronding.
+        if not punten or punten[-1][0] <= 1e-9:
+            return None
+        k, c = punten[-1]
+        return c / k * kwh
 
     def _geld_bij(
         self,
@@ -2308,9 +2402,14 @@ class ChargerCoach:
         betaald = round(float(geld.get("betaald") or 0.0), 4)
         ijk = geld.get("ijk_prijs")
         onbekend_kwh = round(float(geld.get("onbekend_kwh") or 0.0), 3)
-        # Het ijkpunt geldt voor de kilowatturen waarvan de prijs bekend was;
-        # de rest telt in het laden en niet in het geld.
-        ijk_kosten = None if ijk is None else round(max(0.0, kwh - onbekend_kwh) * float(ijk), 4)
+        # De maat: wat de kilowatturen waarvan de prijs bekend was gekost
+        # hadden op vol vermogen vanaf het inpluggen. Zolang het inplugmoment
+        # onbekend is (`terugrekenen` loopt nog) is er geen maat.
+        ijk_kosten = None
+        if not geld.get("terugrekenen") and ijk is not None:
+            ijk_kosten = self._basis_kosten_voor(geld, max(0.0, kwh - onbekend_kwh))
+            if ijk_kosten is not None:
+                ijk_kosten = round(ijk_kosten, 4)
         begon = sessie.get("begon")
         return {
             "id": f"{device.get('id', '')}:{ingeplugd.replace(microsecond=0).isoformat()}",
@@ -2326,9 +2425,17 @@ class ChargerCoach:
             "ref_price": ijk,
             "ref_feed_in": geld.get("ijk_terug"),
             "ref_cost": ijk_kosten,
-            "saved": None if ijk_kosten is None else round(ijk_kosten - betaald, 4),
+            # Nooit onder nul: de coach kan hooguit evenveel betalen als die
+            # andere paal, en een paar cent eronder is een afronding.
+            "saved": None if ijk_kosten is None else round(max(0.0, ijk_kosten - betaald), 4),
             "price_unknown": ijk is None or onbekend_kwh > 0,
             "unknown_kwh": onbekend_kwh,
+            "baseline": {
+                "kwh": round(float(geld.get("basis_kwh") or 0.0), 3),
+                "cost": round(float(geld.get("basis_kosten") or 0.0), 4),
+                "unknown_kwh": round(float(geld.get("basis_onbekend") or 0.0), 3),
+                "points": [list(p) for p in (geld.get("basis_punten") or [])][-240:],
+            },
             "resumed": bool(sessie.get("ingestapt")),
             "complete": klaar,
         }
@@ -2343,6 +2450,241 @@ class ChargerCoach:
                 _LOGGER.exception("kon de laadbeurt niet bewaren")
 
         self.hass.async_create_task(schrijf())
+
+    # --- terugrekenen na een herstart midden in een beurt ---------------
+
+    async def _async_geschiedenis(
+        self, entity_id: str | None, start: datetime, einde: datetime
+    ) -> list[tuple[datetime, str]]:
+        """De toestanden van een sensor tussen twee momenten, uit de recorder,
+        als (lokaal tijdstip, toestand). Leeg als de recorder er niet is."""
+        if not entity_id:
+            return []
+        try:
+            from homeassistant.components.recorder import get_instance, history
+
+            begin = dt_util.as_utc(start.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE))
+            eind = dt_util.as_utc(einde.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE))
+            gevonden = await get_instance(self.hass).async_add_executor_job(
+                history.state_changes_during_period, self.hass, begin, eind, entity_id
+            )
+        except Exception as fout:  # noqa: BLE001 - zonder recorder is er geen geschiedenis
+            _LOGGER.warning("kon de geschiedenis van %s niet lezen: %s", entity_id, fout)
+            return []
+        uit: list[tuple[datetime, str]] = []
+        for st in (gevonden or {}).get(entity_id, []):
+            uit.append((dt_util.as_local(st.last_changed).replace(tzinfo=None), str(st.state)))
+        return uit
+
+    async def _async_kwartieren(
+        self, entity_ids: list[str], start: datetime, einde: datetime
+    ) -> dict[str, list[dict[str, float]]]:
+        """De kwartieren uit de eigen opslag, of leeg als die er niet is."""
+        try:
+            from .archive import async_get_archive
+
+            return await async_get_archive(self.hass).async_lees(entity_ids, start, einde)
+        except Exception as fout:  # noqa: BLE001
+            _LOGGER.warning("kon de kwartieropslag niet lezen: %s", fout)
+            return {}
+
+    async def _async_terugrekenen(
+        self, device: dict[str, Any], settings: dict[str, Any], tot: datetime
+    ) -> dict[str, Any] | None:
+        """Wat er in een beurt gebeurde vóór de coach hem zag.
+
+        Sven op 05-09-2026: "kan je niet historisch terugrekenen?" Ja: de
+        recorder weet wanneer de kabel erin ging en wat een kWh toen kostte,
+        en de eigen kwartieropslag weet wat de paal, de zon en het net daarna
+        per kwartier deden. Daaruit komen dezelfde tellers als `_geld_bij` en
+        `_basis_bij` live bijhouden. Alleen gemeten getallen; ontbreekt er
+        iets, dan komt er niets terug en blijft het ijkpunt onbekend.
+        """
+        entities = device.get("entities") or {}
+        status = entities.get("status")
+        venster = timedelta(days=3)
+        toestanden = await self._async_geschiedenis(status, tot - venster, tot)
+        plug: datetime | None = None
+        vorige: str | None = None
+        for moment, toestand in toestanden:
+            if vorige == "disconnected" and toestand != "disconnected":
+                plug = moment
+            vorige = toestand
+        if plug is None or plug >= tot:
+            return None
+
+        # De prijs per moment: bij een dynamisch contract uit de geschiedenis
+        # van de prijssensor, bij een vast contract het tarief.
+        contract = settings.get("contract") or {}
+        dynamic = contract.get("dynamic") or {}
+        prijzen: list[tuple[datetime, float]] = []
+        markt: list[tuple[datetime, float]] = []
+        if contract.get("type") == "dynamic":
+            bron = dynamic.get("all_in_entity") if dynamic.get("source") == "all_in" else dynamic.get("market_entity")
+            for moment, toestand in await self._async_geschiedenis(bron, plug - timedelta(hours=1), tot):
+                try:
+                    prijzen.append((moment, float(toestand)))
+                except ValueError:
+                    continue
+            if dynamic.get("source") != "all_in":
+                prijzen = [(m, self._all_in(p, dynamic)) for m, p in prijzen]
+            if not self._salderen(contract) and dynamic.get("market_entity"):
+                for moment, toestand in await self._async_geschiedenis(
+                    dynamic.get("market_entity"), plug - timedelta(hours=1), tot
+                ):
+                    try:
+                        markt.append((moment, float(toestand)))
+                    except ValueError:
+                        continue
+            if not prijzen:
+                return None
+        tarief = self._tariff(settings)
+        kosten = float(dynamic.get("feed_in_costs") or 0)
+        opslag = float(dynamic.get("supplier_markup") or 0) * (
+            1 + float(dynamic.get("vat_percent") or 0) / 100
+        )
+
+        def laatste(reeks: list[tuple[datetime, float]], moment: datetime) -> float | None:
+            waarde = None
+            for m, w in reeks:
+                if m <= moment:
+                    waarde = w
+                else:
+                    break
+            return waarde
+
+        def prijs_op(moment: datetime) -> tuple[float | None, float | None]:
+            if contract.get("type") != "dynamic":
+                return tarief.buy, tarief.feed_in
+            koop = laatste(prijzen, moment)
+            if koop is None:
+                return None, None
+            if self._salderen(contract):
+                return koop, koop - opslag - kosten
+            m = laatste(markt, moment)
+            return koop, (m - kosten) if m is not None else None
+
+        # De kwartieren: de paal, en het net zoals `_read` het leest.
+        sources = settings.get("sources") or {}
+        paal = device.get("entity")
+        if not paal:
+            return None
+        signed = sources.get("grid_mode") == "signed"
+        netten = [sources.get("grid_signed")] if signed else [sources.get("grid_export"), sources.get("grid_import")]
+        netten = [e for e in netten if e]
+        rijen = await self._async_kwartieren([paal, *netten], plug - timedelta(minutes=15), tot)
+        paal_rijen = rijen.get(paal) or []
+        if not paal_rijen:
+            return None
+        per_start: dict[str, dict[int, dict[str, float]]] = {
+            e: {int(r["start"]): r for r in rijen.get(e) or []} for e in netten
+        }
+        # Vol vermogen: het maximum van de paal op de fasen van de auto.
+        fasen = 3
+        for auto in device.get("cars") or []:
+            if auto.get("phases"):
+                fasen = {"one": 1, "three": 3}.get(auto["phases"], 3)
+                break
+        cap_w = watts_for(16.0, fasen)
+        try:
+            cap_w = watts_for(
+                float((entities.get("max_limit") and _number(self.hass, entities.get("max_limit"))) or 16.0),
+                fasen,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        uit = {
+            "ingeplugd": plug, "kwh": 0.0, "zon_kwh": 0.0, "betaald": 0.0, "onbekend_kwh": 0.0,
+            "basis_kwh": 0.0, "basis_kosten": 0.0, "basis_onbekend": 0.0, "basis_punten": [],
+        }
+        uit["ijk_prijs"], uit["ijk_terug"] = prijs_op(plug)
+        uur: int | None = None
+        for rij in paal_rijen:
+            t0 = datetime.fromtimestamp(int(rij["start"]))
+            t1 = t0 + timedelta(minutes=15)
+            if t1 <= plug or t0 >= tot:
+                continue
+            sec = float(rij.get("seconden") or 0.0)
+            if t0 < plug:
+                sec = min(sec, (t1 - plug).total_seconds())
+            if t1 > tot:
+                sec = min(sec, (tot - t0).total_seconds())
+            if sec <= 0:
+                continue
+            paal_w = max(0.0, float(rij.get("gemiddeld") or 0.0))
+            netto: float | None = None
+            if signed:
+                r = per_start.get(netten[0], {}).get(int(rij["start"])) if netten else None
+                if r is not None:
+                    s = float(r.get("gemiddeld") or 0.0)
+                    netto = -(-s if sources.get("grid_signed_invert") else s)
+            elif len(netten) == 2:
+                re_ = per_start[netten[0]].get(int(rij["start"]))
+                ri = per_start[netten[1]].get(int(rij["start"]))
+                if re_ is not None and ri is not None:
+                    netto = float(re_.get("gemiddeld") or 0.0) - float(ri.get("gemiddeld") or 0.0)
+            over = max(0.0, netto + paal_w) if netto is not None else 0.0
+            koop, terug = prijs_op(max(t0, plug))
+            if uur is not None and uur != t0.hour:
+                uit["basis_punten"].append([round(uit["basis_kwh"], 3), round(uit["basis_kosten"], 4)])
+            uur = t0.hour
+            kwh = paal_w / 1000.0 * sec / 3600.0
+            zon = kwh * (min(1.0, over / paal_w) if paal_w > 0 else 0.0)
+            uit["kwh"] += kwh
+            uit["zon_kwh"] += zon
+            basis = cap_w / 1000.0 * sec / 3600.0
+            zon_deel = min(1.0, over / cap_w) if cap_w > 0 else 0.0
+            uit["basis_kwh"] += basis
+            if koop is None:
+                uit["onbekend_kwh"] += kwh
+                uit["basis_onbekend"] += basis
+                continue
+            uit["betaald"] += (kwh - zon) * koop + zon * (terug if terug is not None else 0.0)
+            uit["basis_kosten"] += basis * ((1.0 - zon_deel) * koop + zon_deel * (terug if terug is not None else 0.0))
+        return uit
+
+    async def _async_terugrekenen_toepassen(
+        self, device: dict[str, Any], settings: dict[str, Any] | None, tot: datetime
+    ) -> None:
+        """Het teruggerekende deel bij de lopende tellers optellen."""
+        device_id = device.get("id", "")
+        try:
+            terug = await self._async_terugrekenen(device, settings or {}, tot)
+        except Exception:  # noqa: BLE001 - liever geen ijkpunt dan een ronde die omvalt
+            _LOGGER.exception("terugrekenen van de laadbeurt mislukt")
+            terug = None
+        sessie = self._sessie.get(device_id)
+        geld = (sessie or {}).get("geld") if sessie else None
+        if geld is None:
+            return
+        geld["terugrekenen"] = False
+        if terug is None:
+            return
+        # De regel die al onder het herstartmoment in de opslag stond krijgt
+        # straks een andere sleutel (het echte inplugmoment); de oude weg.
+        oud_moment: datetime = geld.get("ingeplugd") or tot
+        oud_id = f"{device_id}:{oud_moment.replace(microsecond=0).isoformat()}"
+        for weg in [oud_id, *(geld.pop("opruimen", None) or [])]:
+            if not weg:
+                continue
+            try:
+                await async_get_beurten(self.hass).async_remove(weg)
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("kon de voorlopige regel van de laadbeurt niet weghalen")
+        for sleutel in ("kwh", "zon_kwh", "betaald", "onbekend_kwh", "basis_kwh", "basis_kosten", "basis_onbekend"):
+            geld[sleutel] = geld.get(sleutel, 0.0) + terug[sleutel]
+        # De punten van na de herstart schuiven op met wat ervoor gebeurde.
+        rk, rc = terug["basis_kwh"], terug["basis_kosten"]
+        geld["basis_punten"] = terug["basis_punten"] + [
+            [round(k + rk, 3), round(c + rc, 4)] for k, c in (geld.get("basis_punten") or [])
+        ]
+        geld["ingeplugd"] = terug["ingeplugd"]
+        geld["ijk_prijs"] = terug["ijk_prijs"]
+        geld["ijk_terug"] = terug["ijk_terug"]
+        if sessie is not None:
+            sessie["ingestapt"] = False
+        geld["bewaard"] = None  # meteen naar de opslag bij de volgende ronde
 
     async def _async_beurten_laden(self) -> None:
         """De beurten die bij de vorige keer nog liepen, voor `_geld_begin`."""
@@ -2498,6 +2840,11 @@ class ChargerCoach:
             eigen["kwh"] += kwh_stap
             if geld is not None and settings is not None:
                 self._geld_bij(geld, kwh_stap, eigen["watt"], grid, settings, now)
+        if geld is not None and settings is not None and 0 < stap <= 10:
+            # De maat loopt altijd mee, ook als de coach niets doet.
+            self._basis_bij(
+                geld, stap, watts_for(charger.max_amps or 16.0, car.phases), grid, settings, now
+            )
         eigen["watt"] = _watts(self.hass, device.get("entity")) or 0.0
         eigen["liep"] = charger.charging
         if geld is not None:
@@ -2507,6 +2854,13 @@ class ChargerCoach:
             if bewaard is None or (now - bewaard).total_seconds() >= 300:
                 geld["bewaard"] = now
                 self._beurt_schrijven(self._beurt_regel(device, car, sessie, now, klaar=False))
+            # Ná het wegschrijven, zodat het terugrekenen de voorlopige regel
+            # onder het herstartmoment kan vervangen door de echte.
+            if geld.get("terugrekenen") and not geld.get("terugrekenen_bezig"):
+                geld["terugrekenen_bezig"] = True
+                self.hass.async_create_task(
+                    self._async_terugrekenen_toepassen(device, settings, now)
+                )
 
         if meter is not None and meter != eigen["meter_stand"]:
             vorige_stand = eigen["meter_stand"]
