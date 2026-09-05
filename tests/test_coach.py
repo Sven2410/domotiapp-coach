@@ -2190,6 +2190,54 @@ controle("de mediaan van 1, 1, 1 en 9 is 1", coachmod._mediaan([1.0, 1.0, 1.0, 9
 controle("en van 1, 2, 3 is 2", coachmod._mediaan([3.0, 1.0, 2.0]) == 2.0,
          f"{coachmod._mediaan([3.0, 1.0, 2.0])}")
 
+print("=== 48. een laadbeurt komt met kosten en besparing in de opslag ===")
+# Sven op 05-09-2026: "Kunnen we ergens een overzichtje maken wat we hebben
+# bespaard? Dat is natuurlijk het belangrijkste voor de klant." Het ijkpunt is
+# de prijs op het moment van inpluggen. Vast contract: elke kWh uit eigen zon
+# kost wat teruglevering opgebracht had in plaats van de inkoopprijs.
+inst48 = instellingen()
+hass48, store48, coach48 = bouw(huis(teruglevering=1500.0), inst48)
+t48 = dt.datetime(2026, 8, 18, 14, 37)
+asyncio.run(ronde(coach48, inst48, t48))                       # kabel erin, nog niets
+hass48.states.zet("sensor.laadpaal_status", "charging")
+hass48.states.zet("sensor.laadpaal_stroom", "6.0")
+hass48.states.zet("sensor.laadpaal_vermogen", "4140")
+asyncio.run(ronde(coach48, inst48, t48 + dt.timedelta(minutes=1)))   # laadt op 4,14 kW
+asyncio.run(ronde(coach48, inst48, t48 + dt.timedelta(minutes=10)))  # negen minuten later
+asyncio.run(ronde(coach48, inst48, t48 + dt.timedelta(minutes=11)))
+hass48.states.zet("sensor.laadpaal_status", "disconnected")
+hass48.states.zet("sensor.laadpaal_stroom", "0.05")
+hass48.states.zet("sensor.laadpaal_vermogen", "0")
+asyncio.run(ronde(coach48, inst48, t48 + dt.timedelta(minutes=12)))  # kabel eruit
+# De coach gelooft een losse kabel pas na `KABEL_ONTDREUN`, en de schrijftaak
+# naar de opslag loopt buiten de ronde om.
+asyncio.run(ronde(coach48, inst48, t48 + dt.timedelta(minutes=13)))
+asyncio.run(hass48.afmaken())
+beurten48 = asyncio.run(coachmod.async_get_beurten(hass48).async_list())
+print(f"  {len(beurten48)} beurt(en)")
+for b in beurten48:
+    print(f"  {b['plugged_at']} tot {b['ended']}: {b['kwh']} kWh, zon {b['solar_kwh']}, "
+          f"betaald {b['paid']}, ijk {b['ref_price']}, bespaard {b['saved']}, compleet {b['complete']}")
+controle("één beurt, afgesloten", len(beurten48) == 1 and beurten48[0]["complete"], f"{beurten48}")
+b48 = beurten48[0] if beurten48 else {}
+# Elf minuten en niet tien: de minuut waarin de kabel eruit ging telt nog mee
+# met het vermogen van de ronde ervoor, net als in het verslag (`_geladen`).
+controle("elf minuten op 4,14 kW is 0,76 kWh", abs(b48.get("kwh", 0) - 0.759) < 0.01, f"{b48.get('kwh')}")
+controle("en bijna allemaal zon, want er ging 1,5 kW naar het net",
+         b48.get("solar_kwh", 0) > 0.9 * b48.get("kwh", 1), f"{b48.get('solar_kwh')} van {b48.get('kwh')}")
+tarief48 = coachmod.ChargerCoach._tariff(inst48)
+controle("het ijkpunt is de prijs bij het inpluggen",
+         b48.get("ref_price") == tarief48.buy, f"{b48.get('ref_price')} tegen {tarief48.buy}")
+zon48 = b48.get("solar_kwh", 0)
+verwacht48 = zon48 * (tarief48.feed_in or 0) + (b48.get("kwh", 0) - zon48) * (tarief48.buy or 0)
+controle("betaald is de zon tegen teruglevering en de rest tegen inkoop",
+         abs(b48.get("paid", 0) - verwacht48) < 0.001, f"{b48.get('paid')} tegen {verwacht48:.4f}")
+controle("bespaard is het ijkpunt min wat betaald is",
+         b48.get("saved") is not None
+         and abs(b48["saved"] - (b48["ref_cost"] - b48["paid"])) < 0.0001, f"{b48.get('saved')}")
+controle("de ingeplugde tijd is de eerste ronde met kabel",
+         b48.get("plugged_at") == "2026-08-18T14:37:00", f"{b48.get('plugged_at')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

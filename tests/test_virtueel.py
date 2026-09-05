@@ -113,6 +113,21 @@ for naam, vl in V.items():
     # `_gladde_fase` in coach.py), dus een echte sprong in het huisverbruik
     # heeft daar pas na een halve minuut de meerderheid. Een zekering houdt
     # dat; een coach die het langer laat lopen is fout.
+    # Elke beurt staat in de opslag met wat hij kostte en bespaarde (Sven op
+    # 05-09-2026: "het belangrijkste voor de klant"). De kilowatturen erin
+    # zijn dezelfde als het huis mat, en het geld is nooit verzonnen: zonder
+    # prijs staat er geen besparing.
+    if vl.geladen_kwh > 1:
+        kwh_beurten = sum(b["kwh"] for b in vl.beurten)
+        controle(f"{naam}: de beurten in de opslag tellen op tot wat er geladen is",
+                 vl.beurten and abs(kwh_beurten - vl.geladen_kwh) <= max(0.5, 0.03 * vl.geladen_kwh),
+                 f"{kwh_beurten:.1f} in {len(vl.beurten)} beurt(en) tegen {vl.geladen_kwh:.1f} geladen")
+        controle(f"{naam}: zon in de beurten is niet meer dan het huis aan zon zag",
+                 sum(b["solar_kwh"] for b in vl.beurten) <= vl.uit_zon_kwh + max(0.5, 0.05 * vl.geladen_kwh),
+                 f"{sum(b['solar_kwh'] for b in vl.beurten):.1f} tegen {vl.uit_zon_kwh:.1f}")
+        controle(f"{naam}: bespaard is ijkpunt min betaald, of onbekend",
+                 all((b["saved"] is None and (b["price_unknown"] or b["ref_cost"] is None))
+                     or abs(b["saved"] - (b["ref_cost"] - b["paid"])) < 0.001 for b in vl.beurten), "")
     over = [r for r in vl.regels if max(r.fase_amps) > s.zekering]
     controle(f"{naam}: de zekering wordt hooguit een minuut overschreden",
              len(over) * vl.stap_uur * 60 <= 1.0, f"{len(over) * vl.stap_uur * 60:.1f} minuten boven "
@@ -464,6 +479,17 @@ VDD_ZONDAG_05 = virtueel.dt.datetime(2026, 9, 6, 5, 0)
 
 def vdd_basis(vl, naam):
     """Wat in elke Van den Dam-variant hoort te gelden."""
+    # Eén beurt, ingeplugd vrijdag 19:00 tegen de avondprijs, en die bespaart:
+    # de middag en de zon zijn goedkoper dan het ijkpunt.
+    controle(f"{naam}: één laadbeurt in de opslag, afgesloten of nog lopend",
+             len(vl.beurten) == 1, f"{len(vl.beurten)}")
+    if vl.beurten:
+        b = vl.beurten[0]
+        controle(f"{naam}: ingeplugd vrijdagavond tegen de prijs van dat uur",
+                 b["plugged_at"].startswith("2026-09-04T19:0") and b["ref_price"] is not None
+                 and b["ref_price"] > 0.3, f"{b['plugged_at']} op {b['ref_price']}")
+        controle(f"{naam}: en bespaart tegen dat ijkpunt",
+                 b["saved"] is not None and b["saved"] > 5, f"bespaard {b['saved']}, betaald {b['paid']}")
     vrijdagnacht = [r for r in vl.regels if r.tijd < virtueel.dt.datetime(2026, 9, 5, 7, 0)]
     controle(f"{naam}: vrijdagnacht 0 A", not any(r.paal_w > 0 for r in vrijdagnacht),
              f"{[r.tijd.strftime('%H:%M') for r in vrijdagnacht if r.paal_w > 0][:3]}")

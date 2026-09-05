@@ -38,6 +38,12 @@ MELDINGEN_KEY: Final = f"{DOMAIN}.meldingen"
 MELDINGEN_VERSION: Final = 1
 MELDINGEN_MAX: Final = 3000
 
+# De laadbeurten, met wat ze kostten en wat ze bespaarden. Eigen bestand, net
+# als de meldingen. Tweeduizend beurten is jaren.
+BEURTEN_KEY: Final = f"{DOMAIN}.beurten"
+BEURTEN_VERSION: Final = 1
+BEURTEN_MAX: Final = 2000
+
 # --- Device types ----------------------------------------------------------
 # "overig" carries a free-text name; the rest are named by their type.
 DEVICE_TYPES: Final = [

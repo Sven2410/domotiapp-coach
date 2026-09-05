@@ -442,6 +442,8 @@ class Verloop:
     # Hoe lang één regel duurt, in uren. Energie is vermogen maal dit getal.
     stap_uur: float = 1 / 60
     fouten: list[str] = field(default_factory=list)
+    # De laadbeurten zoals de coach ze in de opslag zette: kWh, betaald, bespaard.
+    beurten: list = field(default_factory=list)
 
     @property
     def kosten(self) -> float:
@@ -1048,6 +1050,11 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
             wereld.verstrijk(stap_s)
 
     asyncio.run(lus())
+    asyncio.run(hass.afmaken())
+    try:
+        verloop.beurten = asyncio.run(coachmod.async_get_beurten(hass).async_list())
+    except Exception as fout:  # noqa: BLE001
+        verloop.fouten.append(f"beurten niet te lezen: {fout!r}")
     if verloop.klaar_tijd is not None and verloop.soc_bij_klaar_tijd is None:
         verloop.soc_bij_klaar_tijd = wereld.auto.soc
     try:

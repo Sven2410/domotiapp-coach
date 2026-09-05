@@ -454,6 +454,18 @@ export async function reportPdf(gegevens) {
     vel.uitleg(gegevens.geldUitleg);
   }
 
+  if (gegevens.bespaard?.vakjes?.length) {
+    // Wat de coach bespaarde, per laadbeurt tegen de prijs van het
+    // inplugmoment. Sven op 05-09-2026: "dat is natuurlijk het belangrijkste
+    // voor de klant", dus vóór het verloop en de tabellen.
+    vel.kop("Bespaard");
+    schrijfVakjes(pdf, vel, gegevens.bespaard.vakjes);
+    vel.uitleg(gegevens.bespaard.uitleg);
+    if (gegevens.bespaard.rijen?.length) {
+      schrijfTabel(pdf, vel, gegevens.bespaard.kop, gegevens.bespaard.rijen, gegevens.bespaard.totaal);
+    }
+  }
+
   if (gegevens.verloop?.length) {
     vel.kop("Verloop");
     schrijfGrafiek(pdf, vel, gegevens.verloop, gegevens.metZon);
