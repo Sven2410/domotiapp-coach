@@ -261,9 +261,13 @@ class MeldingenStore:
             ]
         return list(self._items)
 
-    async def async_add(self, message: str, at: datetime) -> dict[str, Any]:
+    async def async_add(
+        self, message: str, at: datetime, kind: str = "melding"
+    ) -> dict[str, Any]:
+        """Een regel erbij. `kind` is "melding" (ging ook naar de telefoon) of
+        "besluit" (alleen hier: wat de coach deed en waarom)."""
         items = await self.async_list()
-        entry = {"at": at.replace(microsecond=0).isoformat(), "message": message}
+        entry = {"at": at.replace(microsecond=0).isoformat(), "message": message, "kind": kind}
         items.append(entry)
         self._items = items[-MELDINGEN_MAX:]
         await self._store.async_save({"items": self._items})

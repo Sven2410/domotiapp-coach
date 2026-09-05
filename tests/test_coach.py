@@ -186,6 +186,22 @@ print(f"  {besluit['rule']}: {besluit['amps']} A")
 controle("volgt de zon weer", besluit["rule"] == "surplus" and besluit["amps"] <= 8,
          f"kreeg {besluit['rule']} met {besluit['amps']} A")
 
+# Sven op 05-09-2026, toen de paal om 09:42 op zon begon en Meldingen zweeg:
+# "ik wil dat alles wat de coach doet terug te lezen is in meldingen." Elk
+# ander besluit komt dus in de geschiedenis, als "besluit" en zonder telefoon.
+print("=== 3b. elk ander besluit staat in de geschiedenis, zonder telefoon ===")
+geschiedenis = asyncio.run(coachmod.async_get_meldingen(hass).async_list())
+besluiten = [g["message"] for g in geschiedenis if g.get("kind") == "besluit"]
+for b in besluiten:
+    print(f"  {b[:110]}")
+controle("wekken, wachten op de auto en zon zijn drie besluiten", len(besluiten) == 3,
+         f"{len(besluiten)}")
+controle("het eerste zegt wekken op 10 A", "laden op 10 A" in besluiten[0], besluiten[0])
+controle("het laatste zegt laden op zon", "laden op" in besluiten[-1]
+         and "zon" in besluiten[-1], besluiten[-1])
+controle("een besluit gaat niet naar de telefoon",
+         not [d for d in verstuurd if d[0] == "notify"], f"{verstuurd}")
+
 print("=== 4. zonder accustand vraagt hij erom en laadt hij niet uit het net ===")
 inst = instellingen()
 hass, store, coach = bouw(huis(teruglevering=0.0, afname=1200.0), inst)

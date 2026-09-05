@@ -36,7 +36,7 @@ EVENT_SETTINGS_UPDATED: Final = f"{DOMAIN}_settings_updated"
 EVENT_NOTIFICATION: Final = f"{DOMAIN}_notification"
 MELDINGEN_KEY: Final = f"{DOMAIN}.meldingen"
 MELDINGEN_VERSION: Final = 1
-MELDINGEN_MAX: Final = 300
+MELDINGEN_MAX: Final = 1000
 
 # --- Device types ----------------------------------------------------------
 # "overig" carries a free-text name; the rest are named by their type.

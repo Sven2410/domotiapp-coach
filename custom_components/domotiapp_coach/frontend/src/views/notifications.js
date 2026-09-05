@@ -53,6 +53,9 @@ export function groepeer(items, nu = new Date()) {
     groep.rijen.push({
       tijd: `${twee(moment.getHours())}:${twee(moment.getMinutes())}`,
       tekst: item.message,
+      // "besluit": wat de coach deed, alleen hier. "melding": ging ook naar
+      // de telefoon. Oudere regels hebben het veld niet en zijn meldingen.
+      soort: item.kind === "besluit" ? "besluit" : "melding",
     });
   }
   return groepen;
@@ -74,6 +77,10 @@ const css = /* css */ `
     border: 1px solid var(--dac-border); background: rgba(255,255,255,0.03);
     margin-bottom: 6px;
   }
+  /* Een besluit is wat de coach deed; een melding ging ook naar de telefoon
+     en mag daarom opvallen. */
+  .rij.besluit { background: transparent; border-color: transparent; padding-top: 6px; padding-bottom: 6px; margin-bottom: 2px; }
+  .rij.besluit .tekst { color: var(--dac-ink-2, inherit); font-size: 13.5px; }
   .tijd { font-variant-numeric: tabular-nums; color: var(--dac-ink-3); font-size: 13px; padding-top: 1px; }
   .tekst { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
   .leeg { color: var(--dac-ink-3); font-size: 14px; padding: 18px 0; }
@@ -111,7 +118,7 @@ class DacViewNotifications extends DacElement {
     return /* html */ `
       <section class="page">
         <h1>${icons.bell} Meldingen</h1>
-        <p class="sub">Alles wat de coach gemeld heeft, de nieuwste bovenaan.</p>
+        <p class="sub">Alles wat de coach deed en meldde, de nieuwste bovenaan. Wat ook naar je telefoon ging staat in een kader.</p>
         <div id="lijst"></div>
       </section>
     `;
@@ -179,7 +186,7 @@ class DacViewNotifications extends DacElement {
       lijst.append(kop);
       for (const rij of groep.rijen) {
         const el = document.createElement("div");
-        el.className = "rij";
+        el.className = `rij ${rij.soort}`;
         const tijd = document.createElement("span");
         tijd.className = "tijd";
         tijd.textContent = rij.tijd;

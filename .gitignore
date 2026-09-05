@@ -15,3 +15,6 @@ custom_components/domotiapp_coach/frontend/preview.html
 # Tokens horen hier nooit te staan, ook niet per ongeluk.
 tokens/
 *token*.txt
+
+# Standen van de meldingenlogger (tools/meldingen.py), net als *.log
+*.jsonl

@@ -465,6 +465,11 @@ proef("meldingen worden per dag gegroepeerd, de nieuwste eerst", () => {
   assert.deepEqual(groepen.map((g) => g.kop), ["Vandaag", "Gisteren", "vrijdag 4 september"]);
   assert.deepEqual(groepen[1].rijen.map((r) => r.tijd), ["13:40", "11:10"]);
   assert.equal(groepen[0].rijen[0].tekst, "Ford aan Laadpaal is vol.");
+  assert.equal(groepen[0].rijen[0].soort, "melding", "zonder kind is het een melding van vroeger");
+  const besluit = groepeer([
+    { at: "2026-09-05T09:42:00", message: "Laadpaal: laden op 6 A. Er is 0,3 kW zon over.", kind: "besluit" },
+  ], nu)[0].rijen[0];
+  assert.equal(besluit.soort, "besluit", "wat de coach deed heet een besluit");
   assert.equal(dagkop(new Date(2025, 11, 24), nu), "woensdag 24 december 2025", "een ander jaar krijgt het jaar erbij");
 });
 
@@ -486,11 +491,14 @@ proef("het scherm tekent een kop per dag en een rij per melding", () => {
   el.items_ = [
     { at: "2026-09-05T13:40:00", message: "De accustand van Ford meldt al 10 minuten niets." },
     { at: "2026-09-05T11:10:00", message: "De status van Laadpaal meldt al 10 minuten niets." },
+    { at: "2026-09-05T09:42:00", message: "Laadpaal: laden op 6 A.", kind: "besluit" },
   ];
   el.paint_();
   const lijst = knopen.get("#lijst").kinderen;
-  assert.equal(lijst.length, 3, "een dagkop en twee rijen");
+  assert.equal(lijst.length, 4, "een dagkop en drie rijen");
   assert.equal(lijst[0].className, "dag");
+  assert.equal(lijst[1].className, "rij melding", "een melding krijgt een kader");
+  assert.equal(lijst[3].className, "rij besluit", "een besluit staat er kaal tussen");
   assert.deepEqual(lijst[1].kinderen.map((k) => k.textContent),
     ["13:40", "De accustand van Ford meldt al 10 minuten niets."]);
 
