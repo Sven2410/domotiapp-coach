@@ -2238,6 +2238,25 @@ controle("bespaard is het ijkpunt min wat betaald is",
 controle("de ingeplugde tijd is de eerste ronde met kabel",
          b48.get("plugged_at") == "2026-08-18T14:37:00", f"{b48.get('plugged_at')}")
 
+print("=== 49. elk paneelcommando is ook aangemeld ===")
+# Op 05-09-2026 stond domotiapp_coach/savings/list keurig in websocket.py en
+# antwoordde Home Assistant "Unknown command": de functie was er, de regel in
+# `async_register` niet. Een commando zonder aanmelding bestaat niet.
+bron49 = (pathlib.Path(__file__).resolve().parent.parent
+          / "custom_components" / "domotiapp_coach" / "websocket.py").read_text(encoding="utf-8")
+aangemeld49 = set(_re.findall(r"async_register_command\(hass, (\w+)\)", bron49))
+namen49 = {}
+for blok in _re.split(r"\n@websocket_api\.websocket_command", bron49)[1:]:
+    soort = _re.search(r'"type"\): "([^"]+)"', blok)
+    functie = _re.search(r"\n(?:async )?def (\w+)\(", blok)
+    if soort and functie:
+        namen49[soort.group(1)] = functie.group(1)
+niet49 = sorted(t for t, f in namen49.items() if f not in aangemeld49)
+print(f"  {len(namen49)} commando's, {len(aangemeld49)} aangemeld")
+controle("elk commando uit websocket.py staat in async_register", not niet49,
+         f"niet aangemeld: {niet49}")
+controle("en savings/list is er een van", "domotiapp_coach/savings/list" in namen49, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
