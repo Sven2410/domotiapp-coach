@@ -462,6 +462,9 @@ class ChargerCoach:
         self._paused: set[str] = set()
         # Hoeveel ronden een sessie al tegen de ladder in wordt aangehouden.
         self._holding: dict[str, int] = {}
+        # Het laatste besluit dat in de geschiedenis staat, per paal, zodat
+        # alleen een verandering een regel oplevert en niet elke minuut.
+        self._besluit_genoteerd: dict[str, tuple[Any, ...]] = {}
         # Of de wekpoging van deze sessie nog openstaat. Eén per sessie, dus
         # zodra hij gedaan is blijft dit staan tot de kabel eruit gaat.
         self._woken: set[str] = set()
@@ -627,6 +630,48 @@ class ChargerCoach:
             self.hass.bus.async_fire(EVENT_NOTIFICATION, entry)
         except Exception:  # noqa: BLE001 - de geschiedenis mag de melding zelf niet kosten
             _LOGGER.exception("kon de melding niet in de geschiedenis zetten")
+
+    async def _async_noteer(self, message: str, now: datetime) -> None:
+        """Alleen in de geschiedenis, niet naar de telefoon.
+
+        Voor wat de coach doet: elk besluit hoort terug te lezen te zijn, maar
+        niemand wil er 's nachts een telefoon van horen zoemen.
+        """
+        try:
+            entry = await async_get_meldingen(self.hass).async_add(message, now, "besluit")
+            self.hass.bus.async_fire(EVENT_NOTIFICATION, entry)
+        except Exception:  # noqa: BLE001 - de geschiedenis mag de ronde niet kosten
+            _LOGGER.exception("kon het besluit niet in de geschiedenis zetten")
+
+    async def _async_noteer_besluit(
+        self, device: dict[str, Any], device_id: str, now: datetime
+    ) -> None:
+        """Het besluit van deze ronde in de geschiedenis, als het anders is dan
+        het vorige: een andere stroom, een andere regel, aan of uit, of een
+        coach die niet meer mag sturen.
+
+        Sven op 05-09-2026, toen de paal om 09:42 op zon begon te laden en het
+        meldingenscherm daar niets van zei: "ik wil dat alles wat de coach
+        doet terug te lezen is in meldingen."
+        """
+        st = self.state.get(device_id) or {}
+        kern = (
+            bool(st.get("charge")),
+            st.get("amps"),
+            st.get("rule"),
+            bool(st.get("applied")),
+            bool(st.get("paused")),
+            bool(st.get("boost")),
+        )
+        if self._besluit_genoteerd.get(device_id) == kern:
+            return
+        self._besluit_genoteerd[device_id] = kern
+        naam = device.get("name") or "De laadpaal"
+        kop = f"laden op {st.get('amps')} A" if st.get("charge") else "niet laden"
+        if not st.get("applied"):
+            kop = f"zou {kop}, maar de coach stuurt nu niet"
+        reden = (st.get("reason") or "").strip()
+        await self._async_noteer(f"{naam}: {kop}. {reden}".strip(), now)
 
     def _sensoren(self, settings: dict[str, Any]) -> dict[str, str]:
         """Elke sensor waar de coach op rekent, met hoe de bewoner hem kent.
@@ -1107,6 +1152,7 @@ class ChargerCoach:
         self.hass.bus.async_fire(
             EVENT_DECISION, {"device": device_id, **self.state[device_id]}
         )
+        await self._async_noteer_besluit(device, device_id, now)
 
         # Wat deze paal straks méér gaat trekken dan nu. Alleen als de coach
         # ook werkelijk mag sturen, want anders gaat er niets naar de paal en is
