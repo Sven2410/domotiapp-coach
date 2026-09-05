@@ -264,8 +264,9 @@ class MeldingenStore:
     async def async_add(
         self, message: str, at: datetime, kind: str = "melding"
     ) -> dict[str, Any]:
-        """Een regel erbij. `kind` is "melding" (ging ook naar de telefoon) of
-        "besluit" (alleen hier: wat de coach deed en waarom)."""
+        """Een regel erbij. `kind` is "melding" (ging ook naar de telefoon),
+        "kritiek" (idem, en de bewoner moet er iets mee) of "besluit" (alleen
+        hier: wat de coach deed en waarom)."""
         items = await self.async_list()
         entry = {"at": at.replace(microsecond=0).isoformat(), "message": message, "kind": kind}
         items.append(entry)
