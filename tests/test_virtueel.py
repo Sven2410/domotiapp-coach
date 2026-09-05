@@ -125,9 +125,12 @@ for naam, vl in V.items():
         controle(f"{naam}: zon in de beurten is niet meer dan het huis aan zon zag",
                  sum(b["solar_kwh"] for b in vl.beurten) <= vl.uit_zon_kwh + max(0.5, 0.05 * vl.geladen_kwh),
                  f"{sum(b['solar_kwh'] for b in vl.beurten):.1f} tegen {vl.uit_zon_kwh:.1f}")
-        controle(f"{naam}: bespaard is ijkpunt min betaald, of onbekend",
-                 all((b["saved"] is None and (b["price_unknown"] or b["ref_cost"] is None))
-                     or abs(b["saved"] - (b["ref_cost"] - b["paid"])) < 0.001 for b in vl.beurten), "")
+        # Bespaard is de maat (vanaf het inpluggen op vol vermogen) min wat er
+        # betaald is, en nooit onder nul. Sven: "een min getal bij besparen
+        # kan helemaal niet."
+        controle(f"{naam}: bespaard is de maat min betaald, nooit onder nul, of onbekend",
+                 all((b["saved"] is None and b["ref_cost"] is None)
+                     or abs(b["saved"] - max(0.0, b["ref_cost"] - b["paid"])) < 0.001 for b in vl.beurten), "")
     over = [r for r in vl.regels if max(r.fase_amps) > s.zekering]
     controle(f"{naam}: de zekering wordt hooguit een minuut overschreden",
              len(over) * vl.stap_uur * 60 <= 1.0, f"{len(over) * vl.stap_uur * 60:.1f} minuten boven "

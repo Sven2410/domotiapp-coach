@@ -1323,23 +1323,23 @@ class DacViewHistory extends DacElement {
         { label: "Waarvan zon", waarde: kwh(totaal.solar_kwh) },
       ],
       uitleg:
-        "Bespaard is wat dezelfde kilowatturen gekost hadden tegen de prijs op het moment van " +
-        "inpluggen, min wat ze werkelijk kostten. Eigen zon telt tegen wat teruglevering " +
-        "opgebracht had." +
+        "Bespaard is wat dezelfde kilowatturen gekost hadden als de paal vanaf het inpluggen " +
+        "gewoon op vol vermogen was doorgegaan, uur na uur tegen de prijs van dat uur, min wat ze " +
+        "werkelijk kostten. Eigen zon telt tegen wat teruglevering opgebracht had." +
         (totaal.onbekend
           ? ` ${totaal.onbekend === 1 ? "Eén beurt telt" : `${totaal.onbekend} beurten tellen`} niet mee in het geld, omdat de prijs toen niet bekend was.`
           : ""),
-      kop: ["Ingeplugd", "Apparaat", "Geladen", "Zon", "Prijs toen", "Betaald", "Bespaard"],
+      kop: ["Ingeplugd", "Apparaat", "Geladen", "Zon", "Vanaf inpluggen", "Betaald", "Bespaard"],
       rijen: items.map((b) => [
         wanneer(b),
         b.car ? `${b.name}, ${b.car}` : b.name,
         kwh(b.kwh),
         kwh(b.solar_kwh),
-        b.ref_price === null || b.ref_price === undefined ? "" : euro(b.ref_price),
-        b.price_unknown ? "" : euro(b.paid),
+        b.ref_cost === null || b.ref_cost === undefined ? "" : euro(b.ref_cost),
+        euro(b.paid),
         b.saved === null || b.saved === undefined ? "" : euro(b.saved),
       ]),
-      totaal: ["Totaal", "", kwh(totaal.kwh), kwh(totaal.solar_kwh), "", euro(totaal.paid), euro(totaal.saved)],
+      totaal: ["Totaal", "", kwh(totaal.kwh), kwh(totaal.solar_kwh), euro(totaal.ref_cost), euro(totaal.paid), euro(totaal.saved)],
     };
   }
 
@@ -1410,7 +1410,7 @@ class DacViewHistory extends DacElement {
     );
 
     const zinnen = [
-      "Bespaard is wat dezelfde kilowatturen gekost hadden tegen de prijs op het moment van inpluggen, min wat ze werkelijk kostten. Eigen zon telt tegen wat teruglevering opgebracht had.",
+      "Bespaard is wat dezelfde kilowatturen gekost hadden als de paal vanaf het inpluggen gewoon op vol vermogen was doorgegaan, uur na uur tegen de prijs van dat uur, min wat ze werkelijk kostten. Eigen zon telt tegen wat teruglevering opgebracht had.",
     ];
     if (totaal.onbekend) {
       zinnen.push(
@@ -1443,7 +1443,7 @@ class DacViewHistory extends DacElement {
       const klok = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
       return this.period_ === "day" ? klok : `${dag} ${klok}`;
     };
-    lijst.append(rij(["Ingeplugd", "Apparaat", "Geladen", "Zon", "Prijs toen", "Betaald", "Bespaard", ""], true));
+    lijst.append(rij(["Ingeplugd", "Apparaat", "Geladen", "Zon", "Vanaf inpluggen", "Betaald", "Bespaard", ""], true));
     for (const b of items) {
       lijst.append(
         rij([
@@ -1451,8 +1451,8 @@ class DacViewHistory extends DacElement {
           b.car ? `${b.name}, ${b.car}` : b.name,
           kwh(b.kwh),
           kwh(b.solar_kwh),
-          b.ref_price === null || b.ref_price === undefined ? "" : euro(b.ref_price),
-          b.price_unknown ? "" : euro(b.paid),
+          b.ref_cost === null || b.ref_cost === undefined ? "" : euro(b.ref_cost),
+          euro(b.paid),
           b.saved === null || b.saved === undefined ? "" : euro(b.saved),
           opmerking(b),
         ])
