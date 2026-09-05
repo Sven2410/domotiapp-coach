@@ -1664,9 +1664,14 @@ EVENING_START = time(20, 0)
 # avondpiek, want we hadden gezegd dat hij pas na 20 uur weer mag laden." De
 # klaar-tijdregel staat hier nog boven: past het anders niet meer, dan laadt
 # hij. Zon blijft in de avondpiek gewoon beschikbaar, want die belast de
-# aansluiting niet. Vijf uur is een aanname van mij en geen meting; Sven kan
-# hem verzetten.
-EVENING_PEAK_START = time(17, 0)
+# aansluiting niet.
+#
+# Zes uur, en niet vijf. Vijf was een aanname van mij; op 05-09-2026 kostte
+# die bij Van den Dam 1,65 euro: het uur van 17:00 stond op 0,186 en mocht
+# niet, dus moesten de laatste 11,6 kWh 's nachts tegen 0,328. Sven koos
+# toen 18:00, want de kookpiek zit ná zes uur en de prijs van 17:00 is bij
+# een dynamisch contract meestal nog een middagprijs.
+EVENING_PEAK_START = time(18, 0)
 
 
 def in_evening_peak(moment: datetime) -> bool:

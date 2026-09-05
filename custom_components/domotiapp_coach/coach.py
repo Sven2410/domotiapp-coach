@@ -2216,10 +2216,23 @@ class ChargerCoach:
         return tarief.buy, tarief.feed_in
 
     def _geld_begin(
-        self, device_id: str, now: datetime, settings: dict[str, Any] | None
+        self,
+        device_id: str,
+        now: datetime,
+        settings: dict[str, Any] | None,
+        ingestapt: bool = False,
     ) -> dict[str, Any]:
         """De teller van een nieuwe beurt, of die van de beurt die bij de
-        herstart nog open stond."""
+        herstart nog open stond.
+
+        Loopt de beurt al bij de eerste ronde (`ingestapt`) en staat er niets
+        in de opslag, dan is het inplugmoment onbekend en dus ook de prijs van
+        toen. Dan komt er geen ijkpunt: de kilowatturen en de kosten tellen,
+        de besparing blijft leeg. Sven op 05-09-2026, bij "bespaard -0,01" op
+        een beurt van vrijdagavond die de coach pas om 15:03 zag: "waarom is
+        er vandaag niks bespaard?" Een ijkpunt van het verkeerde uur is erger
+        dan geen ijkpunt.
+        """
         open_beurt = self._beurt_open.pop(device_id, None)
         if open_beurt is not None:
             ingeplugd = _tijdstip(open_beurt.get("plugged_at"))
@@ -2236,6 +2249,8 @@ class ChargerCoach:
                 "bewaard": None,
             }
         koop, terug = self._prijs_nu(settings, now) if settings is not None else (None, None)
+        if ingestapt:
+            koop, terug = None, None
         return {
             "ingeplugd": now,
             "ijk_prijs": koop,
@@ -2421,7 +2436,7 @@ class ChargerCoach:
             # "Geladen van 20:58 tot 21:32, 3,1 kWh", terwijl de auto vanaf 19:18
             # aan de kabel hing en er 5,2 kWh in was gegaan.
             sessie["ingestapt"] = charger.charging
-            sessie["geld"] = self._geld_begin(device_id, now, settings)
+            sessie["geld"] = self._geld_begin(device_id, now, settings, charger.charging)
 
         # Wat deze beurt kost en bespaart, per ronde bijgeteld. Zie `_geld_bij`.
         geld = sessie.get("geld")

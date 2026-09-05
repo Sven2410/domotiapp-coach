@@ -62,14 +62,21 @@ export function perApparaat(items) {
 /** Wat er over een beurt te zeggen is naast de getallen. */
 export function opmerking(beurt) {
   if (!beurt) return "";
-  if (!beurt.complete) return "loopt nog";
-  if (beurt.price_unknown) {
+  const delen = [];
+  if (!beurt.complete) delen.push("loopt nog");
+  if (beurt.resumed && (beurt.ref_price === null || beurt.ref_price === undefined)) {
+    // De coach stapte midden in de beurt in en kent het inplugmoment niet,
+    // dus ook de prijs van toen niet: geen ijkpunt, geen verzonnen bedrag.
+    delen.push("na een herstart, prijs bij inpluggen onbekend");
+  } else if (beurt.price_unknown) {
     const zonder = Number(beurt.unknown_kwh) || 0;
-    if (beurt.saved !== null && beurt.saved !== undefined && zonder > 0) {
-      return `${zonder.toFixed(1).replace(".", ",")} kWh zonder prijs`;
-    }
-    return "prijs onbekend";
+    delen.push(
+      beurt.saved !== null && beurt.saved !== undefined && zonder > 0
+        ? `${zonder.toFixed(1).replace(".", ",")} kWh zonder prijs`
+        : "prijs onbekend"
+    );
+  } else if (beurt.resumed) {
+    delen.push("na een herstart");
   }
-  if (beurt.resumed) return "na een herstart";
-  return "";
+  return delen.join(", ");
 }

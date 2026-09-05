@@ -60,8 +60,9 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    Hij moduleert van 6 A tot het maximum van de paal, op het aantal fasen dat
    er is. Er staat nergens code die een fasemodus schrijft; dat hoort zo te
    blijven.
-4. **Niets van het net in de avondpiek**, van `EVENING_PEAK_START` (17:00,
-   een aanname van mij) tot `EVENING_START` (20:00), bij elk contract. Bij een
+4. **Niets van het net in de avondpiek**, van `EVENING_PEAK_START` (18:00,
+   Svens keuze van 05-09-2026; 17:00 kostte die dag 1,65 euro) tot
+   `EVENING_START` (20:00), bij elk contract. Bij een
    vast contract komt er bovendien vóór 20:00 helemaal niets van het net bij
    op de avond die bij de klaar-tijd hoort. Zon blijft altijd beschikbaar,
    want die belast de aansluiting niet. Alleen de klaar-tijdregel en snelladen

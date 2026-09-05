@@ -574,9 +574,11 @@ proef("bespaard telt per periode en per apparaat op, zonder verzonnen geld", () 
   assert.equal(t.lopend, 1);
   const per = perApparaat(beurtenIn(beurten, new Date(2026, 8, 1), new Date(2026, 8, 8)));
   assert.deepEqual(per.map((a) => [a.name, a.beurten, a.saved]), [["Laadpaal", 2, 16.3], ["Vaatwasser", 1, 0]]);
-  assert.equal(opmerking(beurten[2]), "loopt nog");
+  assert.equal(opmerking(beurten[2]), "loopt nog, prijs onbekend");
   assert.equal(opmerking({ ...beurten[2], complete: true }), "prijs onbekend");
   assert.equal(opmerking({ ...beurten[0], resumed: true }), "na een herstart");
+  assert.equal(opmerking({ ...beurten[0], resumed: true, ref_price: null, saved: null, price_unknown: true }),
+    "na een herstart, prijs bij inpluggen onbekend", "midden in een beurt ingestapt: geen ijkpunt");
   assert.equal(opmerking(beurten[0]), "");
 });
 
