@@ -26,7 +26,10 @@ def verbind():
 
 def _verbind():
     w = ws.WS()
-    w.s.settimeout(ELKE)  # even niets is geen storing, maar wel het sein voor een stand
+    # Kort wachten en dan op de klok kijken. Niet ELKE zelf: Home Assistant
+    # stuurt tussendoor pings die ws.recv zelf beantwoordt, en dan loopt een
+    # lange wachttijd nooit af.
+    w.s.settimeout(min(30, ELKE))
     w.id += 1
     w.send({"id": w.id, "type": "subscribe_events",
             "event_type": "domotiapp_coach_notification"})
@@ -61,11 +64,11 @@ while True:
         wacht_op = stand(w)
         laatste = time.time()
         continue
-    if m is None or time.time() - laatste >= ELKE:
+    if time.time() - laatste >= ELKE:
         wacht_op = stand(w)
         laatste = time.time()
-        if m is None:
-            continue
+    if m is None:
+        continue
     if m.get("type") == "ping":
         w.send({"id": m.get("id"), "type": "pong"})
         continue
