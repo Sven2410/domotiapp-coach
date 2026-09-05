@@ -583,6 +583,24 @@ async def async_history_quarters(
     connection.send_result(msg["id"], rijen)
 
 
+@websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/savings/list"})
+@websocket_api.async_response
+async def async_savings_list(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Elke laadbeurt met wat hij kostte en bespaarde, de nieuwste eerst.
+
+    Het paneel telt zelf op per dag, week, maand, jaar en per apparaat; hier
+    komen alleen de beurten vandaan. Zie `BeurtenStore`.
+    """
+    from .storage import async_get_beurten
+
+    items = await async_get_beurten(hass).async_list()
+    connection.send_result(msg["id"], list(reversed(items)))
+
+
 @websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/notifications/list"})
 @websocket_api.async_response
 async def async_notifications_list(

@@ -25,6 +25,7 @@ const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
 import { tariff } from "../data-source.js";
 import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
+import { beurtenIn, opmerking, perApparaat, totalen } from "../savings.js";
 import {
   PERIODS,
   combine,
@@ -264,6 +265,9 @@ class DacViewHistory extends DacElement {
   constructor() {
     super();
     this.period_ = "week";
+    // Energie of Bespaard; de laadbeurten komen pas als iemand daarnaar kijkt.
+    this.onderwerp_ = "energie";
+    this.beurten_ = undefined;
     this.offset_ = 0;
     // Hoe fijn het verloop in het rapport komt te staan. Leeg betekent: kies
     // wat bij de periode past. Zodra de klant zelf iets aanwijst blijft die
@@ -302,6 +306,13 @@ class DacViewHistory extends DacElement {
         </header>
 
         <div class="controls">
+          <div class="keuze">
+            <span class="keuze-kop">Onderwerp</span>
+            <div class="segmented" id="onderwerpen">
+              <button type="button" data-onderwerp="energie" aria-pressed="true">Energie</button>
+              <button type="button" data-onderwerp="bespaard" aria-pressed="false">Bespaard</button>
+            </div>
+          </div>
           <div class="keuze">
             <span class="keuze-kop">Periode</span>
             <div class="segmented" id="periods">
@@ -355,11 +366,33 @@ class DacViewHistory extends DacElement {
           </div>
           <div id="gas-stage"></div>
         </section>
+
+        <section class="card saved" id="saved-card" hidden>
+          <div class="panel-head">
+            <div class="eyebrow">Bespaard</div>
+            <h2>Wat de coach je bespaarde</h2>
+          </div>
+          <div class="totals" id="saved-totals"></div>
+          <p class="note" id="saved-note"></p>
+          <div class="tabel-wrap"><table class="beurten" id="saved-devices"></table></div>
+          <div class="tabel-wrap"><table class="beurten" id="saved-list"></table></div>
+        </section>
       </div>
     `;
   }
 
   afterRender() {
+    for (const button of this.$$("#onderwerpen button")) {
+      button.addEventListener("click", () => {
+        if (this.onderwerp_ === button.dataset.onderwerp) return;
+        this.onderwerp_ = button.dataset.onderwerp;
+        for (const knop of this.$$("#onderwerpen button")) {
+          knop.setAttribute("aria-pressed", String(knop.dataset.onderwerp === this.onderwerp_));
+        }
+        if (this.onderwerp_ === "bespaard") this.laadBeurten_();
+        this.paint_();
+      });
+    }
     for (const button of this.$$("#periods button")) {
       button.addEventListener("click", () => {
         if (this.period_ === button.dataset.period) return;
@@ -548,6 +581,19 @@ class DacViewHistory extends DacElement {
   paint_() {
     if (!this.rendered_) return;
     this.paintPeriod_();
+
+    // Bespaard is een eigen onderwerp met dezelfde periodeknoppen: de
+    // energiekaarten gaan dicht en de besparingskaart open, of andersom.
+    const bespaard = this.onderwerp_ === "bespaard";
+    this.$("#saved-card").hidden = !bespaard;
+    this.$("#card").hidden = bespaard;
+    this.$("#korrel-note").hidden = bespaard;
+    if (bespaard) {
+      this.$("#money-card").hidden = true;
+      this.$("#gas-card").hidden = true;
+      this.paintSaved_();
+      return;
+    }
 
     const note = this.$("#note");
     const roles = this.meters_();
@@ -914,6 +960,7 @@ class DacViewHistory extends DacElement {
       energie: energieVakjes,
       geld: geldVakjes,
       geldUitleg: geldVakjes.length ? this.$("#money-note").textContent : "",
+      bespaard: this.bespaardRapport_(),
       verloop: rows.map((row) => ({
         label: bucketLabel(this.period_, row.start),
         own: row.own,
@@ -1250,6 +1297,169 @@ class DacViewHistory extends DacElement {
    * today's average and the screen says so. Guessing at what a kilowatt-hour
    * cost last February would put a precise-looking number on nothing.
    */
+  /**
+   * Bespaard voor in het rapport: de vakjes, de uitleg en een tabel per beurt.
+   * Alleen als de beurten al opgehaald zijn en er iets in de periode valt;
+   * anders komt het hoofdstuk niet in het rapport.
+   */
+  bespaardRapport_() {
+    if (!Array.isArray(this.beurten_)) return null;
+    const { items, totaal } = this.bespaard_();
+    if (!items.length) return null;
+    const kwh = (value) => {
+      const { value: getal, unit } = energy(value);
+      return `${getal} ${unit}`;
+    };
+    const wanneer = (b) => {
+      const t = new Date(b.plugged_at);
+      if (Number.isNaN(t.getTime())) return "";
+      return `${String(t.getDate()).padStart(2, "0")}-${String(t.getMonth() + 1).padStart(2, "0")} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+    };
+    return {
+      vakjes: [
+        { label: "Bespaard", waarde: euro(totaal.saved) },
+        { label: "Betaald", waarde: euro(totaal.paid) },
+        { label: "Geladen", waarde: kwh(totaal.kwh) },
+        { label: "Waarvan zon", waarde: kwh(totaal.solar_kwh) },
+      ],
+      uitleg:
+        "Bespaard is wat dezelfde kilowatturen gekost hadden tegen de prijs op het moment van " +
+        "inpluggen, min wat ze werkelijk kostten. Eigen zon telt tegen wat teruglevering " +
+        "opgebracht had." +
+        (totaal.onbekend
+          ? ` ${totaal.onbekend === 1 ? "Eén beurt telt" : `${totaal.onbekend} beurten tellen`} niet mee in het geld, omdat de prijs toen niet bekend was.`
+          : ""),
+      kop: ["Ingeplugd", "Apparaat", "Geladen", "Zon", "Prijs toen", "Betaald", "Bespaard"],
+      rijen: items.map((b) => [
+        wanneer(b),
+        b.car ? `${b.name}, ${b.car}` : b.name,
+        kwh(b.kwh),
+        kwh(b.solar_kwh),
+        b.ref_price === null || b.ref_price === undefined ? "" : euro(b.ref_price),
+        b.price_unknown ? "" : euro(b.paid),
+        b.saved === null || b.saved === undefined ? "" : euro(b.saved),
+      ]),
+      totaal: ["Totaal", "", kwh(totaal.kwh), kwh(totaal.solar_kwh), "", euro(totaal.paid), euro(totaal.saved)],
+    };
+  }
+
+  /** De laadbeurten ophalen, één keer; daarna leeft de lijst mee met de periode. */
+  async laadBeurten_() {
+    if (this.beurten_ !== undefined || !this.hass_?.callWS) return;
+    this.beurten_ = null;
+    try {
+      this.beurten_ = await this.hass_.callWS({ type: "domotiapp_coach/savings/list" });
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de laadbeurten niet laden", error);
+      this.beurten_ = [];
+    }
+    if (this.onderwerp_ === "bespaard") this.paint_();
+  }
+
+  /** De beurten van de gekozen periode en wat ze samen bespaarden. */
+  bespaard_() {
+    const start = periodStart(this.period_, this.offset_);
+    const end = periodEnd(this.period_, start);
+    const items = beurtenIn(this.beurten_ ?? [], start, end);
+    return { items, totaal: totalen(items), apparaten: perApparaat(items) };
+  }
+
+  paintSaved_() {
+    const note = this.$("#saved-note");
+    const tegels = this.$("#saved-totals");
+    const apparaten = this.$("#saved-devices");
+    const lijst = this.$("#saved-list");
+    tegels.replaceChildren();
+    apparaten.replaceChildren();
+    lijst.replaceChildren();
+
+    if (this.beurten_ === undefined || this.beurten_ === null) {
+      note.textContent = "Bezig met ophalen…";
+      return;
+    }
+    const { items, totaal, apparaten: perDevice } = this.bespaard_();
+    if (!items.length) {
+      note.textContent = this.beurten_.length
+        ? "Geen laadbeurten in deze periode."
+        : "Nog geen laadbeurten. Vanaf de eerstvolgende beurt staat hier wat hij kostte en bespaarde.";
+      return;
+    }
+
+    const tegel = (label, value, tone) => {
+      const box = document.createElement("div");
+      box.className = "total";
+      if (tone) box.style.setProperty("--tone", tone);
+      const l = document.createElement("span");
+      l.className = "t-label";
+      l.textContent = label;
+      const v = document.createElement("span");
+      v.className = "t-value";
+      v.textContent = value;
+      box.append(l, v);
+      return box;
+    };
+    const kwh = (value) => {
+      const { value: getal, unit } = energy(value);
+      return `${getal} ${unit}`;
+    };
+    tegels.append(
+      tegel("Bespaard", euro(totaal.saved), "var(--dac-solar)"),
+      tegel("Betaald", euro(totaal.paid), "var(--dac-grid-in)"),
+      tegel("Geladen", kwh(totaal.kwh)),
+      tegel("Waarvan zon", kwh(totaal.solar_kwh), "var(--dac-solar)")
+    );
+
+    const zinnen = [
+      "Bespaard is wat dezelfde kilowatturen gekost hadden tegen de prijs op het moment van inpluggen, min wat ze werkelijk kostten. Eigen zon telt tegen wat teruglevering opgebracht had.",
+    ];
+    if (totaal.onbekend) {
+      zinnen.push(
+        `${totaal.onbekend === 1 ? "Eén beurt telt" : `${totaal.onbekend} beurten tellen`} niet mee in het geld, omdat de prijs toen niet bekend was.`
+      );
+    }
+    if (totaal.lopend) zinnen.push("Een beurt die nog loopt telt mee tot nu.");
+    note.textContent = zinnen.join(" ");
+
+    const rij = (cellen, kop = false) => {
+      const tr = document.createElement("tr");
+      for (const cel of cellen) {
+        const td = document.createElement(kop ? "th" : "td");
+        td.textContent = cel;
+        tr.append(td);
+      }
+      return tr;
+    };
+    if (perDevice.length > 1) {
+      apparaten.append(rij(["Apparaat", "Beurten", "Geladen", "Zon", "Betaald", "Bespaard"], true));
+      for (const a of perDevice) {
+        apparaten.append(rij([a.name, String(a.beurten), kwh(a.kwh), kwh(a.solar_kwh), euro(a.paid), euro(a.saved)]));
+      }
+    }
+
+    const wanneer = (b) => {
+      const t = new Date(b.plugged_at);
+      if (Number.isNaN(t.getTime())) return "";
+      const dag = `${String(t.getDate()).padStart(2, "0")}-${String(t.getMonth() + 1).padStart(2, "0")}`;
+      const klok = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+      return this.period_ === "day" ? klok : `${dag} ${klok}`;
+    };
+    lijst.append(rij(["Ingeplugd", "Apparaat", "Geladen", "Zon", "Prijs toen", "Betaald", "Bespaard", ""], true));
+    for (const b of items) {
+      lijst.append(
+        rij([
+          wanneer(b),
+          b.car ? `${b.name}, ${b.car}` : b.name,
+          kwh(b.kwh),
+          kwh(b.solar_kwh),
+          b.ref_price === null || b.ref_price === undefined ? "" : euro(b.ref_price),
+          b.price_unknown ? "" : euro(b.paid),
+          b.saved === null || b.saved === undefined ? "" : euro(b.saved),
+          opmerking(b),
+        ])
+      );
+    }
+  }
+
   paintMoney_() {
     const card = this.$("#money-card");
     const rows = this.rowsShown_ ?? [];
@@ -1594,6 +1804,16 @@ DacViewHistory.css = /* css */ `
   .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: 0 0 auto; }
 
   .money .totals { margin: 16px 0 0; }
+  .saved .totals { margin: 16px 0 0; }
+  .tabel-wrap { overflow-x: auto; margin-top: 16px; }
+  .tabel-wrap:has(table:empty) { display: none; }
+  table.beurten { border-collapse: collapse; width: 100%; font-size: 13px; }
+  table.beurten th, table.beurten td {
+    text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--dac-border);
+    white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+  table.beurten th { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dac-ink-3); }
+  table.beurten td:last-child { color: var(--dac-ink-3); }
   .note { margin: 12px 0 0; font-size: 13px; line-height: 1.5; color: var(--dac-ink-2); }
   .note:empty { display: none; }
 

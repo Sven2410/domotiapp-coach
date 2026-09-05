@@ -545,6 +545,41 @@ proef("het scherm tekent een kop per dag en een rij per melding", () => {
   assert.match(knopen.get("#lijst").kinderen[0].textContent, /nog niets gemeld/, "leeg is een zin, geen leeg scherm");
 });
 
+// --- Bespaard: de laadbeurten opgeteld --------------------------------------
+//
+// Sven op 05-09-2026: "een overzichtje wat we hebben bespaard, per dag, week,
+// maand, jaar, van elk apparaat." Het rekenwerk per beurt zit in de coach; hier
+// wordt alleen opgeteld, en een beurt zonder prijs telt niet mee in het geld.
+
+const { beurtenIn, totalen, perApparaat, opmerking } = await import(
+  "../custom_components/domotiapp_coach/frontend/src/savings.js"
+);
+
+proef("bespaard telt per periode en per apparaat op, zonder verzonnen geld", () => {
+  const beurten = [
+    { id: "a:1", device: "a", name: "Laadpaal", plugged_at: "2026-09-04T19:01:00", ended: "2026-09-06T04:09:00",
+      kwh: 66.1, solar_kwh: 6.9, paid: 9.5, ref_price: 0.36, ref_cost: 23.8, saved: 14.3, price_unknown: false, complete: true },
+    { id: "a:2", device: "a", name: "Laadpaal", plugged_at: "2026-09-02T18:00:00", ended: "2026-09-03T05:00:00",
+      kwh: 20, solar_kwh: 0, paid: 4, ref_price: 0.3, ref_cost: 6, saved: 2, price_unknown: false, complete: true },
+    { id: "b:1", device: "b", name: "Vaatwasser", plugged_at: "2026-09-05T20:00:00", ended: null,
+      kwh: 1.2, solar_kwh: 0, paid: 0, ref_price: null, ref_cost: null, saved: null, price_unknown: true, complete: false },
+  ];
+  const week = beurtenIn(beurten, new Date(2026, 8, 5), new Date(2026, 8, 7));
+  assert.deepEqual(week.map((b) => b.id), ["a:1", "b:1"], "een beurt valt op zijn eind, of op nu als hij loopt; de nieuwste eerst");
+  const t = totalen(week);
+  assert.equal(t.beurten, 2);
+  assert.ok(Math.abs(t.kwh - 67.3) < 1e-9, "de kilowatturen tellen altijd mee");
+  assert.equal(t.saved, 14.3, "het geld alleen van beurten met een prijs");
+  assert.equal(t.onbekend, 1);
+  assert.equal(t.lopend, 1);
+  const per = perApparaat(beurtenIn(beurten, new Date(2026, 8, 1), new Date(2026, 8, 8)));
+  assert.deepEqual(per.map((a) => [a.name, a.beurten, a.saved]), [["Laadpaal", 2, 16.3], ["Vaatwasser", 1, 0]]);
+  assert.equal(opmerking(beurten[2]), "loopt nog");
+  assert.equal(opmerking({ ...beurten[2], complete: true }), "prijs onbekend");
+  assert.equal(opmerking({ ...beurten[0], resumed: true }), "na een herstart");
+  assert.equal(opmerking(beurten[0]), "");
+});
+
 // --- de knoppenrij op de laadpaalkaart --------------------------------------
 //
 // Op 30-08-2026 kreeg de nieuwe knop "Wat gaat hij doen" de klasse `plan-link`,

@@ -17,6 +17,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import (
+    BEURTEN_KEY,
+    BEURTEN_MAX,
+    BEURTEN_VERSION,
     DEFAULT_SETTINGS,
     DOMAIN,
     MELDINGEN_KEY,
@@ -273,6 +276,55 @@ class MeldingenStore:
         self._items = items[-MELDINGEN_MAX:]
         await self._store.async_save({"items": self._items})
         return entry
+
+
+class BeurtenStore:
+    """Elke laadbeurt, met wat hij kostte en wat hij bespaarde.
+
+    Sven op 05-09-2026: "Kunnen we ergens een overzichtje maken wat we hebben
+    bespaard? Per dag, week, maand, jaar, van elk apparaat. Dat is natuurlijk
+    het belangrijkste voor de klant." Het ijkpunt is de prijs op het moment
+    van inpluggen: "bereken die prijs wanneer die gestopt is en gewacht heeft
+    met laden op een goedkoop moment. Dus de prijs vanaf het inpluggen."
+
+    Eén regel per beurt, op `id` (apparaat plus inplugmoment). Een lopende
+    beurt staat er ook al in, met `complete` op false, zodat een herstart hem
+    niet kwijtraakt. De coach werkt hem elke paar minuten bij.
+    """
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._store: Store[dict[str, Any]] = Store(hass, BEURTEN_VERSION, BEURTEN_KEY)
+        self._items: list[dict[str, Any]] | None = None
+
+    async def async_list(self) -> list[dict[str, Any]]:
+        if self._items is None:
+            data = await self._store.async_load()
+            items = (data or {}).get("items") if isinstance(data, dict) else None
+            self._items = [
+                item for item in (items or []) if isinstance(item, dict) and item.get("id")
+            ]
+        return list(self._items)
+
+    async def async_upsert(self, entry: dict[str, Any]) -> dict[str, Any]:
+        items = await self.async_list()
+        items = [item for item in items if item.get("id") != entry["id"]]
+        items.append(entry)
+        items.sort(key=lambda item: str(item.get("plugged_at") or ""))
+        self._items = items[-BEURTEN_MAX:]
+        await self._store.async_save({"items": self._items})
+        return entry
+
+    async def async_open(self) -> list[dict[str, Any]]:
+        """De beurten die nog lopen, voor na een herstart."""
+        return [item for item in await self.async_list() if not item.get("complete")]
+
+
+def async_get_beurten(hass: HomeAssistant) -> BeurtenStore:
+    """De ene lijst laadbeurten van deze installatie."""
+    data = hass.data.setdefault(DOMAIN, {})
+    if "beurten" not in data:
+        data["beurten"] = BeurtenStore(hass)
+    return data["beurten"]
 
 
 def async_get_meldingen(hass: HomeAssistant) -> MeldingenStore:

@@ -64,7 +64,7 @@ from .planner import (
     resolve_window,
     should_send,
 )
-from .storage import async_get_meldingen, async_get_store
+from .storage import async_get_beurten, async_get_meldingen, async_get_store
 from .units import hour_to_watts, to_kwh, to_watts
 
 _LOGGER = logging.getLogger(__name__)
@@ -465,6 +465,9 @@ class ChargerCoach:
         # Het laatste besluit dat in de geschiedenis staat, per paal, zodat
         # alleen een verandering een regel oplevert en niet elke minuut.
         self._besluit_genoteerd: dict[str, tuple[Any, ...]] = {}
+        # Beurten die bij een herstart nog open stonden in de opslag, per
+        # apparaat: het geld van de beurt loopt daar gewoon in door.
+        self._beurt_open: dict[str, dict[str, Any]] = {}
         # Of de wekpoging van deze sessie nog openstaat. Eén per sessie, dus
         # zodra hij gedaan is blijft dit staan tot de kabel eruit gaat.
         self._woken: set[str] = set()
@@ -930,6 +933,10 @@ class ChargerCoach:
             _LOGGER.exception("kon de instellingen niet lezen")
             return False
 
+        if not self._restored:
+            # Eén keer, vóór de eerste ronde: de beurten die nog liepen toen
+            # Home Assistant stopte, zodat hun geld gewoon doortelt.
+            await self._async_beurten_laden()
         self._restore(settings)
 
         level = (settings.get("strategy") or {}).get("level", LEVEL_PROPOSE)
@@ -1088,7 +1095,7 @@ class ChargerCoach:
             self._asking_since.setdefault(device_id, now)
         else:
             self._asking_since.pop(device_id, None)
-        self._bijhouden(now, device, car, charger, window, decision)
+        self._bijhouden(now, device, car, charger, window, decision, grid, settings)
 
         # Bijhouden hoe lang een sessie al tegen de ladder in wordt aangehouden.
         # Zodra de ladder het weer eens is met wat er gebeurt, staat de teller
@@ -2180,6 +2187,156 @@ class ChargerCoach:
         "too-early": "de tijden die je hebt ingesteld",
     }
 
+    # ------------------------------------------------------------------
+    # Wat een laadbeurt kost en bespaart
+    #
+    # Sven op 05-09-2026: "Kunnen we ergens een overzichtje maken wat we
+    # hebben bespaard? Dat is natuurlijk het belangrijkste voor de klant." Het
+    # ijkpunt is de prijs op het moment van inpluggen: "bereken die prijs
+    # wanneer die gestopt is en gewacht heeft met laden op een goedkoop moment.
+    # Dus de prijs vanaf het inpluggen." Elke kWh die later goedkoper werd
+    # geladen, of uit eigen zon kwam, telt tegen die prijs.
+    #
+    # Alleen gemeten getallen: het vermogen van de paal per ronde, de prijs van
+    # dat uur, en het zonoverschot van dat moment. Ontbreekt een prijs, dan is
+    # de besparing van die beurt onbekend en staat dat erbij.
+    # ------------------------------------------------------------------
+
+    def _prijs_nu(
+        self, settings: dict[str, Any], now: datetime
+    ) -> tuple[float | None, float | None]:
+        """Wat een kWh nu kost en wat teruglevering nu opbrengt, of None."""
+        rows = self._prices(settings)
+        if rows:
+            for rij in rows:
+                if rij["start"] <= now < rij["end"]:
+                    return rij["price"], rij.get("feed_in")
+            return None, None
+        tarief = self._tariff(settings)
+        return tarief.buy, tarief.feed_in
+
+    def _geld_begin(
+        self, device_id: str, now: datetime, settings: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """De teller van een nieuwe beurt, of die van de beurt die bij de
+        herstart nog open stond."""
+        open_beurt = self._beurt_open.pop(device_id, None)
+        if open_beurt is not None:
+            ingeplugd = _tijdstip(open_beurt.get("plugged_at"))
+            if ingeplugd is not None:
+                ingeplugd = ingeplugd.replace(tzinfo=None)
+            return {
+                "ingeplugd": ingeplugd or now,
+                "ijk_prijs": open_beurt.get("ref_price"),
+                "ijk_terug": open_beurt.get("ref_feed_in"),
+                "kwh": float(open_beurt.get("kwh") or 0.0),
+                "zon_kwh": float(open_beurt.get("solar_kwh") or 0.0),
+                "betaald": float(open_beurt.get("paid") or 0.0),
+                "onbekend_kwh": float(open_beurt.get("unknown_kwh") or 0.0),
+                "bewaard": None,
+            }
+        koop, terug = self._prijs_nu(settings, now) if settings is not None else (None, None)
+        return {
+            "ingeplugd": now,
+            "ijk_prijs": koop,
+            "ijk_terug": terug,
+            "kwh": 0.0,
+            "zon_kwh": 0.0,
+            "betaald": 0.0,
+            "onbekend_kwh": 0.0,
+            "bewaard": None,
+        }
+
+    def _geld_bij(
+        self,
+        geld: dict[str, Any],
+        kwh_stap: float,
+        watt: float,
+        grid: Grid | None,
+        settings: dict[str, Any],
+        now: datetime,
+    ) -> None:
+        """Eén ronde erbij: hoeveel er in ging, hoeveel daarvan zon was, en
+        wat het kostte. Zon is wat er zonder de paal naar het net was gegaan,
+        tot wat de paal trok; de rest kwam van het net tegen de prijs van nu.
+        Eigen zon wordt gerekend tegen wat teruglevering opgebracht had, want
+        dat is wat die kWh je werkelijk kostte."""
+        if kwh_stap <= 0:
+            return
+        over_w = max(0.0, grid.surplus_w) if grid is not None else 0.0
+        zon_deel = min(1.0, over_w / watt) if watt > 0 else 0.0
+        zon_kwh = kwh_stap * zon_deel
+        net_kwh = kwh_stap - zon_kwh
+        koop, terug = self._prijs_nu(settings, now)
+        geld["kwh"] += kwh_stap
+        geld["zon_kwh"] += zon_kwh
+        if koop is None:
+            # Geen prijs op dit moment, bijvoorbeeld een prijssensor die even
+            # weg is: deze kilowatturen tellen mee in het laden en niet in het
+            # geld. Ze staan apart, zodat de rest van de beurt gewoon telt.
+            geld["onbekend_kwh"] = geld.get("onbekend_kwh", 0.0) + kwh_stap
+            return
+        geld["betaald"] += net_kwh * koop + zon_kwh * (terug if terug is not None else 0.0)
+
+    def _beurt_regel(
+        self,
+        device: dict[str, Any],
+        car: Car | None,
+        sessie: dict[str, Any],
+        now: datetime,
+        klaar: bool,
+    ) -> dict[str, Any]:
+        """De beurt zoals hij in de opslag en op het scherm komt."""
+        geld = sessie.get("geld") or {}
+        ingeplugd: datetime = geld.get("ingeplugd") or now
+        kwh = round(float(geld.get("kwh") or 0.0), 3)
+        betaald = round(float(geld.get("betaald") or 0.0), 4)
+        ijk = geld.get("ijk_prijs")
+        onbekend_kwh = round(float(geld.get("onbekend_kwh") or 0.0), 3)
+        # Het ijkpunt geldt voor de kilowatturen waarvan de prijs bekend was;
+        # de rest telt in het laden en niet in het geld.
+        ijk_kosten = None if ijk is None else round(max(0.0, kwh - onbekend_kwh) * float(ijk), 4)
+        begon = sessie.get("begon")
+        return {
+            "id": f"{device.get('id', '')}:{ingeplugd.replace(microsecond=0).isoformat()}",
+            "device": device.get("id", ""),
+            "name": device.get("name") or "Laadpaal",
+            "car": self._hoe_heet(car) if car is not None else "",
+            "plugged_at": ingeplugd.replace(microsecond=0).isoformat(),
+            "started": begon.replace(microsecond=0).isoformat() if begon else None,
+            "ended": now.replace(microsecond=0).isoformat() if klaar else None,
+            "kwh": kwh,
+            "solar_kwh": round(float(geld.get("zon_kwh") or 0.0), 3),
+            "paid": betaald,
+            "ref_price": ijk,
+            "ref_feed_in": geld.get("ijk_terug"),
+            "ref_cost": ijk_kosten,
+            "saved": None if ijk_kosten is None else round(ijk_kosten - betaald, 4),
+            "price_unknown": ijk is None or onbekend_kwh > 0,
+            "unknown_kwh": onbekend_kwh,
+            "resumed": bool(sessie.get("ingestapt")),
+            "complete": klaar,
+        }
+
+    def _beurt_schrijven(self, entry: dict[str, Any]) -> None:
+        """Naar de opslag, buiten de ronde om: de ronde wacht er niet op."""
+
+        async def schrijf() -> None:
+            try:
+                await async_get_beurten(self.hass).async_upsert(entry)
+            except Exception:  # noqa: BLE001 - de opslag mag de ronde niet kosten
+                _LOGGER.exception("kon de laadbeurt niet bewaren")
+
+        self.hass.async_create_task(schrijf())
+
+    async def _async_beurten_laden(self) -> None:
+        """De beurten die bij de vorige keer nog liepen, voor `_geld_begin`."""
+        try:
+            for entry in await async_get_beurten(self.hass).async_open():
+                self._beurt_open[str(entry.get("device") or "")] = entry
+        except Exception:  # noqa: BLE001 - zonder geschiedenis begint hij gewoon opnieuw
+            _LOGGER.exception("kon de lopende laadbeurten niet lezen")
+
     def _bijhouden(
         self,
         now: datetime,
@@ -2188,10 +2345,19 @@ class ChargerCoach:
         charger: Charger,
         window: Window,
         decision: Decision,
+        grid: Grid | None = None,
+        settings: dict[str, Any] | None = None,
     ) -> None:
         """Onthouden wat er in deze laadbeurt gebeurt, om het na te kunnen vertellen."""
         device_id = device.get("id", "")
         if not charger.connected:
+            # Een beurt die nog open stond in de opslag terwijl de kabel er nu
+            # niet in zit: de kabel ging eruit terwijl Home Assistant herstartte.
+            # Afsluiten met wat er bekend is, want anders blijft hij eeuwig lopen.
+            open_beurt = self._beurt_open.pop(device_id, None)
+            if open_beurt is not None:
+                self._beurt_schrijven({**open_beurt, "complete": True,
+                                       "ended": open_beurt.get("ended") or now.isoformat()})
             # De kabel is eruit. Voordat deze beurt wordt vergeten gaat hij naar
             # `_afscheid`, want er hoort nog een verslag over. Sven trok hem er
             # op 20-08-2026 twee keer uit tijdens het laden en hoorde niets: er
@@ -2201,6 +2367,8 @@ class ChargerCoach:
             # over gezegd is: een auto die vol was en daarna van de kabel gaat
             # heeft zijn verslag al gehad.
             beurt = self._sessie.pop(device_id, None)
+            if beurt and beurt.get("geld"):
+                self._beurt_schrijven(self._beurt_regel(device, car, beurt, now, klaar=True))
             if beurt and beurt.get("begon") and "vol" not in beurt.get("gemeld", set()):
                 # Het moment waarop de paal het zei, niet het moment waarop de
                 # coach het na `KABEL_ONTDREUN` geloofde. Anders staat er in het
@@ -2253,6 +2421,10 @@ class ChargerCoach:
             # "Geladen van 20:58 tot 21:32, 3,1 kWh", terwijl de auto vanaf 19:18
             # aan de kabel hing en er 5,2 kWh in was gegaan.
             sessie["ingestapt"] = charger.charging
+            sessie["geld"] = self._geld_begin(device_id, now, settings)
+
+        # Wat deze beurt kost en bespaart, per ronde bijgeteld. Zie `_geld_bij`.
+        geld = sessie.get("geld")
 
         # Tijd toeschrijven aan wat er op dat moment aan de hand was. Het verschil
         # met de vorige ronde en niet één minuut, want een ronde kan ook door een
@@ -2307,9 +2479,19 @@ class ChargerCoach:
         # alleen als hij toen ook laadde, want een vermogenssensor die na
         # afloop op zijn laatste waarde blijft hangen zou anders doortellen.
         if eigen["liep"] and 0 < stap <= 10:
-            eigen["kwh"] += eigen["watt"] / 1000.0 * stap / 60.0
+            kwh_stap = eigen["watt"] / 1000.0 * stap / 60.0
+            eigen["kwh"] += kwh_stap
+            if geld is not None and settings is not None:
+                self._geld_bij(geld, kwh_stap, eigen["watt"], grid, settings, now)
         eigen["watt"] = _watts(self.hass, device.get("entity")) or 0.0
         eigen["liep"] = charger.charging
+        if geld is not None:
+            # Elke vijf minuten naar de opslag, en meteen als de beurt net
+            # begint: zo overleeft een lopende beurt een herstart.
+            bewaard = geld.get("bewaard")
+            if bewaard is None or (now - bewaard).total_seconds() >= 300:
+                geld["bewaard"] = now
+                self._beurt_schrijven(self._beurt_regel(device, car, sessie, now, klaar=False))
 
         if meter is not None and meter != eigen["meter_stand"]:
             vorige_stand = eigen["meter_stand"]

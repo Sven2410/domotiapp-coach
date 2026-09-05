@@ -96,6 +96,7 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
 | `frontend/src/` | het paneel, ES-modules zonder buildstap |
 | `frontend/src/schedule-sheet.js` | het schema van één apparaat, als pop-up achter zijn kaart |
 | `frontend/src/views/notifications.js` | Meldingen: alles wat de coach ooit stuurde én elk besluit dat hij nam (`_async_noteer_besluit`), uit `MeldingenStore` in storage.py |
+| `frontend/src/savings.js` | Bespaard, onder Historie: de laadbeurten uit `BeurtenStore` (storage.py) opgeteld per periode en per apparaat; de coach rekent ze per ronde bij in `_geld_bij` (coach.py), tegen de prijs van het inplugmoment |
 
 De scheiding tussen `planner.py` en `coach.py` is de kern: het denkwerk is los
 te draaien tegen een hele dag echte historie voordat er ook maar iets geschakeld
