@@ -152,8 +152,8 @@ for naam, vl in V.items():
     # driefasige auto 0,4 kWh over de grens heen.
     if naam not in ("snelladen", "vast-onhaalbare-klaar-tijd", "eenfase-krappe-zekering"):
         controle(f"{naam}: niets van het net in de avondpiek",
-                 vl.net_kwh_tussen("17:00", "20:00") < 0.6,
-                 f"{vl.net_kwh_tussen('17:00', '20:00'):.2f} kWh tussen 17:00 en 20:00")
+                 vl.net_kwh_tussen("18:00", "20:00") < 0.6,
+                 f"{vl.net_kwh_tussen('18:00', '20:00'):.2f} kWh tussen 18:00 en 20:00")
 
 # --- vast contract: zon voor net, net pas na de avondpiek ---------------------
 
@@ -259,7 +259,7 @@ for naam, marge in (("dynamisch-bewolkt", 0.35), ("dynamisch-geen-panelen", 0.35
     if (vl := v(naam)):
         controle(f"{naam}: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
         controle(f"{naam}: niets van het net in de dure avonduren",
-                 vl.net_kwh_tussen("17:00", "21:00") < 0.6, f"{vl.net_kwh_tussen('17:00', '21:00'):.2f} kWh")
+                 vl.net_kwh_tussen("18:00", "21:00") < 0.6, f"{vl.net_kwh_tussen('18:00', '21:00'):.2f} kWh")
         controle(f"{naam}: niet duurder dan het optimum plus wat de prijsregel kost",
                  vl.optimum is not None and vl.kosten <= vl.optimum + marge,
                  f"kosten {vl.kosten:.2f}, optimum {vl.optimum}")
@@ -373,14 +373,16 @@ if (vl := v("tien-uur-erin-dynamisch")):
     controle("tien uur: voor de prijzen alleen uren onder het gemiddelde",
              net_onder_gemiddelde(vl, [r for r in vl.regels if r.tijd.hour < 13]), "")
     controle("tien uur: de goedkope middag pakken", laadt_tussen(vl, "13:05", "17:00"), "")
-    controle("tien uur: stoppen voor de avondpiek", not laadt_tussen(vl, "17:05", "20:00"), "")
+    controle("tien uur: stoppen voor de avondpiek", not laadt_tussen(vl, "18:05", "20:00"), "")
     controle("tien uur: en 's nachts de rest", laadt_tussen(vl, "00:00", "05:00"), "")
     controle("tien uur: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
     # Zestig cent: het uur van 12:00 ligt onder het gemiddelde van de dag maar
     # boven de nacht die hij nog niet kende. Dat is de prijs van de regel; bij
     # Van den Dam bespaarde dezelfde regel op 05-09-2026 twee euro.
-    controle("tien uur: binnen zestig cent van het optimum",
-             vl.optimum is not None and vl.kosten <= vl.optimum + 0.60,
+    # Zeventig sinds de avondpiek om 18:00 begint (05-09-2026): het uur van
+    # 17:00 mag nu mee en ligt onder het daggemiddelde, maar boven de nacht.
+    controle("tien uur: binnen zeventig cent van het optimum",
+             vl.optimum is not None and vl.kosten <= vl.optimum + 0.70,
              f"kosten {vl.kosten:.2f}, optimum {vl.optimum}")
 
 if (vl := v("tien-uur-erin-zon")):
@@ -497,13 +499,14 @@ def vdd_basis(vl, naam):
              any(r.regel == "wait-for-prices" and "Zaterdag staat in je schema uit" in r.reden
                  and "zondag om 06:00" in r.reden for r in vrijdagnacht),
              f"{next((r.reden for r in vrijdagnacht if r.regel == 'wait-for-prices'), '')}")
-    # Een paar minuten nalopen na 17:00 hoort erbij: de auto volgt de limiet
+    # De avondpiek begint sinds 05-09-2026 om 18:00 (Svens keuze, 17:00 kostte
+    # die dag 1,65 euro). Een paar minuten nalopen hoort erbij: de auto volgt de limiet
     # met een minuut vertraging. Sinds 05-09-2026 houdt de coach een lopende
     # beurt in de avondpiek niet meer vast (`_keep_alive`), want met tien
     # ronden `STOP_ROUNDS` was dat een kilowattuur uit de piek.
     controle(f"{naam}: niets van het net in de avondpiek",
-             vl.net_kwh_tussen("17:03", "20:00") < 0.1,
-             f"{vl.net_kwh_tussen('17:03', '20:00'):.2f} kWh tussen 17:03 en 20:00")
+             vl.net_kwh_tussen("18:03", "20:00") < 0.1,
+             f"{vl.net_kwh_tussen('18:03', '20:00'):.2f} kWh tussen 18:03 en 20:00")
     controle(f"{naam}: onder de zekering", vl.hoogste_fase <= 25.0, f"{vl.hoogste_fase:.1f} A")
     controle(f"{naam}: een uur voor zondag 06:00 vol",
              gehaald(vl) and vl.klaar_op is not None and vl.klaar_op <= VDD_ZONDAG_05,

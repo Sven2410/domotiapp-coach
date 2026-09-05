@@ -1594,8 +1594,10 @@ coach34d._async_phase_changed(Meting("sensor.l3", "40"))
 hass34d.states.zet("sensor.l3", "40")
 langs, _ = asyncio.run(ronde(coach34d, inst34d, nu=coachmod._moment()))
 print(f"  door de hele keten heen: {langs['rule']} {langs['amps']} A")
+# Niet "hij laadt", want deze proef loopt op de echte klok en 's avonds kiest
+# de planner voor de zon van morgen; wel "de piek zette hem niet klem".
 controle("de ronde rekent met de gladgestreken fase en niet met de piek",
-         langs["amps"] > 0, f"{langs['rule']} {langs['amps']}")
+         langs["rule"].split("+")[0] not in ("no-room", "tight"), f"{langs['rule']} {langs['amps']}")
 
 # En het tegenbewijs: dezelfde piek zonder historie eronder zet hem wel uit.
 # Dat is precies wat er bij Van den Dam gebeurde, en het laat zien dat het de
@@ -2237,6 +2239,28 @@ controle("bespaard is het ijkpunt min wat betaald is",
          and abs(b48["saved"] - (b48["ref_cost"] - b48["paid"])) < 0.0001, f"{b48.get('saved')}")
 controle("de ingeplugde tijd is de eerste ronde met kabel",
          b48.get("plugged_at") == "2026-08-18T14:37:00", f"{b48.get('plugged_at')}")
+
+print("=== 48b. midden in een beurt ingestapt: geen ijkpunt, geen verzonnen besparing ===")
+# Sven op 05-09-2026, bij "bespaard -0,01" op een beurt die vrijdagavond
+# begon en die de coach pas na een herstart om 15:03 zag: "waarom is er
+# vandaag niks bespaard?" Het ijkpunt was de prijs van het herstartuur, en dat
+# is het verkeerde uur. Zonder inplugmoment dus geen ijkpunt.
+hass48b, _, coach48b = bouw(huis(status="charging", stroom=15.0, vermogen=10800.0,
+                                 teruglevering=0.0, afname=9000.0), inst48)
+asyncio.run(ronde(coach48b, inst48, t48))
+asyncio.run(ronde(coach48b, inst48, t48 + dt.timedelta(minutes=1)))
+# De opslag krijgt de lopende beurt elke vijf minuten; dus nog twee ronden.
+asyncio.run(ronde(coach48b, inst48, t48 + dt.timedelta(minutes=5)))
+asyncio.run(ronde(coach48b, inst48, t48 + dt.timedelta(minutes=6)))
+asyncio.run(hass48b.afmaken())
+b48b = asyncio.run(coachmod.async_get_beurten(hass48b).async_list())
+print(f"  {[(b['kwh'], b['ref_price'], b['saved'], b['resumed']) for b in b48b]}")
+controle("de beurt staat in de opslag als hervat", len(b48b) == 1 and b48b[0]["resumed"], f"{b48b}")
+controle("zonder ijkpunt en zonder besparing",
+         b48b and b48b[0]["ref_price"] is None and b48b[0]["saved"] is None and b48b[0]["price_unknown"],
+         f"{b48b}")
+controle("maar met de kilowatturen en wat ze kostten",
+         b48b and b48b[0]["kwh"] > 0.1 and b48b[0]["paid"] > 0, f"{b48b}")
 
 print("=== 49. elk paneelcommando is ook aangemeld ===")
 # Op 05-09-2026 stond domotiapp_coach/savings/list keurig in websocket.py en
