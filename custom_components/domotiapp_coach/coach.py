@@ -2235,11 +2235,14 @@ class ChargerCoach:
         dan geen ijkpunt.
         """
         open_beurt = self._beurt_open.pop(device_id, None)
-        if open_beurt is not None and open_beurt.get("resumed") and open_beurt.get("ref_price") is None:
-            # Een beurt die een vorige coach al hervat had zonder inplugmoment
-            # (v0.49.x). Opnieuw beginnen en terugrekenen vanaf het echte
-            # inpluggen; de opslag dekt ook wat die vorige coach al telde, dus
-            # zijn tellers gaan niet dubbel mee. Zijn regel gaat straks weg.
+        if open_beurt is not None and open_beurt.get("resumed"):
+            # Een beurt die een vorige coach al hervat had zonder het echte
+            # inplugmoment (v0.49.x: met de prijs van het herstartuur als
+            # ijkpunt, of zonder). Opnieuw beginnen en terugrekenen vanaf het
+            # echte inpluggen; de opslag dekt ook wat die vorige coach al
+            # telde, dus zijn tellers gaan niet dubbel mee. Zijn regel gaat
+            # straks weg. Na het terugrekenen staat `resumed` op false, dus
+            # een echte v0.50-regel komt hier niet.
             koop, terug = None, None
             return {
                 "ingeplugd": now, "ijk_prijs": None, "ijk_terug": None,
