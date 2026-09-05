@@ -12,6 +12,10 @@ Sven op 05-09-2026, toen de paal om 09:42 begon en ik het pas om 10:07 zag:
 """
 import re, sys, time
 
+# Een Windows-console spreekt cp1252 en struikelt over een tekenreeks uit de
+# logs; de wachter mag daar niet op omvallen, want dan wekt hij niemand.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 BESLUITEN = sys.argv[1] if len(sys.argv) > 1 else "besluiten.log"
 MELDINGEN = sys.argv[2] if len(sys.argv) > 2 else "meldingen.log"
 RIJ = re.compile(r"^(\d\d:\d\d:\d\d)\s+(laden|NIET laden)\s+(\S+) A\s+regel=(\S+)")
