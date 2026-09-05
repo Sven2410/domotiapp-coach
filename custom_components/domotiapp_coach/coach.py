@@ -540,6 +540,10 @@ class ChargerCoach:
         """Begin the minute-by-minute round."""
         if self._cancel is None:
             self._cancel = async_track_time_interval(self.hass, self._tick, INTERVAL)
+            # Gaat Home Assistant uit, dan eerst de lopende laadbeurten naar
+            # de opslag: die gaan anders elke vijf minuten en de laatste
+            # minuten raken kwijt.
+            self.hass.bus.async_listen_once("homeassistant_stop", self._async_bij_stop)
         if self._cancel_watchdog is None:
             self._last_round = dt_util.utcnow()
             self._cancel_watchdog = async_track_time_interval(
@@ -2216,74 +2220,30 @@ class ChargerCoach:
         tarief = self._tariff(settings)
         return tarief.buy, tarief.feed_in
 
-    def _geld_begin(
-        self,
-        device_id: str,
-        now: datetime,
-        settings: dict[str, Any] | None,
-        ingestapt: bool = False,
-    ) -> dict[str, Any]:
-        """De teller van een nieuwe beurt, of die van de beurt die bij de
-        herstart nog open stond.
+    @staticmethod
+    def _geld_uit_regel(open_beurt: dict[str, Any], now: datetime) -> dict[str, Any]:
+        """De tellers van een beurt zoals hij in de opslag stond."""
+        ingeplugd = _tijdstip(open_beurt.get("plugged_at"))
+        if ingeplugd is not None:
+            ingeplugd = ingeplugd.replace(tzinfo=None)
+        basis = open_beurt.get("baseline") or {}
+        return {
+            "ingeplugd": ingeplugd or now,
+            "ijk_prijs": open_beurt.get("ref_price"),
+            "ijk_terug": open_beurt.get("ref_feed_in"),
+            "kwh": float(open_beurt.get("kwh") or 0.0),
+            "zon_kwh": float(open_beurt.get("solar_kwh") or 0.0),
+            "betaald": float(open_beurt.get("paid") or 0.0),
+            "onbekend_kwh": float(open_beurt.get("unknown_kwh") or 0.0),
+            "basis_kwh": float(basis.get("kwh") or 0.0),
+            "basis_kosten": float(basis.get("cost") or 0.0),
+            "basis_onbekend": float(basis.get("unknown_kwh") or 0.0),
+            "basis_punten": [list(p) for p in (basis.get("points") or [])],
+        }
 
-        Loopt de beurt al bij de eerste ronde (`ingestapt`) en staat er niets
-        in de opslag, dan is het inplugmoment onbekend en dus ook de prijs van
-        toen. Dan komt er geen ijkpunt: de kilowatturen en de kosten tellen,
-        de besparing blijft leeg. Sven op 05-09-2026, bij "bespaard -0,01" op
-        een beurt van vrijdagavond die de coach pas om 15:03 zag: "waarom is
-        er vandaag niks bespaard?" Een ijkpunt van het verkeerde uur is erger
-        dan geen ijkpunt.
-        """
-        open_beurt = self._beurt_open.pop(device_id, None)
-        basis_oud = (open_beurt or {}).get("baseline") or {}
-        zonder_maat = (
-            open_beurt is not None
-            and float(basis_oud.get("kwh") or 0.0) + 0.5 < float(open_beurt.get("kwh") or 0.0)
-        )
-        if open_beurt is not None and (
-            open_beurt.get("resumed") or open_beurt.get("ref_price") is None or zonder_maat
-        ):
-            # Een beurt die een vorige coach al hervat had zonder het echte
-            # inplugmoment (v0.49.x: met de prijs van het herstartuur als
-            # ijkpunt, of zonder). Opnieuw beginnen en terugrekenen vanaf het
-            # echte inpluggen; de opslag dekt ook wat die vorige coach al
-            # telde, dus zijn tellers gaan niet dubbel mee. Zijn regel gaat
-            # straks weg. Na het terugrekenen staat `resumed` op false, dus
-            # een echte v0.50-regel komt hier niet.
-            koop, terug = None, None
-            return {
-                "ingeplugd": now, "ijk_prijs": None, "ijk_terug": None,
-                "kwh": 0.0, "zon_kwh": 0.0, "betaald": 0.0, "onbekend_kwh": 0.0,
-                "basis_kwh": 0.0, "basis_kosten": 0.0, "basis_onbekend": 0.0,
-                "basis_punten": [], "basis_uur": None,
-                "terugrekenen": True, "opruimen": [open_beurt.get("id")], "bewaard": None,
-            }
-        if open_beurt is not None:
-            ingeplugd = _tijdstip(open_beurt.get("plugged_at"))
-            if ingeplugd is not None:
-                ingeplugd = ingeplugd.replace(tzinfo=None)
-            basis = open_beurt.get("baseline") or {}
-            return {
-                "ingeplugd": ingeplugd or now,
-                "ijk_prijs": open_beurt.get("ref_price"),
-                "ijk_terug": open_beurt.get("ref_feed_in"),
-                "kwh": float(open_beurt.get("kwh") or 0.0),
-                "zon_kwh": float(open_beurt.get("solar_kwh") or 0.0),
-                "betaald": float(open_beurt.get("paid") or 0.0),
-                "onbekend_kwh": float(open_beurt.get("unknown_kwh") or 0.0),
-                "basis_kwh": float(basis.get("kwh") or 0.0),
-                "basis_kosten": float(basis.get("cost") or 0.0),
-                "basis_onbekend": float(basis.get("unknown_kwh") or 0.0),
-                "basis_punten": [list(p) for p in (basis.get("points") or [])],
-                "basis_uur": None,
-                "terugrekenen": False,
-                "bewaard": None,
-            }
-        koop, terug = self._prijs_nu(settings, now) if settings is not None else (None, None)
-        if ingestapt:
-            # Het inplugmoment is onbekend; `_async_terugrekenen` zoekt het
-            # straks op in de recorder en vult de tellers van vóór nu aan.
-            koop, terug = None, None
+    @staticmethod
+    def _geld_leeg(now: datetime, koop: float | None, terug: float | None) -> dict[str, Any]:
+        """Een verse teller."""
         return {
             "ingeplugd": now,
             "ijk_prijs": koop,
@@ -2299,9 +2259,60 @@ class ChargerCoach:
             "basis_onbekend": 0.0,
             "basis_punten": [],
             "basis_uur": None,
-            "terugrekenen": ingestapt,
+            "terugrekenen": False,
             "bewaard": None,
         }
+
+    def _geld_begin(
+        self,
+        device_id: str,
+        now: datetime,
+        settings: dict[str, Any] | None,
+        ingestapt: bool = False,
+    ) -> dict[str, Any]:
+        """De teller van een nieuwe beurt, of die van de beurt die bij de
+        herstart nog open stond.
+
+        Loopt de beurt al bij de eerste ronde (`ingestapt`) en staat er niets
+        in de opslag, dan is het inplugmoment onbekend en dus ook de prijs van
+        toen. Dan zoekt `_async_terugrekenen` het op in de recorder; lukt dat
+        niet, dan komt er geen ijkpunt: de kilowatturen en de kosten tellen,
+        de besparing blijft leeg. Sven op 05-09-2026, bij "bespaard -0,01" op
+        een beurt van vrijdagavond die de coach pas om 15:03 zag: "waarom is
+        er vandaag niks bespaard?" Een ijkpunt van het verkeerde uur is erger
+        dan geen ijkpunt.
+        """
+        open_beurt = self._beurt_open.pop(device_id, None)
+        if open_beurt is not None:
+            basis_oud = open_beurt.get("baseline") or {}
+            zonder_maat = (
+                float(basis_oud.get("kwh") or 0.0) + 0.5 < float(open_beurt.get("kwh") or 0.0)
+            )
+            if open_beurt.get("resumed") or open_beurt.get("ref_price") is None or zonder_maat:
+                # Een beurt die een vorige coach al hervat had zonder het
+                # echte inplugmoment (v0.49.x: met de prijs van het
+                # herstartuur als ijkpunt, of zonder, of zonder maat).
+                # Opnieuw beginnen en terugrekenen vanaf het echte inpluggen;
+                # de opslag dekt ook wat die vorige coach al telde, dus zijn
+                # tellers gaan niet dubbel mee. Zijn regel gaat straks weg,
+                # tenzij het terugrekenen niet lukt: dan telt hij door.
+                geld = self._geld_leeg(now, None, None)
+                geld["terugrekenen"] = True
+                geld["opruimen"] = [open_beurt.get("id")]
+                geld["terugval"] = open_beurt
+                return geld
+            geld = self._geld_uit_regel(open_beurt, now)
+            geld.update({"basis_uur": None, "terugrekenen": False, "bewaard": None,
+                         "hervat_bekend": True})
+            return geld
+        koop, terug = self._prijs_nu(settings, now) if settings is not None else (None, None)
+        if ingestapt:
+            # Het inplugmoment is onbekend; `_async_terugrekenen` zoekt het
+            # straks op in de recorder en vult de tellers van vóór nu aan.
+            koop, terug = None, None
+        geld = self._geld_leeg(now, koop, terug)
+        geld["terugrekenen"] = ingestapt
+        return geld
 
     def _basis_bij(
         self,
@@ -2446,7 +2457,10 @@ class ChargerCoach:
                 "unknown_kwh": round(float(geld.get("basis_onbekend") or 0.0), 3),
                 "points": [list(p) for p in (geld.get("basis_punten") or [])][-240:],
             },
-            "resumed": bool(sessie.get("ingestapt")),
+            # Hervat: de coach stapte midden in de beurt in én kent het
+            # inplugmoment niet. Na een herstart met de regel nog in de opslag,
+            # of na terugrekenen, is het inplugmoment wél bekend.
+            "resumed": bool(sessie.get("ingestapt")) and not geld.get("hervat_bekend"),
             "complete": klaar,
         }
 
@@ -2669,6 +2683,15 @@ class ChargerCoach:
         if geld is None:
             return
         geld["terugrekenen"] = False
+        terugval = geld.pop("terugval", None)
+        if terug is None and terugval is not None:
+            # Terugrekenen lukte niet (geen recorder, geen kwartieren): dan
+            # toch verder met wat de vorige coach al geteld had, want dat is
+            # beter dan opnieuw bij nul beginnen.
+            terug = self._geld_uit_regel(terugval, tot)
+            geld["opruimen"] = [
+                weg for weg in (geld.get("opruimen") or []) if weg != terugval.get("id")
+            ]
         if terug is None:
             return
         # De regel die al onder het herstartmoment in de opslag stond krijgt
@@ -2692,9 +2715,27 @@ class ChargerCoach:
         geld["ingeplugd"] = terug["ingeplugd"]
         geld["ijk_prijs"] = terug["ijk_prijs"]
         geld["ijk_terug"] = terug["ijk_terug"]
-        if sessie is not None:
-            sessie["ingestapt"] = False
+        geld["hervat_bekend"] = True
         geld["bewaard"] = None  # meteen naar de opslag bij de volgende ronde
+
+    async def _async_bij_stop(self, _event: Any = None) -> None:
+        """Home Assistant gaat uit: elke lopende beurt nu naar de opslag."""
+        try:
+            settings = await async_get_store(self.hass).async_load()
+        except Exception:  # noqa: BLE001
+            settings = {}
+        apparaten = {d.get("id", ""): d for d in settings.get("devices") or []}
+        nu = _moment(None)
+        for device_id, sessie in list(self._sessie.items()):
+            if not sessie.get("geld"):
+                continue
+            device = apparaten.get(device_id) or {"id": device_id}
+            try:
+                await async_get_beurten(self.hass).async_upsert(
+                    self._beurt_regel(device, None, sessie, nu, klaar=False)
+                )
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("kon de lopende laadbeurt niet bewaren bij het stoppen")
 
     async def _async_beurten_laden(self) -> None:
         """De beurten die bij de vorige keer nog liepen, voor `_geld_begin`."""

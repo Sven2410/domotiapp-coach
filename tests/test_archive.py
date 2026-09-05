@@ -282,6 +282,40 @@ uit = archive.Archive.kwartieren_uit_blokjes(leeg)
 controle("een blokje zonder gemiddelde wordt overgeslagen",
          len(uit) == 1 and uit[0][5] == 300.0, f"{uit}")
 
+print("=== 8b. gaten rond een herstart: ontbrekende en halve kwartieren aanvullen ===")
+# Bij Van den Dam raakte op 05-09-2026 bij vijf herstarten zes van de vijftig
+# kilowattuur van een laadbeurt kwijt: kwartier 10:30 ontbrak, 13:45 had 44
+# seconden. Na de start zoekt het archief zulke kwartieren op en vult ze uit
+# de vijfminutenblokken van de recorder, maar alleen als die meer dekken.
+van8b = t(10, 0)
+tot8b = t(11, 0)
+bestaand8b = {
+    ("sensor.proef", int(t(10, 0).timestamp())): 900.0,
+    ("sensor.proef", int(t(10, 15).timestamp())): 900.0,
+    # 10:30 ontbreekt helemaal
+    ("sensor.proef", int(t(10, 45).timestamp())): 44.0,
+}
+gaten8b = archive.Archive.gaten(["sensor.proef"], bestaand8b, van8b, tot8b)
+print(f"  gaten: {sorted(dt.datetime.fromtimestamp(s).strftime('%H:%M') for _, s in gaten8b)}")
+controle("een ontbrekend en een half kwartier zijn gaten, volle niet",
+         {dt.datetime.fromtimestamp(s).strftime("%H:%M") for _, s in gaten8b} == {"10:30", "10:45"},
+         f"{gaten8b}")
+def ms10(minuut, gem):
+    return {"start": t(10, minuut), "min": gem, "max": gem, "mean": gem}
+rijen8b = archive.Archive.kwartieren_uit_blokjes({"sensor.proef": [
+    ms10(15, 300.0), ms10(30, 300.0), ms10(35, 300.0), ms10(40, 300.0), ms10(45, 300.0),
+]})
+aan8b = archive.Archive.aanvullingen(gaten8b, bestaand8b, rijen8b)
+print(f"  aanvullingen: {[(dt.datetime.fromtimestamp(r[1]).strftime('%H:%M'), r[5]) for r in aan8b]}")
+controle("10:30 komt er vol bij en 10:45 wordt 300 s in plaats van 44",
+         sorted((dt.datetime.fromtimestamp(r[1]).strftime("%H:%M"), r[5]) for r in aan8b)
+         == [("10:30", 900.0), ("10:45", 300.0)], f"{aan8b}")
+controle("een kwartier dat al vol was blijft met rust",
+         all(dt.datetime.fromtimestamp(r[1]).strftime("%H:%M") != "10:15" for r in aan8b), "")
+kort8b = archive.Archive.aanvullingen(gaten8b, {**bestaand8b, ("sensor.proef", int(t(10, 45).timestamp())): 600.0}, rijen8b)
+controle("en een blokje dat minder dekt dan wat er al staat vervangt niets",
+         all(dt.datetime.fromtimestamp(r[1]).strftime("%H:%M") != "10:45" for r in kort8b), f"{kort8b}")
+
 print("=== 9. de recorder telt in seconden, niet in milliseconden ===")
 # Deze proef bestaat omdat het bij de eerste klant precies hier misging. Het
 # websocketcommando van Home Assistant geeft `start` in milliseconden, de
