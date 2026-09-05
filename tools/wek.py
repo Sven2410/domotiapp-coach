@@ -17,13 +17,24 @@ MELDINGEN = sys.argv[2] if len(sys.argv) > 2 else "meldingen.log"
 RIJ = re.compile(r"^(\d\d:\d\d:\d\d)\s+(laden|NIET laden)\s+(\S+) A\s+regel=(\S+)")
 
 
+def kern(laden, amps, regel):
+    """Waar je voor gewekt wilt worden: aan of uit, een andere stroom, een
+    andere regel. Niet voor zon die even achter een wolk gaat: `surplus` en
+    `wait-for-prices+hold` op dezelfde stroom zijn dezelfde laadbeurt, en bij
+    wisselend weer wisselen die elke paar minuten."""
+    basis = regel.split("+")[0]
+    if laden == "laden" and basis in ("surplus", "wait-for-prices"):
+        basis = "zon"
+    return (laden, amps, basis)
+
+
 def besluiten():
     uit = []
     try:
         for r in open(BESLUITEN, encoding="utf-8", errors="replace"):
             m = RIJ.match(r)
             if m:
-                uit.append((m.group(2), m.group(3), m.group(4), r.rstrip()))
+                uit.append(kern(m.group(2), m.group(3), m.group(4)) + (r.rstrip(),))
     except FileNotFoundError:
         pass
     return uit
