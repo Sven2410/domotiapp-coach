@@ -211,6 +211,12 @@ print(f"  {besluit['rule']}: laden={besluit['charge']}  melding={bool(meldingen)
 controle("wacht op de accustand", besluit["rule"] == "no-soc" and not besluit["charge"],
          besluit["rule"])
 controle("stuurt één melding", len(meldingen) == 1, f"{meldingen}")
+# En in de geschiedenis is die kritiek: de bewoner moet er iets mee. Sven op
+# 05-09-2026: "dat je op normale en kritieke meldingen kan filteren."
+geschiedenis = asyncio.run(coachmod.async_get_meldingen(hass).async_list())
+controle("en in de geschiedenis heet die kritiek",
+         [g["kind"] for g in geschiedenis if g["message"].startswith("De coach wil de auto")] == ["kritiek"],
+         f"{[(g.get('kind'), g['message'][:40]) for g in geschiedenis]}")
 
 print("=== 5. en zeurt niet elke minuut ===")
 besluit, verstuurd = asyncio.run(ronde(coach, inst, dt.datetime(2026, 8, 18, 14, 38)))

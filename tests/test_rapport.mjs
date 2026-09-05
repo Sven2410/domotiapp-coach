@@ -447,7 +447,7 @@ proef("een onbekende accustand geeft een streepje en geen nul", () => {
 // scherm." De lijst komt van de server, de nieuwste eerst, en wordt per dag
 // gegroepeerd: Vandaag, Gisteren, en daarna de dag bij naam.
 
-const { groepeer, dagkop } = await import(
+const { groepeer, dagkop, zeef, dagen } = await import(
   "../custom_components/domotiapp_coach/frontend/src/views/notifications.js"
 );
 const Meldingen = geregistreerd.get("dac-view-notifications");
@@ -473,6 +473,32 @@ proef("meldingen worden per dag gegroepeerd, de nieuwste eerst", () => {
   assert.equal(dagkop(new Date(2025, 11, 24), nu), "woensdag 24 december 2025", "een ander jaar krijgt het jaar erbij");
 });
 
+// Sven op 05-09-2026: "dat je op normale en kritieke meldingen kan filteren
+// en op de tijd."
+proef("het filter zeeft op soort en op dag", () => {
+  const nu = new Date(2026, 8, 6, 8, 0);
+  const items = [
+    { at: "2026-09-06T04:44:00", message: "Ford aan Laadpaal is vol." },
+    { at: "2026-09-05T13:40:00", message: "De accustand van Ford meldt al 10 minuten niets.", kind: "kritiek" },
+    { at: "2026-09-05T09:42:00", message: "Laadpaal: laden op 6 A.", kind: "besluit" },
+    { at: "2026-09-04T19:01:00", message: "De coach wil laden maar weet niet hoe vol hij is.", kind: "kritiek" },
+  ];
+  assert.equal(zeef(items).length, 4, "zonder filter blijft alles staan");
+  assert.deepEqual(zeef(items, { soort: "besluit" }).map((i) => i.at), ["2026-09-05T09:42:00"]);
+  assert.equal(zeef(items, { soort: "melding" }).length, 3, "meldingen zijn alles behalve besluiten, kritiek erbij");
+  assert.deepEqual(zeef(items, { soort: "kritiek" }).map((i) => i.at),
+    ["2026-09-05T13:40:00", "2026-09-04T19:01:00"]);
+  assert.deepEqual(zeef(items, { dag: "2026-09-05" }).map((i) => i.at),
+    ["2026-09-05T13:40:00", "2026-09-05T09:42:00"], "één dag");
+  assert.deepEqual(zeef(items, { soort: "kritiek", dag: "2026-09-05" }).map((i) => i.at),
+    ["2026-09-05T13:40:00"], "soort en dag samen");
+  assert.deepEqual(dagen(items, nu), [
+    { sleutel: "2026-09-06", kop: "Vandaag" },
+    { sleutel: "2026-09-05", kop: "Gisteren" },
+    { sleutel: "2026-09-04", kop: "vrijdag 4 september" },
+  ], "de dagkeuze kent elke dag één keer, de nieuwste eerst");
+});
+
 proef("het scherm tekent een kop per dag en een rij per melding", () => {
   const knopen = new Map();
   const maak = () => {
@@ -487,9 +513,11 @@ proef("het scherm tekent een kop per dag en een rij per melding", () => {
   globalThis.document.createElement = () => maak();
   const el = Object.create(Meldingen.prototype);
   el.$ = (kiezer) => knopen.get(kiezer) ?? null;
+  el.$$ = () => [];
   el.geladen_ = true;
+  el.filter_ = { soort: "alles", dag: "" };
   el.items_ = [
-    { at: "2026-09-05T13:40:00", message: "De accustand van Ford meldt al 10 minuten niets." },
+    { at: "2026-09-05T13:40:00", message: "De accustand van Ford meldt al 10 minuten niets.", kind: "kritiek" },
     { at: "2026-09-05T11:10:00", message: "De status van Laadpaal meldt al 10 minuten niets." },
     { at: "2026-09-05T09:42:00", message: "Laadpaal: laden op 6 A.", kind: "besluit" },
   ];
@@ -497,10 +525,20 @@ proef("het scherm tekent een kop per dag en een rij per melding", () => {
   const lijst = knopen.get("#lijst").kinderen;
   assert.equal(lijst.length, 4, "een dagkop en drie rijen");
   assert.equal(lijst[0].className, "dag");
-  assert.equal(lijst[1].className, "rij melding", "een melding krijgt een kader");
+  assert.equal(lijst[1].className, "rij kritiek", "kritiek valt op");
+  assert.equal(lijst[2].className, "rij melding", "een melding krijgt een kader");
   assert.equal(lijst[3].className, "rij besluit", "een besluit staat er kaal tussen");
+  // Vóór de volgende paint_, want die leegt dezelfde kinderen-lijst.
   assert.deepEqual(lijst[1].kinderen.map((k) => k.textContent),
     ["13:40", "De accustand van Ford meldt al 10 minuten niets."]);
+
+  el.filter_ = { soort: "kritiek", dag: "" };
+  el.paint_();
+  assert.equal(knopen.get("#lijst").kinderen.length, 2, "met het filter op kritiek blijft één rij over");
+  el.filter_ = { soort: "kritiek", dag: "2026-09-04" };
+  el.paint_();
+  assert.match(knopen.get("#lijst").kinderen[0].textContent, /aan dit filter/, "een leeg filter zegt dat het het filter is");
+  el.filter_ = { soort: "alles", dag: "" };
 
   el.items_ = [];
   el.paint_();

@@ -594,15 +594,22 @@ class ChargerCoach:
         await self._async_tell(
             f"De coach heeft {minuten} niets meer beslist. Wat er nu op je "
             "laadpaal staat blijft staan tot hij weer draait. Kijk in het "
-            "logboek van Home Assistant wat er misging."
+            "logboek van Home Assistant wat er misging.",
+            kritiek=True,
         )
 
-    async def _async_tell(self, message: str) -> None:
+    async def _async_tell(self, message: str, kritiek: bool = False) -> None:
         """Een melding sturen aan wie de klant daarvoor heeft uitgekozen.
 
         Dezelfde ontvangers als de waarschuwing over de belasting, want het is
         dezelfde vraag: er is iets waar je iets mee moet en niemand kijkt naar
         het scherm.
+
+        `kritiek` is voor wat de bewoner zelf moet oplossen of moet weten
+        voordat het misgaat: een sensor die zwijgt, een coach die stilstaat,
+        een auto die niet op tijd vol raakt. In de geschiedenis is daar op te
+        filteren; Sven op 05-09-2026: "dat je op normale en kritieke
+        meldingen kan filteren".
         """
         try:
             settings = await async_get_store(self.hass).async_load()
@@ -626,7 +633,9 @@ class ChargerCoach:
         # paneel toont wat er gemeld is, en een telefoon vergeet dat zodra de
         # melding weggeveegd is.
         try:
-            entry = await async_get_meldingen(self.hass).async_add(message, _moment(None))
+            entry = await async_get_meldingen(self.hass).async_add(
+                message, _moment(None), "kritiek" if kritiek else "melding"
+            )
             self.hass.bus.async_fire(EVENT_NOTIFICATION, entry)
         except Exception:  # noqa: BLE001 - de geschiedenis mag de melding zelf niet kosten
             _LOGGER.exception("kon de melding niet in de geschiedenis zetten")
@@ -745,7 +754,8 @@ class ChargerCoach:
             await self._async_tell(
                 f"{naam[0].upper()}{naam[1:]} ({entity_id}) meldt al {minuten} minuten "
                 "niets. De coach rekent zolang zonder. Kijk of de integratie erachter "
-                "nog draait."
+                "nog draait.",
+                kritiek=True,
             )
 
     @callback
@@ -1173,7 +1183,9 @@ class ChargerCoach:
 
         if tip and device_id not in self._getipt:
             self._getipt.add(device_id)
-            await self._async_tell(f"{device.get('name') or 'De laadpaal'}: {tip}")
+            await self._async_tell(
+                f"{device.get('name') or 'De laadpaal'}: {tip}", kritiek=True
+            )
 
         # De pauze van de bewoner wint, ook van de klaar-tijd: het is zijn huis
         # en zijn knop. Maar de waarschuwing komt terug zolang het risico er is,
@@ -1187,7 +1199,8 @@ class ChargerCoach:
             self._warned[device_id] = now
             await self._async_tell(
                 f"De pauze op {device.get('name') or 'de laadpaal'} staat nog aan, en zo "
-                "is de auto niet op tijd vol. Hervat het laden of verzet je klaar-tijd."
+                "is de auto niet op tijd vol. Hervat het laden of verzet je klaar-tijd.",
+                kritiek=True,
             )
 
         # The dead band holds only while the charging point is doing what it was
@@ -2511,7 +2524,8 @@ class ChargerCoach:
                 "minuten geen stroom af "
                 f"terwijl de coach hem aanbiedt.{stand} Zo wordt "
                 f"{window.deadline:%H:%M} niet gehaald. Meestal helpt het om de "
-                "kabel er even uit te trekken en er weer in te doen."
+                "kabel er even uit te trekken en er weer in te doen.",
+                kritiek=True,
             )
 
         # De auto is vol.
@@ -2582,7 +2596,8 @@ class ChargerCoach:
             f"{self._hoe_heet(car).capitalize()} aan {naam} was om {vorig:%H:%M} "
             f"nog niet vol.{stand}"
             + (f" {waarom}." if waarom else "")
-            + " Hij laadt door tot hij vol is."
+            + " Hij laadt door tot hij vol is.",
+            kritiek=True,
         )
 
     async def _async_afgekoppeld(
@@ -2653,7 +2668,7 @@ class ChargerCoach:
                 "hij is. Geef de accustand door op de laadpaalkaart, dan laadt hij op "
                 "het gunstigste moment."
             )
-        await self._async_tell(bericht)
+        await self._async_tell(bericht, kritiek=True)
 
     async def _async_forget(self, settings: dict[str, Any], device_id: str) -> None:
         """Alles wat over deze sessie bewaard was vergeten, in één keer.

@@ -28,8 +28,8 @@ from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
-from .const import EVENT_SETTINGS_UPDATED, GRID_MODE_SIGNED, LEVEL_STEER
-from .storage import async_get_store
+from .const import EVENT_NOTIFICATION, EVENT_SETTINGS_UPDATED, GRID_MODE_SIGNED, LEVEL_STEER
+from .storage import async_get_meldingen, async_get_store
 from .units import to_watts
 
 _LOGGER = logging.getLogger(__name__)
@@ -401,3 +401,13 @@ class LoadMonitor:
                 )
             except Exception:  # noqa: BLE001 - one bad target must not stop the rest
                 _LOGGER.exception("Kon melding niet versturen naar notify.%s", target)
+
+        # Ook in de geschiedenis van het paneel, als kritiek: dit is de melding
+        # waar je iets mee moet. Tot 05-09-2026 stond hij er niet in.
+        try:
+            entry = await async_get_meldingen(self.hass).async_add(
+                message, dt_util.now().replace(tzinfo=None), "kritiek"
+            )
+            self.hass.bus.async_fire(EVENT_NOTIFICATION, entry)
+        except Exception:  # noqa: BLE001 - de geschiedenis mag de melding niet kosten
+            _LOGGER.exception("kon de zekeringmelding niet in de geschiedenis zetten")
