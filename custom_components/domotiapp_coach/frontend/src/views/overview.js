@@ -695,6 +695,7 @@ class DacViewOverview extends DacElement {
        een witte knop rechts, uit een grijze baan met een doffe knop links. */
     .plan-pick .plan-toggle {
       flex: 0 0 auto;
+      box-sizing: border-box; line-height: 0; font-size: 0; margin: 0;
       width: 46px; min-width: 46px; height: 27px; padding: 0;
       border-radius: var(--dac-radius-pill);
       border: 1px solid transparent;
@@ -704,7 +705,8 @@ class DacViewOverview extends DacElement {
       transition: background 120ms linear, border-color 120ms linear;
     }
     .plan-toggle .knob {
-      position: absolute; top: 3px; left: 3px;
+      position: absolute; top: 0; bottom: 0; margin: auto 0; left: 3px;
+      transform: translate(0, 0);
       width: 19px; height: 19px;
       border-radius: 50%;
       background: rgba(232,228,222,0.65);
@@ -715,7 +717,7 @@ class DacViewOverview extends DacElement {
       background: var(--dac-accent-hi);
     }
     .plan-toggle[aria-checked="true"] .knob {
-      transform: translateX(19px);
+      transform: translate(19px, 0);
       background: #fff;
     }
     .plan-toggle:disabled { opacity: 0.4; cursor: default; }
