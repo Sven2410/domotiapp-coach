@@ -145,6 +145,14 @@ function advise(r, thresholds, configured, alertAt, sturing, devices) {
   // want hij staat al aan.
   // En een coach die iets van de bewoner nodig heeft ook: dat is het enige
   // waar die op dat moment iets aan kan doen.
+  if (sturing?.programma) {
+    return {
+      tone: "var(--dac-accent-hi)",
+      tag: "Aan het werk",
+      title: sturing.running ? `${sturing.name} draait` : `${sturing.name} start nu`,
+      body: `${sturing.reason} ${sturing.plan}`.trim(),
+    };
+  }
   if (sturing?.wants || sturing?.needsSoc) {
     const titel = sturing.charging
       ? `${sturing.name} laadt op ${sturing.amps} A`
@@ -1766,8 +1774,13 @@ class DacViewOverview extends DacElement {
       if (!besluit || !besluit.applied) continue;
       if (besluit.rule === "disconnected" || besluit.rule === "complete") continue;
       if (besluit.paused) continue;
+      // Een apparaat met een programma (de vaatwasser) telt alleen zolang hij
+      // draait of nu start; wachten op het goedkoopste moment is geen werk.
+      if (besluit.kind === "programma" && !besluit.charge) continue;
       return {
         name: this.labelFor_(device),
+        programma: besluit.kind === "programma",
+        running: Boolean(besluit.running),
         amps: besluit.amps,
         // Of hij stroom vráágt, en of die ook werkelijk loopt. Dat verschil is
         // precies wat er op de kaart hoort te staan.

@@ -1833,6 +1833,62 @@ zonder49 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=16.
 controle("zonder de sensor van de groep verandert er niets",
          planner.ceiling_amps(rustig49, Car(phases=3), zonder49) == 16, "")
 
+print("=== 50. de vaatwasser: het goedkoopste startmoment binnen het schema ===")
+# Sven op 06-09-2026: "nu verder met de vaatwasser sturing." Een programma
+# start één keer; de vraag is wanneer. Alle startmomenten tegen elkaar, de
+# avondpiek dicht, de klaar-tijd heilig, en zonder prijzen geen gok.
+def prijzen50(dag):
+    rijen = []
+    for i in range(48):
+        start = dt.datetime(2026, 9, dag, 0, 0) + dt.timedelta(hours=i)
+        prijs = 0.30 if 17 <= start.hour < 21 else (0.18 if 1 <= start.hour < 6 else 0.25)
+        rijen.append({"start": start, "end": start + dt.timedelta(hours=1), "price": prijs, "feed_in": 0.07})
+    return rijen
+eco = planner.programma_van("dishcare_dishwasher_program_eco_50")
+controle("het programma wordt herkend in de spelling van Home Assistant", eco is not None and eco.minutes == 225, f"{eco}")
+controle("en in die van de andere integratie", planner.programma_van("Dishcare.Dishwasher.Program.Eco50") is eco, "")
+controle("een onbekend programma is None", planner.programma_van("iets_anders") is None, "")
+venster50 = planner.Window(enabled=True, deadline=dt.datetime(2026, 9, 8, 7, 0))
+vrij = planner.Apparaat(status="ready", released=True, program=eco)
+avond = planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), prijzen50(7), Tariff(), Forecast(), venster50, vrij)
+print(f"  19:00: {avond.rule} {avond.starts_at}  {avond.reason}")
+controle("om 19:00 vrijgegeven met klaar om 07:00: start om 01:00, het goedkoopste blok",
+         avond.rule == "wait-for-start" and avond.starts_at == "2026-09-08T01:00:00" and not avond.charge, f"{avond}")
+controle("en de reden noemt wat nu starten gekost had", "Nu starten zou" in avond.reason, avond.reason)
+nacht = planner.plan_programma(dt.datetime(2026, 9, 8, 1, 0), prijzen50(7), Tariff(), Forecast(), venster50, vrij)
+controle("om 01:00 start hij", nacht.rule == "cheapest-start" and nacht.charge, f"{nacht.rule}")
+krap = planner.plan_programma(dt.datetime(2026, 9, 8, 3, 30), prijzen50(7), Tariff(), Forecast(), venster50, vrij)
+controle("om 03:30 past het niet meer voor 07:00: meteen starten", krap.rule == "deadline" and krap.charge, f"{krap.reason}")
+controle("niet vrijgegeven: niets", planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), prijzen50(7), Tariff(), Forecast(), venster50,
+         planner.Apparaat(status="ready", released=False, program=eco)).rule == "not-released", "")
+controle("draait al: running", planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), prijzen50(7), Tariff(), Forecast(), venster50,
+         planner.Apparaat(status="run", released=True, program=eco)).rule == "running", "")
+vast = planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), [], Tariff(buy=0.28, feed_in=0.07), Forecast(), venster50, vrij)
+controle("vast contract om 19:00: na de avondpiek, om 20:00, en zo heet het ook",
+         vast.rule == "wait-for-start" and vast.starts_at == "2026-09-07T20:00:00" and "na de avondpiek" in vast.reason, f"{vast}")
+geen = planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), prijzen50(6), Tariff(), Forecast(), venster50, vrij)
+controle("prijzen die niet tot de klaar-tijd reiken: wachten, geen gok",
+         geen.rule == "wait-for-prices" and not geen.charge, f"{geen.rule}")
+uiterlijk = planner.Window(enabled=True, start_by=dt.datetime(2026, 9, 7, 22, 0), deadline=dt.datetime(2026, 9, 8, 7, 0))
+controle("uiterlijk starten om 22:00 bereikt: starten",
+         planner.plan_programma(dt.datetime(2026, 9, 7, 22, 0), prijzen50(7), Tariff(), Forecast(), uiterlijk, vrij).rule == "start-by", "")
+controle("en daarvoor kiest hij niets na 22:00",
+         planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), prijzen50(7), Tariff(), Forecast(), uiterlijk, vrij).starts_at <= "2026-09-07T22:00:00", "")
+zon = Forecast(solar_kwh={dt.datetime(2026, 9, 7, 12, 0) + dt.timedelta(hours=i): 2.0 for i in range(4)}, house_kwh={})
+dag = planner.Window(enabled=True, deadline=dt.datetime(2026, 9, 7, 18, 0))
+middag = planner.plan_programma(dt.datetime(2026, 9, 7, 8, 0), prijzen50(7), Tariff(), zon, dag, vrij)
+controle("met zon verwacht vanaf 12:00 en klaar om 18:00 start hij om 12:00",
+         middag.starts_at == "2026-09-07T12:00:00", f"{middag.starts_at} {middag.reason}")
+kosten_zon = planner.programma_kosten(dt.datetime(2026, 9, 7, 12, 0), eco, prijzen50(7), Tariff(), zon)
+controle("op zon kost Eco 50 de terugleverprijs: 0,8 kWh maal 0,07",
+         abs(kosten_zon - 0.8 * 0.07) < 0.001, f"{kosten_zon:.4f}")
+controle("voorspoelen wordt niet verschoven",
+         planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), prijzen50(7), Tariff(), Forecast(), venster50,
+                                planner.Apparaat(status="ready", released=True, program=planner.programma_van("pre_rinse"))).rule == "start-now", "")
+controle("zonder herkend programma en zonder haast: uitleg, geen start",
+         planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), prijzen50(7), Tariff(), Forecast(), venster50,
+                                planner.Apparaat(status="ready", released=True, program=None)).rule == "no-program", "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

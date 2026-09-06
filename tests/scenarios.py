@@ -16,7 +16,7 @@ bewaken:
 
 from dataclasses import replace
 
-from virtueel import Auto, Huis, Paal, Prijzen, Scenario, Zon
+from virtueel import Auto, Huis, Paal, Prijzen, Scenario, Vaatwasser, Zon
 
 # Twee auto's die er in het echt hangen: een kleine bus op één fase, en een
 # grote op drie.
@@ -435,6 +435,38 @@ afbouw_krap_geleerd = afbouw_krap.kopie(
     geleerd_tempo={8: 1.84, 9: 1.84},
 )
 
+# --- de vaatwasser (06-09-2026) ----------------------------------------------
+#
+# Sven: "omdat de bus vol zit gaan we de laadpaal even parkeren en nu verder
+# met de vaatwasser sturing." De bewoner geeft vrij, de coach kiest het
+# goedkoopste startmoment binnen het schema en drukt op de knop. De auto
+# staat in deze scenario's al vol, zodat het alleen over de vaatwasser gaat.
+VOL = replace(BUS, soc=100.0)
+vaatwasser_avond = dyn_geen_zon.kopie(
+    naam="vaatwasser-avond", uitleg="dynamisch, om 19:00 vrijgegeven, klaar om 07:00: hij hoort in de goedkope nacht te draaien, niet in de avondpiek",
+    auto=VOL, vaatwasser=Vaatwasser(), vaatwasser_klaar_om="07:00",
+    begin="2026-09-07 18:25", kabel_erin=None, duur_uren=14,
+    gebeurtenissen=[("19:00", "vaatwasser_vrijgeven", None)],
+)
+vaatwasser_zon = vast_zonnig.kopie(
+    naam="vaatwasser-zon", uitleg="vast contract, heldere dag, om 08:00 vrijgegeven, klaar om 18:00: op eigen zon rond het middaguur",
+    auto=VOL, vaatwasser=Vaatwasser(), vaatwasser_klaar_om="18:00",
+    begin="2026-09-07 07:55", kabel_erin=None, duur_uren=12,
+    gebeurtenissen=[("08:00", "vaatwasser_vrijgeven", None)],
+)
+vaatwasser_krap = vaatwasser_avond.kopie(
+    naam="vaatwasser-krap", uitleg="om 03:00 vrijgegeven, klaar om 07:00: Eco duurt 3 uur 45, dus meteen starten",
+    begin="2026-09-08 02:55", gebeurtenissen=[("03:00", "vaatwasser_vrijgeven", None)], duur_uren=6,
+)
+vaatwasser_afstand_uit = vaatwasser_avond.kopie(
+    naam="vaatwasser-afstand-uit", uitleg="hetzelfde, maar starten op afstand staat uit op het apparaat: de coach drukt, er gebeurt niets, en hij zegt dat",
+    vaatwasser=Vaatwasser(afstand_aan=False),
+)
+vaatwasser_uiterlijk = vaatwasser_avond.kopie(
+    naam="vaatwasser-uiterlijk-starten", uitleg="om 19:00 vrijgegeven met uiterlijk starten om 22:00: dan gaat hij om 22:00, ook al is de nacht goedkoper",
+    vaatwasser_uiterlijk="22:00",
+)
+
 ALLE = [
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
@@ -449,6 +481,7 @@ ALLE = [
     weekend, weekend_geen_zon,
     ford_storing, een_fase_groep, een_fase_blind, afbouw, afbouw_geleerd,
     afbouw_krap, afbouw_krap_geleerd,
+    vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
     *VAN_DEN_DAM,
 ]
 

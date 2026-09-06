@@ -38,6 +38,12 @@ commit, tag en breng uit.
   de stand van nu, en met de hele reeks erbij had hij dat meteen gezien.
 - Niets bouwen zonder zijn seintje. Wat er op de lijst staat betekent niet dat
   het aan mag.
+- **Meldingen naar de telefoon: per beurt één verslag, plus wat de bewoner
+  zelf moet oplossen.** Sven op 06-09-2026: "alleen laden voltooid met een
+  kleine samenvatting, en niet telkens onnodig meldingen sturen." Wie wat
+  krijgt staat per persoon in het tabje Meldingen (`ontvangers.py`);
+  besluiten staan standaard uit, "doet het weer" gaat alleen in de
+  geschiedenis (`telefoon=False` bij `_async_tell`).
 
 ## De eisen van Sven
 
@@ -107,11 +113,45 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    `_uren_met_afbouw` in planner.py). En is de klaar-tijd voorbij terwijl de
    auto niet vol is, dan laadt hij op vol vermogen door (`overdue`).
 
+## De vaatwasser
+
+Sinds 06-09-2026 stuurt de coach ook een vaatwasser (Home Connect), na Svens
+"omdat de bus vol zit gaan we de laadpaal even parkeren en nu verder met de
+vaatwasser sturing." Eerst alleen de vaatwasser (`PROGRAMMA_TYPES` in
+coach.py); de wasmachine en de droger komen erbij als dit werkt.
+
+Een programma-apparaat start één keer en draait dan af, dus de enige vraag
+is wanneer. `plan_programma` in planner.py zet elk startmoment tussen nu en
+de klaar-tijd tegen elkaar (per kwartier), met de prijs per uur en wat er
+dan aan eigen zon over is, en kiest het goedkoopste; de avondpiek blijft
+dicht, en zonder bekende prijzen wordt er niet geraden. De duur en het
+verbruik komen uit `PROGRAMMAS`, dezelfde tabel als `DISHWASHER_PROGRAMS`
+in devices.js (opgaven van de fabrikant; `test_rapport.mjs` legt ze naast
+elkaar). Eis 2 geldt hier als een half uur speling (`PROGRAMMA_SPELING`).
+
+In coach.py: `_one_programma` leest status, programma en deur, drukt op de
+startknop (`_async_druk`, een button-entiteit), wacht drie minuten op "run"
+en zegt het als dat niet komt (starten op afstand uit, deur open), probeert
+één keer opnieuw, telt kWh en kosten mee terwijl hij draait
+(`_programma_tellen`, met dezelfde maat als een laadbeurt: wat meteen
+starten bij het vrijgeven gekost had), en meldt één keer dat hij klaar is
+(`_async_programma_klaar`), schrijft de beurt in `BeurtenStore` zodat hij
+onder Bespaard staat, en haalt de vrijgave eraf. Zonder vrijgave
+(`ready_devices`, de knop "Ingeruimd en dicht" op de kaart) doet hij niets.
+
+Het virtuele huis heeft een `Vaatwasser` (tests/virtueel.py) met een
+verbruiksprofiel in twee bulten, "starten op afstand" dat uit kan staan, en
+de gebeurtenissen `vaatwasser_vrijgeven` en `vaatwasser_deur`. Vijf
+scenario's `vaatwasser-*` in scenarios.py.
+
+**Nog niet aan een echte Home Connect gezien.** Sven test bij zichzelf thuis.
+
 ## Hoe het in elkaar zit
 
 | bestand | wat het doet |
 |---|---|
 | `planner.py` | alle denkwerk, kent Home Assistant niet, is los te draaien |
+| `planner.py`, onderaan | het denkwerk voor een apparaat met een programma: `plan_programma`, `programma_kosten`, `PROGRAMMAS` |
 | `coach.py` | leest sensoren, stuurt de paal aan, houdt de laadbeurt bij |
 | `websocket.py` | wat het paneel mag opvragen en wijzigen |
 | `storage.py` | de instellingen op schijf |

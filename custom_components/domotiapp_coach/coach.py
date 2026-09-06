@@ -35,13 +35,21 @@ from .const import (
     EVENT_DECISION,
     EVENT_NOTIFICATION,
     EVENT_SETTINGS_UPDATED,
+    LEVEL_ADVISE,
     LEVEL_PROPOSE,
+    LEVEL_READ,
     LEVEL_STEER,
     PHASE_START_AMPS,
 )
 from .archive import async_get_archive
 from .planner import (
+    Apparaat,
     BALANCER_MARGIN_AMPS,
+    DRAAIT,
+    KLAAR,
+    plan_programma,
+    price_now,
+    programma_van,
     CHARGE_EFFICIENCY,
     FUSE_MARGIN_AMPS,
     FUSE_MARGIN_SHARE,
@@ -61,6 +69,7 @@ from .planner import (
     timeline,
     FULL_PERCENT,
     RAMP_MINUTES,
+    _euro,
     beschikbaar_van_bewaker,
     energy_needed_kwh,
     held_back,
@@ -169,6 +178,16 @@ FASEMETING_AMPS = 5.0
 # minuten over om na een start weer stroom te nemen (05:18 gestuurd, 05:27
 # aan het laden). Een kwartier, dezelfde maat als `MIN_HOLD_MINUTES`.
 HERSTART_WACHT = timedelta(minutes=15)
+
+# Apparaten met een programma die de coach start. Sven op 06-09-2026: eerst
+# alleen de vaatwasser; de wasmachine en de droger komen erbij als dit werkt.
+PROGRAMMA_TYPES = ("vaatwasser",)
+# Hoe lang de coach na een druk op de startknop wacht op "run" voordat hij
+# zegt dat het niet lukte, hoe vaak hij het probeert, en hoe lang daartussen.
+# Home Connect doet er soms een minuut over om de nieuwe toestand te melden.
+START_WACHT = timedelta(minutes=3)
+START_POGINGEN = 2
+START_OPNIEUW = timedelta(minutes=5)
 FASEMETING_VERS = timedelta(seconds=10)
 
 # Hoe vaak achter elkaar dezelfde uitkomst nodig is voor de coach er iets over
@@ -488,6 +507,10 @@ class ChargerCoach:
         # en op 86% bleef staan: "hij is nog niet vol, dus dan ook maar een
         # herstart." Wanneer die herstart gestuurd is staat in `_herstart_gedaan`;
         # zolang dat er staat gelooft de coach "klaar" gewoon weer.
+        # Per programma-apparaat wat er deze beurt gebeurt: wanneer hij is
+        # vrijgegeven, wanneer de coach op start drukte, wanneer hij ging
+        # draaien, en de tellers voor het verslag. Zie `_one_programma`.
+        self._programma: dict[str, dict[str, Any]] = {}
         self._herstart_open: set[str] = set()
         self._herstart_gedaan: dict[str, datetime] = {}
         self._herstart_melden: set[str] = set()
@@ -632,7 +655,9 @@ class ChargerCoach:
             kritiek=True,
         )
 
-    async def _async_tell(self, message: str, kritiek: bool = False) -> None:
+    async def _async_tell(
+        self, message: str, kritiek: bool = False, telefoon: bool = True
+    ) -> None:
         """Een melding sturen aan wie hem wil hebben, en in de geschiedenis zetten.
 
         Wie wat krijgt staat per persoon in de instellingen, zie ontvangers.py;
@@ -645,7 +670,10 @@ class ChargerCoach:
         meldingen kan filteren".
         """
         soort = "kritiek" if kritiek else "melding"
-        await self._async_versturen(message, soort)
+        # Sven op 06-09-2026: per beurt één verslag plus wat kritiek is. Wat
+        # daarbuiten valt komt wel in de geschiedenis, niet op de telefoon.
+        if telefoon:
+            await self._async_versturen(message, soort)
         # En in de geschiedenis, ook als er geen ontvanger is ingesteld: het
         # paneel toont wat er gemeld is, en een telefoon vergeet dat zodra de
         # melding weggeveegd is.
@@ -776,7 +804,9 @@ class ChargerCoach:
             if not stil:
                 if entity_id in self._sensor_gemeld:
                     self._sensor_gemeld.discard(entity_id)
-                    await self._async_tell(f"{naam[0].upper()}{naam[1:]} doet het weer.")
+                    await self._async_tell(
+                        f"{naam[0].upper()}{naam[1:]} doet het weer.", telefoon=False
+                    )
                 self._sensor_stil.pop(entity_id, None)
                 continue
             if sinds is None:
@@ -1026,7 +1056,300 @@ class ChargerCoach:
             except Exception:  # noqa: BLE001 - one broken device is not all of them
                 _LOGGER.exception("kon %s niet beoordelen", device.get("id"))
 
+        # En de apparaten met een programma: die starten één keer.
+        for device in settings.get("devices") or []:
+            if device.get("type") not in PROGRAMMA_TYPES or not device.get("controllable"):
+                continue
+            try:
+                await self._one_programma(moment, settings, device, level)
+            except ServiceNotFound:
+                _LOGGER.warning(
+                    "%s kan nog niet aangestuurd worden: de startknop bestaat niet (nog niet geladen?)",
+                    device.get("name") or device.get("id"),
+                )
+            except Exception:  # noqa: BLE001 - one broken device is not all of them
+                _LOGGER.exception("kon %s niet beoordelen", device.get("id"))
+
         return True
+
+    # ------------------------------------------------------------------
+    # Een apparaat met een programma: de vaatwasser
+    #
+    # Sven op 06-09-2026: "nu verder met de vaatwasser sturing." Het denkwerk
+    # staat in `plan_programma` in planner.py; hier alleen het lezen van de
+    # sensoren, het drukken op de knop, en het verslag.
+
+    async def _one_programma(
+        self,
+        now: datetime,
+        settings: dict[str, Any],
+        device: dict[str, Any],
+        level: str,
+    ) -> None:
+        device_id = device.get("id", "")
+        entities = device.get("entities") or {}
+        naam = device.get("name") or "De vaatwasser"
+        sessie = self._programma.setdefault(
+            device_id,
+            {
+                "vrijgegeven": None,   # wanneer de bewoner hem vrijgaf
+                "gedrukt": None,       # wanneer de coach het laatst op start drukte
+                "pogingen": 0,
+                "gestart": None,       # wanneer hij ging draaien
+                "kwh": 0.0,
+                "zon_kwh": 0.0,
+                "betaald": 0.0,
+                "maat": 0.0,           # wat meteen starten gekost had
+                "maat_onbekend": False,
+                "laatst": now,
+                "gemeld": set(),
+                "programma": None,
+                "prijzen": [],
+            },
+        )
+
+        status = _text(self.hass, entities.get("status")).strip().lower()
+        # `Dishcare...OperationState.Run` en `run` zijn hetzelfde; zie
+        # `programma_van` voor dezelfde afspraak bij het programma.
+        status = status.split(".")[-1]
+        released = device_id in (settings.get("ready_devices") or [])
+        programma = programma_van(_text(self.hass, entities.get("program")))
+        deur = _text(self.hass, entities.get("door")).strip().lower()
+        deur_open = None if not deur else deur in ("open", "on")
+        watts = _watts(self.hass, device.get("entity"))
+
+        if released and sessie["vrijgegeven"] is None:
+            sessie["vrijgegeven"] = now
+            sessie["programma"] = programma
+            # De prijzen van dit moment bewaren: de maat (wat meteen starten
+            # gekost had) rekent met de uren ná het vrijgeven, en die staan
+            # morgen niet meer in de prijslijst van de sensor.
+            sessie["prijzen"] = list(self._prices(settings))
+        if not released and sessie["gestart"] is None:
+            # Vrijgave ingetrokken voor er iets gebeurde: schone lei.
+            self._programma[device_id] = {**sessie, "vrijgegeven": None, "gedrukt": None,
+                                          "pogingen": 0, "gemeld": set(), "programma": None}
+            sessie = self._programma[device_id]
+        if programma is not None:
+            sessie["programma"] = programma
+
+        window = resolve_window(now, self._days(settings, device))
+        apparaat = Apparaat(
+            status=status, released=released, program=programma, door_open=deur_open,
+        )
+        decision = plan_programma(
+            now, self._prices(settings), self._tariff(settings),
+            Forecast(solar_kwh=self._zon_kwh, house_kwh=self._huis_kwh, estimated=self._zon_geschat),
+            window, apparaat,
+        )
+
+        draait = status in DRAAIT
+        if draait and sessie["gestart"] is None:
+            sessie["gestart"] = now
+            sessie["gedrukt"] = None
+            sessie["laatst"] = now
+        if draait:
+            self._programma_tellen(settings, sessie, now, watts)
+        sessie["laatst"] = now
+
+        mag = level == LEVEL_STEER or (level == LEVEL_PROPOSE and device_id in self._approved)
+        self.state[device_id] = {
+            **asdict(decision),
+            "kind": "programma",
+            "at": now.isoformat(),
+            "level": level,
+            "applied": mag and level != LEVEL_READ and level != LEVEL_ADVISE,
+            "approved": device_id in self._approved,
+            "running": draait,
+            "started_at": sessie["gestart"].isoformat() if sessie["gestart"] else None,
+            "released": released,
+            "tip": "",
+        }
+        await self._async_noteer_programma(device, device_id, now)
+
+        # Klaar: verslag, opslag, vrijgave eraf.
+        if status in KLAAR or (sessie["gestart"] is not None and not draait and status in ("ready", "inactive", "")):
+            if sessie["gestart"] is not None and "klaar" not in sessie["gemeld"]:
+                sessie["gemeld"].add("klaar")
+                await self._async_programma_klaar(settings, device, naam, sessie, now)
+            return
+
+        if not (decision.charge and mag) or draait or status in KLAAR:
+            return
+
+        # Starten, en kijken of het lukt.
+        gedrukt = sessie.get("gedrukt")
+        if gedrukt is None:
+            if sessie["pogingen"] >= START_POGINGEN:
+                return
+            await self._async_druk(device, "start")
+            sessie["gedrukt"] = now
+            sessie["pogingen"] += 1
+            return
+        if now - gedrukt >= START_WACHT and "start-mislukt" not in sessie["gemeld"]:
+            sessie["gemeld"].add("start-mislukt")
+            waarom = (
+                " De deur staat open."
+                if deur_open
+                else " Kijk of starten op afstand aan staat op het apparaat en of de deur dicht is."
+            )
+            await self._async_tell(
+                f"De coach heeft {naam} om {gedrukt:%H:%M} gestart, maar hij is niet gaan "
+                f"draaien.{waarom}",
+                kritiek=True,
+            )
+        if now - gedrukt >= START_OPNIEUW and sessie["pogingen"] < START_POGINGEN:
+            await self._async_druk(device, "start")
+            sessie["gedrukt"] = now
+            sessie["pogingen"] += 1
+
+    async def _async_druk(self, device: dict[str, Any], knop: str) -> None:
+        """Op een knop van het apparaat drukken: bij Home Connect een button-entiteit."""
+        entity_id = (device.get("entities") or {}).get(knop)
+        if not entity_id:
+            raise ServiceNotFound("button", "press")
+        domein = entity_id.split(".")[0]
+        dienst = {"button": "press", "switch": "turn_on", "script": "turn_on"}.get(domein, "press")
+        await self.hass.services.async_call(domein, dienst, {"entity_id": entity_id}, blocking=True)
+
+    def _netto_export_w(self, settings: dict[str, Any]) -> float | None:
+        """Wat er nu naar het net gaat, positief bij teruglevering, of None."""
+        sources = settings.get("sources") or {}
+        if sources.get("grid_mode") == "signed":
+            signed = _watts(self.hass, sources.get("grid_signed"))
+            if signed is None:
+                return None
+            if sources.get("grid_signed_invert"):
+                signed = -signed
+            return -signed
+        export = _watts(self.hass, sources.get("grid_export"))
+        invoer = _watts(self.hass, sources.get("grid_import"))
+        if export is None and invoer is None:
+            return None
+        return (export or 0.0) - (invoer or 0.0)
+
+    def _programma_tellen(
+        self, settings: dict[str, Any], sessie: dict[str, Any], now: datetime, watts: float | None
+    ) -> None:
+        """Wat deze ronde kostte, en wat hij gekost had als hij meteen was gestart.
+
+        Dezelfde maat als bij een laadbeurt (Sven op 05-09-2026: "de prijs
+        vanaf het inpluggen"): hetzelfde verbruik, verschoven naar het moment
+        van vrijgeven. Zon telt tegen de terugleverprijs, net als bij de paal.
+        """
+        if watts is None or watts <= 0:
+            return
+        uren = max(0.0, (now - sessie["laatst"]).total_seconds()) / 3600.0
+        if uren <= 0 or uren > 0.5:
+            return
+        kwh = watts / 1000.0 * uren
+        koop, terug = self._prijs_nu(settings, now)
+        export = self._netto_export_w(settings)
+        zon_deel = 0.0
+        if export is not None and terug is not None:
+            zon_deel = max(0.0, min(1.0, (export + watts) / watts))
+        sessie["kwh"] += kwh
+        sessie["zon_kwh"] += kwh * zon_deel
+        if koop is not None:
+            sessie["betaald"] += kwh * ((1 - zon_deel) * koop + zon_deel * (terug or 0.0))
+        # De maat: hetzelfde kwartier, maar dan geteld vanaf het vrijgeven.
+        vrij = sessie.get("vrijgegeven")
+        gestart = sessie.get("gestart")
+        if vrij is not None and gestart is not None:
+            toen = vrij + (now - gestart)
+            rij = price_now(sessie.get("prijzen") or [], toen)
+            if rij is not None:
+                koop_toen = rij["price"]
+            else:
+                koop_toen, _ = self._prijs_nu(settings, toen)
+            if koop_toen is None:
+                sessie["maat_onbekend"] = True
+            else:
+                sessie["maat"] += kwh * koop_toen
+
+    async def _async_programma_klaar(
+        self,
+        settings: dict[str, Any],
+        device: dict[str, Any],
+        naam: str,
+        sessie: dict[str, Any],
+        now: datetime,
+    ) -> None:
+        """Het verslag, de beurt in de opslag, en de vrijgave eraf."""
+        programma = sessie.get("programma")
+        gestart: datetime = sessie["gestart"]
+        kwh = sessie["kwh"]
+        betaald = sessie["betaald"]
+        maat = None if sessie["maat_onbekend"] or sessie["vrijgegeven"] is None else sessie["maat"]
+        wat = f" ({programma.label})" if programma is not None else ""
+        geld = f", ongeveer {_euro(betaald)}" if kwh > 0 else ""
+        bespaard = ""
+        if maat is not None and kwh > 0 and maat - betaald >= 0.005:
+            bespaard = f" Meteen starten had {_euro(maat)} gekost."
+        await self._async_tell(
+            f"{naam} is klaar{wat}: gedraaid van {gestart:%H:%M} tot {now:%H:%M}"
+            + (f", {kwh:.1f} kWh".replace(".", ",") if kwh > 0 else "")
+            + geld + "." + bespaard
+        )
+        vrij = sessie.get("vrijgegeven") or gestart
+        self._beurt_schrijven(
+            {
+                "id": f"{device.get('id', '')}:{vrij.replace(microsecond=0).isoformat()}",
+                "device": device.get("id", ""),
+                "name": naam,
+                "car": programma.label if programma is not None else "",
+                "plugged_at": vrij.replace(microsecond=0).isoformat(),
+                "started": gestart.replace(microsecond=0).isoformat(),
+                "ended": now.replace(microsecond=0).isoformat(),
+                "kwh": round(kwh, 3),
+                "solar_kwh": round(sessie["zon_kwh"], 3),
+                "paid": round(betaald, 4),
+                "ref_price": None,
+                "ref_feed_in": None,
+                "ref_cost": None if maat is None else round(maat, 4),
+                "saved": None if maat is None else round(max(0.0, maat - betaald), 4),
+                "price_unknown": maat is None,
+                "unknown_kwh": 0.0,
+                "baseline": {"kwh": round(kwh, 3), "cost": None if maat is None else round(maat, 4),
+                             "unknown_kwh": 0.0, "points": []},
+                "resumed": False,
+                "complete": True,
+            }
+        )
+        # De vrijgave eraf: de volgende lading vraagt om een nieuwe.
+        ready = [d for d in (settings.get("ready_devices") or []) if d != device.get("id")]
+        if len(ready) != len(settings.get("ready_devices") or []):
+            try:
+                saved = await async_get_store(self.hass).async_save({"ready_devices": ready})
+                self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+            except Exception:  # noqa: BLE001 - een vrijgave die blijft staan is geen reden om te stoppen
+                _LOGGER.exception("kon de vrijgave van %s niet terugzetten", device.get("id"))
+        self._programma[device.get("id", "")] = {
+            "vrijgegeven": None, "gedrukt": None, "pogingen": 0, "gestart": None,
+            "kwh": 0.0, "zon_kwh": 0.0, "betaald": 0.0, "maat": 0.0, "maat_onbekend": False,
+            "laatst": now, "gemeld": set(), "programma": None, "prijzen": [],
+        }
+
+    async def _async_noteer_programma(
+        self, device: dict[str, Any], device_id: str, now: datetime
+    ) -> None:
+        """Het besluit over een programma-apparaat in de geschiedenis, bij verandering."""
+        st = self.state.get(device_id) or {}
+        kern = (bool(st.get("charge")), st.get("rule"), bool(st.get("applied")), st.get("starts_at"))
+        if self._besluit_genoteerd.get(device_id) == kern:
+            return
+        self._besluit_genoteerd[device_id] = kern
+        naam = device.get("name") or "De vaatwasser"
+        if st.get("rule") == "running":
+            kop = "draait"
+        elif st.get("charge"):
+            kop = "start nu"
+        else:
+            kop = "wacht"
+        if not st.get("applied") and st.get("charge") and st.get("rule") != "running":
+            kop = "zou nu starten, maar de coach stuurt nu niet"
+        reden = (st.get("reason") or "").strip()
+        await self._async_noteer(f"{naam}: {kop}. {reden}".strip(), now)
 
     @staticmethod
     def _priority(settings: dict[str, Any], device: dict[str, Any]) -> int:
@@ -3460,11 +3783,14 @@ class ChargerCoach:
             verloop = "."
 
         waarom = self._waarom(sessie)
+        # Was de auto al als vol gemeld, dan is dit het tweede verslag van
+        # dezelfde beurt: wel in de geschiedenis, niet nog eens op de telefoon.
         await self._async_tell(
             f"{self._hoe_heet(car).capitalize()} aan {naam} is afgekoppeld om "
             f"{moment:%H:%M}"
             + verloop
-            + (f" {waarom}." if waarom else "")
+            + (f" {waarom}." if waarom else ""),
+            telefoon="vol" not in (sessie.get("gemeld") or set()),
         )
 
     async def _async_ask_soc(self, device: dict[str, Any], decision: Decision) -> None:
