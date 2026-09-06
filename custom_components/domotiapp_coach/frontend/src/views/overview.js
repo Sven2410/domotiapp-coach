@@ -524,6 +524,10 @@ class DacViewOverview extends DacElement {
       display: flex; flex-wrap: wrap; gap: 8px;
     }
     .steer-actions button { flex: 1 1 170px; }
+    @media (max-width: 560px) {
+      .steer-actions button { flex: 1 1 calc(50% - 4px); padding: 9px 10px; font-size: 13px; }
+      .steer-actions .plan-row .plan-prio, .steer-actions .plan-row .plan-link { flex: 1 1 100%; }
+    }
 
     /* Voor de eigen display-regel hieronder uit, anders wint die van het
        hidden-attribuut en blijft een verborgen knop gewoon staan. Dat is wat
@@ -693,8 +697,8 @@ class DacViewOverview extends DacElement {
        kaart over nu. */
     .plan-pick {
       flex: 1 1 100%;
-      display: grid; gap: 10px;
-      margin: 14px 0 0; padding-top: 13px;
+      display: grid; gap: 8px;
+      margin: 12px 0 0; padding-top: 11px;
       border-top: 1px solid var(--dac-border);
     }
     .plan-pick[hidden] { display: none; }
@@ -702,7 +706,14 @@ class DacViewOverview extends DacElement {
       display: flex; align-items: center; justify-content: space-between;
       gap: 10px; min-width: 0;
     }
+    .plan-words { display: grid; gap: 2px; min-width: 0; }
     .plan-head .plan-title { font-size: 12.5px; font-weight: 600; color: var(--dac-ink-2); }
+    /* Prioriteit en de schemaknop naast elkaar: samen één regel in plaats van
+       drie. Sven op 06-09-2026: "het past niet lekker op één scherm, op de
+       telefoon helemaal scrollen." */
+    .plan-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .plan-row .plan-prio { flex: 1 1 160px; }
+    .plan-row .plan-link { flex: 1 1 160px; }
 
     /* Een knop en geen checkbox: een echte checkbox is per browser anders
        opgemaakt en die van iOS negeert de helft van wat hier staat. */
@@ -740,22 +751,23 @@ class DacViewOverview extends DacElement {
     }
     .plan-toggle:disabled { opacity: 0.4; cursor: default; }
 
-    .plan-note { margin: 0; font-size: 12px; line-height: 1.5; color: var(--dac-ink-2); }
+    .plan-note { margin: 0; font-size: 12px; line-height: 1.4; color: var(--dac-ink-2); }
 
     /* Wie er voorgaat. Alleen zichtbaar zolang het schema aan staat, want met
-       een uitgezet schema valt er niets te verdelen. */
-    .plan-prio { display: grid; gap: 6px; }
+       een uitgezet schema valt er niets te verdelen. Label en keuzelijst op
+       één regel, zodat het blok niet hoger wordt dan de knop ernaast. */
+    .plan-prio { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .plan-prio[hidden] { display: none; }
-    .plan-prio span { font-size: 12.5px; color: var(--dac-ink-2); }
+    .plan-prio span { font-size: 12.5px; color: var(--dac-ink-2); white-space: nowrap; }
     .plan-prio select {
-      padding: 10px 12px;
-      border-radius: var(--dac-radius-sm);
+      padding: 8px 10px;
+      border-radius: var(--dac-radius-pill);
       border: 1px solid var(--dac-border-hi);
       background: rgba(255,255,255,0.04);
       color: var(--dac-ink);
-      font: inherit; font-size: 14px;
+      font: inherit; font-size: 13.5px;
       min-height: 44px;
-      width: 100%;
+      flex: 1 1 auto; min-width: 0; width: auto;
     }
     .plan-prio select option { background: #12120f; color: var(--dac-ink); }
     @media (pointer: coarse) { .plan-prio select { font-size: 16px; } }
@@ -765,7 +777,7 @@ class DacViewOverview extends DacElement {
        wint de regel voor knoppen in steer-actions met zijn flex 1 1 170px. Hier
        is die volle breedte juist goed, maar de hoogte en de vorm niet. */
     .plan-pick .plan-link {
-      width: 100%;
+      width: auto;
       min-height: 44px;
       padding: 10px 16px;
       display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -1735,7 +1747,10 @@ class DacViewOverview extends DacElement {
     // Snelladen alleen aanbieden waar de coach ook echt kan sturen en er een
     // auto aan hangt. Een knop die niets kan doen is erger dan geen knop.
     const boost = this.$(`[data-boost="${slot}"]`);
-    const kan = besluit.rule !== "disconnected" && besluit.level !== "advise";
+    // En alleen op een laadpaal: een vaatwasser laadt niet sneller en heeft
+    // zijn eigen knop om te wachten. Sven op 06-09-2026: "dingen van de
+    // laadpaal op mijn vaatwasserkaart, dat moet niet."
+    const kan = besluit.rule !== "disconnected" && besluit.level !== "advise" && besluit.kind !== "programma";
     boost.hidden = !kan;
     boost.setAttribute("aria-pressed", String(Boolean(besluit.boost)));
     this.$(`[data-boost-text="${slot}"]`).textContent = besluit.boost
@@ -1819,6 +1834,14 @@ class DacViewOverview extends DacElement {
     if (!picker) return;
 
     const select = this.$(`[data-program-select="${slot}"]`);
+    if (picker.kind === "missing") {
+      select.replaceChildren();
+      select.disabled = true;
+      select.dataset.key = "missing";
+      this.$(`[data-program-hint="${slot}"]`).textContent =
+        "Om hier een programma te kiezen vul je bij Apparaten \"Programma kiezen\" in: de select-entiteit van de machine.";
+      return;
+    }
     let options;
     let current;
     if (picker.kind === "entity") {
@@ -2219,24 +2242,28 @@ class DacViewOverview extends DacElement {
             </div>
             <div class="plan-pick" data-plan="${slot}" hidden>
               <div class="plan-head">
-                <span class="plan-title" id="plan-title-${slot}">Schema</span>
+                <div class="plan-words">
+                  <span class="plan-title" id="plan-title-${slot}">Schema</span>
+                  <p class="plan-note" data-plan-note="${slot}"></p>
+                </div>
                 <button type="button" class="plan-toggle" role="switch" aria-checked="false"
                         aria-labelledby="plan-title-${slot}" data-plan-toggle="${slot}">
                   <span class="knob"></span>
                 </button>
               </div>
-              <p class="plan-note" data-plan-note="${slot}"></p>
-              <label class="plan-prio" data-plan-prio-row="${slot}">
-                <span>Prioriteit</span>
-                <select data-plan-prio="${slot}">
-                  ${PRIORITIES.map(
-                    (item) => `<option value="${item.key}">${item.label}</option>`
-                  ).join("")}
-                </select>
-              </label>
-              <button type="button" class="plan-link" data-plan-link="${slot}">
-                ${icons.sliders} Schema instellen
-              </button>
+              <div class="plan-row">
+                <label class="plan-prio" data-plan-prio-row="${slot}">
+                  <span>Prioriteit</span>
+                  <select data-plan-prio="${slot}">
+                    ${PRIORITIES.map(
+                      (item) => `<option value="${item.key}">${item.label}</option>`
+                    ).join("")}
+                  </select>
+                </label>
+                <button type="button" class="plan-link" data-plan-link="${slot}">
+                  ${icons.sliders} Schema instellen
+                </button>
+              </div>
             </div>
             <button class="release" type="button" data-release="${slot}" aria-pressed="false">
               <span class="mark" data-mark="${slot}"></span>

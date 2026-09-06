@@ -13,14 +13,13 @@ import { icons } from "../icons.js";
 import {
   CAR_PHASES,
   DEVICE_TYPES,
-  PLAN_LABELS,
   PROGRAM_TYPES,
-  defaultPrograms,
   hasOwnPrograms,
   isManualProgram,
   measuredFor,
   programKey,
-  programsFor,
+  programOptions,
+  programRows,
   brandActions,
   brandButtons,
   brandDevice,
@@ -334,13 +333,16 @@ class DacViewDevices extends DacEditorElement {
 
     const measured = measuredFor(this.draft_, device);
     const own = hasOwnPrograms(device);
+    const manual = isManualProgram(device);
     const attr = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-    const plans = (chosen) =>
-      Object.entries(PLAN_LABELS)
-        .map(([key, label]) => `<option value="${key}"${key === chosen ? " selected" : ""}>${label}</option>`)
-        .join("");
+    const text = (value) => attr(value).replace(/>/g, "&gt;");
 
-    const rows = programsFor(device)
+    // Bij een machine die haar programma's zelf noemt staan de namen vast en
+    // komen de rijen van de machine; bij een domme vaatwasser typ je ze zelf.
+    // Sven op 06-09-2026: "bij Home Connect moet de naam geblokkeerd worden."
+    const options = manual ? [] : programOptions(device, this.feed_);
+    const vast = !manual;
+    const rows = programRows(device, options)
       .map((program, row) => {
         const key = program.key || programKey(program.label);
         const meting = measured.get(key);
@@ -349,42 +351,71 @@ class DacViewDevices extends DacEditorElement {
             + (Number(meting.peak_w) > 0 ? `, piek ${Math.round(Number(meting.peak_w))} W` : "")
             + (Number(meting.runs) > 1 ? ` (${meting.runs} beurten)` : "")
           : "";
+        const naam = vast
+          ? `<span class="name">${text(program.label)}</span>`
+          : `<input type="text" data-prog-field="label" data-index="${index}" data-row="${row}"
+                   value="${attr(program.label)}" placeholder="Naam" autocomplete="off" spellcheck="false">`;
         return `
       <tr>
-        <td><input type="text" data-prog-field="label" data-index="${index}" data-row="${row}"
-                   value="${attr(program.label)}" placeholder="Naam" autocomplete="off" spellcheck="false"></td>
+        <td>${naam}</td>
         <td class="tnum"><input type="number" min="1" max="1440" step="1" inputmode="numeric"
                    data-prog-field="minutes" data-index="${index}" data-row="${row}" value="${attr(program.minutes)}"> min</td>
         <td class="tnum"><input type="number" min="0" max="50" step="0.01" inputmode="decimal"
                    data-prog-field="kwh" data-index="${index}" data-row="${row}" value="${attr(program.kwh)}"> kWh</td>
         <td class="tnum"><input type="number" min="0" max="20000" step="10" inputmode="numeric"
                    data-prog-field="peak_w" data-index="${index}" data-row="${row}" value="${attr(program.peak_w ?? "")}"> W</td>
-        <td><select data-prog-field="plan" data-index="${index}" data-row="${row}">${plans(program.plan ?? "yes")}</select></td>
         <td class="measured">${gemeten
           ? `<span>${gemeten}</span> <button type="button" class="link" data-prog-forget="${key}" data-index="${index}">wissen</button>`
           : `<span class="none">nog niet gemeten</span>`}</td>
-        <td><button type="button" class="remove small" data-prog-remove="${row}" data-index="${index}" aria-label="Programma verwijderen">${icons.trash}</button></td>
+        ${vast ? "" : `<td><button type="button" class="remove small" data-prog-remove="${row}" data-index="${index}" aria-label="Programma verwijderen">${icons.trash}</button></td>`}
       </tr>`;
       })
       .join("");
 
+    const uitleg = manual
+      ? "Deze programma's kun je op de kaart kiezen; typ de namen zoals ze op je machine heten. Duur en verbruik zijn opgaven van de fabrikant als uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft op de vermogenssensor, rekent de coach met wat er gemeten is."
+      : options.length
+        ? "De programma's van je machine, zoals de select-entiteit ze noemt. De opgaven van de fabrikant zijn het uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft, rekent de coach met wat er bij jou gemeten is."
+        : "Vul hierboven \"Programma kiezen\" in, dan komen hier de programma's van je machine te staan. Tot die tijd rekent de coach met de opgaven van de fabrikant hieronder.";
+
     return `
       <div class="row">
         <label>Programma's</label>
-        <span class="sub">${isManualProgram(device)
-          ? "Deze programma's kun je op de kaart kiezen. Duur en verbruik zijn opgaven van de fabrikant als uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft op de vermogenssensor, rekent de coach met wat er gemeten is."
-          : "Waarmee de coach rekent als hij het goedkoopste startmoment kiest. De opgaven van de fabrikant zijn het uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft, rekent de coach met wat er bij jou gemeten is."}</span>
+        <span class="sub">${uitleg}</span>
         <div class="table-scroll">
           <table class="programs edit">
-            <thead><tr><th>Programma</th><th>Duur</th><th>Energie</th><th>Piek</th><th>Verschuiven</th><th>Gemeten</th><th></th></tr></thead>
+            <thead><tr><th>Programma</th><th>Duur</th><th>Energie</th><th>Piek</th><th>Gemeten</th>${vast ? "" : "<th></th>"}</tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
         <div class="prog-actions">
-          <button type="button" data-prog-add="${index}">${icons.plus} Programma toevoegen</button>
+          ${vast ? "" : `<button type="button" data-prog-add="${index}">${icons.plus} Programma toevoegen</button>`}
           <button type="button" data-prog-reset="${index}"${own ? "" : " hidden"}>Opgaven terugzetten</button>
         </div>
       </div>`;
+  }
+
+  /** De rijen zoals ze nu op het scherm staan, als beginpunt voor een eigen tabel. */
+  rowsFor_(device) {
+    return programRows(device, isManualProgram(device) ? [] : programOptions(device, this.feed_));
+  }
+
+  /**
+   * De opties van een select-entiteit komen met de feed, meestal net na de
+   * eerste tekening. Verandert de lijst, dan de tabel opnieuw; anders niets,
+   * want een herschildering gooit de cursor uit een veld.
+   */
+  onFeed_() {
+    super.onFeed_();
+    if (!this.draft_ || !this.rendered_) return;
+    const sleutel = (this.draft_.devices ?? [])
+      .filter((device) => PROGRAM_TYPES.includes(device.type) && !isManualProgram(device))
+      .map((device) => programOptions(device, this.feed_).map((option) => option.value).join(","))
+      .join("|");
+    if (sleutel !== this.optiesSleutel_) {
+      this.optiesSleutel_ = sleutel;
+      this.paintDevices_();
+    }
   }
 
   /**
@@ -425,7 +456,6 @@ class DacViewDevices extends DacEditorElement {
           minutes: Math.round(Number(program.minutes)),
           kwh: Math.max(0, Number(program.kwh) || 0),
           peak_w: Math.max(0, Math.round(Number(program.peak_w) || 0)),
-          plan: program.plan || "yes",
         }));
     }
     return clean;
@@ -844,8 +874,9 @@ class DacViewDevices extends DacEditorElement {
       const index = Number(picker.dataset.index);
       const key = picker.dataset.entityKey;
       // Not a power filter: a status or a limit is anything but watts, and the
-      // filter is a ranking rather than a restriction anyway.
-      picker.filter = "all";
+      // filter is a ranking rather than a restriction anyway. Een veld dat om
+      // een select vraagt zet die bovenaan.
+      picker.filter = brandEntityFields(this.draft_.devices[index]).find((f) => f.key === key)?.filter ?? "all";
       picker.placeholder = "Zoek een entiteit…";
       picker.stateFeed = this.feed_;
       // A charger reports its status in English keys whatever the language Home
@@ -917,13 +948,13 @@ class DacViewDevices extends DacEditorElement {
       const index = Number(el.dataset.index);
       const row = Number(el.dataset.row);
       const field = el.dataset.progField;
-      el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
+      el.addEventListener("input", () => {
         const device = this.draft_.devices[index];
-        if (!hasOwnPrograms(device)) device.programs = defaultPrograms();
+        if (!hasOwnPrograms(device)) device.programs = this.rowsFor_(device);
         const program = device.programs[row];
         if (!program) return;
-        if (field === "label" || field === "plan") {
-          program[field] = el.value;
+        if (field === "label") {
+          program.label = el.value;
         } else {
           const n = Number(el.value);
           program[field] = Number.isFinite(n) ? n : 0;
@@ -938,7 +969,7 @@ class DacViewDevices extends DacEditorElement {
         const index = Number(button.dataset.index);
         const row = Number(button.dataset.progRemove);
         const device = this.draft_.devices[index];
-        device.programs = programsFor(device).filter((_, i) => i !== row);
+        device.programs = this.rowsFor_(device).filter((_, i) => i !== row);
         this.paintDevices_();
         this.syncSaveBar_();
       });
@@ -948,8 +979,8 @@ class DacViewDevices extends DacEditorElement {
         const index = Number(button.dataset.progAdd);
         const device = this.draft_.devices[index];
         device.programs = [
-          ...programsFor(device),
-          { key: "", label: "", minutes: 120, kwh: 1, peak_w: 2000, plan: "yes" },
+          ...this.rowsFor_(device),
+          { key: "", label: "", minutes: 120, kwh: 1, peak_w: 2000 },
         ];
         this.paintDevices_();
         this.syncSaveBar_();
@@ -1109,7 +1140,7 @@ DacViewDevices.css = /* css */ `
     padding: 6px 8px; min-height: 36px; font-size: 13px; width: 5.5em;
   }
   table.programs.edit input[data-prog-field="label"] { width: 11em; }
-  table.programs.edit select { width: auto; max-width: 14em; }
+  table.programs.edit .name { color: var(--dac-ink); font-weight: 500; }
   table.programs.edit td.measured { color: var(--dac-ink-3); }
   table.programs.edit td.measured .none { font-style: italic; }
   table.programs.edit button.link {

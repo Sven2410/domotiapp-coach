@@ -488,7 +488,7 @@ vaatwasser_eigen_tabel = vaatwasser_avond.kopie(
     naam="vaatwasser-eigen-tabel", uitleg="de klant heeft Eco op 150 minuten en 0,6 kWh gezet: om 03:30 vrijgegeven met klaar om 07:00 past het nog, dus geen paniekstart",
     begin="2026-09-08 03:25", gebeurtenissen=[("03:30", "vaatwasser_vrijgeven", None)], duur_uren=6,
     vaatwasser=Vaatwasser(minuten=150, kwh=0.6),
-    vaatwasser_tabel=[{"key": "eco_50", "label": "Eco 50 °C", "minutes": 150, "kwh": 0.6, "peak_w": 2000, "plan": "ideal"}],
+    vaatwasser_tabel=[{"key": "eco_50", "label": "Eco 50 °C", "minutes": 150, "kwh": 0.6, "peak_w": 2000}],
 )
 vaatwasser_gemeten = vaatwasser_zon.kopie(
     naam="vaatwasser-gemeten", uitleg="Home Connect met een eerdere meting van Eco: de coach plant met het gemeten profiel en zet de opwarmpiek in de zon",

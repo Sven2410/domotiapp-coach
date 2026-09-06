@@ -2932,9 +2932,9 @@ class Programma:
     minutes: int
     kwh: float
     peak_w: int
-    # ideal: verschuiven loont; yes: mag; variable: mag, duur varieert;
-    # rare: zelden nodig; never: nooit verschuiven (voorspoelen).
-    plan: str = "yes"
+    # Elk programma is te verschuiven. Sven op 06-09-2026 's avonds: "het
+    # hoofddoel is slim wassen, en als je het clean programma wilt doen gaat
+    # dat waarschijnlijk toch handmatig." Dus geen beleid per programma meer.
     # Het gemeten verloop: gemiddeld vermogen in watt per PROFIEL_STAP_MIN
     # minuten vanaf de start. Leeg is: gelijkmatig over de duur, want meer
     # weet een opgave niet. Een vaatwasser trekt bijna alles in de eerste
@@ -2945,13 +2945,13 @@ class Programma:
 
 
 PROGRAMMAS: tuple[Programma, ...] = (
-    Programma("eco_50", "Eco 50 °C", 225, 0.8, 2100, "ideal"),
-    Programma("auto_2", "Auto 45 tot 65 °C", 135, 1.15, 2100, "variable"),
-    Programma("intensiv_70", "Intensief 70 °C", 145, 1.4, 2100, "yes"),
-    Programma("kurz_60", "Express 60 °C", 60, 1.05, 2200, "yes"),
-    Programma("night_wash", "Nacht Was", 210, 1.0, 1600, "yes"),
-    Programma("machine_care", "Machine Onderhoud", 120, 1.3, 2100, "rare"),
-    Programma("pre_rinse", "Voorspoelen", 15, 0.05, 0, "never"),
+    Programma("eco_50", "Eco 50 °C", 225, 0.8, 2100),
+    Programma("auto_2", "Auto 45 tot 65 °C", 135, 1.15, 2100),
+    Programma("intensiv_70", "Intensief 70 °C", 145, 1.4, 2100),
+    Programma("kurz_60", "Express 60 °C", 60, 1.05, 2200),
+    Programma("night_wash", "Nacht Was", 210, 1.0, 1600),
+    Programma("machine_care", "Machine Onderhoud", 120, 1.3, 2100),
+    Programma("pre_rinse", "Voorspoelen", 15, 0.05, 0),
 )
 
 
@@ -3010,10 +3010,7 @@ def tabel_van(rows: list[dict] | None) -> tuple[Programma, ...]:
         if minutes <= 0 or kwh < 0 or not label:
             continue
         key = str(row.get("key") or "").strip() or sleutel_van(label)
-        plan = str(row.get("plan") or "yes")
-        if plan not in ("ideal", "yes", "variable", "rare", "never"):
-            plan = "yes"
-        uit.append(Programma(key, label, minutes, kwh, peak_w, plan))
+        uit.append(Programma(key, label, minutes, kwh, peak_w))
     return tuple(uit) if uit else PROGRAMMAS
 
 
@@ -3021,8 +3018,8 @@ def met_metingen(tabel: tuple[Programma, ...], metingen: list[dict] | None, devi
     """De tabel met de metingen van dit apparaat eroverheen.
 
     Een meting wint van een opgave zodra hij er is: duur, verbruik en de piek
-    komen dan van de meetstekker, en het profiel erbij. De naam en het
-    verschuifbeleid blijven van de tabel.
+    komen dan van de meetstekker, en het profiel erbij. De naam blijft van de
+    tabel.
     """
     per_key: dict[str, dict] = {}
     for row in metingen or []:
@@ -3240,12 +3237,6 @@ def plan_programma(
     start_nu = "zet hem nu aan" if hand else "hij start nu"
 
     programma = apparaat.program
-    if programma is not None and programma.plan == "never":
-        return Decision(
-            True, 0,
-            f"{programma.label} is niet de moeite van het verschuiven, dus {start_nu}.",
-            rule="start-now",
-        )
 
     einde = window.deadline if window.enabled else None
     uiterlijk = window.start_by if window.enabled else None

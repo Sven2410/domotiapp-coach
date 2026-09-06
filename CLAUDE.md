@@ -169,6 +169,16 @@ Connect uit de select-entiteit. **De coach kiest nooit zelf een programma.**
 Zes scenario's `vaatwasser-dom-*`, `vaatwasser-eigen-tabel` en
 `vaatwasser-gemeten` in scenarios.py; proef 58 en 59 in test_coach.py.
 
+**Home Connect heeft twee programma-entiteiten** (v0.55.0, na Svens "ik heb
+selected program in plaats van select"): de sensor `program` die zegt wat
+erop staat, en de select `program_select` waarmee het gezet wordt. De
+keuzelijst op de kaart en de namen in de tabel komen uit de opties van die
+select (`programOptions`, `programRows` in devices.js); de namen zijn daar
+niet te typen. Zonder select zegt de kaart wat er mist (`programPicker` geeft
+`missing`). **Geen verschuifbeleid per programma meer**: Sven, "elk programma
+is gewoon te verschuiven; het clean programma doe je toch handmatig."
+Snelladen en Pauzeren staan alleen op een laadpaal (`kind !== "programma"`).
+
 **Nog niet aan een echte Home Connect of een echte meetstekker gezien.** Sven
 test bij zichzelf thuis.
 
