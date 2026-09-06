@@ -1119,6 +1119,13 @@ class ChargerCoach:
         )
 
         released = device_id in (settings.get("ready_devices") or [])
+        # Een vrijgaveschakelaar naast de knop op de kaart. Sven op 06-09-2026:
+        # een eigen kaart in de keuken met een knop "sturing" die een
+        # schakelaar aanzet, "en dan wil ik dat Ingeruimd en dicht aangaat."
+        # De twee volgen elkaar: beweegt de schakelaar, dan volgt de vrijgave;
+        # beweegt de knop op de kaart, dan volgt de schakelaar; en na een
+        # beurt gaan ze allebei uit.
+        released = await self._async_schakelaar_volgen(settings, device, sessie, released)
         # Wat erop staat: de sensor, of anders de select-entiteit waarmee het
         # gezet wordt (Home Connect heeft ze allebei; Sven heeft de sensor).
         programma_entiteit = entities.get("program") or entities.get("program_select")
@@ -1284,6 +1291,10 @@ class ChargerCoach:
             "stil_sinds": None,
             # Zonder startknop: wanneer de coach vroeg om hem aan te zetten.
             "gevraagd": None,
+            # De vrijgaveschakelaar en de vrijgave zoals ze de vorige ronde
+            # stonden, om te zien wie er bewoog.
+            "schakelaar": None,
+            "vrij_vorig": None,
         }
 
     @staticmethod
@@ -1422,15 +1433,84 @@ class ChargerCoach:
                 "complete": True,
             }
         )
-        # De vrijgave eraf: de volgende lading vraagt om een nieuwe.
-        ready = [d for d in (settings.get("ready_devices") or []) if d != device.get("id")]
-        if len(ready) != len(settings.get("ready_devices") or []):
-            try:
-                saved = await async_get_store(self.hass).async_save({"ready_devices": ready})
-                self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
-            except Exception:  # noqa: BLE001 - een vrijgave die blijft staan is geen reden om te stoppen
-                _LOGGER.exception("kon de vrijgave van %s niet terugzetten", device.get("id"))
+        # De vrijgave eraf, en de schakelaar mee: de volgende lading vraagt om
+        # een nieuwe.
+        await self._async_vrijgave_zetten(settings, device.get("id", ""), False)
+        await self._async_schakelen(device, False)
         self._programma[device.get("id", "")] = self._lege_programma_sessie(now)
+
+    async def _async_vrijgave_zetten(self, settings: dict[str, Any], device_id: str, aan: bool) -> None:
+        """De vrijgave van één apparaat aan of uit, in de opslag en op de eventbus."""
+        ready = [d for d in (settings.get("ready_devices") or []) if d != device_id]
+        if aan:
+            ready.append(device_id)
+        if sorted(ready) == sorted(settings.get("ready_devices") or []):
+            return
+        try:
+            saved = await async_get_store(self.hass).async_save({"ready_devices": sorted(ready)})
+            # Ook in de instellingen van deze ronde, zodat de rest van de ronde
+            # met de nieuwe stand rekent.
+            settings["ready_devices"] = sorted(ready)
+            self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        except Exception:  # noqa: BLE001 - een vrijgave die blijft staan is geen reden om te stoppen
+            _LOGGER.exception("kon de vrijgave van %s niet zetten", device_id)
+
+    async def _async_schakelen(self, device: dict[str, Any], aan: bool) -> None:
+        """De vrijgaveschakelaar aan of uit zetten, als er een is en hij anders staat."""
+        entity_id = (device.get("entities") or {}).get("release_switch")
+        if not entity_id:
+            return
+        stand = _text(self.hass, entity_id).strip().lower()
+        if stand == ("on" if aan else "off"):
+            return
+        domein = entity_id.split(".")[0]
+        try:
+            await self.hass.services.async_call(
+                domein, "turn_on" if aan else "turn_off", {"entity_id": entity_id}, blocking=True
+            )
+        except Exception:  # noqa: BLE001 - een schakelaar die blijft staan is geen reden om te stoppen
+            _LOGGER.exception("kon de vrijgaveschakelaar %s niet zetten", entity_id)
+
+    async def _async_schakelaar_volgen(
+        self, settings: dict[str, Any], device: dict[str, Any], sessie: dict[str, Any], released: bool
+    ) -> bool:
+        """De vrijgaveschakelaar en de knop op de kaart gelijk houden; geeft de vrijgave van nu.
+
+        Wie het laatst bewoog wint. Bij de eerste ronde (of na een herstart)
+        wint een schakelaar die aan staat, want dan heeft de bewoner hem
+        aangezet terwijl de coach niet keek.
+        """
+        entity_id = (device.get("entities") or {}).get("release_switch")
+        if not entity_id:
+            return released
+        tekst = _text(self.hass, entity_id).strip().lower()
+        stand = True if tekst == "on" else False if tekst == "off" else None
+        if stand is None:
+            return released
+        device_id = device.get("id", "")
+        vorige_stand = sessie.get("schakelaar")
+        vorige_vrij = sessie.get("vrij_vorig")
+        if vorige_stand is None:
+            # Eerste keer dat de coach hem ziet: aan wint, uit zegt niets.
+            if stand and not released:
+                await self._async_vrijgave_zetten(settings, device_id, True)
+                released = True
+        elif stand != vorige_stand:
+            # De schakelaar bewoog: de vrijgave volgt. Uit terwijl hij al
+            # draait laat de beurt met rust; het verslag komt gewoon.
+            if stand and not released:
+                await self._async_vrijgave_zetten(settings, device_id, True)
+                released = True
+            elif not stand and released and sessie.get("gestart") is None:
+                await self._async_vrijgave_zetten(settings, device_id, False)
+                released = False
+        elif vorige_vrij is not None and released != vorige_vrij and released != stand:
+            # De knop op de kaart bewoog: de schakelaar volgt.
+            await self._async_schakelen(device, released)
+            stand = released
+        sessie["schakelaar"] = stand
+        sessie["vrij_vorig"] = released
+        return released
 
     async def _async_meting_bewaren(
         self,

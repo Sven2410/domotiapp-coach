@@ -2916,6 +2916,68 @@ print(f"  {m1} {m2} {m3} {m4}")
 controle("de vraag om 11:00, niets om 11:30, de herinnering om 11:46 met de tijd van de vraag erin, en daarna niets meer",
          len(m1) == 1 and not m2 and len(m3) == 1 and "nog steeds uit" in m3[0] and "11:00" in m3[0] and not m4, f"{m1} {m2} {m3} {m4}")
 
+print("=== 60. de vrijgaveschakelaar: de knop op de kaart en een schakelaar volgen elkaar ===")
+# Sven op 06-09-2026: een eigen kaart in de keuken met een knop "sturing" die
+# een schakelaar aanzet, "en dan wil ik dat Ingeruimd en dicht aangaat."
+SCHAKEL = "input_boolean.vaatwasser_sturing"
+DOM60 = dict(DOM, entities={"release_switch": SCHAKEL})
+inst60 = instellingen(devices=[LAADPAAL, DOM60])
+inst60["contract"] = inst56["contract"]
+inst60["strategy"]["schedules"].append({
+    "device": "dev-dom", "enabled": True, "priority": "mid", "per_day": False,
+    "window": {"not_before": "08:00", "start_by": "", "done_by": "16:30"}, "days": [],
+})
+huis60 = dict(huis58); huis60[SCHAKEL] = "off"
+hass60, _, coach60 = bouw(huis60, inst60)
+async def ronde60(nu):
+    hass60.services.verstuurd.clear()
+    await hass60.afmaken()
+    await coach60._round(nu)
+    await hass60.afmaken()
+    return coach60.state.get("dev-dom") or {}, [d for d in hass60.services.verstuurd if d[2].get("entity_id") == SCHAKEL]
+def vrij60():
+    return "dev-dom" in (inst60.get("ready_devices") or [])
+b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 7, 0)))
+controle("schakelaar uit, niet vrijgegeven: niets gebeurt", not vrij60() and not v and b.get("rule") == "not-released", f"{v} {b.get('rule')}")
+hass60.states.zet(SCHAKEL, "on")
+b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 7, 1)))
+controle("de schakelaar gaat aan: de vrijgave volgt, zonder de schakelaar zelf aan te raken",
+         vrij60() and not v and b.get("rule") == "wait-for-start", f"{vrij60()} {v} {b.get('rule')}")
+# De bewoner zet de vrijgave op de kaart uit: de schakelaar gaat mee uit.
+inst60["ready_devices"] = []
+b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 7, 2)))
+controle("de knop op de kaart gaat uit: de schakelaar volgt", v == [("input_boolean", "turn_off", {"entity_id": SCHAKEL})] and not vrij60(), f"{v}")
+hass60.states.zet(SCHAKEL, "off")
+b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 7, 3)))
+controle("en daarna rust", not v and not vrij60(), f"{v}")
+# En weer aan op de kaart: de schakelaar mee aan.
+inst60["ready_devices"] = ["dev-dom"]
+b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 7, 4)))
+controle("de knop op de kaart gaat aan: de schakelaar volgt", v == [("input_boolean", "turn_on", {"entity_id": SCHAKEL})] and vrij60(), f"{v}")
+hass60.states.zet(SCHAKEL, "on")
+b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 7, 5)))
+controle("allebei aan: niets te doen", not v and vrij60(), f"{v}")
+# De schakelaar gaat uit (vanaf de keukenkaart): de vrijgave eraf.
+hass60.states.zet(SCHAKEL, "off")
+b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 7, 6)))
+controle("de schakelaar gaat uit voor de beurt begon: de vrijgave gaat eraf", not vrij60() and not v, f"{vrij60()} {v}")
+# Weer aan, de beurt draait, en na afloop gaan allebei uit.
+hass60.states.zet(SCHAKEL, "on")
+asyncio.run(ronde60(dt.datetime(2026, 9, 8, 7, 7)))
+hass60.states.zet("sensor.dom_vermogen", "2000")
+for minuut in range(0, 30):
+    hass60.states.zet("sensor.dom_vermogen", "2000" if minuut < 20 else "60")
+    b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 11, 0) + dt.timedelta(minutes=minuut)))
+controle("tijdens de beurt draait hij en blijft alles staan", b.get("rule") == "running" and vrij60() and not v, f"{b.get('rule')} {v}")
+hass60.states.zet("sensor.dom_vermogen", "0")
+asyncio.run(ronde60(dt.datetime(2026, 9, 8, 11, 31)))
+b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 11, 47)))
+controle("na de beurt gaan de vrijgave en de schakelaar allebei uit",
+         not vrij60() and v == [("input_boolean", "turn_off", {"entity_id": SCHAKEL})] and b.get("rule") in ("finished", "not-released"), f"{vrij60()} {v} {b.get('rule')}")
+hass60.states.zet(SCHAKEL, "off")
+b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 11, 48)))
+controle("en daarna wacht hij op een nieuwe vrijgave", not vrij60() and not v and b.get("rule") == "not-released", f"{v} {b.get('rule')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
