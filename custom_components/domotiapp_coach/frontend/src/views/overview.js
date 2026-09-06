@@ -691,12 +691,14 @@ class DacViewOverview extends DacElement {
     /* Twee klassen diep, net als bij .soc-save hierboven: anders wint de regel
        voor knoppen in steer-actions met zijn flex 1 1 170px en wordt de schuif
        zo breed als de kaart. */
+    /* Dezelfde schuif als onder Meldingen: aan is een gevulde blauwe baan met
+       een witte knop rechts, uit een grijze baan met een doffe knop links. */
     .plan-pick .plan-toggle {
       flex: 0 0 auto;
       width: 46px; min-width: 46px; height: 27px; padding: 0;
       border-radius: var(--dac-radius-pill);
-      border: 1px solid var(--dac-border-hi);
-      background: rgba(255,255,255,0.04);
+      border: 1px solid transparent;
+      background: rgba(232,228,222,0.16);
       cursor: pointer;
       position: relative;
       transition: background 120ms linear, border-color 120ms linear;
@@ -705,16 +707,16 @@ class DacViewOverview extends DacElement {
       position: absolute; top: 3px; left: 3px;
       width: 19px; height: 19px;
       border-radius: 50%;
-      background: var(--dac-ink-3);
+      background: rgba(232,228,222,0.65);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.35);
       transition: transform 120ms linear, background 120ms linear;
     }
     .plan-toggle[aria-checked="true"] {
-      background: var(--dac-accent-soft);
-      border-color: rgba(25,143,217,0.55);
+      background: var(--dac-accent-hi);
     }
     .plan-toggle[aria-checked="true"] .knob {
       transform: translateX(19px);
-      background: var(--dac-accent-hi);
+      background: #fff;
     }
     .plan-toggle:disabled { opacity: 0.4; cursor: default; }
 
