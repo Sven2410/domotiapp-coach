@@ -387,6 +387,10 @@ class Decision:
     # zwijgen hoort hier ook niet: dan staat de auto morgen leeg en is er niets
     # kapot om naar te wijzen.
     deadline_risk: bool = False
+    # Voor een apparaat met een programma: wanneer hij gepland staat om te
+    # beginnen, als dat later is dan nu. Tekst (ISO), want dit gaat zo het
+    # paneel in. Zie `plan_programma`.
+    starts_at: str | None = None
 
 
 # --- The sums -------------------------------------------------------------
@@ -2880,3 +2884,330 @@ def should_send(previous: Decision | None, decision: Decision) -> bool:
     if not decision.charge:
         return False
     return abs(previous.amps - decision.amps) >= STEP_AMPS
+
+
+# --- Een apparaat met een programma: de vaatwasser ---------------------------
+#
+# Sven op 06-09-2026: "omdat de bus vol zit gaan we de laadpaal even parkeren
+# en nu verder met de vaatwasser sturing." Eerst alleen de vaatwasser; de
+# wasmachine en de droger komen erbij als dit werkt.
+#
+# Een programma-apparaat is anders dan een laadpaal: hij moduleert niet maar
+# start één keer en draait dan zijn programma af. De enige vraag is dus
+# wanneer hij begint. Dat is dezelfde afweging als bij de paal, alle manieren
+# tegen elkaar: elk startmoment tussen nu en de klaar-tijd kost iets, uit de
+# prijzen per uur en uit wat er dan aan eigen zon over is, en het goedkoopste
+# wint. De avondpiek blijft dicht (eis 4), de klaar-tijd is heilig (eis 2),
+# en zonder bekende prijzen wordt er niets geraden (eis 6).
+
+# Hoeveel eerder dan de klaar-tijd een programma af hoort te zijn. De duur in
+# de tabel hieronder is een opgave van de fabrikant en geen meting; een half
+# uur speling vangt een programma dat wat langer doorspoelt.
+PROGRAMMA_SPELING = timedelta(minutes=30)
+
+# Hoe fijn de startmomenten liggen die tegen elkaar gezet worden.
+PROGRAMMA_STAP = timedelta(minutes=15)
+
+
+@dataclass(frozen=True)
+class Programma:
+    """Wat een programma van de fabrikant meekrijgt: duur en verbruik.
+
+    Dezelfde tabel als `DISHWASHER_PROGRAMS` in devices.js van het paneel;
+    `test_rapport.mjs` legt ze naast elkaar. Opgaven en geen metingen, en zo
+    heten ze ook op de kaart.
+    """
+
+    key: str
+    label: str
+    minutes: int
+    kwh: float
+    peak_w: int
+    # ideal: verschuiven loont; yes: mag; variable: mag, duur varieert;
+    # rare: zelden nodig; never: nooit verschuiven (voorspoelen).
+    plan: str = "yes"
+
+
+PROGRAMMAS: tuple[Programma, ...] = (
+    Programma("eco_50", "Eco 50 °C", 225, 0.8, 2100, "ideal"),
+    Programma("auto_2", "Auto 45 tot 65 °C", 135, 1.15, 2100, "variable"),
+    Programma("intensiv_70", "Intensief 70 °C", 145, 1.4, 2100, "yes"),
+    Programma("kurz_60", "Express 60 °C", 60, 1.05, 2200, "yes"),
+    Programma("night_wash", "Nacht Was", 210, 1.0, 1600, "yes"),
+    Programma("machine_care", "Machine Onderhoud", 120, 1.3, 2100, "rare"),
+    Programma("pre_rinse", "Voorspoelen", 15, 0.05, 0, "never"),
+)
+
+
+def _plat(raw: str) -> str:
+    return "".join(ch for ch in str(raw or "").lower() if ch.isalnum())
+
+
+def programma_van(raw: str | None) -> Programma | None:
+    """Het programma achter een sensorwaarde, hoe een integratie hem ook spelt.
+
+    Home Assistant zegt `dishcare_dishwasher_program_eco_50`, de andere
+    integratie `Dishcare.Dishwasher.Program.Eco50`; zie `valueLabel` in
+    devices.js. Alles wat geen letter of cijfer is gaat eruit en het stuk na
+    de laatste punt telt, dan komen ze op hetzelfde uit.
+    """
+    if not raw:
+        return None
+    heel = _plat(raw)
+    staart = _plat(str(raw).split(".")[-1])
+    for programma in PROGRAMMAS:
+        sleutel = _plat(programma.key)
+        if heel.endswith(sleutel) or staart == sleutel:
+            return programma
+    return None
+
+
+@dataclass
+class Apparaat:
+    """Een programma-apparaat zoals de coach hem deze ronde ziet."""
+
+    # De toestand van Home Connect, plat: ready, run, finished, ...
+    status: str = ""
+    # Of de bewoner hem heeft vrijgegeven: ingeruimd en dicht.
+    released: bool = False
+    program: Programma | None = None
+    # Of de deur open staat, als dat te zien is.
+    door_open: bool | None = None
+
+
+# Wat Home Connect meldt zolang er een programma loopt of klaarstaat.
+DRAAIT = frozenset({"run", "delayedstart", "pause", "aborting"})
+KLAAR = frozenset({"finished"})
+
+
+def _in_avondpiek(start: datetime, einde: datetime) -> bool:
+    """Of een programma tussen `start` en `einde` de avondpiek raakt."""
+    dag = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    for offset in range(0, 3):
+        piek_van = datetime.combine((dag + timedelta(days=offset)).date(), EVENING_PEAK_START)
+        piek_tot = datetime.combine((dag + timedelta(days=offset)).date(), EVENING_START)
+        if start < piek_tot and einde > piek_van:
+            return True
+    return False
+
+
+def programma_kosten(
+    start: datetime,
+    programma: Programma,
+    prices: list[dict],
+    tariff: Tariff,
+    forecast: Forecast,
+) -> float | None:
+    """Wat dit programma kost als het op `start` begint, of None als de prijs
+    van een deel van die uren niet bekend is.
+
+    Het verbruik wordt gelijkmatig over de duur verdeeld; de tabel kent alleen
+    het totaal en de piek, niet het verloop. Per uur gaat wat er aan eigen zon
+    over is (de verwachting min het huis) tegen de terugleverprijs, want dat
+    is wat je er anders voor gekregen had, en de rest tegen de inkoopprijs
+    van dat uur. Precies zoals `schijven` dat voor een laadpaal doet.
+    """
+    einde = start + timedelta(minutes=programma.minutes)
+    kwh_per_uur = programma.kwh / (programma.minutes / 60.0)
+    kosten = 0.0
+    moment = start
+    while moment < einde:
+        uur = moment.replace(minute=0, second=0, microsecond=0)
+        volgend = min(uur + timedelta(hours=1), einde)
+        deel_uur = (volgend - moment).total_seconds() / 3600.0
+        kwh = kwh_per_uur * deel_uur
+
+        rij = price_now(prices, moment) if prices else None
+        koop = rij["price"] if rij is not None else (tariff.buy if not prices else None)
+        if koop is None:
+            return None
+        terug = rij.get("feed_in") if rij is not None else None
+        if terug is None:
+            terug = tariff.feed_in
+
+        over = max(0.0, forecast.solar_kwh.get(uur, 0.0) - forecast.house_kwh.get(uur.hour, 0.0))
+        over *= deel_uur
+        zon = min(kwh, over) if terug is not None else 0.0
+        kosten += (zon * terug if zon > 0 else 0.0) + (kwh - zon) * koop
+        moment = volgend
+    return kosten
+
+
+def plan_programma(
+    now: datetime,
+    prices: list[dict],
+    tariff: Tariff,
+    forecast: Forecast,
+    window: Window,
+    apparaat: Apparaat,
+) -> Decision:
+    """Wanneer een programma-apparaat begint.
+
+    Van boven naar beneden: vrijgave, wat hij al doet, het programma, de
+    knoppen van het schema, en dan pas de vergelijking van alle startmomenten.
+    `charge` betekent hier: nu starten (of: hij draait).
+    """
+    if apparaat.status in KLAAR:
+        return Decision(False, 0, "Het programma is klaar.", rule="finished")
+    if apparaat.status in DRAAIT:
+        return Decision(
+            True, 0, "Hij draait.", plan="De coach doet niets tot het programma af is.",
+            rule="running",
+        )
+    if not apparaat.released:
+        return Decision(
+            False, 0,
+            "Wacht tot je hem vrijgeeft: ingeruimd en dicht.",
+            plan="Daarna kiest de coach het goedkoopste moment binnen je schema.",
+            rule="not-released",
+        )
+
+    programma = apparaat.program
+    if programma is not None and programma.plan == "never":
+        return Decision(
+            True, 0,
+            f"{programma.label} is niet de moeite van het verschuiven, dus hij start nu.",
+            rule="start-now",
+        )
+
+    einde = window.deadline if window.enabled else None
+    uiterlijk = window.start_by if window.enabled else None
+    vanaf = window.opens if window.enabled else None
+
+    if uiterlijk is not None and now >= uiterlijk:
+        return Decision(
+            True, 0,
+            f"Je hebt ingesteld dat hij uiterlijk om {_wanneer(uiterlijk, now)} begint, dus hij start nu.",
+            rule="start-by",
+        )
+
+    if programma is None:
+        # Zonder duur valt er niets te plannen. Niet raden: zeggen, en de
+        # klaar-tijd niet laten verlopen.
+        if einde is not None and now + PROGRAMMA_SPELING >= einde - timedelta(hours=1):
+            return Decision(
+                True, 0,
+                f"De coach kent het gekozen programma niet en {_wanneer(einde, now)} komt dichtbij, dus hij start nu.",
+                rule="deadline",
+            )
+        return Decision(
+            False, 0,
+            "De coach herkent het gekozen programma niet en weet dus niet hoe lang het duurt. "
+            "Kies een programma op het apparaat, of zet 'uiterlijk starten' in het schema.",
+            plan="Zonder programma start hij pas op de uiterste starttijd.",
+            rule="no-program",
+        )
+
+    duur = timedelta(minutes=programma.minutes)
+    if einde is not None and now + duur + PROGRAMMA_SPELING >= einde:
+        haalt = now + duur <= einde
+        return Decision(
+            True, 0,
+            (
+                f"Nu starten, anders is hij om {_wanneer(einde, now)} niet klaar."
+                if haalt
+                else f"Hij haalt {_wanneer(einde, now)} niet meer, dus hij start meteen."
+            ),
+            rule="deadline",
+        )
+
+    # Alle startmomenten tussen nu en het laatste moment dat nog past.
+    laatste = None
+    if einde is not None:
+        laatste = einde - duur - PROGRAMMA_SPELING
+    if uiterlijk is not None:
+        laatste = uiterlijk if laatste is None else min(laatste, uiterlijk)
+    if laatste is None:
+        # Geen klaar-tijd: tot waar de prijzen reiken, of een etmaal bij een
+        # vast contract.
+        laatste = max((rij["end"] for rij in prices), default=now) - duur if prices else now + timedelta(hours=24)
+    eerste = now if vanaf is None else max(now, vanaf)
+    if eerste > laatste:
+        # Het venster is al dicht: starten zolang het nog kan.
+        return Decision(True, 0, "Later past het niet meer, dus hij start nu.", rule="deadline")
+
+    kandidaten: list[tuple[float, datetime]] = []
+    onbekend = 0
+    moment = eerste
+    while moment <= laatste:
+        kosten = programma_kosten(moment, programma, prices, tariff, forecast)
+        if kosten is None:
+            onbekend += 1
+        else:
+            kandidaten.append((kosten, moment))
+        if moment == eerste:
+            # Van nu naar het eerstvolgende kwartier, daarna per kwartier.
+            rest = (PROGRAMMA_STAP - timedelta(minutes=moment.minute % 15, seconds=moment.second, microseconds=moment.microsecond))
+            moment = moment + (rest if rest < PROGRAMMA_STAP else PROGRAMMA_STAP)
+        else:
+            moment += PROGRAMMA_STAP
+
+    if not kandidaten:
+        return Decision(
+            False, 0,
+            (
+                f"De prijzen tot {_wanneer(einde, now)} zijn nog niet bekend. Tot die binnenkomen, "
+                "meestal tussen 13:00 en 15:00, wacht hij."
+                if einde is not None
+                else "De prijzen zijn nog niet bekend, dus hij wacht."
+            ),
+            plan="Zodra de prijzen er zijn kiest hij het goedkoopste moment.",
+            rule="wait-for-prices",
+        )
+
+    # Buiten de avondpiek als het kan (eis 4): niets van het net tussen
+    # EVENING_PEAK_START en EVENING_START. Past alleen de piek, dan de piek.
+    buiten = [k for k in kandidaten if not _in_avondpiek(k[1], k[1] + duur)]
+    keuze = buiten or kandidaten
+    goedkoopst, start = min(keuze, key=lambda k: (round(k[0], 4), k[1]))
+    kosten_nu = next((k for k, m in kandidaten if m == eerste), None)
+
+    # Reiken de prijzen niet tot het laatste startmoment, dan is de goedkoopste
+    # bekende kandidaat misschien niet de goedkoopste van de nacht. Dezelfde
+    # afspraak als bij de paal (eis 6, Sven op 05-09-2026): een bekend moment
+    # dat goedkoper is dan het gemiddelde van alle bekende prijzen mag, de rest
+    # wacht op de prijzen. De klaar-tijdregel hierboven blijft het vangnet.
+    if onbekend and prices:
+        # Over álle bekende uren, ook die van vandaag al voorbij zijn: dat is de
+        # maat die de paal ook gebruikt (`gemiddeld_bekend`).
+        bekend = [rij["price"] for rij in prices]
+        gemiddeld = sum(bekend) / len(bekend) if bekend else None
+        per_kwh = goedkoopst / programma.kwh if programma.kwh else None
+        if gemiddeld is not None and per_kwh is not None and per_kwh >= gemiddeld:
+            return Decision(
+                False, 0,
+                f"De prijzen tot {_wanneer(einde, now)} zijn nog niet allemaal bekend, en wat bekend is "
+                "is niet goedkoop. Tot de rest binnenkomt, meestal tussen 13:00 en 15:00, wacht hij."
+                if einde is not None
+                else "De prijzen zijn nog niet allemaal bekend, en wat bekend is is niet goedkoop, dus hij wacht.",
+                plan="Zodra de prijzen er zijn kiest hij het goedkoopste moment.",
+                rule="wait-for-prices",
+            )
+
+    if start <= now + timedelta(minutes=1):
+        return Decision(
+            True, 0,
+            f"Dit is het goedkoopste moment"
+            + (f" tot {_wanneer(einde, now)}" if einde is not None else "")
+            + f": {programma.label} kost nu ongeveer {_euro(goedkoopst)}.",
+            plan=f"Klaar rond {_wanneer(now + duur, now)}.",
+            rule="cheapest-start",
+        )
+
+    verschil = ""
+    if kosten_nu is not None and kosten_nu - goedkoopst >= 0.005:
+        verschil = f" Nu starten zou ongeveer {_euro(kosten_nu)} kosten, dan {_euro(goedkoopst)}."
+    # Even duur als nu en toch later: dan is het de avondpiek die nu dichtzit.
+    waarom = (
+        f"na de avondpiek"
+        if kosten_nu is not None and kosten_nu - goedkoopst < 0.005 and _in_avondpiek(eerste, eerste + duur)
+        else f"dan is {programma.label} het goedkoopst"
+    )
+    return Decision(
+        False, 0,
+        f"Hij start om {_wanneer(start, now)}: {waarom}.{verschil}",
+        plan=f"Klaar rond {_wanneer(start + duur, now)}"
+        + (f", ruim voor {_wanneer(einde, now)}." if einde is not None else "."),
+        rule="wait-for-start",
+        starts_at=start.isoformat(),
+    )

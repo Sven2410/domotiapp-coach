@@ -441,6 +441,26 @@ proef("een onbekende accustand geeft een streepje en geen nul", () => {
   assert.ok(!tekst.includes("0,0 kWh"), "en zeker geen verzonnen nul");
 });
 
+// --- de programmatabel van de vaatwasser -------------------------------------
+//
+// Dezelfde tabel staat in planner.py (`PROGRAMMAS`), want de coach plant
+// ermee zonder Home Assistant. Twee tabellen die uit elkaar lopen zouden een
+// paneel geven dat "225 minuten" zegt en een coach die met iets anders rekent.
+
+import { readFileSync } from "node:fs";
+const { DISHWASHER_PROGRAMS } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+proef("de programmatabel in het paneel is dezelfde als die in planner.py", () => {
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/planner.py", import.meta.url), "utf-8");
+  const regels = [...bron.matchAll(/Programma\("([a-z0-9_]+)", "[^"]+", (\d+), ([\d.]+), (\d+), "([a-z]+)"\)/g)];
+  const python = new Map(regels.map((m) => [m[1], { minutes: Number(m[2]), kwh: Number(m[3]), peakW: Number(m[4]), plan: m[5] }]));
+  assert.equal(python.size, DISHWASHER_PROGRAMS.length, "evenveel programma's");
+  for (const p of DISHWASHER_PROGRAMS) {
+    const q = python.get(p.key);
+    assert.ok(q, `${p.key} staat ook in planner.py`);
+    assert.deepEqual({ minutes: p.minutes, kwh: p.kwh, peakW: p.peakW, plan: p.plan }, q, p.key);
+  }
+});
+
 // --- het meldingenscherm -----------------------------------------------------
 //
 // Sven op 04-09-2026: "daarom wil ik ook een soort geschiedenis meldingen

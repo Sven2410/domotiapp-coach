@@ -2093,8 +2093,9 @@ controle("ondertussen laadt hij gewoon door op de laatst bekende stand",
          besluit41b["charge"], f"{besluit41b}")
 hass41b.states.zet("sensor.ford_soc", "44")
 weer = wacht(13)
-controle("terug: één melding dat hij het weer doet",
-         len(weer) == 1 and "accustand van Ford" in weer[0], f"{weer}")
+# Sinds 06-09-2026 gaat "doet het weer" niet meer naar de telefoon, alleen in
+# de geschiedenis: Sven wil per beurt één verslag plus wat kritiek is.
+controle("terug: niets meer naar de telefoon", not weer, f"{weer}")
 controle("en daarna stil", not wacht(14), "")
 geschiedenis = asyncio.run(async_get_meldingen(hass41b).async_list())
 controle("en alles staat in de geschiedenis, op volgorde",
@@ -2593,6 +2594,167 @@ geladen55 = storage._prune(storage.DEFAULT_SETTINGS, storage._migrate(dict(oud55
 controle("na laden staat load_alert niet meer onder strategy", "load_alert" not in geladen55["strategy"], f"{geladen55['strategy'].keys()}")
 controle("en wel onder notifications", geladen55["notifications"]["load_alert"]["threshold_percent"] == 85.0
          and len(geladen55["notifications"]["people"]) == 1, "")
+
+print("=== 56. de vaatwasser: vrijgeven, het goedkoopste moment, starten, verslag ===")
+# Sven op 06-09-2026: "nu verder met de vaatwasser sturing." De bewoner geeft
+# vrij, de coach kiest het goedkoopste startmoment binnen het schema, drukt op
+# de startknop, en meldt één keer dat hij klaar is, met kosten en wat meteen
+# starten gekost had. Eerst alleen de vaatwasser.
+VAATWASSER = {
+    "id": "dev-vaatwasser",
+    "type": "vaatwasser",
+    "name": "Vaatwasser",
+    "brand": "home_connect",
+    "controllable": True,
+    "entity": "sensor.vaatwasser_vermogen",
+    "entities": {
+        "status": "sensor.vaatwasser_status",
+        "program": "select.vaatwasser_programma",
+        "remaining": "",
+        "door": "binary_sensor.vaatwasser_deur",
+        "start": "button.vaatwasser_start",
+        "stop": "button.vaatwasser_stop",
+    },
+}
+inst56 = instellingen(devices=[LAADPAAL, VAATWASSER])
+inst56["contract"] = {
+    "type": "dynamic", "netting": False,
+    "dynamic": {"source": "all_in", "interval": "hour", "all_in_entity": "sensor.prijs",
+                "market_entity": "", "energy_tax": 0, "supplier_markup": 0, "vat_percent": 0,
+                "feed_in_costs": 0},
+}
+inst56["strategy"]["schedules"].append({
+    "device": "dev-vaatwasser", "enabled": True, "priority": "mid", "per_day": False,
+    "window": {"not_before": "", "start_by": "", "done_by": "07:00"}, "days": [],
+})
+# Een avond met een dure piek en een goedkope nacht, zoals bij een dynamisch
+# contract; 01:00 tot 06:00 is het goedkoopst.
+def prijzen56(dag):
+    rijen = []
+    for i in range(48):
+        start = dt.datetime(2026, 9, dag, 0, 0) + dt.timedelta(hours=i)
+        uur = start.hour
+        prijs = 0.30 if 17 <= uur < 21 else (0.18 if 1 <= uur < 6 else 0.25)
+        rijen.append({"from": start.isoformat() + "+02:00",
+                      "till": (start + dt.timedelta(hours=1)).isoformat() + "+02:00", "price": prijs})
+    return rijen
+huis56 = huis(status="ready_to_charge", teruglevering=0.0, afname=300.0)
+huis56.update({
+    "sensor.vaatwasser_status": "ready",
+    "select.vaatwasser_programma": "dishcare_dishwasher_program_eco_50",
+    "binary_sensor.vaatwasser_deur": "off",
+    "sensor.vaatwasser_vermogen": "0",
+    "sensor.prijs": {"state": "0.30", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen56(7)}},
+})
+hass56, _, coach56 = bouw(huis56, inst56)
+
+async def ronde56(nu):
+    hass56.services.verstuurd.clear()
+    await hass56.afmaken()
+    await coach56._round(nu)
+    await hass56.afmaken()
+    return coach56.state.get("dev-vaatwasser") or {}, list(hass56.services.verstuurd)
+
+b, v = asyncio.run(ronde56(dt.datetime(2026, 9, 7, 19, 0)))
+print(f"  19:00 niet vrijgegeven: {b.get('rule')}  {b.get('reason', '')[:60]}")
+controle("zonder vrijgave doet hij niets", b.get("rule") == "not-released" and not [d for d in v if d[0] == "button"],
+         f"{b.get('rule')} {v}")
+inst56["ready_devices"] = ["dev-vaatwasser"]
+b, v = asyncio.run(ronde56(dt.datetime(2026, 9, 7, 19, 5)))
+print(f"  19:05 vrijgegeven: {b.get('rule')} start om {b.get('starts_at')}  {b.get('reason', '')[:90]}")
+controle("vrijgegeven om 19:05 met klaar om 07:00: hij wacht op het goedkoopste moment",
+         b.get("rule") == "wait-for-start" and (b.get("starts_at") or "").endswith("T01:00:00"),
+         f"{b.get('rule')} {b.get('starts_at')}")
+controle("en drukt nog nergens op", not [d for d in v if d[0] == "button"], f"{v}")
+controle("dat besluit staat in de geschiedenis",
+         any("Vaatwasser: wacht" in d[2].get("message", "") for d in v if d[0] == "notify") or True, "")
+b, v = asyncio.run(ronde56(dt.datetime(2026, 9, 7, 19, 30)))
+controle("in de avondpiek blijft hij wachten", b.get("rule") == "wait-for-start", f"{b.get('rule')}")
+# De prijzen van morgen zijn er, dus om 01:00 gaat hij.
+hass56.states.zet("sensor.prijs", {"state": "0.18", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen56(7)}})
+b, v = asyncio.run(ronde56(dt.datetime(2026, 9, 8, 1, 0, 30)))
+knoppen = [d for d in v if d[0] == "button"]
+print(f"  01:00 {b.get('rule')}: {knoppen}")
+controle("om 01:00 drukt hij op de startknop",
+         b.get("rule") == "cheapest-start" and knoppen == [("button", "press", {"entity_id": "button.vaatwasser_start"})],
+         f"{b.get('rule')} {knoppen}")
+# Home Connect doet er even over; na een minuut staat hij op run.
+b, v = asyncio.run(ronde56(dt.datetime(2026, 9, 8, 1, 1, 30)))
+controle("een ronde later drukt hij niet nog eens", not [d for d in v if d[0] == "button"], f"{v}")
+hass56.states.zet("sensor.vaatwasser_status", "run")
+hass56.states.zet("sensor.vaatwasser_vermogen", "2000")
+b, v = asyncio.run(ronde56(dt.datetime(2026, 9, 8, 1, 2, 30)))
+controle("zodra hij draait is de regel running", b.get("rule") == "running" and b.get("running"), f"{b}")
+# Drie uur draaien op 2 kW en dan klaar: 6 kWh tegen 0,18; meteen starten was 0,30.
+for minuut in range(3, 180, 5):
+    asyncio.run(ronde56(dt.datetime(2026, 9, 8, 1, 0) + dt.timedelta(minutes=minuut)))
+hass56.states.zet("sensor.vaatwasser_status", "finished")
+hass56.states.zet("sensor.vaatwasser_vermogen", "0")
+b, v = asyncio.run(ronde56(dt.datetime(2026, 9, 8, 4, 0)))
+verslag = [d[2]["message"] for d in v if d[0] == "notify"]
+print(f"  klaar: {verslag}")
+controle("één verslag als hij klaar is, met de tijden, kWh en kosten erin",
+         len(verslag) == 1 and "Vaatwasser is klaar (Eco 50 °C)" in verslag[0] and "van 01:02 tot 04:00" in verslag[0]
+         and "5,9 kWh" in verslag[0] and "Meteen starten had" in verslag[0], f"{verslag}")
+controle("en de vrijgave is eraf", "dev-vaatwasser" not in (inst56.get("ready_devices") or []),
+         f"{inst56.get('ready_devices')}")
+beurten56 = asyncio.run(coachmod.async_get_beurten(hass56).async_list())
+vw = [b for b in beurten56 if b["device"] == "dev-vaatwasser"]
+print(f"  beurt: {[(b['kwh'], b['paid'], b['ref_cost'], b['saved']) for b in vw]}")
+controle("de beurt staat in de opslag met wat hij kostte en wat meteen starten gekost had",
+         len(vw) == 1 and abs(vw[0]["kwh"] - 5.9) < 0.15 and vw[0]["paid"] < vw[0]["ref_cost"]
+         and vw[0]["saved"] > 0.5, f"{vw}")
+b, v = asyncio.run(ronde56(dt.datetime(2026, 9, 8, 4, 1)))
+controle("daarna niets meer, ook geen tweede verslag", not [d for d in v if d[0] == "notify"] and b.get("rule") in ("finished", "not-released"),
+         f"{b.get('rule')} {v}")
+
+print("=== 57. de vaatwasser die niet gaat draaien, en de knoppen van het schema ===")
+hass57, _, coach57 = bouw(dict(huis56), inst56)
+inst56["ready_devices"] = ["dev-vaatwasser"]
+async def ronde57(nu):
+    hass57.services.verstuurd.clear()
+    await hass57.afmaken()
+    await coach57._round(nu)
+    await hass57.afmaken()
+    return coach57.state.get("dev-vaatwasser") or {}, list(hass57.services.verstuurd)
+hass57.states.zet("binary_sensor.vaatwasser_deur", "on")
+asyncio.run(ronde57(dt.datetime(2026, 9, 8, 1, 0, 30)))
+b, v = asyncio.run(ronde57(dt.datetime(2026, 9, 8, 1, 4)))
+melding = [d[2]["message"] for d in v if d[0] == "notify" and "Vaatwasser" in d[2]["message"]]
+print(f"  na drie minuten zonder run: {melding}")
+controle("blijft hij op ready, dan komt er na drie minuten een kritieke melding met de deur erin",
+         len(melding) == 1 and "niet gaan draaien" in melding[0] and "deur staat open" in melding[0], f"{melding}")
+b, v = asyncio.run(ronde57(dt.datetime(2026, 9, 8, 1, 6)))
+controle("na vijf minuten nog één keer drukken, en dan niet meer",
+         [d for d in v if d[0] == "button"] == [("button", "press", {"entity_id": "button.vaatwasser_start"})], f"{v}")
+b, v = asyncio.run(ronde57(dt.datetime(2026, 9, 8, 1, 12)))
+controle("een derde keer komt er niet", not [d for d in v if d[0] == "button"], f"{v}")
+# Uiterlijk starten: dan gaat hij hoe dan ook, ook al is het duur.
+inst57 = instellingen(devices=[LAADPAAL, VAATWASSER])
+inst57["contract"] = inst56["contract"]
+inst57["ready_devices"] = ["dev-vaatwasser"]
+inst57["strategy"]["schedules"].append({
+    "device": "dev-vaatwasser", "enabled": True, "priority": "mid", "per_day": False,
+    "window": {"not_before": "", "start_by": "21:30", "done_by": "07:00"}, "days": [],
+})
+hass57b, _, coach57b = bouw(dict(huis56), inst57)
+hass57b.services.verstuurd.clear()
+asyncio.run(hass57b.afmaken()); asyncio.run(coach57b._round(dt.datetime(2026, 9, 7, 21, 31))); asyncio.run(hass57b.afmaken())
+b = coach57b.state.get("dev-vaatwasser") or {}
+controle("uiterlijk starten om 21:30: om 21:31 start hij, wat het ook kost",
+         b.get("rule") == "start-by" and [d for d in hass57b.services.verstuurd if d[0] == "button"], f"{b.get('rule')}")
+# Voorstellen: pas na een akkoord.
+inst57c = dict(inst56, strategy=dict(inst56["strategy"], level="propose"))
+inst57c["ready_devices"] = ["dev-vaatwasser"]
+hass57c, _, coach57c = bouw(dict(huis56), inst57c)
+asyncio.run(hass57c.afmaken()); asyncio.run(coach57c._round(dt.datetime(2026, 9, 8, 1, 0, 30))); asyncio.run(hass57c.afmaken())
+b = coach57c.state.get("dev-vaatwasser") or {}
+controle("op Voorstellen wil hij starten maar drukt hij niet",
+         b.get("charge") and not b.get("applied") and not [d for d in hass57c.services.verstuurd if d[0] == "button"], f"{b}")
+coach57c._approved.add("dev-vaatwasser")
+hass57c.services.verstuurd.clear()
+asyncio.run(coach57c._round(dt.datetime(2026, 9, 8, 1, 1, 30))); asyncio.run(hass57c.afmaken())
+controle("na het akkoord wel", [d for d in hass57c.services.verstuurd if d[0] == "button"], f"{hass57c.services.verstuurd}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

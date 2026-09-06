@@ -139,7 +139,9 @@ for naam, vl in V.items():
     # rekent de coach met de teller van de paal, en die loopt bij een Easee
     # tot een uur achter; dan zegt het verslag "staat op 87%" over een auto
     # die vol is. Dat staat open, zie waar-gebleven.md van 04-09-2026.
-    if vl.klaar_op is not None and s.auto.laadgrens >= 100 and s.auto.meldt_soc:
+    # Een auto die al vol was toen de proef begon heeft geen beurt en dus geen
+    # verslag; dat zijn de vaatwasserscenario's.
+    if vl.klaar_op is not None and s.auto.laadgrens >= 100 and s.auto.meldt_soc and vl.geladen_kwh > 0.1:
         controle(f"{naam}: precies één keer 'is vol' gemeld",
                  len(meldingen(vl, "is vol")) == 1, f"{meldingen(vl, 'is vol')}")
     # Sven op 04-09-2026: "De eindtijd is heel belangrijk. Een uur daarvoor
@@ -393,6 +395,58 @@ if (vk := v("afbouw-krap")) and (vg := v("afbouw-krap-geleerd")):
              and vg.klaar_op <= vg.klaar_tijd - virtueel.dt.timedelta(hours=1) + virtueel.dt.timedelta(minutes=5),
              f"begin {eerste(vg)}, vol {vg.klaar_op}, klaar-tijd {vg.klaar_tijd}")
     controle("afbouw krap: allebei op tijd vol", gehaald(vk) and gehaald(vg), "")
+
+# --- de vaatwasser (06-09-2026) ----------------------------------------------
+#
+# Sven: "nu verder met de vaatwasser sturing." De bewoner geeft vrij, de coach
+# kiest het goedkoopste startmoment binnen het schema, drukt op de knop en
+# meldt één keer dat hij klaar is.
+
+print("=== de vaatwasser ===")
+def vw_klok(moment):
+    return None if moment is None else moment.strftime("%a %H:%M")
+
+if (vl := v("vaatwasser-avond")):
+    controle("vaatwasser avond: om 19:00 vrijgegeven, gestart om 01:00 in de goedkope nacht",
+             vl.vw_gestart is not None and vl.vw_gestart.hour == 1 and vl.vw_gestart.minute <= 1,
+             f"gestart {vw_klok(vl.vw_gestart)}")
+    controle("vaatwasser avond: niets in de avondpiek", not (vl.vw_gestart and 17 <= vl.vw_gestart.hour < 20), "")
+    controle("vaatwasser avond: klaar voor 07:00", vl.vw_klaar is not None and vl.vw_klaar.hour < 7,
+             f"klaar {vw_klok(vl.vw_klaar)}")
+    controle("vaatwasser avond: één keer gedrukt", len(vl.vw_gedrukt) == 1, f"{vl.vw_gedrukt}")
+    controle("vaatwasser avond: precies een verslag, met kWh en wat meteen starten gekost had",
+             len(meldingen(vl, "Vaatwasser is klaar")) == 1 and "Meteen starten had" in meldingen(vl, "Vaatwasser is klaar")[0],
+             f"{[m for _, m in vl.meldingen]}")
+    controle("vaatwasser avond: geen kritieke melding", not meldingen(vl, "niet gaan draaien"), "")
+    controle("vaatwasser avond: de beurt staat in de opslag met een besparing",
+             any(b["device"] == "vaatwasser" and (b["saved"] or 0) > 0 for b in vl.beurten),
+             f"{[(b['device'], b['kwh'], b['paid'], b['saved']) for b in vl.beurten]}")
+
+if (vl := v("vaatwasser-zon")):
+    controle("vaatwasser zon: bij een vast contract en genoeg zon start hij zodra hij mag",
+             vl.vw_gestart is not None and vl.vw_gestart.hour == 8, f"gestart {vw_klok(vl.vw_gestart)}")
+    controle("vaatwasser zon: klaar voor 18:00", vl.vw_klaar is not None and vl.vw_klaar.hour < 18, f"{vw_klok(vl.vw_klaar)}")
+    controle("vaatwasser zon: een verslag", len(meldingen(vl, "Vaatwasser is klaar")) == 1, "")
+
+if (vl := v("vaatwasser-krap")):
+    controle("vaatwasser krap: om 03:00 vrijgegeven met klaar om 07:00 start hij meteen",
+             vl.vw_gestart is not None and vl.vw_gestart.hour == 3 and vl.vw_gestart.minute <= 2,
+             f"gestart {vw_klok(vl.vw_gestart)}")
+    controle("vaatwasser krap: en is nog net op tijd klaar", vl.vw_klaar is not None and vl.vw_klaar.hour < 7,
+             f"{vw_klok(vl.vw_klaar)}")
+
+if (vl := v("vaatwasser-afstand-uit")):
+    controle("afstand uit: de coach drukt twee keer, niet vaker", len(vl.vw_gedrukt) == 2, f"{vl.vw_gedrukt}")
+    controle("afstand uit: en zegt na drie minuten dat hij niet gaat draaien",
+             len(meldingen(vl, "niet gaan draaien")) == 1 and "starten op afstand" in meldingen(vl, "niet gaan draaien")[0],
+             f"{[m for _, m in vl.meldingen]}")
+    controle("afstand uit: hij draait niet en er komt geen verslag",
+             vl.vw_gestart is None and not meldingen(vl, "is klaar"), "")
+
+if (vl := v("vaatwasser-uiterlijk-starten")):
+    controle("uiterlijk starten om 22:00: hij start om 22:00, ook al is de nacht goedkoper",
+             vl.vw_gestart is not None and vl.vw_gestart.hour == 22 and vl.vw_gestart.minute <= 1,
+             f"gestart {vw_klok(vl.vw_gestart)}")
 
 # --- de bewoner --------------------------------------------------------------
 
@@ -717,8 +771,10 @@ for naam, sensor, wat, van, tot in (
     stil = meldingen(vl, "meldt al 10 minuten niets")
     controle(f"{kort}: na tien minuten één melding dat de sensor niets zegt",
              len(stil) == 1 and sensor in stil[0], f"{stil}")
+    # Sinds 06-09-2026 gaat "doet het weer" alleen nog in de geschiedenis en
+    # niet naar de telefoon: per beurt één verslag plus wat kritiek is.
     weer = meldingen(vl, "doet het weer")
-    controle(f"{kort}: en één als hij terug is", len(weer) == 1 and sensor in weer[0], f"{weer}")
+    controle(f"{kort}: en niets op de telefoon als hij terug is", not weer, f"{weer}")
     tijdens = [r for r in regels_in(vl, van, tot) if r.tijd.date() == VDD_ZATERDAG]
     controle(f"{kort}: ondertussen laadt hij gewoon door",
              tijdens and all(r.paal_w > 0 for r in tijdens[3:])
@@ -739,8 +795,8 @@ if (vl := v("van-den-dam-prijssensor-weg-om-13")):
     controle("prijssensor weg: zodra hij terug is, meteen de prijzen van zondag en vol",
              any(r.regel == "cheap-hour" and r.amps >= 15 for r in na),
              f"{[(r.tijd.strftime('%H:%M'), r.regel, r.amps) for r in na]}")
-    controle("prijssensor weg: en gemeld dat hij het weer doet",
-             any("prijssensor doet het weer" in m for _, m in vl.meldingen), "")
+    controle("prijssensor weg: en niets op de telefoon als hij het weer doet",
+             not any("prijssensor doet het weer" in m for _, m in vl.meldingen), "")
 
 # --- storingen ---------------------------------------------------------------
 

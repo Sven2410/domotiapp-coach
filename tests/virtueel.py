@@ -351,6 +351,65 @@ class Paal:
         return self.teller_zichtbaar
 
 
+# --- de vaatwasser -------------------------------------------------------------
+
+
+@dataclass
+class Vaatwasser:
+    """Een Home Connect-vaatwasser: een programma dat je start en dat afdraait.
+
+    Het verbruik loopt in twee bulten, verwarmen aan het begin en drogen aan
+    het eind, met daartussen een pomp. De opgaven van de fabrikant zijn de
+    tabel in planner.py; hier is het een profiel dat op dezelfde kWh uitkomt.
+    """
+
+    programma: str = "dishcare_dishwasher_program_eco_50"
+    minuten: int = 225
+    kwh: float = 0.8
+    piek_w: float = 1200.0
+    piek_minuten: int = 40
+    pomp_w: float = 60.0
+    # Of "starten op afstand" op het apparaat aan staat. Staat het uit, dan
+    # doet een druk op de knop niets, zoals bij een echte Home Connect.
+    afstand_aan: bool = True
+    deur_open: bool = False
+    # Hoe lang Home Connect erover doet om na de knop "run" te melden.
+    aanloop_min: int = 1
+
+    # toestand
+    status: str = "ready"
+    gestart_op: dt.datetime | None = None
+    gedrukt_op: dt.datetime | None = None
+    kwh_geleverd: float = 0.0
+
+    def druk_start(self, nu: dt.datetime) -> None:
+        if self.afstand_aan and not self.deur_open and self.status in ("ready", "inactive"):
+            self.gedrukt_op = nu
+
+    def stap(self, nu: dt.datetime) -> float:
+        """Eén stap; geeft het vermogen van dit moment in watt."""
+        if self.gedrukt_op is not None and self.status != "run":
+            if nu - self.gedrukt_op >= dt.timedelta(minutes=self.aanloop_min):
+                self.status = "run"
+                self.gestart_op = nu
+                self.gedrukt_op = None
+        if self.status != "run" or self.gestart_op is None:
+            return 0.0
+        verstreken = (nu - self.gestart_op).total_seconds() / 60
+        if verstreken >= self.minuten:
+            self.status = "finished"
+            return 0.0
+        helft = self.piek_minuten / 2
+        if verstreken < helft or verstreken >= self.minuten - helft:
+            return self.piek_w
+        return self.pomp_w
+
+    def resterend(self, nu: dt.datetime) -> int | None:
+        if self.status != "run" or self.gestart_op is None:
+            return None
+        return max(0, int(self.minuten - (nu - self.gestart_op).total_seconds() / 60))
+
+
 # --- de prijzen --------------------------------------------------------------
 
 # Een gewone dag op de Nederlandse markt, kaal, per uur. Goedkoop in de nacht
@@ -445,6 +504,10 @@ class Scenario:
     # Wat de coach bij een eerdere beurt over deze auto leerde: kW per band van
     # tien procent, zoals `car_pace` in de instellingen. Zie `_tempo_leren`.
     geleerd_tempo: dict = field(default_factory=dict)
+    # Een vaatwasser in huis, met haar eigen schema ("klaar om"); None is geen.
+    vaatwasser: Vaatwasser | None = None
+    vaatwasser_klaar_om: str | None = "07:00"
+    vaatwasser_uiterlijk: str | None = None
     vast_prijs: float = 0.28
     vast_teruglevering: float = 0.07
     vast_terugleverkosten: float = 0.0
@@ -505,6 +568,13 @@ class Verloop:
     paal_herstarts: int = 0
     # Wat de coach aan het eind over de auto geleerd had: kW per band.
     geleerd: dict = field(default_factory=dict)
+    # De vaatwasser: wanneer de coach op start drukte, wanneer hij draaide,
+    # wanneer hij klaar was, en wat hij aan energie en geld kostte.
+    vw_gedrukt: list = field(default_factory=list)
+    vw_gestart: dt.datetime | None = None
+    vw_klaar: dt.datetime | None = None
+    vw_kwh: float = 0.0
+    vw_betaald: float = 0.0
 
     @property
     def kosten(self) -> float:
@@ -566,6 +636,13 @@ E = {
     "zon_dit_uur": "sensor.v_zon_dit_uur",
     "zon_volgend_uur": "sensor.v_zon_volgend_uur",
     "zon_piek": "sensor.v_zon_piek",
+    "vw_status": "sensor.v_vaatwasser_status",
+    "vw_programma": "select.v_vaatwasser_programma",
+    "vw_rest": "sensor.v_vaatwasser_rest",
+    "vw_deur": "binary_sensor.v_vaatwasser_deur",
+    "vw_start": "button.v_vaatwasser_start",
+    "vw_stop": "button.v_vaatwasser_stop",
+    "vw_vermogen": "sensor.v_vaatwasser_vermogen",
 }
 
 
@@ -617,8 +694,36 @@ def instellingen(s: Scenario) -> dict:
                 "feed_in_costs": s.prijzen.terugleverkosten,
             },
         }
+    apparaten = []
+    schemas = []
+    if s.vaatwasser is not None:
+        apparaten.append({
+            "id": "vaatwasser",
+            "type": "vaatwasser",
+            "name": "Vaatwasser",
+            "brand": "home_connect",
+            "controllable": True,
+            "entity": E["vw_vermogen"],
+            "entities": {
+                "status": E["vw_status"],
+                "program": E["vw_programma"],
+                "remaining": E["vw_rest"],
+                "door": E["vw_deur"],
+                "start": E["vw_start"],
+                "stop": E["vw_stop"],
+            },
+        })
+        schemas.append({
+            "device": "vaatwasser",
+            "enabled": bool(s.vaatwasser_klaar_om or s.vaatwasser_uiterlijk),
+            "priority": "mid",
+            "per_day": False,
+            "window": {"not_before": "", "start_by": s.vaatwasser_uiterlijk or "",
+                       "done_by": s.vaatwasser_klaar_om or ""},
+            "days": [],
+        })
     return {
-        "devices": [{
+        "devices": [*apparaten, {
             "id": "paal",
             "type": "laadpaal",
             "name": "Laadpaal",
@@ -655,7 +760,7 @@ def instellingen(s: Scenario) -> dict:
         "contract": contract,
         "strategy": {
             "level": "steer",
-            "schedules": [{
+            "schedules": [*schemas, {
                 "device": "paal",
                 "enabled": s.schema_aan,
                 "priority": "high",
@@ -699,6 +804,8 @@ class Wereld:
         self.s = s
         self.zon = dataclasses.replace(s.zon)
         self.huis = dataclasses.replace(s.huis)
+        self.vaatwasser = dataclasses.replace(s.vaatwasser) if s.vaatwasser is not None else None
+        self.vw_w = 0.0
         self.auto = dataclasses.replace(s.auto, soc_gemeld=[])
         self.paal = dataclasses.replace(s.paal, ontvangen=[])
         self.prijzen = dataclasses.replace(s.prijzen)
@@ -726,6 +833,11 @@ class Wereld:
         self.huis_w = self.huis.watt(nu)
         if self.oven_tot is not None and nu < self.oven_tot:
             self.huis_w += self.oven_w
+        # De vaatwasser hangt op de eerste fase en telt bij het huis: de meter
+        # ziet hem, de coach leest hem apart via zijn eigen vermogenssensor.
+        if self.vaatwasser is not None:
+            self.vw_w = self.vaatwasser.stap(nu)
+            self.huis_w += self.vw_w
         self.paal.stap(nu)
         aanbod = self.paal.aanbod()
         # De Equalizer zit tussen de paal en de auto: hij laat nooit meer door
@@ -823,6 +935,14 @@ class Wereld:
 
         soc = self.auto.gemelde_soc(nu)
         z(E["soc"], "unavailable" if soc is None else w(str(soc), "%"))
+        if self.vaatwasser is not None:
+            vw = self.vaatwasser
+            z(E["vw_status"], vw.status)
+            z(E["vw_programma"], vw.programma)
+            rest = vw.resterend(nu)
+            z(E["vw_rest"], "unknown" if rest is None else w(str(rest), "min"))
+            z(E["vw_deur"], "on" if vw.deur_open else "off")
+            z(E["vw_vermogen"], w(f"{self.vw_w:.0f}", "W"))
         if self.s.equalizer:
             z(E["equalizer"], w(f"{self.equalizer_vrij:.1f}", "A"))
             z(E["reden"], self.reden or "none")
@@ -941,6 +1061,17 @@ class Wereld:
         if actie == "storing":
             self.auto.ga_in_storing()
             return "de auto gaat in storing, de paal meldt 'completed'"
+        if actie == "vaatwasser_vrijgeven":
+            klaar = set(inst.get("ready_devices") or [])
+            klaar.add("vaatwasser")
+            inst["ready_devices"] = sorted(klaar)
+            if self.vaatwasser is not None and self.vaatwasser.status == "finished":
+                self.vaatwasser.status = "ready"
+                self.vaatwasser.gestart_op = None
+            return "de bewoner geeft de vaatwasser vrij: ingeruimd en dicht"
+        if actie == "vaatwasser_deur":
+            self.vaatwasser.deur_open = bool(arg)
+            return "de deur van de vaatwasser gaat " + ("open" if arg else "dicht")
         if actie == "sensor_weg":
             naam, minuten = arg
             self.weg[naam] = self.nu + dt.timedelta(minutes=int(minuten))
@@ -971,6 +1102,10 @@ class Diensten:
                                             "attributes": {"unit_of_measurement": "A"}})
         elif domein == "notify":
             self.verloop.meldingen.append((self.wereld.nu, data.get("message", "")))
+        elif domein == "button" and data.get("entity_id") == E["vw_start"]:
+            self.verloop.vw_gedrukt.append(self.wereld.nu)
+            if self.wereld.vaatwasser is not None:
+                self.wereld.vaatwasser.druk_start(self.wereld.nu)
 
 
 # --- draaien -----------------------------------------------------------------
@@ -1145,6 +1280,16 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                 verloop.misgelopen += uit_zon * deel * terug
             if verloop.klaar_op is None and wereld.auto.klaar and wereld.paal.kabel:
                 verloop.klaar_op = nu
+            if wereld.vaatwasser is not None:
+                vw = wereld.vaatwasser
+                if vw.status == "run" and verloop.vw_gestart is None:
+                    verloop.vw_gestart = vw.gestart_op
+                if vw.status == "finished" and verloop.vw_klaar is None and verloop.vw_gestart is not None:
+                    verloop.vw_klaar = nu
+                if wereld.vw_w > 0:
+                    verloop.vw_kwh += wereld.vw_w * deel
+                    if prijs is not None:
+                        verloop.vw_betaald += wereld.vw_w * deel * prijs
             if (verloop.klaar_tijd is not None and verloop.soc_bij_klaar_tijd is None
                     and nu >= verloop.klaar_tijd):
                 verloop.soc_bij_klaar_tijd = wereld.auto.soc
@@ -1225,6 +1370,11 @@ def samenvatting(v: Verloop) -> str:
         kt = (f"  klaar-tijd {v.klaar_tijd:%a %H:%M}: {'gehaald' if gehaald else 'GEMIST'}"
               f" ({v.soc_bij_klaar_tijd:.0f}%)")
     opt = "" if v.optimum is None else f"  optimum €{v.optimum:.2f}"
+    if v.scenario.vaatwasser is not None:
+        vw = (f"  vaatwasser {v.vw_gestart:%a %H:%M}-{v.vw_klaar:%H:%M} {v.vw_kwh:.2f} kWh €{v.vw_betaald:.2f}"
+              if v.vw_gestart and v.vw_klaar else
+              f"  vaatwasser {'draait nog' if v.vw_gestart else 'niet gestart'}")
+        opt += vw
     return (
         f"{s.naam:<28} {v.geladen_kwh:5.1f} kWh (zon {v.uit_zon_kwh:4.1f}, net {v.uit_net_kwh:4.1f})"
         f"  kosten €{v.kosten:.2f} (betaald €{v.betaald:.2f}){opt}"
