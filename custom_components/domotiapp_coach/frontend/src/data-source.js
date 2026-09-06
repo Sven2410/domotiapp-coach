@@ -16,7 +16,7 @@
  * export (naar het net).
  */
 
-import { brandFields, programFor, valueLabel } from "./devices.js";
+import { brandFields, programOf, valueLabel } from "./devices.js";
 import { countdown, duration, toKwh, toWatts } from "./format.js";
 
 const PHASES = ["l1", "l2", "l3"];
@@ -360,12 +360,12 @@ function readNumber(feed, entityId) {
  *
  * A sensor that says nothing gets a dash, never a plausible-looking number.
  */
-function deviceDetails(feed, device) {
+function deviceDetails(feed, device, settings) {
   const rows = [];
 
   for (const field of brandFields(device)) {
     const entityId = device.entities?.[field.key];
-    if (!entityId) continue;
+    if (!entityId || field.hideRow) continue;
 
     const state = feed.get(entityId);
     if (!usable(state)) {
@@ -394,12 +394,13 @@ function deviceDetails(feed, device) {
     // number the coach will plan with, and seeing it is how you catch it being
     // the wrong program.
     if (field.key === "program") {
-      const program = programFor(raw);
+      const program = programOf(device, raw, settings);
       if (program) {
         rows.push({
-          label: "Duurt ongeveer",
-          text: `${duration(program.minutes)} · ${program.kwh.toLocaleString("nl-NL", {
+          label: program.measured ? "Duurt gemeten" : "Duurt ongeveer",
+          text: `${duration(program.minutes)} · ${Number(program.kwh).toLocaleString("nl-NL", {
             minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
           })} kWh`,
         });
       }
@@ -565,7 +566,7 @@ export class LiveSource {
     const devices = (settings?.devices ?? []).map((device) => ({
       ...device,
       watts: readPower(feed, device.entity),
-      details: deviceDetails(feed, device),
+      details: deviceDetails(feed, device, settings),
     }));
 
     const phases = readPhases(feed, sources);

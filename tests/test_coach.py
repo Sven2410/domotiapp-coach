@@ -2888,7 +2888,7 @@ controle("zonder gekozen programma zegt hij dat je er een moet kiezen en vraagt 
          b.get("rule") == "no-program" and "Kies hieronder" in (b.get("reason") or "") and not telefoon58(v), f"{b.get('rule')} {b.get('reason')}")
 # Een eigen tabel: de klant zet Eco op 120 minuten.
 inst58["devices"][1]["program"] = "eco_50"
-inst58["devices"][1]["programs"] = [{"key": "eco_50", "label": "Eco 50 °C", "minutes": 120, "kwh": 0.7, "peak_w": 2000, "plan": "ideal"}]
+inst58["devices"][1]["programs"] = [{"key": "eco_50", "label": "Eco 50 °C", "minutes": 120, "kwh": 0.7, "peak_w": 2000}]
 b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 9, 11, 1)))
 controle("met een eigen tabel rekent hij met 120 minuten",
          coach58._programma["dev-dom"]["programma"].minutes == 120 and coach58._programma["dev-dom"]["programma"].kwh == 0.7, "")

@@ -237,23 +237,14 @@ export const CHARGER_BRANDS = [
  * appliance API and the alternative integration report.
  */
 export const DISHWASHER_PROGRAMS = [
-  { key: "eco_50", alias: "Eco50", label: "Eco 50 °C", minutes: 225, kwh: 0.8, peakW: 2100, peakMinutes: 40, plan: "ideal" },
-  { key: "auto_2", alias: "Auto2", label: "Auto 45 tot 65 °C", minutes: 135, kwh: 1.15, peakW: 2100, peakMinutes: 35, plan: "variable" },
-  { key: "intensiv_70", alias: "Intensiv70", label: "Intensief 70 °C", minutes: 145, kwh: 1.4, peakW: 2100, peakMinutes: 50, plan: "yes" },
-  { key: "kurz_60", alias: "Kurz60", label: "Express 60 °C", minutes: 60, kwh: 1.05, peakW: 2200, peakMinutes: 30, plan: "yes" },
-  { key: "night_wash", alias: "NightWash", label: "Nacht Was", minutes: 210, kwh: 1.0, peakW: 1600, peakMinutes: 55, plan: "yes" },
-  { key: "machine_care", alias: "MachineCare", label: "Machine Onderhoud", minutes: 120, kwh: 1.3, peakW: 2100, peakMinutes: 45, plan: "rare" },
-  { key: "pre_rinse", alias: "PreRinse", label: "Voorspoelen", minutes: 15, kwh: 0.05, peakW: 0, peakMinutes: null, plan: "never" },
+  { key: "eco_50", alias: "Eco50", label: "Eco 50 °C", minutes: 225, kwh: 0.8, peakW: 2100, peakMinutes: 40 },
+  { key: "auto_2", alias: "Auto2", label: "Auto 45 tot 65 °C", minutes: 135, kwh: 1.15, peakW: 2100, peakMinutes: 35 },
+  { key: "intensiv_70", alias: "Intensiv70", label: "Intensief 70 °C", minutes: 145, kwh: 1.4, peakW: 2100, peakMinutes: 50 },
+  { key: "kurz_60", alias: "Kurz60", label: "Express 60 °C", minutes: 60, kwh: 1.05, peakW: 2200, peakMinutes: 30 },
+  { key: "night_wash", alias: "NightWash", label: "Nacht Was", minutes: 210, kwh: 1.0, peakW: 1600, peakMinutes: 55 },
+  { key: "machine_care", alias: "MachineCare", label: "Machine Onderhoud", minutes: 120, kwh: 1.3, peakW: 2100, peakMinutes: 45 },
+  { key: "pre_rinse", alias: "PreRinse", label: "Voorspoelen", minutes: 15, kwh: 0.05, peakW: 0, peakMinutes: null },
 ];
-
-/** Why the coach would or would not move this program. */
-export const PLAN_LABELS = {
-  ideal: "ideaal om te verschuiven",
-  yes: "te verschuiven",
-  variable: "te verschuiven, maar de duur varieert",
-  rare: "zelden nodig",
-  never: "niet verschuiven",
-};
 
 /**
  * The same value, however an integration chose to spell it.
@@ -345,10 +336,21 @@ export const DISHWASHER_BRANDS = [
       {
         key: "program",
         label: "Geselecteerd programma",
-        hint: "Welk programma klaarstaat. Daar hangt aan vast hoe lang het duurt en wat het kost. Die gegevens zitten in het paneel.",
+        hint: "De sensor die zegt welk programma klaarstaat. Daar hangt aan vast hoe lang het duurt en wat het kost.",
         filter: "all",
         needed: true,
         values: DISHWASHER_PROGRAM_VALUES,
+      },
+      {
+        key: "program_select",
+        label: "Programma kiezen",
+        hint: "De select-entiteit waarmee je een programma op de machine zet. Hiermee kies je op de kaart welk programma erop staat, en hieruit komen de namen in de tabel hieronder.",
+        filter: "select",
+        // Sven op 06-09-2026: "ik heb selected program in plaats van select;
+        // voeg een optie toe waar ik een sensor in kan zetten." Vandaar twee
+        // velden: de sensor die het zegt, en de select die het zet.
+        values: DISHWASHER_PROGRAM_VALUES,
+        hideRow: true,
       },
       {
         key: "remaining",
@@ -533,12 +535,15 @@ export function deviceCommands(device, readNumber) {
  */
 export function programChooser(device) {
   const key = brandMeta(device)?.programField;
-  const entityId = key ? device?.entities?.[key] : undefined;
-  if (!entityId) return undefined;
-
-  const domain = entityId.split(".")[0];
-  if (domain !== "select" && domain !== "input_select") return undefined;
-  return { entityId, domain };
+  if (!key) return undefined;
+  // Eerst de select die ervoor bedoeld is, dan de programmasensor als die
+  // toevallig zelf een select is.
+  for (const entityId of [device?.entities?.program_select, device?.entities?.[key]]) {
+    if (!entityId) continue;
+    const domain = entityId.split(".")[0];
+    if (domain === "select" || domain === "input_select") return { entityId, domain };
+  }
+  return undefined;
 }
 
 /** Whether there is anything to send to this device at all. */
@@ -674,8 +679,45 @@ export const defaultPrograms = () =>
     minutes: program.minutes,
     kwh: program.kwh,
     peak_w: program.peakW,
-    plan: program.plan,
   }));
+
+/**
+ * De programma's zoals de machine ze zelf aanbiedt: de opties van de
+ * select-entiteit, elk met de sleutel waaronder de coach hem kent en een
+ * leesbare naam. Leeg zonder select of zolang de feed er nog niet is.
+ */
+export function programOptions(device, feed) {
+  const chooser = programChooser(device);
+  if (!chooser || !feed) return [];
+  const options = feed.get(chooser.entityId)?.attributes?.options ?? [];
+  return options.map((value) => {
+    const known = programFor(value);
+    // Een programma dat de tabel niet kent: het stuk na het vaste voorvoegsel,
+    // netjes gemaakt. `dishcare_dishwasher_program_glas_40` wordt "Glas 40".
+    const staart = String(value).replace(/^dishcare[._]dishwasher[._]program[._]/i, "").split(".").pop();
+    const label = known?.label ?? valueLabel(DISHWASHER_PROGRAM_VALUES, value)
+      ?? staart.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+    return { value, key: known?.key ?? programKey(staart), label };
+  });
+}
+
+/**
+ * De rijen van de tabel in Apparaten.
+ *
+ * Bij een machine die haar programma's zelf noemt (Home Connect met een
+ * select): één rij per optie, in die volgorde en met die naam, en de cijfers
+ * uit wat de klant invulde of anders uit de opgave. Zonder opties: de eigen
+ * tabel, of de opgave als uitgangspunt.
+ */
+export function programRows(device, options = []) {
+  if (!options.length) return programsFor(device).map((row) => ({ ...row }));
+  const eigen = new Map((device?.programs ?? []).map((row) => [row.key || programKey(row.label), row]));
+  const opgave = new Map(defaultPrograms().map((row) => [row.key, row]));
+  return options.map((option) => {
+    const row = eigen.get(option.key) ?? opgave.get(option.key) ?? { minutes: 120, kwh: 1, peak_w: 2000 };
+    return { key: option.key, label: option.label, minutes: row.minutes, kwh: row.kwh, peak_w: row.peak_w ?? 0 };
+  });
+}
 
 export const hasOwnPrograms = (device) =>
   Array.isArray(device?.programs) && device.programs.length > 0;
@@ -744,7 +786,9 @@ export function programPicker(device) {
   if (!PROGRAM_TYPES.includes(device?.type)) return undefined;
   const chooser = programChooser(device);
   if (chooser) return { kind: "entity", entityId: chooser.entityId };
-  if (device?.entities?.program) return undefined;
+  // Een merk dat het programma van de machine leest maar zonder select om het
+  // te zetten: niets te kiezen, maar wel zeggen waar dat aan ligt.
+  if (brandMeta(device)?.programField && !isManualProgram(device)) return { kind: "missing" };
   return { kind: "table", options: programsFor(device) };
 }
 

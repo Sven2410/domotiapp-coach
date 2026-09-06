@@ -1119,8 +1119,11 @@ class ChargerCoach:
         )
 
         released = device_id in (settings.get("ready_devices") or [])
-        if entities.get("program"):
-            programma = programma_van(_text(self.hass, entities.get("program")), tabel)
+        # Wat erop staat: de sensor, of anders de select-entiteit waarmee het
+        # gezet wordt (Home Connect heeft ze allebei; Sven heeft de sensor).
+        programma_entiteit = entities.get("program") or entities.get("program_select")
+        if programma_entiteit:
+            programma = programma_van(_text(self.hass, programma_entiteit), tabel)
         else:
             # Geen sensor die het programma zegt: de bewoner koos het op de kaart.
             programma = programma_van(device.get("program") or None, tabel)

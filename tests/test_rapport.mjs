@@ -451,13 +451,13 @@ import { readFileSync } from "node:fs";
 const { DISHWASHER_PROGRAMS } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
 proef("de programmatabel in het paneel is dezelfde als die in planner.py", () => {
   const bron = readFileSync(new URL("../custom_components/domotiapp_coach/planner.py", import.meta.url), "utf-8");
-  const regels = [...bron.matchAll(/Programma\("([a-z0-9_]+)", "[^"]+", (\d+), ([\d.]+), (\d+), "([a-z]+)"\)/g)];
-  const python = new Map(regels.map((m) => [m[1], { minutes: Number(m[2]), kwh: Number(m[3]), peakW: Number(m[4]), plan: m[5] }]));
+  const regels = [...bron.matchAll(/Programma\("([a-z0-9_]+)", "[^"]+", (\d+), ([\d.]+), (\d+)\)/g)];
+  const python = new Map(regels.map((m) => [m[1], { minutes: Number(m[2]), kwh: Number(m[3]), peakW: Number(m[4]) }]));
   assert.equal(python.size, DISHWASHER_PROGRAMS.length, "evenveel programma's");
   for (const p of DISHWASHER_PROGRAMS) {
     const q = python.get(p.key);
     assert.ok(q, `${p.key} staat ook in planner.py`);
-    assert.deepEqual({ minutes: p.minutes, kwh: p.kwh, peakW: p.peakW, plan: p.plan }, q, p.key);
+    assert.deepEqual({ minutes: p.minutes, kwh: p.kwh, peakW: p.peakW }, q, p.key);
   }
 });
 
@@ -468,12 +468,13 @@ proef("de programmatabel in het paneel is dezelfde als die in planner.py", () =>
 // er in heb gezet." De opgave is het uitgangspunt, de eigen tabel wint, en de
 // meting wint van allebei.
 
-const { programsFor, defaultPrograms, hasOwnPrograms, programKey, programOf, programPicker, isManualProgram, missingForControl } =
+const { programsFor, defaultPrograms, hasOwnPrograms, programKey, programOf, programPicker, isManualProgram, missingForControl,
+        programOptions, programRows, programChooser } =
   await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
 proef("zonder eigen tabel is de tabel van een apparaat de opgave van de fabrikant", () => {
   const rows = programsFor({ type: "vaatwasser", brand: "overig" });
   assert.equal(rows.length, DISHWASHER_PROGRAMS.length);
-  assert.deepEqual(rows[0], { key: "eco_50", label: "Eco 50 °C", minutes: 225, kwh: 0.8, peak_w: 2100, plan: "ideal" });
+  assert.deepEqual(rows[0], { key: "eco_50", label: "Eco 50 °C", minutes: 225, kwh: 0.8, peak_w: 2100 });
   assert.equal(hasOwnPrograms({ programs: [] }), false);
   // Elke keer een verse kopie, zodat bewerken de opgave zelf niet aanraakt.
   assert.notEqual(defaultPrograms()[0], defaultPrograms()[0]);
@@ -487,8 +488,8 @@ proef("programOf vindt een programma op de sensorwaarde, in de eigen tabel, met 
   const device = {
     id: "vw", type: "vaatwasser", brand: "home_connect",
     programs: [
-      { key: "eco_50", label: "Eco 50 °C", minutes: 180, kwh: 0.6, peak_w: 2000, plan: "ideal" },
-      { key: "", label: "Glas 40 °C", minutes: 90, kwh: 0.5, peak_w: 1800, plan: "yes" },
+      { key: "eco_50", label: "Eco 50 °C", minutes: 180, kwh: 0.6, peak_w: 2000 },
+      { key: "", label: "Glas 40 °C", minutes: 90, kwh: 0.5, peak_w: 1800 },
     ],
   };
   assert.equal(programOf(device, "dishcare_dishwasher_program_eco_50").minutes, 180);
@@ -507,13 +508,38 @@ proef("programOf vindt een programma op de sensorwaarde, in de eigen tabel, met 
 proef("de programmakeuze op de kaart: de entiteit bij een slimme machine, de eigen tabel bij een domme", () => {
   const slim = { type: "vaatwasser", brand: "home_connect", entities: { program: "select.vaatwasser_programma" } };
   assert.deepEqual(programPicker(slim), { kind: "entity", entityId: "select.vaatwasser_programma" });
+  // Sven heeft de sensor "selected program" én, apart, de select om te kiezen.
+  const sven = { type: "vaatwasser", brand: "home_connect",
+                 entities: { program: "sensor.vaatwasser_programma", program_select: "select.vaatwasser_programmas" } };
+  assert.deepEqual(programPicker(sven), { kind: "entity", entityId: "select.vaatwasser_programmas" });
+  assert.equal(programChooser(sven).entityId, "select.vaatwasser_programmas");
   const alleenLezen = { type: "vaatwasser", brand: "home_connect", entities: { program: "sensor.vaatwasser_programma" } };
-  assert.equal(programPicker(alleenLezen), undefined, "een sensor is niet te kiezen");
+  assert.deepEqual(programPicker(alleenLezen), { kind: "missing" }, "een sensor is niet te kiezen, en de kaart zegt wat er mist");
   const dom = { type: "vaatwasser", brand: "overig", entities: {} };
   const keuze = programPicker(dom);
   assert.equal(keuze.kind, "table");
   assert.equal(keuze.options.length, DISHWASHER_PROGRAMS.length);
   assert.equal(programPicker({ type: "laadpaal", brand: "easee" }), undefined);
+});
+proef("de tabel bij Home Connect: de rijen van de machine, met de cijfers van de klant of de opgave", () => {
+  const device = {
+    id: "vw", type: "vaatwasser", brand: "home_connect",
+    entities: { program: "sensor.vw_programma", program_select: "select.vw_programmas" },
+    programs: [{ key: "eco_50", label: "Eco 50 °C", minutes: 180, kwh: 0.6, peak_w: 2000 }],
+  };
+  const feed = new Map([["select.vw_programmas", { state: "dishcare_dishwasher_program_eco_50", attributes: {
+    options: ["dishcare_dishwasher_program_eco_50", "dishcare_dishwasher_program_kurz_60", "dishcare_dishwasher_program_glas_40"],
+  } }]]);
+  const options = programOptions(device, feed);
+  assert.deepEqual(options.map((o) => [o.key, o.label]),
+    [["eco_50", "Eco 50 °C"], ["kurz_60", "Express 60 °C"], ["glas_40", "Glas 40"]]);
+  const rows = programRows(device, options);
+  assert.equal(rows.length, 3, "één rij per optie van de machine");
+  assert.deepEqual(rows[0], { key: "eco_50", label: "Eco 50 °C", minutes: 180, kwh: 0.6, peak_w: 2000 }, "de eigen cijfers");
+  assert.deepEqual(rows[1], { key: "kurz_60", label: "Express 60 °C", minutes: 60, kwh: 1.05, peak_w: 2200 }, "de opgave");
+  assert.deepEqual(rows[2], { key: "glas_40", label: "Glas 40", minutes: 120, kwh: 1, peak_w: 2000 }, "onbekend: een gok om te bewerken");
+  assert.deepEqual(programOptions(device, new Map()), [], "zonder feed nog niets");
+  assert.equal(programRows(device, []).length, 1, "zonder opties de eigen tabel");
 });
 proef("een domme vaatwasser is handmatig en heeft een vermogenssensor nodig", () => {
   const dom = { type: "vaatwasser", brand: "overig", controllable: true, entities: {}, entity: "" };

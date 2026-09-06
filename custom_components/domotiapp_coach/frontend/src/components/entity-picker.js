@@ -41,6 +41,8 @@ const MATCHERS = {
   power: (attrs, unit) => POWER_UNITS.has(unit) || attrs.device_class === "power",
   price: (attrs, unit) => attrs.device_class === "monetary" || unit.includes("/kwh"),
   current: (attrs, unit) => unit === "a" || attrs.device_class === "current",
+  // Iets waar je uit kunt kiezen: een select of input_select heeft opties.
+  select: (attrs) => Array.isArray(attrs.options),
   all: () => true,
 };
 

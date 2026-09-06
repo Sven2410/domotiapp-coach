@@ -98,7 +98,6 @@ _PROGRAM = _schema(
         vol.Required("minutes"): vol.All(vol.Coerce(int), vol.Range(1, 24 * 60)),
         vol.Required("kwh"): vol.All(vol.Coerce(float), vol.Range(0, 50)),
         vol.Optional("peak_w", default=0): vol.All(vol.Coerce(int), vol.Range(0, 20000)),
-        vol.Optional("plan", default="yes"): vol.In(["ideal", "yes", "variable", "rare", "never"]),
     }
 )
 
