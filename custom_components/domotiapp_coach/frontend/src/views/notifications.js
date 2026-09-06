@@ -232,18 +232,23 @@ const css = /* css */ `
   /* Een knop en geen checkbox: een echte checkbox is per browser anders
      opgemaakt en die van iOS negeert de helft van wat hier staat. Zelfde
      schuif als op de kaart van een apparaat. */
+  /* Aan is een gevulde blauwe baan met een witte knop rechts, uit een grijze
+     baan met een doffe knop links. De zachte variant van eerst was van een
+     afstand niet van uit te onderscheiden; Sven op 06-09-2026. */
   .schuif {
     flex: 0 0 auto; width: 46px; min-width: 46px; height: 27px; padding: 0;
-    border-radius: var(--dac-radius-pill); border: 1px solid var(--dac-border-hi);
-    background: rgba(255,255,255,0.04); cursor: pointer; position: relative;
+    border-radius: var(--dac-radius-pill); border: 1px solid transparent;
+    background: rgba(232,228,222,0.16); cursor: pointer; position: relative;
     transition: background 120ms linear, border-color 120ms linear;
   }
   .schuif .knob {
     position: absolute; top: 3px; left: 3px; width: 19px; height: 19px; border-radius: 50%;
-    background: var(--dac-ink-3); transition: transform 120ms linear, background 120ms linear;
+    background: rgba(232,228,222,0.65); transition: transform 120ms linear, background 120ms linear;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.35);
   }
-  .schuif[aria-checked="true"] { background: var(--dac-accent-soft); border-color: rgba(25,143,217,0.55); }
-  .schuif[aria-checked="true"] .knob { transform: translateX(19px); background: var(--dac-accent-hi); }
+  .schuif[aria-checked="true"] { background: var(--dac-accent-hi); }
+  .schuif[aria-checked="true"] .knob { transform: translateX(19px); background: #fff; }
+  .schuif:focus-visible { outline: 2px solid var(--dac-accent-hi); outline-offset: 2px; }
   .schuif:disabled { opacity: 0.4; cursor: default; }
   .persoon .voet { display: flex; justify-content: flex-end; padding: 6px 0 4px; border-top: 1px solid var(--dac-border); }
   .knop {
@@ -270,6 +275,11 @@ const css = /* css */ `
     min-height: 40px; width: 100%; box-sizing: border-box;
   }
   input:focus, select:focus { outline: 2px solid var(--dac-accent); outline-offset: 1px; }
+  /* De uitklaplijst tekent de browser zelf, buiten onze stijlen om. Zonder
+     color-scheme kwam hij wit met onze lichte letters erin: onleesbaar. Sven
+     op 06-09-2026, met een schermafdruk waarop hij "amper wat kon lezen". */
+  select { color-scheme: dark; }
+  select option { background: #12120f; color: #e8e4de; }
   @media (pointer: coarse) { input, select { font-size: 16px; } }
   .rij-knoppen { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .status { font-size: 12.5px; color: var(--dac-ink-3); min-height: 18px; margin-top: 6px; }
