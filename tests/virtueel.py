@@ -190,6 +190,20 @@ class Auto:
     aanloop_s: int = 60
     # Zo lang doet zijn app erover om een nieuw percentage te laten zien.
     soc_vertraging_min: int = 0
+    # Vanaf dit percentage neemt de auto zelf gas terug: daarboven neemt hij
+    # nog `afbouw_deel` van zijn maximum. Sven op 06-09-2026: "bepaalde auto's
+    # schroeven vanaf een bepaald procent zelf hun doorlaatbaarheid terug."
+    afbouw_vanaf: float | None = None
+    afbouw_deel: float = 0.5
+    # Zoveel ampère trekt hij bóven de limiet die hij krijgt. De Ford bij Van
+    # den Dam trok op 06-09-2026 16,9 A op een limiet van 16 op één fase.
+    overschot_amps: float = 0.0
+    # Een auto die een herstart van de paal midden in de sessie niet verdraagt:
+    # hij gaat in storing en laat de paal "completed" melden. Uit die storing
+    # komt hij alleen met een nieuw startcommando, en daar doet hij zo veel
+    # minuten over (de Ford: negen, van 05:18 tot 05:27).
+    storing_bij_herstart: bool = False
+    storing_herstel_min: int = 9
 
     # toestand
     trekt_amps: float = 0.0
@@ -197,8 +211,19 @@ class Auto:
     klaar: bool = False
     aanloop: int = 0
     soc_gemeld: list = field(default_factory=list)
+    storing: bool = False
+    herstel_op: dt.datetime | None = None
 
-    def stap(self, aanbod_amps: float, gestart: bool, stap_s: int = 60) -> None:
+    def stap(self, aanbod_amps: float, gestart: bool, stap_s: int = 60,
+             nu: dt.datetime | None = None, fasen: int = 3) -> None:
+        if self.storing:
+            self.trekt_amps = 0.0
+            if self.herstel_op is not None and nu is not None and nu >= self.herstel_op:
+                self.storing = False
+                self.herstel_op = None
+                self.wakker = False
+            else:
+                return
         if self.soc >= self.laadgrens - 1e-9:
             self.klaar = True
         if self.klaar:
@@ -218,7 +243,24 @@ class Auto:
             self.aanloop -= 1
             self.trekt_amps = 0.0
             return
-        self.trekt_amps = min(aanbod_amps, self.max_amps)
+        kan = self.max_amps
+        if self.afbouw_vanaf is not None and self.soc >= self.afbouw_vanaf:
+            kan = max(MIN_AMPS, self.max_amps * self.afbouw_deel)
+        # Het overschot komt bovenop wat hij krijgt, ook boven zijn eigen
+        # maximum: de Ford trok 16,9 A waar 16 het maximum van de paal was.
+        # Alleen op één fase; op drie bleef dezelfde Ford met 14,4 A onder de 16.
+        self.trekt_amps = min(aanbod_amps, kan) + (self.overschot_amps if fasen == 1 else 0.0)
+
+    def start_ontvangen(self, nu: dt.datetime) -> None:
+        """De paal stuurde een start. In storing telt vanaf nu het herstel."""
+        if self.storing and self.herstel_op is None:
+            self.herstel_op = nu + dt.timedelta(minutes=self.storing_herstel_min)
+
+    def ga_in_storing(self) -> None:
+        self.storing = True
+        self.herstel_op = None
+        self.trekt_amps = 0.0
+        self.wakker = False
 
     def laad(self, kwh_aan_de_stekker: float) -> None:
         self.soc = min(
@@ -249,6 +291,18 @@ class Paal:
     ttl_tot: dt.datetime | None = None
     gestart: bool = False
     kabel: bool = False
+    # De groep waar de paal op zit (bij Easee de dynamische circuitlimiet), en
+    # of de coach die sensor heeft. Trekt de auto er langer dan een minuut
+    # overheen, dan pauzeert de paal en start hij de sessie opnieuw, zoals de
+    # Easee bij Van den Dam op 06-09-2026 om 04:25:57 deed.
+    circuit_amps: float | None = None
+    circuit_zichtbaar: bool = True
+    # Een Easee in automatische fasemodus kiest bij het starten zelf. Met dit
+    # aan kiest hij bij de eerstvolgende start één fase, zoals om 04:17.
+    kiest_een_fase: bool = False
+    fasen_nu: int = 3
+    boven_groep_sinds: dt.datetime | None = None
+    herstarts: int = 0
     teller_kwh: float = 100.0
     # De echte Easee werkt zijn levensduurteller maar af en toe bij, in
     # sprongen. Zie `_geladen` in coach.py voor wat dat kostte.
@@ -282,7 +336,7 @@ class Paal:
     def status(self, auto: Auto) -> str:
         if not self.kabel:
             return "disconnected"
-        if auto.klaar:
+        if auto.klaar or auto.storing:
             return "completed"
         if auto.trekt_amps > 0:
             return "charging"
@@ -388,6 +442,9 @@ class Scenario:
     # meldt hoeveel hij vrijgeeft, en de paal zegt waarom hij geknepen wordt.
     equalizer: bool = False
     voorspeller: str = "dashboard"      # dashboard | sensoren | geen
+    # Wat de coach bij een eerdere beurt over deze auto leerde: kW per band van
+    # tien procent, zoals `car_pace` in de instellingen. Zie `_tempo_leren`.
+    geleerd_tempo: dict = field(default_factory=dict)
     vast_prijs: float = 0.28
     vast_teruglevering: float = 0.07
     vast_terugleverkosten: float = 0.0
@@ -444,6 +501,10 @@ class Verloop:
     fouten: list[str] = field(default_factory=list)
     # De laadbeurten zoals de coach ze in de opslag zette: kWh, betaald, bespaard.
     beurten: list = field(default_factory=list)
+    # Hoe vaak de paal zelf de sessie herstartte omdat de auto over de groep ging.
+    paal_herstarts: int = 0
+    # Wat de coach aan het eind over de auto geleerd had: kW per band.
+    geleerd: dict = field(default_factory=dict)
 
     @property
     def kosten(self) -> float:
@@ -489,6 +550,7 @@ E = {
     "vermogen": "sensor.v_paal_vermogen",
     "max": "sensor.v_paal_max",
     "dyn": "sensor.v_paal_dyn",
+    "circuit": "sensor.v_paal_circuit",
     "teller": "sensor.v_paal_teller",
     "zon": "sensor.v_zon",
     "afname": "sensor.v_afname",
@@ -571,6 +633,8 @@ def instellingen(s: Scenario) -> dict:
                 "dynamic_limit": E["dyn"],
                 "lifetime_energy": E["teller"],
                 "no_current_reason": E["reden"] if s.equalizer else "",
+                "circuit_limit": E["circuit"]
+                if s.paal.circuit_amps is not None and s.paal.circuit_zichtbaar else "",
             },
             "cars": [{
                 "id": "auto",
@@ -611,6 +675,9 @@ def instellingen(s: Scenario) -> dict:
         },
         "active_cars": [{"device": "paal", "car": "auto"}],
         "car_soc": [],
+        # Wat een eerdere beurt over deze auto leerde, per band van tien procent.
+        "car_pace": [{"device": "paal", "car": "auto", "band": band, "kw": kw, "at": ""}
+                     for band, kw in sorted(s.geleerd_tempo.items())],
         "ready_devices": [],
         "sessions": [],
     }
@@ -669,9 +736,38 @@ class Wereld:
             elif aanbod > vrij:
                 self.reden = "limited_by_equalizer"
                 aanbod = math.floor(vrij)
-        self.auto.stap(aanbod, self.paal.gestart, self.s.stap_seconden)
-        self.paal_fasen = min(self.auto.fasen, self.paal.fasen)
+        trok = self.auto.trekt_amps
+        # Op hoeveel fasen deze sessie loopt, of gaat lopen als hij nu begint.
+        volgende = 1 if self.paal.kiest_een_fase else self.paal.fasen
+        fasen_nu = self.paal.fasen_nu if trok > 0 else volgende
+        self.auto.stap(aanbod, self.paal.gestart, self.s.stap_seconden, nu,
+                       fasen=min(self.auto.fasen, fasen_nu))
+        # De paal kiest zijn fasen bij het begin van een sessie, niet
+        # halverwege. Een Easee in automatische modus pakt er soms één.
+        if self.auto.trekt_amps > 0 and trok <= 0:
+            self.paal.fasen_nu = 1 if self.paal.kiest_een_fase else self.paal.fasen
+            self.paal.kiest_een_fase = False
+        self.paal_fasen = min(self.auto.fasen, self.paal.fasen_nu)
         self.paal_w = self.auto.trekt_amps * VOLT * self.paal_fasen
+        # Boven de groep: de paal grijpt na een minuut zelf in, met een
+        # herstart van de sessie. Een auto die daar niet tegen kan gaat in
+        # storing en de paal meldt "completed".
+        groep = self.paal.circuit_amps
+        if groep is not None and self.auto.trekt_amps > groep + 1e-9:
+            if self.paal.boven_groep_sinds is None:
+                self.paal.boven_groep_sinds = nu
+            elif nu - self.paal.boven_groep_sinds >= dt.timedelta(minutes=1):
+                self.paal.boven_groep_sinds = None
+                self.paal.herstarts += 1
+                self.paal.fasen_nu = self.paal.fasen
+                if self.auto.storing_bij_herstart:
+                    self.auto.ga_in_storing()
+                else:
+                    self.auto.wakker = False
+                self.auto.trekt_amps = 0.0
+                self.paal_w = 0.0
+        else:
+            self.paal.boven_groep_sinds = None
 
     def verstrijk(self, seconden: float) -> None:
         """Een stap energie laten stromen."""
@@ -715,6 +811,8 @@ class Wereld:
         z(E["vermogen"], w(f"{self.paal_w:.0f}", "W"))
         z(E["max"], w(f"{self.paal.max_amps:.0f}", "A"))
         z(E["dyn"], w(f"{self.paal.dyn_limit:.0f}", "A"))
+        if self.paal.circuit_amps is not None:
+            z(E["circuit"], w(f"{self.paal.circuit_amps:.0f}", "A"))
         z(E["teller"], w(f"{self.paal.teller(nu):.3f}", "kWh"))
 
         soc = self.auto.gemelde_soc(nu)
@@ -834,6 +932,9 @@ class Wereld:
         if actie == "paal_max":
             self.paal.max_amps = float(arg)
             return f"de paal staat nu op maximaal {arg} A"
+        if actie == "storing":
+            self.auto.ga_in_storing()
+            return "de auto gaat in storing, de paal meldt 'completed'"
         if actie == "sensor_weg":
             naam, minuten = arg
             self.weg[naam] = self.nu + dt.timedelta(minutes=int(minuten))
@@ -855,6 +956,8 @@ class Diensten:
         self.verstuurd.append((domein, dienst, dict(data)))
         if domein == "easee":
             self.wereld.paal.opdracht(dienst, data, self.wereld.nu)
+            if dienst == "action_command" and data.get("action_command") == "start":
+                self.wereld.auto.start_ontvangen(self.wereld.nu)
             self.verloop.opdrachten.append((self.wereld.nu, dienst, dict(data)))
             # De paal meldt zijn nieuwe limiet meteen terug; de coach leest die
             # om te zien of zijn opdracht is aangenomen.
@@ -1053,6 +1156,9 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
     asyncio.run(hass.afmaken())
     try:
         verloop.beurten = asyncio.run(coachmod.async_get_beurten(hass).async_list())
+        verloop.paal_herstarts = wereld.paal.herstarts
+        verloop.geleerd = {int(r["band"]): float(r["kw"]) for r in inst.get("car_pace") or []
+                           if isinstance(r, dict) and r.get("car") == "auto"}
     except Exception as fout:  # noqa: BLE001
         verloop.fouten.append(f"beurten niet te lezen: {fout!r}")
     if verloop.klaar_tijd is not None and verloop.soc_bij_klaar_tijd is None:

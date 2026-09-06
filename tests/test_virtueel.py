@@ -144,7 +144,11 @@ for naam, vl in V.items():
                  len(meldingen(vl, "is vol")) == 1, f"{meldingen(vl, 'is vol')}")
     # Sven op 04-09-2026: "De eindtijd is heel belangrijk. Een uur daarvoor
     # moet hij altijd klaar zijn." Vijf minuten speling voor de aanloop.
-    if gehaald(vl) and vl.klaar_tijd is not None and vl.klaar_op is not None:
+    # `afbouw-krap` is met opzet de beurt waarin de coach nog niet weet dat de
+    # auto bovenin afbouwt: hij wordt vol in het laatste uur, en juist daarom
+    # leert hij het; zie `afbouw-krap-geleerd`.
+    if (gehaald(vl) and vl.klaar_tijd is not None and vl.klaar_op is not None
+            and naam != "afbouw-krap"):
         controle(f"{naam}: een uur voor de klaar-tijd al vol",
                  vl.klaar_op <= vl.klaar_tijd - virtueel.dt.timedelta(minutes=55),
                  f"vol om {vl.klaar_op:%H:%M}, klaar-tijd {vl.klaar_tijd:%H:%M}")
@@ -331,6 +335,64 @@ if (vl := v("auto-wordt-niet-wakker")):
     controle("slapende auto: meldt dat hij geen stroom afneemt",
              bool(meldingen(vl, "geen stroom af")), "")
     controle("slapende auto: komt alsnog vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
+# --- de nacht van 05 op 06-09-2026 bij Van den Dam ---------------------------
+#
+# De Easee koos één fase, de Ford trok 16,9 A op een groep van 16 A, de paal
+# herstartte, de Ford ging in storing en bleef op 86% staan tot een start met
+# de hand. Sven: de fasemodus blijft, dus de coach rekent met wat er loopt,
+# blijft onder de groep, en start een auto die niet vol is zelf opnieuw.
+
+print("=== storing, één fase, de groep, en een auto die bovenin afbouwt ===")
+if (vl := v("ford-storing")):
+    controle("storing: de coach start de paal één keer opnieuw en zegt dat",
+             len(meldingen(vl, "opnieuw gestart")) == 1, f"{[m for _, m in vl.meldingen]}")
+    controle("storing: de auto komt daarna gewoon vol", gehaald(vl) and vl.klaar_op is not None,
+             f"{vl.klaar_op}")
+    controle("storing: geen 'laadt niet verder' over een auto die weer ging",
+             not meldingen(vl, "laadt niet verder"), f"{meldingen(vl, 'laadt niet verder')}")
+    controle("storing: precies een verslag", len(meldingen(vl, "is vol")) == 1, "")
+
+if (vl := v("easee-een-fase-groep")):
+    controle("één fase, groep zichtbaar: de paal hoeft nooit zelf te herstarten",
+             vl.paal_herstarts == 0, f"{vl.paal_herstarts}")
+    controle("één fase, groep zichtbaar: geen storing en geen herstart door de coach",
+             not meldingen(vl, "opnieuw gestart"), f"{meldingen(vl, 'opnieuw gestart')}")
+    # De eerste minuten vraagt hij 16, tot hij ziet dat de auto 16,9 trekt. De
+    # nachtsessie begint de paal weer op drie fasen, en daar is 16 gewoon goed.
+    een_fase = [r for r in vl.regels if r.paal_w > 0 and r.paal_w / (r.paal_amps * 230) < 1.5]
+    controle("één fase, groep zichtbaar: op één fase vraagt hij daarna hooguit 15 A, de groep min het overschot",
+             len([r for r in een_fase if r.amps > 15]) <= 5,
+             f"{len([r for r in een_fase if r.amps > 15])} ronden boven 15 A op één fase")
+    controle("één fase, groep zichtbaar: de tip zegt dat hij met één fase rekent",
+             bool(meldingen(vl, "rekent deze beurt met die ene fase")), "")
+    controle("één fase, groep zichtbaar: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
+if (vl := v("easee-een-fase-blind")):
+    controle("één fase, groep onzichtbaar: de paal herstart zelf, zoals bij Van den Dam",
+             vl.paal_herstarts >= 1, f"{vl.paal_herstarts}")
+    controle("één fase, groep onzichtbaar: de auto gaat in storing en de coach start hem opnieuw",
+             len(meldingen(vl, "opnieuw gestart")) >= 1, f"{[m for _, m in vl.meldingen]}")
+    controle("één fase, groep onzichtbaar: en zo komt hij alsnog vol", gehaald(vl),
+             f"{vl.soc_bij_klaar_tijd}")
+
+if (vl := v("afbouw-boven-80")):
+    controle("afbouw: de coach leert wat de bus boven 80% aanneemt, 8 A op één fase",
+             all(abs(vl.geleerd.get(b, 0) - 1.84) < 0.05 for b in (8, 9)), f"{vl.geleerd}")
+    controle("afbouw: en niets over de banden waar de paal de rem was",
+             not [b for b in vl.geleerd if b < 8], f"{vl.geleerd}")
+
+if (vk := v("afbouw-krap")) and (vg := v("afbouw-krap-geleerd")):
+    eerste = lambda vl: next((r.tijd for r in vl.regels if r.paal_w > 0), None)
+    controle("afbouw krap: zonder te weten pas na middernacht begonnen en tot in het laatste uur bezig",
+             eerste(vk) is not None and eerste(vk).hour == 0 and vk.klaar_op is not None
+             and vk.klaar_op.hour == 5 and vk.klaar_op.minute > 5,
+             f"begin {eerste(vk)}, vol {vk.klaar_op}")
+    controle("afbouw krap: met de geleerde banden begint hij meteen en is hij voor 05:00 vol",
+             eerste(vg) is not None and eerste(vg) < eerste(vk) and vg.klaar_op is not None
+             and vg.klaar_op <= vg.klaar_tijd - virtueel.dt.timedelta(hours=1) + virtueel.dt.timedelta(minutes=5),
+             f"begin {eerste(vg)}, vol {vg.klaar_op}, klaar-tijd {vg.klaar_tijd}")
+    controle("afbouw krap: allebei op tijd vol", gehaald(vk) and gehaald(vg), "")
 
 # --- de bewoner --------------------------------------------------------------
 
