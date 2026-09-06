@@ -2939,6 +2939,10 @@ def vrij60():
     return "dev-dom" in (inst60.get("ready_devices") or [])
 b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 7, 0)))
 controle("schakelaar uit, niet vrijgegeven: niets gebeurt", not vrij60() and not v and b.get("rule") == "not-released", f"{v} {b.get('rule')}")
+# Sven op 06-09-2026: zette hem aan en binnen vijf seconden weer uit, want er
+# gebeurde niets. De schakelaar en de status horen de coach meteen te wekken.
+controle("de coach luistert naar de schakelaar en naar de status van de vaatwasser",
+         SCHAKEL in coach60._watched and "sensor.vaatwasser_status" not in coach60._watched, f"{coach60._watched}")
 hass60.states.zet(SCHAKEL, "on")
 b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 7, 1)))
 controle("de schakelaar gaat aan: de vrijgave volgt, zonder de schakelaar zelf aan te raken",

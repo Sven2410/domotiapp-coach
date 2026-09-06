@@ -185,7 +185,10 @@ vaatwassermerken): een switch of input_boolean die hetzelfde betekent als
 in coach.py houdt de twee gelijk: beweegt de schakelaar, dan volgt de
 vrijgave; beweegt de knop op de kaart, dan volgt de schakelaar; na een beurt
 gaan ze allebei uit. Uit tijdens een lopende beurt laat de beurt met rust.
-Proef 60 in test_coach.py.
+Proef 60 in test_coach.py. **De schakelaar en de status van een
+programma-apparaat wekken de coach meteen** (v0.56.1, `_watch`): Sven zette
+de schakelaar aan en binnen vijf seconden weer uit omdat er niets gebeurde,
+terwijl de coach pas bij de volgende minuut keek.
 
 **Nog niet aan een echte Home Connect of een echte meetstekker gezien.** Sven
 test bij zichzelf thuis.
