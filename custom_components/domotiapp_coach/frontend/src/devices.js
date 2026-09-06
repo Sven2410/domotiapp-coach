@@ -308,6 +308,21 @@ const PROGRAM_BY_LABEL = new Map(DISHWASHER_PROGRAMS.map((program) => [program.l
 export const programFor = (raw) =>
   PROGRAM_BY_LABEL.get(valueLabel(DISHWASHER_PROGRAM_VALUES, raw));
 
+/**
+ * Een schakelaar die hetzelfde zegt als de knop "Ingeruimd en dicht", voor
+ * wie de vaatwasser vanaf een eigen dashboard vrijgeeft. Sven op 06-09-2026:
+ * een kaart in de keuken met een knop "sturing" die een schakelaar aanzet,
+ * "en dan wil ik dat Ingeruimd en dicht aangaat." De coach houdt de twee
+ * gelijk, in beide richtingen, en zet ze na een beurt allebei uit.
+ */
+const RELEASE_SWITCH_FIELD = {
+  key: "release_switch",
+  label: "Vrijgaveschakelaar",
+  hint: "Optioneel: een schakelaar of input_boolean die hetzelfde betekent als \"Ingeruimd en dicht\". Zet je die aan, bijvoorbeeld vanaf een eigen dashboard, dan geeft de coach de vaatwasser vrij; zet je hem op de kaart vrij, dan gaat de schakelaar mee aan. Na de beurt gaan ze allebei uit.",
+  filter: "all",
+  hideRow: true,
+};
+
 export const DISHWASHER_BRANDS = [
   {
     id: "home_connect",
@@ -359,6 +374,7 @@ export const DISHWASHER_BRANDS = [
         filter: "all",
         format: "countdown",
       },
+      RELEASE_SWITCH_FIELD,
       {
         key: "door",
         label: "Deurstand",
@@ -413,7 +429,7 @@ export const DISHWASHER_BRANDS = [
     id: "overig",
     label: "Overig",
     note: "Een vaatwasser zonder koppeling, op een meetstekker: de coach zegt wanneer je hem aan moet zetten en meet wat hij verbruikt.",
-    fields: [],
+    fields: [RELEASE_SWITCH_FIELD],
     manual: true,
   },
 ];

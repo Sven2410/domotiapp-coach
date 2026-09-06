@@ -179,6 +179,14 @@ niet te typen. Zonder select zegt de kaart wat er mist (`programPicker` geeft
 is gewoon te verschuiven; het clean programma doe je toch handmatig."
 Snelladen en Pauzeren staan alleen op een laadpaal (`kind !== "programma"`).
 
+**Een vrijgaveschakelaar** (v0.56.0, `release_switch` bij allebei de
+vaatwassermerken): een switch of input_boolean die hetzelfde betekent als
+"Ingeruimd en dicht", voor Svens eigen keukenkaart. `_async_schakelaar_volgen`
+in coach.py houdt de twee gelijk: beweegt de schakelaar, dan volgt de
+vrijgave; beweegt de knop op de kaart, dan volgt de schakelaar; na een beurt
+gaan ze allebei uit. Uit tijdens een lopende beurt laat de beurt met rust.
+Proef 60 in test_coach.py.
+
 **Nog niet aan een echte Home Connect of een echte meetstekker gezien.** Sven
 test bij zichzelf thuis.
 
