@@ -210,7 +210,7 @@ const css = /* css */ `
     border: 1px solid var(--dac-border); border-radius: var(--dac-radius-sm);
     background: rgba(255,255,255,0.03); padding: 12px 14px 6px;
   }
-  .persoon .kop { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .persoon .kop { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
   .persoon .naam { font-size: 15px; font-weight: 600; }
   .persoon .tel {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px;
@@ -235,19 +235,25 @@ const css = /* css */ `
   /* Aan is een gevulde blauwe baan met een witte knop rechts, uit een grijze
      baan met een doffe knop links. De zachte variant van eerst was van een
      afstand niet van uit te onderscheiden; Sven op 06-09-2026. */
+  /* box-sizing en line-height staan er met opzet: in het echte paneel erft
+     een knop een regelhoogte en groeit hij, en dan hangt de knop boven het
+     midden. Sven op 06-09-2026: "het witte bolletje is niet in het midden."
+     De knop staat daarom op 50% en niet op een vaste 3px. */
   .schuif {
-    flex: 0 0 auto; width: 46px; min-width: 46px; height: 27px; padding: 0;
+    flex: 0 0 auto; box-sizing: border-box; display: inline-block; vertical-align: middle;
+    width: 46px; min-width: 46px; height: 27px; padding: 0; margin: 0; line-height: 0; font-size: 0;
     border-radius: var(--dac-radius-pill); border: 1px solid transparent;
     background: rgba(232,228,222,0.16); cursor: pointer; position: relative;
     transition: background 120ms linear, border-color 120ms linear;
   }
   .schuif .knob {
-    position: absolute; top: 3px; left: 3px; width: 19px; height: 19px; border-radius: 50%;
+    position: absolute; top: 0; bottom: 0; margin: auto 0; left: 3px; width: 19px; height: 19px; border-radius: 50%;
+    transform: translate(0, 0);
     background: rgba(232,228,222,0.65); transition: transform 120ms linear, background 120ms linear;
     box-shadow: 0 1px 2px rgba(0,0,0,0.35);
   }
   .schuif[aria-checked="true"] { background: var(--dac-accent-hi); }
-  .schuif[aria-checked="true"] .knob { transform: translateX(19px); background: #fff; }
+  .schuif[aria-checked="true"] .knob { transform: translate(19px, 0); background: #fff; }
   .schuif:focus-visible { outline: 2px solid var(--dac-accent-hi); outline-offset: 2px; }
   .schuif:disabled { opacity: 0.4; cursor: default; }
   .persoon .voet { display: flex; justify-content: flex-end; padding: 6px 0 4px; border-top: 1px solid var(--dac-border); }
@@ -265,8 +271,11 @@ const css = /* css */ `
   .leeg { color: var(--dac-ink-3); font-size: 14px; padding: 12px 0; line-height: 1.5; }
 
   /* ---- toevoegen en de zekeringmelding: velden ---- */
-  .velden { display: grid; gap: 10px; margin-top: 12px; }
-  .veld { display: grid; gap: 4px; }
+  /* align-content: start, anders rekt het ene veld zich op tot de hoogte van
+     zijn buurman met uitleg eronder en wordt het invoervak twee keer zo hoog.
+     Sven op 06-09-2026: "de uitlijning van naam en telefoon staat versprongen." */
+  .velden { display: grid; gap: 10px; margin-top: 12px; align-items: start; }
+  .veld { display: grid; gap: 4px; align-content: start; }
   .veld label { font-size: 12px; color: var(--dac-ink-3); font-weight: 500; }
   .veld .uitleg { font-size: 12px; color: var(--dac-ink-3); line-height: 1.45; }
   input, select {
