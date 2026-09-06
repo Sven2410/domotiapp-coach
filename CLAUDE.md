@@ -59,7 +59,16 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    autoprofiel zegt, en de coach wisselt dat nooit: dat beschadigt het relais.
    Hij moduleert van 6 A tot het maximum van de paal, op het aantal fasen dat
    er is. Er staat nergens code die een fasemodus schrijft; dat hoort zo te
-   blijven.
+   blijven. **De paal zelf wisselt wel**, in de automatische fasemodus van
+   een Easee, en die modus blijft: Sven op 06-09-2026, "belangrijk voor
+   gastauto's." Bij Van den Dam koos hij die nacht om 04:17 één fase op een
+   driefasig profiel; de Ford trok 16,9 A op een groep van 16 A, de paal
+   herstartte op drie fasen en de Ford ging in storing. Sindsdien: laadt de
+   paal aantoonbaar op één fase (`_fase_nu` in coach.py, uit de verhouding
+   vermogen en stroom, drie ronden stabiel), dan rekent de coach die beurt
+   met één fase (`Car.phases_measured`); en trekt de auto meer dan de
+   limiet, dan blijft de coach evenveel onder de groep van de paal
+   (`circuit_ceiling` in planner.py, met de entiteit `circuit_limit`).
 4. **Niets van het net in de avondpiek**, van `EVENING_PEAK_START` (18:00,
    Svens keuze van 05-09-2026; 17:00 kostte die dag 1,65 euro) tot
    `EVENING_START` (20:00), bij elk contract. Bij een
@@ -83,6 +92,20 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    de prijzen van maandag zondag rond 13:00 binnen zijn. De klaar-tijdregel
    rekent daarbij met wat er fysiek nog in kan (`capaciteit_kwh`), niet met
    wat er aan prijzen bekend is.
+7. **Liever iets eerder vol dan niet vol.** Sven op 06-09-2026, na de nacht
+   waarin de Ford op 86% in storing bleef staan. Vier dingen horen erbij.
+   "Klaar" van de paal is niet "vol": zegt de accustand dat er nog iets in
+   moet, dan start de coach de paal één keer opnieuw en gelooft hij "klaar"
+   pas als de auto na een kwartier nog niets doet (`_niet_vol`,
+   `HERSTART_WACHT` in coach.py); dat geldt ook voor een auto die niet in
+   Home Assistant zit, want na een opgegeven stand telt de coach zelf verder
+   met de teller van de paal. Zo'n geschatte stand krijgt een uur extra in
+   de klaar-tijdsom (`Car.soc_estimated`, `ESTIMATED_SOC_EXTRA_HOURS`). Een
+   auto die bovenin gas terugneemt wordt gemeten terwijl hij zelf de rem is,
+   per band van tien procent, en de volgende beurt rekent daarmee
+   (`car_pace` in de instellingen, `_tempo_leren` in coach.py,
+   `_uren_met_afbouw` in planner.py). En is de klaar-tijd voorbij terwijl de
+   auto niet vol is, dan laadt hij op vol vermogen door (`overdue`).
 
 ## Hoe het in elkaar zit
 

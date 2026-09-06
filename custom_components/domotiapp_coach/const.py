@@ -364,6 +364,12 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # verder en hoeft er niet elk uur opnieuw iets ingevuld te worden. Vervalt
     # zodra de kabel eruit gaat: het percentage hoorde bij die auto en die rit.
     "car_soc": [],
+    # Wat een auto per band van tien procent aankan, in kW, zoals de coach dat
+    # bij een echte beurt mat terwijl de auto zelf de rem was. Sommige auto's
+    # nemen bovenin gas terug, en zonder dit rekent de klaar-tijdsom met het
+    # tempo van de paal en is de auto 's ochtends niet vol. Per laadpunt en per
+    # auto; storage.py snoeit op het laadpunt. Zie `_tempo_leren` in coach.py.
+    "car_pace": [],
     # De knoppen van de bewoner per laadpunt: een akkoord, snelladen, een pauze.
     # Opdrachten van een mens, dus ze horen een herstart van Home Assistant te
     # overleven. Ze gelden voor de sessie die er dan hangt: de kabel eruit wist

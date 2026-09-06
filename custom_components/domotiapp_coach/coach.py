@@ -60,6 +60,9 @@ from .planner import (
     decide,
     timeline,
     FULL_PERCENT,
+    RAMP_MINUTES,
+    beschikbaar_van_bewaker,
+    energy_needed_kwh,
     held_back,
     resolve_window,
     should_send,
@@ -159,6 +162,12 @@ FASE_VENSTER = timedelta(seconds=90)
 # Vanaf welke stroom de fasemeting van een laadpunt iets betekent, en hoe vers
 # de twee sensoren van elkaar moeten zijn. Zie `_measured_phases`.
 FASEMETING_AMPS = 5.0
+# Hoe lang de coach na een eigen herstart van de paal wacht voor hij "vol"
+# gelooft, en hoe lang de auto daarna weer geladen moet hebben voor er een
+# volgende herstart mag. De Ford bij Van den Dam deed er op 06-09-2026 negen
+# minuten over om na een start weer stroom te nemen (05:18 gestuurd, 05:27
+# aan het laden). Een kwartier, dezelfde maat als `MIN_HOLD_MINUTES`.
+HERSTART_WACHT = timedelta(minutes=15)
 FASEMETING_VERS = timedelta(seconds=10)
 
 # Hoe vaak achter elkaar dezelfde uitkomst nodig is voor de coach er iets over
@@ -472,6 +481,22 @@ class ChargerCoach:
         # Of de wekpoging van deze sessie nog openstaat. Eén per sessie, dus
         # zodra hij gedaan is blijft dit staan tot de kabel eruit gaat.
         self._woken: set[str] = set()
+        # Laadpunten waar de paal "klaar" zegt terwijl de accustand zegt van
+        # niet, en die deze ronde daarom één keer opnieuw gestart mogen worden.
+        # Sven op 06-09-2026, na een Ford die om 04:27 met een storing afhaakte
+        # en op 86% bleef staan: "hij is nog niet vol, dus dan ook maar een
+        # herstart." Wanneer die herstart gestuurd is staat in `_herstart_gedaan`;
+        # zolang dat er staat gelooft de coach "klaar" gewoon weer.
+        self._herstart_open: set[str] = set()
+        self._herstart_gedaan: dict[str, datetime] = {}
+        self._herstart_melden: set[str] = set()
+        # Het aantal fasen zoals het deze ronde gemeten is, per laadpunt. Eén
+        # meting per ronde, want `_fasen_stabiel` telt ronden.
+        self._fase_nu: dict[str, int | None] = {}
+        # Wat de auto deze beurt per band van tien procent aannam terwijl hij
+        # zelf de rem was, in kW: het laagste per band. Zie `_tempo_leren`.
+        self._tempo_gezien: dict[str, dict[int, float]] = {}
+        self._auto_id: dict[str, str] = {}
         # Sinds wanneer er stroom wordt aangeboden zonder dat de auto iets
         # afneemt. Daarmee weet de kaart het verschil tussen "begint zo" en "de
         # auto doet niets". Een tijdstip en geen teller: een ronde is niet altijd
@@ -1101,6 +1126,7 @@ class ChargerCoach:
         else:
             self._asking_since.pop(device_id, None)
         self._bijhouden(now, device, car, charger, window, decision, grid, settings)
+        self._tempo_leren(now, settings, device, car, charger, grid)
 
         # Bijhouden hoe lang een sessie al tegen de ladder in wordt aangehouden.
         # Zodra de ladder het weer eens is met wat er gebeurt, staat de teller
@@ -1152,6 +1178,10 @@ class ChargerCoach:
             self._asking_since.pop(device_id, None)
             self._deadline_for.pop(device_id, None)
             self._te_laat.discard(device_id)
+            self._herstart_open.discard(device_id)
+            self._herstart_gedaan.pop(device_id, None)
+            self._herstart_melden.discard(device_id)
+            self._tempo_gezien.pop(device_id, None)
             self._soc_asked.discard(device_id)
             self._warned.pop(device_id, None)
             self._getipt.discard(device_id)
@@ -1982,14 +2012,42 @@ class ChargerCoach:
             # Wat er op de paal staat, zodat de klaar-tijdsom kan zien of de
             # coach zelf de rem is. Zie `throttled_by_coach` in planner.py.
             limit_amps=_number(self.hass, entities.get("dynamic_limit")),
+            circuit_amps=_number(self.hass, entities.get("circuit_limit")),
         )
         # After a restart nothing is known about when this session began. Taking
         # it as "just now" only means waiting out the minimum run once.
         if charger.charging and charger.started_at is None:
             charger.started_at = self._since.setdefault(device.get("id", ""), now)
 
+        # Eén fasemeting per ronde; `_fasetip` en `_car` lezen allebei deze.
+        if charger.charging:
+            self._fase_nu[device_id] = self._fasen_stabiel(device)
+        else:
+            self._fasen_gemeten.pop(device_id, None)
+            self._fase_nu.pop(device_id, None)
+
         # --- which car ---
         car = self._car(settings, device, charger)
+
+        # --- "klaar" terwijl de auto niet vol is ---
+        # De paal zegt alleen dat de auto niets meer aanneemt. Bij Van den Dam
+        # was dat op 06-09-2026 om 04:27 een Ford met een storing op 86%, en die
+        # ging pas weer laden nadat er om 05:18 met de hand een start gestuurd
+        # was. Weet de coach dat de auto niet vol is, dan doet hij dat zelf, één
+        # keer: hij laat de planner gewoon beslissen en stuurt bij het eerste
+        # besluit om te laden een start. Blijft de paal daarna "klaar" zeggen,
+        # dan gelooft hij dat en zegt hij het, mét de herstart erbij.
+        gedaan = self._herstart_gedaan.get(device_id)
+        if gedaan is not None and charger.charging and now - gedaan >= HERSTART_WACHT:
+            # Hij heeft na de herstart weer een kwartier geladen; haakt hij nog
+            # eens af, dan mag er opnieuw één poging komen.
+            self._herstart_gedaan.pop(device_id, None)
+            gedaan = None
+        if charger.complete and gedaan is None and self._niet_vol(car):
+            charger.complete = False
+            self._herstart_open.add(device_id)
+        else:
+            self._herstart_open.discard(device_id)
 
         # --- when it may run ---
         window = resolve_window(now, self._days(settings, device))
@@ -2090,21 +2148,39 @@ class ChargerCoach:
         # coach op de verkeerde momenten aan het werk. Klopt de keuze niet met
         # wat er gemeten wordt, dan zegt `_fasetip` dat; zie daar.
         phases = {"one": 1, "three": 3}.get(profile.get("phases"), 3)
+        # Behalve als de paal aantoonbaar op één fase laadt terwijl het profiel
+        # drie zegt. Een Easee in automatische fasemodus kiest bij het starten
+        # zelf, en die modus blijft: Sven op 06-09-2026, "die is belangrijk
+        # voor gastauto's." Zolang deze beurt loopt rekent de coach dan met wat
+        # er werkelijk loopt, want anders denkt hij drie keer zo snel te zijn.
+        device_id = device.get("id", "")
+        gemeten = self._fase_nu.get(device_id)
+        phases_measured = phases == 3 and gemeten == 1 and charger.charging
+        if phases_measured:
+            phases = 1
 
         # De auto zelf gaat voor. Zegt hij niets, dan telt wat de bewoner heeft
         # opgegeven, bijgewerkt met wat de paal er sindsdien in heeft gedaan.
         soc = _number(self.hass, profile.get("soc_entity"))
+        geschat = False
         if soc is None:
             soc = self._typed_soc(settings, device, profile)
+            geschat = soc is not None
         if soc is None:
             soc = self._onthouden_soc(device, profile)
+            geschat = soc is not None
 
+        auto_id = str(profile.get("id") or "")
+        self._auto_id[device_id] = auto_id
         return Car(
             name=str(profile.get("name") or "").strip(),
             capacity_kwh=float(profile.get("capacity_kwh") or 0),
             phases=phases,
+            phases_measured=phases_measured,
             max_amps=float(profile.get("max_amps") or 0),
             soc_percent=soc,
+            soc_estimated=geschat,
+            tempo_per_band=self._tempo_uit(settings, device_id, auto_id),
         )
 
     def _onthouden_soc(
@@ -2135,6 +2211,126 @@ class ChargerCoach:
             geladen = max(0.0, meter - float(sinds)) * CHARGE_EFFICIENCY
             percent = float(percent) + geladen / capacity * 100.0
         return min(100.0, float(percent))
+
+    @staticmethod
+    def _niet_vol(car: Car) -> bool:
+        """Of de accustand zegt dat er nog iets in moet.
+
+        Alleen als dat te weten is: een gast of een auto zonder accustand
+        levert hier onwaar op, en dan is "klaar" van de paal het enige dat er
+        is. Een auto die niet in Home Assistant zit telt mee zodra de bewoner
+        zijn stand heeft opgegeven, want daarna telt de coach zelf verder met de
+        teller van de paal (`_typed_soc`).
+        """
+        rest = energy_needed_kwh(car)
+        return (
+            rest is not None
+            and rest > 0
+            and car.soc_percent is not None
+            and car.soc_percent < FULL_PERCENT
+        )
+
+    def _tempo_leren(
+        self,
+        now: datetime,
+        settings: dict[str, Any],
+        device: dict[str, Any],
+        car: Car,
+        charger: Charger,
+        grid: Grid,
+    ) -> None:
+        """Onthouden wat deze auto per band van tien procent aankan.
+
+        Sven op 06-09-2026: "bepaalde auto's schroeven vanaf een bepaald
+        procent zelf hun doorlaatbaarheid in ampère terug." Dat is alleen te
+        meten als de auto zélf de rem is: de paal biedt meer dan hij neemt, en
+        niets anders houdt hem tegen. Niet de coach (zijn limiet ligt hoger dan
+        wat er loopt), niet de lastbewaker, niet de groep. Per band het laagste
+        van deze beurt, want een auto die afbouwt doet dat bovenin de band het
+        sterkst, en Sven wil liever te vroeg vol dan te laat.
+
+        Het staat per auto in de instellingen (`car_pace`) en de volgende beurt
+        rekent ermee, zie `hours_needed` in planner.py. Een nieuwe beurt
+        overschrijft de banden die hij zelf meet, zodat een auto die vandaag
+        anders doet dan vorige maand morgen ook anders gepland wordt.
+        """
+        device_id = device.get("id", "")
+        if (
+            not charger.charging
+            or charger.started_at is None
+            or now - charger.started_at < timedelta(minutes=RAMP_MINUTES)
+            or car.guest
+            or not car.capacity_kwh
+            or car.soc_percent is None
+            or charger.limit_amps is None
+            or charger.actual_amps <= 0
+            or charger.actual_amps >= charger.limit_amps - STEP_AMPS
+            or held_back(charger)
+            or charger.paused_by_balancer
+        ):
+            return
+        bewaker = beschikbaar_van_bewaker(grid)
+        if bewaker is not None and charger.actual_amps >= bewaker - STEP_AMPS:
+            return
+        groep = charger.circuit_amps
+        if groep is not None and charger.actual_amps >= groep - STEP_AMPS:
+            return
+        kw = round(watts_for(charger.actual_amps, car.phases) / 1000.0, 2)
+        band = int(car.soc_percent // 10)
+        gezien = self._tempo_gezien.setdefault(device_id, {})
+        if band in gezien and gezien[band] <= kw:
+            return
+        gezien[band] = kw
+        self.hass.async_create_task(self._async_tempo_schrijven(settings, device_id, now))
+
+    async def _async_tempo_schrijven(
+        self, settings: dict[str, Any], device_id: str, now: datetime
+    ) -> None:
+        """De gemeten banden van deze beurt in de instellingen zetten."""
+        auto_id = self._auto_id.get(device_id)
+        gezien = self._tempo_gezien.get(device_id) or {}
+        if not auto_id or not gezien:
+            return
+        rows = [
+            row
+            for row in (settings.get("car_pace") or [])
+            if isinstance(row, dict)
+            and not (
+                row.get("device") == device_id
+                and row.get("car") == auto_id
+                and row.get("band") in gezien
+            )
+        ]
+        for band, kw in sorted(gezien.items()):
+            rows.append(
+                {"device": device_id, "car": auto_id, "band": band, "kw": kw,
+                 "at": now.isoformat()}
+            )
+        try:
+            saved = await async_get_store(self.hass).async_save({"car_pace": rows})
+        except Exception:  # noqa: BLE001 - een gemist tempo is geen reden om te stoppen
+            _LOGGER.exception("kon het laadtempo van de auto niet bewaren")
+            return
+        # Zoals `_async_forget`: de andere lezers horen het via de eventbus. De
+        # instellingen van deze ronde zelf niet aanraken, want in de proeven is
+        # `saved` hetzelfde object en dan wist een clear() alles.
+        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+
+    @staticmethod
+    def _tempo_uit(settings: dict[str, Any], device_id: str, auto_id: str) -> dict[int, float]:
+        """Wat er over deze auto per band bewaard is."""
+        uit: dict[int, float] = {}
+        for row in settings.get("car_pace") or []:
+            if (
+                isinstance(row, dict)
+                and row.get("device") == device_id
+                and row.get("car") == auto_id
+            ):
+                try:
+                    uit[int(row["band"])] = float(row["kw"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+        return uit
 
     def _typed_soc(
         self,
@@ -3130,11 +3326,31 @@ class ChargerCoach:
                 kritiek=True,
             )
 
+        # De coach heeft de paal zojuist opnieuw gestart omdat de auto volgens
+        # zijn accustand nog niet vol was. Dat hoort de bewoner te lezen, ook
+        # als het lukt: de Ford-app zei op 06-09-2026 "charging error" en dan
+        # wil je weten dat er iemand iets deed.
+        if device_id in self._herstart_melden:
+            self._herstart_melden.discard(device_id)
+            stand = f" {int(car.soc_percent)}%" if car.soc_percent is not None else ""
+            await self._async_tell(
+                f"{naam} zei dat {self._hoe_heet(car)} klaar was, maar hij staat op"
+                f"{stand} en dat is niet vol. De coach heeft de paal een keer opnieuw "
+                "gestart. Gaat de auto niet binnen een kwartier verder, dan laat "
+                "hij het daarbij.",
+                kritiek=True,
+            )
+
         # De auto is vol.
         if decision.rule == "complete" and "vol" not in gemeld and sessie["begon"]:
             if sessie.get("klaar_sinds") is None:
                 sessie["klaar_sinds"] = now
             if not self._soc_bezonken(now, sessie, car):
+                return
+            # Na een eigen herstart eerst een kwartier afwachten: de Ford bij
+            # Van den Dam had er negen minuten voor nodig.
+            herstart = self._herstart_gedaan.get(device_id)
+            if herstart is not None and now - herstart < HERSTART_WACHT:
                 return
             gemeld.add("vol")
             geladen = self._geladen(device, sessie)
@@ -3165,8 +3381,14 @@ class ChargerCoach:
                 verloop = f" Geladen van {begon:%H:%M} tot {now:%H:%M}, {kwh}."
             else:
                 verloop = f" Geladen van {begon:%H:%M} tot {now:%H:%M}."
+            nog = (
+                f" De coach heeft de paal om {herstart:%H:%M} nog een keer opnieuw "
+                "gestart, zonder gevolg."
+                if herstart is not None
+                else ""
+            )
             await self._async_tell(
-                klaar + verloop + (f" {waarom}." if waarom else "")
+                klaar + verloop + (f" {waarom}." if waarom else "") + nog
             )
             return
 
@@ -3339,9 +3561,8 @@ class ChargerCoach:
         en krijgt dus niets te lezen.
         """
         if not charger.charging:
-            self._fasen_gemeten.pop(device.get("id", ""), None)
             return ""
-        gemeten = self._fasen_stabiel(device)
+        gemeten = self._fase_nu.get(device.get("id", ""))
         if gemeten is None:
             return ""
         _, profile = self._chosen_car(settings, device)
@@ -3371,10 +3592,10 @@ class ChargerCoach:
         # klopt, in plaats van er stilletjes omheen te rekenen.
         if staat_op == "three" and gemeten == 1:
             return (
-                "Dit profiel staat op driefasig, maar er wordt op één fase geladen. "
-                "Laden duurt daardoor ongeveer drie keer zo lang als de coach denkt, "
-                "en dan kan hij te laat beginnen. Zet de auto op eenfasig bij "
-                "Apparaten."
+                "Dit profiel staat op driefasig, maar er wordt nu op één fase "
+                "geladen. Laden duurt daardoor ongeveer drie keer zo lang; de coach "
+                "rekent deze beurt met die ene fase. Gebeurt dit elke beurt, zet de "
+                "auto dan op eenfasig bij Apparaten."
             )
         if staat_op == "one" and gemeten == 3:
             return (
@@ -3732,6 +3953,10 @@ class ChargerCoach:
                     decision.amps,
                 )
             await self._command(device, control, "start")
+            if device.get("id", "") in self._herstart_open:
+                self._herstart_open.discard(device.get("id", ""))
+                self._herstart_gedaan[device.get("id", "")] = now
+                self._herstart_melden.add(device.get("id", ""))
 
         return True
 

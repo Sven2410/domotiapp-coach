@@ -219,6 +219,21 @@ class Car:
     # om mee te rekenen. Zonder dit was een naam die je invulde nergens meer te
     # zien: de kaart toont de laadpaal en de meldingen zeiden "de auto".
     name: str = ""
+    # Of de accustand een schatting is: opgegeven door de bewoner of onthouden
+    # van eerder, en daarna bijgeteld uit de teller van de paal. Zo'n auto krijgt
+    # meer speling naar de klaar-tijd. Sven op 06-09-2026: "een auto die niet in
+    # HA kan moet langer speling hebben. Liever iets eerder vol dan niet vol."
+    soc_estimated: bool = False
+    # Wat deze auto per band van tien procent aankan, in kW, zoals dat bij
+    # eerdere beurten gemeten is. Alleen banden waarin de auto zélf de rem was.
+    # Leeg zolang er niets gemeten is; dan rekent de coach met de paal. Zie
+    # `hours_needed` en `_tempo_leren` in coach.py.
+    tempo_per_band: dict[int, float] = field(default_factory=dict)
+    # Of het aantal fasen hierboven van een meting komt en niet uit het profiel.
+    # Bij Van den Dam koos de Easee op 06-09-2026 om 04:17 in zijn automatische
+    # fasemodus zelf één fase, terwijl het profiel drie zegt. Dan hoort de coach
+    # met die ene te rekenen zolang die beurt loopt.
+    phases_measured: bool = False
 
 
 @dataclass
@@ -257,6 +272,11 @@ class Charger:
     # holds the charger down; see `throttled_by_coach`. None when the
     # installation has no sensor for it.
     limit_amps: float | None = None
+    # De grens van de groep waar de paal op zit, zoals de paal die zelf meldt
+    # (bij Easee de dynamische circuitlimiet). None zonder die sensor. Zie
+    # `circuit_ceiling`: de auto trekt soms meer dan er gevraagd is, en boven
+    # deze grens grijpt de paal zelf in.
+    circuit_amps: float | None = None
 
 
 @dataclass
@@ -456,6 +476,9 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
     bewaker = beschikbaar_van_bewaker(grid)
     if bewaker is not None:
         limits.append(bewaker)
+    groep = circuit_ceiling(charger)
+    if groep is not None:
+        limits.append(groep)
 
     if grid.phase_amps:
         household = max(grid.phase_amps) - charger_share(grid, charger)
@@ -489,6 +512,29 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
         limits.append(ruimte)
 
     return int(max(0, min(limits)))
+
+
+def circuit_ceiling(charger: Charger) -> float | None:
+    """Wat er gevraagd mag worden zonder dat de paal zijn eigen groep overschrijdt.
+
+    Een auto trekt niet precies wat er gevraagd is. Bij Van den Dam op
+    06-09-2026 om 04:18:30: limiet 16 A, de Ford trok 16,9 A op één fase, en
+    de groep van de paal staat op 16 A. Om 04:25:57 hield de paal ermee op,
+    startte opnieuw op drie fasen, en daar haakte de Ford op af met een
+    storing. De coach had dat niet kunnen zien: hij rekende met drie fasen en
+    kende de grens van de groep niet.
+
+    Dus: zoveel als de auto boven de limiet uitkomt, zoveel blijft de coach
+    onder de groep. Dat getal is gemeten en niet aangenomen, en het is nul
+    zolang de auto netjes onder zijn limiet blijft, zoals dezelfde Ford op drie
+    fasen doet (14,4 A op 16).
+    """
+    if charger.circuit_amps is None:
+        return None
+    overschot = 0.0
+    if charger.charging and charger.limit_amps:
+        overschot = max(0.0, charger.actual_amps - charger.limit_amps)
+    return charger.circuit_amps - overschot
 
 
 def nood_ruimte(grid: Grid, charger: Charger) -> float:
@@ -762,7 +808,44 @@ def hours_needed(car: Car, amps: int, assume_empty: bool = False) -> float | Non
     energy = worst_case_kwh(car) if assume_empty else energy_needed_kwh(car)
     if energy is None or amps <= 0:
         return None
-    return energy / (watts_for(amps, car.phases) / 1000.0)
+    kw = watts_for(amps, car.phases) / 1000.0
+    if assume_empty:
+        return energy / kw
+    uren = _uren_met_afbouw(car, kw, energy)
+    # Een geschatte accustand krijgt een uur extra. Sven op 06-09-2026: "liever
+    # iets eerder vol dan niet vol." Een lege accu aannemen (hierboven) is al
+    # het slechtste geval en krijgt dat uur niet nog eens.
+    if car.soc_estimated:
+        uren += ESTIMATED_SOC_EXTRA_HOURS
+    return uren
+
+
+def _uren_met_afbouw(car: Car, kw: float, energy: float) -> float:
+    """Hoe lang `energy` duurt als de auto bovenin zelf gas terugneemt.
+
+    Sven op 06-09-2026: "bepaalde auto's schroeven vanaf een bepaald procent
+    zelf hun doorlaatbaarheid in ampère terug, zodat de accu het laatste stuk
+    niet volle bak geladen wordt." Wat zo'n auto per band van tien procent
+    aankan staat in `Car.tempo_per_band`, gemeten bij eerdere beurten; zonder
+    die meting is het gewoon energie gedeeld door vermogen. Per band telt het
+    laagste van wat de paal geeft en wat de auto daar aannam.
+    """
+    if not car.tempo_per_band or car.soc_percent is None or not car.capacity_kwh:
+        return energy / kw
+    uren = 0.0
+    soc = car.soc_percent
+    # Dezelfde verhouding als `energy_needed_kwh`: wat er aan de stekker in
+    # moet is wat er in de accu bij moet, gedeeld door het rendement.
+    while soc < 100.0:
+        band = int(soc // 10)
+        tot = min(100.0, (band + 1) * 10.0)
+        kwh = (tot - soc) / 100.0 * car.capacity_kwh / CHARGE_EFFICIENCY
+        tempo = min(kw, car.tempo_per_band.get(band, kw))
+        if tempo <= 0:
+            tempo = kw
+        uren += kwh / tempo
+        soc = tot
+    return uren
 
 
 def _at(day: datetime, moment: time | None) -> datetime | None:
@@ -1648,6 +1731,10 @@ def _uitgezet(window: Window, now: datetime) -> str:
 # de coach om 00:13 voor een goedkoper uur en zette de regel hem om 00:17 weer
 # aan.
 DEADLINE_SLACK_HOURS = 1.0
+
+# Hoeveel uur een auto met een geschatte accustand extra krijgt in de
+# klaar-tijdsom. Dezelfde maat als de speling zelf: Svens uur.
+ESTIMATED_SOC_EXTRA_HOURS = DEADLINE_SLACK_HOURS
 
 # Wanneer het huis tot rust komt. Bij een vast contract kost elk uur hetzelfde,
 # dus zodra de zon niets meer oplevert is er niets om nog langer op te wachten.

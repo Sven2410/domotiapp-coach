@@ -1780,6 +1780,59 @@ controle("geen enkel laadblok staat onder de ondergrens",
 controle("en het plan dekt nog steeds precies wat er in moet",
          abs(plan47.planned_kwh - nodig47) < 0.1, f"{plan47.planned_kwh} van {nodig47}")
 
+print("=== 48. een auto die bovenin gas terugneemt, en een geschatte accustand ===")
+# Sven op 06-09-2026: "bepaalde auto's schroeven vanaf een bepaald procent zelf
+# hun doorlaatbaarheid in ampère terug." Wat zo'n auto per band van tien
+# procent aankan komt uit eerdere beurten (`car_pace`); de som rekent per band
+# met het laagste van paal en auto. En: "een auto die niet in HA kan moet
+# langer speling hebben": een opgegeven stand krijgt een uur extra.
+glad48 = Car(capacity_kwh=66.0, phases=3, soc_percent=70.0)
+uren48 = planner.hours_needed(glad48, 16)
+# 30% van 66 kWh is 19,8 kWh in de accu, 22,0 aan de stekker, op 11,04 kW.
+controle("zonder afbouw: energie gedeeld door vermogen",
+         abs(uren48 - (0.3 * 66 / 0.9) / 11.04) < 0.01, f"{uren48:.3f}")
+afbouw48 = Car(capacity_kwh=66.0, phases=3, soc_percent=70.0,
+               tempo_per_band={8: 5.5, 9: 2.75})
+uren48b = planner.hours_needed(afbouw48, 16)
+# 70-80 op 11,04 kW, 80-90 op 5,5, 90-100 op 2,75: 0,66 + 1,33 + 2,67 uur.
+verwacht48 = (6.6 / 0.9) / 11.04 + (6.6 / 0.9) / 5.5 + (6.6 / 0.9) / 2.75
+controle("met afbouw telt elke band met zijn eigen tempo",
+         abs(uren48b - verwacht48) < 0.01, f"{uren48b:.3f} tegen {verwacht48:.3f}")
+controle("en dat is meer dan zonder", uren48b > uren48 * 2, f"{uren48b:.2f} tegen {uren48:.2f}")
+halve48 = Car(capacity_kwh=66.0, phases=3, soc_percent=85.0, tempo_per_band={8: 5.5, 9: 2.75})
+uren48c = planner.hours_needed(halve48, 16)
+verwacht48c = (3.3 / 0.9) / 5.5 + (6.6 / 0.9) / 2.75
+controle("halverwege een band telt alleen de rest van die band",
+         abs(uren48c - verwacht48c) < 0.01, f"{uren48c:.3f} tegen {verwacht48c:.3f}")
+traag48 = Car(capacity_kwh=66.0, phases=3, soc_percent=70.0, tempo_per_band={7: 20.0})
+controle("een auto die meer kan dan de paal wordt niet sneller dan de paal",
+         abs(planner.hours_needed(traag48, 16) - uren48) < 0.001, "")
+geschat48 = Car(capacity_kwh=66.0, phases=3, soc_percent=70.0, soc_estimated=True)
+controle("een opgegeven stand krijgt precies een uur extra",
+         abs(planner.hours_needed(geschat48, 16) - uren48 - 1.0) < 0.001,
+         f"{planner.hours_needed(geschat48, 16):.3f}")
+leeg48 = Car(capacity_kwh=66.0, phases=3, soc_percent=None, soc_estimated=True)
+controle("maar een lege accu aannemen krijgt dat uur niet nog eens",
+         abs(planner.hours_needed(leeg48, 16, assume_empty=True) - (66 / 0.9) / 11.04) < 0.01, "")
+
+print("=== 49. de auto trekt meer dan gevraagd: onder de groep van de paal ===")
+# Van den Dam 06-09-2026 04:18:30: limiet 16 A, de Ford trok 16,9 A op één
+# fase, groep 16 A. De coach blijft er zoveel onder als de auto erboven zit.
+rustig49 = Grid(phase_amps=[2.0, 18.0, 3.0], fuse_amps=25.0, charger_amps=16.88, margin_amps=3.0)
+teveel49 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=16.88,
+                   limit_amps=16.0, circuit_amps=16.0, started_at=middag(3, 0))
+controle("16,9 A op een limiet van 16 en een groep van 16: plafond 15",
+         planner.ceiling_amps(rustig49, Car(phases=3), teveel49) == 15,
+         f"{planner.ceiling_amps(rustig49, Car(phases=3), teveel49)}")
+netjes49 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=14.4,
+                   limit_amps=16.0, circuit_amps=16.0, started_at=middag(3, 0))
+controle("14,4 A op 16: de groep knijpt niet",
+         planner.ceiling_amps(Grid(phase_amps=[15.0, 16.0, 16.0], fuse_amps=25.0, charger_amps=14.4,
+                                   margin_amps=3.0), Car(phases=3), netjes49) == 16, "")
+zonder49 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=16.88, limit_amps=16.0)
+controle("zonder de sensor van de groep verandert er niets",
+         planner.ceiling_amps(rustig49, Car(phases=3), zonder49) == 16, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

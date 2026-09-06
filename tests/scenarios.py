@@ -393,6 +393,48 @@ VAN_DEN_DAM = [van_den_dam, vdd_bewolkt, vdd_geen_zon, vdd_dure_zondag, vdd_wekk
                vdd_herstart, vdd_soc_weg, vdd_status_weg, vdd_zon_weg, vdd_equalizer_weg,
                vdd_prijzen_weg_13]
 
+# --- wat de nacht van 05 op 06-09-2026 bij Van den Dam leerde -----------------
+#
+# Om 04:17 koos de Easee in zijn automatische fasemodus één fase, de Ford trok
+# 16,9 A op een groep van 16 A, de paal herstartte de sessie op drie fasen en
+# de Ford ging in storing: "completed" op 86%. Pas een start om 05:18 kreeg
+# hem om 05:27 weer aan het laden. Sven: de fasemodus blijft (gastauto's), dus
+# de coach hoort met de gemeten fase te rekenen, onder de groep te blijven, en
+# een auto die niet vol is zelf opnieuw te starten.
+ford_storing = dyn_zonnig.kopie(
+    naam="ford-storing", uitleg="dynamisch, grote auto op 60%; om 13:00 gaat hij midden in het laden in storing en de paal zegt 'completed'",
+    auto=replace(GROTE, soc=60.0, storing_bij_herstart=True),
+    gebeurtenissen=[("13:00", "storing", None)],
+)
+een_fase_groep = dyn_zonnig.kopie(
+    naam="easee-een-fase-groep", uitleg="de Easee kiest bij de start één fase, de auto trekt 0,9 A boven de limiet, de groep is 16 A en de coach ziet die",
+    auto=replace(GROTE, soc=60.0, overschot_amps=0.9, storing_bij_herstart=True),
+    paal=Paal(circuit_amps=16.0, kiest_een_fase=True),
+)
+een_fase_blind = een_fase_groep.kopie(
+    naam="easee-een-fase-blind", uitleg="hetzelfde, maar zonder de sensor van de groep: de paal herstart, de auto gaat in storing, en de coach start hem opnieuw",
+    paal=Paal(circuit_amps=16.0, circuit_zichtbaar=False, kiest_een_fase=True),
+)
+afbouw = dyn_geen_zon.kopie(
+    naam="afbouw-boven-80", uitleg="dynamisch zonder panelen, de bus neemt boven 80% nog de helft; de coach leert dat",
+    auto=replace(BUS, soc=30.0, afbouw_vanaf=80.0),
+)
+afbouw_geleerd = afbouw.kopie(
+    naam="afbouw-geleerd", uitleg="dezelfde bus, en de coach weet het al van een vorige beurt",
+    geleerd_tempo={8: 1.84, 9: 1.84},
+)
+# Dezelfde bus, maar krap: om 23:30 erin, klaar om 06:00. Zonder te weten dat
+# hij bovenin afbouwt rekent de coach 4,2 uur en begint hij te laat; met de
+# geleerde banden rekent hij 5,3 uur en begint hij een uur eerder.
+afbouw_krap = afbouw.kopie(
+    naam="afbouw-krap", uitleg="dezelfde bus om 23:30 erin, klaar om 06:00, en de coach weet nog niet dat hij afbouwt",
+    begin="2026-09-07 23:25", kabel_erin="23:30", duur_uren=8,
+)
+afbouw_krap_geleerd = afbouw_krap.kopie(
+    naam="afbouw-krap-geleerd", uitleg="hetzelfde, en de coach weet het van een vorige beurt",
+    geleerd_tempo={8: 1.84, 9: 1.84},
+)
+
 ALLE = [
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
@@ -405,6 +447,8 @@ ALLE = [
     p1_weg, p1_lang_weg, paal_traag,
     tien_uur, tien_uur_zon, tien_uur_valt_tegen, tien_uur_vast, equalizer, prijzen_weg,
     weekend, weekend_geen_zon,
+    ford_storing, een_fase_groep, een_fase_blind, afbouw, afbouw_geleerd,
+    afbouw_krap, afbouw_krap_geleerd,
     *VAN_DEN_DAM,
 ]
 

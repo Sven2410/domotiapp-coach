@@ -198,6 +198,18 @@ export const CHARGER_BRANDS = [
         filter: "all",
       },
       {
+        key: "circuit_limit",
+        label: "Dynamisch limiet stroomcircuit",
+        // Bij Easee de dynamische limiet van het circuit waar de paal op zit.
+        // Een auto trekt soms iets meer dan de laderlimiet, en boven deze grens
+        // grijpt de paal zelf in: bij Van den Dam op 06-09-2026 trok een Ford
+        // 16,9 A op een groep van 16 A, de paal herstartte en de auto ging in
+        // storing. Met deze sensor blijft de coach er zoveel onder als de auto
+        // erboven zit.
+        hint: "De limiet van de groep waar de paal op zit, in ampère. Daarmee blijft de coach eronder als de auto iets meer trekt dan gevraagd.",
+        filter: "all",
+      },
+      {
         key: "current",
         label: "Stroom",
         hint: "Wat de lader op dit moment levert, in ampère.",
