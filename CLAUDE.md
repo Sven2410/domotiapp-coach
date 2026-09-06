@@ -119,7 +119,8 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
 | `report.py` | het pdf-rapport |
 | `frontend/src/` | het paneel, ES-modules zonder buildstap |
 | `frontend/src/schedule-sheet.js` | het schema van één apparaat, als pop-up achter zijn kaart |
-| `frontend/src/views/notifications.js` | Meldingen: alles wat de coach ooit stuurde én elk besluit dat hij nam (`_async_noteer_besluit`), uit `MeldingenStore` in storage.py |
+| `ontvangers.py` | wie welke melding krijgt: personen (een telefoon, een naam, eventueel een gebruiker van Home Assistant) met een schakelaar per soort: kritiek, melding, besluit, belasting. Kent Home Assistant niet |
+| `frontend/src/views/notifications.js` | Meldingen, twee in een sinds 06-09-2026: bovenaan de personen (de admin voegt toe, een bewoner ziet alleen zichzelf en zet zijn eigen schuiven via `notifications/mine`), de zekeringmelding "Zware belasting" (uit Strategie verhuisd), en daaronder alles wat de coach ooit stuurde én elk besluit dat hij nam (`_async_noteer_besluit`), uit `MeldingenStore` in storage.py |
 | `frontend/src/savings.js` | Bespaard, onder Historie: de laadbeurten uit `BeurtenStore` (storage.py) opgeteld per periode en per apparaat. De coach telt per ronde wat een beurt kost (`_geld_bij`) en wat dezelfde tijd op vol vermogen vanaf het inpluggen gekost had (`_basis_bij`, de maat); bespaard is maat min betaald, nooit onder nul. Stapt hij midden in een beurt in, dan rekent `_async_terugrekenen` het begin terug uit de recorder en de kwartieropslag |
 
 De scheiding tussen `planner.py` en `coach.py` is de kern: het denkwerk is los
@@ -253,8 +254,8 @@ twee voor een laadpaal, ook als ze nog in oude instellingen staan. Alles gaat la
 `domotiapp_coach/device/schedule`, dat precies dat ene apparaat aanraakt en de
 nieuwe lijst zelf uitrekent.
 
-**Strategie gaat alleen nog over de coach zelf**: hoeveel hij mag doen, waar hij
-op mikt, en de meldingen. Zet daar geen apparaten meer in.
+**Strategie gaat alleen nog over hoeveel de coach zelf mag.** De meldingen
+staan sinds 06-09-2026 onder Meldingen, en de apparaten op hun eigen kaart.
 
 Het schuifje is geen apart begrip: het is de `enabled` die elk schema al had.
 Staat hij uit, dan slaat `_days` in `coach.py` het schema over en vervalt in

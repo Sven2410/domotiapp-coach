@@ -447,9 +447,28 @@ proef("een onbekende accustand geeft een streepje en geen nul", () => {
 // scherm." De lijst komt van de server, de nieuwste eerst, en wordt per dag
 // gegroepeerd: Vandaag, Gisteren, en daarna de dag bij naam.
 
-const { groepeer, dagkop, zeef, dagen } = await import(
+const { groepeer, dagkop, zeef, dagen, zichtbaar, naamVanTelefoon, STANDAARD_SOORTEN } = await import(
   "../custom_components/domotiapp_coach/frontend/src/views/notifications.js"
 );
+
+// Sven op 06-09-2026: "de admin voegt de personen toe, en die persoon ziet
+// alleen zichzelf."
+proef("een bewoner ziet alleen zichzelf, de admin iedereen", () => {
+  const mensen = [
+    { id: "p-1", name: "Sven", target: "mobile_app_sven", user_id: "u-sven" },
+    { id: "p-2", name: "Partner", target: "mobile_app_partner", user_id: "u-partner" },
+    { id: "p-3", name: "Tablet", target: "mobile_app_tablet", user_id: "" },
+    { id: "p-4", name: "leeg", target: "" },
+  ];
+  assert.deepEqual(zichtbaar(mensen, { id: "u-x", is_admin: true }).map((p) => p.id), ["p-1", "p-2", "p-3"]);
+  assert.deepEqual(zichtbaar(mensen, { id: "u-partner", is_admin: false }).map((p) => p.id), ["p-2"]);
+  assert.deepEqual(zichtbaar(mensen, { id: "u-niemand", is_admin: false }), [], "niet gekoppeld: niets");
+  assert.deepEqual(zichtbaar(mensen, null).length, 3, "zonder gebruiker (het voorbeeld) alles");
+  assert.equal(naamVanTelefoon("mobile_app_iphone_van_sven"), "Iphone van sven");
+  assert.equal(naamVanTelefoon(""), "");
+  assert.deepEqual(STANDAARD_SOORTEN, { kritiek: true, melding: true, besluit: false, belasting: true },
+    "een nieuwe persoon krijgt alles behalve de besluiten, net als op de server");
+});
 const Meldingen = geregistreerd.get("dac-view-notifications");
 assert.ok(Meldingen, "het meldingenscherm hoort zich te registreren");
 

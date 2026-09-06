@@ -34,6 +34,7 @@ from .const import (
     PRICE_INTERVAL_HOUR,
     PRICE_INTERVAL_QUARTER,
 )
+from .ontvangers import SOORTEN, alleen_eigen, nieuwe_persoon, zet_eigen_soorten
 from .storage import async_get_store, schema_bijwerken
 
 
@@ -161,13 +162,34 @@ _SCHEDULE = _schema(
 _STRATEGY = _schema(
     {
         vol.Optional("level"): vol.In(LEVELS),
+        # `load_alert` stond hier tot v0.52.0; zie `_NOTIFICATIONS`. Een oud
+        # paneel dat hem nog meestuurt raakt hem hier kwijt, en dat is goed.
+        vol.Optional("schedules"): [_SCHEDULE],
+    }
+)
+
+# Een persoon die meldingen krijgt: een telefoon met een naam, eventueel
+# gekoppeld aan een gebruiker van Home Assistant, en een schakelaar per soort.
+_KINDS = _schema({vol.Optional(soort): bool for soort in SOORTEN})
+_PERSON = _schema(
+    {
+        vol.Optional("id", default=""): str,
+        vol.Required("name"): str,
+        vol.Required("target"): vol.Match(r"^[a-z0-9_]+$"),
+        vol.Optional("user_id", default=""): str,
+        vol.Optional("kinds", default=dict): _KINDS,
+    }
+)
+
+_NOTIFICATIONS = _schema(
+    {
+        vol.Optional("people"): vol.All([_PERSON], vol.Length(max=20)),
         vol.Optional("load_alert"): _schema(
             {
                 vol.Optional("enabled"): bool,
                 vol.Optional("threshold_percent"): vol.All(
                     vol.Coerce(float), vol.Range(1, 200)
                 ),
-                vol.Optional("targets"): [str],
                 vol.Optional("min_interval_minutes"): vol.All(
                     vol.Coerce(int), vol.Range(1, 1440)
                 ),
@@ -176,7 +198,6 @@ _STRATEGY = _schema(
                 ),
             }
         ),
-        vol.Optional("schedules"): [_SCHEDULE],
     }
 )
 
@@ -289,9 +310,83 @@ async def async_get_settings(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Send the current settings to the panel."""
+    """Send the current settings to the panel.
+
+    Een gewone bewoner ziet van de personen alleen zichzelf. Sven op
+    06-09-2026: "dat die persoon alleen zichzelf ziet." De rest van de
+    instellingen gaat gewoon mee, want het paneel tekent daarmee.
+    """
     settings = await async_get_store(hass).async_load()
+    user = getattr(connection, "user", None)
+    if user is not None and not getattr(user, "is_admin", True):
+        settings = alleen_eigen(settings, str(getattr(user, "id", "") or ""))
     connection.send_result(msg["id"], settings)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/notifications/set",
+        vol.Required("notifications"): _NOTIFICATIONS,
+    }
+)
+@websocket_api.async_response
+async def async_set_notifications(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Wie welke melding krijgt, en de zekeringmelding: alleen de admin.
+
+    De personen komen als hele lijst; een persoon zonder id is nieuw en krijgt
+    er hier een. De schakelaars van een persoon zet die persoon zelf, via
+    `notifications/mine`.
+    """
+    wijziging = dict(msg["notifications"])
+    if "people" in wijziging:
+        mensen = []
+        for row in wijziging["people"]:
+            persoon = nieuwe_persoon(row["name"], row["target"], row.get("user_id", ""), row.get("kinds"))
+            if row.get("id"):
+                persoon["id"] = row["id"]
+            mensen.append(persoon)
+        wijziging["people"] = mensen
+    settings = await async_get_store(hass).async_save({"notifications": wijziging})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], settings)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/notifications/mine",
+        vol.Required("kinds"): _KINDS,
+    }
+)
+@websocket_api.async_response
+async def async_set_my_notifications(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De eigen schakelaars, voor wie ook geen admin is.
+
+    Alleen de persoon die aan deze gebruiker gekoppeld is verandert; naam,
+    telefoon en koppeling blijven van de admin. Is er geen persoon voor deze
+    gebruiker, dan is er niets om te zetten en zegt het antwoord dat.
+    """
+    settings = await async_get_store(hass).async_load()
+    user = getattr(connection, "user", None)
+    user_id = str(getattr(user, "id", "") or "")
+    mensen = zet_eigen_soorten(settings, user_id, msg["kinds"])
+    if mensen is None:
+        connection.send_error(
+            msg["id"], "not_found",
+            "Er is nog geen persoon aan jouw account gekoppeld. Vraag de beheerder om je toe te voegen bij Meldingen.",
+        )
+        return
+    settings = await async_get_store(hass).async_save({"notifications": {"people": mensen}})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], alleen_eigen(settings, user_id))
 
 
 @websocket_api.require_admin
@@ -762,6 +857,8 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_set_settings)
     websocket_api.async_register_command(hass, async_set_device_ready)
     websocket_api.async_register_command(hass, async_set_strategy)
+    websocket_api.async_register_command(hass, async_set_notifications)
+    websocket_api.async_register_command(hass, async_set_my_notifications)
     websocket_api.async_register_command(hass, async_set_device_schedule)
     websocket_api.async_register_command(hass, async_set_active_car)
     websocket_api.async_register_command(hass, async_set_car_soc)

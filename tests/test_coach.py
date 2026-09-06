@@ -84,7 +84,6 @@ def instellingen(**extra):
         "strategy": {
             "level": "steer",
             "goal": "cost",
-            "load_alert": {"targets": ["mobile_app_iphone"]},
             "schedules": [
                 {
                     "device": "dev-laadpaal",
@@ -98,6 +97,13 @@ def instellingen(**extra):
         "active_cars": [{"device": "dev-laadpaal", "car": "car-1"}],
         "car_soc": [],
         "ready_devices": [],
+        # Wie wat krijgt, sinds 06-09-2026 per persoon; zie ontvangers.py.
+        "notifications": {
+            "people": [{"id": "p-1", "name": "Sven", "target": "mobile_app_iphone", "user_id": "u-sven",
+                        "kinds": {"kritiek": True, "melding": True, "besluit": False, "belasting": True}}],
+            "load_alert": {"enabled": False, "threshold_percent": 80,
+                           "min_interval_minutes": 30, "min_duration_seconds": 60},
+        },
     }
     basis.update(extra)
     return basis
@@ -1799,10 +1805,9 @@ def waarschuwing(hass, monitor):
 
 
 inst38 = instellingen()
-inst38["strategy"]["load_alert"] = {
+inst38["notifications"]["load_alert"] = {
     "enabled": True,
     "threshold_percent": 80.0,
-    "targets": ["mobile_app_iphone"],
     "min_interval_minutes": 30,
     "min_duration_seconds": 60,
 }
@@ -1841,7 +1846,7 @@ controle("op een niveau waarop de coach niets stuurt komt hij wel",
 
 # Net zo voor een paal die niet stuurbaar is.
 inst38d = instellingen(devices=[dict(LAADPAAL, controllable=False)])
-inst38d["strategy"]["load_alert"] = inst38["strategy"]["load_alert"]
+inst38d["notifications"] = inst38["notifications"]
 hass38d, monitor38d = bewaker(inst38d, huis38b)
 vast38 = waarschuwing(hass38d, monitor38d)
 print(f"  onstuurbare paal: {vast38}")
@@ -2520,6 +2525,74 @@ hass54b, _, coach54b = bouw(huis(status="completed", teruglevering=0.0, afname=1
 b4, v4 = asyncio.run(ronde(coach54b, inst54b, nu=dt.datetime(2026, 9, 6, 4, 27)))
 controle("zonder accustand geen herstart", b4["rule"] == "complete" and not starts(v4),
          f"{b4['rule']} {v4}")
+
+print("=== 55. wie welke melding krijgt: per persoon, per soort ===")
+# Sven op 06-09-2026: "de klant kan meldingen aan en uit zetten in het tabje
+# Meldingen. De admin voegt de personen toe, en die persoon ziet alleen
+# zichzelf. En niet telkens onnodig meldingen sturen."
+ontv = laad("ontvangers")
+inst55 = instellingen()
+inst55["notifications"]["people"] = [
+    {"id": "p-1", "name": "Sven", "target": "mobile_app_sven", "user_id": "u-sven",
+     "kinds": {"kritiek": True, "melding": True, "besluit": False, "belasting": True}},
+    {"id": "p-2", "name": "Partner", "target": "mobile_app_partner", "user_id": "u-partner",
+     "kinds": {"kritiek": True, "melding": False, "besluit": False, "belasting": False}},
+    {"id": "p-3", "name": "Alles", "target": "mobile_app_alles", "user_id": "",
+     "kinds": {"kritiek": True, "melding": True, "besluit": True, "belasting": True}},
+]
+controle("kritiek gaat naar iedereen die dat aan heeft",
+         ontv.ontvangers(inst55, "kritiek") == ["mobile_app_sven", "mobile_app_partner", "mobile_app_alles"],
+         f"{ontv.ontvangers(inst55, 'kritiek')}")
+controle("een verslag alleen naar wie verslagen wil",
+         ontv.ontvangers(inst55, "melding") == ["mobile_app_sven", "mobile_app_alles"], "")
+controle("een besluit alleen naar wie alles wil volgen",
+         ontv.ontvangers(inst55, "besluit") == ["mobile_app_alles"], "")
+controle("een onbekende soort gaat naar niemand", ontv.ontvangers(inst55, "geheim") == [], "")
+# De coach zelf: een verslag en een besluit.
+hass55, _, coach55 = bouw(huis(), inst55)
+asyncio.run(coach55._async_tell("proefverslag"))
+asyncio.run(coach55._async_tell("proefalarm", kritiek=True))
+asyncio.run(coach55._async_noteer("proefbesluit", dt.datetime(2026, 9, 6, 10, 0)))
+naar = [(d[1], d[2]["message"]) for d in hass55.services.verstuurd if d[0] == "notify"]
+print(f"  verstuurd: {naar}")
+controle("het verslag ging naar Sven en Alles, niet naar Partner",
+         [t for t, m in naar if m == "proefverslag"] == ["mobile_app_sven", "mobile_app_alles"], f"{naar}")
+controle("het alarm ging naar alle drie",
+         len([t for t, m in naar if m == "proefalarm"]) == 3, f"{naar}")
+controle("het besluit alleen naar Alles",
+         [t for t, m in naar if m == "proefbesluit"] == ["mobile_app_alles"], f"{naar}")
+# Een gewone bewoner ziet alleen zichzelf, en zet alleen zijn eigen schuiven.
+eigen = ontv.alleen_eigen(inst55, "u-partner")
+controle("een bewoner ziet alleen zijn eigen persoon",
+         [p["id"] for p in eigen["notifications"]["people"]] == ["p-2"], f"{eigen['notifications']['people']}")
+controle("en de rest van de instellingen blijft", eigen["devices"] == inst55["devices"], "")
+nieuw55 = ontv.zet_eigen_soorten(inst55, "u-partner", {"melding": True, "besluit": True, "name": "hack"})
+controle("hij zet zijn eigen soorten, en niets anders",
+         nieuw55[1]["kinds"] == {"kritiek": True, "melding": True, "besluit": True, "belasting": False}
+         and nieuw55[1]["name"] == "Partner" and nieuw55[0]["kinds"]["melding"] is True, f"{nieuw55}")
+controle("zonder gekoppelde persoon valt er niets te zetten",
+         ontv.zet_eigen_soorten(inst55, "u-onbekend", {"melding": True}) is None, "")
+# De migratie: wat er onder Strategie stond wordt personen.
+oud55 = {"strategy": {"level": "steer", "load_alert": {"enabled": True, "threshold_percent": 85.0,
+                                                        "targets": ["mobile_app_iphone_van_sven"],
+                                                        "min_interval_minutes": 30, "min_duration_seconds": 60}}}
+mig = ontv.migreer_load_alert(oud55)
+mensen55 = mig["notifications"]["people"]
+print(f"  gemigreerd: {mensen55}")
+controle("de oude ontvanger wordt een persoon met een leesbare naam",
+         len(mensen55) == 1 and mensen55[0]["target"] == "mobile_app_iphone_van_sven"
+         and mensen55[0]["name"] == "Iphone van sven" and mensen55[0]["id"].startswith("p-"), f"{mensen55}")
+controle("met alles aan behalve de besluiten",
+         mensen55[0]["kinds"] == {"kritiek": True, "melding": True, "besluit": False, "belasting": True}, "")
+controle("en de drempel gaat mee, zonder de ontvangers",
+         mig["notifications"]["load_alert"] == {"enabled": True, "threshold_percent": 85.0,
+                                                 "min_interval_minutes": 30, "min_duration_seconds": 60}, "")
+controle("een tweede keer verandert er niets", ontv.migreer_load_alert(mig) is mig and len(mig["notifications"]["people"]) == 1, "")
+# En via de opslag zelf: laden snoeit het oude blok weg en houdt het nieuwe.
+geladen55 = storage._prune(storage.DEFAULT_SETTINGS, storage._migrate(dict(oud55)))
+controle("na laden staat load_alert niet meer onder strategy", "load_alert" not in geladen55["strategy"], f"{geladen55['strategy'].keys()}")
+controle("en wel onder notifications", geladen55["notifications"]["load_alert"]["threshold_percent"] == 85.0
+         and len(geladen55["notifications"]["people"]) == 1, "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

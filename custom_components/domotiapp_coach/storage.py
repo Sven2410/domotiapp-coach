@@ -16,6 +16,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
+from .ontvangers import migreer_load_alert
 from .const import (
     BEURTEN_KEY,
     BEURTEN_MAX,
@@ -184,6 +185,9 @@ def _migrate(stored: dict[str, Any]) -> dict[str, Any]:
         for car in device.get("cars") or []:
             if isinstance(car, dict) and car.get("phases") == "both":
                 car["phases"] = "three"
+
+    # v0.52.0: de zekeringmelding en haar ontvangers gaan naar Meldingen.
+    migreer_load_alert(stored)
 
     strategy = stored.get("strategy")
     if not isinstance(strategy, dict):
