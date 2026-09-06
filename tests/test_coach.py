@@ -2756,6 +2756,166 @@ hass57c.services.verstuurd.clear()
 asyncio.run(coach57c._round(dt.datetime(2026, 9, 8, 1, 1, 30))); asyncio.run(hass57c.afmaken())
 controle("na het akkoord wel", [d for d in hass57c.services.verstuurd if d[0] == "button"], f"{hass57c.services.verstuurd}")
 
+print("=== 58. een domme vaatwasser op een meetstekker: adviseren, meten, leren ===")
+# Sven op 06-09-2026 's avonds: "smart plug als starten doen we niet, wel
+# adviseren en meten, met zet hem aan." Merk "overig": geen status, geen
+# programma, geen knop; het programma kiest de bewoner op de kaart, en het
+# vermogen zegt of hij draait. Zijn schema: vanaf 08:00, klaar om 16:30.
+DOM = {
+    "id": "dev-dom",
+    "type": "vaatwasser",
+    "name": "Vaatwasser",
+    "brand": "overig",
+    "controllable": True,
+    "entity": "sensor.dom_vermogen",
+    "entities": {},
+    "programs": [],
+    "program": "eco_50",
+}
+inst58 = instellingen(devices=[LAADPAAL, DOM])
+inst58["contract"] = inst56["contract"]
+inst58["strategy"]["schedules"].append({
+    "device": "dev-dom", "enabled": True, "priority": "mid", "per_day": False,
+    "window": {"not_before": "08:00", "start_by": "", "done_by": "16:30"}, "days": [],
+})
+# Overdag goedkoop rond het middaguur, zoals een dynamisch contract met zon.
+def prijzen58(dag):
+    rijen = []
+    for i in range(48):
+        start = dt.datetime(2026, 9, dag, 0, 0) + dt.timedelta(hours=i)
+        prijs = 0.10 if 11 <= start.hour < 14 else (0.30 if 17 <= start.hour < 21 else 0.22)
+        rijen.append({"from": start.isoformat() + "+02:00",
+                      "till": (start + dt.timedelta(hours=1)).isoformat() + "+02:00", "price": prijs})
+    return rijen
+huis58 = huis(status="ready_to_charge", teruglevering=0.0, afname=300.0)
+huis58.update({
+    "sensor.dom_vermogen": "0",
+    "sensor.prijs": {"state": "0.22", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen58(8)}},
+})
+hass58, _, coach58 = bouw(huis58, inst58)
+
+async def ronde58(nu):
+    hass58.services.verstuurd.clear()
+    await hass58.afmaken()
+    await coach58._round(nu)
+    await hass58.afmaken()
+    return coach58.state.get("dev-dom") or {}, list(hass58.services.verstuurd)
+
+def telefoon58(v):
+    return [d[2]["message"] for d in v if d[0] == "notify" and "Vaatwasser" in d[2].get("message", "")]
+
+inst58["ready_devices"] = ["dev-dom"]
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 7, 30)))
+print(f"  07:30: {b.get('rule')} {b.get('reason', '')[:80]}")
+# 10:15 en 11:00 kosten evenveel (drie kwartier duur, drie uur goedkoop), en
+# van twee gelijke wint de vroegste.
+controle("om 07:30 vrijgegeven met vanaf 08:00: hij wacht op het goedkoopste moment, in de woorden 'zet hem aan om'",
+         b.get("rule") == "wait-for-start" and (b.get("reason") or "").startswith("Zet hem aan om 10:15")
+         and b.get("manual") is True and b.get("program") == "eco_50" and not telefoon58(v), f"{b.get('rule')} {b.get('reason')}")
+controle("en drukt nergens op, want er is geen knop", not [d for d in v if d[0] == "button"], f"{v}")
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 11, 0, 20)))
+print(f"  11:00: {b.get('rule')}  telefoon: {telefoon58(v)}")
+controle("om 11:00 vraagt hij de bewoner om hem aan te zetten, één melding met de naam erin",
+         b.get("rule") == "cheapest-start" and b.get("charge") and len(telefoon58(v)) == 1
+         and telefoon58(v)[0].startswith("Zet Vaatwasser nu aan: dit is het goedkoopste moment"), f"{telefoon58(v)}")
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 11, 10)))
+controle("tien minuten later vraagt hij het niet nog eens", not telefoon58(v), f"{telefoon58(v)}")
+# De bewoner drukt om 11:12; de meetstekker ziet 2000 W.
+hass58.states.zet("sensor.dom_vermogen", "2000")
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 11, 12)))
+controle("zodra er vermogen loopt draait hij, zonder statussensor", b.get("rule") == "running" and b.get("running"), f"{b}")
+# Twintig minuten opwarmen op 2000 W, dan pompen op 60 W, dan drogen op 1500 W,
+# met een stille minuut of drie tussendoor die geen einde is.
+def vermogen58(minuut):
+    if minuut < 20:
+        return 2000
+    if 60 <= minuut < 63:
+        return 0
+    if minuut >= 170:
+        return 1500
+    return 60
+for minuut in range(1, 200):
+    hass58.states.zet("sensor.dom_vermogen", str(vermogen58(minuut)))
+    b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 11, 12) + dt.timedelta(minutes=minuut)))
+    if minuut == 62:
+        controle("drie stille minuten midden in de beurt zijn geen einde", b.get("rule") == "running", f"{b.get('rule')}")
+    if telefoon58(v):
+        controle("geen melding tijdens de beurt", False, f"{telefoon58(v)}")
+        break
+# Om 14:32 ziet de stekker niets meer; na een kwartier stilte is hij klaar.
+hass58.states.zet("sensor.dom_vermogen", "0")
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 14, 32)))
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 14, 40)))
+controle("acht minuten stilte is nog niet klaar", b.get("rule") == "running" and not telefoon58(v), f"{b.get('rule')} {telefoon58(v)}")
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 14, 48)))
+verslag = telefoon58(v)
+print(f"  klaar: {verslag}")
+controle("na een kwartier stilte één verslag, met het einde op het laatste vermogen en niet op nu",
+         len(verslag) == 1 and "Vaatwasser is klaar (Eco 50 °C)" in verslag[0] and "van 11:12 tot 14:31" in verslag[0]
+         and "1,5 kWh" in verslag[0] and "Meteen starten had" in verslag[0], f"{verslag}")
+controle("de vrijgave is eraf", "dev-dom" not in (inst58.get("ready_devices") or []), f"{inst58.get('ready_devices')}")
+gemeten = [r for r in inst58.get("program_measured") or [] if r.get("device") == "dev-dom"]
+print(f"  gemeten: {[(r['key'], r['minutes'], r['kwh'], r['peak_w'], r['runs'], len(r['profile'])) for r in gemeten]}")
+controle("de beurt is gemeten: 199 minuten, 1,5 kWh, piek 2000 W, één beurt, een profiel van veertig stappen",
+         len(gemeten) == 1 and gemeten[0]["key"] == "eco_50" and 195 <= gemeten[0]["minutes"] <= 200
+         and 1.4 <= gemeten[0]["kwh"] <= 1.6 and gemeten[0]["peak_w"] == 2000 and gemeten[0]["runs"] == 1
+         and 39 <= len(gemeten[0]["profile"]) <= 41, f"{gemeten}")
+profiel58 = gemeten[0]["profile"] if gemeten else []
+controle("het profiel: 2000 W in de eerste vier stappen, 60 W in het midden, 1500 W aan het eind",
+         profiel58[:4] == [2000.0] * 4 and profiel58[20] == 60.0 and profiel58[-1] == 1500.0, f"{profiel58}")
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 14, 49)))
+controle("daarna niets meer: geen tweede verslag, en hij wacht op een nieuwe vrijgave",
+         not telefoon58(v) and b.get("rule") == "not-released", f"{b.get('rule')} {telefoon58(v)}")
+# De volgende dag plant hij met de meting: de duur is nu 199 minuten en het
+# profiel legt het opwarmen in het goedkoopste uur.
+inst58["ready_devices"] = ["dev-dom"]
+hass58.states.zet("sensor.prijs", {"state": "0.22", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen58(9)}})
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 9, 7, 30)))
+print(f"  dag 2 om 07:30: {b.get('rule')} {b.get('reason', '')[:90]} | {b.get('plan', '')}")
+controle("de volgende dag rekent hij met de gemeten duur",
+         b.get("rule") == "wait-for-start" and coach58._programma["dev-dom"]["programma"] is not None
+         and coach58._programma["dev-dom"]["programma"].measured
+         and coach58._programma["dev-dom"]["programma"].minutes == gemeten[0]["minutes"], f"{b}")
+# Wist de klant de meting, dan is het weer de opgave.
+inst58["program_measured"] = []
+asyncio.run(ronde58(dt.datetime(2026, 9, 9, 7, 31)))
+controle("zonder meting weer de opgave van 225 minuten",
+         not coach58._programma["dev-dom"]["programma"].measured and coach58._programma["dev-dom"]["programma"].minutes == 225, "")
+# Zonder gekozen programma: uitleg op de kaart, geen vraag aan de bewoner.
+inst58["devices"][1]["program"] = ""
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 9, 11, 0, 20)))
+controle("zonder gekozen programma zegt hij dat je er een moet kiezen en vraagt hij niets",
+         b.get("rule") == "no-program" and "Kies hieronder" in (b.get("reason") or "") and not telefoon58(v), f"{b.get('rule')} {b.get('reason')}")
+# Een eigen tabel: de klant zet Eco op 120 minuten.
+inst58["devices"][1]["program"] = "eco_50"
+inst58["devices"][1]["programs"] = [{"key": "eco_50", "label": "Eco 50 °C", "minutes": 120, "kwh": 0.7, "peak_w": 2000, "plan": "ideal"}]
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 9, 11, 1)))
+controle("met een eigen tabel rekent hij met 120 minuten",
+         coach58._programma["dev-dom"]["programma"].minutes == 120 and coach58._programma["dev-dom"]["programma"].kwh == 0.7, "")
+
+print("=== 59. de bewoner negeert de vraag: één herinnering na drie kwartier ===")
+inst59 = instellingen(devices=[LAADPAAL, DOM])
+inst59["contract"] = inst56["contract"]
+inst59["strategy"]["schedules"].append({
+    "device": "dev-dom", "enabled": True, "priority": "mid", "per_day": False,
+    "window": {"not_before": "08:00", "start_by": "", "done_by": "16:30"}, "days": [],
+})
+inst59["ready_devices"] = ["dev-dom"]
+hass59, _, coach59 = bouw(dict(huis58), inst59)
+async def ronde59(nu):
+    hass59.services.verstuurd.clear()
+    await hass59.afmaken()
+    await coach59._round(nu)
+    await hass59.afmaken()
+    return coach59.state.get("dev-dom") or {}, [d[2]["message"] for d in hass59.services.verstuurd if d[0] == "notify" and "Vaatwasser" in d[2].get("message", "")]
+b, m1 = asyncio.run(ronde59(dt.datetime(2026, 9, 8, 11, 0, 20)))
+b, m2 = asyncio.run(ronde59(dt.datetime(2026, 9, 8, 11, 30)))
+b, m3 = asyncio.run(ronde59(dt.datetime(2026, 9, 8, 11, 46)))
+b, m4 = asyncio.run(ronde59(dt.datetime(2026, 9, 8, 13, 0)))
+print(f"  {m1} {m2} {m3} {m4}")
+controle("de vraag om 11:00, niets om 11:30, de herinnering om 11:46 met de tijd van de vraag erin, en daarna niets meer",
+         len(m1) == 1 and not m2 and len(m3) == 1 and "nog steeds uit" in m3[0] and "11:00" in m3[0] and not m4, f"{m1} {m2} {m3} {m4}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

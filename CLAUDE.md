@@ -144,7 +144,33 @@ verbruiksprofiel in twee bulten, "starten op afstand" dat uit kan staan, en
 de gebeurtenissen `vaatwasser_vrijgeven` en `vaatwasser_deur`. Vijf
 scenario's `vaatwasser-*` in scenarios.py.
 
-**Nog niet aan een echte Home Connect gezien.** Sven test bij zichzelf thuis.
+**De tabel is van de klant, en de meting wint.** Sven op 06-09-2026 's
+avonds: "ik wil dat kunnen aanpassen, wel moet hij dit als uitgangspunt
+hebben." `PROGRAMMAS` is dus alleen nog het uitgangspunt: per apparaat staat
+in Apparaten een bewerkbare tabel (`device.programs`, leeg is de opgave;
+`tabel_van` in planner.py), en wat de coach bij een echte beurt meet komt
+eroverheen (`program_measured` in de instellingen, `_async_meting_bewaren`
+in coach.py, `met_metingen` in planner.py): duur, kWh, piek en het verloop
+als watt per vijf minuten (`profiel_van`). `programma_kosten` rekent met
+dat profiel, zodat de opwarmpiek in het zonnigste uur valt; zonder profiel
+smeert hij het verbruik uit. Lopend gemiddelde over de laatste vijf beurten
+(`METING_MAX_N`); per rij te wissen in Apparaten
+(`device/measurements/clear`).
+
+**Een domme vaatwasser** (merk "overig", op een meetstekker) plant de coach
+ook, maar hij drukt niet: "smart plug als starten doen we niet, wel
+adviseren en meten." `Apparaat.manual` maakt de teksten "zet hem aan"; op
+het moment zelf gaat er één melding naar de telefoon, en na drie kwartier
+één herinnering (`HERINNERING`). Of hij draait leest de coach van het
+vermogen (`_status_uit_vermogen`: boven `DRAAI_W` draait hij, na
+`STIL_KLAAR` stilte is hij klaar). Het programma kiest de bewoner op de kaart
+uit de eigen tabel (`device.program`, commando `device/program`); bij Home
+Connect uit de select-entiteit. **De coach kiest nooit zelf een programma.**
+Zes scenario's `vaatwasser-dom-*`, `vaatwasser-eigen-tabel` en
+`vaatwasser-gemeten` in scenarios.py; proef 58 en 59 in test_coach.py.
+
+**Nog niet aan een echte Home Connect of een echte meetstekker gezien.** Sven
+test bij zichzelf thuis.
 
 ## Hoe het in elkaar zit
 

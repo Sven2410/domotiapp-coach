@@ -1889,6 +1889,86 @@ controle("zonder herkend programma en zonder haast: uitleg, geen start",
          planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), prijzen50(7), Tariff(), Forecast(), venster50,
                                 planner.Apparaat(status="ready", released=True, program=None)).rule == "no-program", "")
 
+print("=== 51. de programmatabel van de klant, de metingen en het profiel ===")
+# Sven op 06-09-2026: "we hebben nu een hard coded tabel maar ik wil dat
+# kunnen aanpassen, wel moet hij dit als uitgangspunt hebben", en "het
+# verbruik is in het begin heel hoog vanwege het opwarmen, dus dat wil ik
+# gaan meten en die waardes in kunnen vullen."
+controle("een lege tabel is de opgave van de fabrikant", planner.tabel_van([]) is planner.PROGRAMMAS
+         and planner.tabel_van(None) is planner.PROGRAMMAS, "")
+eigen = planner.tabel_van([
+    {"key": "eco_50", "label": "Eco 50 °C", "minutes": 180, "kwh": 0.6, "peak_w": 2000, "plan": "ideal"},
+    {"label": "Glas 40 °C", "minutes": "90", "kwh": "0.5", "peak_w": 1800},
+    {"label": "", "minutes": 60, "kwh": 1.0},          # zonder naam telt niet
+    {"label": "Kapot", "minutes": 0, "kwh": 1.0},      # zonder duur telt niet
+    {"label": "Raar", "minutes": "x", "kwh": 1.0},     # onbruikbaar telt niet
+])
+controle("de eigen tabel: twee bruikbare rijen, de rest valt af", len(eigen) == 2, f"{eigen}")
+controle("een eigen rij zonder sleutel krijgt er een uit zijn naam",
+         eigen[1].key == "glas_40_c" and eigen[1].minutes == 90 and eigen[1].kwh == 0.5 and eigen[1].plan == "yes", f"{eigen[1]}")
+controle("sleutel_van: letters en cijfers, de rest wordt een streepje",
+         planner.sleutel_van("Auto 45 tot 65 °C") == "auto_45_tot_65_c" and planner.sleutel_van("") == "programma", "")
+controle("de aangepaste Eco is 180 minuten en 0,6 kWh",
+         planner.programma_van("dishcare_dishwasher_program_eco_50", eigen).minutes == 180
+         and planner.programma_van("dishcare_dishwasher_program_eco_50", eigen).kwh == 0.6, "")
+controle("een eigen programma wordt gevonden op zijn sleutel en op zijn naam",
+         planner.programma_van("glas_40_c", eigen) is eigen[1] and planner.programma_van("Glas 40 °C", eigen) is eigen[1], "")
+controle("en niet in de fabriekstabel", planner.programma_van("glas_40_c") is None, "")
+
+metingen = [
+    {"device": "vw", "key": "eco_50", "minutes": 200, "kwh": 0.95, "peak_w": 2050,
+     "profile": [2000.0] * 4 + [60.0] * 30 + [1500.0] * 6, "runs": 2},
+    {"device": "ander", "key": "eco_50", "minutes": 999, "kwh": 9.0, "peak_w": 1, "profile": [], "runs": 1},
+]
+gemeten = planner.met_metingen(planner.PROGRAMMAS, metingen, "vw")
+eco_gemeten = planner.programma_van("dishcare_dishwasher_program_eco_50", gemeten)
+controle("een meting wint van de opgave: 200 minuten, 0,95 kWh, en het profiel erbij",
+         eco_gemeten.measured and eco_gemeten.minutes == 200 and eco_gemeten.kwh == 0.95
+         and eco_gemeten.peak_w == 2050 and len(eco_gemeten.profile) == 40, f"{eco_gemeten}")
+controle("de meting van een ander apparaat telt niet", planner.met_metingen(planner.PROGRAMMAS, metingen, "nogeen")[0].measured is False, "")
+controle("de naam en het verschuifbeleid blijven van de tabel",
+         eco_gemeten.label == "Eco 50 °C" and eco_gemeten.plan == "ideal", "")
+controle("zonder metingen dezelfde tabel terug", planner.met_metingen(planner.PROGRAMMAS, [], "vw") is planner.PROGRAMMAS, "")
+
+# Het profiel: eerst de opwarmpiek, dan de pomp, dan het drogen. Met zon van
+# 12:00 tot 14:00 hoort de piek in de zon te vallen, dus een start om 11:40
+# (piek om 11:40 tot 12:00, buiten de zon) is duurder dan een start om 12:00.
+punten = [(m, 2000.0 if m < 20 else (1500.0 if m >= 170 else 60.0)) for m in range(0, 200)]
+profiel = planner.profiel_van(punten)
+controle("profiel_van: veertig stappen van vijf minuten, hoog aan het begin en het eind, laag ertussen",
+         len(profiel) == 40 and profiel[0] == 2000.0 and profiel[3] == 2000.0 and profiel[4] == 60.0
+         and profiel[20] == 60.0 and profiel[-1] == 1500.0, f"{profiel[:6]} ... {profiel[-3:]}")
+controle("een stap zonder meting neemt de vorige over",
+         planner.profiel_van([(0, 1000.0), (12, 500.0)]) == (1000.0, 1000.0, 500.0), f"{planner.profiel_van([(0, 1000.0), (12, 500.0)])}")
+controle("profiel_gemiddeld: gewogen met het aantal beurten, en de langere staart blijft",
+         planner.profiel_gemiddeld((1000.0, 1000.0), 1, (2000.0, 2000.0, 300.0)) == (1500.0, 1500.0, 150.0)
+         and planner.profiel_gemiddeld((), 0, (5.0,)) == (5.0,), f"{planner.profiel_gemiddeld((1000.0, 1000.0), 1, (2000.0, 2000.0, 300.0))}")
+eco_profiel = planner.Programma("eco_50", "Eco 50 °C", 200, 0.95, 2000, "ideal", profile=profiel, measured=True)
+zon2 = Forecast(solar_kwh={dt.datetime(2026, 9, 7, 12, 0): 3.0, dt.datetime(2026, 9, 7, 13, 0): 3.0}, house_kwh={})
+vast = Tariff(buy=0.28, feed_in=0.07)
+k_1140 = planner.programma_kosten(dt.datetime(2026, 9, 7, 11, 40), eco_profiel, [], vast, zon2)
+k_1200 = planner.programma_kosten(dt.datetime(2026, 9, 7, 12, 0), eco_profiel, [], vast, zon2)
+print(f"  met profiel: start 11:40 kost {k_1140:.3f}, start 12:00 kost {k_1200:.3f}")
+controle("met het profiel is starten in de zon goedkoper dan de opwarmpiek er net voor",
+         k_1200 < k_1140 - 0.05, f"{k_1200:.3f} < {k_1140:.3f}")
+eco_plat = planner.Programma("eco_50", "Eco 50 °C", 200, 0.95, 2000, "ideal")
+p_1140 = planner.programma_kosten(dt.datetime(2026, 9, 7, 11, 40), eco_plat, [], vast, zon2)
+p_1200 = planner.programma_kosten(dt.datetime(2026, 9, 7, 12, 0), eco_plat, [], vast, zon2)
+controle("zonder profiel is dat verschil er nauwelijks, want dan is het verbruik uitgesmeerd",
+         abs(p_1140 - p_1200) < 0.03, f"{p_1140:.3f} {p_1200:.3f}")
+controle("zonder zon telt het profiel precies zijn eigen kilowatturen tegen de inkoopprijs",
+         abs(planner.programma_kosten(dt.datetime(2026, 9, 7, 2, 0), eco_profiel, [], vast, Forecast()) - 0.28 * sum(w / 1000 * 5 / 60 for w in profiel)) < 0.001, "")
+dom = planner.Apparaat(status="ready", released=True, program=eco, manual=True)
+d_wacht = planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), prijzen50(7), Tariff(), Forecast(), venster50, dom)
+d_nu = planner.plan_programma(dt.datetime(2026, 9, 8, 1, 0), prijzen50(7), Tariff(), Forecast(), venster50, dom)
+d_krap = planner.plan_programma(dt.datetime(2026, 9, 8, 3, 30), prijzen50(7), Tariff(), Forecast(), venster50, dom)
+print(f"  dom: {d_wacht.reason} | {d_nu.reason} | {d_krap.reason}")
+controle("zonder startknop zegt hij 'zet hem aan' in plaats van 'hij start'",
+         d_wacht.reason.startswith("Zet hem aan om 01:00") and d_nu.reason.startswith("Zet hem nu aan")
+         and "zet hem meteen aan" in d_krap.reason and "hij start" not in (d_wacht.reason + d_nu.reason + d_krap.reason), "")
+controle("en de regels zijn dezelfde als met een knop",
+         (d_wacht.rule, d_nu.rule, d_krap.rule) == ("wait-for-start", "cheapest-start", "deadline"), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

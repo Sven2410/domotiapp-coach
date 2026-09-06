@@ -448,6 +448,77 @@ if (vl := v("vaatwasser-uiterlijk-starten")):
              vl.vw_gestart is not None and vl.vw_gestart.hour == 22 and vl.vw_gestart.minute <= 1,
              f"gestart {vw_klok(vl.vw_gestart)}")
 
+# De domme vaatwasser op een meetstekker (06-09-2026 's avonds). Sven: "wel
+# adviseren en meten, met zet hem aan", en zijn schema: vanaf 08:00, klaar
+# om 16:30, nooit in de nacht.
+if (vl := v("vaatwasser-dom-zon")):
+    vraag = vl.vw_gevraagd[0] if vl.vw_gevraagd else None
+    print(f"  dom zon: gevraagd {vw_klok(vraag)}, aangezet {[vw_klok(t) for t in vl.vw_gedrukt]}, klaar {vw_klok(vl.vw_klaar)}")
+    controle("dom zon: 's avonds vrijgegeven, en de coach vraagt niets in de nacht",
+             vraag is not None and vraag.date() > virtueel.dt.date(2026, 9, 7), f"{vw_klok(vraag)}")
+    controle("dom zon: hij vraagt tussen 08:00 en 12:15, in de zon",
+             vraag is not None and virtueel.dt.time(8, 0) <= vraag.time() <= virtueel.dt.time(12, 15), f"{vw_klok(vraag)}")
+    controle("dom zon: de vraag komt op de telefoon, één keer",
+             len(meldingen(vl, "Zet Vaatwasser nu aan")) == 1, f"{meldingen(vl, 'Zet Vaatwasser')}")
+    controle("dom zon: de bewoner zet hem vijf minuten later aan en de coach ziet dat aan het vermogen",
+             len(vl.vw_gedrukt) == 1 and vl.vw_gestart is not None and vl.vw_gestart == vl.vw_gedrukt[0], f"{vl.vw_gedrukt} {vl.vw_gestart}")
+    controle("dom zon: klaar voor 16:30", vl.vw_klaar is not None and vl.vw_klaar.time() < virtueel.dt.time(16, 30), f"{vw_klok(vl.vw_klaar)}")
+    controle("dom zon: één verslag, met de tijden erin", len(meldingen(vl, "Vaatwasser is klaar")) == 1
+             and "Eco 50" in meldingen(vl, "Vaatwasser is klaar")[0], f"{meldingen(vl, 'is klaar')}")
+    controle("dom zon: geen herinnering nodig", not meldingen(vl, "nog steeds uit"), "")
+    m = vl.vw_gemeten[0] if vl.vw_gemeten else {}
+    print(f"  dom zon: gemeten {m.get('minutes')} min, {m.get('kwh')} kWh, piek {m.get('peak_w')} W, profiel {len(m.get('profile') or [])} stappen: {(m.get('profile') or [])[:5]} ... {(m.get('profile') or [])[-3:]}")
+    controle("dom zon: de beurt is gemeten: duur, verbruik, piek",
+             len(vl.vw_gemeten) == 1 and 215 <= m.get("minutes", 0) <= 240 and 0.9 <= m.get("kwh", 0) <= 1.1
+             and 1100 <= m.get("peak_w", 0) <= 1300 and m.get("runs") == 1, f"{m}")
+    profiel = m.get("profile") or []
+    controle("dom zon: het profiel laat de opwarmpiek aan het begin en het drogen aan het eind zien",
+             40 <= len(profiel) <= 48 and profiel[0] >= 1000 and profiel[2] >= 1000 and profiel[len(profiel) // 2] < 100
+             and profiel[-2] >= 1000, f"{profiel}")
+
+if (vl := v("vaatwasser-dom-leert")):
+    print(f"  dom leert: beurten {[(vw_klok(a), vw_klok(b), g) for a, b, g in vl.vw_beurten]}")
+    controle("dom leert: twee beurten, elk op zijn eigen dag", len(vl.vw_beurten) == 2
+             and vl.vw_beurten[0][0].date() != vl.vw_beurten[1][0].date(), f"{vl.vw_beurten}")
+    controle("dom leert: de eerste met de opgave, de tweede met de meting",
+             len(vl.vw_beurten) == 2 and vl.vw_beurten[0][2] is False and vl.vw_beurten[1][2] is True, f"{vl.vw_beurten}")
+    controle("dom leert: na twee beurten telt de meting twee beurten",
+             vl.vw_gemeten and vl.vw_gemeten[0].get("runs") == 2, f"{vl.vw_gemeten}")
+    controle("dom leert: allebei klaar voor 16:30 en allebei na 08:00 gevraagd",
+             all(b[1] is not None and b[1].time() < virtueel.dt.time(16, 30) for b in vl.vw_beurten)
+             and all(virtueel.dt.time(8, 0) <= t.time() for t in vl.vw_gevraagd), f"{vl.vw_gevraagd}")
+
+if (vl := v("vaatwasser-dom-negeert")):
+    print(f"  dom negeert: {[m for _, m in vl.meldingen]}")
+    controle("dom negeert: één vraag en één herinnering, en verder niets",
+             len(meldingen(vl, "Zet Vaatwasser nu aan")) == 1 and len(meldingen(vl, "nog steeds uit")) == 1
+             and vl.vw_gestart is None and not meldingen(vl, "is klaar"), f"{[m for _, m in vl.meldingen]}")
+    controle("dom negeert: de herinnering komt drie kwartier na de vraag",
+             len(vl.meldingen) >= 2 and (vl.meldingen[1][0] - vl.meldingen[0][0]) == virtueel.dt.timedelta(minutes=45),
+             f"{[t for t, _ in vl.meldingen]}")
+
+if (vl := v("vaatwasser-dom-zelf")):
+    print(f"  dom zelf: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, meldingen {[m for _, m in vl.meldingen]}")
+    controle("dom zelf: zonder vrijgave vraagt de coach niets", not vl.vw_gevraagd and not meldingen(vl, "Zet Vaatwasser"), "")
+    controle("dom zelf: maar hij ziet de beurt aan het vermogen, meldt hem en meet hem",
+             vl.vw_gestart is not None and vl.vw_gestart.hour == 6 and len(meldingen(vl, "Vaatwasser is klaar")) == 1
+             and len(vl.vw_gemeten) == 1, f"{vl.vw_gemeten}")
+
+if (vl := v("vaatwasser-eigen-tabel")):
+    print(f"  eigen tabel: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}")
+    controle("eigen tabel: met Eco op 150 minuten past 03:30 nog voor 07:00, dus de gewone regel en geen paniekstart",
+             vl.vw_gestart is not None and vl.vw_klaar is not None and vl.vw_klaar.time() < virtueel.dt.time(7, 0)
+             and not any("niet klaar" in m or "haalt" in m for _, m in vl.meldingen), f"{[m for _, m in vl.meldingen]}")
+    controle("eigen tabel: de beurt is gemeten met de echte 150 minuten",
+             vl.vw_gemeten and 140 <= vl.vw_gemeten[0].get("minutes", 0) <= 160, f"{vl.vw_gemeten}")
+
+if (vl := v("vaatwasser-gemeten")):
+    print(f"  gemeten: gestart {vw_klok(vl.vw_gestart)}, beurten {[(vw_klok(a), vw_klok(b), g) for a, b, g in vl.vw_beurten]}")
+    controle("gemeten: de coach plant met het gemeten programma", vl.vw_beurten and vl.vw_beurten[0][2] is True, f"{vl.vw_beurten}")
+    controle("gemeten: hij start pas als de zon er is, niet om 08:00 op het net",
+             vl.vw_gestart is not None and vl.vw_gestart.hour >= 9, f"{vw_klok(vl.vw_gestart)}")
+    controle("gemeten: na de beurt telt de meting twee beurten", vl.vw_gemeten and vl.vw_gemeten[0].get("runs") == 2, f"{vl.vw_gemeten}")
+
 # --- de bewoner --------------------------------------------------------------
 
 print("=== de bewoner ===")

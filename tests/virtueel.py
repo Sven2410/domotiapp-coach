@@ -375,6 +375,12 @@ class Vaatwasser:
     deur_open: bool = False
     # Hoe lang Home Connect erover doet om na de knop "run" te melden.
     aanloop_min: int = 1
+    # Een domme vaatwasser op een meetstekker (merk "overig"): geen status,
+    # geen programma, geen knop; alleen het vermogen. De coach zegt wanneer
+    # en de bewoner drukt zelf, zoveel minuten later. None: hij doet het niet.
+    # Sven op 06-09-2026: "wel adviseren en meten, met zet hem aan."
+    slim: bool = True
+    bewoner_reageert_min: int | None = 5
 
     # toestand
     status: str = "ready"
@@ -385,6 +391,15 @@ class Vaatwasser:
     def druk_start(self, nu: dt.datetime) -> None:
         if self.afstand_aan and not self.deur_open and self.status in ("ready", "inactive"):
             self.gedrukt_op = nu
+
+    def zet_aan(self, nu: dt.datetime) -> bool:
+        """De bewoner drukt zelf op de knop van de machine."""
+        if self.status in ("ready", "inactive", "finished"):
+            self.status = "run"
+            self.gestart_op = nu
+            self.gedrukt_op = None
+            return True
+        return False
 
     def stap(self, nu: dt.datetime) -> float:
         """Eén stap; geeft het vermogen van dit moment in watt."""
@@ -508,6 +523,14 @@ class Scenario:
     vaatwasser: Vaatwasser | None = None
     vaatwasser_klaar_om: str | None = "07:00"
     vaatwasser_uiterlijk: str | None = None
+    vaatwasser_niet_eerder: str | None = None
+    # De eigen programmatabel van de klant (rijen zoals `programs` in de
+    # instellingen); None is de opgave van de fabrikant.
+    vaatwasser_tabel: list | None = None
+    # Welk programma erop staat bij een domme vaatwasser (de sleutel).
+    vaatwasser_programma: str = "eco_50"
+    # Wat de coach bij een eerdere beurt al mat (rijen zoals `program_measured`).
+    vaatwasser_gemeten: list = field(default_factory=list)
     vast_prijs: float = 0.28
     vast_teruglevering: float = 0.07
     vast_terugleverkosten: float = 0.0
@@ -575,6 +598,12 @@ class Verloop:
     vw_klaar: dt.datetime | None = None
     vw_kwh: float = 0.0
     vw_betaald: float = 0.0
+    # Elke beurt apart: (gestart, klaar, met een gemeten programma gepland).
+    vw_beurten: list = field(default_factory=list)
+    # Wat de coach aan het eind over de programma's gemeten had.
+    vw_gemeten: list = field(default_factory=list)
+    # Wanneer de coach de bewoner vroeg om hem aan te zetten (domme machine).
+    vw_gevraagd: list = field(default_factory=list)
 
     @property
     def kosten(self) -> float:
@@ -697,28 +726,44 @@ def instellingen(s: Scenario) -> dict:
     apparaten = []
     schemas = []
     if s.vaatwasser is not None:
-        apparaten.append({
-            "id": "vaatwasser",
-            "type": "vaatwasser",
-            "name": "Vaatwasser",
-            "brand": "home_connect",
-            "controllable": True,
-            "entity": E["vw_vermogen"],
-            "entities": {
-                "status": E["vw_status"],
-                "program": E["vw_programma"],
-                "remaining": E["vw_rest"],
-                "door": E["vw_deur"],
-                "start": E["vw_start"],
-                "stop": E["vw_stop"],
-            },
-        })
+        if s.vaatwasser.slim:
+            apparaten.append({
+                "id": "vaatwasser",
+                "type": "vaatwasser",
+                "name": "Vaatwasser",
+                "brand": "home_connect",
+                "controllable": True,
+                "entity": E["vw_vermogen"],
+                "entities": {
+                    "status": E["vw_status"],
+                    "program": E["vw_programma"],
+                    "remaining": E["vw_rest"],
+                    "door": E["vw_deur"],
+                    "start": E["vw_start"],
+                    "stop": E["vw_stop"],
+                },
+                "programs": list(s.vaatwasser_tabel or []),
+            })
+        else:
+            # Een domme vaatwasser: alleen een meetstekker, en het programma
+            # zoals de bewoner het op de kaart koos.
+            apparaten.append({
+                "id": "vaatwasser",
+                "type": "vaatwasser",
+                "name": "Vaatwasser",
+                "brand": "overig",
+                "controllable": True,
+                "entity": E["vw_vermogen"],
+                "entities": {},
+                "programs": list(s.vaatwasser_tabel or []),
+                "program": s.vaatwasser_programma,
+            })
         schemas.append({
             "device": "vaatwasser",
-            "enabled": bool(s.vaatwasser_klaar_om or s.vaatwasser_uiterlijk),
+            "enabled": bool(s.vaatwasser_klaar_om or s.vaatwasser_uiterlijk or s.vaatwasser_niet_eerder),
             "priority": "mid",
             "per_day": False,
-            "window": {"not_before": "", "start_by": s.vaatwasser_uiterlijk or "",
+            "window": {"not_before": s.vaatwasser_niet_eerder or "", "start_by": s.vaatwasser_uiterlijk or "",
                        "done_by": s.vaatwasser_klaar_om or ""},
             "days": [],
         })
@@ -791,6 +836,8 @@ def instellingen(s: Scenario) -> dict:
                      for band, kw in sorted(s.geleerd_tempo.items())],
         "ready_devices": [],
         "sessions": [],
+        # Wat een eerdere beurt over de programma's van de vaatwasser mat.
+        "program_measured": [dict(r) for r in s.vaatwasser_gemeten],
     }
 
 
@@ -806,6 +853,7 @@ class Wereld:
         self.huis = dataclasses.replace(s.huis)
         self.vaatwasser = dataclasses.replace(s.vaatwasser) if s.vaatwasser is not None else None
         self.vw_w = 0.0
+        self.vw_gevraagd: dt.datetime | None = None
         self.auto = dataclasses.replace(s.auto, soc_gemeld=[])
         self.paal = dataclasses.replace(s.paal, ontvangen=[])
         self.prijzen = dataclasses.replace(s.prijzen)
@@ -1072,6 +1120,9 @@ class Wereld:
         if actie == "vaatwasser_deur":
             self.vaatwasser.deur_open = bool(arg)
             return "de deur van de vaatwasser gaat " + ("open" if arg else "dicht")
+        if actie == "vaatwasser_aan":
+            self.vaatwasser.zet_aan(self.nu)
+            return "de bewoner zet de vaatwasser zelf aan"
         if actie == "sensor_weg":
             naam, minuten = arg
             self.weg[naam] = self.nu + dt.timedelta(minutes=int(minuten))
@@ -1251,6 +1302,25 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                 await coach._round(nu)
                 laatste_ronde = nu
             besluit = coach.state.get("paal") or {}
+            # Een domme vaatwasser: zegt de coach "zet hem aan", dan doet de
+            # bewoner dat zoveel minuten later, als hij dat doet.
+            if wereld.vaatwasser is not None and not wereld.vaatwasser.slim:
+                vw_besluit = coach.state.get("vaatwasser") or {}
+                vraagt = bool(vw_besluit.get("charge")) and not vw_besluit.get("running") \
+                    and wereld.vaatwasser.status != "run"
+                if vraagt and wereld.vw_gevraagd is None:
+                    wereld.vw_gevraagd = nu
+                    verloop.vw_gevraagd.append(nu)
+                elif not vraagt:
+                    wereld.vw_gevraagd = None
+                reageert = wereld.vaatwasser.bewoner_reageert_min
+                if (vraagt and reageert is not None and wereld.vw_gevraagd is not None
+                        and nu - wereld.vw_gevraagd >= dt.timedelta(minutes=reageert)):
+                    if wereld.vaatwasser.zet_aan(nu):
+                        verloop.vw_gedrukt.append(nu)
+                        if toon:
+                            print(f"{nu:%a %H:%M}  >> de bewoner zet de vaatwasser aan, zoals de coach vroeg")
+                    wereld.vw_gevraagd = None
             prijs, terug = _prijs_nu(coach, inst, nu)
             fasen = wereld.fase_amps()
             netto = wereld.huis_w + wereld.paal_w - wereld.zon_w
@@ -1286,6 +1356,13 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                     verloop.vw_gestart = vw.gestart_op
                 if vw.status == "finished" and verloop.vw_klaar is None and verloop.vw_gestart is not None:
                     verloop.vw_klaar = nu
+                # En elke beurt apart, voor een proef die er meer dan één ziet.
+                if vw.status == "run" and (not verloop.vw_beurten or verloop.vw_beurten[-1][1] is not None):
+                    sessie = coach._programma.get("vaatwasser") or {}
+                    programma = sessie.get("programma")
+                    verloop.vw_beurten.append([vw.gestart_op, None, bool(programma is not None and programma.measured)])
+                if vw.status == "finished" and verloop.vw_beurten and verloop.vw_beurten[-1][1] is None:
+                    verloop.vw_beurten[-1][1] = nu
                 if wereld.vw_w > 0:
                     verloop.vw_kwh += wereld.vw_w * deel
                     if prijs is not None:
@@ -1310,6 +1387,8 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
         verloop.paal_herstarts = wereld.paal.herstarts
         verloop.geleerd = {int(r["band"]): float(r["kw"]) for r in inst.get("car_pace") or []
                            if isinstance(r, dict) and r.get("car") == "auto"}
+        verloop.vw_gemeten = [r for r in inst.get("program_measured") or []
+                              if isinstance(r, dict) and r.get("device") == "vaatwasser"]
     except Exception as fout:  # noqa: BLE001
         verloop.fouten.append(f"beurten niet te lezen: {fout!r}")
     if verloop.klaar_tijd is not None and verloop.soc_bij_klaar_tijd is None:

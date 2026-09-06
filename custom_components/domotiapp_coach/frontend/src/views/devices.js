@@ -13,8 +13,14 @@ import { icons } from "../icons.js";
 import {
   CAR_PHASES,
   DEVICE_TYPES,
-  DISHWASHER_PROGRAMS,
   PLAN_LABELS,
+  PROGRAM_TYPES,
+  defaultPrograms,
+  hasOwnPrograms,
+  isManualProgram,
+  measuredFor,
+  programKey,
+  programsFor,
   brandActions,
   brandButtons,
   brandDevice,
@@ -280,7 +286,7 @@ class DacViewDevices extends DacEditorElement {
         ? `<p class="sub">Voor dit merk zijn de velden nog niet uitgewerkt. Het vermogen wordt wel meegenomen.</p>`
         : "";
 
-    return `${brandRow}${this.integrationHtml_(device, index)}${power}${extra}${this.buttonsHtml_(device, index)}${this.actionsHtml_(device, index)}${this.programsHtml_(device)}${note}`;
+    return `${brandRow}${this.integrationHtml_(device, index)}${power}${extra}${this.buttonsHtml_(device, index)}${this.actionsHtml_(device, index)}${this.programsHtml_(device, index)}${note}`;
   }
 
   /**
@@ -313,36 +319,116 @@ class DacViewDevices extends DacEditorElement {
   }
 
   /**
-   * What the panel already knows about this brand's programs.
+   * De programmatabel van dit apparaat, om aan te passen.
    *
-   * Shown because it is what the coach will plan with: the customer should be
-   * able to see that the numbers exist, and that they are specifications rather
-   * than something measured at their house.
+   * De opgave van de fabrikant staat er als uitgangspunt; elke cel is te
+   * wijzigen, een rij is weg te halen of toe te voegen, en "Opgaven
+   * terugzetten" maakt het weer de fabriekstabel. Ernaast wat de coach bij
+   * een echte beurt mat: dat wint van de tabel zodra het er is, en is per rij
+   * te wissen als er met het verkeerde programma gemeten is. Sven op
+   * 06-09-2026: "ik wil dat kunnen aanpassen, wel moet hij dit als uitgangspunt
+   * hebben", en "dat gaan meten en dan die waardes in kunnen vullen."
    */
-  programsHtml_(device) {
-    if (brandMeta(device)?.id !== "home_connect" || device.type !== "vaatwasser") return "";
+  programsHtml_(device, index) {
+    if (!PROGRAM_TYPES.includes(device.type) || !brandMeta(device)) return "";
 
-    const rows = DISHWASHER_PROGRAMS.map(
-      (program) => `
+    const measured = measuredFor(this.draft_, device);
+    const own = hasOwnPrograms(device);
+    const attr = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    const plans = (chosen) =>
+      Object.entries(PLAN_LABELS)
+        .map(([key, label]) => `<option value="${key}"${key === chosen ? " selected" : ""}>${label}</option>`)
+        .join("");
+
+    const rows = programsFor(device)
+      .map((program, row) => {
+        const key = program.key || programKey(program.label);
+        const meting = measured.get(key);
+        const gemeten = meting
+          ? `${duration(meting.minutes)}, ${Number(meting.kwh).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWh`
+            + (Number(meting.peak_w) > 0 ? `, piek ${Math.round(Number(meting.peak_w))} W` : "")
+            + (Number(meting.runs) > 1 ? ` (${meting.runs} beurten)` : "")
+          : "";
+        return `
       <tr>
-        <td>${program.label}</td>
-        <td class="tnum">${duration(program.minutes)}</td>
-        <td class="tnum">${program.kwh.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} kWh</td>
-        <td>${PLAN_LABELS[program.plan]}</td>
-      </tr>`
-    ).join("");
+        <td><input type="text" data-prog-field="label" data-index="${index}" data-row="${row}"
+                   value="${attr(program.label)}" placeholder="Naam" autocomplete="off" spellcheck="false"></td>
+        <td class="tnum"><input type="number" min="1" max="1440" step="1" inputmode="numeric"
+                   data-prog-field="minutes" data-index="${index}" data-row="${row}" value="${attr(program.minutes)}"> min</td>
+        <td class="tnum"><input type="number" min="0" max="50" step="0.01" inputmode="decimal"
+                   data-prog-field="kwh" data-index="${index}" data-row="${row}" value="${attr(program.kwh)}"> kWh</td>
+        <td class="tnum"><input type="number" min="0" max="20000" step="10" inputmode="numeric"
+                   data-prog-field="peak_w" data-index="${index}" data-row="${row}" value="${attr(program.peak_w ?? "")}"> W</td>
+        <td><select data-prog-field="plan" data-index="${index}" data-row="${row}">${plans(program.plan ?? "yes")}</select></td>
+        <td class="measured">${gemeten
+          ? `<span>${gemeten}</span> <button type="button" class="link" data-prog-forget="${key}" data-index="${index}">wissen</button>`
+          : `<span class="none">nog niet gemeten</span>`}</td>
+        <td><button type="button" class="remove small" data-prog-remove="${row}" data-index="${index}" aria-label="Programma verwijderen">${icons.trash}</button></td>
+      </tr>`;
+      })
+      .join("");
 
     return `
       <div class="row">
-        <label>Bekende programma's</label>
-        <span class="sub">Wat een programma ongeveer duurt en kost staat in het paneel, zodat de coach straks kan uitrekenen wanneer hij hem het beste kan laten draaien. Dit zijn opgaven van de fabrikant, geen metingen bij jou thuis.</span>
+        <label>Programma's</label>
+        <span class="sub">${isManualProgram(device)
+          ? "Deze programma's kun je op de kaart kiezen. Duur en verbruik zijn opgaven van de fabrikant als uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft op de vermogenssensor, rekent de coach met wat er gemeten is."
+          : "Waarmee de coach rekent als hij het goedkoopste startmoment kiest. De opgaven van de fabrikant zijn het uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft, rekent de coach met wat er bij jou gemeten is."}</span>
         <div class="table-scroll">
-          <table class="programs">
-            <thead><tr><th>Programma</th><th>Duur</th><th>Energie</th><th>Verschuiven</th></tr></thead>
+          <table class="programs edit">
+            <thead><tr><th>Programma</th><th>Duur</th><th>Energie</th><th>Piek</th><th>Verschuiven</th><th>Gemeten</th><th></th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
+        <div class="prog-actions">
+          <button type="button" data-prog-add="${index}">${icons.plus} Programma toevoegen</button>
+          <button type="button" data-prog-reset="${index}"${own ? "" : " hidden"}>Opgaven terugzetten</button>
+        </div>
       </div>`;
+  }
+
+  /**
+   * Een meting wissen, meteen op de server: metingen zijn van de coach en
+   * niet van dit concept, dus ze reizen niet mee met Opslaan.
+   */
+  async forgetMeasurement_(index, key) {
+    const device = this.draft_?.devices?.[index];
+    if (!device || !this.hass_) return;
+    try {
+      const saved = await this.hass_.callWS({
+        type: "domotiapp_coach/device/measurements/clear",
+        device_id: device.id,
+        program: key,
+      });
+      this.draft_.program_measured = saved?.program_measured ?? [];
+      this.saved_.program_measured = this.draft_.program_measured;
+      this.paintDevices_();
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de meting niet wissen", error);
+    }
+  }
+
+  /**
+   * Wat er naar de server gaat: een rij zonder naam of zonder duur is er een
+   * die iemand half invulde, en die hoort het opslaan niet te blokkeren.
+   */
+  payload_(sections) {
+    const clean = super.payload_(sections);
+    const devices = Array.isArray(clean) ? clean : clean?.devices;
+    for (const device of devices ?? []) {
+      if (!Array.isArray(device.programs)) continue;
+      device.programs = device.programs
+        .filter((program) => String(program.label ?? "").trim() && Number(program.minutes) >= 1)
+        .map((program) => ({
+          key: program.key || "",
+          label: String(program.label).trim(),
+          minutes: Math.round(Number(program.minutes)),
+          kwh: Math.max(0, Number(program.kwh) || 0),
+          peak_w: Math.max(0, Math.round(Number(program.peak_w) || 0)),
+          plan: program.plan || "yes",
+        }));
+    }
+    return clean;
   }
 
   /**
@@ -422,13 +508,19 @@ class DacViewDevices extends DacEditorElement {
     if (brandsFor(device.type).length && !brandMeta(device)) return "";
 
     const missing = missingForControl(device);
+    // Zonder startknop stuurt de coach niet maar plant hij: hij zegt wanneer
+    // je hem aan moet zetten en meet wat er gebeurt. Dezelfde schuif, want
+    // hij bepaalt in beide gevallen of het apparaat op het overzicht komt.
+    const manual = isManualProgram(device);
     return `
       <label class="check" for="control-${index}">
         <input type="checkbox" id="control-${index}" data-field="controllable" data-index="${index}"
                ${device.controllable ? "checked" : ""}>
         <span>
-          <strong>De coach mag dit apparaat aansturen</strong>
-          Een apparaat dat alleen op een meetstekker zit, kun je wel volgen maar niet sturen. Zet dit alleen aan bij apparaten die echt te bedienen zijn. Ze komen dan op het overzicht te staan, met een vrijgaveknop en handmatige besturing.
+          <strong>${manual ? "De coach plant dit apparaat" : "De coach mag dit apparaat aansturen"}</strong>
+          ${manual
+            ? "Hij heeft geen startknop, dus de coach zegt op de kaart en op je telefoon wanneer je hem aan moet zetten, en meet via de vermogenssensor hoe lang een programma duurt en wat het verbruikt. Het apparaat komt dan op het overzicht te staan, met de vrijgaveknop en de programmakeuze."
+            : "Een apparaat dat alleen op een meetstekker zit, kun je wel volgen maar niet sturen. Zet dit alleen aan bij apparaten die echt te bedienen zijn. Ze komen dan op het overzicht te staan, met een vrijgaveknop en handmatige besturing."}
         </span>
       </label>
       <div class="notice"${missing.length ? "" : " hidden"} data-missing="${index}">
@@ -818,6 +910,65 @@ class DacViewDevices extends DacEditorElement {
     for (const button of list.querySelectorAll("[data-remove]")) {
       button.addEventListener("click", () => this.askRemove_(Number(button.dataset.remove)));
     }
+
+    // De programmatabel. De eerste wijziging aan een fabriekstabel maakt er
+    // een eigen tabel van; "Opgaven terugzetten" maakt hem weer leeg.
+    for (const el of list.querySelectorAll("[data-prog-field]")) {
+      const index = Number(el.dataset.index);
+      const row = Number(el.dataset.row);
+      const field = el.dataset.progField;
+      el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
+        const device = this.draft_.devices[index];
+        if (!hasOwnPrograms(device)) device.programs = defaultPrograms();
+        const program = device.programs[row];
+        if (!program) return;
+        if (field === "label" || field === "plan") {
+          program[field] = el.value;
+        } else {
+          const n = Number(el.value);
+          program[field] = Number.isFinite(n) ? n : 0;
+        }
+        // Zichtbaar zodra er iets van de opgave afwijkt.
+        list.querySelector(`[data-prog-reset="${index}"]`)?.removeAttribute("hidden");
+        this.syncSaveBar_();
+      });
+    }
+    for (const button of list.querySelectorAll("[data-prog-remove]")) {
+      button.addEventListener("click", () => {
+        const index = Number(button.dataset.index);
+        const row = Number(button.dataset.progRemove);
+        const device = this.draft_.devices[index];
+        device.programs = programsFor(device).filter((_, i) => i !== row);
+        this.paintDevices_();
+        this.syncSaveBar_();
+      });
+    }
+    for (const button of list.querySelectorAll("[data-prog-add]")) {
+      button.addEventListener("click", () => {
+        const index = Number(button.dataset.progAdd);
+        const device = this.draft_.devices[index];
+        device.programs = [
+          ...programsFor(device),
+          { key: "", label: "", minutes: 120, kwh: 1, peak_w: 2000, plan: "yes" },
+        ];
+        this.paintDevices_();
+        this.syncSaveBar_();
+        list.querySelector(`[data-prog-field="label"][data-index="${index}"][data-row="${device.programs.length - 1}"]`)?.focus();
+      });
+    }
+    for (const button of list.querySelectorAll("[data-prog-reset]")) {
+      button.addEventListener("click", () => {
+        const index = Number(button.dataset.progReset);
+        this.draft_.devices[index].programs = [];
+        this.paintDevices_();
+        this.syncSaveBar_();
+      });
+    }
+    for (const button of list.querySelectorAll("[data-prog-forget]")) {
+      button.addEventListener("click", () =>
+        this.forgetMeasurement_(Number(button.dataset.index), button.dataset.progForget)
+      );
+    }
   }
 
   /**
@@ -953,6 +1104,33 @@ DacViewDevices.css = /* css */ `
   table.programs td { color: var(--dac-ink-2); }
   table.programs td:first-child { color: var(--dac-ink); font-weight: 500; }
   table.programs tr:last-child td { border-bottom: 0; }
+  /* De bewerkbare tabel: kleine velden, want er staan er zes op een rij. */
+  table.programs.edit input, table.programs.edit select {
+    padding: 6px 8px; min-height: 36px; font-size: 13px; width: 5.5em;
+  }
+  table.programs.edit input[data-prog-field="label"] { width: 11em; }
+  table.programs.edit select { width: auto; max-width: 14em; }
+  table.programs.edit td.measured { color: var(--dac-ink-3); }
+  table.programs.edit td.measured .none { font-style: italic; }
+  table.programs.edit button.link {
+    background: none; border: 0; padding: 0 4px; color: var(--dac-accent-hi);
+    font: inherit; font-size: 12.5px; cursor: pointer; text-decoration: underline;
+  }
+  table.programs.edit button.remove.small {
+    width: 32px; height: 32px; display: grid; place-items: center;
+    border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border);
+    background: transparent; color: var(--dac-ink-3); cursor: pointer;
+  }
+  table.programs.edit button.remove.small svg { width: 16px; height: 16px; }
+  .prog-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .prog-actions button {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 12px; border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border-hi); background: rgba(255,255,255,0.04);
+    color: var(--dac-ink); font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .prog-actions button svg { width: 14px; height: 14px; }
+  .prog-actions button[hidden] { display: none; }
 
   /* Folded shut a device is one line, so the card is only as tall as that line;
      open, it gets the room its fields need. */

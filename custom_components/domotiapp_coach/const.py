@@ -381,6 +381,13 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # tempo van de paal en is de auto 's ochtends niet vol. Per laadpunt en per
     # auto; storage.py snoeit op het laadpunt. Zie `_tempo_leren` in coach.py.
     "car_pace": [],
+    # Wat de coach bij een echte beurt mat van een programma-apparaat: per
+    # apparaat en per programma de duur, het verbruik, de piek en het verloop
+    # (watt per vijf minuten vanaf de start), als lopend gemiddelde over de
+    # laatste beurten. Wint van de tabel van de klant zodra hij er is. Sven op
+    # 06-09-2026: "dat gaan meten en dan die waardes in kunnen vullen." Zie
+    # `_async_meting_bewaren` in coach.py en `met_metingen` in planner.py.
+    "program_measured": [],
     # De knoppen van de bewoner per laadpunt: een akkoord, snelladen, een pauze.
     # Opdrachten van een mens, dus ze horen een herstart van Home Assistant te
     # overleven. Ze gelden voor de sessie die er dan hangt: de kabel eruit wist
