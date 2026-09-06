@@ -461,6 +461,69 @@ proef("de programmatabel in het paneel is dezelfde als die in planner.py", () =>
   }
 });
 
+// --- de programmatabel per apparaat (06-09-2026 's avonds) -------------------
+//
+// Sven: "ik wil dat kunnen aanpassen, wel moet hij dit als uitgangspunt
+// hebben", en "bij een domme vaatwasser een dropdown van de variabelen die ik
+// er in heb gezet." De opgave is het uitgangspunt, de eigen tabel wint, en de
+// meting wint van allebei.
+
+const { programsFor, defaultPrograms, hasOwnPrograms, programKey, programOf, programPicker, isManualProgram, missingForControl } =
+  await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+proef("zonder eigen tabel is de tabel van een apparaat de opgave van de fabrikant", () => {
+  const rows = programsFor({ type: "vaatwasser", brand: "overig" });
+  assert.equal(rows.length, DISHWASHER_PROGRAMS.length);
+  assert.deepEqual(rows[0], { key: "eco_50", label: "Eco 50 °C", minutes: 225, kwh: 0.8, peak_w: 2100, plan: "ideal" });
+  assert.equal(hasOwnPrograms({ programs: [] }), false);
+  // Elke keer een verse kopie, zodat bewerken de opgave zelf niet aanraakt.
+  assert.notEqual(defaultPrograms()[0], defaultPrograms()[0]);
+});
+proef("de sleutel uit een naam is dezelfde als in planner.py", () => {
+  assert.equal(programKey("Glas 40 °C"), "glas_40_c");
+  assert.equal(programKey("Auto 45 tot 65 °C"), "auto_45_tot_65_c");
+  assert.equal(programKey(""), "programma");
+});
+proef("programOf vindt een programma op de sensorwaarde, in de eigen tabel, met de meting erover", () => {
+  const device = {
+    id: "vw", type: "vaatwasser", brand: "home_connect",
+    programs: [
+      { key: "eco_50", label: "Eco 50 °C", minutes: 180, kwh: 0.6, peak_w: 2000, plan: "ideal" },
+      { key: "", label: "Glas 40 °C", minutes: 90, kwh: 0.5, peak_w: 1800, plan: "yes" },
+    ],
+  };
+  assert.equal(programOf(device, "dishcare_dishwasher_program_eco_50").minutes, 180);
+  assert.equal(programOf(device, "Dishcare.Dishwasher.Program.Eco50").minutes, 180);
+  assert.equal(programOf(device, "glas_40_c").label, "Glas 40 °C");
+  assert.equal(programOf(device, "Glas 40 °C").key, "glas_40_c");
+  assert.equal(programOf(device, "iets_anders"), undefined);
+  const settings = { program_measured: [{ device: "vw", key: "eco_50", minutes: 200, kwh: 0.95, runs: 2 }] };
+  const gemeten = programOf(device, "dishcare_dishwasher_program_eco_50", settings);
+  assert.equal(gemeten.minutes, 200);
+  assert.equal(gemeten.kwh, 0.95);
+  assert.equal(gemeten.measured, true);
+  // De meting van een ander apparaat telt niet mee.
+  assert.equal(programOf({ ...device, id: "ander" }, "dishcare_dishwasher_program_eco_50", settings).measured, undefined);
+});
+proef("de programmakeuze op de kaart: de entiteit bij een slimme machine, de eigen tabel bij een domme", () => {
+  const slim = { type: "vaatwasser", brand: "home_connect", entities: { program: "select.vaatwasser_programma" } };
+  assert.deepEqual(programPicker(slim), { kind: "entity", entityId: "select.vaatwasser_programma" });
+  const alleenLezen = { type: "vaatwasser", brand: "home_connect", entities: { program: "sensor.vaatwasser_programma" } };
+  assert.equal(programPicker(alleenLezen), undefined, "een sensor is niet te kiezen");
+  const dom = { type: "vaatwasser", brand: "overig", entities: {} };
+  const keuze = programPicker(dom);
+  assert.equal(keuze.kind, "table");
+  assert.equal(keuze.options.length, DISHWASHER_PROGRAMS.length);
+  assert.equal(programPicker({ type: "laadpaal", brand: "easee" }), undefined);
+});
+proef("een domme vaatwasser is handmatig en heeft een vermogenssensor nodig", () => {
+  const dom = { type: "vaatwasser", brand: "overig", controllable: true, entities: {}, entity: "" };
+  assert.equal(isManualProgram(dom), true);
+  assert.deepEqual(missingForControl(dom), ["Vermogenssensor"]);
+  assert.deepEqual(missingForControl({ ...dom, entity: "sensor.stekker" }), []);
+  assert.equal(isManualProgram({ type: "vaatwasser", brand: "home_connect" }), false);
+  assert.equal(isManualProgram({ type: "laadpaal", brand: "overig" }), false);
+});
+
 // --- het meldingenscherm -----------------------------------------------------
 //
 // Sven op 04-09-2026: "daarom wil ik ook een soort geschiedenis meldingen

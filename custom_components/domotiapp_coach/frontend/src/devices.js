@@ -403,7 +403,17 @@ export const DISHWASHER_BRANDS = [
     // that entity is one you can write to. Nothing extra to fill in for it.
     programField: "program",
   },
-  { id: "overig", label: "Overig", fields: [] },
+  // Een vaatwasser zonder koppeling, op een meetstekker. Geen startknop, dus
+  // de coach zegt wanneer en de bewoner drukt; het vermogen zegt of hij
+  // draait en wat hij verbruikt. Sven op 06-09-2026: "smart plug als starten
+  // doen we niet, wel adviseren en meten."
+  {
+    id: "overig",
+    label: "Overig",
+    note: "Een vaatwasser zonder koppeling, op een meetstekker: de coach zegt wanneer je hem aan moet zetten en meet wat hij verbruikt.",
+    fields: [],
+    manual: true,
+  },
 ];
 
 /**
@@ -629,8 +639,16 @@ export function missingForControl(device) {
   const wanted = brandDevice(device);
   if (wanted && !device.device_id) missing.unshift(wanted.label);
 
+  // Zonder startknop is het vermogen het enige wat de coach van het apparaat
+  // ziet: daaraan meet hij of hij draait, hoe lang, en wat het kost.
+  if (isManualProgram(device) && !device.entity) missing.unshift("Vermogenssensor");
+
   return missing;
 }
+
+/** Een programma-apparaat zonder startknop: de coach adviseert en meet. */
+export const isManualProgram = (device) =>
+  PROGRAM_TYPES.includes(device?.type) && Boolean(brandMeta(device)?.manual);
 
 /**
  * The device types that run a program of a known length.
@@ -639,6 +657,96 @@ export function missingForControl(device) {
  * this list is about the sum, not about permission to plan.
  */
 export const PROGRAM_TYPES = ["vaatwasser", "wasmachine", "droger"];
+
+/**
+ * De programmatabel van één apparaat.
+ *
+ * De opgave van de fabrikant is het uitgangspunt; wat de klant zelf invulde
+ * staat in `device.programs` en wint zodra het er is. Dezelfde veldnamen als
+ * de instellingen (`peak_w`), zodat een rij ongewijzigd opgeslagen kan worden.
+ * Sven op 06-09-2026: "ik wil dat kunnen aanpassen, wel moet hij dit als
+ * uitgangspunt hebben."
+ */
+export const defaultPrograms = () =>
+  DISHWASHER_PROGRAMS.map((program) => ({
+    key: program.key,
+    label: program.label,
+    minutes: program.minutes,
+    kwh: program.kwh,
+    peak_w: program.peakW,
+    plan: program.plan,
+  }));
+
+export const hasOwnPrograms = (device) =>
+  Array.isArray(device?.programs) && device.programs.length > 0;
+
+export const programsFor = (device) =>
+  hasOwnPrograms(device) ? device.programs : defaultPrograms();
+
+/** Dezelfde sleutel als `sleutel_van` in planner.py: "Glas 40 °C" wordt "glas_40_c". */
+export const programKey = (label) =>
+  String(label ?? "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .join("_") || "programma";
+
+/** Wat de coach bij dit apparaat gemeten heeft, per programma. */
+export function measuredFor(settings, device) {
+  const map = new Map();
+  for (const row of settings?.program_measured ?? []) {
+    if (row?.device === device?.id && row?.key) map.set(row.key, row);
+  }
+  return map;
+}
+
+/**
+ * Het programma achter een waarde, in de tabel van dit apparaat, met de
+ * meting eroverheen. Dezelfde afspraak als `programma_van` in planner.py:
+ * eerst de sleutel (als staart van wat de sensor zegt), dan de naam.
+ */
+export function programOf(device, raw, settings) {
+  if (!raw) return undefined;
+  const table = programsFor(device);
+  const heel = squash(raw);
+  const staart = tail(raw);
+  const keyOf = (program) => program.key || programKey(program.label);
+  const found =
+    table.find((program) => {
+      const key = squash(keyOf(program));
+      return key && (heel.endsWith(key) || staart === key);
+    }) ??
+    table.find((program) => heel === squash(program.label) || staart === squash(program.label));
+  if (!found) return undefined;
+  const meting = settings ? measuredFor(settings, device).get(keyOf(found)) : undefined;
+  if (!meting) return { ...found, key: keyOf(found) };
+  return {
+    ...found,
+    key: keyOf(found),
+    minutes: Number(meting.minutes) > 0 ? Number(meting.minutes) : found.minutes,
+    kwh: Number.isFinite(Number(meting.kwh)) ? Number(meting.kwh) : found.kwh,
+    measured: true,
+  };
+}
+
+/**
+ * Hoe de bewoner op de kaart het programma kiest.
+ *
+ * Bij een machine met een schrijfbare select-entiteit: de opties van de
+ * machine zelf, en de keuze gaat naar die entiteit. Zonder programmasensor:
+ * de eigen tabel, en de keuze gaat naar de instellingen (`device.program`).
+ * Een alleen-lezen programmasensor geeft niets te kiezen. De coach kiest
+ * nooit zelf; Sven op 06-09-2026: "dat doet de klant altijd zelf."
+ */
+export function programPicker(device) {
+  if (!PROGRAM_TYPES.includes(device?.type)) return undefined;
+  const chooser = programChooser(device);
+  if (chooser) return { kind: "entity", entityId: chooser.entityId };
+  if (device?.entities?.program) return undefined;
+  return { kind: "table", options: programsFor(device) };
+}
 
 /**
  * The device types that can be given a time window at all.

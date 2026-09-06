@@ -88,6 +88,20 @@ _CAR = _schema(
     }
 )
 
+# Een programma in de tabel van één apparaat: wat de klant zelf invulde. De
+# opgave van de fabrikant is het uitgangspunt (lege lijst); zie `tabel_van` in
+# planner.py. Wat de coach meet staat er niet in maar in `program_measured`.
+_PROGRAM = _schema(
+    {
+        vol.Optional("key", default=""): vol.Match(r"^[a-z0-9_]*$"),
+        vol.Required("label"): str,
+        vol.Required("minutes"): vol.All(vol.Coerce(int), vol.Range(1, 24 * 60)),
+        vol.Required("kwh"): vol.All(vol.Coerce(float), vol.Range(0, 50)),
+        vol.Optional("peak_w", default=0): vol.All(vol.Coerce(int), vol.Range(0, 20000)),
+        vol.Optional("plan", default="yes"): vol.In(["ideal", "yes", "variable", "rare", "never"]),
+    }
+)
+
 _DEVICE = _schema(
     {
         vol.Required("id"): str,
@@ -120,6 +134,13 @@ _DEVICE = _schema(
         vol.Optional("actions", default=dict): {vol.Match(r"^[a-z0-9_]+$"): str},
         # The cars that charge here, for the device types that have them.
         vol.Optional("cars", default=list): vol.All([_CAR], vol.Length(max=8)),
+        # De programmatabel van een apparaat met een programma (vaatwasser):
+        # leeg is de opgave van de fabrikant, anders wat de klant invulde.
+        vol.Optional("programs", default=list): vol.All([_PROGRAM], vol.Length(max=20)),
+        # Welk programma erop staat, voor een apparaat zonder sensor die dat
+        # zegt (merk "overig", op een meetstekker). De bewoner kiest het op de
+        # kaart; de coach kiest nooit zelf een programma.
+        vol.Optional("program", default=""): vol.Match(r"^[a-z0-9_]*$"),
     }
 )
 
@@ -444,6 +465,81 @@ async def async_set_device_ready(
         ready.discard(msg["device_id"])
 
     settings = await store.async_save({"ready_devices": sorted(ready)})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], settings)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/device/program",
+        vol.Required("device_id"): str,
+        vol.Required("program"): vol.Match(r"^[a-z0-9_]*$"),
+    }
+)
+@websocket_api.async_response
+async def async_set_device_program(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Welk programma er op een apparaat zonder programmasensor staat.
+
+    Sven op 06-09-2026: "de coach mag nooit een programma selecteren, dat
+    doet de klant altijd zelf." Dit is de klant die het zegt, vanaf de kaart,
+    voor een vaatwasser op een meetstekker. Niet admin-only, om dezelfde reden
+    als de vrijgave: wie de knop op de machine indrukte weet wat erop staat.
+
+    Alleen dat ene veld van dat ene apparaat; de rest van de apparaatlijst
+    blijft zoals hij op schijf staat.
+    """
+    store = async_get_store(hass)
+    settings = await store.async_load()
+    devices = []
+    gevonden = False
+    for device in settings.get("devices") or []:
+        if isinstance(device, dict) and device.get("id") == msg["device_id"]:
+            device = {**device, "program": msg["program"]}
+            gevonden = True
+        devices.append(device)
+    if not gevonden:
+        connection.send_error(msg["id"], "not_found", "Dat apparaat bestaat niet.")
+        return
+    settings = await store.async_save({"devices": devices})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], settings)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/device/measurements/clear",
+        vol.Required("device_id"): str,
+        # Eén programma, of alles van dit apparaat als hij ontbreekt.
+        vol.Optional("program"): vol.Match(r"^[a-z0-9_]*$"),
+    }
+)
+@websocket_api.async_response
+async def async_clear_measurements(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De metingen van een apparaat wissen, zodat de coach weer met de tabel rekent.
+
+    Voor als er een beurt met het verkeerde programma gemeten is: een meting
+    wint van de tabel, dus een verkeerde meting blijft anders meetellen.
+    """
+    store = async_get_store(hass)
+    settings = await store.async_load()
+    rows = [
+        row for row in (settings.get("program_measured") or [])
+        if not (
+            isinstance(row, dict)
+            and row.get("device") == msg["device_id"]
+            and (msg.get("program") in (None, "") or row.get("key") == msg.get("program"))
+        )
+    ]
+    settings = await store.async_save({"program_measured": rows})
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
     connection.send_result(msg["id"], settings)
 
@@ -856,6 +952,8 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_get_settings)
     websocket_api.async_register_command(hass, async_set_settings)
     websocket_api.async_register_command(hass, async_set_device_ready)
+    websocket_api.async_register_command(hass, async_set_device_program)
+    websocket_api.async_register_command(hass, async_clear_measurements)
     websocket_api.async_register_command(hass, async_set_strategy)
     websocket_api.async_register_command(hass, async_set_notifications)
     websocket_api.async_register_command(hass, async_set_my_notifications)

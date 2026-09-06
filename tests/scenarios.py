@@ -462,6 +462,40 @@ vaatwasser_afstand_uit = vaatwasser_avond.kopie(
     naam="vaatwasser-afstand-uit", uitleg="hetzelfde, maar starten op afstand staat uit op het apparaat: de coach drukt, er gebeurt niets, en hij zegt dat",
     vaatwasser=Vaatwasser(afstand_aan=False),
 )
+# Een domme vaatwasser op een meetstekker (06-09-2026 's avonds). Sven: "smart
+# plug als starten doen we niet, wel adviseren en meten, met zet hem aan." En
+# zijn eigen schema: niet in de nacht, vanaf 08:00, uiterlijk klaar om 16:30.
+DOM = Vaatwasser(slim=False)
+vaatwasser_dom_zon = vast_zonnig.kopie(
+    naam="vaatwasser-dom-zon", uitleg="domme vaatwasser op een meetstekker, vast contract, zonnig, 's avonds vrijgegeven met vanaf 08:00 en klaar om 16:30: de coach vraagt om hem in de zon aan te zetten, de bewoner doet dat, en de coach meet de beurt",
+    auto=VOL, vaatwasser=DOM, vaatwasser_klaar_om="16:30", vaatwasser_niet_eerder="08:00",
+    begin="2026-09-07 19:25", kabel_erin=None, duur_uren=22,
+    gebeurtenissen=[("20:00", "vaatwasser_vrijgeven", None)],
+)
+vaatwasser_dom_leert = vaatwasser_dom_zon.kopie(
+    naam="vaatwasser-dom-leert", uitleg="dezelfde domme vaatwasser twee dagen achter elkaar: de tweede beurt plant hij met wat hij de eerste dag mat",
+    duur_uren=46, gebeurtenissen=[("20:00", "vaatwasser_vrijgeven", None), ("+1 20:00", "vaatwasser_vrijgeven", None)],
+)
+vaatwasser_dom_negeert = vaatwasser_dom_zon.kopie(
+    naam="vaatwasser-dom-negeert", uitleg="de bewoner zet hem niet aan als de coach het vraagt: één herinnering na drie kwartier, en geen verslag",
+    vaatwasser=Vaatwasser(slim=False, bewoner_reageert_min=None),
+)
+vaatwasser_dom_zelf = vaatwasser_dom_zon.kopie(
+    naam="vaatwasser-dom-zelf", uitleg="de bewoner zet hem om 06:30 zelf aan, voor het schema en zonder vrijgave: de coach meet de beurt en meldt hem, maar vraagt niets",
+    gebeurtenissen=[("06:30", "vaatwasser_aan", None)],
+)
+vaatwasser_eigen_tabel = vaatwasser_avond.kopie(
+    naam="vaatwasser-eigen-tabel", uitleg="de klant heeft Eco op 150 minuten en 0,6 kWh gezet: om 03:30 vrijgegeven met klaar om 07:00 past het nog, dus geen paniekstart",
+    begin="2026-09-08 03:25", gebeurtenissen=[("03:30", "vaatwasser_vrijgeven", None)], duur_uren=6,
+    vaatwasser=Vaatwasser(minuten=150, kwh=0.6),
+    vaatwasser_tabel=[{"key": "eco_50", "label": "Eco 50 °C", "minutes": 150, "kwh": 0.6, "peak_w": 2000, "plan": "ideal"}],
+)
+vaatwasser_gemeten = vaatwasser_zon.kopie(
+    naam="vaatwasser-gemeten", uitleg="Home Connect met een eerdere meting van Eco: de coach plant met het gemeten profiel en zet de opwarmpiek in de zon",
+    vaatwasser=Vaatwasser(minuten=200, kwh=0.95, piek_w=2000.0, piek_minuten=40),
+    vaatwasser_gemeten=[{"device": "vaatwasser", "key": "eco_50", "minutes": 200, "kwh": 0.95, "peak_w": 2000,
+                         "profile": [2000.0] * 4 + [60.0] * 32 + [2000.0] * 4, "runs": 1, "at": ""}],
+)
 vaatwasser_uiterlijk = vaatwasser_avond.kopie(
     naam="vaatwasser-uiterlijk-starten", uitleg="om 19:00 vrijgegeven met uiterlijk starten om 22:00: dan gaat hij om 22:00, ook al is de nacht goedkoper",
     vaatwasser_uiterlijk="22:00",
@@ -482,6 +516,8 @@ ALLE = [
     ford_storing, een_fase_groep, een_fase_blind, afbouw, afbouw_geleerd,
     afbouw_krap, afbouw_krap_geleerd,
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
+    vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
+    vaatwasser_eigen_tabel, vaatwasser_gemeten,
     *VAN_DEN_DAM,
 ]
 

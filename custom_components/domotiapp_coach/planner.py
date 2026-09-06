@@ -25,7 +25,7 @@ re-commanded every second stops charging altogether.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, time, timedelta
 
 # --- The hard limits ------------------------------------------------------
@@ -2908,14 +2908,23 @@ PROGRAMMA_SPELING = timedelta(minutes=30)
 # Hoe fijn de startmomenten liggen die tegen elkaar gezet worden.
 PROGRAMMA_STAP = timedelta(minutes=15)
 
+# Hoe fijn een gemeten verbruiksprofiel is: één gemiddeld vermogen per zoveel
+# minuten vanaf de start. Vijf minuten is fijn genoeg om de opwarmpiek aan het
+# begin en het drogen aan het eind op het juiste uur te leggen, en grof genoeg
+# om een meetstekker die eens per minuut iets zegt niet na te praten.
+PROFIEL_STAP_MIN = 5
+
 
 @dataclass(frozen=True)
 class Programma:
-    """Wat een programma van de fabrikant meekrijgt: duur en verbruik.
+    """Wat een programma meekrijgt: duur en verbruik.
 
-    Dezelfde tabel als `DISHWASHER_PROGRAMS` in devices.js van het paneel;
-    `test_rapport.mjs` legt ze naast elkaar. Opgaven en geen metingen, en zo
-    heten ze ook op de kaart.
+    De opgaven van de fabrikant staan in `PROGRAMMAS`, dezelfde tabel als
+    `DISHWASHER_PROGRAMS` in devices.js van het paneel; `test_rapport.mjs`
+    legt ze naast elkaar. Sinds 06-09-2026 is dat alleen het uitgangspunt:
+    de klant past de tabel per apparaat aan (`tabel_van`), en wat de coach bij
+    een echte beurt meet komt eroverheen (`met_metingen`). Sven: "ik wil dat
+    kunnen aanpassen, wel moet hij dit als uitgangspunt hebben."
     """
 
     key: str
@@ -2926,6 +2935,13 @@ class Programma:
     # ideal: verschuiven loont; yes: mag; variable: mag, duur varieert;
     # rare: zelden nodig; never: nooit verschuiven (voorspoelen).
     plan: str = "yes"
+    # Het gemeten verloop: gemiddeld vermogen in watt per PROFIEL_STAP_MIN
+    # minuten vanaf de start. Leeg is: gelijkmatig over de duur, want meer
+    # weet een opgave niet. Een vaatwasser trekt bijna alles in de eerste
+    # twintig minuten (opwarmen) en bij het drogen, en met zon telt dat.
+    profile: tuple[float, ...] = ()
+    # Of duur en verbruik gemeten zijn bij de klant thuis, of opgaven zijn.
+    measured: bool = False
 
 
 PROGRAMMAS: tuple[Programma, ...] = (
@@ -2943,23 +2959,142 @@ def _plat(raw: str) -> str:
     return "".join(ch for ch in str(raw or "").lower() if ch.isalnum())
 
 
-def programma_van(raw: str | None) -> Programma | None:
+def programma_van(raw: str | None, tabel: tuple[Programma, ...] = PROGRAMMAS) -> Programma | None:
     """Het programma achter een sensorwaarde, hoe een integratie hem ook spelt.
 
     Home Assistant zegt `dishcare_dishwasher_program_eco_50`, de andere
     integratie `Dishcare.Dishwasher.Program.Eco50`; zie `valueLabel` in
     devices.js. Alles wat geen letter of cijfer is gaat eruit en het stuk na
-    de laatste punt telt, dan komen ze op hetzelfde uit.
+    de laatste punt telt, dan komen ze op hetzelfde uit. Een programma dat de
+    klant zelf toevoegde heeft een sleutel uit zijn naam (`sleutel_van`), dus
+    ook de naam zelf telt mee.
     """
     if not raw:
         return None
     heel = _plat(raw)
     staart = _plat(str(raw).split(".")[-1])
-    for programma in PROGRAMMAS:
+    for programma in tabel:
         sleutel = _plat(programma.key)
         if heel.endswith(sleutel) or staart == sleutel:
             return programma
+    for programma in tabel:
+        if heel == _plat(programma.label) or staart == _plat(programma.label):
+            return programma
     return None
+
+
+def sleutel_van(label: str) -> str:
+    """Een sleutel voor een programma dat de klant zelf toevoegt: `Glas 40 °C` wordt `glas_40_c`."""
+    woorden = "".join(ch.lower() if ch.isalnum() else " " for ch in str(label or "")).split()
+    return "_".join(woorden) or "programma"
+
+
+def tabel_van(rows: list[dict] | None) -> tuple[Programma, ...]:
+    """De programmatabel van één apparaat, uit de instellingen.
+
+    Leeg of ontbrekend is de opgave van de fabrikant. Wat de klant invulde
+    wordt genomen zoals het er staat: een rij zonder bruikbare duur of
+    verbruik telt niet mee, want daar valt niets mee te plannen.
+    """
+    uit: list[Programma] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            minutes = int(float(row.get("minutes") or 0))
+            kwh = float(row.get("kwh") or 0)
+            peak_w = int(float(row.get("peak_w") or 0))
+        except (TypeError, ValueError):
+            continue
+        label = str(row.get("label") or "").strip()
+        if minutes <= 0 or kwh < 0 or not label:
+            continue
+        key = str(row.get("key") or "").strip() or sleutel_van(label)
+        plan = str(row.get("plan") or "yes")
+        if plan not in ("ideal", "yes", "variable", "rare", "never"):
+            plan = "yes"
+        uit.append(Programma(key, label, minutes, kwh, peak_w, plan))
+    return tuple(uit) if uit else PROGRAMMAS
+
+
+def met_metingen(tabel: tuple[Programma, ...], metingen: list[dict] | None, device_id: str) -> tuple[Programma, ...]:
+    """De tabel met de metingen van dit apparaat eroverheen.
+
+    Een meting wint van een opgave zodra hij er is: duur, verbruik en de piek
+    komen dan van de meetstekker, en het profiel erbij. De naam en het
+    verschuifbeleid blijven van de tabel.
+    """
+    per_key: dict[str, dict] = {}
+    for row in metingen or []:
+        if isinstance(row, dict) and row.get("device") == device_id and row.get("key"):
+            per_key[str(row["key"])] = row
+    if not per_key:
+        return tabel
+    uit: list[Programma] = []
+    for programma in tabel:
+        meting = per_key.get(programma.key)
+        if meting is None:
+            uit.append(programma)
+            continue
+        try:
+            minutes = int(float(meting.get("minutes") or programma.minutes))
+            kwh = float(meting.get("kwh") if meting.get("kwh") is not None else programma.kwh)
+            peak_w = int(float(meting.get("peak_w") or programma.peak_w))
+            profiel = tuple(float(w) for w in (meting.get("profile") or []))
+        except (TypeError, ValueError):
+            uit.append(programma)
+            continue
+        if minutes <= 0:
+            uit.append(programma)
+            continue
+        uit.append(replace(programma, minutes=minutes, kwh=kwh, peak_w=peak_w, profile=profiel, measured=True))
+    return tuple(uit)
+
+
+def profiel_van(punten: list[tuple[float, float]], stap_min: int = PROFIEL_STAP_MIN) -> tuple[float, ...]:
+    """Van losse metingen (minuten sinds de start, watt) naar een profiel per stap.
+
+    Het gemiddelde per stap; een stap zonder meting neemt de vorige over, en
+    de laatste stap eindigt waar de laatste meting zat.
+    """
+    if not punten:
+        return ()
+    laatste = max(m for m, _ in punten)
+    stappen = int(laatste // stap_min) + 1
+    som = [0.0] * stappen
+    tel = [0] * stappen
+    for minuut, watt in punten:
+        i = min(stappen - 1, max(0, int(minuut // stap_min)))
+        som[i] += max(0.0, float(watt))
+        tel[i] += 1
+    uit: list[float] = []
+    vorige = 0.0
+    for s, t in zip(som, tel):
+        vorige = round(s / t, 1) if t else vorige
+        uit.append(vorige)
+    return tuple(uit)
+
+
+def profiel_gemiddeld(oud: tuple[float, ...], oud_n: int, nieuw: tuple[float, ...]) -> tuple[float, ...]:
+    """Het lopende gemiddelde van twee profielen, gewogen met hoe vaak het oude gemeten is.
+
+    Verschillen ze in lengte, dan telt het langere door met zijn eigen staart:
+    een beurt die een kwartier langer duurde is daarmee niet weg.
+    """
+    if not oud or oud_n <= 0:
+        return tuple(nieuw)
+    if not nieuw:
+        return tuple(oud)
+    lengte = max(len(oud), len(nieuw))
+    uit = []
+    for i in range(lengte):
+        if i < len(oud) and i < len(nieuw):
+            uit.append(round((oud[i] * oud_n + nieuw[i]) / (oud_n + 1), 1))
+        elif i < len(oud):
+            uit.append(round(oud[i] * oud_n / (oud_n + 1), 1))
+        else:
+            uit.append(round(nieuw[i] / (oud_n + 1), 1))
+    return tuple(uit)
 
 
 @dataclass
@@ -2973,6 +3108,11 @@ class Apparaat:
     program: Programma | None = None
     # Of de deur open staat, als dat te zien is.
     door_open: bool | None = None
+    # Een apparaat zonder startknop, op een meetstekker: de coach zegt
+    # wanneer, de bewoner drukt zelf. Sven op 06-09-2026: "adviseren en
+    # meten, met zet hem aan." De teksten zeggen dan "zet hem aan" in plaats
+    # van "hij start".
+    manual: bool = False
 
 
 # Wat Home Connect meldt zolang er een programma loopt of klaarstaat.
@@ -3001,21 +3141,20 @@ def programma_kosten(
     """Wat dit programma kost als het op `start` begint, of None als de prijs
     van een deel van die uren niet bekend is.
 
-    Het verbruik wordt gelijkmatig over de duur verdeeld; de tabel kent alleen
-    het totaal en de piek, niet het verloop. Per uur gaat wat er aan eigen zon
-    over is (de verwachting min het huis) tegen de terugleverprijs, want dat
-    is wat je er anders voor gekregen had, en de rest tegen de inkoopprijs
-    van dat uur. Precies zoals `schijven` dat voor een laadpaal doet.
+    Met een gemeten profiel gaat het per stap van dat profiel: de opwarmpiek
+    aan het begin en het drogen aan het eind vallen dan op het uur waar ze
+    horen, en met zon maakt dat het verschil. Zonder profiel wordt het
+    verbruik gelijkmatig over de duur verdeeld, want een opgave kent alleen
+    het totaal en de piek. Per stuk gaat wat er aan eigen zon over is (de
+    verwachting min het huis) tegen de terugleverprijs, want dat is wat je er
+    anders voor gekregen had, en de rest tegen de inkoopprijs van dat uur.
+    Precies zoals `schijven` dat voor een laadpaal doet.
     """
     einde = start + timedelta(minutes=programma.minutes)
-    kwh_per_uur = programma.kwh / (programma.minutes / 60.0)
     kosten = 0.0
-    moment = start
-    while moment < einde:
+    for moment, volgend, kwh in _programma_stukken(start, einde, programma):
         uur = moment.replace(minute=0, second=0, microsecond=0)
-        volgend = min(uur + timedelta(hours=1), einde)
         deel_uur = (volgend - moment).total_seconds() / 3600.0
-        kwh = kwh_per_uur * deel_uur
 
         rij = price_now(prices, moment) if prices else None
         koop = rij["price"] if rij is not None else (tariff.buy if not prices else None)
@@ -3029,8 +3168,42 @@ def programma_kosten(
         over *= deel_uur
         zon = min(kwh, over) if terug is not None else 0.0
         kosten += (zon * terug if zon > 0 else 0.0) + (kwh - zon) * koop
-        moment = volgend
     return kosten
+
+
+def _programma_stukken(
+    start: datetime, einde: datetime, programma: Programma
+) -> list[tuple[datetime, datetime, float]]:
+    """Het programma in stukken die elk binnen één uur vallen: (van, tot, kWh).
+
+    Met een profiel: elke stap van het profiel, gesplitst op de uurgrens.
+    Zonder: per uur een evenredig deel van het totaal.
+    """
+    stukken: list[tuple[datetime, datetime, float]] = []
+    if programma.profile:
+        stap = timedelta(minutes=PROFIEL_STAP_MIN)
+        moment = start
+        for watt in programma.profile:
+            tot = min(moment + stap, einde)
+            if tot <= moment:
+                break
+            # Op de uurgrens knippen, want de prijs en de zon zijn per uur.
+            binnen = moment
+            while binnen < tot:
+                grens = binnen.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+                volgend = min(grens, tot)
+                stukken.append((binnen, volgend, watt / 1000.0 * (volgend - binnen).total_seconds() / 3600.0))
+                binnen = volgend
+            moment = tot
+        return stukken
+    kwh_per_uur = programma.kwh / (programma.minutes / 60.0) if programma.minutes else 0.0
+    moment = start
+    while moment < einde:
+        uur = moment.replace(minute=0, second=0, microsecond=0)
+        volgend = min(uur + timedelta(hours=1), einde)
+        stukken.append((moment, volgend, kwh_per_uur * (volgend - moment).total_seconds() / 3600.0))
+        moment = volgend
+    return stukken
 
 
 def plan_programma(
@@ -3062,11 +3235,15 @@ def plan_programma(
             rule="not-released",
         )
 
+    # Een apparaat zonder startknop: de coach zegt het, de bewoner drukt.
+    hand = apparaat.manual
+    start_nu = "zet hem nu aan" if hand else "hij start nu"
+
     programma = apparaat.program
     if programma is not None and programma.plan == "never":
         return Decision(
             True, 0,
-            f"{programma.label} is niet de moeite van het verschuiven, dus hij start nu.",
+            f"{programma.label} is niet de moeite van het verschuiven, dus {start_nu}.",
             rule="start-now",
         )
 
@@ -3077,7 +3254,7 @@ def plan_programma(
     if uiterlijk is not None and now >= uiterlijk:
         return Decision(
             True, 0,
-            f"Je hebt ingesteld dat hij uiterlijk om {_wanneer(uiterlijk, now)} begint, dus hij start nu.",
+            f"Je hebt ingesteld dat hij uiterlijk om {_wanneer(uiterlijk, now)} begint, dus {start_nu}.",
             rule="start-by",
         )
 
@@ -3087,13 +3264,14 @@ def plan_programma(
         if einde is not None and now + PROGRAMMA_SPELING >= einde - timedelta(hours=1):
             return Decision(
                 True, 0,
-                f"De coach kent het gekozen programma niet en {_wanneer(einde, now)} komt dichtbij, dus hij start nu.",
+                f"De coach kent het gekozen programma niet en {_wanneer(einde, now)} komt dichtbij, dus {start_nu}.",
                 rule="deadline",
             )
         return Decision(
             False, 0,
             "De coach herkent het gekozen programma niet en weet dus niet hoe lang het duurt. "
-            "Kies een programma op het apparaat, of zet 'uiterlijk starten' in het schema.",
+            + ("Kies hieronder welk programma erop staat." if hand
+               else "Kies een programma op het apparaat, of zet 'uiterlijk starten' in het schema."),
             plan="Zonder programma start hij pas op de uiterste starttijd.",
             rule="no-program",
         )
@@ -3104,9 +3282,10 @@ def plan_programma(
         return Decision(
             True, 0,
             (
-                f"Nu starten, anders is hij om {_wanneer(einde, now)} niet klaar."
+                (f"Zet hem nu aan, anders is hij om {_wanneer(einde, now)} niet klaar." if hand
+                 else f"Nu starten, anders is hij om {_wanneer(einde, now)} niet klaar.")
                 if haalt
-                else f"Hij haalt {_wanneer(einde, now)} niet meer, dus hij start meteen."
+                else f"Hij haalt {_wanneer(einde, now)} niet meer, dus " + ("zet hem meteen aan." if hand else "hij start meteen.")
             ),
             rule="deadline",
         )
@@ -3124,7 +3303,7 @@ def plan_programma(
     eerste = now if vanaf is None else max(now, vanaf)
     if eerste > laatste:
         # Het venster is al dicht: starten zolang het nog kan.
-        return Decision(True, 0, "Later past het niet meer, dus hij start nu.", rule="deadline")
+        return Decision(True, 0, f"Later past het niet meer, dus {start_nu}.", rule="deadline")
 
     kandidaten: list[tuple[float, datetime]] = []
     onbekend = 0
@@ -3184,10 +3363,12 @@ def plan_programma(
                 rule="wait-for-prices",
             )
 
-    if start <= now + timedelta(minutes=1):
+    # Een minuut speling voor een ronde die net voor het kwartier valt, maar
+    # niet over "niet eerder dan" heen: vanaf 08:00 is vanaf 08:00.
+    if start <= now + timedelta(minutes=1) and (vanaf is None or now >= vanaf):
         return Decision(
             True, 0,
-            f"Dit is het goedkoopste moment"
+            ("Zet hem nu aan: dit is het goedkoopste moment" if hand else "Dit is het goedkoopste moment")
             + (f" tot {_wanneer(einde, now)}" if einde is not None else "")
             + f": {programma.label} kost nu ongeveer {_euro(goedkoopst)}.",
             plan=f"Klaar rond {_wanneer(now + duur, now)}.",
@@ -3205,7 +3386,7 @@ def plan_programma(
     )
     return Decision(
         False, 0,
-        f"Hij start om {_wanneer(start, now)}: {waarom}.{verschil}",
+        ("Zet hem aan om" if hand else "Hij start om") + f" {_wanneer(start, now)}: {waarom}.{verschil}",
         plan=f"Klaar rond {_wanneer(start + duur, now)}"
         + (f", ruim voor {_wanneer(einde, now)}." if einde is not None else "."),
         rule="wait-for-start",

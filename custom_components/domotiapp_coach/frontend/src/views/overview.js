@@ -24,6 +24,8 @@ import {
   deviceLabelMap,
   needsRelease,
   programChooser,
+  programKey,
+  programPicker,
   releaseCopy,
   typeMeta,
   valueLabel,
@@ -146,6 +148,14 @@ function advise(r, thresholds, configured, alertAt, sturing, devices) {
   // En een coach die iets van de bewoner nodig heeft ook: dat is het enige
   // waar die op dat moment iets aan kan doen.
   if (sturing?.programma) {
+    if (sturing.manual && !sturing.running) {
+      return {
+        tone: "var(--dac-warn)",
+        tag: "Doe iets",
+        title: `Zet ${sturing.name} nu aan`,
+        body: `${sturing.reason} ${sturing.plan}`.trim(),
+      };
+    }
     return {
       tone: "var(--dac-accent-hi)",
       tag: "Aan het werk",
@@ -1780,6 +1790,8 @@ class DacViewOverview extends DacElement {
       return {
         name: this.labelFor_(device),
         programma: besluit.kind === "programma",
+        // Zonder startknop: de coach vraagt, de bewoner drukt.
+        manual: Boolean(besluit.manual),
         running: Boolean(besluit.running),
         amps: besluit.amps,
         // Of hij stroom vráágt, en of die ook werkelijk loopt. Dat verschil is
@@ -1792,6 +1804,96 @@ class DacViewOverview extends DacElement {
       };
     }
     return null;
+  }
+
+  /**
+   * Het programma op de kaart. Sven op 06-09-2026: "bij de vaatwasserkaart
+   * wil ik sowieso het programma kunnen selecteren." Bij een slimme machine
+   * de opties van haar eigen select-entiteit; zonder programmasensor de eigen
+   * tabel uit Apparaten. De coach kiest nooit zelf.
+   */
+  paintProgramPick_(slot, device) {
+    const pick = this.$(`[data-program-pick="${slot}"]`);
+    const picker = programPicker(device);
+    pick.hidden = !picker;
+    if (!picker) return;
+
+    const select = this.$(`[data-program-select="${slot}"]`);
+    let options;
+    let current;
+    if (picker.kind === "entity") {
+      const state = this.feed_?.get(picker.entityId);
+      options = (state?.attributes?.options ?? []).map((value) => ({
+        value,
+        label: valueLabel(DISHWASHER_PROGRAM_VALUES, value) ?? value,
+      }));
+      current = state?.state ?? "";
+    } else {
+      options = picker.options.map((program) => ({
+        value: program.key || programKey(program.label),
+        label: program.label,
+      }));
+      current = device.program ?? "";
+    }
+
+    const key = `${picker.kind}|${options.map((option) => option.value).join("|")}`;
+    if (select.dataset.key !== key) {
+      select.dataset.key = key;
+      const leeg = document.createElement("option");
+      leeg.value = "";
+      leeg.textContent = "Kies een programma";
+      select.replaceChildren(
+        leeg,
+        ...options.map((option) => {
+          const el = document.createElement("option");
+          el.value = option.value;
+          // Names come from the appliance or the customer, so they go in as text.
+          el.textContent = option.label;
+          return el;
+        })
+      );
+    }
+    if (this.shadowRoot?.activeElement !== select) {
+      select.value = options.some((option) => option.value === current) ? current : "";
+    }
+    select.disabled = !options.length;
+    this.$(`[data-program-hint="${slot}"]`).textContent = !options.length
+      ? "Deze entiteit geeft geen keuzes terug, dus er valt hier niets te kiezen."
+      : picker.kind === "entity"
+        ? "Kiezen zet het programma klaar op de machine; de coach start hem op het goedkoopste moment."
+        : "De coach kiest nooit zelf een programma. Kies hier wat je op de machine hebt ingesteld, dan weet hij hoe lang het duurt en wat het kost.";
+  }
+
+  async chooseProgramOnCard_(slot, value) {
+    const device = this.steerDevices_?.[slot];
+    const picker = programPicker(device);
+    if (!device || !picker || !this.hass) return;
+    try {
+      if (picker.kind === "entity") {
+        await this.hass.callService(picker.entityId.split(".")[0], "select_option", {
+          entity_id: picker.entityId,
+          option: value,
+        });
+      } else {
+        // Meteen op de kaart, en in de eigen kopie van de instellingen, zodat
+        // de keuze niet terugspringt tot de server het bevestigt.
+        device.program = value;
+        this.settings_ = {
+          ...this.settings_,
+          devices: (this.settings_?.devices ?? []).map((d) =>
+            d.id === device.id ? { ...d, program: value } : d
+          ),
+        };
+        await this.hass.callWS({
+          type: "domotiapp_coach/device/program",
+          device_id: device.id,
+          program: value,
+        });
+      }
+    } catch (error) {
+      console.warn("[DomotiApp Coach] programma kiezen mislukt", error);
+      this.paintProgramPick_(slot, device);
+    }
   }
 
   /** Remember which car is plugged in, for everybody looking at this house. */
@@ -2110,6 +2212,11 @@ class DacViewOverview extends DacElement {
               </div>
               <p class="soc-hint" data-soc-hint="${slot}"></p>
             </div>
+            <div class="car-pick" data-program-pick="${slot}" hidden>
+              <label for="program-${slot}">Welk programma staat erop?</label>
+              <select id="program-${slot}" data-program-select="${slot}"></select>
+              <p class="soc-hint" data-program-hint="${slot}"></p>
+            </div>
             <div class="plan-pick" data-plan="${slot}" hidden>
               <div class="plan-head">
                 <span class="plan-title" id="plan-title-${slot}">Schema</span>
@@ -2177,6 +2284,11 @@ class DacViewOverview extends DacElement {
       field.addEventListener("keydown", (event) => {
         if (event.key === "Enter") this.saveSoc_(Number(field.dataset.socInput));
       });
+    }
+    for (const select of this.$$("[data-program-select]")) {
+      select.addEventListener("change", () =>
+        this.chooseProgramOnCard_(Number(select.dataset.programSelect), select.value)
+      );
     }
     for (const button of this.$$("[data-plan-toggle]")) {
       button.addEventListener("click", () =>
@@ -2298,6 +2410,7 @@ class DacViewOverview extends DacElement {
             : "Geef dit door, dan kan de coach het gunstigste moment kiezen.";
       }
 
+      this.paintProgramPick_(slot, device);
       this.fillSchedule_(slot, device);
 
       // Only where somebody has to say so. A charger is released by plugging

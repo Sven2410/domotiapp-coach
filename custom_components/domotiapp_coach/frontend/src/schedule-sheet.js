@@ -15,7 +15,7 @@
 
 import { DacElement, define } from "./base.js";
 import { icons } from "./icons.js";
-import { PROGRAM_TYPES, needsRelease, programFor, typeMeta } from "./devices.js";
+import { PROGRAM_TYPES, needsRelease, programOf, typeMeta } from "./devices.js";
 import { priceForecast } from "./data-source.js";
 import { clock, duration } from "./format.js";
 import { sheetCss } from "./theme.js";
@@ -545,14 +545,19 @@ export class DacScheduleSheet extends DacElement {
     const [hours, minutes] = doneBy.split(":").map(Number);
     const start = new Date();
     start.setHours(hours, minutes - program.minutes, 0, 0);
-    hint.textContent = `${program.label} duurt ongeveer ${duration(program.minutes)}, dus starten moet uiterlijk om ${clock(start)}.`;
+    hint.textContent = `${program.label} duurt ${program.measured ? "gemeten" : "ongeveer"} ${duration(program.minutes)}, dus starten moet uiterlijk om ${clock(start)}.`;
   }
 
-  /** Het programma dat het apparaat klaar heeft staan, als het paneel het kent. */
+  /**
+   * Het programma dat het apparaat klaar heeft staan, als het paneel het kent.
+   *
+   * Uit de tabel van dit apparaat, met de meting eroverheen: zegt de sensor
+   * het niet, dan is het wat de bewoner op de kaart koos.
+   */
   program_() {
     const entityId = this.device_?.entities?.program;
-    if (!entityId || !this.feed_) return undefined;
-    return programFor(this.feed_.get(entityId)?.state);
+    const raw = entityId ? this.feed_?.get(entityId)?.state : this.device_?.program;
+    return programOf(this.device_, raw, this.settings_);
   }
 
   /**
