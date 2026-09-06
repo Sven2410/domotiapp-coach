@@ -1028,11 +1028,27 @@ class ChargerCoach:
             if device.get("type") == "laadpaal" and device.get("controllable")
         ]
         self._watch_phases(settings, bool(chargers))
+        # En de vrijgaveschakelaar en de status van een programma-apparaat:
+        # Sven zette op 06-09-2026 zijn schakelaar aan en binnen vijf seconden
+        # weer uit omdat er niets gebeurde, terwijl de coach pas bij de
+        # volgende minuut keek. Een schakelaar hoort binnen een seconde
+        # antwoord te geven, net als een kabel in de paal.
+        programma_apparaten = [
+            device
+            for device in settings.get("devices") or []
+            if device.get("type") in PROGRAMMA_TYPES and device.get("controllable")
+        ]
         self._watch(
             {
                 entity
                 for device in chargers
                 if (entity := (device.get("entities") or {}).get("status"))
+            }
+            | {
+                entity
+                for device in programma_apparaten
+                for sleutel in ("release_switch", "status")
+                if (entity := (device.get("entities") or {}).get(sleutel))
             }
             | self._watched_phases
         )
