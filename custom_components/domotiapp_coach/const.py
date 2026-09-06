@@ -295,6 +295,32 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             "feed_in_costs": 0.0,
         },
     },
+    # Wie welke melding krijgt, en de zekeringmelding zelf. Sven op 06-09-2026:
+    # de klant zet zijn meldingen aan en uit in het tabje Meldingen, de admin
+    # voegt de personen toe, en een persoon ziet alleen zichzelf. Een persoon
+    # is een telefoon (notify-dienst) met een naam, eventueel gekoppeld aan een
+    # gebruiker van Home Assistant, en een schakelaar per soort; zie
+    # ontvangers.py. Een lijst, want storage.py snoeit dicts tegen deze
+    # standaard en zou een vrije map leegmaken.
+    "notifications": {
+        "people": [],
+        # Warn when the connection is being pushed towards its limit. The
+        # interval matters as much as the threshold: load swings across the
+        # trigger point constantly, so without it one busy hour would send a
+        # stream of notifications.
+        "load_alert": {
+            "enabled": False,
+            "threshold_percent": 80,
+            "min_interval_minutes": 30,
+            # How long the load has to stay over the line before anything is
+            # sent. An oven element or a motor starting produces a spike of a
+            # second or two that no fuse minds and nobody can act on, and a
+            # notification for it is exactly the kind people switch off. A
+            # minute still leaves plenty of room: a fuse carrying a little over
+            # its rating holds for the better part of an hour.
+            "min_duration_seconds": 60,
+        },
+    },
     "strategy": {
         # How far the coach may go on its own. It starts at "propose": it works
         # out what it would do and shows it, and only acts once somebody agrees.
@@ -305,24 +331,9 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # euros, which by itself already prefers using your own sun over
         # exporting it; "solar" insists on the sun even when buying would be
         # cheaper.
-        # Warn when the connection is being pushed towards its limit. The
-        # interval matters as much as the threshold: load swings across the
-        # trigger point constantly, so without it one busy hour would send a
-        # stream of notifications.
-        "load_alert": {
-            "enabled": False,
-            "threshold_percent": 80,
-            # notify service names without their domain, e.g. "mobile_app_sven".
-            "targets": [],
-            "min_interval_minutes": 30,
-            # How long the load has to stay over the line before anything is
-            # sent. An oven element or a motor starting produces a spike of a
-            # second or two that no fuse minds and nobody can act on, and a
-            # notification for it is exactly the kind people switch off. A
-            # minute still leaves plenty of room: a fuse carrying a little over
-            # its rating holds for the better part of an hour.
-            "min_duration_seconds": 60,
-        },
+        # "Zware belasting" stond hier tot v0.52.0 als `load_alert`, met de
+        # ontvangers erin. Sinds 06-09-2026 staat dat onder `notifications`,
+        # in het tabje Meldingen; storage.py verhuist het één keer.
         # When an appliance may run. One entry per device, as a list rather
         # than a map keyed by device id: the storage prunes dictionaries
         # against these defaults, which would empty a free-form map on every

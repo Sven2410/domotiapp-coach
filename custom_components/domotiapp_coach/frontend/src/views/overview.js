@@ -1486,7 +1486,7 @@ class DacViewOverview extends DacElement {
     // The alert threshold is the one number that says "too much" here, so the
     // tile turns on the same boundary the notification uses rather than a
     // second, quietly different one.
-    const alertAt = Number(this.settings_?.strategy?.load_alert?.threshold_percent) || 80;
+    const alertAt = Number(this.settings_?.notifications?.load_alert?.threshold_percent) || 80;
     const loadBounds = { low: Math.round(alertAt * 0.75), high: alertAt };
     const loadLevel = level(r.load, loadBounds, true);
     this.tiles_.load.update({

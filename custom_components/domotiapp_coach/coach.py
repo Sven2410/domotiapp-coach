@@ -68,6 +68,7 @@ from .planner import (
     should_send,
     watts_for,
 )
+from .ontvangers import ontvangers
 from .storage import async_get_beurten, async_get_meldingen, async_get_store
 from .units import hour_to_watts, to_kwh, to_watts
 
@@ -632,11 +633,10 @@ class ChargerCoach:
         )
 
     async def _async_tell(self, message: str, kritiek: bool = False) -> None:
-        """Een melding sturen aan wie de klant daarvoor heeft uitgekozen.
+        """Een melding sturen aan wie hem wil hebben, en in de geschiedenis zetten.
 
-        Dezelfde ontvangers als de waarschuwing over de belasting, want het is
-        dezelfde vraag: er is iets waar je iets mee moet en niemand kijkt naar
-        het scherm.
+        Wie wat krijgt staat per persoon in de instellingen, zie ontvangers.py;
+        sinds 06-09-2026 zet de bewoner dat zelf in het tabje Meldingen.
 
         `kritiek` is voor wat de bewoner zelf moet oplossen of moet weten
         voordat het misgaat: een sensor die zwijgt, een coach die stilstaat,
@@ -644,14 +644,25 @@ class ChargerCoach:
         filteren; Sven op 05-09-2026: "dat je op normale en kritieke
         meldingen kan filteren".
         """
+        soort = "kritiek" if kritiek else "melding"
+        await self._async_versturen(message, soort)
+        # En in de geschiedenis, ook als er geen ontvanger is ingesteld: het
+        # paneel toont wat er gemeld is, en een telefoon vergeet dat zodra de
+        # melding weggeveegd is.
+        try:
+            entry = await async_get_meldingen(self.hass).async_add(message, _moment(None), soort)
+            self.hass.bus.async_fire(EVENT_NOTIFICATION, entry)
+        except Exception:  # noqa: BLE001 - de geschiedenis mag de melding zelf niet kosten
+            _LOGGER.exception("kon de melding niet in de geschiedenis zetten")
+
+    async def _async_versturen(self, message: str, soort: str) -> None:
+        """Naar de telefoons van wie deze soort aan heeft staan."""
         try:
             settings = await async_get_store(self.hass).async_load()
         except Exception:  # noqa: BLE001 - een stille coach is erger dan een lege melding
             _LOGGER.exception("kon de instellingen niet lezen voor een melding")
             return
-
-        alert = (settings.get("strategy") or {}).get("load_alert") or {}
-        for target in alert.get("targets") or []:
+        for target in ontvangers(settings, soort):
             try:
                 await self.hass.services.async_call(
                     "notify",
@@ -662,23 +673,14 @@ class ChargerCoach:
             except Exception:  # noqa: BLE001 - één slechte ontvanger is niet alle
                 _LOGGER.exception("Kon melding niet versturen naar notify.%s", target)
 
-        # En in de geschiedenis, ook als er geen ontvanger is ingesteld: het
-        # paneel toont wat er gemeld is, en een telefoon vergeet dat zodra de
-        # melding weggeveegd is.
-        try:
-            entry = await async_get_meldingen(self.hass).async_add(
-                message, _moment(None), "kritiek" if kritiek else "melding"
-            )
-            self.hass.bus.async_fire(EVENT_NOTIFICATION, entry)
-        except Exception:  # noqa: BLE001 - de geschiedenis mag de melding zelf niet kosten
-            _LOGGER.exception("kon de melding niet in de geschiedenis zetten")
-
     async def _async_noteer(self, message: str, now: datetime) -> None:
-        """Alleen in de geschiedenis, niet naar de telefoon.
+        """Een besluit in de geschiedenis, en naar wie dat per se wil.
 
-        Voor wat de coach doet: elk besluit hoort terug te lezen te zijn, maar
-        niemand wil er 's nachts een telefoon van horen zoemen.
+        Elk besluit hoort terug te lezen te zijn, maar niemand wil er 's nachts
+        een telefoon van horen zoemen. Vandaar dat de soort "besluit" bij een
+        nieuwe persoon uit staat; wie alles wil volgen zet hem zelf aan.
         """
+        await self._async_versturen(message, "besluit")
         try:
             entry = await async_get_meldingen(self.hass).async_add(message, now, "besluit")
             self.hass.bus.async_fire(EVENT_NOTIFICATION, entry)

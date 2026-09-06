@@ -29,6 +29,7 @@ from homeassistant.helpers.event import async_call_later, async_track_state_chan
 from homeassistant.util import dt as dt_util
 
 from .const import EVENT_NOTIFICATION, EVENT_SETTINGS_UPDATED, GRID_MODE_SIGNED, LEVEL_STEER
+from .ontvangers import ontvangers
 from .storage import async_get_meldingen, async_get_store
 from .units import to_watts
 
@@ -179,7 +180,7 @@ class LoadMonitor:
         """Recompute the load and decide whether to say something."""
         self._async_cancel_recheck()
 
-        alert = self._settings.get("strategy", {}).get("load_alert", {})
+        alert = self._settings.get("notifications", {}).get("load_alert", {})
         threshold = float(alert.get("threshold_percent") or 0)
         reading = self.async_current_load()
 
@@ -350,8 +351,8 @@ class LoadMonitor:
     async def _async_notify(
         self, reading: LoadReading, threshold: float, alert: dict[str, Any]
     ) -> None:
-        """Send the warning to everyone the customer picked."""
-        targets = alert.get("targets") or []
+        """Send the warning to everyone who switched it on; see ontvangers.py."""
+        targets = ontvangers(self._settings, "belasting")
         if not targets:
             return
 

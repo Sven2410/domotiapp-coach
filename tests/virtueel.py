@@ -655,7 +655,6 @@ def instellingen(s: Scenario) -> dict:
         "contract": contract,
         "strategy": {
             "level": "steer",
-            "load_alert": {"targets": ["virtueel"]},
             "schedules": [{
                 "device": "paal",
                 "enabled": s.schema_aan,
@@ -674,6 +673,13 @@ def instellingen(s: Scenario) -> dict:
             }],
         },
         "active_cars": [{"device": "paal", "car": "auto"}],
+        # Eén bewoner die alles wil horen behalve de besluiten, net als in het echt.
+        "notifications": {
+            "people": [{"id": "p-1", "name": "Bewoner", "target": "virtueel", "user_id": "",
+                        "kinds": {"kritiek": True, "melding": True, "besluit": False, "belasting": True}}],
+            "load_alert": {"enabled": False, "threshold_percent": 80,
+                           "min_interval_minutes": 30, "min_duration_seconds": 60},
+        },
         "car_soc": [],
         # Wat een eerdere beurt over deze auto leerde, per band van tien procent.
         "car_pace": [{"device": "paal", "car": "auto", "band": band, "kw": kw, "at": ""}
