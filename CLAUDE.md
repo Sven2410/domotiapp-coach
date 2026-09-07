@@ -190,6 +190,25 @@ programma-apparaat wekken de coach meteen** (v0.56.1, `_watch`): Sven zette
 de schakelaar aan en binnen vijf seconden weer uit omdat er niets gebeurde,
 terwijl de coach pas bij de volgende minuut keek.
 
+**In het lopende uur wint de meter van de zonverwachting** (v0.57.0). Sven
+op 07-09-2026 om 10:22: de coach wachtte op 11:00 terwijl zijn meter 3,5 kW
+teruglevering zag; "je weet niet hoeveel je om 11 uur terug gaat leveren."
+De verwachting zei 2,2 kW, het dak gaf 4,3. `programma_kosten` rekent voor
+elk stuk in het lopende uur met `surplus_w` (de netto-export van nu,
+`_netto_export_w` in coach.py), net als `schijven` bij de paal; bij gelijke
+kosten wint het vroegste moment, dus een meting van nu wint van een even
+goede verwachting van straks. Scenario `vaatwasser-meter-wint`.
+
+**Twee meldingen per beurt**, gestart en klaar (v0.57.0, Sven: "ik wil wel
+meldingen ontvangen dat de vaatwasser gestart is en klaar is"). "Is gestart"
+als de coach drukte of erom vroeg, "draait" als de bewoner hem zelf aanzette.
+
+**Het vinkje bij Apparaten heet naar wat de coach kan** (v0.57.0, Sven: "er
+is een verschil tussen aansturen en adviseren"): "aansturen" bij een merk met
+knoppen (`canSteer` in devices.js), "adviseren" bij een programma-apparaat
+zonder startknop, "noemen" bij alles wat alleen op een meetstekker zit. Staat
+het uit, dan noemt de overschottip het apparaat ook niet (`apparatenZin`).
+
 **Nog niet aan een echte Home Connect of een echte meetstekker gezien.** Sven
 test bij zichzelf thuis.
 
@@ -234,11 +253,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 212 controles op het denkwerk
-python tests/test_coach.py       # 206 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 726 op hele laadbeurten in het virtuele huis
-python tests/test_archive.py     # 37 op de kwartieropslag
-node   tests/test_rapport.mjs    # 21 op het rapport en op het paneel
+python tests/test_planner.py     # 276 controles op het denkwerk
+python tests/test_coach.py       # 309 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1162 op hele laadbeurten in het virtuele huis
+python tests/test_archive.py     # 41 op de kwartieropslag
+node   tests/test_rapport.mjs    # 33 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

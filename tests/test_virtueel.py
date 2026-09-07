@@ -519,6 +519,13 @@ if (vl := v("vaatwasser-gemeten")):
              vl.vw_gestart is not None and vl.vw_gestart.hour >= 9, f"{vw_klok(vl.vw_gestart)}")
     controle("gemeten: na de beurt telt de meting twee beurten", vl.vw_gemeten and vl.vw_gemeten[0].get("runs") == 2, f"{vl.vw_gemeten}")
 
+if (vl := v("vaatwasser-meter-wint")):
+    print(f"  meter wint: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}")
+    controle("meter wint: met 3 kW teruglevering op de meter start hij om 10:20, niet op de verwachting van later",
+             vl.vw_gestart is not None and (vl.vw_gestart.hour, vl.vw_gestart.minute) <= (10, 22), f"gestart {vw_klok(vl.vw_gestart)}")
+    controle("meter wint: klaar rond 11:20, ruim voor 16:30",
+             vl.vw_klaar is not None and (vl.vw_klaar.hour, vl.vw_klaar.minute) <= (11, 30), f"{vw_klok(vl.vw_klaar)}")
+
 # --- de bewoner --------------------------------------------------------------
 
 print("=== de bewoner ===")

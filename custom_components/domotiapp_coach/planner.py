@@ -3134,9 +3134,20 @@ def programma_kosten(
     prices: list[dict],
     tariff: Tariff,
     forecast: Forecast,
+    *,
+    now: datetime | None = None,
+    surplus_w: float | None = None,
 ) -> float | None:
     """Wat dit programma kost als het op `start` begint, of None als de prijs
     van een deel van die uren niet bekend is.
+
+    Het uur waar we nú in zitten wordt gemeten en niet voorspeld: `surplus_w`
+    is wat er op dit moment werkelijk naar het net gaat, en dat telt voor elk
+    stuk dat in dit uur valt. Precies zoals `schijven` dat voor een laadpaal
+    doet. Sven op 07-09-2026, toen de coach om 10:22 op 11:00 wachtte terwijl
+    zijn meter 3,5 kW teruglevering zag: "ik lever nu 3,5 kW terug, dat is
+    toch gunstig? Je weet niet hoeveel je om 11 uur terug gaat leveren." De
+    verwachting zei voor dat uur 2,2 kW en het dak gaf 4,3.
 
     Met een gemeten profiel gaat het per stap van dat profiel: de opwarmpiek
     aan het begin en het drogen aan het eind vallen dan op het uur waar ze
@@ -3161,7 +3172,11 @@ def programma_kosten(
         if terug is None:
             terug = tariff.feed_in
 
-        over = max(0.0, forecast.solar_kwh.get(uur, 0.0) - forecast.house_kwh.get(uur.hour, 0.0))
+        nu_uur = now is not None and uur == now.replace(minute=0, second=0, microsecond=0)
+        if nu_uur and surplus_w is not None:
+            over = max(0.0, surplus_w) / 1000.0
+        else:
+            over = max(0.0, forecast.solar_kwh.get(uur, 0.0) - forecast.house_kwh.get(uur.hour, 0.0))
         over *= deel_uur
         zon = min(kwh, over) if terug is not None else 0.0
         kosten += (zon * terug if zon > 0 else 0.0) + (kwh - zon) * koop
@@ -3210,8 +3225,14 @@ def plan_programma(
     forecast: Forecast,
     window: Window,
     apparaat: Apparaat,
+    surplus_w: float | None = None,
 ) -> Decision:
     """Wanneer een programma-apparaat begint.
+
+    `surplus_w` is wat er nu werkelijk naar het net gaat; dat weegt in het
+    lopende uur zwaarder dan de verwachting. Bij gelijke kosten wint het
+    vroegste moment, dus een meting van nu wint van een even goede
+    verwachting van straks.
 
     Van boven naar beneden: vrijgave, wat hij al doet, het programma, de
     knoppen van het schema, en dan pas de vergelijking van alle startmomenten.
@@ -3300,7 +3321,9 @@ def plan_programma(
     onbekend = 0
     moment = eerste
     while moment <= laatste:
-        kosten = programma_kosten(moment, programma, prices, tariff, forecast)
+        kosten = programma_kosten(
+            moment, programma, prices, tariff, forecast, now=now, surplus_w=surplus_w
+        )
         if kosten is None:
             onbekend += 1
         else:

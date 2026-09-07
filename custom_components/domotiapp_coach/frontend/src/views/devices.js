@@ -16,6 +16,7 @@ import {
   PROGRAM_TYPES,
   hasOwnPrograms,
   isManualProgram,
+  canSteer,
   measuredFor,
   programKey,
   programOptions,
@@ -538,19 +539,32 @@ class DacViewDevices extends DacEditorElement {
     if (brandsFor(device.type).length && !brandMeta(device)) return "";
 
     const missing = missingForControl(device);
-    // Zonder startknop stuurt de coach niet maar plant hij: hij zegt wanneer
-    // je hem aan moet zetten en meet wat er gebeurt. Dezelfde schuif, want
-    // hij bepaalt in beide gevallen of het apparaat op het overzicht komt.
+    // Eén vinkje, drie woorden. Sven op 07-09-2026: "er is een verschil tussen
+    // de coach mag aansturen en adviseren, want een domme vaatwasser kan de
+    // coach helemaal niet aansturen maar wel adviseren." Wat de coach kan
+    // bedienen stuurt hij; een programma-apparaat zonder startknop plant hij
+    // en zegt hij wanneer; alles wat alleen op een meetstekker zit kan hij
+    // hooguit noemen als er overschot is of de stroom goedkoop is. Staat het
+    // vinkje uit, dan doet hij geen van drie en noemt hij het apparaat nergens.
     const manual = isManualProgram(device);
+    const stuurbaar = canSteer(device);
+    const kop = stuurbaar
+      ? "De coach mag dit apparaat aansturen"
+      : manual
+        ? "De coach mag over dit apparaat adviseren"
+        : "De coach mag dit apparaat noemen";
+    const uitleg = stuurbaar
+      ? "Hij komt dan op het overzicht te staan, met een vrijgaveknop en handmatige besturing, en de coach bedient hem zelf op het gunstigste moment."
+      : manual
+        ? "Hij heeft geen startknop, dus sturen kan de coach niet. Hij zegt op de kaart en op je telefoon wanneer je hem aan moet zetten, en meet via de vermogenssensor hoe lang een programma duurt en wat het verbruikt. Het apparaat komt dan op het overzicht te staan, met de vrijgaveknop en de programmakeuze."
+        : "Dit apparaat zit alleen op een meetstekker: de coach kan het niet sturen en niet plannen. Met dit vinkje aan noemt hij het wel als je overschot hebt of de stroom goedkoop is; uit, dan volgt hij alleen het verbruik.";
     return `
       <label class="check" for="control-${index}">
         <input type="checkbox" id="control-${index}" data-field="controllable" data-index="${index}"
                ${device.controllable ? "checked" : ""}>
         <span>
-          <strong>${manual ? "De coach plant dit apparaat" : "De coach mag dit apparaat aansturen"}</strong>
-          ${manual
-            ? "Hij heeft geen startknop, dus de coach zegt op de kaart en op je telefoon wanneer je hem aan moet zetten, en meet via de vermogenssensor hoe lang een programma duurt en wat het verbruikt. Het apparaat komt dan op het overzicht te staan, met de vrijgaveknop en de programmakeuze."
-            : "Een apparaat dat alleen op een meetstekker zit, kun je wel volgen maar niet sturen. Zet dit alleen aan bij apparaten die echt te bedienen zijn. Ze komen dan op het overzicht te staan, met een vrijgaveknop en handmatige besturing."}
+          <strong>${kop}</strong>
+          ${uitleg}
         </span>
       </label>
       <div class="notice"${missing.length ? "" : " hidden"} data-missing="${index}">

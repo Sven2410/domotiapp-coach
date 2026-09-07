@@ -496,6 +496,17 @@ vaatwasser_gemeten = vaatwasser_zon.kopie(
     vaatwasser_gemeten=[{"device": "vaatwasser", "key": "eco_50", "minutes": 200, "kwh": 0.95, "peak_w": 2000,
                          "profile": [2000.0] * 4 + [60.0] * 32 + [2000.0] * 4, "runs": 1, "at": ""}],
 )
+# Sven op 07-09-2026 om 10:22 thuis: de coach wachtte op 11:00 terwijl zijn
+# meter 3,5 kW teruglevering zag. "Je weet niet hoeveel je om 11 uur terug gaat
+# leveren." De voorspeller zei bewolkt, het dak deed helder: in het lopende
+# uur hoort de meter te winnen.
+vaatwasser_meter_wint = vast_zonnig.kopie(
+    naam="vaatwasser-meter-wint", uitleg="vast contract met salderen, de voorspeller zei bewolkt maar het is helder: om 10:20 vrijgegeven met 3 kW op de meter hoort Express 60 meteen te starten, niet op de verwachting van 12:00 te wachten",
+    auto=VOL, contract="vast-salderen", vast_terugleverkosten=0.05, zon=Zon(wolken="helder", voorspeld="bewolkt"),
+    vaatwasser=Vaatwasser(programma="dishcare_dishwasher_program_kurz_60", minuten=60, kwh=1.05, piek_w=2200.0, piek_minuten=20),
+    vaatwasser_klaar_om="16:30", vaatwasser_niet_eerder="08:00",
+    gebeurtenissen=[("10:20", "vaatwasser_vrijgeven", None)],
+)
 vaatwasser_uiterlijk = vaatwasser_avond.kopie(
     naam="vaatwasser-uiterlijk-starten", uitleg="om 19:00 vrijgegeven met uiterlijk starten om 22:00: dan gaat hij om 22:00, ook al is de nacht goedkoper",
     vaatwasser_uiterlijk="22:00",
@@ -517,7 +528,7 @@ ALLE = [
     afbouw_krap, afbouw_krap_geleerd,
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
-    vaatwasser_eigen_tabel, vaatwasser_gemeten,
+    vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint,
     *VAN_DEN_DAM,
 ]
 

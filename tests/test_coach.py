@@ -2685,6 +2685,14 @@ hass56.states.zet("sensor.vaatwasser_status", "run")
 hass56.states.zet("sensor.vaatwasser_vermogen", "2000")
 b, v = asyncio.run(ronde56(dt.datetime(2026, 9, 8, 1, 2, 30)))
 controle("zodra hij draait is de regel running", b.get("rule") == "running" and b.get("running"), f"{b}")
+# Sven op 07-09-2026: "ik wil wel meldingen ontvangen dat de vaatwasser
+# gestart is en klaar is."
+gestart56 = [d[2]["message"] for d in v if d[0] == "notify"]
+print(f"  gestart: {gestart56}")
+controle("en één melding dat hij gestart is, met het programma en wanneer hij klaar is",
+         len(gestart56) == 1 and gestart56[0] == "Vaatwasser is gestart (Eco 50 °C), klaar rond 04:47.", f"{gestart56}")
+b, v = asyncio.run(ronde56(dt.datetime(2026, 9, 8, 1, 3, 30)))
+controle("en niet nog eens", not [d for d in v if d[0] == "notify"], f"{v}")
 # Drie uur draaien op 2 kW en dan klaar: 6 kWh tegen 0,18; meteen starten was 0,30.
 for minuut in range(3, 180, 5):
     asyncio.run(ronde56(dt.datetime(2026, 9, 8, 1, 0) + dt.timedelta(minutes=minuut)))
@@ -2824,6 +2832,9 @@ controle("tien minuten later vraagt hij het niet nog eens", not telefoon58(v), f
 hass58.states.zet("sensor.dom_vermogen", "2000")
 b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 11, 12)))
 controle("zodra er vermogen loopt draait hij, zonder statussensor", b.get("rule") == "running" and b.get("running"), f"{b}")
+print(f"  gestart: {telefoon58(v)}")
+controle("en één melding dat hij gestart is, want de coach had erom gevraagd",
+         len(telefoon58(v)) == 1 and telefoon58(v)[0] == "Vaatwasser is gestart (Eco 50 °C), klaar rond 14:57.", f"{telefoon58(v)}")
 # Twintig minuten opwarmen op 2000 W, dan pompen op 60 W, dan drogen op 1500 W,
 # met een stille minuut of drie tussendoor die geen einde is.
 def vermogen58(minuut):

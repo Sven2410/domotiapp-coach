@@ -1889,6 +1889,37 @@ controle("ook voorspoelen wacht op het goedkoopste moment",
 controle("zonder herkend programma en zonder haast: uitleg, geen start",
          planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), prijzen50(7), Tariff(), Forecast(), venster50,
                                 planner.Apparaat(status="ready", released=True, program=None)).rule == "no-program", "")
+# Sven op 07-09-2026 om 10:22, met 3,5 kW teruglevering op de meter terwijl de
+# coach op 11:00 wachtte: "ik lever nu 3,5 kW terug, dat is toch gunstig? Je
+# weet niet hoeveel je om 11 uur terug gaat leveren." In het lopende uur wint
+# de meter van de verwachting, net als bij de paal.
+kurz = planner.programma_van("kurz_60")
+salderen = Tariff(buy=0.24171, feed_in=0.24171 - 0.052756)
+# De verwachting van die ochtend, ruwweg: te weinig voor 10:00, genoeg vanaf 11:00.
+ochtend = Forecast(solar_kwh={dt.datetime(2026, 9, 7, 10, 0): 2.2, dt.datetime(2026, 9, 7, 11, 0): 3.5,
+                              dt.datetime(2026, 9, 7, 12, 0): 4.7, dt.datetime(2026, 9, 7, 13, 0): 4.9},
+                   house_kwh={u: 1.4 for u in range(24)})
+thuis = planner.Window(enabled=True, opens=dt.datetime(2026, 9, 7, 8, 0), deadline=dt.datetime(2026, 9, 7, 16, 30))
+kort = planner.Apparaat(status="ready", released=True, program=kurz)
+zonder = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 22), [], salderen, ochtend, thuis, kort)
+print(f"  zonder meting: {zonder.rule} {zonder.starts_at}  {zonder.reason}")
+controle("zonder meting gelooft hij de verwachting en wacht hij tot 11:00",
+         zonder.rule == "wait-for-start" and zonder.starts_at == "2026-09-07T11:00:00", f"{zonder}")
+met = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 22), [], salderen, ochtend, thuis, kort, surplus_w=3460.0)
+print(f"  met 3,46 kW teruglevering: {met.rule} {met.starts_at}  {met.reason}")
+controle("met 3,46 kW op de meter start hij nu: een meting wint van een even goede verwachting",
+         met.rule == "cheapest-start" and met.charge, f"{met}")
+k_nu = planner.programma_kosten(dt.datetime(2026, 9, 7, 10, 22), kurz, [], salderen, ochtend,
+                                now=dt.datetime(2026, 9, 7, 10, 22), surplus_w=3460.0)
+controle("en die beurt kost dan de zonprijs: 1,05 kWh maal de inkoop min de terugleverkosten",
+         abs(k_nu - 1.05 * (0.24171 - 0.052756)) < 0.001, f"{k_nu:.4f}")
+niets = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 22), [], salderen, ochtend, thuis, kort, surplus_w=0.0)
+controle("meet de meter niets, dan telt dat ook: hij wacht op de zon van 11:00",
+         niets.rule == "wait-for-start" and niets.starts_at == "2026-09-07T11:00:00", f"{niets}")
+controle("de meting geldt alleen voor het lopende uur; om 11:00 rekent hij weer met de verwachting",
+         abs(planner.programma_kosten(dt.datetime(2026, 9, 7, 11, 0), kurz, [], salderen, ochtend,
+                                      now=dt.datetime(2026, 9, 7, 10, 22), surplus_w=0.0)
+             - planner.programma_kosten(dt.datetime(2026, 9, 7, 11, 0), kurz, [], salderen, ochtend)) < 1e-9, "")
 
 print("=== 51. de programmatabel van de klant, de metingen en het profiel ===")
 # Sven op 06-09-2026: "we hebben nu een hard coded tabel maar ik wil dat
