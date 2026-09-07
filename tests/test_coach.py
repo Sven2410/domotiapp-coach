@@ -2853,15 +2853,20 @@ for minuut in range(1, 200):
     if telefoon58(v):
         controle("geen melding tijdens de beurt", False, f"{telefoon58(v)}")
         break
-# Om 14:32 ziet de stekker niets meer; na een kwartier stilte is hij klaar.
+# Om 14:32 ziet de stekker niets meer; na een half uur stilte is hij klaar.
+# Sven op 07-09-2026: zijn machine zet een kwartier voor het eind de deur
+# open en doet daarna twintig minuten vrijwel niets; een kwartier was te kort.
 hass58.states.zet("sensor.dom_vermogen", "0")
 b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 14, 32)))
 b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 14, 40)))
 controle("acht minuten stilte is nog niet klaar", b.get("rule") == "running" and not telefoon58(v), f"{b.get('rule')} {telefoon58(v)}")
-b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 14, 48)))
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 14, 52)))
+controle("twintig minuten stilte ook niet, want zo lang droogt een machine met de deur open",
+         b.get("rule") == "running" and not telefoon58(v), f"{b.get('rule')} {telefoon58(v)}")
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 15, 3)))
 verslag = telefoon58(v)
 print(f"  klaar: {verslag}")
-controle("na een kwartier stilte één verslag, met het einde op het laatste vermogen en niet op nu",
+controle("na een half uur stilte één verslag, met het einde op het laatste vermogen en niet op nu",
          len(verslag) == 1 and "Vaatwasser is klaar (Eco 50 °C)" in verslag[0] and "van 11:12 tot 14:31" in verslag[0]
          and "1,5 kWh" in verslag[0] and "Meteen starten had" in verslag[0], f"{verslag}")
 controle("de vrijgave is eraf", "dev-dom" not in (inst58.get("ready_devices") or []), f"{inst58.get('ready_devices')}")
@@ -2874,7 +2879,7 @@ controle("de beurt is gemeten: 199 minuten, 1,5 kWh, piek 2000 W, één beurt, e
 profiel58 = gemeten[0]["profile"] if gemeten else []
 controle("het profiel: 2000 W in de eerste vier stappen, 60 W in het midden, 1500 W aan het eind",
          profiel58[:4] == [2000.0] * 4 and profiel58[20] == 60.0 and profiel58[-1] == 1500.0, f"{profiel58}")
-b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 14, 49)))
+b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 15, 4)))
 controle("daarna niets meer: geen tweede verslag, en hij wacht op een nieuwe vrijgave",
          not telefoon58(v) and b.get("rule") == "not-released", f"{b.get('rule')} {telefoon58(v)}")
 # De volgende dag plant hij met de meting: de duur is nu 199 minuten en het
@@ -2986,12 +2991,226 @@ for minuut in range(0, 30):
 controle("tijdens de beurt draait hij en blijft alles staan", b.get("rule") == "running" and vrij60() and not v, f"{b.get('rule')} {v}")
 hass60.states.zet("sensor.dom_vermogen", "0")
 asyncio.run(ronde60(dt.datetime(2026, 9, 8, 11, 31)))
-b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 11, 47)))
+b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 12, 2)))
 controle("na de beurt gaan de vrijgave en de schakelaar allebei uit",
          not vrij60() and v == [("input_boolean", "turn_off", {"entity_id": SCHAKEL})] and b.get("rule") in ("finished", "not-released"), f"{vrij60()} {v} {b.get('rule')}")
 hass60.states.zet(SCHAKEL, "off")
-b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 11, 48)))
+b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 12, 3)))
 controle("en daarna wacht hij op een nieuwe vrijgave", not vrij60() and not v and b.get("rule") == "not-released", f"{v} {b.get('rule')}")
+
+print("=== 61. de eindtijd van het apparaat zelf: als tijdstip, in minuten, in seconden ===")
+# Sven op 07-09-2026: "pak de eindtijd van de integratie." Home Connect geeft
+# een tijdstip; andere integraties de minuten of seconden die nog resten.
+hass61 = NepHass({
+    "sensor.rest_tijdstip": "2026-09-08T04:47:00+02:00",
+    "sensor.rest_minuten": {"state": "105", "attributes": {"unit_of_measurement": "min"}},
+    "sensor.rest_seconden": {"state": "6300", "attributes": {"unit_of_measurement": "s"}},
+    "sensor.rest_leeg": "unknown",
+})
+nu61 = dt.datetime(2026, 9, 8, 3, 2)
+e_tijd = coachmod._eindtijd(hass61, "sensor.rest_tijdstip", nu61)
+e_min = coachmod._eindtijd(hass61, "sensor.rest_minuten", nu61)
+e_sec = coachmod._eindtijd(hass61, "sensor.rest_seconden", nu61)
+print(f"  tijdstip {e_tijd}, minuten {e_min}, seconden {e_sec}")
+controle("een tijdstip met zone wordt een lokale klok zonder zone",
+         e_tijd is not None and e_tijd.tzinfo is None and (e_tijd.hour, e_tijd.minute) == (4, 47), f"{e_tijd}")
+controle("minuten en seconden tellen vanaf nu", e_min == nu61 + dt.timedelta(minutes=105) and e_sec == e_min, f"{e_min} {e_sec}")
+controle("zonder waarde geen eindtijd", coachmod._eindtijd(hass61, "sensor.rest_leeg", nu61) is None
+         and coachmod._eindtijd(hass61, "", nu61) is None, "")
+
+print("=== 62. een herstart midden in een vaatwasserbeurt: de telling gaat door ===")
+# Sven op 07-09-2026: "ja, reken terug." De coach bewaart de lopende beurt elke
+# vijf minuten; na een herstart pakt hij hem daar op, en het gat sinds die
+# opslag komt uit de kwartieropslag. Geen tweede "is gestart", één verslag
+# over de hele beurt.
+VW62 = dict(VAATWASSER, entities=dict(VAATWASSER["entities"], remaining="sensor.vaatwasser_rest"))
+inst62 = instellingen(devices=[LAADPAAL, VW62])
+inst62["contract"] = inst56["contract"]
+inst62["strategy"]["schedules"].append({
+    "device": "dev-vaatwasser", "enabled": True, "priority": "mid", "per_day": False,
+    "window": {"not_before": "", "start_by": "", "done_by": "07:00"}, "days": [],
+})
+huis62 = dict(huis56)
+huis62["sensor.prijs"] = {"state": "0.18", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen56(7)}}
+huis62["sensor.vaatwasser_rest"] = "unknown"
+hass62, _, coach62 = bouw(huis62, inst62)
+
+def coach62_nieuw():
+    """Zoals Home Assistant hem na een herstart neerzet: leeg geheugen, dezelfde opslag."""
+    c = coachmod.ChargerCoach(hass62)
+    c._sleep = lambda seconds: asyncio.sleep(0)
+    return c
+
+async def ronde62(c, nu):
+    hass62.services.verstuurd.clear()
+    await hass62.afmaken()
+    await c._round(nu)
+    await hass62.afmaken()
+    return c.state.get("dev-vaatwasser") or {}, [d[2]["message"] for d in hass62.services.verstuurd if d[0] == "notify" and "Vaatwasser" in d[2].get("message", "")]
+
+def beurten62():
+    return [b for b in asyncio.run(coachmod.async_get_beurten(hass62).async_list()) if b["device"] == "dev-vaatwasser"]
+
+inst62["ready_devices"] = ["dev-vaatwasser"]
+asyncio.run(ronde62(coach62, dt.datetime(2026, 9, 7, 19, 5)))
+asyncio.run(ronde62(coach62, dt.datetime(2026, 9, 8, 1, 0, 30)))
+hass62.states.zet("sensor.vaatwasser_status", "run")
+hass62.states.zet("sensor.vaatwasser_vermogen", "2000")
+hass62.states.zet("sensor.vaatwasser_rest", "2026-09-08T04:47:00+02:00")
+b, m = asyncio.run(ronde62(coach62, dt.datetime(2026, 9, 8, 1, 2)))
+print(f"  gestart: {m}  reden: {b.get('reason')}  ends_at {b.get('ends_at')}")
+controle("de melding 'is gestart' neemt de eindtijd van het apparaat, niet de tabel",
+         m == ["Vaatwasser is gestart (Eco 50 °C), klaar rond 04:47."], f"{m}")
+controle("en op de kaart staat hij ook", b.get("reason") == "Hij draait, klaar rond 04:47." and (b.get("ends_at") or "").endswith("T04:47:00"),
+         f"{b.get('reason')} {b.get('ends_at')}")
+for minuut in range(3, 58):
+    asyncio.run(ronde62(coach62, dt.datetime(2026, 9, 8, 1, minuut)))
+open62 = [b for b in beurten62() if not b.get("complete")]
+print(f"  open in de opslag: {[(b['started'], b['ended'], b['kwh'], sorted(b.get('session', {}).keys())) for b in open62]}")
+controle("de lopende beurt staat in de opslag, met alles om hem op te pakken",
+         len(open62) == 1 and open62[0]["started"] == "2026-09-08T01:02:00" and open62[0]["ended"] == "2026-09-08T01:57:00"
+         and abs(open62[0]["kwh"] - 55 / 60 * 2) < 0.05 and open62[0]["session"]["told"] == ["gestart"]
+         and open62[0]["session"]["released"] == "2026-09-07T19:05:00" and len(open62[0]["session"]["prices"]) > 0,
+         f"{open62}")
+
+# De herstart om 02:10: dertien minuten gat sinds de laatste opslag van 01:57.
+# De kwartieropslag heeft die kwartieren wel.
+def stempel62(uur, minuut):
+    return int(dt.datetime(2026, 9, 8, uur, minuut).timestamp())
+class NepArchief62:
+    async def async_lees(self, ids, start, einde):
+        rijen = {e: [] for e in ids}
+        rijen["sensor.vaatwasser_vermogen"] = [
+            {"start": stempel62(1, 45), "gemiddeld": 2000.0, "seconden": 900.0},
+            {"start": stempel62(2, 0), "gemiddeld": 2000.0, "seconden": 900.0},
+            {"start": stempel62(2, 15), "gemiddeld": 2000.0, "seconden": 900.0},
+        ]
+        return rijen
+archief_oud = coachmod.async_get_archive
+coachmod.async_get_archive = lambda hass: NepArchief62()
+coach62b = coach62_nieuw()
+b, m = asyncio.run(ronde62(coach62b, dt.datetime(2026, 9, 8, 2, 10)))
+sessie62 = coach62b._programma["dev-vaatwasser"]
+print(f"  02:10 na de herstart: {b.get('rule')} gestart {b.get('started_at')} meldingen {m} kwh {sessie62['kwh']:.3f} gat {sessie62['terugrekenen']}")
+controle("na de herstart weet hij nog wanneer de beurt begon, en zegt hij niet nog eens dat hij draait",
+         b.get("rule") == "running" and b.get("started_at") == "2026-09-08T01:02:00" and not m, f"{b.get('started_at')} {m}")
+controle("de tellers gaan verder waar de opslag was", abs(sessie62["kwh"] - 55 / 60 * 2) < 0.05 and sessie62["vrijgegeven"] == dt.datetime(2026, 9, 7, 19, 5)
+         and sessie62["maat"] > 0 and len(sessie62["prijzen"]) > 0, f"{sessie62['kwh']} {sessie62['vrijgegeven']} {sessie62['maat']}")
+controle("en het gat sinds de opslag staat klaar om terug te rekenen",
+         sessie62["terugrekenen"] == (dt.datetime(2026, 9, 8, 1, 57), dt.datetime(2026, 9, 8, 2, 10)), f"{sessie62['terugrekenen']}")
+asyncio.run(ronde62(coach62b, dt.datetime(2026, 9, 8, 2, 11)))
+controle("een minuut later nog niet, want de kwartieropslag haalt eerst zelf in", sessie62["terugrekenen"] is not None, "")
+asyncio.run(ronde62(coach62b, dt.datetime(2026, 9, 8, 2, 12)))
+print(f"  02:12: kwh {sessie62['kwh']:.3f}, maat {sessie62['maat']:.3f}, punten {len(sessie62['punten'])}")
+# 55 minuten live tot 01:57, 13 minuten uit de kwartieropslag, 2 minuten live: 70 minuten op 2 kW.
+controle("na twee minuten is het gat uit de kwartieropslag gehaald: dertien minuten op 2 kW erbij, tegen de prijs van toen",
+         sessie62["terugrekenen"] is None and abs(sessie62["kwh"] - 70 / 60 * 2) < 0.05 and not sessie62["maat_onbekend"]
+         and abs(sessie62["betaald"] - 70 / 60 * 2 * 0.18) < 0.02 and abs(sessie62["maat"] - 70 / 60 * 2 * 0.30) < 0.03,
+         f"{sessie62['kwh']} {sessie62['betaald']} {sessie62['maat']}")
+for minuut in range(13, 60):
+    asyncio.run(ronde62(coach62b, dt.datetime(2026, 9, 8, 2, minuut)))
+hass62.states.zet("sensor.vaatwasser_status", "finished")
+hass62.states.zet("sensor.vaatwasser_vermogen", "0")
+b, m = asyncio.run(ronde62(coach62b, dt.datetime(2026, 9, 8, 3, 0)))
+print(f"  klaar: {m}")
+controle("één verslag over de hele beurt, van voor de herstart tot nu",
+         len(m) == 1 and "van 01:02 tot 03:00" in m[0] and "3,9 kWh" in m[0] and "€ 0,70" in m[0]
+         and "Meteen starten had € 1,1" in m[0], f"{m}")
+klaar62 = beurten62()
+print(f"  opslag: {[(b['id'], b['complete'], b['kwh'], b['saved']) for b in klaar62]}")
+controle("in de opslag één afgeronde beurt, onder dezelfde sleutel, zonder de open regel ernaast",
+         len(klaar62) == 1 and klaar62[0]["complete"] and abs(klaar62[0]["kwh"] - 118 / 60 * 2) < 0.05
+         and klaar62[0]["saved"] > 0 and "session" not in klaar62[0], f"{klaar62}")
+controle("en de vrijgave is eraf", "dev-vaatwasser" not in (inst62.get("ready_devices") or []), f"{inst62.get('ready_devices')}")
+
+# Zonder regel in de opslag: de recorder zegt wanneer hij ging draaien, de
+# vrijgaveschakelaar wanneer hij werd vrijgegeven, en de hele beurt komt uit
+# de kwartieropslag.
+VW62c = dict(VW62, entities=dict(VW62["entities"], release_switch="input_boolean.vw_sturing"))
+inst62c = instellingen(devices=[LAADPAAL, VW62c])
+inst62c["contract"] = inst56["contract"]
+inst62c["strategy"]["schedules"].append(inst62["strategy"]["schedules"][-1])
+inst62c["ready_devices"] = ["dev-vaatwasser"]
+huis62c = dict(huis62)
+huis62c.update({"sensor.vaatwasser_status": "run", "sensor.vaatwasser_vermogen": "2000", "input_boolean.vw_sturing": "on",
+                "sensor.vaatwasser_rest": "2026-09-08T04:47:00+02:00"})
+hass62c, _, coach62c = bouw(huis62c, inst62c)
+async def geschiedenis62c(entity_id, start, einde):
+    if entity_id == "sensor.vaatwasser_status":
+        return [(dt.datetime(2026, 9, 7, 22, 0), "ready"), (dt.datetime(2026, 9, 8, 1, 2), "BSH.Common.EnumType.OperationState.Run")]
+    if entity_id == "input_boolean.vw_sturing":
+        return [(dt.datetime(2026, 9, 7, 10, 0), "off"), (dt.datetime(2026, 9, 7, 19, 5), "on")]
+    if entity_id == "sensor.prijs":
+        return [(dt.datetime(2026, 9, 7, 17, 0), "0.30"), (dt.datetime(2026, 9, 7, 21, 0), "0.25"), (dt.datetime(2026, 9, 8, 1, 0), "0.18")]
+    return []
+coach62c._async_geschiedenis = geschiedenis62c
+class NepArchief62c:
+    async def async_lees(self, ids, start, einde):
+        rijen = {e: [] for e in ids}
+        rijen["sensor.vaatwasser_vermogen"] = [
+            {"start": stempel62(1, q), "gemiddeld": 2000.0, "seconden": 900.0} for q in (0, 15, 30, 45)
+        ] + [{"start": stempel62(2, q), "gemiddeld": 2000.0, "seconden": 900.0} for q in (0, 15)]
+        return rijen
+coachmod.async_get_archive = lambda hass: NepArchief62c()
+async def ronde62c(nu):
+    hass62c.services.verstuurd.clear()
+    await hass62c.afmaken()
+    await coach62c._round(nu)
+    await hass62c.afmaken()
+    return coach62c.state.get("dev-vaatwasser") or {}, [d[2]["message"] for d in hass62c.services.verstuurd if d[0] == "notify" and "Vaatwasser" in d[2].get("message", "")]
+b, m = asyncio.run(ronde62c(dt.datetime(2026, 9, 8, 2, 10)))
+s62c = coach62c._programma["dev-vaatwasser"]
+print(f"  zonder regel om 02:10: gestart {b.get('started_at')}, vrijgegeven {s62c['vrijgegeven']}, meldingen {m}")
+controle("zonder regel in de opslag komt het begin uit de recorder en de vrijgave van de schakelaar",
+         b.get("started_at") == "2026-09-08T01:02:00" and s62c["vrijgegeven"] == dt.datetime(2026, 9, 7, 19, 5), f"{b.get('started_at')} {s62c['vrijgegeven']}")
+controle("en dan zegt hij wel dat hij draait, want deze coach heeft hem niet zelf gestart",
+         m == ["Vaatwasser draait (Eco 50 °C), klaar rond 04:47."], f"{m}")
+asyncio.run(ronde62c(dt.datetime(2026, 9, 8, 2, 11)))
+asyncio.run(ronde62c(dt.datetime(2026, 9, 8, 2, 12)))
+print(f"  02:12: kwh {s62c['kwh']:.3f}, betaald {s62c['betaald']:.3f}, maat {s62c['maat']:.3f}, onbekend {s62c['maat_onbekend']}")
+# 68 minuten uit de kwartieropslag tegen 0,18, plus twee minuten live; de maat
+# is dezelfde 70 minuten vanaf 19:05 tegen 0,30.
+controle("de hele beurt tot de herstart komt uit de kwartieropslag, met de prijs van toen en de maat vanaf het vrijgeven",
+         abs(s62c["kwh"] - 70 / 60 * 2) < 0.05 and abs(s62c["betaald"] - 70 / 60 * 2 * 0.18) < 0.02
+         and not s62c["maat_onbekend"] and abs(s62c["maat"] - 70 / 60 * 2 * 0.30) < 0.03, f"{s62c['kwh']} {s62c['betaald']} {s62c['maat']}")
+coachmod.async_get_archive = archief_oud
+
+# En een beurt die afliep terwijl de coach weg was: afronden met wat er stond,
+# anders blijft de vrijgave staan en start hij zo nog een keer.
+inst62d = instellingen(devices=[LAADPAAL, VW62])
+inst62d["contract"] = inst56["contract"]
+inst62d["strategy"]["schedules"].append(inst62["strategy"]["schedules"][-1])
+inst62d["ready_devices"] = ["dev-vaatwasser"]
+hass62d, _, coach62d = bouw(dict(huis62), inst62d)
+async def ronde62d(c, nu):
+    hass62d.services.verstuurd.clear()
+    await hass62d.afmaken()
+    await c._round(nu)
+    await hass62d.afmaken()
+    return c.state.get("dev-vaatwasser") or {}, [d[2]["message"] for d in hass62d.services.verstuurd if d[0] == "notify" and "Vaatwasser" in d[2].get("message", "")]
+asyncio.run(ronde62d(coach62d, dt.datetime(2026, 9, 7, 19, 5)))
+asyncio.run(ronde62d(coach62d, dt.datetime(2026, 9, 8, 1, 0, 30)))
+hass62d.states.zet("sensor.vaatwasser_status", "run")
+hass62d.states.zet("sensor.vaatwasser_vermogen", "2000")
+for minuut in range(2, 31):
+    asyncio.run(ronde62d(coach62d, dt.datetime(2026, 9, 8, 1, minuut)))
+# Weg tot 02:30; intussen is hij klaar en weer "ready".
+hass62d.states.zet("sensor.vaatwasser_status", "ready")
+hass62d.states.zet("sensor.vaatwasser_vermogen", "0")
+coach62e = coachmod.ChargerCoach(hass62d)
+coach62e._sleep = lambda seconds: asyncio.sleep(0)
+b, m = asyncio.run(ronde62d(coach62e, dt.datetime(2026, 9, 8, 2, 30)))
+print(f"  afgelopen terwijl de coach weg was: {m}")
+controle("een beurt die afliep terwijl de coach weg was krijgt zijn verslag met wat er bewaard was, en de vrijgave gaat eraf",
+         len(m) == 1 and "Vaatwasser is klaar (Eco 50 °C)" in m[0] and "van 01:02 tot 01:27" in m[0]
+         and "dev-vaatwasser" not in (inst62d.get("ready_devices") or []), f"{m} {inst62d.get('ready_devices')}")
+klaar62d = [x for x in asyncio.run(coachmod.async_get_beurten(hass62d).async_list()) if x["device"] == "dev-vaatwasser"]
+controle("en de regel in de opslag is afgerond", len(klaar62d) == 1 and klaar62d[0]["complete"], f"{klaar62d}")
+controle("maar er is niets gemeten, want het echte einde is niet gezien en 25 minuten is geen Eco",
+         not [r for r in inst62d.get("program_measured") or [] if r.get("device") == "dev-vaatwasser"], f"{inst62d.get('program_measured')}")
+b, m = asyncio.run(ronde62d(coach62e, dt.datetime(2026, 9, 8, 2, 31)))
+controle("daarna wacht hij op een nieuwe vrijgave en drukt hij nergens op",
+         b.get("rule") == "not-released" and not m and not [d for d in hass62d.services.verstuurd if d[0] == "button"], f"{b.get('rule')} {m}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

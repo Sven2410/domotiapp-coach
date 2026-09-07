@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
@@ -195,12 +195,22 @@ START_OPNIEUW = timedelta(minutes=5)
 
 # Een apparaat zonder startknop, op een meetstekker (merk "overig"). De coach
 # ziet aan het vermogen of hij draait: boven DRAAI_W is draaien, en klaar is
-# hij als het STIL_KLAAR lang onder die grens bleef. Vijftien minuten, want
+# hij als het STIL_KLAAR lang onder die grens bleef. Een half uur, want
 # tussen twee spoelgangen staat een vaatwasser gerust een paar minuten stil,
-# en het drogen aan het eind kan bij sommige machines bijna niets trekken.
-# Sven op 06-09-2026: "adviseren en meten inderdaad, met zet hem aan."
+# en het drogen aan het eind trekt bij sommige machines bijna niets: die van
+# Sven zette op 07-09-2026 een kwartier voor het eind de deur open voor de
+# stoom en deed daarna twintig minuten vrijwel niets, en een kwartier was
+# daarmee te kort. Sven op 06-09-2026: "adviseren en meten inderdaad, met
+# zet hem aan."
 DRAAI_W = 30.0
-STIL_KLAAR = timedelta(minutes=15)
+STIL_KLAAR = timedelta(minutes=30)
+# Een beurt die al liep toen de coach begon (een herstart middenin): het gat
+# tussen de laatste opslag en nu komt uit de kwartieropslag, maar die haalt
+# na een herstart zelf eerst in wat hij miste. Daarom even wachten.
+TERUGREKENEN_WACHT = timedelta(minutes=2)
+# Hoe ver terug de coach in de geschiedenis kijkt naar het begin van een
+# beurt die hij niet zelf zag beginnen.
+PROGRAMMA_TERUGKIJK = timedelta(hours=8)
 # Zegt de coach "zet hem aan" en gebeurt er niets, dan één keer opnieuw.
 HERINNERING = timedelta(minutes=45)
 # Een meting weegt mee als lopend gemiddelde over zoveel beurten; daarna
@@ -405,6 +415,36 @@ def _text(hass: HomeAssistant, entity_id: str | None) -> str:
         return ""
     state = hass.states.get(entity_id)
     return "" if state is None else str(state.state).lower()
+
+
+def _eindtijd(hass: HomeAssistant, entity_id: str | None, now: datetime) -> datetime | None:
+    """Wanneer het apparaat zelf zegt klaar te zijn, of None.
+
+    Home Connect geeft de resterende tijd als een tijdstip (de sensor
+    `remaining_program_time`, een timestamp); andere integraties geven de
+    minuten of de seconden die nog resten. Allebei hetzelfde antwoord op
+    dezelfde vraag, als lokaal tijdstip zonder zone, zoals `now`. Sven op
+    07-09-2026: "pak de eindtijd van de integratie."
+    """
+    if not entity_id:
+        return None
+    state = hass.states.get(entity_id)
+    if state is None or state.state in ("unknown", "unavailable", ""):
+        return None
+    try:
+        getal = float(state.state)
+    except (TypeError, ValueError):
+        moment = _tijdstip(state.state)
+        if moment is None:
+            return None
+        if moment.tzinfo is not None:
+            moment = dt_util.as_local(moment).replace(tzinfo=None)
+        return moment
+    eenheid = str(state.attributes.get("unit_of_measurement") or "").lower()
+    seconden = getal if eenheid in ("s", "sec", "seconds") else getal * 60.0
+    if seconden < 0:
+        return None
+    return now + timedelta(seconds=seconden)
 
 
 def _wanneer(now: datetime, moment: datetime) -> str:
@@ -1124,6 +1164,10 @@ class ChargerCoach:
         entities = device.get("entities") or {}
         naam = device.get("name") or "De vaatwasser"
         sessie = self._programma.setdefault(device_id, self._lege_programma_sessie(now))
+        # De eerste ronde waarin deze coach het apparaat ziet: liep er toen al
+        # een beurt, dan is dit een herstart middenin.
+        eerste = not sessie.get("gezien")
+        sessie["gezien"] = True
 
         # Zonder startknop is het een apparaat op een meetstekker: de coach
         # zegt wanneer, de bewoner drukt, en het vermogen zegt of hij draait.
@@ -1153,6 +1197,9 @@ class ChargerCoach:
         deur = _text(self.hass, entities.get("door")).strip().lower()
         deur_open = None if not deur else deur in ("open", "on")
         watts = _watts(self.hass, device.get("entity"))
+        # Wanneer het apparaat zelf zegt klaar te zijn; alleen zolang hij
+        # draait zegt dat iets.
+        eind = _eindtijd(self.hass, entities.get("remaining"), now)
 
         if handmatig:
             status = self._status_uit_vermogen(sessie, now, watts)
@@ -1193,9 +1240,33 @@ class ChargerCoach:
         )
 
         draait = status in DRAAIT
+        if not draait and sessie["gestart"] is None and eerste:
+            # Een beurt die in de opslag nog liep, maar nu niet meer draait:
+            # hij is afgelopen terwijl de coach weg was. Afronden met wat er
+            # stond (het einde is dan de laatste opslag, hooguit vijf minuten
+            # te vroeg), anders blijft de vrijgave staan en start hij zo nog
+            # een keer.
+            regel = self._beurt_open.get(device_id)
+            if regel is not None and regel.get("kind") == "programma":
+                self._beurt_open.pop(device_id, None)
+                if self._programma_uit_regel(sessie, regel, tabel):
+                    einde = _tijdstip(regel.get("ended"))
+                    einde = einde.replace(tzinfo=None) if einde is not None else now
+                    sessie["gemeld"].add("klaar")
+                    await self._async_programma_klaar(
+                        settings, device, naam, sessie, now, min(einde, now), meten=False
+                    )
+                    return
         if draait and sessie["gestart"] is None:
-            sessie["gestart"] = now
+            # Liep hij al toen de coach begon (een herstart middenin), dan
+            # de beurt oppakken waar hij was, in plaats van nu te beginnen.
+            if eerste:
+                await self._async_programma_hervatten(settings, device, sessie, tabel, now)
+            if sessie["gestart"] is None:
+                sessie["gestart"] = now
             sessie["laatst"] = now
+            if sessie.get("programma") is not None and programma is None:
+                programma = sessie["programma"]
             # Sven op 07-09-2026: "ik wil wel meldingen ontvangen dat de
             # vaatwasser gestart is en klaar is." Dus per beurt twee: deze en
             # het verslag. "Gestart" als de coach erop drukte of erom vroeg;
@@ -1204,10 +1275,14 @@ class ChargerCoach:
                 sessie["gemeld"].add("gestart")
                 zelf = sessie.get("gedrukt") is not None or sessie.get("gevraagd") is not None
                 wat = f" ({programma.label})" if programma is not None else ""
-                klaar = (
-                    f", klaar rond {(now + timedelta(minutes=programma.minutes)):%H:%M}"
-                    if programma is not None and programma.minutes else ""
-                )
+                # Het apparaat zelf weet het beste wanneer hij klaar is;
+                # zonder die sensor de duur uit de tabel.
+                if eind is not None and eind > now:
+                    klaar = f", klaar rond {eind:%H:%M}"
+                elif programma is not None and programma.minutes:
+                    klaar = f", klaar rond {(now + timedelta(minutes=programma.minutes)):%H:%M}"
+                else:
+                    klaar = ""
                 await self._async_tell(f"{naam} {'is gestart' if zelf else 'draait'}{wat}{klaar}.")
             sessie["gedrukt"] = None
         if draait:
@@ -1216,9 +1291,22 @@ class ChargerCoach:
             # start en wat hij op dat moment trok.
             if watts is not None and sessie["gestart"] is not None:
                 sessie["punten"].append(((now - sessie["gestart"]).total_seconds() / 60.0, watts))
+            # Het gat van een herstart, zodra de kwartieropslag het heeft.
+            gat = sessie.get("terugrekenen")
+            if gat is not None and now >= (sessie.get("terugrekenen_na") or now):
+                sessie["terugrekenen"] = None
+                await self._async_programma_terugrekenen(settings, device, sessie, *gat)
+            # Elke vijf minuten naar de opslag, en meteen als de beurt net
+            # begint: zo overleeft een lopende beurt een herstart.
+            bewaard = sessie.get("bewaard")
+            if bewaard is None or (now - bewaard).total_seconds() >= 300:
+                sessie["bewaard"] = now
+                self._beurt_schrijven(self._programma_regel(device, naam, sessie, now, now, klaar=False))
         sessie["laatst"] = now
 
         mag = level == LEVEL_STEER or (level == LEVEL_PROPOSE and device_id in self._approved)
+        if draait and eind is not None and eind > now and decision.rule == "running":
+            decision = replace(decision, reason=f"Hij draait, klaar rond {eind:%H:%M}.")
         self.state[device_id] = {
             **asdict(decision),
             "kind": "programma",
@@ -1228,6 +1316,7 @@ class ChargerCoach:
             "approved": device_id in self._approved,
             "running": draait,
             "started_at": sessie["gestart"].isoformat() if sessie["gestart"] else None,
+            "ends_at": eind.isoformat() if draait and eind is not None else None,
             "released": released,
             "manual": handmatig,
             "program": programma.key if programma is not None else "",
@@ -1239,6 +1328,10 @@ class ChargerCoach:
         if status in KLAAR or (sessie["gestart"] is not None and not draait and status in ("ready", "inactive", "")):
             if sessie["gestart"] is not None and "klaar" not in sessie["gemeld"]:
                 sessie["gemeld"].add("klaar")
+                gat = sessie.get("terugrekenen")
+                if gat is not None:
+                    sessie["terugrekenen"] = None
+                    await self._async_programma_terugrekenen(settings, device, sessie, *gat)
                 # Zonder statussensor is "klaar" het moment waarop hij voor het
                 # laatst iets trok, niet het moment waarop de coach dat doorhad.
                 einde = sessie.get("laatst_actief") if handmatig else None
@@ -1327,6 +1420,17 @@ class ChargerCoach:
             # stonden, om te zien wie er bewoog.
             "schakelaar": None,
             "vrij_vorig": None,
+            # Wanneer de lopende beurt voor het laatst naar de opslag ging, en
+            # onder welke sleutel; die blijft dezelfde, ook als het
+            # terugrekenen het vrijgavemoment nog vindt.
+            "bewaard": None,
+            "regel_id": None,
+            # Na een herstart: het stuk (van, tot) dat nog uit de
+            # kwartieropslag moet komen, en vanaf wanneer dat mag.
+            "terugrekenen": None,
+            "terugrekenen_na": None,
+            # Of deze coach het apparaat al eens gezien heeft; zie `eerste`.
+            "gezien": False,
         }
 
     @staticmethod
@@ -1419,8 +1523,13 @@ class ChargerCoach:
         sessie: dict[str, Any],
         now: datetime,
         einde: datetime | None = None,
+        meten: bool = True,
     ) -> None:
-        """Het verslag, de beurt in de opslag, de meting bewaren, en de vrijgave eraf."""
+        """Het verslag, de beurt in de opslag, de meting bewaren, en de vrijgave eraf.
+
+        `meten` uit als het einde niet echt gezien is (afgelopen terwijl de
+        coach weg was): een te korte duur hoort niet in de tabel.
+        """
         programma = sessie.get("programma")
         gestart: datetime = sessie["gestart"]
         einde = einde or now
@@ -1439,38 +1548,347 @@ class ChargerCoach:
         )
         # Wat er gemeten is gaat in de instellingen, zodat de volgende beurt
         # met de echte duur, het echte verbruik en het verloop rekent.
-        await self._async_meting_bewaren(settings, device, programma, sessie, gestart, einde)
-        vrij = sessie.get("vrijgegeven") or gestart
-        self._beurt_schrijven(
-            {
-                "id": f"{device.get('id', '')}:{vrij.replace(microsecond=0).isoformat()}",
-                "device": device.get("id", ""),
-                "name": naam,
-                "kind": "programma",
-                "car": programma.label if programma is not None else "",
-                "plugged_at": vrij.replace(microsecond=0).isoformat(),
-                "started": gestart.replace(microsecond=0).isoformat(),
-                "ended": einde.replace(microsecond=0).isoformat(),
-                "kwh": round(kwh, 3),
-                "solar_kwh": round(sessie["zon_kwh"], 3),
-                "paid": round(betaald, 4),
-                "ref_price": None,
-                "ref_feed_in": None,
-                "ref_cost": None if maat is None else round(maat, 4),
-                "saved": None if maat is None else round(max(0.0, maat - betaald), 4),
-                "price_unknown": maat is None,
-                "unknown_kwh": 0.0,
-                "baseline": {"kwh": round(kwh, 3), "cost": None if maat is None else round(maat, 4),
-                             "unknown_kwh": 0.0, "points": []},
-                "resumed": False,
-                "complete": True,
-            }
-        )
+        if meten:
+            await self._async_meting_bewaren(settings, device, programma, sessie, gestart, einde)
+        self._beurt_schrijven(self._programma_regel(device, naam, sessie, now, einde, klaar=True))
         # De vrijgave eraf, en de schakelaar mee: de volgende lading vraagt om
         # een nieuwe.
         await self._async_vrijgave_zetten(settings, device.get("id", ""), False)
         await self._async_schakelen(device, False)
-        self._programma[device.get("id", "")] = self._lege_programma_sessie(now)
+        self._programma[device.get("id", "")] = {**self._lege_programma_sessie(now), "gezien": True}
+
+    def _programma_regel(
+        self,
+        device: dict[str, Any],
+        naam: str,
+        sessie: dict[str, Any],
+        now: datetime,
+        einde: datetime,
+        klaar: bool,
+    ) -> dict[str, Any]:
+        """De beurt van een programma-apparaat zoals hij in de opslag staat.
+
+        Een lopende beurt staat er ook al in, met `complete` op false en
+        alles wat de coach nodig heeft om hem na een herstart op te pakken
+        (`session`); de afgeronde regel heeft dat niet meer nodig.
+        """
+        programma = sessie.get("programma")
+        gestart: datetime = sessie["gestart"]
+        vrij = sessie.get("vrijgegeven") or gestart
+        kwh = sessie["kwh"]
+        betaald = sessie["betaald"]
+        maat = None if sessie["maat_onbekend"] or sessie["vrijgegeven"] is None else sessie["maat"]
+        if not sessie.get("regel_id"):
+            sessie["regel_id"] = f"{device.get('id', '')}:{vrij.replace(microsecond=0).isoformat()}"
+        regel = {
+            "id": sessie["regel_id"],
+            "device": device.get("id", ""),
+            "name": naam,
+            "kind": "programma",
+            "car": programma.label if programma is not None else "",
+            "program": programma.key if programma is not None else "",
+            "plugged_at": vrij.replace(microsecond=0).isoformat(),
+            "started": gestart.replace(microsecond=0).isoformat(),
+            "ended": einde.replace(microsecond=0).isoformat(),
+            "kwh": round(kwh, 3),
+            "solar_kwh": round(sessie["zon_kwh"], 3),
+            "paid": round(betaald, 4),
+            "ref_price": None,
+            "ref_feed_in": None,
+            "ref_cost": None if maat is None else round(maat, 4),
+            "saved": None if maat is None else round(max(0.0, maat - betaald), 4),
+            "price_unknown": maat is None,
+            "unknown_kwh": 0.0,
+            "baseline": {"kwh": round(kwh, 3), "cost": None if maat is None else round(maat, 4),
+                         "unknown_kwh": 0.0, "points": []},
+            "resumed": False,
+            "complete": klaar,
+        }
+        if not klaar:
+            regel["session"] = {
+                "released": sessie["vrijgegeven"].isoformat() if sessie.get("vrijgegeven") else None,
+                "prices": [
+                    {"start": r["start"].isoformat(), "end": r["end"].isoformat(),
+                     "price": r.get("price"), "feed_in": r.get("feed_in")}
+                    for r in (sessie.get("prijzen") or [])
+                ],
+                "points": [[round(m, 2), round(w, 1)] for m, w in (sessie.get("punten") or [])],
+                "told": sorted(sessie.get("gemeld") or ()),
+                "asked": sessie["gevraagd"].isoformat() if sessie.get("gevraagd") else None,
+                "ref_cost_unknown": bool(sessie["maat_onbekend"]),
+                "ref_cost": round(sessie["maat"], 4),
+            }
+        return regel
+
+    async def _async_programma_hervatten(
+        self,
+        settings: dict[str, Any],
+        device: dict[str, Any],
+        sessie: dict[str, Any],
+        tabel: tuple[Any, ...],
+        now: datetime,
+    ) -> None:
+        """Een beurt die al liep toen de coach begon, oppakken waar hij was.
+
+        Sven op 07-09-2026, over een herstart midden in een vaatwasserbeurt:
+        "ja, reken terug." Stond de beurt in de opslag (elke vijf minuten
+        bewaard), dan gaan de tellers daar verder en komt alleen het gat
+        sinds die opslag uit de kwartieropslag. Stond er niets, dan zegt de
+        recorder wanneer hij ging draaien, de vrijgaveschakelaar wanneer hij
+        werd vrijgegeven, en komt de hele beurt tot nu uit de kwartieropslag.
+        Lukt ook dat niet, dan begint de beurt gewoon nu, zoals eerst.
+        """
+        device_id = device.get("id", "")
+        regel = self._beurt_open.get(device_id)
+        if regel is not None and regel.get("kind") == "programma":
+            self._beurt_open.pop(device_id, None)
+            if self._programma_uit_regel(sessie, regel, tabel):
+                van = _tijdstip(regel.get("ended"))
+                van = van.replace(tzinfo=None) if van is not None else sessie["gestart"]
+                sessie["terugrekenen"] = (min(van, now), now)
+                sessie["terugrekenen_na"] = now + TERUGREKENEN_WACHT
+                return
+        try:
+            gestart, vrij = await self._async_programma_begin(device, sessie, now)
+        except Exception:  # noqa: BLE001 - liever nu beginnen dan een ronde die omvalt
+            _LOGGER.exception("kon het begin van de beurt van %s niet vinden", device_id)
+            return
+        if gestart is None:
+            return
+        sessie["gestart"] = gestart
+        sessie["vrijgegeven"] = vrij
+        sessie["terugrekenen"] = (gestart, now)
+        sessie["terugrekenen_na"] = now + TERUGREKENEN_WACHT
+
+    @staticmethod
+    def _programma_uit_regel(
+        sessie: dict[str, Any], regel: dict[str, Any], tabel: tuple[Any, ...]
+    ) -> bool:
+        """De sessie zoals hij in de opslag stond; False als de regel niet deugt."""
+        gestart = _tijdstip(regel.get("started"))
+        if gestart is None:
+            return False
+        extra = regel.get("session") or {}
+        vrij = _tijdstip(extra.get("released"))
+        gevraagd = _tijdstip(extra.get("asked"))
+        prijzen = []
+        for r in extra.get("prices") or []:
+            try:
+                prijzen.append({
+                    "start": datetime.fromisoformat(r["start"]), "end": datetime.fromisoformat(r["end"]),
+                    "price": r.get("price"), "feed_in": r.get("feed_in"),
+                })
+            except (KeyError, TypeError, ValueError):
+                continue
+        sessie["gestart"] = gestart.replace(tzinfo=None)
+        sessie["vrijgegeven"] = vrij.replace(tzinfo=None) if vrij is not None else None
+        sessie["gevraagd"] = gevraagd.replace(tzinfo=None) if gevraagd is not None else None
+        sessie["programma"] = programma_van(regel.get("program") or None, tabel) or sessie.get("programma")
+        sessie["prijzen"] = prijzen
+        sessie["kwh"] = float(regel.get("kwh") or 0.0)
+        sessie["zon_kwh"] = float(regel.get("solar_kwh") or 0.0)
+        sessie["betaald"] = float(regel.get("paid") or 0.0)
+        sessie["maat"] = float(extra.get("ref_cost") or 0.0)
+        sessie["maat_onbekend"] = bool(extra.get("ref_cost_unknown"))
+        sessie["punten"] = [
+            (float(p[0]), float(p[1])) for p in (extra.get("points") or []) if len(p) == 2
+        ]
+        sessie["gemeld"] = set(extra.get("told") or ())
+        sessie["regel_id"] = regel.get("id")
+        return True
+
+    async def _async_programma_begin(
+        self, device: dict[str, Any], sessie: dict[str, Any], now: datetime
+    ) -> tuple[datetime | None, datetime | None]:
+        """Wanneer een beurt die de coach niet zag beginnen begon, en wanneer
+        hij werd vrijgegeven; None voor wat niet te vinden is."""
+        entities = device.get("entities") or {}
+        gestart: datetime | None = None
+        if entities.get("start") and entities.get("status"):
+            # Home Connect: de laatste overgang naar "run" in de recorder.
+            vorige: str | None = None
+            for moment, toestand in await self._async_geschiedenis(
+                entities["status"], now - PROGRAMMA_TERUGKIJK, now
+            ):
+                plat = toestand.strip().lower().split(".")[-1]
+                if plat in DRAAIT and (vorige is None or vorige not in DRAAIT):
+                    gestart = moment
+                vorige = plat
+        elif device.get("entity"):
+            # Op een meetstekker: het laatste kwartier waarin hij ging trekken
+            # na een stilte van minstens STIL_KLAAR.
+            rijen = (await self._async_kwartieren([device["entity"]], now - PROGRAMMA_TERUGKIJK, now)).get(
+                device["entity"]
+            ) or []
+            stil_sinds: datetime | None = now - PROGRAMMA_TERUGKIJK
+            for rij in rijen:
+                t0 = datetime.fromtimestamp(int(rij["start"]))
+                if float(rij.get("gemiddeld") or 0.0) >= DRAAI_W:
+                    if stil_sinds is not None and t0 - stil_sinds >= STIL_KLAAR:
+                        gestart = t0
+                    stil_sinds = None
+                elif stil_sinds is None:
+                    stil_sinds = t0
+        if gestart is None or gestart >= now:
+            return None, None
+        vrij: datetime | None = None
+        if entities.get("release_switch"):
+            for moment, toestand in await self._async_geschiedenis(
+                entities["release_switch"], gestart - timedelta(days=3), gestart
+            ):
+                if toestand == "on":
+                    vrij = moment
+        return gestart, vrij
+
+    async def _async_programma_terugrekenen(
+        self,
+        settings: dict[str, Any],
+        device: dict[str, Any],
+        sessie: dict[str, Any],
+        van: datetime,
+        tot: datetime,
+    ) -> None:
+        """Het stuk van een beurt dat de coach niet zag, uit de kwartieropslag.
+
+        Dezelfde tellers als `_programma_tellen` live bijhoudt: kWh, het
+        deel dat van eigen zon kwam, wat het kostte, wat meteen starten
+        gekost had, en het verloop voor het profiel. Alleen gemeten getallen;
+        een kwartier zonder prijs maakt de maat onbekend.
+        """
+        if tot <= van or not device.get("entity"):
+            return
+        gestart = sessie["gestart"]
+        vrij = sessie.get("vrijgegeven")
+        try:
+            sources = settings.get("sources") or {}
+            signed = sources.get("grid_mode") == "signed"
+            netten = [sources.get("grid_signed")] if signed else [sources.get("grid_export"), sources.get("grid_import")]
+            netten = [e for e in netten if e]
+            rijen = await self._async_kwartieren([device["entity"], *netten], van - timedelta(minutes=15), tot)
+            # De maat rekent met de prijzen vanaf het vrijgeven, dus die
+            # horen er ook bij.
+            prijs_op = await self._async_prijs_functie(settings, min(van, vrij or van), tot)
+        except Exception:  # noqa: BLE001 - dan blijft het gat een gat
+            _LOGGER.exception("terugrekenen van de beurt van %s mislukt", device.get("id", ""))
+            return
+        per_start = {e: {int(r["start"]): r for r in rijen.get(e) or []} for e in netten}
+        for rij in rijen.get(device["entity"]) or []:
+            t0 = datetime.fromtimestamp(int(rij["start"]))
+            t1 = t0 + timedelta(minutes=15)
+            if t1 <= van or t0 >= tot:
+                continue
+            sec = float(rij.get("seconden") or 0.0)
+            if t0 < van:
+                sec = min(sec, (t1 - van).total_seconds())
+            if t1 > tot:
+                sec = min(sec, (tot - t0).total_seconds())
+            watts = max(0.0, float(rij.get("gemiddeld") or 0.0))
+            if sec <= 0 or watts <= 0:
+                continue
+            netto: float | None = None
+            if signed and netten:
+                r = per_start.get(netten[0], {}).get(int(rij["start"]))
+                if r is not None:
+                    s = float(r.get("gemiddeld") or 0.0)
+                    netto = -(-s if sources.get("grid_signed_invert") else s)
+            elif len(netten) == 2:
+                re_ = per_start[netten[0]].get(int(rij["start"]))
+                ri = per_start[netten[1]].get(int(rij["start"]))
+                if re_ is not None and ri is not None:
+                    netto = float(re_.get("gemiddeld") or 0.0) - float(ri.get("gemiddeld") or 0.0)
+            kwh = watts / 1000.0 * sec / 3600.0
+            zon_deel = max(0.0, min(1.0, (netto + watts) / watts)) if netto is not None else 0.0
+            begin = max(t0, van)
+            koop, terug = self._prijs_toen(settings, sessie, prijs_op, begin)
+            sessie["kwh"] += kwh
+            sessie["zon_kwh"] += kwh * zon_deel
+            if koop is not None:
+                sessie["betaald"] += kwh * ((1 - zon_deel) * koop + zon_deel * (terug or 0.0))
+            # Het verloop: één punt per vijf minuten, zodat het profiel het
+            # kwartier vult zoals de live meting dat doet.
+            for stap in range(3):
+                minuut = (t0 + timedelta(minutes=5 * stap) - gestart).total_seconds() / 60.0
+                if minuut >= 0:
+                    sessie["punten"].append((minuut, watts))
+            if vrij is not None:
+                toen = vrij + (begin - gestart)
+                koop_toen, _ = self._prijs_toen(settings, sessie, prijs_op, toen)
+                if koop_toen is None:
+                    sessie["maat_onbekend"] = True
+                else:
+                    sessie["maat"] += kwh * koop_toen
+        sessie["punten"].sort()
+
+    def _prijs_toen(
+        self, settings: dict[str, Any], sessie: dict[str, Any], prijs_op: Any, moment: datetime
+    ) -> tuple[float | None, float | None]:
+        """Wat een kWh op een moment kostte: eerst de lijst die bij het
+        vrijgeven bewaard is, dan de recorder, dan de prijssensor van nu."""
+        rij = price_now(sessie.get("prijzen") or [], moment)
+        if rij is not None and rij.get("price") is not None:
+            return rij["price"], rij.get("feed_in")
+        if prijs_op is not None:
+            koop, terug = prijs_op(moment)
+            if koop is not None:
+                return koop, terug
+        return self._prijs_nu(settings, moment)
+
+    async def _async_prijs_functie(
+        self, settings: dict[str, Any], van: datetime, tot: datetime
+    ) -> Any:
+        """Wat een kWh op een moment in het verleden kostte en opbracht.
+
+        Bij een vast contract het tarief; bij een dynamisch contract uit de
+        geschiedenis van de prijssensor. None als die er niet is.
+        """
+        contract = settings.get("contract") or {}
+        dynamic = contract.get("dynamic") or {}
+        tarief = self._tariff(settings)
+        if contract.get("type") != "dynamic":
+            return lambda moment: (tarief.buy, tarief.feed_in)
+        bron = dynamic.get("all_in_entity") if dynamic.get("source") == "all_in" else dynamic.get("market_entity")
+        prijzen: list[tuple[datetime, float]] = []
+        for moment, toestand in await self._async_geschiedenis(bron, van - timedelta(hours=1), tot):
+            try:
+                prijzen.append((moment, float(toestand)))
+            except ValueError:
+                continue
+        if not prijzen:
+            return None
+        if dynamic.get("source") != "all_in":
+            prijzen = [(m, self._all_in(p, dynamic)) for m, p in prijzen]
+        markt: list[tuple[datetime, float]] = []
+        if not self._salderen(contract) and dynamic.get("market_entity"):
+            for moment, toestand in await self._async_geschiedenis(
+                dynamic.get("market_entity"), van - timedelta(hours=1), tot
+            ):
+                try:
+                    markt.append((moment, float(toestand)))
+                except ValueError:
+                    continue
+        kosten = float(dynamic.get("feed_in_costs") or 0)
+        opslag = float(dynamic.get("supplier_markup") or 0) * (1 + float(dynamic.get("vat_percent") or 0) / 100)
+        salderen = self._salderen(contract)
+
+        def laatste(reeks: list[tuple[datetime, float]], moment: datetime) -> float | None:
+            waarde = None
+            for m, w in reeks:
+                if m <= moment:
+                    waarde = w
+                else:
+                    break
+            return waarde
+
+        def prijs_op(moment: datetime) -> tuple[float | None, float | None]:
+            koop = laatste(prijzen, moment)
+            if koop is None:
+                return None, None
+            if salderen:
+                return koop, koop - opslag - kosten
+            m = laatste(markt, moment)
+            return koop, (m - kosten) if m is not None else None
+
+        return prijs_op
 
     async def _async_vrijgave_zetten(self, settings: dict[str, Any], device_id: str, aan: bool) -> None:
         """De vrijgave van één apparaat aan of uit, in de opslag en op de eventbus."""
@@ -3308,8 +3726,6 @@ class ChargerCoach:
     ) -> dict[str, list[dict[str, float]]]:
         """De kwartieren uit de eigen opslag, of leeg als die er niet is."""
         try:
-            from .archive import async_get_archive
-
             return await async_get_archive(self.hass).async_lees(entity_ids, start, einde)
         except Exception as fout:  # noqa: BLE001
             _LOGGER.warning("kon de kwartieropslag niet lezen: %s", fout)
