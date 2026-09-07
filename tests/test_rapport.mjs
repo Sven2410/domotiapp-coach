@@ -698,9 +698,30 @@ proef("het scherm tekent een kop per dag en een rij per melding", () => {
 // maand, jaar, van elk apparaat." Het rekenwerk per beurt zit in de coach; hier
 // wordt alleen opgeteld, en een beurt zonder prijs telt niet mee in het geld.
 
-const { beurtenIn, totalen, perApparaat, opmerking } = await import(
+const { beurtenIn, totalen, perApparaat, opmerking, woorden, soort } = await import(
   "../custom_components/domotiapp_coach/frontend/src/savings.js"
 );
+
+// Sven op 07-09-2026, bij de eerste vaatwasserbeurt onder Bespaard: "hij heeft
+// het hier over de paal, maar dat moet vaatwasser zijn. Ook kan je niet een
+// vaatwasser inpluggen."
+proef("de woorden van Bespaard volgen wat er in de lijst staat", () => {
+  const auto = { kind: "laden", name: "Laadpaal" };
+  const oud = { name: "Laadpaal" };
+  const vaat = { kind: "programma", name: "Vaatwasser" };
+  assert.equal(soort(oud), "laden", "een beurt van voor v0.57.2 is een laadbeurt");
+  assert.deepEqual([woorden([auto]).wanneer, woorden([auto]).hoeveel, woorden([auto]).vanaf],
+    ["Ingeplugd", "Geladen", "Vanaf inpluggen"]);
+  assert.deepEqual([woorden([vaat]).wanneer, woorden([vaat]).hoeveel, woorden([vaat]).vanaf],
+    ["Vrijgegeven", "Verbruikt", "Meteen starten"]);
+  assert.ok(!woorden([vaat]).uitleg.includes("paal") && !woorden([vaat]).uitleg.includes("inplug"),
+    "over een vaatwasser geen paal en geen inpluggen");
+  assert.deepEqual([woorden([auto, vaat]).wanneer, woorden([auto, vaat]).hoeveel, woorden([auto, vaat]).vanaf],
+    ["Vanaf", "Verbruikt", "Zonder coach"]);
+  assert.equal(woorden([]).wanneer, "Ingeplugd");
+  assert.equal(opmerking({ ...vaat, resumed: true, ref_price: null, price_unknown: true, complete: true }),
+    "na een herstart, prijs bij vrijgeven onbekend");
+});
 
 proef("bespaard telt per periode en per apparaat op, zonder verzonnen geld", () => {
   const beurten = [
