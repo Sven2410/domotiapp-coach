@@ -35,7 +35,7 @@ from .const import (
     PRICE_INTERVAL_QUARTER,
 )
 from .ontvangers import SOORTEN, alleen_eigen, nieuwe_persoon, zet_eigen_soorten
-from .storage import async_get_store, schema_bijwerken
+from .storage import async_get_store, met_soort, schema_bijwerken
 
 
 def _schema(mapping: dict) -> vol.Schema:
@@ -788,6 +788,9 @@ async def async_savings_list(
     from .storage import async_get_beurten
 
     items = await async_get_beurten(hass).async_list()
+    settings = await async_get_store(hass).async_load()
+    # Een beurt van voor v0.57.2 zegt zijn soort niet; het apparaat wel.
+    items = met_soort(items, settings.get("devices"))
     connection.send_result(msg["id"], list(reversed(items)))
 
 

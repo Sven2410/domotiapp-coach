@@ -18,6 +18,7 @@ from homeassistant.helpers.storage import Store
 
 from .ontvangers import migreer_load_alert
 from .const import (
+    PROGRAMMA_TYPES,
     BEURTEN_KEY,
     BEURTEN_MAX,
     BEURTEN_VERSION,
@@ -330,6 +331,28 @@ class BeurtenStore:
         if len(rest) != len(items):
             self._items = rest
             await self._store.async_save({"items": self._items})
+
+
+def met_soort(items: list[dict[str, Any]], devices: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Elke beurt met zijn soort: "laden" of "programma".
+
+    Een beurt van voor v0.57.2 zegt het niet zelf, maar het apparaat wel:
+    een vaatwasser draait programma's. Sven op 07-09-2026, bij de beurt
+    van die ochtend onder Bespaard: "ik zie nog dingen terugkomen van de
+    laadpaal." Zonder deze aanvulling kreeg die beurt de woorden van de
+    paal, ingeplugd en geladen.
+    """
+    typen = {
+        d.get("id"): d.get("type") for d in (devices or []) if isinstance(d, dict) and d.get("id")
+    }
+    uit = []
+    for item in items:
+        if item.get("kind"):
+            uit.append(item)
+            continue
+        soort = "programma" if typen.get(item.get("device")) in PROGRAMMA_TYPES else "laden"
+        uit.append({**item, "kind": soort})
+    return uit
 
 
 def async_get_beurten(hass: HomeAssistant) -> BeurtenStore:
