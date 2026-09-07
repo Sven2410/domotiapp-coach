@@ -328,6 +328,14 @@ class DacViewDevices extends DacEditorElement {
    * te wissen als er met het verkeerde programma gemeten is. Sven op
    * 06-09-2026: "ik wil dat kunnen aanpassen, wel moet hij dit als uitgangspunt
    * hebben", en "dat gaan meten en dan die waardes in kunnen vullen."
+   *
+   * Een gemeten rij staat op slot. Sven op 07-09-2026, na de eerste echte
+   * beurt: "er staan nog wel mijn dingen in; moeten we niet iets maken dat
+   * als hij het gemeten heeft, dat dan geblokkeerd wordt tot je het wist, en
+   * dat je het zelf kan invullen of toch iets overschrijven?" De velden tonen
+   * dan wat er gemeten is en zijn niet te bewerken, want dat is waar de coach
+   * mee rekent; "wissen" haalt de meting weg en geeft de eigen getallen terug,
+   * "overnemen" maakt de meting de eigen opgave en haalt hem dan weg.
    */
   programsHtml_(device, index) {
     if (!PROGRAM_TYPES.includes(device.type) || !brandMeta(device)) return "";
@@ -356,28 +364,38 @@ class DacViewDevices extends DacEditorElement {
           ? `<span class="name">${text(program.label)}</span>`
           : `<input type="text" data-prog-field="label" data-index="${index}" data-row="${row}"
                    value="${attr(program.label)}" placeholder="Naam" autocomplete="off" spellcheck="false">`;
+        // Gemeten: de velden tonen de meting en staan op slot.
+        const slot = meting ? " disabled" : "";
+        const minuten = meting ? Math.round(Number(meting.minutes)) : program.minutes;
+        const energie = meting ? Math.round(Number(meting.kwh) * 100) / 100 : program.kwh;
+        const piek = meting ? Math.round(Number(meting.peak_w) || 0) : (program.peak_w ?? "");
         return `
-      <tr>
+      <tr${meting ? ' class="locked"' : ""}>
         <td>${naam}</td>
-        <td class="tnum"><input type="number" min="1" max="1440" step="1" inputmode="numeric"
-                   data-prog-field="minutes" data-index="${index}" data-row="${row}" value="${attr(program.minutes)}"> min</td>
-        <td class="tnum"><input type="number" min="0" max="50" step="0.01" inputmode="decimal"
-                   data-prog-field="kwh" data-index="${index}" data-row="${row}" value="${attr(program.kwh)}"> kWh</td>
-        <td class="tnum"><input type="number" min="0" max="20000" step="10" inputmode="numeric"
-                   data-prog-field="peak_w" data-index="${index}" data-row="${row}" value="${attr(program.peak_w ?? "")}"> W</td>
+        <td class="tnum"><input type="number" min="1" max="1440" step="1" inputmode="numeric"${slot}
+                   data-prog-field="minutes" data-index="${index}" data-row="${row}" value="${attr(minuten)}"> min</td>
+        <td class="tnum"><input type="number" min="0" max="50" step="0.01" inputmode="decimal"${slot}
+                   data-prog-field="kwh" data-index="${index}" data-row="${row}" value="${attr(energie)}"> kWh</td>
+        <td class="tnum"><input type="number" min="0" max="20000" step="10" inputmode="numeric"${slot}
+                   data-prog-field="peak_w" data-index="${index}" data-row="${row}" value="${attr(piek)}"> W</td>
         <td class="measured">${gemeten
-          ? `<span>${gemeten}</span> <button type="button" class="link" data-prog-forget="${key}" data-index="${index}">wissen</button>`
+          ? `<span>${gemeten}</span>
+             <button type="button" class="link" data-prog-take="${key}" data-index="${index}" title="De meting wordt je eigen opgave">overnemen</button>
+             <button type="button" class="link" data-prog-forget="${key}" data-index="${index}" title="Terug naar je eigen getallen">wissen</button>`
           : `<span class="none">nog niet gemeten</span>`}</td>
         ${vast ? "" : `<td><button type="button" class="remove small" data-prog-remove="${row}" data-index="${index}" aria-label="Programma verwijderen">${icons.trash}</button></td>`}
       </tr>`;
       })
       .join("");
 
-    const uitleg = manual
+    const gemetenUitleg = measured.size
+      ? " Een gemeten programma staat op slot en toont de meting, want daar rekent de coach mee. \"Wissen\" geeft je eigen getallen terug, \"overnemen\" maakt de meting je eigen opgave."
+      : "";
+    const uitleg = (manual
       ? "Deze programma's kun je op de kaart kiezen; typ de namen zoals ze op je machine heten. Duur en verbruik zijn opgaven van de fabrikant als uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft op de vermogenssensor, rekent de coach met wat er gemeten is."
       : options.length
         ? "De programma's van je machine, zoals de select-entiteit ze noemt. De opgaven van de fabrikant zijn het uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft, rekent de coach met wat er bij jou gemeten is."
-        : "Vul hierboven \"Programma kiezen\" in, dan komen hier de programma's van je machine te staan. Tot die tijd rekent de coach met de opgaven van de fabrikant hieronder.";
+        : "Vul hierboven \"Programma kiezen\" in, dan komen hier de programma's van je machine te staan. Tot die tijd rekent de coach met de opgaven van de fabrikant hieronder.") + gemetenUitleg;
 
     return `
       <div class="row">
@@ -1014,6 +1032,31 @@ class DacViewDevices extends DacEditorElement {
         this.forgetMeasurement_(Number(button.dataset.index), button.dataset.progForget)
       );
     }
+    for (const button of list.querySelectorAll("[data-prog-take]")) {
+      button.addEventListener("click", () =>
+        this.takeMeasurement_(Number(button.dataset.index), button.dataset.progTake)
+      );
+    }
+  }
+
+  /**
+   * De meting wordt de eigen opgave: duur, energie en piek in de rij, en dan
+   * de meting weg. Het verloop per vijf minuten gaat daarbij verloren; dat
+   * kent de tabel niet. De rij gaat mee met Opslaan, de meting is meteen weg.
+   */
+  async takeMeasurement_(index, key) {
+    const device = this.draft_?.devices?.[index];
+    if (!device) return;
+    const meting = measuredFor(this.draft_, device).get(key);
+    if (!meting) return;
+    if (!hasOwnPrograms(device)) device.programs = this.rowsFor_(device);
+    const program = device.programs.find((p) => (p.key || programKey(p.label)) === key);
+    if (!program) return;
+    program.minutes = Math.max(1, Math.round(Number(meting.minutes) || 0));
+    program.kwh = Math.round((Number(meting.kwh) || 0) * 100) / 100;
+    if (Number(meting.peak_w) > 0) program.peak_w = Math.round(Number(meting.peak_w));
+    await this.forgetMeasurement_(index, key);
+    this.syncSaveBar_();
   }
 
   /**
@@ -1156,6 +1199,10 @@ DacViewDevices.css = /* css */ `
   table.programs.edit input[data-prog-field="label"] { width: 11em; }
   table.programs.edit .name { color: var(--dac-ink); font-weight: 500; }
   table.programs.edit td.measured { color: var(--dac-ink-3); }
+  /* Een gemeten rij: de velden tonen de meting en staan op slot. */
+  table.programs.edit tr.locked input[disabled] {
+    opacity: 0.65; color: var(--dac-ink-2); cursor: not-allowed;
+  }
   table.programs.edit td.measured .none { font-style: italic; }
   table.programs.edit button.link {
     background: none; border: 0; padding: 0 4px; color: var(--dac-accent-hi);

@@ -59,15 +59,73 @@ export function perApparaat(items) {
     .sort((a, b) => b.saved - a.saved);
 }
 
+/**
+ * Wat voor beurt het is: "laden" (een auto aan een paal) of "programma" (een
+ * vaatwasser die één keer start en afdraait). Een beurt van voor v0.57.2 zegt
+ * het niet zelf; dat was toen altijd een laadbeurt.
+ */
+export const soort = (beurt) => (beurt?.kind === "programma" ? "programma" : "laden");
+
+/**
+ * De woorden voor de kop van Bespaard, naar wat er in de lijst staat. Sven op
+ * 07-09-2026, bij de eerste vaatwasserbeurt onder Bespaard: "hij heeft het
+ * hier over de paal, maar dat moet vaatwasser zijn. Ook kan je niet een
+ * vaatwasser inpluggen." Een vaatwasser wordt vrijgegeven en verbruikt; een
+ * auto wordt ingeplugd en geladen. Staan ze door elkaar, dan woorden die
+ * voor allebei kloppen.
+ *
+ * `vanaf` is de kolom met het ijkpunt: wat dezelfde beurt gekost had zonder
+ * de coach, vanaf het inpluggen op vol vermogen of meteen bij het vrijgeven
+ * gestart.
+ */
+export function woorden(items) {
+  const soorten = new Set((items ?? []).map(soort));
+  const alleen = (s) => soorten.size === 1 && soorten.has(s);
+  if (alleen("programma")) {
+    return {
+      wanneer: "Vrijgegeven",
+      hoeveel: "Verbruikt",
+      vanaf: "Meteen starten",
+      uitleg:
+        "Bespaard is wat dezelfde beurt gekost had als het apparaat meteen bij het vrijgeven was gestart, " +
+        "tegen de prijs van dat moment, min wat hij werkelijk kostte. Eigen zon telt tegen wat teruglevering opgebracht had.",
+    };
+  }
+  if (alleen("laden") || !soorten.size) {
+    return {
+      wanneer: "Ingeplugd",
+      hoeveel: "Geladen",
+      vanaf: "Vanaf inpluggen",
+      uitleg:
+        "Bespaard is wat dezelfde kilowatturen gekost hadden als de paal vanaf het inpluggen gewoon op vol " +
+        "vermogen was doorgegaan, uur na uur tegen de prijs van dat uur, min wat ze werkelijk kostten. " +
+        "Eigen zon telt tegen wat teruglevering opgebracht had.",
+    };
+  }
+  return {
+    wanneer: "Vanaf",
+    hoeveel: "Verbruikt",
+    vanaf: "Zonder coach",
+    uitleg:
+      "Bespaard is wat dezelfde beurt zonder de coach gekost had, min wat hij werkelijk kostte: voor een auto " +
+      "vanaf het inpluggen op vol vermogen, uur na uur tegen de prijs van dat uur; voor een vaatwasser meteen bij " +
+      "het vrijgeven gestart. Eigen zon telt tegen wat teruglevering opgebracht had.",
+  };
+}
+
 /** Wat er over een beurt te zeggen is naast de getallen. */
 export function opmerking(beurt) {
   if (!beurt) return "";
   const delen = [];
   if (!beurt.complete) delen.push("loopt nog");
   if (beurt.resumed && (beurt.ref_price === null || beurt.ref_price === undefined)) {
-    // De coach stapte midden in de beurt in en kent het inplugmoment niet,
-    // dus ook de prijs van toen niet: geen ijkpunt, geen verzonnen bedrag.
-    delen.push("na een herstart, prijs bij inpluggen onbekend");
+    // De coach stapte midden in de beurt in en kent het begin niet, dus ook
+    // de prijs van toen niet: geen ijkpunt, geen verzonnen bedrag.
+    delen.push(
+      soort(beurt) === "programma"
+        ? "na een herstart, prijs bij vrijgeven onbekend"
+        : "na een herstart, prijs bij inpluggen onbekend"
+    );
   } else if (beurt.price_unknown) {
     const zonder = Number(beurt.unknown_kwh) || 0;
     delen.push(

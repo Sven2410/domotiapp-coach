@@ -25,7 +25,7 @@ const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
 import { tariff } from "../data-source.js";
 import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
-import { beurtenIn, opmerking, perApparaat, totalen } from "../savings.js";
+import { beurtenIn, opmerking, perApparaat, totalen, woorden } from "../savings.js";
 import {
   PERIODS,
   combine,
@@ -1315,21 +1315,20 @@ class DacViewHistory extends DacElement {
       if (Number.isNaN(t.getTime())) return "";
       return `${String(t.getDate()).padStart(2, "0")}-${String(t.getMonth() + 1).padStart(2, "0")} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
     };
+    const w = woorden(items);
     return {
       vakjes: [
         { label: "Bespaard", waarde: euro(totaal.saved) },
         { label: "Betaald", waarde: euro(totaal.paid) },
-        { label: "Geladen", waarde: kwh(totaal.kwh) },
+        { label: w.hoeveel, waarde: kwh(totaal.kwh) },
         { label: "Waarvan zon", waarde: kwh(totaal.solar_kwh) },
       ],
       uitleg:
-        "Bespaard is wat dezelfde kilowatturen gekost hadden als de paal vanaf het inpluggen " +
-        "gewoon op vol vermogen was doorgegaan, uur na uur tegen de prijs van dat uur, min wat ze " +
-        "werkelijk kostten. Eigen zon telt tegen wat teruglevering opgebracht had." +
+        w.uitleg +
         (totaal.onbekend
           ? ` ${totaal.onbekend === 1 ? "Eén beurt telt" : `${totaal.onbekend} beurten tellen`} niet mee in het geld, omdat de prijs toen niet bekend was.`
           : ""),
-      kop: ["Ingeplugd", "Apparaat", "Geladen", "Zon", "Vanaf inpluggen", "Betaald", "Bespaard"],
+      kop: [w.wanneer, "Apparaat", w.hoeveel, "Zon", w.vanaf, "Betaald", "Bespaard"],
       rijen: items.map((b) => [
         wanneer(b),
         b.car ? `${b.name}, ${b.car}` : b.name,
@@ -1402,16 +1401,17 @@ class DacViewHistory extends DacElement {
       const { value: getal, unit } = energy(value);
       return `${getal} ${unit}`;
     };
+    // De woorden naar wat er in de lijst staat: een auto wordt ingeplugd en
+    // geladen, een vaatwasser vrijgegeven en verbruikt. Sven op 07-09-2026.
+    const w = woorden(items);
     tegels.append(
       tegel("Bespaard", euro(totaal.saved), "var(--dac-solar)"),
       tegel("Betaald", euro(totaal.paid), "var(--dac-grid-in)"),
-      tegel("Geladen", kwh(totaal.kwh)),
+      tegel(w.hoeveel, kwh(totaal.kwh)),
       tegel("Waarvan zon", kwh(totaal.solar_kwh), "var(--dac-solar)")
     );
 
-    const zinnen = [
-      "Bespaard is wat dezelfde kilowatturen gekost hadden als de paal vanaf het inpluggen gewoon op vol vermogen was doorgegaan, uur na uur tegen de prijs van dat uur, min wat ze werkelijk kostten. Eigen zon telt tegen wat teruglevering opgebracht had.",
-    ];
+    const zinnen = [w.uitleg];
     if (totaal.onbekend) {
       zinnen.push(
         `${totaal.onbekend === 1 ? "Eén beurt telt" : `${totaal.onbekend} beurten tellen`} niet mee in het geld, omdat de prijs toen niet bekend was.`
@@ -1430,7 +1430,7 @@ class DacViewHistory extends DacElement {
       return tr;
     };
     if (perDevice.length > 1) {
-      apparaten.append(rij(["Apparaat", "Beurten", "Geladen", "Zon", "Betaald", "Bespaard"], true));
+      apparaten.append(rij(["Apparaat", "Beurten", w.hoeveel, "Zon", "Betaald", "Bespaard"], true));
       for (const a of perDevice) {
         apparaten.append(rij([a.name, String(a.beurten), kwh(a.kwh), kwh(a.solar_kwh), euro(a.paid), euro(a.saved)]));
       }
@@ -1443,7 +1443,7 @@ class DacViewHistory extends DacElement {
       const klok = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
       return this.period_ === "day" ? klok : `${dag} ${klok}`;
     };
-    lijst.append(rij(["Ingeplugd", "Apparaat", "Geladen", "Zon", "Vanaf inpluggen", "Betaald", "Bespaard", ""], true));
+    lijst.append(rij([w.wanneer, "Apparaat", w.hoeveel, "Zon", w.vanaf, "Betaald", "Bespaard", ""], true));
     for (const b of items) {
       lijst.append(
         rij([

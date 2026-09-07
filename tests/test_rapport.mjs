@@ -698,9 +698,30 @@ proef("het scherm tekent een kop per dag en een rij per melding", () => {
 // maand, jaar, van elk apparaat." Het rekenwerk per beurt zit in de coach; hier
 // wordt alleen opgeteld, en een beurt zonder prijs telt niet mee in het geld.
 
-const { beurtenIn, totalen, perApparaat, opmerking } = await import(
+const { beurtenIn, totalen, perApparaat, opmerking, woorden, soort } = await import(
   "../custom_components/domotiapp_coach/frontend/src/savings.js"
 );
+
+// Sven op 07-09-2026, bij de eerste vaatwasserbeurt onder Bespaard: "hij heeft
+// het hier over de paal, maar dat moet vaatwasser zijn. Ook kan je niet een
+// vaatwasser inpluggen."
+proef("de woorden van Bespaard volgen wat er in de lijst staat", () => {
+  const auto = { kind: "laden", name: "Laadpaal" };
+  const oud = { name: "Laadpaal" };
+  const vaat = { kind: "programma", name: "Vaatwasser" };
+  assert.equal(soort(oud), "laden", "een beurt van voor v0.57.2 is een laadbeurt");
+  assert.deepEqual([woorden([auto]).wanneer, woorden([auto]).hoeveel, woorden([auto]).vanaf],
+    ["Ingeplugd", "Geladen", "Vanaf inpluggen"]);
+  assert.deepEqual([woorden([vaat]).wanneer, woorden([vaat]).hoeveel, woorden([vaat]).vanaf],
+    ["Vrijgegeven", "Verbruikt", "Meteen starten"]);
+  assert.ok(!woorden([vaat]).uitleg.includes("paal") && !woorden([vaat]).uitleg.includes("inplug"),
+    "over een vaatwasser geen paal en geen inpluggen");
+  assert.deepEqual([woorden([auto, vaat]).wanneer, woorden([auto, vaat]).hoeveel, woorden([auto, vaat]).vanaf],
+    ["Vanaf", "Verbruikt", "Zonder coach"]);
+  assert.equal(woorden([]).wanneer, "Ingeplugd");
+  assert.equal(opmerking({ ...vaat, resumed: true, ref_price: null, price_unknown: true, complete: true }),
+    "na een herstart, prijs bij vrijgeven onbekend");
+});
 
 proef("bespaard telt per periode en per apparaat op, zonder verzonnen geld", () => {
   const beurten = [
@@ -727,6 +748,35 @@ proef("bespaard telt per periode en per apparaat op, zonder verzonnen geld", () 
   assert.equal(opmerking({ ...beurten[0], resumed: true, ref_price: null, saved: null, price_unknown: true }),
     "na een herstart, prijs bij inpluggen onbekend", "midden in een beurt ingestapt: geen ijkpunt");
   assert.equal(opmerking(beurten[0]), "");
+});
+
+// --- de programmatabel in Apparaten: een gemeten rij staat op slot ----------
+//
+// Sven op 07-09-2026, na de eerste echte beurt: "er staan nog wel mijn dingen
+// in; moeten we niet iets maken dat als hij het gemeten heeft, dat dan
+// geblokkeerd wordt tot je het wist?"
+
+proef("een gemeten programma toont de meting, staat op slot en heeft wissen en overnemen", async () => {
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.feed_ = {};
+  el.draft_ = {
+    devices: [{ id: "vw", type: "vaatwasser", brand: "overig", name: "Vaatwasser", controllable: true, entities: {}, programs: [] }],
+    program_measured: [{ device: "vw", key: "kurz_60", minutes: 90, kwh: 0.825, peak_w: 2264, runs: 1, profile: [] }],
+  };
+  const html = el.programsHtml_(el.draft_.devices[0], 0);
+  const rijen = html.split("<tr").slice(1);
+  const gemeten = rijen.find((r) => r.includes('class="locked"'));
+  assert.ok(gemeten, "de gemeten rij heeft de klasse locked");
+  assert.ok(gemeten.includes("kurz_60") || gemeten.includes("Express"), "en is Express 60");
+  assert.equal((gemeten.match(/ disabled/g) ?? []).length, 3, "duur, energie en piek staan op slot");
+  assert.ok(gemeten.includes('value="90"') && gemeten.includes('value="0.83"') && gemeten.includes('value="2264"'),
+    "de velden tonen de meting, niet de opgave");
+  assert.ok(gemeten.includes("data-prog-take") && gemeten.includes("data-prog-forget"), "overnemen en wissen");
+  const vrij = rijen.filter((r) => !r.includes('class="locked"'));
+  assert.ok(vrij.length >= 1 && vrij.every((r) => !r.includes(" disabled")), "de andere rijen zijn gewoon te bewerken");
+  assert.ok(html.includes("staat op slot"), "en de uitleg zegt het");
 });
 
 // --- de knoppenrij op de laadpaalkaart --------------------------------------

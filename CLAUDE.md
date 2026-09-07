@@ -215,8 +215,23 @@ knoppen (`canSteer` in devices.js), "adviseren" bij een programma-apparaat
 zonder startknop, "noemen" bij alles wat alleen op een meetstekker zit. Staat
 het uit, dan noemt de overschottip het apparaat ook niet (`apparatenZin`).
 
-**Nog niet aan een echte Home Connect of een echte meetstekker gezien.** Sven
-test bij zichzelf thuis.
+**Een gemeten rij staat op slot** (v0.57.2, Sven na de eerste beurt: "er
+staan nog wel mijn dingen in; geblokkeerd tot je het wist, en dat je het
+zelf kan invullen of toch overschrijven"): de velden tonen de meting en zijn
+niet te bewerken; "wissen" geeft de eigen getallen terug, "overnemen"
+(`takeMeasurement_`) maakt de meting de eigen opgave en haalt hem weg (het
+verloop per vijf minuten gaat daarbij verloren). **Bespaard kiest zijn
+woorden naar de beurten** (`woorden` in savings.js, `kind` in het
+beurtrecord): een auto wordt ingeplugd en geladen, een vaatwasser
+vrijgegeven en verbruikt.
+
+**Eén keer echt gezien aan Home Connect, 07-09-2026 om 11:00 bij Sven:**
+knop, Run na twee seconden, tellen op de meetstekker, Finished, verslag,
+meting (Express 60: 90 min, 0,825 kWh, piek 2264 W), vrijgave eraf. Zijn
+machine zet de deur een kwartier voor het eind vanzelf open voor de stoom
+en trekt de laatste twintig minuten vrijwel niets; voor een domme
+vaatwasser is `STIL_KLAAR` (een kwartier) daarmee te kort. Nog niet
+veranderd.
 
 ## Hoe het in elkaar zit
 
@@ -263,7 +278,7 @@ python tests/test_planner.py     # 280 controles op het denkwerk
 python tests/test_coach.py       # 309 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1162 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 33 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 35 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```
