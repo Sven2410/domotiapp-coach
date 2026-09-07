@@ -3212,6 +3212,22 @@ b, m = asyncio.run(ronde62d(coach62e, dt.datetime(2026, 9, 8, 2, 31)))
 controle("daarna wacht hij op een nieuwe vrijgave en drukt hij nergens op",
          b.get("rule") == "not-released" and not m and not [d for d in hass62d.services.verstuurd if d[0] == "button"], f"{b.get('rule')} {m}")
 
+print("=== 63. een beurt van voor v0.57.2 krijgt zijn soort van het apparaat ===")
+# Sven op 07-09-2026 's middags, bij de beurt van die ochtend onder Bespaard:
+# "ik zie nog dingen terugkomen van de laadpaal." Die regel had geen `kind`.
+met_soort = storage.met_soort
+oud63 = [
+    {"id": "dev-vaatwasser:2026-09-07T10:51:00", "device": "dev-vaatwasser", "kwh": 0.825},
+    {"id": "dev-laadpaal:2026-09-04T19:01:00", "device": "dev-laadpaal", "kwh": 66.0},
+    {"id": "dev-vaatwasser:2026-09-08T01:02:00", "device": "dev-vaatwasser", "kind": "programma"},
+    {"id": "dev-weg:2026-09-01T00:00:00", "device": "dev-weg"},
+]
+uit63 = met_soort(oud63, [LAADPAAL, VAATWASSER])
+print(f"  {[(b['device'], b['kind']) for b in uit63]}")
+controle("de oude vaatwasserbeurt wordt een programma, de laadbeurt blijft laden, wat er al stond blijft staan",
+         [b["kind"] for b in uit63] == ["programma", "laden", "programma", "laden"], f"{uit63}")
+controle("en de regels zelf zijn niet aangeraakt", "kind" not in oud63[0], "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

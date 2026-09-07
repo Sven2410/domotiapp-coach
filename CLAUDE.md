@@ -223,7 +223,10 @@ niet te bewerken; "wissen" geeft de eigen getallen terug, "overnemen"
 verloop per vijf minuten gaat daarbij verloren). **Bespaard kiest zijn
 woorden naar de beurten** (`woorden` in savings.js, `kind` in het
 beurtrecord): een auto wordt ingeplugd en geladen, een vaatwasser
-vrijgegeven en verbruikt.
+vrijgegeven en verbruikt. Een beurt van vóór v0.57.2 heeft geen `kind`;
+`met_soort` in storage.py leidt hem dan af uit het type van het apparaat
+(`PROGRAMMA_TYPES` in const.py), bij het opvragen van de lijst (v0.58.1,
+Sven: "ik zie nog dingen terugkomen van de laadpaal").
 
 **Eén keer echt gezien aan Home Connect, 07-09-2026 om 11:00 bij Sven:**
 knop, Run na twee seconden, tellen op de meetstekker, Finished, verslag,
@@ -297,7 +300,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 282 controles op het denkwerk
-python tests/test_coach.py       # 331 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 333 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1171 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 35 op het rapport en op het paneel

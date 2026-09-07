@@ -40,6 +40,7 @@ from .const import (
     LEVEL_READ,
     LEVEL_STEER,
     PHASE_START_AMPS,
+    PROGRAMMA_TYPES,
 )
 from .archive import async_get_archive
 from .planner import (
@@ -183,9 +184,8 @@ FASEMETING_AMPS = 5.0
 # aan het laden). Een kwartier, dezelfde maat als `MIN_HOLD_MINUTES`.
 HERSTART_WACHT = timedelta(minutes=15)
 
-# Apparaten met een programma die de coach start. Sven op 06-09-2026: eerst
-# alleen de vaatwasser; de wasmachine en de droger komen erbij als dit werkt.
-PROGRAMMA_TYPES = ("vaatwasser",)
+# Apparaten met een programma die de coach start: `PROGRAMMA_TYPES` in
+# const.py. Sven op 06-09-2026: eerst alleen de vaatwasser.
 # Hoe lang de coach na een druk op de startknop wacht op "run" voordat hij
 # zegt dat het niet lukte, hoe vaak hij het probeert, en hoe lang daartussen.
 # Home Connect doet er soms een minuut over om de nieuwe toestand te melden.

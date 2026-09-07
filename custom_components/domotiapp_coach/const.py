@@ -400,3 +400,9 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         "price": {"low": 0.20, "high": 0.30},
     },
 }
+
+# Apparaten met een programma die de coach start. Sven op 06-09-2026: eerst
+# alleen de vaatwasser; de wasmachine en de droger komen erbij als dit werkt.
+# Hier en niet in coach.py, omdat de opslag ze ook nodig heeft: een beurt
+# van zo'n apparaat is een "programma" en geen laadbeurt.
+PROGRAMMA_TYPES = ("vaatwasser",)
