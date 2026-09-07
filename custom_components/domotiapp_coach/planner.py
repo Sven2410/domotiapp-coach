@@ -3137,6 +3137,7 @@ def programma_kosten(
     *,
     now: datetime | None = None,
     surplus_w: float | None = None,
+    meter_overal: bool = False,
 ) -> float | None:
     """Wat dit programma kost als het op `start` begint, of None als de prijs
     van een deel van die uren niet bekend is.
@@ -3148,6 +3149,10 @@ def programma_kosten(
     zijn meter 3,5 kW teruglevering zag: "ik lever nu 3,5 kW terug, dat is
     toch gunstig? Je weet niet hoeveel je om 11 uur terug gaat leveren." De
     verwachting zei voor dat uur 2,2 kW en het dak gaf 4,3.
+
+    Met `meter_overal` telt de meting van nu voor elk uur, alsof de zon blijft
+    wat hij is. Dat is geen verwachting maar een vraag: als het zo blijft, kan
+    het dan ergens goedkoper? Zie `plan_programma`.
 
     Met een gemeten profiel gaat het per stap van dat profiel: de opwarmpiek
     aan het begin en het drogen aan het eind vallen dan op het uur waar ze
@@ -3173,7 +3178,7 @@ def programma_kosten(
             terug = tariff.feed_in
 
         nu_uur = now is not None and uur == now.replace(minute=0, second=0, microsecond=0)
-        if nu_uur and surplus_w is not None:
+        if (nu_uur or meter_overal) and surplus_w is not None:
             over = max(0.0, surplus_w) / 1000.0
         else:
             over = max(0.0, forecast.solar_kwh.get(uur, 0.0) - forecast.house_kwh.get(uur.hour, 0.0))
@@ -3354,6 +3359,26 @@ def plan_programma(
     keuze = buiten or kandidaten
     goedkoopst, start = min(keuze, key=lambda k: (round(k[0], 4), k[1]))
     kosten_nu = next((k for k, m in kandidaten if m == eerste), None)
+    # Laat de meter genoeg zon zien om het hele programma nu op eigen zon te
+    # draaien, en is dat op geen enkel later moment goedkoper, dan nu. Het
+    # beste moment van straks is een verwachting; wat de meter nu ziet is
+    # zeker, en zon later is niet goedkoper dan zon nu. Sven op 07-09-2026 om
+    # 10:51: de coach wachtte tot 12:00 omdat de verwachting voor 11:00 net te
+    # weinig zei, terwijl de meter 3,4 kW zag en de verwachting die ochtend al
+    # drie keer te laag was gebleken. Bij een dynamisch contract met een
+    # goedkoper uur later blijft dat uur winnen, want dat is een prijs en geen
+    # gok. Niet in de avondpiek, want daar gaat het niet om geld.
+    if (
+        surplus_w is not None
+        and surplus_w > 0
+        and kosten_nu is not None
+        and any(m == eerste for _, m in buiten)
+    ):
+        als_het_zo_blijft = programma_kosten(
+            eerste, programma, prices, tariff, forecast, now=now, surplus_w=surplus_w, meter_overal=True
+        )
+        if als_het_zo_blijft is not None and round(als_het_zo_blijft, 4) <= round(goedkoopst, 4):
+            goedkoopst, start = kosten_nu, eerste
 
     # Reiken de prijzen niet tot het laatste startmoment, dan is de goedkoopste
     # bekende kandidaat misschien niet de goedkoopste van de nacht. Dezelfde
