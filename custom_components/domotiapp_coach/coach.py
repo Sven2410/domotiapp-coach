@@ -1195,8 +1195,21 @@ class ChargerCoach:
         draait = status in DRAAIT
         if draait and sessie["gestart"] is None:
             sessie["gestart"] = now
-            sessie["gedrukt"] = None
             sessie["laatst"] = now
+            # Sven op 07-09-2026: "ik wil wel meldingen ontvangen dat de
+            # vaatwasser gestart is en klaar is." Dus per beurt twee: deze en
+            # het verslag. "Gestart" als de coach erop drukte of erom vroeg;
+            # "draait" als de bewoner hem zelf aanzette of de coach net herstartte.
+            if "gestart" not in sessie["gemeld"]:
+                sessie["gemeld"].add("gestart")
+                zelf = sessie.get("gedrukt") is not None or sessie.get("gevraagd") is not None
+                wat = f" ({programma.label})" if programma is not None else ""
+                klaar = (
+                    f", klaar rond {(now + timedelta(minutes=programma.minutes)):%H:%M}"
+                    if programma is not None and programma.minutes else ""
+                )
+                await self._async_tell(f"{naam} {'is gestart' if zelf else 'draait'}{wat}{klaar}.")
+            sessie["gedrukt"] = None
         if draait:
             self._programma_tellen(settings, sessie, now, watts)
             # Het verloop van deze beurt, voor het profiel: minuten sinds de

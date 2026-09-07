@@ -672,6 +672,15 @@ export const isManualProgram = (device) =>
   PROGRAM_TYPES.includes(device?.type) && Boolean(brandMeta(device)?.manual);
 
 /**
+ * Of de coach dit apparaat zelf kan bedienen: er zit een merk met knoppen of
+ * een dienst achter. Alles zonder (een meetstekker, het merk "overig") kan
+ * hij alleen plannen of noemen. Sven op 07-09-2026: "er is een verschil
+ * tussen de coach mag aansturen en adviseren, want een domme vaatwasser kan
+ * de coach helemaal niet aansturen maar wel adviseren."
+ */
+export const canSteer = (device) => Boolean(brandMeta(device)) && !isManualProgram(device);
+
+/**
  * The device types that run a program of a known length.
  *
  * The length is what lets the panel work back from "done by" to "start by", so
@@ -889,12 +898,19 @@ export const ACTIVE_WATTS = 3;
  * gaf. Heeft hij niets ingevuld, dan komt er niets: dan is er geen apparaat om
  * te noemen en hoort de zin dat ook niet te doen.
  *
+ * En alleen apparaten waarbij het vinkje aan staat dat de coach er iets mee
+ * mag: sturen, plannen of noemen. Sven op 07-09-2026: "de coach zegt zet nu
+ * de tablet lader aan, maar de tablet lader is alleen een vermogenssensor en
+ * het vinkje staat uit." Een apparaat dat alleen gevolgd wordt, wordt nergens
+ * genoemd.
+ *
  * @param {Array} devices de apparaten uit de instellingen
  * @param {string} voegwoord "of" bij een keuze, "en" bij een opsomming
  * @returns {string} de opsomming, of "" als er niets is
  */
 export function apparatenZin(devices, voegwoord = "of") {
   const namen = (devices ?? [])
+    .filter((device) => Boolean(device?.controllable))
     .map((device) => {
       const eigen = (device?.name || "").trim();
       // Een naam die de klant zelf getypt heeft blijft staan zoals hij hem

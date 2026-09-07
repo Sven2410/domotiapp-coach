@@ -469,8 +469,27 @@ proef("de programmatabel in het paneel is dezelfde als die in planner.py", () =>
 // meting wint van allebei.
 
 const { programsFor, defaultPrograms, hasOwnPrograms, programKey, programOf, programPicker, isManualProgram, missingForControl,
-        programOptions, programRows, programChooser } =
+        programOptions, programRows, programChooser, apparatenZin, canSteer } =
   await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+// Sven op 07-09-2026: "de coach zegt zet nu de tablet lader aan, maar de
+// tablet lader is alleen een vermogenssensor en het vinkje staat uit."
+proef("de tip noemt alleen apparaten waarbij het vinkje aan staat", () => {
+  const tablet = { type: "overig", name: "Tablet lader", controllable: false };
+  const paal = { type: "laadpaal", name: "Laadpaal", brand: "easee", controllable: true };
+  const dom = { type: "vaatwasser", brand: "overig", name: "Vaatwasser", controllable: true };
+  assert.equal(apparatenZin([tablet, paal, dom]), "de laadpaal of de vaatwasser");
+  assert.equal(apparatenZin([tablet]), "");
+  assert.equal(apparatenZin([{ ...tablet, controllable: true }]), "de Tablet lader");
+});
+// "Er is een verschil tussen de coach mag aansturen en adviseren, want een
+// domme vaatwasser kan de coach helemaal niet aansturen maar wel adviseren."
+proef("sturen kan alleen wat een merk met knoppen heeft", () => {
+  assert.equal(canSteer({ type: "laadpaal", brand: "easee" }), true);
+  assert.equal(canSteer({ type: "vaatwasser", brand: "home_connect" }), true);
+  assert.equal(canSteer({ type: "vaatwasser", brand: "overig" }), false);
+  assert.equal(canSteer({ type: "overig" }), false);
+  assert.equal(canSteer({ type: "boiler" }), false);
+});
 proef("zonder eigen tabel is de tabel van een apparaat de opgave van de fabrikant", () => {
   const rows = programsFor({ type: "vaatwasser", brand: "overig" });
   assert.equal(rows.length, DISHWASHER_PROGRAMS.length);
