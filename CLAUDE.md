@@ -230,8 +230,30 @@ knop, Run na twee seconden, tellen op de meetstekker, Finished, verslag,
 meting (Express 60: 90 min, 0,825 kWh, piek 2264 W), vrijgave eraf. Zijn
 machine zet de deur een kwartier voor het eind vanzelf open voor de stoom
 en trekt de laatste twintig minuten vrijwel niets; voor een domme
-vaatwasser is `STIL_KLAAR` (een kwartier) daarmee te kort. Nog niet
-veranderd.
+vaatwasser was `STIL_KLAAR` (een kwartier) daarmee te kort. Sinds v0.58.0
+een half uur.
+
+**Een herstart midden in een beurt verliest de telling niet** (v0.58.0,
+Sven: "ja, reken terug"). De lopende beurt gaat elke vijf minuten naar de
+`BeurtenStore`, met `complete` op false en een `session` met alles wat de
+coach nodig heeft (vrijgavemoment, prijzen van toen, verloop, wat er al
+gemeld is). In de eerste ronde na een herstart (`eerste` in
+`_one_programma`) pakt `_async_programma_hervatten` hem daar op; het gat
+sinds die opslag komt twee minuten later uit de kwartieropslag
+(`_async_programma_terugrekenen`, want die haalt na een herstart zelf
+eerst in). Staat er niets in de opslag, dan zegt de recorder wanneer hij
+ging draaien en de vrijgaveschakelaar wanneer hij werd vrijgegeven
+(`_async_programma_begin`), en komt de hele beurt tot nu uit de
+kwartieropslag. Is hij afgelopen terwijl de coach weg was, dan krijgt de
+beurt zijn verslag met wat er bewaard stond en gaat de vrijgave eraf,
+anders start hij zo nog een keer. Proef 62 in test_coach.py, scenario
+`vaatwasser-herstart`.
+
+**De eindtijd van het apparaat zelf** (v0.58.0, Sven: "pak de eindtijd van
+de integratie"): het veld Resterende tijd (`remaining`) mag een tijdstip
+zijn (Home Connect) of minuten of seconden (`_eindtijd` in coach.py). "Klaar
+rond" in de melding en op de kaart komt daarvandaan; zonder die sensor uit
+de tabel. Proef 61.
 
 ## Hoe het in elkaar zit
 
@@ -274,9 +296,9 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 280 controles op het denkwerk
-python tests/test_coach.py       # 309 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1162 op hele laadbeurten in het virtuele huis
+python tests/test_planner.py     # 282 controles op het denkwerk
+python tests/test_coach.py       # 331 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1171 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 35 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

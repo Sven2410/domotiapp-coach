@@ -507,6 +507,14 @@ vaatwasser_meter_wint = vast_zonnig.kopie(
     vaatwasser_klaar_om="16:30", vaatwasser_niet_eerder="08:00",
     gebeurtenissen=[("10:20", "vaatwasser_vrijgeven", None)],
 )
+# Een herstart van Home Assistant midden in de beurt (07-09-2026, Sven: "ja,
+# reken terug"). De coach bewaart de lopende beurt elke vijf minuten en pakt
+# hem na de herstart daar op: geen tweede "is gestart", en één verslag over
+# de hele beurt.
+vaatwasser_herstart = vaatwasser_avond.kopie(
+    naam="vaatwasser-herstart", uitleg="dynamisch, om 19:00 vrijgegeven, en om 02:00 herstart Home Assistant midden in de beurt: de telling gaat door en het verslag gaat over de hele beurt",
+    gebeurtenissen=[("19:00", "vaatwasser_vrijgeven", None), ("+1 02:00", "herstart", None)],
+)
 vaatwasser_uiterlijk = vaatwasser_avond.kopie(
     naam="vaatwasser-uiterlijk-starten", uitleg="om 19:00 vrijgegeven met uiterlijk starten om 22:00: dan gaat hij om 22:00, ook al is de nacht goedkoper",
     vaatwasser_uiterlijk="22:00",
@@ -528,7 +536,7 @@ ALLE = [
     afbouw_krap, afbouw_krap_geleerd,
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
-    vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint,
+    vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_herstart,
     *VAN_DEN_DAM,
 ]
 

@@ -526,6 +526,19 @@ if (vl := v("vaatwasser-meter-wint")):
     controle("meter wint: klaar rond 11:20, ruim voor 16:30",
              vl.vw_klaar is not None and (vl.vw_klaar.hour, vl.vw_klaar.minute) <= (11, 30), f"{vw_klok(vl.vw_klaar)}")
 
+if (vl := v("vaatwasser-herstart")):
+    print(f"  herstart: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, {vl.vw_kwh:.2f} kWh, meldingen {[m for _, m in vl.meldingen if 'Vaatwasser' in m]}")
+    controle("herstart: gestart om 01:00, en na de herstart om 02:00 zegt hij niet nog eens dat hij draait",
+             vl.vw_gestart is not None and vl.vw_gestart.hour == 1 and len(meldingen(vl, "Vaatwasser is gestart")) == 1
+             and not meldingen(vl, "Vaatwasser draait"), f"{[m for _, m in vl.meldingen]}")
+    controle("herstart: één verslag, over de hele beurt vanaf 01:00",
+             len(meldingen(vl, "Vaatwasser is klaar")) == 1 and "van 01:0" in meldingen(vl, "Vaatwasser is klaar")[0]
+             and "Meteen starten had" in meldingen(vl, "Vaatwasser is klaar")[0], f"{meldingen(vl, 'is klaar')}")
+    controle("herstart: de beurt staat één keer in de opslag, afgerond, met bijna alle kWh en een besparing",
+             len([b for b in vl.beurten if b["device"] == "vaatwasser"]) == 1
+             and all(b["complete"] and 0.9 <= b["kwh"] <= 1.1 and (b["saved"] or 0) > 0 for b in vl.beurten if b["device"] == "vaatwasser"),
+             f"{[(b['device'], b['complete'], b['kwh'], b['saved']) for b in vl.beurten]}")
+
 # --- de bewoner --------------------------------------------------------------
 
 print("=== de bewoner ===")
