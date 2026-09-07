@@ -1187,6 +1187,9 @@ class ChargerCoach:
             now, self._prices(settings), self._tariff(settings),
             Forecast(solar_kwh=self._zon_kwh, house_kwh=self._huis_kwh, estimated=self._zon_geschat),
             window, apparaat,
+            # Wat er nu werkelijk naar het net gaat: in het lopende uur wint de
+            # meter van de verwachting. Sven op 07-09-2026, zie programma_kosten.
+            surplus_w=self._netto_export_w(settings),
         )
 
         draait = status in DRAAIT
