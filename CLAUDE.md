@@ -197,7 +197,13 @@ De verwachting zei 2,2 kW, het dak gaf 4,3. `programma_kosten` rekent voor
 elk stuk in het lopende uur met `surplus_w` (de netto-export van nu,
 `_netto_export_w` in coach.py), net als `schijven` bij de paal; bij gelijke
 kosten wint het vroegste moment, dus een meting van nu wint van een even
-goede verwachting van straks. Scenario `vaatwasser-meter-wint`.
+goede verwachting van straks. Scenario `vaatwasser-meter-wint`. En laat de
+meter nu genoeg zon zien voor het hele programma, en is dat op geen later
+moment goedkoper (`meter_overal` in `programma_kosten`), dan start hij nu
+(v0.57.1, na 10:51 die ochtend: hij wachtte tot 12:00 omdat de verwachting
+voor 11:00 net te weinig zei, terwijl de meter 3,4 kW zag). Een goedkoper
+uur bij een dynamisch contract blijft winnen, want dat is een prijs en geen
+gok. Niet in de avondpiek.
 
 **Twee meldingen per beurt**, gestart en klaar (v0.57.0, Sven: "ik wil wel
 meldingen ontvangen dat de vaatwasser gestart is en klaar is"). "Is gestart"
@@ -253,7 +259,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 276 controles op het denkwerk
+python tests/test_planner.py     # 280 controles op het denkwerk
 python tests/test_coach.py       # 309 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1162 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag

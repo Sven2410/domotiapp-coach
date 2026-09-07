@@ -1916,6 +1916,37 @@ controle("en die beurt kost dan de zonprijs: 1,05 kWh maal de inkoop min de teru
 niets = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 22), [], salderen, ochtend, thuis, kort, surplus_w=0.0)
 controle("meet de meter niets, dan telt dat ook: hij wacht op de zon van 11:00",
          niets.rule == "wait-for-start" and niets.starts_at == "2026-09-07T11:00:00", f"{niets}")
+# 10:51, na de herstart: de verwachting was ververst en nog lager, nu starten
+# liep 51 minuten het uur van 11:00 in dat op de verwachting net te weinig zon
+# had, en hij wachtte tot 12:00 voor minder dan een halve cent.
+laat = Forecast(solar_kwh={dt.datetime(2026, 9, 7, 10, 0): 1.26, dt.datetime(2026, 9, 7, 11, 0): 1.84,
+                           dt.datetime(2026, 9, 7, 12, 0): 2.78, dt.datetime(2026, 9, 7, 13, 0): 3.59},
+                house_kwh={u: 0.85 for u in range(24)})
+k_1051 = planner.programma_kosten(dt.datetime(2026, 9, 7, 10, 51), kurz, [], salderen, laat,
+                                  now=dt.datetime(2026, 9, 7, 10, 51), surplus_w=3360.0)
+k_1200 = planner.programma_kosten(dt.datetime(2026, 9, 7, 12, 0), kurz, [], salderen, laat)
+print(f"  10:51 kost {k_1051:.4f}, 12:00 kost {k_1200:.4f}")
+controle("om 10:51 is nu starten op de som een fractie duurder dan 12:00",
+         0 < k_1051 - k_1200 < 0.005, f"{k_1051 - k_1200:.4f}")
+halve = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 51), [], salderen, laat, thuis, kort, surplus_w=3360.0)
+controle("maar de meter ziet genoeg voor het hele programma en later is zon niet goedkoper: hij start nu",
+         halve.rule == "cheapest-start" and halve.charge, f"{halve}")
+weinig = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 51), [], salderen, laat, thuis, kort, surplus_w=600.0)
+controle("met 600 W op de meter, te weinig voor 1,05 kW, wacht hij op de zon van 12:00",
+         weinig.rule == "wait-for-start" and weinig.starts_at == "2026-09-07T12:00:00", f"{weinig}")
+echt = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 51), [], salderen, laat, thuis, kort, surplus_w=0.0)
+controle("en zonder zon op de meter ook, met het verschil erbij",
+         echt.rule == "wait-for-start" and "Nu starten zou" in echt.reason, f"{echt}")
+# Dynamisch: zon nu, maar vannacht is de stroom goedkoper dan wat de zon
+# oplevert. Dan is de nacht een prijs en geen gok, en die wint.
+nachtprijs = [{**rij, "price": 0.05 if 1 <= rij["start"].hour < 6 else 0.25} for rij in prijzen50(7)]
+nacht_wint = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 51), nachtprijs, Tariff(), laat, venster50, kort, surplus_w=3360.0)
+controle("dynamisch met een nacht onder de terugleverprijs: de nacht wint van de zon van nu",
+         nacht_wint.rule == "wait-for-start" and nacht_wint.starts_at >= "2026-09-08T01:00:00", f"{nacht_wint}")
+piek = planner.plan_programma(dt.datetime(2026, 9, 7, 18, 30), [], Tariff(buy=0.28, feed_in=0.07), Forecast(),
+                              planner.Window(enabled=True, deadline=dt.datetime(2026, 9, 8, 7, 0)), kort, surplus_w=3000.0)
+controle("in de avondpiek geldt dit niet: zon op de meter en toch wachten tot 20:00",
+         piek.rule == "wait-for-start" and piek.starts_at == "2026-09-07T20:00:00", f"{piek}")
 controle("de meting geldt alleen voor het lopende uur; om 11:00 rekent hij weer met de verwachting",
          abs(planner.programma_kosten(dt.datetime(2026, 9, 7, 11, 0), kurz, [], salderen, ochtend,
                                       now=dt.datetime(2026, 9, 7, 10, 22), surplus_w=0.0)
