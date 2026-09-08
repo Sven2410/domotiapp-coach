@@ -65,7 +65,9 @@ class Zon:
     # nabouwt, zoals Van den Dam op 04-09-2026.
     kromme: dict[int, float] | None = None
 
-    PATRONEN = {"helder": 1.0, "bewolkt": 0.3, "geen": 0.0}
+    # "half": de voorspeller zag de helft van wat het dak deed, zoals bij Sven
+    # op 08-09-2026 (Forecast.Solar 1,0 tot 1,7 kWh per uur, het dak 1,9 tot 4,4).
+    PATRONEN = {"helder": 1.0, "half": 0.5, "bewolkt": 0.3, "geen": 0.0}
 
     def helder_kw(self, moment: dt.datetime) -> float:
         u = moment.hour + moment.minute / 60 + moment.second / 3600

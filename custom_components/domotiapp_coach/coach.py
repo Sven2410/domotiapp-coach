@@ -53,6 +53,7 @@ from .planner import (
     programma_van,
     tabel_van,
     met_metingen,
+    PROFIEL_STAP_MIN,
     profiel_van,
     profiel_gemiddeld,
     CHARGE_EFFICIENCY,
@@ -1285,6 +1286,12 @@ class ChargerCoach:
                     klaar = ""
                 await self._async_tell(f"{naam} {'is gestart' if zelf else 'draait'}{wat}{klaar}.")
             sessie["gedrukt"] = None
+        if sessie.get("vrijgegeven") is not None:
+            # Wat het huis zonder dit apparaat aan zon over heeft, vanaf het
+            # vrijgeven: dat is wat een start van toen gekregen had.
+            export = self._netto_export_w(settings)
+            if export is not None:
+                self._zon_toen_bij(sessie, now, export + ((watts or 0.0) if draait else 0.0))
         if draait:
             self._programma_tellen(settings, sessie, now, watts)
             # Het verloop van deze beurt, voor het profiel: minuten sinds de
@@ -1404,6 +1411,11 @@ class ChargerCoach:
             "betaald": 0.0,
             "maat": 0.0,           # wat meteen starten gekost had
             "maat_onbekend": False,
+            # Wat er sinds het vrijgeven aan zon over was, per vijf minuten:
+            # (minuten sinds het vrijgeven, watt zonder dit apparaat). De maat
+            # rekent daarmee: wat meteen starten gekost had, mét de zon van
+            # toen. Zie `_zon_toen_bij`.
+            "zon_toen": [],
             "laatst": now,
             "gemeld": set(),
             "programma": None,
@@ -1483,7 +1495,12 @@ class ChargerCoach:
 
         Dezelfde maat als bij een laadbeurt (Sven op 05-09-2026: "de prijs
         vanaf het inpluggen"): hetzelfde verbruik, verschoven naar het moment
-        van vrijgeven. Zon telt tegen de terugleverprijs, net als bij de paal.
+        van vrijgeven. Zon telt tegen de terugleverprijs, net als bij de paal,
+        en dat geldt ook voor de maat: de zon die er op dat moment over was
+        (`zon_toen`) had een start van toen net zo goed gekregen. Tot
+        08-09-2026 rekende de maat alles tegen de inkoopprijs, en dan "bespaart"
+        een beurt die meteen bij het vrijgeven start toch, precies zijn eigen
+        zonaandeel. Bij Sven thuis was dat die dag 1,6 cent die er niet was.
         """
         if watts is None or watts <= 0:
             return
@@ -1510,10 +1527,56 @@ class ChargerCoach:
                 koop_toen = rij["price"]
             else:
                 koop_toen, _ = self._prijs_nu(settings, toen)
+            terug_toen = rij.get("feed_in") if rij is not None else None
+            if terug_toen is None:
+                _, terug_toen = self._prijs_nu(settings, toen)
             if koop_toen is None:
                 sessie["maat_onbekend"] = True
             else:
-                sessie["maat"] += kwh * koop_toen
+                sessie["maat"] += kwh * self._prijs_met_zon(
+                    koop_toen, terug_toen, self._zon_toen(sessie, toen), watts
+                )
+
+    @staticmethod
+    def _prijs_met_zon(
+        koop: float, terug: float | None, over_w: float | None, watts: float
+    ) -> float:
+        """Wat een kWh kost als er `over_w` aan zon over is voor een apparaat
+        dat `watts` trekt: het zondeel tegen de terugleverprijs, de rest tegen
+        de inkoop. Zonder meting van de zon is alles inkoop."""
+        if over_w is None or terug is None or watts <= 0:
+            return koop
+        zon_deel = max(0.0, min(1.0, over_w / watts))
+        return (1 - zon_deel) * koop + zon_deel * terug
+
+    @staticmethod
+    def _zon_toen_bij(sessie: dict[str, Any], now: datetime, over_w: float) -> None:
+        """Eén meting van wat er aan zon over is, in het vak van vijf minuten
+        sinds het vrijgeven; binnen een vak het gemiddelde."""
+        vrij = sessie.get("vrijgegeven")
+        if vrij is None:
+            return
+        vak = int((now - vrij).total_seconds() // (PROFIEL_STAP_MIN * 60))
+        reeks: list = sessie.setdefault("zon_toen", [])
+        if reeks and int(reeks[-1][0]) == vak:
+            _, som, n = reeks[-1]
+            reeks[-1] = [vak, som + over_w, n + 1]
+        elif not reeks or int(reeks[-1][0]) < vak:
+            reeks.append([vak, over_w, 1])
+
+    @staticmethod
+    def _zon_toen(sessie: dict[str, Any], moment: datetime) -> float | None:
+        """Wat er op `moment` aan zon over was, uit `zon_toen`; None als er
+        toen niets gemeten is."""
+        vrij = sessie.get("vrijgegeven")
+        reeks = sessie.get("zon_toen") or []
+        if vrij is None or not reeks:
+            return None
+        vak = int((moment - vrij).total_seconds() // (PROFIEL_STAP_MIN * 60))
+        for v, som, n in reeks:
+            if int(v) == vak and n:
+                return som / n
+        return None
 
     async def _async_programma_klaar(
         self,
@@ -1617,6 +1680,7 @@ class ChargerCoach:
                 "asked": sessie["gevraagd"].isoformat() if sessie.get("gevraagd") else None,
                 "ref_cost_unknown": bool(sessie["maat_onbekend"]),
                 "ref_cost": round(sessie["maat"], 4),
+                "surplus": [[int(v), round(s, 1), int(n)] for v, s, n in (sessie.get("zon_toen") or [])],
             }
         return regel
 
@@ -1690,6 +1754,9 @@ class ChargerCoach:
         sessie["betaald"] = float(regel.get("paid") or 0.0)
         sessie["maat"] = float(extra.get("ref_cost") or 0.0)
         sessie["maat_onbekend"] = bool(extra.get("ref_cost_unknown"))
+        sessie["zon_toen"] = [
+            [int(p[0]), float(p[1]), int(p[2])] for p in (extra.get("surplus") or []) if len(p) == 3
+        ]
         sessie["punten"] = [
             (float(p[0]), float(p[1])) for p in (extra.get("points") or []) if len(p) == 2
         ]
@@ -1764,7 +1831,11 @@ class ChargerCoach:
             signed = sources.get("grid_mode") == "signed"
             netten = [sources.get("grid_signed")] if signed else [sources.get("grid_export"), sources.get("grid_import")]
             netten = [e for e in netten if e]
-            rijen = await self._async_kwartieren([device["entity"], *netten], van - timedelta(minutes=15), tot)
+            # Vanaf het vrijgeven, want de maat wil weten wat er toen aan zon
+            # over was.
+            rijen = await self._async_kwartieren(
+                [device["entity"], *netten], min(van, vrij or van) - timedelta(minutes=15), tot
+            )
             # De maat rekent met de prijzen vanaf het vrijgeven, dus die
             # horen er ook bij.
             prijs_op = await self._async_prijs_functie(settings, min(van, vrij or van), tot)
@@ -1772,6 +1843,39 @@ class ChargerCoach:
             _LOGGER.exception("terugrekenen van de beurt van %s mislukt", device.get("id", ""))
             return
         per_start = {e: {int(r["start"]): r for r in rijen.get(e) or []} for e in netten}
+        apparaat_op = {int(r["start"]): r for r in rijen.get(device["entity"]) or []}
+
+        def netto_op(start: int) -> float | None:
+            if signed and netten:
+                r = per_start.get(netten[0], {}).get(start)
+                if r is None:
+                    return None
+                s = float(r.get("gemiddeld") or 0.0)
+                return -(-s if sources.get("grid_signed_invert") else s)
+            if len(netten) == 2:
+                re_ = per_start[netten[0]].get(start)
+                ri = per_start[netten[1]].get(start)
+                if re_ is None or ri is None:
+                    return None
+                return float(re_.get("gemiddeld") or 0.0) - float(ri.get("gemiddeld") or 0.0)
+            return None
+
+        # Wat er sinds het vrijgeven aan zon over was, per kwartier uit de
+        # opslag, in de vakken van `zon_toen`; wat de coach live al zag blijft.
+        if vrij is not None:
+            for start in sorted(set().union(*(per_start[e] for e in netten)) if netten else ()):
+                t0 = datetime.fromtimestamp(start)
+                if t0 + timedelta(minutes=15) <= vrij or t0 >= tot:
+                    continue
+                netto = netto_op(start)
+                if netto is None:
+                    continue
+                zelf = apparaat_op.get(start)
+                over = netto + max(0.0, float(zelf.get("gemiddeld") or 0.0)) if zelf is not None else netto
+                for stap in range(3):
+                    moment = t0 + timedelta(minutes=5 * stap)
+                    if moment >= vrij and self._zon_toen(sessie, moment) is None:
+                        self._zon_toen_bij(sessie, moment, over)
         for rij in rijen.get(device["entity"]) or []:
             t0 = datetime.fromtimestamp(int(rij["start"]))
             t1 = t0 + timedelta(minutes=15)
@@ -1785,17 +1889,7 @@ class ChargerCoach:
             watts = max(0.0, float(rij.get("gemiddeld") or 0.0))
             if sec <= 0 or watts <= 0:
                 continue
-            netto: float | None = None
-            if signed and netten:
-                r = per_start.get(netten[0], {}).get(int(rij["start"]))
-                if r is not None:
-                    s = float(r.get("gemiddeld") or 0.0)
-                    netto = -(-s if sources.get("grid_signed_invert") else s)
-            elif len(netten) == 2:
-                re_ = per_start[netten[0]].get(int(rij["start"]))
-                ri = per_start[netten[1]].get(int(rij["start"]))
-                if re_ is not None and ri is not None:
-                    netto = float(re_.get("gemiddeld") or 0.0) - float(ri.get("gemiddeld") or 0.0)
+            netto = netto_op(int(rij["start"]))
             kwh = watts / 1000.0 * sec / 3600.0
             zon_deel = max(0.0, min(1.0, (netto + watts) / watts)) if netto is not None else 0.0
             begin = max(t0, van)
@@ -1812,11 +1906,13 @@ class ChargerCoach:
                     sessie["punten"].append((minuut, watts))
             if vrij is not None:
                 toen = vrij + (begin - gestart)
-                koop_toen, _ = self._prijs_toen(settings, sessie, prijs_op, toen)
+                koop_toen, terug_toen = self._prijs_toen(settings, sessie, prijs_op, toen)
                 if koop_toen is None:
                     sessie["maat_onbekend"] = True
                 else:
-                    sessie["maat"] += kwh * koop_toen
+                    sessie["maat"] += kwh * self._prijs_met_zon(
+                        koop_toen, terug_toen, self._zon_toen(sessie, toen), watts
+                    )
         sessie["punten"].sort()
 
     def _prijs_toen(

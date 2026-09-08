@@ -2815,10 +2815,11 @@ def telefoon58(v):
 inst58["ready_devices"] = ["dev-dom"]
 b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 7, 30)))
 print(f"  07:30: {b.get('rule')} {b.get('reason', '')[:80]}")
-# 10:15 en 11:00 kosten evenveel (drie kwartier duur, drie uur goedkoop), en
-# van twee gelijke wint de vroegste.
+# Zonder meting gaat het verbruik op de piek aan het begin (sinds 08-09-2026),
+# en die hoort in het goedkope uur: 11:00. Tot die dag was het 10:15, want
+# uitgesmeerd kostte dat evenveel als 11:00 en van twee gelijke wint de vroegste.
 controle("om 07:30 vrijgegeven met vanaf 08:00: hij wacht op het goedkoopste moment, in de woorden 'zet hem aan om'",
-         b.get("rule") == "wait-for-start" and (b.get("reason") or "").startswith("Zet hem aan om 10:15")
+         b.get("rule") == "wait-for-start" and (b.get("reason") or "").startswith("Zet hem aan om 11:00")
          and b.get("manual") is True and b.get("program") == "eco_50" and not telefoon58(v), f"{b.get('rule')} {b.get('reason')}")
 controle("en drukt nergens op, want er is geen knop", not [d for d in v if d[0] == "button"], f"{v}")
 b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 11, 0, 20)))
@@ -3227,6 +3228,76 @@ print(f"  {[(b['device'], b['kind']) for b in uit63]}")
 controle("de oude vaatwasserbeurt wordt een programma, de laadbeurt blijft laden, wat er al stond blijft staan",
          [b["kind"] for b in uit63] == ["programma", "laden", "programma", "laden"], f"{uit63}")
 controle("en de regels zelf zijn niet aangeraakt", "kind" not in oud63[0], "")
+
+print("=== 64. de maat van een programmabeurt rekent de zon van toen mee ===")
+# Sven thuis op 08-09-2026: de vaatwasser startte in dezelfde minuut als hij
+# werd vrijgegeven, en toch zei het verslag "Meteen starten had € 0,174
+# gekost" bij € 0,158 betaald. De maat telde alles tegen de inkoopprijs en de
+# betaalde kant met zon; het verschil was het zonaandeel, geen besparing.
+controle("_prijs_met_zon: genoeg zon is de terugleverprijs, half is het midden, zonder meting de inkoop",
+         abs(coachmod.ChargerCoach._prijs_met_zon(0.24, 0.19, 3000.0, 2000.0) - 0.19) < 1e-9
+         and abs(coachmod.ChargerCoach._prijs_met_zon(0.24, 0.19, 1000.0, 2000.0) - 0.215) < 1e-9
+         and coachmod.ChargerCoach._prijs_met_zon(0.24, 0.19, None, 2000.0) == 0.24
+         and coachmod.ChargerCoach._prijs_met_zon(0.24, None, 3000.0, 2000.0) == 0.24, "")
+s64 = {"vrijgegeven": dt.datetime(2026, 9, 8, 9, 12), "zon_toen": []}
+for minuut, w in ((0, 200.0), (1, 300.0), (6, 1000.0), (12, 2500.0)):
+    coachmod.ChargerCoach._zon_toen_bij(s64, dt.datetime(2026, 9, 8, 9, 12) + dt.timedelta(minutes=minuut), w)
+controle("_zon_toen: per vijf minuten het gemiddelde, en niets voor een vak zonder meting",
+         coachmod.ChargerCoach._zon_toen(s64, dt.datetime(2026, 9, 8, 9, 14)) == 250.0
+         and coachmod.ChargerCoach._zon_toen(s64, dt.datetime(2026, 9, 8, 9, 20)) == 1000.0
+         and coachmod.ChargerCoach._zon_toen(s64, dt.datetime(2026, 9, 8, 9, 25)) == 2500.0
+         and coachmod.ChargerCoach._zon_toen(s64, dt.datetime(2026, 9, 8, 9, 40)) is None, f"{s64['zon_toen']}")
+
+inst64 = instellingen(devices=[LAADPAAL, VAATWASSER])
+inst64["contract"] = {
+    "type": "fixed", "netting": True,
+    "fixed": {"all_in_price": 0.24171, "feed_in_tariff": 0.0721, "feed_in_costs": 0.052756},
+}
+inst64["strategy"]["schedules"].append({
+    "device": "dev-vaatwasser", "enabled": True, "priority": "mid", "per_day": False,
+    "window": {"not_before": "08:00", "start_by": "", "done_by": "16:30"}, "days": [],
+})
+# Drie kilowatt over op de meter: meer dan de piek van Eco, dus hij start.
+huis64 = huis(status="ready_to_charge", teruglevering=3000.0, afname=0.0, zon_rest=0.0)
+huis64.update({
+    "sensor.vaatwasser_status": "ready",
+    "select.vaatwasser_programma": "dishcare_dishwasher_program_eco_50",
+    "binary_sensor.vaatwasser_deur": "off",
+    "sensor.vaatwasser_vermogen": "0",
+})
+hass64, _, coach64 = bouw(huis64, inst64)
+
+async def ronde64(nu):
+    hass64.services.verstuurd.clear()
+    await hass64.afmaken()
+    await coach64._round(nu)
+    await hass64.afmaken()
+    return coach64.state.get("dev-vaatwasser") or {}, [d[2]["message"] for d in hass64.services.verstuurd if d[0] == "notify" and "Vaatwasser" in d[2].get("message", "")]
+
+inst64["ready_devices"] = ["dev-vaatwasser"]
+b, m = asyncio.run(ronde64(dt.datetime(2026, 9, 8, 12, 0)))
+print(f"  12:00: {b.get('rule')} {b.get('reason', '')[:70]}")
+controle("met 3 kW over start hij meteen bij het vrijgeven", b.get("rule") == "cheapest-start", f"{b}")
+hass64.states.zet("sensor.vaatwasser_status", "run")
+hass64.states.zet("sensor.vaatwasser_vermogen", "2000")
+hass64.states.zet("sensor.teruglevering", "1000")   # 3 kW over min de 2 kW die hij trekt
+for minuut in range(1, 31):
+    asyncio.run(ronde64(dt.datetime(2026, 9, 8, 12, minuut)))
+sessie64 = coach64._programma["dev-vaatwasser"]
+print(f"  12:30: kwh {sessie64['kwh']:.3f}, betaald {sessie64['betaald']:.4f}, maat {sessie64['maat']:.4f}, zon_toen {len(sessie64['zon_toen'])} vakken")
+controle("een half uur op 2 kW met zon genoeg: betaald tegen de zonprijs, en de maat precies hetzelfde",
+         abs(sessie64["kwh"] - 29 / 60 * 2) < 0.01 and abs(sessie64["betaald"] - sessie64["kwh"] * (0.24171 - 0.052756)) < 0.001
+         and abs(sessie64["maat"] - sessie64["betaald"]) < 0.001, f"{sessie64['kwh']} {sessie64['betaald']} {sessie64['maat']}")
+hass64.states.zet("sensor.vaatwasser_status", "finished")
+hass64.states.zet("sensor.vaatwasser_vermogen", "0")
+hass64.states.zet("sensor.teruglevering", "3000")
+b, m = asyncio.run(ronde64(dt.datetime(2026, 9, 8, 12, 31)))
+print(f"  verslag: {m}")
+controle("het verslag zegt niet dat meteen starten meer gekost had, want dat is precies wat er gebeurde",
+         len(m) == 1 and "is klaar" in m[0] and "Meteen starten had" not in m[0], f"{m}")
+b64 = [b for b in asyncio.run(coachmod.async_get_beurten(hass64).async_list()) if b["device"] == "dev-vaatwasser"]
+controle("en onder Bespaard staat nul, niet het zonaandeel",
+         len(b64) == 1 and b64[0]["saved"] == 0 and abs(b64[0]["ref_cost"] - b64[0]["paid"]) < 0.001, f"{b64}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

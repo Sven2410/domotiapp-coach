@@ -407,8 +407,11 @@ def vw_klok(moment):
     return None if moment is None else moment.strftime("%a %H:%M")
 
 if (vl := v("vaatwasser-avond")):
-    controle("vaatwasser avond: om 19:00 vrijgegeven, gestart om 01:00 in de goedkope nacht",
-             vl.vw_gestart is not None and vl.vw_gestart.hour == 1 and vl.vw_gestart.minute <= 1,
+    # Het goedkoopste uur van de nacht is 02:00 (0,060, gelijk aan 03:00, en
+    # van twee gelijke wint de vroegste). Tot 08-09-2026 was het 01:00, want
+    # uitgesmeerd over 225 minuten telde het gemiddelde van vier uur.
+    controle("vaatwasser avond: om 19:00 vrijgegeven, gestart om 02:00, het goedkoopste uur van de nacht",
+             vl.vw_gestart is not None and vl.vw_gestart.hour == 2 and vl.vw_gestart.minute <= 1,
              f"gestart {vw_klok(vl.vw_gestart)}")
     controle("vaatwasser avond: niets in de avondpiek", not (vl.vw_gestart and 17 <= vl.vw_gestart.hour < 20), "")
     controle("vaatwasser avond: klaar voor 07:00", vl.vw_klaar is not None and vl.vw_klaar.hour < 7,
@@ -423,8 +426,12 @@ if (vl := v("vaatwasser-avond")):
              f"{[(b['device'], b['kwh'], b['paid'], b['saved']) for b in vl.beurten]}")
 
 if (vl := v("vaatwasser-zon")):
-    controle("vaatwasser zon: bij een vast contract en genoeg zon start hij zodra hij mag",
-             vl.vw_gestart is not None and vl.vw_gestart.hour == 8, f"gestart {vw_klok(vl.vw_gestart)}")
+    # Om 08:00 belooft de verwachting 0,5 kW over, om 09:00 2,2 kW: het eerste
+    # uur dat de opwarmpiek van 2,1 kW draagt. Tot 08-09-2026 startte hij om
+    # 08:00, want uitgesmeerd paste Eco (213 W) in die 0,5 kW.
+    controle("vaatwasser zon: bij een vast contract start hij op het eerste uur waarvan de zon de piek draagt, 09:00",
+             vl.vw_gestart is not None and virtueel.dt.time(8, 58) <= vl.vw_gestart.time() <= virtueel.dt.time(9, 1),
+             f"gestart {vw_klok(vl.vw_gestart)}")
     controle("vaatwasser zon: klaar voor 18:00", vl.vw_klaar is not None and vl.vw_klaar.hour < 18, f"{vw_klok(vl.vw_klaar)}")
     controle("vaatwasser zon: een verslag", len(meldingen(vl, "Vaatwasser is klaar")) == 1, "")
 
@@ -526,13 +533,40 @@ if (vl := v("vaatwasser-meter-wint")):
     controle("meter wint: klaar rond 11:20, ruim voor 16:30",
              vl.vw_klaar is not None and (vl.vw_klaar.hour, vl.vw_klaar.minute) <= (11, 30), f"{vw_klok(vl.vw_klaar)}")
 
+if (vl := v("vaatwasser-vroeg")):
+    vw_beurt = [b for b in vl.beurten if b["device"] == "vaatwasser"]
+    print(f"  vroeg: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, beurt {[(b['kwh'], b['solar_kwh'], b['paid'], b['ref_cost'], b['saved']) for b in vw_beurt]}")
+    # Hij start pas als de meter van het lopende uur op de som wint van wat de
+    # voorspeller (de helft) voor de middag belooft, na 10:00. Tot 08-09-2026
+    # startte hij om 09:12: uitgesmeerd paste Eco in 250 W.
+    controle("vroeg (08-09): met 250 W over om 09:12 start hij niet, want de opwarmpiek past daar niet in",
+             vl.vw_gestart is not None and vl.vw_gestart.hour >= 10, f"gestart {vw_klok(vl.vw_gestart)}")
+    controle("vroeg: en hij is voor 16:30 klaar", vl.vw_klaar is not None and vl.vw_klaar < vl.vw_klaar.replace(hour=16, minute=30), f"{vw_klok(vl.vw_klaar)}")
+    # Om 10:22 zag de meter 1,2 kW en droeg de eerste opwarmpiek voor de helft;
+    # de rest van de beurt is zon. Met een kloppende verwachting (hieronder)
+    # wacht hij tot 12:00 en is het alles.
+    controle("vroeg: de beurt draait grotendeels op eigen zon",
+             len(vw_beurt) == 1 and vw_beurt[0]["solar_kwh"] >= 0.75 * vw_beurt[0]["kwh"], f"{vw_beurt}")
+    controle("vroeg: de maat rekent de zon van het vrijgavemoment mee en is dus minder dan alles van het net",
+             len(vw_beurt) == 1 and vw_beurt[0]["ref_cost"] is not None
+             and vw_beurt[0]["ref_cost"] < 0.99 * vw_beurt[0]["kwh"] * vl.scenario.vast_prijs, f"{vw_beurt}")
+
+if (vl := v("vaatwasser-vroeg-verwacht")):
+    vw_beurt = [b for b in vl.beurten if b["device"] == "vaatwasser"]
+    print(f"  vroeg, verwachting klopt: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, beurt {[(b['kwh'], b['solar_kwh'], b['paid'], b['saved']) for b in vw_beurt]}")
+    controle("vroeg met een kloppende verwachting: hij wacht tot de zon de piek draagt, niet voor 11:30",
+             vl.vw_gestart is not None and (vl.vw_gestart.hour, vl.vw_gestart.minute) >= (11, 30), f"gestart {vw_klok(vl.vw_gestart)}")
+    controle("vroeg met een kloppende verwachting: klaar voor 16:30 en helemaal op zon",
+             vl.vw_klaar is not None and vl.vw_klaar < vl.vw_klaar.replace(hour=16, minute=30)
+             and len(vw_beurt) == 1 and vw_beurt[0]["solar_kwh"] >= 0.95 * vw_beurt[0]["kwh"], f"{vw_klok(vl.vw_klaar)} {vw_beurt}")
+
 if (vl := v("vaatwasser-herstart")):
     print(f"  herstart: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, {vl.vw_kwh:.2f} kWh, meldingen {[m for _, m in vl.meldingen if 'Vaatwasser' in m]}")
-    controle("herstart: gestart om 01:00, en na de herstart om 02:00 zegt hij niet nog eens dat hij draait",
-             vl.vw_gestart is not None and vl.vw_gestart.hour == 1 and len(meldingen(vl, "Vaatwasser is gestart")) == 1
+    controle("herstart: gestart om 02:00, en na de herstart om 03:00 zegt hij niet nog eens dat hij draait",
+             vl.vw_gestart is not None and vl.vw_gestart.hour == 2 and len(meldingen(vl, "Vaatwasser is gestart")) == 1
              and not meldingen(vl, "Vaatwasser draait"), f"{[m for _, m in vl.meldingen]}")
-    controle("herstart: één verslag, over de hele beurt vanaf 01:00",
-             len(meldingen(vl, "Vaatwasser is klaar")) == 1 and "van 01:0" in meldingen(vl, "Vaatwasser is klaar")[0]
+    controle("herstart: één verslag, over de hele beurt vanaf 02:00",
+             len(meldingen(vl, "Vaatwasser is klaar")) == 1 and "van 02:0" in meldingen(vl, "Vaatwasser is klaar")[0]
              and "Meteen starten had" in meldingen(vl, "Vaatwasser is klaar")[0], f"{meldingen(vl, 'is klaar')}")
     controle("herstart: de beurt staat één keer in de opslag, afgerond, met bijna alle kWh en een besparing",
              len([b for b in vl.beurten if b["device"] == "vaatwasser"]) == 1

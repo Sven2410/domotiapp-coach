@@ -258,6 +258,23 @@ zijn (Home Connect) of minuten of seconden (`_eindtijd` in coach.py). "Klaar
 rond" in de melding en op de kaart komt daarvandaan; zonder die sensor uit
 de tabel. Proef 61.
 
+**Zonder meting gaat het verbruik op de piek, en de meterregel eist de
+piek** (v0.59.0). Sven op 08-09-2026 om 09:12: Eco 50 zonder meting startte
+met 250 W op de meter, "waarom, terwijl bekend is dat de zon later meer
+schijnt?" Uitgesmeerd was Eco (225 min, 0,8 kWh) 213 W, en dat paste; de
+opwarmpiek van 2,2 kW kwam van het net terwijl het dak om 12:00 3,8 kW gaf.
+Sinds die dag zet `_programma_stukken` zonder profiel alle kilowatturen op
+`peak_w` vanaf de start (23 minuten voor Eco) en daarna niets, en grijpt
+`meter_overal` in `plan_programma` alleen in als de meter ten minste de piek
+laat zien. De gewone som met de meter voor het lopende uur blijft: zegt de
+voorspeller de helft (zoals die dag), dan start hij zodra de meter van nu op
+de som wint, en dat is een verwachting waar niets aan te schaven is (Sven,
+07-09). Scenario's `vaatwasser-vroeg` en `vaatwasser-vroeg-verwacht`, proef
+50 in test_planner.py. **De maat van een programmabeurt rekent de zon van
+toen mee** (`zon_toen` in de sessie, `_prijs_met_zon` in coach.py): "meteen
+starten had gekost" was tot dan alles tegen de inkoopprijs, en dan bespaart
+een beurt die bij het vrijgeven start precies zijn eigen zonaandeel. Proef 64.
+
 ## Hoe het in elkaar zit
 
 | bestand | wat het doet |
@@ -299,9 +316,9 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 282 controles op het denkwerk
-python tests/test_coach.py       # 333 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1171 op hele laadbeurten in het virtuele huis
+python tests/test_planner.py     # 290 controles op het denkwerk
+python tests/test_coach.py       # 339 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1189 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 35 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
