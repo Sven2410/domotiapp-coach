@@ -507,13 +507,46 @@ vaatwasser_meter_wint = vast_zonnig.kopie(
     vaatwasser_klaar_om="16:30", vaatwasser_niet_eerder="08:00",
     gebeurtenissen=[("10:20", "vaatwasser_vrijgeven", None)],
 )
+# Sven thuis op 08-09-2026. Om 09:12 vrijgegeven, Eco 50 zonder meting, het
+# dak gaf 0,9 kWh in dat uur en de meter zag 250 W over; de voorspeller zei
+# voor de middag ongeveer de helft van wat het dak deed. De coach startte
+# meteen, want uitgesmeerd was Eco 213 W en dat paste; de opwarmpiek van
+# 2,2 kW kwam van het net. Sven: "waarom startte hij terwijl bekend is dat de
+# zon later meer schijnt?" De zon is de gemeten opbrengst per uur van die dag
+# (tot 15:00 gemeten; daarna de vorm van de voorspeller, 2,6 keer, zoals om
+# 14:00), het huis de mediaan per uur uit zijn kwartieropslag.
+SVEN_ZON_KWH = {
+    7: 0.1, 8: 0.5, 9: 0.92, 10: 1.93, 11: 2.25, 12: 3.78, 13: 3.83, 14: 4.41,
+    15: 3.4, 16: 3.7, 17: 3.1, 18: 2.2, 19: 1.3, 20: 0.5,
+}
+SVEN_HUIS_W = {
+    0: 685, 1: 598, 2: 581, 3: 566, 4: 572, 5: 573, 6: 572, 7: 564, 8: 533, 9: 753,
+    10: 855, 11: 813, 12: 841, 13: 851, 14: 1068, 15: 962, 16: 1014, 17: 1081,
+    18: 2019, 19: 1113, 20: 1127, 21: 1087, 22: 951, 23: 796,
+}
+vaatwasser_vroeg = vast_zonnig.kopie(
+    naam="vaatwasser-vroeg", uitleg="Sven op 08-09-2026: vast contract met salderen, om 09:12 vrijgegeven met 250 W over en een voorspeller die de helft zag; Eco zonder meting hoort niet te starten voor de zon de opwarmpiek draagt",
+    auto=VOL, contract="vast-salderen", vast_terugleverkosten=0.052756,
+    begin="2026-09-08 07:55", kabel_erin=None, duur_uren=10,
+    zon=Zon(kromme=SVEN_ZON_KWH, voorspeld="half"), huis=Huis(profiel=SVEN_HUIS_W, verdeling=(0.4, 0.3, 0.3)),
+    vaatwasser=Vaatwasser(minuten=225, kwh=0.8, piek_w=2200.0, piek_minuten=20),
+    vaatwasser_klaar_om="16:30", vaatwasser_niet_eerder="08:00",
+    gebeurtenissen=[("09:12", "vaatwasser_vrijgeven", None)],
+)
+# Dezelfde dag met een voorspeller die het wél goed zag: dan wacht hij op het
+# uur waarvan de zon de piek draagt. Het verschil tussen de twee is wat een
+# verwachting die de helft zegt kost, en dat is geen fout van de coach.
+vaatwasser_vroeg_verwacht = vaatwasser_vroeg.kopie(
+    naam="vaatwasser-vroeg-verwacht", uitleg="dezelfde dag, maar de voorspeller zag het dak goed: dan wacht hij tot de zon de opwarmpiek draagt, rond 12:00",
+    zon=Zon(kromme=SVEN_ZON_KWH),
+)
 # Een herstart van Home Assistant midden in de beurt (07-09-2026, Sven: "ja,
 # reken terug"). De coach bewaart de lopende beurt elke vijf minuten en pakt
 # hem na de herstart daar op: geen tweede "is gestart", en één verslag over
 # de hele beurt.
 vaatwasser_herstart = vaatwasser_avond.kopie(
-    naam="vaatwasser-herstart", uitleg="dynamisch, om 19:00 vrijgegeven, en om 02:00 herstart Home Assistant midden in de beurt: de telling gaat door en het verslag gaat over de hele beurt",
-    gebeurtenissen=[("19:00", "vaatwasser_vrijgeven", None), ("+1 02:00", "herstart", None)],
+    naam="vaatwasser-herstart", uitleg="dynamisch, om 19:00 vrijgegeven, en om 03:00 herstart Home Assistant midden in de beurt: de telling gaat door en het verslag gaat over de hele beurt",
+    gebeurtenissen=[("19:00", "vaatwasser_vrijgeven", None), ("+1 03:00", "herstart", None)],
 )
 vaatwasser_uiterlijk = vaatwasser_avond.kopie(
     naam="vaatwasser-uiterlijk-starten", uitleg="om 19:00 vrijgegeven met uiterlijk starten om 22:00: dan gaat hij om 22:00, ook al is de nacht goedkoper",
@@ -536,7 +569,7 @@ ALLE = [
     afbouw_krap, afbouw_krap_geleerd,
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
-    vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_herstart,
+    vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,
     *VAN_DEN_DAM,
 ]
 

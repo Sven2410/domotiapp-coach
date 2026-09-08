@@ -1874,7 +1874,8 @@ controle("uiterlijk starten om 22:00 bereikt: starten",
          planner.plan_programma(dt.datetime(2026, 9, 7, 22, 0), prijzen50(7), Tariff(), Forecast(), uiterlijk, vrij).rule == "start-by", "")
 controle("en daarvoor kiest hij niets na 22:00",
          planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), prijzen50(7), Tariff(), Forecast(), uiterlijk, vrij).starts_at <= "2026-09-07T22:00:00", "")
-zon = Forecast(solar_kwh={dt.datetime(2026, 9, 7, 12, 0) + dt.timedelta(hours=i): 2.0 for i in range(4)}, house_kwh={})
+# 2,5 kWh per uur over: meer dan de piek van 2,1 kW, dus het opwarmen past er in.
+zon = Forecast(solar_kwh={dt.datetime(2026, 9, 7, 12, 0) + dt.timedelta(hours=i): 2.5 for i in range(4)}, house_kwh={})
 dag = planner.Window(enabled=True, deadline=dt.datetime(2026, 9, 7, 18, 0))
 middag = planner.plan_programma(dt.datetime(2026, 9, 7, 8, 0), prijzen50(7), Tariff(), zon, dag, vrij)
 controle("met zon verwacht vanaf 12:00 en klaar om 18:00 start hij om 12:00",
@@ -1903,8 +1904,11 @@ thuis = planner.Window(enabled=True, opens=dt.datetime(2026, 9, 7, 8, 0), deadli
 kort = planner.Apparaat(status="ready", released=True, program=kurz)
 zonder = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 22), [], salderen, ochtend, thuis, kort)
 print(f"  zonder meting: {zonder.rule} {zonder.starts_at}  {zonder.reason}")
-controle("zonder meting gelooft hij de verwachting en wacht hij tot 11:00",
-         zonder.rule == "wait-for-start" and zonder.starts_at == "2026-09-07T11:00:00", f"{zonder}")
+# Tot 08-09-2026 was dat 11:00: uitgesmeerd is Express 1,05 kW, en 11:00 had
+# 2,1 kW over. Sinds het verbruik op de piek van 2,2 kW gerekend wordt is
+# 11:00 net te weinig en 12:00 (3,3 kW over) het eerste uur dat hem draagt.
+controle("zonder meting gelooft hij de verwachting en wacht hij op het eerste uur dat de piek draagt, 12:00",
+         zonder.rule == "wait-for-start" and zonder.starts_at == "2026-09-07T12:00:00", f"{zonder}")
 met = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 22), [], salderen, ochtend, thuis, kort, surplus_w=3460.0)
 print(f"  met 3,46 kW teruglevering: {met.rule} {met.starts_at}  {met.reason}")
 controle("met 3,46 kW op de meter start hij nu: een meting wint van een even goede verwachting",
@@ -1914,8 +1918,8 @@ k_nu = planner.programma_kosten(dt.datetime(2026, 9, 7, 10, 22), kurz, [], salde
 controle("en die beurt kost dan de zonprijs: 1,05 kWh maal de inkoop min de terugleverkosten",
          abs(k_nu - 1.05 * (0.24171 - 0.052756)) < 0.001, f"{k_nu:.4f}")
 niets = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 22), [], salderen, ochtend, thuis, kort, surplus_w=0.0)
-controle("meet de meter niets, dan telt dat ook: hij wacht op de zon van 11:00",
-         niets.rule == "wait-for-start" and niets.starts_at == "2026-09-07T11:00:00", f"{niets}")
+controle("meet de meter niets, dan telt dat ook: hij wacht op de zon van 12:00",
+         niets.rule == "wait-for-start" and niets.starts_at == "2026-09-07T12:00:00", f"{niets}")
 # 10:51, na de herstart: de verwachting was ververst en nog lager, nu starten
 # liep 51 minuten het uur van 11:00 in dat op de verwachting net te weinig zon
 # had, en hij wachtte tot 12:00 voor minder dan een halve cent.
@@ -1926,14 +1930,22 @@ k_1051 = planner.programma_kosten(dt.datetime(2026, 9, 7, 10, 51), kurz, [], sal
                                   now=dt.datetime(2026, 9, 7, 10, 51), surplus_w=3360.0)
 k_1200 = planner.programma_kosten(dt.datetime(2026, 9, 7, 12, 0), kurz, [], salderen, laat)
 print(f"  10:51 kost {k_1051:.4f}, 12:00 kost {k_1200:.4f}")
-controle("om 10:51 is nu starten op de som een fractie duurder dan 12:00",
-         0 < k_1051 - k_1200 < 0.005, f"{k_1051 - k_1200:.4f}")
+# Op de som van toen (uitgesmeerd) was dat een halve cent; met de piek aan het
+# begin valt het opwarmen in het uur van 11:00, waarvan de verwachting te
+# weinig zei, en is het verschil groter. De meter hieronder weet beter.
+controle("om 10:51 is nu starten op de som duurder dan 12:00",
+         0 < k_1051 - k_1200 < 0.03, f"{k_1051 - k_1200:.4f}")
 halve = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 51), [], salderen, laat, thuis, kort, surplus_w=3360.0)
 controle("maar de meter ziet genoeg voor het hele programma en later is zon niet goedkoper: hij start nu",
          halve.rule == "cheapest-start" and halve.charge, f"{halve}")
 weinig = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 51), [], salderen, laat, thuis, kort, surplus_w=600.0)
-controle("met 600 W op de meter, te weinig voor 1,05 kW, wacht hij op de zon van 12:00",
-         weinig.rule == "wait-for-start" and weinig.starts_at == "2026-09-07T12:00:00", f"{weinig}")
+controle("met 600 W op de meter, te weinig voor de piek van 2,2 kW, wacht hij op het uur dat die draagt: 13:00",
+         weinig.rule == "wait-for-start" and weinig.starts_at == "2026-09-07T13:00:00", f"{weinig}")
+# Genoeg voor het gemiddelde is niet genoeg: 1,5 kW op de meter is meer dan
+# 1,05 kW uitgesmeerd, maar minder dan de piek van 2,2 kW. Zie 08-09-2026.
+gemiddeld = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 51), [], salderen, laat, thuis, kort, surplus_w=1500.0)
+controle("1,5 kW op de meter, boven het gemiddelde maar onder de piek: de meterregel grijpt niet in",
+         gemiddeld.rule == "wait-for-start", f"{gemiddeld}")
 echt = planner.plan_programma(dt.datetime(2026, 9, 7, 10, 51), [], salderen, laat, thuis, kort, surplus_w=0.0)
 controle("en zonder zon op de meter ook, met het verschil erbij",
          echt.rule == "wait-for-start" and "Nu starten zou" in echt.reason, f"{echt}")
@@ -1951,6 +1963,53 @@ controle("de meting geldt alleen voor het lopende uur; om 11:00 rekent hij weer 
          abs(planner.programma_kosten(dt.datetime(2026, 9, 7, 11, 0), kurz, [], salderen, ochtend,
                                       now=dt.datetime(2026, 9, 7, 10, 22), surplus_w=0.0)
              - planner.programma_kosten(dt.datetime(2026, 9, 7, 11, 0), kurz, [], salderen, ochtend)) < 1e-9, "")
+
+# Sven thuis op 08-09-2026 om 09:12: Eco 50 zonder meting (225 min, 0,8 kWh,
+# piek 2100 W), de meter zag 250 W teruglevering, Forecast.Solar zei 1,0 tot
+# 1,7 kWh per uur voor de middag, het huis 0,75 tot 0,85 kWh. De coach
+# startte: uitgesmeerd was Eco 213 W en dat paste in 250 W. De opwarmpiek van
+# 2,2 kW kwam van het net, en om 12:00 gaf het dak 3,8 kW. Sven: "waarom
+# startte hij terwijl bekend is dat de zon later meer schijnt?"
+vandaag = dt.datetime(2026, 9, 8)
+sven_zon = Forecast(
+    solar_kwh={vandaag.replace(hour=h): k for h, k in [(9, 0.65), (10, 1.002), (11, 1.299), (12, 1.521), (13, 1.66),
+                                                       (14, 1.696), (15, 1.617), (16, 1.437), (17, 1.184), (18, 0.865)]},
+    house_kwh={9: 0.753, 10: 0.855, 11: 0.813, 12: 0.841, 13: 0.851, 14: 1.068, 15: 0.962, 16: 1.014, 17: 1.081, 18: 2.019},
+)
+sven_venster = planner.Window(enabled=True, opens=vandaag.replace(hour=8), deadline=vandaag.replace(hour=16, minute=30))
+sven_eco = planner.Apparaat(status="ready", released=True, program=eco)
+stukken = planner._programma_stukken(vandaag.replace(hour=9, minute=12), vandaag.replace(hour=12, minute=57), eco)
+print(f"  stukken zonder profiel: {[(a.strftime('%H:%M'), b.strftime('%H:%M'), round(k, 3)) for a, b, k in stukken]}")
+controle("zonder profiel gaan de 0,8 kWh op 2100 W vanaf de start, in 23 minuten, en trekt de staart niets",
+         abs(sum(k for _, _, k in stukken) - 0.8) < 1e-6 and stukken[0][2] > 0.7 and all(k == 0 for _, _, k in stukken[1:])
+         and stukken[-1][1] == vandaag.replace(hour=12, minute=57), f"{stukken}")
+controle("voorspoelen heeft geen piek in de opgave en blijft gelijkmatig",
+         abs(sum(k for _, _, k in planner._programma_stukken(vandaag.replace(hour=9), vandaag.replace(hour=9, minute=15),
+                                                              planner.programma_van("pre_rinse"))) - 0.05) < 1e-6, "")
+sven_250 = planner.plan_programma(vandaag.replace(hour=9, minute=12, second=9), [], salderen, sven_zon, sven_venster, sven_eco, surplus_w=250.0)
+print(f"  09:12 met 250 W: {sven_250.rule} {sven_250.starts_at}  {sven_250.reason}")
+controle("08-09 om 09:12 met 250 W op de meter start hij niet, want de piek van 2,1 kW past daar niet in",
+         sven_250.rule == "wait-for-start" and not sven_250.charge, f"{sven_250}")
+# 13:00 belooft het meest maar past niet meer voor 16:30 (225 minuten plus
+# een half uur speling), dus 12:00.
+controle("en hij wacht op het laatste uur dat nog past en het meest belooft, 12:00",
+         sven_250.starts_at == "2026-09-08T12:00:00", f"{sven_250.starts_at}")
+sven_300 = planner.plan_programma(vandaag.replace(hour=10, minute=0), [], salderen, sven_zon, sven_venster, sven_eco, surplus_w=300.0)
+controle("om 10:00 met 300 W op de meter ook niet",
+         sven_300.rule == "wait-for-start", f"{sven_300}")
+# Met 1 kW op de meter om 10:00 start hij wel, maar niet via de meterregel:
+# de piek past er niet in. Het is de gewone som, met de meter voor het
+# lopende uur (Sven op 07-09-2026): 1 kW zon nu is op de som goedkoper dan
+# de 0,7 kW die de verwachting voor 12:00 belooft. Zegt de verwachting te
+# weinig, dan is dat een verwachting; Sven op 07-09: daar is niets aan te
+# schaven.
+sven_1000 = planner.plan_programma(vandaag.replace(hour=10, minute=0), [], salderen, sven_zon, sven_venster, sven_eco, surplus_w=1000.0)
+controle("om 10:00 met 1 kW op de meter start hij op de gewone som: de meter van nu wint van een magere verwachting",
+         sven_1000.rule == "cheapest-start" and sven_1000.charge, f"{sven_1000}")
+sven_3000 = planner.plan_programma(vandaag.replace(hour=12, minute=0), [], salderen, sven_zon, sven_venster, sven_eco, surplus_w=3000.0)
+controle("om 12:00 met 3 kW op de meter wel: de meter draagt de piek en zon is later niet goedkoper",
+         sven_3000.rule == "cheapest-start" and sven_3000.charge and abs(sven_3000.cost_hint - 0.8 * salderen.feed_in) < 0.001
+         if hasattr(sven_3000, "cost_hint") else sven_3000.rule == "cheapest-start" and sven_3000.charge, f"{sven_3000}")
 
 print("=== 51. de programmatabel van de klant, de metingen en het profiel ===")
 # Sven op 06-09-2026: "we hebben nu een hard coded tabel maar ik wil dat
@@ -2016,8 +2075,8 @@ controle("met het profiel is starten in de zon goedkoper dan de opwarmpiek er ne
 eco_plat = planner.Programma("eco_50", "Eco 50 °C", 200, 0.95, 2000)
 p_1140 = planner.programma_kosten(dt.datetime(2026, 9, 7, 11, 40), eco_plat, [], vast, zon2)
 p_1200 = planner.programma_kosten(dt.datetime(2026, 9, 7, 12, 0), eco_plat, [], vast, zon2)
-controle("zonder profiel is dat verschil er nauwelijks, want dan is het verbruik uitgesmeerd",
-         abs(p_1140 - p_1200) < 0.03, f"{p_1140:.3f} {p_1200:.3f}")
+controle("zonder profiel gaat alles op de piek aan het begin, dus ook dan is 12:00 goedkoper dan 11:40",
+         p_1200 < p_1140 - 0.05 and abs(p_1200 - 0.95 * 0.07) < 0.001, f"{p_1140:.3f} {p_1200:.3f}")
 controle("zonder zon telt het profiel precies zijn eigen kilowatturen tegen de inkoopprijs",
          abs(planner.programma_kosten(dt.datetime(2026, 9, 7, 2, 0), eco_profiel, [], vast, Forecast()) - 0.28 * sum(w / 1000 * 5 / 60 for w in profiel)) < 0.001, "")
 dom = planner.Apparaat(status="ready", released=True, program=eco, manual=True)

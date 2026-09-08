@@ -3156,12 +3156,13 @@ def programma_kosten(
 
     Met een gemeten profiel gaat het per stap van dat profiel: de opwarmpiek
     aan het begin en het drogen aan het eind vallen dan op het uur waar ze
-    horen, en met zon maakt dat het verschil. Zonder profiel wordt het
-    verbruik gelijkmatig over de duur verdeeld, want een opgave kent alleen
-    het totaal en de piek. Per stuk gaat wat er aan eigen zon over is (de
-    verwachting min het huis) tegen de terugleverprijs, want dat is wat je er
-    anders voor gekregen had, en de rest tegen de inkoopprijs van dat uur.
-    Precies zoals `schijven` dat voor een laadpaal doet.
+    horen, en met zon maakt dat het verschil. Zonder profiel gaat het hele
+    verbruik op de piek van de opgave, vanaf de start, tot de kilowatturen op
+    zijn; zie `_programma_stukken` voor waarom niet uitgesmeerd. Per stuk gaat
+    wat er aan eigen zon over is (de verwachting min het huis) tegen de
+    terugleverprijs, want dat is wat je er anders voor gekregen had, en de
+    rest tegen de inkoopprijs van dat uur. Precies zoals `schijven` dat voor
+    een laadpaal doet.
     """
     einde = start + timedelta(minutes=programma.minutes)
     kosten = 0.0
@@ -3194,9 +3195,33 @@ def _programma_stukken(
     """Het programma in stukken die elk binnen één uur vallen: (van, tot, kWh).
 
     Met een profiel: elke stap van het profiel, gesplitst op de uurgrens.
-    Zonder: per uur een evenredig deel van het totaal.
+
+    Zonder profiel: alle kilowatturen op de piek van de opgave, vanaf de
+    start, en daarna niets meer tot het eind. Tot 08-09-2026 werd het
+    verbruik gelijkmatig over de duur uitgesmeerd, en dat maakte van Eco 50
+    (225 minuten, 0,8 kWh) een apparaat van 213 W. Bij Sven thuis zag de
+    meter om 09:12 iets meer dan dat aan teruglevering, en de coach besloot
+    dat het hele programma op eigen zon kon: "start nu". In het echt trekt
+    een vaatwasser zijn stroom bij het opwarmen, drie keer 1,3 tot 2,2 kW,
+    en die pieken kwamen van het net terwijl het dak drie uur later 4 kW
+    gaf. Een opgave kent alleen het totaal en de piek, en het eerlijkste dat
+    daarvan te zeggen is: de energie gaat erin op piekvermogen, en dat begint
+    bij het opwarmen aan het begin. Zo weegt een stuk zon pas mee als het de
+    piek ook echt kan dragen, en valt de piek in het uur waarvan de zon het
+    meest belooft. Wat er in werkelijkheid gebeurt komt na de eerste beurt
+    uit de meting (`met_metingen`), en die wint dan.
     """
     stukken: list[tuple[datetime, datetime, float]] = []
+
+    def knip(moment: datetime, tot: datetime, watt: float) -> None:
+        # Op de uurgrens knippen, want de prijs en de zon zijn per uur.
+        binnen = moment
+        while binnen < tot:
+            grens = binnen.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+            volgend = min(grens, tot)
+            stukken.append((binnen, volgend, watt / 1000.0 * (volgend - binnen).total_seconds() / 3600.0))
+            binnen = volgend
+
     if programma.profile:
         stap = timedelta(minutes=PROFIEL_STAP_MIN)
         moment = start
@@ -3204,22 +3229,22 @@ def _programma_stukken(
             tot = min(moment + stap, einde)
             if tot <= moment:
                 break
-            # Op de uurgrens knippen, want de prijs en de zon zijn per uur.
-            binnen = moment
-            while binnen < tot:
-                grens = binnen.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-                volgend = min(grens, tot)
-                stukken.append((binnen, volgend, watt / 1000.0 * (volgend - binnen).total_seconds() / 3600.0))
-                binnen = volgend
+            knip(moment, tot, watt)
             moment = tot
         return stukken
-    kwh_per_uur = programma.kwh / (programma.minutes / 60.0) if programma.minutes else 0.0
-    moment = start
-    while moment < einde:
-        uur = moment.replace(minute=0, second=0, microsecond=0)
-        volgend = min(uur + timedelta(hours=1), einde)
-        stukken.append((moment, volgend, kwh_per_uur * (volgend - moment).total_seconds() / 3600.0))
-        moment = volgend
+    duur_uren = programma.minutes / 60.0 if programma.minutes else 0.0
+    piek_uren = programma.kwh / (programma.peak_w / 1000.0) if programma.peak_w > 0 else duur_uren
+    if 0 < piek_uren < duur_uren:
+        piek_tot = start + timedelta(hours=piek_uren)
+        knip(start, piek_tot, float(programma.peak_w))
+        # De staart trekt niets meer, maar hoort er wel bij: de prijs van
+        # elk uur waarin hij draait moet bekend zijn.
+        knip(piek_tot, einde, 0.0)
+        return stukken
+    # Een opgave zonder piek, of een piek die de hele duur nodig heeft: dan
+    # is gelijkmatig het enige dat er te zeggen is.
+    kwh_per_uur = programma.kwh / duur_uren if duur_uren else 0.0
+    knip(start, einde, kwh_per_uur * 1000.0)
     return stukken
 
 
@@ -3368,9 +3393,18 @@ def plan_programma(
     # drie keer te laag was gebleken. Bij een dynamisch contract met een
     # goedkoper uur later blijft dat uur winnen, want dat is een prijs en geen
     # gok. Niet in de avondpiek, want daar gaat het niet om geld.
+    #
+    # En "genoeg zon" is: genoeg voor de piek, niet voor het gemiddelde.
+    # Op 08-09-2026 om 09:12 zag de meter bij Sven 250 W teruglevering, en
+    # dat was meer dan de uitgesmeerde 213 W van Eco 50; de coach startte,
+    # en de opwarmpiek van 2,2 kW kwam van het net terwijl het dak drie uur
+    # later 4 kW gaf. Een vaatwasser trekt zijn piek hoe dan ook, dus de
+    # meter moet die piek laten zien voor de meting van nu een verwachting
+    # van straks mag verslaan.
     if (
         surplus_w is not None
         and surplus_w > 0
+        and surplus_w >= programma.peak_w
         and kosten_nu is not None
         and any(m == eerste for _, m in buiten)
     ):
