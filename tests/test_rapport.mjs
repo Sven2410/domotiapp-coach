@@ -698,7 +698,7 @@ proef("het scherm tekent een kop per dag en een rij per melding", () => {
 // maand, jaar, van elk apparaat." Het rekenwerk per beurt zit in de coach; hier
 // wordt alleen opgeteld, en een beurt zonder prijs telt niet mee in het geld.
 
-const { beurtenIn, totalen, perApparaat, opmerking, woorden, soort } = await import(
+const { beurtenIn, totalen, perApparaat, opmerking, woorden, soort, delen } = await import(
   "../custom_components/domotiapp_coach/frontend/src/savings.js"
 );
 
@@ -726,7 +726,7 @@ proef("de woorden van Bespaard volgen wat er in de lijst staat", () => {
 proef("bespaard telt per periode en per apparaat op, zonder verzonnen geld", () => {
   const beurten = [
     { id: "a:1", device: "a", name: "Laadpaal", plugged_at: "2026-09-04T19:01:00", ended: "2026-09-06T04:09:00",
-      kwh: 66.1, solar_kwh: 6.9, paid: 9.5, ref_price: 0.36, ref_cost: 23.8, saved: 14.3, price_unknown: false, complete: true },
+      kwh: 66.1, solar_kwh: 6.9, paid: 9.5, ref_price: 0.36, ref_cost: 23.8, saved: 14.3, solar_saved: 1.3, price_unknown: false, complete: true },
     { id: "a:2", device: "a", name: "Laadpaal", plugged_at: "2026-09-02T18:00:00", ended: "2026-09-03T05:00:00",
       kwh: 20, solar_kwh: 0, paid: 4, ref_price: 0.3, ref_cost: 6, saved: 2, price_unknown: false, complete: true },
     { id: "b:1", device: "b", name: "Vaatwasser", plugged_at: "2026-09-05T20:00:00", ended: null,
@@ -738,6 +738,9 @@ proef("bespaard telt per periode en per apparaat op, zonder verzonnen geld", () 
   assert.equal(t.beurten, 2);
   assert.ok(Math.abs(t.kwh - 67.3) < 1e-9, "de kilowatturen tellen altijd mee");
   assert.equal(t.saved, 14.3, "het geld alleen van beurten met een prijs");
+  assert.ok(Math.abs(t.solar_saved - 1.3) < 1e-9 && Math.abs(t.wait_saved - 13) < 1e-9, "bespaard in twee delen: door de zon en door te wachten");
+  assert.deepEqual(delen(beurten[1]), { zon: null, wachten: 2 }, "een beurt van voor v0.60.0 kent het zondeel niet; toen was bespaard alleen het wachten");
+  assert.deepEqual(delen(beurten[2]), { zon: null, wachten: null }, "zonder prijs geen delen");
   assert.equal(t.onbekend, 1);
   assert.equal(t.lopend, 1);
   const per = perApparaat(beurtenIn(beurten, new Date(2026, 8, 1), new Date(2026, 8, 8)));

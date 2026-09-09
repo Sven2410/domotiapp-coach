@@ -2703,7 +2703,7 @@ verslag = [d[2]["message"] for d in v if d[0] == "notify"]
 print(f"  klaar: {verslag}")
 controle("één verslag als hij klaar is, met de tijden, kWh en kosten erin",
          len(verslag) == 1 and "Vaatwasser is klaar (Eco 50 °C)" in verslag[0] and "van 01:02 tot 04:00" in verslag[0]
-         and "5,9 kWh" in verslag[0] and "Meteen starten had" in verslag[0], f"{verslag}")
+         and "5,9 kWh" in verslag[0] and "Bespaard €" in verslag[0] and "door te wachten" in verslag[0], f"{verslag}")
 controle("en de vrijgave is eraf", "dev-vaatwasser" not in (inst56.get("ready_devices") or []),
          f"{inst56.get('ready_devices')}")
 beurten56 = asyncio.run(coachmod.async_get_beurten(hass56).async_list())
@@ -2869,7 +2869,7 @@ verslag = telefoon58(v)
 print(f"  klaar: {verslag}")
 controle("na een half uur stilte één verslag, met het einde op het laatste vermogen en niet op nu",
          len(verslag) == 1 and "Vaatwasser is klaar (Eco 50 °C)" in verslag[0] and "van 11:12 tot 14:31" in verslag[0]
-         and "1,5 kWh" in verslag[0] and "Meteen starten had" in verslag[0], f"{verslag}")
+         and "1,5 kWh" in verslag[0] and "Bespaard €" in verslag[0], f"{verslag}")
 controle("de vrijgave is eraf", "dev-dom" not in (inst58.get("ready_devices") or []), f"{inst58.get('ready_devices')}")
 gemeten = [r for r in inst58.get("program_measured") or [] if r.get("device") == "dev-dom"]
 print(f"  gemeten: {[(r['key'], r['minutes'], r['kwh'], r['peak_w'], r['runs'], len(r['profile'])) for r in gemeten]}")
@@ -3116,7 +3116,7 @@ b, m = asyncio.run(ronde62(coach62b, dt.datetime(2026, 9, 8, 3, 0)))
 print(f"  klaar: {m}")
 controle("één verslag over de hele beurt, van voor de herstart tot nu",
          len(m) == 1 and "van 01:02 tot 03:00" in m[0] and "3,9 kWh" in m[0] and "€ 0,70" in m[0]
-         and "Meteen starten had € 1,1" in m[0], f"{m}")
+         and "Bespaard € 0,46" in m[0] and "door te wachten" in m[0], f"{m}")
 klaar62 = beurten62()
 print(f"  opslag: {[(b['id'], b['complete'], b['kwh'], b['saved']) for b in klaar62]}")
 controle("in de opslag één afgeronde beurt, onder dezelfde sleutel, zonder de open regel ernaast",
@@ -3229,24 +3229,19 @@ controle("de oude vaatwasserbeurt wordt een programma, de laadbeurt blijft laden
          [b["kind"] for b in uit63] == ["programma", "laden", "programma", "laden"], f"{uit63}")
 controle("en de regels zelf zijn niet aangeraakt", "kind" not in oud63[0], "")
 
-print("=== 64. de maat van een programmabeurt rekent de zon van toen mee ===")
-# Sven thuis op 08-09-2026: de vaatwasser startte in dezelfde minuut als hij
-# werd vrijgegeven, en toch zei het verslag "Meteen starten had € 0,174
-# gekost" bij € 0,158 betaald. De maat telde alles tegen de inkoopprijs en de
-# betaalde kant met zon; het verschil was het zonaandeel, geen besparing.
-controle("_prijs_met_zon: genoeg zon is de terugleverprijs, half is het midden, zonder meting de inkoop",
-         abs(coachmod.ChargerCoach._prijs_met_zon(0.24, 0.19, 3000.0, 2000.0) - 0.19) < 1e-9
-         and abs(coachmod.ChargerCoach._prijs_met_zon(0.24, 0.19, 1000.0, 2000.0) - 0.215) < 1e-9
-         and coachmod.ChargerCoach._prijs_met_zon(0.24, 0.19, None, 2000.0) == 0.24
-         and coachmod.ChargerCoach._prijs_met_zon(0.24, None, 3000.0, 2000.0) == 0.24, "")
-s64 = {"vrijgegeven": dt.datetime(2026, 9, 8, 9, 12), "zon_toen": []}
-for minuut, w in ((0, 200.0), (1, 300.0), (6, 1000.0), (12, 2500.0)):
-    coachmod.ChargerCoach._zon_toen_bij(s64, dt.datetime(2026, 9, 8, 9, 12) + dt.timedelta(minutes=minuut), w)
-controle("_zon_toen: per vijf minuten het gemiddelde, en niets voor een vak zonder meting",
-         coachmod.ChargerCoach._zon_toen(s64, dt.datetime(2026, 9, 8, 9, 14)) == 250.0
-         and coachmod.ChargerCoach._zon_toen(s64, dt.datetime(2026, 9, 8, 9, 20)) == 1000.0
-         and coachmod.ChargerCoach._zon_toen(s64, dt.datetime(2026, 9, 8, 9, 25)) == 2500.0
-         and coachmod.ChargerCoach._zon_toen(s64, dt.datetime(2026, 9, 8, 9, 40)) is None, f"{s64['zon_toen']}")
+print("=== 64. bespaard is het totaal plaatje: de zon en het wachten ===")
+# Sven thuis op 09-09-2026, bij een vaatwasser die meteen op zon startte en
+# "bespaard nul" kreeg: "Er is toch wel iets zonne-energie naar de vaatwasser
+# gegaan? Ik wil het totaal plaatje." De maat is alles van het net op het
+# moment van vrijgeven; wat de zon scheelde en wat het wachten scheelde
+# staan allebei in bespaard, en het verslag zegt welk deel wat was.
+zin = coachmod.ChargerCoach._bespaard_zin
+controle("_bespaard_zin: alleen zon, alleen wachten, allebei, en wachten dat geld kostte",
+         zin(0.037, 0.037) == "Bespaard € 0,037, allemaal door de zon."
+         and zin(0.04, 0.0) == "Bespaard € 0,040 door te wachten."
+         and zin(0.12, 0.08) == "Bespaard € 0,120: € 0,080 door de zon en € 0,040 door te wachten."
+         and zin(0.03, 0.05) == "Bespaard € 0,030: de zon scheelde € 0,050, het wachten kostte € 0,020.",
+         f"{zin(0.037, 0.037)!r} {zin(0.04, 0.0)!r} {zin(0.12, 0.08)!r} {zin(0.03, 0.05)!r}")
 
 inst64 = instellingen(devices=[LAADPAAL, VAATWASSER])
 inst64["contract"] = {
@@ -3284,20 +3279,27 @@ hass64.states.zet("sensor.teruglevering", "1000")   # 3 kW over min de 2 kW die 
 for minuut in range(1, 31):
     asyncio.run(ronde64(dt.datetime(2026, 9, 8, 12, minuut)))
 sessie64 = coach64._programma["dev-vaatwasser"]
-print(f"  12:30: kwh {sessie64['kwh']:.3f}, betaald {sessie64['betaald']:.4f}, maat {sessie64['maat']:.4f}, zon_toen {len(sessie64['zon_toen'])} vakken")
-controle("een half uur op 2 kW met zon genoeg: betaald tegen de zonprijs, en de maat precies hetzelfde",
+print(f"  12:30: kwh {sessie64['kwh']:.3f}, betaald {sessie64['betaald']:.4f}, maat {sessie64['maat']:.4f}, zonwinst {sessie64['zon_winst']:.4f}")
+# De maat is alles van het net bij het vrijgeven (Sven op 09-09-2026: "wat je
+# op zonne-energie laadt bespaar je natuurlijk ook door minder stroom in te
+# kopen"); wat de zon scheelde staat apart, en dat is hier het hele verschil.
+controle("een half uur op 2 kW met zon genoeg: betaald tegen de zonprijs, de maat alles van het net, en het verschil is de zon",
          abs(sessie64["kwh"] - 29 / 60 * 2) < 0.01 and abs(sessie64["betaald"] - sessie64["kwh"] * (0.24171 - 0.052756)) < 0.001
-         and abs(sessie64["maat"] - sessie64["betaald"]) < 0.001, f"{sessie64['kwh']} {sessie64['betaald']} {sessie64['maat']}")
+         and abs(sessie64["maat"] - sessie64["kwh"] * 0.24171) < 0.001
+         and abs(sessie64["zon_winst"] - (sessie64["maat"] - sessie64["betaald"])) < 0.001,
+         f"{sessie64['kwh']} {sessie64['betaald']} {sessie64['maat']} {sessie64['zon_winst']}")
 hass64.states.zet("sensor.vaatwasser_status", "finished")
 hass64.states.zet("sensor.vaatwasser_vermogen", "0")
 hass64.states.zet("sensor.teruglevering", "3000")
 b, m = asyncio.run(ronde64(dt.datetime(2026, 9, 8, 12, 31)))
 print(f"  verslag: {m}")
-controle("het verslag zegt niet dat meteen starten meer gekost had, want dat is precies wat er gebeurde",
-         len(m) == 1 and "is klaar" in m[0] and "Meteen starten had" not in m[0], f"{m}")
+controle("het verslag zegt wat er bespaard is, en dat het allemaal de zon was",
+         len(m) == 1 and "is klaar" in m[0] and "Bespaard € 0,051, allemaal door de zon." in m[0], f"{m}")
 b64 = [b for b in asyncio.run(coachmod.async_get_beurten(hass64).async_list()) if b["device"] == "dev-vaatwasser"]
-controle("en onder Bespaard staat nul, niet het zonaandeel",
-         len(b64) == 1 and b64[0]["saved"] == 0 and abs(b64[0]["ref_cost"] - b64[0]["paid"]) < 0.001, f"{b64}")
+controle("en onder Bespaard staat het zonaandeel, met het zondeel erbij",
+         len(b64) == 1 and abs(b64[0]["saved"] - b64[0]["kwh"] * 0.052756) < 0.001
+         and abs(b64[0]["solar_saved"] - b64[0]["saved"]) < 0.001
+         and abs(b64[0]["ref_cost"] - b64[0]["kwh"] * 0.24171) < 0.001, f"{b64}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

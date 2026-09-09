@@ -25,7 +25,7 @@ const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
 import { tariff } from "../data-source.js";
 import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
-import { beurtenIn, opmerking, perApparaat, totalen, woorden } from "../savings.js";
+import { beurtenIn, delen, opmerking, perApparaat, totalen, woorden } from "../savings.js";
 import {
   PERIODS,
   combine,
@@ -1319,6 +1319,8 @@ class DacViewHistory extends DacElement {
     return {
       vakjes: [
         { label: "Bespaard", waarde: euro(totaal.saved) },
+        { label: "Door de zon", waarde: euro(totaal.solar_saved) },
+        { label: "Door te wachten", waarde: euro(totaal.wait_saved) },
         { label: "Betaald", waarde: euro(totaal.paid) },
         { label: w.hoeveel, waarde: kwh(totaal.kwh) },
         { label: "Waarvan zon", waarde: kwh(totaal.solar_kwh) },
@@ -1328,7 +1330,7 @@ class DacViewHistory extends DacElement {
         (totaal.onbekend
           ? ` ${totaal.onbekend === 1 ? "Eén beurt telt" : `${totaal.onbekend} beurten tellen`} niet mee in het geld, omdat de prijs toen niet bekend was.`
           : ""),
-      kop: [w.wanneer, "Apparaat", w.hoeveel, "Zon", w.vanaf, "Betaald", "Bespaard"],
+      kop: [w.wanneer, "Apparaat", w.hoeveel, "Zon", w.vanaf, "Betaald", "Bespaard", "Door zon"],
       rijen: items.map((b) => [
         wanneer(b),
         b.car ? `${b.name}, ${b.car}` : b.name,
@@ -1337,8 +1339,12 @@ class DacViewHistory extends DacElement {
         b.ref_cost === null || b.ref_cost === undefined ? "" : euro(b.ref_cost),
         euro(b.paid),
         b.saved === null || b.saved === undefined ? "" : euro(b.saved),
+        delen(b).zon === null ? "" : euro(delen(b).zon),
       ]),
-      totaal: ["Totaal", "", kwh(totaal.kwh), kwh(totaal.solar_kwh), euro(totaal.ref_cost), euro(totaal.paid), euro(totaal.saved)],
+      totaal: [
+        "Totaal", "", kwh(totaal.kwh), kwh(totaal.solar_kwh), euro(totaal.ref_cost), euro(totaal.paid),
+        euro(totaal.saved), euro(totaal.solar_saved),
+      ],
     };
   }
 
@@ -1404,8 +1410,12 @@ class DacViewHistory extends DacElement {
     // De woorden naar wat er in de lijst staat: een auto wordt ingeplugd en
     // geladen, een vaatwasser vrijgegeven en verbruikt. Sven op 07-09-2026.
     const w = woorden(items);
+    // Het totaal plaatje, Sven op 09-09-2026: wat er bespaard is, en daarvan
+    // wat de zon deed en wat het wachten op een goedkoper moment.
     tegels.append(
       tegel("Bespaard", euro(totaal.saved), "var(--dac-solar)"),
+      tegel("Door de zon", euro(totaal.solar_saved), "var(--dac-solar)"),
+      tegel("Door te wachten", euro(totaal.wait_saved), "var(--dac-solar)"),
       tegel("Betaald", euro(totaal.paid), "var(--dac-grid-in)"),
       tegel(w.hoeveel, kwh(totaal.kwh)),
       tegel("Waarvan zon", kwh(totaal.solar_kwh), "var(--dac-solar)")
@@ -1430,9 +1440,11 @@ class DacViewHistory extends DacElement {
       return tr;
     };
     if (perDevice.length > 1) {
-      apparaten.append(rij(["Apparaat", "Beurten", w.hoeveel, "Zon", "Betaald", "Bespaard"], true));
+      apparaten.append(rij(["Apparaat", "Beurten", w.hoeveel, "Zon", "Betaald", "Bespaard", "Door zon"], true));
       for (const a of perDevice) {
-        apparaten.append(rij([a.name, String(a.beurten), kwh(a.kwh), kwh(a.solar_kwh), euro(a.paid), euro(a.saved)]));
+        apparaten.append(
+          rij([a.name, String(a.beurten), kwh(a.kwh), kwh(a.solar_kwh), euro(a.paid), euro(a.saved), euro(a.solar_saved)])
+        );
       }
     }
 
@@ -1443,8 +1455,9 @@ class DacViewHistory extends DacElement {
       const klok = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
       return this.period_ === "day" ? klok : `${dag} ${klok}`;
     };
-    lijst.append(rij([w.wanneer, "Apparaat", w.hoeveel, "Zon", w.vanaf, "Betaald", "Bespaard", ""], true));
+    lijst.append(rij([w.wanneer, "Apparaat", w.hoeveel, "Zon", w.vanaf, "Betaald", "Bespaard", "Door zon", ""], true));
     for (const b of items) {
+      const d = delen(b);
       lijst.append(
         rij([
           wanneer(b),
@@ -1454,6 +1467,7 @@ class DacViewHistory extends DacElement {
           b.ref_cost === null || b.ref_cost === undefined ? "" : euro(b.ref_cost),
           euro(b.paid),
           b.saved === null || b.saved === undefined ? "" : euro(b.saved),
+          d.zon === null ? "" : euro(d.zon),
           opmerking(b),
         ])
       );

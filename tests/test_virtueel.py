@@ -131,6 +131,11 @@ for naam, vl in V.items():
         controle(f"{naam}: bespaard is de maat min betaald, nooit onder nul, of onbekend",
                  all((b["saved"] is None and b["ref_cost"] is None)
                      or abs(b["saved"] - max(0.0, b["ref_cost"] - b["paid"])) < 0.001 for b in vl.beurten), "")
+        # Het zondeel is wat de eigen zon scheelde tegenover inkopen: nooit meer
+        # dan de zon-kilowatturen maal het verschil tussen inkoop en teruglevering.
+        controle(f"{naam}: het zondeel van bespaard past bij de zon-kilowatturen",
+                 all(0.0 <= b["solar_saved"] <= b["solar_kwh"] * 1.0 + 0.001 for b in vl.beurten),
+                 f"{[(b['device'], b['solar_kwh'], b['solar_saved']) for b in vl.beurten]}")
     over = [r for r in vl.regels if max(r.fase_amps) > s.zekering]
     controle(f"{naam}: de zekering wordt hooguit een minuut overschreden",
              len(over) * vl.stap_uur * 60 <= 1.0, f"{len(over) * vl.stap_uur * 60:.1f} minuten boven "
@@ -417,8 +422,8 @@ if (vl := v("vaatwasser-avond")):
     controle("vaatwasser avond: klaar voor 07:00", vl.vw_klaar is not None and vl.vw_klaar.hour < 7,
              f"klaar {vw_klok(vl.vw_klaar)}")
     controle("vaatwasser avond: één keer gedrukt", len(vl.vw_gedrukt) == 1, f"{vl.vw_gedrukt}")
-    controle("vaatwasser avond: precies een verslag, met kWh en wat meteen starten gekost had",
-             len(meldingen(vl, "Vaatwasser is klaar")) == 1 and "Meteen starten had" in meldingen(vl, "Vaatwasser is klaar")[0],
+    controle("vaatwasser avond: precies een verslag, met kWh en wat er bespaard is",
+             len(meldingen(vl, "Vaatwasser is klaar")) == 1 and "Bespaard €" in meldingen(vl, "Vaatwasser is klaar")[0],
              f"{[m for _, m in vl.meldingen]}")
     controle("vaatwasser avond: geen kritieke melding", not meldingen(vl, "niet gaan draaien"), "")
     controle("vaatwasser avond: de beurt staat in de opslag met een besparing",
@@ -547,9 +552,13 @@ if (vl := v("vaatwasser-vroeg")):
     # wacht hij tot 12:00 en is het alles.
     controle("vroeg: de beurt draait grotendeels op eigen zon",
              len(vw_beurt) == 1 and vw_beurt[0]["solar_kwh"] >= 0.75 * vw_beurt[0]["kwh"], f"{vw_beurt}")
-    controle("vroeg: de maat rekent de zon van het vrijgavemoment mee en is dus minder dan alles van het net",
+    # De maat is alles van het net bij het vrijgeven (Sven op 09-09-2026), en
+    # wat de zon scheelde staat apart in het zondeel van bespaard.
+    controle("vroeg: de maat is alles van het net bij het vrijgeven, en het zondeel is de zon tegen het verschil",
              len(vw_beurt) == 1 and vw_beurt[0]["ref_cost"] is not None
-             and vw_beurt[0]["ref_cost"] < 0.99 * vw_beurt[0]["kwh"] * vl.scenario.vast_prijs, f"{vw_beurt}")
+             and abs(vw_beurt[0]["ref_cost"] - vw_beurt[0]["kwh"] * vl.scenario.vast_prijs) < 0.01 * vw_beurt[0]["ref_cost"]
+             and vw_beurt[0]["solar_saved"] > 0
+             and vw_beurt[0]["solar_saved"] <= vw_beurt[0]["saved"] + 0.001, f"{vw_beurt}")
 
 if (vl := v("vaatwasser-vroeg-verwacht")):
     vw_beurt = [b for b in vl.beurten if b["device"] == "vaatwasser"]
@@ -567,7 +576,7 @@ if (vl := v("vaatwasser-herstart")):
              and not meldingen(vl, "Vaatwasser draait"), f"{[m for _, m in vl.meldingen]}")
     controle("herstart: één verslag, over de hele beurt vanaf 02:00",
              len(meldingen(vl, "Vaatwasser is klaar")) == 1 and "van 02:0" in meldingen(vl, "Vaatwasser is klaar")[0]
-             and "Meteen starten had" in meldingen(vl, "Vaatwasser is klaar")[0], f"{meldingen(vl, 'is klaar')}")
+             and "Bespaard €" in meldingen(vl, "Vaatwasser is klaar")[0], f"{meldingen(vl, 'is klaar')}")
     controle("herstart: de beurt staat één keer in de opslag, afgerond, met bijna alle kWh en een besparing",
              len([b for b in vl.beurten if b["device"] == "vaatwasser"]) == 1
              and all(b["complete"] and 0.9 <= b["kwh"] <= 1.1 and (b["saved"] or 0) > 0 for b in vl.beurten if b["device"] == "vaatwasser"),
