@@ -134,7 +134,8 @@ startknop (`_async_druk`, een button-entiteit), wacht drie minuten op "run"
 en zegt het als dat niet komt (starten op afstand uit, deur open), probeert
 één keer opnieuw, telt kWh en kosten mee terwijl hij draait
 (`_programma_tellen`, met dezelfde maat als een laadbeurt: wat meteen
-starten bij het vrijgeven gekost had), en meldt één keer dat hij klaar is
+starten bij het vrijgeven met alles van het net gekost had), en meldt één
+keer dat hij klaar is
 (`_async_programma_klaar`), schrijft de beurt in `BeurtenStore` zodat hij
 onder Bespaard staat, en haalt de vrijgave eraf. Zonder vrijgave
 (`ready_devices`, de knop "Ingeruimd en dicht" op de kaart) doet hij niets.
@@ -270,10 +271,23 @@ laat zien. De gewone som met de meter voor het lopende uur blijft: zegt de
 voorspeller de helft (zoals die dag), dan start hij zodra de meter van nu op
 de som wint, en dat is een verwachting waar niets aan te schaven is (Sven,
 07-09). Scenario's `vaatwasser-vroeg` en `vaatwasser-vroeg-verwacht`, proef
-50 in test_planner.py. **De maat van een programmabeurt rekent de zon van
-toen mee** (`zon_toen` in de sessie, `_prijs_met_zon` in coach.py): "meteen
-starten had gekost" was tot dan alles tegen de inkoopprijs, en dan bespaart
-een beurt die bij het vrijgeven start precies zijn eigen zonaandeel. Proef 64.
+50 in test_planner.py.
+
+**Bespaard is het totaal plaatje** (v0.60.0). Sven op 09-09-2026, bij een
+vaatwasser die meteen op zon startte en "bespaard nul" kreeg: "Er is toch
+wel iets zonne-energie naar de vaatwasser gegaan? Ik wil het totaal plaatje.
+Wat het heeft gekost nu tegenover een duurder moment van het vrijgeven, en
+wat je op zonne-energie laadt bespaar je natuurlijk ook door minder stroom
+in te kopen." De maat is dus alles van het net op het moment van vrijgeven
+of inpluggen (`_basis_bij` en `_programma_tellen` in coach.py), en bespaard
+is maat min betaald, in twee delen: door de zon (`zon_winst`, `solar_saved`
+in het beurtrecord: de zon-kilowatturen maal inkoop min teruglevering) en
+door te wachten (de rest). Het verslag zegt welk deel wat was
+(`_bespaard_zin`); Bespaard toont ze als tegels en als kolom "Door zon"
+(`delen` in savings.js). Een beurt van vóór v0.60.0 heeft geen zondeel:
+bij die beurten zat de zon in de maat en was bespaard alleen het wachten.
+v0.59.0 had het één dag andersom (de zon van het vrijgavemoment in de maat,
+`zon_toen`), en dat gaf precies de nul waar Sven over viel. Proef 64.
 
 ## Hoe het in elkaar zit
 
@@ -290,7 +304,7 @@ een beurt die bij het vrijgeven start precies zijn eigen zonaandeel. Proef 64.
 | `frontend/src/schedule-sheet.js` | het schema van één apparaat, als pop-up achter zijn kaart |
 | `ontvangers.py` | wie welke melding krijgt: personen (een telefoon, een naam, eventueel een gebruiker van Home Assistant) met een schakelaar per soort: kritiek, melding, besluit, belasting. Kent Home Assistant niet |
 | `frontend/src/views/notifications.js` | Meldingen, twee in een sinds 06-09-2026: bovenaan de personen (de admin voegt toe, een bewoner ziet alleen zichzelf en zet zijn eigen schuiven via `notifications/mine`), de zekeringmelding "Zware belasting" (uit Strategie verhuisd), en daaronder alles wat de coach ooit stuurde én elk besluit dat hij nam (`_async_noteer_besluit`), uit `MeldingenStore` in storage.py |
-| `frontend/src/savings.js` | Bespaard, onder Historie: de laadbeurten uit `BeurtenStore` (storage.py) opgeteld per periode en per apparaat. De coach telt per ronde wat een beurt kost (`_geld_bij`) en wat dezelfde tijd op vol vermogen vanaf het inpluggen gekost had (`_basis_bij`, de maat); bespaard is maat min betaald, nooit onder nul. Stapt hij midden in een beurt in, dan rekent `_async_terugrekenen` het begin terug uit de recorder en de kwartieropslag |
+| `frontend/src/savings.js` | Bespaard, onder Historie: de laadbeurten uit `BeurtenStore` (storage.py) opgeteld per periode en per apparaat. De coach telt per ronde wat een beurt kost (`_geld_bij`) en wat dezelfde tijd op vol vermogen vanaf het inpluggen met alles van het net gekost had (`_basis_bij`, de maat); bespaard is maat min betaald, nooit onder nul, in twee delen: door de zon (`zon_winst`) en door te wachten. Stapt hij midden in een beurt in, dan rekent `_async_terugrekenen` het begin terug uit de recorder en de kwartieropslag |
 
 De scheiding tussen `planner.py` en `coach.py` is de kern: het denkwerk is los
 te draaien tegen een hele dag echte historie voordat er ook maar iets geschakeld
@@ -317,8 +331,8 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 290 controles op het denkwerk
-python tests/test_coach.py       # 339 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1189 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 338 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1261 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 35 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

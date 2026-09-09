@@ -1286,12 +1286,6 @@ class ChargerCoach:
                     klaar = ""
                 await self._async_tell(f"{naam} {'is gestart' if zelf else 'draait'}{wat}{klaar}.")
             sessie["gedrukt"] = None
-        if sessie.get("vrijgegeven") is not None:
-            # Wat het huis zonder dit apparaat aan zon over heeft, vanaf het
-            # vrijgeven: dat is wat een start van toen gekregen had.
-            export = self._netto_export_w(settings)
-            if export is not None:
-                self._zon_toen_bij(sessie, now, export + ((watts or 0.0) if draait else 0.0))
         if draait:
             self._programma_tellen(settings, sessie, now, watts)
             # Het verloop van deze beurt, voor het profiel: minuten sinds de
@@ -1409,13 +1403,9 @@ class ChargerCoach:
             "kwh": 0.0,
             "zon_kwh": 0.0,
             "betaald": 0.0,
-            "maat": 0.0,           # wat meteen starten gekost had
+            "maat": 0.0,           # wat meteen starten, alles van het net, gekost had
             "maat_onbekend": False,
-            # Wat er sinds het vrijgeven aan zon over was, per vijf minuten:
-            # (minuten sinds het vrijgeven, watt zonder dit apparaat). De maat
-            # rekent daarmee: wat meteen starten gekost had, mét de zon van
-            # toen. Zie `_zon_toen_bij`.
-            "zon_toen": [],
+            "zon_winst": 0.0,      # wat de eigen zon scheelde tegenover inkopen
             "laatst": now,
             "gemeld": set(),
             "programma": None,
@@ -1495,12 +1485,13 @@ class ChargerCoach:
 
         Dezelfde maat als bij een laadbeurt (Sven op 05-09-2026: "de prijs
         vanaf het inpluggen"): hetzelfde verbruik, verschoven naar het moment
-        van vrijgeven. Zon telt tegen de terugleverprijs, net als bij de paal,
-        en dat geldt ook voor de maat: de zon die er op dat moment over was
-        (`zon_toen`) had een start van toen net zo goed gekregen. Tot
-        08-09-2026 rekende de maat alles tegen de inkoopprijs, en dan "bespaart"
-        een beurt die meteen bij het vrijgeven start toch, precies zijn eigen
-        zonaandeel. Bij Sven thuis was dat die dag 1,6 cent die er niet was.
+        van vrijgeven, en dan alles van het net tegen de prijs van toen. Zon
+        telt in het betaalde tegen de terugleverprijs, en wat dat scheelde
+        tegenover inkopen loopt apart mee (`zon_winst`), zodat Bespaard kan
+        zeggen wat de zon deed en wat het wachten. Sven op 09-09-2026: "wat je
+        op zonne-energie laadt bespaar je natuurlijk ook door minder stroom in
+        te kopen." Eén dag eerder rekende de maat de zon van het
+        vrijgavemoment mee en stond een beurt die meteen op zon startte op nul.
         """
         if watts is None or watts <= 0:
             return
@@ -1517,7 +1508,9 @@ class ChargerCoach:
         sessie["zon_kwh"] += kwh * zon_deel
         if koop is not None:
             sessie["betaald"] += kwh * ((1 - zon_deel) * koop + zon_deel * (terug or 0.0))
-        # De maat: hetzelfde kwartier, maar dan geteld vanaf het vrijgeven.
+            sessie["zon_winst"] += kwh * zon_deel * max(0.0, koop - (terug or 0.0))
+        # De maat: hetzelfde kwartier, maar dan geteld vanaf het vrijgeven,
+        # alles van het net.
         vrij = sessie.get("vrijgegeven")
         gestart = sessie.get("gestart")
         if vrij is not None and gestart is not None:
@@ -1527,56 +1520,35 @@ class ChargerCoach:
                 koop_toen = rij["price"]
             else:
                 koop_toen, _ = self._prijs_nu(settings, toen)
-            terug_toen = rij.get("feed_in") if rij is not None else None
-            if terug_toen is None:
-                _, terug_toen = self._prijs_nu(settings, toen)
             if koop_toen is None:
                 sessie["maat_onbekend"] = True
             else:
-                sessie["maat"] += kwh * self._prijs_met_zon(
-                    koop_toen, terug_toen, self._zon_toen(sessie, toen), watts
-                )
+                sessie["maat"] += kwh * koop_toen
 
     @staticmethod
-    def _prijs_met_zon(
-        koop: float, terug: float | None, over_w: float | None, watts: float
-    ) -> float:
-        """Wat een kWh kost als er `over_w` aan zon over is voor een apparaat
-        dat `watts` trekt: het zondeel tegen de terugleverprijs, de rest tegen
-        de inkoop. Zonder meting van de zon is alles inkoop."""
-        if over_w is None or terug is None or watts <= 0:
-            return koop
-        zon_deel = max(0.0, min(1.0, over_w / watts))
-        return (1 - zon_deel) * koop + zon_deel * terug
+    def _bespaard_zin(totaal: float, zon: float) -> str:
+        """Eén zin voor in het verslag: wat er bespaard is, en waardoor.
 
-    @staticmethod
-    def _zon_toen_bij(sessie: dict[str, Any], now: datetime, over_w: float) -> None:
-        """Eén meting van wat er aan zon over is, in het vak van vijf minuten
-        sinds het vrijgeven; binnen een vak het gemiddelde."""
-        vrij = sessie.get("vrijgegeven")
-        if vrij is None:
-            return
-        vak = int((now - vrij).total_seconds() // (PROFIEL_STAP_MIN * 60))
-        reeks: list = sessie.setdefault("zon_toen", [])
-        if reeks and int(reeks[-1][0]) == vak:
-            _, som, n = reeks[-1]
-            reeks[-1] = [vak, som + over_w, n + 1]
-        elif not reeks or int(reeks[-1][0]) < vak:
-            reeks.append([vak, over_w, 1])
-
-    @staticmethod
-    def _zon_toen(sessie: dict[str, Any], moment: datetime) -> float | None:
-        """Wat er op `moment` aan zon over was, uit `zon_toen`; None als er
-        toen niets gemeten is."""
-        vrij = sessie.get("vrijgegeven")
-        reeks = sessie.get("zon_toen") or []
-        if vrij is None or not reeks:
-            return None
-        vak = int((moment - vrij).total_seconds() // (PROFIEL_STAP_MIN * 60))
-        for v, som, n in reeks:
-            if int(v) == vak and n:
-                return som / n
-        return None
+        `totaal` is de maat min het betaalde: wat dezelfde beurt gekost had
+        als alles van het net was gekomen op het moment van vrijgeven of
+        inpluggen. `zon` is wat de eigen zon daarvan scheelde; de rest is het
+        wachten op een goedkoper moment. Sven op 09-09-2026: "ik wil het
+        totaal plaatje."
+        """
+        wachten = totaal - zon
+        if zon < 0.005:
+            return f"Bespaard {_euro(totaal)} door te wachten."
+        if wachten < -0.005:
+            return (
+                f"Bespaard {_euro(totaal)}: de zon scheelde {_euro(zon)}, "
+                f"het wachten kostte {_euro(-wachten)}."
+            )
+        if wachten < 0.005:
+            return f"Bespaard {_euro(totaal)}, allemaal door de zon."
+        return (
+            f"Bespaard {_euro(totaal)}: {_euro(zon)} door de zon en "
+            f"{_euro(wachten)} door te wachten."
+        )
 
     async def _async_programma_klaar(
         self,
@@ -1603,7 +1575,7 @@ class ChargerCoach:
         geld = f", ongeveer {_euro(betaald)}" if kwh > 0 else ""
         bespaard = ""
         if maat is not None and kwh > 0 and maat - betaald >= 0.005:
-            bespaard = f" Meteen starten had {_euro(maat)} gekost."
+            bespaard = " " + self._bespaard_zin(maat - betaald, sessie.get("zon_winst") or 0.0)
         await self._async_tell(
             f"{naam} is klaar{wat}: gedraaid van {gestart:%H:%M} tot {einde:%H:%M}"
             + (f", {kwh:.1f} kWh".replace(".", ",") if kwh > 0 else "")
@@ -1660,6 +1632,7 @@ class ChargerCoach:
             "ref_feed_in": None,
             "ref_cost": None if maat is None else round(maat, 4),
             "saved": None if maat is None else round(max(0.0, maat - betaald), 4),
+            "solar_saved": round(sessie.get("zon_winst") or 0.0, 4),
             "price_unknown": maat is None,
             "unknown_kwh": 0.0,
             "baseline": {"kwh": round(kwh, 3), "cost": None if maat is None else round(maat, 4),
@@ -1680,7 +1653,6 @@ class ChargerCoach:
                 "asked": sessie["gevraagd"].isoformat() if sessie.get("gevraagd") else None,
                 "ref_cost_unknown": bool(sessie["maat_onbekend"]),
                 "ref_cost": round(sessie["maat"], 4),
-                "surplus": [[int(v), round(s, 1), int(n)] for v, s, n in (sessie.get("zon_toen") or [])],
             }
         return regel
 
@@ -1754,9 +1726,7 @@ class ChargerCoach:
         sessie["betaald"] = float(regel.get("paid") or 0.0)
         sessie["maat"] = float(extra.get("ref_cost") or 0.0)
         sessie["maat_onbekend"] = bool(extra.get("ref_cost_unknown"))
-        sessie["zon_toen"] = [
-            [int(p[0]), float(p[1]), int(p[2])] for p in (extra.get("surplus") or []) if len(p) == 3
-        ]
+        sessie["zon_winst"] = float(regel.get("solar_saved") or 0.0)
         sessie["punten"] = [
             (float(p[0]), float(p[1])) for p in (extra.get("points") or []) if len(p) == 2
         ]
@@ -1843,7 +1813,6 @@ class ChargerCoach:
             _LOGGER.exception("terugrekenen van de beurt van %s mislukt", device.get("id", ""))
             return
         per_start = {e: {int(r["start"]): r for r in rijen.get(e) or []} for e in netten}
-        apparaat_op = {int(r["start"]): r for r in rijen.get(device["entity"]) or []}
 
         def netto_op(start: int) -> float | None:
             if signed and netten:
@@ -1860,22 +1829,6 @@ class ChargerCoach:
                 return float(re_.get("gemiddeld") or 0.0) - float(ri.get("gemiddeld") or 0.0)
             return None
 
-        # Wat er sinds het vrijgeven aan zon over was, per kwartier uit de
-        # opslag, in de vakken van `zon_toen`; wat de coach live al zag blijft.
-        if vrij is not None:
-            for start in sorted(set().union(*(per_start[e] for e in netten)) if netten else ()):
-                t0 = datetime.fromtimestamp(start)
-                if t0 + timedelta(minutes=15) <= vrij or t0 >= tot:
-                    continue
-                netto = netto_op(start)
-                if netto is None:
-                    continue
-                zelf = apparaat_op.get(start)
-                over = netto + max(0.0, float(zelf.get("gemiddeld") or 0.0)) if zelf is not None else netto
-                for stap in range(3):
-                    moment = t0 + timedelta(minutes=5 * stap)
-                    if moment >= vrij and self._zon_toen(sessie, moment) is None:
-                        self._zon_toen_bij(sessie, moment, over)
         for rij in rijen.get(device["entity"]) or []:
             t0 = datetime.fromtimestamp(int(rij["start"]))
             t1 = t0 + timedelta(minutes=15)
@@ -1898,6 +1851,7 @@ class ChargerCoach:
             sessie["zon_kwh"] += kwh * zon_deel
             if koop is not None:
                 sessie["betaald"] += kwh * ((1 - zon_deel) * koop + zon_deel * (terug or 0.0))
+                sessie["zon_winst"] += kwh * zon_deel * max(0.0, koop - (terug or 0.0))
             # Het verloop: één punt per vijf minuten, zodat het profiel het
             # kwartier vult zoals de live meting dat doet.
             for stap in range(3):
@@ -1906,13 +1860,11 @@ class ChargerCoach:
                     sessie["punten"].append((minuut, watts))
             if vrij is not None:
                 toen = vrij + (begin - gestart)
-                koop_toen, terug_toen = self._prijs_toen(settings, sessie, prijs_op, toen)
+                koop_toen, _ = self._prijs_toen(settings, sessie, prijs_op, toen)
                 if koop_toen is None:
                     sessie["maat_onbekend"] = True
                 else:
-                    sessie["maat"] += kwh * self._prijs_met_zon(
-                        koop_toen, terug_toen, self._zon_toen(sessie, toen), watts
-                    )
+                    sessie["maat"] += kwh * koop_toen
         sessie["punten"].sort()
 
     def _prijs_toen(
@@ -3550,6 +3502,7 @@ class ChargerCoach:
             "kwh": float(open_beurt.get("kwh") or 0.0),
             "zon_kwh": float(open_beurt.get("solar_kwh") or 0.0),
             "betaald": float(open_beurt.get("paid") or 0.0),
+            "zon_winst": float(open_beurt.get("solar_saved") or 0.0),
             "onbekend_kwh": float(open_beurt.get("unknown_kwh") or 0.0),
             "basis_kwh": float(basis.get("kwh") or 0.0),
             "basis_kosten": float(basis.get("cost") or 0.0),
@@ -3567,9 +3520,12 @@ class ChargerCoach:
             "kwh": 0.0,
             "zon_kwh": 0.0,
             "betaald": 0.0,
+            # Wat de eigen zon scheelde tegenover inkopen: het deel van
+            # bespaard dat van de zon komt. Zie `_geld_bij`.
+            "zon_winst": 0.0,
             "onbekend_kwh": 0.0,
-            # Wat dezelfde tijd op vol vermogen vanaf het inpluggen gekost had:
-            # de maat waartegen bespaard wordt. Zie `_basis_bij`.
+            # Wat dezelfde tijd op vol vermogen vanaf het inpluggen gekost had,
+            # alles van het net: de maat waartegen bespaard wordt. Zie `_basis_bij`.
             "basis_kwh": 0.0,
             "basis_kosten": 0.0,
             "basis_onbekend": 0.0,
@@ -3635,7 +3591,6 @@ class ChargerCoach:
         geld: dict[str, Any],
         stap_min: float,
         cap_w: float,
-        grid: Grid | None,
         settings: dict[str, Any],
         now: datetime,
     ) -> None:
@@ -3646,11 +3601,18 @@ class ChargerCoach:
         inpluggen." En: "een min getal bij besparen kan helemaal niet." Dus:
         wat dezelfde kilowatturen gekost hadden als de paal vanaf het
         inpluggen gewoon op vol vermogen was doorgegaan, uur na uur tegen de
-        prijs van dat uur, met de zon die er toen over was. Dat loopt hier als
-        een tweede teller mee, elke ronde, ook als de coach zelf niets doet:
-        want dan had die andere paal wél geladen. Per uur een ijkpunt
-        (`basis_punten`), zodat voor elke hoeveelheid kilowatturen af te lezen
-        is wat ze op die manier gekost hadden.
+        prijs van dat uur, alles van het net. Dat loopt hier als een tweede
+        teller mee, elke ronde, ook als de coach zelf niets doet: want dan had
+        die andere paal wél geladen. Per uur een ijkpunt (`basis_punten`),
+        zodat voor elke hoeveelheid kilowatturen af te lezen is wat ze op die
+        manier gekost hadden.
+
+        Tot v0.60.0 telde de zon die er toen over was in de maat mee tegen de
+        terugleverprijs, en dan was wat er op eigen zon geladen werd geen
+        besparing. Sven op 09-09-2026: "wat je op zonne-energie laadt bespaar
+        je natuurlijk ook door minder stroom in te kopen." Dat deel staat nu
+        apart in `zon_winst` (zie `_geld_bij`); de rest van bespaard is het
+        wachten op een goedkoper uur.
         """
         if stap_min <= 0 or cap_w <= 0:
             return
@@ -3660,16 +3622,12 @@ class ChargerCoach:
             )
         geld["basis_uur"] = now.hour
         kwh_stap = cap_w / 1000.0 * stap_min / 60.0
-        over_w = max(0.0, grid.surplus_w) if grid is not None else 0.0
-        zon_deel = min(1.0, over_w / cap_w)
-        koop, terug = self._prijs_nu(settings, now)
+        koop, _ = self._prijs_nu(settings, now)
         geld["basis_kwh"] = geld.get("basis_kwh", 0.0) + kwh_stap
         if koop is None:
             geld["basis_onbekend"] = geld.get("basis_onbekend", 0.0) + kwh_stap
             return
-        geld["basis_kosten"] = geld.get("basis_kosten", 0.0) + kwh_stap * (
-            (1.0 - zon_deel) * koop + zon_deel * (terug if terug is not None else 0.0)
-        )
+        geld["basis_kosten"] = geld.get("basis_kosten", 0.0) + kwh_stap * koop
 
     @staticmethod
     def _basis_kosten_voor(geld: dict[str, Any], kwh: float) -> float | None:
@@ -3723,6 +3681,9 @@ class ChargerCoach:
             geld["onbekend_kwh"] = geld.get("onbekend_kwh", 0.0) + kwh_stap
             return
         geld["betaald"] += net_kwh * koop + zon_kwh * (terug if terug is not None else 0.0)
+        geld["zon_winst"] = geld.get("zon_winst", 0.0) + zon_kwh * max(
+            0.0, koop - (terug if terug is not None else 0.0)
+        )
 
     def _beurt_regel(
         self,
@@ -3766,6 +3727,7 @@ class ChargerCoach:
             # Nooit onder nul: de coach kan hooguit evenveel betalen als die
             # andere paal, en een paar cent eronder is een afronding.
             "saved": None if ijk_kosten is None else round(max(0.0, ijk_kosten - betaald), 4),
+            "solar_saved": round(float(geld.get("zon_winst") or 0.0), 4),
             "price_unknown": ijk is None or onbekend_kwh > 0,
             "unknown_kwh": onbekend_kwh,
             "baseline": {
@@ -3934,7 +3896,8 @@ class ChargerCoach:
             pass
 
         uit = {
-            "ingeplugd": plug, "kwh": 0.0, "zon_kwh": 0.0, "betaald": 0.0, "onbekend_kwh": 0.0,
+            "ingeplugd": plug, "kwh": 0.0, "zon_kwh": 0.0, "betaald": 0.0, "zon_winst": 0.0,
+            "onbekend_kwh": 0.0,
             "basis_kwh": 0.0, "basis_kosten": 0.0, "basis_onbekend": 0.0, "basis_punten": [],
         }
         uit["ijk_prijs"], uit["ijk_terug"] = prijs_op(plug)
@@ -3973,14 +3936,14 @@ class ChargerCoach:
             uit["kwh"] += kwh
             uit["zon_kwh"] += zon
             basis = cap_w / 1000.0 * sec / 3600.0
-            zon_deel = min(1.0, over / cap_w) if cap_w > 0 else 0.0
             uit["basis_kwh"] += basis
             if koop is None:
                 uit["onbekend_kwh"] += kwh
                 uit["basis_onbekend"] += basis
                 continue
             uit["betaald"] += (kwh - zon) * koop + zon * (terug if terug is not None else 0.0)
-            uit["basis_kosten"] += basis * ((1.0 - zon_deel) * koop + zon_deel * (terug if terug is not None else 0.0))
+            uit["zon_winst"] += zon * max(0.0, koop - (terug if terug is not None else 0.0))
+            uit["basis_kosten"] += basis * koop
         return uit
 
     async def _async_terugrekenen_toepassen(
@@ -4020,7 +3983,7 @@ class ChargerCoach:
                 await async_get_beurten(self.hass).async_remove(weg)
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("kon de voorlopige regel van de laadbeurt niet weghalen")
-        for sleutel in ("kwh", "zon_kwh", "betaald", "onbekend_kwh", "basis_kwh", "basis_kosten", "basis_onbekend"):
+        for sleutel in ("kwh", "zon_kwh", "betaald", "zon_winst", "onbekend_kwh", "basis_kwh", "basis_kosten", "basis_onbekend"):
             geld[sleutel] = geld.get(sleutel, 0.0) + terug[sleutel]
         # De punten van na de herstart schuiven op met wat ervoor gebeurde.
         rk, rc = terug["basis_kwh"], terug["basis_kosten"]
@@ -4209,7 +4172,7 @@ class ChargerCoach:
         if geld is not None and settings is not None and 0 < stap <= 10:
             # De maat loopt altijd mee, ook als de coach niets doet.
             self._basis_bij(
-                geld, stap, watts_for(charger.max_amps or 16.0, car.phases), grid, settings, now
+                geld, stap, watts_for(charger.max_amps or 16.0, car.phases), settings, now
             )
         eigen["watt"] = _watts(self.hass, device.get("entity")) or 0.0
         eigen["liep"] = charger.charging
