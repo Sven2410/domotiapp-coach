@@ -79,6 +79,7 @@ from .planner import (
     beschikbaar_van_bewaker,
     energy_needed_kwh,
     held_back,
+    MIN_AMPS,
     resolve_window,
     should_send,
     watts_for,
@@ -96,6 +97,18 @@ _LOGGER = logging.getLogger(__name__)
 # 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat moet wel
 # gemeld worden."
 SENSOR_STIL = timedelta(minutes=10)
+
+# Over hoeveel van de afgelopen tijd het gemiddelde plafond gaat dat in de
+# klaar-tijdsom meetelt, en hoeveel daarvan er minstens gemeten moet zijn.
+# Drie uur is lang genoeg om een warmtepomp die om het kwartier aangaat een
+# paar keer te zien, en kort genoeg om het koken van zes uur kwijt te zijn
+# tegen de tijd dat de nacht gepland wordt: het hele venster sinds het
+# inpluggen nemen zette in het virtuele huis een rustig huis een uur eerder
+# aan, alleen om de kookpiek van de avond ervoor. Minder dan een half uur is
+# een momentopname; een warmtepomp die net aanstaat zou de hele nacht als vol
+# tellen.
+PLAFOND_VENSTER = timedelta(hours=3)
+PLAFOND_MEETTIJD_MIN = 30.0
 
 # How often to think. A minute is often enough to catch a kettle before a fuse
 # minds, and rare enough that a car is never re-commanded into giving up.
@@ -3086,6 +3099,13 @@ class ChargerCoach:
             limit_amps=_number(self.hass, entities.get("dynamic_limit")),
             circuit_amps=_number(self.hass, entities.get("circuit_limit")),
         )
+        # Wat er de afgelopen uren gemiddeld overbleef voor deze paal, uit de
+        # boekhouding van de beurt (`_bijhouden`). Een meting van deze beurt,
+        # niet van gisteren: na de kabel eruit begint hij op nul, en na een
+        # herstart ook, want de beurt zelf wordt niet bewaard.
+        if charger.connected:
+            charger.expected_amps = self._plafond_gemeten(device_id, now)
+
         # After a restart nothing is known about when this session began. Taking
         # it as "just now" only means waiting out the minimum run once.
         if charger.charging and charger.started_at is None:
@@ -3254,6 +3274,23 @@ class ChargerCoach:
             soc_estimated=geschat,
             tempo_per_band=self._tempo_uit(settings, device_id, auto_id),
         )
+
+    def _plafond_gemeten(self, device_id: str, now: datetime) -> float | None:
+        """Wat er de afgelopen `PLAFOND_VENSTER` gemiddeld voor de paal overbleef.
+
+        Uit het plafond van elke ronde (zekering min wat het huis trok, de
+        lastbewaker, de groep; onder de ondergrens van de paal telt als nul),
+        gewogen naar hoe lang elke ronde duurde. None zolang er minder dan
+        `PLAFOND_MEETTIJD_MIN` minuten in het venster staan. Zie
+        `structural_ceiling` in planner.py voor waar dit heen gaat.
+        """
+        reeks = (self._sessie.get(device_id) or {}).get("plafond_reeks") or []
+        grens = now - PLAFOND_VENSTER
+        binnen = [r for r in reeks if r[0] >= grens]
+        minuten = sum(stap for _, _, stap in binnen)
+        if minuten < PLAFOND_MEETTIJD_MIN:
+            return None
+        return sum(plafond * stap for _, plafond, stap in binnen) / minuten
 
     def _onthouden_soc(
         self, device: dict[str, Any], profile: dict[str, Any]
@@ -4078,6 +4115,9 @@ class ChargerCoach:
                 "meter": None,
                 "laatst": now,
                 "kwijt": {},
+                # Het plafond van elke ronde, als (moment, ampère, minuten),
+                # voor de afgelopen `PLAFOND_VENSTER`. Zie `_plafond_gemeten`.
+                "plafond_reeks": [],
                 "doel": window.deadline if window.enabled else None,
                 "mikpunt": window.deadline if window.enabled else None,
                 "gemeld": set(),
@@ -4122,6 +4162,28 @@ class ChargerCoach:
                 if sleutel in decision.rule:
                     sessie["kwijt"][sleutel] = sessie["kwijt"].get(sleutel, 0.0) + stap
                     break
+            # Hoeveel er deze ronde voor de paal overbleef, of hij nu laadde of
+            # niet: de zekering min wat het huis trok, de lastbewaker, de groep.
+            # Zie `structural_ceiling` in planner.py voor waarom dit telt.
+            # Onder de ondergrens van de paal levert hij niets, dus dat telt
+            # als nul en niet als "bijna zes". En vroeg de coach het volle
+            # plafond, dan telt wat er werkelijk liep: na elke keer dat de
+            # Equalizer de paal stilzette kost het opnieuw aanlopen een minuut
+            # of twee, en die minuten zag het plafond niet. In het virtuele
+            # huis was het verschil tien procent, en dat was precies het
+            # kwartier waarmee hij de klaar-tijd miste.
+            if grid is not None:
+                plafond = ceiling_amps(grid, car, charger)
+                if plafond < MIN_AMPS:
+                    gemeten = 0.0
+                elif decision.charge and decision.amps >= plafond:
+                    gemeten = min(float(plafond), max(0.0, charger.actual_amps))
+                else:
+                    gemeten = float(plafond)
+                reeks = sessie.setdefault("plafond_reeks", [])
+                reeks.append((now, gemeten, stap))
+                grens = now - PLAFOND_VENSTER
+                sessie["plafond_reeks"] = [r for r in reeks if r[0] >= grens]
 
         meter = self._teller(device)
 
@@ -4780,6 +4842,7 @@ class ChargerCoach:
             "solar_only": plan.solar_only,
             "note": plan.note,
             "estimated": plan.estimated,
+            "measured": plan.measured,
             "blocks": [
                 {
                     "start": klok(blok.start),

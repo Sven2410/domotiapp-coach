@@ -2090,6 +2090,47 @@ controle("zonder startknop zegt hij 'zet hem aan' in plaats van 'hij start'",
 controle("en de regels zijn dezelfde als met een knop",
          (d_wacht.rule, d_nu.rule, d_krap.rule) == ("wait-for-start", "cheapest-start", "deadline"), "")
 
+print("=== 51. het gemeten plafond van deze beurt (Van den Dam, nacht van 09 op 10-09-2026) ===")
+# Een warmtepomp op één fase ging om het kwartier aan, de paal kreeg 8 A waar
+# het plan met 16 rekende. Sven: "er zit geen patroon in", dus geen
+# voorspelling; wel de meting van de afgelopen uren in `Charger.expected_amps`.
+bus3 = Car(capacity_kwh=77.0, phases=3, soc_percent=50.0, max_amps=16.0)
+stil = Charger(max_amps=16.0, connected=True)
+druk = Charger(max_amps=16.0, connected=True, expected_amps=9.6)
+ruim = Charger(max_amps=16.0, connected=True, expected_amps=20.0)
+controle("zonder meting is het plafond wat paal en auto kunnen",
+         planner.structural_ceiling(bus3, stil) == 16 and planner.physical_ceiling(bus3, druk) == 16, "")
+controle("met een meting van 9,6 A rekent hij met 9, naar beneden afgerond",
+         planner.structural_ceiling(bus3, druk) == 9, f"{planner.structural_ceiling(bus3, druk)}")
+controle("een meting boven het fysieke plafond verandert niets en krijgt geen zin",
+         planner.structural_ceiling(bus3, ruim) == 16 and planner.measured_ceiling_note(bus3, ruim) == "", "")
+u16 = planner.hours_needed(bus3, planner.structural_ceiling(bus3, stil))
+u9 = planner.hours_needed(bus3, planner.structural_ceiling(bus3, druk))
+controle("en dan duurt het naar verhouding langer", abs(u9 / u16 - 16 / 9) < 0.01, f"{u16:.2f} {u9:.2f}")
+controle("de zin noemt het gemeten getal",
+         planner.measured_ceiling_note(bus3, druk)
+         == "De afgelopen uren bleef er gemiddeld 9 A over voor de paal, en daarmee rekent hij voor de uren die komen.",
+         planner.measured_ceiling_note(bus3, druk))
+nu51 = dt.datetime(2026, 9, 9, 22, 0)
+w51 = venster(nu51)
+net51 = Grid(surplus_w=0.0, phase_amps=[2.0, 2.0, 2.0], fuse_amps=25.0, charger_amps=0.0)
+p_stil = planner.timeline(nu51, prijzen50(9), net51, bus3, stil, w51, 16)
+p_druk = planner.timeline(nu51, prijzen50(9), net51, bus3, druk, w51, 16)
+print(f"  uiterlijk beginnen: rustig {p_stil.latest_start:%H:%M}, druk {p_druk.latest_start:%H:%M}")
+controle("de tijdlijn begint eerder, rekent met 9 A en zegt dat het een meting is",
+         p_druk.latest_start < p_stil.latest_start - dt.timedelta(hours=2)
+         and p_druk.measured and not p_stil.measured and p_druk.amps == 9 and p_stil.amps == 16,
+         f"{p_stil.latest_start} {p_druk.latest_start}")
+d_stil = decide(nu51, prijzen50(9), net51, bus3, stil, w51)
+d_druk = decide(nu51, prijzen50(9), net51, bus3, druk, w51)
+laat51 = nu51.replace(hour=23)
+d_laat = decide(laat51, prijzen50(9), net51, bus3, druk, venster(laat51))
+print(f"  22:00 rustig: {d_stil.rule} | druk: {d_druk.rule} | 23:00 druk: {d_laat.rule}: {d_laat.reason}")
+controle("om 22:00 wacht een rustig huis op de nacht; het drukke huis laadt al, want op 9 A zijn bijna alle uren nodig",
+         not d_stil.charge and d_druk.charge and d_druk.rule == "cheap-hour", f"{d_stil.rule} | {d_druk.rule}")
+controle("om 23:00 past het op 9 A niet meer met een uur speling: de klaar-tijdregel, met de meting in de reden",
+         d_laat.charge and d_laat.rule == "deadline" and "gemiddeld 9 A" in d_laat.reason, f"{d_laat.rule}: {d_laat.reason}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

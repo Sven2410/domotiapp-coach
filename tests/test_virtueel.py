@@ -136,10 +136,14 @@ for naam, vl in V.items():
         controle(f"{naam}: het zondeel van bespaard past bij de zon-kilowatturen",
                  all(0.0 <= b["solar_saved"] <= b["solar_kwh"] * 1.0 + 0.001 for b in vl.beurten),
                  f"{[(b['device'], b['solar_kwh'], b['solar_saved']) for b in vl.beurten]}")
+    # Een minuut per keer dat er iets groots aangaat: `warmtepomp-nacht` zet
+    # negenenveertig keer 22 A op één fase, en elke keer volgt de auto de
+    # lagere limiet met zijn eigen aanloop van een halve minuut.
     over = [r for r in vl.regels if max(r.fase_amps) > s.zekering]
-    controle(f"{naam}: de zekering wordt hooguit een minuut overschreden",
-             len(over) * vl.stap_uur * 60 <= 1.0, f"{len(over) * vl.stap_uur * 60:.1f} minuten boven "
-             f"{s.zekering} A, hoogste {vl.hoogste_fase:.1f} A")
+    sprongen = max(1, sum(1 for g in s.gebeurtenissen if g[1] == "oven"))
+    controle(f"{naam}: de zekering wordt hooguit een minuut per sprong overschreden",
+             len(over) * vl.stap_uur * 60 <= 1.0 * sprongen, f"{len(over) * vl.stap_uur * 60:.1f} minuten boven "
+             f"{s.zekering} A, hoogste {vl.hoogste_fase:.1f} A, {sprongen} sprongen")
     # Alleen als de auto zijn accustand zelf meldt. Met een opgegeven stand
     # rekent de coach met de teller van de paal, en die loopt bij een Easee
     # tot een uur achter; dan zegt het verslag "staat op 87%" over een auto
@@ -153,9 +157,13 @@ for naam, vl in V.items():
     # moet hij altijd klaar zijn." Vijf minuten speling voor de aanloop.
     # `afbouw-krap` is met opzet de beurt waarin de coach nog niet weet dat de
     # auto bovenin afbouwt: hij wordt vol in het laatste uur, en juist daarom
-    # leert hij het; zie `afbouw-krap-geleerd`.
+    # leert hij het; zie `afbouw-krap-geleerd`. `warmtepomp-nacht` is het huis
+    # waar dat uur voor bedoeld is: een warmtepomp zonder patroon eet er een
+    # deel van op, en het gemeten plafond (v0.61.0) ziet het opnieuw aanlopen
+    # na elke onderbreking niet voordat er geladen wordt. Vol vóór de
+    # klaar-tijd, en dat staat in zijn eigen controle.
     if (gehaald(vl) and vl.klaar_tijd is not None and vl.klaar_op is not None
-            and naam != "afbouw-krap"):
+            and naam not in ("afbouw-krap", "warmtepomp-nacht")):
         controle(f"{naam}: een uur voor de klaar-tijd al vol",
                  vl.klaar_op <= vl.klaar_tijd - virtueel.dt.timedelta(minutes=55),
                  f"vol om {vl.klaar_op:%H:%M}, klaar-tijd {vl.klaar_tijd:%H:%M}")
@@ -308,6 +316,21 @@ if (vl := v("oven-tijdens-laden")):
              f"hoogste {max(max(r.fase_amps) for r in regels_in(vl, '02:01', '02:30')):.1f} A")
     controle("oven: na de oven weer verder", laadt_tussen(vl, "02:35", "04:00"), "")
     controle("oven: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
+# Van den Dam, nacht van 09 op 10-09-2026: een warmtepomp die om het kwartier
+# aangaat. Zonder de meting van het plafond (v0.61.0) begon de coach om 01:02
+# op de goedkoopste uren en stond de auto om 06:00 op 84%.
+if (vl := v("warmtepomp-nacht")):
+    controle("warmtepomp: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    controle("warmtepomp: begint vóór 23:00 en zegt dat er gemeten minder overbleef",
+             laadt_tussen(vl, "22:00", "23:00")
+             and any("gemiddeld" in r.reden and "A over voor de paal" in r.reden
+                     for r in regels_in(vl, "22:00", "23:30")), "")
+if (vl := v("warmtepomp-uit")):
+    controle("warmtepomp uit: een rustig huis wacht gewoon op de nacht",
+             not laadt_tussen(vl, "20:00", "00:30") and gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    controle("warmtepomp uit: en betaalt het optimum",
+             vl.optimum is not None and vl.betaald <= vl.optimum + 0.02, f"{vl.betaald:.2f} tegen {vl.optimum:.2f}")
 
 # --- de auto -----------------------------------------------------------------
 

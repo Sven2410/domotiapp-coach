@@ -113,6 +113,26 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    `_uren_met_afbouw` in planner.py). En is de klaar-tijd voorbij terwijl de
    auto niet vol is, dan laadt hij op vol vermogen door (`overdue`).
 
+**Het plafond voor de uren die komen is een meting van deze beurt** (v0.61.0).
+In de nacht van 09 op 10-09-2026 ging bij Van den Dam om het kwartier een
+warmtepomp aan op één fase, tot 22 A; de paal kreeg 8 A waar het plan met 16
+rekende, en de klaar-tijdregel zag dat pas om 03:01. Sven: "er zit geen
+patroon in, en dat kan bij andere woningen ook zo zijn", dus voorspellen mag
+niet en een verlaagd plafond aannemen ook niet. Wat wel mag is meten: sinds
+het inpluggen telt de coach elke ronde wat er voor de paal overbleef
+(`ceiling_amps`, onder de ondergrens telt als nul; vroeg hij het volle
+plafond, dan wat er werkelijk liep), en het gemiddelde van de afgelopen drie
+uur (`PLAFOND_VENSTER`, `_plafond_gemeten` in coach.py) gaat als
+`Charger.expected_amps` naar `structural_ceiling` in planner.py. Daar rekenen
+het plan, "uiterlijk beginnen" en de klaar-tijdregel mee. Een rustig huis
+meet het volle plafond en merkt er niets van; een huis met een warmtepomp
+begint eerder, en de kaart en de reden zeggen erbij dat het een meting is
+(`Plan.measured`, `measured_ceiling_note`). Drie uur en niet de hele beurt,
+want de kookpiek van de avond hoort niet in de nacht mee te tellen. Na een
+herstart begint de meting opnieuw. Scenario's `warmtepomp-nacht` (oud: 85% om
+06:00, nieuw: vol om 05:25) en `warmtepomp-uit` (hetzelfde als zonder de
+regel); proef 51 in test_planner.py, proef 65 in test_coach.py.
+
 ## De vaatwasser
 
 Sinds 06-09-2026 stuurt de coach ook een vaatwasser (Home Connect), na Svens
@@ -330,9 +350,9 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 290 controles op het denkwerk
-python tests/test_coach.py       # 338 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1261 op hele laadbeurten in het virtuele huis
+python tests/test_planner.py     # 298 controles op het denkwerk
+python tests/test_coach.py       # 343 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1286 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 35 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

@@ -245,7 +245,14 @@ export class DacPlanAheadSheet extends DacElement {
     for (const [label, waarde, bij] of [
       ["Nog te laden", kwh(plan.kwh_needed), ""],
       ["Op vol vermogen", uren(plan.hours_needed),
-        plan.amps ? `${plan.amps} A, wat paal en auto kunnen` : ""],
+        // Sinds v0.61.0 kan dit een meting zijn: wat er de afgelopen uren
+        // gemiddeld onder de zekering overbleef, bij een huis met een
+        // warmtepomp die om het kwartier aangaat. Zie structural_ceiling.
+        plan.amps
+          ? plan.measured
+            ? `${plan.amps} A, wat er de afgelopen uren gemiddeld overbleef onder je zekering`
+            : `${plan.amps} A, wat paal en auto kunnen`
+          : ""],
       ["Uiterlijk beginnen", wanneer(plan.latest_start), "met een uur speling"],
       laatste,
     ]) {
@@ -324,12 +331,18 @@ export class DacPlanAheadSheet extends DacElement {
       ? " De zon per uur is een schatting: er staat geen uurverwachting klaar, dus " +
         "de dagverwachting is over de daglichturen verdeeld."
       : "";
+    const gemeten = plan.measured
+      ? ` De afgelopen uren bleef er gemiddeld ${plan.amps} A over voor de paal, omdat ` +
+        "je huis bij vlagen veel trok. Daarmee rekent hij voor de uren die komen, " +
+        "zodat hij op tijd begint."
+      : "";
     this.$("#vooruit-voet").textContent =
       (plan.note ||
         "Dit is wat de coach nu van plan is. Hij vergelijkt elk uur tot je klaar-tijd, " +
           "en per uur wat je eigen zon kost tegen wat het net kost. Verandert je " +
           "accustand, de prijs of de verwachting, dan rekent hij het opnieuw uit.") +
-      geschat;
+      geschat +
+      gemeten;
   }
 }
 
