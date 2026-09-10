@@ -277,6 +277,11 @@ class Charger:
     # `circuit_ceiling`: de auto trekt soms meer dan er gevraagd is, en boven
     # deze grens grijpt de paal zelf in.
     circuit_amps: float | None = None
+    # Wat er sinds het inpluggen gemiddeld voor deze paal overbleef, in ampère:
+    # het plafond van elke ronde (zekering, lastbewaker, wat het huis trok)
+    # gemiddeld over de tijd. Een meting van déze beurt en geen patroon over
+    # dagen; zie `structural_ceiling`. None zolang er niets gemeten is.
+    expected_amps: float | None = None
 
 
 @dataclass
@@ -1064,11 +1069,40 @@ def structural_ceiling(car: Car, charger: Charger) -> int:
     coach met die 9 A voor de hele nacht, zag dat het dan niet meer paste en
     zette de klaar-tijdregel aan terwijl er tijd zat was. Gezien in het
     virtuele huis op 04-09-2026.
+
+    **Maar wat er sinds het inpluggen gemiddeld overbleef telt wél mee.** Bij
+    Van den Dam ging in de nacht van 09 op 10-09-2026 om het kwartier een
+    warmtepomp aan op één fase, tot 22 A; de paal kreeg 8 A waar het plan met
+    16 rekende, en de klaar-tijdregel zag dat pas om 03:01. Sven: "er zit geen
+    patroon in", dus voorspellen mag niet. Meten in deze beurt wel: de coach
+    houdt vanaf het inpluggen bij hoeveel er elke ronde onder de zekering
+    overbleef (`Charger.expected_amps`), en rekent voor de uren die komen met
+    dat gemiddelde. Een rustig huis geeft het volle plafond en verandert niets;
+    een huis met een warmtepomp begint eerder. Sven op 10-09-2026: "bouw maar."
     """
+    plafond = physical_ceiling(car, charger)
+    if charger.expected_amps is not None:
+        plafond = min(plafond, charger.expected_amps)
+    return int(max(0, plafond))
+
+
+def physical_ceiling(car: Car, charger: Charger) -> int:
+    """Wat deze paal en deze auto samen kunnen, zonder enige meting erbij."""
     plafond = charger.max_amps
     if car.max_amps:
         plafond = min(plafond, car.max_amps)
     return int(max(0, plafond))
+
+
+def measured_ceiling_note(car: Car, charger: Charger) -> str:
+    """Eén zin over het gemeten plafond, of niets als het niet lager uitkomt."""
+    gemeten = structural_ceiling(car, charger)
+    if charger.expected_amps is None or gemeten >= physical_ceiling(car, charger):
+        return ""
+    return (
+        f"De afgelopen uren bleef er gemiddeld {gemeten} A over voor de paal, "
+        f"en daarmee rekent hij voor de uren die komen."
+    )
 
 
 def schijven(
@@ -1446,6 +1480,9 @@ class Plan:
     blocks: list[Blok] = field(default_factory=list)
     # Waarom er geen blokken zijn, als die er niet zijn.
     note: str = ""
+    # Of `amps` lager is dan wat paal en auto kunnen, omdat er sinds het
+    # inpluggen gemiddeld minder overbleef. Zie `structural_ceiling`.
+    measured: bool = False
     # Of de zon per uur een meting is of een schatting. Zie `_zonkromme` in
     # coach.py: staat er geen uurkromme klaar, dan wordt de dagverwachting over
     # de daglichturen verdeeld, en dat hoort het scherm te zeggen.
@@ -1502,6 +1539,7 @@ def timeline(
         kwh_needed=kwh,
         hours_needed=hours_needed(car, structureel),
         amps=structureel,
+        measured=bool(measured_ceiling_note(car, charger)),
         estimated=forecast.estimated,
     )
 
@@ -2268,7 +2306,7 @@ def _decide(
                     f"van een lege accu en laadt nu door om {_wanneer(end, now)} te halen."
                     if soc_unknown
                     else f"Nu doorladen, anders is de auto om {_wanneer(end, now)} niet vol."
-                ),
+                ) + (" " + gemeten if (gemeten := measured_ceiling_note(car, charger)) else ""),
                 plan="Laadt op vol vermogen tot de auto klaar is.",
                 rule="deadline",
                 needs_soc=soc_unknown,

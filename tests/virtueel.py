@@ -540,6 +540,9 @@ class Scenario:
     # ("12:00", "snelladen", True), ("09:30", "soc_opgeven", 40), ("11:00", "p1_weg", 3),
     # ("20:00", "oven", 30)
     gebeurtenissen: list[tuple] = field(default_factory=list)
+    # Wat "oven" aanzet, in watt; valt over de fasen zoals `Huis.verdeling`.
+    # 5,5 kW met 80% op één fase is een warmtepomp zoals bij Van den Dam.
+    oven_w: float = 3000.0
 
     def kopie(self, **wijzigingen) -> "Scenario":
         return dataclasses.replace(self, **wijzigingen)
@@ -867,7 +870,7 @@ class Wereld:
         # Sensoren die tijdelijk `unavailable` zijn, met tot wanneer.
         self.weg: dict[str, dt.datetime] = {}
         self.reden = ""
-        self.oven_w = 3000.0
+        self.oven_w = s.oven_w
         if s.kabel_erin is None:
             self.paal.kabel = True
         # wat er deze minuut gebeurde

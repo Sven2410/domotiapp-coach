@@ -3301,6 +3301,44 @@ controle("en onder Bespaard staat het zonaandeel, met het zondeel erbij",
          and abs(b64[0]["solar_saved"] - b64[0]["saved"]) < 0.001
          and abs(b64[0]["ref_cost"] - b64[0]["kwh"] * 0.24171) < 0.001, f"{b64}")
 
+print("=== 65. het plafond wordt per ronde gemeten, over de afgelopen drie uur ===")
+# Van den Dam, nacht van 09 op 10-09-2026: een warmtepomp op L3 om het
+# kwartier een paar minuten aan. De coach telt elke ronde wat er onder de
+# zekering overbleef (onder de ondergrens van de paal telt als nul) en geeft
+# het gemiddelde van de afgelopen `PLAFOND_VENSTER` mee als
+# `Charger.expected_amps`, pas na `PLAFOND_MEETTIJD_MIN` minuten.
+hass65, _, coach65 = bouw(huis(), laat)
+def ronde65(minuut):
+    # Vijf van elke vijftien minuten trekt het huis 22 A op L3: dan blijft er
+    # onder de zekering van 25 A minder dan de ondergrens over.
+    hass65.states.zet("sensor.l3", "22" if minuut % 15 < 5 else "2")
+    return asyncio.run(ronde(coach65, laat, dt.datetime(2026, 9, 9, 10, 0) + dt.timedelta(minutes=minuut)))
+for minuut in range(0, 20):
+    ronde65(minuut)
+vroeg65 = coach65._plafond_gemeten("dev-laadpaal", dt.datetime(2026, 9, 9, 10, 19))
+controle("na twintig minuten is er nog geen meting", vroeg65 is None, f"{vroeg65}")
+for minuut in range(20, 46):
+    b65, _ = ronde65(minuut)
+gemeten65 = coach65._plafond_gemeten("dev-laadpaal", dt.datetime(2026, 9, 9, 10, 45))
+print(f"  na 45 minuten: gemiddeld {gemeten65:.2f} A, plan rekent met {b65['plan_ahead']['amps']} A, meting {b65['plan_ahead']['measured']}")
+controle("na drie kwartier: tien van de vijftien minuten 14 A en vijf keer nul, dus rond de 9 A",
+         gemeten65 is not None and 8.5 <= gemeten65 <= 10.0, f"{gemeten65}")
+controle("en het plan rekent daarmee en zegt dat het een meting is",
+         b65["plan_ahead"]["amps"] == int(gemeten65) and b65["plan_ahead"]["measured"] is True, f"{b65['plan_ahead']}")
+# Een rustig huis: na drie uur zonder warmtepomp is het venster schoon.
+hass65.states.zet("sensor.l3", "2")
+for minuut in range(46, 230):
+    b65, _ = asyncio.run(ronde(coach65, laat, dt.datetime(2026, 9, 9, 10, 0) + dt.timedelta(minutes=minuut)))
+rustig65 = coach65._plafond_gemeten("dev-laadpaal", dt.datetime(2026, 9, 9, 13, 49))
+controle("drie uur later is de warmtepomp uit het venster en staat het plafond weer op 14",
+         rustig65 is not None and abs(rustig65 - 14.0) < 0.01 and b65["plan_ahead"]["measured"] is False, f"{rustig65}")
+hass65.states.zet("sensor.laadpaal_status", "disconnected")
+# Twee ronden, want de coach gelooft een kabel pas na `KABEL_ONTDREUN`.
+asyncio.run(ronde(coach65, laat, dt.datetime(2026, 9, 9, 13, 50)))
+asyncio.run(ronde(coach65, laat, dt.datetime(2026, 9, 9, 13, 51)))
+controle("kabel eruit: de meting is weg, want hij hoort bij de beurt",
+         coach65._plafond_gemeten("dev-laadpaal", dt.datetime(2026, 9, 9, 13, 51)) is None, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

@@ -163,6 +163,27 @@ lastbewaker = vast_zonnig.kopie(
     naam="met-lastbewaker", uitleg="een installatie met een eigen lastbewaker",
     lastbewaker=True,
 )
+# De nacht van 09 op 10-09-2026 bij Van den Dam: een warmtepomp die om het
+# kwartier een paar minuten 22 A op één fase trekt, zonder patroon. De coach
+# meet vanaf het inpluggen wat er gemiddeld voor de paal overblijft en rekent
+# daarmee (`structural_ceiling` in planner.py). Het zusje zonder warmtepomp
+# laat zien dat een rustig huis er niets van merkt.
+warmtepomp = dyn_grote_auto.kopie(
+    naam="warmtepomp-nacht",
+    uitleg="dynamisch, geen zon, 3x25 A met Equalizer: de grote auto om 17:30 erin op 50%, klaar om 06:00; vanaf 17:45 om het kwartier vier minuten 5,5 kW op de zware fase, de hele nacht door",
+    zon=Zon(wolken="geen"), voorspeller="geen",
+    huis=Huis(basis_w=300.0, verdeling=(0.1, 0.1, 0.8)), oven_w=5500.0,
+    begin="2026-09-09 17:25", kabel_erin="17:30", klaar_om="06:00", duur_uren=13,
+    auto=replace(GROTE, soc=50.0), equalizer=True, zekering=25.0, aansluiting_fasen=3,
+    stap_seconden=10,
+    gebeurtenissen=[(f"{h:02d}:{m:02d}", "oven", 4)
+                    for h in list(range(17, 24)) + list(range(0, 6))
+                    for m in (0, 15, 30, 45) if h < 17 or (h, m) >= (17, 45)],
+)
+warmtepomp_uit = warmtepomp.kopie(
+    naam="warmtepomp-uit", uitleg="hetzelfde huis, maar de warmtepomp blijft de hele nacht uit",
+    gebeurtenissen=[],
+)
 
 # --- de auto -----------------------------------------------------------------
 
@@ -559,7 +580,7 @@ ALLE = [
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,
     dyn_zonnig, dyn_bewolkt, dyn_geen_zon, dyn_markt, dyn_salderen, dyn_avond, dyn_grote_auto,
     dyn_negatief, dyn_kwartier_later, dyn_geen_klaar_tijd,
-    meter_teken, meter_teken_om, een_fase_krap, oven, lastbewaker,
+    meter_teken, meter_teken_om, een_fase_krap, oven, lastbewaker, warmtepomp, warmtepomp_uit,
     geen_soc, soc_opgegeven, soc_traag, laadgrens, bijna_vol, auto_slaapt,
     pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,
     p1_weg, p1_lang_weg, paal_traag,
