@@ -227,6 +227,26 @@ TERUGREKENEN_WACHT = timedelta(minutes=2)
 PROGRAMMA_TERUGKIJK = timedelta(hours=8)
 # Zegt de coach "zet hem aan" en gebeurt er niets, dan één keer opnieuw.
 HERINNERING = timedelta(minutes=45)
+# De meter telt voor een programma-apparaat als wat hij de afgelopen tien
+# minuten ten minste naar het net zag gaan, niet als de meting van dit moment.
+# Sven op 11-09-2026 om 09:35: een opklaring van een paar minuten gaf 2694 W
+# teruglevering, meer dan de piek van Express 60, en de coach startte; om
+# 09:37 was het 721 W en de opwarmpieken kwamen van het net. Een programma
+# start één keer en draait dan anderhalf uur, dus hij hoort te starten op zon
+# die blijft. Zolang er nog geen METER_DEKKING gemeten is (na een herstart)
+# telt de meter niet, en rekent hij het lopende uur met de verwachting.
+METER_VENSTER = timedelta(minutes=10)
+METER_DEKKING = timedelta(minutes=8)
+# De eindtijd van het apparaat telt pas als hij bij deze beurt hoort. Home
+# Connect zet hem al bij het kiezen van het programma (het moment van kiezen
+# plus de duur) en rekent hem pas een minuut na de start opnieuw uit. Bij Sven
+# op 11-09-2026: om 09:01 gekozen, om 09:36 gestart, en de melding zei "klaar
+# rond 10:56" terwijl hij om 11:28 klaar was. Wat voor EINDTIJD_MARGE voor de
+# start gezet is, telt niet; de marge omdat de coach de start soms een ronde
+# later ziet dan hij gebeurde. De melding "is gestart" wacht er hooguit
+# EINDTIJD_WACHT op, en neemt daarna de duur uit de tabel.
+EINDTIJD_MARGE = timedelta(minutes=2)
+EINDTIJD_WACHT = timedelta(minutes=2)
 # Een meting weegt mee als lopend gemiddelde over zoveel beurten; daarna
 # blijft hij even zwaar tellen, zodat een machine die ouder wordt bijblijft.
 METING_MAX_N = 5
@@ -431,7 +451,9 @@ def _text(hass: HomeAssistant, entity_id: str | None) -> str:
     return "" if state is None else str(state.state).lower()
 
 
-def _eindtijd(hass: HomeAssistant, entity_id: str | None, now: datetime) -> datetime | None:
+def _eindtijd(
+    hass: HomeAssistant, entity_id: str | None, now: datetime, sinds: datetime | None = None
+) -> datetime | None:
     """Wanneer het apparaat zelf zegt klaar te zijn, of None.
 
     Home Connect geeft de resterende tijd als een tijdstip (de sensor
@@ -439,12 +461,23 @@ def _eindtijd(hass: HomeAssistant, entity_id: str | None, now: datetime) -> date
     minuten of de seconden die nog resten. Allebei hetzelfde antwoord op
     dezelfde vraag, als lokaal tijdstip zonder zone, zoals `now`. Sven op
     07-09-2026: "pak de eindtijd van de integratie."
+
+    Met `sinds` telt alleen een waarde die op of na dat moment gezet is: een
+    eindtijd van voor de start is die van het kiezen van het programma, niet
+    die van de beurt. Zie `EINDTIJD_MARGE`.
     """
     if not entity_id:
         return None
     state = hass.states.get(entity_id)
     if state is None or state.state in ("unknown", "unavailable", ""):
         return None
+    if sinds is not None:
+        gezet = getattr(state, "last_changed", None) or getattr(state, "last_updated", None)
+        if gezet is not None:
+            if gezet.tzinfo is not None:
+                gezet = dt_util.as_local(gezet).replace(tzinfo=None)
+            if gezet < sinds:
+                return None
     try:
         getal = float(state.state)
     except (TypeError, ValueError):
@@ -583,6 +616,9 @@ class ChargerCoach:
         # vrijgegeven, wanneer de coach op start drukte, wanneer hij ging
         # draaien, en de tellers voor het verslag. Zie `_one_programma`.
         self._programma: dict[str, dict[str, Any]] = {}
+        # Wat er de afgelopen METER_VENSTER per ronde naar het net ging:
+        # (moment, watt). Zie `_meter_zeker`.
+        self._meter: list[tuple[datetime, float]] = []
         self._herstart_open: set[str] = set()
         self._herstart_gedaan: dict[str, datetime] = {}
         self._herstart_melden: set[str] = set()
@@ -1122,6 +1158,7 @@ class ChargerCoach:
         await self._async_huisverbruik(settings, moment)
         await self._async_sensorwacht(settings, moment)
         await self._async_zonkromme(settings, moment)
+        self._meter_bijhouden(settings, moment)
 
         chargers.sort(key=lambda device: self._priority(settings, device))
         vergeven = 0.0
@@ -1211,9 +1248,6 @@ class ChargerCoach:
         deur = _text(self.hass, entities.get("door")).strip().lower()
         deur_open = None if not deur else deur in ("open", "on")
         watts = _watts(self.hass, device.get("entity"))
-        # Wanneer het apparaat zelf zegt klaar te zijn; alleen zolang hij
-        # draait zegt dat iets.
-        eind = _eindtijd(self.hass, entities.get("remaining"), now)
 
         if handmatig:
             status = self._status_uit_vermogen(sessie, now, watts)
@@ -1248,9 +1282,11 @@ class ChargerCoach:
             now, self._prices(settings), self._tariff(settings),
             Forecast(solar_kwh=self._zon_kwh, house_kwh=self._huis_kwh, estimated=self._zon_geschat),
             window, apparaat,
-            # Wat er nu werkelijk naar het net gaat: in het lopende uur wint de
-            # meter van de verwachting. Sven op 07-09-2026, zie programma_kosten.
-            surplus_w=self._netto_export_w(settings),
+            # Wat er werkelijk naar het net gaat: in het lopende uur wint de
+            # meter van de verwachting (Sven op 07-09-2026, zie
+            # programma_kosten), maar dan wat hij de afgelopen tien minuten
+            # ten minste zag en niet één opklaring (11-09-2026, METER_VENSTER).
+            surplus_w=self._meter_zeker(now),
         )
 
         draait = status in DRAAIT
@@ -1281,24 +1317,39 @@ class ChargerCoach:
             sessie["laatst"] = now
             if sessie.get("programma") is not None and programma is None:
                 programma = sessie["programma"]
-            # Sven op 07-09-2026: "ik wil wel meldingen ontvangen dat de
-            # vaatwasser gestart is en klaar is." Dus per beurt twee: deze en
-            # het verslag. "Gestart" als de coach erop drukte of erom vroeg;
-            # "draait" als de bewoner hem zelf aanzette of de coach net herstartte.
-            if "gestart" not in sessie["gemeld"]:
-                sessie["gemeld"].add("gestart")
-                zelf = sessie.get("gedrukt") is not None or sessie.get("gevraagd") is not None
-                wat = f" ({programma.label})" if programma is not None else ""
-                # Het apparaat zelf weet het beste wanneer hij klaar is;
-                # zonder die sensor de duur uit de tabel.
-                if eind is not None and eind > now:
-                    klaar = f", klaar rond {eind:%H:%M}"
-                elif programma is not None and programma.minutes:
-                    klaar = f", klaar rond {(now + timedelta(minutes=programma.minutes)):%H:%M}"
-                else:
-                    klaar = ""
-                await self._async_tell(f"{naam} {'is gestart' if zelf else 'draait'}{wat}{klaar}.")
+            # Of de coach erop drukte of erom vroeg, voor de melding hieronder:
+            # die kan een ronde later komen, en dan is `gedrukt` al leeg.
+            sessie["door_coach"] = sessie.get("gedrukt") is not None or sessie.get("gevraagd") is not None
             sessie["gedrukt"] = None
+        # Wanneer het apparaat zelf zegt klaar te zijn: alleen zolang hij
+        # draait, en alleen een tijd die bij deze beurt hoort (EINDTIJD_MARGE).
+        eind = (
+            _eindtijd(self.hass, entities.get("remaining"), now, sinds=sessie["gestart"] - EINDTIJD_MARGE)
+            if draait and sessie["gestart"] is not None
+            else None
+        )
+        # Sven op 07-09-2026: "ik wil wel meldingen ontvangen dat de
+        # vaatwasser gestart is en klaar is." Dus per beurt twee: deze en
+        # het verslag. "Gestart" als de coach erop drukte of erom vroeg;
+        # "draait" als de bewoner hem zelf aanzette of de coach net herstartte.
+        # Heeft het apparaat een eindtijd, dan wacht de melding tot die bij
+        # deze beurt hoort, hooguit EINDTIJD_WACHT.
+        if draait and sessie["gestart"] is not None and "gestart" not in sessie["gemeld"] and not (
+            eind is None and entities.get("remaining") and now - sessie["gestart"] < EINDTIJD_WACHT
+        ):
+            sessie["gemeld"].add("gestart")
+            zelf = sessie.get("door_coach", False)
+            dit = programma or sessie.get("programma")
+            wat = f" ({dit.label})" if dit is not None else ""
+            # Het apparaat zelf weet het beste wanneer hij klaar is;
+            # zonder die sensor de duur uit de tabel.
+            if eind is not None and eind > now:
+                klaar = f", klaar rond {eind:%H:%M}"
+            elif dit is not None and dit.minutes:
+                klaar = f", klaar rond {(sessie['gestart'] + timedelta(minutes=dit.minutes)):%H:%M}"
+            else:
+                klaar = ""
+            await self._async_tell(f"{naam} {'is gestart' if zelf else 'draait'}{wat}{klaar}.")
         if draait:
             self._programma_tellen(settings, sessie, now, watts)
             # Het verloop van deze beurt, voor het profiel: minuten sinds de
@@ -1413,6 +1464,7 @@ class ChargerCoach:
             "gedrukt": None,       # wanneer de coach het laatst op start drukte
             "pogingen": 0,
             "gestart": None,       # wanneer hij ging draaien
+            "door_coach": False,   # of de coach hem startte of erom vroeg
             "kwh": 0.0,
             "zon_kwh": 0.0,
             "betaald": 0.0,
@@ -1474,6 +1526,23 @@ class ChargerCoach:
         domein = entity_id.split(".")[0]
         dienst = {"button": "press", "switch": "turn_on", "script": "turn_on"}.get(domein, "press")
         await self.hass.services.async_call(domein, dienst, {"entity_id": entity_id}, blocking=True)
+
+    def _meter_bijhouden(self, settings: dict[str, Any], now: datetime) -> None:
+        """Elke ronde wat er naar het net gaat, voor `_meter_zeker`."""
+        waarde = self._netto_export_w(settings)
+        if waarde is not None:
+            self._meter.append((now, waarde))
+        grens = now - METER_VENSTER
+        while self._meter and self._meter[0][0] < grens:
+            self._meter.pop(0)
+
+    def _meter_zeker(self, now: datetime) -> float | None:
+        """Wat de meter de afgelopen METER_VENSTER ten minste naar het net zag
+        gaan, of None zolang er nog geen METER_DEKKING gemeten is."""
+        binnen = [w for t, w in self._meter if now - METER_VENSTER <= t <= now]
+        if not binnen or now - self._meter[0][0] < METER_DEKKING:
+            return None
+        return min(binnen)
 
     def _netto_export_w(self, settings: dict[str, Any]) -> float | None:
         """Wat er nu naar het net gaat, positief bij teruglevering, of None."""

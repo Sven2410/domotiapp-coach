@@ -592,6 +592,31 @@ if (vl := v("vaatwasser-vroeg-verwacht")):
              vl.vw_klaar is not None and vl.vw_klaar < vl.vw_klaar.replace(hour=16, minute=30)
              and len(vw_beurt) == 1 and vw_beurt[0]["solar_kwh"] >= 0.95 * vw_beurt[0]["kwh"], f"{vw_klok(vl.vw_klaar)} {vw_beurt}")
 
+if (vl := v("vaatwasser-zonpiek")):
+    vw_beurt = [b for b in vl.beurten if b["device"] == "vaatwasser"]
+    print(f"  zonpiek: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, beurt {[(b['kwh'], b['solar_kwh'], b['paid'], b['saved']) for b in vw_beurt]}")
+    # Tot 11-09-2026 startte hij om 09:32, op de opklaring: 2,4 kW over was
+    # meer dan de piek van 2264 W, en de opwarmpieken kwamen daarna van het
+    # net. Nu telt de laagste teruglevering van tien minuten (METER_VENSTER).
+    controle("zonpiek (11-09): op een opklaring van zes minuten start hij niet",
+             vl.vw_gestart is not None and not (9 <= vl.vw_gestart.hour < 10), f"gestart {vw_klok(vl.vw_gestart)}")
+    controle("zonpiek: hij start op zon die blijft, en de beurt is grotendeels zon",
+             len(vw_beurt) == 1 and vw_beurt[0]["solar_kwh"] >= 0.9 * vw_beurt[0]["kwh"], f"{vw_beurt}")
+    controle("zonpiek: en hij is voor 16:30 klaar",
+             vl.vw_klaar is not None and (vl.vw_klaar.hour, vl.vw_klaar.minute) < (16, 30), f"{vw_klok(vl.vw_klaar)}")
+
+if (vl := v("vaatwasser-eindtijd")):
+    gestart_m = [(t, m) for t, m in vl.meldingen if "Vaatwasser is gestart" in m]
+    print(f"  eindtijd: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, melding {[(f'{t:%H:%M}', m) for t, m in gestart_m]}")
+    # Tot 11-09-2026 zei de melding "klaar rond 10:45": de eindtijd die Home
+    # Connect om 09:45 bij het kiezen zette.
+    controle("eindtijd (11-09): de melding noemt de eindtijd van de beurt, niet die van het kiezen",
+             len(gestart_m) == 1 and vl.vw_klaar is not None and f"klaar rond {vl.vw_klaar:%H:%M}." in gestart_m[0][1],
+             f"{gestart_m} klaar {vw_klok(vl.vw_klaar)}")
+    controle("eindtijd: en de melding komt binnen twee minuten na de start",
+             len(gestart_m) == 1 and vl.vw_gestart is not None
+             and (gestart_m[0][0] - vl.vw_gestart).total_seconds() <= 120, f"{gestart_m} gestart {vw_klok(vl.vw_gestart)}")
+
 if (vl := v("vaatwasser-herstart")):
     print(f"  herstart: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, {vl.vw_kwh:.2f} kWh, meldingen {[m for _, m in vl.meldingen if 'Vaatwasser' in m]}")
     controle("herstart: gestart om 02:00, en na de herstart om 03:00 zegt hij niet nog eens dat hij draait",

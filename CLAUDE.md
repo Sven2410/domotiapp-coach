@@ -224,7 +224,8 @@ moment goedkoper (`meter_overal` in `programma_kosten`), dan start hij nu
 (v0.57.1, na 10:51 die ochtend: hij wachtte tot 12:00 omdat de verwachting
 voor 11:00 net te weinig zei, terwijl de meter 3,4 kW zag). Een goedkoper
 uur bij een dynamisch contract blijft winnen, want dat is een prijs en geen
-gok. Niet in de avondpiek.
+gok. Niet in de avondpiek. Sinds v0.62.0 is "de meter" hier de laagste
+teruglevering van de afgelopen tien minuten; zie hieronder.
 
 **Twee meldingen per beurt**, gestart en klaar (v0.57.0, Sven: "ik wil wel
 meldingen ontvangen dat de vaatwasser gestart is en klaar is"). "Is gestart"
@@ -277,7 +278,8 @@ anders start hij zo nog een keer. Proef 62 in test_coach.py, scenario
 de integratie"): het veld Resterende tijd (`remaining`) mag een tijdstip
 zijn (Home Connect) of minuten of seconden (`_eindtijd` in coach.py). "Klaar
 rond" in de melding en op de kaart komt daarvandaan; zonder die sensor uit
-de tabel. Proef 61.
+de tabel. Proef 61. Een eindtijd die al voor de start stond telt niet
+(v0.62.0; zie hieronder).
 
 **Zonder meting gaat het verbruik op de piek, en de meterregel eist de
 piek** (v0.59.0). Sven op 08-09-2026 om 09:12: Eco 50 zonder meting startte
@@ -308,6 +310,33 @@ door te wachten (de rest). Het verslag zegt welk deel wat was
 bij die beurten zat de zon in de maat en was bespaard alleen het wachten.
 v0.59.0 had het één dag andersom (de zon van het vrijgavemoment in de maat,
 `zon_toen`), en dat gaf precies de nul waar Sven over viel. Proef 64.
+
+**De meter is tien minuten zon, en de eindtijd hoort bij de beurt**
+(v0.62.0). Sven thuis op 11-09-2026: om 09:29 vrijgegeven, en om 09:35
+klaarde het een paar minuten op; de meter zag 2694 W teruglevering, meer dan
+de piek van Express 60 (2264 W), en de coach startte. Om 09:37 was het 721 W;
+de drie opwarmpieken kregen 1,1 tot 1,8 kW zon, 0,2 van de 1,0 kWh, en de
+beurt kostte € 0,234 waar hij € 0,180 voorspelde. Sinds die dag krijgt
+`plan_programma` als `surplus_w` de laagste teruglevering van de afgelopen
+tien minuten (`METER_VENSTER`, `_meter_bijhouden` en `_meter_zeker` in
+coach.py), voor het lopende uur én voor `meter_overal`; zolang er nog geen
+acht minuten gemeten zijn (`METER_DEKKING`, na een herstart) telt de meter
+niet en rekent hij met de verwachting. De paal houdt de meting van nu, want
+die past zich elke ronde aan. De keerzijde: in een opkomende ochtendzon loopt
+de meter tien minuten achter, en vier scenario's starten 3 tot 10 minuten
+later, zonder dat het duurder wordt. En de melding zei "klaar rond 10:56":
+dat was de eindtijd die Home Connect om 09:01 bij het kiezen van het
+programma zette; om 09:37:05 rekende hij hem opnieuw uit (11:31), klaar was
+hij om 11:28. `_eindtijd` neemt met `sinds` alleen een waarde die niet
+eerder dan `EINDTIJD_MARGE` voor de start gezet is (`last_changed`), en de
+melding "is gestart" wacht daar hooguit `EINDTIJD_WACHT` op; daarna de duur
+uit de tabel, vanaf de start. Scenario's `vaatwasser-zonpiek` (oud: start
+09:32 op de opklaring; nieuw: 11:56, 0,84 van 0,85 kWh zon) en
+`vaatwasser-eindtijd` (oud: "klaar rond 10:45", nieuw: 11:21, zoals het
+ging), proef 66 en 67 in test_coach.py. Het virtuele huis kent daarvoor
+`Zon.pieken` (een opklaring die de voorspeller niet ziet) en
+`Vaatwasser.eindtijd_tijdstip` (een eindtijd die al bij het kiezen staat en
+pas een minuut na de start klopt).
 
 ## Hoe het in elkaar zit
 
@@ -351,8 +380,8 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 298 controles op het denkwerk
-python tests/test_coach.py       # 343 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1286 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 355 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1303 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 35 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
