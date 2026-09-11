@@ -64,6 +64,10 @@ class Zon:
     # `voorspeld` werken er net zo op. Voor een scenario dat een echte woning
     # nabouwt, zoals Van den Dam op 04-09-2026.
     kromme: dict[int, float] | None = None
+    # Een opklaring van een paar minuten die de voorspeller niet ziet: (van,
+    # tot, kW aan de omvormer). Bij Sven op 11-09-2026 ging het dak om 09:35
+    # van 1,1 naar 3,0 kW, en twee minuten later weer naar 1,2.
+    pieken: list[tuple[str, str, float]] = field(default_factory=list)
 
     # "half": de voorspeller zag de helft van wat het dak deed, zoals bij Sven
     # op 08-09-2026 (Forecast.Solar 1,0 tot 1,7 kWh per uur, het dak 1,9 tot 4,4).
@@ -99,6 +103,10 @@ class Zon:
         raise ValueError(f"onbekend weer: {patroon}")
 
     def nu_kw(self, moment: dt.datetime) -> float:
+        u = moment.hour + moment.minute / 60 + moment.second / 3600
+        for van, tot, kw in self.pieken:
+            if _uur(van) <= u < _uur(tot):
+                return kw
         return self.helder_kw(moment) * self.factor(moment, self.wolken)
 
     def verwacht_kwh(self, uur: dt.datetime) -> float:
@@ -377,6 +385,15 @@ class Vaatwasser:
     deur_open: bool = False
     # Hoe lang Home Connect erover doet om na de knop "run" te melden.
     aanloop_min: int = 1
+    # Home Connect geeft de eindtijd als tijdstip, en die staat er al voor de
+    # start: het moment waarop het programma gekozen werd plus de duur. Pas
+    # `eindtijd_na_min` na de start rekent hij hem opnieuw uit. Bij Sven op
+    # 11-09-2026: om 09:01 gekozen (eindtijd 10:56), om 09:36 gestart, om
+    # 09:37:05 de echte eindtijd 11:31. False: de minuten die nog resten, en
+    # alleen zolang hij draait.
+    eindtijd_tijdstip: bool = False
+    gekozen: str | None = None      # "HH:MM" op de eerste dag; None is het begin van de proef
+    eindtijd_na_min: int = 1
     # Een domme vaatwasser op een meetstekker (merk "overig"): geen status,
     # geen programma, geen knop; alleen het vermogen. De coach zegt wanneer
     # en de bewoner drukt zelf, zoveel minuten later. None: hij doet het niet.
@@ -425,6 +442,15 @@ class Vaatwasser:
         if self.status != "run" or self.gestart_op is None:
             return None
         return max(0, int(self.minuten - (nu - self.gestart_op).total_seconds() / 60))
+
+    def eindtijd(self, nu: dt.datetime, gekozen_op: dt.datetime) -> dt.datetime | None:
+        """Wat Home Connect als eindtijd laat zien; zie `eindtijd_tijdstip`."""
+        if self.status == "finished":
+            return None
+        if self.status == "run" and self.gestart_op is not None \
+                and nu - self.gestart_op >= dt.timedelta(minutes=self.eindtijd_na_min):
+            return self.gestart_op + dt.timedelta(minutes=self.minuten)
+        return gekozen_op + dt.timedelta(minutes=self.minuten)
 
 
 # --- de prijzen --------------------------------------------------------------
@@ -863,6 +889,17 @@ class Wereld:
         self.paal = dataclasses.replace(s.paal, ontvangen=[])
         self.prijzen = dataclasses.replace(s.prijzen)
         self.nu = dt.datetime.fromisoformat(s.begin)
+        # Wanneer het programma op de vaatwasser gekozen werd, en de eindtijd
+        # zoals Home Connect hem laat zien met sinds wanneer: Home Assistant
+        # zet `last_changed` alleen als de waarde verandert. Zie
+        # `Vaatwasser.eindtijd`.
+        vw = s.vaatwasser
+        self.vw_gekozen_op = (
+            self.nu.replace(hour=int(vw.gekozen[:2]), minute=int(vw.gekozen[3:5]), second=0)
+            if vw is not None and vw.gekozen else self.nu
+        )
+        self.vw_eind_waarde: str | None = None
+        self.vw_eind_sinds: dt.datetime | None = None
         self.p1_weg_tot: dt.datetime | None = None
         self.prijzen_weg_tot: dt.datetime | None = None
         self.oven_tot: dt.datetime | None = None
@@ -992,8 +1029,15 @@ class Wereld:
             vw = self.vaatwasser
             z(E["vw_status"], vw.status)
             z(E["vw_programma"], vw.programma)
-            rest = vw.resterend(nu)
-            z(E["vw_rest"], "unknown" if rest is None else w(str(rest), "min"))
+            if vw.eindtijd_tijdstip:
+                eind = vw.eindtijd(nu, self.vw_gekozen_op)
+                waarde = "unavailable" if eind is None else eind.isoformat()
+                if waarde != self.vw_eind_waarde:
+                    self.vw_eind_waarde, self.vw_eind_sinds = waarde, nu
+                z(E["vw_rest"], waarde, last_updated=self.vw_eind_sinds)
+            else:
+                rest = vw.resterend(nu)
+                z(E["vw_rest"], "unknown" if rest is None else w(str(rest), "min"))
             z(E["vw_deur"], "on" if vw.deur_open else "off")
             z(E["vw_vermogen"], w(f"{self.vw_w:.0f}", "W"))
         if self.s.equalizer:

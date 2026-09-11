@@ -573,6 +573,37 @@ vaatwasser_uiterlijk = vaatwasser_avond.kopie(
     naam="vaatwasser-uiterlijk-starten", uitleg="om 19:00 vrijgegeven met uiterlijk starten om 22:00: dan gaat hij om 22:00, ook al is de nacht goedkoper",
     vaatwasser_uiterlijk="22:00",
 )
+# Sven thuis op 11-09-2026. Om 09:29 vrijgegeven, Express 60 met een meting
+# (piek 2264 W). Om 09:35 klaarde het een paar minuten op: het dak ging van
+# 1,1 naar 3,0 kW en de meter zag 2694 W teruglevering, meer dan de piek. De
+# coach startte, en om 09:37 was het 721 W; de drie opwarmpieken kregen 1,1
+# tot 1,8 kW zon, 0,2 van de 1,0 kWh. Om 12:00 gaf het dak 3,4 kW. De zon is
+# die van 08-09 (in de ochtend binnen een paar honderd watt van 11-09), de
+# opklaring die van 11-09, en de meting is de rij zoals hij na die beurt in
+# zijn instellingen stond.
+KURZ_60_GEMETEN = {
+    "device": "vaatwasser", "key": "kurz_60", "minutes": 98, "kwh": 0.911, "peak_w": 2264,
+    "profile": [463.1, 2203.6, 1471.1, 61.4, 1313.1, 932.3, 64.3, 14.0, 11.9, 44.3, 1034.2, 2134.7,
+                1157.1, 21.5, 2.5, 0.5, 0.0, 0.8, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "runs": 3, "at": "",
+}
+vaatwasser_zonpiek = vaatwasser_vroeg_verwacht.kopie(
+    naam="vaatwasser-zonpiek", uitleg="Sven op 11-09-2026: om 09:29 vrijgegeven, om 09:31 klaart het zes minuten op tot 3,2 kW; op zo'n opklaring hoort Express 60 niet te starten, want de opwarmpieken komen dan van het net",
+    begin="2026-09-11 07:55", vast_prijs=0.24171,
+    zon=Zon(kromme=SVEN_ZON_KWH, pieken=[("09:31", "09:37", 3.2)]),
+    vaatwasser=Vaatwasser(programma="dishcare_dishwasher_program_kurz_60", minuten=98, kwh=0.91,
+                          piek_w=2200.0, piek_minuten=22),
+    vaatwasser_gemeten=[KURZ_60_GEMETEN],
+    gebeurtenissen=[("09:29", "vaatwasser_vrijgeven", None)],
+)
+# Dezelfde dag, en toen zei de melding "klaar rond 10:56": dat was de eindtijd
+# die Home Connect om 09:01 bij het kiezen had gezet. Hier om 09:45 gekozen en
+# om 10:20 gestart op de meter; de melding hoort de echte eindtijd te noemen.
+vaatwasser_eindtijd = vaatwasser_meter_wint.kopie(
+    naam="vaatwasser-eindtijd", uitleg="Home Connect met een eindtijd die al om 09:45 bij het kiezen gezet werd en pas een minuut na de start klopt: de melding 'is gestart' hoort de echte eindtijd te noemen",
+    vaatwasser=Vaatwasser(programma="dishcare_dishwasher_program_kurz_60", minuten=60, kwh=1.05, piek_w=2200.0,
+                          piek_minuten=20, eindtijd_tijdstip=True, gekozen="09:45"),
+)
 
 ALLE = [
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
@@ -591,6 +622,7 @@ ALLE = [
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,
+    vaatwasser_zonpiek, vaatwasser_eindtijd,
     *VAN_DEN_DAM,
 ]
 

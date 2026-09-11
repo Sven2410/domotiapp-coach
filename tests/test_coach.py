@@ -3339,6 +3339,111 @@ asyncio.run(ronde(coach65, laat, dt.datetime(2026, 9, 9, 13, 51)))
 controle("kabel eruit: de meting is weg, want hij hoort bij de beurt",
          coach65._plafond_gemeten("dev-laadpaal", dt.datetime(2026, 9, 9, 13, 51)) is None, "")
 
+print("=== 66. de eindtijd van het apparaat telt pas als hij bij deze beurt hoort ===")
+# Sven thuis op 11-09-2026: om 09:01 het programma gekozen, en Home Connect zet
+# de eindtijd dan al (10:56); om 09:36 gestart, en de melding zei "klaar rond
+# 10:56". Om 09:37:05 rekende Home Connect hem opnieuw uit: 11:31. Een eindtijd
+# die voor de start gezet is telt niet, en de melding wacht er hooguit
+# `EINDTIJD_WACHT` op.
+hass66 = NepHass({})
+hass66.states.zet("sensor.rest", "2026-09-08T04:15:00", last_updated=dt.datetime(2026, 9, 8, 0, 30))
+start66 = dt.datetime(2026, 9, 8, 1, 2)
+sinds66 = start66 - coachmod.EINDTIJD_MARGE
+controle("een eindtijd die voor de start gezet is telt niet",
+         coachmod._eindtijd(hass66, "sensor.rest", start66, sinds=sinds66) is None, "")
+controle("zonder sinds telt hij wel, zoals het altijd deed",
+         coachmod._eindtijd(hass66, "sensor.rest", start66) == dt.datetime(2026, 9, 8, 4, 15), "")
+hass66.states.zet("sensor.rest", "2026-09-08T04:47:00", last_updated=dt.datetime(2026, 9, 8, 1, 1, 30))
+e66 = coachmod._eindtijd(hass66, "sensor.rest", start66, sinds=sinds66)
+controle("een eindtijd die binnen de marge van de start gezet is telt wel", e66 == dt.datetime(2026, 9, 8, 4, 47), f"{e66}")
+
+
+def beurt66(bijwerken):
+    """Een beurt waarin Home Connect de eindtijd om 00:30 zette, bij het kiezen.
+
+    Met `bijwerken` rekent hij hem een minuut na de start opnieuw uit, zoals
+    bij Sven; zonder blijft de oude staan.
+    """
+    inst = instellingen(devices=[LAADPAAL, VW62])
+    inst["contract"] = inst56["contract"]
+    inst["strategy"]["schedules"].append({
+        "device": "dev-vaatwasser", "enabled": True, "priority": "mid", "per_day": False,
+        "window": {"not_before": "", "start_by": "", "done_by": "07:00"}, "days": [],
+    })
+    waarden = dict(huis56)
+    waarden["sensor.prijs"] = {"state": "0.18", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen56(7)}}
+    hass, _, c = bouw(waarden, inst)
+    hass.states.zet("sensor.vaatwasser_rest", "2026-09-08T04:15:00", last_updated=dt.datetime(2026, 9, 8, 0, 30))
+
+    async def ronde(nu):
+        hass.services.verstuurd.clear()
+        await hass.afmaken()
+        await c._round(nu)
+        await hass.afmaken()
+        return c.state.get("dev-vaatwasser") or {}, [d[2]["message"] for d in hass.services.verstuurd
+                                                     if d[0] == "notify" and "Vaatwasser" in d[2].get("message", "")]
+
+    inst["ready_devices"] = ["dev-vaatwasser"]
+    asyncio.run(ronde(dt.datetime(2026, 9, 7, 19, 5)))
+    asyncio.run(ronde(dt.datetime(2026, 9, 8, 1, 0, 30)))
+    hass.states.zet("sensor.vaatwasser_status", "run")
+    hass.states.zet("sensor.vaatwasser_vermogen", "2000")
+    uit = []
+    for minuut in (2, 3, 4):
+        if bijwerken and minuut == 3:
+            hass.states.zet("sensor.vaatwasser_rest", "2026-09-08T04:48:00", last_updated=dt.datetime(2026, 9, 8, 1, 2, 40))
+        b, m = asyncio.run(ronde(dt.datetime(2026, 9, 8, 1, minuut)))
+        print(f"  {'bijgewerkt' if bijwerken else 'blijft oud'} 01:0{minuut}: {m}  kaart: {b.get('reason')}  ends_at {b.get('ends_at')}")
+        uit.append((b, m))
+    return uit
+
+
+b66 = beurt66(True)
+controle("in de ronde van de start geen melding: de eindtijd is nog die van het kiezen",
+         b66[0][1] == [] and b66[0][0].get("ends_at") is None and b66[0][0].get("reason") == "Hij draait.",
+         f"{b66[0]}")
+controle("zodra Home Connect hem opnieuw uitrekent de melding, met de eindtijd van de beurt",
+         b66[1][1] == ["Vaatwasser is gestart (Eco 50 °C), klaar rond 04:48."]
+         and b66[1][0].get("reason") == "Hij draait, klaar rond 04:48.", f"{b66[1]}")
+controle("en niet nog eens", b66[2][1] == [], f"{b66[2][1]}")
+n66 = beurt66(False)
+controle("rekent hij hem niet opnieuw uit, dan na twee minuten de duur uit de tabel, en niet 04:15",
+         n66[0][1] == [] and n66[1][1] == [] and n66[2][1] == ["Vaatwasser is gestart (Eco 50 °C), klaar rond 04:47."],
+         f"{[m for _, m in n66]}")
+controle("en op de kaart geen eindtijd die niet bij de beurt hoort",
+         all(b.get("ends_at") is None for b, _ in n66), f"{[b.get('ends_at') for b, _ in n66]}")
+
+print("=== 67. de meter telt als de laagste van tien minuten, niet als één opklaring ===")
+# Sven thuis op 11-09-2026 om 09:35: een opklaring van een paar minuten gaf
+# 2694 W teruglevering, meer dan de piek van Express 60, en de coach startte;
+# om 09:37 was het 721 W. Voor een programma-apparaat telt de meter nu als wat
+# hij de afgelopen `METER_VENSTER` ten minste zag, en pas na `METER_DEKKING`.
+inst67 = instellingen()
+hass67, _, coach67 = bouw(huis(teruglevering=300.0), inst67)
+t67 = dt.datetime(2026, 9, 11, 9, 20)
+
+def meet67(van, tot):
+    for minuut in range(van, tot):
+        coach67._meter_bijhouden(inst67, t67 + dt.timedelta(minutes=minuut))
+
+meet67(0, 6)
+controle("na vijf minuten meten telt de meter nog niet, zoals na een herstart",
+         coach67._meter_zeker(t67 + dt.timedelta(minutes=5)) is None, "")
+meet67(6, 15)
+hass67.states.zet("sensor.teruglevering", "2694")
+meet67(15, 17)
+z67 = coach67._meter_zeker(t67 + dt.timedelta(minutes=16))
+print(f"  twee minuten 2694 W na een kwartier 300 W: de meter telt als {z67}")
+controle("een opklaring van twee minuten: de meter telt als de 300 W van ervoor", z67 == 300.0, f"{z67}")
+meet67(17, 27)
+z67 = coach67._meter_zeker(t67 + dt.timedelta(minutes=26))
+controle("tien minuten 2694 W: dan telt hij", z67 == 2694.0, f"{z67}")
+hass67.states.zet("sensor.teruglevering", "unavailable")
+hass67.states.zet("sensor.afname", "unavailable")
+meet67(27, 29)
+z67 = coach67._meter_zeker(t67 + dt.timedelta(minutes=28))
+controle("een meter die even wegvalt telt niet mee als nul", z67 == 2694.0, f"{z67}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
