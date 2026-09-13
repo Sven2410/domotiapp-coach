@@ -323,6 +323,20 @@ const RELEASE_SWITCH_FIELD = {
   hideRow: true,
 };
 
+/**
+ * Een tweede schakelaar, voor "ingeruimd en nu starten". Sven op 13-09-2026:
+ * na de klaar-tijd de keuze "ingeruimd en morgen starten" of "ingeruimd en nu
+ * starten", en vanaf zijn keukenkaart allebei. De vrijgaveschakelaar is dan
+ * morgen, deze is nu.
+ */
+const RELEASE_NOW_SWITCH_FIELD = {
+  key: "release_now_switch",
+  label: "Schakelaar nu starten",
+  hint: "Optioneel: een schakelaar of input_boolean die \"ingeruimd en nu starten\" betekent. Zet je die aan, dan start de coach hem meteen, ook als het niet het goedkoopste moment is. Na de beurt gaat hij uit.",
+  filter: "all",
+  hideRow: true,
+};
+
 export const DISHWASHER_BRANDS = [
   {
     id: "home_connect",
@@ -375,6 +389,7 @@ export const DISHWASHER_BRANDS = [
         format: "countdown",
       },
       RELEASE_SWITCH_FIELD,
+      RELEASE_NOW_SWITCH_FIELD,
       {
         key: "door",
         label: "Deurstand",
@@ -429,7 +444,7 @@ export const DISHWASHER_BRANDS = [
     id: "overig",
     label: "Overig",
     note: "Een vaatwasser zonder koppeling, op een meetstekker: de coach zegt wanneer je hem aan moet zetten en meet wat hij verbruikt.",
-    fields: [RELEASE_SWITCH_FIELD],
+    fields: [RELEASE_SWITCH_FIELD, RELEASE_NOW_SWITCH_FIELD],
     manual: true,
   },
 ];
@@ -622,21 +637,25 @@ export function releaseCopy(device) {
     case "vaatwasser":
       return {
         label: "Ingeruimd en dicht",
+        short: "Ingeruimd",
         hint: "Zet dit aan als de vaatwasser vol staat en de klep dicht zit. Anders zou de coach hem leeg kunnen laten spoelen.",
       };
     case "wasmachine":
       return {
         label: "Gevuld en dicht",
+        short: "Gevuld",
         hint: "Zet dit aan als de was erin zit en de deur dicht is.",
       };
     case "droger":
       return {
         label: "Gevuld en dicht",
+        short: "Gevuld",
         hint: "Zet dit aan als de droger gevuld is en de deur dicht is.",
       };
     default:
       return {
         label: "Mag meedraaien",
+        short: "Mag draaien",
         hint: "Zet dit aan als de coach dit apparaat nu mag inschakelen.",
       };
   }

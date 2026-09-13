@@ -324,6 +324,12 @@ class Window:
     # 04-09-2026 "de prijzen tot 06:00 zijn nog niet bekend" als morgenochtend,
     # en die prijzen waren er wel; de klaar-tijd was zondag.
     skipped: tuple[str, ...] = ()
+    # De klaar-tijd van vandaag, als die al voorbij is en dit venster dus bij
+    # een volgende dag hoort. Sven op 12-09-2026 gaf de vaatwasser om 16:33
+    # vrij bij klaar om 16:30; de coach plande hem voor de volgende middag en
+    # zei "hij start om 13:00". Voor een programma-apparaat is dat het moment
+    # om te vragen: morgen, of toch nu.
+    missed: datetime | None = None
 
 
 @dataclass
@@ -892,6 +898,7 @@ def resolve_window(now: datetime, days: dict[int, DayWindow]) -> Window:
         return Window()
 
     overgeslagen: list[str] = []
+    gemist: datetime | None = None
     for offset in range(LOOKAHEAD_DAYS):
         basis = now + timedelta(days=offset)
         day = days.get(basis.weekday())
@@ -902,6 +909,8 @@ def resolve_window(now: datetime, days: dict[int, DayWindow]) -> Window:
 
         deadline = _at(basis, day.done_by)
         if deadline is None or deadline <= now:
+            if offset == 0 and deadline is not None:
+                gemist = deadline
             continue
 
         opens = _at(basis, day.not_before)
@@ -924,7 +933,7 @@ def resolve_window(now: datetime, days: dict[int, DayWindow]) -> Window:
 
         return Window(
             enabled=True, opens=opens, start_by=uiterlijk, deadline=deadline,
-            skipped=tuple(overgeslagen),
+            skipped=tuple(overgeslagen), missed=gemist,
         )
 
     return Window()
@@ -1708,6 +1717,28 @@ def _wanneer(moment: datetime, now: datetime) -> str:
     if (moment.date() - now.date()).days <= 1:
         return _clock(moment)
     return f"{DAGNAMEN[moment.weekday()]} {_clock(moment)}"
+
+
+def _dag_klok(moment: datetime, now: datetime) -> str:
+    """"13:00", "morgen 13:00" of "zondag 13:00": voor een programma-apparaat.
+
+    Anders dan bij `_wanneer` hoort "morgen" er hier wel bij. Een vaatwasser
+    die na de klaar-tijd wordt vrijgegeven schuift een dag op, en om 16:33
+    las "hij start om 13:00" als een tijd die al voorbij was (Sven,
+    12-09-2026).
+    """
+    if (moment.date() - now.date()).days == 1:
+        return f"morgen {_clock(moment)}"
+    return _wanneer(moment, now)
+
+
+def _dag_om(moment: datetime, now: datetime) -> str:
+    """"om 13:00", "morgen om 13:00" of "zondag om 13:00"."""
+    verschil = (moment.date() - now.date()).days
+    if verschil <= 0:
+        return f"om {_clock(moment)}"
+    dag = "morgen" if verschil == 1 else DAGNAMEN[moment.weekday()]
+    return f"{dag} om {_clock(moment)}"
 
 
 def _prijzen_komen(end: datetime | None, now: datetime) -> str:
@@ -3148,6 +3179,10 @@ class Apparaat:
     # meten, met zet hem aan." De teksten zeggen dan "zet hem aan" in plaats
     # van "hij start".
     manual: bool = False
+    # De bewoner koos "ingeruimd en nu starten": geen goedkoopste moment, geen
+    # avondpiek, nu. Sven op 13-09-2026, na een vrijgave om 16:33 bij klaar om
+    # 16:30: "de keuze ingeruimd en morgen starten of ingeruimd en nu starten."
+    start_now: bool = False
 
 
 # Wat Home Connect meldt zolang er een programma loopt of klaarstaat.
@@ -3314,9 +3349,15 @@ def plan_programma(
             rule="running",
         )
     if not apparaat.released:
+        gemist = window.missed if window.enabled and window.deadline is not None else None
         return Decision(
             False, 0,
-            "Wacht tot je hem vrijgeeft: ingeruimd en dicht.",
+            (
+                f"Wacht tot je hem vrijgeeft. {_clock(gemist)} is vandaag voorbij: kies of hij "
+                f"{_dagnaam(window.deadline, now)} op het goedkoopste moment start, of nu."
+                if gemist is not None
+                else "Wacht tot je hem vrijgeeft: ingeruimd en dicht."
+            ),
             plan="Daarna kiest de coach het goedkoopste moment binnen je schema.",
             rule="not-released",
         )
@@ -3326,6 +3367,20 @@ def plan_programma(
     start_nu = "zet hem nu aan" if hand else "hij start nu"
 
     programma = apparaat.program
+
+    # "Ingeruimd en nu starten": de bewoner koos, dus geen goedkoopste moment
+    # en geen avondpiek, net als snelladen bij de paal.
+    if apparaat.start_now:
+        return Decision(
+            True, 0,
+            "Zet hem nu aan: je koos ingeruimd en nu starten." if hand
+            else "Je koos ingeruimd en nu starten, dus hij start nu.",
+            plan=(
+                f"Klaar rond {_dag_klok(now + timedelta(minutes=programma.minutes), now)}."
+                if programma is not None and programma.minutes else ""
+            ),
+            rule="start-now",
+        )
 
     einde = window.deadline if window.enabled else None
     uiterlijk = window.start_by if window.enabled else None
@@ -3487,19 +3542,32 @@ def plan_programma(
         )
 
     verschil = ""
-    if kosten_nu is not None and kosten_nu - goedkoopst >= 0.005:
-        verschil = f" Nu starten zou ongeveer {_euro(kosten_nu)} kosten, dan {_euro(goedkoopst)}."
+    # Wat echt nu starten kost. Opent het venster later (na de klaar-tijd is
+    # dat morgen 08:00), dan is het eerste moment niet nu; op 12-09-2026 om
+    # 16:33 stond hier de prijs van 08:00 de volgende ochtend als "nu".
+    kosten_echt_nu = kosten_nu if eerste == now else programma_kosten(
+        now, programma, prices, tariff, forecast, now=now, surplus_w=surplus_w
+    )
+    if kosten_echt_nu is not None and kosten_echt_nu - goedkoopst >= 0.005:
+        verschil = f" Nu starten zou ongeveer {_euro(kosten_echt_nu)} kosten, dan {_euro(goedkoopst)}."
     # Even duur als nu en toch later: dan is het de avondpiek die nu dichtzit.
     waarom = (
         f"na de avondpiek"
         if kosten_nu is not None and kosten_nu - goedkoopst < 0.005 and _in_avondpiek(eerste, eerste + duur)
         else f"dan is {programma.label} het goedkoopst"
     )
+    # Na de klaar-tijd van vandaag schuift hij een dag op; dat hoort er dan
+    # met zoveel woorden bij, met de weg terug.
+    gemist = window.missed if window.enabled and start.date() > now.date() else None
+    tekst = ("Zet hem aan" if hand else "Hij start") + f" {_dag_om(start, now)}: {waarom}.{verschil}"
+    if gemist is not None:
+        tekst = f"{_clock(gemist)} is vandaag voorbij, dus " + tekst[0].lower() + tekst[1:]
     return Decision(
         False, 0,
-        ("Zet hem aan om" if hand else "Hij start om") + f" {_wanneer(start, now)}: {waarom}.{verschil}",
-        plan=f"Klaar rond {_wanneer(start + duur, now)}"
-        + (f", ruim voor {_wanneer(einde, now)}." if einde is not None else "."),
+        tekst,
+        plan=f"Klaar rond {_dag_klok(start + duur, now)}"
+        + (f", ruim voor {_dag_klok(einde, now)}." if einde is not None else ".")
+        + (" Liever nu? Kies dan nu starten." if gemist is not None else ""),
         rule="wait-for-start",
         starts_at=start.isoformat(),
     )

@@ -2269,6 +2269,10 @@ class DacViewOverview extends DacElement {
               <span class="mark" data-mark="${slot}"></span>
               <span data-release-text="${slot}"></span>
             </button>
+            <!-- Na de klaar-tijd van vandaag: niet morgen, maar nu. -->
+            <button class="release" type="button" data-release-now="${slot}" aria-pressed="false" hidden>
+              <span data-release-now-text="${slot}"></span>
+            </button>
             <button class="boost" type="button" data-boost="${slot}" aria-pressed="false" hidden>
               ${icons.bolt}<span data-boost-text="${slot}">Snelladen</span>
             </button>
@@ -2335,6 +2339,9 @@ class DacViewOverview extends DacElement {
     }
     for (const button of this.$$("[data-release]")) {
       button.addEventListener("click", () => this.toggleReady_(Number(button.dataset.release)));
+    }
+    for (const button of this.$$("[data-release-now]")) {
+      button.addEventListener("click", () => this.toggleReady_(Number(button.dataset.releaseNow), true));
     }
     for (const button of this.$$("[data-manual]")) {
       button.addEventListener("click", () => this.openManual_(Number(button.dataset.manual)));
@@ -2444,12 +2451,29 @@ class DacViewOverview extends DacElement {
       // the cable in, and asking again on the dashboard added a step without
       // adding a decision.
       const asks = needsRelease(device);
+      // Na de klaar-tijd van vandaag schuift het schema een dag op. Dan twee
+      // knoppen: op het goedkoopste moment van morgen, of nu. Sven op
+      // 13-09-2026, na een vrijgave om 16:33 bij klaar om 16:30.
+      const besluit = this.coach_?.[device.id];
+      const gemist = asks && Boolean(besluit?.missed) && !besluit?.running;
+      const later = besluit?.later || "morgen";
+      const nu = on && (this.settings_?.ready_now ?? []).includes(device.id);
       const button = this.$(`[data-release="${slot}"]`);
       button.hidden = !asks;
       button.setAttribute("aria-pressed", String(on));
       this.$(`[data-mark="${slot}"]`).innerHTML = on ? icons.check : "";
-      this.$(`[data-release-text="${slot}"]`).textContent = on ? "Vrijgegeven" : copy.label;
-      this.$(`[data-hint="${slot}"]`).textContent = asks ? (on ? "" : copy.hint) : "";
+      this.$(`[data-release-text="${slot}"]`).textContent = on
+        ? nu ? "Vrijgegeven, start nu" : gemist ? `Vrijgegeven, start ${later}` : "Vrijgegeven"
+        : gemist ? `${copy.short}, ${later} starten` : copy.label;
+      this.$(`[data-release-now="${slot}"]`).hidden = !gemist || nu;
+      this.$(`[data-release-now-text="${slot}"]`).textContent = on
+        ? "Toch nu starten"
+        : `${copy.short}, nu starten`;
+      this.$(`[data-hint="${slot}"]`).textContent = !asks || on
+        ? ""
+        : gemist
+          ? `${String(besluit.missed).slice(11, 16)} is vandaag voorbij. Kies of hij ${later} op het goedkoopste moment start, of nu meteen.`
+          : copy.hint;
 
       // Only where there is something to send to: a brand that takes commands,
       // and the Home Assistant device to send them to.
@@ -2627,18 +2651,27 @@ class DacViewOverview extends DacElement {
    * Written through its own websocket command, which is the one thing here a
    * customer may change without being an administrator.
    */
-  async toggleReady_(slot) {
+  async toggleReady_(slot, now = false) {
     const device = this.steerDevices_?.[slot];
     if (!device || !this.hass) return;
 
-    const ready = new Set(this.settings_?.ready_devices ?? []);
-    const next = !ready.has(device.id);
+    const vorig = {
+      ready_devices: this.settings_?.ready_devices ?? [],
+      ready_now: this.settings_?.ready_now ?? [],
+    };
+    const ready = new Set(vorig.ready_devices);
+    const snel = new Set(vorig.ready_now);
+    // "Nu starten" zet alleen aan. De gewone knop wisselt, en is daarmee
+    // altijd zonder "nu": uit, of vrijgegeven voor het goedkoopste moment.
+    const next = now ? true : !ready.has(device.id);
 
     // Shown straight away rather than after the round trip: a button that waits
     // for the server before it moves reads as a button that did not work.
     if (next) ready.add(device.id);
     else ready.delete(device.id);
-    this.settings_ = { ...this.settings_, ready_devices: [...ready] };
+    if (now) snel.add(device.id);
+    else snel.delete(device.id);
+    this.settings_ = { ...this.settings_, ready_devices: [...ready], ready_now: [...snel] };
     this.fillSteerable_(this.steerDevices_);
 
     try {
@@ -2646,14 +2679,13 @@ class DacViewOverview extends DacElement {
         type: "domotiapp_coach/device/ready",
         device_id: device.id,
         ready: next,
+        now,
       });
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de vrijgave niet opslaan", error);
       // Put it back: pretending it worked would have the customer believe the
       // machine is released when it is not.
-      if (next) ready.delete(device.id);
-      else ready.add(device.id);
-      this.settings_ = { ...this.settings_, ready_devices: [...ready] };
+      this.settings_ = { ...this.settings_, ...vorig };
       this.fillSteerable_(this.steerDevices_);
     }
   }

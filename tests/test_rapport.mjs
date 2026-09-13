@@ -866,6 +866,85 @@ proef("de tijdlijnknop staat in de rij en is verborgen tot er een plan is", () =
   assert.match(knop, /\shidden/, "en verborgen tot de coach een tijdlijn heeft");
 });
 
+// Sven op 13-09-2026, na een vrijgave om 16:33 bij klaar om 16:30: "de keuze
+// ingeruimd en morgen starten of ingeruimd en nu starten." De coach zegt in
+// zijn besluit welke klaar-tijd gemist is (`missed`) en naar welke dag het
+// schema opschuift (`later`); de kaart maakt daar twee knoppen van.
+function kaartKnoppen({ ready = [], now = [], missed = "2026-09-12T16:30:00", running = false } = {}) {
+  const stub = () => {
+    const doel = {
+      hidden: false, innerHTML: "", textContent: "", value: "", dataset: {}, style: {}, attrs: {},
+      setAttribute(k, v) { this.attrs[k] = v; },
+      getAttribute(k) { return this.attrs[k]; },
+      classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
+      replaceChildren() {}, append() {}, addEventListener() {}, close() {}, focus() {},
+      querySelector: () => stub(), querySelectorAll: () => [],
+    };
+    return doel;
+  };
+  const knopen = new Map();
+  const el = Object.create(Overzicht.prototype);
+  el.$ = (kiezer) => { if (!knopen.has(kiezer)) knopen.set(kiezer, stub()); return knopen.get(kiezer); };
+  el.$$ = () => [];
+  const device = { id: "d2", type: "vaatwasser", name: "Vaatwasser", brand: "home_connect",
+                   controllable: true, entities: {}, details: [] };
+  el.labels_ = new Map([["d2", "Vaatwasser"]]);
+  el.settings_ = { devices: [device], ready_devices: ready, ready_now: now, strategy: { schedules: [] } };
+  el.coach_ = { d2: { kind: "programma", rule: ready.length ? "wait-for-start" : "not-released", level: "steer",
+                      reason: "", plan: "", missed, later: missed ? "morgen" : null, running,
+                      at: new Date().toISOString() } };
+  el.fillSteerable_([device]);
+  return {
+    el, device,
+    gewoon: knopen.get('[data-release-text="0"]')?.textContent,
+    nuTekst: knopen.get('[data-release-now-text="0"]')?.textContent,
+    nuVerborgen: knopen.get('[data-release-now="0"]')?.hidden,
+    uitleg: knopen.get('[data-hint="0"]')?.textContent,
+  };
+}
+
+proef("na de klaar-tijd: ingeruimd en morgen starten, of ingeruimd en nu starten", () => {
+  const k = kaartKnoppen();
+  assert.equal(k.gewoon, "Ingeruimd, morgen starten");
+  assert.equal(k.nuTekst, "Ingeruimd, nu starten");
+  assert.equal(k.nuVerborgen, false, "de knop nu starten hoort te staan");
+  assert.match(k.uitleg, /^16:30 is vandaag voorbij\. Kies of hij morgen/);
+});
+
+proef("vrijgegeven voor morgen blijft 'toch nu starten' staan; nu gekozen verdwijnt hij", () => {
+  const morgen = kaartKnoppen({ ready: ["d2"] });
+  assert.equal(morgen.gewoon, "Vrijgegeven, start morgen");
+  assert.equal(morgen.nuTekst, "Toch nu starten");
+  assert.equal(morgen.nuVerborgen, false);
+  assert.equal(morgen.uitleg, "");
+  const nu = kaartKnoppen({ ready: ["d2"], now: ["d2"] });
+  assert.equal(nu.gewoon, "Vrijgegeven, start nu");
+  assert.equal(nu.nuVerborgen, true);
+});
+
+proef("voor de klaar-tijd en tijdens een beurt blijft het één knop", () => {
+  const voor = kaartKnoppen({ missed: null });
+  assert.equal(voor.gewoon, "Ingeruimd en dicht");
+  assert.equal(voor.nuVerborgen, true);
+  const draait = kaartKnoppen({ ready: ["d2"], running: true });
+  assert.equal(draait.gewoon, "Vrijgegeven");
+  assert.equal(draait.nuVerborgen, true);
+});
+
+proef("nu starten stuurt ready en now mee, de gewone knop now uit", async () => {
+  const k = kaartKnoppen();
+  const verstuurd = [];
+  k.el.hass = { callWS: async (msg) => { verstuurd.push(msg); } };
+  k.el.steerDevices_ = [k.device];
+  await k.el.toggleReady_(0, true);
+  assert.deepEqual(verstuurd.at(-1), { type: "domotiapp_coach/device/ready", device_id: "d2", ready: true, now: true });
+  assert.deepEqual(k.el.settings_.ready_now, ["d2"]);
+  await k.el.toggleReady_(0);
+  assert.deepEqual(verstuurd.at(-1), { type: "domotiapp_coach/device/ready", device_id: "d2", ready: false, now: false });
+  assert.deepEqual(k.el.settings_.ready_devices, []);
+  assert.deepEqual(k.el.settings_.ready_now, []);
+});
+
 // --- draaien ----------------------------------------------------------------
 
 let goed = 0;

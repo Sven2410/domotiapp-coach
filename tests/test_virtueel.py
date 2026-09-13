@@ -617,6 +617,27 @@ if (vl := v("vaatwasser-eindtijd")):
              len(gestart_m) == 1 and vl.vw_gestart is not None
              and (gestart_m[0][0] - vl.vw_gestart).total_seconds() <= 120, f"{gestart_m} gestart {vw_klok(vl.vw_gestart)}")
 
+if (vl := v("vaatwasser-na-klaartijd")):
+    print(f"  na de klaar-tijd, morgen: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, {vl.vw_kwh:.2f} kWh, {len(vl.vw_gedrukt)} keer gedrukt")
+    # Sven op 12-09-2026: om 16:33 vrijgegeven bij klaar om 16:30.
+    controle("na de klaar-tijd (12-09): ingeruimd en morgen starten start niet meer vandaag, maar morgen tussen 08:00 en 15:00",
+             vl.vw_gestart is not None and "2026-09-08 08:00" <= f"{vl.vw_gestart:%Y-%m-%d %H:%M}" < "2026-09-08 15:00",
+             f"{vl.vw_gestart}")
+    controle("na de klaar-tijd: en morgen klaar voor 16:30",
+             vl.vw_klaar is not None and f"{vl.vw_klaar:%Y-%m-%d %H:%M}" <= "2026-09-08 16:30", f"{vl.vw_klaar}")
+    controle("na de klaar-tijd: één keer gedrukt en één verslag",
+             len(vl.vw_gedrukt) == 1 and len(meldingen(vl, "Vaatwasser is klaar")) == 1, f"{vl.vw_gedrukt}")
+
+if (vl := v("vaatwasser-na-klaartijd-nu")):
+    print(f"  na de klaar-tijd, nu: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, {vl.vw_kwh:.2f} kWh, meldingen {[m for _, m in vl.meldingen if 'Vaatwasser' in m]}")
+    # Sven op 13-09-2026: "of ingeruimd en nu starten."
+    controle("nu starten (13-09): hij start binnen twee minuten na 16:33, dezelfde dag",
+             vl.vw_gestart is not None and "2026-09-07 16:33" <= f"{vl.vw_gestart:%Y-%m-%d %H:%M}" <= "2026-09-07 16:35",
+             f"{vl.vw_gestart}")
+    controle("nu starten: één keer gedrukt, één keer 'is gestart' en één verslag",
+             len(vl.vw_gedrukt) == 1 and len(meldingen(vl, "Vaatwasser is gestart")) == 1
+             and len(meldingen(vl, "Vaatwasser is klaar")) == 1, f"{vl.vw_gedrukt} {[m for _, m in vl.meldingen]}")
+
 if (vl := v("vaatwasser-herstart")):
     print(f"  herstart: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, {vl.vw_kwh:.2f} kWh, meldingen {[m for _, m in vl.meldingen if 'Vaatwasser' in m]}")
     controle("herstart: gestart om 02:00, en na de herstart om 03:00 zegt hij niet nog eens dat hij draait",

@@ -3444,6 +3444,101 @@ meet67(27, 29)
 z67 = coach67._meter_zeker(t67 + dt.timedelta(minutes=28))
 controle("een meter die even wegvalt telt niet mee als nul", z67 == 2694.0, f"{z67}")
 
+print("=== 68. na de klaar-tijd: ingeruimd en morgen starten, of ingeruimd en nu starten ===")
+# Sven op 12-09-2026 om 16:33: vrijgegeven bij klaar om 16:30, en de coach
+# plande de volgende dag. Op 13-09: "ik wil dat er een optie bijkomt als hij na
+# de klaartijd is. Dan de keuze ingeruimd en morgen starten of ingeruimd en nu
+# starten." Op zijn keukenkaart met een tweede schakelaar: de vrijgave is
+# morgen, deze is nu.
+VRIJ68 = "input_boolean.vaatwasser_vrij"
+NU68 = "input_boolean.vaatwasser_nu"
+VW68 = dict(VAATWASSER, entities={**VAATWASSER["entities"], "release_switch": VRIJ68, "release_now_switch": NU68})
+inst68 = instellingen(devices=[LAADPAAL, VW68])
+inst68["contract"] = inst56["contract"]
+inst68["strategy"]["schedules"].append({
+    "device": "dev-vaatwasser", "enabled": True, "priority": "mid", "per_day": False,
+    "window": {"not_before": "08:00", "start_by": "", "done_by": "16:30"}, "days": [],
+})
+huis68 = dict(huis56)
+huis68.update({
+    VRIJ68: "off", NU68: "off",
+    "sensor.vaatwasser_status": "ready",
+    "sensor.vaatwasser_vermogen": "0",
+    "sensor.prijs": {"state": "0.25", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen56(12)}},
+})
+hass68, _, coach68 = bouw(huis68, inst68)
+async def ronde68(nu):
+    hass68.services.verstuurd.clear()
+    await hass68.afmaken()
+    await coach68._round(nu)
+    await hass68.afmaken()
+    return coach68.state.get("dev-vaatwasser") or {}, list(hass68.services.verstuurd)
+def schakel68(v, entiteit):
+    return [d[1] for d in v if d[2].get("entity_id") == entiteit]
+def knop68(v):
+    return [d for d in v if d[0] == "button"]
+
+b, v = asyncio.run(ronde68(dt.datetime(2026, 9, 12, 15, 30)))
+controle("om 15:30, voor de klaar-tijd: niets gemist", b.get("rule") == "not-released" and b.get("missed") is None
+         and b.get("later") is None, f"{b.get('missed')} {b.get('later')}")
+controle("en de coach luistert naar allebei de schakelaars", VRIJ68 in coach68._watched and NU68 in coach68._watched,
+         f"{coach68._watched}")
+b, v = asyncio.run(ronde68(dt.datetime(2026, 9, 12, 16, 33)))
+print(f"  16:33 {b.get('rule')}, gemist {b.get('missed')}, later {b.get('later')}: {b.get('reason')}")
+controle("om 16:33: 16:30 gemist, het schema schuift naar morgen, en de reden vraagt morgen of nu",
+         b.get("missed") == "2026-09-12T16:30:00" and b.get("later") == "morgen"
+         and "morgen" in (b.get("reason") or "") and "of nu" in (b.get("reason") or ""), f"{b}")
+hass68.states.zet(VRIJ68, "on")
+b, v = asyncio.run(ronde68(dt.datetime(2026, 9, 12, 16, 34)))
+print(f"  16:34 vrijgaveschakelaar aan: {b.get('rule')} {b.get('starts_at')}: {b.get('reason')}")
+controle("de vrijgaveschakelaar is morgen: hij plant morgen, zegt dat, en drukt niets",
+         b.get("rule") == "wait-for-start" and (b.get("starts_at") or "").startswith("2026-09-13")
+         and "morgen om" in (b.get("reason") or "") and not b.get("start_now") and not knop68(v), f"{b} {v}")
+# Op de kaart: toch nu starten.
+inst68["ready_now"] = ["dev-vaatwasser"]
+b, v = asyncio.run(ronde68(dt.datetime(2026, 9, 12, 16, 35)))
+print(f"  16:35 toch nu starten: {b.get('rule')}: {b.get('reason')} | {knop68(v)} | nu {schakel68(v, NU68)}")
+controle("toch nu starten op de kaart: hij drukt meteen, en de schakelaar nu starten gaat mee aan",
+         b.get("rule") == "start-now" and b.get("start_now") and b.get("charge")
+         and knop68(v) == [("button", "press", {"entity_id": "button.vaatwasser_start"})]
+         and schakel68(v, NU68) == ["turn_on"] and not schakel68(v, VRIJ68), f"{b} {v}")
+hass68.states.zet(NU68, "on")
+hass68.states.zet("sensor.vaatwasser_status", "run")
+hass68.states.zet("sensor.vaatwasser_vermogen", "2000")
+b, v = asyncio.run(ronde68(dt.datetime(2026, 9, 12, 16, 36)))
+gestart68 = [d[2]["message"] for d in v if d[0] == "notify" and "Vaatwasser" in d[2].get("message", "")]
+controle("hij draait, zegt dat hij gestart is, en de schakelaars blijven staan",
+         b.get("rule") == "running" and any("Vaatwasser is gestart" in m for m in gestart68)
+         and not schakel68(v, NU68) and not schakel68(v, VRIJ68), f"{b.get('rule')} {gestart68} {v}")
+hass68.states.zet("sensor.vaatwasser_status", "finished")
+hass68.states.zet("sensor.vaatwasser_vermogen", "0")
+b, v = asyncio.run(ronde68(dt.datetime(2026, 9, 12, 18, 30)))
+controle("na de beurt gaan de vrijgave, nu starten en allebei de schakelaars uit",
+         not inst68.get("ready_devices") and not inst68.get("ready_now")
+         and schakel68(v, VRIJ68) == ["turn_off"] and schakel68(v, NU68) == ["turn_off"],
+         f"{inst68.get('ready_devices')} {inst68.get('ready_now')} {v}")
+hass68.states.zet(VRIJ68, "off")
+hass68.states.zet(NU68, "off")
+hass68.states.zet("sensor.vaatwasser_status", "ready")
+b, v = asyncio.run(ronde68(dt.datetime(2026, 9, 12, 18, 31)))
+controle("en daarna rust", b.get("rule") == "not-released" and not knop68(v) and not schakel68(v, NU68), f"{b.get('rule')} {v}")
+# De volgende dag vanaf de keukenkaart, na de klaar-tijd: de schakelaar nu starten.
+hass68.states.zet(NU68, "on")
+b, v = asyncio.run(ronde68(dt.datetime(2026, 9, 13, 17, 0)))
+print(f"  13-09 17:00 schakelaar nu starten: {b.get('rule')} vrij {inst68.get('ready_devices')} nu {inst68.get('ready_now')} {knop68(v)}")
+controle("de schakelaar nu starten geeft vrij, kiest nu, en hij drukt",
+         inst68.get("ready_devices") == ["dev-vaatwasser"] and inst68.get("ready_now") == ["dev-vaatwasser"]
+         and b.get("rule") == "start-now" and len(knop68(v)) == 1, f"{b.get('rule')} {v}")
+b, v = asyncio.run(ronde68(dt.datetime(2026, 9, 13, 17, 1)))
+controle("een ronde later volgt de vrijgaveschakelaar, en hij drukt niet nog eens",
+         schakel68(v, VRIJ68) == ["turn_on"] and not knop68(v), f"{v}")
+# De vrijgaveschakelaar uit voordat hij draait: dan is er ook geen "nu" meer.
+hass68.states.zet(VRIJ68, "off")
+b, v = asyncio.run(ronde68(dt.datetime(2026, 9, 13, 17, 2)))
+controle("vrijgave uit voor de start: nu starten gaat eraf, en die schakelaar volgt",
+         not inst68.get("ready_devices") and not inst68.get("ready_now") and schakel68(v, NU68) == ["turn_off"],
+         f"{inst68.get('ready_devices')} {inst68.get('ready_now')} {v}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

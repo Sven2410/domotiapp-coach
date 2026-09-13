@@ -363,6 +363,11 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # it has to survive a restart (a dishwasher stays loaded) and reach every
     # open panel over the same event.
     "ready_devices": [],
+    # Welke daarvan de bewoner "nu starten" gaf in plaats van het goedkoopste
+    # moment; altijd ook in `ready_devices`. Sven op 13-09-2026: na de
+    # klaar-tijd de keuze "ingeruimd en morgen starten" of "ingeruimd en nu
+    # starten".
+    "ready_now": [],
     # Which car is hanging on which charging point right now. State rather than
     # configuration, like `ready_devices`: it changes when somebody plugs in a
     # different car, it has to survive a restart, and whoever is standing in the

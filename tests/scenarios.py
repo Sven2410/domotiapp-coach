@@ -605,6 +605,21 @@ vaatwasser_eindtijd = vaatwasser_meter_wint.kopie(
                           piek_minuten=20, eindtijd_tijdstip=True, gekozen="09:45"),
 )
 
+# Sven op 12-09-2026 om 16:33: vrijgegeven bij vanaf 08:00 en klaar om 16:30.
+# De coach plande de volgende middag en zei "hij start om 13:00"; Sven zette
+# hem zelf aan. Op 13-09: "de keuze ingeruimd en morgen starten of ingeruimd
+# en nu starten."
+vaatwasser_na_klaartijd = vaatwasser_zon.kopie(
+    naam="vaatwasser-na-klaartijd", uitleg="vast contract, zonnig, om 16:33 vrijgegeven bij vanaf 08:00 en klaar om 16:30: ingeruimd en morgen starten, dus de volgende middag op zon (dat deed hij al, alleen zei hij niet dat het morgen werd)",
+    vaatwasser_klaar_om="16:30", vaatwasser_niet_eerder="08:00",
+    begin="2026-09-07 16:25", duur_uren=24,
+    gebeurtenissen=[("16:33", "vaatwasser_vrijgeven", None)],
+)
+vaatwasser_na_klaartijd_nu = vaatwasser_na_klaartijd.kopie(
+    naam="vaatwasser-na-klaartijd-nu", uitleg="hetzelfde, maar ingeruimd en nu starten: hij start om 16:33 en is dezelfde avond klaar (oud: die keuze was er niet)",
+    gebeurtenissen=[("16:33", "vaatwasser_nu_starten", None)],
+)
+
 ALLE = [
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
@@ -622,7 +637,7 @@ ALLE = [
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,
-    vaatwasser_zonpiek, vaatwasser_eindtijd,
+    vaatwasser_zonpiek, vaatwasser_eindtijd, vaatwasser_na_klaartijd, vaatwasser_na_klaartijd_nu,
     *VAN_DEN_DAM,
 ]
 

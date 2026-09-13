@@ -75,6 +75,7 @@ from .planner import (
     timeline,
     FULL_PERCENT,
     RAMP_MINUTES,
+    _dagnaam,
     _euro,
     beschikbaar_van_bewaker,
     energy_needed_kwh,
@@ -1137,7 +1138,7 @@ class ChargerCoach:
             | {
                 entity
                 for device in programma_apparaten
-                for sleutel in ("release_switch", "status")
+                for sleutel in ("release_switch", "release_now_switch", "status")
                 if (entity := (device.get("entities") or {}).get(sleutel))
             }
             | self._watched_phases
@@ -1237,6 +1238,9 @@ class ChargerCoach:
         # beweegt de knop op de kaart, dan volgt de schakelaar; en na een
         # beurt gaan ze allebei uit.
         released = await self._async_schakelaar_volgen(settings, device, sessie, released)
+        # En "ingeruimd en nu starten", op de kaart of met een eigen schakelaar
+        # (Sven, 13-09-2026).
+        released, nu_starten = await self._async_nu_volgen(settings, device, sessie, released)
         # Wat erop staat: de sensor, of anders de select-entiteit waarmee het
         # gezet wordt (Home Connect heeft ze allebei; Sven heeft de sensor).
         programma_entiteit = entities.get("program") or entities.get("program_select")
@@ -1276,7 +1280,7 @@ class ChargerCoach:
         window = resolve_window(now, self._days(settings, device))
         apparaat = Apparaat(
             status=status, released=released, program=programma, door_open=deur_open,
-            manual=handmatig,
+            manual=handmatig, start_now=nu_starten,
         )
         decision = plan_programma(
             now, self._prices(settings), self._tariff(settings),
@@ -1383,6 +1387,11 @@ class ChargerCoach:
             "started_at": sessie["gestart"].isoformat() if sessie["gestart"] else None,
             "ends_at": eind.isoformat() if draait and eind is not None else None,
             "released": released,
+            "start_now": nu_starten,
+            # De klaar-tijd van vandaag als die voorbij is, en de dag waar het
+            # schema dan naar opschuift: de kaart vraagt dan morgen of nu.
+            "missed": window.missed.isoformat() if window.missed is not None and window.deadline is not None else None,
+            "later": _dagnaam(window.deadline, now) if window.missed is not None and window.deadline is not None else None,
             "manual": handmatig,
             "program": programma.key if programma is not None else "",
             "tip": "",
@@ -1672,6 +1681,7 @@ class ChargerCoach:
         # een nieuwe.
         await self._async_vrijgave_zetten(settings, device.get("id", ""), False)
         await self._async_schakelen(device, False)
+        await self._async_schakelen(device, False, "release_now_switch")
         self._programma[device.get("id", "")] = {**self._lege_programma_sessie(now), "gezien": True}
 
     def _programma_regel(
@@ -2020,25 +2030,37 @@ class ChargerCoach:
 
         return prijs_op
 
-    async def _async_vrijgave_zetten(self, settings: dict[str, Any], device_id: str, aan: bool) -> None:
-        """De vrijgave van één apparaat aan of uit, in de opslag en op de eventbus."""
+    async def _async_vrijgave_zetten(
+        self, settings: dict[str, Any], device_id: str, aan: bool, nu: bool | None = None
+    ) -> None:
+        """De vrijgave van één apparaat aan of uit, in de opslag en op de eventbus.
+
+        `nu` zet "ingeruimd en nu starten" aan of uit; None laat dat staan.
+        Zonder vrijgave is er geen "nu starten".
+        """
+        was_nu = device_id in (settings.get("ready_now") or [])
         ready = [d for d in (settings.get("ready_devices") or []) if d != device_id]
+        snel = [d for d in (settings.get("ready_now") or []) if d != device_id]
         if aan:
             ready.append(device_id)
-        if sorted(ready) == sorted(settings.get("ready_devices") or []):
+            if nu or (nu is None and was_nu):
+                snel.append(device_id)
+        nieuw = {"ready_devices": sorted(ready), "ready_now": sorted(snel)}
+        if (nieuw["ready_devices"] == sorted(settings.get("ready_devices") or [])
+                and nieuw["ready_now"] == sorted(settings.get("ready_now") or [])):
             return
         try:
-            saved = await async_get_store(self.hass).async_save({"ready_devices": sorted(ready)})
+            saved = await async_get_store(self.hass).async_save(nieuw)
             # Ook in de instellingen van deze ronde, zodat de rest van de ronde
             # met de nieuwe stand rekent.
-            settings["ready_devices"] = sorted(ready)
+            settings.update(nieuw)
             self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
         except Exception:  # noqa: BLE001 - een vrijgave die blijft staan is geen reden om te stoppen
             _LOGGER.exception("kon de vrijgave van %s niet zetten", device_id)
 
-    async def _async_schakelen(self, device: dict[str, Any], aan: bool) -> None:
-        """De vrijgaveschakelaar aan of uit zetten, als er een is en hij anders staat."""
-        entity_id = (device.get("entities") or {}).get("release_switch")
+    async def _async_schakelen(self, device: dict[str, Any], aan: bool, sleutel: str = "release_switch") -> None:
+        """De vrijgaveschakelaar (of die van nu starten) aan of uit zetten, als er een is en hij anders staat."""
+        entity_id = (device.get("entities") or {}).get(sleutel)
         if not entity_id:
             return
         stand = _text(self.hass, entity_id).strip().lower()
@@ -2092,6 +2114,44 @@ class ChargerCoach:
         sessie["schakelaar"] = stand
         sessie["vrij_vorig"] = released
         return released
+
+    async def _async_nu_volgen(
+        self, settings: dict[str, Any], device: dict[str, Any], sessie: dict[str, Any], released: bool
+    ) -> tuple[bool, bool]:
+        """De schakelaar "nu starten" en die keuze op de kaart gelijk houden; geeft (vrijgave, nu).
+
+        Sven op 13-09-2026: na de klaar-tijd de keuze "ingeruimd en morgen
+        starten" of "ingeruimd en nu starten", en vanaf de keukenkaart met een
+        tweede schakelaar. Dezelfde afspraak als de vrijgaveschakelaar: wie het
+        laatst bewoog wint, en bij de eerste ronde wint aan. Aan is ingeruimd
+        én nu, dus de vrijgave gaat mee aan; uit voordat hij draait haalt
+        alleen "nu" eraf, ingeruimd blijft hij.
+        """
+        device_id = device.get("id", "")
+        nu = released and device_id in (settings.get("ready_now") or [])
+        entity_id = (device.get("entities") or {}).get("release_now_switch")
+        if not entity_id:
+            return released, nu
+        tekst = _text(self.hass, entity_id).strip().lower()
+        stand = True if tekst == "on" else False if tekst == "off" else None
+        if stand is None:
+            return released, nu
+        vorige_stand = sessie.get("nu_schakelaar")
+        vorige_nu = sessie.get("nu_vorig")
+        if vorige_stand is None or stand != vorige_stand:
+            if stand and not nu:
+                await self._async_vrijgave_zetten(settings, device_id, True, nu=True)
+                released = nu = True
+            elif vorige_stand is not None and not stand and nu and sessie.get("gestart") is None:
+                await self._async_vrijgave_zetten(settings, device_id, True, nu=False)
+                nu = False
+        elif vorige_nu is not None and nu != vorige_nu and nu != stand:
+            # De keuze op de kaart bewoog: de schakelaar volgt.
+            await self._async_schakelen(device, nu, "release_now_switch")
+            stand = nu
+        sessie["nu_schakelaar"] = stand
+        sessie["nu_vorig"] = nu
+        return released, nu
 
     async def _async_meting_bewaren(
         self,

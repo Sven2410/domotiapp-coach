@@ -2085,7 +2085,7 @@ d_nu = planner.plan_programma(dt.datetime(2026, 9, 8, 1, 0), prijzen50(7), Tarif
 d_krap = planner.plan_programma(dt.datetime(2026, 9, 8, 3, 30), prijzen50(7), Tariff(), Forecast(), venster50, dom)
 print(f"  dom: {d_wacht.reason} | {d_nu.reason} | {d_krap.reason}")
 controle("zonder startknop zegt hij 'zet hem aan' in plaats van 'hij start'",
-         d_wacht.reason.startswith("Zet hem aan om 01:00") and d_nu.reason.startswith("Zet hem nu aan")
+         d_wacht.reason.startswith("Zet hem aan morgen om 01:00") and d_nu.reason.startswith("Zet hem nu aan")
          and "zet hem meteen aan" in d_krap.reason and "hij start" not in (d_wacht.reason + d_nu.reason + d_krap.reason), "")
 controle("en de regels zijn dezelfde als met een knop",
          (d_wacht.rule, d_nu.rule, d_krap.rule) == ("wait-for-start", "cheapest-start", "deadline"), "")
@@ -2130,6 +2130,66 @@ controle("om 22:00 wacht een rustig huis op de nacht; het drukke huis laadt al, 
          not d_stil.charge and d_druk.charge and d_druk.rule == "cheap-hour", f"{d_stil.rule} | {d_druk.rule}")
 controle("om 23:00 past het op 9 A niet meer met een uur speling: de klaar-tijdregel, met de meting in de reden",
          d_laat.charge and d_laat.rule == "deadline" and "gemiddeld 9 A" in d_laat.reason, f"{d_laat.rule}: {d_laat.reason}")
+
+from dataclasses import replace  # noqa: E402
+
+print("=== 52. na de klaar-tijd: morgen starten of nu starten (12 en 13-09-2026) ===")
+# Sven gaf de vaatwasser op 12-09-2026 om 16:33 vrij, bij vanaf 08:00 en klaar
+# om 16:30. De coach plande de volgende middag en zei "hij start om 13:00", en
+# "nu starten" was de prijs van 08:00 de volgende ochtend; Sven zette hem zelf
+# aan. Op 13-09: "de keuze ingeruimd en morgen starten of ingeruimd en nu
+# starten."
+dagen52 = {d: planner.DayWindow(not_before=dt.time(8, 0), done_by=dt.time(16, 30)) for d in range(7)}
+voor52 = planner.resolve_window(dt.datetime(2026, 9, 13, 15, 30), dagen52)
+na52 = planner.resolve_window(dt.datetime(2026, 9, 12, 16, 33), dagen52)
+controle("om 15:30 is er niets gemist en is de klaar-tijd vandaag",
+         voor52.missed is None and voor52.deadline == dt.datetime(2026, 9, 13, 16, 30), f"{voor52}")
+controle("om 16:33 is 16:30 van vandaag gemist, en het venster is morgen van 08:00 tot 16:30",
+         na52.missed == dt.datetime(2026, 9, 12, 16, 30) and na52.opens == dt.datetime(2026, 9, 13, 8, 0)
+         and na52.deadline == dt.datetime(2026, 9, 13, 16, 30), f"{na52}")
+express52 = planner.programma_van("dishcare_dishwasher_program_kurz_60")
+vrij52 = planner.Apparaat(status="ready", released=True, program=express52)
+# Een beetje zon nu, veel zon morgen rond het middaguur, niets om 08:00.
+zon52 = Forecast(solar_kwh={dt.datetime(2026, 9, 12, 16, 0): 0.6,
+                            **{dt.datetime(2026, 9, 13, 11, 0) + dt.timedelta(hours=i): 3.0 for i in range(4)}},
+                 house_kwh={})
+vast52 = Tariff(buy=0.24, feed_in=0.07)
+nu52 = dt.datetime(2026, 9, 12, 16, 33)
+d52 = planner.plan_programma(nu52, [], vast52, zon52, na52, vrij52)
+print(f"  16:33 vrijgegeven: {d52.rule} {d52.starts_at}  {d52.reason} | {d52.plan}")
+controle("om 16:33 vrijgegeven: hij plant morgen, en zegt dat met zoveel woorden",
+         d52.rule == "wait-for-start" and (d52.starts_at or "").startswith("2026-09-13T1")
+         and d52.reason.startswith("16:30 is vandaag voorbij, dus hij start morgen om ")
+         and d52.plan.startswith("Klaar rond morgen ") and "nu starten" in d52.plan, f"{d52}")
+echt_nu52 = planner.programma_kosten(nu52, express52, [], vast52, zon52, now=nu52)
+morgen_acht52 = planner.programma_kosten(dt.datetime(2026, 9, 13, 8, 0), express52, [], vast52, zon52, now=nu52)
+print(f"  nu starten {echt_nu52:.4f}, morgen 08:00 {morgen_acht52:.4f}")
+controle("'nu starten zou' is de prijs van nu, niet van morgen 08:00",
+         round(echt_nu52, 2) != round(morgen_acht52, 2)
+         and f"Nu starten zou ongeveer {planner._euro(echt_nu52)} kosten" in d52.reason, d52.reason)
+hand52 = planner.plan_programma(nu52, [], vast52, zon52, na52, replace(vrij52, manual=True))
+controle("zonder startknop: zet hem aan morgen om",
+         hand52.reason.startswith("16:30 is vandaag voorbij, dus zet hem aan morgen om "), hand52.reason)
+wacht52 = planner.plan_programma(nu52, [], vast52, zon52, na52, replace(vrij52, released=False))
+controle("nog niet vrijgegeven na de klaar-tijd: hij vraagt morgen of nu",
+         wacht52.rule == "not-released" and "16:30 is vandaag voorbij" in wacht52.reason
+         and "morgen" in wacht52.reason and "of nu" in wacht52.reason, wacht52.reason)
+ochtend52 = planner.plan_programma(dt.datetime(2026, 9, 13, 8, 0), [], vast52, zon52,
+                                   planner.resolve_window(dt.datetime(2026, 9, 13, 8, 0), dagen52), vrij52)
+controle("voor de klaar-tijd blijft het zoals het was: geen 'morgen', geen 'voorbij'",
+         ochtend52.reason.startswith("Hij start om 1") and "voorbij" not in ochtend52.reason
+         and "morgen" not in ochtend52.plan, f"{ochtend52.reason} | {ochtend52.plan}")
+avond52 = dt.datetime(2026, 9, 12, 18, 30)
+nu_start52 = planner.plan_programma(avond52, [], vast52, zon52, planner.resolve_window(avond52, dagen52),
+                                    replace(vrij52, start_now=True))
+controle("ingeruimd en nu starten: meteen, ook in de avondpiek",
+         nu_start52.charge and nu_start52.rule == "start-now" and nu_start52.plan.startswith("Klaar rond "), f"{nu_start52}")
+controle("zonder startknop: zet hem nu aan",
+         planner.plan_programma(avond52, [], vast52, zon52, planner.resolve_window(avond52, dagen52),
+                                replace(vrij52, start_now=True, manual=True)).reason.startswith("Zet hem nu aan"), "")
+controle("nu starten zonder vrijgave is geen vrijgave",
+         planner.plan_programma(avond52, [], vast52, zon52, na52, replace(vrij52, released=False, start_now=True)).rule
+         == "not-released", "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

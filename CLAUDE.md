@@ -338,6 +338,28 @@ ging), proef 66 en 67 in test_coach.py. Het virtuele huis kent daarvoor
 `Vaatwasser.eindtijd_tijdstip` (een eindtijd die al bij het kiezen staat en
 pas een minuut na de start klopt).
 
+**Na de klaar-tijd: morgen of nu** (v0.63.0). Sven gaf de vaatwasser op
+12-09-2026 om 16:33 vrij, bij vanaf 08:00 en klaar om 16:30. De coach plande
+de volgende middag, zei "hij start om 13:00" zonder "morgen", en noemde bij
+"nu starten" de prijs van 08:00 de volgende ochtend; Sven zette hem zelf aan.
+Op 13-09: "ik wil dat er een optie bijkomt als hij na de klaartijd is. Dan de
+keuze ingeruimd en morgen starten of ingeruimd en nu starten." Sindsdien geeft
+`resolve_window` de klaar-tijd van vandaag mee als die voorbij is
+(`Window.missed`), en staan er dan twee knoppen op de kaart: "Ingeruimd,
+morgen starten" (de gewone vrijgave, het schema van de volgende dag; `later`
+in het besluit zegt welke dag) en "Ingeruimd, nu starten" (`ready_now` in de
+instellingen, `Apparaat.start_now`, regel `start-now`: meteen, ook in de
+avondpiek, net als snelladen). Na een vrijgave voor morgen blijft "Toch nu
+starten" staan. Voor de keukenkaart een tweede schakelaar, `release_now_switch`
+(`_async_nu_volgen` in coach.py, keuze van Sven): aan is ingeruimd én nu, uit
+voordat hij draait haalt alleen "nu" eraf, de vrijgave uit haalt ook "nu"
+eraf, en na de beurt gaan beide schakelaars uit. De teksten van een programma
+zeggen "morgen om" (`_dag_om`, `_dag_klok` in planner.py), en "nu starten zou"
+rekent met echt nu. Vóór de klaar-tijd verandert er niets. Proef 52 in
+test_planner.py, proef 68 in test_coach.py, scenario's
+`vaatwasser-na-klaartijd` (morgen 09:00 op zon, zoals het al ging) en
+`vaatwasser-na-klaartijd-nu` (16:34, oud: die keuze was er niet).
+
 ## Hoe het in elkaar zit
 
 | bestand | wat het doet |
@@ -379,11 +401,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 298 controles op het denkwerk
-python tests/test_coach.py       # 355 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1303 op hele laadbeurten in het virtuele huis
+python tests/test_planner.py     # 308 controles op het denkwerk
+python tests/test_coach.py       # 366 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1320 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 35 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 39 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

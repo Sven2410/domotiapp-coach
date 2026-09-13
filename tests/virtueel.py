@@ -1166,6 +1166,14 @@ class Wereld:
                 self.vaatwasser.status = "ready"
                 self.vaatwasser.gestart_op = None
             return "de bewoner geeft de vaatwasser vrij: ingeruimd en dicht"
+        if actie == "vaatwasser_nu_starten":
+            # "Ingeruimd en nu starten" (Sven, 13-09-2026).
+            for sleutel in ("ready_devices", "ready_now"):
+                inst[sleutel] = sorted(set(inst.get(sleutel) or []) | {"vaatwasser"})
+            if self.vaatwasser is not None and self.vaatwasser.status == "finished":
+                self.vaatwasser.status = "ready"
+                self.vaatwasser.gestart_op = None
+            return "de bewoner geeft de vaatwasser vrij: ingeruimd en nu starten"
         if actie == "vaatwasser_deur":
             self.vaatwasser.deur_open = bool(arg)
             return "de deur van de vaatwasser gaat " + ("open" if arg else "dicht")

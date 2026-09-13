@@ -300,6 +300,7 @@ _SETTINGS = _schema(
         ),
         vol.Optional("devices"): [_DEVICE],
         vol.Optional("ready_devices"): [str],
+        vol.Optional("ready_now"): [str],
         vol.Optional("active_cars"): [
             _schema({vol.Required("device"): str, vol.Required("car"): str})
         ],
@@ -435,6 +436,8 @@ async def async_set_settings(
         vol.Required("type"): "domotiapp_coach/device/ready",
         vol.Required("device_id"): str,
         vol.Required("ready"): bool,
+        # "Ingeruimd en nu starten" in plaats van het goedkoopste moment.
+        vol.Optional("now"): bool,
     }
 )
 @websocket_api.async_response
@@ -458,12 +461,18 @@ async def async_set_device_ready(
     settings = await store.async_load()
 
     ready = set(settings.get("ready_devices") or [])
+    now = set(settings.get("ready_now") or [])
     if msg["ready"]:
         ready.add(msg["device_id"])
+        if msg.get("now"):
+            now.add(msg["device_id"])
+        elif "now" in msg:
+            now.discard(msg["device_id"])
     else:
         ready.discard(msg["device_id"])
+        now.discard(msg["device_id"])
 
-    settings = await store.async_save({"ready_devices": sorted(ready)})
+    settings = await store.async_save({"ready_devices": sorted(ready), "ready_now": sorted(now & ready)})
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
     connection.send_result(msg["id"], settings)
 
