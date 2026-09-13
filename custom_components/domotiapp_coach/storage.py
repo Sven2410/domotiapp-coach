@@ -144,6 +144,7 @@ def _forget_removed_devices(data: dict[str, Any]) -> dict[str, Any]:
     known = {device.get("id") for device in data.get("devices", []) if isinstance(device, dict)}
 
     data["ready_devices"] = [item for item in data.get("ready_devices", []) if item in known]
+    data["ready_now"] = [item for item in data.get("ready_now", []) if item in data["ready_devices"]]
 
     # Hetzelfde geldt voor wat er per laadpunt over de lopende sessie bewaard
     # is: welke auto eraan hangt, wat de bewoner over de accustand zei en welke
