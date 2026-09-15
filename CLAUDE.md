@@ -338,6 +338,24 @@ ging), proef 66 en 67 in test_coach.py. Het virtuele huis kent daarvoor
 `Vaatwasser.eindtijd_tijdstip` (een eindtijd die al bij het kiezen staat en
 pas een minuut na de start klopt).
 
+**Een eindtijd telt pas als hij stilstaat** (v0.64.0). Sven thuis op
+15-09-2026: om 09:33 vrijgegeven, om 10:11 startte de coach op de meter, en
+de melding zei "klaar rond 11:33" terwijl hij om 11:45 klaar was. Deze keer
+was het geen eindtijd van het kiezen: Home Connect zette hem om 10:11:56,
+een seconde voor Run, en rekende hem om 10:13:02 opnieuw uit op 11:41. De
+melding ging om 10:12:53, negen seconden voor die correctie. Sinds die dag
+gelooft de coach een eindtijd pas als hij hem twee ronden achter elkaar
+ongeveer hetzelfde zag (`_eindtijd_vast` in coach.py, `EINDTIJD_SPELING`);
+ongeveer, want de sensor wiebelt een minuut heen en weer (11:41:02 en
+11:42:02 om de minuut). Tot dan blijft staan wat er al geloofd werd, dus een
+eindtijd die verspringt verdwijnt niet van de kaart. `EINDTIJD_WACHT` ging
+van twee naar vier minuten: twee ronden zijn er nodig en de eerste waarde
+komt soms pas een ronde na de start. De melding komt daarmee een tot twee
+minuten later dan vroeger. Scenario `vaatwasser-eindtijd-bijstellen` (oud:
+10:21 "klaar rond 11:09"; nieuw: 10:23 "klaar rond 11:21", en dat werd het),
+`Vaatwasser.eindtijd_eerst_min` in het virtuele huis, proef 66 in
+test_coach.py.
+
 **Na de klaar-tijd: morgen of nu** (v0.63.0). Sven gaf de vaatwasser op
 12-09-2026 om 16:33 vrij, bij vanaf 08:00 en klaar om 16:30. De coach plande
 de volgende middag, zei "hij start om 13:00" zonder "morgen", en noemde bij

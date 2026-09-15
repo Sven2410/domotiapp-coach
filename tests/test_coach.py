@@ -3060,11 +3060,14 @@ hass62.states.zet("sensor.vaatwasser_vermogen", "2000")
 hass62.states.zet("sensor.vaatwasser_rest", "2026-09-08T04:47:00+02:00")
 b, m = asyncio.run(ronde62(coach62, dt.datetime(2026, 9, 8, 1, 2)))
 print(f"  gestart: {m}  reden: {b.get('reason')}  ends_at {b.get('ends_at')}")
+controle("in de ronde van de start wacht de melding tot de eindtijd stilstaat", m == [], f"{m}")
+b, m = asyncio.run(ronde62(coach62, dt.datetime(2026, 9, 8, 1, 3)))
+print(f"  een ronde later: {m}  reden: {b.get('reason')}  ends_at {b.get('ends_at')}")
 controle("de melding 'is gestart' neemt de eindtijd van het apparaat, niet de tabel",
          m == ["Vaatwasser is gestart (Eco 50 °C), klaar rond 04:47."], f"{m}")
 controle("en op de kaart staat hij ook", b.get("reason") == "Hij draait, klaar rond 04:47." and (b.get("ends_at") or "").endswith("T04:47:00"),
          f"{b.get('reason')} {b.get('ends_at')}")
-for minuut in range(3, 58):
+for minuut in range(4, 58):
     asyncio.run(ronde62(coach62, dt.datetime(2026, 9, 8, 1, minuut)))
 open62 = [b for b in beurten62() if not b.get("complete")]
 print(f"  open in de opslag: {[(b['started'], b['ended'], b['kwh'], sorted(b.get('session', {}).keys())) for b in open62]}")
@@ -3339,12 +3342,17 @@ asyncio.run(ronde(coach65, laat, dt.datetime(2026, 9, 9, 13, 51)))
 controle("kabel eruit: de meting is weg, want hij hoort bij de beurt",
          coach65._plafond_gemeten("dev-laadpaal", dt.datetime(2026, 9, 9, 13, 51)) is None, "")
 
-print("=== 66. de eindtijd van het apparaat telt pas als hij bij deze beurt hoort ===")
-# Sven thuis op 11-09-2026: om 09:01 het programma gekozen, en Home Connect zet
-# de eindtijd dan al (10:56); om 09:36 gestart, en de melding zei "klaar rond
-# 10:56". Om 09:37:05 rekende Home Connect hem opnieuw uit: 11:31. Een eindtijd
-# die voor de start gezet is telt niet, en de melding wacht er hooguit
-# `EINDTIJD_WACHT` op.
+print("=== 66. de eindtijd van het apparaat telt pas als hij bij de beurt hoort en stilstaat ===")
+# Twee keer misging het met dezelfde melding. Sven thuis op 11-09-2026: om 09:01
+# het programma gekozen, en Home Connect zet de eindtijd dan al (10:56); om
+# 09:36 gestart, en de melding zei "klaar rond 10:56", terwijl hij om 11:28
+# klaar was. Een eindtijd die voor de start gezet is telt daarom niet
+# (`EINDTIJD_MARGE`). En op 15-09-2026: Run om 10:11:57, om 10:11:56 zette Home
+# Connect 11:33 en om 10:13:02 rekende hij hem opnieuw uit op 11:41; de melding
+# van 10:12:53 zei "klaar rond 11:33" en klaar was hij om 11:45. Een eindtijd
+# telt dus ook pas als hij stilstaat: twee ronden achter elkaar ongeveer
+# hetzelfde (`EINDTIJD_SPELING`). De melding wacht op allebei, hooguit
+# `EINDTIJD_WACHT`.
 hass66 = NepHass({})
 hass66.states.zet("sensor.rest", "2026-09-08T04:15:00", last_updated=dt.datetime(2026, 9, 8, 0, 30))
 start66 = dt.datetime(2026, 9, 8, 1, 2)
@@ -3357,12 +3365,33 @@ hass66.states.zet("sensor.rest", "2026-09-08T04:47:00", last_updated=dt.datetime
 e66 = coachmod._eindtijd(hass66, "sensor.rest", start66, sinds=sinds66)
 controle("een eindtijd die binnen de marge van de start gezet is telt wel", e66 == dt.datetime(2026, 9, 8, 4, 47), f"{e66}")
 
+# `_eindtijd_vast` op zichzelf: wat er nodig is voor de coach hem gelooft.
+def vast66(waarden):
+    """De reeks antwoorden op een reeks metingen, vanaf een schone sessie."""
+    sessie = {}
+    return [coachmod._eindtijd_vast(sessie, w) for w in waarden]
 
-def beurt66(bijwerken):
+u66 = vast66([dt.datetime(2026, 9, 8, 4, 40), dt.datetime(2026, 9, 8, 4, 48),
+              dt.datetime(2026, 9, 8, 4, 48), dt.datetime(2026, 9, 8, 4, 49)])
+print(f"  11:33 dan 11:41 dan 11:41 dan het gewiebel: {[None if x is None else f'{x:%H:%M}' for x in u66]}")
+controle("een eerste waarde telt nog niet, en een waarde die verspringt ook niet",
+         u66[0] is None and u66[1] is None, f"{u66}")
+controle("twee ronden hetzelfde: dan telt hij", u66[2] == dt.datetime(2026, 9, 8, 4, 48), f"{u66}")
+controle("een minuut gewiebel blijft binnen de speling en telt gewoon mee",
+         u66[3] == dt.datetime(2026, 9, 8, 4, 49), f"{u66}")
+w66 = vast66([dt.datetime(2026, 9, 8, 4, 48), dt.datetime(2026, 9, 8, 4, 48),
+              dt.datetime(2026, 9, 8, 4, 56), None, dt.datetime(2026, 9, 8, 4, 56)])
+controle("een echte herberekening telt pas als hij een ronde later blijft staan",
+         w66[2] == dt.datetime(2026, 9, 8, 4, 48) and w66[4] == dt.datetime(2026, 9, 8, 4, 56), f"{w66}")
+controle("een sensor die even wegvalt laat staan wat er geloofd werd",
+         w66[3] == dt.datetime(2026, 9, 8, 4, 48), f"{w66}")
+
+
+def beurt66(wijzigingen, minuten=(2, 3, 4, 5, 6)):
     """Een beurt waarin Home Connect de eindtijd om 00:30 zette, bij het kiezen.
 
-    Met `bijwerken` rekent hij hem een minuut na de start opnieuw uit, zoals
-    bij Sven; zonder blijft de oude staan.
+    `wijzigingen` is wat de sensor per minuut gaat zeggen: de minuut na de
+    hele uur, de nieuwe waarde, en wanneer die gezet werd.
     """
     inst = instellingen(devices=[LAADPAAL, VW62])
     inst["contract"] = inst56["contract"]
@@ -3389,27 +3418,41 @@ def beurt66(bijwerken):
     hass.states.zet("sensor.vaatwasser_status", "run")
     hass.states.zet("sensor.vaatwasser_vermogen", "2000")
     uit = []
-    for minuut in (2, 3, 4):
-        if bijwerken and minuut == 3:
-            hass.states.zet("sensor.vaatwasser_rest", "2026-09-08T04:48:00", last_updated=dt.datetime(2026, 9, 8, 1, 2, 40))
+    for minuut in minuten:
+        if minuut in wijzigingen:
+            waarde, gezet = wijzigingen[minuut]
+            hass.states.zet("sensor.vaatwasser_rest", waarde, last_updated=gezet)
         b, m = asyncio.run(ronde(dt.datetime(2026, 9, 8, 1, minuut)))
-        print(f"  {'bijgewerkt' if bijwerken else 'blijft oud'} 01:0{minuut}: {m}  kaart: {b.get('reason')}  ends_at {b.get('ends_at')}")
+        print(f"  01:0{minuut}: {m}  kaart: {b.get('reason')}  ends_at {b.get('ends_at')}")
         uit.append((b, m))
     return uit
 
 
-b66 = beurt66(True)
+# Zoals het op 15-09 ging: bij de start een eindtijd die er acht minuten naast
+# zit, een minuut later de goede.
+print("  -- Home Connect rekent hem een minuut na de start opnieuw uit --")
+b66 = beurt66({3: ("2026-09-08T04:40:00", dt.datetime(2026, 9, 8, 1, 2, 40)),
+               4: ("2026-09-08T04:48:00", dt.datetime(2026, 9, 8, 1, 3, 10)),
+               5: ("2026-09-08T04:48:00", dt.datetime(2026, 9, 8, 1, 3, 10))})
 controle("in de ronde van de start geen melding: de eindtijd is nog die van het kiezen",
          b66[0][1] == [] and b66[0][0].get("ends_at") is None and b66[0][0].get("reason") == "Hij draait.",
          f"{b66[0]}")
-controle("zodra Home Connect hem opnieuw uitrekent de melding, met de eindtijd van de beurt",
-         b66[1][1] == ["Vaatwasser is gestart (Eco 50 °C), klaar rond 04:48."]
-         and b66[1][0].get("reason") == "Hij draait, klaar rond 04:48.", f"{b66[1]}")
-controle("en niet nog eens", b66[2][1] == [], f"{b66[2][1]}")
-n66 = beurt66(False)
-controle("rekent hij hem niet opnieuw uit, dan na twee minuten de duur uit de tabel, en niet 04:15",
-         n66[0][1] == [] and n66[1][1] == [] and n66[2][1] == ["Vaatwasser is gestart (Eco 50 °C), klaar rond 04:47."],
-         f"{[m for _, m in n66]}")
+controle("en ook niet op de eerste waarde van na de start, want die staat nog niet stil",
+         b66[1][1] == [] and b66[1][0].get("ends_at") is None, f"{b66[1]}")
+controle("staat hij twee ronden stil, dan de melding met die eindtijd en niet met de eerste",
+         b66[3][1] == ["Vaatwasser is gestart (Eco 50 °C), klaar rond 04:48."]
+         and b66[3][0].get("reason") == "Hij draait, klaar rond 04:48.", f"{b66[3]}")
+controle("en niet nog eens", b66[4][1] == [], f"{b66[4][1]}")
+controle("de eindtijd die er acht minuten naast zat komt nergens voor",
+         not any("04:40" in m for _, ms in b66 for m in ms), f"{[ms for _, ms in b66]}")
+
+# Zoals het op 11-09 ging: hij rekent hem helemaal niet opnieuw uit.
+print("  -- hij rekent hem niet opnieuw uit --")
+n66 = beurt66({})
+controle("dan geen melding zolang de coach wacht, en niet met de eindtijd van het kiezen",
+         [m for _, m in n66[:4]] == [[], [], [], []], f"{[m for _, m in n66]}")
+controle("en na EINDTIJD_WACHT de duur uit de tabel, en niet 04:15",
+         n66[4][1] == ["Vaatwasser is gestart (Eco 50 °C), klaar rond 04:47."], f"{n66[4][1]}")
 controle("en op de kaart geen eindtijd die niet bij de beurt hoort",
          all(b.get("ends_at") is None for b, _ in n66), f"{[b.get('ends_at') for b, _ in n66]}")
 

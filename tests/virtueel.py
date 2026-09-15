@@ -394,6 +394,11 @@ class Vaatwasser:
     eindtijd_tijdstip: bool = False
     gekozen: str | None = None      # "HH:MM" op de eerste dag; None is het begin van de proef
     eindtijd_na_min: int = 1
+    # De eindtijd die hij meteen bij de start neerzet, als duur in minuten:
+    # wel van na de start, maar nog niet de goede. Bij Sven op 15-09-2026 gaf
+    # Home Connect bij Run 11:33 en een minuut later 11:41; klaar was hij om
+    # 11:45. None: bij de start blijft de eindtijd van het kiezen staan.
+    eindtijd_eerst_min: int | None = None
     # Een domme vaatwasser op een meetstekker (merk "overig"): geen status,
     # geen programma, geen knop; alleen het vermogen. De coach zegt wanneer
     # en de bewoner drukt zelf, zoveel minuten later. None: hij doet het niet.
@@ -450,6 +455,8 @@ class Vaatwasser:
         if self.status == "run" and self.gestart_op is not None \
                 and nu - self.gestart_op >= dt.timedelta(minutes=self.eindtijd_na_min):
             return self.gestart_op + dt.timedelta(minutes=self.minuten)
+        if self.status == "run" and self.gestart_op is not None and self.eindtijd_eerst_min is not None:
+            return self.gestart_op + dt.timedelta(minutes=self.eindtijd_eerst_min)
         return gekozen_op + dt.timedelta(minutes=self.minuten)
 
 

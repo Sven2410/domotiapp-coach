@@ -246,8 +246,22 @@ METER_DEKKING = timedelta(minutes=8)
 # start gezet is, telt niet; de marge omdat de coach de start soms een ronde
 # later ziet dan hij gebeurde. De melding "is gestart" wacht er hooguit
 # EINDTIJD_WACHT op, en neemt daarna de duur uit de tabel.
+#
+# En hij telt pas als hij stilstaat. Een eindtijd van ná de start kan nog
+# steeds de verkeerde zijn: bij Sven op 15-09-2026 gaf Home Connect om
+# 10:11:56 (Run om 10:11:57) eerst 11:33, om 10:13:02 acht minuten later
+# 11:41, en klaar was hij om 11:45. De melding van 10:12:53 zat er twaalf
+# minuten naast, negen seconden voor de correctie. Een eindtijd telt daarom
+# pas als de coach hem twee ronden achter elkaar ongeveer hetzelfde zag,
+# want dan is het apparaat klaar met rekenen. Ongeveer, want de sensor
+# wiebelt een minuut heen en weer (11:41:02 en 11:42:02 om de minuut);
+# EINDTIJD_SPELING is ruimer dan dat gewiebel en krapper dan een echte
+# herberekening. EINDTIJD_WACHT ging daarvoor van twee naar vier minuten: er
+# zijn twee ronden nodig om stil te staan, en de eerste waarde komt soms pas
+# een ronde na de start.
 EINDTIJD_MARGE = timedelta(minutes=2)
-EINDTIJD_WACHT = timedelta(minutes=2)
+EINDTIJD_WACHT = timedelta(minutes=4)
+EINDTIJD_SPELING = timedelta(minutes=2)
 # Een meting weegt mee als lopend gemiddelde over zoveel beurten; daarna
 # blijft hij even zwaar tellen, zodat een machine die ouder wordt bijblijft.
 METING_MAX_N = 5
@@ -493,6 +507,28 @@ def _eindtijd(
     if seconden < 0:
         return None
     return now + timedelta(seconds=seconden)
+
+
+def _eindtijd_vast(sessie: dict[str, Any], rauw: datetime | None) -> datetime | None:
+    """De eindtijd zoals de coach hem gelooft: pas als hij stilstaat.
+
+    Een apparaat rekent zijn eindtijd nog even door nadat het begonnen is.
+    Bij Sven op 15-09-2026 zei Home Connect bij de start 11:33 en een minuut
+    later 11:41; klaar was hij om 11:45. Een nieuwe waarde telt daarom pas
+    als de volgende ronde er ongeveer hetzelfde staat (`EINDTIJD_SPELING`,
+    ruimer dan het gewiebel van een minuut dat die sensor vertoont).
+
+    Tot die tijd blijft staan wat er al geloofd werd, want een eindtijd die
+    verspringt hoort niet van de kaart te verdwijnen. Zonder waarde blijft
+    het laatste antwoord ook staan: een sensor die even wegvalt zegt niet
+    dat het apparaat niet meer weet wanneer hij klaar is.
+    """
+    if rauw is not None:
+        vorig = sessie.get("eind_gezien")
+        if vorig is not None and abs(rauw - vorig) <= EINDTIJD_SPELING:
+            sessie["eind"] = rauw
+        sessie["eind_gezien"] = rauw
+    return sessie.get("eind")
 
 
 def _wanneer(now: datetime, moment: datetime) -> str:
@@ -1272,7 +1308,7 @@ class ChargerCoach:
             # Vrijgave ingetrokken voor er iets gebeurde: schone lei.
             self._programma[device_id] = {**sessie, "vrijgegeven": None, "gedrukt": None,
                                           "pogingen": 0, "gemeld": set(), "programma": None,
-                                          "gevraagd": None}
+                                          "gevraagd": None, "eind": None, "eind_gezien": None}
             sessie = self._programma[device_id]
         if programma is not None:
             sessie["programma"] = programma
@@ -1326,9 +1362,16 @@ class ChargerCoach:
             sessie["door_coach"] = sessie.get("gedrukt") is not None or sessie.get("gevraagd") is not None
             sessie["gedrukt"] = None
         # Wanneer het apparaat zelf zegt klaar te zijn: alleen zolang hij
-        # draait, en alleen een tijd die bij deze beurt hoort (EINDTIJD_MARGE).
+        # draait, alleen een tijd die bij deze beurt hoort (EINDTIJD_MARGE),
+        # en pas als hij stilstaat (`_eindtijd_vast`).
         eind = (
-            _eindtijd(self.hass, entities.get("remaining"), now, sinds=sessie["gestart"] - EINDTIJD_MARGE)
+            _eindtijd_vast(
+                sessie,
+                _eindtijd(
+                    self.hass, entities.get("remaining"), now,
+                    sinds=sessie["gestart"] - EINDTIJD_MARGE,
+                ),
+            )
             if draait and sessie["gestart"] is not None
             else None
         )
@@ -1507,6 +1550,10 @@ class ChargerCoach:
             "terugrekenen_na": None,
             # Of deze coach het apparaat al eens gezien heeft; zie `eerste`.
             "gezien": False,
+            # De eindtijd van het apparaat zoals de coach hem gelooft, en de
+            # waarde die er de vorige ronde stond; zie `_eindtijd_vast`.
+            "eind": None,
+            "eind_gezien": None,
         }
 
     @staticmethod

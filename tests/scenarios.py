@@ -605,6 +605,17 @@ vaatwasser_eindtijd = vaatwasser_meter_wint.kopie(
                           piek_minuten=20, eindtijd_tijdstip=True, gekozen="09:45"),
 )
 
+# En op 15-09-2026 zei de melding "klaar rond 11:33", terwijl hij om 11:45
+# klaar was. Dat was geen eindtijd van het kiezen: Home Connect zette hem bij
+# Run (10:11:56, Run 10:11:57) en rekende hem om 10:13:02 opnieuw uit op
+# 11:41. De melding ging om 10:12:53, negen seconden voor de correctie. Een
+# eindtijd telt daarom pas als hij twee ronden stilstaat.
+vaatwasser_eindtijd_bijstellen = vaatwasser_eindtijd.kopie(
+    naam="vaatwasser-eindtijd-bijstellen", uitleg="Home Connect zet bij de start meteen een eindtijd die er twaalf minuten naast zit en stelt hem een minuut later bij (oud: 10:21 'klaar rond 11:09'; nieuw: 10:23 'klaar rond 11:21', en dat werd het)",
+    vaatwasser=Vaatwasser(programma="dishcare_dishwasher_program_kurz_60", minuten=60, kwh=1.05, piek_w=2200.0,
+                          piek_minuten=20, eindtijd_tijdstip=True, gekozen="09:45", eindtijd_eerst_min=48),
+)
+
 # Sven op 12-09-2026 om 16:33: vrijgegeven bij vanaf 08:00 en klaar om 16:30.
 # De coach plande de volgende middag en zei "hij start om 13:00"; Sven zette
 # hem zelf aan. Op 13-09: "de keuze ingeruimd en morgen starten of ingeruimd
@@ -637,7 +648,7 @@ ALLE = [
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,
-    vaatwasser_zonpiek, vaatwasser_eindtijd, vaatwasser_na_klaartijd, vaatwasser_na_klaartijd_nu,
+    vaatwasser_zonpiek, vaatwasser_eindtijd, vaatwasser_eindtijd_bijstellen, vaatwasser_na_klaartijd, vaatwasser_na_klaartijd_nu,
     *VAN_DEN_DAM,
 ]
 
