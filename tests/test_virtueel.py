@@ -617,6 +617,18 @@ if (vl := v("vaatwasser-eindtijd")):
              len(gestart_m) == 1 and vl.vw_gestart is not None
              and (gestart_m[0][0] - vl.vw_gestart).total_seconds() <= 120, f"{gestart_m} gestart {vw_klok(vl.vw_gestart)}")
 
+if (vl := v("vaatwasser-eindtijd-bijstellen")):
+    gestart_m = [(t, m) for t, m in vl.meldingen if "Vaatwasser is gestart" in m]
+    print(f"  eindtijd bijstellen: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, melding {[(f'{t:%H:%M}', m) for t, m in gestart_m]}")
+    # Tot 15-09-2026 zei de melding de eindtijd die Home Connect bij de start
+    # neerzette, en die stelde hij een minuut later twaalf minuten bij.
+    controle("eindtijd bijstellen (15-09): de melding noemt de bijgestelde eindtijd, niet die van de start",
+             len(gestart_m) == 1 and vl.vw_klaar is not None and f"klaar rond {vl.vw_klaar:%H:%M}." in gestart_m[0][1],
+             f"{gestart_m} klaar {vw_klok(vl.vw_klaar)}")
+    controle("eindtijd bijstellen: en hij wacht daar hooguit EINDTIJD_WACHT op",
+             len(gestart_m) == 1 and vl.vw_gestart is not None
+             and (gestart_m[0][0] - vl.vw_gestart).total_seconds() <= 240, f"{gestart_m} gestart {vw_klok(vl.vw_gestart)}")
+
 if (vl := v("vaatwasser-na-klaartijd")):
     print(f"  na de klaar-tijd, morgen: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, {vl.vw_kwh:.2f} kWh, {len(vl.vw_gedrukt)} keer gedrukt")
     # Sven op 12-09-2026: om 16:33 vrijgegeven bij klaar om 16:30.
