@@ -142,6 +142,13 @@ CHARGE_EFFICIENCY = 0.9
 # percentage in plaats van het woord vol.
 FULL_PERCENT = 99.0
 
+# Hoeveel een accustand onder het doel mag staan en toch als bereikt tellen.
+# Een procent, want een accusensor is nooit fijner dan dat: die van Sven springt
+# per tien procent, en een auto die op 79,6 blijft staan is op zijn 80 procent.
+# Dit is dezelfde marge die `FULL_PERCENT` altijd al had (100 min 1), nu ook
+# voor een doel dat de bewoner zelf koos. Zie `doel_bereikt`.
+DOEL_MARGE = 100.0 - FULL_PERCENT
+
 # Hoeveel goedkoper het ene moment moet zijn dan het andere voordat het meetelt.
 # Een tiende cent per kWh, want dat is ook de fijnheid waarmee het paneel prijzen
 # opschrijft: is het verschil kleiner, dan staan er twee gelijke bedragen op het
@@ -234,6 +241,21 @@ class Car:
     # fasemodus zelf één fase, terwijl het profiel drie zegt. Dan hoort de coach
     # met die ene te rekenen zolang die beurt loopt.
     phases_measured: bool = False
+    # Tot hoever deze auto geladen hoort te worden, 10 tot 100. Een keuze van de
+    # bewoner in het autoprofiel, want de auto zegt het niet: de laadgrens staat
+    # in het scherm van de auto of in zijn app, en geen enkele integratie geeft
+    # hem door. Sven op 16-09-2026: "ik wil een optie hebben op de kaart dat ik
+    # kan aangeven tot hoever de bus laadt. Mijne laadt tot 80% namelijk maar ik
+    # kan hem ook op 100% instellen." Zonder die keuze rekende de coach tot 100,
+    # vroeg hij die ochtend om 10:46 een herstart voor een auto die precies deed
+    # wat hij moest doen, en stuurde hij een kritieke melding over 70%.
+    #
+    # Dit is niet hetzelfde als de grens in de auto: die stuurt de auto, deze
+    # stuurt de coach. Staan ze gelijk, dan weet de coach wanneer hij klaar is
+    # in plaats van het achteraf te merken. Staat het doel lager dan de auto,
+    # dan stopt de coach eerder. Staat het hoger, dan merkt hij dat de auto niet
+    # verder wil en zegt hij dat, zoals altijd al.
+    target_percent: float = 100.0
 
 
 @dataclass
@@ -738,17 +760,87 @@ def charging_pace(now: datetime, charger: Charger, wanted: int) -> int:
     return max(MIN_AMPS, int(charger.actual_amps))
 
 
+def doel_van(car: Car) -> float:
+    """Tot hoever deze auto geladen hoort te worden, 10 tot 100.
+
+    Eén plek, want het staat in het profiel van de klant en dat kan leeg zijn,
+    nul, of een getal waar niemand iets aan heeft. Alles buiten bereik leest als
+    "gewoon vol": een doel van nul zou een auto opleveren die nooit laadt, en
+    dat is de ene fout die een klant niet vergeeft.
+    """
+    waarde = car.target_percent
+    if not waarde or waarde <= 0 or waarde > 100:
+        return 100.0
+    return max(10.0, float(waarde))
+
+
+def doel_bereikt(car: Car) -> bool:
+    """Of de accustand zegt dat deze auto is waar hij wezen moet.
+
+    Met `DOEL_MARGE` speling, want een accusensor is nooit fijner dan een
+    procent. Zonder accustand valt er niets te zeggen en is het antwoord onwaar:
+    dan is "klaar" van de paal het enige dat er is.
+
+    Bij een doel van 100 is dit precies wat `FULL_PERCENT` altijd deed, dus een
+    installatie zonder ingevuld doel merkt er niets van.
+    """
+    if car.soc_percent is None:
+        return False
+    return car.soc_percent >= doel_van(car) - DOEL_MARGE
+
+
+def klaar_zin(car: Car, volgens_accu: bool = False) -> str:
+    """Waarom er niets meer gebeurt, in de woorden die op dat moment kloppen.
+
+    Drie gevallen, en het verschil doet ertoe. Staat de auto op zijn doel, dan
+    is er niets aan de hand en hoort dat er ook zo te staan: "vol" bij een doel
+    van 100, en anders het percentage met de reden erbij, want wie 80% instelt
+    wil niet elke beurt lezen dat zijn auto niet vol is. Stopt hij eronder, dan
+    is er wél iets aan de hand en blijft de hint over de laadgrens staan: dat
+    was op 16-09-2026 precies de goede gok, alleen stond het doel toen nog
+    nergens.
+
+    `volgens_accu` is voor het geval dat de accustand het zegt en de paal nog
+    niets gemeld heeft. Dat is een ander bericht dan hetzelfde nieuws van de
+    paal, want wie 80% instelt terwijl zijn auto tot 100 laadt hoort te lezen
+    dat de coach ermee ophoudt en niet dat de auto niet meer wil.
+    """
+    if car.soc_percent is None:
+        return "De auto is vol."
+    stand = int(car.soc_percent)
+    if not doel_bereikt(car):
+        return (
+            f"De auto laadt niet verder en staat op {stand}%. "
+            "Mogelijk staat er een laadgrens in de auto."
+        )
+    if doel_van(car) >= FULL_PERCENT:
+        return (
+            "De auto is vol volgens zijn accustand."
+            if volgens_accu
+            else "De auto is vol."
+        )
+    return (
+        f"De auto staat op {stand}% en dat is waar je hem wilde hebben."
+        if volgens_accu
+        else f"De auto staat op {stand}% en verder hoeft hij niet."
+    )
+
+
 def energy_needed_kwh(car: Car) -> float | None:
     """How much still has to go into this car, when that is knowable.
 
     Needs both a battery size and a state of charge. Without them the coach
     charges the cheapest hours until the car stops by itself, which is not as
     clever but never wrong.
+
+    Tot het doel uit het profiel en niet tot vol: laadt de bus tot 80%, dan is
+    er boven de 80 niets meer nodig en hoeft er ook geen uur voor gepland te
+    worden.
     """
     if car.guest or not car.capacity_kwh or car.soc_percent is None:
         return None
 
-    missing = max(0.0, (100.0 - car.soc_percent) / 100.0 * car.capacity_kwh)
+    missing = max(0.0, (doel_van(car) - car.soc_percent) / 100.0 * car.capacity_kwh)
     return missing / CHARGE_EFFICIENCY
 
 
@@ -766,7 +858,7 @@ def worst_case_kwh(car: Car) -> float | None:
     """
     if car.guest or not car.capacity_kwh:
         return None
-    return car.capacity_kwh / CHARGE_EFFICIENCY
+    return doel_van(car) / 100.0 * car.capacity_kwh / CHARGE_EFFICIENCY
 
 
 def charge_cost(watts: float, surplus_w: float, buy: float, feed_in: float) -> float:
@@ -849,11 +941,14 @@ def _uren_met_afbouw(car: Car, kw: float, energy: float) -> float:
         return energy / kw
     uren = 0.0
     soc = car.soc_percent
+    grens = doel_van(car)
     # Dezelfde verhouding als `energy_needed_kwh`: wat er aan de stekker in
-    # moet is wat er in de accu bij moet, gedeeld door het rendement.
-    while soc < 100.0:
+    # moet is wat er in de accu bij moet, gedeeld door het rendement. Tot het
+    # doel, want banden daarboven worden nooit geladen en hun trage tempo hoort
+    # de klaar-tijd dus ook niet naar voren te halen.
+    while soc < grens:
         band = int(soc // 10)
-        tot = min(100.0, (band + 1) * 10.0)
+        tot = min(grens, (band + 1) * 10.0)
         kwh = (tot - soc) / 100.0 * car.capacity_kwh / CHARGE_EFFICIENCY
         tempo = min(kw, car.tempo_per_band.get(band, kw))
         if tempo <= 0:
@@ -2138,26 +2233,24 @@ def _decide(
         return Decision(
             False,
             0,
-            "De auto is vol."
-            if car.soc_percent is None or car.soc_percent >= FULL_PERCENT
-            else (
-                f"De auto laadt niet verder en staat op {int(car.soc_percent)}%. "
-                "Mogelijk staat er een laadgrens in de auto."
-            ),
+            klaar_zin(car),
             rule="complete",
             hold_minutes=MIN_HOLD_MINUTES,
         )
 
-    # Wat de accustand zegt telt net zo goed als wat de paal zegt. Een auto op
-    # 100% hoeft niets meer, en zonder deze sport viel dat door naar de
-    # prijsregel: die pakt bij "niets nodig" alle uren als goedkoop en zet dus
-    # vol vermogen op een auto die niets meer aanneemt.
+    # Wat de accustand zegt telt net zo goed als wat de paal zegt. Een auto die
+    # op zijn doel staat hoeft niets meer, en zonder deze sport viel dat door
+    # naar de prijsregel: die pakt bij "niets nodig" alle uren als goedkoop en
+    # zet dus vol vermogen op een auto die niets meer aanneemt. Met een doel
+    # onder de 100 is dit de sport die als eerste vuurt: de accustand is er
+    # eerder dan het "completed" van de paal, en dan stopt de coach uit zichzelf
+    # in plaats van het achteraf te merken.
     rest = energy_needed_kwh(car)
     if rest is not None and rest <= 0:
         return Decision(
             False,
             0,
-            "De auto is vol volgens zijn accustand.",
+            klaar_zin(car, volgens_accu=True),
             rule="complete",
             hold_minutes=MIN_HOLD_MINUTES,
         )

@@ -80,6 +80,14 @@ _CAR = _schema(
         vol.Optional("phases", default="three"): vol.In(["one", "three"]),
         # Some cars stop at 16 A however thick the cable is.
         vol.Optional("max_amps", default=0): vol.All(vol.Coerce(float), vol.Range(0, 100)),
+        # Tot hoever deze auto geladen hoort te worden. Honderd is gewoon vol en
+        # daarmee verandert er niets; wie zijn accu spaart zet hem op 80. Niet
+        # lager dan 10, want een doel onder de stand van een auto die net
+        # binnenkomt zou een beurt opleveren die nooit begint. Zie `doel_van` in
+        # planner.py, dat hetzelfde nog eens afdwingt voor oude instellingen.
+        vol.Optional("target_percent", default=100): vol.All(
+            vol.Coerce(float), vol.Range(10, 100)
+        ),
         # The car's own state of charge, when Home Assistant knows it. With it
         # the coach works out how much still has to go in; without it the
         # customer says so, and without that it simply charges the cheapest

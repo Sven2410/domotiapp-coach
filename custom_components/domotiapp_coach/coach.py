@@ -78,6 +78,8 @@ from .planner import (
     _dagnaam,
     _euro,
     beschikbaar_van_bewaker,
+    doel_van,
+    doel_bereikt,
     energy_needed_kwh,
     held_back,
     MIN_AMPS,
@@ -333,6 +335,10 @@ FOREVER_RULES = frozenset({"no-room", "user-hold"})
 # En de uitkomsten waarbij er helemaal niets naar de paal gaat. Zonder kabel valt
 # er niets tegen te houden, en bij een volle auto zou een 0 die blijft staan de
 # volgende auto in de weg zitten.
+#
+# Met één uitzondering, en die staat in `_niets_schrijven`: laadt de paal op dat
+# moment nog, dan is "klaar" een besluit van de coach en geen constatering, en
+# moet die 0 er wél heen. Zie daar.
 NO_WRITE_RULES = frozenset({"disconnected", "complete"})
 
 # Hoe lang het verslag wacht op een accustand die bij deze laadbeurt hoort.
@@ -659,6 +665,15 @@ class ChargerCoach:
         self._herstart_open: set[str] = set()
         self._herstart_gedaan: dict[str, datetime] = {}
         self._herstart_melden: set[str] = set()
+        # Sinds wanneer de paal van dit laadpunt "klaar" zegt. Het ijkpunt voor
+        # `_soc_bezonken`: een accustand van vóór dit moment hoort nog bij het
+        # laden en zegt niets over waar de auto geëindigd is.
+        self._klaar_sinds: dict[str, datetime] = {}
+        # De accustand zoals `_read` hem deze ronde zag, en wanneer die voor het
+        # laatst veranderde. Los van de sessie, want die wordt later in de ronde
+        # bijgewerkt en is hier dus een ronde te oud.
+        self._soc_stand: dict[str, float | None] = {}
+        self._soc_op: dict[str, datetime] = {}
         # Het aantal fasen zoals het deze ronde gemeten is, per laadpunt. Eén
         # meting per ronde, want `_fasen_stabiel` telt ronden.
         self._fase_nu: dict[str, int | None] = {}
@@ -2585,7 +2600,7 @@ class ChargerCoach:
         """
         if decision.charge:
             return charger.charging
-        if decision.rule in NO_WRITE_RULES:
+        if self._niets_schrijven(charger, decision):
             return True
 
         limiet = _number(self.hass, (device.get("entities") or {}).get("dynamic_limit"))
@@ -3311,7 +3326,32 @@ class ChargerCoach:
             # eens af, dan mag er opnieuw één poging komen.
             self._herstart_gedaan.pop(device_id, None)
             gedaan = None
-        if charger.complete and gedaan is None and self._niet_vol(car):
+        # Wanneer deze accustand voor het laatst veranderde. De sessie houdt
+        # hetzelfde bij, maar die wordt verderop in de ronde bijgewerkt en loopt
+        # hier dus precies één ronde achter: net te laat om te zien dat de auto
+        # zich mét het "klaar" van de paal meldde. Daarom hier nog een keer, op
+        # het moment dat `car` gebouwd is.
+        if car.soc_percent != self._soc_stand.get(device_id):
+            self._soc_stand[device_id] = car.soc_percent
+            self._soc_op[device_id] = now
+        # Sinds wanneer de paal "klaar" zegt. Nodig om te weten of de accustand
+        # bij dít einde hoort of nog van halverwege de beurt is.
+        if charger.complete:
+            self._klaar_sinds.setdefault(device_id, now)
+        else:
+            self._klaar_sinds.pop(device_id, None)
+        # En pas oordelen als die stand bezonken is. Thuis op 16-09-2026 zei de
+        # paal om 10:46:21 "completed" terwijl de Ford-app nog 70% toonde; om
+        # 10:47:19 werd dat 80, de stand waar de bus ook op stond. De coach
+        # besloot om 10:46:57, tweeëntwintig seconden te vroeg, herstartte de
+        # paal voor niets en stuurde een kritieke melding over 70%. Een
+        # accustand die per tien procent springt is nooit jonger dan zijn
+        # laatste sprong, dus hier wachten tot de auto zich meldt of tot
+        # `SOC_SETTLE` om is. De auto staat toch stil; dat kost niets.
+        bezonken = self._soc_bezonken(
+            now, self._klaar_sinds.get(device_id), self._soc_op.get(device_id), car
+        )
+        if charger.complete and gedaan is None and bezonken and self._niet_vol(car):
             charger.complete = False
             self._herstart_open.add(device_id)
         else:
@@ -3446,6 +3486,7 @@ class ChargerCoach:
             phases=phases,
             phases_measured=phases_measured,
             max_amps=float(profile.get("max_amps") or 0),
+            target_percent=float(profile.get("target_percent") or 100),
             soc_percent=soc,
             soc_estimated=geschat,
             tempo_per_band=self._tempo_uit(settings, device_id, auto_id),
@@ -3506,14 +3547,13 @@ class ChargerCoach:
         is. Een auto die niet in Home Assistant zit telt mee zodra de bewoner
         zijn stand heeft opgegeven, want daarna telt de coach zelf verder met de
         teller van de paal (`_typed_soc`).
+
+        "Vol" is hier het doel uit het autoprofiel en niet honderd procent. Wie
+        zijn bus op 80% zet is op 80% klaar, en een herstart zou daar een auto
+        wakker schudden die precies doet wat hem gevraagd is.
         """
         rest = energy_needed_kwh(car)
-        return (
-            rest is not None
-            and rest > 0
-            and car.soc_percent is not None
-            and car.soc_percent < FULL_PERCENT
-        )
+        return rest is not None and rest > 0 and not doel_bereikt(car)
 
     def _tempo_leren(
         self,
@@ -4550,8 +4590,12 @@ class ChargerCoach:
         )
         return f"{sinds} is er " + " en ".join(stukken) + " gegaan"
 
+    @staticmethod
     def _soc_bezonken(
-        self, now: datetime, sessie: dict[str, Any], car: Car
+        now: datetime,
+        klaar: datetime | None,
+        soc_moment: datetime | None,
+        car: Car,
     ) -> bool:
         """Of de accustand hoort bij de laadbeurt die net is afgelopen.
 
@@ -4559,18 +4603,21 @@ class ChargerCoach:
         app nog op het percentage van een half uur geleden, dan zou het verslag
         een getal noemen dat de bewoner op de kaart al gecorrigeerd ziet staan.
         Dus wacht het bericht tot de auto zich één keer heeft gemeld sinds hij
-        ophield, of tot `SOC_SETTLE` voorbij is.
+        ophield (`soc_moment`), of tot `SOC_SETTLE` voorbij is.
 
         Zonder accustand valt er niets te wachten: dan noemt het verslag geen
         percentage en is er ook niets dat verouderen kan.
+
+        Twee aanroepers, en daarom de losse argumenten in plaats van de sessie:
+        het verslag wacht hiermee met zijn bericht, en `_read` wacht ermee met
+        het oordeel of de auto niet vol is. Dat laatste is sinds 16-09-2026 net
+        zo belangrijk, want daar hing een herstart aan.
         """
         if car.soc_percent is None:
             return True
-        klaar = sessie.get("klaar_sinds")
         if klaar is None:
             return True
-        moment = sessie.get("soc_moment")
-        if moment is not None and moment >= klaar:
+        if soc_moment is not None and soc_moment >= klaar:
             return True
         return now - klaar >= SOC_SETTLE
 
@@ -4653,11 +4700,17 @@ class ChargerCoach:
         if device_id in self._herstart_melden:
             self._herstart_melden.discard(device_id)
             stand = f" {int(car.soc_percent)}%" if car.soc_percent is not None else ""
+            # Waar hij naartoe moest, als dat niet gewoon vol is. Zonder dat
+            # leest "dat is niet vol" bij een doel van 90% als een coach die de
+            # instelling niet kent.
+            heen = (
+                "" if doel_van(car) >= FULL_PERCENT else f" en hij moet naar {int(doel_van(car))}%"
+            )
             await self._async_tell(
                 f"{naam} zei dat {self._hoe_heet(car)} klaar was, maar hij staat op"
-                f"{stand} en dat is niet vol. De coach heeft de paal een keer opnieuw "
-                "gestart. Gaat de auto niet binnen een kwartier verder, dan laat "
-                "hij het daarbij.",
+                f"{stand}{heen} en dat is niet vol. De coach heeft de paal een keer "
+                "opnieuw gestart. Gaat de auto niet binnen een kwartier verder, dan "
+                "laat hij het daarbij.",
                 kritiek=True,
             )
 
@@ -4665,7 +4718,9 @@ class ChargerCoach:
         if decision.rule == "complete" and "vol" not in gemeld and sessie["begon"]:
             if sessie.get("klaar_sinds") is None:
                 sessie["klaar_sinds"] = now
-            if not self._soc_bezonken(now, sessie, car):
+            if not self._soc_bezonken(
+                now, sessie.get("klaar_sinds"), sessie.get("soc_moment"), car
+            ):
                 return
             # Na een eigen herstart eerst een kwartier afwachten: de Ford bij
             # Van den Dam had er negen minuten voor nodig.
@@ -4680,16 +4735,22 @@ class ChargerCoach:
             # auto op 80% omdat daar een laadgrens in staat, dan is "de auto is
             # vol" onwaar en leest het als een coach die niet weet wat hij doet.
             # Weet hij de accustand, dan zegt hij die gewoon. Sven op 20-08-2026.
-            klaar = (
-                f"{self._hoe_heet(car).capitalize()} aan {naam} is vol."
-                if car.soc_percent is None or car.soc_percent >= FULL_PERCENT
-                else (
-                    f"{self._hoe_heet(car).capitalize()} aan {naam} laadt niet verder en "
-                    f"staat op "
+            #
+            # En staat die 80% als doel in het profiel, dan is er niets bijzonders
+            # gebeurd en hoort er ook geen bijzonderheid te staan: dan is dit
+            # gewoon het einde van een geslaagde beurt. Sven op 16-09-2026.
+            wie = f"{self._hoe_heet(car).capitalize()} aan {naam}"
+            heel = doel_van(car) >= FULL_PERCENT
+            if car.soc_percent is None or (heel and doel_bereikt(car)):
+                klaar = f"{wie} is vol."
+            elif doel_bereikt(car):
+                klaar = f"{wie} staat op {int(car.soc_percent)}%, en verder hoefde hij niet."
+            else:
+                klaar = (
+                    f"{wie} laadt niet verder en staat op "
                     f"{int(car.soc_percent)}%. Mogelijk staat er een laadgrens in "
                     "de auto."
                 )
-            )
             # Is de coach midden in de laadbeurt ingestapt, dan weet hij niet
             # hoe laat die begon en hoort hij dat ook niet te suggereren.
             begon = sessie["begon"]
@@ -5306,6 +5367,27 @@ class ChargerCoach:
             blocking=True,
         )
 
+    @staticmethod
+    def _niets_schrijven(charger: Charger, decision: Decision) -> bool:
+        """Of dit besluit de paal helemaal met rust laat.
+
+        Zonder kabel valt er niets tegen te houden, en bij een auto die zelf
+        gestopt is zou een 0 die blijft staan de volgende auto in de weg zitten.
+
+        Behalve als de paal op dit moment nog laadt. Dan is "klaar" geen
+        constatering maar een besluit van de coach: de accustand zegt dat het
+        doel gehaald is terwijl de auto nog best wil. Sinds 16-09-2026 kan dat,
+        want het doel hoeft niet meer honderd procent te zijn. Zonder deze
+        uitzondering bleef de bus in het virtuele huis na "de auto staat op 80%"
+        gewoon doorlopen tot 100, en dan is de instelling een mededeling in
+        plaats van een opdracht.
+        """
+        if not charger.connected:
+            return True
+        if decision.rule not in NO_WRITE_RULES:
+            return False
+        return not charger.charging
+
     async def _pause(
         self,
         device: dict[str, Any],
@@ -5317,11 +5399,18 @@ class ChargerCoach:
         """Niet laden, en dat vasthouden zonder de sessie op te breken."""
         device_id = device.get("id", "")
 
-        if not charger.connected or decision.rule in NO_WRITE_RULES:
+        if self._niets_schrijven(charger, decision):
             self._pause_until.pop(device_id, None)
             return True
 
-        minutes = 0 if decision.rule in FOREVER_RULES else (decision.hold_minutes or 0)
+        # Houdt de coach zelf op terwijl de paal nog laadt (`_niets_schrijven`
+        # liet ons hier juist dóór omdat het doel gehaald is), dan hoort die 0
+        # te blijven staan. Met een houdbaarheid loopt hij af, pakt de paal zijn
+        # eigen limiet weer en laadt de auto alsnog door: in het virtuele huis
+        # gaf dat honderdveertig wissels en 3,2 kWh van het net op een auto die
+        # allang op 80% stond.
+        blijvend = decision.rule in FOREVER_RULES or decision.rule in NO_WRITE_RULES
+        minutes = 0 if blijvend else (decision.hold_minutes or 0)
         await self._limit(device, control, 0, minutes)
 
         if minutes:

@@ -357,6 +357,33 @@ if (vl := v("laadgrens-80")):
     controle("laadgrens: zegt niet dat hij vol is", not meldingen(vl, "is vol"), "")
     controle("laadgrens: geen 'nog niet vol' in de ochtend", not meldingen(vl, "nog niet vol"), "")
 
+# Dezelfde auto met de 80% ook in het profiel. Svens eigen geval van
+# 16-09-2026: de coach hoort zelf op te houden, zonder herstart en zonder
+# kritieke melding over een auto die precies deed wat hem gevraagd was.
+if (vl := v("laadgrens-80-ingesteld")):
+    controle("doel gelijk aan de laadgrens: zegt dat verder niet hoeft",
+             bool(meldingen(vl, "verder hoefde hij niet")), f"{[m for _, m in vl.meldingen]}")
+    controle("doel gelijk aan de laadgrens: geen laadgrens-gok",
+             not meldingen(vl, "Mogelijk staat er een laadgrens"), "")
+    controle("doel gelijk aan de laadgrens: geen herstart",
+             not meldingen(vl, "opnieuw gestart"), "")
+    controle("doel gelijk aan de laadgrens: zegt niet dat hij vol is",
+             not meldingen(vl, "is vol"), "")
+    controle("doel gelijk aan de laadgrens: stopt rond 80%",
+             vl.soc_bij_klaar_tijd is not None and 79 <= vl.soc_bij_klaar_tijd <= 82,
+             f"{vl.soc_bij_klaar_tijd}")
+
+# En het omgekeerde: de auto zou doorladen, de bewoner wil op 80 stoppen. Dan is
+# de coach degene die ophoudt, en hij laadt dus minder dan tot vol.
+if (vl := v("doel-80")):
+    controle("doel onder de auto: stopt rond 80%",
+             vl.soc_bij_klaar_tijd is not None and 79 <= vl.soc_bij_klaar_tijd <= 84,
+             f"{vl.soc_bij_klaar_tijd}")
+    controle("doel onder de auto: geen herstart",
+             not meldingen(vl, "opnieuw gestart"), "")
+    controle("doel onder de auto: laadt minder dan tot vol",
+             vl.geladen_kwh < 11.5, f"{vl.geladen_kwh:.2f}")
+
 if (vl := v("bijna-vol")):
     controle("bijna vol: laadt het restje", 0.5 < vl.geladen_kwh < 2.0, f"{vl.geladen_kwh:.2f}")
     controle("bijna vol: één melding", len(meldingen(vl, "is vol")) == 1, "")

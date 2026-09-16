@@ -195,6 +195,12 @@ class Auto:
     # worden en doet daarna op 6 A gewoon mee; zie `WAKE_AMPS` in planner.py.
     wek_amps: float = 6.0
     laadgrens: float = 100.0
+    # Tot hoever de bewoner deze auto wil laden: `target_percent` in het
+    # autoprofiel. Iets anders dan `laadgrens` hierboven, dat is wat de auto
+    # zelf doet. Staan ze gelijk, dan weet de coach waar de beurt eindigt in
+    # plaats van het achteraf te merken; staat het doel hoger, dan loopt hij
+    # tegen de grens van de auto aan zoals altijd.
+    doel: float = 100.0
     meldt_soc: bool = True
     rendement: float = 0.9
     aanloop_s: int = 60
@@ -830,6 +836,7 @@ def instellingen(s: Scenario) -> dict:
                 "capacity_kwh": auto.capaciteit_kwh,
                 "phases": "one" if auto.fasen == 1 else "three",
                 "max_amps": auto.max_amps,
+                "target_percent": auto.doel,
                 "soc_entity": E["soc"] if auto.meldt_soc else "",
             }],
         }],
@@ -1250,7 +1257,8 @@ def optimum(s: Scenario, coach, inst, kabel_in: dt.datetime) -> float | None:
     w = Wereld(s)
     auto = s.auto
     nodig = planner.energy_needed_kwh(planner.Car(
-        capacity_kwh=auto.capaciteit_kwh, phases=auto.fasen, soc_percent=auto.soc))
+        capacity_kwh=auto.capaciteit_kwh, phases=auto.fasen, soc_percent=auto.soc,
+        target_percent=auto.doel))
     if nodig is None:
         return None
     einde = klaar_tijd_na(s, kabel_in)
@@ -1272,7 +1280,8 @@ def optimum(s: Scenario, coach, inst, kabel_in: dt.datetime) -> float | None:
     fasen = min(auto.fasen, s.paal.fasen)
     ceiling = int(min(s.paal.max_amps, auto.max_amps))
     car = planner.Car(capacity_kwh=auto.capaciteit_kwh, phases=fasen,
-                      soc_percent=auto.soc, max_amps=auto.max_amps)
+                      soc_percent=auto.soc, max_amps=auto.max_amps,
+                      target_percent=auto.doel)
     uur0 = kabel_in.replace(minute=0, second=0)
     grid = planner.Grid(surplus_w=max(0.0, zon.get(uur0, 0.0) * 1000 - huis.get(uur0.hour, 0.0) * 1000))
     alle = planner.schijven(kabel_in, prijzen, grid, car, ceiling, None, einde, tarief,
@@ -1509,7 +1518,8 @@ def samenvatting(v: Verloop) -> str:
     kt = ""
     if v.klaar_tijd is not None:
         gehaald = (v.soc_bij_klaar_tijd is not None
-                   and v.soc_bij_klaar_tijd >= min(s.auto.laadgrens, planner.FULL_PERCENT))
+                   and v.soc_bij_klaar_tijd >= min(s.auto.laadgrens, s.auto.doel,
+                                                   planner.FULL_PERCENT))
         kt = (f"  klaar-tijd {v.klaar_tijd:%a %H:%M}: {'gehaald' if gehaald else 'GEMIST'}"
               f" ({v.soc_bij_klaar_tijd:.0f}%)")
     opt = "" if v.optimum is None else f"  optimum €{v.optimum:.2f}"
