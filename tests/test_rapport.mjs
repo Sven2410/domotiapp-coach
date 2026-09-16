@@ -782,6 +782,33 @@ proef("een gemeten programma toont de meting, staat op slot en heeft wissen en o
   assert.ok(html.includes("staat op slot"), "en de uitleg zegt het");
 });
 
+// Sven op 16-09-2026: "ik wil een optie hebben op de kaart dat ik kan aangeven
+// tot hoever de bus laadt. Mijne laadt tot 80% namelijk maar ik kan hem ook op
+// 100% instellen."
+
+proef("het autoprofiel heeft een doel, standaard 100, en een lege invoer is geen nul", async () => {
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.feed_ = {};
+  const paal = {
+    id: "paal", type: "laadpaal", brand: "easee", name: "Laadpaal", controllable: true,
+    entities: {}, cars: [{ id: "auto", name: "Bus", capacity_kwh: 19.7, phases: "three", max_amps: 0 }],
+  };
+  const html = el.carsHtml_(paal, 0);
+  assert.ok(html.includes('data-car-field="target_percent"'), "het veld staat er");
+  assert.ok(html.includes("Laadt tot"), "en heet naar wat het doet");
+  // Een auto zonder het veld is een oude instelling: die laadt gewoon vol.
+  const doelVeld = (h) => h.match(/data-car-field="target_percent"[\s\S]*?value="(\d+)"/)?.[1];
+  assert.equal(doelVeld(html), "100", "zonder ingevuld doel staat er 100");
+  const tot80 = el.carsHtml_({ ...paal, cars: [{ ...paal.cars[0], target_percent: 80 }] }, 0);
+  assert.equal(doelVeld(tot80), "80", "en een ingevuld doel staat er zoals het is");
+  // De server weigert alles onder de 10, dus een veld dat leeggemaakt wordt mag
+  // geen nul opleveren: dat zou een foutmelding geven over iets wat de klant
+  // niet deed.
+  assert.ok(html.includes('min="10"') && html.includes('max="100"'), "de invoer blijft binnen bereik");
+});
+
 // --- de knoppenrij op de laadpaalkaart --------------------------------------
 //
 // Op 30-08-2026 kreeg de nieuwe knop "Wat gaat hij doen" de klasse `plan-link`,

@@ -2191,6 +2191,67 @@ controle("nu starten zonder vrijgave is geen vrijgave",
          planner.plan_programma(avond52, [], vast52, zon52, na52, replace(vrij52, released=False, start_now=True)).rule
          == "not-released", "")
 
+print("=== 53. tot hoever de auto laadt (Sven, 16-09-2026) ===")
+# "Ik wil een optie hebben op de kaart dat ik kan aangeven tot hoever de bus
+# laadt. Mijne laadt tot 80% namelijk maar ik kan hem ook op 100% instellen."
+# Zijn bus van 19,7 kWh stond die ochtend op 32% en stopte zelf op 80.
+bus53 = planner.Car(capacity_kwh=19.7, phases=3, soc_percent=32.0)
+tot80 = replace(bus53, target_percent=80.0)
+heel53 = planner.energy_needed_kwh(bus53)
+deel53 = planner.energy_needed_kwh(tot80)
+print(f"  tot 100%: {heel53:.2f} kWh   tot 80%: {deel53:.2f} kWh")
+controle("tot 100% is de hele accu vanaf 32%", abs(heel53 - 14.87) < 0.05, f"{heel53:.2f}")
+controle("tot 80% is minder", abs(deel53 - 10.51) < 0.05, f"{deel53:.2f}")
+controle("en dat is precies wat er die ochtend in ging", abs(deel53 - 10.33) < 0.25,
+         f"{deel53:.2f} tegenover 10,33 gemeten")
+
+# Op zijn doel is hij klaar, en een procent eronder telt mee: de accusensor van
+# een Ford springt per tien procent en is nooit fijner dan dat.
+op80 = replace(tot80, soc_percent=80.0)
+controle("op 80% met doel 80 is hij waar hij wezen moet", planner.doel_bereikt(op80), "")
+controle("79,5% telt ook mee", planner.doel_bereikt(replace(op80, soc_percent=79.5)), "")
+controle("78% niet", not planner.doel_bereikt(replace(op80, soc_percent=78.0)), "")
+controle("met doel 100 blijft 80% gewoon niet vol",
+         not planner.doel_bereikt(replace(op80, target_percent=100.0)), "")
+controle("en 99,5% wel, zoals FULL_PERCENT altijd deed",
+         planner.doel_bereikt(replace(op80, target_percent=100.0, soc_percent=99.5)), "")
+
+# Een doel dat nergens op slaat leest als "gewoon vol". Een oude instelling
+# zonder het veld heeft een nul, en een auto die daarop nooit laadt is de ene
+# fout die een klant niet vergeeft.
+for raar in (0.0, -5.0, 120.0):
+    controle(f"een doel van {raar:g} leest als 100",
+             planner.doel_van(replace(bus53, target_percent=raar)) == 100.0, "")
+controle("een doel van 5 wordt 10", planner.doel_van(replace(bus53, target_percent=5.0)) == 10.0, "")
+
+# En de zinnen die erbij horen. Wie 80% instelt hoort niet elke beurt te lezen
+# dat zijn auto niet vol is.
+print(f"  op doel, 80 : {planner.klaar_zin(op80)}")
+print(f"  op doel, 100: {planner.klaar_zin(replace(op80, target_percent=100.0, soc_percent=99.5))}")
+print(f"  eronder     : {planner.klaar_zin(replace(op80, soc_percent=70.0))}")
+controle("op het doel van 80: geen woord over vol en geen gok over een laadgrens",
+         "vol" not in planner.klaar_zin(op80) and "laadgrens" not in planner.klaar_zin(op80),
+         planner.klaar_zin(op80))
+controle("op het doel van 80: noemt de stand",
+         "80%" in planner.klaar_zin(op80), planner.klaar_zin(op80))
+controle("op een doel van 100: gewoon vol",
+         planner.klaar_zin(replace(op80, target_percent=100.0, soc_percent=99.5))
+         == "De auto is vol.", "")
+controle("onder het doel: de laadgrens blijft de gok",
+         "laadgrens" in planner.klaar_zin(replace(op80, soc_percent=70.0)), "")
+
+# Het slechtste geval en de afbouw lopen ook tot het doel. Een auto die bovenin
+# gas terugneemt hoeft de klaar-tijd niet naar voren te halen voor banden die
+# nooit geladen worden.
+controle("leeg tot 80% is minder dan leeg tot vol",
+         planner.worst_case_kwh(tot80) < planner.worst_case_kwh(bus53), "")
+traag = {8: 1.0, 9: 0.5}   # boven de 80% wordt hij traag
+uren80 = planner._uren_met_afbouw(replace(tot80, tempo_per_band=traag), 11.0, deel53)
+uren100 = planner._uren_met_afbouw(replace(bus53, tempo_per_band=traag), 11.0, heel53)
+print(f"  met afbouw: tot 80% {uren80:.2f} uur, tot 100% {uren100:.2f} uur")
+controle("de trage banden boven het doel tellen niet mee", uren80 < uren100 - 1.0,
+         f"{uren80:.2f} tegenover {uren100:.2f}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

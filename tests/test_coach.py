@@ -557,19 +557,42 @@ print(f"  meteen bij het stoppen: {meldingen}")
 controle("hij wacht op een accustand die bij deze beurt hoort", not meldingen,
          f"{meldingen}")
 
-# De auto meldt zich, en dan pas gaat het bericht de deur uit.
+# De auto meldt zich, en dan pas doet de coach iets. Dat "iets" is eerst een
+# herstart, want 80% is niet vol en het doel staat hier op honderd; pas als de
+# auto daarna niets doet gelooft hij "klaar". Zie eis 7.
 hassC.states.zet("sensor.auto_soc", "80")
 _, verstuurd = asyncio.run(ronde(coachC, tachtig, paal=PAAL_FORD, nu=dt.datetime(2026, 8, 20, 21, 33)))
+starts = [d for d in verstuurd if d[0] == "easee" and d[2].get("action_command") == "start"]
+print(f"  zodra de auto zich meldt: start={len(starts)}")
+controle("pas na een bezonken accustand herstart hij", len(starts) == 1, f"{starts}")
+
+# En die melding noemt de stand van ná het stoppen. Thuis op 16-09-2026 ging hij
+# de deur uit met 70% terwijl de Ford op 80 stond: de sensor sprong tweeëntwintig
+# seconden later. Dat is precies wat de bezinktijd hierboven voorkomt.
+_, verstuurd = asyncio.run(ronde(coachC, tachtig, paal=PAAL_FORD, nu=dt.datetime(2026, 8, 20, 21, 34)))
+meldingen = [d[2]["message"] for d in verstuurd if d[0] == "notify"]
+print(f"  herstartmelding: {meldingen}")
+controle("en de melding noemt de stand van na het stoppen",
+         any("80%" in m for m in meldingen), f"{meldingen}")
+controle("en niet de stand van ervoor", all("70%" not in m for m in meldingen),
+         f"{meldingen}")
+
+# De auto doet niets meer. Na het kwartier gelooft de coach "klaar" alsnog, en
+# dan pas komt het verslag, met de accustand en zonder het woord vol.
+for minuut in (40, 45, 50):
+    _, verstuurd = asyncio.run(
+        ronde(coachC, tachtig, paal=PAAL_FORD, nu=dt.datetime(2026, 8, 20, 21, minuut)))
 meldingen = [d[2]["message"] for d in verstuurd if d[0] == "notify"]
 besluit = coachC.state["dev-laadpaal"]
-print(f"  melding: {meldingen}")
+print(f"  verslag: {meldingen}")
 print(f"  kaart  : {besluit['reason']}")
 controle("hij noemt het geen vol", all("is vol" not in m for m in meldingen),
          f"{meldingen}")
 controle("maar noemt de accustand", any("80%" in m for m in meldingen), f"{meldingen}")
 
-# En blijft de auto stil, dan komt het bericht alsnog: te laat melden is erger
-# dan een getal dat een ronde oud is.
+# En blijft de auto stil, dan wacht hij niet eindeloos op een percentage dat
+# nooit komt: na SOC_SETTLE gaat het alsnog door. Te laat melden is erger dan
+# een getal dat een paar minuten oud is.
 huisD = huis(status="ready_to_charge", teruglevering=0.0, afname=1800.0)
 huisD["sensor.auto_soc"] = "70"
 hassD, _, coachD = bouw(huisD, tachtig)
@@ -581,12 +604,17 @@ asyncio.run(ronde(coachD, tachtig, paal=PAAL_FORD, nu=dt.datetime(2026, 8, 20, 2
 hassD.states.zet("sensor.laadpaal_status", "completed")
 asyncio.run(ronde(coachD, tachtig, paal=PAAL_FORD, nu=dt.datetime(2026, 8, 20, 21, 32)))
 _, verstuurd = asyncio.run(ronde(coachD, tachtig, paal=PAAL_FORD, nu=dt.datetime(2026, 8, 20, 21, 36)))
-meldingen = [d[2]["message"] for d in verstuurd if d[0] == "notify"]
-print(f"  auto blijft stil, vier minuten later: {meldingen}")
-controle("een auto die zwijgt houdt het bericht niet tegen", meldingen,
-         f"{meldingen}")
-controle("en op de kaart net zo", "80%" in besluit["reason"], besluit["reason"])
-controle("met een reden die klopt", "laadgrens" in besluit["reason"], besluit["reason"])
+starts = [d for d in verstuurd if d[0] == "easee" and d[2].get("action_command") == "start"]
+print(f"  auto blijft stil, vier minuten later: start={len(starts)}")
+controle("een auto die zwijgt houdt het niet eindeloos tegen", len(starts) == 1,
+         f"{starts}")
+for minuut in (40, 45, 52):
+    _, verstuurd = asyncio.run(
+        ronde(coachD, tachtig, paal=PAAL_FORD, nu=dt.datetime(2026, 8, 20, 21, minuut)))
+besluitD = coachD.state["dev-laadpaal"]
+print(f"  kaart  : {besluitD['reason']}")
+controle("en op de kaart net zo", "70%" in besluitD["reason"], besluitD["reason"])
+controle("met een reden die klopt", "laadgrens" in besluitD["reason"], besluitD["reason"])
 
 print("=== 16. en waarom hij de klaar-tijd niet gehaald heeft ===")
 laat2 = instellingen()
@@ -634,12 +662,19 @@ controle("en zegt waarom hij doorlaadt", all(r == "overdue" for r, _ in na), f"{
 print("=== 18. en hij houdt op zodra de auto vol is ===")
 hassC.states.zet("sensor.laadpaal_status", "completed")
 # Op 90% plus wat er sindsdien in ging is dit geen volle auto, dus eerst één
-# herstart (06-09-2026). Blijft de paal "klaar" zeggen, dan is het klaar.
+# herstart (06-09-2026). Maar niet meteen: sinds 16-09-2026 wacht de coach tot
+# de accustand bij dit einde hoort. De teller van deze paal staat stil, dus dat
+# duurt hier de volle `SOC_SETTLE`. Blijft de paal daarna "klaar" zeggen, dan is
+# het klaar.
 besluit, verstuurd = asyncio.run(ronde(coachC, door, dt.datetime(2026, 8, 18, 19, 5)))
-controle("eerst één herstart, want 90% is niet vol",
+controle("nog geen herstart op een accustand van voor het stoppen",
+         not [d for d in verstuurd if d[0] == "easee" and d[2].get("action_command") == "start"],
+         f"{verstuurd}")
+besluit, verstuurd = asyncio.run(ronde(coachC, door, dt.datetime(2026, 8, 18, 19, 9)))
+controle("daarna één herstart, want 90% is niet vol",
          [d for d in verstuurd if d[0] == "easee" and d[2].get("action_command") == "start"],
          f"{verstuurd}")
-besluit, verstuurd = asyncio.run(ronde(coachC, door, dt.datetime(2026, 8, 18, 19, 6)))
+besluit, verstuurd = asyncio.run(ronde(coachC, door, dt.datetime(2026, 8, 18, 19, 10)))
 print(f"  {besluit['rule']}: laden={besluit['charge']}")
 controle("stopt bij een volle auto", not besluit["charge"] and besluit["rule"] == "complete",
          f"{besluit['rule']}")

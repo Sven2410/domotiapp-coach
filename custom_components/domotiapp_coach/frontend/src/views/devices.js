@@ -699,12 +699,19 @@ class DacViewDevices extends DacEditorElement {
                      value="${car.capacity_kwh || ""}" placeholder="bijvoorbeeld 58">
             </div>
             <div class="row">
-              <label>Hoogste stroom (A)</label>
-              <input type="number" min="0" max="100" step="1" inputmode="numeric"
-                     data-car-field="max_amps" data-car-index="${index}:${slot}"
-                     value="${car.max_amps || ""}" placeholder="optioneel">
-              <span class="sub">Alleen invullen als de auto zelf lager blijft dan je paal aankan.</span>
+              <label>Laadt tot (%)</label>
+              <input type="number" min="10" max="100" step="5" inputmode="numeric"
+                     data-car-field="target_percent" data-car-index="${index}:${slot}"
+                     value="${car.target_percent || 100}" placeholder="100">
+              <span class="sub">Staat er een laadgrens in de auto, zet hem hier ook. Dan weet de coach wanneer hij klaar is in plaats van het achteraf te merken.</span>
             </div>
+          </div>
+          <div class="row">
+            <label>Hoogste stroom (A)</label>
+            <input type="number" min="0" max="100" step="1" inputmode="numeric"
+                   data-car-field="max_amps" data-car-index="${index}:${slot}"
+                   value="${car.max_amps || ""}" placeholder="optioneel">
+            <span class="sub">Alleen invullen als de auto zelf lager blijft dan je paal aankan.</span>
           </div>
           <div class="row">
             <label>Accupercentage van de auto</label>
@@ -816,7 +823,12 @@ class DacViewDevices extends DacEditorElement {
       const key = input.dataset.carField;
       input.addEventListener("input", () => {
         const car = this.draft_.devices[index].cars[slot];
-        car[key] = key === "name" ? input.value : Number(input.value) || 0;
+        if (key === "name") car[key] = input.value;
+        // Een leeg doel is geen doel van nul maar gewoon vol. Zonder deze regel
+        // wordt het veld tijdens het wissen even 0, en dat weigert de server
+        // (10 tot 100) met een foutmelding over iets wat de klant niet deed.
+        else if (key === "target_percent") car[key] = Number(input.value) || 100;
+        else car[key] = Number(input.value) || 0;
         this.syncSaveBar_();
       });
     }
@@ -862,6 +874,7 @@ class DacViewDevices extends DacEditorElement {
           id: `car-${Math.random().toString(36).slice(2, 9)}`,
           name: "",
           capacity_kwh: 0,
+          target_percent: 100,
           phases: "three",
           max_amps: 0,
           soc_entity: "",

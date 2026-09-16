@@ -113,6 +113,38 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    `_uren_met_afbouw` in planner.py). En is de klaar-tijd voorbij terwijl de
    auto niet vol is, dan laadt hij op vol vermogen door (`overdue`).
 
+**"Vol" is wat de bewoner instelt, en een accustand telt pas als hij bezonken
+is** (v0.65.0). Sven op 16-09-2026: "ik wil een optie hebben op de kaart dat ik
+kan aangeven tot hoever de bus laadt. Mijne laadt tot 80% namelijk maar ik kan
+hem ook op 100% instellen." Twee dingen, en ze horen bij elkaar.
+
+Per auto staat er in Apparaten **Laadt tot (%)** (`target_percent`, 10 tot 100,
+standaard 100). Alles wat "vol" betekende rekent nu tot dat doel: `doel_van`,
+`doel_bereikt` en `klaar_zin` in planner.py, en daarmee `energy_needed_kwh`,
+`worst_case_kwh`, `_uren_met_afbouw` en `_niet_vol` in coach.py. Een doel van
+100 is precies wat `FULL_PERCENT` altijd deed, dus wie het veld leeg laat merkt
+er niets van. Een procent speling (`DOEL_MARGE`), want een accusensor is nooit
+fijner dan dat. **Dit is niet de laadgrens in de auto**: die stuurt de auto,
+deze stuurt de coach. Staan ze gelijk, dan weet de coach waar de beurt eindigt
+in plaats van het achteraf te merken; staat het doel lager, dan stopt de coach
+eerder. Daarvoor moest `NO_WRITE_RULES` een uitzondering krijgen
+(`_niets_schrijven` in coach.py): laadt de paal nog, dan is "klaar" een besluit
+en geen constatering, en gaat die 0 er wél heen, blijvend (zonder houdbaarheid,
+anders loopt hij af en laadt de auto door; in het virtuele huis gaf dat honderd-
+veertig wissels en 3,2 kWh van het net op een auto die allang op 80% stond).
+
+En de melding wacht op een accustand die bij het einde hoort. Die ochtend zei de
+paal om 10:46:21 "completed" terwijl de Ford-app nog 70% toonde; om 10:47:19
+werd dat 80. De coach besloot om 10:46:57, tweeëntwintig seconden te vroeg,
+herstartte de paal voor niets en stuurde een kritieke melding over 70%.
+`_soc_bezonken` deed dit al voor het verslag en doet het nu ook voor het oordeel
+"niet vol" (`_klaar_sinds` en `_soc_op` in coach.py, los van de sessie omdat die
+een ronde achterloopt). De herstart komt daarmee hooguit `SOC_SETTLE` later; de
+auto staat toch stil. Scenario's `laadgrens-80-ingesteld` (de auto stopt op 80%
+en dat staat ook in het profiel: geen herstart, geen alarm) en `doel-80` (de auto
+kan tot 100, de bewoner wil tot 80: de coach houdt zelf op), `Auto.doel` in het
+virtuele huis, proef 53 in test_planner.py, proef 15c en 18 in test_coach.py.
+
 **Het plafond voor de uren die komen is een meting van deze beurt** (v0.61.0).
 In de nacht van 09 op 10-09-2026 ging bij Van den Dam om het kwartier een
 warmtepomp aan op één fase, tot 22 A; de paal kreeg 8 A waar het plan met 16
@@ -419,11 +451,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 308 controles op het denkwerk
-python tests/test_coach.py       # 375 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1328 op hele laadbeurten in het virtuele huis
+python tests/test_planner.py     # 326 controles op het denkwerk
+python tests/test_coach.py       # 379 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1354 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 39 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 40 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

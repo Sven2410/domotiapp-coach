@@ -203,6 +203,21 @@ laadgrens = vast_zonnig.kopie(
     naam="laadgrens-80", uitleg="de auto stopt zelf op 80%",
     auto=replace(BUS, laadgrens=80.0),
 )
+# Dezelfde auto, maar nu staat die 80% ook in het profiel. Svens eigen geval,
+# 16-09-2026: zonder het doel rekende de coach tot 100, vroeg hij om 10:46 een
+# herstart voor een bus die precies deed wat hij moest doen, en stuurde hij een
+# kritieke melding over 70% omdat de Ford-app nog niet bijgewerkt was. Met het
+# doel erbij stopt hij uit zichzelf, zonder herstart en zonder alarm.
+laadgrens_ingesteld = vast_zonnig.kopie(
+    naam="laadgrens-80-ingesteld", uitleg="de auto stopt op 80% en dat staat ook in het profiel",
+    auto=replace(BUS, laadgrens=80.0, doel=80.0),
+)
+# En het geval waarin alleen het profiel het zegt: de auto zou tot 100 laden,
+# maar de bewoner wil op 80 stoppen. Dan is de coach degene die ophoudt.
+doel_onder_auto = vast_zonnig.kopie(
+    naam="doel-80", uitleg="de auto kan tot 100, de bewoner wil tot 80",
+    auto=replace(BUS, doel=80.0),
+)
 bijna_vol = vast_zonnig.kopie(
     naam="bijna-vol", uitleg="bus op 95% erin",
     auto=replace(BUS, soc=95.0),
@@ -638,7 +653,8 @@ ALLE = [
     dyn_zonnig, dyn_bewolkt, dyn_geen_zon, dyn_markt, dyn_salderen, dyn_avond, dyn_grote_auto,
     dyn_negatief, dyn_kwartier_later, dyn_geen_klaar_tijd,
     meter_teken, meter_teken_om, een_fase_krap, oven, lastbewaker, warmtepomp, warmtepomp_uit,
-    geen_soc, soc_opgegeven, soc_traag, laadgrens, bijna_vol, auto_slaapt,
+    geen_soc, soc_opgegeven, soc_traag, laadgrens, laadgrens_ingesteld,
+    doel_onder_auto, bijna_vol, auto_slaapt,
     pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,
     p1_weg, p1_lang_weg, paal_traag,
     tien_uur, tien_uur_zon, tien_uur_valt_tegen, tien_uur_vast, equalizer, prijzen_weg,
