@@ -2419,6 +2419,20 @@ controle("vol rond klopt met die ondergrens, niet met het einde van het uur",
          plan57.expected_done is not None and plan57.expected_done.hour == 22
          and plan57.expected_done.minute == 45, f"{plan57.expected_done}")
 
+# En ook als de afronding het verbergt. Om 22:26 met 2,19 kWh over vierendertig
+# minuten is het gemiddelde 3,86 kW, en dat rondt af naar 6 A; de stroom klopte
+# dan toevallig maar het vermogen (3,89 in plaats van 4,14) en "vol rond 23:00"
+# niet. Daarom toetst de regel op het vermogen en niet op de afgeronde stroom.
+laat57 = planner.timeline(
+    dt.datetime(2026, 9, 17, 22, 26), [], net57,
+    Car(capacity_kwh=19.7, phases=3, soc_percent=70.0, target_percent=80.0),
+    paal57, w57, 16, tariff=VAST, forecast=Forecast())
+b57 = laat57.blocks[0]
+print(f"  22:26 -> {b57.amps} A  {b57.kw:.2f} kW  {b57.why}")
+controle("de afronding verbergt het niet: vermogen en vol-rond kloppen ook",
+         b57.amps == MIN_AMPS and abs(b57.kw - 4.14) < 0.01 and "vol rond" in b57.why,
+         f"{b57.amps} A, {b57.kw} kW, {b57.why}")
+
 # Maar een uur dat wél vol benut wordt blijft gewoon staan, en een zonuur ook:
 # daar is de ondergrens al het antwoord en het gemiddelde klopt.
 vol57 = planner.timeline(
