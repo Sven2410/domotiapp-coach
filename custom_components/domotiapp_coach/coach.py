@@ -5223,6 +5223,10 @@ class ChargerCoach:
             "note": plan.note,
             "estimated": plan.estimated,
             "measured": plan.measured,
+            # Zonder deze regel bleef `solar_measured_note` in v0.67.0 hangen
+            # in de reden en bereikte hij de tijdlijn op de kaart nooit, terwijl
+            # `plan-ahead-sheet.js` er wel naar keek.
+            "solar_note": plan.solar_note,
             "blocks": [
                 {
                     "start": klok(blok.start),
