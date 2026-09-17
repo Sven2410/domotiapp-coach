@@ -3738,6 +3738,18 @@ voed69(coach69d, 45)
 klopt69 = coach69d._zon_gemeten(UUR69 + dt.timedelta(minutes=45))
 controle("een kloppende voorspelling blijft staan", klopt69 == 1.0, f"{klopt69}")
 
+# En de zin reist mee naar de kaart. In v0.67.0 deed hij dat niet: `_tijdlijn`
+# zette hem niet in de tijdlijn die het paneel krijgt, terwijl
+# plan-ahead-sheet.js er wel naar keek. Elk veld van `Plan` dat het scherm
+# gebruikt hoort hier langs te komen.
+plan69 = coach69._tijdlijn.__doc__ is not None
+velden69 = set(coachmod.ChargerCoach._tijdlijn.__code__.co_consts)
+kaartvelden = {"deadline", "latest_start", "expected_done", "kwh_needed", "hours_needed",
+               "amps", "planned_kwh", "solar_only", "note", "estimated", "measured",
+               "solar_note", "blocks"}
+controle("elk veld dat het scherm leest staat in de tijdlijn die het paneel krijgt",
+         kaartvelden <= velden69, f"mist {sorted(kaartvelden - velden69)}")
+
 # Zonder panelen, of in de schemering: niets beloofd, dus niets te corrigeren.
 coach69c = coach69_met(0)
 coach69c._zon_kwh = {}

@@ -200,6 +200,13 @@ voorspelling weer, en zo schoof de belofte elk uur op. Drie dingen erbij.
    `plan-ahead-sheet.js`): "Je dak gaf de afgelopen uren X% minder dan de
    zonverwachting zei, dus hij rekent verder met wat hij mat."
 
+   In v0.67.0 haalde die zin de tijdlijn niet: `_tijdlijn` in coach.py bouwt de
+   lijst voor het paneel veld voor veld op en `solar_note` stond er niet bij,
+   terwijl `plan-ahead-sheet.js` er wel naar keek. In de reden op de kaart
+   stond hij wel. Gerepareerd in v0.67.1, met een proef die elk veld dat het
+   scherm leest langs die lijst houdt (proef 69 in test_coach.py). **Elk nieuw
+   veld van `Plan` hoort in die twee lijsten tegelijk.**
+
 **Bij allebei de contracten, en het bijt verschillend.** Sven vroeg ernaar: "je
 weet ook dat dit thuis een vast contract is, dus ik weet niet hoe het met een
 dynamisch moet." Bij een vast contract is de zonvloer vóór 20:00 de enige deur
@@ -578,7 +585,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 338 controles op het denkwerk
-python tests/test_coach.py       # 387 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 388 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1391 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 40 op het rapport en op het paneel
