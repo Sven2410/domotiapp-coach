@@ -276,6 +276,18 @@ zon, terwijl `latest_start` 03:24 die nacht zei. Vier dingen erbij:
 
 Proef 53b in test_coach.py, proef 54 in test_planner.py.
 
+**Een laaduur op de kaart staat nooit onder de ondergrens van de paal**
+(v0.67.3). Sven op 17-09-2026 om 22:10, met 2,5 kWh te gaan: "dit klopt niet,
+4 A laden." Het restje werd uitgesmeerd over de vijftig minuten die nog van dat
+uur over waren, 2,94 kW, en dat is 4 A; zijn paal trok 5,92 A en 4,08 kW en was
+om 22:45 klaar in plaats van om 23:00. De regel die dit sinds 05-09-2026 al
+oploste ("nu staat er ineens 2 A, dat is helemaal niet de bedoeling") eist een
+vol uur ervóór, en bij het uur waar de coach ín zit ligt dat in het verleden,
+dus er bestaat geen schijf van. Een netblok toont nu minstens `MIN_AMPS`, en is
+het het laatste laaduur dan staat er "nog X kWh, vol rond HH:MM" bij, waar ook
+`expected_done` mee rekent. Zonuren blijven zoals ze waren: daar is de
+ondergrens al het antwoord. Proef 57 in test_planner.py.
+
 **De tijdlijn viel om bij een uur dat hij zelf had gewist** (v0.66.0). De
 crash in `_restje_naar_achteren` die op 15-09-2026 gevonden en niet gerepareerd
 werd: `sorted(uit)` is een momentopname en de lus wist er zelf uren uit, en een
@@ -597,7 +609,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 340 controles op het denkwerk
+python tests/test_planner.py     # 344 controles op het denkwerk
 python tests/test_coach.py       # 388 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1405 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag

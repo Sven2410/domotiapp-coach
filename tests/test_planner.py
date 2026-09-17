@@ -2390,6 +2390,47 @@ controle("een meting van gisteren raakt de zon van vandaag niet",
 controle("en zonder dag telt de factor helemaal niet",
          abs(planner.overschot_kwh(fc56(solar_factor=0.5), uur16) - kaal) < 0.001, "")
 
+print("=== 57. het laatste uur toont nooit minder dan de ondergrens (17-09-2026) ===")
+# Svens scherm om 22:10, met 2,5 kWh te gaan: "4 A, laden op 2,8 kW, vol rond
+# 23:00", terwijl zijn paal 5,92 A en 4,08 kW trok. 2,5 kWh uitgesmeerd over de
+# vijftig minuten die nog van dat uur over zijn is 2,94 kW, en dat is 4 A; maar
+# een paal levert niets onder 6 A, dus hij loopt op 4,14 kW en is om 22:45
+# klaar. Sven: "dit klopt niet, 4 A laden." Dezelfde klacht als op 05-09-2026.
+#
+# De restant-regel erboven kon er niet bij: die vraagt een vol uur ervóór en dat
+# ligt in het verleden, dus er bestaat geen schijf van.
+nu57 = dt.datetime(2026, 9, 17, 22, 10)
+w57 = Window(enabled=True, opens=None, deadline=dt.datetime(2026, 9, 18, 6, 0))
+auto57 = Car(capacity_kwh=19.7, phases=3, soc_percent=68.8, target_percent=80.0)
+paal57 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=5.92,
+                 limit_amps=6.0, started_at=dt.datetime(2026, 9, 17, 20, 0))
+net57 = Grid(surplus_w=0.0, phase_amps=[9.0, 6.0, 7.0], fuse_amps=25.0, charger_amps=5.92)
+plan57 = planner.timeline(nu57, [], net57, auto57, paal57, w57, 16, tariff=VAST,
+                          forecast=Forecast())
+blok57 = plan57.blocks[0]
+print(f"  {blok57.start:%H:%M}  {blok57.amps} A  {blok57.kw:.2f} kW  {blok57.why}")
+print(f"  vol rond {plan57.expected_done:%H:%M}")
+controle("het laatste uur staat op de ondergrens en niet op het gemiddelde",
+         blok57.amps == MIN_AMPS and abs(blok57.kw - 4.14) < 0.01,
+         f"{blok57.amps} A, {blok57.kw} kW")
+controle("en zegt wanneer hij vol is in plaats van het uur vol te maken",
+         "vol rond 22:45" in blok57.why, blok57.why)
+controle("vol rond klopt met die ondergrens, niet met het einde van het uur",
+         plan57.expected_done is not None and plan57.expected_done.hour == 22
+         and plan57.expected_done.minute == 45, f"{plan57.expected_done}")
+
+# Maar een uur dat wél vol benut wordt blijft gewoon staan, en een zonuur ook:
+# daar is de ondergrens al het antwoord en het gemiddelde klopt.
+vol57 = planner.timeline(
+    nu57.replace(hour=20, minute=0), [], net57,
+    Car(capacity_kwh=77.0, phases=3, soc_percent=20.0, target_percent=100.0),
+    paal57, w57, 16, tariff=VAST, forecast=Forecast())
+laadt57 = [b for b in vol57.blocks if b.charging]
+print(f"  een volle nacht: {[(b.start.hour, b.amps) for b in laadt57][:4]}")
+controle("een uur dat helemaal gebruikt wordt houdt zijn eigen stroom",
+         laadt57 and all(b.amps >= MIN_AMPS for b in laadt57),
+         f"{[(b.start.hour, b.amps) for b in laadt57]}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
