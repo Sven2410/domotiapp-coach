@@ -1857,6 +1857,7 @@ def timeline(
         # ondergrens niet eens kan, maar op vol vermogen tot hij vol is. Dus
         # de stroom die hij dan vraagt, en wanneer hij klaar is.
         vorige = genomen.get(start - timedelta(hours=1), 0.0)
+        laatste = not any(u > start and v > SCHIJF_MINIMUM for u, v in genomen.items())
         if (
             laadt and zonschijf is None and netschijf is not None
             and kwh_blok < ruimte_per_uur.get(start, 0.0) - SCHIJF_MINIMUM
@@ -1869,6 +1870,26 @@ def timeline(
             klaar_om = van + timedelta(hours=kwh_blok / kw) if kw > 0 else rij["end"]
             klaar_om = klaar_om.replace(second=0, microsecond=0)
             waarom = f"nog {_kwh(kwh_blok)}, vol rond {_clock(klaar_om)}"
+        elif laadt and zonschijf is None and blok_amps < MIN_AMPS:
+            # Een uur waarin de paal minder dan zijn ondergrens zou leveren
+            # bestaat niet. Hij levert de ondergrens en is dus eerder klaar;
+            # het gemiddelde over het uur is een getal dat nooit op de paal
+            # komt te staan.
+            #
+            # Dit is het uur waar we ín zitten, en dat is korter dan een uur:
+            # de restant-regel hierboven kan er niet bij, want die vraagt een
+            # vol uur ervóór en dat ligt in het verleden. Sven op 17-09-2026 om
+            # 22:10, met 2,2 kWh te gaan: op de kaart stond "4 A, laden op 2,8
+            # kW, vol rond 23:00" terwijl de paal 5,92 A en 4,08 kW trok en om
+            # 22:42 klaar zou zijn. Dezelfde klacht als op 05-09-2026: "nu
+            # staat er ineens 2 A, dat is helemaal niet de bedoeling."
+            blok_amps = MIN_AMPS
+            kw = watts_for(MIN_AMPS, car.phases) / 1000.0
+            if laatste and kw > 0:
+                klaar_om = (van + timedelta(hours=kwh_blok / kw)).replace(
+                    second=0, microsecond=0
+                )
+                waarom = f"nog {_kwh(kwh_blok)}, vol rond {_clock(klaar_om)}"
         plan.blocks.append(
             Blok(
                 start=start,
