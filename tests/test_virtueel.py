@@ -511,6 +511,20 @@ if (vl := v("zonbelofte-dynamisch")):
              f"{vl.kosten:.2f} tegen optimum {vl.optimum:.2f}")
     controle("zonbelofte dynamisch: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
+# Een meting van zaterdag hoort zondag met rust te laten. Bij Sven liep de zin
+# op 17-09-2026 tussen 17:46 en 20:00 op van "50% minder" naar "86% minder", en
+# dat klopte voor die uren: de voorspeller zei 769 Wh voor 19:00 en 406 voor
+# 20:00 terwijl het dak op nul stond. Zonder `solar_day` zou zo'n meting bij
+# zonsondergang ook de volgende dag inkrimpen, en bij een klaar-tijd die over
+# een dag heen loopt is dat duur. Oud: 23,0 kWh zon en € 10,80. Nieuw: 37,6 kWh
+# zon en € 9,35, bij een optimum van € 8,00.
+if (vl := v("weekend-voorspelling-mis")):
+    controle("weekend: de zon van zondag wordt niet weggestreept door zaterdag",
+             vl.uit_zon_kwh > 30, f"{vl.uit_zon_kwh:.1f} kWh uit zon")
+    controle("weekend: en dat scheelt tegenover de 10,80 van v0.67.1",
+             vl.kosten < 10.0, f"{vl.kosten:.2f}")
+    controle("weekend: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
 # --- de vaatwasser (06-09-2026) ----------------------------------------------
 #
 # Sven: "nu verder met de vaatwasser sturing." De bewoner geeft vrij, de coach

@@ -2333,12 +2333,13 @@ zon56 = {nu56.replace(hour=h, minute=0, second=0, microsecond=0): kwh
          for h, kwh in [(15, 0.95), (16, 1.552), (17, 1.364), (18, 0.5), (19, 0.1)]}
 paal56 = Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.05)
 
-def uren56(fasen, factor):
+def uren56(fasen, factor, dag=None):
     auto = Car(capacity_kwh=19.7, phases=fasen, soc_percent=25.0, target_percent=80.0)
     plan = planner.timeline(
         nu56, [], net56, auto, paal56, w56, 16, tariff=VAST,
         forecast=Forecast(solar_kwh=zon56, house_kwh={u: 0.94 for u in range(24)},
-                          solar_factor=factor),
+                          solar_factor=factor,
+                          solar_day=nu56.date() if dag is None else dag),
     )
     return [b.start.hour for b in plan.blocks if b.charging], plan
 
@@ -2368,15 +2369,26 @@ controle("zonder meting staat er niets", plan56.solar_note == "", plan56.solar_n
 # 1,552 kWh maal 0,5 is 0,776, min 0,94 huis is niets meer over. Andersom (het
 # overschot halveren) zou er 0,306 uitkomen, en dat is niet wat er gemeten is.
 uur16 = nu56.replace(hour=16, minute=0, second=0, microsecond=0)
-kaal = planner.overschot_kwh(Forecast(solar_kwh=zon56, house_kwh={16: 0.94}), uur16)
-half = planner.overschot_kwh(
-    Forecast(solar_kwh=zon56, house_kwh={16: 0.94}, solar_factor=0.5), uur16)
-driekwart = planner.overschot_kwh(
-    Forecast(solar_kwh=zon56, house_kwh={16: 0.94}, solar_factor=0.75), uur16)
+def fc56(**extra):
+    return Forecast(solar_kwh=zon56, house_kwh={16: 0.94}, **extra)
+kaal = planner.overschot_kwh(fc56(), uur16)
+half = planner.overschot_kwh(fc56(solar_factor=0.5, solar_day=uur16.date()), uur16)
+driekwart = planner.overschot_kwh(fc56(solar_factor=0.75, solar_day=uur16.date()), uur16)
 print(f"  overschot zonder factor {kaal:.3f}, met 0,75 {driekwart:.3f}, met 0,5 {half:.3f} kWh")
 controle("de factor zit op de opbrengst en niet op het overschot",
          abs(kaal - 0.612) < 0.001 and abs(driekwart - (1.552 * 0.75 - 0.94)) < 0.001
          and half == 0.0, f"{kaal}, {driekwart}, {half}")
+
+# En alleen voor uren van de dag waarop gemeten is. Een meting bij zonsondergang
+# zegt niets over morgenmiddag; zonder deze grens zou een klaar-tijd die over
+# een dag heen loopt (weekend) de zon van de volgende dag wegstrepen.
+morgen56 = planner.overschot_kwh(
+    fc56(solar_factor=0.5, solar_day=(uur16 - dt.timedelta(days=1)).date()), uur16)
+print(f"  gemeten op een andere dag: {morgen56:.3f} kWh (ongecorrigeerd {kaal:.3f})")
+controle("een meting van gisteren raakt de zon van vandaag niet",
+         abs(morgen56 - kaal) < 0.001, f"{morgen56} tegen {kaal}")
+controle("en zonder dag telt de factor helemaal niet",
+         abs(planner.overschot_kwh(fc56(solar_factor=0.5), uur16) - kaal) < 0.001, "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

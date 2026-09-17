@@ -58,6 +58,13 @@ class Zon:
     onder: float = 19.75
     wolken: str = "helder"      # helder | bewolkt | wisselend | middag-dicht | geen
     voorspeld: str | None = None  # None: de voorspelling klopt
+    # Het echte weer per dag, geteld vanaf de eerste dag van het scenario:
+    # {0: "bewolkt", 1: "helder"}. Waar niets staat geldt `wolken`. De
+    # voorspelling blijft `voorspeld`, dus hiermee is een dag te maken waarop de
+    # voorspeller er flink naast zat en een dag waarop hij klopt. Dat is nodig
+    # om te zien of een meting van gisteren de zon van vandaag met rust laat;
+    # zie `solar_day` in planner.py.
+    wolken_per_dag: dict = field(default_factory=dict)
     zaad: int = 1
     # Een echte uurkromme, kWh per uur van de dag, zoals het energiedashboard
     # hem geeft. Dan is dit het heldere dak en niet de sinus; `wolken` en
@@ -68,6 +75,9 @@ class Zon:
     # tot, kW aan de omvormer). Bij Sven op 11-09-2026 ging het dak om 09:35
     # van 1,1 naar 3,0 kW, en twee minuten later weer naar 1,2.
     pieken: list[tuple[str, str, float]] = field(default_factory=list)
+    # De eerste dag van het scenario, gezet door `Wereld`; alleen nodig om
+    # `wolken_per_dag` te kunnen tellen.
+    eerste_dag: dt.date | None = None
 
     # "half": de voorspeller zag de helft van wat het dak deed, zoals bij Sven
     # op 08-09-2026 (Forecast.Solar 1,0 tot 1,7 kWh per uur, het dak 1,9 tot 4,4).
@@ -102,12 +112,18 @@ class Zon:
             return 1.0 if random.Random(f"{self.zaad}-{blok}").random() < 0.6 else 0.3
         raise ValueError(f"onbekend weer: {patroon}")
 
+    def weer_op(self, moment: dt.datetime) -> str:
+        """Het echte weer op deze dag; `wolken` als er niets per dag staat."""
+        if not self.wolken_per_dag or self.eerste_dag is None:
+            return self.wolken
+        return self.wolken_per_dag.get((moment.date() - self.eerste_dag).days, self.wolken)
+
     def nu_kw(self, moment: dt.datetime) -> float:
         u = moment.hour + moment.minute / 60 + moment.second / 3600
         for van, tot, kw in self.pieken:
             if _uur(van) <= u < _uur(tot):
                 return kw
-        return self.helder_kw(moment) * self.factor(moment, self.wolken)
+        return self.helder_kw(moment) * self.factor(moment, self.weer_op(moment))
 
     def verwacht_kwh(self, uur: dt.datetime) -> float:
         """Wat de voorspeller voor dit hele uur zegt, in kWh."""
@@ -910,6 +926,8 @@ class Wereld:
         self.paal = dataclasses.replace(s.paal, ontvangen=[])
         self.prijzen = dataclasses.replace(s.prijzen)
         self.nu = dt.datetime.fromisoformat(s.begin)
+        # Vanaf welke dag `Zon.wolken_per_dag` telt.
+        self.zon.eerste_dag = self.nu.date()
         # Wanneer het programma op de vaatwasser gekozen werd, en de eindtijd
         # zoals Home Connect hem laat zien met sinds wanneer: Home Assistant
         # zet `last_changed` alleen als de waarde verandert. Zie
