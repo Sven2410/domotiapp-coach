@@ -218,6 +218,21 @@ doel_onder_auto = vast_zonnig.kopie(
     naam="doel-80", uitleg="de auto kan tot 100, de bewoner wil tot 80",
     auto=replace(BUS, doel=80.0),
 )
+# Svens Ford meldt zijn accustand per tien procent, ongeveer elk half uur.
+# Tussen twee stappen staat het beeld van de coach stil terwijl de auto voller
+# wordt: op 17-09-2026 zei de kaart om 22:26 "nog 2,2 kWh" terwijl er 0,18 kWh
+# in ging. Met het doel op 80 is het de coach die hoort op te houden, en dat kan
+# hij alleen met een stand die bijgeteld is.
+# Krap gezet, want daar kost het geld: zolang de sensor op een oude stap staat
+# denkt de coach tot een hele stap meer nodig te hebben dan waar, en dat is bij
+# deze bus ruim twee kilowattuur oftewel een half uur op vol vermogen. Dan
+# slaat de klaar-tijdregel aan terwijl er zon ligt.
+soc_stappen = vast_zonnig.kopie(
+    naam="accustand-per-tien",
+    uitleg="de auto meldt zijn accustand per tien procent; om 13:00 erin op 55%, klaar om 17:00",
+    begin="2026-09-07 12:55", kabel_erin="13:00", klaar_om="17:00", duur_uren=6,
+    auto=replace(BUS, soc=55.0, soc_stap=10.0, soc_vertraging_min=3),
+)
 bijna_vol = vast_zonnig.kopie(
     naam="bijna-vol", uitleg="bus op 95% erin",
     auto=replace(BUS, soc=95.0),
@@ -722,7 +737,7 @@ ALLE = [
     dyn_negatief, dyn_kwartier_later, dyn_geen_klaar_tijd,
     meter_teken, meter_teken_om, een_fase_krap, oven, lastbewaker, warmtepomp, warmtepomp_uit,
     geen_soc, soc_opgegeven, soc_traag, laadgrens, laadgrens_ingesteld,
-    doel_onder_auto, bijna_vol, auto_slaapt,
+    doel_onder_auto, soc_stappen, bijna_vol, auto_slaapt,
     pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,
     p1_weg, p1_lang_weg, paal_traag,
     tien_uur, tien_uur_zon, tien_uur_valt_tegen, tien_uur_vast, equalizer, prijzen_weg,

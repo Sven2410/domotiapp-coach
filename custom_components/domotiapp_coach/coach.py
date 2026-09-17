@@ -367,6 +367,17 @@ NO_WRITE_RULES = frozenset({"disconnected", "complete"})
 # oud is.
 SOC_SETTLE = timedelta(minutes=3)
 
+# Een accusensor die met stappen meldt: hoeveel procent de coach er hoogstens
+# zelf bij mag tellen tussen twee stappen door, en waar hij mee begint zolang
+# hij nog geen stap gezien heeft. Zie `_soc_bijgeteld`.
+#
+# Beginnen bij één en naar boven leren, nooit andersom: over-corrigeren laat de
+# coach te vroeg stoppen, onder-corrigeren is wat hij tot v0.68.0 altijd deed
+# en kost hooguit nauwkeurigheid. Een sprong groter dan `SOC_STAP_MAX` telt niet
+# mee als stap; dat is een auto die ondertussen ergens anders geladen heeft.
+SOC_STAP_START = 1.0
+SOC_STAP_MAX = 25.0
+
 # Hoeveel twee ronden van elkaar mogen verschillen voordat het geen meting meer
 # is maar een sensor die nog aan het bijkomen is. Zie `_tempo_leren`. Ruim
 # genoeg voor het gewiebel van een paal die op zijn limiet moduleert, krap
@@ -702,6 +713,14 @@ class ChargerCoach:
         # bijgewerkt en is hier dus een ronde te oud.
         self._soc_stand: dict[str, float | None] = {}
         self._soc_op: dict[str, datetime] = {}
+        # De laatste kale meting van de accusensor, en wat de eigen meting van
+        # de paal toen stond. Daarmee telt `_soc_bijgeteld` op wat er sinds die
+        # meting in ging. Kaal, want de bijgetelde stand verandert elke ronde en
+        # dan zou `_soc_op` nooit meer tot rust komen.
+        self._soc_ruw: dict[str, float] = {}
+        self._soc_ijk: dict[str, tuple[float, float]] = {}
+        # De kleinste sprong die deze sensor liet zien: zijn resolutie.
+        self._soc_stap: dict[str, float] = {}
         # Het aantal fasen zoals het deze ronde gemeten is, per laadpunt. Eén
         # meting per ronde, want `_fasen_stabiel` telt ronden.
         self._fase_nu: dict[str, int | None] = {}
@@ -3390,8 +3409,9 @@ class ChargerCoach:
         # hier dus precies één ronde achter: net te laat om te zien dat de auto
         # zich mét het "klaar" van de paal meldde. Daarom hier nog een keer, op
         # het moment dat `car` gebouwd is.
-        if car.soc_percent != self._soc_stand.get(device_id):
-            self._soc_stand[device_id] = car.soc_percent
+        stand = self._soc_ruw.get(device_id, car.soc_percent)
+        if stand != self._soc_stand.get(device_id):
+            self._soc_stand[device_id] = stand
             self._soc_op[device_id] = now
         # Sinds wanneer de paal "klaar" zegt. Nodig om te weten of de accustand
         # bij dít einde hoort of nog van halverwege de beurt is.
@@ -3530,7 +3550,16 @@ class ChargerCoach:
         # opgegeven, bijgewerkt met wat de paal er sindsdien in heeft gedaan.
         soc = _number(self.hass, profile.get("soc_entity"))
         geschat = False
-        if soc is None:
+        if soc is not None:
+            # Wat de sensor zelf zei blijft apart staan: `_soc_op` hoort tot
+            # rust te komen zodra de sensor stilstaat, en de bijgetelde stand
+            # loopt elke ronde door. Zie `_soc_bijgeteld`.
+            self._soc_ruw[device_id] = soc
+            soc = self._soc_bijgeteld(
+                device_id, soc, float(profile.get("capacity_kwh") or 0)
+            )
+        else:
+            self._soc_ruw.pop(device_id, None)
             soc = self._typed_soc(settings, device, profile)
             geschat = soc is not None
         if soc is None:
@@ -3800,6 +3829,42 @@ class ChargerCoach:
                 except (KeyError, TypeError, ValueError):
                     continue
         return uit
+
+    def _soc_bijgeteld(self, device_id: str, gemeten: float, capacity: float) -> float:
+        """De stand van de auto, plus wat de paal sinds die stand geleverd heeft.
+
+        Hetzelfde wat `_typed_soc` voor een opgegeven stand doet, maar dan voor
+        een auto die zijn stand zelf meldt. Dat was nodig omdat niet elke
+        accusensor per procent meldt.
+
+        Svens Ford meldt per tien procent, ongeveer elk half uur. Op 17-09-2026
+        stond hij van 21:58:43 tot 22:30:37 op zeventig; in die achtentwintig
+        minuten leverde de paal 4.072 W, dus 1,90 kWh aan de stekker en bijna
+        negen procentpunt in de accu. Om 22:26 zei de kaart "nog 2,2 kWh, vol
+        rond 23:00" terwijl er 0,18 kWh in ging en de bus om 22:29 op zijn doel
+        stond. Sven: "dat hoeft helemaal niet en is onzin."
+
+        Geen gok maar de eigen meting van de paal (`_eigen`, zie `_geladen`),
+        want die loopt wél per ronde mee. Begrensd op één stap van de sensor,
+        zodat een correctie nooit groter kan worden dan de onnauwkeurigheid die
+        hij repareert; die stap wordt geleerd uit de sprongen die de sensor zelf
+        maakt en begint bij één procent. Zo is over-corrigeren uitgesloten, en
+        dat is de richting die ertoe doet: te hoog rekenen laat de coach te
+        vroeg stoppen.
+        """
+        eigen = float((self._eigen.get(device_id) or {}).get("kwh") or 0.0)
+        ijk = self._soc_ijk.get(device_id)
+        if ijk is None or abs(ijk[0] - gemeten) > 1e-9:
+            if ijk is not None and 0.0 < gemeten - ijk[0] <= SOC_STAP_MAX:
+                sprong = gemeten - ijk[0]
+                eerder = self._soc_stap.get(device_id)
+                self._soc_stap[device_id] = sprong if eerder is None else min(eerder, sprong)
+            self._soc_ijk[device_id] = (gemeten, eigen)
+            return gemeten
+        if not capacity:
+            return gemeten
+        erbij = max(0.0, eigen - ijk[1]) * CHARGE_EFFICIENCY / capacity * 100.0
+        return min(100.0, gemeten + min(erbij, self._soc_stap.get(device_id, SOC_STAP_START)))
 
     def _typed_soc(
         self,
@@ -4569,8 +4634,15 @@ class ChargerCoach:
         # van dat moment erbij. Een percentage dat wegvalt is geen nieuw
         # percentage: de auto hangt nog aan dezelfde kabel en kan dus niet
         # weggereden zijn. Zie `_onthouden_soc` voor wat ermee gebeurt.
-        if car.soc_percent is not None and car.soc_percent != sessie.get("soc_gezien"):
-            sessie["soc_gezien"] = car.soc_percent
+        # De kale meting van de sensor, niet de bijgetelde stand: die laatste
+        # loopt elke ronde door en dan zou "de accustand is net bijgewerkt"
+        # altijd waar zijn. Dat brak in het virtuele huis `ford-storing`, waar
+        # het verslag daardoor meteen bij de storing uitging in plaats van te
+        # wachten tot de auto zich meldde. Zie `_soc_bijgeteld` en
+        # `_soc_bezonken`.
+        gemeten = self._soc_ruw.get(device_id, car.soc_percent)
+        if gemeten is not None and gemeten != sessie.get("soc_gezien"):
+            sessie["soc_gezien"] = gemeten
             sessie["soc_moment"] = now
             sessie["soc_meter"] = meter
 

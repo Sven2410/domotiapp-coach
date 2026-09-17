@@ -3757,6 +3757,55 @@ voed69(coach69c, 60)
 geen69 = coach69c._zon_gemeten(UUR69 + dt.timedelta(minutes=60))
 controle("zonder belofte geen oordeel", geen69 is None, f"{geen69}")
 
+print("=== 70. een accusensor die per tien procent meldt (thuis, 17-09-2026) ===")
+# De Ford stond van 21:58:43 tot 22:30:37 op zeventig terwijl de paal 4.072 W
+# leverde: 1,90 kWh aan de stekker, bijna negen procentpunt in de accu. Om 22:26
+# zei de kaart "nog 2,2 kWh, vol rond 23:00" terwijl er 0,18 kWh in ging. Sven:
+# "dat hoeft helemaal niet en is onzin."
+hass70, _, coach70 = bouw(huis(), instellingen())
+D70 = "dev-laadpaal"
+
+def bij70(ruw, eigen_kwh):
+    coach70._eigen.setdefault(D70, {"kwh": 0.0})["kwh"] = eigen_kwh
+    return coach70._soc_bijgeteld(D70, ruw, 19.7)
+
+# Eerste meting: die is het ijkpunt en wordt niet opgehoogd.
+controle("de eerste meting blijft zoals hij is", bij70(60.0, 10.0) == 60.0, "")
+# Zolang de sensor nog geen sprong liet zien telt hij hooguit één procent bij.
+print(f"  nog geen sprong gezien, 1,9 kWh erin: {bij70(60.0, 11.9):.1f}%")
+controle("zonder bekende stap hoogstens een procent erbij",
+         abs(bij70(60.0, 11.9) - 61.0) < 0.001, f"{bij70(60.0, 11.9)}")
+# De sensor springt naar 70: dat is zijn resolutie, dus vanaf nu mag er tot
+# tien procent bijgeteld worden.
+controle("een sprong van tien is het nieuwe ijkpunt", bij70(70.0, 11.9) == 70.0, "")
+op70 = bij70(70.0, 11.9 + 1.90)
+print(f"  na de sprong, 1,90 kWh geleverd: {op70:.1f}% (kaal 70,0)")
+controle("nu telt hij de kilowatturen van de paal er wel bij",
+         abs(op70 - (70.0 + 1.90 * 0.9 / 19.7 * 100)) < 0.01, f"{op70}")
+controle("en dat is precies wat er die avond ontbrak: ruim acht procentpunt",
+         8.0 < op70 - 70.0 < 9.0, f"{op70 - 70.0}")
+# Maar nooit meer dan één stap, hoe lang de paal ook doorlevert.
+ver70 = bij70(70.0, 11.9 + 10.0)
+print(f"  tien kWh geleverd zonder nieuwe meting: {ver70:.1f}%")
+controle("de correctie blijft binnen een stap van de sensor", ver70 == 80.0, f"{ver70}")
+# Een auto zonder capaciteit in het profiel valt terug op de kale meting.
+controle("zonder capaciteit blijft het de kale meting",
+         coach70._soc_bijgeteld(D70, 70.0, 0.0) == 70.0, "")
+
+# En een sensor die netjes per procent meldt merkt er niets van: de sprong is
+# dan een, dus de correctie ook hoogstens een.
+hass70b, _, coach70b = bouw(huis(), instellingen())
+def fijn70(ruw, eigen_kwh):
+    coach70b._eigen.setdefault(D70, {"kwh": 0.0})["kwh"] = eigen_kwh
+    return coach70b._soc_bijgeteld(D70, ruw, 19.7)
+fijn70(60.0, 10.0)
+fijn70(61.0, 10.2)
+fijn70(62.0, 10.4)
+fijn = fijn70(62.0, 12.4)
+print(f"  sensor per procent, 2 kWh erin zonder nieuwe melding: {fijn:.1f}%")
+controle("een fijne sensor krijgt hoogstens een procent erbij", abs(fijn - 63.0) < 0.001,
+         f"{fijn}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

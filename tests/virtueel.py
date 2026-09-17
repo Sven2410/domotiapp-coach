@@ -222,6 +222,11 @@ class Auto:
     aanloop_s: int = 60
     # Zo lang doet zijn app erover om een nieuw percentage te laten zien.
     soc_vertraging_min: int = 0
+    # In stappen van zoveel procent meldt hij zijn accustand. Svens Ford doet
+    # tien: 31, 40, 50, 60, 70, 80, ongeveer elk half uur. Tussen twee stappen
+    # staat het beeld van de coach stil terwijl de auto voller wordt; zie
+    # `_soc_bijgeteld` in coach.py.
+    soc_stap: float = 1.0
     # Vanaf dit percentage neemt de auto zelf gas terug: daarboven neemt hij
     # nog `afbouw_deel` van zijn maximum. Sven op 06-09-2026: "bepaalde auto's
     # schroeven vanaf een bepaald procent zelf hun doorlaatbaarheid terug."
@@ -303,7 +308,8 @@ class Auto:
     def gemelde_soc(self, nu: dt.datetime) -> float | None:
         if not self.meldt_soc:
             return None
-        self.soc_gemeld.append((nu, int(self.soc)))
+        stap = max(1.0, self.soc_stap)
+        self.soc_gemeld.append((nu, int(self.soc // stap * stap)))
         grens = nu - dt.timedelta(minutes=self.soc_vertraging_min)
         oud = [s for t, s in self.soc_gemeld if t <= grens]
         return oud[-1] if oud else self.soc_gemeld[0][1]
@@ -631,6 +637,10 @@ class Regel:
     prijs: float | None
     fase_amps: list[float]
     status: str
+    # Wat de coach zelf zegt nog te moeten laden, uit `plan_ahead`. Dat is het
+    # getal dat de bewoner op de kaart leest, en het hangt aan de accustand
+    # zoals de coach die kent; zie `_soc_bijgeteld` in coach.py.
+    nodig_kwh: float | None = None
 
 
 @dataclass
@@ -1430,6 +1440,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
             regel = Regel(
                 tijd=nu, regel=besluit.get("rule", "?"), amps=int(besluit.get("amps") or 0),
                 reden=besluit.get("reason", ""), plan=besluit.get("plan", ""),
+                nodig_kwh=(besluit.get("plan_ahead") or {}).get("kwh_needed"),
                 paal_w=wereld.paal_w, paal_amps=wereld.auto.trekt_amps, soc=wereld.auto.soc,
                 zon_w=wereld.zon_w, huis_w=wereld.huis_w,
                 over_w=max(0.0, wereld.zon_w - wereld.huis_w),
