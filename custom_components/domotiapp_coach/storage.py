@@ -19,6 +19,7 @@ from homeassistant.helpers.storage import Store
 from .ontvangers import migreer_load_alert
 from .const import (
     PROGRAMMA_TYPES,
+    TEMPO_ONDERGRENS,
     BEURTEN_KEY,
     BEURTEN_MAX,
     BEURTEN_VERSION,
@@ -127,6 +128,21 @@ def _merge(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _tempo_klopt(entry: dict[str, Any]) -> bool:
+    """Of deze `car_pace`-rij een tempo is dat een paal kan leveren.
+
+    Tot v0.66.0 kon er een tussenstand van een stroomsensor in belanden: thuis
+    stond er op 17-09-2026 0,1 kW voor de band van 0 tot 10 procent, en daarmee
+    rekende de klaar-tijdregel bijna twintig uur voor die ene band. Zo'n rij
+    gaat er bij de eerstvolgende opslag uit; `_tempo_uit` in coach.py negeert
+    hem tot het zover is.
+    """
+    try:
+        return float(entry["kw"]) >= TEMPO_ONDERGRENS
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def _forget_removed_devices(data: dict[str, Any]) -> dict[str, Any]:
     """Drop everything that points at a device that no longer exists.
 
@@ -155,6 +171,12 @@ def _forget_removed_devices(data: dict[str, Any]) -> dict[str, Any]:
             for entry in data.get(sleutel, [])
             if isinstance(entry, dict) and entry.get("device") in known
         ]
+
+    # En een laadtempo onder wat een paal überhaupt kan leveren is geen meting
+    # maar een ongeluk; tot v0.66.0 kon dat erin komen. Zie `TEMPO_ONDERGRENS`.
+    data["car_pace"] = [
+        entry for entry in data["car_pace"] if _tempo_klopt(entry)
+    ]
 
     strategy = data.get("strategy")
     if isinstance(strategy, dict):

@@ -94,7 +94,18 @@ MIN_RUN_MINUTES = 10
 # pendelen dat een auto na een stuk of wat pogingen helemaal laat afhaken, en de
 # paar minuten bijkopen die dit hooguit kost wegen niet op tegen een auto die de
 # hele middag stilstaat.
-WAKE_AMPS = 10
+#
+# Zestien en niet tien, sinds 17-09-2026. Een Easee in automatische fasemodus
+# kiest het aantal fasen bij elke start opnieuw, en hij kiest naar wat er
+# aangeboden wordt. Thuis stopte de coach die middag om 14:10 om op de zon van
+# 15:00 te wachten, wekte om 14:14 met tien ampère, en de paal begon op één
+# fase: 5,875 A bij 1323 W is 225 V per ampère. Om 14:05 was het op hetzelfde
+# aanbod nog 5,900 A bij 4070 W, dus 690, en om 14:24 op zestien ampère weer
+# 687. Sven: "die 10 A wekstroom, doe dat gewoon 16 A maken." De paal wisselt
+# dus wél van fase, de coach niet, en wekken op het plafond is wat die keuze de
+# goede kant op stuurt. Dit blijft begrensd door `ceiling_amps`, dus onder de
+# zekering en onder de lastbewaker komt hij niet uit.
+WAKE_AMPS = 16
 
 # Hoe lang een auto de tijd krijgt voordat de kaart zegt dat hij niets afneemt.
 # In seconden en niet in ronden, want een ronde is niet altijd een minuut: een
@@ -1470,7 +1481,11 @@ def _restje_naar_achteren(
     uur = timedelta(hours=1)
 
     for start in sorted(uit):
-        if start in zon_uren or uit[start] <= SCHIJF_MINIMUM:
+        # `sorted(uit)` is een momentopname en de lus hieronder wist uren uit
+        # `uit`: een uur dat al naar voren geschoven is bestaat niet meer en
+        # heeft ook niets meer te schuiven. Zonder deze regel viel de tijdlijn
+        # om met een KeyError, gezien op 15-09-2026 in `warmtepomp-nacht`.
+        if start not in uit or start in zon_uren or uit[start] <= SCHIJF_MINIMUM:
             continue
         vol = ruimte.get(start, 0.0)
         tekort = vol - uit[start]
@@ -1649,6 +1664,13 @@ def timeline(
 
     horizon = max((rij["end"] for rij in prices), default=None)
     alleen_zon = bool(prices) and einde is not None and horizon < einde
+    # Dezelfde grens die `schijven` hanteert, zodat de tijdlijn kan zeggen
+    # waaróm een uur leeg is. Bij een vast contract komt er voor de avond niets
+    # van het net bij; zonder die uitleg stond er "buiten je tijden" boven een
+    # uur dat gewoon binnen het schema valt, en dat klopte niet. Sven op
+    # 17-09-2026: "hij zegt nu 14:00 wachten buiten je tijden, maar dat klopt
+    # ook niet."
+    netto_vanaf = _evening_before(einde) if not prices else None
     alle = schijven(
         now, prices, grid, car, amps, begin, einde, tariff, forecast,
         ceiling_later=structureel, alleen_zon=alleen_zon,
@@ -1715,6 +1737,10 @@ def timeline(
                 waarom = "een van de goedkoopste manieren"
         elif begin is not None and rij["end"] <= begin:
             waarom = "voor je begintijd"
+        elif not schijven_hier and in_evening_peak(start):
+            waarom = "de avondpiek, daar komt niets van het net bij"
+        elif not schijven_hier and netto_vanaf is not None and rij["end"] <= netto_vanaf:
+            waarom = f"geen zon over, en voor {_clock(netto_vanaf)} geen net"
         elif not schijven_hier:
             waarom = "buiten je tijden"
         else:
@@ -1899,6 +1925,20 @@ def _uitgezet(window: Window, now: datetime) -> str:
 # de coach om 00:13 voor een goedkoper uur en zette de regel hem om 00:17 weer
 # aan.
 DEADLINE_SLACK_HOURS = 1.0
+
+# Hoeveel speling er bovenop die van hierboven moet zijn voordat een sessie die
+# al op vol vermogen staat er weer vanaf mag. Grijpen bij een uur, loslaten bij
+# vier: dat verschil is er met opzet, want zonder dat zou de regel om de minuut
+# aan en uit gaan. Zie `must_finish` in `_decide`.
+#
+# Dat vasthouden was zelf een reparatie (18-08-2026, twintig minuten lang om de
+# minuut wisselen tussen 14 en 6 A), en het had een gat: het vroeg nooit meer
+# of de reden er nog was. Op 17-09-2026 thuis sloeg de klaar-tijdregel aan op
+# een tempo van 0,1 kW dat uit een halve meting kwam, en daarna bleef de paal
+# op 16 A staan terwijl hij tot 03:24 die nacht had kunnen wachten; Sven zag
+# 11,2 kW van het net bij 452 W zon. Eén verkeerd getal hoort geen hele nacht
+# te duren.
+DEADLINE_RELEASE_HOURS = 3.0
 
 # Hoeveel uur een auto met een geschatte accustand extra krijgt in de
 # klaar-tijdsom. Dezelfde maat als de speling zelf: Svens uur.
@@ -2421,7 +2461,13 @@ def _decide(
     # halverwege gas terugnemen zonder alsnog te laat te zijn.
     if window.enabled and end and needed is not None:
         slack = (end - now).total_seconds() / 3600 - needed
-        if slack <= _slack_hours(end) or must_finish:
+        # Vasthouden zolang het krap is, en loslaten zodra het ruim is. De twee
+        # grenzen verschillen (`DEADLINE_RELEASE_HOURS`), anders wisselt hij om
+        # de minuut; ze zijn er allebei, anders blijft een sessie op vol
+        # vermogen staan omdat hij dat een keer was.
+        if slack <= _slack_hours(end) or (
+            must_finish and slack <= _slack_hours(end) + DEADLINE_RELEASE_HOURS
+        ):
             return Decision(
                 True,
                 ceiling,

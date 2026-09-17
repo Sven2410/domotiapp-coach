@@ -223,8 +223,13 @@ bijna_vol = vast_zonnig.kopie(
     auto=replace(BUS, soc=95.0),
 )
 auto_slaapt = vast_zonnig.kopie(
-    naam="auto-wordt-niet-wakker", uitleg="een auto die pas op 14 A op gang komt",
-    auto=replace(BUS, wek_amps=14.0),
+    naam="auto-wordt-niet-wakker", uitleg="een auto die helemaal niet op gang komt: zelfs het hele plafond wekt hem niet",
+    # Meer dan de paal kan geven (16 A), dus geen wekpoging helpt. Tot
+    # 17-09-2026 stond hier 14 A: toen bood de coach er tien aan en was dat
+    # genoeg om hem stil te houden. Sinds de wekstroom op zestien staat is dat
+    # geen slapende auto meer maar een auto die gewoon wakker wordt, en juist
+    # dat moest deze proef niet meten.
+    auto=replace(BUS, wek_amps=20.0),
 )
 
 # --- de bewoner --------------------------------------------------------------
@@ -371,7 +376,7 @@ vdd_dure_zondag = van_den_dam.kopie(
     prijzen=Prijzen(per_dag={**VDD_PRIJZEN, "2026-09-06": VDD_ZONDAG_DUUR}),
 )
 vdd_wekken = van_den_dam.kopie(
-    naam="van-den-dam-ford-wekken", uitleg="hetzelfde, de Ford wil 10 A om wakker te worden",
+    naam="van-den-dam-ford-wekken", uitleg="hetzelfde, de Ford wil 10 A om wakker te worden en krijgt sinds 17-09-2026 het hele plafond aangeboden",
     auto=replace(FORD, wek_amps=10.0),
 )
 vdd_koken = van_den_dam.kopie(
@@ -469,6 +474,30 @@ afbouw_krap = afbouw.kopie(
 afbouw_krap_geleerd = afbouw_krap.kopie(
     naam="afbouw-krap-geleerd", uitleg="hetzelfde, en de coach weet het van een vorige beurt",
     geleerd_tempo={8: 1.84, 9: 1.84},
+)
+
+# --- wat 17-09-2026 thuis leerde ---------------------------------------------
+#
+# De coach stopte om 14:10 om op de zon van 15:00 te wachten en wekte om 14:14
+# met tien ampère. De Easee staat in automatische fasemodus, koos naar dat
+# aanbod, en begon op één fase: 5,875 A bij 1323 W, terwijl het om 14:05 op
+# hetzelfde aanbod nog 4070 W was. Sven: "hoe kon de laadpaal opeens op één
+# fase gaan laden? Die 10 A wekstroom, doe dat gewoon 16 A maken."
+#
+# Wisselend weer, want daar stopt en start de coach; een driefasige auto, want
+# alleen die heeft er last van; en een paal die onder de twaalf ampère voor één
+# fase kiest.
+fasekeuze = vast_wisselend.kopie(
+    naam="easee-fasekeuze",
+    uitleg="wolkenvelden, driefasige auto, en een Easee die onder 12 A voor één fase kiest",
+    # Twintig seconden aanloop en een wereld die per twintig seconden tikt,
+    # want de paal kiest binnen de minuut: thuis stond hij om 14:14:44 op
+    # `ready_to_charge` en om 14:15:03 op `charging`, negentien seconden later.
+    # Op een wereld die per minuut tikt zou de wekstroom altijd net voorbij
+    # zijn als de auto begint, en dan meet deze proef niets.
+    auto=replace(GROTE, soc=40.0, aanloop_s=20),
+    paal=Paal(fase_drempel=12.0),
+    stap_seconden=20,
 )
 
 # --- de vaatwasser (06-09-2026) ----------------------------------------------
@@ -660,7 +689,7 @@ ALLE = [
     tien_uur, tien_uur_zon, tien_uur_valt_tegen, tien_uur_vast, equalizer, prijzen_weg,
     weekend, weekend_geen_zon,
     ford_storing, een_fase_groep, een_fase_blind, afbouw, afbouw_geleerd,
-    afbouw_krap, afbouw_krap_geleerd,
+    afbouw_krap, afbouw_krap_geleerd, fasekeuze,
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,

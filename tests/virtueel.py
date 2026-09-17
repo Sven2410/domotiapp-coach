@@ -316,6 +316,13 @@ class Paal:
     # Een Easee in automatische fasemodus kiest bij het starten zelf. Met dit
     # aan kiest hij bij de eerstvolgende start één fase, zoals om 04:17.
     kiest_een_fase: bool = False
+    # En zo kiest hij als er niets aan de hand is: onder deze stroom wordt het
+    # één fase, erboven drie, en dat opnieuw bij elke start. Thuis op
+    # 17-09-2026 stopte de coach om 14:10 om op de zon van 15:00 te wachten,
+    # wekte om 14:14 met tien ampère, en de paal begon op één fase: 5,875 A bij
+    # 1323 W is 225 V per ampère, waar het om 14:05 nog 690 was. Zie
+    # `WAKE_AMPS` in planner.py.
+    fase_drempel: float | None = None
     fasen_nu: int = 3
     boven_groep_sinds: dt.datetime | None = None
     herstarts: int = 0
@@ -960,14 +967,19 @@ class Wereld:
                 aanbod = math.floor(vrij)
         trok = self.auto.trekt_amps
         # Op hoeveel fasen deze sessie loopt, of gaat lopen als hij nu begint.
-        volgende = 1 if self.paal.kiest_een_fase else self.paal.fasen
+        # Met een drempel kiest de paal naar wat hem op dat moment aangeboden
+        # wordt; zie `fase_drempel`.
+        if self.paal.fase_drempel is not None:
+            volgende = 1 if aanbod < self.paal.fase_drempel else self.paal.fasen
+        else:
+            volgende = 1 if self.paal.kiest_een_fase else self.paal.fasen
         fasen_nu = self.paal.fasen_nu if trok > 0 else volgende
         self.auto.stap(aanbod, self.paal.gestart, self.s.stap_seconden, nu,
                        fasen=min(self.auto.fasen, fasen_nu))
         # De paal kiest zijn fasen bij het begin van een sessie, niet
         # halverwege. Een Easee in automatische modus pakt er soms één.
         if self.auto.trekt_amps > 0 and trok <= 0:
-            self.paal.fasen_nu = 1 if self.paal.kiest_een_fase else self.paal.fasen
+            self.paal.fasen_nu = volgende
             self.paal.kiest_een_fase = False
         self.paal_fasen = min(self.auto.fasen, self.paal.fasen_nu)
         self.paal_w = self.auto.trekt_amps * VOLT * self.paal_fasen

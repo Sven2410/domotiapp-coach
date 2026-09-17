@@ -201,8 +201,11 @@ if (vl := v("vast-bewolkt")):
              f"{vl.net_kwh_tussen('00:00', '20:00'):.2f} kWh van het net voor acht uur")
     controle("bewolkt: de zon die er was is gebruikt", vl.uit_zon_kwh > 5, f"{vl.uit_zon_kwh:.1f}")
     controle("bewolkt: na acht uur rustig aan", bool(vl.regels_met("easy-pace")), "geen easy-pace")
+    # De wekronde telt niet mee: die biedt met opzet het hele plafond aan en
+    # duurt één ronde, zie `WAKE_AMPS` in planner.py.
     controle("bewolkt: rustig aan is nooit vol vermogen",
-             all(r.amps < 16 for r in vl.regels_met("easy-pace")), "16 A in easy-pace")
+             all(r.amps < 16 for r in vl.regels_met("easy-pace") if "+wake" not in r.regel),
+             "16 A in easy-pace")
 
 if (vl := v("vast-geen-panelen")):
     controle("geen panelen: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
@@ -391,7 +394,13 @@ if (vl := v("bijna-vol")):
 if (vl := v("auto-wordt-niet-wakker")):
     controle("slapende auto: meldt dat hij geen stroom afneemt",
              bool(meldingen(vl, "geen stroom af")), "")
-    controle("slapende auto: komt alsnog vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    # Sinds 17-09-2026 biedt de coach het hele plafond aan om te wekken, dus een
+    # auto die hier nog stilstaat wordt door niets meer wakker. Dan is het enige
+    # dat telt dat de bewoner het weet en dat de coach het blijft proberen.
+    controle("slapende auto: hij blijft stroom aanbieden tot het laatst",
+             vl.regels and vl.regels[-1].amps >= 6, f"{vl.regels[-1].amps if vl.regels else None}")
+    controle("slapende auto: en hij meldt dat de klaar-tijd gemist is",
+             bool(meldingen(vl, "nog niet vol")), "")
 
 # --- de nacht van 05 op 06-09-2026 bij Van den Dam ---------------------------
 #
@@ -450,6 +459,26 @@ if (vk := v("afbouw-krap")) and (vg := v("afbouw-krap-geleerd")):
              and vg.klaar_op <= vg.klaar_tijd - virtueel.dt.timedelta(hours=1) + virtueel.dt.timedelta(minutes=5),
              f"begin {eerste(vg)}, vol {vg.klaar_op}, klaar-tijd {vg.klaar_tijd}")
     controle("afbouw krap: allebei op tijd vol", gehaald(vk) and gehaald(vg), "")
+
+# --- 17-09-2026 thuis: de wekstroom en de fasekeuze van de paal ---------------
+#
+# De Easee koos bij een wekstroom van tien ampère één fase. Sinds de wekstroom
+# op zestien staat kiest hij er drie, en dan is er niets aan de hand: geen
+# melding, geen klaar-tijdregel, en een beurt die vlak tegen het optimum aan
+# zit. Oud: één fase vanaf 08:31, vol pas dinsdag 04:47, € 10,30. Nieuw: vol
+# maandag 22:50, € 9,60, optimum € 9,59.
+if (vl := v("easee-fasekeuze")):
+    controle("fasekeuze: de paal begint op drie fasen, dus geen fasemelding",
+             not meldingen(vl, "op één fase geladen"), "")
+    controle("fasekeuze: de wekstroom is het hele plafond",
+             any(r.regel.endswith("+wake") and r.amps == 16 for r in vl.regels),
+             f"{[r.amps for r in vl.regels if r.regel.endswith('+wake')]}")
+    controle("fasekeuze: de klaar-tijdregel hoeft er niet aan te pas te komen",
+             not any(r.regel.startswith("deadline") for r in vl.regels),
+             f"{[r.regel for r in vl.regels if r.regel.startswith('deadline')][:3]}")
+    controle("fasekeuze: vol ruim voor de klaar-tijd, en dicht bij het optimum",
+             gehaald(vl) and vl.kosten <= vl.optimum * 1.02,
+             f"{vl.kosten:.2f} tegen optimum {vl.optimum:.2f}")
 
 # --- de vaatwasser (06-09-2026) ----------------------------------------------
 #
@@ -927,8 +956,11 @@ if (vl := v("van-den-dam-dure-zondagnacht")):
 
 if (vl := v("van-den-dam-ford-wekken")):
     vdd_basis(vl, "wekken")
-    controle("wekken: op 10 A gewekt en daarna terug naar 6 A",
-             any(r.regel.endswith("+wake") and r.amps == 10 for r in vl.regels)
+    # Zestien sinds 17-09-2026, en niet tien: een Easee in automatische
+    # fasemodus kiest bij elke start naar wat er aangeboden wordt. Zie
+    # `WAKE_AMPS` in planner.py en het scenario `easee-fasekeuze`.
+    controle("wekken: op 16 A gewekt en daarna terug naar 6 A",
+             any(r.regel.endswith("+wake") and r.amps == 16 for r in vl.regels)
              and any(r.regel == "surplus" and r.amps == 6 for r in vl.regels), "")
 
 if (vl := v("van-den-dam-oven")):

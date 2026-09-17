@@ -162,16 +162,16 @@ inst = instellingen()
 hass, store, coach = bouw(huis(), inst)
 besluit, verstuurd = asyncio.run(ronde(coach, inst))
 print(f"  {besluit['rule']}: {besluit['amps']} A -> {verstuurd}")
-controle("wekstroom van 10 A", besluit["amps"] == 10 and besluit["rule"].endswith("+wake"),
+controle("wekstroom van 14 A", besluit["amps"] == 14 and besluit["rule"].endswith("+wake"),
          f"kreeg {besluit['rule']} met {besluit['amps']} A")
 controle("gaat ook echt naar de paal",
-         any(d[1] == "set_charger_dynamic_limit" and d[2].get("current") == 10 for d in verstuurd),
+         any(d[1] == "set_charger_dynamic_limit" and d[2].get("current") == 14 for d in verstuurd),
          f"verstuurd: {verstuurd}")
 
 print("=== 2. een ronde drie seconden later: nog geen paniek op de kaart ===")
 besluit, verstuurd = asyncio.run(ronde(coach, inst, dt.datetime(2026, 8, 18, 14, 37, 3)))
 print(f"  {besluit['rule']}: {besluit['amps']} A")
-controle("wekstroom blijft staan binnen de minuut", besluit["amps"] == 10,
+controle("wekstroom blijft staan binnen de minuut", besluit["amps"] == 14,
          f"{besluit['rule']} met {besluit['amps']} A")
 controle("nog niet klagen over de auto", "+waiting-for-car" not in besluit["rule"],
          besluit["rule"])
@@ -202,7 +202,7 @@ for b in besluiten:
     print(f"  {b[:110]}")
 controle("wekken, wachten op de auto en zon zijn drie besluiten", len(besluiten) == 3,
          f"{len(besluiten)}")
-controle("het eerste zegt wekken op 10 A", "laden op 10 A" in besluiten[0], besluiten[0])
+controle("het eerste zegt wekken op 14 A", "laden op 14 A" in besluiten[0], besluiten[0])
 controle("het laatste zegt laden op zon", "laden op" in besluiten[-1]
          and "zon" in besluiten[-1], besluiten[-1])
 controle("een besluit gaat niet naar de telefoon",
@@ -2494,6 +2494,10 @@ coach53.async_boost("dev-laadpaal", True)
 # De ronde van `async_boost` zelf draait op de echte klok (zie proef 23) en zet
 # daarmee het begin van de beurt in het heden; de proef speelt in september.
 coach53._since["dev-laadpaal"] = dt.datetime(2026, 9, 5, 20, 55)
+# En dat de paal toen al laadde, want sinds 17-09-2026 begint de aanloop opnieuw
+# zodra de paal uit `charging` valt en terugkomt. Zonder deze regel zet de ronde
+# van `async_boost` de klok alsnog op nu.
+coach53._laadde["dev-laadpaal"] = True
 for minuut in (0, 1, 2, 3, 4):
     asyncio.run(ronde(coach53, inst53, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, minuut)))
 rijen53 = inst53.get("car_pace") or []
@@ -2520,6 +2524,71 @@ l53b, l53c = b53b["plan_ahead"]["latest_start"], b53c["plan_ahead"]["latest_star
 print(f"  met afbouw: {l53b}   zonder: {l53c}")
 controle("met het geleerde tempo begint hij eerder", l53b and l53c and l53b < l53c,
          f"{l53b} tegen {l53c}")
+
+print("=== 53b. een halve meting wordt geen tempo (thuis, 17-09-2026) ===")
+# Om 14:24:31 ging snelladen aan, de paal herstartte en zei om 14:24:58 weer
+# "charging" terwijl de stroomsensor nog op 0,152 A van de vorige stand stond.
+# De coach schreef 0,1 kW op als het tempo van band 0, rekende de ronde erna
+# 21,41 uur waar het er 1,93 waren, en de klaar-tijdregel bleef de hele middag
+# staan. Twee dingen houden dat nu tegen: de aanloop begint opnieuw zodra de
+# paal opnieuw begint, en een band telt pas als twee ronden hetzelfde zeggen.
+inst53d = instellingen(devices=[PAAL52])
+inst53d["strategy"]["schedules"][0]["window"]["done_by"] = "06:00"
+huis53d = huis(status="charging", stroom=8.0, vermogen=1840.0, teruglevering=0.0, afname=1800.0)
+huis53d["sensor.auto_soc"] = "85"
+hass53d, _, coach53d = bouw(huis53d, inst53d)
+coach53d.async_boost("dev-laadpaal", True)
+coach53d._since["dev-laadpaal"] = dt.datetime(2026, 9, 5, 20, 55)
+coach53d._laadde["dev-laadpaal"] = True
+for minuut in (0, 1, 2):
+    asyncio.run(ronde(coach53d, inst53d, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, minuut)))
+# De paal valt één ronde uit `charging` (een nieuwe limiet, zoals een Easee bij
+# snelladen doet) en komt terug terwijl de stroomsensor nog achterloopt.
+hass53d.states.zet("sensor.laadpaal_status", "awaiting_start")
+asyncio.run(ronde(coach53d, inst53d, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 3)))
+hass53d.states.zet("sensor.laadpaal_status", "charging")
+hass53d.states.zet("sensor.laadpaal_stroom", "0.152")
+hass53d.states.zet("sensor.laadpaal_vermogen", "35")
+asyncio.run(ronde(coach53d, inst53d, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 4)))
+rijen53d = inst53d.get("car_pace") or []
+print(f"  na de herstart met een achterlopende stroomsensor: {rijen53d}")
+controle("de tussenstand van 0,152 A wordt geen tempo",
+         not any(r.get("kw", 9) < 1.0 for r in rijen53d), f"{rijen53d}")
+
+# En één losse ronde met een rare waarde telt ook zonder herstart niet mee: pas
+# als de volgende ronde hetzelfde zegt, is het een meting.
+inst53e = instellingen(devices=[PAAL52])
+inst53e["strategy"]["schedules"][0]["window"]["done_by"] = "06:00"
+huis53e = huis(status="charging", stroom=8.0, vermogen=1840.0, teruglevering=0.0, afname=1800.0)
+huis53e["sensor.auto_soc"] = "85"
+hass53e, _, coach53e = bouw(huis53e, inst53e)
+coach53e.async_boost("dev-laadpaal", True)
+coach53e._since["dev-laadpaal"] = dt.datetime(2026, 9, 5, 20, 55)
+coach53e._laadde["dev-laadpaal"] = True
+asyncio.run(ronde(coach53e, inst53e, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 0)))
+hass53e.states.zet("sensor.laadpaal_stroom", "0.3")
+hass53e.states.zet("sensor.laadpaal_vermogen", "69")
+asyncio.run(ronde(coach53e, inst53e, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 1)))
+hass53e.states.zet("sensor.laadpaal_stroom", "8.0")
+hass53e.states.zet("sensor.laadpaal_vermogen", "1840")
+asyncio.run(ronde(coach53e, inst53e, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 2)))
+asyncio.run(ronde(coach53e, inst53e, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 3)))
+rijen53e = inst53e.get("car_pace") or []
+print(f"  één rare ronde tussen twee goede: {rijen53e}")
+controle("één losse ronde telt niet, de twee gelijke wel",
+         any(abs(r.get("kw", 0) - 1.84) < 0.01 for r in rijen53e)
+         and not any(r.get("kw", 9) < 1.0 for r in rijen53e), f"{rijen53e}")
+
+# En een rij die er vóór v0.66.0 in is gekomen wordt bij het lezen genegeerd:
+# een herstart haalt hem niet uit de opslag en hij blijft anders bijten zodra
+# de auto weer in die band komt.
+inst53f = instellingen(devices=[PAAL52], car_pace=[
+    {"device": "dev-laadpaal", "car": "car-1", "band": 0, "kw": 0.1, "at": "x"},
+    {"device": "dev-laadpaal", "car": "car-1", "band": 8, "kw": 1.84, "at": "x"}])
+gelezen53 = coachmod.ChargerCoach._tempo_uit(inst53f, "dev-laadpaal", "car-1")
+print(f"  uit de opslag gelezen: {gelezen53}")
+controle("0,1 kW uit een oude opslag telt niet meer mee, 1,84 wel",
+         gelezen53 == {8: 1.84}, f"{gelezen53}")
 
 print("=== 54. 'klaar' op 86%: één herstart, dan geloven, en na een kwartier laden opnieuw ===")
 inst54 = instellingen(devices=[PAAL52])
@@ -3359,8 +3428,11 @@ for minuut in range(20, 46):
     b65, _ = ronde65(minuut)
 gemeten65 = coach65._plafond_gemeten("dev-laadpaal", dt.datetime(2026, 9, 9, 10, 45))
 print(f"  na 45 minuten: gemiddeld {gemeten65:.2f} A, plan rekent met {b65['plan_ahead']['amps']} A, meting {b65['plan_ahead']['measured']}")
-controle("na drie kwartier: tien van de vijftien minuten 14 A en vijf keer nul, dus rond de 9 A",
-         gemeten65 is not None and 8.5 <= gemeten65 <= 10.0, f"{gemeten65}")
+# Tien van de vijftien minuten 14 A en vijf keer nul is 9,3. De ene wekronde
+# gaat eraf: daarin vraagt de coach sinds 17-09-2026 het hele plafond, en dan
+# telt wat er werkelijk liep, en dat is nul zolang de auto nog niet begonnen is.
+controle("na drie kwartier: tien van de vijftien minuten 14 A en vijf keer nul, dus rond de 8,5 A",
+         gemeten65 is not None and 8.0 <= gemeten65 <= 10.0, f"{gemeten65}")
 controle("en het plan rekent daarmee en zegt dat het een meting is",
          b65["plan_ahead"]["amps"] == int(gemeten65) and b65["plan_ahead"]["measured"] is True, f"{b65['plan_ahead']}")
 # Een rustig huis: na drie uur zonder warmtepomp is het venster schoon.
