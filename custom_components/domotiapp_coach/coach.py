@@ -114,6 +114,20 @@ SENSOR_STIL = timedelta(minutes=10)
 PLAFOND_VENSTER = timedelta(hours=3)
 PLAFOND_MEETTIJD_MIN = 30.0
 
+# Hetzelfde idee voor de zon: over hoeveel van de afgelopen tijd de coach
+# vergelijkt wat de zonverwachting beloofde met wat zijn eigen dak gaf, en
+# hoeveel daarvan er minstens gemeten moet zijn.
+#
+# Twee uur en niet drie: dit is een verhouding en geen gemiddelde, dus hij
+# blijft over de dag heen bruikbaar, maar het weer verandert en een ochtend
+# hoort de middag niet te blijven drukken. Een half uur meting eronder, anders
+# zou één wolk de rest van de dag stempelen. En er moet genoeg beloofd zijn om
+# een verhouding van te maken: bij 0,05 kWh verwacht overschot zegt "de helft
+# ervan" niets. Zie `_zon_gemeten` en `overschot_kwh` in planner.py.
+ZON_VENSTER = timedelta(hours=2)
+ZON_MEETTIJD_MIN = 30.0
+ZON_MIN_VOORSPELD = 0.5
+
 # How often to think. A minute is often enough to catch a kettle before a fuse
 # minds, and rare enough that a car is never re-commanded into giving up.
 INTERVAL = timedelta(seconds=60)
@@ -640,6 +654,10 @@ class ChargerCoach:
         self._huis_tot: datetime | None = None
         self._zon_kwh: dict[datetime, float] = {}
         self._zon_geschat = True
+        # Wat de zonverwachting per ronde beloofde en wat de meter gaf, als
+        # (moment, voorspeld W, gemeten W, minuten). Van het huis en niet van
+        # een laadpunt: de zon is van de woning. Zie `_zon_gemeten`.
+        self._zon_reeks: list[tuple[datetime, float, float, float]] = []
         self._zon_tot: datetime | None = None
         # Wie er op snelladen staat. Net als een akkoord niet bewaard over een
         # herstart heen en afgelopen zodra de kabel eruit gaat: snelladen is
@@ -1349,7 +1367,8 @@ class ChargerCoach:
         )
         decision = plan_programma(
             now, self._prices(settings), self._tariff(settings),
-            Forecast(solar_kwh=self._zon_kwh, house_kwh=self._huis_kwh, estimated=self._zon_geschat),
+            Forecast(solar_kwh=self._zon_kwh, house_kwh=self._huis_kwh,
+                     estimated=self._zon_geschat, solar_factor=self._zon_gemeten(now)),
             window, apparaat,
             # Wat er werkelijk naar het net gaat: in het lopende uur wint de
             # meter van de verwachting (Sven op 07-09-2026, zie
@@ -2378,6 +2397,7 @@ class ChargerCoach:
                 solar_kwh=self._zon_kwh,
                 house_kwh=self._huis_kwh,
                 estimated=self._zon_geschat,
+                solar_factor=self._zon_gemeten(now),
             ),
             holding=self._holding.get(device_id, 0),
             waking=waking,
@@ -3167,6 +3187,10 @@ class ChargerCoach:
                 netto + (laadvermogen or 0.0) if compleet else max(0.0, netto),
             )
             surplus = self._smooth(device.get("id", ""), surplus, now)
+            # Wat de verwachting voor dit uur beloofde naast wat er werkelijk
+            # over is. Alleen als er echt gemeten is; een ronde waarin de
+            # netmeting wegviel zegt niets over de zon. Zie `_zon_gemeten`.
+            self._zon_bijhouden(now, settings)
 
         charger_amps = (
             self._volgehouden(
@@ -3524,6 +3548,60 @@ class ChargerCoach:
             soc_estimated=geschat,
             tempo_per_band=self._tempo_uit(settings, device_id, auto_id),
         )
+
+    def _zon_bijhouden(self, now: datetime, settings: dict[str, Any]) -> None:
+        """Wat de zonverwachting voor dit uur beloofde, naast wat het dak gaf.
+
+        Het dak en niet het overschot, en dat verschil is het hele punt. Het
+        overschot is opbrengst min huisverbruik, en in de ochtend liggen die
+        twee vlak bij elkaar; dan is de verhouding tussen voorspeld en gemeten
+        overschot wilde onzin en zou één ochtend de hele middag bijstellen. In
+        het virtuele huis kostte dat `dynamisch-zonnig` vijf cent op een dag
+        waarop de voorspelling gewoon klopte. Wat de voorspeller voorspelt is
+        de opbrengst van het dak, dus dat is ook wat er tegen zijn eigen
+        belofte gelegd hoort te worden; het huisverbruik wordt al apart gemeten
+        (`_huisverbruik`).
+
+        Eén regel per ronde, van de woning en niet van een laadpunt.
+        """
+        if self._zon_reeks and self._zon_reeks[-1][0] >= now:
+            return
+        opbrengst = _watts(self.hass, (settings.get("sources") or {}).get("solar"))
+        if opbrengst is None:
+            return
+        uur = now.replace(minute=0, second=0, microsecond=0)
+        voorspeld = max(0.0, self._zon_kwh.get(uur, 0.0)) * 1000.0
+        stap = 1.0
+        if self._zon_reeks:
+            stap = min(5.0, max(0.0, (now - self._zon_reeks[-1][0]).total_seconds() / 60.0))
+        self._zon_reeks.append((now, voorspeld, max(0.0, opbrengst), stap))
+        grens = now - ZON_VENSTER
+        self._zon_reeks = [r for r in self._zon_reeks if r[0] >= grens]
+
+    def _zon_gemeten(self, now: datetime) -> float | None:
+        """Welk deel van de beloofde opbrengst er de afgelopen uren echt kwam.
+
+        Nul tot één, of niets zolang er te weinig gemeten is of er te weinig
+        beloofd was om een verhouding van te maken. Nooit boven één: meer zon
+        verwachten dan voorspeld is een gok, en dit hoort een correctie te zijn
+        en geen tweede voorspelling. Voor het uur waar de coach ín zit telt de
+        meter toch al rechtstreeks.
+
+        Sven op 17-09-2026: de voorspeller zei 1,552 kWh voor het uur van
+        16:00 en het dak deed 0,58. De coach verschoof zijn belofte van 16:00
+        naar 17:00 en zou hem om 17:00 weer verschoven hebben. Zie
+        `overschot_kwh` in planner.py.
+        """
+        grens = now - ZON_VENSTER
+        binnen = [r for r in self._zon_reeks if r[0] >= grens]
+        minuten = sum(stap for _, _, _, stap in binnen)
+        if minuten < ZON_MEETTIJD_MIN:
+            return None
+        voorspeld = sum(w * stap for _, w, _, stap in binnen) / 60.0 / 1000.0
+        if voorspeld < ZON_MIN_VOORSPELD:
+            return None
+        gemeten = sum(w * stap for _, _, w, stap in binnen) / 60.0 / 1000.0
+        return max(0.0, min(1.0, gemeten / voorspeld))
 
     def _plafond_gemeten(self, device_id: str, now: datetime) -> float | None:
         """Wat er de afgelopen `PLAFOND_VENSTER` gemiddeld voor de paal overbleef.
@@ -5126,6 +5204,7 @@ class ChargerCoach:
                 solar_kwh=self._zon_kwh,
                 house_kwh=self._huis_kwh,
                 estimated=self._zon_geschat,
+                solar_factor=self._zon_gemeten(now),
             ),
         )
 

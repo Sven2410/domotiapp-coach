@@ -1187,9 +1187,16 @@ vloer36f = [b for b in laadt36f if b.solar_kwh + 0.05 < b.kwh]
 controle("in een vloer-uur is het zonaandeel kleiner dan wat er in gaat",
          vloer36f and all(0 < b.solar_kwh < b.kwh for b in vloer36f),
          f"{[(b.solar_kwh, b.kwh) for b in laadt36f]}")
+# Het uur van 09:00 met 1,0 kWh zon valt sinds 17-09-2026 af: dat is 24% van de
+# 4,14 kWh die er in dat uur in gaat, net onder `ZON_AANDEEL`. Wat de controle
+# meet blijft hetzelfde: in een vloer-uur staat er hoeveel het dák geeft (3,0)
+# en niet hoeveel de paal laadt (4,1).
 controle("en het zonaandeel is wat het dak geeft, niet de vloer",
-         any(abs(b.solar_kwh - 1.0) < 0.05 for b in laadt36f),
+         any(abs(b.solar_kwh - 3.0) < 0.05 for b in laadt36f),
          f"{[round(b.solar_kwh, 2) for b in laadt36f]}")
+controle("een uur dat voor minder dan een kwart op zon draait is geen zonuur",
+         not any(b.start.hour == 9 for b in laadt36f),
+         f"{[b.start.hour for b in laadt36f]}")
 controle("een vloer-uur is 6 A op driefasig 4,1 kW",
          all(b.amps == MIN_AMPS and abs(b.kw - 4.14) < 0.05 for b in vloer36f),
          f"{[(b.amps, b.kw) for b in vloer36f]}")
@@ -2313,6 +2320,63 @@ print(f"  {len(genomen55)} uren in, {len(uit55)} uit, samen {sum(uit55.values())
 controle("hij valt niet om en houdt dezelfde hoeveelheid vast",
          abs(sum(uit55.values()) - sum(genomen55.values())) < 0.01,
          f"{sum(uit55.values()):.2f} tegen {sum(genomen55.values()):.2f}")
+
+print("=== 56. een zonuur moet de zon ook echt dragen (17-09-2026) ===")
+# Svens middag, met zijn eigen getallen: de voorspeller zei 1,552 kWh voor het
+# uur van 16:00 en 1,364 voor 17:00, het huisprofiel stond op 0,94 kWh, dus er
+# bleef 0,61 respectievelijk 0,42 kWh over op papier. Zijn meter leverde vanaf
+# 15:41 niets meer terug.
+nu56 = dt.datetime(2026, 9, 17, 15, 42)
+w56 = Window(enabled=True, opens=None, deadline=dt.datetime(2026, 9, 18, 6, 0))
+net56 = Grid(surplus_w=0.0, phase_amps=[2.0, 0.0, 1.0], fuse_amps=25.0, charger_amps=0.0)
+zon56 = {nu56.replace(hour=h, minute=0, second=0, microsecond=0): kwh
+         for h, kwh in [(15, 0.95), (16, 1.552), (17, 1.364), (18, 0.5), (19, 0.1)]}
+paal56 = Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.05)
+
+def uren56(fasen, factor):
+    auto = Car(capacity_kwh=19.7, phases=fasen, soc_percent=25.0, target_percent=80.0)
+    plan = planner.timeline(
+        nu56, [], net56, auto, paal56, w56, 16, tariff=VAST,
+        forecast=Forecast(solar_kwh=zon56, house_kwh={u: 0.94 for u in range(24)},
+                          solar_factor=factor),
+    )
+    return [b.start.hour for b in plan.blocks if b.charging], plan
+
+# Driefasig: er gaat 4,14 kWh in zo'n uur en de zon draagt er 0,61 van, vijftien
+# procent. Dat is geen zonuur meer, dus vóór 20:00 gaat er niets van het net bij
+# (eis 4). Op v0.66.0 stonden 16:00 en 17:00 hier nog wél in.
+drie, plan56 = uren56(3, None)
+print(f"  driefasig, zonder meting: laadt in {drie}")
+controle("driefasig: 0,61 kWh zon opent geen uur van 4,14 kWh meer",
+         16 not in drie and 17 not in drie and 20 in drie, f"{drie}")
+
+# Eenfasig gaat er 1,38 kWh in en is diezelfde 0,61 kWh wél bijna de helft: dat
+# blijft een zonuur, en dan is de meting het enige dat het nog tegenhoudt.
+een, _ = uren56(1, None)
+print(f"  eenfasig, zonder meting:  laadt in {een}")
+controle("eenfasig: daar draagt de zon bijna de helft, dus dat blijft een zonuur",
+         16 in een, f"{een}")
+een_gemeten, plan56b = uren56(1, 0.0)
+print(f"  eenfasig, meter gaf niets: laadt in {een_gemeten}")
+controle("eenfasig: maar niet als de meter twee uur lang niets teruglegde",
+         16 not in een_gemeten and 17 not in een_gemeten, f"{een_gemeten}")
+controle("en dan staat er op de kaart waarom", "Je dak gaf" in plan56b.solar_note,
+         plan56b.solar_note)
+controle("zonder meting staat er niets", plan56.solar_note == "", plan56.solar_note)
+
+# De correctie zit op de opbrengst en pas daarna gaat het huis eraf: voorspeld
+# 1,552 kWh maal 0,5 is 0,776, min 0,94 huis is niets meer over. Andersom (het
+# overschot halveren) zou er 0,306 uitkomen, en dat is niet wat er gemeten is.
+uur16 = nu56.replace(hour=16, minute=0, second=0, microsecond=0)
+kaal = planner.overschot_kwh(Forecast(solar_kwh=zon56, house_kwh={16: 0.94}), uur16)
+half = planner.overschot_kwh(
+    Forecast(solar_kwh=zon56, house_kwh={16: 0.94}, solar_factor=0.5), uur16)
+driekwart = planner.overschot_kwh(
+    Forecast(solar_kwh=zon56, house_kwh={16: 0.94}, solar_factor=0.75), uur16)
+print(f"  overschot zonder factor {kaal:.3f}, met 0,75 {driekwart:.3f}, met 0,5 {half:.3f} kWh")
+controle("de factor zit op de opbrengst en niet op het overschot",
+         abs(kaal - 0.612) < 0.001 and abs(driekwart - (1.552 * 0.75 - 0.94)) < 0.001
+         and half == 0.0, f"{kaal}, {driekwart}, {half}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

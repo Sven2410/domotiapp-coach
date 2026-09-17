@@ -145,6 +145,62 @@ en dat staat ook in het profiel: geen herstart, geen alarm) en `doel-80` (de aut
 kan tot 100, de bewoner wil tot 80: de coach houdt zelf op), `Auto.doel` in het
 virtuele huis, proef 53 in test_planner.py, proef 15c en 18 in test_coach.py.
 
+**Een zonuur moet de zon ook echt dragen, en de meter stelt de verwachting bij**
+(v0.67.0). Sven op 17-09-2026 om 16:33: "waarom ging hij niet laden om 16 uur
+terwijl hij net zei ik ga laden om 16 uur, nu gaat hij om 17 uur. En om 20 uur
+gaat hij meer laden maar dan is er geen zon toch? Dan is het nu toch sowieso met
+een beetje eigen zon goedkoper?" In zijn eigen besluitenlog:
+
+```
+15:43:14  wait-for-sun  Hij wacht op je eigen zon van 16:00
+16:00:14  wait-for-sun  Hij wacht op je eigen zon van 17:00
+```
+
+De voorspeller zei 1,552 kWh voor het uur van 16:00 en 1,364 voor 17:00; het dak
+deed 0,58 kWh en het huis gebruikte 881 W tegen 748 W van het dak, dus de meter
+leverde vanaf 15:41 geen seconde terug. Voor het lópende uur zag de coach dat
+(daar telt de meter sinds v0.57.0), voor het uur erna geloofde hij de
+voorspelling weer, en zo schoof de belofte elk uur op. Drie dingen erbij.
+
+1. **De voorspelling wordt bijgesteld met wat het dak gaf** (`overschot_kwh` in
+   planner.py, `Forecast.solar_factor`). De coach legt per ronde de belofte van
+   de zonverwachting naast de zonnesensor (`_zon_bijhouden`, `_zon_gemeten` in
+   coach.py, `ZON_VENSTER` twee uur, `ZON_MEETTIJD_MIN` een half uur,
+   `ZON_MIN_VOORSPELD` 0,5 kWh) en vermenigvuldigt de verwachte opbrengst van
+   de uren die komen daarmee; pas dáárna gaat het huisverbruik eraf. **Het dak
+   en niet het overschot**, want in de ochtend liggen opbrengst en huisverbruik
+   vlak bij elkaar en is de verhouding tussen voorspeld en gemeten overschot
+   wilde onzin: op het overschot gemeten kostte dit `dynamisch-zonnig` vijf cent
+   op een dag waarop de voorspelling gewoon klopte. **Nooit boven één**: meer
+   zon verwachten dan voorspeld is een gok, en dit hoort een correctie te zijn.
+   Geldt ook voor de vaatwasser (`programma_kosten`) en voor de klaar-tijdsom
+   (`capaciteit_kwh`).
+2. **De zon moet een kwart van het uur dragen** (`ZON_AANDEEL`, Svens keuze van
+   17-09-2026). Daarvoor was `SCHIJF_MINIMUM` genoeg: tien wattuur verwacht
+   overschot maakte een heel uur tot zonuur en kocht tot de ondergrens van de
+   paal bij. Bij Sven was dat 0,24 kWh zon die 3,90 kWh van het net meesleepte,
+   vóór 20:00, terwijl eis 4 juist zegt dat er bij een vast contract voor de
+   avond niets van het net bij hoort te komen. **Alleen voor de uren die nog
+   komen**: voor het uur waar de coach in zit meet de meter het overschot, en
+   een meting is nooit een gok; 0,9 kW echte zon onder de ondergrens van een
+   driefasige paal maakt dat uur nog steeds goedkoper dan een avonduur, en dat
+   is de som van 30-08-2026.
+3. **De kaart zegt het** (`solar_measured_note`, `Plan.solar_note`,
+   `plan-ahead-sheet.js`): "Je dak gaf de afgelopen uren X% minder dan de
+   zonverwachting zei, dus hij rekent verder met wat hij mat."
+
+**Bij allebei de contracten, en het bijt verschillend.** Sven vroeg ernaar: "je
+weet ook dat dit thuis een vast contract is, dus ik weet niet hoe het met een
+dynamisch moet." Bij een vast contract is de zonvloer vóór 20:00 de enige deur
+naar dat uur (`netto_vanaf`), dus daar sluit regel 2 het uur en wacht hij tot
+20:00. Bij een dynamisch contract houdt datzelfde uur gewoon zijn eigen
+netschijf tegen de prijs van dat uur; wat verdwijnt is alleen de korting die op
+een voorspelling rustte, en dat maakt het goedkoper in plaats van duurder.
+Scenario's `zonbelofte-vast` (oud: 15:05 "zon van 16:00", 16:05 "zon van 17:00";
+nieuw: meteen "wacht tot 20:00" met de meterzin erbij, € 4,60 = het optimum) en
+`zonbelofte-dynamisch` (oud € 3,12 en vol om 02:18, nieuw € 2,99 bij een optimum
+van € 2,95). Proef 56 in test_planner.py, proef 69 in test_coach.py.
+
 **Wekken doet de coach op het plafond, want de paal kiest daarop zijn fasen**
 (v0.66.0). Thuis op 17-09-2026: om 14:10 stopte de coach om op de zon van 15:00
 te wachten, om 14:14 wekte hij met tien ampère, en de Easee begon op één fase.
@@ -510,9 +566,9 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 331 controles op het denkwerk
-python tests/test_coach.py       # 382 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1363 op hele laadbeurten in het virtuele huis
+python tests/test_planner.py     # 338 controles op het denkwerk
+python tests/test_coach.py       # 387 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1391 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 40 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

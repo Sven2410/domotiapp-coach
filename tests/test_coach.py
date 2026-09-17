@@ -3689,6 +3689,62 @@ controle("vrijgave uit voor de start: nu starten gaat eraf, en die schakelaar vo
          not inst68.get("ready_devices") and not inst68.get("ready_now") and schakel68(v, NU68) == ["turn_off"],
          f"{inst68.get('ready_devices')} {inst68.get('ready_now')} {v}")
 
+print("=== 69. de zonverwachting wordt bijgesteld met wat de meter gaf (17-09-2026) ===")
+# Thuis zei de voorspeller 1,552 kWh voor het uur van 16:00 terwijl het dak 0,58
+# deed en het huis het opat: vanaf 15:41 geen seconde teruglevering. De coach
+# hield zijn belofte voor 16:00 overeind en verschoof hem daarna naar 17:00.
+UUR69 = dt.datetime(2026, 9, 17, 15, 0)
+
+def inst69():
+    """Dezelfde instellingen, maar mét een zonnesensor: die meet het dak."""
+    i = instellingen()
+    i["sources"] = dict(i["sources"], solar="sensor.zon")
+    return i
+
+def coach69_met(dak_w):
+    """Een coach met een voorspelling van 1,55 kWh voor dit uur en dat dak."""
+    h = huis()
+    h["sensor.zon"] = str(dak_w)
+    _hass, _s, c = bouw(h, inst69())
+    c._zon_kwh = {UUR69: 1.55, UUR69 + dt.timedelta(hours=1): 1.55}
+    c._huis_kwh = {u: 0.94 for u in range(24)}
+    return c
+
+def voed69(coach, minuten, vanaf=UUR69):
+    for i in range(minuten):
+        coach._zon_bijhouden(vanaf + dt.timedelta(minutes=i), inst69())
+
+# Het dak doet 580 W waar 1550 voorspeld stond, zoals thuis om 16:00.
+coach69 = coach69_met(580)
+voed69(coach69, 20)
+vroeg69 = coach69._zon_gemeten(UUR69 + dt.timedelta(minutes=20))
+controle("na twintig minuten is er nog geen oordeel", vroeg69 is None, f"{vroeg69}")
+voed69(coach69, 25, UUR69 + dt.timedelta(minutes=20))
+mager69 = coach69._zon_gemeten(UUR69 + dt.timedelta(minutes=45))
+print(f"  580 W gemeten bij 1550 W beloofd: factor {mager69:.2f}")
+controle("drie kwartier een derde van de belofte: de verwachting gaat mee omlaag",
+         mager69 is not None and abs(mager69 - 580 / 1550) < 0.01, f"{mager69}")
+
+# Een dak dat meer geeft dan voorspeld blaast de verwachting niet op.
+coach69b = coach69_met(2000)
+voed69(coach69b, 45)
+ruim69 = coach69b._zon_gemeten(UUR69 + dt.timedelta(minutes=45))
+print(f"  2000 W gemeten bij 1550 W beloofd: factor {ruim69}")
+controle("meer zon dan voorspeld wordt geen extra zon", ruim69 == 1.0, f"{ruim69}")
+
+# Een dak dat doet wat beloofd is verandert niets.
+coach69d = coach69_met(1550)
+voed69(coach69d, 45)
+klopt69 = coach69d._zon_gemeten(UUR69 + dt.timedelta(minutes=45))
+controle("een kloppende voorspelling blijft staan", klopt69 == 1.0, f"{klopt69}")
+
+# Zonder panelen, of in de schemering: niets beloofd, dus niets te corrigeren.
+coach69c = coach69_met(0)
+coach69c._zon_kwh = {}
+voed69(coach69c, 60)
+geen69 = coach69c._zon_gemeten(UUR69 + dt.timedelta(minutes=60))
+controle("zonder belofte geen oordeel", geen69 is None, f"{geen69}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
