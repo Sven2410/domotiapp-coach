@@ -286,7 +286,11 @@ vol uur ervóór, en bij het uur waar de coach ín zit ligt dat in het verleden,
 dus er bestaat geen schijf van. Een netblok toont nu minstens `MIN_AMPS`, en is
 het het laatste laaduur dan staat er "nog X kWh, vol rond HH:MM" bij, waar ook
 `expected_done` mee rekent. Zonuren blijven zoals ze waren: daar is de
-ondergrens al het antwoord. Proef 57 in test_planner.py.
+ondergrens al het antwoord. **Getoetst op het vermogen en niet op de afgeronde
+stroom** (v0.67.4): 2,19 kWh over vierendertig minuten is 3,86 kW en dat rondt
+af naar 6 A, dus op de stroom getoetst glipte het er later in het uur alsnog
+doorheen terwijl het vermogen en "vol rond" nog fout stonden. Proef 57 in
+test_planner.py dekt allebei.
 
 **De tijdlijn viel om bij een uur dat hij zelf had gewist** (v0.66.0). De
 crash in `_restje_naar_achteren` die op 15-09-2026 gevonden en niet gerepareerd
@@ -609,7 +613,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 344 controles op het denkwerk
+python tests/test_planner.py     # 345 controles op het denkwerk
 python tests/test_coach.py       # 388 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1405 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag

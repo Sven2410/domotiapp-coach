@@ -1846,6 +1846,7 @@ def timeline(
 
         # Het tempo over het deel van het blok dat nog komt: het uur waar we
         # in zitten is korter dan een uur.
+        vloer_kw = watts_for(MIN_AMPS, car.phases) / 1000.0
         van = max(start, now)
         tot = min(rij["end"], grens)
         duur = max(0.0, (tot - van).total_seconds() / 3600.0)
@@ -1870,11 +1871,16 @@ def timeline(
             klaar_om = van + timedelta(hours=kwh_blok / kw) if kw > 0 else rij["end"]
             klaar_om = klaar_om.replace(second=0, microsecond=0)
             waarom = f"nog {_kwh(kwh_blok)}, vol rond {_clock(klaar_om)}"
-        elif laadt and zonschijf is None and blok_amps < MIN_AMPS:
+        elif laadt and zonschijf is None and kw < vloer_kw - 0.01:
             # Een uur waarin de paal minder dan zijn ondergrens zou leveren
             # bestaat niet. Hij levert de ondergrens en is dus eerder klaar;
             # het gemiddelde over het uur is een getal dat nooit op de paal
             # komt te staan.
+            #
+            # Op het vermogen getoetst en niet op de afgeronde stroom: 2,19 kWh
+            # over vierendertig minuten is 3,86 kW, en dat rondt af naar 6 A
+            # terwijl het 4,14 kW hoort te zijn. Dan stond er wel de goede
+            # stroom maar het verkeerde vermogen en een verkeerd "vol rond".
             #
             # Dit is het uur waar we ín zitten, en dat is korter dan een uur:
             # de restant-regel hierboven kan er niet bij, want die vraagt een
