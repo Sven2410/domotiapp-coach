@@ -185,6 +185,17 @@ voorspelling weer, en zo schoof de belofte elk uur op. Drie dingen erbij.
    een meting is nooit een gok; 0,9 kW echte zon onder de ondergrens van een
    driefasige paal maakt dat uur nog steeds goedkoper dan een avonduur, en dat
    is de som van 30-08-2026.
+
+   Dat laatste is op 17-09-2026 nog een keer tegen het licht gehouden en
+   bevestigd. Die middag startte de coach om 16:56 op 230 W gemeten overschot
+   en trok hij daarna elf minuten 4,06 kW van het net, vóór 20:00; ik stelde
+   voor de kwartregel ook op het lopende uur te zetten. Sven: **"bij een vast
+   contract is het wel beter om met overschot te laden."** En dat klopt: een
+   teruggeleverde kilowattuur brengt hem € 0,0193 op en een ingekochte kost
+   € 0,2417, dus elke gemeten watt overschot maakt dat uur goedkoper dan de
+   avond (bij 230 W € 0,2294 tegen € 0,2417, bij 2 kW € 0,1343). Een drempel
+   op een meting gooit dat weg. **Geen drempel op het lopende uur, in geen
+   enkel contract.**
 3. **De kaart zegt het** (`solar_measured_note`, `Plan.solar_note`,
    `plan-ahead-sheet.js`): "Je dak gaf de afgelopen uren X% minder dan de
    zonverwachting zei, dus hij rekent verder met wat hij mat."
