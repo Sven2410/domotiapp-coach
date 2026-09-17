@@ -200,6 +200,19 @@ voorspelling weer, en zo schoof de belofte elk uur op. Drie dingen erbij.
    `plan-ahead-sheet.js`): "Je dak gaf de afgelopen uren X% minder dan de
    zonverwachting zei, dus hij rekent verder met wat hij mat."
 
+**De correctie geldt alleen voor uren van de dag waarop gemeten is**
+(`Forecast.solar_day`, v0.67.2). Bij Sven liep de zin diezelfde avond tussen
+17:46 en 20:00 op van "50% minder" naar "86% minder", en dat klopte voor die
+uren: de voorspeller zei 769 Wh voor 19:00 en 406 voor 20:00 terwijl het dak op
+nul stond. Maar zonder deze grens zou een meting bij zonsondergang ook de uren
+van de volgende dag inkrimpen, en dat is geen meting meer maar een
+weersvoorspelling. Het gaat mis bij een klaar-tijd die over een dag heen loopt:
+zaterdagavond om 20:00 met klaar-tijd maandag 06:00 kwam zondagmiddag op 14% te
+staan. Scenario `weekend-voorspelling-mis` (zaterdag bewolkt terwijl helder
+voorspeld was, zondag klopt het): oud 23,0 kWh zon en € 10,80, nieuw 37,6 kWh
+zon en € 9,35 bij een optimum van € 8,00. Het virtuele huis kent daarvoor
+`Zon.wolken_per_dag`.
+
    In v0.67.0 haalde die zin de tijdlijn niet: `_tijdlijn` in coach.py bouwt de
    lijst voor het paneel veld voor veld op en `solar_note` stond er niet bij,
    terwijl `plan-ahead-sheet.js` er wel naar keek. In de reden op de kaart
@@ -584,9 +597,9 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 338 controles op het denkwerk
+python tests/test_planner.py     # 340 controles op het denkwerk
 python tests/test_coach.py       # 388 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1391 op hele laadbeurten in het virtuele huis
+python tests/test_virtueel.py    # 1405 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 40 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, replace
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 # --- The hard limits ------------------------------------------------------
 
@@ -1171,10 +1171,14 @@ class Forecast:
     house_kwh: dict[int, float] = field(default_factory=dict)
     # Of de zon per uur uit een echte uurkromme komt of over de dag verdeeld is.
     estimated: bool = False
-    # Welk deel van het voorspelde overschot er de afgelopen uren werkelijk uit
-    # de meter kwam, 0 tot 1, of niets als er te weinig gemeten is. Zie
-    # `_zon_gemeten` in coach.py en `overschot_kwh` hieronder.
+    # Welk deel van de voorspelde opbrengst het dak de afgelopen uren werkelijk
+    # gaf, 0 tot 1, of niets als er te weinig gemeten is. Zie `_zon_gemeten` in
+    # coach.py en `overschot_kwh` hieronder.
     solar_factor: float | None = None
+    # De dag waarop dat gemeten is. De correctie geldt alleen voor uren van die
+    # dag: wat je dak vanmiddag deed zegt iets over vanavond en niets over
+    # morgenmiddag. Zie `overschot_kwh`.
+    solar_day: date | None = None
 
 
 def overschot_kwh(
@@ -1198,11 +1202,20 @@ def overschot_kwh(
     voor het uur erna geloofde hij de voorspelling weer, en zo schoof de
     belofte elk uur op.
 
+    **Alleen voor uren van de dag waarop gemeten is** (`solar_day`). Bij Sven
+    liep de zin op 17-09-2026 tussen 17:46 en 20:00 op van "50% minder" naar
+    "86% minder", en dat klopte voor die uren: de voorspeller zei 769 Wh voor
+    19:00 en 406 voor 20:00 terwijl het dak op nul stond. Maar zonder deze
+    grens zou zo'n meting bij zonsondergang ook de uren van de volgende dag
+    inkrimpen, en dat is geen meting meer maar een weersvoorspelling. Het gaat
+    mis bij een klaar-tijd die over een dag heen loopt: zaterdagavond om 20:00
+    met klaar-tijd maandag 06:00 zou zondagmiddag op 14% komen te staan.
+
     Het deel en het hele uur zijn er voor het uur waar we in zitten: dat is
     korter dan een uur en levert dus ook minder.
     """
     zon = max(0.0, forecast.solar_kwh.get(uur, 0.0))
-    if forecast.solar_factor is not None:
+    if forecast.solar_factor is not None and uur.date() == forecast.solar_day:
         zon *= forecast.solar_factor
     over = max(0.0, zon - forecast.house_kwh.get(uur.hour, 0.0))
     return over * (deel / heel if heel else 1.0)

@@ -293,6 +293,16 @@ weekend_geen_zon = weekend.kopie(
     naam="weekend-zondag-uit-geen-zon", uitleg="hetzelfde zonder panelen: niets tot zondag 13:00, dan plannen",
     zon=Zon(wolken="geen"), voorspeller="geen",
 )
+# Zaterdag zat de voorspeller er flink naast en zondag klopt hij. Zonder de
+# grens van `solar_day` zou de meting van zaterdagavond de hele zondag op een
+# derde zetten, en dan plant de coach zaterdagnacht van het net wat hij zondag
+# gratis van het dak had kunnen halen. Dynamisch, want daar kost dat geld.
+weekend_voorspelling_mis = weekend.kopie(
+    naam="weekend-voorspelling-mis",
+    uitleg="zaterdag bewolkt terwijl helder voorspeld was, zondag klopt het weer; klaar maandag 06:00",
+    contract="dynamisch",
+    zon=Zon(wolken="helder", voorspeld="helder", wolken_per_dag={0: "bewolkt"}),
+)
 prijzen_weg = tien_uur.kopie(
     naam="prijzen-weg-bij-inpluggen", uitleg="de prijssensor zwijgt de eerste twintig minuten na het inpluggen",
     gebeurtenissen=[("10:00", "prijzen_weg", 20)],
@@ -716,7 +726,7 @@ ALLE = [
     pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,
     p1_weg, p1_lang_weg, paal_traag,
     tien_uur, tien_uur_zon, tien_uur_valt_tegen, tien_uur_vast, equalizer, prijzen_weg,
-    weekend, weekend_geen_zon,
+    weekend, weekend_geen_zon, weekend_voorspelling_mis,
     ford_storing, een_fase_groep, een_fase_blind, afbouw, afbouw_geleerd,
     afbouw_krap, afbouw_krap_geleerd, fasekeuze, zon_belofte, zon_belofte_dyn,
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,

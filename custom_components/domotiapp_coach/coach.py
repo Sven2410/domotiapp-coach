@@ -1368,7 +1368,8 @@ class ChargerCoach:
         decision = plan_programma(
             now, self._prices(settings), self._tariff(settings),
             Forecast(solar_kwh=self._zon_kwh, house_kwh=self._huis_kwh,
-                     estimated=self._zon_geschat, solar_factor=self._zon_gemeten(now)),
+                     estimated=self._zon_geschat, solar_factor=self._zon_gemeten(now),
+                     solar_day=now.date()),
             window, apparaat,
             # Wat er werkelijk naar het net gaat: in het lopende uur wint de
             # meter van de verwachting (Sven op 07-09-2026, zie
@@ -2398,6 +2399,7 @@ class ChargerCoach:
                 house_kwh=self._huis_kwh,
                 estimated=self._zon_geschat,
                 solar_factor=self._zon_gemeten(now),
+                solar_day=now.date(),
             ),
             holding=self._holding.get(device_id, 0),
             waking=waking,
@@ -5205,6 +5207,7 @@ class ChargerCoach:
                 house_kwh=self._huis_kwh,
                 estimated=self._zon_geschat,
                 solar_factor=self._zon_gemeten(now),
+                solar_day=now.date(),
             ),
         )
 
