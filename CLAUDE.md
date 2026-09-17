@@ -145,6 +145,65 @@ en dat staat ook in het profiel: geen herstart, geen alarm) en `doel-80` (de aut
 kan tot 100, de bewoner wil tot 80: de coach houdt zelf op), `Auto.doel` in het
 virtuele huis, proef 53 in test_planner.py, proef 15c en 18 in test_coach.py.
 
+**Wekken doet de coach op het plafond, want de paal kiest daarop zijn fasen**
+(v0.66.0). Thuis op 17-09-2026: om 14:10 stopte de coach om op de zon van 15:00
+te wachten, om 14:14 wekte hij met tien ampère, en de Easee begon op één fase.
+Te zien aan de verhouding vermogen en stroom: 5,900 A bij 4070 W om 14:05 is
+690 V per ampère, 5,875 A bij 1323 W om 14:15 is 225, en 15,498 A bij 10652 W
+om 14:26 weer 687. Sven: "hoe kon de laadpaal opeens op één fase gaan laden?
+Die 10 A wekstroom, doe dat gewoon 16 A maken." De automatische fasemodus
+blijft (eis 3), de coach schrijft nog steeds geen fasemodus, maar hij zorgt dat
+de paal bij elke start genoeg aangeboden krijgt om er drie te kiezen.
+`WAKE_AMPS` staat dus op 16 en blijft begrensd door `ceiling_amps`. Het
+virtuele huis kent daarvoor `Paal.fase_drempel`; scenario `easee-fasekeuze`
+(oud: één fase vanaf 08:31, vol pas dinsdag 04:47, € 10,30; nieuw: drie fasen,
+vol maandag 22:50, € 9,60 bij een optimum van € 9,59). Een auto die pas boven
+het plafond wakker wordt bestaat daarmee niet meer als scenario;
+`auto-wordt-niet-wakker` meet nu wat de coach zegt en niet meer of hij wakker
+wordt.
+
+**Een halve meting wordt geen laadtempo, en de klaar-tijdregel laat weer los**
+(v0.66.0). Dezelfde middag om 14:24:58 herstartte de paal voor snelladen en
+meldde "charging" terwijl de stroomsensor nog op 0,152 A van de vorige stand
+stond. `_tempo_leren` zag een sessie die al tien minuten liep, rekende 0,152 A
+maal 690 V naar 0,1 kW en schreef dat op als het tempo van de bus tussen 0 en
+10 procent. De ronde erna stond er 21,41 uur nodig waar het er 1,93 waren, de
+klaar-tijdregel sloeg aan, en die bleef staan: 11,2 kW van het net bij 452 W
+zon, terwijl `latest_start` 03:24 die nacht zei. Vier dingen erbij:
+
+- **De aanloop hoort bij de paal en niet bij het besluit.** `_since` in coach.py
+  begint opnieuw zodra de paal uit `charging` valt en terugkomt (`_laadde`).
+  Zolang het aan het besluit hing liep de klok door, want de coach wilde al die
+  tijd laden.
+- **Twee ronden hetzelfde voordat een band telt** (`_tempo_vorig`,
+  `TEMPO_SPELING`), zoals `_eindtijd_vast` bij de vaatwasser en
+  `_fasen_stabiel` bij de fasen.
+- **Onder `TEMPO_ONDERGRENS` (6 A op één fase, 1,38 kW) is het geen tempo.** Een
+  paal levert daar niets onder, dus wat lager gemeten wordt komt van een auto
+  die stilstaat. `_tempo_uit` gooit zulke rijen ook bij het lézen weg, want ze
+  staan al in de opslag van klanten en een herstart haalt ze er niet uit.
+- **`must_finish` vervalt zodra er weer ruim tijd is** (`DEADLINE_RELEASE_HOURS`,
+  drie uur bovenop de speling). Grijpen bij een uur, loslaten bij vier: dat
+  verschil is er tegen het pendelen van 18-08-2026, maar het vasthouden vroeg
+  nooit meer of de reden er nog was.
+
+Proef 53b in test_coach.py, proef 54 in test_planner.py.
+
+**De tijdlijn viel om bij een uur dat hij zelf had gewist** (v0.66.0). De
+crash in `_restje_naar_achteren` die op 15-09-2026 gevonden en niet gerepareerd
+werd: `sorted(uit)` is een momentopname en de lus wist er zelf uren uit, en een
+gewist uur gaf daarna een `KeyError`. Dan stond er niets op de kaart, dertien
+keer in één nacht in `warmtepomp-nacht`. Eén regel (`start not in uit`), proef
+55 in test_planner.py.
+
+**De tijdlijn zegt waarom een uur leeg is** (v0.66.0). Sven diezelfde dag: "hij
+zegt nu 14:00 wachten buiten je tijden, maar dat klopt ook niet." Klopte ook
+niet: zijn tijden lopen tot 06:00. Een uur zonder enkele schijf kreeg altijd
+"buiten je tijden", ook als het gewoon de avondpiek was of de avondregel van een
+vast contract (`netto_vanaf` in `schijven`). `timeline` rekent die grens nu zelf
+uit en zegt "de avondpiek, daar komt niets van het net bij" of "geen zon over,
+en voor 20:00 geen net".
+
 **Het plafond voor de uren die komen is een meting van deze beurt** (v0.61.0).
 In de nacht van 09 op 10-09-2026 ging bij Van den Dam om het kwartier een
 warmtepomp aan op één fase, tot 22 A; de paal kreeg 8 A waar het plan met 16
@@ -451,9 +510,9 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 326 controles op het denkwerk
-python tests/test_coach.py       # 379 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1354 op hele laadbeurten in het virtuele huis
+python tests/test_planner.py     # 331 controles op het denkwerk
+python tests/test_coach.py       # 382 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1363 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 40 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

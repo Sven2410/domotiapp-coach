@@ -411,3 +411,11 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
 # Hier en niet in coach.py, omdat de opslag ze ook nodig heeft: een beurt
 # van zo'n apparaat is een "programma" en geen laadbeurt.
 PROGRAMMA_TYPES = ("vaatwasser",)
+
+# Wat een laadtempo minstens moet zijn om er een te heten: zes ampère op één
+# fase, de laagste stand die een paal kan leveren. Wat daaronder gemeten wordt
+# komt van een auto die stilstaat of van een sensor die achterloopt; thuis
+# kwam er op 17-09-2026 0,1 kW in de opslag en daarmee rekende de
+# klaar-tijdregel twintig uur voor één band. Hier en niet in coach.py, omdat de
+# opslag zulke rijen ook opruimt. Zie `_tempo_leren` en `_tempo_uit`.
+TEMPO_ONDERGRENS = 6 * 230.0 / 1000.0

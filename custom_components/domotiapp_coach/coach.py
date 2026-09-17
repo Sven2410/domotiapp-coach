@@ -41,6 +41,7 @@ from .const import (
     LEVEL_STEER,
     PHASE_START_AMPS,
     PROGRAMMA_TYPES,
+    TEMPO_ONDERGRENS,
 )
 from .archive import async_get_archive
 from .planner import (
@@ -352,6 +353,12 @@ NO_WRITE_RULES = frozenset({"disconnected", "complete"})
 # oud is.
 SOC_SETTLE = timedelta(minutes=3)
 
+# Hoeveel twee ronden van elkaar mogen verschillen voordat het geen meting meer
+# is maar een sensor die nog aan het bijkomen is. Zie `_tempo_leren`. Ruim
+# genoeg voor het gewiebel van een paal die op zijn limiet moduleert, krap
+# genoeg dat een tussenstand van bijna nul er niet doorheen komt.
+TEMPO_SPELING = 0.3
+
 # Hoe vaak de waarschuwing terugkomt dat een eigen pauze de klaar-tijd gaat
 # kosten. Sven op 26-08-2026: de pauze zelf blijft winnen, want het is zijn huis
 # en zijn knop, maar één keer waarschuwen is te weinig. Wie het bericht om elf
@@ -572,6 +579,9 @@ class ChargerCoach:
         # restart the charger itself says whether it is charging, and treating
         # that as "just started" only costs a few minutes of patience.
         self._since: dict[str, datetime] = {}
+        # Of de paal de vorige ronde laadde. Begint hij opnieuw, dan begint de
+        # aanloop ook opnieuw; zie `_since` hierboven en `_tempo_leren`.
+        self._laadde: dict[str, bool] = {}
         # The latest decision per device, for the panel to ask after.
         self.state: dict[str, dict[str, Any]] = {}
         # Devices the customer said yes to. Only meaningful at "propose", and
@@ -680,6 +690,10 @@ class ChargerCoach:
         # Wat de auto deze beurt per band van tien procent aannam terwijl hij
         # zelf de rem was, in kW: het laagste per band. Zie `_tempo_leren`.
         self._tempo_gezien: dict[str, dict[int, float]] = {}
+        # De meting van de vorige ronde, per apparaat: band en kW. Een tempo
+        # telt pas als twee ronden achter elkaar hetzelfde zeggen; zie
+        # `_tempo_leren`.
+        self._tempo_vorig: dict[str, tuple[int, float]] = {}
         self._auto_id: dict[str, str] = {}
         # Sinds wanneer er stroom wordt aangeboden zonder dat de auto iets
         # afneemt. Daarmee weet de kaart het verschil tussen "begint zo" en "de
@@ -3297,10 +3311,29 @@ class ChargerCoach:
         if charger.connected:
             charger.expected_amps = self._plafond_gemeten(device_id, now)
 
-        # After a restart nothing is known about when this session began. Taking
-        # it as "just now" only means waiting out the minimum run once.
-        if charger.charging and charger.started_at is None:
-            charger.started_at = self._since.setdefault(device.get("id", ""), now)
+        # De aanloop hoort bij de paal en niet bij het besluit. Valt de paal uit
+        # `charging` en komt hij terug, dan is alles weer aan het opstarten: de
+        # stroomsensor loopt een ronde achter, de auto moet nog op gang komen en
+        # de fasekeuze is opnieuw gemaakt. Zolang dit aan het bésluit hing bleef
+        # de klok gewoon doorlopen, want de coach wilde al die tijd laden.
+        #
+        # Dat kostte op 17-09-2026 thuis een nacht. Om 14:24:31 ging snelladen
+        # aan, de paal herstartte en zei om 14:24:58 weer "charging" terwijl de
+        # stroomsensor nog op 0,152 A van de vorige stand stond. `_tempo_leren`
+        # zag een sessie die al tien minuten liep, rekende 0,152 A maal 690 V
+        # naar 0,1 kW en schreef op dat de bus tussen 0 en 10% niet meer dan
+        # 0,1 kW aanneemt. De volgende ronde stond er 21,41 uur nodig waar het
+        # er 1,93 waren, sloeg de klaar-tijdregel aan, en die bleef staan.
+        #
+        # After a restart of Home Assistant itself nothing is known about when
+        # this session began either. Taking it as "just now" only means waiting
+        # out the minimum run once.
+        if charger.charging and not self._laadde.get(device_id):
+            self._since[device_id] = now
+            charger.started_at = now
+        elif charger.charging and charger.started_at is None:
+            charger.started_at = self._since.setdefault(device_id, now)
+        self._laadde[device_id] = charger.charging
 
         # Eén fasemeting per ronde; `_fasetip` en `_car` lezen allebei deze.
         if charger.charging:
@@ -3593,15 +3626,37 @@ class ChargerCoach:
             or held_back(charger)
             or charger.paused_by_balancer
         ):
+            self._tempo_vorig.pop(device_id, None)
             return
         bewaker = beschikbaar_van_bewaker(grid)
         if bewaker is not None and charger.actual_amps >= bewaker - STEP_AMPS:
+            self._tempo_vorig.pop(device_id, None)
             return
         groep = charger.circuit_amps
         if groep is not None and charger.actual_amps >= groep - STEP_AMPS:
+            self._tempo_vorig.pop(device_id, None)
             return
         kw = round(watts_for(charger.actual_amps, car.phases) / 1000.0, 2)
         band = int(car.soc_percent // 10)
+        if kw < TEMPO_ONDERGRENS:
+            # Minder dan een paal op zijn laagste stand op één fase levert. Dat
+            # is geen auto die gas terugneemt maar een auto die stilstaat, of
+            # een sensor die nog niet bij is. Als tempo zou het onzin zijn: op
+            # 17-09-2026 rekende 0,1 kW een band van tien procent op bijna
+            # twintig uur.
+            self._tempo_vorig.pop(device_id, None)
+            return
+
+        # Twee ronden hetzelfde voordat het telt, zoals `_eindtijd_vast` bij de
+        # vaatwasser en `_fasen_stabiel` bij de fasen. Een stroomsensor loopt
+        # een ronde achter, en één zo'n ronde is hier duur: op 17-09-2026 werd
+        # een tussenstand van 0,152 A het tempo van een hele band. Wat er echt
+        # gebeurt houdt langer dan een minuut aan, dus dit kost niets.
+        vorig = self._tempo_vorig.get(device_id)
+        self._tempo_vorig[device_id] = (band, kw)
+        if vorig is None or vorig[0] != band or abs(vorig[1] - kw) > TEMPO_SPELING:
+            return
+
         gezien = self._tempo_gezien.setdefault(device_id, {})
         if band in gezien and gezien[band] <= kw:
             return
@@ -3643,7 +3698,14 @@ class ChargerCoach:
 
     @staticmethod
     def _tempo_uit(settings: dict[str, Any], device_id: str, auto_id: str) -> dict[int, float]:
-        """Wat er over deze auto per band bewaard is."""
+        """Wat er over deze auto per band bewaard is.
+
+        Rijen onder `TEMPO_ONDERGRENS` gaan eruit. Die konden er tot v0.66.0 in
+        komen (zie `_tempo_leren`), ze staan dan in de opslag van een klant, en
+        een herstart haalt ze er niet uit. Thuis stond er op 17-09-2026 0,1 kW
+        voor band 0; daarmee rekende de klaar-tijdregel 21,41 uur waar het er
+        1,93 waren.
+        """
         uit: dict[int, float] = {}
         for row in settings.get("car_pace") or []:
             if (
@@ -3652,7 +3714,9 @@ class ChargerCoach:
                 and row.get("car") == auto_id
             ):
                 try:
-                    uit[int(row["band"])] = float(row["kw"])
+                    kw = float(row["kw"])
+                    if kw >= TEMPO_ONDERGRENS:
+                        uit[int(row["band"])] = kw
                 except (KeyError, TypeError, ValueError):
                     continue
         return uit

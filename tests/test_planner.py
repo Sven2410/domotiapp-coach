@@ -162,8 +162,19 @@ for _u in range(20):
 d = decide(nu, DUUR_NU, zonnig, sven_auto(), paal(laadt=False), venster(nu),
            tariff=VAST, sun=ZON_RUIM, waking=True)
 print(f"  {d.rule}: {d.amps} A  {d.reason}")
-controle("biedt 10 A aan", d.charge and d.amps == 10, f"kreeg {d.amps} A via {d.rule}")
+# Zestien sinds 17-09-2026, begrensd door wat er onder de zekering past. Hier is
+# dat veertien: een huis van 2 A per fase op een zekering van 25. Dat een Easee
+# in automatische fasemodus bij tien ampère voor één fase koos is de reden; zie
+# `WAKE_AMPS` in planner.py.
+controle("biedt zo veel aan als er past", d.charge and d.amps == 14,
+         f"kreeg {d.amps} A via {d.rule}")
 controle("heet ook zo", d.rule.endswith("+wake"))
+
+ruim = Grid(surplus_w=1500.0, phase_amps=[0.0, 0.0, 0.0], fuse_amps=40.0, charger_amps=0.0)
+grote_paal = Charger(max_amps=32.0, connected=True, charging=False, actual_amps=0.05)
+d = decide(nu, DUUR_NU, ruim, sven_auto(), grote_paal, venster(nu),
+           tariff=VAST, sun=ZON_RUIM, waking=True)
+controle("en niet meer dan zestien", d.amps == 16, f"kreeg {d.amps} A")
 
 print("=== 7. wekstroom blijft onder de zekering ===")
 krap = Grid(surplus_w=1500.0, phase_amps=[17.0, 3.0, 2.0], fuse_amps=25.0, charger_amps=0.0)
@@ -2251,6 +2262,57 @@ uren100 = planner._uren_met_afbouw(replace(bus53, tempo_per_band=traag), 11.0, h
 print(f"  met afbouw: tot 80% {uren80:.2f} uur, tot 100% {uren100:.2f} uur")
 controle("de trage banden boven het doel tellen niet mee", uren80 < uren100 - 1.0,
          f"{uren80:.2f} tegenover {uren100:.2f}")
+
+print("=== 54. de klaar-tijdregel laat weer los zodra er ruim tijd is (17-09-2026) ===")
+# Thuis om 14:26: de coach had geleerd dat de bus tussen 0 en 10% maar 0,1 kW
+# aanneemt (een halve meting, zie `_tempo_leren` in coach.py), rekende daarmee
+# 21,41 uur waar het er 1,93 waren, en de klaar-tijdregel sloeg aan. Daarna
+# bleef `must_finish` staan en trok de paal de hele middag 11 kW van het net
+# terwijl hij tot 03:24 die nacht had kunnen wachten. Grijpen bij een uur
+# speling, loslaten bij vier: zie `DEADLINE_RELEASE_HOURS`.
+nu54 = dt.datetime(2026, 8, 18, 14, 26)
+bus54 = Car(capacity_kwh=19.7, phases=3, soc_percent=10.0, target_percent=80.0)
+paal54 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=15.7,
+                 limit_amps=16.0, started_at=dt.datetime(2026, 8, 18, 13, 0))
+uren54 = planner.hours_needed(bus54, 13)
+print(f"  op 10% met 13 A: {uren54:.2f} uur nodig, {(venster(nu54).deadline - nu54).total_seconds()/3600:.2f} uur tot 06:00")
+d54 = decide(nu54, [], NET_LEEG, bus54, paal54, venster(nu54), tariff=VAST, sun=ZON_KRAP,
+             must_finish=True)
+print(f"  vastgehouden besluit met ruim tijd: {d54.rule} {d54.amps} A")
+controle("met ruim vijftien uur speling laat hij los", not d54.rule.startswith("deadline"),
+         f"kreeg {d54.rule}: {d54.reason}")
+
+# En hij houdt wél vast zolang het krap is: dezelfde auto, klaar over drie uur.
+krap54 = Window(enabled=True, opens=None, deadline=nu54 + dt.timedelta(hours=3))
+d54b = decide(nu54, [], NET_LEEG, bus54, paal54, krap54, tariff=VAST, sun=ZON_KRAP,
+              must_finish=True)
+print(f"  met drie uur tot de klaar-tijd: {d54b.rule} {d54b.amps} A")
+controle("bij drie uur blijft hij op vol vermogen staan", d54b.rule == "deadline",
+         f"kreeg {d54b.rule}")
+# Zonder het vasthouden zou dat uur op zichzelf geen klaar-tijdregel opleveren:
+# 1,93 uur nodig en 3 uur tot de klaar-tijd is meer dan het uur speling.
+d54c = decide(nu54, [], NET_LEEG, bus54, paal54, krap54, tariff=VAST, sun=ZON_KRAP,
+              must_finish=False)
+controle("en dat is juist het vasthouden, niet de som zelf", d54c.rule != "deadline",
+         f"kreeg {d54c.rule}")
+
+print("=== 55. het restje naar achteren schuiven valt niet meer om ===")
+# `sorted(uit)` is een momentopname en de lus wist er zelf uren uit. Kwam er
+# later zo'n gewist uur langs, dan viel de hele tijdlijn om met een KeyError en
+# stond er niets op de kaart. Gezien op 15-09-2026 in `warmtepomp-nacht`; drie
+# reeksen achter elkaar is genoeg om het uit te lokken.
+u0 = dt.datetime(2026, 9, 9, 22, 0)
+def blok55(i, kwh):
+    return planner.Schijf(u0 + dt.timedelta(hours=i), u0 + dt.timedelta(hours=i + 1),
+                          0.20, kwh)
+alle55 = [blok55(i, 11.0) for i in range(8)]
+genomen55 = {blok55(i, 0).start: kwh for i, kwh in
+             enumerate([0.2, 11.0, 11.0, 0.3, 11.0, 0.4, 11.0, 11.0])}
+uit55 = planner._restje_naar_achteren(genomen55, alle55)
+print(f"  {len(genomen55)} uren in, {len(uit55)} uit, samen {sum(uit55.values()):.1f} kWh")
+controle("hij valt niet om en houdt dezelfde hoeveelheid vast",
+         abs(sum(uit55.values()) - sum(genomen55.values())) < 0.01,
+         f"{sum(uit55.values()):.2f} tegen {sum(genomen55.values()):.2f}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
