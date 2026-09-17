@@ -500,6 +500,35 @@ fasekeuze = vast_wisselend.kopie(
     stap_seconden=20,
 )
 
+# --- de zonbelofte die opschoof (17-09-2026 thuis) ---------------------------
+#
+# De voorspeller zei 1,552 kWh voor het uur van 16:00; het dak deed 0,58 en het
+# huis at het op, dus de meter leverde vanaf 15:41 geen seconde terug. De coach
+# beloofde om 15:42 "ik laad om 16:00", om 16:03 "ik laad om 17:00", en zou dat
+# om 17:00 weer verschoven hebben. Sven: "waarom ging hij niet laden om 16 uur
+# terwijl hij net zei ik ga laden om 16 uur? En om 20 uur gaat hij meer laden
+# maar dan is er geen zon toch?"
+#
+# Een driefasige auto (dan is de ondergrens van de paal 4,14 kW en draagt een
+# kruimel zon dat uur nooit), een middag die minder geeft dan voorspeld, en een
+# huis dat de rest opeet. Allebei de contracten, want de vraag van Sven was
+# juist of dit ook bij een dynamisch contract klopt.
+BUS_DRIE = Auto(naam="Bus", capaciteit_kwh=19.7, soc=25.0, fasen=3, max_amps=16.0,
+                wek_amps=10.0)
+zon_belofte = Scenario(
+    "zonbelofte-vast",
+    "vast contract, kabel om 14:00 erin, driefasige bus; voorspeld helder, in werkelijkheid weinig, en het huis eet het op",
+    contract="vast", auto=BUS_DRIE,
+    zon=Zon(wolken="bewolkt", voorspeld="helder"),
+    huis=Huis(extra=[("13:00", "20:00", 1500.0)]),
+    begin="2026-09-07 13:55", kabel_erin="14:00", duur_uren=17,
+)
+zon_belofte_dyn = zon_belofte.kopie(
+    naam="zonbelofte-dynamisch",
+    uitleg="hetzelfde op een dynamisch contract: daar houdt het uur zijn eigen netschijf en telt alleen de prijs nog",
+    contract="dynamisch",
+)
+
 # --- de vaatwasser (06-09-2026) ----------------------------------------------
 #
 # Sven: "omdat de bus vol zit gaan we de laadpaal even parkeren en nu verder
@@ -689,7 +718,7 @@ ALLE = [
     tien_uur, tien_uur_zon, tien_uur_valt_tegen, tien_uur_vast, equalizer, prijzen_weg,
     weekend, weekend_geen_zon,
     ford_storing, een_fase_groep, een_fase_blind, afbouw, afbouw_geleerd,
-    afbouw_krap, afbouw_krap_geleerd, fasekeuze,
+    afbouw_krap, afbouw_krap_geleerd, fasekeuze, zon_belofte, zon_belofte_dyn,
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,

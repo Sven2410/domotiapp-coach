@@ -79,6 +79,33 @@ VOLTS = 230
 # the sun at all.
 SURPLUS_SLACK = 0.9
 
+# Hoeveel van een uur de zon minstens moet dragen voordat het een zonuur heet
+# en er tot de ondergrens van de paal bij gekocht wordt. Een kwart, Svens keuze
+# van 17-09-2026.
+#
+# Hiervoor stond er `SCHIJF_MINIMUM`: tien wattuur verwacht overschot maakte
+# een heel uur tot zonuur. Bij Sven was dat die middag 0,24 kWh voorspelde zon
+# die 3,90 kWh van het net meesleepte, en dat vóór 20:00, terwijl bij een vast
+# contract juist geldt dat er voor de avond niets van het net bij hoort te
+# komen (eis 4). Sven: "om 20 uur gaat hij meer laden maar dan is er geen zon
+# toch? Dan is het nu toch sowieso met een beetje eigen zon goedkoper?" Het
+# eerlijke antwoord was nee, want zijn meter leverde niets terug; maar een uur
+# dat voor zes procent op zon draait hoort ook niet als zonuur op de kaart.
+#
+# **Dit raakt allebei de contracten, maar het bijt alleen bij een vast.** Bij
+# een dynamisch contract bestaat er voor datzelfde uur gewoon een netschijf
+# tegen de prijs van dat uur, en die blijft: valt de zonvloer weg, dan doet het
+# uur nog steeds mee en wint het als het goedkoop is. Bij een vast contract is
+# de zonvloer vóór 20:00 de enige deur naar dat uur (`netto_vanaf`), en die
+# hoort niet open te gaan voor een kruimel. Eis 6 blijft overeind: een uur mét
+# zon telt, ook als het dak te weinig geeft om alleen op te laden. Alleen heet
+# het nu pas zon als de zon er ook echt is.
+ZON_AANDEEL = 0.25
+
+# Onder welk deel de kaart erbij zegt dat de zonverwachting bijgesteld is. Zie
+# `solar_measured_note`.
+ZON_NOTE_ONDER = 0.8
+
 # Once charging, keep going at least this long. Cars dislike being interrupted,
 # and a few of them stop asking for current altogether after a handful of
 # cycles.
@@ -1144,6 +1171,51 @@ class Forecast:
     house_kwh: dict[int, float] = field(default_factory=dict)
     # Of de zon per uur uit een echte uurkromme komt of over de dag verdeeld is.
     estimated: bool = False
+    # Welk deel van het voorspelde overschot er de afgelopen uren werkelijk uit
+    # de meter kwam, 0 tot 1, of niets als er te weinig gemeten is. Zie
+    # `_zon_gemeten` in coach.py en `overschot_kwh` hieronder.
+    solar_factor: float | None = None
+
+
+def overschot_kwh(
+    forecast: Forecast, uur: datetime, deel: float = 1.0, heel: float = 1.0
+) -> float:
+    """Wat er van dit uur aan eigen zon over verwacht wordt, in kWh.
+
+    De voorspelde opbrengst maal wat het dak de afgelopen uren van zo'n
+    voorspelling waarmaakte (`solar_factor`), en dan pas het huisverbruik
+    eraf. Die volgorde doet ertoe: voorspeld wordt de opbrengst, dus daar hoort
+    de belofte tegenaan gelegd te worden, en het huisverbruik wordt al apart
+    gemeten. Dat laatste is geen tweede voorspelling maar een meting, dezelfde
+    soort correctie als `structural_ceiling` op het plafond van de paal doet:
+    wat er beloofd werd en wat er kwam, naast elkaar.
+
+    Sven op 17-09-2026 om 16:33: "waarom ging hij niet laden om 16 uur terwijl
+    hij net zei ik ga laden om 16 uur, nu gaat hij om 17 uur." De voorspeller
+    zei die middag 1,552 kWh voor het uur van 16:00; het dak deed 0,58 en het
+    huis at het op, dus de meter leverde vanaf 15:41 geen seconde terug. Voor
+    het lópende uur zag de coach dat (daar telt de meter, sinds v0.57.0), maar
+    voor het uur erna geloofde hij de voorspelling weer, en zo schoof de
+    belofte elk uur op.
+
+    Het deel en het hele uur zijn er voor het uur waar we in zitten: dat is
+    korter dan een uur en levert dus ook minder.
+    """
+    zon = max(0.0, forecast.solar_kwh.get(uur, 0.0))
+    if forecast.solar_factor is not None:
+        zon *= forecast.solar_factor
+    over = max(0.0, zon - forecast.house_kwh.get(uur.hour, 0.0))
+    return over * (deel / heel if heel else 1.0)
+
+
+def solar_measured_note(forecast: Forecast) -> str:
+    """Eén zin over een zonverwachting die de meter niet waarmaakt, of niets."""
+    if forecast.solar_factor is None or forecast.solar_factor > ZON_NOTE_ONDER:
+        return ""
+    return (
+        f"Je dak gaf de afgelopen uren {round((1 - forecast.solar_factor) * 100)}% minder "
+        "dan de zonverwachting zei, dus hij rekent verder met wat hij mat."
+    )
 
 
 def _vlakke_blokken(
@@ -1313,9 +1385,7 @@ def schijven(
             over = max(0.0, grid.surplus_w) / 1000.0 * deel
         else:
             heel = (rij["end"] - rij["start"]).total_seconds() / 3600.0
-            verwacht = forecast.solar_kwh.get(rij["start"], 0.0)
-            thuis = forecast.house_kwh.get(rij["start"].hour, 0.0)
-            over = max(0.0, verwacht - thuis) * (deel / heel if heel else 1.0)
+            over = overschot_kwh(forecast, rij["start"], deel, heel)
 
         terug = rij.get("feed_in")
         if terug is None:
@@ -1342,10 +1412,24 @@ def schijven(
                     uit.append(
                         Schijf(rij["start"], rij["end"], terug, gedekt, "zon", gedekt)
                     )
-            elif in_evening_peak(rij["start"]):
+            elif in_evening_peak(rij["start"]) or (
+                not nu_blok and over < vloer_kwh * ZON_AANDEEL
+            ):
                 # Bijkopen tot de ondergrens is ook net, en in de avondpiek
                 # komt er niets van het net bij. De zon van dat uur is dan te
                 # weinig om alleen op te laden, dus dat uur bestaat niet.
+                #
+                # En hetzelfde zodra de zon minder dan `ZON_AANDEEL` van dat
+                # uur draagt: dan is het geen zonuur maar een netuur met een
+                # kruimel zon erin, en dan hoort de zon het niet open te maken.
+                #
+                # **Alleen voor de uren die nog moeten komen.** Voor het uur
+                # waar we in zitten meet de meter wat er werkelijk over is, en
+                # een meting is nooit een gok: 0,9 kW echte zon onder de
+                # ondergrens van een driefasige paal maakt dat uur nog steeds
+                # goedkoper dan een avonduur, en dat is de som van 30-08-2026
+                # die Sven toen goedkeurde. Wat hij op 17-09-2026 aanwees was
+                # een belofte over een uur dat nog moest komen.
                 #
                 # Buiten de avondpiek telt zo'n uur wél, ook als de prijzen
                 # tot de klaar-tijd nog niet bekend zijn (`alleen_zon`). Sven
@@ -1423,10 +1507,7 @@ def capaciteit_kwh(
                 if uur <= now < volgend:
                     over = max(0.0, grid.surplus_w) / 1000.0 * deel
                 else:
-                    over = max(
-                        0.0,
-                        forecast.solar_kwh.get(uur, 0.0) - forecast.house_kwh.get(uur.hour, 0.0),
-                    ) * deel
+                    over = overschot_kwh(forecast, uur) * deel
                 som += min(over, vermogen * deel)
         uur = volgend
     return som
@@ -1606,6 +1687,9 @@ class Plan:
     # coach.py: staat er geen uurkromme klaar, dan wordt de dagverwachting over
     # de daglichturen verdeeld, en dat hoort het scherm te zeggen.
     estimated: bool = False
+    # Eén zin als de zonverwachting bijgesteld is met wat de meter de afgelopen
+    # uren werkelijk teruglegde, anders leeg. Zie `solar_measured_note`.
+    solar_note: str = ""
 
 
 # Hoe ver een tijdlijn vooruit kijkt als er geen klaar-tijd is. Dan is er geen
@@ -1660,6 +1744,7 @@ def timeline(
         amps=structureel,
         measured=bool(measured_ceiling_note(car, charger)),
         estimated=forecast.estimated,
+        solar_note=solar_measured_note(forecast),
     )
 
     horizon = max((rij["end"] for rij in prices), default=None)
@@ -2848,6 +2933,12 @@ def _decide(
         reden = f"Stroom is straks goedkoper dan nu, dus hij wacht tot {_clock(begint)}."
         regel = "wait-for-price"
 
+    # Wacht hij op zon, dan hoort erbij te staan of hij de voorspelling nog
+    # gelooft. Sven op 17-09-2026 zag hem "ik laad om 16:00" zeggen en daarna
+    # "ik laad om 17:00", zonder een woord over waarom.
+    if regel == "wait-for-sun" and (zonnote := solar_measured_note(forecast)):
+        reden += " " + zonnote
+
     return Decision(
         False,
         0,
@@ -3394,7 +3485,10 @@ def programma_kosten(
         if (nu_uur or meter_overal) and surplus_w is not None:
             over = max(0.0, surplus_w) / 1000.0
         else:
-            over = max(0.0, forecast.solar_kwh.get(uur, 0.0) - forecast.house_kwh.get(uur.hour, 0.0))
+            # Ook hier de bijgestelde verwachting: een vaatwasser die op zon
+            # van 13:00 wacht heeft niets aan een voorspelling die de meter de
+            # hele ochtend al tegenspreekt. Zie `overschot_kwh`.
+            over = overschot_kwh(forecast, uur)
         over *= deel_uur
         zon = min(kwh, over) if terug is not None else 0.0
         kosten += (zon * terug if zon > 0 else 0.0) + (kwh - zon) * koop

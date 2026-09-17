@@ -336,13 +336,17 @@ export class DacPlanAheadSheet extends DacElement {
         "je huis bij vlagen veel trok. Daarmee rekent hij voor de uren die komen, " +
         "zodat hij op tijd begint."
       : "";
+    // Sinds v0.67.0: de zonverwachting bijgesteld met wat de meter gaf. Zie
+    // solar_measured_note in planner.py.
+    const zon = plan.solar_note ? ` ${plan.solar_note}` : "";
     this.$("#vooruit-voet").textContent =
       (plan.note ||
         "Dit is wat de coach nu van plan is. Hij vergelijkt elk uur tot je klaar-tijd, " +
           "en per uur wat je eigen zon kost tegen wat het net kost. Verandert je " +
           "accustand, de prijs of de verwachting, dan rekent hij het opnieuw uit.") +
       geschat +
-      gemeten;
+      gemeten +
+      zon;
   }
 }
 

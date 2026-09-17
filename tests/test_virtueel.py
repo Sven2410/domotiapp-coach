@@ -480,6 +480,37 @@ if (vl := v("easee-fasekeuze")):
              gehaald(vl) and vl.kosten <= vl.optimum * 1.02,
              f"{vl.kosten:.2f} tegen optimum {vl.optimum:.2f}")
 
+# --- 17-09-2026 thuis: de zonbelofte die opschoof ----------------------------
+#
+# De voorspeller beloofde 1,552 kWh voor het uur van 16:00, het dak deed 0,58 en
+# het huis at het op. De coach zei om 15:42 "ik laad om 16:00", om 16:03 "ik
+# laad om 17:00", en zou dat om 17:00 weer verschoven hebben. Sven: "waarom ging
+# hij niet laden om 16 uur terwijl hij net zei ik ga laden om 16 uur?"
+#
+# Allebei de contracten, want dat was zijn tweede vraag: "je weet ook dat dit
+# thuis een vast contract is, dus ik weet niet hoe het met een dynamisch moet."
+if (vl := v("zonbelofte-vast")):
+    na15 = [r for r in vl.regels if r.tijd.hour >= 15 and r.tijd.hour < 20]
+    # Oud: 15:05 "wacht op je eigen zon van 16:00", 16:05 "van 17:00".
+    controle("zonbelofte vast: hij belooft geen zonuur meer dat zijn meter tegenspreekt",
+             not any("eigen zon van" in r.reden for r in na15),
+             f"{next((r.reden[:80] for r in na15 if 'eigen zon van' in r.reden), '')}")
+    controle("zonbelofte vast: en hij zegt erbij dat hij de verwachting bijgesteld heeft",
+             any("Je dak gaf" in r.reden for r in na15), "")
+    controle("zonbelofte vast: het kost hem niets, hij zit op het optimum",
+             vl.optimum is not None and vl.kosten <= vl.optimum * 1.02,
+             f"{vl.kosten:.2f} tegen optimum {vl.optimum:.2f}")
+    controle("zonbelofte vast: en op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
+if (vl := v("zonbelofte-dynamisch")):
+    # Bij een dynamisch contract houdt zo'n uur zijn eigen netschijf, dus er
+    # gaat niets verloren; wat verdwijnt is de korting die op een voorspelling
+    # rustte. Oud: € 3,12 en vol om 02:18. Nieuw: € 2,99, optimum € 2,95.
+    controle("zonbelofte dynamisch: dichter bij het optimum dan de 3,12 van v0.66.0",
+             vl.optimum is not None and vl.kosten <= vl.optimum * 1.02,
+             f"{vl.kosten:.2f} tegen optimum {vl.optimum:.2f}")
+    controle("zonbelofte dynamisch: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
 # --- de vaatwasser (06-09-2026) ----------------------------------------------
 #
 # Sven: "nu verder met de vaatwasser sturing." De bewoner geeft vrij, de coach
