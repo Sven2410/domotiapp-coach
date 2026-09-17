@@ -276,6 +276,38 @@ zon, terwijl `latest_start` 03:24 die nacht zei. Vier dingen erbij:
 
 Proef 53b in test_coach.py, proef 54 in test_planner.py.
 
+**Een accustand die met stappen meldt wordt bijgeteld** (v0.68.0). Svens Ford
+meldt per tien procent, ongeveer elk half uur: op 17-09-2026 stond hij van
+21:58:43 tot 22:30:37 op zeventig terwijl de paal 4.072 W leverde, dus 1,90 kWh
+aan de stekker en bijna negen procentpunt in de accu. Om 22:26 zei de kaart
+"nog 2,2 kWh, vol rond 23:00" terwijl er 0,18 kWh in ging en de bus om 22:29 op
+zijn doel stond. Sven: "dat hoeft helemaal niet en is onzin." Het was ook de
+bús die stopte en niet de coach, want die wachtte nog tot de sensor 79 zou
+zeggen.
+
+`_soc_bijgeteld` in coach.py doet voor een auto mét sensor wat `_typed_soc` al
+voor een opgegeven stand deed: de laatste meting plus wat de paal sindsdien
+geleverd heeft, uit de eigen meting per ronde (`_eigen`, zie `_geladen`) en niet
+uit de teller van de paal, want die stapt zelf ook maar eens per uur. Drie
+grenzen, allemaal de veilige kant op:
+
+- **Nooit meer dan één stap van de sensor.** De correctie kan niet groter worden
+  dan de onnauwkeurigheid die hij repareert.
+- **Die stap wordt geleerd** uit de sprongen die de sensor zelf maakt, en begint
+  op `SOC_STAP_START` (één procent). Een sensor die per procent meldt merkt er
+  dus niets van; te hoog rekenen laat de coach te vroeg stoppen en dat is de
+  richting die ertoe doet. Een sprong boven `SOC_STAP_MAX` telt niet mee.
+- **De kale meting blijft apart staan** (`_soc_ruw`), want `_soc_op`,
+  `sessie["soc_gezien"]` en daarmee `_soc_bezonken` horen tot rust te komen
+  zodra de sénsor stilstaat. Zonder dat ging het verslag van `ford-storing` in
+  het virtuele huis meteen bij de storing de deur uit in plaats van te wachten
+  tot de auto zich meldde.
+
+Scenario `accustand-per-tien` (`Auto.soc_stap` in het virtuele huis, en
+`Regel.nodig_kwh` om het te kunnen meten): over de hele beurt zat "nog te laden"
+er gemiddeld 0,63 kWh naast, nu 0,19. Proef 70 in test_coach.py, met Svens eigen
+getallen: 70% plus 1,90 kWh geleverd wordt 78,7%.
+
 **Een laaduur op de kaart staat nooit onder de ondergrens van de paal**
 (v0.67.3). Sven op 17-09-2026 om 22:10, met 2,5 kWh te gaan: "dit klopt niet,
 4 A laden." Het restje werd uitgesmeerd over de vijftig minuten die nog van dat
@@ -614,8 +646,8 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 345 controles op het denkwerk
-python tests/test_coach.py       # 388 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1405 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 396 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1419 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 40 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

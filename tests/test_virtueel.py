@@ -387,6 +387,25 @@ if (vl := v("doel-80")):
     controle("doel onder de auto: laadt minder dan tot vol",
              vl.geladen_kwh < 11.5, f"{vl.geladen_kwh:.2f}")
 
+# Svens Ford meldt zijn accustand per tien procent, ongeveer elk half uur.
+# Tussen twee stappen stond het beeld van de coach stil terwijl de bus voller
+# werd: op 17-09-2026 om 22:26 zei de kaart "nog 2,2 kWh, vol rond 23:00"
+# terwijl er 0,18 kWh in ging en de bus om 22:29 op zijn doel stond. Sinds
+# v0.68.0 telt hij op wat de paal sinds die stap geleverd heeft. Gemiddeld over
+# de beurt zat hij er 0,63 kWh naast, nu 0,19.
+if (vl := v("accustand-per-tien")):
+    auto70 = vl.scenario.auto
+    fouten = [
+        r.nodig_kwh - max(0.0, (auto70.doel - r.soc) / 100 * auto70.capaciteit_kwh / 0.9)
+        for r in vl.regels if r.nodig_kwh is not None
+    ]
+    gemiddeld = sum(fouten) / len(fouten) if fouten else 0.0
+    controle("accustand per tien: 'nog te laden' klopt gemiddeld binnen 0,3 kWh",
+             fouten and gemiddeld < 0.3, f"gemiddeld {gemiddeld:+.2f} kWh ernaast")
+    controle("accustand per tien: en hij rekent nooit te laag",
+             all(f > -0.5 for f in fouten), f"laagste {min(fouten):+.2f} kWh")
+    controle("accustand per tien: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+
 if (vl := v("bijna-vol")):
     controle("bijna vol: laadt het restje", 0.5 < vl.geladen_kwh < 2.0, f"{vl.geladen_kwh:.2f}")
     controle("bijna vol: één melding", len(meldingen(vl, "is vol")) == 1, "")
