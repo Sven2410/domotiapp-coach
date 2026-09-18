@@ -1379,9 +1379,7 @@ def schijven(
     # daardoor 's nachts tegen 0,304 moest halen: "nu hebben we dus niks
     # bespaard", en de regel mocht eraan. Een uur boven het gemiddelde wacht
     # nog steeds op de prijzen van morgen.
-    gemiddeld_bekend = (
-        sum(rij["price"] for rij in prices) / len(prices) if prices else None
-    )
+    gemiddeld_bekend = _gemiddeld_bekend(prices)
     uit: list[Schijf] = []
     for rij in blokken:
         if rij["end"] <= vanaf or (end is not None and rij["start"] >= end):
@@ -1479,6 +1477,13 @@ def schijven(
                 Schijf(rij["start"], rij["end"], rij["price"], plafond_kwh - gedekt)
             )
     return uit
+
+
+def _gemiddeld_bekend(prices: list[dict]) -> float | None:
+    """Het gemiddelde van alle bekende uurprijzen: de grens die `schijven` bij
+    `alleen_zon` legt, en die de tijdlijn gebruikt om te zeggen waarom een uur
+    leeg blijft."""
+    return sum(rij["price"] for rij in prices) / len(prices) if prices else None
 
 
 def capaciteit_kwh(
@@ -1769,6 +1774,11 @@ def timeline(
     # 17-09-2026: "hij zegt nu 14:00 wachten buiten je tijden, maar dat klopt
     # ook niet."
     netto_vanaf = _evening_before(einde) if not prices else None
+    # En zolang de prijzen niet tot de klaar-tijd reiken komt er van het net
+    # alleen iets bij in een uur onder het gemiddelde van wat bekend is. Bij
+    # Van den Dam stond op 18-09-2026 de hele vrijdagavond "buiten je tijden",
+    # terwijl die uren gewoon in het schema vielen en alleen duurder waren.
+    gemiddeld = _gemiddeld_bekend(prices) if alleen_zon else None
     alle = schijven(
         now, prices, grid, car, amps, begin, einde, tariff, forecast,
         ceiling_later=structureel, alleen_zon=alleen_zon,
@@ -1839,6 +1849,8 @@ def timeline(
             waarom = "de avondpiek, daar komt niets van het net bij"
         elif not schijven_hier and netto_vanaf is not None and rij["end"] <= netto_vanaf:
             waarom = f"geen zon over, en voor {_clock(netto_vanaf)} geen net"
+        elif not schijven_hier and gemiddeld is not None and rij["price"] >= gemiddeld:
+            waarom = "duurder dan gemiddeld, dus hij wacht eerst op de nieuwe prijzen"
         elif not schijven_hier:
             waarom = "buiten je tijden"
         else:

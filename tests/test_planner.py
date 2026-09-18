@@ -2445,6 +2445,54 @@ controle("een uur dat helemaal gebruikt wordt houdt zijn eigen stroom",
          laadt57 and all(b.amps >= MIN_AMPS for b in laadt57),
          f"{[(b.start.hour, b.amps) for b in laadt57]}")
 
+print("=== 58. een leeg uur boven het gemiddelde zegt waarom (18-09-2026) ===")
+# Van den Dam, vrijdag 19:55: de Ford op 18%, zaterdag uitgevinkt, dus klaar
+# zondag 06:00, en de prijzen reiken tot zaterdag 23:00. Dan komt er van het
+# net alleen iets bij in een uur onder het gemiddelde van wat bekend is
+# (`alleen_zon`). De uren van 20:00 tot 02:00 lagen daarboven en de kaart zei
+# "buiten je tijden", terwijl ze gewoon in het schema vielen.
+prijzen58_lijst = [
+    0.3709, 0.3722, 0.3509, 0.3333, 0.2986,          # vrijdag 19:00 tot 24:00
+    0.2609, 0.2332, 0.2074, 0.1682, 0.1727, 0.1724,  # zaterdag 00:00 tot 06:00
+    0.1849, 0.1848, 0.1688, 0.1409, 0.1291, 0.1288,
+    0.1283, 0.1276, 0.1275, 0.1279, 0.1289, 0.1394,
+    0.2146, 0.2885, 0.2739, 0.2556, 0.2485, 0.2405,  # tot zaterdag 24:00
+]
+begin58 = dt.datetime(2026, 9, 18, 19, 0)
+prijzen58 = [
+    {"start": begin58 + dt.timedelta(hours=i),
+     "end": begin58 + dt.timedelta(hours=i + 1), "price": p}
+    for i, p in enumerate(prijzen58_lijst)
+]
+gem58 = sum(prijzen58_lijst) / len(prijzen58_lijst)
+nu58 = dt.datetime(2026, 9, 18, 19, 55)
+w58 = Window(enabled=True, opens=None, deadline=dt.datetime(2026, 9, 20, 6, 0))
+auto58 = Car(capacity_kwh=65.0, phases=3, soc_percent=18.0)
+paal58 = Charger(max_amps=16.0, connected=True, charging=False)
+plan58 = planner.timeline(nu58, prijzen58, NET_LEEG, auto58, paal58, w58, 16,
+                          forecast=Forecast())
+print(f"  gemiddelde {gem58:.4f}, alleen zon: {plan58.solar_only}")
+for b in plan58.blocks[:9]:
+    print(f"  {b.start:%a %H:%M}  {b.price:.4f}  {b.why}")
+controle("de prijzen reiken niet tot de klaar-tijd", plan58.solar_only, "")
+controle("nergens staat nog 'buiten je tijden'",
+         not any(b.why == "buiten je tijden" for b in plan58.blocks),
+         f"{[(b.start.hour, b.why) for b in plan58.blocks if b.why == 'buiten je tijden']}")
+duur58 = [b for b in plan58.blocks
+          if not b.charging and b.price >= gem58 and not planner.in_evening_peak(b.start)]
+controle("een uur boven het gemiddelde zegt dat hij op de nieuwe prijzen wacht",
+         duur58 and all("wacht eerst op de nieuwe prijzen" in b.why for b in duur58),
+         f"{[(b.start.hour, b.why) for b in duur58]}")
+controle("de avondpiek houdt zijn eigen reden",
+         "avondpiek" in plan58.blocks[0].why, plan58.blocks[0].why)
+goedkoop58 = [b for b in plan58.blocks if not b.charging and b.price < gem58]
+controle("een uur onder het gemiddelde dat niet gekozen is blijft 'duurder dan wat hij nodig heeft'",
+         goedkoop58 and all(b.why == "duurder dan wat hij nodig heeft" for b in goedkoop58),
+         f"{[(b.start.hour, b.why) for b in goedkoop58]}")
+controle("het plan zelf verandert niet: zaterdag 11:00 tot 16:00",
+         [b.start.hour for b in plan58.blocks if b.charging] == [11, 12, 13, 14, 15, 16],
+         f"{[b.start.hour for b in plan58.blocks if b.charging]}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
