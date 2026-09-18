@@ -337,7 +337,12 @@ niet: zijn tijden lopen tot 06:00. Een uur zonder enkele schijf kreeg altijd
 "buiten je tijden", ook als het gewoon de avondpiek was of de avondregel van een
 vast contract (`netto_vanaf` in `schijven`). `timeline` rekent die grens nu zelf
 uit en zegt "de avondpiek, daar komt niets van het net bij" of "geen zon over,
-en voor 20:00 geen net".
+en voor 20:00 geen net". Sinds v0.68.1 ook de derde grens: reiken de prijzen
+niet tot de klaar-tijd, dan zegt een leeg uur boven het gemiddelde van de
+bekende prijzen "duurder dan gemiddeld, dus hij wacht eerst op de nieuwe
+prijzen" (`_gemiddeld_bekend`, dezelfde som als in `schijven`). Bij Van den Dam
+stond op 18-09-2026 de hele vrijdagavond "buiten je tijden" bij een klaar-tijd
+op zondag 06:00. Proef 58 in test_planner.py.
 
 **Het plafond voor de uren die komen is een meting van deze beurt** (v0.61.0).
 In de nacht van 09 op 10-09-2026 ging bij Van den Dam om het kwartier een
@@ -645,7 +650,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 345 controles op het denkwerk
+python tests/test_planner.py     # 351 controles op het denkwerk
 python tests/test_coach.py       # 396 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1419 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
