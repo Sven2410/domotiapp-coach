@@ -533,6 +533,77 @@ MARKT = [
 
 
 @dataclass
+class Boiler:
+    """Een elektrische boiler op een smart plug.
+
+    Een vat met een thermostaat ervoor. Staat er stroom op en is het water
+    kouder dan de thermostaat wil, dan trekt het element zijn vermogen; is het
+    vat op temperatuur, dan trekt hij niets, ook al staat de stekker erin. Dat
+    laatste is precies wat de coach meet om te zien dat het vat vol is.
+
+    Wat er uit het vat gaat is afkoeling plus douchen. De thermostaat heeft
+    speling: hij vraagt pas warmte als er een stuk uit is, en houdt die vraag
+    vast tot het vat weer vol is. Zo gedraagt een echte zich ook, en zo kan de
+    coach niet elke minuut een kruimel bijverwarmen.
+    """
+
+    element_w: float = 2000.0
+    vat_kwh: float = 6.0
+    verlies_kwh_h: float = 0.08
+    # Wanneer er warm water getapt wordt en hoeveel: {"07:15": 2.0}.
+    tappen: dict = field(default_factory=lambda: {"07:20": 2.2, "21:30": 1.4})
+    # Hoeveel er uit moet zijn voor de thermostaat warmte vraagt.
+    speling_kwh: float = 0.5
+    # Of de stekker het doet. Uit: er komt nooit stroom, wat de coach ook zegt.
+    stekker_werkt: bool = True
+
+    # toestand
+    aan: bool = False
+    inhoud_kwh: float | None = None
+    vraagt: bool = False
+    getapt: set = field(default_factory=set)
+    laagste_kwh: float | None = None
+    begonnen: dt.datetime | None = None
+
+    def stap(self, nu: dt.datetime, seconden: float) -> float:
+        """Eén stap; geeft het vermogen van dit moment in watt."""
+        if self.inhoud_kwh is None:
+            self.inhoud_kwh = self.vat_kwh
+        if self.begonnen is None:
+            self.begonnen = nu
+        uren = seconden / 3600.0
+        self.inhoud_kwh = max(0.0, self.inhoud_kwh - self.verlies_kwh_h * uren)
+        for tijd, kwh in self.tappen.items():
+            moment = nu.replace(hour=int(tijd[:2]), minute=int(tijd[3:5]), second=0, microsecond=0)
+            sleutel = (nu.date(), tijd)
+            # Een douche van vóór het begin van de proef is al geweest; die
+            # hoort niet in de eerste minuut alsnog het vat leeg te trekken.
+            if moment < self.begonnen:
+                self.getapt.add(sleutel)
+            if sleutel not in self.getapt and nu >= moment:
+                self.getapt.add(sleutel)
+                self.inhoud_kwh = max(0.0, self.inhoud_kwh - kwh)
+
+        watt = 0.0
+        if self.aan and self.stekker_werkt and self.vraagt:
+            watt = self.element_w
+            self.inhoud_kwh = min(self.vat_kwh, self.inhoud_kwh + watt / 1000.0 * uren)
+
+        # De thermostaat: vol is vol, en daarna vraagt hij pas weer warmte als
+        # er een stuk uit is. De marge is er omdat het vat elke stap ook een
+        # beetje afkoelt; zonder die marge stond hij een haar onder vol en
+        # bleef hij eeuwig bijverwarmen.
+        if self.inhoud_kwh >= self.vat_kwh - 0.005:
+            self.vraagt = False
+        elif self.inhoud_kwh <= self.vat_kwh - self.speling_kwh:
+            self.vraagt = True
+        self.laagste_kwh = (
+            self.inhoud_kwh if self.laagste_kwh is None else min(self.laagste_kwh, self.inhoud_kwh)
+        )
+        return watt
+
+
+@dataclass
 class Prijzen:
     markt: list[float] = field(default_factory=lambda: list(MARKT))
     bekend_om: str = "13:00"     # vanaf dan is de dag van morgen bekend
@@ -627,6 +698,12 @@ class Scenario:
     vaatwasser_programma: str = "eco_50"
     # Wat de coach bij een eerdere beurt al mat (rijen zoals `program_measured`).
     vaatwasser_gemeten: list = field(default_factory=list)
+    # Een boiler op een smart plug, met zijn eigen "klaar om"; None is geen.
+    boiler: Boiler | None = None
+    boiler_klaar_om: str | None = "07:00"
+    # Wat de coach van deze boiler al geleerd had (een rij zoals
+    # `boiler_learned` in de instellingen); leeg is: hij begint met meten.
+    boiler_geleerd: dict = field(default_factory=dict)
     vast_prijs: float = 0.28
     vast_teruglevering: float = 0.07
     vast_terugleverkosten: float = 0.0
@@ -707,6 +784,18 @@ class Verloop:
     vw_gemeten: list = field(default_factory=list)
     # Wanneer de coach de bewoner vroeg om hem aan te zetten (domme machine).
     vw_gevraagd: list = field(default_factory=list)
+    # De boiler: wanneer de stroom erop en eraf ging, wat erin ging en wat dat
+    # kostte, hoe leeg het vat onderweg werd en hoe vol het was op de
+    # klaar-tijd. Dat laatste is waar het om gaat: er hoort warm water te zijn
+    # als de bewoner onder de douche stapt.
+    boiler_schakels: list = field(default_factory=list)
+    boiler_kwh: float = 0.0
+    boiler_betaald: float = 0.0
+    boiler_zon_kwh: float = 0.0
+    boiler_bij_klaar: float | None = None
+    boiler_laagste: float | None = None
+    # Wat de coach aan het eind van deze boiler geleerd had.
+    boiler_geleerd: dict = field(default_factory=dict)
 
     @property
     def kosten(self) -> float:
@@ -775,6 +864,8 @@ E = {
     "vw_start": "button.v_vaatwasser_start",
     "vw_stop": "button.v_vaatwasser_stop",
     "vw_vermogen": "sensor.v_vaatwasser_vermogen",
+    "boiler_vermogen": "sensor.v_boiler_vermogen",
+    "boiler_switch": "switch.v_boiler",
 }
 
 
@@ -870,6 +961,23 @@ def instellingen(s: Scenario) -> dict:
                        "done_by": s.vaatwasser_klaar_om or ""},
             "days": [],
         })
+    if s.boiler is not None:
+        apparaten.append({
+            "id": "boiler",
+            "type": "boiler",
+            "name": "Boiler",
+            "controllable": True,
+            "entity": E["boiler_vermogen"],
+            "entities": {"switch": E["boiler_switch"]},
+        })
+        schemas.append({
+            "device": "boiler",
+            "enabled": bool(s.boiler_klaar_om),
+            "priority": "mid",
+            "per_day": False,
+            "window": {"not_before": "", "start_by": "", "done_by": s.boiler_klaar_om or ""},
+            "days": [],
+        })
     return {
         "devices": [*apparaten, {
             "id": "paal",
@@ -942,6 +1050,8 @@ def instellingen(s: Scenario) -> dict:
         "sessions": [],
         # Wat een eerdere beurt over de programma's van de vaatwasser mat.
         "program_measured": [dict(r) for r in s.vaatwasser_gemeten],
+        # En wat de coach van de boiler geleerd had.
+        "boiler_learned": [{"device": "boiler", **s.boiler_geleerd}] if s.boiler_geleerd else [],
     }
 
 
@@ -956,6 +1066,8 @@ class Wereld:
         self.zon = dataclasses.replace(s.zon)
         self.huis = dataclasses.replace(s.huis)
         self.vaatwasser = dataclasses.replace(s.vaatwasser) if s.vaatwasser is not None else None
+        self.boiler = dataclasses.replace(s.boiler, getapt=set()) if s.boiler is not None else None
+        self.boiler_w = 0.0
         self.vw_w = 0.0
         self.vw_gevraagd: dt.datetime | None = None
         self.auto = dataclasses.replace(s.auto, soc_gemeld=[])
@@ -1003,6 +1115,11 @@ class Wereld:
         if self.vaatwasser is not None:
             self.vw_w = self.vaatwasser.stap(nu)
             self.huis_w += self.vw_w
+        # De boiler hangt net zo in huis: de meter ziet hem, de coach leest
+        # hem apart via zijn eigen meetstekker.
+        if self.boiler is not None:
+            self.boiler_w = self.boiler.stap(nu, self.s.stap_seconden)
+            self.huis_w += self.boiler_w
         self.paal.stap(nu)
         aanbod = self.paal.aanbod()
         # De Equalizer zit tussen de paal en de auto: hij laat nooit meer door
@@ -1120,6 +1237,9 @@ class Wereld:
                 z(E["vw_rest"], "unknown" if rest is None else w(str(rest), "min"))
             z(E["vw_deur"], "on" if vw.deur_open else "off")
             z(E["vw_vermogen"], w(f"{self.vw_w:.0f}", "W"))
+        if self.boiler is not None:
+            z(E["boiler_switch"], "on" if self.boiler.aan else "off")
+            z(E["boiler_vermogen"], w(f"{self.boiler_w:.0f}", "W"))
         if self.s.equalizer:
             z(E["equalizer"], w(f"{self.equalizer_vrij:.1f}", "A"))
             z(E["reden"], self.reden or "none")
@@ -1290,6 +1410,11 @@ class Diensten:
                                             "attributes": {"unit_of_measurement": "A"}})
         elif domein == "notify":
             self.verloop.meldingen.append((self.wereld.nu, data.get("message", "")))
+        elif data.get("entity_id") == E["boiler_switch"] and dienst in ("turn_on", "turn_off"):
+            if self.wereld.boiler is not None:
+                self.wereld.boiler.aan = dienst == "turn_on"
+                self.verloop.boiler_schakels.append((self.wereld.nu, dienst == "turn_on"))
+            self.hass.states.zet(E["boiler_switch"], "on" if dienst == "turn_on" else "off")
         elif domein == "button" and data.get("entity_id") == E["vw_start"]:
             self.verloop.vw_gedrukt.append(self.wereld.nu)
             if self.wereld.vaatwasser is not None:
@@ -1385,6 +1510,11 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
     gebeurtenissen.sort(key=lambda g: g[0])
     kabel_in = wereld.nu if s.kabel_erin is None else _moment_op(wereld.nu, s.kabel_erin)
     verloop.klaar_tijd = klaar_tijd_na(s, kabel_in)
+    boiler_klaar = None
+    if s.boiler is not None and s.boiler_klaar_om:
+        boiler_klaar = _moment_op(wereld.nu, s.boiler_klaar_om)
+        if boiler_klaar <= wereld.nu:
+            boiler_klaar += dt.timedelta(days=1)
 
     vorige = (None, None)
     laatste_ronde = None
@@ -1507,6 +1637,20 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                     verloop.vw_kwh += wereld.vw_w * deel
                     if prijs is not None:
                         verloop.vw_betaald += wereld.vw_w * deel * prijs
+            if wereld.boiler is not None:
+                if wereld.boiler_w > 0:
+                    verloop.boiler_kwh += wereld.boiler_w * deel
+                    uit_zon_b = min(wereld.boiler_w, max(0.0, over - wereld.paal_w))
+                    verloop.boiler_zon_kwh += uit_zon_b * deel
+                    if prijs is not None:
+                        verloop.boiler_betaald += (wereld.boiler_w - uit_zon_b) * deel * prijs
+                verloop.boiler_laagste = wereld.boiler.laagste_kwh
+                # De eerste klaar-tijd ná het begin van de proef: dáár hoort
+                # er warm water te zijn. Valt hij op de begindag al achter ons,
+                # dan is het die van de volgende dag.
+                if boiler_klaar is not None and verloop.boiler_bij_klaar is None and nu >= boiler_klaar:
+                    verloop.boiler_bij_klaar = wereld.boiler.inhoud_kwh
+
             if (verloop.klaar_tijd is not None and verloop.soc_bij_klaar_tijd is None
                     and nu >= verloop.klaar_tijd):
                 verloop.soc_bij_klaar_tijd = wereld.auto.soc
@@ -1529,6 +1673,10 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                            if isinstance(r, dict) and r.get("car") == "auto"}
         verloop.vw_gemeten = [r for r in inst.get("program_measured") or []
                               if isinstance(r, dict) and r.get("device") == "vaatwasser"]
+        verloop.boiler_geleerd = next(
+            (r for r in inst.get("boiler_learned") or []
+             if isinstance(r, dict) and r.get("device") == "boiler"), {}
+        )
     except Exception as fout:  # noqa: BLE001
         verloop.fouten.append(f"beurten niet te lezen: {fout!r}")
     if verloop.klaar_tijd is not None and verloop.soc_bij_klaar_tijd is None:
@@ -1595,6 +1743,10 @@ def samenvatting(v: Verloop) -> str:
               if v.vw_gestart and v.vw_klaar else
               f"  vaatwasser {'draait nog' if v.vw_gestart else 'niet gestart'}")
         opt += vw
+    if v.scenario.boiler is not None:
+        vol = "" if v.boiler_bij_klaar is None else f", vat {v.boiler_bij_klaar:.1f} kWh op de klaar-tijd"
+        opt += (f"  boiler {v.boiler_kwh:.2f} kWh (zon {v.boiler_zon_kwh:.2f}) €{v.boiler_betaald:.2f}"
+                f", {sum(1 for _, aan in v.boiler_schakels if aan)}x aan{vol}")
     return (
         f"{s.naam:<28} {v.geladen_kwh:5.1f} kWh (zon {v.uit_zon_kwh:4.1f}, net {v.uit_net_kwh:4.1f})"
         f"  kosten €{v.kosten:.2f} (betaald €{v.betaald:.2f}){opt}"

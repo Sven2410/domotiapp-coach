@@ -423,6 +423,21 @@ function deviceDetails(feed, device, settings) {
     }
   }
 
+  // Een boiler heeft geen tabel en geen programma: wat de coach van hem weet
+  // heeft hij zelf gemeten. Dat hoort op de kaart te staan, want het is het
+  // enige waaraan te zien is dat het leren werkt. Sven op 19-09-2026: "ik wil
+  // dit zelflerend hebben." Nog niets gemeten is een eerlijk antwoord.
+  if (device?.type === "boiler") {
+    const geleerd = (settings?.boiler_learned ?? []).find((rij) => rij?.device === device.id) ?? {};
+    const getal = (waarde, eenheid, cijfers = 1) =>
+      waarde === null || waarde === undefined || waarde === ""
+        ? "nog niet gemeten"
+        : `${Number(waarde).toLocaleString("nl-NL", { maximumFractionDigits: cijfers })} ${eenheid}`;
+    rows.push({ label: "Element", text: getal(geleerd.heat_w ? geleerd.heat_w / 1000 : null, "kW", 1) });
+    rows.push({ label: "Vol vat", text: getal(geleerd.vol_kwh, "kWh", 1) });
+    rows.push({ label: "Eruit per uur", text: getal(geleerd.verbruik_kwh_h, "kWh", 2) });
+  }
+
   return rows;
 }
 

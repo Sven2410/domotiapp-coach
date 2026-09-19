@@ -2493,6 +2493,184 @@ controle("het plan zelf verandert niet: zaterdag 11:00 tot 16:00",
          [b.start.hour for b in plan58.blocks if b.charging] == [11, 12, 13, 14, 15, 16],
          f"{[b.start.hour for b in plan58.blocks if b.charging]}")
 
+# --- De boiler ---------------------------------------------------------------
+#
+# Sven op 19-09-2026: een boiler waar je alleen stroom op hoeft te zetten, met
+# een smart plug. Alleen de schakelaar en het vermogen invullen, de rest leert
+# hij zelf. Klaar om 07:00, zonoverschot mag hij pakken, en af en toe even
+# proefdraaien om te zien of het vat nog warm is.
+
+print()
+print("=== de boiler ===")
+
+def prijzen_boiler(dag=7):
+    """Twee etmalen: nacht goedkoop (0,18), avondpiek duur (0,30), rest 0,25."""
+    rijen = []
+    for i in range(48):
+        start = dt.datetime(2026, 9, dag, 0, 0) + dt.timedelta(hours=i)
+        prijs = 0.30 if 17 <= start.hour < 21 else (0.18 if 1 <= start.hour < 6 else 0.25)
+        rijen.append({"start": start, "end": start + dt.timedelta(hours=1), "price": prijs, "feed_in": 0.07})
+    return rijen
+
+
+def geleerde_boiler(**kw):
+    """Een boiler die al gemeten is: 2 kW, een vat van 6 kWh, 0,25 kWh per uur eruit."""
+    velden = dict(heat_w=2000.0, vol_kwh=6.0, verbruik_kwh_h=0.25)
+    velden.update(kw)
+    return planner.Boiler(**velden)
+
+
+venster_b = planner.Window(enabled=True, deadline=dt.datetime(2026, 9, 8, 7, 0))
+prijzen_b = prijzen_boiler()
+
+# Wat er nog in moet: sinds het vat vol was tot aan de klaar-tijd, begrensd op
+# een heel vat, min wat er al in ging.
+nodig = planner.boiler_nodig(
+    dt.datetime(2026, 9, 7, 19, 0),
+    geleerde_boiler(vol_sinds=dt.datetime(2026, 9, 7, 7, 0)),
+    venster_b.deadline,
+)
+controle("twaalf uur geleden vol en nog twaalf te gaan: 24 maal 0,25 is 6, en het vat is 6",
+         abs(nodig - 6.0) < 0.001, f"{nodig}")
+nodig_kort = planner.boiler_nodig(
+    dt.datetime(2026, 9, 7, 19, 0),
+    geleerde_boiler(vol_sinds=dt.datetime(2026, 9, 7, 17, 0)),
+    venster_b.deadline,
+)
+controle("twee uur geleden gemeten dat hij vol was: dan hoeft er niets bij, wat de som ook zegt",
+         nodig_kort == 0.0, f"{nodig_kort}")
+nodig_al = planner.boiler_nodig(
+    dt.datetime(2026, 9, 7, 19, 0),
+    geleerde_boiler(vol_sinds=dt.datetime(2026, 9, 7, 14, 0), kwh_sinds_vol=1.0),
+    venster_b.deadline,
+)
+controle("wat er al in ging gaat eraf: zeventien uur maal 0,25 is 4,25, min 1 is 3,25",
+         abs(nodig_al - 3.25) < 0.001, f"{nodig_al}")
+controle("zonder meting is er niets te zeggen",
+         planner.boiler_nodig(dt.datetime(2026, 9, 7, 19, 0), planner.Boiler(), venster_b.deadline) is None, "")
+
+# Het gewone geval: 's avonds om 19:00, klaar om 07:00. De nacht is goedkoop.
+avond_b = planner.plan_boiler(
+    dt.datetime(2026, 9, 7, 19, 0), prijzen_b, Tariff(), Forecast(), venster_b,
+    geleerde_boiler(vol_sinds=dt.datetime(2026, 9, 7, 12, 0)),
+)
+print(f"  19:00: {avond_b.rule} {avond_b.starts_at}  {avond_b.reason}")
+controle("om 19:00 wacht hij op de nacht en zegt wanneer",
+         avond_b.rule == "wait-for-cheap" and not avond_b.charge
+         and avond_b.starts_at == "2026-09-08T01:00:00", f"{avond_b}")
+
+nacht_b = planner.plan_boiler(
+    dt.datetime(2026, 9, 8, 1, 0), prijzen_b, Tariff(), Forecast(), venster_b,
+    geleerde_boiler(vol_sinds=dt.datetime(2026, 9, 7, 12, 0)),
+)
+controle("om 01:00 zet hij hem aan", nacht_b.rule == "cheapest-hour" and nacht_b.charge, f"{nacht_b}")
+
+# De klaar-tijd is heilig, ook als het dan duur is.
+krap_b = planner.plan_boiler(
+    dt.datetime(2026, 9, 8, 6, 0), prijzen_b, Tariff(), Forecast(), venster_b,
+    geleerde_boiler(vol_sinds=dt.datetime(2026, 9, 7, 7, 0)),
+)
+controle("een uur voor de klaar-tijd met een leeg vat: meteen aan",
+         krap_b.rule == "deadline" and krap_b.charge, f"{krap_b.reason}")
+
+# Vol gemeten: de stroom gaat eraf, wat de prijs ook is.
+vol_b = planner.plan_boiler(
+    dt.datetime(2026, 9, 8, 1, 0), prijzen_b, Tariff(), Forecast(), venster_b,
+    geleerde_boiler(on=True, full=True, vol_sinds=dt.datetime(2026, 9, 8, 1, 0)),
+)
+controle("vol gemeten: uit, ook in het goedkoopste uur",
+         vol_b.rule == "full" and not vol_b.charge, f"{vol_b}")
+
+# Nog niets geleerd: aanzetten en meten, niet rekenen.
+leeg_b = planner.plan_boiler(
+    dt.datetime(2026, 9, 7, 19, 0), prijzen_b, Tariff(), Forecast(), venster_b, planner.Boiler(),
+)
+controle("de eerste keer zet hij hem aan om te meten",
+         leeg_b.rule == "leren" and leeg_b.charge, f"{leeg_b}")
+
+# Schema uit: de coach stuurt niet en laat de stroom erop staan.
+uit_b = planner.plan_boiler(
+    dt.datetime(2026, 9, 7, 19, 0), prijzen_b, Tariff(), Forecast(),
+    planner.Window(enabled=False), geleerde_boiler(),
+)
+controle("zonder schema blijft de stroom erop staan",
+         uit_b.rule == "schema-uit" and uit_b.charge, f"{uit_b}")
+
+# Zon van nu wint van elk uur van straks.
+zon_b = planner.plan_boiler(
+    dt.datetime(2026, 9, 7, 13, 0), prijzen_b, Tariff(), Forecast(), venster_b,
+    geleerde_boiler(vol_sinds=dt.datetime(2026, 9, 7, 8, 0)), surplus_w=2400.0,
+)
+controle("2,4 kW overschot op een boiler van 2 kW: aan",
+         zon_b.rule == "zon" and zon_b.charge, f"{zon_b.reason}")
+zon_te_weinig = planner.plan_boiler(
+    dt.datetime(2026, 9, 7, 13, 0), prijzen_b, Tariff(), Forecast(), venster_b,
+    geleerde_boiler(vol_sinds=dt.datetime(2026, 9, 7, 8, 0)), surplus_w=900.0,
+)
+controle("900 W overschot draagt hem niet: dan telt de prijs weer",
+         zon_te_weinig.rule in ("wait-for-cheap", "cheapest-hour"), f"{zon_te_weinig.rule}")
+
+# De avondpiek zit dicht voor het net, maar niet voor de zon.
+schijven_piek = planner.boiler_schijven(
+    dt.datetime(2026, 9, 7, 12, 0), prijzen_b, Tariff(), Forecast(), geleerde_boiler(),
+    tot=dt.datetime(2026, 9, 7, 23, 0),
+)
+controle("in de avondpiek staat geen enkel blok als er geen zon is",
+         not any(planner.in_evening_peak(s.start) for s in schijven_piek),
+         f"{[s.start.hour for s in schijven_piek if planner.in_evening_peak(s.start)]}")
+zonnig = kromme(dt.datetime(2026, 9, 7), 18, [3.0, 3.0])
+schijven_zon = planner.boiler_schijven(
+    dt.datetime(2026, 9, 7, 12, 0), prijzen_b, Tariff(), zonnig, geleerde_boiler(),
+    tot=dt.datetime(2026, 9, 7, 23, 0),
+)
+piek_zon = [s for s in schijven_zon if planner.in_evening_peak(s.start)]
+controle("met een dak dat 3 kW geeft mag de boiler wel in de avondpiek, tegen de terugleverprijs",
+         len(piek_zon) == 2 and all(abs(s.price - 0.07) < 0.001 for s in piek_zon),
+         f"{[(s.start.hour, round(s.price, 3)) for s in piek_zon]}")
+
+# Zonder prijzen tot de klaar-tijd wordt er niets geraden (eis 6).
+geen_prijzen = planner.plan_boiler(
+    dt.datetime(2026, 9, 7, 19, 0), [], Tariff(), Forecast(), venster_b,
+    geleerde_boiler(vol_sinds=dt.datetime(2026, 9, 7, 12, 0)),
+)
+controle("zonder prijzen en zonder vast tarief wacht hij",
+         geen_prijzen.rule == "wait-for-prices" and not geen_prijzen.charge, f"{geen_prijzen}")
+
+# Genoeg warm water: niets doen.
+genoeg = planner.plan_boiler(
+    dt.datetime(2026, 9, 8, 6, 45), prijzen_b, Tariff(), Forecast(),
+    planner.Window(enabled=True, deadline=dt.datetime(2026, 9, 8, 7, 0)),
+    geleerde_boiler(vol_sinds=dt.datetime(2026, 9, 8, 6, 40)),
+)
+# En een vat dat een dag geleden vol was, met een stekker die niets doet.
+geen_stroom = planner.plan_boiler(
+    dt.datetime(2026, 9, 8, 1, 0), prijzen_b, Tariff(), Forecast(), venster_b,
+    geleerde_boiler(vol_sinds=dt.datetime(2026, 9, 7, 12, 0), vergeefs=3),
+)
+controle("na drie keer vergeefs stroom geven houdt hij ermee op en zegt waarom",
+         geen_stroom.rule == "geen-stroom" and not geen_stroom.charge
+         and "geen stroom" in geen_stroom.reason, f"{geen_stroom}")
+controle("vlak na een volle beurt hoeft er niets bij",
+         genoeg.rule == "genoeg" and not genoeg.charge, f"{genoeg}")
+
+# Proefdraaien: even kijken of het vat nog warm is.
+proef = planner.plan_boiler(
+    dt.datetime(2026, 9, 7, 19, 0), prijzen_b, Tariff(), Forecast(), venster_b,
+    geleerde_boiler(vol_sinds=dt.datetime(2026, 9, 7, 12, 0), proef_nodig=True),
+)
+controle("met proef_nodig zet hij hem even aan om te kijken",
+         proef.rule == "proef" and proef.charge, f"{proef.reason}")
+
+# Een vast contract heeft geen prijslijst en moet toch werken.
+vast_b = planner.plan_boiler(
+    dt.datetime(2026, 9, 7, 19, 0), [], Tariff(buy=0.28, feed_in=0.07), Forecast(), venster_b,
+    geleerde_boiler(vol_sinds=dt.datetime(2026, 9, 7, 12, 0)),
+)
+controle("bij een vast tarief kiest hij gewoon een blok buiten de avondpiek",
+         vast_b.rule in ("wait-for-cheap", "cheapest-hour")
+         and (vast_b.starts_at is None or not planner.in_evening_peak(dt.datetime.fromisoformat(vast_b.starts_at))),
+         f"{vast_b.rule} {vast_b.starts_at}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

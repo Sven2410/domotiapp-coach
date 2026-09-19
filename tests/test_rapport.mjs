@@ -469,8 +469,9 @@ proef("de programmatabel in het paneel is dezelfde als die in planner.py", () =>
 // meting wint van allebei.
 
 const { programsFor, defaultPrograms, hasOwnPrograms, programKey, programOf, programPicker, isManualProgram, missingForControl,
-        programOptions, programRows, programChooser, apparatenZin, canSteer } =
+        programOptions, programRows, programChooser, apparatenZin, canSteer, brandsFor, brandFields, canHaveDeadline } =
   await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+const { timesFor } = await import("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js");
 // Sven op 07-09-2026: "de coach zegt zet nu de tablet lader aan, maar de
 // tablet lader is alleen een vermogenssensor en het vinkje staat uit."
 proef("de tip noemt alleen apparaten waarbij het vinkje aan staat", () => {
@@ -483,12 +484,30 @@ proef("de tip noemt alleen apparaten waarbij het vinkje aan staat", () => {
 });
 // "Er is een verschil tussen de coach mag aansturen en adviseren, want een
 // domme vaatwasser kan de coach helemaal niet aansturen maar wel adviseren."
-proef("sturen kan alleen wat een merk met knoppen heeft", () => {
+proef("sturen kan alleen wat een merk met knoppen heeft, of een boiler met een schakelaar", () => {
   assert.equal(canSteer({ type: "laadpaal", brand: "easee" }), true);
   assert.equal(canSteer({ type: "vaatwasser", brand: "home_connect" }), true);
   assert.equal(canSteer({ type: "vaatwasser", brand: "overig" }), false);
   assert.equal(canSteer({ type: "overig" }), false);
-  assert.equal(canSteer({ type: "boiler" }), false);
+  // Een boiler heeft geen merk maar wel een schakelaar (v0.71.0). Sven op
+  // 19-09-2026: "alleen de switch invullen en power invullen."
+  assert.equal(canSteer({ type: "boiler" }), true);
+});
+proef("een boiler vraagt om twee dingen en verder niets", () => {
+  const leeg = { type: "boiler", controllable: true };
+  // De velden van het type, zonder dat er een merk gekozen hoeft te worden.
+  assert.deepEqual(brandsFor("boiler"), []);
+  assert.deepEqual(brandFields(leeg).map((f) => f.key), ["switch"]);
+  // En allebei zijn ze nodig zodra hij mag sturen: zonder schakelaar kan hij
+  // niets, zonder vermogen ziet hij niet dat het vat vol is.
+  assert.deepEqual(missingForControl(leeg), ["Vermogenssensor", "Schakelaar"]);
+  assert.deepEqual(
+    missingForControl({ ...leeg, entity: "sensor.boiler", entities: { switch: "switch.boiler" } }),
+    []
+  );
+  // Een klaar-tijd hoort erbij, en dan alleen die ene tijd.
+  assert.equal(canHaveDeadline({ ...leeg, type: "boiler" }), true);
+  assert.deepEqual(timesFor({ type: "boiler" }).map((t) => t.key), ["done_by"]);
 });
 proef("zonder eigen tabel is de tabel van een apparaat de opgave van de fabrikant", () => {
   const rows = programsFor({ type: "vaatwasser", brand: "overig" });

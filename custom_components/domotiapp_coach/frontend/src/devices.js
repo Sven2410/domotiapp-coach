@@ -461,6 +461,39 @@ const BRANDS_BY_TYPE = new Map([
   ["vaatwasser", DISHWASHER_BRANDS],
 ]);
 
+/**
+ * De schakelaar waarmee een boiler stroom krijgt.
+ *
+ * Sven op 19-09-2026: "een boiler waar je alleen stroom op moet zetten, met
+ * een smart plug bijvoorbeeld. Alleen de switch invullen en power invullen."
+ * Geen merk, geen programma, geen temperatuur: de coach zet de stroom erop of
+ * eraf en de thermostaat van de boiler bepaalt hoe warm het water wordt. Wat
+ * hij trekt terwijl er stroom op staat zegt of het vat nog warmte vraagt, en
+ * daar leert de coach de rest uit.
+ */
+const BOILER_SWITCH_FIELD = {
+  key: "switch",
+  label: "Schakelaar",
+  hint:
+    "De smart plug, schakelaar of het relais waarmee de boiler stroom krijgt. Hier zet de coach hem mee " +
+    "aan en uit; hoe warm het water wordt blijft aan de thermostaat van de boiler zelf.",
+  filter: "all",
+  needed: true,
+  values: { on: "Stroom staat erop", off: "Geen stroom" },
+};
+
+/**
+ * De entiteiten die bij een type horen zonder dat er een merk aan te pas komt.
+ * Een boiler is overal dezelfde boiler; een laadpaal is dat niet.
+ */
+const FIELDS_BY_TYPE = new Map([["boiler", [BOILER_SWITCH_FIELD]]]);
+
+/** De velden van dit type, los van welk merk er gekozen is. */
+export const typeFields = (device) => FIELDS_BY_TYPE.get(device?.type) ?? [];
+
+/** De types waarvoor de vermogenssensor geen luxe is maar het enige zintuig. */
+const POWER_NEEDED_TYPES = ["boiler"];
+
 /** The brands offered for a device type, or an empty list. */
 export const brandsFor = (type) => BRANDS_BY_TYPE.get(type) ?? [];
 
@@ -469,7 +502,7 @@ export const brandMeta = (device) =>
   brandsFor(device?.type).find((brand) => brand.id === device?.brand);
 
 /** The extra entity fields this device asks for, beyond its power sensor. */
-export const brandFields = (device) => brandMeta(device)?.fields ?? [];
+export const brandFields = (device) => brandMeta(device)?.fields ?? typeFields(device);
 
 /** The entities this brand is steered through, if it works that way. */
 export const brandButtons = (device) => brandMeta(device)?.buttons ?? [];
@@ -671,6 +704,9 @@ export function missingForControl(device) {
   // Zonder startknop is het vermogen het enige wat de coach van het apparaat
   // ziet: daaraan meet hij of hij draait, hoe lang, en wat het kost.
   if (isManualProgram(device) && !device.entity) missing.unshift("Vermogenssensor");
+  // En bij een boiler net zo: daaraan ziet hij dat het vat vol is, want dan
+  // vraagt de boiler niets meer. Zonder die sensor zou hij blind schakelen.
+  if (POWER_NEEDED_TYPES.includes(device?.type) && !device.entity) missing.unshift("Vermogenssensor");
 
   return missing;
 }
@@ -686,7 +722,8 @@ export const isManualProgram = (device) =>
  * tussen de coach mag aansturen en adviseren, want een domme vaatwasser kan
  * de coach helemaal niet aansturen maar wel adviseren."
  */
-export const canSteer = (device) => Boolean(brandMeta(device)) && !isManualProgram(device);
+export const canSteer = (device) =>
+  (Boolean(brandMeta(device)) && !isManualProgram(device)) || typeFields(device).length > 0;
 
 /**
  * The device types that run a program of a known length.
@@ -834,7 +871,17 @@ export function programPicker(device) {
  * that makes cheap night-time charging possible, and without a deadline later
  * is always cheaper and the coach would never begin.
  */
-export const SCHEDULABLE_TYPES = [...PROGRAM_TYPES, "laadpaal"];
+export const SCHEDULABLE_TYPES = [...PROGRAM_TYPES, "laadpaal", "boiler"];
+
+/**
+ * De types die alleen "klaar om" kennen, en niet de andere twee tijden.
+ *
+ * Bij een laadpaal omdat de coach zelf het goedkoopste moment kiest (Sven,
+ * 04-09-2026); bij een boiler om dezelfde reden, en omdat "uiterlijk starten"
+ * bij een vat dat zichzelf uitzet niets betekent. Sven op 19-09-2026 koos
+ * "klaar om, zoals de auto".
+ */
+export const DEADLINE_ONLY_TYPES = ["laadpaal", "boiler"];
 
 /** Whether "must be finished by" means anything for this device. */
 export const canHaveDeadline = (device) =>

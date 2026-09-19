@@ -16,7 +16,7 @@ bewaken:
 
 from dataclasses import replace
 
-from virtueel import Auto, Huis, Paal, Prijzen, Scenario, Vaatwasser, Zon
+from virtueel import Auto, Boiler, Huis, Paal, Prijzen, Scenario, Vaatwasser, Zon
 
 # Twee auto's die er in het echt hangen: een kleine bus op één fase, en een
 # grote op drie.
@@ -747,6 +747,58 @@ vaatwasser_na_klaartijd_nu = vaatwasser_na_klaartijd.kopie(
     gebeurtenissen=[("16:33", "vaatwasser_nu_starten", None)],
 )
 
+# --- de boiler ---------------------------------------------------------------
+#
+# Sven op 19-09-2026: "een boiler waar je alleen stroom op moet zetten, met een
+# smart plug. Als je er stroom op zet en de boiler is warm moet de coach
+# detecteren dat hij warm genoeg is omdat hij dan onder een bepaald vermogen
+# zit. Zelflerend." Klaar om 07:00, en overschot mag hij pakken.
+#
+# De eerste nacht weet de coach niets: hij zet hem aan, ziet 2 kW, ziet het
+# wegvallen, en heeft dan zijn eerste twee getallen. De tweede nacht plant hij
+# met wat hij toen mat.
+boiler_leert = dyn_geen_zon.kopie(
+    naam="boiler-leert",
+    uitleg="dynamisch, geen zon: een boiler van 2 kW die de coach nog nooit gezien heeft, klaar om 07:00",
+    auto=VOL, kabel_erin=None,
+    boiler=Boiler(), boiler_klaar_om="07:00",
+    begin="2026-09-07 18:00", duur_uren=14,
+)
+# En dezelfde nacht met wat hij de vorige nacht leerde: 2 kW, een vat van 6 kWh
+# en 0,25 kWh per uur eruit. Dan hoeft hij niet meer te leren en kan hij kiezen,
+# en dan hoort hij in de goedkope nacht te zitten en niet in de avondpiek.
+boiler_nacht = boiler_leert.kopie(
+    naam="boiler-nacht",
+    uitleg="dezelfde boiler, maar de coach weet al wat hij trekt: hij hoort de goedkoopste nachturen te pakken en om 07:00 warm te zijn",
+    boiler=Boiler(inhoud_kwh=3.0),
+    boiler_geleerd={"heat_w": 2000.0, "vol_kwh": 6.0, "verbruik_kwh_h": 0.25,
+                    "kwh_sinds_vol": 0.0, "vol_sinds": "2026-09-07T06:00:00",
+                    "getrokken_op": "2026-09-07T06:00:00", "runs": 3},
+)
+# Een zonnige dag: het vat is de goedkoopste plek om overschot in te stoppen.
+boiler_zon = vast_zonnig.kopie(
+    naam="boiler-zon",
+    uitleg="vast contract, heldere dag: de boiler hoort op eigen zon te verwarmen en niet van het net",
+    auto=VOL, kabel_erin=None,
+    boiler=Boiler(inhoud_kwh=3.0), boiler_klaar_om="18:00",
+    boiler_geleerd={"heat_w": 2000.0, "vol_kwh": 6.0, "verbruik_kwh_h": 0.25,
+                    "kwh_sinds_vol": 0.0, "vol_sinds": "2026-09-07T06:00:00",
+                    "getrokken_op": "2026-09-07T06:00:00", "runs": 3},
+    begin="2026-09-07 07:55", duur_uren=12,
+)
+# En een stekker die het niet doet: er staat stroom op volgens Home Assistant,
+# maar er loopt niets. Dat hoort niemand pas onder de douche te merken.
+boiler_stekker_stuk = boiler_nacht.kopie(
+    naam="boiler-stekker-stuk",
+    uitleg="dezelfde nacht, maar de smart plug schakelt niet werkelijk: na een etmaal zonder één watt hoort de coach te zeggen dat er geen stroom loopt",
+    boiler=Boiler(inhoud_kwh=3.0, stekker_werkt=False),
+    # Gisterochtend trok hij voor het laatst; een vat van 6 kWh dat 0,25 kWh
+    # per uur verliest is daarna in een dag leeg.
+    boiler_geleerd={"heat_w": 2000.0, "vol_kwh": 6.0, "verbruik_kwh_h": 0.25,
+                    "kwh_sinds_vol": 0.0, "vol_sinds": "2026-09-07T06:00:00",
+                    "getrokken_op": "2026-09-07T06:00:00", "runs": 3},
+)
+
 ALLE = [
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
@@ -766,6 +818,7 @@ ALLE = [
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,
     vaatwasser_zonpiek, vaatwasser_eindtijd, vaatwasser_eindtijd_bijstellen, vaatwasser_na_klaartijd, vaatwasser_na_klaartijd_nu,
+    boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
     *VAN_DEN_DAM,
 ]
 

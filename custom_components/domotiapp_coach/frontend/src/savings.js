@@ -80,11 +80,13 @@ export function perApparaat(items) {
 }
 
 /**
- * Wat voor beurt het is: "laden" (een auto aan een paal) of "programma" (een
- * vaatwasser die één keer start en afdraait). Een beurt van voor v0.57.2 zegt
- * het niet zelf; dat was toen altijd een laadbeurt.
+ * Wat voor beurt het is: "laden" (een auto aan een paal), "programma" (een
+ * vaatwasser die één keer start en afdraait) of "boiler" (een vat dat op de
+ * goedkoopste uren warm gestookt wordt). Een beurt van voor v0.57.2 zegt het
+ * niet zelf; dat was toen altijd een laadbeurt.
  */
-export const soort = (beurt) => (beurt?.kind === "programma" ? "programma" : "laden");
+export const soort = (beurt) =>
+  beurt?.kind === "programma" || beurt?.kind === "boiler" ? beurt.kind : "laden";
 
 /**
  * De woorden voor de kop van Bespaard, naar wat er in de lijst staat. Sven op
@@ -113,6 +115,17 @@ export function woorden(items) {
         "Bespaard is wat dezelfde beurt gekost had als het apparaat meteen bij het vrijgeven was gestart " +
         "met alles van het net, tegen de prijs van dat moment, min wat hij werkelijk kostte. " +
         "Door de zon is wat eigen zon scheelde tegenover inkopen; door te wachten is wat het latere moment scheelde.",
+    };
+  }
+  if (alleen("boiler")) {
+    return {
+      wanneer: "Warmte nodig",
+      hoeveel: "Verbruikt",
+      vanaf: "Meteen verwarmen",
+      uitleg:
+        "Bespaard is wat dezelfde beurt gekost had als de boiler meteen was gaan verwarmen toen er warm water " +
+        "bij moest, met alles van het net tegen de prijs van dat moment, min wat hij werkelijk kostte. " +
+        "Door de zon is wat eigen zon scheelde tegenover inkopen; door te wachten is wat de goedkopere uren scheelden.",
     };
   }
   if (alleen("laden") || !soorten.size) {
@@ -148,9 +161,10 @@ export function opmerking(beurt) {
     // De coach stapte midden in de beurt in en kent het begin niet, dus ook
     // de prijs van toen niet: geen ijkpunt, geen verzonnen bedrag.
     delen.push(
-      soort(beurt) === "programma"
-        ? "na een herstart, prijs bij vrijgeven onbekend"
-        : "na een herstart, prijs bij inpluggen onbekend"
+      {
+        programma: "na een herstart, prijs bij vrijgeven onbekend",
+        boiler: "na een herstart, prijs van het moment onbekend",
+      }[soort(beurt)] ?? "na een herstart, prijs bij inpluggen onbekend"
     );
   } else if (beurt.price_unknown) {
     const zonder = Number(beurt.unknown_kwh) || 0;

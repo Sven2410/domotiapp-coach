@@ -1638,6 +1638,22 @@ def _kwh(waarde: float) -> str:
     return f"{waarde:.1f} kWh".replace(".", ",")
 
 
+def _kw(watt: float) -> str:
+    """Watt als kilowatt, zoals het paneel ze schrijft."""
+    return f"{watt / 1000.0:.1f} kW".replace(".", ",")
+
+
+def _duur(minuten: float) -> str:
+    """Een tijdsduur in woorden: twintig minuten, of anderhalf uur."""
+    minuten = max(0, int(round(minuten)))
+    if minuten < 60:
+        return f"{max(1, minuten)} minuten"
+    uren, rest = divmod(minuten, 60)
+    if rest == 0:
+        return "een uur" if uren == 1 else f"{uren} uur"
+    return f"{uren} uur en {rest} minuten"
+
+
 @dataclass
 class Blok:
     """Eén blok in de tijdlijn, meestal een uur lang."""
@@ -3855,4 +3871,411 @@ def plan_programma(
         + (" Liever nu? Kies dan nu starten." if gemist is not None else ""),
         rule="wait-for-start",
         starts_at=start.isoformat(),
+    )
+
+
+# --- De boiler ---------------------------------------------------------------
+#
+# Sven op 19-09-2026: "ik wil gewoon een sturing maken op een boiler waar je
+# alleen stroom op moet zetten, met een smart plug bijvoorbeeld. Als je er
+# stroom op zet en de boiler is warm moet de coach detecteren dat hij warm
+# genoeg is omdat de boiler dan onder een bepaald vermogen zit. Ik wil dit
+# zelflerend hebben. Alleen de switch invullen en power invullen."
+#
+# Een boiler is geen programma-apparaat maar een buffer, en staat daarmee
+# dichter bij de auto dan bij de vaatwasser: er moet een hoeveelheid energie in
+# vóór een moment, hij mag onderbroken worden, en de goedkoopste uren mogen er
+# zelf uit gekozen worden. Twee dingen zijn anders dan bij de auto. Hij
+# moduleert niet, dus elk blok is aan of uit op één vermogen. En er is geen
+# accustand: hoe vol het vat is blijkt alleen uit wat hij trekt terwijl er
+# stroom op staat. Dat laatste is meteen de veiligheid: de coach kiest het
+# moment, de thermostaat van de boiler kiest de temperatuur, en die twee kunnen
+# elkaar niet in de weg zitten.
+
+# Hoeveel eerder dan de klaar-tijd het vat vol hoort te zijn. Een half uur,
+# net als bij een programma: de opwarmduur is een gemiddelde van metingen en
+# geen garantie.
+BOILER_SPELING = timedelta(minutes=30)
+
+# Hoeveel ruimer hij blokken vastlegt dan de schatting zegt. Een blok te veel
+# kost niets, want de boiler slaat zelf af zodra het vat vol is; een blok te
+# weinig kost een koude douche. Sven op 19-09-2026 koos "klaar om", en de
+# klaar-tijd is heilig (eis 2).
+BOILER_RUIM = 1.2
+
+# Hoe lang een gemeten vol vat meetelt zolang de coach nog niet weet hoe snel
+# het leegloopt. Met de stroom eraf kan de boiler niets zeggen, dus na een
+# volle beurt gelooft hij die meting een tijdje, en daarna kijkt hij opnieuw.
+# Hetzelfde getal als waarmee de coach proefdraait, want het is dezelfde
+# vraag: hoe lang mag een meting van het vat oud zijn.
+BOILER_KIJKEN = timedelta(hours=3)
+
+# Onder welk deel van een vol vat er niets te verwarmen valt. Een thermostaat
+# heeft speling: hij vraagt pas warmte als het vat een paar graden gezakt is,
+# en de coach die daarvoor een keer aan en uit zet krijgt niets terug behalve
+# een schakeling. Gevonden op 19-09-2026 in de proeven: vijf minuten na een
+# volle beurt rekende hij 0,08 kWh en zette hem aan omdat de klaar-tijd
+# dichtbij was.
+BOILER_KRUIMEL = 0.05
+
+# Hoe vaak de coach vergeefs stroom mag geven voordat hij ermee ophoudt: er
+# stond stroom op, er moest verwarmd worden, en er liep niets. Dan is er iets
+# met de stekker of de schakelaar en heeft doorproberen geen zin. Elk
+# kijkmoment (`BOILER_KIJKEN`) is een nieuwe kans.
+BOILER_VERGEEFS = 3
+
+# Wanneer "hij vraagt niets" niet meer als een vol vat te verklaren is.
+#
+# Dit is het lastigste onderscheid van de hele boilersturing: een boiler die
+# niets trekt terwijl er stroom op staat is een vol vat óf een stekker die
+# niets doet, en aan één meting zijn die twee niet te zien. Wat ze wel uit
+# elkaar houdt is de tijd. Een vat loopt leeg, dus na `vol_kwh / verbruik` uur
+# móet elke werkende boiler een keer warmte gevraagd hebben. Is er in die hele
+# tijd geen watt gelopen, dan is het de stekker.
+#
+# Geteld vanaf de laatste keer dat hij werkelijk iets trok, en niet vanaf de
+# laatste keer dat de coach "vol" concludeerde: dat laatste schuift bij elke
+# vergeefse poging mee op en dan komt dat moment nooit. Op 19-09-2026 zweeg de
+# coach daardoor de hele nacht in `boiler-stekker-stuk`, en meldde hij het
+# juist wél in `boiler-leert`, waar niets aan de hand was.
+BOILER_VERDACHT = 1.0
+
+
+@dataclass
+class Boiler:
+    """Een boiler zoals de coach hem deze ronde ziet.
+
+    Alles wat geleerd is mag None zijn, en dat betekent "nog niet gemeten" en
+    niet "nul". Zolang er iets van None is doet de coach niet alsof hij het
+    weet: hij zet de boiler aan, kijkt wat er gebeurt, en zegt wat hij eruit
+    opmaakte (eis: nooit verzonnen getallen).
+    """
+
+    # Staat er stroom op, volgens de schakelaar in Home Assistant.
+    on: bool = False
+    # Wat de meetstekker nu zegt, in watt. None is "geen meting".
+    power_w: float | None = None
+    # Of het vat vol is. Gemeten: er stond stroom op en hij trok niets meer.
+    # None is "weet hij niet", en dat is de gewone toestand zodra de stroom
+    # eraf gaat.
+    full: bool | None = None
+
+    # --- wat hij geleerd heeft ---------------------------------------------
+    # Wat hij trekt terwijl hij opwarmt, in watt.
+    heat_w: float | None = None
+    # De grootste volle beurt die hij zag, in kWh: het vat van koud naar vol.
+    vol_kwh: float | None = None
+    # Wat er per uur uit het vat gaat, in kWh: afkoeling plus douchen samen,
+    # gemeten over de tijd tussen twee volle beurten.
+    verbruik_kwh_h: float | None = None
+
+    # Sinds wanneer het vat niet meer vol is: het moment van de laatste volle
+    # beurt. None is "nooit gezien".
+    vol_sinds: datetime | None = None
+    # Wat er sinds dat moment al in ging, in kWh.
+    kwh_sinds_vol: float = 0.0
+    # Of de coach nu even mag proefdraaien: de stroom staat eraf en hij heeft
+    # al een tijd niet gezien of het vat nog warm is. Het tellen zit in
+    # coach.py, de beslissing hier.
+    proef_nodig: bool = False
+    # Hoe vaak hij achter elkaar stroom gaf terwijl er warmte bij moest en er
+    # niets liep. Zie `BOILER_VERGEEFS`.
+    vergeefs: int = 0
+
+
+def boiler_nodig(
+    now: datetime, boiler: Boiler, deadline: datetime | None, vers_telt: bool = True
+) -> float | None:
+    """Hoeveel kWh er nog in moet om op de klaar-tijd vol te zijn.
+
+    None zodra er iets ontbreekt dat gemeten hoort te zijn. Dan valt er niets
+    te plannen en zegt `plan_boiler` dat, in plaats van met een aanname te
+    gaan rekenen.
+
+    Met `vers_telt` uit telt een net gemeten vol vat niet mee en komt eruit
+    wat de som zégt dat er uit het vat is. Dat is de vraag die coach.py stelt
+    als de boiler niets vroeg terwijl er stroom op stond: hoort dat zo, of is
+    er iets met de stekker?
+
+    De som: wat er uit het vat gaat sinds het voor het laatst vol was tot aan
+    de klaar-tijd, begrensd op een heel vat, min wat er ondertussen al in ging.
+    Zo telt zowel het douchen van gisteravond als de afkoeling van vannacht
+    mee, en meer dan vol kan het nooit worden.
+    """
+    if boiler.vol_kwh is None:
+        return None
+    vanaf = boiler.vol_sinds or now
+    al_in = max(0.0, boiler.kwh_sinds_vol)
+
+    # Net gemeten dat het vat vol is: dan hoeft er niets bij, hoe de som ook
+    # uitpakt. Een thermostaat heeft speling en neemt een bijvulling van een
+    # paar procent toch niet aan; de coach die het tóch probeert ziet een
+    # boiler die niets vraagt, noemt dat "vol", en begint opnieuw. Gezien op
+    # 19-09-2026 in `boiler-nacht`: drie keer aan en uit binnen tien minuten,
+    # met een valse melding dat er geen stroom liep. Bij het volgende
+    # kijkmoment telt de som weer.
+    if vers_telt and boiler.vol_sinds is not None and now - boiler.vol_sinds < BOILER_KIJKEN:
+        return 0.0
+
+    if boiler.verbruik_kwh_h is None:
+        # Eén volle beurt gezien, maar nog niet hoe snel het vat leegloopt.
+        # Dan het slechtste geval, een heel vat, want te vroeg opwarmen kost
+        # een paar cent en te laat kost iemand zijn douche (eis 7). De
+        # volgende volle beurt leert hem het echte getal.
+        return max(0.0, boiler.vol_kwh - al_in)
+
+    tot = deadline if deadline is not None and deadline > now else now
+    uren = max(0.0, (tot - vanaf).total_seconds() / 3600.0)
+    leeg = min(boiler.vol_kwh, uren * boiler.verbruik_kwh_h)
+    return max(0.0, leeg - al_in)
+
+
+def boiler_schijven(
+    now: datetime,
+    prices: list[dict],
+    tariff: Tariff,
+    forecast: Forecast,
+    boiler: Boiler,
+    *,
+    surplus_w: float | None = None,
+    vanaf: datetime | None = None,
+    tot: datetime | None = None,
+) -> list[Schijf]:
+    """Elk blok tussen nu en de klaar-tijd, met wat een kWh erin kost.
+
+    Eén schijf per blok en niet twee zoals bij de paal, want een boiler
+    moduleert niet: hij staat aan op zijn eigen vermogen of hij staat uit. Wat
+    er aan eigen zon onder valt maakt dat blok goedkoper en de rest komt van
+    het net, en dat is precies wat `charge_cost` uitrekent.
+
+    In de avondpiek telt alleen het deel dat de zon draagt (eis 4). Draagt de
+    zon er niets, dan bestaat dat blok niet; de klaar-tijdregel in
+    `plan_boiler` staat daar nog boven.
+    """
+    if boiler.heat_w is None or boiler.heat_w <= 0:
+        return []
+    blokken = prices or _vlakke_blokken(now, tot, tariff)
+    if not blokken:
+        return []
+
+    begin = max(now, vanaf) if vanaf else now
+    vermogen_kw = boiler.heat_w / 1000.0
+    uit: list[Schijf] = []
+    for rij in blokken:
+        if rij["end"] <= begin or (tot is not None and rij["start"] >= tot):
+            continue
+        van = max(rij["start"], begin)
+        tot_blok = min(rij["end"], tot) if tot is not None else rij["end"]
+        deel = (tot_blok - van).total_seconds() / 3600.0
+        if deel <= 0:
+            continue
+
+        past_kwh = vermogen_kw * deel
+        nu_blok = rij["start"] <= now < rij["end"]
+        if nu_blok and surplus_w is not None:
+            over = max(0.0, surplus_w) / 1000.0 * deel
+        else:
+            heel = (rij["end"] - rij["start"]).total_seconds() / 3600.0
+            over = overschot_kwh(forecast, rij["start"], deel, heel)
+
+        terug = rij.get("feed_in")
+        if terug is None:
+            terug = tariff.feed_in
+
+        if in_evening_peak(rij["start"]):
+            # Alleen zon, en alleen als die het hele vermogen draagt: een
+            # boiler die voor de helft van het net loopt belast de aansluiting
+            # in het uur waarin dat niet hoort.
+            if terug is None or over < past_kwh - SCHIJF_MINIMUM:
+                continue
+            uit.append(Schijf(rij["start"], rij["end"], terug, past_kwh, "zon", past_kwh))
+            continue
+
+        if terug is None:
+            prijs, zon_kwh = rij["price"], 0.0
+        else:
+            prijs = charge_cost(
+                boiler.heat_w, over / deel * 1000.0 if deel else 0.0, rij["price"], terug
+            )
+            zon_kwh = min(over, past_kwh)
+        soort = "zon" if zon_kwh >= past_kwh - SCHIJF_MINIMUM else ("vloer" if zon_kwh > SCHIJF_MINIMUM else "net")
+        uit.append(Schijf(rij["start"], rij["end"], prijs, past_kwh, soort, zon_kwh))
+    return uit
+
+
+def plan_boiler(
+    now: datetime,
+    prices: list[dict],
+    tariff: Tariff,
+    forecast: Forecast,
+    window: Window,
+    boiler: Boiler,
+    surplus_w: float | None = None,
+) -> Decision:
+    """Of er nu stroom op de boiler hoort te staan.
+
+    Van boven naar beneden: het schema, wat hij op dit moment meet, wat hij
+    nog niet weet, de klaar-tijd, de zon van nu, en dan pas de vergelijking
+    van alle blokken tot de klaar-tijd.
+
+    `charge` betekent hier: stroom erop.
+    """
+    # Zonder schema stuurt de coach niet, en dan hoort de stroom erop te
+    # blijven staan. Een boiler die uit blijft omdat niemand hem aanstuurt is
+    # het ergste wat er kan gebeuren; dan is de eigen thermostaat weer de baas,
+    # precies zoals vóór de coach.
+    if not window.enabled:
+        return Decision(
+            True, 0,
+            "Het schema van deze boiler staat uit, dus de coach stuurt hem niet en laat de stroom erop staan.",
+            plan="Zet het schema aan met een tijd waarop er warm water moet zijn, dan zoekt hij de goedkoopste uren.",
+            rule="schema-uit",
+        )
+
+    einde = window.deadline
+
+    # Gemeten: er staat stroom op en hij trekt niets meer. Dan is het vat vol,
+    # en dat is het enige moment waarop de coach dat zeker weet.
+    if boiler.full:
+        return Decision(
+            False, 0,
+            "Het vat is vol: er stond stroom op en hij vroeg niets meer.",
+            plan=(
+                f"De volgende keer verwarmt hij op de goedkoopste uren vóór {_dag_klok(einde, now)}."
+                if einde is not None else "Hij houdt in de gaten wanneer er weer warmte bij moet."
+            ),
+            rule="full",
+        )
+
+    nodig = boiler_nodig(now, boiler, einde)
+
+    # Net gekeken en het vat was vol: dan hoeft er niets, ook niet als de coach
+    # verder nog weinig van deze boiler weet. Zonder deze regel stond een
+    # boiler die bij het installeren toevallig vol was elke vijf minuten aan en
+    # uit; gezien op 19-09-2026 in `boiler-leert`.
+    vers_vol = boiler.vol_sinds is not None and now - boiler.vol_sinds < BOILER_KIJKEN
+
+    # De eerste keer weet hij niets: geen vermogen en geen vol vat. Dan niet
+    # rekenen maar meten. Zodra er één volle beurt in zit kan hij plannen,
+    # ook zonder te weten hoe snel het leegloopt; zie `boiler_nodig`.
+    if boiler.heat_w is None or nodig is None:
+        if vers_vol:
+            return Decision(
+                False, 0,
+                "Het vat was net nog vol, dus er hoeft niets bij. Zodra er een keer warmte in moet meet de coach hoeveel hij trekt.",
+                plan="Tot die tijd kijkt hij af en toe of het vat nog warm is.",
+                rule="genoeg",
+            )
+        return Decision(
+            True, 0,
+            "De coach weet nog niet hoeveel deze boiler trekt en hoe lang hij erover doet, dus hij zet hem aan en meet het.",
+            plan="Zodra het vat een keer vol is geweest kent hij de opwarmtijd en kiest hij zelf de goedkoopste uren.",
+            rule="leren",
+        )
+
+    # Even kijken of het vat nog warm is. Kost niets zolang het vol is: dan
+    # vraagt de boiler geen stroom. Dit staat boven het plannen omdat het
+    # het antwoord geeft waar dat plan op rekent: met de stroom eraf weet de
+    # coach niets, en dan is kijken het eerste wat je doet.
+    if boiler.proef_nodig:
+        return Decision(
+            True, 0,
+            "Even kijken of er nog warm water is: met de stroom eraf kan de boiler niet zeggen dat hij warmte wil.",
+            plan="Vraagt hij niets, dan gaat de stroom er meteen weer af.",
+            rule="proef",
+        )
+
+    # Er staat stroom op en er komt niets: dan is er iets met de stekker of de
+    # schakelaar, en dan heeft aanzetten geen zin. De coach zegt het (in
+    # coach.py) en probeert het bij het volgende kijkmoment opnieuw, in plaats
+    # van elke vijf minuten een relais om te gooien.
+    if boiler.vergeefs >= BOILER_VERGEEFS:
+        return Decision(
+            False, 0,
+            "De coach zet de boiler wel aan, maar er loopt geen stroom. Kijk of de stekker en de schakelaar doen wat ze horen te doen.",
+            plan="Hij probeert het over een paar uur opnieuw.",
+            rule="geen-stroom",
+        )
+
+    if nodig <= max(SCHIJF_MINIMUM, BOILER_KRUIMEL * boiler.vol_kwh):
+        # Te weinig om voor aan te zetten: het vat is zo goed als vol en de
+        # thermostaat zou de warmte niet eens aannemen.
+        return Decision(
+            False, 0,
+            f"Er zit genoeg warm water in voor {_wanneer(einde, now)}." if einde is not None
+            else "Er zit genoeg warm water in.",
+            plan="Hij kijkt af en toe of dat nog zo is.",
+            rule="genoeg",
+        )
+
+    minuten = (nodig / (boiler.heat_w / 1000.0)) * 60.0 if boiler.heat_w else 0.0
+    duur = timedelta(minutes=minuten)
+
+    # De klaar-tijd is heilig (eis 2), en gaat over de avondpiek en over de
+    # prijs heen.
+    if einde is not None and now + duur + BOILER_SPELING >= einde:
+        return Decision(
+            True, 0,
+            (
+                f"Er moet nog ongeveer {_duur(minuten)} verwarmd worden en om {_wanneer(einde, now)} "
+                "hoort er warm water te zijn, dus hij gaat nu aan."
+            ),
+            plan="Hij gaat uit zodra de boiler zelf afslaat.",
+            rule="deadline",
+        )
+
+    # De zon van nu. Sven op 19-09-2026: vullen met wat er over is, want het
+    # vat is de goedkoopste plek om overschot in te stoppen en hij slaat zelf
+    # af zodra hij vol is.
+    if surplus_w is not None and surplus_w >= boiler.heat_w:
+        return Decision(
+            True, 0,
+            f"Je levert op dit moment {_kw(surplus_w)} terug, genoeg om de boiler er helemaal op te laten draaien.",
+            plan="Hij gaat uit zodra de boiler vol is of de zon wegvalt.",
+            rule="zon",
+        )
+
+    alle = boiler_schijven(
+        now, prices, tariff, forecast, boiler,
+        surplus_w=surplus_w,
+        vanaf=window.opens,
+        tot=einde,
+    )
+    if not alle:
+        return Decision(
+            False, 0,
+            (
+                f"De prijzen tot {_wanneer(einde, now)} zijn nog niet bekend, dus hij wacht."
+                if einde is not None else "De prijzen zijn nog niet bekend, dus hij wacht."
+            ),
+            plan="Zodra ze er zijn kiest hij de goedkoopste uren. De klaar-tijd blijft het vangnet.",
+            rule="wait-for-prices",
+        )
+
+    gekozen = goedkoopste(alle, nodig * BOILER_RUIM)
+    if not gekozen:
+        return Decision(
+            False, 0, "Er hoeft niets bij.", rule="genoeg",
+        )
+
+    eerste = gekozen[0][0]
+    if eerste.start <= now < eerste.end:
+        return Decision(
+            True, 0,
+            f"Dit is een van de goedkoopste uren tot {_wanneer(einde, now)}, dus hij verwarmt nu."
+            if einde is not None else "Dit is een van de goedkoopste uren, dus hij verwarmt nu.",
+            plan="Hij gaat uit zodra de boiler zelf afslaat.",
+            rule="cheapest-hour",
+        )
+
+    return Decision(
+        False, 0,
+        f"Hij verwarmt {_dag_om(eerste.start, now)}: dan is het het goedkoopst."
+        + (f" Er moet ongeveer {_duur(minuten)} bij." if minuten >= 1 else ""),
+        plan=(
+            f"Op tijd vol voor {_dag_klok(einde, now)}." if einde is not None
+            else "Hij houdt het vat op peil."
+        ),
+        rule="wait-for-cheap",
+        starts_at=eerste.start.isoformat(),
     )
