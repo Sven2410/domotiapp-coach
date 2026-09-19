@@ -4,18 +4,18 @@
  * Order matters: it is the order shown in the picker, heaviest and most common
  * first. "Overig" carries a free-text name so anything not on the list still
  * fits.
+ *
+ * Alleen wat de coach werkelijk iets met een apparaat kan. Sven op 19-09-2026
+ * haalde de thuisbatterij, de warmtepomp, de wasmachine, de droger en de
+ * zwembadpomp eruit: hetzelfde argument als bij de merken van een laadpaal,
+ * een regel in een lijst leest als een belofte.
  */
 
 export const DEVICE_TYPES = [
   { id: "laadpaal", label: "Laadpaal", icon: "laadpaal" },
-  { id: "thuisbatterij", label: "Thuisbatterij", icon: "thuisbatterij" },
-  { id: "warmtepomp", label: "Warmtepomp", icon: "warmtepomp" },
   { id: "boiler", label: "Boiler", icon: "boiler" },
   { id: "vaatwasser", label: "Vaatwasser", icon: "vaatwasser" },
-  { id: "wasmachine", label: "Wasmachine", icon: "wasmachine" },
-  { id: "droger", label: "Droger", icon: "droger" },
   { id: "airco", label: "Airco", icon: "airco" },
-  { id: "zwembadpomp", label: "Zwembadpomp", icon: "zwembadpomp" },
   { id: "overig", label: "Overig", icon: "overig" },
 ];
 
@@ -32,9 +32,11 @@ export const DEVICE_TYPES = [
  * `needed` marks the ones the coach cannot steer without; they are only ever
  * insisted on once steering is switched on for that device.
  *
- * Only Easee is supported, and "overig" for a charger that is watched but not
- * steered. Sven took the other brands out on 04-09-2026: a brand in a list
- * reads as a promise, and there was none behind it.
+ * Only Easee is supported. Sven took the other brands out on 04-09-2026: a
+ * brand in a list reads as a promise, and there was none behind it. Op
+ * 19-09-2026 ging "overig" er om dezelfde reden uit: een laadpaal die de coach
+ * niet kan sturen is geen laadpaal maar een apparaat dat hij meet, en daarvoor
+ * is er het type "Overig".
  */
 export const CHARGER_BRANDS = [
   {
@@ -217,7 +219,6 @@ export const CHARGER_BRANDS = [
       },
     ],
   },
-  { id: "overig", label: "Overig", fields: [] },
 ];
 
 /**
@@ -626,7 +627,7 @@ export const carsFor = (device) =>
  * with no cable in it cannot start whatever anybody says. Asking for a second
  * yes on the dashboard was a step that only ever cost a walk to the phone.
  */
-export const RELEASE_TYPES = ["vaatwasser", "wasmachine", "droger"];
+export const RELEASE_TYPES = ["vaatwasser"];
 
 /** Whether this device waits for the customer before the coach may start it. */
 export const needsRelease = (device) => RELEASE_TYPES.includes(device?.type);
@@ -639,18 +640,6 @@ export function releaseCopy(device) {
         label: "Ingeruimd en dicht",
         short: "Ingeruimd",
         hint: "Zet dit aan als de vaatwasser vol staat en de klep dicht zit. Anders zou de coach hem leeg kunnen laten spoelen.",
-      };
-    case "wasmachine":
-      return {
-        label: "Gevuld en dicht",
-        short: "Gevuld",
-        hint: "Zet dit aan als de was erin zit en de deur dicht is.",
-      };
-    case "droger":
-      return {
-        label: "Gevuld en dicht",
-        short: "Gevuld",
-        hint: "Zet dit aan als de droger gevuld is en de deur dicht is.",
       };
     default:
       return {
@@ -705,7 +694,7 @@ export const canSteer = (device) => Boolean(brandMeta(device)) && !isManualProgr
  * The length is what lets the panel work back from "done by" to "start by", so
  * this list is about the sum, not about permission to plan.
  */
-export const PROGRAM_TYPES = ["vaatwasser", "wasmachine", "droger"];
+export const PROGRAM_TYPES = ["vaatwasser"];
 
 /**
  * De programmatabel van één apparaat.

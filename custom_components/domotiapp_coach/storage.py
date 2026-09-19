@@ -18,6 +18,9 @@ from homeassistant.helpers.storage import Store
 
 from .ontvangers import migreer_load_alert
 from .const import (
+    CHARGER_BRANDS,
+    DEVICE_TYPES,
+    VERVALLEN_TYPES,
     PROGRAMMA_TYPES,
     TEMPO_ONDERGRENS,
     BEURTEN_KEY,
@@ -209,6 +212,29 @@ def _migrate(stored: dict[str, Any]) -> dict[str, Any]:
         for car in device.get("cars") or []:
             if isinstance(car, dict) and car.get("phases") == "both":
                 car["phases"] = "three"
+
+    # v0.70.0: de apparaatlijst en de merken van een laadpaal zijn korter
+    # geworden. Een apparaat dat er al stond mag daar niet stil van veranderen:
+    # zonder deze stap toont de keuzelijst in het paneel de eerste regel
+    # ("Laadpaal") voor een type dat er niet meer in staat, en bij de volgende
+    # opslag is een zwembadpomp een laadpaal. Het wordt dus "overig", met de
+    # oude naam erbij zodat op het overzicht blijft staan wat het was.
+    for device in stored.get("devices") or []:
+        if not isinstance(device, dict):
+            continue
+        soort = device.get("type")
+        if soort not in DEVICE_TYPES and soort in VERVALLEN_TYPES:
+            device["type"] = "overig"
+            if not (device.get("name") or "").strip():
+                device["name"] = VERVALLEN_TYPES[soort]
+        # En een laadpaal van het merk "overig": die kon de coach nooit sturen,
+        # dat was juist wat het merk betekende. Hij blijft een laadpaal die
+        # gemeten wordt; alleen het merk en de vink "mag sturen" gaan eraf,
+        # zodat er niets beloofd wordt wat er niet is. Zijn autoprofielen en
+        # zijn schema blijven staan.
+        if device.get("type") == "laadpaal" and device.get("brand") not in ("", *CHARGER_BRANDS):
+            device["brand"] = ""
+            device["controllable"] = False
 
     # v0.52.0: de zekeringmelding en haar ontvangers gaan naar Meldingen.
     migreer_load_alert(stored)

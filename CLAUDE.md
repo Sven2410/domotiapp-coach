@@ -398,6 +398,28 @@ herstart begint de meting opnieuw. Scenario's `warmtepomp-nacht` (oud: 85% om
 06:00, nieuw: vol om 05:25) en `warmtepomp-uit` (hetzelfde als zonder de
 regel); proef 51 in test_planner.py, proef 65 in test_coach.py.
 
+**De apparaatlijst noemt alleen wat de coach werkelijk kan** (v0.70.0). Sven op
+19-09-2026: bij Apparaten gingen de thuisbatterij, de warmtepomp, de wasmachine,
+de droger en de zwembadpomp eruit, en bij een laadpaal het merk "overig". Over
+blijven: laadpaal, boiler, vaatwasser, airco en overig. Hetzelfde argument als
+bij de merken van 04-09-2026, een regel in een lijst leest als een belofte. Wat
+er niet in staat past onder "overig" met een eigen naam, en wordt gemeten zoals
+elk apparaat met een vermogenssensor.
+
+Twee lijsten hangen eraan vast en zijn meegekrompen: `PROGRAM_TYPES` en
+`RELEASE_TYPES` in devices.js waren `vaatwasser, wasmachine, droger` en zijn nu
+alleen de vaatwasser, net als `PROGRAMMA_TYPES` in const.py altijd al was.
+
+**Wat er bij een klant al stond verandert niet stil.** Een keuzelijst zonder de
+opgeslagen waarde toont zijn eerste regel, en bij de volgende opslag zou een
+zwembadpomp een laadpaal zijn. `_migrate` in storage.py maakt er daarom
+"overig" van, met de oude typenaam als naam wanneer het apparaat er zelf geen
+had (`VERVALLEN_TYPES` in const.py); een laadpaal van het merk "overig" blijft
+een laadpaal die gemeten wordt, maar verliest zijn merk en de vink "mag sturen",
+want sturen kon de coach hem nooit. Autoprofielen en het schema blijven staan.
+Proef 24b in test_coach.py.
+
+
 ## De vaatwasser
 
 Sinds 06-09-2026 stuurt de coach ook een vaatwasser (Home Connect), na Svens
