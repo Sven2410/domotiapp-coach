@@ -308,6 +308,40 @@ Scenario `accustand-per-tien` (`Auto.soc_stap` in het virtuele huis, en
 er gemiddeld 0,63 kWh naast, nu 0,19. Proef 70 in test_coach.py, met Svens eigen
 getallen: 70% plus 1,90 kWh geleverd wordt 78,7%.
 
+**Een auto die nog bijkomt is geen auto die afbouwt** (v0.69.0). Bij Van den
+Dam in de nacht van 18 op 19-09-2026 zakte de coach een paar keer voor de
+zekering; om 03:17 naar 8 A, om 03:33:13 bood hij weer 16 A aan, en de Ford
+bleef tot 03:44 op 8 A en 5,49 kW hangen. De meter bevestigde het (afname 6,8 kW
+tot 03:42, 10,7 kW om 03:44). Om 01:35 duurde dat negen minuten; na een dip van
+een minuut kwam hij binnen een halve minuut terug. Sven zag "16 A op maar 5,49
+kW". `_tempo_leren` zag een auto die zelf de rem was en schreef 5,52 kW op voor
+band 6 en 7,58 voor band 4, terwijl hij daar 10 kW trok. Twee dingen erbij:
+
+- **Na een verhoging van de limiet krijgt de auto `TEMPO_HERSTEL` (een kwartier)**
+  voordat wat hij neemt zijn tempo is (`_limiet_vorig`, `_limiet_omhoog`).
+- **Een bewaard tempo vervalt zodra de auto het weerlegt** (`_tempo_weerleggen`):
+  twee ronden duidelijk meer (`TEMPO_SPELING`) in dezelfde band, bij dezelfde of
+  een hogere accustand. Een rij weet sinds v0.69.0 bij welke stand hij gemeten is
+  (`soc` in `car_pace`); een oudere telt als gemeten onderin zijn band. Zo gaan
+  de rijen die al bij klanten staan er bij de volgende beurt vanzelf uit.
+
+Het virtuele huis kent daarvoor `Auto.bijkomen_min`; scenario's `ford-bijkomen`
+(oud leerde {7: 6,9, 9: 6,9} bij een auto die 11 kW kan, nieuw niets) en
+`ford-oude-opslag` (oud hield {6: 5,52, 7: 6,9} en voegde band 9 toe, nieuw ruimt
+ze op). Proef 71 in test_coach.py. `afbouw-boven-80` leert zijn echte afbouw nog
+precies zo.
+
+**Een omvormer die slaapt is geen storing** (v0.69.0). De SolarEdge van Van den
+Dam wordt 's nachts onbereikbaar (18-09-2026 om 21:40, zon onder om 20:31), en om
+21:51 kwam er een kritieke melding; zo elke nacht. Onder `ZON_SLAAPT_ONDER` (tien
+graden zonshoogte, uit `sun.sun`) telt een zonnesensor die niets zegt niet als
+stilte (`_zon_slaapt` in coach.py): 's ochtends leverde hij op 17 en 18-09-2026
+pas 64 en 55 minuten na zonsopkomst iets. En het paneel toonde de hele nacht een
+streepje bij Woning, want verbruik is zon plus net: met de zon onder de horizon is
+een onbereikbare omvormer nu 0 W (`readSolar` in data-source.js). Overdag blijft
+het een streepje, want dan kan hij best leveren. Zonder `sun.sun` blijft alles
+zoals het was. Proef 72 in test_coach.py, vier proeven in test_rapport.mjs.
+
 **Een laaduur op de kaart staat nooit onder de ondergrens van de paal**
 (v0.67.3). Sven op 17-09-2026 om 22:10, met 2,5 kWh te gaan: "dit klopt niet,
 4 A laden." Het restje werd uitgesmeerd over de vijftig minuten die nog van dat
@@ -651,10 +685,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 351 controles op het denkwerk
-python tests/test_coach.py       # 396 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1419 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 407 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1444 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 40 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 44 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

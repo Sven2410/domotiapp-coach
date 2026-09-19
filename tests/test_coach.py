@@ -2498,7 +2498,9 @@ coach53._since["dev-laadpaal"] = dt.datetime(2026, 9, 5, 20, 55)
 # zodra de paal uit `charging` valt en terugkomt. Zonder deze regel zet de ronde
 # van `async_boost` de klok alsnog op nu.
 coach53._laadde["dev-laadpaal"] = True
-for minuut in (0, 1, 2, 3, 4):
+# Snelladen zet de limiet omhoog, en daarna krijgt de auto een kwartier om bij te
+# komen voordat wat hij neemt zijn tempo is (`TEMPO_HERSTEL`, sinds v0.69.0).
+for minuut in (0, 1, 2, 3, 4, 15, 16, 17):
     asyncio.run(ronde(coach53, inst53, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, minuut)))
 rijen53 = inst53.get("car_pace") or []
 print(f"  geleerd: {rijen53}")
@@ -2566,13 +2568,15 @@ coach53e.async_boost("dev-laadpaal", True)
 coach53e._since["dev-laadpaal"] = dt.datetime(2026, 9, 5, 20, 55)
 coach53e._laadde["dev-laadpaal"] = True
 asyncio.run(ronde(coach53e, inst53e, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 0)))
+asyncio.run(ronde(coach53e, inst53e, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 15)))
+asyncio.run(ronde(coach53e, inst53e, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 30)))
 hass53e.states.zet("sensor.laadpaal_stroom", "0.3")
 hass53e.states.zet("sensor.laadpaal_vermogen", "69")
-asyncio.run(ronde(coach53e, inst53e, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 1)))
+asyncio.run(ronde(coach53e, inst53e, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 31)))
 hass53e.states.zet("sensor.laadpaal_stroom", "8.0")
 hass53e.states.zet("sensor.laadpaal_vermogen", "1840")
-asyncio.run(ronde(coach53e, inst53e, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 2)))
-asyncio.run(ronde(coach53e, inst53e, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 3)))
+asyncio.run(ronde(coach53e, inst53e, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 32)))
+asyncio.run(ronde(coach53e, inst53e, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 33)))
 rijen53e = inst53e.get("car_pace") or []
 print(f"  één rare ronde tussen twee goede: {rijen53e}")
 controle("één losse ronde telt niet, de twee gelijke wel",
@@ -3805,6 +3809,132 @@ fijn = fijn70(62.0, 12.4)
 print(f"  sensor per procent, 2 kWh erin zonder nieuwe melding: {fijn:.1f}%")
 controle("een fijne sensor krijgt hoogstens een procent erbij", abs(fijn - 63.0) < 0.001,
          f"{fijn}")
+
+
+print("=== 71. een auto die nog bijkomt is geen auto die afbouwt (Van den Dam, 19-09-2026) ===")
+# Om 03:17 zakte de coach voor de zekering naar 8 A, om 03:33:13 bood hij weer
+# 16 A aan, en de Ford bleef tot 03:44 op 8 A. Om 03:35:11 stond dat als 5,52 kW
+# voor band 6 in de opslag, en om 01:44 was band 4 zo op 7,58 kW gekomen. Hier op
+# één fase en met het plafond van deze proefpaal (14 A), dus kleinere getallen.
+def beurt71(car_pace=None, soc="65"):
+    inst = instellingen(devices=[PAAL52], car_pace=list(car_pace or []))
+    inst["strategy"]["schedules"][0]["window"]["done_by"] = "06:00"
+    waarden = huis(status="charging", stroom=8.0, vermogen=1840.0, teruglevering=0.0,
+                   afname=1800.0)
+    waarden["sensor.auto_soc"] = soc
+    hass, _, coach = bouw(waarden, inst)
+    coach.async_boost("dev-laadpaal", True)
+    coach._since["dev-laadpaal"] = dt.datetime(2026, 9, 19, 2, 55)
+    coach._laadde["dev-laadpaal"] = True
+    return inst, hass, coach
+
+def op71(coach, inst, uur, minuut):
+    asyncio.run(ronde(coach, inst, paal=PAAL52, nu=dt.datetime(2026, 9, 19, uur, minuut)))
+
+inst71, hass71, coach71 = beurt71()
+op71(coach71, inst71, 3, 0)
+op71(coach71, inst71, 3, 15)
+# De coach zakt voor de zekering: de paal meldt 8 A terug. Daarna biedt hij weer
+# het plafond aan, en de auto blijft elf minuten op 8 A hangen.
+hass71.states.zet("sensor.laadpaal_dyn", "8")
+op71(coach71, inst71, 3, 32)
+# De coach stuurt dezelfde 14 A niet nog een keer, dus de terugmelding van de
+# verhoging zet de proef zelf, zoals de paal om 03:33:13 deed.
+hass71.states.zet("sensor.laadpaal_dyn", "14")
+for minuut in range(33, 44):
+    op71(coach71, inst71, 3, minuut)
+bijkomen71 = list(inst71.get("car_pace") or [])
+print(f"  na elf minuten 8 A op een limiet van 14: {bijkomen71}")
+controle("de minuten waarin de auto nog bijkomt worden geen tempo", not bijkomen71,
+         f"{bijkomen71}")
+# En daarna trekt hij gewoon het plafond: ook dat is geen tempo.
+hass71.states.zet("sensor.laadpaal_stroom", "13.5")
+hass71.states.zet("sensor.laadpaal_vermogen", "3100")
+for minuut in range(44, 50):
+    op71(coach71, inst71, 3, minuut)
+controle("en de volle stroom daarna ook niet", not (inst71.get("car_pace") or []),
+         f"{inst71.get('car_pace')}")
+
+# Blijft hij langer dan een kwartier op 8 A, dan is het wel zijn tempo.
+for minuut in range(50, 60):
+    op71(coach71, inst71, 3, minuut)
+hass71.states.zet("sensor.laadpaal_stroom", "8.0")
+hass71.states.zet("sensor.laadpaal_vermogen", "1840")
+for minuut in range(0, 3):
+    op71(coach71, inst71, 4, minuut)
+echt71 = list(inst71.get("car_pace") or [])
+print(f"  8 A ruim na de laatste verhoging: {echt71}")
+controle("een auto die ruim na een verhoging minder neemt wordt wel geleerd",
+         any(r.get("band") == 6 and abs(r.get("kw", 0) - 1.84) < 0.01 and "soc" in r
+             for r in echt71), f"{echt71}")
+
+# Een bewaard tempo vervalt zodra de auto in die band aantoonbaar meer neemt,
+# zoals de oude rijen van Van den Dam: zonder accustand, dus onderin de band.
+OUD71 = {"device": "dev-laadpaal", "car": "car-1", "band": 6, "kw": 1.84, "at": "x"}
+ANDER71 = {"device": "dev-laadpaal", "car": "car-1", "band": 4, "kw": 1.84, "at": "x"}
+inst71b, hass71b, coach71b = beurt71([OUD71, ANDER71], soc="68")
+op71(coach71b, inst71b, 3, 44)
+hass71b.states.zet("sensor.laadpaal_stroom", "13.5")
+hass71b.states.zet("sensor.laadpaal_vermogen", "3100")
+op71(coach71b, inst71b, 3, 45)
+een71 = list(inst71b.get("car_pace") or [])
+controle("één ronde meer is nog geen weerlegging", OUD71 in een71, f"{een71}")
+op71(coach71b, inst71b, 3, 46)
+op71(coach71b, inst71b, 3, 47)
+weg71 = list(inst71b.get("car_pace") or [])
+print(f"  op 68% 13,5 A tegen een bewaarde 1,84 kW: {weg71}")
+controle("twee ronden duidelijk meer: de band vervalt", not any(r.get("band") == 6 for r in weg71),
+         f"{weg71}")
+controle("en een andere band blijft staan", ANDER71 in weg71, f"{weg71}")
+
+# Maar een afbouw die hoger in de band gemeten is blijft, want onderin de band
+# nam de auto toen ook nog meer.
+HOOG71 = dict(OUD71, soc=69.5)
+inst71c, hass71c, coach71c = beurt71([HOOG71], soc="68")
+op71(coach71c, inst71c, 3, 44)
+hass71c.states.zet("sensor.laadpaal_stroom", "13.5")
+hass71c.states.zet("sensor.laadpaal_vermogen", "3100")
+for minuut in (45, 46, 47):
+    op71(coach71c, inst71c, 3, minuut)
+controle("een tempo gemeten bij 69,5% blijft staan als de auto op 68% meer neemt",
+         HOOG71 in (inst71c.get("car_pace") or []), f"{inst71c.get('car_pace')}")
+
+print("=== 72. een omvormer die slaapt is geen storing (Van den Dam, 18-09-2026) ===")
+# De SolarEdge werd om 21:40 onbereikbaar, de zon was om 20:31 onder, en om 21:51
+# kwam er een kritieke melding. 's Ochtends levert hij pas een uur na
+# zonsopkomst weer iets.
+inst72 = instellingen()
+inst72["sources"]["solar"] = "sensor.omvormer"
+hass72, _, coach72 = bouw(dict(huis(), **{"sensor.omvormer": "unavailable"}), inst72)
+T72 = dt.datetime(2026, 9, 18, 21, 40)
+
+def wacht72(minuten):
+    hass72.services.verstuurd.clear()
+    asyncio.run(coach72._async_sensorwacht(inst72, T72 + dt.timedelta(minutes=minuten)))
+    return [d[2]["message"] for d in hass72.services.verstuurd
+            if d[0] == "notify" and "sensor.omvormer" in d[2]["message"]]
+
+hass72.states.zet("sun.sun", {"state": "below_horizon", "attributes": {"elevation": -15.0}})
+nacht72 = wacht72(0) + wacht72(11) + wacht72(60)
+controle("met de zon onder geen melding", not nacht72, f"{nacht72}")
+hass72.states.zet("sun.sun", {"state": "above_horizon", "attributes": {"elevation": 6.0}})
+ochtend72 = wacht72(600) + wacht72(615)
+controle("vlak na zonsopkomst ook niet", not ochtend72, f"{ochtend72}")
+hass72.states.zet("sun.sun", {"state": "above_horizon", "attributes": {"elevation": 25.0}})
+dag72 = wacht72(700) + wacht72(711)
+print(f"  overdag, na elf minuten: {dag72}")
+controle("overdag wel, na tien minuten", len(dag72) == 1 and "sensor.omvormer" in dag72[0],
+         f"{dag72}")
+# Zonder `sun.sun` weet de coach het niet en blijft het zoals het was.
+inst72b = instellingen()
+inst72b["sources"]["solar"] = "sensor.omvormer"
+hass72b, _, coach72b = bouw(dict(huis(), **{"sensor.omvormer": "unavailable"}), inst72b)
+hass72b.services.verstuurd.clear()
+asyncio.run(coach72b._async_sensorwacht(inst72b, T72))
+asyncio.run(coach72b._async_sensorwacht(inst72b, T72 + dt.timedelta(minutes=11)))
+zonder72 = [d for d in hass72b.services.verstuurd
+            if d[0] == "notify" and "sensor.omvormer" in d[2]["message"]]
+controle("zonder zonnestand meldt hij zoals vroeger", len(zonder72) == 1, f"{zonder72}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

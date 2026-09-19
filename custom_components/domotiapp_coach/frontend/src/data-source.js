@@ -39,6 +39,22 @@ function readPower(feed, entityId) {
 }
 
 /**
+ * What the roof delivers, in watts.
+ *
+ * A SolarEdge goes to sleep at night and its sensor turns `unavailable`. With
+ * the sun below the horizon that is not a missing number but zero, and saying
+ * so keeps the house on the diagram: at Van den Dam on 19-09-2026 it read a
+ * dash all night, because consumption is solar plus grid. Only below the
+ * horizon, and only with `sun.sun` present: in daylight an unreachable
+ * inverter may well be producing, and then a dash is the honest answer.
+ */
+function readSolar(feed, entityId) {
+  const watts = readPower(feed, entityId);
+  if (watts !== null || !entityId) return watts;
+  return feed.get("sun.sun")?.state === "below_horizon" ? 0 : null;
+}
+
+/**
  * Read a price entity as euro per kWh.
  *
  * Suppliers publish in both euro and cents, so the unit decides -- a tariff read
@@ -533,7 +549,7 @@ export class LiveSource {
   sample(feed, settings) {
     const sources = settings?.sources ?? {};
 
-    const solar = readPower(feed, sources.solar);
+    const solar = readSolar(feed, sources.solar);
 
     let importW = null;
     let exportW = null;

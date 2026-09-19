@@ -180,6 +180,24 @@ warmtepomp = dyn_grote_auto.kopie(
                     for h in list(range(17, 24)) + list(range(0, 6))
                     for m in (0, 15, 30, 45) if h < 17 or (h, m) >= (17, 45)],
 )
+# De nacht van 18 op 19-09-2026 bij Van den Dam: de coach zakt een paar keer
+# lang voor de zekering, en de Ford komt daarna pas na tien minuten terug. Die
+# minuten horen niet als zijn tempo in de opslag; om 03:35 stond er 5,52 kW voor
+# band 6 terwijl hij daar 10 kW trok. Zie `TEMPO_HERSTEL` in coach.py.
+ford_bijkomen = warmtepomp.kopie(
+    naam="ford-bijkomen",
+    uitleg="dynamisch, geen zon, 3x25 A met Equalizer, de grote auto om 17:30 erin op 50%; drie keer een kwartier 3 kW op de zware fase, en na zo'n verlaging blijft de auto nog tien minuten op de oude stroom",
+    auto=replace(GROTE, soc=50.0, bijkomen_min=10), oven_w=3000.0,
+    gebeurtenissen=[("23:15", "oven", 16), ("01:26", "oven", 16), ("03:17", "oven", 16)],
+)
+# En wat er bij Van den Dam op 19-09-2026 al in de opslag stond: 5,52 kW voor
+# band 6 en 6,9 voor band 7, rijen zonder accustand. De eerste beurt waarin de
+# auto daar gewoon het plafond trekt haalt ze weg.
+ford_oude_opslag = ford_bijkomen.kopie(
+    naam="ford-oude-opslag",
+    uitleg="hetzelfde huis, en de coach heeft van een eerdere nacht nog een te laag tempo voor band 6 en 7 bewaard",
+    geleerd_tempo={6: 5.52, 7: 6.9},
+)
 warmtepomp_uit = warmtepomp.kopie(
     naam="warmtepomp-uit", uitleg="hetzelfde huis, maar de warmtepomp blijft de hele nacht uit",
     gebeurtenissen=[],
@@ -735,7 +753,7 @@ ALLE = [
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,
     dyn_zonnig, dyn_bewolkt, dyn_geen_zon, dyn_markt, dyn_salderen, dyn_avond, dyn_grote_auto,
     dyn_negatief, dyn_kwartier_later, dyn_geen_klaar_tijd,
-    meter_teken, meter_teken_om, een_fase_krap, oven, lastbewaker, warmtepomp, warmtepomp_uit,
+    meter_teken, meter_teken_om, een_fase_krap, oven, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
     geen_soc, soc_opgegeven, soc_traag, laadgrens, laadgrens_ingesteld,
     doel_onder_auto, soc_stappen, bijna_vol, auto_slaapt,
     pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,

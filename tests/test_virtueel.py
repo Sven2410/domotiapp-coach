@@ -329,6 +329,17 @@ if (vl := v("warmtepomp-nacht")):
              laadt_tussen(vl, "22:00", "23:00")
              and any("gemiddeld" in r.reden and "A over voor de paal" in r.reden
                      for r in regels_in(vl, "22:00", "23:30")), "")
+# Van den Dam, nacht van 18 op 19-09-2026: na een verlaging voor de zekering
+# bleef de Ford nog tien minuten op de oude stroom, en de coach schreef dat op
+# als zijn tempo (5,52 kW voor band 6 waar hij 10 kW trok). Tot v0.69.0 leerde
+# hij hier {7: 6,9, 9: 6,9}, en bleven de oude rijen staan.
+if (vl := v("ford-bijkomen")):
+    controle("ford bijkomen: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    controle("ford bijkomen: de minuten na een verlaging worden geen tempo", not vl.geleerd,
+             f"{vl.geleerd}")
+if (vl := v("ford-oude-opslag")):
+    controle("ford oude opslag: een te laag bewaard tempo vervalt zodra hij meer trekt",
+             not vl.geleerd, f"{vl.geleerd}")
 if (vl := v("warmtepomp-uit")):
     controle("warmtepomp uit: een rustig huis wacht gewoon op de nacht",
              not laadt_tussen(vl, "20:00", "00:30") and gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
