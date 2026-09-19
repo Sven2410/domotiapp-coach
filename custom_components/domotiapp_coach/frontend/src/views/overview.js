@@ -1748,9 +1748,14 @@ class DacViewOverview extends DacElement {
     // auto aan hangt. Een knop die niets kan doen is erger dan geen knop.
     const boost = this.$(`[data-boost="${slot}"]`);
     // En alleen op een laadpaal: een vaatwasser laadt niet sneller en heeft
-    // zijn eigen knop om te wachten. Sven op 06-09-2026: "dingen van de
-    // laadpaal op mijn vaatwasserkaart, dat moet niet."
-    const kan = besluit.rule !== "disconnected" && besluit.level !== "advise" && besluit.kind !== "programma";
+    // zijn eigen knop om te wachten, en een boiler wordt warm zo snel als zijn
+    // element kan. Sven op 06-09-2026: "dingen van de laadpaal op mijn
+    // vaatwasserkaart, dat moet niet."
+    const kan =
+      besluit.rule !== "disconnected"
+      && besluit.level !== "advise"
+      && besluit.kind !== "programma"
+      && besluit.kind !== "boiler";
     boost.hidden = !kan;
     boost.setAttribute("aria-pressed", String(Boolean(besluit.boost)));
     this.$(`[data-boost-text="${slot}"]`).textContent = besluit.boost
@@ -1800,8 +1805,10 @@ class DacViewOverview extends DacElement {
       if (besluit.rule === "disconnected" || besluit.rule === "complete") continue;
       if (besluit.paused) continue;
       // Een apparaat met een programma (de vaatwasser) telt alleen zolang hij
-      // draait of nu start; wachten op het goedkoopste moment is geen werk.
+      // draait of nu start, en een boiler alleen terwijl hij werkelijk
+      // verwarmt; wachten op het goedkoopste moment is geen werk.
       if (besluit.kind === "programma" && !besluit.charge) continue;
+      if (besluit.kind === "boiler" && !besluit.running) continue;
       return {
         name: this.labelFor_(device),
         programma: besluit.kind === "programma",

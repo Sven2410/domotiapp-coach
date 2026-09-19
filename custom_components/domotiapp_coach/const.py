@@ -407,6 +407,12 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # 06-09-2026: "dat gaan meten en dan die waardes in kunnen vullen." Zie
     # `_async_meting_bewaren` in coach.py en `met_metingen` in planner.py.
     "program_measured": [],
+    # Wat de coach van een boiler leerde door hem aan te zetten en te kijken:
+    # het vermogen van het element, hoeveel er in een vol vat gaat, wat er per
+    # uur uit gaat, wanneer hij voor het laatst vol was en wat er sindsdien in
+    # ging. Per apparaat. Sven op 19-09-2026: "alleen de switch invullen en
+    # power invullen", de rest zelflerend. Zie `_one_boiler` in coach.py.
+    "boiler_learned": [],
     # De knoppen van de bewoner per laadpunt: een akkoord, snelladen, een pauze.
     # Opdrachten van een mens, dus ze horen een herstart van Home Assistant te
     # overleven. Ze gelden voor de sessie die er dan hangt: de kabel eruit wist

@@ -3967,6 +3967,174 @@ zonder72 = [d for d in hass72b.services.verstuurd
             if d[0] == "notify" and "sensor.omvormer" in d[2]["message"]]
 controle("zonder zonnestand meldt hij zoals vroeger", len(zonder72) == 1, f"{zonder72}")
 
+
+print("=== 73. de boiler: aanzetten, kijken wat hij trekt, en het onthouden (19-09-2026) ===")
+# Sven op 19-09-2026: "een boiler waar je alleen stroom op moet zetten, met een
+# smart plug. Als je er stroom op zet en de boiler is warm moet de coach
+# detecteren dat hij warm genoeg is omdat hij dan onder een bepaald vermogen
+# zit. Zelflerend, alleen de switch en power invullen."
+BOILER = {
+    "id": "dev-boiler",
+    "type": "boiler",
+    "name": "Boiler",
+    "controllable": True,
+    "entity": "sensor.boiler_vermogen",
+    "entities": {"switch": "switch.boiler"},
+}
+inst73 = instellingen(devices=[BOILER])
+inst73["strategy"]["schedules"] = [{
+    "device": "dev-boiler", "enabled": True, "priority": "mid", "per_day": False,
+    "window": {"not_before": "", "start_by": "", "done_by": "07:00"}, "days": [],
+}]
+huis73 = {
+    **huis(afname=500.0, teruglevering=0.0, zon_rest=0.0),
+    "switch.boiler": "off",
+    "sensor.boiler_vermogen": "0",
+}
+hass73, store73, coach73 = bouw(dict(huis73), inst73)
+
+
+async def ronde73(nu, watt=None):
+    hass73.services.verstuurd.clear()
+    await hass73.afmaken()
+    if watt is not None:
+        hass73.states.zet("sensor.boiler_vermogen", str(watt))
+    await coach73._round(nu)
+    await hass73.afmaken()
+    # De smart plug doet wat hem gezegd wordt: dat doet een echte ook.
+    for domein, dienst, gegevens in hass73.services.verstuurd:
+        if gegevens.get("entity_id") == "switch.boiler":
+            hass73.states.zet("switch.boiler", "on" if dienst == "turn_on" else "off")
+    return coach73.state.get("dev-boiler") or {}, hass73.services.verstuurd
+
+
+def stand73():
+    return (store73.instellingen.get("boiler_learned") or [{}])[0]
+
+
+# De eerste ronde: hij weet nog niets, dus hij meet in plaats van te rekenen.
+b73, diensten = asyncio.run(ronde73(dt.datetime(2026, 9, 7, 22, 0)))
+print(f"  22:00  {b73.get('rule')}  {b73.get('reason')}")
+controle("de eerste keer: aanzetten en meten, niet rekenen", b73.get("rule") == "leren", f"{b73}")
+controle("en de stroom gaat er werkelijk op",
+         any(d[1] == "turn_on" and d[2].get("entity_id") == "switch.boiler" for d in diensten),
+         f"{diensten}")
+
+# Hij trekt 2 kW, een half uur lang.
+for minuut in range(1, 31):
+    b73, _ = asyncio.run(ronde73(dt.datetime(2026, 9, 7, 22, minuut), watt=2000))
+controle("terwijl hij trekt staat hij op draaien en blijft de stroom erop",
+         b73.get("running") is True and b73.get("on") is True, f"{b73}")
+
+# En dan slaat de thermostaat af: geen vermogen meer.
+b73, _ = asyncio.run(ronde73(dt.datetime(2026, 9, 7, 22, 31), watt=0))
+controle("één minuut stilte is nog geen vol vat", b73.get("rule") != "full", f"{b73.get('rule')}")
+b73, diensten = asyncio.run(ronde73(dt.datetime(2026, 9, 7, 22, 35), watt=0))
+print(f"  22:35  {b73.get('rule')}  {b73.get('reason')}")
+print(f"  geleerd: {stand73()}")
+controle("na drie minuten stilte is het vat vol", b73.get("rule") == "full", f"{b73}")
+controle("en de stroom gaat eraf",
+         any(d[1] == "turn_off" and d[2].get("entity_id") == "switch.boiler" for d in diensten),
+         f"{diensten}")
+controle("hij weet nu wat het element trekt: ongeveer 2 kW",
+         abs(float(stand73().get("heat_w") or 0) - 2000) < 60, f"{stand73()}")
+controle("en hoeveel er in een vol vat ging: een half uur maal 2 kW is 1 kWh",
+         abs(float(stand73().get("vol_kwh") or 0) - 1.0) < 0.05, f"{stand73()}")
+controle("wat er per uur uit het vat gaat weet hij nog niet: daar zijn twee volle beurten voor nodig",
+         stand73().get("verbruik_kwh_h") is None, f"{stand73()}")
+
+# Meteen erna hoeft er niets bij.
+b73, diensten = asyncio.run(ronde73(dt.datetime(2026, 9, 7, 22, 40), watt=0))
+controle("vlak na een volle beurt blijft hij uit",
+         not b73.get("charge") and b73.get("on") is False, f"{b73.get('rule')} {b73.get('on')}")
+controle("en er wordt niets geschakeld", not diensten, f"{diensten}")
+
+# Drie uur later kijkt hij even of het vat nog warm is. Het is nacht, dus hij
+# vraagt niets: dan gaat de stroom er meteen weer af.
+b73, diensten = asyncio.run(ronde73(dt.datetime(2026, 9, 8, 1, 41), watt=0))
+print(f"  01:41  {b73.get('rule')}  {b73.get('reason')}")
+controle("na drie uur draait hij even proef", b73.get("rule") == "proef", f"{b73}")
+controle("en zet daarvoor de stroom erop",
+         any(d[1] == "turn_on" and d[2].get("entity_id") == "switch.boiler" for d in diensten), f"{diensten}")
+
+# Het vat is nog warm: binnen een paar minuten staat hij weer uit, en de
+# tweede volle beurt leert hem wat er per uur uit gaat. Nu een beurt waarin
+# hij wél iets vraagt.
+for minuut in range(42, 60):
+    b73, _ = asyncio.run(ronde73(dt.datetime(2026, 9, 8, 1, minuut), watt=1000))
+b73, _ = asyncio.run(ronde73(dt.datetime(2026, 9, 8, 2, 0), watt=0))
+b73, diensten = asyncio.run(ronde73(dt.datetime(2026, 9, 8, 2, 4), watt=0))
+print(f"  02:04  {b73.get('rule')}  geleerd: {stand73()}")
+controle("de tweede volle beurt zegt hoe snel het vat leegloopt",
+         stand73().get("verbruik_kwh_h") is not None
+         and 0.05 < float(stand73()["verbruik_kwh_h"]) < 0.2, f"{stand73()}")
+controle("en hij weet nu drie dingen van deze boiler",
+         all(stand73().get(k) for k in ("heat_w", "vol_kwh", "verbruik_kwh_h")), f"{stand73()}")
+controle("de kaart zegt wat hij geleerd heeft",
+         (b73.get("learned") or {}).get("runs") == 2, f"{b73.get('learned')}")
+
+# Wat er geleerd is, is te wissen: een boiler die vervangen wordt begint
+# opnieuw. Het commando zelf staat in websocket.py en die sleept de hele
+# websocket-API mee; hier dus de bewerking zoals hij daar staat.
+store73.instellingen["boiler_learned"] = [
+    r for r in (store73.instellingen.get("boiler_learned") or []) if r.get("device") != "dev-boiler"
+]
+controle("wissen haalt het geleerde weg", not (store73.instellingen.get("boiler_learned") or []),
+         f"{store73.instellingen.get('boiler_learned')}")
+
+# En als de coach weggaat hoort de stroom erop te staan: een boiler zonder
+# stroom blijft koud tot iemand het merkt, en dat is onder de douche.
+hass73.services.verstuurd.clear()
+coach73.async_stop()
+asyncio.run(hass73.afmaken())
+controle("de coach zet de boiler aan als hij stopt, zodat de thermostaat weer de baas is",
+         any(d[1] == "turn_on" and d[2].get("entity_id") == "switch.boiler"
+             for d in hass73.services.verstuurd),
+         f"{hass73.services.verstuurd}")
+
+print("=== 74. een boiler waar geen stroom bij komt zegt dat na drie keer ===")
+# Er staat stroom op, er moest verwarmd worden, en er liep niets: dan is er
+# iets met de stekker of de schakelaar, en dat hoort niemand pas onder de
+# douche te merken.
+inst74 = instellingen(devices=[BOILER])
+inst74["strategy"]["schedules"] = list(inst73["strategy"]["schedules"])
+# Gisterochtend trok hij voor het laatst stroom, en een vat van 6 kWh dat 0,3
+# kWh per uur verliest is in twintig uur leeg. Vraagt hij dan nog steeds niets,
+# dan is dat geen vol vat meer; zie BOILER_VERDACHT in planner.py.
+inst74["boiler_learned"] = [{
+    "device": "dev-boiler", "heat_w": 2000.0, "vol_kwh": 6.0, "verbruik_kwh_h": 0.3,
+    "kwh_sinds_vol": 0.0, "vol_sinds": "2026-09-07T07:00:00",
+    "getrokken_op": "2026-09-06T20:00:00", "runs": 3,
+}]
+huis74 = {**huis73, "switch.boiler": "off", "sensor.boiler_vermogen": "0"}
+hass74, store74, coach74 = bouw(dict(huis74), inst74)
+
+
+async def ronde74(nu):
+    hass74.services.verstuurd.clear()
+    await hass74.afmaken()
+    await coach74._round(nu)
+    await hass74.afmaken()
+    for domein, dienst, gegevens in hass74.services.verstuurd:
+        if gegevens.get("entity_id") == "switch.boiler":
+            hass74.states.zet("switch.boiler", "on" if dienst == "turn_on" else "off")
+    return (coach74.state.get("dev-boiler") or {},
+            [d[2]["message"] for d in hass74.services.verstuurd if d[0] == "notify"])
+
+
+meldingen74 = []
+klok74 = dt.datetime(2026, 9, 7, 22, 0)
+for keer in range(4):
+    # Aanzetten, en er gebeurt niets: na de aanloop plus de stilte heet dat vol.
+    for stap in (0, 1, 4, 7):
+        b74, m = asyncio.run(ronde74(klok74 + dt.timedelta(minutes=stap)))
+        meldingen74 += m
+    klok74 += dt.timedelta(hours=3, minutes=10)
+print(f"  {meldingen74}")
+controle("na drie vergeefse keren zegt hij dat er geen stroom loopt",
+         any("geen stroom" in m for m in meldingen74), f"{meldingen74}")
+controle("en hij zegt het één keer", sum("geen stroom" in m for m in meldingen74) == 1, f"{meldingen74}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

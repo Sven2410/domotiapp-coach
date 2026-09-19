@@ -544,6 +544,11 @@ async def async_clear_measurements(
 
     Voor als er een beurt met het verkeerde programma gemeten is: een meting
     wint van de tabel, dus een verkeerde meting blijft anders meetellen.
+
+    Hetzelfde commando wist wat er van een boiler geleerd is (v0.71.0). Daar is
+    geen tabel om op terug te vallen: hij begint gewoon opnieuw met aanzetten
+    en kijken. Voor een boiler die vervangen is door een grotere, of een
+    stekker die maanden iets anders mat.
     """
     store = async_get_store(hass)
     settings = await store.async_load()
@@ -555,7 +560,13 @@ async def async_clear_measurements(
             and (msg.get("program") in (None, "") or row.get("key") == msg.get("program"))
         )
     ]
-    settings = await store.async_save({"program_measured": rows})
+    geleerd = [
+        row for row in (settings.get("boiler_learned") or [])
+        if not (isinstance(row, dict) and row.get("device") == msg["device_id"])
+    ]
+    settings = await store.async_save(
+        {"program_measured": rows, "boiler_learned": geleerd}
+    )
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
     connection.send_result(msg["id"], settings)
 

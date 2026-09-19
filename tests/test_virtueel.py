@@ -1165,5 +1165,72 @@ if (vl := v("teller-per-uur")):
     controle("teller per uur: het verslag noemt de echte hoeveelheid",
              any("15," in m for m in meldingen(vl, "Geladen van")), f"{[m for _, m in vl.meldingen]}")
 
+
+# --- de boiler ---------------------------------------------------------------
+#
+# Sven op 19-09-2026: een boiler op een smart plug, zelflerend, klaar om 07:00.
+# Wat de bewoner ervan merkt is dit: er is warm water als hij onder de douche
+# stapt, en het is op de goedkoopste uren verwarmd.
+
+print("=== de boiler ===")
+
+if (vl := v("boiler-leert")):
+    geleerd = vl.boiler_geleerd
+    print(f"  boiler-leert: {vl.boiler_kwh:.2f} kWh, geleerd {geleerd}")
+    controle("boiler leert: na één nacht weet hij wat het element trekt",
+             geleerd.get("heat_w") is not None and abs(float(geleerd["heat_w"]) - 2000) < 100,
+             f"{geleerd}")
+    controle("boiler leert: en hoeveel er in een volle beurt ging",
+             (geleerd.get("vol_kwh") or 0) > 0.5, f"{geleerd}")
+    controle("boiler leert: geen valse melding over de stekker",
+             not any("geen stroom" in m for _, m in vl.meldingen),
+             f"{[m for _, m in vl.meldingen]}")
+    controle("boiler leert: en er is warm water om 07:00",
+             (vl.boiler_bij_klaar or 0) > 2.0, f"{vl.boiler_bij_klaar}")
+
+if (vl := v("boiler-nacht")):
+    aan = [t for t, a in vl.boiler_schakels if a]
+    lang = [(t, e) for t, e in zip(aan, [e for e, a in vl.boiler_schakels if not a])
+            if (e - t).total_seconds() > 900]
+    print(f"  boiler-nacht: {vl.boiler_kwh:.2f} kWh €{vl.boiler_betaald:.2f}, "
+          f"aan om {[t.strftime('%H:%M') for t in aan]}, vat {vl.boiler_bij_klaar:.1f} kWh om 07:00")
+    controle("boiler nacht: er is warm water om 07:00", (vl.boiler_bij_klaar or 0) > 4.0,
+             f"{vl.boiler_bij_klaar}")
+    controle("boiler nacht: het vat raakt onderweg niet leeg", (vl.boiler_laagste or 0) > 0.5,
+             f"{vl.boiler_laagste}")
+    controle("boiler nacht: hij verwarmt in de goedkope nacht en niet in de avondpiek",
+             lang and all(t.hour < 6 or t.hour >= 23 for t, _ in lang),
+             f"{[(t.strftime('%H:%M'), e.strftime('%H:%M')) for t, e in lang]}")
+    controle("boiler nacht: niet in de avondpiek van het net",
+             not any(18 <= t.hour < 20 for t, _ in lang),
+             f"{[t.strftime('%H:%M') for t, _ in lang]}")
+    controle("boiler nacht: hij schakelt een handvol keren, niet honderd",
+             len(vl.boiler_schakels) <= 20, f"{len(vl.boiler_schakels)} schakelingen")
+    beurt = next((b for b in vl.beurten if b.get("device") == "boiler"), None)
+    controle("boiler nacht: de beurt staat onder Bespaard, met wat het wachten opleverde",
+             beurt is not None and beurt.get("kind") == "boiler" and (beurt.get("saved") or 0) > 0,
+             f"{beurt}")
+
+if (vl := v("boiler-zon")):
+    print(f"  boiler-zon: {vl.boiler_kwh:.2f} kWh waarvan {vl.boiler_zon_kwh:.2f} uit eigen zon")
+    controle("boiler zon: het grootste deel komt uit eigen zon",
+             vl.boiler_zon_kwh >= 0.4 * vl.boiler_kwh,
+             f"{vl.boiler_zon_kwh:.2f} van {vl.boiler_kwh:.2f}")
+    controle("boiler zon: hij verwarmt overdag en niet 's nachts",
+             all(8 <= t.hour < 20 for t, a in vl.boiler_schakels if a),
+             f"{[t.strftime('%H:%M') for t, a in vl.boiler_schakels if a]}")
+
+if (vl := v("boiler-stekker-stuk")):
+    print(f"  boiler-stekker-stuk: {len(vl.boiler_schakels)} schakelingen, "
+          f"meldingen {[m[:40] for _, m in vl.meldingen]}")
+    controle("stekker stuk: na een etmaal zonder één watt zegt hij het",
+             any("geen stroom" in m for _, m in vl.meldingen),
+             f"{[m for _, m in vl.meldingen]}")
+    controle("stekker stuk: en hij zegt het één keer",
+             sum("geen stroom" in m for _, m in vl.meldingen) == 1,
+             f"{[m for _, m in vl.meldingen]}")
+    controle("stekker stuk: hij blijft niet eindeloos schakelen",
+             len(vl.boiler_schakels) <= 20, f"{len(vl.boiler_schakels)} schakelingen")
+
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

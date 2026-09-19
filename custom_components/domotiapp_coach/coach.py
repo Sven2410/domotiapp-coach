@@ -47,8 +47,14 @@ from .archive import async_get_archive
 from .planner import (
     Apparaat,
     BALANCER_MARGIN_AMPS,
+    Boiler,
+    BOILER_KIJKEN,
+    BOILER_VERDACHT,
+    BOILER_VERGEEFS,
     DRAAIT,
     KLAAR,
+    boiler_nodig,
+    plan_boiler,
     plan_programma,
     price_now,
     programma_van,
@@ -291,6 +297,38 @@ EINDTIJD_SPELING = timedelta(minutes=2)
 # Een meting weegt mee als lopend gemiddelde over zoveel beurten; daarna
 # blijft hij even zwaar tellen, zodat een machine die ouder wordt bijblijft.
 METING_MAX_N = 5
+
+# --- De boiler --------------------------------------------------------------
+#
+# Sven op 19-09-2026: "alleen de switch invullen en power invullen", en de rest
+# zelflerend. Wat de coach dus zelf moet uitvinden: hoeveel hij trekt, hoe lang
+# een vol vat duurt, en hoe snel dat vat weer leeg is.
+#
+# Hij trekt iets, of hij trekt niets. Een boilerelement is minstens een paar
+# honderd watt en een meetstekker in rust een paar watt, dus die twee zijn niet
+# te verwarren; honderd watt ligt daar ruim tussenin. Zodra hij een keer
+# gemeten heeft wat het element trekt gebruikt hij een vijfde daarvan, zodat
+# een boiler die bovenin terugregelt niet als "vol" telt zolang hij nog
+# behoorlijk trekt.
+BOILER_DRAAI_W = 100.0
+BOILER_DRAAI_DEEL = 0.2
+# Hoe lang er stroom op moet staan voor "hij vraagt niets" ook werkelijk "het
+# vat is vol" betekent. Een meetstekker meldt niet elke seconde, en een
+# thermostaat die net dichtvalt mag even de tijd krijgen.
+BOILER_AANLOOP = timedelta(minutes=3)
+BOILER_STIL = timedelta(minutes=3)
+# Hoe vaak hij even kijkt of het vat nog warm is. Met de stroom eraf kan de
+# boiler niet zeggen dat hij warmte wil, en dat is het enige gat in deze
+# aanpak; Sven koos op 19-09-2026 voor af en toe proefdraaien. Kost niets
+# zolang het vat vol is, want dan vraagt de boiler geen stroom. Hetzelfde
+# getal als waarmee de planner een gemeten vol vat gelooft: het is dezelfde
+# vraag.
+BOILER_PROEF_ELKE = BOILER_KIJKEN
+# Hoeveel er in een beurt gegaan moet zijn voordat het een beurt heet. Minder
+# dan dit is een proefmoment of een thermostaat die even aantikte, en daar valt
+# niets uit te leren.
+BOILER_MIN_KWH = 0.05
+
 FASEMETING_VERS = timedelta(seconds=10)
 
 # Hoe vaak achter elkaar dezelfde uitkomst nodig is voor de coach er iets over
@@ -716,6 +754,11 @@ class ChargerCoach:
         # vrijgegeven, wanneer de coach op start drukte, wanneer hij ging
         # draaien, en de tellers voor het verslag. Zie `_one_programma`.
         self._programma: dict[str, dict[str, Any]] = {}
+        # Per boiler wat er deze ronde bekend is: sinds wanneer er stroom op
+        # staat, wanneer hij voor het laatst iets trok, en de tellers voor
+        # Bespaard. Wat hij geléérd heeft staat in de instellingen, want dat
+        # moet een herstart overleven. Zie `_one_boiler`.
+        self._boiler: dict[str, dict[str, Any]] = {}
         # Wat er de afgelopen METER_VENSTER per ronde naar het net ging:
         # (moment, watt). Zie `_meter_zeker`.
         self._meter: list[tuple[datetime, float]] = []
@@ -846,7 +889,13 @@ class ChargerCoach:
         time-to-live stays put, and it is always at or under what the charging
         point allows, so a coach that goes away leaves a car charging safely
         rather than at full tilt.
+
+        Bij een boiler is het andersom, en daarom gebeurt daar wél iets: een
+        boiler zonder stroom blijft koud tot iemand het merkt, en dat is onder
+        de douche. Gaat de coach weg, dan gaat de stroom erop en is de
+        thermostaat weer de baas, precies zoals vóór de coach.
         """
+        self.hass.async_create_task(self._async_boilers_aan())
         if self._cancel is not None:
             self._cancel()
             self._cancel = None
@@ -857,6 +906,25 @@ class ChargerCoach:
             self._unwatch()
             self._unwatch = None
         self._watched = set()
+
+    async def _async_boilers_aan(self) -> None:
+        """De stroom terug op elke boiler die de coach stuurde.
+
+        Voor het afsluiten van de integratie en voor een herstart van Home
+        Assistant: wat er dan gebeurt hoort nooit een koude boiler te zijn.
+        """
+        try:
+            settings = await async_get_store(self.hass).async_load()
+        except Exception:  # noqa: BLE001 - afsluiten mag hier niet op stuklopen
+            _LOGGER.exception("kon de instellingen niet lezen bij het afsluiten")
+            return
+        for device in settings.get("devices") or []:
+            if device.get("type") != "boiler" or not device.get("controllable"):
+                continue
+            try:
+                await self._async_boiler_zetten(device, True)
+            except Exception:  # noqa: BLE001 - één apparaat is niet alle apparaten
+                _LOGGER.exception("kon %s niet aanzetten bij het afsluiten", device.get("id"))
 
     async def _async_watchdog(self, now: datetime | None = None) -> None:
         """Kijken of de coach zelf nog draait, en het zeggen als dat niet zo is.
@@ -1281,6 +1349,11 @@ class ChargerCoach:
             for device in settings.get("devices") or []
             if device.get("type") in PROGRAMMA_TYPES and device.get("controllable")
         ]
+        boilers = [
+            device
+            for device in settings.get("devices") or []
+            if device.get("type") == "boiler" and device.get("controllable")
+        ]
         self._watch(
             {
                 entity
@@ -1292,6 +1365,15 @@ class ChargerCoach:
                 for device in programma_apparaten
                 for sleutel in ("release_switch", "release_now_switch", "status")
                 if (entity := (device.get("entities") or {}).get(sleutel))
+            }
+            # De schakelaar van een boiler, en niet zijn vermogenssensor: die
+            # laatste beweegt voortdurend en zou de coach elke seconde wekken.
+            # Of het vat vol is blijkt pas na minuten stilte, dus daar is de
+            # klok snel genoeg voor.
+            | {
+                entity
+                for device in boilers
+                if (entity := (device.get("entities") or {}).get("switch"))
             }
             | self._watched_phases
         )
@@ -1343,6 +1425,21 @@ class ChargerCoach:
             except ServiceNotFound:
                 _LOGGER.warning(
                     "%s kan nog niet aangestuurd worden: de startknop bestaat niet (nog niet geladen?)",
+                    device.get("name") or device.get("id"),
+                )
+            except Exception:  # noqa: BLE001 - one broken device is not all of them
+                _LOGGER.exception("kon %s niet beoordelen", device.get("id"))
+
+        # En de boilers: die staan aan of uit, en hun eigen thermostaat zegt
+        # wanneer het genoeg is.
+        for device in settings.get("devices") or []:
+            if device.get("type") != "boiler" or not device.get("controllable"):
+                continue
+            try:
+                await self._one_boiler(moment, settings, device, level)
+            except ServiceNotFound:
+                _LOGGER.warning(
+                    "%s kan nog niet aangestuurd worden: de schakelaar bestaat niet (nog niet geladen?)",
                     device.get("name") or device.get("id"),
                 )
             except Exception:  # noqa: BLE001 - one broken device is not all of them
@@ -2413,6 +2510,467 @@ class ChargerCoach:
             if isinstance(entry, dict) and entry.get("device") == device.get("id"):
                 return rang.get(entry.get("priority", "mid"), 1)
         return 1
+
+    # ------------------------------------------------------------------
+    # De boiler
+    #
+    # Sven op 19-09-2026: "ik wil gewoon een sturing maken op een boiler waar
+    # je alleen stroom op moet zetten, met een smart plug bijvoorbeeld. Als je
+    # er stroom op zet en de boiler is warm moet de coach detecteren dat hij
+    # warm genoeg is omdat de boiler dan onder een bepaald vermogen zit. Ik wil
+    # dit zelflerend hebben. Alleen de switch invullen en power invullen."
+    #
+    # Twee entiteiten, en verder niets in te vullen. De coach zet de stroom
+    # erop of eraf; de thermostaat van de boiler bepaalt hoe warm het water
+    # wordt. Daardoor kan dit niets kapotmaken en niets gevaarlijks doen: het
+    # ergste wat de coach kan is te laat aanzetten, en daar is de klaar-tijd
+    # voor. Het denkwerk staat in `plan_boiler` in planner.py.
+
+    async def _one_boiler(
+        self,
+        now: datetime,
+        settings: dict[str, Any],
+        device: dict[str, Any],
+        level: str,
+    ) -> None:
+        device_id = device.get("id", "")
+        entities = device.get("entities") or {}
+        naam = device.get("name") or "De boiler"
+        schakelaar = entities.get("switch")
+        sessie = self._boiler.setdefault(device_id, self._lege_boiler_sessie(now))
+        geleerd = self._boiler_rij(settings, device_id)
+
+        watts = _watts(self.hass, device.get("entity"))
+        stand = _text(self.hass, schakelaar).strip().lower() if schakelaar else ""
+        aan = stand == "on"
+        if not aan and sessie.get("aan_sinds") is not None:
+            # De schakelaar ging eraf, door wie dan ook: de opwarmbeurt is uit.
+            sessie["aan_sinds"] = None
+            sessie["stil_sinds"] = None
+        if aan and sessie.get("aan_sinds") is None:
+            sessie["aan_sinds"] = now
+
+        # Trekt hij iets? Zodra de coach een keer gemeten heeft wat het element
+        # trekt is de grens een vijfde daarvan, anders BOILER_DRAAI_W.
+        grens = BOILER_DRAAI_W
+        if geleerd.get("heat_w"):
+            grens = max(BOILER_DRAAI_W, float(geleerd["heat_w"]) * BOILER_DRAAI_DEEL)
+        draait = aan and watts is not None and watts >= grens
+
+        if draait:
+            sessie["stil_sinds"] = None
+            self._boiler_tellen(settings, sessie, now, watts)
+        elif aan:
+            sessie["stil_sinds"] = sessie.get("stil_sinds") or now
+        sessie["laatst"] = now
+
+        # Vol is een meting: er staat lang genoeg stroom op en hij vraagt
+        # niets. Pas na BOILER_AANLOOP, want een meetstekker meldt niet elke
+        # seconde en een thermostaat mag even nadenken.
+        vol = None
+        if aan and sessie.get("aan_sinds") is not None and now - sessie["aan_sinds"] >= BOILER_AANLOOP:
+            if draait:
+                vol = False
+            elif sessie.get("stil_sinds") is not None and now - sessie["stil_sinds"] >= BOILER_STIL:
+                vol = True
+        if vol is not None:
+            # Hij heeft net gezien hoe het vat ervoor staat; dan hoeft er
+            # voorlopig niet geproefd te worden, en is de proef afgelopen.
+            sessie["gekeken"] = now
+            sessie["proef_sinds"] = None
+        elif sessie.get("proef_sinds") is not None and (
+            now - sessie["proef_sinds"] > BOILER_AANLOOP + BOILER_STIL + timedelta(minutes=2)
+        ):
+            # Een proef die nergens op uitkomt (de meetstekker zegt niets) mag
+            # niet blijven hangen: dan zou de stroom erop blijven staan.
+            sessie["proef_sinds"] = None
+            sessie["gekeken"] = now
+
+        window = resolve_window(now, self._days(settings, device))
+        einde = window.deadline if window.enabled else None
+        # Hoeveel er uit het vat gegaan moet zijn sinds hij voor het laatst
+        # werkelijk stroom trok. Dat is de maat waaraan "hij vraagt niets"
+        # gelegd wordt; zie `BOILER_VERDACHT` in planner.py.
+        zou_nodig = None
+        getrokken = geleerd.get("getrokken_op")
+        if getrokken is not None and geleerd.get("verbruik_kwh_h"):
+            uren = max(0.0, (now - getrokken).total_seconds() / 3600.0)
+            zou_nodig = uren * float(geleerd["verbruik_kwh_h"])
+
+        if vol:
+            geleerd = await self._async_boiler_vol(
+                settings, device, naam, sessie, geleerd, now, zou_nodig
+            )
+            sessie = self._boiler[device_id]
+
+        boiler = Boiler(
+            on=aan,
+            power_w=watts,
+            # Vol weet hij alleen zolang er stroom op staat. Gaat de stroom
+            # eraf, dan kan de boiler niets meer zeggen en rekent de coach
+            # weer met wat hij geleerd heeft.
+            full=vol if aan else None,
+            heat_w=geleerd.get("heat_w"),
+            vol_kwh=geleerd.get("vol_kwh"),
+            verbruik_kwh_h=geleerd.get("verbruik_kwh_h"),
+            vol_sinds=geleerd.get("vol_sinds"),
+            kwh_sinds_vol=float(geleerd.get("kwh_sinds_vol") or 0.0) + sessie["beurt_kwh"],
+            vergeefs=int(sessie.get("vergeefs") or 0),
+            # Een proef die loopt is pas klaar als hij iets opgeleverd heeft.
+            # Zonder dat zou hij na één minuut alweer afgebroken worden door
+            # het gewone plan ("wacht op het goedkope uur"), en stond de boiler
+            # elke minuut aan en uit; gezien op 19-09-2026 in `boiler-nacht`.
+            proef_nodig=sessie.get("proef_sinds") is not None or (
+                not aan and (
+                    (gekeken := sessie.get("gekeken") or geleerd.get("vol_sinds")) is None
+                    or now - gekeken >= BOILER_PROEF_ELKE
+                )
+            ),
+        )
+        # Wat er naar het net zou gaan als deze boiler níet liep. Zonder die
+        # correctie zou hij zichzelf uitzetten zodra hij aangaat: hij eet zijn
+        # eigen overschot op. Dezelfde som als bij de paal, waar het
+        # laadvermogen er ook weer bij opgeteld wordt.
+        gemeten = self._meter_zeker(now)
+        eigen = (watts or 0.0) if draait else 0.0
+        surplus = None if gemeten is None else gemeten + eigen
+        decision = plan_boiler(
+            now, self._prices(settings), self._tariff(settings),
+            Forecast(solar_kwh=self._zon_kwh, house_kwh=self._huis_kwh,
+                     estimated=self._zon_geschat, solar_factor=self._zon_gemeten(now),
+                     solar_day=now.date()),
+            window, boiler,
+            surplus_w=surplus,
+        )
+
+        # Sinds wanneer er warmte bij moest: het ijkpunt voor Bespaard, net als
+        # het inpluggen bij een auto en het vrijgeven bij een vaatwasser.
+        if decision.rule in ("deadline", "cheapest-hour", "wait-for-cheap", "zon", "leren"):
+            if sessie.get("nodig_sinds") is None:
+                sessie["nodig_sinds"] = now
+                sessie["prijzen"] = list(self._prices(settings))
+
+        mag = level == LEVEL_STEER or (level == LEVEL_PROPOSE and device_id in self._approved)
+        nodig = boiler_nodig(now, boiler, window.deadline if window.enabled else None)
+        self.state[device_id] = {
+            **asdict(decision),
+            "kind": "boiler",
+            "at": now.isoformat(),
+            "level": level,
+            "applied": mag and level not in (LEVEL_READ, LEVEL_ADVISE),
+            "approved": device_id in self._approved,
+            "running": draait,
+            "on": aan,
+            "power_w": None if watts is None else round(watts),
+            # Wat hij geleerd heeft, voor op de kaart. None is "nog niet
+            # gemeten", en dat hoort de kaart ook zo te zeggen.
+            "learned": {
+                "heat_w": geleerd.get("heat_w"),
+                "vol_kwh": geleerd.get("vol_kwh"),
+                "use_kwh_h": geleerd.get("verbruik_kwh_h"),
+                "runs": geleerd.get("runs") or 0,
+                "full_at": geleerd["vol_sinds"].isoformat() if geleerd.get("vol_sinds") else None,
+            },
+            "needed_kwh": None if nodig is None else round(nodig, 2),
+            "tip": "",
+        }
+        await self._async_noteer_programma(device, device_id, now)
+
+        if level in (LEVEL_READ, LEVEL_ADVISE) or not mag or not schakelaar:
+            return
+        if decision.charge == aan:
+            return
+        # Vergeefs aanzetten: er moest verwarmd worden en er liep niets. Dan is
+        # er iets met de stekker of de schakelaar.
+        if not decision.charge and aan:
+            await self._async_boiler_zetten(device, False)
+            # Wat er deze aanzetting in ging hoort bij dit vat en niet bij deze
+            # aanzetting: hij mag over meerdere goedkope blokken verdeeld
+            # worden. Dus naar de opslag, waar het ook een herstart overleeft.
+            if sessie["beurt_kwh"] > 0:
+                await self._async_boiler_bewaren(
+                    settings, device_id, geleerd,
+                    {"kwh_sinds_vol": float(geleerd.get("kwh_sinds_vol") or 0.0) + sessie["beurt_kwh"]},
+                )
+                sessie["beurt_kwh"] = 0.0
+            return
+        await self._async_boiler_zetten(device, True)
+        sessie["aan_sinds"] = now
+        sessie["stil_sinds"] = None
+        # Waarom de stroom erop ging. Bij het afronden is de regel altijd
+        # "full", en dan is dit het enige dat nog zegt of er werkelijk warmte
+        # bij moest; zie `_async_boiler_vol`.
+        sessie["reden_aan"] = decision.rule
+        if decision.rule == "proef":
+            sessie["proef_sinds"] = now
+
+    async def _async_boiler_zetten(self, device: dict[str, Any], aan: bool) -> None:
+        """De stroom van de boiler erop of eraf."""
+        await self._async_schakelen(device, aan, "switch")
+
+    async def _async_boiler_vol(
+        self,
+        settings: dict[str, Any],
+        device: dict[str, Any],
+        naam: str,
+        sessie: dict[str, Any],
+        geleerd: dict[str, Any],
+        now: datetime,
+        zou_nodig: float | None = None,
+    ) -> dict[str, Any]:
+        """Het vat is vol: leren wat deze beurt zei, en de beurt wegschrijven.
+
+        Alleen leren van een beurt waarin werkelijk iets gebeurde. Een
+        proefmoment dat meteen "vol" oplevert meet niets, en zou het geleerde
+        vermogen en de vatgrootte alleen maar verwateren.
+        """
+        if "vol" in sessie["gemeld"]:
+            return geleerd
+        sessie["gemeld"].add("vol")
+        device_id = device.get("id", "")
+        erin = sessie["beurt_kwh"] + float(geleerd.get("kwh_sinds_vol") or 0.0)
+        nieuw: dict[str, Any] = {"vol_sinds": now, "kwh_sinds_vol": 0.0}
+
+        if sessie["beurt_kwh"] > BOILER_MIN_KWH and sessie["draai_seconden"] > 60:
+            sessie["vergeefs"] = 0
+            sessie["gemeld"].discard("vergeefs")
+            # Wanneer hij voor het laatst werkelijk iets trok. Hiervandaan
+            # wordt geteld of stilte nog te verklaren is; zie BOILER_VERDACHT.
+            nieuw["getrokken_op"] = now
+            n = max(0, min(METING_MAX_N, int(geleerd.get("runs") or 0)))
+            vermogen = sessie["beurt_kwh"] / (sessie["draai_seconden"] / 3600.0) * 1000.0
+            oud_w = geleerd.get("heat_w")
+            nieuw["heat_w"] = round(
+                (oud_w * n + vermogen) / (n + 1) if oud_w and n else vermogen, 1
+            )
+            # Het vat is zo groot als de grootste volle beurt die hij zag: van
+            # koud naar vol, en dat is een grens uit de natuurkunde en geen
+            # gemiddelde.
+            nieuw["vol_kwh"] = round(max(float(geleerd.get("vol_kwh") or 0.0), erin), 3)
+            # Wat er per uur uit het vat gaat: afkoelen en douchen samen, over
+            # de tijd sinds hij voor het laatst vol was. Onder het uur zegt dat
+            # niets.
+            vorig = geleerd.get("vol_sinds")
+            if vorig is not None:
+                uren = (now - vorig).total_seconds() / 3600.0
+                if uren >= 1.0:
+                    per_uur = erin / uren
+                    oud_u = geleerd.get("verbruik_kwh_h")
+                    nieuw["verbruik_kwh_h"] = round(
+                        (oud_u * n + per_uur) / (n + 1) if oud_u and n else per_uur, 3
+                    )
+            nieuw["runs"] = min(METING_MAX_N, n + 1)
+            sessie["gemeld"].discard("vergeefs")
+            # Het verslag gaat naar de geschiedenis en niet naar de telefoon:
+            # een boiler die om drie uur 's nachts warm wordt hoeft niemand te
+            # wekken. Sven op 06-09-2026: "niet telkens onnodig meldingen."
+            vanaf = f" vanaf {sessie['gestart']:%H:%M}" if sessie.get("gestart") else ""
+            erin_tekst = f"{erin:.1f} kWh".replace(".", ",")
+            await self._async_tell(
+                f"{naam} is weer warm: {erin_tekst}{vanaf}.", telefoon=False
+            )
+            self._beurt_schrijven(self._boiler_regel(device, naam, sessie, now))
+
+        leeg = sessie["beurt_kwh"] <= BOILER_MIN_KWH
+        if leeg and geleerd.get("getrokken_op") is None:
+            # Nog nooit zien trekken: dan begint de klok nu, want zonder
+            # beginpunt valt er niets te zeggen over hoe lang het al stil is.
+            nieuw["getrokken_op"] = now
+        verdacht = (
+            leeg
+            and zou_nodig is not None
+            and geleerd.get("vol_kwh")
+            and zou_nodig >= BOILER_VERDACHT * float(geleerd["vol_kwh"])
+        )
+        if verdacht:
+            # Volgens de som is het vat halfleeg en toch vraagt hij niets. Dat
+            # is geen vol vat maar een stekker die niets doet, en dan hoort
+            # `vol_sinds` er niet op te schuiven: dan zou de coach zichzelf
+            # wijsmaken dat het goed zit.
+            nieuw.pop("vol_sinds", None)
+            nieuw.pop("kwh_sinds_vol", None)
+            sessie["vergeefs"] = int(sessie.get("vergeefs") or 0) + 1
+            if sessie["vergeefs"] >= BOILER_VERGEEFS and "vergeefs" not in sessie["gemeld"]:
+                sessie["gemeld"].add("vergeefs")
+                await self._async_tell(
+                    f"De coach zet {naam} wel aan, maar er loopt geen stroom: "
+                    f"{sessie['vergeefs']} keer achter elkaar vroeg hij niets terwijl er warm water "
+                    "bij moest. Kijk of de stekker en de schakelaar doen wat ze horen te doen.",
+                    kritiek=True,
+                )
+
+        samen = await self._async_boiler_bewaren(settings, device_id, geleerd, nieuw)
+        self._boiler[device_id] = {
+            **self._lege_boiler_sessie(now),
+            "gekeken": now,
+            "vergeefs": sessie.get("vergeefs") or 0,
+            # Een melding die gedaan is blijft gedaan: anders komt "er loopt
+            # geen stroom" bij elke volgende vergeefse poging opnieuw.
+            "gemeld": {"vergeefs"} & set(sessie.get("gemeld") or ()),
+        }
+        return samen
+
+    def _boiler_tellen(
+        self, settings: dict[str, Any], sessie: dict[str, Any], now: datetime, watts: float | None
+    ) -> None:
+        """Wat deze ronde erin ging, wat het kostte, en wat het gekost had als
+        hij meteen was gaan verwarmen toen het nodig was.
+
+        Dezelfde maat als bij een laadbeurt en bij een vaatwasser: hetzelfde
+        verbruik, verschoven naar het moment waarop de coach zag dat er warmte
+        bij moest, en dan alles van het net tegen de prijs van toen.
+        """
+        if watts is None or watts <= 0:
+            return
+        uren = max(0.0, (now - sessie["laatst"]).total_seconds()) / 3600.0
+        if uren <= 0 or uren > 0.5:
+            return
+        kwh = watts / 1000.0 * uren
+        if sessie.get("gestart") is None:
+            sessie["gestart"] = now
+        sessie["beurt_kwh"] += kwh
+        sessie["draai_seconden"] += uren * 3600.0
+        koop, terug = self._prijs_nu(settings, now)
+        export = self._netto_export_w(settings)
+        zon_deel = 0.0
+        if export is not None and terug is not None:
+            zon_deel = max(0.0, min(1.0, (export + watts) / watts))
+        sessie["kwh"] += kwh
+        sessie["zon_kwh"] += kwh * zon_deel
+        if koop is not None:
+            sessie["betaald"] += kwh * ((1 - zon_deel) * koop + zon_deel * (terug or 0.0))
+            sessie["zon_winst"] += kwh * zon_deel * max(0.0, koop - (terug or 0.0))
+        nodig_sinds = sessie.get("nodig_sinds")
+        if nodig_sinds is not None:
+            toen = nodig_sinds + timedelta(seconds=sessie["draai_seconden"])
+            rij = price_now(sessie.get("prijzen") or [], toen)
+            koop_toen = rij["price"] if rij is not None else self._prijs_nu(settings, toen)[0]
+            if koop_toen is None:
+                sessie["maat_onbekend"] = True
+            else:
+                sessie["maat"] += kwh * koop_toen
+
+    def _boiler_regel(
+        self, device: dict[str, Any], naam: str, sessie: dict[str, Any], einde: datetime
+    ) -> dict[str, Any]:
+        """De opwarmbeurt zoals hij onder Bespaard komt te staan."""
+        gestart = sessie.get("gestart") or einde
+        begin = sessie.get("nodig_sinds") or gestart
+        maat = None if sessie["maat_onbekend"] or sessie.get("nodig_sinds") is None else sessie["maat"]
+        betaald = sessie["betaald"]
+        return {
+            "id": f"{device.get('id', '')}:{begin.replace(microsecond=0).isoformat()}",
+            "device": device.get("id", ""),
+            "name": naam,
+            "kind": "boiler",
+            "car": "",
+            "program": "",
+            "plugged_at": begin.replace(microsecond=0).isoformat(),
+            "started": gestart.replace(microsecond=0).isoformat(),
+            "ended": einde.replace(microsecond=0).isoformat(),
+            "kwh": round(sessie["kwh"], 3),
+            "solar_kwh": round(sessie["zon_kwh"], 3),
+            "paid": round(betaald, 4),
+            "ref_price": None,
+            "ref_feed_in": None,
+            "ref_cost": None if maat is None else round(maat, 4),
+            "saved": None if maat is None else round(max(0.0, maat - betaald), 4),
+            "solar_saved": round(sessie.get("zon_winst") or 0.0, 4),
+            "price_unknown": maat is None,
+            "unknown_kwh": 0.0,
+            "baseline": {"kwh": round(sessie["kwh"], 3),
+                         "cost": None if maat is None else round(maat, 4),
+                         "unknown_kwh": 0.0, "points": []},
+            "resumed": False,
+            "complete": True,
+        }
+
+    @staticmethod
+    def _lege_boiler_sessie(now: datetime) -> dict[str, Any]:
+        return {
+            "aan_sinds": None,      # wanneer er stroom op ging
+            "stil_sinds": None,     # sinds wanneer hij niets meer trekt
+            "gestart": None,        # wanneer hij voor het eerst iets trok
+            "gekeken": None,        # wanneer de coach zag hoe het vat ervoor staat
+            "proef_sinds": None,    # of er een proef loopt, en sinds wanneer
+            "reden_aan": "",        # waarom de stroom erop ging
+            "nodig_sinds": None,    # wanneer er warmte bij moest: het ijkpunt
+            "prijzen": [],
+            "beurt_kwh": 0.0,       # wat er sinds de laatste volle beurt in ging
+            "draai_seconden": 0.0,
+            "kwh": 0.0,
+            "zon_kwh": 0.0,
+            "betaald": 0.0,
+            "maat": 0.0,
+            "maat_onbekend": False,
+            "zon_winst": 0.0,
+            "laatst": now,
+            "vergeefs": 0,
+            "gemeld": set(),
+        }
+
+    @staticmethod
+    def _boiler_rij(settings: dict[str, Any], device_id: str) -> dict[str, Any]:
+        """Wat de coach van deze boiler geleerd heeft, uit de instellingen."""
+        for rij in settings.get("boiler_learned") or []:
+            if not isinstance(rij, dict) or rij.get("device") != device_id:
+                continue
+            uit: dict[str, Any] = {}
+            for sleutel in ("heat_w", "vol_kwh", "verbruik_kwh_h", "kwh_sinds_vol"):
+                try:
+                    waarde = rij.get(sleutel)
+                    uit[sleutel] = None if waarde is None else float(waarde)
+                except (TypeError, ValueError):
+                    uit[sleutel] = None
+            for sleutel in ("vol_sinds", "getrokken_op"):
+                moment = _tijdstip(rij.get(sleutel))
+                uit[sleutel] = moment.replace(tzinfo=None) if moment is not None else None
+            try:
+                uit["runs"] = int(rij.get("runs") or 0)
+            except (TypeError, ValueError):
+                uit["runs"] = 0
+            return uit
+        return {}
+
+    async def _async_boiler_bewaren(
+        self,
+        settings: dict[str, Any],
+        device_id: str,
+        geleerd: dict[str, Any],
+        nieuw: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Het geleerde van deze boiler naar de instellingen, en terug.
+
+        Terug, want `async_save` maakt een nieuwe instellingendict: wat deze
+        ronde in de hand heeft is daarna oud, en die zou het net geleerde
+        meteen weer vergeten.
+        """
+        samen = {**geleerd, **nieuw}
+        rij = {
+            "device": device_id,
+            "heat_w": samen.get("heat_w"),
+            "vol_kwh": samen.get("vol_kwh"),
+            "verbruik_kwh_h": samen.get("verbruik_kwh_h"),
+            "kwh_sinds_vol": round(float(samen.get("kwh_sinds_vol") or 0.0), 3),
+            "vol_sinds": samen["vol_sinds"].isoformat() if samen.get("vol_sinds") else None,
+            "getrokken_op": samen["getrokken_op"].isoformat() if samen.get("getrokken_op") else None,
+            "runs": int(samen.get("runs") or 0),
+        }
+        rows = [
+            r for r in (settings.get("boiler_learned") or [])
+            if isinstance(r, dict) and r.get("device") != device_id
+        ]
+        rows.append(rij)
+        try:
+            saved = await async_get_store(self.hass).async_save({"boiler_learned": rows})
+        except Exception:  # noqa: BLE001 - een gemiste meting is geen reden om te stoppen
+            _LOGGER.exception("kon het geleerde van %s niet bewaren", device_id)
+            return samen
+        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        # De instellingen van deze ronde zijn nu oud; de rij die er net in
+        # geschreven is telt.
+        settings["boiler_learned"] = rows
+        return samen
 
     async def _one(
         self,
@@ -3511,7 +4069,8 @@ class ChargerCoach:
         # en een starttijd zou hem laten laden terwijl het duur is. Het paneel
         # vraagt er bij een laadpaal niet meer om; wat er van vroeger nog in de
         # instellingen staat telt hier niet mee.
-        alleen_klaar = device.get("type") == "laadpaal"
+        # Een boiler net zo: Sven koos op 19-09-2026 "klaar om, zoals de auto".
+        alleen_klaar = device.get("type") in ("laadpaal", "boiler")
 
         def tijd(bron: dict[str, Any], sleutel: str) -> time | None:
             if alleen_klaar and sleutel != "done_by":

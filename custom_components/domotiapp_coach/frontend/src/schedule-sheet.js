@@ -15,7 +15,7 @@
 
 import { DacElement, define } from "./base.js";
 import { icons } from "./icons.js";
-import { PROGRAM_TYPES, needsRelease, programOf, typeMeta } from "./devices.js";
+import { DEADLINE_ONLY_TYPES, PROGRAM_TYPES, needsRelease, programOf, typeMeta } from "./devices.js";
 import { priceForecast } from "./data-source.js";
 import { clock, duration } from "./format.js";
 import { sheetCss } from "./theme.js";
@@ -73,11 +73,14 @@ export const PRIORITIES = [
  * Een laadpaal alleen "klaar om". Sven op 04-09-2026: "niet eerder dan en
  * starten voor moet er helemaal uit." De coach zoekt zelf het goedkoopste
  * moment tussen nu en de klaar-tijd; een begintijd houdt hem alleen van de zon
- * af en een starttijd laat hem laden terwijl het duur is. Andere apparaten
- * houden alle drie.
+ * af en een starttijd laat hem laden terwijl het duur is. Een boiler net zo
+ * (Sven, 19-09-2026: "klaar om, zoals de auto"). Andere apparaten houden alle
+ * drie.
  */
 export const timesFor = (device) =>
-  device?.type === "laadpaal" ? TIMES.filter((time) => time.key === "done_by") : TIMES;
+  DEADLINE_ONLY_TYPES.includes(device?.type)
+    ? TIMES.filter((time) => time.key === "done_by")
+    : TIMES;
 
 export const priorityLabel = (key) =>
   PRIORITIES.find((item) => item.key === key)?.label ?? "Middel";
