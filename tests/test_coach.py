@@ -1203,6 +1203,37 @@ controle("een apparaat zonder auto's laat hem niet omvallen",
 controle("en instellingen zonder apparaten ook niet",
          storage._migrate({}) == {}, f"{storage._migrate({})}")
 
+print("\n=== 24b. de kortere apparaatlijst laat staan wat er al stond ===")
+
+# De apparaatlijst is korter geworden (v0.70.0): thuisbatterij, warmtepomp,
+# wasmachine, droger en zwembadpomp eruit, en bij een laadpaal het merk
+# "overig". Wat er bij een klant al stond mag daar niet stil van veranderen:
+# een keuzelijst zonder de opgeslagen waarde toont zijn eerste regel, en bij de
+# volgende opslag zou een zwembadpomp een laadpaal zijn.
+korter = storage._migrate({
+    "devices": [
+        {"id": "d1", "type": "zwembadpomp", "entity": "sensor.pomp"},
+        {"id": "d2", "type": "warmtepomp", "name": "Achterhuis"},
+        {"id": "d3", "type": "laadpaal", "brand": "overig", "controllable": True,
+         "cars": [{"id": "car-a", "phases": "one"}]},
+        {"id": "d4", "type": "laadpaal", "brand": "easee", "controllable": True},
+        {"id": "d5", "type": "vaatwasser", "brand": "home_connect"},
+    ],
+})
+na = {d["id"]: d for d in korter["devices"]}
+print(f"  na de migratie: {[(d['id'], d['type'], d.get('name',''), d.get('brand','')) for d in korter['devices']]}")
+controle("een vervallen type wordt 'overig' en houdt zijn oude naam",
+         na["d1"]["type"] == "overig" and na["d1"]["name"] == "Zwembadpomp", f"{na['d1']}")
+controle("een eigen naam wint van de oude typenaam",
+         na["d2"]["type"] == "overig" and na["d2"]["name"] == "Achterhuis", f"{na['d2']}")
+controle("een laadpaal van het merk 'overig' blijft een laadpaal, zonder merk en zonder sturing",
+         na["d3"]["type"] == "laadpaal" and na["d3"]["brand"] == ""
+         and na["d3"]["controllable"] is False and len(na["d3"]["cars"]) == 1, f"{na['d3']}")
+controle("een Easee blijft onaangeroerd",
+         na["d4"]["brand"] == "easee" and na["d4"]["controllable"] is True, f"{na['d4']}")
+controle("en een apparaat van een type dat gewoon bestaat ook",
+         na["d5"]["type"] == "vaatwasser" and na["d5"]["brand"] == "home_connect", f"{na['d5']}")
+
 # Helemaal zonder strategie moet het ook niet omvallen.
 uit = schema_bijwerken(None, "d1", enabled=True)
 controle("zonder strategie ontstaat er gewoon een",

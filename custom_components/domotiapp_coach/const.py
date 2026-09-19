@@ -46,29 +46,43 @@ BEURTEN_MAX: Final = 2000
 
 # --- Device types ----------------------------------------------------------
 # "overig" carries a free-text name; the rest are named by their type.
+#
+# Alleen wat de coach werkelijk iets met een apparaat kan: de laadpaal en de
+# vaatwasser stuurt hij, de boiler is het volgende, een airco meet hij mee.
+# Sven op 19-09-2026 haalde de thuisbatterij, de warmtepomp, de wasmachine, de
+# droger en de zwembadpomp eruit; hetzelfde argument als bij de merken van een
+# laadpaal, een regel in een lijst leest als een belofte. Wat er niet in staat
+# past nog steeds onder "overig", met een eigen naam.
 DEVICE_TYPES: Final = [
     "laadpaal",
-    "thuisbatterij",
-    "warmtepomp",
     "boiler",
     "vaatwasser",
-    "wasmachine",
-    "droger",
     "airco",
-    "zwembadpomp",
     "overig",
 ]
+
+# De types die er ooit in stonden, met hoe ze in het paneel heetten. Alleen om
+# een apparaat dat er al staat netjes om te zetten naar "overig" zonder dat de
+# bewoner kwijt is wat het was; zie `_migrate` in storage.py.
+VERVALLEN_TYPES: Final = {
+    "thuisbatterij": "Thuisbatterij",
+    "warmtepomp": "Warmtepomp",
+    "wasmachine": "Wasmachine",
+    "droger": "Droger",
+    "zwembadpomp": "Zwembadpomp",
+}
 
 # --- Charger brands --------------------------------------------------------
 # Which extra entities a charging point offers depends entirely on its brand:
 # not every charger can be started, stopped or paused, and the ones that can do
 # not agree on how. Picking the brand is what decides which fields are asked
-# for. Only Easee is supported; "overig" is for a charger the coach can watch
-# but not steer. Sven on 04-09-2026: the other brands came out of the list,
-# because a brand in a list reads as a promise, and there was none.
+# for. Only Easee is supported. Sven on 04-09-2026: the other brands came out
+# of the list, because a brand in a list reads as a promise, and there was
+# none. Op 19-09-2026 ging "overig" er om dezelfde reden uit: een laadpaal die
+# de coach niet kan sturen is geen laadpaal maar een apparaat dat hij meet, en
+# daar is "overig" als type voor.
 CHARGER_BRANDS: Final = [
     "easee",
-    "overig",
 ]
 
 # --- Dishwasher brands -----------------------------------------------------
@@ -407,8 +421,7 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
 }
 
 # Apparaten met een programma die de coach start. Sven op 06-09-2026: eerst
-# alleen de vaatwasser; de wasmachine en de droger komen erbij als dit werkt.
-# Hier en niet in coach.py, omdat de opslag ze ook nodig heeft: een beurt
+# alleen de vaatwasser. Hier en niet in coach.py, omdat de opslag ze ook nodig heeft: een beurt
 # van zo'n apparaat is een "programma" en geen laadbeurt.
 PROGRAMMA_TYPES = ("vaatwasser",)
 
