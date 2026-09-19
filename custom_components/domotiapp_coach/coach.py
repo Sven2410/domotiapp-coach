@@ -102,6 +102,15 @@ _LOGGER = logging.getLogger(__name__)
 # gemeld worden."
 SENSOR_STIL = timedelta(minutes=10)
 
+# Onder welke zonshoogte een omvormer die niets zegt geen storing is. Een
+# SolarEdge gaat 's nachts slapen en is dan niet bereikbaar: bij Van den Dam
+# elke avond, op 18-09-2026 om 21:40, en om 21:51 kwam er een kritieke melding.
+# 's Ochtends leverde hij op 17 en 18-09-2026 pas 64 en 55 minuten na
+# zonsopkomst iets (46 W om 08:17, 152 W om 08:09); de zon staat dan rond de
+# zeven graden. Tien graden laat hem wakker worden voordat er iets gemeld wordt.
+# Alleen voor de melding: de coach rekent zonder zonnesensor toch al met nul.
+ZON_SLAAPT_ONDER = 10.0
+
 # Over hoeveel van de afgelopen tijd het gemiddelde plafond gaat dat in de
 # klaar-tijdsom meetelt, en hoeveel daarvan er minstens gemeten moet zijn.
 # Drie uur is lang genoeg om een warmtepomp die om het kwartier aangaat een
@@ -383,6 +392,15 @@ SOC_STAP_MAX = 25.0
 # genoeg voor het gewiebel van een paal die op zijn limiet moduleert, krap
 # genoeg dat een tussenstand van bijna nul er niet doorheen komt.
 TEMPO_SPELING = 0.3
+
+# Hoe lang de auto na een verhoging van de limiet de tijd krijgt om bij te
+# komen voordat wat hij neemt als zijn eigen tempo telt. Gemeten bij Van den Dam
+# in de nacht van 18 op 19-09-2026: na een verlaging voor de zekering bleef de
+# Ford op 16 A nog negen minuten (01:35 tot 01:44) en elf minuten (03:33 tot
+# 03:44) op de oude stand hangen, en die minuten werden het tempo van band 4
+# (7,58 kW) en band 6 (5,52 kW) terwijl hij daar gewoon 10 kW trok. Een auto die
+# echt afbouwt doet dat langer dan een kwartier, dus wachten kost niets.
+TEMPO_HERSTEL = timedelta(minutes=15)
 
 # Hoe vaak de waarschuwing terugkomt dat een eigen pauze de klaar-tijd gaat
 # kosten. Sven op 26-08-2026: de pauze zelf blijft winnen, want het is zijn huis
@@ -731,6 +749,16 @@ class ChargerCoach:
         # telt pas als twee ronden achter elkaar hetzelfde zeggen; zie
         # `_tempo_leren`.
         self._tempo_vorig: dict[str, tuple[int, float]] = {}
+        # Bij welke accustand het laagste per band gemeten is, zodat een latere
+        # meting erboven hem kan weerleggen; zie `_tempo_weerleggen`.
+        self._tempo_soc: dict[str, dict[int, float]] = {}
+        # De limiet van de vorige ronde en wanneer hij voor het laatst omhoog
+        # ging. Zie `TEMPO_HERSTEL`.
+        self._limiet_vorig: dict[str, float] = {}
+        self._limiet_omhoog: dict[str, datetime] = {}
+        # De band waarin de vorige ronde meer liep dan het bekende tempo. Twee
+        # ronden achter elkaar voordat een tempo vervalt, net als bij het leren.
+        self._weerleg_vorig: dict[str, int] = {}
         self._auto_id: dict[str, str] = {}
         # Sinds wanneer er stroom wordt aangeboden zonder dat de auto iets
         # afneemt. Daarmee weet de kaart het verschil tussen "begint zo" en "de
@@ -1008,9 +1036,15 @@ class ChargerCoach:
         hij (`no-prices`), zonder lastbewaker rekent hij op de zekering. Dit is
         alleen de melding dat er iets stuk is, want daar kijkt niemand naar.
         """
+        zon = (settings.get("sources") or {}).get("solar")
         for entity_id, naam in self._sensoren(settings).items():
             state = self.hass.states.get(entity_id)
             stil = state is None or state.state in ("unknown", "unavailable", "")
+            if stil and entity_id == zon and self._zon_slaapt():
+                # Een omvormer die slaapt is geen storing. De klok begint pas
+                # als de zon hoog genoeg staat om hem wakker te maken.
+                self._sensor_stil.pop(entity_id, None)
+                continue
             sinds = self._sensor_stil.get(entity_id)
             if not stil:
                 if entity_id in self._sensor_gemeld:
@@ -1033,6 +1067,22 @@ class ChargerCoach:
                 "nog draait.",
                 kritiek=True,
             )
+
+    def _zon_slaapt(self) -> bool:
+        """Of de zon zo laag staat dat een omvormer mag slapen (`sun.sun`).
+
+        Zonder die entiteit weet de coach het niet, en dan blijft de melding
+        zoals hij was.
+        """
+        state = self.hass.states.get("sun.sun")
+        if state is None:
+            return False
+        if state.state == "below_horizon":
+            return True
+        try:
+            return float(state.attributes.get("elevation")) < ZON_SLAAPT_ONDER
+        except (TypeError, ValueError):
+            return False
 
     @callback
     def async_refresh(self) -> None:
@@ -2513,6 +2563,10 @@ class ChargerCoach:
             self._herstart_gedaan.pop(device_id, None)
             self._herstart_melden.discard(device_id)
             self._tempo_gezien.pop(device_id, None)
+            self._tempo_soc.pop(device_id, None)
+            self._limiet_vorig.pop(device_id, None)
+            self._limiet_omhoog.pop(device_id, None)
+            self._weerleg_vorig.pop(device_id, None)
             self._soc_asked.discard(device_id)
             self._warned.pop(device_id, None)
             self._getipt.discard(device_id)
@@ -3722,10 +3776,24 @@ class ChargerCoach:
         anders doet dan vorige maand morgen ook anders gepland wordt.
         """
         device_id = device.get("id", "")
+        limiet = charger.limit_amps
+        if charger.charging and limiet is not None:
+            vorige = self._limiet_vorig.get(device_id)
+            if vorige is not None and limiet > vorige:
+                self._limiet_omhoog[device_id] = now
+            self._limiet_vorig[device_id] = limiet
+        else:
+            self._limiet_vorig.pop(device_id, None)
+        self._tempo_weerleggen(settings, device_id, car, charger, now)
+
+        omhoog = self._limiet_omhoog.get(device_id)
         if (
             not charger.charging
             or charger.started_at is None
             or now - charger.started_at < timedelta(minutes=RAMP_MINUTES)
+            # Net meer aangeboden: wat er nu loopt is een auto die nog bijkomt
+            # en niet een auto die afbouwt. Zie `TEMPO_HERSTEL`.
+            or (omhoog is not None and now - omhoog < TEMPO_HERSTEL)
             or car.guest
             or not car.capacity_kwh
             or car.soc_percent is None
@@ -3770,7 +3838,107 @@ class ChargerCoach:
         if band in gezien and gezien[band] <= kw:
             return
         gezien[band] = kw
+        self._tempo_soc.setdefault(device_id, {})[band] = round(car.soc_percent, 1)
         self.hass.async_create_task(self._async_tempo_schrijven(settings, device_id, now))
+
+    def _tempo_weerleggen(
+        self,
+        settings: dict[str, Any],
+        device_id: str,
+        car: Car,
+        charger: Charger,
+        now: datetime,
+    ) -> None:
+        """Een bewaard tempo laten vallen zodra de auto aantoonbaar meer neemt.
+
+        Een auto die bovenin gas terugneemt doet dat niet ineens weer minder:
+        binnen een band loopt het tempo alleen maar af. Neemt hij bij dezelfde
+        of een hogere accustand twee ronden achter elkaar duidelijk meer dan wat
+        er voor die band bewaard staat, dan was die meting geen afbouw maar iets
+        anders, en dan hoort hij weg. Bij Van den Dam stond er op 19-09-2026
+        5,52 kW voor band 6, gemeten om 03:35 terwijl de Ford nog bijkwam van een
+        verlaging; om 03:45 trok hij in diezelfde band 9,6 kW.
+
+        Een rij van vóór v0.69.0 weet niet bij welke stand hij gemeten is en telt
+        als gemeten onderin zijn band. Een echte afbouw die zo wegvalt meet de
+        coach later in de band opnieuw.
+        """
+        auto_id = self._auto_id.get(device_id)
+        if (
+            not auto_id
+            or not charger.charging
+            or car.soc_percent is None
+            or charger.actual_amps <= 0
+        ):
+            self._weerleg_vorig.pop(device_id, None)
+            return
+        band = int(car.soc_percent // 10)
+        gezien = self._tempo_gezien.get(device_id) or {}
+        if band in gezien:
+            bekend = (gezien[band], (self._tempo_soc.get(device_id) or {}).get(band, band * 10.0))
+        else:
+            bekend = self._tempo_bewaard(settings, device_id, auto_id).get(band)
+        kw_nu = watts_for(charger.actual_amps, car.phases) / 1000.0
+        if (
+            bekend is None
+            or car.soc_percent < bekend[1]
+            or kw_nu <= bekend[0] + TEMPO_SPELING
+        ):
+            self._weerleg_vorig.pop(device_id, None)
+            return
+        if self._weerleg_vorig.get(device_id) != band:
+            self._weerleg_vorig[device_id] = band
+            return
+        self._weerleg_vorig.pop(device_id, None)
+        gezien.pop(band, None)
+        (self._tempo_soc.get(device_id) or {}).pop(band, None)
+        self._tempo_vorig.pop(device_id, None)
+        self.hass.async_create_task(
+            self._async_tempo_wissen(settings, device_id, auto_id, band)
+        )
+
+    async def _async_tempo_wissen(
+        self, settings: dict[str, Any], device_id: str, auto_id: str, band: int
+    ) -> None:
+        """Eén band van deze auto uit de instellingen halen."""
+        rows = [
+            row
+            for row in (settings.get("car_pace") or [])
+            if isinstance(row, dict)
+            and not (
+                row.get("device") == device_id
+                and row.get("car") == auto_id
+                and row.get("band") == band
+            )
+        ]
+        if len(rows) == len(settings.get("car_pace") or []):
+            return
+        try:
+            saved = await async_get_store(self.hass).async_save({"car_pace": rows})
+        except Exception:  # noqa: BLE001 - een tempo te veel is geen reden om te stoppen
+            _LOGGER.exception("kon het laadtempo van de auto niet bijwerken")
+            return
+        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+
+    @staticmethod
+    def _tempo_bewaard(
+        settings: dict[str, Any], device_id: str, auto_id: str
+    ) -> dict[int, tuple[float, float]]:
+        """Per band het bewaarde tempo en de accustand waarbij het gemeten is."""
+        uit: dict[int, tuple[float, float]] = {}
+        for row in settings.get("car_pace") or []:
+            if (
+                isinstance(row, dict)
+                and row.get("device") == device_id
+                and row.get("car") == auto_id
+            ):
+                try:
+                    band = int(row["band"])
+                    soc = row.get("soc")
+                    uit[band] = (float(row["kw"]), float(soc) if soc is not None else band * 10.0)
+                except (KeyError, TypeError, ValueError):
+                    continue
+        return uit
 
     async def _async_tempo_schrijven(
         self, settings: dict[str, Any], device_id: str, now: datetime
@@ -3790,11 +3958,13 @@ class ChargerCoach:
                 and row.get("band") in gezien
             )
         ]
+        socs = self._tempo_soc.get(device_id) or {}
         for band, kw in sorted(gezien.items()):
-            rows.append(
-                {"device": device_id, "car": auto_id, "band": band, "kw": kw,
-                 "at": now.isoformat()}
-            )
+            row = {"device": device_id, "car": auto_id, "band": band, "kw": kw,
+                   "at": now.isoformat()}
+            if band in socs:
+                row["soc"] = socs[band]
+            rows.append(row)
         try:
             saved = await async_get_store(self.hass).async_save({"car_pace": rows})
         except Exception:  # noqa: BLE001 - een gemist tempo is geen reden om te stoppen

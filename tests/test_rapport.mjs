@@ -972,6 +972,45 @@ proef("nu starten stuurt ready en now mee, de gewone knop now uit", async () => 
   assert.deepEqual(k.el.settings_.ready_now, []);
 });
 
+// --- de woning bij een slapende omvormer (Van den Dam, 19-09-2026) ----------
+// Om 03:40 stond er een streepje bij Woning: 6,77 kW van het net en 5,49 kW
+// naar de paal, maar de SolarEdge was sinds 21:40 onbereikbaar en het verbruik
+// is zon plus net.
+const { LiveSource } = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
+
+function woningBij(zon, sun) {
+  const staten = {
+    "sensor.omvormer": { state: zon, attributes: { unit_of_measurement: "W" } },
+    "sensor.afname": { state: "6770", attributes: { unit_of_measurement: "W" } },
+    "sensor.teruglevering": { state: "0", attributes: { unit_of_measurement: "W" } },
+  };
+  if (sun) staten["sun.sun"] = { state: sun, attributes: {} };
+  const feed = { get: (id) => staten[id] };
+  const settings = { sources: { solar: "sensor.omvormer", grid_mode: "split",
+    grid_import: "sensor.afname", grid_export: "sensor.teruglevering" } };
+  return new LiveSource().sample(feed, settings);
+}
+
+proef("een slapende omvormer met de zon onder telt als nul, en de woning staat er", () => {
+  const r = woningBij("unavailable", "below_horizon");
+  assert.equal(r.solar, 0);
+  assert.equal(r.house, 6770);
+});
+
+proef("overdag blijft een onbereikbare omvormer een streepje", () => {
+  const r = woningBij("unavailable", "above_horizon");
+  assert.equal(r.solar, null);
+  assert.equal(r.house, null);
+});
+
+proef("zonder sun.sun ook", () => {
+  assert.equal(woningBij("unavailable", null).house, null);
+});
+
+proef("een omvormer die wel iets zegt wint altijd", () => {
+  assert.equal(woningBij("12", "below_horizon").solar, 12);
+});
+
 // --- draaien ----------------------------------------------------------------
 
 let goed = 0;

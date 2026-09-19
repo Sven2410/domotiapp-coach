@@ -241,6 +241,13 @@ class Auto:
     # minuten over (de Ford: negen, van 05:18 tot 05:27).
     storing_bij_herstart: bool = False
     storing_herstel_min: int = 9
+    # Een auto die na een lange verlaging niet meteen terugkomt. De Ford bij Van
+    # den Dam, nacht van 18 op 19-09-2026: na negen en na zestien minuten op
+    # 7 tot 9 A bleef hij op 16 A nog negen (01:35 tot 01:44) en elf minuten
+    # (03:33 tot 03:44) op de oude stroom hangen; na een dip van een minuut
+    # kwam hij binnen een halve minuut terug. Nul is een auto die meteen volgt.
+    bijkomen_min: int = 0
+    bijkomen_na_min: int = 5
 
     # toestand
     trekt_amps: float = 0.0
@@ -250,6 +257,10 @@ class Auto:
     soc_gemeld: list = field(default_factory=list)
     storing: bool = False
     herstel_op: dt.datetime | None = None
+    vorig_aanbod: float = 0.0
+    laag_sinds: dt.datetime | None = None
+    vast_tot: dt.datetime | None = None
+    vast_amps: float = 0.0
 
     def stap(self, aanbod_amps: float, gestart: bool, stap_s: int = 60,
              nu: dt.datetime | None = None, fasen: int = 3) -> None:
@@ -286,7 +297,22 @@ class Auto:
         # Het overschot komt bovenop wat hij krijgt, ook boven zijn eigen
         # maximum: de Ford trok 16,9 A waar 16 het maximum van de paal was.
         # Alleen op één fase; op drie bleef dezelfde Ford met 14,4 A onder de 16.
-        self.trekt_amps = min(aanbod_amps, kan) + (self.overschot_amps if fasen == 1 else 0.0)
+        doel = min(aanbod_amps, kan)
+        if self.bijkomen_min and nu is not None:
+            if aanbod_amps < self.vorig_aanbod - 0.5:
+                self.laag_sinds = nu
+            elif aanbod_amps > self.vorig_aanbod + 0.5:
+                if (self.laag_sinds is not None and self.trekt_amps > 0
+                        and nu - self.laag_sinds >= dt.timedelta(minutes=self.bijkomen_na_min)):
+                    self.vast_tot = nu + dt.timedelta(minutes=self.bijkomen_min)
+                    self.vast_amps = self.trekt_amps
+                self.laag_sinds = None
+            self.vorig_aanbod = aanbod_amps
+            if self.vast_tot is not None and nu < self.vast_tot:
+                doel = min(doel, self.vast_amps)
+            else:
+                self.vast_tot = None
+        self.trekt_amps = doel + (self.overschot_amps if fasen == 1 else 0.0)
 
     def start_ontvangen(self, nu: dt.datetime) -> None:
         """De paal stuurde een start. In storing telt vanaf nu het herstel."""
