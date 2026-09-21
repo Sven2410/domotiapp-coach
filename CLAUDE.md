@@ -44,6 +44,15 @@ commit, tag en breng uit.
   krijgt staat per persoon in het tabje Meldingen (`ontvangers.py`);
   besluiten staan standaard uit, "doet het weer" gaat alleen in de
   geschiedenis (`telefoon=False` bij `_async_tell`).
+- **Elke melding is kort, en er staat geen entiteit-id in.** Sven op
+  21-09-2026, over "Sinds 14:47 ging er 3,2 kWh in, en toen liep hij al": "ik
+  vind dat en toen liep hij al onnodig. Alle meldingen moeten gewoon duidelijk
+  en kort zijn." Die bijzin is eruit; "sinds" zegt al dat de coach het begin
+  niet zag. En over de sensorwacht, die de hele entiteit-id noemde: "meld zo'n
+  sensor niet volledig, zeg gewoon dat er iets mis is met de integratie." De
+  naam die de bewoner zelf invulde mag erin, de id gaat naar het log
+  (`_LOGGER.warning` in `_async_sensorwacht`). Een bijzin die de bewoner niets
+  laat doen en niets laat begrijpen hoort er niet te staan (v0.71.1).
 
 ## De eisen van Sven
 
