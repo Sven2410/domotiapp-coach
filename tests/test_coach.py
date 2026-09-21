@@ -527,8 +527,11 @@ controle("en er ging maar één start uit",
          not [d for d in verstuurd if d[0] == "easee"], f"{verstuurd}")
 controle("maar doet niet alsof hij het begin zag",
          all("van 20:58 tot" not in m for m in meldingen), f"{meldingen}")
-controle("en zegt dat hij al liep",
-         any("toen liep hij al" in m for m in meldingen), f"{meldingen}")
+# Sinds 21-09-2026 zonder de bijzin "en toen liep hij al": Sven wil korte
+# meldingen. Het woord "sinds" zegt al dat de coach het begin niet zag.
+controle("en zegt eerlijk vanaf wanneer hij telt",
+         any("Sinds 20:58" in m for m in meldingen)
+         and all("liep hij al" not in m for m in meldingen), f"{meldingen}")
 
 print("=== 15c. een auto die op 80% stopt is niet vol ===")
 # Zijn Ford stopte op 80%, de Easee meldde `completed` en de coach zei "de auto
@@ -2151,8 +2154,13 @@ te_vroeg = wacht(1) + wacht(5)
 controle("vijf minuten stilte is nog geen melding", not te_vroeg, f"{te_vroeg}")
 stil = wacht(11)
 print(f"  na elf minuten: {stil}")
+# De naam die de bewoner zelf invulde staat erin, de entiteit-id niet: die
+# hoort in het log. Sven op 21-09-2026: "meld zo'n sensor niet volledig, zeg
+# gewoon dat er iets mis is met de integratie."
 controle("na tien minuten wel, met de naam van de sensor erin",
-         len(stil) == 1 and "accustand van Ford" in stil[0] and "sensor.ford_soc" in stil[0], f"{stil}")
+         len(stil) == 1 and "accustand van Ford" in stil[0], f"{stil}")
+controle("en zonder de entiteit-id, wel met de integratie erbij",
+         "sensor.ford_soc" not in stil[0] and "integratie" in stil[0], f"{stil}")
 controle("en niet nog een keer", not wacht(12), "")
 besluit41b, _ = asyncio.run(ronde(coach41b, inst41b, nu=t0 + dt.timedelta(minutes=12)))
 controle("ondertussen laadt hij gewoon door op de laatst bekende stand",
@@ -3943,7 +3951,7 @@ def wacht72(minuten):
     hass72.services.verstuurd.clear()
     asyncio.run(coach72._async_sensorwacht(inst72, T72 + dt.timedelta(minutes=minuten)))
     return [d[2]["message"] for d in hass72.services.verstuurd
-            if d[0] == "notify" and "sensor.omvormer" in d[2]["message"]]
+            if d[0] == "notify" and "zonnesensor" in d[2]["message"]]
 
 hass72.states.zet("sun.sun", {"state": "below_horizon", "attributes": {"elevation": -15.0}})
 nacht72 = wacht72(0) + wacht72(11) + wacht72(60)
@@ -3954,7 +3962,7 @@ controle("vlak na zonsopkomst ook niet", not ochtend72, f"{ochtend72}")
 hass72.states.zet("sun.sun", {"state": "above_horizon", "attributes": {"elevation": 25.0}})
 dag72 = wacht72(700) + wacht72(711)
 print(f"  overdag, na elf minuten: {dag72}")
-controle("overdag wel, na tien minuten", len(dag72) == 1 and "sensor.omvormer" in dag72[0],
+controle("overdag wel, na tien minuten", len(dag72) == 1 and "zonnesensor" in dag72[0],
          f"{dag72}")
 # Zonder `sun.sun` weet de coach het niet en blijft het zoals het was.
 inst72b = instellingen()
@@ -3964,7 +3972,7 @@ hass72b.services.verstuurd.clear()
 asyncio.run(coach72b._async_sensorwacht(inst72b, T72))
 asyncio.run(coach72b._async_sensorwacht(inst72b, T72 + dt.timedelta(minutes=11)))
 zonder72 = [d for d in hass72b.services.verstuurd
-            if d[0] == "notify" and "sensor.omvormer" in d[2]["message"]]
+            if d[0] == "notify" and "zonnesensor" in d[2]["message"]]
 controle("zonder zonnestand meldt hij zoals vroeger", len(zonder72) == 1, f"{zonder72}")
 
 

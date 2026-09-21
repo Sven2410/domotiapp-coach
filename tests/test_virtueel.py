@@ -1098,10 +1098,14 @@ if (vl := v("van-den-dam-herstart")) and (basis := v("van-den-dam")):
              not meldingen(vl, "niet lezen") and not meldingen(vl, "meldt al") and not meldingen(vl, "niets meer beslist"),
              f"{[m for _, m in vl.meldingen]}")
     # Bekend en niet verholpen: na de herstart om 04:20 kent de coach het begin
-    # van de beurt niet meer en zegt het verslag "sinds 04:20 ... en toen liep
-    # hij al". Eerlijk, maar onvolledig. Zie de notities van 04-09-2026.
-    controle("herstart: het verslag zegt eerlijk dat hij midden in de beurt instapte",
-             any("liep hij al" in m for m in meldingen(vl, "is vol")), f"{meldingen(vl, 'is vol')}")
+    # van de beurt niet meer en telt het verslag vanaf dat moment. Eerlijk, maar
+    # onvolledig. Zie de notities van 04-09-2026. De bijzin "en toen liep hij
+    # al" is er op 21-09-2026 uit gegaan; "sinds" doet hetzelfde werk.
+    controle("herstart: het verslag telt eerlijk vanaf het moment van instappen",
+             any("Sinds " in m for m in meldingen(vl, "is vol"))
+             and all("liep hij al" not in m and "Geladen van" not in m
+                     for m in meldingen(vl, "is vol")),
+             f"{meldingen(vl, 'is vol')}")
 
 # Een sensor die wegvalt wordt na tien minuten gemeld, en als hij terug is ook.
 # Sven op 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat

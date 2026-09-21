@@ -1129,10 +1129,18 @@ class ChargerCoach:
                 continue
             self._sensor_gemeld.add(entity_id)
             minuten = int((now - sinds).total_seconds() // 60)
+            # De entiteit-id staat in het log en niet in de melding. Sven op
+            # 21-09-2026, over precies deze zin: "meld zo'n sensor niet
+            # volledig, zeg gewoon dat er iets mis is met de integratie". Wie
+            # hem moet opzoeken kijkt in het log; wie hem leest heeft genoeg aan
+            # de naam die hij zelf heeft ingevuld.
+            _LOGGER.warning(
+                "%s (%s) meldt al %d minuten niets", naam, entity_id, minuten
+            )
             await self._async_tell(
-                f"{naam[0].upper()}{naam[1:]} ({entity_id}) meldt al {minuten} minuten "
-                "niets. De coach rekent zolang zonder. Kijk of de integratie erachter "
-                "nog draait.",
+                f"{naam[0].upper()}{naam[1:]} meldt al {minuten} minuten niets. "
+                "Waarschijnlijk hapert de integratie erachter. De coach rekent "
+                "zolang zonder.",
                 kritiek=True,
             )
 
@@ -5698,11 +5706,13 @@ class ChargerCoach:
                 )
             # Is de coach midden in de laadbeurt ingestapt, dan weet hij niet
             # hoe laat die begon en hoort hij dat ook niet te suggereren.
+            # Vandaar "sinds" en niet "van ... tot"; dat ene woord zegt het al.
+            # Wat er niet meer bij staat is "en toen liep hij al". Sven op
+            # 21-09-2026: "ik vind dat en toen liep hij al onnodig. Alle
+            # meldingen moeten gewoon duidelijk en kort zijn."
             begon = sessie["begon"]
-            if sessie.get("ingestapt") and kwh:
-                verloop = f" Sinds {begon:%H:%M} ging er {kwh} in, en toen liep hij al."
-            elif sessie.get("ingestapt"):
-                verloop = f" Hij liep al toen de coach om {begon:%H:%M} begon te kijken."
+            if sessie.get("ingestapt"):
+                verloop = f" Sinds {begon:%H:%M} ging er {kwh} in." if kwh else ""
             elif kwh:
                 verloop = f" Geladen van {begon:%H:%M} tot {now:%H:%M}, {kwh}."
             else:
@@ -5773,12 +5783,10 @@ class ChargerCoach:
         kwh = f"{geladen:.1f} kWh".replace(".", ",") if geladen else ""
         begon = sessie.get("begon")
 
-        # Is de coach midden in de laadbeurt ingestapt, dan weet hij niet hoe
-        # laat die begon en hoort hij dat ook niet te suggereren. Zelfde
-        # afweging als bij het verslag hierboven.
-        if sessie.get("ingestapt") and kwh:
-            verloop = f", er ging {kwh} in sinds {begon:%H:%M}, en toen liep hij al."
-        elif kwh:
+        # "Sinds" en niet "van ... tot", want is de coach midden in de beurt
+        # ingestapt dan weet hij het begin niet. Die ene zin dekt allebei de
+        # gevallen; de bijzin "en toen liep hij al" is eruit (Sven, 21-09-2026).
+        if kwh:
             verloop = f", er ging {kwh} in sinds {begon:%H:%M}."
         else:
             verloop = "."

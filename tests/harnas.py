@@ -13,10 +13,17 @@ de proeven vroeger zelf bovenaan deden.
 import asyncio
 import datetime as dt
 import importlib.util
+import logging
 import pathlib
 import sys
 import tempfile
 import types
+
+# De coach schrijft zijn eigen logregels, en sinds v0.71.1 staat daar wat er
+# niet meer in een melding hoort: de entiteit-id van een sensor die stil valt.
+# Python stuurt die regels naar stderr en dan lopen ze door de uitslag van de
+# proeven heen. In Home Assistant horen ze thuis, hier niet.
+logging.disable(logging.WARNING)
 
 # Home Assistant draait op een verse Python en `coach.py` gebruikt dingen die
 # daarbij horen, zoals `asyncio.timeout` (3.11). Apple levert bij zijn
