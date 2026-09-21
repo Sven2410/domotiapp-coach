@@ -5,7 +5,7 @@
  * first. "Overig" carries a free-text name so anything not on the list still
  * fits.
  *
- * Alleen wat de coach werkelijk iets met een apparaat kan. Sven op 19-09-2026
+ * Alleen wat de coach werkelijk iets met een apparaat kan. De eigenaar op 19-09-2026
  * haalde de thuisbatterij, de warmtepomp, de wasmachine, de droger en de
  * zwembadpomp eruit: hetzelfde argument als bij de merken van een laadpaal,
  * een regel in een lijst leest als een belofte.
@@ -32,7 +32,7 @@ export const DEVICE_TYPES = [
  * `needed` marks the ones the coach cannot steer without; they are only ever
  * insisted on once steering is switched on for that device.
  *
- * Only Easee is supported. Sven took the other brands out on 04-09-2026: a
+ * Only Easee is supported. De eigenaar took the other brands out on 04-09-2026: a
  * brand in a list reads as a promise, and there was none behind it. Op
  * 19-09-2026 ging "overig" er om dezelfde reden uit: een laadpaal die de coach
  * niet kan sturen is geen laadpaal maar een apparaat dat hij meet, en daarvoor
@@ -204,7 +204,7 @@ export const CHARGER_BRANDS = [
         label: "Dynamisch limiet stroomcircuit",
         // Bij Easee de dynamische limiet van het circuit waar de paal op zit.
         // Een auto trekt soms iets meer dan de laderlimiet, en boven deze grens
-        // grijpt de paal zelf in: bij Van den Dam op 06-09-2026 trok een Ford
+        // grijpt de paal zelf in: in de klantwoning op 06-09-2026 trok een Ford
         // 16,9 A op een groep van 16 A, de paal herstartte en de auto ging in
         // storing. Met deze sensor blijft de coach er zoveel onder als de auto
         // erboven zit.
@@ -311,7 +311,7 @@ export const programFor = (raw) =>
 
 /**
  * Een schakelaar die hetzelfde zegt als de knop "Ingeruimd en dicht", voor
- * wie de vaatwasser vanaf een eigen dashboard vrijgeeft. Sven op 06-09-2026:
+ * wie de vaatwasser vanaf een eigen dashboard vrijgeeft. De eigenaar op 06-09-2026:
  * een kaart in de keuken met een knop "sturing" die een schakelaar aanzet,
  * "en dan wil ik dat Ingeruimd en dicht aangaat." De coach houdt de twee
  * gelijk, in beide richtingen, en zet ze na een beurt allebei uit.
@@ -325,7 +325,7 @@ const RELEASE_SWITCH_FIELD = {
 };
 
 /**
- * Een tweede schakelaar, voor "ingeruimd en nu starten". Sven op 13-09-2026:
+ * Een tweede schakelaar, voor "ingeruimd en nu starten". De eigenaar op 13-09-2026:
  * na de klaar-tijd de keuze "ingeruimd en morgen starten" of "ingeruimd en nu
  * starten", en vanaf zijn keukenkaart allebei. De vrijgaveschakelaar is dan
  * morgen, deze is nu.
@@ -376,7 +376,7 @@ export const DISHWASHER_BRANDS = [
         label: "Programma kiezen",
         hint: "De select-entiteit waarmee je een programma op de machine zet. Hiermee kies je op de kaart welk programma erop staat, en hieruit komen de namen in de tabel hieronder.",
         filter: "select",
-        // Sven op 06-09-2026: "ik heb selected program in plaats van select;
+        // De eigenaar op 06-09-2026: "ik heb selected program in plaats van select;
         // voeg een optie toe waar ik een sensor in kan zetten." Vandaar twee
         // velden: de sensor die het zegt, en de select die het zet.
         values: DISHWASHER_PROGRAM_VALUES,
@@ -439,7 +439,7 @@ export const DISHWASHER_BRANDS = [
   },
   // Een vaatwasser zonder koppeling, op een meetstekker. Geen startknop, dus
   // de coach zegt wanneer en de bewoner drukt; het vermogen zegt of hij
-  // draait en wat hij verbruikt. Sven op 06-09-2026: "smart plug als starten
+  // draait en wat hij verbruikt. De eigenaar op 06-09-2026: "smart plug als starten
   // doen we niet, wel adviseren en meten."
   {
     id: "overig",
@@ -464,7 +464,7 @@ const BRANDS_BY_TYPE = new Map([
 /**
  * De schakelaar waarmee een boiler stroom krijgt.
  *
- * Sven op 19-09-2026: "een boiler waar je alleen stroom op moet zetten, met
+ * De eigenaar op 19-09-2026: "een boiler waar je alleen stroom op moet zetten, met
  * een smart plug bijvoorbeeld. Alleen de switch invullen en power invullen."
  * Geen merk, geen programma, geen temperatuur: de coach zet de stroom erop of
  * eraf en de thermostaat van de boiler bepaalt hoe warm het water wordt. Wat
@@ -718,7 +718,7 @@ export const isManualProgram = (device) =>
 /**
  * Of de coach dit apparaat zelf kan bedienen: er zit een merk met knoppen of
  * een dienst achter. Alles zonder (een meetstekker, het merk "overig") kan
- * hij alleen plannen of noemen. Sven op 07-09-2026: "er is een verschil
+ * hij alleen plannen of noemen. De eigenaar op 07-09-2026: "er is een verschil
  * tussen de coach mag aansturen en adviseren, want een domme vaatwasser kan
  * de coach helemaal niet aansturen maar wel adviseren."
  */
@@ -739,7 +739,7 @@ export const PROGRAM_TYPES = ["vaatwasser"];
  * De opgave van de fabrikant is het uitgangspunt; wat de klant zelf invulde
  * staat in `device.programs` en wint zodra het er is. Dezelfde veldnamen als
  * de instellingen (`peak_w`), zodat een rij ongewijzigd opgeslagen kan worden.
- * Sven op 06-09-2026: "ik wil dat kunnen aanpassen, wel moet hij dit als
+ * De eigenaar op 06-09-2026: "ik wil dat kunnen aanpassen, wel moet hij dit als
  * uitgangspunt hebben."
  */
 export const defaultPrograms = () =>
@@ -850,7 +850,7 @@ export function programOf(device, raw, settings) {
  * machine zelf, en de keuze gaat naar die entiteit. Zonder programmasensor:
  * de eigen tabel, en de keuze gaat naar de instellingen (`device.program`).
  * Een alleen-lezen programmasensor geeft niets te kiezen. De coach kiest
- * nooit zelf; Sven op 06-09-2026: "dat doet de klant altijd zelf."
+ * nooit zelf; de eigenaar op 06-09-2026: "dat doet de klant altijd zelf."
  */
 export function programPicker(device) {
   if (!PROGRAM_TYPES.includes(device?.type)) return undefined;
@@ -876,9 +876,9 @@ export const SCHEDULABLE_TYPES = [...PROGRAM_TYPES, "laadpaal", "boiler"];
 /**
  * De types die alleen "klaar om" kennen, en niet de andere twee tijden.
  *
- * Bij een laadpaal omdat de coach zelf het goedkoopste moment kiest (Sven,
+ * Bij een laadpaal omdat de coach zelf het goedkoopste moment kiest (de eigenaar,
  * 04-09-2026); bij een boiler om dezelfde reden, en omdat "uiterlijk starten"
- * bij een vat dat zichzelf uitzet niets betekent. Sven op 19-09-2026 koos
+ * bij een vat dat zichzelf uitzet niets betekent. De eigenaar op 19-09-2026 koos
  * "klaar om, zoals de auto".
  */
 export const DEADLINE_ONLY_TYPES = ["laadpaal", "boiler"];
@@ -954,7 +954,7 @@ export const ACTIVE_WATTS = 3;
  * te noemen en hoort de zin dat ook niet te doen.
  *
  * En alleen apparaten waarbij het vinkje aan staat dat de coach er iets mee
- * mag: sturen, plannen of noemen. Sven op 07-09-2026: "de coach zegt zet nu
+ * mag: sturen, plannen of noemen. De eigenaar op 07-09-2026: "de coach zegt zet nu
  * de tablet lader aan, maar de tablet lader is alleen een vermogenssensor en
  * het vinkje staat uit." Een apparaat dat alleen gevolgd wordt, wordt nergens
  * genoemd.
@@ -976,7 +976,7 @@ export function apparatenZin(devices, voegwoord = "of") {
       const soort = typeMeta(device?.type).label;
       // Vulde hij precies het soortwoord in ("Laadpaal"), dan is dat geen naam
       // maar hetzelfde woord met een hoofdletter omdat het in een lijst stond.
-      // Middenin een zin hoort dat klein. Bij Van den Dam las het anders als
+      // Middenin een zin hoort dat klein. In de klantwoning las het anders als
       // "Zet de Laadpaal aan."
       if (!eigen || eigen.toLowerCase() === soort.toLowerCase()) {
         return soort.toLowerCase();

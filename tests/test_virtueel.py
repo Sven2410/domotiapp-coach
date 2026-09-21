@@ -73,7 +73,7 @@ def laadt_tussen(verloop, van, tot):
 
 # Sinds 05-09-2026 mag een bekend uur dat goedkoper is dan het gemiddelde van
 # alle bekende uren ook van het net, zolang de prijzen tot de klaar-tijd er nog
-# niet zijn. Sven, na een ochtend wachten bij Van den Dam: "nu hebben we dus
+# niet zijn. De eigenaar, na een ochtend wachten in de klantwoning: "nu hebben we dus
 # niks bespaard." De coach middelt over alles wat hij kent; hier benaderd als
 # alle uren tot en met de dag van de regel.
 def gemiddelde_tot(verloop, datum):
@@ -113,7 +113,7 @@ for naam, vl in V.items():
     # `_gladde_fase` in coach.py), dus een echte sprong in het huisverbruik
     # heeft daar pas na een halve minuut de meerderheid. Een zekering houdt
     # dat; een coach die het langer laat lopen is fout.
-    # Elke beurt staat in de opslag met wat hij kostte en bespaarde (Sven op
+    # Elke beurt staat in de opslag met wat hij kostte en bespaarde (de eigenaar op
     # 05-09-2026: "het belangrijkste voor de klant"). De kilowatturen erin
     # zijn dezelfde als het huis mat, en het geld is nooit verzonnen: zonder
     # prijs staat er geen besparing.
@@ -126,7 +126,7 @@ for naam, vl in V.items():
                  sum(b["solar_kwh"] for b in vl.beurten) <= vl.uit_zon_kwh + max(0.5, 0.05 * vl.geladen_kwh),
                  f"{sum(b['solar_kwh'] for b in vl.beurten):.1f} tegen {vl.uit_zon_kwh:.1f}")
         # Bespaard is de maat (vanaf het inpluggen op vol vermogen) min wat er
-        # betaald is, en nooit onder nul. Sven: "een min getal bij besparen
+        # betaald is, en nooit onder nul. De eigenaar: "een min getal bij besparen
         # kan helemaal niet."
         controle(f"{naam}: bespaard is de maat min betaald, nooit onder nul, of onbekend",
                  all((b["saved"] is None and b["ref_cost"] is None)
@@ -153,7 +153,7 @@ for naam, vl in V.items():
     if vl.klaar_op is not None and s.auto.laadgrens >= 100 and s.auto.meldt_soc and vl.geladen_kwh > 0.1:
         controle(f"{naam}: precies één keer 'is vol' gemeld",
                  len(meldingen(vl, "is vol")) == 1, f"{meldingen(vl, 'is vol')}")
-    # Sven op 04-09-2026: "De eindtijd is heel belangrijk. Een uur daarvoor
+    # De eigenaar op 04-09-2026: "De eindtijd is heel belangrijk. Een uur daarvoor
     # moet hij altijd klaar zijn." Vijf minuten speling voor de aanloop.
     # `afbouw-krap` is met opzet de beurt waarin de coach nog niet weet dat de
     # auto bovenin afbouwt: hij wordt vol in het laatste uur, en juist daarom
@@ -274,10 +274,10 @@ if (vl := v("dynamisch-zonnig")) and (vm := v("dynamisch-markt")):
     controle("kale marktprijs en all-in geven hetzelfde besluit",
              abs(vl.kosten - vm.kosten) < 0.01, f"{vl.kosten:.3f} tegen {vm.kosten:.3f}")
 
-# De marge op het optimum is wat Svens regel "alleen zon tot de prijzen bekend
+# De marge op het optimum is wat de regel "alleen zon tot de prijzen bekend
 # zijn" kost: om 07:00 kent de coach alleen vandaag, dus het goedkope uur van
 # 12:00 laat hij liggen en hij plant pas om 13:00. Het optimum kent alles. Bij
-# de bus is dat drie dubbeltjes, bij de grote auto anderhalve euro. Sven kent
+# de bus is dat drie dubbeltjes, bij de grote auto anderhalve euro. De eigenaar kent
 # die getallen (notities 04-09-2026) en koos de regel.
 for naam, marge in (("dynamisch-bewolkt", 0.35), ("dynamisch-geen-panelen", 0.35),
                     ("dynamisch-avond-erin", 0.10), ("dynamisch-grote-auto", 1.50)):
@@ -320,7 +320,7 @@ if (vl := v("oven-tijdens-laden")):
     controle("oven: na de oven weer verder", laadt_tussen(vl, "02:35", "04:00"), "")
     controle("oven: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
-# Van den Dam, nacht van 09 op 10-09-2026: een warmtepomp die om het kwartier
+# de klantwoning, nacht van 09 op 10-09-2026: een warmtepomp die om het kwartier
 # aangaat. Zonder de meting van het plafond (v0.61.0) begon de coach om 01:02
 # op de goedkoopste uren en stond de auto om 06:00 op 84%.
 if (vl := v("warmtepomp-nacht")):
@@ -329,7 +329,7 @@ if (vl := v("warmtepomp-nacht")):
              laadt_tussen(vl, "22:00", "23:00")
              and any("gemiddeld" in r.reden and "A over voor de paal" in r.reden
                      for r in regels_in(vl, "22:00", "23:30")), "")
-# Van den Dam, nacht van 18 op 19-09-2026: na een verlaging voor de zekering
+# de klantwoning, nacht van 18 op 19-09-2026: na een verlaging voor de zekering
 # bleef de Ford nog tien minuten op de oude stroom, en de coach schreef dat op
 # als zijn tempo (5,52 kW voor band 6 waar hij 10 kW trok). Tot v0.69.0 leerde
 # hij hier {7: 6,9, 9: 6,9}, en bleven de oude rijen staan.
@@ -371,7 +371,7 @@ if (vl := v("laadgrens-80")):
     controle("laadgrens: zegt niet dat hij vol is", not meldingen(vl, "is vol"), "")
     controle("laadgrens: geen 'nog niet vol' in de ochtend", not meldingen(vl, "nog niet vol"), "")
 
-# Dezelfde auto met de 80% ook in het profiel. Svens eigen geval van
+# Dezelfde auto met de 80% ook in het profiel. het gemeten geval van
 # 16-09-2026: de coach hoort zelf op te houden, zonder herstart en zonder
 # kritieke melding over een auto die precies deed wat hem gevraagd was.
 if (vl := v("laadgrens-80-ingesteld")):
@@ -398,7 +398,7 @@ if (vl := v("doel-80")):
     controle("doel onder de auto: laadt minder dan tot vol",
              vl.geladen_kwh < 11.5, f"{vl.geladen_kwh:.2f}")
 
-# Svens Ford meldt zijn accustand per tien procent, ongeveer elk half uur.
+# de eigen Ford meldt zijn accustand per tien procent, ongeveer elk half uur.
 # Tussen twee stappen stond het beeld van de coach stil terwijl de bus voller
 # werd: op 17-09-2026 om 22:26 zei de kaart "nog 2,2 kWh, vol rond 23:00"
 # terwijl er 0,18 kWh in ging en de bus om 22:29 op zijn doel stond. Sinds
@@ -432,11 +432,11 @@ if (vl := v("auto-wordt-niet-wakker")):
     controle("slapende auto: en hij meldt dat de klaar-tijd gemist is",
              bool(meldingen(vl, "nog niet vol")), "")
 
-# --- de nacht van 05 op 06-09-2026 bij Van den Dam ---------------------------
+# --- de nacht van 05 op 06-09-2026 in de klantwoning ---------------------------
 #
 # De Easee koos één fase, de Ford trok 16,9 A op een groep van 16 A, de paal
 # herstartte, de Ford ging in storing en bleef op 86% staan tot een start met
-# de hand. Sven: de fasemodus blijft, dus de coach rekent met wat er loopt,
+# de hand. De eigenaar: de fasemodus blijft, dus de coach rekent met wat er loopt,
 # blijft onder de groep, en start een auto die niet vol is zelf opnieuw.
 
 print("=== storing, één fase, de groep, en een auto die bovenin afbouwt ===")
@@ -465,7 +465,7 @@ if (vl := v("easee-een-fase-groep")):
     controle("één fase, groep zichtbaar: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
 if (vl := v("easee-een-fase-blind")):
-    controle("één fase, groep onzichtbaar: de paal herstart zelf, zoals bij Van den Dam",
+    controle("één fase, groep onzichtbaar: de paal herstart zelf, zoals in de klantwoning",
              vl.paal_herstarts >= 1, f"{vl.paal_herstarts}")
     controle("één fase, groep onzichtbaar: de auto gaat in storing en de coach start hem opnieuw",
              len(meldingen(vl, "opnieuw gestart")) >= 1, f"{[m for _, m in vl.meldingen]}")
@@ -514,7 +514,7 @@ if (vl := v("easee-fasekeuze")):
 #
 # De voorspeller beloofde 1,552 kWh voor het uur van 16:00, het dak deed 0,58 en
 # het huis at het op. De coach zei om 15:42 "ik laad om 16:00", om 16:03 "ik
-# laad om 17:00", en zou dat om 17:00 weer verschoven hebben. Sven: "waarom ging
+# laad om 17:00", en zou dat om 17:00 weer verschoven hebben. De eigenaar: "waarom ging
 # hij niet laden om 16 uur terwijl hij net zei ik ga laden om 16 uur?"
 #
 # Allebei de contracten, want dat was zijn tweede vraag: "je weet ook dat dit
@@ -541,7 +541,7 @@ if (vl := v("zonbelofte-dynamisch")):
              f"{vl.kosten:.2f} tegen optimum {vl.optimum:.2f}")
     controle("zonbelofte dynamisch: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
-# Een meting van zaterdag hoort zondag met rust te laten. Bij Sven liep de zin
+# Een meting van zaterdag hoort zondag met rust te laten. In die woning liep de zin
 # op 17-09-2026 tussen 17:46 en 20:00 op van "50% minder" naar "86% minder", en
 # dat klopte voor die uren: de voorspeller zei 769 Wh voor 19:00 en 406 voor
 # 20:00 terwijl het dak op nul stond. Zonder `solar_day` zou zo'n meting bij
@@ -557,7 +557,7 @@ if (vl := v("weekend-voorspelling-mis")):
 
 # --- de vaatwasser (06-09-2026) ----------------------------------------------
 #
-# Sven: "nu verder met de vaatwasser sturing." De bewoner geeft vrij, de coach
+# De eigenaar: "nu verder met de vaatwasser sturing." De bewoner geeft vrij, de coach
 # kiest het goedkoopste startmoment binnen het schema, drukt op de knop en
 # meldt één keer dat hij klaar is.
 
@@ -614,7 +614,7 @@ if (vl := v("vaatwasser-uiterlijk-starten")):
              vl.vw_gestart is not None and vl.vw_gestart.hour == 22 and vl.vw_gestart.minute <= 1,
              f"gestart {vw_klok(vl.vw_gestart)}")
 
-# De domme vaatwasser op een meetstekker (06-09-2026 's avonds). Sven: "wel
+# De domme vaatwasser op een meetstekker (06-09-2026 's avonds). De eigenaar: "wel
 # adviseren en meten, met zet hem aan", en zijn schema: vanaf 08:00, klaar
 # om 16:30, nooit in de nacht.
 if (vl := v("vaatwasser-dom-zon")):
@@ -706,7 +706,7 @@ if (vl := v("vaatwasser-vroeg")):
     # wacht hij tot 12:00 en is het alles.
     controle("vroeg: de beurt draait grotendeels op eigen zon",
              len(vw_beurt) == 1 and vw_beurt[0]["solar_kwh"] >= 0.75 * vw_beurt[0]["kwh"], f"{vw_beurt}")
-    # De maat is alles van het net bij het vrijgeven (Sven op 09-09-2026), en
+    # De maat is alles van het net bij het vrijgeven (de eigenaar op 09-09-2026), en
     # wat de zon scheelde staat apart in het zondeel van bespaard.
     controle("vroeg: de maat is alles van het net bij het vrijgeven, en het zondeel is de zon tegen het verschil",
              len(vw_beurt) == 1 and vw_beurt[0]["ref_cost"] is not None
@@ -762,7 +762,7 @@ if (vl := v("vaatwasser-eindtijd-bijstellen")):
 
 if (vl := v("vaatwasser-na-klaartijd")):
     print(f"  na de klaar-tijd, morgen: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, {vl.vw_kwh:.2f} kWh, {len(vl.vw_gedrukt)} keer gedrukt")
-    # Sven op 12-09-2026: om 16:33 vrijgegeven bij klaar om 16:30.
+    # De eigenaar op 12-09-2026: om 16:33 vrijgegeven bij klaar om 16:30.
     controle("na de klaar-tijd (12-09): ingeruimd en morgen starten start niet meer vandaag, maar morgen tussen 08:00 en 15:00",
              vl.vw_gestart is not None and "2026-09-08 08:00" <= f"{vl.vw_gestart:%Y-%m-%d %H:%M}" < "2026-09-08 15:00",
              f"{vl.vw_gestart}")
@@ -773,7 +773,7 @@ if (vl := v("vaatwasser-na-klaartijd")):
 
 if (vl := v("vaatwasser-na-klaartijd-nu")):
     print(f"  na de klaar-tijd, nu: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, {vl.vw_kwh:.2f} kWh, meldingen {[m for _, m in vl.meldingen if 'Vaatwasser' in m]}")
-    # Sven op 13-09-2026: "of ingeruimd en nu starten."
+    # De eigenaar op 13-09-2026: "of ingeruimd en nu starten."
     controle("nu starten (13-09): hij start binnen twee minuten na 16:33, dezelfde dag",
              vl.vw_gestart is not None and "2026-09-07 16:33" <= f"{vl.vw_gestart:%Y-%m-%d %H:%M}" <= "2026-09-07 16:35",
              f"{vl.vw_gestart}")
@@ -828,7 +828,7 @@ if (vl := v("oude-begintijd-genegeerd")) and (vz := v("vast-zonnig")):
     controle("oude tijden: geen too-early of start-by",
              not vl.regels_met("too-early") and not vl.regels_met("start-by"), "")
 
-# --- Svens voorbeeld van 04-09-2026 ----------------------------------------------
+# --- het voorbeeld van 04-09-2026 ----------------------------------------------
 
 print("=== om tien uur erin, klaar om zes ===")
 if (vl := v("tien-uur-erin-dynamisch")):
@@ -843,7 +843,7 @@ if (vl := v("tien-uur-erin-dynamisch")):
     controle("tien uur: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
     # Zestig cent: het uur van 12:00 ligt onder het gemiddelde van de dag maar
     # boven de nacht die hij nog niet kende. Dat is de prijs van de regel; bij
-    # Van den Dam bespaarde dezelfde regel op 05-09-2026 twee euro.
+    # de klantwoning bespaarde dezelfde regel op 05-09-2026 twee euro.
     # Zeventig sinds de avondpiek om 18:00 begint (05-09-2026): het uur van
     # 17:00 mag nu mee en ligt onder het daggemiddelde, maar boven de nacht.
     controle("tien uur: binnen zeventig cent van het optimum",
@@ -893,7 +893,7 @@ if (vl := v("weekend-zondag-uit")):
     zaterdag = [r for r in vl.regels if r.tijd.date() == ZATERDAG]
     voor_de_prijzen = [r for r in vl.regels if r.tijd < ZONDAG_13]
     # Zon, en net alleen als aanvulling tot de ondergrens van de paal in een
-    # uur waarin het dak iets geeft. Sven op 05-09-2026: een uur met wat zon en
+    # uur waarin het dak iets geeft. De eigenaar op 05-09-2026: een uur met wat zon en
     # een goedkope prijs weegt zwaarder dan een iets goedkopere nacht.
     controle("weekend: zaterdag zon, net als aanvulling tot 6 A of in een uur onder het gemiddelde",
              all((r.paal_amps <= 6.01 and r.over_w > 50) or onder_gemiddelde(vl, r)
@@ -920,7 +920,7 @@ if (vl := v("weekend-zondag-uit-geen-zon")):
              net_onder_gemiddelde(vl, [r for r in vl.regels if r.tijd < ZONDAG_13]), "")
     controle("weekend zonder zon: daarna de goedkope uren", vl.geladen_kwh > 60, f"{vl.geladen_kwh:.1f}")
     controle("weekend zonder zon: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
-    # Een euro: het optimum kent zaterdagmiddag al, de coach mag die van Sven
+    # Een euro: het optimum kent zaterdagmiddag al, de coach mag die van de eigenaar
     # niet gebruiken zolang de prijzen van maandag er niet zijn.
     controle("weekend zonder zon: het optimum plus wat de prijsregel kost",
              vl.optimum is not None and vl.kosten <= vl.optimum + 1.10,
@@ -933,19 +933,19 @@ if (vl := v("prijzen-weg-bij-inpluggen")):
              f"{sorted({r.regel for r in regels_in(vl, '10:00', '10:20')})}")
     controle("prijzen weg: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
-# --- Van den Dam, het weekend van 04-09-2026 -----------------------------------
+# --- de klantwoning, het weekend van 04-09-2026 -----------------------------------
 #
 # De eerste echte laadbeurt met v0.47.x, nagebouwd met zijn eigen cijfers (zie
 # scenarios.py). Dit zijn de vijf dingen die in de notities staan om in het
 # echt vast te stellen, plus wat de varianten laten zien.
 
-VDD_ZATERDAG = virtueel.dt.date(2026, 9, 5)
-VDD_ZATERDAG_13 = virtueel.dt.datetime(2026, 9, 5, 13, 0)
-VDD_ZONDAG_05 = virtueel.dt.datetime(2026, 9, 6, 5, 0)
+KLANT_ZATERDAG = virtueel.dt.date(2026, 9, 5)
+KLANT_ZATERDAG_13 = virtueel.dt.datetime(2026, 9, 5, 13, 0)
+KLANT_ZONDAG_05 = virtueel.dt.datetime(2026, 9, 6, 5, 0)
 
 
-def vdd_basis(vl, naam):
-    """Wat in elke Van den Dam-variant hoort te gelden."""
+def klant_basis(vl, naam):
+    """Wat in elke de klantwoning-variant hoort te gelden."""
     # Eén beurt, ingeplugd vrijdag 19:00 tegen de avondprijs, en die bespaart:
     # de middag en de zon zijn goedkoper dan het ijkpunt.
     controle(f"{naam}: één laadbeurt in de opslag, afgesloten of nog lopend",
@@ -964,7 +964,7 @@ def vdd_basis(vl, naam):
              any(r.regel == "wait-for-prices" and "Zaterdag staat in je schema uit" in r.reden
                  and "zondag om 06:00" in r.reden for r in vrijdagnacht),
              f"{next((r.reden for r in vrijdagnacht if r.regel == 'wait-for-prices'), '')}")
-    # De avondpiek begint sinds 05-09-2026 om 18:00 (Svens keuze, 17:00 kostte
+    # De avondpiek begint sinds 05-09-2026 om 18:00 (de keuze, 17:00 kostte
     # die dag 1,65 euro). Een paar minuten nalopen hoort erbij: de auto volgt de limiet
     # met een minuut vertraging. Sinds 05-09-2026 houdt de coach een lopende
     # beurt in de avondpiek niet meer vast (`_keep_alive`), want met tien
@@ -974,7 +974,7 @@ def vdd_basis(vl, naam):
              f"{vl.net_kwh_tussen('18:03', '20:00'):.2f} kWh tussen 18:03 en 20:00")
     controle(f"{naam}: onder de zekering", vl.hoogste_fase <= 25.0, f"{vl.hoogste_fase:.1f} A")
     controle(f"{naam}: een uur voor zondag 06:00 vol",
-             gehaald(vl) and vl.klaar_op is not None and vl.klaar_op <= VDD_ZONDAG_05,
+             gehaald(vl) and vl.klaar_op is not None and vl.klaar_op <= KLANT_ZONDAG_05,
              f"vol om {vl.klaar_op}, {vl.soc_bij_klaar_tijd}")
     controle(f"{naam}: geen valse 'nog niet vol'", not meldingen(vl, "nog niet vol"),
              f"{meldingen(vl, 'nog niet vol')}")
@@ -982,55 +982,55 @@ def vdd_basis(vl, naam):
              f"{meldingen(vl, 'is vol')}")
 
 
-if (vl := v("van-den-dam")):
-    vdd_basis(vl, "vdd")
-    zaterdag = [r for r in vl.regels if r.tijd.date() == VDD_ZATERDAG]
-    ochtend = [r for r in zaterdag if r.tijd < VDD_ZATERDAG_13]
-    controle("vdd: zaterdagochtend begint pas als het dak iets overhoudt",
+if (vl := v("klantwoning")):
+    klant_basis(vl, "klantwoning")
+    zaterdag = [r for r in vl.regels if r.tijd.date() == KLANT_ZATERDAG]
+    ochtend = [r for r in zaterdag if r.tijd < KLANT_ZATERDAG_13]
+    controle("klantwoning: zaterdagochtend begint pas als het dak iets overhoudt",
              all(r.over_w > 0 for r in ochtend if r.paal_w > 0), "laadde zonder overschot")
-    controle("vdd: en dan op de ondergrens van 6 A, of vol in een uur onder het gemiddelde",
+    controle("klantwoning: en dan op de ondergrens van 6 A, of vol in een uur onder het gemiddelde",
              ochtend and all(r.paal_amps <= 10.01 or onder_gemiddelde(vl, r) for r in ochtend),
              f"hoogste {max((r.paal_amps for r in ochtend), default=0):.0f} A")
-    controle("vdd: om 13:00 komen de prijzen en gaat hij vol",
+    controle("klantwoning: om 13:00 komen de prijzen en gaat hij vol",
              any(r.regel == "cheap-hour" and r.paal_amps >= 15
                  for r in zaterdag if 13 <= r.tijd.hour < 17),
              f"{sorted({r.regel for r in zaterdag if 13 <= r.tijd.hour < 17})}")
-    # Sven op 04-09-2026: "check inderdaad of na 13 uur de coach de prijzen
+    # De eigenaar op 04-09-2026: "check inderdaad of na 13 uur de coach de prijzen
     # binnenhaalt." De prijssensor krijgt om 13:00 de dag van morgen, en de
     # eerstvolgende ronde hoort er al naar te handelen.
     eerste_net = next((r for r in zaterdag if r.regel == "cheap-hour"), None)
-    controle("vdd: en handelt binnen een minuut na 13:00 naar de nieuwe prijzen",
-             eerste_net is not None and eerste_net.tijd <= VDD_ZATERDAG_13 + virtueel.dt.timedelta(minutes=1),
+    controle("klantwoning: en handelt binnen een minuut na 13:00 naar de nieuwe prijzen",
+             eerste_net is not None and eerste_net.tijd <= KLANT_ZATERDAG_13 + virtueel.dt.timedelta(minutes=1),
              f"{eerste_net.tijd if eerste_net else None}")
-    controle("vdd: de coach vraagt nooit meer dan de Equalizer vrijgeeft",
+    controle("klantwoning: de coach vraagt nooit meer dan de Equalizer vrijgeeft",
              all(r.amps <= 16 for r in vl.regels), f"{max(r.amps for r in vl.regels)} A")
-    controle("vdd: nooit in no-room gevallen", not any(r.regel.startswith("no-room") for r in vl.regels), "")
-    controle("vdd: een handvol opdrachten, geen gehamer op de Easee",
+    controle("klantwoning: nooit in no-room gevallen", not any(r.regel.startswith("no-room") for r in vl.regels), "")
+    controle("klantwoning: een handvol opdrachten, geen gehamer op de Easee",
              len(vl.opdrachten) <= 25, f"{len(vl.opdrachten)} opdrachten")
-    controle("vdd: niet ver van het optimum",
+    controle("klantwoning: niet ver van het optimum",
              vl.optimum is not None and vl.kosten <= vl.optimum + 0.60,
              f"kosten {vl.kosten:.2f}, optimum {vl.optimum}")
 
-for naam in ("van-den-dam-bewolkt", "van-den-dam-geen-zon"):
+for naam in ("klantwoning-bewolkt", "klantwoning-geen-zon"):
     if (vl := v(naam)):
-        vdd_basis(vl, naam[12:])
+        klant_basis(vl, naam[12:])
         controle(f"{naam[12:]}: zonder overschot voor 13:00 alleen uren onder het gemiddelde",
-                 net_onder_gemiddelde(vl, [r for r in vl.regels if r.tijd < VDD_ZATERDAG_13]), "")
+                 net_onder_gemiddelde(vl, [r for r in vl.regels if r.tijd < KLANT_ZATERDAG_13]), "")
         controle(f"{naam[12:]}: daarna de goedkope middag en nacht", vl.geladen_kwh > 60,
                  f"{vl.geladen_kwh:.1f} kWh")
 
-if (vl := v("van-den-dam-dure-zondagnacht")):
-    vdd_basis(vl, "dure zondag")
-    zaterdag = [r for r in vl.regels if r.tijd.date() == VDD_ZATERDAG]
+if (vl := v("klantwoning-dure-zondagnacht")):
+    klant_basis(vl, "dure zondag")
+    zaterdag = [r for r in vl.regels if r.tijd.date() == KLANT_ZATERDAG]
     controle("dure zondag: zaterdag doet het werk",
              sum(r.paal_w for r in zaterdag if 8 <= r.tijd.hour < 17) * vl.stap_uur / 1000 > 40,
              f"{sum(r.paal_w for r in zaterdag if 8 <= r.tijd.hour < 17) * vl.stap_uur / 1000:.1f} kWh")
     controle("dure zondag: en de dure nacht wordt niet gebruikt",
-             sum(r.paal_w for r in vl.regels if r.tijd.date() > VDD_ZATERDAG and r.tijd.hour >= 1) * vl.stap_uur / 1000 < 1,
+             sum(r.paal_w for r in vl.regels if r.tijd.date() > KLANT_ZATERDAG and r.tijd.hour >= 1) * vl.stap_uur / 1000 < 1,
              "laadde in de dure zondagnacht")
 
-if (vl := v("van-den-dam-ford-wekken")):
-    vdd_basis(vl, "wekken")
+if (vl := v("klantwoning-ford-wekken")):
+    klant_basis(vl, "wekken")
     # Zestien sinds 17-09-2026, en niet tien: een Easee in automatische
     # fasemodus kiest bij elke start naar wat er aangeboden wordt. Zie
     # `WAKE_AMPS` in planner.py en het scenario `easee-fasekeuze`.
@@ -1038,32 +1038,32 @@ if (vl := v("van-den-dam-ford-wekken")):
              any(r.regel.endswith("+wake") and r.amps == 16 for r in vl.regels)
              and any(r.regel == "surplus" and r.amps == 6 for r in vl.regels), "")
 
-if (vl := v("van-den-dam-oven")):
-    vdd_basis(vl, "oven")
+if (vl := v("klantwoning-oven")):
+    klant_basis(vl, "oven")
     # De oven gaat om 12:30 aan; de coach houdt de beurt eerst `STOP_ROUNDS`
-    # ronden op de ondergrens vast (tien sinds 05-09-2026, Svens "wekken doe
+    # ronden op de ondergrens vast (tien sinds 05-09-2026, de eigen "wekken doe
     # maar per 10 min") en de auto volgt met een minuut. Daarna niets meer.
     # Het uur van 12:00 ligt onder het gemiddelde van de dag, dus sinds
     # 05-09-2026 mag hij daar gewoon van het net; de oven maakt dat niet anders.
     controle("oven: tijdens de oven van het net alleen in een uur onder het gemiddelde",
              net_onder_gemiddelde(vl, [r for r in regels_in(vl, "12:42", "13:00")
-                                       if r.tijd.date() == VDD_ZATERDAG]),
+                                       if r.tijd.date() == KLANT_ZATERDAG]),
              f"{vl.net_kwh_tussen('12:42', '13:00'):.2f} kWh")
     controle("oven: de Equalizer wordt gemeld, niet bevochten",
              meldingen(vl, "lastbewaker") and len(vl.opdrachten) <= 60, f"{len(vl.opdrachten)} opdrachten")
 
-if (vl := v("van-den-dam-p1-weg")):
-    vdd_basis(vl, "p1 weg")
+if (vl := v("klantwoning-p1-weg")):
+    klant_basis(vl, "p1 weg")
     controle("p1 weg: melding over de netmeting", bool(meldingen(vl, "netmeting")), "")
     controle("p1 weg: en daarna gewoon verder",
              any(r.paal_w > 0 and r.regel.split("+")[0] in ("surplus", "cheap-hour")
                  for r in regels_in(vl, "11:15", "12:00")), "")
 
-if (vl := v("van-den-dam-prijzen-laat")):
-    vdd_basis(vl, "prijzen laat")
+if (vl := v("klantwoning-prijzen-laat")):
+    klant_basis(vl, "prijzen laat")
     controle("prijzen laat: tot 15:30 alleen zon en uren onder het gemiddelde",
              all(r.paal_amps <= 6.01 or onder_gemiddelde(vl, r) for r in vl.regels
-                 if r.tijd.date() == VDD_ZATERDAG and r.tijd < virtueel.dt.datetime(2026, 9, 5, 15, 30)), "")
+                 if r.tijd.date() == KLANT_ZATERDAG and r.tijd < virtueel.dt.datetime(2026, 9, 5, 15, 30)), "")
     controle("prijzen laat: daarna vol tot de avondpiek",
              any(r.paal_amps >= 15 for r in regels_in(vl, "15:30", "17:00")), "")
     # Het laatste uur, zondag 04:00 tot 05:00, moet op een rustig tempo en niet
@@ -1074,25 +1074,25 @@ if (vl := v("van-den-dam-prijzen-laat")):
     controle("prijzen laat: geen opdracht per minuut in het laatste uur",
              len(laatste_uur) <= 8, f"{len(laatste_uur)} opdrachten na 04:00")
 
-if (vl := v("van-den-dam-geen-accustand")):
+if (vl := v("klantwoning-geen-accustand")):
     controle("geen accustand: vraagt erom", bool(meldingen(vl, "weet niet hoe vol")), "")
     controle("geen accustand: en laadt op tijd toch vol via het vangnet", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
 # Onverwachte herstarten van Home Assistant. De coach begint elke keer met een
 # leeg geheugen en dezelfde opslag, en de laadbeurt hoort daar niets van te
 # merken: geen dubbele meldingen, geen andere beslissing, op tijd vol.
-if (vl := v("van-den-dam-herstart")) and (basis := v("van-den-dam")):
-    vdd_basis(vl, "herstart")
+if (vl := v("klantwoning-herstart")) and (basis := v("klantwoning")):
+    klant_basis(vl, "herstart")
     controle("herstart: dezelfde laadbeurt als zonder herstarts",
              abs(vl.kosten - basis.kosten) < 0.10 and abs(vl.geladen_kwh - basis.geladen_kwh) < 0.5,
              f"kosten {vl.kosten:.2f} tegen {basis.kosten:.2f}, {vl.geladen_kwh:.1f} tegen {basis.geladen_kwh:.1f} kWh")
     na_10_30 = regels_in(vl, "10:30", "10:34")
     controle("herstart tijdens het laden: binnen drie minuten weer aan het laden",
-             any(r.paal_w > 0 and r.amps >= 6 for r in na_10_30 if r.tijd.date() == VDD_ZATERDAG),
+             any(r.paal_w > 0 and r.amps >= 6 for r in na_10_30 if r.tijd.date() == KLANT_ZATERDAG),
              f"{[(r.tijd.strftime('%H:%M'), r.regel, r.amps) for r in na_10_30]}")
     na_13_05 = regels_in(vl, "13:05", "13:08")
     controle("herstart net na de prijzen: meteen weer op de goedkope middag",
-             any(r.regel == "cheap-hour" and r.amps >= 15 for r in na_13_05 if r.tijd.date() == VDD_ZATERDAG),
+             any(r.regel == "cheap-hour" and r.amps >= 15 for r in na_13_05 if r.tijd.date() == KLANT_ZATERDAG),
              f"{[(r.tijd.strftime('%H:%M'), r.regel, r.amps) for r in na_13_05]}")
     controle("herstart: geen enkele valse melding",
              not meldingen(vl, "niet lezen") and not meldingen(vl, "meldt al") and not meldingen(vl, "niets meer beslist"),
@@ -1108,19 +1108,19 @@ if (vl := v("van-den-dam-herstart")) and (basis := v("van-den-dam")):
              f"{meldingen(vl, 'is vol')}")
 
 # Een sensor die wegvalt wordt na tien minuten gemeld, en als hij terug is ook.
-# Sven op 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat
+# De eigenaar op 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat
 # moet wel gemeld worden." Ondertussen laadt de coach gewoon door op wat hij
 # het laatst wist.
 for naam, sensor, wat, van, tot in (
-    ("van-den-dam-accustand-weg", "accustand van Ford", "cheap-hour", "13:30", "14:15"),
-    ("van-den-dam-status-weg", "status van Laadpaal", "cheap-hour", "11:00", "11:20"),
-    ("van-den-dam-zonsensor-weg", "zonnesensor", "cheap-hour", "10:03", "10:20"),
-    ("van-den-dam-equalizer-weg", "lastbewaker", "cheap-hour", "14:00", "14:30"),
+    ("klantwoning-accustand-weg", "accustand van Ford", "cheap-hour", "13:30", "14:15"),
+    ("klantwoning-status-weg", "status van Laadpaal", "cheap-hour", "11:00", "11:20"),
+    ("klantwoning-zonsensor-weg", "zonnesensor", "cheap-hour", "10:03", "10:20"),
+    ("klantwoning-equalizer-weg", "lastbewaker", "cheap-hour", "14:00", "14:30"),
 ):
     if not (vl := v(naam)):
         continue
     kort = naam[12:]
-    vdd_basis(vl, kort)
+    klant_basis(vl, kort)
     stil = meldingen(vl, "meldt al 10 minuten niets")
     controle(f"{kort}: na tien minuten één melding dat de sensor niets zegt",
              len(stil) == 1 and sensor in stil[0], f"{stil}")
@@ -1128,23 +1128,23 @@ for naam, sensor, wat, van, tot in (
     # niet naar de telefoon: per beurt één verslag plus wat kritiek is.
     weer = meldingen(vl, "doet het weer")
     controle(f"{kort}: en niets op de telefoon als hij terug is", not weer, f"{weer}")
-    tijdens = [r for r in regels_in(vl, van, tot) if r.tijd.date() == VDD_ZATERDAG]
+    tijdens = [r for r in regels_in(vl, van, tot) if r.tijd.date() == KLANT_ZATERDAG]
     controle(f"{kort}: ondertussen laadt hij gewoon door",
              tijdens and all(r.paal_w > 0 for r in tijdens[3:])
              and any(r.regel.split("+")[0] == wat for r in tijdens),
              f"{sorted({r.regel for r in tijdens})}, laagste {min((r.paal_w for r in tijdens), default=0):.0f} W")
     controle(f"{kort}: en is even goedkoop uit als zonder storing",
-             (basis := v("van-den-dam")) is not None and abs(vl.kosten - basis.kosten) < 0.10,
+             (basis := v("klantwoning")) is not None and abs(vl.kosten - basis.kosten) < 0.10,
              f"{vl.kosten:.2f}")
 
-if (vl := v("van-den-dam-prijssensor-weg-om-13")):
-    vdd_basis(vl, "prijssensor weg om 13")
+if (vl := v("klantwoning-prijssensor-weg-om-13")):
+    klant_basis(vl, "prijssensor weg om 13")
     controle("prijssensor weg: gemeld na tien minuten, om 13:00",
              any(t.time() == virtueel.dt.time(13, 0) and "prijssensor" in m for t, m in vl.meldingen),
              f"{[(t.strftime('%H:%M'), m[:40]) for t, m in vl.meldingen]}")
     controle("prijssensor weg: zonder prijzen niets van het net",
              not laadt_tussen(vl, "12:54", "13:39"), "laadde zonder prijzen")
-    na = [r for r in regels_in(vl, "13:40", "13:43") if r.tijd.date() == VDD_ZATERDAG]
+    na = [r for r in regels_in(vl, "13:40", "13:43") if r.tijd.date() == KLANT_ZATERDAG]
     controle("prijssensor weg: zodra hij terug is, meteen de prijzen van zondag en vol",
              any(r.regel == "cheap-hour" and r.amps >= 15 for r in na),
              f"{[(r.tijd.strftime('%H:%M'), r.regel, r.amps) for r in na]}")
@@ -1172,7 +1172,7 @@ if (vl := v("teller-per-uur")):
 
 # --- de boiler ---------------------------------------------------------------
 #
-# Sven op 19-09-2026: een boiler op een smart plug, zelflerend, klaar om 07:00.
+# De eigenaar op 19-09-2026: een boiler op een smart plug, zelflerend, klaar om 07:00.
 # Wat de bewoner ervan merkt is dit: er is warm water als hij onder de douche
 # stapt, en het is op de goedkoopste uren verwarmd.
 

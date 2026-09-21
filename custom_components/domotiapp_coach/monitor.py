@@ -229,7 +229,7 @@ class LoadMonitor:
         niets van weet. Een laadpaal die de coach op ditzelfde moment aan het
         terugregelen is, is precies dat niet.
 
-        Bij Van den Dam kreeg Sven in de nacht van 30-08-2026 drie meldingen,
+        In de klantwoning kreeg de eigenaar in de nacht van 30-08-2026 drie meldingen,
         om 03:02, 03:32 en 04:22, telkens met "zet iets zwaars uit of wacht
         ermee". Het zware ding was zijn eigen auto, en de coach stond op dat
         moment al op 12 A in plaats van 16. Om vier uur 's nachts gewekt worden

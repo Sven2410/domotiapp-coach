@@ -1,32 +1,41 @@
 # DomotiApp Coach
 
-Een eigen energiedashboard voor Home Assistant, met een ingebouwde coach.
+Een energiedashboard voor Home Assistant dat niet alleen laat zien wat er
+gebeurt, maar je apparaten ook op het gunstigste moment laat draaien.
 
-Het standaard energiedashboard van Home Assistant laat zien *wat er gebeurd is*.
-DomotiApp Coach laat zien wat er **nu** gebeurt, en gaat je vertellen wat je
-er het beste mee kunt doen.
+Het standaard energiedashboard laat zien *wat er gebeurd is*. DomotiApp Coach
+laat zien wat er **nu** gebeurt, rekent uit wanneer stroom het goedkoopst is, en
+schakelt zelf: de laadpaal, de vaatwasser en de boiler.
 
-De integratie zet een eigen paneel in de zijbalk — geen Lovelace-dashboard dat
+De integratie zet een eigen paneel in de zijbalk. Geen Lovelace-dashboard dat
 per woning opnieuw ingericht moet worden, maar één dashboard dat overal
 hetzelfde werkt zodra de integratie geïnstalleerd is.
 
 ---
 
-## Status
+## Wat de coach doet
 
-**Fase 1 — Uitlezen.** De header, het Overzicht en de instellingen staan er, en
-het dashboard draait op je eigen sensoren zodra je ze gekoppeld hebt.
+**Hij vergelijkt alle manieren om een kilowattuur in een apparaat te krijgen.**
+Elk uur tussen nu en het moment waarop iets klaar moet zijn levert twee
+mogelijkheden: uit je eigen zon, tegen wat je er anders voor teruggekregen had,
+of van het net, tegen de prijs van dat uur. Alle mogelijkheden op een hoop,
+sorteren op prijs, van onderaf vullen tot er genoeg in zit. Dat is aantoonbaar
+de goedkoopste verdeling, en geen ladder van vuistregels.
 
-| Fase | Wat het doet | Status |
-|------|--------------|--------|
-| 1 | Uitlezen — sensoren tonen, live beeld van de woning | werkend |
-| 2 | Adviseren — rekenen met tarieven, opwek en verbruik | in aanbouw |
-| 3 | Sturen — apparaten schakelen op zonneoverschot en prijs | gepland |
+Daarboven staan de dingen die niet over geld gaan: de zekering van de woning, de
+groep van de laadpaal, een eigen pauze, de avondpiek en het moment waarop iets
+klaar moet zijn.
 
-> Zonder gekoppelde sensoren toont het Overzicht streepjes en vertelt de coach
-> wat er nog ontbreekt. Er worden nooit getallen verzonnen: een dashboard dat
-> het gat opvult met iets plausibels is erger dan een dashboard dat toegeeft dat
-> het het niet weet.
+**Hij verzint nooit een getal.** Elk getal op het scherm komt uit een meting, uit
+een instelling of uit een som die daarop rust. Weet hij iets niet, dan zegt hij
+dat, in plaats van het gat te vullen met iets plausibels.
+
+| Apparaat | Wat de coach doet |
+|---|---|
+| **Laadpaal** | Kiest het goedkoopste moment, moduleert tussen 6 A en het maximum van de paal, en is op tijd klaar. Wisselt nooit van fasemodus. |
+| **Vaatwasser** | Kiest het goedkoopste startmoment en drukt op de startknop. Bij een machine zonder startknop geeft hij het moment door en meet hij mee. |
+| **Boiler** | Schakelt de stroom, en leert zelf hoeveel het element trekt en hoe snel het vat leegloopt. De thermostaat van de boiler bepaalt de temperatuur. |
+| **Overig** | Alles met een vermogenssensor wordt gemeten en meegeteld, ook zonder sturing. |
 
 ---
 
@@ -34,231 +43,226 @@ het dashboard draait op je eigen sensoren zodra je ze gekoppeld hebt.
 
 ### Via HACS (aanbevolen)
 
-1. HACS → menu rechtsboven → **Custom repositories**
+1. HACS, menu rechtsboven, **Custom repositories**
 2. Repository: `https://github.com/Sven2410/domotiapp-coach`, type: **Integration**
 3. Zoek **DomotiApp Coach** in HACS en download hem
 4. Home Assistant herstarten
-5. **Instellingen → Apparaten & diensten → Integratie toevoegen → DomotiApp Coach**
+5. **Instellingen, Apparaten & diensten, Integratie toevoegen, DomotiApp Coach**
 
-Het toevoegen vraagt niets: alles stel je daarna in het paneel zelf in.
-Na het toevoegen verschijnt **DomotiApp Coach** in de zijbalk.
+Het toevoegen vraagt niets: alles stel je daarna in het paneel zelf in. Na het
+toevoegen verschijnt **DomotiApp Coach** in de zijbalk.
 
 ### Handmatig
 
 Kopieer `custom_components/domotiapp_coach` naar de `custom_components` map van
 je Home Assistant configuratie en herstart.
 
+Vereist Home Assistant 2025.6 of nieuwer.
+
 ---
 
-## Instellingen
+## De schermen
 
-Alles staat in het paneel onder **Instellingen**, niet in het configuratiescherm
-van Home Assistant. Klanten draaien dit op hun telefoon achter Kiosk Mode, waar
-de instellingen van HA niet bereikbaar zijn.
+Alles staat in het paneel zelf en niet in het configuratiescherm van Home
+Assistant. Een bewoner draait dit vaak op een tablet of telefoon achter Kiosk
+Mode, waar de instellingen van HA niet bereikbaar zijn.
 
-De secties in de header verdelen het zo:
+| Scherm | Wat er staat | Wie |
+|---|---|---|
+| **Overzicht** | De energiestroom van dit moment, en per aanstuurbaar apparaat een kaart met wat de coach van plan is. | iedereen |
+| **Apparaten** | Welke apparaten er zijn, met hun sensoren en wat de coach ermee mag. | beheerder |
+| **Strategie** | Hoeveel de coach zelf mag beslissen. | beheerder |
+| **Meldingen** | Wie welke melding krijgt, plus alles wat de coach ooit stuurde en besloot. | bewoner ziet zichzelf |
+| **Historie** | Wat er verbruikt is, en onder **Bespaard** wat het slimme moment opleverde. | iedereen |
+| **Installatie** | Naam van de woning, aantal fasen, hoofdzekering, maximaal netvermogen en het energiecontract. | bewoner leest mee |
+| **Instellingen** | Welke sensoren de meetwaarden leveren, de fasen, en de drempels voor de kleuren. | alleen beheerder |
 
-| Sectie | Wat je er instelt | Wie |
-|--------|-------------------|-----|
-| **Apparaten** | Welke apparaten als bol in de energiestroom verschijnen, met hun sensoren en of ze gestuurd mogen worden. Opgeslagen apparaten staan ingeklapt op één regel; tik er een aan om hem te bewerken. | beheerder |
-| **Strategie** | Meldingen: waar de coach uit zichzelf voor waarschuwt, en wie dat bericht krijgt. Elke melding is één regel; tik hem aan om hem in te stellen. | beheerder |
-| **Installatie** | Naam van de woning, aantal fasen, hoofdzekering, maximaal netvermogen, en het energiecontract. | klant leest mee, beheerder wijzigt |
-| **Instellingen** | Waar de Home-knop naartoe gaat, welke sensoren de meetwaarden leveren, de fasen, en de drempelwaarden voor de kleuren. | alleen beheerder |
+**Installatie** is met opzet leesbaar voor de bewoner en alleen te wijzigen door
+een beheerder: die gegevens bepalen wat de coach adviseert, dus iemand die ziet
+dat de zekering of het tarief niet klopt en dat meldt is meer waard dan iemand
+die het scherm niet mag zien. **Instellingen** wijst rechtstreeks naar
+entiteiten en is daarom helemaal verborgen voor niet-beheerders.
 
-**Installatie** is met opzet leesbaar voor de klant en alleen te wijzigen door
-een beheerder: de gegevens daar bepalen wat de coach adviseert, dus een klant
-die ziet dat zijn zekering of tarief niet klopt en dat meldt is meer waard dan
-een klant die het scherm niet mag zien. **Instellingen** wijst rechtstreeks naar
-entiteiten en is daarom helemaal verborgen voor klanten.
+---
 
-### Aansluiting
+## Apparaten
 
-Het maximale netvermogen volgt uit fasen × hoofdzekering × 230 V — 3 × 25 A geeft
-17,250 kW, 1 × 25 A geeft 5,750 kW — maar is aan te passen voor een begrensde of
-verzwaarde aansluiting.
+Elk apparaat kan een vermogenssensor hebben; dat is wat het op de energiestroom
+zet, en waarmee de coach meet wat een beurt gekost heeft. Verplicht is die niet.
+Daarnaast geef je per apparaat aan wat de coach ermee mag: **aansturen**,
+**adviseren** of alleen **noemen**. Wat hij niet kan, belooft het scherm ook
+niet.
 
-### Belastbaarheid
+### Laadpaal
 
-Het overzicht laat zien hoe hard je aansluiting wordt gewerkt. Zijn er
-sensoren per fase ingevuld, dan rekent de coach met de **zwaarst belaste fase**
-tegen de hoofdzekering — een zekering gaat eruit op de fase die overbelast is,
-en een gemiddelde verbergt precies dat geval. Zonder fasesensoren wordt het
-totale netvermogen tegen het maximum gelegd.
+Kies het merk, want welke gegevens een paal levert verschilt per fabrikant.
+**Easee** is uitgewerkt: status, reden geen stroomvraag, levensduurverbruik,
+maximale limiet, gemeten stroom, de dynamische laadgrens van de lader en die van
+het stroomcircuit. Een paal van een ander merk zet je onder **Overig**: die wordt
+gemeten en meegeteld, maar niet gestuurd.
 
-Onder **Strategie** kun je daar een melding aan hangen: vanaf welk percentage,
-hoe lang dat moet aanhouden, naar welke `notify`-diensten (dat zijn de telefoons
-waarop de HA-app is ingelogd) en hoe vaak dat hoogstens mag. Die melding wordt
-door de integratie zelf verstuurd, dus ook als niemand het dashboard open heeft.
+Per auto leg je vast wat de accu kan hebben, op hoeveel fasen hij laadt en **tot
+hoever hij laadt**. Dat laatste is niet de laadgrens in de auto zelf maar het
+doel van de coach: staan ze gelijk, dan weet hij waar de beurt eindigt in plaats
+van het achteraf te merken. Staat het doel lager, dan stopt de coach eerder.
 
-De aanhoudtijd is er tegen valse meldingen: een oven die aanslaat of een motor
-die start geeft een piek van een seconde waar geen zekering van uit gaat en waar
-je niets aan kunt doen. Standaard staat hij op een minuut — een zekering die net
-boven zijn waarde belast wordt, houdt dat het grootste deel van een uur vol, dus
-je bent nog ruim op tijd.
+Drie dingen doet hij bewust niet: van fasemodus wisselen (dat beschadigt het
+relais van sommige auto's), blind laden zonder accustand of zonder prijzen, en
+doorladen als de groep van de paal dat niet aankan.
 
-### Apparaten
+### Vaatwasser
 
-Een apparaat kan een vermogenssensor hebben; dat is wat het op de energiestroom
-zet. Verplicht is die niet — lang niet elke vaatwasser meet zijn eigen verbruik,
-en zonder sensor valt er nog steeds prima mee te plannen. Daarnaast geef je per
-apparaat aan of de coach het straks mag **aansturen** — veel apparaten hangen
-alleen aan een meetstekker en zijn wel te volgen maar niet te bedienen.
+**Home Connect** is uitgewerkt, de integratie achter Bosch, Siemens, Neff,
+Gaggenau en Constructa: de status, het geselecteerde programma, de resterende
+tijd, de deurstand, en de knoppen waarmee gestart en gestopt wordt. Een machine
+van een ander merk zet je onder **Overig** met een meetstekker: dan plant de
+coach hem wel en drukt hij niet, maar krijg je op het juiste moment een bericht
+dat je hem aan kunt zetten.
 
-Bij een **laadpaal** kies je eerst het merk, want welke gegevens een paal levert
-verschilt per fabrikant en lang niet elke paal kan gestart of gepauzeerd worden.
-Easee is uitgewerkt: de Easee-integratie zelf (daar komt het `device_id` uit dat
-`easee.action_command` nodig heeft), status, reden geen stroomvraag,
-levensduurverbruik, maximale limiet en stroom, plus de woorden voor starten,
-stoppen, pauzeren, hervatten en herstarten. Die woorden staan voorgevuld op wat
-Easee vandaag gebruikt en zijn aan te passen. Een paal van een ander merk kies
-je als "Overig": die kan de coach volgen maar niet sturen. Draait een apparaat,
-dan is zijn bol op het overzicht aan te klikken voor precies die gegevens.
+De tabel met programma's (duur, verbruik, piekvermogen) is het uitgangspunt en
+is bewerkbaar. Wat de coach bij een echte beurt meet komt daaroverheen, als
+lopend gemiddelde over de laatste beurten. Zo klopt de planning na een paar keer
+met jouw machine en jouw programma's, en niet met een folder.
 
-Bij een **vaatwasser** gaat het net zo. **Home Connect** is uitgewerkt — dat is
-wat Bosch, Siemens, Neff, Gaggenau en Constructa allemaal gebruiken — met de
-status, het geselecteerde programma, de resterende tijd en de deurstand, plus de
-knoppen waarmee gestart en gestopt wordt. Een vaatwasser van een ander merk
-kies je als "Overig".
+De deurstand is er alleen om te laten zien. Of de machine mag draaien zeg je met
+de knop **Ingeruimd en dicht**: een deur die dichtvalt betekent niet dat hij
+ingeruimd is. Die knop is ook aan een schakelaar te koppelen, voor wie hem liever
+op een eigen keukendashboard heeft.
 
-Integraties spellen dezelfde waarde niet hetzelfde. Home Assistant's eigen Home
-Connect-integratie meldt `ready`; de alternatieve meldt
-`BSH.Common.EnumType.OperationState.Ready`. Het paneel herkent beide vormen —
-per merk hoeven alleen de woorden zelf te worden opgegeven, niet elke spelling
-ervan.
+De coach kiest nooit zelf een programma. Dat doe jij.
 
-De deurstand is er **alleen om te laten zien**. Of de vaatwasser mag draaien,
-zegt de klant zelf met de vrijgaveknop: een deur die dichtvalt betekent niet dat
-de machine ingeruimd is.
+### Boiler
 
-Van de Home Connect-programma's kent het paneel de duur, het verbruik, het
-piekvermogen en of ze te verschuiven zijn — Eco 50 °C duurt ruim 3,5 uur en kost
-0,80 kWh, Voorspoelen is 15 minuten en heeft geen zin om te plannen. Dat zijn
-opgaven van de fabrikant, geen metingen; ze staan erbij zodat de coach straks kan
-uitrekenen wanneer een programma moet beginnen om op tijd klaar te zijn.
+Twee velden en verder niets: de **schakelaar** (een smart plug, een switch of een
+relais) en de **vermogenssensor**. Geen merk, geen temperatuursensor, geen tabel.
 
-Een apparaat verwijderen vraagt om een bevestiging: de prullenbak zit naast de
-regel die je aantikt om een apparaat te openen, en daar hangt een scherm vol
-entiteiten achter. Die vraag wordt één keer gesteld en dan is het klaar —
-verwijderen slaat zichzelf op. Andere wijzigingen die je nog aan het maken bent,
-blijven staan tot je op Opslaan drukt.
+De coach zet de stroom erop of eraf; hoe warm het water wordt blijft aan de
+thermostaat van de boiler zelf. Staat er stroom op en vraagt de boiler niets
+meer, dan is het vat vol. Zo leert hij in een paar beurten hoeveel het element
+trekt, hoeveel er in een vol vat gaat, en hoe snel dat vat weer leegloopt.
+Zonoverschot dat het element kan dragen pakt hij meteen: een vat is de
+goedkoopste plek om overschot in te stoppen.
 
-Je kunt er meerdere van hetzelfde type hebben. Twee vaatwassers zijn twee
-aparte apparaten met elk hun eigen entiteiten, hun eigen vrijgaveknop en hun
-eigen tijden onder Strategie. Zonder eigen naam heten ze "Vaatwasser 1" en
-"Vaatwasser 2"; een naam is duidelijker en het scherm zegt dat er ook bij.
+Gaat de integratie uit of staat het schema uit, dan zet hij de stroom erop. Een
+auto die blijft staan is een ongemak, een koud vat merk je onder de douche.
 
-### Aanstuurbare apparaten
+---
 
-Alles wat op "mag aangestuurd worden" staat, komt op het overzicht in een eigen
-kaart met dezelfde gegevens. Boven de kaarten staan de namen op een rij: je kiest
-er één en die kaart staat er, in plaats van alle kaarten onder elkaar — op een
-telefoon scrol je anders langs het hele rijtje voordat je bij de energiestroom
-bent.
+## Wanneer een apparaat klaar moet zijn
 
-Elke kaart heeft een knop **vrijgeven**. Daarmee zegt de klant dat het apparaat
-nú mee mag doen — de vaatwasser is ingeruimd en de klep zit dicht, de auto hangt
-eraan. Zonder die knop zou de coach straks een lege vaatwasser laten spoelen
-omdat de zon toevallig schijnt, en dat is de enige informatie die geen sensor kan
-leveren. Vrijgeven mag iedereen die in Home Assistant is ingelogd, ook een
-niet-beheerder: degene die in de keuken staat is nooit de installateur.
+Op de kaart van elk apparaat zit een knop **Schema**. Daarachter staan de tijden
+en het werk per dag.
 
-Kan een apparaat opdrachten aan, dan staat er ook **Handmatige besturing**. Die
-opent een venster met de opdrachten van dat merk — bij Easee starten, stoppen,
-pauzeren, hervatten en herstarten; bij een vaatwasser starten en stoppen, met
-een keuzelijst voor het programma — en verstuurt de opdracht meteen. Herstarten
-staat apart: dat breekt een lopende laadsessie af en de paal is daarna even niet
-bereikbaar.
+Voor een **laadpaal** is er één tijd: **klaar om**. Wanneer hij begint zoekt de
+coach zelf uit, en daar is hij voor. Andere apparaten houden alle drie de
+tijden:
 
-> De coach stuurt nog niet uit zichzelf. Handmatige besturing is een mens op de
-> knop; wanneer de coach zelf mag ingrijpen is de volgende stap.
-
-### Wanneer een apparaat mag draaien
-
-Onder **Strategie** staat per apparaat dat een programma draait — vaatwasser,
-wasmachine, droger — binnen welke grenzen de coach mag werken. Inplannen kan
-zodra de coach het apparaat mag aansturen; staat dat nog uit, dan staat het er
-wel bij met de reden erbij, zodat je niet hoeft te raden waarom het ontbreekt.
-
-Drie tijden, elk apart en elk optioneel:
-
-- **Niet eerder dan** — hiervóór begint hij er niet aan, hoe goedkoop de stroom
+- **Niet eerder dan** — hiervoor begint hij er niet aan, hoe goedkoop de stroom
   ook is.
 - **Uiterlijk starten om** — op deze tijd start hij hoe dan ook.
 - **Uiterlijk klaar om** — hier rekent hij de starttijd van terug.
 
-Alleen invullen wat je belangrijk vindt. Wie alleen wil dat de vaatwasser vóór
-het ontbijt klaar is, vult één tijd in en laat de rest leeg. Minstens één van de
-drie is wel nodig: zonder enige grens is later altijd goedkoper en begint de
-coach nooit.
+Vul alleen in wat je belangrijk vindt. Dat kan **elke dag hetzelfde** of **per
+dag**, want een zaterdag is geen dinsdag; dagen die je uitvinkt slaat hij over.
+Met de schuif ernaast zet je het hele schema uit.
 
-Dat kan **elke dag hetzelfde** of **per dag**, want een zaterdag is geen
-dinsdag. Per dag zijn het dezelfde drie tijden, en dagen die je uitvinkt slaat
-hij over.
+Bij een programma-apparaat blijft vrijgeven daarnaast nodig. Een tijd instellen
+is niet hetzelfde als toestemming geven.
 
-Het scherm rekent meteen terug: staat Eco 50 °C klaar en moet de vaatwasser om
-07:00 klaar zijn, dan staat eronder dat starten uiterlijk om 03:15 moet. Zo zie
-je op de plek waar je de tijd invult of hij haalbaar is.
+---
 
-Vrijgeven blijft daarnaast nodig. Een tijd instellen is niet hetzelfde als
-toestemming geven.
+## Aansluiting en belastbaarheid
 
-### Wat niet opgeslagen kan worden
+Het maximale netvermogen volgt uit fasen maal hoofdzekering maal 230 V. Drie keer
+25 A geeft 17,250 kW, één keer 25 A geeft 5,750 kW, en het is aan te passen voor
+een begrensde of verzwaarde aansluiting.
 
-Instellingen die iets beloven wat niet kan gebeuren, blokkeren het opslaan; de
-reden staat in de balk onderin. Dat zijn er twee: een apparaat dat op
-"aansturen" staat zonder de entiteiten die daarvoor nodig zijn, en de melding
-Zware belasting zonder ontvanger. Allebei sloegen ze eerder gewoon op en deden
-daarna niets.
+Zijn er sensoren per fase ingevuld, dan rekent de coach met de **zwaarst belaste
+fase** tegen de hoofdzekering. Een zekering gaat eruit op de fase die overbelast
+is, en een gemiddelde verbergt precies dat geval. Zonder fasesensoren wordt het
+totale netvermogen tegen het maximum gelegd.
 
-Wat alleen nog niet af is, blokkeert niets. Een installatie moet over twee
-avonden ingevuld kunnen worden.
+Daar hangt onder **Meldingen** een waarschuwing aan: vanaf welk percentage, hoe
+lang dat moet aanhouden, naar wie, en hoe vaak dat hoogstens mag. Die melding
+verstuurt de integratie zelf, dus ook als niemand het dashboard open heeft.
 
-### Contract
+De aanhoudtijd is er tegen valse meldingen: een oven die aanslaat of een motor
+die start geeft een piek van een seconde waar geen zekering van uit gaat.
+Standaard een minuut, want een zekering die net boven zijn waarde belast wordt
+houdt dat het grootste deel van een uur vol. Je bent dan nog ruim op tijd.
+
+---
+
+## Contract
 
 Een **vast** contract is een all-in prijs, een terugleververgoeding en
 terugleverkosten. Bij een **dynamisch** contract kies je tussen één sensor die de
-all-in prijs al levert, of de kale marktprijs waarbij de coach zelf
-energiebelasting en leveranciersopslag optelt en er btw overheen rekent.
+all-in prijs al levert, of de kale marktprijs, waarbij de coach zelf
+energiebelasting en leveranciersopslag optelt en er btw overheen rekent. Geef er
+bij dynamisch ook bij of de prijs **per uur of per kwartier** verandert: dat is
+niet uit de sensor af te leiden, en het is de blokgrootte waarin de coach plant.
 
-Bij dynamisch geef je er ook bij of de prijs **per uur of per kwartier**
-verandert. Dat is niet uit de sensor af te leiden — een uurprijs ziet er precies
-hetzelfde uit als een kwartierprijs die een uur lang gelijk blijft — en het is de
-blokgrootte waarin de coach straks plant.
+Bij een vast contract kost elk uur hetzelfde. Dan valt er met haasten niets te
+winnen en laadt de coach in het rustigste tempo dat de klaar-tijd nog haalt; dat
+belast de aansluiting het minst. Eigen zon is ook dan goedkoper dan het net, dus
+die wint vanzelf.
 
-Wijzigen mag alleen een beheerder; meekijken mag iedereen. Een wijziging op de
-ene telefoon komt vanzelf door op een tablet die openstaat.
+---
 
-### Slimme meter
+## Slimme meter en eenheden
 
 Twee patronen worden ondersteund, in te stellen onder Energiebronnen:
 
-- **Afzonderlijk** — twee sensoren, energieverbruik en energieproductie, waarvan
-  er altijd één op nul staat.
+- **Afzonderlijk** — twee sensoren, verbruik en teruglevering, waarvan er altijd
+  één op nul staat.
 - **Gecombineerd** — één sensor die negatief wordt zodra je teruglevert.
 
-### Eenheden
-
 Of een sensor in W, kW of MW meet maakt niet uit: de integratie leest de eenheid
-van de entiteit en rekent alles om. In beeld wordt per waarde gekozen — onder
-een kilowatt in watt, daarboven in kW.
+van de entiteit en rekent alles om. In beeld wordt per waarde gekozen: onder een
+kilowatt in watt, daarboven in kW.
+
+---
+
+## Meldingen
+
+Per persoon staat er welke soort hij krijgt: kritiek, gewone meldingen,
+besluiten, en de belastingwaarschuwing. Een bewoner ziet zichzelf en zet zijn
+eigen schuiven; de beheerder voegt mensen toe.
+
+De regel is: **per beurt één verslag, plus wat je zelf moet oplossen.** Besluiten
+staan standaard uit en komen alleen in de geschiedenis. Dat een boiler om drie
+uur 's nachts weer warm is hoeft niemand te wekken.
+
+Op hetzelfde scherm staat alles wat de coach ooit stuurde, en elk besluit dat hij
+nam, met het moment erbij. Daarmee is achteraf na te gaan waarom hij deed wat hij
+deed.
+
+---
+
+## Bespaard
+
+Onder Historie staat wat het slimme moment opleverde, per periode en per
+apparaat. De maat is eerlijk: wat dezelfde beurt gekost zou hebben als hij meteen
+bij het inpluggen of vrijgeven op vol vermogen van het net was gegaan, min wat er
+werkelijk betaald is. Dat verschil valt uiteen in twee delen: wat de zon
+bespaarde, en wat het wachten bespaarde.
+
+Start de integratie midden in een beurt opnieuw op, dan rekent hij het begin
+terug uit de recorder en de eigen kwartieropslag, zodat er geen beurt wegvalt.
 
 ---
 
 ## Kiosk Mode
 
-Klanten draaien hun dashboard vaak met de HACS-integratie
-[Kiosk Mode](https://github.com/NemesisRE/kiosk-mode), die de header en de
-zijbalk verbergt. Daardoor kunnen ze niet meer zelf tussen dashboards
-navigeren.
-
-Daar is in het ontwerp rekening mee gehouden:
+Wie het dashboard draait met de HACS-integratie
+[Kiosk Mode](https://github.com/NemesisRE/kiosk-mode) verbergt de header en de
+zijbalk van Home Assistant. Daar is in het ontwerp rekening mee gehouden:
 
 - De header van DomotiApp Coach hoort **bij het paneel zelf** en blijft dus
-  zichtbaar in Kiosk Mode.
-- De **Home**-knop rechtsboven brengt de klant terug naar het eigen dashboard.
+  zichtbaar.
+- De **Home**-knop rechtsboven brengt je terug naar het eigen dashboard.
 
-Voeg op het eigen dashboard van de klant een knop toe die de andere kant op
-gaat:
+Voeg op dat eigen dashboard een knop toe die de andere kant op gaat:
 
 ```yaml
 type: button
@@ -274,13 +278,13 @@ tap_action:
 ## Ontwerp
 
 Donkere achtergrond met `#026FA1` als accentkleur, en het eigen lettertype van
-Home Assistant — er worden geen fonts meegeleverd en er gaat geen verkeer naar
-een externe CDN.
+Home Assistant. Er worden geen fonts meegeleverd en er gaat geen verkeer naar een
+externe CDN.
 
 De kleuren van de energiestromen zijn niet met de hand gekozen maar doorgerekend
 tegen de donkere achtergrond, op lichtheid, verzadiging, contrast en
-onderscheidbaarheid bij kleurenblindheid — en getoetst in beide netstanden,
-omdat inkoop en teruglevering nooit tegelijk in beeld zijn.
+onderscheidbaarheid bij kleurenblindheid, en getoetst in beide netstanden, omdat
+inkoop en teruglevering nooit tegelijk in beeld zijn.
 
 | Rol | Kleur |
 |-----|-------|
@@ -291,11 +295,11 @@ omdat inkoop en teruglevering nooit tegelijk in beeld zijn.
 | Apparaatbol 1 | `#fd0774` roze |
 | Apparaatbol 2 | `#039580` teal |
 
-Rood en groen zijn bewust géén stroomkleur: die zijn gereserveerd voor status
-(duur/kritiek en goed). Elke stroom heeft daarnaast een eigen icoon en
+Rood en groen zijn bewust geen stroomkleur: die zijn gereserveerd voor status
+(duur of kritiek, en goed). Elke stroom heeft daarnaast een eigen icoon en
 tekstlabel, zodat kleur nooit de enige drager van betekenis is.
 
-**Vervang deze kleuren niet zonder opnieuw te toetsen** — de marges zijn krap en
+**Vervang deze kleuren niet zonder opnieuw te toetsen.** De marges zijn krap en
 twee van de zes paren zitten dicht op hun ondergrens.
 
 ---
@@ -303,38 +307,53 @@ twee van de zes paren zitten dicht op hun ondergrens.
 ## Techniek
 
 - Geen buildstap: het paneel bestaat uit gewone ES-modules en web components.
-- De integratie registreert het paneel met `panel_custom.async_register_panel`
-  en serveert de frontend vanaf een eigen statisch pad.
+- Het denkwerk (`planner.py`) kent Home Assistant niet en is los te draaien tegen
+  een hele dag echte historie voordat er iets geschakeld wordt. De bedrading
+  (`coach.py`) leest de sensoren en stuurt de apparaten.
 - Instellingen staan in HA-storage en gaan over een eigen websocket-API.
 - Live waarden komen **niet** uit de `hass`-property die het paneel krijgt
-  aangereikt, maar uit een eigen abonnement op `state_changed` (`state-feed.js`).
-  Zie de toelichting in dat bestand.
-- Vereist Home Assistant 2025.6 of nieuwer.
+  aangereikt, maar uit een eigen abonnement op `state_changed`
+  (`state-feed.js`).
 
 ```
 custom_components/domotiapp_coach/
 ├── __init__.py            paneel- en assetregistratie
 ├── config_flow.py         setup (vraagt niets)
-├── const.py
-├── storage.py             opslag van de instellingen
+├── planner.py             al het denkwerk, zonder Home Assistant
+├── coach.py               sensoren lezen, apparaten sturen, beurten bijhouden
+├── storage.py             opslag van instellingen, beurten en meldingen
 ├── websocket.py           lezen en schrijven vanuit het paneel
 ├── monitor.py             bewaakt de belasting en stuurt de melding
+├── ontvangers.py          wie welke melding krijgt
+├── report.py              het pdf-rapport
 ├── brand/                 icon.png, logo.png
 └── frontend/
     ├── domotiapp-coach-panel.js   entry point, routing, rechten
-    ├── img/               logo in de header
     └── src/
         ├── base.js        mini-basisklasse voor de components
         ├── theme.js       design tokens
         ├── format.js      eenheden en getalweergave
         ├── state-feed.js  eigen abonnement op statuswijzigingen
         ├── data-source.js meetwaarden en prijsberekening
-        ├── devices.js     apparaattypes
-        ├── header.js      header met navigatie en Home-knop
-        ├── icons.js
+        ├── devices.js     apparaattypes en hun velden
+        ├── savings.js     Bespaard
+        ├── schedule-sheet.js    het schema van één apparaat
+        ├── plan-ahead-sheet.js  wat de coach van plan is, per uur
         ├── components/    stat-tile, energy-flow, entity-picker
-        └── views/         overzicht, apparaten, strategie, installatie,
-                           instellingen (editor-base deelt hun opslaglogica)
+        └── views/         overzicht, apparaten, strategie, meldingen,
+                           historie, installatie, instellingen
+```
+
+De proeven draaien zonder Home Assistant: een nagebouwde HA, en een virtueel huis
+met een zon die opkomt, een huis dat kookt, een auto die voller wordt en een
+meter die dat ziet. Een hele nacht laden duurt daarin een seconde.
+
+```
+python tests/test_planner.py     het denkwerk
+python tests/test_coach.py       de bedrading
+python tests/test_virtueel.py    hele beurten in het virtuele huis
+python tests/test_archive.py     de kwartieropslag
+node   tests/test_rapport.mjs    het rapport en het paneel
 ```
 
 ---

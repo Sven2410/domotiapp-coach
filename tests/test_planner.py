@@ -1,6 +1,6 @@
 """Scenario's langs de rekenkern, zonder Home Assistant.
 
-Elk geval is een situatie die vandaag bij Sven had kunnen staan, met de uitkomst
+Elk geval is een situatie die vandaag in die woning had kunnen staan, met de uitkomst
 die erbij hoort. Draait tegen planner.py zoals die op schijf staat.
 """
 
@@ -56,7 +56,7 @@ def middag(uur=14, minuut=0):
 
 
 def venster(now, klaar="06:00"):
-    """Een venster met klaar-tijd morgenvroeg, zoals bij Sven."""
+    """Een venster met klaar-tijd morgenvroeg, zoals in een echte woning."""
     einde = (now + dt.timedelta(days=1)).replace(
         hour=int(klaar[:2]), minute=int(klaar[3:]), second=0, microsecond=0
     )
@@ -118,7 +118,7 @@ controle("en zegt wanneer hij dan wel begint", "15:00" in d2.plan or "15:00" in 
 
 print("=== 2. zonder zon op komst geldt de avondregel ===")
 # Is er niets meer van het dak te verwachten, dan is elk uur even duur en valt er
-# op prijs niets te kiezen. Dan blijft Svens afspraak van 20-08-2026 over: wacht
+# op prijs niets te kiezen. Dan blijft de afspraak van 20-08-2026 over: wacht
 # tot acht uur, want dan zijn de pieken van koken voorbij.
 d = decide(nu, [], NET_LEEG, sven_auto(), paal(), venster(nu), tariff=VAST,
            sun=ZON_KRAP, forecast=Forecast(), holding=planner.STOP_ROUNDS)
@@ -316,7 +316,7 @@ print(f"  {d.rule}: {d.reason}  risico={d.deadline_risk}")
 controle("geen loos alarm", not d.deadline_risk, d.reason)
 
 print("=== 20. de eigen rem van de coach is geen bewijs dat de paal niet harder kan ===")
-# Wat er op 20-08-2026 om 15:48 bij Sven gebeurde. Auto op 12%, klaar om 06:00,
+# Wat er op 20-08-2026 om 15:48 in die woning gebeurde. Auto op 12%, klaar om 06:00,
 # zonvolgend op 6 A omdat de coach hem daar zelf op zette. Er moet 19,3 kWh in:
 # op 6 A is dat 13,96 uur en dus te laat, op 14 A 5,98 uur en dus zeeën van tijd.
 zonvolgend = Charger(
@@ -384,7 +384,7 @@ controle("en zonder allebei blijft het zoals het was",
          and planner.charging_pace(dt.datetime(2026, 8, 20, 15, 48), blind, 14) == 6)
 
 print("=== 23. dynamisch contract: vroeg vol als de dure uren nog moeten komen ===")
-# Svens vraag van 20-08-2026: de klaar-tijd is een moment waarop de auto vol
+# de eigen vraag van 20-08-2026: de klaar-tijd is een moment waarop de auto vol
 # moet zijn, niet een moment waarop hij vol moet raken. Komt er een avondpiek
 # aan en is de middag spotgoedkoop, dan hoort hij 's middags te laden en om acht
 # uur 's avonds al vol te staan, elf uur voor de klaar-tijd.
@@ -465,7 +465,7 @@ controle("en sleepte de dure uren mee naar binnen",
          f"{max(r['price'] for r in oud_uren)}")
 
 print("=== 25. wie wacht, hoort te lezen wanneer hij weer begint ===")
-# Sven op 20-08-2026, kwart voor zeven 's avonds: "hoezo is de laadpaal gestopt
+# De eigenaar op 20-08-2026, kwart voor zeven 's avonds: "hoezo is de laadpaal gestopt
 # met laden?" De kaart zei alleen dat hij op tijd zou bijvullen, niet wanneer.
 avond = dt.datetime(2026, 8, 20, 18, 48)
 tot_zes = Window(enabled=True, opens=None, deadline=dt.datetime(2026, 8, 21, 6, 0))
@@ -496,7 +496,7 @@ controle("en een minuut erna gaat hij",
          net_erna.rule == "easy-pace" and net_erna.charge, net_erna.rule)
 
 print("=== 26. vast contract: wachten houdt op om acht uur 's avonds ===")
-# Sven op 20-08-2026: "op een vast contract is een kwartier speling niet
+# De eigenaar op 20-08-2026: "op een vast contract is een kwartier speling niet
 # voldoende, ik wil dat je het zo maakt wanneer het niet meer rendabel is van de
 # zon dat hij vanaf 20 uur dan gaat laden, dan heb je de grote pieken van het
 # koken etc achter de rug en belast je het ook niet zo veel."
@@ -519,7 +519,7 @@ controle("en noemt acht uur, niet half twee", "20:00" in d.plan, d.plan)
 
 d = vast_besluit(dt.datetime(2026, 8, 20, 20, 0))
 print(f"  20:00  {d.rule}: {d.amps} A  {d.reason}")
-# Sven op 25-08-2026: op een vast contract is de nacht lang genoeg, dus de
+# De eigenaar op 25-08-2026: op een vast contract is de nacht lang genoeg, dus de
 # aansluiting hoeft er niet vol voor open. Sinds 04-09-2026 is rustig het
 # laagste hele aantal ampère dat een uur vóór de klaar-tijd klaar is: 13,1 kWh
 # tussen 20:00 en 05:00 is 6,3 A, dus 7. Op 6 A was hij om 05:00 niet klaar en
@@ -572,7 +572,7 @@ controle("de pauze reikt tot acht uur en niet verder",
          d.hold_minutes == 600, f"{d.hold_minutes}")
 
 print("=== 29. snelladen dat de zekering tegenkomt, zegt dat het de zekering is ===")
-# Sven op 20-08-2026 om 19:18. Hij plugde in, zette snelladen aan, en kreeg 8 A.
+# De eigenaar op 20-08-2026 om 19:18. Hij plugde in, zette snelladen aan, en kreeg 8 A.
 # Precies nagerekend uit zijn meter: op het moment dat de auto begon te trekken
 # stond L1 al op 16 A terwijl de paal zelf nog 2,7 A meldde. Het huis leek dus
 # 13,3 A te vragen, en 25 min 13,3 min 3 marge is 8,7 A.
@@ -600,7 +600,7 @@ controle("een minuut later gewoon 14 A", d.amps == 14, f"{d.amps} A")
 controle("en dan zwijgt hij over de zekering", "zekering" not in d.reason, d.reason)
 
 print("=== 30. een halve ochtendzon is geen reden om stroom bij te kopen ===")
-# Sven op 25-08-2026: "zo goedkoop mogelijk". Om negen uur is 0,9 kW overschot
+# De eigenaar op 25-08-2026: "zo goedkoop mogelijk". Om negen uur is 0,9 kW overschot
 # genoeg om de coach te laten beginnen, waarna hij ruim 3 kW uit het net bijkoopt
 # terwijl diezelfde kilowatturen om één uur gratis van het dak komen.
 OCHTEND = dt.datetime(2026, 8, 26, 9, 0)
@@ -713,7 +713,7 @@ print("=== 31. wachten op de zon van vandaag zonder te weten hoeveel er in moet 
 # Gevonden door proef 21 in test_coach.py, in v0.34.0 van 25-08-2026. De poort
 # `_zon_verwacht` laat een onbekende accustand er bewust doorheen: "ik weet het
 # niet" is geen reden om te laden. Maar de zin eronder zette dat onbekende getal
-# in de tekst, en dan valt de hele ronde om met een TypeError. Bij Sven had dat
+# in de tekst, en dan valt de hele ronde om met een TypeError. In die woning had dat
 # gekund op de avond van 25-08, toen zijn Ford-integratie wegviel.
 d = ochtend_besluit(soc=None)
 print(f"  zonder accustand  {d.rule}: {d.amps} A  {d.reason}")
@@ -729,7 +729,7 @@ controle("met accustand noemt hij de zon die er is",
          "6,0 kW zon over" in d.reason, d.reason)
 
 print("=== 32. een klaar-tijd overdag krijgt een uur speling ===")
-# Sven op 26-08-2026, zijn eigen getal. Een kwartier is te krap bij een
+# De eigenaar op 26-08-2026, zijn eigen getal. Een kwartier is te krap bij een
 # klaar-tijd overdag, en dat komt doordat de avondregel daar niet bij helpt:
 # die zet een auto met een klaar-tijd 's nachts al om acht uur 's avonds aan,
 # ruim voor het laatste moment dat nog past. Overdag is er geen avond die
@@ -737,7 +737,7 @@ print("=== 32. een klaar-tijd overdag krijgt een uur speling ===")
 #
 # Het is bewust geen nieuw begrip: de vraag "hoort er een avond bij" is
 # dezelfde die `_evening_before` al beantwoordde.
-# Sinds 04-09-2026 is het overal een uur. Sven: "De eindtijd is heel
+# Sinds 04-09-2026 is het overal een uur. De eigenaar: "De eindtijd is heel
 # belangrijk. Een uur daarvoor moet hij altijd klaar zijn." Daarvoor was het
 # een half uur 's nachts (zijn getal van 30-08) en een uur overdag.
 for uur, verwacht in ((6, 1.0), (8, 1.0), (12, 1.0), (19, 1.0), (21, 1.0), (23, 1.0)):
@@ -754,7 +754,7 @@ controle("'s nachts is het ook een uur",
          planner._latest_start(dt.datetime(2026, 8, 21, 6, 0), 2.0)
          == dt.datetime(2026, 8, 21, 3, 0))
 
-# Svens eis van 04-09-2026: klaar om 07:00 betekent uiterlijk 06:00 vol. Met
+# de eigen eis van 04-09-2026: klaar om 07:00 betekent uiterlijk 06:00 vol. Met
 # een auto die er nog niets in hoeft is dat precies de speling.
 controle("klaar om 07:00 betekent uiterlijk 06:00 vol",
          planner._latest_start(dt.datetime(2026, 8, 21, 7, 0), 0.0)
@@ -798,7 +798,7 @@ controle("'s avonds is er niets veranderd",
          not d.charge and d.rule == "wait-for-sun", d.rule)
 
 print("=== 33. de trage meter van de paal kost geen ampere meer ===")
-# Svens meting van 20-08-2026. Hij zette snelladen aan, de coach schreef 16 A,
+# de eigen meting van 20-08-2026. Hij zette snelladen aan, de coach schreef 16 A,
 # de paal trok op, en de fasemeting van het huis stond al op 16 terwijl de paal
 # zelf nog 2,7 A meldde. Die 13,3 A werd aan het huis toegerekend terwijl het de
 # auto zelf was, en er kwam 8 A uit. Een ronde later klopte het.
@@ -870,7 +870,7 @@ controle("een stilstaande paal die net niets trok krijgt geen correctie",
 # staat zijn eigen meter meteen op nul terwijl de fasemeting van het huis zijn
 # stroom nog even meedraagt. Dat werd aan het huis toegerekend, en de coach
 # meldde dat de aansluiting te zwaar belast was terwijl er niets liep. Gezien bij
-# Van den Dam op 29-08-2026 om 11:27:06, met de kabel er al uit: regel=no-room.
+# de klantwoning op 29-08-2026 om 11:27:06, met de kabel er al uit: regel=no-room.
 AFBOUWEND = Grid(surplus_w=0.0, phase_amps=[16.0, 3.0, 3.0], fuse_amps=25.0,
                  charger_amps=0.0, margin_amps=3.0, recent_charger_amps=16.0)
 NET_GESTOPT = Charger(max_amps=16.0, connected=True, charging=False,
@@ -895,7 +895,7 @@ controle("een huis dat echt vol zit wordt niet weggepoetst",
 
 print()
 print("=== het aantal fasen staat vast en wordt niet meer aangenomen ===")
-# De bus van Van den Dam, 29-08-2026: 65 kWh, 12,5% vol, aan een paal van 16 A.
+# De bus van de klantwoning, 29-08-2026: 65 kWh, 12,5% vol, aan een paal van 16 A.
 # Zolang de keuze "allebei" bestond rekende deze som met een fase, want een auto
 # die kan wisselen verraadt zich pas als hij laadt. Dat gaf 17,2 uur, waarna de
 # klaar-tijdregel om 11:13 aansloeg en de coach op 16 A van het net laadde
@@ -911,7 +911,7 @@ controle("en dat scheelt precies een factor drie", abs(een / drie - 3.0) < 1e-6,
          f"{een / drie}")
 
 # En de ondergrens van de zonregel hangt aan hetzelfde getal: driefasig kan niet
-# onder de 4,1 kW beginnen. Sven op 29-08-2026, gevraagd en akkoord: "het is niet
+# onder de 4,1 kW beginnen. De eigenaar op 29-08-2026, gevraagd en akkoord: "het is niet
 # erg dan 3 fase op ongeveer 4 kW laden, we moeten gebruikmaken van de zon."
 controle("driefasig begint pas bij 4.140 W overschot",
          planner.watts_for(planner.MIN_AMPS, 3) == 4140.0,
@@ -921,7 +921,7 @@ controle("en eenfasig al bij 1.380 W",
          f"{planner.watts_for(planner.MIN_AMPS, 1)}")
 
 print("=== 34. een volle aansluiting zet een lopende beurt niet meer uit ===")
-# Bij Van den Dam meldde de huismeter op 30-08-2026 om 04:28:56 een enkel sample
+# In de klantwoning meldde de huismeter op 30-08-2026 om 04:28:56 een enkel sample
 # van 27 A op L3. De coach schreef 0 A, de paal stond achtenzeventig seconden
 # uit, en de Ford beeindigde zijn laadbeurt en kwam er die hele dag niet meer
 # uit: om 09:37 stond de auto nog op 69,5%.
@@ -970,7 +970,7 @@ controle("een paal die stilstaat begint er niet aan", not stil.charge,
          f"{stil.rule} {stil.amps}")
 
 print("=== 35. wat de lastbewaker vrijgeeft is een restwaarde, geen tweede zekering ===")
-# Nagemeten bij Van den Dam met `sensor.1_equalizer_limiet`. Op 29-08-2026 om
+# Nagemeten in de klantwoning met `sensor.1_equalizer_limiet`. Op 29-08-2026 om
 # 16:50 meldde die 18 A terwijl de paal 15 A trok en het huis er zelf ongeveer 5
 # bijhad; om 17:20 met een leeg huis stond hij op 20. Het getal beweegt dus mee
 # met het huis, en de paal zelf telt er niet in mee.
@@ -1023,7 +1023,7 @@ controle("een bewaker die niets vrijgeeft houdt hem niet op de laagste stand",
 
 
 print("=== 36. de tijdlijn tot de auto vol moet zijn ===")
-# Sven op 30-08-2026: "ik wil zien wat de coach van plan is met hele tijdlijn tot
+# De eigenaar op 30-08-2026: "ik wil zien wat de coach van plan is met hele tijdlijn tot
 # dat hij vol moet zijn." De opzet hieronder is zijn eigen nacht van 29 op 30
 # augustus: een bus van 65 kWh op 48,5%, driefasig, klaar om 07:00, met de
 # echte prijzen van die nacht.
@@ -1058,7 +1058,7 @@ controle("en hoe lang dat duurt", abs(plan36.hours_needed - 3.37) < 0.05,
          f"{plan36.hours_needed}")
 
 # Vier uur nodig, dus de vier goedkoopste vóór 06:00, want het plan eindigt
-# een uur vóór de klaar-tijd (Sven, 04-09-2026): 02, 03, 04 en 05.
+# een uur vóór de klaar-tijd (de eigenaar, 04-09-2026): 02, 03, 04 en 05.
 laadt = [blok.start.hour for blok in plan36.blocks if blok.charging]
 print(f"  laadt in de uren: {laadt}")
 controle("hij pakt de vier goedkoopste uren voor de klaar-tijd",
@@ -1140,9 +1140,9 @@ controle("en de sommen staan er nog steeds",
          f"{plan36e}")
 
 # Wat er gepland staat hoort het tekort te dekken, anders is "vol rond" geen
-# belofte. Bij Van den Dam stond op 04-09-2026 "Vol rond 17:00" boven acht
+# belofte. In de klantwoning stond op 04-09-2026 "Vol rond 17:00" boven acht
 # zonblokken van samen 33 van de 66 kWh: de prijzen tot zondag 06:00 waren er
-# nog niet, dus alleen zon. Sven las het als een belofte. Het plan telt sinds
+# nog niet, dus alleen zon. De eigenaar las het als een belofte. Het plan telt sinds
 # v0.47.3 mee wat het gepland heeft, en zegt of dat alleen zon is.
 controle("het volledige plan dekt wat er nog in moet",
          abs(plan36.planned_kwh - plan36.kwh_needed) < 0.1,
@@ -1175,7 +1175,7 @@ controle("terwijl expected_done wel het einde van het laatste zonuur is",
          plan36f.expected_done is not None and plan36f.expected_done.hour == max(uren36f) + 1,
          f"{plan36f.expected_done}")
 
-# Sven op 04-09-2026, over een rij "4,1 kWh zon" bij een dak van 2,4 kWh: "dat
+# De eigenaar op 04-09-2026, over een rij "4,1 kWh zon" bij een dak van 2,4 kWh: "dat
 # weet je toch niet. Laat sowieso zien hoeveel ampère hij laadt en kW." Het
 # zonaandeel is wat het dak geeft, het totaal is wat er in de auto gaat, en
 # de stroom en het vermogen staan erbij.
@@ -1209,7 +1209,7 @@ controle("een echt zonuur laadt op wat het dak geeft en zegt dat",
 controle("een wachtuur heeft geen stroom",
          all(b.amps == 0 and b.kw == 0 for b in plan36f.blocks if not b.charging))
 
-# Bij Van den Dam op 04-09-2026 om 21:21 trok fase 3 zestien ampère door het
+# In de klantwoning op 04-09-2026 om 21:21 trok fase 3 zestien ampère door het
 # huis, en de kop zei "op vol vermogen 15 u 58 m op 6 A, uiterlijk beginnen
 # zaterdag 13:02". De klaar-tijdregel rekent met wat paal en auto kunnen, en
 # de kop hoort hetzelfde te zeggen. Het uur van nu houdt wel het plafond van nu.
@@ -1223,7 +1223,7 @@ controle("dus uiterlijk beginnen verschuift niet door een piek in het huis",
          plan36g.latest_start == plan36.latest_start, f"{plan36g.latest_start}")
 
 print("=== 37. twee getallen uit twee momenten in een zin ===")
-# Sven op 30-08-2026, tijdens het herstarten: "de equalizer staat op 18 A maar
+# De eigenaar op 30-08-2026, tijdens het herstarten: "de equalizer staat op 18 A maar
 # de coach zegt dat de lastbewaking op 7 A zit?" Allebei waar en toch onzin. De
 # 7 was de gemeten stroom van dat moment; de reden `limited_by_equalizer` kwam
 # van `sensor.1_reden_geen_stroom`, en die was op dat moment vijf minuten oud.
@@ -1277,7 +1277,7 @@ controle("en geeft de bewaker dus ook de schuld niet",
          not krap37.rule.endswith("+held-back"), f"{krap37.rule}")
 
 print("=== 38. een lopende beurt stopt niet voor een verschil dat er niet is ===")
-# Gezien bij Van den Dam op 30-08-2026, met zijn eigen prijzen. Om 12:05 stond de
+# Gezien in de klantwoning op 30-08-2026, met zijn eigen prijzen. Om 12:05 stond de
 # accu op 70% en waren er drie uur nodig: 12, 13 en 14 uur zaten in de lijst en
 # hij begon te laden. Tien minuten later stond hij op 72%, waren er nog maar twee
 # uur nodig, en viel het uur van dat moment eruit. Verschil met het duurste uur
@@ -1342,10 +1342,10 @@ controle("een cent duurder is wel een reden om te stoppen",
          not merkbaar.charge, f"{merkbaar.rule}")
 
 print("=== 39. de coach zegt niet dat je teruglevert terwijl je inkoopt ===")
-# Sven op 30-08-2026: "de coach zegt je levert nu 0,7 kW terug maar ik lever
+# De eigenaar op 30-08-2026: "de coach zegt je levert nu 0,7 kW terug maar ik lever
 # helemaal niks terug." Hij had gelijk, en de meter ook.
 #
-# De rauwe getallen van dat moment, om 13:11:46 bij Van den Dam:
+# De rauwe getallen van dat moment, om 13:11:46 in de klantwoning:
 #
 #   afname          3.683 W
 #   teruglevering       0 W
@@ -1405,8 +1405,8 @@ controle("ook onder de ondergrens van de paal", "zon over" in d39b.reason
          and "levert" not in d39b.reason, f"{d39b.reason}")
 controle("en dan op de ondergrens", d39b.amps == MIN_AMPS, f"{d39b.amps} A")
 
-print("=== 40. alle scenario's tegen elkaar, met Van den Dams eigen cijfers ===")
-# Sven op 30-08-2026: "lage kosten en zoveel mogelijk zon moet uit de strategie.
+print("=== 40. alle scenario's tegen elkaar, met de klantwoning zijn eigen cijfers ===")
+# De eigenaar op 30-08-2026: "lage kosten en zoveel mogelijk zon moet uit de strategie.
 # Het eindoel is altijd lage kosten. Dus alle scenario's moeten vergeleken worden
 # met elkaar: lage prijs met zon, hoge prijs met zon, laden op een later tijdstip
 # als de prijs gunstiger is. Belangrijk is kijken naar forecast."
@@ -1598,7 +1598,7 @@ controle("en dat is aantoonbaar minder dan de duurste manier",
          kosten41 < slechtst, f"{kosten41:.2f} tegen {slechtst:.2f}")
 
 print("=== 44. de veiligheidsrail mag afremmen maar niet stoppen ===")
-# Twee keer op 30-08-2026 stond er bij Van den Dam een ronde lang "je aansluiting
+# Twee keer op 30-08-2026 stond er in de klantwoning een ronde lang "je aansluiting
 # is te zwaar belast om te laden", om 12:47:36 en om 15:02:58. De fasen stonden
 # op dat moment op 5, 5 en 7 ampere en de zekering is 25. Ik heb er die dag twee
 # keer naar gezocht in de meting; het was de rail zelf.
@@ -1626,7 +1626,7 @@ controle("dus geen 'te zwaar belast' meer bij een rustig huis",
          d44.rule != "no-room", f"{d44.rule}")
 
 # En de rail doet nog wel waar hij voor is: hij houdt een optrekkende paal tegen
-# die anders op een naijlende meting omhoog zou springen. Svens getallen van
+# die anders op een naijlende meting omhoog zou springen. de eigen getallen van
 # 20-08-2026: de paal meldt 2,7 A terwijl L1 al op 16 staat.
 OPTREKKEND = Grid(surplus_w=0.0, phase_amps=[16.0, 3.0, 2.0], fuse_amps=25.0,
                   charger_amps=2.7, margin_amps=2.0)
@@ -1646,7 +1646,7 @@ controle("een huis dat er zelf overheen gaat wint van de rail",
          plafond44c < MIN_AMPS, f"{plafond44c} A")
 
 print("=== 45. een klaar-tijd die verder weg is dan morgen krijgt zijn dag ===")
-# Sven op vrijdagavond 04-09-2026, met zaterdag uitgevinkt en zondag klaar om
+# De eigenaar op vrijdagavond 04-09-2026, met zaterdag uitgevinkt en zondag klaar om
 # 06:00: "er staat prijzen tot 06:00 zijn nog niet bekend maar dat is wel zo,
 # want morgen is het zaterdag en dan is 06:00 al wel bekend. Er moet iets komen
 # staan dat zaterdag niet ingepland staat en dan zondag pas vol moet."
@@ -1712,7 +1712,7 @@ controle("de tijdlijn zegt hetzelfde",
          plan45.note)
 
 print("=== 46. een bekend uur onder het gemiddelde mag, ook zonder de prijzen van morgen ===")
-# Sven op 05-09-2026, na een ochtend waarin de coach bij Van den Dam van 08:00
+# De eigenaar op 05-09-2026, na een ochtend waarin de coach in de klantwoning van 08:00
 # (0,184) tot 13:24 op de prijzen van zondag wachtte en de laatste 11 kWh
 # daardoor 's nachts tegen 0,304 moest halen: "nu hebben we dus niks bespaard."
 # Een bekend uur van vandaag is geen gok: ligt het onder het gemiddelde van
@@ -1746,13 +1746,13 @@ controle("en het plan heet nog steeds alleen-zon, want de rest komt met de prijz
          plan46.solar_only, f"{plan46.solar_only}")
 
 print("=== 47. een restje vóór een vol uur: het uur gaat vol, het staartje zegt wanneer hij klaar is ===")
-# Sven op 05-09-2026 over de tijdlijn van zaterdag: "waarom staat er bij 3 uur
+# De eigenaar op 05-09-2026 over de tijdlijn van zaterdag: "waarom staat er bij 3 uur
 # geen A maar is wel groen", en later "nu staat er ineens 2 A, dat is helemaal
 # niet de bedoeling, hij mag niet onder de 6 A." De knapzak had 0,5 kWh in het
 # uur van 03:00 gelegd naast een vol uur om 04:00, en de kaart deelde dat door
 # een uur. Wat de coach werkelijk doet: om 03:00 op vol vermogen beginnen en
 # doorladen, want stoppen laat te weinig speling over (cheap-hour+reserve, en
-# Sven op 04-09-2026: "een uur daarvoor moet hij altijd klaar zijn"). Dus vol
+# De eigenaar op 04-09-2026: "een uur daarvoor moet hij altijd klaar zijn"). Dus vol
 # rond 04:03, en dat hoort de kaart te zeggen.
 prijzen47 = []
 for stap, prijs in enumerate([0.38, 0.38, 0.38, 0.38, 0.34, 0.34, 0.34, 0.328, 0.304, 0.3039]):
@@ -1799,7 +1799,7 @@ controle("en het plan dekt nog steeds precies wat er in moet",
          abs(plan47.planned_kwh - nodig47) < 0.1, f"{plan47.planned_kwh} van {nodig47}")
 
 print("=== 48. een auto die bovenin gas terugneemt, en een geschatte accustand ===")
-# Sven op 06-09-2026: "bepaalde auto's schroeven vanaf een bepaald procent zelf
+# De eigenaar op 06-09-2026: "bepaalde auto's schroeven vanaf een bepaald procent zelf
 # hun doorlaatbaarheid in ampère terug." Wat zo'n auto per band van tien
 # procent aankan komt uit eerdere beurten (`car_pace`); de som rekent per band
 # met het laagste van paal en auto. En: "een auto die niet in HA kan moet
@@ -1834,7 +1834,7 @@ controle("maar een lege accu aannemen krijgt dat uur niet nog eens",
          abs(planner.hours_needed(leeg48, 16, assume_empty=True) - (66 / 0.9) / 11.04) < 0.01, "")
 
 print("=== 49. de auto trekt meer dan gevraagd: onder de groep van de paal ===")
-# Van den Dam 06-09-2026 04:18:30: limiet 16 A, de Ford trok 16,9 A op één
+# de klantwoning 06-09-2026 04:18:30: limiet 16 A, de Ford trok 16,9 A op één
 # fase, groep 16 A. De coach blijft er zoveel onder als de auto erboven zit.
 rustig49 = Grid(phase_amps=[2.0, 18.0, 3.0], fuse_amps=25.0, charger_amps=16.88, margin_amps=3.0)
 teveel49 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=16.88,
@@ -1852,7 +1852,7 @@ controle("zonder de sensor van de groep verandert er niets",
          planner.ceiling_amps(rustig49, Car(phases=3), zonder49) == 16, "")
 
 print("=== 50. de vaatwasser: het goedkoopste startmoment binnen het schema ===")
-# Sven op 06-09-2026: "nu verder met de vaatwasser sturing." Een programma
+# De eigenaar op 06-09-2026: "nu verder met de vaatwasser sturing." Een programma
 # start één keer; de vraag is wanneer. Alle startmomenten tegen elkaar, de
 # avondpiek dicht, de klaar-tijd heilig, en zonder prijzen geen gok.
 def prijzen50(dag):
@@ -1901,14 +1901,14 @@ controle("met zon verwacht vanaf 12:00 en klaar om 18:00 start hij om 12:00",
 kosten_zon = planner.programma_kosten(dt.datetime(2026, 9, 7, 12, 0), eco, prijzen50(7), Tariff(), zon)
 controle("op zon kost Eco 50 de terugleverprijs: 0,8 kWh maal 0,07",
          abs(kosten_zon - 0.8 * 0.07) < 0.001, f"{kosten_zon:.4f}")
-# Sven op 06-09-2026 's avonds: "elk programma is gewoon te verschuiven."
+# De eigenaar op 06-09-2026 's avonds: "elk programma is gewoon te verschuiven."
 controle("ook voorspoelen wacht op het goedkoopste moment",
          planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), prijzen50(7), Tariff(), Forecast(), venster50,
                                 planner.Apparaat(status="ready", released=True, program=planner.programma_van("pre_rinse"))).rule == "wait-for-start", "")
 controle("zonder herkend programma en zonder haast: uitleg, geen start",
          planner.plan_programma(dt.datetime(2026, 9, 7, 19, 0), prijzen50(7), Tariff(), Forecast(), venster50,
                                 planner.Apparaat(status="ready", released=True, program=None)).rule == "no-program", "")
-# Sven op 07-09-2026 om 10:22, met 3,5 kW teruglevering op de meter terwijl de
+# De eigenaar op 07-09-2026 om 10:22, met 3,5 kW teruglevering op de meter terwijl de
 # coach op 11:00 wachtte: "ik lever nu 3,5 kW terug, dat is toch gunstig? Je
 # weet niet hoeveel je om 11 uur terug gaat leveren." In het lopende uur wint
 # de meter van de verwachting, net als bij de paal.
@@ -1982,11 +1982,11 @@ controle("de meting geldt alleen voor het lopende uur; om 11:00 rekent hij weer 
                                       now=dt.datetime(2026, 9, 7, 10, 22), surplus_w=0.0)
              - planner.programma_kosten(dt.datetime(2026, 9, 7, 11, 0), kurz, [], salderen, ochtend)) < 1e-9, "")
 
-# Sven thuis op 08-09-2026 om 09:12: Eco 50 zonder meting (225 min, 0,8 kWh,
+# In een echte woning op 08-09-2026 om 09:12: Eco 50 zonder meting (225 min, 0,8 kWh,
 # piek 2100 W), de meter zag 250 W teruglevering, Forecast.Solar zei 1,0 tot
 # 1,7 kWh per uur voor de middag, het huis 0,75 tot 0,85 kWh. De coach
 # startte: uitgesmeerd was Eco 213 W en dat paste in 250 W. De opwarmpiek van
-# 2,2 kW kwam van het net, en om 12:00 gaf het dak 3,8 kW. Sven: "waarom
+# 2,2 kW kwam van het net, en om 12:00 gaf het dak 3,8 kW. De eigenaar: "waarom
 # startte hij terwijl bekend is dat de zon later meer schijnt?"
 vandaag = dt.datetime(2026, 9, 8)
 sven_zon = Forecast(
@@ -2017,9 +2017,9 @@ controle("om 10:00 met 300 W op de meter ook niet",
          sven_300.rule == "wait-for-start", f"{sven_300}")
 # Met 1 kW op de meter om 10:00 start hij wel, maar niet via de meterregel:
 # de piek past er niet in. Het is de gewone som, met de meter voor het
-# lopende uur (Sven op 07-09-2026): 1 kW zon nu is op de som goedkoper dan
+# lopende uur (de eigenaar op 07-09-2026): 1 kW zon nu is op de som goedkoper dan
 # de 0,7 kW die de verwachting voor 12:00 belooft. Zegt de verwachting te
-# weinig, dan is dat een verwachting; Sven op 07-09: daar is niets aan te
+# weinig, dan is dat een verwachting; de eigenaar op 07-09: daar is niets aan te
 # schaven.
 sven_1000 = planner.plan_programma(vandaag.replace(hour=10, minute=0), [], salderen, sven_zon, sven_venster, sven_eco, surplus_w=1000.0)
 controle("om 10:00 met 1 kW op de meter start hij op de gewone som: de meter van nu wint van een magere verwachting",
@@ -2030,7 +2030,7 @@ controle("om 12:00 met 3 kW op de meter wel: de meter draagt de piek en zon is l
          if hasattr(sven_3000, "cost_hint") else sven_3000.rule == "cheapest-start" and sven_3000.charge, f"{sven_3000}")
 
 print("=== 51. de programmatabel van de klant, de metingen en het profiel ===")
-# Sven op 06-09-2026: "we hebben nu een hard coded tabel maar ik wil dat
+# De eigenaar op 06-09-2026: "we hebben nu een hard coded tabel maar ik wil dat
 # kunnen aanpassen, wel moet hij dit als uitgangspunt hebben", en "het
 # verbruik is in het begin heel hoog vanwege het opwarmen, dus dat wil ik
 # gaan meten en die waardes in kunnen vullen."
@@ -2108,9 +2108,9 @@ controle("zonder startknop zegt hij 'zet hem aan' in plaats van 'hij start'",
 controle("en de regels zijn dezelfde als met een knop",
          (d_wacht.rule, d_nu.rule, d_krap.rule) == ("wait-for-start", "cheapest-start", "deadline"), "")
 
-print("=== 51. het gemeten plafond van deze beurt (Van den Dam, nacht van 09 op 10-09-2026) ===")
+print("=== 51. het gemeten plafond van deze beurt (de klantwoning, nacht van 09 op 10-09-2026) ===")
 # Een warmtepomp op één fase ging om het kwartier aan, de paal kreeg 8 A waar
-# het plan met 16 rekende. Sven: "er zit geen patroon in", dus geen
+# het plan met 16 rekende. De eigenaar: "er zit geen patroon in", dus geen
 # voorspelling; wel de meting van de afgelopen uren in `Charger.expected_amps`.
 bus3 = Car(capacity_kwh=77.0, phases=3, soc_percent=50.0, max_amps=16.0)
 stil = Charger(max_amps=16.0, connected=True)
@@ -2152,9 +2152,9 @@ controle("om 23:00 past het op 9 A niet meer met een uur speling: de klaar-tijdr
 from dataclasses import replace  # noqa: E402
 
 print("=== 52. na de klaar-tijd: morgen starten of nu starten (12 en 13-09-2026) ===")
-# Sven gaf de vaatwasser op 12-09-2026 om 16:33 vrij, bij vanaf 08:00 en klaar
+# De eigenaar gaf de vaatwasser op 12-09-2026 om 16:33 vrij, bij vanaf 08:00 en klaar
 # om 16:30. De coach plande de volgende middag en zei "hij start om 13:00", en
-# "nu starten" was de prijs van 08:00 de volgende ochtend; Sven zette hem zelf
+# "nu starten" was de prijs van 08:00 de volgende ochtend; de eigenaar zette hem zelf
 # aan. Op 13-09: "de keuze ingeruimd en morgen starten of ingeruimd en nu
 # starten."
 dagen52 = {d: planner.DayWindow(not_before=dt.time(8, 0), done_by=dt.time(16, 30)) for d in range(7)}
@@ -2209,7 +2209,7 @@ controle("nu starten zonder vrijgave is geen vrijgave",
          planner.plan_programma(avond52, [], vast52, zon52, na52, replace(vrij52, released=False, start_now=True)).rule
          == "not-released", "")
 
-print("=== 53. tot hoever de auto laadt (Sven, 16-09-2026) ===")
+print("=== 53. tot hoever de auto laadt (de eigenaar, 16-09-2026) ===")
 # "Ik wil een optie hebben op de kaart dat ik kan aangeven tot hoever de bus
 # laadt. Mijne laadt tot 80% namelijk maar ik kan hem ook op 100% instellen."
 # Zijn bus van 19,7 kWh stond die ochtend op 32% en stopte zelf op 80.
@@ -2322,7 +2322,7 @@ controle("hij valt niet om en houdt dezelfde hoeveelheid vast",
          f"{sum(uit55.values()):.2f} tegen {sum(genomen55.values()):.2f}")
 
 print("=== 56. een zonuur moet de zon ook echt dragen (17-09-2026) ===")
-# Svens middag, met zijn eigen getallen: de voorspeller zei 1,552 kWh voor het
+# de eigen middag, met zijn eigen getallen: de voorspeller zei 1,552 kWh voor het
 # uur van 16:00 en 1,364 voor 17:00, het huisprofiel stond op 0,94 kWh, dus er
 # bleef 0,61 respectievelijk 0,42 kWh over op papier. Zijn meter leverde vanaf
 # 15:41 niets meer terug.
@@ -2391,11 +2391,11 @@ controle("en zonder dag telt de factor helemaal niet",
          abs(planner.overschot_kwh(fc56(solar_factor=0.5), uur16) - kaal) < 0.001, "")
 
 print("=== 57. het laatste uur toont nooit minder dan de ondergrens (17-09-2026) ===")
-# Svens scherm om 22:10, met 2,5 kWh te gaan: "4 A, laden op 2,8 kW, vol rond
+# de eigen scherm om 22:10, met 2,5 kWh te gaan: "4 A, laden op 2,8 kW, vol rond
 # 23:00", terwijl zijn paal 5,92 A en 4,08 kW trok. 2,5 kWh uitgesmeerd over de
 # vijftig minuten die nog van dat uur over zijn is 2,94 kW, en dat is 4 A; maar
 # een paal levert niets onder 6 A, dus hij loopt op 4,14 kW en is om 22:45
-# klaar. Sven: "dit klopt niet, 4 A laden." Dezelfde klacht als op 05-09-2026.
+# klaar. De eigenaar: "dit klopt niet, 4 A laden." Dezelfde klacht als op 05-09-2026.
 #
 # De restant-regel erboven kon er niet bij: die vraagt een vol uur ervóór en dat
 # ligt in het verleden, dus er bestaat geen schijf van.
@@ -2446,7 +2446,7 @@ controle("een uur dat helemaal gebruikt wordt houdt zijn eigen stroom",
          f"{[(b.start.hour, b.amps) for b in laadt57]}")
 
 print("=== 58. een leeg uur boven het gemiddelde zegt waarom (18-09-2026) ===")
-# Van den Dam, vrijdag 19:55: de Ford op 18%, zaterdag uitgevinkt, dus klaar
+# de klantwoning, vrijdag 19:55: de Ford op 18%, zaterdag uitgevinkt, dus klaar
 # zondag 06:00, en de prijzen reiken tot zaterdag 23:00. Dan komt er van het
 # net alleen iets bij in een uur onder het gemiddelde van wat bekend is
 # (`alleen_zon`). De uren van 20:00 tot 02:00 lagen daarboven en de kaart zei
@@ -2495,7 +2495,7 @@ controle("het plan zelf verandert niet: zaterdag 11:00 tot 16:00",
 
 # --- De boiler ---------------------------------------------------------------
 #
-# Sven op 19-09-2026: een boiler waar je alleen stroom op hoeft te zetten, met
+# De eigenaar op 19-09-2026: een boiler waar je alleen stroom op hoeft te zetten, met
 # een smart plug. Alleen de schakelaar en het vermogen invullen, de rest leert
 # hij zelf. Klaar om 07:00, zonoverschot mag hij pakken, en af en toe even
 # proefdraaien om te zien of het vat nog warm is.
@@ -2670,6 +2670,74 @@ controle("bij een vast tarief kiest hij gewoon een blok buiten de avondpiek",
          vast_b.rule in ("wait-for-cheap", "cheapest-hour")
          and (vast_b.starts_at is None or not planner.in_evening_peak(dt.datetime.fromisoformat(vast_b.starts_at))),
          f"{vast_b.rule} {vast_b.starts_at}")
+
+print("=== 59. de tijdlijn zegt wat de paal doet, ook bij gelijke prijzen ===")
+# Op de kaart stond bij een vast contract "14 A, laden op 9,4 kW" boven een paal
+# die op 6 A liep, en "vol rond 15:00" terwijl het 15:32 werd. De oorzaak:
+# `_decide` spreidt bij gelijke prijzen over alle uren (`easy-pace`) en
+# `timeline` riep gewoon de knapzak aan, die de vroegste uren volpropt. Deze
+# proef bewaakt dat de twee hetzelfde zeggen; die ontbrak, en daarom kon het
+# erin blijven zitten.
+NU59 = dt.datetime(2026, 9, 21, 14, 32)
+KLAAR59 = Window(enabled=True, opens=None, deadline=dt.datetime(2026, 9, 22, 13, 0))
+BUS59 = Car(capacity_kwh=65.0, phases=3, soc_percent=73.0, target_percent=80)
+PAAL59 = Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.05)
+NET59 = Grid(surplus_w=0.0, phase_amps=[4.0, 2.0, 2.0], fuse_amps=25.0)
+# Hetzelfde plafond als het besluit ziet; anders vergelijk je twee sommen die
+# van iets anders uitgaan.
+PLAFOND59 = planner.ceiling_amps(NET59, BUS59, PAAL59)
+
+besluit59 = decide(NU59, [], NET59, BUS59, PAAL59, KLAAR59, tariff=VAST)
+plan59 = planner.timeline(NU59, [], NET59, BUS59, PAAL59, KLAAR59, PLAFOND59, VAST)
+nu_blok = next((b for b in plan59.blocks if b.start <= NU59 < b.end), None)
+print(f"  besluit: {besluit59.rule} {besluit59.amps} A     "
+      f"tijdlijn nu: {nu_blok and nu_blok.amps} A, {nu_blok and nu_blok.kw} kW")
+controle("bij gelijke prijzen doet hij rustig aan", besluit59.rule == "easy-pace",
+         f"{besluit59.rule}")
+controle("en de tijdlijn zegt dezelfde ampères als het besluit",
+         nu_blok is not None and nu_blok.amps == besluit59.amps,
+         f"tijdlijn {nu_blok and nu_blok.amps} A tegen besluit {besluit59.amps} A")
+controle("dus niet het volle plafond in het eerste uur",
+         nu_blok is not None and nu_blok.amps < PLAFOND59,
+         f"{nu_blok and nu_blok.amps} A van {PLAFOND59}")
+
+# En dan klopt "vol rond" ook: op dit tempo duurt het langer dan tot het hele uur.
+print(f"  vol rond {plan59.expected_done:%H:%M}, gepland {plan59.planned_kwh:.1f} kWh "
+      f"over {len([b for b in plan59.blocks if b.charging])} uren")
+controle("wat er nodig is staat er ook helemaal in",
+         abs(plan59.planned_kwh - planner.energy_needed_kwh(BUS59)) < 0.1,
+         f"{plan59.planned_kwh:.2f} tegen {planner.energy_needed_kwh(BUS59):.2f}")
+controle("en hij is niet binnen het eerste uur klaar",
+         plan59.expected_done > dt.datetime(2026, 9, 21, 15, 0), f"{plan59.expected_done}")
+
+# Een uur dat niets krijgt is bij gelijke prijzen niet duurder maar overbodig.
+leeg59 = [b for b in plan59.blocks
+          if not b.charging and not planner.in_evening_peak(b.start)]
+redenen59 = {b.why for b in leeg59}
+print(f"  redenen van de lege uren: {sorted(redenen59)[:3]}")
+controle("een leeg uur heet niet duurder als alles even duur is",
+         all("duurder dan wat hij nodig heeft" not in reden for reden in redenen59),
+         f"{sorted(redenen59)}")
+
+# Bij verschillende prijzen verandert er niets: dan is haasten wél wat waard en
+# hoort de knapzak de goedkoopste uren vol te pakken.
+prijzen59 = [
+    {"start": dt.datetime(2026, 9, 21, 14 + i), "end": dt.datetime(2026, 9, 21, 15 + i),
+     "price": 0.30 if i < 2 else 0.10}
+    for i in range(9)
+]
+plan59b = planner.timeline(NU59, prijzen59, NET59, BUS59, PAAL59,
+                           Window(enabled=True, opens=None,
+                                  deadline=dt.datetime(2026, 9, 21, 23, 0)), PLAFOND59)
+laadt59b = [b for b in plan59b.blocks if b.charging]
+print(f"  met verschillende prijzen laadt hij in {[b.start.hour for b in laadt59b]} "
+      f"op {[b.amps for b in laadt59b]} A")
+controle("met verschillende prijzen laat hij de dure uren staan",
+         bool(laadt59b) and all(b.price < 0.2 for b in laadt59b),
+         f"{[(b.start.hour, b.price) for b in laadt59b]}")
+controle("en spreidt hij niet, want daar is dan wel iets mee te winnen",
+         len(laadt59b) <= 2, f"{[(b.start.hour, b.amps) for b in laadt59b]}")
+
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

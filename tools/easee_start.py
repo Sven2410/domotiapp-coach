@@ -1,12 +1,12 @@
 """Eén keer de dynamische limiet op 16 A zetten en de Easee een start sturen.
 
-Dit is een handeling bij een klant en dus iets wat Sven zelf start:
+Dit is een handeling bij een klant en dus iets wat de eigenaar zelf start:
 
     python tools/easee_start.py            # 16 A en start
     python tools/easee_start.py 10         # met een andere limiet
 
-Gemaakt op 06-09-2026 om 04:50, toen de Ford bij Van den Dam na een
-fasewissel van de Easee in fault stond en Sven op afstand een herstart wilde
+Gemaakt op 06-09-2026 om 04:50, toen de Ford in de klantwoning na een
+fasewissel van de Easee in fault stond en de eigenaar op afstand een herstart wilde
 proberen. Dezelfde twee diensten die de coach zelf gebruikt.
 """
 import json, sys, urllib.request

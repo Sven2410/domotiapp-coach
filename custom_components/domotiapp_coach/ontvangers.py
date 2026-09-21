@@ -1,6 +1,6 @@
 """Wie welke melding krijgt.
 
-Sven op 06-09-2026: "ik wil dat de klant meldingen kan aan en uit zetten in
+De eigenaar op 06-09-2026: "ik wil dat de klant meldingen kan aan en uit zetten in
 het meldingen tabje. Twee in een: de admin voegt de personen toe, en die
 persoon ziet alleen zichzelf, met welke soorten meldingen hij of zij krijgt.
 En niet telkens onnodig meldingen sturen."
@@ -37,7 +37,7 @@ STANDAARD_SOORTEN: dict[str, bool] = {
 
 
 def naam_uit_doel(target: str) -> str:
-    """"mobile_app_iphone_van_sven" leest als "Iphone van sven".
+    """"mobile_app_iphone_van_de_keuken" leest als "Iphone van de keuken".
 
     Dezelfde som als het paneel maakte voor de lijst met ontvangers; goed
     genoeg als eerste naam, en de admin kan hem aanpassen.
@@ -101,7 +101,7 @@ def alleen_eigen(settings: dict[str, Any], user_id: str) -> dict[str, Any]:
     """De instellingen zoals een gewone bewoner ze te zien krijgt.
 
     Alleen de eigen persoon blijft over; de rest van de instellingen blijft
-    zoals hij is, want het paneel heeft die nodig om te tekenen. Sven: "dat
+    zoals hij is, want het paneel heeft die nodig om te tekenen. De eigenaar: "dat
     die persoon alleen zichzelf ziet."
     """
     uit = dict(settings)

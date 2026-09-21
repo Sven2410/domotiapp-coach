@@ -7,7 +7,7 @@ bij komt. Wat er veranderde staat op stdout.
 
     python tools/wek.py besluiten.log meldingen.log
 
-Sven op 05-09-2026, toen de paal om 09:42 begon en ik het pas om 10:07 zag:
+De eigenaar op 05-09-2026, toen de paal om 09:42 begon en ik het pas om 10:07 zag:
 "waarom meldde je niet om 10 uur dat hij aan het laden begon?"
 """
 import re, sys, time

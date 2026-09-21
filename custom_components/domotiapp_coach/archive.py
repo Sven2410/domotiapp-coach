@@ -268,7 +268,7 @@ class Archive:
         )
         # Gaat Home Assistant uit, dan eerst alles naar schijf, ook het
         # lopende kwartier. Anders raakt tot een half uur kwijt, plus het
-        # kwartier waar we in zaten. Bij Van den Dam kostte dat op 05-09-2026
+        # kwartier waar we in zaten. In de klantwoning kostte dat op 05-09-2026
         # bij vijf herstarten samen zes van de vijftig kilowattuur van een
         # laadbeurt: kwartier 10:30 ontbrak, 13:45 had 44 seconden.
         self._uit.append(

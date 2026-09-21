@@ -1,7 +1,7 @@
 /**
  * Meldingen -- wie welke melding krijgt, en alles wat de coach deed en meldde.
  *
- * Twee dingen op één scherm, en dat is met opzet. Sven op 06-09-2026: "ik wil
+ * Twee dingen op één scherm, en dat is met opzet. De eigenaar op 06-09-2026: "ik wil
  * dat de klant meldingen kan aan en uit zetten in het meldingen tabje. Twee in
  * een: de admin voegt de personen toe, en die persoon ziet alleen zichzelf,
  * met welke soorten meldingen hij of zij krijgt."
@@ -19,7 +19,7 @@
  *   melding    de verslagen: vol, kabel eruit, een sensor die het weer doet
  *   besluit    elk besluit van de coach; standaard uit, want dat zijn er veel
  *   belasting  je aansluiting wordt te zwaar belast
- * Sven op 05-09-2026: "dat je op normale en kritieke meldingen kan filteren
+ * De eigenaar op 05-09-2026: "dat je op normale en kritieke meldingen kan filteren
  * en op de tijd." Vandaar de knoppen boven de lijst en de dagkeuze.
  *
  * De lijst komt van `domotiapp_coach/notifications/list` en groeit live mee via
@@ -74,7 +74,7 @@ const INTERVALS = [5, 10, 15, 30, 60, 120, 240];
 /** Hoe lang de belasting moet aanhouden, in seconden; onder de vijf is een piek. */
 const HOLDS = [5, 10, 30, 60, 120, 300];
 
-/** "mobile_app_iphone_van_sven" leest als "Iphone van sven". */
+/** "mobile_app_iphone_van_de_keuken" leest als "Iphone van de keuken". */
 export function naamVanTelefoon(target) {
   const naam = String(target ?? "").replace(/^mobile_app_/, "").replace(/_/g, " ").trim();
   return naam ? naam[0].toUpperCase() + naam.slice(1) : String(target ?? "");
@@ -234,10 +234,10 @@ const css = /* css */ `
      schuif als op de kaart van een apparaat. */
   /* Aan is een gevulde blauwe baan met een witte knop rechts, uit een grijze
      baan met een doffe knop links. De zachte variant van eerst was van een
-     afstand niet van uit te onderscheiden; Sven op 06-09-2026. */
+     afstand niet van uit te onderscheiden; de eigenaar op 06-09-2026. */
   /* box-sizing en line-height staan er met opzet: in het echte paneel erft
      een knop een regelhoogte en groeit hij, en dan hangt de knop boven het
-     midden. Sven op 06-09-2026: "het witte bolletje is niet in het midden."
+     midden. De eigenaar op 06-09-2026: "het witte bolletje is niet in het midden."
      De knop staat daarom op 50% en niet op een vaste 3px. */
   .schuif {
     flex: 0 0 auto; box-sizing: border-box; display: inline-block; vertical-align: middle;
@@ -273,7 +273,7 @@ const css = /* css */ `
   /* ---- toevoegen en de zekeringmelding: velden ---- */
   /* align-content: start, anders rekt het ene veld zich op tot de hoogte van
      zijn buurman met uitleg eronder en wordt het invoervak twee keer zo hoog.
-     Sven op 06-09-2026: "de uitlijning van naam en telefoon staat versprongen." */
+     De eigenaar op 06-09-2026: "de uitlijning van naam en telefoon staat versprongen." */
   .velden { display: grid; gap: 10px; margin-top: 12px; align-items: start; }
   .veld { display: grid; gap: 4px; align-content: start; }
   .veld label { font-size: 12px; color: var(--dac-ink-3); font-weight: 500; }
@@ -285,7 +285,7 @@ const css = /* css */ `
   }
   input:focus, select:focus { outline: 2px solid var(--dac-accent); outline-offset: 1px; }
   /* De uitklaplijst tekent de browser zelf, buiten onze stijlen om. Zonder
-     color-scheme kwam hij wit met onze lichte letters erin: onleesbaar. Sven
+     color-scheme kwam hij wit met onze lichte letters erin: onleesbaar. De eigenaar
      op 06-09-2026, met een schermafdruk waarop hij "amper wat kon lezen". */
   select { color-scheme: dark; }
   select option { background: #12120f; color: #e8e4de; }
@@ -393,7 +393,7 @@ class DacViewNotifications extends DacElement {
             <div class="velden twee">
               <div class="veld">
                 <label for="nieuw-naam">Naam</label>
-                <input id="nieuw-naam" type="text" maxlength="40" placeholder="Bijvoorbeeld Sven" autocomplete="off">
+                <input id="nieuw-naam" type="text" maxlength="40" placeholder="Naam van de bewoner" autocomplete="off">
               </div>
               <div class="veld">
                 <label for="nieuw-telefoon">Telefoon</label>

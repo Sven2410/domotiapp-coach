@@ -8,7 +8,7 @@
  * die leest een bestand met `import` erin niet als de module die het is, en de
  * fout zit in een scope die hij daarmee anders beoordeelt.
  *
- * Sven keek naar een zwart scherm en dacht dat zijn herstart mislukt was.
+ * De eigenaar keek naar een zwart scherm en dacht dat zijn herstart mislukt was.
  *
  * `python tools/stijlcheck.py` blijft ernaast staan: die zoekt een backtick in
  * een stijlblok, en dat is weer iets waar deze niet over valt zolang de string

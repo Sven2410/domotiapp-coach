@@ -103,13 +103,13 @@ _LOGGER = logging.getLogger(__name__)
 # Hoe lang een sensor niets mag zeggen voordat de bewoner het hoort. Bij het
 # opstarten van Home Assistant is van alles een paar minuten `unavailable`, en
 # een Ford-app of een Easee-cloud hapert wel eens een paar minuten; daar hoeft
-# niemand voor gewekt te worden. Tien minuten is wel een storing. Sven op
+# niemand voor gewekt te worden. Tien minuten is wel een storing. De eigenaar op
 # 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat moet wel
 # gemeld worden."
 SENSOR_STIL = timedelta(minutes=10)
 
 # Onder welke zonshoogte een omvormer die niets zegt geen storing is. Een
-# SolarEdge gaat 's nachts slapen en is dan niet bereikbaar: bij Van den Dam
+# SolarEdge gaat 's nachts slapen en is dan niet bereikbaar: in de klantwoning
 # elke avond, op 18-09-2026 om 21:40, en om 21:51 kwam er een kritieke melding.
 # 's Ochtends leverde hij op 17 en 18-09-2026 pas 64 en 55 minuten na
 # zonsopkomst iets (46 W om 08:17, 152 W om 08:09); de zon staat dan rond de
@@ -159,7 +159,7 @@ CONFIRM_SECONDS = 15
 NUDGE_INTERVAL = timedelta(minutes=5)
 
 # Hoe lang de fasemeting van het huis na mag ijlen op een paal die net gestopt
-# is. Bij Van den Dam stond op 29-08-2026 om 11:27:06 `regel=no-room` op de
+# is. In de klantwoning stond op 29-08-2026 om 11:27:06 `regel=no-room` op de
 # kaart met de kabel er al uit: de paal meldde nul, het huis nog twaalf ampère.
 # Een minuut is ruim genoeg voor een P1 of een seriële meter en kort genoeg om
 # een huis dat werkelijk bijschakelt niet te missen.
@@ -170,7 +170,7 @@ METER_NAIJL = timedelta(minutes=1)
 #
 # Een Easee die zijn laadbeurt opnieuw opstart doorloopt de hele keten:
 # `disconnected`, `awaiting_authorization`, `pending_authorization`,
-# `waiting_in_queue`, `charging`. Dat duurt bij Van den Dam ongeveer twee
+# `waiting_in_queue`, `charging`. Dat duurt in de klantwoning ongeveer twee
 # seconden en gebeurde in de nacht van 30-08-2026 drie keer, twee daarvan
 # binnen tien seconden nadat de coach zelf zijn grens omlaag schreef. Elke keer
 # las de coach dat als de kabel eruit: verslag versturen, en het akkoord,
@@ -192,7 +192,7 @@ KABEL_ONTDREUN = timedelta(seconds=30)
 # sensor even niets zegt.
 #
 # Dit is dezelfde fout als bij de status van de laadpaal, maar dan in de
-# meetkant, en die tak was niet nagekeken. Bij Van den Dam viel de P1-meter op
+# meetkant, en die tak was niet nagekeken. In de klantwoning viel de P1-meter op
 # 30-08-2026 om 11:07, 11:09 en 11:15 telkens een paar seconden weg. Zodra
 # `grid_import` en `grid_export` allebei `unavailable` zijn, rekent `_read`
 # `netto = 0` uit en concludeert de coach dat er geen zon over is. Op de zonregel
@@ -212,7 +212,7 @@ KABEL_ONTDREUN = timedelta(seconds=30)
 MEETNAIJL = timedelta(minutes=5)
 
 # Over hoeveel tijd de fasestromen worden gladgestreken voor er een besluit op
-# valt. De huismeter van Van den Dam meldt elke dertig seconden en gooit er af
+# valt. De huismeter van de klantwoning meldt elke dertig seconden en gooit er af
 # en toe één sample uit dat nergens bij hoort; zie `nood_ruimte` in planner.py.
 # Een mediaan over anderhalve minuut haalt zo'n enkele uitschieter eruit en
 # laat een huis dat werkelijk bijschakelt er binnen twee metingen door.
@@ -226,13 +226,13 @@ FASE_VENSTER = timedelta(seconds=90)
 FASEMETING_AMPS = 5.0
 # Hoe lang de coach na een eigen herstart van de paal wacht voor hij "vol"
 # gelooft, en hoe lang de auto daarna weer geladen moet hebben voor er een
-# volgende herstart mag. De Ford bij Van den Dam deed er op 06-09-2026 negen
+# volgende herstart mag. De Ford in de klantwoning deed er op 06-09-2026 negen
 # minuten over om na een start weer stroom te nemen (05:18 gestuurd, 05:27
 # aan het laden). Een kwartier, dezelfde maat als `MIN_HOLD_MINUTES`.
 HERSTART_WACHT = timedelta(minutes=15)
 
 # Apparaten met een programma die de coach start: `PROGRAMMA_TYPES` in
-# const.py. Sven op 06-09-2026: eerst alleen de vaatwasser.
+# const.py. De eigenaar op 06-09-2026: eerst alleen de vaatwasser.
 # Hoe lang de coach na een druk op de startknop wacht op "run" voordat hij
 # zegt dat het niet lukte, hoe vaak hij het probeert, en hoe lang daartussen.
 # Home Connect doet er soms een minuut over om de nieuwe toestand te melden.
@@ -245,9 +245,9 @@ START_OPNIEUW = timedelta(minutes=5)
 # hij als het STIL_KLAAR lang onder die grens bleef. Een half uur, want
 # tussen twee spoelgangen staat een vaatwasser gerust een paar minuten stil,
 # en het drogen aan het eind trekt bij sommige machines bijna niets: die van
-# Sven zette op 07-09-2026 een kwartier voor het eind de deur open voor de
+# De eigenaar zette op 07-09-2026 een kwartier voor het eind de deur open voor de
 # stoom en deed daarna twintig minuten vrijwel niets, en een kwartier was
-# daarmee te kort. Sven op 06-09-2026: "adviseren en meten inderdaad, met
+# daarmee te kort. De eigenaar op 06-09-2026: "adviseren en meten inderdaad, met
 # zet hem aan."
 DRAAI_W = 30.0
 STIL_KLAAR = timedelta(minutes=30)
@@ -262,7 +262,7 @@ PROGRAMMA_TERUGKIJK = timedelta(hours=8)
 HERINNERING = timedelta(minutes=45)
 # De meter telt voor een programma-apparaat als wat hij de afgelopen tien
 # minuten ten minste naar het net zag gaan, niet als de meting van dit moment.
-# Sven op 11-09-2026 om 09:35: een opklaring van een paar minuten gaf 2694 W
+# De eigenaar op 11-09-2026 om 09:35: een opklaring van een paar minuten gaf 2694 W
 # teruglevering, meer dan de piek van Express 60, en de coach startte; om
 # 09:37 was het 721 W en de opwarmpieken kwamen van het net. Een programma
 # start één keer en draait dan anderhalf uur, dus hij hoort te starten op zon
@@ -272,7 +272,7 @@ METER_VENSTER = timedelta(minutes=10)
 METER_DEKKING = timedelta(minutes=8)
 # De eindtijd van het apparaat telt pas als hij bij deze beurt hoort. Home
 # Connect zet hem al bij het kiezen van het programma (het moment van kiezen
-# plus de duur) en rekent hem pas een minuut na de start opnieuw uit. Bij Sven
+# plus de duur) en rekent hem pas een minuut na de start opnieuw uit. In een echte woning
 # op 11-09-2026: om 09:01 gekozen, om 09:36 gestart, en de melding zei "klaar
 # rond 10:56" terwijl hij om 11:28 klaar was. Wat voor EINDTIJD_MARGE voor de
 # start gezet is, telt niet; de marge omdat de coach de start soms een ronde
@@ -280,7 +280,7 @@ METER_DEKKING = timedelta(minutes=8)
 # EINDTIJD_WACHT op, en neemt daarna de duur uit de tabel.
 #
 # En hij telt pas als hij stilstaat. Een eindtijd van ná de start kan nog
-# steeds de verkeerde zijn: bij Sven op 15-09-2026 gaf Home Connect om
+# steeds de verkeerde zijn: in die woning op 15-09-2026 gaf Home Connect om
 # 10:11:56 (Run om 10:11:57) eerst 11:33, om 10:13:02 acht minuten later
 # 11:41, en klaar was hij om 11:45. De melding van 10:12:53 zat er twaalf
 # minuten naast, negen seconden voor de correctie. Een eindtijd telt daarom
@@ -300,7 +300,7 @@ METING_MAX_N = 5
 
 # --- De boiler --------------------------------------------------------------
 #
-# Sven op 19-09-2026: "alleen de switch invullen en power invullen", en de rest
+# De eigenaar op 19-09-2026: "alleen de switch invullen en power invullen", en de rest
 # zelflerend. Wat de coach dus zelf moet uitvinden: hoeveel hij trekt, hoe lang
 # een vol vat duurt, en hoe snel dat vat weer leeg is.
 #
@@ -319,7 +319,7 @@ BOILER_AANLOOP = timedelta(minutes=3)
 BOILER_STIL = timedelta(minutes=3)
 # Hoe vaak hij even kijkt of het vat nog warm is. Met de stroom eraf kan de
 # boiler niet zeggen dat hij warmte wil, en dat is het enige gat in deze
-# aanpak; Sven koos op 19-09-2026 voor af en toe proefdraaien. Kost niets
+# aanpak; de eigenaar koos op 19-09-2026 voor af en toe proefdraaien. Kost niets
 # zolang het vat vol is, want dan vraagt de boiler geen stroom. Hetzelfde
 # getal als waarmee de planner een gemeten vol vat gelooft: het is dezelfde
 # vraag.
@@ -360,7 +360,7 @@ def _mediaan(waarden: list[float]) -> float:
 
     Bewust de mediaan en niet het gemiddelde: één keer wassen tilt een
     gemiddelde over een week heen op, en dan denkt de coach dat het huis elke
-    dag om dat uur zwaar is. Svens keuze op 30-08-2026, uit drie mogelijkheden.
+    dag om dat uur zwaar is. de keuze op 30-08-2026, uit drie mogelijkheden.
     """
     if not waarden:
         return 0.0
@@ -404,7 +404,7 @@ FOREVER_RULES = frozenset({"no-room", "user-hold"})
 NO_WRITE_RULES = frozenset({"disconnected", "complete"})
 
 # Hoe lang het verslag wacht op een accustand die bij deze laadbeurt hoort.
-# Een auto meldt zijn percentage niet op commando: Svens Ford stopte op
+# Een auto meldt zijn percentage niet op commando: de eigen Ford stopte op
 # 25-08-2026 om 14:44 op 80% terwijl de app nog 70% zei, en werkte pas ruim een
 # minuut later bij. De melding was toen al de deur uit met het oude getal, en
 # juist bij een auto die zelf op 80% stopt is dat percentage het interessantste
@@ -432,7 +432,7 @@ SOC_STAP_MAX = 25.0
 TEMPO_SPELING = 0.3
 
 # Hoe lang de auto na een verhoging van de limiet de tijd krijgt om bij te
-# komen voordat wat hij neemt als zijn eigen tempo telt. Gemeten bij Van den Dam
+# komen voordat wat hij neemt als zijn eigen tempo telt. Gemeten in de klantwoning
 # in de nacht van 18 op 19-09-2026: na een verlaging voor de zekering bleef de
 # Ford op 16 A nog negen minuten (01:35 tot 01:44) en elf minuten (03:33 tot
 # 03:44) op de oude stand hangen, en die minuten werden het tempo van band 4
@@ -441,7 +441,7 @@ TEMPO_SPELING = 0.3
 TEMPO_HERSTEL = timedelta(minutes=15)
 
 # Hoe vaak de waarschuwing terugkomt dat een eigen pauze de klaar-tijd gaat
-# kosten. Sven op 26-08-2026: de pauze zelf blijft winnen, want het is zijn huis
+# kosten. De eigenaar op 26-08-2026: de pauze zelf blijft winnen, want het is zijn huis
 # en zijn knop, maar één keer waarschuwen is te weinig. Wie het bericht om elf
 # uur 's avonds wegveegt en om zeven uur naar een lege auto loopt, is niet
 # geholpen.
@@ -568,7 +568,7 @@ def _eindtijd(
     Home Connect geeft de resterende tijd als een tijdstip (de sensor
     `remaining_program_time`, een timestamp); andere integraties geven de
     minuten of de seconden die nog resten. Allebei hetzelfde antwoord op
-    dezelfde vraag, als lokaal tijdstip zonder zone, zoals `now`. Sven op
+    dezelfde vraag, als lokaal tijdstip zonder zone, zoals `now`. De eigenaar op
     07-09-2026: "pak de eindtijd van de integratie."
 
     Met `sinds` telt alleen een waarde die op of na dat moment gezet is: een
@@ -607,7 +607,7 @@ def _eindtijd_vast(sessie: dict[str, Any], rauw: datetime | None) -> datetime | 
     """De eindtijd zoals de coach hem gelooft: pas als hij stilstaat.
 
     Een apparaat rekent zijn eindtijd nog even door nadat het begonnen is.
-    Bij Sven op 15-09-2026 zei Home Connect bij de start 11:33 en een minuut
+    In die woning op 15-09-2026 zei Home Connect bij de start 11:33 en een minuut
     later 11:41; klaar was hij om 11:45. Een nieuwe waarde telt daarom pas
     als de volgende ronde er ongeveer hetzelfde staat (`EINDTIJD_SPELING`,
     ruimer dan het gewiebel van een minuut dat die sensor vertoont).
@@ -746,7 +746,7 @@ class ChargerCoach:
         self._woken: set[str] = set()
         # Laadpunten waar de paal "klaar" zegt terwijl de accustand zegt van
         # niet, en die deze ronde daarom één keer opnieuw gestart mogen worden.
-        # Sven op 06-09-2026, na een Ford die om 04:27 met een storing afhaakte
+        # De eigenaar op 06-09-2026, na een Ford die om 04:27 met een storing afhaakte
         # en op 86% bleef staan: "hij is nog niet vol, dus dan ook maar een
         # herstart." Wanneer die herstart gestuurd is staat in `_herstart_gedaan`;
         # zolang dat er staat gelooft de coach "klaar" gewoon weer.
@@ -973,11 +973,11 @@ class ChargerCoach:
         `kritiek` is voor wat de bewoner zelf moet oplossen of moet weten
         voordat het misgaat: een sensor die zwijgt, een coach die stilstaat,
         een auto die niet op tijd vol raakt. In de geschiedenis is daar op te
-        filteren; Sven op 05-09-2026: "dat je op normale en kritieke
+        filteren; de eigenaar op 05-09-2026: "dat je op normale en kritieke
         meldingen kan filteren".
         """
         soort = "kritiek" if kritiek else "melding"
-        # Sven op 06-09-2026: per beurt één verslag plus wat kritiek is. Wat
+        # De eigenaar op 06-09-2026: per beurt één verslag plus wat kritiek is. Wat
         # daarbuiten valt komt wel in de geschiedenis, niet op de telefoon.
         if telefoon:
             await self._async_versturen(message, soort)
@@ -1029,7 +1029,7 @@ class ChargerCoach:
         het vorige: een andere stroom, een andere regel, aan of uit, of een
         coach die niet meer mag sturen.
 
-        Sven op 05-09-2026, toen de paal om 09:42 op zon begon te laden en het
+        De eigenaar op 05-09-2026, toen de paal om 09:42 op zon begon te laden en het
         meldingenscherm daar niets van zei: "ik wil dat alles wat de coach
         doet terug te lezen is in meldingen."
         """
@@ -1129,7 +1129,7 @@ class ChargerCoach:
                 continue
             self._sensor_gemeld.add(entity_id)
             minuten = int((now - sinds).total_seconds() // 60)
-            # De entiteit-id staat in het log en niet in de melding. Sven op
+            # De entiteit-id staat in het log en niet in de melding. De eigenaar op
             # 21-09-2026, over precies deze zin: "meld zo'n sensor niet
             # volledig, zeg gewoon dat er iets mis is met de integratie". Wie
             # hem moet opzoeken kijkt in het log; wie hem leest heeft genoeg aan
@@ -1348,7 +1348,7 @@ class ChargerCoach:
         ]
         self._watch_phases(settings, bool(chargers))
         # En de vrijgaveschakelaar en de status van een programma-apparaat:
-        # Sven zette op 06-09-2026 zijn schakelaar aan en binnen vijf seconden
+        # De eigenaar zette op 06-09-2026 zijn schakelaar aan en binnen vijf seconden
         # weer uit omdat er niets gebeurde, terwijl de coach pas bij de
         # volgende minuut keek. Een schakelaar hoort binnen een seconde
         # antwoord te geven, net als een kabel in de paal.
@@ -1458,7 +1458,7 @@ class ChargerCoach:
     # ------------------------------------------------------------------
     # Een apparaat met een programma: de vaatwasser
     #
-    # Sven op 06-09-2026: "nu verder met de vaatwasser sturing." Het denkwerk
+    # De eigenaar op 06-09-2026: "nu verder met de vaatwasser sturing." Het denkwerk
     # staat in `plan_programma` in planner.py; hier alleen het lezen van de
     # sensoren, het drukken op de knop, en het verslag.
 
@@ -1488,7 +1488,7 @@ class ChargerCoach:
         )
 
         released = device_id in (settings.get("ready_devices") or [])
-        # Een vrijgaveschakelaar naast de knop op de kaart. Sven op 06-09-2026:
+        # Een vrijgaveschakelaar naast de knop op de kaart. De eigenaar op 06-09-2026:
         # een eigen kaart in de keuken met een knop "sturing" die een
         # schakelaar aanzet, "en dan wil ik dat Ingeruimd en dicht aangaat."
         # De twee volgen elkaar: beweegt de schakelaar, dan volgt de vrijgave;
@@ -1496,10 +1496,10 @@ class ChargerCoach:
         # beurt gaan ze allebei uit.
         released = await self._async_schakelaar_volgen(settings, device, sessie, released)
         # En "ingeruimd en nu starten", op de kaart of met een eigen schakelaar
-        # (Sven, 13-09-2026).
+        # (de eigenaar, 13-09-2026).
         released, nu_starten = await self._async_nu_volgen(settings, device, sessie, released)
         # Wat erop staat: de sensor, of anders de select-entiteit waarmee het
-        # gezet wordt (Home Connect heeft ze allebei; Sven heeft de sensor).
+        # gezet wordt (Home Connect heeft ze allebei; de eigenaar heeft de sensor).
         programma_entiteit = entities.get("program") or entities.get("program_select")
         if programma_entiteit:
             programma = programma_van(_text(self.hass, programma_entiteit), tabel)
@@ -1546,7 +1546,7 @@ class ChargerCoach:
                      solar_day=now.date()),
             window, apparaat,
             # Wat er werkelijk naar het net gaat: in het lopende uur wint de
-            # meter van de verwachting (Sven op 07-09-2026, zie
+            # meter van de verwachting (de eigenaar op 07-09-2026, zie
             # programma_kosten), maar dan wat hij de afgelopen tien minuten
             # ten minste zag en niet één opklaring (11-09-2026, METER_VENSTER).
             surplus_w=self._meter_zeker(now),
@@ -1598,7 +1598,7 @@ class ChargerCoach:
             if draait and sessie["gestart"] is not None
             else None
         )
-        # Sven op 07-09-2026: "ik wil wel meldingen ontvangen dat de
+        # De eigenaar op 07-09-2026: "ik wil wel meldingen ontvangen dat de
         # vaatwasser gestart is en klaar is." Dus per beurt twee: deze en
         # het verslag. "Gestart" als de coach erop drukte of erom vroeg;
         # "draait" als de bewoner hem zelf aanzette of de coach net herstartte.
@@ -1844,12 +1844,12 @@ class ChargerCoach:
     ) -> None:
         """Wat deze ronde kostte, en wat hij gekost had als hij meteen was gestart.
 
-        Dezelfde maat als bij een laadbeurt (Sven op 05-09-2026: "de prijs
+        Dezelfde maat als bij een laadbeurt (de eigenaar op 05-09-2026: "de prijs
         vanaf het inpluggen"): hetzelfde verbruik, verschoven naar het moment
         van vrijgeven, en dan alles van het net tegen de prijs van toen. Zon
         telt in het betaalde tegen de terugleverprijs, en wat dat scheelde
         tegenover inkopen loopt apart mee (`zon_winst`), zodat Bespaard kan
-        zeggen wat de zon deed en wat het wachten. Sven op 09-09-2026: "wat je
+        zeggen wat de zon deed en wat het wachten. De eigenaar op 09-09-2026: "wat je
         op zonne-energie laadt bespaar je natuurlijk ook door minder stroom in
         te kopen." Eén dag eerder rekende de maat de zon van het
         vrijgavemoment mee en stond een beurt die meteen op zon startte op nul.
@@ -1893,7 +1893,7 @@ class ChargerCoach:
         `totaal` is de maat min het betaalde: wat dezelfde beurt gekost had
         als alles van het net was gekomen op het moment van vrijgeven of
         inpluggen. `zon` is wat de eigen zon daarvan scheelde; de rest is het
-        wachten op een goedkoper moment. Sven op 09-09-2026: "ik wil het
+        wachten op een goedkoper moment. De eigenaar op 09-09-2026: "ik wil het
         totaal plaatje."
         """
         wachten = totaal - zon
@@ -2028,7 +2028,7 @@ class ChargerCoach:
     ) -> None:
         """Een beurt die al liep toen de coach begon, oppakken waar hij was.
 
-        Sven op 07-09-2026, over een herstart midden in een vaatwasserbeurt:
+        De eigenaar op 07-09-2026, over een herstart midden in een vaatwasserbeurt:
         "ja, reken terug." Stond de beurt in de opslag (elke vijf minuten
         bewaard), dan gaan de tellers daar verder en komt alleen het gat
         sinds die opslag uit de kwartieropslag. Stond er niets, dan zegt de
@@ -2390,7 +2390,7 @@ class ChargerCoach:
     ) -> tuple[bool, bool]:
         """De schakelaar "nu starten" en die keuze op de kaart gelijk houden; geeft (vrijgave, nu).
 
-        Sven op 13-09-2026: na de klaar-tijd de keuze "ingeruimd en morgen
+        De eigenaar op 13-09-2026: na de klaar-tijd de keuze "ingeruimd en morgen
         starten" of "ingeruimd en nu starten", en vanaf de keukenkaart met een
         tweede schakelaar. Dezelfde afspraak als de vrijgaveschakelaar: wie het
         laatst bewoog wint, en bij de eerste ronde wint aan. Aan is ingeruimd
@@ -2434,7 +2434,7 @@ class ChargerCoach:
     ) -> None:
         """De gemeten duur, het verbruik, de piek en het profiel van deze beurt bewaren.
 
-        Sven op 06-09-2026: "het verbruik van een vaatwasser is in het begin
+        De eigenaar op 06-09-2026: "het verbruik van een vaatwasser is in het begin
         heel hoog vanwege het opwarmen, dus ik wil dat gaan meten en dan die
         waardes in kunnen vullen." Per apparaat en per programma, als lopend
         gemiddelde over de laatste beurten (`METING_MAX_N`). Een beurt zonder
@@ -2522,7 +2522,7 @@ class ChargerCoach:
     # ------------------------------------------------------------------
     # De boiler
     #
-    # Sven op 19-09-2026: "ik wil gewoon een sturing maken op een boiler waar
+    # De eigenaar op 19-09-2026: "ik wil gewoon een sturing maken op een boiler waar
     # je alleen stroom op moet zetten, met een smart plug bijvoorbeeld. Als je
     # er stroom op zet en de boiler is warm moet de coach detecteren dat hij
     # warm genoeg is omdat de boiler dan onder een bepaald vermogen zit. Ik wil
@@ -2771,7 +2771,7 @@ class ChargerCoach:
             sessie["gemeld"].discard("vergeefs")
             # Het verslag gaat naar de geschiedenis en niet naar de telefoon:
             # een boiler die om drie uur 's nachts warm wordt hoeft niemand te
-            # wekken. Sven op 06-09-2026: "niet telkens onnodig meldingen."
+            # wekken. De eigenaar op 06-09-2026: "niet telkens onnodig meldingen."
             vanaf = f" vanaf {sessie['gestart']:%H:%M}" if sessie.get("gestart") else ""
             erin_tekst = f"{erin:.1f} kWh".replace(".", ",")
             await self._async_tell(
@@ -3367,7 +3367,7 @@ class ChargerCoach:
         # bij afname, maar die opslag niet: die betaal je per ingekochte kWh en
         # krijg je nergens terug. Zonder deze aftrek stond de terugleveropbrengst
         # er ruim twee cent te hoog in en leek eigen zon gebruiken even duur als
-        # het weggeven ervan. Gevonden op 27-08-2026, uit Svens eigen nota.
+        # het weggeven ervan. Gevonden op 27-08-2026, uit een eigen energienota.
         opslag = float(dynamic.get("supplier_markup") or 0) * (
             1 + float(dynamic.get("vat_percent") or 0) / 100
         )
@@ -3399,7 +3399,7 @@ class ChargerCoach:
             rows.append({"start": start, "end": end, "price": prijs, "feed_in": terug})
         # Verder dan de lijst reikt weet de coach niets, en dat hoort zo.
         # Er stond hier op 04-09-2026 een middag lang een geschatte dag
-        # achteraan (de prijzen van vandaag nog eens voor morgen); Sven wil
+        # achteraan (de prijzen van vandaag nog eens voor morgen); de eigenaar wil
         # geen gegokte prijzen. Reikt de lijst niet tot de klaar-tijd, dan
         # laadt hij tot die tijd alleen op zon. Zie `alleen_zon` in planner.py.
         return sorted(rows, key=lambda item: item["start"])
@@ -3447,8 +3447,8 @@ class ChargerCoach:
         binnenkant van Home Assistant, en bij elke klant dezelfde som. Alles staat
         daar in watt, wat de sensor zichzelf ook noemt.
 
-        **De mediaan en niet het gemiddelde.** Sven koos die op 30-08-2026 nadat
-        ik hem de drie mogelijkheden voorlegde. Bij Van den Dam zei het gemiddelde
+        **De mediaan en niet het gemiddelde.** De eigenaar koos die op 30-08-2026 nadat
+        ik hem de drie mogelijkheden voorlegde. In de klantwoning zei het gemiddelde
         voor dat uur 1,63 kWh terwijl het huis er op dat moment 0,5 gebruikte:
         één keer wassen tilt een gemiddelde over dagen heen op. De mediaan is
         daar niet gevoelig voor, en de werkelijke sturing loopt hoe dan ook op de
@@ -3534,7 +3534,7 @@ class ChargerCoach:
         **De voorspelling van het energiedashboard.** Elke zonvoorspeller die
         aan het energiedashboard hangt levert daar een uurkromme, en Home
         Assistant ontsluit ze allemaal op dezelfde manier. Dat is dus geen
-        Forecast.Solar-truc: Solcast doet het net zo. Nagemeten bij Van den Dam
+        Forecast.Solar-truc: Solcast doet het net zo. Nagemeten in de klantwoning
         op 30-08-2026: veertien uur vooruit, per uur, in wattuur.
 
         **En anders wat de klant zelf heeft ingevuld.** Dit uur en het volgende
@@ -3690,7 +3690,7 @@ class ChargerCoach:
 
         Een sensor die `unavailable` of `unknown` meldt, of die er even helemaal
         niet is, heeft geen waarde nul. Hij heeft geen waarde. Dat verschil is
-        precies waar het op 30-08-2026 bij Van den Dam op misging: de P1-meter
+        precies waar het op 30-08-2026 in de klantwoning op misging: de P1-meter
         viel drie keer een paar seconden weg, de coach rekende de zon uit op nul
         en zette het laden stil. Zie `MEETNAIJL`.
 
@@ -3915,7 +3915,7 @@ class ChargerCoach:
         # verslag en wiste de hele sessie, dus het akkoord, snelladen, de
         # opgegeven accustand en de klaar-tijd waar hij aan werkte.
         #
-        # Sven kreeg op 29-08-2026 om 19:54 zo'n verslag terwijl de paal die hele
+        # De eigenaar kreeg op 29-08-2026 om 19:54 zo'n verslag terwijl de paal die hele
         # avond op `awaiting_start` stond. Of het toen precies hierdoor kwam is
         # achteraf niet te bewijzen, maar een sensor die niets zegt mag sowieso
         # geen afkoppeling betekenen.
@@ -3929,7 +3929,7 @@ class ChargerCoach:
         # En een paal die wél iets zegt, alleen niet lang genoeg om het te
         # geloven. Een Easee die zijn laadbeurt opnieuw opstart meldt twee
         # seconden `disconnected` en gaat daarna gewoon door met laden. Zie
-        # `KABEL_ONTDREUN` voor wat dat bij Van den Dam kostte.
+        # `KABEL_ONTDREUN` voor wat dat in de klantwoning kostte.
         #
         # Het moment dat hier onthouden wordt is het moment dat straks in het
         # verslag komt: de kabel ging eruit toen de paal het zei, niet toen de
@@ -4011,7 +4011,7 @@ class ChargerCoach:
         car = self._car(settings, device, charger)
 
         # --- "klaar" terwijl de auto niet vol is ---
-        # De paal zegt alleen dat de auto niets meer aanneemt. Bij Van den Dam
+        # De paal zegt alleen dat de auto niets meer aanneemt. In de klantwoning
         # was dat op 06-09-2026 om 04:27 een Ford met een storing op 86%, en die
         # ging pas weer laden nadat er om 05:18 met de hand een start gestuurd
         # was. Weet de coach dat de auto niet vol is, dan doet hij dat zelf, één
@@ -4071,13 +4071,13 @@ class ChargerCoach:
         weekend zonder eisen erin telt niet als "niets te doen" maar als "tijd
         om het goedkoopste moment uit te zoeken".
         """
-        # Een laadpaal kent alleen "klaar om". Sven op 04-09-2026: "niet eerder
+        # Een laadpaal kent alleen "klaar om". De eigenaar op 04-09-2026: "niet eerder
         # dan en starten voor moet er helemaal uit." De coach kiest zelf het
         # goedkoopste moment; een begintijd zou hem alleen van de zon afhouden
         # en een starttijd zou hem laten laden terwijl het duur is. Het paneel
         # vraagt er bij een laadpaal niet meer om; wat er van vroeger nog in de
         # instellingen staat telt hier niet mee.
-        # Een boiler net zo: Sven koos op 19-09-2026 "klaar om, zoals de auto".
+        # Een boiler net zo: de eigenaar koos op 19-09-2026 "klaar om, zoals de auto".
         alleen_klaar = device.get("type") in ("laadpaal", "boiler")
 
         def tijd(bron: dict[str, Any], sleutel: str) -> time | None:
@@ -4158,7 +4158,7 @@ class ChargerCoach:
         phases = {"one": 1, "three": 3}.get(profile.get("phases"), 3)
         # Behalve als de paal aantoonbaar op één fase laadt terwijl het profiel
         # drie zegt. Een Easee in automatische fasemodus kiest bij het starten
-        # zelf, en die modus blijft: Sven op 06-09-2026, "die is belangrijk
+        # zelf, en die modus blijft: de eigenaar op 06-09-2026, "die is belangrijk
         # voor gastauto's." Zolang deze beurt loopt rekent de coach dan met wat
         # er werkelijk loopt, want anders denkt hij drie keer zo snel te zijn.
         device_id = device.get("id", "")
@@ -4239,7 +4239,7 @@ class ChargerCoach:
         en geen tweede voorspelling. Voor het uur waar de coach ín zit telt de
         meter toch al rechtstreeks.
 
-        Sven op 17-09-2026: de voorspeller zei 1,552 kWh voor het uur van
+        De eigenaar op 17-09-2026: de voorspeller zei 1,552 kWh voor het uur van
         16:00 en het dak deed 0,58. De coach verschoof zijn belofte van 16:00
         naar 17:00 en zou hem om 17:00 weer verschoven hebben. Zie
         `overschot_kwh` in planner.py.
@@ -4329,13 +4329,13 @@ class ChargerCoach:
     ) -> None:
         """Onthouden wat deze auto per band van tien procent aankan.
 
-        Sven op 06-09-2026: "bepaalde auto's schroeven vanaf een bepaald
+        De eigenaar op 06-09-2026: "bepaalde auto's schroeven vanaf een bepaald
         procent zelf hun doorlaatbaarheid in ampère terug." Dat is alleen te
         meten als de auto zélf de rem is: de paal biedt meer dan hij neemt, en
         niets anders houdt hem tegen. Niet de coach (zijn limiet ligt hoger dan
         wat er loopt), niet de lastbewaker, niet de groep. Per band het laagste
         van deze beurt, want een auto die afbouwt doet dat bovenin de band het
-        sterkst, en Sven wil liever te vroeg vol dan te laat.
+        sterkst, en de eigenaar wil liever te vroeg vol dan te laat.
 
         Het staat per auto in de instellingen (`car_pace`) en de volgende beurt
         rekent ermee, zie `hours_needed` in planner.py. Een nieuwe beurt
@@ -4422,7 +4422,7 @@ class ChargerCoach:
         binnen een band loopt het tempo alleen maar af. Neemt hij bij dezelfde
         of een hogere accustand twee ronden achter elkaar duidelijk meer dan wat
         er voor die band bewaard staat, dan was die meting geen afbouw maar iets
-        anders, en dan hoort hij weg. Bij Van den Dam stond er op 19-09-2026
+        anders, en dan hoort hij weg. In de klantwoning stond er op 19-09-2026
         5,52 kW voor band 6, gemeten om 03:35 terwijl de Ford nog bijkwam van een
         verlaging; om 03:45 trok hij in diezelfde band 9,6 kW.
 
@@ -4574,12 +4574,12 @@ class ChargerCoach:
         een auto die zijn stand zelf meldt. Dat was nodig omdat niet elke
         accusensor per procent meldt.
 
-        Svens Ford meldt per tien procent, ongeveer elk half uur. Op 17-09-2026
+        de eigen Ford meldt per tien procent, ongeveer elk half uur. Op 17-09-2026
         stond hij van 21:58:43 tot 22:30:37 op zeventig; in die achtentwintig
         minuten leverde de paal 4.072 W, dus 1,90 kWh aan de stekker en bijna
         negen procentpunt in de accu. Om 22:26 zei de kaart "nog 2,2 kWh, vol
         rond 23:00" terwijl er 0,18 kWh in ging en de bus om 22:29 op zijn doel
-        stond. Sven: "dat hoeft helemaal niet en is onzin."
+        stond. De eigenaar: "dat hoeft helemaal niet en is onzin."
 
         Geen gok maar de eigen meting van de paal (`_eigen`, zie `_geladen`),
         want die loopt wél per ronde mee. Begrensd op één stap van de sensor,
@@ -4662,7 +4662,7 @@ class ChargerCoach:
     # ------------------------------------------------------------------
     # Wat een laadbeurt kost en bespaart
     #
-    # Sven op 05-09-2026: "Kunnen we ergens een overzichtje maken wat we
+    # De eigenaar op 05-09-2026: "Kunnen we ergens een overzichtje maken wat we
     # hebben bespaard? Dat is natuurlijk het belangrijkste voor de klant." Het
     # ijkpunt is de prijs op het moment van inpluggen: "bereken die prijs
     # wanneer die gestopt is en gewacht heeft met laden op een goedkoop moment.
@@ -4748,7 +4748,7 @@ class ChargerCoach:
         in de opslag, dan is het inplugmoment onbekend en dus ook de prijs van
         toen. Dan zoekt `_async_terugrekenen` het op in de recorder; lukt dat
         niet, dan komt er geen ijkpunt: de kilowatturen en de kosten tellen,
-        de besparing blijft leeg. Sven op 05-09-2026, bij "bespaard -0,01" op
+        de besparing blijft leeg. De eigenaar op 05-09-2026, bij "bespaard -0,01" op
         een beurt van vrijdagavond die de coach pas om 15:03 zag: "waarom is
         er vandaag niks bespaard?" Een ijkpunt van het verkeerde uur is erger
         dan geen ijkpunt.
@@ -4795,7 +4795,7 @@ class ChargerCoach:
     ) -> None:
         """De maat waartegen bespaard wordt, per ronde bijgeteld.
 
-        Sven op 05-09-2026: "bereken die prijs wanneer die gestopt is en
+        De eigenaar op 05-09-2026: "bereken die prijs wanneer die gestopt is en
         gewacht heeft met laden op een goedkoop moment. Dus de prijs vanaf het
         inpluggen." En: "een min getal bij besparen kan helemaal niet." Dus:
         wat dezelfde kilowatturen gekost hadden als de paal vanaf het
@@ -4808,7 +4808,7 @@ class ChargerCoach:
 
         Tot v0.60.0 telde de zon die er toen over was in de maat mee tegen de
         terugleverprijs, en dan was wat er op eigen zon geladen werd geen
-        besparing. Sven op 09-09-2026: "wat je op zonne-energie laadt bespaar
+        besparing. De eigenaar op 09-09-2026: "wat je op zonne-energie laadt bespaar
         je natuurlijk ook door minder stroom in te kopen." Dat deel staat nu
         apart in `zon_winst` (zie `_geld_bij`); de rest van bespaard is het
         wachten op een goedkoper uur.
@@ -4993,7 +4993,7 @@ class ChargerCoach:
     ) -> dict[str, Any] | None:
         """Wat er in een beurt gebeurde vóór de coach hem zag.
 
-        Sven op 05-09-2026: "kan je niet historisch terugrekenen?" Ja: de
+        De eigenaar op 05-09-2026: "kan je niet historisch terugrekenen?" Ja: de
         recorder weet wanneer de kabel erin ging en wat een kWh toen kostte,
         en de eigen kwartieropslag weet wat de paal, de zon en het net daarna
         per kwartier deden. Daaruit komen dezelfde tellers als `_geld_bij` en
@@ -5244,7 +5244,7 @@ class ChargerCoach:
                 self._beurt_schrijven({**open_beurt, "complete": True,
                                        "ended": open_beurt.get("ended") or now.isoformat()})
             # De kabel is eruit. Voordat deze beurt wordt vergeten gaat hij naar
-            # `_afscheid`, want er hoort nog een verslag over. Sven trok hem er
+            # `_afscheid`, want er hoort nog een verslag over. De eigenaar trok hem er
             # op 20-08-2026 twee keer uit tijdens het laden en hoorde niets: er
             # kwam alleen iets bij "vol" en bij een gemiste klaar-tijd.
             #
@@ -5305,7 +5305,7 @@ class ChargerCoach:
             # pas een ronde later stroom lopen.
             #
             # Dit onthouden is het verschil tussen een verslag dat klopt en een
-            # dat liegt. Op 20-08-2026 herstartte Sven om 20:57 en las hij daarna
+            # dat liegt. Op 20-08-2026 herstartte de eigenaar om 20:57 en las hij daarna
             # "Geladen van 20:58 tot 21:32, 3,1 kWh", terwijl de auto vanaf 19:18
             # aan de kabel hing en er 5,2 kWh in was gegaan.
             sessie["ingestapt"] = charger.charging
@@ -5354,7 +5354,7 @@ class ChargerCoach:
         # Dat is een reparatie. Stond hij in de beurt, dan begon hij bij elke
         # nieuwe beurt weer op nul, en dan is er niets meer om de eerste stap
         # van de teller mee te verdelen: die stap dekt immers ook tijd van vóór
-        # deze beurt. Bij Van den Dam kostte dat op 30-08-2026 een verslag van
+        # deze beurt. In de klantwoning kostte dat op 30-08-2026 een verslag van
         # 10,0 kWh over vierentwintig minuten, waar er 3,34 in ging.
         eigen = self._eigen.setdefault(
             device_id,
@@ -5384,7 +5384,7 @@ class ChargerCoach:
             sessie["soc_meter"] = meter
 
         # Zelf meten wat er langskomt, want de levensduurteller van de paal
-        # loopt achter. Bij Sven werkte hij op 25-08-2026 maar één keer per uur
+        # loopt achter. In die woning werkte hij op 25-08-2026 maar één keer per uur
         # bij en sprong hij toen met 3,5 kWh ineens, dus het verslag miste het
         # laatste half uur van de beurt. Wat de teller al verwerkt heeft blijft
         # van de teller; alleen de staart daarna komt uit deze som.
@@ -5474,7 +5474,7 @@ class ChargerCoach:
         **En de kop loopt net zo goed voor.** Die kant stond er niet in. De
         teller stond bij het begin van de beurt stil op een stand van misschien
         wel een uur oud, en de eerste stap daarna bevat dus ook energie van vóór
-        deze beurt. Bij Van den Dam sprong hij op 30-08-2026 om 04:02:45 in één
+        deze beurt. In de klantwoning sprong hij op 30-08-2026 om 04:02:45 in één
         keer 9,35 kWh, over de periode vanaf 02:55. De beurt die om 03:43 begon
         nam die hele sprong mee en meldde 10,0 kWh over vierentwintig minuten,
         wat 25 kW zou zijn. Er was 3,34 kWh in gegaan.
@@ -5508,7 +5508,7 @@ class ChargerCoach:
 
         Dit stond er niet, en daardoor was een naam die je invulde nergens meer
         terug te vinden: de kaart toonde de laadpaal en elke melding zei "de
-        auto". Sven op 30-08-2026: "ik heb de naam aangepast bij de auto maar in
+        auto". De eigenaar op 30-08-2026: "ik heb de naam aangepast bij de auto maar in
         het overzicht staat de naam nog verkeerd en neemt hij het niet mee."
         """
         naam = ((car.name if car else "") or "").strip()
@@ -5519,7 +5519,7 @@ class ChargerCoach:
 
         Met de periode erbij, en dat is een reparatie. Deze minuten tellen vanaf
         het moment dat de kabel erin ging, terwijl de kWh in dezelfde zin vanaf
-        het begin van het laden telt. Sven kreeg op 30-08-2026 om 03:43: "er
+        het begin van het laden telt. De eigenaar kreeg op 30-08-2026 om 03:43: "er
         ging 6,9 kWh in sinds 03:00. Er ging 381 minuten naar wachten op een
         goedkoper uur." Dat leest als 381 minuten binnen drieënveertig, terwijl
         het klopte: de kabel zat er sinds 20:37 in. Elk getal was goed en de zin
@@ -5610,7 +5610,7 @@ class ChargerCoach:
         gemeld: set[str] = sessie["gemeld"]
 
         # De coach biedt stroom aan en er komt niets. Dit is het bericht dat bij
-        # Van den Dam had moeten komen: de Ford hield op 30-08-2026 om 04:34 op
+        # de klantwoning had moeten komen: de Ford hield op 30-08-2026 om 04:34 op
         # met laden en kwam daar zelf niet meer uit, maar het eerste woord
         # daarover was het verslag van 07:00, toen de klaar-tijd al voorbij was
         # en de auto op 69% stond. Twee en een half uur waarin niemand iets kon
@@ -5676,7 +5676,7 @@ class ChargerCoach:
             ):
                 return
             # Na een eigen herstart eerst een kwartier afwachten: de Ford bij
-            # Van den Dam had er negen minuten voor nodig.
+            # de klantwoning had er negen minuten voor nodig.
             herstart = self._herstart_gedaan.get(device_id)
             if herstart is not None and now - herstart < HERSTART_WACHT:
                 return
@@ -5687,11 +5687,11 @@ class ChargerCoach:
             # "Vol" is wat de paal zegt, niet altijd wat de accu doet. Stopt een
             # auto op 80% omdat daar een laadgrens in staat, dan is "de auto is
             # vol" onwaar en leest het als een coach die niet weet wat hij doet.
-            # Weet hij de accustand, dan zegt hij die gewoon. Sven op 20-08-2026.
+            # Weet hij de accustand, dan zegt hij die gewoon. De eigenaar op 20-08-2026.
             #
             # En staat die 80% als doel in het profiel, dan is er niets bijzonders
             # gebeurd en hoort er ook geen bijzonderheid te staan: dan is dit
-            # gewoon het einde van een geslaagde beurt. Sven op 16-09-2026.
+            # gewoon het einde van een geslaagde beurt. De eigenaar op 16-09-2026.
             wie = f"{self._hoe_heet(car).capitalize()} aan {naam}"
             heel = doel_van(car) >= FULL_PERCENT
             if car.soc_percent is None or (heel and doel_bereikt(car)):
@@ -5707,7 +5707,7 @@ class ChargerCoach:
             # Is de coach midden in de laadbeurt ingestapt, dan weet hij niet
             # hoe laat die begon en hoort hij dat ook niet te suggereren.
             # Vandaar "sinds" en niet "van ... tot"; dat ene woord zegt het al.
-            # Wat er niet meer bij staat is "en toen liep hij al". Sven op
+            # Wat er niet meer bij staat is "en toen liep hij al". De eigenaar op
             # 21-09-2026: "ik vind dat en toen liep hij al onnodig. Alle
             # meldingen moeten gewoon duidelijk en kort zijn."
             begon = sessie["begon"]
@@ -5772,7 +5772,7 @@ class ChargerCoach:
 
         Dezelfde vorm als het verslag bij een volle auto, want het is dezelfde
         vraag: wanneer hield het op en hoeveel is erin gegaan. Afgesproken met
-        Sven op 26-08-2026, met zijn eigen zin als voorbeeld: "afgekoppeld om
+        De eigenaar op 26-08-2026, met zijn eigen zin als voorbeeld: "afgekoppeld om
         19:12, er ging 4,2 kWh in".
 
         Wat er niet in staat is een oordeel. De kabel eruit trekken is een
@@ -5785,7 +5785,7 @@ class ChargerCoach:
 
         # "Sinds" en niet "van ... tot", want is de coach midden in de beurt
         # ingestapt dan weet hij het begin niet. Die ene zin dekt allebei de
-        # gevallen; de bijzin "en toen liep hij al" is eruit (Sven, 21-09-2026).
+        # gevallen; de bijzin "en toen liep hij al" is eruit (de eigenaar, 21-09-2026).
         if kwh:
             verloop = f", er ging {kwh} in sinds {begon:%H:%M}."
         else:
@@ -5861,7 +5861,7 @@ class ChargerCoach:
 
         Twee velden vroegen om hetzelfde. Bij een Easee vult de installateur
         onder Merk "Levensduur verbruik" in, en bij Apparaten staat daarnaast
-        "Energieteller (optioneel)" die naar dezelfde sensor wijst. Sven merkte
+        "Energieteller (optioneel)" die naar dezelfde sensor wijst. De eigenaar merkte
         dat op 27-08-2026 bij een klant: hij typte hem twee keer.
 
         Erger dan het dubbele typen was wat eronder zat. Alleen Easee heeft dat
@@ -5886,7 +5886,7 @@ class ChargerCoach:
 
         De paal kiest bij het starten van een beurt zelf hoeveel fasen hij
         pakt, en gaat daarbij af op zijn eigen maximale limiet. Staat die te
-        laag, dan laadt elke beurt eenfasig. Bij Sven kostte dat een week lang
+        laag, dan laadt elke beurt eenfasig. In die woning kostte dat een week lang
         stilletjes een factor drie: 3,1 kW waar 10,9 kW kon, en niets in het
         paneel dat er iets over zei. De limiet die de coach schrijft telt in die
         keuze niet mee, dus dit is met sturen niet op te lossen en is het enige
@@ -5951,9 +5951,9 @@ class ChargerCoach:
         keer. Die som klopt alleen als de twee getallen bij hetzelfde moment
         horen, en dat is precies wat er misging.
 
-        Bij Van den Dam meldde de Easee op 30-08-2026 om 04:28:17 een stroom van
+        In de klantwoning meldde de Easee op 30-08-2026 om 04:28:17 een stroom van
         2,20 A terwijl het vermogen nog de 782 W van drie seconden eerder was.
-        Dat is een verhouding van 1,54 en dus "één fase", en zo kreeg Sven te
+        Dat is een verhouding van 1,54 en dus "één fase", en zo kreeg de eigenaar te
         lezen dat zijn auto eenfasig laadde terwijl alle drie de fasen van het
         huis netjes samen elf ampère zakten zodra de paal uitging.
 
@@ -6086,7 +6086,7 @@ class ChargerCoach:
         auto wil meer, en er past onder de zekering ook meer, maar de bewaker
         geeft niet meer vrij.
 
-        Dat is de vraag die iemand zich dan stelt. Bij Van den Dam stond in het
+        Dat is de vraag die iemand zich dan stelt. In de klantwoning stond in het
         logboek van de nacht van 30-08-2026 uur na uur `limited_by_equalizer`
         terwijl er nergens op het scherm iets over te vinden was.
         """

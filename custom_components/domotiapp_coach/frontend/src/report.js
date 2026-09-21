@@ -456,7 +456,7 @@ export async function reportPdf(gegevens) {
 
   if (gegevens.bespaard?.vakjes?.length) {
     // Wat de coach bespaarde, per laadbeurt tegen de prijs van het
-    // inplugmoment. Sven op 05-09-2026: "dat is natuurlijk het belangrijkste
+    // inplugmoment. De eigenaar op 05-09-2026: "dat is natuurlijk het belangrijkste
     // voor de klant", dus vóór het verloop en de tabellen.
     vel.kop("Bespaard");
     schrijfVakjes(pdf, vel, gegevens.bespaard.vakjes);

@@ -1,7 +1,7 @@
 /**
  * Bespaard: wat de laadbeurten kostten en wat ze bespaarden, opgeteld.
  *
- * Sven op 05-09-2026: "Kunnen we ergens een overzichtje maken wat we hebben
+ * De eigenaar op 05-09-2026: "Kunnen we ergens een overzichtje maken wat we hebben
  * bespaard? En dat per dag, week, maand, jaar van elk apparaat. Dat is
  * natuurlijk het belangrijkste voor de klant." Het ijkpunt is de prijs op het
  * moment van inpluggen: "bereken die prijs wanneer die gestopt is en gewacht
@@ -34,7 +34,7 @@ export function beurtenIn(items, start, end) {
  * tegenover inkopen) en door te wachten (de rest: een goedkoper uur). Een
  * beurt van voor v0.60.0 kent het zondeel niet; toen zat de zon al in de maat
  * en was bespaard alleen het wachten, dus dan is dat ook het hele bedrag.
- * Sven op 09-09-2026: "ik wil het totaal plaatje."
+ * De eigenaar op 09-09-2026: "ik wil het totaal plaatje."
  */
 export function delen(beurt) {
   if (beurt?.saved === null || beurt?.saved === undefined) return { zon: null, wachten: null };
@@ -89,7 +89,7 @@ export const soort = (beurt) =>
   beurt?.kind === "programma" || beurt?.kind === "boiler" ? beurt.kind : "laden";
 
 /**
- * De woorden voor de kop van Bespaard, naar wat er in de lijst staat. Sven op
+ * De woorden voor de kop van Bespaard, naar wat er in de lijst staat. De eigenaar op
  * 07-09-2026, bij de eerste vaatwasserbeurt onder Bespaard: "hij heeft het
  * hier over de paal, maar dat moet vaatwasser zijn. Ook kan je niet een
  * vaatwasser inpluggen." Een vaatwasser wordt vrijgegeven en verbruikt; een
@@ -99,7 +99,7 @@ export const soort = (beurt) =>
  * `vanaf` is de kolom met het ijkpunt: wat dezelfde beurt gekost had zonder
  * de coach en zonder zon, vanaf het inpluggen op vol vermogen of meteen bij
  * het vrijgeven gestart, alles van het net tegen de prijs van dat moment.
- * Sven op 09-09-2026: "wat het heeft gekost nu tegenover een duurder moment
+ * De eigenaar op 09-09-2026: "wat het heeft gekost nu tegenover een duurder moment
  * van het vrijgeven, en wat je op zonne-energie laadt bespaar je natuurlijk
  * ook door minder stroom in te kopen."
  */

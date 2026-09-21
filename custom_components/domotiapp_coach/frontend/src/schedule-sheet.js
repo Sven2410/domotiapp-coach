@@ -1,7 +1,7 @@
 /**
  * Het schema van één apparaat, als pop-up achter zijn eigen kaart.
  *
- * Stond tot 27-08-2026 in Strategie, achter een lijstje apparaten. Sven wilde
+ * Stond tot 27-08-2026 in Strategie, achter een lijstje apparaten. De eigenaar wilde
  * het bij het apparaat zelf hebben: op de kaart de schuif en de voorrang, en
  * achter de knop Schema dit scherm met de tijden. Strategie houdt daarmee één
  * onderwerp over, namelijk wat de coach uit zichzelf doet.
@@ -70,11 +70,11 @@ export const PRIORITIES = [
 /**
  * Welke van de drie tijden dit apparaat kent.
  *
- * Een laadpaal alleen "klaar om". Sven op 04-09-2026: "niet eerder dan en
+ * Een laadpaal alleen "klaar om". De eigenaar op 04-09-2026: "niet eerder dan en
  * starten voor moet er helemaal uit." De coach zoekt zelf het goedkoopste
  * moment tussen nu en de klaar-tijd; een begintijd houdt hem alleen van de zon
  * af en een starttijd laat hem laden terwijl het duur is. Een boiler net zo
- * (Sven, 19-09-2026: "klaar om, zoals de auto"). Andere apparaten houden alle
+ * (de eigenaar, 19-09-2026: "klaar om, zoals de auto"). Andere apparaten houden alle
  * drie.
  */
 export const timesFor = (device) =>
@@ -177,7 +177,7 @@ const css = /* css */ `
   /* Het attribuut hidden is niets meer dan een regel van de browser zelf, en
      die verliest van elke display die hier staat. Zonder deze regels bleef de
      lege waarschuwing staan en stonden de tijden van elke dag én die per dag
-     tegelijk in beeld. Sven zag dat op 27-08-2026. Elke klasse hieronder die
+     tegelijk in beeld. De eigenaar zag dat op 27-08-2026. Elke klasse hieronder die
      een display krijgt, hoort er dus eentje te hebben. */
   [hidden] { display: none !important; }
 
