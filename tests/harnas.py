@@ -162,6 +162,7 @@ def laad(naam):
 
 laad("const")
 planner = laad("planner")
+laad("batterij")
 storage = laad("storage")
 coachmod = laad("coach")
 monitormod = laad("monitor")

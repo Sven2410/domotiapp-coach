@@ -109,6 +109,43 @@ _PROGRAM = _schema(
     }
 )
 
+_LEEG_OF = lambda soort, *grens: vol.Any(None, "", vol.All(vol.Coerce(soort), vol.Range(*grens)))  # noqa: E731
+
+_BATTERY = _schema(
+    {
+        # Alleen nodig waar geen sensor voor is ingevuld.
+        vol.Optional("capacity_kwh", default=None): _LEEG_OF(float, 0.1, 1000),
+        vol.Optional("max_charge_w", default=None): _LEEG_OF(int, 0, 100000),
+        vol.Optional("max_discharge_w", default=None): _LEEG_OF(int, 0, 100000),
+        # Het rendement heen en terug in procent, voor wie geen kWh-meter op de
+        # batterij heeft. Met zo'n meter meet de coach het zelf en wint de meting.
+        vol.Optional("rte_percent", default=None): _LEEG_OF(float, 30, 100),
+        # De vermogenssensor van dit apparaat is positief bij laden, tenzij dit
+        # aanstaat.
+        vol.Optional("power_invert", default=False): bool,
+        # Hetzelfde voor het getal waarmee hij gestuurd wordt, als daar geen
+        # aparte richting naast staat.
+        vol.Optional("setpoint_invert", default=False): bool,
+        # Op welke fase hij hangt, voor de zekeringbewaking. Leeg is "weet ik
+        # niet", en dan telt de zwaarste fase.
+        vol.Optional("phase", default=""): vol.In(["", "l1", "l2", "l3"]),
+        # De reserve voor noodstroom.
+        vol.Optional("reserve_enabled", default=False): bool,
+        vol.Optional("reserve_percent", default=20): vol.All(vol.Coerce(int), vol.Range(0, 100)),
+        # Ontladen naar het net op dure uren.
+        vol.Optional("trade", default=False): bool,
+        # Een keer per week helemaal vol, voor het balanceren van de cellen.
+        vol.Optional("weekly_full", default=False): bool,
+        vol.Optional("weekly_full_day", default=6): vol.All(vol.Coerce(int), vol.Range(0, 6)),
+        # Wat de batterij gekost heeft, voor de terugverdientijd.
+        vol.Optional("purchase_price", default=None): _LEEG_OF(float, 0, 1000000),
+        # Welke keuze van de modus-entiteit "de coach stuurt" betekent, en welke
+        # er terugkomt als de coach stopt.
+        vol.Optional("control_mode", default=""): str,
+        vol.Optional("idle_mode", default=""): str,
+    }
+)
+
 _DEVICE = _schema(
     {
         vol.Required("id"): str,
@@ -148,6 +185,9 @@ _DEVICE = _schema(
         # zegt (merk "overig", op een meetstekker). De bewoner kiest het op de
         # kaart; de coach kiest nooit zelf een programma.
         vol.Optional("program", default=""): vol.Match(r"^[a-z0-9_]*$"),
+        # Wat de bewoner over zijn thuisbatterij invult. Alles mag leeg: wat
+        # een sensor zegt gaat voor, en wat niemand zegt weet de coach niet.
+        vol.Optional("battery", default=dict): _BATTERY,
     }
 )
 
@@ -564,8 +604,15 @@ async def async_clear_measurements(
         row for row in (settings.get("boiler_learned") or [])
         if not (isinstance(row, dict) and row.get("device") == msg["device_id"])
     ]
+    # En van een thuisbatterij het gemeten rendement. Wat hij verdiend heeft
+    # blijft staan: dat is geen meting die verkeerd kan zijn gegaan maar een
+    # kasboek.
+    batterijen = [
+        {**row, "rte": None} if isinstance(row, dict) and row.get("device") == msg["device_id"] else row
+        for row in (settings.get("battery_state") or [])
+    ]
     settings = await store.async_save(
-        {"program_measured": rows, "boiler_learned": geleerd}
+        {"program_measured": rows, "boiler_learned": geleerd, "battery_state": batterijen}
     )
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
     connection.send_result(msg["id"], settings)

@@ -1,7 +1,8 @@
 # DomotiApp Coach
 
 Een custom integration voor Home Assistant die apparaten in huis op het
-gunstigste moment laat draaien: de laadpaal, de vaatwasser en de boiler. Hij
+gunstigste moment laat draaien: de laadpaal, de thuisbatterij, de vaatwasser
+en de boiler. Hij
 wordt via HACS verspreid, dus alleen `custom_components/` gaat mee naar de klant.
 
 De eigenaar beoordeelt en beslist; ik bouw, test, commit, tag en breng uit.
@@ -458,7 +459,8 @@ regel); proef 51 in test_planner.py, proef 65 in test_coach.py.
 **De apparaatlijst noemt alleen wat de coach werkelijk kan** (v0.70.0). De eigenaar op
 19-09-2026: bij Apparaten gingen de thuisbatterij, de warmtepomp, de wasmachine,
 de droger en de zwembadpomp eruit, en bij een laadpaal het merk "overig". Over
-blijven: laadpaal, boiler, vaatwasser, airco en overig. Hetzelfde argument als
+blijven: laadpaal, boiler, vaatwasser, airco en overig. (De thuisbatterij kwam
+in v0.73.0 terug, en nu omdat de coach hem werkelijk stuurt.) Hetzelfde argument als
 bij de merken van 04-09-2026, een regel in een lijst leest als een belofte. Wat
 er niet in staat past onder "overig" met een eigen naam, en wordt gemeten zoals
 elk apparaat met een vermogenssensor.
@@ -819,12 +821,154 @@ meldt, hoeveel speling de thermostaat heeft, en of een boiler bovenin
 terugregelt in plaats van hard af te slaan.
 
 
+## De thuisbatterij
+
+Sinds 22-09-2026 stuurt de coach ook een thuisbatterij (v0.73.0), na de eigen
+"Ik wil de coach gaan uitbreiden met een thuisbatterij. Ik wil hem kunnen
+aansturen in HA. Laden, ontladen, blokkeren als de laadpaal laadt. Laden op
+goedkope tarieven overdag en in de nacht. Laden op overschot zonne-energie. Hij
+moet helemaal samenwerken met de energiecoach." En diezelfde avond, toen ik
+voorstelde de batterij zijn eigen nul-op-de-meter te laten doen: **"het doel is
+om hem volledig third party te sturen, dus via HA."**
+
+**Twee lagen, en dat is de kern.** `batterij.py` kent Home Assistant niet, net
+als planner.py.
+
+* `plan_batterij` kiest elke minuut een **stand**. Het is een som over de tijd
+  (`_waarde_vooruit`): van achter naar voren over alle blokken met een bekende
+  prijs, per inhoud van de batterij wat de rest nog kost, met het verwachte
+  huisverbruik en de zon erin (`_netto_huis_kwh`, dezelfde bronnen als
+  `overschot_kwh`). Aan het eind is wat er nog in zit waard wat een gemiddeld
+  bekend uur kost (`_gemiddeld_bekend`). Dat is dezelfde gedachte als
+  `schijven` en `goedkoopste`, alle manieren op een hoop, maar een batterij kan
+  twee kanten op en onthoudt wat erin zit.
+* `Regelaar` voert die stand uit op het tempo van de meter (`_async_regel` in
+  coach.py, gewekt door de netsensor en daarnaast elke `REGEL_TIK`).
+
+**De standen** (de namen zijn van de bewoner van de eerste woning, 21-09-2026):
+`nul`, `zonneladen`, `ontladen`, `netladen`, `max-laden`, `handelen`, `standby`.
+`Besluit.grenzen` zegt per stand of de regelaar mag laden en mag ontladen; meer
+verschil is er voor de regelaar niet.
+
+**Zon opslaan en het huis voeden gaan tegen wat een kilowattuur straks waard
+is** (`erbij` en `eraf`, het verschil in de som over een stap van het rooster).
+Bij gelijkspel wint wat je in handen hebt: op een zonnige dag komt de batterij
+toch vol, en wie dan "straks" kiest rekent op zon die er nog niet is. **Van het
+net laden en handelen volgen het plan zelf** (`_rustig_vermogen`): de
+vergelijking staat in het randuur precies op gelijkspel en viel in het virtuele
+huis elke minuut anders, zeven wissels in een kwartier.
+
+**Rustig laden.** De bewoner van de eerste woning: "als we 5u lang een
+energieprijs van 13 cent hebben, heb ik liever dat ie 5u lang laadt op 50%
+capaciteit, dan 2,5u op 100%." Wat het plan in de aaneengesloten even dure uren
+van het net wil halen wordt over al die uren uitgesmeerd; dezelfde gedachte als
+`rustig_tempo` bij de paal. Hij noemde erbij dat een omvormer tussen 30 en 75%
+van zijn vermogen het zuinigst is. **Dat getal staat er niet in**: het is een
+vuistregel en geen meting van deze batterij. Uitsmeren over even dure uren kost
+nooit geld; een duurder uur erbij nemen om rustiger te laden is pas een som als
+het rendement per vermogen gemeten is, en dat is het nog niet.
+
+**Het rendement is een meting of een opgave, nooit een aanname.** In de eerste
+woning kwam van elke kilowattuur die de kWh-meter op de batterij erin zag gaan
+73,6% er weer uit.
+De eigen tellers van die batterij telden meer eruit dan erin,
+want die meten aan de accukant. `rendement_uit_tellers` wil tien keer de inhoud
+aan doorzet (`RTE_MIN_DOORZET`) en weigert alles buiten 30 tot 100%. Zonder
+rendement wordt er niet gepland: alleen nul op de meter (`rendement-onbekend`),
+en met volledig salderen standby, want dan verliest opslaan altijd.
+
+**Wat niet over geld gaat staat erboven**, zoals bij de paal: geen accustand is
+standby; een negatieve prijs (de prijs die de bewoner betaalt, en de eigenaar op
+21-09-2026: "dit jaar een paar keer voorgekomen") is maximaal laden met
+ontladen dicht; de avondpiek blijft dicht voor het net (eis 4); onder de reserve
+voor noodstroom komt er niets uit; en **laadt er een paal, dan geeft de batterij
+niets af** (`_met_paal`, `_paal_laadt` in coach.py: gemeten aan het vermogen
+van de paal en niet aan het besluit van de coach, want in de eerste woning
+stuurde iets anders de paal).
+
+**De laadgrens van de batterij is van de batterij.** De eigenaar: "die instelling
+van 95% is belangrijk, daar blijft hij continu op staan. Dit is een waarde waar
+niet aan gekomen moet worden." De coach leest `charge_limit` en
+`discharge_limit` en schrijft ze nooit. De wekelijkse volle beurt voor het
+balanceren (`vol_voor`, `VOL_GEWICHT`) gaat dus tot die grens en niet tot 100%.
+
+**De regelaar**, na de eigen "als je realistisch kijkt verbruik je nooit steady
+350 W, hoe zorgen we dat we niet gaan pendelen?" Gemeten in de eerste woning,
+waar een andere sturing de batterij toen regelde: 1.713 opdrachten en 233
+statuswissels per dag, een dode band van 40 W die de meter 98,9% van de tijd
+binnen 50 W hield, een sprong van 2,1 kW die na tien seconden weg was, de meter
+elke vijf seconden in Home Assistant en de batterij die een opdracht binnen
+vijf seconden volgde. Het pendelen zat rond nul: standby en ontladen om de tien
+tot vijftien seconden. Daaruit:
+
+- **Een som en geen versterkingsfactor**: het huis vraagt wat de meter zegt plus
+  wat de batterij nu doet, en dat is de nieuwe opdracht.
+- **Niet opnieuw corrigeren voordat de vorige te zien is** (`bezonken`,
+  `WACHT_OP_BATTERIJ`). Hier komt pendelen vandaan.
+- **Een dode band** (`DODE_BAND_W`), **groot meteen en klein pas als het blijft**
+  (`GROOT_W`, `KLEIN_METINGEN`), **rond nul twee grenzen** (`BEGIN_W`, `STOP_W`)
+  en een kleine wens die de richting niet binnen een minuut omkeert
+  (`RICHTING_WACHT`).
+- **Mikken op de goedkope kant van nul** (`doel_w`): waar terugleveren minder
+  opbrengt dan inkopen kost, een halve dode band onder nul.
+- **Zwijgt de meter `METER_STIL`, dan gaat de batterij naar 0 W.** Een enkele
+  gemiste meting niet: veel integraties melden tussendoor even "niet
+  beschikbaar".
+- De officiele stuurentiteit van de eerste woning **leest niet terug** wat erin
+  geschreven is (hij stond op 0 W terwijl de batterij 2250 W ontlaadde), dus de
+  regelaar kijkt naar het gemeten batterijvermogen en nooit naar zijn eigen
+  laatste opdracht als er een meting is.
+
+**Gaat de coach weg, dan gaat de batterij terug** (`_async_batterij_loslaten`):
+vermogen op nul en `idle_mode` in de modus. Ook als het vinkje "mag sturen" eraf
+gaat of het niveau naar adviseren. Dezelfde gedachte als de stroom terug op de
+boiler.
+
+**De batterij vervalst de meter voor de andere apparaten.** Wat hij opslokt is
+geen huisverbruik maar zon die ook naar de auto had gekund, en wat hij afgeeft
+is geen zon. `_batterijen_w` telt het terug in `_netto_export_w` en in `_read`;
+`_async_huisverbruik` trekt een batterij met zijn teken van het huis af, en het
+paneel doet dat in `data-source.js` (`batteryWatts`). De auto laadt op zon
+zonder verlies en de batterij verliest een kwart, dus de andere apparaten gaan
+voor; de batterij krijgt vanzelf wat er daarna over is.
+
+**Het kasboek en de terugverdientijd.** `verdiend` is per stap het verschil
+tussen de rekening zoals hij loopt en zoals hij zonder batterij gelopen had (de
+meter min wat de batterij doet); het rendement zit er vanzelf in. Het gaat per
+dag naar `battery_state` in de instellingen. `terugverdiend` noemt pas een datum
+na `TERUGVERDIEN_MIN_DAGEN` en zegt over hoeveel dagen hij gemeten heeft. Wat de
+batterij verdiende voordat de coach erbij kwam wordt niet geschat.
+
+In het paneel: het type thuisbatterij staat er weer in (`DEVICE_TYPES`; het is
+uit `VERVALLEN_TYPES`), merken Anker en Overig met dezelfde velden
+(`BATTERY_FIELDS` in devices.js), de instellingen van de bewoner in
+`batteryHtml_` (views/devices.js, `battery` op het apparaat, `_BATTERY` in
+websocket.py), en de regels op de kaart in `battery.js`.
+
+Het virtuele huis heeft een `Batterij` die een opdracht na vijf seconden
+uitvoert en daarna vasthoudt, zoals een batterij in externe sturing doet.
+Dertien scenario's `batterij-*` in scenarios.py, met per scenario het aantal
+opdrachten, de richtingwissels, en de kosten van de dag met en zonder batterij.
+Wat eruit kwam en gerepareerd is: het klapperen in het randuur, en een waarde
+die vlak onder de laadgrens een achtste te laag uitkwam, waardoor de batterij op
+een zonnige dag op 93% bleef staan. test_batterij.py, proef 75 tot 78 in
+test_coach.py, en de batterijproeven in test_rapport.mjs.
+
+**Nog nooit aan een echte batterij gehangen.** Wat er in het echt anders kan
+zijn: in welke volgorde vermogen en richting geschreven moeten worden (ze delen
+bij Anker een register), wat de batterij doet als Home Assistant zelf vastloopt
+terwijl er een opdracht staat, of `BEGIN_W` en `STOP_W` bij de echte omvormer
+passen, en of het opgegeven laadvermogen klopt. Eerst meekijkend installeren
+(niveau adviseren), dan pas sturen.
+
+
 ## Hoe het in elkaar zit
 
 | bestand | wat het doet |
 |---|---|
 | `planner.py` | alle denkwerk, kent Home Assistant niet, is los te draaien |
 | `planner.py`, onderaan | het denkwerk voor een apparaat met een programma: `plan_programma`, `programma_kosten`, `PROGRAMMAS`, en daaronder dat voor een boiler: `plan_boiler`, `boiler_schijven`, `boiler_nodig` |
+| `batterij.py` | het denkwerk voor een thuisbatterij, kent Home Assistant ook niet: `plan_batterij` (de stand), `Regelaar` (de snelle lus), `verdiend`, `terugverdiend`, `rendement_uit_tellers` |
 | `coach.py` | leest sensoren, stuurt de paal aan, houdt de laadbeurt bij |
 | `websocket.py` | wat het paneel mag opvragen en wijzigen |
 | `storage.py` | de instellingen op schijf |
@@ -860,11 +1004,12 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 351 controles op het denkwerk
-python tests/test_coach.py       # 407 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1444 op hele laadbeurten in het virtuele huis
+python tests/test_planner.py     # 378 controles op het denkwerk
+python tests/test_batterij.py    # 66 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_coach.py       # 461 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1654 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 44 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 59 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

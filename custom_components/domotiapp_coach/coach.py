@@ -18,6 +18,7 @@ import asyncio
 import logging
 from dataclasses import asdict, replace
 from datetime import datetime, time, timedelta, timezone
+from functools import partial
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
@@ -44,6 +45,19 @@ from .const import (
     TEMPO_ONDERGRENS,
 )
 from .archive import async_get_archive
+from .batterij import (
+    MAX_LADEN,
+    NETLADEN,
+    STAND_NAMEN,
+    VOL_MARGE,
+    Batterij,
+    Regelaar,
+    plan_batterij,
+    rendement_uit_tellers,
+    terugverdiend,
+    verdiend,
+    vol_voor,
+)
 from .planner import (
     Apparaat,
     BALANCER_MARGIN_AMPS,
@@ -92,6 +106,7 @@ from .planner import (
     MIN_AMPS,
     resolve_window,
     should_send,
+    VOLTS,
     watts_for,
 )
 from .ontvangers import ontvangers
@@ -146,6 +161,17 @@ ZON_MIN_VOORSPELD = 0.5
 # How often to think. A minute is often enough to catch a kettle before a fuse
 # minds, and rare enough that a car is never re-commanded into giving up.
 INTERVAL = timedelta(seconds=60)
+
+# Hoe vaak de regelaar van een thuisbatterij ook zonder nieuwe meterwaarde
+# kijkt. Hij wordt wakker van de meter zelf; dit is er voor de meter die
+# zwijgt, want die meldt dat niet. Gelijk aan het tempo waarop Home Assistant
+# in de eerste woning de meter kreeg (21-09-2026: om de vijf seconden).
+REGEL_TIK = timedelta(seconds=5)
+# Hoe vaak wat de batterij verdiende naar de opslag gaat, en hoeveel dagen
+# daarvan bewaard blijven: ruim een jaar, zodat de terugverdientijd zomer en
+# winter allebei kent.
+BATTERIJ_BEWAREN = timedelta(minutes=5)
+BATTERIJ_DAGEN_MAX = 400
 
 # How long to wait for the charger to confirm a new limit before starting.
 CONFIRM_SECONDS = 15
@@ -715,6 +741,12 @@ class ChargerCoach:
         # uur. Samen bepalen ze hoeveel er in een komend uur voor de auto
         # overblijft. Zie `_async_huisverbruik` en `_async_zonkromme`.
         self._huis_kwh: dict[int, float] = {}
+        # Per thuisbatterij: de regelaar, het besluit van deze minuut, en wat
+        # hij sinds de laatste opslag verdiende. Zie `_one_batterij`.
+        self._batterij: dict[str, dict[str, Any]] = {}
+        self._batterij_meters: set[str] = set()
+        self._unwatch_batterij = None
+        self._cancel_regel = None
         # Per sensor sinds wanneer hij niets zegt, en welke daarvan al gemeld zijn.
         self._sensor_stil: dict[str, datetime] = {}
         self._sensor_gemeld: set[str] = set()
@@ -896,6 +928,14 @@ class ChargerCoach:
         thermostaat weer de baas, precies zoals vóór de coach.
         """
         self.hass.async_create_task(self._async_boilers_aan())
+        # En een batterij gaat terug naar zijn eigen stand: op zijn laatste
+        # opdracht blijven staan is leeglopen naar het net, of vol van het net.
+        self.hass.async_create_task(self._async_batterijen_los())
+        for opzeggen in (self._unwatch_batterij, self._cancel_regel):
+            if opzeggen is not None:
+                opzeggen()
+        self._unwatch_batterij = self._cancel_regel = None
+        self._batterij_meters = set()
         if self._cancel is not None:
             self._cancel()
             self._cancel = None
@@ -1362,6 +1402,12 @@ class ChargerCoach:
             for device in settings.get("devices") or []
             if device.get("type") == "boiler" and device.get("controllable")
         ]
+        batterijen = [
+            device
+            for device in settings.get("devices") or []
+            if device.get("type") == "thuisbatterij" and device.get("controllable")
+        ]
+        self._watch_batterij(settings, batterijen)
         self._watch(
             {
                 entity
@@ -1402,6 +1448,29 @@ class ChargerCoach:
         await self._async_sensorwacht(settings, moment)
         await self._async_zonkromme(settings, moment)
         self._meter_bijhouden(settings, moment)
+
+        # De batterij eerst: wat hij deze minuut doet bepaalt wat de meter de
+        # andere apparaten laat zien.
+        for device in batterijen:
+            try:
+                await self._one_batterij(moment, settings, device, level)
+            except ServiceNotFound:
+                _LOGGER.warning(
+                    "%s kan nog niet aangestuurd worden: de integratie van de batterij is er nog niet",
+                    device.get("name") or device.get("id"),
+                )
+            except Exception:  # noqa: BLE001 - one broken device is not all of them
+                _LOGGER.exception("kon %s niet beoordelen", device.get("id"))
+        # Een batterij die niet meer gestuurd mag worden gaat terug naar zijn
+        # eigen stand, ook als het vinkje eraf ging.
+        for device_id, sessie in list(self._batterij.items()):
+            if device_id in {d.get("id") for d in batterijen}:
+                continue
+            oud = next((d for d in settings.get("devices") or [] if d.get("id") == device_id), None)
+            if sessie.get("stuurt") and oud is not None:
+                await self._async_batterij_loslaten(oud)
+            self._batterij.pop(device_id, None)
+            self.state.pop(device_id, None)
 
         chargers.sort(key=lambda device: self._priority(settings, device))
         vergeven = 0.0
@@ -1824,7 +1893,17 @@ class ChargerCoach:
         return min(binnen)
 
     def _netto_export_w(self, settings: dict[str, Any]) -> float | None:
-        """Wat er nu naar het net gaat, positief bij teruglevering, of None."""
+        """Wat er naar het net zou gaan als er geen thuisbatterij was, of None.
+
+        Positief bij teruglevering. Wat een batterij opslokt is zon die de
+        vaatwasser of de boiler ook had kunnen nemen, en wat hij afgeeft is
+        geen zon; zie `_batterijen_w`.
+        """
+        kaal = self._netto_export_kaal(settings)
+        return None if kaal is None else kaal + self._batterijen_w(settings)
+
+    def _netto_export_kaal(self, settings: dict[str, Any]) -> float | None:
+        """Wat er nu werkelijk naar het net gaat, positief bij teruglevering, of None."""
         sources = settings.get("sources") or {}
         if sources.get("grid_mode") == "signed":
             signed = _watts(self.hass, sources.get("grid_signed"))
@@ -2980,6 +3059,469 @@ class ChargerCoach:
         settings["boiler_learned"] = rows
         return samen
 
+    # ------------------------------------------------------------------
+    # De thuisbatterij
+    #
+    # De eigenaar op 21-09-2026: "het doel is om hem volledig third party te
+    # sturen, dus via HA." Het denkwerk staat in batterij.py. Hier twee lussen:
+    # `_one_batterij` kiest elke minuut een stand, en `_async_regel` voert die
+    # uit op het tempo van de meter.
+
+    def _batterij_w(self, device: dict[str, Any]) -> float | None:
+        """Wat deze batterij nu doet, in watt, laden positief.
+
+        Uit één sensor met een teken, of uit twee losse sensoren voor laden en
+        ontladen: allebei de vormen komen voor, soms bij dezelfde batterij.
+        """
+        entities = device.get("entities") or {}
+        getekend = _watts(self.hass, device.get("entity"))
+        if getekend is not None:
+            return -getekend if (device.get("battery") or {}).get("power_invert") else getekend
+        laden = _watts(self.hass, entities.get("charge_power"))
+        ontladen = _watts(self.hass, entities.get("discharge_power"))
+        if laden is None and ontladen is None:
+            return None
+        return (laden or 0.0) - (ontladen or 0.0)
+
+    def _batterijen_w(self, settings: dict[str, Any]) -> float:
+        """Wat alle batterijen samen nu opnemen, in watt.
+
+        Voor iedereen die naar het overschot kijkt: wat een batterij opslokt is
+        geen huisverbruik maar zon die ook naar de auto of de vaatwasser had
+        gekund, en wat hij afgeeft is geen zon. De auto laadt op zon zonder
+        verlies en de batterij verliest een kwart, dus de andere apparaten gaan
+        voor en de batterij krijgt wat er daarna over is; dat laatste regelt
+        zich vanzelf, want hij houdt de meter op nul.
+        """
+        totaal = 0.0
+        for device in settings.get("devices") or []:
+            if device.get("type") == "thuisbatterij":
+                totaal += self._batterij_w(device) or 0.0
+        return totaal
+
+    def _net_nu(self, settings: dict[str, Any]) -> tuple[float | None, datetime | None]:
+        """De meter, positief bij afname, en wanneer hij dat voor het laatst zei."""
+        sources = settings.get("sources") or {}
+        if sources.get("grid_mode") == "signed":
+            namen = [sources.get("grid_signed")]
+        else:
+            namen = [sources.get("grid_import"), sources.get("grid_export")]
+        export = self._netto_export_kaal(settings)
+        stempels = []
+        for naam in namen:
+            staat = self.hass.states.get(naam) if naam else None
+            if staat is not None:
+                stempels.append(getattr(staat, "last_reported", None) or staat.last_updated)
+        if export is None or not stempels:
+            return None, None
+        return -export, _moment(max(stempels))
+
+    def _laadruimte_w(
+        self, settings: dict[str, Any], device: dict[str, Any], batterij_w: float | None
+    ) -> float | None:
+        """Hoeveel de zekering deze batterij nog aan laadvermogen toestaat.
+
+        Een batterij hangt meestal op één fase, en 3,5 kW is daar vijftien
+        ampère. Laadt de auto tegelijk op drie fasen, dan zit die fase zo vol.
+        Zonder fasesensoren bewaakt de coach dit niet: None.
+        """
+        sources = settings.get("sources") or {}
+        if not sources.get("phases_enabled"):
+            return None
+        installation = settings.get("installation") or {}
+        zekering = float(installation.get("fuse_amps") or 25)
+        marge = BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
+        grens = zekering - max(marge, zekering * FUSE_MARGIN_SHARE)
+        fase = (device.get("battery") or {}).get("phase") or ""
+        stromen = []
+        for key in ("l1", "l2", "l3"):
+            if fase and key != fase:
+                continue
+            amps = _number(self.hass, ((sources.get("phases") or {}).get(key) or {}).get("current"))
+            if amps is not None:
+                stromen.append(abs(amps))
+        if not stromen:
+            return None
+        return (grens - max(stromen)) * VOLTS + max(0.0, batterij_w or 0.0)
+
+    @staticmethod
+    def _batterij_rij(settings: dict[str, Any], device_id: str) -> dict[str, Any]:
+        for rij in settings.get("battery_state") or []:
+            if isinstance(rij, dict) and rij.get("device") == device_id:
+                return dict(rij)
+        return {"device": device_id}
+
+    async def _async_batterij_bewaren(
+        self, settings: dict[str, Any], device_id: str, nieuw: dict[str, Any]
+    ) -> None:
+        """Wat de coach van deze batterij bijhoudt naar de instellingen."""
+        rij = {**self._batterij_rij(settings, device_id), **nieuw}
+        dagen = rij.get("earned_days") or {}
+        if len(dagen) > BATTERIJ_DAGEN_MAX:
+            rij["earned_days"] = dict(sorted(dagen.items())[-BATTERIJ_DAGEN_MAX:])
+        rows = [
+            r for r in (settings.get("battery_state") or [])
+            if isinstance(r, dict) and r.get("device") != device_id
+        ]
+        rows.append(rij)
+        try:
+            saved = await async_get_store(self.hass).async_save({"battery_state": rows})
+        except Exception:  # noqa: BLE001 - een gemiste opslag is geen reden om te stoppen
+            _LOGGER.exception("kon de stand van %s niet bewaren", device_id)
+            return
+        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        settings["battery_state"] = rows
+
+    def _batterij_van(
+        self, now: datetime, settings: dict[str, Any], device: dict[str, Any], rij: dict[str, Any]
+    ) -> Batterij:
+        """De batterij zoals hij er nu bij staat: sensoren eerst, dan wat er is ingevuld."""
+        entities = device.get("entities") or {}
+        eigen = device.get("battery") or {}
+
+        def getal(sleutel: str) -> float | None:
+            try:
+                waarde = eigen.get(sleutel)
+                return None if waarde in (None, "") else float(waarde)
+            except (TypeError, ValueError):
+                return None
+
+        stuur = self.hass.states.get(entities.get("setpoint")) if entities.get("setpoint") else None
+        attrs = getattr(stuur, "attributes", None) or {}
+
+        def uit_knop(*namen: str) -> float | None:
+            for naam in namen:
+                try:
+                    if attrs.get(naam) is not None:
+                        return float(attrs[naam])
+                except (TypeError, ValueError):
+                    continue
+            return None
+
+        capaciteit = _kwh(self.hass, entities.get("capacity")) or getal("capacity_kwh")
+        gemeten = rendement_uit_tellers(
+            _kwh(self.hass, entities.get("energy_in")),
+            _kwh(self.hass, entities.get("energy_out")),
+            capaciteit,
+        )
+        ingevuld = getal("rte_percent")
+        bewaard = rij.get("rte")
+        rte = gemeten or (float(bewaard) if bewaard else None) or (ingevuld / 100.0 if ingevuld else None)
+
+        laatst_vol = _tijdstip(rij.get("full_at"))
+        return Batterij(
+            soc=_number(self.hass, entities.get("soc")),
+            capacity_kwh=capaciteit,
+            max_charge_w=getal("max_charge_w") or uit_knop("max_charge_power", "max") or 0.0,
+            max_discharge_w=getal("max_discharge_w") or uit_knop("max_discharge_power", "max") or 0.0,
+            soc_min=_number(self.hass, entities.get("discharge_limit")) or 0.0,
+            soc_max=_number(self.hass, entities.get("charge_limit")) or 100.0,
+            reserve=float(eigen.get("reserve_percent") or 0) if eigen.get("reserve_enabled") else None,
+            rte=rte,
+            handelen=bool(eigen.get("trade")),
+            power_w=self._batterij_w(device),
+            vol_voor=vol_voor(
+                now, bool(eigen.get("weekly_full")), eigen.get("weekly_full_day"),
+                laatst_vol.replace(tzinfo=None) if laatst_vol is not None else None,
+            ),
+        )
+
+    def _paal_laadt(self, settings: dict[str, Any]) -> bool:
+        """Of er op dit moment een laadpaal laadt, van wie hij ook de opdracht kreeg.
+
+        Gemeten aan zijn vermogen en niet aan het besluit van de coach: in de
+        eerste woning stuurde iets anders de paal, en dan telt het net zo goed.
+        De grens is de helft van wat een paal op zijn laagst levert.
+        """
+        for device in settings.get("devices") or []:
+            if device.get("type") != "laadpaal":
+                continue
+            watt = _watts(self.hass, device.get("entity"))
+            if watt is not None and watt > watts_for(MIN_AMPS, 1) / 2.0:
+                return True
+        return False
+
+    async def _one_batterij(
+        self, now: datetime, settings: dict[str, Any], device: dict[str, Any], level: str
+    ) -> None:
+        device_id = device.get("id", "")
+        naam = device.get("name") or "De batterij"
+        rij = self._batterij_rij(settings, device_id)
+        sessie = self._batterij.setdefault(device_id, {"regelaar": Regelaar()})
+        b = self._batterij_van(now, settings, device, rij)
+
+        prijzen = self._prices(settings)
+        tarief = self._tariff(settings)
+        verwachting = Forecast(
+            solar_kwh=self._zon_kwh, house_kwh=self._huis_kwh, estimated=self._zon_geschat,
+            solar_factor=self._zon_gemeten(now), solar_day=now.date(),
+        )
+        # De som over de tijd kost met een lange prijslijst een tiende seconde,
+        # en dat hoort niet in de lus van Home Assistant zelf.
+        besluit = await self.hass.async_add_executor_job(
+            partial(
+                plan_batterij, now, prijzen, tarief, verwachting, b,
+                enabled=True, paal_laadt=self._paal_laadt(settings),
+            )
+        )
+
+        # Het gemeten rendement en de laatste volle stand bewaren, zodat ze een
+        # herstart overleven en de kaart ze kan tonen.
+        nieuw: dict[str, Any] = {}
+        if b.rte is not None and abs(float(rij.get("rte") or 0.0) - b.rte) > 0.002:
+            nieuw["rte"] = round(b.rte, 4)
+        if b.soc is not None and b.soc >= b.soc_max - VOL_MARGE:
+            vorige = _tijdstip(rij.get("full_at"))
+            if vorige is None or now - vorige.replace(tzinfo=None) > timedelta(hours=1):
+                nieuw["full_at"] = now.isoformat()
+        geld = sessie.get("geld")
+        if geld and (sessie.get("bewaard_op") is None or now - sessie["bewaard_op"] >= BATTERIJ_BEWAREN):
+            dagen = dict(rij.get("earned_days") or {})
+            for dag, euro in geld.items():
+                dagen[dag] = round(float(dagen.get(dag) or 0.0) + euro, 5)
+            nieuw["earned_days"] = dagen
+            nieuw["earned_total"] = round(float(rij.get("earned_total") or 0.0) + sum(geld.values()), 5)
+            sessie["geld"] = {}
+            sessie["bewaard_op"] = now
+        if nieuw:
+            await self._async_batterij_bewaren(settings, device_id, nieuw)
+            rij = self._batterij_rij(settings, device_id)
+
+        nu_rij = price_now(prijzen, now)
+        koop = nu_rij["price"] if nu_rij else tarief.buy
+        terug = nu_rij.get("feed_in") if nu_rij else tarief.feed_in
+        sessie.update(besluit=besluit, batterij=b, koop=koop, terug=terug,
+                      settings=settings, device=device)
+
+        mag = level == LEVEL_STEER or (level == LEVEL_PROPOSE and device_id in self._approved)
+        stuurt = mag and level not in (LEVEL_READ, LEVEL_ADVISE) and bool(
+            (device.get("entities") or {}).get("setpoint")
+        )
+        totaal = float(rij.get("earned_total") or 0.0) + sum((sessie.get("geld") or {}).values())
+        eigen = device.get("battery") or {}
+        try:
+            aankoop = float(eigen.get("purchase_price")) if eigen.get("purchase_price") not in (None, "") else None
+        except (TypeError, ValueError):
+            aankoop = None
+        terug_verdiend = terugverdiend(dict(rij.get("earned_days") or {}), aankoop, now)
+        terug_verdiend["earned"] = round(totaal, 2)
+
+        self.state[device_id] = {
+            "charge": besluit.stand in (NETLADEN, MAX_LADEN),
+            "amps": 0,
+            "reason": besluit.reason,
+            "plan": besluit.plan,
+            "rule": besluit.rule,
+            "kind": "batterij",
+            "mode": besluit.stand,
+            "mode_name": STAND_NAMEN.get(besluit.stand, besluit.stand),
+            "at": now.isoformat(),
+            "level": level,
+            "applied": stuurt,
+            "approved": device_id in self._approved,
+            "soc": b.soc,
+            "power_w": None if b.power_w is None else round(b.power_w),
+            "setpoint_w": round(sessie["regelaar"].opdracht_w) if stuurt else None,
+            "target_w": round(besluit.power_w),
+            "value": None if besluit.waarde is None else round(besluit.waarde, 4),
+            "rte": None if b.rte is None else round(b.rte, 3),
+            "capacity_kwh": b.capacity_kwh,
+            "floor": b.bodem,
+            "ceiling": b.soc_max,
+            "full_before": b.vol_voor.isoformat() if b.vol_voor else None,
+            "payback": terug_verdiend,
+            "hours": [
+                {
+                    "start": uur.start.isoformat(), "end": uur.end.isoformat(), "mode": uur.stand,
+                    "kwh": round(uur.kwh, 2), "grid_kwh": round(uur.net_kwh, 2),
+                    "soc": round(uur.soc), "price": uur.price,
+                }
+                for uur in besluit.uren[:48]
+            ],
+            "tip": "",
+        }
+
+        kern = (besluit.stand, besluit.rule, stuurt)
+        if self._besluit_genoteerd.get(device_id) != kern:
+            self._besluit_genoteerd[device_id] = kern
+            kop = STAND_NAMEN.get(besluit.stand, besluit.stand).lower()
+            if not stuurt:
+                kop = f"zou op {kop} staan, maar de coach stuurt nu niet"
+            await self._async_noteer(f"{naam}: {kop}. {besluit.reason}".strip(), now)
+
+        if stuurt and not sessie.get("stuurt"):
+            await self._async_batterij_modus(device, "control_mode")
+            sessie["stuurt"] = True
+        elif not stuurt and sessie.get("stuurt"):
+            await self._async_batterij_loslaten(device)
+        if stuurt:
+            await self._async_regel(device_id, settings, device)
+
+    async def _async_regel(
+        self, device_id: str, settings: dict[str, Any], device: dict[str, Any]
+    ) -> None:
+        """Eén stap van de regelaar: de meter lezen, de som maken, zo nodig schrijven.
+
+        Wordt wakker van elke nieuwe waarde van de meter, en daarnaast om de
+        vijf seconden: een meter die zwijgt meldt dat niet zelf.
+        """
+        sessie = self._batterij.get(device_id)
+        if not sessie or not sessie.get("stuurt") or sessie.get("bezig"):
+            return
+        sessie["bezig"] = True
+        try:
+            nu = _moment()
+            net_w, net_op = self._net_nu(settings)
+            batterij_w = self._batterij_w(device)
+            regelaar: Regelaar = sessie["regelaar"]
+            b: Batterij = sessie["batterij"]
+            soc = _number(self.hass, (device.get("entities") or {}).get("soc"))
+            if soc is not None:
+                b.soc = soc
+
+            # Het kasboek: wat de batterij sinds de vorige stap opleverde.
+            vorige = sessie.get("geteld_op")
+            sessie["geteld_op"] = nu
+            if vorige is not None and net_w is not None and batterij_w is not None:
+                seconden = min(60.0, max(0.0, (nu - vorige).total_seconds()))
+                euro = verdiend(net_w, batterij_w, sessie.get("koop"), sessie.get("terug"), seconden)
+                if euro is not None:
+                    dag = nu.date().isoformat()
+                    geld = sessie.setdefault("geld", {})
+                    geld[dag] = geld.get(dag, 0.0) + euro
+
+            opdracht = regelaar.stap(
+                nu, net_w=net_w, net_op=net_op, batterij_w=batterij_w,
+                besluit=sessie["besluit"], b=b,
+                doel_w=regelaar.doel_w(sessie.get("koop"), sessie.get("terug")),
+                ruimte_w=self._laadruimte_w(settings, device, batterij_w),
+            )
+            if opdracht is not None:
+                await self._async_batterij_zetten(device, opdracht)
+        except ServiceNotFound:
+            _LOGGER.warning("%s kan nog niet aangestuurd worden (nog niet geladen?)", device_id)
+        except Exception:  # noqa: BLE001 - de regelaar mag nooit stilvallen op één fout
+            _LOGGER.exception("de regelaar van %s struikelde", device_id)
+        finally:
+            sessie["bezig"] = False
+
+    async def _async_regel_tik(self, _now: datetime | None = None) -> None:
+        """De regelaar van elke gestuurde batterij één stap laten doen."""
+        # Met de instellingen van de laatste ronde, en niet opnieuw uit de
+        # opslag: een meter die per seconde meldt zou anders elke seconde een
+        # kopie van alle instellingen maken. Wat er verandert (het vinkje eraf,
+        # een andere sensor) pakt de ronde binnen een minuut op.
+        for device_id, sessie in list(self._batterij.items()):
+            if sessie.get("stuurt") and sessie.get("settings") is not None:
+                await self._async_regel(device_id, sessie["settings"], sessie["device"])
+
+    @callback
+    def _async_meter_gemeld(self, _event) -> None:
+        self.hass.async_create_task(self._async_regel_tik())
+
+    def _watch_batterij(self, settings: dict[str, Any], batterijen: list[dict[str, Any]]) -> None:
+        """Meeluisteren met de meter, zolang er een batterij is om te sturen."""
+        sources = settings.get("sources") or {}
+        if not batterijen:
+            namen: set[str] = set()
+        elif sources.get("grid_mode") == "signed":
+            namen = {sources.get("grid_signed")}
+        else:
+            namen = {sources.get("grid_import"), sources.get("grid_export")}
+        namen = {naam for naam in namen if naam}
+        if namen == self._batterij_meters:
+            return
+        for opzeggen in (self._unwatch_batterij, self._cancel_regel):
+            if opzeggen is not None:
+                opzeggen()
+        self._unwatch_batterij = self._cancel_regel = None
+        self._batterij_meters = namen
+        if namen:
+            self._unwatch_batterij = async_track_state_change_event(
+                self.hass, sorted(namen), self._async_meter_gemeld
+            )
+            self._cancel_regel = async_track_time_interval(
+                self.hass, self._async_regel_tik, REGEL_TIK
+            )
+
+    @staticmethod
+    def _richting_keuze(opties: list[str], laden: bool) -> str | None:
+        """Welke keuze van de richting-entiteit laden of ontladen betekent."""
+        ontladen = [o for o in opties if "dis" in o.lower() or "ontl" in o.lower()]
+        rest = [o for o in opties if o not in ontladen]
+        gekozen = rest if laden else ontladen
+        return gekozen[0] if gekozen else None
+
+    async def _async_batterij_zetten(self, device: dict[str, Any], watt: float) -> None:
+        """Een vermogen naar de batterij, laden positief.
+
+        Met een richting-entiteit ernaast gaat het getal er zonder teken in;
+        zonder is het teken de richting. Eerst de richting en dan het getal, en
+        de richting alleen als hij verandert.
+        """
+        entities = device.get("entities") or {}
+        knop, richting = entities.get("setpoint"), entities.get("direction")
+        if not knop:
+            return
+        eigen = device.get("battery") or {}
+        if richting:
+            staat = self.hass.states.get(richting)
+            opties = list((getattr(staat, "attributes", None) or {}).get("options") or [])
+            keuze = self._richting_keuze(opties, watt >= 0)
+            if watt != 0 and keuze and (staat is None or staat.state != keuze):
+                await self.hass.services.async_call(
+                    "select", "select_option", {"entity_id": richting, "option": keuze}, blocking=True
+                )
+            waarde = abs(watt)
+        else:
+            waarde = -watt if eigen.get("setpoint_invert") else watt
+        await self.hass.services.async_call(
+            "number", "set_value", {"entity_id": knop, "value": round(waarde)}, blocking=True
+        )
+
+    async def _async_batterij_modus(self, device: dict[str, Any], welke: str) -> None:
+        """De modus van de batterij op "de coach stuurt", of terug op zijn eigen stand."""
+        entity = (device.get("entities") or {}).get("mode")
+        keuze = ((device.get("battery") or {}).get(welke) or "").strip()
+        if not entity or not keuze:
+            return
+        staat = self.hass.states.get(entity)
+        if staat is not None and staat.state == keuze:
+            return
+        await self.hass.services.async_call(
+            "select", "select_option", {"entity_id": entity, "option": keuze}, blocking=True
+        )
+
+    async def _async_batterij_loslaten(self, device: dict[str, Any]) -> None:
+        """De batterij teruggeven: vermogen op nul, en zijn eigen stand terug.
+
+        Dezelfde gedachte als de stroom terug op de boiler: een batterij die op
+        zijn laatste opdracht blijft staan loopt leeg naar het net of trekt vol
+        van het net tot iemand het ziet.
+        """
+        sessie = self._batterij.get(device.get("id", ""))
+        if sessie is not None:
+            sessie["stuurt"] = False
+            sessie["regelaar"] = Regelaar()
+        await self._async_batterij_zetten(device, 0.0)
+        await self._async_batterij_modus(device, "idle_mode")
+
+    async def _async_batterijen_los(self) -> None:
+        """Bij het stoppen van de coach: elke batterij die hij stuurde teruggeven."""
+        try:
+            settings = await async_get_store(self.hass).async_load()
+        except Exception:  # noqa: BLE001 - afsluiten mag hier niet op stuklopen
+            return
+        for device in settings.get("devices") or []:
+            if device.get("type") != "thuisbatterij":
+                continue
+            if not (self._batterij.get(device.get("id", "")) or {}).get("stuurt"):
+                continue
+            try:
+                await self._async_batterij_loslaten(device)
+            except Exception:  # noqa: BLE001 - één apparaat is niet alle apparaten
+                _LOGGER.exception("kon %s niet teruggeven bij het afsluiten", device.get("id"))
+
     async def _one(
         self,
         now: datetime,
@@ -3464,9 +4006,24 @@ class ChargerCoach:
         erin = bronnen.get("grid_import")
         eruit = bronnen.get("grid_export")
         getekend = bronnen.get("grid_signed")
-        apparaten = [
-            device.get("entity") for device in settings.get("devices") or [] if device.get("entity")
-        ]
+        # Elk apparaat met het teken waarmee het van het huisverbruik af gaat.
+        # Een thuisbatterij telt twee kanten op: wat hij laadt is geen
+        # huisverbruik, en wat hij ontlaadt heeft het huis wel gebruikt.
+        tekens: list[tuple[str, float]] = []
+        for device in settings.get("devices") or []:
+            if device.get("type") == "thuisbatterij":
+                extra = device.get("entities") or {}
+                om = -1.0 if (device.get("battery") or {}).get("power_invert") else 1.0
+                if device.get("entity"):
+                    tekens.append((device["entity"], om))
+                else:
+                    if extra.get("charge_power"):
+                        tekens.append((extra["charge_power"], 1.0))
+                    if extra.get("discharge_power"):
+                        tekens.append((extra["discharge_power"], -1.0))
+            elif device.get("entity"):
+                tekens.append((device["entity"], 1.0))
+        apparaten = [naam for naam, _ in tekens]
         wanted = [e for e in [zon, erin, eruit, getekend, *apparaten] if e]
         if not wanted:
             return
@@ -3494,7 +4051,7 @@ class ChargerCoach:
             kwartieren(eruit),
             kwartieren(getekend),
         )
-        apparaat = [kwartieren(e) for e in apparaten]
+        apparaat = [(kwartieren(naam), teken) for naam, teken in tekens]
 
         # Een meter met een teken meet één getal, en of plus inkoop of
         # teruglevering betekent verschilt per merk. Dat vinkje staat al bij
@@ -3512,8 +4069,8 @@ class ChargerCoach:
             else:
                 net = binnen.get(stempel, 0.0) - buiten.get(stempel, 0.0)
             watt = zonnen.get(stempel, 0.0) + net
-            for reeks in apparaat:
-                watt -= reeks.get(stempel, 0.0)
+            for reeks, teken in apparaat:
+                watt -= teken * reeks.get(stempel, 0.0)
             uur = dt_util.as_local(
                 datetime.fromtimestamp(stempel, tz=timezone.utc)
             ).hour
@@ -3801,6 +4358,12 @@ class ChargerCoach:
             invoer = self._volgehouden(in_, invoer_gemeten, now)
             compleet = export is not None and invoer is not None
             netto = (export - invoer) if compleet else (export if invoer is None else None)
+
+        # Wat een thuisbatterij opneemt hoort bij het overschot: de auto laadt
+        # op zon zonder verlies en de batterij niet, dus de auto gaat voor. En
+        # wat de batterij afgeeft is geen zon. Zie `_batterijen_w`.
+        if netto is not None:
+            netto += self._batterijen_w(settings)
 
         # Het vermogen van de paal zit in dezelfde som, en juist die houdt het
         # kringetje open: zonder hem ziet de coach zijn eigen laden aan voor

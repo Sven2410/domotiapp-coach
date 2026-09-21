@@ -5,7 +5,7 @@ gebeurt, maar je apparaten ook op het gunstigste moment laat draaien.
 
 Het standaard energiedashboard laat zien *wat er gebeurd is*. DomotiApp Coach
 laat zien wat er **nu** gebeurt, rekent uit wanneer stroom het goedkoopst is, en
-schakelt zelf: de laadpaal, de vaatwasser en de boiler.
+schakelt zelf: de laadpaal, de thuisbatterij, de vaatwasser en de boiler.
 
 De integratie zet een eigen paneel in de zijbalk. Geen Lovelace-dashboard dat
 per woning opnieuw ingericht moet worden, maar één dashboard dat overal
@@ -33,6 +33,7 @@ dat, in plaats van het gat te vullen met iets plausibels.
 | Apparaat | Wat de coach doet |
 |---|---|
 | **Laadpaal** | Kiest het goedkoopste moment, moduleert tussen 6 A en het maximum van de paal, en is op tijd klaar. Wisselt nooit van fasemodus. |
+| **Thuisbatterij** | Houdt de meter op nul, laadt van het net op de goedkoopste uren als dat het rendement goedmaakt, en geeft niets af terwijl de laadpaal laadt. Rekent met het gemeten rendement van jouw batterij. |
 | **Vaatwasser** | Kiest het goedkoopste startmoment en drukt op de startknop. Bij een machine zonder startknop geeft hij het moment door en meet hij mee. |
 | **Boiler** | Schakelt de stroom, en leert zelf hoeveel het element trekt en hoe snel het vat leegloopt. De thermostaat van de boiler bepaalt de temperatuur. |
 | **Overig** | Alles met een vermogenssensor wordt gemeten en meegeteld, ook zonder sturing. |
@@ -130,6 +131,51 @@ ingeruimd is. Die knop is ook aan een schakelaar te koppelen, voor wie hem lieve
 op een eigen keukendashboard heeft.
 
 De coach kiest nooit zelf een programma. Dat doe jij.
+
+### Thuisbatterij
+
+De coach stuurt de batterij helemaal zelf, lokaal via Home Assistant. Hij heeft
+daarvoor drie dingen nodig: een **getal waarmee het vermogen gezet wordt**, de
+**accustand**, en wat de batterij nu doet (een vermogenssensor met een teken, of
+twee losse sensoren voor laden en ontladen). Ondersteund is **Anker SOLIX** via
+de officiele integratie; onder **Overig** past elke batterij met dezelfde
+knoppen.
+
+Twee lagen. Elke minuut kijkt de coach vooruit over alle uren waarvan de prijs
+bekend is, met wat het huis gaat verbruiken en wat de zon gaat geven, en kiest
+hij een stand:
+
+| Stand | Wat er gebeurt |
+|---|---|
+| **Nul op de meter** | Overschot gaat erin, wat het huis vraagt komt eruit. |
+| **Alleen zonneladen** | Zonoverschot gaat erin, er komt niets uit: de laadpaal laadt, of de stroom in de batterij is straks meer waard. |
+| **Laden van het net** | Op de goedkoopste uren, en niet voluit maar rustig verdeeld over de uren die even duur zijn. |
+| **Maximaal laden** | De prijs die je betaalt is negatief: vol vermogen, en er komt niets uit. |
+| **Handelen** | Terugleveren op dure uren. Staat standaard uit. |
+| **Standby** | Opslaan zou geld kosten, of de meter zwijgt. |
+
+Daaronder draait een regelaar op het tempo van je meter, die de stand uitvoert.
+Hij rekent in een keer uit wat het huis vraagt, corrigeert pas opnieuw als de
+vorige opdracht in het vermogen te zien is, en doet niets binnen een dode band
+rond nul. Zo stuurt hij een paar keer per uur bij in plaats van een paar keer
+per minuut.
+
+**Het rendement is een meting.** Met een kWh-meter op de batterij meet de coach
+zelf wat erin gaat en wat eruit komt; zonder vul je het in. Zonder rendement
+houdt hij alleen de meter op nul en laadt hij niet van het net, want dan valt er
+niets te vergelijken. De tellers van een batterij zelf zijn hier meestal niet
+goed voor: die meten aan de accukant en tellen de omzetverliezen niet mee.
+
+Per batterij stel je in: een **reserve voor noodstroom** waaronder niets meer
+ontladen wordt, of er **gehandeld** mag worden, een **wekelijkse volle beurt** voor
+het balanceren van de cellen, en de **aankoopprijs**. Met dat laatste laat de
+kaart zien hoeveel de batterij al heeft terugverdiend, en na vier weken meten
+ook wanneer de rest er ongeveer is. De laadgrens en de ontlaadgrens van de
+batterij leest de coach alleen; hij verandert ze nooit.
+
+Stopt de integratie, valt de meter weg of gaat het vinkje "mag sturen" eraf, dan
+gaat het vermogen naar nul en krijgt de batterij zijn eigen modus terug. Een
+batterij die op zijn laatste opdracht blijft staan loopt leeg naar het net.
 
 ### Boiler
 

@@ -359,6 +359,21 @@ export function meterReadings(feed, sources) {
 }
 
 /** Read a plain numeric entity, in whatever unit it reports. */
+/**
+ * Wat een thuisbatterij nu doet, in watt, laden positief, of null.
+ *
+ * Een sensor met een teken, of twee losse sensoren voor laden en ontladen:
+ * dezelfde twee vormen als `_batterij_w` in coach.py.
+ */
+export function batteryWatts(feed, device) {
+  const getekend = readPower(feed, device?.entity);
+  if (getekend !== null) return device?.battery?.power_invert ? -getekend : getekend;
+  const laden = readPower(feed, device?.entities?.charge_power);
+  const ontladen = readPower(feed, device?.entities?.discharge_power);
+  if (laden === null && ontladen === null) return null;
+  return (laden ?? 0) - (ontladen ?? 0);
+}
+
 function readNumber(feed, entityId) {
   if (!entityId) return null;
   const state = feed.get(entityId);
@@ -421,6 +436,21 @@ function deviceDetails(feed, device, settings) {
         });
       }
     }
+  }
+
+  // Een thuisbatterij: wat de coach zelf bijhoudt. Het rendement is een meting
+  // of een opgave, nooit een aanname; zonder staat er dat het niet bekend is.
+  if (device?.type === "thuisbatterij") {
+    const rij = (settings?.battery_state ?? []).find((r) => r?.device === device.id) ?? {};
+    const opgave = device.battery?.rte_percent;
+    rows.push({
+      label: "Rendement",
+      text: rij.rte
+        ? `${(rij.rte * 100).toLocaleString("nl-NL", { maximumFractionDigits: 1 })}% gemeten`
+        : opgave
+          ? `${Number(opgave).toLocaleString("nl-NL", { maximumFractionDigits: 1 })}% opgegeven`
+          : "nog niet bekend",
+    });
   }
 
   // Een boiler heeft geen tabel en geen programma: wat de coach van hem weet
@@ -592,13 +622,37 @@ export class LiveSource {
     // Consumption is always derived, never configured: it is exactly generation
     // plus whatever the meter says, so asking for a third sensor only adds a
     // way for the three to disagree.
-    const house = solar !== null && grid !== null ? solar + grid : null;
+    // Een thuisbatterij is geen verbruiker: wat hij afgeeft heeft het huis
+    // gebruikt en wat hij opneemt niet. Zonder deze som stond er bij Woning
+    // nul terwijl de batterij het hele huis voedde.
+    const batterijen = (settings?.devices ?? [])
+      .filter((device) => device.type === "thuisbatterij")
+      .map((device) => batteryWatts(feed, device));
+    const batterij = batterijen.reduce((som, w) => som + (w ?? 0), 0);
+    const house = solar !== null && grid !== null ? Math.max(0, solar + grid - batterij) : null;
 
-    const devices = (settings?.devices ?? []).map((device) => ({
-      ...device,
-      watts: readPower(feed, device.entity),
-      details: deviceDetails(feed, device, settings),
-    }));
+    const devices = (settings?.devices ?? []).map((device) => {
+      if (device.type !== "thuisbatterij") {
+        return {
+          ...device,
+          watts: readPower(feed, device.entity),
+          details: deviceDetails(feed, device, settings),
+        };
+      }
+      // Op de kaart het vermogen zonder teken, met erbij welke kant het op
+      // gaat: een bolletje met een minteken leest als een storing.
+      const w = batteryWatts(feed, device);
+      const richting = w === null ? null : w > 3 ? "laadt" : w < -3 ? "ontlaadt" : "staat stil";
+      return {
+        ...device,
+        watts: w === null ? null : Math.abs(w),
+        batteryWatts: w,
+        details: [
+          ...(richting ? [{ label: "Doet nu", text: richting }] : []),
+          ...deviceDetails(feed, device, settings),
+        ],
+      };
+    });
 
     const phases = readPhases(feed, sources);
     const load = loadOf(phases, importW, settings?.installation);

@@ -604,6 +604,71 @@ class Boiler:
 
 
 @dataclass
+class Batterij:
+    """Een thuisbatterij die precies doet wat hem gezegd wordt, een paar tellen later.
+
+    Gebouwd naar wat er op 21-09-2026 in de eerste woning gemeten is: 14,6 kWh,
+    3,5 kW erin en 2,5 kW eruit, grenzen op 5 en 95 procent, 73,6% rendement
+    heen en terug, en een opdracht die na ongeveer vijf seconden in het
+    vermogen te zien is. In de stand voor externe sturing regelt hij zelf niets:
+    hij houdt zijn laatste opdracht vast tot er een nieuwe komt. Dat is precies
+    wat de coach gevaarlijk zou maken als zijn lus stilvalt, en dus wat hier
+    nagemeten wordt.
+    """
+
+    capaciteit_kwh: float = 14.6
+    soc: float = 50.0
+    max_laden_w: float = 3500.0
+    max_ontladen_w: float = 2500.0
+    soc_min: float = 5.0
+    soc_max: float = 95.0
+    rte: float = 0.736
+    volgt_na_s: float = 5.0
+    # Op welke fase hij hangt (0 is L1).
+    fase: int = 2
+    # Een kWh-meter op de batterij, met standen die samen 73,6% geven: daar
+    # leest de coach het rendement uit. Zonder meter moet de bewoner het
+    # opgeven (`rte_opgegeven`), en anders weet de coach het niet.
+    meter: bool = True
+    rte_opgegeven: float | None = None
+    # Wat de bewoner instelt.
+    reserve: float | None = None
+    handelen: bool = False
+    wekelijks_vol_dag: int | None = None
+    aankoop: float | None = None
+    # --- toestand ---
+    modus: str = "self_consumption"
+    richting: str = "charge"
+    vermogen_w: float = 0.0
+    wachtrij: list = field(default_factory=list)
+    teller_in: float = 250.0
+    teller_uit: float = 184.0
+
+    def opdracht(self, watt: float, nu: dt.datetime) -> None:
+        self.wachtrij.append((nu + dt.timedelta(seconds=self.volgt_na_s), watt))
+
+    def stap(self, nu: dt.datetime, seconden: float) -> float:
+        """Wat hij deze stap doet, in watt aan de wisselstroomkant, laden positief."""
+        klaar = [w for t, w in self.wachtrij if t <= nu]
+        if klaar:
+            self.vermogen_w = klaar[-1]
+            self.wachtrij = [(t, w) for t, w in self.wachtrij if t > nu]
+        w = max(-self.max_ontladen_w, min(self.max_laden_w, self.vermogen_w))
+        if (w > 0 and self.soc >= self.soc_max) or (w < 0 and self.soc <= self.soc_min):
+            w = 0.0
+        eta = math.sqrt(self.rte)
+        kwh = w / 1000 * seconden / 3600
+        if kwh >= 0:
+            self.soc += kwh * eta / self.capaciteit_kwh * 100
+            self.teller_in += kwh
+        else:
+            self.soc += kwh / eta / self.capaciteit_kwh * 100
+            self.teller_uit += -kwh
+        self.soc = max(0.0, min(100.0, self.soc))
+        return w
+
+
+@dataclass
 class Prijzen:
     markt: list[float] = field(default_factory=lambda: list(MARKT))
     bekend_om: str = "13:00"     # vanaf dan is de dag van morgen bekend
@@ -704,6 +769,13 @@ class Scenario:
     # Wat de coach van deze boiler al geleerd had (een rij zoals
     # `boiler_learned` in de instellingen); leeg is: hij begint met meten.
     boiler_geleerd: dict = field(default_factory=dict)
+    # Een thuisbatterij; None is geen. En of de coach de paal stuurt: in de
+    # eerste woning deed iets anders dat, en dan ziet de coach alleen zijn
+    # vermogen.
+    batterij: Batterij | None = None
+    paal_stuurbaar: bool = True
+    # Wat de coach van de batterij al bijhield (een rij zoals `battery_state`).
+    batterij_stand: dict = field(default_factory=dict)
     vast_prijs: float = 0.28
     vast_teruglevering: float = 0.07
     vast_terugleverkosten: float = 0.0
@@ -796,6 +868,32 @@ class Verloop:
     boiler_laagste: float | None = None
     # Wat de coach aan het eind van deze boiler geleerd had.
     boiler_geleerd: dict = field(default_factory=dict)
+    # De thuisbatterij: elke opdracht die de coach gaf, het verloop per stap
+    # (tijd, meter, batterij, accustand, stand), wat het huis van het net nam en
+    # eraan gaf, en wat de dag kostte met en zonder batterij.
+    bat_opdrachten: list = field(default_factory=list)
+    bat_modi: list = field(default_factory=list)
+    bat_verloop: list = field(default_factory=list)
+    bat_afname_kwh: float = 0.0
+    bat_levering_kwh: float = 0.0
+    bat_kosten_met: float = 0.0
+    bat_kosten_zonder: float = 0.0
+    bat_stand: dict = field(default_factory=dict)
+
+    def bat_wissels(self) -> int:
+        """Hoe vaak de batterij van richting wisselde of aan- en uitging."""
+        tekens = [0 if abs(w) < 1 else (1 if w > 0 else -1) for _, w in self.bat_opdrachten]
+        return sum(1 for a, b in zip(tekens, tekens[1:]) if a != b)
+
+    def bat_minuten(self, stand: str) -> float:
+        return sum(1 for r in self.bat_verloop if r[4] == stand) * self.stap_uur * 60
+
+    def bat_soc_op(self, tijd: str, dag: int = 0) -> float | None:
+        doel = _moment_op(self.regels[0].tijd, tijd) + dt.timedelta(days=dag)
+        for r in self.bat_verloop:
+            if r[0] >= doel:
+                return r[3]
+        return None
 
     @property
     def kosten(self) -> float:
@@ -866,6 +964,16 @@ E = {
     "vw_vermogen": "sensor.v_vaatwasser_vermogen",
     "boiler_vermogen": "sensor.v_boiler_vermogen",
     "boiler_switch": "switch.v_boiler",
+    "bat_soc": "sensor.v_batterij_soc",
+    "bat_vermogen": "sensor.v_batterij_vermogen",
+    "bat_stuur": "number.v_batterij_vermogen",
+    "bat_richting": "select.v_batterij_richting",
+    "bat_modus": "select.v_batterij_modus",
+    "bat_cap": "sensor.v_batterij_capaciteit",
+    "bat_hoog": "number.v_batterij_laadgrens",
+    "bat_laag": "number.v_batterij_ontlaadgrens",
+    "bat_in": "sensor.v_batterij_meter_in",
+    "bat_uit": "sensor.v_batterij_meter_uit",
 }
 
 
@@ -978,13 +1086,48 @@ def instellingen(s: Scenario) -> dict:
             "window": {"not_before": "", "start_by": "", "done_by": s.boiler_klaar_om or ""},
             "days": [],
         })
+    if s.batterij is not None:
+        bat = s.batterij
+        apparaten.append({
+            "id": "batterij",
+            "type": "thuisbatterij",
+            "name": "Thuisbatterij",
+            "brand": "anker",
+            "controllable": True,
+            "entity": E["bat_vermogen"],
+            "entities": {
+                "soc": E["bat_soc"],
+                "setpoint": E["bat_stuur"],
+                "direction": E["bat_richting"],
+                "mode": E["bat_modus"],
+                "capacity": E["bat_cap"],
+                "charge_limit": E["bat_hoog"],
+                "discharge_limit": E["bat_laag"],
+                **({"energy_in": E["bat_in"], "energy_out": E["bat_uit"]} if bat.meter else {}),
+            },
+            "battery": {
+                "max_charge_w": bat.max_laden_w,
+                "max_discharge_w": bat.max_ontladen_w,
+                "rte_percent": None if bat.rte_opgegeven is None else bat.rte_opgegeven * 100,
+                "phase": ("l1", "l2", "l3")[bat.fase],
+                "reserve_enabled": bat.reserve is not None,
+                "reserve_percent": bat.reserve or 0,
+                "trade": bat.handelen,
+                "weekly_full": bat.wekelijks_vol_dag is not None,
+                "weekly_full_day": bat.wekelijks_vol_dag or 0,
+                "purchase_price": bat.aankoop,
+                "control_mode": "third_party_control",
+                "idle_mode": "self_consumption",
+            },
+        })
     return {
+        "battery_state": [{"device": "batterij", **s.batterij_stand}] if s.batterij_stand else [],
         "devices": [*apparaten, {
             "id": "paal",
             "type": "laadpaal",
             "name": "Laadpaal",
             "brand": "easee",
-            "controllable": True,
+            "controllable": s.paal_stuurbaar,
             "device_id": "virtueel",
             "entity": E["vermogen"],
             "entities": {
@@ -1068,6 +1211,8 @@ class Wereld:
         self.vaatwasser = dataclasses.replace(s.vaatwasser) if s.vaatwasser is not None else None
         self.boiler = dataclasses.replace(s.boiler, getapt=set()) if s.boiler is not None else None
         self.boiler_w = 0.0
+        self.batterij = dataclasses.replace(s.batterij, wachtrij=[]) if s.batterij is not None else None
+        self.bat_w = 0.0
         self.vw_w = 0.0
         self.vw_gevraagd: dt.datetime | None = None
         self.auto = dataclasses.replace(s.auto, soc_gemeld=[])
@@ -1120,6 +1265,8 @@ class Wereld:
         if self.boiler is not None:
             self.boiler_w = self.boiler.stap(nu, self.s.stap_seconden)
             self.huis_w += self.boiler_w
+        if self.batterij is not None:
+            self.bat_w = self.batterij.stap(nu, self.s.stap_seconden)
         self.paal.stap(nu)
         aanbod = self.paal.aanbod()
         # De Equalizer zit tussen de paal en de auto: hij laat nooit meer door
@@ -1189,6 +1336,8 @@ class Wereld:
             a = w / VOLT
             if i < self.paal_fasen:
                 a += self.auto.trekt_amps
+            if self.batterij is not None and i == self.batterij.fase:
+                a += self.bat_w / VOLT
             uit.append(a)
         return uit
 
@@ -1196,18 +1345,37 @@ class Wereld:
         """Alle sensoren zetten zoals Home Assistant ze nu zou tonen."""
         nu = self.nu
         z = hass.states.zet
-        netto = self.huis_w + self.paal_w - self.zon_w   # + is inkoop
+        netto = self.huis_w + self.paal_w + self.bat_w - self.zon_w   # + is inkoop
         p1_weg = self.p1_weg_tot is not None and nu < self.p1_weg_tot
         weg = "unavailable"
+        # De meter krijgt de tijd van de wereld mee: de regelaar van de batterij
+        # kijkt hoe oud een meting is, en de klok van deze computer zegt daar
+        # niets over.
+        stempel = nu.replace(tzinfo=dt.timezone.utc) if self.batterij is not None else None
 
         def w(waarde, eenheid):
             return {"state": waarde, "attributes": {"unit_of_measurement": eenheid}}
 
         z(E["zon"], weg if p1_weg else w(f"{self.zon_w:.0f}", "W"))
-        z(E["afname"], weg if p1_weg else w(f"{max(0.0, netto):.0f}", "W"))
-        z(E["teruglevering"], weg if p1_weg else w(f"{max(0.0, -netto):.0f}", "W"))
+        z(E["afname"], weg if p1_weg else w(f"{max(0.0, netto):.0f}", "W"), last_updated=stempel)
+        z(E["teruglevering"], weg if p1_weg else w(f"{max(0.0, -netto):.0f}", "W"), last_updated=stempel)
         teken = -1 if self.s.net == "signed-omgekeerd" else 1
-        z(E["net"], weg if p1_weg else w(f"{teken * netto:.0f}", "W"))
+        z(E["net"], weg if p1_weg else w(f"{teken * netto:.0f}", "W"), last_updated=stempel)
+        if self.batterij is not None:
+            bat = self.batterij
+            z(E["bat_soc"], w(f"{bat.soc:.0f}", "%"))
+            z(E["bat_vermogen"], w(f"{self.bat_w:.0f}", "W"))
+            z(E["bat_cap"], w(f"{bat.capaciteit_kwh:.1f}", "kWh"))
+            z(E["bat_hoog"], w(f"{bat.soc_max:.0f}", "%"))
+            z(E["bat_laag"], w(f"{bat.soc_min:.0f}", "%"))
+            z(E["bat_in"], w(f"{bat.teller_in:.3f}", "kWh"))
+            z(E["bat_uit"], w(f"{bat.teller_uit:.3f}", "kWh"))
+            z(E["bat_modus"], bat.modus)
+            z(E["bat_richting"], {"state": bat.richting,
+                                  "attributes": {"options": ["charge", "discharge"]}})
+            # Zoals de echte: deze knop leest niet terug wat erin staat.
+            z(E["bat_stuur"], {"state": "0", "attributes": {
+                "unit_of_measurement": "W", "max_charge_power": 7000, "max_discharge_power": 2500}})
         for naam, a in zip(("l1", "l2", "l3"), self.fase_amps()):
             z(E[naam], weg if p1_weg else w(f"{a:.2f}", "A"))
 
@@ -1310,6 +1478,7 @@ class Wereld:
                             E["teruglevering"]: max(0.0, -netto),
                             E["net"]: (-1 if wereld.s.net == "signed-omgekeerd" else 1) * netto,
                             E["vermogen"]: 0.0,
+                            E["bat_vermogen"]: 0.0,
                         }
                         for e in ids:
                             if e in rij:
@@ -1415,6 +1584,19 @@ class Diensten:
                 self.wereld.boiler.aan = dienst == "turn_on"
                 self.verloop.boiler_schakels.append((self.wereld.nu, dienst == "turn_on"))
             self.hass.states.zet(E["boiler_switch"], "on" if dienst == "turn_on" else "off")
+        elif data.get("entity_id") == E["bat_stuur"] and dienst == "set_value":
+            bat = self.wereld.batterij
+            watt = float(data.get("value") or 0.0) * (1 if bat.richting == "charge" else -1)
+            bat.opdracht(watt, self.wereld.nu)
+            self.verloop.bat_opdrachten.append((self.wereld.nu, watt))
+        elif data.get("entity_id") == E["bat_richting"] and dienst == "select_option":
+            self.wereld.batterij.richting = data.get("option")
+            self.hass.states.zet(E["bat_richting"], {"state": data.get("option"),
+                                                     "attributes": {"options": ["charge", "discharge"]}})
+        elif data.get("entity_id") == E["bat_modus"] and dienst == "select_option":
+            self.wereld.batterij.modus = data.get("option")
+            self.verloop.bat_modi.append((self.wereld.nu, data.get("option")))
+            self.hass.states.zet(E["bat_modus"], data.get("option"))
         elif domein == "button" and data.get("entity_id") == E["vw_start"]:
             self.verloop.vw_gedrukt.append(self.wereld.nu)
             if self.wereld.vaatwasser is not None:
@@ -1570,6 +1752,10 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
             elif laatste_ronde is None or nu - laatste_ronde >= dt.timedelta(seconds=60):
                 await coach._round(nu)
                 laatste_ronde = nu
+            # De regelaar van de batterij loopt op het tempo van de meter, los
+            # van de ronde. Zie `_async_regel_tik` in coach.py.
+            if wereld.batterij is not None:
+                await coach._async_regel_tik()
             besluit = coach.state.get("paal") or {}
             # Een domme vaatwasser: zegt de coach "zet hem aan", dan doet de
             # bewoner dat zoveel minuten later, als hij dat doet.
@@ -1592,7 +1778,19 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                     wereld.vw_gevraagd = None
             prijs, terug = _prijs_nu(coach, inst, nu)
             fasen = wereld.fase_amps()
-            netto = wereld.huis_w + wereld.paal_w - wereld.zon_w
+            netto = wereld.huis_w + wereld.paal_w + wereld.bat_w - wereld.zon_w
+            if wereld.batterij is not None:
+                deel_b = verloop.stap_uur / 1000
+                zonder = netto - wereld.bat_w
+                stand = (coach.state.get("batterij") or {}).get("mode", "")
+                verloop.bat_verloop.append((nu, netto, wereld.bat_w, wereld.batterij.soc, stand))
+                verloop.bat_afname_kwh += max(0.0, netto) * deel_b
+                verloop.bat_levering_kwh += max(0.0, -netto) * deel_b
+                if prijs is not None:
+                    def _rekening(watt):
+                        return watt * deel_b * (prijs if watt >= 0 else (terug or 0.0))
+                    verloop.bat_kosten_met += _rekening(netto)
+                    verloop.bat_kosten_zonder += _rekening(zonder)
             regel = Regel(
                 tijd=nu, regel=besluit.get("rule", "?"), amps=int(besluit.get("amps") or 0),
                 reden=besluit.get("reason", ""), plan=besluit.get("plan", ""),
@@ -1677,6 +1875,10 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
             (r for r in inst.get("boiler_learned") or []
              if isinstance(r, dict) and r.get("device") == "boiler"), {}
         )
+        verloop.bat_stand = next(
+            (r for r in inst.get("battery_state") or []
+             if isinstance(r, dict) and r.get("device") == "batterij"), {}
+        )
     except Exception as fout:  # noqa: BLE001
         verloop.fouten.append(f"beurten niet te lezen: {fout!r}")
     if verloop.klaar_tijd is not None and verloop.soc_bij_klaar_tijd is None:
@@ -1747,6 +1949,11 @@ def samenvatting(v: Verloop) -> str:
         vol = "" if v.boiler_bij_klaar is None else f", vat {v.boiler_bij_klaar:.1f} kWh op de klaar-tijd"
         opt += (f"  boiler {v.boiler_kwh:.2f} kWh (zon {v.boiler_zon_kwh:.2f}) €{v.boiler_betaald:.2f}"
                 f", {sum(1 for _, aan in v.boiler_schakels if aan)}x aan{vol}")
+    if v.scenario.batterij is not None:
+        eind = v.bat_verloop[-1][3] if v.bat_verloop else 0.0
+        opt += (f"  batterij: net {v.bat_afname_kwh:.1f} kWh erin en {v.bat_levering_kwh:.1f} eruit, "
+                f"€{v.bat_kosten_met:.2f} tegen €{v.bat_kosten_zonder:.2f} zonder, "
+                f"{len(v.bat_opdrachten)} opdrachten, {v.bat_wissels()} wissels, eindigt op {eind:.0f}%")
     return (
         f"{s.naam:<28} {v.geladen_kwh:5.1f} kWh (zon {v.uit_zon_kwh:4.1f}, net {v.uit_net_kwh:4.1f})"
         f"  kosten €{v.kosten:.2f} (betaald €{v.betaald:.2f}){opt}"

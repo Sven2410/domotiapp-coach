@@ -53,8 +53,12 @@ BEURTEN_MAX: Final = 2000
 # droger en de zwembadpomp eruit; hetzelfde argument als bij de merken van een
 # laadpaal, een regel in een lijst leest als een belofte. Wat er niet in staat
 # past nog steeds onder "overig", met een eigen naam.
+#
+# De thuisbatterij is er sinds 22-09-2026 weer in, en nu omdat de coach hem
+# werkelijk stuurt: zie batterij.py.
 DEVICE_TYPES: Final = [
     "laadpaal",
+    "thuisbatterij",
     "boiler",
     "vaatwasser",
     "airco",
@@ -65,7 +69,6 @@ DEVICE_TYPES: Final = [
 # een apparaat dat er al staat netjes om te zetten naar "overig" zonder dat de
 # bewoner kwijt is wat het was; zie `_migrate` in storage.py.
 VERVALLEN_TYPES: Final = {
-    "thuisbatterij": "Thuisbatterij",
     "warmtepomp": "Warmtepomp",
     "wasmachine": "Wasmachine",
     "droger": "Droger",
@@ -95,10 +98,21 @@ DISHWASHER_BRANDS: Final = [
     "overig",
 ]
 
+# --- Battery brands ----------------------------------------------------------
+# Anker is de officiele Anker SOLIX-integratie, die lokaal via Modbus praat:
+# een modus, een vermogen en een richting. "overig" is elke batterij die in
+# Home Assistant dezelfde knoppen heeft: een getal voor het vermogen (met een
+# teken, of met een richting ernaast) en eventueel een modus. Welke tekst er in
+# die modus hoort staat per merk in devices.js en gaat mee in `battery`.
+BATTERY_BRANDS: Final = [
+    "anker",
+    "overig",
+]
+
 # Every brand id the panel may send, whatever the device type. Kept as one set
 # so the websocket schema does not have to know which brands belong to which
 # type -- the panel decides that, and it only ever sends one it offered.
-ALL_BRANDS: Final = sorted({*CHARGER_BRANDS, *DISHWASHER_BRANDS})
+ALL_BRANDS: Final = sorted({*CHARGER_BRANDS, *DISHWASHER_BRANDS, *BATTERY_BRANDS})
 
 # --- Grid metering patterns ------------------------------------------------
 # Customers have one of two: a pair of sensors where one is always zero, or a
@@ -413,6 +427,11 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # ging. Per apparaat. De eigenaar op 19-09-2026: "alleen de switch invullen en
     # power invullen", de rest zelflerend. Zie `_one_boiler` in coach.py.
     "boiler_learned": [],
+    # Wat de coach van een thuisbatterij bijhoudt, per apparaat: het gemeten
+    # rendement, wanneer hij voor het laatst vol was (voor de wekelijkse volle
+    # beurt) en wat hij per dag verdiende (voor de terugverdientijd). Zie
+    # `_one_batterij` in coach.py.
+    "battery_state": [],
     # De knoppen van de bewoner per laadpunt: een akkoord, snelladen, een pauze.
     # Opdrachten van een mens, dus ze horen een herstart van Home Assistant te
     # overleven. Ze gelden voor de sessie die er dan hangt: de kabel eruit wist

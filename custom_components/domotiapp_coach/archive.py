@@ -354,6 +354,10 @@ class Archive:
         }
         for apparaat in settings.get("devices") or []:
             uit.add(apparaat.get("entity"))
+            # Een thuisbatterij meldt laden en ontladen soms op twee sensoren.
+            if apparaat.get("type") == "thuisbatterij":
+                for sleutel in ("charge_power", "discharge_power"):
+                    uit.add((apparaat.get("entities") or {}).get(sleutel))
         return {e for e in uit if e}
 
     # --- de inhaalslag bij de eerste keer -----------------------------------

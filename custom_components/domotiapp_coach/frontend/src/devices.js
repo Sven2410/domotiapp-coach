@@ -13,6 +13,8 @@
 
 export const DEVICE_TYPES = [
   { id: "laadpaal", label: "Laadpaal", icon: "laadpaal" },
+  // Terug sinds 22-09-2026, en nu omdat de coach hem werkelijk stuurt.
+  { id: "thuisbatterij", label: "Thuisbatterij", icon: "thuisbatterij" },
   { id: "boiler", label: "Boiler", icon: "boiler" },
   { id: "vaatwasser", label: "Vaatwasser", icon: "vaatwasser" },
   { id: "airco", label: "Airco", icon: "airco" },
@@ -450,6 +452,157 @@ export const DISHWASHER_BRANDS = [
   },
 ];
 
+
+/**
+ * Thuisbatterijen, per merk.
+ *
+ * De eigenaar op 21-09-2026: "Ik wil de coach gaan uitbreiden met een
+ * thuisbatterij. Ik wil hem kunnen aansturen in HA. Laden, ontladen, blokkeren
+ * als de laadpaal laadt." En later: "het doel is om hem volledig third party
+ * te sturen."
+ *
+ * Wat de coach nodig heeft is overal hetzelfde: een getal waarmee hij het
+ * vermogen zet, een accustand, en wat de batterij nu doet. De rest maakt het
+ * beter maar is niet nodig. Een merk legt alleen vast welke woorden er in de
+ * modus horen; de velden zijn voor elk merk gelijk, zodat een batterij met
+ * dezelfde knoppen onder "Overig" past zonder dat er code bij moet.
+ */
+const BATTERY_FIELDS = (richtingNodig) => [
+  {
+    key: "soc",
+    label: "Accustand",
+    hint: "Hoe vol de batterij is, in procent.",
+    filter: "all",
+    needed: true,
+  },
+  {
+    key: "setpoint",
+    label: "Vermogen zetten",
+    hint: "Het getal (number) waarmee het vermogen van de batterij gezet wordt, in watt. Hier stuurt de coach mee.",
+    filter: "all",
+    needed: true,
+    hideRow: true,
+  },
+  {
+    key: "direction",
+    label: "Richting",
+    hint: richtingNodig
+      ? "De keuzelijst (select) die zegt of dat vermogen laden of ontladen is."
+      : "Optioneel: een keuzelijst die zegt of het vermogen laden of ontladen is. Zonder deze is het teken van het getal de richting: plus is laden.",
+    filter: "select",
+    needed: richtingNodig,
+    hideRow: true,
+  },
+  {
+    key: "mode",
+    label: "Bedrijfsmodus",
+    hint: "Optioneel: de keuzelijst met de modus van de batterij. De coach zet hem op de modus voor externe sturing zodra hij gaat sturen, en terug zodra hij stopt.",
+    filter: "select",
+    // De woorden van de officiele Anker-integratie. Een ander merk laat zijn
+    // eigen woord zien zoals het binnenkomt.
+    values: {
+      self_consumption: "Eigen verbruik",
+      tou_mode: "Tijdschema",
+      third_party_control: "Externe sturing",
+      custom_mode: "Eigen modus",
+      smart_mode: "Slimme modus",
+      dynamic_pricing: "Dynamische prijzen",
+    },
+  },
+  {
+    key: "charge_power",
+    label: "Laadvermogen",
+    hint: "Alleen als er hierboven geen vermogenssensor met een teken is: wat de batterij nu laadt.",
+    filter: "power",
+    hideRow: true,
+  },
+  {
+    key: "discharge_power",
+    label: "Ontlaadvermogen",
+    hint: "En wat hij nu ontlaadt.",
+    filter: "power",
+    hideRow: true,
+  },
+  {
+    key: "capacity",
+    label: "Capaciteit (kWh)",
+    hint: "Optioneel: de sensor met de bruikbare inhoud. Zonder deze vul je hem hieronder in.",
+    filter: "all",
+    hideRow: true,
+  },
+  {
+    key: "charge_limit",
+    label: "Laadgrens (%)",
+    hint: "Optioneel: tot hoever de batterij zelf laadt. De coach leest dit en verandert het nooit.",
+    filter: "all",
+    hideRow: true,
+  },
+  {
+    key: "discharge_limit",
+    label: "Ontlaadgrens (%)",
+    hint: "Optioneel: tot hoever de batterij zelf ontlaadt. Ook alleen gelezen.",
+    filter: "all",
+    hideRow: true,
+  },
+  {
+    key: "energy_in",
+    label: "kWh-meter: erin",
+    hint: "Optioneel: de teller van een kWh-meter op de batterij, wat erin ging. Met deze twee tellers meet de coach het echte rendement. De tellers van de batterij zelf zijn daar meestal niet goed voor: die meten aan de accukant.",
+    filter: "all",
+    hideRow: true,
+  },
+  {
+    key: "energy_out",
+    label: "kWh-meter: eruit",
+    hint: "En wat eruit kwam.",
+    filter: "all",
+    hideRow: true,
+  },
+];
+
+export const BATTERY_BRANDS = [
+  {
+    id: "anker",
+    label: "Anker SOLIX",
+    note: "Voor Anker is dat de officiele Anker SOLIX-integratie, die lokaal met de batterij praat.",
+    fields: BATTERY_FIELDS(true),
+    // Wat er in de bedrijfsmodus hoort te staan terwijl de coach stuurt, en
+    // wat er terugkomt als hij stopt. De woorden van de integratie zelf.
+    battery: { control_mode: "third_party_control", idle_mode: "self_consumption" },
+  },
+  {
+    id: "overig",
+    label: "Overig",
+    note: "Onder Overig past elke batterij die in Home Assistant een getal heeft waarmee je het vermogen zet.",
+    fields: BATTERY_FIELDS(false),
+    battery: { control_mode: "", idle_mode: "" },
+  },
+];
+
+/** De types die een thuisbatterij zijn, met hun eigen blok instellingen. */
+export const isBattery = (device) => device?.type === "thuisbatterij";
+
+/** De dagen van de week zoals de coach ze telt: nul is maandag. */
+export const WEEKDAGEN = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"];
+
+/** Wat een nieuwe batterij aan instellingen meekrijgt. */
+export const defaultBattery = (brandId) => ({
+  capacity_kwh: null,
+  max_charge_w: null,
+  max_discharge_w: null,
+  rte_percent: null,
+  power_invert: false,
+  setpoint_invert: false,
+  phase: "",
+  reserve_enabled: false,
+  reserve_percent: 20,
+  trade: false,
+  weekly_full: false,
+  weekly_full_day: 6,
+  purchase_price: null,
+  ...(BATTERY_BRANDS.find((brand) => brand.id === brandId)?.battery ?? { control_mode: "", idle_mode: "" }),
+});
+
 /**
  * Which brands belong to which device type.
  *
@@ -459,6 +612,7 @@ export const DISHWASHER_BRANDS = [
 const BRANDS_BY_TYPE = new Map([
   ["laadpaal", CHARGER_BRANDS],
   ["vaatwasser", DISHWASHER_BRANDS],
+  ["thuisbatterij", BATTERY_BRANDS],
 ]);
 
 /**
