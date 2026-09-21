@@ -1,7 +1,7 @@
 /**
  * Wat de coach van plan is, uur voor uur, tot de auto vol moet zijn.
  *
- * Sven op 30-08-2026: "ik wil een knop op de laadpaalkaart dat ik kan zien wat
+ * De eigenaar op 30-08-2026: "ik wil een knop op de laadpaalkaart dat ik kan zien wat
  * de coach van plan is met hele tijdlijn tot dat hij vol moet zijn." Dat is de
  * vraag die een coach die uren stilstaat oproept, en het antwoord stond tot nu
  * toe in één zin op de kaart: "wacht op een goedkoper uur." Dat klopt, maar het
@@ -221,7 +221,7 @@ export class DacPlanAheadSheet extends DacElement {
     // "Op vol vermogen" is een som en geen plan: zo lang zou het duren als
     // hij nu op alles wat er past door zou laden, en daar komt "uiterlijk
     // beginnen" uit. Het plan zelf staat in de uren eronder en gaat meestal
-    // langzamer, want de goedkoopste uren zijn zelden aaneengesloten. Sven op
+    // langzamer, want de goedkoopste uren zijn zelden aaneengesloten. De eigenaar op
     // 04-09-2026, met "laadtijd 6 u 23 m op 15 A" naast acht uur op 6 A:
     // "mij lijkt het toch logisch dynamisch te laden".
     //
@@ -292,7 +292,7 @@ export class DacPlanAheadSheet extends DacElement {
       // In een laaduur staat er hoe hard: de stroom in de kolom, het vermogen
       // en het zonaandeel in de zin. "4,1 kWh zon" stond er over een uur
       // waarin het dak 2,4 gaf: dat was wat er in de auto ging, zon plus net.
-      // Sven op 04-09-2026: "laat sowieso zien hoeveel ampère hij laadt en
+      // De eigenaar op 04-09-2026: "laat sowieso zien hoeveel ampère hij laadt en
       // kW." Een server van vóór v0.47.5 stuurt geen amps mee; dan blijft de
       // zonkolom zoals hij was.
       const zonTekst = blok.solar_kwh > 0.05

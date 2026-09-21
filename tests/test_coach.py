@@ -99,7 +99,7 @@ def instellingen(**extra):
         "ready_devices": [],
         # Wie wat krijgt, sinds 06-09-2026 per persoon; zie ontvangers.py.
         "notifications": {
-            "people": [{"id": "p-1", "name": "Sven", "target": "mobile_app_iphone", "user_id": "u-sven",
+            "people": [{"id": "p-1", "name": "Bewoner", "target": "mobile_app_iphone", "user_id": "u-1",
                         "kinds": {"kritiek": True, "melding": True, "besluit": False, "belasting": True}}],
             "load_alert": {"enabled": False, "threshold_percent": 80,
                            "min_interval_minutes": 30, "min_duration_seconds": 60},
@@ -192,7 +192,7 @@ print(f"  {besluit['rule']}: {besluit['amps']} A")
 controle("volgt de zon weer", besluit["rule"] == "surplus" and besluit["amps"] <= 8,
          f"kreeg {besluit['rule']} met {besluit['amps']} A")
 
-# Sven op 05-09-2026, toen de paal om 09:42 op zon begon en Meldingen zweeg:
+# De eigenaar op 05-09-2026, toen de paal om 09:42 op zon begon en Meldingen zweeg:
 # "ik wil dat alles wat de coach doet terug te lezen is in meldingen." Elk
 # ander besluit komt dus in de geschiedenis, als "besluit" en zonder telefoon.
 print("=== 3b. elk ander besluit staat in de geschiedenis, zonder telefoon ===")
@@ -217,7 +217,7 @@ print(f"  {besluit['rule']}: laden={besluit['charge']}  melding={bool(meldingen)
 controle("wacht op de accustand", besluit["rule"] == "no-soc" and not besluit["charge"],
          besluit["rule"])
 controle("stuurt één melding", len(meldingen) == 1, f"{meldingen}")
-# En in de geschiedenis is die kritiek: de bewoner moet er iets mee. Sven op
+# En in de geschiedenis is die kritiek: de bewoner moet er iets mee. De eigenaar op
 # 05-09-2026: "dat je op normale en kritieke meldingen kan filteren."
 geschiedenis = asyncio.run(coachmod.async_get_meldingen(hass).async_list())
 controle("en in de geschiedenis heet die kritiek",
@@ -373,7 +373,7 @@ controle("de wachthond blijft dus wakker", coach6._last_round is None,
          f"{coach6._last_round}")
 
 print("=== 14. de klaar-tijd grijpt pas op het laatste moment in ===")
-# Wat er op 20-08-2026 om 15:48 bij Sven misging. Hij laadde zonvolgend op 6 A,
+# Wat er op 20-08-2026 om 15:48 in die woning misging. Hij laadde zonvolgend op 6 A,
 # de klaar-tijdsom rekende met die gemeten 6 A in plaats van met wat de paal kan,
 # en zette hem acht uur te vroeg op vol vermogen. Op 14 A had hij pas veel later
 # hoeven beginnen.
@@ -487,7 +487,7 @@ controle("en vertelt waar de tijd bleef",
          any("minuten naar wachten op je eigen zon" in m for m in meldingen), f"{meldingen}")
 
 print("=== 15b. herstart midden in de laadbeurt: geen verzonnen begintijd ===")
-# Sven op 20-08-2026. Home Assistant herstartte om 20:57 terwijl de auto vanaf
+# De eigenaar op 20-08-2026. Home Assistant herstartte om 20:57 terwijl de auto vanaf
 # 19:18 laadde, en het verslag meldde daarna "Geladen van 20:58 tot 21:32,
 # 3,1 kWh" terwijl er 5,2 kWh in was gegaan. De coach kán die begintijd niet
 # weten, dus hoort hij hem ook niet te noemen.
@@ -527,7 +527,7 @@ controle("en er ging maar één start uit",
          not [d for d in verstuurd if d[0] == "easee"], f"{verstuurd}")
 controle("maar doet niet alsof hij het begin zag",
          all("van 20:58 tot" not in m for m in meldingen), f"{meldingen}")
-# Sinds 21-09-2026 zonder de bijzin "en toen liep hij al": Sven wil korte
+# Sinds 21-09-2026 zonder de bijzin "en toen liep hij al": de eigenaar wil korte
 # meldingen. Het woord "sinds" zegt al dat de coach het begin niet zag.
 controle("en zegt eerlijk vanaf wanneer hij telt",
          any("Sinds 20:58" in m for m in meldingen)
@@ -536,7 +536,7 @@ controle("en zegt eerlijk vanaf wanneer hij telt",
 print("=== 15c. een auto die op 80% stopt is niet vol ===")
 # Zijn Ford stopte op 80%, de Easee meldde `completed` en de coach zei "de auto
 # is vol". Dat is onwaar en het leest als een coach die niet weet wat hij doet.
-# Met een auto die zijn accustand zelf meldt, zoals Svens Ford, want juist daar
+# Met een auto die zijn accustand zelf meldt, zoals de eigen Ford, want juist daar
 # loopt het percentage achter op wat de paal doet.
 ford = dict(LAADPAAL["cars"][0], soc_entity="sensor.auto_soc")
 PAAL_FORD = dict(LAADPAAL, cars=[ford])
@@ -552,7 +552,7 @@ hassC.states.zet("sensor.laadpaal_vermogen", "3070")
 asyncio.run(ronde(coachC, tachtig, paal=PAAL_FORD, nu=dt.datetime(2026, 8, 20, 20, 58)))
 hassC.states.zet("sensor.laadpaal_status", "completed")
 # De auto stopt, maar zijn app hangt nog op het percentage van daarvoor. Zo ging
-# het op 25-08-2026 bij Sven: de melding vertrok met 70% terwijl de kaart een
+# het op 25-08-2026 in een echte woning: de melding vertrok met 70% terwijl de kaart een
 # minuut later 80% zei. Het verslag hoort dus even te wachten.
 _, verstuurd = asyncio.run(ronde(coachC, tachtig, paal=PAAL_FORD, nu=dt.datetime(2026, 8, 20, 21, 32)))
 meldingen = [d[2]["message"] for d in verstuurd if d[0] == "notify"]
@@ -686,7 +686,7 @@ controle("en er gaat niets meer naar de paal", not naar_de_paal, f"{naar_de_paal
 controle("het doorladen is vergeten", "dev-laadpaal" not in coachC._te_laat)
 
 print("=== 19. een accustand die wegvalt is geen onbekende accustand ===")
-# Op 25-08-2026 om 15:45 was Svens Ford-integratie een minuut `unavailable` en
+# Op 25-08-2026 om 15:45 was de eigen Ford-integratie een minuut `unavailable` en
 # zei de kaart "De auto is vol" terwijl de bus op 80% stond. Diezelfde avond om
 # 20:04 vroeg de coach op zijn telefoon om een accustand die hij eerder die
 # avond gewoon gezien had. De auto hangt dan nog aan dezelfde kabel, dus er is
@@ -735,7 +735,7 @@ print(f"  na de kabel eruit: {opnieuw['rule']}  needs_soc={opnieuw['needs_soc']}
 controle("maar na de kabel eruit weet hij het niet meer", opnieuw["needs_soc"], f"{opnieuw}")
 
 print("=== 20. het verslag telt mee wat de teller nog niet verwerkt heeft ===")
-# Svens Easee-levensduurteller werkte op 25-08-2026 maar eens per uur bij en
+# de eigen Easee-levensduurteller werkte op 25-08-2026 maar eens per uur bij en
 # sprong toen met 3,5 kWh ineens. Het verslag miste daardoor het laatste half
 # uur: het meldde 5,8 kWh waar de som op de vermogens op ruim 6 uitkwam. Hier
 # staat de teller de hele beurt stil, dus alles moet uit de eigen meting komen.
@@ -799,7 +799,7 @@ controle(
 )
 
 print("=== 21. een laderlimiet die elke beurt op een fase zet, wordt gezegd ===")
-# Svens laderlimiet stond een week op 14 A. Daarmee koos de Easee bij elke start
+# de laderlimiet stond een week op 14 A. Daarmee koos de Easee bij elke start
 # een enkele fase: 3.125 W waar op 16 A 10.855 W ging. Het paneel zei er niets
 # over, en de coach kan het met sturen niet oplossen.
 ford21 = dict(LAADPAAL["cars"][0], phases="three")
@@ -816,7 +816,7 @@ hass21.states.zet("sensor.laadpaal_stroom", "13.5")
 hass21.states.zet("sensor.laadpaal_vermogen", "3070")
 # Een enkele ronde is niet genoeg: de twee sensoren van een Easee melden tijdens
 # het optrekken seconden na elkaar, en dan is de verhouding een vergelijking
-# tussen nu en daarnet. Bij Van den Dam leverde dat op 30-08-2026 om 04:28 een
+# tussen nu en daarnet. In de klantwoning leverde dat op 30-08-2026 om 04:28 een
 # valse melding op terwijl de auto keurig driefasig laadde. Er moet dus een
 # aantal ronden hetzelfde uit komen; zie `FASEMETING_RONDEN`.
 for minuut in (51, 52):
@@ -875,7 +875,7 @@ controle("een eenfasige auto krijgt geen verwijt", not eenfasig["tip"], f"{eenfa
 
 # En het vangnet dat in de plaats komt van de keuze "allebei". Die bestond omdat
 # een auto die kan wisselen zich pas verraadt als hij laadt, en de prijs ervan
-# was dat elke voorspelling het traagste geval nam: bij Van den Dam 17,2 uur
+# was dat elke voorspelling het traagste geval nam: in de klantwoning 17,2 uur
 # waar er 5,7 nodig waren. Het aantal fasen staat nu vast in het profiel, en de
 # meting wordt gebruikt om te zeggen dat die keuze niet klopt.
 #
@@ -909,7 +909,7 @@ controle("en een profiel op eenfasig dat driefasig laadt ook",
          "driefasig" in mis1["tip"] and "eenfasig" in mis1["tip"], f"{mis1['tip']}")
 
 print("=== 22. de kabel eruit tijdens het laden levert een verslag op ===")
-# Sven op 20-08-2026: hij trok de kabel er twee keer uit tijdens het laden en
+# De eigenaar op 20-08-2026: hij trok de kabel er twee keer uit tijdens het laden en
 # hoorde niets. Er kwam alleen een verslag bij "vol" en bij een gemiste
 # klaar-tijd. Afgesproken op 26-08-2026: dezelfde vorm als bij vol, met zijn
 # eigen zin als voorbeeld: "afgekoppeld om 19:12, er ging 4,2 kWh in".
@@ -936,7 +936,7 @@ _, verstuurd = asyncio.run(ronde(coach22, los, nu=dt.datetime(2026, 8, 20, 19, 1
 meldingen = [d[2]["message"] for d in verstuurd if d[0] == "notify"]
 print(f"  {meldingen}")
 controle("nu komt er wel een verslag", bool(meldingen), f"{meldingen}")
-controle("in Svens eigen bewoording",
+controle("in de eigen bewoording",
          any("afgekoppeld om 19:12, er ging" in m and "kWh in" in m for m in meldingen),
          f"{meldingen}")
 controle("en met de begintijd erbij",
@@ -949,7 +949,7 @@ controle("en zonder verwijt dat hij niet vol was",
 # daarmee onwaar. Trekt een integratie kort zijn entiteiten in, bijvoorbeeld bij
 # een herverbinding, dan stuurde de coach een verslag en wiste hij de hele
 # sessie: het akkoord, snelladen, de opgegeven accustand en de klaar-tijd waar
-# hij aan werkte. Sven kreeg op 29-08-2026 om 19:54 zo'n verslag terwijl de paal
+# hij aan werkte. De eigenaar kreeg op 29-08-2026 om 19:54 zo'n verslag terwijl de paal
 # die hele avond op `awaiting_start` stond.
 weg = instellingen()
 weg["strategy"]["schedules"][0]["window"]["done_by"] = "23:00"
@@ -1028,7 +1028,7 @@ controle("en daarna geen tweede over dezelfde beurt",
          not [d for d in daarna if d[0] == "notify"], f"{daarna}")
 
 print("=== 23. de waarschuwing bij een eigen pauze komt terug ===")
-# Sven op 26-08-2026: de pauze zelf blijft winnen van de klaar-tijd, want het is
+# De eigenaar op 26-08-2026: de pauze zelf blijft winnen van de klaar-tijd, want het is
 # zijn huis en zijn knop. Maar één keer waarschuwen is te weinig. Wie het
 # bericht om elf uur 's avonds wegveegt en om zeven uur naar een lege auto
 # loopt, is niet geholpen.
@@ -1184,7 +1184,7 @@ controle("en de bestaande twee staan er nog", len(uit["schedules"]) == 3, f"{uit
 # de waarde niet, en een profiel dat stilletijes op de standaard terugvalt is
 # net zo fout als een dat blijft staan. Driefasig, want dat is wat er aan een
 # driefasige paal gebeurt; klopt dat niet, dan zegt `_fasetip` het zodra er een
-# keer stroom loopt. Sven op 29-08-2026.
+# keer stroom loopt. De eigenaar op 29-08-2026.
 oud_op_schijf = {
     "devices": [
         {"id": "dev-1", "cars": [
@@ -1243,7 +1243,7 @@ controle("zonder strategie ontstaat er gewoon een",
          uit["schedules"][0]["device"] == "d1", f"{uit}")
 
 print("=== 25. de kWh-teller mag ook in het algemene veld staan ===")
-# Sven op 27-08-2026, tijdens een installatie bij een klant: "Energieteller
+# De eigenaar op 27-08-2026, tijdens een installatie bij een klant: "Energieteller
 # (optioneel)" en "Levensduur verbruik" wezen naar dezelfde sensor en hij typte
 # hem twee keer.
 #
@@ -1300,7 +1300,7 @@ controle("zonder enige teller geeft hij niets terug in plaats van om te vallen",
          coach25b._teller(GEEN) is None, f"{coach25b._teller(GEEN)}")
 
 print("=== 26. wat teruglevering opbrengt bij salderen ===")
-# Uit Svens eigen nota van Frank, nagerekend op 27-08-2026. Wat er op de
+# Uit een eigen energienota, nagerekend op 27-08-2026. Wat er op de
 # factuur staat zijn kale commodityprijzen; de energiebelasting staat als vast
 # maandbedrag apart, geheven over het gesaldeerde jaarvolume. Daaruit volgt dat
 # de belasting bij teruglevering wegstreept tegen die bij afname.
@@ -1309,7 +1309,7 @@ print("=== 26. wat teruglevering opbrengt bij salderen ===")
 # en krijg je nergens terug. Zonder die aftrek stond de terugleveropbrengst er
 # ruim twee cent te hoog in.
 #
-# Thuis bij Sven: vast contract, salderen aan. Bij de klant: dynamisch,
+# Thuis in een echte woning: vast contract, salderen aan. Bij de klant: dynamisch,
 # salderen tot 1 januari 2027.
 
 VOOR_2027 = dt.datetime(2026, 8, 27, 12, 0)
@@ -1321,7 +1321,7 @@ def klok(moment):
     return moment
 
 
-# --- het vaste contract van Sven -----------------------------------------
+# --- het vaste contract van de eigenaar -----------------------------------------
 VAST = {
     "type": "fixed",
     "netting": True,
@@ -1336,7 +1336,7 @@ controle("bij salderen is teruglevering de inkoopprijs min de kosten",
 zonder = coachmod.ChargerCoach._tariff({"contract": dict(VAST, netting=False)})
 controle("zonder salderen is het de terugleververgoeding min de kosten",
          abs(zonder.feed_in - (0.0721 - 0.052756)) < 1e-9, f"{zonder.feed_in}")
-print(f"  verschil voor Sven: {tar.feed_in - zonder.feed_in:.4f} euro per kWh")
+print(f"  verschil voor de eigenaar: {tar.feed_in - zonder.feed_in:.4f} euro per kWh")
 
 # --- het dynamische contract van de klant --------------------------------
 DYN = {
@@ -1383,7 +1383,7 @@ controle("zonder opslag is teruglevering de hele inkoopprijs",
 # verschil onzichtbaar omdat daar alles tot tekst geserialiseerd wordt. Binnen
 # HA staat het object er nog, en `parse_datetime` struikelt erover.
 #
-# Bij Van den Dam gebeurde dat op 29-08-2026 met alle 24 uurblokken tegelijk.
+# In de klantwoning gebeurde dat op 29-08-2026 met alle 24 uurblokken tegelijk.
 # De coach zei "er komen geen prijzen binnen" en laadde op vol vermogen van het
 # net, terwijl hij op de zon had horen te wachten. Geen enkele foutmelding: de
 # TypeError werd per blok opgevangen en de regel overgeslagen.
@@ -1470,11 +1470,11 @@ controle("en het is niet toevallig allebei nul", grid_w.surplus_w > 0,
 # energie die er in dat uur in gaat (kWh). Over precies een uur is dat hetzelfde
 # getal, alleen niet dezelfde eenheid.
 #
-# Bij Van den Dam stond op 29-08-2026 een vermogenssensor in "volgend uur". Die
+# In de klantwoning stond op 29-08-2026 een vermogenssensor in "volgend uur". Die
 # 1874 W werd als 1874 kWh gelezen en dus als 1.874.000 W doorgegeven: op de
 # kaart "over een uur wordt er 1874,0 kW zon verwacht", en `_beter_straks` koos
 # met zo'n vooruitzicht altijd voor wachten. De coach stond daardoor stil op de
-# goedkoopste uren van de dag. Gevonden door Sven, op zijn eigen kaart.
+# goedkoopste uren van de dag. Gevonden door de eigenaar, op zijn eigen kaart.
 ZON_VELDEN = {"this_hour": "sensor.zon_nu", "next_hour": "sensor.zon_straks",
               "remaining_today": "sensor.zon_rest"}
 inst_zon = instellingen()
@@ -1549,7 +1549,7 @@ controle("een zonverwachting in Wh geeft hetzelfde vermogen als een in kWh",
 controle("en dat is 2 kWh over het uur, dus 2000 W", abs(zon_kwh.now_w - 2000.0) < 1e-6,
          f"{zon_kwh.now_w}")
 
-print("=== 33. de nacht van 30-08-2026 bij Van den Dam ===")
+print("=== 33. de nacht van 30-08-2026 in de klantwoning ===")
 # Alles hieronder is nagemeten uit de recorder van die installatie. Vier dingen
 # gingen er mis en ze hebben dezelfde vorm: de coach nam een enkele meting voor
 # waar zonder te kijken of hij ergens bij hoorde.
@@ -1643,7 +1643,7 @@ controle("een huis dat er zelf overheen gaat wint wel", vol34["amps"] == 0,
          f"{vol34['rule']} {vol34['amps']}")
 
 # En de piek zelf hoort er al uit te vallen voordat de som eraan begint. De
-# huismeter van Van den Dam meldt elke dertig seconden; op 30-08-2026 om
+# huismeter van de klantwoning meldt elke dertig seconden; op 30-08-2026 om
 # 04:28:56 gaf hij een enkel sample van 27 A op een fase die ervoor en erna op
 # 10 stond. Die metingen komen binnen op de luisteraar en niet in de ronde, dus
 # ze worden hier zo gevoerd.
@@ -1708,7 +1708,7 @@ controle("de ronde rekent met de gladgestreken fase en niet met de piek",
          langs["rule"].split("+")[0] not in ("no-room", "tight"), f"{langs['rule']} {langs['amps']}")
 
 # En het tegenbewijs: dezelfde piek zonder historie eronder zet hem wel uit.
-# Dat is precies wat er bij Van den Dam gebeurde, en het laat zien dat het de
+# Dat is precies wat er in de klantwoning gebeurde, en het laat zien dat het de
 # demping is die het verschil maakt en niet iets anders in de opstelling.
 hass34e, _, coach34e = bouw(huis34d, instellingen())
 inst34e = instellingen()
@@ -1753,14 +1753,14 @@ controle("twee sensoren die niet tegelijk gemeld hebben zeggen samen niets",
          f"{coach35._measured_phases(LAADPAAL)}")
 
 # Vers en stabiel: dan is 9300 W bij 13,5 A driefasig, en dat klopt met de meting
-# van Van den Dam waar alle drie de fasen samen elf ampere zakten.
+# van de klantwoning waar alle drie de fasen samen elf ampere zakten.
 hass35.states.zet("sensor.laadpaal_vermogen", "9300")
 controle("vers en boven de drempel wordt het gewoon gemeten",
          coach35._measured_phases(LAADPAAL) == 3,
          f"{coach35._measured_phases(LAADPAAL)}")
 
 print("--- d. wat de lastbewaker vrijgeeft is een restwaarde ---")
-# `sensor.1_equalizer_limiet` bij Van den Dam meldt niet een instelling maar wat
+# `sensor.1_equalizer_limiet` in de klantwoning meldt niet een instelling maar wat
 # er ná het huisverbruik overblijft voor de paal. Nagemeten op 29-08-2026: om
 # 16:50 stond hij op 18 A terwijl de paal 15 trok en het huis er zelf 5 bijhad,
 # om 17:20 met een leeg huis op 20. v0.44.0 las dat als een tweede zekering en
@@ -1845,7 +1845,7 @@ controle("en met wat je eraan kunt doen", bool(stil37) and "kabel" in stil37[0],
          f"{stil37}")
 
 print("=== 38. de lastwaarschuwing gaat niet over het laden van de coach zelf ===")
-# Sven kreeg in de nacht van 30-08-2026 drie meldingen, om 03:02 op 84%, om
+# De eigenaar kreeg in de nacht van 30-08-2026 drie meldingen, om 03:02 op 84%, om
 # 03:32 op 80% en om 04:22 op 88%, telkens met "zet iets zwaars uit of wacht
 # ermee". Die getallen klopten: zijn huis heeft in de nacht ongeveer 10 A
 # basislast op L3, en met de paal erbij is dat 22 A van de 25.
@@ -1941,7 +1941,7 @@ controle("en dan staat erbij welk deel van de laadpaal komt",
          any("12.0 A van de laadpaal" in m for m in beide38), f"{beide38}")
 
 print("=== 39. een meter die even zwijgt meet geen nul ===")
-# Bij Van den Dam viel de P1-meter op 30-08-2026 om 11:07, 11:09 en 11:15
+# In de klantwoning viel de P1-meter op 30-08-2026 om 11:07, 11:09 en 11:15
 # telkens een paar seconden weg. `_read` rekende dan `netto = 0` uit, de coach
 # concludeerde dat er geen zon over was en zette het laden op de zonregel stil.
 # Twee keer een kwartier, midden op een zonnige ochtend.
@@ -2027,7 +2027,7 @@ controle("`unknown` telt net zo goed als weg", len(onbekend.phase_amps) == 3,
          f"{onbekend.phase_amps}")
 
 print("=== 40. de naam die je een auto geeft komt ook ergens terug ===")
-# Sven op 30-08-2026: "ik heb de naam aangepast bij de auto maar in het
+# De eigenaar op 30-08-2026: "ik heb de naam aangepast bij de auto maar in het
 # overzicht staat de naam nog verkeerd en neemt hij het niet mee." Die naam
 # werd nergens gebruikt: de kaart toont de laadpaal en elke melding zei "de
 # auto". Nu praat de coach over de auto zoals de bewoner hem noemt.
@@ -2116,7 +2116,7 @@ controle("en hij zegt hoeveel er gepland staat, en of dat alleen zon is",
          and isinstance(plan41.get("solar_only"), bool), f"{plan41}")
 
 print("=== 41b. elke melding komt in de geschiedenis, en een stille sensor wordt gemeld ===")
-# Sven op 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat
+# De eigenaar op 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat
 # moet wel gemeld worden. Daarom wil ik ook een soort geschiedenis meldingen
 # scherm." De geschiedenis is een eigen opslag naast de instellingen, en het
 # paneel leest hem over `domotiapp_coach/notifications/list`.
@@ -2155,7 +2155,7 @@ controle("vijf minuten stilte is nog geen melding", not te_vroeg, f"{te_vroeg}")
 stil = wacht(11)
 print(f"  na elf minuten: {stil}")
 # De naam die de bewoner zelf invulde staat erin, de entiteit-id niet: die
-# hoort in het log. Sven op 21-09-2026: "meld zo'n sensor niet volledig, zeg
+# hoort in het log. De eigenaar op 21-09-2026: "meld zo'n sensor niet volledig, zeg
 # gewoon dat er iets mis is met de integratie."
 controle("na tien minuten wel, met de naam van de sensor erin",
          len(stil) == 1 and "accustand van Ford" in stil[0], f"{stil}")
@@ -2168,7 +2168,7 @@ controle("ondertussen laadt hij gewoon door op de laatst bekende stand",
 hass41b.states.zet("sensor.ford_soc", "44")
 weer = wacht(13)
 # Sinds 06-09-2026 gaat "doet het weer" niet meer naar de telefoon, alleen in
-# de geschiedenis: Sven wil per beurt één verslag plus wat kritiek is.
+# de geschiedenis: de eigenaar wil per beurt één verslag plus wat kritiek is.
 controle("terug: niets meer naar de telefoon", not weer, f"{weer}")
 controle("en daarna stil", not wacht(14), "")
 geschiedenis = asyncio.run(async_get_meldingen(hass41b).async_list())
@@ -2178,7 +2178,7 @@ controle("en alles staat in de geschiedenis, op volgorde",
          and any("doet het weer" in g["message"] for g in geschiedenis), f"{geschiedenis}")
 
 print("=== 42. niets van één installatie zit in de code ===")
-# Sven op 30-08-2026: "je hebt toch niet iets van mij thuis hard gecodeerd? Het
+# De eigenaar op 30-08-2026: "je hebt toch niet iets van mij thuis hard gecodeerd? Het
 # moet wel universeel zijn." Deze proef dwingt dat af in plaats van het te
 # beloven: hij leest de eigen broncode en valt om zodra er een entiteitnaam in
 # staat. Elke sensor hoort uit de instellingen van de klant te komen.
@@ -2298,7 +2298,7 @@ print(f"  woning zonder zon: {kaal}")
 controle("zonder zonnepanelen is het huis de inkoop",
          abs(kaal.get(12, 0) - 0.8) < 0.01, f"{kaal}")
 
-# En de mediaan, niet het gemiddelde. Svens keuze van 30-08-2026: één keer
+# En de mediaan, niet het gemiddelde. de keuze van 30-08-2026: één keer
 # wassen tilt een gemiddelde over een week heen op.
 controle("de mediaan van 1, 1, 1 en 9 is 1", coachmod._mediaan([1.0, 1.0, 1.0, 9.0]) == 1.0,
          f"{coachmod._mediaan([1.0, 1.0, 1.0, 9.0])}")
@@ -2306,7 +2306,7 @@ controle("en van 1, 2, 3 is 2", coachmod._mediaan([3.0, 1.0, 2.0]) == 2.0,
          f"{coachmod._mediaan([3.0, 1.0, 2.0])}")
 
 print("=== 48. een laadbeurt komt met kosten en besparing in de opslag ===")
-# Sven op 05-09-2026: "Kunnen we ergens een overzichtje maken wat we hebben
+# De eigenaar op 05-09-2026: "Kunnen we ergens een overzichtje maken wat we hebben
 # bespaard? Dat is natuurlijk het belangrijkste voor de klant." Het ijkpunt is
 # de prijs op het moment van inpluggen. Vast contract: elke kWh uit eigen zon
 # kost wat teruglevering opgebracht had in plaats van de inkoopprijs.
@@ -2354,7 +2354,7 @@ controle("de ingeplugde tijd is de eerste ronde met kabel",
          b48.get("plugged_at") == "2026-08-18T14:37:00", f"{b48.get('plugged_at')}")
 
 print("=== 48b. midden in een beurt ingestapt: geen ijkpunt, geen verzonnen besparing ===")
-# Sven op 05-09-2026, bij "bespaard -0,01" op een beurt die vrijdagavond
+# De eigenaar op 05-09-2026, bij "bespaard -0,01" op een beurt die vrijdagavond
 # begon en die de coach pas na een herstart om 15:03 zag: "waarom is er
 # vandaag niks bespaard?" Het ijkpunt was de prijs van het herstartuur, en dat
 # is het verkeerde uur. Zonder inplugmoment dus geen ijkpunt.
@@ -2376,7 +2376,7 @@ controle("maar met de kilowatturen en wat ze kostten",
          b48b and b48b[0]["kwh"] > 0.1 and b48b[0]["paid"] > 0, f"{b48b}")
 
 print("=== 48c. na een herstart rekent hij terug uit de recorder en de kwartieropslag ===")
-# Sven op 05-09-2026: "kan je niet historisch terugrekenen?" De recorder weet
+# De eigenaar op 05-09-2026: "kan je niet historisch terugrekenen?" De recorder weet
 # wanneer de kabel erin ging, de kwartieropslag wat de paal en het net daarna
 # deden. Hier nagemaakt: kabel erin om 13:37, een uur op 4,14 kW met 1,5 kW
 # teruglevering ernaast, en de coach die om 14:37 instapt.
@@ -2437,7 +2437,7 @@ controle("elk commando uit websocket.py staat in async_register", not niet49,
 controle("en savings/list is er een van", "domotiapp_coach/savings/list" in namen49, "")
 
 print("=== 50. de auto trekt meer dan gevraagd: onder de groep van de paal blijven ===")
-# Van den Dam, 06-09-2026 om 04:18:30: limiet 16 A, de Ford trok 16,9 A op één
+# de klantwoning, 06-09-2026 om 04:18:30: limiet 16 A, de Ford trok 16,9 A op één
 # fase, de groep staat op 16 A. Om 04:25:57 hield de paal ermee op, startte op
 # drie fasen opnieuw en de Ford ging in storing. Met de circuitlimiet als
 # sensor blijft de coach er zoveel onder als de auto erboven zit.
@@ -2468,7 +2468,7 @@ controle("op drie fasen onder de limiet blijft het gewoon 16 A", b50b["amps"] ==
 
 print("=== 51. één fase gemeten op een driefasig profiel: daarmee rekenen ===")
 # Dezelfde nacht om 04:17: de Easee koos in automatische fasemodus zelf één
-# fase. Die modus blijft (Sven: "belangrijk voor gastauto's"), dus de coach
+# fase. Die modus blijft (de eigenaar: "belangrijk voor gastauto's"), dus de coach
 # hoort te zien wat er loopt en daar deze beurt mee te rekenen: drie keer zo
 # lang, en dat zegt hij erbij.
 inst51 = instellingen(devices=[PAAL50])
@@ -2498,7 +2498,7 @@ controle("en op één fase moet hij uren eerder beginnen dan op drie",
          f"{plan51['latest_start']} tegen {plan51b['latest_start']}")
 
 print("=== 52. een opgegeven accustand krijgt een uur extra speling ===")
-# Sven op 06-09-2026: "een auto die niet in HA kan moet langer speling hebben.
+# De eigenaar op 06-09-2026: "een auto die niet in HA kan moet langer speling hebben.
 # Liever iets eerder vol dan niet vol."
 inst52 = instellingen()
 inst52["strategy"]["schedules"][0]["window"]["done_by"] = "06:00"
@@ -2521,7 +2521,7 @@ controle("met een opgegeven stand begint hij precies een uur eerder dan met een 
          == dt.timedelta(hours=1), f"{l52} tegen {l52b}")
 
 print("=== 53. een auto die bovenin gas terugneemt: leren en ermee rekenen ===")
-# Sven op 06-09-2026: "bepaalde auto's schroeven vanaf een bepaald procent zelf
+# De eigenaar op 06-09-2026: "bepaalde auto's schroeven vanaf een bepaald procent zelf
 # hun doorlaatbaarheid in ampère terug." De coach meet dat alleen als de auto
 # zelf de rem is: limiet 14 A, hij neemt 8 A, niets anders houdt hem tegen.
 inst53 = instellingen(devices=[PAAL52])
@@ -2675,13 +2675,13 @@ controle("zonder accustand geen herstart", b4["rule"] == "complete" and not star
          f"{b4['rule']} {v4}")
 
 print("=== 55. wie welke melding krijgt: per persoon, per soort ===")
-# Sven op 06-09-2026: "de klant kan meldingen aan en uit zetten in het tabje
+# De eigenaar op 06-09-2026: "de klant kan meldingen aan en uit zetten in het tabje
 # Meldingen. De admin voegt de personen toe, en die persoon ziet alleen
 # zichzelf. En niet telkens onnodig meldingen sturen."
 ontv = laad("ontvangers")
 inst55 = instellingen()
 inst55["notifications"]["people"] = [
-    {"id": "p-1", "name": "Sven", "target": "mobile_app_sven", "user_id": "u-sven",
+    {"id": "p-1", "name": "Bewoner", "target": "mobile_app_telefoon", "user_id": "u-1",
      "kinds": {"kritiek": True, "melding": True, "besluit": False, "belasting": True}},
     {"id": "p-2", "name": "Partner", "target": "mobile_app_partner", "user_id": "u-partner",
      "kinds": {"kritiek": True, "melding": False, "besluit": False, "belasting": False}},
@@ -2689,10 +2689,10 @@ inst55["notifications"]["people"] = [
      "kinds": {"kritiek": True, "melding": True, "besluit": True, "belasting": True}},
 ]
 controle("kritiek gaat naar iedereen die dat aan heeft",
-         ontv.ontvangers(inst55, "kritiek") == ["mobile_app_sven", "mobile_app_partner", "mobile_app_alles"],
+         ontv.ontvangers(inst55, "kritiek") == ["mobile_app_telefoon", "mobile_app_partner", "mobile_app_alles"],
          f"{ontv.ontvangers(inst55, 'kritiek')}")
 controle("een verslag alleen naar wie verslagen wil",
-         ontv.ontvangers(inst55, "melding") == ["mobile_app_sven", "mobile_app_alles"], "")
+         ontv.ontvangers(inst55, "melding") == ["mobile_app_telefoon", "mobile_app_alles"], "")
 controle("een besluit alleen naar wie alles wil volgen",
          ontv.ontvangers(inst55, "besluit") == ["mobile_app_alles"], "")
 controle("een onbekende soort gaat naar niemand", ontv.ontvangers(inst55, "geheim") == [], "")
@@ -2703,8 +2703,8 @@ asyncio.run(coach55._async_tell("proefalarm", kritiek=True))
 asyncio.run(coach55._async_noteer("proefbesluit", dt.datetime(2026, 9, 6, 10, 0)))
 naar = [(d[1], d[2]["message"]) for d in hass55.services.verstuurd if d[0] == "notify"]
 print(f"  verstuurd: {naar}")
-controle("het verslag ging naar Sven en Alles, niet naar Partner",
-         [t for t, m in naar if m == "proefverslag"] == ["mobile_app_sven", "mobile_app_alles"], f"{naar}")
+controle("het verslag ging naar de eigenaar en Alles, niet naar Partner",
+         [t for t, m in naar if m == "proefverslag"] == ["mobile_app_telefoon", "mobile_app_alles"], f"{naar}")
 controle("het alarm ging naar alle drie",
          len([t for t, m in naar if m == "proefalarm"]) == 3, f"{naar}")
 controle("het besluit alleen naar Alles",
@@ -2722,14 +2722,14 @@ controle("zonder gekoppelde persoon valt er niets te zetten",
          ontv.zet_eigen_soorten(inst55, "u-onbekend", {"melding": True}) is None, "")
 # De migratie: wat er onder Strategie stond wordt personen.
 oud55 = {"strategy": {"level": "steer", "load_alert": {"enabled": True, "threshold_percent": 85.0,
-                                                        "targets": ["mobile_app_iphone_van_sven"],
+                                                        "targets": ["mobile_app_iphone_van_de_keuken"],
                                                         "min_interval_minutes": 30, "min_duration_seconds": 60}}}
 mig = ontv.migreer_load_alert(oud55)
 mensen55 = mig["notifications"]["people"]
 print(f"  gemigreerd: {mensen55}")
 controle("de oude ontvanger wordt een persoon met een leesbare naam",
-         len(mensen55) == 1 and mensen55[0]["target"] == "mobile_app_iphone_van_sven"
-         and mensen55[0]["name"] == "Iphone van sven" and mensen55[0]["id"].startswith("p-"), f"{mensen55}")
+         len(mensen55) == 1 and mensen55[0]["target"] == "mobile_app_iphone_van_de_keuken"
+         and mensen55[0]["name"] == "Iphone van de keuken" and mensen55[0]["id"].startswith("p-"), f"{mensen55}")
 controle("met alles aan behalve de besluiten",
          mensen55[0]["kinds"] == {"kritiek": True, "melding": True, "besluit": False, "belasting": True}, "")
 controle("en de drempel gaat mee, zonder de ontvangers",
@@ -2743,7 +2743,7 @@ controle("en wel onder notifications", geladen55["notifications"]["load_alert"][
          and len(geladen55["notifications"]["people"]) == 1, "")
 
 print("=== 56. de vaatwasser: vrijgeven, het goedkoopste moment, starten, verslag ===")
-# Sven op 06-09-2026: "nu verder met de vaatwasser sturing." De bewoner geeft
+# De eigenaar op 06-09-2026: "nu verder met de vaatwasser sturing." De bewoner geeft
 # vrij, de coach kiest het goedkoopste startmoment binnen het schema, drukt op
 # de startknop, en meldt één keer dat hij klaar is, met kosten en wat meteen
 # starten gekost had. Eerst alleen de vaatwasser.
@@ -2832,7 +2832,7 @@ hass56.states.zet("sensor.vaatwasser_status", "run")
 hass56.states.zet("sensor.vaatwasser_vermogen", "2000")
 b, v = asyncio.run(ronde56(dt.datetime(2026, 9, 8, 1, 2, 30)))
 controle("zodra hij draait is de regel running", b.get("rule") == "running" and b.get("running"), f"{b}")
-# Sven op 07-09-2026: "ik wil wel meldingen ontvangen dat de vaatwasser
+# De eigenaar op 07-09-2026: "ik wil wel meldingen ontvangen dat de vaatwasser
 # gestart is en klaar is."
 gestart56 = [d[2]["message"] for d in v if d[0] == "notify"]
 print(f"  gestart: {gestart56}")
@@ -2912,7 +2912,7 @@ asyncio.run(coach57c._round(dt.datetime(2026, 9, 8, 1, 1, 30))); asyncio.run(has
 controle("na het akkoord wel", [d for d in hass57c.services.verstuurd if d[0] == "button"], f"{hass57c.services.verstuurd}")
 
 print("=== 58. een domme vaatwasser op een meetstekker: adviseren, meten, leren ===")
-# Sven op 06-09-2026 's avonds: "smart plug als starten doen we niet, wel
+# De eigenaar op 06-09-2026 's avonds: "smart plug als starten doen we niet, wel
 # adviseren en meten, met zet hem aan." Merk "overig": geen status, geen
 # programma, geen knop; het programma kiest de bewoner op de kaart, en het
 # vermogen zegt of hij draait. Zijn schema: vanaf 08:00, klaar om 16:30.
@@ -3002,7 +3002,7 @@ for minuut in range(1, 200):
         controle("geen melding tijdens de beurt", False, f"{telefoon58(v)}")
         break
 # Om 14:32 ziet de stekker niets meer; na een half uur stilte is hij klaar.
-# Sven op 07-09-2026: zijn machine zet een kwartier voor het eind de deur
+# De eigenaar op 07-09-2026: zijn machine zet een kwartier voor het eind de deur
 # open en doet daarna twintig minuten vrijwel niets; een kwartier was te kort.
 hass58.states.zet("sensor.dom_vermogen", "0")
 b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 14, 32)))
@@ -3081,7 +3081,7 @@ controle("de vraag om 11:00, niets om 11:30, de herinnering om 11:46 met de tijd
          len(m1) == 1 and not m2 and len(m3) == 1 and "nog steeds uit" in m3[0] and "11:00" in m3[0] and not m4, f"{m1} {m2} {m3} {m4}")
 
 print("=== 60. de vrijgaveschakelaar: de knop op de kaart en een schakelaar volgen elkaar ===")
-# Sven op 06-09-2026: een eigen kaart in de keuken met een knop "sturing" die
+# De eigenaar op 06-09-2026: een eigen kaart in de keuken met een knop "sturing" die
 # een schakelaar aanzet, "en dan wil ik dat Ingeruimd en dicht aangaat."
 SCHAKEL = "input_boolean.vaatwasser_sturing"
 DOM60 = dict(DOM, entities={"release_switch": SCHAKEL})
@@ -3103,7 +3103,7 @@ def vrij60():
     return "dev-dom" in (inst60.get("ready_devices") or [])
 b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 7, 0)))
 controle("schakelaar uit, niet vrijgegeven: niets gebeurt", not vrij60() and not v and b.get("rule") == "not-released", f"{v} {b.get('rule')}")
-# Sven op 06-09-2026: zette hem aan en binnen vijf seconden weer uit, want er
+# De eigenaar op 06-09-2026: zette hem aan en binnen vijf seconden weer uit, want er
 # gebeurde niets. De schakelaar en de status horen de coach meteen te wekken.
 controle("de coach luistert naar de schakelaar en naar de status van de vaatwasser",
          SCHAKEL in coach60._watched and "sensor.vaatwasser_status" not in coach60._watched, f"{coach60._watched}")
@@ -3147,7 +3147,7 @@ b, v = asyncio.run(ronde60(dt.datetime(2026, 9, 8, 12, 3)))
 controle("en daarna wacht hij op een nieuwe vrijgave", not vrij60() and not v and b.get("rule") == "not-released", f"{v} {b.get('rule')}")
 
 print("=== 61. de eindtijd van het apparaat zelf: als tijdstip, in minuten, in seconden ===")
-# Sven op 07-09-2026: "pak de eindtijd van de integratie." Home Connect geeft
+# De eigenaar op 07-09-2026: "pak de eindtijd van de integratie." Home Connect geeft
 # een tijdstip; andere integraties de minuten of seconden die nog resten.
 hass61 = NepHass({
     "sensor.rest_tijdstip": "2026-09-08T04:47:00+02:00",
@@ -3167,7 +3167,7 @@ controle("zonder waarde geen eindtijd", coachmod._eindtijd(hass61, "sensor.rest_
          and coachmod._eindtijd(hass61, "", nu61) is None, "")
 
 print("=== 62. een herstart midden in een vaatwasserbeurt: de telling gaat door ===")
-# Sven op 07-09-2026: "ja, reken terug." De coach bewaart de lopende beurt elke
+# De eigenaar op 07-09-2026: "ja, reken terug." De coach bewaart de lopende beurt elke
 # vijf minuten; na een herstart pakt hij hem daar op, en het gat sinds die
 # opslag komt uit de kwartieropslag. Geen tweede "is gestart", één verslag
 # over de hele beurt.
@@ -3364,7 +3364,7 @@ controle("daarna wacht hij op een nieuwe vrijgave en drukt hij nergens op",
          b.get("rule") == "not-released" and not m and not [d for d in hass62d.services.verstuurd if d[0] == "button"], f"{b.get('rule')} {m}")
 
 print("=== 63. een beurt van voor v0.57.2 krijgt zijn soort van het apparaat ===")
-# Sven op 07-09-2026 's middags, bij de beurt van die ochtend onder Bespaard:
+# De eigenaar op 07-09-2026 's middags, bij de beurt van die ochtend onder Bespaard:
 # "ik zie nog dingen terugkomen van de laadpaal." Die regel had geen `kind`.
 met_soort = storage.met_soort
 oud63 = [
@@ -3380,7 +3380,7 @@ controle("de oude vaatwasserbeurt wordt een programma, de laadbeurt blijft laden
 controle("en de regels zelf zijn niet aangeraakt", "kind" not in oud63[0], "")
 
 print("=== 64. bespaard is het totaal plaatje: de zon en het wachten ===")
-# Sven thuis op 09-09-2026, bij een vaatwasser die meteen op zon startte en
+# In een echte woning op 09-09-2026, bij een vaatwasser die meteen op zon startte en
 # "bespaard nul" kreeg: "Er is toch wel iets zonne-energie naar de vaatwasser
 # gegaan? Ik wil het totaal plaatje." De maat is alles van het net op het
 # moment van vrijgeven; wat de zon scheelde en wat het wachten scheelde
@@ -3430,7 +3430,7 @@ for minuut in range(1, 31):
     asyncio.run(ronde64(dt.datetime(2026, 9, 8, 12, minuut)))
 sessie64 = coach64._programma["dev-vaatwasser"]
 print(f"  12:30: kwh {sessie64['kwh']:.3f}, betaald {sessie64['betaald']:.4f}, maat {sessie64['maat']:.4f}, zonwinst {sessie64['zon_winst']:.4f}")
-# De maat is alles van het net bij het vrijgeven (Sven op 09-09-2026: "wat je
+# De maat is alles van het net bij het vrijgeven (de eigenaar op 09-09-2026: "wat je
 # op zonne-energie laadt bespaar je natuurlijk ook door minder stroom in te
 # kopen"); wat de zon scheelde staat apart, en dat is hier het hele verschil.
 controle("een half uur op 2 kW met zon genoeg: betaald tegen de zonprijs, de maat alles van het net, en het verschil is de zon",
@@ -3452,7 +3452,7 @@ controle("en onder Bespaard staat het zonaandeel, met het zondeel erbij",
          and abs(b64[0]["ref_cost"] - b64[0]["kwh"] * 0.24171) < 0.001, f"{b64}")
 
 print("=== 65. het plafond wordt per ronde gemeten, over de afgelopen drie uur ===")
-# Van den Dam, nacht van 09 op 10-09-2026: een warmtepomp op L3 om het
+# de klantwoning, nacht van 09 op 10-09-2026: een warmtepomp op L3 om het
 # kwartier een paar minuten aan. De coach telt elke ronde wat er onder de
 # zekering overbleef (onder de ondergrens van de paal telt als nul) en geeft
 # het gemiddelde van de afgelopen `PLAFOND_VENSTER` mee als
@@ -3493,7 +3493,7 @@ controle("kabel eruit: de meting is weg, want hij hoort bij de beurt",
          coach65._plafond_gemeten("dev-laadpaal", dt.datetime(2026, 9, 9, 13, 51)) is None, "")
 
 print("=== 66. de eindtijd van het apparaat telt pas als hij bij de beurt hoort en stilstaat ===")
-# Twee keer misging het met dezelfde melding. Sven thuis op 11-09-2026: om 09:01
+# Twee keer misging het met dezelfde melding. In een echte woning op 11-09-2026: om 09:01
 # het programma gekozen, en Home Connect zet de eindtijd dan al (10:56); om
 # 09:36 gestart, en de melding zei "klaar rond 10:56", terwijl hij om 11:28
 # klaar was. Een eindtijd die voor de start gezet is telt daarom niet
@@ -3607,7 +3607,7 @@ controle("en op de kaart geen eindtijd die niet bij de beurt hoort",
          all(b.get("ends_at") is None for b, _ in n66), f"{[b.get('ends_at') for b, _ in n66]}")
 
 print("=== 67. de meter telt als de laagste van tien minuten, niet als één opklaring ===")
-# Sven thuis op 11-09-2026 om 09:35: een opklaring van een paar minuten gaf
+# In een echte woning op 11-09-2026 om 09:35: een opklaring van een paar minuten gaf
 # 2694 W teruglevering, meer dan de piek van Express 60, en de coach startte;
 # om 09:37 was het 721 W. Voor een programma-apparaat telt de meter nu als wat
 # hij de afgelopen `METER_VENSTER` ten minste zag, en pas na `METER_DEKKING`.
@@ -3638,7 +3638,7 @@ z67 = coach67._meter_zeker(t67 + dt.timedelta(minutes=28))
 controle("een meter die even wegvalt telt niet mee als nul", z67 == 2694.0, f"{z67}")
 
 print("=== 68. na de klaar-tijd: ingeruimd en morgen starten, of ingeruimd en nu starten ===")
-# Sven op 12-09-2026 om 16:33: vrijgegeven bij klaar om 16:30, en de coach
+# De eigenaar op 12-09-2026 om 16:33: vrijgegeven bij klaar om 16:30, en de coach
 # plande de volgende dag. Op 13-09: "ik wil dat er een optie bijkomt als hij na
 # de klaartijd is. Dan de keuze ingeruimd en morgen starten of ingeruimd en nu
 # starten." Op zijn keukenkaart met een tweede schakelaar: de vrijgave is
@@ -3803,7 +3803,7 @@ controle("zonder belofte geen oordeel", geen69 is None, f"{geen69}")
 print("=== 70. een accusensor die per tien procent meldt (thuis, 17-09-2026) ===")
 # De Ford stond van 21:58:43 tot 22:30:37 op zeventig terwijl de paal 4.072 W
 # leverde: 1,90 kWh aan de stekker, bijna negen procentpunt in de accu. Om 22:26
-# zei de kaart "nog 2,2 kWh, vol rond 23:00" terwijl er 0,18 kWh in ging. Sven:
+# zei de kaart "nog 2,2 kWh, vol rond 23:00" terwijl er 0,18 kWh in ging. De eigenaar:
 # "dat hoeft helemaal niet en is onzin."
 hass70, _, coach70 = bouw(huis(), instellingen())
 D70 = "dev-laadpaal"
@@ -3850,7 +3850,7 @@ controle("een fijne sensor krijgt hoogstens een procent erbij", abs(fijn - 63.0)
          f"{fijn}")
 
 
-print("=== 71. een auto die nog bijkomt is geen auto die afbouwt (Van den Dam, 19-09-2026) ===")
+print("=== 71. een auto die nog bijkomt is geen auto die afbouwt (de klantwoning, 19-09-2026) ===")
 # Om 03:17 zakte de coach voor de zekering naar 8 A, om 03:33:13 bood hij weer
 # 16 A aan, en de Ford bleef tot 03:44 op 8 A. Om 03:35:11 stond dat als 5,52 kW
 # voor band 6 in de opslag, en om 01:44 was band 4 zo op 7,58 kW gekomen. Hier op
@@ -3908,7 +3908,7 @@ controle("een auto die ruim na een verhoging minder neemt wordt wel geleerd",
              for r in echt71), f"{echt71}")
 
 # Een bewaard tempo vervalt zodra de auto in die band aantoonbaar meer neemt,
-# zoals de oude rijen van Van den Dam: zonder accustand, dus onderin de band.
+# zoals de oude rijen van de klantwoning: zonder accustand, dus onderin de band.
 OUD71 = {"device": "dev-laadpaal", "car": "car-1", "band": 6, "kw": 1.84, "at": "x"}
 ANDER71 = {"device": "dev-laadpaal", "car": "car-1", "band": 4, "kw": 1.84, "at": "x"}
 inst71b, hass71b, coach71b = beurt71([OUD71, ANDER71], soc="68")
@@ -3938,7 +3938,7 @@ for minuut in (45, 46, 47):
 controle("een tempo gemeten bij 69,5% blijft staan als de auto op 68% meer neemt",
          HOOG71 in (inst71c.get("car_pace") or []), f"{inst71c.get('car_pace')}")
 
-print("=== 72. een omvormer die slaapt is geen storing (Van den Dam, 18-09-2026) ===")
+print("=== 72. een omvormer die slaapt is geen storing (de klantwoning, 18-09-2026) ===")
 # De SolarEdge werd om 21:40 onbereikbaar, de zon was om 20:31 onder, en om 21:51
 # kwam er een kritieke melding. 's Ochtends levert hij pas een uur na
 # zonsopkomst weer iets.
@@ -3977,7 +3977,7 @@ controle("zonder zonnestand meldt hij zoals vroeger", len(zonder72) == 1, f"{zon
 
 
 print("=== 73. de boiler: aanzetten, kijken wat hij trekt, en het onthouden (19-09-2026) ===")
-# Sven op 19-09-2026: "een boiler waar je alleen stroom op moet zetten, met een
+# De eigenaar op 19-09-2026: "een boiler waar je alleen stroom op moet zetten, met een
 # smart plug. Als je er stroom op zet en de boiler is warm moet de coach
 # detecteren dat hij warm genoeg is omdat hij dan onder een bepaald vermogen
 # zit. Zelflerend, alleen de switch en power invullen."

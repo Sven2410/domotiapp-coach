@@ -30,7 +30,7 @@ STORAGE_VERSION: Final = 1
 EVENT_SETTINGS_UPDATED: Final = f"{DOMAIN}_settings_updated"
 
 # Elke melding die de coach naar de telefoon stuurt gaat ook hierlangs, zodat
-# het paneel een geschiedenis kan tonen. Sven op 04-09-2026: "daarom wil ik
+# het paneel een geschiedenis kan tonen. De eigenaar op 04-09-2026: "daarom wil ik
 # ook een soort geschiedenis meldingen scherm." Een melding op een telefoon is
 # weg zodra hij weggeveegd is; hier blijft hij staan.
 EVENT_NOTIFICATION: Final = f"{DOMAIN}_notification"
@@ -49,7 +49,7 @@ BEURTEN_MAX: Final = 2000
 #
 # Alleen wat de coach werkelijk iets met een apparaat kan: de laadpaal en de
 # vaatwasser stuurt hij, de boiler is het volgende, een airco meet hij mee.
-# Sven op 19-09-2026 haalde de thuisbatterij, de warmtepomp, de wasmachine, de
+# De eigenaar op 19-09-2026 haalde de thuisbatterij, de warmtepomp, de wasmachine, de
 # droger en de zwembadpomp eruit; hetzelfde argument als bij de merken van een
 # laadpaal, een regel in een lijst leest als een belofte. Wat er niet in staat
 # past nog steeds onder "overig", met een eigen naam.
@@ -76,7 +76,7 @@ VERVALLEN_TYPES: Final = {
 # Which extra entities a charging point offers depends entirely on its brand:
 # not every charger can be started, stopped or paused, and the ones that can do
 # not agree on how. Picking the brand is what decides which fields are asked
-# for. Only Easee is supported. Sven on 04-09-2026: the other brands came out
+# for. Only Easee is supported. De eigenaar on 04-09-2026: the other brands came out
 # of the list, because a brand in a list reads as a promise, and there was
 # none. Op 19-09-2026 ging "overig" er om dezelfde reden uit: een laadpaal die
 # de coach niet kan sturen is geen laadpaal maar een apparaat dat hij meet, en
@@ -144,7 +144,7 @@ LEVELS: Final = [LEVEL_READ, LEVEL_ADVISE, LEVEL_PROPOSE, LEVEL_STEER]
 EVENT_DECISION: Final = f"{DOMAIN}_decision"
 
 # Vanaf welke maximale laderlimiet een paal in fasemodus `auto` een laadbeurt
-# op drie fasen begint. Gemeten aan Svens Easee op 25-08-2026: op 14 A koos hij
+# op drie fasen begint. Gemeten aan de eigen Easee op 25-08-2026: op 14 A koos hij
 # bij elke start één fase (13,85 A, 3.125 W), en op 16 A koos dezelfde paal met
 # dezelfde auto meteen drie fasen (15,45 A, 10.855 W). Waar de grens tussen die
 # twee precies ligt is niet ingekaderd en Easee noemt zelf nergens een getal,
@@ -309,7 +309,7 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             "feed_in_costs": 0.0,
         },
     },
-    # Wie welke melding krijgt, en de zekeringmelding zelf. Sven op 06-09-2026:
+    # Wie welke melding krijgt, en de zekeringmelding zelf. De eigenaar op 06-09-2026:
     # de klant zet zijn meldingen aan en uit in het tabje Meldingen, de admin
     # voegt de personen toe, en een persoon ziet alleen zichzelf. Een persoon
     # is een telefoon (notify-dienst) met een naam, eventueel gekoppeld aan een
@@ -378,7 +378,7 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # open panel over the same event.
     "ready_devices": [],
     # Welke daarvan de bewoner "nu starten" gaf in plaats van het goedkoopste
-    # moment; altijd ook in `ready_devices`. Sven op 13-09-2026: na de
+    # moment; altijd ook in `ready_devices`. De eigenaar op 13-09-2026: na de
     # klaar-tijd de keuze "ingeruimd en morgen starten" of "ingeruimd en nu
     # starten".
     "ready_now": [],
@@ -403,14 +403,14 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # Wat de coach bij een echte beurt mat van een programma-apparaat: per
     # apparaat en per programma de duur, het verbruik, de piek en het verloop
     # (watt per vijf minuten vanaf de start), als lopend gemiddelde over de
-    # laatste beurten. Wint van de tabel van de klant zodra hij er is. Sven op
+    # laatste beurten. Wint van de tabel van de klant zodra hij er is. De eigenaar op
     # 06-09-2026: "dat gaan meten en dan die waardes in kunnen vullen." Zie
     # `_async_meting_bewaren` in coach.py en `met_metingen` in planner.py.
     "program_measured": [],
     # Wat de coach van een boiler leerde door hem aan te zetten en te kijken:
     # het vermogen van het element, hoeveel er in een vol vat gaat, wat er per
     # uur uit gaat, wanneer hij voor het laatst vol was en wat er sindsdien in
-    # ging. Per apparaat. Sven op 19-09-2026: "alleen de switch invullen en
+    # ging. Per apparaat. De eigenaar op 19-09-2026: "alleen de switch invullen en
     # power invullen", de rest zelflerend. Zie `_one_boiler` in coach.py.
     "boiler_learned": [],
     # De knoppen van de bewoner per laadpunt: een akkoord, snelladen, een pauze.
@@ -426,7 +426,7 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     },
 }
 
-# Apparaten met een programma die de coach start. Sven op 06-09-2026: eerst
+# Apparaten met een programma die de coach start. De eigenaar op 06-09-2026: eerst
 # alleen de vaatwasser. Hier en niet in coach.py, omdat de opslag ze ook nodig heeft: een beurt
 # van zo'n apparaat is een "programma" en geen laadbeurt.
 PROGRAMMA_TYPES = ("vaatwasser",)

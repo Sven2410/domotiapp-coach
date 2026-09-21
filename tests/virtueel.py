@@ -9,7 +9,7 @@ minuut een gewone ronde in, met zijn echte code, en krijgt alleen terug wat
 zijn opdrachten in dat huis teweegbrengen.
 
 Waarom dit bestaat: tot 04-09-2026 kon een laadbeurt alleen beproefd worden
-met een lege bus aan een echte paal, bij Sven of bij een klant. Sven: "ik wil
+met een lege bus aan een echte paal, in die woning of bij een klant. De eigenaar: "ik wil
 nu echt een werkend product maken." Hier draait een nacht in seconden.
 
 Wat er wél echt is: `coach.py`, `planner.py`, `storage.py` en de vertaling van
@@ -69,17 +69,17 @@ class Zon:
     # Een echte uurkromme, kWh per uur van de dag, zoals het energiedashboard
     # hem geeft. Dan is dit het heldere dak en niet de sinus; `wolken` en
     # `voorspeld` werken er net zo op. Voor een scenario dat een echte woning
-    # nabouwt, zoals Van den Dam op 04-09-2026.
+    # nabouwt, zoals de klantwoning op 04-09-2026.
     kromme: dict[int, float] | None = None
     # Een opklaring van een paar minuten die de voorspeller niet ziet: (van,
-    # tot, kW aan de omvormer). Bij Sven op 11-09-2026 ging het dak om 09:35
+    # tot, kW aan de omvormer). In die woning op 11-09-2026 ging het dak om 09:35
     # van 1,1 naar 3,0 kW, en twee minuten later weer naar 1,2.
     pieken: list[tuple[str, str, float]] = field(default_factory=list)
     # De eerste dag van het scenario, gezet door `Wereld`; alleen nodig om
     # `wolken_per_dag` te kunnen tellen.
     eerste_dag: dt.date | None = None
 
-    # "half": de voorspeller zag de helft van wat het dak deed, zoals bij Sven
+    # "half": de voorspeller zag de helft van wat het dak deed, zoals in een echte woning
     # op 08-09-2026 (Forecast.Solar 1,0 tot 1,7 kWh per uur, het dak 1,9 tot 4,4).
     PATRONEN = {"helder": 1.0, "half": 0.5, "bewolkt": 0.3, "geen": 0.0}
 
@@ -159,7 +159,7 @@ class Huis:
     # Hoe het verbruik over de fasen valt. Koken zit op de eerste.
     verdeling: tuple[float, float, float] = (0.5, 0.3, 0.2)
     # Een echt profiel, watt per uur van de dag, in plaats van basis, ochtend,
-    # koken en avond. Uit de mediaan van een echte woning; zie Van den Dam in
+    # koken en avond. Uit de mediaan van een echte woning; zie de klantwoning in
     # scenarios.py.
     profiel: dict[int, float] | None = None
 
@@ -207,7 +207,7 @@ class Auto:
     soc: float = 30.0
     fasen: int = 1
     max_amps: float = 16.0
-    # Onder deze stroom komt hij niet op gang. Svens Ford wil 10 A om wakker te
+    # Onder deze stroom komt hij niet op gang. de eigen Ford wil 10 A om wakker te
     # worden en doet daarna op 6 A gewoon mee; zie `WAKE_AMPS` in planner.py.
     wek_amps: float = 6.0
     laadgrens: float = 100.0
@@ -222,13 +222,13 @@ class Auto:
     aanloop_s: int = 60
     # Zo lang doet zijn app erover om een nieuw percentage te laten zien.
     soc_vertraging_min: int = 0
-    # In stappen van zoveel procent meldt hij zijn accustand. Svens Ford doet
+    # In stappen van zoveel procent meldt hij zijn accustand. de eigen Ford doet
     # tien: 31, 40, 50, 60, 70, 80, ongeveer elk half uur. Tussen twee stappen
     # staat het beeld van de coach stil terwijl de auto voller wordt; zie
     # `_soc_bijgeteld` in coach.py.
     soc_stap: float = 1.0
     # Vanaf dit percentage neemt de auto zelf gas terug: daarboven neemt hij
-    # nog `afbouw_deel` van zijn maximum. Sven op 06-09-2026: "bepaalde auto's
+    # nog `afbouw_deel` van zijn maximum. De eigenaar op 06-09-2026: "bepaalde auto's
     # schroeven vanaf een bepaald procent zelf hun doorlaatbaarheid terug."
     afbouw_vanaf: float | None = None
     afbouw_deel: float = 0.5
@@ -358,7 +358,7 @@ class Paal:
     # De groep waar de paal op zit (bij Easee de dynamische circuitlimiet), en
     # of de coach die sensor heeft. Trekt de auto er langer dan een minuut
     # overheen, dan pauzeert de paal en start hij de sessie opnieuw, zoals de
-    # Easee bij Van den Dam op 06-09-2026 om 04:25:57 deed.
+    # Easee in de klantwoning op 06-09-2026 om 04:25:57 deed.
     circuit_amps: float | None = None
     circuit_zichtbaar: bool = True
     # Een Easee in automatische fasemodus kiest bij het starten zelf. Met dit
@@ -448,7 +448,7 @@ class Vaatwasser:
     aanloop_min: int = 1
     # Home Connect geeft de eindtijd als tijdstip, en die staat er al voor de
     # start: het moment waarop het programma gekozen werd plus de duur. Pas
-    # `eindtijd_na_min` na de start rekent hij hem opnieuw uit. Bij Sven op
+    # `eindtijd_na_min` na de start rekent hij hem opnieuw uit. In die woning op
     # 11-09-2026: om 09:01 gekozen (eindtijd 10:56), om 09:36 gestart, om
     # 09:37:05 de echte eindtijd 11:31. False: de minuten die nog resten, en
     # alleen zolang hij draait.
@@ -456,14 +456,14 @@ class Vaatwasser:
     gekozen: str | None = None      # "HH:MM" op de eerste dag; None is het begin van de proef
     eindtijd_na_min: int = 1
     # De eindtijd die hij meteen bij de start neerzet, als duur in minuten:
-    # wel van na de start, maar nog niet de goede. Bij Sven op 15-09-2026 gaf
+    # wel van na de start, maar nog niet de goede. In die woning op 15-09-2026 gaf
     # Home Connect bij Run 11:33 en een minuut later 11:41; klaar was hij om
     # 11:45. None: bij de start blijft de eindtijd van het kiezen staan.
     eindtijd_eerst_min: int | None = None
     # Een domme vaatwasser op een meetstekker (merk "overig"): geen status,
     # geen programma, geen knop; alleen het vermogen. De coach zegt wanneer
     # en de bewoner drukt zelf, zoveel minuten later. None: hij doet het niet.
-    # Sven op 06-09-2026: "wel adviseren en meten, met zet hem aan."
+    # De eigenaar op 06-09-2026: "wel adviseren en meten, met zet hem aan."
     slim: bool = True
     bewoner_reageert_min: int | None = 5
 
@@ -712,7 +712,7 @@ class Scenario:
     # ("20:00", "oven", 30)
     gebeurtenissen: list[tuple] = field(default_factory=list)
     # Wat "oven" aanzet, in watt; valt over de fasen zoals `Huis.verdeling`.
-    # 5,5 kW met 80% op één fase is een warmtepomp zoals bij Van den Dam.
+    # 5,5 kW met 80% op één fase is een warmtepomp zoals in de klantwoning.
     oven_w: float = 3000.0
 
     def kopie(self, **wijzigingen) -> "Scenario":
@@ -1367,7 +1367,7 @@ class Wereld:
                 self.vaatwasser.gestart_op = None
             return "de bewoner geeft de vaatwasser vrij: ingeruimd en dicht"
         if actie == "vaatwasser_nu_starten":
-            # "Ingeruimd en nu starten" (Sven, 13-09-2026).
+            # "Ingeruimd en nu starten" (de eigenaar, 13-09-2026).
             for sleutel in ("ready_devices", "ready_now"):
                 inst[sleutel] = sorted(set(inst.get(sleutel) or []) | {"vaatwasser"})
             if self.vaatwasser is not None and self.vaatwasser.status == "finished":
@@ -1543,7 +1543,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                 if actie == "herstart":
                     # Een onverwachte herstart van Home Assistant: de coach
                     # verliest alles wat hij in zijn hoofd had en begint
-                    # opnieuw uit de opslag. Sven op 04-09-2026: "ook
+                    # opnieuw uit de opslag. De eigenaar op 04-09-2026: "ook
                     # onverwachte herstarten."
                     coach = nieuwe_coach()
                     laatste_ronde = None

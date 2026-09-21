@@ -341,7 +341,7 @@ async def async_get_settings(
 ) -> None:
     """Send the current settings to the panel.
 
-    Een gewone bewoner ziet van de personen alleen zichzelf. Sven op
+    Een gewone bewoner ziet van de personen alleen zichzelf. De eigenaar op
     06-09-2026: "dat die persoon alleen zichzelf ziet." De rest van de
     instellingen gaat gewoon mee, want het paneel tekent daarmee.
     """
@@ -500,7 +500,7 @@ async def async_set_device_program(
 ) -> None:
     """Welk programma er op een apparaat zonder programmasensor staat.
 
-    Sven op 06-09-2026: "de coach mag nooit een programma selecteren, dat
+    De eigenaar op 06-09-2026: "de coach mag nooit een programma selecteren, dat
     doet de klant altijd zelf." Dit is de klant die het zegt, vanaf de kaart,
     voor een vaatwasser op een meetstekker. Niet admin-only, om dezelfde reden
     als de vrijgave: wie de knop op de machine indrukte weet wat erop staat.

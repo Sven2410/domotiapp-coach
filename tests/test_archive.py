@@ -283,7 +283,7 @@ controle("een blokje zonder gemiddelde wordt overgeslagen",
          len(uit) == 1 and uit[0][5] == 300.0, f"{uit}")
 
 print("=== 8b. gaten rond een herstart: ontbrekende en halve kwartieren aanvullen ===")
-# Bij Van den Dam raakte op 05-09-2026 bij vijf herstarten zes van de vijftig
+# In de klantwoning raakte op 05-09-2026 bij vijf herstarten zes van de vijftig
 # kilowattuur van een laadbeurt kwijt: kwartier 10:30 ontbrak, 13:45 had 44
 # seconden. Na de start zoekt het archief zulke kwartieren op en vult ze uit
 # de vijfminutenblokken van de recorder, maar alleen als die meer dekken.

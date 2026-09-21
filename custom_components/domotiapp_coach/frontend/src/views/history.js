@@ -1408,9 +1408,9 @@ class DacViewHistory extends DacElement {
       return `${getal} ${unit}`;
     };
     // De woorden naar wat er in de lijst staat: een auto wordt ingeplugd en
-    // geladen, een vaatwasser vrijgegeven en verbruikt. Sven op 07-09-2026.
+    // geladen, een vaatwasser vrijgegeven en verbruikt. De eigenaar op 07-09-2026.
     const w = woorden(items);
-    // Het totaal plaatje, Sven op 09-09-2026: wat er bespaard is, en daarvan
+    // Het totaal plaatje, de eigenaar op 09-09-2026: wat er bespaard is, en daarvan
     // wat de zon deed en wat het wachten op een goedkoper moment.
     tegels.append(
       tegel("Bespaard", euro(totaal.saved), "var(--dac-solar)"),

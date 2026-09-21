@@ -80,14 +80,14 @@ VOLTS = 230
 SURPLUS_SLACK = 0.9
 
 # Hoeveel van een uur de zon minstens moet dragen voordat het een zonuur heet
-# en er tot de ondergrens van de paal bij gekocht wordt. Een kwart, Svens keuze
+# en er tot de ondergrens van de paal bij gekocht wordt. Een kwart, de keuze
 # van 17-09-2026.
 #
 # Hiervoor stond er `SCHIJF_MINIMUM`: tien wattuur verwacht overschot maakte
-# een heel uur tot zonuur. Bij Sven was dat die middag 0,24 kWh voorspelde zon
+# een heel uur tot zonuur. In die woning was dat die middag 0,24 kWh voorspelde zon
 # die 3,90 kWh van het net meesleepte, en dat vóór 20:00, terwijl bij een vast
 # contract juist geldt dat er voor de avond niets van het net bij hoort te
-# komen (eis 4). Sven: "om 20 uur gaat hij meer laden maar dan is er geen zon
+# komen (eis 4). De eigenaar: "om 20 uur gaat hij meer laden maar dan is er geen zon
 # toch? Dan is het nu toch sowieso met een beetje eigen zon goedkoper?" Het
 # eerlijke antwoord was nee, want zijn meter leverde niets terug; maar een uur
 # dat voor zes procent op zon draait hoort ook niet als zonuur op de kaart.
@@ -128,7 +128,7 @@ MIN_RUN_MINUTES = 10
 # 15:00 te wachten, wekte om 14:14 met tien ampère, en de paal begon op één
 # fase: 5,875 A bij 1323 W is 225 V per ampère. Om 14:05 was het op hetzelfde
 # aanbod nog 5,900 A bij 4070 W, dus 690, en om 14:24 op zestien ampère weer
-# 687. Sven: "die 10 A wekstroom, doe dat gewoon 16 A maken." De paal wisselt
+# 687. De eigenaar: "die 10 A wekstroom, doe dat gewoon 16 A maken." De paal wisselt
 # dus wél van fase, de coach niet, en wekken op het plafond is wat die keuze de
 # goede kant op stuurt. Dit blijft begrensd door `ceiling_amps`, dus onder de
 # zekering en onder de lastbewaker komt hij niet uit.
@@ -153,8 +153,8 @@ WAITING_SECONDS = 60
 # drie per uur. Een aparte teller daarvoor zou een mechanisme zijn dat zijn werk
 # al gedaan ziet.
 #
-# Tien, en niet drie. Sven op 05-09-2026, na een ochtend wisselend weer bij
-# Van den Dam waarin de Ford om 10:10 en om 10:37 stopte en telkens opnieuw
+# Tien, en niet drie. De eigenaar op 05-09-2026, na een ochtend wisselend weer bij
+# de klantwoning waarin de Ford om 10:10 en om 10:37 stopte en telkens opnieuw
 # gewekt moest worden: "wekken doe maar per 10 min." Elke minuut vasthouden
 # kost hooguit de ondergrens van de paal van het net; elke wekpoging is een
 # auto die op een dag ophoudt met luisteren.
@@ -181,7 +181,7 @@ CHARGE_EFFICIENCY = 0.9
 FULL_PERCENT = 99.0
 
 # Hoeveel een accustand onder het doel mag staan en toch als bereikt tellen.
-# Een procent, want een accusensor is nooit fijner dan dat: die van Sven springt
+# Een procent, want een accusensor is nooit fijner dan dat: die van de eigenaar springt
 # per tien procent, en een auto die op 79,6 blijft staan is op zijn 80 procent.
 # Dit is dezelfde marge die `FULL_PERCENT` altijd al had (100 min 1), nu ook
 # voor een doel dat de bewoner zelf koos. Zie `doel_bereikt`.
@@ -266,7 +266,7 @@ class Car:
     name: str = ""
     # Of de accustand een schatting is: opgegeven door de bewoner of onthouden
     # van eerder, en daarna bijgeteld uit de teller van de paal. Zo'n auto krijgt
-    # meer speling naar de klaar-tijd. Sven op 06-09-2026: "een auto die niet in
+    # meer speling naar de klaar-tijd. De eigenaar op 06-09-2026: "een auto die niet in
     # HA kan moet langer speling hebben. Liever iets eerder vol dan niet vol."
     soc_estimated: bool = False
     # Wat deze auto per band van tien procent aankan, in kW, zoals dat bij
@@ -275,14 +275,14 @@ class Car:
     # `hours_needed` en `_tempo_leren` in coach.py.
     tempo_per_band: dict[int, float] = field(default_factory=dict)
     # Of het aantal fasen hierboven van een meting komt en niet uit het profiel.
-    # Bij Van den Dam koos de Easee op 06-09-2026 om 04:17 in zijn automatische
+    # In de klantwoning koos de Easee op 06-09-2026 om 04:17 in zijn automatische
     # fasemodus zelf één fase, terwijl het profiel drie zegt. Dan hoort de coach
     # met die ene te rekenen zolang die beurt loopt.
     phases_measured: bool = False
     # Tot hoever deze auto geladen hoort te worden, 10 tot 100. Een keuze van de
     # bewoner in het autoprofiel, want de auto zegt het niet: de laadgrens staat
     # in het scherm van de auto of in zijn app, en geen enkele integratie geeft
-    # hem door. Sven op 16-09-2026: "ik wil een optie hebben op de kaart dat ik
+    # hem door. De eigenaar op 16-09-2026: "ik wil een optie hebben op de kaart dat ik
     # kan aangeven tot hoever de bus laadt. Mijne laadt tot 80% namelijk maar ik
     # kan hem ook op 100% instellen." Zonder die keuze rekende de coach tot 100,
     # vroeg hij die ochtend om 10:46 een herstart voor een auto die precies deed
@@ -380,12 +380,12 @@ class Window:
     deadline: datetime | None = None
     # De dagen die de klant heeft uitgezet tussen nu en de klaar-tijd, bij hun
     # naam. Alleen voor de uitleg op de kaart: "zaterdag staat in je schema
-    # uit, dus hij moet zondag om 06:00 vol zijn." Zonder dat las Sven op
+    # uit, dus hij moet zondag om 06:00 vol zijn." Zonder dat las de eigenaar op
     # 04-09-2026 "de prijzen tot 06:00 zijn nog niet bekend" als morgenochtend,
     # en die prijzen waren er wel; de klaar-tijd was zondag.
     skipped: tuple[str, ...] = ()
     # De klaar-tijd van vandaag, als die al voorbij is en dit venster dus bij
-    # een volgende dag hoort. Sven op 12-09-2026 gaf de vaatwasser om 16:33
+    # een volgende dag hoort. De eigenaar op 12-09-2026 gaf de vaatwasser om 16:33
     # vrij bij klaar om 16:30; de coach plande hem voor de volgende middag en
     # zei "hij start om 13:00". Voor een programma-apparaat is dat het moment
     # om te vragen: morgen, of toch nu.
@@ -480,7 +480,7 @@ def watts_for(amps: float, phases: int) -> float:
 def meter_loopt_achter(grid: Grid, charger: Charger) -> bool:
     """Of de eigen meter van de paal nog niet bij is met wat er gevraagd is.
 
-    Wat er bij Sven op 20-08-2026 misging. Hij zette snelladen aan, de coach
+    Wat er in die woning op 20-08-2026 misging. Hij zette snelladen aan, de coach
     schreef 16 A, de paal trok op, en de fasemeting van het huis stond al op 16
     terwijl de paal zelf nog 2,7 A meldde. Het verschil van 13,3 A werd toen aan
     het huis toegerekend terwijl het de auto zelf was, en er kwam 8 A uit. Een
@@ -495,7 +495,7 @@ def meter_loopt_achter(grid: Grid, charger: Charger) -> bool:
     Stopt de paal, dan staat zijn eigen meter meteen op nul terwijl de
     fasemeting van het huis zijn stroom nog een halve minuut meedraagt. Dat
     verschil werd dan aan het huis toegerekend, en de coach meldde dat de
-    aansluiting te zwaar belast was terwijl er niets liep. Gezien bij Van den Dam
+    aansluiting te zwaar belast was terwijl er niets liep. Gezien in de klantwoning
     op 29-08-2026 om 11:27:06, met de kabel er al uit: `regel=no-room`.
     """
     if charger.limit_amps is None:
@@ -567,7 +567,7 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
             # stap terug voorkomen, maar nooit een stap vooruit rechtvaardigen;
             # opschroeven wacht tot de paal het zelf bevestigt, en dat is één
             # ronde later. De marge blijft dus onaangeroerd, zoals afgesproken
-            # met Sven op 26-08-2026.
+            # met de eigenaar op 26-08-2026.
             #
             # **Maar hij mag nooit onder de ondergrens duwen.** Deze rail zegt
             # "niet meer dan je al vroeg", en dat is iets anders dan "stop".
@@ -576,7 +576,7 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
             # `no-room`, dus "je aansluiting is te zwaar belast" terwijl het huis
             # zeven ampère trok en de zekering 25 A is.
             #
-            # Precies dat gebeurde bij Van den Dam op 30-08-2026 om 12:47:36 en
+            # Precies dat gebeurde in de klantwoning op 30-08-2026 om 12:47:36 en
             # om 15:02:58. Beide keren stond er een ronde lang dat de aansluiting
             # vol zat, met de fasen op 5, 5 en 7. Ik heb er die dag twee keer
             # naar gezocht in de meting terwijl het de rail zelf was.
@@ -592,7 +592,7 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
 def circuit_ceiling(charger: Charger) -> float | None:
     """Wat er gevraagd mag worden zonder dat de paal zijn eigen groep overschrijdt.
 
-    Een auto trekt niet precies wat er gevraagd is. Bij Van den Dam op
+    Een auto trekt niet precies wat er gevraagd is. In de klantwoning op
     06-09-2026 om 04:18:30: limiet 16 A, de Ford trok 16,9 A op één fase, en
     de groep van de paal staat op 16 A. Om 04:25:57 hield de paal ermee op,
     startte opnieuw op drie fasen, en daar haakte de Ford op af met een
@@ -621,7 +621,7 @@ def nood_ruimte(grid: Grid, charger: Charger) -> float:
     sparen kost meer dan hij oplevert: een auto die uitgezet wordt komt daar
     lang niet altijd zelf weer uit.
 
-    Gemeten bij Van den Dam in de nacht van 30-08-2026. De huismeter meldt daar
+    Gemeten in de klantwoning in de nacht van 30-08-2026. De huismeter meldt daar
     elke dertig seconden en gaf om 04:28:56 één sample van 27 A op L3; tien
     seconden ervoor en dertig erna stond hij op 10. Op dat ene getal schreef de
     coach 0 A. De paal stond achtenzeventig seconden uit, de Ford beëindigde
@@ -643,7 +643,7 @@ def fuse_limited(grid: Grid, car: Car, charger: Charger) -> bool:
 
     Worth telling apart, because they read completely differently. "Snelladen
     staat aan, dus hij laadt op 8 A" sounds like a broken button; "meer past er
-    nu niet onder je zekering" is an answer. Sven op 20-08-2026, die precies dat
+    nu niet onder je zekering" is an answer. De eigenaar op 20-08-2026, die precies dat
     vroeg toen hij snelladen aanzette en er 8 A uit kwam.
     """
     if not grid.phase_amps:
@@ -661,7 +661,7 @@ def beschikbaar_van_bewaker(grid: Grid) -> float | None:
     is precies waar v0.44.0 de fout in ging. Daar werd dit getal als een tweede
     zekering behandeld, en dan gaat het huisverbruik er twee keer vanaf.
 
-    Nagemeten bij Van den Dam op 30-08-2026, met `sensor.1_equalizer_limiet`:
+    Nagemeten in de klantwoning op 30-08-2026, met `sensor.1_equalizer_limiet`:
 
     | moment | bewaker meldt | paal trok | huis zelf |
     |---|---|---|---|
@@ -735,7 +735,7 @@ def held_back(charger: Charger) -> bool:
 
 # Wat een paal meldt zolang de laadbeurt nog goedgekeurd moet worden. Dit staat
 # bewust níet in HELD_BACK_REASONS: dat zou de coach op de rustige herhaalklok
-# zetten, en juist het elke ronde opnieuw sturen is wat de paal bij Van den Dam
+# zetten, en juist het elke ronde opnieuw sturen is wat de paal in de klantwoning
 # op 29-08-2026 aan de praat kreeg. Het is alleen bedoeld om het goede te zeggen.
 AUTHORISATION_REASONS = frozenset({"pending_authorization", "awaiting_authorization"})
 
@@ -938,7 +938,7 @@ def hours_needed(car: Car, amps: int, assume_empty: bool = False) -> float | Non
     pas als hij laadt, en drie fasen aannemen die er één blijken te zijn levert
     een auto op die 's ochtends halfvol staat.
 
-    De prijs daarvan was hoog. Bij Van den Dam stond op 29-08-2026 een bus van
+    De prijs daarvan was hoog. In de klantwoning stond op 29-08-2026 een bus van
     65 kWh op 12%: met "allebei" rekende deze som 17,2 uur en sloeg de
     klaar-tijdregel om 11:13 al aan, waarna hij op 16 A van het net laadde
     terwijl er zon lag. Met driefasig is het 5,7 uur en had hij tot 01:07 de tijd.
@@ -957,7 +957,7 @@ def hours_needed(car: Car, amps: int, assume_empty: bool = False) -> float | Non
     if assume_empty:
         return energy / kw
     uren = _uren_met_afbouw(car, kw, energy)
-    # Een geschatte accustand krijgt een uur extra. Sven op 06-09-2026: "liever
+    # Een geschatte accustand krijgt een uur extra. De eigenaar op 06-09-2026: "liever
     # iets eerder vol dan niet vol." Een lege accu aannemen (hierboven) is al
     # het slechtste geval en krijgt dat uur niet nog eens.
     if car.soc_estimated:
@@ -968,7 +968,7 @@ def hours_needed(car: Car, amps: int, assume_empty: bool = False) -> float | Non
 def _uren_met_afbouw(car: Car, kw: float, energy: float) -> float:
     """Hoe lang `energy` duurt als de auto bovenin zelf gas terugneemt.
 
-    Sven op 06-09-2026: "bepaalde auto's schroeven vanaf een bepaald procent
+    De eigenaar op 06-09-2026: "bepaalde auto's schroeven vanaf een bepaald procent
     zelf hun doorlaatbaarheid in ampère terug, zodat de accu het laatste stuk
     niet volle bak geladen wordt." Wat zo'n auto per band van tien procent
     aankan staat in `Car.tempo_per_band`, gemeten bij eerdere beurten; zonder
@@ -1140,7 +1140,7 @@ class Schijf:
     # Hoeveel van `kwh` werkelijk van het dak komt. Bij "zon" alles, bij
     # "vloer" alleen wat er over is (de rest is bijkopen), bij "net" niets.
     # Voor de tijdlijn: die zei "4,1 kWh zon" over een uur waarin het dak 2,4
-    # gaf en het huis een deel opat. Sven op 04-09-2026: "dat weet je toch
+    # gaf en het huis een deel opat. De eigenaar op 04-09-2026: "dat weet je toch
     # niet." De 4,1 was wat er in de auto ging, zon plus net.
     zon_kwh: float = 0.0
 
@@ -1194,7 +1194,7 @@ def overschot_kwh(
     soort correctie als `structural_ceiling` op het plafond van de paal doet:
     wat er beloofd werd en wat er kwam, naast elkaar.
 
-    Sven op 17-09-2026 om 16:33: "waarom ging hij niet laden om 16 uur terwijl
+    De eigenaar op 17-09-2026 om 16:33: "waarom ging hij niet laden om 16 uur terwijl
     hij net zei ik ga laden om 16 uur, nu gaat hij om 17 uur." De voorspeller
     zei die middag 1,552 kWh voor het uur van 16:00; het dak deed 0,58 en het
     huis at het op, dus de meter leverde vanaf 15:41 geen seconde terug. Voor
@@ -1202,7 +1202,7 @@ def overschot_kwh(
     voor het uur erna geloofde hij de voorspelling weer, en zo schoof de
     belofte elk uur op.
 
-    **Alleen voor uren van de dag waarop gemeten is** (`solar_day`). Bij Sven
+    **Alleen voor uren van de dag waarop gemeten is** (`solar_day`). In een echte woning
     liep de zin op 17-09-2026 tussen 17:46 en 20:00 op van "50% minder" naar
     "86% minder", en dat klopte voor die uren: de voorspeller zei 769 Wh voor
     19:00 en 406 voor 20:00 terwijl het dak op nul stond. Maar zonder deze
@@ -1271,14 +1271,14 @@ def structural_ceiling(car: Car, charger: Charger) -> int:
     virtuele huis op 04-09-2026.
 
     **Maar wat er sinds het inpluggen gemiddeld overbleef telt wél mee.** Bij
-    Van den Dam ging in de nacht van 09 op 10-09-2026 om het kwartier een
+    de klantwoning ging in de nacht van 09 op 10-09-2026 om het kwartier een
     warmtepomp aan op één fase, tot 22 A; de paal kreeg 8 A waar het plan met
-    16 rekende, en de klaar-tijdregel zag dat pas om 03:01. Sven: "er zit geen
+    16 rekende, en de klaar-tijdregel zag dat pas om 03:01. De eigenaar: "er zit geen
     patroon in", dus voorspellen mag niet. Meten in deze beurt wel: de coach
     houdt vanaf het inpluggen bij hoeveel er elke ronde onder de zekering
     overbleef (`Charger.expected_amps`), en rekent voor de uren die komen met
     dat gemiddelde. Een rustig huis geeft het volle plafond en verandert niets;
-    een huis met een warmtepomp begint eerder. Sven op 10-09-2026: "bouw maar."
+    een huis met een warmtepomp begint eerder. De eigenaar op 10-09-2026: "bouw maar."
     """
     plafond = physical_ceiling(car, charger)
     if charger.expected_amps is not None:
@@ -1346,7 +1346,7 @@ def schijven(
 
     # De avondregel, en die gaat niet over prijs.
     #
-    # Sven op 20-08-2026: "op een vast contract is een kwartier speling niet
+    # De eigenaar op 20-08-2026: "op een vast contract is een kwartier speling niet
     # voldoende. Ik wil dat wanneer het niet meer rendabel is van de zon, hij
     # vanaf 20 uur gaat laden. Dan heb je de grote pieken van het koken achter
     # de rug en belast je het ook niet zo veel."
@@ -1374,7 +1374,7 @@ def schijven(
     # gemiddelde van alle uren die wél bekend zijn. Een bekend uur van vandaag
     # is geen gok over morgen; de onbekende uren zijn bij een klaar-tijd in de
     # vroege ochtend nachturen, en die zijn zelden goedkoper dan een goedkoop
-    # daguur. Sven op 05-09-2026, nadat de coach bij Van den Dam van 08:00
+    # daguur. De eigenaar op 05-09-2026, nadat de coach in de klantwoning van 08:00
     # (0,184) tot 13:24 op de prijzen van zondag wachtte en de laatste 11 kWh
     # daardoor 's nachts tegen 0,304 moest halen: "nu hebben we dus niks
     # bespaard", en de regel mocht eraan. Een uur boven het gemiddelde wacht
@@ -1439,11 +1439,11 @@ def schijven(
                 # een meting is nooit een gok: 0,9 kW echte zon onder de
                 # ondergrens van een driefasige paal maakt dat uur nog steeds
                 # goedkoper dan een avonduur, en dat is de som van 30-08-2026
-                # die Sven toen goedkeurde. Wat hij op 17-09-2026 aanwees was
+                # die de eigenaar toen goedkeurde. Wat hij op 17-09-2026 aanwees was
                 # een belofte over een uur dat nog moest komen.
                 #
                 # Buiten de avondpiek telt zo'n uur wél, ook als de prijzen
-                # tot de klaar-tijd nog niet bekend zijn (`alleen_zon`). Sven
+                # tot de klaar-tijd nog niet bekend zijn (`alleen_zon`). De eigenaar
                 # op 05-09-2026: "het kan toch zijn dat je wel wat opwekt om
                 # 14 uur en dan is vaak de prijs ook goedkoop; dat weegt
                 # zwaarder dan op een iets goedkopere prijs laden in de
@@ -1531,6 +1531,49 @@ def capaciteit_kwh(
     return som
 
 
+def vlakke_prijzen(alle: list[Schijf]) -> bool:
+    """Of elk uur van het net even duur is.
+
+    Dan valt er met haasten niets te winnen en is het rustigste tempo dat de
+    klaar-tijd nog haalt het beste voor de aansluiting. Zowel het besluit
+    (`easy-pace` in `_decide`) als de tijdlijn hangt hieraan; ze horen
+    hetzelfde te zien, dus staat de vraag hier één keer.
+    """
+    prijzen = {round(schijf.price, 6) for schijf in alle if not schijf.solar}
+    return len(prijzen) == 1
+
+
+def rustig_tempo(
+    netschijven: list[Schijf], nodig_kwh: float, car: Car, ceiling: int
+) -> int | None:
+    """Het rustigste tempo waarop alles er nog op tijd in gaat.
+
+    Hoeveel uur er nog van het net te laden valt komt uit de inhoud van de
+    schijven en niet uit hun begin- en eindtijd, want die zijn van het hele
+    uurblok, ook voor het blok waar we nu middenin zitten. Op de tijden
+    gerekend telde 00:52 nog als een vol uur, dus zakte het tempo door het uur
+    heen van 8 naar 6 A en sprong het op het hele uur weer op; het tekort dat
+    zo opliep moest de klaar-tijdregel met een sprint goedmaken.
+
+    Naar boven afronden, want naar beneden is elke ronde net iets te langzaam.
+    Dat tekort stapelt op tot het laatste uur op vol vermogen moet, en dan was
+    het geen rustig tempo maar een sprint met een aanloop. Een tiende ampère is
+    de nauwkeurigheid waarmee een paal een limiet volgt; die hoort geen hele
+    ampère extra te kosten.
+
+    De schijven lopen al tot een uur vóór de klaar-tijd (zie `plan_end`), dus
+    dit tempo is er een dat met dat uur speling klaar is.
+    """
+    vermogen_kw = watts_for(ceiling, car.phases) / 1000.0
+    if vermogen_kw <= 0:
+        return None
+    beschikbaar = sum(schijf.kwh for schijf in netschijven) / vermogen_kw
+    if beschikbaar <= 0:
+        return None
+    rustig = amps_for(nodig_kwh / beschikbaar * 1000.0, car.phases)
+    return max(MIN_AMPS, min(ceiling, math.ceil(rustig - 0.1)))
+
+
 def goedkoopste(alle: list[Schijf], nodig_kwh: float) -> list[tuple[Schijf, float]]:
     """De goedkoopste manier om `nodig_kwh` binnen te krijgen.
 
@@ -1553,6 +1596,68 @@ def goedkoopste(alle: list[Schijf], nodig_kwh: float) -> list[tuple[Schijf, floa
     return sorted(uit, key=lambda paar: paar[0].start)
 
 
+def _rustig_spreiden(
+    alle: list[Schijf],
+    kwh: float,
+    car: Car,
+    ceiling: int,
+    now: datetime,
+    grens: datetime | None,
+) -> dict[datetime, float] | None:
+    """Wat er per uur in gaat als elk uur even duur is.
+
+    De knapzak is dan onverschillig en pakt de vroegste uren helemaal vol. Dat
+    is niet wat de coach doet: bij gelijke prijzen levert haasten geen cent op
+    en laadt hij rustig door over alle uren die hij heeft (`easy-pace` in
+    `_decide`). De tijdlijn hoorde dat ook te doen en deed het niet, en dan
+    staat er op de kaart een ampèrage die nooit op de paal komt: bij een vast
+    contract met vier en een halve kilowattuur te gaan zei de kaart "14 A,
+    laden op 9,4 kW" terwijl de paal op 6 A liep, en beloofde hij "vol rond
+    15:00" terwijl het een half uur later werd.
+
+    Geeft None terug als er niets te spreiden valt: dan is vol vermogen het
+    antwoord en doet de knapzak het goed.
+    """
+    netschijven = [schijf for schijf in alle if not schijf.solar]
+    tempo = rustig_tempo(netschijven, kwh, car, ceiling)
+    if tempo is None or tempo >= ceiling:
+        return None
+    kw = watts_for(tempo, car.phases) / 1000.0
+    if kw <= 0:
+        return None
+
+    ruimte: dict[datetime, float] = {}
+    duren: dict[datetime, float] = {}
+    for schijf in alle:
+        ruimte[schijf.start] = ruimte.get(schijf.start, 0.0) + schijf.kwh
+        tot = min(schijf.end, grens) if grens is not None else schijf.end
+        duren[schijf.start] = max(
+            0.0, (tot - max(schijf.start, now)).total_seconds() / 3600.0
+        )
+    # Nooit langzamer dan het dak op dit moment geeft. Diezelfde regel staat in
+    # `_decide`: die zon is er nu en is straks weg, en rustig aan doen is goed
+    # voor de aansluiting maar niet ten koste van zon die anders het net op gaat.
+    nu_zon = sum(
+        schijf.zon_kwh
+        for schijf in alle
+        if schijf.solar and schijf.start <= now < schijf.end
+    )
+
+    uit: dict[datetime, float] = {}
+    rest = kwh
+    for start in sorted(ruimte):
+        if rest <= SCHIJF_MINIMUM:
+            break
+        tempo_kwh = kw * duren[start]
+        if start <= now < start + timedelta(hours=1):
+            tempo_kwh = max(tempo_kwh, nu_zon)
+        hoeveel = min(rest, tempo_kwh, ruimte[start])
+        if hoeveel > SCHIJF_MINIMUM:
+            uit[start] = hoeveel
+            rest -= hoeveel
+    return uit
+
+
 def _restje_naar_achteren(
     genomen: dict[datetime, float], alle: list[Schijf]
 ) -> dict[datetime, float]:
@@ -1562,11 +1667,11 @@ def _restje_naar_achteren(
     aanraakt is vaak maar voor een deel nodig: 0,2 kWh om 03:00 naast een vol
     uur om 04:00. De coach begint dat uur toch op vol vermogen, en stopt daarna
     niet meer: stoppen zou te weinig speling overlaten voor de klaar-tijd
-    (`cheap-hour+reserve`), en Sven op 04-09-2026: "een uur daarvoor moet hij
+    (`cheap-hour+reserve`), en de eigenaar op 04-09-2026: "een uur daarvoor moet hij
     altijd klaar zijn." Het restje schuift dus naar het eind van de reeks: het
     uur van 03:00 gaat vol, en van 04:00 blijft een paar minuten over. Zo
     zegt de tijdlijn wat de coach gaat doen, en niet een gemiddelde van 0 A.
-    Sven op 05-09-2026: "waarom staat er bij 3 uur geen A maar is wel groen",
+    De eigenaar op 05-09-2026: "waarom staat er bij 3 uur geen A maar is wel groen",
     en later "nu staat er ineens 2 A, dat is helemaal niet de bedoeling".
 
     Alleen voor uren zonder zon: overdag is het tempo van de zon en niet van
@@ -1672,7 +1777,7 @@ class Blok:
     solar_kwh: float = 0.0
     kwh: float = 0.0
     # En hoe hard dat is, gemiddeld over het blok: de stroom en het vermogen.
-    # Sven op 04-09-2026: "laat sowieso zien hoeveel ampère hij laadt en kW."
+    # De eigenaar op 04-09-2026: "laat sowieso zien hoeveel ampère hij laadt en kW."
     amps: int = 0
     kw: float = 0.0
 
@@ -1702,8 +1807,8 @@ class Plan:
     # Hoeveel er in de blokken hieronder gepland staat. Is dat minder dan
     # `kwh_needed`, dan is `expected_done` niet het moment waarop hij vol is
     # maar het einde van wat hij nú al kan plannen. In de alleen-zon-stand is
-    # dat de helft: bij Van den Dam stond op 04-09-2026 "Vol rond 17:00" boven
-    # acht zonblokken van samen 33 van de 66 kWh, en Sven las dat als een
+    # dat de helft: in de klantwoning stond op 04-09-2026 "Vol rond 17:00" boven
+    # acht zonblokken van samen 33 van de 66 kWh, en de eigenaar las dat als een
     # belofte. Het scherm zegt sindsdien wat er gepland is en niet wanneer hij
     # vol is, zolang die twee niet hetzelfde zijn.
     planned_kwh: float = 0.0
@@ -1751,7 +1856,7 @@ def timeline(
     zegt dan wat de coach doet laat de bewoner op het verkeerde wachten, en dat
     is erger dan geen tijdlijn.
 
-    Sven op 30-08-2026: "ik wil zien wat de coach van plan is met hele tijdlijn
+    De eigenaar op 30-08-2026: "ik wil zien wat de coach van plan is met hele tijdlijn
     tot dat hij vol moet zijn."
     """
     klaar = window.deadline if window.enabled else None
@@ -1762,7 +1867,7 @@ def timeline(
     # De sommen in de kop, "op vol vermogen" en "uiterlijk beginnen", rekenen
     # met wat paal en auto kunnen en niet met wat er op dit moment onder de
     # zekering past: dat is wat de klaar-tijdregel zelf ook doet (zie
-    # `structural_ceiling`). Bij Van den Dam trok fase 3 op 04-09-2026 om 21:21
+    # `structural_ceiling`). In de klantwoning trok fase 3 op 04-09-2026 om 21:21
     # zestien ampère door het huis, en toen stond er "op vol vermogen 15 u 58 m
     # op 6 A, uiterlijk beginnen zaterdag 13:02" boven een plan dat om 09:00
     # begon. Het plafond van nu blijft wél gelden voor het uur waar we in
@@ -1786,13 +1891,13 @@ def timeline(
     # Dezelfde grens die `schijven` hanteert, zodat de tijdlijn kan zeggen
     # waaróm een uur leeg is. Bij een vast contract komt er voor de avond niets
     # van het net bij; zonder die uitleg stond er "buiten je tijden" boven een
-    # uur dat gewoon binnen het schema valt, en dat klopte niet. Sven op
+    # uur dat gewoon binnen het schema valt, en dat klopte niet. De eigenaar op
     # 17-09-2026: "hij zegt nu 14:00 wachten buiten je tijden, maar dat klopt
     # ook niet."
     netto_vanaf = _evening_before(einde) if not prices else None
     # En zolang de prijzen niet tot de klaar-tijd reiken komt er van het net
     # alleen iets bij in een uur onder het gemiddelde van wat bekend is. Bij
-    # Van den Dam stond op 18-09-2026 de hele vrijdagavond "buiten je tijden",
+    # de klantwoning stond op 18-09-2026 de hele vrijdagavond "buiten je tijden",
     # terwijl die uren gewoon in het schema vielen en alleen duurder waren.
     gemiddeld = _gemiddeld_bekend(prices) if alleen_zon else None
     alle = schijven(
@@ -1826,7 +1931,17 @@ def timeline(
     genomen: dict[datetime, float] = {}
     for schijf, hoeveel in gekozen:
         genomen[schijf.start] = genomen.get(schijf.start, 0.0) + hoeveel
-    genomen = _restje_naar_achteren(genomen, alle)
+    # Kost elk uur hetzelfde, dan spreidt de coach en propt hij de vroegste
+    # uren niet vol. Zie `_rustig_spreiden`; zonder dit zei de kaart 14 A boven
+    # een paal die op 6 A liep.
+    vlak = vlakke_prijzen(alle)
+    gespreid = (
+        _rustig_spreiden(alle, kwh, car, amps, now, einde) if vlak else None
+    )
+    if gespreid is not None:
+        genomen = gespreid
+    else:
+        genomen = _restje_naar_achteren(genomen, alle)
     ruimte_per_uur: dict[datetime, float] = {}
     for schijf in alle:
         ruimte_per_uur[schijf.start] = ruimte_per_uur.get(schijf.start, 0.0) + schijf.kwh
@@ -1869,6 +1984,12 @@ def timeline(
             waarom = "duurder dan gemiddeld, dus hij wacht eerst op de nieuwe prijzen"
         elif not schijven_hier:
             waarom = "buiten je tijden"
+        elif vlak:
+            # Bij gelijke prijzen is geen enkel uur duurder dan een ander; het
+            # enige dat er aan de hand is, is dat de auto dan al vol is. "Duurder
+            # dan wat hij nodig heeft" stond er boven drie uren van € 0,242 naast
+            # een uur van € 0,242.
+            waarom = "hij is dan al klaar"
         else:
             waarom = "duurder dan wat hij nodig heeft"
 
@@ -1912,7 +2033,7 @@ def timeline(
             #
             # Dit is het uur waar we ín zitten, en dat is korter dan een uur:
             # de restant-regel hierboven kan er niet bij, want die vraagt een
-            # vol uur ervóór en dat ligt in het verleden. Sven op 17-09-2026 om
+            # vol uur ervóór en dat ligt in het verleden. De eigenaar op 17-09-2026 om
             # 22:10, met 2,2 kWh te gaan: op de kaart stond "4 A, laden op 2,8
             # kW, vol rond 23:00" terwijl de paal 5,92 A en 4,08 kW trok en om
             # 22:42 klaar zou zijn. Dezelfde klacht als op 05-09-2026: "nu
@@ -1984,9 +2105,9 @@ def _wanneer(moment: datetime, now: datetime) -> str:
 
     Vandaag en morgen krijgen alleen de klok, want "06:00" leest vanzelf als
     de eerstvolgende zes uur. Verder weg hoort de dag erbij. Op vrijdagavond
-    04-09-2026 stond er bij Van den Dam "de prijzen tot 06:00 zijn nog niet
+    04-09-2026 stond er in de klantwoning "de prijzen tot 06:00 zijn nog niet
     bekend" terwijl zaterdag uit stond en de klaar-tijd zondag was; de prijzen
-    van zaterdag 06:00 waren er wel, en Sven las het als een fout.
+    van zaterdag 06:00 waren er wel, en de eigenaar las het als een fout.
     """
     if (moment.date() - now.date()).days <= 1:
         return _clock(moment)
@@ -1998,7 +2119,7 @@ def _dag_klok(moment: datetime, now: datetime) -> str:
 
     Anders dan bij `_wanneer` hoort "morgen" er hier wel bij. Een vaatwasser
     die na de klaar-tijd wordt vrijgegeven schuift een dag op, en om 16:33
-    las "hij start om 13:00" als een tijd die al voorbij was (Sven,
+    las "hij start om 13:00" als een tijd die al voorbij was (de eigenaar,
     12-09-2026).
     """
     if (moment.date() - now.date()).days == 1:
@@ -2021,7 +2142,7 @@ def _prijzen_komen(end: datetime | None, now: datetime) -> str:
         return "Plant de rest zodra de prijzen er zijn, meestal tussen 13:00 en 15:00."
     # De prijzen van een dag komen de middag ervoor. Een klaar-tijd van
     # zondag 06:00 valt in de dag die zaterdag rond 13:00 bekend wordt; bij
-    # Van den Dam kwamen ze op 05-09-2026 om 13:24, en Sven: "op internet
+    # de klantwoning kwamen ze op 05-09-2026 om 13:24, en de eigenaar: "op internet
     # staat dat de energieprijzen tussen 13 en 15 bekend kunnen worden."
     dag = _dagnaam(end - timedelta(days=1), now)
     return f"Plant de rest zodra de prijzen er zijn, meestal {dag} tussen 13:00 en 15:00."
@@ -2064,7 +2185,7 @@ def _uitgezet(window: Window, now: datetime) -> str:
 # auto vol is. Staat hier met een naam omdat zowel de regel als de tekst op de
 # kaart hem gebruikt, en die twee mogen nooit uit elkaar lopen.
 #
-# Een uur, altijd. Sven op 04-09-2026: "De eindtijd is heel belangrijk. Een
+# Een uur, altijd. De eigenaar op 04-09-2026: "De eindtijd is heel belangrijk. Een
 # uur daarvoor moet hij altijd klaar zijn." Daarvoor was het een half uur 's
 # nachts en een uur overdag, en daarvoor een kwartier; elk van die getallen was
 # te krap voor wat er in de praktijk tussen komt: een auto die niet meteen
@@ -2088,13 +2209,13 @@ DEADLINE_SLACK_HOURS = 1.0
 # minuut wisselen tussen 14 en 6 A), en het had een gat: het vroeg nooit meer
 # of de reden er nog was. Op 17-09-2026 thuis sloeg de klaar-tijdregel aan op
 # een tempo van 0,1 kW dat uit een halve meting kwam, en daarna bleef de paal
-# op 16 A staan terwijl hij tot 03:24 die nacht had kunnen wachten; Sven zag
+# op 16 A staan terwijl hij tot 03:24 die nacht had kunnen wachten; de eigenaar zag
 # 11,2 kW van het net bij 452 W zon. Eén verkeerd getal hoort geen hele nacht
 # te duren.
 DEADLINE_RELEASE_HOURS = 3.0
 
 # Hoeveel uur een auto met een geschatte accustand extra krijgt in de
-# klaar-tijdsom. Dezelfde maat als de speling zelf: Svens uur.
+# klaar-tijdsom. Dezelfde maat als de speling zelf: het afgesproken uur.
 ESTIMATED_SOC_EXTRA_HOURS = DEADLINE_SLACK_HOURS
 
 # Wanneer het huis tot rust komt. Bij een vast contract kost elk uur hetzelfde,
@@ -2102,12 +2223,12 @@ ESTIMATED_SOC_EXTRA_HOURS = DEADLINE_SLACK_HOURS
 # Wachten tot het laatste moment dat nog past levert dan geen cent op en laat
 # een kwartier speling over, en dat is te weinig. Acht uur 's avonds is de tijd
 # waarop koken, wassen en douchen achter de rug zijn, dus dan belast het laden
-# de aansluiting ook het minst. Sven op 20-08-2026.
+# de aansluiting ook het minst. De eigenaar op 20-08-2026.
 EVENING_START = time(20, 0)
 
 # En wanneer die avondpiek begint. Tussen deze twee tijden komt er bij geen
 # enkel contract iets van het net bij, ook niet bij een dynamisch contract
-# waar de som het toch al zelden zou kiezen. Sven op 04-09-2026, over een auto
+# waar de som het toch al zelden zou kiezen. De eigenaar op 04-09-2026, over een auto
 # die om tien uur 's ochtends aan de kabel gaat: "dan ergens stoppen voor de
 # avondpiek, want we hadden gezegd dat hij pas na 20 uur weer mag laden." De
 # klaar-tijdregel staat hier nog boven: past het anders niet meer, dan laadt
@@ -2115,8 +2236,8 @@ EVENING_START = time(20, 0)
 # aansluiting niet.
 #
 # Zes uur, en niet vijf. Vijf was een aanname van mij; op 05-09-2026 kostte
-# die bij Van den Dam 1,65 euro: het uur van 17:00 stond op 0,186 en mocht
-# niet, dus moesten de laatste 11,6 kWh 's nachts tegen 0,328. Sven koos
+# die in de klantwoning 1,65 euro: het uur van 17:00 stond op 0,186 en mocht
+# niet, dus moesten de laatste 11,6 kWh 's nachts tegen 0,328. De eigenaar koos
 # toen 18:00, want de kookpiek zit ná zes uur en de prijs van 17:00 is bij
 # een dynamisch contract meestal nog een middagprijs.
 EVENING_PEAK_START = time(18, 0)
@@ -2136,7 +2257,7 @@ def _slack_hours(end: datetime | None) -> float:
     """Hoeveel speling deze klaar-tijd krijgt: een uur, zie `DEADLINE_SLACK_HOURS`.
 
     Tot 04-09-2026 hing dit af van of er een avond bij de klaar-tijd hoorde.
-    Sven wil het overal hetzelfde, en de functie blijft staan omdat elke plek
+    De eigenaar wil het overal hetzelfde, en de functie blijft staan omdat elke plek
     die met de klaar-tijd rekent hierlangs hoort te gaan en niet langs het getal.
     """
     return DEADLINE_SLACK_HOURS
@@ -2281,7 +2402,7 @@ def decide(
         # dan het getal ernaast. Zwijgen is dan beter dan een zin met twee
         # getallen die elkaar tegenspreken.
         #
-        # Sven op 30-08-2026, tijdens een herstart: "de equalizer staat op 18 A
+        # De eigenaar op 30-08-2026, tijdens een herstart: "de equalizer staat op 18 A
         # maar de coach zegt dat de lastbewaking op 7 A zit?" Allebei waar en
         # toch onzin. De 7 was de gemeten stroom van dat moment; de reden
         # `limited_by_equalizer` kwam van een sensor die er vijf minuten over
@@ -2350,7 +2471,7 @@ def _wake(
         # auto die niets afneemt, en het advies eronder verschilt ook: bij het
         # eerste valt er in de auto niets na te kijken. De coach blijft het in
         # allebei de gevallen elke ronde opnieuw proberen, want juist dat kreeg
-        # de paal bij Van den Dam op 29-08-2026 alsnog aan de praat; alleen de
+        # de paal in de klantwoning op 29-08-2026 alsnog aan de praat; alleen de
         # tekst stuurde je toen de verkeerde kant op.
         if charger.no_current_reason in AUTHORISATION_REASONS:
             return Decision(
@@ -2587,7 +2708,7 @@ def _decide(
 
     # De klaar-tijd is verstreken en de auto is niet vol. Dan is er niets meer te
     # plannen: de afspraak is al gebroken en het enige dat nog telt is dat hij vol
-    # raakt. Sven op 18-08-2026: "de auto moet wel vol zitten, dat wint altijd. De
+    # raakt. De eigenaar op 18-08-2026: "de auto moet wel vol zitten, dat wint altijd. De
     # coach plant alleen in om geld te besparen."
     #
     # Dit staat bewust onder de pauze, snelladen en de zekering: een opdracht van
@@ -2645,7 +2766,7 @@ def _decide(
     #
     # Op 30-08-2026 om 13:06 kwam dat eruit. De zonsport stond boven de
     # prijssport, dus 0,7 kW zon nam een uur over dat de prijssport net op vol
-    # vermogen had gezet: 6 A waar 16 A hoorde. Sven daarop: "het eindoel is
+    # vermogen had gezet: 6 A waar 16 A hoorde. De eigenaar daarop: "het eindoel is
     # altijd lage kosten, dus alle scenario's moeten vergeleken worden met
     # elkaar."
     #
@@ -2707,7 +2828,7 @@ def _decide(
         )
 
     # Reiken de bekende prijzen niet tot het einde van het plan, dan komt er tot
-    # ze er zijn alleen zon in. Sven op 04-09-2026, over een zondag die in het
+    # ze er zijn alleen zon in. De eigenaar op 04-09-2026, over een zondag die in het
     # schema uitgevinkt is en een klaar-tijd op maandag 06:00: "dan moet hij
     # echt puur op zonne-energie laden totdat de prijzen ook bekend zijn." Geen
     # geschatte prijzen dus; die stonden hier een middag lang en zijn er weer
@@ -2745,7 +2866,7 @@ def _decide(
         # onbekende accustand: kopen zonder te weten wat het kost is precies
         # wat een dynamisch contract niet wil. Een prijssensor die bij het
         # inpluggen even niets zegt zette de auto anders meteen op vol vermogen,
-        # en dat is wat Sven zag: "wanneer ik de auto inplugde ging hij gelijk
+        # en dat is wat de eigenaar zag: "wanneer ik de auto inplugde ging hij gelijk
         # laden." Sinds 04-09-2026.
         if window.enabled and end and needed is not None:
             slack = (end - now).total_seconds() / 3600 - needed
@@ -2801,43 +2922,24 @@ def _decide(
         # Hoe hard hangt af van of er iets te winnen is met haasten. Kosten alle
         # uren hetzelfde, dan levert vol vermogen geen cent op en is het
         # rustigste tempo dat de klaar-tijd nog haalt beter voor de aansluiting.
-        # Sven op 20-08-2026, over de avond: "dan belast je het ook niet zo
+        # De eigenaar op 20-08-2026, over de avond: "dan belast je het ook niet zo
         # veel." Verschillen de uren wel, dan is elk uur dat je in een goedkoop
         # blok wegneemt er een die je duurder terugkrijgt, en gaat hij vol.
         netschijven = [schijf for schijf in alle if not schijf.solar]
-        prijzen = {round(schijf.price, 6) for schijf in netschijven}
-        vlak = len(prijzen) == 1
+        vlak = vlakke_prijzen(alle)
         amps = ceiling
         if vlak:
-            # Hoeveel uur er nog van het net te laden valt. Uit de inhoud van
-            # de schijven en niet uit hun begin- en eindtijd, want die zijn
-            # van het hele uurblok, ook voor het blok waar we nu middenin
-            # zitten. Op de tijden gerekend telde 00:52 nog als een vol uur,
-            # dus zakte het tempo door het uur heen van 8 naar 6 A en sprong
-            # het op het hele uur weer op; het tekort dat zo opliep moest de
-            # klaar-tijdregel om 05:20 met een sprint goedmaken. Gezien in het
-            # virtuele huis op 04-09-2026.
-            vermogen_kw = watts_for(ceiling, car.phases) / 1000.0
-            beschikbaar = sum(schijf.kwh for schijf in netschijven) / vermogen_kw
-            # De schijven lopen al tot een uur vóór de klaar-tijd (zie
-            # `plan_end`), dus dit tempo is er een dat met dat uur speling
-            # klaar is.
-            if beschikbaar > 0:
-                rustig = amps_for(nodig_kwh / beschikbaar * 1000.0, car.phases)
-                # Naar boven afronden, want naar beneden is elke ronde net iets
-                # te langzaam. Dat tekort stapelt op tot de klaar-tijdregel het
-                # laatste uur op vol vermogen moet redden, en dan was het geen
-                # rustig tempo maar een sprint met een aanloop. Gezien in het
-                # virtuele huis op 04-09-2026: zeven uur op 8 en 9 A, en om
-                # 04:01 alsnog naar 16 A.
-                # Een tiende ampère is de nauwkeurigheid waarmee een paal een
-                # limiet volgt; die hoort geen hele ampère extra te kosten.
-                amps = max(MIN_AMPS, min(ceiling, math.ceil(rustig - 0.1)))
+            # Dezelfde som die de tijdlijn gebruikt, zodat wat er op de kaart
+            # staat is wat de paal doet. Stond hier tot v0.72.0 los, en toen
+            # zei de kaart 14 A boven een paal die op 6 A liep.
+            rustig = rustig_tempo(netschijven, nodig_kwh, car, ceiling)
+            if rustig is not None:
+                amps = rustig
                 # En niet elke minuut een ampère op en neer. De auto volgt de
                 # limiet met een minuut vertraging, en een tempo dat elke ronde
                 # opnieuw uit de meting komt, jaagt daar achteraan: 14, 15, 14,
                 # 15, drieëndertig opdrachten in één uur naar de paal. Gezien in
-                # het virtuele huis met Van den Dams cijfers op 04-09-2026.
+                # het virtuele huis met de klantwoning zijn cijfers op 04-09-2026.
                 # Scheelt het nieuwe tempo één ampère met wat er al staat, dan
                 # blijft staan wat er staat; naar boven afronden vangt de rest.
                 # Twee ampère speling, want de slingering is er een van twee:
@@ -2885,7 +2987,7 @@ def _decide(
     # Een beurt die loopt wordt niet afgebroken voor een verschil dat er niet is.
     # Wordt de auto voller, dan krimpt het plan mee en kan het uur waar hij net
     # in begon eruit vallen terwijl het praktisch evenveel kost als de uren die
-    # overblijven. Bij Van den Dam scheelde dat op 30-08-2026 drie tienden van
+    # overblijven. In de klantwoning scheelde dat op 30-08-2026 drie tienden van
     # een cent per kWh, en daarvoor ging de paal uit en straks weer aan. Een auto
     # stopt niet graag steeds; zie ook `MIN_RUN_MINUTES` en `_keep_alive`.
     if nu_net is None and charger.charging:
@@ -3002,7 +3104,7 @@ def _decide(
         regel = "wait-for-price"
 
     # Wacht hij op zon, dan hoort erbij te staan of hij de voorspelling nog
-    # gelooft. Sven op 17-09-2026 zag hem "ik laad om 16:00" zeggen en daarna
+    # gelooft. De eigenaar op 17-09-2026 zag hem "ik laad om 16:00" zeggen en daarna
     # "ik laad om 17:00", zonder een woord over waarom.
     if regel == "wait-for-sun" and (zonnote := solar_measured_note(forecast)):
         reden += " " + zonnote
@@ -3043,7 +3145,7 @@ def _zon_dekt_vandaag(
     die er de hele dag over mag doen: om negen uur is een halve kilowatt zon
     genoeg om de coach te laten beginnen, waarna hij er drie kilowatt uit het net
     bij koopt terwijl diezelfde kilowatturen om één uur gratis van het dak waren
-    gekomen. Sven op 25-08-2026: "zo goedkoop mogelijk".
+    gekomen. De eigenaar op 25-08-2026: "zo goedkoop mogelijk".
 
     De som is die van de klant zelf. Komt er vandaag nog meer zon dan er in de
     auto moet, dan is elke kWh die hij nu bijkoopt een kWh die hij straks voor
@@ -3127,7 +3229,7 @@ def _beter_straks(
 # omdat er niets te beschermen valt, en één omdat wachten daar gevaarlijk is:
 # een aansluiting die vol zit, zit vol.
 # Regels waar een lopende beurt niet tegenin wordt vastgehouden. De laatste
-# twee zijn Svens zesde eis, nooit blind laden: valt de prijssensor of de
+# twee zijn de zesde eis, nooit blind laden: valt de prijssensor of de
 # accustand weg, dan is elke minuut doorladen een minuut zonder te weten wat
 # het kost of of het nog past. Met tien ronden uitstel was dat te veel.
 NEVER_HOLD = frozenset(
@@ -3255,7 +3357,7 @@ def should_send(previous: Decision | None, decision: Decision) -> bool:
 
 # --- Een apparaat met een programma: de vaatwasser ---------------------------
 #
-# Sven op 06-09-2026: "omdat de bus vol zit gaan we de laadpaal even parkeren
+# De eigenaar op 06-09-2026: "omdat de bus vol zit gaan we de laadpaal even parkeren
 # en nu verder met de vaatwasser sturing." Eerst alleen de vaatwasser; de
 # wasmachine en de droger komen erbij als dit werkt.
 #
@@ -3290,7 +3392,7 @@ class Programma:
     `DISHWASHER_PROGRAMS` in devices.js van het paneel; `test_rapport.mjs`
     legt ze naast elkaar. Sinds 06-09-2026 is dat alleen het uitgangspunt:
     de klant past de tabel per apparaat aan (`tabel_van`), en wat de coach bij
-    een echte beurt meet komt eroverheen (`met_metingen`). Sven: "ik wil dat
+    een echte beurt meet komt eroverheen (`met_metingen`). De eigenaar: "ik wil dat
     kunnen aanpassen, wel moet hij dit als uitgangspunt hebben."
     """
 
@@ -3299,7 +3401,7 @@ class Programma:
     minutes: int
     kwh: float
     peak_w: int
-    # Elk programma is te verschuiven. Sven op 06-09-2026 's avonds: "het
+    # Elk programma is te verschuiven. De eigenaar op 06-09-2026 's avonds: "het
     # hoofddoel is slim wassen, en als je het clean programma wilt doen gaat
     # dat waarschijnlijk toch handmatig." Dus geen beleid per programma meer.
     # Het gemeten verloop: gemiddeld vermogen in watt per PROFIEL_STAP_MIN
@@ -3473,12 +3575,12 @@ class Apparaat:
     # Of de deur open staat, als dat te zien is.
     door_open: bool | None = None
     # Een apparaat zonder startknop, op een meetstekker: de coach zegt
-    # wanneer, de bewoner drukt zelf. Sven op 06-09-2026: "adviseren en
+    # wanneer, de bewoner drukt zelf. De eigenaar op 06-09-2026: "adviseren en
     # meten, met zet hem aan." De teksten zeggen dan "zet hem aan" in plaats
     # van "hij start".
     manual: bool = False
     # De bewoner koos "ingeruimd en nu starten": geen goedkoopste moment, geen
-    # avondpiek, nu. Sven op 13-09-2026, na een vrijgave om 16:33 bij klaar om
+    # avondpiek, nu. De eigenaar op 13-09-2026, na een vrijgave om 16:33 bij klaar om
     # 16:30: "de keuze ingeruimd en morgen starten of ingeruimd en nu starten."
     start_now: bool = False
 
@@ -3516,7 +3618,7 @@ def programma_kosten(
     Het uur waar we nú in zitten wordt gemeten en niet voorspeld: `surplus_w`
     is wat er op dit moment werkelijk naar het net gaat, en dat telt voor elk
     stuk dat in dit uur valt. Precies zoals `schijven` dat voor een laadpaal
-    doet. Sven op 07-09-2026, toen de coach om 10:22 op 11:00 wachtte terwijl
+    doet. De eigenaar op 07-09-2026, toen de coach om 10:22 op 11:00 wachtte terwijl
     zijn meter 3,5 kW teruglevering zag: "ik lever nu 3,5 kW terug, dat is
     toch gunstig? Je weet niet hoeveel je om 11 uur terug gaat leveren." De
     verwachting zei voor dat uur 2,2 kW en het dak gaf 4,3.
@@ -3573,7 +3675,7 @@ def _programma_stukken(
     Zonder profiel: alle kilowatturen op de piek van de opgave, vanaf de
     start, en daarna niets meer tot het eind. Tot 08-09-2026 werd het
     verbruik gelijkmatig over de duur uitgesmeerd, en dat maakte van Eco 50
-    (225 minuten, 0,8 kWh) een apparaat van 213 W. Bij Sven thuis zag de
+    (225 minuten, 0,8 kWh) een apparaat van 213 W. In die woning thuis zag de
     meter om 09:12 iets meer dan dat aan teruglevering, en de coach besloot
     dat het hele programma op eigen zon kon: "start nu". In het echt trekt
     een vaatwasser zijn stroom bij het opwarmen, drie keer 1,3 tot 2,2 kW,
@@ -3781,7 +3883,7 @@ def plan_programma(
     # Laat de meter genoeg zon zien om het hele programma nu op eigen zon te
     # draaien, en is dat op geen enkel later moment goedkoper, dan nu. Het
     # beste moment van straks is een verwachting; wat de meter nu ziet is
-    # zeker, en zon later is niet goedkoper dan zon nu. Sven op 07-09-2026 om
+    # zeker, en zon later is niet goedkoper dan zon nu. De eigenaar op 07-09-2026 om
     # 10:51: de coach wachtte tot 12:00 omdat de verwachting voor 11:00 net te
     # weinig zei, terwijl de meter 3,4 kW zag en de verwachting die ochtend al
     # drie keer te laag was gebleken. Bij een dynamisch contract met een
@@ -3789,7 +3891,7 @@ def plan_programma(
     # gok. Niet in de avondpiek, want daar gaat het niet om geld.
     #
     # En "genoeg zon" is: genoeg voor de piek, niet voor het gemiddelde.
-    # Op 08-09-2026 om 09:12 zag de meter bij Sven 250 W teruglevering, en
+    # Op 08-09-2026 om 09:12 zag de meter in die woning 250 W teruglevering, en
     # dat was meer dan de uitgesmeerde 213 W van Eco 50; de coach startte,
     # en de opwarmpiek van 2,2 kW kwam van het net terwijl het dak drie uur
     # later 4 kW gaf. Een vaatwasser trekt zijn piek hoe dan ook, dus de
@@ -3810,7 +3912,7 @@ def plan_programma(
 
     # Reiken de prijzen niet tot het laatste startmoment, dan is de goedkoopste
     # bekende kandidaat misschien niet de goedkoopste van de nacht. Dezelfde
-    # afspraak als bij de paal (eis 6, Sven op 05-09-2026): een bekend moment
+    # afspraak als bij de paal (eis 6, de eigenaar op 05-09-2026): een bekend moment
     # dat goedkoper is dan het gemiddelde van alle bekende prijzen mag, de rest
     # wacht op de prijzen. De klaar-tijdregel hierboven blijft het vangnet.
     if onbekend and prices:
@@ -3876,7 +3978,7 @@ def plan_programma(
 
 # --- De boiler ---------------------------------------------------------------
 #
-# Sven op 19-09-2026: "ik wil gewoon een sturing maken op een boiler waar je
+# De eigenaar op 19-09-2026: "ik wil gewoon een sturing maken op een boiler waar je
 # alleen stroom op moet zetten, met een smart plug bijvoorbeeld. Als je er
 # stroom op zet en de boiler is warm moet de coach detecteren dat hij warm
 # genoeg is omdat de boiler dan onder een bepaald vermogen zit. Ik wil dit
@@ -3899,7 +4001,7 @@ BOILER_SPELING = timedelta(minutes=30)
 
 # Hoeveel ruimer hij blokken vastlegt dan de schatting zegt. Een blok te veel
 # kost niets, want de boiler slaat zelf af zodra het vat vol is; een blok te
-# weinig kost een koude douche. Sven op 19-09-2026 koos "klaar om", en de
+# weinig kost een koude douche. De eigenaar op 19-09-2026 koos "klaar om", en de
 # klaar-tijd is heilig (eis 2).
 BOILER_RUIM = 1.2
 
@@ -4224,7 +4326,7 @@ def plan_boiler(
             rule="deadline",
         )
 
-    # De zon van nu. Sven op 19-09-2026: vullen met wat er over is, want het
+    # De zon van nu. De eigenaar op 19-09-2026: vullen met wat er over is, want het
     # vat is de goedkoopste plek om overschot in te stoppen en hij slaat zelf
     # af zodra hij vol is.
     if surplus_w is not None and surplus_w >= boiler.heat_w:

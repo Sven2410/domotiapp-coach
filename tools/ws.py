@@ -1,4 +1,4 @@
-"""Kale websocket-client voor Svens HA (er is hier geen websockets-module).
+"""Kale websocket-client voor de eigen HA (er is hier geen websockets-module).
 
 Alleen lezen: authenticeren en commando's sturen die niets veranderen.
 """

@@ -709,7 +709,7 @@ class DacViewOverview extends DacElement {
     .plan-words { display: grid; gap: 2px; min-width: 0; }
     .plan-head .plan-title { font-size: 12.5px; font-weight: 600; color: var(--dac-ink-2); }
     /* Prioriteit en de schemaknop naast elkaar: samen één regel in plaats van
-       drie. Sven op 06-09-2026: "het past niet lekker op één scherm, op de
+       drie. De eigenaar op 06-09-2026: "het past niet lekker op één scherm, op de
        telefoon helemaal scrollen." */
     .plan-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .plan-row .plan-prio { flex: 1 1 160px; }
@@ -1749,7 +1749,7 @@ class DacViewOverview extends DacElement {
     const boost = this.$(`[data-boost="${slot}"]`);
     // En alleen op een laadpaal: een vaatwasser laadt niet sneller en heeft
     // zijn eigen knop om te wachten, en een boiler wordt warm zo snel als zijn
-    // element kan. Sven op 06-09-2026: "dingen van de laadpaal op mijn
+    // element kan. De eigenaar op 06-09-2026: "dingen van de laadpaal op mijn
     // vaatwasserkaart, dat moet niet."
     const kan =
       besluit.rule !== "disconnected"
@@ -1829,7 +1829,7 @@ class DacViewOverview extends DacElement {
   }
 
   /**
-   * Het programma op de kaart. Sven op 06-09-2026: "bij de vaatwasserkaart
+   * Het programma op de kaart. De eigenaar op 06-09-2026: "bij de vaatwasserkaart
    * wil ik sowieso het programma kunnen selecteren." Bij een slimme machine
    * de opties van haar eigen select-entiteit; zonder programmasensor de eigen
    * tabel uit Apparaten. De coach kiest nooit zelf.
@@ -2397,7 +2397,7 @@ class DacViewOverview extends DacElement {
 
       // Met één auto is er niets te kiezen, maar zijn naam hoort er wel te
       // staan. Zonder dit was een naam die je invulde nergens meer te zien: de
-      // kop toont de laadpaal en de keuzelijst is dan verborgen. Sven op
+      // kop toont de laadpaal en de keuzelijst is dan verborgen. De eigenaar op
       // 30-08-2026, die precies daarover viel.
       const enige = this.$(`[data-car-one="${slot}"]`);
       const alleen = cars.length === 1 ? (cars[0].name ?? "").trim() : "";
@@ -2459,7 +2459,7 @@ class DacViewOverview extends DacElement {
       // adding a decision.
       const asks = needsRelease(device);
       // Na de klaar-tijd van vandaag schuift het schema een dag op. Dan twee
-      // knoppen: op het goedkoopste moment van morgen, of nu. Sven op
+      // knoppen: op het goedkoopste moment van morgen, of nu. De eigenaar op
       // 13-09-2026, na een vrijgave om 16:33 bij klaar om 16:30.
       const besluit = this.coach_?.[device.id];
       const gemist = asks && Boolean(besluit?.missed) && !besluit?.running;

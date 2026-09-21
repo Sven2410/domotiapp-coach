@@ -43,7 +43,7 @@ function readPower(feed, entityId) {
  *
  * A SolarEdge goes to sleep at night and its sensor turns `unavailable`. With
  * the sun below the horizon that is not a missing number but zero, and saying
- * so keeps the house on the diagram: at Van den Dam on 19-09-2026 it read a
+ * so keeps the house on the diagram: at de klantwoning on 19-09-2026 it read a
  * dash all night, because consumption is solar plus grid. Only below the
  * horizon, and only with `sun.sun` present: in daylight an unreachable
  * inverter may well be producing, and then a dash is the honest answer.
@@ -425,7 +425,7 @@ function deviceDetails(feed, device, settings) {
 
   // Een boiler heeft geen tabel en geen programma: wat de coach van hem weet
   // heeft hij zelf gemeten. Dat hoort op de kaart te staan, want het is het
-  // enige waaraan te zien is dat het leren werkt. Sven op 19-09-2026: "ik wil
+  // enige waaraan te zien is dat het leren werkt. De eigenaar op 19-09-2026: "ik wil
   // dit zelflerend hebben." Nog niets gemeten is een eerlijk antwoord.
   if (device?.type === "boiler") {
     const geleerd = (settings?.boiler_learned ?? []).find((rij) => rij?.device === device.id) ?? {};

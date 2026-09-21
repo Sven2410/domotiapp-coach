@@ -5,7 +5,7 @@ verschillen zijn de installatievormen die er bij klanten zijn: het contract,
 het weer, het moment dat de kabel erin gaat, de klaar-tijd, de auto, de meter,
 en wat er onderweg misgaat. Zie `virtueel.py` voor wat elk veld doet.
 
-Twee afspraken van Sven (04-09-2026) die de controles in `test_virtueel.py`
+Twee afspraken van de eigenaar (04-09-2026) die de controles in `test_virtueel.py`
 bewaken:
 
 - **Vast contract:** laden in de zonuren is goedkoper, en naar de prijs hoeft
@@ -23,10 +23,10 @@ from virtueel import Auto, Boiler, Huis, Paal, Prijzen, Scenario, Vaatwasser, Zo
 BUS = Auto(naam="Bus", capaciteit_kwh=19.7, soc=30.0, fasen=1, max_amps=16.0, wek_amps=10.0)
 GROTE = Auto(naam="Grote", capaciteit_kwh=77.0, soc=20.0, fasen=3, max_amps=16.0)
 
-# Svens voorbeeld van 04-09-2026: "de goedkoopste uren zijn vanaf 13 uur tot een
+# het voorbeeld van 04-09-2026: "de goedkoopste uren zijn vanaf 13 uur tot een
 # uurtje of 17 en dan in de nacht weer." Een dag waarop de ochtend duurder is
 # dan de middag en de nacht, kaal per uur.
-MARKT_SVEN = [
+MARKT_VAST = [
     0.070, 0.060, 0.050, 0.050, 0.060, 0.080, 0.100, 0.120,
     0.130, 0.120, 0.110, 0.100, 0.090, 0.030, 0.020, 0.030,
     0.050, 0.140, 0.190, 0.210, 0.150, 0.120, 0.100, 0.090,
@@ -163,7 +163,7 @@ lastbewaker = vast_zonnig.kopie(
     naam="met-lastbewaker", uitleg="een installatie met een eigen lastbewaker",
     lastbewaker=True,
 )
-# De nacht van 09 op 10-09-2026 bij Van den Dam: een warmtepomp die om het
+# De nacht van 09 op 10-09-2026 in de klantwoning: een warmtepomp die om het
 # kwartier een paar minuten 22 A op één fase trekt, zonder patroon. De coach
 # meet vanaf het inpluggen wat er gemiddeld voor de paal overblijft en rekent
 # daarmee (`structural_ceiling` in planner.py). Het zusje zonder warmtepomp
@@ -180,7 +180,7 @@ warmtepomp = dyn_grote_auto.kopie(
                     for h in list(range(17, 24)) + list(range(0, 6))
                     for m in (0, 15, 30, 45) if h < 17 or (h, m) >= (17, 45)],
 )
-# De nacht van 18 op 19-09-2026 bij Van den Dam: de coach zakt een paar keer
+# De nacht van 18 op 19-09-2026 in de klantwoning: de coach zakt een paar keer
 # lang voor de zekering, en de Ford komt daarna pas na tien minuten terug. Die
 # minuten horen niet als zijn tempo in de opslag; om 03:35 stond er 5,52 kW voor
 # band 6 terwijl hij daar 10 kW trok. Zie `TEMPO_HERSTEL` in coach.py.
@@ -190,7 +190,7 @@ ford_bijkomen = warmtepomp.kopie(
     auto=replace(GROTE, soc=50.0, bijkomen_min=10), oven_w=3000.0,
     gebeurtenissen=[("23:15", "oven", 16), ("01:26", "oven", 16), ("03:17", "oven", 16)],
 )
-# En wat er bij Van den Dam op 19-09-2026 al in de opslag stond: 5,52 kW voor
+# En wat er in de klantwoning op 19-09-2026 al in de opslag stond: 5,52 kW voor
 # band 6 en 6,9 voor band 7, rijen zonder accustand. De eerste beurt waarin de
 # auto daar gewoon het plafond trekt haalt ze weg.
 ford_oude_opslag = ford_bijkomen.kopie(
@@ -221,7 +221,7 @@ laadgrens = vast_zonnig.kopie(
     naam="laadgrens-80", uitleg="de auto stopt zelf op 80%",
     auto=replace(BUS, laadgrens=80.0),
 )
-# Dezelfde auto, maar nu staat die 80% ook in het profiel. Svens eigen geval,
+# Dezelfde auto, maar nu staat die 80% ook in het profiel. het gemeten geval,
 # 16-09-2026: zonder het doel rekende de coach tot 100, vroeg hij om 10:46 een
 # herstart voor een bus die precies deed wat hij moest doen, en stuurde hij een
 # kritieke melding over 70% omdat de Ford-app nog niet bijgewerkt was. Met het
@@ -236,7 +236,7 @@ doel_onder_auto = vast_zonnig.kopie(
     naam="doel-80", uitleg="de auto kan tot 100, de bewoner wil tot 80",
     auto=replace(BUS, doel=80.0),
 )
-# Svens Ford meldt zijn accustand per tien procent, ongeveer elk half uur.
+# de eigen Ford meldt zijn accustand per tien procent, ongeveer elk half uur.
 # Tussen twee stappen staat het beeld van de coach stil terwijl de auto voller
 # wordt: op 17-09-2026 zei de kaart om 22:26 "nog 2,2 kWh" terwijl er 0,18 kWh
 # in ging. Met het doel op 80 is het de coach die hoort op te houden, en dat kan
@@ -289,13 +289,13 @@ oude_tijden = vast_zonnig.kopie(
     niet_voor="23:00", uiterlijk_starten="22:00",
 )
 
-# --- Svens voorbeeld: om tien uur erin, klaar om zes -------------------------
+# --- het voorbeeld: om tien uur erin, klaar om zes -------------------------
 
 tien_uur = Scenario(
     "tien-uur-erin-dynamisch",
     "dynamisch, geen panelen, grote auto om 10:00 erin, goedkoop van 13 tot 17 en 's nachts",
     contract="dynamisch", zon=Zon(wolken="geen"), voorspeller="geen", auto=GROTE,
-    prijzen=Prijzen(markt=MARKT_SVEN), begin="2026-09-07 09:55", kabel_erin="10:00",
+    prijzen=Prijzen(markt=MARKT_VAST), begin="2026-09-07 09:55", kabel_erin="10:00",
     duur_uren=21,
 )
 tien_uur_zon = tien_uur.kopie(
@@ -314,7 +314,7 @@ equalizer = tien_uur.kopie(
     naam="equalizer-knijpt", uitleg="3x25 A met een Equalizer; van 13:30 tot 15:00 trekt het huis 7 kW en knijpt hij de paal",
     equalizer=True, huis=Huis(extra=[("13:30", "15:00", 7000.0)]),
 )
-# Svens tweede voorbeeld: zondag uitgevinkt, dus klaar op maandag 06:00. Tot
+# het tweede voorbeeld: zondag uitgevinkt, dus klaar op maandag 06:00. Tot
 # de prijzen van maandag er zijn (zondag rond 13:00) alleen zon.
 weekend = tien_uur.kopie(
     naam="weekend-zondag-uit",
@@ -358,7 +358,7 @@ paal_traag = vast_zonnig.kopie(
     gebeurtenissen=[("07:05", "soc_opgeven", 30)],
 )
 
-# --- Van den Dam, het weekend van 04-09-2026 -----------------------------------
+# --- de klantwoning, het weekend van 04-09-2026 -----------------------------------
 #
 # De eerste echte laadbeurt met v0.47.x, nagebouwd met zijn eigen cijfers zoals
 # ze vrijdagavond 21:21 in Home Assistant stonden: de all-in prijzen van
@@ -367,122 +367,122 @@ paal_traag = vast_zonnig.kopie(
 # de eigen opslag, de Ford op 8,5%, de Equalizer, zaterdag uitgevinkt en
 # zondag klaar om 06:00. Zondag zelf kende niemand nog; die staat hier als
 # een aanname en er is een variant met een dure zondagnacht.
-VDD_HUIS_W = {
+KLANT_HUIS_W = {
     0: 1138, 1: 1052, 2: 1026, 3: 1355, 4: 949, 5: 723, 6: 640, 7: 972,
     8: 1029, 9: 1048, 10: 970, 11: 986, 12: 972, 13: 1300, 14: 1419, 15: 1263,
     16: 1576, 17: 1589, 18: 1322, 19: 1299, 20: 1507, 21: 1244, 22: 1809, 23: 1085,
 }
-VDD_ZON_KWH = {
+KLANT_ZON_KWH = {
     7: 0.54, 8: 1.12, 9: 1.56, 10: 1.88, 11: 2.28, 12: 2.64, 13: 2.68,
     14: 2.42, 15: 2.0, 16: 1.64, 17: 1.24, 18: 0.73, 19: 0.34,
 }
-VDD_VRIJDAG = [
+KLANT_VRIJDAG = [
     0.3018, 0.2790, 0.2694, 0.2690, 0.2600, 0.2609, 0.2899, 0.3133,
     0.3141, 0.2957, 0.2574, 0.2048, 0.1870, 0.1694, 0.1776, 0.1779,
     0.1872, 0.2141, 0.2829, 0.3032, 0.3117, 0.3159, 0.3098, 0.2993,
 ]
-VDD_ZATERDAG = [
+KLANT_ZATERDAG = [
     0.2320, 0.2321, 0.2243, 0.2047, 0.2010, 0.2026, 0.2198, 0.2070,
     0.1835, 0.1320, 0.1287, 0.1244, 0.1182, 0.1123, 0.1137, 0.1210,
     0.1269, 0.1858, 0.3105, 0.3616, 0.3918, 0.4000, 0.3902, 0.3666,
 ]
 # Zondag: een aanname, de zaterdag met een iets duurdere nacht.
-VDD_ZONDAG = [
+KLANT_ZONDAG = [
     0.2500, 0.2450, 0.2400, 0.2300, 0.2250, 0.2280, 0.2350, 0.2200,
     0.1900, 0.1500, 0.1400, 0.1350, 0.1300, 0.1250, 0.1280, 0.1350,
     0.1400, 0.1950, 0.3200, 0.3700, 0.3900, 0.4000, 0.3900, 0.3600,
 ]
-VDD_ZONDAG_DUUR = [0.31] * 8 + VDD_ZONDAG[8:]
+KLANT_ZONDAG_DUUR = [0.31] * 8 + KLANT_ZONDAG[8:]
 FORD = Auto(naam="Ford", capaciteit_kwh=65.0, soc=8.5, fasen=3, max_amps=16.0)
-VDD_PRIJZEN = {"2026-09-04": VDD_VRIJDAG, "2026-09-05": VDD_ZATERDAG, "2026-09-06": VDD_ZONDAG}
+KLANT_PRIJZEN = {"2026-09-04": KLANT_VRIJDAG, "2026-09-05": KLANT_ZATERDAG, "2026-09-06": KLANT_ZONDAG}
 
-van_den_dam = Scenario(
-    "van-den-dam",
+klantwoning = Scenario(
+    "klantwoning",
     "vrijdag 19:01 erin op 8,5%, zaterdag uit, zondag klaar om 06:00, met zijn eigen prijzen, zon en huis",
     contract="dynamisch-salderen",
-    zon=Zon(kromme=VDD_ZON_KWH), huis=Huis(profiel=VDD_HUIS_W, verdeling=(0.25, 0.15, 0.6)),
+    zon=Zon(kromme=KLANT_ZON_KWH), huis=Huis(profiel=KLANT_HUIS_W, verdeling=(0.25, 0.15, 0.6)),
     auto=FORD, paal=Paal(teller_interval_min=60),
-    prijzen=Prijzen(per_dag=VDD_PRIJZEN),
+    prijzen=Prijzen(per_dag=KLANT_PRIJZEN),
     begin="2026-09-04 18:55", kabel_erin="19:01", klaar_om="06:00", dagen_uit=(5,),
     duur_uren=36, equalizer=True, zekering=25.0, aansluiting_fasen=3,
 )
-vdd_bewolkt = van_den_dam.kopie(
-    naam="van-den-dam-bewolkt", uitleg="hetzelfde, maar zaterdag valt de zon tegen: een derde van de verwachting",
-    zon=Zon(kromme=VDD_ZON_KWH, wolken="bewolkt", voorspeld="helder"),
+klant_bewolkt = klantwoning.kopie(
+    naam="klantwoning-bewolkt", uitleg="hetzelfde, maar zaterdag valt de zon tegen: een derde van de verwachting",
+    zon=Zon(kromme=KLANT_ZON_KWH, wolken="bewolkt", voorspeld="helder"),
 )
-vdd_geen_zon = van_den_dam.kopie(
-    naam="van-den-dam-geen-zon", uitleg="hetzelfde, zaterdag helemaal dicht terwijl helder voorspeld was",
-    zon=Zon(kromme=VDD_ZON_KWH, wolken="geen", voorspeld="helder"),
+klant_geen_zon = klantwoning.kopie(
+    naam="klantwoning-geen-zon", uitleg="hetzelfde, zaterdag helemaal dicht terwijl helder voorspeld was",
+    zon=Zon(kromme=KLANT_ZON_KWH, wolken="geen", voorspeld="helder"),
 )
-vdd_dure_zondag = van_den_dam.kopie(
-    naam="van-den-dam-dure-zondagnacht", uitleg="hetzelfde, maar de zondagnacht wordt 0,31: dan moet zaterdagmiddag het werk doen",
-    prijzen=Prijzen(per_dag={**VDD_PRIJZEN, "2026-09-06": VDD_ZONDAG_DUUR}),
+klant_dure_zondag = klantwoning.kopie(
+    naam="klantwoning-dure-zondagnacht", uitleg="hetzelfde, maar de zondagnacht wordt 0,31: dan moet zaterdagmiddag het werk doen",
+    prijzen=Prijzen(per_dag={**KLANT_PRIJZEN, "2026-09-06": KLANT_ZONDAG_DUUR}),
 )
-vdd_wekken = van_den_dam.kopie(
-    naam="van-den-dam-ford-wekken", uitleg="hetzelfde, de Ford wil 10 A om wakker te worden en krijgt sinds 17-09-2026 het hele plafond aangeboden",
+klant_wekken = klantwoning.kopie(
+    naam="klantwoning-ford-wekken", uitleg="hetzelfde, de Ford wil 10 A om wakker te worden en krijgt sinds 17-09-2026 het hele plafond aangeboden",
     auto=replace(FORD, wek_amps=10.0),
 )
-vdd_koken = van_den_dam.kopie(
-    naam="van-den-dam-oven", uitleg="hetzelfde, zaterdag om 12:30 een uur lang 3 kW erbij op de zware fase",
+klant_koken = klantwoning.kopie(
+    naam="klantwoning-oven", uitleg="hetzelfde, zaterdag om 12:30 een uur lang 3 kW erbij op de zware fase",
     gebeurtenissen=[("12:30", "oven", 60)],
 )
-vdd_p1_weg = van_den_dam.kopie(
-    naam="van-den-dam-p1-weg", uitleg="hetzelfde, de P1 valt zaterdag om 11:00 een kwartier weg",
+klant_p1_weg = klantwoning.kopie(
+    naam="klantwoning-p1-weg", uitleg="hetzelfde, de P1 valt zaterdag om 11:00 een kwartier weg",
     gebeurtenissen=[("11:00", "p1_weg", 15)],
 )
-vdd_prijzen_laat = van_den_dam.kopie(
-    naam="van-den-dam-prijzen-laat", uitleg="hetzelfde, de prijzen van zondag komen pas om 15:30",
-    prijzen=Prijzen(bekend_om="15:30", per_dag=VDD_PRIJZEN),
+klant_prijzen_laat = klantwoning.kopie(
+    naam="klantwoning-prijzen-laat", uitleg="hetzelfde, de prijzen van zondag komen pas om 15:30",
+    prijzen=Prijzen(bekend_om="15:30", per_dag=KLANT_PRIJZEN),
 )
-vdd_geen_soc = van_den_dam.kopie(
-    naam="van-den-dam-geen-accustand", uitleg="hetzelfde, de Ford meldt zijn accustand niet",
+klant_geen_soc = klantwoning.kopie(
+    naam="klantwoning-geen-accustand", uitleg="hetzelfde, de Ford meldt zijn accustand niet",
     auto=replace(FORD, meldt_soc=False),
 )
-# Sven op 04-09-2026, laat: "ook onverwachte herstarten, en wat als een sensor
+# De eigenaar op 04-09-2026, laat: "ook onverwachte herstarten, en wat als een sensor
 # ineens niet meer beschikbaar is. Dat moet wel gemeld worden."
-vdd_herstart = van_den_dam.kopie(
-    naam="van-den-dam-herstart",
+klant_herstart = klantwoning.kopie(
+    naam="klantwoning-herstart",
     uitleg="Home Assistant herstart vijf keer: vr 23:00, za 04:20, za 10:30 op zon, za 13:05 net na de prijzen, zo 04:20 in het laatste uur",
     gebeurtenissen=[("23:00", "herstart", None), ("04:20", "herstart", None),
                     ("10:30", "herstart", None), ("13:05", "herstart", None),
                     ("+1 04:20", "herstart", None)],
 )
-vdd_soc_weg = van_den_dam.kopie(
-    naam="van-den-dam-accustand-weg",
+klant_soc_weg = klantwoning.kopie(
+    naam="klantwoning-accustand-weg",
     uitleg="de accustand van de Ford is zaterdag van 13:30 tot 14:15 niet beschikbaar, midden in het laden",
     gebeurtenissen=[("13:30", "sensor_weg", ("soc", 45))],
 )
-vdd_status_weg = van_den_dam.kopie(
-    naam="van-den-dam-status-weg",
+klant_status_weg = klantwoning.kopie(
+    naam="klantwoning-status-weg",
     uitleg="de status van de Easee is zaterdag van 11:00 tot 11:20 niet beschikbaar, tijdens het laden op zon",
     gebeurtenissen=[("11:00", "sensor_weg", ("status", 20))],
 )
-vdd_zon_weg = van_den_dam.kopie(
-    naam="van-den-dam-zonsensor-weg",
+klant_zon_weg = klantwoning.kopie(
+    naam="klantwoning-zonsensor-weg",
     uitleg="de zonnesensor is zaterdag van 10:00 tot 10:20 niet beschikbaar",
     gebeurtenissen=[("10:00", "sensor_weg", ("zon", 20))],
 )
-vdd_equalizer_weg = van_den_dam.kopie(
-    naam="van-den-dam-equalizer-weg",
+klant_equalizer_weg = klantwoning.kopie(
+    naam="klantwoning-equalizer-weg",
     uitleg="de Equalizer-sensor is zaterdag van 14:00 tot 14:30 niet beschikbaar, tijdens het laden op 16 A",
     gebeurtenissen=[("14:00", "sensor_weg", ("equalizer", 30))],
 )
-vdd_prijzen_weg_13 = van_den_dam.kopie(
-    naam="van-den-dam-prijssensor-weg-om-13",
+klant_prijzen_weg_13 = klantwoning.kopie(
+    naam="klantwoning-prijssensor-weg-om-13",
     uitleg="de prijssensor valt van 12:50 tot 13:40 weg, precies als de prijzen van zondag komen",
     gebeurtenissen=[("12:50", "prijzen_weg", 50)],
 )
-VAN_DEN_DAM = [van_den_dam, vdd_bewolkt, vdd_geen_zon, vdd_dure_zondag, vdd_wekken,
-               vdd_koken, vdd_p1_weg, vdd_prijzen_laat, vdd_geen_soc,
-               vdd_herstart, vdd_soc_weg, vdd_status_weg, vdd_zon_weg, vdd_equalizer_weg,
-               vdd_prijzen_weg_13]
+VAN_DEN_DAM = [klantwoning, klant_bewolkt, klant_geen_zon, klant_dure_zondag, klant_wekken,
+               klant_koken, klant_p1_weg, klant_prijzen_laat, klant_geen_soc,
+               klant_herstart, klant_soc_weg, klant_status_weg, klant_zon_weg, klant_equalizer_weg,
+               klant_prijzen_weg_13]
 
-# --- wat de nacht van 05 op 06-09-2026 bij Van den Dam leerde -----------------
+# --- wat de nacht van 05 op 06-09-2026 in de klantwoning leerde -----------------
 #
 # Om 04:17 koos de Easee in zijn automatische fasemodus één fase, de Ford trok
 # 16,9 A op een groep van 16 A, de paal herstartte de sessie op drie fasen en
 # de Ford ging in storing: "completed" op 86%. Pas een start om 05:18 kreeg
-# hem om 05:27 weer aan het laden. Sven: de fasemodus blijft (gastauto's), dus
+# hem om 05:27 weer aan het laden. De eigenaar: de fasemodus blijft (gastauto's), dus
 # de coach hoort met de gemeten fase te rekenen, onder de groep te blijven, en
 # een auto die niet vol is zelf opnieuw te starten.
 ford_storing = dyn_zonnig.kopie(
@@ -524,7 +524,7 @@ afbouw_krap_geleerd = afbouw_krap.kopie(
 # De coach stopte om 14:10 om op de zon van 15:00 te wachten en wekte om 14:14
 # met tien ampère. De Easee staat in automatische fasemodus, koos naar dat
 # aanbod, en begon op één fase: 5,875 A bij 1323 W, terwijl het om 14:05 op
-# hetzelfde aanbod nog 4070 W was. Sven: "hoe kon de laadpaal opeens op één
+# hetzelfde aanbod nog 4070 W was. De eigenaar: "hoe kon de laadpaal opeens op één
 # fase gaan laden? Die 10 A wekstroom, doe dat gewoon 16 A maken."
 #
 # Wisselend weer, want daar stopt en start de coach; een driefasige auto, want
@@ -548,13 +548,13 @@ fasekeuze = vast_wisselend.kopie(
 # De voorspeller zei 1,552 kWh voor het uur van 16:00; het dak deed 0,58 en het
 # huis at het op, dus de meter leverde vanaf 15:41 geen seconde terug. De coach
 # beloofde om 15:42 "ik laad om 16:00", om 16:03 "ik laad om 17:00", en zou dat
-# om 17:00 weer verschoven hebben. Sven: "waarom ging hij niet laden om 16 uur
+# om 17:00 weer verschoven hebben. De eigenaar: "waarom ging hij niet laden om 16 uur
 # terwijl hij net zei ik ga laden om 16 uur? En om 20 uur gaat hij meer laden
 # maar dan is er geen zon toch?"
 #
 # Een driefasige auto (dan is de ondergrens van de paal 4,14 kW en draagt een
 # kruimel zon dat uur nooit), een middag die minder geeft dan voorspeld, en een
-# huis dat de rest opeet. Allebei de contracten, want de vraag van Sven was
+# huis dat de rest opeet. Allebei de contracten, want de vraag van de eigenaar was
 # juist of dit ook bij een dynamisch contract klopt.
 BUS_DRIE = Auto(naam="Bus", capaciteit_kwh=19.7, soc=25.0, fasen=3, max_amps=16.0,
                 wek_amps=10.0)
@@ -574,7 +574,7 @@ zon_belofte_dyn = zon_belofte.kopie(
 
 # --- de vaatwasser (06-09-2026) ----------------------------------------------
 #
-# Sven: "omdat de bus vol zit gaan we de laadpaal even parkeren en nu verder
+# De eigenaar: "omdat de bus vol zit gaan we de laadpaal even parkeren en nu verder
 # met de vaatwasser sturing." De bewoner geeft vrij, de coach kiest het
 # goedkoopste startmoment binnen het schema en drukt op de knop. De auto
 # staat in deze scenario's al vol, zodat het alleen over de vaatwasser gaat.
@@ -599,7 +599,7 @@ vaatwasser_afstand_uit = vaatwasser_avond.kopie(
     naam="vaatwasser-afstand-uit", uitleg="hetzelfde, maar starten op afstand staat uit op het apparaat: de coach drukt, er gebeurt niets, en hij zegt dat",
     vaatwasser=Vaatwasser(afstand_aan=False),
 )
-# Een domme vaatwasser op een meetstekker (06-09-2026 's avonds). Sven: "smart
+# Een domme vaatwasser op een meetstekker (06-09-2026 's avonds). De eigenaar: "smart
 # plug als starten doen we niet, wel adviseren en meten, met zet hem aan." En
 # zijn eigen schema: niet in de nacht, vanaf 08:00, uiterlijk klaar om 16:30.
 DOM = Vaatwasser(slim=False)
@@ -633,7 +633,7 @@ vaatwasser_gemeten = vaatwasser_zon.kopie(
     vaatwasser_gemeten=[{"device": "vaatwasser", "key": "eco_50", "minutes": 200, "kwh": 0.95, "peak_w": 2000,
                          "profile": [2000.0] * 4 + [60.0] * 32 + [2000.0] * 4, "runs": 1, "at": ""}],
 )
-# Sven op 07-09-2026 om 10:22 thuis: de coach wachtte op 11:00 terwijl zijn
+# De eigenaar op 07-09-2026 om 10:22 thuis: de coach wachtte op 11:00 terwijl zijn
 # meter 3,5 kW teruglevering zag. "Je weet niet hoeveel je om 11 uur terug gaat
 # leveren." De voorspeller zei bewolkt, het dak deed helder: in het lopende
 # uur hoort de meter te winnen.
@@ -644,11 +644,11 @@ vaatwasser_meter_wint = vast_zonnig.kopie(
     vaatwasser_klaar_om="16:30", vaatwasser_niet_eerder="08:00",
     gebeurtenissen=[("10:20", "vaatwasser_vrijgeven", None)],
 )
-# Sven thuis op 08-09-2026. Om 09:12 vrijgegeven, Eco 50 zonder meting, het
+# In een echte woning op 08-09-2026. Om 09:12 vrijgegeven, Eco 50 zonder meting, het
 # dak gaf 0,9 kWh in dat uur en de meter zag 250 W over; de voorspeller zei
 # voor de middag ongeveer de helft van wat het dak deed. De coach startte
 # meteen, want uitgesmeerd was Eco 213 W en dat paste; de opwarmpiek van
-# 2,2 kW kwam van het net. Sven: "waarom startte hij terwijl bekend is dat de
+# 2,2 kW kwam van het net. De eigenaar: "waarom startte hij terwijl bekend is dat de
 # zon later meer schijnt?" De zon is de gemeten opbrengst per uur van die dag
 # (tot 15:00 gemeten; daarna de vorm van de voorspeller, 2,6 keer, zoals om
 # 14:00), het huis de mediaan per uur uit zijn kwartieropslag.
@@ -662,7 +662,7 @@ SVEN_HUIS_W = {
     18: 2019, 19: 1113, 20: 1127, 21: 1087, 22: 951, 23: 796,
 }
 vaatwasser_vroeg = vast_zonnig.kopie(
-    naam="vaatwasser-vroeg", uitleg="Sven op 08-09-2026: vast contract met salderen, om 09:12 vrijgegeven met 250 W over en een voorspeller die de helft zag; Eco zonder meting hoort niet te starten voor de zon de opwarmpiek draagt",
+    naam="vaatwasser-vroeg", uitleg="de eigenaar op 08-09-2026: vast contract met salderen, om 09:12 vrijgegeven met 250 W over en een voorspeller die de helft zag; Eco zonder meting hoort niet te starten voor de zon de opwarmpiek draagt",
     auto=VOL, contract="vast-salderen", vast_terugleverkosten=0.052756,
     begin="2026-09-08 07:55", kabel_erin=None, duur_uren=10,
     zon=Zon(kromme=SVEN_ZON_KWH, voorspeld="half"), huis=Huis(profiel=SVEN_HUIS_W, verdeling=(0.4, 0.3, 0.3)),
@@ -677,7 +677,7 @@ vaatwasser_vroeg_verwacht = vaatwasser_vroeg.kopie(
     naam="vaatwasser-vroeg-verwacht", uitleg="dezelfde dag, maar de voorspeller zag het dak goed: dan wacht hij tot de zon de opwarmpiek draagt, rond 12:00",
     zon=Zon(kromme=SVEN_ZON_KWH),
 )
-# Een herstart van Home Assistant midden in de beurt (07-09-2026, Sven: "ja,
+# Een herstart van Home Assistant midden in de beurt (07-09-2026, de eigenaar: "ja,
 # reken terug"). De coach bewaart de lopende beurt elke vijf minuten en pakt
 # hem na de herstart daar op: geen tweede "is gestart", en één verslag over
 # de hele beurt.
@@ -689,7 +689,7 @@ vaatwasser_uiterlijk = vaatwasser_avond.kopie(
     naam="vaatwasser-uiterlijk-starten", uitleg="om 19:00 vrijgegeven met uiterlijk starten om 22:00: dan gaat hij om 22:00, ook al is de nacht goedkoper",
     vaatwasser_uiterlijk="22:00",
 )
-# Sven thuis op 11-09-2026. Om 09:29 vrijgegeven, Express 60 met een meting
+# In een echte woning op 11-09-2026. Om 09:29 vrijgegeven, Express 60 met een meting
 # (piek 2264 W). Om 09:35 klaarde het een paar minuten op: het dak ging van
 # 1,1 naar 3,0 kW en de meter zag 2694 W teruglevering, meer dan de piek. De
 # coach startte, en om 09:37 was het 721 W; de drie opwarmpieken kregen 1,1
@@ -704,7 +704,7 @@ KURZ_60_GEMETEN = {
     "runs": 3, "at": "",
 }
 vaatwasser_zonpiek = vaatwasser_vroeg_verwacht.kopie(
-    naam="vaatwasser-zonpiek", uitleg="Sven op 11-09-2026: om 09:29 vrijgegeven, om 09:31 klaart het zes minuten op tot 3,2 kW; op zo'n opklaring hoort Express 60 niet te starten, want de opwarmpieken komen dan van het net",
+    naam="vaatwasser-zonpiek", uitleg="de eigenaar op 11-09-2026: om 09:29 vrijgegeven, om 09:31 klaart het zes minuten op tot 3,2 kW; op zo'n opklaring hoort Express 60 niet te starten, want de opwarmpieken komen dan van het net",
     begin="2026-09-11 07:55", vast_prijs=0.24171,
     zon=Zon(kromme=SVEN_ZON_KWH, pieken=[("09:31", "09:37", 3.2)]),
     vaatwasser=Vaatwasser(programma="dishcare_dishwasher_program_kurz_60", minuten=98, kwh=0.91,
@@ -732,8 +732,8 @@ vaatwasser_eindtijd_bijstellen = vaatwasser_eindtijd.kopie(
                           piek_minuten=20, eindtijd_tijdstip=True, gekozen="09:45", eindtijd_eerst_min=48),
 )
 
-# Sven op 12-09-2026 om 16:33: vrijgegeven bij vanaf 08:00 en klaar om 16:30.
-# De coach plande de volgende middag en zei "hij start om 13:00"; Sven zette
+# De eigenaar op 12-09-2026 om 16:33: vrijgegeven bij vanaf 08:00 en klaar om 16:30.
+# De coach plande de volgende middag en zei "hij start om 13:00"; de eigenaar zette
 # hem zelf aan. Op 13-09: "de keuze ingeruimd en morgen starten of ingeruimd
 # en nu starten."
 vaatwasser_na_klaartijd = vaatwasser_zon.kopie(
@@ -749,7 +749,7 @@ vaatwasser_na_klaartijd_nu = vaatwasser_na_klaartijd.kopie(
 
 # --- de boiler ---------------------------------------------------------------
 #
-# Sven op 19-09-2026: "een boiler waar je alleen stroom op moet zetten, met een
+# De eigenaar op 19-09-2026: "een boiler waar je alleen stroom op moet zetten, met een
 # smart plug. Als je er stroom op zet en de boiler is warm moet de coach
 # detecteren dat hij warm genoeg is omdat hij dan onder een bepaald vermogen
 # zit. Zelflerend." Klaar om 07:00, en overschot mag hij pakken.

@@ -3,7 +3,7 @@
  *
  * Sinds 06-09-2026 alleen nog het niveau: hoeveel de coach zelf mag. De
  * melding "Zware belasting" en wie hem krijgt staan in het tabje Meldingen
- * (`views/notifications.js`), samen met de andere soorten; Sven wilde dat
+ * (`views/notifications.js`), samen met de andere soorten; de eigenaar wilde dat
  * twee in een. De schema's van apparaten staan sinds 27-08-2026 op de kaart
  * van het apparaat zelf.
  */
@@ -159,7 +159,7 @@ class DacViewStrategy extends DacEditorElement {
    * Het niveau: hoeveel de coach zelf mag doen.
    *
    * De keuze tussen laagste kosten en zoveel mogelijk zon stond hier ook, en die
-   * is weg. Sven op 30-08-2026: "het eindoel is altijd lage kosten." Sindsdien
+   * is weg. De eigenaar op 30-08-2026: "het eindoel is altijd lage kosten." Sindsdien
    * legt de coach alle manieren naast elkaar en wint zon vanzelf zodra hij
    * goedkoper is; een knop die dat overrulet zou alleen maar geld kosten.
    */

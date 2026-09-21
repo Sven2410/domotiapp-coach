@@ -1,11 +1,16 @@
 # DomotiApp Coach
 
 Een custom integration voor Home Assistant die apparaten in huis op het
-gunstigste moment laat draaien: nu de laadpaal, straks de vaatwasser. Hij wordt
-via HACS verspreid, dus alleen `custom_components/` gaat mee naar de klant.
+gunstigste moment laat draaien: de laadpaal, de vaatwasser en de boiler. Hij
+wordt via HACS verspreid, dus alleen `custom_components/` gaat mee naar de klant.
 
-Eigenaar en opdrachtgever is Sven. Hij beoordeelt en beslist; ik bouw, test,
-commit, tag en breng uit.
+De eigenaar beoordeelt en beslist; ik bouw, test, commit, tag en breng uit.
+
+**Deze repo is publiek.** Er staat dus geen naam van de eigenaar of van een
+klant in, geen adres, geen entiteit-id van één woning en geen meterstand. Wat
+uit de praktijk komt staat er als meting, met de datum erbij: "de eigenaar op
+17-09-2026" en "in de klantwoning" zijn genoeg om te weten waar een regel
+vandaan komt. Alles wat wél herleidbaar is hoort in de privénotities ernaast.
 
 ## Werkafspraken
 
@@ -15,7 +20,7 @@ commit, tag en breng uit.
 - **Ik doe git zelf**: feature-branch, één commit, `--no-ff` merge naar `main`,
   tag, push, en een GitHub release. HACS kijkt naar releases en niet naar tags,
   dus zonder release krijgt niemand de update.
-- **Testen vóór opleveren.** Sven installeert meteen bij zichzelf; alles wat ik
+- **Testen vóór opleveren.** De eigenaar installeert meteen bij zichzelf; alles wat ik
   zelf had kunnen zien kost hem een ronde. Meld eerlijk wat niet getest is.
 - **Niets van één installatie in de code.** Elke sensor komt uit de instellingen
   van de klant, nooit uit een naam in de broncode. Proef 42 in `test_coach.py`
@@ -39,12 +44,12 @@ commit, tag en breng uit.
 - Niets bouwen zonder zijn seintje. Wat er op de lijst staat betekent niet dat
   het aan mag.
 - **Meldingen naar de telefoon: per beurt één verslag, plus wat de bewoner
-  zelf moet oplossen.** Sven op 06-09-2026: "alleen laden voltooid met een
+  zelf moet oplossen.** De eigenaar op 06-09-2026: "alleen laden voltooid met een
   kleine samenvatting, en niet telkens onnodig meldingen sturen." Wie wat
   krijgt staat per persoon in het tabje Meldingen (`ontvangers.py`);
   besluiten staan standaard uit, "doet het weer" gaat alleen in de
   geschiedenis (`telefoon=False` bij `_async_tell`).
-- **Elke melding is kort, en er staat geen entiteit-id in.** Sven op
+- **Elke melding is kort, en er staat geen entiteit-id in.** De eigenaar op
   21-09-2026, over "Sinds 14:47 ging er 3,2 kWh in, en toen liep hij al": "ik
   vind dat en toen liep hij al onnodig. Alle meldingen moeten gewoon duidelijk
   en kort zijn." Die bijzin is eruit; "sinds" zegt al dat de coach het begin
@@ -54,7 +59,7 @@ commit, tag en breng uit.
   (`_LOGGER.warning` in `_async_sensorwacht`). Een bijzin die de bewoner niets
   laat doen en niets laat begrijpen hoort er niet te staan (v0.71.1).
 
-## De eisen van Sven
+## De eisen van de eigenaar
 
 Vastgelegd op 04-09-2026, in zijn woorden, en hard: elke regel in de coach
 hoort hieraan te voldoen en elke nieuwe regel wordt hieraan getoetst. Het
@@ -75,8 +80,8 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    Hij moduleert van 6 A tot het maximum van de paal, op het aantal fasen dat
    er is. Er staat nergens code die een fasemodus schrijft; dat hoort zo te
    blijven. **De paal zelf wisselt wel**, in de automatische fasemodus van
-   een Easee, en die modus blijft: Sven op 06-09-2026, "belangrijk voor
-   gastauto's." Bij Van den Dam koos hij die nacht om 04:17 één fase op een
+   een Easee, en die modus blijft: de eigenaar op 06-09-2026, "belangrijk voor
+   gastauto's." In de klantwoning koos hij die nacht om 04:17 één fase op een
    driefasig profiel; de Ford trok 16,9 A op een groep van 16 A, de paal
    herstartte op drie fasen en de Ford ging in storing. Sindsdien: laadt de
    paal aantoonbaar op één fase (`_fase_nu` in coach.py, uit de verhouding
@@ -85,7 +90,7 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    limiet, dan blijft de coach evenveel onder de groep van de paal
    (`circuit_ceiling` in planner.py, met de entiteit `circuit_limit`).
 4. **Niets van het net in de avondpiek**, van `EVENING_PEAK_START` (18:00,
-   Svens keuze van 05-09-2026; 17:00 kostte die dag 1,65 euro) tot
+   de keuze van 05-09-2026; 17:00 kostte die dag 1,65 euro) tot
    `EVENING_START` (20:00), bij elk contract. Bij een
    vast contract komt er bovendien vóór 20:00 helemaal niets van het net bij
    op de avond die bij de klaar-tijd hoort. Zon blijft altijd beschikbaar,
@@ -100,14 +105,14 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    tot ze er zijn alleen zon in: geen geschatte prijzen, geen uur zonder zon
    van het net (`alleen_zon` in planner.py). Een uur mét zon telt wel, ook
    als het dak te weinig geeft om zonder net te laden: dan vult hij aan tot
-   de ondergrens van de paal tegen de bekende prijs van dat uur. Sven op
+   de ondergrens van de paal tegen de bekende prijs van dat uur. De eigenaar op
    05-09-2026: "wat zon om 14 uur met een goedkope prijs weegt zwaarder dan
    een iets goedkopere nacht." Met zondag uitgevinkt en klaar-tijd maandag
    06:00 laadt hij dus het hele weekend op zon, en plant hij de nacht zodra
    de prijzen van maandag zondag rond 13:00 binnen zijn. De klaar-tijdregel
    rekent daarbij met wat er fysiek nog in kan (`capaciteit_kwh`), niet met
    wat er aan prijzen bekend is.
-7. **Liever iets eerder vol dan niet vol.** Sven op 06-09-2026, na de nacht
+7. **Liever iets eerder vol dan niet vol.** De eigenaar op 06-09-2026, na de nacht
    waarin de Ford op 86% in storing bleef staan. Vier dingen horen erbij.
    "Klaar" van de paal is niet "vol": zegt de accustand dat er nog iets in
    moet, dan start de coach de paal één keer opnieuw en gelooft hij "klaar"
@@ -123,7 +128,7 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    auto niet vol is, dan laadt hij op vol vermogen door (`overdue`).
 
 **"Vol" is wat de bewoner instelt, en een accustand telt pas als hij bezonken
-is** (v0.65.0). Sven op 16-09-2026: "ik wil een optie hebben op de kaart dat ik
+is** (v0.65.0). De eigenaar op 16-09-2026: "ik wil een optie hebben op de kaart dat ik
 kan aangeven tot hoever de bus laadt. Mijne laadt tot 80% namelijk maar ik kan
 hem ook op 100% instellen." Twee dingen, en ze horen bij elkaar.
 
@@ -155,7 +160,7 @@ kan tot 100, de bewoner wil tot 80: de coach houdt zelf op), `Auto.doel` in het
 virtuele huis, proef 53 in test_planner.py, proef 15c en 18 in test_coach.py.
 
 **Een zonuur moet de zon ook echt dragen, en de meter stelt de verwachting bij**
-(v0.67.0). Sven op 17-09-2026 om 16:33: "waarom ging hij niet laden om 16 uur
+(v0.67.0). De eigenaar op 17-09-2026 om 16:33: "waarom ging hij niet laden om 16 uur
 terwijl hij net zei ik ga laden om 16 uur, nu gaat hij om 17 uur. En om 20 uur
 gaat hij meer laden maar dan is er geen zon toch? Dan is het nu toch sowieso met
 een beetje eigen zon goedkoper?" In zijn eigen besluitenlog:
@@ -184,10 +189,10 @@ voorspelling weer, en zo schoof de belofte elk uur op. Drie dingen erbij.
    zon verwachten dan voorspeld is een gok, en dit hoort een correctie te zijn.
    Geldt ook voor de vaatwasser (`programma_kosten`) en voor de klaar-tijdsom
    (`capaciteit_kwh`).
-2. **De zon moet een kwart van het uur dragen** (`ZON_AANDEEL`, Svens keuze van
+2. **De zon moet een kwart van het uur dragen** (`ZON_AANDEEL`, de keuze van
    17-09-2026). Daarvoor was `SCHIJF_MINIMUM` genoeg: tien wattuur verwacht
    overschot maakte een heel uur tot zonuur en kocht tot de ondergrens van de
-   paal bij. Bij Sven was dat 0,24 kWh zon die 3,90 kWh van het net meesleepte,
+   paal bij. In die woning was dat 0,24 kWh zon die 3,90 kWh van het net meesleepte,
    vóór 20:00, terwijl eis 4 juist zegt dat er bij een vast contract voor de
    avond niets van het net bij hoort te komen. **Alleen voor de uren die nog
    komen**: voor het uur waar de coach in zit meet de meter het overschot, en
@@ -198,7 +203,7 @@ voorspelling weer, en zo schoof de belofte elk uur op. Drie dingen erbij.
    Dat laatste is op 17-09-2026 nog een keer tegen het licht gehouden en
    bevestigd. Die middag startte de coach om 16:56 op 230 W gemeten overschot
    en trok hij daarna elf minuten 4,06 kW van het net, vóór 20:00; ik stelde
-   voor de kwartregel ook op het lopende uur te zetten. Sven: **"bij een vast
+   voor de kwartregel ook op het lopende uur te zetten. De eigenaar: **"bij een vast
    contract is het wel beter om met overschot te laden."** En dat klopt: een
    teruggeleverde kilowattuur brengt hem € 0,0193 op en een ingekochte kost
    € 0,2417, dus elke gemeten watt overschot maakt dat uur goedkoper dan de
@@ -210,7 +215,7 @@ voorspelling weer, en zo schoof de belofte elk uur op. Drie dingen erbij.
    zonverwachting zei, dus hij rekent verder met wat hij mat."
 
 **De correctie geldt alleen voor uren van de dag waarop gemeten is**
-(`Forecast.solar_day`, v0.67.2). Bij Sven liep de zin diezelfde avond tussen
+(`Forecast.solar_day`, v0.67.2). In die woning liep de zin diezelfde avond tussen
 17:46 en 20:00 op van "50% minder" naar "86% minder", en dat klopte voor die
 uren: de voorspeller zei 769 Wh voor 19:00 en 406 voor 20:00 terwijl het dak op
 nul stond. Maar zonder deze grens zou een meting bij zonsondergang ook de uren
@@ -229,7 +234,7 @@ zon en € 9,35 bij een optimum van € 8,00. Het virtuele huis kent daarvoor
    scherm leest langs die lijst houdt (proef 69 in test_coach.py). **Elk nieuw
    veld van `Plan` hoort in die twee lijsten tegelijk.**
 
-**Bij allebei de contracten, en het bijt verschillend.** Sven vroeg ernaar: "je
+**Bij allebei de contracten, en het bijt verschillend.** De eigenaar vroeg ernaar: "je
 weet ook dat dit thuis een vast contract is, dus ik weet niet hoe het met een
 dynamisch moet." Bij een vast contract is de zonvloer vóór 20:00 de enige deur
 naar dat uur (`netto_vanaf`), dus daar sluit regel 2 het uur en wacht hij tot
@@ -246,7 +251,7 @@ van € 2,95). Proef 56 in test_planner.py, proef 69 in test_coach.py.
 te wachten, om 14:14 wekte hij met tien ampère, en de Easee begon op één fase.
 Te zien aan de verhouding vermogen en stroom: 5,900 A bij 4070 W om 14:05 is
 690 V per ampère, 5,875 A bij 1323 W om 14:15 is 225, en 15,498 A bij 10652 W
-om 14:26 weer 687. Sven: "hoe kon de laadpaal opeens op één fase gaan laden?
+om 14:26 weer 687. De eigenaar: "hoe kon de laadpaal opeens op één fase gaan laden?
 Die 10 A wekstroom, doe dat gewoon 16 A maken." De automatische fasemodus
 blijft (eis 3), de coach schrijft nog steeds geen fasemodus, maar hij zorgt dat
 de paal bij elke start genoeg aangeboden krijgt om er drie te kiezen.
@@ -285,12 +290,12 @@ zon, terwijl `latest_start` 03:24 die nacht zei. Vier dingen erbij:
 
 Proef 53b in test_coach.py, proef 54 in test_planner.py.
 
-**Een accustand die met stappen meldt wordt bijgeteld** (v0.68.0). Svens Ford
+**Een accustand die met stappen meldt wordt bijgeteld** (v0.68.0). de eigen Ford
 meldt per tien procent, ongeveer elk half uur: op 17-09-2026 stond hij van
 21:58:43 tot 22:30:37 op zeventig terwijl de paal 4.072 W leverde, dus 1,90 kWh
 aan de stekker en bijna negen procentpunt in de accu. Om 22:26 zei de kaart
 "nog 2,2 kWh, vol rond 23:00" terwijl er 0,18 kWh in ging en de bus om 22:29 op
-zijn doel stond. Sven: "dat hoeft helemaal niet en is onzin." Het was ook de
+zijn doel stond. De eigenaar: "dat hoeft helemaal niet en is onzin." Het was ook de
 bús die stopte en niet de coach, want die wachtte nog tot de sensor 79 zou
 zeggen.
 
@@ -314,7 +319,7 @@ grenzen, allemaal de veilige kant op:
 
 Scenario `accustand-per-tien` (`Auto.soc_stap` in het virtuele huis, en
 `Regel.nodig_kwh` om het te kunnen meten): over de hele beurt zat "nog te laden"
-er gemiddeld 0,63 kWh naast, nu 0,19. Proef 70 in test_coach.py, met Svens eigen
+er gemiddeld 0,63 kWh naast, nu 0,19. Proef 70 in test_coach.py, met de eigen
 getallen: 70% plus 1,90 kWh geleverd wordt 78,7%.
 
 **Een auto die nog bijkomt is geen auto die afbouwt** (v0.69.0). Bij Van den
@@ -322,7 +327,7 @@ Dam in de nacht van 18 op 19-09-2026 zakte de coach een paar keer voor de
 zekering; om 03:17 naar 8 A, om 03:33:13 bood hij weer 16 A aan, en de Ford
 bleef tot 03:44 op 8 A en 5,49 kW hangen. De meter bevestigde het (afname 6,8 kW
 tot 03:42, 10,7 kW om 03:44). Om 01:35 duurde dat negen minuten; na een dip van
-een minuut kwam hij binnen een halve minuut terug. Sven zag "16 A op maar 5,49
+een minuut kwam hij binnen een halve minuut terug. De eigenaar zag "16 A op maar 5,49
 kW". `_tempo_leren` zag een auto die zelf de rem was en schreef 5,52 kW op voor
 band 6 en 7,58 voor band 4, terwijl hij daar 10 kW trok. Twee dingen erbij:
 
@@ -352,7 +357,7 @@ het een streepje, want dan kan hij best leveren. Zonder `sun.sun` blijft alles
 zoals het was. Proef 72 in test_coach.py, vier proeven in test_rapport.mjs.
 
 **Een laaduur op de kaart staat nooit onder de ondergrens van de paal**
-(v0.67.3). Sven op 17-09-2026 om 22:10, met 2,5 kWh te gaan: "dit klopt niet,
+(v0.67.3). De eigenaar op 17-09-2026 om 22:10, met 2,5 kWh te gaan: "dit klopt niet,
 4 A laden." Het restje werd uitgesmeerd over de vijftig minuten die nog van dat
 uur over waren, 2,94 kW, en dat is 4 A; zijn paal trok 5,92 A en 4,08 kW en was
 om 22:45 klaar in plaats van om 23:00. De regel die dit sinds 05-09-2026 al
@@ -374,7 +379,7 @@ gewist uur gaf daarna een `KeyError`. Dan stond er niets op de kaart, dertien
 keer in één nacht in `warmtepomp-nacht`. Eén regel (`start not in uit`), proef
 55 in test_planner.py.
 
-**De tijdlijn zegt waarom een uur leeg is** (v0.66.0). Sven diezelfde dag: "hij
+**De tijdlijn zegt waarom een uur leeg is** (v0.66.0). De eigenaar diezelfde dag: "hij
 zegt nu 14:00 wachten buiten je tijden, maar dat klopt ook niet." Klopte ook
 niet: zijn tijden lopen tot 06:00. Een uur zonder enkele schijf kreeg altijd
 "buiten je tijden", ook als het gewoon de avondpiek was of de avondregel van een
@@ -383,14 +388,39 @@ uit en zegt "de avondpiek, daar komt niets van het net bij" of "geen zon over,
 en voor 20:00 geen net". Sinds v0.68.1 ook de derde grens: reiken de prijzen
 niet tot de klaar-tijd, dan zegt een leeg uur boven het gemiddelde van de
 bekende prijzen "duurder dan gemiddeld, dus hij wacht eerst op de nieuwe
-prijzen" (`_gemiddeld_bekend`, dezelfde som als in `schijven`). Bij Van den Dam
+prijzen" (`_gemiddeld_bekend`, dezelfde som als in `schijven`). In de klantwoning
 stond op 18-09-2026 de hele vrijdagavond "buiten je tijden" bij een klaar-tijd
 op zondag 06:00. Proef 58 in test_planner.py.
 
+**De tijdlijn rekent met dezelfde som als het besluit** (v0.72.0). De eigenaar
+op 21-09-2026, met twee schermafdrukken erbij: "die 14 A klopt totaal niet, dat
+moet toch gewoon 6 A zijn?" Op de kaart stond bij het lopende uur "14 A, laden
+op 9,4 kW" en een kwartier later "16 A, 11,0 kW", terwijl de paal de hele beurt
+op 6 A liep (dynamische laadgrens 6 vanaf 14:31:22, gemeten 5,85 tot 5,90 A) en
+het besluit ook 6 A zei. De kop beloofde "vol rond 15:00"; het werd 15:32.
+
+De oorzaak: bij gelijke prijzen spreidt `_decide` het laden over alle uren die
+er zijn (`easy-pace`), en `timeline` riep gewoon `goedkoopste` aan. Die knapzak
+is bij gelijke prijzen onverschillig en propt de vroegste uren vol, dus 4,4 kWh
+over de achtentwintig minuten die van dat uur over waren: 9,4 kW, oftewel 14 A.
+Twee sommen die hetzelfde hoorden te doen en uit elkaar gelopen waren; de
+docstring van `timeline` beloofde het tegenovergestelde.
+
+Nu delen ze de som: `vlakke_prijzen` en `rustig_tempo` in planner.py, gebruikt
+door allebei, en `_rustig_spreiden` legt de kilowatturen per uur neer op dat
+tempo in plaats van de knapzak te volgen. Het laatste (deel)uur zegt dan
+vanzelf "nog X kWh, vol rond HH:MM", want daar valt het tempo onder de
+ondergrens van de paal. Een uur dat niets krijgt heet bij gelijke prijzen niet
+meer "duurder dan wat hij nodig heeft" (drie uren van € 0,242 naast een uur van
+€ 0,242) maar "hij is dan al klaar". Bij verschillende prijzen verandert er
+niets: daar is haasten wél iets waard en hoort de knapzak de goedkoopste uren
+vol te pakken. Proef 59 in test_planner.py zet de twee sommen naast elkaar;
+**die proef ontbrak, en daarom kon dit erin blijven zitten.**
+
 **Het plafond voor de uren die komen is een meting van deze beurt** (v0.61.0).
-In de nacht van 09 op 10-09-2026 ging bij Van den Dam om het kwartier een
+In de nacht van 09 op 10-09-2026 ging in de klantwoning om het kwartier een
 warmtepomp aan op één fase, tot 22 A; de paal kreeg 8 A waar het plan met 16
-rekende, en de klaar-tijdregel zag dat pas om 03:01. Sven: "er zit geen
+rekende, en de klaar-tijdregel zag dat pas om 03:01. De eigenaar: "er zit geen
 patroon in, en dat kan bij andere woningen ook zo zijn", dus voorspellen mag
 niet en een verlaagd plafond aannemen ook niet. Wat wel mag is meten: sinds
 het inpluggen telt de coach elke ronde wat er voor de paal overbleef
@@ -407,7 +437,7 @@ herstart begint de meting opnieuw. Scenario's `warmtepomp-nacht` (oud: 85% om
 06:00, nieuw: vol om 05:25) en `warmtepomp-uit` (hetzelfde als zonder de
 regel); proef 51 in test_planner.py, proef 65 in test_coach.py.
 
-**De apparaatlijst noemt alleen wat de coach werkelijk kan** (v0.70.0). Sven op
+**De apparaatlijst noemt alleen wat de coach werkelijk kan** (v0.70.0). De eigenaar op
 19-09-2026: bij Apparaten gingen de thuisbatterij, de warmtepomp, de wasmachine,
 de droger en de zwembadpomp eruit, en bij een laadpaal het merk "overig". Over
 blijven: laadpaal, boiler, vaatwasser, airco en overig. Hetzelfde argument als
@@ -431,7 +461,7 @@ Proef 24b in test_coach.py.
 
 ## De vaatwasser
 
-Sinds 06-09-2026 stuurt de coach ook een vaatwasser (Home Connect), na Svens
+Sinds 06-09-2026 stuurt de coach ook een vaatwasser (Home Connect), na de eigen
 "omdat de bus vol zit gaan we de laadpaal even parkeren en nu verder met de
 vaatwasser sturing." Eerst alleen de vaatwasser (`PROGRAMMA_TYPES` in
 coach.py); de wasmachine en de droger komen erbij als dit werkt.
@@ -461,7 +491,7 @@ verbruiksprofiel in twee bulten, "starten op afstand" dat uit kan staan, en
 de gebeurtenissen `vaatwasser_vrijgeven` en `vaatwasser_deur`. Vijf
 scenario's `vaatwasser-*` in scenarios.py.
 
-**De tabel is van de klant, en de meting wint.** Sven op 06-09-2026 's
+**De tabel is van de klant, en de meting wint.** De eigenaar op 06-09-2026 's
 avonds: "ik wil dat kunnen aanpassen, wel moet hij dit als uitgangspunt
 hebben." `PROGRAMMAS` is dus alleen nog het uitgangspunt: per apparaat staat
 in Apparaten een bewerkbare tabel (`device.programs`, leeg is de opgave;
@@ -486,28 +516,28 @@ Connect uit de select-entiteit. **De coach kiest nooit zelf een programma.**
 Zes scenario's `vaatwasser-dom-*`, `vaatwasser-eigen-tabel` en
 `vaatwasser-gemeten` in scenarios.py; proef 58 en 59 in test_coach.py.
 
-**Home Connect heeft twee programma-entiteiten** (v0.55.0, na Svens "ik heb
+**Home Connect heeft twee programma-entiteiten** (v0.55.0, na de eigen "ik heb
 selected program in plaats van select"): de sensor `program` die zegt wat
 erop staat, en de select `program_select` waarmee het gezet wordt. De
 keuzelijst op de kaart en de namen in de tabel komen uit de opties van die
 select (`programOptions`, `programRows` in devices.js); de namen zijn daar
 niet te typen. Zonder select zegt de kaart wat er mist (`programPicker` geeft
-`missing`). **Geen verschuifbeleid per programma meer**: Sven, "elk programma
+`missing`). **Geen verschuifbeleid per programma meer**: de eigenaar, "elk programma
 is gewoon te verschuiven; het clean programma doe je toch handmatig."
 Snelladen en Pauzeren staan alleen op een laadpaal (`kind !== "programma"`).
 
 **Een vrijgaveschakelaar** (v0.56.0, `release_switch` bij allebei de
 vaatwassermerken): een switch of input_boolean die hetzelfde betekent als
-"Ingeruimd en dicht", voor Svens eigen keukenkaart. `_async_schakelaar_volgen`
+"Ingeruimd en dicht", voor een eigen keukendashboard. `_async_schakelaar_volgen`
 in coach.py houdt de twee gelijk: beweegt de schakelaar, dan volgt de
 vrijgave; beweegt de knop op de kaart, dan volgt de schakelaar; na een beurt
 gaan ze allebei uit. Uit tijdens een lopende beurt laat de beurt met rust.
 Proef 60 in test_coach.py. **De schakelaar en de status van een
-programma-apparaat wekken de coach meteen** (v0.56.1, `_watch`): Sven zette
+programma-apparaat wekken de coach meteen** (v0.56.1, `_watch`): de eigenaar zette
 de schakelaar aan en binnen vijf seconden weer uit omdat er niets gebeurde,
 terwijl de coach pas bij de volgende minuut keek.
 
-**In het lopende uur wint de meter van de zonverwachting** (v0.57.0). Sven
+**In het lopende uur wint de meter van de zonverwachting** (v0.57.0). De eigenaar
 op 07-09-2026 om 10:22: de coach wachtte op 11:00 terwijl zijn meter 3,5 kW
 teruglevering zag; "je weet niet hoeveel je om 11 uur terug gaat leveren."
 De verwachting zei 2,2 kW, het dak gaf 4,3. `programma_kosten` rekent voor
@@ -523,17 +553,17 @@ uur bij een dynamisch contract blijft winnen, want dat is een prijs en geen
 gok. Niet in de avondpiek. Sinds v0.62.0 is "de meter" hier de laagste
 teruglevering van de afgelopen tien minuten; zie hieronder.
 
-**Twee meldingen per beurt**, gestart en klaar (v0.57.0, Sven: "ik wil wel
+**Twee meldingen per beurt**, gestart en klaar (v0.57.0, de eigenaar: "ik wil wel
 meldingen ontvangen dat de vaatwasser gestart is en klaar is"). "Is gestart"
 als de coach drukte of erom vroeg, "draait" als de bewoner hem zelf aanzette.
 
-**Het vinkje bij Apparaten heet naar wat de coach kan** (v0.57.0, Sven: "er
+**Het vinkje bij Apparaten heet naar wat de coach kan** (v0.57.0, de eigenaar: "er
 is een verschil tussen aansturen en adviseren"): "aansturen" bij een merk met
 knoppen (`canSteer` in devices.js), "adviseren" bij een programma-apparaat
 zonder startknop, "noemen" bij alles wat alleen op een meetstekker zit. Staat
 het uit, dan noemt de overschottip het apparaat ook niet (`apparatenZin`).
 
-**Een gemeten rij staat op slot** (v0.57.2, Sven na de eerste beurt: "er
+**Een gemeten rij staat op slot** (v0.57.2, de eigenaar na de eerste beurt: "er
 staan nog wel mijn dingen in; geblokkeerd tot je het wist, en dat je het
 zelf kan invullen of toch overschrijven"): de velden tonen de meting en zijn
 niet te bewerken; "wissen" geeft de eigen getallen terug, "overnemen"
@@ -544,9 +574,9 @@ beurtrecord): een auto wordt ingeplugd en geladen, een vaatwasser
 vrijgegeven en verbruikt. Een beurt van vóór v0.57.2 heeft geen `kind`;
 `met_soort` in storage.py leidt hem dan af uit het type van het apparaat
 (`PROGRAMMA_TYPES` in const.py), bij het opvragen van de lijst (v0.58.1,
-Sven: "ik zie nog dingen terugkomen van de laadpaal").
+De eigenaar: "ik zie nog dingen terugkomen van de laadpaal").
 
-**Eén keer echt gezien aan Home Connect, 07-09-2026 om 11:00 bij Sven:**
+**Eén keer echt gezien aan Home Connect, 07-09-2026 om 11:00 in een echte woning:**
 knop, Run na twee seconden, tellen op de meetstekker, Finished, verslag,
 meting (Express 60: 90 min, 0,825 kWh, piek 2264 W), vrijgave eraf. Zijn
 machine zet de deur een kwartier voor het eind vanzelf open voor de stoom
@@ -555,7 +585,7 @@ vaatwasser was `STIL_KLAAR` (een kwartier) daarmee te kort. Sinds v0.58.0
 een half uur.
 
 **Een herstart midden in een beurt verliest de telling niet** (v0.58.0,
-Sven: "ja, reken terug"). De lopende beurt gaat elke vijf minuten naar de
+De eigenaar: "ja, reken terug"). De lopende beurt gaat elke vijf minuten naar de
 `BeurtenStore`, met `complete` op false en een `session` met alles wat de
 coach nodig heeft (vrijgavemoment, prijzen van toen, verloop, wat er al
 gemeld is). In de eerste ronde na een herstart (`eerste` in
@@ -570,7 +600,7 @@ beurt zijn verslag met wat er bewaard stond en gaat de vrijgave eraf,
 anders start hij zo nog een keer. Proef 62 in test_coach.py, scenario
 `vaatwasser-herstart`.
 
-**De eindtijd van het apparaat zelf** (v0.58.0, Sven: "pak de eindtijd van
+**De eindtijd van het apparaat zelf** (v0.58.0, de eigenaar: "pak de eindtijd van
 de integratie"): het veld Resterende tijd (`remaining`) mag een tijdstip
 zijn (Home Connect) of minuten of seconden (`_eindtijd` in coach.py). "Klaar
 rond" in de melding en op de kaart komt daarvandaan; zonder die sensor uit
@@ -578,7 +608,7 @@ de tabel. Proef 61. Een eindtijd die al voor de start stond telt niet
 (v0.62.0; zie hieronder).
 
 **Zonder meting gaat het verbruik op de piek, en de meterregel eist de
-piek** (v0.59.0). Sven op 08-09-2026 om 09:12: Eco 50 zonder meting startte
+piek** (v0.59.0). De eigenaar op 08-09-2026 om 09:12: Eco 50 zonder meting startte
 met 250 W op de meter, "waarom, terwijl bekend is dat de zon later meer
 schijnt?" Uitgesmeerd was Eco (225 min, 0,8 kWh) 213 W, en dat paste; de
 opwarmpiek van 2,2 kW kwam van het net terwijl het dak om 12:00 3,8 kW gaf.
@@ -587,11 +617,11 @@ Sinds die dag zet `_programma_stukken` zonder profiel alle kilowatturen op
 `meter_overal` in `plan_programma` alleen in als de meter ten minste de piek
 laat zien. De gewone som met de meter voor het lopende uur blijft: zegt de
 voorspeller de helft (zoals die dag), dan start hij zodra de meter van nu op
-de som wint, en dat is een verwachting waar niets aan te schaven is (Sven,
+de som wint, en dat is een verwachting waar niets aan te schaven is (de eigenaar,
 07-09). Scenario's `vaatwasser-vroeg` en `vaatwasser-vroeg-verwacht`, proef
 50 in test_planner.py.
 
-**Bespaard is het totaal plaatje** (v0.60.0). Sven op 09-09-2026, bij een
+**Bespaard is het totaal plaatje** (v0.60.0). De eigenaar op 09-09-2026, bij een
 vaatwasser die meteen op zon startte en "bespaard nul" kreeg: "Er is toch
 wel iets zonne-energie naar de vaatwasser gegaan? Ik wil het totaal plaatje.
 Wat het heeft gekost nu tegenover een duurder moment van het vrijgeven, en
@@ -605,10 +635,10 @@ door te wachten (de rest). Het verslag zegt welk deel wat was
 (`delen` in savings.js). Een beurt van vóór v0.60.0 heeft geen zondeel:
 bij die beurten zat de zon in de maat en was bespaard alleen het wachten.
 v0.59.0 had het één dag andersom (de zon van het vrijgavemoment in de maat,
-`zon_toen`), en dat gaf precies de nul waar Sven over viel. Proef 64.
+`zon_toen`), en dat gaf precies de nul waar de eigenaar over viel. Proef 64.
 
 **De meter is tien minuten zon, en de eindtijd hoort bij de beurt**
-(v0.62.0). Sven thuis op 11-09-2026: om 09:29 vrijgegeven, en om 09:35
+(v0.62.0). In een echte woning op 11-09-2026: om 09:29 vrijgegeven, en om 09:35
 klaarde het een paar minuten op; de meter zag 2694 W teruglevering, meer dan
 de piek van Express 60 (2264 W), en de coach startte. Om 09:37 was het 721 W;
 de drie opwarmpieken kregen 1,1 tot 1,8 kW zon, 0,2 van de 1,0 kWh, en de
@@ -634,7 +664,7 @@ ging), proef 66 en 67 in test_coach.py. Het virtuele huis kent daarvoor
 `Vaatwasser.eindtijd_tijdstip` (een eindtijd die al bij het kiezen staat en
 pas een minuut na de start klopt).
 
-**Een eindtijd telt pas als hij stilstaat** (v0.64.0). Sven thuis op
+**Een eindtijd telt pas als hij stilstaat** (v0.64.0). In een echte woning op
 15-09-2026: om 09:33 vrijgegeven, om 10:11 startte de coach op de meter, en
 de melding zei "klaar rond 11:33" terwijl hij om 11:45 klaar was. Deze keer
 was het geen eindtijd van het kiezen: Home Connect zette hem om 10:11:56,
@@ -652,10 +682,10 @@ minuten later dan vroeger. Scenario `vaatwasser-eindtijd-bijstellen` (oud:
 `Vaatwasser.eindtijd_eerst_min` in het virtuele huis, proef 66 in
 test_coach.py.
 
-**Na de klaar-tijd: morgen of nu** (v0.63.0). Sven gaf de vaatwasser op
+**Na de klaar-tijd: morgen of nu** (v0.63.0). De eigenaar gaf de vaatwasser op
 12-09-2026 om 16:33 vrij, bij vanaf 08:00 en klaar om 16:30. De coach plande
 de volgende middag, zei "hij start om 13:00" zonder "morgen", en noemde bij
-"nu starten" de prijs van 08:00 de volgende ochtend; Sven zette hem zelf aan.
+"nu starten" de prijs van 08:00 de volgende ochtend; de eigenaar zette hem zelf aan.
 Op 13-09: "ik wil dat er een optie bijkomt als hij na de klaartijd is. Dan de
 keuze ingeruimd en morgen starten of ingeruimd en nu starten." Sindsdien geeft
 `resolve_window` de klaar-tijd van vandaag mee als die voorbij is
@@ -665,7 +695,7 @@ in het besluit zegt welke dag) en "Ingeruimd, nu starten" (`ready_now` in de
 instellingen, `Apparaat.start_now`, regel `start-now`: meteen, ook in de
 avondpiek, net als snelladen). Na een vrijgave voor morgen blijft "Toch nu
 starten" staan. Voor de keukenkaart een tweede schakelaar, `release_now_switch`
-(`_async_nu_volgen` in coach.py, keuze van Sven): aan is ingeruimd én nu, uit
+(`_async_nu_volgen` in coach.py, keuze van de eigenaar): aan is ingeruimd én nu, uit
 voordat hij draait haalt alleen "nu" eraf, de vrijgave uit haalt ook "nu"
 eraf, en na de beurt gaan beide schakelaars uit. De teksten van een programma
 zeggen "morgen om" (`_dag_om`, `_dag_klok` in planner.py), en "nu starten zou"
@@ -676,7 +706,7 @@ test_planner.py, proef 68 in test_coach.py, scenario's
 
 ## De boiler
 
-Sinds 19-09-2026 stuurt de coach ook een boiler, na Svens "ik wil gewoon een
+Sinds 19-09-2026 stuurt de coach ook een boiler, na de eigen "ik wil gewoon een
 sturing maken op een boiler waar je alleen stroom op moet zetten, met een smart
 plug bijvoorbeeld. Als je er stroom op zet en de boiler is warm moet de coach
 detecteren dat hij warm genoeg is omdat de boiler dan onder een bepaald
@@ -703,7 +733,7 @@ rest tegen de prijs van dat uur, precies zoals `charge_cost` bij de paal), en
 `goedkoopste` pakt daar de goedkoopste uit. Eén schijf per blok en niet twee,
 want een boiler moduleert niet: hij staat aan op zijn eigen vermogen of hij
 staat uit. In de avondpiek telt alleen een blok dat de zon helemaal draagt
-(eis 4). Sven koos "klaar om, zoals de auto" (`DEADLINE_ONLY_TYPES`), en
+(eis 4). De eigenaar koos "klaar om, zoals de auto" (`DEADLINE_ONLY_TYPES`), en
 zonoverschot mag hij pakken: staat er meer overschot dan het element trekt, dan
 gaat hij aan, want het vat is de goedkoopste plek om overschot in te stoppen.
 
@@ -804,7 +834,7 @@ Wat daar niet in zit zijn de dingen die niet over geld gaan, en die staan er nog
 gewoon boven: de kabel, de zekering, de lastbewaker, een eigen pauze, snelladen,
 de klaar-tijd en de avondregel. Zie de opsomming in `_decide`.
 
-Sven op 30-08-2026: "het eindoel is altijd lage kosten, zo min mogelijk geld
+De eigenaar op 30-08-2026: "het eindoel is altijd lage kosten, zo min mogelijk geld
 uitgeven, en dat moet optimaal gestuurd worden. Dus alle scenario's moeten
 vergeleken worden met elkaar." De keuze tussen laagste kosten en zoveel mogelijk
 zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
@@ -856,7 +886,7 @@ met de mediaan van het huisverbruik in watt per uur uit de eigen opslag
 (`domotiapp_coach/history/quarters`), en `Prijzen(per_dag={"2026-09-05": [...]})`
 met de all-in prijzen zoals de klant ze zag. Let op: het energiedashboard en de
 prijssensor geven hun uren in UTC; twee uur erbij voor de lokale lijst. De negen
-`van-den-dam-*`-scenario's zijn zo gebouwd, uit de stand van vrijdagavond
+`klantwoning-*`-scenario's zijn zo gebouwd, uit de stand van vrijdagavond
 04-09-2026, en `test_virtueel.py` meet er de vijf controlepunten van die
 laadbeurt op na.
 
@@ -962,7 +992,7 @@ python tools/stijlcheck.py     # backticks in css-commentaar
 tweede `const device` in een functie die er al een in zijn parameters had. Dat is
 een `SyntaxError`, dus een module die niet laadt, dus een paneel dat helemaal
 zwart blijft. `node --check` gaf groen: die leest een bestand met `import` erin
-niet als de module die het is. Sven keek naar een zwart scherm en dacht dat zijn
+niet als de module die het is. De eigenaar keek naar een zwart scherm en dacht dat zijn
 herstart mislukt was.
 
 `stijlcheck.py` gaat over iets anders. De stijlen staan in een template literal
@@ -1023,10 +1053,9 @@ tokens/jansen.txt
 ```
 
 **Een installatie heet naar de achternaam, zonder voorvoegsel.** Dus
-`jansen.txt` en niet `klant-jansen.txt`. Dat is Svens afspraak; hij noemt zijn
-klanten bij de achternaam en wil dat terugzien in de bestandsnaam, in
+`jansen.txt` en niet `klant-jansen.txt`, en dat terugzien in de bestandsnaam, in
 `HA_INSTALLATIE` en in de kop van elk stuk gereedschap. Een tussenvoegsel wordt
-een streepje: `van-den-dam`.
+een streepje: `van-der-berg.txt`.
 
 Adres op de ene regel, het long-lived token op de andere. **Die bestanden horen
 op geen enkele remote, ook niet op een privérepo.** Maak op een nieuwe machine
@@ -1049,7 +1078,7 @@ python tools/besluiten.py                            # live meeluisteren
 ### Eén sessie kijkt naar één installatie
 
 **De installatie waarop de sessie gestart is, is de installatie waar het over
-gaat.** Vraagt Sven naar "mijn laadpaal" terwijl de sessie op een klant staat,
+gaat.** Vraagt de eigenaar naar "mijn laadpaal" terwijl de sessie op een klant staat,
 dan bedoelt hij de laadpaal van die klant, want daar is hij mee bezig. Ga daar
 niet zelf van afwijken, en kijk er nooit "even ook" naast bij een andere
 installatie om te vergelijken.
@@ -1058,16 +1087,16 @@ Daar hoort dit bij:
 
 - **Zet `HA_INSTALLATIE` niet zelf om** en gebruik geen `HA_TOKEN_FILE` om er
   omheen te gaan. `start.sh` zet `HA_VAST=1`, en dan weigert `ha.py` allebei met
-  een uitleg. Wil Sven uitdrukkelijk twee installaties vergelijken, dan mag
+  een uitleg. Wil de eigenaar uitdrukkelijk twee installaties vergelijken, dan mag
   `HA_VAST=0` ervoor, en zeg er dan bij dat je dat doet.
-- **De entiteit-id's in de privénotities zijn die van Svens eigen huis.** Bij een
+- **De entiteit-id's in de privénotities zijn die van de eigen woning.** Bij een
   klant heten ze anders. Zoek ze op met `/api/states` of via `logboek.py`, die
   het aan het paneel zelf vraagt, in plaats van ze aan te nemen.
-- Klopt de installatie niet met wat Sven wil, zeg dat dan en laat hem de sessie
+- Klopt de installatie niet met wat de eigenaar wil, zeg dat dan en laat hem de sessie
   opnieuw starten. Stiekem omschakelen is erger dan een ronde vertraging.
 
 Dit staat hier omdat het op 27-08-2026 misging: een sessie was op een klant
-gestart en las toch Svens eigen laadpaal uit.
+gestart en las toch de laadpaal van de eigen woning uit.
 
 **Welke installatie het is, moet altijd zichtbaar zijn.** Elk stuk gereedschap
 dat `ha` importeert schrijft daarom één regel naar stderr:

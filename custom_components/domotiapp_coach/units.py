@@ -65,7 +65,7 @@ def hour_to_watts(value: float | None, unit: str | None) -> float | None:
     precies een uur is dat hetzelfde getal in een andere eenheid, en juist
     daarom is het verschil een factor duizend die niemand opmerkt.
 
-    Bij Van den Dam stond op 29-08-2026 een vermogenssensor in het veld
+    In de klantwoning stond op 29-08-2026 een vermogenssensor in het veld
     "volgend uur". Die 1874 W werd als 1874 kWh gelezen en dus als 1.874.000 W
     doorgegeven. Op de kaart stond "over een uur wordt er 1874,0 kW zon
     verwacht", en erger: `_beter_straks` koos met zo'n vooruitzicht altijd voor

@@ -207,7 +207,7 @@ proef("een stroom van -0,017 A wordt 0,0 en niet -0,0", () => {
 
 // --- de grenssensor van de lastbewaker in het installatiescherm -------------
 //
-// De Easee Equalizer bij Van den Dam meldt in een sensor hoeveel hij op dit
+// De Easee Equalizer in de klantwoning meldt in een sensor hoeveel hij op dit
 // moment vrijgeeft voor het laden. De coach vroeg daar de hele nacht van
 // 30-08-2026 overheen en las uur na uur `limited_by_equalizer`, dus die sensor
 // is nu in te vullen.
@@ -248,7 +248,7 @@ proef("de rij hangt aan het vinkje van de lastbewaker", () => {
 
 // --- de tijdlijn op de laadpaalkaart ---------------------------------------
 //
-// Sven vroeg er op 30-08-2026 om: zien wat de coach van plan is tot de auto vol
+// De eigenaar vroeg er op 30-08-2026 om: zien wat de coach van plan is tot de auto vol
 // moet zijn. Het scherm rekent zelf niets uit; alles komt uit `timeline()` in
 // planner.py. Wat hier beproefd wordt is dus of het staat wat er gestuurd is.
 
@@ -291,7 +291,7 @@ function vooruitScherm(planAhead) {
   return { el, knopen };
 }
 
-/** De tijdlijn zoals de coach hem voor Van den Dam die nacht uitrekende. */
+/** De tijdlijn zoals de coach hem voor de klantwoning die nacht uitrekende. */
 const NACHT = {
   deadline: "2026-08-30T07:00:00",
   latest_start: "2026-08-30T03:07:00",
@@ -328,9 +328,9 @@ proef("de kop toont wat er nog in moet en wanneer hij begint", () => {
   assert.match(tekst, /Vol rond/, "zonder planned_kwh staat er gewoon vol rond");
 });
 
-// Bij Van den Dam op 04-09-2026: "Vol rond 17:00" boven acht zonblokken van
+// In de klantwoning op 04-09-2026: "Vol rond 17:00" boven acht zonblokken van
 // samen 33 van de 66 kWh, want de prijzen tot zondag 06:00 waren er nog niet.
-// Sven las dat als een belofte. Dekt het plan het tekort niet, dan staat er
+// De eigenaar las dat als een belofte. Dekt het plan het tekort niet, dan staat er
 // wat er gepland is en waarom de rest ontbreekt.
 proef("dekt het plan het tekort niet, dan staat er gepland en geen vol rond", () => {
   const half = { ...NACHT, kwh_needed: 66.1, planned_kwh: 33.1, solar_only: true };
@@ -384,7 +384,7 @@ proef("elk uur staat er met zijn prijs en of hij laadt", () => {
   assert.ok(rijen[2].className.includes("laadt"), "een laaduur wel");
 });
 
-// Sven op 04-09-2026, over "4,1 kWh zon" bij een dak van 2,4: "dat weet je toch
+// De eigenaar op 04-09-2026, over "4,1 kWh zon" bij een dak van 2,4: "dat weet je toch
 // niet. Laat sowieso zien hoeveel ampère hij laadt en kW."
 proef("een laaduur zegt hoe hard, en hoeveel daarvan zon is", () => {
   const met = { ...NACHT, blocks: [
@@ -463,7 +463,7 @@ proef("de programmatabel in het paneel is dezelfde als die in planner.py", () =>
 
 // --- de programmatabel per apparaat (06-09-2026 's avonds) -------------------
 //
-// Sven: "ik wil dat kunnen aanpassen, wel moet hij dit als uitgangspunt
+// De eigenaar: "ik wil dat kunnen aanpassen, wel moet hij dit als uitgangspunt
 // hebben", en "bij een domme vaatwasser een dropdown van de variabelen die ik
 // er in heb gezet." De opgave is het uitgangspunt, de eigen tabel wint, en de
 // meting wint van allebei.
@@ -472,7 +472,7 @@ const { programsFor, defaultPrograms, hasOwnPrograms, programKey, programOf, pro
         programOptions, programRows, programChooser, apparatenZin, canSteer, brandsFor, brandFields, canHaveDeadline } =
   await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
 const { timesFor } = await import("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js");
-// Sven op 07-09-2026: "de coach zegt zet nu de tablet lader aan, maar de
+// De eigenaar op 07-09-2026: "de coach zegt zet nu de tablet lader aan, maar de
 // tablet lader is alleen een vermogenssensor en het vinkje staat uit."
 proef("de tip noemt alleen apparaten waarbij het vinkje aan staat", () => {
   const tablet = { type: "overig", name: "Tablet lader", controllable: false };
@@ -489,7 +489,7 @@ proef("sturen kan alleen wat een merk met knoppen heeft, of een boiler met een s
   assert.equal(canSteer({ type: "vaatwasser", brand: "home_connect" }), true);
   assert.equal(canSteer({ type: "vaatwasser", brand: "overig" }), false);
   assert.equal(canSteer({ type: "overig" }), false);
-  // Een boiler heeft geen merk maar wel een schakelaar (v0.71.0). Sven op
+  // Een boiler heeft geen merk maar wel een schakelaar (v0.71.0). De eigenaar op
   // 19-09-2026: "alleen de switch invullen en power invullen."
   assert.equal(canSteer({ type: "boiler" }), true);
 });
@@ -546,11 +546,11 @@ proef("programOf vindt een programma op de sensorwaarde, in de eigen tabel, met 
 proef("de programmakeuze op de kaart: de entiteit bij een slimme machine, de eigen tabel bij een domme", () => {
   const slim = { type: "vaatwasser", brand: "home_connect", entities: { program: "select.vaatwasser_programma" } };
   assert.deepEqual(programPicker(slim), { kind: "entity", entityId: "select.vaatwasser_programma" });
-  // Sven heeft de sensor "selected program" én, apart, de select om te kiezen.
-  const sven = { type: "vaatwasser", brand: "home_connect",
+  // De eigenaar heeft de sensor "selected program" én, apart, de select om te kiezen.
+  const vaatwasser58 = { type: "vaatwasser", brand: "home_connect",
                  entities: { program: "sensor.vaatwasser_programma", program_select: "select.vaatwasser_programmas" } };
-  assert.deepEqual(programPicker(sven), { kind: "entity", entityId: "select.vaatwasser_programmas" });
-  assert.equal(programChooser(sven).entityId, "select.vaatwasser_programmas");
+  assert.deepEqual(programPicker(vaatwasser58), { kind: "entity", entityId: "select.vaatwasser_programmas" });
+  assert.equal(programChooser(vaatwasser58).entityId, "select.vaatwasser_programmas");
   const alleenLezen = { type: "vaatwasser", brand: "home_connect", entities: { program: "sensor.vaatwasser_programma" } };
   assert.deepEqual(programPicker(alleenLezen), { kind: "missing" }, "een sensor is niet te kiezen, en de kaart zegt wat er mist");
   const dom = { type: "vaatwasser", brand: "overig", entities: {} };
@@ -590,7 +590,7 @@ proef("een domme vaatwasser is handmatig en heeft een vermogenssensor nodig", ()
 
 // --- het meldingenscherm -----------------------------------------------------
 //
-// Sven op 04-09-2026: "daarom wil ik ook een soort geschiedenis meldingen
+// De eigenaar op 04-09-2026: "daarom wil ik ook een soort geschiedenis meldingen
 // scherm." De lijst komt van de server, de nieuwste eerst, en wordt per dag
 // gegroepeerd: Vandaag, Gisteren, en daarna de dag bij naam.
 
@@ -598,11 +598,11 @@ const { groepeer, dagkop, zeef, dagen, zichtbaar, naamVanTelefoon, STANDAARD_SOO
   "../custom_components/domotiapp_coach/frontend/src/views/notifications.js"
 );
 
-// Sven op 06-09-2026: "de admin voegt de personen toe, en die persoon ziet
+// De eigenaar op 06-09-2026: "de admin voegt de personen toe, en die persoon ziet
 // alleen zichzelf."
 proef("een bewoner ziet alleen zichzelf, de admin iedereen", () => {
   const mensen = [
-    { id: "p-1", name: "Sven", target: "mobile_app_sven", user_id: "u-sven" },
+    { id: "p-1", name: "Bewoner", target: "mobile_app_telefoon", user_id: "u-1" },
     { id: "p-2", name: "Partner", target: "mobile_app_partner", user_id: "u-partner" },
     { id: "p-3", name: "Tablet", target: "mobile_app_tablet", user_id: "" },
     { id: "p-4", name: "leeg", target: "" },
@@ -611,7 +611,7 @@ proef("een bewoner ziet alleen zichzelf, de admin iedereen", () => {
   assert.deepEqual(zichtbaar(mensen, { id: "u-partner", is_admin: false }).map((p) => p.id), ["p-2"]);
   assert.deepEqual(zichtbaar(mensen, { id: "u-niemand", is_admin: false }), [], "niet gekoppeld: niets");
   assert.deepEqual(zichtbaar(mensen, null).length, 3, "zonder gebruiker (het voorbeeld) alles");
-  assert.equal(naamVanTelefoon("mobile_app_iphone_van_sven"), "Iphone van sven");
+  assert.equal(naamVanTelefoon("mobile_app_iphone_van_de_keuken"), "Iphone van de keuken");
   assert.equal(naamVanTelefoon(""), "");
   assert.deepEqual(STANDAARD_SOORTEN, { kritiek: true, melding: true, besluit: false, belasting: true },
     "een nieuwe persoon krijgt alles behalve de besluiten, net als op de server");
@@ -639,7 +639,7 @@ proef("meldingen worden per dag gegroepeerd, de nieuwste eerst", () => {
   assert.equal(dagkop(new Date(2025, 11, 24), nu), "woensdag 24 december 2025", "een ander jaar krijgt het jaar erbij");
 });
 
-// Sven op 05-09-2026: "dat je op normale en kritieke meldingen kan filteren
+// De eigenaar op 05-09-2026: "dat je op normale en kritieke meldingen kan filteren
 // en op de tijd."
 proef("het filter zeeft op soort en op dag", () => {
   const nu = new Date(2026, 8, 6, 8, 0);
@@ -713,7 +713,7 @@ proef("het scherm tekent een kop per dag en een rij per melding", () => {
 
 // --- Bespaard: de laadbeurten opgeteld --------------------------------------
 //
-// Sven op 05-09-2026: "een overzichtje wat we hebben bespaard, per dag, week,
+// De eigenaar op 05-09-2026: "een overzichtje wat we hebben bespaard, per dag, week,
 // maand, jaar, van elk apparaat." Het rekenwerk per beurt zit in de coach; hier
 // wordt alleen opgeteld, en een beurt zonder prijs telt niet mee in het geld.
 
@@ -721,7 +721,7 @@ const { beurtenIn, totalen, perApparaat, opmerking, woorden, soort, delen } = aw
   "../custom_components/domotiapp_coach/frontend/src/savings.js"
 );
 
-// Sven op 07-09-2026, bij de eerste vaatwasserbeurt onder Bespaard: "hij heeft
+// De eigenaar op 07-09-2026, bij de eerste vaatwasserbeurt onder Bespaard: "hij heeft
 // het hier over de paal, maar dat moet vaatwasser zijn. Ook kan je niet een
 // vaatwasser inpluggen."
 proef("de woorden van Bespaard volgen wat er in de lijst staat", () => {
@@ -774,7 +774,7 @@ proef("bespaard telt per periode en per apparaat op, zonder verzonnen geld", () 
 
 // --- de programmatabel in Apparaten: een gemeten rij staat op slot ----------
 //
-// Sven op 07-09-2026, na de eerste echte beurt: "er staan nog wel mijn dingen
+// De eigenaar op 07-09-2026, na de eerste echte beurt: "er staan nog wel mijn dingen
 // in; moeten we niet iets maken dat als hij het gemeten heeft, dat dan
 // geblokkeerd wordt tot je het wist?"
 
@@ -801,7 +801,7 @@ proef("een gemeten programma toont de meting, staat op slot en heeft wissen en o
   assert.ok(html.includes("staat op slot"), "en de uitleg zegt het");
 });
 
-// Sven op 16-09-2026: "ik wil een optie hebben op de kaart dat ik kan aangeven
+// De eigenaar op 16-09-2026: "ik wil een optie hebben op de kaart dat ik kan aangeven
 // tot hoever de bus laadt. Mijne laadt tot 80% namelijk maar ik kan hem ook op
 // 100% instellen."
 
@@ -834,7 +834,7 @@ proef("het autoprofiel heeft een doel, standaard 100, en een lege invoer is geen
 // en die stijlen staan onder `.plan-pick`. Buiten dat blok kreeg de knop dus
 // helemaal geen vorm: het pictogram werd op ware grootte getekend, de rij groeide
 // mee, en Snelladen en Pauzeren werden reusachtige cirkels omdat hun
-// pillevorm de hoogte van de rij overnam. Sven: "waarom is dit ineens zo groot?"
+// pillevorm de hoogte van de rij overnam. De eigenaar: "waarom is dit ineens zo groot?"
 //
 // Elke knop in die rij hoort dus een klasse te hebben die de stijlen ook echt
 // vormgeven, en een die verborgen kan worden hoort een eigen `[hidden]`-regel
@@ -912,7 +912,7 @@ proef("de tijdlijnknop staat in de rij en is verborgen tot er een plan is", () =
   assert.match(knop, /\shidden/, "en verborgen tot de coach een tijdlijn heeft");
 });
 
-// Sven op 13-09-2026, na een vrijgave om 16:33 bij klaar om 16:30: "de keuze
+// De eigenaar op 13-09-2026, na een vrijgave om 16:33 bij klaar om 16:30: "de keuze
 // ingeruimd en morgen starten of ingeruimd en nu starten." De coach zegt in
 // zijn besluit welke klaar-tijd gemist is (`missed`) en naar welke dag het
 // schema opschuift (`later`); de kaart maakt daar twee knoppen van.
@@ -991,7 +991,7 @@ proef("nu starten stuurt ready en now mee, de gewone knop now uit", async () => 
   assert.deepEqual(k.el.settings_.ready_now, []);
 });
 
-// --- de woning bij een slapende omvormer (Van den Dam, 19-09-2026) ----------
+// --- de woning bij een slapende omvormer (de klantwoning, 19-09-2026) ----------
 // Om 03:40 stond er een streepje bij Woning: 6,77 kW van het net en 5,49 kW
 // naar de paal, maar de SolarEdge was sinds 21:40 onbereikbaar en het verbruik
 // is zon plus net.

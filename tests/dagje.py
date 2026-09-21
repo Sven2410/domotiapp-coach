@@ -1,6 +1,6 @@
 """Een bus die om 06:01 aan de lader gaat: wat doet de coach de hele dag?
 
-Svens installatie, vast contract, klaar-tijd de volgende ochtend om 06:00.
+een echte installatie, vast contract, klaar-tijd de volgende ochtend om 06:00.
 Alleen rekenen, er gaat niets naar zijn paal.
 """
 import importlib.util, sys

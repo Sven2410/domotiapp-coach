@@ -325,11 +325,11 @@ class DacViewDevices extends DacEditorElement {
    * wijzigen, een rij is weg te halen of toe te voegen, en "Opgaven
    * terugzetten" maakt het weer de fabriekstabel. Ernaast wat de coach bij
    * een echte beurt mat: dat wint van de tabel zodra het er is, en is per rij
-   * te wissen als er met het verkeerde programma gemeten is. Sven op
+   * te wissen als er met het verkeerde programma gemeten is. De eigenaar op
    * 06-09-2026: "ik wil dat kunnen aanpassen, wel moet hij dit als uitgangspunt
    * hebben", en "dat gaan meten en dan die waardes in kunnen vullen."
    *
-   * Een gemeten rij staat op slot. Sven op 07-09-2026, na de eerste echte
+   * Een gemeten rij staat op slot. De eigenaar op 07-09-2026, na de eerste echte
    * beurt: "er staan nog wel mijn dingen in; moeten we niet iets maken dat
    * als hij het gemeten heeft, dat dan geblokkeerd wordt tot je het wist, en
    * dat je het zelf kan invullen of toch iets overschrijven?" De velden tonen
@@ -348,7 +348,7 @@ class DacViewDevices extends DacEditorElement {
 
     // Bij een machine die haar programma's zelf noemt staan de namen vast en
     // komen de rijen van de machine; bij een domme vaatwasser typ je ze zelf.
-    // Sven op 06-09-2026: "bij Home Connect moet de naam geblokkeerd worden."
+    // De eigenaar op 06-09-2026: "bij Home Connect moet de naam geblokkeerd worden."
     const options = manual ? [] : programOptions(device, this.feed_);
     const vast = !manual;
     const rows = programRows(device, options)
@@ -557,7 +557,7 @@ class DacViewDevices extends DacEditorElement {
     if (brandsFor(device.type).length && !brandMeta(device)) return "";
 
     const missing = missingForControl(device);
-    // Eén vinkje, drie woorden. Sven op 07-09-2026: "er is een verschil tussen
+    // Eén vinkje, drie woorden. De eigenaar op 07-09-2026: "er is een verschil tussen
     // de coach mag aansturen en adviseren, want een domme vaatwasser kan de
     // coach helemaal niet aansturen maar wel adviseren." Wat de coach kan
     // bedienen stuurt hij; een programma-apparaat zonder startknop plant hij
