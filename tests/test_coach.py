@@ -1221,6 +1221,7 @@ korter = storage._migrate({
          "cars": [{"id": "car-a", "phases": "one"}]},
         {"id": "d4", "type": "laadpaal", "brand": "easee", "controllable": True},
         {"id": "d5", "type": "vaatwasser", "brand": "home_connect"},
+        {"id": "d6", "type": "thuisbatterij", "brand": "anker", "controllable": True},
     ],
 })
 na = {d["id"]: d for d in korter["devices"]}
@@ -1236,6 +1237,13 @@ controle("een Easee blijft onaangeroerd",
          na["d4"]["brand"] == "easee" and na["d4"]["controllable"] is True, f"{na['d4']}")
 controle("en een apparaat van een type dat gewoon bestaat ook",
          na["d5"]["type"] == "vaatwasser" and na["d5"]["brand"] == "home_connect", f"{na['d5']}")
+
+# Sinds v0.73.0 stuurt de coach een thuisbatterij werkelijk, en staat het type
+# er dus weer in. Een batterij die iemand nu toevoegt mag bij de volgende
+# herstart niet stilletjes "overig" worden.
+controle("een thuisbatterij is geen vervallen type meer",
+         na["d6"]["type"] == "thuisbatterij" and na["d6"]["brand"] == "anker"
+         and na["d6"]["controllable"] is True, f"{na['d6']}")
 
 # Helemaal zonder strategie moet het ook niet omvallen.
 uit = schema_bijwerken(None, "d1", enabled=True)
@@ -4142,6 +4150,179 @@ print(f"  {meldingen74}")
 controle("na drie vergeefse keren zegt hij dat er geen stroom loopt",
          any("geen stroom" in m for m in meldingen74), f"{meldingen74}")
 controle("en hij zegt het één keer", sum("geen stroom" in m for m in meldingen74) == 1, f"{meldingen74}")
+
+print("=== 75. de thuisbatterij: de coach zet de modus, schrijft een vermogen en geeft hem terug ===")
+# De eigenaar op 21-09-2026: "het doel is om hem volledig third party te sturen,
+# dus via HA." De velden zijn die van de officiele integratie in de eerste
+# woning: een modus, een vermogen zonder teken en een richting ernaast.
+BATTERIJ = {
+    "id": "dev-batterij", "type": "thuisbatterij", "name": "", "brand": "anker", "controllable": True,
+    "entity": "sensor.batterij_vermogen",
+    "entities": {
+        "soc": "sensor.batterij_soc", "setpoint": "number.batterij_vermogen",
+        "direction": "select.batterij_richting", "mode": "select.batterij_modus",
+        "capacity": "sensor.batterij_capaciteit",
+        "charge_limit": "number.batterij_laadgrens", "discharge_limit": "number.batterij_ontlaadgrens",
+        "energy_in": "sensor.batterij_in", "energy_out": "sensor.batterij_uit",
+    },
+    "battery": {"max_charge_w": 3500, "max_discharge_w": 2500, "phase": "l3",
+                "control_mode": "third_party_control", "idle_mode": "self_consumption"},
+}
+
+
+def huis75(afname=1500.0, teruglevering=0.0, batterij="0", soc="60", modus="self_consumption"):
+    return {
+        **huis(afname=afname, teruglevering=teruglevering, zon_rest=0.0, status="disconnected"),
+        "sensor.batterij_vermogen": {"state": batterij, "attributes": {"unit_of_measurement": "W"}},
+        "sensor.batterij_soc": soc,
+        "number.batterij_vermogen": {"state": "0", "attributes": {"max_charge_power": 7000}},
+        "select.batterij_richting": {"state": "charge", "attributes": {"options": ["charge", "discharge"]}},
+        "select.batterij_modus": modus,
+        "sensor.batterij_capaciteit": {"state": "14.6", "attributes": {"unit_of_measurement": "kWh"}},
+        "number.batterij_laadgrens": "95", "number.batterij_ontlaadgrens": "5",
+        "sensor.batterij_in": {"state": "250.0", "attributes": {"unit_of_measurement": "kWh"}},
+        "sensor.batterij_uit": {"state": "184.0", "attributes": {"unit_of_measurement": "kWh"}},
+    }
+
+
+def zet75(hass):
+    """Wat er deze ronde naar de batterij ging: (modus, richting, vermogen)."""
+    modus = [d[2]["option"] for d in hass.services.verstuurd if d[2].get("entity_id") == "select.batterij_modus"]
+    richting = [d[2]["option"] for d in hass.services.verstuurd if d[2].get("entity_id") == "select.batterij_richting"]
+    vermogen = [d[2]["value"] for d in hass.services.verstuurd if d[2].get("entity_id") == "number.batterij_vermogen"]
+    return modus, richting, vermogen
+
+
+def volg75(hass):
+    """Wat Home Assistant doet na een opdracht: de keuzelijst laat de nieuwe keuze zien."""
+    for _, _, gegevens in hass.services.verstuurd:
+        if gegevens.get("entity_id") == "select.batterij_modus":
+            hass.states.zet("select.batterij_modus", gegevens["option"])
+
+
+async def ronde75(hass, coach, nu):
+    hass.services.verstuurd.clear()
+    await hass.afmaken()
+    await coach._round(nu)
+    await hass.afmaken()
+    volg75(hass)
+    return coach.state.get("dev-batterij") or {}
+
+
+inst75 = instellingen(devices=[LAADPAAL, BATTERIJ])
+hass75, store75, coach75 = bouw(huis75(), inst75)
+NU75 = dt.datetime(2026, 9, 21, 21, 0)
+b75 = asyncio.run(ronde75(hass75, coach75, NU75))
+modus75, richting75, vermogen75 = zet75(hass75)
+print(f"  {b75.get('mode_name')}: {b75.get('reason')}")
+print(f"  naar de batterij: modus {modus75}, richting {richting75}, vermogen {vermogen75}")
+controle("vast contract, avond: nul op de meter", b75.get("mode") == "nul", f"{b75.get('mode')}")
+controle("de modus gaat naar externe sturing", modus75 == ["third_party_control"], f"{modus75}")
+controle("het huis vraagt 1500 W: de richting gaat naar ontladen", richting75 == ["discharge"], f"{richting75}")
+# Het doel ligt een halve dode band onder nul, want terugleveren brengt minder
+# op dan inkopen kost: 1500 plus 20.
+controle("en het vermogen is wat het huis vraagt, zonder teken", vermogen75 == [1520], f"{vermogen75}")
+controle("het rendement komt uit de kWh-meter: 73,6%", b75.get("rte") == 0.736, f"{b75.get('rte')}")
+controle("en staat in de opslag, voor na een herstart",
+         abs((store75.instellingen.get("battery_state") or [{}])[0].get("rte", 0) - 0.736) < 0.001,
+         f"{store75.instellingen.get('battery_state')}")
+controle("de laadgrens en de ontlaadgrens zijn alleen gelezen",
+         not [d for d in hass75.services.verstuurd if "grens" in str(d[2].get("entity_id"))],
+         f"{hass75.services.verstuurd}")
+controle("de kaart krijgt de stand, de accustand en de terugverdientijd",
+         b75.get("kind") == "batterij" and b75.get("soc") == 60.0 and "earned" in (b75.get("payback") or {}),
+         f"{ {k: b75.get(k) for k in ('kind', 'soc', 'payback')} }")
+
+# De coach stopt: het vermogen naar nul en de batterij terug naar zijn eigen
+# stand. Op zijn laatste opdracht blijven staan is leeglopen naar het net.
+hass75.services.verstuurd.clear()
+coach75.async_stop()
+asyncio.run(hass75.afmaken())
+modus75, _, vermogen75 = zet75(hass75)
+print(f"  bij het stoppen: modus {modus75}, vermogen {vermogen75}")
+controle("stopt de coach, dan gaat het vermogen naar nul", vermogen75 == [0], f"{vermogen75}")
+controle("en de batterij terug naar zijn eigen stand", modus75 == ["self_consumption"], f"{modus75}")
+
+print("=== 76. de thuisbatterij: wie niet mag sturen schrijft niets ===")
+for niveau in ("read", "advise", "propose"):
+    inst76 = instellingen(devices=[LAADPAAL, BATTERIJ])
+    inst76["strategy"]["level"] = niveau
+    hass76, _, coach76 = bouw(huis75(), inst76)
+    b76 = asyncio.run(ronde75(hass76, coach76, NU75))
+    controle(f"op '{niveau}' gaat er niets naar de batterij", zet75(hass76) == ([], [], []), f"{zet75(hass76)}")
+    controle(f"op '{niveau}' zegt hij wel wat hij zou doen",
+             b76.get("mode") == "nul" and b76.get("applied") is False, f"{b76.get('mode')} {b76.get('applied')}")
+
+# Het vinkje "mag sturen" gaat eraf terwijl hij stuurde: dan geeft hij hem terug.
+inst76 = instellingen(devices=[LAADPAAL, BATTERIJ])
+hass76, store76, coach76 = bouw(huis75(), inst76)
+asyncio.run(ronde75(hass76, coach76, NU75))
+store76.instellingen["devices"] = [LAADPAAL, {**BATTERIJ, "controllable": False}]
+asyncio.run(ronde75(hass76, coach76, NU75 + dt.timedelta(minutes=1)))
+modus76, _, vermogen76 = zet75(hass76)
+controle("vinkje eraf: vermogen naar nul en de eigen stand terug",
+         vermogen76 == [0] and modus76 == ["self_consumption"], f"{modus76} {vermogen76}")
+
+print("=== 77. de thuisbatterij: de laadpaal laadt, een ander merk, en twee sensoren ===")
+inst77 = instellingen(devices=[LAADPAAL, BATTERIJ])
+hass77, _, coach77 = bouw({**huis75(afname=5500.0), "sensor.laadpaal_vermogen": "4100",
+                           "sensor.laadpaal_status": "charging", "sensor.laadpaal_stroom": "6"}, inst77)
+b77 = asyncio.run(ronde75(hass77, coach77, NU75))
+print(f"  {b77.get('mode_name')}: {b77.get('reason')}")
+controle("laadt de paal, dan staat de batterij op alleen zonneladen",
+         b77.get("mode") == "zonneladen" and b77.get("rule") == "paal-laadt", f"{b77.get('mode')} {b77.get('rule')}")
+controle("en er gaat geen ontlaadopdracht heen",
+         not [v for v in zet75(hass77)[2] if v] and "discharge" not in zet75(hass77)[1], f"{zet75(hass77)}")
+
+# Het merk Overig zonder richting: het teken van het getal is de richting.
+OVERIG77 = {**BATTERIJ, "brand": "overig",
+            "entities": {k: v for k, v in BATTERIJ["entities"].items() if k not in ("direction", "mode")},
+            "battery": {"max_charge_w": 3000, "max_discharge_w": 3000}}
+hass77b, _, coach77b = bouw(huis75(), instellingen(devices=[LAADPAAL, OVERIG77]))
+asyncio.run(ronde75(hass77b, coach77b, NU75))
+controle("zonder richting gaat ontladen erin als een negatief getal", zet75(hass77b) == ([], [], [-1520]),
+         f"{zet75(hass77b)}")
+OMGEKEERD77 = {**OVERIG77, "battery": {**OVERIG77["battery"], "setpoint_invert": True}}
+hass77c, _, coach77c = bouw(huis75(), instellingen(devices=[LAADPAAL, OMGEKEERD77]))
+asyncio.run(ronde75(hass77c, coach77c, NU75))
+controle("of als een positief, waar de batterij het zo wil", zet75(hass77c)[2] == [1520], f"{zet75(hass77c)}")
+
+# Een batterij die laden en ontladen op twee sensoren meldt, zoals de officiele
+# integratie in de eerste woning: 2250 W ontladen is dan min 2250.
+TWEE77 = {**BATTERIJ, "entity": "",
+          "entities": {**BATTERIJ["entities"], "charge_power": "sensor.bat_laden",
+                       "discharge_power": "sensor.bat_ontladen"}}
+hass77d, _, coach77d = bouw({**huis75(afname=0.0), "sensor.bat_laden": "0", "sensor.bat_ontladen": "2250"},
+                            instellingen(devices=[LAADPAAL, TWEE77]))
+b77d = asyncio.run(ronde75(hass77d, coach77d, NU75))
+controle("twee sensoren worden samen een vermogen met een teken", b77d.get("power_w") == -2250,
+         f"{b77d.get('power_w')}")
+controle("en de sensor die andersom telt ook",
+         coach77d._batterij_w({**BATTERIJ, "battery": {"power_invert": True}}) is not None
+         and coachmod.ChargerCoach._batterij_w(
+             coach75, {**BATTERIJ, "battery": {"power_invert": True}}) in (0.0, -0.0), "")
+
+print("=== 78. de thuisbatterij: wat hij opslokt blijft overschot voor de andere apparaten ===")
+# De meter staat op nul omdat de batterij 2 kW zon opneemt. Voor de vaatwasser
+# en de paal is dat nog steeds 2 kW overschot: die laden zonder verlies en gaan
+# dus voor, en de batterij krijgt wat er daarna over is.
+hass78, _, coach78 = bouw(huis75(afname=0.0, teruglevering=0.0, batterij="2000"),
+                          instellingen(devices=[LAADPAAL, BATTERIJ]))
+inst78 = instellingen(devices=[LAADPAAL, BATTERIJ])
+controle("de kale meter zegt nul", coach78._netto_export_kaal(inst78) == 0.0,
+         f"{coach78._netto_export_kaal(inst78)}")
+controle("voor de andere apparaten is er 2 kW over", coach78._netto_export_w(inst78) == 2000.0,
+         f"{coach78._netto_export_w(inst78)}")
+hass78.states.zet("sensor.batterij_vermogen", {"state": "-1500", "attributes": {"unit_of_measurement": "W"}})
+hass78.states.zet("sensor.teruglevering", "200")
+controle("en wat de batterij afgeeft is geen zon: 200 W terug bij 1500 W ontladen is 1300 W tekort",
+         coach78._netto_export_w(inst78) == -1300.0, f"{coach78._netto_export_w(inst78)}")
+# De zekering: de batterij hangt op L3, waar al 18 A loopt. Onder de 25 A met
+# de marge van de lastbewaker blijft er weinig over om mee te laden.
+hass78.states.zet("sensor.l3", "18")
+ruimte78 = coach78._laadruimte_w(inst78, BATTERIJ, 0.0)
+print(f"  laadruimte op L3 bij 18 A: {ruimte78:.0f} W")
+controle("de laadruimte is wat die ene fase nog overlaat", 0 < ruimte78 < 1500, f"{ruimte78}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

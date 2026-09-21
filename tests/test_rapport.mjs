@@ -1030,6 +1030,143 @@ proef("een omvormer die wel iets zegt wint altijd", () => {
   assert.equal(woningBij("12", "below_horizon").solar, 12);
 });
 
+// --- de thuisbatterij ---------------------------------------------------------
+//
+// De eigenaar op 21-09-2026: "Ik wil de coach gaan uitbreiden met een
+// thuisbatterij." Hier wat het paneel ervan laat zien: het merk met zijn velden,
+// de regels op de kaart, en de woning die klopt terwijl de batterij het huis
+// voedt.
+const { BATTERY_BRANDS, DEVICE_TYPES: TYPES, brandFields: veldenVan, canSteer: kanSturen, missingForControl: mistNog, defaultBattery } =
+  await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+const { batteryRows, volgendeNetlading, terugverdiendTekst } = await import(
+  "../custom_components/domotiapp_coach/frontend/src/battery.js"
+);
+
+proef("de thuisbatterij staat weer in de lijst, met Anker en Overig als merk", () => {
+  assert.ok(TYPES.some((t) => t.id === "thuisbatterij"));
+  assert.deepEqual(BATTERY_BRANDS.map((b) => b.id), ["anker", "overig"]);
+});
+
+proef("de merken van de batterij zijn dezelfde als in const.py", () => {
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/const.py", import.meta.url), "utf8");
+  const blok = bron.slice(bron.indexOf("BATTERY_BRANDS: Final = ["));
+  const python = [...blok.slice(0, blok.indexOf("]")).matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(python, BATTERY_BRANDS.map((b) => b.id));
+});
+
+proef("Anker vraagt om een richting, Overig niet", () => {
+  const nodig = (brand) =>
+    veldenVan({ type: "thuisbatterij", brand }).filter((f) => f.needed).map((f) => f.key);
+  assert.deepEqual(nodig("anker"), ["soc", "setpoint", "direction"]);
+  assert.deepEqual(nodig("overig"), ["soc", "setpoint"]);
+});
+
+proef("een batterij is te sturen, en zegt wat er nog mist", () => {
+  const batterij = { type: "thuisbatterij", brand: "anker", controllable: true, entities: { soc: "sensor.soc" } };
+  assert.equal(kanSturen(batterij), true);
+  assert.deepEqual(mistNog(batterij), ["Vermogen zetten", "Richting"]);
+});
+
+proef("Anker krijgt de woorden van zijn bedrijfsmodus mee, Overig niet", () => {
+  assert.equal(defaultBattery("anker").control_mode, "third_party_control");
+  assert.equal(defaultBattery("anker").idle_mode, "self_consumption");
+  assert.equal(defaultBattery("overig").control_mode, "");
+  // Niets wat de coach zou moeten weten staat standaard ingevuld.
+  assert.equal(defaultBattery("anker").capacity_kwh, null);
+  assert.equal(defaultBattery("anker").rte_percent, null);
+  assert.equal(defaultBattery("anker").trade, false);
+});
+
+const BESLUIT_BATTERIJ = {
+  kind: "batterij", mode: "netladen", mode_name: "Laden van het net", applied: true,
+  setpoint_w: 1750, value: 0.2451, full_before: null,
+  hours: [
+    { start: "2026-09-22T01:00:00", end: "2026-09-22T02:00:00", grid_kwh: 0 },
+    { start: "2026-09-22T02:00:00", end: "2026-09-22T03:00:00", grid_kwh: 1.7 },
+    { start: "2026-09-22T03:00:00", end: "2026-09-22T04:00:00", grid_kwh: 1.8 },
+    { start: "2026-09-22T04:00:00", end: "2026-09-22T05:00:00", grid_kwh: 0 },
+    { start: "2026-09-22T13:00:00", end: "2026-09-22T14:00:00", grid_kwh: 2.0 },
+  ],
+  payback: { earned: 45, price: 4500, days: 30, min_days: 28, date: "2034-11-08" },
+};
+
+proef("de kaart van een batterij: stand, opdracht, waarde, netlading en terugverdientijd", () => {
+  const rijen = Object.fromEntries(batteryRows(BESLUIT_BATTERIJ).map((r) => [r.label, r.text]));
+  assert.equal(rijen["Stand"], "Laden van het net");
+  assert.equal(rijen["Opdracht van de coach"], "laden op 1.750 W");
+  assert.equal(rijen["Een kWh erin is straks waard"], "€ 0,245");
+  assert.equal(rijen["Laadt van het net"], "02:00 tot 04:00, ongeveer 3,5 kWh");
+  assert.equal(rijen["Terugverdiend"], "€ 45,00 van € 4.500");
+  assert.match(rijen["Terugverdiend rond"], /november 2034, in het tempo van de laatste 30 gemeten dagen/);
+});
+
+proef("alleen de eerste aaneengesloten netlading staat erop", () => {
+  const net = volgendeNetlading(BESLUIT_BATTERIJ.hours);
+  assert.equal(net.start, "2026-09-22T02:00:00");
+  assert.equal(net.end, "2026-09-22T04:00:00");
+  assert.equal(volgendeNetlading([]), null);
+});
+
+proef("een ontlaadopdracht leest als ontladen, en nul als nul", () => {
+  const tekst = (w) => batteryRows({ ...BESLUIT_BATTERIJ, setpoint_w: w }).find((r) => r.label === "Opdracht van de coach").text;
+  assert.equal(tekst(-340), "ontladen op 340 W");
+  assert.equal(tekst(0), "0 W");
+});
+
+proef("stuurt de coach niet, dan staat er geen opdracht", () => {
+  const rijen = batteryRows({ ...BESLUIT_BATTERIJ, applied: false });
+  assert.ok(!rijen.some((r) => r.label === "Opdracht van de coach"));
+});
+
+proef("te vroeg voor een datum zegt hoeveel dagen er gemeten zijn", () => {
+  const rijen = terugverdiendTekst({ earned: 12.5, price: 4500, days: 9, min_days: 28, date: null });
+  assert.equal(rijen[1].text, "nog te vroeg voor een datum: 9 van de 28 dagen gemeten");
+});
+
+proef("zonder aankoopprijs alleen wat hij opleverde", () => {
+  const rijen = terugverdiendTekst({ earned: 12.5, price: null, days: 9, date: null });
+  assert.deepEqual(rijen, [{ label: "Opgeleverd", text: "€ 12,50 in 9 dagen" }]);
+  assert.deepEqual(terugverdiendTekst({ earned: 0, price: null, days: 0 }), []);
+});
+
+proef("een apparaat dat geen batterij is krijgt geen batterijregels", () => {
+  assert.deepEqual(batteryRows({ kind: "boiler" }), []);
+  assert.deepEqual(batteryRows(undefined), []);
+});
+
+function woningMetBatterij(batterijW, extra = {}) {
+  const staten = {
+    "sensor.omvormer": { state: "0", attributes: { unit_of_measurement: "W" } },
+    "sensor.afname": { state: "24", attributes: { unit_of_measurement: "W" } },
+    "sensor.teruglevering": { state: "0", attributes: { unit_of_measurement: "W" } },
+    "sensor.batterij": { state: String(batterijW), attributes: { unit_of_measurement: "W" } },
+    ...extra,
+  };
+  const feed = { get: (id) => staten[id] };
+  const settings = {
+    sources: { solar: "sensor.omvormer", grid_mode: "split",
+      grid_import: "sensor.afname", grid_export: "sensor.teruglevering" },
+    devices: [{ id: "b", type: "thuisbatterij", brand: "anker", entity: "sensor.batterij", entities: {} }],
+  };
+  return new LiveSource().sample(feed, settings);
+}
+
+// In de eerste woning op 21-09-2026 om 19:30: 24 W op de meter, geen zon, en
+// de batterij gaf 2250 W af. Het huis gebruikte dus 2274 W en geen 24.
+proef("de woning telt mee wat de batterij afgeeft", () => {
+  const r = woningMetBatterij(-2250);
+  assert.equal(r.house, 2274);
+  assert.equal(r.devices[0].watts, 2250);
+  assert.equal(r.devices[0].details[0].text, "ontlaadt");
+});
+
+proef("en wat de batterij laadt is geen verbruik van de woning", () => {
+  const staten = { "sensor.afname": { state: "2300", attributes: { unit_of_measurement: "W" } } };
+  const r = woningMetBatterij(2000, staten);
+  assert.equal(r.house, 300);
+  assert.equal(r.devices[0].details[0].text, "laadt");
+});
+
 // --- draaien ----------------------------------------------------------------
 
 let goed = 0;

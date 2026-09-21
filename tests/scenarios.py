@@ -16,7 +16,7 @@ bewaken:
 
 from dataclasses import replace
 
-from virtueel import Auto, Boiler, Huis, Paal, Prijzen, Scenario, Vaatwasser, Zon
+from virtueel import Auto, Batterij, Boiler, Huis, Paal, Prijzen, Scenario, Vaatwasser, Zon
 
 # Twee auto's die er in het echt hangen: een kleine bus op één fase, en een
 # grote op drie.
@@ -472,7 +472,7 @@ klant_prijzen_weg_13 = klantwoning.kopie(
     uitleg="de prijssensor valt van 12:50 tot 13:40 weg, precies als de prijzen van zondag komen",
     gebeurtenissen=[("12:50", "prijzen_weg", 50)],
 )
-VAN_DEN_DAM = [klantwoning, klant_bewolkt, klant_geen_zon, klant_dure_zondag, klant_wekken,
+KLANTWONING = [klantwoning, klant_bewolkt, klant_geen_zon, klant_dure_zondag, klant_wekken,
                klant_koken, klant_p1_weg, klant_prijzen_laat, klant_geen_soc,
                klant_herstart, klant_soc_weg, klant_status_weg, klant_zon_weg, klant_equalizer_weg,
                klant_prijzen_weg_13]
@@ -799,6 +799,107 @@ boiler_stekker_stuk = boiler_nacht.kopie(
                     "getrokken_op": "2026-09-07T06:00:00", "runs": 3},
 )
 
+# --- de thuisbatterij --------------------------------------------------------
+#
+# De eigenaar op 21-09-2026: "Ik wil de coach gaan uitbreiden met een
+# thuisbatterij." De batterij is die van de eerste woning (14,6 kWh, 3,5 kW
+# erin, 2,5 kW eruit, 5 tot 95%, 73,6% rendement uit de kWh-meter, een opdracht
+# is na vijf seconden te zien). Er hangt geen auto aan de paal, tenzij het
+# scenario daarover gaat: `kabel_erin` ligt dan voorbij het einde.
+#
+# De wereld tikt hier elke vijftien seconden, en in de scenario's die over de
+# regelaar gaan elke vijf, want zo vaak kreeg Home Assistant daar de meter.
+
+ZONDER_AUTO = dict(kabel_erin="+9 07:00", schema_aan=False, stap_seconden=15)
+
+batterij_vast_zon = Scenario(
+    "batterij-vast-zon",
+    "vast contract, heldere dag, batterij op 20%: overschot erin, de avond en de nacht eruit",
+    contract="vast", zon=Zon(wolken="helder"), batterij=Batterij(soc=20.0), **ZONDER_AUTO,
+)
+batterij_vast_salderen = batterij_vast_zon.kopie(
+    naam="batterij-vast-salderen",
+    uitleg="vast contract met salderen: opslaan kost alleen het verlies, dus wat erin zit gaat eruit en er komt niets bij",
+    contract="vast-salderen",
+)
+batterij_winter = Scenario(
+    "batterij-dynamisch-winter",
+    "dynamisch, bewolkt: te weinig zon, dus bijladen op de goedkoopste uren voor de dure avond",
+    contract="dynamisch", zon=Zon(wolken="bewolkt"), batterij=Batterij(soc=8.0),
+    begin="2026-09-07 13:05", duur_uren=34, **ZONDER_AUTO,
+)
+batterij_zomer = batterij_winter.kopie(
+    naam="batterij-dynamisch-zon",
+    uitleg="dynamisch, heldere dag: de zon vult hem, van het net laden hoeft niet",
+    zon=Zon(wolken="helder"), begin="2026-09-07 06:55", duur_uren=24,
+)
+batterij_handelen = batterij_winter.kopie(
+    naam="batterij-handelen",
+    uitleg="dynamisch met handelen aan en een avond van tachtig cent: dan levert hij ook aan het net",
+    batterij=Batterij(soc=85.0, handelen=True),
+    # Met de gewone prijzen gebeurt hier niets, en dat hoort zo: 0,21 terug
+    # tegen 0,16 gedeeld door 73,6% om het weer bij te laden is geen winst. De
+    # bewoner van de eerste woning zei het al: "de spread is dan te klein."
+    prijzen=Prijzen(per_dag={
+        "2026-09-07": [0.23] * 12 + [0.16] * 4 + [0.25] * 3 + [0.80] * 2 + [0.30] * 3,
+        "2026-09-08": [0.22] * 12 + [0.15] * 4 + [0.25] * 8,
+    }),
+    begin="2026-09-07 17:55", duur_uren=8,
+)
+batterij_reserve = batterij_vast_zon.kopie(
+    naam="batterij-reserve",
+    uitleg="vast contract, reserve van 40% voor noodstroom: daaronder komt er niets uit",
+    batterij=Batterij(soc=55.0, reserve=40.0), begin="2026-09-07 17:55", duur_uren=14,
+)
+batterij_negatief = Scenario(
+    "batterij-negatieve-prijs",
+    "dynamisch, midden op de dag een negatieve all-in prijs: vol vermogen laden, niets eruit",
+    contract="dynamisch", zon=Zon(wolken="bewolkt"), batterij=Batterij(soc=30.0),
+    prijzen=Prijzen(per_dag={"2026-09-07": [0.24] * 12 + [-0.02, -0.04, -0.01] + [0.26] * 9}),
+    begin="2026-09-07 10:55", duur_uren=6, **ZONDER_AUTO,
+)
+batterij_volle_beurt = Scenario(
+    "batterij-volle-beurt",
+    "dynamisch, bewolkte maandag met de wekelijkse volle beurt: voor middernacht een keer aan de laadgrens",
+    contract="dynamisch", zon=Zon(wolken="bewolkt"),
+    batterij=Batterij(soc=35.0, wekelijks_vol_dag=0),
+    begin="2026-09-07 00:05", duur_uren=24, **ZONDER_AUTO,
+)
+batterij_paal = Scenario(
+    "batterij-paal-laadt",
+    "vast contract, de bus laadt na 20:00 van het net: de batterij geeft dan niets af",
+    contract="vast", zon=Zon(wolken="bewolkt"), auto=BUS, batterij=Batterij(soc=80.0),
+    begin="2026-09-07 17:55", kabel_erin="18:00", duur_uren=13, stap_seconden=15,
+)
+batterij_sprong = Scenario(
+    "batterij-sprong",
+    "de regelaar: om 19:00 gaat er drie kilowatt aan, om 19:20 weer uit",
+    contract="vast", zon=Zon(wolken="geen"), voorspeller="geen", batterij=Batterij(soc=70.0),
+    begin="2026-09-07 18:40", duur_uren=1, gebeurtenissen=[("19:00", "oven", 20)],
+    kabel_erin="+9 07:00", schema_aan=False, stap_seconden=5,
+)
+batterij_meter_weg = batterij_sprong.kopie(
+    naam="batterij-meter-weg",
+    uitleg="de meter valt om 19:00 vier minuten weg terwijl de batterij het huis voedt: hij gaat naar nul",
+    gebeurtenissen=[("19:00", "p1_weg", 4)],
+)
+batterij_herstart = batterij_sprong.kopie(
+    naam="batterij-herstart",
+    uitleg="Home Assistant herstart om 19:05 midden in het ontladen: de coach pakt de batterij weer op",
+    gebeurtenissen=[("19:00", "oven", 20), ("19:05", "herstart", None)],
+)
+batterij_zonder_rendement = batterij_winter.kopie(
+    naam="batterij-rendement-onbekend",
+    uitleg="geen kWh-meter en niets opgegeven: alleen nul op de meter, niet van het net laden",
+    batterij=Batterij(soc=8.0, meter=False), duur_uren=20,
+)
+
+BATTERIJ = [
+    batterij_vast_zon, batterij_vast_salderen, batterij_winter, batterij_zomer, batterij_handelen,
+    batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_paal, batterij_sprong,
+    batterij_meter_weg, batterij_herstart, batterij_zonder_rendement,
+]
+
 ALLE = [
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
@@ -819,7 +920,8 @@ ALLE = [
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,
     vaatwasser_zonpiek, vaatwasser_eindtijd, vaatwasser_eindtijd_bijstellen, vaatwasser_na_klaartijd, vaatwasser_na_klaartijd_nu,
     boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
-    *VAN_DEN_DAM,
+    *KLANTWONING,
+    *BATTERIJ,
 ]
 
 

@@ -1236,5 +1236,189 @@ if (vl := v("boiler-stekker-stuk")):
     controle("stekker stuk: hij blijft niet eindeloos schakelen",
              len(vl.boiler_schakels) <= 20, f"{len(vl.boiler_schakels)} schakelingen")
 
+print("=== de thuisbatterij ===")
+# De eigenaar op 21-09-2026: "Laden, ontladen, blokkeren als de laadpaal laadt.
+# Laden op goedkope tarieven. Laden op overschot zonne-energie." En over de
+# regelaar: "Hoe zorgen we dat we niet gaan pendelen?"
+
+
+def bat_moment(vl, tijd, dag=0):
+    """Een tijdstip in dit scenario; met seconden erbij mag ook ("19:00:45")."""
+    delen = tijd.split(":")
+    moment = virtueel._moment_op(vl.regels[0].tijd, ":".join(delen[:2]))
+    seconden = int(delen[2]) if len(delen) > 2 else 0
+    return moment + virtueel.dt.timedelta(days=dag, seconds=seconden)
+
+
+def bat_stand_om(vl, tijd, dag=0):
+    doel = bat_moment(vl, tijd, dag)
+    return next((r[4] for r in vl.bat_verloop if r[0] >= doel), None)
+
+
+def bat_tussen(vl, van, tot, dag=0):
+    a, b = bat_moment(vl, van, dag), bat_moment(vl, tot, dag)
+    return [r for r in vl.bat_verloop if a <= r[0] < b]
+
+
+for naam, vl in V.items():
+    if vl.scenario.batterij is None:
+        continue
+    bat = vl.scenario.batterij
+    print(f"  {naam}: {len(vl.bat_opdrachten)} opdrachten, {vl.bat_wissels()} wissels, "
+          f"net {vl.bat_afname_kwh:.1f} kWh erin en {vl.bat_levering_kwh:.1f} eruit, "
+          f"kosten {vl.bat_kosten_met:.2f} tegen {vl.bat_kosten_zonder:.2f} zonder")
+    uren = max(1.0, len(vl.bat_verloop) * vl.stap_uur)
+    controle(f"{naam}: de coach zette de batterij in de modus voor externe sturing",
+             bool(vl.bat_modi) and vl.bat_modi[0][1] == "third_party_control", f"{vl.bat_modi}")
+    # Het antwoord op "hoe zorgen we dat we niet gaan pendelen": in de eerste
+    # woning stuurde de oude regelaar 1.700 keer per dag bij en wisselde de
+    # batterij 233 keer van toestand.
+    controle(f"{naam}: hooguit tien opdrachten per uur",
+             len(vl.bat_opdrachten) / uren <= 10, f"{len(vl.bat_opdrachten) / uren:.1f} per uur")
+    # Zes mag altijd: ontladen, laden bij een negatieve prijs, vol, en weer
+    # ontladen is er al drie, en dat is geen pendelen.
+    controle(f"{naam}: hooguit een richtingwissel per twee uur",
+             vl.bat_wissels() <= max(6, uren / 2), f"{vl.bat_wissels()} in {uren:.0f} uur")
+    controle(f"{naam}: de accustand blijft tussen zijn eigen grenzen",
+             all(bat.soc_min - 0.5 <= r[3] <= bat.soc_max + 0.5 for r in vl.bat_verloop),
+             f"{min(r[3] for r in vl.bat_verloop):.1f} tot {max(r[3] for r in vl.bat_verloop):.1f}%")
+    # De wekelijkse volle beurt is de uitzondering: die is er voor de cellen en
+    # niet voor de rekening, en kost dus geld.
+    if bat.wekelijks_vol_dag is None:
+        controle(f"{naam}: de batterij maakt de dag niet duurder",
+                 vl.bat_kosten_met <= vl.bat_kosten_zonder + 0.02,
+                 f"{vl.bat_kosten_met:.2f} tegen {vl.bat_kosten_zonder:.2f}")
+    # Wat de coach in zijn kasboek schreef is wat het huis werkelijk scheelde.
+    # De laatste minuten staan nog niet in de opslag: die gaat om de vijf minuten.
+    geboekt = float(vl.bat_stand.get("earned_total") or 0.0)
+    controle(f"{naam}: het kasboek klopt met wat de dag werkelijk scheelde",
+             abs(geboekt - (vl.bat_kosten_zonder - vl.bat_kosten_met)) <= 0.10,
+             f"geboekt {geboekt:.2f}, werkelijk {vl.bat_kosten_zonder - vl.bat_kosten_met:.2f}")
+
+if (vl := v("batterij-vast-zon")):
+    controle("vast met zon: de hele dag nul op de meter, of vol",
+             all(r[4] in ("nul", "ontladen") for r in vl.bat_verloop[5:]),
+             f"{sorted({r[4] for r in vl.bat_verloop})}")
+    controle("vast met zon: overdag komt hij vol", max(r[3] for r in vl.bat_verloop) >= 93.0,
+             f"{max(r[3] for r in vl.bat_verloop):.0f}%")
+    controle("vast met zon: er komt bijna niets meer van het net",
+             vl.bat_afname_kwh <= 0.5, f"{vl.bat_afname_kwh:.2f} kWh")
+    avond = bat_tussen(vl, "21:00", "23:00")
+    controle("vast met zon: 's avonds staat de meter rond nul",
+             sum(abs(r[1]) <= 60 for r in avond) / len(avond) >= 0.95,
+             f"{sum(abs(r[1]) <= 60 for r in avond) / len(avond):.2f}")
+
+if (vl := v("batterij-vast-salderen")):
+    controle("salderen: er gaat geen zon in de batterij",
+             all(r[2] <= 1 for r in vl.bat_verloop), f"{max(r[2] for r in vl.bat_verloop):.0f} W")
+    controle("salderen: eenmaal leeg staat hij stil", bat_stand_om(vl, "22:00") == "standby",
+             bat_stand_om(vl, "22:00"))
+
+if (vl := v("batterij-dynamisch-winter")):
+    net = [r for r in vl.bat_verloop if r[4] == "netladen"]
+    controle("winter: hij laadt bij van het net", len(net) * vl.stap_uur >= 1.0,
+             f"{len(net) * vl.stap_uur:.1f} uur")
+    prijzen = vl.scenario.prijzen
+    # De dure avond is 0,41; met 73,6% rendement loont alles onder de 0,30.
+    # Hij pakt daarvan de goedkoopste: de middag, niet de nacht van 0,23.
+    controle("winter: en alleen in de goedkoopste uren van de dag",
+             all(prijzen.all_in(r[0]) <= 0.21 for r in net),
+             f"{sorted({round(prijzen.all_in(r[0]), 3) for r in net})}")
+    controle("winter: niet in de avondpiek", not [r for r in net if 18 <= r[0].hour < 20], "")
+    duur = bat_tussen(vl, "18:00", "20:00")
+    controle("winter: op de dure avond voedt hij het huis",
+             sum(r[2] < -100 for r in duur) / len(duur) >= 0.9, "")
+    # In de nacht van maandag op dinsdag is 0,228 gedeeld door 73,6% duurder
+    # dan wat hij dinsdagmiddag voor 0,156 kan kopen: dan laadt hij 's nachts
+    # niet, ook al is de batterij leeg.
+    nacht = bat_tussen(vl, "00:00", "05:00")
+    controle("winter: een nacht die het rendement niet goedmaakt laat hij liggen",
+             not [r for r in nacht if r[4] == "netladen"], "")
+
+if (vl := v("batterij-dynamisch-zon")):
+    controle("zomer: van het net laden hoeft niet",
+             not [r for r in vl.bat_verloop if r[4] == "netladen"], "")
+    controle("zomer: de zon vult hem", max(r[3] for r in vl.bat_verloop) >= 85.0,
+             f"{max(r[3] for r in vl.bat_verloop):.0f}%")
+    # De ochtendzon levert elf tot dertien cent op en de middagzon bijna niets:
+    # hij wacht met opslaan tot de middag, want vol komt hij toch.
+    ochtend = bat_tussen(vl, "08:00", "10:30")
+    controle("zomer: dure ochtendzon gaat naar het net, goedkope middagzon de batterij in",
+             sum(r[2] for r in ochtend) / len(ochtend) < 100,
+             f"{sum(r[2] for r in ochtend) / len(ochtend):.0f} W gemiddeld")
+
+if (vl := v("batterij-handelen")):
+    piek = bat_tussen(vl, "19:00", "21:00")
+    controle("handelen: op de avond van tachtig cent levert hij aan het net",
+             sum(r[1] < -500 for r in piek) / len(piek) >= 0.8,
+             f"{sum(r[1] for r in piek) / len(piek):.0f} W gemiddeld op de meter")
+    # Twee metingen mag: een huis dat minder gaat vragen wordt een stap later
+    # gevolgd, en dat is geen handelen.
+    controle("handelen: en daarbuiten niet",
+             len([r for r in bat_tussen(vl, "21:05", "23:55") if r[1] < -200]) <= 2, "")
+
+if (vl := v("batterij-reserve")):
+    controle("reserve: onder de veertig procent komt er niets uit",
+             min(r[3] for r in vl.bat_verloop) >= 39.0, f"{min(r[3] for r in vl.bat_verloop):.1f}%")
+    controle("reserve: en daarna staat hij op alleen zonneladen",
+             bat_stand_om(vl, "03:00") == "zonneladen", bat_stand_om(vl, "03:00"))
+
+if (vl := v("batterij-negatieve-prijs")):
+    neg = bat_tussen(vl, "12:02", "14:30")
+    controle("negatieve prijs: maximaal laden", all(r[4] == "max-laden" for r in neg),
+             f"{sorted({r[4] for r in neg})}")
+    controle("negatieve prijs: op vol vermogen",
+             sum(r[2] >= 3400 for r in neg) / len(neg) >= 0.95, "")
+    controle("negatieve prijs: ervoor laadt hij niet van het net",
+             not [r for r in bat_tussen(vl, "11:00", "11:59") if r[4] in ("netladen", "max-laden")], "")
+
+if (vl := v("batterij-volle-beurt")):
+    controle("volle beurt: voor middernacht een keer aan de laadgrens",
+             max(r[3] for r in vl.bat_verloop) >= 94.0, f"{max(r[3] for r in vl.bat_verloop):.0f}%")
+    controle("volle beurt: en dat staat in de opslag, zodat hij morgen niet opnieuw begint",
+             bool(vl.bat_stand.get("full_at")), f"{vl.bat_stand}")
+
+if (vl := v("batterij-paal-laadt")):
+    laadt = [r for r, regel in zip(vl.bat_verloop, vl.regels) if regel.paal_w > 1000]
+    controle("paal laadt: er is werkelijk geladen", len(laadt) * vl.stap_uur > 3, "")
+    # De eerste minuut na het begin mag hij nog ontladen: de coach ziet de paal
+    # pas bij zijn volgende ronde.
+    controle("paal laadt: de batterij geeft dan niets af",
+             sum(r[2] < -50 for r in laadt) * vl.stap_uur * 60 <= 2.0,
+             f"{sum(r[2] < -50 for r in laadt) * vl.stap_uur * 60:.1f} minuten")
+    controle("paal laadt: daarvoor en daarna voedt hij het huis wel",
+             bat_stand_om(vl, "19:00") == "nul" and bat_stand_om(vl, "05:30") == "nul",
+             f"{bat_stand_om(vl, '19:00')} en {bat_stand_om(vl, '05:30')}")
+    controle("paal laadt: de auto haalt zijn klaar-tijd", gehaald(vl), "")
+
+if (vl := v("batterij-sprong")):
+    na = bat_tussen(vl, "19:00", "19:01")
+    controle("sprong: binnen tien seconden levert de batterij wat hij kan",
+             any(r[2] <= -2490 for r in na[:3]), f"{[round(r[2]) for r in na[:4]]}")
+    uit = bat_tussen(vl, "19:20", "19:22")
+    controle("sprong: gaat het weer uit, dan schiet hij niet door naar terugleveren",
+             sum(r[1] < -100 for r in uit) <= 3, f"{[round(r[1]) for r in uit[:6]]}")
+    controle("sprong: een handvol opdrachten in het hele uur", len(vl.bat_opdrachten) <= 8,
+             f"{len(vl.bat_opdrachten)}")
+
+if (vl := v("batterij-meter-weg")):
+    stil = bat_tussen(vl, "19:00:45", "19:03:55")
+    controle("meter weg: binnen drie kwartier van een minuut staat de batterij op nul",
+             bool(stil) and all(abs(r[2]) < 1 for r in stil), f"{[round(r[2]) for r in stil[:4]]}")
+    terug = bat_tussen(vl, "19:04:30", "19:06:00")
+    controle("meter weg: is hij terug, dan pakt hij het weer op",
+             bool(terug) and all(r[2] < -100 for r in terug), f"{[round(r[2]) for r in terug[:4]]}")
+
+if (vl := v("batterij-herstart")):
+    na = bat_tussen(vl, "19:06", "19:15")
+    controle("herstart: de nieuwe coach neemt de batterij over zonder hem los te laten",
+             bool(na) and all(r[2] <= -2400 for r in na), f"{sorted({round(r[2]) for r in na})}")
+
+if (vl := v("batterij-rendement-onbekend")):
+    controle("rendement onbekend: alleen nul op de meter",
+             {r[4] for r in vl.bat_verloop[5:]} <= {"nul"}, f"{sorted({r[4] for r in vl.bat_verloop})}")
+    controle("rendement onbekend: en er staat geen rendement in de opslag",
+             not vl.bat_stand.get("rte"), f"{vl.bat_stand}")
+
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

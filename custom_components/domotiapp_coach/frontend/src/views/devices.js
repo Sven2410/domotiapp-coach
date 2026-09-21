@@ -31,6 +31,9 @@ import {
   deviceLabel,
   deviceLabelMap,
   hasCars,
+  isBattery,
+  defaultBattery,
+  WEEKDAGEN,
   missingForControl,
   typeMeta,
 } from "../devices.js";
@@ -466,6 +469,16 @@ class DacViewDevices extends DacEditorElement {
     const clean = super.payload_(sections);
     const devices = Array.isArray(clean) ? clean : clean?.devices;
     for (const device of devices ?? []) {
+      // De server wil bij een batterij een getal of niets, geen lege tekst.
+      if (device.battery && typeof device.battery === "object") {
+        for (const key of ["capacity_kwh", "max_charge_w", "max_discharge_w", "rte_percent", "purchase_price"]) {
+          const waarde = device.battery[key];
+          device.battery[key] = waarde === "" || waarde === undefined || !Number.isFinite(Number(waarde)) || waarde === null
+            ? null
+            : Number(waarde);
+        }
+        device.battery.reserve_percent = Number(device.battery.reserve_percent) || 0;
+      }
       if (!Array.isArray(device.programs)) continue;
       device.programs = device.programs
         .filter((program) => String(program.label ?? "").trim() && Number(program.minutes) >= 1)
@@ -677,6 +690,99 @@ class DacViewDevices extends DacEditorElement {
    * of 58 kWh is not one of 77, and a car that can drop to one phase can follow
    * the sun far more closely than one that cannot.
    */
+  /**
+   * Wat de bewoner over zijn thuisbatterij zegt.
+   *
+   * Alles hier is van hem: hoe groot, hoeveel reserve, of er gehandeld mag
+   * worden. Wat een sensor al zegt hoeft hij niet in te vullen, en wat niemand
+   * zegt weet de coach niet: een leeg veld blijft leeg en wordt geen aanname.
+   */
+  batteryHtml_(device, index) {
+    if (!isBattery(device) || !brandMeta(device)) return "";
+    const b = { ...defaultBattery(device.brand), ...(device.battery ?? {}) };
+    const getal = (key, attrs, placeholder) => `
+      <input type="number" inputmode="decimal" ${attrs} data-bat-field="${key}" data-index="${index}"
+             value="${b[key] ?? ""}" placeholder="${placeholder}">`;
+    const vink = (key, kop, uitleg) => `
+      <label class="check" for="bat-${key}-${index}">
+        <input type="checkbox" id="bat-${key}-${index}" data-bat-field="${key}" data-index="${index}"
+               ${b[key] ? "checked" : ""}>
+        <span><strong>${kop}</strong> ${uitleg}</span>
+      </label>`;
+    const tekst = (key, placeholder) => `
+      <input type="text" data-bat-field="${key}" data-index="${index}" autocomplete="off"
+             value="${String(b[key] ?? "").replace(/"/g, "&quot;")}" placeholder="${placeholder}">`;
+
+    return `
+      <div class="block">
+        <div class="block-title">De batterij</div>
+        <div class="two">
+          <div class="row">
+            <label>Capaciteit (kWh)</label>
+            ${getal("capacity_kwh", 'min="0" step="0.1"', "alleen zonder sensor")}
+          </div>
+          <div class="row">
+            <label>Rendement heen en terug (%)</label>
+            ${getal("rte_percent", 'min="30" max="100" step="0.1"', "alleen zonder kWh-meter")}
+          </div>
+        </div>
+        <p class="sub">Met het rendement rekent de coach uit of laden van het net loont: bij 75% moet het dure uur een derde duurder zijn dan het goedkope. Met een kWh-meter op de batterij meet hij het zelf, en dan wint de meting. Zonder rendement houdt hij alleen de meter op nul.</p>
+        <div class="two">
+          <div class="row">
+            <label>Hoogste laadvermogen (W)</label>
+            ${getal("max_charge_w", 'min="0" step="50"', "bijvoorbeeld 3500")}
+          </div>
+          <div class="row">
+            <label>Hoogste ontlaadvermogen (W)</label>
+            ${getal("max_discharge_w", 'min="0" step="50"', "bijvoorbeeld 2500")}
+          </div>
+        </div>
+        <div class="row">
+          <label for="bat-phase-${index}">Hangt op fase</label>
+          <select id="bat-phase-${index}" data-bat-field="phase" data-index="${index}">
+            ${[["", "Weet ik niet"], ["l1", "L1"], ["l2", "L2"], ["l3", "L3"]]
+              .map(([id, label]) => `<option value="${id}"${b.phase === id ? " selected" : ""}>${label}</option>`)
+              .join("")}
+          </select>
+          <span class="sub">Voor de zekeringbewaking: laadt de auto tegelijk, dan blijft de batterij onder wat die fase nog overlaat. Weet je het niet, dan telt de zwaarste fase.</span>
+        </div>
+        ${vink("power_invert", "De vermogenssensor is positief bij ontladen.", "Standaard leest de coach plus als laden.")}
+        ${device.entities?.direction ? "" : vink("setpoint_invert", "Het stuurgetal is positief bij ontladen.", "Alleen van belang zonder aparte richting.")}
+        <div class="two">
+          <div class="row">
+            <label>Modus als de coach stuurt</label>
+            ${tekst("control_mode", "de keuze in de bedrijfsmodus")}
+          </div>
+          <div class="row">
+            <label>Modus als de coach stopt</label>
+            ${tekst("idle_mode", "de keuze in de bedrijfsmodus")}
+          </div>
+        </div>
+        <p class="sub">Stopt de coach, dan zet hij het vermogen op nul en geeft hij de batterij terug aan zijn eigen modus, zodat hij nooit op zijn laatste opdracht blijft staan.</p>
+      </div>
+      <div class="block">
+        <div class="block-title">Wat jij wilt</div>
+        ${vink("reserve_enabled", "Reserve houden voor noodstroom.", "Onder deze accustand komt er niets meer uit, wat de prijzen ook zeggen.")}
+        <div class="row"${b.reserve_enabled ? "" : " hidden"} data-bat-reserve="${index}">
+          <label>Reserve (%)</label>
+          ${getal("reserve_percent", 'min="0" max="100" step="5"', "20")}
+        </div>
+        ${vink("trade", "Handelen: terugleveren op dure uren.", "De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis.")}
+        ${vink("weekly_full", "Een keer per week helemaal vol.", "Voor het balanceren van de cellen. De coach kiest op die dag het goedkoopste moment en slaat de beurt over als de batterij die week al vol was. Vol is de laadgrens van de batterij zelf; daar komt de coach niet aan.")}
+        <div class="row"${b.weekly_full ? "" : " hidden"} data-bat-day="${index}">
+          <label for="bat-day-${index}">Op</label>
+          <select id="bat-day-${index}" data-bat-field="weekly_full_day" data-index="${index}">
+            ${WEEKDAGEN.map((dag, i) => `<option value="${i}"${Number(b.weekly_full_day) === i ? " selected" : ""}>${dag}</option>`).join("")}
+          </select>
+        </div>
+        <div class="row">
+          <label>Aankoopprijs (euro)</label>
+          ${getal("purchase_price", 'min="0" step="1"', "optioneel")}
+          <span class="sub">Voor de terugverdientijd op de kaart. De coach telt wat de batterij oplevert vanaf het moment dat hij hem stuurt; wat er daarvoor verdiend is weet hij niet en schat hij niet.</span>
+        </div>
+      </div>`;
+  }
+
   carsHtml_(device, index) {
     if (!hasCars(device)) return "";
 
@@ -805,6 +911,7 @@ class DacViewDevices extends DacEditorElement {
             </div>
             ${this.brandHtml_(device, index)}
             ${this.carsHtml_(device, index)}
+            ${this.batteryHtml_(device, index)}
             ${this.controlHtml_(device, index)}
           </div>
         </section>`;
@@ -963,6 +1070,14 @@ class DacViewDevices extends DacEditorElement {
         } else {
           device[field] = el.value;
         }
+        // Een batterij krijgt bij het kiezen van zijn merk de woorden mee die
+        // in zijn bedrijfsmodus horen. Wat de bewoner zelf al invulde blijft.
+        if (isBattery(device) && (field === "brand" || field === "type")) {
+          device.battery = { ...defaultBattery(device.brand), ...(device.battery ?? {}) };
+          const merk = defaultBattery(device.brand);
+          if (!device.battery.control_mode) device.battery.control_mode = merk.control_mode;
+          if (!device.battery.idle_mode) device.battery.idle_mode = merk.idle_mode;
+        }
 
         if (field === "controllable" || field === "device_id") {
           this.paintMissing_(index);
@@ -985,6 +1100,26 @@ class DacViewDevices extends DacEditorElement {
 
     for (const button of list.querySelectorAll("[data-remove]")) {
       button.addEventListener("click", () => this.askRemove_(Number(button.dataset.remove)));
+    }
+
+    // De instellingen van een thuisbatterij. Een leeg getal is "niet ingevuld"
+    // en geen nul: de coach rekent nooit met een capaciteit of een rendement
+    // dat niemand heeft opgegeven.
+    for (const el of list.querySelectorAll("[data-bat-field]")) {
+      const index = Number(el.dataset.index);
+      const key = el.dataset.batField;
+      const vink = el.type === "checkbox";
+      el.addEventListener(vink || el.tagName === "SELECT" ? "change" : "input", () => {
+        const device = this.draft_.devices[index];
+        device.battery = { ...defaultBattery(device.brand), ...(device.battery ?? {}) };
+        if (vink) device.battery[key] = el.checked;
+        else if (el.type === "number") device.battery[key] = el.value === "" ? null : Number(el.value);
+        else if (key === "weekly_full_day") device.battery[key] = Number(el.value);
+        else device.battery[key] = el.value;
+        if (key === "reserve_enabled") list.querySelector(`[data-bat-reserve="${index}"]`).hidden = !el.checked;
+        if (key === "weekly_full") list.querySelector(`[data-bat-day="${index}"]`).hidden = !el.checked;
+        this.syncSaveBar_();
+      });
     }
 
     // De programmatabel. De eerste wijziging aan een fabriekstabel maakt er

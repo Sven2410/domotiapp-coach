@@ -30,6 +30,7 @@ import {
   typeMeta,
   valueLabel,
 } from "../devices.js";
+import { batteryRows } from "../battery.js";
 import { LiveSource, meterReadings, priceForecast, solarForecast } from "../data-source.js";
 import {
   PRIORITIES,
@@ -1755,7 +1756,10 @@ class DacViewOverview extends DacElement {
       besluit.rule !== "disconnected"
       && besluit.level !== "advise"
       && besluit.kind !== "programma"
-      && besluit.kind !== "boiler";
+      && besluit.kind !== "boiler"
+      // Een thuisbatterij heeft geen auto die haast heeft en geen beurt om te
+      // pauzeren: wie hem wil stilzetten haalt het vinkje "mag sturen" weg.
+      && besluit.kind !== "batterij";
     boost.hidden = !kan;
     boost.setAttribute("aria-pressed", String(Boolean(besluit.boost)));
     this.$(`[data-boost-text="${slot}"]`).textContent = besluit.boost
@@ -1809,6 +1813,9 @@ class DacViewOverview extends DacElement {
       // verwarmt; wachten op het goedkoopste moment is geen werk.
       if (besluit.kind === "programma" && !besluit.charge) continue;
       if (besluit.kind === "boiler" && !besluit.running) continue;
+      // Een batterij stuurt de coach de hele dag; dat bovenaan zetten zou de
+      // auto en de vaatwasser verdringen, en zijn kaart zegt het al.
+      if (besluit.kind === "batterij") continue;
       return {
         name: this.labelFor_(device),
         programma: besluit.kind === "programma",
@@ -2372,9 +2379,12 @@ class DacViewOverview extends DacElement {
       this.$(`[data-name="${slot}"]`).textContent = this.labelFor_(device);
       this.$(`[data-now="${slot}"]`).textContent = powerText(device.watts);
 
+      // Een thuisbatterij krijgt er de regels van de coach bij: de stand, de
+      // opdracht, en wat hij terugverdiend heeft.
+      const details = [...(device.details ?? []), ...batteryRows(this.coach_?.[device.id])];
       const rows = this.$(`[data-rows="${slot}"]`);
       rows.replaceChildren(
-        ...(device.details ?? []).map((row) => {
+        ...details.map((row) => {
           const line = document.createElement("div");
           const key = document.createElement("span");
           key.className = "k";
