@@ -6,11 +6,29 @@ wordt via HACS verspreid, dus alleen `custom_components/` gaat mee naar de klant
 
 De eigenaar beoordeelt en beslist; ik bouw, test, commit, tag en breng uit.
 
-**Deze repo is publiek.** Er staat dus geen naam van de eigenaar of van een
-klant in, geen adres, geen entiteit-id van één woning en geen meterstand. Wat
-uit de praktijk komt staat er als meting, met de datum erbij: "de eigenaar op
-17-09-2026" en "in de klantwoning" zijn genoeg om te weten waar een regel
-vandaan komt. Alles wat wél herleidbaar is hoort in de privénotities ernaast.
+**Deze repo is publiek, en er gaat nooit iets persoonlijks naar GitHub.**
+Harde eis van 21-09-2026: "alles moet universeel en niet te linken zijn aan mij
+of mijn klanten." Niet in de code, niet in het commentaar, niet in een
+commit message, niet in releasenotes, niet in een issue, en niet in een
+voorbeeld op het scherm. Dus geen namen van de eigenaar of van klanten, geen
+adressen, geen IP-adressen of hostnamen, geen tokens, geen entiteit-id's van
+één woning, geen meterstanden en geen schermafdrukken uit een echte
+installatie.
+
+Wat uit de praktijk komt hoort er wél in, maar als meting met de datum erbij:
+"De eigenaar op 17-09-2026" en "in de klantwoning" zeggen genoeg om te weten
+waar een regel vandaan komt. Alles wat herleidbaar is gaat naar de
+privénotities ernaast (`../notities/`), die daarvoor bestaan.
+
+**Controleer het vóór elke push**, want daarna staat het er voorgoed:
+
+```
+git diff --cached | grep -inE "<achternaam>|<straat>|192\.168|@gmail"
+```
+
+Dat één keer overslaan kostte op 21-09-2026 een opruimactie over 36 bestanden
+en zeven releasenotes, en de commitgeschiedenis is er nog steeds niet van
+schoon.
 
 ## Werkafspraken
 
