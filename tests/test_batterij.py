@@ -165,12 +165,21 @@ b9 = plan_batterij(DAG.replace(hour=1), LIJST3, Tariff(), verwachting(huis=0.5),
 print(f"  {b9.stand}: {b9.reason}")
 controle("dan alleen nul op de meter", b9.stand == NUL and b9.rule == "rendement-onbekend", b9.rule)
 
-print("10. de avondpiek blijft dicht voor het net")
+print("10. de avondpiek: bij dynamisch telt de prijs, bij vast blijft hij dicht")
+# Sinds v0.79.0 (de bewoner van de eerste woning, 22-09-2026): bij een
+# dynamisch contract is de avondpiek een gewoon uur op zijn eigen prijs.
 PIEK = [0.30] * 18 + [0.05] * 2 + [0.45] * 4
 b10 = plan_batterij(DAG.replace(hour=18, minute=10), prijzen(PIEK, terug=0.02), Tariff(),
                     verwachting(huis=0.5), anker(soc=10.0))
 print(f"  {b10.stand}: {b10.reason}")
-controle("ook een spotgoedkoop uur in de avondpiek laadt niet van het net", b10.stand != NETLADEN, b10.stand)
+controle("een spotgoedkoop uur in de avondpiek laadt bij een dynamisch contract wél van het net",
+         b10.stand == NETLADEN, b10.stand)
+b10b = plan_batterij(DAG.replace(hour=18, minute=10), [], VAST,
+                     verwachting(huis=0.5), anker(soc=10.0))
+controle("bij een vast contract komt er in de avondpiek niets van het net", b10b.stand != NETLADEN, b10b.stand)
+b10c = plan_batterij(DAG.replace(hour=18, minute=10), prijzen([0.30] * 18 + [-0.02] * 2 + [0.45] * 4, terug=0.0),
+                     Tariff(), verwachting(huis=0.5), anker(soc=10.0))
+controle("en een negatieve prijs om 18:00 is bij dynamisch maximaal laden", b10c.stand == MAX_LADEN, b10c.stand)
 
 print("11. handelen")
 HANDEL = [0.10] * 6 + [0.25] * 12 + [0.60] * 3 + [0.25] * 3

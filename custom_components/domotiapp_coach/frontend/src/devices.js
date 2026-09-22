@@ -1137,6 +1137,15 @@ export const ACTIVE_WATTS = 3;
  * het vinkje staat uit." Een apparaat dat alleen gevolgd wordt, wordt nergens
  * genoemd.
  *
+ * **En nooit iets wat de coach zelf stuurt of plant.** De eigenaar op 22-09-2026,
+ * bij een tip die de thuisbatterij en de vaatwasser noemde: "je mag nooit de
+ * batterij adviseren om aan te zetten, dat doet de coach zelf. Ook met een
+ * laadpaal die stuurbaar is. Adviseer alleen apparaten die de coach niet
+ * aanstuurt." Dus geen thuisbatterij, geen paal die de coach kan sturen, en
+ * geen apparaat met een programma: dat plant de coach zelf en zegt hij op zijn
+ * eigen kaart. Wat overblijft is wat op een meetstekker zit: de wasmachine, de
+ * droger, een airco. Zie `canSteer`.
+ *
  * @param {Array} devices de apparaten uit de instellingen
  * @param {string} voegwoord "of" bij een keuze, "en" bij een opsomming
  * @returns {string} de opsomming, of "" als er niets is
@@ -1144,6 +1153,7 @@ export const ACTIVE_WATTS = 3;
 export function apparatenZin(devices, voegwoord = "of") {
   const namen = (devices ?? [])
     .filter((device) => Boolean(device?.controllable))
+    .filter((device) => device?.type !== "thuisbatterij" && !canSteer(device) && !PROGRAM_TYPES.includes(device?.type))
     .map((device) => {
       const eigen = (device?.name || "").trim();
       // Een naam die de klant zelf getypt heeft blijft staan zoals hij hem

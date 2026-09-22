@@ -172,7 +172,10 @@ for naam, vl in V.items():
     # halve kilowattuur speling: de coach houdt een lopende beurt drie ronden
     # op de ondergrens aan voordat hij stopt (`_keep_alive`), en dat is bij een
     # driefasige auto 0,4 kWh over de grens heen.
-    if naam not in ("snelladen", "vast-onhaalbare-klaar-tijd", "eenfase-krappe-zekering"):
+    # Sinds v0.79.0 alleen bij een vast contract: bij dynamisch is de piek een
+    # gewoon uur op zijn prijs (de bewoner van de eerste woning, 22-09-2026).
+    if (naam not in ("snelladen", "vast-onhaalbare-klaar-tijd", "eenfase-krappe-zekering")
+            and vl.scenario.contract.startswith("vast")):
         controle(f"{naam}: niets van het net in de avondpiek",
                  vl.net_kwh_tussen("18:00", "20:00") < 0.6,
                  f"{vl.net_kwh_tussen('18:00', '20:00'):.2f} kWh tussen 18:00 en 20:00")

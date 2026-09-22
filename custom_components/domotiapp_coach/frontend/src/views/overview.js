@@ -104,7 +104,7 @@ function netZin(r) {
   return "Je gebruikt vrijwel precies wat je zelf opwekt.";
 }
 
-function advise(r, thresholds, configured, alertAt, sturing, devices) {
+export function advise(r, thresholds, configured, alertAt, sturing, devices, batterij = null) {
   if (!configured) {
     return {
       tone: "var(--dac-accent-hi)",
@@ -180,7 +180,44 @@ function advise(r, thresholds, configured, alertAt, sturing, devices) {
     };
   }
 
-  if ((r.exportW ?? 0) > SURPLUS_W) {
+  // Handelt de batterij, dan is wat er naar het net gaat geen overschot maar
+  // verkoop. De eigenaar op 22-09-2026, over een kaart die toen "gebruik je
+  // overschot, zet de batterij aan" zei terwijl de batterij 2,3 kW aan het net
+  // verkocht: "het advies had moeten zijn: je hebt toegestaan om te handelen
+  // met je batterij, de spread is groot genoeg en je batterij is vol genoeg om
+  // de nacht door te komen; de komende uren ontladen op zoveel watt om te
+  // profiteren van de hoge prijs; je kunt nog zoveel kWh ontladen om alsnog de
+  // nacht door te komen."
+  if (batterij?.mode === "handelen") {
+    const watt = Math.abs(Math.round(batterij.setpoint_w ?? batterij.target_w ?? 0));
+    const over = Number.isFinite(batterij.balance_kwh) ? batterij.balance_kwh : null;
+    return {
+      tone: "var(--dac-good)",
+      tag: "Aan het werk",
+      title: `${batterij.name} handelt`,
+      body:
+        // En de volgorde, de eigenaar op 22-09-2026: "nul op de meter heeft
+        // prioriteit, het overschot verhandelen met hoge tarieven."
+        "Je hebt toegestaan om te handelen met je batterij. De spread is groot genoeg en je batterij is vol genoeg om de nacht door te komen. Je huis gaat voor; wat de accu meer heeft dan de nacht vraagt, verkoopt hij. "
+        + (watt ? `De komende uren ontlaadt hij op ${watt.toLocaleString("nl-NL")} W om te profiteren van de hoge stroomprijs.` : "De komende uren ontlaadt hij om te profiteren van de hoge stroomprijs.")
+        + (over !== null && over > 0 ? ` Je kunt nog ${over.toLocaleString("nl-NL", { maximumFractionDigits: 1 })} kWh ontladen en alsnog de nacht doorkomen.` : "")
+        // De bewoner van de eerste woning, via de eigenaar: "in dit geval had ie
+        // alle apparaten juist uit moeten schakelen; zo min mogelijk stroom
+        // gebruiken, zo veel mogelijk terugleveren."
+        + (() => {
+          const apparaten = apparatenZin(devices, "en");
+          return apparaten
+            ? ` Gebruik nu zo min mogelijk stroom: stel ${apparaten} uit tot de prijs weer zakt, dan kan alles wat de accu geeft naar het net.`
+            : " Gebruik nu zo min mogelijk stroom, dan kan alles wat de accu geeft naar het net.";
+        })(),
+    };
+  }
+
+  // Wat de batterij afgeeft is geen overschot: dat is stroom uit de accu, en
+  // die hoort niet in "zet iets aan".
+  const echtOverschot = (r.exportW ?? 0) - Math.max(0, -(batterij?.power_w ?? 0));
+
+  if (echtOverschot > SURPLUS_W) {
     return {
       tone: "var(--dac-grid-out)",
       tag: "Kans",
@@ -253,7 +290,7 @@ function advise(r, thresholds, configured, alertAt, sturing, devices) {
   // niets": er gaat stroom naar het net waar je minder voor krijgt dan hij je
   // kost. Zeggen dat er niets aan de hand is terwijl de klant ziet dat hij
   // teruglevert, is precies waarvan iemand denkt dat de coach niet oplet.
-  if ((r.exportW ?? 0) > TRICKLE_W) {
+  if (echtOverschot > TRICKLE_W) {
     return {
       tone: "var(--dac-accent-hi)",
       tag: "Rustig",
@@ -1555,7 +1592,7 @@ class DacViewOverview extends DacElement {
     this.flow_.update(r);
     this.updateLegend_();
     this.updateCoach_(
-      advise(r, thresholds, configured, alertAt, this.steeringNow_(), this.settings_?.devices)
+      advise(r, thresholds, configured, alertAt, this.steeringNow_(), this.settings_?.devices, this.batterijNu_())
     );
   }
 
@@ -1846,6 +1883,25 @@ class DacViewOverview extends DacElement {
    * bovenaan zetten dat hij aan het werk is precies de loze belofte zijn die
    * hier nergens hoort te staan.
    */
+  /** De batterij die de coach stuurt, met wat hij ermee doet, voor het advies. */
+  batterijNu_() {
+    for (const device of this.lastDevices_ ?? []) {
+      const besluit = this.coach_?.[device.id];
+      if (!besluit || besluit.kind !== "batterij" || !besluit.applied) continue;
+      return {
+        name: this.labelFor_(device),
+        mode: besluit.mode,
+        setpoint_w: besluit.setpoint_w,
+        target_w: besluit.target_w,
+        power_w: besluit.power_w,
+        balance_kwh: besluit.balance_kwh,
+        reason: besluit.reason ?? "",
+        plan: besluit.plan ?? "",
+      };
+    }
+    return null;
+  }
+
   steeringNow_() {
     for (const device of this.lastDevices_ ?? []) {
       const besluit = this.coach_?.[device.id];
