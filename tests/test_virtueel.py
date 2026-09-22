@@ -1110,9 +1110,10 @@ if (vl := v("klantwoning-herstart")) and (basis := v("klantwoning")):
 # Een sensor die wegvalt wordt na tien minuten gemeld, en als hij terug is ook.
 # De eigenaar op 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat
 # moet wel gemeld worden." Ondertussen laadt de coach gewoon door op wat hij
-# het laatst wist.
+# het laatst wist. De accustand van een auto krijgt een uur (22-09-2026: "bij
+# ford zet dat maar op een uur polling").
 for naam, sensor, wat, van, tot in (
-    ("klantwoning-accustand-weg", "accustand van Ford", "cheap-hour", "13:30", "14:15"),
+    ("klantwoning-accustand-weg", "accustand van Ford", "cheap-hour", "13:30", "14:45"),
     ("klantwoning-status-weg", "status van Laadpaal", "cheap-hour", "11:00", "11:20"),
     ("klantwoning-zonsensor-weg", "zonnesensor", "cheap-hour", "10:03", "10:20"),
     ("klantwoning-equalizer-weg", "lastbewaker", "cheap-hour", "14:00", "14:30"),
@@ -1121,8 +1122,8 @@ for naam, sensor, wat, van, tot in (
         continue
     kort = naam[12:]
     klant_basis(vl, kort)
-    stil = meldingen(vl, "meldt al 10 minuten niets")
-    controle(f"{kort}: na tien minuten één melding dat de sensor niets zegt",
+    stil = meldingen(vl, "meldt al 10 minuten niets") + meldingen(vl, "meldt al 60 minuten niets")
+    controle(f"{kort}: na tien minuten (een uur voor een auto) één melding dat de sensor niets zegt",
              len(stil) == 1 and sensor in stil[0], f"{stil}")
     # Sinds 06-09-2026 gaat "doet het weer" alleen nog in de geschiedenis en
     # niet naar de telefoon: per beurt één verslag plus wat kritiek is.

@@ -2211,23 +2211,25 @@ def wacht(minuten):
 asyncio.run(ronde(coach41b, inst41b, nu=t0))
 wacht(0)
 hass41b.states.zet("sensor.ford_soc", "unavailable")
-te_vroeg = wacht(1) + wacht(5)
-controle("vijf minuten stilte is nog geen melding", not te_vroeg, f"{te_vroeg}")
-stil = wacht(11)
-print(f"  na elf minuten: {stil}")
+# Een auto mag een uur zwijgen: zijn integratie haalt de stand eens per zoveel
+# tijd op. De eigenaar op 22-09-2026: "bij ford zet dat maar op een uur polling."
+te_vroeg = wacht(1) + wacht(5) + wacht(11) + wacht(59)
+controle("een uur stilte van een auto is nog geen melding", not te_vroeg, f"{te_vroeg}")
+stil = wacht(61)
+print(f"  na eenenzestig minuten: {stil}")
 # De naam die de bewoner zelf invulde staat erin, de entiteit-id niet: die
 # hoort in het log. De eigenaar op 21-09-2026: "meld zo'n sensor niet volledig, zeg
 # gewoon dat er iets mis is met de integratie."
-controle("na tien minuten wel, met de naam van de sensor erin",
+controle("na een uur wel, met de naam van de sensor erin",
          len(stil) == 1 and "accustand van Ford" in stil[0], f"{stil}")
 controle("en zonder de entiteit-id, wel met de integratie erbij",
          "sensor.ford_soc" not in stil[0] and "integratie" in stil[0], f"{stil}")
-controle("en niet nog een keer", not wacht(12), "")
-besluit41b, _ = asyncio.run(ronde(coach41b, inst41b, nu=t0 + dt.timedelta(minutes=12)))
+controle("en niet nog een keer", not wacht(62), "")
+besluit41b, _ = asyncio.run(ronde(coach41b, inst41b, nu=t0 + dt.timedelta(minutes=62)))
 controle("ondertussen laadt hij gewoon door op de laatst bekende stand",
          besluit41b["charge"], f"{besluit41b}")
 hass41b.states.zet("sensor.ford_soc", "44")
-weer = wacht(13)
+weer = wacht(63)
 # Sinds 06-09-2026 gaat "doet het weer" niet meer naar de telefoon, alleen in
 # de geschiedenis: de eigenaar wil per beurt één verslag plus wat kritiek is.
 controle("terug: niets meer naar de telefoon", not weer, f"{weer}")
@@ -4522,6 +4524,69 @@ controle("en zonder garagelast wint de hoofdaansluiting", monitor81n.async_curre
 # Instellingen die de groep niet kennen, of een paal zonder groep, blijven zoals ze waren.
 grid81c, _, _, _ = coach81._read(NU81, inst81, LAADPAAL)
 controle("een paal zonder groep heeft geen groepen", grid81c.circuits == [], f"{grid81c.circuits}")
+
+print("=== 82. een Tesla slaapt als hij niet laadt: de wekknop (22-09-2026) ===")
+# De eigenaar: "als een tesla niet aan de lader hangt slaapt hij en geeft hij
+# geen accu door, daardoor krijg ik telkens een melding van tesla meldt al 10
+# min niks." Twee standen: elk uur wekken als hij stilstaat, of handmatig via
+# de knop op de kaart. Bij het inpluggen wekt de coach hem altijd één keer.
+TESLA = {"id": "car-t", "name": "Model Y", "brand": "tesla", "capacity_kwh": 75, "phases": "three",
+         "max_amps": 16, "soc_entity": "sensor.tesla_accu", "wake_entity": "button.tesla_wake",
+         "wake_mode": "manual"}
+PAAL_T = {**LAADPAAL, "cars": [TESLA]}
+
+
+def gedrukt(hass):
+    return [d for d in hass.services.verstuurd if d[2].get("entity_id") == "button.tesla_wake"]
+
+
+inst82 = instellingen(devices=[PAAL_T])
+hass82, _, coach82 = bouw({**huis(status="disconnected"), "sensor.tesla_accu": "unavailable"}, inst82)
+T82 = dt.datetime(2026, 9, 22, 20, 0)
+controle("de sensorwacht laat de accustand van een auto met wekknop met rust",
+         "sensor.tesla_accu" not in coach82._sensoren(inst82), f"{coach82._sensoren(inst82)}")
+controle("een auto zonder wekknop staat er wel in",
+         "sensor.tesla_accu" in coach82._sensoren(instellingen(devices=[{**LAADPAAL, "cars": [{**TESLA, "wake_entity": ""}]}])), "")
+
+# Handmatig: de coach wekt niet uit zichzelf, ook niet na een uur.
+for minuten in (0, 1, 61, 122):
+    asyncio.run(ronde75(hass82, coach82, T82 + dt.timedelta(minutes=minuten)))
+controle("handmatig: zonder kabel wekt de coach de auto nooit zelf", gedrukt(hass82) == [], f"{gedrukt(hass82)}")
+b82 = coach82.state.get("dev-laadpaal") or {}
+controle("de kaart weet dat er een wekknop is", b82.get("wake") is True, f"{b82.get('wake')}")
+
+# De knop op de kaart.
+gewekt82 = asyncio.run(coach82.async_wake("dev-laadpaal"))
+asyncio.run(hass82.afmaken())
+controle("de knop op de kaart drukt op de wekknop", gewekt82 is True and len(gedrukt(hass82)) == 1, f"{gedrukt(hass82)}")
+controle("en een laadpunt zonder wekknop zegt nee", asyncio.run(coach82.async_wake("bestaat-niet")) is False, "")
+
+# Elk uur: als hij stilstaat en niets meldt, hooguit eens per uur. (`ronde75`
+# maakt de lijst van opdrachten elke ronde leeg, dus dit telt per ronde.)
+inst82b = instellingen(devices=[{**LAADPAAL, "cars": [{**TESLA, "wake_mode": "hourly"}]}])
+hass82b, _, coach82b = bouw({**huis(status="disconnected"), "sensor.tesla_accu": "unavailable"}, inst82b)
+tellingen = []
+for minuten in (0, 1, 30, 59, 60, 61, 119, 120):
+    asyncio.run(ronde75(hass82b, coach82b, T82 + dt.timedelta(minutes=minuten)))
+    tellingen.append((minuten, len(gedrukt(hass82b))))
+print(f"  elk uur, gewekt in de ronde van minuut: {[m for m, n in tellingen if n]}")
+controle("elk uur: bij het begin, na een uur en na twee uur, en niet vaker",
+         tellingen == [(0, 1), (1, 0), (30, 0), (59, 0), (60, 1), (61, 0), (119, 0), (120, 1)], f"{tellingen}")
+
+# Meldt de sensor wel iets, dan wordt er niet gewekt.
+hass82b.states.zet("sensor.tesla_accu", "74")
+asyncio.run(ronde75(hass82b, coach82b, T82 + dt.timedelta(minutes=181)))
+controle("een auto die zijn accustand meldt wordt niet gewekt", len(gedrukt(hass82b)) == 0, f"{len(gedrukt(hass82b))}")
+
+# Inpluggen: één keer wekken, in beide standen.
+hass82c, _, coach82c = bouw({**huis(status="disconnected"), "sensor.tesla_accu": "unavailable"}, inst82)
+asyncio.run(ronde75(hass82c, coach82c, T82))
+hass82c.states.zet("sensor.laadpaal_status", "awaiting_start")
+asyncio.run(ronde75(hass82c, coach82c, T82 + dt.timedelta(minutes=1)))
+erin = len(gedrukt(hass82c))
+asyncio.run(ronde75(hass82c, coach82c, T82 + dt.timedelta(minutes=2)))
+controle("handmatig: bij het inpluggen wekt hij de auto één keer, en daarna niet meer",
+         erin == 1 and len(gedrukt(hass82c)) == 0, f"{erin} en {len(gedrukt(hass82c))}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

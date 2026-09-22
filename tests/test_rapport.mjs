@@ -846,6 +846,27 @@ proef("het autoprofiel heeft een doel, standaard 100, en een lege invoer is geen
   assert.ok(html.includes('min="10"') && html.includes('max="100"'), "de invoer blijft binnen bereik");
 });
 
+proef("een nieuwe auto begint met het merk, en een Tesla krijgt de wekknop en de keuze", async () => {
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.feed_ = {};
+  const paal = { id: "paal", type: "laadpaal", brand: "easee", name: "Laadpaal", controllable: true, entities: {} };
+  const nieuw = el.carsHtml_({ ...paal, cars: [{ id: "a", name: "", capacity_kwh: 0, brand: "" }] }, 0);
+  assert.ok(nieuw.includes('data-car-field="brand"'), "het merk staat er");
+  assert.ok(!nieuw.includes('data-car-field="capacity_kwh"'), "en verder nog niets, tot het merk gekozen is");
+  const ford = el.carsHtml_({ ...paal, cars: [{ id: "a", name: "Bus", capacity_kwh: 19.7, brand: "ford" }] }, 0);
+  assert.ok(ford.includes('data-car-field="capacity_kwh"'), "een Ford heeft zijn velden");
+  assert.ok(!ford.includes("data-car-wake="), "maar geen wekknop");
+  const tesla = el.carsHtml_({ ...paal, cars: [{ id: "a", name: "Model Y", capacity_kwh: 75, brand: "tesla", wake_mode: "hourly" }] }, 0);
+  assert.ok(tesla.includes("data-car-wake="), "een Tesla heeft de wekknop");
+  assert.ok(tesla.includes('data-car-wake-mode="0:0:manual"') && tesla.includes('data-car-wake-mode="0:0:hourly"'), "en de keuze");
+  assert.ok(tesla.includes('data-car-wake-mode="0:0:hourly"\n                        aria-pressed="true"'), "met de gekozen stand ingedrukt");
+  // Een profiel van voor er merken waren houdt zijn velden.
+  const oud = el.carsHtml_({ ...paal, cars: [{ id: "a", name: "Bus", capacity_kwh: 19.7 }] }, 0);
+  assert.ok(oud.includes('data-car-field="capacity_kwh"'));
+});
+
 // --- de knoppenrij op de laadpaalkaart --------------------------------------
 //
 // Op 30-08-2026 kreeg de nieuwe knop "Wat gaat hij doen" de klasse `plan-link`,

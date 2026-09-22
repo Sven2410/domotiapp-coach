@@ -123,6 +123,17 @@ _LOGGER = logging.getLogger(__name__)
 # 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat moet wel
 # gemeld worden."
 SENSOR_STIL = timedelta(minutes=10)
+# De accustand van een auto mag langer zwijgen voordat dat een melding is: een
+# auto-integratie haalt zijn stand eens per zoveel tijd op, en een auto die
+# stilstaat verandert niet. De eigenaar op 22-09-2026 over de Ford: "zet dat maar
+# op een uur polling."
+SENSOR_STIL_AUTO = timedelta(minutes=60)
+
+# Hoe vaak de coach een slapende auto hooguit wekt om zijn accustand te horen,
+# als de bewoner daarvoor gekozen heeft (`wake_mode` "hourly"). De eigenaar op
+# 22-09-2026: "auto moet elke 60 minuten de accu status doorgeven wanneer deze
+# stil staat."
+WEK_INTERVAL = timedelta(minutes=60)
 
 # Onder welke zonshoogte een omvormer die niets zegt geen storing is. Een
 # SolarEdge gaat 's nachts slapen en is dan niet bereikbaar: in de klantwoning
@@ -814,6 +825,10 @@ class ChargerCoach:
         # Per sensor sinds wanneer hij niets zegt, en welke daarvan al gemeld zijn.
         self._sensor_stil: dict[str, datetime] = {}
         self._sensor_gemeld: set[str] = set()
+        # Wanneer de auto aan een laadpunt voor het laatst gewekt is, en of de
+        # kabel er de vorige ronde al in zat. Zie `_async_auto_wekken`.
+        self._gewekt: dict[str, datetime] = {}
+        self._kabel_erin: dict[str, bool] = {}
         self._huis_tot: datetime | None = None
         self._zon_kwh: dict[datetime, float] = {}
         self._zon_geschat = True
@@ -1205,9 +1220,79 @@ class ChargerCoach:
                 if entities.get(sleutel):
                     uit[entities[sleutel]] = f"{wat} van {naam}"
             for car in device.get("cars") or []:
-                if car.get("soc_entity"):
+                # Een auto met een wekknop slaapt als hij niet laadt en meldt
+                # dan niets; dat is geen storing maar zijn aard. De eigenaar op
+                # 22-09-2026: "daardoor krijg ik telkens een melding van tesla
+                # meldt al 10 min niks."
+                if car.get("soc_entity") and not car.get("wake_entity"):
                     uit[car["soc_entity"]] = f"de accustand van {car.get('name') or 'de auto'}"
         return uit
+
+    def _slaapt(self, entity_id: str | None) -> bool:
+        """Of een sensor niets zegt: er niet is, of `unknown` of `unavailable`."""
+        state = self.hass.states.get(entity_id) if entity_id else None
+        return state is None or state.state in ("unknown", "unavailable", "")
+
+    async def _async_wek(self, device_id: str, profile: dict[str, Any], now: datetime) -> bool:
+        """Op de wekknop van deze auto drukken, als hij er een heeft."""
+        entity_id = profile.get("wake_entity")
+        if not entity_id:
+            return False
+        domein = entity_id.split(".")[0]
+        dienst = {"button": "press", "switch": "turn_on", "script": "turn_on"}.get(domein, "press")
+        await self.hass.services.async_call(domein, dienst, {"entity_id": entity_id}, blocking=True)
+        self._gewekt[device_id] = now
+        _LOGGER.info("%s: %s gewekt om zijn accustand te horen", device_id, profile.get("name") or "de auto")
+        return True
+
+    async def _async_auto_wekken(
+        self, now: datetime, settings: dict[str, Any], device: dict[str, Any], connected: bool
+    ) -> None:
+        """Een slapende auto wekken als de bewoner dat wil, of als de kabel er net in gaat.
+
+        Twee redenen. Bij "elk uur" (`wake_mode` hourly): staat hij stil en
+        meldt hij niets, dan hooguit eens per `WEK_INTERVAL`. En bij het
+        inpluggen altijd één keer, in beide standen: zonder accustand laadt
+        de coach niet blind (eis 6) en wacht hij op de bewoner, en dat is
+        precies het moment waarop de auto het zelf kan zeggen.
+        """
+        device_id = device.get("id", "")
+        zat_erin = self._kabel_erin.get(device_id, False)
+        self._kabel_erin[device_id] = connected
+        _chosen, profile = self._chosen_car(settings, device)
+        if not profile or not profile.get("wake_entity") or not profile.get("soc_entity"):
+            return
+        if not self._slaapt(profile.get("soc_entity")):
+            return
+        laatst = self._gewekt.get(device_id)
+        if connected and not zat_erin:
+            if laatst is None or now - laatst >= timedelta(minutes=5):
+                await self._async_wek(device_id, profile, now)
+            return
+        if profile.get("wake_mode") == "hourly" and (laatst is None or now - laatst >= WEK_INTERVAL):
+            await self._async_wek(device_id, profile, now)
+
+    async def async_wake(self, device_id: str) -> bool:
+        """De knop op de kaart: de auto aan dit laadpunt nu wekken."""
+        try:
+            settings = await async_get_store(self.hass).async_load()
+        except Exception:  # noqa: BLE001 - een gemiste opslag is geen reden om te stoppen
+            return False
+        device = next((d for d in settings.get("devices") or [] if d.get("id") == device_id), None)
+        if device is None:
+            return False
+        _chosen, profile = self._chosen_car(settings, device)
+        if not profile:
+            return False
+        gewekt = await self._async_wek(device_id, profile, _moment())
+        if gewekt:
+            self.async_refresh()
+        return gewekt
+
+    def _wekbaar(self, settings: dict[str, Any], device: dict[str, Any]) -> bool:
+        """Of de auto aan dit laadpunt een wekknop heeft, voor de knop op de kaart."""
+        _chosen, profile = self._chosen_car(settings, device)
+        return bool(profile and profile.get("wake_entity"))
 
     async def _async_sensorwacht(self, settings: dict[str, Any], now: datetime) -> None:
         """Zeggen welke sensor al `SENSOR_STIL` niets zegt, en wanneer hij terug is.
@@ -1220,6 +1305,12 @@ class ChargerCoach:
         alleen de melding dat er iets stuk is, want daar kijkt niemand naar.
         """
         zon = (settings.get("sources") or {}).get("solar")
+        auto_sensoren = {
+            car.get("soc_entity")
+            for device in settings.get("devices") or []
+            for car in device.get("cars") or []
+            if car.get("soc_entity")
+        }
         for entity_id, naam in self._sensoren(settings).items():
             state = self.hass.states.get(entity_id)
             stil = state is None or state.state in ("unknown", "unavailable", "")
@@ -1240,7 +1331,8 @@ class ChargerCoach:
             if sinds is None:
                 self._sensor_stil[entity_id] = now
                 continue
-            if entity_id in self._sensor_gemeld or now - sinds < SENSOR_STIL:
+            grens = SENSOR_STIL_AUTO if entity_id in auto_sensoren else SENSOR_STIL
+            if entity_id in self._sensor_gemeld or now - sinds < grens:
                 continue
             self._sensor_gemeld.add(entity_id)
             minuten = int((now - sinds).total_seconds() // 60)
@@ -3758,6 +3850,10 @@ class ChargerCoach:
         """
         device_id = device.get("id", "")
         grid, car, charger, window = self._read(now, settings, device, reserved)
+        try:
+            await self._async_auto_wekken(now, settings, device, charger.connected)
+        except ServiceNotFound:
+            _LOGGER.warning("%s: de wekknop van de auto bestaat niet (nog niet geladen?)", device_id)
 
         # Wekken mag zolang de auto aan de kabel hangt, niet laadt en de poging
         # van deze sessie nog openstaat. Dat de coach ook wíl laden weet de
@@ -3854,6 +3950,10 @@ class ChargerCoach:
             # als het besluit hierboven, want een tijdlijn die iets anders zegt
             # dan wat de coach doet laat de bewoner op het verkeerde wachten.
             "plan_ahead": self._tijdlijn(now, settings, grid, car, charger, window),
+            # Of er een knop "accustand opvragen" op de kaart hoort, en wanneer
+            # de auto voor het laatst gewekt is.
+            "wake": self._wekbaar(settings, device),
+            "woke_at": self._gewekt[device_id].isoformat() if device_id in self._gewekt else None,
         }
         # Iets dat alleen de bewoner zelf kan verhelpen, en dat losstaat van
         # het besluit van deze ronde. Het gaat dus naast de reden op de kaart

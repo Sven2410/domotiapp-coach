@@ -11,7 +11,9 @@
 import { define } from "../base.js";
 import { icons } from "../icons.js";
 import {
+  CAR_BRANDS,
   CAR_PHASES,
+  WAKE_MODES,
   DEVICE_TYPES,
   PROGRAM_TYPES,
   hasOwnPrograms,
@@ -805,8 +807,51 @@ class DacViewDevices extends DacEditorElement {
 
     const cars = device.cars ?? [];
     const rows = cars
-      .map(
-        (car, slot) => `
+      .map((car, slot) => {
+        // Eerst het merk, dan de rest: het merk kiest welke velden er horen.
+        // Een profiel van voor er merken waren heeft al een naam of een accu
+        // en houdt zijn velden gewoon.
+        const merkKeuze = `
+          <div class="row">
+            <label>Merk</label>
+            <select data-car-field="brand" data-car-index="${index}:${slot}">
+              <option value=""${car.brand ? "" : " selected"}>Kies een merk…</option>
+              ${CAR_BRANDS.map((b) => `<option value="${b.id}"${car.brand === b.id ? " selected" : ""}>${b.label}</option>`).join("")}
+            </select>
+          </div>`;
+        const bekend = Boolean(car.brand) || Boolean(car.name) || Number(car.capacity_kwh) > 0;
+        if (!bekend) {
+          return `
+        <div class="car" data-car="${index}:${slot}">
+          <div class="car-head">
+            ${merkKeuze}
+            <button type="button" class="remove" data-car-remove="${index}:${slot}" aria-label="Auto verwijderen">${icons.trash}</button>
+          </div>
+        </div>`;
+        }
+        const tesla = car.brand === "tesla";
+        const wekken = tesla
+          ? `
+          <div class="row">
+            <label>Wekknop</label>
+            <dac-entity-picker data-car-wake="${index}:${slot}"></dac-entity-picker>
+            <span class="sub">De knop "Wake up" van de Tesla-integratie. Een Tesla slaapt als hij niet laadt en meldt dan geen accustand; met deze knop kan de coach hem wekken. Bij het inpluggen doet hij dat altijd één keer, anders weet hij niet hoeveel er nog in moet.</span>
+          </div>
+          <div class="row">
+            <label>Accustand opvragen</label>
+            <div class="segmented">
+              ${WAKE_MODES.map(
+                (item) => `
+                <button type="button" data-car-wake-mode="${index}:${slot}:${item.id}"
+                        aria-pressed="${(car.wake_mode ?? "manual") === item.id}">
+                  <strong>${item.label}</strong>
+                  ${item.blurb}
+                </button>`
+              ).join("")}
+            </div>
+          </div>`
+          : "";
+        return `
         <div class="car" data-car="${index}:${slot}">
           <div class="car-head">
             <input type="text" data-car-field="name" data-car-index="${index}:${slot}"
@@ -814,6 +859,7 @@ class DacViewDevices extends DacEditorElement {
                    placeholder="Bijvoorbeeld: de blauwe" autocomplete="off">
             <button type="button" class="remove" data-car-remove="${index}:${slot}" aria-label="Auto verwijderen">${icons.trash}</button>
           </div>
+          ${merkKeuze}
           <div class="two">
             <div class="row">
               <label>Accu (kWh)</label>
@@ -839,8 +885,11 @@ class DacViewDevices extends DacEditorElement {
           <div class="row">
             <label>Accupercentage van de auto</label>
             <dac-entity-picker data-car-entity="${index}:${slot}"></dac-entity-picker>
-            <span class="sub">Optioneel. Staat de auto in Home Assistant, wijs dan de sensor aan die zegt hoe vol hij is; dan weet de coach zelf hoeveel er nog in moet. Zonder deze vraagt hij het aan jou.</span>
+            <span class="sub">${tesla
+              ? "De sensor \"Battery level\" van de Tesla-integratie. Daarmee weet de coach zelf hoeveel er nog in moet."
+              : "Optioneel. Staat de auto in Home Assistant, wijs dan de sensor aan die zegt hoe vol hij is; dan weet de coach zelf hoeveel er nog in moet. Zonder deze vraagt hij het aan jou."}</span>
           </div>
+          ${wekken}
           <div class="row">
             <label>Laadt op</label>
             <div class="segmented three">
@@ -854,8 +903,8 @@ class DacViewDevices extends DacEditorElement {
               ).join("")}
             </div>
           </div>
-        </div>`
-      )
+        </div>`;
+      })
       .join("");
 
     return `
@@ -945,9 +994,14 @@ class DacViewDevices extends DacEditorElement {
     for (const input of list.querySelectorAll("[data-car-field]")) {
       const [index, slot] = input.dataset.carIndex.split(":").map(Number);
       const key = input.dataset.carField;
-      input.addEventListener("input", () => {
+      input.addEventListener(input.tagName === "SELECT" ? "change" : "input", () => {
         const car = this.draft_.devices[index].cars[slot];
         if (key === "name") car[key] = input.value;
+        else if (key === "brand") {
+          car[key] = input.value;
+          // Het merk kiest de velden, dus de kaart wordt opnieuw getekend.
+          this.paintDevices_();
+        }
         // Een leeg doel is geen doel van nul maar gewoon vol. Zonder deze regel
         // wordt het veld tijdens het wissen even 0, en dat weigert de server
         // (10 tot 100) met een foutmelding over iets wat de klant niet deed.
@@ -981,6 +1035,27 @@ class DacViewDevices extends DacEditorElement {
       });
     }
 
+    for (const picker of list.querySelectorAll("[data-car-wake]")) {
+      const [index, slot] = picker.dataset.carWake.split(":").map(Number);
+      picker.filter = "all";
+      picker.placeholder = "Zoek de wekknop…";
+      picker.stateFeed = this.feed_;
+      picker.value = this.draft_.devices[index].cars[slot].wake_entity ?? "";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        this.draft_.devices[index].cars[slot].wake_entity = ev.detail.value;
+        this.syncSaveBar_();
+      });
+    }
+
+    for (const button of list.querySelectorAll("[data-car-wake-mode]")) {
+      const [index, slot, mode] = button.dataset.carWakeMode.split(":");
+      button.addEventListener("click", () => {
+        this.draft_.devices[Number(index)].cars[Number(slot)].wake_mode = mode;
+        this.paintDevices_();
+        this.syncSaveBar_();
+      });
+    }
+
     for (const button of list.querySelectorAll("[data-car-phases]")) {
       const [index, slot, phases] = button.dataset.carPhases.split(":");
       button.addEventListener("click", () => {
@@ -1002,6 +1077,9 @@ class DacViewDevices extends DacEditorElement {
           phases: "three",
           max_amps: 0,
           soc_entity: "",
+          brand: "",
+          wake_entity: "",
+          wake_mode: "manual",
         });
         this.paintDevices_();
         this.syncSaveBar_();

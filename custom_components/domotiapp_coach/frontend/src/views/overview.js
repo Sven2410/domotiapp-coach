@@ -1679,6 +1679,26 @@ class DacViewOverview extends DacElement {
   }
 
   /**
+   * De auto wekken zodat hij zijn accustand meldt.
+   *
+   * De sensor komt daarna vanzelf binnen via Home Assistant, en de kaart
+   * volgt hem; hier alleen even zeggen dat het gebeurd is.
+   */
+  async wake_(slot) {
+    const device = this.steerDevices_?.[slot];
+    if (!device || !this.hass) return;
+    const tekst = this.$(`[data-wake-text="${slot}"]`);
+    try {
+      const uit = await this.hass.callWS({ type: "domotiapp_coach/coach/wake", device_id: device.id });
+      if (tekst) tekst.textContent = uit?.woken ? "Opgevraagd, even geduld" : "Geen wekknop";
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de auto niet wekken", error);
+      if (tekst) tekst.textContent = "Wekken mislukt";
+    }
+    setTimeout(() => { if (tekst) tekst.textContent = "Accustand opvragen"; }, 8000);
+  }
+
+  /**
    * Het laden stilzetten of hervatten.
    *
    * Dit gaat via de coach en niet rechtstreeks naar de paal, en dat is het hele
@@ -1773,6 +1793,10 @@ class DacViewOverview extends DacElement {
     this.$(`[data-boost-text="${slot}"]`).textContent = besluit.boost
       ? "Snelladen staat aan"
       : "Snelladen";
+
+    const wek = this.$(`[data-wake="${slot}"]`);
+    wek.hidden = !(besluit.wake && besluit.level !== "advise" && besluit.kind !== "programma"
+      && besluit.kind !== "boiler" && besluit.kind !== "batterij");
 
     const pauze = this.$(`[data-pause="${slot}"]`);
     pauze.hidden = !kan;
@@ -2308,6 +2332,11 @@ class DacViewOverview extends DacElement {
             <button class="boost" type="button" data-pause="${slot}" aria-pressed="false" hidden>
               ${icons.pause}<span data-pause-text="${slot}">Pauzeren</span>
             </button>
+            <!-- Een Tesla slaapt als hij niet laadt en meldt dan geen accustand;
+                 deze knop wekt hem. Alleen als de auto een wekknop heeft. -->
+            <button class="boost" type="button" data-wake="${slot}" hidden>
+              ${icons.spark}<span data-wake-text="${slot}">Accustand opvragen</span>
+            </button>
             <button class="manual" type="button" data-manual="${slot}" hidden>
               ${icons.sliders}<span>Handmatige besturing</span>
             </button>
@@ -2331,6 +2360,9 @@ class DacViewOverview extends DacElement {
     }
     for (const button of this.$$("[data-boost]")) {
       button.addEventListener("click", () => this.toggleBoost_(Number(button.dataset.boost)));
+    }
+    for (const button of this.$$("[data-wake]")) {
+      button.addEventListener("click", () => this.wake_(Number(button.dataset.wake)));
     }
     for (const select of this.$$("[data-car-select]")) {
       select.addEventListener("change", () =>

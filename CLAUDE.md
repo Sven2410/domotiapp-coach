@@ -479,6 +479,51 @@ want sturen kon de coach hem nooit. Autoprofielen en het schema blijven staan.
 Proef 24b in test_coach.py.
 
 
+## Het merk van de auto, en een Tesla die slaapt
+
+Sinds 22-09-2026 (v0.76.0) heeft een autoprofiel een merk: Ford of Tesla
+(`CAR_BRANDS` in devices.js, `brand` in `_CAR` in websocket.py). De eigenaar:
+"als je 1 van die selecteert kan je de naam invullen en komen de juiste
+invulvelden tevoorschijn." Een nieuwe auto begint dus met alleen de keuzelijst;
+een profiel van voor er merken waren (leeg merk, wel een naam of een accu)
+houdt zijn velden. Een Ford heeft de velden die er al waren; een Tesla krijgt
+er twee dingen bij.
+
+**Een Tesla slaapt als hij niet laadt en meldt dan geen accustand.** De
+eigenaar: "daardoor krijg ik telkens een melding van tesla meldt al 10 min
+niks." De Tesla-integratie heeft een knop "Wake up"; die staat in het profiel
+als `wake_entity`, en de accustand van een auto mét wekknop staat niet in de
+sensorwacht (`_sensoren`): slapen is zijn aard, geen storing. Hoe de coach
+aan de accustand komt kiest de bewoner (`wake_mode`, `WAKE_MODES`):
+
+- **Handmatig opvragen** (standaard, het zuinigst): op de laadpaalkaart staat
+  de knop "Accustand opvragen" (`data-wake` in overview.js,
+  `domotiapp_coach/coach/wake`, `async_wake` in coach.py), die op de wekknop
+  drukt; de sensor komt daarna vanzelf binnen.
+- **Elk uur wakker maken**: staat hij stil en meldt hij niets, dan wekt de
+  coach hem hooguit eens per `WEK_INTERVAL` (`_async_auto_wekken`). Met de
+  waarschuwing erbij dat elke keer wakker worden accu kost en de auto uit zijn
+  diepe slaap houdt.
+
+**Bij het inpluggen wekt hij hem altijd één keer**, in beide standen
+(`_kabel_erin`): zonder accustand laadt de coach niet blind (eis 6) en wacht
+hij op de bewoner, en dat is precies het moment waarop de auto het zelf kan
+zeggen. Daarna niet meer, tot de kabel er weer uit en in gaat. De eigenaar:
+"wekken bij inpluggen is goed."
+
+**Een Ford houdt zijn melding, maar pas na een uur.** De eigenaar: "alleen wil
+ik wel een melding ontvangen bij de ford als ik niks krijg; bij ford zet dat
+maar op een uur polling." De accustand van elke auto zonder wekknop staat dus
+gewoon in de sensorwacht, met `SENSOR_STIL_AUTO` (een uur) in plaats van
+`SENSOR_STIL` (tien minuten): een auto-integratie haalt zijn stand eens per
+zoveel tijd op, en een auto die stilstaat verandert niet. Proef 41 in
+test_coach.py meet dat (59 minuten niets, 61 wel), scenario
+`klantwoning-accustand-weg` is daarvoor vijf kwartier geworden. Proef 82 in
+test_coach.py (de sensorwacht, handmatig nooit uit zichzelf, elk uur op 0, 60
+en 120 minuten en niet vaker, niet als de sensor iets zegt, één keer bij het
+inpluggen, de knop), en het formulier in test_rapport.mjs. **Nog niet aan een
+echte Tesla gehangen.**
+
 ## Groepen met een eigen zekering
 
 Sinds 22-09-2026 (v0.75.0) kent de coach onderverdeelkasten, na de vraag van
@@ -1139,10 +1184,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 386 controles op het denkwerk
 python tests/test_batterij.py    # 74 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 492 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 501 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1683 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 64 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 65 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

@@ -449,8 +449,10 @@ klant_herstart = klantwoning.kopie(
 )
 klant_soc_weg = klantwoning.kopie(
     naam="klantwoning-accustand-weg",
-    uitleg="de accustand van de Ford is zaterdag van 13:30 tot 14:15 niet beschikbaar, midden in het laden",
-    gebeurtenissen=[("13:30", "sensor_weg", ("soc", 45))],
+    uitleg="de accustand van de Ford is zaterdag van 13:30 tot 14:45 niet beschikbaar, midden in het laden",
+    # Vijf kwartier, want een auto mag een uur zwijgen voordat dat een melding
+    # is (`SENSOR_STIL_AUTO`, de eigenaar op 22-09-2026).
+    gebeurtenissen=[("13:30", "sensor_weg", ("soc", 75))],
 )
 klant_status_weg = klantwoning.kopie(
     naam="klantwoning-status-weg",
