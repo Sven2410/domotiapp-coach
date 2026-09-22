@@ -203,7 +203,9 @@ class DacViewInstallation extends DacEditorElement {
                     opbrengt, en in een all-in prijs zit die niet meer. Vul je hem in, dan
                     kan de coach uitrekenen wanneer het goedkoper is om je eigen zon te
                     gebruiken dan om op een goedkoop uur te wachten. Laat je hem leeg, dan
-                    laadt hij op zon alleen als de zon het grotendeels zelf dekt.
+                    laadt hij op zon alleen als de zon het grotendeels zelf dekt. Het moet
+                    een andere sensor zijn dan de all-in sensor: dezelfde sensor twee keer
+                    telt niet, want een all-in prijs is geen marktprijs.
                   </span>
                 </div>
               </div>
