@@ -660,6 +660,15 @@ class Batterij:
     sensor_na_s: float = 0.0
     sensor_aanloop: bool = False
     sensor_echo_s: float = 0.0
+    # --- de meter ---
+    # De P1 meldt eens per zoveel seconden en houdt daartussen zijn waarde vast,
+    # met de tijd van die melding als stempel; `meter_fase_s` zegt op welke
+    # seconde van die vijf hij meldt. In de eerste woning op 22-09-2026 's
+    # nachts: de P1 om :08 nog de oude stand, de sensor van de batterij om :09
+    # al de nieuwe, en de regelaar die om :09 met die twee rekende. Alleen met
+    # stappen van een seconde te zien; standaard uit.
+    meter_tik_s: float = 0.0
+    meter_fase_s: float = 0.0
     # --- toestand ---
     modus: str = "self_consumption"
     richting: str = "charge"
@@ -1287,6 +1296,8 @@ class Wereld:
         self.vw_eind_waarde: str | None = None
         self.vw_eind_sinds: dt.datetime | None = None
         self.p1_weg_tot: dt.datetime | None = None
+        # De laatste melding van een P1 die niet elke stap meldt: (tijd, netto).
+        self.meter_melding: tuple[dt.datetime, float] | None = None
         self.prijzen_weg_tot: dt.datetime | None = None
         self.oven_tot: dt.datetime | None = None
         self.equalizer_vrij: float | None = None
@@ -1406,15 +1417,22 @@ class Wereld:
         # kijkt hoe oud een meting is, en de klok van deze computer zegt daar
         # niets over.
         stempel = nu.replace(tzinfo=dt.timezone.utc) if self.batterij is not None else None
+        gemeld = netto
+        if self.batterij is not None and self.batterij.meter_tik_s > 0:
+            tik, fase = self.batterij.meter_tik_s, self.batterij.meter_fase_s
+            if self.meter_melding is None or (nu.second + nu.minute * 60) % tik == fase:
+                self.meter_melding = (nu, netto)
+            gemeld = self.meter_melding[1]
+            stempel = self.meter_melding[0].replace(tzinfo=dt.timezone.utc)
 
         def w(waarde, eenheid):
             return {"state": waarde, "attributes": {"unit_of_measurement": eenheid}}
 
         z(E["zon"], weg if p1_weg else w(f"{self.zon_w:.0f}", "W"))
-        z(E["afname"], weg if p1_weg else w(f"{max(0.0, netto):.0f}", "W"), last_updated=stempel)
-        z(E["teruglevering"], weg if p1_weg else w(f"{max(0.0, -netto):.0f}", "W"), last_updated=stempel)
+        z(E["afname"], weg if p1_weg else w(f"{max(0.0, gemeld):.0f}", "W"), last_updated=stempel)
+        z(E["teruglevering"], weg if p1_weg else w(f"{max(0.0, -gemeld):.0f}", "W"), last_updated=stempel)
         teken = -1 if self.s.net == "signed-omgekeerd" else 1
-        z(E["net"], weg if p1_weg else w(f"{teken * netto:.0f}", "W"), last_updated=stempel)
+        z(E["net"], weg if p1_weg else w(f"{teken * gemeld:.0f}", "W"), last_updated=stempel)
         if self.batterij is not None:
             bat = self.batterij
             z(E["bat_soc"], w(f"{bat.soc:.0f}", "%"))

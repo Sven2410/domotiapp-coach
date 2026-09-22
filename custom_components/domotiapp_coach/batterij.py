@@ -828,6 +828,9 @@ class Regelaar:
     # Of de laatste opdracht al in het gemeten batterijvermogen terug te zien
     # was. Tot dan wordt er niet opnieuw gecorrigeerd.
     bezonken: bool = True
+    # Wanneer de sensor de laatste opdracht voor het eerst bevestigde. Een
+    # meting van de meter telt pas als hij daarna genomen is; zie `stap`.
+    bevestigd_op: datetime | None = None
     # Hoe vaak de sensor achter elkaar iets anders zei dan de opdracht, buiten
     # het venster na een opdracht. Zie `AFWIJK_METINGEN` en `vermogen_w`.
     _afwijkt: int = 0
@@ -917,15 +920,29 @@ class Regelaar:
         # gemeten. Een sensor die vlak na de opdracht al "klopt" toont de
         # opdracht en niet de meting; die telt niet. Duurt het langer dan
         # `WACHT_OP_BATTERIJ`, dan gaat hij toch verder.
+        #
+        # "Daarna" is na de bevestiging van de sensor en niet na de opdracht
+        # plus `VOLGT_NA`. In de eerste woning op 22-09-2026 's nachts volgde
+        # de batterij pas na tien seconden: de meter van :08 toonde nog de
+        # oude stand, de sensor van :09 al de nieuwe, en de regelaar telde die
+        # oude meting bij de nieuwe stand op. Elke tien seconden een opdracht
+        # van 1 tot 2 kW de andere kant op, laden van het net op 12% midden
+        # in de nacht. De meter meldt eens per vijf seconden, dus dit kost
+        # hooguit één tik extra.
         if not self.bezonken and self.opdracht_op is not None:
             sinds = now - self.opdracht_op
             aangekomen = sinds >= VOLGT_NA and (
                 batterij_w is None or abs(batterij_w - self.opdracht_w) <= DODE_BAND_W
             )
+            if aangekomen and batterij_w is not None and self.bevestigd_op is None:
+                self.bevestigd_op = now
             # Zonder sensor is de meter het enige bewijs, en dan hoort de
             # batterij ruim de tijd gehad te hebben voordat die meting telt.
-            na = VOLGT_NA if batterij_w is not None else 2 * VOLGT_NA
-            meter_na = net_op is not None and net_op > self.opdracht_op + na
+            if batterij_w is None:
+                grens = self.opdracht_op + 2 * VOLGT_NA
+            else:
+                grens = self.bevestigd_op or (self.opdracht_op + VOLGT_NA)
+            meter_na = net_op is not None and net_op > grens
             if (aangekomen and meter_na) or sinds >= WACHT_OP_BATTERIJ:
                 self.bezonken = True
             else:
@@ -984,6 +1001,7 @@ class Regelaar:
         self.opdracht_w = watt
         self.opdracht_op = now
         self.bezonken = meteen
+        self.bevestigd_op = None
         self._keren = 0
         return watt
 

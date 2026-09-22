@@ -444,6 +444,48 @@ controle("met te weinig doorzet nog geen rendement", bat.rendement_uit_tellers(4
 controle("de tellers van de batterij zelf (meer eruit dan erin) worden geweigerd",
          bat.rendement_uit_tellers(200.0, 205.0, 14.6) is None)
 
+print("=== 30. een meting van vóór de bevestiging telt niet (22-09-2026, 's nachts in de eerste woning) ===")
+# De batterij volgde pas na tien seconden. De meter van :08 toonde nog de oude
+# stand, de sensor van :09 al de nieuwe, en de regelaar telde die oude meting
+# bij de nieuwe stand op: 230 W ontladen bevestigd, meter -2141 W, en dan 966 W
+# láden op 12% midden in de nacht. Elke tien seconden de andere kant op.
+r30 = Regelaar()
+b30 = anker(soc=12.0)
+t0 = DAG.replace(hour=23, minute=21, second=48)
+# De last gaat aan: de meter zegt 2139 W afname, de batterij deed 190 W ontladen.
+uit30 = r30.stap(t0, net_w=2139.0, net_op=t0, batterij_w=-188.0, besluit=Besluit(NUL), b=b30)
+controle("de last gaat aan: meteen ontladen", uit30 is not None and uit30 < -2000, f"{uit30}")
+# Vijf seconden later is de last alweer uit; de batterij doet nog het oude.
+controle("vijf seconden later nog niet bezonken: de sensor toont nog de oude stand",
+         r30.stap(t0 + dt.timedelta(seconds=5), net_w=-22.0, net_op=t0 + dt.timedelta(seconds=5),
+                  batterij_w=-188.0, besluit=Besluit(NUL), b=b30) is None, "")
+# Om :58 zegt de sensor dat de batterij ontlaadt (het huis vraagt 190 W); de meter van datzelfde moment
+# telt nog niet, want die kan van vlak vóór de omslag zijn.
+t1 = t0 + dt.timedelta(seconds=10)
+controle("de sensor bevestigt: de meter van datzelfde moment telt nog niet",
+         r30.stap(t1, net_w=-1949.0, net_op=t1, batterij_w=-2150.0, besluit=Besluit(NUL), b=b30) is None
+         and r30.bevestigd_op == t1, f"{r30.bevestigd_op}")
+uit30b = r30.stap(t1 + dt.timedelta(seconds=5), net_w=-1949.0, net_op=t1 + dt.timedelta(seconds=5),
+                  batterij_w=-2150.0, besluit=Besluit(NUL), b=b30)
+controle("de tik daarna wel: terug naar wat het huis vraagt",
+         uit30b is not None and -300 < uit30b < -150, f"{uit30b}")
+# Nu het geval van die nacht: om :08 meet de meter nog -1949 (de batterij doet nog
+# 2150), om :09 zegt de sensor 200 (de nieuwe stand). De meter is van vóór die
+# bevestiging en telt dus niet: geen opdracht, laat staan 966 W laden.
+t2 = t1 + dt.timedelta(seconds=10)
+controle("een meter van vóór de bevestiging telt niet", r30.stap(
+    t2 + dt.timedelta(seconds=1), net_w=-1949.0, net_op=t2, batterij_w=-200.0,
+    besluit=Besluit(NUL), b=b30) is None, f"{r30.opdracht_w}")
+controle("en de bevestiging is onthouden", r30.bevestigd_op == t2 + dt.timedelta(seconds=1), f"{r30.bevestigd_op}")
+# De volgende metertik, :13, meet -10: dat is het huis met de nieuwe stand erin.
+t3 = t2 + dt.timedelta(seconds=5)
+uit30c = r30.stap(t3, net_w=-10.0, net_op=t3, batterij_w=-200.0, besluit=Besluit(NUL), b=b30)
+controle("de tik daarna telt wel, en die vraagt hooguit een kleine bijstelling",
+         uit30c is None or -300 < uit30c < -100, f"{uit30c}")
+controle("na vijftien seconden gaat hij hoe dan ook verder", (lambda r: (
+    r._zet(t0, -2000.0) or True) and r.stap(t0 + dt.timedelta(seconds=15), net_w=-1800.0,
+    net_op=t0 + dt.timedelta(seconds=14), batterij_w=-500.0, besluit=Besluit(NUL), b=b30) is not None
+)(Regelaar()), "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
