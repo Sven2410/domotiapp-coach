@@ -1020,6 +1020,25 @@ Assistant (de andere sturing zette eerst 0 W, dertig seconden stil, daarna
 weer verder), en de omvormer van de zon die 's nachts onbereikbaar is
 (`_zon_slaapt` geldt daar ook).
 
+**De coach leest elke vorm van prijslijst die het paneel ook leest** (v0.74.1).
+De eerste dag op sturen in de eerste woning (22-09-2026) stond er de hele dag
+"de prijs van dit uur is niet bekend": het contract was dynamisch met Zonneplan,
+en die integratie geeft zijn lijst als `forecast` met alleen een `datetime` en
+een `electricity_price` in tienmiljoensten van een euro (3355224 naast een
+toestand van 0,3355224 €/kWh), terwijl `_slots` alleen `prices` met `from`,
+`till` en `price` kende (Frank Energie). `_prijsrijen` in coach.py leest nu
+dezelfde vier vormen als `readSchedule` in data-source.js: Frank Energie, Nord
+Pool (`raw_today`/`raw_tomorrow`), Tibber en EnergyZero (`data`) en Zonneplan
+(`ZONNEPLAN_DELER`). Een blok zonder eindtijd loopt tot het volgende blok, het
+laatste blok is even lang als het blok ervoor, en zonder blok ervoor zo lang
+als het contract zegt; paneel en coach houden daar dezelfde regel voor. **Houd
+die twee lijsten gelijk.** En dezelfde sensor als all-in én als marktprijs
+ingevuld maakt de terugleveropbrengst onbekend in plaats van gelijk aan de
+inkoopprijs; het formulier zegt dat erbij. In de energiestroom wijst de pijl
+van een ontladende batterij nu naar het huis (`batteryWatts < 0` in
+energy-flow.js); de bewoner zette er een rode kring om. Proeven bij de
+prijslijst in test_coach.py (na de datetime-proef) en in test_rapport.mjs.
+
 
 ## Hoe het in elkaar zit
 
@@ -1065,10 +1084,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 378 controles op het denkwerk
 python tests/test_batterij.py    # 74 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 474 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 480 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1683 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 59 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 60 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

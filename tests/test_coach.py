@@ -1429,6 +1429,59 @@ rommel = coach28._prices({"contract": DYN})
 controle("een onleesbare rij wordt overgeslagen, de rest blijft staan",
          len(rommel) == 1, f"{len(rommel)} blokken")
 
+# Zonneplan geeft zijn lijst als `forecast`, met alleen een begintijd en de
+# prijs in tienmiljoensten van een euro. In de eerste woning stond daardoor op
+# 22-09-2026 de hele dag "de prijs van dit uur is niet bekend" en laadde de
+# batterij niet van het net. Drie uren, het laatste zonder opvolger: dat is
+# even lang als het uur ervoor.
+PRIJSLIJST_ZONNEPLAN = {
+    "state": "0.3355224",
+    "attributes": {"unit_of_measurement": "€/kWh", "forecast": [
+        {"electricity_price": 3355224, "electricity_price_excl_tax": 2246743, "tariff_group": "low",
+         "datetime": "2026-08-27T10:00:00.000000Z"},
+        {"electricity_price": 2919535, "datetime": "2026-08-27T11:00:00.000000Z"},
+        {"electricity_price": 2500000, "datetime": "2026-08-27T12:00:00.000000Z"},
+        {"electricity_price": None, "datetime": "2026-08-27T13:00:00.000000Z"},
+    ]},
+}
+hass28b, _, coach28b = bouw({"sensor.prijs": PRIJSLIJST_ZONNEPLAN}, instellingen())
+zp = coach28b._prices({"contract": DYN})
+print(f"  Zonneplan: {[(r['start'].strftime('%H:%M'), r['end'].strftime('%H:%M'), r['price']) for r in zp]}")
+controle("een Zonneplan-lijst levert een blok per uur", len(zp) == 3, f"{len(zp)}")
+controle("met de prijs in euro's, gedeeld door tien miljoen",
+         bool(zp) and abs(zp[0]["price"] - 0.3355224) < 1e-9 and abs(zp[2]["price"] - 0.25) < 1e-9, f"{zp}")
+controle("elk blok loopt tot het volgende, en het laatste is even lang als het blok ervoor",
+         all(r["end"] - r["start"] == dt.timedelta(hours=1) for r in zp), f"{zp}")
+
+# Nord Pool: `raw_today` en `raw_tomorrow` met start, end en value.
+PRIJSLIJST_NORDPOOL = {
+    "state": "0.30",
+    "attributes": {"raw_today": [
+        {"start": "2026-08-27T12:00:00+02:00", "end": "2026-08-27T13:00:00+02:00", "value": 0.30},
+    ], "raw_tomorrow": [
+        {"start": "2026-08-28T12:00:00+02:00", "end": "2026-08-28T13:00:00+02:00", "value": 0.20},
+    ]},
+}
+hass28c, _, coach28c = bouw({"sensor.prijs": PRIJSLIJST_NORDPOOL}, instellingen())
+np_ = coach28c._prices({"contract": DYN})
+controle("een Nord Pool-lijst levert vandaag en morgen", [r["price"] for r in np_] == [0.30, 0.20], f"{np_}")
+
+# Dezelfde sensor als all-in én als marktprijs ingevuld (de eerste woning,
+# 22-09-2026): dan is de terugleveropbrengst onbekend, en niet de all-in prijs.
+dubbel = {"contract": dict(DYN, netting=False, dynamic=dict(DYN["dynamic"], market_entity=DYN["dynamic"]["all_in_entity"]))}
+zelfde = coach28c._prices(dubbel)
+controle("dezelfde sensor als marktprijs maakt de terugleveropbrengst onbekend",
+         bool(zelfde) and all(r["feed_in"] is None for r in zelfde), f"{zelfde}")
+
+# En een kwartierlijst zonder eindtijden en met maar één rij: dan zegt het
+# contract hoe lang een blok is.
+PRIJSLIJST_EEN = {"state": "0.30", "attributes": {"data": [{"startsAt": "2026-08-27T12:00:00+02:00", "total": 0.30}]}}
+hass28d, _, coach28d = bouw({"sensor.prijs": PRIJSLIJST_EEN}, instellingen())
+kwartier = {"contract": dict(DYN, dynamic=dict(DYN["dynamic"], interval="quarter"))}
+een = coach28d._prices(kwartier)
+controle("één rij zonder eindtijd krijgt de bloklengte van het contract",
+         len(een) == 1 and een[0]["end"] - een[0]["start"] == dt.timedelta(minutes=15), f"{een}")
+
 print()
 print("=== eenheden: kW is geen W, en Wh is geen kWh ===")
 

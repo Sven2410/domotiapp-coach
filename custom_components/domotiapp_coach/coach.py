@@ -510,6 +510,69 @@ WAKE_WINDOW = timedelta(seconds=60)
 HURRY_INTERVAL = timedelta(seconds=15)
 
 
+# Hoe Zonneplan zijn prijzen meegeeft: in tienmiljoensten van een euro per kWh.
+# Gemeten in de eerste woning op 22-09-2026: de rij van het lopende uur zei
+# 3355224 naast een toestand van 0,3355224 €/kWh.
+ZONNEPLAN_DELER = 10_000_000.0
+
+
+def _prijsrijen(attributes: Any) -> list[tuple[datetime, datetime | None, float]]:
+    """Elke vorm waarin een prijsentiteit zijn lijst meegeeft: (begin, eind, prijs).
+
+    Er is geen standaard, dus dezelfde vormen als `readSchedule` in
+    data-source.js, in dezelfde volgorde:
+
+    - `prices: [{from, till, price}]`               Frank Energie
+    - `raw_today` en `raw_tomorrow: [{start, end, value}]`  Nord Pool
+    - `data: [{startsAt, total}]`                    Tibber, EnergyZero
+    - `forecast: [{datetime, electricity_price}]`    Zonneplan, zie `ZONNEPLAN_DELER`
+
+    Een rij die niet te lezen is wordt overgeslagen, de rest blijft staan.
+    Tot 22-09-2026 kende de coach alleen de eerste vorm; in de eerste woning
+    stond daardoor bij een dynamisch contract met Zonneplan de hele dag "de
+    prijs van dit uur is niet bekend", en laadde er niets van het net.
+    """
+    attributes = attributes or {}
+
+    def lijst(naam: str) -> list:
+        waarde = attributes.get(naam)
+        return waarde if isinstance(waarde, list) else []
+
+    uit: list[tuple[datetime, datetime | None, float]] = []
+
+    def voeg(begin: Any, eind: Any, prijs: Any) -> None:
+        try:
+            start = _tijdstip(begin)
+            end = _tijdstip(eind) if eind is not None else None
+            waarde = float(prijs)
+        except (TypeError, ValueError):
+            return
+        if start is None or (eind is not None and end is None):
+            return
+        uit.append((start, end, waarde))
+
+    for row in lijst("prices"):
+        if isinstance(row, dict):
+            voeg(row.get("from", row.get("start")), row.get("till", row.get("end")),
+                 row.get("price", row.get("value")))
+    for row in lijst("raw_today") + lijst("raw_tomorrow"):
+        if isinstance(row, dict):
+            voeg(row.get("start"), row.get("end"), row.get("value", row.get("price")))
+    for row in lijst("data"):
+        if isinstance(row, dict):
+            voeg(row.get("startsAt", row.get("start", row.get("from", row.get("datetime")))),
+                 row.get("endsAt", row.get("end", row.get("till"))),
+                 row.get("total", row.get("price", row.get("value"))))
+    for row in lijst("forecast"):
+        if isinstance(row, dict) and row.get("electricity_price") is not None:
+            try:
+                prijs = float(row["electricity_price"]) / ZONNEPLAN_DELER
+            except (TypeError, ValueError):
+                continue
+            voeg(row.get("datetime"), None, prijs)
+    return uit
+
+
 def _moment(now: datetime | None = None) -> datetime:
     """De klok waar de coach mee rekent: lokale tijd, zonder tijdzone erbij.
 
@@ -3918,21 +3981,29 @@ class ChargerCoach:
         self._nudged[device_id] = now
         return True
 
-    def _slots(self, entity_id: str | None) -> dict[datetime, tuple[datetime, float]]:
-        """De blokken uit een prijsentiteit, op begintijd."""
+    def _slots(self, entity_id: str | None, interval: str = "hour") -> dict[datetime, tuple[datetime, float]]:
+        """De blokken uit een prijsentiteit, op begintijd.
+
+        Een blok zonder eindtijd loopt tot het volgende blok; het laatste blok
+        is even lang als het blok ervoor, en zonder blok ervoor zo lang als
+        het contract zegt. Dezelfde regel als `priceForecast` in data-source.js.
+        """
         state = self.hass.states.get(entity_id) if entity_id else None
         if state is None:
             return {}
 
+        rijen = sorted(_prijsrijen(state.attributes), key=lambda r: r[0])
+        vast = timedelta(minutes=15 if interval == "quarter" else 60)
         uit: dict[datetime, tuple[datetime, float]] = {}
-        for row in state.attributes.get("prices") or []:
-            try:
-                start = _tijdstip(row["from"])
-                end = _tijdstip(row["till"])
-                price = float(row["price"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if start is None or end is None:
+        for i, (start, end, price) in enumerate(rijen):
+            if end is None:
+                if i + 1 < len(rijen):
+                    end = rijen[i + 1][0]
+                elif i > 0:
+                    end = start + (start - rijen[i - 1][0])
+                else:
+                    end = start + vast
+            if end <= start:
                 continue
             uit[dt_util.as_local(start).replace(tzinfo=None)] = (
                 dt_util.as_local(end).replace(tzinfo=None),
@@ -3986,8 +4057,17 @@ class ChargerCoach:
             1 + float(dynamic.get("vat_percent") or 0) / 100
         )
 
-        markt = self._slots(dynamic.get("market_entity"))
-        inkoop = self._slots(dynamic.get("all_in_entity")) if all_in else markt
+        interval = str(dynamic.get("interval") or "hour")
+        # Dezelfde sensor twee keer zegt niets over teruglevering: een all-in
+        # prijs als marktprijs lezen maakt van elke teruggeleverde kWh een die
+        # de volle inkoopprijs opbrengt, en daar plant de coach dan op. In de
+        # eerste woning stond dat zo ingevuld (22-09-2026). Dan is de opbrengst
+        # onbekend, en dat is beter dan een verzonnen bedrag.
+        markt_entity = dynamic.get("market_entity")
+        if all_in and markt_entity and markt_entity == dynamic.get("all_in_entity"):
+            markt_entity = None
+        markt = self._slots(markt_entity, interval)
+        inkoop = self._slots(dynamic.get("all_in_entity"), interval) if all_in else markt
         if not inkoop:
             return []
 

@@ -419,7 +419,11 @@ class DacEnergyFlow extends DacElement {
       // bubble, or the extra readings a brand offers.
       node.classList.toggle("clickable", rolled > 0 || (device.details?.length ?? 0) > 0);
       this.setNode_(slot, device.watts, label);
-      this.setFlow_(slot, device.watts, false);
+      // Een thuisbatterij die ontlaadt voedt het huis: de energie loopt tegen
+      // de getekende arm in. De bewoner van de eerste woning op 22-09-2026,
+      // met een rode kring om de pijl die naar de batterij wees terwijl de
+      // kaart "ontlaadt" zei.
+      this.setFlow_(slot, device.watts, (device.batteryWatts ?? 0) < 0);
     }
 
     this.fitHeight_(Boolean(slots[1]));

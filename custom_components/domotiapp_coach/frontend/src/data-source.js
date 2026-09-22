@@ -125,13 +125,21 @@ export function priceNow(feed, contract) {
  * - `prices: [{from, till, price}]`      Frank Energie
  * - `raw_today` + `raw_tomorrow`         Nord Pool: `[{start, end, value}]`
  * - `data: [{startsAt, total}]`          Tibber, EnergyZero and friends
+ * - `forecast: [{datetime, electricity_price}]`  Zonneplan, in ten-millionths of
+ *   a euro (3355224 next to a state of 0.3355224 €/kWh, measured 22-09-2026)
  * - `today` + `tomorrow: [number]`       one bare number per hour from midnight
+ *
+ * The coach reads the same shapes in `_prijsrijen` (coach.py); keep the two
+ * lists the same, or the chart and the decision disagree about what an hour
+ * costs.
  *
  * Anything else yields nothing, and the panel says it has no forecast rather
  * than inventing one.
  *
  * @returns {Array<{start: Date, end: Date|null, value: number}>}
  */
+const ZONNEPLAN_DIVISOR = 10_000_000;
+
 function readSchedule(attributes) {
   const rows = [];
 
@@ -161,6 +169,11 @@ function readSchedule(attributes) {
     );
   }
 
+  for (const entry of list(attributes?.forecast)) {
+    if (entry?.electricity_price === undefined || entry?.electricity_price === null) continue;
+    push(entry?.datetime, null, Number(entry.electricity_price) / ZONNEPLAN_DIVISOR);
+  }
+
   // Bare hourly numbers carry no timestamps of their own: they are 24 values
   // starting at local midnight, and tomorrow's list follows on from today's.
   if (!rows.length) {
@@ -183,8 +196,9 @@ function readSchedule(attributes) {
  * so a chart of the forecast and the number on the tile cannot disagree: cents
  * become euros, and a bare market price gets tax, markup and VAT.
  *
- * Entries without an end time inherit the gap to the next one, falling back to
- * the interval the customer said their contract uses.
+ * Entries without an end time inherit the gap to the next one; the last one is
+ * as long as the one before it, falling back to the interval the customer said
+ * their contract uses. The same rule as `_slots` in coach.py.
  *
  * @returns {Array<{start: Date, end: Date, price: number}>} empty when the
  *   contract is fixed or the entity publishes nothing.
@@ -206,8 +220,10 @@ export function priceForecast(feed, contract) {
 
   return rows.map((row, index) => {
     const next = rows[index + 1];
+    const prev = rows[index - 1];
+    const length = prev ? row.start.getTime() - prev.start.getTime() : fallback;
     const end =
-      row.end ?? (next ? next.start : new Date(row.start.getTime() + fallback));
+      row.end ?? (next ? next.start : new Date(row.start.getTime() + length));
     const value = row.value * scale;
     return { start: row.start, end, price: allIn ? value : allInFrom(value, dynamic) };
   });

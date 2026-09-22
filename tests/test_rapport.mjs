@@ -1030,6 +1030,26 @@ proef("een omvormer die wel iets zegt wint altijd", () => {
   assert.equal(woningBij("12", "below_horizon").solar, 12);
 });
 
+// Zonneplan geeft zijn prijzen als `forecast`, in tienmiljoensten van een
+// euro en zonder eindtijd. Gemeten in de eerste woning op 22-09-2026.
+const { priceForecast } = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
+
+proef("een Zonneplan-lijst wordt een prijs per uur in euro's", () => {
+  const staten = {
+    "sensor.prijs": { state: "0.3355224", attributes: { unit_of_measurement: "€/kWh", forecast: [
+      { electricity_price: 3355224, datetime: "2026-08-27T10:00:00.000000Z" },
+      { electricity_price: 2500000, datetime: "2026-08-27T11:00:00.000000Z" },
+    ] } },
+  };
+  const contract = { type: "dynamic", dynamic: { source: "all_in", all_in_entity: "sensor.prijs", interval: "quarter" } };
+  const rijen = priceForecast({ get: (id) => staten[id] }, contract);
+  assert.equal(rijen.length, 2);
+  assert.ok(Math.abs(rijen[0].price - 0.3355224) < 1e-9);
+  assert.equal(rijen[0].end.getTime(), rijen[1].start.getTime());
+  // Het laatste blok kent geen opvolger en is even lang als het blok ervoor.
+  assert.equal(rijen[1].end.getTime() - rijen[1].start.getTime(), 3_600_000);
+});
+
 // --- de thuisbatterij ---------------------------------------------------------
 //
 // De eigenaar op 21-09-2026: "Ik wil de coach gaan uitbreiden met een
