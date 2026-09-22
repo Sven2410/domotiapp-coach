@@ -867,6 +867,34 @@ proef("een nieuwe auto begint met het merk, en een Tesla krijgt de wekknop en de
   assert.ok(oud.includes('data-car-field="capacity_kwh"'));
 });
 
+// --- het plan van de batterij op de kaart ------------------------------------------
+//
+// De eigenaar op 22-09-2026: "ik kan nu niet zien wat de coach van plan is met
+// de batterij." Uren met dezelfde stand worden één regel.
+const { planRegels } = await import("../custom_components/domotiapp_coach/frontend/src/battery.js");
+
+proef("het plan vat de uren samen per stand, met accustand, kWh en prijs", () => {
+  const dag = new Date().toISOString().slice(0, 10);
+  const uur = (h, mode, soc, grid = 0, price = 0.25) => ({
+    start: `${dag}T${String(h).padStart(2, "0")}:00:00`, end: `${dag}T${String(h + 1).padStart(2, "0")}:00:00`,
+    mode, soc, grid_kwh: grid, kwh: grid, price,
+  });
+  const regels = planRegels([
+    uur(18, "nul", 80), uur(19, "nul", 70), uur(20, "nul", 60),
+    uur(21, "netladen", 75, 2.1, 0.12), uur(22, "netladen", 90, 2.1, 0.14),
+    uur(23, "nul", 85),
+  ]);
+  assert.equal(regels.length, 3);
+  assert.equal(regels[0].label, "18:00 tot 21:00");
+  assert.ok(regels[0].text.startsWith("nul op de meter"));
+  assert.ok(regels[0].text.includes("60%"));
+  assert.ok(regels[1].text.includes("van 60 naar 90%"), regels[1].text);
+  assert.ok(regels[1].text.includes("4,2 kWh") && regels[1].text.includes("0,130"), regels[1].text);
+  assert.deepEqual(planRegels([]), []);
+  const rijen = batteryRows({ kind: "batterij", mode: "nul", mode_name: "Nul op de meter", hours: [uur(18, "nul", 80)] });
+  assert.ok(rijen.some((r) => r.label === "Plan"));
+});
+
 // --- eerdere contracten en gas ---------------------------------------------------
 //
 // De bewoner van de eerste woning op 22-09-2026: "gascontract 1: van-tot +

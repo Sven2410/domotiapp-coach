@@ -46,6 +46,7 @@ from .const import (
 )
 from .archive import async_get_archive
 from .batterij import (
+    Besluit,
     MAX_LADEN,
     NETLADEN,
     STAND_NAMEN,
@@ -3561,6 +3562,30 @@ class ChargerCoach:
             )
         )
 
+        # "Nu vol laden": dezelfde knop als snelladen bij de paal, voor wie de
+        # batterij nu vol wil hebben, wat het plan ook zegt. De eigenaar op
+        # 22-09-2026: "eigenlijk wil je nu dat de batterij handmatig vol wordt
+        # geladen." Gaat vanzelf uit zodra hij vol is; boven de avondpiek, net
+        # als snelladen.
+        if device_id in self._boost:
+            if b.soc is not None and b.soc >= b.soc_max - VOL_MARGE:
+                self._boost.discard(device_id)
+                self._remember(device_id)
+                await self._async_noteer(f"{naam} is vol; hij volgt het plan weer.", now)
+            elif b.soc is not None and b.max_charge_w > 0:
+                besluit = Besluit(
+                    MAX_LADEN,
+                    power_w=b.max_charge_w,
+                    reason=(
+                        f"Je hebt gevraagd hem nu vol te laden, dus hij laadt van het net op "
+                        f"{b.max_charge_w / 1000:.1f} kW tot {b.soc_max:.0f}%, wat de prijs ook is.".replace(".", ",", 1)
+                    ),
+                    plan=besluit.plan,
+                    rule="vol-laden",
+                    waarde=besluit.waarde,
+                    uren=besluit.uren,
+                )
+
         # Het gemeten rendement en de laatste volle stand bewaren, zodat ze een
         # herstart overleven en de kaart ze kan tonen.
         nieuw: dict[str, Any] = {}
@@ -3625,6 +3650,7 @@ class ChargerCoach:
             "ceiling": b.soc_max,
             "full_before": b.vol_voor.isoformat() if b.vol_voor else None,
             "payback": terug_verdiend,
+            "boost": device_id in self._boost,
             "hours": [
                 {
                     "start": uur.start.isoformat(), "end": uur.end.isoformat(), "mode": uur.stand,

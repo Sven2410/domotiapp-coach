@@ -4611,6 +4611,24 @@ controle("elke omvormer met een eigen naam in de sensorwacht",
 controle("zonder extra's is er alleen de eerste",
          coachmod.zonsensoren(instellingen()) == [] and coachmod.zonsensoren({"sources": {"solar": "sensor.zon"}}) == ["sensor.zon"], "")
 
+print("=== 84. de thuisbatterij: nu vol laden, en het plan op de kaart (22-09-2026) ===")
+# De eigenaar: "eigenlijk wil je nu dat de batterij handmatig vol wordt
+# geladen." Dezelfde knop als snelladen: van het net op vol vermogen tot de
+# laadgrens, wat de prijs ook is, en dan vanzelf weer het plan.
+hass84, _, coach84 = bouw(huis75(soc="60"), instellingen(devices=[LAADPAAL, BATTERIJ]))
+NU84 = dt.datetime(2026, 9, 22, 18, 30)   # midden in de avondpiek
+coach84.async_boost("dev-batterij", True)
+b84 = asyncio.run(ronde75(hass84, coach84, NU84))
+print(f"  {b84.get('mode_name')}: {b84.get('reason')}")
+controle("met de knop aan laadt hij maximaal, ook in de avondpiek",
+         b84.get("mode") == "max-laden" and b84.get("rule") == "vol-laden" and b84.get("boost") is True,
+         f"{b84.get('mode')} {b84.get('rule')} {b84.get('boost')}")
+controle("en het plan van de uren blijft op de kaart staan", isinstance(b84.get("hours"), list), "")
+hass84.states.zet("sensor.batterij_soc", "95")
+b84 = asyncio.run(ronde75(hass84, coach84, NU84 + dt.timedelta(minutes=1)))
+controle("op de laadgrens gaat de knop vanzelf uit en volgt hij het plan weer",
+         b84.get("boost") is False and b84.get("rule") != "vol-laden", f"{b84.get('boost')} {b84.get('rule')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

@@ -530,6 +530,19 @@ allemaal gebouwd in v0.77.0.
    rapport zelf (report.js) is niet veranderd: elk deel stond er al alleen als er
    gegevens voor zijn.
 
+**Het plan op de kaart, en "Nu vol laden"** (v0.78.0). De eigenaar op
+22-09-2026: "ik kan nu niet zien wat de coach van plan is met de batterij; want
+eigenlijk wil je nu dat de batterij handmatig vol wordt geladen." Twee dingen.
+`planRegels` in battery.js voegt de uren van het plan (`hours` in de stand)
+samen per stand tot regels als "18:00 tot 21:00: nul op de meter, van 80 naar
+60%" en "21:00 tot 23:00: laden van het net, van 60 naar 90%, 4,2 kWh tegen
+€ 0,130", onder het kopje "Plan" op de kaart. En de knop "Nu vol laden": dezelfde
+knop en hetzelfde commando als snelladen bij de paal (`coach/boost`,
+`self._boost`); in `_one_batterij` wordt het besluit dan `MAX_LADEN` op het
+laadvermogen tot de laadgrens (`vol-laden`), ook in de avondpiek, en zodra hij
+vol is gaat de knop vanzelf uit met een regel in de geschiedenis. Proef 84 in
+test_coach.py, `planRegels` in test_rapport.mjs.
+
 ## Het merk van de auto, en een Tesla die slaapt
 
 Sinds 22-09-2026 (v0.76.0) heeft een autoprofiel een merk: Ford of Tesla
@@ -1235,10 +1248,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 386 controles op het denkwerk
 python tests/test_batterij.py    # 79 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 506 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 509 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1683 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 70 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 71 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

@@ -29,6 +29,68 @@ export function volgendeNetlading(hours = []) {
   return { start: hours[eerste].start, end: hours[laatste].end, kwh };
 }
 
+const STAND_NAMEN = {
+  nul: "nul op de meter",
+  zonneladen: "alleen zonneladen",
+  ontladen: "alleen ontladen",
+  netladen: "laden van het net",
+  "max-laden": "maximaal laden",
+  handelen: "handelen",
+  standby: "standby",
+};
+
+/**
+ * Het plan van de coach voor de komende uren, samengevat per stand.
+ *
+ * De eigenaar op 22-09-2026: "ik kan nu niet zien wat de coach van plan is met
+ * de batterij." De coach rekent het per uur uit; hier worden uren met dezelfde
+ * stand samengevoegd tot één regel: van wanneer tot wanneer, wat hij doet, en
+ * van hoeveel naar hoeveel procent. Laden van het net krijgt de kWh en de
+ * gemiddelde prijs erbij.
+ *
+ * @returns {Array<{label: string, text: string}>}
+ */
+export function planRegels(hours = [], maxRegels = 8) {
+  const uren = (hours ?? []).filter((u) => u && u.start && u.end);
+  if (!uren.length) return [];
+  const blokken = [];
+  for (const uur of uren) {
+    const laatste = blokken[blokken.length - 1];
+    if (laatste && laatste.mode === uur.mode) {
+      laatste.end = uur.end;
+      laatste.socEind = uur.soc;
+      laatste.kwh += Number(uur.grid_kwh) || 0;
+      if (Number.isFinite(uur.price)) { laatste.prijsSom += uur.price; laatste.prijsN += 1; }
+      laatste.n += 1;
+    } else {
+      blokken.push({
+        mode: uur.mode, start: uur.start, end: uur.end,
+        socBegin: laatste ? laatste.socEind : null, socEind: uur.soc,
+        kwh: Number(uur.grid_kwh) || 0,
+        prijsSom: Number.isFinite(uur.price) ? uur.price : 0, prijsN: Number.isFinite(uur.price) ? 1 : 0, n: 1,
+      });
+    }
+  }
+  const dagKlok = (iso) => {
+    const vandaag = new Date().toISOString().slice(0, 10);
+    const dag = String(iso ?? "").slice(0, 10);
+    return `${dag && dag !== vandaag && dag > vandaag ? "morgen " : ""}${klok(iso)}`;
+  };
+  return blokken.slice(0, maxRegels).map((b) => {
+    let text = STAND_NAMEN[b.mode] ?? b.mode;
+    if (Number.isFinite(b.socEind)) {
+      text += Number.isFinite(b.socBegin) && Math.round(b.socBegin) !== Math.round(b.socEind)
+        ? `, van ${Math.round(b.socBegin)} naar ${Math.round(b.socEind)}%`
+        : `, ${Math.round(b.socEind)}%`;
+    }
+    if (b.kwh > 0.05) {
+      text += `, ${b.kwh.toLocaleString("nl-NL", { maximumFractionDigits: 1 })} kWh`;
+      if (b.prijsN) text += ` tegen ${euro(b.prijsSom / b.prijsN, 3)}`;
+    }
+    return { label: `${dagKlok(b.start)} tot ${dagKlok(b.end)}`, text };
+  });
+}
+
 /** Wat er over de terugverdientijd te zeggen valt, of niets. */
 export function terugverdiendTekst(payback) {
   if (!payback) return [];
@@ -83,6 +145,12 @@ export function batteryRows(besluit) {
 
   if (besluit.full_before) {
     rijen.push({ label: "Volle beurt", text: "vandaag een keer helemaal vol, voor het balanceren van de cellen" });
+  }
+
+  const plan = planRegels(besluit.hours);
+  if (plan.length) {
+    rijen.push({ label: "Plan", text: "wat hij de komende uren van plan is:" });
+    rijen.push(...plan);
   }
 
   return [...rijen, ...terugverdiendTekst(besluit.payback)];
