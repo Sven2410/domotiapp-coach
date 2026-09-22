@@ -109,6 +109,23 @@ class DacViewInstallation extends DacEditorElement {
         </section>
 
         <section class="card">
+          <h2>${icons.plug} Groepen met een eigen zekering</h2>
+          <p class="hint">
+            Heb je een onderverdeelkast, bijvoorbeeld in de garage, met een eigen zekering en
+            een eigen meter? Zet hem hier neer en kies bij Apparaten welke apparaten eraan
+            hangen. De coach blijft dan onder de zekering van die groep én onder de
+            hoofdzekering. Een groep zonder meter telt alleen wat de coach er zelf naartoe
+            stuurt.
+          </p>
+          <div class="fields">
+            <div id="circuits"></div>
+            <div class="circuit-actions">
+              <button type="button" id="circuit-add">Groep toevoegen</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
           <h2>${icons.euro} Contract en prijzen</h2>
           <p class="hint">Waar de energieprijs op het overzicht vandaan komt.</p>
           <div class="fields">
@@ -299,6 +316,20 @@ class DacViewInstallation extends DacEditorElement {
       this.afterChange_();
     });
 
+    this.$("#circuit-add").addEventListener("click", () => {
+      const groepen = this.circuits_();
+      groepen.push({
+        id: `g-${Date.now().toString(36)}`,
+        name: "",
+        fuse_amps: 16,
+        phases: 3,
+        parent: "",
+        sensors: { l1: {}, l2: {}, l3: {} },
+      });
+      this.paintCircuits_();
+      this.afterChange_();
+    });
+
     this.$("#netting").addEventListener("change", (ev) => {
       this.draft_.contract.netting = ev.target.checked;
       this.afterChange_();
@@ -425,9 +456,130 @@ class DacViewInstallation extends DacEditorElement {
     this.onFeed_();
 
     this.paintPhases_();
+    this.paintCircuits_();
     this.paintContract_();
     this.paintHints_();
     this.syncSaveBar_();
+  }
+
+  /** De groepen in het klad, altijd als lijst. */
+  circuits_() {
+    const inst = this.draft_.installation;
+    if (!Array.isArray(inst.circuits)) inst.circuits = [];
+    return inst.circuits;
+  }
+
+  /**
+   * Eén groep als blok: naam, zekering, fasen, de groep erboven, en per fase de
+   * sensoren. Zelfde velden als de fasen van de hoofdaansluiting bij Instellingen.
+   */
+  circuitHtml_(g, index, groepen) {
+    const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    const fasen = Number(g.phases) === 1 ? ["l1"] : ["l1", "l2", "l3"];
+    const anderen = groepen.filter((o) => o !== g && o.id !== g.id);
+    return `
+      <div class="circuit" data-circuit="${index}">
+        <div class="two">
+          <div class="row">
+            <label for="circuit-name-${index}">Naam</label>
+            <input type="text" id="circuit-name-${index}" data-circuit-field="name" data-index="${index}"
+                   value="${esc(g.name)}" placeholder="Bijvoorbeeld: Garage" autocomplete="off">
+          </div>
+          <div class="row">
+            <label for="circuit-fuse-${index}">Zekering per fase (A)</label>
+            <input type="number" id="circuit-fuse-${index}" data-circuit-field="fuse_amps" data-index="${index}"
+                   min="1" max="1000" step="1" inputmode="numeric" value="${esc(g.fuse_amps)}">
+          </div>
+        </div>
+        <div class="two">
+          <div class="row">
+            <label for="circuit-phases-${index}">Aantal fasen</label>
+            <select id="circuit-phases-${index}" data-circuit-field="phases" data-index="${index}">
+              <option value="1"${Number(g.phases) === 1 ? " selected" : ""}>1 fase</option>
+              <option value="3"${Number(g.phases) !== 1 ? " selected" : ""}>3 fasen</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="circuit-parent-${index}">Hangt onder</label>
+            <select id="circuit-parent-${index}" data-circuit-field="parent" data-index="${index}">
+              <option value=""${g.parent ? "" : " selected"}>Hoofdaansluiting</option>
+              ${anderen
+                .map((o) => `<option value="${esc(o.id)}"${g.parent === o.id ? " selected" : ""}>${esc(o.name || o.id)}</option>`)
+                .join("")}
+            </select>
+          </div>
+        </div>
+        ${fasen
+          .map(
+            (phase) => `
+        <div class="phase-block">
+          <div class="phase-title">${phase.toUpperCase()}</div>
+          <div class="row">
+            <label>Stroom (A)</label>
+            <dac-entity-picker data-circuit="${index}" data-phase="${phase}" data-kind="current"></dac-entity-picker>
+          </div>
+          <div class="row">
+            <label>Vermogen</label>
+            <dac-entity-picker data-circuit="${index}" data-phase="${phase}" data-kind="power"></dac-entity-picker>
+          </div>
+          <div class="row">
+            <label>Spanning (V)</label>
+            <dac-entity-picker data-circuit="${index}" data-phase="${phase}" data-kind="voltage"></dac-entity-picker>
+          </div>
+        </div>`
+          )
+          .join("")}
+        <div class="circuit-actions">
+          <button type="button" class="remove" data-circuit-remove="${index}">Groep verwijderen</button>
+        </div>
+      </div>`;
+  }
+
+  paintCircuits_() {
+    const host = this.$("#circuits");
+    if (!host) return;
+    const groepen = this.circuits_();
+    host.innerHTML = groepen.map((g, i) => this.circuitHtml_(g, i, groepen)).join("");
+
+    for (const el of host.querySelectorAll("[data-circuit-field]")) {
+      const g = groepen[Number(el.dataset.index)];
+      const field = el.dataset.circuitField;
+      el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
+        if (field === "fuse_amps" || field === "phases") g[field] = Number(el.value);
+        else g[field] = el.value;
+        // Een ander aantal fasen is een ander aantal sensorrijen, en een
+        // andere naam hoort meteen in de keuzelijst van de andere groepen.
+        if (field === "phases" || field === "parent") this.paintCircuits_();
+        this.afterChange_();
+      });
+    }
+    for (const picker of host.querySelectorAll("dac-entity-picker[data-circuit]")) {
+      const g = groepen[Number(picker.dataset.circuit)];
+      const { phase, kind } = picker.dataset;
+      picker.filter = kind === "power" ? "power" : kind === "current" ? "current" : "all";
+      picker.placeholder =
+        kind === "current" ? "Zoek een stroomsensor…"
+        : kind === "voltage" ? "Zoek een spanningssensor…"
+        : "Zoek een vermogenssensor…";
+      if (this.feed_) picker.stateFeed = this.feed_;
+      picker.value = g.sensors?.[phase]?.[kind] ?? "";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        if (!g.sensors) g.sensors = {};
+        if (!g.sensors[phase]) g.sensors[phase] = {};
+        g.sensors[phase][kind] = ev.detail.value;
+        this.afterChange_();
+      });
+    }
+    for (const knop of host.querySelectorAll("[data-circuit-remove]")) {
+      knop.addEventListener("click", () => {
+        const weg = groepen[Number(knop.dataset.circuitRemove)];
+        groepen.splice(groepen.indexOf(weg), 1);
+        // Wie onder de verwijderde groep hing, hangt weer aan de hoofdaansluiting.
+        for (const o of groepen) if (o.parent === weg.id) o.parent = "";
+        this.paintCircuits_();
+        this.afterChange_();
+      });
+    }
   }
 
   paintPhases_() {
@@ -506,7 +658,41 @@ class DacViewInstallation extends DacEditorElement {
 DacViewInstallation.css = /* css */ `
   ${editorCss}
 
-
+  /* ---- groepen ---- */
+  .circuit {
+    padding: 14px;
+    border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border);
+    background: rgba(255,255,255,0.022);
+    display: grid;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .phase-block {
+    padding: 12px;
+    border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border);
+    display: grid;
+    gap: 10px;
+  }
+  .phase-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--dac-accent-hi);
+  }
+  .circuit-actions { display: flex; justify-content: flex-end; }
+  .circuit-actions button {
+    font: inherit;
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border);
+    background: rgba(255,255,255,0.04);
+    color: var(--dac-ink);
+    cursor: pointer;
+  }
+  .circuit-actions button.remove { color: var(--dac-danger, #e5484d); }
 `;
 
 define("dac-view-installation", DacViewInstallation);

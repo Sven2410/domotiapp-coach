@@ -228,6 +228,24 @@ proef("het installatiescherm heeft een veld voor wat de lastbewaker vrijgeeft", 
   );
 });
 
+proef("het installatiescherm heeft een plek voor groepen met een eigen zekering", () => {
+  const html = Object.create(Installatie.prototype).render();
+  assert.ok(html.includes('id="circuits"'), "de lijst van groepen");
+  assert.ok(html.includes('id="circuit-add"'), "en een knop om er een toe te voegen");
+});
+
+proef("een groep wordt een blok met naam, zekering, fasen, de groep erboven en sensoren", () => {
+  const el = Object.create(Installatie.prototype);
+  const garage = { id: "garage", name: "Garage", fuse_amps: 16, phases: 3, parent: "", sensors: {} };
+  const carport = { id: "carport", name: "Carport", fuse_amps: 16, phases: 1, parent: "garage", sensors: {} };
+  const html = el.circuitHtml_(carport, 1, [garage, carport]);
+  assert.ok(html.includes('value="Carport"'));
+  assert.ok(html.includes('<option value="garage" selected>Garage</option>'), "hangt onder de garage");
+  assert.ok(!html.includes('value="carport"'), "een groep hangt niet onder zichzelf");
+  assert.equal((html.match(/data-kind="current"/g) ?? []).length, 1, "één fase, dus één stroomsensor");
+  assert.equal((el.circuitHtml_(garage, 0, [garage, carport]).match(/data-kind="current"/g) ?? []).length, 3);
+});
+
 proef("de rij hangt aan het vinkje van de lastbewaker", () => {
   const rij = { hidden: false, style: {} };
   const el = Object.create(Installatie.prototype);
@@ -1028,6 +1046,37 @@ proef("zonder sun.sun ook", () => {
 
 proef("een omvormer die wel iets zegt wint altijd", () => {
   assert.equal(woningBij("12", "below_horizon").solar, 12);
+});
+
+// De belasting: een garage van 16 A op 12 A is zwaarder belast dan een
+// aansluiting van 25 A op 6, en de kaart zegt erbij welke groep het is.
+const { loadOf: belastingVan, readCircuits: groepenVan } = await import(
+  "../custom_components/domotiapp_coach/frontend/src/data-source.js"
+);
+
+proef("de belasting kijkt ook naar de groepen, elk tegen zijn eigen zekering", () => {
+  const hoofd = [{ label: "L1", amps: 6 }, { label: "L2", amps: 4 }];
+  const garage = [{ name: "Garage", fuse: 16, phases: [{ label: "L1", amps: 12 }] }];
+  const met = belastingVan(hoofd, null, { fuse_amps: 25 }, garage);
+  assert.equal(met.basis, "phase");
+  assert.ok(Math.abs(met.percent - 75) < 0.01);
+  assert.equal(met.worst, "L1 (Garage)");
+  const zonder = belastingVan(hoofd, null, { fuse_amps: 25 });
+  assert.equal(zonder.worst, "L1");
+  assert.ok(Math.abs(zonder.percent - 24) < 0.01);
+});
+
+proef("een groep zonder meetwaarde blijft van de kaart", () => {
+  const staten = { "sensor.g1": { state: "12", attributes: { unit_of_measurement: "A" } } };
+  const feed = { get: (id) => staten[id] };
+  const groepen = groepenVan(feed, { circuits: [
+    { id: "garage", name: "Garage", fuse_amps: 16, phases: 1, sensors: { l1: { current: "sensor.g1" } } },
+    { id: "leeg", name: "Leeg", fuse_amps: 16, phases: 3, sensors: {} },
+  ] });
+  assert.equal(groepen.length, 1);
+  assert.equal(groepen[0].name, "Garage");
+  assert.equal(groepen[0].phases.length, 1);
+  assert.equal(groepen[0].phases[0].amps, 12);
 });
 
 // Zonneplan geeft zijn prijzen als `forecast`, in tienmiljoensten van een

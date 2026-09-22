@@ -111,6 +111,21 @@ _PROGRAM = _schema(
 
 _LEEG_OF = lambda soort, *grens: vol.Any(None, "", vol.All(vol.Coerce(soort), vol.Range(*grens)))  # noqa: E731
 
+# Een groep onder de aansluiting met een eigen zekering; zie `installation.circuits`
+# in const.py en `Circuit` in planner.py.
+_CIRCUIT = _schema(
+    {
+        vol.Required("id"): vol.Match(r"^[a-z0-9_-]+$"),
+        vol.Optional("name", default=""): str,
+        vol.Optional("fuse_amps", default=16): vol.All(vol.Coerce(float), vol.Range(1, 1000)),
+        vol.Optional("phases", default=3): vol.In([1, 3]),
+        vol.Optional("parent", default=""): str,
+        vol.Optional("sensors", default=dict): _schema(
+            {vol.Optional(phase): _PHASE for phase in ("l1", "l2", "l3")}
+        ),
+    }
+)
+
 _BATTERY = _schema(
     {
         # Alleen nodig waar geen sensor voor is ingevuld.
@@ -188,6 +203,9 @@ _DEVICE = _schema(
         # Wat de bewoner over zijn thuisbatterij invult. Alles mag leeg: wat
         # een sensor zegt gaat voor, en wat niemand zegt weet de coach niet.
         vol.Optional("battery", default=dict): _BATTERY,
+        # De groep waar dit apparaat aan hangt (`installation.circuits`), of ""
+        # voor de hoofdaansluiting.
+        vol.Optional("circuit", default=""): str,
     }
 )
 
@@ -317,6 +335,7 @@ _SETTINGS = _schema(
                 vol.Optional("max_grid_auto"): bool,
                 vol.Optional("load_balancer"): bool,
                 vol.Optional("balancer_entity"): str,
+                vol.Optional("circuits"): vol.All([_CIRCUIT], vol.Length(max=12)),
             }
         ),
         vol.Optional("contract"): _schema(

@@ -155,6 +155,15 @@ class LoadMonitor:
                     if config.get(kind):
                         entities.append(config[kind])
 
+        for groep in self._settings.get("installation", {}).get("circuits") or []:
+            if not isinstance(groep, dict):
+                continue
+            for phase in ("l1", "l2", "l3"):
+                config = (groep.get("sensors") or {}).get(phase) or {}
+                for kind in ("current", "power", "voltage"):
+                    if config.get(kind):
+                        entities.append(config[kind])
+
         if sources.get("grid_mode") == GRID_MODE_SIGNED:
             if sources.get("grid_signed"):
                 entities.append(sources["grid_signed"])
@@ -301,29 +310,46 @@ class LoadMonitor:
         installation = self._settings.get("installation", {})
         states = self.hass.states
 
+        # Elke zekering met een meter: de hoofdaansluiting en elke groep. De
+        # zwaarst belaste wint, als aandeel van haar eigen zekering; een garage
+        # van 16 A op 14 A is zwaarder belast dan een aansluiting van 25 A op 15.
+        kandidaten: list[tuple[float, str, dict]] = []
         fuse = float(installation.get("fuse_amps") or 0)
         if sources.get("phases_enabled") and fuse > 0:
-            worst_label: str | None = None
-            worst_amps: float | None = None
+            kandidaten.append((fuse, "", sources.get("phases", {}) or {}))
+        for groep in installation.get("circuits") or []:
+            if isinstance(groep, dict) and float(groep.get("fuse_amps") or 0) > 0:
+                kandidaten.append((
+                    float(groep["fuse_amps"]),
+                    str(groep.get("name") or groep.get("id") or ""),
+                    groep.get("sensors") or {},
+                ))
+
+        zwaarste: tuple[float, float, str] | None = None   # (aandeel, amps, label)
+        zwaarste_fuse = 0.0
+        for zekering, naam, sensoren in kandidaten:
             for phase in ("l1", "l2", "l3"):
-                config = sources.get("phases", {}).get(phase, {}) or {}
+                config = sensoren.get(phase, {}) or {}
                 amps = self._phase_amps(config)
                 if amps is None:
                     continue
-                if worst_amps is None or amps > worst_amps:
-                    worst_amps = amps
-                    worst_label = phase.upper()
+                aandeel = amps / zekering
+                if zwaarste is None or aandeel > zwaarste[0]:
+                    label = phase.upper() + (f" ({naam})" if naam else "")
+                    zwaarste = (aandeel, amps, label)
+                    zwaarste_fuse = zekering
 
-            if worst_amps is not None:
-                eigen = min(self._coach_aandeel(in_watt=False), worst_amps)
-                return LoadReading(
-                    percent=(worst_amps / fuse) * 100,
-                    basis="phase",
-                    worst_phase=worst_label,
-                    amps=worst_amps,
-                    eigen=eigen,
-                    zonder_coach=((worst_amps - eigen) / fuse) * 100,
-                )
+        if zwaarste is not None:
+            _aandeel, worst_amps, worst_label = zwaarste
+            eigen = min(self._coach_aandeel(in_watt=False), worst_amps)
+            return LoadReading(
+                percent=(worst_amps / zwaarste_fuse) * 100,
+                basis="phase",
+                worst_phase=worst_label,
+                amps=worst_amps,
+                eigen=eigen,
+                zonder_coach=((worst_amps - eigen) / zwaarste_fuse) * 100,
+            )
 
         ceiling = float(installation.get("max_grid_watts") or 0)
         if ceiling <= 0:

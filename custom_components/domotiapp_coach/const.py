@@ -289,6 +289,14 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # restwaarde en geen tweede zekering: het huisverbruik zit er al af, de
         # laadpaal zelf niet. Zie `beschikbaar_van_bewaker` in planner.py.
         "balancer_entity": "",
+        # Groepen onder de aansluiting met een eigen zekering, zoals een
+        # onderverdeelkast in de garage van 3x16 A onder een hoofdaansluiting
+        # van 3x25 A (de eerste woning, 22-09-2026). Per groep: id, name,
+        # fuse_amps, phases (1 of 3), parent (het id van de groep erboven, ""
+        # is de hoofdaansluiting) en sensors (per fase current, power,
+        # voltage, zoals `sources.phases`). Een apparaat wijst met `circuit`
+        # naar zijn groep. Zie `Circuit` in planner.py.
+        "circuits": [],
     },
     "contract": {
         "type": CONTRACT_FIXED,

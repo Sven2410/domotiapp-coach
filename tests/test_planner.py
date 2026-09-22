@@ -2740,5 +2740,66 @@ controle("en spreidt hij niet, want daar is dan wel iets mee te winnen",
 
 
 print()
+print("=== 60. een groep onder de aansluiting met een eigen zekering (22-09-2026) ===")
+# De eerste woning: 3x25 A aan de meterkast achter de P1, en in de garage een
+# onderverdeelkast van 3x16 A met een eigen meter, waar de paal aan hangt. Het
+# huis trekt 6 A aan de meterkast en de garage 3 A: onder de hoofdzekering past
+# 25 - 6 - 2 = 17, onder de garage 16 - 3 - 2 = 11. De paal kan 14.
+Circuit, knelpunt, ruimten, ceiling_amps = planner.Circuit, planner.knelpunt, planner.ruimten, planner.ceiling_amps
+
+garage = Circuit(name="Garage", phase_amps=[3.0, 2.0, 2.0], fuse_amps=16.0)
+g60 = Grid(surplus_w=0.0, phase_amps=[6.0, 4.0, 4.0], fuse_amps=25.0, charger_amps=0.0, circuits=[garage])
+zonder60 = Grid(surplus_w=0.0, phase_amps=[6.0, 4.0, 4.0], fuse_amps=25.0, charger_amps=0.0)
+print(f"  ruimten: {ruimten(g60, paal(laadt=False))}")
+controle("zonder groep begrenst de paal zelf: 14 A",
+         ceiling_amps(zonder60, sven_auto(), paal(laadt=False)) == 14,
+         f"{ceiling_amps(zonder60, sven_auto(), paal(laadt=False))}")
+controle("met de garage van 16 A: 16 - 3 - 2 = 11 A",
+         ceiling_amps(g60, sven_auto(), paal(laadt=False)) == 11,
+         f"{ceiling_amps(g60, sven_auto(), paal(laadt=False))}")
+controle("en de garage is de zekering die knelt",
+         knelpunt(g60, sven_auto(), paal(laadt=False)) == "Garage",
+         f"{knelpunt(g60, sven_auto(), paal(laadt=False))}")
+controle("zonder groep knelt niets, want de paal zelf is de grens",
+         knelpunt(zonder60, sven_auto(), paal(laadt=False)) is None,
+         f"{knelpunt(zonder60, sven_auto(), paal(laadt=False))}")
+
+# De paal laadt zelf op 10 A: die tien zitten in de meterkast én in de garage,
+# en gaan er bij allebei af. De garage staat dan op 13 A en de coach mag nog
+# steeds 11.
+laadt60 = Grid(surplus_w=0.0, phase_amps=[16.0, 4.0, 4.0], fuse_amps=25.0, charger_amps=10.0,
+               circuits=[Circuit(name="Garage", phase_amps=[13.0, 2.0, 2.0], fuse_amps=16.0)])
+# (`paal(laadt=True)` kan hier niet meer: `middag` is verderop in dit bestand
+# een besluit geworden.)
+laadpaal60 = Charger(max_amps=14.0, connected=True, charging=True, actual_amps=10.0, limit_amps=10.0,
+                     started_at=nu - dt.timedelta(hours=1))
+controle("de eigen stroom van de paal telt op de groep niet als huis",
+         ceiling_amps(laadt60, sven_auto(), laadpaal60) == 11,
+         f"{ceiling_amps(laadt60, sven_auto(), laadpaal60)}")
+
+# Een groep zonder meter: geen huis bekend, dus de zekering min de marge, en
+# min wat er deze ronde al aan een andere paal op dezelfde groep is toegezegd.
+blind60 = Grid(surplus_w=0.0, phase_amps=[6.0, 4.0, 4.0], fuse_amps=25.0, charger_amps=0.0,
+               circuits=[Circuit(name="Carport", phase_amps=[], fuse_amps=16.0, reserved_amps=6.0)])
+controle("een groep zonder meter: 16 - 2 - 6 toegezegd = 8 A",
+         ceiling_amps(blind60, sven_auto(), paal(laadt=False)) == 8,
+         f"{ceiling_amps(blind60, sven_auto(), paal(laadt=False))}")
+
+# De zin op de kaart noemt de groep, want "onder je zekering" zegt bij een
+# hoofdzekering van 25 A niets over een garage van 16.
+vol60 = Grid(surplus_w=0.0, phase_amps=[6.0, 4.0, 4.0], fuse_amps=25.0, charger_amps=0.0,
+             circuits=[Circuit(name="Garage", phase_amps=[13.0, 2.0, 2.0], fuse_amps=16.0)])
+besluit60 = decide(nu, [], vol60, sven_auto(), paal(laadt=False), venster(nu), tariff=VAST, sun=ZON_RUIM)
+print(f"  garage vol: {besluit60.rule} {besluit60.amps} A: {besluit60.reason}")
+controle("is de garage vol, dan zegt de kaart dat het de garage is",
+         besluit60.rule == "no-room" and "De groep Garage" in besluit60.reason, f"{besluit60.reason}")
+import dataclasses as _dc  # noqa: E402
+boost60 = decide(nu, [], g60, sven_auto(), _dc.replace(paal(laadt=False), boost=True), venster(nu),
+                 tariff=VAST, sun=ZON_RUIM)
+print(f"  snelladen: {boost60.amps} A: {boost60.reason}")
+controle("bij snelladen noemt hij de zekering van de garage",
+         boost60.amps == 11 and "de zekering van de groep Garage" in boost60.reason, f"{boost60.reason}")
+
+print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
