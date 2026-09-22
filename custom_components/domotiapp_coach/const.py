@@ -273,6 +273,13 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             "export_high": "",
             "gas_enabled": False,
             "gas": "",
+            # Water: de teller in m³ en, als die er is, het debiet in L/min
+            # voor de lekmelding. De bewoner van de eerste woning op
+            # 22-09-2026: "water toevoegen, incl prijs, dan is je nutsrapport
+            # compleet."
+            "water_enabled": False,
+            "water": "",
+            "water_flow": "",
         },
     },
     "installation": {
@@ -320,6 +327,8 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # onbekend, en dan staat er geen bedrag. De bewoner van de eerste
         # woning op 22-09-2026: "prijs van gas laten invullen."
         "gas_price": 0.0,
+        # Wat water kost, in euro per m³, net als gas.
+        "water_price": 0.0,
         # Eerdere contracten, voor wie van leverancier wisselde: de historie
         # rekent elke dag met de prijs die toen gold. Per contract van, tot
         # (leeg is nog lopend), de all-in stroomprijs, de terugleververgoeding
@@ -369,6 +378,17 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # interval matters as much as the threshold: load swings across the
         # trigger point constantly, so without it one busy hour would send a
         # stream of notifications.
+        # Lekkage of abnormaal verbruik van water en gas. De bewoner van de eerste
+        # woning op 22-09-2026: "meldingen instellen obv abnormaal water- en
+        # gasverbruik, mogelijk lekkage." Water dat langer dan `water_flow_minutes`
+        # onafgebroken loopt, of een dag die meer dan `factor` keer het gewone
+        # dagverbruik is (na `min_days` gemeten dagen).
+        "usage_alert": {
+            "enabled": False,
+            "water_flow_minutes": 120,
+            "factor": 3,
+            "min_days": 5,
+        },
         "load_alert": {
             "enabled": False,
             "threshold_percent": 80,
@@ -465,6 +485,11 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # beurt) en wat hij per dag verdiende (voor de terugverdientijd). Zie
     # `_one_batterij` in coach.py.
     "battery_state": [],
+    # Het dagverbruik van gas en water dat de coach bijhoudt voor de melding
+    # bij abnormaal verbruik: per meter en per dag de m³, en per meter de
+    # stand waarmee de dag begon. Lijsten, want `_prune` laat lijsten met rust.
+    "usage_days": [],
+    "usage_start": [],
     # De knoppen van de bewoner per laadpunt: een akkoord, snelladen, een pauze.
     # Opdrachten van een mens, dus ze horen een herstart van Home Assistant te
     # overleven. Ze gelden voor de sessie die er dan hangt: de kabel eruit wist

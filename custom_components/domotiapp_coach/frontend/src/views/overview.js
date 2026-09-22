@@ -214,8 +214,14 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
   }
 
   // Wat de batterij afgeeft is geen overschot: dat is stroom uit de accu, en
-  // die hoort niet in "zet iets aan".
-  const echtOverschot = (r.exportW ?? 0) - Math.max(0, -(batterij?.power_w ?? 0));
+  // die hoort niet in "zet iets aan". Gemeten aan de batterij zelf, wie hem
+  // ook stuurt: op 22-09-2026 om 23:01 zei de kaart "gebruik je overschot,
+  // 1,73 kW" terwijl de accu die 1,73 kW afgaf. De bewoner van de eerste
+  // woning: "de coach herkent nu niet dat een accu aan het ontladen is."
+  const uitAccu = (r.devices ?? [])
+    .filter((d) => d?.type === "thuisbatterij")
+    .reduce((som, d) => som + Math.max(0, -(d.batteryWatts ?? 0)), 0);
+  const echtOverschot = (r.exportW ?? 0) - Math.max(uitAccu, Math.max(0, -(batterij?.power_w ?? 0)));
 
   if (echtOverschot > SURPLUS_W) {
     return {
@@ -679,6 +685,9 @@ class DacViewOverview extends DacElement {
     .says-mark .icon { width: 16px; height: 16px; }
     .says-plan { margin: 0 0 0 25px; font-size: 12.5px; line-height: 1.5; color: var(--dac-ink-2); }
     .says-plan:empty { display: none; }
+    .drain-to { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--dac-ink-2); }
+    .drain-to[hidden] { display: none; }
+    .drain-to input { width: 56px; font: inherit; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--dac-border); background: rgba(255,255,255,0.04); color: var(--dac-ink); }
     .says-plan.good { color: var(--dac-good); }
     .says-plan.warn { color: var(--dac-warn); }
     /* Iets aan de installatie dat de bewoner zelf moet verhelpen. Apart van de
@@ -1597,7 +1606,9 @@ class DacViewOverview extends DacElement {
         r.load === null
           ? "Aansluiting nog niet ingevuld"
           : r.loadBasis === "phase"
-            ? `Zwaarst belaste fase (${r.loadWorstPhase})`
+            ? (String(r.loadWorstPhase).includes("(")
+              ? `Zwaarst belaste fase ${r.loadWorstPhase}`
+              : `Zwaarst belaste fase (${r.loadWorstPhase})`)
             : "Van het maximale netvermogen",
       series: this.source_.series("load"),
     });
@@ -1735,6 +1746,29 @@ class DacViewOverview extends DacElement {
   }
 
   /**
+   * De batterij nu leegladen tot de accustand in het veld ernaast, of daarmee
+   * ophouden. Gaat vanzelf uit zodra hij daar is.
+   */
+  async toggleDrain_(slot) {
+    const device = this.steerDevices_?.[slot];
+    if (!device || !this.hass) return;
+    const aan = !Number.isFinite(this.coach_?.[device.id]?.drain_to);
+    const veld = this.$(`[data-drain-to="${slot}"]`);
+    const tot = Math.min(95, Math.max(5, Number(veld?.value) || 50));
+    try {
+      await this.hass.callWS({
+        type: "domotiapp_coach/coach/drain",
+        device_id: device.id,
+        to_percent: aan ? tot : null,
+      });
+      this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
+      this.updateSteerable_(this.lastDevices_ ?? []);
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon het leegladen niet omzetten", error);
+    }
+  }
+
+  /**
    * De auto wekken zodat hij zijn accustand meldt.
    *
    * De sensor komt daarna vanzelf binnen via Home Assistant, en de kaart
@@ -1859,6 +1893,19 @@ class DacViewOverview extends DacElement {
       : besluit.boost
         ? "Snelladen staat aan"
         : "Snelladen";
+
+    const leeg = this.$(`[data-drain="${slot}"]`);
+    const leegRij = this.$(`[data-drain-to-row="${slot}"]`);
+    const magLeeg = batterij && besluit.level !== "advise" && besluit.applied;
+    leeg.hidden = !magLeeg;
+    leegRij.hidden = !magLeeg;
+    leegRij.style.display = magLeeg ? "" : "none";
+    leeg.setAttribute("aria-pressed", String(Number.isFinite(besluit.drain_to)));
+    this.$(`[data-drain-text="${slot}"]`).textContent = Number.isFinite(besluit.drain_to)
+      ? `Laadt leeg tot ${Math.round(besluit.drain_to)}%`
+      : "Nu leegladen";
+    const veld = this.$(`[data-drain-to="${slot}"]`);
+    if (Number.isFinite(besluit.drain_to) && document.activeElement !== veld) veld.value = Math.round(besluit.drain_to);
 
     const wek = this.$(`[data-wake="${slot}"]`);
     wek.hidden = !(besluit.wake && besluit.level !== "advise" && besluit.kind !== "programma"
@@ -2417,6 +2464,16 @@ class DacViewOverview extends DacElement {
             <button class="boost" type="button" data-pause="${slot}" aria-pressed="false" hidden>
               ${icons.pause}<span data-pause-text="${slot}">Pauzeren</span>
             </button>
+            <!-- De thuisbatterij: nu leegladen tot een accustand naar keuze, en
+                 daarna weer het gewone plan. De bewoner van de eerste woning op
+                 22-09-2026: "nu maximaal ontladen tot 50%, daarna terug naar
+                 normale modus." -->
+            <button class="boost" type="button" data-drain="${slot}" aria-pressed="false" hidden>
+              ${icons.pause}<span data-drain-text="${slot}">Nu leegladen</span>
+            </button>
+            <label class="drain-to" data-drain-to-row="${slot}" hidden>
+              tot <input type="number" min="5" max="95" step="5" value="50" data-drain-to="${slot}" inputmode="numeric"> %
+            </label>
             <!-- Een Tesla slaapt als hij niet laadt en meldt dan geen accustand;
                  deze knop wekt hem. Alleen als de auto een wekknop heeft. -->
             <button class="boost" type="button" data-wake="${slot}" hidden>
@@ -2448,6 +2505,9 @@ class DacViewOverview extends DacElement {
     }
     for (const button of this.$$("[data-wake]")) {
       button.addEventListener("click", () => this.wake_(Number(button.dataset.wake)));
+    }
+    for (const button of this.$$("[data-drain]")) {
+      button.addEventListener("click", () => this.toggleDrain_(Number(button.dataset.drain)));
     }
     for (const select of this.$$("[data-car-select]")) {
       select.addEventListener("change", () =>

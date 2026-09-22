@@ -315,11 +315,13 @@ export function contractAt(contract, when) {
     ? (Number(contract?.fixed?.feed_in_tariff) || 0) - (Number(contract?.fixed?.feed_in_costs) || 0)
     : null;
   const huidigGas = Number(contract?.gas_price) > 0 ? Number(contract.gas_price) : null;
+  const huidigWater = Number(contract?.water_price) > 0 ? Number(contract.water_price) : null;
   const getal = (v) => (Number(v) > 0 ? Number(v) : null);
   return {
     buy: getal(period?.all_in_price) ?? (fixed && Number.isFinite(huidig) ? huidig : null),
     feedIn: getal(period?.feed_in_tariff) ?? huidigTerug,
     gas: getal(period?.gas_price) ?? huidigGas,
+    water: getal(period?.water_price) ?? huidigWater,
     period,
   };
 }
@@ -387,6 +389,7 @@ const METERS = [
   { key: "export_low", label: "Teruggeleverd laag" },
   { key: "export_high", label: "Teruggeleverd hoog" },
   { key: "gas", label: "Gas" },
+  { key: "water", label: "Water" },
 ];
 
 /**
@@ -407,7 +410,7 @@ const METERS = [
 export function meterReadings(feed, sources) {
   const config = sources?.meters ?? {};
 
-  return METERS.filter((meter) => meter.key !== "gas" || config.gas_enabled)
+  return METERS.filter((meter) => (meter.key !== "gas" || config.gas_enabled) && (meter.key !== "water" || config.water_enabled))
     .map((meter) => {
       const state = feed.get(config[meter.key]);
       if (!usable(state)) return null;
