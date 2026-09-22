@@ -147,6 +147,13 @@ export function batteryRows(besluit) {
     rijen.push({ label: "Volle beurt", text: "vandaag een keer helemaal vol, voor het balanceren van de cellen" });
   }
 
+  if (besluit.holiday) {
+    rijen.push({
+      label: "Vakantiestand",
+      text: `hij houdt de batterij onder ${Number.isFinite(besluit.ceiling) ? Math.round(besluit.ceiling) : "de grens"}%, en de wekelijkse volle beurt slaat hij over`,
+    });
+  }
+
   const plan = planRegels(besluit.hours);
   if (plan.length) {
     rijen.push({ label: "Plan", text: "wat hij de komende uren van plan is:" });

@@ -671,7 +671,13 @@ def plan_batterij(
                 uren=uren,
             )
 
-    if b.handelen and not leeg and not paal_laadt:
+    # Handelen alleen met wat er boven de nacht uitkomt. De eigenaar op
+    # 22-09-2026: "nul op de meter heeft prioriteit, het overschot verhandelen
+    # met hoge tarieven." De som zelf zou alles verkopen en 's nachts
+    # terugkopen zodra dat goedkoper is, maar dat is niet wat de bewoner
+    # bedoelt met een batterij die de nacht overbrugt.
+    nacht = balans_kwh(now, forecast, b)
+    if b.handelen and not leeg and not paal_laadt and (nacht is None or nacht > 0):
         vermogen, tot = _rustig_vermogen(uren, b, ontladen=True)
         if vermogen > 0:
             return Besluit(

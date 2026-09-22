@@ -176,6 +176,16 @@ _BATTERY = _schema(
         # Een keer per week helemaal vol, voor het balanceren van de cellen.
         vol.Optional("weekly_full", default=False): bool,
         vol.Optional("weekly_full_day", default=6): vol.All(vol.Coerce(int), vol.Range(0, 6)),
+        # Vakantiestand: de coach houdt de batterij onder deze accustand, zodat
+        # de cellen in een zomer met veel zon en weinig verbruik niet dagenlang
+        # vol staan. De bewoner van de eerste woning op 22-09-2026.
+        vol.Optional("holiday", default=False): bool,
+        vol.Optional("holiday_max_percent", default=50): vol.All(vol.Coerce(int), vol.Range(10, 90)),
+        # Vakantiestand: de coach houdt de batterij onder deze accustand, zodat
+        # de cellen in een zomer met veel zon en weinig verbruik niet dagenlang
+        # vol staan. De bewoner van de eerste woning op 22-09-2026.
+        vol.Optional("holiday", default=False): bool,
+        vol.Optional("holiday_max_percent", default=50): vol.All(vol.Coerce(int), vol.Range(10, 90)),
         # Wat de batterij gekost heeft, voor de terugverdientijd.
         vol.Optional("purchase_price", default=None): _LEEG_OF(float, 0, 1000000),
         # Welke keuze van de modus-entiteit "de coach stuurt" betekent, en welke
@@ -389,6 +399,7 @@ _SETTINGS = _schema(
                         vol.Optional("supplier_markup"): _EURO,
                         vol.Optional("vat_percent"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
                         vol.Optional("feed_in_costs"): _EURO,
+                        vol.Optional("feed_in_bonus"): vol.All(vol.Coerce(float), vol.Range(-1, 1)),
                     }
                 ),
             }

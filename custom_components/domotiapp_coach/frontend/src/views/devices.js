@@ -794,6 +794,16 @@ class DacViewDevices extends DacEditorElement {
             ${WEEKDAGEN.map((dag, i) => `<option value="${i}"${Number(b.weekly_full_day) === i ? " selected" : ""}>${dag}</option>`).join("")}
           </select>
         </div>
+        ${vink("holiday", "Vakantiestand.", "Ben je weg en is er veel zon en weinig verbruik, dan staat een batterij dagenlang vol, en dat is slecht voor de cellen. In deze stand houdt de coach hem onder de grens hieronder: wat erboven zit gaat naar je huis (of naar het net, als handelen aanstaat), en er komt pas weer zon in als hij eronder zit. De wekelijkse volle beurt slaat hij over. Aan de laadgrens van de batterij zelf komt hij niet.")}
+        <div class="row"${b.holiday ? "" : " hidden"} data-bat-holiday="${index}">
+          <label>Hoogste accustand in vakantiestand (%)</label>
+          ${getal("holiday_max_percent", 'min="10" max="90" step="5"', "50")}
+        </div>
+        ${vink("holiday", "Vakantiestand.", "Ben je weg en is er veel zon en weinig verbruik, dan staat een batterij dagenlang vol, en dat is slecht voor de cellen. In deze stand houdt de coach hem onder de grens hieronder: wat erboven zit gaat naar je huis (of naar het net, als handelen aanstaat), en er komt pas weer zon in als hij eronder zit. De wekelijkse volle beurt slaat hij over. Aan de laadgrens van de batterij zelf komt hij niet.")}
+        <div class="row"${b.holiday ? "" : " hidden"} data-bat-holiday="${index}">
+          <label>Hoogste accustand in vakantiestand (%)</label>
+          ${getal("holiday_max_percent", 'min="10" max="90" step="5"', "50")}
+        </div>
         <div class="row">
           <label>Aankoopprijs (euro)</label>
           ${getal("purchase_price", 'min="0" step="1"', "optioneel")}
@@ -1213,6 +1223,8 @@ class DacViewDevices extends DacEditorElement {
         else device.battery[key] = el.value;
         if (key === "reserve_enabled") list.querySelector(`[data-bat-reserve="${index}"]`).hidden = !el.checked;
         if (key === "weekly_full") list.querySelector(`[data-bat-day="${index}"]`).hidden = !el.checked;
+        if (key === "holiday") list.querySelector(`[data-bat-holiday="${index}"]`).hidden = !el.checked;
+        if (key === "holiday") list.querySelector(`[data-bat-holiday="${index}"]`).hidden = !el.checked;
         this.syncSaveBar_();
       });
     }

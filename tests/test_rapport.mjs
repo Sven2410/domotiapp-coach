@@ -893,6 +893,20 @@ proef("een nieuwe auto begint met het merk, en een Tesla krijgt de wekknop en de
   assert.ok(oud.includes('data-car-field="capacity_kwh"'));
 });
 
+proef("de vakantiestand staat in het formulier en op de kaart", async () => {
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.feed_ = {};
+  const accu = { id: "b", type: "thuisbatterij", brand: "anker", name: "Anker", controllable: true, entities: {},
+    battery: { ...defaultBattery("anker"), holiday: true, holiday_max_percent: 60 } };
+  const html = el.batteryHtml_(accu, 0);
+  assert.ok(html.includes('data-bat-field="holiday"') && html.includes('data-bat-field="holiday_max_percent"'));
+  assert.ok(html.includes('data-bat-holiday="0"') && !html.includes('hidden data-bat-holiday="0"'), "de grens is zichtbaar als de stand aanstaat");
+  const rijen = batteryRows({ kind: "batterij", mode: "nul", mode_name: "Nul op de meter", holiday: true, ceiling: 60 });
+  assert.ok(rijen.some((r) => r.label === "Vakantiestand" && r.text.includes("60%")), JSON.stringify(rijen));
+});
+
 // --- het plan van de batterij op de kaart ------------------------------------------
 //
 // De eigenaar op 22-09-2026: "ik kan nu niet zien wat de coach van plan is met
@@ -959,6 +973,17 @@ proef("een dag in een eerder contract rekent met de prijs van toen, daarbuiten m
   // Een contract zonder einde loopt nog.
   const open = contractAt({ type: "dynamic", periods: [{ from: "2026-01-01", to: "", all_in_price: 0.3 }] }, new Date(2026, 8, 22));
   assert.equal(open.buy, 0.3);
+});
+
+proef("een negatieve prijs krijgt zijn eigen tip, en de verkoopvergoeding staat in het formulier", () => {
+  const drempels = { price: { high: 0.4, low: 0.1 }, self_use: { low: 20 } };
+  const r = { solar: 2000, grid: -1500, exportW: 1500, importW: 0, load: 1, loadBasis: "phase", price: -0.03, selfUse: 30 };
+  const tip = advise(r, drempels, true, 80, null, [{ type: "overig", name: "Droger", controllable: true }], null);
+  assert.equal(tip.title, "De stroomprijs is negatief");
+  assert.ok(tip.body.includes("de Droger"), tip.body);
+  const html = Object.create(Installatie.prototype).render();
+  assert.ok(html.includes('id="dyn-feedbonus"'));
+  assert.ok(html.includes("0,0025"), "de kwart cent van na het salderen staat erbij");
 });
 
 proef("het installatiescherm heeft de gasprijs en de eerdere contracten", () => {
