@@ -110,7 +110,15 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    (`circuit_ceiling` in planner.py, met de entiteit `circuit_limit`).
 4. **Niets van het net in de avondpiek**, van `EVENING_PEAK_START` (18:00,
    de keuze van 05-09-2026; 17:00 kostte die dag 1,65 euro) tot
-   `EVENING_START` (20:00), bij elk contract. Bij een
+   `EVENING_START` (20:00). **Sinds v0.79.0 alleen bij een vast contract**
+   (`piek_dicht` in planner.py): bij een dynamisch contract is de avondpiek
+   een gewoon uur op zijn eigen prijs, want daar kiest de som hem toch niet
+   tenzij hij een keer goedkoop of negatief is. De bewoner van de eerste
+   woning op 22-09-2026: "zou geen harde blokkade hoeven zijn als je al met
+   laagste prijzen werkt"; de eigenaar: "bouw dat maar." Geldt voor de paal
+   (`schijven`, `capaciteit_kwh`, `timeline`, `_keep_alive`), de batterij
+   (`_Som.piek`, `_rustig_vermogen`, de negatieve prijs), de boiler
+   (`boiler_schijven`) en de vaatwasser (`plan_programma`). Bij een
    vast contract komt er bovendien vóór 20:00 helemaal niets van het net bij
    op de avond die bij de klaar-tijd hoort. Zon blijft altijd beschikbaar,
    want die belast de aansluiting niet. Alleen de klaar-tijdregel en snelladen
@@ -542,6 +550,28 @@ knop en hetzelfde commando als snelladen bij de paal (`coach/boost`,
 laadvermogen tot de laadgrens (`vol-laden`), ook in de avondpiek, en zodra hij
 vol is gaat de knop vanzelf uit met een regel in de geschiedenis. Proef 84 in
 test_coach.py, `planRegels` in test_rapport.mjs.
+
+**De tip bovenaan noemt nooit wat de coach zelf stuurt of plant, en als de
+batterij handelt zegt hij "alles uit"** (v0.79.0). De eigenaar op 22-09-2026,
+bij een kaart die "gebruik je overschot, zet de vaatwasser of de Anker aan"
+zei terwijl de batterij 2,3 kW aan het net verkocht: "je mag nooit de batterij
+adviseren om aan te zetten, dat doet de coach zelf. Ook met een laadpaal die
+stuurbaar is. Adviseer alleen apparaten die de coach niet aanstuurt."
+`apparatenZin` in devices.js laat de thuisbatterij, elke paal die de coach kan
+sturen (`canSteer`) en elk programma-apparaat weg; wat overblijft zit op een
+meetstekker. En `advise` in overview.js krijgt de gestuurde batterij mee
+(`batterijNu_`): handelt hij, dan is het advies in de woorden van de bewoner
+van de eerste woning ("je hebt toegestaan om te handelen met je batterij; de
+spread is groot genoeg en je batterij is vol genoeg om de nacht door te komen;
+de komende uren ontlaadt hij op X W; je kunt nog Y kWh ontladen en alsnog de
+nacht doorkomen", met `balance_kwh`), plus "gebruik nu zo min mogelijk stroom:
+stel de wasmachine uit tot de prijs weer zakt", want "in dit geval had ie alle
+apparaten juist uit moeten schakelen". Het huis gaat voor ("nul op de meter
+heeft prioriteit, het overschot verhandelen"). En wat de batterij afgeeft telt
+niet als overschot voor de tip (`echtOverschot`). Proeven in test_rapport.mjs.
+De bewoner wees er ook op dat het handelen vanaf 01-01-2027 verandert doordat
+bij teruglevering de btw vervalt; dat zit al in `NETTING_ENDS` en in de
+terugleverprijs uit de kale marktprijs.
 
 ## Het merk van de auto, en een Tesla die slaapt
 
@@ -1246,12 +1276,12 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 386 controles op het denkwerk
-python tests/test_batterij.py    # 79 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_planner.py     # 387 controles op het denkwerk
+python tests/test_batterij.py    # 81 op het denkwerk van de thuisbatterij en op de regelaar
 python tests/test_coach.py       # 509 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1683 op hele laadbeurten in het virtuele huis
+python tests/test_virtueel.py    # 1622 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 71 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 72 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

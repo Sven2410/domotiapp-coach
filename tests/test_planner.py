@@ -2483,8 +2483,10 @@ duur58 = [b for b in plan58.blocks
 controle("een uur boven het gemiddelde zegt dat hij op de nieuwe prijzen wacht",
          duur58 and all("wacht eerst op de nieuwe prijzen" in b.why for b in duur58),
          f"{[(b.start.hour, b.why) for b in duur58]}")
-controle("de avondpiek houdt zijn eigen reden",
-         "avondpiek" in plan58.blocks[0].why, plan58.blocks[0].why)
+# Sinds v0.79.0 is de avondpiek bij een dynamisch contract een gewoon uur op
+# zijn prijs, dus ook het blok van 20:00 krijgt een prijsreden.
+controle("de avondpiek heeft bij een dynamisch contract geen eigen reden meer",
+         "avondpiek" not in plan58.blocks[0].why, plan58.blocks[0].why)
 goedkoop58 = [b for b in plan58.blocks if not b.charging and b.price < gem58]
 controle("een uur onder het gemiddelde dat niet gekozen is blijft 'duurder dan wat hij nodig heeft'",
          goedkoop58 and all(b.why == "duurder dan wat hij nodig heeft" for b in goedkoop58),
@@ -2615,9 +2617,18 @@ schijven_piek = planner.boiler_schijven(
     dt.datetime(2026, 9, 7, 12, 0), prijzen_b, Tariff(), Forecast(), geleerde_boiler(),
     tot=dt.datetime(2026, 9, 7, 23, 0),
 )
-controle("in de avondpiek staat geen enkel blok als er geen zon is",
-         not any(planner.in_evening_peak(s.start) for s in schijven_piek),
+# Bij een dynamisch contract (een prijslijst) telt de avondpiek gewoon mee op
+# zijn prijs (v0.79.0); bij een vast contract staat er zonder zon geen blok.
+controle("bij een dynamisch contract staat de avondpiek gewoon in de lijst, op zijn eigen prijs",
+         any(planner.in_evening_peak(s.start) and s.kind == "net" for s in schijven_piek),
          f"{[s.start.hour for s in schijven_piek if planner.in_evening_peak(s.start)]}")
+schijven_vast = planner.boiler_schijven(
+    dt.datetime(2026, 9, 7, 12, 0), [], Tariff(buy=0.25, feed_in=0.07), Forecast(), geleerde_boiler(),
+    tot=dt.datetime(2026, 9, 7, 23, 0),
+)
+controle("bij een vast contract staat er in de avondpiek geen enkel blok als er geen zon is",
+         not any(planner.in_evening_peak(s.start) for s in schijven_vast),
+         f"{[s.start.hour for s in schijven_vast if planner.in_evening_peak(s.start)]}")
 zonnig = kromme(dt.datetime(2026, 9, 7), 18, [3.0, 3.0])
 schijven_zon = planner.boiler_schijven(
     dt.datetime(2026, 9, 7, 12, 0), prijzen_b, Tariff(), zonnig, geleerde_boiler(),

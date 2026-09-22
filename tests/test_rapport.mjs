@@ -492,13 +492,39 @@ const { programsFor, defaultPrograms, hasOwnPrograms, programKey, programOf, pro
 const { timesFor } = await import("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js");
 // De eigenaar op 07-09-2026: "de coach zegt zet nu de tablet lader aan, maar de
 // tablet lader is alleen een vermogenssensor en het vinkje staat uit."
-proef("de tip noemt alleen apparaten waarbij het vinkje aan staat", () => {
+proef("de tip noemt alleen apparaten waarbij het vinkje aan staat, en nooit wat de coach zelf stuurt of plant", () => {
   const tablet = { type: "overig", name: "Tablet lader", controllable: false };
   const paal = { type: "laadpaal", name: "Laadpaal", brand: "easee", controllable: true };
   const dom = { type: "vaatwasser", brand: "overig", name: "Vaatwasser", controllable: true };
-  assert.equal(apparatenZin([tablet, paal, dom]), "de laadpaal of de vaatwasser");
+  const accu = { type: "thuisbatterij", brand: "anker", name: "Anker", controllable: true, entities: { setpoint: "number.x" } };
+  const was = { type: "overig", name: "Wasmachine", controllable: true };
+  const alfen = { type: "laadpaal", name: "Alfen", brand: "", controllable: false };
+  // De eigenaar op 22-09-2026: "je mag nooit de batterij adviseren om aan te
+  // zetten, dat doet de coach zelf. Ook met een laadpaal die stuurbaar is."
+  assert.equal(apparatenZin([tablet, paal, dom, accu, was]), "de Wasmachine");
   assert.equal(apparatenZin([tablet]), "");
   assert.equal(apparatenZin([{ ...tablet, controllable: true }]), "de Tablet lader");
+  assert.equal(apparatenZin([alfen, { ...alfen, controllable: true }]), "de Alfen");
+});
+
+// Het advies bovenaan het overzicht als de batterij handelt, of afgeeft.
+const { advise } = await import("../custom_components/domotiapp_coach/frontend/src/views/overview.js");
+proef("handelt de batterij, dan is wat naar het net gaat verkoop en geen overschot", () => {
+  const drempels = { price: { high: 0.4, low: 0.1 }, self_use: { low: 20 } };
+  const r = { solar: 275, grid: -2290, exportW: 2290, importW: 0, load: 1, loadBasis: "phase", price: 0.39, selfUse: 100 };
+  const accu = { name: "Anker", mode: "handelen", setpoint_w: -2400, target_w: 2400, power_w: -2400, balance_kwh: 3.2 };
+  const advies = advise(r, drempels, true, 80, null, [], accu);
+  assert.equal(advies.title, "Anker handelt");
+  assert.ok(advies.body.includes("toegestaan om te handelen") && advies.body.includes("2.400 W") && advies.body.includes("3,2 kWh"), advies.body);
+  assert.ok(advies.body.includes("zo min mogelijk stroom"), advies.body);
+  const metWas = advise(r, drempels, true, 80, null, [{ type: "overig", name: "Wasmachine", controllable: true }], accu);
+  assert.ok(metWas.body.includes("stel de Wasmachine uit"), metWas.body);
+  // Geeft hij aan het huis af en gaat er toch iets naar het net, dan is alleen
+  // het deel dat niet uit de accu komt overschot.
+  const nul = advise(r, drempels, true, 80, null, [], { ...accu, mode: "nul", power_w: -2400 });
+  assert.notEqual(nul.title, "Gebruik je overschot");
+  const zon = advise({ ...r, exportW: 2290, grid: -2290 }, drempels, true, 80, null, [], { ...accu, mode: "nul", power_w: 500 });
+  assert.equal(zon.title, "Gebruik je overschot");
 });
 // "Er is een verschil tussen de coach mag aansturen en adviseren, want een
 // domme vaatwasser kan de coach helemaal niet aansturen maar wel adviseren."

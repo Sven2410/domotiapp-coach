@@ -1501,7 +1501,7 @@ def schijven(
                     uit.append(
                         Schijf(rij["start"], rij["end"], terug, gedekt, "zon", gedekt)
                     )
-            elif in_evening_peak(rij["start"]) or (
+            elif (piek_dicht(prices) and in_evening_peak(rij["start"])) or (
                 not nu_blok and over < vloer_kwh * ZON_AANDEEL
             ):
                 # Bijkopen tot de ondergrens is ook net, en in de avondpiek
@@ -1545,7 +1545,7 @@ def schijven(
         if (
             plafond_kwh - gedekt > SCHIJF_MINIMUM
             and rij["end"] > netto_vanaf
-            and not in_evening_peak(rij["start"])
+            and not (piek_dicht(prices) and in_evening_peak(rij["start"]))
             and (
                 not alleen_zon
                 or (gemiddeld_bekend is not None and rij["price"] < gemiddeld_bekend)
@@ -1596,7 +1596,7 @@ def capaciteit_kwh(
         tot = min(volgend, end)
         deel = (tot - van).total_seconds() / 3600.0
         if deel > 0:
-            net_mag = not in_evening_peak(uur) and (avond is None or volgend > avond)
+            net_mag = not (vast and in_evening_peak(uur)) and (avond is None or volgend > avond)
             if net_mag:
                 som += vermogen * deel
             else:
@@ -2054,7 +2054,7 @@ def timeline(
                 waarom = "een van de goedkoopste manieren"
         elif begin is not None and rij["end"] <= begin:
             waarom = "voor je begintijd"
-        elif not schijven_hier and in_evening_peak(start):
+        elif not schijven_hier and piek_dicht(prices) and in_evening_peak(start):
             waarom = "de avondpiek, daar komt niets van het net bij"
         elif not schijven_hier and netto_vanaf is not None and rij["end"] <= netto_vanaf:
             waarom = f"geen zon over, en voor {_clock(netto_vanaf)} geen net"
@@ -2325,6 +2325,22 @@ def in_evening_peak(moment: datetime) -> bool:
     """Of dit blok in de avondpiek valt."""
     return EVENING_PEAK_START <= moment.time() < EVENING_START
 
+
+def piek_dicht(prices: list[dict]) -> bool:
+    """Of de avondpiek dicht is voor het net: alleen bij een vast contract (v0.79.0).
+
+    De bewoner van de eerste woning op 22-09-2026: "zou geen harde blokkade
+    hoeven zijn als je al met laagste prijzen werkt; dan vermijd je die uren
+    automatisch." De eigenaar: "bouw dat maar." Bij een dynamisch contract is
+    de avondpiek dus een gewoon uur op zijn eigen prijs: bijna altijd het
+    duurste van de dag, en dan kiest de som hem toch niet; is hij een keer
+    goedkoop of negatief, dan mag hij. Bij een vast contract is er geen
+    prijssignaal en is deze blokkade het enige dat de avond vrijhoudt (eis 4).
+    Een dynamisch contract zonder prijzen is hier een vast contract: zonder
+    prijs geen keuze.
+    """
+    return not prices
+
 # Hoe lang een klaar-tijd na die avond nog mag liggen om er nog bij te horen.
 # Meer dan een halve dag betekent dat er een hele daglichtperiode tussen zit, en
 # dan is er wel degelijk zon om op te wachten en gaat de avondregel niet op.
@@ -2462,7 +2478,7 @@ def decide(
     )
 
     if not decision.charge:
-        return _keep_alive(now, grid, car, charger, decision, holding)
+        return _keep_alive(now, grid, car, charger, decision, holding, piek=piek_dicht(prices))
 
     if charger.paused_by_balancer:
         return Decision(
@@ -3348,6 +3364,7 @@ def _keep_alive(
     charger: Charger,
     decision: Decision,
     holding: int,
+    piek: bool = True,
 ) -> Decision:
     """Een sessie die loopt niet meteen afbreken omdat de ladder omslaat.
 
@@ -3383,7 +3400,7 @@ def _keep_alive(
     # in leven te houden: met tien minuten uitstel zou dat elke avond om 17:00
     # een kilowattuur uit de piek zijn. Draagt de zon de ondergrens, dan mag
     # het wel, want die belast de aansluiting niet.
-    if in_evening_peak(now) and amps_for(grid.surplus_w, car.phases) < MIN_AMPS:
+    if piek and in_evening_peak(now) and amps_for(grid.surplus_w, car.phases) < MIN_AMPS:
         return decision
 
     amps = max(MIN_AMPS, min(ceiling, int(amps_for(grid.surplus_w, car.phases))))
@@ -3955,7 +3972,9 @@ def plan_programma(
     # Buiten de avondpiek als het kan (eis 4): niets van het net tussen
     # EVENING_PEAK_START en EVENING_START. Past alleen de piek, dan de piek.
     buiten = [k for k in kandidaten if not _in_avondpiek(k[1], k[1] + duur)]
-    keuze = buiten or kandidaten
+    # Bij een dynamisch contract telt de piek gewoon mee op zijn prijs; zie
+    # `piek_dicht`.
+    keuze = (buiten or kandidaten) if piek_dicht(prices) else kandidaten
     goedkoopst, start = min(keuze, key=lambda k: (round(k[0], 4), k[1]))
     kosten_nu = next((k for k, m in kandidaten if m == eerste), None)
     # Laat de meter genoeg zon zien om het hele programma nu op eigen zon te
@@ -4262,7 +4281,7 @@ def boiler_schijven(
         if terug is None:
             terug = tariff.feed_in
 
-        if in_evening_peak(rij["start"]):
+        if piek_dicht(prices) and in_evening_peak(rij["start"]):
             # Alleen zon, en alleen als die het hele vermogen draagt: een
             # boiler die voor de helft van het net loopt belast de aansluiting
             # in het uur waarin dat niet hoort.

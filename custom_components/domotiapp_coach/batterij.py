@@ -40,6 +40,7 @@ from .planner import (
     _kwh,
     _vlakke_blokken,
     in_evening_peak,
+    piek_dicht,
     price_now,
 )
 
@@ -242,15 +243,17 @@ class _Som:
     hoog: float
     stap: float
     eta: float
+    # Of de avondpiek dicht is voor het net (vast contract). Zie `piek_dicht`.
+    piek: bool = True
 
 
 def _mogelijk(
     e: float, rij: dict, deel: float, huis: float, b: Batterij, som_laag: float,
-    hoog: float, eta: float,
+    hoog: float, eta: float, piek: bool = True,
 ) -> tuple[float, float]:
     """Tussen welke inhoud de batterij aan het eind van dit blok kan zitten."""
     op = min(hoog, e + b.max_charge_w / 1000.0 * deel * eta)
-    if in_evening_peak(rij["start"]):
+    if piek and in_evening_peak(rij["start"]):
         # Eis 4: in de avondpiek komt er niets van het net bij. Zon mag.
         op = min(op, e + max(0.0, -huis) * eta)
     neer_w = b.max_discharge_w / 1000.0 * deel
@@ -271,7 +274,7 @@ def _blok_kosten(e: float, naar: float, huis: float, rij: dict, eta: float) -> f
 
 
 def _waarde_vooruit(
-    now: datetime, blokken: list[dict], forecast: Forecast, b: Batterij
+    now: datetime, blokken: list[dict], forecast: Forecast, b: Batterij, piek: bool = True
 ) -> _Som | None:
     """De som over de tijd: wat de rest van de bekende uren kost, per inhoud.
 
@@ -318,7 +321,7 @@ def _waarde_vooruit(
         na[k] = volgende
         begin = []
         for e in rooster:
-            op, neer = _mogelijk(e, rij, deel, h, b, bodem, hoog, eta)
+            op, neer = _mogelijk(e, rij, deel, h, b, bodem, hoog, eta, piek)
             kandidaten = {e, op, neer}
             if h > 0:
                 kandidaten.add(max(neer, e - h / eta))
@@ -336,14 +339,14 @@ def _waarde_vooruit(
             )
         volgende = begin
 
-    return _Som(blokken, delen, huis, na, laag, hoog, stap, eta)
+    return _Som(blokken, delen, huis, na, laag, hoog, stap, eta, piek)
 
 
 def _beste_stap(som: _Som, k: int, e: float, b: Batterij) -> float:
     """Naar welke inhoud de batterij in blok k het beste kan gaan."""
     rij, deel, h = som.blokken[k], som.delen[k], som.huis[k]
     bodem = b.bodem / 100.0 * (b.capacity_kwh or 0.0)
-    op, neer = _mogelijk(e, rij, deel, h, b, bodem, som.hoog, som.eta)
+    op, neer = _mogelijk(e, rij, deel, h, b, bodem, som.hoog, som.eta, som.piek)
     kandidaten = {e, op, neer}
     if h > 0:
         kandidaten.add(max(neer, e - h / som.eta))
@@ -407,7 +410,7 @@ def _vooruit(som: _Som, b: Batterij) -> list[Uur]:
 
 
 def _rustig_vermogen(
-    uren: list[Uur], b: Batterij, ontladen: bool = False
+    uren: list[Uur], b: Batterij, ontladen: bool = False, piek: bool = True
 ) -> tuple[float, datetime | None]:
     """Op welk vermogen hij van het net laadt (of eraan levert), en tot wanneer.
 
@@ -435,7 +438,7 @@ def _rustig_vermogen(
     prijs = uren[0].price
     energie, tijd, tot = 0.0, 0.0, None
     for uur in uren:
-        if abs(uur.price - prijs) > PRICE_MARGIN or (not ontladen and in_evening_peak(uur.start)):
+        if abs(uur.price - prijs) > PRICE_MARGIN or (piek and not ontladen and in_evening_peak(uur.start)):
             break
         energie += max(0.0, -uur.net_kwh if ontladen else uur.net_kwh)
         tijd += (uur.end - uur.start).total_seconds() / 3600.0
@@ -555,6 +558,8 @@ def plan_batterij(
         )
 
     blokken = [rij for rij in prices if rij["end"] > now] or _vlakke_blokken(now, None, tariff)
+    # Bij een dynamisch contract is de avondpiek een gewoon uur op zijn prijs.
+    dicht = piek_dicht(prices)
     nu = price_now(blokken, now)
     if nu is None:
         # Eis 6: nooit blind. Zonder prijs van dit moment alleen zon erin en het
@@ -574,7 +579,7 @@ def plan_batterij(
     # Een negatieve prijs gaat voor alles: elk verlies levert dan geld op. Het
     # gaat om wat de bewoner betaalt, met belasting en opslag erin; dat kwam in
     # 2026 een paar keer voor (de eigenaar, 21-09-2026).
-    if koop < 0 and not in_evening_peak(now) and b.soc < b.soc_max - VOL_MARGE:
+    if koop < 0 and not (dicht and in_evening_peak(now)) and b.soc < b.soc_max - VOL_MARGE:
         return Besluit(
             MAX_LADEN,
             power_w=b.max_charge_w,
@@ -603,7 +608,7 @@ def plan_batterij(
             paal_laadt,
         )
 
-    som = _waarde_vooruit(now, blokken, forecast, b)
+    som = _waarde_vooruit(now, blokken, forecast, b, piek=dicht)
     if som is None:
         return _met_paal(
             Besluit(NUL, reason="Hij houdt de meter op nul.", rule="nul"), paal_laadt
@@ -631,7 +636,7 @@ def plan_batterij(
     leeg = b.soc <= b.bodem + 1e-6
     uren = _vooruit(som, b)
     kijk = _vooruitkijk_zin(now, forecast, b)
-    piek = in_evening_peak(now)
+    piek = dicht and in_evening_peak(now)
 
     # Zon opslaan en het huis voeden: elk tegen wat een kilowattuur in de
     # batterij straks waard is.
@@ -646,7 +651,7 @@ def plan_batterij(
     # Van het net laden en handelen: die volgen het plan zelf. Zie
     # `_rustig_vermogen`.
     if not vol and not piek:
-        vermogen, tot = _rustig_vermogen(uren, b)
+        vermogen, tot = _rustig_vermogen(uren, b, piek=dicht)
         if vermogen > 0:
             rustig = vermogen < b.max_charge_w - 1.0
             return Besluit(
