@@ -1788,6 +1788,7 @@ class DacViewOverview extends DacElement {
     // zijn eigen knop om te wachten, en een boiler wordt warm zo snel als zijn
     // element kan. De eigenaar op 06-09-2026: "dingen van de laadpaal op mijn
     // vaatwasserkaart, dat moet niet."
+    const batterij = besluit.kind === "batterij";
     const kan =
       besluit.rule !== "disconnected"
       && besluit.level !== "advise"
@@ -1795,12 +1796,15 @@ class DacViewOverview extends DacElement {
       && besluit.kind !== "boiler"
       // Een thuisbatterij heeft geen auto die haast heeft en geen beurt om te
       // pauzeren: wie hem wil stilzetten haalt het vinkje "mag sturen" weg.
-      && besluit.kind !== "batterij";
-    boost.hidden = !kan;
+      // Wel kan hij nu vol: dezelfde knop, andere woorden (22-09-2026).
+      && !batterij;
+    boost.hidden = !(kan || (batterij && besluit.level !== "advise" && besluit.applied));
     boost.setAttribute("aria-pressed", String(Boolean(besluit.boost)));
-    this.$(`[data-boost-text="${slot}"]`).textContent = besluit.boost
-      ? "Snelladen staat aan"
-      : "Snelladen";
+    this.$(`[data-boost-text="${slot}"]`).textContent = batterij
+      ? (besluit.boost ? "Laadt nu vol" : "Nu vol laden")
+      : besluit.boost
+        ? "Snelladen staat aan"
+        : "Snelladen";
 
     const wek = this.$(`[data-wake="${slot}"]`);
     wek.hidden = !(besluit.wake && besluit.level !== "advise" && besluit.kind !== "programma"
