@@ -93,6 +93,16 @@ _CAR = _schema(
         # customer says so, and without that it simply charges the cheapest
         # hours until the car stops by itself.
         vol.Optional("soc_entity", default=""): _ENTITY,
+        # Het merk kiest welke velden er bij de auto horen (v0.76.0). Leeg is
+        # een profiel van voor het merk bestond, en dat blijft gewoon werken.
+        vol.Optional("brand", default=""): vol.In(["", "ford", "tesla"]),
+        # Een Tesla slaapt als hij niet laadt en meldt dan geen accustand. De
+        # integratie heeft een knop die hem wekt; met die knop weet de coach
+        # weer hoe vol hij is. De eigenaar op 22-09-2026.
+        vol.Optional("wake_entity", default=""): _ENTITY,
+        # "hourly": elk uur wekken als hij stilstaat en niets meldt. "manual":
+        # alleen op de knop op de kaart, het zuinigst voor de accu.
+        vol.Optional("wake_mode", default="manual"): vol.In(["manual", "hourly"]),
     }
 )
 
@@ -1018,6 +1028,29 @@ def async_coach_boost(
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): "domotiapp_coach/coach/wake",
+        vol.Required("device_id"): str,
+    }
+)
+@websocket_api.async_response
+async def async_coach_wake(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De auto aan dit laadpunt wekken, zodat hij zijn accustand meldt.
+
+    Niet alleen voor beheerders, om dezelfde reden als snelladen: wie wil weten
+    hoe vol de auto is, is degene die erin stapt.
+    """
+    from .coach import async_get_coach
+
+    gewekt = await async_get_coach(hass).async_wake(msg["device_id"])
+    connection.send_result(msg["id"], {"woken": gewekt})
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): "domotiapp_coach/coach/pause",
         vol.Required("device_id"): str,
         vol.Required("paused"): bool,
@@ -1062,4 +1095,5 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_savings_list)
     websocket_api.async_register_command(hass, async_coach_approve)
     websocket_api.async_register_command(hass, async_coach_boost)
+    websocket_api.async_register_command(hass, async_coach_wake)
     websocket_api.async_register_command(hass, async_coach_pause)

@@ -782,6 +782,30 @@ export const CAR_TYPES = ["laadpaal"];
 export const hasCars = (device) => CAR_TYPES.includes(device?.type);
 
 /** How a car takes its power, and what that means for the lowest step. */
+/** De merken van een auto, en daarmee welke velden er bij het profiel horen. */
+export const CAR_BRANDS = [
+  { id: "ford", label: "Ford" },
+  { id: "tesla", label: "Tesla" },
+];
+
+/**
+ * Hoe de coach een slapende Tesla zijn accustand laat melden. De eigenaar op
+ * 22-09-2026: "als een tesla niet aan de lader hangt slaapt hij en geeft hij
+ * geen accu door."
+ */
+export const WAKE_MODES = [
+  {
+    id: "manual",
+    label: "Handmatig opvragen",
+    blurb: "Het zuinigst: de auto slaapt door. Op de laadpaalkaart komt een knop om de accustand op te vragen.",
+  },
+  {
+    id: "hourly",
+    label: "Elk uur wakker maken",
+    blurb: "Staat hij stil en meldt hij niets, dan wekt de coach hem elk uur. Let op: elke keer wakker worden kost accu en houdt de auto uit zijn diepe slaap.",
+  },
+];
+
 export const CAR_PHASES = [
   { id: "one", label: "Eén fase", blurb: "Laagste stap ongeveer 1,4 kW." },
   { id: "three", label: "Drie fasen", blurb: "Laagste stap ongeveer 4,1 kW." },
