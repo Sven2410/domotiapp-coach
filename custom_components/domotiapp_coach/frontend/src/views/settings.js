@@ -230,6 +230,27 @@ class DacViewSettings extends DacEditorElement {
               <label>Gasmeter (m³)</label>
               <dac-entity-picker data-meter="gas"></dac-entity-picker>
             </div>
+
+            <label class="check" for="water-enabled">
+              <input type="checkbox" id="water-enabled">
+              <span>
+                <strong>Deze woning heeft een watermeter in Home Assistant</strong>
+                Bijvoorbeeld de HomeWizard Watermeter. Dan staat water bij de standen, in de historie en in het rapport.
+              </span>
+            </label>
+
+            <div class="fields" id="water-field">
+              <div class="row">
+                <label>Watermeter (m³)</label>
+                <dac-entity-picker data-meter="water"></dac-entity-picker>
+                <span class="sub">De teller, in m³.</span>
+              </div>
+              <div class="row">
+                <label>Waterverbruik nu (L/min)</label>
+                <dac-entity-picker data-meter="water_flow"></dac-entity-picker>
+                <span class="sub">Optioneel. Met deze sensor kan de coach melden als er te lang onafgebroken water loopt; zie Meldingen.</span>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -348,6 +369,7 @@ class DacViewSettings extends DacEditorElement {
       ["phases-enabled", (on) => (this.draft_.sources.phases_enabled = on)],
       ["phases-overview", (on) => (this.draft_.sources.phases_on_overview = on)],
       ["gas-enabled", (on) => ((this.draft_.sources.meters ??= {}).gas_enabled = on)],
+      ["water-enabled", (on) => ((this.draft_.sources.meters ??= {}).water_enabled = on)],
     ]) {
       const box = this.$(`#${id}`);
       box.addEventListener("change", () => {
@@ -460,6 +482,7 @@ class DacViewSettings extends DacEditorElement {
       picker.value = d.sources.meters?.[picker.dataset.meter] ?? "";
     }
     this.$("#gas-enabled").checked = Boolean(d.sources.meters?.gas_enabled);
+    this.$("#water-enabled").checked = Boolean(d.sources.meters?.water_enabled);
     this.paintExtra_();
     this.onFeed_();
 
@@ -475,6 +498,7 @@ class DacViewSettings extends DacEditorElement {
 
   paintGas_() {
     this.$("#gas-field").style.display = this.draft_.sources.meters?.gas_enabled ? "" : "none";
+    this.$("#water-field").style.display = this.draft_.sources.meters?.water_enabled ? "" : "none";
   }
 
   paintGridMode_() {

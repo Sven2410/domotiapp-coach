@@ -4689,6 +4689,97 @@ DYN87b = dict(DYN87, dynamic=dict(DYN87["dynamic"], feed_in_bonus=-0.0219))
 controle("en een negatieve vergoeding gaat eraf",
          abs(coach87._prices({"contract": DYN87b})[0]["feed_in"] - (0.30 - 0.0219)) < 1e-9, "")
 
+print("=== 88. de thuisbatterij: nu leegladen tot een accustand (22-09-2026) ===")
+# De bewoner van de eerste woning: "naast pauze en laad snel vol ook een knop
+# laad snel leeg, met een minimale accustand: nu maximaal ontladen tot 50%,
+# daarna terug naar normale modus."
+hass88, _, coach88 = bouw(huis75(soc="80"), instellingen(devices=[LAADPAAL, BATTERIJ]))
+NU88 = dt.datetime(2026, 9, 22, 23, 0)
+coach88.async_drain("dev-batterij", 50.0)
+b88 = asyncio.run(ronde75(hass88, coach88, NU88))
+print(f"  {b88.get('mode_name')}: {b88.get('reason')}")
+controle("met de knop aan levert hij aan het net op zijn ontlaadvermogen",
+         b88.get("mode") == "handelen" and b88.get("rule") == "leeg-laden" and b88.get("drain_to") == 50.0,
+         f"{b88.get('mode')} {b88.get('rule')} {b88.get('drain_to')}")
+_, richting88, vermogen88 = zet75(hass88)
+controle("en de regelaar schrijft ontladen", richting88 == ["discharge"] and vermogen88 and vermogen88[-1] > 0, f"{richting88} {vermogen88}")
+hass88.states.zet("sensor.batterij_soc", "50")
+b88 = asyncio.run(ronde75(hass88, coach88, NU88 + dt.timedelta(minutes=1)))
+controle("op de gekozen stand gaat de knop vanzelf uit en volgt hij het plan weer",
+         b88.get("drain_to") is None and b88.get("rule") != "leeg-laden", f"{b88.get('drain_to')} {b88.get('rule')}")
+coach88.async_drain("dev-batterij", 2.0)
+hass88.states.zet("sensor.batterij_soc", "5")
+b88 = asyncio.run(ronde75(hass88, coach88, NU88 + dt.timedelta(minutes=2)))
+controle("nooit onder de eigen ondergrens van de batterij: op 5% is hij klaar, ook al vroeg je 2",
+         b88.get("drain_to") is None, f"{b88.get('drain_to')} {b88.get('rule')}")
+
+print("=== 89. lekkage of abnormaal verbruik: water dat blijft lopen, en een dag uit de toon (22-09-2026) ===")
+# De bewoner van de eerste woning: "meldingen instellen obv abnormaal water- en
+# gasverbruik, mogelijk lekkage van water of gas."
+inst89 = instellingen()
+inst89["sources"]["meters"] = {"gas_enabled": True, "gas": "sensor.gasmeter", "water_enabled": True,
+                               "water": "sensor.watermeter", "water_flow": "sensor.waterflow"}
+inst89["notifications"] = {**(inst89.get("notifications") or {}),
+                           "usage_alert": {"enabled": True, "water_flow_minutes": 120, "factor": 3, "min_days": 3}}
+huis89 = {**huis(), "sensor.gasmeter": {"state": "9130.000", "attributes": {"unit_of_measurement": "m³"}},
+          "sensor.watermeter": {"state": "50.000", "attributes": {"unit_of_measurement": "m³"}},
+          "sensor.waterflow": {"state": "0", "attributes": {"unit_of_measurement": "L/min"}}}
+hass89, store89, coach89 = bouw(huis89, inst89)
+
+
+def meldingen89(hass):
+    # Alleen de meldingen van de verbruikswacht; de laadpaal in het huis zegt ook dingen.
+    return [d[2].get("message", "") for d in hass.services.verstuurd
+            if d[0] == "notify" and ("m³" in d[2].get("message", "") or "water" in d[2].get("message", ""))]
+
+
+T89 = dt.datetime(2026, 9, 10, 8, 0)
+# Vijf gewone dagen van een halve kuub gas en 0,3 kuub water, dan een dag met vijf keer zoveel.
+dagen = [(0.5, 0.3)] * 5 + [(2.6, 0.31)]
+gas, water = 9130.0, 50.0
+uitkomsten = []
+for i, (g, w) in enumerate(dagen):
+    hass89.states.zet("sensor.gasmeter", {"state": f"{gas:.3f}", "attributes": {"unit_of_measurement": "m³"}})
+    hass89.states.zet("sensor.watermeter", {"state": f"{water:.3f}", "attributes": {"unit_of_measurement": "m³"}})
+    asyncio.run(ronde75(hass89, coach89, T89 + dt.timedelta(days=i)))
+    uitkomsten.append(meldingen89(hass89))
+    gas += g
+    water += w
+hass89.states.zet("sensor.gasmeter", {"state": f"{gas:.3f}", "attributes": {"unit_of_measurement": "m³"}})
+hass89.states.zet("sensor.watermeter", {"state": f"{water:.3f}", "attributes": {"unit_of_measurement": "m³"}})
+asyncio.run(ronde75(hass89, coach89, T89 + dt.timedelta(days=len(dagen))))
+laatste89 = meldingen89(hass89)
+dagen89 = store89.instellingen.get("usage_days") or []
+print(f"  dagverbruik in de opslag: {[(d['meter'], d['date'][5:], d['m3']) for d in dagen89]}")
+controle("de coach houdt per meter het dagverbruik bij, uit de tellers zelf",
+         sum(1 for d in dagen89 if d["meter"] == "gas") == 6 and any(abs(d["m3"] - 2.6) < 1e-6 for d in dagen89 if d["meter"] == "gas"),
+         f"{dagen89}")
+controle("de gewone dagen geven geen melding", not any(m for u in uitkomsten for m in u), f"{uitkomsten}")
+print(f"  na de dag van 2,6 m³: {laatste89}")
+controle("een dag met vijf keer het gewone gasverbruik geeft één kritieke melding, met de getallen erin",
+         len(laatste89) == 1 and "2,6 m³ gas" in laatste89[0] and "0,5 m³" in laatste89[0], f"{laatste89}")
+asyncio.run(ronde75(hass89, coach89, T89 + dt.timedelta(days=len(dagen), minutes=1)))
+controle("en niet nog een keer", not meldingen89(hass89), f"{meldingen89(hass89)}")
+
+# Water dat blijft lopen: twee uur 0,8 L/min.
+hass89.states.zet("sensor.waterflow", {"state": "0.8", "attributes": {"unit_of_measurement": "L/min"}})
+T89b = T89 + dt.timedelta(days=10)
+for minuten in (0, 30, 60, 119):
+    asyncio.run(ronde75(hass89, coach89, T89b + dt.timedelta(minutes=minuten)))
+controle("een bad van anderhalf uur is nog geen lekkage", not meldingen89(hass89), f"{meldingen89(hass89)}")
+asyncio.run(ronde75(hass89, coach89, T89b + dt.timedelta(minutes=121)))
+lek = meldingen89(hass89)
+print(f"  na twee uur: {lek}")
+controle("na twee uur onafgebroken water één kritieke melding", len(lek) == 1 and "onafgebroken water" in lek[0] and "0,8 L/min" in lek[0], f"{lek}")
+asyncio.run(ronde75(hass89, coach89, T89b + dt.timedelta(minutes=180)))
+controle("en niet nog een keer zolang het loopt", not meldingen89(hass89), "")
+hass89.states.zet("sensor.waterflow", {"state": "0", "attributes": {"unit_of_measurement": "L/min"}})
+asyncio.run(ronde75(hass89, coach89, T89b + dt.timedelta(minutes=181)))
+hass89.states.zet("sensor.waterflow", {"state": "0.5", "attributes": {"unit_of_measurement": "L/min"}})
+asyncio.run(ronde75(hass89, coach89, T89b + dt.timedelta(minutes=182)))
+asyncio.run(ronde75(hass89, coach89, T89b + dt.timedelta(minutes=305)))
+controle("stopt het en begint het opnieuw, dan telt de klok opnieuw", len(meldingen89(hass89)) == 1, f"{meldingen89(hass89)}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

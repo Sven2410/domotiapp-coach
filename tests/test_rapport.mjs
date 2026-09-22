@@ -523,6 +523,9 @@ proef("handelt de batterij, dan is wat naar het net gaat verkoop en geen oversch
   // het deel dat niet uit de accu komt overschot.
   const nul = advise(r, drempels, true, 80, null, [], { ...accu, mode: "nul", power_w: -2400 });
   assert.notEqual(nul.title, "Gebruik je overschot");
+  // Ook zonder besluit van de coach: de meting aan de batterij zelf telt.
+  const rAccu = { ...r, devices: [{ type: "thuisbatterij", batteryWatts: -2400 }] };
+  assert.notEqual(advise(rAccu, drempels, true, 80, null, [], null).title, "Gebruik je overschot");
   const zon = advise({ ...r, exportW: 2290, grid: -2290 }, drempels, true, 80, null, [], { ...accu, mode: "nul", power_w: 500 });
   assert.equal(zon.title, "Gebruik je overschot");
 });
@@ -984,6 +987,42 @@ proef("een negatieve prijs krijgt zijn eigen tip, en de verkoopvergoeding staat 
   const html = Object.create(Installatie.prototype).render();
   assert.ok(html.includes('id="dyn-feedbonus"'));
   assert.ok(html.includes("0,0025"), "de kwart cent van na het salderen staat erbij");
+});
+
+proef("water hoort erbij: prijs per dag, meterstand, formulier en de lekmelding", async () => {
+  const contract = { type: "fixed", gas_price: 1.3, water_price: 1.1, fixed: { all_in_price: 0.28 },
+    periods: [{ from: "2025-01-01", to: "2025-12-31", all_in_price: 0.35, gas_price: 1.5, water_price: 0.9 }] };
+  assert.equal(contractAt(contract, new Date(2025, 5, 1)).water, 0.9);
+  assert.equal(contractAt(contract, new Date(2026, 5, 1)).water, 1.1);
+  assert.equal(contractAt({ type: "fixed" }, new Date()).water, null);
+  const { meterReadings } = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
+  const staten = { "sensor.water": { state: "50.563", attributes: { unit_of_measurement: "m³" } } };
+  const feed = { get: (id) => staten[id] };
+  assert.equal(meterReadings(feed, { meters: { water: "sensor.water", water_enabled: false } }).length, 0);
+  assert.equal(meterReadings(feed, { meters: { water: "sensor.water", water_enabled: true } })[0].label, "Water");
+  const inst = Object.create(Installatie.prototype).render();
+  assert.ok(inst.includes('id="water-price"'));
+  await import("../custom_components/domotiapp_coach/frontend/src/views/settings.js");
+  const Instellingen = geregistreerd.get("dac-view-settings");
+  const set = Object.create(Instellingen.prototype).render();
+  assert.ok(set.includes('id="water-enabled"') && set.includes('data-meter="water_flow"'));
+  await import("../custom_components/domotiapp_coach/frontend/src/views/notifications.js");
+  const Meldingen = geregistreerd.get("dac-view-notifications");
+  const mel = Object.create(Meldingen.prototype).render();
+  assert.ok(mel.includes('id="verbruik-aan"') && mel.includes('id="verbruik-water"') && mel.includes('id="verbruik-factor"'));
+  const hist = Object.create(Historie.prototype).render();
+  assert.ok(hist.includes('id="water-card"') && hist.includes('id="water-stage"'));
+  const el = Object.create(Historie.prototype);
+  el.settings_ = { sources: { meters: { water_enabled: true, water: "sensor.water", gas_enabled: true, gas: "sensor.gas" } } };
+  assert.deepEqual(el.meters_().water, ["sensor.water"]);
+});
+
+proef("Historie opent op vandaag, de eerste knop van de rij (22-09-2026)", () => {
+  const bron = Historie.toString();
+  assert.ok(/this\.period_ = "day";/.test(bron), "de constructor begint op day");
+  assert.ok(!/this\.period_ = "week";/.test(bron));
+  const html = Object.create(Historie.prototype).render();
+  assert.ok(html.indexOf('data-period="day"') < html.indexOf('data-period="week"'));
 });
 
 proef("het installatiescherm heeft de gasprijs en de eerdere contracten", () => {

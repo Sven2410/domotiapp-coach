@@ -264,7 +264,10 @@ function bucketLabel(period, date) {
 class DacViewHistory extends DacElement {
   constructor() {
     super();
-    this.period_ = "week";
+    // Vandaag, want dat is wat je meestal wilt zien; het is ook de eerste knop
+    // van de rij, en een rij die op de tweede opent leest als een fout
+    // (de eigenaar op 22-09-2026).
+    this.period_ = "day";
     // Energie of Bespaard; de laadbeurten komen pas als iemand daarnaar kijkt.
     this.onderwerp_ = "energie";
     this.beurten_ = undefined;
@@ -373,6 +376,14 @@ class DacViewHistory extends DacElement {
           <div id="gas-stage"></div>
         </section>
 
+        <section class="card gas water" id="water-card" hidden>
+          <div class="panel-head">
+            <div class="eyebrow">Water</div>
+            <h2 id="water-total"></h2>
+          </div>
+          <div id="water-stage"></div>
+        </section>
+
         <section class="card saved" id="saved-card" hidden>
           <div class="panel-head">
             <div class="eyebrow">Bespaard</div>
@@ -431,7 +442,7 @@ class DacViewHistory extends DacElement {
     this.addEventListener("pointerdown", (event) => {
       if (event.pointerType === "mouse") return;
       const path = event.composedPath();
-      if (!path.some((node) => node?.id === "stage" || node?.id === "gas-stage")) {
+      if (!path.some((node) => node?.id === "stage" || node?.id === "gas-stage" || node?.id === "water-stage")) {
         this.clearPick_();
         this.clearGasPick_();
       }
@@ -484,12 +495,13 @@ class DacViewHistory extends DacElement {
       import: [meters.import_low, meters.import_high].filter(Boolean),
       export: [meters.export_low, meters.export_high].filter(Boolean),
       gas: meters.gas_enabled && meters.gas ? [meters.gas] : [],
+      water: meters.water_enabled && meters.water ? [meters.water] : [],
     };
   }
 
   async load_() {
     const roles = this.meters_();
-    const ids = [...roles.solar, ...roles.import, ...roles.export, ...roles.gas];
+    const ids = [...roles.solar, ...roles.import, ...roles.export, ...roles.gas, ...roles.water];
 
     this.paintPeriod_();
 
@@ -529,6 +541,7 @@ class DacViewHistory extends DacElement {
       import: combine(series, roles.import),
       export: combine(series, roles.export),
       gas: combine(series, roles.gas),
+      water: combine(series, roles.water),
     };
     this.paint_();
   }
@@ -598,6 +611,7 @@ class DacViewHistory extends DacElement {
     if (bespaard) {
       this.$("#money-card").hidden = true;
       this.$("#gas-card").hidden = true;
+      this.$("#water-card").hidden = true;
       this.paintSaved_();
       return;
     }
@@ -610,6 +624,7 @@ class DacViewHistory extends DacElement {
       this.$("#totals").replaceChildren();
       this.$("#legend").replaceChildren();
       this.$("#gas-card").hidden = true;
+      this.$("#water-card").hidden = true;
       note.textContent =
         "Er zijn nog geen meterstanden gekozen. Onder Instellingen bij Meterstanden wijs je de tellers aan; daarna staat hier je geschiedenis.";
       return;
@@ -640,6 +655,7 @@ class DacViewHistory extends DacElement {
     this.paintChart_();
     this.paintMoney_();
     this.paintGas_();
+    this.paintVolume_("water", "Waterverbruik per periode");
   }
 
   /** The buckets of this period, in order, with everything that belongs to one. */
@@ -877,6 +893,11 @@ class DacViewHistory extends DacElement {
         : (prices.get(row.start.getTime()) ?? rate.buy);
     const terugBij = (row) => contractAt(contract, row.start).feedIn ?? rate.feedIn;
     const gasBij = (row) => contractAt(contract, row.start).gas;
+    const waterBij = (row) => contractAt(contract, row.start).water;
+    const water = new Map((this.rows_?.water ?? []).map((row) => [row.start.getTime(), row.value]));
+    const waterRijen = this.rows_?.water ?? [];
+    const waterWaarde = waterRijen.reduce((total, row) => total + row.value * (waterBij(row) ?? 0), 0);
+    const metWater = waterRijen.length > 0 && waterRijen.some((row) => waterBij(row) !== null);
     const waarde = (key) =>
       rows.reduce((total, row) => total + row[key] * (prijsBij(row) ?? 0), 0);
     const terugWaarde = rows.reduce((total, row) => total + row.sold * (terugBij(row) ?? 0), 0);
@@ -890,6 +911,7 @@ class DacViewHistory extends DacElement {
     if (hasSolar) kop.push("Opgewekt", "Verbruikt", "Eigen zon");
     kop.push("Van het net", "Naar het net");
     if (gas.size) kop.push("Gas");
+    if (water.size) kop.push("Water");
     if (rate.buy !== null) kop.push("Prijs", "Kosten");
 
     const regels = rows.map((row) => {
@@ -898,6 +920,7 @@ class DacViewHistory extends DacElement {
       if (hasSolar) cellen.push(kwh(row.own + row.sold), kwh(row.used), kwh(row.own));
       cellen.push(kwh(row.bought), kwh(row.sold));
       if (gas.size) cellen.push(`${nl(gas.get(row.start.getTime()) ?? 0, 2)} m³`);
+      if (water.size) cellen.push(`${nl(water.get(row.start.getTime()) ?? 0, 2)} m³`);
       if (rate.buy !== null) {
         cellen.push(prijs === null ? "" : euro(prijs), euro(row.bought * (prijs ?? 0)));
       }
@@ -910,6 +933,9 @@ class DacViewHistory extends DacElement {
     totaalCellen.push(kwh(som("bought")), kwh(som("sold")));
     if (gas.size) {
       totaalCellen.push(`${nl([...gas.values()].reduce((a, b) => a + b, 0), 2)} m³`);
+    }
+    if (water.size) {
+      totaalCellen.push(`${nl([...water.values()].reduce((a, b) => a + b, 0), 2)} m³`);
     }
     if (rate.buy !== null) totaalCellen.push("", euro(waarde("bought")));
 
@@ -959,6 +985,9 @@ class DacViewHistory extends DacElement {
       gas.size
         ? cel("Gas", `${nl([...gas.values()].reduce((a, b) => a + b, 0), 1)} m³`)
         : null,
+      water.size
+        ? cel("Water", `${nl([...water.values()].reduce((a, b) => a + b, 0), 1)} m³`)
+        : null,
     ].filter(Boolean);
 
     const geldVakjes =
@@ -969,6 +998,7 @@ class DacViewHistory extends DacElement {
             cel("Stroom gekocht voor", euro(waarde("bought"))),
             metTerug ? cel("Teruglevering leverde", euro(Math.max(0, terugWaarde))) : null,
             metGas ? cel("Gas gekocht voor", euro(gasWaarde)) : null,
+            metWater ? cel("Water gekocht voor", euro(waterWaarde)) : null,
           ].filter(Boolean);
 
     const bespaard = this.bespaardRapport_();
@@ -1530,6 +1560,7 @@ class DacViewHistory extends DacElement {
         : (perBucket ? prices.get(row.start.getTime()) ?? rate.buy : rate.buy);
     const feedInAt = (row) => contractAt(contract, row.start).feedIn ?? rate.feedIn;
     const gasAt = (row) => contractAt(contract, row.start).gas;
+    const waterAt = (row) => contractAt(contract, row.start).water;
 
     const own = rows.reduce((total, row) => total + row.own, 0);
     const bought = rows.reduce((total, row) => total + row.bought, 0);
@@ -1543,6 +1574,9 @@ class DacViewHistory extends DacElement {
     const gasRows = this.rows_?.gas ?? [];
     const gasValue = gasRows.reduce((total, row) => total + row.value * (gasAt(row) ?? 0), 0);
     const metGas = gasRows.length > 0 && gasRows.some((row) => gasAt(row) !== null);
+    const waterRows = this.rows_?.water ?? [];
+    const waterValue = waterRows.reduce((total, row) => total + row.value * (waterAt(row) ?? 0), 0);
+    const metWater = waterRows.length > 0 && waterRows.some((row) => waterAt(row) !== null);
     const eerder = rows.some((row) => contractAt(contract, row.start).period);
 
     // Alle drie als positief bedrag, met het label dat de richting draagt. Een
@@ -1564,6 +1598,9 @@ class DacViewHistory extends DacElement {
     }
     if (metGas) {
       cells.push({ label: "Gas gekocht voor", value: euro(gasValue), tone: "var(--dac-warn)" });
+    }
+    if (metWater) {
+      cells.push({ label: "Water gekocht voor", value: euro(waterValue), tone: "var(--dac-grid-in)" });
     }
 
     card.hidden = false;
@@ -1610,15 +1647,24 @@ class DacViewHistory extends DacElement {
   }
 
   paintGas_() {
-    const rows = this.rows_?.gas ?? [];
-    const card = this.$("#gas-card");
+    this.paintVolume_("gas", "Gasverbruik per periode");
+  }
+
+  /**
+   * De grafiek van een m³-meter: gas, en sinds v0.81.0 ook water. Dezelfde
+   * tekening, dezelfde schaal en hetzelfde aanwijzen, elk op zijn eigen kaart.
+   */
+  paintVolume_(soort, titel) {
+    const rows = this.rows_?.[soort] ?? [];
+    const card = this.$(`#${soort}-card`);
+    if (!card) return;
     card.hidden = !rows.length;
     if (!rows.length) return;
 
     const total = rows.reduce((sum, row) => sum + row.value, 0);
-    this.$("#gas-total").textContent = `${nl(total, 1)} m³ verbruikt`;
+    this.$(`#${soort}-total`).textContent = `${nl(total, 1)} m³ verbruikt`;
 
-    const gasStage = this.$("#gas-stage");
+    const gasStage = this.$(`#${soort}-stage`);
     const W = Math.max(MIN_W, Math.round(gasStage.getBoundingClientRect().width) || MIN_W);
     // Ruimte onderaan voor de tijdschaal. Die stond er eerst niet, waardoor je
     // wel zag dat er een piek was maar niet wanneer, en dat is bij gas nu juist
@@ -1664,7 +1710,7 @@ class DacViewHistory extends DacElement {
       .join("");
 
     gasStage.innerHTML = `
-      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gasverbruik per periode">${bars}${ticks}${hits}</svg>
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${titel}">${bars}${ticks}${hits}</svg>
     `;
 
     // Net als de stroomgrafiek: aanwijzen zet de kop erboven op die ene balk.
@@ -1678,7 +1724,7 @@ class DacViewHistory extends DacElement {
     const pick = (index) => {
       const row = rows[index];
       if (!row) return;
-      this.$("#gas-total").textContent = `${nl(row.value, 1)} m³ op ${bucketTitle(this.period_, row.start)}`;
+      this.$(`#${soort}-total`).textContent = `${nl(row.value, 1)} m³ op ${bucketTitle(this.period_, row.start)}`;
       for (const bar of svg.querySelectorAll(".b")) bar.classList.add("dim");
       svg.querySelectorAll(".b")[index]?.classList.remove("dim");
     };
@@ -1695,7 +1741,7 @@ class DacViewHistory extends DacElement {
         this.gasScrub_ = false;
       });
     }
-    this.gasWhole_ = heel;
+    (this.volumeWhole_ ??= {})[soort] = heel;
     svg.addEventListener("pointerleave", (event) => {
       if (event.pointerType !== "mouse") return;
       this.clearGasPick_();
@@ -1703,8 +1749,12 @@ class DacViewHistory extends DacElement {
   }
 
   clearGasPick_() {
-    if (this.gasWhole_) this.$("#gas-total").textContent = this.gasWhole_;
-    for (const bar of this.$$("#gas-stage .b")) bar.classList.remove("dim");
+    for (const soort of ["gas", "water"]) {
+      const heel = this.volumeWhole_?.[soort];
+      const kop = this.$(`#${soort}-total`);
+      if (heel && kop) kop.textContent = heel;
+      for (const bar of this.$$(`#${soort}-stage .b`)) bar.classList.remove("dim");
+    }
   }
 }
 

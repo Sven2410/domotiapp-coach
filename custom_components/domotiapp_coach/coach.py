@@ -46,6 +46,7 @@ from .const import (
 )
 from .archive import async_get_archive
 from .batterij import (
+    HANDELEN,
     Besluit,
     MAX_LADEN,
     NETLADEN,
@@ -838,6 +839,11 @@ class ChargerCoach:
         # Per sensor sinds wanneer hij niets zegt, en welke daarvan al gemeld zijn.
         self._sensor_stil: dict[str, datetime] = {}
         self._sensor_gemeld: set[str] = set()
+        # De verbruikswacht: sinds wanneer er onafgebroken water loopt, of dat
+        # al gemeld is, en welke dagen al gemeld zijn. Zie `_async_verbruikswacht`.
+        self._water_loopt_sinds: datetime | None = None
+        self._water_gemeld = False
+        self._verbruik_gemeld: set[str] = set()
         # Wanneer de auto aan een laadpunt voor het laatst gewekt is, en of de
         # kabel er de vorige ronde al in zat. Zie `_async_auto_wekken`.
         self._gewekt: dict[str, datetime] = {}
@@ -854,6 +860,9 @@ class ChargerCoach:
         # herstart heen en afgelopen zodra de kabel eruit gaat: snelladen is
         # iets voor nu, niet iets wat stilletjes blijft staan.
         self._boost: set[str] = set()
+        # De thuisbatterij nu leegladen tot deze accustand (procent), per
+        # apparaat. Zie `async_drain`.
+        self._drain: dict[str, float] = {}
         # En wie er met de hand op pauze staat. Zelfde levensduur, tegengestelde
         # bedoeling.
         self._paused: set[str] = set()
@@ -1376,6 +1385,120 @@ class ChargerCoach:
             return None
         return sum(waarden)
 
+    async def _async_verbruikswacht(self, settings: dict[str, Any], now: datetime) -> None:
+        """Lekkage of abnormaal verbruik van water en gas, één melding per geval.
+
+        De bewoner van de eerste woning op 22-09-2026: "meldingen instellen
+        obv abnormaal water- en gasverbruik, mogelijk lekkage." Twee tekenen:
+
+        1. **Water dat blijft lopen.** Meldt de debietsensor (L/min) langer dan
+           `water_flow_minutes` achter elkaar iets boven nul, dan staat er een
+           kraan open of lekt er iets. Eén melding per keer dat het begint.
+        2. **Een dag die uit de toon valt.** De coach houdt per meter het
+           dagverbruik bij (`usage_days`), en zegt het als de dag van gisteren
+           meer dan `factor` keer de mediaan van de dagen ervoor was, pas na
+           `min_days` gemeten dagen. Eén melding per dag.
+
+        Het dagverbruik komt uit de tellers zelf: bij de eerste ronde van een
+        nieuwe dag is het verschil met de stand waarmee de dag begon het
+        verbruik van gisteren. Dat vraagt geen recorder en overleeft een
+        herstart, want de beginstand staat in de instellingen (`usage_start`).
+        """
+        alert = (settings.get("notifications") or {}).get("usage_alert") or {}
+        meters = (settings.get("sources") or {}).get("meters") or {}
+        tellers = {}
+        if meters.get("gas_enabled") and meters.get("gas"):
+            tellers["gas"] = meters["gas"]
+        if meters.get("water_enabled") and meters.get("water"):
+            tellers["water"] = meters["water"]
+
+        # 1. Water dat blijft lopen.
+        if alert.get("enabled") and meters.get("water_enabled") and meters.get("water_flow"):
+            debiet = _number(self.hass, meters["water_flow"])
+            if debiet is not None and debiet > 0:
+                sinds = self._water_loopt_sinds or now
+                self._water_loopt_sinds = sinds
+                grens = timedelta(minutes=int(alert.get("water_flow_minutes") or 120))
+                if now - sinds >= grens and not self._water_gemeld:
+                    self._water_gemeld = True
+                    minuten = int((now - sinds).total_seconds() // 60)
+                    await self._async_tell(
+                        f"Er loopt al {minuten} minuten onafgebroken water ({str(round(debiet, 1)).replace('.', ',')} L/min). "
+                        "Mogelijk een lekkage of een kraan die openstaat.",
+                        kritiek=True,
+                    )
+            else:
+                self._water_loopt_sinds = None
+                self._water_gemeld = False
+
+        # 2. Het dagverbruik bijhouden, en gisteren vergelijken met de dagen ervoor.
+        if not tellers:
+            return
+        vandaag = now.date().isoformat()
+        starts = {r.get("meter"): r for r in settings.get("usage_start") or [] if isinstance(r, dict)}
+        dagen = [r for r in settings.get("usage_days") or [] if isinstance(r, dict)]
+        nieuw_start = []
+        nieuwe_dagen = list(dagen)
+        veranderd = False
+        for meter, entity in tellers.items():
+            stand = _number(self.hass, entity)
+            if stand is None:
+                if meter in starts:
+                    nieuw_start.append(starts[meter])
+                continue
+            begin = starts.get(meter)
+            if begin is None or begin.get("date") != vandaag:
+                if begin is not None and begin.get("date"):
+                    try:
+                        verbruik = stand - float(begin.get("value"))
+                    except (TypeError, ValueError):
+                        verbruik = None
+                    if verbruik is not None and 0 <= verbruik < 1000:
+                        nieuwe_dagen = [d for d in nieuwe_dagen if not (d.get("meter") == meter and d.get("date") == begin["date"])]
+                        nieuwe_dagen.append({"meter": meter, "date": begin["date"], "m3": round(verbruik, 3)})
+                nieuw_start.append({"meter": meter, "date": vandaag, "value": stand})
+                veranderd = True
+            else:
+                nieuw_start.append(begin)
+        # Hooguit dertig dagen per meter.
+        per_meter: dict[str, list[dict]] = {}
+        for d in sorted(nieuwe_dagen, key=lambda d: str(d.get("date"))):
+            per_meter.setdefault(str(d.get("meter")), []).append(d)
+        nieuwe_dagen = [d for lijst in per_meter.values() for d in lijst[-30:]]
+        if veranderd:
+            try:
+                saved = await async_get_store(self.hass).async_save(
+                    {"usage_start": nieuw_start, "usage_days": nieuwe_dagen}
+                )
+                settings["usage_start"], settings["usage_days"] = nieuw_start, nieuwe_dagen
+                self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+            except Exception:  # noqa: BLE001 - een gemiste opslag is geen reden om te stoppen
+                _LOGGER.exception("kon het dagverbruik niet bewaren")
+
+        if not alert.get("enabled") or not veranderd:
+            return
+        factor = float(alert.get("factor") or 3)
+        min_dagen = int(alert.get("min_days") or 5)
+        for meter, lijst in per_meter.items():
+            if len(lijst) < min_dagen + 1:
+                continue
+            gisteren = lijst[-1]
+            eerder = sorted(float(d.get("m3") or 0) for d in lijst[:-1])
+            mediaan = eerder[len(eerder) // 2]
+            if mediaan <= 0 or float(gisteren.get("m3") or 0) <= factor * mediaan:
+                continue
+            sleutel = f"{meter}:{gisteren.get('date')}"
+            if sleutel in self._verbruik_gemeld:
+                continue
+            self._verbruik_gemeld.add(sleutel)
+            naam = "gas" if meter == "gas" else "water"
+            await self._async_tell(
+                f"Gisteren ging er {str(round(float(gisteren['m3']), 2)).replace('.', ',')} m³ {naam} doorheen, "
+                f"normaal is dat rond {str(round(mediaan, 2)).replace('.', ',')} m³ per dag. "
+                "Kijk of er iets lekt of aan is blijven staan.",
+                kritiek=True,
+            )
+
     def _zon_slaapt(self) -> bool:
         """Of de zon zo laag staat dat een omvormer mag slapen (`sun.sun`).
 
@@ -1650,6 +1773,7 @@ class ChargerCoach:
         # buiten zichzelf kijkt.
         await self._async_huisverbruik(settings, moment)
         await self._async_sensorwacht(settings, moment)
+        await self._async_verbruikswacht(settings, moment)
         await self._async_zonkromme(settings, moment)
         self._meter_bijhouden(settings, moment)
 
@@ -3598,6 +3722,31 @@ class ChargerCoach:
                 f"Vakantiestand: hij houdt de batterij onder {vakantie:.0f}%. " + besluit.reason
             )
 
+        # "Nu leegladen tot X%": naar het net op het ontlaadvermogen tot de
+        # gekozen accustand, en dan weer het plan. Boven het plan en boven de
+        # avondpiek, net als snelladen; nooit onder de eigen ondergrens van
+        # de batterij, en niet zolang de paal laadt (die gaat voor).
+        leeg_tot = self._drain.get(device_id)
+        if leeg_tot is not None:
+            grens = max(leeg_tot, b.bodem)
+            if b.soc is not None and b.soc <= grens + VOL_MARGE - 1.0:
+                self._drain.pop(device_id, None)
+                self._remember(device_id)
+                await self._async_noteer(f"{naam} is leeggeladen tot {grens:.0f}%; hij volgt het plan weer.", now)
+            elif b.soc is not None and b.max_discharge_w > 0 and not self._paal_laadt(settings):
+                besluit = Besluit(
+                    HANDELEN,
+                    power_w=b.max_discharge_w,
+                    reason=(
+                        f"Je hebt gevraagd hem nu leeg te laden tot {grens:.0f}%, dus hij levert aan het net op "
+                        f"{b.max_discharge_w / 1000:.1f} kW, wat de prijs ook is.".replace(".", ",", 1)
+                    ),
+                    plan=besluit.plan,
+                    rule="leeg-laden",
+                    waarde=besluit.waarde,
+                    uren=besluit.uren,
+                )
+
         # "Nu vol laden": dezelfde knop als snelladen bij de paal, voor wie de
         # batterij nu vol wil hebben, wat het plan ook zegt. De eigenaar op
         # 22-09-2026: "eigenlijk wil je nu dat de batterij handmatig vol wordt
@@ -3687,6 +3836,7 @@ class ChargerCoach:
             "full_before": b.vol_voor.isoformat() if b.vol_voor else None,
             "payback": terug_verdiend,
             "boost": device_id in self._boost,
+            "drain_to": self._drain.get(device_id),
             "holiday": vakantie is not None,
             "hours": [
                 {
@@ -7185,6 +7335,11 @@ class ChargerCoach:
                 self._boost.add(device_id)
             if row.get("paused"):
                 self._paused.add(device_id)
+            if row.get("drain_to") is not None:
+                try:
+                    self._drain[device_id] = float(row["drain_to"])
+                except (TypeError, ValueError):
+                    pass
 
     def _remember(self, device_id: str) -> None:
         """Vastleggen wat er nu voor dit apparaat aan staat.
@@ -7202,6 +7357,7 @@ class ChargerCoach:
             "approved": device_id in self._approved,
             "boost": device_id in self._boost,
             "paused": device_id in self._paused,
+            "drain_to": self._drain.get(device_id),
         }
         try:
             store = async_get_store(self.hass)
@@ -7244,6 +7400,24 @@ class ChargerCoach:
             # telt. Anders zou snelladen aanstaan terwijl er niets gebeurt.
             self._paused.discard(device_id)
         else:
+            self._boost.discard(device_id)
+        self._remember(device_id)
+        self.async_refresh()
+
+    @callback
+    def async_drain(self, device_id: str, to_percent: float | None) -> None:
+        """De thuisbatterij nu leegladen tot een accustand, of daarmee ophouden.
+
+        De bewoner van de eerste woning op 22-09-2026: "naast pauze en laad
+        snel vol ook een knop laad snel leeg, met een minimale accustand: nu
+        maximaal ontladen tot 50%, daarna terug naar normale modus." Naar het
+        net, op het ontlaadvermogen van de batterij; gaat vanzelf uit op de
+        gekozen stand, en nooit onder de eigen ondergrens van de batterij.
+        """
+        if to_percent is None:
+            self._drain.pop(device_id, None)
+        else:
+            self._drain[device_id] = float(to_percent)
             self._boost.discard(device_id)
         self._remember(device_id)
         self.async_refresh()

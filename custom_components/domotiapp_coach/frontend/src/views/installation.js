@@ -154,10 +154,17 @@ class DacViewInstallation extends DacEditorElement {
               </span>
             </label>
 
-            <div class="row">
-              <label for="gas-price">Gasprijs (€ per m³)</label>
-              <input type="number" id="gas-price" min="0" step="0.001" inputmode="decimal">
-              <span class="sub">All-in, voor de historie en het rapport. Leeg laten als je geen gas hebt.</span>
+            <div class="two">
+              <div class="row">
+                <label for="gas-price">Gasprijs (€ per m³)</label>
+                <input type="number" id="gas-price" min="0" step="0.001" inputmode="decimal">
+                <span class="sub">All-in, voor de historie en het rapport. Leeg laten als je geen gas hebt.</span>
+              </div>
+              <div class="row">
+                <label for="water-price">Waterprijs (€ per m³)</label>
+                <input type="number" id="water-price" min="0" step="0.001" inputmode="decimal">
+                <span class="sub">All-in, inclusief belasting. Leeg laten zonder watermeter.</span>
+              </div>
             </div>
 
             <!-- vast -->
@@ -328,6 +335,7 @@ class DacViewInstallation extends DacEditorElement {
     });
 
     bind("gas-price", (v) => (this.draft_.contract.gas_price = Number(v) || 0));
+    bind("water-price", (v) => (this.draft_.contract.water_price = Number(v) || 0));
     bind("fx-price", (v) => (this.draft_.contract.fixed.all_in_price = Number(v)));
     bind("fx-feedin", (v) => (this.draft_.contract.fixed.feed_in_tariff = Number(v)));
     bind("fx-feedcost", (v) => (this.draft_.contract.fixed.feed_in_costs = Number(v)));
@@ -345,7 +353,7 @@ class DacViewInstallation extends DacEditorElement {
     });
 
     this.$("#period-add").addEventListener("click", () => {
-      this.periods_().push({ from: "", to: "", all_in_price: 0, feed_in_tariff: 0, gas_price: 0 });
+      this.periods_().push({ from: "", to: "", all_in_price: 0, feed_in_tariff: 0, gas_price: 0, water_price: 0 });
       this.paintPeriods_();
       this.afterChange_();
     });
@@ -477,6 +485,7 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#netting").checked = Boolean(this.draft_.contract.netting);
 
     this.$("#gas-price").value = contract.gas_price || "";
+    this.$("#water-price").value = contract.water_price || "";
     this.$("#fx-price").value = contract.fixed.all_in_price;
     this.$("#fx-feedin").value = contract.fixed.feed_in_tariff;
     this.$("#fx-feedcost").value = contract.fixed.feed_in_costs;
@@ -526,7 +535,10 @@ class DacViewInstallation extends DacEditorElement {
           <div class="row"><label>Stroom, all-in (€ per kWh)</label>${veld(i, "all_in_price", "number", 'min="0" step="0.001" inputmode="decimal"', p.all_in_price || "")}</div>
           <div class="row"><label>Terugleververgoeding (€ per kWh)</label>${veld(i, "feed_in_tariff", "number", 'min="0" step="0.001" inputmode="decimal"', p.feed_in_tariff || "")}</div>
         </div>
-        <div class="row"><label>Gas (€ per m³)</label>${veld(i, "gas_price", "number", 'min="0" step="0.001" inputmode="decimal"', p.gas_price || "")}</div>
+        <div class="two">
+          <div class="row"><label>Gas (€ per m³)</label>${veld(i, "gas_price", "number", 'min="0" step="0.001" inputmode="decimal"', p.gas_price || "")}</div>
+          <div class="row"><label>Water (€ per m³)</label>${veld(i, "water_price", "number", 'min="0" step="0.001" inputmode="decimal"', p.water_price || "")}</div>
+        </div>
         <div class="circuit-actions">
           <button type="button" class="remove" data-period-remove="${i}">Contract weghalen</button>
         </div>

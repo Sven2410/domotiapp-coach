@@ -132,6 +132,7 @@ _PERIOD = _schema(
         vol.Optional("all_in_price", default=0.0): vol.All(vol.Coerce(float), vol.Range(-10, 10)),
         vol.Optional("feed_in_tariff", default=0.0): vol.All(vol.Coerce(float), vol.Range(-10, 10)),
         vol.Optional("gas_price", default=0.0): vol.All(vol.Coerce(float), vol.Range(0, 100)),
+        vol.Optional("water_price", default=0.0): vol.All(vol.Coerce(float), vol.Range(0, 100)),
     }
 )
 
@@ -304,6 +305,14 @@ _PERSON = _schema(
 _NOTIFICATIONS = _schema(
     {
         vol.Optional("people"): vol.All([_PERSON], vol.Length(max=20)),
+        vol.Optional("usage_alert"): _schema(
+            {
+                vol.Optional("enabled"): bool,
+                vol.Optional("water_flow_minutes"): vol.All(vol.Coerce(int), vol.Range(5, 1440)),
+                vol.Optional("factor"): vol.All(vol.Coerce(float), vol.Range(1.5, 20)),
+                vol.Optional("min_days"): vol.All(vol.Coerce(int), vol.Range(2, 30)),
+            }
+        ),
         vol.Optional("load_alert"): _schema(
             {
                 vol.Optional("enabled"): bool,
@@ -357,6 +366,9 @@ _SETTINGS = _schema(
                         vol.Optional("export_high"): _ENTITY,
                         vol.Optional("gas_enabled"): bool,
                         vol.Optional("gas"): _ENTITY,
+                        vol.Optional("water_enabled"): bool,
+                        vol.Optional("water"): _ENTITY,
+                        vol.Optional("water_flow"): _ENTITY,
                     }
                 ),
             }
@@ -379,6 +391,7 @@ _SETTINGS = _schema(
                 vol.Optional("type"): vol.In([CONTRACT_FIXED, CONTRACT_DYNAMIC]),
                 vol.Optional("netting"): bool,
                 vol.Optional("gas_price"): _EURO,
+                vol.Optional("water_price"): _EURO,
                 vol.Optional("periods"): vol.All([_PERIOD], vol.Length(max=24)),
                 vol.Optional("fixed"): _schema(
                     {
@@ -1057,6 +1070,26 @@ def async_coach_boost(
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): "domotiapp_coach/coach/drain",
+        vol.Required("device_id"): str,
+        vol.Required("to_percent"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(0, 100))),
+    }
+)
+@callback
+def async_coach_drain(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De thuisbatterij nu leegladen tot een accustand, of daarmee ophouden (None)."""
+    from .coach import async_get_coach
+
+    async_get_coach(hass).async_drain(msg["device_id"], msg["to_percent"])
+    connection.send_result(msg["id"], {"to_percent": msg["to_percent"]})
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): "domotiapp_coach/coach/wake",
         vol.Required("device_id"): str,
     }
@@ -1125,4 +1158,5 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_coach_approve)
     websocket_api.async_register_command(hass, async_coach_boost)
     websocket_api.async_register_command(hass, async_coach_wake)
+    websocket_api.async_register_command(hass, async_coach_drain)
     websocket_api.async_register_command(hass, async_coach_pause)

@@ -608,6 +608,57 @@ stuurt** (v0.80.0, allemaal 22-09-2026).
   teruglevering na 2027, want of die er voor een particulier bij komt staat
   niet vast, en de coach rekent niet met wat niet vaststaat.
 
+**Water, de lekmelding, nu leegladen, en de accu die geen kans is** (v0.81.0,
+de laatste punten van de eerste woning op 22-09-2026).
+
+- **Water** naast gas: `sources.meters.water_enabled`, `water` (de teller in
+  m³, bij de eerste woning de HomeWizard Watermeter) en `water_flow` (L/min,
+  optioneel, voor de lekmelding); `contract.water_price` en `water_price` in
+  de eerdere contracten (`contractAt` geeft `water`); bij Instellingen onder
+  Meterstanden, bij Installatie onder Contract. In Historie een eigen kaart
+  (`paintVolume_`, dezelfde tekening als gas), de tegel "Water gekocht voor",
+  en in het rapport de kolom en de tegels. "Water toevoegen, incl prijs, dan
+  is je nutsrapport compleet."
+- **Lekkage of abnormaal verbruik** (`notifications.usage_alert`,
+  `_async_verbruikswacht` in coach.py, het blok bij Meldingen). Twee tekenen:
+  water dat langer dan `water_flow_minutes` (twee uur) onafgebroken loopt
+  volgens de debietsensor, één melding per keer; en een dag die meer dan
+  `factor` (drie) keer de mediaan van de dagen ervoor vroeg, na `min_days`
+  gemeten dagen, één melding per dag. Het dagverbruik komt uit de tellers
+  zelf: de coach bewaart per meter de stand waarmee de dag begon
+  (`usage_start`) en schrijft bij de eerste ronde van een nieuwe dag het
+  verschil weg (`usage_days`, hooguit dertig dagen per meter). Lijsten, want
+  `_prune` laat lijsten met rust. Proef 89 in test_coach.py.
+- **Nu leegladen tot X%** (`coach/drain`, `async_drain`, `_drain`, regel
+  `leeg-laden`): naast "Nu vol laden" een knop met een veld voor de accustand;
+  de batterij levert dan aan het net op zijn ontlaadvermogen tot die stand,
+  nooit onder zijn eigen ondergrens, niet zolang de paal laadt, en daarna
+  weer het plan. "Nu maximaal ontladen tot 50%, daarna terug naar normale
+  modus." Onthouden over een herstart (`drain_to` in `sessions`). Proef 88.
+- **Wat de accu afgeeft is nooit een kans**, wie hem ook stuurt: `advise`
+  trekt de gemeten afgifte van elke thuisbatterij (`r.devices`) van de
+  teruglevering af. Om 23:01 zei de kaart "gebruik je overschot, 1,73 kW"
+  terwijl de accu die 1,73 kW afgaf. En het label van de zwaarst belaste fase
+  krijgt geen dubbele haakjes meer bij een groep.
+- **Historie opent op vandaag** (`period_` in history.js). De eigenaar om
+  23:12: "niet logisch, want vaak wil je even kijken wat er vandaag is
+  gedaan; dag is het eerste bolletje van de rij, terwijl standaard de tweede
+  geselecteerd wordt." Een rij die op de tweede knop opent leest als een
+  fout. Proef in test_rapport.mjs leest het uit de bron van de constructor.
+
+**Gemeten in de eerste woning op 22-09-2026 's avonds, vier sturingen naast
+elkaar** (uit de toestanden-logger): de coach in een rustig huis 4
+opdrachten per uur en 93% van de P1-metingen binnen 50 W, zo goed als
+Omnibattery; bij een last die elke 10 tot 60 s aan en uit gaat 144
+opdrachten per uur, 15% binnen 50 W en 0,69 kWh van het net in drie kwartier,
+terwijl de Anker in eigen verbruik dezelfde last met 89% binnen 50 W en 0,13
+kWh in anderhalf uur opving. Een lus via Home Assistant (meter per 5 s,
+batterij na 5 s, bevestiging tot 15 s) verliest van de lus in de batterij
+zelf. Voorstel aan de eigenaar, nog niet gebouwd: laat een batterij met een
+eigen meter nul op de meter zelf doen (eigen verbruik) en laat de coach alleen
+de uitzonderingen schakelen. evcc verkocht die avond 6,2 kWh van 81% naar 19%
+zonder aan de nacht te denken.
+
 ## Het merk van de auto, en een Tesla die slaapt
 
 Sinds 22-09-2026 (v0.76.0) heeft een autoprofiel een merk: Ford of Tesla
@@ -1313,10 +1364,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 387 controles op het denkwerk
 python tests/test_batterij.py    # 82 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 523 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 535 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1622 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 74 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 76 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

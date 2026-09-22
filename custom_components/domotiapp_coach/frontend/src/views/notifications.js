@@ -444,6 +444,31 @@ class DacViewNotifications extends DacElement {
           <div class="status" id="belasting-status"></div>
         </section>
 
+        <section class="blok" id="verbruik" hidden>
+          <h2>${icons.warning} Lekkage of abnormaal verbruik</h2>
+          <p class="hint">Een bericht als er te lang onafgebroken water loopt, of als een dag veel meer gas of water vraagt dan gewoon. Water vraagt een watermeter onder Instellingen; voor het lopende water ook de sensor van het verbruik nu.</p>
+          <div class="aanzet">
+            <div>
+              <strong>Melding aanzetten</strong>
+              <span>De coach houdt het dagverbruik van gas en water sowieso bij; met dit aan zegt hij het als een dag uit de toon valt.</span>
+            </div>
+            <button type="button" class="schuif" role="switch" aria-checked="false" id="verbruik-aan" aria-label="Lekkage of abnormaal verbruik aan"><span class="knob"></span></button>
+          </div>
+          <div class="velden" id="verbruik-velden" hidden>
+            <div class="veld">
+              <label for="verbruik-water">Water dat blijft lopen, langer dan</label>
+              <select id="verbruik-water">${[30, 60, 120, 240, 480].map((m) => `<option value="${m}">${m < 60 ? `${m} minuten` : `${m / 60} uur`}</option>`).join("")}</select>
+              <span class="uitleg">Een bad of een wasmachine loopt een half uur; een kraan die openstaat of een lekkende leiding loopt de hele nacht.</span>
+            </div>
+            <div class="veld">
+              <label for="verbruik-factor">Een dag valt uit de toon vanaf</label>
+              <select id="verbruik-factor">${[2, 3, 4, 5].map((f) => `<option value="${f}">${f} keer het gewone dagverbruik</option>`).join("")}</select>
+              <span class="uitleg">Gewoon is de middelste dag van de laatste dertig. Een wasdag of een koude dag komt daar niet zomaar overheen; een lekkage wel.</span>
+            </div>
+          </div>
+          <div class="status" id="verbruik-status"></div>
+        </section>
+
         <section class="blok">
           <h2>${icons.bell} Geschiedenis</h2>
           <p class="hint">Alles wat de coach deed en meldde, de nieuwste bovenaan. Wat ook naar een telefoon ging staat in een kader; kritiek is wat je zelf moet oplossen.</p>
@@ -482,6 +507,14 @@ class DacViewNotifications extends DacElement {
       this.bewaarBelasting_({ min_duration_seconds: Number(e.target.value) }));
     this.$("#belasting-tussen")?.addEventListener("change", (e) =>
       this.bewaarBelasting_({ min_interval_minutes: Number(e.target.value) }));
+    this.$("#verbruik-aan")?.addEventListener("click", () => {
+      const aan = this.$("#verbruik-aan").getAttribute("aria-checked") !== "true";
+      this.bewaarVerbruik_({ enabled: aan });
+    });
+    this.$("#verbruik-water")?.addEventListener("change", (e) =>
+      this.bewaarVerbruik_({ water_flow_minutes: Number(e.target.value) }));
+    this.$("#verbruik-factor")?.addEventListener("change", (e) =>
+      this.bewaarVerbruik_({ factor: Number(e.target.value) }));
     this.paintAlles_();
   }
 
@@ -500,6 +533,7 @@ class DacViewNotifications extends DacElement {
   paintAlles_() {
     this.paintPersonen_();
     this.paintBelasting_();
+    this.paintVerbruik_();
     this.paint_();
   }
 
@@ -778,6 +812,38 @@ class DacViewNotifications extends DacElement {
     return this.meldingen_().load_alert ?? {};
   }
 
+  verbruik_() {
+    return this.meldingen_().usage_alert ?? {};
+  }
+
+  paintVerbruik_() {
+    const blok = this.$("#verbruik");
+    if (!blok) return;
+    blok.hidden = !this.isAdmin_() || !this.settings_;
+    if (blok.hidden) return;
+    const alert = this.verbruik_();
+    this.$("#verbruik-aan").setAttribute("aria-checked", String(Boolean(alert.enabled)));
+    this.$("#verbruik-velden").hidden = !alert.enabled;
+    this.$("#verbruik-water").value = String(alert.water_flow_minutes ?? 120);
+    this.$("#verbruik-factor").value = String(alert.factor ?? 3);
+  }
+
+  async bewaarVerbruik_(wijziging) {
+    if (!this.hass_?.callWS) return;
+    try {
+      const settings = await this.hass_.callWS({
+        type: "domotiapp_coach/notifications/set",
+        notifications: { usage_alert: { ...this.verbruik_(), ...wijziging } },
+      });
+      this.settings_ = settings;
+      this.status_("#verbruik-status", "Opgeslagen", false);
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de verbruiksmelding niet opslaan", error);
+      this.status_("#verbruik-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
+    }
+    this.paintVerbruik_();
+  }
+
   paintBelasting_() {
     const blok = this.$("#belasting");
     if (!blok) return;
@@ -815,6 +881,7 @@ class DacViewNotifications extends DacElement {
       this.status_("#belasting-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
     }
     this.paintBelasting_();
+    this.paintVerbruik_();
   }
 
   // ------------------------------------------------------------------
