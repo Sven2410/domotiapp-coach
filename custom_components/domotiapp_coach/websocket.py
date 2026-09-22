@@ -121,6 +121,20 @@ _PROGRAM = _schema(
 
 _LEEG_OF = lambda soort, *grens: vol.Any(None, "", vol.All(vol.Coerce(soort), vol.Range(*grens)))  # noqa: E731
 
+# Een datum als "2026-01-01", of leeg.
+_DATUM = vol.Any("", vol.Match(r"^\d{4}-\d{2}-\d{2}$"))
+
+# Een eerder contract; zie `contract.periods` in const.py.
+_PERIOD = _schema(
+    {
+        vol.Optional("from", default=""): _DATUM,
+        vol.Optional("to", default=""): _DATUM,
+        vol.Optional("all_in_price", default=0.0): vol.All(vol.Coerce(float), vol.Range(-10, 10)),
+        vol.Optional("feed_in_tariff", default=0.0): vol.All(vol.Coerce(float), vol.Range(-10, 10)),
+        vol.Optional("gas_price", default=0.0): vol.All(vol.Coerce(float), vol.Range(0, 100)),
+    }
+)
+
 # Een groep onder de aansluiting met een eigen zekering; zie `installation.circuits`
 # in const.py en `Circuit` in planner.py.
 _CIRCUIT = _schema(
@@ -303,6 +317,7 @@ _SETTINGS = _schema(
         vol.Optional("sources"): _schema(
             {
                 vol.Optional("solar"): _ENTITY,
+                vol.Optional("solar_extra"): vol.All([_ENTITY], vol.Length(max=8)),
                 vol.Optional("grid_mode"): vol.In([GRID_MODE_SPLIT, GRID_MODE_SIGNED]),
                 vol.Optional("grid_import"): _ENTITY,
                 vol.Optional("grid_export"): _ENTITY,
@@ -325,6 +340,7 @@ _SETTINGS = _schema(
                 vol.Optional("meters"): _schema(
                     {
                         vol.Optional("solar_total"): _ENTITY,
+                vol.Optional("solar_total_extra"): vol.All([_ENTITY], vol.Length(max=8)),
                         vol.Optional("import_low"): _ENTITY,
                         vol.Optional("import_high"): _ENTITY,
                         vol.Optional("export_low"): _ENTITY,
@@ -352,6 +368,8 @@ _SETTINGS = _schema(
             {
                 vol.Optional("type"): vol.In([CONTRACT_FIXED, CONTRACT_DYNAMIC]),
                 vol.Optional("netting"): bool,
+                vol.Optional("gas_price"): _EURO,
+                vol.Optional("periods"): vol.All([_PERIOD], vol.Length(max=24)),
                 vol.Optional("fixed"): _schema(
                     {
                         vol.Optional("all_in_price"): _EURO,

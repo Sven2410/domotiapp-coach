@@ -54,6 +54,22 @@ function readSolar(feed, entityId) {
   return feed.get("sun.sun")?.state === "below_horizon" ? 0 : null;
 }
 
+/** Alle omvormers samen: de eerste plus `solar_extra`. */
+export function solarEntities(sources) {
+  return [sources?.solar, ...(Array.isArray(sources?.solar_extra) ? sources.solar_extra : [])].filter(Boolean);
+}
+
+/**
+ * Wat alle omvormers samen geven. Zwijgt er een terwijl een ander wel iets
+ * zegt, dan telt wat er is: op het scherm is een dak dat half meet beter dan
+ * een streepje. (De coach zelf is strenger; zie `_zon_w` in coach.py.)
+ */
+function readSolarAll(feed, sources) {
+  const waarden = solarEntities(sources).map((id) => readSolar(feed, id));
+  if (!waarden.length || waarden.every((w) => w === null)) return waarden.length ? null : readSolar(feed, sources?.solar);
+  return waarden.reduce((som, w) => som + (w ?? 0), 0);
+}
+
 /**
  * Read a price entity as euro per kWh.
  *
@@ -270,6 +286,42 @@ export function solarForecast(feed, sources) {
   };
   out.has = out.remainingToday !== null || out.tomorrow !== null;
   return out;
+}
+
+/**
+ * Het contract dat op een dag gold: een eerder contract uit `contract.periods`
+ * als de dag erin valt, anders het huidige.
+ *
+ * De bewoner van de eerste woning op 22-09-2026: van-tot met een prijs, per
+ * contract, voor stroom en voor gas, "dan kun je een goede weergave bieden van
+ * kosten, ook bij wijzigen van aanbieder." Een prijs van nul in een periode
+ * betekent "niet ingevuld" en valt terug op het huidige contract. Een dynamisch
+ * contract heeft geen vaste inkoopprijs: `buy` is dan null en de historie pakt
+ * de prijs uit de geschiedenis van de prijsentiteit.
+ *
+ * @returns {{buy: number|null, feedIn: number|null, gas: number|null, period: object|null}}
+ */
+export function contractAt(contract, when) {
+  const dag = when instanceof Date ? when : new Date(when);
+  const key = Number.isNaN(dag.getTime()) ? null : dag.toISOString().slice(0, 10);
+  const lokaal = key === null ? null
+    : `${dag.getFullYear()}-${String(dag.getMonth() + 1).padStart(2, "0")}-${String(dag.getDate()).padStart(2, "0")}`;
+  const periods = Array.isArray(contract?.periods) ? contract.periods : [];
+  const period = lokaal === null ? null
+    : periods.find((p) => p && (!p.from || p.from <= lokaal) && (!p.to || lokaal <= p.to)) ?? null;
+  const fixed = contract?.type !== "dynamic";
+  const huidig = Number(contract?.fixed?.all_in_price);
+  const huidigTerug = fixed
+    ? (Number(contract?.fixed?.feed_in_tariff) || 0) - (Number(contract?.fixed?.feed_in_costs) || 0)
+    : null;
+  const huidigGas = Number(contract?.gas_price) > 0 ? Number(contract.gas_price) : null;
+  const getal = (v) => (Number(v) > 0 ? Number(v) : null);
+  return {
+    buy: getal(period?.all_in_price) ?? (fixed && Number.isFinite(huidig) ? huidig : null),
+    feedIn: getal(period?.feed_in_tariff) ?? huidigTerug,
+    gas: getal(period?.gas_price) ?? huidigGas,
+    period,
+  };
 }
 
 /**
@@ -653,7 +705,7 @@ export class LiveSource {
   sample(feed, settings) {
     const sources = settings?.sources ?? {};
 
-    const solar = readSolar(feed, sources.solar);
+    const solar = readSolarAll(feed, sources);
 
     let importW = null;
     let exportW = null;
@@ -746,6 +798,6 @@ export class LiveSource {
     const s = settings?.sources ?? {};
     const grid =
       s.grid_mode === "signed" ? s.grid_signed : s.grid_import || s.grid_export;
-    return Boolean(s.solar || grid);
+    return Boolean(solarEntities(s).length || grid);
   }
 }

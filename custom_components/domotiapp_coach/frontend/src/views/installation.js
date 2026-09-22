@@ -154,6 +154,12 @@ class DacViewInstallation extends DacEditorElement {
               </span>
             </label>
 
+            <div class="row">
+              <label for="gas-price">Gasprijs (€ per m³)</label>
+              <input type="number" id="gas-price" min="0" step="0.001" inputmode="decimal">
+              <span class="sub">All-in, voor de historie en het rapport. Leeg laten als je geen gas hebt.</span>
+            </div>
+
             <!-- vast -->
             <div id="fixed-fields" class="fields">
               <div class="two">
@@ -272,6 +278,19 @@ class DacViewInstallation extends DacEditorElement {
                 <span class="sub">Wat je leverancier rekent over wat je teruglevert.</span>
               </div>
             </div>
+
+            <div class="row">
+              <label>Eerdere contracten</label>
+              <span class="sub">
+                Ben je van leverancier of van contract gewisseld? Zet hier per contract van wanneer
+                tot wanneer het gold en wat het kostte. Historie en rapport rekenen dan elke dag
+                met de prijs van toen. Wat de coach nu doet rekent altijd met het contract hierboven.
+              </span>
+            </div>
+            <div id="periods"></div>
+            <div class="circuit-actions">
+              <button type="button" id="period-add">Eerder contract toevoegen</button>
+            </div>
           </div>
         </section>
       </div>
@@ -301,6 +320,7 @@ class DacViewInstallation extends DacEditorElement {
       this.$("#max-auto").checked = false;
     });
 
+    bind("gas-price", (v) => (this.draft_.contract.gas_price = Number(v) || 0));
     bind("fx-price", (v) => (this.draft_.contract.fixed.all_in_price = Number(v)));
     bind("fx-feedin", (v) => (this.draft_.contract.fixed.feed_in_tariff = Number(v)));
     bind("fx-feedcost", (v) => (this.draft_.contract.fixed.feed_in_costs = Number(v)));
@@ -313,6 +333,12 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#max-auto").addEventListener("change", (ev) => {
       this.draft_.installation.max_grid_auto = ev.target.checked;
       this.recalculate_();
+      this.afterChange_();
+    });
+
+    this.$("#period-add").addEventListener("click", () => {
+      this.periods_().push({ from: "", to: "", all_in_price: 0, feed_in_tariff: 0, gas_price: 0 });
+      this.paintPeriods_();
       this.afterChange_();
     });
 
@@ -442,6 +468,7 @@ class DacViewInstallation extends DacEditorElement {
     this.paintBalancer_();
     this.$("#netting").checked = Boolean(this.draft_.contract.netting);
 
+    this.$("#gas-price").value = contract.gas_price || "";
     this.$("#fx-price").value = contract.fixed.all_in_price;
     this.$("#fx-feedin").value = contract.fixed.feed_in_tariff;
     this.$("#fx-feedcost").value = contract.fixed.feed_in_costs;
@@ -457,9 +484,61 @@ class DacViewInstallation extends DacEditorElement {
 
     this.paintPhases_();
     this.paintCircuits_();
+    this.paintPeriods_();
     this.paintContract_();
     this.paintHints_();
     this.syncSaveBar_();
+  }
+
+  /** De eerdere contracten in het klad, altijd als lijst. */
+  periods_() {
+    const contract = this.draft_.contract;
+    if (!Array.isArray(contract.periods)) contract.periods = [];
+    return contract.periods;
+  }
+
+  /** Eén eerder contract per rij: van, tot, stroom, teruglevering, gas. */
+  paintPeriods_() {
+    const host = this.$("#periods");
+    if (!host) return;
+    const lijst = this.periods_();
+    const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    const veld = (i, key, type, extra, waarde) =>
+      `<input type="${type}" data-period-field="${key}" data-index="${i}" ${extra} value="${esc(waarde)}">`;
+    host.innerHTML = lijst
+      .map(
+        (p, i) => `
+      <div class="circuit period" data-period="${i}">
+        <div class="two">
+          <div class="row"><label>Van</label>${veld(i, "from", "date", "", p.from)}</div>
+          <div class="row"><label>Tot</label>${veld(i, "to", "date", "", p.to)}</div>
+        </div>
+        <div class="two">
+          <div class="row"><label>Stroom, all-in (€ per kWh)</label>${veld(i, "all_in_price", "number", 'min="0" step="0.001" inputmode="decimal"', p.all_in_price || "")}</div>
+          <div class="row"><label>Terugleververgoeding (€ per kWh)</label>${veld(i, "feed_in_tariff", "number", 'min="0" step="0.001" inputmode="decimal"', p.feed_in_tariff || "")}</div>
+        </div>
+        <div class="row"><label>Gas (€ per m³)</label>${veld(i, "gas_price", "number", 'min="0" step="0.001" inputmode="decimal"', p.gas_price || "")}</div>
+        <div class="circuit-actions">
+          <button type="button" class="remove" data-period-remove="${i}">Contract weghalen</button>
+        </div>
+      </div>`
+      )
+      .join("");
+    for (const el of host.querySelectorAll("[data-period-field]")) {
+      const p = lijst[Number(el.dataset.index)];
+      const key = el.dataset.periodField;
+      el.addEventListener("input", () => {
+        p[key] = el.type === "number" ? Number(el.value) || 0 : el.value;
+        this.afterChange_();
+      });
+    }
+    for (const knop of host.querySelectorAll("[data-period-remove]")) {
+      knop.addEventListener("click", () => {
+        lijst.splice(Number(knop.dataset.periodRemove), 1);
+        this.paintPeriods_();
+        this.afterChange_();
+      });
+    }
   }
 
   /** De groepen in het klad, altijd als lijst. */

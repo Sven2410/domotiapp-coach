@@ -55,6 +55,11 @@ class DacViewSettings extends DacEditorElement {
               <label>Opwek zonnepanelen</label>
               <dac-entity-picker id="src-solar" data-key="solar"></dac-entity-picker>
             </div>
+            <div id="solar-extra"></div>
+            <div class="row">
+              <button type="button" class="add" id="solar-extra-add">Nog een omvormer</button>
+              <span class="sub">Heb je meer omvormers, zet ze hier erbij; de coach telt ze op.</span>
+            </div>
             <div class="row">
               <label>Hoe meet je slimme meter?</label>
               <div class="segmented" id="grid-mode">
@@ -189,6 +194,11 @@ class DacViewSettings extends DacEditorElement {
               <dac-entity-picker data-meter="solar_total"></dac-entity-picker>
               <span class="sub">De teller van je omvormer in kWh, niet het vermogen. Zonder deze kan het paneel niet terugkijken op wat je hebt opgewekt.</span>
             </div>
+            <div id="solar-total-extra"></div>
+            <div class="row">
+              <button type="button" class="add" id="solar-total-extra-add">Nog een opwekteller</button>
+              <span class="sub">De teller van elke andere omvormer; het paneel telt ze op.</span>
+            </div>
             <div class="two">
               <div class="row">
                 <label>Geleverd, laag tarief</label>
@@ -311,6 +321,17 @@ class DacViewSettings extends DacEditorElement {
       });
     }
 
+    this.$("#solar-extra-add").addEventListener("click", () => {
+      (this.draft_.sources.solar_extra ??= []).push("");
+      this.paintExtra_();
+      this.syncSaveBar_();
+    });
+    this.$("#solar-total-extra-add").addEventListener("click", () => {
+      ((this.draft_.sources.meters ??= {}).solar_total_extra ??= []).push("");
+      this.paintExtra_();
+      this.syncSaveBar_();
+    });
+
     for (const picker of this.$$("dac-entity-picker[data-meter]")) {
       picker.filter = "all";
       picker.placeholder =
@@ -355,6 +376,52 @@ class DacViewSettings extends DacEditorElement {
     this.paint_();
   }
 
+  /**
+   * De extra omvormers en hun tellers: een kiezer per stuk, met een kruisje.
+   *
+   * Meer omvormers: de bewoner van de eerste woning op 22-09-2026, "steeds
+   * meer consumenten hebben meerdere omvormers." Een lijst en niet een tweede
+   * en derde vast veld, want drie is niet het einde.
+   */
+  paintExtra_() {
+    const d = this.draft_;
+    if (!d) return;
+    const teken = (host, lijst, kind, placeholder) => {
+      host.innerHTML = lijst
+        .map(
+          (_, i) => `
+          <div class="row extra-row">
+            <label>${kind === "solar" ? `Omvormer ${i + 2}` : `Opwekteller ${i + 2}`}</label>
+            <div class="extra-line">
+              <dac-entity-picker data-extra="${kind}" data-index="${i}"></dac-entity-picker>
+              <button type="button" class="remove" data-extra-remove="${kind}:${i}" aria-label="Weghalen">${icons.trash}</button>
+            </div>
+          </div>`
+        )
+        .join("");
+      for (const picker of host.querySelectorAll("dac-entity-picker[data-extra]")) {
+        const i = Number(picker.dataset.index);
+        picker.filter = kind === "solar" ? "power" : "all";
+        picker.placeholder = placeholder;
+        picker.stateFeed = this.feed_;
+        picker.value = lijst[i] ?? "";
+        picker.addEventListener("dac-entity-change", (ev) => {
+          lijst[i] = ev.detail.value;
+          this.syncSaveBar_();
+        });
+      }
+      for (const knop of host.querySelectorAll("[data-extra-remove]")) {
+        knop.addEventListener("click", () => {
+          lijst.splice(Number(knop.dataset.extraRemove.split(":")[1]), 1);
+          this.paintExtra_();
+          this.syncSaveBar_();
+        });
+      }
+    };
+    teken(this.$("#solar-extra"), (d.sources.solar_extra ??= []), "solar", "Zoek een vermogenssensor…");
+    teken(this.$("#solar-total-extra"), ((d.sources.meters ??= {}).solar_total_extra ??= []), "meter", "Zoek een meterstand…");
+  }
+
   paint_() {
     if (!this.draft_ || !this.rendered_) return;
     const d = this.draft_;
@@ -393,6 +460,7 @@ class DacViewSettings extends DacEditorElement {
       picker.value = d.sources.meters?.[picker.dataset.meter] ?? "";
     }
     this.$("#gas-enabled").checked = Boolean(d.sources.meters?.gas_enabled);
+    this.paintExtra_();
     this.onFeed_();
 
     this.paintGridMode_();
@@ -459,6 +527,17 @@ DacViewSettings.css = /* css */ `
     letter-spacing: 0.12em;
     color: var(--dac-accent-hi);
   }
+
+  /* ---- extra omvormers ---- */
+  .extra-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .extra-line .remove, button.add {
+    font: inherit; font-size: 13px; padding: 8px 12px;
+    border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border);
+    background: rgba(255,255,255,0.04); color: var(--dac-ink); cursor: pointer;
+  }
+  .extra-line .remove { padding: 6px 8px; display: inline-flex; }
+  .extra-line .remove svg { width: 16px; height: 16px; }
+  button.add { justify-self: start; }
 `;
 
 define("dac-view-settings", DacViewSettings);

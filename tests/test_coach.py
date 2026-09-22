@@ -4588,6 +4588,29 @@ asyncio.run(ronde75(hass82c, coach82c, T82 + dt.timedelta(minutes=2)))
 controle("handmatig: bij het inpluggen wekt hij de auto één keer, en daarna niet meer",
          erin == 1 and len(gedrukt(hass82c)) == 0, f"{erin} en {len(gedrukt(hass82c))}")
 
+print("=== 83. meer omvormers: opgeteld, elk met een naam, en samen geen halve meting (22-09-2026) ===")
+# De bewoner van de eerste woning: "steeds meer consumenten hebben meerdere
+# omvormers." De tweede en derde staan in `sources.solar_extra` en tellen
+# overal mee waar de eerste telt.
+inst83 = instellingen()
+inst83["sources"] = dict(inst83["sources"], solar="sensor.zon1", solar_extra=["sensor.zon2", ""])
+hass83, _, coach83 = bouw({
+    **huis(),
+    "sensor.zon1": {"state": "1500", "attributes": {"unit_of_measurement": "W"}},
+    "sensor.zon2": {"state": "0.7", "attributes": {"unit_of_measurement": "kW"}},
+}, inst83)
+controle("de lijst van omvormers, zonder lege velden",
+         coachmod.zonsensoren(inst83) == ["sensor.zon1", "sensor.zon2"], f"{coachmod.zonsensoren(inst83)}")
+controle("samen 2200 W, ook als de tweede in kW meet", coach83._zon_w(inst83) == 2200.0, f"{coach83._zon_w(inst83)}")
+hass83.states.zet("sensor.zon2", "unavailable")
+controle("zwijgt er een, dan is de som onbekend en niet kleiner", coach83._zon_w(inst83) is None, f"{coach83._zon_w(inst83)}")
+namen83 = coach83._sensoren(inst83)
+controle("elke omvormer met een eigen naam in de sensorwacht",
+         namen83.get("sensor.zon1") == "de zonnesensor" and namen83.get("sensor.zon2") == "de zonnesensor van omvormer 2",
+         f"{namen83}")
+controle("zonder extra's is er alleen de eerste",
+         coachmod.zonsensoren(instellingen()) == [] and coachmod.zonsensoren({"sources": {"solar": "sensor.zon"}}) == ["sensor.zon"], "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

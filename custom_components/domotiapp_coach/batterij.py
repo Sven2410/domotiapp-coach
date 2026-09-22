@@ -449,19 +449,28 @@ def _rustig_vermogen(
     return min(grens, energie / tijd * 1000.0), tot
 
 
-def _vooruitkijk_zin(now: datetime, forecast: Forecast, b: Batterij) -> str:
-    """Eén zin over zon, huis en batterij voor de rest van vandaag.
+# Tot hoe laat "de nacht overbruggen" loopt: morgenvroeg. De bewoner van de
+# eerste woning op 22-09-2026: "de meeste consumenten hebben een accu om de
+# nacht te overbruggen. 'Tot middernacht' klinkt logisch, maar bij doel
+# overbruggen van de nacht zou het logischer zijn om te zeggen 'tot
+# morgenvroeg'." Zeven uur: dan geeft een dak in de zomer al iets en in de
+# winter nog niets, en dat verschil zit in de zonverwachting zelf.
+OCHTEND_UUR = 7
 
-    De bewoner van de eerste woning liet op 21-09-2026 zien wat hij van zijn
-    oude sturing het meest miste als het weg zou zijn: een regel die zegt
-    waaróm er wel of niet bijgeladen wordt. "Wat is mijn verwacht verbruik
-    vandaag? Wat is de verwachte zonopbrengst?"
+
+def nachtbalans(now: datetime, forecast: Forecast, b: Batterij) -> tuple[float, float, float] | None:
+    """Zon, huis en wat er bruikbaar in de batterij zit, tot morgenvroeg, in kWh.
+
+    None als er geen huisprofiel of geen accustand is. De zon van de uren die
+    komen wordt bijgesteld met wat het dak vandaag waarmaakte, net als overal.
     """
     if not forecast.house_kwh or b.inhoud_kwh is None:
-        return ""
+        return None
     zon = huis = 0.0
     uur = now.replace(minute=0, second=0, microsecond=0)
-    eind = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    eind = now.replace(hour=OCHTEND_UUR, minute=0, second=0, microsecond=0)
+    if eind <= now:
+        eind += timedelta(days=1)
     while uur < eind:
         deel = 1.0 if uur >= now else (uur + timedelta(hours=1) - now).total_seconds() / 3600.0
         opbrengst = max(0.0, forecast.solar_kwh.get(uur, 0.0))
@@ -471,9 +480,49 @@ def _vooruitkijk_zin(now: datetime, forecast: Forecast, b: Batterij) -> str:
         huis += forecast.house_kwh.get(uur.hour, 0.0) * deel
         uur += timedelta(hours=1)
     bruikbaar = max(0.0, b.inhoud_kwh - b.bodem / 100.0 * (b.capacity_kwh or 0.0))
+    return zon, huis, bruikbaar
+
+
+def balans_kwh(now: datetime, forecast: Forecast, b: Batterij) -> float | None:
+    """Wat er morgenvroeg naar verwachting over is (positief) of tekortkomt.
+
+    Wat er in de batterij zit komt er met het rendement uit; zonder gemeten
+    rendement telt het voor de volle inhoud, want een gok is geen meting.
+    """
+    som = nachtbalans(now, forecast, b)
+    if som is None:
+        return None
+    zon, huis, bruikbaar = som
+    return bruikbaar * (b.rte if b.rte else 1.0) + zon - huis
+
+
+def _vooruitkijk_zin(now: datetime, forecast: Forecast, b: Batterij) -> str:
+    """Twee zinnen: zon, huis en batterij tot morgenvroeg, en de conclusie.
+
+    De bewoner van de eerste woning liet op 21-09-2026 zien wat hij van zijn
+    oude sturing het meest miste als het weg zou zijn: een regel die zegt
+    waaróm er wel of niet bijgeladen wordt. "Wat is mijn verwacht verbruik
+    vandaag? Wat is de verwachte zonopbrengst?" En op 22-09-2026: "Als laatste
+    afsluiten met een conclusie: je hebt naar verwachting X kWh overschot in je
+    accu, of je hebt X kWh tekort om de nacht te overbruggen."
+    """
+    som = nachtbalans(now, forecast, b)
+    if som is None:
+        return ""
+    zon, huis, bruikbaar = som
+    balans = balans_kwh(now, forecast, b) or 0.0
+    # Wat erin zit komt er niet helemaal uit; de conclusie rekent met het
+    # rendement, dus de zin zegt erbij waar hij mee rekent.
+    eruit = f", goed voor {_kwh(bruikbaar * b.rte)} na het verlies" if b.rte and bruikbaar > 0 else ""
+    zin = (
+        f"Tot morgenvroeg verwacht hij {_kwh(zon)} zon, het huis vraagt {_kwh(huis)} "
+        f"en er zit {_kwh(bruikbaar)} in de batterij{eruit}. "
+    )
+    if balans >= 0:
+        return zin + f"Je houdt naar verwachting {_kwh(balans)} over in je accu."
     return (
-        f"Tot middernacht verwacht hij {_kwh(zon)} zon, het huis vraagt {_kwh(huis)} "
-        f"en er zit {_kwh(bruikbaar)} in de batterij."
+        zin + f"Je komt naar verwachting {_kwh(-balans)} tekort om de nacht te overbruggen; "
+        "hij laadt bij als de stroom goedkoop genoeg is."
     )
 
 

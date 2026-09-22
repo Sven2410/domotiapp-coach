@@ -351,6 +351,7 @@ class Archive:
             bronnen.get("grid_export"),
             bronnen.get("grid_signed"),
             bronnen.get("solar"),
+            *(bronnen.get("solar_extra") or []),
         }
         for apparaat in settings.get("devices") or []:
             uit.add(apparaat.get("entity"))
