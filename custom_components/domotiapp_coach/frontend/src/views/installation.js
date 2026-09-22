@@ -171,7 +171,7 @@ class DacViewInstallation extends DacEditorElement {
                 <div class="row">
                   <label for="fx-feedin">Terugleververgoeding (€ per kWh)</label>
                   <input type="number" id="fx-feedin" min="0" step="0.001" inputmode="decimal">
-                  <span class="sub">Wat je krijgt voor wat je teruglevert.</span>
+                  <span class="sub">Wat je krijgt voor wat je teruglevert. Zonder salderen (vanaf 2027) is dat bij de grote leveranciers ongeveer een kwart cent: 0,0025.</span>
                 </div>
               </div>
               <div class="row">
@@ -272,10 +272,17 @@ class DacViewInstallation extends DacEditorElement {
                 </div>
               </div>
 
-              <div class="row">
-                <label for="dyn-feedcost">Terugleverkosten (€ per kWh)</label>
-                <input type="number" id="dyn-feedcost" min="0" step="0.001" inputmode="decimal">
-                <span class="sub">Wat je leverancier rekent over wat je teruglevert.</span>
+              <div class="two">
+                <div class="row">
+                  <label for="dyn-feedcost">Terugleverkosten (€ per kWh)</label>
+                  <input type="number" id="dyn-feedcost" min="0" step="0.001" inputmode="decimal">
+                  <span class="sub">Wat je leverancier rekent over wat je teruglevert.</span>
+                </div>
+                <div class="row">
+                  <label for="dyn-feedbonus">Verkoopvergoeding (€ per kWh)</label>
+                  <input type="number" id="dyn-feedbonus" step="0.001" inputmode="decimal">
+                  <span class="sub">Wat je leverancier bovenop de marktprijs betaalt voor wat je teruglevert. Verschilt per leverancier: de een geeft 2 cent, de ander niets, en er zijn er die er 2 cent afhalen; dan vul je een negatief getal in.</span>
+                </div>
               </div>
             </div>
 
@@ -329,6 +336,7 @@ class DacViewInstallation extends DacEditorElement {
     bind("dyn-markup", (v) => (this.draft_.contract.dynamic.supplier_markup = Number(v)));
     bind("dyn-vat", (v) => (this.draft_.contract.dynamic.vat_percent = Number(v)));
     bind("dyn-feedcost", (v) => (this.draft_.contract.dynamic.feed_in_costs = Number(v)));
+    bind("dyn-feedbonus", (v) => (this.draft_.contract.dynamic.feed_in_bonus = Number(v) || 0));
 
     this.$("#max-auto").addEventListener("change", (ev) => {
       this.draft_.installation.max_grid_auto = ev.target.checked;
@@ -477,6 +485,7 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#dyn-markup").value = contract.dynamic.supplier_markup;
     this.$("#dyn-vat").value = contract.dynamic.vat_percent;
     this.$("#dyn-feedcost").value = contract.dynamic.feed_in_costs;
+    this.$("#dyn-feedbonus").value = contract.dynamic.feed_in_bonus ?? 0;
 
     this.$("#dyn-allin").value = contract.dynamic.all_in_entity ?? "";
     this.$("#dyn-market").value = contract.dynamic.market_entity ?? "";

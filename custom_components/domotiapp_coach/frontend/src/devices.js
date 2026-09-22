@@ -599,6 +599,8 @@ export const defaultBattery = (brandId) => ({
   trade: false,
   weekly_full: false,
   weekly_full_day: 6,
+  holiday: false,
+  holiday_max_percent: 50,
   purchase_price: null,
   ...(BATTERY_BRANDS.find((brand) => brand.id === brandId)?.battery ?? { control_mode: "", idle_mode: "" }),
 });

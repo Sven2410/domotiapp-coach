@@ -348,6 +348,12 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             "supplier_markup": 0.02,
             "vat_percent": 21,
             "feed_in_costs": 0.0,
+            # Wat de leverancier per teruggeleverde kWh bovenop de marktprijs
+            # betaalt. Uit een artikel over het einde van het salderen dat de
+            # eigenaar op 22-09-2026 doorstuurde: Zonneplan, Frank Energie en
+            # ANWB 2 cent, Tibber niets, Next Energy 2,19 cent eraf. Mag dus
+            # ook negatief zijn.
+            "feed_in_bonus": 0.0,
         },
     },
     # Wie welke melding krijgt, en de zekeringmelding zelf. De eigenaar op 06-09-2026:

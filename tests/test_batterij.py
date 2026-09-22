@@ -195,6 +195,13 @@ b11c = plan_batterij(DAG.replace(hour=19), L11, Tariff(), verwachting(huis=0.3),
                      anker(soc=90.0, handelen=True), paal_laadt=True)
 controle("en niet als de laadpaal laadt", b11c.grenzen[1] is False, b11c.stand)
 
+# Handelen alleen met wat er boven de nacht uitkomt (de eigenaar, 22-09-2026:
+# "nul op de meter heeft prioriteit, het overschot verhandelen").
+b11c = plan_batterij(DAG.replace(hour=18, minute=10), prijzen(HANDEL, terug=0.02), Tariff(),
+                     verwachting(huis=0.6), anker(soc=20.0, handelen=True))
+print(f"  bijna leeg om 18:10 met 0,6 kWh per uur huis: {b11c.stand}")
+controle("met te weinig voor de nacht handelt hij niet, hoe duur het uur ook is", b11c.stand != HANDELEN, b11c.stand)
+
 print("12. te weinig zon: bijladen voor de dure avond, met de zin erbij")
 WINTER = {11: 0.4, 12: 0.6, 13: 0.4}
 b12 = plan_batterij(DAG.replace(hour=2), LIJST3, Tariff(), verwachting(WINTER, huis=0.5), anker(soc=8.0))

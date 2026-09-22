@@ -4629,6 +4629,66 @@ b84 = asyncio.run(ronde75(hass84, coach84, NU84 + dt.timedelta(minutes=1)))
 controle("op de laadgrens gaat de knop vanzelf uit en volgt hij het plan weer",
          b84.get("boost") is False and b84.get("rule") != "vol-laden", f"{b84.get('boost')} {b84.get('rule')}")
 
+print("=== 85. de thuisbatterij: vakantiestand (22-09-2026) ===")
+# De bewoner van de eerste woning: "in de zomer met veel opwek en minimaal
+# verbruik moet de accu regelmatig leeggetrokken worden; slecht voor de cellen
+# als ze te lang op 100% staan." De coach houdt hem onder een grens, de
+# laadgrens van de batterij blijft staan, en de volle beurt vervalt.
+BATTERIJ85 = {**BATTERIJ, "battery": {**BATTERIJ["battery"], "holiday": True, "holiday_max_percent": 50,
+                                       "weekly_full": True, "weekly_full_day": 0}}
+hass85, store85, coach85 = bouw(huis75(afname=0.0, teruglevering=1500.0, soc="70"), instellingen(devices=[LAADPAAL, BATTERIJ85]))
+NU85 = dt.datetime(2026, 9, 21, 12, 0)   # maandag, de dag van de volle beurt
+b85 = asyncio.run(ronde75(hass85, coach85, NU85))
+print(f"  {b85.get('mode_name')}: {b85.get('reason')}")
+controle("de bovengrens is de vakantiegrens", b85.get("ceiling") == 50.0 and b85.get("holiday") is True,
+         f"{b85.get('ceiling')} {b85.get('holiday')}")
+controle("boven de grens gaat er geen zon in, ook niet bij 1,5 kW overschot",
+         b85.get("mode") in ("nul", "ontladen", "standby") and b85.get("charge") is False, f"{b85.get('mode')}")
+controle("en de kaart zegt het", "Vakantiestand" in (b85.get("reason") or ""), f"{b85.get('reason')}")
+controle("de volle beurt vervalt en de laadgrens van de batterij blijft met rust",
+         not b85.get("full_before") and not [d for d in hass85.services.verstuurd if "laadgrens" in str(d[2].get("entity_id"))],
+         f"{b85.get('full_before')}")
+# De regelaar laat de batterij niet boven de grens laden.
+_, _, ver85 = zet75(hass85)
+controle("de regelaar schrijft geen laadopdracht", all(v == 0 or v is None for v in ver85) or not ver85, f"{ver85}")
+hass85.states.zet("sensor.batterij_soc", "40")
+b85 = asyncio.run(ronde75(hass85, coach85, NU85 + dt.timedelta(minutes=1)))
+controle("onder de grens gaat de zon er weer in", b85.get("mode") in ("nul", "zonneladen"), f"{b85.get('mode')}")
+
+print("=== 86. iets anders stuurt de batterij: de coach laat los zonder zelf te schrijven (22-09-2026) ===")
+# In de eerste woning nam evcc de Anker over. Zet iets anders de bedrijfsmodus
+# om, dan laat de coach na twee ronden los, schrijft hij niets (een 0 W zou de
+# ander overschrijven), zegt hij het één keer en probeert hij het na een uur weer.
+hass86, _, coach86 = bouw(huis75(), instellingen(devices=[LAADPAAL, BATTERIJ]))
+NU86 = dt.datetime(2026, 9, 22, 18, 0)
+asyncio.run(ronde75(hass86, coach86, NU86))
+controle("de coach stuurt", coach86._batterij["dev-batterij"].get("stuurt") is True, "")
+hass86.states.zet("select.batterij_modus", "self_consumption")   # iets anders zet hem om
+asyncio.run(ronde75(hass86, coach86, NU86 + dt.timedelta(minutes=1)))
+b86 = asyncio.run(ronde75(hass86, coach86, NU86 + dt.timedelta(minutes=2)))
+modus86, _, vermogen86 = zet75(hass86)
+meldingen86 = [d[2].get("message", "") for d in hass86.services.verstuurd if d[0] == "notify"]
+controle("na twee ronden laat hij los", coach86._batterij["dev-batterij"].get("stuurt") is False and b86.get("applied") is False,
+         f"{coach86._batterij['dev-batterij'].get('stuurt')} {b86.get('applied')}")
+controle("zonder zelf de modus of een vermogen te schrijven", modus86 == [] and vermogen86 == [], f"{modus86} {vermogen86}")
+controle("en hij zegt het", any("Iets anders stuurt" in m for m in meldingen86), f"{meldingen86}")
+b86 = asyncio.run(ronde75(hass86, coach86, NU86 + dt.timedelta(minutes=3)))
+controle("de ronde erna neemt hij hem niet meteen terug", b86.get("applied") is False and b86.get("foreign") is True,
+         f"{b86.get('applied')} {b86.get('foreign')}")
+b86 = asyncio.run(ronde75(hass86, coach86, NU86 + dt.timedelta(minutes=62)))
+modus86, _, _ = zet75(hass86)
+controle("na een uur probeert hij het opnieuw", modus86 == ["third_party_control"] and b86.get("applied") is True, f"{modus86}")
+
+print("=== 87. de verkoopvergoeding telt mee in wat teruglevering opbrengt ===")
+DYN87 = dict(DYN, netting=False, dynamic=dict(DYN["dynamic"], source="market", market_entity="sensor.prijs", feed_in_costs=0.0, feed_in_bonus=0.02))
+hass87, _, coach87 = bouw({"sensor.prijs": PRIJSLIJST}, instellingen())
+rij87 = coach87._prices({"contract": DYN87})
+controle("twee cent verkoopvergoeding komt bij de marktprijs",
+         bool(rij87) and abs(rij87[0]["feed_in"] - 0.32) < 1e-9, f"{rij87}")
+DYN87b = dict(DYN87, dynamic=dict(DYN87["dynamic"], feed_in_bonus=-0.0219))
+controle("en een negatieve vergoeding gaat eraf",
+         abs(coach87._prices({"contract": DYN87b})[0]["feed_in"] - (0.30 - 0.0219)) < 1e-9, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

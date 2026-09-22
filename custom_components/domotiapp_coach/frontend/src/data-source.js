@@ -374,7 +374,7 @@ export function tariff(feed, contract) {
         price: row.value,
       }))
     );
-    if (market !== null) feedIn = market - (Number(dynamic.feed_in_costs) || 0);
+    if (market !== null) feedIn = market - (Number(dynamic.feed_in_costs) || 0) + (Number(dynamic.feed_in_bonus) || 0);
   }
 
   return { buy: mean(priceForecast(feed, contract)), feedIn, basis: "het gemiddelde tarief van vandaag" };

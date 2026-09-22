@@ -232,6 +232,23 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
     };
   }
 
+  // Een negatieve prijs: terugleveren kost dan geld, en alles wat je zelf
+  // gebruikt is gratis of beter. Uit het artikel over het einde van het
+  // salderen dat de eigenaar op 22-09-2026 doorstuurde: in 2025 was de prijs
+  // 573 uur negatief, en wie dan niet teruglevert verliest er niets aan.
+  if (r.price !== null && r.price < 0) {
+    const apparaten = apparatenZin(devices, "en");
+    return {
+      tone: "var(--dac-good)",
+      tag: "Kans",
+      title: "De stroomprijs is negatief",
+      body:
+        `Je krijgt nu ${fmtPrice(-r.price).value} per kWh toe voor wat je gebruikt, en terugleveren kost je geld. `
+        + (apparaten ? `Zet ${apparaten} aan. ` : "Zet aan wat toch nog moet draaien. ")
+        + "Wat de coach zelf stuurt laadt nu al zoveel het kan.",
+    };
+  }
+
   if (r.price !== null && r.price >= thresholds.price.high) {
     return {
       tone: "var(--dac-bad)",

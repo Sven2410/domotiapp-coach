@@ -573,6 +573,41 @@ De bewoner wees er ook op dat het handelen vanaf 01-01-2027 verandert doordat
 bij teruglevering de btw vervalt; dat zit al in `NETTING_ENDS` en in de
 terugleverprijs uit de kale marktprijs.
 
+**Vakantiestand, handelen met wat de nacht overhoudt, en iets anders dat
+stuurt** (v0.80.0, allemaal 22-09-2026).
+
+- **Vakantiestand** (`battery.holiday`, `holiday_max_percent`, standaard 50):
+  de bewoner van de eerste woning, "met name in de zomer met veel opwek en
+  minimaal verbruik moet de accu regelmatig leeggetrokken worden; slecht voor
+  de accucellen als ze te lang op 100% blijven staan." `_vakantie` in coach.py
+  verlaagt `Batterij.soc_max` voor de som en de regelaar; de laadgrens van de
+  batterij zelf blijft met rust, en de wekelijkse volle beurt vervalt zolang
+  de stand aanstaat. Boven de grens gaat er geen zon in, wat erboven zit gaat
+  naar het huis of, met handelen, naar het net. Proef 85 in test_coach.py.
+- **Handelen alleen met wat er boven de nacht uitkomt** (`balans_kwh` in
+  `plan_batterij`): de eigenaar, "nul op de meter heeft prioriteit, het
+  overschot verhandelen met hoge tarieven." De som zelf verkocht alles zodra
+  terugkopen 's nachts goedkoper was. Proef 11 in test_batterij.py.
+- **Iets anders stuurt de batterij** (`VREEMD_RONDEN`, `VREEMD_PAUZE` in
+  coach.py): staat de bedrijfsmodus twee ronden op iets anders dan de coach
+  zette, dan laat hij los zónder zelf nog iets te schrijven (een 0 W zou de
+  ander overschrijven), zegt het één keer op de telefoon, en probeert het na
+  een uur opnieuw; de kaart zegt `foreign`. In de eerste woning nam evcc op
+  22-09-2026 om 18:17 de Anker over terwijl de coach op voorstellen stond;
+  de coach zei toen keurig "zou op nul staan, maar de coach stuurt nu niet",
+  en evcc verkocht van 81% naar 19% op 2,5 tot 3,5 kW tot 21:15. Proef 86.
+- **Uit een artikel over het einde van het salderen** dat de eigenaar op
+  22-09-2026 doorstuurde: `dynamic.feed_in_bonus`, wat de leverancier bovenop
+  de marktprijs betaalt per teruggeleverde kWh (het artikel noemt Zonneplan,
+  Frank Energie en ANWB 2 cent, Tibber niets, Next Energy 2,19 cent eraf; mag
+  negatief), in `_prices`, `_async_terugrekenen` en `tariff()`; bij een vast
+  contract de zin dat de vergoeding zonder salderen ongeveer een kwart cent
+  is; en de tip "De stroomprijs is negatief" (573 uur in 2025 volgens dat
+  artikel): terugleveren kost dan geld, zet aan wat toch moet draaien. Proef
+  87 in test_coach.py, de tip in test_rapport.mjs. Niet overgenomen: de btw op
+  teruglevering na 2027, want of die er voor een particulier bij komt staat
+  niet vast, en de coach rekent niet met wat niet vaststaat.
+
 ## Het merk van de auto, en een Tesla die slaapt
 
 Sinds 22-09-2026 (v0.76.0) heeft een autoprofiel een merk: Ford of Tesla
@@ -1277,11 +1312,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 387 controles op het denkwerk
-python tests/test_batterij.py    # 81 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 509 op de bedrading, met een nagebouwde HA
+python tests/test_batterij.py    # 82 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_coach.py       # 523 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1622 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 72 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 74 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

@@ -181,6 +181,10 @@ INTERVAL = timedelta(seconds=60)
 # zwijgt, want die meldt dat niet. Gelijk aan het tempo waarop Home Assistant
 # in de eerste woning de meter kreeg (21-09-2026: om de vijf seconden).
 REGEL_TIK = timedelta(seconds=5)
+# Na zoveel ronden met een andere bedrijfsmodus dan de coach zette laat hij de
+# batterij los (iets anders stuurt), en na zoveel tijd probeert hij het weer.
+VREEMD_RONDEN = 2
+VREEMD_PAUZE = timedelta(hours=1)
 # Hoe vaak wat de batterij verdiende naar de opslag gaat, en hoeveel dagen
 # daarvan bewaard blijven: ruim een jaar, zodat de terugverdientijd zomer en
 # winter allebei kent.
@@ -2561,7 +2565,7 @@ class ChargerCoach:
                     markt.append((moment, float(toestand)))
                 except ValueError:
                     continue
-        kosten = float(dynamic.get("feed_in_costs") or 0)
+        kosten = float(dynamic.get("feed_in_costs") or 0) - float(dynamic.get("feed_in_bonus") or 0)
         opslag = float(dynamic.get("supplier_markup") or 0) * (1 + float(dynamic.get("vat_percent") or 0) / 100)
         salderen = self._salderen(contract)
 
@@ -3490,16 +3494,42 @@ class ChargerCoach:
             max_charge_w=getal("max_charge_w") or uit_knop("max_charge_power", "max") or 0.0,
             max_discharge_w=getal("max_discharge_w") or uit_knop("max_discharge_power", "max") or 0.0,
             soc_min=_number(self.hass, entities.get("discharge_limit")) or 0.0,
-            soc_max=_number(self.hass, entities.get("charge_limit")) or 100.0,
+            # Vakantiestand: de coach rekent met een lagere bovengrens, en laat
+            # de laadgrens van de batterij zelf met rust. Zie `_vakantie`.
+            soc_max=min(
+                _number(self.hass, entities.get("charge_limit")) or 100.0,
+                self._vakantie(device) or 100.0,
+            ),
             reserve=float(eigen.get("reserve_percent") or 0) if eigen.get("reserve_enabled") else None,
             rte=rte,
             handelen=bool(eigen.get("trade")),
             power_w=self._batterij_w(device),
             vol_voor=vol_voor(
-                now, bool(eigen.get("weekly_full")), eigen.get("weekly_full_day"),
+                now, bool(eigen.get("weekly_full")) and self._vakantie(device) is None,
+                eigen.get("weekly_full_day"),
                 laatst_vol.replace(tzinfo=None) if laatst_vol is not None else None,
             ),
         )
+
+    @staticmethod
+    def _vakantie(device: dict[str, Any]) -> float | None:
+        """De bovengrens van de vakantiestand in procent, of None als die uitstaat.
+
+        De bewoner van de eerste woning op 22-09-2026: "met name in de zomer
+        met veel opwek en minimaal verbruik moet de accu regelmatig
+        leeggetrokken worden; slecht voor de accucellen als ze te lang op 100%
+        blijven staan." De coach houdt hem dan onder deze grens: wat erboven
+        zit gaat naar het huis of, met handelen, naar het net, en er komt pas
+        weer zon in als hij eronder zit. De wekelijkse volle beurt vervalt
+        zolang de stand aanstaat.
+        """
+        eigen = device.get("battery") or {}
+        if not eigen.get("holiday"):
+            return None
+        try:
+            return float(eigen.get("holiday_max_percent") or 50)
+        except (TypeError, ValueError):
+            return 50.0
 
     def _paal_laadt(self, settings: dict[str, Any]) -> bool:
         """Of er op dit moment een laadpaal laadt, van wie hij ook de opdracht kreeg.
@@ -3561,6 +3591,12 @@ class ChargerCoach:
                 enabled=True, paal_laadt=self._paal_laadt(settings),
             )
         )
+
+        vakantie = self._vakantie(device)
+        if vakantie is not None:
+            besluit.reason = (
+                f"Vakantiestand: hij houdt de batterij onder {vakantie:.0f}%. " + besluit.reason
+            )
 
         # "Nu vol laden": dezelfde knop als snelladen bij de paal, voor wie de
         # batterij nu vol wil hebben, wat het plan ook zegt. De eigenaar op
@@ -3651,6 +3687,7 @@ class ChargerCoach:
             "full_before": b.vol_voor.isoformat() if b.vol_voor else None,
             "payback": terug_verdiend,
             "boost": device_id in self._boost,
+            "holiday": vakantie is not None,
             "hours": [
                 {
                     "start": uur.start.isoformat(), "end": uur.end.isoformat(), "mode": uur.stand,
@@ -3669,6 +3706,41 @@ class ChargerCoach:
             if not stuurt:
                 kop = f"zou op {kop} staan, maar de coach stuurt nu niet"
             await self._async_noteer(f"{naam}: {kop}. {besluit.reason}".strip(), now)
+
+        # Iets anders stuurt de batterij: de modus staat niet meer op wat de
+        # coach zette. In de eerste woning op 22-09-2026 nam evcc de Anker
+        # over terwijl de coach hem op voorstellen had staan; had de coach
+        # hem toen nog gestuurd, dan hadden twee sturingen om hetzelfde
+        # register gevochten. Dus: twee ronden een andere modus, en de coach
+        # laat los zonder zelf nog iets te schrijven (een 0 W zou de ander
+        # overschrijven), zegt het één keer, en probeert het na
+        # `VREEMD_PAUZE` opnieuw.
+        if stuurt and sessie.get("stuurt"):
+            modus_entity = entities.get("mode")
+            wil = ((device.get("battery") or {}).get("control_mode") or "").strip()
+            staat = self.hass.states.get(modus_entity) if modus_entity else None
+            anders = bool(wil) and staat is not None and staat.state not in ("unknown", "unavailable") and staat.state != wil
+            sessie["modus_anders"] = sessie.get("modus_anders", 0) + 1 if anders else 0
+            if sessie["modus_anders"] >= VREEMD_RONDEN:
+                sessie["stuurt"] = False
+                sessie["regelaar"] = Regelaar()
+                sessie["vreemd"] = now
+                sessie["modus_anders"] = 0
+                _LOGGER.warning("%s: de modus staat op %s en niet op %s; iets anders stuurt, de coach laat los",
+                                device_id, staat.state, wil)
+                await self._async_tell(
+                    f"Iets anders stuurt {naam}: de bedrijfsmodus staat niet meer op wat de coach zette. "
+                    f"De coach laat hem los en probeert het over een uur opnieuw. Zet de andere sturing uit, "
+                    f"of haal bij de coach het vinkje 'mag sturen' weg.",
+                    kritiek=True,
+                )
+        if sessie.get("vreemd") is not None:
+            if now - sessie["vreemd"] < VREEMD_PAUZE:
+                stuurt = False
+            else:
+                sessie.pop("vreemd", None)
+        self.state[device_id]["applied"] = stuurt
+        self.state[device_id]["foreign"] = sessie.get("vreemd") is not None
 
         if stuurt and not sessie.get("stuurt"):
             await self._async_batterij_modus(device, "control_mode")
@@ -4278,7 +4350,7 @@ class ChargerCoach:
 
         dynamic = contract.get("dynamic") or {}
         all_in = dynamic.get("source") == "all_in"
-        kosten = float(dynamic.get("feed_in_costs") or 0)
+        kosten = float(dynamic.get("feed_in_costs") or 0) - float(dynamic.get("feed_in_bonus") or 0)
         salderen = self._salderen(contract)
         # De opslag van de leverancier zit wel in wat je betaalt en niet in wat
         # je terugkrijgt. Bij salderen streept de energiebelasting weg tegen die
@@ -5998,7 +6070,7 @@ class ChargerCoach:
             if not prijzen:
                 return None
         tarief = self._tariff(settings)
-        kosten = float(dynamic.get("feed_in_costs") or 0)
+        kosten = float(dynamic.get("feed_in_costs") or 0) - float(dynamic.get("feed_in_bonus") or 0)
         opslag = float(dynamic.get("supplier_markup") or 0) * (
             1 + float(dynamic.get("vat_percent") or 0) / 100
         )
