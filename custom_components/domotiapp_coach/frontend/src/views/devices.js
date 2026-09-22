@@ -589,7 +589,24 @@ class DacViewDevices extends DacEditorElement {
       : manual
         ? "Hij heeft geen startknop, dus sturen kan de coach niet. Hij zegt op de kaart en op je telefoon wanneer je hem aan moet zetten, en meet via de vermogenssensor hoe lang een programma duurt en wat het verbruikt. Het apparaat komt dan op het overzicht te staan, met de vrijgaveknop en de programmakeuze."
         : "Dit apparaat zit alleen op een meetstekker: de coach kan het niet sturen en niet plannen. Met dit vinkje aan noemt hij het wel als je overschot hebt of de stroom goedkoop is; uit, dan volgt hij alleen het verbruik.";
-    return `
+    // De groep waar het apparaat aan hangt, als er groepen zijn (Installatie).
+    // De eerste woning, 22-09-2026: de paal en de batterij in de garage, op
+    // een onderverdeelkast van 3x16 A onder een aansluiting van 3x25 A.
+    const groepen = (this.draft_?.installation?.circuits ?? []).filter((g) => g?.id);
+    const groepHtml = groepen.length
+      ? `
+      <div class="row">
+        <label for="circuit-${index}">Hangt op groep</label>
+        <select id="circuit-${index}" data-field="circuit" data-index="${index}">
+          <option value=""${device.circuit ? "" : " selected"}>Hoofdaansluiting</option>
+          ${groepen
+            .map((g) => `<option value="${g.id}"${device.circuit === g.id ? " selected" : ""}>${g.name || g.id}</option>`)
+            .join("")}
+        </select>
+        <span class="sub">Voor de zekeringbewaking: de coach blijft onder de zekering van deze groep én onder de hoofdzekering.</span>
+      </div>`
+      : "";
+    return `${groepHtml}
       <label class="check" for="control-${index}">
         <input type="checkbox" id="control-${index}" data-field="controllable" data-index="${index}"
                ${device.controllable ? "checked" : ""}>

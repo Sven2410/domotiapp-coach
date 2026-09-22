@@ -529,6 +529,38 @@ function readPhases(feed, sources) {
 }
 
 /**
+ * De groepen met een eigen zekering en meter, met per fase wat er loopt.
+ *
+ * Dezelfde rijen als `readPhases`, per groep; een groep zonder een enkele
+ * meetwaarde blijft weg. Zie `installation.circuits`.
+ *
+ * @returns {Array<{id: string, name: string, fuse: number, phases: Array}>}
+ */
+export function readCircuits(feed, installation) {
+  const groepen = Array.isArray(installation?.circuits) ? installation.circuits : [];
+  return groepen
+    .filter((g) => g?.id)
+    .map((g) => {
+      const keys = Number(g.phases) === 1 ? ["l1"] : PHASES;
+      const phases = keys.map((key) => {
+        const config = g.sensors?.[key] ?? {};
+        const row = {
+          key,
+          label: key.toUpperCase(),
+          current: readNumber(feed, config.current),
+          power: readPower(feed, config.power),
+          voltage: readNumber(feed, config.voltage),
+        };
+        row.amps = phaseAmps(row);
+        row.ampsDerived = row.amps !== null && !Number.isFinite(row.current);
+        return row;
+      });
+      return { id: g.id, name: g.name || g.id, fuse: Number(g.fuse_amps) || 0, phases };
+    })
+    .filter((g) => g.phases.some((row) => row.current !== null || row.power !== null || row.voltage !== null));
+}
+
+/**
  * How hard the connection is being worked, as a percentage.
  *
  * With per-phase currents this is the *heaviest* phase against the main fuse,
@@ -541,21 +573,32 @@ function readPhases(feed, sources) {
  * Only import counts. Feeding back also loads the connection, but the ceiling a
  * customer cares about -- and the one their fuse enforces -- is what they draw.
  *
+ * Sinds v0.75.0 telt elke groep met een eigen zekering mee, tegen haar eigen
+ * zekering: een garage van 16 A op 14 A is zwaarder belast dan een aansluiting
+ * van 25 A op 15. Dezelfde som als `async_current_load` in monitor.py.
+ *
  * @returns {{percent: number|null, basis: "phase"|"power"|null, worst: string|null}}
  */
-export function loadOf(phases, importW, installation) {
+export function loadOf(phases, importW, installation, circuits = []) {
   const fuse = Number(installation?.fuse_amps) || 0;
 
-  if (phases && fuse > 0) {
-    const loaded = phases.filter((p) => Number.isFinite(p.amps));
-    if (loaded.length) {
-      const worst = loaded.reduce((a, b) => (b.amps > a.amps ? b : a));
-      return {
-        percent: clamp((worst.amps / fuse) * 100, 0, 999),
-        basis: "phase",
-        worst: worst.label,
-      };
+  const kandidaten = [];
+  if (phases && fuse > 0) kandidaten.push({ fuse, label: "", phases });
+  for (const g of circuits ?? []) {
+    if (g?.fuse > 0 && Array.isArray(g.phases)) kandidaten.push({ fuse: g.fuse, label: g.name, phases: g.phases });
+  }
+  let zwaarste = null;
+  for (const k of kandidaten) {
+    for (const p of k.phases) {
+      if (!Number.isFinite(p.amps)) continue;
+      const share = (p.amps / k.fuse) * 100;
+      if (!zwaarste || share > zwaarste.share) {
+        zwaarste = { share, worst: k.label ? `${p.label} (${k.label})` : p.label };
+      }
     }
+  }
+  if (zwaarste) {
+    return { percent: clamp(zwaarste.share, 0, 999), basis: "phase", worst: zwaarste.worst };
   }
 
   const ceiling = Number(installation?.max_grid_watts) || 0;
@@ -671,7 +714,8 @@ export class LiveSource {
     });
 
     const phases = readPhases(feed, sources);
-    const load = loadOf(phases, importW, settings?.installation);
+    const circuits = readCircuits(feed, settings?.installation);
+    const load = loadOf(phases, importW, settings?.installation, circuits);
 
     const reading = {
       solar,
@@ -683,6 +727,7 @@ export class LiveSource {
       price: priceNow(feed, settings?.contract),
       devices,
       phases,
+      circuits,
       load: load.percent,
       loadBasis: load.basis,
       loadWorstPhase: load.worst,

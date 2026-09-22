@@ -82,6 +82,7 @@ from .planner import (
     FUSE_MARGIN_SHARE,
     Car,
     Charger,
+    Circuit,
     DayWindow,
     Decision,
     Forecast,
@@ -953,7 +954,9 @@ class ChargerCoach:
         self._unwatch = None
         # Vanaf welke fasestroom het haast wordt, en wanneer dat voor het laatst
         # gold. Beide worden elke ronde bijgewerkt.
-        self._urgent_above: float | None = None
+        # Per stroomsensor de grens waarboven de coach meteen opnieuw kijkt:
+        # de zekering van de aansluiting of van de groep waar die sensor bij hoort.
+        self._urgent_above: dict[str, float] | None = None
         self._last_urgent: datetime | None = None
         # Wanneer er voor het laatst een ronde helemaal is afgelopen, en of daar
         # al over gemeld is. Dit is wat de wachthond leest.
@@ -1170,6 +1173,15 @@ class ChargerCoach:
             if isinstance(velden, dict) and velden.get("current"):
                 uit[velden["current"]] = f"de stroommeting van fase {str(fase).upper()}"
         installation = settings.get("installation") or {}
+        for groep in installation.get("circuits") or []:
+            if not isinstance(groep, dict):
+                continue
+            for fase, velden in (groep.get("sensors") or {}).items():
+                if isinstance(velden, dict) and velden.get("current"):
+                    uit[velden["current"]] = (
+                        f"de stroommeting van fase {str(fase).upper()} van de groep "
+                        f"{groep.get('name') or groep.get('id')}"
+                    )
         if installation.get("load_balancer") and installation.get("balancer_entity"):
             uit[installation["balancer_entity"]] = "je lastbewaker"
         contract = settings.get("contract") or {}
@@ -1299,16 +1311,30 @@ class ChargerCoach:
                 if phase.get("current"):
                     entities.add(phase["current"])
 
-        self._watched_phases = entities
-        if not entities:
-            self._urgent_above = None
-            return
-
+        # En de stroomsensoren van elke groep, elk met de grens van zijn eigen
+        # zekering: een garage van 16 A zit vol bij 14 A, lang voordat de
+        # hoofdaansluiting iets merkt.
+        grenzen: dict[str, float] = {}
         zekering = float(installation.get("fuse_amps") or 25)
         marge = (
             BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
         )
-        self._urgent_above = zekering - max(marge, zekering * FUSE_MARGIN_SHARE)
+        for entity in entities:
+            grenzen[entity] = zekering - max(marge, zekering * FUSE_MARGIN_SHARE)
+        if steerable:
+            for groep in installation.get("circuits") or []:
+                if not isinstance(groep, dict):
+                    continue
+                grens_groep = float(groep.get("fuse_amps") or 16)
+                grens_groep -= max(FUSE_MARGIN_AMPS, grens_groep * FUSE_MARGIN_SHARE)
+                for key in ("l1", "l2", "l3"):
+                    sensor = ((groep.get("sensors") or {}).get(key) or {}).get("current")
+                    if sensor:
+                        entities.add(sensor)
+                        grenzen[sensor] = min(grenzen.get(sensor, grens_groep), grens_groep)
+
+        self._watched_phases = entities
+        self._urgent_above = grenzen or None
 
     def _watch(self, entity_ids: set[str]) -> None:
         """Meeluisteren met de statussensoren van de laadpalen.
@@ -1381,16 +1407,14 @@ class ChargerCoach:
         while historie and historie[0][0] < grens:
             historie.pop(0)
 
-        if self._urgent_above is None:
-            return
-        if amps < self._urgent_above:
+        grens = (self._urgent_above or {}).get(new.entity_id)
+        if grens is None or amps < grens:
             return
 
         if self._last_urgent is not None and nu - self._last_urgent < HURRY_INTERVAL:
             return
         self._last_urgent = nu
-        _LOGGER.debug("fasestroom %.1f A boven %.1f A, meteen opnieuw kijken",
-                      amps, self._urgent_above)
+        _LOGGER.debug("fasestroom %.1f A boven %.1f A, meteen opnieuw kijken", amps, grens)
         self.async_refresh()
 
     async def _tick(self, now: datetime | None = None) -> None:
@@ -1536,10 +1560,16 @@ class ChargerCoach:
             self.state.pop(device_id, None)
 
         chargers.sort(key=lambda device: self._priority(settings, device))
-        vergeven = 0.0
+        # Wat er deze ronde al aan een eerder laadpunt is toegezegd, per
+        # zekering: "" is de hoofdaansluiting, verder het id van elke groep.
+        # Twee palen op dezelfde groep delen die groep; een paal in de garage
+        # en een aan de meterkast delen alleen de hoofdaansluiting.
+        vergeven: dict[str, float] = {}
         for device in chargers:
             try:
-                vergeven += await self._one(moment, settings, device, level, vergeven)
+                claim = await self._one(moment, settings, device, level, vergeven)
+                for sleutel in self._groep_sleutels(settings, device):
+                    vergeven[sleutel] = vergeven.get(sleutel, 0.0) + claim
             except ServiceNotFound as fout:
                 # Gebeurt bij het opstarten: de coach draait al voordat de
                 # integratie van het merk zijn diensten heeft klaargezet. Geen
@@ -3204,23 +3234,77 @@ class ChargerCoach:
         Zonder fasesensoren bewaakt de coach dit niet: None.
         """
         sources = settings.get("sources") or {}
-        if not sources.get("phases_enabled"):
-            return None
         installation = settings.get("installation") or {}
-        zekering = float(installation.get("fuse_amps") or 25)
-        marge = BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
-        grens = zekering - max(marge, zekering * FUSE_MARGIN_SHARE)
         fase = (device.get("battery") or {}).get("phase") or ""
-        stromen = []
-        for key in ("l1", "l2", "l3"):
-            if fase and key != fase:
-                continue
-            amps = _number(self.hass, ((sources.get("phases") or {}).get(key) or {}).get("current"))
-            if amps is not None:
-                stromen.append(abs(amps))
-        if not stromen:
+
+        def stromen_uit(sensoren: dict[str, Any], alleen_fase: bool) -> list[float]:
+            uit = []
+            for key in ("l1", "l2", "l3"):
+                if alleen_fase and fase and key != fase:
+                    continue
+                amps = _number(self.hass, ((sensoren or {}).get(key) or {}).get("current"))
+                if amps is not None:
+                    uit.append(abs(amps))
+            return uit
+
+        ruimten: list[float] = []
+        if sources.get("phases_enabled"):
+            zekering = float(installation.get("fuse_amps") or 25)
+            marge = BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
+            stromen = stromen_uit(sources.get("phases") or {}, True)
+            if stromen:
+                ruimten.append(zekering - max(marge, zekering * FUSE_MARGIN_SHARE) - max(stromen))
+        # En elke groep waar de batterij aan hangt, met haar eigen zekering en
+        # meter. Op een eenfasige groep is er maar één meting en telt die.
+        for groep in self._groepen_keten(settings, device):
+            zekering = float(groep.get("fuse_amps") or 16)
+            stromen = stromen_uit(groep.get("sensors") or {}, int(groep.get("phases") or 3) == 3)
+            if stromen:
+                ruimten.append(zekering - max(FUSE_MARGIN_AMPS, zekering * FUSE_MARGIN_SHARE) - max(stromen))
+        if not ruimten:
             return None
-        return (grens - max(stromen)) * VOLTS + max(0.0, batterij_w or 0.0)
+        return min(ruimten) * VOLTS + max(0.0, batterij_w or 0.0)
+
+    @staticmethod
+    def _groepen_keten(settings: dict[str, Any], device: dict[str, Any]) -> list[dict[str, Any]]:
+        """De groepen waar dit apparaat aan hangt, van onder naar boven.
+
+        Een apparaat wijst naar één groep (`circuit`), en een groep naar de
+        groep erboven (`parent`). De hoofdaansluiting staat er niet in: die is
+        er altijd. Een kring of een groep die niet bestaat eindigt de keten.
+        """
+        groepen = {
+            g.get("id"): g
+            for g in ((settings.get("installation") or {}).get("circuits") or [])
+            if isinstance(g, dict) and g.get("id")
+        }
+        keten: list[dict[str, Any]] = []
+        volgende = device.get("circuit") or ""
+        while volgende and volgende in groepen and len(keten) < 12:
+            groep = groepen[volgende]
+            if any(g is groep for g in keten):
+                break
+            keten.append(groep)
+            volgende = groep.get("parent") or ""
+        return keten
+
+    def _groep_sleutels(self, settings: dict[str, Any], device: dict[str, Any]) -> list[str]:
+        """Onder welke zekeringen een toezegging aan dit apparaat meetelt."""
+        return [""] + [str(g.get("id")) for g in self._groepen_keten(settings, device)]
+
+    def _fase_amps(self, phase: dict[str, Any], now: datetime) -> float | None:
+        """Wat een fase trekt: de stroomsensor (vastgehouden en gladgestreken),
+        anders vermogen gedeeld door spanning. Zie `_gladde_fase`."""
+        amps = self._volgehouden(
+            phase.get("current"), _number(self.hass, phase.get("current")), now
+        )
+        if amps is not None:
+            return self._gladde_fase(phase.get("current"), amps, now)
+        watts = self._volgehouden(
+            phase.get("power"), _watts(self.hass, phase.get("power")), now
+        )
+        volts = _number(self.hass, phase.get("voltage")) or 230
+        return watts / volts if watts is not None and volts else None
 
     @staticmethod
     def _batterij_rij(settings: dict[str, Any], device_id: str) -> dict[str, Any]:
@@ -3663,7 +3747,7 @@ class ChargerCoach:
         settings: dict[str, Any],
         device: dict[str, Any],
         level: str,
-        reserved: float = 0.0,
+        reserved: dict[str, float] | None = None,
     ) -> float:
         """Look at one charging point and act on what the planner says.
 
@@ -4458,7 +4542,7 @@ class ChargerCoach:
         now: datetime,
         settings: dict[str, Any],
         device: dict[str, Any],
-        reserved: float = 0.0,
+        reserved: dict[str, float] | None = None,
     ) -> tuple[Grid, Car, Charger, Window]:
         """Everything the planner needs, gathered from the installation."""
         sources = settings.get("sources") or {}
@@ -4565,20 +4649,26 @@ class ChargerCoach:
 
         phases = []
         for key in ("l1", "l2", "l3"):
-            phase = (sources.get("phases") or {}).get(key) or {}
-            amps = self._volgehouden(
-                phase.get("current"), _number(self.hass, phase.get("current")), now
-            )
-            if amps is not None:
-                amps = self._gladde_fase(phase.get("current"), amps, now)
-            else:
-                watts = self._volgehouden(
-                    phase.get("power"), _watts(self.hass, phase.get("power")), now
-                )
-                volts = _number(self.hass, phase.get("voltage")) or 230
-                amps = watts / volts if watts is not None and volts else None
+            amps = self._fase_amps((sources.get("phases") or {}).get(key) or {}, now)
             if amps is not None:
                 phases.append(amps)
+
+        # De groepen waar deze paal aan hangt, elk met de eigen meter en de
+        # eigen zekering. Zie `Circuit` in planner.py.
+        reserved = reserved or {}
+        circuits = []
+        for groep in self._groepen_keten(settings, device):
+            stromen = []
+            for key in ("l1", "l2", "l3"):
+                amps = self._fase_amps((groep.get("sensors") or {}).get(key) or {}, now)
+                if amps is not None:
+                    stromen.append(amps)
+            circuits.append(Circuit(
+                name=str(groep.get("name") or groep.get("id") or ""),
+                phase_amps=stromen,
+                fuse_amps=float(groep.get("fuse_amps") or 16),
+                reserved_amps=float(reserved.get(str(groep.get("id")), 0.0)),
+            ))
 
         # Wat deze paal kort geleden nog trok. De fasemeting van het huis loopt
         # achter op de paal, dus vlak na het stoppen draagt zij zijn stroom nog
@@ -4600,7 +4690,8 @@ class ChargerCoach:
             surplus_w=surplus,
             # Wat een eerder laadpunt in deze ronde al toegezegd heeft gekregen
             # en nog niet in de fasemeting staat.
-            reserved_amps=reserved,
+            reserved_amps=float(reserved.get("", 0.0)),
+            circuits=circuits,
             phase_amps=phases,
             fuse_amps=float(installation.get("fuse_amps") or 25),
             charger_amps=charger_amps,

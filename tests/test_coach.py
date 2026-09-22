@@ -4454,6 +4454,75 @@ coach80._batterij["dev-batterij"]["stuurt"] = False
 controle("en stuurt de coach niet, dan is er alleen de sensor",
          coach80._netto_export_w(inst80) == 3000.0, f"{coach80._netto_export_w(inst80)}")
 
+print("=== 81. een onderverdeelkast met een eigen zekering en meter (22-09-2026) ===")
+# De eerste woning: 3x25 A aan de meterkast, in de garage 3x16 A met een eigen
+# HomeWizard kWh-meter, en daar hangen de paal en de batterij aan. De bewoner
+# had het vermogen van fase 2 en 3 al uit de garagemeter gehaald als noodgreep;
+# nu is het een groep, en telt hij bij alles mee waar de hoofdzekering telt.
+GARAGE = {
+    "id": "garage", "name": "Garage", "fuse_amps": 16, "phases": 3, "parent": "",
+    "sensors": {"l1": {"current": "sensor.g1"}, "l2": {"current": "sensor.g2"}, "l3": {"current": "sensor.g3"}},
+}
+LAADPAAL_G = {**LAADPAAL, "circuit": "garage"}
+BATTERIJ_G = {**BATTERIJ, "circuit": "garage", "battery": {**BATTERIJ["battery"], "phase": "l3"}}
+inst81 = instellingen(devices=[LAADPAAL_G, BATTERIJ_G])
+inst81["installation"]["circuits"] = [GARAGE]
+inst81["installation"]["load_balancer"] = False
+huis81 = {**huis75(afname=1500.0), "sensor.l1": "6", "sensor.l2": "4", "sensor.l3": "4",
+          "sensor.g1": "3", "sensor.g2": "2", "sensor.g3": "2"}
+hass81, _, coach81 = bouw(huis81, inst81)
+NU81 = dt.datetime(2026, 9, 22, 12, 0)
+
+controle("de keten van de paal is de garage", [g["id"] for g in coach81._groepen_keten(inst81, LAADPAAL_G)] == ["garage"],
+         f"{coach81._groepen_keten(inst81, LAADPAAL_G)}")
+controle("en een toezegging aan die paal telt onder de hoofdaansluiting en onder de garage",
+         coach81._groep_sleutels(inst81, LAADPAAL_G) == ["", "garage"], f"{coach81._groep_sleutels(inst81, LAADPAAL_G)}")
+grid81, _, _, _ = coach81._read(NU81, inst81, LAADPAAL_G)
+print(f"  hoofdaansluiting {grid81.phase_amps} A tegen {grid81.fuse_amps} A, "
+      f"groepen {[(c.name, c.phase_amps, c.fuse_amps) for c in grid81.circuits]}")
+controle("de coach leest de garagemeter als groep",
+         len(grid81.circuits) == 1 and grid81.circuits[0].name == "Garage"
+         and grid81.circuits[0].phase_amps == [3.0, 2.0, 2.0] and grid81.circuits[0].fuse_amps == 16.0,
+         f"{grid81.circuits}")
+grid81b, _, _, _ = coach81._read(NU81, inst81, LAADPAAL_G, {"": 4.0, "garage": 3.0})
+controle("wat er al is toegezegd komt per zekering binnen",
+         grid81b.reserved_amps == 4.0 and grid81b.circuits[0].reserved_amps == 3.0,
+         f"{grid81b.reserved_amps} {grid81b.circuits[0].reserved_amps}")
+
+# De batterij op L3 in de garage: onder de garage past (16 - 2 - 2) x 230 = 2760 W,
+# onder de hoofdaansluiting (25 - 2 - 4) x 230 = 4370 W; de garage wint.
+ruimte81 = coach81._laadruimte_w(inst81, BATTERIJ_G, 0.0)
+print(f"  laadruimte voor de batterij in de garage: {ruimte81:.0f} W")
+controle("de batterij blijft onder de zekering van de garage", abs(ruimte81 - 2760.0) < 1, f"{ruimte81}")
+controle("een batterij aan de meterkast heeft de ruimte van de hoofdaansluiting",
+         abs(coach81._laadruimte_w(inst81, {**BATTERIJ_G, "circuit": ""}, 0.0) - 4370.0) < 1,
+         f"{coach81._laadruimte_w(inst81, {**BATTERIJ_G, 'circuit': ''}, 0.0)}")
+
+# De snelle zekeringcontrole kent per sensor de grens van zijn eigen zekering.
+asyncio.run(ronde75(hass81, coach81, NU81))
+print(f"  grenzen: {coach81._urgent_above}")
+controle("de garagesensoren wekken de coach al bij 14 A, die van de meterkast bij 23",
+         (coach81._urgent_above or {}).get("sensor.g1") == 14.0 and (coach81._urgent_above or {}).get("sensor.l1") == 23.0,
+         f"{coach81._urgent_above}")
+controle("en de garagesensoren horen bij wat de coach volgt", "sensor.g2" in coach81._watched_phases,
+         f"{sorted(coach81._watched_phases)}")
+controle("de sensorwacht kent de garagesensor bij naam",
+         "Garage" in coach81._sensoren(inst81).get("sensor.g1", ""), f"{coach81._sensoren(inst81).get('sensor.g1')}")
+
+# De lastwaarschuwing: de garage op 12 A is 75% van 16, zwaarder dan 6 van 25.
+hass81m, monitor81 = bewaker(inst81, {**huis81, "sensor.g1": "12"})
+last81 = monitor81.async_current_load()
+print(f"  belasting: {last81.percent:.0f}% op {last81.worst_phase}")
+controle("de lastwaarschuwing kijkt naar de zwaarst belaste zekering, ook die van een groep",
+         abs(last81.percent - 75.0) < 0.1 and last81.worst_phase == "L1 (Garage)", f"{last81}")
+hass81n, monitor81n = bewaker(inst81, huis81)
+controle("en zonder garagelast wint de hoofdaansluiting", monitor81n.async_current_load().worst_phase == "L1",
+         f"{monitor81n.async_current_load()}")
+
+# Instellingen die de groep niet kennen, of een paal zonder groep, blijven zoals ze waren.
+grid81c, _, _, _ = coach81._read(NU81, inst81, LAADPAAL)
+controle("een paal zonder groep heeft geen groepen", grid81c.circuits == [], f"{grid81c.circuits}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

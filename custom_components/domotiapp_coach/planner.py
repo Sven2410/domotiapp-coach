@@ -214,6 +214,29 @@ STOP_MARGIN = 0.005
 
 
 @dataclass
+class Circuit:
+    """Een groep onder de aansluiting met een eigen zekering (v0.75.0).
+
+    De bewoner van de eerste woning op 22-09-2026: een meterkast met 3x25 A
+    achter de P1, en in de garage een onderverdeelkast van 3x16 A met een eigen
+    kWh-meter, waar de laadpaal en de thuisbatterij aan hangen. De
+    hoofdzekering zegt dan niets over wat er in de garage nog past. Zoals de
+    circuits van evcc: een naam, een zekering, een meter, en een groep erboven.
+
+    Hier staan alleen de groepen waar déze paal aan hangt, van onder naar
+    boven; de hoofdaansluiting zelf is `Grid`. Zonder meter is het
+    huisverbruik op de groep onbekend en telt alleen wat er in deze ronde aan
+    andere apparaten op dezelfde groep is toegezegd.
+    """
+
+    name: str = ""
+    phase_amps: list[float] = field(default_factory=list)
+    fuse_amps: float = 16.0
+    margin_amps: float = FUSE_MARGIN_AMPS
+    reserved_amps: float = 0.0
+
+
+@dataclass
 class Grid:
     """What the house is doing right now."""
 
@@ -243,6 +266,9 @@ class Grid:
     # Hoeveel de lastbewaker van de installatie op dit moment vrijgeeft voor
     # het laden, als hij dat meldt. Zie `beschikbaar_van_bewaker`.
     balancer_amps: float | None = None
+    # De groepen waar deze paal aan hangt, elk met een eigen zekering. Zie
+    # `Circuit`; de ruimte onder elke zekering telt, en de krapste wint.
+    circuits: list[Circuit] = field(default_factory=list)
 
 
 @dataclass
@@ -533,6 +559,55 @@ def charger_share(grid: Grid, charger: Charger) -> float:
     return max(grid.charger_amps, min(gevraagde_amps(grid, charger), zwaarste))
 
 
+def ruimten(grid: Grid, charger: Charger, marge: bool = True) -> list[tuple[str, float]]:
+    """Wat er onder elke zekering nog past, op naam: "" is de hoofdaansluiting.
+
+    Per zekering dezelfde som: de zwaarste fase min wat daarvan van de paal
+    zelf is, dat is het huis; de zekering min het huis min de marge min wat er
+    deze ronde al aan een ander laadpunt onder dezelfde zekering is toegezegd.
+    Een groep zonder meter heeft geen huis: daar telt alleen de toezegging.
+    """
+    uit: list[tuple[str, float]] = []
+    if grid.phase_amps:
+        household = max(grid.phase_amps) - charger_share(grid, charger)
+        ruimte = grid.fuse_amps - max(0.0, household) - grid.reserved_amps
+        if marge:
+            ruimte -= fuse_margin(grid)
+        uit.append(("", ruimte))
+    for groep in grid.circuits:
+        if groep.phase_amps:
+            # De paal zit ook in de meting van zijn eigen groep, en nooit voor
+            # meer dan er op die groep werkelijk loopt.
+            aandeel = min(charger_share(grid, charger), max(groep.phase_amps))
+            household = max(groep.phase_amps) - aandeel
+            ruimte = groep.fuse_amps - max(0.0, household) - groep.reserved_amps
+        else:
+            ruimte = groep.fuse_amps - groep.reserved_amps
+        if marge:
+            ruimte -= fuse_margin_van(groep.fuse_amps, groep.margin_amps)
+        uit.append((groep.name, ruimte))
+    return uit
+
+
+def knelpunt(grid: Grid, car: Car, charger: Charger) -> str | None:
+    """De naam van de groep waarvan de zekering het laden tegenhoudt.
+
+    "" als het de hoofdaansluiting is, None als het de paal of de auto is en
+    niet een zekering. Voor de zin op de kaart: "meer past er nu niet onder de
+    zekering van de garage" is een antwoord, "onder je zekering" is dat bij een
+    hoofdzekering van 25 A en een garage van 16 A niet.
+    """
+    if not fuse_limited(grid, car, charger):
+        return None
+    alle = ruimten(grid, charger)
+    return min(alle, key=lambda paar: paar[1])[0] if alle else None
+
+
+def zekering_van(naam: str | None) -> str:
+    """Hoe de zekering heet in een zin: "je zekering" of "de zekering van de garage"."""
+    return f"de zekering van de groep {naam}" if naam else "je zekering"
+
+
 def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
     """The most this charger may draw right now, whatever the reason to charge.
 
@@ -540,7 +615,8 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
     deliver, what the car accepts, and what is left under the fuse on the
     heaviest phase. The charger's own current is taken out of that phase
     reading first, otherwise it reads its own charging as household load and
-    walks itself down to the floor.
+    walks itself down to the floor. Sinds v0.75.0 telt elke zekering waar de
+    paal onder hangt, de hoofdaansluiting en elke groep; zie `ruimten`.
     """
     limits = [charger.max_amps]
     if car.max_amps:
@@ -555,11 +631,7 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
     if groep is not None:
         limits.append(groep)
 
-    if grid.phase_amps:
-        household = max(grid.phase_amps) - charger_share(grid, charger)
-        ruimte = (
-            grid.fuse_amps - max(0.0, household) - fuse_margin(grid) - grid.reserved_amps
-        )
+    for _naam, ruimte in ruimten(grid, charger):
         if meter_loopt_achter(grid, charger):
             # De veiligheidsrail. Zolang de meter achterloopt is een deel van
             # deze som een aanname, en op een aanname mag er nooit méér gevraagd
@@ -587,6 +659,13 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
         limits.append(ruimte)
 
     return int(max(0, min(limits)))
+
+
+def _aansluiting(grid: Grid, car: Car, charger: Charger) -> str:
+    """Het onderwerp van de zin over een volle zekering: de aansluiting of een groep."""
+    alle = ruimten(grid, charger)
+    krapste = min(alle, key=lambda paar: paar[1])[0] if alle else ""
+    return f"De groep {krapste}" if krapste else "Je aansluiting"
 
 
 def circuit_ceiling(charger: Charger) -> float | None:
@@ -632,10 +711,8 @@ def nood_ruimte(grid: Grid, charger: Charger) -> float:
     laagste stand aan te houden. De grens zelf blijft heilig: past `MIN_AMPS` er
     ook zonder marge niet meer bij, dan gaat hij alsnog uit.
     """
-    if not grid.phase_amps:
-        return float("inf")
-    household = max(0.0, max(grid.phase_amps) - charger_share(grid, charger))
-    return grid.fuse_amps - household - grid.reserved_amps
+    alle = ruimten(grid, charger, marge=False)
+    return min(ruimte for _naam, ruimte in alle) if alle else float("inf")
 
 
 def fuse_limited(grid: Grid, car: Car, charger: Charger) -> bool:
@@ -646,12 +723,8 @@ def fuse_limited(grid: Grid, car: Car, charger: Charger) -> bool:
     nu niet onder je zekering" is an answer. De eigenaar op 20-08-2026, die precies dat
     vroeg toen hij snelladen aanzette en er 8 A uit kwam.
     """
-    if not grid.phase_amps:
-        return False
-    household = max(0.0, max(grid.phase_amps) - charger_share(grid, charger))
-    room = grid.fuse_amps - household - fuse_margin(grid) - grid.reserved_amps
     hardware = [charger.max_amps] + ([car.max_amps] if car.max_amps else [])
-    return room < min(hardware)
+    return any(ruimte < min(hardware) for _naam, ruimte in ruimten(grid, charger))
 
 
 def beschikbaar_van_bewaker(grid: Grid) -> float | None:
@@ -694,7 +767,12 @@ def fuse_margin(grid: Grid) -> float:
     de twee wint. Zie `FUSE_MARGIN_SHARE` voor waarom een vast getal alleen niet
     volstaat.
     """
-    return max(grid.margin_amps, grid.fuse_amps * FUSE_MARGIN_SHARE)
+    return fuse_margin_van(grid.fuse_amps, grid.margin_amps)
+
+
+def fuse_margin_van(fuse_amps: float, margin_amps: float) -> float:
+    """Dezelfde marge voor elke zekering, ook die van een groep."""
+    return max(margin_amps, fuse_amps * FUSE_MARGIN_SHARE)
 
 
 # The words the Easee reports when something other than the coach is holding the
@@ -2614,14 +2692,14 @@ def _decide(
             return Decision(
                 True,
                 MIN_AMPS,
-                "Je aansluiting zit bijna vol, dus hij laadt door op de laagste stand.",
+                f"{_aansluiting(grid, car, charger)} zit bijna vol, dus hij laadt door op de laagste stand.",
                 plan="Gaat weer omhoog zodra er ruimte is.",
                 rule="tight",
             )
         return Decision(
             False,
             0,
-            "Je aansluiting is te zwaar belast om te laden. Zodra er ruimte is, gaat hij verder.",
+            f"{_aansluiting(grid, car, charger)} is te zwaar belast om te laden. Zodra er ruimte is, gaat hij verder.",
             rule="no-room",
         )
 
@@ -2634,7 +2712,7 @@ def _decide(
             ceiling,
             (
                 f"Snelladen staat aan, dus hij laadt op {ceiling} A. Meer past er nu "
-                "niet onder je zekering. Zodra je huis minder vraagt, gaat hij omhoog."
+                f"niet onder {zekering_van(knelpunt(grid, car, charger))}. Zodra je huis minder vraagt, gaat hij omhoog."
                 if fuse_limited(grid, car, charger)
                 else f"Snelladen staat aan, dus hij laadt op {ceiling} A, ongeacht de prijs."
             ),

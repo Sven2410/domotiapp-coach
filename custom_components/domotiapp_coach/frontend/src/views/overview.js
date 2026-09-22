@@ -377,6 +377,14 @@ class DacViewOverview extends DacElement {
     /* ---- per phase ---- */
     .phases[hidden] { display: none; }
     .phase-rows { margin-top: 14px; display: grid; gap: 10px; }
+    .phase-group {
+      margin: 10px 0 4px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--dac-ink-3);
+    }
     .phase-row {
       display: grid;
       grid-template-columns: 34px minmax(0, 1fr) auto;
@@ -2115,12 +2123,14 @@ class DacViewOverview extends DacElement {
 
     const bounds = { low: Math.round(alertAt * 0.75), high: alertAt };
 
-    this.$("#phase-rows").innerHTML = r.phases
+    // Eerst de hoofdaansluiting, dan elke groep met een eigen zekering, elk
+    // tegen zijn eigen zekering (v0.75.0).
+    const rijen = (phases, zekering) => phases
       .map((phase) => {
         // The bar follows the amps, measured or worked out from the power, so a
         // customer who mapped only one of the two still gets a reading.
         const share =
-          fuse > 0 && Number.isFinite(phase.amps) ? (phase.amps / fuse) * 100 : null;
+          zekering > 0 && Number.isFinite(phase.amps) ? (phase.amps / zekering) * 100 : null;
         // Teruglevering laadt de zekering niet zoals afname dat doet, en een
         // balk kan sowieso niet korter dan niets. Zonder deze bodem werd het
         // `width: -0.1%`, en dat is geen breedte maar ongeldige CSS.
@@ -2153,6 +2163,11 @@ class DacViewOverview extends DacElement {
           </div>`;
       })
       .join("");
+
+    const groepen = (r.circuits ?? [])
+      .map((g) => `<div class="phase-group">${g.name}${g.fuse ? `, tegen ${g.fuse} A` : ""}</div>${rijen(g.phases, g.fuse)}`)
+      .join("");
+    this.$("#phase-rows").innerHTML = rijen(r.phases, fuse) + groepen;
   }
 
   /**
