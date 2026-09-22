@@ -1252,6 +1252,26 @@ drie uur, slingerend tussen 357 en 3.500 W; nieuw: twee per puls en 0,17 kWh
 van het net op een hele dag, de tien seconden aanloop van elke puls). Proef
 26 tot 29 in test_batterij.py, proef 80 in test_coach.py.
 
+**"Daarna" is na de bevestiging, niet na de opdracht plus vijf seconden**
+(v0.81.1). De eerste nacht met de coach aan het stuur in de eerste woning,
+22-09-2026 vanaf 23:21: een last van 2,1 kW die vijf seconden aanstond, een
+batterij die de opdracht pas na tien seconden uitvoerde, en toen om :08 de
+meter met de oude stand (−2141 W) en om :09 de sensor met de nieuwe (228 W).
+`meter_na` eiste alleen een meting van na de opdracht plus `VOLGT_NA`, en
+:08 was dat; de regelaar telde −2141 bij 230 op en vroeg 966 W laden, op 12%
+midden in de nacht. Daarna elke tien seconden de andere kant op: 1155
+ontladen, 195, 1781, 220. De `Regelaar` onthoudt nu wanneer de sensor de
+opdracht voor het eerst bevestigde (`bevestigd_op`) en telt alleen een meting
+van daarná; zonder sensor blijft het de opdracht plus tweemaal `VOLGT_NA`. De
+meter meldt eens per vijf seconden, dus dit kost hooguit één tik. Het virtuele
+huis kan dit sinds die nacht nadoen: `Batterij.meter_tik_s` en `meter_fase_s`
+(een P1 die om :03 en :08 meldt en daartussen vasthoudt) met stappen van een
+seconde. Scenario `batterij-klapperlast` (oud: 286 opdrachten, 143 wissels,
+0,86 kWh van het net in een uur op 30%; nieuw: 181, 0, 0,25), proef 30 in
+test_batterij.py met de getallen van die nacht. Wat er overblijft is één
+opdracht per puls en één terug: de batterij reageert op een puls die allang
+voorbij is, en dat is geen slinger maar de vertraging van de batterij zelf.
+
 **Gaat de coach weg, dan gaat de batterij terug** (`_async_batterij_loslaten`):
 vermogen op nul en `idle_mode` in de modus. Ook als het vinkje "mag sturen" eraf
 gaat of het niveau naar adviseren. Dezelfde gedachte als de stroom terug op de
@@ -1280,7 +1300,7 @@ websocket.py), en de regels op de kaart in `battery.js`.
 
 Het virtuele huis heeft een `Batterij` die een opdracht na vijf seconden
 uitvoert en daarna vasthoudt, zoals een batterij in externe sturing doet.
-Vijftien scenario's `batterij-*` in scenarios.py, met per scenario het aantal
+Zestien scenario's `batterij-*` in scenarios.py, met per scenario het aantal
 opdrachten, de richtingwissels, en de kosten van de dag met en zonder batterij.
 Wat eruit kwam en gerepareerd is: het klapperen in het randuur, en een waarde
 die vlak onder de laadgrens een achtste te laag uitkwam, waardoor de batterij op
@@ -1363,9 +1383,9 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 387 controles op het denkwerk
-python tests/test_batterij.py    # 82 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_batterij.py    # 90 op het denkwerk van de thuisbatterij en op de regelaar
 python tests/test_coach.py       # 535 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1622 op hele laadbeurten in het virtuele huis
+python tests/test_virtueel.py    # 1634 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 76 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

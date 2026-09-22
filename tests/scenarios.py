@@ -907,6 +907,18 @@ batterij_uurlast = Scenario(
     batterij=Batterij(soc=60.0, **ANKER_SENSOR),
     begin="2026-09-07 09:55", duur_uren=24, kabel_erin="+9 07:00", schema_aan=False, stap_seconden=5,
 )
+# De nacht van 22-09-2026 in de eerste woning, met de coach aan het stuur: een
+# last die vijf seconden aan en vijftien seconden uit staat, een batterij die
+# een opdracht pas na tien seconden uitvoert, en een sensor die dat vrijwel
+# meteen meldt. De meter van 5 s na de opdracht toont dan nog de oude stand.
+batterij_klapperlast = Scenario(
+    "batterij-klapperlast",
+    "nacht, vast contract, en elke twintig seconden vijf seconden 2 kW: de batterij volgt pas na tien seconden, en de regelaar hoort daar niet op door te schieten",
+    contract="vast", zon=Zon(wolken="geen"), voorspeller="geen",
+    huis=Huis(puls=(2000.0, 5.0, 1 / 3)),
+    batterij=Batterij(soc=30.0, volgt_na_s=10.5, sensor_na_s=1.0, meter_tik_s=5.0, meter_fase_s=3.0),
+    begin="2026-09-07 22:55", duur_uren=1, kabel_erin="+9 07:00", schema_aan=False, stap_seconden=1,
+)
 batterij_zonder_rendement = batterij_winter.kopie(
     naam="batterij-rendement-onbekend",
     uitleg="geen kWh-meter en niets opgegeven: alleen nul op de meter, niet van het net laden",
@@ -917,7 +929,7 @@ BATTERIJ = [
     batterij_vast_zon, batterij_vast_salderen, batterij_winter, batterij_zomer, batterij_handelen,
     batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_paal, batterij_sprong,
     batterij_meter_weg, batterij_herstart, batterij_anker_sensor, batterij_uurlast,
-    batterij_zonder_rendement,
+    batterij_klapperlast, batterij_zonder_rendement,
 ]
 
 ALLE = [

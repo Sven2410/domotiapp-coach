@@ -1277,8 +1277,11 @@ for naam, vl in V.items():
     # Het antwoord op "hoe zorgen we dat we niet gaan pendelen": in de eerste
     # woning stuurde de oude regelaar 1.700 keer per dag bij en wisselde de
     # batterij 233 keer van toestand.
-    controle(f"{naam}: hooguit tien opdrachten per uur",
-             len(vl.bat_opdrachten) / uren <= 10, f"{len(vl.bat_opdrachten) / uren:.1f} per uur")
+    # Een last die elke twintig seconden klappert vraagt per puls een opdracht
+    # en een terug; dat scenario meet zijn eigen grens hieronder.
+    if naam != "batterij-klapperlast":
+        controle(f"{naam}: hooguit tien opdrachten per uur",
+                 len(vl.bat_opdrachten) / uren <= 10, f"{len(vl.bat_opdrachten) / uren:.1f} per uur")
     # Zes mag altijd: ontladen, laden bij een negatieve prijs, vol, en weer
     # ontladen is er al drie, en dat is geen pendelen.
     controle(f"{naam}: hooguit een richtingwissel per twee uur",
@@ -1462,6 +1465,22 @@ if (vl := v("batterij-uurlast")):
              vl.bat_afname_kwh <= 0.25, f"{vl.bat_afname_kwh:.3f}")
     controle("uurlast: overdag nul op de meter en niet meer dan een handvol richtingwissels",
              vl.bat_wissels() <= 8, f"{vl.bat_wissels()}")
+
+# De nacht van 22-09-2026 in de eerste woning, met de coach aan het stuur: een
+# last van vijf seconden elke twintig seconden, een batterij die pas na tien
+# seconden volgt, en een P1 die om :03 en :08 meldt terwijl de sensor van de
+# batterij om :09 al de nieuwe stand toont. Met de regelaar van v0.81.0: 286
+# opdrachten en 143 richtingwissels in een uur, 0,86 kWh van het net op 30%
+# midden in de nacht. Nu: één opdracht per puls en terug, geen enkele wissel.
+if (vl := v("batterij-klapperlast")):
+    print(f"  klapperlast: {len(vl.bat_opdrachten)} opdrachten, {vl.bat_wissels()} wissels, "
+          f"net {vl.bat_afname_kwh:.3f} kWh erin, {vl.bat_levering_kwh:.3f} eruit")
+    controle("klapperlast: 's nachts op 30% gaat er geen enkele opdracht de laadkant op",
+             vl.bat_wissels() == 0 and all(w <= 0 for _, w in vl.bat_opdrachten), f"{vl.bat_wissels()}")
+    controle("klapperlast: hooguit twee opdrachten per puls (omlaag en weer omhoog)",
+             len(vl.bat_opdrachten) <= 2 * 181, f"{len(vl.bat_opdrachten)}")
+    controle("klapperlast: er komt in dat uur niet meer dan een derde kWh van het net",
+             vl.bat_afname_kwh <= 0.35, f"{vl.bat_afname_kwh:.3f}")
 
 if (vl := v("batterij-rendement-onbekend")):
     controle("rendement onbekend: alleen nul op de meter",
