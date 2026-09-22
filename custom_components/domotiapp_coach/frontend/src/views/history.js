@@ -22,7 +22,7 @@ import { deviceLabel, deviceLabelMap } from "../devices.js";
 
 /** Het merkteken op het rapport. */
 const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
-import { tariff } from "../data-source.js";
+import { tariff, contractAt } from "../data-source.js";
 import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
 import { beurtenIn, delen, opmerking, perApparaat, totalen, woorden } from "../savings.js";
@@ -329,8 +329,14 @@ class DacViewHistory extends DacElement {
               ).join("")}
             </div>
           </div>
-          <button type="button" class="download" id="report" title="Een rapport om te bewaren of te printen">
-            ${icons.compass}<span>Rapport</span>
+          <!-- Twee rapporten. De bewoner van de eerste woning op 22-09-2026:
+               "omdat ie nu zó uitgebreid is downloaden consumenten m straks niet
+               meer; dus twee varianten bieden, een onepager en een uitgebreide." -->
+          <button type="button" class="download" id="report-short" title="Eén pagina: de cijfers, het geld, bespaard en het verloop">
+            ${icons.compass}<span>Kort rapport</span>
+          </button>
+          <button type="button" class="download" id="report" title="Alles, met het verloop per apparaat en alle cijfers">
+            ${icons.compass}<span>Uitgebreid rapport</span>
           </button>
           <div class="stepper">
             <button type="button" class="now" id="now" hidden></button>
@@ -409,7 +415,8 @@ class DacViewHistory extends DacElement {
         this.paintKorrel_();
       });
     }
-    this.$("#report").addEventListener("click", () => this.report_());
+    this.$("#report").addEventListener("click", () => this.report_(false));
+    this.$("#report-short").addEventListener("click", () => this.report_(true));
     this.$("#prev").addEventListener("click", () => this.step_(-1));
     this.$("#next").addEventListener("click", () => this.step_(1));
     this.$("#now").addEventListener("click", () => {
@@ -473,7 +480,7 @@ class DacViewHistory extends DacElement {
   meters_() {
     const meters = this.settings_?.sources?.meters ?? {};
     return {
-      solar: [meters.solar_total].filter(Boolean),
+      solar: [meters.solar_total, ...(Array.isArray(meters.solar_total_extra) ? meters.solar_total_extra : [])].filter(Boolean),
       import: [meters.import_low, meters.import_high].filter(Boolean),
       export: [meters.export_low, meters.export_high].filter(Boolean),
       gas: meters.gas_enabled && meters.gas ? [meters.gas] : [],
@@ -685,6 +692,11 @@ class DacViewHistory extends DacElement {
     };
     totals.selfUse =
       hasSolar && totals.solar > 0 ? (sum("own") / totals.solar) * 100 : null;
+    // Zelfvoorzienend, zoals het energiedashboard van Home Assistant het noemt:
+    // welk deel van je verbruik niet van het net kwam. De bewoner van de eerste
+    // woning op 22-09-2026: "daar mag zelfvoorzienend nog wel bij."
+    totals.selfSufficient =
+      hasSolar && totals.used > 0 ? Math.max(0, (1 - sum("bought") / totals.used) * 100) : null;
 
     this.paintTotals_(totals);
     this.paintLegend_();
@@ -787,6 +799,7 @@ class DacViewHistory extends DacElement {
           bought: row.bought,
           sold: row.sold,
           selfUse: row.own + row.sold > 0 ? (row.own / (row.own + row.sold)) * 100 : null,
+          selfSufficient: row.used > 0 ? Math.max(0, (1 - row.bought / row.used) * 100) : null,
         },
         bucketTitle(this.period_, row.start)
       );
@@ -819,11 +832,14 @@ class DacViewHistory extends DacElement {
    * niets, zodat een verandering aan de bladspiegel nooit per ongeluk een getal
    * verandert en andersom.
    */
-  async reportData_() {
+  async reportData_(beknopt = false) {
     const rows = this.rowsShown_ ?? [];
     if (!rows.length) return null;
 
-    const vermogen = await this.vermogen_();
+    // Het beknopte rapport slaat het vermogensdeel over: dat is het lange
+    // stuk, en het is niet nodig voor één pagina.
+    const vermogen = beknopt ? { samenvatting: null, detail: null } : await this.vermogen_();
+    const contract = this.settings_?.contract;
 
     const prices = this.prices_ ?? new Map();
     const rate = tariff(this.feed_, this.settings_?.contract);
@@ -855,9 +871,19 @@ class DacViewHistory extends DacElement {
       return `${getal} ${unit}`;
     };
 
-    const prijsBij = (row) => prices.get(row.start.getTime()) ?? rate.buy;
+    const prijsBij = (row) =>
+      contractAt(contract, row.start).period?.all_in_price > 0
+        ? contractAt(contract, row.start).buy
+        : (prices.get(row.start.getTime()) ?? rate.buy);
+    const terugBij = (row) => contractAt(contract, row.start).feedIn ?? rate.feedIn;
+    const gasBij = (row) => contractAt(contract, row.start).gas;
     const waarde = (key) =>
       rows.reduce((total, row) => total + row[key] * (prijsBij(row) ?? 0), 0);
+    const terugWaarde = rows.reduce((total, row) => total + row.sold * (terugBij(row) ?? 0), 0);
+    const metTerug = rows.some((row) => terugBij(row) !== null);
+    const gasRijen = this.rows_?.gas ?? [];
+    const gasWaarde = gasRijen.reduce((total, row) => total + row.value * (gasBij(row) ?? 0), 0);
+    const metGas = gasRijen.length > 0 && gasRijen.some((row) => gasBij(row) !== null);
 
     // ---- de tabel per tijdvak ----
     const kop = ["Periode"];
@@ -927,6 +953,9 @@ class DacViewHistory extends DacElement {
       totals.selfUse === null || totals.selfUse === undefined
         ? null
         : cel("Zelf gebruikt", `${percent(totals.selfUse).value} %`),
+      totals.selfSufficient === null || totals.selfSufficient === undefined
+        ? null
+        : cel("Zelfvoorzienend", `${percent(totals.selfSufficient).value} %`),
       gas.size
         ? cel("Gas", `${nl([...gas.values()].reduce((a, b) => a + b, 0), 1)} m³`)
         : null,
@@ -938,19 +967,17 @@ class DacViewHistory extends DacElement {
         : [
             hasSolar ? cel("Eigen zon bespaarde", euro(waarde("own"))) : null,
             cel("Stroom gekocht voor", euro(waarde("bought"))),
-            rate.feedIn === null
-              ? null
-              : cel(
-                  "Teruglevering leverde",
-                  euro(Math.max(0, (totals.sold ?? 0) * rate.feedIn))
-                ),
+            metTerug ? cel("Teruglevering leverde", euro(Math.max(0, terugWaarde))) : null,
+            metGas ? cel("Gas gekocht voor", euro(gasWaarde)) : null,
           ].filter(Boolean);
 
+    const bespaard = this.bespaardRapport_();
     return {
       logoUrl: LOGO_URL,
       woning,
       periode,
-      korrel,
+      korrel: beknopt ? "Beknopt" : korrel,
+      beknopt,
       metZon: hasSolar,
       gemaakt: new Date().toLocaleDateString("nl-NL", {
         day: "numeric",
@@ -960,7 +987,8 @@ class DacViewHistory extends DacElement {
       energie: energieVakjes,
       geld: geldVakjes,
       geldUitleg: geldVakjes.length ? this.$("#money-note").textContent : "",
-      bespaard: this.bespaardRapport_(),
+      // Beknopt: de tegels van Bespaard wel, de regels per beurt niet.
+      bespaard: beknopt && bespaard ? { ...bespaard, rijen: [] } : bespaard,
       verloop: rows.map((row) => ({
         label: bucketLabel(this.period_, row.start),
         own: row.own,
@@ -970,7 +998,7 @@ class DacViewHistory extends DacElement {
       apparaten: { kop: apparaatKop, rijen: apparaatRijen, uitleg: apparaatUitleg },
       vermogen: vermogen.samenvatting,
       vermogenDetail: vermogen.detail,
-      cijfers: { kop, rijen: regels, totaal: totaalCellen },
+      cijfers: beknopt ? null : { kop, rijen: regels, totaal: totaalCellen },
     };
   }
 
@@ -986,6 +1014,9 @@ class DacViewHistory extends DacElement {
     return [
       ...netBronnen(bronnen),
       { entity: bronnen.solar, label: "Zon" },
+      ...(Array.isArray(bronnen.solar_extra) ? bronnen.solar_extra : [])
+        .filter(Boolean)
+        .map((entity, i) => ({ entity, label: `Zon ${i + 2}` })),
       ...(this.settings_?.devices ?? []).map((device) => ({
         entity: device.entity,
         label: namen.get(device.id) ?? deviceLabel(device),
@@ -1116,11 +1147,11 @@ class DacViewHistory extends DacElement {
    * pdf zelf gemaakt, zie pdf.js, en gaat hij als bestand naar buiten. Daarmee
    * werkt het op elk apparaat op dezelfde manier.
    */
-  async report_() {
-    const knop = this.$("#report");
+  async report_(beknopt = false) {
+    const knop = this.$(beknopt ? "#report-short" : "#report");
     if (knop?.disabled) return;
 
-    const gegevens = await this.reportData_();
+    const gegevens = await this.reportData_(beknopt);
     if (!gegevens) return;
 
     const label = knop?.querySelector("span");
@@ -1130,7 +1161,7 @@ class DacViewHistory extends DacElement {
 
     try {
       const blob = await reportPdf(gegevens);
-      const naam = `DomotiApp Coach ${gegevens.periode}.pdf`.replace(/[\\/:*?"<>|]/g, "-");
+      const naam = `DomotiApp Coach ${gegevens.periode}${beknopt ? " (beknopt)" : ""}.pdf`.replace(/[\\/:*?"<>|]/g, "-");
       const uitkomst = await this.bezorg_(blob, naam);
       if (label && uitkomst === "mislukt") label.textContent = "Niet gelukt";
       else if (label) label.textContent = oud;
@@ -1239,6 +1270,9 @@ class DacViewHistory extends DacElement {
     rows.push({ label: "Naar het net", value: energy(totals.sold), tone: "var(--dac-grid-out)" });
     if (totals.selfUse !== null) {
       rows.push({ label: "Zelf gebruikt", value: percent(totals.selfUse), tone: "var(--dac-good)" });
+    }
+    if (totals.selfSufficient !== null && totals.selfSufficient !== undefined) {
+      rows.push({ label: "Zelfvoorzienend", value: percent(totals.selfSufficient), tone: "var(--dac-good)" });
     }
 
     this.$("#totals").replaceChildren(
@@ -1484,11 +1518,18 @@ class DacViewHistory extends DacElement {
       return;
     }
 
-    // Per bucket met de prijs van dat moment, als die er is. Anders valt het
-    // terug op één tarief voor de hele periode.
+    // Per bucket met de prijs van dat moment: een eerder contract als die dag
+    // erin valt, anders de prijs uit de geschiedenis van de prijsentiteit, en
+    // anders het huidige tarief.
     const prices = this.prices_ ?? new Map();
     const perBucket = prices.size > 0;
-    const priceAt = (row) => (perBucket ? prices.get(row.start.getTime()) ?? rate.buy : rate.buy);
+    const contract = this.settings_?.contract;
+    const priceAt = (row) =>
+      contractAt(contract, row.start).period?.all_in_price > 0
+        ? contractAt(contract, row.start).buy
+        : (perBucket ? prices.get(row.start.getTime()) ?? rate.buy : rate.buy);
+    const feedInAt = (row) => contractAt(contract, row.start).feedIn ?? rate.feedIn;
+    const gasAt = (row) => contractAt(contract, row.start).gas;
 
     const own = rows.reduce((total, row) => total + row.own, 0);
     const bought = rows.reduce((total, row) => total + row.bought, 0);
@@ -1496,6 +1537,13 @@ class DacViewHistory extends DacElement {
 
     const ownValue = rows.reduce((total, row) => total + row.own * priceAt(row), 0);
     const boughtValue = rows.reduce((total, row) => total + row.bought * priceAt(row), 0);
+    const soldValue = rows.reduce((total, row) => total + row.sold * (feedInAt(row) ?? 0), 0);
+    const metTerug = rows.some((row) => feedInAt(row) !== null);
+    // Gas: per bucket de m³ maal de gasprijs van toen. Zonder gasprijs geen tegel.
+    const gasRows = this.rows_?.gas ?? [];
+    const gasValue = gasRows.reduce((total, row) => total + row.value * (gasAt(row) ?? 0), 0);
+    const metGas = gasRows.length > 0 && gasRows.some((row) => gasAt(row) !== null);
+    const eerder = rows.some((row) => contractAt(contract, row.start).period);
 
     // Alle drie als positief bedrag, met het label dat de richting draagt. Een
     // minteken voor een euroteken leest als een fout, en met "gekocht voor" is
@@ -1507,12 +1555,15 @@ class DacViewHistory extends DacElement {
       cells.push({ label: "Eigen zon bespaarde", value: euro(ownValue), tone: "var(--dac-solar)" });
     }
     cells.push({ label: "Stroom gekocht voor", value: euro(boughtValue), tone: "var(--dac-grid-in)" });
-    if (rate.feedIn !== null) {
+    if (metTerug) {
       cells.push({
         label: "Teruglevering leverde",
-        value: euro(Math.max(0, sold * rate.feedIn)),
+        value: euro(Math.max(0, soldValue)),
         tone: "var(--dac-grid-out)",
       });
+    }
+    if (metGas) {
+      cells.push({ label: "Gas gekocht voor", value: euro(gasValue), tone: "var(--dac-warn)" });
     }
 
     card.hidden = false;
@@ -1551,7 +1602,9 @@ class DacViewHistory extends DacElement {
 
     this.$("#money-note").textContent =
       uitleg +
-      (rate.feedIn === null
+      (eerder ? " Dagen die in een eerder contract vallen zijn gerekend met de prijs van dat contract." : "") +
+      (metGas ? ` Gas tegen ${euro(gasRows.map(gasAt).find((g) => g !== null) ?? 0)} per m³.` : "") +
+      (!metTerug
         ? " Wat teruglevering opbrengt staat er niet bij, want bij een all-in prijsentiteit is de kale marktprijs er niet uit te halen."
         : "");
   }

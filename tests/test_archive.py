@@ -219,6 +219,7 @@ instellingen = {
         "grid_export": "sensor.teruglevering",
         "grid_signed": "",
         "solar": "sensor.zon",
+        "solar_extra": ["sensor.zon2", ""],
     },
     "devices": [
         {"id": "d1", "entity": "sensor.laadpaal"},
@@ -227,8 +228,8 @@ instellingen = {
     ],
 }
 volgt = archive.Archive._wat_volgen(instellingen)
-controle("het net, de zon en elk gekoppeld apparaat",
-         volgt == {"sensor.afname", "sensor.teruglevering", "sensor.zon",
+controle("het net, de zon (elke omvormer) en elk gekoppeld apparaat",
+         volgt == {"sensor.afname", "sensor.teruglevering", "sensor.zon", "sensor.zon2",
                    "sensor.laadpaal", "sensor.warmtepomp"}, f"{sorted(volgt)}")
 controle("en een leeg veld levert geen sensor op", "" not in volgt, f"{sorted(volgt)}")
 

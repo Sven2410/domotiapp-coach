@@ -52,6 +52,7 @@ from .batterij import (
     VOL_MARGE,
     Batterij,
     Regelaar,
+    balans_kwh,
     plan_batterij,
     rendement_uit_tellers,
     terugverdiend,
@@ -583,6 +584,13 @@ def _prijsrijen(attributes: Any) -> list[tuple[datetime, datetime | None, float]
                 continue
             voeg(row.get("datetime"), None, prijs)
     return uit
+
+
+def zonsensoren(settings: dict[str, Any]) -> list[str]:
+    """De vermogenssensoren van alle omvormers: de eerste en de extra's (v0.77.0)."""
+    bronnen = settings.get("sources") or {}
+    uit = [bronnen.get("solar")] + list(bronnen.get("solar_extra") or [])
+    return [z for z in uit if isinstance(z, str) and z]
 
 
 def _moment(now: datetime | None = None) -> datetime:
@@ -1182,8 +1190,8 @@ class ChargerCoach:
         """
         uit: dict[str, str] = {}
         bronnen = settings.get("sources") or {}
-        if bronnen.get("solar"):
-            uit[bronnen["solar"]] = "de zonnesensor"
+        for i, zon in enumerate(zonsensoren(settings)):
+            uit[zon] = "de zonnesensor" if i == 0 else f"de zonnesensor van omvormer {i + 1}"
         for fase, velden in (bronnen.get("phases") or {}).items():
             if isinstance(velden, dict) and velden.get("current"):
                 uit[velden["current"]] = f"de stroommeting van fase {str(fase).upper()}"
@@ -1304,7 +1312,7 @@ class ChargerCoach:
         hij (`no-prices`), zonder lastbewaker rekent hij op de zekering. Dit is
         alleen de melding dat er iets stuk is, want daar kijkt niemand naar.
         """
-        zon = (settings.get("sources") or {}).get("solar")
+        zonnen = set(zonsensoren(settings))
         auto_sensoren = {
             car.get("soc_entity")
             for device in settings.get("devices") or []
@@ -1314,7 +1322,7 @@ class ChargerCoach:
         for entity_id, naam in self._sensoren(settings).items():
             state = self.hass.states.get(entity_id)
             stil = state is None or state.state in ("unknown", "unavailable", "")
-            if stil and entity_id == zon and self._zon_slaapt():
+            if stil and entity_id in zonnen and self._zon_slaapt():
                 # Een omvormer die slaapt is geen storing. De klok begint pas
                 # als de zon hoog genoeg staat om hem wakker te maken.
                 self._sensor_stil.pop(entity_id, None)
@@ -1350,6 +1358,18 @@ class ChargerCoach:
                 "zolang zonder.",
                 kritiek=True,
             )
+
+    def _zon_w(self, settings: dict[str, Any]) -> float | None:
+        """Wat alle omvormers samen nu geven, of None zolang er een niets zegt.
+
+        Eén omvormer die zwijgt maakt de som onbekend, niet kleiner: wie de
+        zonverwachting bijstelt op een halve meting rekent het dak naar beneden
+        voor iets dat er wel was.
+        """
+        waarden = [_watts(self.hass, zon) for zon in zonsensoren(settings)]
+        if not waarden or any(w is None for w in waarden):
+            return None
+        return sum(waarden)
 
     def _zon_slaapt(self) -> bool:
         """Of de zon zo laag staat dat een omvormer mag slapen (`sun.sun`).
@@ -3583,6 +3603,9 @@ class ChargerCoach:
             "amps": 0,
             "reason": besluit.reason,
             "plan": besluit.plan,
+            # Wat er morgenvroeg naar verwachting over is of tekortkomt, zodat de
+            # kaart de conclusie groen of oranje kan maken.
+            "balance_kwh": None if (bal := balans_kwh(now, verwachting, b)) is None else round(bal, 2),
             "rule": besluit.rule,
             "kind": "batterij",
             "mode": besluit.stand,
@@ -4338,7 +4361,7 @@ class ChargerCoach:
         self._huis_tot = now + HUIS_VERVERSEN
 
         bronnen = settings.get("sources") or {}
-        zon = bronnen.get("solar")
+        zonnen_ids = zonsensoren(settings)
         erin = bronnen.get("grid_import")
         eruit = bronnen.get("grid_export")
         getekend = bronnen.get("grid_signed")
@@ -4360,7 +4383,7 @@ class ChargerCoach:
             elif device.get("entity"):
                 tekens.append((device["entity"], 1.0))
         apparaten = [naam for naam, _ in tekens]
-        wanted = [e for e in [zon, erin, eruit, getekend, *apparaten] if e]
+        wanted = [e for e in [*zonnen_ids, erin, eruit, getekend, *apparaten] if e]
         if not wanted:
             return
 
@@ -4381,8 +4404,12 @@ class ChargerCoach:
                 for rij in rijen.get(entity_id, [])
             }
 
-        zonnen, binnen, buiten, getekende = (
-            kwartieren(zon),
+        # Meer omvormers: per kwartier bij elkaar opgeteld.
+        zonnen: dict[int, float] = {}
+        for zon_id in zonnen_ids:
+            for stempel, watt in kwartieren(zon_id).items():
+                zonnen[stempel] = zonnen.get(stempel, 0.0) + watt
+        binnen, buiten, getekende = (
             kwartieren(erin),
             kwartieren(eruit),
             kwartieren(getekend),
@@ -5124,7 +5151,7 @@ class ChargerCoach:
         """
         if self._zon_reeks and self._zon_reeks[-1][0] >= now:
             return
-        opbrengst = _watts(self.hass, (settings.get("sources") or {}).get("solar"))
+        opbrengst = self._zon_w(settings)
         if opbrengst is None:
             return
         uur = now.replace(minute=0, second=0, microsecond=0)

@@ -625,6 +625,8 @@ class DacViewOverview extends DacElement {
     .says-mark .icon { width: 16px; height: 16px; }
     .says-plan { margin: 0 0 0 25px; font-size: 12.5px; line-height: 1.5; color: var(--dac-ink-2); }
     .says-plan:empty { display: none; }
+    .says-plan.good { color: var(--dac-good); }
+    .says-plan.warn { color: var(--dac-warn); }
     /* Iets aan de installatie dat de bewoner zelf moet verhelpen. Apart van de
        reden, want het gaat niet over dit besluit maar over elke laadbeurt. */
     .says-tip {
@@ -1754,7 +1756,13 @@ class DacViewOverview extends DacElement {
       stil !== null && stil >= COACH_SILENT_MINUTES
         ? `De coach heeft ${stil} minuten niets beslist. Dit vond hij het laatst: ${besluit.reason ?? ""}`
         : (besluit.reason ?? "");
-    this.$(`[data-coach-plan="${slot}"]`).textContent = besluit.plan ?? "";
+    const planTekst = this.$(`[data-coach-plan="${slot}"]`);
+    planTekst.textContent = besluit.plan ?? "";
+    // De conclusie van de batterij: groen als de nacht rond komt, oranje als
+    // er tekort is. De bewoner van de eerste woning op 22-09-2026.
+    const balans = besluit.kind === "batterij" && Number.isFinite(besluit.balance_kwh) ? besluit.balance_kwh : null;
+    planTekst.classList.toggle("good", balans !== null && balans >= 0);
+    planTekst.classList.toggle("warn", balans !== null && balans < 0);
 
     // Wat de coach ziet maar niet kan sturen: een laderlimiet die elke
     // laadbeurt op één fase zet. Alleen tonen als hij het werkelijk meet.

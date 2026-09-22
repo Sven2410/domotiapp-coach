@@ -192,6 +192,21 @@ b12 = plan_batterij(DAG.replace(hour=2), LIJST3, Tariff(), verwachting(WINTER, h
 print(f"  {b12.stand}: {b12.reason}\n  {b12.plan}")
 controle("hij laadt bij in de nacht", b12.stand == NETLADEN, b12.stand)
 controle("en zegt wat hij verwacht", "zon" in b12.plan and "huis vraagt" in b12.plan, b12.plan)
+# De bewoner van de eerste woning op 22-09-2026: tot morgenvroeg, en afsluiten
+# met een conclusie: over, of tekort om de nacht te overbruggen.
+controle("tot morgenvroeg, niet tot middernacht", "morgenvroeg" in b12.plan and "middernacht" not in b12.plan, b12.plan)
+controle("met een bijna lege batterij en weinig zon: een tekort, en hij laadt bij",
+         "tekort om de nacht te overbruggen" in b12.plan, b12.plan)
+bal12 = bat.balans_kwh(DAG.replace(hour=2), verwachting(WINTER, huis=0.5), anker(soc=8.0))
+controle("en de balans is dan negatief", bal12 is not None and bal12 < 0, f"{bal12}")
+b12c = plan_batterij(DAG.replace(hour=20), prijzen([0.25] * 24, terug=0.05), Tariff(),
+                     verwachting(WINTER, huis=0.3), anker(soc=90.0))
+print(f"  's avonds vol: {b12c.plan}")
+controle("met een volle batterij 's avonds: over", "over in je accu" in b12c.plan, b12c.plan)
+controle("en tot morgenvroeg telt alleen de nacht: zeven uur huis, geen zon",
+         bat.balans_kwh(DAG.replace(hour=20), verwachting(WINTER, huis=0.3), anker(soc=90.0)) is not None
+         and abs(bat.nachtbalans(DAG.replace(hour=20), verwachting(WINTER, huis=0.3), anker(soc=90.0))[1] - 11 * 0.3) < 1e-6,
+         f"{bat.nachtbalans(DAG.replace(hour=20), verwachting(WINTER, huis=0.3), anker(soc=90.0))}")
 ZOMER = {u: 4.0 for u in range(8, 19)}
 b12b = plan_batterij(DAG.replace(hour=2), prijzen([0.22] * 5 + [0.25] * 19, terug=0.05), Tariff(),
                      verwachting(ZOMER, huis=0.3), anker(soc=40.0))

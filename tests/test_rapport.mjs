@@ -867,6 +867,93 @@ proef("een nieuwe auto begint met het merk, en een Tesla krijgt de wekknop en de
   assert.ok(oud.includes('data-car-field="capacity_kwh"'));
 });
 
+// --- eerdere contracten en gas ---------------------------------------------------
+//
+// De bewoner van de eerste woning op 22-09-2026: "gascontract 1: van-tot +
+// prijs, gascontract 2: van-tot + prijs; dat kun je ook doen bij de
+// stroomprijzen. Op die manier kun je een goede weergave bieden van kosten,
+// ook bij wijzigen van aanbieder."
+const { contractAt } = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
+
+proef("een dag in een eerder contract rekent met de prijs van toen, daarbuiten met het huidige", () => {
+  const contract = {
+    type: "fixed", gas_price: 1.3,
+    fixed: { all_in_price: 0.28, feed_in_tariff: 0.07, feed_in_costs: 0.01 },
+    periods: [
+      { from: "2025-01-01", to: "2025-12-31", all_in_price: 0.35, feed_in_tariff: 0.09, gas_price: 1.5 },
+      { from: "2024-01-01", to: "2024-12-31", all_in_price: 0.4, feed_in_tariff: 0, gas_price: 0 },
+    ],
+  };
+  const toen = contractAt(contract, new Date(2025, 5, 15, 12));
+  assert.equal(toen.buy, 0.35);
+  assert.equal(toen.feedIn, 0.09);
+  assert.equal(toen.gas, 1.5);
+  assert.ok(toen.period);
+  const nu = contractAt(contract, new Date(2026, 8, 22, 12));
+  assert.equal(nu.buy, 0.28);
+  assert.ok(Math.abs(nu.feedIn - 0.06) < 1e-9, "teruglevering min de kosten");
+  assert.equal(nu.gas, 1.3);
+  assert.equal(nu.period, null);
+  // Een leeg veld in een eerder contract valt terug op het huidige contract.
+  const leeg = contractAt(contract, new Date(2024, 3, 1, 12));
+  assert.equal(leeg.buy, 0.4);
+  assert.ok(Math.abs(leeg.feedIn - 0.06) < 1e-9);
+  assert.equal(leeg.gas, 1.3);
+  // Zonder gasprijs is gas onbekend, en een dynamisch contract heeft geen vaste inkoopprijs.
+  assert.equal(contractAt({ type: "dynamic", dynamic: {} }, new Date()).buy, null);
+  assert.equal(contractAt({ type: "fixed", fixed: { all_in_price: 0.28 } }, new Date()).gas, null);
+  // Een contract zonder einde loopt nog.
+  const open = contractAt({ type: "dynamic", periods: [{ from: "2026-01-01", to: "", all_in_price: 0.3 }] }, new Date(2026, 8, 22));
+  assert.equal(open.buy, 0.3);
+});
+
+proef("het installatiescherm heeft de gasprijs en de eerdere contracten", () => {
+  const html = Object.create(Installatie.prototype).render();
+  assert.ok(html.includes('id="gas-price"'));
+  assert.ok(html.includes('id="periods"') && html.includes('id="period-add"'));
+});
+
+proef("de historie biedt een kort en een uitgebreid rapport", () => {
+  const html = Object.create(Historie.prototype).render();
+  assert.ok(html.includes('id="report-short"') && html.includes("Kort rapport"));
+  assert.ok(html.includes('id="report"') && html.includes("Uitgebreid rapport"));
+});
+
+// --- meer omvormers ------------------------------------------------------------
+//
+// De bewoner van de eerste woning op 22-09-2026: "steeds meer consumenten
+// hebben meerdere omvormers." De tweede en derde tellen op bij de eerste.
+proef("twee omvormers tellen op in de energiestroom, en een slapende telt als nul", () => {
+  const staten = {
+    "sensor.zon1": { state: "1500", attributes: { unit_of_measurement: "W" } },
+    "sensor.zon2": { state: "0.7", attributes: { unit_of_measurement: "kW" } },
+    "sensor.afname": { state: "0", attributes: { unit_of_measurement: "W" } },
+    "sensor.teruglevering": { state: "1200", attributes: { unit_of_measurement: "W" } },
+    "sun.sun": { state: "above_horizon", attributes: {} },
+  };
+  const feed = { get: (id) => staten[id] };
+  const settings = { sources: { solar: "sensor.zon1", solar_extra: ["sensor.zon2", ""], grid_mode: "split",
+    grid_import: "sensor.afname", grid_export: "sensor.teruglevering" } };
+  const r = new LiveSource().sample(feed, settings);
+  assert.equal(r.solar, 2200);
+  assert.equal(r.house, 1000);
+  staten["sensor.zon2"] = { state: "unavailable", attributes: {} };
+  assert.equal(new LiveSource().sample(feed, settings).solar, 1500, "wat er is telt, op het scherm");
+  assert.ok(LiveSource.isConfigured({ sources: { solar: "", solar_extra: ["sensor.zon2"], grid_mode: "split" } }),
+    "een installatie met alleen een tweede omvormer is ingesteld");
+});
+
+proef("de tellers van meer omvormers tellen op in de historie, en het rapport noemt elke omvormer", () => {
+  const el = Object.create(Historie.prototype);
+  el.settings_ = {
+    sources: { solar: "sensor.zon1", solar_extra: ["sensor.zon2"], grid_mode: "split", grid_import: "sensor.afname", grid_export: "sensor.teruglevering",
+      meters: { solar_total: "sensor.zon1_kwh", solar_total_extra: ["sensor.zon2_kwh", ""] } },
+    devices: [],
+  };
+  assert.deepEqual(el.meters_().solar, ["sensor.zon1_kwh", "sensor.zon2_kwh"]);
+  assert.deepEqual(el.vermogenBronnen_().map((r) => r.label), ["Van het net", "Naar het net", "Zon", "Zon 2"]);
+});
+
 // --- de knoppenrij op de laadpaalkaart --------------------------------------
 //
 // Op 30-08-2026 kreeg de nieuwe knop "Wat gaat hij doen" de klasse `plan-link`,

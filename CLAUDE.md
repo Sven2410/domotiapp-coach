@@ -479,6 +479,57 @@ want sturen kon de coach hem nooit. Autoprofielen en het schema blijven staan.
 Proef 24b in test_coach.py.
 
 
+## De feedback van de eerste woning, 22-09-2026 (v0.77.0)
+
+Vijf punten van de bewoner van de eerste woning, doorgestuurd door de eigenaar,
+allemaal gebouwd in v0.77.0.
+
+1. **Zelfvoorzienend in Historie**, "zoals in het native HA Energie
+   dashboard": welk deel van het verbruik niet van het net kwam, `1 - bought /
+   used` (`totals.selfSufficient` in views/history.js), naast "Zelf gebruikt"
+   (welk deel van de opwek zelf gebruikt is), ook per balk en in de tegels van
+   het rapport.
+2. **De batterijzin loopt tot morgenvroeg en sluit af met een conclusie.**
+   "De meeste consumenten hebben een accu om de nacht te overbruggen." `OCHTEND_UUR`
+   (zeven uur), `nachtbalans` en `balans_kwh` in batterij.py: zon, huis en wat er
+   bruikbaar in de batterij zit tot morgenvroeg, met het rendement erin ("goed
+   voor X kWh na het verlies"), en dan "Je houdt naar verwachting X kWh over in
+   je accu" of "Je komt naar verwachting X kWh tekort om de nacht te overbruggen;
+   hij laadt bij als de stroom goedkoop genoeg is." De kaart maakt de conclusie
+   groen of oranje (`balance_kwh` in de stand, `.says-plan.good/.warn` in
+   overview.js). Proef 12 in test_batterij.py.
+3. **Meerdere omvormers.** "Steeds meer consumenten hebben meerdere omvormers."
+   `sources.solar_extra` (vermogens) en `sources.meters.solar_total_extra`
+   (kWh-tellers), lijsten naast de eerste; bij Instellingen "Nog een omvormer"
+   en "Nog een opwekteller" (`paintExtra_` in views/settings.js). `zonsensoren`
+   in coach.py is de ene lijst voor alle vier de lezers (de sensorwacht, met per
+   omvormer een eigen naam; de slapende-omvormer-uitzondering; het huisverbruik
+   uit de kwartieropslag; `_zon_bijhouden`), en `_zon_w` telt op maar wordt
+   onbekend zodra één omvormer zwijgt: een halve meting zou het dak naar beneden
+   rekenen. Het archief volgt ze (`_wat_volgen`). In het paneel `solarEntities`
+   en `readSolarAll` in data-source.js (op het scherm telt wat er is), de
+   tellers in `meters_()` en "Zon 2", "Zon 3" in het rapport. Proef 83 in
+   test_coach.py, test_archive.py en test_rapport.mjs.
+4. **Gasprijs en eerdere contracten.** "Gascontract 1: van-tot + prijs,
+   gascontract 2: van-tot + prijs; dat kun je ook doen bij de stroomprijzen."
+   `contract.gas_price` (euro per m³) en `contract.periods` (van, tot, all-in
+   stroomprijs, terugleververgoeding, gasprijs; een leeg veld valt terug op het
+   huidige contract). `contractAt(contract, dag)` in data-source.js kiest per
+   dag het contract van toen; Historie en het rapport rekenen daar per bucket
+   mee (`priceAt`, `feedInAt`, `gasAt` in `paintMoney_` en `reportData_`), met
+   de tegel "Gas gekocht voor" zodra er een gasprijs is. **Alleen voor
+   terugkijken**: wat de coach nu doet rekent met het huidige contract
+   (`_tariff` in coach.py is ongewijzigd), en de laadbeurten in `BeurtenStore`
+   hebben hun prijzen al bevroren. Formulier bij Installatie onder Contract:
+   "Gasprijs" en "Eerdere contracten" (`paintPeriods_`).
+5. **Een kort rapport naast het uitgebreide.** "Omdat ie nu zó uitgebreid is
+   downloaden consumenten m straks niet meer." Twee knoppen in Historie: "Kort
+   rapport" (`#report-short`, `reportData_(true)`: de tegels van energie, geld
+   en bespaard, het verloop en per apparaat; geen regels per beurt, geen
+   vermogen, geen "Alle cijfers", kop "Beknopt") en "Uitgebreid rapport". Het
+   rapport zelf (report.js) is niet veranderd: elk deel stond er al alleen als er
+   gegevens voor zijn.
+
 ## Het merk van de auto, en een Tesla die slaapt
 
 Sinds 22-09-2026 (v0.76.0) heeft een autoprofiel een merk: Ford of Tesla
@@ -1183,11 +1234,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 386 controles op het denkwerk
-python tests/test_batterij.py    # 74 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 501 op de bedrading, met een nagebouwde HA
+python tests/test_batterij.py    # 79 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_coach.py       # 506 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1683 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 65 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 70 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

@@ -212,6 +212,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     },
     "sources": {
         "solar": "",
+        # Meer omvormers: de vermogenssensoren van de tweede en derde, bij de
+        # eerste opgeteld. De bewoner van de eerste woning op 22-09-2026:
+        # "steeds meer consumenten hebben meerdere omvormers."
+        "solar_extra": [],
         # House consumption is never configured: it follows from generation and
         # the meter, and one less mandatory sensor is one less thing to get
         # wrong at a customer.
@@ -261,6 +265,8 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             # sensor above: that one says what the panels do right now, and a
             # counter is what makes it possible to look back at a week.
             "solar_total": "",
+        # De kWh-tellers van de andere omvormers, opgeteld bij de eerste.
+        "solar_total_extra": [],
             "import_low": "",
             "import_high": "",
             "export_low": "",
@@ -310,6 +316,19 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # afspraak met je leverancier en geen sensor. De regeling loopt af op
         # 1 januari 2027, dus dit vinkje gaat vanzelf uit de praktijk verdwijnen.
         "netting": False,
+        # Wat gas kost, in euro per m³, voor de historie en het rapport. Nul is
+        # onbekend, en dan staat er geen bedrag. De bewoner van de eerste
+        # woning op 22-09-2026: "prijs van gas laten invullen."
+        "gas_price": 0.0,
+        # Eerdere contracten, voor wie van leverancier wisselde: de historie
+        # rekent elke dag met de prijs die toen gold. Per contract van, tot
+        # (leeg is nog lopend), de all-in stroomprijs, de terugleververgoeding
+        # en de gasprijs. Dezelfde bewoner: "gascontract 1: van-tot + prijs,
+        # gascontract 2: van-tot + prijs; dat kun je ook doen bij de
+        # stroomprijzen, dan kun je een goede weergave bieden van kosten, ook
+        # bij wijzigen van aanbieder." Wat de coach nú doet rekent met het
+        # contract hierboven; dit is alleen voor terugkijken.
+        "periods": [],
         "fixed": {
             "all_in_price": 0.28,
             "feed_in_tariff": 0.07,
