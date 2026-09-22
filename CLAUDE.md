@@ -889,8 +889,20 @@ stuurde iets anders de paal).
 **De laadgrens van de batterij is van de batterij.** De eigenaar: "die instelling
 van 95% is belangrijk, daar blijft hij continu op staan. Dit is een waarde waar
 niet aan gekomen moet worden." De coach leest `charge_limit` en
-`discharge_limit` en schrijft ze nooit. De wekelijkse volle beurt voor het
-balanceren (`vol_voor`, `VOL_GEWICHT`) gaat dus tot die grens en niet tot 100%.
+`discharge_limit` en schrijft ze niet, **met één uitzondering** (v0.74.0, de
+keuze van de eigenaar op 22-09-2026): de wekelijkse volle beurt voor het
+balanceren (`vol_voor`, `VOL_GEWICHT`) is er voor de cellen, en tot 95%
+balanceert niets. Op de dag van die beurt zet de coach de laadgrens op het
+maximum van de entiteit (`_async_laadgrens_omhoog`), en zodra de batterij vol
+is, de dag om is, de coach niet meer stuurt of stopt, zet hij hem terug op
+wat er stond (`_async_laadgrens_terug`, ook vanuit
+`_async_batterij_loslaten`). Wat er stond staat in `battery_state` als
+`limit_restore`, zodat een herstart het niet vergeet. Alleen op het niveau
+sturen; op adviseren blijft de grens met rust. "Vol" voor de opslag
+(`full_at`) is dan ook 100 en niet de eigen grens, anders is een batterij die
+in de zomer elke middag op 95% staat nooit aan een volle beurt toe. Proef 79
+in test_coach.py; scenario `batterij-volle-beurt` (grens om 00:05 naar 100,
+om 23:56 op 98,8% terug naar 95).
 
 **De regelaar**, na de eigen "als je realistisch kijkt verbruik je nooit steady
 350 W, hoe zorgen we dat we niet gaan pendelen?" Gemeten in de eerste woning,
@@ -904,7 +916,10 @@ tot vijftien seconden. Daaruit:
 - **Een som en geen versterkingsfactor**: het huis vraagt wat de meter zegt plus
   wat de batterij nu doet, en dat is de nieuwe opdracht.
 - **Niet opnieuw corrigeren voordat de vorige te zien is** (`bezonken`,
-  `WACHT_OP_BATTERIJ`). Hier komt pendelen vandaan.
+  `WACHT_OP_BATTERIJ`). Hier komt pendelen vandaan. Te zien is: de batterij
+  heeft `VOLGT_NA` gehad om hem uit te voeren, de sensor meldt hem, en de
+  meter heeft daarna nog gemeten; hooguit vijftien seconden wachten, de
+  keuze van de eigenaar op 22-09-2026.
 - **Een dode band** (`DODE_BAND_W`), **groot meteen en klein pas als het blijft**
   (`GROOT_W`, `KLEIN_METINGEN`), **rond nul twee grenzen** (`BEGIN_W`, `STOP_W`)
   en een kleine wens die de richting niet binnen een minuut omkeert
@@ -915,9 +930,47 @@ tot vijftien seconden. Daaruit:
   gemiste meting niet: veel integraties melden tussendoor even "niet
   beschikbaar".
 - De officiele stuurentiteit van de eerste woning **leest niet terug** wat erin
-  geschreven is (hij stond op 0 W terwijl de batterij 2250 W ontlaadde), dus de
-  regelaar kijkt naar het gemeten batterijvermogen en nooit naar zijn eigen
-  laatste opdracht als er een meting is.
+  geschreven is (hij stond op 0 W terwijl de batterij 2250 W ontlaadde). De
+  regelaar leest dus nooit uit die entiteit; hij onthoudt zijn opdracht zelf.
+
+**De sensor is de bevestiging en niet de bron** (v0.74.0). Op 22-09-2026 een
+etmaal meegekeken in de eerste woning, waar toen nog een andere sturing de
+batterij regelde, met een kWh-meter op de batterij als meetlat. Die sturing
+schreef 1.713 opdrachten per dag en slingerde bij elke korte last: zeven
+slingers in zes minuten, vijf keer 3.500 W laden met 1 tot 1,9 kW inkoop op
+een zonnige ochtend, drie keer ontladen met 1,4 tot 1,7 kW teruglevering. De
+oorzaak zat niet in die sturing maar in de sensor: het vermogen dat de
+Anker-integratie meldt loopt vijf tot tien seconden achter op de kWh-meter,
+toont onderweg een aanloop die er niet is (1040, 1020, 1010, 1000, 940 en dan
+pas 2500, terwijl de meter meteen 2580 zag) en vlak na een opdracht soms de
+opdracht zelf (0 W terwijl er aantoonbaar 2215 W liep). Wie de sensor bij de
+meter optelt telt zijn eigen opdracht dubbel. Drie dingen, alle drie in de
+`Regelaar`:
+
+1. **De som rekent met de eigen opdracht** (`vermogen_w`): nieuwe opdracht is
+   vorige opdracht plus wat de meter zegt. De sensor telt pas als hij de
+   opdracht `AFWIJK_METINGEN` keer achter elkaar tegenspreekt buiten het
+   venster na een opdracht, want een batterij die blijvend niet doet wat er
+   gevraagd is (vol, leeg, te warm) moet wel gezien worden.
+2. **Een aanloop is geen bevestiging.** Alleen een sensorwaarde binnen de dode
+   band van de opdracht telt als aangekomen, en pas na `VOLGT_NA`; een sensor
+   die twee seconden na de opdracht al "klopt" toont de opdracht en niet de
+   meting. Zonder sensor is de meter het bewijs, en dan met dubbele tijd.
+3. **Het overschot voor de andere apparaten rekent ook zo**
+   (`_batterij_geregeld_w` in coach.py, in `_batterijen_w` en dus in
+   `_netto_export_w`): anders ziet de paalplanner bij elke omslag een
+   schijnoverschot van de sensor die nog op de oude stand staat.
+
+Het virtuele huis kent daarvoor de sensor van de Anker (`sensor_na_s`,
+`sensor_aanloop`, `sensor_echo_s` op `Batterij`, samen `ANKER_SENSOR` in
+scenarios.py) en de uurlast van die woning (`Huis.puls`: elk uur veertig
+seconden 2,5 kW, een boiler of een warmtepomp zei de eigenaar). Scenario
+`batterij-anker-sensor` (de sprong van 3 kW; oud: 241 opdrachten en 118
+richtingwissels in een uur, 0,87 kWh van het net; nieuw: 3 en 0, 0,39 kWh,
+gelijk aan de eerlijke sensor) en `batterij-uurlast` (oud: 180 opdrachten in
+drie uur, slingerend tussen 357 en 3.500 W; nieuw: twee per puls en 0,17 kWh
+van het net op een hele dag, de tien seconden aanloop van elke puls). Proef
+26 tot 29 in test_batterij.py, proef 80 in test_coach.py.
 
 **Gaat de coach weg, dan gaat de batterij terug** (`_async_batterij_loslaten`):
 vermogen op nul en `idle_mode` in de modus. Ook als het vinkje "mag sturen" eraf
@@ -947,11 +1000,11 @@ websocket.py), en de regels op de kaart in `battery.js`.
 
 Het virtuele huis heeft een `Batterij` die een opdracht na vijf seconden
 uitvoert en daarna vasthoudt, zoals een batterij in externe sturing doet.
-Dertien scenario's `batterij-*` in scenarios.py, met per scenario het aantal
+Vijftien scenario's `batterij-*` in scenarios.py, met per scenario het aantal
 opdrachten, de richtingwissels, en de kosten van de dag met en zonder batterij.
 Wat eruit kwam en gerepareerd is: het klapperen in het randuur, en een waarde
 die vlak onder de laadgrens een achtste te laag uitkwam, waardoor de batterij op
-een zonnige dag op 93% bleef staan. test_batterij.py, proef 75 tot 78 in
+een zonnige dag op 93% bleef staan. test_batterij.py, proef 75 tot 80 in
 test_coach.py, en de batterijproeven in test_rapport.mjs.
 
 **Nog nooit aan een echte batterij gehangen.** Wat er in het echt anders kan
@@ -959,7 +1012,13 @@ zijn: in welke volgorde vermogen en richting geschreven moeten worden (ze delen
 bij Anker een register), wat de batterij doet als Home Assistant zelf vastloopt
 terwijl er een opdracht staat, of `BEGIN_W` en `STOP_W` bij de echte omvormer
 passen, en of het opgegeven laadvermogen klopt. Eerst meekijkend installeren
-(niveau adviseren), dan pas sturen.
+(niveau adviseren), dan pas sturen. Wat wél al aan de echte woning gemeten is
+(22-09-2026): de P1 elke vijf seconden, de batterij die een opdracht binnen
+vijf seconden volgt, de sensor die vijf tot tien seconden achterloopt, de
+accustand per procent om de vijf minuten, een nette herstart van Home
+Assistant (de andere sturing zette eerst 0 W, dertig seconden stil, daarna
+weer verder), en de omvormer van de zon die 's nachts onbereikbaar is
+(`_zon_slaapt` geldt daar ook).
 
 
 ## Hoe het in elkaar zit
@@ -1005,9 +1064,9 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 378 controles op het denkwerk
-python tests/test_batterij.py    # 66 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 461 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1654 op hele laadbeurten in het virtuele huis
+python tests/test_batterij.py    # 74 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_coach.py       # 474 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1683 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 59 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

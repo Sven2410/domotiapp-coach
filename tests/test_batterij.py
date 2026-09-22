@@ -221,12 +221,19 @@ controle("anderhalve dag kwartierprijzen binnen een seconde", duur < 1.0, f"{duu
 # --- de regelaar ---------------------------------------------------------------
 
 def draai(huis_w, stand=NUL, seconden=600, meter_elke=5, volgt_na=5, power_w=0.0,
-          soc=50.0, meter_valt_weg=None, ruis=0.0, zaad=1):
+          soc=50.0, meter_valt_weg=None, ruis=0.0, zaad=1,
+          sensor_na=0, sensor_aanloop=False, sensor_echo=0, geen_sensor=False, volgt_niet=False):
     """Een huis, een meter en een batterij, per seconde.
 
     De meter meldt elke `meter_elke` seconden, de batterij voert een opdracht
     `volgt_na` seconden later uit: de twee getallen die op 21-09-2026 gemeten
     zijn. Geeft de opdrachten, het verloop van de meter en de kWh van het net.
+
+    De sensor van de batterij is standaard eerlijk. Met `sensor_na` loopt hij
+    zoveel seconden achter, met `sensor_aanloop` toont hij onderweg een waarde
+    tussen oud en nieuw, en met `sensor_echo` zoveel seconden lang de opdracht
+    zelf: de Anker van 22-09-2026. `geen_sensor` is een batterij zonder
+    vermogenssensor, `volgt_niet` een batterij die niets met een opdracht doet.
     """
     rnd = random.Random(zaad)
     regelaar = Regelaar()
@@ -236,21 +243,35 @@ def draai(huis_w, stand=NUL, seconden=600, meter_elke=5, volgt_na=5, power_w=0.0
     batterij_w, wachtrij = 0.0, []
     opdrachten, meter, afname, levering = [], [], 0.0, 0.0
     net_w, net_op = None, None
+    verloop = []
+
+    def sensor(s):
+        if geen_sensor:
+            return None
+        if sensor_echo and opdrachten and s - opdrachten[-1][0] < sensor_echo:
+            return opdrachten[-1][1]
+        oud = next((w for t, w in reversed(verloop) if t <= s - sensor_na), 0.0)
+        if sensor_aanloop and abs(batterij_w - oud) > 1.0:
+            return oud + 0.4 * (batterij_w - oud)
+        return oud
+
     for s in range(seconden):
         nu += dt.timedelta(seconds=1)
         vraag = huis_w(s) + (rnd.uniform(-ruis, ruis) if ruis else 0.0)
         echt = vraag + batterij_w
+        verloop.append((s, batterij_w))
         afname += max(0.0, echt) / 3_600_000
         levering += max(0.0, -echt) / 3_600_000
         if s % meter_elke == 0 and not (meter_valt_weg and meter_valt_weg[0] <= s < meter_valt_weg[1]):
             net_w, net_op = echt, nu
             meter.append((s, echt))
         if s % meter_elke == 0 or s % 5 == 0:
-            uit = regelaar.stap(nu, net_w=net_w, net_op=net_op, batterij_w=batterij_w,
+            uit = regelaar.stap(nu, net_w=net_w, net_op=net_op, batterij_w=sensor(s),
                                 besluit=besluit, b=b, doel_w=0.0)
             if uit is not None:
                 opdrachten.append((s, uit))
-                wachtrij.append((s + volgt_na, uit))
+                if not volgt_niet:
+                    wachtrij.append((s + volgt_na, uit))
         klaar = [w for t, w in wachtrij if t <= s]
         if klaar:
             batterij_w = klaar[-1]
@@ -322,6 +343,45 @@ controle("maximaal laden blijft onder wat de zekering overlaat", uit21 == 1200.0
 print("22. mikken op de goedkope kant van nul")
 controle("bij een lage terugleverprijs iets onder nul", Regelaar().doel_w(0.2417, 0.0193) == -20.0)
 controle("bij salderen precies op nul", Regelaar().doel_w(0.24, 0.24) == 0.0)
+
+# Gemeten op 22-09-2026 in de eerste woning, naast een kWh-meter op dezelfde
+# batterij: de vermogenssensor van de Anker loopt vijf tot tien seconden
+# achter, toont onderweg een aanloop die er niet is en vlak na een opdracht de
+# opdracht zelf. De sturing die daar toen draaide rekende daarmee en slingerde:
+# vijf keer 3.500 W en drie keer ontladen in zes minuten. De regelaar rekent
+# daarom met zijn eigen opdracht en gebruikt de sensor alleen als bevestiging.
+ANKER = dict(sensor_na=8, sensor_aanloop=True, sensor_echo=2)
+
+print("26. dezelfde sprong, gezien door de sensor van de Anker")
+op26, meter26, _, lev26 = draai(lambda s: 300.0 if s < 60 else 2400.0, seconden=180, **ANKER)
+print(f"  opdrachten: {op26}")
+na26 = [w for s, w in meter26 if s >= 80]
+controle("hij slingert niet: een handvol opdrachten", len(op26) <= 4, f"{len(op26)}")
+controle("en de meter staat na twintig seconden rond nul",
+         all(abs(w) <= 60 for w in na26), f"{[round(w) for w in na26[:6]]}")
+controle("zonder doorschot naar terugleveren", all(w >= -60 for s, w in meter26),
+         f"{min(w for s, w in meter26):.0f} W")
+
+print("27. de oven op zijn thermostaat, gezien door de sensor van de Anker")
+op27, _, af27, lev27 = draai(lambda s: 300.0 + (2000.0 if (s // 45) % 2 == 0 else 0.0), seconden=1800, **ANKER)
+print(f"  {len(op27)} opdrachten, {af27:.3f} kWh van het net, {lev27:.3f} kWh terug")
+controle("evenveel opdrachten als met een eerlijke sensor", len(op27) <= len(op18) + 2, f"{len(op27)} tegen {len(op18)}")
+controle("en niet meer terugleveren dan met een eerlijke sensor", lev27 <= lev18 + 0.005, f"{lev27:.3f} tegen {lev18:.3f}")
+
+print("28. een batterij zonder vermogenssensor")
+op28, meter28, _, _ = draai(lambda s: 300.0 if s < 60 else 2400.0, seconden=180, geen_sensor=True)
+print(f"  opdrachten: {op28}")
+controle("de sprong wordt gevolgd zodra de meter hem na de opdracht gezien heeft",
+         len(op28) <= 4 and all(abs(w) <= 60 for s, w in meter28 if s >= 80), f"{[round(w) for s, w in meter28[10:18]]}")
+
+print("29. een batterij die niets doet met een opdracht")
+# Vol, leeg, te warm: de sensor blijft op nul terwijl de opdracht iets anders
+# zegt. Na `AFWIJK_METINGEN` gelooft de regelaar de sensor en houdt hij op met
+# aandringen, in plaats van elke vijftien seconden een nieuwe opdracht.
+op29, _, _, _ = draai(lambda s: 1500.0, seconden=300, volgt_niet=True)
+print(f"  opdrachten: {op29}")
+controle("hij dringt niet elke vijftien seconden opnieuw aan", len(op29) <= 3, f"{len(op29)}")
+controle("en de laatste opdracht is wat het huis vraagt", op29 and abs(op29[-1][1] + 1500.0) <= 60, f"{op29}")
 
 
 # --- geld en rendement ------------------------------------------------------------

@@ -4324,6 +4324,83 @@ ruimte78 = coach78._laadruimte_w(inst78, BATTERIJ, 0.0)
 print(f"  laadruimte op L3 bij 18 A: {ruimte78:.0f} W")
 controle("de laadruimte is wat die ene fase nog overlaat", 0 < ruimte78 < 1500, f"{ruimte78}")
 
+print("=== 79. de thuisbatterij: de wekelijkse volle beurt zet de laadgrens een dag op 100 en daarna terug ===")
+# De laadgrens is van de batterij en de coach schrijft hem nooit, met deze ene
+# uitzondering (de keuze van de eigenaar op 22-09-2026): op de dag van de volle
+# beurt naar 100, en zodra hij vol is terug naar wat er stond. Wat er stond
+# staat in de opslag, zodat een herstart het niet vergeet.
+BATTERIJ79 = {**BATTERIJ, "battery": {**BATTERIJ["battery"], "weekly_full": True, "weekly_full_day": 0}}
+inst79 = instellingen(devices=[LAADPAAL, BATTERIJ79])
+hass79, store79, coach79 = bouw(huis75(soc="60"), inst79)
+NU79 = dt.datetime(2026, 9, 21, 21, 0)   # een maandag
+
+
+def grens79(hass):
+    return [d[2]["value"] for d in hass.services.verstuurd if d[2].get("entity_id") == "number.batterij_laadgrens"]
+
+
+def rij79(store):
+    return (store.instellingen.get("battery_state") or [{}])[0]
+
+
+b79 = asyncio.run(ronde75(hass79, coach79, NU79))
+print(f"  {b79.get('mode_name')}: {b79.get('reason')}")
+print(f"  laadgrens: {grens79(hass79)}, opslag: {rij79(store79)}")
+controle("op de dag van de volle beurt gaat de laadgrens naar 100", grens79(hass79) == [100.0], f"{grens79(hass79)}")
+controle("en wat er stond staat in de opslag", rij79(store79).get("limit_restore") == 95.0, f"{rij79(store79)}")
+controle("de kaart weet dat hij vandaag vol hoort", bool(b79.get("full_before")), f"{b79.get('full_before')}")
+controle("en het plan rekent meteen tot 100", b79.get("ceiling") == 100.0, f"{b79.get('ceiling')}")
+hass79.states.zet("number.batterij_laadgrens", "100")
+b79 = asyncio.run(ronde75(hass79, coach79, NU79 + dt.timedelta(minutes=1)))
+controle("de ronde erna schrijft hij niet nog een keer", grens79(hass79) == [], f"{grens79(hass79)}")
+hass79.states.zet("sensor.batterij_soc", "99")
+b79 = asyncio.run(ronde75(hass79, coach79, NU79 + dt.timedelta(minutes=2)))
+print(f"  op 99%: laadgrens {grens79(hass79)}, opslag: {rij79(store79)}")
+controle("op 99% gaat de laadgrens terug naar 95", grens79(hass79) == [95.0], f"{grens79(hass79)}")
+controle("de volle beurt staat in de opslag en de oude grens is vergeten",
+         bool(rij79(store79).get("full_at")) and rij79(store79).get("limit_restore") is None, f"{rij79(store79)}")
+hass79.states.zet("number.batterij_laadgrens", "95")
+b79 = asyncio.run(ronde75(hass79, coach79, NU79 + dt.timedelta(minutes=3)))
+controle("en daarna is er een week niets te doen", grens79(hass79) == [] and not b79.get("full_before"),
+         f"{grens79(hass79)} {b79.get('full_before')}")
+
+# Stopt de coach terwijl de grens op 100 staat, dan gaat hij mee terug.
+hass79b, store79b, coach79b = bouw(huis75(soc="60"), instellingen(devices=[LAADPAAL, BATTERIJ79]))
+asyncio.run(ronde75(hass79b, coach79b, NU79))
+hass79b.services.verstuurd.clear()
+coach79b.async_stop()
+asyncio.run(hass79b.afmaken())
+controle("stopt de coach met de grens op 100, dan zet hij hem terug", grens79(hass79b) == [95.0], f"{grens79(hass79b)}")
+
+# Wie niet stuurt schrijft ook de laadgrens niet.
+inst79c = instellingen(devices=[LAADPAAL, BATTERIJ79])
+inst79c["strategy"]["level"] = "advise"
+hass79c, store79c, coach79c = bouw(huis75(soc="60"), inst79c)
+b79c = asyncio.run(ronde75(hass79c, coach79c, NU79))
+controle("op adviseren blijft de laadgrens met rust", grens79(hass79c) == [] and rij79(store79c).get("limit_restore") is None,
+         f"{grens79(hass79c)}")
+
+print("=== 80. de thuisbatterij: het overschot voor de andere apparaten rekent met de opdracht ===")
+# 22-09-2026 in de eerste woning: de sensor van de Anker liep vijf tot tien
+# seconden achter op de kWh-meter. De batterij laadde 3 kW van de zon, een
+# wolk kwam, de regelaar zette hem op 1 kW; de meter zag dat binnen vijf
+# seconden, de sensor bleef 3 kW zeggen. Wie dan de sensor bij de meter optelt
+# ziet 3 kW overschot dat er niet is, en daar start een paal op.
+hass80, _, coach80 = bouw(huis75(afname=0.0, teruglevering=0.0, batterij="3000"),
+                          instellingen(devices=[LAADPAAL, BATTERIJ]))
+inst80 = instellingen(devices=[LAADPAAL, BATTERIJ])
+NU80 = dt.datetime(2026, 9, 22, 12, 0)
+coach80._batterij["dev-batterij"] = {"regelaar": coachmod.Regelaar(opdracht_w=1000.0, opdracht_op=NU80, bezonken=False),
+                                     "stuurt": True}
+controle("zolang de sensor de opdracht niet bevestigt telt de opdracht: 1 kW overschot en geen 3",
+         coach80._netto_export_w(inst80) == 1000.0, f"{coach80._netto_export_w(inst80)}")
+coach80._batterij["dev-batterij"]["regelaar"]._afwijkt = 3
+controle("spreekt de sensor de opdracht blijvend tegen, dan telt de sensor",
+         coach80._netto_export_w(inst80) == 3000.0, f"{coach80._netto_export_w(inst80)}")
+coach80._batterij["dev-batterij"]["stuurt"] = False
+controle("en stuurt de coach niet, dan is er alleen de sensor",
+         coach80._netto_export_w(inst80) == 3000.0, f"{coach80._netto_export_w(inst80)}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

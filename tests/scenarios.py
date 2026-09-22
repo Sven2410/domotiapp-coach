@@ -888,6 +888,23 @@ batterij_herstart = batterij_sprong.kopie(
     uitleg="Home Assistant herstart om 19:05 midden in het ontladen: de coach pakt de batterij weer op",
     gebeurtenissen=[("19:00", "oven", 20), ("19:05", "herstart", None)],
 )
+# De sensor van de Anker, zoals hij op 22-09-2026 in de eerste woning gemeten
+# is naast een kWh-meter: acht seconden achter, een aanloop die er niet is, en
+# twee seconden lang de opdracht zelf. Zie `Batterij` in virtueel.py.
+ANKER_SENSOR = dict(sensor_na_s=8.0, sensor_aanloop=True, sensor_echo_s=2.0)
+
+batterij_anker_sensor = batterij_sprong.kopie(
+    naam="batterij-anker-sensor",
+    uitleg="dezelfde sprong, maar de vermogenssensor van de batterij loopt acht seconden achter en toont onderweg een aanloop en de opdracht zelf, zoals de Anker in de eerste woning",
+    batterij=Batterij(soc=70.0, **ANKER_SENSOR),
+)
+batterij_uurlast = Scenario(
+    "batterij-uurlast",
+    "vast contract, zonnige ochtend, en elk uur veertig seconden 2,5 kW erbij (een boiler): de batterij schiet daar niet op door en er komt niets van het net in",
+    contract="vast", zon=Zon(wolken="helder"), huis=Huis(puls=(2500.0, 40.0, 54.0)),
+    batterij=Batterij(soc=60.0, **ANKER_SENSOR),
+    begin="2026-09-07 09:55", duur_uren=24, kabel_erin="+9 07:00", schema_aan=False, stap_seconden=5,
+)
 batterij_zonder_rendement = batterij_winter.kopie(
     naam="batterij-rendement-onbekend",
     uitleg="geen kWh-meter en niets opgegeven: alleen nul op de meter, niet van het net laden",
@@ -897,7 +914,8 @@ batterij_zonder_rendement = batterij_winter.kopie(
 BATTERIJ = [
     batterij_vast_zon, batterij_vast_salderen, batterij_winter, batterij_zomer, batterij_handelen,
     batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_paal, batterij_sprong,
-    batterij_meter_weg, batterij_herstart, batterij_zonder_rendement,
+    batterij_meter_weg, batterij_herstart, batterij_anker_sensor, batterij_uurlast,
+    batterij_zonder_rendement,
 ]
 
 ALLE = [

@@ -3096,8 +3096,23 @@ class ChargerCoach:
         totaal = 0.0
         for device in settings.get("devices") or []:
             if device.get("type") == "thuisbatterij":
-                totaal += self._batterij_w(device) or 0.0
+                totaal += self._batterij_geregeld_w(device) or 0.0
         return totaal
+
+    def _batterij_geregeld_w(self, device: dict[str, Any]) -> float | None:
+        """Wat deze batterij doet volgens de regelaar die hem stuurt, anders de sensor.
+
+        Stuurt de coach hem, dan is de eigen opdracht de waarheid zolang de
+        sensor die niet blijvend tegenspreekt (`Regelaar.vermogen_w`): de
+        sensor van de Anker loopt na een opdracht vijf tot tien seconden achter,
+        en wie daarop rekent ziet bij elke omslag een schijnoverschot. Gemeten
+        in de eerste woning op 22-09-2026.
+        """
+        gemeten = self._batterij_w(device)
+        sessie = self._batterij.get(device.get("id", ""))
+        if sessie is not None and sessie.get("stuurt"):
+            return sessie["regelaar"].vermogen_w(gemeten)
+        return gemeten
 
     def _net_nu(self, settings: dict[str, Any]) -> tuple[float | None, datetime | None]:
         """De meter, positief bij afname, en wanneer hij dat voor het laatst zei."""
@@ -3249,6 +3264,28 @@ class ChargerCoach:
         rij = self._batterij_rij(settings, device_id)
         sessie = self._batterij.setdefault(device_id, {"regelaar": Regelaar()})
         b = self._batterij_van(now, settings, device, rij)
+        entities = device.get("entities") or {}
+        mag = level == LEVEL_STEER or (level == LEVEL_PROPOSE and device_id in self._approved)
+        stuurt = mag and level not in (LEVEL_READ, LEVEL_ADVISE) and bool(entities.get("setpoint"))
+
+        # De wekelijkse volle beurt gaat tot honderd procent, want daar is hij
+        # voor: het balanceren van de cellen. De laadgrens van de batterij is
+        # van de batterij en de coach schrijft hem nooit, met deze ene
+        # uitzondering (de keuze van de eigenaar op 22-09-2026): op de dag van
+        # de volle beurt zet hij hem op 100, en zodra de batterij vol is, de
+        # dag om is of de coach niet meer stuurt, zet hij hem terug op wat er
+        # stond. Wat er stond staat in de opslag, zodat een herstart het niet
+        # vergeet.
+        grens_terug = rij.get("limit_restore")
+        vol_grens = 100.0 if stuurt and entities.get("charge_limit") else b.soc_max
+        vol_nu = b.soc is not None and b.soc >= vol_grens - VOL_MARGE
+        if grens_terug is None and b.vol_voor is not None and stuurt and not vol_nu:
+            if await self._async_laadgrens_omhoog(settings, device, b.soc_max):
+                b.soc_max = 100.0
+                rij = self._batterij_rij(settings, device_id)
+        elif grens_terug is not None and (vol_nu or b.vol_voor is None or not stuurt):
+            await self._async_laadgrens_terug(settings, device)
+            rij = self._batterij_rij(settings, device_id)
 
         prijzen = self._prices(settings)
         tarief = self._tariff(settings)
@@ -3270,7 +3307,7 @@ class ChargerCoach:
         nieuw: dict[str, Any] = {}
         if b.rte is not None and abs(float(rij.get("rte") or 0.0) - b.rte) > 0.002:
             nieuw["rte"] = round(b.rte, 4)
-        if b.soc is not None and b.soc >= b.soc_max - VOL_MARGE:
+        if vol_nu:
             vorige = _tijdstip(rij.get("full_at"))
             if vorige is None or now - vorige.replace(tzinfo=None) > timedelta(hours=1):
                 nieuw["full_at"] = now.isoformat()
@@ -3293,10 +3330,6 @@ class ChargerCoach:
         sessie.update(besluit=besluit, batterij=b, koop=koop, terug=terug,
                       settings=settings, device=device)
 
-        mag = level == LEVEL_STEER or (level == LEVEL_PROPOSE and device_id in self._approved)
-        stuurt = mag and level not in (LEVEL_READ, LEVEL_ADVISE) and bool(
-            (device.get("entities") or {}).get("setpoint")
-        )
         totaal = float(rij.get("earned_total") or 0.0) + sum((sessie.get("geld") or {}).values())
         eigen = device.get("battery") or {}
         try:
@@ -3382,9 +3415,10 @@ class ChargerCoach:
             # Het kasboek: wat de batterij sinds de vorige stap opleverde.
             vorige = sessie.get("geteld_op")
             sessie["geteld_op"] = nu
-            if vorige is not None and net_w is not None and batterij_w is not None:
+            if vorige is not None and net_w is not None:
                 seconden = min(60.0, max(0.0, (nu - vorige).total_seconds()))
-                euro = verdiend(net_w, batterij_w, sessie.get("koop"), sessie.get("terug"), seconden)
+                euro = verdiend(net_w, regelaar.vermogen_w(batterij_w),
+                                sessie.get("koop"), sessie.get("terug"), seconden)
                 if euro is not None:
                     dag = nu.date().isoformat()
                     geld = sessie.setdefault("geld", {})
@@ -3479,6 +3513,42 @@ class ChargerCoach:
             "number", "set_value", {"entity_id": knop, "value": round(waarde)}, blocking=True
         )
 
+    async def _async_laadgrens_omhoog(
+        self, settings: dict[str, Any], device: dict[str, Any], huidig: float
+    ) -> bool:
+        """De laadgrens van de batterij op honderd, en onthouden wat er stond."""
+        entity = (device.get("entities") or {}).get("charge_limit")
+        staat = self.hass.states.get(entity) if entity else None
+        if staat is None:
+            return False
+        try:
+            top = float((staat.attributes or {}).get("max", 100.0))
+        except (TypeError, ValueError):
+            top = 100.0
+        if huidig >= top:
+            return False
+        await self.hass.services.async_call(
+            "number", "set_value", {"entity_id": entity, "value": top}, blocking=True
+        )
+        await self._async_batterij_bewaren(settings, device.get("id", ""), {"limit_restore": huidig})
+        _LOGGER.info("%s: laadgrens voor de volle beurt van %s naar %s", device.get("id"), huidig, top)
+        return True
+
+    async def _async_laadgrens_terug(self, settings: dict[str, Any], device: dict[str, Any]) -> None:
+        """De laadgrens terug op wat er stond voor de volle beurt, als die er staat."""
+        device_id = device.get("id", "")
+        rij = self._batterij_rij(settings, device_id)
+        terug = rij.get("limit_restore")
+        if terug is None:
+            return
+        entity = (device.get("entities") or {}).get("charge_limit")
+        if entity:
+            await self.hass.services.async_call(
+                "number", "set_value", {"entity_id": entity, "value": float(terug)}, blocking=True
+            )
+            _LOGGER.info("%s: laadgrens terug op %s", device_id, terug)
+        await self._async_batterij_bewaren(settings, device_id, {"limit_restore": None})
+
     async def _async_batterij_modus(self, device: dict[str, Any], welke: str) -> None:
         """De modus van de batterij op "de coach stuurt", of terug op zijn eigen stand."""
         entity = (device.get("entities") or {}).get("mode")
@@ -3503,6 +3573,8 @@ class ChargerCoach:
         if sessie is not None:
             sessie["stuurt"] = False
             sessie["regelaar"] = Regelaar()
+            if sessie.get("settings") is not None:
+                await self._async_laadgrens_terug(sessie["settings"], device)
         await self._async_batterij_zetten(device, 0.0)
         await self._async_batterij_modus(device, "idle_mode")
 
