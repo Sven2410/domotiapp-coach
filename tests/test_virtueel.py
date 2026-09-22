@@ -1279,8 +1279,10 @@ for naam, vl in V.items():
     # ontladen is er al drie, en dat is geen pendelen.
     controle(f"{naam}: hooguit een richtingwissel per twee uur",
              vl.bat_wissels() <= max(6, uren / 2), f"{vl.bat_wissels()} in {uren:.0f} uur")
+    # De laadgrens mag hoger staan als de coach hem voor de volle beurt schreef.
+    hoogste = max([bat.soc_max] + [g for _, g in vl.bat_grenzen])
     controle(f"{naam}: de accustand blijft tussen zijn eigen grenzen",
-             all(bat.soc_min - 0.5 <= r[3] <= bat.soc_max + 0.5 for r in vl.bat_verloop),
+             all(bat.soc_min - 0.5 <= r[3] <= hoogste + 0.5 for r in vl.bat_verloop),
              f"{min(r[3] for r in vl.bat_verloop):.1f} tot {max(r[3] for r in vl.bat_verloop):.1f}%")
     # De wekelijkse volle beurt is de uitzondering: die is er voor de cellen en
     # niet voor de rekening, en kost dus geld.
@@ -1373,10 +1375,18 @@ if (vl := v("batterij-negatieve-prijs")):
              not [r for r in bat_tussen(vl, "11:00", "11:59") if r[4] in ("netladen", "max-laden")], "")
 
 if (vl := v("batterij-volle-beurt")):
-    controle("volle beurt: voor middernacht een keer aan de laadgrens",
-             max(r[3] for r in vl.bat_verloop) >= 94.0, f"{max(r[3] for r in vl.bat_verloop):.0f}%")
-    controle("volle beurt: en dat staat in de opslag, zodat hij morgen niet opnieuw begint",
-             bool(vl.bat_stand.get("full_at")), f"{vl.bat_stand}")
+    # De keuze van de eigenaar op 22-09-2026: de coach zet de laadgrens die dag
+    # zelf op 100 en daarna terug, want een volle beurt tot 95% balanceert niets.
+    print(f"  volle beurt: laadgrens {[(t.strftime('%H:%M'), g) for t, g in vl.bat_grenzen]}, "
+          f"hoogste stand {max(r[3] for r in vl.bat_verloop):.1f}%")
+    controle("volle beurt: de laadgrens gaat aan het begin van de dag naar 100",
+             bool(vl.bat_grenzen) and vl.bat_grenzen[0][1] == 100.0, f"{vl.bat_grenzen}")
+    controle("volle beurt: voor middernacht een keer echt vol",
+             max(r[3] for r in vl.bat_verloop) >= 98.0, f"{max(r[3] for r in vl.bat_verloop):.0f}%")
+    controle("volle beurt: en dan gaat de laadgrens terug naar 95",
+             len(vl.bat_grenzen) == 2 and vl.bat_grenzen[-1][1] == 95.0, f"{vl.bat_grenzen}")
+    controle("volle beurt: dat staat in de opslag, zodat hij morgen niet opnieuw begint",
+             bool(vl.bat_stand.get("full_at")) and vl.bat_stand.get("limit_restore") is None, f"{vl.bat_stand}")
 
 if (vl := v("batterij-paal-laadt")):
     laadt = [r for r, regel in zip(vl.bat_verloop, vl.regels) if regel.paal_w > 1000]
@@ -1413,6 +1423,41 @@ if (vl := v("batterij-herstart")):
     na = bat_tussen(vl, "19:06", "19:15")
     controle("herstart: de nieuwe coach neemt de batterij over zonder hem los te laten",
              bool(na) and all(r[2] <= -2400 for r in na), f"{sorted({round(r[2]) for r in na})}")
+
+# Gemeten op 22-09-2026 in de eerste woning: de vermogenssensor van de Anker
+# loopt vijf tot tien seconden achter op de kWh-meter, toont onderweg een
+# aanloop die er niet is en vlak na een opdracht de opdracht zelf. De sturing
+# die daar draaide slingerde daarop, en de regelaar van v0.73.0 deed dat in dit
+# scenario ook: 241 opdrachten en 118 wissels in een uur, tegen 3 en 0 met een
+# eerlijke sensor. Sinds v0.74.0 rekent hij met zijn eigen opdracht.
+if (vl := v("batterij-anker-sensor")):
+    na = bat_tussen(vl, "19:00", "19:01")
+    controle("anker-sensor: binnen tien seconden levert de batterij wat hij kan",
+             any(r[2] <= -2490 for r in na[:3]), f"{[round(r[2]) for r in na[:4]]}")
+    uit = bat_tussen(vl, "19:20", "19:22")
+    controle("anker-sensor: gaat het weer uit, dan schiet hij niet door naar terugleveren",
+             sum(r[1] < -100 for r in uit) <= 3, f"{[round(r[1]) for r in uit[:6]]}")
+    controle("anker-sensor: een handvol opdrachten, net als met een eerlijke sensor",
+             len(vl.bat_opdrachten) <= 8, f"{len(vl.bat_opdrachten)}")
+    controle("anker-sensor: en geen enkele richtingwissel", vl.bat_wissels() == 0, f"{vl.bat_wissels()}")
+
+# Elk uur veertig seconden 2,5 kW, dag en nacht (de eerste woning, 22-09-2026;
+# een boiler of een warmtepomp, zei de eigenaar). Met de regelaar van v0.73.0
+# en de sensor van de Anker: 180 opdrachten in drie uur, slingerend tussen 357
+# en 3.500 W. Wat er van het net komt is de aanloop van elke puls: tien
+# seconden voordat de batterij hem opvangt.
+if (vl := v("batterij-uurlast")):
+    pulsen = [t for t, *_ in vl.bat_verloop if (t.hour * 60 + t.minute) % 54 == 0 and t.second == 0]
+    per_puls = [sum(1 for o, _ in vl.bat_opdrachten if t <= o < t + virtueel.dt.timedelta(seconds=90))
+                for t in pulsen]
+    print(f"  uurlast: {len(pulsen)} pulsen, opdrachten per puls {per_puls}, "
+          f"net {vl.bat_afname_kwh:.3f} kWh erin over de dag")
+    controle("uurlast: per puls hooguit drie opdrachten (omlaag, en weer omhoog)",
+             pulsen and max(per_puls) <= 3, f"{per_puls}")
+    controle("uurlast: over de hele dag komt er hooguit een kwart kWh van het net",
+             vl.bat_afname_kwh <= 0.25, f"{vl.bat_afname_kwh:.3f}")
+    controle("uurlast: overdag nul op de meter en niet meer dan een handvol richtingwissels",
+             vl.bat_wissels() <= 8, f"{vl.bat_wissels()}")
 
 if (vl := v("batterij-rendement-onbekend")):
     controle("rendement onbekend: alleen nul op de meter",

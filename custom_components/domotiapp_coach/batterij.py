@@ -706,11 +706,29 @@ def _met_paal(besluit: Besluit, paal_laadt: bool) -> Besluit:
 # Binnen zoveel watt van het doel gebeurt er niets. De gemeten 40 W.
 DODE_BAND_W = 40.0
 
-# Hoe lang de regelaar na een opdracht wacht tot de batterij die heeft
-# uitgevoerd voordat hij opnieuw corrigeert. Hier komt pendelen vandaan: bijsturen
-# op een meterwaarde waar je vorige opdracht nog niet in zit. Twee keer de
-# gemeten vijf seconden.
-WACHT_OP_BATTERIJ = timedelta(seconds=10)
+# Hoe lang de batterij nodig heeft om een opdracht uit te voeren: de gemeten
+# vijf seconden. Een meting van de meter of van de batterij van vóór dat
+# moment zegt nog niets over de opdracht.
+VOLGT_NA = timedelta(seconds=5)
+
+# Hoe lang de regelaar na een opdracht hooguit wacht op de bevestiging dat de
+# batterij hem uitvoert, voordat hij toch opnieuw corrigeert. Hier komt
+# pendelen vandaan: bijsturen op een meterwaarde waar je vorige opdracht nog
+# niet in zit. De keuze van de eigenaar op 22-09-2026: vijftien seconden, want
+# de sensor van de Anker liep die dag vijf tot tien seconden achter.
+WACHT_OP_BATTERIJ = timedelta(seconds=15)
+
+# Buiten dat venster rekent de regelaar met zijn eigen opdracht en niet met de
+# vermogenssensor van de batterij, tot die sensor hem zoveel metingen achter
+# elkaar tegenspreekt. Gemeten op 22-09-2026 in de eerste woning, naast een
+# kWh-meter op dezelfde batterij: de sensor van de Anker toont na een opdracht
+# eerst een aanloop die er niet is (1040, 1020, 1010, 1000, 940 en dan pas
+# 2500, terwijl de meter meteen 2580 zag), en soms twee seconden lang de
+# opdracht zelf (0 W terwijl er 2215 liep). Wie daarop rekent telt zijn eigen
+# opdracht dubbel, en dat was precies de slinger van de sturing die daar toen
+# draaide. Maar een batterij die een opdracht blijvend niet uitvoert (vol,
+# leeg, te warm) moet wel gezien worden, en dat is wat de teller doet.
+AFWIJK_METINGEN = 3
 
 # Een afwijking boven deze grens wordt meteen gevolgd; daaronder pas als hij
 # `KLEIN_METINGEN` metingen achter elkaar dezelfde kant op staat. Vijf keer de
@@ -750,6 +768,9 @@ class Regelaar:
     # Of de laatste opdracht al in het gemeten batterijvermogen terug te zien
     # was. Tot dan wordt er niet opnieuw gecorrigeerd.
     bezonken: bool = True
+    # Hoe vaak de sensor achter elkaar iets anders zei dan de opdracht, buiten
+    # het venster na een opdracht. Zie `AFWIJK_METINGEN` en `vermogen_w`.
+    _afwijkt: int = 0
     # De richting van de laatste opdracht die niet nul was, en wanneer er voor
     # het laatst zo'n opdracht stond. Voor `RICHTING_WACHT`.
     laatste_kant: float = 0.0
@@ -770,6 +791,20 @@ class Regelaar:
         if koop is not None and terug is not None and terug >= koop:
             return 0.0
         return -DODE_BAND_W / 2.0
+
+    def vermogen_w(self, batterij_w: float | None) -> float:
+        """Wat de batterij doet, zoals de regelaar erover denkt: zijn eigen opdracht.
+
+        De sensor is de bevestiging, niet de bron: hij loopt achter en toont
+        onderweg waarden die er niet zijn (zie `AFWIJK_METINGEN`). Pas als hij
+        de opdracht een tijdje tegenspreekt is het de batterij die niet doet
+        wat er gevraagd is, en dan telt de sensor. Zonder sensor is er alleen
+        de opdracht. Ook voor wie buiten de regelaar naar de batterij kijkt:
+        de paalplanner ziet anders bij elke omslag een schijnoverschot.
+        """
+        if batterij_w is None or abs(batterij_w - self.opdracht_w) <= DODE_BAND_W:
+            return self.opdracht_w
+        return batterij_w if self._afwijkt >= AFWIJK_METINGEN else self.opdracht_w
 
     def stap(
         self,
@@ -816,19 +851,35 @@ class Regelaar:
         if besluit.stand == MAX_LADEN:
             return self._zet(now, hoog, meteen=True)
 
-        if batterij_w is None:
-            batterij_w = self.opdracht_w
-
         # Wacht tot de vorige opdracht te zien is, anders corrigeer je dubbel.
+        # Te zien is: de batterij heeft de tijd gehad om hem uit te voeren, de
+        # sensor meldt hem (of er is geen sensor), en de meter heeft daarna nog
+        # gemeten. Een sensor die vlak na de opdracht al "klopt" toont de
+        # opdracht en niet de meting; die telt niet. Duurt het langer dan
+        # `WACHT_OP_BATTERIJ`, dan gaat hij toch verder.
         if not self.bezonken and self.opdracht_op is not None:
-            aangekomen = abs(batterij_w - self.opdracht_w) <= DODE_BAND_W
-            if aangekomen or now - self.opdracht_op >= WACHT_OP_BATTERIJ:
+            sinds = now - self.opdracht_op
+            aangekomen = sinds >= VOLGT_NA and (
+                batterij_w is None or abs(batterij_w - self.opdracht_w) <= DODE_BAND_W
+            )
+            # Zonder sensor is de meter het enige bewijs, en dan hoort de
+            # batterij ruim de tijd gehad te hebben voordat die meting telt.
+            na = VOLGT_NA if batterij_w is not None else 2 * VOLGT_NA
+            meter_na = net_op is not None and net_op > self.opdracht_op + na
+            if (aangekomen and meter_na) or sinds >= WACHT_OP_BATTERIJ:
                 self.bezonken = True
             else:
                 return None
+        if batterij_w is not None:
+            if abs(batterij_w - self.opdracht_w) <= DODE_BAND_W:
+                self._afwijkt = 0
+            else:
+                self._afwijkt += 1
 
-        # De som: wat het huis vraagt is de meter plus wat de batterij nu doet.
-        wens = batterij_w - (net_w - doel_w)
+        # De som: wat het huis vraagt is de meter plus wat de batterij nu doet,
+        # en dat laatste is de eigen opdracht zolang de sensor die niet
+        # blijvend tegenspreekt.
+        wens = self.vermogen_w(batterij_w) - (net_w - doel_w)
         if besluit.stand == NETLADEN:
             wens = max(wens, besluit.power_w)
         elif besluit.stand == HANDELEN:

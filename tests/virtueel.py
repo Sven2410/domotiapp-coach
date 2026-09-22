@@ -162,9 +162,21 @@ class Huis:
     # koken en avond. Uit de mediaan van een echte woning; zie de klantwoning in
     # scenarios.py.
     profiel: dict[int, float] | None = None
+    # Een last die elke zoveel minuten kort aanstaat: (watt, seconden, elke
+    # minuten). In de eerste woning op 22-09-2026 elk uur 1,7 tot 5,3 kW, 30
+    # tot 50 s lang, ook 's nachts, ongeveer 54 minuten uit elkaar; een boiler
+    # of een warmtepomp, zei de eigenaar. Elke sturing op de meter schiet daar
+    # op door als hij niet oppast.
+    puls: tuple[float, float, float] | None = None
 
     def watt(self, moment: dt.datetime, dag_offset: int = 0) -> float:
         u = moment.hour + moment.minute / 60
+        puls_w = 0.0
+        if self.puls is not None:
+            watt_p, seconden, elke = self.puls
+            minuut = moment.hour * 60 + moment.minute + moment.second / 60
+            if (minuut % elke) * 60 < seconden:
+                puls_w = watt_p
         if self.profiel is not None:
             w = self.profiel.get(moment.hour, self.basis_w)
         else:
@@ -182,7 +194,7 @@ class Huis:
         else:
             # Andere dagen wijken wat af, anders is een mediaan geen mediaan.
             w *= 1.0 + 0.15 * math.sin(dag_offset * 1.7 + u)
-        return w
+        return w + puls_w
 
     def per_fase(self, watt: float, fasen: int) -> list[float]:
         if fasen == 1:
@@ -636,6 +648,18 @@ class Batterij:
     handelen: bool = False
     wekelijks_vol_dag: int | None = None
     aankoop: float | None = None
+    # --- de sensor ---
+    # Gemeten aan de Anker van de eerste woning op 22-09-2026, naast een
+    # kWh-meter op dezelfde batterij: het vermogen dat de integratie meldt loopt
+    # vijf tot tien seconden achter, toont onderweg een aanloop die er niet is
+    # (1040, 1020, 1010, 1000, 940 en dan pas 2500, terwijl de meter meteen
+    # 2580 zag), en vlak na een opdracht soms de opdracht zelf in plaats van de
+    # meting (0 W terwijl er 2215 liep). Standaard staat dit uit, zodat de
+    # oudere scenario's blijven wat ze waren; `ANKER_SENSOR` in scenarios.py
+    # zet het aan.
+    sensor_na_s: float = 0.0
+    sensor_aanloop: bool = False
+    sensor_echo_s: float = 0.0
     # --- toestand ---
     modus: str = "self_consumption"
     richting: str = "charge"
@@ -643,9 +667,32 @@ class Batterij:
     wachtrij: list = field(default_factory=list)
     teller_in: float = 250.0
     teller_uit: float = 184.0
+    # Wat hij werkelijk deed, per stap: (tijd, watt). Voor de sensor.
+    sensor_verloop: list = field(default_factory=list)
+    opdracht_op: dt.datetime | None = None
+    opdracht_w: float = 0.0
 
     def opdracht(self, watt: float, nu: dt.datetime) -> None:
         self.wachtrij.append((nu + dt.timedelta(seconds=self.volgt_na_s), watt))
+        self.opdracht_op, self.opdracht_w = nu, watt
+
+    def sensor_w(self, nu: dt.datetime) -> float:
+        """Wat de vermogenssensor van de batterij nu meldt."""
+        echt = self.sensor_verloop[-1][1] if self.sensor_verloop else 0.0
+        if self.sensor_na_s <= 0 and self.sensor_echo_s <= 0:
+            return echt
+        if (self.opdracht_op is not None
+                and 0 <= (nu - self.opdracht_op).total_seconds() < self.sensor_echo_s):
+            return self.opdracht_w
+        toen = nu - dt.timedelta(seconds=self.sensor_na_s)
+        oud = echt
+        for t, w in reversed(self.sensor_verloop):
+            oud = w
+            if t <= toen:
+                break
+        if self.sensor_aanloop and abs(echt - oud) > 1.0:
+            return oud + 0.4 * (echt - oud)
+        return oud
 
     def stap(self, nu: dt.datetime, seconden: float) -> float:
         """Wat hij deze stap doet, in watt aan de wisselstroomkant, laden positief."""
@@ -656,6 +703,10 @@ class Batterij:
         w = max(-self.max_ontladen_w, min(self.max_laden_w, self.vermogen_w))
         if (w > 0 and self.soc >= self.soc_max) or (w < 0 and self.soc <= self.soc_min):
             w = 0.0
+        self.sensor_verloop.append((nu, w))
+        grens = nu - dt.timedelta(seconds=self.sensor_na_s + 60)
+        while len(self.sensor_verloop) > 2 and self.sensor_verloop[0][0] < grens:
+            self.sensor_verloop.pop(0)
         eta = math.sqrt(self.rte)
         kwh = w / 1000 * seconden / 3600
         if kwh >= 0:
@@ -873,6 +924,8 @@ class Verloop:
     # eraan gaf, en wat de dag kostte met en zonder batterij.
     bat_opdrachten: list = field(default_factory=list)
     bat_modi: list = field(default_factory=list)
+    # De laadgrens die de coach schreef, voor de wekelijkse volle beurt.
+    bat_grenzen: list = field(default_factory=list)
     bat_verloop: list = field(default_factory=list)
     bat_afname_kwh: float = 0.0
     bat_levering_kwh: float = 0.0
@@ -1211,7 +1264,8 @@ class Wereld:
         self.vaatwasser = dataclasses.replace(s.vaatwasser) if s.vaatwasser is not None else None
         self.boiler = dataclasses.replace(s.boiler, getapt=set()) if s.boiler is not None else None
         self.boiler_w = 0.0
-        self.batterij = dataclasses.replace(s.batterij, wachtrij=[]) if s.batterij is not None else None
+        self.batterij = (dataclasses.replace(s.batterij, wachtrij=[], sensor_verloop=[])
+                         if s.batterij is not None else None)
         self.bat_w = 0.0
         self.vw_w = 0.0
         self.vw_gevraagd: dt.datetime | None = None
@@ -1364,7 +1418,7 @@ class Wereld:
         if self.batterij is not None:
             bat = self.batterij
             z(E["bat_soc"], w(f"{bat.soc:.0f}", "%"))
-            z(E["bat_vermogen"], w(f"{self.bat_w:.0f}", "W"))
+            z(E["bat_vermogen"], w(f"{bat.sensor_w(nu):.0f}", "W"))
             z(E["bat_cap"], w(f"{bat.capaciteit_kwh:.1f}", "kWh"))
             z(E["bat_hoog"], w(f"{bat.soc_max:.0f}", "%"))
             z(E["bat_laag"], w(f"{bat.soc_min:.0f}", "%"))
@@ -1589,6 +1643,11 @@ class Diensten:
             watt = float(data.get("value") or 0.0) * (1 if bat.richting == "charge" else -1)
             bat.opdracht(watt, self.wereld.nu)
             self.verloop.bat_opdrachten.append((self.wereld.nu, watt))
+        elif data.get("entity_id") == E["bat_hoog"] and dienst == "set_value":
+            self.wereld.batterij.soc_max = float(data.get("value") or 0.0)
+            self.verloop.bat_grenzen.append((self.wereld.nu, self.wereld.batterij.soc_max))
+            self.hass.states.zet(E["bat_hoog"], {"state": f"{self.wereld.batterij.soc_max:.0f}",
+                                                 "attributes": {"unit_of_measurement": "%", "min": 80, "max": 100}})
         elif data.get("entity_id") == E["bat_richting"] and dienst == "select_option":
             self.wereld.batterij.richting = data.get("option")
             self.hass.states.zet(E["bat_richting"], {"state": data.get("option"),
