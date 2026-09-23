@@ -500,7 +500,7 @@ proef("de programmatabel in het paneel is dezelfde als die in planner.py", () =>
 // meting wint van allebei.
 
 const { programsFor, defaultPrograms, hasOwnPrograms, programKey, programOf, programPicker, isManualProgram, missingForControl,
-        programOptions, programRows, programChooser, apparatenZin, canSteer, brandsFor, brandFields, canHaveDeadline } =
+        programOptions, programRows, programChooser, programChoices, apparatenZin, canSteer, brandsFor, brandFields, canHaveDeadline } =
   await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
 const { timesFor } = await import("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js");
 // De eigenaar op 07-09-2026: "de coach zegt zet nu de tablet lader aan, maar de
@@ -1268,6 +1268,20 @@ function woningBij(zon, sun) {
     grid_import: "sensor.afname", grid_export: "sensor.teruglevering" } };
   return new LiveSource().sample(feed, settings);
 }
+
+proef("een favoriet van de machine is geen programma en staat niet in de lijst", () => {
+  // De eigenaar op 23-09-2026: "favorite 001 is geen programma, haal die eruit."
+  const state = { state: "dishcare_dishwasher_program_kurz60", attributes: { options: [
+    "favorite_001", "dishcare_dishwasher_program_auto2", "dishcare_dishwasher_program_eco50", "Favorite.002",
+  ] } };
+  assert.deepEqual(programChoices(state), ["dishcare_dishwasher_program_auto2", "dishcare_dishwasher_program_eco50"]);
+  assert.deepEqual(programChoices(undefined), []);
+  const device = { id: "vw", type: "vaatwasser", brand: "home_connect",
+    entities: { program: "sensor.vw_actief", program_select: "select.vw_programma" } };
+  const feed = new Map([["select.vw_programma", state]]);
+  assert.deepEqual(programOptions(device, feed).map((o) => o.key), ["auto_2", "eco_50"]);
+  assert.equal(programRows(device, programOptions(device, feed)).length, 2);
+});
 
 proef("het programma op de kaart: uit de select zolang de sensor niets zegt, uit de sensor tijdens de beurt (Home Connect Local)", () => {
   // Thuis op 23-09-2026: "Actief programma" zegt alleen tijdens de beurt

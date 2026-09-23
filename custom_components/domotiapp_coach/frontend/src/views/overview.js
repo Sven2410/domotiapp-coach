@@ -23,6 +23,7 @@ import {
   deviceLabel,
   deviceLabelMap,
   needsRelease,
+  programChoices,
   programChooser,
   programKey,
   programPicker,
@@ -2034,7 +2035,7 @@ class DacViewOverview extends DacElement {
     let current;
     if (picker.kind === "entity") {
       const state = this.feed_?.get(picker.entityId);
-      options = (state?.attributes?.options ?? []).map((value) => ({
+      options = programChoices(state).map((value) => ({
         value,
         label: valueLabel(DISHWASHER_PROGRAM_VALUES, value) ?? value,
       }));
@@ -2977,7 +2978,7 @@ class DacViewOverview extends DacElement {
     if (!chooser) return;
 
     const state = this.feed_?.get(chooser.entityId);
-    const options = state?.attributes?.options ?? [];
+    const options = programChoices(state);
     this.programEntity_ = chooser.entityId;
 
     select.replaceChildren(
