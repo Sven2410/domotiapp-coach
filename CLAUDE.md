@@ -853,6 +853,20 @@ in test_coach.py (de keten, de toezeggingen, de batterij op 2760 W, de grenzen
 het blok op het scherm en de belasting per groep. **Nog niet aan een echte
 onderverdeelkast beproefd**; de eerste woning is de eerste.
 
+**Een batterij op dezelfde groep neemt de ruimte van de paal niet in** (v0.88.2).
+In de eerste woning op 23-09-2026 om 17:08 laadde de Anker 3,2 kW zon op L3 van
+de garage (14 A) en zei de paal "de groep Garage is te zwaar belast"; bij
+ontladen hetzelfde. Een batterij die de coach stuurt wijkt voor de paal
+(ontladen stopt, `met_paal`; laden op nul op de meter zakt als de auto de zon
+neemt), dus `_batterij_wijkt` in coach.py trekt haar stroom op haar eigen fase
+af van elke zekering in haar keten, en van de hoofdaansluiting, bij het lezen
+voor de paal. Niet bij `netladen` en `max-laden` (dan wijkt hij niet) en niet als
+de coach hem niet stuurt. En zakt een batterij meer dan `BATTERIJ_DALING_W`,
+dan zet dat `_daling` net als een paal die omlaag gaat: om 17:09 stond de Anker
+stil en L3 op 0 A, en de mediaan van 90 s droeg nog 14 A. De snelle
+zekeringcontrole leest de sensor zelf en blijft het vangnet voor de seconden
+waarin de batterij nog wijkt. Proef 96 in test_coach.py.
+
 ## De Alfen-laadpaal
 
 Sinds 23-09-2026 (v0.83.0) is er een tweede paalmerk naast Easee, na de eigen
@@ -1646,7 +1660,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 404 controles op het denkwerk
 python tests/test_batterij.py    # 93 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 589 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 594 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1731 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 94 op het rapport en op het paneel
