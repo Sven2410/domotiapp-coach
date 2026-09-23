@@ -82,6 +82,26 @@ export const timesFor = (device) =>
     ? TIMES.filter((time) => time.key === "done_by")
     : TIMES;
 
+/**
+ * Of dit apparaat een laadlimiet per planning kent (v0.96.0): alleen een laadpaal.
+ * De bewoner van de eerste woning op 23-09-2026, naar evcc: "op maandag werk ik in
+ * Arnhem (50%), op dinsdag in Groningen (100%). De algemene limiet geldt voor
+ * snelladen, continu en zon; stel je een planning in, dan is de laadlimiet van
+ * de planning leidend."
+ */
+export const kentDoel = (device) => device?.type === "laadpaal";
+
+/** Een ingevuld doel als getal tussen 10 en 100, of null voor "de algemene limiet". */
+export function doelUit(waarde) {
+  if (waarde === "" || waarde === null || waarde === undefined) return null;
+  const getal = Number(String(waarde).replace(",", "."));
+  if (!Number.isFinite(getal)) return null;
+  return Math.max(10, Math.min(100, Math.round(getal)));
+}
+
+const DOEL_HINT =
+  "Leeg is de algemene limiet (Laden tot op de kaart). Ingevuld laadt hij voor deze klaar-tijd tot dit percentage.";
+
 export const priorityLabel = (key) =>
   PRIORITIES.find((item) => item.key === key)?.label ?? "Middel";
 
@@ -142,12 +162,13 @@ export function planSummary(plan, modus = "") {
   if (plan.per_day) {
     const days = plan.days
       .filter((day) => day.enabled && (day.not_before || day.start_by || day.done_by))
-      .map((day) => DAYS_SHORT[day.day]);
+      .map((day) => `${DAYS_SHORT[day.day]}${doelUit(day.target) !== null ? ` ${doelUit(day.target)}%` : ""}`);
     return `Per dag · ${days.join(", ")}`;
   }
   const parts = TIMES.filter((time) => plan.window[time.key]).map(
     (time) => `${time.short.toLowerCase()} ${plan.window[time.key]}`
   );
+  if (doelUit(plan.window.target) !== null) parts.push(`tot ${doelUit(plan.window.target)}%`);
   return `Elke dag · ${parts.join(" · ")}`;
 }
 
@@ -224,6 +245,19 @@ const css = /* css */ `
     font: inherit; font-size: 14px;
     font-variant-numeric: tabular-nums;
   }
+  .time-field input.doel {
+    flex: 0 1 auto; min-width: 0; width: 96px;
+    min-height: 44px;
+    padding: 10px 12px;
+    border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border-hi);
+    background: rgba(255,255,255,0.04);
+    color: var(--dac-ink);
+    font: inherit; font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .time-field .procent { color: var(--dac-ink-2); }
+  @media (pointer: coarse) { .time-field input.doel { font-size: 16px; } }
   @media (pointer: coarse) { .time-field input[type="time"] { font-size: 16px; } }
   @supports (-webkit-touch-callout: none) {
     .time-field input[type="time"] { font-size: 16px; }
@@ -416,8 +450,28 @@ export class DacScheduleSheet extends DacElement {
           </div>
           <span class="sub">${time.hint}</span>
         </div>`
-      ).join("");
+      ).join("") + (kentDoel(this.device_) ? `
+        <div class="row">
+          <label for="w-target">Laden tot</label>
+          <div class="time-field">
+            <input type="number" class="doel" id="w-target" min="10" max="100" step="5"
+                   inputmode="numeric" placeholder="algemeen" data-window-target>
+            <span class="procent">%</span>
+            <button type="button" class="wipe" data-wipe-target
+                    aria-label="Laden tot leegmaken">${icons.close}</button>
+          </div>
+          <span class="sub">${DOEL_HINT}</span>
+        </div>` : "");
       holder.dataset.built = this.device_.type;
+
+      const doelVeld = holder.querySelector("[data-window-target]");
+      if (doelVeld) {
+        doelVeld.addEventListener("change", () => this.saveWindow_());
+        holder.querySelector("[data-wipe-target]").addEventListener("click", () => {
+          doelVeld.value = "";
+          this.saveWindow_();
+        });
+      }
 
       for (const time of TIMES) {
         const input = holder.querySelector(`[data-window="${time.key}"]`);
@@ -436,6 +490,11 @@ export class DacScheduleSheet extends DacElement {
       const staat = plan.window[time.key] || "";
       if (this.shadowRoot.activeElement === input) continue;
       if (input.value !== staat) input.value = staat;
+    }
+    const doelVeld = holder.querySelector("[data-window-target]");
+    if (doelVeld && this.shadowRoot.activeElement !== doelVeld) {
+      const staat = doelUit(plan.window.target);
+      doelVeld.value = staat === null ? "" : String(staat);
     }
   }
 
@@ -464,6 +523,17 @@ export class DacScheduleSheet extends DacElement {
                 </div>
               </div>`
             ).join("")}
+            ${kentDoel(this.device_) ? `
+              <div class="row">
+                <label for="d-${day}-target">Laden tot</label>
+                <div class="time-field">
+                  <input type="number" class="doel" id="d-${day}-target" min="10" max="100" step="5"
+                         inputmode="numeric" placeholder="algemeen" data-day-target="${day}">
+                  <span class="procent">%</span>
+                  <button type="button" class="wipe" data-day-wipe-target="${day}"
+                          aria-label="Laden tot leegmaken">${icons.close}</button>
+                </div>
+              </div>` : ""}
           </div>
         </div>`
       ).join("");
@@ -473,6 +543,14 @@ export class DacScheduleSheet extends DacElement {
         holder.querySelector(`[data-day="${day}"]`).addEventListener("change", () =>
           this.saveDays_()
         );
+        const doelVeld = holder.querySelector(`[data-day-target="${day}"]`);
+        if (doelVeld) {
+          doelVeld.addEventListener("change", () => this.saveDays_());
+          holder.querySelector(`[data-day-wipe-target="${day}"]`).addEventListener("click", () => {
+            doelVeld.value = "";
+            this.saveDays_();
+          });
+        }
         for (const time of TIMES) {
           const input = holder.querySelector(`[data-day-time="${day}:${time.key}"]`);
           input.addEventListener("change", () => this.saveDays_());
@@ -497,6 +575,11 @@ export class DacScheduleSheet extends DacElement {
         const staat = entry?.[time.key] || "";
         if (this.shadowRoot.activeElement === input) continue;
         if (input.value !== staat) input.value = staat;
+      }
+      const doelVeld = holder.querySelector(`[data-day-target="${day}"]`);
+      if (doelVeld && this.shadowRoot.activeElement !== doelVeld) {
+        const staat = doelUit(entry?.target);
+        doelVeld.value = staat === null ? "" : String(staat);
       }
     }
   }
@@ -644,6 +727,8 @@ export class DacScheduleSheet extends DacElement {
     for (const time of timesFor(this.device_)) {
       window_[time.key] = holder.querySelector(`[data-window="${time.key}"]`).value || "";
     }
+    const doelVeld = holder.querySelector("[data-window-target]");
+    if (doelVeld) window_.target = doelUit(doelVeld.value);
     this.save_({ window: window_ });
   }
 
@@ -662,6 +747,8 @@ export class DacScheduleSheet extends DacElement {
         entry[time.key] =
           holder.querySelector(`[data-day-time="${day}:${time.key}"]`).value || "";
       }
+      const doelVeld = holder.querySelector(`[data-day-target="${day}"]`);
+      if (doelVeld) entry.target = doelUit(doelVeld.value);
       days.push(entry);
     }
     this.save_({ days });

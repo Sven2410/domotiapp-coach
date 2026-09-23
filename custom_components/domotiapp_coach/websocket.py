@@ -263,6 +263,9 @@ _WINDOW = {
     vol.Optional("not_before", default=""): _TIME,
     vol.Optional("start_by", default=""): _TIME,
     vol.Optional("done_by", default=""): _TIME,
+    # Tot hoeveel procent de auto op die klaar-tijd geladen moet zijn, of leeg
+    # voor de algemene limiet (v0.96.0). Alleen een laadpaal leest het.
+    vol.Optional("target", default=None): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(10, 100))),
 }
 
 # One weekday of a per-day schedule. 0 is Monday, the way a week is written

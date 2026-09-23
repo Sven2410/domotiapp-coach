@@ -509,7 +509,26 @@ class DacViewOverview extends DacElement {
     .steer-tabs::-webkit-scrollbar { display: none; }
     /* Tijdens het indelen zijn de apparaten te slepen (v0.91.0): dan geen
        scrollen onder de vinger, en een hand als wijzer. */
-    :host([arranging]) .steer-tab { touch-action: none; cursor: grab; }
+    :host([arranging]) .steer-tab,
+    :host([sorting]) .steer-tab { touch-action: none; cursor: grab; }
+    /* Het knopje om de volgorde aan te passen (v0.96.0): het icoon van
+       "Indeling aanpassen", zonder tekst, rechtsboven in de kaart. */
+    #steerable { position: relative; }
+    /* Ruimte voor het knopje, zodat een lange titel op een smal scherm er niet onder loopt. */
+    #steerable .panel-head { padding-right: 44px; }
+    .steer-sort {
+      position: absolute; top: 14px; right: 14px;
+      display: inline-grid; place-items: center; width: 36px; height: 36px;
+      border-radius: 50%; border: 1px solid var(--dac-border);
+      background: transparent; color: var(--dac-ink-3); cursor: pointer;
+    }
+    .steer-sort:hover { color: var(--dac-ink-2); border-color: var(--dac-border-hi); }
+    .steer-sort[aria-pressed="true"] {
+      color: var(--dac-ink); border-color: rgba(25,143,217,0.55); background: var(--dac-accent-soft);
+    }
+    .steer-sort[hidden] { display: none; }
+    .steer-sort .icon, .steer-sort svg { width: 16px; height: 16px; }
+    :host([arranging]) .steer-sort { display: none; }
     .steer-tab.dragging {
       position: relative; z-index: 2; cursor: grabbing;
       box-shadow: 0 6px 18px rgba(0,0,0,0.35);
@@ -525,6 +544,11 @@ class DacViewOverview extends DacElement {
       background: transparent; color: var(--dac-ink-2); cursor: pointer;
     }
     .steer-order button svg { width: 16px; height: 16px; }
+    .steer-order .steer-klaar {
+      width: auto; height: 34px; padding: 0 14px; border-radius: var(--dac-radius-pill);
+      color: var(--dac-ink); border-color: rgba(25,143,217,0.55); background: var(--dac-accent-soft);
+    }
+    .steer-order .steer-klaar[hidden] { display: none; }
     .steer-tabs[hidden] { display: none; }
 
     .steer-tab {
@@ -1184,14 +1208,21 @@ class DacViewOverview extends DacElement {
             <div class="eyebrow">Sturing</div>
             <h2>Aanstuurbare apparaten</h2>
           </div>
+          <!-- De volgorde van de rij aanpassen (v0.96.0). De eigenaar op
+               23-09-2026: "het zelfde icoontje als indeling aanpassen beneden,
+               alleen dan zonder tekst, en dat je dan kan slepen." -->
+          <button type="button" class="steer-sort" id="steer-sort" aria-pressed="false"
+                  aria-label="Volgorde aanpassen" title="Volgorde aanpassen" hidden>${icons.sliders}</button>
           <p class="panel-sub">Wat de coach straks zelf mag inschakelen.</p>
           <div class="steer-tabs" id="steer-tabs" role="tablist" aria-label="Aanstuurbare apparaten" hidden></div>
-          <!-- Alleen tijdens het indelen (v0.91.0): het gekozen apparaat een
-               plek opschuiven. Slepen kan ook, maar is nooit de enige manier. -->
+          <!-- Tijdens het indelen, of na het knopje hierboven: het gekozen
+               apparaat een plek opschuiven. Slepen kan ook, maar is nooit de
+               enige manier. -->
           <div class="steer-order" id="steer-order" hidden>
             <span>Sleep de apparaten, of schuif het gekozen apparaat:</span>
             <button type="button" id="steer-left" aria-label="Naar links">${icons.arrowLeft}</button>
             <button type="button" id="steer-right" aria-label="Naar rechts">${icons.arrowRight}</button>
+            <button type="button" class="steer-klaar" id="steer-klaar" hidden>Klaar</button>
           </div>
           <div class="steer-grid" id="steer-grid"></div>
         </article>
@@ -1276,6 +1307,8 @@ class DacViewOverview extends DacElement {
     this.$("#arrange-open").addEventListener("click", () => this.startArranging_());
     this.$("#arrange-done").addEventListener("click", () => this.stopArranging_());
     this.$("#arrange-reset").addEventListener("click", () => this.resetArrangement_());
+    this.$("#steer-sort").addEventListener("click", () => this.sorteren_ ? this.stopSorteren_() : this.startSorteren_());
+    this.$("#steer-klaar").addEventListener("click", () => this.stopSorteren_());
     this.$("#steer-left").addEventListener("click", () => this.moveDevice_(-1));
     this.$("#steer-right").addEventListener("click", () => this.moveDevice_(1));
 
@@ -1309,6 +1342,7 @@ class DacViewOverview extends DacElement {
   }
 
   startArranging_() {
+    this.stopSorteren_();
     this.arranging_ = true;
     this.toggleAttribute("arranging", true);
     this.$("#arrange-bar").hidden = false;
@@ -1325,6 +1359,24 @@ class DacViewOverview extends DacElement {
   }
 
   // --- de volgorde van de apparaten (v0.91.0) ----------------------------
+
+  /** Alleen de rij apparaten in volgorde zetten, zonder de hele indeling (v0.96.0). */
+  startSorteren_() {
+    if (this.arranging_) return;
+    this.sorteren_ = true;
+    this.toggleAttribute("sorting", true);
+    this.$("#steer-sort").setAttribute("aria-pressed", "true");
+    this.$("#steer-order").hidden = this.$("#steer-tabs").hidden;
+    this.$("#steer-klaar").hidden = false;
+  }
+
+  stopSorteren_() {
+    this.sorteren_ = false;
+    this.toggleAttribute("sorting", false);
+    this.$("#steer-sort").setAttribute("aria-pressed", "false");
+    this.$("#steer-klaar").hidden = true;
+    if (!this.arranging_) this.$("#steer-order").hidden = true;
+  }
 
   /** De rij opnieuw opbouwen in de volgorde die nu onthouden is. */
   rebuildSteer_() {
@@ -2575,6 +2627,8 @@ class DacViewOverview extends DacElement {
     // card underneath already says which device this is.
     const tabs = this.$("#steer-tabs");
     tabs.hidden = list.length < 2;
+    // Het knopje voor de volgorde alleen als er iets te ordenen valt.
+    this.$("#steer-sort").hidden = list.length < 2;
     tabs.innerHTML = list
       .map(
         (device, slot) => `
@@ -2629,6 +2683,7 @@ class DacViewOverview extends DacElement {
             <div class="car-pick" data-target-pick="${slot}" hidden>
               <label for="target-${slot}">Laden tot</label>
               <select id="target-${slot}" data-target-select="${slot}"></select>
+              <p class="soc-hint" data-target-hint="${slot}"></p>
             </div>
             <div class="car-pick" data-program-pick="${slot}" hidden>
               <label for="program-${slot}">Welk programma staat erop?</label>
@@ -2771,7 +2826,7 @@ class DacViewOverview extends DacElement {
     }
     for (const tab of this.$$("[data-tab]")) {
       tab.addEventListener("pointerdown", (event) => {
-        if (this.arranging_) this.startTabDrag_(event, Number(tab.dataset.tab));
+        if (this.arranging_ || this.sorteren_) this.startTabDrag_(event, Number(tab.dataset.tab));
       });
       tab.addEventListener("click", () => this.selectSteer_(Number(tab.dataset.tab)));
       tab.addEventListener("keydown", (event) => this.stepSteer_(event, Number(tab.dataset.tab)));
@@ -2891,7 +2946,21 @@ class DacViewOverview extends DacElement {
       if (!doelPick.hidden) {
         const keuze = this.$(`[data-target-select="${slot}"]`);
         const profiel = Math.round(Number(gekozen.target_percent) || 100);
-        const nu = oordeel.target_session ? String(Math.round(oordeel.target_percent)) : "";
+        // De keuzelijst is de algemene limiet; geldt er een planning, dan staat
+        // haar limiet eronder (v0.96.0). De bewoner van de eerste woning: "de
+        // algemene 90 geldt voor snelladen, continu en zon; stel je een planning
+        // in, dan is de laadlimiet van de planning leidend."
+        const algemeen = oordeel.target_general ?? oordeel.target_percent;
+        const nu = oordeel.target_session ? String(Math.round(algemeen)) : "";
+        const doelHint = this.$(`[data-target-hint="${slot}"]`);
+        if (doelHint) {
+          doelHint.textContent = Number.isFinite(oordeel.target_plan)
+            ? `Deze beurt laadt tot ${Math.round(oordeel.target_plan)}%, volgens je planning`
+              + (oordeel.target_day ? ` van ${oordeel.target_day}` : "")
+              + ". Wat je hier kiest geldt voor Snel, Continu en Zon, en voor een planning zonder eigen limiet."
+            : "";
+          doelHint.hidden = !doelHint.textContent;
+        }
         const opties = [["", `Zoals het autoprofiel (${profiel}%)`],
           ...[50, 60, 70, 80, 90, 100].map((p) => [String(p), `${p}%`])];
         if (keuze.dataset.opties !== JSON.stringify(opties)) {

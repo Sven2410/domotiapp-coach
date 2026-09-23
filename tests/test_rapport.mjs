@@ -1240,6 +1240,45 @@ proef("de rij apparaten in de volgorde van dit scherm, nieuwe apparaten achteraa
   assert.ok(kaart.includes("resetDeviceOrder();"), "standaard terugzetten zet ook de apparaten terug");
 });
 
+proef("de rij apparaten: het knopje van Indeling aanpassen, zonder tekst, en dan slepen (v0.96.0)", () => {
+  // De eigenaar op 23-09-2026: "waarom kan ik hier de volgorde niet aanpassen,
+  // drag en drop wat ik vroeg toch?" en daarna "niet lang indrukken maar het
+  // zelfde icoontje als indeling aanpassen beneden, alleen dan zonder tekst, en
+  // dat je dan kan slepen."
+  const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
+  assert.ok(/id="steer-sort"[^>]*aria-label="Volgorde aanpassen"[^>]*>\$\{icons\.sliders\}<\/button>/.test(kaart),
+    "hetzelfde icoon als Indeling aanpassen, zonder tekst");
+  assert.ok(kaart.includes("${icons.sliders} Indeling aanpassen"), "dat is het icoon van de knop onderaan");
+  assert.ok(kaart.includes("if (this.arranging_ || this.sorteren_) this.startTabDrag_("), "in die stand slepen");
+  assert.ok(kaart.includes(":host([sorting]) .steer-tab { touch-action: none; cursor: grab; }"), "dan scrolt de rij niet onder de vinger");
+  assert.ok(kaart.includes('this.$("#steer-sort").hidden = list.length < 2;'), "alleen als er iets te ordenen valt");
+  assert.ok(!kaart.includes("langDrukken_"), "geen lang indrukken");
+});
+
+proef("de laadlimiet per planning: het veld, de samenvatting en de zin op de kaart (v0.96.0)", async () => {
+  const { planSummary, kentDoel, doelUit } = await import("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js");
+  assert.ok(kentDoel({ type: "laadpaal" }) && !kentDoel({ type: "boiler" }) && !kentDoel({ type: "vaatwasser" }));
+  assert.equal(doelUit(""), null);
+  assert.equal(doelUit("50"), 50);
+  assert.equal(doelUit("5"), 10, "nooit onder de 10");
+  assert.equal(doelUit("120"), 100);
+  assert.equal(doelUit("abc"), null);
+  const elke = { enabled: true, per_day: false, window: { done_by: "07:00", target: 80 }, days: [] };
+  assert.equal(planSummary(elke), "Elke dag · klaar om 07:00 · tot 80%");
+  const perDag = { enabled: true, per_day: true, window: {}, days: [
+    { day: 0, enabled: true, done_by: "07:00", target: 50 },
+    { day: 1, enabled: true, done_by: "07:00", target: 100 },
+    { day: 2, enabled: true, done_by: "07:00", target: null },
+  ] };
+  assert.match(planSummary(perDag), /50%.*100%/);
+  const blad = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js", import.meta.url), "utf-8");
+  assert.ok(blad.includes("window_.target = doelUit(doelVeld.value)") && blad.includes("entry.target = doelUit(doelVeld.value)"),
+    "het doel gaat mee bij elke dag hetzelfde en per dag");
+  const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
+  assert.ok(kaart.includes("Deze beurt laadt tot ${Math.round(oordeel.target_plan)}%, volgens je planning"), "de zin op de kaart");
+  assert.ok(kaart.includes("const algemeen = oordeel.target_general ?? oordeel.target_percent;"), "de keuzelijst is de algemene limiet");
+});
+
 proef("voorrang bij zonoverschot: het paneel vult aan zoals de coach (zie proef 63 in test_planner.py)", async () => {
   const { zonRegels, regelUitleg } = await import("../custom_components/domotiapp_coach/frontend/src/voorrang.js");
   const apparaten = [
