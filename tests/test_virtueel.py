@@ -1577,5 +1577,26 @@ if (vl := v("modus-continu")):
              vl.klaar_op is not None and vl.klaar_op.day == 7 and vl.uit_zon_kwh > 10,
              f"vol {vl.klaar_op}, zon {vl.uit_zon_kwh:.1f}")
 
+# --- de batterij helpt de auto met wat er over is (v0.90.0) -----------------
+# De bewoner van de eerste woning op 23-09-2026, naar evcc; de eigenaar: de nacht gaat
+# voor, want "drie keer verlies".
+def bat_eind(vl):
+    return vl.bat_verloop[-1][3] if vl.bat_verloop else None
+
+
+basis_bat = v("batterij-paal-laadt")
+if (vl := v("batterij-helpt-auto")) and basis_bat:
+    controle("helpen boven 40%: de accu gaf aan de auto, en de dag kostte minder",
+             bat_eind(vl) < bat_eind(basis_bat) - 10 and vl.bat_kosten_met < basis_bat.bat_kosten_met,
+             f"eind {bat_eind(vl):.0f}% tegen {bat_eind(basis_bat):.0f}%, €{vl.bat_kosten_met:.2f} tegen €{basis_bat.bat_kosten_met:.2f}")
+    controle("helpen boven 40%: de auto is op tijd vol, zoals zonder", vl.klaar_op is not None and gehaald(vl), f"{vl.klaar_op}")
+if (met := v("batterij-helpt-auto-nacht")) and (zonder := v("batterij-helpt-auto-zonder-nacht")):
+    controle("nachtstrategie aan: de accu houdt meer over dan met de strategie uit",
+             bat_eind(met) > bat_eind(zonder) + 2, f"{bat_eind(met):.0f}% tegen {bat_eind(zonder):.0f}%")
+    controle("nachtstrategie aan: geen slinger rond de grens die 's nachts zakt",
+             met.bat_wissels() <= 8, f"{met.bat_wissels()} wissels")
+    controle("nachtstrategie uit: tot de eigen ondergrens en niet eronder",
+             bat_eind(zonder) >= 4.5, f"{bat_eind(zonder):.1f}%")
+
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

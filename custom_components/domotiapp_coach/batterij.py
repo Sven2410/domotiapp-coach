@@ -87,6 +87,11 @@ VOL_NA = timedelta(days=6)
 # van zijn eigen laadgrens. Een accusensor is nooit fijner dan een procent; zie
 # `DOEL_MARGE` in planner.py.
 VOL_MARGE = 1.0
+# Hoeveel procent boven `auto_grens` de batterij moet zitten om opnieuw te
+# beginnen met de auto helpen; stoppen doet hij op de grens zelf. De grens zakt
+# 's nachts vanzelf (er is minder nacht over), en met een procent speling hielp
+# hij in het virtuele huis zeventien keer een paar minuten (34 wissels).
+AUTO_MARGE = 5.0
 
 
 @dataclass
@@ -116,6 +121,13 @@ class Batterij:
     rte: float | None = None
     # Of ontladen naar het net mag. Standaard uit.
     handelen: bool = False
+    # Boven welke accustand de batterij de auto mag helpen als de paal laadt,
+    # in procent, of None: dan geeft hij de auto niets (v0.90.0). Zie `auto_grens`.
+    auto_boven: float | None = None
+    # De nachtstrategie (Strategie, standaard aan): de batterij houdt genoeg
+    # over om de nacht door te komen. Uit, dan mag hij voor de auto en voor
+    # handelen leeg tot zijn eigen ondergrens (v0.90.0).
+    nacht: bool = True
     # Wat hij nu doet, in watt aan de wisselstroomkant, laden positief.
     power_w: float | None = None
     # Vóór wanneer de batterij een keer helemaal vol hoort te zijn, of None.
@@ -594,6 +606,7 @@ def plan_batterij(
     *,
     enabled: bool = True,
     paal_laadt: bool = False,
+    helpt: bool = False,
 ) -> Besluit:
     """Welke stand de batterij nu hoort te hebben.
 
@@ -627,7 +640,7 @@ def plan_batterij(
                 plan="Van het net laden doet hij pas weer als de prijzen er zijn.",
                 rule="geen-prijs",
             ),
-            paal_laadt,
+            paal_laadt, b,
         )
 
     koop, terug = nu["price"], nu.get("feed_in")
@@ -661,13 +674,13 @@ def plan_batterij(
                 plan="Met een kWh-meter op de batterij meet de coach het zelf; anders vul je het in bij Apparaten.",
                 rule="rendement-onbekend",
             ),
-            paal_laadt,
+            paal_laadt, b,
         )
 
     som = _waarde_vooruit(now, blokken, forecast, b, piek=dicht)
     if som is None:
         return _met_paal(
-            Besluit(NUL, reason="Hij houdt de meter op nul.", rule="nul"), paal_laadt
+            Besluit(NUL, reason="Hij houdt de meter op nul.", rule="nul"), paal_laadt, b
         )
 
     e = b.soc / 100.0 * b.capacity_kwh
@@ -733,7 +746,7 @@ def plan_batterij(
     # terugkopen zodra dat goedkoper is, maar dat is niet wat de bewoner
     # bedoelt met een batterij die de nacht overbrugt.
     nacht = balans_kwh(now, forecast, b)
-    if b.handelen and not leeg and not paal_laadt and (nacht is None or nacht > 0):
+    if b.handelen and not leeg and not paal_laadt and (not b.nacht or nacht is None or nacht > 0):
         vermogen, tot = _rustig_vermogen(uren, b, ontladen=True)
         if vermogen > 0:
             return Besluit(
@@ -782,22 +795,77 @@ def plan_batterij(
             ),
             plan=kijk, rule="standby", waarde=eraf, uren=uren,
         )
-    return _met_paal(besluit, paal_laadt)
+    return _met_paal(besluit, paal_laadt, b, nacht, helpt=helpt)
 
 
-def met_paal(besluit: Besluit, paal_laadt: bool) -> Besluit:
-    """`_met_paal` voor de snelle regelaar in coach.py (v0.87.1)."""
-    return _met_paal(besluit, paal_laadt)
+def met_paal(
+    besluit: Besluit, paal_laadt: bool, b: Batterij | None = None, over_kwh: float | None = None,
+    *, grens: float | None = None, helpt: bool = False,
+) -> Besluit:
+    """`_met_paal` voor de snelle regelaar in coach.py (v0.87.1).
+
+    De regelaar tikt elke paar seconden; de grens voor de auto wordt eens per
+    minuut in de besluitronde vastgesteld en hier meegegeven, anders schuift
+    hij met elke tik mee en valt de batterij rond de grens aan en uit (in het
+    virtuele huis 34 wissels in een nacht, `batterij-helpt-auto-nacht`).
+    `helpt` is of hij de vorige tik al hielp: dan tot de grens, anders pas
+    vanaf de grens plus `AUTO_MARGE`.
+    """
+    return _met_paal(besluit, paal_laadt, b, over_kwh, grens=grens, helpt=helpt)
 
 
-def _met_paal(besluit: Besluit, paal_laadt: bool) -> Besluit:
+def auto_grens(b: Batterij, over_kwh: float | None) -> float | None:
+    """Tot welke accustand de batterij de auto mag helpen, of None: dan niet.
+
+    De bewoner van de eerste woning op 23-09-2026, naar evcc: "bij laden van de
+    auto mag alle batterijcapaciteit boven X% gebruikt worden." En de eigenaar
+    erbij: de nachtbalans gaat voor, want "auto laden vanuit de batterij doe
+    je echt alleen als er te veel capaciteit over is; in het kader van
+    efficiëntie is het niet top, namelijk drie keer verlies." Dus de hoogste
+    van: de grens van de bewoner, de eigen ondergrens van de batterij, en met
+    de nachtstrategie aan de accustand die de nacht nog nodig heeft. Dat
+    laatste is wat er nu in zit min wat er morgenvroeg over zou zijn
+    (`balans_kwh`, na het verlies, dus hier terug naar de accukant). Weet hij
+    de nacht niet, dan helpt hij niet.
+    """
+    if b.auto_boven is None or b.capacity_kwh is None or b.soc is None:
+        return None
+    grens = max(float(b.auto_boven), b.bodem)
+    if b.nacht:
+        if over_kwh is None:
+            return None
+        vrij = max(0.0, over_kwh) / (b.rte if b.rte else 1.0)
+        grens = max(grens, b.soc - vrij / b.capacity_kwh * 100.0)
+    return grens
+
+
+def _met_paal(
+    besluit: Besluit, paal_laadt: bool, b: Batterij | None = None, over_kwh: float | None = None,
+    *, grens: float | None = None, helpt: bool = False,
+) -> Besluit:
     """De laadpaal laadt: dan geeft de batterij niets af.
 
     De eigenaar op 21-09-2026: "als een laadpaal aan gaat moet de batterij niet
     ontladen." Anders loopt hij met een paar kilowatt leeg in een auto die er
     elf trekt. Zon opslaan mag wel, voor zover de paal die niet zelf neemt.
+
+    Behalve met wat er echt over is (v0.90.0): boven `auto_grens` houdt hij
+    de meter op nul, en dan komt wat de auto vraagt uit de batterij.
     """
     if not paal_laadt or besluit.stand not in (NUL, ONTLADEN, HANDELEN):
+        return besluit
+    if grens is None and b is not None:
+        grens = auto_grens(b, over_kwh)
+    if grens is not None and b is not None and b.soc is not None and b.soc > grens + (0.0 if helpt else AUTO_MARGE):
+        besluit.stand = NUL
+        besluit.power_w = 0.0
+        besluit.reason = (
+            f"De laadpaal laadt, en de batterij heeft meer dan de nacht nodig: tot "
+            f"{grens:.0f}% helpt hij de auto."
+            if b.nacht else
+            f"De laadpaal laadt, en de batterij zit boven {grens:.0f}%: tot daar helpt hij de auto."
+        )
+        besluit.rule = "auto-helpen"
         return besluit
     besluit.stand = ZONNELADEN if besluit.stand == NUL else STANDBY
     besluit.power_w = 0.0

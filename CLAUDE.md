@@ -1541,6 +1541,30 @@ test_batterij.py met de getallen van die nacht. Wat er overblijft is één
 opdracht per puls en één terug: de batterij reageert op een puls die allang
 voorbij is, en dat is geen slinger maar de vertraging van de batterij zelf.
 
+**De batterij helpt de auto met wat er echt over is, en de nachtstrategie**
+(v0.90.0). De bewoner van de eerste woning op 23-09-2026, naar evcc: "bij laden van
+de auto mag alle batterijcapaciteit boven X% gebruikt worden." De eigenaar: de
+nachtbalans gaat voor, want "auto laden vanuit de batterij doe je echt alleen als
+er te veel capaciteit over is; in het kader van efficiëntie is het niet top,
+namelijk drie keer verlies." Per batterij `battery.car_above` ("De auto mag de
+accu gebruiken boven (%)", leeg is nooit); op Strategie `strategy.night_strategy`
+(standaard aan): "Coach moet rekening houden met een nachtstrategie, zodat je de
+nacht door komt met opgeslagen energie"; uit mag de batterij voor de auto en voor
+handelen leeg tot zijn eigen ondergrens. `auto_grens` in batterij.py is de hoogste
+van de grens van de bewoner, `bodem` en (met de nachtstrategie aan) de accustand
+die de nacht nog nodig heeft (`balans_kwh` terug naar de accukant); weet hij de
+nacht niet, dan helpt hij niet. Boven die grens maakt `_met_paal` er nul op de
+meter van (`auto-helpen`), en dan komt wat de auto vraagt uit de batterij.
+**De grens wordt eens per minuut vastgesteld** (`auto_grens` in de sessie) en de
+snelle regelaar gebruikt die, met hysterese: al aan het helpen, dan tot de grens;
+opnieuw beginnen pas `AUTO_MARGE` (5%) erboven. Zonder dat schoof de grens met
+elke tik mee en zakte hij 's nachts vanzelf, en hielp de batterij in het virtuele
+huis zeventien keer een paar minuten (34 wissels, nu 6). Scenario's
+`batterij-helpt-auto` (grens 40%: eindigt op 35% in plaats van 53%, de dag
+€ 4,07 in plaats van € 5,21), `batterij-helpt-auto-nacht` en
+`-zonder-nacht` (grens 10%: 9% met de nachtstrategie, 5% zonder). Proef 32 in
+test_batterij.py, proef 98 in test_coach.py.
+
 **Gaat de coach weg, dan gaat de batterij terug** (`_async_batterij_loslaten`):
 vermogen op nul en `idle_mode` in de modus. Ook als het vinkje "mag sturen" eraf
 gaat of het niveau naar adviseren. Dezelfde gedachte als de stroom terug op de
@@ -1671,11 +1695,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 404 controles op het denkwerk
-python tests/test_batterij.py    # 93 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 599 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1731 op hele laadbeurten in het virtuele huis
+python tests/test_batterij.py    # 105 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_coach.py       # 603 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1787 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 95 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 96 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

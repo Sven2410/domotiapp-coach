@@ -54,6 +54,7 @@ from .batterij import (
     VOL_MARGE,
     Batterij,
     Regelaar,
+    auto_grens,
     balans_kwh,
     met_paal,
     plan_batterij,
@@ -3801,6 +3802,8 @@ class ChargerCoach:
             reserve=float(eigen.get("reserve_percent") or 0) if eigen.get("reserve_enabled") else None,
             rte=rte,
             handelen=bool(eigen.get("trade")),
+            auto_boven=getal("car_above"),
+            nacht=bool((settings.get("strategy") or {}).get("night_strategy", True)),
             power_w=self._batterij_w(device),
             vol_voor=vol_voor(
                 now, bool(eigen.get("weekly_full")) and self._vakantie(device) is None,
@@ -3897,6 +3900,7 @@ class ChargerCoach:
             partial(
                 plan_batterij, now, prijzen, tarief, verwachting, b,
                 enabled=True, paal_laadt=self._paal_laadt(settings),
+                helpt=bool(sessie.get("helpt")),
             )
         )
 
@@ -3981,7 +3985,12 @@ class ChargerCoach:
         koop = nu_rij["price"] if nu_rij else tarief.buy
         terug = nu_rij.get("feed_in") if nu_rij else tarief.feed_in
         sessie.update(besluit=besluit, batterij=b, koop=koop, terug=terug,
-                      settings=settings, device=device)
+                      settings=settings, device=device,
+                      # Wat er morgenvroeg over is, voor de snelle regelaar: die
+                      # beslist elke paar seconden of de batterij de auto mag
+                      # helpen (`auto_grens`, v0.90.0).
+                      nacht_over=(nacht_over := balans_kwh(now, verwachting, b)),
+                      auto_grens=auto_grens(b, nacht_over))
 
         totaal = float(rij.get("earned_total") or 0.0) + sum((sessie.get("geld") or {}).values())
         eigen = device.get("battery") or {}
@@ -4000,6 +4009,7 @@ class ChargerCoach:
             # Wat er morgenvroeg naar verwachting over is of tekortkomt, zodat de
             # kaart de conclusie groen of oranje kan maken.
             "balance_kwh": None if (bal := balans_kwh(now, verwachting, b)) is None else round(bal, 2),
+            "car_floor": None if (vloer := auto_grens(b, bal)) is None else round(vloer, 1),
             "rule": besluit.rule,
             "kind": "batterij",
             "mode": besluit.stand,
@@ -4121,7 +4131,11 @@ class ChargerCoach:
             # Laadt er intussen een paal, dan geeft de batterij niets af, ook
             # als het besluit van deze minuut dat nog niet wist: de regelaar
             # tikt elke paar seconden, de besluitronde eens per minuut (v0.87.1).
-            besluit = met_paal(sessie["besluit"], self._paal_laadt(settings))
+            besluit = met_paal(
+                sessie["besluit"], self._paal_laadt(settings), b, sessie.get("nacht_over"),
+                grens=sessie.get("auto_grens"), helpt=bool(sessie.get("helpt")),
+            )
+            sessie["helpt"] = besluit.rule == "auto-helpen"
             opdracht = regelaar.stap(
                 nu, net_w=net_w, net_op=net_op, batterij_w=batterij_w,
                 besluit=besluit, b=b,

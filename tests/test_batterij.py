@@ -512,6 +512,44 @@ controle("een lege accu in de nacht: tekort, uitgerekend uur voor uur",
          nacht31 is not None and nacht31 < 0 and abs(nacht31 - (-(11.0 - (0.15 * 14.6) * 0.736))) < 0.05,
          f"{nacht31}")
 
+print("32. de batterij helpt de auto alleen met wat er echt over is (v0.90.0)")
+# De bewoner van de eerste woning op 23-09-2026, naar evcc: "bij laden van de auto
+# mag alle batterijcapaciteit boven X% gebruikt worden." De eigenaar: de
+# nachtbalans gaat voor, "auto laden vanuit de batterij doe je echt alleen als er
+# te veel capaciteit over is; drie keer verlies."
+a32 = anker(soc=80.0, auto_boven=40.0)
+# 14,6 kWh, rendement 0,736: morgenvroeg 3,0 kWh over is 3,0 / 0,736 = 4,08 kWh
+# aan de accukant, 27,9 procentpunt: de nacht heeft 52,1% nodig.
+controle("de nacht gaat voor: grens 52% en niet de 40% van de bewoner",
+         abs(bat.auto_grens(a32, 3.0) - (80.0 - 3.0 / 0.736 / 14.6 * 100)) < 0.01, f"{bat.auto_grens(a32, 3.0)}")
+controle("is er ruim genoeg over, dan is de grens van de bewoner de ondergrens",
+         bat.auto_grens(a32, 20.0) == 40.0, f"{bat.auto_grens(a32, 20.0)}")
+controle("weet hij de nacht niet, dan helpt hij niet", bat.auto_grens(a32, None) is None, "")
+controle("zonder grens van de bewoner helpt hij nooit", bat.auto_grens(anker(soc=80.0), 20.0) is None, "")
+uit32 = anker(soc=80.0, auto_boven=40.0, nacht=False)
+controle("nachtstrategie uit: de grens van de bewoner", bat.auto_grens(uit32, None) == 40.0, f"{bat.auto_grens(uit32, None)}")
+controle("en nooit onder de eigen ondergrens", bat.auto_grens(anker(soc=80.0, auto_boven=0.0, nacht=False), None) == 5.0,
+         f"{bat.auto_grens(anker(soc=80.0, auto_boven=0.0, nacht=False), None)}")
+
+nul32 = bat.Besluit(bat.NUL, reason="nul", rule="nul")
+helpt = bat.met_paal(nul32, True, a32, 20.0)
+print(f"  {helpt.stand}: {helpt.reason}")
+controle("boven de grens: nul op de meter, dus de auto krijgt uit de batterij",
+         helpt.stand == bat.NUL and helpt.rule == "auto-helpen" and helpt.grenzen[1], f"{helpt.stand} {helpt.rule}")
+niet = bat.met_paal(bat.Besluit(bat.NUL, reason="nul", rule="nul"), True, anker(soc=40.5, auto_boven=40.0), 20.0)
+controle("op de grens (binnen de marge): niets afgeven", niet.rule == "paal-laadt" and not niet.grenzen[1], f"{niet.rule}")
+# Hysterese: al aan het helpen, dan tot de grens; opnieuw beginnen pas 5% erboven.
+dicht = anker(soc=43.0, auto_boven=40.0)
+controle("net boven de grens: niet opnieuw beginnen",
+         bat.met_paal(bat.Besluit(bat.NUL, reason="nul", rule="nul"), True, dicht, 20.0).rule == "paal-laadt", "")
+controle("maar wel doorgaan als hij al hielp",
+         bat.met_paal(bat.Besluit(bat.NUL, reason="nul", rule="nul"), True, dicht, 20.0, helpt=True).rule == "auto-helpen", "")
+controle("een vaste grens uit de besluitronde gaat voor de eigen som",
+         bat.met_paal(bat.Besluit(bat.NUL, reason="nul", rule="nul"), True, dicht, 20.0, grens=30.0).rule == "auto-helpen", "")
+controle("zonder batterijgegevens zoals altijd: niets afgeven",
+         bat.met_paal(bat.Besluit(bat.NUL, reason="nul", rule="nul"), True).rule == "paal-laadt", "")
+
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

@@ -907,6 +907,24 @@ batterij_paal = Scenario(
     contract="vast", zon=Zon(wolken="bewolkt"), auto=BUS, batterij=Batterij(soc=80.0),
     begin="2026-09-07 17:55", kabel_erin="18:00", duur_uren=13, stap_seconden=15,
 )
+# De batterij helpt de auto met wat er boven de nacht over is (v0.90.0). De bewoner
+# van de eerste woning op 23-09-2026, naar evcc; de eigenaar: de nacht gaat voor.
+batterij_helpt_auto = Scenario(
+    "batterij-helpt-auto",
+    "vast contract, de bus laadt na 20:00, de accu op 95% mag helpen boven 40%: alleen wat de nacht niet nodig heeft",
+    contract="vast", zon=Zon(wolken="bewolkt"), auto=BUS, batterij=Batterij(soc=95.0, auto_boven=40.0),
+    begin="2026-09-07 17:55", kabel_erin="18:00", duur_uren=13, stap_seconden=15,
+)
+batterij_helpt_auto_nacht = batterij_helpt_auto.kopie(
+    naam="batterij-helpt-auto-nacht",
+    uitleg="grens 10%, nachtstrategie aan: de accu houdt over wat de nacht nodig heeft",
+    batterij=Batterij(soc=95.0, auto_boven=10.0),
+)
+batterij_helpt_auto_zonder_nacht = batterij_helpt_auto_nacht.kopie(
+    naam="batterij-helpt-auto-zonder-nacht",
+    uitleg="grens 10%, nachtstrategie uit: de accu mag tot 10% in de auto",
+    nachtstrategie=False,
+)
 batterij_sprong = Scenario(
     "batterij-sprong",
     "de regelaar: om 19:00 gaat er drie kilowatt aan, om 19:20 weer uit",
@@ -1010,6 +1028,7 @@ ALLE = [
     *KLANTWONING,
     *BATTERIJ,
     vast_zon_modus, bewolkt_zon_modus, dyn_continu,
+    batterij_helpt_auto, batterij_helpt_auto_nacht, batterij_helpt_auto_zonder_nacht,
 ]
 
 
