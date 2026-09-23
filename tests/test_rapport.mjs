@@ -298,13 +298,17 @@ function vooruitScherm(planAhead) {
       textContent: "",
       classList: { add(naam) { this.klassen.push(naam); }, klassen: [] },
       kinderen,
+      attrs: {},
+      setAttribute(naam, waarde) { this.attrs[naam] = waarde; },
       append(...items) { kinderen.push(...items); },
       replaceChildren(...items) { kinderen.length = 0; kinderen.push(...items); },
     };
   };
-  for (const id of ["#vooruit-title", "#vooruit-nu", "#vooruit-kop", "#vooruit-uren", "#vooruit-voet"]) {
+  // Sinds v0.86.0 ook de prijsgrafiek, die svg-knopen maakt.
+  for (const id of ["#vooruit-title", "#vooruit-nu", "#vooruit-kop", "#vooruit-uren", "#vooruit-voet", "#vooruit-prijs"]) {
     knopen.set(id, maak());
   }
+  globalThis.document.createElementNS = () => maak();
   globalThis.document.createElement = () => {
     const el = maak();
     el.classList = {
@@ -1011,6 +1015,62 @@ proef("de knop Wat gaat hij doen staat er bij een batterij zodra er een plan per
   assert.match(bron, /besluit\.kind === "batterij"\s*\?\s*!\(besluit\.hours \?\? \[\]\)\.length/, "zichtbaarheid van data-ahead bij een batterij");
   const sheet = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js", import.meta.url), "utf-8");
   assert.ok(sheet.includes("batterijVooruit(this.besluit_)"));
+});
+
+// --- de prijsgrafiek in de pop-up (v0.86.0) ----------------------------------------
+//
+// De bewoner van de eerste woning op 23-09-2026, over evcc: "met groene balkjes
+// laat hij precies zien welke (goedkope) uren hij gaat laden, en wat de
+// gemiddelde prijs wordt." De eigenaar: "ook voor de batterij."
+const { prijsBalken } = await import("../custom_components/domotiapp_coach/frontend/src/prijsgrafiek.js");
+
+proef("de prijsgrafiek: groen waar hij laadt, het gemiddelde gewogen naar de kWh van het net", () => {
+  const u = (h, price, groen, kwh) => ({ start: `2026-09-23T${String(h).padStart(2, "0")}:00:00`, end: `2026-09-23T${String(h + 1).padStart(2, "0")}:00:00`, price, groen, kwh });
+  const b = prijsBalken([u(12, 0.30, false, 0), u(13, 0.20, true, 1), u(14, 0.10, true, 3), u(15, 0.40, false, 0)]);
+  assert.deepEqual(b.balken.map((x) => x.groen), [false, true, true, false]);
+  // (0,20 x 1 + 0,10 x 3) / 4 = 0,125, en niet het kale gemiddelde 0,15.
+  assert.ok(Math.abs(b.gemiddeld - 0.125) < 1e-9, String(b.gemiddeld));
+  assert.equal(b.kwh, 4);
+  // Het duurste uur is het hoogste staafje en de nullijn ligt onderaan.
+  const hoogste = b.balken.reduce((a, x) => (x.h > a.h ? x : a));
+  assert.equal(hoogste.tip, "15:00 tot 16:00: € 0,400");
+  assert.equal(b.nul, 96);
+  // Een tijd onder elk derde hele uur.
+  assert.deepEqual(b.balken.map((x) => x.label), ["12", "", "", "15"]);
+  assert.match(b.balken[1].tip, /hij laadt$/);
+});
+
+proef("de prijsgrafiek: een negatieve prijs zakt onder de nullijn, zon telt niet mee in het gemiddelde", () => {
+  const u = (h, price, groen, kwh) => ({ start: `2026-09-23T${String(h).padStart(2, "0")}:00:00`, price, groen, kwh });
+  const b = prijsBalken([u(12, 0.2, false, 0), u(13, -0.1, true, 2)]);
+  assert.ok(b.nul < 96 && b.balken[1].y === b.nul, "het negatieve staafje begint op de nullijn en gaat omlaag");
+  // Een laaduur dat helemaal op zon draait: geen kWh van het net, dus geen prijs om te middelen.
+  const zon = prijsBalken([u(12, 0.2, true, 0), u(13, 0.3, false, 0)]);
+  assert.equal(zon.gemiddeld, null);
+  // Een vast contract heeft geen prijzen per uur: dan geen grafiek.
+  assert.equal(prijsBalken([u(12, null, true, 1), u(13, null, false, 0)]), null);
+  assert.equal(prijsBalken([]), null);
+});
+
+proef("de pop-up van de paal toont de prijsgrafiek met het gewogen gemiddelde van wat van het net komt", () => {
+  const { el, knopen } = vooruitScherm(NACHT);
+  el.paint_();
+  const blok = knopen.get("#vooruit-prijs");
+  assert.equal(blok.hidden, false);
+  const kop = blok.kinderen[0].kinderen[1].kinderen;
+  // 03:00: 11,0 kWh van het net tegen 0,2215; 04:00: 11,0 - 2,4 = 8,6 kWh tegen 0,2113.
+  // (0,2215 x 11 + 0,2113 x 8,6) / 19,6 = 0,2170.
+  assert.equal(kop[1].textContent, "€ 0,217", JSON.stringify(kop));
+  // Een vast contract: geen prijzen, dus geen grafiek.
+  const vast = vooruitScherm({ ...NACHT, blocks: NACHT.blocks.map((b) => ({ ...b, price: null })) });
+  vast.el.paint_();
+  assert.equal(vast.knopen.get("#vooruit-prijs").hidden, true);
+});
+
+proef("de pop-up tekent de grafiek bij de paal en bij de batterij", () => {
+  const sheet = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js", import.meta.url), "utf-8");
+  assert.equal(sheet.split("this.paintPrijs_(").length - 1, 3, "leeg maken, de paal, en de batterij");
+  assert.ok(sheet.includes("Number(b.kwh) - Number(b.solar_kwh || 0)"), "bij de paal telt alleen wat van het net komt");
 });
 
 // --- eerdere contracten en gas ---------------------------------------------------
