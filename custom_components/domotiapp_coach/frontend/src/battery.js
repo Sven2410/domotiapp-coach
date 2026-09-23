@@ -91,6 +91,105 @@ export function planRegels(hours = [], maxRegels = 8) {
   });
 }
 
+const kwhTekst = (kwh) =>
+  `${Number(kwh).toLocaleString("nl-NL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kWh`;
+
+/**
+ * De conclusie van de nachtzin: de laatste zin van `plan`, "Je houdt naar
+ * verwachting ..." of "Je komt naar verwachting ... tekort". De hele zin staat
+ * in de pop-up; op de kaart is de conclusie genoeg.
+ */
+export function nachtConclusie(besluit) {
+  const tekst = String(besluit?.plan ?? "").trim();
+  if (!tekst || besluit?.kind !== "batterij" || !Number.isFinite(besluit?.balance_kwh)) return tekst;
+  const zinnen = tekst.split(/(?<=\.)\s+(?=[A-Z])/);
+  return zinnen[zinnen.length - 1];
+}
+
+/**
+ * Wat de pop-up "Wat gaat hij doen" van een batterij laat zien.
+ *
+ * De eigenaar op 23-09-2026: "ik wil het plan van de accu net als de laadpaal
+ * hebben, zo'n pop-up; nu is de kaart best groot en onoverzichtelijk." Het
+ * plan per uur, zoals de coach het uitrekende (`hours` in de stand), en
+ * bovenaan de vier getallen die ertoe doen. Niets hiervan wordt hier
+ * uitgerekend behalve optellen: de uren, de accustanden en de prijzen komen
+ * uit `plan_batterij`.
+ *
+ * @returns {{kop: Array<{label: string, waarde: string, bij: string}>,
+ *            uren: Array<{start: string, end: string, tijd: string, prijs: string,
+ *                         soc: string, wat: string, net: boolean}>,
+ *            voet: string} | null}
+ */
+export function batterijVooruit(besluit) {
+  if (!besluit || besluit.kind !== "batterij") return null;
+  const uren = (besluit.hours ?? []).filter((u) => u && u.start && u.end);
+
+  const kop = [];
+  if (Number.isFinite(besluit.soc)) {
+    kop.push({
+      label: "Accu nu",
+      waarde: `${Math.round(besluit.soc)}%`,
+      bij: Number.isFinite(besluit.capacity_kwh)
+        ? `van ${kwhTekst(besluit.capacity_kwh)}`
+        : "",
+    });
+  }
+  if (Number.isFinite(besluit.balance_kwh)) {
+    const over = besluit.balance_kwh >= 0;
+    kop.push({
+      label: "Morgenvroeg",
+      waarde: `${over ? "" : "−"}${kwhTekst(Math.abs(besluit.balance_kwh))}`,
+      bij: over ? "over na de nacht" : "tekort voor de nacht",
+    });
+  }
+  const netUren = uren.filter((u) => Number(u.grid_kwh) > 0.05);
+  const netKwh = netUren.reduce((som, u) => som + Number(u.grid_kwh), 0);
+  const prijzen = netUren.filter((u) => Number.isFinite(u.price));
+  kop.push({
+    label: "Van het net",
+    waarde: netKwh > 0.05 ? kwhTekst(netKwh) : "niets",
+    bij: prijzen.length
+      ? `gemiddeld ${euro(prijzen.reduce((s, u) => s + u.price, 0) / prijzen.length, 3)}`
+      : "in de uren die er bekend zijn",
+  });
+  if (Number.isFinite(besluit.value)) {
+    kop.push({ label: "Een kWh erin", waarde: euro(besluit.value, 3), bij: "is straks waard" });
+  }
+
+  // Het plan kan over middernacht lopen; dan zegt het eerste uur van de
+  // nieuwe dag erbij dat het morgen is, zoals "morgen 00:00".
+  const vandaag = String(uren[0]?.start ?? "").slice(0, 10);
+  let dagGezien = vandaag;
+  const rijen = uren.map((u) => {
+    const dag = String(u.start).slice(0, 10);
+    const nieuweDag = dag !== dagGezien;
+    dagGezien = dag;
+    const kwh = Number(u.kwh) || 0;
+    const net = Number(u.grid_kwh) || 0;
+    let wat = STAND_NAMEN[u.mode] ?? u.mode ?? "";
+    // Komt alles wat erin gaat van het net, dan is "waarvan" dubbel.
+    if (net > 0.05 && Math.abs(net - kwh) < 0.05) wat += `, ${kwhTekst(net)} van het net`;
+    else {
+      if (kwh > 0.05) wat += `, ${kwhTekst(kwh)} erin`;
+      else if (kwh < -0.05) wat += `, ${kwhTekst(-kwh)} eruit`;
+      if (net > 0.05) wat += `, waarvan ${kwhTekst(net)} van het net`;
+    }
+    wat = wat.charAt(0).toUpperCase() + wat.slice(1);
+    return {
+      start: u.start,
+      end: u.end,
+      tijd: nieuweDag ? `morgen ${klok(u.start)}` : klok(u.start),
+      prijs: Number.isFinite(u.price) ? euro(u.price, 3) : "",
+      soc: Number.isFinite(u.soc) ? `${Math.round(u.soc)}%` : "",
+      wat,
+      net: net > 0.05,
+    };
+  });
+
+  return { kop, uren: rijen, voet: String(besluit.plan ?? "") };
+}
+
 /** Wat er over de terugverdientijd te zeggen valt, of niets. */
 export function terugverdiendTekst(payback) {
   if (!payback) return [];
@@ -131,10 +230,9 @@ export function batteryRows(besluit) {
     });
   }
 
-  if (Number.isFinite(besluit.value) && besluit.value !== null) {
-    rijen.push({ label: "Een kWh erin is straks waard", text: euro(besluit.value, 3) });
-  }
-
+  // Wat een kWh straks waard is en het plan per uur staan sinds v0.85.0 in de
+  // pop-up "Wat gaat hij doen" (`batterijVooruit`); de kaart werd er te lang
+  // van. De eerstvolgende netlading blijft, want dat is nieuws.
   const net = volgendeNetlading(besluit.hours);
   if (net) {
     rijen.push({
@@ -152,12 +250,6 @@ export function batteryRows(besluit) {
       label: "Vakantiestand",
       text: `hij houdt de batterij onder ${Number.isFinite(besluit.ceiling) ? Math.round(besluit.ceiling) : "de grens"}%, en de wekelijkse volle beurt slaat hij over`,
     });
-  }
-
-  const plan = planRegels(besluit.hours);
-  if (plan.length) {
-    rijen.push({ label: "Plan", text: "wat hij de komende uren van plan is:" });
-    rijen.push(...plan);
   }
 
   return [...rijen, ...terugverdiendTekst(besluit.payback)];

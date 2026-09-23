@@ -949,8 +949,68 @@ proef("het plan vat de uren samen per stand, met accustand, kWh en prijs", () =>
   assert.ok(regels[1].text.includes("van 60 naar 90%"), regels[1].text);
   assert.ok(regels[1].text.includes("4,2 kWh") && regels[1].text.includes("0,130"), regels[1].text);
   assert.deepEqual(planRegels([]), []);
+  // Sinds v0.85.0 staat het plan niet meer op de kaart maar in de pop-up.
   const rijen = batteryRows({ kind: "batterij", mode: "nul", mode_name: "Nul op de meter", hours: [uur(18, "nul", 80)] });
-  assert.ok(rijen.some((r) => r.label === "Plan"));
+  assert.ok(!rijen.some((r) => r.label === "Plan"), "het plan hoort in de pop-up, niet op de kaart");
+});
+
+// --- het plan van de batterij in een pop-up (v0.85.0) ------------------------------
+//
+// De eigenaar op 23-09-2026: "ik wil het plan van de accu net als de laadpaal
+// hebben, zo'n pop-up; nu is de kaart best groot en onoverzichtelijk."
+const { batterijVooruit, nachtConclusie } = await import("../custom_components/domotiapp_coach/frontend/src/battery.js");
+
+proef("de pop-up van de batterij: vier vakken, een rij per uur, netladen gekleurd, morgen na middernacht", () => {
+  const besluit = {
+    kind: "batterij", soc: 62, capacity_kwh: 14.6, balance_kwh: 17.06, value: 0,
+    reason: "Hij houdt de meter op nul.",
+    plan: "Tot morgenvroeg verwacht hij 15,7 kWh zon. Je houdt naar verwachting 17,1 kWh over in je accu.",
+    hours: [
+      { start: "2026-09-23T13:16:57.071", end: "2026-09-23T14:00:00", mode: "standby", kwh: 0, grid_kwh: 0, soc: 62, price: 0.1944 },
+      { start: "2026-09-23T15:00:00", end: "2026-09-23T16:00:00", mode: "nul", kwh: 2.53, grid_kwh: 0, soc: 77, price: 0.253 },
+      { start: "2026-09-23T19:00:00", end: "2026-09-23T20:00:00", mode: "nul", kwh: -0.32, grid_kwh: 0, soc: 92, price: 0.404 },
+      { start: "2026-09-24T02:00:00", end: "2026-09-24T03:00:00", mode: "netladen", kwh: 2.1, grid_kwh: 2.1, soc: 90, price: 0.12 },
+    ],
+  };
+  const v = batterijVooruit(besluit);
+  const kop = Object.fromEntries(v.kop.map((k) => [k.label, `${k.waarde} | ${k.bij}`]));
+  assert.equal(kop["Accu nu"], "62% | van 14,6 kWh");
+  assert.equal(kop["Morgenvroeg"], "17,1 kWh | over na de nacht");
+  assert.equal(kop["Van het net"], "2,1 kWh | gemiddeld € 0,120");
+  assert.equal(kop["Een kWh erin"], "€ 0,000 | is straks waard");
+  assert.equal(v.uren.length, 4);
+  assert.equal(v.uren[0].tijd, "13:16");
+  assert.equal(v.uren[0].wat, "Standby");
+  assert.equal(v.uren[1].wat, "Nul op de meter, 2,5 kWh erin");
+  assert.equal(v.uren[2].wat, "Nul op de meter, 0,3 kWh eruit");
+  assert.equal(v.uren[3].tijd, "morgen 02:00");
+  assert.equal(v.uren[3].wat, "Laden van het net, 2,1 kWh van het net");
+  const deels = batterijVooruit({ ...besluit, hours: [{ ...besluit.hours[3], kwh: 3.0, grid_kwh: 1.2 }] });
+  assert.equal(deels.uren[0].wat, "Laden van het net, 3,0 kWh erin, waarvan 1,2 kWh van het net");
+  assert.deepEqual(v.uren.map((u) => u.net), [false, false, false, true]);
+  assert.equal(v.uren[3].soc, "90%");
+  assert.equal(v.voet, besluit.plan);
+
+  const tekort = batterijVooruit({ ...besluit, balance_kwh: -2.34, hours: [] });
+  assert.equal(tekort.kop.find((k) => k.label === "Morgenvroeg").waarde, "−2,3 kWh");
+  assert.equal(tekort.kop.find((k) => k.label === "Van het net").waarde, "niets");
+  assert.equal(batterijVooruit({ kind: "laadpaal" }), null);
+});
+
+proef("op de kaart van de batterij staat van de nachtzin alleen de conclusie", () => {
+  const plan = "Tot morgenvroeg verwacht hij 15,7 kWh zon, het huis vraagt 4,9 kWh en er zit 8,3 kWh in de batterij, goed voor 6,2 kWh na het verlies. Je houdt naar verwachting 17,1 kWh over in je accu.";
+  assert.equal(nachtConclusie({ kind: "batterij", balance_kwh: 17.06, plan }), "Je houdt naar verwachting 17,1 kWh over in je accu.");
+  assert.equal(nachtConclusie({ kind: "batterij", balance_kwh: -1, plan: "Tot morgenvroeg 1,5 kWh zon. Je komt naar verwachting 1,0 kWh tekort om de nacht te overbruggen; hij laadt bij als de stroom goedkoop genoeg is." }),
+    "Je komt naar verwachting 1,0 kWh tekort om de nacht te overbruggen; hij laadt bij als de stroom goedkoop genoeg is.");
+  // Zonder balans (geen rendement, geen accustand) blijft de zin zoals hij is.
+  assert.equal(nachtConclusie({ kind: "batterij", plan: "Hij weet de accustand niet." }), "Hij weet de accustand niet.");
+});
+
+proef("de knop Wat gaat hij doen staat er bij een batterij zodra er een plan per uur is", async () => {
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
+  assert.match(bron, /besluit\.kind === "batterij"\s*\?\s*!\(besluit\.hours \?\? \[\]\)\.length/, "zichtbaarheid van data-ahead bij een batterij");
+  const sheet = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js", import.meta.url), "utf-8");
+  assert.ok(sheet.includes("batterijVooruit(this.besluit_)"));
 });
 
 // --- eerdere contracten en gas ---------------------------------------------------
@@ -1460,7 +1520,7 @@ proef("de kaart van een batterij: stand, opdracht, waarde, netlading en terugver
   const rijen = Object.fromEntries(batteryRows(BESLUIT_BATTERIJ).map((r) => [r.label, r.text]));
   assert.equal(rijen["Stand"], "Laden van het net");
   assert.equal(rijen["Opdracht van de coach"], "laden op 1.750 W");
-  assert.equal(rijen["Een kWh erin is straks waard"], "€ 0,245");
+  assert.equal(rijen["Een kWh erin is straks waard"], undefined, "staat sinds v0.85.0 in de pop-up");
   assert.equal(rijen["Laadt van het net"], "02:00 tot 04:00, ongeveer 3,5 kWh");
   assert.equal(rijen["Terugverdiend"], "€ 45,00 van € 4.500");
   assert.match(rijen["Terugverdiend rond"], /november 2034, in het tempo van de laatste 30 gemeten dagen/);

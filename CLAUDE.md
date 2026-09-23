@@ -573,6 +573,19 @@ De bewoner wees er ook op dat het handelen vanaf 01-01-2027 verandert doordat
 bij teruglevering de btw vervalt; dat zit al in `NETTING_ENDS` en in de
 terugleverprijs uit de kale marktprijs.
 
+**Het plan van de batterij in een pop-up** (v0.85.0). De eigenaar op
+23-09-2026: "ik wil het plan van de accu net als de laadpaal hebben, zo'n
+pop-up; nu is de kaart best groot en onoverzichtelijk." De knop "Wat gaat hij
+doen" staat nu ook op de batterijkaart zodra er uren in het plan staan, en
+opent dezelfde pop-up als bij de paal (`plan-ahead-sheet.js`, tak
+`paintAccu_`): bovenaan Accu nu, Morgenvroeg (`balance_kwh`), Van het net en
+wat een kWh erin straks waard is; daaronder per uur de tijd, de prijs, de
+accustand aan het eind van het uur en wat hij doet, met laden van het net in
+groen (`batterijVooruit` in battery.js). Van de kaart zijn "Een kWh erin is
+straks waard" en het plan per stand af; van de nachtzin blijft daar alleen
+de conclusie (`nachtConclusie`), de hele zin staat onderaan de pop-up.
+Proeven in test_rapport.mjs.
+
 **Vakantiestand, handelen met wat de nacht overhoudt, en iets anders dat
 stuurt** (v0.80.0, allemaal 22-09-2026).
 
@@ -1550,7 +1563,7 @@ python tests/test_batterij.py    # 90 op het denkwerk van de thuisbatterij en op
 python tests/test_coach.py       # 565 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1699 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 81 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 84 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```
