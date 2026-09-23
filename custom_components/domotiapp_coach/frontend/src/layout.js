@@ -91,3 +91,60 @@ export function resetLayout() {
     // As above.
   }
 }
+
+// --- de volgorde van de apparaten -------------------------------------------
+//
+// De bewoner van de eerste woning op 23-09-2026, bij de rij met aanstuurbare
+// apparaten: "deze zouden ook drag & drop mogen. Apparaten die ik veel gebruik
+// wil ik vooraan kunnen zetten." Om dezelfde reden als de kaarten per scherm
+// en niet per persoon (v0.91.0).
+
+const DEVICE_KEY = "dac-device-order";
+
+/**
+ * Een lijst apparaten in de volgorde die op dit scherm gekozen is.
+ *
+ * Wat in de gekozen volgorde staat komt vooraan, in die volgorde; een apparaat
+ * dat er later bij kwam staat erachter, in de volgorde van de instellingen.
+ * Een id van een apparaat dat er niet meer is doet niets. Los van de opslag,
+ * zodat test_rapport.mjs het kan nameten.
+ */
+export function orderDevices(list, order) {
+  const plek = new Map((order ?? []).map((id, i) => [id, i]));
+  return [...(list ?? [])]
+    .map((device, i) => ({ device, i }))
+    .sort((a, b) => {
+      const pa = plek.has(a.device.id) ? plek.get(a.device.id) : Infinity;
+      const pb = plek.has(b.device.id) ? plek.get(b.device.id) : Infinity;
+      return pa === pb ? a.i - b.i : pa - pb;
+    })
+    .map(({ device }) => device);
+}
+
+/** De gekozen volgorde op dit scherm, als lijst van ids. */
+export function deviceOrder() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DEVICE_KEY) || "[]");
+    return Array.isArray(raw) ? raw.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Deze volgorde onthouden op dit scherm. */
+export function saveDeviceOrder(ids) {
+  try {
+    localStorage.setItem(DEVICE_KEY, JSON.stringify(ids));
+  } catch {
+    // Zoals bij de kaarten: niets aan te doen en niets om over te beginnen.
+  }
+}
+
+/** Terug naar de volgorde van de instellingen. */
+export function resetDeviceOrder() {
+  try {
+    localStorage.removeItem(DEVICE_KEY);
+  } catch {
+    // Idem.
+  }
+}

@@ -1181,6 +1181,18 @@ proef("bij de batterij de grens voor de auto, op Strategie de nachtstrategie (v0
   assert.ok(bron.includes("night_strategy !== false"), "standaard aan");
 });
 
+proef("de rij apparaten in de volgorde van dit scherm, nieuwe apparaten achteraan (v0.91.0)", async () => {
+  const { orderDevices } = await import("../custom_components/domotiapp_coach/frontend/src/layout.js");
+  const lijst = [{ id: "paal" }, { id: "vaat" }, { id: "boiler" }, { id: "accu" }];
+  assert.deepEqual(orderDevices(lijst, ["accu", "paal"]).map((d) => d.id), ["accu", "paal", "vaat", "boiler"]);
+  assert.deepEqual(orderDevices(lijst, []).map((d) => d.id), ["paal", "vaat", "boiler", "accu"], "zonder keuze de volgorde van de instellingen");
+  assert.deepEqual(orderDevices(lijst, ["weg", "boiler"]).map((d) => d.id), ["boiler", "paal", "vaat", "accu"], "een verdwenen apparaat doet niets");
+  const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
+  assert.ok(kaart.includes("orderDevices(") && kaart.includes("deviceOrder()"), "de rij volgt de gekozen volgorde");
+  assert.ok(kaart.includes('id="steer-left"') && kaart.includes('id="steer-right"'), "pijltjes naast het slepen");
+  assert.ok(kaart.includes("resetDeviceOrder();"), "standaard terugzetten zet ook de apparaten terug");
+});
+
 proef("onder het schemaschuifje staat wat hij zonder planning doet", async () => {
   const { planSummary } = await import("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js");
   const uit = { enabled: false, per_day: false, window: {}, days: [] };
