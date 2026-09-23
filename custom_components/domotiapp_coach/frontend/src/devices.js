@@ -1016,6 +1016,19 @@ export const defaultPrograms = () =>
   }));
 
 /**
+ * De keuzes van een programma-select, zonder de favorieten.
+ *
+ * Home Connect Local zet naast de programma's ook de opgeslagen favorieten
+ * van de machine in de lijst (`favorite_001`). Dat is geen programma maar
+ * een verwijzing naar een programma met opties, en de coach weet er geen
+ * duur of verbruik van. De eigenaar op 23-09-2026: "favorite 001 is geen
+ * programma, haal die eruit." Overal waar de opties van de select gelezen
+ * worden gaat het langs hier: de tabel bij Apparaten en de keuze op de kaart.
+ */
+export const programChoices = (state) =>
+  (state?.attributes?.options ?? []).filter((value) => !/(^|[._])favorite[._]?\d*$/i.test(String(value)));
+
+/**
  * De programma's zoals de machine ze zelf aanbiedt: de opties van de
  * select-entiteit, elk met de sleutel waaronder de coach hem kent en een
  * leesbare naam. Leeg zonder select of zolang de feed er nog niet is.
@@ -1023,7 +1036,7 @@ export const defaultPrograms = () =>
 export function programOptions(device, feed) {
   const chooser = programChooser(device);
   if (!chooser || !feed) return [];
-  const options = feed.get(chooser.entityId)?.attributes?.options ?? [];
+  const options = programChoices(feed.get(chooser.entityId));
   return options.map((value) => {
     const known = programFor(value);
     // Een programma dat de tabel niet kent: het stuk na het vaste voorvoegsel,
