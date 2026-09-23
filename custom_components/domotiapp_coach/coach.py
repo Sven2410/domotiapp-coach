@@ -234,6 +234,10 @@ METER_NAIJL = timedelta(minutes=1)
 # steeds binnen een ronde opgemerkt wordt. Het verslag noemt het moment waarop
 # de paal het voor het eerst zei, niet het moment waarop de coach het geloofde.
 KABEL_ONTDREUN = timedelta(seconds=30)
+# Hoeveel een batterij moet zakken voordat de fasemetingen van daarvoor niet
+# meer voor de mediaan tellen (v0.88.2). Een halve kilowatt is ruim twee
+# ampère op één fase; kleiner bijregelen doet de regelaar de hele dag.
+BATTERIJ_DALING_W = 500.0
 
 # Hoe lang de laatste bruikbare meting van een sensor blijft gelden als die
 # sensor even niets zegt.
@@ -880,6 +884,9 @@ class ChargerCoach:
         # bij Apparaten). Zelfde levensduur als snelladen: de kabel eruit en
         # het is weer de voorkeur, zodat er niets te vergeten valt.
         self._modus: dict[str, str] = {}
+        # Het vermogen van elke batterij bij de vorige lezing, om een flinke
+        # daling te zien. Zie `_batterij_wijkt`.
+        self._batterij_vorige_w: dict[str, float] = {}
         # Tot hoeveel procent deze beurt laadt, als de bewoner dat op de kaart
         # koos (v0.88.0), net als de schuif van evcc. Zonder keuze het doel uit
         # het autoprofiel. Weg zodra de kabel eruit gaat.
@@ -3518,6 +3525,51 @@ class ChargerCoach:
     # `_one_batterij` kiest elke minuut een stand, en `_async_regel` voert die
     # uit op het tempo van de meter.
 
+    def _batterij_wijkt(
+        self, settings: dict[str, Any], now: datetime
+    ) -> dict[tuple[str, str], float]:
+        """Per zekering en fase: de stroom van een batterij die wijkt als de paal laadt.
+
+        De eerste woning op 23-09-2026: de Anker en de Alfen op dezelfde groep
+        van 16 A. Laadde de Anker 3,2 kW zon op L3, dan zei de paal "de groep
+        Garage is te zwaar belast", en de zon die voor de auto was ging in de
+        batterij; ontlaadde de Anker, dan net zo. Maar een batterij die de coach
+        stuurt wijkt voor de paal: ontladen stopt zodra die laadt (`met_paal`),
+        en laden op nul op de meter zakt vanzelf als de auto de zon neemt. Die
+        stroom telt dus niet als belasting voor de paal, onder elke zekering in
+        de keten van de batterij en onder de hoofdaansluiting. Wel bij laden van
+        het net en maximaal laden: daar wijkt hij niet.
+
+        En zakt een batterij flink, dan dragen de fasemetingen van daarvoor zijn
+        oude stroom nog; net als bij een paal die omlaag gaat tellen voor de
+        mediaan dan alleen de metingen van daarna (`_daling`, zie `_gladde_fase`).
+        """
+        uit: dict[tuple[str, str], float] = {}
+        for device in settings.get("devices") or []:
+            if device.get("type") != "thuisbatterij":
+                continue
+            device_id = device.get("id", "")
+            watt = self._batterij_w(device)
+            if watt is None:
+                continue
+            vorige = self._batterij_vorige_w.get(device_id)
+            if vorige is not None and abs(watt) < abs(vorige) - BATTERIJ_DALING_W:
+                self._daling = now
+            self._batterij_vorige_w[device_id] = watt
+            sessie = self._batterij.get(device_id) or {}
+            besluit = sessie.get("besluit")
+            if not sessie.get("stuurt") or besluit is None:
+                continue
+            if watt > 0 and besluit.stand in (NETLADEN, MAX_LADEN):
+                continue
+            fase = str((device.get("battery") or {}).get("phase") or "")
+            fasen = [fase] if fase in ("l1", "l2", "l3") else ["l1", "l2", "l3"]
+            amps = abs(watt) / 230.0 / len(fasen)
+            for sleutel in self._groep_sleutels(settings, device):
+                for f in fasen:
+                    uit[(sleutel, f)] = uit.get((sleutel, f), 0.0) + amps
+        return uit
+
     def _batterij_w(self, device: dict[str, Any]) -> float | None:
         """Wat deze batterij nu doet, in watt, laden positief.
 
@@ -5173,11 +5225,16 @@ class ChargerCoach:
             self._daling = now
         self._stroom_vorige[device_id] = charger_amps
 
+        # Wat een gestuurde batterij op deze zekeringen doet, per fase. Die
+        # stroom wijkt zodra de paal laadt, dus het is geen ruimte die het huis
+        # inneemt (v0.88.2). Zie `_batterij_wijkt`.
+        wijkt = self._batterij_wijkt(settings, now)
+
         phases = []
         for key in ("l1", "l2", "l3"):
             amps = self._fase_amps((sources.get("phases") or {}).get(key) or {}, now)
             if amps is not None:
-                phases.append(amps)
+                phases.append(max(0.0, amps - wijkt.get(("", key), 0.0)))
 
         # De groepen waar deze paal aan hangt, elk met de eigen meter en de
         # eigen zekering. Zie `Circuit` in planner.py.
@@ -5188,7 +5245,7 @@ class ChargerCoach:
             for key in ("l1", "l2", "l3"):
                 amps = self._fase_amps((groep.get("sensors") or {}).get(key) or {}, now)
                 if amps is not None:
-                    stromen.append(amps)
+                    stromen.append(max(0.0, amps - wijkt.get((str(groep.get("id")), key), 0.0)))
             circuits.append(Circuit(
                 name=str(groep.get("name") or groep.get("id") or ""),
                 phase_amps=stromen,
