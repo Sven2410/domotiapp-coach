@@ -627,6 +627,7 @@ class DacViewOverview extends DacElement {
        rekt zich uit tot alles wat de knop hem geeft. Vandaar dat alle drie de
        knoppen hier staan en niet alleen degene waar het is opgevallen. */
     button.manual .icon, button.boost .icon { width: 16px; height: 16px; color: var(--dac-accent-hi); }
+    button.boost .ico { display: inline-flex; }
     button.manual[hidden] { display: none; }
     button.release[aria-pressed="true"] {
       border-color: rgba(12,163,12,0.5);
@@ -1893,6 +1894,15 @@ class DacViewOverview extends DacElement {
       : besluit.boost
         ? "Snelladen staat aan"
         : "Snelladen";
+    // Een batterij krijgt zijn eigen icoon (een accu met een pijl erin), de
+    // paal houdt de bliksem. De eigenaar op 23-09-2026: het pauzeteken bij
+    // "Nu leegladen" klopte niet, en dan hoort vol laden ook geen bliksem te zijn.
+    const boostIcoon = this.$(`[data-boost-icon="${slot}"]`);
+    const wilIcoon = batterij ? "accuVol" : "bolt";
+    if (boostIcoon && boostIcoon.dataset.icon !== wilIcoon) {
+      boostIcoon.dataset.icon = wilIcoon;
+      boostIcoon.innerHTML = icons[wilIcoon];
+    }
 
     const leeg = this.$(`[data-drain="${slot}"]`);
     const leegRij = this.$(`[data-drain-to-row="${slot}"]`);
@@ -2459,7 +2469,7 @@ class DacViewOverview extends DacElement {
               <span data-release-now-text="${slot}"></span>
             </button>
             <button class="boost" type="button" data-boost="${slot}" aria-pressed="false" hidden>
-              ${icons.bolt}<span data-boost-text="${slot}">Snelladen</span>
+              <span class="ico" data-boost-icon="${slot}">${icons.bolt}</span><span data-boost-text="${slot}">Snelladen</span>
             </button>
             <button class="boost" type="button" data-pause="${slot}" aria-pressed="false" hidden>
               ${icons.pause}<span data-pause-text="${slot}">Pauzeren</span>
@@ -2469,7 +2479,7 @@ class DacViewOverview extends DacElement {
                  22-09-2026: "nu maximaal ontladen tot 50%, daarna terug naar
                  normale modus." -->
             <button class="boost" type="button" data-drain="${slot}" aria-pressed="false" hidden>
-              ${icons.pause}<span data-drain-text="${slot}">Nu leegladen</span>
+              ${icons.accuLeeg}<span data-drain-text="${slot}">Nu leegladen</span>
             </button>
             <label class="drain-to" data-drain-to-row="${slot}" hidden>
               tot <input type="number" min="5" max="95" step="5" value="50" data-drain-to="${slot}" inputmode="numeric"> %

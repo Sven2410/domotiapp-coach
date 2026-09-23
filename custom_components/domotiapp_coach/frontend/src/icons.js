@@ -102,6 +102,21 @@ export const icons = {
      <path d="m12.2 8.8-2.4 3.6h3.2l-2.4 3.6"/>`
   ),
 
+  // De twee knoppen van de thuisbatterij (23-09-2026; daarvoor stond er
+  // een bliksem en een pauzeteken, en dat laatste zei niets over leegladen).
+  // Dezelfde accu als hierboven, met een pijl die erin gaat of eruit komt.
+  accuVol: svg(
+    `<rect x="4.2" y="6.4" width="14.4" height="11.2" rx="2.2"/>
+     <path d="M18.6 10v4h1.6a.6.6 0 0 0 .6-.6v-2.8a.6.6 0 0 0-.6-.6Z"/>
+     <path d="M11.4 8.6v6.6M8.8 12.6l2.6 2.6 2.6-2.6"/>`
+  ),
+
+  accuLeeg: svg(
+    `<rect x="4.2" y="6.4" width="14.4" height="11.2" rx="2.2"/>
+     <path d="M18.6 10v4h1.6a.6.6 0 0 0 .6-.6v-2.8a.6.6 0 0 0-.6-.6Z"/>
+     <path d="M11.4 15.4V8.8M8.8 11.4l2.6-2.6 2.6 2.6"/>`
+  ),
+
   boiler: svg(
     `<rect x="5.6" y="2.8" width="12.8" height="18.4" rx="4"/>
      <path d="M9 7.4h6"/>

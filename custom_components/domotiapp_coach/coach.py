@@ -6377,7 +6377,19 @@ class ChargerCoach:
         geld["bewaard"] = None  # meteen naar de opslag bij de volgende ronde
 
     async def _async_bij_stop(self, _event: Any = None) -> None:
-        """Home Assistant gaat uit: elke lopende beurt nu naar de opslag."""
+        """Home Assistant gaat uit: elke lopende beurt nu naar de opslag, en
+        daarna de apparaten teruggeven.
+
+        Bij een herstart van Home Assistant wordt `async_unload_entry` niet
+        aangeroepen en dus `async_stop` ook niet; alleen dit event komt. Tot
+        23-09-2026 bleef de batterij daardoor bij elke herstart op zijn laatste
+        opdracht staan (in de eerste woning: 235 W ontladen in de externe
+        modus, twee minuten lang, tot de coach terug was; bij 2,5 kW in een leeg
+        huis was dat leeglopen naar het net geweest) en bleef een boiler zonder
+        stroom. Het teruggeven gebeurt hier dus zelf, en wordt afgewacht, want
+        een taak die bij het afsluiten nog in de wachtrij staat wordt niet meer
+        gedraaid.
+        """
         try:
             settings = await async_get_store(self.hass).async_load()
         except Exception:  # noqa: BLE001
@@ -6394,6 +6406,8 @@ class ChargerCoach:
                 )
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("kon de lopende laadbeurt niet bewaren bij het stoppen")
+        await self._async_batterijen_los()
+        await self._async_boilers_aan()
 
     async def _async_beurten_laden(self) -> None:
         """De beurten die bij de vorige keer nog liepen, voor `_geld_begin`."""
