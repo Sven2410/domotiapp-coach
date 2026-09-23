@@ -43,8 +43,12 @@ import "../plan-ahead-sheet.js";
 import {
   OVERVIEW_CARDS,
   defaultLayout,
+  deviceOrder,
   effectiveLayout,
+  orderDevices,
+  resetDeviceOrder,
   resetLayout,
+  saveDeviceOrder,
   saveLayout,
 } from "../layout.js";
 import {
@@ -504,6 +508,24 @@ class DacViewOverview extends DacElement {
       padding-bottom: 2px;
     }
     .steer-tabs::-webkit-scrollbar { display: none; }
+    /* Tijdens het indelen zijn de apparaten te slepen (v0.91.0): dan geen
+       scrollen onder de vinger, en een hand als wijzer. */
+    :host([arranging]) .steer-tab { touch-action: none; cursor: grab; }
+    .steer-tab.dragging {
+      position: relative; z-index: 2; cursor: grabbing;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    }
+    .steer-order {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px;
+      font-size: 12.5px; color: var(--dac-ink-3);
+    }
+    .steer-order[hidden] { display: none; }
+    .steer-order button {
+      display: inline-grid; place-items: center; width: 34px; height: 34px;
+      border-radius: 50%; border: 1px solid var(--dac-border-hi);
+      background: transparent; color: var(--dac-ink-2); cursor: pointer;
+    }
+    .steer-order button svg { width: 16px; height: 16px; }
     .steer-tabs[hidden] { display: none; }
 
     .steer-tab {
@@ -1165,6 +1187,13 @@ class DacViewOverview extends DacElement {
           </div>
           <p class="panel-sub">Wat de coach straks zelf mag inschakelen.</p>
           <div class="steer-tabs" id="steer-tabs" role="tablist" aria-label="Aanstuurbare apparaten" hidden></div>
+          <!-- Alleen tijdens het indelen (v0.91.0): het gekozen apparaat een
+               plek opschuiven. Slepen kan ook, maar is nooit de enige manier. -->
+          <div class="steer-order" id="steer-order" hidden>
+            <span>Sleep de apparaten, of schuif het gekozen apparaat:</span>
+            <button type="button" id="steer-left" aria-label="Naar links">${icons.arrowLeft}</button>
+            <button type="button" id="steer-right" aria-label="Naar rechts">${icons.arrowRight}</button>
+          </div>
           <div class="steer-grid" id="steer-grid"></div>
         </article>
 
@@ -1248,6 +1277,8 @@ class DacViewOverview extends DacElement {
     this.$("#arrange-open").addEventListener("click", () => this.startArranging_());
     this.$("#arrange-done").addEventListener("click", () => this.stopArranging_());
     this.$("#arrange-reset").addEventListener("click", () => this.resetArrangement_());
+    this.$("#steer-left").addEventListener("click", () => this.moveDevice_(-1));
+    this.$("#steer-right").addEventListener("click", () => this.moveDevice_(1));
 
     this.applyLayout_();
   }
@@ -1282,6 +1313,7 @@ class DacViewOverview extends DacElement {
     this.arranging_ = true;
     this.toggleAttribute("arranging", true);
     this.$("#arrange-bar").hidden = false;
+    this.$("#steer-order").hidden = this.$("#steer-tabs").hidden;
     this.paintCardBars_();
   }
 
@@ -1289,7 +1321,101 @@ class DacViewOverview extends DacElement {
     this.arranging_ = false;
     this.toggleAttribute("arranging", false);
     this.$("#arrange-bar").hidden = true;
+    this.$("#steer-order").hidden = true;
     for (const bar of this.$$(".card-edit")) bar.remove();
+  }
+
+  // --- de volgorde van de apparaten (v0.91.0) ----------------------------
+
+  /** De rij opnieuw opbouwen in de volgorde die nu onthouden is. */
+  rebuildSteer_() {
+    this.steerKey_ = null;
+    if (this.allSteer_) this.updateSteerable_(this.allSteer_);
+    this.paintSteerChoice_();
+  }
+
+  /** Het gekozen apparaat een plek naar links of rechts. */
+  moveDevice_(delta) {
+    const ids = (this.steerDevices_ ?? []).map((device) => device.id);
+    const from = ids.indexOf(this.steerActive_);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= ids.length) return;
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    saveDeviceOrder(ids);
+    this.rebuildSteer_();
+  }
+
+  /**
+   * Een apparaat in de rij verslepen, zoals een kaart (`startDrag_`), maar
+   * zijwaarts. Tijdens het slepen schuiven alleen de plekken (`order`), want
+   * de rij opnieuw opbouwen onder een vinger laat hem los; bij loslaten wordt
+   * de volgorde onthouden en de rij opnieuw opgebouwd.
+   */
+  startTabDrag_(event, slot) {
+    const tab = this.$(`[data-tab="${slot}"]`);
+    const list = this.steerDevices_ ?? [];
+    if (!tab || !list[slot]) return;
+    try {
+      tab.setPointerCapture(event.pointerId);
+    } catch {
+      // Een pointer die al weg is: dan volgt het slepen hem gewoon niet.
+    }
+
+    const id = list[slot].id;
+    const ids = list.map((device) => device.id);
+    const knop = (deviceId) => this.$(`[data-tab="${list.findIndex((d) => d.id === deviceId)}"]`);
+    const zet = () => ids.forEach((deviceId, i) => {
+      const el = knop(deviceId);
+      if (el) el.style.order = String(i);
+    });
+    zet();
+
+    const startX = event.clientX;
+    let settled = 0;
+    let bewogen = false;
+
+    const move = (ev) => {
+      const dx = ev.clientX - startX;
+      if (!bewogen && Math.abs(dx) < 6) return;
+      bewogen = true;
+      tab.classList.add("dragging");
+      tab.style.transform = `translateX(${dx + settled}px)`;
+      for (;;) {
+        const index = ids.indexOf(id);
+        const step = dx + settled < 0 ? -1 : 1;
+        const other = ids[index + step];
+        if (!other) break;
+        const box = knop(other)?.getBoundingClientRect();
+        if (!box) break;
+        const self = tab.getBoundingClientRect();
+        const passed = step < 0
+          ? self.left < box.left + box.width / 2
+          : self.right > box.right - box.width / 2;
+        if (!passed) break;
+        const before = tab.getBoundingClientRect().left;
+        ids.splice(index, 1);
+        ids.splice(index + step, 0, id);
+        zet();
+        settled += before - tab.getBoundingClientRect().left;
+        tab.style.transform = `translateX(${dx + settled}px)`;
+      }
+    };
+
+    const stop = () => {
+      tab.removeEventListener("pointermove", move);
+      tab.removeEventListener("pointerup", stop);
+      tab.removeEventListener("pointercancel", stop);
+      tab.classList.remove("dragging");
+      tab.style.transform = "";
+      if (!bewogen) return;
+      saveDeviceOrder(ids);
+      this.steerActive_ = id;
+      this.rebuildSteer_();
+    };
+
+    tab.addEventListener("pointermove", move);
+    tab.addEventListener("pointerup", stop);
+    tab.addEventListener("pointercancel", stop);
   }
 
   /**
@@ -1444,8 +1570,10 @@ class DacViewOverview extends DacElement {
 
   resetArrangement_() {
     resetLayout();
+    resetDeviceOrder();
     this.layout_ = defaultLayout();
     this.paintLayout_();
+    this.rebuildSteer_();
   }
 
   /**
@@ -2412,7 +2540,13 @@ class DacViewOverview extends DacElement {
     // Numbered over every device, not just the steerable ones, so two
     // dishwashers keep the same numbers here as under Strategie.
     this.labels_ = deviceLabelMap(devices);
-    const list = (devices ?? []).filter((device) => device.controllable);
+    // In de volgorde die op dit scherm gekozen is (v0.91.0). Alle apparaten
+    // bewaard, zodat een nieuwe volgorde de rij meteen opnieuw kan opbouwen.
+    this.allSteer_ = devices;
+    const list = orderDevices(
+      (devices ?? []).filter((device) => device.controllable),
+      deviceOrder()
+    );
 
     card.hidden = !list.length;
     if (!list.length) return;
@@ -2647,6 +2781,9 @@ class DacViewOverview extends DacElement {
       button.addEventListener("click", () => this.openManual_(Number(button.dataset.manual)));
     }
     for (const tab of this.$$("[data-tab]")) {
+      tab.addEventListener("pointerdown", (event) => {
+        if (this.arranging_) this.startTabDrag_(event, Number(tab.dataset.tab));
+      });
       tab.addEventListener("click", () => this.selectSteer_(Number(tab.dataset.tab)));
       tab.addEventListener("keydown", (event) => this.stepSteer_(event, Number(tab.dataset.tab)));
     }

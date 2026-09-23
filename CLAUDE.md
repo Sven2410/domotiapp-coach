@@ -1699,7 +1699,7 @@ python tests/test_batterij.py    # 105 op het denkwerk van de thuisbatterij en o
 python tests/test_coach.py       # 603 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1787 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 96 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 97 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```
@@ -1790,6 +1790,18 @@ Bij een rode proef: verdenk eerst de proef en dan pas de code. Van de zeventien
 Een proefopzet die begint met een paal die al laadt is geen gewone laadbeurt maar
 een herstart middenin, en daar gedraagt de coach zich bewust anders. Doe eerst
 één ronde met de kabel erin en nog geen stroom.
+
+### De volgorde op het overzicht
+
+De kaarten zijn te verslepen sinds de stand "Indelen" (`layout.js`, per scherm in
+de browser en niet per persoon). Sinds v0.91.0 ook de rij met aanstuurbare
+apparaten, na de bewoner van de eerste woning op 23-09-2026: "apparaten die ik veel
+gebruik wil ik vooraan kunnen zetten." `orderDevices`, `deviceOrder` en
+`saveDeviceOrder` in layout.js (`dac-device-order`); een nieuw apparaat komt
+achteraan. In de stand Indelen zijn de knoppen zijwaarts te slepen
+(`startTabDrag_` in overview.js, pointer events zoals bij de kaarten) en staan er
+twee pijltjes die het gekozen apparaat een plek opschuiven, want slepen is nooit
+de enige manier. "Standaard terugzetten" zet ook de apparaten terug.
 
 ### Waar het schema van een apparaat staat
 
