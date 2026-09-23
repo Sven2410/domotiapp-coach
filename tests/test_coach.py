@@ -5264,6 +5264,42 @@ controle("zonder grens helpt hij de auto nooit", b98c.auto_boven is None, f"{b98
 controle("de standaard van de instellingen: nachtstrategie aan",
          storage.DEFAULT_SETTINGS["strategy"]["night_strategy"] is True, "")
 
+print("=== 99. voorrang bij zonoverschot: wat de paal van de zon ziet (v0.92.0) ===")
+# De bewoner van de eerste woning op 23-09-2026: "eerst moet de accu 40% vol zijn,
+# daarna mag het zonoverschot naar de auto. Niet automatisch de auto voorrang geven
+# op alles dus."
+paal99 = dict(LAADPAAL, controllable=True)
+inst99 = instellingen(devices=[paal99, BATTERIJ])
+huis99 = {**huis75(afname=0.0, teruglevering=500.0, batterij="1000", soc="30")}
+hass99, _, coach99 = bouw(huis99, inst99)
+# Een gestuurde batterij telt met de opdracht van de regelaar (`_batterij_geregeld_w`).
+coach99._batterij["dev-batterij"] = {
+    "regelaar": coachmod.Regelaar(opdracht_w=1000.0), "stuurt": True,
+    "besluit": coachmod.Besluit("nul", rule="nul"),
+    "batterij": coachmod.Batterij(soc=30.0, capacity_kwh=14.6, max_charge_w=3500.0, max_discharge_w=2500.0,
+                                  soc_min=5.0, soc_max=95.0, rte=0.75),
+}
+standaard99 = coach99._zon_correctie(inst99, paal99, 500.0)
+controle("standaard gaat de auto voor: de 1000 W van de batterij telt voor de paal als zon",
+         abs(standaard99 - 1000.0) < 1, f"{standaard99}")
+inst99["strategy"]["solar_priority"] = [{"device": "dev-batterij", "limit": 50}, {"device": "dev-laadpaal"},
+                                        {"device": "dev-batterij"}]
+eerst99 = coach99._zon_correctie(inst99, paal99, 500.0)
+print(f"  accu tot 50% eerst, accu op 30%: {eerst99:+.0f} W voor de paal")
+controle("accu eerst: zijn lading telt niet, en zijn ruimte (3500 - 1000) gaat eraf",
+         abs(eerst99 - (-2500.0)) < 1, f"{eerst99}")
+hass99.states.zet("sensor.batterij_soc", "60")
+coach99._batterij["dev-batterij"]["batterij"].soc = 60.0
+boven99 = coach99._zon_correctie(inst99, paal99, 500.0)
+controle("boven de 50%: dan gaat de auto weer voor", abs(boven99 - 1000.0) < 1, f"{boven99}")
+hass99.states.zet("sensor.batterij_vermogen", "-800")
+coach99._batterij["dev-batterij"]["regelaar"] = coachmod.Regelaar(opdracht_w=-800.0)
+ontlaadt99 = coach99._zon_correctie(inst99, paal99, 500.0)
+controle("wat de batterij afgeeft is nooit zon", abs(ontlaadt99 - (-800.0)) < 1, f"{ontlaadt99}")
+meet99 = dict(LAADPAAL, id="dev-meet", controllable=False)
+controle("een paal die de coach niet stuurt: zoals altijd, de batterij wijkt",
+         coach99._zon_correctie(inst99, meet99, 500.0) == coach99._batterijen_w(inst99), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

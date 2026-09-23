@@ -1193,6 +1193,29 @@ proef("de rij apparaten in de volgorde van dit scherm, nieuwe apparaten achteraa
   assert.ok(kaart.includes("resetDeviceOrder();"), "standaard terugzetten zet ook de apparaten terug");
 });
 
+proef("voorrang bij zonoverschot: het paneel vult aan zoals de coach (zie proef 63 in test_planner.py)", async () => {
+  const { zonRegels, regelUitleg } = await import("../custom_components/domotiapp_coach/frontend/src/voorrang.js");
+  const apparaten = [
+    { id: "paal", type: "laadpaal", controllable: true },
+    { id: "boiler", type: "boiler", controllable: true },
+    { id: "accu", type: "thuisbatterij", controllable: true },
+    { id: "vaat", type: "vaatwasser", controllable: true },
+    { id: "meet", type: "laadpaal", controllable: false },
+  ];
+  assert.deepEqual(zonRegels([], apparaten), [
+    { device: "paal", limit: null }, { device: "boiler", limit: null }, { device: "accu", limit: null }]);
+  assert.deepEqual(
+    zonRegels([{ device: "accu", limit: 50 }, { device: "paal", limit: 60 }, { device: "boiler", limit: 40 },
+      { device: "weg", limit: 10 }], apparaten),
+    [{ device: "accu", limit: 50 }, { device: "paal", limit: 60 }, { device: "boiler", limit: null }],
+    "dezelfde uitkomst als zon_regels in planner.py");
+  assert.equal(regelUitleg("thuisbatterij", 50), "tot 50%");
+  assert.equal(regelUitleg("laadpaal", null), "tot het doel van de auto");
+  assert.equal(regelUitleg("boiler", null), "tot hij warm is");
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/strategy.js", import.meta.url), "utf-8");
+  assert.ok(bron.includes('id="zon-lijst"') && bron.includes("sleepZon_(") && bron.includes("solar_priority"));
+});
+
 proef("onder het schemaschuifje staat wat hij zonder planning doet", async () => {
   const { planSummary } = await import("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js");
   const uit = { enabled: false, per_day: false, window: {}, days: [] };

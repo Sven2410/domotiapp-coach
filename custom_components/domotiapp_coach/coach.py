@@ -65,6 +65,9 @@ from .batterij import (
 )
 from .planner import (
     MODI_ZONDER_SOM,
+    zon_grens,
+    zon_rang,
+    zon_regels,
     Apparaat,
     BALANCER_MARGIN_AMPS,
     Boiler,
@@ -973,6 +976,9 @@ class ChargerCoach:
         # ronden achter elkaar voordat een tempo vervalt, net als bij het leren.
         self._weerleg_vorig: dict[str, int] = {}
         self._auto_id: dict[str, str] = {}
+        # De accustand van de auto aan elke paal bij de vorige ronde, voor de
+        # voorrang bij zonoverschot ("auto tot 60%"). Zie `_zon_correctie`.
+        self._auto_soc: dict[str, float | None] = {}
         # Sinds wanneer er stroom wordt aangeboden zonder dat de auto iets
         # afneemt. Daarmee weet de kaart het verschil tussen "begint zo" en "de
         # auto doet niets". Een tijdstip en geen teller: een ronde is niet altijd
@@ -3184,6 +3190,12 @@ class ChargerCoach:
         # laadvermogen er ook weer bij opgeteld wordt.
         gemeten = self._meter_zeker(now)
         eigen = (watts or 0.0) if draait else 0.0
+        # De meter van tien minuten telt de batterij al als wijkend (zie
+        # `_netto_export_w`); de voorrang bij zon (v0.92.0) zegt of dat klopt,
+        # en of een paal lager in de voorrang voor de boiler wijkt.
+        if gemeten is not None:
+            kaal = gemeten - self._batterijen_w(settings)
+            gemeten = kaal + self._zon_correctie(settings, device, kaal)
         surplus = None if gemeten is None else gemeten + eigen
         decision = plan_boiler(
             now, self._prices(settings), self._tariff(settings),
@@ -3591,6 +3603,92 @@ class ChargerCoach:
         if laden is None and ontladen is None:
             return None
         return (laden or 0.0) - (ontladen or 0.0)
+
+    def _zon_voorrang(self, settings: dict[str, Any]) -> tuple[list[dict], dict[str, int]]:
+        """De voorrang bij zonoverschot en ieders plek erin, op dit moment.
+
+        Zie `zon_regels` en `zon_rang` in planner.py. De stand van een paal is
+        de accustand van de auto die eraan hangt, van een batterij haar eigen.
+        """
+        apparaten = settings.get("devices") or []
+        regels = zon_regels((settings.get("strategy") or {}).get("solar_priority"), apparaten)
+        stand: dict[str, float | None] = {}
+        for apparaat in apparaten:
+            apparaat_id = apparaat.get("id", "")
+            if apparaat.get("type") == "laadpaal":
+                stand[apparaat_id] = self._auto_soc.get(apparaat_id)
+            elif apparaat.get("type") == "thuisbatterij":
+                stand[apparaat_id] = _number(self.hass, (apparaat.get("entities") or {}).get("soc"))
+        return regels, zon_rang(regels, stand)
+
+    def _zon_correctie(
+        self, settings: dict[str, Any], device: dict[str, Any], kaal: float
+    ) -> float:
+        """Wat er voor dit apparaat bij de gemeten teruglevering komt of af gaat.
+
+        De voorrang bij zonoverschot (v0.92.0, zie `zon_regels`). Een apparaat
+        ziet de teruglevering, plus wat apparaten lager in de voorrang nu van de
+        zon nemen, want die wijken:
+
+        - Een batterij die ontlaadt is geen zon, waar hij ook staat.
+        - Een batterij lager in de voorrang die laadt, wijkt: zijn lading telt.
+          Zo ging het altijd (`_batterijen_w`), en zo is het de standaard.
+        - Een batterij hoger in de voorrang die nog onder zijn grens zit en mag
+          laden, wijkt niet: zijn lading telt niet, en de ruimte die hij nog
+          heeft gaat eraf, zodat het apparaat eronder wijkt en de batterij het
+          krijgt. De bewoner van de eerste woning: "eerst moet de accu 40% vol
+          zijn, daarna mag het zonoverschot naar de auto."
+        - Een paal of boiler lager in de voorrang wijkt met zijn zondeel: wat
+          hij verbruikt, maar niet meer dan er aan zon was. Een paal die volgens
+          zijn planning van het net laadt maakt voor de boiler dus geen zon.
+
+        `kaal` is de teruglevering zonder batterij-correctie, positief is naar
+        het net. Geeft het verschil terug, zodat de aanroeper zijn eigen
+        vastgehouden meting kan houden.
+        """
+        regels, rang = self._zon_voorrang(settings)
+        if device.get("id", "") not in rang:
+            # Een apparaat dat niet in de voorrang staat (de coach stuurt het
+            # niet): zoals het altijd ging, de batterij wijkt.
+            return self._batterijen_w(settings)
+        mijn = rang[device.get("id", "")]
+        # Eerst het eigen verbruik: de zon die dit apparaat al neemt is van
+        # hem, en pas wat daarna overblijft wordt toegerekend aan wie lager staat.
+        eigen = max(0.0, _watts(self.hass, device.get("entity")) or 0.0)
+        beschikbaar = kaal + eigen
+        for apparaat in settings.get("devices") or []:
+            if apparaat.get("type") != "thuisbatterij":
+                continue
+            w = self._batterij_geregeld_w(apparaat) or 0.0
+            plek = rang.get(apparaat.get("id", ""), len(regels) + 1)
+            if w < 0 or plek > mijn:
+                beschikbaar += w
+                continue
+            sessie = self._batterij.get(apparaat.get("id", "")) or {}
+            b = sessie.get("batterij")
+            besluit = sessie.get("besluit")
+            if not sessie.get("stuurt") or b is None or besluit is None or not besluit.grenzen[0]:
+                beschikbaar += w
+                continue
+            grens = zon_grens(regels, rang, apparaat.get("id", "")) or (b.soc_max - VOL_MARGE)
+            if b.soc is not None and b.soc >= min(grens, b.soc_max - VOL_MARGE):
+                beschikbaar += w
+                continue
+            # Hij staat hoger en wil nog: zijn lading telt niet, zijn ruimte gaat eraf.
+            beschikbaar -= max(0.0, b.max_charge_w - max(0.0, w))
+        for apparaat in settings.get("devices") or []:
+            if apparaat is device or apparaat.get("type") not in ("laadpaal", "boiler"):
+                continue
+            if not apparaat.get("controllable"):
+                continue
+            plek = rang.get(apparaat.get("id", ""), len(regels) + 1)
+            if plek <= mijn:
+                continue
+            neemt = max(0.0, _watts(self.hass, apparaat.get("entity")) or 0.0)
+            if neemt <= 0:
+                continue
+            beschikbaar += max(0.0, min(neemt, beschikbaar + neemt))
+        return beschikbaar - eigen - kaal
 
     def _batterijen_w(self, settings: dict[str, Any]) -> float:
         """Wat alle batterijen samen nu opnemen, in watt.
@@ -5197,11 +5295,13 @@ class ChargerCoach:
             compleet = export is not None and invoer is not None
             netto = (export - invoer) if compleet else (export if invoer is None else None)
 
-        # Wat een thuisbatterij opneemt hoort bij het overschot: de auto laadt
-        # op zon zonder verlies en de batterij niet, dus de auto gaat voor. En
-        # wat de batterij afgeeft is geen zon. Zie `_batterijen_w`.
+        # Wat een thuisbatterij opneemt hoort bij het overschot zolang hij
+        # lager in de voorrang staat, en wat hij afgeeft is geen zon; en een
+        # boiler lager in de voorrang wijkt met wat hij van de zon neemt. Zie
+        # `_zon_correctie` (v0.92.0; daarvoor ging de auto altijd voor de
+        # batterij, en dat is nog steeds de standaard).
         if netto is not None:
-            netto += self._batterijen_w(settings)
+            netto += self._zon_correctie(settings, device, netto)
 
         # Het vermogen van de paal zit in dezelfde som, en juist die houdt het
         # kringetje open: zonder hem ziet de coach zijn eigen laden aan voor
@@ -5607,6 +5707,7 @@ class ChargerCoach:
 
         auto_id = str(profile.get("id") or "")
         self._auto_id[device_id] = auto_id
+        self._auto_soc[device_id] = soc
         return Car(
             name=str(profile.get("name") or "").strip(),
             capacity_kwh=float(profile.get("capacity_kwh") or 0),
