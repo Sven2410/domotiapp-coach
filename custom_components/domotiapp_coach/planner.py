@@ -3345,6 +3345,92 @@ def _beter_straks(
 MODI_ZONDER_SOM = frozenset({"zon", "continu"})
 
 
+# --- Voorrang bij zonoverschot (v0.92.0) --------------------------------------
+#
+# De bewoner van de eerste woning op 23-09-2026, naar evcc: "bepalen prioriteit
+# auto of accu; wie moet als eerste vol zijn, of tot hoeveel procent. Bijvoorbeeld
+# eerst moet de accu 40% vol zijn, daarna mag het zonoverschot naar de auto. Niet
+# automatisch de auto voorrang geven op alles dus." Met een tabelletje:
+#
+#     1. accu tot 50%   2. auto tot 60%   3. boiler   4. ...
+#
+# De eigenaar: "helemaal juist." Een regel is een apparaat met een grens in procent
+# (de accustand van de auto of van de batterij), of zonder grens: tot vol. Een
+# boiler heeft altijd geen grens, want de coach kent zijn temperatuur niet.
+
+# Welke soorten apparaten in de voorrang staan, in de volgorde van de standaard:
+# de auto laadt op zon zonder verlies, de boiler ook, en de batterij verliest
+# een kwart, dus die krijgt wat er daarna over is. Zo deed de coach het tot v0.92.0.
+ZON_SOORTEN = ("laadpaal", "boiler", "thuisbatterij")
+
+
+def zon_regels(opgeslagen: list[dict] | None, apparaten: list[dict]) -> list[dict]:
+    """De voorrang zoals hij geldt: wat er is opgeslagen, aangevuld tot alles erin staat.
+
+    Alleen apparaten die de coach mag sturen en die zon kunnen opnemen. Een
+    regel voor een apparaat dat er niet meer is valt weg; een apparaat zonder
+    regel komt achteraan zonder grens, in de volgorde van `ZON_SOORTEN`. Zo
+    verschijnt een nieuw apparaat vanzelf, en is een lege lijst de standaard.
+    """
+    mag = {
+        a.get("id"): a.get("type")
+        for a in apparaten
+        if a.get("controllable") and a.get("type") in ZON_SOORTEN and a.get("id")
+    }
+    uit: list[dict] = []
+    for rij in opgeslagen or []:
+        if not isinstance(rij, dict) or rij.get("device") not in mag:
+            continue
+        grens = rij.get("limit")
+        if mag[rij["device"]] == "boiler":
+            grens = None
+        try:
+            grens = None if grens in (None, "") else max(0.0, min(100.0, float(grens)))
+        except (TypeError, ValueError):
+            grens = None
+        uit.append({"device": rij["device"], "limit": grens})
+    gezien = {rij["device"] for rij in uit}
+    for soort in ZON_SOORTEN:
+        for apparaat_id, type_ in mag.items():
+            if type_ == soort and apparaat_id not in gezien:
+                uit.append({"device": apparaat_id, "limit": None})
+    return uit
+
+
+def zon_rang(regels: list[dict], stand: dict[str, float | None]) -> dict[str, int]:
+    """Per apparaat zijn plek in de voorrang op dit moment: lager is eerder.
+
+    Een apparaat staat op de eerste regel waarvan de grens nog niet gehaald
+    is. "Accu tot 50%" geldt zolang de batterij onder de 50% zit, daarna zijn
+    volgende regel. Een regel zonder grens is nooit gehaald: tot vol, en wat
+    vol is merkt het apparaat zelf. Een onbekende stand telt als niet gehaald.
+    Heeft een apparaat al zijn grenzen gehaald, dan staat het achter alles.
+    """
+    rang: dict[str, int] = {}
+    alle = []
+    for plek, rij in enumerate(regels):
+        apparaat_id = rij["device"]
+        if apparaat_id not in alle:
+            alle.append(apparaat_id)
+        if apparaat_id in rang:
+            continue
+        grens = rij.get("limit")
+        nu = stand.get(apparaat_id)
+        if grens is None or nu is None or nu < grens:
+            rang[apparaat_id] = plek
+    for apparaat_id in alle:
+        rang.setdefault(apparaat_id, len(regels))
+    return rang
+
+
+def zon_grens(regels: list[dict], rang: dict[str, int], apparaat_id: str) -> float | None:
+    """De grens van de regel waar een apparaat nu op staat, of None: tot vol."""
+    plek = rang.get(apparaat_id)
+    if plek is None or plek >= len(regels):
+        return None
+    return regels[plek].get("limit")
+
+
 def _modus_zonder_planning(
     now: datetime,
     prices: list[dict],

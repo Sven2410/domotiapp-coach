@@ -1343,9 +1343,15 @@ for naam, vl in V.items():
     # batterij 233 keer van toestand.
     # Een last die elke twintig seconden klappert vraagt per puls een opdracht
     # en een terug; dat scenario meet zijn eigen grens hieronder.
+    # En een auto die de hele dag meeloopt met de zon: de paal schuift elke paar
+    # minuten een ampère, en de batterij op nul op de meter volgt elke stap. In
+    # `voorrang-auto-eerst` 171 opdrachten in veertien uur, met en zonder de
+    # voorrang bij zon precies evenveel (gemeten 23-09-2026): dat is volgen en
+    # geen pendelen, want het zijn er zes richtingwissels.
+    grens_per_uur = 15 if naam.startswith("voorrang-") else 10
     if naam != "batterij-klapperlast":
-        controle(f"{naam}: hooguit tien opdrachten per uur",
-                 len(vl.bat_opdrachten) / uren <= 10, f"{len(vl.bat_opdrachten) / uren:.1f} per uur")
+        controle(f"{naam}: hooguit {grens_per_uur} opdrachten per uur",
+                 len(vl.bat_opdrachten) / uren <= grens_per_uur, f"{len(vl.bat_opdrachten) / uren:.1f} per uur")
     # Zes mag altijd: ontladen, laden bij een negatieve prijs, vol, en weer
     # ontladen is er al drie, en dat is geen pendelen.
     controle(f"{naam}: hooguit een richtingwissel per twee uur",
@@ -1597,6 +1603,27 @@ if (met := v("batterij-helpt-auto-nacht")) and (zonder := v("batterij-helpt-auto
              met.bat_wissels() <= 8, f"{met.bat_wissels()} wissels")
     controle("nachtstrategie uit: tot de eigen ondergrens en niet eronder",
              bat_eind(zonder) >= 4.5, f"{bat_eind(zonder):.1f}%")
+
+# --- voorrang bij zonoverschot (v0.92.0) --------------------------------------
+# De bewoner van de eerste woning op 23-09-2026: "eerst moet de accu 40% vol zijn,
+# daarna mag het zonoverschot naar de auto."
+def auto_op(vl, tijd):
+    uur, minuut = (int(x) for x in tijd.split(":"))
+    return next((r.soc for r in vl.regels if r.tijd.hour == uur and r.tijd.minute == minuut), None)
+
+
+if (auto_eerst := v("voorrang-auto-eerst")) and (accu_eerst := v("voorrang-accu-eerst")):
+    print(f"  11:00 auto eerst: auto {auto_op(auto_eerst, '11:00'):.0f}%, accu {auto_eerst.bat_soc_op('11:00'):.0f}%; "
+          f"accu eerst: auto {auto_op(accu_eerst, '11:00'):.0f}%, accu {accu_eerst.bat_soc_op('11:00'):.0f}%")
+    controle("standaard: om 11:00 heeft de auto de ochtendzon gehad en de accu niet",
+             auto_op(auto_eerst, "11:00") >= 50 and auto_eerst.bat_soc_op("11:00") <= 25,
+             f"auto {auto_op(auto_eerst, '11:00')}, accu {auto_eerst.bat_soc_op('11:00')}")
+    controle("accu eerst: om 11:00 zit de accu tegen de 50% en heeft de auto nog niets",
+             accu_eerst.bat_soc_op("11:00") >= 40 and auto_op(accu_eerst, "11:00") <= 32,
+             f"auto {auto_op(accu_eerst, '11:00')}, accu {accu_eerst.bat_soc_op('11:00')}")
+    controle("accu eerst: daarna krijgt de auto de zon, en is hij dezelfde dag vol op zon",
+             accu_eerst.klaar_op is not None and accu_eerst.klaar_op.day == 7 and accu_eerst.uit_net_kwh < 0.2,
+             f"vol {accu_eerst.klaar_op}, net {accu_eerst.uit_net_kwh:.2f}")
 
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

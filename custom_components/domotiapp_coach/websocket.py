@@ -294,6 +294,13 @@ _STRATEGY = _schema(
     {
         vol.Optional("level"): vol.In(LEVELS),
         vol.Optional("night_strategy"): bool,
+        vol.Optional("solar_priority"): vol.All(
+            [_schema({
+                vol.Required("device"): str,
+                vol.Optional("limit", default=None): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(0, 100))),
+            })],
+            vol.Length(max=24),
+        ),
         # `load_alert` stond hier tot v0.52.0; zie `_NOTIFICATIONS`. Een oud
         # paneel dat hem nog meestuurt raakt hem hier kwijt, en dat is goed.
         vol.Optional("schedules"): [_SCHEDULE],

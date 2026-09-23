@@ -2938,5 +2938,37 @@ d_v = decide(nu62, vlak62, net62, auto62, paal62, venster62, tariff=Tariff())
 controle("en het besluit van nu is hetzelfde", (d_u.charge, d_u.rule) == (d_v.charge, d_v.rule), f"{d_u.rule} / {d_v.rule}")
 
 print()
+print("=== 63. voorrang bij zonoverschot: de regels en ieders plek (v0.92.0) ===")
+APP63 = [
+    {"id": "paal", "type": "laadpaal", "controllable": True},
+    {"id": "boiler", "type": "boiler", "controllable": True},
+    {"id": "accu", "type": "thuisbatterij", "controllable": True},
+    {"id": "vaat", "type": "vaatwasser", "controllable": True},
+    {"id": "meet", "type": "laadpaal", "controllable": False},
+]
+controle("leeg is de standaard: auto, boiler, batterij, zonder grens",
+         planner.zon_regels([], APP63) == [{"device": "paal", "limit": None}, {"device": "boiler", "limit": None},
+                                           {"device": "accu", "limit": None}], f"{planner.zon_regels([], APP63)}")
+eigen63 = planner.zon_regels([{"device": "accu", "limit": 50}, {"device": "paal", "limit": 60},
+                              {"device": "boiler", "limit": 40}, {"device": "weg", "limit": 10}], APP63)
+print(f"  {eigen63}")
+controle("de keuze van de bewoner, een boiler zonder grens, wat er niet is valt weg, de rest achteraan",
+         eigen63 == [{"device": "accu", "limit": 50.0}, {"device": "paal", "limit": 60.0},
+                     {"device": "boiler", "limit": None}], f"{eigen63}")
+regels63 = planner.zon_regels([{"device": "accu", "limit": 50}, {"device": "paal", "limit": 60},
+                               {"device": "boiler"}, {"device": "accu"}, {"device": "paal"}], APP63)
+r_a = planner.zon_rang(regels63, {"accu": 30.0, "paal": 40.0})
+r_b = planner.zon_rang(regels63, {"accu": 55.0, "paal": 40.0})
+r_c = planner.zon_rang(regels63, {"accu": 55.0, "paal": 70.0})
+print(f"  accu 30 auto 40: {r_a}; accu 55: {r_b}; auto 70: {r_c}")
+controle("accu onder 50%: de accu eerst", r_a["accu"] < r_a["paal"] < r_a["boiler"], f"{r_a}")
+controle("accu boven 50%: de auto eerst, de accu na de boiler", r_b["paal"] < r_b["boiler"] < r_b["accu"], f"{r_b}")
+controle("auto boven 60%: boiler, dan accu, dan de auto tot zijn doel",
+         r_c["boiler"] < r_c["accu"] < r_c["paal"], f"{r_c}")
+controle("een onbekende accustand telt als niet gehaald", planner.zon_rang(regels63, {})["accu"] == 0, "")
+controle("de grens van de regel waar hij nu staat",
+         planner.zon_grens(regels63, r_a, "accu") == 50.0 and planner.zon_grens(regels63, r_b, "accu") is None, "")
+
+print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

@@ -1565,6 +1565,42 @@ huis zeventien keer een paar minuten (34 wissels, nu 6). Scenario's
 `-zonder-nacht` (grens 10%: 9% met de nachtstrategie, 5% zonder). Proef 32 in
 test_batterij.py, proef 98 in test_coach.py.
 
+**Voorrang bij zonoverschot** (v0.92.0). De bewoner van de eerste woning op
+23-09-2026, naar evcc: "bepalen prioriteit auto of accu; wie moet als eerste vol
+zijn, of tot hoeveel procent. Bijvoorbeeld eerst moet de accu 40% vol zijn, daarna
+mag het zonoverschot naar de auto. Niet automatisch de auto voorrang geven op alles
+dus." De eigenaar: "helemaal juist", met slepen zoals de kaarten op het overzicht,
+en onder Strategie (strategieën zijn een eenmalige instelling, planningen horen
+bij de apparaten).
+
+- `strategy.solar_priority`: regels `{device, limit}`, van boven naar beneden.
+  `zon_regels` in planner.py (en `zonRegels` in voorrang.js, dezelfde regels)
+  vult aan: een apparaat zonder regel komt achteraan zonder grens, in de volgorde
+  auto, boiler, batterij, en dat is ook de standaard bij een lege lijst: zo deed
+  de coach het. Een boiler heeft nooit een grens (geen temperatuur).
+- `zon_rang`: een apparaat staat op de eerste regel waarvan de grens nog niet
+  gehaald is (de accustand van de auto, `_auto_soc`, of van de batterij).
+- `_zon_correctie` in coach.py is wat de paal (in `_read`) en de boiler (op de
+  meter van tien minuten) bij de teruglevering optellen: een batterij die
+  ontlaadt is nooit zon; een lagere batterij die laadt wijkt (zoals altijd); een
+  hogere batterij onder haar grens die mag laden wijkt niet en haar ruimte gaat
+  eraf, zodat de paal wijkt; een lagere paal of boiler wijkt met zijn zondeel
+  (verbruik, maar niet meer dan er aan zon was, dus een paal die volgens planning
+  van het net laadt maakt voor de boiler geen zon). Een apparaat dat niet in de
+  voorrang staat houdt het oude gedrag.
+- Het scherm: de kaart "Voorrang bij zonoverschot" op Strategie (`paintZon_`,
+  `sleepZon_` in views/strategy.js), met een greep om te slepen, pijltjes, een
+  grens per regel, "regel toevoegen" (een tweede regel voor een auto of batterij)
+  en "standaard terugzetten".
+
+Scenario's `voorrang-auto-eerst` en `voorrang-accu-eerst` (heldere dag, bus op
+30%, accu op 20%): om 11:00 standaard auto 56% en accu 17%, met de accu eerst tot
+50% auto 30% en accu 48%; de bus is in beide gevallen dezelfde dag vol op zon (om
+13:38 en 15:18). Die twee scenario's mogen 15 opdrachten per uur aan de batterij
+in plaats van 10: de batterij volgt de auto die met de zon meeloopt, met en
+zonder de voorrang precies evenveel (171 in veertien uur). Proef 63 in
+test_planner.py, proef 99 in test_coach.py, de voorrang in test_rapport.mjs.
+
 **Gaat de coach weg, dan gaat de batterij terug** (`_async_batterij_loslaten`):
 vermogen op nul en `idle_mode` in de modus. Ook als het vinkje "mag sturen" eraf
 gaat of het niveau naar adviseren. Dezelfde gedachte als de stroom terug op de
@@ -1694,12 +1730,12 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 404 controles op het denkwerk
+python tests/test_planner.py     # 411 controles op het denkwerk
 python tests/test_batterij.py    # 105 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 603 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1787 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 608 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1824 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 97 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 98 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

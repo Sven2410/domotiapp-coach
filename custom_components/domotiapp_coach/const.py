@@ -447,6 +447,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # nacht door te komen op wat erin zit. Uit, dan mag hij voor de auto en
         # voor handelen leeg tot zijn eigen ondergrens. Zie `auto_grens`.
         "night_strategy": True,
+        # De voorrang bij zonoverschot (v0.92.0): regels {device, limit}, van
+        # boven naar beneden. Leeg is de standaard: auto, boiler, batterij. Zie
+        # `zon_regels` in planner.py.
+        "solar_priority": [],
         # What it aims for when it does act. Lowest cost reckons everything in
         # euros, which by itself already prefers using your own sun over
         # exporting it; "solar" insists on the sun even when buying would be

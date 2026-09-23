@@ -845,6 +845,9 @@ class Scenario:
     laadmodus: str = "goedkoopst"
     # De nachtstrategie op Strategie (v0.90.0).
     nachtstrategie: bool = True
+    # De voorrang bij zonoverschot (v0.92.0): regels {device, limit}, met de
+    # ids van het virtuele huis ("paal", "batterij", "boiler"). Leeg is de standaard.
+    zon_voorrang: list = field(default_factory=list)
     continu_amps: int = 6
     net: str = "split"                  # split | signed | signed-omgekeerd
     aansluiting_fasen: int = 3
@@ -1292,6 +1295,7 @@ def instellingen(s: Scenario) -> dict:
         "strategy": {
             "level": "steer",
             "night_strategy": s.nachtstrategie,
+            "solar_priority": s.zon_voorrang,
             "schedules": [*schemas, {
                 "device": "paal",
                 "enabled": s.schema_aan,

@@ -925,6 +925,20 @@ batterij_helpt_auto_zonder_nacht = batterij_helpt_auto_nacht.kopie(
     uitleg="grens 10%, nachtstrategie uit: de accu mag tot 10% in de auto",
     nachtstrategie=False,
 )
+# De voorrang bij zonoverschot (v0.92.0). De bewoner van de eerste woning op
+# 23-09-2026: "eerst moet de accu 40% vol zijn, daarna mag het zonoverschot naar de
+# auto. Niet automatisch de auto voorrang geven op alles dus."
+voorrang_auto_eerst = Scenario(
+    "voorrang-auto-eerst",
+    "vast contract, heldere dag, bus op 30% om 07:00, accu op 20%: de standaard, de auto krijgt de zon eerst",
+    contract="vast", zon=Zon(wolken="helder"), auto=BUS, batterij=Batterij(soc=20.0),
+    begin="2026-09-07 06:55", duur_uren=14, stap_seconden=15,
+)
+voorrang_accu_eerst = voorrang_auto_eerst.kopie(
+    naam="voorrang-accu-eerst",
+    uitleg="hetzelfde met eerst de accu tot 50%, dan de auto, dan de accu tot vol",
+    zon_voorrang=[{"device": "batterij", "limit": 50}, {"device": "paal"}, {"device": "batterij"}],
+)
 batterij_sprong = Scenario(
     "batterij-sprong",
     "de regelaar: om 19:00 gaat er drie kilowatt aan, om 19:20 weer uit",
@@ -1029,6 +1043,7 @@ ALLE = [
     *BATTERIJ,
     vast_zon_modus, bewolkt_zon_modus, dyn_continu,
     batterij_helpt_auto, batterij_helpt_auto_nacht, batterij_helpt_auto_zonder_nacht,
+    voorrang_auto_eerst, voorrang_accu_eerst,
 ]
 
 
