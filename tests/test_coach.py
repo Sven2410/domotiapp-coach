@@ -5230,6 +5230,24 @@ coach96._batterij_wijkt(inst81, NU96 + dt.timedelta(seconds=60))
 controle("een batterij die flink zakt zet de mediaan opnieuw in, net als een paal",
          coach96._daling == NU96 + dt.timedelta(seconds=60), f"{coach96._daling}")
 
+print("=== 97. het verslag van een laadbeurt: accustand van en naar, net en zon (v0.89.0) ===")
+# De bewoner van de eerste woning op 23-09-2026: "tijdens deze laadsessie is er X
+# kWh geladen, en is de accu gestegen van A% naar B%. C kWh is afgenomen van het
+# net met een totaalprijs van € D; E kWh heb je direct verbruikt van je zonopwek."
+cijfers = coachmod.ChargerCoach._beurt_cijfers
+sessie97 = {"soc_begin": 44.0, "geld": {"kwh": 28.1, "zon_kwh": 6.2, "betaald": 6.72}}
+auto97 = coachmod.Car(capacity_kwh=78.0, phases=3, soc_percent=80.0)
+zin97 = cijfers(sessie97, auto97)
+print(f"  {zin97.strip()}")
+controle("van en naar, net met bedrag, en zon",
+         zin97 == " De accu ging van 44 naar 80%. 21,9 kWh kwam van het net voor € 6,72; 6,2 kWh kwam direct van je zon.", zin97)
+geschat97 = cijfers(sessie97, coachmod.Car(capacity_kwh=78.0, phases=3, soc_percent=80.0, soc_estimated=True))
+controle("een geschatte stand zegt dat erbij", "80% (geschat)." in geschat97, geschat97)
+controle("zonder accustand geen procenten", "accu ging" not in cijfers({"geld": sessie97["geld"]}, coachmod.Car()), "")
+controle("alles op zon: geen netzin", cijfers({"geld": {"kwh": 5.0, "zon_kwh": 5.0, "betaald": 0.0}}, None)
+         == " 5,0 kWh kwam direct van je zon.", cijfers({"geld": {"kwh": 5.0, "zon_kwh": 5.0, "betaald": 0.0}}, None))
+controle("niets geladen: niets erbij", cijfers({"geld": {}}, None) == "", "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

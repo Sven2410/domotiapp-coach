@@ -741,6 +741,9 @@ class DacViewOverview extends DacElement {
     @supports (-webkit-touch-callout: none) { .car-pick select { font-size: 16px; } }
 
     .soc-row { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+    /* De eenheid naast het veld, want een getal zonder "%" leest als niets
+       (de bewoner van de eerste woning, 23-09-2026). */
+    .soc-procent { align-self: center; margin-left: -2px; font-size: 14px; color: var(--dac-ink-2); }
     .soc-input {
       flex: 1 1 90px;
       min-width: 0;
@@ -2483,6 +2486,7 @@ class DacViewOverview extends DacElement {
                 <input id="soc-${slot}" class="soc-input tnum" type="number" min="0" max="100"
                        step="1" inputmode="numeric" enterkeyhint="done"
                        data-soc-input="${slot}" placeholder="%">
+                <span class="soc-procent" aria-hidden="true">%</span>
                 <button type="button" class="soc-save" data-soc-save="${slot}">Doorgeven</button>
               </div>
               <p class="soc-hint" data-soc-hint="${slot}"></p>
@@ -2736,8 +2740,19 @@ class DacViewOverview extends DacElement {
           field.dataset.stand = String(stand);
           field.value = stand;
         }
+        // Wat de coach van die opgave maakt (v0.89.0). De bewoner van de eerste
+        // woning: "na de laatste opgave is er nog X kWh geladen; de coach
+        // verwacht dat de auto nu Y% vol is." De kWh is terug te rekenen uit
+        // de twee procenten en de accu; de coach telt zelf met de paal.
+        const nu = Number(oordeel?.soc_now);
+        const cap = Number(gekozen.capacity_kwh);
+        const opgegeven = Number(opgave?.percent);
+        const erbij = Number.isFinite(nu) && Number.isFinite(opgegeven) ? (nu - opgegeven) / 100 * cap : NaN;
         this.$(`[data-soc-hint="${slot}"]`).textContent = opgave
-          ? "De coach telt zelf verder met wat de paal erin doet."
+          ? Number.isFinite(erbij) && erbij >= 0.05
+            ? `Sinds je ${Math.round(opgegeven)}% doorgaf is er ${erbij.toFixed(1).replace(".", ",")} kWh geladen. `
+              + `De coach verwacht dat de auto nu ${Math.round(nu)}% vol is.`
+            : "De coach telt zelf verder met wat de paal erin doet."
           : oordeel?.needs_soc
             ? "Hier wacht de coach op. Zonder dit gaat hij uit van een lege accu."
             : "Geef dit door, dan kan de coach het gunstigste moment kiezen.";

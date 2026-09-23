@@ -210,6 +210,18 @@ en geen constatering, en gaat die 0 er wél heen, blijvend (zonder houdbaarheid,
 anders loopt hij af en laadt de auto door; in het virtuele huis gaf dat honderd-
 veertig wissels en 3,2 kWh van het net op een auto die allang op 80% stond).
 
+**Het verslag noemt de accustand, het net en de zon** (v0.89.0). De bewoner van
+de eerste woning op 23-09-2026: "tijdens deze laadsessie is er X kWh geladen,
+en is de accu gestegen van A% naar B%. C kWh is afgenomen van het net met een
+totaalprijs van € D; E kWh heb je direct verbruikt van je zonopwek."
+`_beurt_cijfers` in coach.py, achter het verslag bij "vol" en bij afkoppelen:
+"De accu ging van 30 naar 100%. 6,3 kWh kwam van het net voor € 2,40; 9,0 kWh
+kwam direct van je zon." Alleen wat bekend is (`soc_begin` in de sessie, `geld`),
+en "(geschat)" bij een opgegeven stand. Op de kaart staat onder "Hoe vol is de
+auto nu?" een "%" achter het veld, en na een opgave "Sinds je 59% doorgaf is er
+3,4 kWh geladen. De coach verwacht dat de auto nu 63% vol is." (`soc_now` in de
+stand). Proef 97 in test_coach.py.
+
 **En per beurt op de kaart** (v0.88.0): "Laden tot", met als eerste keuze
 het doel uit het autoprofiel en daarna 50 tot 100%. De bewoner van de eerste
 woning op 23-09-2026, over evcc: "in de auto een harde max (100%), en in evcc
@@ -1660,10 +1672,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 404 controles op het denkwerk
 python tests/test_batterij.py    # 93 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 594 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 599 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1731 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 94 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 95 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```
