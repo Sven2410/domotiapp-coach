@@ -183,6 +183,19 @@ proef("zonder vinkje blijft de meter zoals hij gemeten heeft", async () => {
 
 // --- het teken op de fasekaart ----------------------------------------------
 
+// --- de resterende tijd in uren (Home Connect Local, 23-09-2026) --------------
+
+const { countdown } = await import("../custom_components/domotiapp_coach/frontend/src/format.js");
+
+proef("de resterende tijd telt in de eenheid van de sensor: uren, minuten, seconden", () => {
+  // Thuis op 23-09-2026: 1,48333 h is 89 minuten. Zonder eenheid zijn het minuten.
+  assert.equal(countdown("1.48333333333333", "h"), "nog 1 u 29 min");
+  assert.equal(countdown("89", "min"), "nog 1 u 29 min");
+  assert.equal(countdown("5340", "s"), "nog 1 u 29 min");
+  assert.equal(countdown("89", undefined), "nog 1 u 29 min");
+  assert.equal(countdown("0", "h"), "Klaar");
+});
+
 const { signedPower, zonderMinNul } = await import(
   "../custom_components/domotiapp_coach/frontend/src/format.js"
 );
@@ -1255,6 +1268,29 @@ function woningBij(zon, sun) {
     grid_import: "sensor.afname", grid_export: "sensor.teruglevering" } };
   return new LiveSource().sample(feed, settings);
 }
+
+proef("het programma op de kaart: uit de select zolang de sensor niets zegt, uit de sensor tijdens de beurt (Home Connect Local)", () => {
+  // Thuis op 23-09-2026: "Actief programma" zegt alleen tijdens de beurt
+  // iets, en de select "Geselecteerd programma" valt juist dan weg.
+  const device = { id: "vw", type: "vaatwasser", name: "Vaatwasser", brand: "home_connect", entity: "sensor.vw_w",
+    entities: { status: "sensor.vw_status", program: "sensor.vw_actief", program_select: "select.vw_programma" } };
+  const rij = (staten) => {
+    const feed = { get: (id) => staten[id] };
+    const r = new LiveSource().sample(feed, { sources: {}, devices: [device] });
+    return r.devices[0].details.find((d) => d.label === "Geselecteerd programma")?.text;
+  };
+  assert.equal(rij({ "sensor.vw_status": { state: "ready", attributes: {} },
+                     "sensor.vw_actief": { state: "unknown", attributes: {} },
+                     "select.vw_programma": { state: "dishcare_dishwasher_program_kurz60", attributes: {} } }), "Express 60 °C");
+  assert.equal(rij({ "sensor.vw_status": { state: "run", attributes: {} },
+                     "sensor.vw_actief": { state: "dishcare_dishwasher_program_eco50", attributes: {} },
+                     "select.vw_programma": { state: "unavailable", attributes: {} } }), "Eco 50 °C");
+  // Het veld "Starten op afstand" hoort bij het merk, optioneel, en leest aan/uit.
+  const velden = brandFields(device);
+  const afstand = velden.find((f) => f.key === "remote_start");
+  assert.ok(afstand && !afstand.needed, "remote_start is een optioneel veld van Home Connect");
+  assert.equal(afstand.values.off, "Uit");
+});
 
 proef("een slapende omvormer met de zon onder telt als nul, en de woning staat er", () => {
   const r = woningBij("unavailable", "below_horizon");

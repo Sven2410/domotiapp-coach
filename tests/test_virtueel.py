@@ -646,6 +646,36 @@ if (vl := v("vaatwasser-afstand-uit")):
     controle("afstand uit: hij draait niet en er komt geen verslag",
              vl.vw_gestart is None and not meldingen(vl, "is klaar"), "")
 
+# Home Connect Local (thuis sinds 23-09-2026): een knop die er niet altijd
+# is, het programma in twee entiteiten, de resterende tijd in uren.
+if (vl := v("vaatwasser-lokaal")) and (vz := v("vaatwasser-zon")):
+    controle("lokaal: dezelfde start als aan de cloud (09:00 op zon)",
+             vl.vw_gestart is not None and vz.vw_gestart is not None and abs((vl.vw_gestart - vz.vw_gestart).total_seconds()) <= 60,
+             f"lokaal {vw_klok(vl.vw_gestart)}, cloud {vw_klok(vz.vw_gestart)}")
+    controle("lokaal: dezelfde kilowatturen en kosten", abs(vl.vw_kwh - vz.vw_kwh) < 0.01 and abs(vl.vw_betaald - vz.vw_betaald) < 0.005,
+             f"lokaal {vl.vw_kwh:.2f} kWh €{vl.vw_betaald:.3f}, cloud {vz.vw_kwh:.2f} kWh €{vz.vw_betaald:.3f}")
+    controle("lokaal: één druk, en het programma herkend aan de spelling eco50",
+             len(vl.vw_gedrukt) == 1 and any("Eco 50" in m for _, m in vl.meldingen), f"{vl.vw_gedrukt} {[m for _, m in vl.meldingen]}")
+    controle("lokaal: 'is gestart' met een klaar-tijd uit de uren van de sensor",
+             any("is gestart" in m and "klaar rond" in m for _, m in vl.meldingen), f"{[m for _, m in vl.meldingen]}")
+
+if (vl := v("vaatwasser-lokaal-deur-open")):
+    controle("lokaal, deur open: de coach drukt niet op een knop die er niet is",
+             not [t for t in vl.vw_gedrukt if t.hour == 3 and t.minute < 8], f"{[vw_klok(t) for t in vl.vw_gedrukt]}")
+    controle("lokaal, deur open: na drie minuten één keer dat de deur open staat",
+             len(meldingen(vl, "neemt nu geen start aan")) == 1 and "deur staat open" in meldingen(vl, "neemt nu geen start aan")[0],
+             f"{[m for _, m in vl.meldingen]}")
+    controle("lokaal, deur open: zodra de deur dichtgaat drukt hij, één keer, en de beurt loopt",
+             len(vl.vw_gedrukt) == 1 and vl.vw_gestart is not None and vl.vw_gestart.hour == 3 and 8 <= vl.vw_gestart.minute <= 10,
+             f"gedrukt {[vw_klok(t) for t in vl.vw_gedrukt]}, gestart {vw_klok(vl.vw_gestart)}")
+    controle("lokaal, deur open: geen 'niet gaan draaien', wel een verslag",
+             not meldingen(vl, "niet gaan draaien") and len(meldingen(vl, "is klaar")) == 1, f"{[m for _, m in vl.meldingen]}")
+
+if (vl := v("vaatwasser-lokaal-afstand-uit")):
+    controle("lokaal, afstand uit: de coach drukt geen enkele keer", not vl.vw_gedrukt, f"{vl.vw_gedrukt}")
+    controle("lokaal, afstand uit: en zegt één keer wat er aan moet",
+             len(meldingen(vl, "starten op afstand")) == 1 and not meldingen(vl, "niet gaan draaien"), f"{[m for _, m in vl.meldingen]}")
+
 if (vl := v("vaatwasser-uiterlijk-starten")):
     controle("uiterlijk starten om 22:00: hij start om 22:00, ook al is de nacht goedkoper",
              vl.vw_gestart is not None and vl.vw_gestart.hour == 22 and vl.vw_gestart.minute <= 1,

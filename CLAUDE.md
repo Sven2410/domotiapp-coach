@@ -1093,6 +1093,61 @@ test_planner.py, proef 68 in test_coach.py, scenario's
 `vaatwasser-na-klaartijd` (morgen 09:00 op zon, zoals het al ging) en
 `vaatwasser-na-klaartijd-nu` (16:34, oud: die keuze was er niet).
 
+**Home Connect Local** (v0.84.0). De eigenaar op 23-09-2026: "ik heb thuis
+problemen gehad met mijn Home Connect vaatwasser integratie, ik had er 2
+lopen en heb nu een derde, Home Connect Local. Die lijkt beter te werken."
+Dat is `homeconnect_ws` (chris-mc1/homeconnect_local_hass, HACS): lokaal
+over een websocket naar de machine zelf, geen cloud, en de statuswissels
+komen meteen. Hetzelfde merk "Home Connect" in Apparaten; wat er anders is
+zit in de entiteiten, en de coach leest alle drie de integraties met
+dezelfde velden. Vier dingen, alle vier thuis gemeten op 23-09-2026:
+
+1. **De startknop is er alleen als de machine een start aanneemt.** De
+   knop hangt aan `BSH.Common.Root.ActiveProgram`, en die is met de deur
+   open alleen leesbaar: de knop staat dan op `unavailable`. Met de deur
+   dicht is hij er meteen, ook met de stroom uit (de machine zet zichzelf na
+   elke beurt uit; de stroom aanzetten hielp niets, de deur dichtdoen wel).
+   Home Assistant slaat een dienst op een onbeschikbare entiteit stilzwijgend
+   over, dus drukken kost dan een poging zonder dat er iets gebeurt. De
+   coach drukt daarom niet zolang de knop `unavailable` is, zegt na
+   `START_WACHT` één keer waar het aan ligt ("de deur staat open", of "zet de
+   machine aan en kijk of starten op afstand aan staat"), en drukt zodra de
+   knop terug is; de knop staat daarvoor in `_watch`. Bij de twee
+   cloud-integraties heeft de knop altijd een toestand en verandert er niets.
+2. **Het programma zit in twee entiteiten die elkaar afwisselen**: de sensor
+   "Actief programma" zegt alleen tijdens de beurt iets, de select
+   "Geselecteerd programma" valt juist tijdens de beurt weg. `_one_programma`
+   leest eerst `program` en dan `program_select`, tot er een programma uit
+   komt; het paneel doet hetzelfde voor de rij op de kaart (`deviceDetails`
+   in data-source.js). De spelling is `dishcare_dishwasher_program_kurz60`,
+   zonder het streepje voor het getal; `programma_van` en `valueLabel` gooien
+   alles wat geen letter of cijfer is toch al weg.
+3. **De resterende tijd staat in uren** (de machine telt in seconden, Home
+   Assistant toont het als 1,4833 h). `_eindtijd` en `countdown` in format.js
+   kennen nu seconden, minuten, uren en dagen; zonder eenheid minuten.
+4. **"Start op afstand" is een eigen sensor**, en dat hebben de andere twee
+   ook. Optioneel veld `remote_start` bij het merk: staat hij uit, dan drukt
+   de coach niet en zegt hij na `START_WACHT` één keer "zet starten op
+   afstand aan op het apparaat". Zonder die sensor blijft het zoals het was:
+   drukken, en na drie minuten zeggen dat hij niet is gaan draaien.
+
+Na een beurt zegt Local vijf seconden "finished" en dan "ready" (de machine
+gaat uit); de coach ziet vaak alleen dat laatste, en dat was al klaar (de
+tak `status in ("ready", "inactive", "")` met een lopende beurt). De
+sensorwacht kent de status al; een herverbinding van twee seconden
+(`unavailable`, thuis om 08:37 en 08:46) blijft onder `SENSOR_STIL`.
+
+Het virtuele huis kent `Vaatwasser(lokaal=True)`: de knop `unavailable` bij
+een open deur of tijdens de beurt, en een druk daarop doet niets (zoals Home
+Assistant), de sensor en de select die elkaar afwisselen, de uren, en de
+sensor voor starten op afstand. Scenario's `vaatwasser-lokaal` (dezelfde
+beurt als `vaatwasser-zon`, tot op de cent), `vaatwasser-lokaal-deur-open`
+(om 03:00 vrijgegeven met de deur open: geen druk, om 03:03 de melding,
+om 03:08 gaat de deur dicht en om 03:09 draait hij) en
+`vaatwasser-lokaal-afstand-uit` (geen enkele druk, één melding). Proef 92 in
+test_coach.py, twee proeven in test_rapport.mjs. **Nog geen echte beurt aan
+Home Connect Local gestuurd**: de eerste is de vrijgave thuis na v0.84.0.
+
 ## De boiler
 
 Sinds 19-09-2026 stuurt de coach ook een boiler, na de eigen "ik wil gewoon een
@@ -1492,10 +1547,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 387 controles op het denkwerk
 python tests/test_batterij.py    # 90 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 550 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1673 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 565 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1699 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 78 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 80 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

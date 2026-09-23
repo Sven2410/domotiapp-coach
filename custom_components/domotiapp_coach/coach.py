@@ -682,9 +682,12 @@ def _eindtijd(
 
     Home Connect geeft de resterende tijd als een tijdstip (de sensor
     `remaining_program_time`, een timestamp); andere integraties geven de
-    minuten of de seconden die nog resten. Allebei hetzelfde antwoord op
-    dezelfde vraag, als lokaal tijdstip zonder zone, zoals `now`. De eigenaar op
-    07-09-2026: "pak de eindtijd van de integratie."
+    minuten of de seconden die nog resten, en Home Connect Local de uren
+    (`sensor_remaining_program_time`, seconden van de machine, door Home
+    Assistant als uren getoond: 1,4833 h thuis op 23-09-2026). Allemaal
+    hetzelfde antwoord op dezelfde vraag, als lokaal tijdstip zonder zone,
+    zoals `now`. De eigenaar op 07-09-2026: "pak de eindtijd van de
+    integratie." Zonder eenheid zijn het minuten.
 
     Met `sinds` telt alleen een waarde die op of na dat moment gezet is: een
     eindtijd van voor de start is die van het kiezen van het programma, niet
@@ -712,7 +715,14 @@ def _eindtijd(
             moment = dt_util.as_local(moment).replace(tzinfo=None)
         return moment
     eenheid = str(state.attributes.get("unit_of_measurement") or "").lower()
-    seconden = getal if eenheid in ("s", "sec", "seconds") else getal * 60.0
+    if eenheid in ("s", "sec", "seconds"):
+        seconden = getal
+    elif eenheid in ("h", "hr", "hrs", "hours", "uur", "u"):
+        seconden = getal * 3600.0
+    elif eenheid in ("d", "days", "dagen"):
+        seconden = getal * 86400.0
+    else:
+        seconden = getal * 60.0
     if seconden < 0:
         return None
     return now + timedelta(seconds=seconden)
@@ -1792,10 +1802,12 @@ class ChargerCoach:
                 for sleutel in ("status", "connected", "charging")
                 if (entity := (device.get("entities") or {}).get(sleutel))
             }
+            # De startknop erbij: bij Home Connect Local komt die pas terug
+            # als de deur dichtgaat, en dan hoort de coach meteen te drukken.
             | {
                 entity
                 for device in programma_apparaten
-                for sleutel in ("release_switch", "release_now_switch", "status")
+                for sleutel in ("release_switch", "release_now_switch", "status", "start", "remote_start")
                 if (entity := (device.get("entities") or {}).get(sleutel))
             }
             # De schakelaar van een boiler, en niet zijn vermogenssensor: die
@@ -1952,11 +1964,19 @@ class ChargerCoach:
         # En "ingeruimd en nu starten", op de kaart of met een eigen schakelaar
         # (de eigenaar, 13-09-2026).
         released, nu_starten = await self._async_nu_volgen(settings, device, sessie, released)
-        # Wat erop staat: de sensor, of anders de select-entiteit waarmee het
-        # gezet wordt (Home Connect heeft ze allebei; de eigenaar heeft de sensor).
-        programma_entiteit = entities.get("program") or entities.get("program_select")
-        if programma_entiteit:
-            programma = programma_van(_text(self.hass, programma_entiteit), tabel)
+        # Wat erop staat: de sensor, en als die het niet zegt de select-entiteit
+        # waarmee het gezet wordt. Home Connect Local (thuis sinds 23-09-2026)
+        # heeft een sensor die alleen tijdens de beurt iets zegt (het actieve
+        # programma) en een select die juist tijdens de beurt wegvalt; samen
+        # weten ze het altijd. Bij de andere integraties zegt de sensor het
+        # al, en dan komt de select niet aan de beurt.
+        programma = None
+        if entities.get("program") or entities.get("program_select"):
+            for sleutel in ("program", "program_select"):
+                if entities.get(sleutel):
+                    programma = programma_van(_text(self.hass, entities[sleutel]), tabel)
+                    if programma is not None:
+                        break
         else:
             # Geen sensor die het programma zegt: de bewoner koos het op de kaart.
             programma = programma_van(device.get("program") or None, tabel)
@@ -1983,7 +2003,8 @@ class ChargerCoach:
             # Vrijgave ingetrokken voor er iets gebeurde: schone lei.
             self._programma[device_id] = {**sessie, "vrijgegeven": None, "gedrukt": None,
                                           "pogingen": 0, "gemeld": set(), "programma": None,
-                                          "gevraagd": None, "eind": None, "eind_gezien": None}
+                                          "gevraagd": None, "eind": None, "eind_gezien": None,
+                                          "knop_weg": None}
             sessie = self._programma[device_id]
         if programma is not None:
             sessie["programma"] = programma
@@ -2160,8 +2181,39 @@ class ChargerCoach:
                 )
             return
 
-        # Starten, en kijken of het lukt.
+        # Starten, en kijken of het lukt. Maar niet drukken op een knop die er
+        # niet is: Home Connect Local zet de startknop op `unavailable` zolang
+        # de machine geen start aanneemt (thuis op 23-09-2026: met de deur
+        # open is `ActiveProgram` alleen leesbaar, met de deur dicht is de knop
+        # er meteen, ook met de stroom uit), en Home Assistant slaat een dienst
+        # op een onbeschikbare entiteit stilzwijgend over. Drukken zou dan
+        # een poging kosten zonder dat er iets gebeurt. Dus wachten tot de
+        # knop terug is, en na START_WACHT één keer zeggen waar het aan ligt.
+        # Hetzelfde voor "starten op afstand" als de integratie dat zegt.
         gedrukt = sessie.get("gedrukt")
+        if gedrukt is None and sessie["pogingen"] < START_POGINGEN:
+            knop = _text(self.hass, entities.get("start"))
+            afstand = _text(self.hass, entities.get("remote_start")).strip()
+            waarom = None
+            if knop == "unavailable":
+                waarom = (
+                    " De deur staat open."
+                    if deur_open
+                    else " Zet de machine aan en kijk of starten op afstand aan staat."
+                )
+            elif afstand == "off":
+                waarom = " Zet starten op afstand aan op het apparaat."
+            if waarom is not None:
+                weg = sessie.get("knop_weg") or now
+                sessie["knop_weg"] = weg
+                if now - weg >= START_WACHT and "knop-weg" not in sessie["gemeld"]:
+                    sessie["gemeld"].add("knop-weg")
+                    await self._async_tell(
+                        f"De coach wil {naam} starten, maar de machine neemt nu geen start aan.{waarom}",
+                        kritiek=True,
+                    )
+                return
+            sessie["knop_weg"] = None
         if gedrukt is None:
             if sessie["pogingen"] >= START_POGINGEN:
                 return
@@ -2231,6 +2283,9 @@ class ChargerCoach:
             # waarde die er de vorige ronde stond; zie `_eindtijd_vast`.
             "eind": None,
             "eind_gezien": None,
+            # Sinds wanneer de coach wil drukken maar de startknop er niet is
+            # (Home Connect Local met de deur open), of starten op afstand uit staat.
+            "knop_weg": None,
         }
 
     @staticmethod
