@@ -14,6 +14,7 @@
  * precies dezelfde aanroep van `cheapest_hours` als het besluit van die minuut.
  */
 
+import { batterijVooruit } from "./battery.js";
 import { DacElement, define } from "./base.js";
 import { icons } from "./icons.js";
 import { sheetCss } from "./theme.js";
@@ -75,6 +76,11 @@ const css = /* css */ `
   .uur .wat { color: var(--dac-ink-3); font-size: 12.5px; }
   .uur.laadt .wat { color: var(--dac-ink-2); }
 
+  /* Een batterij: tijd, prijs, accustand aan het eind van het uur, en wat hij
+     doet. De tijd is breder, want na middernacht staat er "morgen" voor. */
+  .uur.accu { grid-template-columns: 92px 62px 42px 1fr; }
+  .uur .soc { font-variant-numeric: tabular-nums; color: var(--dac-ink-2); }
+
   .leeg {
     padding: 14px;
     border-radius: var(--dac-radius-sm);
@@ -90,6 +96,7 @@ const css = /* css */ `
   @media (max-width: 360px) {
     .uur { grid-template-columns: 52px 68px 1fr; }
     .uur .wat { grid-column: 1 / -1; }
+    .uur.accu { grid-template-columns: 1fr 62px 42px; }
   }
 `;
 
@@ -143,6 +150,7 @@ export class DacPlanAheadSheet extends DacElement {
   constructor() {
     super();
     this.plan_ = null;
+    this.besluit_ = null;
     this.label_ = "";
     this.reason_ = "";
   }
@@ -179,6 +187,7 @@ export class DacPlanAheadSheet extends DacElement {
   /** Openen met de tijdlijn zoals de coach hem net heeft uitgerekend. */
   open(label, besluit) {
     this.label_ = label || "";
+    this.besluit_ = besluit ?? null;
     this.plan_ = besluit?.plan_ahead ?? null;
     this.reason_ = [besluit?.reason, besluit?.plan].filter(Boolean).join(" ");
     this.paint_();
@@ -189,6 +198,7 @@ export class DacPlanAheadSheet extends DacElement {
   /** Bijwerken terwijl hij openstaat, want de coach denkt elke minuut opnieuw. */
   update(besluit) {
     if (!this.rendered_ || !this.$("dialog")?.open) return;
+    this.besluit_ = besluit ?? null;
     this.plan_ = besluit?.plan_ahead ?? null;
     this.reason_ = [besluit?.reason, besluit?.plan].filter(Boolean).join(" ");
     this.paint_();
@@ -207,6 +217,14 @@ export class DacPlanAheadSheet extends DacElement {
     const uurlijst = this.$("#vooruit-uren");
     kop.replaceChildren();
     uurlijst.replaceChildren();
+
+    // Een thuisbatterij heeft geen tijdlijn tot een klaar-tijd maar een plan
+    // per uur tot de prijzen ophouden; zie `batterijVooruit` in battery.js.
+    const accu = batterijVooruit(this.besluit_);
+    if (accu) {
+      this.paintAccu_(accu);
+      return;
+    }
 
     if (!plan) {
       this.$("#vooruit-voet").textContent = "";
@@ -242,7 +260,7 @@ export class DacPlanAheadSheet extends DacElement {
       : ["Vol rond", wanneer(plan.expected_done),
           plan.deadline ? `klaar om ${wanneer(plan.deadline)}` : "geen klaar-tijd"];
 
-    for (const [label, waarde, bij] of [
+    this.paintKop_([
       ["Nog te laden", kwh(plan.kwh_needed), ""],
       ["Op vol vermogen", uren(plan.hours_needed),
         // Sinds v0.61.0 kan dit een meting zijn: wat er de afgelopen uren
@@ -255,24 +273,7 @@ export class DacPlanAheadSheet extends DacElement {
           : ""],
       ["Uiterlijk beginnen", wanneer(plan.latest_start), "met een uur speling"],
       laatste,
-    ]) {
-      const vak = document.createElement("div");
-      vak.className = "vak";
-      const kl = document.createElement("div");
-      kl.className = "label";
-      kl.textContent = label;
-      const wa = document.createElement("div");
-      wa.className = "waarde";
-      wa.textContent = waarde;
-      vak.append(kl, wa);
-      if (bij) {
-        const bj = document.createElement("div");
-        bj.className = "bij";
-        bj.textContent = bij;
-        vak.append(bj);
-      }
-      kop.append(vak);
-    }
+    ]);
 
     const nu = Date.now();
     for (const blok of plan.blocks ?? []) {
@@ -347,6 +348,68 @@ export class DacPlanAheadSheet extends DacElement {
       geschat +
       gemeten +
       zon;
+  }
+
+  /** De vakken bovenaan: label, waarde en een regel eronder. */
+  paintKop_(vakken) {
+    const kop = this.$("#vooruit-kop");
+    for (const [label, waarde, bij] of vakken) {
+      const vak = document.createElement("div");
+      vak.className = "vak";
+      const kl = document.createElement("div");
+      kl.className = "label";
+      kl.textContent = label;
+      const wa = document.createElement("div");
+      wa.className = "waarde";
+      wa.textContent = waarde;
+      vak.append(kl, wa);
+      if (bij) {
+        const bj = document.createElement("div");
+        bj.className = "bij";
+        bj.textContent = bij;
+        vak.append(bj);
+      }
+      kop.append(vak);
+    }
+  }
+
+  /** Het plan van een thuisbatterij, uur voor uur. */
+  paintAccu_(accu) {
+    // De nachtzin staat in de voet; bovenaan alleen wat hij nu doet.
+    this.$("#vooruit-nu").textContent = this.besluit_?.reason ?? "";
+    this.paintKop_(accu.kop.map((v) => [v.label, v.waarde, v.bij]));
+    const uurlijst = this.$("#vooruit-uren");
+    const nu = Date.now();
+    for (const uur of accu.uren) {
+      const rij = document.createElement("div");
+      rij.className = "uur accu";
+      // Laden van het net is wat geld kost, dus dat krijgt kleur; de rest is
+      // de batterij die met het huis en de zon meebeweegt.
+      if (uur.net) rij.classList.add("laadt");
+      const start = new Date(uur.start).getTime();
+      const eind = new Date(uur.end).getTime();
+      if (start <= nu && nu < eind) rij.classList.add("nu");
+      for (const [klasse, tekst] of [
+        ["tijd", uur.tijd], ["prijs", uur.prijs], ["soc", uur.soc], ["wat", uur.wat],
+      ]) {
+        const vak = document.createElement("span");
+        vak.className = klasse;
+        vak.textContent = tekst;
+        rij.append(vak);
+      }
+      uurlijst.append(rij);
+    }
+    if (!accu.uren.length) {
+      const leeg = document.createElement("div");
+      leeg.className = "leeg";
+      leeg.textContent =
+        "De coach heeft nog geen plan: er zijn geen prijzen, of hij weet de accustand niet.";
+      uurlijst.append(leeg);
+    }
+    this.$("#vooruit-voet").textContent =
+      (accu.voet ? `${accu.voet} ` : "") +
+      "De accustand is die aan het eind van het uur. Dit is wat de coach nu van plan " +
+      "is; verandert de zon, het huis of de prijs, dan rekent hij het elke minuut opnieuw uit.";
   }
 }
 

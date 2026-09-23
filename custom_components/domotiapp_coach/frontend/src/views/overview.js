@@ -31,7 +31,7 @@ import {
   typeMeta,
   valueLabel,
 } from "../devices.js";
-import { batteryRows } from "../battery.js";
+import { batteryRows, nachtConclusie } from "../battery.js";
 import { LiveSource, meterReadings, priceForecast, solarForecast } from "../data-source.js";
 import {
   PRIORITIES,
@@ -1847,7 +1847,9 @@ class DacViewOverview extends DacElement {
         ? `De coach heeft ${stil} minuten niets beslist. Dit vond hij het laatst: ${besluit.reason ?? ""}`
         : (besluit.reason ?? "");
     const planTekst = this.$(`[data-coach-plan="${slot}"]`);
-    planTekst.textContent = besluit.plan ?? "";
+    // Bij een batterij alleen de conclusie; de hele nachtzin staat in de
+    // pop-up "Wat gaat hij doen" (v0.85.0).
+    planTekst.textContent = besluit.kind === "batterij" ? nachtConclusie(besluit) : (besluit.plan ?? "");
     // De conclusie van de batterij: groen als de nacht rond komt, oranje als
     // er tekort is. De bewoner van de eerste woning op 22-09-2026.
     const balans = besluit.kind === "batterij" && Number.isFinite(besluit.balance_kwh) ? besluit.balance_kwh : null;
@@ -1932,8 +1934,12 @@ class DacViewOverview extends DacElement {
     // De tijdlijn alleen aanbieden waar de coach er een heeft. Een apparaat dat
     // de coach niet plant, of een kaart zonder kabel, levert een leeg scherm op
     // en dat is erger dan geen knop.
+    // Een batterij heeft geen `plan_ahead` maar een plan per uur (`hours`);
+    // dat opent dezelfde pop-up (v0.85.0).
     const vooruit = this.$(`[data-ahead="${slot}"]`);
-    vooruit.hidden = !besluit.plan_ahead || besluit.rule === "disconnected";
+    vooruit.hidden = besluit.kind === "batterij"
+      ? !(besluit.hours ?? []).length
+      : !besluit.plan_ahead || besluit.rule === "disconnected";
 
     // En bijwerken terwijl hij openstaat, want de coach denkt elke minuut
     // opnieuw en een tijdlijn van vijf minuten geleden is een verkeerde. Het
