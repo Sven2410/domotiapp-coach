@@ -209,7 +209,14 @@ function asDate(raw) {
 export function countdown(raw, unit) {
   const number = Number(raw);
   if (raw !== "" && Number.isFinite(number)) {
-    const minutes = unit === "s" || unit === "sec" ? number / 60 : number;
+    // Home Connect Local telt in seconden en Home Assistant toont dat als
+    // uren (1,4833 h thuis op 23-09-2026); zonder eenheid zijn het minuten.
+    const eenheid = String(unit ?? "").toLowerCase();
+    const minutes =
+      eenheid === "s" || eenheid === "sec" || eenheid === "seconds" ? number / 60
+      : eenheid === "h" || eenheid === "hr" || eenheid === "hrs" || eenheid === "hours" || eenheid === "uur" || eenheid === "u" ? number * 60
+      : eenheid === "d" || eenheid === "days" || eenheid === "dagen" ? number * 1440
+      : number;
     return minutes <= 0 ? "Klaar" : `nog ${duration(minutes)}`;
   }
 

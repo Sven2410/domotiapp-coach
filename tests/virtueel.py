@@ -508,6 +508,14 @@ class Vaatwasser:
     # De eigenaar op 06-09-2026: "wel adviseren en meten, met zet hem aan."
     slim: bool = True
     bewoner_reageert_min: int | None = 5
+    # Home Connect Local (thuis sinds 23-09-2026) in plaats van de cloud: de
+    # startknop is er alleen als de machine een start aanneemt (deur dicht,
+    # niet aan het draaien), anders `unavailable`, en Home Assistant slaat een
+    # druk op een onbeschikbare knop stilzwijgend over; het programma zit in
+    # een sensor die alleen tijdens de beurt iets zegt en een select die
+    # juist dan wegvalt; de resterende tijd staat in uren; en "starten op
+    # afstand" is een eigen sensor.
+    lokaal: bool = False
 
     # toestand
     status: str = "ready"
@@ -1056,6 +1064,8 @@ E = {
     "vw_deur": "binary_sensor.v_vaatwasser_deur",
     "vw_start": "button.v_vaatwasser_start",
     "vw_stop": "button.v_vaatwasser_stop",
+    "vw_actief": "sensor.v_vaatwasser_actief",
+    "vw_afstand": "binary_sensor.v_vaatwasser_afstand",
     "vw_vermogen": "sensor.v_vaatwasser_vermogen",
     "boiler_vermogen": "sensor.v_boiler_vermogen",
     "boiler_switch": "switch.v_boiler",
@@ -1137,11 +1147,13 @@ def instellingen(s: Scenario) -> dict:
                 "entity": E["vw_vermogen"],
                 "entities": {
                     "status": E["vw_status"],
-                    "program": E["vw_programma"],
+                    "program": E["vw_actief"] if s.vaatwasser.lokaal else E["vw_programma"],
                     "remaining": E["vw_rest"],
                     "door": E["vw_deur"],
                     "start": E["vw_start"],
                     "stop": E["vw_stop"],
+                    **({"program_select": E["vw_programma"], "remote_start": E["vw_afstand"]}
+                       if s.vaatwasser.lokaal else {}),
                 },
                 "programs": list(s.vaatwasser_tabel or []),
             })
@@ -1521,8 +1533,18 @@ class Wereld:
         if self.vaatwasser is not None:
             vw = self.vaatwasser
             z(E["vw_status"], vw.status)
-            z(E["vw_programma"], vw.programma)
-            if vw.eindtijd_tijdstip:
+            if vw.lokaal:
+                draait = vw.status == "run"
+                z(E["vw_programma"], "unavailable" if draait else vw.programma)
+                z(E["vw_actief"], vw.programma if draait else "unknown")
+                z(E["vw_afstand"], "on" if vw.afstand_aan else "off")
+                z(E["vw_start"], "unavailable" if (vw.deur_open or draait) else "unknown")
+            else:
+                z(E["vw_programma"], vw.programma)
+            if vw.lokaal and not vw.eindtijd_tijdstip:
+                rest = vw.resterend(nu)
+                z(E["vw_rest"], "unknown" if rest is None else w(f"{rest / 60:.4f}", "h"))
+            elif vw.eindtijd_tijdstip:
                 eind = vw.eindtijd(nu, self.vw_gekozen_op)
                 waarde = "unavailable" if eind is None else eind.isoformat()
                 if waarde != self.vw_eind_waarde:
@@ -1739,7 +1761,10 @@ class Diensten:
             self.hass.states.zet(E["bat_modus"], data.get("option"))
         elif domein == "button" and data.get("entity_id") == E["vw_start"]:
             self.verloop.vw_gedrukt.append(self.wereld.nu)
-            if self.wereld.vaatwasser is not None:
+            # Home Assistant slaat een dienst op een onbeschikbare entiteit
+            # stilzwijgend over; de druk telt wel, want hij was vergeefs.
+            knop = self.hass.states.get(E["vw_start"])
+            if self.wereld.vaatwasser is not None and not (knop is not None and knop.state == "unavailable"):
                 self.wereld.vaatwasser.druk_start(self.wereld.nu)
 
 

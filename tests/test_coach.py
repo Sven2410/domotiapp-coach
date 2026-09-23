@@ -4921,6 +4921,122 @@ controle("de sensorwacht kent de kabelmelding, de laadmelding en de stroomlimiet
          and namen90.get("sensor.alfen_laadt") == "de laadmelding van Laadpaal"
          and namen90.get("number.alfen_limiet") == "de stroomlimiet van Laadpaal", f"{namen90}")
 
+print("=== 92. Home Connect Local: uren, twee programma-entiteiten, een knop die er niet altijd is, starten op afstand ===")
+# Thuis sinds 23-09-2026 (`homeconnect_ws`): de resterende tijd staat in uren
+# (1,4833 h), het actieve programma zit in een sensor die alleen tijdens de
+# beurt iets zegt en de select valt juist dan weg, de startknop is
+# `unavailable` zolang de machine geen start aanneemt (gemeten: deur open
+# is alleen lezen, deur dicht is de knop er meteen, ook met de stroom uit),
+# en "start op afstand" is een eigen sensor.
+hass92u = NepHass({"sensor.rest_uren": {"state": "1.48333333333333", "attributes": {"unit_of_measurement": "h"}},
+                   "sensor.rest_dagen": {"state": "0.5", "attributes": {"unit_of_measurement": "d"}}})
+nu92 = dt.datetime(2026, 9, 23, 11, 0)
+e92 = coachmod._eindtijd(hass92u, "sensor.rest_uren", nu92)
+controle("uren tellen als uren: 1,4833 h is 89 minuten", e92 is not None and abs((e92 - nu92).total_seconds() - 89 * 60) < 1, f"{e92}")
+controle("en dagen als dagen", coachmod._eindtijd(hass92u, "sensor.rest_dagen", nu92) == nu92 + dt.timedelta(hours=12), "")
+
+VW92 = dict(VAATWASSER, entities={
+    "status": "sensor.vw92_status", "program": "sensor.vw92_actief", "program_select": "select.vw92_programma",
+    "remaining": "sensor.vw92_rest", "door": "binary_sensor.vw92_deur", "start": "button.vw92_start",
+    "stop": "button.vw92_stop", "remote_start": "binary_sensor.vw92_afstand",
+})
+inst92 = instellingen(devices=[LAADPAAL, VW92])
+inst92["contract"] = inst56["contract"]
+inst92["strategy"]["schedules"].append({
+    "device": "dev-vaatwasser", "enabled": True, "priority": "mid", "per_day": False,
+    "window": {"not_before": "", "start_by": "", "done_by": "07:00"}, "days": [],
+})
+huis92 = dict(huis56)
+huis92.update({
+    "sensor.vw92_status": "ready",
+    "sensor.vw92_actief": "unknown",
+    "select.vw92_programma": {"state": "dishcare_dishwasher_program_kurz60",
+                              "attributes": {"options": ["dishcare_dishwasher_program_eco50", "dishcare_dishwasher_program_kurz60"]}},
+    "sensor.vw92_rest": {"state": "1.4833", "attributes": {"unit_of_measurement": "h"}},
+    "binary_sensor.vw92_deur": "on",
+    "button.vw92_start": "unavailable",
+    "button.vw92_stop": "unavailable",
+    "binary_sensor.vw92_afstand": "on",
+})
+hass92, _, coach92 = bouw(huis92, inst92)
+async def ronde92(nu):
+    hass92.services.verstuurd.clear()
+    await hass92.afmaken()
+    await coach92._round(nu)
+    await hass92.afmaken()
+    return (coach92.state.get("dev-vaatwasser") or {},
+            [d for d in hass92.services.verstuurd if d[0] == "button"],
+            [d[2]["message"] for d in hass92.services.verstuurd if d[0] == "notify" and "Vaatwasser" in d[2].get("message", "")])
+# "Ingeruimd en nu starten", met de deur nog open.
+inst92["ready_devices"] = ["dev-vaatwasser"]
+inst92["ready_now"] = ["dev-vaatwasser"]
+b, knop, m = asyncio.run(ronde92(dt.datetime(2026, 9, 23, 20, 0)))
+print(f"  20:00 deur open: {b.get('rule')} program={b.get('program')} knop={knop} {m}")
+controle("het programma komt uit de select zolang de sensor niets zegt (spelling kurz60)", b.get("program") == "kurz_60", f"{b.get('program')}")
+controle("de startknop is er niet: de coach drukt niet en zegt nog niets", b.get("rule") == "start-now" and not knop and not m, f"{knop} {m}")
+controle("de coach luistert naar de startknop en naar starten op afstand",
+         "button.vw92_start" in coach92._watched and "binary_sensor.vw92_afstand" in coach92._watched, f"{coach92._watched}")
+b, knop, m = asyncio.run(ronde92(dt.datetime(2026, 9, 23, 20, 2)))
+controle("na twee minuten nog niets", not knop and not m, f"{knop} {m}")
+b, knop, m = asyncio.run(ronde92(dt.datetime(2026, 9, 23, 20, 3)))
+controle("na drie minuten één keer: de machine neemt geen start aan, de deur staat open",
+         not knop and len(m) == 1 and "neemt nu geen start aan" in m[0] and "deur staat open" in m[0], f"{knop} {m}")
+b, knop, m = asyncio.run(ronde92(dt.datetime(2026, 9, 23, 20, 4)))
+controle("en niet nog eens", not knop and not m, f"{knop} {m}")
+# De deur gaat dicht: de knop is er, en de coach drukt meteen.
+hass92.states.zet("binary_sensor.vw92_deur", "off")
+hass92.states.zet("button.vw92_start", "unknown")
+b, knop, m = asyncio.run(ronde92(dt.datetime(2026, 9, 23, 20, 5)))
+controle("de deur dicht: de coach drukt, één keer", knop == [("button", "press", {"entity_id": "button.vw92_start"})] and not m, f"{knop} {m}")
+# Hij draait: de sensor zegt het programma, de select valt weg, de knop ook.
+hass92.states.zet("sensor.vw92_status", "run")
+hass92.states.zet("sensor.vw92_actief", "dishcare_dishwasher_program_kurz60")
+hass92.states.zet("select.vw92_programma", "unavailable")
+hass92.states.zet("button.vw92_start", "unavailable")
+hass92.states.zet("sensor.vaatwasser_vermogen", "2000")
+for minuut in (6, 7, 8, 9, 10):
+    hass92.states.zet("sensor.vw92_rest", {"state": f"{(60 - minuut) / 60:.4f}", "attributes": {"unit_of_measurement": "h"}},
+                      last_updated=dt.datetime(2026, 9, 23, 20, minuut))
+    b, knop, m = asyncio.run(ronde92(dt.datetime(2026, 9, 23, 20, minuut)))
+    if m:
+        print(f"  20:{minuut:02d}: {m}  {b.get('reason')}")
+controle("tijdens de beurt komt het programma uit de sensor", b.get("rule") == "running" and b.get("program") == "kurz_60", f"{b.get('rule')} {b.get('program')}")
+# De proef geeft de uren op vier cijfers (0,8333 h is 49,998 min), de echte
+# sensor op veertien; vandaar een minuut speling.
+eind92 = dt.datetime.fromisoformat(b.get("ends_at") or "2000-01-01T00:00")
+controle("'is gestart' noemt de klaar-tijd uit de uren: rond 21:00",
+         b.get("reason", "").startswith("Hij draait, klaar rond 2") and abs((eind92 - dt.datetime(2026, 9, 23, 21, 0)).total_seconds()) <= 60,
+         f"{b.get('reason')} {b.get('ends_at')}")
+# Klaar: Home Connect Local zegt vijf seconden "finished" en dan "ready" (de
+# machine zet zichzelf uit); de coach ziet vaak alleen dat laatste.
+hass92.states.zet("sensor.vw92_status", "ready")
+hass92.states.zet("sensor.vw92_actief", "unknown")
+hass92.states.zet("select.vw92_programma", "dishcare_dishwasher_program_kurz60")
+hass92.states.zet("sensor.vaatwasser_vermogen", "0")
+b, knop, m = asyncio.run(ronde92(dt.datetime(2026, 9, 23, 21, 0)))
+controle("van 'run' meteen naar 'ready' is klaar: verslag, vrijgave eraf, en geen nieuwe druk",
+         len(m) == 1 and "is klaar" in m[0] and "dev-vaatwasser" not in (inst92.get("ready_devices") or []) and not knop, f"{m} {knop} {inst92.get('ready_devices')}")
+
+# Starten op afstand uit: de sensor zegt het, dus niet drukken en zeggen wat er aan moet.
+hass92.states.zet("binary_sensor.vw92_afstand", "off")
+hass92.states.zet("button.vw92_start", "unknown")
+inst92["ready_devices"] = ["dev-vaatwasser"]
+inst92["ready_now"] = ["dev-vaatwasser"]
+b, knop, m = asyncio.run(ronde92(dt.datetime(2026, 9, 23, 21, 30)))
+b, knop, m3 = asyncio.run(ronde92(dt.datetime(2026, 9, 23, 21, 33)))
+controle("starten op afstand uit: geen druk, en na drie minuten één keer 'zet starten op afstand aan'",
+         not knop and not m and len(m3) == 1 and "starten op afstand aan" in m3[0], f"{knop} {m} {m3}")
+hass92.states.zet("binary_sensor.vw92_afstand", "on")
+b, knop, m = asyncio.run(ronde92(dt.datetime(2026, 9, 23, 21, 34)))
+controle("weer aan: dan drukt hij alsnog", knop == [("button", "press", {"entity_id": "button.vw92_start"})], f"{knop}")
+
+# De sensorwacht en de andere integraties: een knop zonder toestand (de
+# cloud) is geen knop die weg is.
+hass92c = NepHass(dict(huis56))
+coach92c = coachmod.ChargerCoach(hass92c)
+controle("bij de cloud-integraties (knop altijd beschikbaar) verandert er niets: `_text` op een knop zonder toestand is leeg",
+         coachmod._text(hass92c, "button.vaatwasser_start") == "", "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

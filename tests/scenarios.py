@@ -601,6 +601,24 @@ vaatwasser_afstand_uit = vaatwasser_avond.kopie(
     naam="vaatwasser-afstand-uit", uitleg="hetzelfde, maar starten op afstand staat uit op het apparaat: de coach drukt, er gebeurt niets, en hij zegt dat",
     vaatwasser=Vaatwasser(afstand_aan=False),
 )
+# Home Connect Local (thuis sinds 23-09-2026): de startknop is er alleen als
+# de machine een start aanneemt, het programma zit in twee entiteiten die
+# elkaar afwisselen, en de resterende tijd staat in uren. Met de spelling
+# van die integratie (`eco50` in plaats van `eco_50`).
+LOKAAL = Vaatwasser(lokaal=True, programma="dishcare_dishwasher_program_eco50")
+vaatwasser_lokaal = vaatwasser_zon.kopie(
+    naam="vaatwasser-lokaal", uitleg="Home Connect Local in plaats van de cloud: dezelfde beurt als vaatwasser-zon, met de resterende tijd in uren en het programma uit de select zolang hij stilstaat",
+    vaatwasser=LOKAAL,
+)
+vaatwasser_lokaal_deur = vaatwasser_krap.kopie(
+    naam="vaatwasser-lokaal-deur-open", uitleg="Home Connect Local, om 03:00 vrijgegeven met de deur nog open: de startknop is er niet, dus de coach drukt niet, zegt na drie minuten dat de deur open staat, en start zodra de deur om 03:08 dichtgaat",
+    vaatwasser=replace(LOKAAL, deur_open=True),
+    gebeurtenissen=[("03:00", "vaatwasser_vrijgeven", None), ("03:08", "vaatwasser_deur", False)],
+)
+vaatwasser_lokaal_afstand_uit = vaatwasser_avond.kopie(
+    naam="vaatwasser-lokaal-afstand-uit", uitleg="Home Connect Local met starten op afstand uit: de sensor zegt het, dus de coach drukt niet één keer en zegt wat er aan moet",
+    vaatwasser=replace(LOKAAL, afstand_aan=False),
+)
 # Een domme vaatwasser op een meetstekker (06-09-2026 's avonds). De eigenaar: "smart
 # plug als starten doen we niet, wel adviseren en meten, met zet hem aan." En
 # zijn eigen schema: niet in de nacht, vanaf 08:00, uiterlijk klaar om 16:30.
@@ -971,6 +989,7 @@ ALLE = [
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,
     vaatwasser_zonpiek, vaatwasser_eindtijd, vaatwasser_eindtijd_bijstellen, vaatwasser_na_klaartijd, vaatwasser_na_klaartijd_nu,
+    vaatwasser_lokaal, vaatwasser_lokaal_deur, vaatwasser_lokaal_afstand_uit,
     boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
     *KLANTWONING,
     *BATTERIJ,

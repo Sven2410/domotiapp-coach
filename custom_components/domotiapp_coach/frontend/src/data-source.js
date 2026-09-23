@@ -469,7 +469,14 @@ function deviceDetails(feed, device, settings) {
     const entityId = device.entities?.[field.key];
     if (!entityId || field.hideRow) continue;
 
-    const state = feed.get(entityId);
+    let state = feed.get(entityId);
+    // Het programma: zegt de sensor niets, dan de select waarmee het gezet
+    // wordt. Bij Home Connect Local zegt de sensor alleen tijdens de beurt
+    // iets en valt de select juist dan weg; dezelfde afspraak als in
+    // `_one_programma` in coach.py.
+    if (field.key === "program" && !usable(state) && device.entities?.program_select) {
+      state = feed.get(device.entities.program_select);
+    }
     if (!usable(state)) {
       rows.push({ label: field.label, text: "—" });
       continue;

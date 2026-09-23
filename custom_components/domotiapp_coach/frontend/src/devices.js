@@ -417,7 +417,7 @@ export const DISHWASHER_BRANDS = [
   {
     id: "home_connect",
     label: "Home Connect",
-    note: "Bosch, Siemens, Neff, Gaggenau en Constructa lopen allemaal via Home Connect.",
+    note: "Bosch, Siemens, Neff, Gaggenau en Constructa lopen allemaal via Home Connect. Werkt met de integratie van Home Assistant zelf, met Home Connect Alt en met Home Connect Local (lokaal, zonder cloud).",
     fields: [
       {
         key: "status",
@@ -441,7 +441,7 @@ export const DISHWASHER_BRANDS = [
       {
         key: "program",
         label: "Geselecteerd programma",
-        hint: "De sensor die zegt welk programma klaarstaat. Daar hangt aan vast hoe lang het duurt en wat het kost.",
+        hint: "De sensor die zegt welk programma klaarstaat. Daar hangt aan vast hoe lang het duurt en wat het kost. Bij Home Connect Local is dit de sensor \"Actief programma\", die alleen tijdens de beurt iets zegt; zet hieronder dan ook de select \"Geselecteerd programma\", want daaruit leest de coach het de rest van de tijd.",
         filter: "all",
         needed: true,
         values: DISHWASHER_PROGRAM_VALUES,
@@ -460,9 +460,20 @@ export const DISHWASHER_BRANDS = [
       {
         key: "remaining",
         label: "Resterende tijd",
-        hint: "Hoe lang het programma nog duurt. Home Connect geeft hier de eindtijd; het paneel rekent zelf terug.",
+        hint: "Hoe lang het programma nog duurt. Home Connect geeft hier de eindtijd, Home Connect Local de uren die nog resten; het paneel rekent zelf terug.",
         filter: "all",
         format: "countdown",
+      },
+      {
+        key: "remote_start",
+        label: "Starten op afstand",
+        // Optioneel. Staat hij uit, dan drukt de coach niet: een druk doet
+        // dan niets, en hij zegt de bewoner wat er aan moet. Thuis op
+        // 23-09-2026 bij Home Connect Local "Start op afstand"; de andere
+        // twee integraties hebben hem ook.
+        hint: "Optioneel: de sensor die zegt of de machine op afstand gestart mag worden. Staat hij uit, dan drukt de coach niet en zegt hij dat je hem op het apparaat aan moet zetten.",
+        filter: "all",
+        values: { on: "Aan", off: "Uit" },
       },
       RELEASE_SWITCH_FIELD,
       RELEASE_NOW_SWITCH_FIELD,
@@ -492,7 +503,7 @@ export const DISHWASHER_BRANDS = [
         label: "Starten",
         icon: "play",
         needed: true,
-        hint: "De knop die het geselecteerde programma start. Bij Home Connect heet die meestal \"Start\" of \"Start/Pauze\". De vaatwasser moet wel op afstand gestart mogen worden.",
+        hint: "De knop die het geselecteerde programma start. Bij Home Connect heet die meestal \"Start\" of \"Start/Pauze\". De vaatwasser moet wel op afstand gestart mogen worden. Bij Home Connect Local is de knop er alleen als de machine een start aanneemt (deur dicht); tot die tijd wacht de coach.",
         filter: "all",
       },
       {
