@@ -210,6 +210,14 @@ en geen constatering, en gaat die 0 er wél heen, blijvend (zonder houdbaarheid,
 anders loopt hij af en laadt de auto door; in het virtuele huis gaf dat honderd-
 veertig wissels en 3,2 kWh van het net op een auto die allang op 80% stond).
 
+**En per beurt op de kaart** (v0.88.0): "Laden tot", met als eerste keuze
+het doel uit het autoprofiel en daarna 50 tot 100%. De bewoner van de eerste
+woning op 23-09-2026, over evcc: "in de auto een harde max (100%), en in evcc
+een gewenste accustand van bijvoorbeeld 80." `coach/target`, `async_target`,
+`_doel` in coach.py: gaat in `Car.target_percent`, dus alles wat met het doel
+rekent (plan, klaar, verslag) volgt vanzelf; nooit onder de 10%; onthouden over
+een herstart (`target` in `sessions`) en weg zodra de kabel eruit gaat. Proef 95.
+
 En de melding wacht op een accustand die bij het einde hoort. Die ochtend zei de
 paal om 10:46:21 "completed" terwijl de Ford-app nog 70% toonde; om 10:47:19
 werd dat 80. De coach besloot om 10:46:57, tweeëntwintig seconden te vroeg,
@@ -1624,10 +1632,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 400 controles op het denkwerk
 python tests/test_batterij.py    # 93 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 581 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 588 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1731 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 91 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 92 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

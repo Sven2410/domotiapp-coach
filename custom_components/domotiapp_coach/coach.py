@@ -880,6 +880,10 @@ class ChargerCoach:
         # bij Apparaten). Zelfde levensduur als snelladen: de kabel eruit en
         # het is weer de voorkeur, zodat er niets te vergeten valt.
         self._modus: dict[str, str] = {}
+        # Tot hoeveel procent deze beurt laadt, als de bewoner dat op de kaart
+        # koos (v0.88.0), net als de schuif van evcc. Zonder keuze het doel uit
+        # het autoprofiel. Weg zodra de kabel eruit gaat.
+        self._doel: dict[str, float] = {}
         # De thuisbatterij nu leegladen tot deze accustand (procent), per
         # apparaat. Zie `async_drain`.
         self._drain: dict[str, float] = {}
@@ -4359,6 +4363,10 @@ class ChargerCoach:
             # voorkeur van de paal. Snel is `boost`; een planning wint.
             "mode": "snel" if charger.boost else charger.modus,
             "mode_session": device_id in self._modus,
+            # Tot hoeveel procent deze beurt laadt, en of dat de keuze van de
+            # kaart is of het doel uit het profiel (v0.88.0).
+            "target_percent": car.target_percent,
+            "target_session": device_id in self._doel,
             "planned": bool(window.enabled),
             # Of er een knop "accustand opvragen" op de kaart hoort, en wanneer
             # de auto voor het laatst gewekt is.
@@ -4388,6 +4396,7 @@ class ChargerCoach:
             self._approved.discard(device_id)
             self._boost.discard(device_id)
             self._modus.pop(device_id, None)
+            self._doel.pop(device_id, None)
             self._paused.discard(device_id)
             self._zon.pop(device_id, None)
             self._holding.pop(device_id, None)
@@ -5523,7 +5532,7 @@ class ChargerCoach:
             phases=phases,
             phases_measured=phases_measured,
             max_amps=float(profile.get("max_amps") or 0),
-            target_percent=float(profile.get("target_percent") or 100),
+            target_percent=self._doel.get(device_id) or float(profile.get("target_percent") or 100),
             soc_percent=soc,
             soc_estimated=geschat,
             tempo_per_band=self._tempo_uit(settings, device_id, auto_id),
@@ -7499,6 +7508,11 @@ class ChargerCoach:
                 self._paused.add(device_id)
             if row.get("mode") in MODI_ZONDER_SOM:
                 self._modus[device_id] = str(row["mode"])
+            if row.get("target") is not None:
+                try:
+                    self._doel[device_id] = max(10.0, min(100.0, float(row["target"])))
+                except (TypeError, ValueError):
+                    pass
             if row.get("drain_to") is not None:
                 try:
                     self._drain[device_id] = float(row["drain_to"])
@@ -7523,6 +7537,7 @@ class ChargerCoach:
             "paused": device_id in self._paused,
             "drain_to": self._drain.get(device_id),
             "mode": self._modus.get(device_id),
+            "target": self._doel.get(device_id),
         }
         try:
             store = async_get_store(self.hass)
@@ -7605,6 +7620,22 @@ class ChargerCoach:
             self._modus[device_id] = mode
         else:
             self._modus.pop(device_id, None)
+        self._remember(device_id)
+        self.async_refresh()
+
+    @callback
+    def async_target(self, device_id: str, percent: float | None) -> None:
+        """Tot hoeveel procent deze beurt laadt, of None voor het autoprofiel.
+
+        De bewoner van de eerste woning op 23-09-2026, over evcc: "in de auto
+        een harde max (100%), en in evcc een gewenste accustand van
+        bijvoorbeeld 80." De laadgrens in de auto blijft de bovengrens; dit is
+        waar de coach zelf ophoudt, en waar hij voor plant.
+        """
+        if percent is None:
+            self._doel.pop(device_id, None)
+        else:
+            self._doel[device_id] = max(10.0, min(100.0, float(percent)))
         self._remember(device_id)
         self.async_refresh()
 

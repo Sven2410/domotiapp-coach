@@ -1077,6 +1077,31 @@ def async_coach_boost(
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): "domotiapp_coach/coach/target",
+        vol.Required("device_id"): str,
+        # None gaat terug naar het doel uit het autoprofiel.
+        vol.Required("percent"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(10, 100))),
+    }
+)
+@callback
+def async_coach_target(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Tot hoeveel procent deze laadbeurt gaat (v0.88.0), zoals de schuif van evcc.
+
+    Niet alleen voor beheerders: wie inplugt weet hoe ver hij morgen moet.
+    De kabel eruit en het is weer het doel uit het autoprofiel.
+    """
+    from .coach import async_get_coach
+
+    async_get_coach(hass).async_target(msg["device_id"], msg["percent"])
+    connection.send_result(msg["id"], {"percent": msg["percent"]})
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): "domotiapp_coach/coach/mode",
         vol.Required("device_id"): str,
         # "" gaat terug naar de voorkeur van de paal.
@@ -1190,6 +1215,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_coach_approve)
     websocket_api.async_register_command(hass, async_coach_boost)
     websocket_api.async_register_command(hass, async_coach_mode)
+    websocket_api.async_register_command(hass, async_coach_target)
     websocket_api.async_register_command(hass, async_coach_wake)
     websocket_api.async_register_command(hass, async_coach_drain)
     websocket_api.async_register_command(hass, async_coach_pause)
