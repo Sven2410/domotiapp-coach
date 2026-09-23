@@ -1073,6 +1073,45 @@ proef("de pop-up tekent de grafiek bij de paal en bij de batterij", () => {
   assert.ok(sheet.includes("Number(b.kwh) - Number(b.solar_kwh || 0)"), "bij de paal telt alleen wat van het net komt");
 });
 
+// --- de laadmodus zonder planning (v0.87.0) ----------------------------------------
+//
+// De eigenaar op 23-09-2026: "de modus is leidend (snel, continu of zon), tenzij er
+// een planning ingesteld is. Geen planning, standaard terug naar zon, of welke
+// voorkeursmodus dan ook."
+proef("bij een stuurbare laadpaal kies je de modus zonder planning en het vermogen van continu", () => {
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.feed_ = {};
+  el.draft_ = { installation: { circuits: [] }, devices: [] };
+  const paal = { id: "p", type: "laadpaal", brand: "easee", controllable: true, device_id: "x",
+    entities: { status: "sensor.s", limit: "number.l" }, charge_mode: "continu", continuous_amps: 10 };
+  const html = el.controlHtml_(paal, 0);
+  assert.ok(html.includes('data-field="charge_mode"'), "de keuzelijst staat erin");
+  assert.ok(html.includes('value="continu" selected'), "met de keuze van de paal");
+  assert.ok(html.includes('data-field="continuous_amps"') && html.includes('value="10"'));
+  const oud = el.controlHtml_({ ...paal, charge_mode: undefined }, 0);
+  assert.ok(oud.includes('value="goedkoopst" selected'), "een paal zonder keuze is goedkoopst, zoals hij altijd deed");
+  const boiler = el.controlHtml_({ id: "b", type: "boiler", controllable: true, entities: { switch: "switch.b" } }, 0);
+  assert.ok(!boiler.includes("charge_mode"), "een boiler heeft geen laadmodus");
+});
+
+proef("een nieuwe paal begint op zon, en de kaart heeft Continu en Zon naast Snel", () => {
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/devices.js", import.meta.url), "utf-8");
+  assert.match(bron, /charge_mode: "zon",\s*continuous_amps: 6,/);
+  const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
+  assert.ok(kaart.includes('data-modus-naam="continu"') && kaart.includes('data-modus-naam="zon"'));
+  assert.ok(kaart.includes("const modi = kan && !besluit.planned"), "alleen zonder planning");
+  assert.ok(kaart.includes('type: "domotiapp_coach/coach/mode"'));
+});
+
+proef("onder het schemaschuifje staat wat hij zonder planning doet", async () => {
+  const { planSummary } = await import("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js");
+  const uit = { enabled: false, per_day: false, window: {}, days: [] };
+  assert.equal(planSummary(uit, "zon"), "Uit. Zonder planning laadt hij alleen op zon.");
+  assert.match(planSummary(uit, "continu"), /continu/);
+  assert.match(planSummary(uit), /gunstigste moment/, "een apparaat zonder modus houdt de oude zin");
+});
+
 // --- eerdere contracten en gas ---------------------------------------------------
 //
 // De bewoner van de eerste woning op 22-09-2026: "gascontract 1: van-tot +

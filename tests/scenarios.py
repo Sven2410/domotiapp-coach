@@ -137,6 +137,22 @@ dyn_geen_klaar_tijd = dyn_zonnig.kopie(
     schema_aan=False, duur_uren=36,
 )
 
+# --- de laadmodus zonder planning (v0.87.0) -----------------------------------
+# De eigenaar op 23-09-2026, naar evcc: "de modus is leidend (snel, continu of zon),
+# tenzij er een planning ingesteld is. Geen planning, standaard terug naar zon."
+vast_zon_modus = vast_geen_klaar_tijd.kopie(
+    naam="modus-zon", uitleg="schema uit, modus zon, heldere dag: alleen op overschot, niets van het net",
+    laadmodus="zon",
+)
+bewolkt_zon_modus = vast_zon_modus.kopie(
+    naam="modus-zon-bewolkt", uitleg="schema uit, modus zon, bewolkt: pas laden als het dak de ondergrens haalt",
+    zon=Zon(wolken="bewolkt"),
+)
+dyn_continu = dyn_geen_klaar_tijd.kopie(
+    naam="modus-continu", uitleg="schema uit, modus continu op 8 A: meteen laden, met de zon erbovenop",
+    laadmodus="continu", continu_amps=8,
+)
+
 # --- de meter en de aansluiting ----------------------------------------------
 
 meter_teken = vast_zonnig.kopie(
@@ -993,6 +1009,7 @@ ALLE = [
     boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
     *KLANTWONING,
     *BATTERIJ,
+    vast_zon_modus, bewolkt_zon_modus, dyn_continu,
 ]
 
 

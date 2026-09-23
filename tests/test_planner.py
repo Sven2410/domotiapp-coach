@@ -2812,5 +2812,85 @@ controle("bij snelladen noemt hij de zekering van de garage",
          boost60.amps == 11 and "de zekering van de groep Garage" in boost60.reason, f"{boost60.reason}")
 
 print()
+print("=== 61. zonder planning: de modus zon, continu of goedkoopst (v0.87.0) ===")
+# De eigenaar op 23-09-2026, naar evcc: "de modus is leidend (snel, continu of
+# zon), tenzij er een planning ingesteld is. Geen planning, standaard terug naar
+# zon." Een eenfasige auto: de ondergrens is 6 A = 1,38 kW, en de zonregel
+# begint op 90% daarvan.
+nu = dt.datetime(2026, 8, 18, 13, 10)   # `middag` is hierboven een besluit geworden
+geen_planning = Window(enabled=False)
+
+
+def met_modus(modus, laadt=False, amps=6.0, continu=6):
+    return Charger(max_amps=14.0, connected=True, charging=laadt, actual_amps=amps if laadt else 0.05,
+                   started_at=nu - dt.timedelta(minutes=30) if laadt else None,
+                   modus=modus, continu_amps=continu)
+
+
+def zon_net(w, laadt_amps=0.0):
+    return Grid(surplus_w=w, phase_amps=[4.0, 3.0, 2.0], fuse_amps=25.0, charger_amps=laadt_amps)
+
+
+d61a = decide(nu, [], zon_net(800.0), sven_auto(), met_modus("zon"), geen_planning, tariff=VAST, sun=ZON_RUIM)
+print(f"  zon, 0,8 kW: {d61a.rule} {d61a.amps} A: {d61a.reason}")
+controle("zon: onder de ondergrens laadt hij niet, en zegt vanaf hoeveel",
+         not d61a.charge and d61a.rule == "zon-wacht" and "1,4 kW" in d61a.reason, d61a.reason)
+
+d61b = decide(nu, [], zon_net(2500.0), sven_auto(), met_modus("zon"), geen_planning, tariff=VAST, sun=ZON_RUIM)
+print(f"  zon, 2,5 kW: {d61b.rule} {d61b.amps} A: {d61b.reason}")
+controle("zon: met 2,5 kW overschot laadt hij op wat het dak geeft (10 A op een fase)",
+         d61b.charge and d61b.rule == "zon-modus" and d61b.amps == 10, f"{d61b.amps} {d61b.rule}")
+
+d61c = decide(nu, [], zon_net(800.0), sven_auto(soc=None), met_modus("zon"), geen_planning, tariff=VAST, sun=ZON_RUIM)
+controle("zon: zonder accustand vraagt hij er niet om, want er valt niets te plannen",
+         not d61c.needs_soc and d61c.rule == "zon-wacht", f"{d61c.rule} needs_soc={d61c.needs_soc}")
+
+d61d = decide(nu, [], zon_net(0.0), sven_auto(), met_modus("continu", continu=8), geen_planning, tariff=VAST, sun=ZON_RUIM)
+d61e = decide(nu, [], zon_net(3000.0), sven_auto(), met_modus("continu", continu=8), geen_planning, tariff=VAST, sun=ZON_RUIM)
+print(f"  continu 8 A zonder zon: {d61d.amps} A; met 3 kW zon: {d61e.amps} A: {d61e.reason}")
+controle("continu: zonder zon op het ingestelde vermogen",
+         d61d.charge and d61d.amps == 8 and d61d.rule == "continu", f"{d61d.amps} {d61d.rule}")
+controle("continu: met meer zon dan dat gaat hij mee omhoog (3 kW is 13 A)",
+         d61e.charge and d61e.amps == 13 and "zon geeft meer" in d61e.reason, f"{d61e.amps} {d61e.reason}")
+d61f = decide(nu, [], zon_net(0.0), sven_auto(), met_modus("continu", continu=32), geen_planning, tariff=VAST, sun=ZON_RUIM)
+controle("continu: nooit boven wat paal en zekering toestaan (14 A)", d61f.amps == 14, f"{d61f.amps}")
+
+piekuur = dt.datetime(2026, 8, 18, 18, 30)
+d61g = decide(piekuur, [], zon_net(0.0), sven_auto(), met_modus("continu", continu=8), geen_planning, tariff=VAST, sun=ZON_RUIM)
+print(f"  continu in de avondpiek, vast contract: {d61g.rule}: {d61g.reason}")
+controle("continu bij een vast contract: in de avondpiek niets van het net (eis 4)",
+         not d61g.charge and "avondpiek" in d61g.reason, d61g.reason)
+dyn_prijzen = [{"start": piekuur.replace(minute=0) + dt.timedelta(hours=i),
+                "end": piekuur.replace(minute=0) + dt.timedelta(hours=i + 1), "price": 0.30} for i in range(6)]
+d61h = decide(piekuur, dyn_prijzen, zon_net(0.0), sven_auto(), met_modus("continu", continu=8), geen_planning,
+              tariff=Tariff(), sun=ZON_RUIM)
+controle("continu bij een dynamisch contract: de avondpiek is een gewoon uur",
+         d61h.charge and d61h.amps == 8, f"{d61h.rule} {d61h.amps}")
+
+d61i = decide(nu, [], zon_net(800.0), sven_auto(), met_modus("zon"), venster(nu), tariff=VAST, sun=ZON_RUIM)
+print(f"  zon met schema aan: {d61i.rule}: {d61i.reason}")
+controle("een planning wint: met het schema aan rekent hij naar de klaar-tijd en niet in de modus",
+         d61i.rule not in ("zon-modus", "zon-wacht", "continu"), d61i.rule)
+
+d61j = decide(nu, [], zon_net(800.0), sven_auto(), met_modus("goedkoopst"), geen_planning, tariff=VAST, sun=ZON_RUIM)
+d61k = decide(nu, [], zon_net(800.0), sven_auto(), paal(laadt=False), geen_planning, tariff=VAST, sun=ZON_RUIM)
+controle("goedkoopst is precies wat hij zonder schema altijd deed",
+         (d61j.charge, d61j.amps, d61j.rule) == (d61k.charge, d61k.amps, d61k.rule) and d61j.rule not in ("zon-wacht", "zon-modus"),
+         f"{d61j.rule} / {d61k.rule}")
+
+d61l = decide(nu, [], zon_net(2500.0), sven_auto(soc=100.0), met_modus("zon"), geen_planning, tariff=VAST, sun=ZON_RUIM)
+controle("zon: een auto op zijn doel laadt niet, ook niet op zon", not d61l.charge and d61l.rule == "complete", d61l.rule)
+
+d61m = decide(nu, [], zon_net(300.0, laadt_amps=6.0), sven_auto(), met_modus("zon", laadt=True), geen_planning,
+              tariff=VAST, sun=ZON_RUIM, holding=0)
+print(f"  zon, wolk terwijl hij laadt: {d61m.rule} {d61m.amps} A")
+controle("zon: een wolk breekt een lopende beurt niet meteen af (keep-alive op de ondergrens)",
+         d61m.charge and d61m.amps == 6 and d61m.rule.endswith("+hold"), f"{d61m.rule} {d61m.amps}")
+
+d61n = decide(nu, [], zon_net(800.0), sven_auto(), _dc.replace(met_modus("zon"), boost=True), geen_planning,
+              tariff=VAST, sun=ZON_RUIM)
+controle("snel gaat boven de modus", d61n.charge and d61n.rule == "boost", d61n.rule)
+
+print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

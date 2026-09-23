@@ -127,8 +127,13 @@ export const planTimes = (plan) =>
     .filter(Boolean);
 
 /** Eén regel die zegt wat er staat, voor onder de schuif op de kaart. */
-export function planSummary(plan) {
+export function planSummary(plan, modus = "") {
   if (!plan.enabled) {
+    // Een laadpaal is zonder planning in een modus (v0.87.0); zie de knoppen
+    // Snel, Continu en Zon op de kaart.
+    if (modus === "zon") return "Uit. Zonder planning laadt hij alleen op zon.";
+    if (modus === "continu") return "Uit. Zonder planning laadt hij continu, met zon erbovenop.";
+    if (modus === "snel") return "Uit. Snel staat aan: hij laadt op vol vermogen.";
     return "Uit. De coach bepaalt zelf wanneer en kijkt puur naar het gunstigste moment.";
   }
   if (!planTimes(plan).length) {

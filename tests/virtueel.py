@@ -838,6 +838,10 @@ class Scenario:
     niet_voor: str | None = None
     uiterlijk_starten: str | None = None
     schema_aan: bool = True
+    # De laadmodus zonder planning (v0.87.0): "zon", "continu" of "goedkoopst".
+    # Alle scenario's van voor die tijd zijn "goedkoopst", zoals de coach toen deed.
+    laadmodus: str = "goedkoopst"
+    continu_amps: int = 6
     net: str = "split"                  # split | signed | signed-omgekeerd
     aansluiting_fasen: int = 3
     zekering: float = 25.0
@@ -1239,6 +1243,8 @@ def instellingen(s: Scenario) -> dict:
             "name": "Laadpaal",
             "brand": s.paal.merk,
             "controllable": s.paal_stuurbaar,
+            "charge_mode": s.laadmodus,
+            "continuous_amps": s.continu_amps,
             "device_id": "" if s.paal.merk == "alfen" else "virtueel",
             "entity": E["vermogen"],
             "entities": {

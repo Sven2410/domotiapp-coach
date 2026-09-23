@@ -154,6 +154,42 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    `_uren_met_afbouw` in planner.py). En is de klaar-tijd voorbij terwijl de
    auto niet vol is, dan laadt hij op vol vermogen door (`overdue`).
 
+**Zonder planning bepaalt de modus: Snel, Continu of Zon** (v0.87.0). De
+eigenaar op 23-09-2026, naar het voorbeeld van evcc: "de modus is leidend (snel,
+continu of zon), tenzij er een planning ingesteld is. Geen planning, standaard
+terug naar zon, of welke voorkeursmodus dan ook." En over de namen: "continu is
+wellicht een betere benaming; en PV zon noemen."
+
+- **Een planning wint.** Staat het schema aan, dan rekent hij zoals altijd naar
+  de klaar-tijd; de modus doet dan niets. Alleen Snel (snelladen) gaat
+  daaroverheen, zoals het al deed.
+- **Zon** (`zon-modus`, `zon-wacht` in `_modus_zonder_planning`, planner.py):
+  alleen op overschot, vanaf `SURPLUS_SLACK` van de ondergrens van de paal; de
+  kaart zegt vanaf hoeveel. Een wolk breekt een lopende beurt niet meteen af
+  (`_keep_alive`), dus dan kan er een paar minuten wat van het net bijkomen:
+  in `modus-zon-bewolkt` 0,2 van 10,9 kWh. Geen accustand nodig, dus ook geen
+  melding om de accustand; een bekende accustand stopt hem wel op zijn doel.
+- **Continu** (`continu`): altijd op `continuous_amps` (per paal, standaard 6),
+  met meer als de zon meer geeft; nooit boven het plafond. **In de avondpiek van
+  een vast contract komt er niets van het net bij** (eis 4): dan is het zon.
+- **Goedkoopst**: wat de coach zonder schema altijd deed, de goedkoopste
+  bekende uren. Alleen als voorkeur, niet als knop.
+- **Voorkeur per paal** bij Apparaten (`charge_mode`, "Zonder planning"). Een
+  bestaande paal wordt `goedkoopst` (`_migrate` in storage.py, en de standaard
+  in `_DEVICE`), zodat er bij een klant niets stil verandert; een nieuwe paal
+  krijgt in het paneel `zon`.
+- **Per beurt kiezen op de kaart** (`coach/mode`, `async_mode`, `_modus` in
+  coach.py): de knoppen Snel, Continu en Zon, alleen zonder planning; nog een
+  keer op de actieve modus gaat terug naar de voorkeur. Onthouden over een
+  herstart (`mode` in `sessions`), weg zodra de kabel eruit gaat.
+- **Geen tijdlijn in de modus zon of continu**: `plan_ahead` is dan None, want
+  een lijst met goedkoopste uren zou iets beloven wat hij niet doet.
+
+Proef 61 in test_planner.py, proef 93 in test_coach.py, scenario's
+`modus-zon`, `modus-zon-bewolkt` en `modus-continu` (dynamisch, 8 A: vol om
+12:42 op dag één, 3,0 kWh van het net en € 0,90, tegen een dag later en € 0,00
+in Goedkoopst), en het formulier en de knoppen in test_rapport.mjs.
+
 **"Vol" is wat de bewoner instelt, en een accustand telt pas als hij bezonken
 is** (v0.65.0). De eigenaar op 16-09-2026: "ik wil een optie hebben op de kaart dat ik
 kan aangeven tot hoever de bus laadt. Mijne laadt tot 80% namelijk maar ik kan
@@ -1581,12 +1617,12 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 387 controles op het denkwerk
+python tests/test_planner.py     # 400 controles op het denkwerk
 python tests/test_batterij.py    # 93 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 565 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1699 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 575 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1731 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 88 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 91 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

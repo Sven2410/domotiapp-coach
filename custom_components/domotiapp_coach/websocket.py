@@ -241,6 +241,13 @@ _DEVICE = _schema(
         # De groep waar dit apparaat aan hangt (`installation.circuits`), of ""
         # voor de hoofdaansluiting.
         vol.Optional("circuit", default=""): str,
+        # Hoe een laadpaal laadt zolang er geen planning aanstaat (v0.87.0):
+        # "zon", "continu" of "goedkoopst". Zonder waarde "goedkoopst", want zo
+        # deed hij het tot v0.87.0 en een klant hoort daar niets van te merken;
+        # het paneel geeft een nieuwe paal "zon" mee. Zie `Charger.modus`.
+        vol.Optional("charge_mode", default="goedkoopst"): vol.In(["zon", "continu", "goedkoopst"]),
+        # Het vaste vermogen van de modus continu, in ampère.
+        vol.Optional("continuous_amps", default=6): vol.All(vol.Coerce(int), vol.Range(6, 32)),
     }
 )
 
@@ -1070,6 +1077,31 @@ def async_coach_boost(
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): "domotiapp_coach/coach/mode",
+        vol.Required("device_id"): str,
+        # "" gaat terug naar de voorkeur van de paal.
+        vol.Required("mode"): vol.In(["snel", "continu", "zon", "goedkoopst", ""]),
+    }
+)
+@callback
+def async_coach_mode(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De laadmodus voor deze beurt: snel, continu of zon (v0.87.0).
+
+    Niet alleen voor beheerders, om dezelfde reden als snelladen: wie de auto
+    inplugt kiest hoe. De kabel eruit en het is weer de voorkeur van de paal.
+    """
+    from .coach import async_get_coach
+
+    async_get_coach(hass).async_mode(msg["device_id"], msg["mode"])
+    connection.send_result(msg["id"], {"mode": msg["mode"]})
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): "domotiapp_coach/coach/drain",
         vol.Required("device_id"): str,
         vol.Required("to_percent"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(0, 100))),
@@ -1157,6 +1189,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_savings_list)
     websocket_api.async_register_command(hass, async_coach_approve)
     websocket_api.async_register_command(hass, async_coach_boost)
+    websocket_api.async_register_command(hass, async_coach_mode)
     websocket_api.async_register_command(hass, async_coach_wake)
     websocket_api.async_register_command(hass, async_coach_drain)
     websocket_api.async_register_command(hass, async_coach_pause)
