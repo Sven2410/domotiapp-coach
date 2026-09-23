@@ -1161,6 +1161,13 @@ proef("op de kaart kies je per beurt tot hoeveel procent hij laadt (v0.88.0)", (
   assert.match(kaart, /percent: waarde === "" \? null : Number\(waarde\)/, "leeg is terug naar het profiel");
 });
 
+proef("onder 'hoe vol is de auto nu' staat wat de coach van de opgave maakt, en het veld heeft een %", () => {
+  const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
+  assert.ok(kaart.includes('<span class="soc-procent" aria-hidden="true">%</span>'));
+  assert.ok(kaart.includes("Sinds je ${Math.round(opgegeven)}% doorgaf is er"), "de zin met de kWh sinds de opgave");
+  assert.ok(kaart.includes("De coach verwacht dat de auto nu ${Math.round(nu)}% vol is."));
+});
+
 proef("onder het schemaschuifje staat wat hij zonder planning doet", async () => {
   const { planSummary } = await import("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js");
   const uit = { enabled: false, per_day: false, window: {}, days: [] };

@@ -645,6 +645,11 @@ def _watts(hass: HomeAssistant, entity_id: str | None) -> float | None:
     return to_watts(_number(hass, entity_id), _unit(hass, entity_id))
 
 
+def _kwh_tekst(waarde: float) -> str:
+    """Kilowattuur zoals in de meldingen: 3,4 kWh."""
+    return f"{waarde:.1f} kWh".replace(".", ",")
+
+
 def _kwh(hass: HomeAssistant, entity_id: str | None) -> float | None:
     """Een energiesensor in kilowattuur, wat hij zichzelf ook noemt."""
     return to_kwh(_number(hass, entity_id), _unit(hass, entity_id))
@@ -4419,6 +4424,11 @@ class ChargerCoach:
             # kaart is of het doel uit het profiel (v0.88.0).
             "target_percent": car.target_percent,
             "target_session": device_id in self._doel,
+            # De accustand waar de coach mee rekent, en of die geschat is (een
+            # opgegeven stand plus wat de paal er sindsdien in deed). De kaart
+            # zegt het onder "Hoe vol is de auto nu?" (v0.89.0).
+            "soc_now": None if car.soc_percent is None else round(car.soc_percent, 1),
+            "soc_estimated": bool(car.soc_estimated),
             "planned": bool(window.enabled),
             # Of er een knop "accustand opvragen" op de kaart hoort, en wanneer
             # de auto voor het laatst gewekt is.
@@ -6697,6 +6707,9 @@ class ChargerCoach:
                 # vanaf wanneer hij niet verder laadt. Samen bepalen ze of het
                 # percentage in het verslag bij deze beurt hoort.
                 "soc_gezien": None,
+                # De eerste accustand van deze beurt, voor het verslag: "de
+                # accu ging van 44 naar 80%" (v0.89.0).
+                "soc_begin": None,
                 "soc_moment": None,
                 "soc_meter": None,
                 "klaar_sinds": None,
@@ -6787,6 +6800,8 @@ class ChargerCoach:
         # wachten tot de auto zich meldde. Zie `_soc_bijgeteld` en
         # `_soc_bezonken`.
         gemeten = self._soc_ruw.get(device_id, car.soc_percent)
+        if sessie.get("soc_begin") is None and car.soc_percent is not None:
+            sessie["soc_begin"] = car.soc_percent
         if gemeten is not None and gemeten != sessie.get("soc_gezien"):
             sessie["soc_gezien"] = gemeten
             sessie["soc_moment"] = now
@@ -7133,7 +7148,7 @@ class ChargerCoach:
                 else ""
             )
             await self._async_tell(
-                klaar + verloop + (f" {waarom}." if waarom else "") + nog
+                klaar + verloop + self._beurt_cijfers(sessie, car) + (f" {waarom}." if waarom else "") + nog
             )
             return
 
@@ -7168,6 +7183,40 @@ class ChargerCoach:
             + " Hij laadt door tot hij vol is.",
             kritiek=True,
         )
+
+    @staticmethod
+    def _beurt_cijfers(sessie: dict[str, Any], car: Car | None) -> str:
+        """De cijfers van een laadbeurt voor het verslag (v0.89.0).
+
+        De bewoner van de eerste woning op 23-09-2026: "tijdens deze laadsessie
+        is er X kWh geladen, en is de accu gestegen van A% naar B%. C kWh is
+        afgenomen van het net met een totaalprijs van € D; E kWh heb je direct
+        verbruikt van je zonopwek." Alleen wat bekend is: zonder accustand geen
+        procenten, en zonder geteld geld geen bedrag. De kWh zelf staat al in
+        de zin ervoor.
+        """
+        delen = []
+        begin = sessie.get("soc_begin")
+        eind = car.soc_percent if car is not None else None
+        if begin is not None and eind is not None and round(eind) > round(begin):
+            geschat = " (geschat)" if car.soc_estimated else ""
+            delen.append(f" De accu ging van {int(round(begin))} naar {int(round(eind))}%{geschat}.")
+        geld = sessie.get("geld") or {}
+        kwh = float(geld.get("kwh") or 0.0)
+        zon = float(geld.get("zon_kwh") or 0.0)
+        net = max(0.0, kwh - zon)
+        if kwh > 0.05:
+            stukken = []
+            if net > 0.05:
+                betaald = float(geld.get("betaald") or 0.0)
+                bedrag = f"{betaald:.2f}".replace(".", ",")
+                stukken.append(f"{_kwh_tekst(net)} kwam van het net voor € {bedrag}")
+            if zon > 0.05:
+                stukken.append(f"{_kwh_tekst(zon)} kwam direct van je zon")
+            if stukken:
+                zin = "; ".join(stukken)
+                delen.append(f" {zin[0].upper()}{zin[1:]}.")
+        return "".join(delen)
 
     async def _async_afgekoppeld(
         self,
@@ -7207,6 +7256,7 @@ class ChargerCoach:
             f"{self._hoe_heet(car).capitalize()} aan {naam} is afgekoppeld om "
             f"{moment:%H:%M}"
             + verloop
+            + self._beurt_cijfers(sessie, car)
             + (f" {waarom}." if waarom else ""),
             telefoon="vol" not in (sessie.get("gemeld") or set()),
         )
