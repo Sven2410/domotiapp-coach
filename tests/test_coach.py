@@ -5198,6 +5198,38 @@ coach95._los_sinds["dev-laadpaal"] = dt.datetime(2026, 8, 18, 14, 39)
 asyncio.run(ronde(coach95, inst95, paal=paal95, nu=dt.datetime(2026, 8, 18, 14, 41)))
 controle("kabel eruit: het gekozen doel vervalt", "dev-laadpaal" not in coach95._doel, f"{coach95._doel}")
 
+print("=== 96. een batterij op dezelfde groep als de paal neemt de ruimte van de auto niet in (v0.88.2) ===")
+# De eerste woning op 23-09-2026 om 17:08: de Anker laadde 3,2 kW zon op L3 van de
+# garage (14 A), en de paal zei "de groep Garage is te zwaar belast". Om 17:09
+# stond de Anker stil en L3 op 0 A, en zei hij het nog steeds: de mediaan van
+# anderhalve minuut droeg de oude stroom.
+huis96 = {**huis75(afname=0.0, teruglevering=0.0, batterij="3200"), "sensor.l1": "2", "sensor.l2": "2", "sensor.l3": "15",
+          "sensor.g1": "0.5", "sensor.g2": "0.5", "sensor.g3": "14"}
+hass96, _, coach96 = bouw(huis96, inst81)
+NU96 = dt.datetime(2026, 9, 23, 17, 8)
+coach96._batterij["dev-batterij"] = {"regelaar": coachmod.Regelaar(), "stuurt": True,
+                                     "besluit": coachmod.Besluit(coachmod.NUL if hasattr(coachmod, "NUL") else "nul", rule="nul")}
+grid96, _, _, _ = coach96._read(NU96, inst81, LAADPAAL_G)
+g3 = grid96.circuits[0].phase_amps[2]
+print(f"  garage L3 voor de paal: {g3:.1f} A (gemeten 14, de Anker 3200 W = {3200 / 230:.1f} A)")
+controle("de lading van een gestuurde batterij op nul op de meter telt niet als belasting",
+         g3 < 0.5, f"{grid96.circuits[0].phase_amps}")
+controle("ook niet onder de hoofdaansluiting", grid96.phase_amps[2] < 1.5, f"{grid96.phase_amps}")
+coach96._batterij["dev-batterij"]["besluit"] = coachmod.Besluit("netladen", rule="netladen")
+grid96b, _, _, _ = coach96._read(NU96, inst81, LAADPAAL_G)
+controle("laadt hij van het net, dan wijkt hij niet en telt zijn stroom wel",
+         grid96b.circuits[0].phase_amps[2] > 13.5, f"{grid96b.circuits[0].phase_amps}")
+coach96._batterij["dev-batterij"]["stuurt"] = False
+grid96c, _, _, _ = coach96._read(NU96, inst81, LAADPAAL_G)
+controle("stuurt de coach de batterij niet, dan telt zijn stroom ook", grid96c.circuits[0].phase_amps[2] > 13.5,
+         f"{grid96c.circuits[0].phase_amps}")
+# De Anker stopt: vanaf dan tellen alleen de metingen van daarna.
+coach96._daling = None
+hass96.states.zet("sensor.batterij_vermogen", "0")
+coach96._batterij_wijkt(inst81, NU96 + dt.timedelta(seconds=60))
+controle("een batterij die flink zakt zet de mediaan opnieuw in, net als een paal",
+         coach96._daling == NU96 + dt.timedelta(seconds=60), f"{coach96._daling}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
