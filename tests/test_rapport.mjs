@@ -1122,10 +1122,45 @@ proef("nog te laden: aan de paal, en wat er in de accu komt, gemeten of aangenom
   const vak = knopen.get("#vooruit-kop").kinderen[0];
   const bij = vak.kinderen[2]?.textContent ?? "";
   assert.equal(vak.kinderen[1].textContent, "26,0 kWh");
-  assert.equal(bij, "aan de paal; 23,4 kWh in de accu, 10% laadverlies (aangenomen, nog niet gemeten)");
+  assert.equal(bij, "aan de paal; 23,4 kWh in de auto, 10% laadverlies (aangenomen, nog niet gemeten)");
   const gemeten = vooruitScherm({ ...NACHT, kwh_needed: 24.6, kwh_in_car: 23.4, efficiency: 0.95, efficiency_measured: true });
   gemeten.el.paint_();
   assert.match(gemeten.knopen.get("#vooruit-kop").kinderen[0].kinderen[2].textContent, /5% laadverlies \(gemeten aan deze auto\)/);
+});
+
+proef("de thuisbatterij helpt: in de kop, in de regel, en niet in wat van het net komt (v0.95.0)", () => {
+  // De bewoner van de eerste woning op 23-09-2026: "de EV-laadplanning zou nu
+  // moeten weten dat de accu mee gaat helpen."
+  const blok = { start: "2026-08-29T23:00:00", end: "2026-08-30T00:00:00", price: 0.308,
+    charging: true, why: "een van de goedkoopste manieren", solar_kwh: 0, kwh: 9.0, accu_kwh: 1.0, amps: 13, kw: 9.0 };
+  const { el, knopen } = vooruitScherm({ ...NACHT, accu_kwh: 1.0, accu_to: 70, blocks: [blok] });
+  el.paint_();
+  const vakken = knopen.get("#vooruit-kop").kinderen;
+  const laatste = vakken[vakken.length - 1].kinderen.map((k) => k.textContent);
+  assert.deepEqual(laatste, ["Uit je thuisbatterij", "1,0 kWh", "tot hij op 70% staat"]);
+  const rij = knopen.get("#vooruit-uren").kinderen[0].kinderen;
+  assert.equal(rij[3].textContent, "Laden op 9,0 kW, waarvan 1,0 kWh uit je thuisbatterij: een van de goedkoopste manieren");
+  const zonder = vooruitScherm({ ...NACHT });
+  zonder.el.paint_();
+  assert.ok(!zonder.knopen.get("#vooruit-kop").kinderen.some((v) => v.kinderen[0]?.textContent === "Uit je thuisbatterij"),
+    "zonder hulp geen vak");
+  const sheet = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js", import.meta.url), "utf-8");
+  assert.ok(sheet.includes("- Number(b.accu_kwh || 0)"), "wat de batterij geeft komt niet van het net");
+});
+
+proef("het uurplan van de batterij zegt welke uren hij de auto helpt (v0.95.0)", () => {
+  const v = batterijVooruit({
+    kind: "batterij", soc: 78, capacity_kwh: 14.6, car_floor: 70,
+    hours: [
+      { start: "2026-09-23T23:00:00", end: "2026-09-24T00:00:00", mode: "nul", kwh: -1.2, grid_kwh: 0, car_kwh: 1.0, soc: 69, price: 0.308 },
+      { start: "2026-09-24T00:00:00", end: "2026-09-24T01:00:00", mode: "nul", kwh: -0.2, grid_kwh: 0, car_kwh: 0, soc: 68, price: 0.319 },
+    ],
+  });
+  assert.equal(v.uren[0].wat, "Nul op de meter, 1,2 kWh eruit, waarvan 1,0 kWh naar de auto");
+  assert.equal(v.uren[1].wat, "Nul op de meter, 0,2 kWh eruit");
+  const kop = v.kop.find((k) => k.label === "Naar de auto");
+  assert.equal(`${kop.waarde} | ${kop.bij}`, "1,0 kWh | tot hij op 70% staat");
+  assert.equal(batterijVooruit({ kind: "batterij", soc: 78, hours: [] }).kop.find((k) => k.label === "Naar de auto"), undefined);
 });
 
 proef("de pop-up tekent de grafiek bij de paal en bij de batterij", () => {

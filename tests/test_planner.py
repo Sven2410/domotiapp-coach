@@ -3001,5 +3001,30 @@ controle("het rendement waarmee gerekend wordt",
          planner.rendement_van(auto65) == planner.CHARGE_EFFICIENCY and planner.rendement_van(gemeten65) == 0.95, "")
 
 print()
+print("=== 66. de thuisbatterij in het plan van de auto (v0.95.0) ===")
+# De bewoner van de eerste woning op 23-09-2026: "de EV-laadplanning zou nu moeten
+# weten dat de accu mee gaat helpen." Wat het uurplan van de batterij de auto geeft
+# komt bij de blokken van de paal, en nooit meer dan wat er van het net zou komen.
+N66 = dt.datetime(2026, 9, 23, 23, 5)
+U66 = dt.datetime(2026, 9, 23, 23, 0)
+plan66 = planner.Plan(blocks=[
+    planner.Blok(U66, U66 + dt.timedelta(hours=1), 0.308, True, "x", 0.0, 5.9, 13, 9.0),
+    planner.Blok(U66 + dt.timedelta(hours=1), U66 + dt.timedelta(hours=2), 0.319, False, "y"),
+    planner.Blok(U66 + dt.timedelta(hours=2), U66 + dt.timedelta(hours=3), 0.315, True, "x", 0.5, 1.0, 12, 8.3),
+])
+hulp66 = [(N66, U66 + dt.timedelta(hours=1), 1.0), (U66 + dt.timedelta(hours=2), U66 + dt.timedelta(hours=3), 3.0)]
+planner.accu_in_plan(plan66, hulp66, N66, 70.0)
+print(f"  per blok uit de batterij: {[b.accu_kwh for b in plan66.blocks]}, samen {plan66.accu_kwh} tot {plan66.accu_to}%")
+controle("het lopende uur krijgt wat de batterij dan geeft",
+         plan66.blocks[0].accu_kwh == 1.0, f"{plan66.blocks[0].accu_kwh}")
+controle("een uur waarin de auto niet laadt krijgt niets", plan66.blocks[1].accu_kwh == 0.0, "")
+controle("nooit meer dan wat er in dat uur van het net zou komen (1,0 min 0,5 zon)",
+         plan66.blocks[2].accu_kwh == 0.5, f"{plan66.blocks[2].accu_kwh}")
+controle("opgeteld, met de grens erbij", plan66.accu_kwh == 1.5 and plan66.accu_to == 70.0, f"{plan66.accu_kwh} {plan66.accu_to}")
+leeg66 = planner.accu_in_plan(planner.Plan(blocks=[planner.Blok(U66, U66 + dt.timedelta(hours=1), 0.3, True, "x", 0.0, 5.0)]),
+                              [], N66, 70.0)
+controle("zonder hulp verandert er niets", leeg66.accu_kwh == 0.0 and leeg66.accu_to is None, "")
+
+print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

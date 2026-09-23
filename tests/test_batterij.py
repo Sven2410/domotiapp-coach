@@ -550,6 +550,63 @@ controle("zonder batterijgegevens zoals altijd: niets afgeven",
          bat.met_paal(bat.Besluit(bat.NUL, reason="nul", rule="nul"), True).rule == "paal-laadt", "")
 
 
+print("=== 33. het uurplan weet welke uren de batterij de auto helpt (v0.95.0) ===")
+# De bewoner van de eerste woning op 23-09-2026 om 22:40: "theoretisch zou 'wat gaat
+# hij doen' nu moeten kijken naar de EV-laadplanning, en zien dat hij om 23 uur mee
+# moet gaan helpen laden." Die avond: van 23:00:48 tot 23:17:43 op 3,45 kW, van 78
+# naar de 70% die de grens was.
+N33 = dt.datetime(2026, 9, 23, 23, 0)
+a33 = anker(soc=78.0, auto_boven=70.0, nacht=False, max_discharge_w=3500.0)
+eta33 = 0.736 ** 0.5
+per_uur33 = 0.2 / eta33 / 14.6 * 100.0          # wat het huis per uur aan de accukant kost
+uren33 = [
+    bat.Uur(N33 + dt.timedelta(hours=i), N33 + dt.timedelta(hours=i + 1), bat.NUL, -0.2, 0.0,
+            78.0 - (i + 1) * per_uur33, 0.30)
+    for i in range(3)
+]
+laden33 = [(N33, N33 + dt.timedelta(hours=1), 5.9), (N33 + dt.timedelta(hours=2), N33 + dt.timedelta(hours=3), 8.3)]
+hulp33 = bat.auto_hulp(uren33, a33, None, laden33)
+# Boven 70%: 8 procentpunt van 14,6 kWh, min wat het huis in dat uur neemt, na het verlies.
+verwacht33 = ((78.0 - 70.0) / 100.0 * 14.6 - 0.2 / eta33) * eta33
+print(f"  per uur naar de auto: {[round(x, 3) for x in hulp33]} (verwacht {verwacht33:.3f} in het eerste uur)")
+controle("om 23:00 helpt hij, tot de grens van de bewoner, na het huis en het verlies",
+         abs(hulp33[0] - verwacht33) < 1e-6, f"{hulp33}")
+controle("om 01:00 is er niets meer boven de grens", hulp33[2] == 0.0 and hulp33[1] == 0.0, f"{hulp33}")
+weg33 = bat._met_auto(uren33, a33, hulp33)
+controle("het uurplan zegt het: naar de auto, en de accustand zakt naar de grens",
+         uren33[0].auto_kwh == hulp33[0] and abs(uren33[0].soc - 70.0) < 0.01 and abs(weg33 - hulp33[0]) < 1e-9,
+         f"{uren33[0]}")
+controle("en de uren daarna schuiven mee omlaag", uren33[2].soc < 70.0, f"{uren33[2].soc}")
+
+nacht33 = anker(soc=78.0, auto_boven=50.0, nacht=True, max_discharge_w=3500.0)
+uren33b = [bat.Uur(N33, N33 + dt.timedelta(hours=1), bat.NUL, 0.0, 0.0, 78.0, 0.30)]
+kort33 = bat.auto_hulp(uren33b, nacht33, 0.5, [(N33, N33 + dt.timedelta(hours=1), 9.0)])
+controle("met de nachtstrategie nooit meer dan wat er morgenvroeg over zou zijn",
+         abs(kort33[0] - 0.5 / 0.736 * eta33) < 1e-6, f"{kort33}")
+controle("weet hij de nacht niet, dan helpt hij in het plan ook niet",
+         bat.auto_hulp(uren33b, nacht33, None, [(N33, N33 + dt.timedelta(hours=1), 9.0)]) == [0.0], "")
+dicht33 = anker(soc=74.0, auto_boven=70.0, nacht=False, max_discharge_w=3500.0)
+uren33c = [bat.Uur(N33, N33 + dt.timedelta(hours=1), bat.NUL, 0.0, 0.0, 74.0, 0.30)]
+controle("binnen de marge boven de grens begint hij niet, zoals de regelaar",
+         bat.auto_hulp(uren33c, dicht33, None, laden33) == [0.0], "")
+controle("maar hielp hij al, dan wel", bat.auto_hulp(uren33c, dicht33, None, laden33, helpt=True)[0] > 0, "")
+laadt33 = [bat.Uur(N33, N33 + dt.timedelta(hours=1), bat.NETLADEN, 2.0, 2.0, 88.0, 0.10)]
+controle("een uur waarin hij zelf van het net laadt helpt hij niet",
+         bat.auto_hulp(laadt33, a33, None, laden33) == [0.0], "")
+
+# En het hele plan: een vast contract om 23:00, de auto laadt van 23:00 tot 00:00.
+b33 = anker(soc=78.0, auto_boven=70.0, nacht=False, max_discharge_w=3500.0)
+plan33 = bat.plan_batterij(N33, [], VAST, verwachting(huis=0.2, dag=DAG.replace(day=23)), b33,
+                           auto_laden=[(N33, N33 + dt.timedelta(hours=1), 5.9)])
+print(f"  {plan33.stand}: {plan33.plan}")
+controle("het besluit draagt de hulp in zijn uren, en wat er aan de accukant uit gaat",
+         plan33.uren and plan33.uren[0].auto_kwh > 0.5 and plan33.auto_weg > 0.5,
+         f"{[(u.start.hour, u.stand, round(u.auto_kwh, 2)) for u in plan33.uren[:3]]} {plan33.auto_weg}")
+controle("en de zin tot morgenvroeg noemt de auto", "de auto krijgt er" in plan33.plan, plan33.plan)
+zonder33 = bat.plan_batterij(N33, [], VAST, verwachting(huis=0.2, dag=DAG.replace(day=23)), anker(soc=78.0, auto_boven=70.0, nacht=False, max_discharge_w=3500.0))
+controle("zonder plan van de paal verandert er niets", zonder33.auto_weg == 0.0 and all(u.auto_kwh == 0 for u in zonder33.uren), "")
+
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

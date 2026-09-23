@@ -1877,6 +1877,9 @@ class Blok:
     # De eigenaar op 04-09-2026: "laat sowieso zien hoeveel ampère hij laadt en kW."
     amps: int = 0
     kw: float = 0.0
+    # Wat daarvan uit de thuisbatterij komt en dus niet van het net (v0.95.0).
+    # Zie `accu_in_plan`.
+    accu_kwh: float = 0.0
 
 
 @dataclass
@@ -1926,6 +1929,10 @@ class Plan:
     # Eén zin als de zonverwachting bijgesteld is met wat de meter de afgelopen
     # uren werkelijk teruglegde, anders leeg. Zie `solar_measured_note`.
     solar_note: str = ""
+    # Wat de thuisbatterij er deze beurt naar verwachting aan geeft, en tot
+    # welke accustand (v0.95.0). Zie `accu_in_plan`.
+    accu_kwh: float = 0.0
+    accu_to: float | None = None
 
 
 # Hoe ver een tijdlijn vooruit kijkt als er geen klaar-tijd is. Dan is er geen
@@ -2165,6 +2172,45 @@ def timeline(
         plan.note = "Er is niets te plannen voor deze periode."
     return plan
 
+
+
+def accu_in_plan(
+    plan: Plan,
+    hulp: list[tuple[datetime, datetime, float]],
+    now: datetime,
+    tot: float | None = None,
+) -> Plan:
+    """Welk deel van de laaduren uit de thuisbatterij komt (v0.95.0).
+
+    De bewoner van de eerste woning op 23-09-2026: "de EV-laadplanning zou nu
+    moeten weten dat de accu mee gaat helpen." `hulp` is wat het uurplan van de
+    batterij de auto per blok geeft (`auto_hulp` in batterij.py), en dat komt
+    hier bij de blokken van de paal waarmee het samenvalt, nooit meer dan wat
+    er in dat blok van het net zou komen.
+
+    Welke uren de auto kiest verandert er niet door. De batterij helpt zodra
+    de paal laadt, tot zijn grens, in welk uur dat ook is (`_met_paal` in
+    batterij.py), dus hij maakt geen uur goedkoper dan een ander. Wat
+    verandert is hoeveel er van het net komt.
+    """
+    if not hulp:
+        return plan
+    totaal = 0.0
+    for blok in plan.blocks:
+        if not blok.charging:
+            continue
+        van = max(blok.start, now)
+        erbij = 0.0
+        for begin, eind, kwh in hulp:
+            lengte = (eind - begin).total_seconds()
+            overlap = (min(eind, blok.end) - max(begin, van)).total_seconds()
+            if lengte > 0 and overlap > 0:
+                erbij += max(0.0, kwh) * overlap / lengte
+        blok.accu_kwh = round(min(erbij, max(0.0, blok.kwh - blok.solar_kwh)), 3)
+        totaal += blok.accu_kwh
+    plan.accu_kwh = round(totaal, 2)
+    plan.accu_to = tot if totaal > SCHIJF_MINIMUM else None
+    return plan
 
 
 def price_now(prices: list[dict], now: datetime) -> dict | None:

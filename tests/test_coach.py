@@ -5415,6 +5415,52 @@ controle("na elke ronde van een batterij, vaatwasser en boiler",
          all(f"await self._one_{soort}(moment, settings, device, level)\n                self._besluit_melden(" in bron103
              for soort in ("batterij", "programma", "boiler")), "")
 
+print("=== 104. de batterij kent het plan van de paal, en de paal de hulp van de batterij (v0.95.0) ===")
+# De bewoner van de eerste woning op 23-09-2026 om 22:40: "theoretisch zou 'wat gaat
+# hij doen' nu moeten kijken naar de EV-laadplanning, en zien dat hij om 23 uur mee
+# moet gaan helpen laden à 3500 W. Aan de andere kant zou de EV-laadplanning nu
+# moeten weten dat de accu mee gaat helpen."
+bat104 = {**BATTERIJ, "battery": {**BATTERIJ["battery"], "car_above": 70, "max_discharge_w": 3500}}
+inst104 = instellingen(devices=[LAADPAAL, bat104])
+inst104["strategy"]["night_strategy"] = False
+N104 = dt.datetime(2026, 9, 23, 22, 59)
+
+
+def paalplan104(coach):
+    # Het plan van de paal uit de vorige ronde: om 23:00 een uur laden.
+    coach.state["dev-laadpaal"] = {"at": N104.isoformat(), "plan_ahead": {"blocks": [
+        {"start": "2026-09-23T23:00:00", "end": "2026-09-24T00:00:00", "charging": True, "kwh": 5.9, "solar_kwh": 0.0},
+        {"start": "2026-09-24T00:00:00", "end": "2026-09-24T01:00:00", "charging": False, "kwh": 0.0, "solar_kwh": 0.0},
+    ]}}
+
+
+hass104, _, coach104 = bouw(huis75(afname=300.0, soc="78"), inst104)
+asyncio.run(ronde75(hass104, coach104, N104 - dt.timedelta(minutes=1)))   # de batterij gaat sturen
+paalplan104(coach104)
+controle("het plan van de paal gaat naar de batterij, vanaf het moment van dat plan",
+         coach104._auto_laden() == [(dt.datetime(2026, 9, 23, 23, 0), dt.datetime(2026, 9, 24, 0, 0), 5.9)],
+         f"{coach104._auto_laden()}")
+st104 = asyncio.run(ronde75(hass104, coach104, N104))
+uren104 = {u["start"][11:16]: u for u in st104.get("hours") or []}
+print(f"  uurplan: {[(k, u['mode'], u.get('car_kwh'), u['soc']) for k, u in list(uren104.items())[:3]]}")
+controle("het uurplan zegt dat hij om 23:00 de auto helpt",
+         (uren104.get("23:00") or {}).get("car_kwh", 0) > 0.5, f"{uren104.get('23:00')}")
+controle("en daarna niet meer", all((u.get("car_kwh") or 0) == 0 for k, u in uren104.items() if k != "23:00"), "")
+hulp104, tot104 = coach104._accu_hulp()
+controle("de paal krijgt die hulp mee, met de grens van de bewoner",
+         len(hulp104) == 1 and hulp104[0][2] > 0.5 and tot104 == 70.0, f"{hulp104} {tot104}")
+controle("de kaart van de batterij: de grens voor de auto",
+         st104.get("car_floor") == 70.0, f"{st104.get('car_floor')}")
+bron104 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
+           / "coach.py").read_text(encoding="utf-8")
+controle("de tijdlijn van de paal zet het in zijn blokken",
+         "accu_in_plan(plan, hulp, now, tot)" in bron104 and '"accu_kwh": blok.accu_kwh' in bron104, "")
+hass104b, _, coach104b = bouw(huis75(afname=300.0, soc="78"), instellingen(devices=[LAADPAAL, bat104]))
+asyncio.run(ronde75(hass104b, coach104b, N104 - dt.timedelta(minutes=1)))
+st104b = asyncio.run(ronde75(hass104b, coach104b, N104))
+controle("zonder plan van de paal helpt hij in het uurplan niet",
+         all((u.get("car_kwh") or 0) == 0 for u in st104b.get("hours") or []), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

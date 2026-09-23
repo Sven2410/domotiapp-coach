@@ -65,6 +65,7 @@ from .batterij import (
 )
 from .planner import (
     MODI_ZONDER_SOM,
+    accu_in_plan,
     rendement_van,
     plan_rang,
     plan_regels,
@@ -4128,6 +4129,7 @@ class ChargerCoach:
                 plan_batterij, now, prijzen, tarief, verwachting, b,
                 enabled=True, paal_laadt=self._paal_laadt(settings),
                 helpt=bool(sessie.get("helpt")),
+                auto_laden=self._auto_laden(),
             )
         )
 
@@ -4247,8 +4249,10 @@ class ChargerCoach:
             "plan": besluit.plan,
             # Wat er morgenvroeg naar verwachting over is of tekortkomt, zodat de
             # kaart de conclusie groen of oranje kan maken.
-            "balance_kwh": None if (bal := balans_kwh(now, verwachting, b)) is None else round(bal, 2),
-            "car_floor": None if (vloer := auto_grens(b, bal)) is None else round(vloer, 1),
+            # Met wat de auto er volgens zijn plan uit haalt (v0.95.0). De grens
+            # voor de auto zelf rekent zonder, anders telt die hulp dubbel.
+            "balance_kwh": None if (bal := balans_kwh(now, verwachting, b, besluit.auto_weg)) is None else round(bal, 2),
+            "car_floor": None if (vloer := sessie.get("auto_grens")) is None else round(vloer, 1),
             "rule": besluit.rule,
             "kind": "batterij",
             "mode": besluit.stand,
@@ -4275,6 +4279,7 @@ class ChargerCoach:
                 {
                     "start": uur.start.isoformat(), "end": uur.end.isoformat(), "mode": uur.stand,
                     "kwh": round(uur.kwh, 2), "grid_kwh": round(uur.net_kwh, 2),
+                    "car_kwh": round(uur.auto_kwh, 2),
                     "soc": round(uur.soc), "price": uur.price,
                 }
                 for uur in besluit.uren[:48]
@@ -7812,6 +7817,9 @@ class ChargerCoach:
             ),
         )
 
+        hulp, tot = self._accu_hulp()
+        accu_in_plan(plan, hulp, now, tot)
+
         def klok(moment: datetime | None) -> str | None:
             return None if moment is None else moment.isoformat()
 
@@ -7837,6 +7845,9 @@ class ChargerCoach:
             "efficiency": round(rendement_van(car), 3),
             "efficiency_measured": car.efficiency is not None,
             "kwh_in_car": None if plan.kwh_needed is None else round(plan.kwh_needed * rendement_van(car), 2),
+            # Wat de thuisbatterij erbij geeft, en tot welke accustand (v0.95.0).
+            "accu_kwh": plan.accu_kwh,
+            "accu_to": None if plan.accu_to is None else round(plan.accu_to),
             "blocks": [
                 {
                     "start": klok(blok.start),
@@ -7848,10 +7859,57 @@ class ChargerCoach:
                     "kwh": blok.kwh,
                     "amps": blok.amps,
                     "kw": blok.kw,
+                    "accu_kwh": blok.accu_kwh,
                 }
                 for blok in plan.blocks
             ],
         }
+
+    def _auto_laden(self) -> list[tuple[datetime, datetime, float]]:
+        """Het plan van elke paal: per blok wat de auto van het net zou nemen.
+
+        Voor het uurplan van de batterij (`auto_hulp` in batterij.py, v0.95.0).
+        Uit de stand van de vorige ronde, want de batterij wordt eerst behandeld;
+        het plan van de paal hangt niet van de batterij af, dus dat scheelt
+        hooguit een minuut. Een blok dat al loopt telt vanaf het moment van dat
+        plan, want daar rekende de paal vanaf.
+        """
+        uit: list[tuple[datetime, datetime, float]] = []
+        for stand in self.state.values():
+            plan = stand.get("plan_ahead") if isinstance(stand, dict) else None
+            if not isinstance(plan, dict):
+                continue
+            try:
+                toen = datetime.fromisoformat(str(stand.get("at")))
+            except ValueError:
+                continue
+            for blok in plan.get("blocks") or []:
+                if not blok.get("charging"):
+                    continue
+                try:
+                    van = max(datetime.fromisoformat(blok["start"]), toen)
+                    tot = datetime.fromisoformat(blok["end"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                kwh = float(blok.get("kwh") or 0.0) - float(blok.get("solar_kwh") or 0.0)
+                if tot > van and kwh > 0:
+                    uit.append((van, tot, kwh))
+        return uit
+
+    def _accu_hulp(self) -> tuple[list[tuple[datetime, datetime, float]], float | None]:
+        """Wat de gestuurde batterijen de auto per blok geven, en tot welke stand."""
+        hulp: list[tuple[datetime, datetime, float]] = []
+        tot: float | None = None
+        for sessie in self._batterij.values():
+            besluit = sessie.get("besluit")
+            if not sessie.get("stuurt") or besluit is None:
+                continue
+            for uur in besluit.uren:
+                if uur.auto_kwh > 0:
+                    hulp.append((uur.start, uur.end, uur.auto_kwh))
+            if sessie.get("auto_grens") is not None:
+                tot = sessie["auto_grens"] if tot is None else max(tot, sessie["auto_grens"])
+        return hulp, tot
 
     def _nettip(self, now: datetime) -> str:
         """Zeggen dat de netmeting er niet is, want dat verklaart de stilstand.

@@ -158,6 +158,17 @@ export function batterijVooruit(besluit) {
   if (Number.isFinite(besluit.value)) {
     kop.push({ label: "Een kWh erin", waarde: euro(besluit.value, 3), bij: "is straks waard" });
   }
+  // De uren waarin hij de auto helpt, opgeteld (v0.95.0). De bewoner van de
+  // eerste woning: "wat gaat hij doen zou moeten zien dat hij om 23 uur mee
+  // moet gaan helpen laden."
+  const naarAuto = uren.reduce((t, u) => t + (Number(u.car_kwh) || 0), 0);
+  if (naarAuto > 0.05) {
+    kop.push({
+      label: "Naar de auto",
+      waarde: kwhTekst(naarAuto),
+      bij: Number.isFinite(besluit.car_floor) ? `tot hij op ${Math.round(besluit.car_floor)}% staat` : "als de paal laadt",
+    });
+  }
 
   // Het plan kan over middernacht lopen; dan zegt het eerste uur van de
   // nieuwe dag erbij dat het morgen is, zoals "morgen 00:00".
@@ -175,6 +186,7 @@ export function batterijVooruit(besluit) {
       mode: standen.length === 1 ? standen[0] : standen,
       kwh: groep.reduce((t, u) => t + (Number(u.kwh) || 0), 0),
       grid_kwh: groep.reduce((t, u) => t + (Number(u.grid_kwh) || 0), 0),
+      car_kwh: groep.reduce((t, u) => t + (Number(u.car_kwh) || 0), 0),
       soc: groep[groep.length - 1].soc,
       price: prijzen.length ? prijzen.reduce((t, p) => t + p, 0) / prijzen.length : undefined,
     };
@@ -185,6 +197,7 @@ export function batterijVooruit(besluit) {
     dagGezien = dag;
     const kwh = Number(u.kwh) || 0;
     const net = Number(u.grid_kwh) || 0;
+    const auto = Number(u.car_kwh) || 0;
     let wat = Array.isArray(u.mode)
       ? u.mode.map((m) => STAND_NAMEN[m] ?? m).join(" en ")
       : STAND_NAMEN[u.mode] ?? u.mode ?? "";
@@ -193,6 +206,8 @@ export function batterijVooruit(besluit) {
     else {
       if (kwh > 0.05) wat += `, ${kwhTekst(kwh)} erin`;
       else if (kwh < -0.05) wat += `, ${kwhTekst(-kwh)} eruit`;
+      // Wat daarvan naar de auto gaat (v0.95.0): de uren waarin hij helpt.
+      if (auto > 0.05) wat += `, waarvan ${kwhTekst(auto)} naar de auto`;
       if (net > 0.05) wat += `, waarvan ${kwhTekst(net)} van het net`;
     }
     wat = wat.charAt(0).toUpperCase() + wat.slice(1);
