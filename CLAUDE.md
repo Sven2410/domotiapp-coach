@@ -653,6 +653,20 @@ bij de batterij `grid_kwh`; het gemiddelde is gewogen naar de kWh **van het
 net** (bij de paal `kwh - solar_kwh`), dus een laaduur op zon trekt het niet
 omlaag. Bij een vast contract geen grafiek. Proeven in test_rapport.mjs.
 
+**Kwartierprijzen in de pop-up** (v0.88.1). De eigenaar op 23-09-2026: "hij moet
+kwartierprijzen laten zien als dat is ingesteld, geen uurprijzen." Het rekenen
+kon het al: de planner en de batterij werken per prijsblok, en met de uurprijs
+op alle vier de kwartieren komt er precies hetzelfde uit als per uur (proef 62
+in test_planner.py); met echte kwartierprijzen pakt hij de goedkoopste
+kwartieren. Nu ook het scherm: de grafiek tekent een staafje per blok en heet
+dan "Prijs per kwartier" (`stap` in `prijsBalken`), en de lijst eronder houdt
+een regel per uur (`perUur` in prijsgrafiek.js, `paalPerUur` in
+plan-ahead-sheet.js, en in `batterijVooruit`), met "in 2 van de 4 kwartieren"
+als hij maar een deel laadt. **De Zonneplan-integratie in Home Assistant geeft
+alleen uurprijzen** (de `forecast` van `sensor.zonneplan_current_electricity_tariff`
+is een rij per uur); evcc haalt zijn kwartieren zelf. Nord Pool met kwartieren
+wordt als kwartieren gelezen (test_coach.py, na de prijslijstproeven).
+
 **Vakantiestand, handelen met wat de nacht overhoudt, en iets anders dat
 stuurt** (v0.80.0, allemaal 22-09-2026).
 
@@ -1630,12 +1644,12 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 400 controles op het denkwerk
+python tests/test_planner.py     # 404 controles op het denkwerk
 python tests/test_batterij.py    # 93 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 588 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 589 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1731 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 92 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 94 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

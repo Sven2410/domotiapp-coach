@@ -1482,6 +1482,17 @@ een = coach28d._prices(kwartier)
 controle("één rij zonder eindtijd krijgt de bloklengte van het contract",
          len(een) == 1 and een[0]["end"] - een[0]["start"] == dt.timedelta(minutes=15), f"{een}")
 
+# Kwartierprijzen van Nord Pool (v0.88.1): vier blokken per uur, elk met een
+# eigen prijs, en niet samengevoegd tot een uur.
+PRIJSLIJST_NP_KWARTIER = {"state": "0.30", "attributes": {"raw_today": [
+    {"start": f"2026-08-27T12:{m:02d}:00+02:00", "end": f"2026-08-27T{12 + (m + 15) // 60}:{(m + 15) % 60:02d}:00+02:00",
+     "value": 0.30 - m / 1000} for m in (0, 15, 30, 45)]}}
+hass28e, _, coach28e = bouw({"sensor.prijs": PRIJSLIJST_NP_KWARTIER}, instellingen())
+npk = coach28e._prices({"contract": DYN})
+controle("een Nord Pool-lijst met kwartieren levert vier blokken van een kwartier, elk met zijn eigen prijs",
+         len(npk) == 4 and all(r["end"] - r["start"] == dt.timedelta(minutes=15) for r in npk)
+         and [round(r["price"], 3) for r in npk] == [0.3, 0.285, 0.27, 0.255], f"{npk}")
+
 print()
 print("=== eenheden: kW is geen W, en Wh is geen kWh ===")
 
