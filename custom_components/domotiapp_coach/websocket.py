@@ -36,6 +36,7 @@ from .const import (
 )
 from .ontvangers import SOORTEN, alleen_eigen, nieuwe_persoon, zet_eigen_soorten
 from .storage import async_get_store, met_soort, schema_bijwerken
+from .units import to_kwh
 
 
 def _schema(mapping: dict) -> vol.Schema:
@@ -878,8 +879,12 @@ async def async_set_car_soc(
         )
         state = hass.states.get(entiteit or "")
         if state is not None:
+            # In kWh, zoals `_teller` hem leest. Een Alfen telt in Wh; bewaard
+            # als kale toestand stond de proefauto in de eerste woning op
+            # 23-09-2026 de hele beurt op 60%, want de teller in kWh min dezelfde
+            # teller in Wh is onder nul.
             try:
-                meter = float(state.state)
+                meter = to_kwh(float(state.state), state.attributes.get("unit_of_measurement"))
             except (TypeError, ValueError):
                 meter = None
 

@@ -5336,6 +5336,85 @@ controle("en ziet de accu niets van de auto", coach100._hogere_toezeggingen(inst
 controle("een apparaat dat niet in de voorrang staat ziet niets",
          coach100._hogere_toezeggingen(inst100, dict(BOILER100, id="dev-anders", controllable=False)) == {}, "")
 
+print("=== 101. het laadrendement meten aan de auto zelf (v0.94.0) ===")
+inst101 = instellingen()
+hass101, store101, coach101 = bouw(huis(), inst101)
+coach101._rendement_meten("dev-laadpaal", 60.0, 0.0, 78.0)
+coach101._rendement_meten("dev-laadpaal", 65.0, 4.2, 78.0)
+controle("onder tien procentpunt nog geen meting", "dev-laadpaal" not in coach101._rend_meting, "")
+coach101._rendement_meten("dev-laadpaal", 70.0, 8.5, 78.0)
+print(f"  van 60 naar 70% (7,8 kWh in de accu) bij 8,5 kWh aan de paal: {coach101._rend_meting.get('dev-laadpaal')}")
+controle("tien procentpunt bij 8,5 kWh: 7,8 / 8,5 = 91,8%",
+         abs(coach101._rend_meting.get("dev-laadpaal", 0) - 7.8 / 8.5) < 1e-6, f"{coach101._rend_meting}")
+coach101._rend_meting.clear()
+coach101._rendement_meten("dev-laadpaal", 85.0, 10.0, 78.0)
+controle("een onmogelijke uitkomst (11,7 kWh in de accu uit 1,5 aan de paal) telt niet",
+         "dev-laadpaal" not in coach101._rend_meting, f"{coach101._rend_meting}")
+coach101._rendement_meten("dev-laadpaal", 20.0, 10.0, 78.0)
+controle("een stand die daalt begint opnieuw", coach101._rend_start["dev-laadpaal"] == (20.0, 10.0), "")
+
+
+async def bewaar101(meting):
+    coach101._auto_id["dev-laadpaal"] = "car-1"
+    coach101._rend_meting["dev-laadpaal"] = meting
+    await coach101._async_rendement_bewaren(store101.instellingen, "dev-laadpaal")
+
+
+asyncio.run(bewaar101(0.92))
+asyncio.run(bewaar101(0.94))
+rij101 = store101.instellingen["car_efficiency"][0]
+controle("bewaard per auto, als lopend gemiddelde", rij101["car"] == "car-1" and abs(rij101["eff"] - 0.93) < 1e-6 and rij101["n"] == 2,
+         f"{rij101}")
+controle("en de coach rekent er daarna mee",
+         coach101._rendement_uit(store101.instellingen, "dev-laadpaal", "car-1") == rij101["eff"], "")
+controle("een andere auto aan dezelfde paal heeft zijn eigen rendement",
+         coach101._rendement_uit(store101.instellingen, "dev-laadpaal", "car-2") is None, "")
+
+print("=== 102. een opgegeven accustand telt door aan een teller in Wh (v0.94.0) ===")
+# In de eerste woning op 23-09-2026: de proefauto stond vanaf 18:13 op 60% en bleef
+# daar tijdens de hele beurt, want het paneel bewaarde de teller van de Alfen als
+# kale toestand, in Wh, en de coach las hem in kWh. (Een verzonnen teller hieronder.)
+PAAL102 = dict(LAADPAAL, entities={**LAADPAAL["entities"], "lifetime_energy": "sensor.alfen_teller"})
+PROFIEL102 = {"id": "car-1", "capacity_kwh": 78.0}
+inst102 = instellingen(car_soc=[{"device": "dev-laadpaal", "car": "car-1", "percent": 60.0, "meter": 12000000.0}])
+huis102 = {**huis(), "sensor.alfen_teller": {"state": "12004065.0", "attributes": {"unit_of_measurement": "Wh"}}}
+hass102, _, coach102 = bouw(huis102, inst102)
+soc102 = coach102._typed_soc(inst102, PAAL102, PROFIEL102)
+# 4,065 kWh aan de paal, maal 90% laadrendement, van 78 kWh: 4,69 procentpunt erbij.
+print(f"  opgegeven 60%, sindsdien 4,065 kWh aan de paal: {soc102:.2f}%")
+controle("een oude stand in Wh telt gewoon door", abs(soc102 - (60.0 + 4.065 * 0.9 / 78.0 * 100.0)) < 0.01, f"{soc102}")
+inst102["car_soc"][0]["meter"] = 12000.0
+controle("en een stand in kWh net zo",
+         abs(coach102._typed_soc(inst102, PAAL102, PROFIEL102) - soc102) < 1e-6, "")
+bron102 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
+           / "websocket.py").read_text(encoding="utf-8")
+controle("het paneel bewaart de teller in kWh, met de eenheid van de sensor",
+         'to_kwh(float(state.state), state.attributes.get("unit_of_measurement"))' in bron102, "")
+
+print("=== 103. elk apparaat stuurt zijn besluit naar het paneel, niet alleen de paal (v0.94.0) ===")
+# Dezelfde avond: de kaart van de accu zei om 23:15 "de coach heeft 43 minuten
+# niets beslist" en "accu nu 79%", terwijl de coach elke minuut besliste en de
+# accu op 71% stond. Alleen de paal stuurde zijn besluit mee.
+inst103 = instellingen(devices=[BATTERIJ])
+hass103, _, coach103 = bouw(huis75(), inst103)
+asyncio.run(coach103._round(dt.datetime(2026, 9, 23, 23, 15)))
+meldingen103 = [d for soort, d in hass103.bus.gebeurtenissen if soort == coachmod.EVENT_DECISION]
+print(f"  besluiten naar het paneel: {[d.get('device') for d in meldingen103]}")
+controle("de batterij stuurt zijn besluit mee",
+         any(d.get("device") == "dev-batterij" and d.get("kind") == "batterij" for d in meldingen103),
+         f"{[d.get('device') for d in meldingen103]}")
+coach103.state["dev-boiler"] = {"kind": "boiler"}
+coach103._besluit_melden("dev-boiler")
+coach103._besluit_melden("dev-onbekend")
+controle("en een boiler of vaatwasser ook, een apparaat zonder stand niet",
+         [d.get("device") for s, d in hass103.bus.gebeurtenissen if s == coachmod.EVENT_DECISION][-1] == "dev-boiler",
+         "")
+bron103 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
+           / "coach.py").read_text(encoding="utf-8")
+controle("na elke ronde van een batterij, vaatwasser en boiler",
+         all(f"await self._one_{soort}(moment, settings, device, level)\n                self._besluit_melden(" in bron103
+             for soort in ("batterij", "programma", "boiler")), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

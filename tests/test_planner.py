@@ -2988,5 +2988,18 @@ controle("de keuze van de bewoner, zonder wat er niet is, de rest achteraan (zoa
 controle("de plek per apparaat", planner.plan_rang(["a", "b"]) == {"a": 0, "b": 1}, "")
 
 print()
+print("=== 65. het laadrendement: aangenomen of gemeten (v0.94.0) ===")
+# De bewoner van de eerste woning op 23-09-2026: 78 kWh, van 60 naar 90%, "nog te
+# laden is 23,4 in plaats van 26." 26,0 is 23,4 / 0,9, aan de paal.
+auto65 = Car(capacity_kwh=78.0, phases=3, soc_percent=60.0, target_percent=90.0)
+controle("zonder meting: 23,4 kWh in de accu is 26,0 aan de paal (90% aangenomen)",
+         abs(planner.energy_needed_kwh(auto65) - 26.0) < 0.01, f"{planner.energy_needed_kwh(auto65)}")
+gemeten65 = Car(capacity_kwh=78.0, phases=3, soc_percent=60.0, target_percent=90.0, efficiency=0.95)
+controle("met een gemeten 95%: 23,4 / 0,95 = 24,6 kWh aan de paal",
+         abs(planner.energy_needed_kwh(gemeten65) - 23.4 / 0.95) < 0.01, f"{planner.energy_needed_kwh(gemeten65)}")
+controle("het rendement waarmee gerekend wordt",
+         planner.rendement_van(auto65) == planner.CHARGE_EFFICIENCY and planner.rendement_van(gemeten65) == 0.95, "")
+
+print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
