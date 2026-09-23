@@ -1625,5 +1625,33 @@ if (auto_eerst := v("voorrang-auto-eerst")) and (accu_eerst := v("voorrang-accu-
              accu_eerst.klaar_op is not None and accu_eerst.klaar_op.day == 7 and accu_eerst.uit_net_kwh < 0.2,
              f"vol {accu_eerst.klaar_op}, net {accu_eerst.uit_net_kwh:.2f}")
 
+# --- voorrang bij planningen (v0.93.0) ----------------------------------------
+# De bewoner van de eerste woning op 23-09-2026: "eerst de auto volgens laadplanning,
+# dan de accu; laadt de accu maar met 3500 W en heb ik nog ruimte op mijn
+# aansluiting?" Twee goedkope uren, en auto en accu passen er samen niet in.
+def auto_amps_op(vl, tijd):
+    uur, minuut = (int(x) for x in tijd.split(":"))
+    return next((r.amps for r in vl.regels if r.tijd.hour == uur and r.tijd.minute == minuut), None)
+
+
+def accu_op(vl, tijd):
+    uur, minuut = (int(x) for x in tijd.split(":"))
+    return next((r[3] for r in vl.bat_verloop if r[0].hour == uur and r[0].minute == minuut and r[0].day == 8), None)
+
+
+if (auto_eerst := v("planning-auto-eerst")) and (accu_eerst := v("planning-accu-eerst")):
+    print(f"  00:30 auto eerst: {auto_amps_op(auto_eerst, '00:30')} A, accu om 02:00 {accu_op(auto_eerst, '02:00'):.0f}%; "
+          f"accu eerst: {auto_amps_op(accu_eerst, '00:30')} A, accu om 02:00 {accu_op(accu_eerst, '02:00'):.0f}%")
+    controle("auto eerst: in het goedkope uur laadt de auto op vol vermogen",
+             auto_amps_op(auto_eerst, "00:30") == 16, f"{auto_amps_op(auto_eerst, '00:30')} A")
+    controle("accu eerst: dan krijgt de accu de ruimte en de auto wat er over is",
+             auto_amps_op(accu_eerst, "00:30") < 10 and accu_op(accu_eerst, "02:00") > accu_op(auto_eerst, "02:00") + 10,
+             f"{auto_amps_op(accu_eerst, '00:30')} A, accu {accu_op(accu_eerst, '02:00'):.0f}% tegen {accu_op(auto_eerst, '02:00'):.0f}%")
+    for vl in (auto_eerst, accu_eerst):
+        naam = vl.scenario.naam
+        controle(f"{naam}: de klaar-tijd blijft heilig, ook met de accu bovenaan", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+        l3 = max((r.fase_amps[2] for r in vl.regels if r.fase_amps and len(r.fase_amps) > 2), default=0.0)
+        controle(f"{naam}: fase 3 blijft onder de zekering min de marge", l3 <= 23.5, f"{l3:.1f} A")
+
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

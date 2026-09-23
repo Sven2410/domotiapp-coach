@@ -11,7 +11,7 @@
 import { define } from "../base.js";
 import { deviceLabelMap } from "../devices.js";
 import { icons } from "../icons.js";
-import { regelUitleg, zonRegels } from "../voorrang.js";
+import { planRegels, regelUitleg, zonRegels } from "../voorrang.js";
 import {
   DacEditorElement,
   adminNoticeHtml,
@@ -123,11 +123,44 @@ class DacViewStrategy extends DacEditorElement {
             naar de volgende. Dit geldt alleen voor overschot: wat er volgens een planning van
             het net geladen wordt staat hier los van.
           </p>
+          <div class="zon-rij vast" aria-hidden="false">
+            <span class="greep"></span><span class="nr">0</span>
+            <span class="wie"><strong>Warmtepomp, koken en de rest van je huis</strong>
+              <small>gaat altijd voor: de coach stuurt dit niet en geeft alleen wat er daarna over is</small></span>
+          </div>
           <ol class="zon-lijst" id="zon-lijst"></ol>
           <div class="zon-voeg">
             <select id="zon-nieuw" aria-label="Apparaat voor een nieuwe regel"></select>
             <button type="button" id="zon-voeg">${icons.plus}<span>Regel toevoegen</span></button>
             <button type="button" class="zacht" id="zon-standaard">Standaard terugzetten</button>
+          </div>
+        </section>
+
+        <!-- De voorrang bij planningen (v0.93.0). De bewoner van de eerste
+             woning: "eerst de auto volgens laadplanning, dan de accu; laadt de
+             accu maar met 3500 W en heb ik nog ruimte op mijn aansluiting, dan
+             kan ik ook mijn boiler nog vol laden." -->
+        <section class="card">
+          <h2>${icons.plug} Voorrang bij planningen</h2>
+          <p class="hint">
+            Wie als eerste de ruimte op je aansluiting krijgt als er volgens een planning van
+            het net geladen wordt. Wie hoger staat krijgt wat er onder je zekeringen past; wie
+            lager staat krijgt wat er daarna over is, en een boiler gaat pas aan als hij er
+            nog bij past.
+          </p>
+          <!-- De eigenaar op 23-09-2026: "warmtepomp moet prio 1 zijn, net als bij
+               de tweede woning, waar de paal geknepen werd omdat de warmtepomp
+               's nachts aanging; je wilt 's ochtends niet in de kou zitten."
+               Dat is hij al: wat de coach niet stuurt meet hij als huis, en wat
+               hij verdeelt is wat er daarna onder de zekering over is. -->
+          <div class="zon-rij plan-rij vast">
+            <span class="greep"></span><span class="nr">0</span>
+            <span class="wie"><strong>Warmtepomp, koken en de rest van je huis</strong>
+              <small>gaat altijd voor: de coach verdeelt alleen wat er daarna onder je zekering over is</small></span>
+          </div>
+          <ol class="zon-lijst" id="plan-lijst"></ol>
+          <div class="zon-voeg">
+            <button type="button" class="zacht" id="plan-standaard">Standaard terugzetten</button>
           </div>
         </section>
 
@@ -168,6 +201,7 @@ class DacViewStrategy extends DacEditorElement {
       this.zetZon_(regels);
     });
     this.$("#zon-standaard").addEventListener("click", () => this.zetZon_([]));
+    this.$("#plan-standaard").addEventListener("click", () => this.zetPlan_([]));
     this.$("#night").addEventListener("change", (event) => {
       this.draft_.strategy.night_strategy = event.target.checked;
       this.afterChange_();
@@ -202,6 +236,7 @@ class DacViewStrategy extends DacEditorElement {
     // onderscheiden van instellingen die verdwenen zijn, en zo is het ook gemeld.
     this.paintLevel_();
     this.paintZon_();
+    this.paintPlan_();
     this.$("#night").checked = this.draft_?.strategy?.night_strategy !== false;
     this.syncSaveBar_();
   }
@@ -239,7 +274,12 @@ class DacViewStrategy extends DacEditorElement {
       greep.className = "greep";
       greep.setAttribute("aria-label", "Verslepen");
       greep.innerHTML = icons.menu;
-      greep.addEventListener("pointerdown", (ev) => this.sleepZon_(ev, plek));
+      greep.addEventListener("pointerdown", (ev) =>
+        this.sleepIn_(ev, plek, "#zon-lijst", (volgorde) => {
+          const oud = this.zonRegels_();
+          this.zetZon_(volgorde.map((i) => oud[i]));
+        })
+      );
 
       const nr = document.createElement("span");
       nr.className = "nr";
@@ -329,8 +369,8 @@ class DacViewStrategy extends DacEditorElement {
    * Een regel verslepen, op dezelfde manier als een kaart op het overzicht:
    * pointer events, zodat het ook op een telefoon werkt, en de pijltjes ernaast.
    */
-  sleepZon_(event, plek) {
-    const lijst = this.$("#zon-lijst");
+  sleepIn_(event, plek, lijstId, klaar) {
+    const lijst = this.$(lijstId);
     const rijen = [...lijst.children];
     const el = rijen[plek];
     if (!el) return;
@@ -373,13 +413,91 @@ class DacViewStrategy extends DacEditorElement {
       greep.removeEventListener("pointercancel", stop);
       el.classList.remove("sleept");
       el.style.transform = "";
-      const regels = this.zonRegels_();
-      if (volgorde.some((oud, i) => oud !== i)) this.zetZon_(volgorde.map((oud) => regels[oud]));
-      else this.paintZon_();
+      if (volgorde.some((oud, i) => oud !== i)) klaar(volgorde);
+      else {
+        this.paintZon_();
+        this.paintPlan_();
+      }
     };
     greep.addEventListener("pointermove", move);
     greep.addEventListener("pointerup", stop);
     greep.addEventListener("pointercancel", stop);
+  }
+
+  // --- voorrang bij planningen (v0.93.0) ----------------------------------
+
+  planRegels_() {
+    return planRegels(
+      this.draft_?.strategy?.plan_priority,
+      this.draft_?.devices ?? [],
+      this.draft_?.strategy?.schedules
+    );
+  }
+
+  zetPlan_(ids) {
+    this.draft_.strategy.plan_priority = [...ids];
+    this.paintPlan_();
+    this.afterChange_();
+  }
+
+  paintPlan_() {
+    const lijst = this.$("#plan-lijst");
+    if (!lijst || !this.draft_) return;
+    const apparaten = this.draft_.devices ?? [];
+    const namen = deviceLabelMap(apparaten);
+    const soort = new Map(apparaten.map((a) => [a.id, a.type]));
+    const ids = this.planRegels_();
+    const uitleg = { laadpaal: "volgens zijn laadplanning", thuisbatterij: "als hij van het net laadt", boiler: "als hij nog past" };
+
+    lijst.replaceChildren(...ids.map((id, plek) => {
+      const li = document.createElement("li");
+      li.className = "zon-rij plan-rij";
+
+      const greep = document.createElement("button");
+      greep.type = "button";
+      greep.className = "greep";
+      greep.setAttribute("aria-label", "Verslepen");
+      greep.innerHTML = icons.menu;
+      greep.addEventListener("pointerdown", (ev) =>
+        this.sleepIn_(ev, plek, "#plan-lijst", (volgorde) => {
+          const oud = this.planRegels_();
+          this.zetPlan_(volgorde.map((i) => oud[i]));
+        })
+      );
+
+      const nr = document.createElement("span");
+      nr.className = "nr";
+      nr.textContent = String(plek + 1);
+
+      const wie = document.createElement("span");
+      wie.className = "wie";
+      const naam = document.createElement("strong");
+      naam.textContent = namen.get(id) ?? id;
+      const klein = document.createElement("small");
+      klein.textContent = uitleg[soort.get(id)] ?? "";
+      wie.append(naam, klein);
+
+      const knoppen = document.createElement("span");
+      knoppen.className = "knoppen";
+      for (const [stap, icoon, label] of [[-1, icons.arrowLeft, "Omhoog"], [1, icons.arrowRight, "Omlaag"]]) {
+        const knop = document.createElement("button");
+        knop.type = "button";
+        knop.innerHTML = icoon;
+        knop.style.transform = "rotate(90deg)";
+        knop.setAttribute("aria-label", label);
+        knop.disabled = plek + stap < 0 || plek + stap >= ids.length;
+        knop.addEventListener("click", () => {
+          const nieuw = this.planRegels_();
+          const [weg] = nieuw.splice(plek, 1);
+          nieuw.splice(plek + stap, 0, weg);
+          this.zetPlan_(nieuw);
+        });
+        knoppen.append(knop);
+      }
+
+      li.append(greep, nr, wie, knoppen);
+      return li;
+    }));
   }
 
   /**
@@ -436,6 +554,12 @@ DacViewStrategy.css = /* css */ `
   .zon-rij .knoppen button:disabled { opacity: 0.3; cursor: default; }
   .zon-rij svg { width: 16px; height: 16px; }
   .zon-voeg { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  /* De vaste regel bovenaan: niet te slepen, en zo ziet hij er ook uit. */
+  .zon-rij.vast { margin-top: 12px; border-style: dashed; background: transparent; }
+  .zon-rij.vast + .zon-lijst { margin-top: 6px; }
+  .zon-rij.vast .wie strong { color: var(--dac-ink-2); white-space: normal; }
+  /* Bij planningen geen grens: naam en pijltjes. */
+  .plan-rij { grid-template-columns: 34px 22px minmax(0, 1fr) auto; }
   .zon-voeg select, .zon-voeg button {
     min-height: 38px; padding: 6px 12px; font: inherit; font-size: 13px;
     border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border-hi);

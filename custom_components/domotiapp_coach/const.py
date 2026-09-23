@@ -451,6 +451,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # boven naar beneden. Leeg is de standaard: auto, boiler, batterij. Zie
         # `zon_regels` in planner.py.
         "solar_priority": [],
+        # De voorrang bij planningen (v0.93.0): apparaat-ids van eerst naar
+        # laatst, voor de ruimte op de aansluiting. Leeg is de standaard: auto,
+        # accu, boiler. Zie `plan_regels` in planner.py.
+        "plan_priority": [],
         # What it aims for when it does act. Lowest cost reckons everything in
         # euros, which by itself already prefers using your own sun over
         # exporting it; "solar" insists on the sun even when buying would be

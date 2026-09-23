@@ -34,7 +34,6 @@ import {
 import { batteryRows, nachtConclusie } from "../battery.js";
 import { LiveSource, meterReadings, priceForecast, solarForecast } from "../data-source.js";
 import {
-  PRIORITIES,
   planFor,
   planSummary,
   planTimes,
@@ -2648,14 +2647,9 @@ class DacViewOverview extends DacElement {
                 </button>
               </div>
               <div class="plan-row">
-                <label class="plan-prio" data-plan-prio-row="${slot}">
-                  <span>Prioriteit</span>
-                  <select data-plan-prio="${slot}">
-                    ${PRIORITIES.map(
-                      (item) => `<option value="${item.key}">${item.label}</option>`
-                    ).join("")}
-                  </select>
-                </label>
+                <!-- Het keuzelijstje "Prioriteit" stond hier tot v0.93.0. Wie
+                     voorgaat op de aansluiting staat nu op Strategie, in de
+                     voorrang bij planningen, voor alle apparaten samen. -->
                 <button type="button" class="plan-link" data-plan-link="${slot}">
                   ${icons.sliders} Schema instellen
                 </button>
@@ -2758,11 +2752,6 @@ class DacViewOverview extends DacElement {
     for (const button of this.$$("[data-plan-toggle]")) {
       button.addEventListener("click", () =>
         this.toggleSchedule_(Number(button.dataset.planToggle))
-      );
-    }
-    for (const select of this.$$("[data-plan-prio]")) {
-      select.addEventListener("change", () =>
-        this.savePriority_(Number(select.dataset.planPrio), select.value)
       );
     }
     for (const button of this.$$("[data-plan-link]")) {
@@ -2998,14 +2987,6 @@ class DacViewOverview extends DacElement {
     );
     this.$(`[data-plan-note="${slot}"]`).textContent = planSummary(plan, this.coach_?.[device.id]?.mode ?? "");
 
-    // Voorrang gaat over wie er wacht als er te weinig ruimte is. Staat het
-    // schema uit, dan doet de coach niets met dit apparaat en valt er ook niets
-    // te verdelen.
-    this.$(`[data-plan-prio-row="${slot}"]`).hidden = !plan.enabled;
-    const keuze = this.$(`[data-plan-prio="${slot}"]`);
-    if (this.shadowRoot?.activeElement !== keuze) {
-      keuze.value = plan.priority ?? "mid";
-    }
   }
 
   /** De schuif om: het hele schema aan of uit. */
@@ -3029,11 +3010,6 @@ class DacViewOverview extends DacElement {
       patch.window = { ...plan.window, done_by: "07:00" };
     }
     this.saveSchedule_(device, patch);
-  }
-
-  savePriority_(slot, waarde) {
-    const device = this.steerDevices_?.[slot];
-    if (device) this.saveSchedule_(device, { priority: waarde });
   }
 
   async saveSchedule_(device, patch) {

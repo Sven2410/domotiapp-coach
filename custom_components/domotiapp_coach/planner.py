@@ -3423,6 +3423,57 @@ def zon_rang(regels: list[dict], stand: dict[str, float | None]) -> dict[str, in
     return rang
 
 
+# --- Voorrang bij planningen (v0.93.0) ----------------------------------------
+#
+# De bewoner van de eerste woning op 23-09-2026: "stel, er is geen zonoverschot.
+# Dan wil ik apparaten laden op basis van dynamische tarieven. Eerst de auto
+# (volgens laadplanning); dan kijk ik naar de accu volgens laadplanning; laadt de
+# accu maar met 3500 W en heb ik nog ruimte op mijn aansluiting, dan kan ik ook
+# mijn boiler nog vol laden." En: "het kan zijn dat de prioriteit bij planningen
+# totaal anders is dan bij zonoverschot." De eigenaar koos als standaard auto,
+# accu, boiler, en het keuzelijstje "wie gaat voor" op de kaart van de paal
+# verviel: de volgorde staat nu alleen op Strategie.
+#
+# Het gaat hier om de ruimte op de aansluiting: wie hoger staat krijgt eerst wat
+# er onder de zekeringen past, en wie lager staat krijgt wat er dan over is.
+
+PLAN_SOORTEN = ("laadpaal", "thuisbatterij", "boiler")
+_OUDE_VOORRANG = {"high": 0, "mid": 1, "low": 2}
+
+
+def plan_regels(
+    opgeslagen: list | None, apparaten: list[dict], oude_voorrang: dict[str, str] | None = None
+) -> list[str]:
+    """De volgorde bij planningen: een lijst van apparaat-ids, van eerst naar laatst.
+
+    Wat er is opgeslagen, zonder wat er niet meer is of niet gestuurd wordt,
+    aangevuld met de rest in de volgorde auto, accu, boiler. Palen onderling
+    in de voorrang die tot v0.93.0 op de kaart stond (hoog, midden, laag), zodat
+    wie die ooit instelde dezelfde volgorde houdt.
+    """
+    mag = [
+        a for a in apparaten
+        if a.get("controllable") and a.get("type") in PLAN_SOORTEN and a.get("id")
+    ]
+    ids = {a["id"] for a in mag}
+    uit: list[str] = []
+    for rij in opgeslagen or []:
+        apparaat_id = rij.get("device") if isinstance(rij, dict) else rij
+        if apparaat_id in ids and apparaat_id not in uit:
+            uit.append(apparaat_id)
+    oud = oude_voorrang or {}
+    for soort in PLAN_SOORTEN:
+        van_soort = [a for a in mag if a["type"] == soort and a["id"] not in uit]
+        van_soort.sort(key=lambda a: _OUDE_VOORRANG.get(oud.get(a["id"], "mid"), 1))
+        uit.extend(a["id"] for a in van_soort)
+    return uit
+
+
+def plan_rang(volgorde: list[str]) -> dict[str, int]:
+    """Per apparaat zijn plek in de voorrang bij planningen: lager is eerder."""
+    return {apparaat_id: plek for plek, apparaat_id in enumerate(volgorde)}
+
+
 def zon_grens(regels: list[dict], rang: dict[str, int], apparaat_id: str) -> float | None:
     """De grens van de regel waar een apparaat nu op staat, of None: tot vol."""
     plek = rang.get(apparaat_id)

@@ -96,9 +96,25 @@ const d = (s) => `M${s.x1.toFixed(1)} ${s.y1.toFixed(1)} L${s.x2.toFixed(1)} ${s
  *   folded into the second one.
  */
 export function chooseBubbles(devices) {
+  // De thuisbatterij staat altijd rechts, ook als hij stilstaat: hij is geen
+  // verbruiker maar een buffer die twee kanten op kan, en de pijl zegt welke
+  // kant (v0.93.0). De eigenaar op 23-09-2026: "bij de bolletjes met de pijlen
+  // wil ik rechts standaard de accu hebben; die kan bidirectioneel. Nu staat
+  // de accu onder meerdere die verbruiken, maar hij levert." De apparaten die
+  // draaien komen dan onder: één met zijn naam, meer opgeteld.
+  const accu = (devices ?? []).find((dev) => dev.type === "thuisbatterij" && Number.isFinite(dev.watts));
   const active = (devices ?? [])
-    .filter((dev) => Number.isFinite(dev.watts) && dev.watts >= ACTIVE_WATTS)
+    .filter((dev) => dev !== accu && Number.isFinite(dev.watts) && dev.watts >= ACTIVE_WATTS)
     .sort((a, b) => b.watts - a.watts);
+
+  if (accu) {
+    if (active.length <= 1) return { slots: [accu, ...active], rolled: [] };
+    const total = active.reduce((sum, dev) => sum + dev.watts, 0);
+    return {
+      slots: [accu, { id: "__rest__", type: "overig", name: "Overig", watts: total, rolled: active }],
+      rolled: active,
+    };
+  }
 
   if (active.length <= 2) return { slots: active, rolled: [] };
 

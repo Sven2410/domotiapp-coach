@@ -5217,8 +5217,14 @@ controle("de lading van een gestuurde batterij op nul op de meter telt niet als 
 controle("ook niet onder de hoofdaansluiting", grid96.phase_amps[2] < 1.5, f"{grid96.phase_amps}")
 coach96._batterij["dev-batterij"]["besluit"] = coachmod.Besluit("netladen", rule="netladen")
 grid96b, _, _, _ = coach96._read(NU96, inst81, LAADPAAL_G)
-controle("laadt hij van het net, dan wijkt hij niet en telt zijn stroom wel",
-         grid96b.circuits[0].phase_amps[2] > 13.5, f"{grid96b.circuits[0].phase_amps}")
+# Sinds v0.93.0 bepaalt de voorrang bij planningen dit: standaard gaat de auto
+# voor de accu, dus ook een batterij die van het net laadt wijkt voor de paal.
+controle("laadt hij van het net, dan wijkt hij standaard voor de auto (v0.93.0)",
+         grid96b.circuits[0].phase_amps[2] < 0.5, f"{grid96b.circuits[0].phase_amps}")
+inst96v = dict(inst81, strategy=dict(inst81["strategy"], plan_priority=["dev-batterij", "dev-laadpaal"]))
+grid96v, _, _, _ = coach96._read(NU96, inst96v, LAADPAAL_G)
+controle("staat de accu hoger bij planningen, dan wijkt hij niet en telt zijn stroom wel",
+         grid96v.circuits[0].phase_amps[2] > 13.5, f"{grid96v.circuits[0].phase_amps}")
 coach96._batterij["dev-batterij"]["stuurt"] = False
 grid96c, _, _, _ = coach96._read(NU96, inst81, LAADPAAL_G)
 controle("stuurt de coach de batterij niet, dan telt zijn stroom ook", grid96c.circuits[0].phase_amps[2] > 13.5,
@@ -5299,6 +5305,36 @@ controle("wat de batterij afgeeft is nooit zon", abs(ontlaadt99 - (-800.0)) < 1,
 meet99 = dict(LAADPAAL, id="dev-meet", controllable=False)
 controle("een paal die de coach niet stuurt: zoals altijd, de batterij wijkt",
          coach99._zon_correctie(inst99, meet99, 500.0) == coach99._batterijen_w(inst99), "")
+
+print("=== 100. voorrang bij planningen: wie hoger staat krijgt eerst de ruimte (v0.93.0) ===")
+# De bewoner van de eerste woning op 23-09-2026: "eerst de auto volgens laadplanning,
+# dan de accu; laadt de accu maar met 3500 W en heb ik nog ruimte op mijn
+# aansluiting, dan kan ik ook mijn boiler nog vol laden."
+BOILER100 = {"id": "dev-boiler", "type": "boiler", "name": "Boiler", "controllable": True,
+             "entity": "sensor.boiler_w", "entities": {"switch": "switch.boiler"}}
+paal100 = dict(LAADPAAL, controllable=True)
+inst100 = instellingen(devices=[paal100, BATTERIJ, BOILER100])
+hass100, _, coach100 = bouw(huis75(afname=1500.0), inst100)
+coach100._toezeggingen = {"dev-laadpaal": {"amps": 10.0, "sleutels": [""]},
+                          "dev-batterij": {"amps": 8.0, "sleutels": [""]}}
+controle("standaard (auto, accu, boiler): de accu ziet wat de auto toezegde",
+         coach100._hogere_toezeggingen(inst100, BATTERIJ) == {"": 10.0}, f"{coach100._hogere_toezeggingen(inst100, BATTERIJ)}")
+controle("de boiler ziet wat de auto en de accu toezegden",
+         coach100._hogere_toezeggingen(inst100, BOILER100) == {"": 18.0}, f"{coach100._hogere_toezeggingen(inst100, BOILER100)}")
+controle("de auto staat bovenaan en ziet niemand",
+         coach100._hogere_toezeggingen(inst100, paal100, zonder_palen=True) == {}, "")
+zonder = coach100._laadruimte_w(inst100, BATTERIJ, 0.0)
+met = coach100._laadruimte_w(inst100, BATTERIJ, 0.0, coach100._hogere_toezeggingen(inst100, BATTERIJ))
+print(f"  laadruimte van de accu: {zonder:.0f} W, na de toezegging van de auto {met:.0f} W")
+controle("de laadruimte van de accu: tien ampère minder, want die heeft de auto",
+         abs((zonder - met) - 10.0 * coachmod.VOLTS) < 1, f"{zonder} {met}")
+inst100b = dict(inst100, strategy=dict(inst100["strategy"], plan_priority=["dev-batterij", "dev-laadpaal"]))
+controle("met de accu bovenaan ziet de auto de toezegging van de accu",
+         coach100._hogere_toezeggingen(inst100b, paal100, zonder_palen=True) == {"": 8.0},
+         f"{coach100._hogere_toezeggingen(inst100b, paal100, zonder_palen=True)}")
+controle("en ziet de accu niets van de auto", coach100._hogere_toezeggingen(inst100b, BATTERIJ) == {}, "")
+controle("een apparaat dat niet in de voorrang staat ziet niets",
+         coach100._hogere_toezeggingen(inst100, dict(BOILER100, id="dev-anders", controllable=False)) == {}, "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

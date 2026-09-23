@@ -65,6 +65,8 @@ from .batterij import (
 )
 from .planner import (
     MODI_ZONDER_SOM,
+    plan_rang,
+    plan_regels,
     zon_grens,
     zon_rang,
     zon_regels,
@@ -979,6 +981,10 @@ class ChargerCoach:
         # De accustand van de auto aan elke paal bij de vorige ronde, voor de
         # voorrang bij zonoverschot ("auto tot 60%"). Zie `_zon_correctie`.
         self._auto_soc: dict[str, float | None] = {}
+        # Wat elk apparaat er de komende minuut aan ampère bij gaat nemen, en
+        # onder welke zekeringen: de toezeggingen voor de voorrang bij
+        # planningen (v0.93.0). Zie `_hogere_toezeggingen`.
+        self._toezeggingen: dict[str, dict[str, Any]] = {}
         # Sinds wanneer er stroom wordt aangeboden zonder dat de auto iets
         # afneemt. Daarmee weet de kaart het verschil tussen "begint zo" en "de
         # auto doet niets". Een tijdstip en geen teller: een ronde is niet altijd
@@ -1893,7 +1899,10 @@ class ChargerCoach:
             self._batterij.pop(device_id, None)
             self.state.pop(device_id, None)
 
-        chargers.sort(key=lambda device: self._priority(settings, device))
+        # In de volgorde van de voorrang bij planningen (v0.93.0; daarvoor de
+        # hoog/midden/laag per paal, die nu de beginvolgorde van die lijst is).
+        rang = self._plan_voorrang(settings)
+        chargers.sort(key=lambda device: rang.get(device.get("id", ""), len(rang)))
         # Wat er deze ronde al aan een eerder laadpunt is toegezegd, per
         # zekering: "" is de hoofdaansluiting, verder het id van elke groep.
         # Twee palen op dezelfde groep delen die groep; een paal in de garage
@@ -1901,9 +1910,16 @@ class ChargerCoach:
         vergeven: dict[str, float] = {}
         for device in chargers:
             try:
-                claim = await self._one(moment, settings, device, level, vergeven)
-                for sleutel in self._groep_sleutels(settings, device):
+                # Wat de palen hiervoor al toezegden, plus wat een batterij of
+                # boiler hoger in de voorrang toezegde.
+                bezet = dict(vergeven)
+                for sleutel, amps in self._hogere_toezeggingen(settings, device, zonder_palen=True).items():
+                    bezet[sleutel] = bezet.get(sleutel, 0.0) + amps
+                claim = await self._one(moment, settings, device, level, bezet)
+                sleutels = self._groep_sleutels(settings, device)
+                for sleutel in sleutels:
                     vergeven[sleutel] = vergeven.get(sleutel, 0.0) + claim
+                self._toezeggingen[device.get("id", "")] = {"amps": claim, "sleutels": sleutels}
             except ServiceNotFound as fout:
                 # Gebeurt bij het opstarten: de coach draait al voordat de
                 # integratie van het merk zijn diensten heeft klaargezet. Geen
@@ -3238,6 +3254,7 @@ class ChargerCoach:
             "tip": "",
         }
         await self._async_noteer_programma(device, device_id, now)
+        self._toezeggingen.pop(device_id, None)
 
         if level in (LEVEL_READ, LEVEL_ADVISE) or not mag or not schakelaar:
             return
@@ -3257,7 +3274,31 @@ class ChargerCoach:
                 )
                 sessie["beurt_kwh"] = 0.0
             return
+        # Past het element nog onder de zekeringen, na wie er hoger staat in de
+        # voorrang bij planningen (v0.93.0)? Een boiler die nog niets gemeten
+        # heeft kent zijn vermogen niet, en dan wordt er niet gegokt.
+        element = geleerd.get("heat_w")
+        ruimte = (
+            self._laadruimte_w(settings, device, 0.0, self._hogere_toezeggingen(settings, device))
+            if element else None
+        )
+        if ruimte is not None and element > ruimte:
+            self.state[device_id].update(
+                charge=False,
+                rule="no-room",
+                reason=(
+                    "Er is nu geen ruimte op de aansluiting voor de boiler: wat hoger staat in "
+                    "de voorrang gaat voor. Zodra er ruimte is, gaat hij aan."
+                ),
+            )
+            self._toezeggingen.pop(device_id, None)
+            return
         await self._async_boiler_zetten(device, True)
+        if element:
+            self._toezeggingen[device_id] = {
+                "amps": float(element) / VOLTS,
+                "sleutels": self._groep_sleutels(settings, device),
+            }
         sessie["aan_sinds"] = now
         sessie["stil_sinds"] = None
         # Waarom de stroom erop ging. Bij het afronden is de regel altijd
@@ -3544,7 +3585,7 @@ class ChargerCoach:
     # uit op het tempo van de meter.
 
     def _batterij_wijkt(
-        self, settings: dict[str, Any], now: datetime
+        self, settings: dict[str, Any], now: datetime, voor: dict[str, Any] | None = None
     ) -> dict[tuple[str, str], float]:
         """Per zekering en fase: de stroom van een batterij die wijkt als de paal laadt.
 
@@ -3579,7 +3620,12 @@ class ChargerCoach:
             if not sessie.get("stuurt") or besluit is None:
                 continue
             if watt > 0 and besluit.stand in (NETLADEN, MAX_LADEN):
-                continue
+                # Laden van het net wijkt alleen voor wie hoger staat in de
+                # voorrang bij planningen (v0.93.0): dan krijgt de batterij wat
+                # er na de paal over is (`_laadruimte_w`).
+                rang = self._plan_voorrang(settings)
+                if voor is None or rang.get(device_id, 0) <= rang.get(voor.get("id", ""), 0):
+                    continue
             fase = str((device.get("battery") or {}).get("phase") or "")
             fasen = [fase] if fase in ("l1", "l2", "l3") else ["l1", "l2", "l3"]
             amps = abs(watt) / 230.0 / len(fasen)
@@ -3603,6 +3649,54 @@ class ChargerCoach:
         if laden is None and ontladen is None:
             return None
         return (laden or 0.0) - (ontladen or 0.0)
+
+    def _plan_voorrang(self, settings: dict[str, Any]) -> dict[str, int]:
+        """Ieders plek in de voorrang bij planningen (v0.93.0). Zie `plan_regels`."""
+        oud = {
+            entry.get("device"): entry.get("priority", "mid")
+            for entry in (settings.get("strategy") or {}).get("schedules") or []
+            if isinstance(entry, dict)
+        }
+        volgorde = plan_regels(
+            (settings.get("strategy") or {}).get("plan_priority"), settings.get("devices") or [], oud
+        )
+        rang = plan_rang(volgorde)
+        # De klaar-tijd is heilig (eis 2), ook boven de volgorde van de bewoner:
+        # een paal die in de klaar-tijdregel zit of te laat is gaat bovenaan. In
+        # het virtuele huis haalde de auto met de accu bovenaan anders 96% om
+        # 07:00 in plaats van vol (`planning-accu-eerst`).
+        for apparaat_id in rang:
+            if apparaat_id in self._deadline_for or apparaat_id in self._te_laat:
+                rang[apparaat_id] = -1
+        return rang
+
+    def _hogere_toezeggingen(
+        self, settings: dict[str, Any], device: dict[str, Any], *, zonder_palen: bool = False
+    ) -> dict[str, float]:
+        """Per zekering wat apparaten hoger in de voorrang bij planningen toezegden.
+
+        Een toezegging is wat een apparaat er de komende minuut bij gaat
+        nemen, bovenop wat de meter al ziet. Wie lager staat krijgt de ruimte
+        die daarna over is: de bewoner van de eerste woning, "laadt de accu
+        maar met 3500 W en heb ik nog ruimte op mijn aansluiting, dan kan ik
+        ook mijn boiler nog vol laden." `zonder_palen` voor de palen zelf: die
+        tellen elkaar in de ronde al via `vergeven`.
+        """
+        rang = self._plan_voorrang(settings)
+        mijn = rang.get(device.get("id", ""))
+        if mijn is None:
+            return {}
+        soort = {a.get("id"): a.get("type") for a in settings.get("devices") or []}
+        uit: dict[str, float] = {}
+        for apparaat_id, toezegging in self._toezeggingen.items():
+            plek = rang.get(apparaat_id)
+            if plek is None or plek >= mijn:
+                continue
+            if zonder_palen and soort.get(apparaat_id) == "laadpaal":
+                continue
+            for sleutel in toezegging.get("sleutels") or []:
+                uit[sleutel] = uit.get(sleutel, 0.0) + float(toezegging.get("amps") or 0.0)
+        return uit
 
     def _zon_voorrang(self, settings: dict[str, Any]) -> tuple[list[dict], dict[str, int]]:
         """De voorrang bij zonoverschot en ieders plek erin, op dit moment.
@@ -3739,7 +3833,8 @@ class ChargerCoach:
         return -export, _moment(max(stempels))
 
     def _laadruimte_w(
-        self, settings: dict[str, Any], device: dict[str, Any], batterij_w: float | None
+        self, settings: dict[str, Any], device: dict[str, Any], batterij_w: float | None,
+        hoger: dict[str, float] | None = None,
     ) -> float | None:
         """Hoeveel de zekering deze batterij nog aan laadvermogen toestaat.
 
@@ -3767,14 +3862,16 @@ class ChargerCoach:
             marge = BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
             stromen = stromen_uit(sources.get("phases") or {}, True)
             if stromen:
-                ruimten.append(zekering - max(marge, zekering * FUSE_MARGIN_SHARE) - max(stromen))
+                ruimten.append(zekering - max(marge, zekering * FUSE_MARGIN_SHARE) - max(stromen)
+                               - (hoger or {}).get("", 0.0))
         # En elke groep waar de batterij aan hangt, met haar eigen zekering en
         # meter. Op een eenfasige groep is er maar één meting en telt die.
         for groep in self._groepen_keten(settings, device):
             zekering = float(groep.get("fuse_amps") or 16)
             stromen = stromen_uit(groep.get("sensors") or {}, int(groep.get("phases") or 3) == 3)
             if stromen:
-                ruimten.append(zekering - max(FUSE_MARGIN_AMPS, zekering * FUSE_MARGIN_SHARE) - max(stromen))
+                ruimten.append(zekering - max(FUSE_MARGIN_AMPS, zekering * FUSE_MARGIN_SHARE) - max(stromen)
+                               - (hoger or {}).get(str(groep.get("id")), 0.0))
         if not ruimten:
             return None
         return min(ruimten) * VOLTS + max(0.0, batterij_w or 0.0)
@@ -4082,6 +4179,18 @@ class ChargerCoach:
         nu_rij = price_now(prijzen, now)
         koop = nu_rij["price"] if nu_rij else tarief.buy
         terug = nu_rij.get("feed_in") if nu_rij else tarief.feed_in
+        # Wat de batterij er de komende minuut van het net bij neemt, voor de
+        # voorrang bij planningen (v0.93.0): wie lager staat krijgt de ruimte
+        # die daarna over is. Zon en nul op de meter zeggen niets toe.
+        if besluit.stand in (NETLADEN, MAX_LADEN):
+            doel_w = besluit.power_w or b.max_charge_w
+            nu_w = max(0.0, self._batterij_geregeld_w(device) or 0.0)
+            self._toezeggingen[device_id] = {
+                "amps": max(0.0, doel_w - nu_w) / VOLTS,
+                "sleutels": self._groep_sleutels(settings, device),
+            }
+        else:
+            self._toezeggingen.pop(device_id, None)
         sessie.update(besluit=besluit, batterij=b, koop=koop, terug=terug,
                       settings=settings, device=device,
                       # Wat er morgenvroeg over is, voor de snelle regelaar: die
@@ -4238,7 +4347,9 @@ class ChargerCoach:
                 nu, net_w=net_w, net_op=net_op, batterij_w=batterij_w,
                 besluit=besluit, b=b,
                 doel_w=regelaar.doel_w(sessie.get("koop"), sessie.get("terug")),
-                ruimte_w=self._laadruimte_w(settings, device, batterij_w),
+                ruimte_w=self._laadruimte_w(
+                    settings, device, batterij_w, self._hogere_toezeggingen(settings, device)
+                ),
             )
             if opdracht is not None:
                 await self._async_batterij_zetten(device, opdracht)
@@ -5352,7 +5463,7 @@ class ChargerCoach:
         # Wat een gestuurde batterij op deze zekeringen doet, per fase. Die
         # stroom wijkt zodra de paal laadt, dus het is geen ruimte die het huis
         # inneemt (v0.88.2). Zie `_batterij_wijkt`.
-        wijkt = self._batterij_wijkt(settings, now)
+        wijkt = self._batterij_wijkt(settings, now, device)
 
         phases = []
         for key in ("l1", "l2", "l3"):
