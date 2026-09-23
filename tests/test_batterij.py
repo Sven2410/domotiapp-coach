@@ -487,6 +487,31 @@ controle("na vijftien seconden gaat hij hoe dan ook verder", (lambda r: (
     net_op=t0 + dt.timedelta(seconds=14), batterij_w=-500.0, besluit=Besluit(NUL), b=b30) is not None
 )(Regelaar()), "")
 
+print("31. morgenvroeg nooit meer over dan er in de accu past")
+# De bewoner van de eerste woning op 23-09-2026 om 14:10, bij "je houdt naar
+# verwachting 15,9 kWh over in je accu" onder een accu van 14,6 kWh: "hoe kan je
+# ooit 16 kWh in een accu hebben van 14 kWh?" Die middag: 79%, 12,4 kWh zon tot
+# de avond, 4,5 kWh huis tot morgenvroeg. De oude som: 10,8 x 0,736 + 12,4 - 4,5
+# = 15,9.
+middag31 = DAG.replace(hour=14, minute=10)
+zon31 = {14: 3.1, 15: 3.1, 16: 2.8, 17: 2.2, 18: 1.2}
+huis31 = 4.5 / 17  # 17 uur tot 07:00, gelijk verdeeld
+v31 = verwachting(zon31, huis=huis31)
+a31 = anker(soc=79.0)
+bal31 = bat.balans_kwh(middag31, v31, a31)
+vol31 = (95.0 - 5.0) / 100.0 * 14.6 * 0.736
+print(f"  balans {bal31:.2f} kWh, hooguit {vol31:.2f}: {bat.plan_batterij(middag31, [], Tariff(), v31, a31).plan}")
+controle("wat er over is past in de accu: tot de laadgrens, na het verlies", 0 < bal31 <= vol31 + 1e-9, f"{bal31:.2f}")
+inhoud31, tekort31, weg31 = bat.nachtverloop(middag31, v31, a31)
+controle("de zon die er niet in past gaat naar het net en wordt genoemd",
+         weg31 > 5 and "niet meer in de accu" in bat._vooruitkijk_zin(middag31, v31, a31), f"weg {weg31:.2f}")
+# De nacht erna: de accu loopt leeg, en wat er dan nog ontbreekt is tekort,
+# ook als de zon morgenvroeg weer komt.
+nacht31 = bat.balans_kwh(DAG.replace(hour=20), verwachting({}, huis=1.0), anker(soc=20.0))
+controle("een lege accu in de nacht: tekort, uitgerekend uur voor uur",
+         nacht31 is not None and nacht31 < 0 and abs(nacht31 - (-(11.0 - (0.15 * 14.6) * 0.736))) < 0.05,
+         f"{nacht31}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
