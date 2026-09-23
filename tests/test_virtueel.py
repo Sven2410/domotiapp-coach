@@ -1604,6 +1604,42 @@ if (met := v("batterij-helpt-auto-nacht")) and (zonder := v("batterij-helpt-auto
     controle("nachtstrategie uit: tot de eigen ondergrens en niet eronder",
              bat_eind(zonder) >= 4.5, f"{bat_eind(zonder):.1f}%")
 
+
+# --- de batterij in het plan van de auto (v0.95.0) -----------------------------
+# De bewoner van de eerste woning op 23-09-2026: "'wat gaat hij doen' zou moeten
+# zien dat hij om 23 uur mee moet gaan helpen laden; de EV-laadplanning zou moeten
+# weten dat de accu mee gaat helpen."
+def naar_auto(vl):
+    """Wat de batterij werkelijk aan de auto gaf: wat hij boven het huis afgaf terwijl de paal laadde."""
+    return sum(max(0.0, min(r.paal_w, -bat_w - r.huis_w)) * vl.stap_uur / 1000
+               for (_t, _n, bat_w, _s, _st), r in zip(vl.bat_verloop, vl.regels) if r.paal_w > 0 and bat_w < 0)
+
+
+def plan_voor_laden(vl):
+    eerste = next((i for i, r in enumerate(vl.regels) if r.paal_w > 0), None)
+    return vl.regels[eerste - 1] if eerste else None
+
+
+for naam in ("batterij-helpt-auto", "batterij-helpt-auto-nacht", "batterij-helpt-auto-zonder-nacht"):
+    if not (vl := v(naam)):
+        continue
+    voor = plan_voor_laden(vl)
+    echt = naar_auto(vl)
+    print(f"  {naam}: plan vlak voor het laden {voor.accu_plan_kwh} kWh uit de accu, werkelijk {echt:.2f}")
+    controle(f"{naam}: de paal en de batterij zeggen elke minuut hetzelfde",
+             all(abs((r.accu_plan_kwh or 0.0) - (r.bat_auto_plan_kwh or 0.0)) < 0.02 for r in vl.regels
+                 if r.accu_plan_kwh is not None),
+             "")
+    controle(f"{naam}: het plan wist het vooraf", (voor.accu_plan_kwh or 0.0) > 1.0, f"{voor.accu_plan_kwh}")
+    if naam.endswith("nacht") and not naam.endswith("zonder-nacht"):
+        # Met de nachtstrategie zakt de grens 's nachts als het huis minder vraagt
+        # dan verwacht; het plan belooft dan minder dan er komt, nooit meer.
+        controle(f"{naam}: het plan belooft niet meer dan er komt",
+                 voor.accu_plan_kwh <= echt + 0.1, f"{voor.accu_plan_kwh} tegen {echt:.2f}")
+    else:
+        controle(f"{naam}: het plan klopt binnen tien procent met wat de auto kreeg",
+                 abs(voor.accu_plan_kwh - echt) <= 0.1 * echt, f"{voor.accu_plan_kwh} tegen {echt:.2f}")
+
 # --- voorrang bij zonoverschot (v0.92.0) --------------------------------------
 # De bewoner van de eerste woning op 23-09-2026: "eerst moet de accu 40% vol zijn,
 # daarna mag het zonoverschot naar de auto."

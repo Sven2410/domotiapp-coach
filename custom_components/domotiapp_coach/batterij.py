@@ -161,6 +161,9 @@ class Uur:
     # De verwachte accustand aan het eind, in procent.
     soc: float
     price: float
+    # Wat daarvan naar de auto gaat, in kWh aan de wisselstroomkant, positief
+    # (v0.95.0). Zit al in `kwh`. Zie `auto_hulp`.
+    auto_kwh: float = 0.0
 
 
 @dataclass
@@ -178,6 +181,9 @@ class Besluit:
     # en voor de kaart.
     waarde: float | None = None
     uren: list[Uur] = field(default_factory=list)
+    # Wat er volgens het plan van de paal naar de auto gaat, aan de accukant in
+    # kWh (v0.95.0). Voor de nachtbalans op de kaart; zie `auto_hulp`.
+    auto_weg: float = 0.0
 
     @property
     def grenzen(self) -> tuple[bool, bool]:
@@ -505,7 +511,9 @@ def nachtbalans(now: datetime, forecast: Forecast, b: Batterij) -> tuple[float, 
     return zon, huis, bruikbaar
 
 
-def nachtverloop(now: datetime, forecast: Forecast, b: Batterij) -> tuple[float, float, float] | None:
+def nachtverloop(
+    now: datetime, forecast: Forecast, b: Batterij, weg: float = 0.0
+) -> tuple[float, float, float] | None:
     """Uur voor uur tot morgenvroeg: (inhoud morgenvroeg, tekort, zon die er niet in past).
 
     De bewoner van de eerste woning op 23-09-2026, bij "je houdt naar
@@ -518,12 +526,16 @@ def nachtverloop(now: datetime, forecast: Forecast, b: Batterij) -> tuple[float,
     terugkomt als 's ochtends de zon opkomt. Zonder gemeten rendement telt
     wat erin zit voor de volle inhoud, want een gok is geen meting.
 
-    De inhoud is aan de accukant en boven de ondergrens, in kWh.
+    De inhoud is aan de accukant en boven de ondergrens, in kWh. `weg` is wat
+    de auto er volgens het plan van de paal uit haalt, ook aan de accukant
+    (v0.95.0): dat gaat er aan het begin af, want de batterij helpt zodra de
+    paal laadt.
     """
     som = nachtbalans(now, forecast, b)
     if som is None:
         return None
     _zon, _huis, inhoud = som
+    inhoud = max(0.0, inhoud - max(0.0, weg))
     cap = b.capacity_kwh or 0.0
     ruimte = max(0.0, (b.soc_max - b.bodem) / 100.0 * cap)
     inhoud = min(inhoud, ruimte) if ruimte else inhoud
@@ -546,14 +558,14 @@ def nachtverloop(now: datetime, forecast: Forecast, b: Batterij) -> tuple[float,
     return inhoud, tekort, weg
 
 
-def balans_kwh(now: datetime, forecast: Forecast, b: Batterij) -> float | None:
+def balans_kwh(now: datetime, forecast: Forecast, b: Batterij, weg: float = 0.0) -> float | None:
     """Wat er morgenvroeg naar verwachting over is (positief) of tekortkomt.
 
     Over is wat er dan nog uit de accu kan komen, na het verlies; nooit meer
     dan de accu kan bevatten. Tekort is wat er in de nacht van het net moet.
     Zie `nachtverloop`.
     """
-    verloop = nachtverloop(now, forecast, b)
+    verloop = nachtverloop(now, forecast, b, weg)
     if verloop is None:
         return None
     inhoud, tekort, _weg = verloop
@@ -562,7 +574,7 @@ def balans_kwh(now: datetime, forecast: Forecast, b: Batterij) -> float | None:
     return inhoud * (b.rte if b.rte else 1.0)
 
 
-def _vooruitkijk_zin(now: datetime, forecast: Forecast, b: Batterij) -> str:
+def _vooruitkijk_zin(now: datetime, forecast: Forecast, b: Batterij, auto: float = 0.0) -> str:
     """Twee zinnen: zon, huis en batterij tot morgenvroeg, en de conclusie.
 
     De bewoner van de eerste woning liet op 21-09-2026 zien wat hij van zijn
@@ -573,20 +585,24 @@ def _vooruitkijk_zin(now: datetime, forecast: Forecast, b: Batterij) -> str:
     accu, of je hebt X kWh tekort om de nacht te overbruggen."
     """
     som = nachtbalans(now, forecast, b)
-    verloop = nachtverloop(now, forecast, b)
+    eta = sqrt(min(max(b.rte, 0.05), 1.0)) if b.rte else 1.0
+    # `auto` is aan de wisselstroomkant, zoals de bewoner hem in de auto ziet
+    # gaan; de nachtbalans rekent aan de accukant.
+    verloop = nachtverloop(now, forecast, b, auto / eta)
     if som is None or verloop is None:
         return ""
     zon, huis, bruikbaar = som
     _inhoud, _tekort, weg = verloop
-    balans = balans_kwh(now, forecast, b) or 0.0
+    balans = balans_kwh(now, forecast, b, auto / eta) or 0.0
     # Wat erin zit komt er niet helemaal uit; de conclusie rekent met het
     # rendement, dus de zin zegt erbij waar hij mee rekent.
     eruit = f", goed voor {_kwh(bruikbaar * b.rte)} na het verlies" if b.rte and bruikbaar > 0 else ""
     # En zon die er niet meer in past gaat naar het net: dat verklaart waarom
     # de optelsom van zon en batterij meer is dan wat er morgenvroeg over is.
     past_niet = f" Van die zon past {_kwh(weg)} niet meer in de accu; die gaat naar het net." if weg > 0.05 else ""
+    naar_auto = f", de auto krijgt er {_kwh(auto)} uit" if auto > 0.05 else ""
     zin = (
-        f"Tot morgenvroeg verwacht hij {_kwh(zon)} zon, het huis vraagt {_kwh(huis)} "
+        f"Tot morgenvroeg verwacht hij {_kwh(zon)} zon, het huis vraagt {_kwh(huis)}{naar_auto} "
         f"en er zit {_kwh(bruikbaar)} in de batterij{eruit}.{past_niet} "
     )
     if balans >= 0:
@@ -607,10 +623,15 @@ def plan_batterij(
     enabled: bool = True,
     paal_laadt: bool = False,
     helpt: bool = False,
+    auto_laden: list[tuple[datetime, datetime, float]] | None = None,
 ) -> Besluit:
     """Welke stand de batterij nu hoort te hebben.
 
     Van boven naar beneden: wat niet over geld gaat, en dan de som.
+
+    `auto_laden` is het plan van de paal: per blok wat de auto van het net
+    zou nemen (v0.95.0). Daarmee zegt het uurplan welke uren de batterij de
+    auto helpt, en rekent de nachtbalans ermee; zie `auto_hulp`.
     """
     if not enabled:
         return Besluit(
@@ -704,7 +725,10 @@ def plan_batterij(
     vol = e >= som.hoog - 1e-6
     leeg = b.soc <= b.bodem + 1e-6
     uren = _vooruit(som, b)
-    kijk = _vooruitkijk_zin(now, forecast, b)
+    nacht_voor_auto = balans_kwh(now, forecast, b)
+    auto_ac = _met_auto(uren, b, auto_hulp(uren, b, nacht_voor_auto, auto_laden or [], helpt))
+    auto_weg = auto_ac / som.eta
+    kijk = _vooruitkijk_zin(now, forecast, b, auto_ac)
     piek = dicht and in_evening_peak(now)
 
     # Zon opslaan en het huis voeden: elk tegen wat een kilowattuur in de
@@ -738,6 +762,7 @@ def plan_batterij(
                 rule="netladen" if b.vol_voor is None else "volle-beurt",
                 waarde=erbij,
                 uren=uren,
+                auto_weg=auto_weg,
             )
 
     # Handelen alleen met wat er boven de nacht uitkomt. De eigenaar op
@@ -745,8 +770,10 @@ def plan_batterij(
     # met hoge tarieven." De som zelf zou alles verkopen en 's nachts
     # terugkopen zodra dat goedkoper is, maar dat is niet wat de bewoner
     # bedoelt met een batterij die de nacht overbrugt.
-    nacht = balans_kwh(now, forecast, b)
-    if b.handelen and not leeg and not paal_laadt and (not b.nacht or nacht is None or nacht > 0):
+    # Wat de auto er vannacht uit haalt telt mee: die surplus is dan al op.
+    nacht = nacht_voor_auto
+    na_auto = balans_kwh(now, forecast, b, auto_weg)
+    if b.handelen and not leeg and not paal_laadt and (not b.nacht or na_auto is None or na_auto > 0):
         vermogen, tot = _rustig_vermogen(uren, b, ontladen=True)
         if vermogen > 0:
             return Besluit(
@@ -757,13 +784,14 @@ def plan_batterij(
                 rule="handelen",
                 waarde=eraf,
                 uren=uren,
+                auto_weg=auto_weg,
             )
 
     if mag_huis and mag_zon:
         besluit = Besluit(
             NUL,
             reason="Hij houdt de meter op nul: overschot gaat erin, wat het huis vraagt komt eruit.",
-            plan=kijk, rule="nul", waarde=eraf, uren=uren,
+            plan=kijk, rule="nul", waarde=eraf, uren=uren, auto_weg=auto_weg,
         )
     elif mag_zon:
         besluit = Besluit(
@@ -774,6 +802,7 @@ def plan_batterij(
                 f"Stroom kost nu {_euro(koop)}, en wat er in de batterij zit bespaart straks meer. Hij bewaart het; zonoverschot gaat er wel in."
             ),
             plan=kijk, rule="leeg" if leeg else "bewaren", waarde=eraf, uren=uren,
+            auto_weg=auto_weg,
         )
     elif mag_huis:
         besluit = Besluit(
@@ -784,6 +813,7 @@ def plan_batterij(
                 f"Terugleveren brengt nu {_euro(terug or 0.0)} op, meer dan opslaan oplevert. Wat het huis vraagt komt wel uit de batterij."
             ),
             plan=kijk, rule="vol" if vol else "niet-opslaan", waarde=eraf, uren=uren,
+            auto_weg=auto_weg,
         )
     else:
         besluit = Besluit(
@@ -793,9 +823,92 @@ def plan_batterij(
                 if terug is not None and terug >= koop - PRICE_MARGIN else
                 "Nu laden of ontladen levert niets op, dus hij staat stil."
             ),
-            plan=kijk, rule="standby", waarde=eraf, uren=uren,
+            plan=kijk, rule="standby", waarde=eraf, uren=uren, auto_weg=auto_weg,
         )
     return _met_paal(besluit, paal_laadt, b, nacht, helpt=helpt)
+
+
+def auto_hulp(
+    uren: list[Uur],
+    b: Batterij,
+    over_kwh: float | None,
+    laden: list[tuple[datetime, datetime, float]],
+    helpt: bool = False,
+) -> list[float]:
+    """Per blok van het uurplan: wat de batterij aan de auto geeft, in kWh (v0.95.0).
+
+    De bewoner van de eerste woning op 23-09-2026 om 22:40, bij een accu die
+    boven 50% de auto mocht helpen: "theoretisch zou 'wat gaat hij doen' nu
+    moeten kijken naar de EV-laadplanning, en zien dat hij om 23 uur mee moet
+    gaan helpen laden." Die avond hielp hij van 23:00:48 tot 23:17:43 op
+    3,45 kW, van 78 tot de 70% die toen de grens was, en het uurplan wist
+    daar niets van.
+
+    Dezelfde regels als `_met_paal`, want dat is wat de regelaar doet: niet
+    in een blok waarin hij zelf van het net laadt, boven `auto_grens` (de
+    eerste keer pas vanaf de grens plus `AUTO_MARGE`), op wat er naast het huis
+    nog van het ontlaadvermogen over is, en met de nachtstrategie nooit meer
+    dan wat er morgenvroeg over zou zijn. Een blok op standby telt wel: bij
+    gelijke prijzen kiest het uurplan standby waar de coach die minuut zelf nul
+    op de meter kiest (in `plan_batterij` wint dan wat je in handen hebt). `laden` is per blok van de paal
+    (van, tot, kWh van het net), van zijn eigen plan; wat daarvan in een blok
+    hier valt, naar rato van de tijd.
+
+    Aan de wisselstroomkant, zoals de bewoner hem in de auto ziet gaan.
+    """
+    uit = [0.0] * len(uren)
+    if b.auto_boven is None or b.capacity_kwh is None or b.soc is None or not laden:
+        return uit
+    eta = sqrt(min(max(b.rte, 0.05), 1.0)) if b.rte else 1.0
+    cap = b.capacity_kwh
+    vrij = float("inf")
+    if b.nacht:
+        if over_kwh is None:
+            return uit
+        # Dezelfde maat als `auto_grens`: wat er morgenvroeg over is, terug naar
+        # de accukant.
+        vrij = max(0.0, over_kwh) / (b.rte if b.rte else 1.0)
+    grens = max(float(b.auto_boven), b.bodem) / 100.0 * cap
+    marge = AUTO_MARGE / 100.0 * cap
+    e = b.soc / 100.0 * cap
+    weg = 0.0
+    bezig = helpt
+    for i, uur in enumerate(uren):
+        deel = max(0.0, (uur.end - uur.start).total_seconds() / 3600.0)
+        wil = 0.0
+        for van, tot, kwh in laden:
+            lengte = (tot - van).total_seconds()
+            overlap = (min(tot, uur.end) - max(van, uur.start)).total_seconds()
+            if lengte > 0 and overlap > 0:
+                wil += max(0.0, kwh) * overlap / lengte
+        huis_ac = max(0.0, -uur.kwh)
+        nu = e - weg
+        if wil > 0.005 and uur.stand not in (NETLADEN, MAX_LADEN) and deel > 0 and nu > grens + (0.0 if bezig else marge):
+            ruimte = max(0.0, b.max_discharge_w / 1000.0 * deel - huis_ac)
+            boven = nu - huis_ac / eta - grens
+            kan = max(0.0, min(boven, vrij - weg)) * eta
+            geef = min(wil, ruimte, kan)
+            if geef > 0.005:
+                uit[i] = geef
+                weg += geef / eta
+                bezig = True
+        e = uur.soc / 100.0 * cap
+    return uit
+
+
+def _met_auto(uren: list[Uur], b: Batterij, hulp: list[float]) -> float:
+    """Wat `auto_hulp` zegt in het uurplan zetten, en het totaal teruggeven."""
+    if not any(hulp) or not b.capacity_kwh:
+        return 0.0
+    eta = sqrt(min(max(b.rte, 0.05), 1.0)) if b.rte else 1.0
+    weg = 0.0
+    for uur, geef in zip(uren, hulp):
+        if geef > 0:
+            uur.auto_kwh = geef
+            uur.kwh -= geef
+            weg += geef / eta
+        uur.soc = max(b.bodem, uur.soc - weg / b.capacity_kwh * 100.0)
+    return sum(hulp)
 
 
 def met_paal(

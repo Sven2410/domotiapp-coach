@@ -40,6 +40,7 @@ export function paalPerUur(blokken = []) {
         ? `${eerste.why} (in ${laden.length} van de ${groep.length} kwartieren)`
         : eerste.why,
       solar_kwh: som(groep, "solar_kwh"),
+      accu_kwh: som(groep, "accu_kwh"),
       kwh,
       amps: Math.max(0, ...laden.map((b) => Number(b.amps) || 0)),
       kw: uren > 0 ? kwh / uren : 0,
@@ -301,7 +302,7 @@ export class DacPlanAheadSheet extends DacElement {
     const verlies = plan.efficiency ? Math.round((1 - plan.efficiency) * 100) : null;
     const nogBij = inAccu === null || verlies === null
       ? ""
-      : `aan de paal; ${kwh(inAccu)} in de accu, ${verlies}% laadverlies `
+      : `aan de paal; ${kwh(inAccu)} in de auto, ${verlies}% laadverlies `
         + (plan.efficiency_measured ? "(gemeten aan deze auto)" : "(aangenomen, nog niet gemeten)");
     this.paintKop_([
       ["Nog te laden", kwh(plan.kwh_needed), nogBij],
@@ -316,6 +317,13 @@ export class DacPlanAheadSheet extends DacElement {
           : ""],
       ["Uiterlijk beginnen", wanneer(plan.latest_start), "met een uur speling"],
       laatste,
+      // De thuisbatterij helpt mee (v0.95.0): wat er daardoor niet van het net
+      // komt. De bewoner van de eerste woning: "de EV-laadplanning zou nu moeten
+      // weten dat de accu mee gaat helpen."
+      ...(Number(plan.accu_kwh) > 0.05
+        ? [["Uit je thuisbatterij", kwh(plan.accu_kwh),
+            Number.isFinite(plan.accu_to) ? `tot hij op ${plan.accu_to}% staat` : "de rest komt van het net"]]
+        : []),
     ]);
 
     // De prijs per uur met de laaduren in groen, zoals evcc het laat zien.
@@ -323,7 +331,9 @@ export class DacPlanAheadSheet extends DacElement {
     this.paintPrijs_(
       (plan.blocks ?? []).map((b) => ({
         start: b.start, end: b.end, price: b.price, groen: Boolean(b.charging),
-        kwh: b.kwh === undefined ? undefined : Math.max(0, Number(b.kwh) - Number(b.solar_kwh || 0)),
+        kwh: b.kwh === undefined
+          ? undefined
+          : Math.max(0, Number(b.kwh) - Number(b.solar_kwh || 0) - Number(b.accu_kwh || 0)),
       })),
       "laden"
     );
@@ -352,6 +362,10 @@ export class DacPlanAheadSheet extends DacElement {
       const zonTekst = blok.solar_kwh > 0.05
         ? `${Number(blok.solar_kwh).toFixed(1).replace(".", ",")} kWh zon`
         : "";
+      const accuTekst = Number(blok.accu_kwh) > 0.05
+        ? `${Number(blok.accu_kwh).toFixed(1).replace(".", ",")} kWh uit je thuisbatterij`
+        : "";
+      const waarvan = [zonTekst, accuTekst].filter(Boolean).join(" en ");
       const zon = document.createElement("span");
       zon.className = "zon";
       const wat = document.createElement("span");
@@ -359,8 +373,8 @@ export class DacPlanAheadSheet extends DacElement {
       if (blok.charging && blok.amps) {
         zon.textContent = `${blok.amps} A`;
         const kw = `${Number(blok.kw).toFixed(1).replace(".", ",")} kW`;
-        wat.textContent = zonTekst
-          ? `Laden op ${kw}, waarvan ${zonTekst}: ${blok.why}`
+        wat.textContent = waarvan
+          ? `Laden op ${kw}, waarvan ${waarvan}: ${blok.why}`
           : `Laden op ${kw}: ${blok.why}`;
       } else {
         zon.textContent = zonTekst;

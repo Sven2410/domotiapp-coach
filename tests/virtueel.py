@@ -927,6 +927,11 @@ class Regel:
     # getal dat de bewoner op de kaart leest, en het hangt aan de accustand
     # zoals de coach die kent; zie `_soc_bijgeteld` in coach.py.
     nodig_kwh: float | None = None
+    # Wat het plan van de paal uit de thuisbatterij verwacht, en wat het uurplan
+    # van de batterij de auto denkt te geven (v0.95.0). Die twee horen gelijk
+    # op te lopen, en in de buurt te komen van wat er werkelijk gebeurt.
+    accu_plan_kwh: float | None = None
+    bat_auto_plan_kwh: float | None = None
 
 
 @dataclass
@@ -1979,6 +1984,9 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                 tijd=nu, regel=besluit.get("rule", "?"), amps=int(besluit.get("amps") or 0),
                 reden=besluit.get("reason", ""), plan=besluit.get("plan", ""),
                 nodig_kwh=(besluit.get("plan_ahead") or {}).get("kwh_needed"),
+                accu_plan_kwh=(besluit.get("plan_ahead") or {}).get("accu_kwh"),
+                bat_auto_plan_kwh=sum(float(u.get("car_kwh") or 0.0)
+                                      for u in (coach.state.get("batterij") or {}).get("hours") or []),
                 paal_w=wereld.paal_w, paal_amps=wereld.auto.trekt_amps, soc=wereld.auto.soc,
                 zon_w=wereld.zon_w, huis_w=wereld.huis_w,
                 over_w=max(0.0, wereld.zon_w - wereld.huis_w),

@@ -1677,6 +1677,44 @@ Dezelfde avond, bij het meekijken, nog twee fouten die met de kaart te maken had
   `_besluit_melden` na elke `_one_batterij`, `_one_programma` en `_one_boiler`.
   Proef 103.
 
+**De batterij en het plan van de auto kennen elkaar** (v0.95.0). De bewoner van de
+eerste woning op 23-09-2026 om 22:40: "'wat gaat hij doen' zou nu moeten kijken naar
+de EV-laadplanning, en zien dat hij om 23 uur mee moet gaan helpen laden à 3500 W. Aan
+de andere kant zou de EV-laadplanning moeten weten dat de accu mee gaat helpen,
+mogelijk van invloed op de laadstrategie." Die avond hielp de Anker van 23:00:48 tot
+23:17:43 op 3,45 kW, van 78 naar de 70% die de grens was, en geen van de twee
+pop-ups wist ervan.
+
+- **Het uurplan van de batterij** (`auto_hulp`, `_met_auto` in batterij.py): het plan
+  van de paal gaat mee in `plan_batterij` (`auto_laden`, uit de stand van de vorige
+  ronde via `_auto_laden` in coach.py, want de batterij wordt eerst behandeld). Per
+  blok dezelfde regels als `_met_paal`: niet als hij zelf van het net laadt, boven
+  `auto_grens` (eerst plus `AUTO_MARGE`), op wat er naast het huis over is van het
+  ontlaadvermogen, en met de nachtstrategie nooit meer dan wat er morgenvroeg over
+  is. `Uur.auto_kwh`, de accustand van de uren daarna zakt mee, `Besluit.auto_weg`,
+  en de nachtbalans op de kaart en in de zin rekent ermee ("de auto krijgt er 1,0
+  kWh uit"). De grens voor de auto zelf (`nacht_over`, `car_floor`) rekent zonder,
+  anders telt de hulp dubbel. Een uur op standby telt ook: bij gelijke prijzen kiest
+  het uurplan standby waar de coach die minuut nul op de meter kiest.
+- **Het plan van de auto** (`accu_in_plan` in planner.py, `_accu_hulp` in
+  coach.py): wat de batterij per blok geeft komt als `accu_kwh` bij de blokken van
+  de paal, nooit meer dan wat er van het net zou komen. De pop-up zegt "Laden op
+  9,0 kW, waarvan 1,0 kWh uit je thuisbatterij", een vak "Uit je thuisbatterij, tot
+  hij op 70% staat", en de prijsgrafiek telt het niet als net. "Nog te laden" zegt
+  nu "in de auto" in plaats van "in de accu", want die pop-up kent nu twee accu's.
+- **Welke uren de auto kiest verandert niet.** De batterij helpt zodra de paal laadt,
+  tot zijn grens, in welk uur dat ook is; hij maakt geen uur goedkoper dan een ander.
+  Wat verandert is hoeveel er van het net komt. Dat is het antwoord op "mogelijk van
+  invloed op de laadstrategie".
+
+Gemeten in het virtuele huis, plan vlak voor het laden tegen wat de auto kreeg:
+`batterij-helpt-auto` 2,90 tegen 3,01 kWh, `-zonder-nacht` 5,78 tegen 5,83. Met de
+nachtstrategie (`-nacht`) 4,05 tegen 5,60: de grens zakt 's nachts als het huis minder
+vraagt dan verwacht, en dan belooft het plan minder dan er komt, nooit meer. Proef 33
+in test_batterij.py, proef 66 in test_planner.py, proef 104 in test_coach.py, de
+teksten in test_rapport.mjs, `accu_plan_kwh` en `bat_auto_plan_kwh` in de `Regel` van
+het virtuele huis.
+
 **Gaat de coach weg, dan gaat de batterij terug** (`_async_batterij_loslaten`):
 vermogen op nul en `idle_mode` in de modus. Ook als het vinkje "mag sturen" eraf
 gaat of het niveau naar adviseren. Dezelfde gedachte als de stroom terug op de
@@ -1806,12 +1844,12 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 418 controles op het denkwerk
-python tests/test_batterij.py    # 105 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 629 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1862 op hele laadbeurten in het virtuele huis
+python tests/test_planner.py     # 423 controles op het denkwerk
+python tests/test_batterij.py    # 117 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_coach.py       # 636 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1871 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 101 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 103 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```
