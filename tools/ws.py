@@ -64,8 +64,28 @@ class WS:
         return uit
 
     def recv(self):
+        """Het volgende bericht.
+
+        Staat er een tijdslimiet op de socket, dan is stilte geen einde maar
+        een vraag: na één keer wachten gaat er een ping heen, en pas als daar
+        ook niets op terugkomt is de verbinding dood. Op 23-09-2026 viel de
+        verbinding via Nabu Casa om 10:22 weg zonder afsluitbericht, en twee
+        loggers die zonder tijdslimiet lazen hingen daarna stil terwijl hun
+        proces gewoon leefde: de coach ging van "leeg" naar "nul op de meter"
+        en niemand schreef het op.
+        """
+        stil = 0
         while True:
-            b0, b1 = self._read(2)
+            try:
+                b0, b1 = self._read(2)
+            except (socket.timeout, TimeoutError):
+                stil += 1
+                if stil >= 2:
+                    raise ConnectionError("geen teken van leven na twee keer wachten")
+                self.id += 1
+                self.send({"id": self.id, "type": "ping"})
+                continue
+            stil = 0
             opcode = b0 & 0x0F
             n = b1 & 0x7F
             if n == 126:
@@ -83,10 +103,11 @@ class WS:
 
     def vraag(self, type_, **kw):
         self.id += 1
-        self.send({"id": self.id, "type": type_, **kw})
+        mijn = self.id  # een ping onderweg mag het nummer niet verschuiven
+        self.send({"id": mijn, "type": type_, **kw})
         while True:
             m = self.recv()
-            if m.get("id") == self.id and m.get("type") == "result":
+            if m.get("id") == mijn and m.get("type") == "result":
                 if not m.get("success", True):
                     raise RuntimeError(m.get("error"))
                 return m.get("result")

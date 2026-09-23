@@ -1344,6 +1344,25 @@ proef("de thuisbatterij staat weer in de lijst, met Anker en Overig als merk", (
   assert.deepEqual(BATTERY_BRANDS.map((b) => b.id), ["anker", "overig"]);
 });
 
+proef("Alfen is een laadpaalmerk: velden zonder apparaat-id of dienst, dezelfde lijst als const.py", async () => {
+  // 23-09-2026: het tweede paalmerk. Geen `device` en geen `service`: de
+  // coach schrijft een number en leest twee aan/uit-sensoren. Sturen kan dus
+  // wel, handmatige knoppen zijn er niet.
+  const { CHARGER_BRANDS, deviceCommands } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  assert.deepEqual(CHARGER_BRANDS.map((b) => b.id), ["easee", "alfen"]);
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/const.py", import.meta.url), "utf8");
+  const blok = bron.slice(bron.indexOf("CHARGER_BRANDS: Final = ["));
+  const python = [...blok.slice(0, blok.indexOf("]")).matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(python, CHARGER_BRANDS.map((b) => b.id));
+  const alfen = CHARGER_BRANDS.find((b) => b.id === "alfen");
+  assert.ok(!alfen.device && !alfen.service && !alfen.actions, "geen apparaat-id, geen dienst, geen woorden");
+  const paal = { type: "laadpaal", brand: "alfen", controllable: true, entities: {} };
+  assert.deepEqual(veldenVan(paal).filter((f) => f.needed).map((f) => f.key), ["limit", "connected", "charging", "max_limit"]);
+  assert.ok(kanSturen(paal), "een Alfen is te sturen");
+  assert.deepEqual(deviceCommands({ ...paal, device_id: "x" }), [], "maar heeft geen handmatige knoppen");
+  assert.deepEqual(mistNog(paal), ["Maximale stroomlimiet", "Auto aangesloten", "Auto laadt", "Werkelijke maximale stroom"]);
+});
+
 proef("de merken van de batterij zijn dezelfde als in const.py", () => {
   const bron = readFileSync(new URL("../custom_components/domotiapp_coach/const.py", import.meta.url), "utf8");
   const blok = bron.slice(bron.indexOf("BATTERY_BRANDS: Final = ["));

@@ -83,9 +83,12 @@ VERVALLEN_TYPES: Final = {
 # of the list, because a brand in a list reads as a promise, and there was
 # none. Op 19-09-2026 ging "overig" er om dezelfde reden uit: een laadpaal die
 # de coach niet kan sturen is geen laadpaal maar een apparaat dat hij meet, en
-# daar is "overig" als type voor.
+# daar is "overig" als type voor. Sinds 23-09-2026 ook Alfen (de eigenaar:
+# "ik wil een tweede paalmerk"); elke wijziging aan de paalsturing wordt
+# sindsdien voor allebei gebouwd en beproefd.
 CHARGER_BRANDS: Final = [
     "easee",
+    "alfen",
 ]
 
 # --- Dishwasher brands -----------------------------------------------------
@@ -185,6 +188,38 @@ CHARGER_CONTROL: Final = {
         "command_service": ("easee", "action_command"),
         "command_field": "action_command",
         "words": {"start": "start", "stop": "stop", "pause": "pause", "resume": "resume"},
+    },
+    # Alfen (Eve Single en Double Pro-line, NG9xx) via de integratie
+    # "alfen_modbus" (Modbus TCP). Drie dingen zijn anders dan bij Easee, en
+    # alle drie komen ze uit hoe die paal werkt en niet uit een voorkeur.
+    #
+    # 1. Er is geen dienst met een woord en geen apparaat-id. De limiet is een
+    #    number-entiteit (de maximale stroomlimiet van de socket, 0 tot 32 A)
+    #    en gaat er met `number.set_value` in. Starten en stoppen bestaan niet:
+    #    een limiet boven de ondergrens ís de start, een 0 is de pauze.
+    # 2. Er is geen houdbaarheid om mee te geven, want de paal heeft er zelf
+    #    een: de "Modbus slave max current valid time" (register 1209/1210).
+    #    Komt er binnen die tijd geen nieuwe waarde, dan valt hij terug op zijn
+    #    veilige stroom bij actieve load balancing (in de eerste woning 16 A).
+    #    Daarom schrijft de coach de limiet elke ronde opnieuw (`refresh`), ook
+    #    als hij niet verandert; evcc doet hetzelfde, elke 25 seconden. De
+    #    keerzijde staat vast: valt de coach weg met een 0 erin, dan laadt de
+    #    auto na die tijd op de veilige stroom door. Bij Easee is dat andersom.
+    # 3. Er is geen statussensor. De coach leest "auto aangesloten", "auto
+    #    laadt" en de modus 3-toestand (A, B1, B2, C2) en maakt daar zelf de
+    #    woorden van die de rest van de coach kent (`_status_afgeleid`).
+    #
+    # Gebouwd op 23-09-2026 naar de entiteiten van de eerste woning; nog nooit
+    # aan een echte Alfen gestuurd.
+    "alfen": {
+        "limit_entity": "limit",
+        "limit_service": ("number", "set_value"),
+        "limit_field": "value",
+        "ttl_field": None,
+        "command_service": None,
+        "command_field": None,
+        "words": {},
+        "refresh": True,
     },
 }
 

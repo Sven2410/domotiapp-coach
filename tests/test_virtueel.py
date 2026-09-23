@@ -193,6 +193,40 @@ if (vl := v("vast-zonnig")):
     controle("zonnig: de coach begint zodra er genoeg zon over is, zonder eerst bij te kopen",
              not laadt_tussen(vl, "07:00", "08:30"), "laadde al voor 08:30")
 
+# Dezelfde dag aan een Alfen (23-09-2026): dezelfde uitkomst, maar via een
+# number zonder houdbaarheid en zonder startwoord. Wat hier bewaakt wordt is
+# dat de coach de limiet elke minuut opnieuw schrijft, want anders valt de
+# paal na zijn geldigheidsduur terug op zijn veilige stroom en laadt de auto
+# op 16 A door terwijl de coach 0 zei.
+if (va := v("alfen-vast-zonnig")) and (vz := v("vast-zonnig")):
+    controle("alfen: dezelfde kilowatturen als aan een Easee",
+             abs(va.geladen_kwh - vz.geladen_kwh) < 0.3, f"alfen {va.geladen_kwh:.2f}, easee {vz.geladen_kwh:.2f}")
+    controle("alfen: dezelfde kosten als aan een Easee",
+             abs(va.kosten - vz.kosten) < 0.03, f"alfen {va.kosten:.2f}, easee {vz.kosten:.2f}")
+    controle("alfen: op tijd vol", gehaald(va), f"{va.soc_bij_klaar_tijd}")
+    controle("alfen: er gaat nooit een startwoord of een Easee-dienst heen",
+             not any(d in ("action_command", "set_charger_dynamic_limit") for _, d, _ in va.opdrachten),
+             f"{sorted({d for _, d, _ in va.opdrachten})}")
+    controle("alfen: de paal viel nooit terug op zijn veilige stroom", va.paal_terugvallen == 0, f"{va.paal_terugvallen} keer")
+    schrijf = [t for t, d, _ in va.opdrachten if d == "set_value"]
+    gaten = [(b - a).total_seconds() for a, b in zip(schrijf, schrijf[1:])]
+    controle("alfen: zolang er een auto hangt gaat de limiet elke minuut opnieuw de number in",
+             schrijf and max(gaten) <= 61, f"grootste gat {max(gaten) if gaten else None} s over {len(schrijf)} opdrachten")
+
+if (va := v("alfen-dynamisch-zonnig")) and (vz := v("dynamisch-zonnig")):
+    controle("alfen dynamisch: dezelfde kosten als aan een Easee",
+             abs(va.kosten - vz.kosten) < 0.03, f"alfen {va.kosten:.2f}, easee {vz.kosten:.2f}")
+    controle("alfen dynamisch: de pauze op 0 A wordt elke minuut opnieuw geschreven en de paal valt niet terug",
+             va.paal_terugvallen == 0 and not laadt_tussen(va, "07:00", "10:59"),
+             f"{va.paal_terugvallen} keer teruggevallen")
+
+if (va := v("alfen-doel-80")) and (vz := v("doel-80")):
+    controle("alfen doel 80: stopt rond 80% en blijft daar, want de 0 wordt elke minuut opnieuw geschreven",
+             va.soc_bij_klaar_tijd is not None and 79 <= va.soc_bij_klaar_tijd <= 84 and va.paal_terugvallen == 0,
+             f"soc {va.soc_bij_klaar_tijd}, {va.paal_terugvallen} keer teruggevallen")
+    controle("alfen doel 80: evenveel geladen als aan een Easee",
+             abs(va.geladen_kwh - vz.geladen_kwh) < 0.3, f"alfen {va.geladen_kwh:.2f}, easee {vz.geladen_kwh:.2f}")
+
 if (vl := v("vast-bewolkt")):
     controle("bewolkt: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
     # Vóór acht uur komt er alleen net bij als aanvulling onder de ondergrens

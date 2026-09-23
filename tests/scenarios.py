@@ -932,7 +932,27 @@ BATTERIJ = [
     batterij_klapperlast, batterij_zonder_rendement,
 ]
 
+# Dezelfde dagen aan een Alfen (23-09-2026). Wat er anders is staat bij
+# `Paal.merk`; wat er hetzelfde hoort te zijn meet test_virtueel.py: dezelfde
+# kilowatturen en dezelfde kosten als aan een Easee, geen startwoord, en een
+# limiet die elke minuut opnieuw geschreven wordt zodat de paal nooit op zijn
+# veilige stroom terugvalt.
+alfen_zonnig = vast_zonnig.kopie(
+    naam="alfen-vast-zonnig", uitleg="vast-zonnig aan een Alfen: de limiet gaat elke minuut opnieuw de number in",
+    paal=Paal(merk="alfen"),
+)
+alfen_dyn = dyn_zonnig.kopie(
+    naam="alfen-dynamisch-zonnig", uitleg="dynamisch-zonnig aan een Alfen: de pauze op 0 A blijft staan tot het goedkope uur",
+    paal=Paal(merk="alfen"),
+)
+
+alfen_doel_80 = doel_onder_auto.kopie(
+    naam="alfen-doel-80", uitleg="doel-80 aan een Alfen: de 0 blijft elke minuut komen, anders laadt de paal na zijn geldigheidsduur op 16 A door",
+    paal=Paal(merk="alfen"),
+)
+
 ALLE = [
+    alfen_zonnig, alfen_dyn, alfen_doel_80,
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,

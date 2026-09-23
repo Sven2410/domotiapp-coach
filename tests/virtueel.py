@@ -359,8 +359,21 @@ class Auto:
 @dataclass
 class Paal:
     """Een Easee-achtige paal: een dynamische limiet met houdbaarheid, en
-    start/pauze als opdracht."""
+    start/pauze als opdracht.
 
+    Met `merk="alfen"` een Alfen zoals de integratie alfen_modbus hem laat
+    zien (23-09-2026): de limiet is een number-entiteit zonder houdbaarheid,
+    er is geen start- of stopwoord (een limiet boven de ondergrens is de
+    start), en de paal vergeet zijn limiet na `geldig_s` en valt dan terug op
+    zijn veilige stroom, zoals de echte na zijn "Modbus slave max current
+    valid time". De status komt niet uit één sensor maar uit "auto
+    aangesloten", "auto laadt" en de modus 3-toestand.
+    """
+
+    merk: str = "easee"
+    geldig_s: int = 300
+    veilig_amps: float = 16.0
+    geschreven_op: dt.datetime | None = None
     max_amps: float = 16.0
     fasen: int = 3
     dyn_limit: float = 16.0
@@ -386,6 +399,7 @@ class Paal:
     fasen_nu: int = 3
     boven_groep_sinds: dt.datetime | None = None
     herstarts: int = 0
+    terugvallen: int = 0
     teller_kwh: float = 100.0
     # De echte Easee werkt zijn levensduurteller maar af en toe bij, in
     # sprongen. Zie `_geladen` in coach.py voor wat dat kostte.
@@ -406,12 +420,28 @@ class Paal:
                 self.gestart = True
             elif woord in ("stop", "pause"):
                 self.gestart = False
+        elif dienst == "set_value":
+            # Alfen: het getal is alles. Boven de ondergrens laadt de auto,
+            # op nul staat hij stil.
+            self.dyn_limit = float(data.get("value") or 0)
+            self.geschreven_op = nu
+            self.gestart = self.dyn_limit >= MIN_AMPS
 
     def stap(self, nu: dt.datetime) -> None:
         # Een limiet met houdbaarheid vervalt: dan staat er weer het maximum.
         if self.ttl_tot is not None and nu >= self.ttl_tot:
             self.dyn_limit = self.max_amps
             self.ttl_tot = None
+        # Een Alfen die niets meer hoort valt terug op zijn veilige stroom.
+        if (
+            self.merk == "alfen"
+            and self.geschreven_op is not None
+            and nu - self.geschreven_op >= dt.timedelta(seconds=self.geldig_s)
+        ):
+            self.dyn_limit = self.veilig_amps
+            self.gestart = True
+            self.geschreven_op = None
+            self.terugvallen += 1
 
     def aanbod(self) -> float:
         return min(self.dyn_limit, self.max_amps) if self.kabel else 0.0
@@ -901,6 +931,9 @@ class Verloop:
     beurten: list = field(default_factory=list)
     # Hoe vaak de paal zelf de sessie herstartte omdat de auto over de groep ging.
     paal_herstarts: int = 0
+    # Hoe vaak een Alfen op zijn veilige stroom terugviel omdat de coach
+    # zijn limiet niet op tijd opnieuw schreef. Hoort nul te zijn.
+    paal_terugvallen: int = 0
     # Wat de coach aan het eind over de auto geleerd had: kW per band.
     geleerd: dict = field(default_factory=dict)
     # De vaatwasser: wanneer de coach op start drukte, wanneer hij draaide,
@@ -1036,6 +1069,10 @@ E = {
     "bat_laag": "number.v_batterij_ontlaadgrens",
     "bat_in": "sensor.v_batterij_meter_in",
     "bat_uit": "sensor.v_batterij_meter_uit",
+    "alfen_limit": "number.v_paal_limiet",
+    "alfen_connected": "sensor.v_paal_auto_aangesloten",
+    "alfen_charging": "sensor.v_paal_auto_laadt",
+    "alfen_mode3": "sensor.v_paal_modus3",
 }
 
 
@@ -1188,12 +1225,21 @@ def instellingen(s: Scenario) -> dict:
             "id": "paal",
             "type": "laadpaal",
             "name": "Laadpaal",
-            "brand": "easee",
+            "brand": s.paal.merk,
             "controllable": s.paal_stuurbaar,
-            "device_id": "virtueel",
+            "device_id": "" if s.paal.merk == "alfen" else "virtueel",
             "entity": E["vermogen"],
             "entities": {
-                "status": E["status"],
+                **(
+                    {"status": E["status"]}
+                    if s.paal.merk != "alfen"
+                    else {
+                        "limit": E["alfen_limit"],
+                        "connected": E["alfen_connected"],
+                        "charging": E["alfen_charging"],
+                        "mode3": E["alfen_mode3"],
+                    }
+                ),
                 "current": E["stroom"],
                 "max_limit": E["max"],
                 "dynamic_limit": E["dyn"],
@@ -1451,7 +1497,17 @@ class Wereld:
         for naam, a in zip(("l1", "l2", "l3"), self.fase_amps()):
             z(E[naam], weg if p1_weg else w(f"{a:.2f}", "A"))
 
-        z(E["status"], self.paal.status(self.auto))
+        status = self.paal.status(self.auto)
+        z(E["status"], status)
+        if self.paal.merk == "alfen":
+            # Zoals alfen_modbus het meldt: twee aan/uit-sensoren en de modus
+            # 3-toestand. "Completed" kent een Alfen niet: een volle auto is
+            # een auto met aanbod die niets neemt, B2.
+            z(E["alfen_connected"], "off" if status == "disconnected" else "on")
+            z(E["alfen_charging"], "on" if status == "charging" else "off")
+            z(E["alfen_mode3"], {"disconnected": "A", "charging": "C2"}.get(
+                status, "B2" if self.paal.dyn_limit >= MIN_AMPS else "B1"))
+            z(E["alfen_limit"], w(f"{self.paal.dyn_limit:.1f}", "A"))
         z(E["stroom"], w(f"{self.auto.trekt_amps:.2f}", "A"))
         z(E["vermogen"], w(f"{self.paal_w:.0f}", "W"))
         z(E["max"], w(f"{self.paal.max_amps:.0f}", "A"))
@@ -1649,6 +1705,13 @@ class Diensten:
             # om te zien of zijn opdracht is aangenomen.
             self.hass.states.zet(E["dyn"], {"state": f"{self.wereld.paal.dyn_limit:.0f}",
                                             "attributes": {"unit_of_measurement": "A"}})
+        elif domein == "number" and dienst == "set_value" and data.get("entity_id") == E["alfen_limit"]:
+            self.wereld.paal.opdracht("set_value", data, self.wereld.nu)
+            self.verloop.opdrachten.append((self.wereld.nu, dienst, dict(data)))
+            self.hass.states.zet(E["dyn"], {"state": f"{self.wereld.paal.dyn_limit:.0f}",
+                                            "attributes": {"unit_of_measurement": "A"}})
+            self.hass.states.zet(E["alfen_limit"], {"state": f"{self.wereld.paal.dyn_limit:.1f}",
+                                                    "attributes": {"unit_of_measurement": "A"}})
         elif domein == "notify":
             self.verloop.meldingen.append((self.wereld.nu, data.get("message", "")))
         elif data.get("entity_id") == E["boiler_switch"] and dienst in ("turn_on", "turn_off"):
@@ -1944,6 +2007,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
     try:
         verloop.beurten = asyncio.run(coachmod.async_get_beurten(hass).async_list())
         verloop.paal_herstarts = wereld.paal.herstarts
+        verloop.paal_terugvallen = wereld.paal.terugvallen
         verloop.geleerd = {int(r["band"]): float(r["kw"]) for r in inst.get("car_pace") or []
                            if isinstance(r, dict) and r.get("car") == "auto"}
         verloop.vw_gemeten = [r for r in inst.get("program_measured") or []

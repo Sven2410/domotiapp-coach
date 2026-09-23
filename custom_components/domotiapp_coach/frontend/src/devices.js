@@ -221,6 +221,79 @@ export const CHARGER_BRANDS = [
       },
     ],
   },
+  {
+    id: "alfen",
+    label: "Alfen",
+    // Alfen (Eve Single en Double Pro-line) via de integratie "alfen_modbus"
+    // (HACS, Modbus TCP). Geen dienst met een woord en geen apparaat-id: de
+    // coach schrijft de maximale stroomlimiet (een number-entiteit) en leest
+    // de status uit twee aan/uit-sensoren en de modus 3-toestand. Elke minuut
+    // opnieuw, want de paal vergeet zijn limiet na zijn geldigheidsduur en
+    // valt dan terug op zijn veilige stroom. Sinds 23-09-2026, naar de
+    // entiteiten van de eerste woning; nog nooit aan een echte Alfen gestuurd.
+    note: "Alfen gaat via de integratie alfen_modbus; zet in de paal de geldigheidsduur van de Modbus-stroomlimiet op minstens drie minuten.",
+    fields: [
+      {
+        key: "limit",
+        label: "Maximale stroomlimiet",
+        hint: "De number-entiteit van de socket (0 tot 32 A). Hier schrijft de coach op, elke minuut opnieuw.",
+        filter: "all",
+        needed: true,
+      },
+      {
+        key: "connected",
+        label: "Auto aangesloten",
+        hint: "De sensor die aan zegt zodra er een auto aan de kabel hangt.",
+        filter: "all",
+        needed: true,
+        values: { on: "Auto aangesloten", off: "Geen auto aangesloten" },
+      },
+      {
+        key: "charging",
+        label: "Auto laadt",
+        hint: "De sensor die aan zegt zolang er stroom in de auto gaat.",
+        filter: "all",
+        needed: true,
+        values: { on: "Aan het laden", off: "Laadt niet" },
+      },
+      {
+        key: "mode3",
+        label: "Modus 3-status",
+        hint: "De toestand volgens IEC 61851 (A, B1, B2, C2). Daaraan ziet de coach of de paal de auto stroom aanbiedt terwijl die niets neemt.",
+        filter: "all",
+        values: {
+          A: "Geen auto",
+          B1: "Auto aangesloten, geen aanbod",
+          B2: "Auto aangesloten, wacht op de auto",
+          C1: "Auto vraagt, geen aanbod",
+          C2: "Aan het laden",
+          D1: "Auto vraagt met ventilatie, geen aanbod",
+          D2: "Aan het laden, met ventilatie",
+          E: "Niet beschikbaar",
+          F: "Storing",
+        },
+      },
+      {
+        key: "max_limit",
+        label: "Werkelijke maximale stroom",
+        hint: "Wat de paal zelf maximaal mag leveren, in ampère. Dit is de bovengrens die vastligt.",
+        filter: "all",
+        needed: true,
+      },
+      {
+        key: "dynamic_limit",
+        label: "Maximale stroom (teruggelezen)",
+        hint: "Wat de paal nu als limiet heeft staan, in ampère. Daaraan ziet de coach of zijn opdracht is aangenomen.",
+        filter: "all",
+      },
+      {
+        key: "current",
+        label: "Stroom L1",
+        hint: "De stroom op fase 1, in ampère. Samen met het vermogen ziet de coach daaraan op hoeveel fasen de auto laadt.",
+        filter: "all",
+      },
+    ],
+  },
 ];
 
 /**
