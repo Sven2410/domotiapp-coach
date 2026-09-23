@@ -4449,8 +4449,10 @@ controle("op adviseren blijft de laadgrens met rust", grens79(hass79c) == [] and
 # Bij een herstart van Home Assistant komt er geen async_stop, alleen het
 # stop-event. In de eerste woning bleef de batterij op 23-09-2026 om 00:44 bij
 # de herstart voor v0.81.1 gewoon 235 W ontladen in de externe modus tot de
-# coach twee minuten later terug was. Het event hoort de batterij terug te
-# geven: 0 W en zijn eigen stand, en de laadgrens terug.
+# coach twee minuten later terug was. Het event zet de batterij op 0 W en de
+# laadgrens terug. Sinds v0.96.0 blijft hij daarbij in de externe modus: in eigen
+# verbruik voedde de Anker op 23-09-2026 om 23:53 tijdens de herstart de Tesla met
+# 3,45 kW. De eigenaar: "bij herstart accu op 0 en dan pas kijken."
 hass79d, store79d, coach79d = bouw(huis75(soc="60"), instellingen(devices=[LAADPAAL, BATTERIJ79]))
 coach79d.async_start()
 asyncio.run(ronde75(hass79d, coach79d, NU79))
@@ -4463,9 +4465,18 @@ asyncio.run(hass79d.afmaken())
 zet79d = [(d[1], d[2].get("entity_id"), d[2]["value"] if "value" in d[2] else d[2].get("option")) for d in hass79d.services.verstuurd]
 controle("bij het stop-event gaat de batterij op 0 W",
          ("set_value", "number.batterij_vermogen", 0.0) in zet79d, f"{zet79d}")
-controle("en terug naar zijn eigen stand",
-         ("select_option", "select.batterij_modus", "self_consumption") in zet79d, f"{zet79d}")
+controle("maar hij blijft in de externe modus: de coach kijkt zelf weer na de herstart",
+         not any(e == "select.batterij_modus" for _, e, _ in zet79d), f"{zet79d}")
 controle("en de laadgrens terug op wat er stond", grens79(hass79d) == [95.0], f"{grens79(hass79d)}")
+# Het echt uitzetten van de integratie geeft hem wel terug.
+hass79e, _, coach79e = bouw(huis75(soc="60"), instellingen(devices=[LAADPAAL, BATTERIJ79]))
+asyncio.run(ronde75(hass79e, coach79e, NU79))
+hass79e.services.verstuurd.clear()
+asyncio.run(coach79e._async_batterijen_los())   # wat async_stop inplant
+asyncio.run(hass79e.afmaken())
+zet79e = [(d[1], d[2].get("entity_id"), d[2]["value"] if "value" in d[2] else d[2].get("option")) for d in hass79e.services.verstuurd]
+controle("bij het uitzetten van de integratie gaat hij wel terug naar zijn eigen stand",
+         ("select_option", "select.batterij_modus", "self_consumption") in zet79e, f"{zet79e}")
 
 print("=== 80. de thuisbatterij: het overschot voor de andere apparaten rekent met de opdracht ===")
 # 22-09-2026 in de eerste woning: de sensor van de Anker liep vijf tot tien
@@ -5460,6 +5471,48 @@ asyncio.run(ronde75(hass104b, coach104b, N104 - dt.timedelta(minutes=1)))
 st104b = asyncio.run(ronde75(hass104b, coach104b, N104))
 controle("zonder plan van de paal helpt hij in het uurplan niet",
          all((u.get("car_kwh") or 0) == 0 for u in st104b.get("hours") or []), "")
+
+print("=== 105. de laadlimiet van de planning is leidend, de algemene geldt zonder (v0.96.0) ===")
+# De bewoner van de eerste woning op 23-09-2026, naar evcc: "de algemene 90 geldt voor
+# snelladen, continu en zon; stel je een planning in, dan is de ingestelde laadlimiet
+# van de planning leidend. Op maandag werk ik in Arnhem (50%), op dinsdag in
+# Groningen (100%)."
+inst105 = instellingen(car_soc=[{"device": "dev-laadpaal", "car": "car-1", "percent": 40.0, "meter": 100.0}])
+inst105["strategy"]["schedules"][0].update(per_day=True, days=[
+    {"day": 0, "enabled": True, "done_by": "07:00", "target": 50},
+    {"day": 1, "enabled": True, "done_by": "07:00", "target": 100},
+    {"day": 2, "enabled": True, "done_by": "07:00"},
+])
+hass105, _, coach105 = bouw(huis(status="ready_to_charge", teruglevering=0.0, afname=500.0), inst105)
+coach105._doel["dev-laadpaal"] = 90.0            # "Laden tot 90%" op de kaart
+zondag105 = dt.datetime(2026, 9, 27, 21, 0)
+b105, _ = asyncio.run(ronde(coach105, inst105, nu=zondag105))
+print(f"  zondagavond: doel {b105['target_percent']}, planning {b105['target_plan']} ({b105['target_day']}), "
+      f"algemeen {b105['target_general']}, nog {b105['plan_ahead']['kwh_needed']:.1f} kWh")
+controle("zondagavond: het doel van maandag, 50%, en niet de 90 van de kaart",
+         b105["target_percent"] == 50.0 and b105["target_plan"] == 50.0 and b105["target_day"] == "maandag",
+         f"{b105['target_percent']} {b105['target_plan']} {b105['target_day']}")
+controle("de algemene limiet staat ernaast voor de kaart", b105["target_general"] == 90.0, f"{b105['target_general']}")
+b105b, _ = asyncio.run(ronde(coach105, inst105, nu=dt.datetime(2026, 9, 28, 21, 0)))
+controle("maandagavond: het doel van dinsdag, 100%", b105b["target_percent"] == 100.0, f"{b105b['target_percent']}")
+b105c, _ = asyncio.run(ronde(coach105, inst105, nu=dt.datetime(2026, 9, 29, 21, 0)))
+controle("dinsdagavond, woensdag zonder doel: de algemene 90",
+         b105c["target_percent"] == 90.0 and b105c["target_plan"] is None, f"{b105c['target_percent']}")
+coach105._boost.add("dev-laadpaal")
+b105d, _ = asyncio.run(ronde(coach105, inst105, nu=zondag105))
+controle("snelladen gaat boven de planning, dus de algemene limiet",
+         b105d["target_percent"] == 90.0 and b105d["target_plan"] is None, f"{b105d['target_percent']}")
+coach105._boost.discard("dev-laadpaal")
+inst105["strategy"]["schedules"][0]["enabled"] = False
+b105e, _ = asyncio.run(ronde(coach105, inst105, nu=zondag105))
+controle("zonder planning de algemene limiet", b105e["target_percent"] == 90.0, f"{b105e['target_percent']}")
+BOILER105 = {"id": "dev-boiler", "type": "boiler"}
+inst105b = instellingen()
+inst105b["strategy"]["schedules"] = [{"device": "dev-boiler", "enabled": True,
+                                      "window": {"done_by": "07:00", "target": 50}}]
+controle("een boiler kent geen laadlimiet",
+         coachmod.ChargerCoach._days(inst105b, BOILER105)[0].target is None, "")
+
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

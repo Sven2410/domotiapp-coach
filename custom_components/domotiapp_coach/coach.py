@@ -64,6 +64,7 @@ from .batterij import (
     vol_voor,
 )
 from .planner import (
+    DAGNAMEN,
     MODI_ZONDER_SOM,
     accu_in_plan,
     rendement_van,
@@ -913,6 +914,10 @@ class ChargerCoach:
         # koos (v0.88.0), net als de schuif van evcc. Zonder keuze het doel uit
         # het autoprofiel. Weg zodra de kabel eruit gaat.
         self._doel: dict[str, float] = {}
+        # Het doel van de planning dat deze ronde geldt, en de algemene limiet
+        # ernaast, voor de kaart (v0.96.0). Zie `_read`.
+        self._doel_planning: dict[str, float] = {}
+        self._doel_algemeen: dict[str, float] = {}
         # De thuisbatterij nu leegladen tot deze accustand (procent), per
         # apparaat. Zie `async_drain`.
         self._drain: dict[str, float] = {}
@@ -4520,12 +4525,13 @@ class ChargerCoach:
             "select", "select_option", {"entity_id": entity, "option": keuze}, blocking=True
         )
 
-    async def _async_batterij_loslaten(self, device: dict[str, Any]) -> None:
+    async def _async_batterij_loslaten(self, device: dict[str, Any], herstart: bool = False) -> None:
         """De batterij teruggeven: vermogen op nul, en zijn eigen stand terug.
 
         Dezelfde gedachte als de stroom terug op de boiler: een batterij die op
         zijn laatste opdracht blijft staan loopt leeg naar het net of trekt vol
-        van het net tot iemand het ziet.
+        van het net tot iemand het ziet. Bij een herstart alleen de nul, in de
+        externe modus (v0.96.0); zie `_async_bij_stop`.
         """
         sessie = self._batterij.get(device.get("id", ""))
         if sessie is not None:
@@ -4534,9 +4540,10 @@ class ChargerCoach:
             if sessie.get("settings") is not None:
                 await self._async_laadgrens_terug(sessie["settings"], device)
         await self._async_batterij_zetten(device, 0.0)
-        await self._async_batterij_modus(device, "idle_mode")
+        if not herstart:
+            await self._async_batterij_modus(device, "idle_mode")
 
-    async def _async_batterijen_los(self) -> None:
+    async def _async_batterijen_los(self, herstart: bool = False) -> None:
         """Bij het stoppen van de coach: elke batterij die hij stuurde teruggeven."""
         try:
             settings = await async_get_store(self.hass).async_load()
@@ -4548,7 +4555,7 @@ class ChargerCoach:
             if not (self._batterij.get(device.get("id", "")) or {}).get("stuurt"):
                 continue
             try:
-                await self._async_batterij_loslaten(device)
+                await self._async_batterij_loslaten(device, herstart=herstart)
             except Exception:  # noqa: BLE001 - één apparaat is niet alle apparaten
                 _LOGGER.exception("kon %s niet teruggeven bij het afsluiten", device.get("id"))
 
@@ -4687,6 +4694,14 @@ class ChargerCoach:
             # kaart is of het doel uit het profiel (v0.88.0).
             "target_percent": car.target_percent,
             "target_session": device_id in self._doel,
+            # De laadlimiet van de planning als die deze beurt geldt, de
+            # algemene limiet ernaast, en de dag van de klaar-tijd (v0.96.0).
+            "target_plan": self._doel_planning.get(device_id),
+            "target_general": self._doel_algemeen.get(device_id),
+            "target_day": (
+                DAGNAMEN[window.deadline.weekday()]
+                if device_id in self._doel_planning and window.deadline else None
+            ),
             # De accustand waar de coach mee rekent, en of die geschat is (een
             # opgegeven stand plus wat de paal er sindsdien in deed). De kaart
             # zegt het onder "Hoe vol is de auto nu?" (v0.89.0).
@@ -5680,6 +5695,20 @@ class ChargerCoach:
         # --- which car ---
         car = self._car(settings, device, charger)
 
+        # --- when it may run ---
+        window = resolve_window(now, self._days(settings, device))
+        # De laadlimiet van de planning (v0.96.0). De bewoner van de eerste
+        # woning op 23-09-2026, naar evcc: "de algemene 90 geldt voor snelladen,
+        # continu en zon; stel je een planning in, dan is de laadlimiet van de
+        # planning leidend." Een planning wint van de modus, dus ook van zijn
+        # limiet; snelladen gaat boven de planning, dus daar de algemene.
+        self._doel_algemeen[device_id] = car.target_percent
+        if window.enabled and window.target is not None and not charger.boost:
+            car.target_percent = window.target
+            self._doel_planning[device_id] = window.target
+        else:
+            self._doel_planning.pop(device_id, None)
+
         # --- "klaar" terwijl de auto niet vol is ---
         # De paal zegt alleen dat de auto niets meer aanneemt. In de klantwoning
         # was dat op 06-09-2026 om 04:27 een Ford met een storing op 86%, en die
@@ -5726,9 +5755,6 @@ class ChargerCoach:
         else:
             self._herstart_open.discard(device_id)
 
-        # --- when it may run ---
-        window = resolve_window(now, self._days(settings, device))
-
         return grid, car, charger, window
 
     @staticmethod
@@ -5755,6 +5781,16 @@ class ChargerCoach:
                 return None
             return _time(bron.get(sleutel))
 
+        def doel(bron: dict[str, Any]) -> float | None:
+            # Het doel van de planning (v0.96.0), alleen bij een laadpaal.
+            if device.get("type") != "laadpaal":
+                return None
+            try:
+                waarde = float(bron.get("target"))
+            except (TypeError, ValueError):
+                return None
+            return max(10.0, min(100.0, waarde))
+
         for entry in (settings.get("strategy") or {}).get("schedules") or []:
             if entry.get("device") != device.get("id") or not entry.get("enabled"):
                 continue
@@ -5766,6 +5802,7 @@ class ChargerCoach:
                     not_before=tijd(times, "not_before"),
                     start_by=tijd(times, "start_by"),
                     done_by=tijd(times, "done_by"),
+                    target=doel(times),
                 )
                 return dict.fromkeys(range(7), elke_dag)
 
@@ -5779,6 +5816,7 @@ class ChargerCoach:
                     not_before=tijd(day, "not_before"),
                     start_by=tijd(day, "start_by"),
                     done_by=tijd(day, "done_by"),
+                    target=doel(day),
                 )
             return uit
 
@@ -6951,6 +6989,15 @@ class ChargerCoach:
         stroom. Het teruggeven gebeurt hier dus zelf, en wordt afgewacht, want
         een taak die bij het afsluiten nog in de wachtrij staat wordt niet meer
         gedraaid.
+
+        **Maar bij een herstart blijft de batterij in de externe modus, op 0 W**
+        (v0.96.0). In eigen verbruik doet de batterij zelf nul op de meter, en
+        met een ladende auto is dat de auto voeden: in de eerste woning op
+        23-09-2026 om 23:53 gaf de Anker tijdens de herstart 3,45 kW aan de
+        Tesla, tot de coach om 23:55:13 terug was. De eigenaar: "bij herstart
+        accu op 0 en dan pas kijken." Stil blijven staan kan geen kwaad; na de
+        herstart kijkt de coach zelf weer. Het echt uitzetten van de integratie
+        (`async_stop`) geeft hem wel terug, want dan komt de coach niet terug.
         """
         try:
             settings = await async_get_store(self.hass).async_load()
@@ -6968,7 +7015,7 @@ class ChargerCoach:
                 )
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("kon de lopende laadbeurt niet bewaren bij het stoppen")
-        await self._async_batterijen_los()
+        await self._async_batterijen_los(herstart=True)
         await self._async_boilers_aan()
 
     async def _async_beurten_laden(self) -> None:

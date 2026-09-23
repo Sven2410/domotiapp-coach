@@ -3026,5 +3026,23 @@ leeg66 = planner.accu_in_plan(planner.Plan(blocks=[planner.Blok(U66, U66 + dt.ti
 controle("zonder hulp verandert er niets", leeg66.accu_kwh == 0.0 and leeg66.accu_to is None, "")
 
 print()
+print("=== 67. de laadlimiet van de planning hoort bij de dag van de klaar-tijd (v0.96.0) ===")
+# De bewoner van de eerste woning op 23-09-2026: "op maandag werk ik in Arnhem
+# (50%), op dinsdag in Groningen (100%)."
+dagen67 = {0: planner.DayWindow(done_by=dt.time(7, 0), target=50.0),
+           1: planner.DayWindow(done_by=dt.time(7, 0), target=100.0),
+           2: planner.DayWindow(done_by=dt.time(7, 0))}
+zondag67 = dt.datetime(2026, 9, 27, 21, 0)      # zondagavond: de klaar-tijd is maandag 07:00
+maandag67 = dt.datetime(2026, 9, 28, 21, 0)     # maandagavond: dinsdag 07:00
+dinsdag67 = dt.datetime(2026, 9, 29, 21, 0)     # dinsdagavond: woensdag, zonder doel
+controle("zondagavond ingeplugd: het doel van maandag", planner.resolve_window(zondag67, dagen67).target == 50.0,
+         f"{planner.resolve_window(zondag67, dagen67)}")
+controle("maandagavond: het doel van dinsdag", planner.resolve_window(maandag67, dagen67).target == 100.0, "")
+controle("een dag zonder doel: geen doel, dus de algemene limiet",
+         planner.resolve_window(dinsdag67, dagen67).target is None, "")
+controle("zonder planning ook geen doel", planner.resolve_window(zondag67, {}).target is None, "")
+
+
+print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

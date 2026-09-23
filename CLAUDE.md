@@ -222,6 +222,23 @@ auto nu?" een "%" achter het veld, en na een opgave "Sinds je 59% doorgaf is er
 3,4 kWh geladen. De coach verwacht dat de auto nu 63% vol is." (`soc_now` in de
 stand). Proef 97 in test_coach.py.
 
+**De laadlimiet van de planning is leidend** (v0.96.0). De bewoner van de eerste
+woning op 23-09-2026, naar evcc: "de algemene 90 geldt voor snelladen, continu en
+zon. Stel je een planning in, dan is de laadlimiet van de planning leidend. Op
+maandag werk ik in Arnhem (50%), op dinsdag in Groningen (100%)." De eigenaar:
+akkoord. In het schema van een laadpaal staat onder "Uiterlijk klaar om" nu
+"Laden tot" (%), bij elke dag hetzelfde en per dag (`target` in `window` en in
+`days`, `_WINDOW` in websocket.py, `kentDoel` en `doelUit` in schedule-sheet.js);
+leeg is de algemene limiet. `DayWindow.target` en `Window.target` in planner.py:
+het doel van de dag waarvan de klaar-tijd geldt, dus zondagavond inpluggen voor
+maandag 07:00 is het doel van maandag. In `_read` (coach.py) wint dat doel zolang
+de planning geldt, en niet bij snelladen (dat gaat boven de planning); anders de
+algemene limiet, dat is "Laden tot" op de kaart of het doel uit het autoprofiel.
+De keuzelijst op de kaart blijft de algemene limiet (`target_general`), met eronder
+"Deze beurt laadt tot 50%, volgens je planning van maandag" (`target_plan`,
+`target_day`). Een boiler kent geen limiet. Proef 67 in test_planner.py, proef 105
+in test_coach.py, het veld en de zin in test_rapport.mjs.
+
 **En per beurt op de kaart** (v0.88.0): "Laden tot", met als eerste keuze
 het doel uit het autoprofiel en daarna 50 tot 100%. De bewoner van de eerste
 woning op 23-09-2026, over evcc: "in de auto een harde max (100%), en in evcc
@@ -1733,6 +1750,25 @@ test_coach.py. **In het echt nog niet gezien**: of de integratie van de
 batterij op dat moment de opdracht nog aanneemt blijkt bij de volgende
 herstart in de eerste woning.
 
+**Maar bij een herstart blijft hij in de externe modus, op 0 W** (v0.96.0). In de
+eerste woning ging de batterij bij de herstart van 23-09-2026 om 23:53 netjes naar
+eigen verbruik, en daar doet de Anker zelf nul op de meter: met een Tesla die 9 kW
+trok gaf hij 3,45 kW aan de auto, tot de coach om 23:55:13 terug was (70 naar 69%).
+De eigenaar: "bij herstart accu op 0 en dan pas kijken." `_async_bij_stop` zet hem
+dus op 0 W en laat de modus staan (`herstart` in `_async_batterijen_los` en
+`_async_batterij_loslaten`); na de herstart neemt de coach het gewoon weer over.
+Het uitzetten van de integratie (`async_stop`) geeft hem wel terug aan zijn eigen
+stand, want dan komt de coach niet terug. Proef 79d.
+
+**Na een herstart houdt de coach een ladende auto nog tien minuten vast.** Dezelfde
+nacht om 00:02 vroeg de eigenaar "waarom laadt hij nu 6 A terwijl hij later
+goedkoper is": de coach zag na de herstart een auto die al laadde, en `_keep_alive`
+in planner.py houdt een beurt die net begonnen is `MIN_RUN_MINUTES` op de ondergrens,
+en stopt pas na `STOP_ROUNDS` ronden "stop" achter elkaar. De coach weet na een
+herstart niet hoe lang de auto al laadde (`_since` begint opnieuw), dus telt hij hem
+als net begonnen. Zo bedoeld: een auto die aan en uit gaat stopt soms helemaal met
+luisteren.
+
 **De knoppen van de batterij hebben eigen iconen** (v0.82.0): "Nu vol laden"
 een accu met een pijl erin (`accuVol`), "Nu leegladen" een accu met een pijl
 eruit (`accuLeeg`), en de paal houdt de bliksem (`data-boost-icon` in
@@ -1844,12 +1880,12 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 423 controles op het denkwerk
+python tests/test_planner.py     # 427 controles op het denkwerk
 python tests/test_batterij.py    # 117 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 636 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 644 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1871 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 103 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 105 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```
@@ -1942,6 +1978,14 @@ een herstart middenin, en daar gedraagt de coach zich bewust anders. Doe eerst
 één ronde met de kabel erin en nog geen stroom.
 
 ### De volgorde op het overzicht
+
+**Sinds v0.96.0 ook zonder Indelen, met het knopje rechtsboven in de kaart**
+(`#steer-sort`, `startSorteren_` in overview.js): het icoon van "Indeling aanpassen",
+zonder tekst. Daarna zijn de apparaten te slepen, staan de pijltjes eronder, en
+zet "Klaar" of het knopje zelf het weer uit. De eigenaar op 23-09-2026: "waarom kan
+ik hier de volgorde niet aanpassen, drag en drop wat ik vroeg toch?" en, na een
+versie met lang indrukken: "niet lang indrukken maar het zelfde icoontje als
+indeling aanpassen beneden, alleen dan zonder tekst, en dat je dan kan slepen."
 
 De kaarten zijn te verslepen sinds de stand "Indelen" (`layout.js`, per scherm in
 de browser en niet per persoon). Sinds v0.91.0 ook de rij met aanstuurbare

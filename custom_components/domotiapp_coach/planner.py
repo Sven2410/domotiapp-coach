@@ -397,6 +397,9 @@ class DayWindow:
     not_before: time | None = None
     start_by: time | None = None
     done_by: time | None = None
+    # Tot hoeveel procent de auto op deze klaar-tijd geladen moet zijn, of None:
+    # dan de algemene limiet (v0.96.0). Alleen bij een laadpaal.
+    target: float | None = None
 
 
 @dataclass
@@ -435,6 +438,12 @@ class Window:
     # zei "hij start om 13:00". Voor een programma-apparaat is dat het moment
     # om te vragen: morgen, of toch nu.
     missed: datetime | None = None
+    # Het doel van de dag waarvan de klaar-tijd geldt, of None (v0.96.0). De
+    # bewoner van de eerste woning op 23-09-2026, naar evcc: "op maandag werk ik
+    # in Arnhem (50%), op dinsdag in Groningen (100%). De algemene limiet geldt
+    # voor snelladen, continu en zon; stel je een planning in, dan is de
+    # laadlimiet van de planning leidend."
+    target: float | None = None
 
 
 @dataclass
@@ -1163,7 +1172,7 @@ def resolve_window(now: datetime, days: dict[int, DayWindow]) -> Window:
 
         return Window(
             enabled=True, opens=opens, start_by=uiterlijk, deadline=deadline,
-            skipped=tuple(overgeslagen), missed=gemist,
+            skipped=tuple(overgeslagen), missed=gemist, target=day.target,
         )
 
     return Window()
