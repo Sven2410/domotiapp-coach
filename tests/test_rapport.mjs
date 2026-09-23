@@ -1104,6 +1104,14 @@ proef("een nieuwe paal begint op zon, en de kaart heeft Continu en Zon naast Sne
   assert.ok(kaart.includes('type: "domotiapp_coach/coach/mode"'));
 });
 
+proef("op de kaart kies je per beurt tot hoeveel procent hij laadt (v0.88.0)", () => {
+  const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
+  assert.ok(kaart.includes('data-target-select="${slot}"'), "de keuzelijst staat op de kaart");
+  assert.ok(kaart.includes("Zoals het autoprofiel ("), "met het doel uit het profiel als eerste keuze");
+  assert.ok(kaart.includes('type: "domotiapp_coach/coach/target"'));
+  assert.match(kaart, /percent: waarde === "" \? null : Number\(waarde\)/, "leeg is terug naar het profiel");
+});
+
 proef("onder het schemaschuifje staat wat hij zonder planning doet", async () => {
   const { planSummary } = await import("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js");
   const uit = { enabled: false, per_day: false, window: {}, days: [] };

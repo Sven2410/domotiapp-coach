@@ -2164,6 +2164,23 @@ class DacViewOverview extends DacElement {
     }
   }
 
+  /** Tot hoeveel procent deze beurt laadt; "" gaat terug naar het autoprofiel. */
+  async saveTarget_(slot, waarde) {
+    const device = this.steerDevices_?.[slot];
+    if (!device || !this.hass) return;
+    try {
+      await this.hass.callWS({
+        type: "domotiapp_coach/coach/target",
+        device_id: device.id,
+        percent: waarde === "" ? null : Number(waarde),
+      });
+      this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
+      this.updateSteerable_(this.lastDevices_ ?? []);
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon het laaddoel niet doorgeven", error);
+    }
+  }
+
   /**
    * Doorgeven hoe vol de auto is die eraan hangt.
    *
@@ -2470,6 +2487,12 @@ class DacViewOverview extends DacElement {
               </div>
               <p class="soc-hint" data-soc-hint="${slot}"></p>
             </div>
+            <!-- Tot hoeveel procent deze beurt laadt (v0.88.0), zoals de schuif
+                 van evcc. De laadgrens in de auto blijft de bovengrens. -->
+            <div class="car-pick" data-target-pick="${slot}" hidden>
+              <label for="target-${slot}">Laden tot</label>
+              <select id="target-${slot}" data-target-select="${slot}"></select>
+            </div>
             <div class="car-pick" data-program-pick="${slot}" hidden>
               <label for="program-${slot}">Welk programma staat erop?</label>
               <select id="program-${slot}" data-program-select="${slot}"></select>
@@ -2576,6 +2599,10 @@ class DacViewOverview extends DacElement {
       select.addEventListener("change", () =>
         this.chooseCar_(Number(select.dataset.carSelect), select.value)
       );
+    }
+    for (const keuze of this.$$("[data-target-select]")) {
+      keuze.addEventListener("change", () =>
+        this.saveTarget_(Number(keuze.dataset.targetSelect), keuze.value));
     }
     for (const button of this.$$("[data-soc-save]")) {
       button.addEventListener("click", () => this.saveSoc_(Number(button.dataset.socSave)));
@@ -2714,6 +2741,28 @@ class DacViewOverview extends DacElement {
           : oordeel?.needs_soc
             ? "Hier wacht de coach op. Zonder dit gaat hij uit van een lege accu."
             : "Geef dit door, dan kan de coach het gunstigste moment kiezen.";
+      }
+
+      // Tot hoeveel procent: bij elke auto van het huis die er hangt. Een gast
+      // heeft geen accu die de coach kent, dus daar valt niets te kiezen.
+      const doelPick = this.$(`[data-target-pick="${slot}"]`);
+      doelPick.hidden = !(hangt && gekozen && !gekozen.guest && oordeel?.target_percent !== undefined);
+      if (!doelPick.hidden) {
+        const keuze = this.$(`[data-target-select="${slot}"]`);
+        const profiel = Math.round(Number(gekozen.target_percent) || 100);
+        const nu = oordeel.target_session ? String(Math.round(oordeel.target_percent)) : "";
+        const opties = [["", `Zoals het autoprofiel (${profiel}%)`],
+          ...[50, 60, 70, 80, 90, 100].map((p) => [String(p), `${p}%`])];
+        if (keuze.dataset.opties !== JSON.stringify(opties)) {
+          keuze.dataset.opties = JSON.stringify(opties);
+          keuze.replaceChildren(...opties.map(([waarde, tekst]) => {
+            const optie = document.createElement("option");
+            optie.value = waarde;
+            optie.textContent = tekst;
+            return optie;
+          }));
+        }
+        if (this.shadowRoot?.activeElement !== keuze) keuze.value = nu;
       }
 
       this.paintProgramPick_(slot, device);

@@ -5146,6 +5146,47 @@ controle("bij een Alfen telt 'auto laadt' aan", coach94._paal_laadt(inst94b), ""
 hass94.states.zet("sensor.alfen_laadt", "off")
 controle("en uit is uit", not coach94._paal_laadt(inst94b), "")
 
+print("=== 95. laden tot een gekozen procent, per beurt op de kaart (v0.88.0) ===")
+# De bewoner van de eerste woning op 23-09-2026, over evcc: "in de auto een harde
+# max (100%), en in evcc een gewenste accustand van bijvoorbeeld 80."
+auto95 = dict(LAADPAAL["cars"][0], soc_entity="sensor.auto_soc", capacity_kwh=78.0, target_percent=100.0)
+paal95 = dict(LAADPAAL, cars=[auto95])
+inst95 = instellingen(devices=[paal95])
+huis95 = huis(status="charging", stroom=10.0, vermogen=6900.0, teruglevering=0.0, afname=7000.0)
+huis95["sensor.auto_soc"] = "85"
+hass95, store95, coach95 = bouw(huis95, inst95)
+b95, _ = asyncio.run(ronde(coach95, inst95, paal=paal95))
+print(f"  profiel 100%, auto op 85%: {b95['rule']}, doel {b95['target_percent']}")
+controle("met het profiel op 100% laadt hij nog", b95["rule"] != "complete" and b95["target_percent"] == 100.0,
+         f"{b95['rule']} {b95['target_percent']}")
+
+
+async def doel95(p):
+    coach95.async_target("dev-laadpaal", p)
+    await hass95.afmaken()
+    return await ronde(coach95, inst95, paal=paal95)
+
+
+b95b, _ = asyncio.run(doel95(80))
+print(f"  gekozen 80%: {b95b['rule']}: {b95b['reason']}")
+controle("80% op de kaart: de auto op 85% is klaar", b95b["rule"] == "complete" and b95b["target_session"],
+         f"{b95b['rule']} {b95b['target_session']}")
+controle("en de keuze is vastgelegd", any(r.get("target") == 80.0 for r in store95.instellingen["sessions"]),
+         f"{store95.instellingen['sessions']}")
+hass95h, store95h, coach95h = bouw(huis95, store95.instellingen)
+coach95h._restore(store95h.instellingen)
+controle("na een herstart staat het gekozen doel er nog", coach95h._doel.get("dev-laadpaal") == 80.0, f"{coach95h._doel}")
+b95c, _ = asyncio.run(doel95(None))
+controle("terug naar het profiel: weer 100%", b95c["target_percent"] == 100.0 and not b95c["target_session"],
+         f"{b95c['target_percent']}")
+coach95.async_target("dev-laadpaal", 5)
+controle("nooit onder de 10%", coach95._doel["dev-laadpaal"] == 10.0, f"{coach95._doel}")
+hass95.states.zet("sensor.laadpaal_status", "disconnected")
+asyncio.run(ronde(coach95, inst95, paal=paal95, nu=dt.datetime(2026, 8, 18, 14, 40)))
+coach95._los_sinds["dev-laadpaal"] = dt.datetime(2026, 8, 18, 14, 39)
+asyncio.run(ronde(coach95, inst95, paal=paal95, nu=dt.datetime(2026, 8, 18, 14, 41)))
+controle("kabel eruit: het gekozen doel vervalt", "dev-laadpaal" not in coach95._doel, f"{coach95._doel}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
