@@ -906,6 +906,8 @@ proef("de vakantiestand staat in het formulier en op de kaart", async () => {
   const html = el.batteryHtml_(accu, 0);
   assert.ok(html.includes('data-bat-field="holiday"') && html.includes('data-bat-field="holiday_max_percent"'));
   assert.ok(html.includes('data-bat-holiday="0"') && !html.includes('hidden data-bat-holiday="0"'), "de grens is zichtbaar als de stand aanstaat");
+  assert.equal(html.split('data-bat-field="holiday_max_percent"').length - 1, 1, "de grens staat precies een keer in het formulier (23-09-2026: hij stond er twee keer)");
+  assert.equal(html.split('data-bat-field="holiday"').length - 1, 1, "de vink staat precies een keer");
   const rijen = batteryRows({ kind: "batterij", mode: "nul", mode_name: "Nul op de meter", holiday: true, ceiling: 60 });
   assert.ok(rijen.some((r) => r.label === "Vakantiestand" && r.text.includes("60%")), JSON.stringify(rijen));
 });
