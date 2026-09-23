@@ -294,8 +294,17 @@ export class DacPlanAheadSheet extends DacElement {
       : ["Vol rond", wanneer(plan.expected_done),
           plan.deadline ? `klaar om ${wanneer(plan.deadline)}` : "geen klaar-tijd"];
 
+    // Aan de paal, en wat daarvan in de accu komt (v0.94.0). De bewoner van de
+    // eerste woning rekende 78 kWh x 30% = 23,4 en las 26,0: dat was aan de
+    // paal, met 10% laadverlies dat niemand gemeten had.
+    const inAccu = plan.kwh_in_car ?? null;
+    const verlies = plan.efficiency ? Math.round((1 - plan.efficiency) * 100) : null;
+    const nogBij = inAccu === null || verlies === null
+      ? ""
+      : `aan de paal; ${kwh(inAccu)} in de accu, ${verlies}% laadverlies `
+        + (plan.efficiency_measured ? "(gemeten aan deze auto)" : "(aangenomen, nog niet gemeten)");
     this.paintKop_([
-      ["Nog te laden", kwh(plan.kwh_needed), ""],
+      ["Nog te laden", kwh(plan.kwh_needed), nogBij],
       ["Op vol vermogen", uren(plan.hours_needed),
         // Sinds v0.61.0 kan dit een meting zijn: wat er de afgelopen uren
         // gemiddeld onder de zekering overbleef, bij een huis met een

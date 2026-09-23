@@ -320,6 +320,17 @@ class Car:
     # dan stopt de coach eerder. Staat het hoger, dan merkt hij dat de auto niet
     # verder wil en zegt hij dat, zoals altijd al.
     target_percent: float = 100.0
+    # Hoeveel van wat de paal levert er in de accu komt, gemeten aan deze auto
+    # (v0.94.0), of None: dan `CHARGE_EFFICIENCY`, en dat is een aanname. De
+    # bewoner van de eerste woning op 23-09-2026 rekende 78 kWh x (90 - 60)% =
+    # 23,4 kWh, en de kaart zei 26,0: dat is 23,4 / 0,9. Zie `_rendement_meten`
+    # in coach.py.
+    efficiency: float | None = None
+
+
+def rendement_van(car: Car) -> float:
+    """Het laadrendement waarmee voor deze auto gerekend wordt."""
+    return car.efficiency if car.efficiency else CHARGE_EFFICIENCY
 
 
 @dataclass
@@ -965,7 +976,7 @@ def energy_needed_kwh(car: Car) -> float | None:
         return None
 
     missing = max(0.0, (doel_van(car) - car.soc_percent) / 100.0 * car.capacity_kwh)
-    return missing / CHARGE_EFFICIENCY
+    return missing / rendement_van(car)
 
 
 def worst_case_kwh(car: Car) -> float | None:
@@ -982,7 +993,7 @@ def worst_case_kwh(car: Car) -> float | None:
     """
     if car.guest or not car.capacity_kwh:
         return None
-    return doel_van(car) / 100.0 * car.capacity_kwh / CHARGE_EFFICIENCY
+    return doel_van(car) / 100.0 * car.capacity_kwh / rendement_van(car)
 
 
 def charge_cost(watts: float, surplus_w: float, buy: float, feed_in: float) -> float:
@@ -1073,7 +1084,7 @@ def _uren_met_afbouw(car: Car, kw: float, energy: float) -> float:
     while soc < grens:
         band = int(soc // 10)
         tot = min(grens, (band + 1) * 10.0)
-        kwh = (tot - soc) / 100.0 * car.capacity_kwh / CHARGE_EFFICIENCY
+        kwh = (tot - soc) / 100.0 * car.capacity_kwh / rendement_van(car)
         tempo = min(kw, car.tempo_per_band.get(band, kw))
         if tempo <= 0:
             tempo = kw

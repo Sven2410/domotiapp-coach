@@ -514,6 +514,9 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # tempo van de paal en is de auto 's ochtends niet vol. Per laadpunt en per
     # auto; storage.py snoeit op het laadpunt. Zie `_tempo_leren` in coach.py.
     "car_pace": [],
+    # Het gemeten laadrendement per auto aan een paal (v0.94.0): {device, car,
+    # eff, n}. Zie `_rendement_meten` in coach.py.
+    "car_efficiency": [],
     # Wat de coach bij een echte beurt mat van een programma-apparaat: per
     # apparaat en per programma de duur, het verbruik, de piek en het verloop
     # (watt per vijf minuten vanaf de start), als lopend gemiddelde over de

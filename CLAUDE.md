@@ -1647,6 +1647,36 @@ fase 3 blijft op 23 A. Proef 64 in test_planner.py, proef 100 in test_coach.py
 (proef 96 aangepast: standaard wijkt ook een batterij die van het net laadt voor de
 auto), de lijst in test_rapport.mjs.
 
+**Het laadrendement is een meting per auto** (v0.94.0). De bewoner van de eerste
+woning op 23-09-2026: 78 kWh van 60 naar 90% is 23,4 kWh, "nog te laden is 23,4 in
+plaats van 26." De 26 was 23,4 gedeeld door `CHARGE_EFFICIENCY` (90%), en dat is
+een aanname. `Car.efficiency` en `rendement_van` in planner.py; in coach.py meet
+`_rendement_meten` bij elke nieuwe stand van de accusensor hoeveel procentpunt er
+bijkwam tegenover wat de paal in die tijd leverde (`_eigen`), over minstens
+`REND_MIN_PROCENT` (tien) en `REND_MIN_KWH` (drie), en alleen een uitkomst tussen
+`REND_LAAGST` en `REND_HOOGST`. `_async_rendement_bewaren` houdt per paal en auto
+een lopend gemiddelde bij in `car_efficiency` (hooguit vijf beurten). Zolang er
+niets gemeten is blijft het 90%, en de pop-up zegt dat: "23,4 kWh in de accu, 10%
+laadverlies (aangenomen, nog niet gemeten)". Het bijtellen van een accustand
+(`_soc_bijgeteld`, `_typed_soc`) rekent met hetzelfde rendement. Proef 65 in
+test_planner.py, proef 101 in test_coach.py.
+
+Dezelfde avond, bij het meekijken, nog twee fouten die met de kaart te maken hadden:
+
+- **Een opgegeven accustand telde niet door aan een Alfen.** Het paneel bewaarde de
+  teller van de paal als kale toestand (`coach/soc` in websocket.py), en die telt
+  bij een Alfen in Wh: een factor duizend boven wat `_teller` in kWh leest. Het verschil was
+  onder nul, dus de proefauto bleef de hele beurt op 60% en "nog te laden" op 26
+  kWh. Nu in kWh met de eenheid van de sensor (`to_kwh`), en `_typed_soc` herstelt
+  een oude stand die een factor duizend te hoog ligt. Bij een Easee (teller in kWh)
+  viel het nooit op. Proef 102.
+- **Alleen de paal stuurde zijn besluit naar het paneel.** `EVENT_DECISION` ging
+  alleen in `_one` af; een batterij, boiler of vaatwasser kreeg zijn besluit alleen
+  bij het openen van het paneel. De accukaart zei daardoor om 23:15 "de coach heeft
+  43 minuten niets beslist" en "accu nu 79%" terwijl de accu op 71% stond.
+  `_besluit_melden` na elke `_one_batterij`, `_one_programma` en `_one_boiler`.
+  Proef 103.
+
 **Gaat de coach weg, dan gaat de batterij terug** (`_async_batterij_loslaten`):
 vermogen op nul en `idle_mode` in de modus. Ook als het vinkje "mag sturen" eraf
 gaat of het niveau naar adviseren. Dezelfde gedachte als de stroom terug op de
@@ -1776,12 +1806,12 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 415 controles op het denkwerk
+python tests/test_planner.py     # 418 controles op het denkwerk
 python tests/test_batterij.py    # 105 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 616 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 629 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1862 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 100 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 101 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

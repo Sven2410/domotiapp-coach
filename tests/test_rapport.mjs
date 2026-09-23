@@ -1116,6 +1116,18 @@ proef("de pop-up zegt 'prijs per kwartier' bij kwartierprijzen", () => {
   assert.equal(knopen.get("#vooruit-uren").kinderen.length, 1, "een regel voor het hele uur");
 });
 
+proef("nog te laden: aan de paal, en wat er in de accu komt, gemeten of aangenomen (v0.94.0)", () => {
+  const { el, knopen } = vooruitScherm({ ...NACHT, kwh_needed: 26.0, kwh_in_car: 23.4, efficiency: 0.9, efficiency_measured: false });
+  el.paint_();
+  const vak = knopen.get("#vooruit-kop").kinderen[0];
+  const bij = vak.kinderen[2]?.textContent ?? "";
+  assert.equal(vak.kinderen[1].textContent, "26,0 kWh");
+  assert.equal(bij, "aan de paal; 23,4 kWh in de accu, 10% laadverlies (aangenomen, nog niet gemeten)");
+  const gemeten = vooruitScherm({ ...NACHT, kwh_needed: 24.6, kwh_in_car: 23.4, efficiency: 0.95, efficiency_measured: true });
+  gemeten.el.paint_();
+  assert.match(gemeten.knopen.get("#vooruit-kop").kinderen[0].kinderen[2].textContent, /5% laadverlies \(gemeten aan deze auto\)/);
+});
+
 proef("de pop-up tekent de grafiek bij de paal en bij de batterij", () => {
   const sheet = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js", import.meta.url), "utf-8");
   assert.equal(sheet.split("this.paintPrijs_(").length - 1, 3, "leeg maken, de paal, en de batterij");

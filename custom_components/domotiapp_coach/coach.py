@@ -65,6 +65,7 @@ from .batterij import (
 )
 from .planner import (
     MODI_ZONDER_SOM,
+    rendement_van,
     plan_rang,
     plan_regels,
     zon_grens,
@@ -240,6 +241,15 @@ METER_NAIJL = timedelta(minutes=1)
 # steeds binnen een ronde opgemerkt wordt. Het verslag noemt het moment waarop
 # de paal het voor het eerst zei, niet het moment waarop de coach het geloofde.
 KABEL_ONTDREUN = timedelta(seconds=30)
+# Het laadrendement meten (v0.94.0): over minstens zoveel procentpunt en kWh,
+# want een accusensor meldt in stappen (een Ford per tien procent) en over een
+# korte strook is de fout groter dan het verlies zelf. En alleen wat tussen
+# deze grenzen valt: daarbuiten klopt de meting niet, niet het rendement.
+REND_MIN_PROCENT = 10.0
+REND_MIN_KWH = 3.0
+REND_LAAGST = 0.70
+REND_HOOGST = 1.0
+REND_MAX_N = 5
 # Hoeveel een batterij moet zakken voordat de fasemetingen van daarvoor niet
 # meer voor de mediaan tellen (v0.88.2). Een halve kilowatt is ruim twee
 # ampère op één fase; kleiner bijregelen doet de regelaar de hele dag.
@@ -981,6 +991,12 @@ class ChargerCoach:
         # De accustand van de auto aan elke paal bij de vorige ronde, voor de
         # voorrang bij zonoverschot ("auto tot 60%"). Zie `_zon_correctie`.
         self._auto_soc: dict[str, float | None] = {}
+        # Het laadrendement: waar de lopende meting per paal begon (accustand,
+        # eigen kWh), wat er gemeten en nog niet bewaard is, en waarmee er nu
+        # gerekend wordt. Zie `_rendement_meten`.
+        self._rend_start: dict[str, tuple[float, float]] = {}
+        self._rend_meting: dict[str, float] = {}
+        self._rend_nu: dict[str, float] = {}
         # Wat elk apparaat er de komende minuut aan ampère bij gaat nemen, en
         # onder welke zekeringen: de toezeggingen voor de voorrang bij
         # planningen (v0.93.0). Zie `_hogere_toezeggingen`.
@@ -1881,6 +1897,7 @@ class ChargerCoach:
         for device in batterijen:
             try:
                 await self._one_batterij(moment, settings, device, level)
+                self._besluit_melden(device.get("id", ""))
             except ServiceNotFound:
                 _LOGGER.warning(
                     "%s kan nog niet aangestuurd worden: de integratie van de batterij is er nog niet",
@@ -1942,6 +1959,7 @@ class ChargerCoach:
                 continue
             try:
                 await self._one_programma(moment, settings, device, level)
+                self._besluit_melden(device.get("id", ""))
             except ServiceNotFound:
                 _LOGGER.warning(
                     "%s kan nog niet aangestuurd worden: de startknop bestaat niet (nog niet geladen?)",
@@ -1957,6 +1975,7 @@ class ChargerCoach:
                 continue
             try:
                 await self._one_boiler(moment, settings, device, level)
+                self._besluit_melden(device.get("id", ""))
             except ServiceNotFound:
                 _LOGGER.warning(
                     "%s kan nog niet aangestuurd worden: de schakelaar bestaat niet (nog niet geladen?)",
@@ -1966,6 +1985,19 @@ class ChargerCoach:
                 _LOGGER.exception("kon %s niet beoordelen", device.get("id"))
 
         return True
+
+    def _besluit_melden(self, device_id: str) -> None:
+        """Het besluit van deze ronde naar het paneel, zoals `_one` het voor een paal doet.
+
+        Tot v0.94.0 deed alleen de paal dat. De kaart van een batterij, een
+        boiler of een vaatwasser kreeg zijn besluit dus alleen bij het openen
+        van het paneel, en in de eerste woning zei de kaart op 23-09-2026 om
+        23:15 "de coach heeft 43 minuten niets beslist" en "accu nu 79%" terwijl
+        de coach elke minuut besliste en de accu op 71% stond.
+        """
+        stand = self.state.get(device_id)
+        if stand is not None:
+            self.hass.bus.async_fire(EVENT_DECISION, {"device": device_id, **stand})
 
     # ------------------------------------------------------------------
     # Een apparaat met een programma: de vaatwasser
@@ -4613,6 +4645,9 @@ class ChargerCoach:
             self._asking_since.pop(device_id, None)
         self._bijhouden(now, device, car, charger, window, decision, grid, settings)
         self._tempo_leren(now, settings, device, car, charger, grid)
+        # Een nieuwe meting van het laadrendement bewaren (v0.94.0).
+        if device_id in self._rend_meting:
+            self.hass.async_create_task(self._async_rendement_bewaren(settings, device_id))
 
         # Bijhouden hoe lang een sessie al tegen de ladder in wordt aangehouden.
         # Zodra de ladder het weer eens is met wat er gebeurt, staat de teller
@@ -4682,6 +4717,7 @@ class ChargerCoach:
             self._boost.discard(device_id)
             self._modus.pop(device_id, None)
             self._doel.pop(device_id, None)
+            self._rend_start.pop(device_id, None)
             self._paused.discard(device_id)
             self._zon.pop(device_id, None)
             self._holding.pop(device_id, None)
@@ -5796,6 +5832,10 @@ class ChargerCoach:
         if phases_measured:
             phases = 1
 
+        # Het laadrendement van deze auto, gemeten of aangenomen (v0.94.0).
+        gemeten_rendement = self._rendement_uit(settings, device_id, str(profile.get("id") or ""))
+        self._rend_nu[device_id] = gemeten_rendement or CHARGE_EFFICIENCY
+
         # De auto zelf gaat voor. Zegt hij niets, dan telt wat de bewoner heeft
         # opgegeven, bijgewerkt met wat de paal er sindsdien in heeft gedaan.
         soc = _number(self.hass, profile.get("soc_entity"))
@@ -5829,6 +5869,7 @@ class ChargerCoach:
             soc_percent=soc,
             soc_estimated=geschat,
             tempo_per_band=self._tempo_uit(settings, device_id, auto_id),
+            efficiency=gemeten_rendement,
         )
 
     def _zon_bijhouden(self, now: datetime, settings: dict[str, Any]) -> None:
@@ -5927,7 +5968,7 @@ class ChargerCoach:
         meter = self._teller(device)
         sinds = sessie.get("soc_meter")
         if capacity and meter is not None and sinds is not None:
-            geladen = max(0.0, meter - float(sinds)) * CHARGE_EFFICIENCY
+            geladen = max(0.0, meter - float(sinds)) * self._rend_nu.get(device.get("id", ""), CHARGE_EFFICIENCY)
             percent = float(percent) + geladen / capacity * 100.0
         return min(100.0, float(percent))
 
@@ -6222,6 +6263,7 @@ class ChargerCoach:
         eigen = float((self._eigen.get(device_id) or {}).get("kwh") or 0.0)
         ijk = self._soc_ijk.get(device_id)
         if ijk is None or abs(ijk[0] - gemeten) > 1e-9:
+            self._rendement_meten(device_id, gemeten, eigen, capacity)
             if ijk is not None and 0.0 < gemeten - ijk[0] <= SOC_STAP_MAX:
                 sprong = gemeten - ijk[0]
                 eerder = self._soc_stap.get(device_id)
@@ -6230,8 +6272,68 @@ class ChargerCoach:
             return gemeten
         if not capacity:
             return gemeten
-        erbij = max(0.0, eigen - ijk[1]) * CHARGE_EFFICIENCY / capacity * 100.0
+        erbij = max(0.0, eigen - ijk[1]) * self._rend_nu.get(device_id, CHARGE_EFFICIENCY) / capacity * 100.0
         return min(100.0, gemeten + min(erbij, self._soc_stap.get(device_id, SOC_STAP_START)))
+
+    def _rendement_meten(self, device_id: str, soc: float, eigen: float, capacity: float) -> None:
+        """Het laadrendement van de auto aan deze paal, uit zijn eigen sensor.
+
+        De bewoner van de eerste woning op 23-09-2026: 78 kWh, van 60 naar 90%, is
+        23,4 kWh, "nog te laden is 23,4 in plaats van 26." De 26 was 23,4 gedeeld
+        door een aangenomen rendement van 90%, en een aanname hoort niet in de
+        coach als hij het kan meten. Dat kan: wat de accustand stijgt, maal de
+        capaciteit, tegenover wat de paal in dezelfde tijd leverde (`_eigen`).
+        Over minstens `REND_MIN_PROCENT` en `REND_MIN_KWH`, en alleen een uitkomst
+        tussen `REND_LAAGST` en `REND_HOOGST`. Een stand die daalt is een nieuwe
+        auto of een nieuwe beurt: dan begint de meting opnieuw.
+        """
+        if not capacity:
+            return
+        start = self._rend_start.get(device_id)
+        if start is None or soc < start[0] or eigen < start[1]:
+            self._rend_start[device_id] = (soc, eigen)
+            return
+        erbij = soc - start[0]
+        geleverd = eigen - start[1]
+        if erbij < REND_MIN_PROCENT or geleverd < REND_MIN_KWH:
+            return
+        rendement = erbij / 100.0 * capacity / geleverd
+        if REND_LAAGST <= rendement <= REND_HOOGST:
+            self._rend_meting[device_id] = rendement
+        self._rend_start[device_id] = (soc, eigen)
+
+    @staticmethod
+    def _rendement_uit(settings: dict[str, Any], device_id: str, auto_id: str) -> float | None:
+        """Het gemeten laadrendement van deze auto aan deze paal, of None."""
+        for row in settings.get("car_efficiency") or []:
+            if isinstance(row, dict) and row.get("device") == device_id and row.get("car") == auto_id:
+                try:
+                    waarde = float(row["eff"])
+                except (KeyError, TypeError, ValueError):
+                    return None
+                return waarde if REND_LAAGST <= waarde <= REND_HOOGST else None
+        return None
+
+    async def _async_rendement_bewaren(self, settings: dict[str, Any], device_id: str) -> None:
+        """Een nieuwe meting bij het lopende gemiddelde van deze auto."""
+        meting = self._rend_meting.pop(device_id, None)
+        auto_id = self._auto_id.get(device_id)
+        if meting is None or not auto_id:
+            return
+        rows = [r for r in (settings.get("car_efficiency") or []) if isinstance(r, dict)]
+        oud = next((r for r in rows if r.get("device") == device_id and r.get("car") == auto_id), None)
+        if oud is None:
+            rows.append({"device": device_id, "car": auto_id, "eff": round(meting, 4), "n": 1})
+        else:
+            n = min(int(oud.get("n") or 1), REND_MAX_N - 1)
+            oud["eff"] = round((float(oud.get("eff") or meting) * n + meting) / (n + 1), 4)
+            oud["n"] = n + 1
+        try:
+            saved = await async_get_store(self.hass).async_save({"car_efficiency": rows})
+        except Exception:  # noqa: BLE001 - een gemiste meting is geen reden om te stoppen
+            _LOGGER.exception("kon het laadrendement niet bewaren")
+            return
+        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
 
     def _typed_soc(
         self,
@@ -6267,8 +6369,13 @@ class ChargerCoach:
         percent = float(entry["percent"])
         meter = self._teller(device)
         since = entry.get("meter")
+        # Tot v0.94.0 bewaarde het paneel de kale toestand van de teller, en die
+        # staat bij een Alfen in Wh. Zo'n stand ligt een factor duizend boven
+        # wat `_teller` in kWh leest.
+        if meter is not None and since is not None and meter > 0 and float(since) > meter * 100:
+            since = float(since) / 1000.0
         if meter is not None and since is not None:
-            geladen = max(0.0, meter - float(since)) * CHARGE_EFFICIENCY
+            geladen = max(0.0, meter - float(since)) * self._rend_nu.get(device.get("id", ""), CHARGE_EFFICIENCY)
             percent += geladen / capacity * 100.0
         return min(100.0, percent)
 
@@ -7724,6 +7831,12 @@ class ChargerCoach:
             # in de reden en bereikte hij de tijdlijn op de kaart nooit, terwijl
             # `plan-ahead-sheet.js` er wel naar keek.
             "solar_note": plan.solar_note,
+            # Het laadrendement (v0.94.0): "nog te laden" is aan de paal, en
+            # wat er daarvan in de accu komt staat ernaast, met of het gemeten
+            # is of aangenomen.
+            "efficiency": round(rendement_van(car), 3),
+            "efficiency_measured": car.efficiency is not None,
+            "kwh_in_car": None if plan.kwh_needed is None else round(plan.kwh_needed * rendement_van(car), 2),
             "blocks": [
                 {
                     "start": klok(blok.start),
