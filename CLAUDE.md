@@ -538,6 +538,17 @@ allemaal gebouwd in v0.77.0.
    rapport zelf (report.js) is niet veranderd: elk deel stond er al alleen als er
    gegevens voor zijn.
 
+**Morgenvroeg nooit meer over dan er in de accu past** (v0.86.1). De bewoner
+van de eerste woning op 23-09-2026, bij "je houdt naar verwachting 15,9 kWh over
+in je accu" onder een accu van 14,6 kWh: "hoe kan je ooit 16 kWh in een accu
+hebben van 14 kWh?" `balans_kwh` telde alle zon tot morgenvroeg op bij wat erin
+zat (10,8 x 0,736 + 12,4 - 4,5). Nu rekent `nachtverloop` in batterij.py het uur
+voor uur: overschot gaat erin tot `soc_max` en de rest naar het net, het huis
+haalt eruit met het rendement tot de ondergrens, en wat er dan ontbreekt is
+tekort (dat komt 's ochtends niet terug met de zon). De zin noemt de zon die
+er niet in past. Handelen rekent met dezelfde balans, en handelt daardoor nu
+met minder. Proef 31 in test_batterij.py.
+
 **Het plan op de kaart, en "Nu vol laden"** (v0.78.0). De eigenaar op
 22-09-2026: "ik kan nu niet zien wat de coach van plan is met de batterij; want
 eigenlijk wil je nu dat de batterij handmatig vol wordt geladen." Twee dingen.
@@ -1571,7 +1582,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 387 controles op het denkwerk
-python tests/test_batterij.py    # 90 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_batterij.py    # 93 op het denkwerk van de thuisbatterij en op de regelaar
 python tests/test_coach.py       # 565 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1699 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag

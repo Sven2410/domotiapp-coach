@@ -461,15 +461,9 @@ def _rustig_vermogen(
 OCHTEND_UUR = 7
 
 
-def nachtbalans(now: datetime, forecast: Forecast, b: Batterij) -> tuple[float, float, float] | None:
-    """Zon, huis en wat er bruikbaar in de batterij zit, tot morgenvroeg, in kWh.
-
-    None als er geen huisprofiel of geen accustand is. De zon van de uren die
-    komen wordt bijgesteld met wat het dak vandaag waarmaakte, net als overal.
-    """
-    if not forecast.house_kwh or b.inhoud_kwh is None:
-        return None
-    zon = huis = 0.0
+def _nacht_uren(now: datetime, forecast: Forecast) -> list[tuple[float, float]]:
+    """Per uur tot morgenvroeg: (zon, huis) in kWh, het lopende uur naar rato."""
+    uren = []
     uur = now.replace(minute=0, second=0, microsecond=0)
     eind = now.replace(hour=OCHTEND_UUR, minute=0, second=0, microsecond=0)
     if eind <= now:
@@ -479,24 +473,81 @@ def nachtbalans(now: datetime, forecast: Forecast, b: Batterij) -> tuple[float, 
         opbrengst = max(0.0, forecast.solar_kwh.get(uur, 0.0))
         if forecast.solar_factor is not None and uur.date() == forecast.solar_day:
             opbrengst *= forecast.solar_factor
-        zon += opbrengst * deel
-        huis += forecast.house_kwh.get(uur.hour, 0.0) * deel
+        uren.append((opbrengst * deel, forecast.house_kwh.get(uur.hour, 0.0) * deel))
         uur += timedelta(hours=1)
+    return uren
+
+
+def nachtbalans(now: datetime, forecast: Forecast, b: Batterij) -> tuple[float, float, float] | None:
+    """Zon, huis en wat er bruikbaar in de batterij zit, tot morgenvroeg, in kWh.
+
+    None als er geen huisprofiel of geen accustand is. De zon van de uren die
+    komen wordt bijgesteld met wat het dak vandaag waarmaakte, net als overal.
+    """
+    if not forecast.house_kwh or b.inhoud_kwh is None:
+        return None
+    uren = _nacht_uren(now, forecast)
+    zon = sum(z for z, _ in uren)
+    huis = sum(h for _, h in uren)
     bruikbaar = max(0.0, b.inhoud_kwh - b.bodem / 100.0 * (b.capacity_kwh or 0.0))
     return zon, huis, bruikbaar
+
+
+def nachtverloop(now: datetime, forecast: Forecast, b: Batterij) -> tuple[float, float, float] | None:
+    """Uur voor uur tot morgenvroeg: (inhoud morgenvroeg, tekort, zon die er niet in past).
+
+    De bewoner van de eerste woning op 23-09-2026, bij "je houdt naar
+    verwachting 15,9 kWh over in je accu" onder een accu van 14,6 kWh: "hoe kan
+    je ooit 16 kWh in een accu hebben van 14 kWh?" De som telde alle zon tot
+    morgenvroeg bij wat erin zat, en een accu is geen emmer zonder rand. Nu per
+    uur: overschot gaat erin tot de laadgrens (`soc_max`) en de rest naar het
+    net; wat het huis vraagt komt eruit met het rendement, tot de ondergrens;
+    en wat er dan nog ontbreekt is tekort, dat van het net komt en niet meer
+    terugkomt als 's ochtends de zon opkomt. Zonder gemeten rendement telt
+    wat erin zit voor de volle inhoud, want een gok is geen meting.
+
+    De inhoud is aan de accukant en boven de ondergrens, in kWh.
+    """
+    som = nachtbalans(now, forecast, b)
+    if som is None:
+        return None
+    _zon, _huis, inhoud = som
+    cap = b.capacity_kwh or 0.0
+    ruimte = max(0.0, (b.soc_max - b.bodem) / 100.0 * cap)
+    inhoud = min(inhoud, ruimte) if ruimte else inhoud
+    eta = b.rte if b.rte else 1.0
+    tekort = weg = 0.0
+    for zon, huis in _nacht_uren(now, forecast):
+        netto = zon - huis
+        if netto >= 0:
+            erbij = min(netto, max(0.0, ruimte - inhoud))
+            inhoud += erbij
+            weg += netto - erbij
+        else:
+            nodig = -netto
+            kan = inhoud * eta
+            if kan >= nodig:
+                inhoud -= nodig / eta
+            else:
+                tekort += nodig - kan
+                inhoud = 0.0
+    return inhoud, tekort, weg
 
 
 def balans_kwh(now: datetime, forecast: Forecast, b: Batterij) -> float | None:
     """Wat er morgenvroeg naar verwachting over is (positief) of tekortkomt.
 
-    Wat er in de batterij zit komt er met het rendement uit; zonder gemeten
-    rendement telt het voor de volle inhoud, want een gok is geen meting.
+    Over is wat er dan nog uit de accu kan komen, na het verlies; nooit meer
+    dan de accu kan bevatten. Tekort is wat er in de nacht van het net moet.
+    Zie `nachtverloop`.
     """
-    som = nachtbalans(now, forecast, b)
-    if som is None:
+    verloop = nachtverloop(now, forecast, b)
+    if verloop is None:
         return None
-    zon, huis, bruikbaar = som
-    return bruikbaar * (b.rte if b.rte else 1.0) + zon - huis
+    inhoud, tekort, _weg = verloop
+    if tekort > 0.05:
+        return -tekort
+    return inhoud * (b.rte if b.rte else 1.0)
 
 
 def _vooruitkijk_zin(now: datetime, forecast: Forecast, b: Batterij) -> str:
@@ -510,16 +561,21 @@ def _vooruitkijk_zin(now: datetime, forecast: Forecast, b: Batterij) -> str:
     accu, of je hebt X kWh tekort om de nacht te overbruggen."
     """
     som = nachtbalans(now, forecast, b)
-    if som is None:
+    verloop = nachtverloop(now, forecast, b)
+    if som is None or verloop is None:
         return ""
     zon, huis, bruikbaar = som
+    _inhoud, _tekort, weg = verloop
     balans = balans_kwh(now, forecast, b) or 0.0
     # Wat erin zit komt er niet helemaal uit; de conclusie rekent met het
     # rendement, dus de zin zegt erbij waar hij mee rekent.
     eruit = f", goed voor {_kwh(bruikbaar * b.rte)} na het verlies" if b.rte and bruikbaar > 0 else ""
+    # En zon die er niet meer in past gaat naar het net: dat verklaart waarom
+    # de optelsom van zon en batterij meer is dan wat er morgenvroeg over is.
+    past_niet = f" Van die zon past {_kwh(weg)} niet meer in de accu; die gaat naar het net." if weg > 0.05 else ""
     zin = (
         f"Tot morgenvroeg verwacht hij {_kwh(zon)} zon, het huis vraagt {_kwh(huis)} "
-        f"en er zit {_kwh(bruikbaar)} in de batterij{eruit}. "
+        f"en er zit {_kwh(bruikbaar)} in de batterij{eruit}.{past_niet} "
     )
     if balans >= 0:
         return zin + f"Je houdt naar verwachting {_kwh(balans)} over in je accu."
