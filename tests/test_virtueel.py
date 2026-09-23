@@ -1552,5 +1552,30 @@ if (vl := v("batterij-rendement-onbekend")):
     controle("rendement onbekend: en er staat geen rendement in de opslag",
              not vl.bat_stand.get("rte"), f"{vl.bat_stand}")
 
+# --- de laadmodus zonder planning (v0.87.0) ---------------------------------
+# De eigenaar op 23-09-2026: "de modus is leidend (snel, continu of zon), tenzij er
+# een planning ingesteld is. Geen planning, standaard terug naar zon."
+if (vl := v("modus-zon")):
+    controle("modus zon, helder: vol op zon en niets van het net", vl.klaar_op is not None and vl.uit_net_kwh < 0.1,
+             f"vol {vl.klaar_op}, net {vl.uit_net_kwh:.2f}")
+    controle("modus zon: nooit een besluit om van het net te laden",
+             not any(r.regel.split("+")[0] in ("cheap-hour", "cheapest-hour", "fixed-tariff", "continu")
+                     for r in vl.regels if r.amps > 0),
+             f"{sorted({r.regel for r in vl.regels if r.amps > 0})}")
+if (vl := v("modus-zon-bewolkt")):
+    controle("modus zon, bewolkt: hooguit het korte doorladen bij een wolk van het net",
+             vl.uit_net_kwh < 0.5, f"net {vl.uit_net_kwh:.2f}")
+    controle("modus zon, bewolkt: hij zegt vanaf hoeveel zon hij begint",
+             any("Hij begint vanaf" in (r.reden or "") for r in vl.regels), "")
+    controle("modus zon: geen melding om de accustand, want er valt niets te plannen",
+             not meldingen(vl, "hoe vol hij is"), f"{meldingen(vl, 'hoe vol')}")
+if (vl := v("modus-continu")):
+    eerste = next((r for r in vl.regels if r.amps > 0), None)
+    controle("modus continu: meteen bij het inpluggen laden", eerste is not None and eerste.tijd.hour == 7,
+             f"{eerste.tijd if eerste else None}")
+    controle("modus continu: vol op de eerste dag, met de zon erbovenop",
+             vl.klaar_op is not None and vl.klaar_op.day == 7 and vl.uit_zon_kwh > 10,
+             f"vol {vl.klaar_op}, zon {vl.uit_zon_kwh:.1f}")
+
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

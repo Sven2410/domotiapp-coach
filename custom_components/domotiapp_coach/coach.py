@@ -62,6 +62,7 @@ from .batterij import (
     vol_voor,
 )
 from .planner import (
+    MODI_ZONDER_SOM,
     Apparaat,
     BALANCER_MARGIN_AMPS,
     Boiler,
@@ -873,6 +874,11 @@ class ChargerCoach:
         # herstart heen en afgelopen zodra de kabel eruit gaat: snelladen is
         # iets voor nu, niet iets wat stilletjes blijft staan.
         self._boost: set[str] = set()
+        # De modus die de bewoner op de kaart koos voor deze beurt, "zon" of
+        # "continu" (v0.87.0). Leeg is de voorkeur van de paal (`charge_mode`
+        # bij Apparaten). Zelfde levensduur als snelladen: de kabel eruit en
+        # het is weer de voorkeur, zodat er niets te vergeten valt.
+        self._modus: dict[str, str] = {}
         # De thuisbatterij nu leegladen tot deze accustand (procent), per
         # apparaat. Zie `async_drain`.
         self._drain: dict[str, float] = {}
@@ -4326,7 +4332,19 @@ class ChargerCoach:
             # De hele tijdlijn tot de auto vol moet zijn. Uit dezelfde sommen
             # als het besluit hierboven, want een tijdlijn die iets anders zegt
             # dan wat de coach doet laat de bewoner op het verkeerde wachten.
-            "plan_ahead": self._tijdlijn(now, settings, grid, car, charger, window),
+            # Behalve in de modus zon of continu zonder planning (v0.87.0): dan
+            # volgt hij het nu en is er niets vooruit te plannen, en een lijst
+            # met goedkoopste uren zou iets beloven wat hij niet doet.
+            "plan_ahead": (
+                None
+                if not window.enabled and charger.modus in MODI_ZONDER_SOM
+                else self._tijdlijn(now, settings, grid, car, charger, window)
+            ),
+            # Welke modus er geldt, en of dat de keuze van deze beurt is of de
+            # voorkeur van de paal. Snel is `boost`; een planning wint.
+            "mode": "snel" if charger.boost else charger.modus,
+            "mode_session": device_id in self._modus,
+            "planned": bool(window.enabled),
             # Of er een knop "accustand opvragen" op de kaart hoort, en wanneer
             # de auto voor het laatst gewekt is.
             "wake": self._wekbaar(settings, device),
@@ -4354,6 +4372,7 @@ class ChargerCoach:
         if not charger.connected:
             self._approved.discard(device_id)
             self._boost.discard(device_id)
+            self._modus.pop(device_id, None)
             self._paused.discard(device_id)
             self._zon.pop(device_id, None)
             self._holding.pop(device_id, None)
@@ -5253,6 +5272,8 @@ class ChargerCoach:
             # op een auto die om een andere reden niets vraagt.
             complete="complete" in status,
             boost=device.get("id", "") in self._boost,
+            modus=self._modus_van(device),
+            continu_amps=int(device.get("continuous_amps") or MIN_AMPS),
             paused_by_user=device.get("id", "") in self._paused,
             paused_by_balancer="equalizer" in status or "load_balancing" in status,
             no_current_reason=_text(self.hass, entities.get("no_current_reason")),
@@ -5947,6 +5968,7 @@ class ChargerCoach:
         "no-soc": "wachten op je accustand",
         "wait-for-sun": "wachten op je eigen zon",
         "wait-for-sun-today": "wachten op je eigen zon",
+        "zon-wacht": "wachten op genoeg zon",
         "wait-for-price": "wachten op een goedkoper uur",
         "too-early": "de tijden die je hebt ingesteld",
     }
@@ -7460,6 +7482,8 @@ class ChargerCoach:
                 self._boost.add(device_id)
             if row.get("paused"):
                 self._paused.add(device_id)
+            if row.get("mode") in MODI_ZONDER_SOM:
+                self._modus[device_id] = str(row["mode"])
             if row.get("drain_to") is not None:
                 try:
                     self._drain[device_id] = float(row["drain_to"])
@@ -7483,6 +7507,7 @@ class ChargerCoach:
             "boost": device_id in self._boost,
             "paused": device_id in self._paused,
             "drain_to": self._drain.get(device_id),
+            "mode": self._modus.get(device_id),
         }
         try:
             store = async_get_store(self.hass)
@@ -7546,6 +7571,35 @@ class ChargerCoach:
             self._boost.discard(device_id)
         self._remember(device_id)
         self.async_refresh()
+
+    @callback
+    def async_mode(self, device_id: str, mode: str) -> None:
+        """De modus voor deze beurt: snel, continu, zon, of "" voor de voorkeur.
+
+        De eigenaar op 23-09-2026: drie knoppen op de kaart, zoals bij evcc.
+        Snel is snelladen en blijft dat; continu en zon zetten snelladen uit,
+        en snel zet de gekozen modus terug naar de voorkeur. Alles vervalt als
+        de kabel eruit gaat.
+        """
+        if mode == "snel":
+            self._modus.pop(device_id, None)
+            self.async_boost(device_id, True)
+            return
+        self._boost.discard(device_id)
+        if mode in MODI_ZONDER_SOM or mode == "goedkoopst":
+            self._modus[device_id] = mode
+        else:
+            self._modus.pop(device_id, None)
+        self._remember(device_id)
+        self.async_refresh()
+
+    def _modus_van(self, device: dict[str, Any]) -> str:
+        """De modus die nu geldt: de keuze van deze beurt, anders de voorkeur."""
+        gekozen = self._modus.get(device.get("id", ""))
+        if gekozen:
+            return gekozen
+        voorkeur = str(device.get("charge_mode") or "goedkoopst")
+        return voorkeur if voorkeur in (*MODI_ZONDER_SOM, "goedkoopst") else "goedkoopst"
 
     @callback
     def async_boosting(self, device_id: str) -> bool:

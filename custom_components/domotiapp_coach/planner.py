@@ -343,6 +343,14 @@ class Charger:
     # De bewoner heeft gezegd dat het nu moet, hoe duur het ook is. Voor wie
     # eerder weg moet dan gepland; makkelijker dan een schema omgooien.
     boost: bool = False
+    # Hoe er geladen wordt zolang er geen planning aanstaat (v0.87.0), zoals de
+    # modi van evcc. "zon": alleen op zonoverschot. "continu": altijd op een
+    # vast vermogen (`continu_amps`), met de zon erbovenop. "goedkoopst": de
+    # goedkoopste uren van wat er aan prijzen bekend is, zon en net samen; zo
+    # deed de coach het zonder schema tot v0.87.0. Snel is `boost`. Een
+    # planning (schema met klaar-tijd) wint altijd; zie `_modus_zonder_planning`.
+    modus: str = "goedkoopst"
+    continu_amps: int = 6
     # En het omgekeerde: de bewoner heeft zelf op pauze gedrukt. Dat is geen
     # advies maar een opdracht, dus de coach houdt zijn handen thuis tot het
     # weer uit gaat of de kabel eruit komt.
@@ -2745,6 +2753,12 @@ def _decide(
             rule="guest",
         )
 
+    # Zonder planning bepaalt de modus hoe er geladen wordt (v0.87.0). Een
+    # planning wint: staat het schema aan, dan rekent hij hieronder zoals
+    # altijd naar de klaar-tijd. "Goedkoopst" valt ook door naar die som.
+    if not window.enabled and charger.modus in MODI_ZONDER_SOM:
+        return _modus_zonder_planning(now, prices, grid, car, charger, ceiling)
+
     start = window.opens if window.enabled else None
     end = window.deadline if window.enabled else None
     # Alles wat vooruit plant mikt een uur vóór de klaar-tijd. De regels die
@@ -3326,6 +3340,85 @@ def _beter_straks(
 # twee zijn de zesde eis, nooit blind laden: valt de prijssensor of de
 # accustand weg, dan is elke minuut doorladen een minuut zonder te weten wat
 # het kost of of het nog past. Met tien ronden uitstel was dat te veel.
+# De modi die geen som over de prijzen maken maar het nu volgen. Zie
+# `Charger.modus`.
+MODI_ZONDER_SOM = frozenset({"zon", "continu"})
+
+
+def _modus_zonder_planning(
+    now: datetime,
+    prices: list[dict],
+    grid: Grid,
+    car: Car,
+    charger: Charger,
+    ceiling: int,
+) -> Decision:
+    """Laden zonder planning, in de modus van de bewoner: zon of continu.
+
+    De eigenaar op 23-09-2026, naar het voorbeeld van evcc: "de modus is
+    leidend (snel, continu of zon), tenzij er een planning ingesteld is. Geen
+    planning, standaard terug naar zon." Hier valt niets te plannen, dus er is
+    ook geen accustand nodig; een bekende accustand stopt hem wel op zijn doel,
+    maar dat staat al hoger in `_decide`.
+
+    **Zon**: alleen wat er aan overschot is, en pas vanaf de ondergrens van de
+    paal (`SURPLUS_SLACK` ervan, net als de zonregel). Zakt het overschot eronder
+    terwijl hij laadt, dan houdt `_keep_alive` hem nog even op de ondergrens,
+    want een auto stopt niet graag steeds; bij een wolk kan er dan een paar
+    minuten wat van het net bijkomen.
+
+    **Continu**: altijd op het ingestelde vermogen, en meer als de zon meer
+    geeft. In de avondpiek van een vast contract komt er niets van het net bij
+    (eis 4), dan is het een uur lang zon; alleen Snel gaat daaroverheen.
+    """
+    zon_amps = min(ceiling, int(amps_for(grid.surplus_w, car.phases)))
+    genoeg_zon = grid.surplus_w >= watts_for(MIN_AMPS, car.phases) * SURPLUS_SLACK
+    hoeveel = _kw(grid.surplus_w) if grid.surplus_w > 0 else "geen zon"
+    drempel = _kw(watts_for(MIN_AMPS, car.phases))
+
+    piek = piek_dicht(prices) and in_evening_peak(now)
+    if charger.modus == "continu" and not piek:
+        vast = max(MIN_AMPS, min(ceiling, int(charger.continu_amps or MIN_AMPS)))
+        amps = max(vast, zon_amps)
+        if amps > vast:
+            reden = f"Continu laden op {vast} A, en de zon geeft meer, dus {amps} A."
+        else:
+            reden = f"Continu laden op {vast} A" + (
+                f", met {hoeveel} zon erin." if grid.surplus_w > 0 else "."
+            )
+        return Decision(
+            True,
+            amps,
+            reden,
+            plan="Laadt door tot de auto vol is of de kabel eruit gaat.",
+            rule="continu",
+        )
+
+    if genoeg_zon:
+        amps = max(MIN_AMPS, zon_amps)
+        return Decision(
+            True,
+            amps,
+            f"Er is {hoeveel} zon over, dus die gaat in de auto.",
+            plan="Laadt alleen op je eigen zon en loopt mee met wat het dak geeft.",
+            rule="zon-modus",
+        )
+
+    if piek and charger.modus == "continu":
+        reden = (
+            "Continu laden, maar in de avondpiek komt er niets van het net bij. "
+            f"Er is nu {hoeveel} over, en hij begint vanaf {drempel}."
+        )
+        plan = f"Gaat om {EVENING_START:%H:%M} weer verder."
+    else:
+        reden = (
+            f"Hij laadt alleen op zon, en er is nu {hoeveel} over. "
+            f"Hij begint vanaf {drempel}."
+        )
+        plan = "Begint vanzelf zodra het dak genoeg geeft. Wil je nu laden, kies dan Snel of Continu."
+    return Decision(False, 0, reden, plan=plan, rule="zon-wacht")
+
+
 NEVER_HOLD = frozenset(
     {"disconnected", "complete", "user-hold", "no-room", "tight", "no-prices", "no-soc"}
 )

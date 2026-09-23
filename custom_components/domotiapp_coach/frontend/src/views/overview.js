@@ -1748,6 +1748,29 @@ class DacViewOverview extends DacElement {
   }
 
   /**
+   * Een laadmodus kiezen voor deze beurt (v0.87.0). Nog een keer op de modus
+   * die al aanstaat gaat terug naar de voorkeur van de paal; de kabel eruit
+   * doet dat ook.
+   */
+  async kiesModus_(slot, modus) {
+    const device = this.steerDevices_?.[slot];
+    if (!device || !this.hass) return;
+    const besluit = this.coach_?.[device.id];
+    const terug = besluit?.mode === modus && besluit?.mode_session;
+    try {
+      await this.hass.callWS({
+        type: "domotiapp_coach/coach/mode",
+        device_id: device.id,
+        mode: terug ? "" : modus,
+      });
+      this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
+      this.updateSteerable_(this.lastDevices_ ?? []);
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de laadmodus niet kiezen", error);
+    }
+  }
+
+  /**
    * De batterij nu leegladen tot de accustand in het veld ernaast, of daarmee
    * ophouden. Gaat vanzelf uit zodra hij daar is.
    */
@@ -1892,11 +1915,21 @@ class DacViewOverview extends DacElement {
       && !batterij;
     boost.hidden = !(kan || (batterij && besluit.level !== "advise" && besluit.applied));
     boost.setAttribute("aria-pressed", String(Boolean(besluit.boost)));
+    // Zonder planning is de paal in een modus: Snel, Continu of Zon (v0.87.0).
+    // Met een planning blijft alleen Snelladen, want dan rekent hij naar de
+    // klaar-tijd en gaat alleen snelladen daaroverheen.
+    const modi = kan && !besluit.planned && besluit.mode !== undefined;
+    for (const knop of this.$$(`[data-modus="${slot}"]`)) {
+      knop.hidden = !modi;
+      knop.setAttribute("aria-pressed", String(modi && besluit.mode === knop.dataset.modusNaam));
+    }
     this.$(`[data-boost-text="${slot}"]`).textContent = batterij
       ? (besluit.boost ? "Laadt nu vol" : "Nu vol laden")
-      : besluit.boost
-        ? "Snelladen staat aan"
-        : "Snelladen";
+      : modi
+        ? "Snel"
+        : besluit.boost
+          ? "Snelladen staat aan"
+          : "Snelladen";
     // Een batterij krijgt zijn eigen icoon (een accu met een pijl erin), de
     // paal houdt de bliksem. De eigenaar op 23-09-2026: het pauzeteken bij
     // "Nu leegladen" klopte niet, en dan hoort vol laden ook geen bliksem te zijn.
@@ -2478,6 +2511,15 @@ class DacViewOverview extends DacElement {
             <button class="boost" type="button" data-boost="${slot}" aria-pressed="false" hidden>
               <span class="ico" data-boost-icon="${slot}">${icons.bolt}</span><span data-boost-text="${slot}">Snelladen</span>
             </button>
+            <!-- De laadmodus zonder planning (v0.87.0), naast Snel: zoals evcc.
+                 Alleen op een laadpaal en alleen als er geen schema aanstaat,
+                 want een planning wint. -->
+            <button class="boost" type="button" data-modus="${slot}" data-modus-naam="continu" aria-pressed="false" hidden>
+              ${icons.plug}<span>Continu</span>
+            </button>
+            <button class="boost" type="button" data-modus="${slot}" data-modus-naam="zon" aria-pressed="false" hidden>
+              ${icons.sun}<span>Zon</span>
+            </button>
             <button class="boost" type="button" data-pause="${slot}" aria-pressed="false" hidden>
               ${icons.pause}<span data-pause-text="${slot}">Pauzeren</span>
             </button>
@@ -2516,6 +2558,10 @@ class DacViewOverview extends DacElement {
     }
     for (const button of this.$$("[data-pause]")) {
       button.addEventListener("click", () => this.togglePause_(Number(button.dataset.pause)));
+    }
+    for (const button of this.$$("[data-modus]")) {
+      button.addEventListener("click", () =>
+        this.kiesModus_(Number(button.dataset.modus), button.dataset.modusNaam));
     }
     for (const button of this.$$("[data-boost]")) {
       button.addEventListener("click", () => this.toggleBoost_(Number(button.dataset.boost)));
@@ -2749,7 +2795,7 @@ class DacViewOverview extends DacElement {
       "aria-checked",
       String(Boolean(plan.enabled))
     );
-    this.$(`[data-plan-note="${slot}"]`).textContent = planSummary(plan);
+    this.$(`[data-plan-note="${slot}"]`).textContent = planSummary(plan, this.coach_?.[device.id]?.mode ?? "");
 
     // Voorrang gaat over wie er wacht als er te weinig ruimte is. Staat het
     // schema uit, dan doet de coach niets met dit apparaat en valt er ook niets

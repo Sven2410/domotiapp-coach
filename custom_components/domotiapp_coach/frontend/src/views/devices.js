@@ -125,6 +125,10 @@ class DacViewDevices extends DacEditorElement {
         entities: {},
         device_id: "",
         actions: {},
+        // Een nieuwe laadpaal laadt zonder planning alleen op zon (v0.87.0),
+        // zoals evcc; een paal die er al stond houdt "goedkoopst".
+        charge_mode: "zon",
+        continuous_amps: 6,
       };
       this.draft_.devices.push(device);
       // A new device has nothing filled in yet, so it opens on its fields.
@@ -608,7 +612,30 @@ class DacViewDevices extends DacEditorElement {
         <span class="sub">Voor de zekeringbewaking: de coach blijft onder de zekering van deze groep én onder de hoofdzekering.</span>
       </div>`
       : "";
-    return `${groepHtml}
+    // Hoe een laadpaal laadt als er geen planning aanstaat (v0.87.0). De
+    // eigenaar op 23-09-2026: "geen planning, standaard terug naar zon, of welke
+    // voorkeursmodus dan ook." Op de kaart kan de bewoner per beurt kiezen;
+    // de kabel eruit en het is weer dit.
+    const modus = device.charge_mode || "goedkoopst";
+    const modusHtml = device.type === "laadpaal" && stuurbaar
+      ? `
+      <div class="row">
+        <label for="mode-${index}">Zonder planning</label>
+        <select id="mode-${index}" data-field="charge_mode" data-index="${index}">
+          <option value="zon"${modus === "zon" ? " selected" : ""}>Zon: alleen op zonoverschot</option>
+          <option value="continu"${modus === "continu" ? " selected" : ""}>Continu: altijd, met zon erbovenop</option>
+          <option value="goedkoopst"${modus === "goedkoopst" ? " selected" : ""}>Goedkoopst: de goedkoopste bekende uren</option>
+        </select>
+        <span class="sub">Staat het schema aan, dan wint de planning. Op de kaart kies je per beurt Snel, Continu of Zon; als de kabel eruit gaat, geldt dit weer.</span>
+      </div>
+      <div class="row">
+        <label for="cont-${index}">Continu laden op (A)</label>
+        <input type="number" id="cont-${index}" data-field="continuous_amps" data-index="${index}"
+               min="6" max="32" step="1" inputmode="numeric" value="${Number(device.continuous_amps) || 6}">
+        <span class="sub">Het vaste vermogen van Continu. Geeft de zon meer, dan laadt hij mee omhoog; nooit boven je zekering.</span>
+      </div>`
+      : "";
+    return `${groepHtml}${modusHtml}
       <label class="check" for="control-${index}">
         <input type="checkbox" id="control-${index}" data-field="controllable" data-index="${index}"
                ${device.controllable ? "checked" : ""}>
@@ -1167,6 +1194,8 @@ class DacViewDevices extends DacEditorElement {
 
         if (field === "controllable") {
           device.controllable = el.checked;
+        } else if (field === "continuous_amps") {
+          device.continuous_amps = Math.min(32, Math.max(6, Math.round(Number(el.value) || 6)));
         } else {
           device[field] = el.value;
         }

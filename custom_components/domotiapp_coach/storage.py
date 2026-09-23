@@ -237,6 +237,13 @@ def _migrate(stored: dict[str, Any]) -> dict[str, Any]:
             device["brand"] = ""
             device["controllable"] = False
 
+    # v0.87.0: een laadpaal kent een modus voor als er geen planning is. Wat
+    # er al stond laadde zonder schema op de goedkoopste bekende uren, en dat
+    # blijft zo; alleen een nieuwe paal begint op zon (het paneel geeft dat mee).
+    for device in stored.get("devices") or []:
+        if isinstance(device, dict) and device.get("type") == "laadpaal" and not device.get("charge_mode"):
+            device["charge_mode"] = "goedkoopst"
+
     # v0.52.0: de zekeringmelding en haar ontvangers gaan naar Meldingen.
     migreer_load_alert(stored)
 

@@ -5037,6 +5037,74 @@ coach92c = coachmod.ChargerCoach(hass92c)
 controle("bij de cloud-integraties (knop altijd beschikbaar) verandert er niets: `_text` op een knop zonder toestand is leeg",
          coachmod._text(hass92c, "button.vaatwasser_start") == "", "")
 
+print("=== 93. de laadmodus zonder planning: voorkeur, keuze per beurt, en weg bij kabel eruit (v0.87.0) ===")
+# De eigenaar op 23-09-2026: "de modus is leidend (snel, continu of zon), tenzij er
+# een planning ingesteld is. Geen planning, standaard terug naar zon." Een
+# bestaande paal houdt "goedkoopst".
+storagemod = storage
+
+gemigreerd = storagemod._migrate({"devices": [{"id": "p", "type": "laadpaal"}, {"id": "b", "type": "boiler"}]})
+controle("een bestaande laadpaal krijgt 'goedkoopst', een ander apparaat niets",
+         gemigreerd["devices"][0]["charge_mode"] == "goedkoopst" and "charge_mode" not in gemigreerd["devices"][1],
+         f"{gemigreerd['devices']}")
+
+paal93 = dict(LAADPAAL, charge_mode="zon", continuous_amps=8)
+inst93 = instellingen(devices=[paal93])
+inst93["strategy"]["schedules"][0]["enabled"] = False
+huis93 = huis(status="awaiting_start", stroom=0.0, vermogen=0.0, teruglevering=500.0, afname=0.0)
+hass93, store93, coach93 = bouw(huis93, inst93)
+b93, _ = asyncio.run(ronde(coach93, inst93, paal=paal93))
+print(f"  voorkeur zon, 0,5 kW over: {b93['rule']}, mode={b93['mode']}, plan_ahead={b93['plan_ahead']}")
+controle("de voorkeur 'zon' van de paal geldt zonder planning",
+         b93["rule"] == "zon-wacht" and b93["mode"] == "zon" and not b93["mode_session"], f"{b93['rule']} {b93['mode']}")
+controle("en dan staat er geen tijdlijn met goedkoopste uren", b93["plan_ahead"] is None, f"{b93['plan_ahead']}")
+
+
+async def kies93(modus):
+    coach93.async_mode("dev-laadpaal", modus)
+    await hass93.afmaken()
+    return await ronde(coach93, inst93, paal=paal93)
+
+
+# De auto laadt al, anders biedt hij bij de start eerst de wekstroom aan.
+hass93.states.zet("sensor.laadpaal_status", "charging")
+hass93.states.zet("sensor.laadpaal_stroom", "8.0")
+b93b, _ = asyncio.run(kies93("continu"))
+print(f"  gekozen continu: {b93b['rule']} {b93b['amps']} A, sessie={b93b['mode_session']}, opgeslagen={store93.instellingen['sessions']}")
+controle("continu op de kaart: laden op de 8 A uit Apparaten",
+         b93b["rule"] == "continu" and b93b["amps"] == 8 and b93b["mode_session"], f"{b93b['rule']} {b93b['amps']}")
+controle("en de keuze is vastgelegd voor een herstart",
+         any(r.get("mode") == "continu" for r in store93.instellingen["sessions"]), f"{store93.instellingen['sessions']}")
+
+b93c, _ = asyncio.run(kies93("snel"))
+controle("snel is snelladen, en zet de gekozen modus terug",
+         b93c["rule"] == "boost" and b93c["mode"] == "snel" and "dev-laadpaal" not in coach93._modus, f"{b93c['rule']}")
+b93d, _ = asyncio.run(kies93("zon"))
+controle("zon zet snelladen weer uit", b93d["mode"] == "zon" and "dev-laadpaal" not in coach93._boost, f"{b93d['mode']}")
+
+# Een herstart onthoudt de keuze, zoals snelladen.
+hass93h, store93h, coach93h = bouw(huis93, store93.instellingen)
+coach93h._restore(store93h.instellingen)
+controle("na een herstart staat de gekozen modus er nog", coach93h._modus.get("dev-laadpaal") == "zon", f"{coach93h._modus}")
+
+# De kabel eruit: de keuze vervalt, en de volgende auto begint op de voorkeur.
+coach93.async_mode("dev-laadpaal", "continu")
+hass93.states.zet("sensor.laadpaal_status", "disconnected")
+asyncio.run(ronde(coach93, inst93, paal=paal93, nu=dt.datetime(2026, 8, 18, 14, 40)))
+# `async_mode` vraagt meteen een ronde op de echte klok; het loskoppelen dus
+# vastzetten op de tijd van deze proef, langer dan `KABEL_ONTDREUN` geleden.
+coach93._los_sinds["dev-laadpaal"] = dt.datetime(2026, 8, 18, 14, 39)
+asyncio.run(ronde(coach93, inst93, paal=paal93, nu=dt.datetime(2026, 8, 18, 14, 41)))
+controle("kabel eruit: de keuze van de beurt is weg", "dev-laadpaal" not in coach93._modus, f"{coach93._modus}")
+
+# Met een planning wint de planning, wat de voorkeur ook is.
+inst93p = instellingen(devices=[paal93])
+hass93p, _, coach93p = bouw(huis93, inst93p)
+b93p, _ = asyncio.run(ronde(coach93p, inst93p, paal=paal93))
+controle("schema aan: de planning wint van de modus zon",
+         b93p["rule"] not in ("zon-wacht", "zon-modus", "continu") and b93p["planned"] and b93p["plan_ahead"] is not None,
+         f"{b93p['rule']}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
