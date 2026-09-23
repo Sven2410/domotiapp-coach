@@ -785,6 +785,11 @@ def plan_batterij(
     return _met_paal(besluit, paal_laadt)
 
 
+def met_paal(besluit: Besluit, paal_laadt: bool) -> Besluit:
+    """`_met_paal` voor de snelle regelaar in coach.py (v0.87.1)."""
+    return _met_paal(besluit, paal_laadt)
+
+
 def _met_paal(besluit: Besluit, paal_laadt: bool) -> Besluit:
     """De laadpaal laadt: dan geeft de batterij niets af.
 

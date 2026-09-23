@@ -1380,7 +1380,12 @@ ontladen dicht; de avondpiek blijft dicht voor het net (eis 4); onder de reserve
 voor noodstroom komt er niets uit; en **laadt er een paal, dan geeft de batterij
 niets af** (`_met_paal`, `_paal_laadt` in coach.py: gemeten aan het vermogen
 van de paal en niet aan het besluit van de coach, want in de eerste woning
-stuurde iets anders de paal).
+stuurde iets anders de paal). Sinds v0.87.1 ook aan wat de paal zelf zegt ("auto laadt" bij een
+Alfen, "charging" bij een Easee), want het vermogen van een Alfen komt eens per
+30 s; en de snelle regelaar past het elke stap toe (`met_paal` in
+`_async_regel`) in plaats van op de besluitronde te wachten. In de eerste
+woning op 23-09-2026 om 15:59 gaf de batterij daardoor 25 s lang 3,45 kW aan
+de auto. Proef 94 in test_coach.py.
 
 **De laadgrens van de batterij is van de batterij.** De eigenaar: "die instelling
 van 95% is belangrijk, daar blijft hij continu op staan. Dit is een waarde waar
@@ -1619,7 +1624,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 400 controles op het denkwerk
 python tests/test_batterij.py    # 93 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 575 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 581 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1731 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 91 op het rapport en op het paneel
