@@ -18,7 +18,7 @@ def verbind():
 
 def _verbind():
     w = ws.WS()
-    w.s.settimeout(None)  # een coach die even niets besluit is geen storing
+    w.s.settimeout(60)  # na een minuut stilte een ping, zie ws.recv
     w.id += 1
     w.send({"id": w.id, "type": "subscribe_events",
             "event_type": "domotiapp_coach_decision"})

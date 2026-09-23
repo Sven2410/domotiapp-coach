@@ -50,6 +50,21 @@ MERKSENSOREN = {
         "reden": "easee_reason_no_current",
         "teller": "lifetime_energy",
     },
+    # De integratie alfen_modbus (sinds 23-09-2026). Geen status en geen
+    # reden: die leidt de coach zelf af uit "auto aangesloten", "auto laadt"
+    # en de modus 3-toestand.
+    "alfen": {
+        "sessie": "current_session_wh",
+        "volt": "voltage_l1_n",
+        "fasemode": "usable_phases",
+        "plug": "car_connected",
+        "status": "mode_3_state",
+        "watt": "real_power_sum",
+        "amp": "current_l1",
+        "limiet": "max_current",
+        "maxlimiet": "actual_max_current",
+        "teller": "real_energy_delivered_sum",
+    },
 }
 
 

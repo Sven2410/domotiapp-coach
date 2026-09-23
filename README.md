@@ -99,8 +99,12 @@ niet.
 Kies het merk, want welke gegevens een paal levert verschilt per fabrikant.
 **Easee** is uitgewerkt: status, reden geen stroomvraag, levensduurverbruik,
 maximale limiet, gemeten stroom, de dynamische laadgrens van de lader en die van
-het stroomcircuit. Een paal van een ander merk zet je onder **Overig**: die wordt
-gemeten en meegeteld, maar niet gestuurd.
+het stroomcircuit. **Alfen** gaat via de integratie alfen_modbus: de coach
+schrijft de maximale stroomlimiet van de socket, elke minuut opnieuw omdat de
+paal hem na zijn geldigheidsduur vergeet, en leest "auto aangesloten", "auto
+laadt" en de modus 3-status. Zet in de paal de geldigheidsduur van de
+Modbus-stroomlimiet op minstens drie minuten. Een paal van een ander merk zet
+je onder **Overig**: die wordt gemeten en meegeteld, maar niet gestuurd.
 
 Per auto leg je vast wat de accu kan hebben, op hoeveel fasen hij laadt en **tot
 hoever hij laadt**. Dat laatste is niet de laadgrens in de auto zelf maar het

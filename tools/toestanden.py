@@ -27,6 +27,15 @@ MERKSENSOREN = {
               "dynamic_charger_limit", "max_charger_limit",
               "easee_reason_no_current", "lifetime_energy", "energy_per_hour",
               "circuit_current", "online", "enable_idle_current"),
+    # De integratie alfen_modbus (sinds 23-09-2026).
+    "alfen": ("max_current_limit", "max_current", "actual_applied_max_current",
+              "actual_max_current", "max_current_valid_time", "mode_3_state",
+              "car_connected", "car_charging", "carconnected", "carcharging",
+              "current_l1", "current_l2", "current_l3", "real_power_sum",
+              "current_session_wh", "current_session_duration",
+              "real_energy_delivered_sum", "usable_phases", "charging_mode",
+              "active_load_balancing_safe_current", "availability",
+              "received_sp_accounted_for"),
 }
 
 ARGS = [a for a in sys.argv[1:] if not a.startswith("plus=")]
@@ -90,7 +99,7 @@ def verbind():
     while True:
         try:
             w = ws.WS()
-            w.s.settimeout(None)
+            w.s.settimeout(60)
             ents = entiteiten(w)
             w.id += 1
             w.send({"id": w.id, "type": "subscribe_events", "event_type": "state_changed"})

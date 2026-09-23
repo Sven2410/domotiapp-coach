@@ -794,6 +794,9 @@ class ChargerCoach:
         # De laatste bruikbare status per laadpunt, zodat een entiteit die even
         # wegvalt niet als een losgekoppelde kabel leest. Zie `_read`.
         self._laatste_status: dict[str, str] = {}
+        # Sinds wanneer een Alfen aanbod geeft zonder dat de auto iets neemt
+        # (`_status_afgeleid`).
+        self._stil_sinds: dict[str, datetime] = {}
         # En hetzelfde voor de metingen: per entiteit de laatste bruikbare
         # waarde met het moment erbij. Zie `_volgehouden` en `MEETNAIJL`.
         self._laatste_meting: dict[str, tuple[float, datetime]] = {}
@@ -1195,6 +1198,50 @@ class ChargerCoach:
         reden = (st.get("reason") or "").strip()
         await self._async_noteer(f"{naam}: {kop}. {reden}".strip(), now)
 
+    def _status_afgeleid(self, device_id: str, entities: dict[str, Any], now: datetime) -> str:
+        """De status van een paal die er zelf geen heeft, in de woorden van Easee.
+
+        Een Alfen meldt geen "charging" of "completed" maar twee aan/uit-
+        sensoren ("auto aangesloten", "auto laadt") en de modus 3-toestand uit
+        IEC 61851: A geen auto, B1 auto aangesloten zonder aanbod, B2
+        aangesloten met aanbod maar de auto neemt niets, C2 aan het laden, E
+        en F niet beschikbaar of storing. De rest van de coach kent alleen de
+        woorden van Easee, en die worden hier gemaakt, zodat er verderop niets
+        per merk hoeft te zijn.
+
+        "Completed" zegt een Alfen nooit. Wat hij wel laat zien is een auto die
+        aanbod krijgt en niets neemt (B2 met een limiet boven de ondergrens).
+        Houdt dat `HERSTART_WACHT` aan, dan is dat wat "klaar" bij een Easee
+        ook betekent: een auto die na een kwartier nog niets doet. Korter is
+        het een auto die nog bijkomt.
+
+        Gebouwd op 23-09-2026 en nog niet aan een echte Alfen gezien; welke
+        toestand een gepauzeerde paal met een auto eraan meldt (B1 of E) staat
+        niet vast en moet gemeten worden.
+        """
+        verbonden = _text(self.hass, entities.get("connected")).strip().lower()
+        if verbonden in ("", "unknown", "unavailable", "none"):
+            return ""  # niets zeggen: dan telt wat de paal het laatst wél zei
+        if verbonden == "off":
+            self._stil_sinds.pop(device_id, None)
+            return "disconnected"
+        laadt = _text(self.hass, entities.get("charging")).strip().lower()
+        modus = _text(self.hass, entities.get("mode3")).strip().upper()
+        if laadt == "on" or modus.startswith(("C", "D")):
+            self._stil_sinds.pop(device_id, None)
+            return "charging"
+        if modus.startswith("B1"):
+            self._stil_sinds.pop(device_id, None)
+            return "awaiting_start"
+        limiet = _number(self.hass, entities.get("dynamic_limit"))
+        if limiet is not None and limiet >= MIN_AMPS:
+            sinds = self._stil_sinds.setdefault(device_id, now)
+            if now - sinds >= HERSTART_WACHT:
+                return "completed"
+        else:
+            self._stil_sinds.pop(device_id, None)
+        return "ready_to_charge"
+
     def _sensoren(self, settings: dict[str, Any]) -> dict[str, str]:
         """Elke sensor waar de coach op rekent, met hoe de bewoner hem kent.
 
@@ -1235,6 +1282,9 @@ class ChargerCoach:
             entities = device.get("entities") or {}
             for sleutel, wat in (
                 ("status", "de status"),
+                ("connected", "de kabelmelding"),
+                ("charging", "de laadmelding"),
+                ("limit", "de stroomlimiet"),
                 ("current", "de stroommeting"),
                 ("dynamic_limit", "de dynamische laadgrens"),
                 ("max_limit", "de laderlimiet"),
@@ -1739,7 +1789,8 @@ class ChargerCoach:
             {
                 entity
                 for device in chargers
-                if (entity := (device.get("entities") or {}).get("status"))
+                for sleutel in ("status", "connected", "charging")
+                if (entity := (device.get("entities") or {}).get(sleutel))
             }
             | {
                 entity
@@ -4337,8 +4388,10 @@ class ChargerCoach:
         following = self._following(device, charger, decision)
         if following:
             self._nudged.pop(device_id, None)
-            if not should_send(self._last.get(device_id), decision) and not (
-                self._pause_expiring(device_id, now)
+            if (
+                not should_send(self._last.get(device_id), decision)
+                and not self._pause_expiring(device_id, now)
+                and not self._ververst(device)
             ):
                 return claim
         elif charger.paused_by_balancer or held_back(charger):
@@ -5100,7 +5153,10 @@ class ChargerCoach:
         # avond op `awaiting_start` stond. Of het toen precies hierdoor kwam is
         # achteraf niet te bewijzen, maar een sensor die niets zegt mag sowieso
         # geen afkoppeling betekenen.
-        gemeld = _text(self.hass, entities.get("status"))
+        if entities.get("status"):
+            gemeld = _text(self.hass, entities.get("status"))
+        else:
+            gemeld = self._status_afgeleid(device_id, entities, now)
         if gemeld in ("", "unknown", "unavailable", "none"):
             status = self._laatste_status.get(device_id, "")
         else:
@@ -7481,7 +7537,7 @@ class ChargerCoach:
         dan een gewoon getal terugschrijven.
         """
         control = CHARGER_CONTROL.get(device.get("brand", ""))
-        if not control or not device.get("device_id"):
+        if not control or not self._stuuradres(device, control):
             return False
 
         if not decision.charge:
@@ -7534,6 +7590,16 @@ class ChargerCoach:
         een 0 ligt het andersom en staat de afweging bij `FOREVER_RULES`.
         """
         domain, service = control["limit_service"]
+        if control.get("limit_entity"):
+            # Een paal met een limiet-entiteit (Alfen): het getal gaat de
+            # number in, zonder houdbaarheid, want die heeft de paal zelf.
+            await self.hass.services.async_call(
+                domain,
+                service,
+                {"entity_id": self._stuuradres(device, control), control["limit_field"]: amps},
+                blocking=True,
+            )
+            return
         await self.hass.services.async_call(
             domain,
             service,
@@ -7544,6 +7610,29 @@ class ChargerCoach:
             },
             blocking=True,
         )
+
+    @staticmethod
+    def _stuuradres(device: dict[str, Any], control: dict[str, Any]) -> str:
+        """Waar de opdrachten heen gaan.
+
+        Bij Easee het HA-apparaat (`device_id`), want `action_command` en de
+        dynamische limiet willen een apparaat. Bij Alfen de limiet-entiteit,
+        want daar is niets anders om naartoe te schrijven. Leeg betekent dat
+        de coach deze paal niet kan sturen.
+        """
+        if control.get("limit_entity"):
+            return (device.get("entities") or {}).get(control["limit_entity"]) or ""
+        return device.get("device_id") or ""
+
+    @staticmethod
+    def _ververst(device: dict[str, Any]) -> bool:
+        """Of deze paal zijn limiet elke ronde opnieuw moet krijgen.
+
+        Een Alfen vergeet zijn limiet na zijn geldigheidsduur en valt dan terug
+        op zijn veilige stroom; de dode band op het besluit geldt daar dus
+        niet. Zie `CHARGER_CONTROL`.
+        """
+        return bool(CHARGER_CONTROL.get(device.get("brand", ""), {}).get("refresh"))
 
     @staticmethod
     def _niets_schrijven(charger: Charger, decision: Decision) -> bool:
@@ -7577,7 +7666,15 @@ class ChargerCoach:
         """Niet laden, en dat vasthouden zonder de sessie op te breken."""
         device_id = device.get("id", "")
 
-        if self._niets_schrijven(charger, decision):
+        # Een Alfen vergeet zijn 0 na zijn geldigheidsduur en laadt dan op zijn
+        # veilige stroom door. Zolang er een auto hangt gaat de 0 er dus elke
+        # ronde opnieuw in, ook bij "klaar": in het virtuele huis viel de paal
+        # anders vijf minuten na het doel terug op 16 A (23-09-2026). Zonder
+        # auto schrijft hij niets, en dan is de veilige stroom precies wat
+        # de volgende auto hoort te krijgen.
+        if self._niets_schrijven(charger, decision) and not (
+            self._ververst(device) and charger.connected
+        ):
             self._pause_until.pop(device_id, None)
             return True
 
@@ -7620,7 +7717,13 @@ class ChargerCoach:
     async def _command(
         self, device: dict[str, Any], control: dict[str, Any], action: str
     ) -> None:
-        """Start, stop or pause, in the word this installation uses."""
+        """Start, stop or pause, in the word this installation uses.
+
+        Een paal zonder opdrachten (Alfen) krijgt niets: daar is een limiet
+        boven de ondergrens de start, en die is al geschreven.
+        """
+        if not control.get("command_service"):
+            return
         domain, service = control["command_service"]
         word = (device.get("actions") or {}).get(action) or control["words"][action]
         await self.hass.services.async_call(

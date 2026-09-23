@@ -4801,6 +4801,126 @@ asyncio.run(ronde75(hass89, coach89, T89b + dt.timedelta(minutes=182)))
 asyncio.run(ronde75(hass89, coach89, T89b + dt.timedelta(minutes=305)))
 controle("stopt het en begint het opnieuw, dan telt de klok opnieuw", len(meldingen89(hass89)) == 1, f"{meldingen89(hass89)}")
 
+print("=== 90. Alfen: een limiet in een number, geen startwoord, elke ronde opnieuw, en een afgeleide status (23-09-2026) ===")
+# De eigenaar op 23-09-2026: "ik wil alfen bouwen; we hebben natuurlijk een
+# wekstroom etc maar ik zou niet weten wat er bij alfen moet gebeuren, dus dat
+# moeten we testen en checken." Wat hier vastligt is wat uit de integratie
+# alfen_modbus en uit evcc te halen was: de limiet is een number zonder
+# houdbaarheid, de paal valt na zijn geldigheidsduur terug op zijn veilige
+# stroom, en er is geen statussensor maar "auto aangesloten", "auto laadt" en
+# de modus 3-toestand.
+ALFEN = {
+    **LAADPAAL, "id": "dev-alfen", "brand": "alfen", "device_id": "",
+    "entities": {
+        "limit": "number.alfen_limiet",
+        "connected": "sensor.alfen_aangesloten",
+        "charging": "sensor.alfen_laadt",
+        "mode3": "sensor.alfen_modus3",
+        "current": "sensor.laadpaal_stroom",
+        "max_limit": "sensor.laadpaal_max",
+        "dynamic_limit": "sensor.laadpaal_dyn",
+        "lifetime_energy": "sensor.laadpaal_teller",
+    },
+}
+
+
+def huis90(aangesloten="on", laadt="off", modus="B1", **rest):
+    return {
+        **huis(**rest),
+        "number.alfen_limiet": "0",
+        "sensor.alfen_aangesloten": aangesloten,
+        "sensor.alfen_laadt": laadt,
+        "sensor.alfen_modus3": modus,
+    }
+
+
+async def ronde90(coach, inst, nu=None):
+    hass = coach.hass
+    hass.services.verstuurd.clear()
+    await hass.afmaken()
+    await coach._one(nu or dt.datetime(2026, 8, 18, 14, 37), inst, ALFEN, "steer")
+    # De integratie leest de limiet bij de volgende poll terug uit de paal.
+    for _, dienst, gegevens in hass.services.verstuurd:
+        if dienst == "set_value" and gegevens.get("entity_id") == "number.alfen_limiet":
+            hass.states.zet("sensor.laadpaal_dyn", str(gegevens.get("value")))
+            hass.states.zet("number.alfen_limiet", str(gegevens.get("value")))
+    return coach.state["dev-alfen"], hass.services.verstuurd
+
+
+inst90 = instellingen(devices=[ALFEN])
+hass90, store90, coach90 = bouw(huis90(), inst90)
+besluit90, verstuurd90 = asyncio.run(ronde90(coach90, inst90))
+print(f"  {besluit90['rule']}: {besluit90['amps']} A -> {verstuurd90}")
+controle("kabel erin aan een Alfen: de wekstroom gaat als getal de number in",
+         besluit90["amps"] == 14 and any(
+             d[0] == "number" and d[1] == "set_value" and d[2].get("entity_id") == "number.alfen_limiet" and d[2].get("value") == 14
+             for d in verstuurd90),
+         f"{besluit90['rule']} {besluit90['amps']} A, verstuurd: {verstuurd90}")
+controle("en er gaat geen Easee-dienst en geen startwoord heen",
+         not any(d[0] == "easee" or d[1] in ("action_command", "set_charger_dynamic_limit") for d in verstuurd90),
+         f"{verstuurd90}")
+
+# De auto laadt op 6 A; het besluit verandert niet, en toch gaat de limiet
+# elke ronde opnieuw de number in, want de paal vergeet hem anders.
+hass90.states.zet("sensor.alfen_laadt", "on")
+hass90.states.zet("sensor.alfen_modus3", "C2")
+hass90.states.zet("sensor.laadpaal_stroom", "5.9")
+hass90.states.zet("sensor.laadpaal_vermogen", {"state": "4070", "attributes": {"unit_of_measurement": "W"}})
+T90 = dt.datetime(2026, 8, 18, 14, 38)
+b1, v1 = asyncio.run(ronde90(coach90, inst90, T90))
+b2, v2 = asyncio.run(ronde90(coach90, inst90, T90 + dt.timedelta(minutes=1)))
+b3, v3 = asyncio.run(ronde90(coach90, inst90, T90 + dt.timedelta(minutes=2)))
+schrijf90 = [[d[2].get("value") for d in v if d[1] == "set_value"] for v in (v1, v2, v3)]
+print(f"  drie ronden laden: {b1['rule']} {b1['amps']} A, {b2['rule']} {b2['amps']} A, {b3['rule']} {b3['amps']} A -> {schrijf90}")
+controle("de coach ziet hem laden (afgeleide status uit 'auto laadt')", b1["charging"] and b2["charging"], f"{b1['charging']} {b2['charging']}")
+controle("bij een ongewijzigd besluit gaat de limiet toch elke ronde opnieuw de number in",
+         all(len(w) == 1 and w[0] == b1["amps"] for w in schrijf90) and b1["amps"] == b2["amps"] == b3["amps"],
+         f"{schrijf90}")
+
+# Ter vergelijking: een Easee met hetzelfde ongewijzigde besluit krijgt niets.
+hassE, storeE, coachE = bouw({**huis(status="charging", stroom=5.9, vermogen=4070), "sensor.laadpaal_dyn": "6"}, instellingen())
+asyncio.run(ronde(coachE, instellingen(), T90))
+bE, vE = asyncio.run(ronde(coachE, instellingen(), T90 + dt.timedelta(minutes=1)))
+controle("een Easee met hetzelfde besluit krijgt de tweede ronde niets (de dode band blijft daar)",
+         not any(d[1] == "set_charger_dynamic_limit" for d in vE), f"{vE}")
+
+# Kabel eruit: "auto aangesloten" uit is afgekoppeld.
+hass90.states.zet("sensor.alfen_aangesloten", "off")
+hass90.states.zet("sensor.alfen_laadt", "off")
+hass90.states.zet("sensor.alfen_modus3", "A")
+hass90.states.zet("sensor.laadpaal_stroom", "0")
+hass90.states.zet("sensor.laadpaal_vermogen", {"state": "0", "attributes": {"unit_of_measurement": "W"}})
+asyncio.run(ronde90(coach90, inst90, T90 + dt.timedelta(minutes=3)))
+# Een Easee zegt bij een herstart twee seconden "disconnected"; daarom gelooft
+# de coach een kabel eruit pas na `KABEL_ONTDREUN`. Dat geldt hier ook.
+b4, v4 = asyncio.run(ronde90(coach90, inst90, T90 + dt.timedelta(minutes=4)))
+controle("'auto aangesloten' uit is afgekoppeld (na het ontdreunen)", b4["rule"] == "disconnected" and not any(d[1] == "set_value" for d in v4), f"{b4['rule']} {v4}")
+
+# Een auto die aanbod krijgt en niets neemt: eerst "gereed" (hij komt nog bij),
+# na een kwartier "klaar", zoals een Easee dat zelf zegt.
+hass91, store91, coach91 = bouw(huis90(modus="B2"), inst90)
+hass91.states.zet("sensor.laadpaal_dyn", "16")
+T91 = dt.datetime(2026, 8, 18, 14, 37)
+controle("B2 met aanbod is eerst 'ready_to_charge'",
+         coach91._status_afgeleid("dev-alfen", ALFEN["entities"], T91) == "ready_to_charge", "")
+controle("en na een kwartier 'completed'",
+         coach91._status_afgeleid("dev-alfen", ALFEN["entities"], T91 + dt.timedelta(minutes=15)) == "completed", "")
+hass91.states.zet("sensor.laadpaal_dyn", "0")
+hass91.states.zet("sensor.alfen_modus3", "B1")
+controle("B1 zonder aanbod is 'awaiting_start', en de klok begint opnieuw",
+         coach91._status_afgeleid("dev-alfen", ALFEN["entities"], T91 + dt.timedelta(minutes=16)) == "awaiting_start"
+         and "dev-alfen" not in coach91._stil_sinds, "")
+hass91.states.zet("sensor.alfen_aangesloten", "unavailable")
+controle("een integratie die even niets zegt geeft geen status (de vorige blijft tellen)",
+         coach91._status_afgeleid("dev-alfen", ALFEN["entities"], T91) == "", "")
+
+# De sensorwacht noemt de nieuwe sensoren, zonder entiteit-id.
+namen90 = coach90._sensoren(inst90)
+controle("de sensorwacht kent de kabelmelding, de laadmelding en de stroomlimiet van een Alfen",
+         namen90.get("sensor.alfen_aangesloten") == "de kabelmelding van Laadpaal"
+         and namen90.get("sensor.alfen_laadt") == "de laadmelding van Laadpaal"
+         and namen90.get("number.alfen_limiet") == "de stroomlimiet van Laadpaal", f"{namen90}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
