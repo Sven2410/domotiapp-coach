@@ -586,6 +586,18 @@ straks waard" en het plan per stand af; van de nachtzin blijft daar alleen
 de conclusie (`nachtConclusie`), de hele zin staat onderaan de pop-up.
 Proeven in test_rapport.mjs.
 
+**De prijs per uur als staafjes in die pop-up** (v0.86.0), bij de paal en bij
+de batterij. De bewoner van de eerste woning op 23-09-2026, over evcc: "met
+groene balkjes laat hij precies zien welke (goedkope) uren hij gaat laden, en
+wat de gemiddelde prijs wordt; zo heb je als gebruiker een visuele check." De
+eigenaar: "ook voor de batterij." `prijsgrafiek.js`: `prijsBalken` rekent (een
+staafje per blok, een negatieve prijs onder de nullijn, een tijd onder elk
+derde hele uur), `prijsSvg` en `prijsLabels` tekenen, en `paintPrijs_` in
+`plan-ahead-sheet.js` zet het boven de uren. Groen is bij de paal `charging`,
+bij de batterij `grid_kwh`; het gemiddelde is gewogen naar de kWh **van het
+net** (bij de paal `kwh - solar_kwh`), dus een laaduur op zon trekt het niet
+omlaag. Bij een vast contract geen grafiek. Proeven in test_rapport.mjs.
+
 **Vakantiestand, handelen met wat de nacht overhoudt, en iets anders dat
 stuurt** (v0.80.0, allemaal 22-09-2026).
 
@@ -1563,7 +1575,7 @@ python tests/test_batterij.py    # 90 op het denkwerk van de thuisbatterij en op
 python tests/test_coach.py       # 565 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1699 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 84 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 88 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

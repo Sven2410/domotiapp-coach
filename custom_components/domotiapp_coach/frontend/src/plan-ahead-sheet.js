@@ -15,12 +15,14 @@
  */
 
 import { batterijVooruit } from "./battery.js";
+import { prijsBalken, prijsCss, prijsLabels, prijsSvg } from "./prijsgrafiek.js";
 import { DacElement, define } from "./base.js";
 import { icons } from "./icons.js";
 import { sheetCss } from "./theme.js";
 
 const css = /* css */ `
   ${sheetCss}
+  ${prijsCss}
 
   .kop {
     display: grid;
@@ -170,6 +172,7 @@ export class DacPlanAheadSheet extends DacElement {
         <p class="sheet-sub" id="vooruit-nu"></p>
 
         <div class="kop" id="vooruit-kop"></div>
+        <div class="prijs-blok" id="vooruit-prijs" hidden></div>
         <div class="uren" id="vooruit-uren"></div>
         <p class="voet" id="vooruit-voet"></p>
       </dialog>
@@ -217,6 +220,7 @@ export class DacPlanAheadSheet extends DacElement {
     const uurlijst = this.$("#vooruit-uren");
     kop.replaceChildren();
     uurlijst.replaceChildren();
+    this.paintPrijs_(null);
 
     // Een thuisbatterij heeft geen tijdlijn tot een klaar-tijd maar een plan
     // per uur tot de prijzen ophouden; zie `batterijVooruit` in battery.js.
@@ -274,6 +278,16 @@ export class DacPlanAheadSheet extends DacElement {
       ["Uiterlijk beginnen", wanneer(plan.latest_start), "met een uur speling"],
       laatste,
     ]);
+
+    // De prijs per uur met de laaduren in groen, zoals evcc het laat zien.
+    // Van het net is wat er in dat uur geladen wordt min wat het dak geeft.
+    this.paintPrijs_(
+      (plan.blocks ?? []).map((b) => ({
+        start: b.start, end: b.end, price: b.price, groen: Boolean(b.charging),
+        kwh: b.kwh === undefined ? undefined : Math.max(0, Number(b.kwh) - Number(b.solar_kwh || 0)),
+      })),
+      "laden"
+    );
 
     const nu = Date.now();
     for (const blok of plan.blocks ?? []) {
@@ -350,6 +364,49 @@ export class DacPlanAheadSheet extends DacElement {
       zon;
   }
 
+  /**
+   * De prijsgrafiek boven de uren, of niets bij een vast contract.
+   *
+   * De bewoner van de eerste woning op 23-09-2026, over evcc: "zo heb je als
+   * gebruiker een visuele check dat de laadpaal inderdaad op de goedkoopste
+   * momenten gaat laden." Zie prijsgrafiek.js.
+   */
+  paintPrijs_(rijen, wat = "laden") {
+    const blok = this.$("#vooruit-prijs");
+    blok.replaceChildren();
+    const berekend = rijen ? prijsBalken(rijen) : null;
+    blok.hidden = !berekend;
+    if (!berekend) return;
+
+    const kop = document.createElement("div");
+    kop.className = "prijs-kop";
+    const links = document.createElement("span");
+    links.textContent = "Prijs per uur";
+    const rechts = document.createElement("span");
+    const groen = berekend.balken.some((b) => b.groen);
+    if (berekend.gemiddeld !== null) {
+      const sterk = document.createElement("strong");
+      sterk.textContent = `€ ${berekend.gemiddeld.toFixed(3).replace(".", ",")}`;
+      rechts.append("gemiddeld ", sterk, " per kWh van het net");
+    } else {
+      rechts.textContent = groen
+        ? "alles op je eigen zon"
+        : "in deze uren niets van het net";
+    }
+    kop.append(links, rechts);
+
+    const legenda = document.createElement("div");
+    legenda.className = "prijs-legenda";
+    for (const [klasse, tekst] of [["groen", `hij gaat ${wat}`], ["", "hij wacht"]]) {
+      const item = document.createElement("span");
+      const blokje = document.createElement("i");
+      if (klasse) blokje.className = klasse;
+      item.append(blokje, tekst);
+      legenda.append(item);
+    }
+    blok.append(kop, prijsSvg(berekend), prijsLabels(berekend), legenda);
+  }
+
   /** De vakken bovenaan: label, waarde en een regel eronder. */
   paintKop_(vakken) {
     const kop = this.$("#vooruit-kop");
@@ -378,6 +435,13 @@ export class DacPlanAheadSheet extends DacElement {
     // De nachtzin staat in de voet; bovenaan alleen wat hij nu doet.
     this.$("#vooruit-nu").textContent = this.besluit_?.reason ?? "";
     this.paintKop_(accu.kop.map((v) => [v.label, v.waarde, v.bij]));
+    this.paintPrijs_(
+      (this.besluit_?.hours ?? []).map((u) => ({
+        start: u.start, end: u.end, price: u.price,
+        groen: Number(u.grid_kwh) > 0.05, kwh: Number(u.grid_kwh) || 0,
+      })),
+      "van het net laden"
+    );
     const uurlijst = this.$("#vooruit-uren");
     const nu = Date.now();
     for (const uur of accu.uren) {
