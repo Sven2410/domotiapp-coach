@@ -5105,6 +5105,47 @@ controle("schema aan: de planning wint van de modus zon",
          b93p["rule"] not in ("zon-wacht", "zon-modus", "continu") and b93p["planned"] and b93p["plan_ahead"] is not None,
          f"{b93p['rule']}")
 
+print("=== 94. een paal die zegt dat hij laadt: de batterij geeft meteen niets meer af (v0.87.1) ===")
+# De eerste woning op 23-09-2026: om 15:58:56 zei de Alfen "auto laadt", het
+# vermogen van de paal stond tot 15:59:25 op 0 W (een Alfen meldt het eens per
+# 30 s), en de regelaar zag de auto als afname en ontlaadde 25 s lang 3,45 kW
+# in de auto. Het besluit van die minuut was nog "nul op de meter".
+inst94 = instellingen(devices=[LAADPAAL, BATTERIJ])
+hass94, _, coach94 = bouw(huis75(afname=1500.0), inst94)
+asyncio.run(ronde75(hass94, coach94, dt.datetime(2026, 9, 21, 21, 0)))
+controle("het besluit van de minuut is nul op de meter", coach94.state["dev-batterij"].get("mode") == "nul",
+         f"{coach94.state['dev-batterij'].get('mode')}")
+gezien94 = []
+regelaar94 = coach94._batterij["dev-batterij"]["regelaar"]
+echte_stap = regelaar94.stap
+
+
+def stap94(*args, **kw):
+    gezien94.append(kw["besluit"])
+    return echte_stap(*args, **kw)
+
+
+regelaar94.stap = stap94
+hass94.states.zet("sensor.afname", "5500")
+asyncio.run(coach94._async_regel("dev-batterij", inst94, BATTERIJ))
+controle("zonder ladende paal mag de regelaar ontladen", gezien94 and gezien94[-1].grenzen[1], f"{gezien94[-1].stand}")
+hass94.states.zet("sensor.laadpaal_status", "charging")   # het vermogen staat nog op 0 W
+controle("de status van de paal telt, ook met 0 W vermogen", coach94._paal_laadt(inst94), "")
+asyncio.run(coach94._async_regel("dev-batterij", inst94, BATTERIJ))
+print(f"  met ladende paal: {gezien94[-1].stand}: {gezien94[-1].reason}")
+controle("en dan mag de regelaar meteen niet meer ontladen, zonder op de besluitronde te wachten",
+         not gezien94[-1].grenzen[1], f"{gezien94[-1].stand}")
+# Een Alfen: "auto laadt" is een eigen sensor.
+alfen94 = {"id": "dev-alfen", "type": "laadpaal", "brand": "alfen", "entity": "sensor.alfen_w",
+           "entities": {"charging": "sensor.alfen_laadt", "limit": "number.alfen_limiet"}}
+hass94.states.zet("sensor.laadpaal_status", "disconnected")
+hass94.states.zet("sensor.alfen_w", "0")
+hass94.states.zet("sensor.alfen_laadt", "on")
+inst94b = instellingen(devices=[alfen94, BATTERIJ])
+controle("bij een Alfen telt 'auto laadt' aan", coach94._paal_laadt(inst94b), "")
+hass94.states.zet("sensor.alfen_laadt", "off")
+controle("en uit is uit", not coach94._paal_laadt(inst94b), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

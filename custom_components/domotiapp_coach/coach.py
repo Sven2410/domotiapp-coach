@@ -55,6 +55,7 @@ from .batterij import (
     Batterij,
     Regelaar,
     balans_kwh,
+    met_paal,
     plan_batterij,
     rendement_uit_tellers,
     terugverdiend,
@@ -3780,6 +3781,16 @@ class ChargerCoach:
             watt = _watts(self.hass, device.get("entity"))
             if watt is not None and watt > watts_for(MIN_AMPS, 1) / 2.0:
                 return True
+            # En wat de paal zelf zegt, want dat komt meteen: het vermogen van
+            # een Alfen komt eens per 30 seconden. In de eerste woning op
+            # 23-09-2026 om 15:58:56 zei de Alfen "auto laadt", en het vermogen
+            # stond tot 15:59:25 op 0 W; de batterij gaf 25 seconden lang
+            # 3,45 kW aan de auto (v0.87.1).
+            entities = device.get("entities") or {}
+            if entities.get("charging") and _text(self.hass, entities.get("charging")) == "on":
+                return True
+            if entities.get("status") and "charging" in _text(self.hass, entities.get("status")):
+                return True
         return False
 
     async def _one_batterij(
@@ -4046,9 +4057,13 @@ class ChargerCoach:
                     geld = sessie.setdefault("geld", {})
                     geld[dag] = geld.get(dag, 0.0) + euro
 
+            # Laadt er intussen een paal, dan geeft de batterij niets af, ook
+            # als het besluit van deze minuut dat nog niet wist: de regelaar
+            # tikt elke paar seconden, de besluitronde eens per minuut (v0.87.1).
+            besluit = met_paal(sessie["besluit"], self._paal_laadt(settings))
             opdracht = regelaar.stap(
                 nu, net_w=net_w, net_op=net_op, batterij_w=batterij_w,
-                besluit=sessie["besluit"], b=b,
+                besluit=besluit, b=b,
                 doel_w=regelaar.doel_w(sessie.get("koop"), sessie.get("terug")),
                 ruimte_w=self._laadruimte_w(settings, device, batterij_w),
             )
