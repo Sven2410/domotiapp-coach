@@ -294,6 +294,7 @@ _STRATEGY = _schema(
     {
         vol.Optional("level"): vol.In(LEVELS),
         vol.Optional("night_strategy"): bool,
+        vol.Optional("plan_priority"): vol.All([str], vol.Length(max=24)),
         vol.Optional("solar_priority"): vol.All(
             [_schema({
                 vol.Required("device"): str,

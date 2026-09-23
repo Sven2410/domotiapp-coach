@@ -939,6 +939,28 @@ voorrang_accu_eerst = voorrang_auto_eerst.kopie(
     uitleg="hetzelfde met eerst de accu tot 50%, dan de auto, dan de accu tot vol",
     zon_voorrang=[{"device": "batterij", "limit": 50}, {"device": "paal"}, {"device": "batterij"}],
 )
+# De voorrang bij planningen (v0.93.0). De bewoner van de eerste woning op
+# 23-09-2026: "eerst de auto volgens laadplanning, dan de accu volgens laadplanning;
+# laadt de accu maar met 3500 W en heb ik nog ruimte op mijn aansluiting?" Een
+# grote auto die de hele nacht nodig heeft en een lege accu die de goedkope nacht
+# wil, op 3x25 A: op fase 3 passen 16 A auto en 15 A accu niet samen.
+planning_auto_eerst = Scenario(
+    "planning-auto-eerst",
+    "dynamisch, 's nachts: een grote auto op 50% en een accu op 10% willen dezelfde goedkope uren, samen passen ze niet: de auto gaat voor",
+    contract="dynamisch", zon=Zon(wolken="geen"), auto=replace(GROTE, soc=50.0), batterij=Batterij(soc=10.0),
+    begin="2026-09-07 20:55", kabel_erin="21:00", klaar_om="07:00", duur_uren=14, stap_seconden=15,
+    # Een nacht met genoeg verschil: dan wil de lege accu de goedkope uren in
+    # voor de dure ochtend, en de auto heeft ze ook nodig.
+    prijzen=Prijzen(per_dag={
+        "2026-09-07": [0.30] * 17 + [0.40] * 7,
+        "2026-09-08": [0.15] * 2 + [0.30] * 5 + [0.45] * 4 + [0.30] * 13,
+    }),
+)
+planning_accu_eerst = planning_auto_eerst.kopie(
+    naam="planning-accu-eerst",
+    uitleg="hetzelfde met de accu bovenaan: de auto krijgt wat de accu overlaat",
+    plan_voorrang=["batterij", "paal"],
+)
 batterij_sprong = Scenario(
     "batterij-sprong",
     "de regelaar: om 19:00 gaat er drie kilowatt aan, om 19:20 weer uit",
@@ -1044,6 +1066,7 @@ ALLE = [
     vast_zon_modus, bewolkt_zon_modus, dyn_continu,
     batterij_helpt_auto, batterij_helpt_auto_nacht, batterij_helpt_auto_zonder_nacht,
     voorrang_auto_eerst, voorrang_accu_eerst,
+    planning_auto_eerst, planning_accu_eerst,
 ]
 
 

@@ -1601,6 +1601,52 @@ in plaats van 10: de batterij volgt de auto die met de zon meeloopt, met en
 zonder de voorrang precies evenveel (171 in veertien uur). Proef 63 in
 test_planner.py, proef 99 in test_coach.py, de voorrang in test_rapport.mjs.
 
+**Voorrang bij planningen** (v0.93.0). De bewoner van de eerste woning op
+23-09-2026: "stel, er is geen zonoverschot. Eerst de auto (volgens laadplanning);
+dan kijk ik naar de accu volgens laadplanning; laadt de accu maar met 3500 W en heb
+ik nog ruimte op mijn aansluiting, dan kan ik ook mijn boiler nog vol laden." De
+eigenaar: standaard auto, accu, boiler, en het keuzelijstje "wie gaat voor" op de
+paalkaart vervalt. Tot dan ging in de praktijk de batterij voor: hij werd eerst
+behandeld en laden van het net wijkt niet, en de boiler keek niet naar de
+aansluiting.
+
+- `strategy.plan_priority`: apparaat-ids van eerst naar laatst. `plan_regels` in
+  planner.py (en `planRegels` in voorrang.js) vult aan in de volgorde auto, accu,
+  boiler, palen onderling in hun oude hoog/midden/laag.
+- **Toezeggingen** (`_toezeggingen`, `_hogere_toezeggingen` in coach.py): wat elk
+  apparaat er de komende minuut bij neemt bovenop wat de meter ziet (een paal zijn
+  claim, een batterij die van het net laadt het verschil tot haar vermogen, een
+  boiler die aangaat zijn element). Elk apparaat krijgt de ruimte onder de
+  zekeringen min wat apparaten **hoger** toezegden: de palen in de ronde via
+  `vergeven` plus de batterij en boiler, de batterij in `_laadruimte_w`, de boiler
+  ook (die gaat pas aan als zijn element past; zonder gemeten vermogen wordt er
+  niet gegokt).
+- Een batterij die van het net laadt **wijkt** voor een paal die hoger staat
+  (`_batterij_wijkt` met `voor`), en telt dus niet als belasting voor die paal.
+- **De klaar-tijd gaat boven de volgorde** (eis 2): een paal in de klaar-tijdregel
+  (`_deadline_for`) of te laat (`_te_laat`) krijgt plek -1 in `_plan_voorrang`.
+  Zonder dat haalde de auto met de accu bovenaan 96% om 07:00.
+- Op Strategie de kaart "Voorrang bij planningen" (`paintPlan_`, `sleepIn_` gedeeld
+  met de zonlijst).
+- **De warmtepomp en de rest van het huis gaan altijd voor.** De eigenaar op
+  23-09-2026: "warmtepomp moet prio 1 zijn, net als in de tweede woning, waar de
+  paal geknepen werd omdat de warmtepomp 's nachts aanging; je wilt 's ochtends
+  niet in de kou zitten." Dat was het al: wat de coach niet stuurt meet hij als
+  huis op de fasen, en hij verdeelt alleen wat er daarna onder de zekering over
+  is. Boven beide lijsten staat het nu als vaste regel 0.
+- **In de energiestroom staat de thuisbatterij altijd rechts** (`chooseBubbles` in
+  components/energy-flow.js), ook als hij stilstaat, met de pijl naar hem toe als
+  hij laadt en naar het huis als hij levert; de draaiende apparaten komen onder,
+  één met zijn naam of opgeteld. De eigenaar: "die kan bidirectioneel; nu staat de
+  accu onder meerdere die verbruiken, maar hij levert."
+
+Scenario's `planning-auto-eerst` en `planning-accu-eerst` (twee goedkope uren, een
+grote auto op 50% en een accu op 10%, 3x25 A): om 00:30 laadt de auto 16 A of 7 A,
+om 02:00 staat de accu op 23% of 39%, de auto is in beide gevallen op tijd vol en
+fase 3 blijft op 23 A. Proef 64 in test_planner.py, proef 100 in test_coach.py
+(proef 96 aangepast: standaard wijkt ook een batterij die van het net laadt voor de
+auto), de lijst in test_rapport.mjs.
+
 **Gaat de coach weg, dan gaat de batterij terug** (`_async_batterij_loslaten`):
 vermogen op nul en `idle_mode` in de modus. Ook als het vinkje "mag sturen" eraf
 gaat of het niveau naar adviseren. Dezelfde gedachte als de stroom terug op de
@@ -1730,12 +1776,12 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 411 controles op het denkwerk
+python tests/test_planner.py     # 415 controles op het denkwerk
 python tests/test_batterij.py    # 105 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 608 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1824 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 616 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1862 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 98 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 100 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

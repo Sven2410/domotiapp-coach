@@ -1213,7 +1213,45 @@ proef("voorrang bij zonoverschot: het paneel vult aan zoals de coach (zie proef 
   assert.equal(regelUitleg("laadpaal", null), "tot het doel van de auto");
   assert.equal(regelUitleg("boiler", null), "tot hij warm is");
   const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/strategy.js", import.meta.url), "utf-8");
-  assert.ok(bron.includes('id="zon-lijst"') && bron.includes("sleepZon_(") && bron.includes("solar_priority"));
+  assert.ok(bron.includes('id="zon-lijst"') && bron.includes("sleepIn_(") && bron.includes("solar_priority"));
+});
+
+proef("voorrang bij planningen: standaard auto, accu, boiler, palen in hun oude voorrang (v0.93.0)", async () => {
+  const { planRegels } = await import("../custom_components/domotiapp_coach/frontend/src/voorrang.js");
+  const apparaten = [
+    { id: "boiler", type: "boiler", controllable: true },
+    { id: "accu", type: "thuisbatterij", controllable: true },
+    { id: "paal1", type: "laadpaal", controllable: true },
+    { id: "paal2", type: "laadpaal", controllable: true },
+    { id: "vaat", type: "vaatwasser", controllable: true },
+  ];
+  assert.deepEqual(planRegels([], apparaten), ["paal1", "paal2", "accu", "boiler"]);
+  assert.deepEqual(planRegels([], apparaten, [{ device: "paal1", priority: "low" }, { device: "paal2", priority: "high" }]),
+    ["paal2", "paal1", "accu", "boiler"], "de oude hoog/laag van de kaart is de beginvolgorde");
+  assert.deepEqual(planRegels(["boiler", "weg", "accu"], apparaten), ["boiler", "accu", "paal1", "paal2"],
+    "dezelfde uitkomst als plan_regels in planner.py (proef 64)");
+  const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
+  assert.ok(!kaart.includes("data-plan-prio"), "het keuzelijstje Prioriteit staat niet meer op de kaart");
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/strategy.js", import.meta.url), "utf-8");
+  assert.ok(bron.includes('id="plan-lijst"') && bron.includes("plan_priority"));
+  // De eigenaar op 23-09-2026: "warmtepomp moet prio 1 zijn." Wat de coach niet stuurt
+  // gaat altijd voor, en dat staat als vaste regel boven beide lijsten.
+  assert.equal(bron.split("Warmtepomp, koken en de rest van je huis").length - 1, 2, "boven beide lijsten");
+});
+
+proef("de energiestroom: de thuisbatterij staat altijd rechts, de rest eronder (v0.93.0)", async () => {
+  const { chooseBubbles } = await import("../custom_components/domotiapp_coach/frontend/src/components/energy-flow.js");
+  const accu = { id: "a", type: "thuisbatterij", watts: 3450, batteryWatts: -3450 };
+  const paal = { id: "p", type: "laadpaal", watts: 9200 };
+  const vaat = { id: "v", type: "vaatwasser", watts: 2000 };
+  const stil = { id: "b", type: "thuisbatterij", watts: 0, batteryWatts: 0 };
+  assert.deepEqual(chooseBubbles([paal, accu]).slots.map((d) => d.id), ["a", "p"], "de accu rechts, ook naast een zwaardere paal");
+  const drie = chooseBubbles([paal, vaat, accu]);
+  assert.equal(drie.slots[0].id, "a");
+  assert.equal(drie.slots[1].id, "__rest__");
+  assert.deepEqual(drie.rolled.map((d) => d.id), ["p", "v"], "de rest opgeteld onder");
+  assert.deepEqual(chooseBubbles([stil, paal]).slots.map((d) => d.id), ["b", "p"], "ook als hij stilstaat");
+  assert.deepEqual(chooseBubbles([paal, vaat]).slots.map((d) => d.id), ["p", "v"], "zonder accu zoals het was");
 });
 
 proef("onder het schemaschuifje staat wat hij zonder planning doet", async () => {

@@ -2970,5 +2970,23 @@ controle("de grens van de regel waar hij nu staat",
          planner.zon_grens(regels63, r_a, "accu") == 50.0 and planner.zon_grens(regels63, r_b, "accu") is None, "")
 
 print()
+print("=== 64. voorrang bij planningen: de volgorde (v0.93.0) ===")
+APP64 = [
+    {"id": "boiler", "type": "boiler", "controllable": True},
+    {"id": "accu", "type": "thuisbatterij", "controllable": True},
+    {"id": "paal1", "type": "laadpaal", "controllable": True},
+    {"id": "paal2", "type": "laadpaal", "controllable": True},
+    {"id": "vaat", "type": "vaatwasser", "controllable": True},
+]
+controle("standaard: auto, accu, boiler", planner.plan_regels([], APP64) == ["paal1", "paal2", "accu", "boiler"],
+         f"{planner.plan_regels([], APP64)}")
+controle("palen onderling in hun oude voorrang van de kaart",
+         planner.plan_regels([], APP64, {"paal1": "low", "paal2": "high"}) == ["paal2", "paal1", "accu", "boiler"], "")
+controle("de keuze van de bewoner, zonder wat er niet is, de rest achteraan (zoals planRegels in voorrang.js)",
+         planner.plan_regels(["boiler", "weg", "accu"], APP64) == ["boiler", "accu", "paal1", "paal2"],
+         f"{planner.plan_regels(['boiler', 'weg', 'accu'], APP64)}")
+controle("de plek per apparaat", planner.plan_rang(["a", "b"]) == {"a": 0, "b": 1}, "")
+
+print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
