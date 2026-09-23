@@ -2892,5 +2892,51 @@ d61n = decide(nu, [], zon_net(800.0), sven_auto(), _dc.replace(met_modus("zon"),
 controle("snel gaat boven de modus", d61n.charge and d61n.rule == "boost", d61n.rule)
 
 print()
+print("=== 62. kwartierprijzen: hetzelfde als uren als de kwartieren gelijk zijn, en anders de goedkoopste kwartieren (v0.88.1) ===")
+nu62 = dt.datetime(2026, 8, 18, 16, 10)
+begin62 = nu62.replace(minute=0)
+def prijs62(t):
+    return round(0.30 + 0.02 * (t.hour % 5) - (0.10 if t.hour == 2 and t.minute < 30 else 0.0), 4)
+uren62, kw62, vlak62 = [], [], []
+for i in range(18):
+    s0 = begin62 + dt.timedelta(hours=i)
+    kwartieren = [s0 + dt.timedelta(minutes=15 * q) for q in range(4)]
+    gem = sum(prijs62(k) for k in kwartieren) / 4
+    uren62.append({"start": s0, "end": s0 + dt.timedelta(hours=1), "price": gem})
+    for k in kwartieren:
+        kw62.append({"start": k, "end": k + dt.timedelta(minutes=15), "price": prijs62(k)})
+        vlak62.append({"start": k, "end": k + dt.timedelta(minutes=15), "price": gem})
+auto62 = Car(capacity_kwh=78.0, phases=3, soc_percent=80.0)
+paal62 = Charger(max_amps=16.0, connected=True, charging=False)
+net62 = Grid(surplus_w=0.0, phase_amps=[3.0, 3.0, 3.0], fuse_amps=25.0, charger_amps=0.0)
+venster62 = Window(enabled=True, deadline=dt.datetime(2026, 8, 19, 8, 0))
+
+
+def geladen62(prijzen):
+    tl = planner.timeline(nu62, prijzen, net62, auto62, paal62, venster62, 16, Tariff())
+    per_uur = {}
+    for b in tl.blocks:
+        if b.charging:
+            per_uur[b.start.replace(minute=0)] = per_uur.get(b.start.replace(minute=0), 0.0) + b.kwh
+    return tl, {k: round(v, 2) for k, v in per_uur.items()}
+
+
+tl_u, u62 = geladen62(uren62)
+tl_v, v62 = geladen62(vlak62)
+tl_k, k62 = geladen62(kw62)
+print(f"  uren: {u62}")
+print(f"  vlakke kwartieren: {v62}")
+controle("vlakke kwartieren laden in dezelfde uren evenveel als uurprijzen", u62 == v62, f"{u62} / {v62}")
+kw_laad = [b.start.strftime("%H:%M") for b in tl_k.blocks if b.charging]
+print(f"  echte kwartieren, laadt in: {kw_laad}")
+controle("met echte kwartierprijzen zitten de twee goedkoopste kwartieren (02:00 en 02:15) in het plan",
+         "02:00" in kw_laad and "02:15" in kw_laad, f"{kw_laad}")
+controle("en de tijdlijn heeft een blok per kwartier", len(tl_k.blocks) == 4 * len(tl_u.blocks) - 3 or len(tl_k.blocks) >= 3 * len(tl_u.blocks),
+         f"{len(tl_k.blocks)} tegen {len(tl_u.blocks)}")
+d_u = decide(nu62, uren62, net62, auto62, paal62, venster62, tariff=Tariff())
+d_v = decide(nu62, vlak62, net62, auto62, paal62, venster62, tariff=Tariff())
+controle("en het besluit van nu is hetzelfde", (d_u.charge, d_u.rule) == (d_v.charge, d_v.rule), f"{d_u.rule} / {d_v.rule}")
+
+print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

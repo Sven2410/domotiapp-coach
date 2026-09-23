@@ -15,7 +15,37 @@
  */
 
 import { batterijVooruit } from "./battery.js";
-import { prijsBalken, prijsCss, prijsLabels, prijsSvg } from "./prijsgrafiek.js";
+import { perUur, prijsBalken, prijsCss, prijsLabels, prijsSvg } from "./prijsgrafiek.js";
+
+/**
+ * Kwartierblokken van de paal samengenomen tot een regel per uur (v0.88.1).
+ * Opgeteld en gemiddeld, verder niets: welke kwartieren laden komt uit het
+ * plan, en de grafiek erboven laat ze elk apart zien.
+ */
+export function paalPerUur(blokken = []) {
+  return perUur(blokken).map((groep) => {
+    if (groep.length === 1) return groep[0];
+    const laden = groep.filter((b) => b.charging);
+    const prijzen = groep.map((b) => b.price).filter((p) => p !== null && p !== undefined);
+    const som = (lijst, veld) => lijst.reduce((t, b) => t + (Number(b[veld]) || 0), 0);
+    const uren = laden.reduce((t, b) => t + (new Date(b.end) - new Date(b.start)) / 3600000, 0);
+    const kwh = som(groep, "kwh");
+    const eerste = laden[0] ?? groep[0];
+    return {
+      start: groep[0].start,
+      end: groep[groep.length - 1].end,
+      price: prijzen.length ? prijzen.reduce((t, p) => t + p, 0) / prijzen.length : null,
+      charging: laden.length > 0,
+      why: laden.length && laden.length < groep.length
+        ? `${eerste.why} (in ${laden.length} van de ${groep.length} kwartieren)`
+        : eerste.why,
+      solar_kwh: som(groep, "solar_kwh"),
+      kwh,
+      amps: Math.max(0, ...laden.map((b) => Number(b.amps) || 0)),
+      kw: uren > 0 ? kwh / uren : 0,
+    };
+  });
+}
 import { DacElement, define } from "./base.js";
 import { icons } from "./icons.js";
 import { sheetCss } from "./theme.js";
@@ -290,7 +320,7 @@ export class DacPlanAheadSheet extends DacElement {
     );
 
     const nu = Date.now();
-    for (const blok of plan.blocks ?? []) {
+    for (const blok of paalPerUur(plan.blocks ?? [])) {
       const rij = document.createElement("div");
       rij.className = "uur";
       if (blok.charging) rij.classList.add("laadt");
@@ -381,7 +411,7 @@ export class DacPlanAheadSheet extends DacElement {
     const kop = document.createElement("div");
     kop.className = "prijs-kop";
     const links = document.createElement("span");
-    links.textContent = "Prijs per uur";
+    links.textContent = berekend.stap <= 20 ? "Prijs per kwartier" : "Prijs per uur";
     const rechts = document.createElement("span");
     const groen = berekend.balken.some((b) => b.groen);
     if (berekend.gemiddeld !== null) {

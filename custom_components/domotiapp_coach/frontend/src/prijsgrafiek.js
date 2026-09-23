@@ -92,7 +92,39 @@ export function prijsBalken(rijen = []) {
   } else if (groen.length) {
     gemiddeld = groen.reduce((s, r) => s + r.price, 0) / groen.length;
   }
-  return { balken, nul, gemiddeld, kwh };
+  // Hoe lang een blok is, in minuten: 60 bij uurprijzen, 15 bij kwartierprijzen
+  // (v0.88.1). Het eerste blok telt niet mee, want dat begint vaak midden in
+  // een uur (nu).
+  const duren = metPrijs.slice(1)
+    .filter((r) => r.end)
+    .map((r) => (new Date(r.end) - new Date(r.start)) / 60000)
+    .filter((m) => m > 0);
+  const stap = duren.length ? Math.round(Math.min(...duren)) : 60;
+  return { balken, nul, gemiddeld, kwh, stap };
+}
+
+/**
+ * Blokken van korter dan een uur samengenomen per uur, voor de lijst onder de
+ * grafiek (v0.88.1). Met kwartierprijzen zijn het anders zestig tot tachtig
+ * regels; de grafiek laat de kwartieren zelf zien. Uurblokken blijven zoals ze
+ * zijn. Geeft groepen: een lijst per uur, in tijdsvolgorde.
+ */
+export function perUur(blokken = []) {
+  const lijst = (blokken ?? []).filter((b) => b && b.start);
+  const kwartieren = lijst.slice(1).some((b) => b.end && new Date(b.end) - new Date(b.start) <= 20 * 60000);
+  if (!kwartieren) return lijst.map((b) => [b]);
+  const groepen = [];
+  let sleutel = null;
+  for (const b of lijst) {
+    const d = new Date(b.start);
+    const k = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}`;
+    if (k !== sleutel) {
+      groepen.push([]);
+      sleutel = k;
+    }
+    groepen[groepen.length - 1].push(b);
+  }
+  return groepen;
 }
 
 const NS = "http://www.w3.org/2000/svg";

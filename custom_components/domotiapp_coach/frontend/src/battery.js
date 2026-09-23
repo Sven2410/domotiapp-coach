@@ -7,6 +7,8 @@
  * weet.
  */
 
+import { perUur } from "./prijsgrafiek.js";
+
 const euro = (bedrag, cijfers = 2) =>
   `€ ${Number(bedrag).toLocaleString("nl-NL", { minimumFractionDigits: cijfers, maximumFractionDigits: cijfers })}`;
 
@@ -161,13 +163,31 @@ export function batterijVooruit(besluit) {
   // nieuwe dag erbij dat het morgen is, zoals "morgen 00:00".
   const vandaag = String(uren[0]?.start ?? "").slice(0, 10);
   let dagGezien = vandaag;
-  const rijen = uren.map((u) => {
+  // Kwartierprijzen: een regel per uur in de lijst, de grafiek toont de
+  // kwartieren zelf (v0.88.1). Opgeteld en gemiddeld, verder niets.
+  const perUurRijen = perUur(uren).map((groep) => {
+    if (groep.length === 1) return groep[0];
+    const standen = [...new Set(groep.map((u) => u.mode))];
+    const prijzen = groep.map((u) => u.price).filter((p) => Number.isFinite(p));
+    return {
+      start: groep[0].start,
+      end: groep[groep.length - 1].end,
+      mode: standen.length === 1 ? standen[0] : standen,
+      kwh: groep.reduce((t, u) => t + (Number(u.kwh) || 0), 0),
+      grid_kwh: groep.reduce((t, u) => t + (Number(u.grid_kwh) || 0), 0),
+      soc: groep[groep.length - 1].soc,
+      price: prijzen.length ? prijzen.reduce((t, p) => t + p, 0) / prijzen.length : undefined,
+    };
+  });
+  const rijen = perUurRijen.map((u) => {
     const dag = String(u.start).slice(0, 10);
     const nieuweDag = dag !== dagGezien;
     dagGezien = dag;
     const kwh = Number(u.kwh) || 0;
     const net = Number(u.grid_kwh) || 0;
-    let wat = STAND_NAMEN[u.mode] ?? u.mode ?? "";
+    let wat = Array.isArray(u.mode)
+      ? u.mode.map((m) => STAND_NAMEN[m] ?? m).join(" en ")
+      : STAND_NAMEN[u.mode] ?? u.mode ?? "";
     // Komt alles wat erin gaat van het net, dan is "waarvan" dubbel.
     if (net > 0.05 && Math.abs(net - kwh) < 0.05) wat += `, ${kwhTekst(net)} van het net`;
     else {

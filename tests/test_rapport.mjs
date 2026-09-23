@@ -1067,6 +1067,55 @@ proef("de pop-up van de paal toont de prijsgrafiek met het gewogen gemiddelde va
   assert.equal(vast.knopen.get("#vooruit-prijs").hidden, true);
 });
 
+proef("kwartierprijzen: een staafje per kwartier, en de lijst een regel per uur (v0.88.1)", async () => {
+  const { perUur } = await import("../custom_components/domotiapp_coach/frontend/src/prijsgrafiek.js");
+  const { paalPerUur } = await import("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js");
+  const k = (h, m, price, charging, kwh = 0) => ({
+    start: `2026-09-23T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`,
+    end: `2026-09-23T${String(h + (m + 15 >= 60 ? 1 : 0)).padStart(2, "0")}:${String((m + 15) % 60).padStart(2, "0")}:00`,
+    price, charging, kwh, why: charging ? "een van de goedkoopste manieren" : "duurder", amps: charging ? 16 : 0,
+    groen: charging, solar_kwh: 0,
+  });
+  const blokken = [k(1, 0, 0.30, false), k(1, 15, 0.29, false), k(1, 30, 0.28, false), k(1, 45, 0.27, false),
+    k(2, 0, 0.20, true, 2.75), k(2, 15, 0.19, true, 2.75), k(2, 30, 0.31, false), k(2, 45, 0.32, false)];
+  const b = prijsBalken(blokken);
+  assert.equal(b.balken.length, 8, "een staafje per kwartier");
+  assert.equal(b.stap, 15);
+  assert.deepEqual(perUur(blokken).map((g) => g.length), [4, 4]);
+  const rijen = paalPerUur(blokken);
+  assert.equal(rijen.length, 2, "twee regels: 01:00 en 02:00");
+  assert.equal(rijen[1].charging, true);
+  assert.match(rijen[1].why, /in 2 van de 4 kwartieren/);
+  assert.ok(Math.abs(rijen[1].kwh - 5.5) < 1e-9 && Math.abs(rijen[1].kw - 11.0) < 1e-9, JSON.stringify(rijen[1]));
+  assert.ok(Math.abs(rijen[1].price - 0.255) < 1e-9, "de gemiddelde prijs van het uur");
+  // Uurprijzen blijven zoals ze zijn.
+  const uren = [{ start: "2026-09-23T01:00:00", end: "2026-09-23T02:00:00", price: 0.3 },
+    { start: "2026-09-23T02:00:00", end: "2026-09-23T03:00:00", price: 0.2 }];
+  assert.deepEqual(perUur(uren).map((g) => g.length), [1, 1]);
+  assert.equal(prijsBalken(uren).stap, 60);
+  // De batterij: ook een regel per uur, met beide standen als ze wisselen.
+  const acc = batterijVooruit({ kind: "batterij", soc: 50, hours: [
+    { start: "2026-09-23T02:00:00", end: "2026-09-23T02:15:00", mode: "netladen", kwh: 0.8, grid_kwh: 0.8, soc: 55, price: 0.19 },
+    { start: "2026-09-23T02:15:00", end: "2026-09-23T02:30:00", mode: "netladen", kwh: 0.8, grid_kwh: 0.8, soc: 60, price: 0.18 },
+    { start: "2026-09-23T02:30:00", end: "2026-09-23T02:45:00", mode: "nul", kwh: 0, grid_kwh: 0, soc: 60, price: 0.31 },
+    { start: "2026-09-23T02:45:00", end: "2026-09-23T03:00:00", mode: "nul", kwh: 0, grid_kwh: 0, soc: 60, price: 0.32 },
+  ] });
+  assert.equal(acc.uren.length, 1);
+  assert.equal(acc.uren[0].wat, "Laden van het net en nul op de meter, 1,6 kWh van het net");
+  assert.equal(acc.uren[0].soc, "60%");
+});
+
+proef("de pop-up zegt 'prijs per kwartier' bij kwartierprijzen", () => {
+  const k = (m, charging) => ({ start: `2026-08-30T03:${String(m).padStart(2, "0")}:00`,
+    end: `2026-08-30T03:${String(m + 14).padStart(2, "0")}:59`, price: 0.2 + m / 1000, charging, why: "x",
+    solar_kwh: 0, kwh: charging ? 2.7 : 0, amps: charging ? 16 : 0, kw: charging ? 11 : 0 });
+  const { el, knopen } = vooruitScherm({ ...NACHT, blocks: [k(0, false), k(15, true), k(30, true), k(45, false)] });
+  el.paint_();
+  const kop = knopen.get("#vooruit-prijs").kinderen[0].kinderen[0];
+  assert.equal(kop.textContent, "Prijs per kwartier");
+  assert.equal(knopen.get("#vooruit-uren").kinderen.length, 1, "een regel voor het hele uur");
+});
+
 proef("de pop-up tekent de grafiek bij de paal en bij de batterij", () => {
   const sheet = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js", import.meta.url), "utf-8");
   assert.equal(sheet.split("this.paintPrijs_(").length - 1, 3, "leeg maken, de paal, en de batterij");
