@@ -187,6 +187,9 @@ _BATTERY = _schema(
         # vol staan. De bewoner van de eerste woning op 22-09-2026.
         vol.Optional("holiday", default=False): bool,
         vol.Optional("holiday_max_percent", default=50): vol.All(vol.Coerce(int), vol.Range(10, 90)),
+        # Boven welke accustand de batterij de auto mag helpen als de paal
+        # laadt (v0.90.0); leeg is nooit. De nachtstrategie gaat voor.
+        vol.Optional("car_above", default=None): _LEEG_OF(float, 0, 100),
         # Wat de batterij gekost heeft, voor de terugverdientijd.
         vol.Optional("purchase_price", default=None): _LEEG_OF(float, 0, 1000000),
         # Welke keuze van de modus-entiteit "de coach stuurt" betekent, en welke
@@ -290,6 +293,7 @@ _SCHEDULE = _schema(
 _STRATEGY = _schema(
     {
         vol.Optional("level"): vol.In(LEVELS),
+        vol.Optional("night_strategy"): bool,
         # `load_alert` stond hier tot v0.52.0; zie `_NOTIFICATIONS`. Een oud
         # paneel dat hem nog meestuurt raakt hem hier kwijt, en dat is goed.
         vol.Optional("schedules"): [_SCHEDULE],

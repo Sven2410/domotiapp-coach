@@ -684,6 +684,8 @@ class Batterij:
     # Wat de bewoner instelt.
     reserve: float | None = None
     handelen: bool = False
+    # Boven welke accustand hij de auto mag helpen (v0.90.0), of None: nooit.
+    auto_boven: float | None = None
     wekelijks_vol_dag: int | None = None
     aankoop: float | None = None
     # --- de sensor ---
@@ -841,6 +843,8 @@ class Scenario:
     # De laadmodus zonder planning (v0.87.0): "zon", "continu" of "goedkoopst".
     # Alle scenario's van voor die tijd zijn "goedkoopst", zoals de coach toen deed.
     laadmodus: str = "goedkoopst"
+    # De nachtstrategie op Strategie (v0.90.0).
+    nachtstrategie: bool = True
     continu_amps: int = 6
     net: str = "split"                  # split | signed | signed-omgekeerd
     aansluiting_fasen: int = 3
@@ -1228,6 +1232,7 @@ def instellingen(s: Scenario) -> dict:
                 "reserve_enabled": bat.reserve is not None,
                 "reserve_percent": bat.reserve or 0,
                 "trade": bat.handelen,
+                "car_above": bat.auto_boven,
                 "weekly_full": bat.wekelijks_vol_dag is not None,
                 "weekly_full_day": bat.wekelijks_vol_dag or 0,
                 "purchase_price": bat.aankoop,
@@ -1286,6 +1291,7 @@ def instellingen(s: Scenario) -> dict:
         "contract": contract,
         "strategy": {
             "level": "steer",
+            "night_strategy": s.nachtstrategie,
             "schedules": [*schemas, {
                 "device": "paal",
                 "enabled": s.schema_aan,

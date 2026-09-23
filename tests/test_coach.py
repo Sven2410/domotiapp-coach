@@ -5248,6 +5248,22 @@ controle("alles op zon: geen netzin", cijfers({"geld": {"kwh": 5.0, "zon_kwh": 5
          == " 5,0 kWh kwam direct van je zon.", cijfers({"geld": {"kwh": 5.0, "zon_kwh": 5.0, "betaald": 0.0}}, None))
 controle("niets geladen: niets erbij", cijfers({"geld": {}}, None) == "", "")
 
+print("=== 98. de nachtstrategie en de accu die de auto helpt komen uit de instellingen (v0.90.0) ===")
+bat98 = {**BATTERIJ, "battery": {**BATTERIJ["battery"], "car_above": 40}}
+inst98 = instellingen(devices=[LAADPAAL, bat98])
+hass98, _, coach98 = bouw(huis75(), inst98)
+b98 = coach98._batterij_van(dt.datetime(2026, 9, 23, 18, 0), inst98, bat98, {"device": "dev-batterij"})
+controle("de grens voor de auto komt uit het apparaat, de nachtstrategie staat standaard aan",
+         b98.auto_boven == 40.0 and b98.nacht is True, f"{b98.auto_boven} {b98.nacht}")
+inst98["strategy"]["night_strategy"] = False
+b98b = coach98._batterij_van(dt.datetime(2026, 9, 23, 18, 0), inst98, bat98, {"device": "dev-batterij"})
+controle("en de nachtstrategie uit komt van Strategie", b98b.nacht is False, f"{b98b.nacht}")
+b98c = coach98._batterij_van(dt.datetime(2026, 9, 23, 18, 0), instellingen(devices=[LAADPAAL, BATTERIJ]), BATTERIJ,
+                             {"device": "dev-batterij"})
+controle("zonder grens helpt hij de auto nooit", b98c.auto_boven is None, f"{b98c.auto_boven}")
+controle("de standaard van de instellingen: nachtstrategie aan",
+         storage.DEFAULT_SETTINGS["strategy"]["night_strategy"] is True, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

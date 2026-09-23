@@ -1168,6 +1168,19 @@ proef("onder 'hoe vol is de auto nu' staat wat de coach van de opgave maakt, en 
   assert.ok(kaart.includes("De coach verwacht dat de auto nu ${Math.round(nu)}% vol is."));
 });
 
+proef("bij de batterij de grens voor de auto, op Strategie de nachtstrategie (v0.90.0)", () => {
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.feed_ = {};
+  const accu = { id: "b", type: "thuisbatterij", brand: "anker", name: "Anker", controllable: true, entities: {},
+    battery: { ...defaultBattery("anker"), car_above: 40 } };
+  const html = el.batteryHtml_(accu, 0);
+  assert.ok(html.includes('data-bat-field="car_above"') && html.includes('value="40"'), "het veld met de grens");
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/strategy.js", import.meta.url), "utf-8");
+  assert.ok(bron.includes('id="night"') && bron.includes("night_strategy"), "de schakelaar op Strategie");
+  assert.ok(bron.includes("night_strategy !== false"), "standaard aan");
+});
+
 proef("onder het schemaschuifje staat wat hij zonder planning doet", async () => {
   const { planSummary } = await import("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js");
   const uit = { enabled: false, per_day: false, window: {}, days: [] };

@@ -109,6 +109,22 @@ class DacViewStrategy extends DacEditorElement {
             </p>
           </div>
         </section>
+
+        <!-- De nachtstrategie (v0.90.0), in de woorden van de bewoner van de
+             eerste woning op 23-09-2026. -->
+        <section class="card">
+          <h2>${icons.thuisbatterij} Nachtstrategie</h2>
+          <label class="check" for="night">
+            <input type="checkbox" id="night">
+            <span>
+              <strong>Houd rekening met de nacht.</strong>
+              De coach houdt genoeg in de thuisbatterij om de nacht door te komen met
+              opgeslagen energie. Zet je dit uit, dan mag de batterij voor de auto en
+              voor handelen leeg tot zijn ingestelde minimum, maar haal je mogelijk de
+              nacht niet met nul op de meter.
+            </span>
+          </label>
+        </section>
       </div>
 
       ${saveBarHtml}
@@ -123,6 +139,10 @@ class DacViewStrategy extends DacEditorElement {
         this.afterChange_();
       });
     }
+    this.$("#night").addEventListener("change", (event) => {
+      this.draft_.strategy.night_strategy = event.target.checked;
+      this.afterChange_();
+    });
     this.wireSaveBar_();
     this.paint_();
   }
@@ -152,6 +172,7 @@ class DacViewStrategy extends DacEditorElement {
     // was het wel, maar het scherm liet niet zien wat er stond. Dat is niet te
     // onderscheiden van instellingen die verdwenen zijn, en zo is het ook gemeld.
     this.paintLevel_();
+    this.$("#night").checked = this.draft_?.strategy?.night_strategy !== false;
     this.syncSaveBar_();
   }
 

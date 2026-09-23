@@ -827,6 +827,11 @@ class DacViewDevices extends DacEditorElement {
           ${getal("holiday_max_percent", 'min="10" max="90" step="5"', "50")}
         </div>
         <div class="row">
+          <label>De auto mag de accu gebruiken boven (%)</label>
+          ${getal("car_above", 'min="0" max="100" step="5"', "nooit")}
+          <span class="sub">Laadt de auto, dan geeft de batterij normaal niets af: laden en ontladen van de accu en laden van de auto is drie keer verlies. Vul je hier een accustand in, dan mag wat er dáárboven zit naar de auto. Met de nachtstrategie aan (Strategie) houdt hij altijd genoeg over voor de nacht. Leeg is nooit.</span>
+        </div>
+        <div class="row">
           <label>Aankoopprijs (euro)</label>
           ${getal("purchase_price", 'min="0" step="1"', "optioneel")}
           <span class="sub">Voor de terugverdientijd op de kaart. De coach telt wat de batterij oplevert vanaf het moment dat hij hem stuurt; wat er daarvoor verdiend is weet hij niet en schat hij niet.</span>

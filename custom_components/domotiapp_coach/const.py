@@ -443,6 +443,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # Nobody should have to trust an automation they have never seen be
         # right.
         "level": LEVEL_PROPOSE,
+        # De nachtstrategie (v0.90.0): de thuisbatterij houdt genoeg over om de
+        # nacht door te komen op wat erin zit. Uit, dan mag hij voor de auto en
+        # voor handelen leeg tot zijn eigen ondergrens. Zie `auto_grens`.
+        "night_strategy": True,
         # What it aims for when it does act. Lowest cost reckons everything in
         # euros, which by itself already prefers using your own sun over
         # exporting it; "solar" insists on the sun even when buying would be
