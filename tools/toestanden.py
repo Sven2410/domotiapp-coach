@@ -3,6 +3,15 @@ Home Assistant hem uitzendt. Leest alleen.
 
     python tools/toestanden.py                 # naar stdout
     python tools/toestanden.py toestanden.log  # en in dat bestand
+    python tools/toestanden.py toestanden.log plus=solix,p1_meter
+                                               # plus elke entiteit met zo'n
+                                               # stuk in zijn id, ook wat het
+                                               # paneel niet kent
+
+`plus=` is er sinds 23-09-2026: een batterij die door iets anders gestuurd
+wordt (evcc, een add-on) laat dat alleen in haar eigen entiteiten zien, en
+het paneel kent daar maar een handvol van. Zonder die optie stonden er in de
+nacht van 22 op 23-09-2026 geen sporen van de andere sturing in het log.
 
 Anders dan live.py, die elke vijf seconden een foto neemt, mist dit niets:
 een sensor die een seconde `unavailable` was staat er met de seconde erbij.
@@ -20,7 +29,10 @@ MERKSENSOREN = {
               "circuit_current", "online", "enable_idle_current"),
 }
 
-PAD = sys.argv[1] if len(sys.argv) > 1 else None
+ARGS = [a for a in sys.argv[1:] if not a.startswith("plus=")]
+PLUS = [p for a in sys.argv[1:] if a.startswith("plus=")
+        for p in a[5:].split(",") if p]
+PAD = ARGS[0] if ARGS else None
 log = open(PAD, "a", encoding="utf-8", buffering=1) if PAD else None
 
 
@@ -65,6 +77,11 @@ def entiteiten(w):
             if (rij.get("device_id") == device_id and not rij.get("disabled_by")
                     and rij.get("translation_key") in sleutels):
                 uit.add(rij["entity_id"])
+    if PLUS:
+        for rij in w.vraag("get_states"):
+            ent = rij.get("entity_id", "")
+            if any(p in ent for p in PLUS):
+                uit.add(ent)
     return uit
 
 

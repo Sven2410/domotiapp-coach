@@ -1277,6 +1277,25 @@ vermogen op nul en `idle_mode` in de modus. Ook als het vinkje "mag sturen" eraf
 gaat of het niveau naar adviseren. Dezelfde gedachte als de stroom terug op de
 boiler.
 
+**Ook bij een herstart van Home Assistant** (v0.82.0). Bij een herstart roept
+Home Assistant `async_unload_entry` niet aan, dus `async_stop` ook niet; er
+komt alleen het event `homeassistant_stop`, en daar bewaarde `_async_bij_stop`
+tot 23-09-2026 alleen de lopende beurten. In de eerste woning bleef de batterij
+daardoor bij de herstart voor v0.81.1 (23-09-2026 om 00:44) gewoon 235 W
+ontladen in de externe modus tot de coach twee minuten later terug was, en een
+boiler was zonder stroom gebleven. `_async_bij_stop` geeft nu zelf de
+batterijen terug en zet de boilers aan, en wacht daarop, want een taak die bij
+het afsluiten nog in de wachtrij staat wordt niet meer gedraaid. Proef 79d in
+test_coach.py. **In het echt nog niet gezien**: of de integratie van de
+batterij op dat moment de opdracht nog aanneemt blijkt bij de volgende
+herstart in de eerste woning.
+
+**De knoppen van de batterij hebben eigen iconen** (v0.82.0): "Nu vol laden"
+een accu met een pijl erin (`accuVol`), "Nu leegladen" een accu met een pijl
+eruit (`accuLeeg`), en de paal houdt de bliksem (`data-boost-icon` in
+overview.js). De eigenaar op 23-09-2026: het pauzeteken bij leegladen klopte
+niet.
+
 **De batterij vervalst de meter voor de andere apparaten.** Wat hij opslokt is
 geen huisverbruik maar zon die ook naar de auto had gekund, en wat hij afgeeft
 is geen zon. `_batterijen_w` telt het terug in `_netto_export_w` en in `_read`;
@@ -1614,7 +1633,14 @@ python tools/ha.py                                   # werkt de verbinding?
 HA_INSTALLATIE=jansen python tools/ha.py         # een andere installatie
 python tools/logboek.py 2026-08-29T06:00             # tijdlijn uit de recorder
 python tools/besluiten.py                            # live meeluisteren
+python tools/toestanden.py t.log plus=solix,p1_meter # elke toestandswissel, ook van
+                                                     # entiteiten die het paneel niet kent
 ```
+
+`plus=` bij `toestanden.py` is er sinds 23-09-2026: een batterij die door iets
+anders gestuurd wordt laat dat alleen in haar eigen entiteiten zien, en het
+paneel kent daar maar een handvol van. In de nacht van 22 op 23-09-2026 stonden
+er daardoor geen sporen van de andere sturing in het log.
 
 ### Eén sessie kijkt naar één installatie
 

@@ -1450,6 +1450,19 @@ function woningMetBatterij(batterijW, extra = {}) {
 
 // In de eerste woning op 21-09-2026 om 19:30: 24 W op de meter, geen zon, en
 // de batterij gaf 2250 W af. Het huis gebruikte dus 2274 W en geen 24.
+proef("de knoppen van de batterij hebben eigen iconen: een accu met een pijl erin en eruit", async () => {
+  // 23-09-2026: "Nu leegladen" droeg een pauzeteken en "Nu vol laden" de
+  // bliksem van snelladen. Nu twee eigen tekeningen, en de paal houdt de bliksem.
+  const { icons } = await import("../custom_components/domotiapp_coach/frontend/src/icons.js");
+  assert.ok(icons.accuVol && icons.accuLeeg && icons.accuVol !== icons.accuLeeg);
+  assert.ok(icons.accuVol.startsWith("<svg") && icons.accuLeeg.startsWith("<svg"));
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf8");
+  const knop = bron.indexOf('data-drain="${slot}" aria-pressed');
+  const leeg = bron.slice(knop, bron.indexOf('data-drain-text="${slot}"', knop));
+  assert.ok(leeg.includes("icons.accuLeeg") && !leeg.includes("icons.pause"), "leegladen draagt de accu met de pijl eruit");
+  assert.ok(bron.includes('const wilIcoon = batterij ? "accuVol" : "bolt"'), "vol laden draagt de accu met de pijl erin, de paal de bliksem");
+});
+
 proef("de woning telt mee wat de batterij afgeeft", () => {
   const r = woningMetBatterij(-2250);
   assert.equal(r.house, 2274);

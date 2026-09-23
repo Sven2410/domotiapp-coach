@@ -4435,6 +4435,27 @@ b79c = asyncio.run(ronde75(hass79c, coach79c, NU79))
 controle("op adviseren blijft de laadgrens met rust", grens79(hass79c) == [] and rij79(store79c).get("limit_restore") is None,
          f"{grens79(hass79c)}")
 
+# Bij een herstart van Home Assistant komt er geen async_stop, alleen het
+# stop-event. In de eerste woning bleef de batterij op 23-09-2026 om 00:44 bij
+# de herstart voor v0.81.1 gewoon 235 W ontladen in de externe modus tot de
+# coach twee minuten later terug was. Het event hoort de batterij terug te
+# geven: 0 W en zijn eigen stand, en de laadgrens terug.
+hass79d, store79d, coach79d = bouw(huis75(soc="60"), instellingen(devices=[LAADPAAL, BATTERIJ79]))
+coach79d.async_start()
+asyncio.run(ronde75(hass79d, coach79d, NU79))
+hass79d.services.verstuurd.clear()
+stop79d = [wat for soort, wat in hass79d.bus.luisteraars if soort == "homeassistant_stop"]
+controle("de coach luistert naar het stop-event van Home Assistant", len(stop79d) == 1, f"{hass79d.bus.luisteraars}")
+for wat in stop79d:
+    asyncio.run(wat(None))
+asyncio.run(hass79d.afmaken())
+zet79d = [(d[1], d[2].get("entity_id"), d[2]["value"] if "value" in d[2] else d[2].get("option")) for d in hass79d.services.verstuurd]
+controle("bij het stop-event gaat de batterij op 0 W",
+         ("set_value", "number.batterij_vermogen", 0.0) in zet79d, f"{zet79d}")
+controle("en terug naar zijn eigen stand",
+         ("select_option", "select.batterij_modus", "self_consumption") in zet79d, f"{zet79d}")
+controle("en de laadgrens terug op wat er stond", grens79(hass79d) == [95.0], f"{grens79(hass79d)}")
+
 print("=== 80. de thuisbatterij: het overschot voor de andere apparaten rekent met de opdracht ===")
 # 22-09-2026 in de eerste woning: de sensor van de Anker liep vijf tot tien
 # seconden achter op de kWh-meter. De batterij laadde 3 kW van de zon, een
