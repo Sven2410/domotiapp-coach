@@ -1007,6 +1007,34 @@ batterij_klapperlast = Scenario(
     batterij=Batterij(soc=30.0, volgt_na_s=10.5, sensor_na_s=1.0, meter_tik_s=5.0, meter_fase_s=3.0),
     begin="2026-09-07 22:55", duur_uren=1, kabel_erin="+9 07:00", schema_aan=False, stap_seconden=1,
 )
+# De nacht van 23 op 24-09-2026 in de eerste woning: een last van 490 W die om
+# de dertig seconden tien seconden aanstaat (een broodbakmachine, denkt de
+# bewoner), een batterij die een opdracht na drie tot acht seconden uitvoert, de
+# sensor van de Anker, en een P1 die om :01 en :06 meldt. De regelaar van
+# v0.96.0 stond daar in tegenfase, tot 210 opdrachten per uur.
+batterij_wisselende_last = Scenario(
+    "batterij-wisselende-last",
+    "nacht, vast contract, en om de dertig seconden tien seconden 490 W: de batterij dekt de basis en laat de last gaan",
+    contract="vast", zon=Zon(wolken="geen"), voorspeller="geen",
+    huis=Huis(puls=(490.0, 10.0, 0.5)),
+    batterij=Batterij(soc=60.0, volgt_na_s=5.0, meter_tik_s=5.0, meter_fase_s=1.0, **ANKER_SENSOR),
+    begin="2026-09-07 04:55", duur_uren=1, kabel_erin="+9 07:00", schema_aan=False, stap_seconden=1,
+)
+# "Anker mag zelf nul op de meter doen" (de eigenaar, 24-09-2026). De batterij heeft
+# een eigen meter en houdt in zijn eigen stand zelf de meter op nul; de coach
+# neemt het over als de paal laadt en geeft hem daarna terug (v0.97.0).
+batterij_zelf_nul = batterij_paal.kopie(
+    naam="batterij-zelf-nul",
+    uitleg="vast contract, de accu doet zelf nul op de meter; de bus laadt na 20:00: dan neemt de coach het over, daarna weer zelf",
+    batterij=Batterij(soc=80.0, eigen_nul=True, zelf_nul=True),
+)
+batterij_zelf_wisselend = batterij_wisselende_last.kopie(
+    naam="batterij-zelf-wisselend",
+    uitleg="de wisselende last van 490 W, met een accu die zelf nul op de meter doet: de coach geeft geen enkele opdracht",
+    # Hij staat nog in de externe stand van een vorige versie: de coach zet hem om.
+    batterij=Batterij(soc=60.0, volgt_na_s=5.0, meter_tik_s=5.0, meter_fase_s=1.0,
+                      eigen_nul=True, zelf_nul=True, modus="third_party_control", **ANKER_SENSOR),
+)
 batterij_zonder_rendement = batterij_winter.kopie(
     naam="batterij-rendement-onbekend",
     uitleg="geen kWh-meter en niets opgegeven: alleen nul op de meter, niet van het net laden",
@@ -1017,7 +1045,8 @@ BATTERIJ = [
     batterij_vast_zon, batterij_vast_salderen, batterij_winter, batterij_zomer, batterij_handelen,
     batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_paal, batterij_sprong,
     batterij_meter_weg, batterij_herstart, batterij_anker_sensor, batterij_uurlast,
-    batterij_klapperlast, batterij_zonder_rendement,
+    batterij_klapperlast, batterij_wisselende_last, batterij_zonder_rendement,
+    batterij_zelf_nul, batterij_zelf_wisselend,
 ]
 
 # Dezelfde dagen aan een Alfen (23-09-2026). Wat er anders is staat bij

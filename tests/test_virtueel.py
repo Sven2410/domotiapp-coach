@@ -1336,8 +1336,11 @@ for naam, vl in V.items():
           f"net {vl.bat_afname_kwh:.1f} kWh erin en {vl.bat_levering_kwh:.1f} eruit, "
           f"kosten {vl.bat_kosten_met:.2f} tegen {vl.bat_kosten_zonder:.2f} zonder")
     uren = max(1.0, len(vl.bat_verloop) * vl.stap_uur)
-    controle(f"{naam}: de coach zette de batterij in de modus voor externe sturing",
-             bool(vl.bat_modi) and vl.bat_modi[0][1] == "third_party_control", f"{vl.bat_modi}")
+    # Doet de batterij zelf nul op de meter (v0.97.0), dan zet de coach hem pas
+    # in de externe stand als hij het moet overnemen; zie hieronder.
+    if not bat.zelf_nul:
+        controle(f"{naam}: de coach zette de batterij in de modus voor externe sturing",
+                 bool(vl.bat_modi) and vl.bat_modi[0][1] == "third_party_control", f"{vl.bat_modi}")
     # Het antwoord op "hoe zorgen we dat we niet gaan pendelen": in de eerste
     # woning stuurde de oude regelaar 1.700 keer per dag bij en wisselde de
     # batterij 233 keer van toestand.
@@ -1549,8 +1552,66 @@ if (vl := v("batterij-klapperlast")):
              vl.bat_wissels() == 0 and all(w <= 0 for _, w in vl.bat_opdrachten), f"{vl.bat_wissels()}")
     controle("klapperlast: hooguit twee opdrachten per puls (omlaag en weer omhoog)",
              len(vl.bat_opdrachten) <= 2 * 181, f"{len(vl.bat_opdrachten)}")
-    controle("klapperlast: er komt in dat uur niet meer dan een derde kWh van het net",
-             vl.bat_afname_kwh <= 0.35, f"{vl.bat_afname_kwh:.3f}")
+    # Sinds v0.97.0 heeft hij geduld met een last die korter duurt dan zijn lus:
+    # de pulsen zelf komen van het net (181 keer 2 kW vijf seconden is 0,50 kWh),
+    # en er gaat bijna niets uit de batterij naar het net. Met v0.96.0 ging er
+    # 0,51 kWh uit de batterij naar het net voor 0,25 kWh minder inkoop.
+    controle("klapperlast: van het net komen hooguit de pulsen zelf",
+             vl.bat_afname_kwh <= 0.52, f"{vl.bat_afname_kwh:.3f}")
+    controle("klapperlast: en uit de batterij gaat bijna niets naar het net",
+             vl.bat_levering_kwh <= 0.05, f"{vl.bat_levering_kwh:.3f}")
+
+# De nacht van 23 op 24-09-2026 in de eerste woning: om de dertig seconden tien
+# seconden 490 W. Met v0.96.0 in het virtuele huis 240 opdrachten in een uur,
+# de P1 43% van de tijd binnen 50 W en 0,20 kWh uit de batterij naar het net; in
+# het echt 210 per uur en ook 43%. Nu geduld: de basis dekken en de last laten gaan.
+if (vl := v("batterij-wisselende-last")):
+    print(f"  wisselende last: {len(vl.bat_opdrachten)} opdrachten, {vl.bat_wissels()} wissels, "
+          f"net {vl.bat_afname_kwh:.3f} kWh erin, {vl.bat_levering_kwh:.3f} eruit")
+    controle("wisselende last: een handvol opdrachten in het uur",
+             len(vl.bat_opdrachten) <= 4, f"{len(vl.bat_opdrachten)}")
+    controle("wisselende last: uit de batterij gaat bijna niets naar het net",
+             vl.bat_levering_kwh <= 0.03, f"{vl.bat_levering_kwh:.3f}")
+    gaf = sum(-r[2] for r in vl.bat_verloop if r[2] < 0) * vl.stap_uur / 1000
+    controle("wisselende last: en de basis van het huis komt wel uit de batterij",
+             gaf >= 0.2, f"{gaf:.3f} kWh")
+
+# "Anker mag zelf nul op de meter doen" (de eigenaar, 24-09-2026; v0.97.0).
+basis_zelf = v("batterij-paal-laadt")
+if (vl := v("batterij-zelf-nul")):
+    begin_paal = next((regel.tijd for regel in vl.regels if regel.paal_w > 1000), None)
+    eind_paal = next((regel.tijd for regel in reversed(vl.regels) if regel.paal_w > 1000), None)
+    over = next((t for t, m in vl.bat_modi if m == "third_party_control"), None)
+    terug = next((t for t, m in vl.bat_modi if m == "self_consumption" and over and t > over), None)
+    print(f"  zelf-nul: paal {begin_paal} tot {eind_paal}, modi {[(t.strftime('%H:%M:%S'), m) for t, m in vl.bat_modi]}, "
+          f"{len(vl.bat_opdrachten)} opdrachten")
+    controle("zelf-nul: tot de paal laadt doet de batterij het zelf",
+             begin_paal is not None and (over is None or over >= begin_paal), f"{over} {begin_paal}")
+    controle("zelf-nul: laadt de paal, dan neemt de coach het binnen twee minuten over",
+             over is not None and over - begin_paal <= virtueel.dt.timedelta(minutes=2), f"{over} {begin_paal}")
+    laadt = [r for r, regel in zip(vl.bat_verloop, vl.regels) if regel.paal_w > 1000]
+    controle("zelf-nul: en dan geeft de batterij niets af, net als zonder de eigen stand",
+             sum(r[2] < -50 for r in laadt) * vl.stap_uur * 60 <= 2.0,
+             f"{sum(r[2] < -50 for r in laadt) * vl.stap_uur * 60:.1f} minuten")
+    controle("zelf-nul: is de auto vol, dan krijgt de batterij het na vijf rustige minuten terug",
+             terug is not None and virtueel.dt.timedelta(minutes=5) <= terug - eind_paal <= virtueel.dt.timedelta(minutes=7),
+             f"{terug} {eind_paal}")
+    controle("zelf-nul: de coach schrijft bijna niets", len(vl.bat_opdrachten) <= 5, f"{len(vl.bat_opdrachten)}")
+    controle("zelf-nul: de auto haalt zijn klaar-tijd", gehaald(vl), "")
+    if basis_zelf:
+        controle("zelf-nul: de avond kost hetzelfde als wanneer de coach alles regelt",
+                 abs(vl.bat_kosten_met - basis_zelf.bat_kosten_met) <= 0.05
+                 and abs(vl.bat_verloop[-1][3] - basis_zelf.bat_verloop[-1][3]) <= 2.0,
+                 f"€{vl.bat_kosten_met:.2f} tegen €{basis_zelf.bat_kosten_met:.2f}, "
+                 f"{vl.bat_verloop[-1][3]:.0f}% tegen {basis_zelf.bat_verloop[-1][3]:.0f}%")
+
+if (vl := v("batterij-zelf-wisselend")):
+    binnen = sum(abs(r[1]) <= 50 for r in vl.bat_verloop) / len(vl.bat_verloop)
+    print(f"  zelf-wisselend: modi {vl.bat_modi}, {len(vl.bat_opdrachten)} opdrachten, P1 {100 * binnen:.0f}% binnen 50 W")
+    controle("zelf-wisselend: stond hij nog in de externe stand, dan zet de coach hem in zijn eigen",
+             [m for _, m in vl.bat_modi] == ["self_consumption"], f"{vl.bat_modi}")
+    controle("zelf-wisselend: en geeft daarna geen enkele opdracht meer", len(vl.bat_opdrachten) <= 1,
+             f"{vl.bat_opdrachten}")
 
 if (vl := v("batterij-rendement-onbekend")):
     controle("rendement onbekend: alleen nul op de meter",

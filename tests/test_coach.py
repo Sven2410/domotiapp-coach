@@ -5513,6 +5513,83 @@ inst105b["strategy"]["schedules"] = [{"device": "dev-boiler", "enabled": True,
 controle("een boiler kent geen laadlimiet",
          coachmod.ChargerCoach._days(inst105b, BOILER105)[0].target is None, "")
 
+print("=== 106. de batterij doet zelf nul op de meter (v0.97.0) ===")
+# De eigenaar op 24-09-2026: "anker mag zelf nul op de meter doen", ook bij een
+# vast contract. Een batterij met een eigen meter in de meterkast doet het in
+# zijn eigen stand; de coach neemt het over voor wat de batterij zelf niet weet.
+klok106 = sys.modules["homeassistant.util.dt"]
+echte_klok106 = klok106.utcnow
+BATTERIJ106 = {**BATTERIJ, "battery": {**BATTERIJ["battery"], "self_zero": True}}
+inst106 = instellingen(devices=[LAADPAAL, BATTERIJ106])
+hass106, store106, coach106 = bouw(huis75(modus="third_party_control"), inst106)
+NU106 = dt.datetime(2026, 9, 24, 21, 0)
+
+
+def ronde106(minuten):
+    klok106.utcnow = lambda: NU106 + dt.timedelta(minutes=minuten)
+    try:
+        return asyncio.run(ronde75(hass106, coach106, NU106 + dt.timedelta(minutes=minuten)))
+    finally:
+        klok106.utcnow = echte_klok106
+
+
+b106 = ronde106(0)
+modus106, _, vermogen106 = zet75(hass106)
+print(f"  {b106.get('mode_name')}: {b106.get('reason')}")
+controle("nul op de meter en de instelling aan: de batterij in zijn eigen stand",
+         modus106 == ["self_consumption"] and b106.get("self_zero") is True, f"{modus106} {b106.get('self_zero')}")
+controle("eerst 0 W in het register, anders begint hij bij een overname op een oude opdracht",
+         vermogen106 == [0], f"{vermogen106}")
+controle("de kaart zegt dat hij het zelf doet, zonder opdracht van de coach",
+         "zelf" in (b106.get("reason") or "") and b106.get("setpoint_w") is None, f"{b106.get('reason')}")
+hass106.states.zet("sensor.batterij_vermogen", {"state": "-1400", "attributes": {"unit_of_measurement": "W"}})
+b106 = ronde106(1)
+b106 = ronde106(2)
+modus106, _, vermogen106 = zet75(hass106)
+controle("daarna schrijft de coach niets meer: geen vermogen, geen modus", modus106 == [] and vermogen106 == [],
+         f"{modus106} {vermogen106}")
+controle("en iets anders stuurt hem niet: zijn eigen stand is wat de coach zette",
+         coach106._batterij["dev-batterij"].get("stuurt") is True and not b106.get("foreign"), "")
+controle("voor de rest van de coach is de sensor de waarheid, niet een opdracht",
+         coach106._batterij_geregeld_w(BATTERIJ106) == -1400.0, f"{coach106._batterij_geregeld_w(BATTERIJ106)}")
+
+# De paal gaat laden: meteen overnemen, op 0 W, want de batterij geeft dan niets af.
+hass106.states.zet("sensor.laadpaal_vermogen", {"state": "7000", "attributes": {"unit_of_measurement": "W"}})
+b106 = ronde106(3)
+modus106, _, vermogen106 = zet75(hass106)
+controle("de paal laadt: de coach neemt het meteen over", modus106 == ["third_party_control"] and b106.get("self_zero") is False,
+         f"{modus106} {b106.get('self_zero')}")
+controle("en zet hem eerst op 0 W", vermogen106[:1] == [0], f"{vermogen106}")
+hass106.states.zet("sensor.laadpaal_vermogen", {"state": "0", "attributes": {"unit_of_measurement": "W"}})
+b106 = ronde106(4)
+controle("de paal is klaar: nog niet meteen terug", zet75(hass106)[0] == [], f"{zet75(hass106)[0]}")
+b106 = ronde106(10)
+controle("na vijf rustige minuten wel", zet75(hass106)[0] == ["self_consumption"] and b106.get("self_zero") is True,
+         f"{zet75(hass106)[0]}")
+
+
+def waarom106(**battery):
+    apparaat = {**BATTERIJ106, "battery": {**BATTERIJ106["battery"], **battery}}
+    b = coachmod.Batterij(soc=battery.pop("soc", 60.0), soc_min=5.0, reserve=battery.get("reserve"))
+    return coach106._zelf_niet(apparaat, coachmod.Besluit(coachmod.NUL), b, -300.0, battery.get("ruimte"))
+
+
+controle("de vakantiestand neemt hij zelf", waarom106(holiday=True) == "de vakantiestand staat aan", f"{waarom106(holiday=True)}")
+controle("bij de reserve voor noodstroom ook",
+         waarom106(reserve=60.0, soc=60.5) == "hij zit bij de reserve voor noodstroom", f"{waarom106(reserve=60.0, soc=60.5)}")
+controle("en als de zekering krap wordt", waarom106(ruimte=400.0) == "de zekering wordt krap", f"{waarom106(ruimte=400.0)}")
+controle("met ruimte genoeg mag het", waarom106(ruimte=2400.0) is None, f"{waarom106(ruimte=2400.0)}")
+controle("zonder de modi ingevuld kan het niet, ook met het vinkje",
+         not coachmod.ChargerCoach._zelf_instelling({**BATTERIJ106, "battery": {"self_zero": True}}), "")
+
+# Een herstart terwijl hij het zelf doet: ook dan op 0 W in de externe stand.
+hass106.services.verstuurd.clear()
+asyncio.run(coach106._async_batterijen_los(herstart=True))
+asyncio.run(hass106.afmaken())
+modus106, _, vermogen106 = zet75(hass106)
+controle("bij een herstart op 0 W in de externe stand, en de coach kiest daarna opnieuw",
+         vermogen106 == [0] and modus106 == ["third_party_control"], f"{modus106} {vermogen106}")
+
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

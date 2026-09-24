@@ -1048,6 +1048,31 @@ BEGIN_W = 100.0
 STOP_W = 50.0
 RICHTING_WACHT = timedelta(seconds=60)
 
+# Geduld met lasten die korter duren dan de lus om ze te volgen. De bewoner van
+# de eerste woning op 24-09-2026: "je zou ervoor kunnen kiezen om de accu pas
+# bij te laten springen als een load minimaal 30 of 60 seconden boven een
+# bepaalde waarde komt." Die nacht ging daar om de dertig seconden een last van
+# 490 W tien seconden aan, de batterij volgde een opdracht na drie tot acht
+# seconden, en de regelaar stond in tegenfase: 07:44:06 de meter +468 W en de
+# opdracht 688, 07:44:14 de batterij op 681, 07:44:16 de last weg en de meter
+# -511 W. Tot 210 opdrachten per uur, en een derde van wat hij gaf ging naar
+# het net.
+#
+# Niet altijd wachten: een oven op zijn thermostaat (45 s aan, 45 s uit) volgt
+# hij met wachten slechter dan zonder, want dan springt hij bij juist op het
+# moment dat de oven afslaat, en het laagste van een halve minuut ruis dekt
+# structureel te weinig. Dus: gewoon volgen, tot hij een grote last achterna
+# ging die binnen `KORTE_LAST` alweer weg was (de tegenfase van die nacht).
+# Dan `GEDULD_DUUR` lang geduld, en dat geduld verlengt zich zolang er grote
+# lasten komen en gaan die korter duren. Met geduld volgt hij van een grote
+# sprong alleen wat er `VOLG_WACHT` lang de hele tijd was; terug naar nul gaat
+# altijd meteen, want anders levert de batterij aan het net of laadt hij van
+# het net. **De getallen zijn gekozen in het virtuele huis**; zie
+# docs/batterij.md.
+VOLG_WACHT = timedelta(seconds=30)
+KORTE_LAST = timedelta(seconds=30)
+GEDULD_DUUR = timedelta(minutes=15)
+
 # Zwijgt de meter zo lang, dan gaat de batterij naar 0 W. Een lus die stilvalt
 # mag hem nooit op zijn laatste opdracht laten staan: dat is leeglopen naar het
 # net, of vol van het net trekken, tot iemand het ziet.
@@ -1085,6 +1110,14 @@ class Regelaar:
     # Hoeveel metingen achter elkaar een kleine afwijking dezelfde kant op stond.
     _kant: int = 0
     _keren: int = 0
+    # Wat het huis de afgelopen `VOLG_WACHT` van de batterij vroeg: (tijd, watt).
+    # Tot wanneer hij geduld heeft, wanneer hij voor het laatst een grote stap
+    # van nul af zette, en sinds wanneer er met geduld een grote vraag staat
+    # die hij nog niet volgt. Zie `_geduld`.
+    _vraag: list = field(default_factory=list)
+    geduldig_tot: datetime | None = None
+    _weg_op: datetime | None = None
+    _piek_sinds: datetime | None = None
 
     def doel_w(self, koop: float | None, terug: float | None) -> float:
         """Waar de meter op hoort te staan.
@@ -1199,6 +1232,7 @@ class Regelaar:
         # en dat laatste is de eigen opdracht zolang de sensor die niet
         # blijvend tegenspreekt.
         wens = self.vermogen_w(batterij_w) - (net_w - doel_w)
+        wens = self._geduld(now, min(max(wens, laag), hoog))
         if besluit.stand == NETLADEN:
             wens = max(wens, besluit.power_w)
         elif besluit.stand == HANDELEN:
@@ -1231,7 +1265,64 @@ class Regelaar:
             self._kant = kant
             if self._keren < KLEIN_METINGEN:
                 return None
+        self._tegenfase(now, wens)
         return self._zet(now, wens)
+
+    def geduldig(self, now: datetime) -> bool:
+        return self.geduldig_tot is not None and now < self.geduldig_tot
+
+    def _geduld(self, now: datetime, wens: float) -> float:
+        """Met geduld: van een grote stap van nul af alleen wat al `VOLG_WACHT` bleef.
+
+        Van alles wat het huis in dat venster vroeg telt het stuk dat er de
+        hele tijd was: bij laden het laagste, bij ontladen het minst negatieve.
+        Een last die korter aanstaat komt zo nooit in de opdracht, en een last
+        die blijft wordt na het venster gewoon gevolgd. Terug naar nul gaat
+        altijd meteen; een wens de andere kant op eerst meteen naar nul. Een
+        kleine stap (onder `GROOT_W`) gaat zoals altijd, anders volgt hij de
+        ruis van een rustig huis structureel te laag.
+        """
+        self._vraag.append((now, wens))
+        grens = now - VOLG_WACHT
+        # Eén meting van vóór het venster blijft staan: die zegt wat er aan
+        # het begin van het venster gevraagd werd.
+        while len(self._vraag) > 1 and self._vraag[1][0] <= grens:
+            self._vraag.pop(0)
+        nu_w = self.opdracht_w
+        terug = nu_w * wens >= 0 and abs(wens) <= abs(nu_w)
+        vanaf = 0.0 if nu_w * wens < 0 else nu_w
+        groot = not terug and abs(wens - vanaf) >= GROOT_W
+        if not self.geduldig(now):
+            self._piek_sinds = None
+            return wens
+        # Met geduld: een grote vraag die weer weg is voordat hij `KORTE_LAST`
+        # duurde, is er weer een. Het geduld gaat door.
+        if groot:
+            if self._piek_sinds is None:
+                self._piek_sinds = now
+        elif self._piek_sinds is not None:
+            if now - self._piek_sinds < KORTE_LAST:
+                self.geduldig_tot = now + GEDULD_DUUR
+            self._piek_sinds = None
+        if not groot:
+            return wens
+        if self._vraag[0][0] > grens:
+            return vanaf
+        if wens > vanaf:
+            return max(vanaf, min(w for _, w in self._vraag))
+        return min(vanaf, max(w for _, w in self._vraag))
+
+    def _tegenfase(self, now: datetime, watt: float) -> None:
+        """Ging hij net een grote last achterna die alweer weg is? Dan geduld."""
+        oud = self.opdracht_w
+        if abs(watt) >= abs(oud) + GROOT_W or (watt * oud < 0 and abs(watt) >= GROOT_W):
+            self._weg_op = now
+        elif (
+            abs(watt) <= abs(oud) - GROOT_W and self._weg_op is not None
+            and now - self._weg_op < KORTE_LAST
+        ):
+            self.geduldig_tot = now + GEDULD_DUUR
+            self._weg_op = None
 
     def _zet(self, now: datetime, watt: float, meteen: bool = False) -> float | None:
         watt = float(round(watt))

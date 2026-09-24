@@ -805,6 +805,7 @@ class DacViewDevices extends DacEditorElement {
           </div>
         </div>
         <p class="sub">Stopt de coach, dan zet hij het vermogen op nul en geeft hij de batterij terug aan zijn eigen modus, zodat hij nooit op zijn laatste opdracht blijft staan.</p>
+        ${vink("self_zero", "De batterij doet zelf nul op de meter.", "Alleen als de batterij een eigen meter in de meterkast heeft, zoals de P1 van Anker. Die volgt het huis in een paar seconden; via Home Assistant duurt dat langer. Is het plan gewoon nul op de meter, dan zet de coach hem in zijn eigen modus (hierboven: als de coach stopt) en kijkt mee. Hij neemt het meteen over voor laden van het net, handelen, als de laadpaal laadt, in de vakantiestand, bij de reserve en als de zekering krap wordt, en geeft hem na vijf rustige minuten terug. Bij een vast contract is dat bijna altijd.")}
       </div>
       <div class="block">
         <div class="block-title">Wat jij wilt</div>

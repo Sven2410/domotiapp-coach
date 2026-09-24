@@ -709,6 +709,18 @@ class Batterij:
     # stappen van een seconde te zien; standaard uit.
     meter_tik_s: float = 0.0
     meter_fase_s: float = 0.0
+    # --- zijn eigen nul op de meter ---
+    # De Anker van de eerste woning heeft een eigen P1 die alleen met de batterij
+    # praat. In zijn eigen stand (`self_consumption`) houdt hij daarmee zelf de
+    # meter op nul; gemeten op 22-09-2026 om 21:24:39: een sprong van 1438 W en
+    # binnen vier seconden 812 W uit de batterij. Een opdracht aan de knop doet
+    # hij in die stand niet. Standaard uit: dan doet hij in zijn eigen stand niets,
+    # zoals de oudere scenario's dat verwachten.
+    eigen_nul: bool = False
+    eigen_tik_s: float = 2.0
+    eigen_na_s: float = 2.0
+    # En wat de bewoner bij de coach instelt: "de batterij doet zelf nul op de meter".
+    zelf_nul: bool = False
     # --- toestand ---
     modus: str = "self_consumption"
     richting: str = "charge"
@@ -720,10 +732,37 @@ class Batterij:
     sensor_verloop: list = field(default_factory=list)
     opdracht_op: dt.datetime | None = None
     opdracht_w: float = 0.0
+    eigen_op: dt.datetime | None = None
+
+    @property
+    def zelf(self) -> bool:
+        return self.eigen_nul and self.modus == "self_consumption"
 
     def opdracht(self, watt: float, nu: dt.datetime) -> None:
-        self.wachtrij.append((nu + dt.timedelta(seconds=self.volgt_na_s), watt))
+        # In zijn eigen stand onthoudt hij het getal wel (het staat in het
+        # register), maar hij doet er pas iets mee als hij weer extern gestuurd wordt.
+        if not self.zelf:
+            self.wachtrij.append((nu + dt.timedelta(seconds=self.volgt_na_s), watt))
         self.opdracht_op, self.opdracht_w = nu, watt
+
+    def zet_modus(self, modus: str, nu: dt.datetime) -> None:
+        self.modus = modus
+        self.wachtrij = []
+        if not self.zelf:
+            # Terug naar externe sturing: hij voert uit wat er in het register staat.
+            self.wachtrij.append((nu + dt.timedelta(seconds=self.volgt_na_s), self.opdracht_w))
+
+    def eigen_regel(self, nu: dt.datetime, rest_w: float) -> None:
+        """Zijn eigen lus: de meter zonder hem op nul, op zijn eigen tempo."""
+        if not self.zelf:
+            return
+        if self.eigen_op is not None and (nu - self.eigen_op).total_seconds() < self.eigen_tik_s:
+            return
+        self.eigen_op = nu
+        doel = max(-self.max_ontladen_w, min(self.max_laden_w, -rest_w))
+        laatste = self.wachtrij[-1][1] if self.wachtrij else self.vermogen_w
+        if abs(doel - laatste) > 20.0:
+            self.wachtrij.append((nu + dt.timedelta(seconds=self.eigen_na_s), doel))
 
     def sensor_w(self, nu: dt.datetime) -> float:
         """Wat de vermogenssensor van de batterij nu meldt."""
@@ -1248,6 +1287,7 @@ def instellingen(s: Scenario) -> dict:
                 "purchase_price": bat.aankoop,
                 "control_mode": "third_party_control",
                 "idle_mode": "self_consumption",
+                "self_zero": bat.zelf_nul,
             },
         })
     return {
@@ -1413,6 +1453,8 @@ class Wereld:
             self.boiler_w = self.boiler.stap(nu, self.s.stap_seconden)
             self.huis_w += self.boiler_w
         if self.batterij is not None:
+            # Zijn eigen meter ziet het huis, de paal van de vorige stap en de zon.
+            self.batterij.eigen_regel(nu, self.huis_w + self.paal_w - self.zon_w)
             self.bat_w = self.batterij.stap(nu, self.s.stap_seconden)
         self.paal.stap(nu)
         aanbod = self.paal.aanbod()
@@ -1780,7 +1822,7 @@ class Diensten:
             self.hass.states.zet(E["bat_richting"], {"state": data.get("option"),
                                                      "attributes": {"options": ["charge", "discharge"]}})
         elif data.get("entity_id") == E["bat_modus"] and dienst == "select_option":
-            self.wereld.batterij.modus = data.get("option")
+            self.wereld.batterij.zet_modus(data.get("option"), self.wereld.nu)
             self.verloop.bat_modi.append((self.wereld.nu, data.get("option")))
             self.hass.states.zet(E["bat_modus"], data.get("option"))
         elif domein == "button" and data.get("entity_id") == E["vw_start"]:

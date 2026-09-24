@@ -1879,6 +1879,17 @@ proef("stuurt de coach niet, dan staat er geen opdracht", () => {
   assert.ok(!rijen.some((r) => r.label === "Opdracht van de coach"));
 });
 
+proef("doet de batterij zelf nul op de meter, dan zegt de kaart wie regelt en staat er geen opdracht (v0.97.0)", () => {
+  const rijen = Object.fromEntries(
+    batteryRows({ ...BESLUIT_BATTERIJ, mode: "nul", mode_name: "Nul op de meter", self_zero: true, setpoint_w: null })
+      .map((r) => [r.label, r.text]),
+  );
+  assert.equal(rijen["Wie regelt"], "de batterij zelf, met zijn eigen meter; de coach kijkt mee");
+  assert.equal(rijen["Opdracht van de coach"], undefined);
+  const zonder = batteryRows({ ...BESLUIT_BATTERIJ, self_zero: false });
+  assert.ok(!zonder.some((r) => r.label === "Wie regelt"));
+});
+
 proef("te vroeg voor een datum zegt hoeveel dagen er gemeten zijn", () => {
   const rijen = terugverdiendTekst({ earned: 12.5, price: 4500, days: 9, min_days: 28, date: null });
   assert.equal(rijen[1].text, "nog te vroeg voor een datum: 9 van de 28 dagen gemeten");
