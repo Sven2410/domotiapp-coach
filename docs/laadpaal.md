@@ -389,6 +389,78 @@ herstart begint de meting opnieuw. Scenario's `warmtepomp-nacht` (oud: 85% om
 06:00, nieuw: vol om 05:25) en `warmtepomp-uit` (hetzelfde als zonder de
 regel); proef 51 in test_planner.py, proef 65 in test_coach.py.
 
+## Een herstart midden in een beurt, en de zekering van de groep (v0.98.0)
+
+De eigenaar op 25-09-2026 om 00:45, bij een auto die laadde terwijl de pop-up "van
+plan te laden tussen 01:00 en 06:00" zei: "laadde hij op het juiste moment en is de
+visualisatie niet goed, of is de visualisatie wel goed maar het sturen niet?" En
+daarna: "onthoudt de coach de accu % die handmatig is ingevuld, werkt hij die
+tijdens het laden bij, en weet hij na een herstart alles nog? Repareer alles als
+dat nodig is."
+
+Wat er die nacht in de eerste woning gebeurde, uit de eigen geschiedenis van de
+coach: om 22:30 "nu doorladen, anders is de auto om 08:00 niet vol; de afgelopen
+uren bleef er gemiddeld 12 A over" (de paal hangt op een groep van 3x16 A); om
+22:49 een herstart en tien minuten 6 A, "net begonnen met laden"; om 22:59 "wacht
+tot 01:00", want na de herstart was de meting weg en rekende hij met 16 A; om
+23:20 weer "nu doorladen"; om 00:39 een herstart en weer 6 A. Het sturen volgde
+de regels, maar de coach vergat bij elke herstart wat hij over de beurt wist.
+
+**De opgegeven accustand zelf ging goed**: die staat in `car_soc` met de
+meterstand van de paal erbij, en `_typed_soc` telt live verder met de teller;
+dat overleeft een herstart. Wat er misging en nu gerepareerd is:
+
+1. **Het vaste plafond van de zekeringen.** `zekering_plafond` in planner.py:
+   de krapste zekering in de keten van de paal min haar marge, zonder het huis.
+   Op een groep van 16 A is dat 14 A. `Charger.zekering_amps` en
+   `zekering_naam`, gezet in `_read`; `vast_plafond` is paal, auto en zekering
+   samen, en `structural_ceiling` begint daar in plaats van bij wat paal en auto
+   kunnen. Daarmee rekent het plan ook direct na een herstart niet meer met
+   16 A. `Plan.fuse_name` gaat naar de pop-up: "14 A, meer past er niet onder de
+   zekering van de groep Garage".
+2. **De beurt over een herstart** (`_sessie_bewaren`, `_hervat_uit`,
+   `HERVAT_MAX` een half uur). Bij de beurt in `BeurtenStore` staat nu ook
+   `session`: het begin, de meterstand en het ijkpunt, de begin-accustand,
+   sinds wanneer de paal laadt, het gemeten plafond van de afgelopen drie uur,
+   de verloren tijd en wat er al gemeld is. `_async_beurten_laden` zet het in
+   `_hervat`; `_plafond_gemeten` en het zetten van `_since` in `_read` lezen het
+   in de eerste ronde, `_bijhouden` neemt het over. Wat er tijdens de herstart
+   geladen werd komt er bij de eerste stap van de teller bij (`gat_vullen`):
+   het verschil tussen de teller voor de hele beurt en het geld, zodat het
+   verslag niet "51,3 kWh geladen" naast "50,6 kWh van het net" zegt.
+3. **"Zegt niets" is geen "kabel eruit".** Na een herstart kent de coach de
+   laatste status van de paal nog niet (`_laatste_status`), en een paal
+   waarvan de integratie nog laadt zegt eerst niets. Dat telde als kabel eruit,
+   en dan wiste `_async_forget` de opgegeven accustand en de knoppen, en sloot
+   `_bijhouden` de open beurt af. Nu alleen als de paal zelf "disconnected" zegt
+   (`_echt_los`).
+4. **De sensorwacht onthoudt wat hij meldde** (`sensor_quiet` in de
+   instellingen). In de eerste woning kwam "Airco F&R meldt al 10 minuten niets"
+   na elke herstart opnieuw als kritieke melding.
+5. **De naam van de auto houdt zijn hoofdletters** (`_hoofdletter`):
+   `str.capitalize` maakte van "Proefauto zonder HA" in het verslag "Proefauto
+   zonder ha".
+
+Het virtuele huis kent daarvoor groepen (`Scenario.groep_amps`, `groep_last_w`;
+de groep in `installation.circuits` met een meter per fase). Scenario
+`herstart-groep` (de nacht van de eerste woning: een grote auto op 40%
+opgegeven, een groep van 3x16 A met 400 W van de rest van de garage, klaar om
+08:00, herstarts om 23:30 en 00:40, en na de tweede zegt de status van de paal
+twee minuten niets) tegen `herstart-groep-zonder`:
+
+| | v0.97.0 | v0.98.0 | zonder herstarts |
+|---|---|---|---|
+| na de herstart van 23:30 | tien minuten 6 A, dan van 23:40 tot 00:22 niets | laadt door op 12 A | laadt door op 12 A |
+| vol | 05:33 | 04:44 | 04:44 |
+| verslag | "sinds 23:30 ging er 48,3 kWh in, van 44 naar 94%", en "mogelijk staat er een laadgrens in de auto" | "geladen van 22:33 tot 05:03, 51,3 kWh, van 40 naar 100%; 51,4 kWh van het net" | "51,3 kWh; 51,3 van het net" |
+| kosten | € 17,26 | € 17,42 | € 17,42 |
+
+Dat v0.97.0 hier goedkoper uitkwam is toeval: zijn gat na de herstart viel in
+een duurder uur, en het plan had ruimte genoeg om het daarna nog te halen. De
+klaar-tijdregel is dezelfde. Met de controles van v0.98.0 vallen er zes om op
+v0.97.0. Proef 68 in test_planner.py, proef 107 in test_coach.py, de kop van de
+pop-up in test_rapport.mjs.
+
 ## Het merk van de auto, en een Tesla die slaapt
 
 Sinds 22-09-2026 (v0.76.0) heeft een autoprofiel een merk: Ford of Tesla

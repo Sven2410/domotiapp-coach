@@ -3043,6 +3043,45 @@ controle("een dag zonder doel: geen doel, dus de algemene limiet",
 controle("zonder planning ook geen doel", planner.resolve_window(zondag67, {}).target is None, "")
 
 
+print("=== 68. de zekering van de groep is een vast plafond, ook na een herstart (v0.98.0) ===")
+# De eerste woning op 25-09-2026 om 00:42, na een herstart: "16 A, wat paal en auto
+# kunnen" en "van plan te laden tussen 01:00 en 06:00", voor een paal op een groep
+# van 3x16 A die daar nooit meer dan 14 A krijgt. Een uur eerder, met 12 A gemeten,
+# was de coach al begonnen.
+groep68 = planner.Circuit(name="Garage", phase_amps=[2.0, 0.0, 0.0], fuse_amps=16.0)
+g68 = Grid(surplus_w=0.0, phase_amps=[5.0, 3.0, 3.0], fuse_amps=25.0, circuits=[groep68])
+controle("de krapste zekering min haar marge: de groep, 16 - 2 = 14 A",
+         planner.zekering_plafond(g68) == (14.0, "Garage"), f"{planner.zekering_plafond(g68)}")
+controle("zonder groep de hoofdaansluiting: 25 - 2 = 23 A",
+         planner.zekering_plafond(Grid(phase_amps=[5.0, 3.0, 3.0], fuse_amps=25.0)) == (23.0, ""), "")
+controle("zonder fasesensoren en zonder groep bewaakt hij niets",
+         planner.zekering_plafond(Grid()) is None and planner.zekering_plafond(None) is None, "")
+auto68 = Car(capacity_kwh=77.0, phases=3, soc_percent=40.0, max_amps=16.0)
+vers68 = Charger(max_amps=16.0, connected=True, zekering_amps=14.0, zekering_naam="Garage")
+controle("direct na een herstart, zonder meting: 14 A en niet 16",
+         planner.structural_ceiling(auto68, vers68) == 14 and planner.vast_plafond(auto68, vers68) == 14,
+         f"{planner.structural_ceiling(auto68, vers68)}")
+gemeten68 = Charger(max_amps=16.0, connected=True, zekering_amps=14.0, zekering_naam="Garage", expected_amps=12.3)
+controle("met een meting eronder wint de meting, met de zin erbij",
+         planner.structural_ceiling(auto68, gemeten68) == 12
+         and "gemiddeld 12 A" in planner.measured_ceiling_note(auto68, gemeten68), planner.measured_ceiling_note(auto68, gemeten68))
+precies68 = Charger(max_amps=16.0, connected=True, zekering_amps=14.0, expected_amps=14.0)
+controle("een meting die gelijk is aan de zekering is geen nieuws: geen zin",
+         planner.measured_ceiling_note(auto68, precies68) == "", planner.measured_ceiling_note(auto68, precies68))
+nu68 = dt.datetime(2026, 9, 25, 0, 42)
+w68 = Window(enabled=True, deadline=dt.datetime(2026, 9, 25, 8, 0))
+plan68 = planner.timeline(nu68, [], g68, auto68, vers68, w68, 14)
+controle("de tijdlijn rekent met 14 A en zegt welke zekering het is",
+         plan68.amps == 14 and plan68.fuse_name == "Garage" and not plan68.measured,
+         f"{plan68.amps} {plan68.fuse_name} {plan68.measured}")
+ruim68 = Charger(max_amps=16.0, connected=True, zekering_amps=23.0, zekering_naam="")
+plan68b = planner.timeline(nu68, [], g68, auto68, ruim68, w68, 16)
+controle("een zekering die ruim genoeg is noemt hij niet",
+         plan68b.amps == 16 and plan68b.fuse_name is None, f"{plan68b.amps} {plan68b.fuse_name}")
+controle("met 14 in plaats van 16 duurt het naar verhouding langer",
+         abs(planner.hours_needed(auto68, 14) / planner.hours_needed(auto68, 16) - 16 / 14) < 0.01, "")
+
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

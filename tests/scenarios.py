@@ -1020,6 +1020,31 @@ batterij_wisselende_last = Scenario(
     batterij=Batterij(soc=60.0, volgt_na_s=5.0, meter_tik_s=5.0, meter_fase_s=1.0, **ANKER_SENSOR),
     begin="2026-09-07 04:55", duur_uren=1, kabel_erin="+9 07:00", schema_aan=False, stap_seconden=1,
 )
+# De nacht van 24 op 25-09-2026 in de eerste woning: een grote auto met een
+# opgegeven accustand aan een paal op een groep van 3x16 A, klaar om 08:00, en twee
+# herstarts van Home Assistant. Tot v0.98.0 vergat de coach bij elke herstart het
+# gemeten plafond (12 A) en rekende hij met 16 A: om 22:59 "wacht tot 01:00", om
+# 23:20 weer "nu doorladen", en na elke herstart tien minuten 6 A vast, "net
+# begonnen met laden". Na de tweede herstart zegt de status van de paal twee
+# minuten niets, zoals een integratie die nog laadt.
+herstart_groep = Scenario(
+    "herstart-groep",
+    "dynamisch, een grote auto op 40% (opgegeven) aan een paal op een groep van 3x16 A, klaar om 08:00, twee herstarts in de nacht",
+    contract="dynamisch", zon=Zon(wolken="geen"), auto=replace(GROTE, soc=40.0, meldt_soc=False),
+    groep_amps=16.0, groep_last_w=400.0,
+    begin="2026-09-07 21:55", kabel_erin="22:00", klaar_om="08:00", duur_uren=11, stap_seconden=15,
+    prijzen=Prijzen(per_dag={
+        "2026-09-07": [0.30] * 22 + [0.35, 0.351],
+        "2026-09-08": [0.351, 0.339, 0.330, 0.330, 0.326, 0.328, 0.345, 0.36] + [0.30] * 16,
+    }),
+    gebeurtenissen=[("22:05", "soc_opgeven", 40), ("23:30", "herstart", None),
+                    ("+1 00:40", "herstart", None), ("+1 00:40", "sensor_weg", ("status", 2))],
+)
+herstart_groep_zonder = herstart_groep.kopie(
+    naam="herstart-groep-zonder", uitleg="dezelfde nacht zonder herstarts: zo hoort het te gaan",
+    gebeurtenissen=[("22:05", "soc_opgeven", 40)],
+)
+
 # "Anker mag zelf nul op de meter doen" (de eigenaar, 24-09-2026). De batterij heeft
 # een eigen meter en houdt in zijn eigen stand zelf de meter op nul; de coach
 # neemt het over als de paal laadt en geeft hem daarna terug (v0.97.0).
@@ -1048,6 +1073,7 @@ BATTERIJ = [
     batterij_klapperlast, batterij_wisselende_last, batterij_zonder_rendement,
     batterij_zelf_nul, batterij_zelf_wisselend,
 ]
+HERSTART = [herstart_groep, herstart_groep_zonder]
 
 # Dezelfde dagen aan een Alfen (23-09-2026). Wat er anders is staat bij
 # `Paal.merk`; wat er hetzelfde hoort te zijn meet test_virtueel.py: dezelfde
@@ -1096,6 +1122,7 @@ ALLE = [
     batterij_helpt_auto, batterij_helpt_auto_nacht, batterij_helpt_auto_zonder_nacht,
     voorrang_auto_eerst, voorrang_accu_eerst,
     planning_auto_eerst, planning_accu_eerst,
+    *HERSTART,
 ]
 
 

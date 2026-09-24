@@ -5590,6 +5590,121 @@ modus106, _, vermogen106 = zet75(hass106)
 controle("bij een herstart op 0 W in de externe stand, en de coach kiest daarna opnieuw",
          vermogen106 == [0] and modus106 == ["third_party_control"], f"{modus106} {vermogen106}")
 
+print("=== 107. na een herstart weet de coach wat hij van de beurt wist (v0.98.0) ===")
+# De eigenaar op 25-09-2026: "onthoudt de coach de accu % die handmatig is ingevuld,
+# werkt hij die tijdens het laden bij, en weet hij na een herstart alles nog?
+# Repareer alles als dat nodig is."
+klok107 = sys.modules["homeassistant.util.dt"]
+echte_klok107 = klok107.utcnow
+NU107 = dt.datetime(2026, 9, 25, 0, 40)
+klok107.utcnow = lambda: NU107.replace(tzinfo=dt.timezone.utc)
+try:
+    # Een paal waarvan de integratie na de herstart nog niets zegt, is geen kabel eruit.
+    inst107 = instellingen(
+        car_soc=[{"device": "dev-laadpaal", "car": "car-1", "percent": 40.0, "meter": 100.0}],
+        sessions=[{"device": "dev-laadpaal", "boost": True, "at": NU107.replace(tzinfo=dt.timezone.utc).isoformat()}],
+    )
+    hass107, _, coach107 = bouw(huis(status="unavailable"), inst107)
+    coach107._restore(inst107)
+    asyncio.run(ronde(coach107, inst107, NU107))
+    controle("de paal zegt na een herstart nog niets: de opgegeven accustand blijft staan",
+             len(inst107["car_soc"]) == 1, f"{inst107['car_soc']}")
+    controle("en snelladen, teruggehaald uit de opslag, ook",
+             "dev-laadpaal" in coach107._boost and len(inst107.get("sessions") or []) == 1, f"{coach107._boost}")
+    hass107.states.zet("sensor.laadpaal_status", "charging")
+    hass107.states.zet("sensor.laadpaal_vermogen", "8000")
+    b107, _ = asyncio.run(ronde(coach107, inst107, NU107 + dt.timedelta(minutes=1)))
+    controle("zegt hij het wel, dan rekent hij met de opgegeven stand",
+             b107.get("soc_estimated") is True and b107.get("boost") is True, f"{b107.get('soc_estimated')} {b107.get('boost')}")
+    # Zegt de paal zelf dat de kabel eruit is, dan gaat het wel weg.
+    inst107c = instellingen(car_soc=[{"device": "dev-laadpaal", "car": "car-1", "percent": 40.0, "meter": 100.0}])
+    hass107c, _, coach107c = bouw(huis(status="disconnected"), inst107c)
+    asyncio.run(ronde(coach107c, inst107c, NU107))
+    controle("zegt de paal zelf dat de kabel eruit is, dan vergeet hij de opgave wel",
+             inst107c["car_soc"] == [], f"{inst107c['car_soc']}")
+
+    # De beurt die bij de herstart openstond, met wat er bij bewaard was.
+    laadt107 = NU107 - dt.timedelta(minutes=50)
+    begon107 = NU107 - dt.timedelta(minutes=80)
+    sessie107 = {
+        "at": (NU107 - dt.timedelta(minutes=3)).isoformat(), "begon": begon107.isoformat(),
+        "meter": 90.0, "geijkt": True, "ijk_kwh": 0.0, "soc_begin": 35.0, "laadt_sinds": laadt107.isoformat(),
+        "plafond": [[(NU107 - dt.timedelta(minutes=m)).isoformat(), 12.0, 1.0] for m in range(60, 0, -1)],
+        "kwijt": {"wait-for-price": 20.0}, "gemeld": [], "ingestapt": False,
+    }
+    beurt107 = {
+        "id": "dev-laadpaal:2026-09-24T22:00:00", "device": "dev-laadpaal", "name": "Laadpaal", "kind": "laden",
+        "car": "Ford", "plugged_at": "2026-09-24T22:00:00", "started": begon107.isoformat(), "ended": None,
+        "kwh": 9.0, "solar_kwh": 0.0, "paid": 3.0, "ref_price": 0.33, "ref_feed_in": 0.0, "ref_cost": 3.1,
+        "saved": 0.1, "solar_saved": 0.0, "price_unknown": False, "unknown_kwh": 0.0,
+        "baseline": {"kwh": 20.0, "cost": 6.6, "unknown_kwh": 0.0, "points": []},
+        "resumed": False, "complete": False, "session": sessie107,
+    }
+    inst107b = instellingen(car_soc=[{"device": "dev-laadpaal", "car": "car-1", "percent": 40.0, "meter": 90.0}])
+    hass107b, _, coach107b = bouw(huis(status="charging", stroom=12.0, vermogen=8280.0, teller=100.0), inst107b)
+    asyncio.run(coachmod.async_get_beurten(hass107b).async_upsert(beurt107))
+    coach107b._restore(inst107b)
+    asyncio.run(coach107b._async_beurten_laden())
+    b107b, _ = asyncio.run(ronde(coach107b, inst107b, NU107))
+    s107b = coach107b._sessie.get("dev-laadpaal") or {}
+    print(f"  na de herstart: {b107b['rule']} {b107b['amps']} A, laadt sinds {coach107b._since.get('dev-laadpaal')}, "
+          f"begon {s107b.get('begon')}, plan {(b107b.get('plan_ahead') or {}).get('amps')} A")
+    controle("hij laadt al sinds 23:50, dus geen tien minuten 6 A 'net begonnen'",
+             coach107b._since.get("dev-laadpaal") == laadt107 and "Net begonnen" not in (b107b.get("reason") or ""),
+             f"{coach107b._since.get('dev-laadpaal')} {b107b.get('reason')}")
+    controle("het begin, de meterstand en de begin-accustand komen terug",
+             s107b.get("begon") == begon107 and s107b.get("meter") == 90.0 and s107b.get("soc_begin") == 35.0,
+             f"{s107b.get('begon')} {s107b.get('meter')} {s107b.get('soc_begin')}")
+    controle("en het gemeten plafond telt meteen: 12 A, niet 16",
+             (b107b.get("plan_ahead") or {}).get("amps") == 12 and (b107b.get("plan_ahead") or {}).get("measured") is True,
+             f"{b107b.get('plan_ahead')}")
+    controle("de tijd die al verloren ging telt door in het verslag",
+             (s107b.get("kwijt") or {}).get("wait-for-price", 0) >= 20.0, f"{s107b.get('kwijt')}")
+    asyncio.run(hass107b.afmaken())
+    open107 = [b for b in asyncio.run(coachmod.async_get_beurten(hass107b).async_list()) if not b.get("complete")]
+    bewaard107 = (open107[0].get("session") if open107 else None) or {}
+    controle("wat hij bewaart heeft alles wat een volgende herstart nodig heeft",
+             bewaard107.get("laadt_sinds") == laadt107.isoformat() and bewaard107.get("begon") == begon107.isoformat()
+             and len(bewaard107.get("plafond") or []) >= 60 and bewaard107.get("soc_begin") == 35.0,
+             f"{ {k: (v if k != 'plafond' else len(v)) for k, v in bewaard107.items()} }")
+
+    # Ouder dan een half uur is niet meer met zekerheid dezelfde beurt.
+    hass107d, _, coach107d = bouw(huis(status="charging"), instellingen())
+    oud107 = {**beurt107, "session": {**sessie107, "at": (NU107 - dt.timedelta(hours=2)).isoformat()}}
+    asyncio.run(coachmod.async_get_beurten(hass107d).async_upsert(oud107))
+    asyncio.run(coach107d._async_beurten_laden())
+    controle("wat ouder is dan een half uur haalt hij niet terug", coach107d._hervat == {}, f"{coach107d._hervat}")
+
+    # De sensorwacht onthoudt wat hij al meldde.
+    inst107e = instellingen()
+    hass107e, _, coach107e = bouw({**huis(), "sensor.l3": "unavailable"}, inst107e)
+    stil107 = "sensor.l3"
+    coach107e._restore(inst107e)
+    asyncio.run(coach107e._async_sensorwacht(inst107e, NU107))
+    asyncio.run(coach107e._async_sensorwacht(inst107e, NU107 + dt.timedelta(minutes=11)))
+    kritiek107 = [d for d in hass107e.services.verstuurd if d[0] == "notify" and "meldt al" in d[2].get("message", "")]
+    controle("een sensor die stil is wordt één keer gemeld en onthouden",
+             len(kritiek107) == 1 and [r["entity"] for r in inst107e.get("sensor_quiet") or []] == [stil107],
+             f"{len(kritiek107)} {inst107e.get('sensor_quiet')}")
+    hass107e.services.verstuurd.clear()
+    coach107f = coachmod.ChargerCoach(hass107e)          # de herstart
+    coach107f._restore(inst107e)
+    asyncio.run(coach107f._async_sensorwacht(inst107e, NU107 + dt.timedelta(minutes=30)))
+    asyncio.run(coach107f._async_sensorwacht(inst107e, NU107 + dt.timedelta(minutes=45)))
+    controle("na een herstart meldt hij dezelfde stille sensor niet opnieuw",
+             not [d for d in hass107e.services.verstuurd if d[0] == "notify" and "meldt al" in d[2].get("message", "")],
+             f"{hass107e.services.verstuurd}")
+    hass107e.states.zet("sensor.l3", "2")
+    asyncio.run(coach107f._async_sensorwacht(inst107e, NU107 + dt.timedelta(minutes=46)))
+    controle("is hij terug, dan valt hij uit de opslag",
+             (inst107e.get("sensor_quiet") or []) == [], f"{inst107e.get('sensor_quiet')}")
+finally:
+    klok107.utcnow = echte_klok107
+
+controle("de naam van de auto houdt zijn hoofdletters",
+         coachmod._hoofdletter("Proefauto zonder HA") == "Proefauto zonder HA"
+         and coachmod._hoofdletter("tesla Model Y") == "Tesla Model Y" and coachmod._hoofdletter("") == "", "")
+
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

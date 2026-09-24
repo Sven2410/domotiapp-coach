@@ -310,10 +310,15 @@ export class DacPlanAheadSheet extends DacElement {
         // Sinds v0.61.0 kan dit een meting zijn: wat er de afgelopen uren
         // gemiddeld onder de zekering overbleef, bij een huis met een
         // warmtepomp die om het kwartier aangaat. Zie structural_ceiling.
+        // Sinds v0.98.0 telt ook de zekering zelf, als vast plafond: op een
+        // groep van 16 A krijgt de paal nooit meer dan 14 A, ook niet direct
+        // na een herstart, als er nog niets gemeten is.
         plan.amps
           ? plan.measured
             ? `${plan.amps} A, wat er de afgelopen uren gemiddeld overbleef onder je zekering`
-            : `${plan.amps} A, wat paal en auto kunnen`
+            : typeof plan.fuse_name === "string"
+              ? `${plan.amps} A, meer past er niet onder ${plan.fuse_name ? `de zekering van de groep ${plan.fuse_name}` : "je zekering"}`
+              : `${plan.amps} A, wat paal en auto kunnen`
           : ""],
       ["Uiterlijk beginnen", wanneer(plan.latest_start), "met een uur speling"],
       laatste,

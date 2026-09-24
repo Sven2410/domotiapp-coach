@@ -345,6 +345,20 @@ const NACHT = {
   ],
 };
 
+proef("op een groep van 16 A zegt de kop 14 A en welke zekering dat is (v0.98.0)", () => {
+  // De eerste woning op 25-09-2026 om 00:42: "16 A, wat paal en auto kunnen" voor een
+  // paal op een groep die hem nooit meer dan 14 A geeft.
+  const kop = (plan) => {
+    const { el, knopen } = vooruitScherm(plan);
+    el.paint_();
+    return knopen.get("#vooruit-kop").kinderen.flatMap((vak) => vak.kinderen.map((kind) => kind.textContent)).join(" | ");
+  };
+  assert.match(kop({ ...NACHT, amps: 14, fuse_name: "Garage" }), /14 A, meer past er niet onder de zekering van de groep Garage/);
+  assert.match(kop({ ...NACHT, amps: 14, fuse_name: "" }), /14 A, meer past er niet onder je zekering/);
+  assert.match(kop({ ...NACHT, amps: 12, fuse_name: "Garage", measured: true }), /12 A, wat er de afgelopen uren gemiddeld overbleef/);
+  assert.match(kop({ ...NACHT, fuse_name: null }), /16 A, wat paal en auto kunnen/);
+});
+
 proef("de kop toont wat er nog in moet en wanneer hij begint", () => {
   const { el, knopen } = vooruitScherm(NACHT);
   el.paint_();

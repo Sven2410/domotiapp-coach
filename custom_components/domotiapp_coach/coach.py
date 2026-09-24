@@ -108,6 +108,7 @@ from .planner import (
     STEP_AMPS,
     amps_for,
     ceiling_amps,
+    zekering_plafond,
     decide,
     timeline,
     FULL_PERCENT,
@@ -170,6 +171,15 @@ ZON_SLAAPT_ONDER = 10.0
 # tellen.
 PLAFOND_VENSTER = timedelta(hours=3)
 PLAFOND_MEETTIJD_MIN = 30.0
+
+# Wat de coach van een lopende laadbeurt over een herstart meeneemt (v0.98.0):
+# het begin, de meterstand en de accustand bij het begin, sinds wanneer de paal
+# laadt, het gemeten plafond, en wat er al gemeld is. Het staat bij de beurt in
+# de opslag, die elke vijf minuten bijgewerkt wordt. Ouder dan dit, dan is het
+# niet meer met zekerheid dezelfde beurt en begint hij opnieuw, zoals vroeger.
+# De eigenaar op 25-09-2026: "na een herstart dat hij alles nog weet? repareer
+# alles als dat nodig is."
+HERVAT_MAX = timedelta(minutes=30)
 
 # Hetzelfde idee voor de zon: over hoeveel van de afgelopen tijd de coach
 # vergelijkt wat de zonverwachting beloofde met wat zijn eigen dak gaf, en
@@ -651,6 +661,16 @@ def _moment(now: datetime | None = None) -> datetime:
     return dt_util.as_local(now or dt_util.utcnow()).replace(tzinfo=None)
 
 
+def _hoofdletter(tekst: str) -> str:
+    """Alleen de eerste letter groot, de rest zoals hij was.
+
+    `str.capitalize` maakt de rest klein: "Proefauto zonder HA" werd in het
+    verslag van 24-09-2026 "Proefauto zonder ha", en "Tesla Model Y" wordt
+    "Tesla model y".
+    """
+    return tekst[:1].upper() + tekst[1:]
+
+
 def _number(hass: HomeAssistant, entity_id: str | None) -> float | None:
     """A sensor read as a plain number, or None when it says nothing useful."""
     if not entity_id:
@@ -833,6 +853,9 @@ class ChargerCoach:
         # Of de paal de vorige ronde laadde. Begint hij opnieuw, dan begint de
         # aanloop ook opnieuw; zie `_since` hierboven en `_tempo_leren`.
         self._laadde: dict[str, bool] = {}
+        # Of de paal deze ronde zelf zei dat de kabel eruit is, en niet alleen
+        # niets zei. Zie `_read` en het vergeten van de sessie.
+        self._echt_los: dict[str, bool] = {}
         # The latest decision per device, for the panel to ask after.
         self.state: dict[str, dict[str, Any]] = {}
         # Devices the customer said yes to. Only meaningful at "propose", and
@@ -897,6 +920,9 @@ class ChargerCoach:
         # Per sensor sinds wanneer hij niets zegt, en welke daarvan al gemeld zijn.
         self._sensor_stil: dict[str, datetime] = {}
         self._sensor_gemeld: set[str] = set()
+        # Wat daarvan in de opslag staat, zodat er alleen bij een verandering
+        # geschreven wordt. Zie `sensor_quiet`.
+        self._sensor_gemeld_bewaard: set[str] = set()
         # De verbruikswacht: sinds wanneer er onafgebroken water loopt, of dat
         # al gemeld is, en welke dagen al gemeld zijn. Zie `_async_verbruikswacht`.
         self._water_loopt_sinds: datetime | None = None
@@ -948,6 +974,9 @@ class ChargerCoach:
         # Beurten die bij een herstart nog open stonden in de opslag, per
         # apparaat: het geld van de beurt loopt daar gewoon in door.
         self._beurt_open: dict[str, dict[str, Any]] = {}
+        # Wat er van een lopende laadbeurt bewaard was, per paal, tot de
+        # eerste ronde het overneemt. Zie `HERVAT_MAX` en `_async_beurten_laden`.
+        self._hervat: dict[str, dict[str, Any]] = {}
         # Of de wekpoging van deze sessie nog openstaat. Eén per sessie, dus
         # zodra hij gedaan is blijft dit staan tot de kabel eruit gaat.
         self._woken: set[str] = set()
@@ -1506,6 +1535,18 @@ class ChargerCoach:
                 "zolang zonder.",
                 kritiek=True,
             )
+
+        # Een gemelde sensor die de coach niet meer gebruikt telt niet meer.
+        self._sensor_gemeld &= set(self._sensoren(settings))
+        if self._sensor_gemeld != self._sensor_gemeld_bewaard:
+            try:
+                saved = await async_get_store(self.hass).async_save({"sensor_quiet": [
+                    {"entity": entity_id, "at": now.isoformat()} for entity_id in sorted(self._sensor_gemeld)
+                ]})
+                self._sensor_gemeld_bewaard = set(self._sensor_gemeld)
+                self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+            except Exception:  # noqa: BLE001 - een melding onthouden is geen reden om te stoppen
+                _LOGGER.exception("kon niet bewaren welke sensoren al gemeld zijn")
 
     def _zon_w(self, settings: dict[str, Any]) -> float | None:
         """Wat alle omvormers samen nu geven, of None zolang er een niets zegt.
@@ -4842,7 +4883,11 @@ class ChargerCoach:
         #
         # Een akkoord duurt zolang de auto aan de kabel hangt, en snelladen ook:
         # de auto waarvoor het bedoeld was staat er dan niet meer.
-        if not charger.connected:
+        #
+        # Alleen als de paal het zelf zegt (v0.98.0). Na een herstart zegt een
+        # paal waarvan de integratie nog laadt eerst niets, en dan wiste dit de
+        # knoppen die `_restore` net had teruggehaald, en de opgegeven accustand.
+        if not charger.connected and self._echt_los.get(device_id, True):
             self._approved.discard(device_id)
             self._boost.discard(device_id)
             self._modus.pop(device_id, None)
@@ -5728,6 +5773,12 @@ class ChargerCoach:
         # verslag komt: de kabel ging eruit toen de paal het zei, niet toen de
         # coach het geloofde.
         zegt_los = (not status) or "disconnect" in status
+        # Wat de bewoner opgaf en wat er over de beurt bewaard is, gaat alleen
+        # weg als de paal zegt dat de kabel eruit is. Na een herstart weet de
+        # coach de laatste status nog niet, en zegt een paal waarvan de
+        # integratie nog laadt eerst niets; dat telde als "kabel eruit", en dan
+        # was de opgegeven accustand weg (v0.98.0).
+        self._echt_los[device_id] = "disconnect" in status
         if not zegt_los:
             self._los_sinds.pop(device_id, None)
             self._was_verbonden.add(device_id)
@@ -5766,10 +5817,16 @@ class ChargerCoach:
         )
         # Wat er de afgelopen uren gemiddeld overbleef voor deze paal, uit de
         # boekhouding van de beurt (`_bijhouden`). Een meting van deze beurt,
-        # niet van gisteren: na de kabel eruit begint hij op nul, en na een
-        # herstart ook, want de beurt zelf wordt niet bewaard.
+        # niet van gisteren: na de kabel eruit begint hij op nul. Na een
+        # herstart gaat hij door met wat er bij de beurt bewaard was (v0.98.0),
+        # anders koos hij in de eerste woning op 24-09-2026 om 22:59 "wacht tot
+        # 01:00" en om 23:20 weer "nu doorladen".
         if charger.connected:
             charger.expected_amps = self._plafond_gemeten(device_id, now)
+        # En het vaste plafond van de zekeringen, ook na een herstart meteen
+        # bekend (v0.98.0). Zie `zekering_plafond` in planner.py.
+        if (vast := zekering_plafond(grid)) is not None:
+            charger.zekering_amps, charger.zekering_naam = vast
 
         # De aanloop hoort bij de paal en niet bij het besluit. Valt de paal uit
         # `charging` en komt hij terug, dan is alles weer aan het opstarten: de
@@ -5789,8 +5846,16 @@ class ChargerCoach:
         # this session began either. Taking it as "just now" only means waiting
         # out the minimum run once.
         if charger.charging and not self._laadde.get(device_id):
-            self._since[device_id] = now
-            charger.started_at = now
+            # De eerste ronde na een herstart en de paal laadt al: dan weet de
+            # bewaarde beurt sinds wanneer (v0.98.0). Zonder dat hield hij in de
+            # eerste woning op 24 en 25-09-2026 na elke herstart tien minuten
+            # 6 A vast, "net begonnen met laden", terwijl de auto al een uur laadde.
+            eerder = (self._hervat.get(device_id) or {}).get("laadt_sinds")
+            if device_id not in self._laadde and eerder is not None:
+                self._since[device_id] = eerder
+            else:
+                self._since[device_id] = now
+            charger.started_at = self._since[device_id]
         elif charger.charging and charger.started_at is None:
             charger.started_at = self._since.setdefault(device_id, now)
         self._laadde[device_id] = charger.charging
@@ -6088,7 +6153,11 @@ class ChargerCoach:
         `PLAFOND_MEETTIJD_MIN` minuten in het venster staan. Zie
         `structural_ceiling` in planner.py voor waar dit heen gaat.
         """
-        reeks = (self._sessie.get(device_id) or {}).get("plafond_reeks") or []
+        if device_id in self._sessie:
+            reeks = self._sessie[device_id].get("plafond_reeks") or []
+        else:
+            # De eerste ronde na een herstart: wat er bij de beurt bewaard was.
+            reeks = (self._hervat.get(device_id) or {}).get("plafond_reeks") or []
         grens = now - PLAFOND_VENSTER
         binnen = [r for r in reeks if r[0] >= grens]
         minuten = sum(stap for _, _, stap in binnen)
@@ -6831,6 +6900,33 @@ class ChargerCoach:
             # of na terugrekenen, is het inplugmoment wél bekend.
             "resumed": bool(sessie.get("ingestapt")) and not geld.get("hervat_bekend"),
             "complete": klaar,
+            # Wat de coach nodig heeft om na een herstart door te gaan waar hij
+            # was (v0.98.0); zie `_hervat_uit`. Een afgesloten beurt heeft het
+            # niet meer nodig.
+            **({} if klaar else {"session": self._sessie_bewaren(device.get("id", ""), sessie, now)}),
+        }
+
+    def _sessie_bewaren(self, device_id: str, sessie: dict[str, Any], now: datetime) -> dict[str, Any]:
+        """Het deel van een lopende laadbeurt dat een herstart moet overleven."""
+        begon = sessie.get("begon")
+        laadt_sinds = self._since.get(device_id) if self._laadde.get(device_id) else None
+        grens = now - PLAFOND_VENSTER
+        return {
+            "at": now.replace(microsecond=0).isoformat(),
+            "begon": begon.replace(microsecond=0).isoformat() if begon else None,
+            "meter": sessie.get("meter"),
+            "geijkt": bool(sessie.get("geijkt")),
+            "ijk_kwh": round(float(sessie.get("ijk_kwh") or 0.0), 4),
+            "soc_begin": sessie.get("soc_begin"),
+            "laadt_sinds": laadt_sinds.replace(microsecond=0).isoformat() if laadt_sinds else None,
+            "plafond": [
+                [moment.replace(microsecond=0).isoformat(), round(amps, 2), round(stap, 3)]
+                for moment, amps, stap in sessie.get("plafond_reeks") or []
+                if moment >= grens
+            ],
+            "kwijt": {k: round(v, 2) for k, v in (sessie.get("kwijt") or {}).items()},
+            "gemeld": sorted(str(x) for x in sessie.get("gemeld") or set()),
+            "ingestapt": bool(sessie.get("ingestapt")),
         }
 
     def _beurt_schrijven(self, entry: dict[str, Any]) -> None:
@@ -7132,9 +7228,50 @@ class ChargerCoach:
         """De beurten die bij de vorige keer nog liepen, voor `_geld_begin`."""
         try:
             for entry in await async_get_beurten(self.hass).async_open():
-                self._beurt_open[str(entry.get("device") or "")] = entry
+                device_id = str(entry.get("device") or "")
+                self._beurt_open[device_id] = entry
+                if entry.get("kind") == "laden" and isinstance(entry.get("session"), dict):
+                    hervat = self._hervat_uit(entry["session"])
+                    if hervat is not None:
+                        self._hervat[device_id] = hervat
         except Exception:  # noqa: BLE001 - zonder geschiedenis begint hij gewoon opnieuw
             _LOGGER.exception("kon de lopende laadbeurten niet lezen")
+
+    @staticmethod
+    def _hervat_uit(bewaard: dict[str, Any]) -> dict[str, Any] | None:
+        """Wat er van een lopende laadbeurt bewaard was, terug in de vorm van de sessie.
+
+        None als het ouder is dan `HERVAT_MAX` of niet te lezen.
+        """
+        def tijd(tekst: Any) -> datetime | None:
+            try:
+                return datetime.fromisoformat(str(tekst)) if tekst else None
+            except ValueError:
+                return None
+
+        op = tijd(bewaard.get("at"))
+        if op is None or _moment() - op > HERVAT_MAX:
+            return None
+        reeks = []
+        for rij in bewaard.get("plafond") or []:
+            try:
+                moment = tijd(rij[0])
+                if moment is not None:
+                    reeks.append((moment, float(rij[1]), float(rij[2])))
+            except (TypeError, ValueError, IndexError):
+                continue
+        return {
+            "begon": tijd(bewaard.get("begon")),
+            "meter": bewaard.get("meter"),
+            "geijkt": bool(bewaard.get("geijkt")),
+            "ijk_kwh": float(bewaard.get("ijk_kwh") or 0.0),
+            "soc_begin": bewaard.get("soc_begin"),
+            "laadt_sinds": tijd(bewaard.get("laadt_sinds")),
+            "plafond_reeks": reeks,
+            "kwijt": {str(k): float(v) for k, v in (bewaard.get("kwijt") or {}).items()},
+            "gemeld": set(bewaard.get("gemeld") or []),
+            "ingestapt": bool(bewaard.get("ingestapt")),
+        }
 
     def _bijhouden(
         self,
@@ -7149,6 +7286,10 @@ class ChargerCoach:
     ) -> None:
         """Onthouden wat er in deze laadbeurt gebeurt, om het na te kunnen vertellen."""
         device_id = device.get("id", "")
+        if not charger.connected and not self._echt_los.get(device_id, True):
+            # De paal zegt (nog) niets: niets afsluiten en niets vergeten. Na een
+            # herstart is dat de integratie die nog laadt (v0.98.0).
+            return
         if not charger.connected:
             # Een beurt die nog open stond in de opslag terwijl de kabel er nu
             # niet in zit: de kabel ging eruit terwijl Home Assistant herstartte.
@@ -7227,6 +7368,32 @@ class ChargerCoach:
             # aan de kabel hing en er 5,2 kWh in was gegaan.
             sessie["ingestapt"] = charger.charging
             sessie["geld"] = self._geld_begin(device_id, now, settings, charger.charging)
+            # En wat er van deze beurt bewaard was, zodat het verslag over de hele
+            # beurt gaat en niet over het stuk na de herstart (v0.98.0). Op
+            # 24-09-2026 om 02:49 zei het verslag "geladen van 02:00 tot 02:49,
+            # 7,3 kWh, de accu ging van 72 naar 80%" naast "20,4 kWh kwam van het
+            # net": het geld liep door vanaf het inpluggen, de rest begon opnieuw.
+            hervat = self._hervat.pop(device_id, None)
+            if hervat is not None and hervat.get("begon") is not None:
+                sessie.update(
+                    begon=hervat["begon"],
+                    meter=hervat["meter"],
+                    geijkt=hervat["geijkt"] and hervat["meter"] is not None,
+                    ijk_kwh=hervat["ijk_kwh"],
+                    eigen_bij_begin=0.0,
+                    ingestapt=hervat["ingestapt"],
+                )
+                # Wat er tussen de laatste opslag en nu geladen werd staat nog
+                # niet in het geld; de teller weet het zodra hij stapt. Zie hieronder.
+                if (sessie.get("geld") or {}).get("hervat_bekend"):
+                    sessie["gat_vullen"] = True
+                    sessie["gat_teller"] = self._teller(device)
+            if hervat is not None:
+                if hervat.get("soc_begin") is not None:
+                    sessie["soc_begin"] = hervat["soc_begin"]
+                sessie["plafond_reeks"] = list(hervat.get("plafond_reeks") or [])
+                sessie["kwijt"] = dict(hervat.get("kwijt") or {})
+                sessie["gemeld"] = set(hervat.get("gemeld") or set())
 
         # Wat deze beurt kost en bespaart, per ronde bijgeteld. Zie `_geld_bij`.
         geld = sessie.get("geld")
@@ -7283,6 +7450,7 @@ class ChargerCoach:
                 "meter_bij": 0.0,
             },
         )
+
 
         # De laatste accustand van deze laadbeurt vasthouden, met de meterstand
         # van dat moment erbij. Een percentage dat wegvalt is geen nieuw
@@ -7370,6 +7538,22 @@ class ChargerCoach:
                 )
                 sessie["meter"] = meter
                 sessie["geijkt"] = True
+
+        # Na een herstart: wat er tussen de laatste opslag van de beurt en nu
+        # geladen werd, telde het geld niet mee, want de coach was weg (v0.98.0).
+        # In het virtuele huis stond er daardoor "50,6 kWh kwam van het net"
+        # naast "51,3 kWh geladen". Bij de eerste stap van de teller na de
+        # herstart dekt die de hele beurt tot nu, en het verschil met het geld
+        # gaat er in één keer bij, tegen de prijs van nu. Een Alfen stapt de
+        # volgende ronde, een Easee binnen het uur.
+        if (
+            sessie.get("gat_vullen") and meter is not None and meter != sessie.get("gat_teller")
+            and geld is not None and settings is not None
+        ):
+            sessie.pop("gat_vullen", None)
+            gat = (self._geladen(device, sessie) or 0.0) - float(geld.get("kwh") or 0.0)
+            if 0.0 < gat < 100.0:
+                self._geld_bij(geld, gat, _watts(self.hass, device.get("entity")) or 0.0, grid, settings, now)
 
         sessie["mikpunt"] = window.deadline if window.enabled else None
 
@@ -7557,7 +7741,7 @@ class ChargerCoach:
                 else ""
             )
             await self._async_tell(
-                f"{self._hoe_heet(car).capitalize()} aan {naam} neemt al {minuten} "
+                f"{_hoofdletter(self._hoe_heet(car))} aan {naam} neemt al {minuten} "
                 "minuten geen stroom af "
                 f"terwijl de coach hem aanbiedt.{stand} Zo wordt "
                 f"{window.deadline:%H:%M} niet gehaald. Meestal helpt het om de "
@@ -7611,7 +7795,7 @@ class ChargerCoach:
             # En staat die 80% als doel in het profiel, dan is er niets bijzonders
             # gebeurd en hoort er ook geen bijzonderheid te staan: dan is dit
             # gewoon het einde van een geslaagde beurt. De eigenaar op 16-09-2026.
-            wie = f"{self._hoe_heet(car).capitalize()} aan {naam}"
+            wie = f"{_hoofdletter(self._hoe_heet(car))} aan {naam}"
             heel = doel_van(car) >= FULL_PERCENT
             if car.soc_percent is None or (heel and doel_bereikt(car)):
                 klaar = f"{wie} is vol."
@@ -7672,7 +7856,7 @@ class ChargerCoach:
         )
         waarom = self._waarom(sessie)
         await self._async_tell(
-            f"{self._hoe_heet(car).capitalize()} aan {naam} was om {vorig:%H:%M} "
+            f"{_hoofdletter(self._hoe_heet(car))} aan {naam} was om {vorig:%H:%M} "
             f"nog niet vol.{stand}"
             + (f" {waarom}." if waarom else "")
             + " Hij laadt door tot hij vol is.",
@@ -7748,7 +7932,7 @@ class ChargerCoach:
         # Was de auto al als vol gemeld, dan is dit het tweede verslag van
         # dezelfde beurt: wel in de geschiedenis, niet nog eens op de telefoon.
         await self._async_tell(
-            f"{self._hoe_heet(car).capitalize()} aan {naam} is afgekoppeld om "
+            f"{_hoofdletter(self._hoe_heet(car))} aan {naam} is afgekoppeld om "
             f"{moment:%H:%M}"
             + verloop
             + self._beurt_cijfers(sessie, car)
@@ -7992,6 +8176,8 @@ class ChargerCoach:
             "note": plan.note,
             "estimated": plan.estimated,
             "measured": plan.measured,
+            # Welke zekering het plan onder wat paal en auto kunnen houdt (v0.98.0).
+            "fuse_name": plan.fuse_name,
             # Zonder deze regel bleef `solar_measured_note` in v0.67.0 hangen
             # in de reden en bereikte hij de tijdlijn op de kaart nooit, terwijl
             # `plan-ahead-sheet.js` er wel naar keek.
@@ -8152,6 +8338,15 @@ class ChargerCoach:
         if self._restored:
             return
         self._restored = True
+
+        # De sensoren die al als stil gemeld waren (v0.98.0). In de eerste
+        # woning kwam "Airco F&R meldt al 10 minuten niets" na elke herstart
+        # opnieuw als kritieke melding (24-09-2026 om 00:05 en 00:53), terwijl
+        # die stekker gewoon weg was.
+        for row in settings.get("sensor_quiet") or []:
+            if isinstance(row, dict) and row.get("entity"):
+                self._sensor_gemeld.add(str(row["entity"]))
+        self._sensor_gemeld_bewaard = set(self._sensor_gemeld)
 
         grens = dt_util.utcnow() - SESSION_MEMORY
         for row in settings.get("sessions") or []:

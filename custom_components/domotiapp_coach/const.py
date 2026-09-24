@@ -539,6 +539,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # bij abnormaal verbruik: per meter en per dag de m³, en per meter de
     # stand waarmee de dag begon. Lijsten, want `_prune` laat lijsten met rust.
     "usage_days": [],
+    # Welke sensoren de sensorwacht al als stil gemeld heeft (v0.98.0): {entity,
+    # at}. Zodat een sensor die echt weg is na een herstart niet opnieuw een
+    # kritieke melding geeft. Zie `_async_sensorwacht` in coach.py.
+    "sensor_quiet": [],
     "usage_start": [],
     # De knoppen van de bewoner per laadpunt: een akkoord, snelladen, een pauze.
     # Opdrachten van een mens, dus ze horen een herstart van Home Assistant te
