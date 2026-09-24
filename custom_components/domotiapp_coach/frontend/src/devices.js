@@ -869,6 +869,20 @@ export const hasCars = (device) => CAR_TYPES.includes(device?.type);
 
 /** How a car takes its power, and what that means for the lowest step. */
 /** De merken van een auto, en daarmee welke velden er bij het profiel horen. */
+/**
+ * Wat er in "Hoe vol is de auto nu?" staat (v0.98.0): na een opgave de stand die
+ * de coach nu verwacht, afgerond, en die loopt elke ronde mee met wat de paal erin
+ * doet. De eigenaar op 25-09-2026: "ik wil dat je hoe vol is de auto nu live mee
+ * laat lopen en dat de bewoner hem kan bijstellen waar nodig." Zonder opgave leeg;
+ * weet de coach nog niets, dan de opgave zelf.
+ */
+export function socVeld(opgave, socNu) {
+  const opgegeven = opgave?.percent;
+  if (opgegeven === null || opgegeven === undefined || opgegeven === "") return "";
+  const nu = socNu === null || socNu === undefined || socNu === "" ? NaN : Number(socNu);
+  return String(Math.round(Number.isFinite(nu) ? nu : Number(opgegeven)));
+}
+
 export const CAR_BRANDS = [
   { id: "ford", label: "Ford" },
   { id: "tesla", label: "Tesla" },

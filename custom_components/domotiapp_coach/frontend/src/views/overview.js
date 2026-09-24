@@ -28,6 +28,7 @@ import {
   programKey,
   programPicker,
   releaseCopy,
+  socVeld,
   typeMeta,
   valueLabel,
 } from "../devices.js";
@@ -2389,6 +2390,7 @@ class DacViewOverview extends DacElement {
         percent,
       });
       field.dataset.stand = String(percent ?? "");
+      delete field.dataset.bewerkt;
       this.fire("dac-settings-saved", { settings });
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de accustand niet doorgeven", error);
@@ -2797,7 +2799,14 @@ class DacViewOverview extends DacElement {
     for (const field of this.$$("[data-soc-input]")) {
       field.addEventListener("keydown", (event) => {
         if (event.key === "Enter") this.saveSoc_(Number(field.dataset.socInput));
+        // Escape: niets doorgeven en weer de stand van de coach tonen.
+        if (event.key === "Escape") {
+          delete field.dataset.bewerkt;
+          field.value = field.dataset.stand ?? "";
+        }
       });
+      // Wat de bewoner zelf intypt blijft staan tot hij het doorgeeft.
+      field.addEventListener("input", () => { field.dataset.bewerkt = "1"; });
     }
     for (const select of this.$$("[data-program-select]")) {
       select.addEventListener("change", () =>
@@ -2915,10 +2924,13 @@ class DacViewOverview extends DacElement {
       if (!socPick.hidden) {
         const opgave = (this.settings_?.car_soc ?? []).find((row) => row?.device === device.id);
         const field = this.$(`[data-soc-input="${slot}"]`);
-        const stand = opgave?.percent ?? "";
-        // Niet overschrijven terwijl iemand aan het typen is.
-        if (this.shadowRoot?.activeElement !== field && field.dataset.stand !== String(stand)) {
-          field.dataset.stand = String(stand);
+        // Sinds v0.98.0 de stand van nu en niet de opgave van toen: het veld loopt
+        // elke ronde mee (`socVeld`). Niet overschrijven terwijl iemand typt, en
+        // ook niet als hij iets anders invulde en nog niet doorgaf.
+        const stand = socVeld(opgave, oordeel?.soc_now);
+        if (this.shadowRoot?.activeElement !== field && field.dataset.bewerkt !== "1"
+            && field.dataset.stand !== stand) {
+          field.dataset.stand = stand;
           field.value = stand;
         }
         // Wat de coach van die opgave maakt (v0.89.0). De bewoner van de eerste
@@ -2930,10 +2942,11 @@ class DacViewOverview extends DacElement {
         const opgegeven = Number(opgave?.percent);
         const erbij = Number.isFinite(nu) && Number.isFinite(opgegeven) ? (nu - opgegeven) / 100 * cap : NaN;
         this.$(`[data-soc-hint="${slot}"]`).textContent = opgave
-          ? Number.isFinite(erbij) && erbij >= 0.05
-            ? `Sinds je ${Math.round(opgegeven)}% doorgaf is er ${erbij.toFixed(1).replace(".", ",")} kWh geladen. `
-              + `De coach verwacht dat de auto nu ${Math.round(nu)}% vol is.`
-            : "De coach telt zelf verder met wat de paal erin doet."
+          ? (Number.isFinite(erbij) && erbij >= 0.05
+            ? `Dit loopt mee met wat de paal erin doet: sinds je ${Math.round(opgegeven)}% doorgaf is er `
+              + `${erbij.toFixed(1).replace(".", ",")} kWh geladen. `
+            : "Dit loopt mee met wat de paal erin doet. ")
+            + "Zegt de auto iets anders, vul dat in en druk op Doorgeven."
           : oordeel?.needs_soc
             ? "Hier wacht de coach op. Zonder dit gaat hij uit van een lege accu."
             : "Geef dit door, dan kan de coach het gunstigste moment kiezen.";

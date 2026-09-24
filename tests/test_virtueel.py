@@ -1164,15 +1164,20 @@ if (vl := v("klantwoning-herstart")) and (basis := v("klantwoning")):
     controle("herstart: geen enkele valse melding",
              not meldingen(vl, "niet lezen") and not meldingen(vl, "meldt al") and not meldingen(vl, "niets meer beslist"),
              f"{[m for _, m in vl.meldingen]}")
-    # Bekend en niet verholpen: na de herstart om 04:20 kent de coach het begin
-    # van de beurt niet meer en telt het verslag vanaf dat moment. Eerlijk, maar
-    # onvolledig. Zie de notities van 04-09-2026. De bijzin "en toen liep hij
-    # al" is er op 21-09-2026 uit gegaan; "sinds" doet hetzelfde werk.
-    controle("herstart: het verslag telt eerlijk vanaf het moment van instappen",
-             any("Sinds " in m for m in meldingen(vl, "is vol"))
-             and all("liep hij al" not in m and "Geladen van" not in m
-                     for m in meldingen(vl, "is vol")),
-             f"{meldingen(vl, 'is vol')}")
+    # Tot v0.98.0 kende de coach na de herstart van 04:20 het begin van de beurt
+    # niet meer en telde het verslag vanaf dat moment ("sinds ..."). Nu bewaart hij
+    # de beurt en is het verslag hetzelfde als zonder herstarts; alleen de
+    # verloren tijd mist per herstart wat er sinds de laatste opslag gebeurde,
+    # hooguit vijf minuten.
+    import re as _re_kh
+    met_kh, zonder_kh = meldingen(vl, "is vol"), meldingen(basis, "is vol")
+    kern_kh = lambda m: _re_kh.sub(r"is er \d+ minuten", "is er N minuten", m)
+    minuten_kh = lambda m: int((_re_kh.search(r"is er (\d+) minuten", m) or [0, 0])[1])
+    controle("herstart: het verslag gaat over de hele beurt, net als zonder herstarts",
+             len(met_kh) == 1 and len(zonder_kh) == 1 and "Geladen van" in met_kh[0]
+             and kern_kh(met_kh[0]) == kern_kh(zonder_kh[0])
+             and abs(minuten_kh(met_kh[0]) - minuten_kh(zonder_kh[0])) <= 5 * 5,
+             f"{met_kh} tegen {zonder_kh}")
 
 # Een sensor die wegvalt wordt na tien minuten gemeld, en als hij terug is ook.
 # De eigenaar op 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat

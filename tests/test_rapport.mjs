@@ -1225,8 +1225,21 @@ proef("op de kaart kies je per beurt tot hoeveel procent hij laadt (v0.88.0)", (
 proef("onder 'hoe vol is de auto nu' staat wat de coach van de opgave maakt, en het veld heeft een %", () => {
   const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
   assert.ok(kaart.includes('<span class="soc-procent" aria-hidden="true">%</span>'));
-  assert.ok(kaart.includes("Sinds je ${Math.round(opgegeven)}% doorgaf is er"), "de zin met de kWh sinds de opgave");
-  assert.ok(kaart.includes("De coach verwacht dat de auto nu ${Math.round(nu)}% vol is."));
+  assert.ok(kaart.includes("sinds je ${Math.round(opgegeven)}% doorgaf is er "), "de zin met de kWh sinds de opgave");
+  assert.ok(kaart.includes("Zegt de auto iets anders, vul dat in en druk op Doorgeven."));
+});
+
+proef("'hoe vol is de auto nu' loopt live mee, en wat de bewoner typt blijft staan tot hij doorgeeft (v0.98.0)", async () => {
+  const { socVeld } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  assert.equal(socVeld({ percent: 32 }, 46.5), "47", "na een opgave de stand die de coach nu verwacht");
+  assert.equal(socVeld({ percent: 32 }, null), "32", "weet de coach nog niets, dan de opgave zelf");
+  assert.equal(socVeld(null, 46.5), "", "zonder opgave leeg: de sensor van de auto telt dan, of niets");
+  assert.equal(socVeld({ percent: null }, 46.5), "");
+  const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
+  assert.ok(kaart.includes("const stand = socVeld(opgave, oordeel?.soc_now);"), "het veld toont de stand van nu");
+  assert.ok(kaart.includes('field.dataset.bewerkt !== "1"'), "en overschrijft niet wat de bewoner net intypte");
+  assert.ok(kaart.includes('field.addEventListener("input", () => { field.dataset.bewerkt = "1"; });'));
+  assert.ok(kaart.includes("delete field.dataset.bewerkt;"), "na doorgeven loopt hij weer mee");
 });
 
 proef("bij de batterij de grens voor de auto, op Strategie de nachtstrategie (v0.90.0)", () => {

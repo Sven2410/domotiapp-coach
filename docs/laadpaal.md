@@ -440,6 +440,16 @@ dat overleeft een herstart. Wat er misging en nu gerepareerd is:
 5. **De naam van de auto houdt zijn hoofdletters** (`_hoofdletter`):
    `str.capitalize` maakte van "Proefauto zonder HA" in het verslag "Proefauto
    zonder ha".
+6. **"Hoe vol is de auto nu?" loopt live mee.** De eigenaar diezelfde nacht:
+   "ik wil dat je hoe vol is de auto nu live mee laat lopen en dat de bewoner
+   hem kan bijstellen waar nodig." Het veld op de kaart toont na een opgave de
+   stand die de coach nu verwacht (`socVeld` in devices.js, uit `soc_now`), en
+   niet meer de opgave van toen; elke ronde bij. Wat de bewoner intypt blijft
+   staan tot hij het doorgeeft (`dataset.bewerkt`), Escape zet de stand van de
+   coach terug, en doorgeven legt een nieuw beginpunt vast bij de meterstand van
+   dat moment. Eronder: "Dit loopt mee met wat de paal erin doet: sinds je 32%
+   doorgaf is er 12,2 kWh geladen. Zegt de auto iets anders, vul dat in en druk
+   op Doorgeven."
 
 Het virtuele huis kent daarvoor groepen (`Scenario.groep_amps`, `groep_last_w`;
 de groep in `installation.circuits` met een meter per fase). Scenario
