@@ -460,7 +460,15 @@ python tools/logboek.py 2026-08-29T06:00             # tijdlijn uit de recorder
 python tools/besluiten.py                            # live meeluisteren
 python tools/toestanden.py t.log plus=solix,p1_meter # elke toestandswissel, ook van
                                                      # entiteiten die het paneel niet kent
+python tools/schaduw.py s.log sturen=<id> zelf=1      # de coach van deze map in de schaduw:
+                                                     # wat hij zou doen, zonder iets te schrijven
 ```
+
+`schaduw.py` is er sinds 25-09-2026, toen in de eerste woning een andere sturing de
+batterij had: hij draait de coach uit deze map in het nagemaakte Home Assistant van de
+proeven, met de echte toestanden, en schrijft per minuut wat hij zou doen naast wat er
+gebeurt. De lus is open (zijn opdrachten gaan nergens heen), dus hij vergelijkt het
+doel en niet de regeling.
 
 `plus=` bij `toestanden.py` is er sinds 23-09-2026: een batterij die door iets
 anders gestuurd wordt laat dat alleen in haar eigen entiteiten zien, en het
