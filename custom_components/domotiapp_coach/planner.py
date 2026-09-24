@@ -387,6 +387,14 @@ class Charger:
     # gemiddeld over de tijd. Een meting van déze beurt en geen patroon over
     # dagen; zie `structural_ceiling`. None zolang er niets gemeten is.
     expected_amps: float | None = None
+    # Het meeste dat deze paal onder zijn zekeringen ooit krijgt: de krapste
+    # zekering in zijn keten min haar marge, zonder het huis erbij (v0.98.0).
+    # Vast, dus ook na een herstart meteen bekend, anders dan `expected_amps`.
+    # None zonder bewaakte zekering. Zie `zekering_plafond`.
+    zekering_amps: float | None = None
+    # En welke zekering dat is, voor de zin op de kaart: "" is de
+    # hoofdaansluiting, anders de naam van de groep.
+    zekering_naam: str = ""
 
 
 @dataclass
@@ -1366,6 +1374,36 @@ def _vlakke_blokken(
     return blokken
 
 
+def zekering_plafond(grid: Grid | None) -> tuple[float, str] | None:
+    """De krapste zekering waar de paal onder hangt, min haar marge, met haar naam.
+
+    Zonder het huis erbij: dit is het meeste dat de paal er ooit krijgt, ook als
+    verder alles uit staat. In de eerste woning hangt de paal op een groep van
+    3x16 A met twee ampère marge; op 25-09-2026 om 00:42 stond er na een herstart
+    "16 A, wat paal en auto kunnen" en "van plan te laden tussen 01:00 en 06:00",
+    terwijl de coach een uur eerder op 12 A gemeten had moeten beginnen en de
+    paal daar nooit meer dan 14 A krijgt. De hoofdaansluiting telt alleen als de
+    coach hem bewaakt (fasesensoren); een groep altijd, want die staat er juist
+    om in de instellingen.
+    """
+    if grid is None:
+        return None
+    grenzen: list[tuple[float, str]] = []
+    if grid.phase_amps:
+        grenzen.append((grid.fuse_amps - fuse_margin(grid), ""))
+    for groep in grid.circuits:
+        grenzen.append((groep.fuse_amps - fuse_margin_van(groep.fuse_amps, groep.margin_amps), groep.name))
+    return min(grenzen, key=lambda paar: paar[0]) if grenzen else None
+
+
+def vast_plafond(car: Car, charger: Charger) -> int:
+    """Wat paal, auto en zekeringen samen ooit toelaten: geen meting, geen huis."""
+    plafond = float(physical_ceiling(car, charger))
+    if charger.zekering_amps is not None:
+        plafond = min(plafond, charger.zekering_amps)
+    return int(max(0, plafond))
+
+
 def structural_ceiling(car: Car, charger: Charger) -> int:
     """Wat deze paal en deze auto samen kunnen, los van dit moment.
 
@@ -1386,7 +1424,7 @@ def structural_ceiling(car: Car, charger: Charger) -> int:
     dat gemiddelde. Een rustig huis geeft het volle plafond en verandert niets;
     een huis met een warmtepomp begint eerder. De eigenaar op 10-09-2026: "bouw maar."
     """
-    plafond = physical_ceiling(car, charger)
+    plafond = vast_plafond(car, charger)
     if charger.expected_amps is not None:
         plafond = min(plafond, charger.expected_amps)
     return int(max(0, plafond))
@@ -1403,7 +1441,7 @@ def physical_ceiling(car: Car, charger: Charger) -> int:
 def measured_ceiling_note(car: Car, charger: Charger) -> str:
     """Eén zin over het gemeten plafond, of niets als het niet lager uitkomt."""
     gemeten = structural_ceiling(car, charger)
-    if charger.expected_amps is None or gemeten >= physical_ceiling(car, charger):
+    if charger.expected_amps is None or gemeten >= vast_plafond(car, charger):
         return ""
     return (
         f"De afgelopen uren bleef er gemiddeld {gemeten} A over voor de paal, "
@@ -1931,6 +1969,10 @@ class Plan:
     # Of `amps` lager is dan wat paal en auto kunnen, omdat er sinds het
     # inpluggen gemiddeld minder overbleef. Zie `structural_ceiling`.
     measured: bool = False
+    # Welke zekering `amps` onder wat paal en auto kunnen houdt, als dat zo is:
+    # "" de hoofdaansluiting, anders de naam van de groep; None als het de paal
+    # of de auto is (v0.98.0). Zie `zekering_plafond`.
+    fuse_name: str | None = None
     # Of de zon per uur een meting is of een schatting. Zie `_zonkromme` in
     # coach.py: staat er geen uurkromme klaar, dan wordt de dagverwachting over
     # de daglichturen verdeeld, en dat hoort het scherm te zeggen.
@@ -1995,6 +2037,11 @@ def timeline(
         hours_needed=hours_needed(car, structureel),
         amps=structureel,
         measured=bool(measured_ceiling_note(car, charger)),
+        fuse_name=(
+            charger.zekering_naam
+            if charger.zekering_amps is not None and vast_plafond(car, charger) < physical_ceiling(car, charger)
+            else None
+        ),
         estimated=forecast.estimated,
         solar_note=solar_measured_note(forecast),
     )

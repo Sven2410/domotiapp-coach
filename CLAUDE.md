@@ -175,7 +175,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 
 | werk je aan | lees eerst |
 |---|---|
-| de laadpaal: de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla | `docs/laadpaal.md` |
+| de laadpaal: een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla | `docs/laadpaal.md` |
 | een Alfen, of iets aan de paalsturing | `docs/alfen.md` |
 | groepen met een eigen zekering (een onderverdeelkast) | `docs/groepen.md` |
 | de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, en hoe de coach prijslijsten leest | `docs/batterij.md` |
@@ -244,12 +244,12 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 427 controles op het denkwerk
+python tests/test_planner.py     # 436 controles op het denkwerk
 python tests/test_batterij.py    # 126 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 660 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1919 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 674 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1944 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 106 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 108 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```
@@ -460,7 +460,15 @@ python tools/logboek.py 2026-08-29T06:00             # tijdlijn uit de recorder
 python tools/besluiten.py                            # live meeluisteren
 python tools/toestanden.py t.log plus=solix,p1_meter # elke toestandswissel, ook van
                                                      # entiteiten die het paneel niet kent
+python tools/schaduw.py s.log sturen=<id> zelf=1      # de coach van deze map in de schaduw:
+                                                     # wat hij zou doen, zonder iets te schrijven
 ```
+
+`schaduw.py` is er sinds 25-09-2026, toen in de eerste woning een andere sturing de
+batterij had: hij draait de coach uit deze map in het nagemaakte Home Assistant van de
+proeven, met de echte toestanden, en schrijft per minuut wat hij zou doen naast wat er
+gebeurt. De lus is open (zijn opdrachten gaan nergens heen), dus hij vergelijkt het
+doel en niet de regeling.
 
 `plus=` bij `toestanden.py` is er sinds 23-09-2026: een batterij die door iets
 anders gestuurd wordt laat dat alleen in haar eigen entiteiten zien, en het

@@ -1164,15 +1164,20 @@ if (vl := v("klantwoning-herstart")) and (basis := v("klantwoning")):
     controle("herstart: geen enkele valse melding",
              not meldingen(vl, "niet lezen") and not meldingen(vl, "meldt al") and not meldingen(vl, "niets meer beslist"),
              f"{[m for _, m in vl.meldingen]}")
-    # Bekend en niet verholpen: na de herstart om 04:20 kent de coach het begin
-    # van de beurt niet meer en telt het verslag vanaf dat moment. Eerlijk, maar
-    # onvolledig. Zie de notities van 04-09-2026. De bijzin "en toen liep hij
-    # al" is er op 21-09-2026 uit gegaan; "sinds" doet hetzelfde werk.
-    controle("herstart: het verslag telt eerlijk vanaf het moment van instappen",
-             any("Sinds " in m for m in meldingen(vl, "is vol"))
-             and all("liep hij al" not in m and "Geladen van" not in m
-                     for m in meldingen(vl, "is vol")),
-             f"{meldingen(vl, 'is vol')}")
+    # Tot v0.98.0 kende de coach na de herstart van 04:20 het begin van de beurt
+    # niet meer en telde het verslag vanaf dat moment ("sinds ..."). Nu bewaart hij
+    # de beurt en is het verslag hetzelfde als zonder herstarts; alleen de
+    # verloren tijd mist per herstart wat er sinds de laatste opslag gebeurde,
+    # hooguit vijf minuten.
+    import re as _re_kh
+    met_kh, zonder_kh = meldingen(vl, "is vol"), meldingen(basis, "is vol")
+    kern_kh = lambda m: _re_kh.sub(r"is er \d+ minuten", "is er N minuten", m)
+    minuten_kh = lambda m: int((_re_kh.search(r"is er (\d+) minuten", m) or [0, 0])[1])
+    controle("herstart: het verslag gaat over de hele beurt, net als zonder herstarts",
+             len(met_kh) == 1 and len(zonder_kh) == 1 and "Geladen van" in met_kh[0]
+             and kern_kh(met_kh[0]) == kern_kh(zonder_kh[0])
+             and abs(minuten_kh(met_kh[0]) - minuten_kh(zonder_kh[0])) <= 5 * 5,
+             f"{met_kh} tegen {zonder_kh}")
 
 # Een sensor die wegvalt wordt na tien minuten gemeld, en als hij terug is ook.
 # De eigenaar op 04-09-2026: "wat als een sensor ineens niet meer beschikbaar is. Dat
@@ -1575,6 +1580,39 @@ if (vl := v("batterij-wisselende-last")):
     gaf = sum(-r[2] for r in vl.bat_verloop if r[2] < 0) * vl.stap_uur / 1000
     controle("wisselende last: en de basis van het huis komt wel uit de batterij",
              gaf >= 0.2, f"{gaf:.3f} kWh")
+
+# De nacht van 24 op 25-09-2026 in de eerste woning, met twee herstarts (v0.98.0).
+# Met v0.97.0 in het virtuele huis: om 23:30 tien minuten 6 A "net begonnen", van
+# 23:40 tot 00:22 niets ("wacht tot 01:00", met 16 A gerekend), om 00:23 weer de
+# klaar-tijdregel, vol om 05:33, en een verslag "sinds 23:30 ging er 48,3 kWh in, de
+# accu ging van 44 naar 94%" met "mogelijk staat er een laadgrens in de auto".
+if (vl := v("herstart-groep")) and (zonder := v("herstart-groep-zonder")):
+    import re as _re_hg
+    laden = [r for r in vl.regels if r.paal_w > 1000]
+    eerst, laatst = (laden[0].tijd, laden[-1].tijd) if laden else (None, None)
+    tussen = [r for r in vl.regels if eerst and eerst <= r.tijd <= laatst]
+    print(f"  herstart-groep: laden {eerst} tot {laatst}, vol {vl.klaar_op} (zonder herstarts {zonder.klaar_op}), "
+          f"{vl.wissels()} wissels (zonder {zonder.wissels()}), € {vl.kosten:.2f} (zonder € {zonder.kosten:.2f})")
+    controle("herstart-groep: na een herstart laadt hij gewoon door, geen 6 A 'net begonnen'",
+             not [r for r in tussen if "hold" in r.regel], f"{sorted({r.regel for r in tussen if 'hold' in r.regel})}")
+    controle("herstart-groep: de paal staat tussendoor niet stil",
+             all(r.paal_w > 1000 for r in tussen if r.regel.split('+')[0] not in ('complete',)), "")
+    controle("herstart-groep: vol op hetzelfde moment als zonder herstarts",
+             vl.klaar_op is not None and zonder.klaar_op is not None
+             and abs((vl.klaar_op - zonder.klaar_op).total_seconds()) <= 300, f"{vl.klaar_op} {zonder.klaar_op}")
+    controle("herstart-groep: en voor dezelfde prijs", abs(vl.kosten - zonder.kosten) <= 0.10,
+             f"€ {vl.kosten:.2f} tegen € {zonder.kosten:.2f}")
+    controle("herstart-groep: de opgegeven accustand blijft, ook als de paal na de herstart even niets zegt",
+             not [r for r in vl.regels if r.regel.startswith("no-soc") and r.tijd.hour != 22], "")
+    verslag = next((m for _, m in vl.meldingen if "is vol" in m or "laadt niet verder" in m), "")
+    geladen_hg = _re_hg.search(r"Geladen van \d\d:\d\d tot \d\d:\d\d, ([\d,]+) kWh", verslag)
+    net_hg = _re_hg.search(r"([\d,]+) kWh kwam van het net", verslag)
+    controle("herstart-groep: het verslag gaat over de hele beurt, vanaf het begin",
+             "Geladen van 22:3" in verslag and "van 40 naar" in verslag, verslag)
+    controle("herstart-groep: en de getallen in het verslag kloppen met elkaar",
+             geladen_hg is not None and net_hg is not None
+             and abs(float(geladen_hg.group(1).replace(",", ".")) - float(net_hg.group(1).replace(",", "."))) <= 0.3,
+             verslag)
 
 # "Anker mag zelf nul op de meter doen" (de eigenaar, 24-09-2026; v0.97.0).
 basis_zelf = v("batterij-paal-laadt")

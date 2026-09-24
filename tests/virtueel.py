@@ -936,6 +936,12 @@ class Scenario:
     # Wat "oven" aanzet, in watt; valt over de fasen zoals `Huis.verdeling`.
     # 5,5 kW met 80% op één fase is een warmtepomp zoals in de klantwoning.
     oven_w: float = 3000.0
+    # Een groep met een eigen zekering waar de paal op hangt (v0.75.0 in de
+    # coach, sinds v0.98.0 ook hier): de zekering in ampère, en wat de rest van
+    # die groep trekt, in watt op L1. Zoals de garage van de eerste woning: 3x16 A
+    # met een eigen kWh-meter. None is geen groep.
+    groep_amps: float | None = None
+    groep_last_w: float = 0.0
 
     def kopie(self, **wijzigingen) -> "Scenario":
         return dataclasses.replace(self, **wijzigingen)
@@ -1100,6 +1106,9 @@ E = {
     "max": "sensor.v_paal_max",
     "dyn": "sensor.v_paal_dyn",
     "circuit": "sensor.v_paal_circuit",
+    "g_l1": "sensor.v_groep_stroom_l1",
+    "g_l2": "sensor.v_groep_stroom_l2",
+    "g_l3": "sensor.v_groep_stroom_l3",
     "teller": "sensor.v_paal_teller",
     "zon": "sensor.v_zon",
     "afname": "sensor.v_afname",
@@ -1297,6 +1306,7 @@ def instellingen(s: Scenario) -> dict:
             "type": "laadpaal",
             "name": "Laadpaal",
             "brand": s.paal.merk,
+            **({"circuit": "garage"} if s.groep_amps is not None else {}),
             "controllable": s.paal_stuurbaar,
             "charge_mode": s.laadmodus,
             "continuous_amps": s.continu_amps,
@@ -1336,6 +1346,10 @@ def instellingen(s: Scenario) -> dict:
             "fuse_amps": s.zekering,
             "load_balancer": s.lastbewaker or s.equalizer,
             "balancer_entity": E["equalizer"] if s.equalizer else "",
+            "circuits": [] if s.groep_amps is None else [{
+                "id": "garage", "name": "Garage", "fuse_amps": s.groep_amps, "phases": 3, "parent": "",
+                "sensors": {f: {"current": E[f"g_{f}"]} for f in ("l1", "l2", "l3")},
+            }],
         },
         "sources": bronnen,
         "contract": contract,
@@ -1440,6 +1454,9 @@ class Wereld:
         nu = self.nu
         self.zon_w = self.zon.nu_kw(nu) * 1000
         self.huis_w = self.huis.watt(nu)
+        # De rest van de groep telt gewoon als huis: de meter ziet hem.
+        if self.s.groep_amps is not None:
+            self.huis_w += self.s.groep_last_w
         if self.oven_tot is not None and nu < self.oven_tot:
             self.huis_w += self.oven_w
         # De vaatwasser hangt op de eerste fase en telt bij het huis: de meter
@@ -1572,6 +1589,14 @@ class Wereld:
             # Zoals de echte: deze knop leest niet terug wat erin staat.
             z(E["bat_stuur"], {"state": "0", "attributes": {
                 "unit_of_measurement": "W", "max_charge_power": 7000, "max_discharge_power": 2500}})
+        if self.s.groep_amps is not None:
+            # De meter van de groep: de paal op zijn fasen, en de rest van de
+            # groep op L1.
+            for i, naam in enumerate(("l1", "l2", "l3")):
+                a = (self.auto.trekt_amps if i < self.paal_fasen else 0.0)
+                if i == 0:
+                    a += self.s.groep_last_w / VOLT
+                z(E[f"g_{naam}"], weg if p1_weg else w(f"{a:.2f}", "A"))
         for naam, a in zip(("l1", "l2", "l3"), self.fase_amps()):
             z(E[naam], weg if p1_weg else w(f"{a:.2f}", "A"))
 
