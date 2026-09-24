@@ -197,6 +197,9 @@ _BATTERY = _schema(
         # er terugkomt als de coach stopt.
         vol.Optional("control_mode", default=""): str,
         vol.Optional("idle_mode", default=""): str,
+        # De batterij doet zelf nul op de meter, met een eigen meter in de
+        # meterkast (v0.97.0); de coach neemt het alleen over voor de uitzonderingen.
+        vol.Optional("self_zero", default=False): bool,
     }
 )
 

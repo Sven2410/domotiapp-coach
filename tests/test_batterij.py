@@ -253,7 +253,8 @@ controle("anderhalve dag kwartierprijzen binnen een seconde", duur < 1.0, f"{duu
 
 def draai(huis_w, stand=NUL, seconden=600, meter_elke=5, volgt_na=5, power_w=0.0,
           soc=50.0, meter_valt_weg=None, ruis=0.0, zaad=1,
-          sensor_na=0, sensor_aanloop=False, sensor_echo=0, geen_sensor=False, volgt_niet=False):
+          sensor_na=0, sensor_aanloop=False, sensor_echo=0, geen_sensor=False, volgt_niet=False,
+          regelaar=None):
     """Een huis, een meter en een batterij, per seconde.
 
     De meter meldt elke `meter_elke` seconden, de batterij voert een opdracht
@@ -267,7 +268,7 @@ def draai(huis_w, stand=NUL, seconden=600, meter_elke=5, volgt_na=5, power_w=0.0
     vermogenssensor, `volgt_niet` een batterij die niets met een opdracht doet.
     """
     rnd = random.Random(zaad)
-    regelaar = Regelaar()
+    regelaar = regelaar or Regelaar()
     b = anker(soc=soc)
     besluit = Besluit(stand, power_w=power_w)
     nu = DAG.replace(hour=12)
@@ -605,6 +606,57 @@ controle("het besluit draagt de hulp in zijn uren, en wat er aan de accukant uit
 controle("en de zin tot morgenvroeg noemt de auto", "de auto krijgt er" in plan33.plan, plan33.plan)
 zonder33 = bat.plan_batterij(N33, [], VAST, verwachting(huis=0.2, dag=DAG.replace(day=23)), anker(soc=78.0, auto_boven=70.0, nacht=False, max_discharge_w=3500.0))
 controle("zonder plan van de paal verandert er niets", zonder33.auto_weg == 0.0 and all(u.auto_kwh == 0 for u in zonder33.uren), "")
+
+
+print("34. geduld met een last die korter duurt dan de lus (24-09-2026, de eerste woning)")
+# Om de dertig seconden tien seconden 490 W bovenop 250 W, de sensor van de Anker, en
+# een batterij die na vijf seconden volgt. De regelaar van v0.96.0 stond daar in
+# tegenfase: 07:44:06 opdracht 688, 07:44:14 de batterij op 681, 07:44:16 de last weg.
+def wissel34(s):
+    return 250.0 + (490.0 if s % 30 < 10 else 0.0)
+
+
+r34 = Regelaar()
+op34, meter34, af34, lev34 = draai(wissel34, seconden=1800, regelaar=r34, **ANKER)
+print(f"  {len(op34)} opdrachten in een half uur, {af34:.3f} kWh van het net, {lev34:.3f} kWh terug")
+eigen34 = bat.Regelaar.geduldig
+bat.Regelaar.geduldig = lambda self, now: False
+oud34, _, oudaf34, oudlev34 = draai(wissel34, seconden=1800, **ANKER)
+bat.Regelaar.geduldig = eigen34
+print(f"  zonder geduld: {len(oud34)} opdrachten, {oudaf34:.3f} kWh van het net, {oudlev34:.3f} kWh terug")
+controle("zonder geduld stond hij in tegenfase, zoals die nacht", len(oud34) >= 60, f"{len(oud34)}")
+controle("met geduld een handvol opdrachten in een half uur", len(op34) <= 6, f"{op34}")
+controle("hij dekt de basis en laat de last gaan", op34 and abs(op34[-1][1] + 250.0) <= 60, f"{op34}")
+controle("en er gaat bijna niets meer naar het net", lev34 <= 0.01, f"{lev34:.3f} tegen {oudlev34:.3f}")
+controle("aan het eind heeft hij nog steeds geduld", r34.geduldig(DAG.replace(hour=12) + dt.timedelta(seconds=1800)), f"{r34.geduldig_tot}")
+
+
+def ketel34(s):
+    if s < 600:
+        return wissel34(s)
+    return 250.0 + (2000.0 if 600 <= s < 780 else 0.0)
+
+
+op34b, _, _, _ = draai(ketel34, seconden=900, regelaar=Regelaar(), **ANKER)
+na34b = [(s, w) for s, w in op34b if s >= 600]
+print(f"  een waterkoker van 2 kW met geduld: {na34b}")
+controle("een waterkoker die blijft volgt hij na een halve minuut, niet eerder",
+         na34b and 630 <= na34b[0][0] <= 650 and na34b[0][1] <= -2000, f"{na34b}")
+controle("en als hij uitgaat meteen terug", any(780 <= s <= 800 and w > -300 for s, w in na34b), f"{na34b}")
+
+
+def later34(s):
+    if s < 300:
+        return wissel34(s)
+    return 250.0 + (2000.0 if s >= 1500 else 0.0)
+
+
+op34c, _, _, _ = draai(later34, seconden=1560, regelaar=Regelaar(), **ANKER)
+na34c = [(s, w) for s, w in op34c if s >= 1500]
+controle("een kwartier zonder korte lasten en het geduld is op: de waterkoker meteen",
+         na34c and na34c[0][0] <= 1505 and na34c[0][1] <= -2000, f"{na34c}")
+controle("een oven op zijn thermostaat (45 s) volgt hij zonder geduld, zoals altijd",
+         af18 < zonder18 * 0.35, f"{af18:.3f}")
 
 
 print()

@@ -178,6 +178,85 @@ test_batterij.py met de getallen van die nacht. Wat er overblijft is één
 opdracht per puls en één terug: de batterij reageert op een puls die allang
 voorbij is, en dat is geen slinger maar de vertraging van de batterij zelf.
 
+**Geduld met een last die korter duurt dan de lus** (v0.97.0). In de nacht van
+23 op 24-09-2026 ging in de eerste woning om de dertig seconden een last van
+490 W tien seconden aan (een broodbakmachine, denkt de bewoner), van 03:50 tot
+08:20. De lus via Home Assistant is daar te traag voor: de P1 komt eens per vijf
+seconden binnen, de coach schrijft in dezelfde seconde, en de batterij voert
+het drie tot acht seconden later uit (de kWh-meter op de accu: 07:44:06 de meter
++468 W en de opdracht 688, 07:44:14 de accu op 681, 07:44:16 de last weg en de
+meter -511 W, opdracht 197, 07:44:19 nog 681, 07:44:24 op 194). De regelaar stond
+in tegenfase: tot 210 opdrachten per uur, de P1 43% van de tijd binnen 50 W, en
+een derde van wat de accu gaf ging naar het net. De bewoner: "je zou ervoor
+kunnen kiezen om de accu pas bij te laten springen als een load minimaal 30 of
+60 seconden boven een bepaalde waarde komt." De eigenaar: "ja bouw."
+
+Niet altijd wachten, want dat meet slechter: `_geduld` in de `Regelaar` gaat pas
+aan als de regelaar net een grote last achterna ging die binnen `KORTE_LAST`
+(30 s) alweer weg was (`_tegenfase`), houdt het `GEDULD_DUUR` (een kwartier) vol,
+en verlengt het zolang er grote lasten komen en gaan die korter duren. Met
+geduld volgt hij van een grote sprong (boven `GROOT_W`) alleen wat er
+`VOLG_WACHT` (30 s) lang de hele tijd was; een kleine stap en terug naar nul gaan
+zoals altijd. In het virtuele huis, oud tegen altijd wachten tegen geduld na
+tegenfase:
+
+| scenario | oud | altijd 30 s wachten | geduld na tegenfase |
+|---|---|---|---|
+| `batterij-wisselende-last` (490 W, 10 s per 30 s) | 240 opdr/h, P1 43%, 0,20 kWh accu naar net | 1 opdr/h, 66%, 0,01 | 2 opdr/h, 67%, 0,02 |
+| `batterij-klapperlast` (2 kW, 5 s per 20 s) | 181 opdr/h, 0,51 kWh accu naar net | 2, 0,02 | 3, 0,02 |
+| `batterij-sprong` (oven 3 kW, 20 min) | 0,387 kWh van het net | 0,407 | 0,387 |
+| `batterij-uurlast` (2,5 kW, 40 s per uur, een dag) | 0,174 kWh van het net | 0,467 | 0,174 |
+| `batterij-vast-zon` (een gewone dag) | 0,076 kWh van het net | 0,084 | 0,076 |
+
+Altijd wachten kost bij elke lange last de eerste halve minuut, en maakt het bij
+een last net boven de wachttijd erger: 1000 W, 25 s per minuut, met 20 s wachten
+gaf 120 opdrachten en 0,26 kWh accu naar het net, meer dan zonder wachten. Een oven
+op zijn thermostaat (45 s aan, 45 s uit) volgt hij met geduld na tegenfase nog
+precies zoals vroeger. In geld is het dicht bij quitte: in de wisselende last
+gaf de accu 0,25 kWh meer voor 0,065 kWh minder inkoop, dus volgen loont alleen
+als een kWh in de accu minder dan acht cent waard is. Het gaat vooral om de
+tweehonderd opdrachten per uur. Proef 34 in test_batterij.py, scenario
+`batterij-wisselende-last` (`Huis(puls=(490, 10, 0.5))`).
+
+**De batterij doet zelf nul op de meter** (v0.97.0). De eigenaar op 24-09-2026:
+"anker mag zelf nul op de meter doen", en erbij: "ook goed voor een vast
+contract, want dan heb je niks aan het strategisch inkopen." De Anker van de
+eerste woning heeft een eigen P1 die alleen met de batterij praat; in zijn eigen
+stand stond hij op 22-09-2026 om 21:24:39 binnen vier seconden op 812 W na een
+sprong van 1438 W, en een piek van minder dan vijf seconden liet hij liggen. Dat
+kan geen lus via Home Assistant.
+
+Per batterij het vinkje "De batterij doet zelf nul op de meter" (`self_zero` in
+`_BATTERY`, websocket.py), alleen bruikbaar met een modus-entiteit en allebei de
+modi ingevuld (`_zelf_instelling`). Is het plan gewoon nul op de meter (ook
+`auto-helpen`), dan zet de coach hem in `idle_mode` en schrijft hij verder niets
+(`_async_zelf_wissel` in coach.py, vanuit `_async_regel`, dus op het tempo van de
+meter). Hij neemt het meteen over, op 0 W in `control_mode`, zodra
+`_zelf_niet` een reden heeft: een andere stand (laden van het net, handelen,
+standby, de paal die laadt), de vakantiestand, geen accustand, de reserve voor
+noodstroom als die boven de eigen ondergrens van de batterij ligt, of minder dan
+`ZELF_ZEKERING_W` (500 W) ruimte op de krapste zekering in zijn keten. Teruggeven
+doet hij pas als dat `ZELF_WACHT` (vijf minuten) zo bleef. Allebei de kanten op
+eerst 0 W in het register, zodat een overname nooit op een oude opdracht begint.
+Elke wissel gaat in de geschiedenis ("doet zelf nul op de meter", "de coach
+neemt het over, want de laadpaal laadt"). Iets anders dat stuurt herkent hij
+zoals altijd, met de eigen stand als wat de coach zette. Het kasboek en de
+rest van de coach (`_batterij_geregeld_w`) rekenen dan met de sensor, want er is
+geen opdracht. Bij een herstart gaat hij ook uit zijn eigen stand naar 0 W in de
+externe stand, "bij herstart accu op 0 en dan pas kijken". Op de kaart "Wie
+regelt: de batterij zelf" (`self_zero` in de stand, `batteryRows`).
+
+Het virtuele huis kent `Batterij.eigen_nul` (een eigen lus van 2 s plus 2 s; een
+opdracht aan de knop doet hij in die stand niet) en `zelf_nul` (het vinkje).
+Scenario `batterij-zelf-nul` (de avond van `batterij-paal-laadt`): de paal begint
+om 20:01:15 en de coach neemt het in diezelfde ronde over, de auto is om 04:21
+vol en om 04:26 doet de batterij het weer zelf; € 5,21 en 53% aan het eind, net
+als wanneer de coach alles regelt, met 4 opdrachten in plaats van 14. Scenario
+`batterij-zelf-wisselend`: stond hij nog in de externe stand, dan zet de coach
+hem om en schrijft daarna niets meer. Proef 106 in test_coach.py. **Nog niet aan
+de echte Anker gezien**: hoe snel hij van stand wisselt, en of hij bij de
+overname echt op de 0 W begint die net in het register ging.
+
 **De batterij helpt de auto met wat er echt over is, en de nachtstrategie**
 (v0.90.0). De bewoner van de eerste woning op 23-09-2026, naar evcc: "bij laden van
 de auto mag alle batterijcapaciteit boven X% gebruikt worden." De eigenaar: de

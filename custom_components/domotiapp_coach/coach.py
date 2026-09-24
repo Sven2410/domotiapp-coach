@@ -50,6 +50,7 @@ from .batterij import (
     Besluit,
     MAX_LADEN,
     NETLADEN,
+    NUL,
     STAND_NAMEN,
     VOL_MARGE,
     Batterij,
@@ -197,6 +198,21 @@ REGEL_TIK = timedelta(seconds=5)
 # batterij los (iets anders stuurt), en na zoveel tijd probeert hij het weer.
 VREEMD_RONDEN = 2
 VREEMD_PAUZE = timedelta(hours=1)
+# "De batterij doet zelf nul op de meter" (v0.97.0). De eigenaar op 24-09-2026:
+# "anker mag zelf nul op de meter doen", en erbij: "ook goed voor een vast
+# contract, want dan heb je niks aan het strategisch inkopen." Een batterij met
+# een eigen meter in de meterkast volgt het huis in een paar seconden; via
+# Home Assistant is dat vijf tot dertien (zie `VOLG_WACHT` in batterij.py). Is
+# het plan gewoon nul op de meter, dan zet de coach hem in zijn eigen stand en
+# kijkt hij mee. Voor alles wat de batterij zelf niet weet neemt hij het meteen
+# over: laden van het net, handelen, een laadpaal die laadt, de vakantiestand,
+# de reserve voor noodstroom, en een zekering waar minder dan
+# `ZELF_ZEKERING_W` ruimte op over is. Teruggeven doet hij pas als dat
+# `ZELF_WACHT` zo gebleven is, zodat een plan dat op de rand staat niet elke
+# minuut de modus omzet.
+ZELF_WACHT = timedelta(minutes=5)
+ZELF_ZEKERING_W = 500.0
+ZELF_MARGE = 1.0
 # Hoe vaak wat de batterij verdiende naar de opslag gaat, en hoeveel dagen
 # daarvan bewaard blijven: ruim een jaar, zodat de terugverdientijd zomer en
 # winter allebei kent.
@@ -3849,7 +3865,8 @@ class ChargerCoach:
         """
         gemeten = self._batterij_w(device)
         sessie = self._batterij.get(device.get("id", ""))
-        if sessie is not None and sessie.get("stuurt"):
+        # Doet hij zelf nul op de meter, dan is er geen opdracht om op te rekenen.
+        if sessie is not None and sessie.get("stuurt") and not sessie.get("zelf"):
             return sessie["regelaar"].vermogen_w(gemeten)
         return gemeten
 
@@ -4310,7 +4327,9 @@ class ChargerCoach:
         # `VREEMD_PAUZE` opnieuw.
         if stuurt and sessie.get("stuurt"):
             modus_entity = entities.get("mode")
-            wil = ((device.get("battery") or {}).get("control_mode") or "").strip()
+            # Doet hij zelf nul op de meter, dan zette de coach zijn eigen stand.
+            welke = "idle_mode" if sessie.get("zelf") else "control_mode"
+            wil = ((device.get("battery") or {}).get(welke) or "").strip()
             staat = self.hass.states.get(modus_entity) if modus_entity else None
             anders = bool(wil) and staat is not None and staat.state not in ("unknown", "unavailable") and staat.state != wil
             sessie["modus_anders"] = sessie.get("modus_anders", 0) + 1 if anders else 0
@@ -4336,12 +4355,24 @@ class ChargerCoach:
         self.state[device_id]["foreign"] = sessie.get("vreemd") is not None
 
         if stuurt and not sessie.get("stuurt"):
-            await self._async_batterij_modus(device, "control_mode")
+            if self._zelf_instelling(device):
+                # Welke modus het wordt kiest `_async_regel` meteen hieronder.
+                sessie["zelf"] = None
+            else:
+                await self._async_batterij_modus(device, "control_mode")
+                sessie["zelf"] = False
             sessie["stuurt"] = True
         elif not stuurt and sessie.get("stuurt"):
             await self._async_batterij_loslaten(device)
         if stuurt:
             await self._async_regel(device_id, settings, device)
+        zelf = bool(stuurt and sessie.get("zelf"))
+        self.state[device_id]["self_zero"] = zelf
+        if zelf:
+            self.state[device_id]["reason"] = (
+                besluit.reason + " De batterij doet dat zelf, met zijn eigen meter."
+            ).strip()
+            self.state[device_id]["setpoint_w"] = None
 
     async def _async_regel(
         self, device_id: str, settings: dict[str, Any], device: dict[str, Any]
@@ -4365,12 +4396,14 @@ class ChargerCoach:
             if soc is not None:
                 b.soc = soc
 
-            # Het kasboek: wat de batterij sinds de vorige stap opleverde.
+            # Het kasboek: wat de batterij sinds de vorige stap opleverde. Doet
+            # hij zelf nul op de meter, dan is de sensor de enige bron.
             vorige = sessie.get("geteld_op")
             sessie["geteld_op"] = nu
             if vorige is not None and net_w is not None:
                 seconden = min(60.0, max(0.0, (nu - vorige).total_seconds()))
-                euro = verdiend(net_w, regelaar.vermogen_w(batterij_w),
+                bat_w = batterij_w if sessie.get("zelf") else regelaar.vermogen_w(batterij_w)
+                euro = verdiend(net_w, bat_w,
                                 sessie.get("koop"), sessie.get("terug"), seconden)
                 if euro is not None:
                     dag = nu.date().isoformat()
@@ -4385,13 +4418,20 @@ class ChargerCoach:
                 grens=sessie.get("auto_grens"), helpt=bool(sessie.get("helpt")),
             )
             sessie["helpt"] = besluit.rule == "auto-helpen"
+            ruimte_w = self._laadruimte_w(
+                settings, device, batterij_w, self._hogere_toezeggingen(settings, device)
+            )
+            if self._zelf_instelling(device) or sessie.get("zelf"):
+                waarom = self._zelf_niet(device, besluit, b, batterij_w, ruimte_w)
+                await self._async_zelf_wissel(device, sessie, nu, waarom)
+                if sessie.get("zelf"):
+                    return
+                regelaar = sessie["regelaar"]
             opdracht = regelaar.stap(
                 nu, net_w=net_w, net_op=net_op, batterij_w=batterij_w,
                 besluit=besluit, b=b,
                 doel_w=regelaar.doel_w(sessie.get("koop"), sessie.get("terug")),
-                ruimte_w=self._laadruimte_w(
-                    settings, device, batterij_w, self._hogere_toezeggingen(settings, device)
-                ),
+                ruimte_w=ruimte_w,
             )
             if opdracht is not None:
                 await self._async_batterij_zetten(device, opdracht)
@@ -4401,6 +4441,69 @@ class ChargerCoach:
             _LOGGER.exception("de regelaar van %s struikelde", device_id)
         finally:
             sessie["bezig"] = False
+
+    @staticmethod
+    def _zelf_instelling(device: dict[str, Any]) -> bool:
+        """Of de bewoner de batterij zelf nul op de meter laat doen, en dat kan."""
+        eigen = device.get("battery") or {}
+        return bool(
+            eigen.get("self_zero") and (device.get("entities") or {}).get("mode")
+            and (eigen.get("idle_mode") or "").strip() and (eigen.get("control_mode") or "").strip()
+        )
+
+    def _zelf_niet(
+        self, device: dict[str, Any], besluit: Besluit, b: Batterij,
+        batterij_w: float | None, ruimte_w: float | None,
+    ) -> str | None:
+        """Waarom de batterij het nu niet zelf mag doen, of None als het mag."""
+        if not self._zelf_instelling(device):
+            return "je hebt het uitgezet"
+        if besluit.stand != NUL:
+            if besluit.rule == "paal-laadt":
+                return "de laadpaal laadt"
+            return f"het plan zegt {STAND_NAMEN.get(besluit.stand, besluit.stand).lower()}"
+        if self._vakantie(device) is not None:
+            return "de vakantiestand staat aan"
+        if b.soc is None:
+            return "de accustand is niet bekend"
+        # Zijn eigen ondergrens kent hij; een hogere reserve van de bewoner niet.
+        if b.bodem > b.soc_min and b.soc <= b.bodem + ZELF_MARGE:
+            return "hij zit bij de reserve voor noodstroom"
+        if ruimte_w is not None and ruimte_w - max(0.0, batterij_w or 0.0) < ZELF_ZEKERING_W:
+            return "de zekering wordt krap"
+        return None
+
+    async def _async_zelf_wissel(
+        self, device: dict[str, Any], sessie: dict[str, Any], nu: datetime, waarom: str | None
+    ) -> None:
+        """De batterij in zijn eigen stand zetten, of hem overnemen.
+
+        Overnemen gaat meteen, teruggeven pas na `ZELF_WACHT`. In allebei de
+        richtingen eerst 0 W in het register: in zijn eigen stand doet de
+        batterij daar niets mee, en bij het overnemen begint hij dan op nul in
+        plaats van op een oude opdracht.
+        """
+        naam = device.get("name") or "De batterij"
+        zelf = sessie.get("zelf")
+        if waarom is None:
+            sessie.setdefault("zelf_sinds", nu)
+            if zelf is None or (zelf is False and nu - sessie["zelf_sinds"] >= ZELF_WACHT):
+                await self._async_batterij_zetten(device, 0.0)
+                await self._async_batterij_modus(device, "idle_mode")
+                sessie["zelf"] = True
+                sessie["regelaar"] = Regelaar()
+                await self._async_noteer(f"{naam} doet zelf nul op de meter, met zijn eigen meter.", nu)
+            return
+        sessie.pop("zelf_sinds", None)
+        if zelf is False:
+            return
+        await self._async_batterij_zetten(device, 0.0)
+        await self._async_batterij_modus(device, "control_mode")
+        # Hij staat nu op nul; de regelaar wacht tot dat te zien is.
+        sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=nu, bezonken=False)
+        sessie["zelf"] = False
+        if zelf:
+            await self._async_noteer(f"{naam}: de coach neemt het over, want {waarom}.", nu)
 
     async def _async_regel_tik(self, _now: datetime | None = None) -> None:
         """De regelaar van elke gestuurde batterij één stap laten doen."""
@@ -4534,14 +4637,21 @@ class ChargerCoach:
         externe modus (v0.96.0); zie `_async_bij_stop`.
         """
         sessie = self._batterij.get(device.get("id", ""))
+        zelf = bool(sessie and sessie.get("zelf"))
         if sessie is not None:
             sessie["stuurt"] = False
+            sessie["zelf"] = None
             sessie["regelaar"] = Regelaar()
             if sessie.get("settings") is not None:
                 await self._async_laadgrens_terug(sessie["settings"], device)
         await self._async_batterij_zetten(device, 0.0)
         if not herstart:
             await self._async_batterij_modus(device, "idle_mode")
+        elif zelf:
+            # Deed hij zelf nul op de meter, dan ook bij een herstart op 0 W in
+            # de externe stand: "bij herstart accu op 0 en dan pas kijken" (de
+            # eigenaar, 24-09-2026). Na de herstart kiest de coach opnieuw.
+            await self._async_batterij_modus(device, "control_mode")
 
     async def _async_batterijen_los(self, herstart: bool = False) -> None:
         """Bij het stoppen van de coach: elke batterij die hij stuurde teruggeven."""

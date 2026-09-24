@@ -257,6 +257,12 @@ export function batteryRows(besluit) {
   if (!besluit || besluit.kind !== "batterij") return [];
   const rijen = [{ label: "Stand", text: besluit.mode_name ?? besluit.mode ?? "—" }];
 
+  // Sinds v0.97.0 kan de batterij het zelf doen, met een eigen meter; dan is er
+  // geen opdracht van de coach en zegt de kaart wie het doet.
+  if (besluit.applied && besluit.self_zero) {
+    rijen.push({ label: "Wie regelt", text: "de batterij zelf, met zijn eigen meter; de coach kijkt mee" });
+  }
+
   if (besluit.applied && Number.isFinite(besluit.setpoint_w)) {
     const w = Math.round(besluit.setpoint_w);
     rijen.push({
