@@ -1005,6 +1005,10 @@ class ChargerCoach:
         # `_soc_bezonken`: een accustand van vóór dit moment hoort nog bij het
         # laden en zegt niets over waar de auto geëindigd is.
         self._klaar_sinds: dict[str, datetime] = {}
+        # Palen zonder eigen "completed" (Alfen) die de coach klaar verklaarde.
+        # Klaar blijft klaar tot de auto weer stroom neemt of de kabel eruit
+        # gaat. Zie `_status_afgeleid`.
+        self._afgeleid_klaar: set[str] = set()
         # De accustand zoals `_read` hem deze ronde zag, en wanneer die voor het
         # laatst veranderde. Los van de sessie, want die wordt later in de ronde
         # bijgewerkt en is hier dus een ronde te oud.
@@ -1337,12 +1341,22 @@ class ChargerCoach:
             return ""  # niets zeggen: dan telt wat de paal het laatst wél zei
         if verbonden == "off":
             self._stil_sinds.pop(device_id, None)
+            self._afgeleid_klaar.discard(device_id)
             return "disconnected"
         laadt = _text(self.hass, entities.get("charging")).strip().lower()
         modus = _text(self.hass, entities.get("mode3")).strip().upper()
         if laadt == "on" or modus.startswith(("C", "D")):
             self._stil_sinds.pop(device_id, None)
+            self._afgeleid_klaar.discard(device_id)
             return "charging"
+        # Klaar blijft klaar (v0.99.0). Na de 0 A van de coach staat de paal op
+        # B1, "wacht op start", en tot v0.99.0 was de auto dan weer niet klaar: in
+        # de eerste woning op 25-09-2026 van 06:06 tot de ochtend elke zestien
+        # minuten een kwartier 13 A aanbieden en een minuut 0, voor een Tesla die
+        # op zijn eigen laadgrens stond. Alleen de ene herstart (`_read`) en een
+        # auto die weer stroom neemt of de kabel die eruit gaat maken het los.
+        if device_id in self._afgeleid_klaar:
+            return "completed"
         if modus.startswith("B1"):
             self._stil_sinds.pop(device_id, None)
             return "awaiting_start"
@@ -1350,6 +1364,7 @@ class ChargerCoach:
         if limiet is not None and limiet >= MIN_AMPS:
             sinds = self._stil_sinds.setdefault(device_id, now)
             if now - sinds >= HERSTART_WACHT:
+                self._afgeleid_klaar.add(device_id)
                 return "completed"
         else:
             self._stil_sinds.pop(device_id, None)
@@ -5927,6 +5942,13 @@ class ChargerCoach:
         if charger.complete and gedaan is None and bezonken and self._niet_vol(car):
             charger.complete = False
             self._herstart_open.add(device_id)
+            # De herstart is een nieuw aanbod (v0.99.0): de auto krijgt weer een
+            # kwartier voordat een Alfen klaar heet, en de melding "neemt al
+            # twintig minuten geen stroom af" telt vanaf nu en niet vanaf het
+            # moment dat de auto zelf stopte.
+            self._afgeleid_klaar.discard(device_id)
+            self._stil_sinds.pop(device_id, None)
+            self._asking_since.pop(device_id, None)
         else:
             self._herstart_open.discard(device_id)
 
@@ -6927,6 +6949,14 @@ class ChargerCoach:
             "kwijt": {k: round(v, 2) for k, v in (sessie.get("kwijt") or {}).items()},
             "gemeld": sorted(str(x) for x in sessie.get("gemeld") or set()),
             "ingestapt": bool(sessie.get("ingestapt")),
+            # Een Alfen die klaar is, en wanneer de ene herstart gestuurd is
+            # (v0.99.0): anders begint na een herstart van Home Assistant de
+            # lus van "klaar" en "weer aanbieden" opnieuw.
+            "klaar": device_id in self._afgeleid_klaar,
+            "herstart_op": (
+                self._herstart_gedaan[device_id].replace(microsecond=0).isoformat()
+                if self._herstart_gedaan.get(device_id) else None
+            ),
         }
 
     def _beurt_schrijven(self, entry: dict[str, Any]) -> None:
@@ -7234,6 +7264,10 @@ class ChargerCoach:
                     hervat = self._hervat_uit(entry["session"])
                     if hervat is not None:
                         self._hervat[device_id] = hervat
+                        if hervat.get("klaar"):
+                            self._afgeleid_klaar.add(device_id)
+                        if hervat.get("herstart_op") is not None:
+                            self._herstart_gedaan[device_id] = hervat["herstart_op"]
         except Exception:  # noqa: BLE001 - zonder geschiedenis begint hij gewoon opnieuw
             _LOGGER.exception("kon de lopende laadbeurten niet lezen")
 
@@ -7271,6 +7305,8 @@ class ChargerCoach:
             "kwijt": {str(k): float(v) for k, v in (bewaard.get("kwijt") or {}).items()},
             "gemeld": set(bewaard.get("gemeld") or []),
             "ingestapt": bool(bewaard.get("ingestapt")),
+            "klaar": bool(bewaard.get("klaar")),
+            "herstart_op": tijd(bewaard.get("herstart_op")),
         }
 
     def _bijhouden(
@@ -7418,11 +7454,16 @@ class ChargerCoach:
             # of twee, en die minuten zag het plafond niet. In het virtuele
             # huis was het verschil tien procent, en dat was precies het
             # kwartier waarmee hij de klaar-tijd miste.
+            # Een auto die niets neemt terwijl de coach aanbiedt, of die klaar is,
+            # zegt niets over de zekering (v0.99.0): dan telt wat de zekering
+            # toeliet en niet de nul die er liep. Na "klaar" zakte het in de
+            # eerste woning op 25-09-2026 van 12 naar "gemiddeld 7 A over".
+            auto_neemt_niets = charger.complete or "waiting-for-car" in decision.rule
             if grid is not None:
                 plafond = ceiling_amps(grid, car, charger)
                 if plafond < MIN_AMPS:
                     gemeten = 0.0
-                elif decision.charge and decision.amps >= plafond:
+                elif decision.charge and decision.amps >= plafond and not auto_neemt_niets:
                     gemeten = min(float(plafond), max(0.0, charger.actual_amps))
                 else:
                     gemeten = float(plafond)
@@ -7736,7 +7777,7 @@ class ChargerCoach:
             gemeld.add("stil")
             minuten = int((now - sinds).total_seconds() // 60)
             stand = (
-                f" Hij staat op {int(car.soc_percent)}%."
+                f" Hij staat op {round(car.soc_percent)}%."
                 if car.soc_percent is not None
                 else ""
             )
@@ -7755,7 +7796,7 @@ class ChargerCoach:
         # wil je weten dat er iemand iets deed.
         if device_id in self._herstart_melden:
             self._herstart_melden.discard(device_id)
-            stand = f" {int(car.soc_percent)}%" if car.soc_percent is not None else ""
+            stand = f" {round(car.soc_percent)}%" if car.soc_percent is not None else ""
             # Waar hij naartoe moest, als dat niet gewoon vol is. Zonder dat
             # leest "dat is niet vol" bij een doel van 90% als een coach die de
             # instelling niet kent.
@@ -7800,11 +7841,11 @@ class ChargerCoach:
             if car.soc_percent is None or (heel and doel_bereikt(car)):
                 klaar = f"{wie} is vol."
             elif doel_bereikt(car):
-                klaar = f"{wie} staat op {int(car.soc_percent)}%, en verder hoefde hij niet."
+                klaar = f"{wie} staat op {round(car.soc_percent)}%, en verder hoefde hij niet."
             else:
                 klaar = (
                     f"{wie} laadt niet verder en staat op "
-                    f"{int(car.soc_percent)}%. Mogelijk staat er een laadgrens in "
+                    f"{round(car.soc_percent)}%. Mogelijk staat er een laadgrens in "
                     "de auto."
                 )
             # Is de coach midden in de laadbeurt ingestapt, dan weet hij niet
@@ -7850,7 +7891,7 @@ class ChargerCoach:
 
         gemeld.add("laat")
         stand = (
-            f" Hij staat nu op {int(car.soc_percent)}%."
+            f" Hij staat nu op {round(car.soc_percent)}%."
             if car.soc_percent is not None
             else ""
         )

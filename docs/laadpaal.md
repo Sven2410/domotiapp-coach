@@ -471,6 +471,27 @@ klaar-tijdregel is dezelfde. Met de controles van v0.98.0 vallen er zes om op
 v0.97.0. Proef 68 in test_planner.py, proef 107 in test_coach.py, de kop van de
 pop-up in test_rapport.mjs.
 
+## Na de nacht van 25-09-2026 (v0.99.0)
+
+Vier dingen die de nacht met de schaduw liet zien, en de eigenaar: "bouw alles maar."
+
+- **Zo weer verder** (`DOORLADEN_BINNEN`, vijf minuten, in `_keep_alive`). Het vasthouden liep
+  om 01:58:57 af, een minuut voor het blok van 02:00; de auto stond die minuut stil en moest
+  daarna weer gewekt worden. Begint het volgende laadblok zo, dan laadt hij tot dan door op de
+  laagste stand ("Om 02:00 begint het volgende laaduur, dus hij laadt tot dan door"). Daarvoor
+  draagt een besluit om te wachten nu het begin van dat blok (`starts_at`, net als de vaatwasser).
+- **Een rest van niets is klaar**: onder `SCHIJF_MINIMUM` (tien wattuur) kiest `goedkoopste`
+  niets meer, en dan hield hij op 24-09-2026 om 02:48 een minuut 6 A vast met "het is nu niet
+  het goedkoopste moment" voor een auto die op zijn doel stond (`_decide`).
+- **Afronden en niet afkappen**: "staat op 92%" en "ging naar 93%" stonden in één verslag.
+  `klaar_zin` en de meldingen in coach.py ronden nu af, net als `_beurt_cijfers`.
+- **Het plafond telt de zekering bij een auto die niets neemt** (`_bijhouden`). Vroeg de coach
+  het volle plafond, dan telde wat er liep; bij een auto die klaar is of niets neemt was dat nul,
+  en na "klaar" zakte het van 12 naar "gemiddeld 7 A over". Een paal die tegengehouden wordt
+  (de Equalizer) telt nog steeds wat er liep.
+
+Proef 69 in test_planner.py, proef 108 in test_coach.py.
+
 ## Het merk van de auto, en een Tesla die slaapt
 
 Sinds 22-09-2026 (v0.76.0) heeft een autoprofiel een merk: Ford of Tesla

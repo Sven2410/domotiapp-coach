@@ -227,6 +227,23 @@ if (va := v("alfen-doel-80")) and (vz := v("doel-80")):
     controle("alfen doel 80: evenveel geladen als aan een Easee",
              abs(va.geladen_kwh - vz.geladen_kwh) < 0.3, f"alfen {va.geladen_kwh:.2f}, easee {vz.geladen_kwh:.2f}")
 
+# De auto stopt zelf op 80% aan een Alfen. Met v0.98.0 in het virtuele huis: vanaf 13:00
+# de hele nacht elke zeventien minuten een kwartier 16 A aanbieden en een minuut 0, zoals
+# in de eerste woning op 25-09-2026 met de Tesla. Nu: een kwartier, één herstart, het
+# verslag, en dan klaar tot de ochtend. Net als aan een Easee.
+if (va := v("alfen-laadgrens-80")) and (ve := v("laadgrens-80")):
+    verslag_al = next((t for t, m in va.meldingen if "laadt niet verder" in m), None)
+    na_al = [r for r in va.regels if verslag_al is not None and r.tijd > verslag_al]
+    print(f"  alfen-laadgrens-80: verslag {verslag_al}, daarna {sum(1 for r in na_al if r.amps > 0)} minuten aanbod")
+    controle("alfen laadgrens: na het verslag biedt hij niets meer aan, klaar blijft klaar",
+             verslag_al is not None and na_al and all(r.amps == 0 for r in na_al),
+             f"{sorted({(r.regel, r.amps) for r in na_al if r.amps > 0})}")
+    controle("alfen laadgrens: één herstart, één verslag, en geen 'neemt al 20 minuten niets'",
+             len(meldingen(va, "binnen een kwartier verder")) == 1 and len(meldingen(va, "laadt niet verder")) == 1
+             and not meldingen(va, "neemt al"), f"{[m for _, m in va.meldingen]}")
+    controle("alfen laadgrens: evenveel geladen als aan een Easee",
+             abs(va.geladen_kwh - ve.geladen_kwh) < 0.3, f"alfen {va.geladen_kwh:.2f}, easee {ve.geladen_kwh:.2f}")
+
 if (vl := v("vast-bewolkt")):
     controle("bewolkt: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
     # Vóór acht uur komt er alleen net bij als aanvulling onder de ondergrens

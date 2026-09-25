@@ -4929,8 +4929,25 @@ controle("en na een kwartier 'completed'",
          coach91._status_afgeleid("dev-alfen", ALFEN["entities"], T91 + dt.timedelta(minutes=15)) == "completed", "")
 hass91.states.zet("sensor.laadpaal_dyn", "0")
 hass91.states.zet("sensor.alfen_modus3", "B1")
-controle("B1 zonder aanbod is 'awaiting_start', en de klok begint opnieuw",
-         coach91._status_afgeleid("dev-alfen", ALFEN["entities"], T91 + dt.timedelta(minutes=16)) == "awaiting_start"
+# Sinds v0.99.0 blijft klaar klaar: na de 0 A van de coach staat de paal op B1, en tot
+# dan begon de coach daar weer (de eerste woning, 25-09-2026: elke zestien minuten een
+# kwartier aanbieden en een minuut 0).
+controle("na klaar en de 0 A (B1) blijft hij klaar",
+         coach91._status_afgeleid("dev-alfen", ALFEN["entities"], T91 + dt.timedelta(minutes=16)) == "completed", "")
+hass91.states.zet("sensor.laadpaal_dyn", "16")
+hass91.states.zet("sensor.alfen_modus3", "B2")
+controle("ook als er weer aanbod staat en de auto niets neemt",
+         coach91._status_afgeleid("dev-alfen", ALFEN["entities"], T91 + dt.timedelta(minutes=17)) == "completed", "")
+hass91.states.zet("sensor.alfen_laadt", "on")
+hass91.states.zet("sensor.alfen_modus3", "C2")
+controle("neemt de auto weer stroom, dan laadt hij en is klaar voorbij",
+         coach91._status_afgeleid("dev-alfen", ALFEN["entities"], T91 + dt.timedelta(minutes=18)) == "charging"
+         and "dev-alfen" not in coach91._afgeleid_klaar, "")
+hass91.states.zet("sensor.alfen_laadt", "off")
+hass91.states.zet("sensor.laadpaal_dyn", "0")
+hass91.states.zet("sensor.alfen_modus3", "B1")
+controle("B1 zonder aanbod en zonder klaar ervoor is 'awaiting_start', en de klok begint opnieuw",
+         coach91._status_afgeleid("dev-alfen", ALFEN["entities"], T91 + dt.timedelta(minutes=19)) == "awaiting_start"
          and "dev-alfen" not in coach91._stil_sinds, "")
 hass91.states.zet("sensor.alfen_aangesloten", "unavailable")
 controle("een integratie die even niets zegt geeft geen status (de vorige blijft tellen)",
@@ -5700,6 +5717,54 @@ try:
              (inst107e.get("sensor_quiet") or []) == [], f"{inst107e.get('sensor_quiet')}")
 finally:
     klok107.utcnow = echte_klok107
+
+print("=== 108. na de nacht van 25-09-2026: het plafond, en klaar over een herstart (v0.99.0) ===")
+# Een auto die niets neemt terwijl de coach het volle plafond aanbiedt: dan telt de
+# ruimte onder de zekering, niet de nul die er liep. Na "klaar" zakte het in de eerste
+# woning van 12 naar "gemiddeld 7 A over".
+inst108 = instellingen()
+hass108, _, coach108 = bouw(huis(status="ready_to_charge"), inst108)
+T108 = dt.datetime(2026, 9, 25, 6, 10)
+auto108 = coachmod.Car(capacity_kwh=75.0, phases=3, soc_percent=90.0)
+paal108 = coachmod.Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.0)
+net108 = coachmod.Grid(surplus_w=0.0, phase_amps=[2.0, 2.0, 2.0], fuse_amps=25.0)
+venster108 = coachmod.Window(enabled=True, deadline=dt.datetime(2026, 9, 25, 8, 0))
+niets108 = coachmod.Decision(True, 16, "De paal biedt 16 A aan, maar de auto neemt nog niets af.", rule="deadline+waiting-for-car")
+coach108._bijhouden(T108, LAADPAAL, auto108, paal108, venster108, niets108, net108, inst108)
+coach108._bijhouden(T108 + dt.timedelta(minutes=1), LAADPAAL, auto108, paal108, venster108, niets108, net108, inst108)
+reeks108 = coach108._sessie["dev-laadpaal"]["plafond_reeks"]
+controle("de auto neemt niets: het plafond telt wat de zekering toeliet, niet nul",
+         reeks108 and reeks108[-1][1] >= 14.0, f"{reeks108}")
+loopt108 = coachmod.Decision(True, 16, "laden", rule="deadline")
+coach108._bijhouden(T108 + dt.timedelta(minutes=2), LAADPAAL, auto108, paal108, venster108, loopt108, net108, inst108)
+controle("en een paal die tegengehouden wordt telt nog steeds wat er werkelijk liep",
+         coach108._sessie["dev-laadpaal"]["plafond_reeks"][-1][1] == 0.0, f"{coach108._sessie['dev-laadpaal']['plafond_reeks']}")
+asyncio.run(hass108.afmaken())   # de beurt die `_bijhouden` wegschrijft
+
+# Klaar en de ene herstart gaan mee over een herstart van Home Assistant.
+coach108._afgeleid_klaar.add("dev-laadpaal")
+coach108._herstart_gedaan["dev-laadpaal"] = T108 - dt.timedelta(minutes=20)
+bewaard108 = coach108._sessie_bewaren("dev-laadpaal", coach108._sessie["dev-laadpaal"], T108)
+controle("wat hij bewaart zegt dat hij klaar is en wanneer de herstart was",
+         bewaard108.get("klaar") is True and bewaard108.get("herstart_op") == (T108 - dt.timedelta(minutes=20)).isoformat(),
+         f"{bewaard108.get('klaar')} {bewaard108.get('herstart_op')}")
+klok108 = sys.modules["homeassistant.util.dt"]
+echte_klok108 = klok108.utcnow
+klok108.utcnow = lambda: (T108 + dt.timedelta(minutes=3)).replace(tzinfo=dt.timezone.utc)
+try:
+    hass108b, _, coach108b = bouw(huis(status="ready_to_charge"), instellingen())
+    asyncio.run(coachmod.async_get_beurten(hass108b).async_upsert({
+        "id": "dev-laadpaal:2026-09-24T22:00:00", "device": "dev-laadpaal", "kind": "laden",
+        "plugged_at": "2026-09-24T22:00:00", "complete": False, "kwh": 50.0, "paid": 17.0,
+        "baseline": {"kwh": 60.0, "cost": 20.0, "points": []}, "session": bewaard108,
+    }))
+    asyncio.run(coach108b._async_beurten_laden())
+    controle("na de herstart is hij nog klaar, en de herstart van de paal is al gedaan",
+             "dev-laadpaal" in coach108b._afgeleid_klaar
+             and coach108b._herstart_gedaan.get("dev-laadpaal") == T108 - dt.timedelta(minutes=20),
+             f"{coach108b._afgeleid_klaar} {coach108b._herstart_gedaan}")
+finally:
+    klok108.utcnow = echte_klok108
 
 controle("de naam van de auto houdt zijn hoofdletters",
          coachmod._hoofdletter("Proefauto zonder HA") == "Proefauto zonder HA"

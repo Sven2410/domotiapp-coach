@@ -1089,13 +1089,21 @@ alfen_dyn = dyn_zonnig.kopie(
     paal=Paal(merk="alfen"),
 )
 
+# De auto stopt zelf op 80% aan een Alfen (25-09-2026 in de eerste woning, bij 92%
+# geschat). Een Alfen zegt nooit "completed"; de coach leidt het af, en tot v0.99.0
+# begon hij na zijn eigen 0 A (modus 3 B1, "wacht op start") gewoon weer: elke zestien
+# minuten een kwartier 13 A aanbieden en een minuut 0.
+alfen_laadgrens = laadgrens.kopie(
+    naam="alfen-laadgrens-80", uitleg="laadgrens-80 aan een Alfen: klaar blijft klaar, en één herstart",
+    paal=Paal(merk="alfen"),
+)
 alfen_doel_80 = doel_onder_auto.kopie(
     naam="alfen-doel-80", uitleg="doel-80 aan een Alfen: de 0 blijft elke minuut komen, anders laadt de paal na zijn geldigheidsduur op 16 A door",
     paal=Paal(merk="alfen"),
 )
 
 ALLE = [
-    alfen_zonnig, alfen_dyn, alfen_doel_80,
+    alfen_zonnig, alfen_dyn, alfen_doel_80, alfen_laadgrens,
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,

@@ -3082,6 +3082,43 @@ controle("met 14 in plaats van 16 duurt het naar verhouding langer",
          abs(planner.hours_needed(auto68, 14) / planner.hours_needed(auto68, 16) - 16 / 14) < 0.01, "")
 
 
+print("=== 69. na de nacht van 25-09-2026: een rest van niets, zo weer verder, en afronden (v0.99.0) ===")
+nu69 = dt.datetime(2026, 9, 25, 2, 48)
+w69 = Window(enabled=True, deadline=dt.datetime(2026, 9, 25, 8, 0))
+bijna69 = Car(capacity_kwh=75.0, phases=3, soc_percent=99.995, max_amps=16.0)
+laadt69 = Charger(max_amps=16.0, connected=True, charging=True, started_at=nu69 - dt.timedelta(hours=1), actual_amps=13.0)
+g69 = Grid(surplus_w=0.0, phase_amps=[14.0, 14.0, 14.0], fuse_amps=25.0, charger_amps=13.0)
+rest69 = planner.energy_needed_kwh(bijna69)
+d69 = planner.decide(nu69, [], g69, bijna69, laadt69, w69)
+controle("een rest onder de tien wattuur is klaar, en geen minuut 6 A 'niet het goedkoopste moment'",
+         rest69 is not None and 0 < rest69 <= planner.SCHIJF_MINIMUM and d69.rule == "complete" and not d69.charge,
+         f"rest {rest69}, {d69.rule}: {d69.reason}")
+# Het vasthouden loopt af een minuut voor het volgende blok: dan niet stoppen.
+auto69 = Car(capacity_kwh=75.0, phases=3, soc_percent=50.0, max_amps=16.0)
+wacht69 = Decision(False, 0, "Stroom is straks goedkoper dan nu, dus hij wacht tot 02:00.", rule="wait-for-price",
+                   starts_at=dt.datetime(2026, 9, 25, 2, 0).isoformat())
+nu69b = dt.datetime(2026, 9, 25, 1, 58, 57)
+laadt69b = Charger(max_amps=16.0, connected=True, charging=True, started_at=nu69b - dt.timedelta(minutes=40), actual_amps=6.0)
+vast69 = planner._keep_alive(nu69b, g69, auto69, laadt69b, wacht69, planner.STOP_ROUNDS)
+controle("tien ronden vastgehouden, maar het blok begint over een minuut: hij laadt door",
+         vast69.charge and vast69.rule == "wait-for-price+hold" and "Om 02:00 begint het volgende laaduur" in vast69.reason,
+         f"{vast69.rule}: {vast69.reason}")
+ver69 = Decision(False, 0, "wacht tot 03:00", rule="wait-for-price", starts_at=dt.datetime(2026, 9, 25, 3, 0).isoformat())
+controle("begint het blok pas over een uur, dan stopt hij na de tien ronden zoals altijd",
+         not planner._keep_alive(nu69b, g69, auto69, laadt69b, ver69, planner.STOP_ROUNDS).charge, "")
+controle("een besluit om te wachten zegt wanneer het volgende blok begint",
+         planner.decide(dt.datetime(2026, 9, 7, 14, 0), [
+             {"start": dt.datetime(2026, 9, 7, h), "end": dt.datetime(2026, 9, 7, h) + dt.timedelta(hours=1),
+              "price": 0.40 if h < 22 else 0.20} for h in range(14, 24)],
+             Grid(surplus_w=0.0, phase_amps=[2.0, 2.0, 2.0], fuse_amps=25.0),
+             Car(capacity_kwh=75.0, phases=3, soc_percent=80.0, max_amps=16.0),
+             Charger(max_amps=16.0, connected=True),
+             Window(enabled=True, deadline=dt.datetime(2026, 9, 8, 7, 0)),
+         ).starts_at == dt.datetime(2026, 9, 7, 22, 0).isoformat(), "")
+controle("'staat op' rondt af, zoals 'ging naar' in het verslag: 92,9% is 93",
+         "staat op 93%" in planner.klaar_zin(Car(capacity_kwh=75.0, soc_percent=92.9)), planner.klaar_zin(Car(capacity_kwh=75.0, soc_percent=92.9)))
+
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
