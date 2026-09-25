@@ -159,6 +159,9 @@ WAITING_SECONDS = 60
 # kost hooguit de ondergrens van de paal van het net; elke wekpoging is een
 # auto die op een dag ophoudt met luisteren.
 STOP_ROUNDS = 10
+# Begint het volgende laadblok binnen zoveel tijd, dan stopt een lopende sessie
+# niet eerst (v0.99.0). Zie `_keep_alive`.
+DOORLADEN_BINNEN = timedelta(minutes=5)
 
 # De grenzen van een pauze die met een houdbaarheidsduur wordt weggeschreven.
 # Korter dan een kwartier is niet de moeite en zou kunnen verlopen tussen twee
@@ -959,7 +962,9 @@ def klaar_zin(car: Car, volgens_accu: bool = False) -> str:
     """
     if car.soc_percent is None:
         return "De auto is vol."
-    stand = int(car.soc_percent)
+    # Afgerond en niet afgekapt, net als "de accu ging van ... naar ...%" in het
+    # verslag: op 25-09-2026 stond er "staat op 92%" en "naar 93%" in één bericht.
+    stand = round(car.soc_percent)
     if not doel_bereikt(car):
         return (
             f"De auto laadt niet verder en staat op {stand}%. "
@@ -2774,8 +2779,13 @@ def _decide(
     # onder de 100 is dit de sport die als eerste vuurt: de accustand is er
     # eerder dan het "completed" van de paal, en dan stopt de coach uit zichzelf
     # in plaats van het achteraf te merken.
+    #
+    # Ook een rest onder de kleinste schijf (`SCHIJF_MINIMUM`, tien wattuur) is
+    # klaar (v0.99.0). Daar kiest `goedkoopste` niets meer uit, en dan stond er in
+    # de eerste woning op 24-09-2026 om 02:48 een minuut "het is nu niet het
+    # goedkoopste moment" met 6 A vastgehouden, voor een auto die op zijn doel stond.
     rest = energy_needed_kwh(car)
-    if rest is not None and rest <= 0:
+    if rest is not None and rest <= SCHIJF_MINIMUM:
         return Decision(
             False,
             0,
@@ -3340,6 +3350,8 @@ def _decide(
         # doordat de coach wegvalt, dan laadt de auto vanaf dat moment gewoon
         # door, en dat is precies het goede antwoord: duurder, maar wel vol.
         hold_minutes=_hold_until(now, begint),
+        # En wanneer dat is, voor `_keep_alive` (v0.99.0).
+        starts_at=begint.isoformat() if begint is not None else None,
     )
 
 # Hoeveel beter het volgende uur moet zijn voordat wachten de moeite is. Onder
@@ -3732,7 +3744,16 @@ def _keep_alive(
         return decision
 
     net_begonnen = now - charger.started_at < timedelta(minutes=MIN_RUN_MINUTES)
-    if not net_begonnen and holding >= STOP_ROUNDS:
+    # **Zo weer verder** (v0.99.0). Begint het volgende laadblok binnen
+    # `DOORLADEN_BINNEN`, dan is stoppen zinloos: in de eerste woning liep het
+    # vasthouden op 25-09-2026 om 01:58:57 af, een minuut voor het blok van
+    # 02:00, en stond de auto die minuut stil om daarna weer gewekt te worden.
+    try:
+        straks = datetime.fromisoformat(decision.starts_at) if decision.starts_at else None
+    except ValueError:
+        straks = None
+    zo_verder = straks is not None and timedelta(0) <= straks - now <= DOORLADEN_BINNEN
+    if not net_begonnen and holding >= STOP_ROUNDS and not zo_verder:
         return decision
 
     ceiling = ceiling_amps(grid, car, charger)
@@ -3750,6 +3771,8 @@ def _keep_alive(
     reason = (
         "Net begonnen met laden, dus hij houdt het nog even vol op de laagste stand."
         if net_begonnen
+        else f"Om {_clock(straks)} begint het volgende laaduur, dus hij laadt tot dan door op de laagste stand."
+        if zo_verder
         else "Hij laadt nog even door op de laagste stand. Een auto stopt niet graag steeds."
     )
     return Decision(

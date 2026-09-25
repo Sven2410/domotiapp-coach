@@ -73,6 +73,21 @@ test_coach.py (de wekstroom als getal, elke ronde opnieuw terwijl een Easee
 de tweede ronde niets krijgt, de afgeleide status in alle vier de toestanden,
 de sensorwacht), en de merkproef in test_rapport.mjs.
 
+**Klaar blijft klaar** (v0.99.0). In de eerste woning op 25-09-2026 stopte de Tesla om
+05:51:42 zelf, bij een geschatte 92 tot 95% (de accustand was ingetypt). Na een kwartier B2
+noemde de coach het klaar en schreef hij 0 A; de paal ging naar B1, "wacht op start", en daarmee
+was de auto voor de coach weer niet klaar. Van 06:06 tot in de ochtend: elke zestien minuten een
+kwartier 13 A aanbieden en een minuut 0, en de kaart sprong mee. `_afgeleid_klaar` in coach.py
+onthoudt het afgeleide "completed" tot de auto weer stroom neemt of de kabel eruit gaat; alleen
+de ene herstart (`_niet_vol` in `_read`) maakt het los, en dan begint ook het kwartier
+(`_stil_sinds`) en de klok van "neemt al twintig minuten niets" (`_asking_since`) opnieuw. De
+schaduw liet die nacht zien dat die melding ("trek de kabel er even uit") anders onterecht was
+gekomen. Klaar en de herstart gaan mee in de bewaarde beurt (`klaar`, `herstart_op`), zodat een
+herstart van Home Assistant de lus niet opnieuw begint. Scenario `alfen-laadgrens-80` (de bus
+stopt zelf op 80%): met v0.98.0 de hele nacht de lus en geen herstartmelding, nu een kwartier,
+één herstart, het verslag, en klaar tot de ochtend, net als `laadgrens-80` aan een Easee.
+Proef 90 in test_coach.py.
+
 **Nog nooit aan een echte Alfen gestuurd.** Wat er in het echt gemeten moet
 worden, in de eerste woning, met de toestanden-logger erbij (`plus=alfen`):
 
