@@ -211,7 +211,7 @@ dan de andere in dezelfde uitgave.
 | `batterij.py` | het denkwerk voor een thuisbatterij, kent Home Assistant ook niet: `plan_batterij` (de stand), `Regelaar` (de snelle lus), `verdiend`, `terugverdiend`, `rendement_uit_tellers` |
 | `coach.py` | leest sensoren, stuurt de paal aan, houdt de laadbeurt bij |
 | `websocket.py` | wat het paneel mag opvragen en wijzigen |
-| `sensor.py` | de eerste eigen entiteiten (v0.100.0): per apparaat met een programma een sensor "start om", met het geplande tijdstip, voor een keukenkaart of een automatisering. Volgt het besluit op de eventbus, rekent zelf niets (`docs/vaatwasser.md`) |
+| `sensor.py` | de eerste eigen entiteiten (v0.100.0): per apparaat met een programma een sensor "<apparaat> start" ("om 14:00", "morgen om 09:00", het tijdstip in `start`), voor een keukenkaart of een automatisering. Volgt het besluit op de eventbus, rekent zelf niets (`docs/vaatwasser.md`) |
 | `storage.py` | de instellingen op schijf |
 | `monitor.py` | de zekeringbewaking en de wachthond |
 | `report.py` | het pdf-rapport |
@@ -247,7 +247,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 441 controles op het denkwerk
 python tests/test_batterij.py    # 126 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 692 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 700 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 1977 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 109 op het rapport en op het paneel

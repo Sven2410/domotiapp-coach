@@ -5809,6 +5809,22 @@ WACHT110 = {"kind": "programma", "rule": "wait-for-start", "charge": False, "rel
 moment110 = sensormod.gepland_om(WACHT110)
 controle("wacht hij op het gekozen moment, dan is dat de toestand, met de tijdzone van het huis",
          moment110 == dt.datetime(2026, 9, 26, 14, 0, tzinfo=dt.timezone(dt.timedelta(hours=2))), f"{moment110}")
+# Na v0.100.0 (de eigenaar: "dat moet de sensor laten zien, dus een tijd, en is het
+# morgen dan morgen om") is de toestand de tekst van de kaart; het tijdstip
+# staat in het attribuut `start`.
+NU110 = dt.datetime(2026, 9, 26, 12, 16)
+controle("de toestand zegt wanneer: vandaag, morgen, verder weg, of nu",
+         sensormod.start_tekst(WACHT110, NU110) == "om 14:00"
+         and sensormod.start_tekst(dict(WACHT110, starts_at="2026-09-27T09:00:00"), NU110) == "morgen om 09:00"
+         and sensormod.start_tekst(dict(WACHT110, starts_at="2026-09-27T09:00:00"), dt.datetime(2026, 9, 27, 0, 1)) == "om 09:00"
+         and sensormod.start_tekst(dict(WACHT110, starts_at="2026-09-29T09:00:00"), NU110).endswith("om 09:00")
+         and sensormod.start_tekst({"rule": "cheapest-start", "charge": True}, NU110) == "nu",
+         f"{sensormod.start_tekst(WACHT110, NU110)} / "
+         f"{sensormod.start_tekst(dict(WACHT110, starts_at='2026-09-27T09:00:00'), NU110)}")
+controle("niet vrijgegeven, wacht op prijzen, of draait al: geen tekst",
+         sensormod.start_tekst({"rule": "not-released"}, NU110) is None
+         and sensormod.start_tekst({"rule": "wait-for-prices"}, NU110) is None
+         and sensormod.start_tekst(dict(WACHT110, running=True), NU110) is None, "")
 controle("niet vrijgegeven, start nu, of draait al: geen tijdstip",
          sensormod.gepland_om({"rule": "not-released"}) is None
          and sensormod.gepland_om({"rule": "cheapest-start", "charge": True}) is None
@@ -5835,11 +5851,12 @@ class Invoer110:
 toegevoegd110 = []
 asyncio.run(sensormod.async_setup_entry(hass110, Invoer110(), lambda nieuw: toegevoegd110.extend(nieuw)))
 controle("één sensor, voor de vaatwasser en niet voor de laadpaal",
-         len(toegevoegd110) == 1 and toegevoegd110[0].name == "Vaatwasser start om"
+         len(toegevoegd110) == 1 and toegevoegd110[0].name == "Vaatwasser start"
          and toegevoegd110[0].unique_id == "dev-vw_start_om", f"{[(s.name, s.unique_id) for s in toegevoegd110]}")
 s110 = toegevoegd110[0]
-controle("hij begint met wat de coach al besloten had, en noemt de vrijgaveschakelaar",
-         s110.native_value == moment110 and s110.extra_state_attributes["release_switch"] == "input_boolean.vw_vrij"
+controle("hij begint met wat de coach al besloten had, en noemt het tijdstip en de vrijgaveschakelaar",
+         s110.extra_state_attributes["start"] == moment110.isoformat()
+         and s110.extra_state_attributes["release_switch"] == "input_boolean.vw_vrij"
          and s110.extra_state_attributes["reason"].startswith("Hij start om 14:00"), f"{s110.extra_state_attributes}")
 luister110 = dict((soort, wat) for soort, wat in hass110.bus.luisteraars)
 s110.hass = hass110
@@ -5847,11 +5864,135 @@ luister110[coachmod.EVENT_DECISION](types.SimpleNamespace(
     data={"device": "dev-vw", **dict(WACHT110, rule="running", running=True, charge=True, starts_at=None,
                                      reason="Hij draait.")}))
 controle("draait hij, dan is het tijdstip weg en schrijft hij één keer",
-         s110.native_value is None and getattr(s110, "geschreven", 0) == 1, f"{s110.native_value} {getattr(s110, 'geschreven', 0)}")
+         s110.native_value is None and s110.extra_state_attributes["start"] is None
+         and getattr(s110, "geschreven", 0) == 1, f"{s110.native_value} {getattr(s110, 'geschreven', 0)}")
 luister110[coachmod.EVENT_DECISION](types.SimpleNamespace(
     data={"device": "dev-vw", **dict(WACHT110, rule="running", running=True, charge=True, starts_at=None,
                                      reason="Hij draait.")}))
 controle("hetzelfde besluit een ronde later schrijft niets", getattr(s110, "geschreven", 0) == 1, "")
+
+print("=== 111. de zonkromme via de integratie van de ingevulde sensoren (v0.100.1) ===")
+# Zonder voorspeller in het energiedashboard rekende de coach met de losse
+# sensoren, en die van Forecast.Solar lopen een uur achter. Nu vraagt hij de
+# integratie achter die sensoren om dezelfde kromme. En twee omvormers die naar
+# dezelfde voorspeller wijzen tellen hem één keer.
+FS111 = {"2026-09-26T11:00:00+00:00": 1471, "2026-09-26T12:00:00+00:00": 1489}
+
+
+class Entry111:
+    def __init__(self, entry_id, domain):
+        self.entry_id, self.domain = entry_id, domain
+
+
+class Platform111:
+    def __init__(self, krommes, stuk=()):
+        self.krommes, self.stuk, self.gevraagd = krommes, set(stuk), []
+
+    async def async_get_solar_forecast(self, hass, entry_id):
+        self.gevraagd.append(entry_id)
+        return {"wh_hours": self.krommes[entry_id]}
+
+
+def nep111(krommes, register, stuk=(), zonne_bronnen=None):
+    """Registratie, config entries, loader en energiedashboard, net genoeg."""
+    platform = Platform111(krommes)
+    domeinen = {"fs": "forecast_solar", "tpl": "template", "sc": "solcast_solar"}
+
+    class Integratie:
+        def __init__(self, domein):
+            self.domein = domein
+
+        async def async_get_platform(self, naam):
+            if self.domein in stuk:
+                raise ImportError(f"{self.domein} heeft geen {naam}-platform")
+            return platform
+
+    async def async_get_integration(hass, domein):
+        return Integratie(domein)
+
+    er = types.ModuleType("homeassistant.helpers.entity_registry")
+    er.async_get = lambda hass: types.SimpleNamespace(
+        async_get=lambda eid: (types.SimpleNamespace(config_entry_id=register[eid]) if eid in register else None))
+    laden = types.ModuleType("homeassistant.loader")
+    laden.async_get_integration = async_get_integration
+    energie = types.ModuleType("homeassistant.components.energy.data")
+
+    async def async_get_manager(hass):
+        return types.SimpleNamespace(data={"energy_sources": zonne_bronnen or []})
+
+    energie.async_get_manager = async_get_manager
+    modules = {"homeassistant.helpers.entity_registry": er, "homeassistant.loader": laden,
+               "homeassistant.components.energy": types.ModuleType("homeassistant.components.energy"),
+               "homeassistant.components.energy.data": energie}
+    ingangen = {eid: Entry111(eid, domeinen[eid.split("-")[0]]) for eid in krommes}
+    return modules, ingangen, platform
+
+
+inst111 = instellingen()
+inst111["sources"]["solar_forecast"] = {"this_hour": "sensor.fs_dit_uur", "next_hour": "sensor.fs_volgend_uur",
+                                        "remaining_today": "sensor.fs_rest"}
+hass111, _, coach111 = bouw(huis(), inst111)
+oud111 = {k: sys.modules.get(k) for k in ("homeassistant.helpers.entity_registry", "homeassistant.loader",
+                                          "homeassistant.components.energy", "homeassistant.components.energy.data")}
+
+
+def met111(modules, ingangen, werk):
+    sys.modules.update(modules)
+    hass111.config_entries = types.SimpleNamespace(async_get_entry=lambda eid: ingangen.get(eid))
+    try:
+        return asyncio.run(werk())
+    finally:
+        for k, v in oud111.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+
+
+REG111 = {"sensor.fs_dit_uur": "fs-1", "sensor.fs_volgend_uur": "fs-1", "sensor.fs_rest": "fs-1"}
+mods, ingang, plat111 = nep111({"fs-1": FS111}, REG111)
+kromme111 = met111(mods, ingang, lambda: coach111._async_zon_uit_integratie(inst111))
+controle("via de sensoren: de kromme van hun integratie, één keer gevraagd, goed uitgelijnd",
+         plat111.gevraagd == ["fs-1"] and abs(kromme111.get(dt.datetime(2026, 9, 26, 10), 0) - 1.471) < 1e-9
+         and abs(kromme111.get(dt.datetime(2026, 9, 26, 11), 0) - 1.489) < 1e-9, f"{plat111.gevraagd} {kromme111}")
+
+mods, ingang, _ = nep111({"tpl-1": {}}, {"sensor.fs_dit_uur": "tpl-1"}, stuk=("template",))
+controle("een sensor zonder energieplatform erachter geeft geen kromme, dus de losse sensoren",
+         met111(mods, ingang, lambda: coach111._async_zon_uit_integratie(inst111)) == {}, "")
+
+mods, ingang, _ = nep111({"fs-1": FS111}, {})
+controle("sensoren die niet in de registratie staan: geen kromme",
+         met111(mods, ingang, lambda: coach111._async_zon_uit_integratie(inst111)) == {}, "")
+
+TWEE111 = [{"type": "solar", "config_entry_solar_forecast": ["fs-1"]},
+           {"type": "solar", "config_entry_solar_forecast": ["fs-1"]}]
+mods, ingang, plat111b = nep111({"fs-1": FS111}, {}, zonne_bronnen=TWEE111)
+dubbel111 = met111(mods, ingang, lambda: coach111._async_zon_uit_dashboard())
+controle("twee omvormers met dezelfde voorspeller in het energiedashboard: één keer geteld",
+         plat111b.gevraagd == ["fs-1"] and abs(dubbel111.get(dt.datetime(2026, 9, 26, 11), 0) - 1.489) < 1e-9,
+         f"{plat111b.gevraagd} {dubbel111}")
+
+TWEE_VERSCHILLEND = [{"type": "solar", "config_entry_solar_forecast": ["fs-1"]},
+                     {"type": "solar", "config_entry_solar_forecast": ["sc-2"]}]
+mods, ingang, _ = nep111({"fs-1": FS111, "sc-2": {"2026-09-26T11:00:00+00:00": 500}}, {},
+                         zonne_bronnen=TWEE_VERSCHILLEND)
+samen111 = met111(mods, ingang, lambda: coach111._async_zon_uit_dashboard())
+controle("twee verschillende voorspellers tellen wel op, elk op zijn eigen manier",
+         abs(samen111.get(dt.datetime(2026, 9, 26, 11), 0) - (1.489 + 0.5)) < 1e-9
+         and abs(samen111.get(dt.datetime(2026, 9, 26, 10), 0) - 1.471) < 1e-9, f"{samen111}")
+
+
+async def keuze111():
+    coach111._zon_tot = None
+    await coach111._async_zonkromme(inst111, dt.datetime(2026, 9, 26, 12, 16))
+    return coach111._zon_kwh, coach111._zon_geschat
+
+
+mods, ingang, _ = nep111({"fs-1": FS111}, REG111)
+zon111, geschat111 = met111(mods, ingang, keuze111)
+controle("zonder energiedashboard kiest de coach de kromme via de sensoren, en die is geen schatting",
+         geschat111 is False and abs(zon111.get(dt.datetime(2026, 9, 26, 11), 0) - 1.489) < 1e-9,
+         f"{geschat111} {zon111}")
 
 
 print()

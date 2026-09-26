@@ -230,12 +230,26 @@ keer viel de oude lezing goedkoper uit, `dynamisch-grote-auto` (€ 7,45 tegen
 € 7,58, bij een optimum van € 7,45); dat gat van dertien cent zat er met een
 goed uitgelijnde kromme al.
 
-**Nog niet gerepareerd: de losse sensoren van Forecast.Solar.** Zonder kromme
-in het energiedashboard rekent de coach met de sensoren die de klant invult
-(`_zon_uit_sensoren`). Die van Forecast.Solar lezen dezelfde lijst als begin:
-"energie dit uur" is dan die van het vorige uur, en ze worden maar eens per uur
-bijgewerkt. Thuis staat de voorspeller in het energiedashboard, dus daar speelt
-het niet.
+**Zonder energiedashboard dezelfde kromme, via de ingevulde sensoren**
+(v0.100.1, de eigenaar: "ja repareer dat ook"). Staat de voorspeller niet in het
+energiedashboard, dan rekende de coach met de losse sensoren die de klant
+invult (`_zon_uit_sensoren`). Die van Forecast.Solar lezen dezelfde lijst als
+begin van het uur, en worden maar eens per uur bijgewerkt: thuis zei "dit uur"
+op 26-09-2026 om 12:16 1,228 kWh, en dat was de verwachting van 10:00 tot 11:00,
+bijgewerkt om 11:48. Nu zoekt `_async_zon_uit_integratie` in de
+entiteitregistratie bij welke config entry de ingevulde sensoren horen, en
+vraagt die om dezelfde `async_get_solar_forecast` als het energiedashboard
+(`_async_kromme_van`, met `zonkromme_uit`). Pas als dat niets oplevert (een
+sjabloonsensor, een integratie zonder energieplatform) blijven de losse
+sensoren. Scenario `forecast-solar-sensoren`: nieuw € 2,38 met 9,1 kWh zon, net
+als via het energiedashboard; met de losse sensoren een uur achter € 2,59 met
+8,1 kWh. Het virtuele huis kent `voorspeller="forecast_solar_sensoren"`.
+
+**Twee omvormers met dezelfde voorspeller tellen hem één keer** (v0.100.1).
+Het energiedashboard heeft per omvormer een lijst voorspellers, en wijzen er
+twee naar dezelfde, dan telde de coach die kromme dubbel. Het energiedashboard
+zelf doet dat niet. Proef 111 in test_coach.py, samen met de weg via de
+sensoren.
 
 **Wekken doet de coach op het plafond, want de paal kiest daarop zijn fasen**
 (v0.66.0). Thuis op 17-09-2026: om 14:10 stopte de coach om op de zon van 15:00

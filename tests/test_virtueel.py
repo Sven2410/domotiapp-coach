@@ -307,6 +307,13 @@ if (vl := v("forecast-solar-vast")) and (vd := v("vast-voorspelling-mis")):
              abs(vl.kosten - vd.kosten) < 0.005 and abs(vl.uit_zon_kwh - vd.uit_zon_kwh) < 0.05,
              f"forecast.solar €{vl.kosten:.2f} zon {vl.uit_zon_kwh:.1f}, begin €{vd.kosten:.2f} zon {vd.uit_zon_kwh:.1f}")
     controle("Forecast.Solar: en de klaar-tijd gehaald", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+# Forecast.Solar zonder energiedashboard (v0.100.1): de kromme via de
+# integratie van de ingevulde sensoren. Oud rekende met die sensoren zelf, een
+# uur achter: € 2,59 met 8,1 kWh zon.
+if (vl := v("forecast-solar-sensoren")) and (vd := v("vast-voorspelling-mis")):
+    controle("Forecast.Solar alleen als sensoren: dezelfde kosten en zon als via het energiedashboard",
+             abs(vl.kosten - vd.kosten) < 0.005 and abs(vl.uit_zon_kwh - vd.uit_zon_kwh) < 0.05,
+             f"sensoren €{vl.kosten:.2f} zon {vl.uit_zon_kwh:.1f}, dashboard €{vd.kosten:.2f} zon {vd.uit_zon_kwh:.1f}")
 if (vl := v("vaatwasser-forecast-solar")) and (vd := v("vaatwasser-zon")):
     controle("Forecast.Solar: de vaatwasser start op hetzelfde moment, 09:00",
              vl.vw_gestart is not None and vd.vw_gestart is not None
