@@ -897,9 +897,12 @@ class Scenario:
     # Een Easee Equalizer: houdt de som van huis en paal zelf onder de zekering,
     # meldt hoeveel hij vrijgeeft, en de paal zegt waarom hij geknepen wordt.
     equalizer: bool = False
-    # dashboard | forecast_solar | sensoren | geen. "forecast_solar" is ook het
-    # energiedashboard, maar met de sleutels zoals Forecast.Solar ze zet: op het
-    # eind van het uur (v0.100.0, zie `zonkromme_uit` in coach.py).
+    # dashboard | forecast_solar | forecast_solar_sensoren | sensoren | geen.
+    # "forecast_solar" is ook het energiedashboard, maar met de sleutels zoals
+    # Forecast.Solar ze zet: op het eind van het uur (v0.100.0, zie
+    # `zonkromme_uit` in coach.py). "forecast_solar_sensoren" is Forecast.Solar
+    # zonder energiedashboard: de kromme alleen via de integratie van de
+    # ingevulde sensoren, en die sensoren zelf een uur achter (v0.100.1).
     voorspeller: str = "dashboard"
     # Wat de coach bij een eerdere beurt over deze auto leerde: kW per band van
     # tien procent, zoals `car_pace` in de instellingen. Zie `_tempo_leren`.
@@ -1681,8 +1684,12 @@ class Wereld:
             rest = sum(self.zon.verwacht_kwh(uur + dt.timedelta(hours=i))
                        for i in range(24 - uur.hour))
             z(E["zon_rest"], w(f"{rest:.2f}", "kWh"))
-            z(E["zon_dit_uur"], w(f"{self.zon.verwacht_kwh(uur):.3f}", "kWh"))
-            z(E["zon_volgend_uur"], w(f"{self.zon.verwacht_kwh(uur + dt.timedelta(hours=1)):.3f}", "kWh"))
+            # De sensoren van Forecast.Solar lezen de lijst als begin van het
+            # uur, en die zet zijn waarden op het eind: "dit uur" is dan het
+            # vorige uur (thuis op 26-09-2026 gemeten).
+            achter = dt.timedelta(hours=1 if self.s.voorspeller == "forecast_solar_sensoren" else 0)
+            z(E["zon_dit_uur"], w(f"{self.zon.verwacht_kwh(uur - achter):.3f}", "kWh"))
+            z(E["zon_volgend_uur"], w(f"{self.zon.verwacht_kwh(uur + dt.timedelta(hours=1) - achter):.3f}", "kWh"))
             z(E["zon_piek"], self.zon.piek_moment(nu.date()).isoformat())
 
     # --- wat de coach van buiten krijgt ---
@@ -1699,13 +1706,29 @@ class Wereld:
             if kwh > 0:
                 uit[uur] = kwh
         if self.s.voorspeller == "forecast_solar":
-            # Zoals Forecast.Solar het levert: de waarde van 12:00 tot 13:00
-            # staat bij 13:00, in Wh. De coach legt hem zelf terug.
-            return coachmod.zonkromme_uit(
-                "forecast_solar",
-                {(uur + dt.timedelta(hours=1)).isoformat(): kwh * 1000 for uur, kwh in uit.items()},
-            )
+            return self._als_forecast_solar(uit)
         return uit
+
+    def _als_forecast_solar(self, uit: dict) -> dict:
+        """Zoals Forecast.Solar het levert: de waarde van 12:00 tot 13:00 staat
+        bij 13:00, in Wh. De coach legt hem zelf terug."""
+        return coachmod.zonkromme_uit(
+            "forecast_solar",
+            {(uur + dt.timedelta(hours=1)).isoformat(): kwh * 1000 for uur, kwh in uit.items()},
+        )
+
+    async def zonkromme_via_sensor(self, settings=None) -> dict:
+        """Wat de integratie achter de ingevulde zonsensoren geeft (v0.100.1)."""
+        if self.s.voorspeller != "forecast_solar_sensoren":
+            return {}
+        vandaag = dt.datetime.combine(self.nu.date(), dt.time(0))
+        uit = {}
+        for i in range(48):
+            uur = vandaag + dt.timedelta(hours=i)
+            kwh = self.zon.verwacht_kwh(uur)
+            if kwh > 0:
+                uit[uur] = kwh
+        return self._als_forecast_solar(uit)
 
     def archief(self):
         """Zeven dagen kwartieren van vóór de proef, zoals archive.py ze bewaart."""
@@ -1943,6 +1966,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
     coach = coachmod.ChargerCoach(hass)
     coach._sleep = lambda seconds: asyncio.sleep(0)
     coach._async_zon_uit_dashboard = wereld.zonkromme
+    coach._async_zon_uit_integratie = wereld.zonkromme_via_sensor
     coachmod.async_get_archive = lambda hass: wereld.archief()
 
     # De klok van Home Assistant is de klok van de wereld.
@@ -1980,6 +2004,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
         c = coachmod.ChargerCoach(hass)
         c._sleep = lambda seconds: asyncio.sleep(0)
         c._async_zon_uit_dashboard = wereld.zonkromme
+        c._async_zon_uit_integratie = wereld.zonkromme_via_sensor
         return c
 
     async def lus():

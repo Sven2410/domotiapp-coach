@@ -318,6 +318,19 @@ een kaart die die schakelaar kent de sensor zelf kan vinden. Hij rekent niets:
 hij volgt `EVENT_DECISION` en `EVENT_SETTINGS_UPDATED`. Proef 110 in
 test_coach.py; het harnas kent daarvoor een nagebouwde `SensorEntity`.
 
+**Sinds v0.100.1 is de toestand de tekst van de kaart.** In v0.100.0 was het een
+tijdstempel, en die toont Home Assistant als "over 2 uur" of "unknown". De
+eigenaar, met de sensor in zijn eigen installatie voor zich: "de coach beslist toch
+immers zelf wanneer hij gaat starten en dat moet de sensor laten zien, dus een
+tijd, en is het morgen dan morgen om." Nu `start_tekst`: "om 14:00", "morgen om
+09:00", "zondag om 09:00" (`_dag_om`, dezelfde woorden als het besluit), of
+"nu"; leeg als er niets gepland is. Het tijdstip staat in het attribuut `start`.
+De naam werd "<apparaat> start"; de `unique_id` bleef `_start_om`, zodat een
+bestaande entiteit niet verweesd raakt. Hij vroeg ook of dit op zijn systeem
+gebouwd was, want hij zag zijn eigen `input_boolean` erin: dat is wat hij bij
+Apparaten als vrijgaveschakelaar invulde, en bij een ander staat daar het zijne
+of niets. Er staat geen entiteitnaam in de code (proef 42).
+
 Wat er thuis gebeurde, voor wie het later naleest: de meter zag tussen 12:16 en
 13:12 op zijn laagste 940 W teruglevering over tien minuten (`METER_VENSTER`),
 de opwarmpiek van Express 60 is 2277 W gemeten, dus `meter_overal` greep niet in

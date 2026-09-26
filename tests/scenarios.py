@@ -1112,6 +1112,13 @@ forecast_solar_vast = vast_voorspelling_mis.kopie(
     naam="forecast-solar-vast", uitleg="vast-voorspelling-mis met de uurkromme zoals Forecast.Solar hem levert: de waarde op het eind van het uur",
     voorspeller="forecast_solar",
 )
+# Forecast.Solar zonder energiedashboard (v0.100.1): de coach haalt dezelfde
+# kromme bij de integratie achter de ingevulde sensoren, in plaats van te
+# rekenen met sensoren die een uur achterlopen.
+forecast_solar_sensoren = vast_voorspelling_mis.kopie(
+    naam="forecast-solar-sensoren", uitleg="vast-voorspelling-mis met Forecast.Solar alleen als sensoren, niet in het energiedashboard: dezelfde kromme via de integratie van die sensoren",
+    voorspeller="forecast_solar_sensoren",
+)
 forecast_solar_vaatwasser = vaatwasser_zon.kopie(
     naam="vaatwasser-forecast-solar", uitleg="vaatwasser-zon met de uurkromme zoals Forecast.Solar hem levert: dezelfde start om 09:00",
     voorspeller="forecast_solar",
@@ -1139,7 +1146,7 @@ ALLE = [
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,
     vaatwasser_zonpiek, vaatwasser_eindtijd, vaatwasser_eindtijd_bijstellen, vaatwasser_na_klaartijd, vaatwasser_na_klaartijd_nu,
     vaatwasser_lokaal, vaatwasser_lokaal_deur, vaatwasser_lokaal_afstand_uit,
-    forecast_solar_vast, forecast_solar_vaatwasser,
+    forecast_solar_vast, forecast_solar_vaatwasser, forecast_solar_sensoren,
     boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
     *KLANTWONING,
     *BATTERIJ,

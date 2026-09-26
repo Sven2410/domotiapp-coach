@@ -5398,13 +5398,17 @@ class ChargerCoach:
     async def _async_zonkromme(self, settings: dict[str, Any], now: datetime) -> None:
         """De zonverwachting per uur, zo precies als deze woning hem heeft.
 
-        Twee bronnen, en de eerste die iets oplevert wint.
+        Drie bronnen, en de eerste die iets oplevert wint.
 
         **De voorspelling van het energiedashboard.** Elke zonvoorspeller die
         aan het energiedashboard hangt levert daar een uurkromme, en Home
         Assistant ontsluit ze allemaal op dezelfde manier. Dat is dus geen
         Forecast.Solar-truc: Solcast doet het net zo. Nagemeten in de klantwoning
         op 30-08-2026: veertien uur vooruit, per uur, in wattuur.
+
+        **Dezelfde kromme via de ingevulde sensoren** (v0.100.1), voor wie zijn
+        voorspeller niet in het energiedashboard heeft gezet. Zie
+        `_async_zon_uit_integratie`.
 
         **En anders wat de klant zelf heeft ingevuld.** Dit uur en het volgende
         staan al onder Zonverwachting en zijn dus echte getallen. Wat er die dag
@@ -5422,6 +5426,8 @@ class ChargerCoach:
         self._zon_tot = now + ZON_VERVERSEN
 
         kromme = await self._async_zon_uit_dashboard()
+        if not kromme:
+            kromme = await self._async_zon_uit_integratie(settings)
         if kromme:
             self._zon_kwh, self._zon_geschat = kromme, False
             return
@@ -5442,29 +5448,75 @@ class ChargerCoach:
         """
         try:
             from homeassistant.components.energy.data import async_get_manager
-            from homeassistant.loader import async_get_integration
 
             manager = await async_get_manager(self.hass)
-            uit: dict[datetime, float] = {}
-            for bron in (manager.data or {}).get("energy_sources") or []:
-                if bron.get("type") != "solar":
-                    continue
-                for entry_id in bron.get("config_entry_solar_forecast") or []:
-                    entry = self.hass.config_entries.async_get_entry(entry_id)
-                    if entry is None:
-                        continue
-                    integratie = await async_get_integration(self.hass, entry.domain)
-                    platform = await integratie.async_get_platform("energy")
-                    voorspeld = await platform.async_get_solar_forecast(self.hass, entry_id)
-                    # Welk uur een tijdstip bedoelt verschilt per voorspeller;
-                    # zie `zonkromme_uit`.
-                    kromme = zonkromme_uit(entry.domain, (voorspeld or {}).get("wh_hours") or {})
-                    for uur, kwh in kromme.items():
-                        uit[uur] = uit.get(uur, 0.0) + kwh
-            return uit
+            entries = [
+                entry_id
+                for bron in (manager.data or {}).get("energy_sources") or []
+                if bron.get("type") == "solar"
+                for entry_id in bron.get("config_entry_solar_forecast") or []
+            ]
+            return await self._async_kromme_van(entries)
         except Exception:  # noqa: BLE001 - een voorspelling is nuttig, niet noodzakelijk
             _LOGGER.debug("geen uurkromme uit het energiedashboard", exc_info=True)
             return {}
+
+    async def _async_zon_uit_integratie(self, settings: dict[str, Any]) -> dict[datetime, float]:
+        """Dezelfde uurkromme, via de integratie achter de ingevulde zonsensoren.
+
+        Voor wie zijn voorspeller niet in het energiedashboard heeft gezet. De
+        losse sensoren zijn dan een slechte tweede keus, en bij Forecast.Solar
+        dubbel: ze lezen dezelfde lijst als begin van het uur (zie
+        `zonkromme_uit`), en ze worden maar eens per uur bijgewerkt. Thuis op
+        26-09-2026 om 12:16 zei "dit uur" 1,228 kWh, en dat was de verwachting
+        van 10:00 tot 11:00: bijgewerkt om 11:48, en toen al een uur achter.
+
+        Elke integratie die het energiedashboard een kromme kan geven, geeft
+        hem ook hier: de entiteitregistratie zegt bij welke config entry een
+        ingevulde sensor hoort, en die vragen we om dezelfde
+        `async_get_solar_forecast`. Levert dat niets op (een sjabloonsensor,
+        een integratie zonder energieplatform), dan blijft `_zon_uit_sensoren`.
+        """
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            register = er.async_get(self.hass)
+            bron = (settings.get("sources") or {}).get("solar_forecast") or {}
+            entries = []
+            for entity_id in bron.values():
+                rij = register.async_get(entity_id) if isinstance(entity_id, str) and entity_id else None
+                if rij is not None and rij.config_entry_id:
+                    entries.append(rij.config_entry_id)
+            return await self._async_kromme_van(entries) if entries else {}
+        except Exception:  # noqa: BLE001 - een voorspelling is nuttig, niet noodzakelijk
+            _LOGGER.debug("geen uurkromme via de zonsensoren", exc_info=True)
+            return {}
+
+    async def _async_kromme_van(self, entry_ids: list[str]) -> dict[datetime, float]:
+        """De uurkromme van deze voorspellers samen, elk één keer, elk goed uitgelijnd.
+
+        Eén keer, want twee omvormers in het energiedashboard kunnen naar
+        dezelfde voorspeller wijzen, en dan telde de coach hem tot v0.100.1
+        dubbel; het energiedashboard zelf telt hem één keer. Faalt er één, dan
+        gooit dit, en valt de aanroeper terug: een halve kromme zegt te weinig
+        zon en is erger dan geen kromme.
+        """
+        from homeassistant.loader import async_get_integration
+
+        uit: dict[datetime, float] = {}
+        for entry_id in dict.fromkeys(entry_ids):
+            entry = self.hass.config_entries.async_get_entry(entry_id)
+            if entry is None:
+                continue
+            integratie = await async_get_integration(self.hass, entry.domain)
+            platform = await integratie.async_get_platform("energy")
+            voorspeld = await platform.async_get_solar_forecast(self.hass, entry_id)
+            # Welk uur een tijdstip bedoelt verschilt per voorspeller; zie
+            # `zonkromme_uit`.
+            kromme = zonkromme_uit(entry.domain, (voorspeld or {}).get("wh_hours") or {})
+            for uur, kwh in kromme.items():
+                uit[uur] = uit.get(uur, 0.0) + kwh
+        return uit
 
     def _zon_uit_sensoren(
         self, settings: dict[str, Any], now: datetime
