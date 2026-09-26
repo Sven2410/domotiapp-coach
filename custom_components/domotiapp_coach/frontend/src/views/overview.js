@@ -3026,10 +3026,13 @@ class DacViewOverview extends DacElement {
       const name = this.$(`[data-tab-name="${slot}"]`);
       if (name) {
         name.textContent = this.labelFor_(device);
-        // The dot says "released", so it only means anything on the devices
-        // that are waiting for that.
-        this.$(`[data-tab-dot="${slot}"]`).classList.toggle("on", asks && on);
-        this.$(`[data-tab-state="${slot}"]`).textContent = asks && on ? " (vrijgegeven)" : "";
+        // Groen is vrijgegeven, of aan het draaien. Alleen vrijgegeven was te
+        // weinig: de eigenaar op 26-09-2026 zag de vaatwasser draaien met een
+        // grijs bolletje, want thuis was hij met de hand gestart en de
+        // vrijgave stond uit.
+        const draait = asks && Boolean(besluit?.running);
+        this.$(`[data-tab-dot="${slot}"]`).classList.toggle("on", asks && (on || draait));
+        this.$(`[data-tab-state="${slot}"]`).textContent = draait ? " (draait)" : asks && on ? " (vrijgegeven)" : "";
       }
     });
 

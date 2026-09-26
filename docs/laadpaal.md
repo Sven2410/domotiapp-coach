@@ -198,6 +198,45 @@ nieuw: meteen "wacht tot 20:00" met de meterzin erbij, € 4,60 = het optimum) e
 `zonbelofte-dynamisch` (oud € 3,12 en vol om 02:18, nieuw € 2,99 bij een optimum
 van € 2,95). Proef 56 in test_planner.py, proef 69 in test_coach.py.
 
+**Forecast.Solar zet zijn uurwaarde op het eind van het uur** (v0.100.0). De
+eigenaar op 26-09-2026, na een vaatwasser die om 12:16 werd vrijgegeven en op
+14:00 wachtte: "check of de coach alles goed uitleest." De uurkromme van het
+energiedashboard (`_async_zon_uit_dashboard`) bestaat per voorspeller uit
+tijdstippen met wattuur, en Forecast.Solar zegt in zijn eigen documentatie: "the
+value is always for the period from last timestamp to the timestamp in the
+key." De waarde bij 14:00 is dus die van 13:00 tot 14:00. De coach las alles als
+het begin van het uur, en daarmee stond de hele verwachting van Forecast.Solar
+een uur te laat, voor elk apparaat tegelijk: de paal, de batterij, de
+vaatwasser en de boiler. Aan de kromme van de eigen woning die dag was het
+zelf te zien: `05:28:26` met 0 Wh bij zonsopkomst en `17:25:37` (UTC) met 37 Wh
+bij zonsondergang, dus wat er van 17:00 tot dan kwam. Het verklaart ook een
+deel van 17-09-2026 hierboven: 406 Wh "voor 20:00" terwijl het dak op nul
+stond, was de verwachting van 19:00 tot 20:00.
+
+Solcast zet het begin van elk half uur (`period_start` in zijn
+`get_energy_data`), Open-Meteo het begin van elk uur (`wh_period` uit
+`[time, time + 15 min)`); die twee klopten al. Nagelezen in hun broncode op
+26-09-2026. `zonkromme_uit` in coach.py legt per domein van de integratie
+(`VOORSPELLER_OP_EIND`) een eindpunt een seconde terug, zodat hij in het goede uur
+valt, ook bij zonsondergang. Proef 109 in test_coach.py (alle drie de
+voorspellers), en het virtuele huis kent `voorspeller="forecast_solar"`: de
+kromme met de sleutels zoals Forecast.Solar ze zet. Over alle scenario's
+gemeten geeft dat met v0.100.0 precies dezelfde uitkomst als een kromme op het
+begin van het uur; met de oude lezing bijvoorbeeld `vast-voorspelling-mis`
+€ 2,68 en 7,7 kWh zon tegen € 2,38 en 9,1, `weekend-voorspelling-mis` € 9,47
+tegen € 9,25, en de vaatwasser in `vaatwasser-zon` om 09:35 in plaats van
+09:00. Scenario's `forecast-solar-vast` en `vaatwasser-forecast-solar`. Eén
+keer viel de oude lezing goedkoper uit, `dynamisch-grote-auto` (€ 7,45 tegen
+€ 7,58, bij een optimum van € 7,45); dat gat van dertien cent zat er met een
+goed uitgelijnde kromme al.
+
+**Nog niet gerepareerd: de losse sensoren van Forecast.Solar.** Zonder kromme
+in het energiedashboard rekent de coach met de sensoren die de klant invult
+(`_zon_uit_sensoren`). Die van Forecast.Solar lezen dezelfde lijst als begin:
+"energie dit uur" is dan die van het vorige uur, en ze worden maar eens per uur
+bijgewerkt. Thuis staat de voorspeller in het energiedashboard, dus daar speelt
+het niet.
+
 **Wekken doet de coach op het plafond, want de paal kiest daarop zijn fasen**
 (v0.66.0). Thuis op 17-09-2026: om 14:10 stopte de coach om op de zon van 15:00
 te wachten, om 14:14 wekte hij met tien ampère, en de Easee begon op één fase.

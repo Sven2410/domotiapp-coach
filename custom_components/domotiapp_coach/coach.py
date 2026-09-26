@@ -661,6 +661,45 @@ def _moment(now: datetime | None = None) -> datetime:
     return dt_util.as_local(now or dt_util.utcnow()).replace(tzinfo=None)
 
 
+# Zonvoorspellers die een uurwaarde op het EIND van de periode zetten, per
+# domein van hun integratie. De rest zet hem op het begin.
+VOORSPELLER_OP_EIND = frozenset({"forecast_solar"})
+
+
+def zonkromme_uit(domein: str, wh_hours: dict[str, Any]) -> dict[datetime, float]:
+    """De uurkromme van één zonvoorspeller: kWh per lokaal uur, met het begin
+    van dat uur als sleutel.
+
+    **Niet elke voorspeller bedoelt met een tijdstip hetzelfde.** Forecast.Solar
+    zegt in zijn eigen documentatie: "the value is always for the period from
+    last timestamp to the timestamp in the key". De waarde bij 14:00 is dus
+    wat er van 13:00 tot 14:00 verwacht wordt. Solcast zet het begin van elk
+    half uur (`period_start`), Open-Meteo het begin van elk uur. Vóór v0.100.0
+    las de coach alles als begin, en stond de hele verwachting van
+    Forecast.Solar een uur te laat: de zon van 13:00 tot 14:00 kwam bij hem op
+    14:00 tot 15:00 terecht, bij de paal, de batterij, de vaatwasser en de
+    boiler. In de eigen woning op 26-09-2026 was het aan de kromme zelf te zien:
+    05:28:26 met 0 Wh (de zonsopkomst, er komt nog niets vóór) en 17:25:37
+    UTC met 37 Wh (de zonsondergang: wat er van 17:00 tot dan nog kwam).
+
+    Een seconde terug in de tijd legt zo'n eindpunt in het goede uur, ook het
+    eindpunt van de zonsondergang en een sleutel die precies op het hele uur
+    valt.
+    """
+    uit: dict[datetime, float] = {}
+    op_eind = domein in VOORSPELLER_OP_EIND
+    for stempel, wh in (wh_hours or {}).items():
+        moment = dt_util.parse_datetime(str(stempel))
+        if moment is None:
+            continue
+        lokaal = _moment(moment)
+        if op_eind:
+            lokaal -= timedelta(seconds=1)
+        uur = lokaal.replace(minute=0, second=0, microsecond=0)
+        uit[uur] = uit.get(uur, 0.0) + float(wh) / 1000.0
+    return uit
+
+
 def _hoofdletter(tekst: str) -> str:
     """Alleen de eerste letter groot, de rest zoals hij was.
 
@@ -5417,12 +5456,11 @@ class ChargerCoach:
                     integratie = await async_get_integration(self.hass, entry.domain)
                     platform = await integratie.async_get_platform("energy")
                     voorspeld = await platform.async_get_solar_forecast(self.hass, entry_id)
-                    for stempel, wh in ((voorspeld or {}).get("wh_hours") or {}).items():
-                        moment = dt_util.parse_datetime(str(stempel))
-                        if moment is None:
-                            continue
-                        uur = _moment(moment).replace(minute=0, second=0, microsecond=0)
-                        uit[uur] = uit.get(uur, 0.0) + float(wh) / 1000.0
+                    # Welk uur een tijdstip bedoelt verschilt per voorspeller;
+                    # zie `zonkromme_uit`.
+                    kromme = zonkromme_uit(entry.domain, (voorspeld or {}).get("wh_hours") or {})
+                    for uur, kwh in kromme.items():
+                        uit[uur] = uit.get(uur, 0.0) + kwh
             return uit
         except Exception:  # noqa: BLE001 - een voorspelling is nuttig, niet noodzakelijk
             _LOGGER.debug("geen uurkromme uit het energiedashboard", exc_info=True)

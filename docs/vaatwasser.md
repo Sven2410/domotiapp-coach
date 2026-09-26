@@ -301,3 +301,31 @@ om 03:08 gaat de deur dicht en om 03:09 draait hij) en
 `vaatwasser-lokaal-afstand-uit` (geen enkele druk, één melding). Proef 92 in
 test_coach.py, twee proeven in test_rapport.mjs. **Nog geen echte beurt aan
 Home Connect Local gestuurd**: de eerste is de vrijgave thuis na v0.84.0.
+
+**Een sensor zegt wanneer hij start** (v0.100.0). Thuis op 26-09-2026: om
+12:16 vrijgegeven met de schakelaar op de keukenkaart (een Lovelace-kaart die
+alleen entiteiten kent), de coach plande 14:00, en om 13:12 ging hij met de hand
+aan. Op het paneel stond "Hij start om 14:00", op de keukenkaart niets. De
+eigenaar: "dan wil ik dat er op de vaatwasser kaart komt te staan wanneer de coach
+van plan is om de vaatwasser aan te zetten." Gekozen boven een kaart die het de
+coach zelf vraagt: een sensor werkt in elke kaart en in een automatisering.
+`sensor.py`: één `StartOmSensor` per apparaat met een programma, onder een
+apparaat "DomotiApp Coach", met het tijdstip als toestand (`gepland_om`: alleen
+bij `wait-for-start`), en leeg als hij niet vrijgegeven is, nu start of draait.
+In de attributen de zin van de coach (`reason`, `plan`, niet in de recorder),
+`rule`, `released`, `running` en de vrijgaveschakelaar (`release_switch`), zodat
+een kaart die die schakelaar kent de sensor zelf kan vinden. Hij rekent niets:
+hij volgt `EVENT_DECISION` en `EVENT_SETTINGS_UPDATED`. Proef 110 in
+test_coach.py; het harnas kent daarvoor een nagebouwde `SensorEntity`.
+
+Wat er thuis gebeurde, voor wie het later naleest: de meter zag tussen 12:16 en
+13:12 op zijn laagste 940 W teruglevering over tien minuten (`METER_VENSTER`),
+de opwarmpiek van Express 60 is 2277 W gemeten, dus `meter_overal` greep niet in
+en de verwachting won. Met wolken zakte de teruglevering af en toe naar nul;
+de 3 kW die de eigenaar zag waren pieken van een paar minuten. De beurt kostte
+€ 0,190; nagerekend met de werkelijke zon en het echte verloop van de machine
+had 12:17 € 0,198 gekost en 14:00 € 0,203, alles van het net € 0,238. De
+verwachting stond bovendien een uur te laat (Forecast.Solar, zie
+`docs/laadpaal.md`), en die van 12:16 is niet bewaard: nagespeeld met de kromme
+van die avond en met die uit de sensoren van 11:48 kwam 13:00 à 13:15 eruit, niet
+14:00.

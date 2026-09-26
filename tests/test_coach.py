@@ -5770,6 +5770,89 @@ controle("de naam van de auto houdt zijn hoofdletters",
          coachmod._hoofdletter("Proefauto zonder HA") == "Proefauto zonder HA"
          and coachmod._hoofdletter("tesla Model Y") == "Tesla Model Y" and coachmod._hoofdletter("") == "", "")
 
+print("=== 109. elke zonvoorspeller in het goede uur (v0.100.0) ===")
+# Forecast.Solar zet een waarde op het eind van zijn periode, Solcast en
+# Open-Meteo op het begin. Een stuk van de kromme van Forecast.Solar zoals het
+# energiedashboard hem in de eigen woning op 26-09-2026 gaf, in UTC: de
+# zonsopkomst met 0, het ochtenduur, de middag, en de zonsondergang met wat er
+# na 17:00 nog kwam.
+FS109 = {
+    "2026-09-26T05:28:26+00:00": 0, "2026-09-26T06:00:00+00:00": 82,
+    "2026-09-26T11:00:00+00:00": 1471, "2026-09-26T12:00:00+00:00": 1489,
+    "2026-09-26T17:00:00+00:00": 334, "2026-09-26T17:25:37+00:00": 37,
+}
+kromme109 = coachmod.zonkromme_uit("forecast_solar", FS109)
+U109 = lambda h: dt.datetime(2026, 9, 26, h)  # noqa: E731
+controle("Forecast.Solar: 14:00 in de lijst is het uur van 13:00 tot 14:00",
+         abs(kromme109.get(U109(11), 0) - 1.489) < 1e-9 and abs(kromme109.get(U109(10), 0) - 1.471) < 1e-9
+         and U109(12) not in kromme109, f"{kromme109}")
+controle("Forecast.Solar: zonsopkomst en het eerste uur samen in het uur ervoor, zonsondergang in zijn eigen uur",
+         abs(kromme109.get(U109(5), 0) - 0.082) < 1e-9 and abs(kromme109.get(U109(16), 0) - 0.334) < 1e-9
+         and abs(kromme109.get(U109(17), 0) - 0.037) < 1e-9, f"{kromme109}")
+controle("Forecast.Solar: er gaat niets verloren",
+         abs(sum(kromme109.values()) - sum(FS109.values()) / 1000) < 1e-9, "")
+solcast109 = coachmod.zonkromme_uit("solcast_solar", {
+    "2026-09-26T11:00:00+00:00": 700, "2026-09-26T11:30:00+00:00": 750})
+controle("Solcast: twee halve uren vanaf hun begin in hetzelfde uur",
+         list(solcast109) == [U109(11)] and abs(solcast109[U109(11)] - 1.45) < 1e-9, f"{solcast109}")
+meteo109 = coachmod.zonkromme_uit("open_meteo_solar_forecast", {"2026-09-26T11:00:00+00:00": 1400})
+controle("Open-Meteo: het uur begint op de sleutel",
+         list(meteo109) == [U109(11)] and abs(meteo109[U109(11)] - 1.4) < 1e-9, f"{meteo109}")
+
+print("=== 110. een sensor zegt wanneer de coach de vaatwasser wil starten (v0.100.0) ===")
+# De eigenaar op 26-09-2026: om 12:16 vrijgegeven met de schakelaar op de
+# keukenkaart, de coach plande 14:00, en daar stond nergens iets over; om 13:12
+# ging hij met de hand aan. Nu een sensor per apparaat met een programma.
+WACHT110 = {"kind": "programma", "rule": "wait-for-start", "charge": False, "released": True,
+            "running": False, "starts_at": "2026-09-26T14:00:00",
+            "reason": "Hij start om 14:00: dan is Express 60 °C het goedkoopst.", "plan": "Klaar rond 15:32."}
+moment110 = sensormod.gepland_om(WACHT110)
+controle("wacht hij op het gekozen moment, dan is dat de toestand, met de tijdzone van het huis",
+         moment110 == dt.datetime(2026, 9, 26, 14, 0, tzinfo=dt.timezone(dt.timedelta(hours=2))), f"{moment110}")
+controle("niet vrijgegeven, start nu, of draait al: geen tijdstip",
+         sensormod.gepland_om({"rule": "not-released"}) is None
+         and sensormod.gepland_om({"rule": "cheapest-start", "charge": True}) is None
+         and sensormod.gepland_om(dict(WACHT110, running=True)) is None
+         and sensormod.gepland_om(None) is None, "")
+
+VW110 = {"id": "dev-vw", "type": "vaatwasser", "name": "Vaatwasser",
+         "entities": {"status": "sensor.vw_status", "release_switch": "input_boolean.vw_vrij"}}
+inst110 = instellingen()
+inst110["devices"] = [LAADPAAL, VW110]
+hass110, _, coach110 = bouw(huis(), inst110)
+hass110.data["domotiapp_coach"]["coach"] = coach110
+coach110.state["dev-vw"] = dict(WACHT110)
+
+
+class Invoer110:
+    def __init__(self):
+        self.afmelden = []
+
+    def async_on_unload(self, wat):
+        self.afmelden.append(wat)
+
+
+toegevoegd110 = []
+asyncio.run(sensormod.async_setup_entry(hass110, Invoer110(), lambda nieuw: toegevoegd110.extend(nieuw)))
+controle("één sensor, voor de vaatwasser en niet voor de laadpaal",
+         len(toegevoegd110) == 1 and toegevoegd110[0].name == "Vaatwasser start om"
+         and toegevoegd110[0].unique_id == "dev-vw_start_om", f"{[(s.name, s.unique_id) for s in toegevoegd110]}")
+s110 = toegevoegd110[0]
+controle("hij begint met wat de coach al besloten had, en noemt de vrijgaveschakelaar",
+         s110.native_value == moment110 and s110.extra_state_attributes["release_switch"] == "input_boolean.vw_vrij"
+         and s110.extra_state_attributes["reason"].startswith("Hij start om 14:00"), f"{s110.extra_state_attributes}")
+luister110 = dict((soort, wat) for soort, wat in hass110.bus.luisteraars)
+s110.hass = hass110
+luister110[coachmod.EVENT_DECISION](types.SimpleNamespace(
+    data={"device": "dev-vw", **dict(WACHT110, rule="running", running=True, charge=True, starts_at=None,
+                                     reason="Hij draait.")}))
+controle("draait hij, dan is het tijdstip weg en schrijft hij één keer",
+         s110.native_value is None and getattr(s110, "geschreven", 0) == 1, f"{s110.native_value} {getattr(s110, 'geschreven', 0)}")
+luister110[coachmod.EVENT_DECISION](types.SimpleNamespace(
+    data={"device": "dev-vw", **dict(WACHT110, rule="running", running=True, charge=True, starts_at=None,
+                                     reason="Hij draait.")}))
+controle("hetzelfde besluit een ronde later schrijft niets", getattr(s110, "geschreven", 0) == 1, "")
+
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

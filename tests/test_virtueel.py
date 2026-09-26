@@ -298,6 +298,21 @@ for naam in ("vast-zonder-voorspelling", "vast-sensor-voorspelling"):
 if (vl := v("vast-voorspelling-mis")):
     controle("voorspelling mis: de klaar-tijd wordt toch gehaald", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
+# Forecast.Solar zet een uurwaarde op het eind van het uur (v0.100.0). Met de
+# sleutels zoals die voorspeller ze levert moet dezelfde dag precies hetzelfde
+# lopen als met een kromme die het begin van het uur gebruikt. Oud kostte
+# deze dag € 2,68 met 7,7 kWh zon, en startte de vaatwasser om 09:35.
+if (vl := v("forecast-solar-vast")) and (vd := v("vast-voorspelling-mis")):
+    controle("Forecast.Solar: dezelfde kosten en dezelfde zon als met de kromme op het begin van het uur",
+             abs(vl.kosten - vd.kosten) < 0.005 and abs(vl.uit_zon_kwh - vd.uit_zon_kwh) < 0.05,
+             f"forecast.solar €{vl.kosten:.2f} zon {vl.uit_zon_kwh:.1f}, begin €{vd.kosten:.2f} zon {vd.uit_zon_kwh:.1f}")
+    controle("Forecast.Solar: en de klaar-tijd gehaald", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+if (vl := v("vaatwasser-forecast-solar")) and (vd := v("vaatwasser-zon")):
+    controle("Forecast.Solar: de vaatwasser start op hetzelfde moment, 09:00",
+             vl.vw_gestart is not None and vd.vw_gestart is not None
+             and abs((vl.vw_gestart - vd.vw_gestart).total_seconds()) <= 60,
+             f"forecast.solar {vl.vw_gestart}, begin {vd.vw_gestart}")
+
 if (vl := v("vast-geen-klaar-tijd")):
     controle("geen klaar-tijd: toch vol op zon", vl.klaar_op is not None and vl.uit_net_kwh < 0.3,
              f"vol {vl.klaar_op}, net {vl.uit_net_kwh:.2f}")

@@ -1603,7 +1603,11 @@ function kaartKnoppen({ ready = [], now = [], missed = "2026-09-12T16:30:00", ru
       hidden: false, innerHTML: "", textContent: "", value: "", dataset: {}, style: {}, attrs: {},
       setAttribute(k, v) { this.attrs[k] = v; },
       getAttribute(k) { return this.attrs[k]; },
-      classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
+      classList: {
+        klassen: new Set(),
+        toggle(k, aan) { if (aan) this.klassen.add(k); else this.klassen.delete(k); },
+        add() {}, remove() {}, contains: () => false,
+      },
       replaceChildren() {}, append() {}, addEventListener() {}, close() {}, focus() {},
       querySelector: () => stub(), querySelectorAll: () => [],
     };
@@ -1627,6 +1631,8 @@ function kaartKnoppen({ ready = [], now = [], missed = "2026-09-12T16:30:00", ru
     nuTekst: knopen.get('[data-release-now-text="0"]')?.textContent,
     nuVerborgen: knopen.get('[data-release-now="0"]')?.hidden,
     uitleg: knopen.get('[data-hint="0"]')?.textContent,
+    groen: knopen.get('[data-tab-dot="0"]')?.classList.klassen.has("on"),
+    staat: knopen.get('[data-tab-state="0"]')?.textContent,
   };
 }
 
@@ -1647,6 +1653,21 @@ proef("vrijgegeven voor morgen blijft 'toch nu starten' staan; nu gekozen verdwi
   const nu = kaartKnoppen({ ready: ["d2"], now: ["d2"] });
   assert.equal(nu.gewoon, "Vrijgegeven, start nu");
   assert.equal(nu.nuVerborgen, true);
+});
+
+// De eigenaar op 26-09-2026: "bij aanstuurbare apparaten draait de vaatwasser
+// maar het bolletje is niet groen." Thuis was hij met de hand gestart, dus de
+// vrijgave stond uit, en het bolletje zei alleen "vrijgegeven".
+proef("het bolletje is groen als hij vrijgegeven is, en ook als hij draait zonder vrijgave", () => {
+  const niets = kaartKnoppen({ missed: null });
+  assert.equal(niets.groen, false, "niet vrijgegeven en stil: grijs");
+  assert.equal(niets.staat, "");
+  const vrij = kaartKnoppen({ ready: ["d2"], missed: null });
+  assert.equal(vrij.groen, true, "vrijgegeven: groen");
+  assert.equal(vrij.staat, " (vrijgegeven)");
+  const hand = kaartKnoppen({ missed: null, running: true });
+  assert.equal(hand.groen, true, "met de hand gestart: groen");
+  assert.equal(hand.staat, " (draait)");
 });
 
 proef("voor de klaar-tijd en tijdens een beurt blijft het één knop", () => {
