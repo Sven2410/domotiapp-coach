@@ -129,7 +129,49 @@ def _lees_tijd(waarde):
 
 
 dtutil.parse_datetime = _lees_tijd
+# De tijdzone van de installatie. Een vaste zomertijd, want tzdata staat niet
+# op elke machine en de proeven hoeven geen wisseling van de klok te zien.
+dtutil.get_default_time_zone = lambda: dt.timezone(dt.timedelta(hours=2))
 util.dt = dtutil
+
+# De sensor van de coach (v0.100.0, sensor.py): net genoeg van de klassen van
+# Home Assistant om hem te laden en zijn toestand te lezen.
+componenten = types.ModuleType("homeassistant.components")
+componenten.__path__ = []
+sensormod_ha = types.ModuleType("homeassistant.components.sensor")
+
+
+class SensorDeviceClass:  # noqa: D101
+    TIMESTAMP = "timestamp"
+
+
+class SensorEntity:
+    """Zoals Home Assistant: `hass` is er pas als de entiteit is toegevoegd."""
+
+    hass = None
+    entity_id = None
+    name = property(lambda self: getattr(self, "_attr_name", None))
+    unique_id = property(lambda self: getattr(self, "_attr_unique_id", None))
+
+    def async_write_ha_state(self):
+        self.geschreven = getattr(self, "geschreven", 0) + 1
+
+
+sensormod_ha.SensorDeviceClass = SensorDeviceClass
+sensormod_ha.SensorEntity = SensorEntity
+configitems = types.ModuleType("homeassistant.config_entries")
+configitems.ConfigEntry = object
+apparaatreg = types.ModuleType("homeassistant.helpers.device_registry")
+
+
+class DeviceEntryType:  # noqa: D101
+    SERVICE = "service"
+
+
+apparaatreg.DeviceEntryType = DeviceEntryType
+apparaatreg.DeviceInfo = dict
+entiteitplatform = types.ModuleType("homeassistant.helpers.entity_platform")
+entiteitplatform.AddEntitiesCallback = object
 
 sys.modules.update({
     "homeassistant": ha,
@@ -141,6 +183,11 @@ sys.modules.update({
     "homeassistant.helpers.storage": opslag,
     "homeassistant.util": util,
     "homeassistant.util.dt": dtutil,
+    "homeassistant.components": componenten,
+    "homeassistant.components.sensor": sensormod_ha,
+    "homeassistant.config_entries": configitems,
+    "homeassistant.helpers.device_registry": apparaatreg,
+    "homeassistant.helpers.entity_platform": entiteitplatform,
 })
 
 # --- het pakket zelf, zonder __init__.py te draaien ------------------------
@@ -165,6 +212,7 @@ planner = laad("planner")
 laad("batterij")
 storage = laad("storage")
 coachmod = laad("coach")
+sensormod = laad("sensor")
 monitormod = laad("monitor")
 
 # --- een huis om in te meten ------------------------------------------------

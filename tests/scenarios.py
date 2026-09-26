@@ -1102,6 +1102,22 @@ alfen_doel_80 = doel_onder_auto.kopie(
     paal=Paal(merk="alfen"),
 )
 
+# Forecast.Solar zet een uurwaarde op het EIND van zijn periode (v0.100.0). De
+# coach las tot dan alles als begin, en dan stond de zon een uur te laat. In
+# de eigen woning op 26-09-2026 aan de kromme zelf gezien. Dezelfde dag met de
+# sleutels zoals Forecast.Solar ze zet hoort precies hetzelfde te lopen.
+# Oud: bij vast-voorspelling-mis € 2,68 (zon 7,7 kWh) tegen € 2,38 (zon 9,1),
+# de vaatwasser om 09:35 in plaats van 09:00.
+forecast_solar_vast = vast_voorspelling_mis.kopie(
+    naam="forecast-solar-vast", uitleg="vast-voorspelling-mis met de uurkromme zoals Forecast.Solar hem levert: de waarde op het eind van het uur",
+    voorspeller="forecast_solar",
+)
+forecast_solar_vaatwasser = vaatwasser_zon.kopie(
+    naam="vaatwasser-forecast-solar", uitleg="vaatwasser-zon met de uurkromme zoals Forecast.Solar hem levert: dezelfde start om 09:00",
+    voorspeller="forecast_solar",
+)
+
+
 ALLE = [
     alfen_zonnig, alfen_dyn, alfen_doel_80, alfen_laadgrens,
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
@@ -1123,6 +1139,7 @@ ALLE = [
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,
     vaatwasser_zonpiek, vaatwasser_eindtijd, vaatwasser_eindtijd_bijstellen, vaatwasser_na_klaartijd, vaatwasser_na_klaartijd_nu,
     vaatwasser_lokaal, vaatwasser_lokaal_deur, vaatwasser_lokaal_afstand_uit,
+    forecast_solar_vast, forecast_solar_vaatwasser,
     boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
     *KLANTWONING,
     *BATTERIJ,

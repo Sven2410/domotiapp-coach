@@ -897,7 +897,10 @@ class Scenario:
     # Een Easee Equalizer: houdt de som van huis en paal zelf onder de zekering,
     # meldt hoeveel hij vrijgeeft, en de paal zegt waarom hij geknepen wordt.
     equalizer: bool = False
-    voorspeller: str = "dashboard"      # dashboard | sensoren | geen
+    # dashboard | forecast_solar | sensoren | geen. "forecast_solar" is ook het
+    # energiedashboard, maar met de sleutels zoals Forecast.Solar ze zet: op het
+    # eind van het uur (v0.100.0, zie `zonkromme_uit` in coach.py).
+    voorspeller: str = "dashboard"
     # Wat de coach bij een eerdere beurt over deze auto leerde: kW per band van
     # tien procent, zoals `car_pace` in de instellingen. Zie `_tempo_leren`.
     geleerd_tempo: dict = field(default_factory=dict)
@@ -1686,7 +1689,7 @@ class Wereld:
 
     async def zonkromme(self) -> dict:
         """Wat het energiedashboard zou geven: een uurkromme, vandaag en morgen."""
-        if self.s.voorspeller != "dashboard":
+        if self.s.voorspeller not in ("dashboard", "forecast_solar"):
             return {}
         uit = {}
         vandaag = dt.datetime.combine(self.nu.date(), dt.time(0))
@@ -1695,6 +1698,13 @@ class Wereld:
             kwh = self.zon.verwacht_kwh(uur)
             if kwh > 0:
                 uit[uur] = kwh
+        if self.s.voorspeller == "forecast_solar":
+            # Zoals Forecast.Solar het levert: de waarde van 12:00 tot 13:00
+            # staat bij 13:00, in Wh. De coach legt hem zelf terug.
+            return coachmod.zonkromme_uit(
+                "forecast_solar",
+                {(uur + dt.timedelta(hours=1)).isoformat(): kwh * 1000 for uur, kwh in uit.items()},
+            )
         return uit
 
     def archief(self):

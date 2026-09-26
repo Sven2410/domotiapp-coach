@@ -65,3 +65,12 @@ staan sinds 06-09-2026 onder Meldingen, en de apparaten op hun eigen kaart.
 Het schuifje is geen apart begrip: het is de `enabled` die elk schema al had.
 Staat hij uit, dan slaat `_days` in `coach.py` het schema over en vervalt in
 `planner.py` de hele klaar-tijdtak.
+
+## Het bolletje op de tabbladen
+
+**Groen is vrijgegeven, of aan het draaien** (v0.100.0). Tot dan betekende het
+alleen "vrijgegeven". De eigenaar op 26-09-2026, met een schermafdruk: "bij
+aanstuurbare apparaten in het overzicht draait de vaatwasser maar het bolletje
+is niet groen." Thuis was hij met de hand gestart en de vrijgave stond uit.
+Alleen bij apparaten die een vrijgave kennen (`needsRelease`); de schermlezer
+hoort " (draait)" of " (vrijgegeven)". Proef in test_rapport.mjs.

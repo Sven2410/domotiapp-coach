@@ -175,7 +175,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 
 | werk je aan | lees eerst |
 |---|---|
-| de laadpaal: een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla | `docs/laadpaal.md` |
+| de laadpaal: de zonverwachting per voorspeller (Forecast.Solar telt op het eind van het uur), een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla | `docs/laadpaal.md` |
 | een Alfen, of iets aan de paalsturing | `docs/alfen.md` |
 | groepen met een eigen zekering (een onderverdeelkast) | `docs/groepen.md` |
 | de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, en hoe de coach prijslijsten leest | `docs/batterij.md` |
@@ -211,6 +211,7 @@ dan de andere in dezelfde uitgave.
 | `batterij.py` | het denkwerk voor een thuisbatterij, kent Home Assistant ook niet: `plan_batterij` (de stand), `Regelaar` (de snelle lus), `verdiend`, `terugverdiend`, `rendement_uit_tellers` |
 | `coach.py` | leest sensoren, stuurt de paal aan, houdt de laadbeurt bij |
 | `websocket.py` | wat het paneel mag opvragen en wijzigen |
+| `sensor.py` | de eerste eigen entiteiten (v0.100.0): per apparaat met een programma een sensor "start om", met het geplande tijdstip, voor een keukenkaart of een automatisering. Volgt het besluit op de eventbus, rekent zelf niets (`docs/vaatwasser.md`) |
 | `storage.py` | de instellingen op schijf |
 | `monitor.py` | de zekeringbewaking en de wachthond |
 | `report.py` | het pdf-rapport |
@@ -246,10 +247,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 441 controles op het denkwerk
 python tests/test_batterij.py    # 126 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 681 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 1957 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 692 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 1977 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 108 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 109 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```
