@@ -3519,6 +3519,8 @@ b, m = asyncio.run(ronde64(dt.datetime(2026, 9, 8, 12, 31)))
 print(f"  verslag: {m}")
 controle("het verslag zegt wat er bespaard is, en dat het allemaal de zon was",
          len(m) == 1 and "is klaar" in m[0] and "Bespaard € 0,051, allemaal door de zon." in m[0], f"{m}")
+controle("en waar de stroom vandaan kwam, zonder een bedrag dat nergens betaald is (v0.101.0)",
+         len(m) == 1 and "Alles kwam van je zon." in m[0] and "ongeveer" not in m[0], f"{m}")
 b64 = [b for b in asyncio.run(coachmod.async_get_beurten(hass64).async_list()) if b["device"] == "dev-vaatwasser"]
 controle("en onder Bespaard staat het zonaandeel, met het zondeel erbij",
          len(b64) == 1 and abs(b64[0]["saved"] - b64[0]["kwh"] * 0.052756) < 0.001
@@ -5269,17 +5271,18 @@ print("=== 97. het verslag van een laadbeurt: accustand van en naar, net en zon 
 # kWh geladen, en is de accu gestegen van A% naar B%. C kWh is afgenomen van het
 # net met een totaalprijs van € D; E kWh heb je direct verbruikt van je zonopwek."
 cijfers = coachmod.ChargerCoach._beurt_cijfers
-sessie97 = {"soc_begin": 44.0, "geld": {"kwh": 28.1, "zon_kwh": 6.2, "betaald": 6.72}}
+sessie97 = {"soc_begin": 44.0, "geld": {"kwh": 28.1, "zon_kwh": 6.2, "betaald": 6.72, "net_eur": 6.72}}
 auto97 = coachmod.Car(capacity_kwh=78.0, phases=3, soc_percent=80.0)
 zin97 = cijfers(sessie97, auto97)
 print(f"  {zin97.strip()}")
+# Sinds v0.101.0 dezelfde zin als bij elk apparaat: eigen zon eerst, het bedrag bij het net.
 controle("van en naar, net met bedrag, en zon",
-         zin97 == " De accu ging van 44 naar 80%. 21,9 kWh kwam van het net voor € 6,72; 6,2 kWh kwam direct van je zon.", zin97)
+         zin97 == " De accu ging van 44 naar 80%. 6,2 kWh kwam van je zon en 21,9 kWh van het net voor € 6,72.", zin97)
 geschat97 = cijfers(sessie97, coachmod.Car(capacity_kwh=78.0, phases=3, soc_percent=80.0, soc_estimated=True))
 controle("een geschatte stand zegt dat erbij", "80% (geschat)." in geschat97, geschat97)
 controle("zonder accustand geen procenten", "accu ging" not in cijfers({"geld": sessie97["geld"]}, coachmod.Car()), "")
 controle("alles op zon: geen netzin", cijfers({"geld": {"kwh": 5.0, "zon_kwh": 5.0, "betaald": 0.0}}, None)
-         == " 5,0 kWh kwam direct van je zon.", cijfers({"geld": {"kwh": 5.0, "zon_kwh": 5.0, "betaald": 0.0}}, None))
+         == " Alles kwam van je zon.", cijfers({"geld": {"kwh": 5.0, "zon_kwh": 5.0, "betaald": 0.0}}, None))
 controle("niets geladen: niets erbij", cijfers({"geld": {}}, None) == "", "")
 
 print("=== 98. de nachtstrategie en de accu die de auto helpt komen uit de instellingen (v0.90.0) ===")
@@ -6100,6 +6103,76 @@ volgorde112b = [d[2].get("entity_id") for d in hass112b.services.verstuurd]
 controle("een batterij met een knop die er gewoon is: eerst 0 W, dan de stand, zoals altijd",
          volgorde112b == ["number.batterij_vermogen", "select.batterij_modus"], f"{volgorde112b}")
 
+
+print("=== 113. waar de stroom vandaan kwam: zon, thuisbatterij en net, bij elk apparaat (v0.101.0) ===")
+# De eigenaar op 28-09-2026, bij "0,9 kWh, ongeveer € 0,199. Bespaard € 0,018,
+# allemaal door de zon": "moet daar niet iets van de batterij bij? ... er is niks
+# van het net af gehaald." Gemeten in de recorder: 0,908 kWh, 0,329 van de zon,
+# 0,553 uit de thuisbatterij en 0,026 van het net.
+zin113 = coachmod._herkomst_zin
+controle("de beurt van die middag", zin113(0.329, 0.553, 0.026, 0.006)
+         == "0,3 kWh kwam van je zon en 0,6 kWh uit je thuisbatterij.", zin113(0.329, 0.553, 0.026, 0.006))
+controle("alle drie, eigen energie eerst en het bedrag bij het net", zin113(6.2, 3.0, 21.9, 6.72)
+         == "6,2 kWh kwam van je zon, 3,0 kWh uit je thuisbatterij en 21,9 kWh van het net voor € 6,72.",
+         zin113(6.2, 3.0, 21.9, 6.72))
+controle("alleen van het net", zin113(0.0, 0.0, 0.9, 0.199) == "Alles kwam van het net, voor € 0,199.",
+         zin113(0.0, 0.0, 0.9, 0.199))
+controle("alleen uit de thuisbatterij", zin113(0.0, 0.9, 0.0, 0.0) == "Alles kwam uit je thuisbatterij.", "")
+controle("een onbekend bedrag laat het bedrag weg", zin113(0.5, 0.0, 1.0, None)
+         == "0,5 kWh kwam van je zon en 1,0 kWh van het net.", zin113(0.5, 0.0, 1.0, None))
+controle("een paar wattuur noemt hij niet", zin113(0.01, 0.0, 0.02, 0.005) == "", "")
+controle("één aantal decimalen per zin",
+         coachmod.ChargerCoach._bespaard_zin(1.0, 0.5) == "Bespaard € 1,00: € 0,50 door de zon en € 0,50 door te wachten."
+         and coachmod.ChargerCoach._bespaard_zin(0.018, 0.018) == "Bespaard € 0,018, allemaal door de zon.",
+         coachmod.ChargerCoach._bespaard_zin(1.0, 0.5))
+
+BAT113 = {**BATTERIJ, "controllable": False}
+inst113 = instellingen(devices=[LAADPAAL, BAT113])
+hass113, _, coach113 = bouw(huis75(afname=0.0, teruglevering=0.0, batterij="-550"), inst113)
+controle("de batterij levert en het net niets: wat niet van de zon komt is batterij",
+         coach113._uit_accu(inst113) == 1.0, f"{coach113._uit_accu(inst113)}")
+hass113.states.zet("sensor.afname", "550")
+controle("net en batterij evenveel: half om half", abs(coach113._uit_accu(inst113) - 0.5) < 1e-9,
+         f"{coach113._uit_accu(inst113)}")
+hass113.states.zet("sensor.batterij_vermogen", {"state": "800", "attributes": {"unit_of_measurement": "W"}})
+controle("een batterij die laadt levert niets", coach113._uit_accu(inst113) == 0.0, "")
+controle("zonder batterij ook niets", coach113._uit_accu(instellingen()) == 0.0, "")
+
+# Een vaatwasser van 2 kW een half uur op de batterij: alles uit de batterij, niets
+# van het net, en het geld zoals het was (het deel uit de batterij telt als net,
+# want wat de batterij verdient staat in haar eigen kasboek).
+hass113.states.zet("sensor.afname", "0")
+hass113.states.zet("sensor.batterij_vermogen", {"state": "-2000", "attributes": {"unit_of_measurement": "W"}})
+NU113 = dt.datetime(2026, 9, 28, 14, 0)
+sessie113 = coachmod.ChargerCoach._lege_programma_sessie(NU113)
+for minuut in range(1, 31):
+    coach113._programma_tellen(inst113, sessie113, NU113 + dt.timedelta(minutes=minuut), 2000.0)
+    sessie113["laatst"] = NU113 + dt.timedelta(minutes=minuut)
+controle("een half uur op 2 kW uit de batterij: 1 kWh uit de batterij, niets van het net",
+         abs(sessie113["kwh"] - 1.0) < 1e-6 and abs(sessie113["accu_kwh"] - 1.0) < 1e-6 and sessie113["net_eur"] == 0.0
+         and sessie113["zon_kwh"] == 0.0, f"{sessie113['kwh']} {sessie113['accu_kwh']} {sessie113['net_eur']}")
+controle("het geld blijft zoals het was: de batterij telt als net",
+         abs(sessie113["betaald"] - 0.24171) < 1e-6, f"{sessie113['betaald']}")
+controle("en de zin zegt het", coachmod.ChargerCoach._herkomst_tekst(sessie113) == "Alles kwam uit je thuisbatterij.",
+         coachmod.ChargerCoach._herkomst_tekst(sessie113))
+sessie113["gestart"] = NU113
+sessie113["vrijgegeven"] = NU113
+regel113 = coach113._programma_regel({"id": "dev-vw"}, "Vaatwasser", sessie113, NU113, NU113, klaar=True)
+controle("de beurt in de opslag weet het ook", regel113["battery_kwh"] == 1.0 and regel113["grid_cost"] == 0.0,
+         f"{regel113.get('battery_kwh')} {regel113.get('grid_cost')}")
+
+# Een beurt van voor deze versie, na een herstart opgepakt: geen bedrag, want dat
+# begon niet bij nul.
+velden113 = coachmod.ChargerCoach._herkomst_velden({"kwh": 3.0, "net_eur_onbekend": True, "net_eur": 0.4})
+controle("een beurt zonder begin van het netbedrag slaat geen bedrag op", velden113["grid_cost"] is None, f"{velden113}")
+
+# Het laadverslag zegt ook wat er bespaard is, met dezelfde maat als Bespaard.
+geld113 = {"ijk_prijs": 0.3, "kwh": 10.0, "betaald": 2.0, "zon_winst": 0.5, "onbekend_kwh": 0.0,
+           "basis_punten": [[10.0, 3.0]], "basis_kwh": 10.0, "basis_kosten": 3.0}
+controle("het laadverslag zegt wat er bespaard is",
+         coach113._beurt_bespaard({"geld": geld113}) == " Bespaard € 1,00: € 0,50 door de zon en € 0,50 door te wachten.",
+         coach113._beurt_bespaard({"geld": geld113}))
+controle("zonder maat zegt het niets", coach113._beurt_bespaard({"geld": {**geld113, "ijk_prijs": None}}) == "", "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

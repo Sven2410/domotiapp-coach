@@ -46,13 +46,16 @@ export function delen(beurt) {
 /** Alles opgeteld. `onbekend` is hoeveel beurten geen prijs hadden. */
 export function totalen(items) {
   const uit = {
-    beurten: 0, kwh: 0, solar_kwh: 0, paid: 0, ref_cost: 0, saved: 0, solar_saved: 0, wait_saved: 0,
-    onbekend: 0, lopend: 0,
+    beurten: 0, kwh: 0, solar_kwh: 0, battery_kwh: 0, paid: 0, ref_cost: 0, saved: 0, solar_saved: 0,
+    wait_saved: 0, onbekend: 0, lopend: 0,
   };
   for (const b of items ?? []) {
     uit.beurten += 1;
     uit.kwh += Number(b.kwh) || 0;
     uit.solar_kwh += Number(b.solar_kwh) || 0;
+    // Wat er uit de thuisbatterij kwam (v0.101.0). Een beurt van daarvoor kent
+    // het niet en telt hier als nul; het geld verandert er niet door.
+    uit.battery_kwh += Number(b.battery_kwh) || 0;
     if (!b.complete) uit.lopend += 1;
     if (b.price_unknown) uit.onbekend += 1;
     if (b.saved === null || b.saved === undefined) continue;

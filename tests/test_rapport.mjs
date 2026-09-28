@@ -1597,7 +1597,7 @@ proef("de tijdlijnknop staat in de rij en is verborgen tot er een plan is", () =
 // ingeruimd en morgen starten of ingeruimd en nu starten." De coach zegt in
 // zijn besluit welke klaar-tijd gemist is (`missed`) en naar welke dag het
 // schema opschuift (`later`); de kaart maakt daar twee knoppen van.
-function kaartKnoppen({ ready = [], now = [], missed = "2026-09-12T16:30:00", running = false } = {}) {
+function kaartKnoppen({ ready = [], now = [], missed = "2026-09-12T16:30:00", running = false, apparaat = null } = {}) {
   const stub = () => {
     const doel = {
       hidden: false, innerHTML: "", textContent: "", value: "", dataset: {}, style: {}, attrs: {},
@@ -1617,8 +1617,8 @@ function kaartKnoppen({ ready = [], now = [], missed = "2026-09-12T16:30:00", ru
   const el = Object.create(Overzicht.prototype);
   el.$ = (kiezer) => { if (!knopen.has(kiezer)) knopen.set(kiezer, stub()); return knopen.get(kiezer); };
   el.$$ = () => [];
-  const device = { id: "d2", type: "vaatwasser", name: "Vaatwasser", brand: "home_connect",
-                   controllable: true, entities: {}, details: [] };
+  const device = apparaat ?? { id: "d2", type: "vaatwasser", name: "Vaatwasser", brand: "home_connect",
+                              controllable: true, entities: {}, details: [] };
   el.labels_ = new Map([["d2", "Vaatwasser"]]);
   el.settings_ = { devices: [device], ready_devices: ready, ready_now: now, strategy: { schedules: [] } };
   el.coach_ = { d2: { kind: "programma", rule: ready.length ? "wait-for-start" : "not-released", level: "steer",
@@ -1668,6 +1668,28 @@ proef("het bolletje is groen als hij vrijgegeven is, en ook als hij draait zonde
   const hand = kaartKnoppen({ missed: null, running: true });
   assert.equal(hand.groen, true, "met de hand gestart: groen");
   assert.equal(hand.staat, " (draait)");
+});
+
+// De eigenaar op 28-09-2026: "bolletje van de batterij is niet groen. Als die laadt
+// of ontlaadt moet hij groen zijn. Staat hij echt niks te doen dan moet hij uit
+// zijn." Dezelfde grens als "Doet nu" op de kaart (`ACTIVE_WATTS`).
+proef("het bolletje van de thuisbatterij is groen als hij laadt of ontlaadt, en uit als hij stilstaat", () => {
+  const accu = (w) => kaartKnoppen({
+    missed: null,
+    apparaat: { id: "d2", type: "thuisbatterij", name: "Batterij", brand: "anker", controllable: true,
+                entities: {}, details: [], watts: w === null ? null : Math.abs(w), batteryWatts: w },
+  });
+  const laadt = accu(1470);
+  assert.equal(laadt.groen, true, "laden: groen");
+  assert.equal(laadt.staat, " (laadt)");
+  const ontlaadt = accu(-300);
+  assert.equal(ontlaadt.groen, true, "ontladen: groen");
+  assert.equal(ontlaadt.staat, " (ontlaadt)");
+  for (const w of [0, 3, -3, null]) {
+    const stil = accu(w);
+    assert.equal(stil.groen, false, `${w} W: uit`);
+    assert.equal(stil.staat, "");
+  }
 });
 
 proef("voor de klaar-tijd en tijdens een beurt blijft het één knop", () => {
@@ -1998,6 +2020,152 @@ proef("en wat de batterij laadt is geen verbruik van de woning", () => {
   const r = woningMetBatterij(2000, staten);
   assert.equal(r.house, 300);
   assert.equal(r.devices[0].details[0].text, "laadt");
+});
+
+// --- In geld en Terugverdiend (v0.101.0) --------------------------------------
+// De eigenaar op 28-09-2026: "ik wil op het historie overzicht duidelijk hebben wat
+// ik heb bespaard die dag, totaal uitgegeven en totaal bespaard", "de klant wil
+// natuurlijk ook zijn investering weten", en "stel alles goed op elkaar af".
+const geld = await import("../custom_components/domotiapp_coach/frontend/src/geld.js");
+const VAST = { type: "fixed", netting: true, fixed: { all_in_price: 0.24171, feed_in_tariff: 0.0721, feed_in_costs: 0.052756 } };
+const TARIEF = { buy: 0.24171, feedIn: 0.0721 - 0.052756 };
+
+proef("salderen: tot 2027 is een teruggeleverde kWh de prijs min de terugleverkosten, daarna de vergoeding", () => {
+  const voor = geld.prijsOp(VAST, TARIEF, new Map(), new Date(2026, 8, 28, 12));
+  assert.ok(Math.abs(voor.koop - 0.24171) < 1e-9 && Math.abs(voor.terug - (0.24171 - 0.052756)) < 1e-9, `${voor.terug}`);
+  const na = geld.prijsOp(VAST, TARIEF, new Map(), new Date(2027, 0, 1, 12));
+  assert.ok(Math.abs(na.terug - (0.0721 - 0.052756)) < 1e-9, `${na.terug}`);
+  const zonder = geld.prijsOp({ ...VAST, netting: false }, TARIEF, new Map(), new Date(2026, 8, 28, 12));
+  assert.ok(Math.abs(zonder.terug - (0.0721 - 0.052756)) < 1e-9, "zonder het vinkje de vergoeding");
+});
+
+proef("salderen bij een dynamisch contract: de prijs van dat uur min opslag en terugleverkosten, zoals de coach", () => {
+  const dyn = { type: "dynamic", netting: true, dynamic: { supplier_markup: 0.02, vat_percent: 21, feed_in_costs: 0.0182, feed_in_bonus: 0 } };
+  const uur = new Date(2026, 8, 28, 13);
+  const p = geld.prijsOp(dyn, { buy: 0.3, feedIn: null }, new Map([[uur.getTime(), 0.25]]), uur);
+  assert.ok(Math.abs(p.terug - (0.25 - 0.02 * 1.21 - 0.0182)) < 1e-9, `${p.terug}`);
+});
+
+proef("de balans: uitgegeven en bespaard, en de drie delen tellen samen op tot bespaard", () => {
+  const dag = new Date(2026, 8, 28, 12);
+  const b = geld.balans({
+    rijen: [{ start: dag, own: 10, bought: 4, sold: 6, used: 14 }],
+    prijs: (w) => geld.prijsOp(VAST, TARIEF, new Map(), w),
+    gas: [{ start: dag, value: 2 }],
+    contract: { ...VAST, gas_price: 1.33 },
+    accu: 0.034,
+    coach: { saved: 0.3, solar_saved: 0.2, wait_saved: 0.1 },
+  });
+  const terug = 0.24171 - 0.052756;
+  assert.ok(Math.abs(b.stroom - 4 * 0.24171) < 1e-9);
+  assert.ok(Math.abs(b.terug - 6 * terug) < 1e-9);
+  assert.ok(Math.abs(b.uitgegeven - (4 * 0.24171 - 6 * terug + 2 * 1.33)) < 1e-9, `${b.uitgegeven}`);
+  assert.ok(Math.abs(b.bespaard - (10 * 0.24171 + 6 * terug + 0.1)) < 1e-9, `${b.bespaard}`);
+  const som = b.delen.zon + b.delen.accu + b.delen.coach;
+  assert.ok(Math.abs(som - b.bespaard) < 1e-9, `${som} tegen ${b.bespaard}`);
+  assert.ok(Math.abs(b.zonder - (b.uitgegeven + b.bespaard)) < 1e-9);
+});
+
+proef("het kasboek van de batterij telt alleen de dagen van de periode", () => {
+  const settings = { battery_state: [{ device: "b", earned_days: { "2026-09-27": 0.5, "2026-09-28": 0.034, "2026-09-29": 1 } }] };
+  const r = geld.accuVerdiend(settings, new Date(2026, 8, 28), new Date(2026, 8, 29));
+  assert.ok(Math.abs(r.euro - 0.034) < 1e-9 && r.dagen === 1, `${r.euro} ${r.dagen}`);
+});
+
+proef("terugverdienen: een datum pas na 28 dagen, klaar als het eruit is, niets zonder prijs", () => {
+  const nu = new Date(2026, 8, 28);
+  const vroeg = geld.terugverdienen(5000, 10, 5, 2, nu);
+  assert.equal(vroeg.datum, null);
+  assert.ok(Math.abs(vroeg.rest - 4990) < 1e-9 && Math.abs(vroeg.deel - 0.002) < 1e-9);
+  const later = geld.terugverdienen(5000, 100, 50, 2, nu);
+  assert.equal(later.datum.getFullYear(), 2033, `${later.datum}`);
+  assert.equal(geld.terugverdienen(100, 120, 60, 2, nu).klaar, true);
+  assert.equal(geld.terugverdienen(null, 12, 3, 4, nu).deel, null);
+});
+
+/** Een historieweergave met een dag aan vakken, de batterij en een beurt. */
+function geldweergave({ prijs = null, payback = null, investeringen = {} } = {}) {
+  const el = Object.create(Historie.prototype);
+  el.period_ = "day";
+  el.offset_ = 0;
+  const vandaag = new Date();
+  vandaag.setHours(12, 0, 0, 0);
+  const dag = `${vandaag.getFullYear()}-${String(vandaag.getMonth() + 1).padStart(2, "0")}-${String(vandaag.getDate()).padStart(2, "0")}`;
+  el.settings_ = {
+    contract: VAST,
+    sources: { meters: { solar_total: "sensor.zon", import_low: "sensor.af", export_low: "sensor.terug" } },
+    installation: { investments: investeringen },
+    devices: [
+      { id: "bat", type: "thuisbatterij", name: "Batterij", controllable: true, battery: { purchase_price: prijs } },
+      { id: "vw", type: "vaatwasser", name: "Vaatwasser", controllable: true },
+    ],
+    battery_state: [{ device: "bat", earned_days: { [dag]: 0.034 }, earned_total: 0.034 }],
+  };
+  el.rowsShown_ = [{ start: vandaag, own: 5, bought: 1, sold: 3, used: 6 }];
+  el.rows_ = { gas: [], water: [] };
+  el.prices_ = new Map();
+  el.feed_ = { get: () => null };
+  el.beurten_ = [{ device: "vw", name: "Vaatwasser", plugged_at: vandaag.toISOString(), ended: vandaag.toISOString(),
+                   complete: true, kwh: 0.908, solar_kwh: 0.329, battery_kwh: 0.553, paid: 0.199, ref_cost: 0.217,
+                   saved: 0.018, solar_saved: 0.018 }];
+  el.coach_ = payback ? { bat: { payback } } : {};
+  return el;
+}
+
+proef("In geld rekent met het kasboek van de batterij en met de beurten van die dag", () => {
+  const g = geldweergave().geld_();
+  assert.ok(Math.abs(g.delen.accu - 0.034) < 1e-9, `${g.delen.accu}`);
+  assert.ok(Math.abs(g.delen.coach - 0.018) < 1e-9, `${g.delen.coach}`);
+  assert.ok(Math.abs(g.delen.zon + g.delen.accu + g.delen.coach - g.bespaard) < 1e-9);
+  assert.equal(g.metAccu, true);
+  assert.equal(g.metCoach, true);
+});
+
+proef("de uitleg van In geld noemt het salderen en waar de delen vandaan komen", () => {
+  const el = geldweergave();
+  const zin = el.geldUitleg_(el.geld_());
+  assert.match(zin, /Je saldeert nog tot 1 januari 2027/);
+  assert.match(zin, /kasboek/);
+  assert.match(zin, /Door de coach/);
+});
+
+proef("Terugverdiend: zonder aankoopprijs vraagt hij erom, met prijs en datum van de coach noemt hij de maand", () => {
+  const zonder = geldweergave().terugRijen_();
+  const bat = zonder.find((r) => r.naam === "Batterij");
+  assert.match(bat.tekst, /Vul bij Apparaten de aankoopprijs in/);
+  const zon = zonder.find((r) => r.naam === "Zonnepanelen");
+  assert.match(zon.tekst, /Investeringen/);
+  const met = geldweergave({
+    prijs: 5000,
+    payback: { earned: 120, days: 40, price: 5000, date: "2030-03-01", per_day: 3, min_days: 28 },
+  }).terugRijen_().find((r) => r.naam === "Batterij");
+  assert.match(met.tekst, /maart 2030/, met.tekst);
+  assert.ok(Math.abs(met.t.rest - 4880) < 1e-9);
+});
+
+proef("Terugverdiend: de coach met zijn prijs telt wat de beurten sinds die datum bespaarden", () => {
+  const rijen = geldweergave({ investeringen: { coach_price: 300, coach_since: "2026-01-01" } }).terugRijen_();
+  const coach = rijen.find((r) => r.naam === "DomotiApp en de installatie");
+  assert.ok(coach, "de coach hoort een regel te krijgen");
+  assert.ok(Math.abs(coach.t.verdiend - 0.018) < 1e-9, `${coach.t.verdiend}`);
+});
+
+proef("het bolletje van de laadpaal en de boiler is groen als ze aan staan", () => {
+  const paal = (w) => kaartKnoppen({
+    missed: null,
+    apparaat: { id: "d2", type: "laadpaal", name: "Laadpaal", brand: "easee", controllable: true,
+                entities: {}, details: [], watts: w, cars: [] },
+  });
+  const laadt = paal(7400);
+  assert.equal(laadt.groen, true);
+  assert.equal(laadt.staat, " (laadt)");
+  assert.equal(paal(0).groen, false);
+  const boiler = kaartKnoppen({
+    missed: null,
+    apparaat: { id: "d2", type: "boiler", name: "Boiler", controllable: true, entities: {}, details: [], watts: 2000 },
+  });
+  assert.equal(boiler.groen, true);
+  assert.equal(boiler.staat, " (verwarmt)");
 });
 
 // --- draaien ----------------------------------------------------------------

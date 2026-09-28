@@ -14,6 +14,7 @@
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
 import {
+  ACTIVE_WATTS,
   DISHWASHER_PROGRAM_VALUES,
   canCommand,
   canHaveDeadline,
@@ -3031,8 +3032,29 @@ class DacViewOverview extends DacElement {
         // grijs bolletje, want thuis was hij met de hand gestart en de
         // vrijgave stond uit.
         const draait = asks && Boolean(besluit?.running);
-        this.$(`[data-tab-dot="${slot}"]`).classList.toggle("on", asks && (on || draait));
-        this.$(`[data-tab-state="${slot}"]`).textContent = draait ? " (draait)" : asks && on ? " (vrijgegeven)" : "";
+        // En elk apparaat dat aan staat, gemeten aan zijn vermogen: dezelfde
+        // grens als "Doet nu" op de kaart (`ACTIVE_WATTS`). De eigenaar op
+        // 28-09-2026: "bolletje van de batterij is niet groen. Als die laadt of
+        // ontlaadt moet hij groen zijn. Staat hij echt niks te doen dan moet hij
+        // uit zijn." En: "laadpaal moet ook groen worden. Eigenlijk elk apparaat
+        // als die aan staat."
+        const accu = device.type === "thuisbatterij";
+        const w = accu ? device.batteryWatts : device.watts;
+        const aan = Number.isFinite(w) && Math.abs(w) > ACTIVE_WATTS;
+        const doet = !aan
+          ? ""
+          : accu
+            ? (w > 0 ? " (laadt)" : " (ontlaadt)")
+            : device.type === "laadpaal"
+              ? " (laadt)"
+              : device.type === "boiler"
+                ? " (verwarmt)"
+                : asks
+                  ? " (draait)"
+                  : " (aan)";
+        this.$(`[data-tab-dot="${slot}"]`).classList.toggle("on", (asks && (on || draait)) || aan);
+        this.$(`[data-tab-state="${slot}"]`).textContent =
+          doet || (draait ? " (draait)" : asks && on ? " (vrijgegeven)" : "");
       }
     });
 

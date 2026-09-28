@@ -97,3 +97,7 @@ boilerproeven in test_planner.py. **Nog nooit aan een echte boiler gehangen**,
 dus wat er in het echt anders kan zijn: hoe snel een meetstekker zijn vermogen
 meldt, hoeveel speling de thermostaat heeft, en of een boiler bovenin
 terugregelt in plaats van hard af te slaan.
+
+**"Is weer warm" met herkomst en bespaard** (v0.101.0), in dezelfde twee zinnen als
+de vaatwasser en de paal; nog steeds alleen in de geschiedenis.
+

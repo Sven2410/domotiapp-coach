@@ -1210,12 +1210,16 @@ if (vl := v("klantwoning-herstart")) and (basis := v("klantwoning")):
     # hooguit vijf minuten.
     import re as _re_kh
     met_kh, zonder_kh = meldingen(vl, "is vol"), meldingen(basis, "is vol")
-    kern_kh = lambda m: _re_kh.sub(r"is er \d+ minuten", "is er N minuten", m)
+    # Sinds v0.101.0 staat bespaard in het verslag; een herstart mist hooguit vijf
+    # minuten telling, dus dat bedrag mag net zo ver afwijken als de kosten.
+    kern_kh = lambda m: _re_kh.sub(r"Bespaard [^.]*\.", "Bespaard X.", _re_kh.sub(r"is er \d+ minuten", "is er N minuten", m))
     minuten_kh = lambda m: int((_re_kh.search(r"is er (\d+) minuten", m) or [0, 0])[1])
+    bespaard_kh = lambda m: float((_re_kh.search(r"Bespaard € ([\d,]+)", m) or [0, "0"])[1].replace(",", "."))
     controle("herstart: het verslag gaat over de hele beurt, net als zonder herstarts",
              len(met_kh) == 1 and len(zonder_kh) == 1 and "Geladen van" in met_kh[0]
              and kern_kh(met_kh[0]) == kern_kh(zonder_kh[0])
-             and abs(minuten_kh(met_kh[0]) - minuten_kh(zonder_kh[0])) <= 5 * 5,
+             and abs(minuten_kh(met_kh[0]) - minuten_kh(zonder_kh[0])) <= 5 * 5
+             and abs(bespaard_kh(met_kh[0]) - bespaard_kh(zonder_kh[0])) <= 0.10,
              f"{met_kh} tegen {zonder_kh}")
 
 # Een sensor die wegvalt wordt na tien minuten gemeld, en als hij terug is ook.
@@ -1645,7 +1649,9 @@ if (vl := v("herstart-groep")) and (zonder := v("herstart-groep-zonder")):
              not [r for r in vl.regels if r.regel.startswith("no-soc") and r.tijd.hour != 22], "")
     verslag = next((m for _, m in vl.meldingen if "is vol" in m or "laadt niet verder" in m), "")
     geladen_hg = _re_hg.search(r"Geladen van \d\d:\d\d tot \d\d:\d\d, ([\d,]+) kWh", verslag)
-    net_hg = _re_hg.search(r"([\d,]+) kWh kwam van het net", verslag)
+    # "X kWh van het net", of sinds v0.101.0 "Alles kwam van het net" als er niets anders was.
+    net_hg = _re_hg.search(r"([\d,]+) kWh (?:kwam )?van het net", verslag) or (
+        geladen_hg if "Alles kwam van het net" in verslag else None)
     controle("herstart-groep: het verslag gaat over de hele beurt, vanaf het begin",
              "Geladen van 22:3" in verslag and "van 40 naar" in verslag, verslag)
     controle("herstart-groep: en de getallen in het verslag kloppen met elkaar",

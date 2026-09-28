@@ -589,3 +589,10 @@ test_coach.py (de sensorwacht, handmatig nooit uit zichzelf, elk uur op 0, 60
 en 120 minuten en niet vaker, niet als de sensor iets zegt, één keer bij het
 inpluggen, de knop), en het formulier in test_rapport.mjs. **Nog niet aan een
 echte Tesla gehangen.**
+
+**Het laadverslag in de zinnen van de andere apparaten** (v0.101.0): de herkomst
+("6,2 kWh kwam van je zon, 3,0 kWh uit je thuisbatterij en 21,9 kWh van het net
+voor € 6,72", `_herkomst_zin`), met het bedrag alleen voor het net (`net_eur`, tot
+dan het betaalde inclusief de zon tegen de terugleverprijs), en daarna wat de beurt
+bespaarde met dezelfde maat als Bespaard (`_beurt_bespaard`). Proef 97 en 113.
+
