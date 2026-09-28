@@ -253,9 +253,24 @@ om 20:01:15 en de coach neemt het in diezelfde ronde over, de auto is om 04:21
 vol en om 04:26 doet de batterij het weer zelf; € 5,21 en 53% aan het eind, net
 als wanneer de coach alles regelt, met 4 opdrachten in plaats van 14. Scenario
 `batterij-zelf-wisselend`: stond hij nog in de externe stand, dan zet de coach
-hem om en schrijft daarna niets meer. Proef 106 in test_coach.py. **Nog niet aan
-de echte Anker gezien**: hoe snel hij van stand wisselt, en of hij bij de
-overname echt op de 0 W begint die net in het register ging.
+hem om en schrijft daarna niets meer. Proef 106 in test_coach.py.
+
+**In zijn eigen stand is de stuurknop weg** (v0.100.2). Bij de Anker van de
+eigenaar op 28-09-2026: om 11:07:55 naar `self_consumption`, en om 11:07:56 waren
+het stuurgetal en de richting `unavailable`. Home Assistant slaat een dienst aan
+een onbereikbare entiteit zonder melding over, dus de 0 W die de coach vóór het
+overnemen schreef kwam nooit aan: de batterij begon in de externe stand op wat er
+nog in het register stond. In het virtuele huis (`Batterij.knop_weg`, scenario
+`batterij-zelf-knop-weg`, met 2500 W ontladen van een vorige sturing in het
+register) gaf dat de hele nacht 2500 W aan de auto, van 80 naar 5%, met nul
+opdrachten: de regelaar dacht dat hij op 0 W stond en had niets te veranderen.
+`_async_overnemen_op_nul` in coach.py zet nu bij een weggevallen knop eerst de
+stand om, wacht tot de knop er weer is (`KNOP_WACHT_STAPPEN` keer
+`KNOP_WACHT_STAP`, samen tien seconden) en schrijft dan de 0 W; met een knop die
+er gewoon is blijft het eerst 0 W en dan de stand. Bij het overnemen en bij een
+herstart. Proef 112 in test_coach.py. **Nog niet aan de echte Anker gezien**: hoe
+lang de knop na het omzetten wegblijft, en wat hij in de externe stand uit het
+register doet.
 
 **De batterij helpt de auto met wat er echt over is, en de nachtstrategie**
 (v0.90.0). De bewoner van de eerste woning op 23-09-2026, naar evcc: "bij laden van

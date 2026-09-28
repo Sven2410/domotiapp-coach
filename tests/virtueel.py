@@ -719,6 +719,11 @@ class Batterij:
     eigen_nul: bool = False
     eigen_tik_s: float = 2.0
     eigen_na_s: float = 2.0
+    # De Anker van de eigenaar (28-09-2026): in zijn eigen stand zijn het
+    # stuurgetal en de richting `unavailable`, en Home Assistant slaat een
+    # opdracht daaraan stil over. Wat er dan in het register staat blijft staan
+    # (`opdracht_w`), en dat voert hij uit zodra hij weer extern gestuurd wordt.
+    knop_weg: bool = False
     # En wat de bewoner bij de coach instelt: "de batterij doet zelf nul op de meter".
     zelf_nul: bool = False
     # --- toestand ---
@@ -1553,6 +1558,19 @@ class Wereld:
             uit.append(a)
         return uit
 
+    def bat_knoppen(self, hass) -> None:
+        """De stuurknop en de richting van de batterij, zoals Home Assistant ze toont."""
+        bat = self.batterij
+        if bat.knop_weg and bat.modus != "third_party_control":
+            hass.states.zet(E["bat_richting"], "unavailable")
+            hass.states.zet(E["bat_stuur"], "unavailable")
+            return
+        hass.states.zet(E["bat_richting"], {"state": bat.richting,
+                                             "attributes": {"options": ["charge", "discharge"]}})
+        # Zoals de echte: deze knop leest niet terug wat erin staat.
+        hass.states.zet(E["bat_stuur"], {"state": "0", "attributes": {
+            "unit_of_measurement": "W", "max_charge_power": 7000, "max_discharge_power": 2500}})
+
     def publiceer(self, hass) -> None:
         """Alle sensoren zetten zoals Home Assistant ze nu zou tonen."""
         nu = self.nu
@@ -1590,11 +1608,7 @@ class Wereld:
             z(E["bat_in"], w(f"{bat.teller_in:.3f}", "kWh"))
             z(E["bat_uit"], w(f"{bat.teller_uit:.3f}", "kWh"))
             z(E["bat_modus"], bat.modus)
-            z(E["bat_richting"], {"state": bat.richting,
-                                  "attributes": {"options": ["charge", "discharge"]}})
-            # Zoals de echte: deze knop leest niet terug wat erin staat.
-            z(E["bat_stuur"], {"state": "0", "attributes": {
-                "unit_of_measurement": "W", "max_charge_power": 7000, "max_discharge_power": 2500}})
+            self.bat_knoppen(hass)
         if self.s.groep_amps is not None:
             # De meter van de groep: de paal op zijn fasen, en de rest van de
             # groep op L1.
@@ -1841,6 +1855,12 @@ class Diensten:
         self.verstuurd = []
 
     async def async_call(self, domein, dienst, data, blocking=False):
+        # Home Assistant slaat een dienst aan een onbereikbare entiteit stil
+        # over: de stuurknop van een Anker in zijn eigen stand (`knop_weg`).
+        if data.get("entity_id") in (E["bat_stuur"], E["bat_richting"]):
+            staat = self.hass.states.get(data.get("entity_id"))
+            if staat is not None and staat.state == "unavailable":
+                return
         self.verstuurd.append((domein, dienst, dict(data)))
         if domein == "easee":
             self.wereld.paal.opdracht(dienst, data, self.wereld.nu)
@@ -1883,6 +1903,8 @@ class Diensten:
             self.wereld.batterij.zet_modus(data.get("option"), self.wereld.nu)
             self.verloop.bat_modi.append((self.wereld.nu, data.get("option")))
             self.hass.states.zet(E["bat_modus"], data.get("option"))
+            # De integratie laat de knop meteen volgen; de echte doet dat binnen een tel.
+            self.wereld.bat_knoppen(self.hass)
         elif domein == "button" and data.get("entity_id") == E["vw_start"]:
             self.verloop.vw_gedrukt.append(self.wereld.nu)
             # Home Assistant slaat een dienst op een onbeschikbare entiteit

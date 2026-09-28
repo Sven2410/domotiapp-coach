@@ -1053,6 +1053,14 @@ batterij_zelf_nul = batterij_paal.kopie(
     uitleg="vast contract, de accu doet zelf nul op de meter; de bus laadt na 20:00: dan neemt de coach het over, daarna weer zelf",
     batterij=Batterij(soc=80.0, eigen_nul=True, zelf_nul=True),
 )
+# De Anker van de eigenaar (28-09-2026): in zijn eigen stand is de stuurknop weg,
+# dus de 0 W van vóór het overnemen kwam nooit aan. In het register staat nog de
+# laatste opdracht van de sturing die er daarvoor was: 2500 W ontladen (v0.100.2).
+batterij_zelf_knop_weg = batterij_zelf_nul.kopie(
+    naam="batterij-zelf-knop-weg",
+    uitleg="als batterij-zelf-nul, maar de knop is weg in de eigen stand en er staat nog 2500 W ontladen in het register",
+    batterij=Batterij(soc=80.0, eigen_nul=True, zelf_nul=True, knop_weg=True, opdracht_w=-2500.0),
+)
 batterij_zelf_wisselend = batterij_wisselende_last.kopie(
     naam="batterij-zelf-wisselend",
     uitleg="de wisselende last van 490 W, met een accu die zelf nul op de meter doet: de coach geeft geen enkele opdracht",
@@ -1071,7 +1079,7 @@ BATTERIJ = [
     batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_paal, batterij_sprong,
     batterij_meter_weg, batterij_herstart, batterij_anker_sensor, batterij_uurlast,
     batterij_klapperlast, batterij_wisselende_last, batterij_zonder_rendement,
-    batterij_zelf_nul, batterij_zelf_wisselend,
+    batterij_zelf_nul, batterij_zelf_knop_weg, batterij_zelf_wisselend,
 ]
 HERSTART = [herstart_groep, herstart_groep_zonder]
 

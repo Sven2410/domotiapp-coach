@@ -1682,6 +1682,24 @@ if (vl := v("batterij-zelf-nul")):
                  f"€{vl.bat_kosten_met:.2f} tegen €{basis_zelf.bat_kosten_met:.2f}, "
                  f"{vl.bat_verloop[-1][3]:.0f}% tegen {basis_zelf.bat_verloop[-1][3]:.0f}%")
 
+# De knop van de Anker is weg in zijn eigen stand (de eigenaar, 28-09-2026; v0.100.2).
+# Met de 0 W vóór het omzetten bleef de oude 2500 W ontladen in het register staan: de
+# hele nacht in de auto, van 80 naar 5%.
+if (vl := v("batterij-zelf-knop-weg")):
+    laadt = [r for r, regel in zip(vl.bat_verloop, vl.regels) if regel.paal_w > 1000]
+    ontlaad_min = sum(r[2] < -50 for r in laadt) * vl.stap_uur * 60
+    print(f"  zelf-knop-weg: modi {[(t.strftime('%H:%M:%S'), m) for t, m in vl.bat_modi]}, "
+          f"{len(vl.bat_opdrachten)} opdrachten, {ontlaad_min:.1f} min ontladen terwijl de paal laadt, "
+          f"eindigt op {vl.bat_verloop[-1][3]:.0f}%")
+    controle("zelf-knop-weg: na het overnemen staat de batterij op 0 W, niet op de oude opdracht",
+             ontlaad_min <= 2.0, f"{ontlaad_min:.1f} minuten")
+    if (zelf := v("batterij-zelf-nul")):
+        controle("zelf-knop-weg: en de avond loopt als met een knop die er altijd is",
+                 abs(vl.bat_verloop[-1][3] - zelf.bat_verloop[-1][3]) <= 2.0
+                 and abs(vl.bat_kosten_met - zelf.bat_kosten_met) <= 0.05,
+                 f"{vl.bat_verloop[-1][3]:.0f}% tegen {zelf.bat_verloop[-1][3]:.0f}%, "
+                 f"€{vl.bat_kosten_met:.2f} tegen €{zelf.bat_kosten_met:.2f}")
+
 if (vl := v("batterij-zelf-wisselend")):
     binnen = sum(abs(r[1]) <= 50 for r in vl.bat_verloop) / len(vl.bat_verloop)
     print(f"  zelf-wisselend: modi {vl.bat_modi}, {len(vl.bat_opdrachten)} opdrachten, P1 {100 * binnen:.0f}% binnen 50 W")
