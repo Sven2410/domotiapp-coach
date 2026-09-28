@@ -410,6 +410,14 @@ _SETTINGS = _schema(
                 vol.Optional("load_balancer"): bool,
                 vol.Optional("balancer_entity"): str,
                 vol.Optional("circuits"): vol.All([_CIRCUIT], vol.Length(max=12)),
+                vol.Optional("investments"): _schema(
+                    {
+                        vol.Optional("solar_price"): _LEEG_OF(float, 0, 10_000_000),
+                        vol.Optional("solar_since"): _DATUM,
+                        vol.Optional("coach_price"): _LEEG_OF(float, 0, 10_000_000),
+                        vol.Optional("coach_since"): _DATUM,
+                    }
+                ),
             }
         ),
         vol.Optional("contract"): _schema(

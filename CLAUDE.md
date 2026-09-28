@@ -201,6 +201,10 @@ dan de andere in dezelfde uitgave.
   `DISHWASHER_PROGRAMS` in devices.js; test_rapport.mjs legt ze naast elkaar.
 - **De typen met een programma**: `PROGRAMMA_TYPES` in const.py en
   `PROGRAM_TYPES`, `RELEASE_TYPES` in devices.js (`docs/paneel.md`).
+- **Salderen en de terugleverprijs**: `_salderen`, `_tariff`, `_prices` en
+  `NETTING_ENDS` in coach.py en const.py tegenover `salderen`, `prijsOp` en
+  `SALDEREN_TOT` in geld.js; en `terugverdiend` in batterij.py tegenover
+  `terugverdienen` in geld.js (`docs/eerste-woning.md`).
 
 ## Hoe het in elkaar zit
 
@@ -219,6 +223,7 @@ dan de andere in dezelfde uitgave.
 | `frontend/src/schedule-sheet.js` | het schema van één apparaat, als pop-up achter zijn kaart |
 | `ontvangers.py` | wie welke melding krijgt: personen (een telefoon, een naam, eventueel een gebruiker van Home Assistant) met een schakelaar per soort: kritiek, melding, besluit, belasting. Kent Home Assistant niet |
 | `frontend/src/views/notifications.js` | Meldingen, twee in een sinds 06-09-2026: bovenaan de personen (de admin voegt toe, een bewoner ziet alleen zichzelf en zet zijn eigen schuiven via `notifications/mine`), de zekeringmelding "Zware belasting" (uit Strategie verhuisd), en daaronder alles wat de coach ooit stuurde én elk besluit dat hij nam (`_async_noteer_besluit`), uit `MeldingenStore` in storage.py |
+| `frontend/src/geld.js` | In geld en Terugverdiend in Historie en het rapport (v0.101.0): uitgegeven, bespaard in zon, thuisbatterij en coach, salderen zoals de coach, en hoe ver een investering terugverdiend is |
 | `frontend/src/savings.js` | Bespaard, onder Historie: de laadbeurten uit `BeurtenStore` (storage.py) opgeteld per periode en per apparaat. De coach telt per ronde wat een beurt kost (`_geld_bij`) en wat dezelfde tijd op vol vermogen vanaf het inpluggen met alles van het net gekost had (`_basis_bij`, de maat); bespaard is maat min betaald, nooit onder nul, in twee delen: door de zon (`zon_winst`) en door te wachten. Stapt hij midden in een beurt in, dan rekent `_async_terugrekenen` het begin terug uit de recorder en de kwartieropslag |
 
 De scheiding tussen `planner.py` en `coach.py` is de kern: het denkwerk is los
@@ -247,10 +252,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 441 controles op het denkwerk
 python tests/test_batterij.py    # 126 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 707 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 726 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2007 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 109 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 120 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

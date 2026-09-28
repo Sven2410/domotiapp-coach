@@ -74,3 +74,12 @@ aanstuurbare apparaten in het overzicht draait de vaatwasser maar het bolletje
 is niet groen." Thuis was hij met de hand gestart en de vrijgave stond uit.
 Alleen bij apparaten die een vrijgave kennen (`needsRelease`); de schermlezer
 hoort " (draait)" of " (vrijgegeven)". Proef in test_rapport.mjs.
+
+**En elk apparaat dat aan staat** (v0.101.0). De eigenaar op 28-09-2026: "bolletje
+van de batterij is niet groen. Als die laadt of ontlaadt moet hij groen zijn. Staat
+hij echt niks te doen dan moet hij uit zijn." En: "laadpaal moet ook groen worden.
+Eigenlijk elk apparaat als die aan staat." Gemeten aan het vermogen, met dezelfde
+grens als "Doet nu" op de kaart (`ACTIVE_WATTS`); de schermlezer hoort " (laadt)",
+" (ontlaadt)", " (verwarmt)" of " (aan)". De vrijgave blijft ook groen. Proeven in
+test_rapport.mjs.
+

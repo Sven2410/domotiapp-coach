@@ -223,3 +223,37 @@ zelf. Voorstel aan de eigenaar, nog niet gebouwd: laat een batterij met een
 eigen meter nul op de meter zelf doen (eigen verbruik) en laat de coach alleen
 de uitzonderingen schakelen. evcc verkocht die avond 6,2 kWh van 81% naar 19%
 zonder aan de nacht te denken.
+
+## In geld en Terugverdiend (v0.101.0)
+
+De eigenaar op 28-09-2026: "ik wil op het historie overzicht duidelijk hebben wat
+ik heb bespaard die dag, totaal uitgegeven en totaal bespaard. Maak een mooi
+overzicht, want de klant wil natuurlijk ook zijn investering weten, wanneer hij
+het heeft terugverdiend." En: "stel alles goed op elkaar af."
+
+**In geld** (kaart onder de grafiek, en dezelfde tegels in het rapport): drie
+getallen, uitgegeven (stroom van het net, gas en water, min wat teruglevering
+opbracht; onder nul heet het verdiend), bespaard, en wat het zonder zon, batterij
+en coach gekost had; een balk met die verdeling; en twee kolommen. De som staat
+in `geld.js` (`balans`), zodat Historie en het rapport (`reportData_`) hem delen:
+bespaard is het verbruik tegen de prijs van het net min wat de stroom werkelijk
+kostte, plus wat de coach won door te wachten, in drie delen die samen precies
+het geheel zijn: de coach (de beurten onder Bespaard), de thuisbatterij (haar
+kasboek, `battery_state.earned_days`, `accuVerdiend`) en de zon (de rest).
+
+**Salderen rekent in het paneel nu zoals in de coach** (`salderen`, `prijsOp` in
+geld.js tegenover `_salderen`, `_tariff` en `_prices` in coach.py): tot 1 januari
+2027 is een teruggeleverde kWh de inkoopprijs waard min de terugleverkosten (bij
+dynamisch ook min de opslag). Tot v0.101.0 rekende Historie met de
+terugleververgoeding; bij de eigenaar gaf dat 1,9 cent per kWh waar de coach 18,9 rekende.
+
+**Terugverdiend** (`terugRijen_`, `terugverdienen` in geld.js): de thuisbatterij
+uit haar eigen kasboek (`payback` in de stand van de coach, aankoopprijs bij
+Apparaten), de zonnepanelen en DomotiApp met de installatie uit
+`installation.investments` (prijs en sinds, op Installatie onder Investeringen).
+De panelen per maand uit de statistieken vanaf de datum (`laadZonTerug_`), met
+dezelfde som als In geld, en de zin zegt het als Home Assistant pas later begon.
+De coach uit de beurten sinds zijn datum. Een datum pas na 28 gemeten dagen, net
+als `terugverdiend` in batterij.py; ver weg met het aantal jaren erbij. Proeven
+in test_rapport.mjs.
+

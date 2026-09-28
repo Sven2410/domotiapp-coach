@@ -550,3 +550,17 @@ inkoopprijs; het formulier zegt dat erbij. In de energiestroom wijst de pijl
 van een ontladende batterij nu naar het huis (`batteryWatts < 0` in
 energy-flow.js); de bewoner zette er een rode kring om. Proeven bij de
 prijslijst in test_coach.py (na de datetime-proef) en in test_rapport.mjs.
+
+**Wat een apparaat uit de batterij kreeg staat in zijn verslag** (v0.101.0). Bij de eigenaar
+op 28-09-2026: een vaatwasser van 0,908 kWh kreeg 0,329 van de zon, 0,553 uit de
+Anker en 0,026 van het net, en het verslag zei "ongeveer € 0,199, bespaard € 0,018,
+allemaal door de zon". De eigenaar: "moet daar niet iets van de batterij bij? er is
+niks van het net af gehaald." `_uit_accu` in coach.py verdeelt wat niet van de zon
+kwam over batterij en net naar rato (afgifte tegen inkoop op de meter),
+`_herkomst_bij` telt het per ronde bij elke paal, vaatwasser en boiler, en de beurt
+bewaart `battery_kwh` en `grid_cost`. **Het geld verandert niet**: het deel uit de
+batterij telt in de beurt als netstroom, want de winst ervan staat in het kasboek
+van de batterij, en In geld in Historie telt ze samen zonder iets twee keer.
+Onder salderen levert dat deel weinig op: een kWh uit de batterij is eerder
+opgeslagen zon die anders voor de prijs min de terugleverkosten was teruggekomen.
+

@@ -454,6 +454,14 @@ export async function reportPdf(gegevens) {
     vel.uitleg(gegevens.geldUitleg);
   }
 
+  if (gegevens.terug?.rijen?.length) {
+    // Terugverdiend (v0.101.0): "de klant wil natuurlijk ook zijn investering
+    // weten, wanneer hij het heeft terugverdiend."
+    vel.kop("Terugverdiend");
+    schrijfTabel(pdf, vel, gegevens.terug.kop, gegevens.terug.rijen);
+    vel.uitleg(gegevens.terug.uitleg);
+  }
+
   if (gegevens.bespaard?.vakjes?.length) {
     // Wat de coach bespaarde, per laadbeurt tegen de prijs van het
     // inplugmoment. De eigenaar op 05-09-2026: "dat is natuurlijk het belangrijkste

@@ -342,3 +342,11 @@ verwachting stond bovendien een uur te laat (Forecast.Solar, zie
 `docs/laadpaal.md`), en die van 12:16 is niet bewaard: nagespeeld met de kromme
 van die avond en met die uit de sensoren van 11:48 kwam 13:00 à 13:15 eruit, niet
 14:00.
+
+**Het verslag zegt waar de stroom vandaan kwam** (v0.101.0), voor elk apparaat met
+dezelfde zin (`_herkomst_zin` in coach.py): "0,3 kWh kwam van je zon en 0,6 kWh uit
+je thuisbatterij." met het bedrag alleen bij het net, want dat is wat er aan de
+leverancier betaald is. "Ongeveer € 0,199" is eruit: de eigenaar las dat bij een
+beurt die vrijwel niets van het net haalde. Bedragen onder een euro in drie
+decimalen, daarboven in twee, per zin gelijk (`_bedrag`). Proef 113.
+
