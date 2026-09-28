@@ -223,6 +223,12 @@ VREEMD_PAUZE = timedelta(hours=1)
 ZELF_WACHT = timedelta(minutes=5)
 ZELF_ZEKERING_W = 500.0
 ZELF_MARGE = 1.0
+# Hoe lang de coach na het omzetten naar de externe stand wacht tot de stuurknop
+# van de batterij er weer is, in stappen van een halve seconde. De Anker van de
+# eigenaar (28-09-2026) maakte hem een seconde na het omzetten onbereikbaar; de
+# weg terug duurt naar verwachting even lang. Zie `_async_overnemen_op_nul`.
+KNOP_WACHT_STAP = 0.5
+KNOP_WACHT_STAPPEN = 20
 # Hoe vaak wat de batterij verdiende naar de opslag gaat, en hoeveel dagen
 # daarvan bewaard blijven: ruim een jaar, zodat de terugverdientijd zomer en
 # winter allebei kent.
@@ -4574,9 +4580,10 @@ class ChargerCoach:
         """De batterij in zijn eigen stand zetten, of hem overnemen.
 
         Overnemen gaat meteen, teruggeven pas na `ZELF_WACHT`. In allebei de
-        richtingen eerst 0 W in het register: in zijn eigen stand doet de
-        batterij daar niets mee, en bij het overnemen begint hij dan op nul in
-        plaats van op een oude opdracht.
+        richtingen 0 W in het register: in zijn eigen stand doet de batterij
+        daar niets mee, en bij het overnemen begint hij dan op nul in plaats van
+        op een oude opdracht. Hoe dat gaat als de stuurknop in zijn eigen stand
+        onbereikbaar is staat bij `_async_overnemen_op_nul`.
         """
         naam = device.get("name") or "De batterij"
         zelf = sessie.get("zelf")
@@ -4592,13 +4599,47 @@ class ChargerCoach:
         sessie.pop("zelf_sinds", None)
         if zelf is False:
             return
-        await self._async_batterij_zetten(device, 0.0)
-        await self._async_batterij_modus(device, "control_mode")
+        await self._async_overnemen_op_nul(device)
         # Hij staat nu op nul; de regelaar wacht tot dat te zien is.
-        sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=nu, bezonken=False)
+        sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=_moment(), bezonken=False)
         sessie["zelf"] = False
         if zelf:
             await self._async_noteer(f"{naam}: de coach neemt het over, want {waarom}.", nu)
+
+    def _knop_weg(self, device: dict[str, Any]) -> bool:
+        """Of de stuurknop van de batterij nu onbereikbaar is."""
+        knop = (device.get("entities") or {}).get("setpoint")
+        staat = self.hass.states.get(knop) if knop else None
+        return staat is not None and staat.state == "unavailable"
+
+    async def _async_overnemen_op_nul(self, device: dict[str, Any]) -> None:
+        """De batterij in de externe stand, op 0 W (v0.100.2).
+
+        Eerst 0 W en dan de stand, zodat hij nooit op een oude opdracht begint.
+        Maar de Anker van de eigenaar maakt zijn stuurknop en richting in zijn
+        eigen stand onbereikbaar (28-09-2026: om 11:07:55 naar
+        `self_consumption`, om 11:07:56 allebei `unavailable`), en Home
+        Assistant slaat een dienst aan een onbereikbare entiteit zonder melding
+        over. Die 0 W kwam dan nooit aan, en de batterij begon in de externe
+        stand op wat er nog in het register stond: in de eerste woning de
+        laatste opdracht van de sturing die er daarvoor was. Is de knop weg,
+        dan eerst de stand, wachten tot de knop er weer is, en dan de 0 W.
+        """
+        if not self._knop_weg(device):
+            await self._async_batterij_zetten(device, 0.0)
+            await self._async_batterij_modus(device, "control_mode")
+            return
+        await self._async_batterij_modus(device, "control_mode")
+        for _ in range(KNOP_WACHT_STAPPEN):
+            if not self._knop_weg(device):
+                await self._async_batterij_zetten(device, 0.0)
+                return
+            await self._sleep(KNOP_WACHT_STAP)
+        _LOGGER.warning(
+            "%s: de stuurknop %s bleef onbereikbaar na het omzetten naar de externe stand; "
+            "de 0 W kon er niet in",
+            device.get("id"), (device.get("entities") or {}).get("setpoint"),
+        )
 
     async def _async_regel_tik(self, _now: datetime | None = None) -> None:
         """De regelaar van elke gestuurde batterij één stap laten doen."""
@@ -4739,14 +4780,15 @@ class ChargerCoach:
             sessie["regelaar"] = Regelaar()
             if sessie.get("settings") is not None:
                 await self._async_laadgrens_terug(sessie["settings"], device)
-        await self._async_batterij_zetten(device, 0.0)
-        if not herstart:
-            await self._async_batterij_modus(device, "idle_mode")
-        elif zelf:
+        if herstart and zelf:
             # Deed hij zelf nul op de meter, dan ook bij een herstart op 0 W in
             # de externe stand: "bij herstart accu op 0 en dan pas kijken" (de
             # eigenaar, 24-09-2026). Na de herstart kiest de coach opnieuw.
-            await self._async_batterij_modus(device, "control_mode")
+            await self._async_overnemen_op_nul(device)
+            return
+        await self._async_batterij_zetten(device, 0.0)
+        if not herstart:
+            await self._async_batterij_modus(device, "idle_mode")
 
     async def _async_batterijen_los(self, herstart: bool = False) -> None:
         """Bij het stoppen van de coach: elke batterij die hij stuurde teruggeven."""

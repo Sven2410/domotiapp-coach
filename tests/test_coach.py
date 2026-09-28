@@ -5994,6 +5994,112 @@ controle("zonder energiedashboard kiest de coach de kromme via de sensoren, en d
          geschat111 is False and abs(zon111.get(dt.datetime(2026, 9, 26, 11), 0) - 1.489) < 1e-9,
          f"{geschat111} {zon111}")
 
+print("=== 112. overnemen als de stuurknop in de eigen stand wegvalt (v0.100.2) ===")
+# De Anker van de eigenaar op 28-09-2026: om 11:07:55 naar `self_consumption`, om
+# 11:07:56 waren het stuurgetal en de richting `unavailable`. Home Assistant slaat
+# een dienst aan een onbereikbare entiteit zonder melding over, dus de 0 W die de
+# coach vóór het omzetten schreef kwam nooit aan, en de batterij begon in de
+# externe stand op wat er nog in het register stond.
+
+
+class Anker112(Diensten):
+    """Home Assistant met die integratie: een onbereikbare entiteit wordt
+    overgeslagen, en de knop is er alleen in de externe stand, een tel na het
+    omzetten."""
+
+    def __init__(self, hass):
+        super().__init__()
+        self.hass = hass
+        # De laatste opdracht van de sturing die er hiervoor was.
+        self.register = 1800.0
+        self.volgt = True
+
+    def knop(self):
+        weg = self.hass.states.get("select.batterij_modus").state != "third_party_control"
+        for eid, waarde in (("number.batterij_vermogen", {"state": f"{self.register:.0f}", "attributes": {}}),
+                            ("select.batterij_richting", {"state": "charge",
+                                                          "attributes": {"options": ["charge", "discharge"]}})):
+            self.hass.states.zet(eid, "unavailable" if weg else waarde)
+
+    def tel(self):
+        if self.volgt:
+            self.knop()
+        return asyncio.sleep(0)
+
+    async def async_call(self, domein, dienst, data, blocking=False):
+        staat = self.hass.states.get(data.get("entity_id"))
+        if staat is not None and staat.state == "unavailable":
+            return
+        await super().async_call(domein, dienst, data, blocking)
+        if data.get("entity_id") == "number.batterij_vermogen":
+            self.register = float(data["value"])
+        elif data.get("entity_id") == "select.batterij_modus":
+            self.hass.states.zet("select.batterij_modus", data["option"])
+
+
+klok112 = sys.modules["homeassistant.util.dt"]
+echte_klok112 = klok112.utcnow
+hass112, store112, coach112 = bouw(huis75(modus="self_consumption"), instellingen(devices=[LAADPAAL, BATTERIJ106]))
+anker112 = Anker112(hass112)
+hass112.services = anker112
+anker112.knop()
+coach112._sleep = lambda seconds: anker112.tel()
+NU112 = dt.datetime(2026, 9, 28, 20, 0)
+
+
+def ronde112(minuten):
+    klok112.utcnow = lambda: NU112 + dt.timedelta(minutes=minuten)
+    try:
+        return asyncio.run(ronde75(hass112, coach112, NU112 + dt.timedelta(minutes=minuten)))
+    finally:
+        klok112.utcnow = echte_klok112
+
+
+b112 = ronde112(0)
+controle("in zijn eigen stand is de knop weg: de 0 W komt niet aan, en dat hoeft daar ook niet",
+         b112.get("self_zero") is True and anker112.register == 1800.0
+         and hass112.states.get("number.batterij_vermogen").state == "unavailable", f"{anker112.register}")
+
+hass112.services.verstuurd.clear()
+hass112.states.zet("sensor.laadpaal_vermogen", {"state": "7000", "attributes": {"unit_of_measurement": "W"}})
+b112 = ronde112(1)
+volgorde112 = [d[2].get("entity_id") for d in hass112.services.verstuurd]
+controle("de paal laadt: de coach neemt het over, en de batterij staat op 0 W in plaats van op de oude 1800",
+         b112.get("self_zero") is False and anker112.register == 0.0
+         and hass112.states.get("select.batterij_modus").state == "third_party_control", f"{anker112.register}")
+controle("eerst de stand, dan de 0 W, want pas dan is de knop er",
+         volgorde112[:2] == ["select.batterij_modus", "number.batterij_vermogen"], f"{volgorde112}")
+
+# Terug naar zijn eigen stand, en dan een herstart van Home Assistant.
+hass112.states.zet("sensor.laadpaal_vermogen", {"state": "0", "attributes": {"unit_of_measurement": "W"}})
+ronde112(2)
+b112 = ronde112(8)
+anker112.knop()
+anker112.register = 900.0
+controle("na vijf rustige minuten doet hij het weer zelf, en de knop is weer weg",
+         b112.get("self_zero") is True and hass112.states.get("number.batterij_vermogen").state == "unavailable",
+         f"{b112.get('self_zero')}")
+asyncio.run(coach112._async_batterijen_los(herstart=True))
+asyncio.run(hass112.afmaken())
+controle("bij een herstart ook: externe stand en 0 W, niet de 900 die er nog stond",
+         hass112.states.get("select.batterij_modus").state == "third_party_control" and anker112.register == 0.0,
+         f"{anker112.register}")
+
+# Komt de knop niet terug, dan geen hang en geen fout: een waarschuwing in het log.
+hass112.states.zet("select.batterij_modus", "self_consumption")
+anker112.knop()
+anker112.volgt = False
+anker112.register = 700.0
+asyncio.run(coach112._async_overnemen_op_nul(BATTERIJ106))
+controle("blijft de knop weg, dan geeft de coach het na een paar tellen op",
+         hass112.states.get("select.batterij_modus").state == "third_party_control" and anker112.register == 700.0,
+         f"{anker112.register}")
+hass112b, _, coach112b = bouw(huis75(modus="self_consumption"), instellingen(devices=[LAADPAAL, BATTERIJ106]))
+asyncio.run(coach112b._async_overnemen_op_nul(BATTERIJ106))
+volgorde112b = [d[2].get("entity_id") for d in hass112b.services.verstuurd]
+controle("een batterij met een knop die er gewoon is: eerst 0 W, dan de stand, zoals altijd",
+         volgorde112b == ["number.batterij_vermogen", "select.batterij_modus"], f"{volgorde112b}")
+
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
