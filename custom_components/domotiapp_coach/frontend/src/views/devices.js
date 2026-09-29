@@ -37,6 +37,7 @@ import {
   defaultBattery,
   WEEKDAGEN,
   missingForControl,
+  releaseOnOwnPlug,
   typeMeta,
 } from "../devices.js";
 import { duration } from "../format.js";
@@ -705,6 +706,12 @@ class DacViewDevices extends DacEditorElement {
     // folded-shut line.
     const missing = missingForControl(device);
     if (missing.length) return { text: `om te kunnen sturen ${missingText(missing)}`, warn: true };
+    // De schakelaar van de eigen stekker als vrijgave: na de beurt zou de
+    // stroom van de machine eraf gaan. De coach laat hem met rust, en dat hoort
+    // de bewoner hier te lezen in plaats van te merken aan een dode vaatwasser.
+    if (releaseOnOwnPlug(device, this.hass_?.entities).length) {
+      return { text: "de vrijgaveschakelaar is de stekker zelf en haalt de stroom eraf; de coach gebruikt hem niet", warn: true };
+    }
     if (brandsFor(device.type).length && !device.brand) {
       return { text: "nog geen merk gekozen", warn: true };
     }

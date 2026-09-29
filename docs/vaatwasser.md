@@ -75,7 +75,20 @@ vaatwassermerken): een switch of input_boolean die hetzelfde betekent als
 in coach.py houdt de twee gelijk: beweegt de schakelaar, dan volgt de
 vrijgave; beweegt de knop op de kaart, dan volgt de schakelaar; na een beurt
 gaan ze allebei uit. Uit tijdens een lopende beurt laat de beurt met rust.
-Proef 60 in test_coach.py. **De schakelaar en de status van een
+Proef 60 in test_coach.py. **De schakelaar van de eigen stekker is geen vrijgave** (v0.101.11). In
+de eerste woning stond tot 29-09-2026 de schakelaar van de meetstekker onder
+de vaatwasser als vrijgaveschakelaar ingevuld, en de bewoner meldde "sinds de
+coach is geinstalleerd wordt de smart plug regelmatig uitgeschakeld". Het
+logboek gaf vier keer een `turn_off` op de seconde van "is klaar", na de beurt
+van 28-09 bleef hij 31 uur zonder stroom, en de stekker weer aanzetten las de
+coach als "ingeruimd en dicht", met twee dagen achter elkaar een kritieke
+"zet hem nu aan". Een vrijgaveschakelaar (of die van nu starten) op hetzelfde
+apparaat in Home Assistant als de vermogenssensor laat de coach nu helemaal
+met rust (`_vrijgave_entiteit` in coach.py, één waarschuwing in het log), en
+Apparaten zegt het op de ingeklapte regel (`releaseOnOwnPlug` in devices.js,
+uit `hass.entities`). De sensor "<apparaat> start" noemt in `release_switch`
+nog wel wat er is ingevuld. Proef 120 in test_coach.py en een proef in
+test_rapport.mjs. **De schakelaar en de status van een
 programma-apparaat wekken de coach meteen** (v0.56.1, `_watch`): de eigenaar zette
 de schakelaar aan en binnen vijf seconden weer uit omdat er niets gebeurde,
 terwijl de coach pas bij de volgende minuut keek.
