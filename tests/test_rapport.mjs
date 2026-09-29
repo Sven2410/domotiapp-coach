@@ -2058,7 +2058,8 @@ proef("de balans: uitgegeven en bespaard, en de drie delen tellen samen op tot b
   assert.ok(Math.abs(b.stroom - 4 * 0.24171) < 1e-9);
   assert.ok(Math.abs(b.terug - 6 * terug) < 1e-9);
   assert.ok(Math.abs(b.uitgegeven - (4 * 0.24171 - 6 * terug + 2 * 1.33)) < 1e-9, `${b.uitgegeven}`);
-  assert.ok(Math.abs(b.bespaard - (10 * 0.24171 + 6 * terug + 0.1)) < 1e-9, `${b.bespaard}`);
+  // Sinds v0.101.2 telt het kasboek van de batterij erbij: de meters zien haar niet.
+  assert.ok(Math.abs(b.bespaard - (10 * 0.24171 + 6 * terug + 0.034 + 0.1)) < 1e-9, `${b.bespaard}`);
   const som = b.delen.zon + b.delen.accu + b.delen.coach;
   assert.ok(Math.abs(som - b.bespaard) < 1e-9, `${som} tegen ${b.bespaard}`);
   assert.ok(Math.abs(b.zonder - (b.uitgegeven + b.bespaard)) < 1e-9);
@@ -2091,6 +2092,118 @@ proef("geen terugverdientijd en geen aankoopprijzen meer, nergens (v0.101.1)", (
       assert.ok(!bron.includes(woord), `${woord} staat nog in ${pad}`);
     }
   }
+});
+
+// --- de thuisbatterij in Historie (v0.101.2) ---------------------------------
+// Bij de eigenaar op 29-09-2026 om 10:00: "Door je zon € -0,56" naast "Door je
+// thuisbatterij € 0,60", en 2,65 kWh verbruikt waar het huis er ruim vijf
+// gebruikte. De uren van 00:00 tot 09:00 zoals de recorder ze die dag gaf: zon,
+// van het net, naar het net, en wat de batterij netto opnam (gemiddeld vermogen).
+const { huisMetAccu } = await import("../custom_components/domotiapp_coach/frontend/src/views/history.js");
+const NACHT_29 = [
+  [0.0, 0.02, 0.0, -0.765], [0.0, 0.0, 0.0, -0.570], [0.0, 0.0, 0.0, -0.559], [0.0, 0.0, 0.0, -0.573],
+  [0.0, 0.42, 0.0, -0.145], [0.0, 0.60, 0.0, 0.0], [0.0, 0.58, 0.0, 0.0], [0.0, 0.57, 0.0, 0.0],
+  [0.15, 0.31, 0.0, 0.0],
+].map(([zon, af, terug, accu], uur) => {
+  const own = Math.max(0, zon - terug);
+  return { start: new Date(2026, 8, 29, uur), own, bought: af, sold: terug, ...huisMetAccu(own, af, { battery: accu, voor: 0 }) };
+});
+
+proef("de eigenaar, 29-09 tot 09:00: de nacht op de batterij is verbruik, en de zon wordt niet negatief", () => {
+  const verbruikt = NACHT_29.reduce((s, r) => s + r.used, 0);
+  assert.ok(Math.abs(verbruikt - 5.262) < 0.001, `${verbruikt}`);
+  const vanNet = NACHT_29.reduce((s, r) => s + r.fromGrid, 0);
+  assert.ok(Math.abs(vanNet - 2.50) < 0.001, `${vanNet}`);
+  const b = geld.balans({ rijen: NACHT_29, prijs: (w) => geld.prijsOp(VAST, TARIEF, new Map(), w), contract: VAST, accu: 0.60 });
+  assert.ok(Math.abs(b.delen.zon - 0.15 * 0.24171) < 1e-9, `zon ${b.delen.zon}`);
+  assert.ok(Math.abs(b.bespaard - (0.15 * 0.24171 + 0.60)) < 1e-9, `bespaard ${b.bespaard}`);
+  assert.ok(Math.abs(b.delen.zon + b.delen.accu + b.delen.coach - b.bespaard) < 1e-9);
+  assert.ok(Math.abs(b.zonder - (b.uitgegeven + b.bespaard)) < 1e-9);
+});
+
+proef("huisMetAccu: laden uit de zon is geen verbruik, laden van het net telt niet als van het net naar het huis", () => {
+  const zon = huisMetAccu(3, 0.2, { battery: 2, voor: 2 });
+  assert.ok(Math.abs(zon.used - 1.2) < 1e-9 && Math.abs(zon.fromGrid - 0.2) < 1e-9 && Math.abs(zon.zonInAccu - 2) < 1e-9, JSON.stringify(zon));
+  const net = huisMetAccu(0, 3, { battery: 2.5, voor: 2.5 });
+  assert.ok(Math.abs(net.used - 0.5) < 1e-9 && Math.abs(net.fromGrid - 0.5) < 1e-9 && net.zonInAccu === 0, JSON.stringify(net));
+  const zonder = huisMetAccu(4, 1);
+  assert.deepEqual(zonder, { used: 5, fromGrid: 1, ownUse: 4, battery: 0, zonInAccu: 0 });
+});
+
+proef("de zon die de batterij in ging: uit de telling van de coach, en daarvoor uit het vak zelf", () => {
+  const dag = new Date(2026, 9, 1, 12);
+  const terug = 0.24171 - 0.052756;
+  const rij = { start: dag, own: 3, bought: 0.2, sold: 1, ...huisMetAccu(3, 0.2, { battery: 2, voor: 2 }) };
+  const b = geld.balans({ rijen: [rij], prijs: (w) => geld.prijsOp(VAST, TARIEF, new Map(), w), contract: VAST, accu: 0 });
+  assert.ok(Math.abs(b.delen.zon - (3 * 0.24171 + 1 * terug - 2 * 0.052756)) < 1e-9, `${b.delen.zon}`);
+  const geteld = geld.balans({
+    rijen: [{ ...rij, zonInAccu: 0 }], prijs: (w) => geld.prijsOp(VAST, TARIEF, new Map(), w), contract: VAST, accuZon: 0.1,
+  });
+  assert.ok(Math.abs(geteld.delen.zon - (3 * 0.24171 + 1 * terug - 0.1)) < 1e-9, `${geteld.delen.zon}`);
+  const settings = { battery_state: [{ device: "b", solar_stored_days: { "2026-09-30": 0.5, "2026-10-01": 0.1 } }] };
+  assert.ok(Math.abs(geld.accuZon(settings, new Date(2026, 9, 1), new Date(2026, 9, 2)).euro - 0.1) < 1e-9);
+});
+
+proef("de batterij per vak: uren in hun dag, en de schatting alleen voor wat de coach nog niet telde", () => {
+  const el = Object.create(Historie.prototype);
+  const d1 = new Date(2026, 8, 28).getTime();
+  const d2 = new Date(2026, 8, 29).getTime();
+  const d3 = new Date(2026, 8, 30).getTime();
+  const uur = (d, h) => d + h * 3600000;
+  el.settings_ = { battery_state: [{ device: "b", solar_stored_from: new Date(2026, 8, 29, 14, 5).toISOString() }] };
+  el.accu_ = new Map([["b", [
+    { start: uur(d1, 10), kwh: 1 }, { start: uur(d1, 22), kwh: -0.5 },
+    { start: uur(d2, 10), kwh: 2 }, { start: uur(d3, 1), kwh: -1 },
+  ]]]);
+  const tijden = [d1, d2, d3];
+  const vakken = el.accuPerVak_(tijden, (i) => tijden[i + 1] ?? d3 + 86400000);
+  assert.deepEqual(vakken.map((v) => v.battery), [0.5, 2, -1]);
+  assert.deepEqual(vakken.map((v) => v.voor), [0.5, 0, 0], "28-09 helemaal voor de telling, 29-09 niet meer");
+  // Per uur op de dag zelf: de uren tot de telling begon wel, daarna niet.
+  const uren = Array.from({ length: 24 }, (_, h) => uur(d2, h));
+  el.accu_ = new Map([["b", [{ start: uur(d2, 10), kwh: 0.8 }, { start: uur(d2, 15), kwh: 0.6 }]]]);
+  const perUur = el.accuPerVak_(uren, (i) => uren[i + 1] ?? d3);
+  assert.equal(perUur[10].voor, 0.8);
+  assert.equal(perUur[15].voor, 0);
+  assert.equal(perUur[15].battery, 0.6);
+});
+
+proef("fetchBattery: tellers, een sensor met een teken en twee losse, en van vandaag alleen de verstreken uren", async () => {
+  const { fetchBattery } = await import("../custom_components/domotiapp_coach/frontend/src/statistics.js");
+  const uur = new Date(2026, 8, 29, 3).getTime();
+  const vragen = [];
+  const hass = {
+    callWS: async (v) => {
+      vragen.push(v);
+      const uit = {};
+      for (const id of v.statistic_ids) {
+        if (v.types[0] === "change") uit[id] = [{ start: uur, change: id.endsWith("_in") ? 1.2 : 0.2 }];
+        else uit[id] = [{ start: uur, mean: { "sensor.laad": 800, "sensor.ontlaad": 100, "sensor.teken": 500 }[id] }];
+      }
+      return uit;
+    },
+  };
+  const accus = [
+    { id: "meter", entities: { energy_in: "sensor.m_in", energy_out: "sensor.m_uit" }, entity: "sensor.teken" },
+    { id: "twee", entities: { charge_power: "sensor.laad", discharge_power: "sensor.ontlaad" } },
+    { id: "teken", entity: "sensor.teken", battery: { power_invert: true }, entities: {} },
+    { id: "niets", entities: {} },
+  ];
+  const r = await fetchBattery(hass, accus, "day", new Date(2026, 8, 29));
+  assert.ok(Math.abs(r.get("meter")[0].kwh - 1.0) < 1e-9, "de kWh-meter gaat voor");
+  assert.ok(Math.abs(r.get("twee")[0].kwh - 0.7) < 1e-9, `${r.get("twee")[0].kwh}`);
+  assert.ok(Math.abs(r.get("teken")[0].kwh + 0.5) < 1e-9, "omgekeerd teken: 500 W is ontladen");
+  assert.equal(r.has("niets"), false);
+  assert.ok(vragen.every((v) => v.period === "hour"), "per uur, ook als het vak een uur is");
+  // Over een jaar per dag; de dag van vandaag telt alleen de uren die voorbij zijn.
+  const vandaag = new Date();
+  vandaag.setHours(0, 0, 0, 0);
+  const jaar = {
+    callWS: async (v) => ({ "sensor.teken": [{ start: vandaag.getTime(), mean: 1000 }] }),
+  };
+  const j = await fetchBattery(jaar, [{ id: "t", entity: "sensor.teken", entities: {} }], "year", new Date(vandaag.getFullYear(), 0, 1));
+  const verstreken = Math.floor((Date.now() - vandaag.getTime()) / 3600000);
+  assert.ok(Math.abs(j.get("t")[0].kwh - verstreken) < 1e-9, `${j.get("t")[0].kwh} tegen ${verstreken}`);
 });
 
 /** Een historieweergave met een dag aan vakken, de batterij en een beurt. */

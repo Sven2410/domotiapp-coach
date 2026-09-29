@@ -6175,6 +6175,63 @@ controle("het laadverslag zegt wat er bespaard is",
          coach113._beurt_bespaard({"geld": geld113}))
 controle("zonder maat zegt het niets", coach113._beurt_bespaard({"geld": {**geld113, "ijk_prijs": None}}) == "", "")
 
+print("=== 114. de zon die de batterij in gaat, per dag in de opslag, en een rendement dat je kunt veranderen (v0.101.2) ===")
+# Bij de eigenaar op 29-09-2026 om 10:00 stond er "Door je zon € -0,56": Historie trok
+# het hele kasboek van de batterij van de zon af. Nu telt de coach naast het
+# kasboek wat de zon die erin ging minder waard was dan zelf gebruikt.
+inst114 = instellingen(devices=[LAADPAAL, BATTERIJ])
+hass114, store114, coach114 = bouw(huis75(afname=0.0, teruglevering=0.0, batterij="1000"), inst114)
+asyncio.run(ronde75(hass114, coach114, dt.datetime(2026, 9, 21, 12, 0)))
+sessie114 = coach114._batterij["dev-batterij"]
+sessie114["regelaar"].opdracht_w = 1000.0
+sessie114["geteld_op"] = coachmod._moment() - dt.timedelta(seconds=60)
+asyncio.run(coach114._async_regel("dev-batterij", inst114, BATTERIJ))
+koop114, terug114 = sessie114.get("koop"), sessie114.get("terug") or 0.0
+zon114 = sum((sessie114.get("zon") or {}).values())
+verwacht114 = 1.0 * (koop114 - terug114) * 60 / 3600
+print(f"  een minuut 1 kW zon de batterij in, meter op 0: {zon114:.6f} (verwacht {verwacht114:.6f})")
+controle("een minuut 1 kW zon de batterij in telt een minuut lang het verschil tussen koop en terug",
+         abs(zon114 - verwacht114) < 2e-5, f"{zon114} {verwacht114}")
+asyncio.run(ronde75(hass114, coach114, dt.datetime(2026, 9, 21, 12, 1)))
+rij114 = (store114.instellingen.get("battery_state") or [{}])[0]
+controle("en gaat naar de opslag, per dag, met het moment vanaf wanneer",
+         abs(sum((rij114.get("solar_stored_days") or {}).values()) - verwacht114) < 2e-5
+         and bool(rij114.get("solar_stored_from")) and bool(rij114.get("earned_days")),
+         f"{ {k: rij114.get(k) for k in ('solar_stored_days', 'solar_stored_from', 'earned_days')} }")
+vanaf114 = rij114.get("solar_stored_from")
+sessie114["geteld_op"] = coachmod._moment() - dt.timedelta(seconds=60)
+asyncio.run(coach114._async_regel("dev-batterij", inst114, BATTERIJ))
+asyncio.run(ronde75(hass114, coach114, dt.datetime(2026, 9, 21, 12, 7)))
+rij114 = (store114.instellingen.get("battery_state") or [{}])[0]
+controle("het moment vanaf wanneer blijft het eerste", rij114.get("solar_stored_from") == vanaf114,
+         f"{rij114.get('solar_stored_from')} {vanaf114}")
+
+# De eigenaar op 29-09-2026: "ik wil wel het rendement erin zetten als ik geen
+# kWh-meter heb." Dat veld was er, maar tot v0.101.2 ging een ingevuld
+# rendement de opslag in en won die daarna van het veld.
+ZONDER_METER = {**BATTERIJ, "entities": {k: v for k, v in BATTERIJ["entities"].items()
+                                          if k not in ("energy_in", "energy_out")}}
+
+
+def rte114(procent, opslag=None):
+    apparaat = {**ZONDER_METER, "battery": {**ZONDER_METER["battery"], "rte_percent": procent}}
+    inst = instellingen(devices=[LAADPAAL, apparaat])
+    if opslag is not None:
+        inst["battery_state"] = [{"device": "dev-batterij", **opslag}]
+    hass, store, coach = bouw(huis75(), inst)
+    b = asyncio.run(ronde75(hass, coach, dt.datetime(2026, 9, 21, 21, 0)))
+    return b.get("rte"), (store.instellingen.get("battery_state") or [{}])[0].get("rte")
+
+
+rte74, opslag74 = rte114(74)
+controle("zonder kWh-meter rekent hij met het ingevulde rendement", rte74 == 0.74, f"{rte74}")
+controle("en dat gaat niet de opslag in, die is voor een meting", opslag74 is None, f"{opslag74}")
+rte85, _ = rte114(85, opslag={"rte": 0.74})
+controle("een oude ingevulde waarde in de opslag wint niet meer van het veld", rte85 == 0.85, f"{rte85}")
+rte_leeg, _ = rte114(None, opslag={"rte": 0.74})
+controle("en leegmaken is leeg: geen rendement, alleen nul op de meter", rte_leeg is None, f"{rte_leeg}")
+controle("met een kWh-meter wint de meting van het veld", b75.get("rte") == 0.736, f"{b75.get('rte')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

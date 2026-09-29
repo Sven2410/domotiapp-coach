@@ -262,3 +262,38 @@ battery.js). Een oude `investments` valt bij het laden weg (`_prune` in
 storage.py), een oude `purchase_price` bij de volgende opslag (`REMOVE_EXTRA`).
 Proef "geen terugverdientijd" in test_rapport.mjs houdt de woorden uit de bron.
 
+**De thuisbatterij in Historie (v0.101.2).** Bij de eigenaar op 29-09-2026 om 10:00 stond er
+onder In geld "Door je zon € -0,56" naast "Door je thuisbatterij € 0,60". Alle
+zeven bedragen op het scherm zijn nagerekend en kwamen precies terug: net 2,506
+kWh (€ 0,6057), gas € 0,0971, uitgegeven € 0,6998, bespaard € 0,0388, zonder
+€ 0,7386. Twee fouten. Verbruik was opwek plus inkoop min teruglevering, dus de
+nacht op de batterij (0,77, 0,57, 0,56, 0,57 en 0,15 kWh per uur, om 04:00 op
+5%) zat er niet in: 2,65 kWh verbruikt waar het huis er 5,26 gebruikte. En de
+zon was de rest (bespaard min het kasboek), dus kreeg hij het hele kasboek als
+min. De eigenaar: "repareer alles."
+
+Nu haalt `fetchBattery` (statistics.js) per batterij wat ze netto opnam: de twee
+tellers van een kWh-meter, anders het gemiddelde van de vermogenssensor met een
+teken, anders van de losse sensoren voor laden en ontladen; per uur, over een
+jaar per dag met van vandaag alleen de verstreken uren. `huisMetAccu`
+(views/history.js) maakt daar per vak verbruik van (eigen zon plus inkoop min
+wat de batterij opnam), en van het net naar het huis (de batterij laadt eerst
+uit de zon, zoals het energiedashboard het verdeelt). Verbruikt, zelfvoorzienend
+en de balken rekenen daarmee; de legenda zegt "Eigen zon en batterij".
+
+In geld rekent de zon nu zelf uit (`balans` in geld.js): de eigen zon tegen de
+inkoopprijs, teruglevering tegen wat die opbracht, min wat de zon die de
+batterij in ging minder waard was dan zelf gebruikt; het kasboek komt erbij in
+plaats van eraf. Dat laatste telt de coach per stap naast het kasboek
+(`zon_in_accu` in batterij.py, `solar_stored_days` en `solar_stored_from` in
+`battery_state`). Voor de uren van voor die telling schat Historie het uit het
+vak zelf: wat de batterij opnam, hooguit de eigen zon (`zonInAccu`). Met de uren
+van 29-09 tot 10:00: verbruikt 4,37 wordt 6,85 kWh, zelfvoorzienend 22,8 wordt
+50,7%, "Door je zon" € -0,28 wordt € 0,24, bespaard € 0,25 wordt € 0,77.
+
+Wat blijft: het kasboek telt alleen sinds de coach de batterij stuurt. Een
+batterij die hij niet stuurt telt in het verbruik wel mee, maar wat ze bespaarde
+niet. En "Zonder" in geld en verbruikt maal de prijs kunnen een paar cent
+verschillen: het kasboek rekent met de metingen van de coach, het verbruik met
+de uurgemiddelden van Home Assistant (op 29-09 2,48 tegen 2,61 kWh ontladen).
+

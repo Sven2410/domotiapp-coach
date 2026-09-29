@@ -62,6 +62,7 @@ from .batterij import (
     rendement_uit_tellers,
     verdiend,
     vol_voor,
+    zon_in_accu,
 )
 from .planner import (
     DAGNAMEN,
@@ -4214,9 +4215,10 @@ class ChargerCoach:
     ) -> None:
         """Wat de coach van deze batterij bijhoudt naar de instellingen."""
         rij = {**self._batterij_rij(settings, device_id), **nieuw}
-        dagen = rij.get("earned_days") or {}
-        if len(dagen) > BATTERIJ_DAGEN_MAX:
-            rij["earned_days"] = dict(sorted(dagen.items())[-BATTERIJ_DAGEN_MAX:])
+        for sleutel in ("earned_days", "solar_stored_days"):
+            dagen = rij.get(sleutel) or {}
+            if len(dagen) > BATTERIJ_DAGEN_MAX:
+                rij[sleutel] = dict(sorted(dagen.items())[-BATTERIJ_DAGEN_MAX:])
         rows = [
             r for r in (settings.get("battery_state") or [])
             if isinstance(r, dict) and r.get("device") != device_id
@@ -4229,6 +4231,15 @@ class ChargerCoach:
             return
         self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
         settings["battery_state"] = rows
+
+    def _rte_gemeten(self, device: dict[str, Any], capaciteit: float | None) -> float | None:
+        """Het rendement uit de tellers van een kWh-meter op de batterij, of None."""
+        entities = device.get("entities") or {}
+        return rendement_uit_tellers(
+            _kwh(self.hass, entities.get("energy_in")),
+            _kwh(self.hass, entities.get("energy_out")),
+            capaciteit,
+        )
 
     def _batterij_van(
         self, now: datetime, settings: dict[str, Any], device: dict[str, Any], rij: dict[str, Any]
@@ -4257,14 +4268,17 @@ class ChargerCoach:
             return None
 
         capaciteit = _kwh(self.hass, entities.get("capacity")) or getal("capacity_kwh")
-        gemeten = rendement_uit_tellers(
-            _kwh(self.hass, entities.get("energy_in")),
-            _kwh(self.hass, entities.get("energy_out")),
-            capaciteit,
-        )
+        gemeten = self._rte_gemeten(device, capaciteit)
+        # Met een kWh-meter op de batterij wint de meting, en de laatste meting
+        # als de meter even niets zegt. Zonder meter geldt wat de bewoner invulde.
+        # Tot v0.101.2 kwam ook een ingevuld rendement in `rte` in de opslag, en
+        # die ging vóór het veld: wat er één keer stond bleef staan, ook na
+        # aanpassen of leegmaken. Nu staat daar alleen een meting (`_one_batterij`).
         ingevuld = getal("rte_percent")
-        bewaard = rij.get("rte")
-        rte = gemeten or (float(bewaard) if bewaard else None) or (ingevuld / 100.0 if ingevuld else None)
+        ingevuld_rte = ingevuld / 100.0 if ingevuld else None
+        bewaard = float(rij["rte"]) if rij.get("rte") else None
+        met_meter = bool(entities.get("energy_in") and entities.get("energy_out"))
+        rte = gemeten or ((bewaard or ingevuld_rte) if met_meter else ingevuld_rte)
 
         laatst_vol = _tijdstip(rij.get("full_at"))
         return Batterij(
@@ -4443,8 +4457,10 @@ class ChargerCoach:
         # Het gemeten rendement en de laatste volle stand bewaren, zodat ze een
         # herstart overleven en de kaart ze kan tonen.
         nieuw: dict[str, Any] = {}
-        if b.rte is not None and abs(float(rij.get("rte") or 0.0) - b.rte) > 0.002:
-            nieuw["rte"] = round(b.rte, 4)
+        # Alleen een meting, nooit wat er ingevuld is (zie `_batterij_van`).
+        gemeten = self._rte_gemeten(device, b.capacity_kwh)
+        if gemeten is not None and abs(float(rij.get("rte") or 0.0) - gemeten) > 0.002:
+            nieuw["rte"] = round(gemeten, 4)
         if vol_nu:
             vorige = _tijdstip(rij.get("full_at"))
             if vorige is None or now - vorige.replace(tzinfo=None) > timedelta(hours=1):
@@ -4457,6 +4473,15 @@ class ChargerCoach:
             nieuw["earned_days"] = dagen
             nieuw["earned_total"] = round(float(rij.get("earned_total") or 0.0) + sum(geld.values()), 5)
             sessie["geld"] = {}
+            # De zon die erin ging (`zon_in_accu`), per dag, en vanaf wanneer dat
+            # geteld wordt: wat daarvoor lag schat Historie uit de statistieken.
+            zon_dagen = dict(rij.get("solar_stored_days") or {})
+            for dag, euro in (sessie.get("zon") or {}).items():
+                zon_dagen[dag] = round(float(zon_dagen.get(dag) or 0.0) + euro, 5)
+            nieuw["solar_stored_days"] = zon_dagen
+            if not rij.get("solar_stored_from") and sessie.get("zon_vanaf") is not None:
+                nieuw["solar_stored_from"] = sessie["zon_vanaf"].isoformat()
+            sessie["zon"] = {}
             sessie["bewaard_op"] = now
         if nieuw:
             await self._async_batterij_bewaren(settings, device_id, nieuw)
@@ -4635,6 +4660,13 @@ class ChargerCoach:
                     dag = nu.date().isoformat()
                     geld = sessie.setdefault("geld", {})
                     geld[dag] = geld.get(dag, 0.0) + euro
+                    # En wat de zon die erin ging minder waard was dan zelf
+                    # gebruikt, voor "Door je zon" in Historie (v0.101.2).
+                    zon = sessie.setdefault("zon", {})
+                    zon[dag] = zon.get(dag, 0.0) + (
+                        zon_in_accu(net_w, bat_w, sessie.get("koop"), sessie.get("terug"), seconden) or 0.0
+                    )
+                    sessie.setdefault("zon_vanaf", nu)
 
             # Laadt er intussen een paal, dan geeft de batterij niets af, ook
             # als het besluit van deze minuut dat nog niet wist: de regelaar
