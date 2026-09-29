@@ -394,7 +394,7 @@ export const programFor = (raw) =>
 const RELEASE_SWITCH_FIELD = {
   key: "release_switch",
   label: "Vrijgaveschakelaar",
-  hint: "Optioneel: een schakelaar of input_boolean die hetzelfde betekent als \"Ingeruimd en dicht\". Zet je die aan, bijvoorbeeld vanaf een eigen dashboard, dan geeft de coach de vaatwasser vrij; zet je hem op de kaart vrij, dan gaat de schakelaar mee aan. Na de beurt gaan ze allebei uit.",
+  hint: "Optioneel: een schakelaar of input_boolean die hetzelfde betekent als \"Ingeruimd en dicht\". Zet je die aan, bijvoorbeeld vanaf een eigen dashboard, dan geeft de coach de vaatwasser vrij; zet je hem op de kaart vrij, dan gaat de schakelaar mee aan. Na de beurt gaan ze allebei uit. Niet de schakelaar van de stekker waar de machine op hangt: die haalt de stroom eraf, en die gebruikt de coach dus niet.",
   filter: "all",
   hideRow: true,
 };
@@ -408,9 +408,28 @@ const RELEASE_SWITCH_FIELD = {
 const RELEASE_NOW_SWITCH_FIELD = {
   key: "release_now_switch",
   label: "Schakelaar nu starten",
-  hint: "Optioneel: een schakelaar of input_boolean die \"ingeruimd en nu starten\" betekent. Zet je die aan, dan start de coach hem meteen, ook als het niet het goedkoopste moment is. Na de beurt gaat hij uit.",
+  hint: "Optioneel: een schakelaar of input_boolean die \"ingeruimd en nu starten\" betekent. Zet je die aan, dan start de coach hem meteen, ook als het niet het goedkoopste moment is. Na de beurt gaat hij uit. Niet de schakelaar van de stekker waar de machine op hangt.",
   filter: "all",
   hideRow: true,
+};
+
+/**
+ * De vrijgaveschakelaars die op dezelfde stekker zitten als de vermogenssensor,
+ * en dus de stroom van de machine zelf zijn. In de eerste woning stond tot
+ * 29-09-2026 de schakelaar van de meetstekker onder de vaatwasser als
+ * vrijgaveschakelaar ingevuld; de coach zette hem na elke beurt uit, en de
+ * vaatwasser zat daarna zonder stroom. De coach gebruikt zo'n schakelaar niet
+ * meer (`_vrijgave_entiteit` in coach.py) en Apparaten zegt het.
+ * `entities` is `hass.entities` van Home Assistant, met per entiteit zijn `device_id`.
+ */
+export const releaseOnOwnPlug = (device, entities) => {
+  const deviceOf = (id) => (id ? entities?.[id]?.device_id : undefined);
+  const meters = [device?.entity, device?.energy_entity].map(deviceOf).filter(Boolean);
+  if (!meters.length) return [];
+  return ["release_switch", "release_now_switch"].filter((key) => {
+    const own = deviceOf(device?.entities?.[key]);
+    return Boolean(own) && meters.includes(own);
+  });
 };
 
 export const DISHWASHER_BRANDS = [

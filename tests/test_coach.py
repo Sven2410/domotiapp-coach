@@ -6572,6 +6572,79 @@ controle("en in een ronde: de batterij krijgt zijn eigen stand terug, de coach k
          b119.get("self_zero") is True and hass119.states.get("select.batterij_modus").state == "self_consumption",
          f"{b119.get('self_zero')} {hass119.states.get('select.batterij_modus').state}")
 
+
+print("=== 120. de schakelaar van de eigen stekker is geen vrijgave (v0.101.11) ===")
+# De eerste woning op 29-09-2026: "sinds de coach is geinstalleerd wordt de smart plug
+# van de vaatwasser regelmatig uitgeschakeld." Als vrijgaveschakelaar stond de
+# schakelaar van de meetstekker onder de vaatwasser. Na elke beurt ging de vrijgave
+# eraf en de schakelaar mee, dus de vaatwasser van de stroom; en de stekker weer
+# aanzetten was voor de coach "ingeruimd en dicht", met een kritieke "zet hem nu aan".
+STEKKER120 = "switch.dom_stekker"
+er120 = types.ModuleType("homeassistant.helpers.entity_registry")
+APPARAAT120 = {"sensor.dom_vermogen": "stekker-1", STEKKER120: "stekker-1", "switch.ander_apparaat": "knop-2"}
+er120.async_get = lambda hass: types.SimpleNamespace(async_get=lambda eid: (
+    types.SimpleNamespace(device_id=APPARAAT120[eid]) if eid in APPARAAT120 else None))
+oud120 = sys.modules.get("homeassistant.helpers.entity_registry")
+sys.modules["homeassistant.helpers.entity_registry"] = er120
+try:
+    DOM120 = dict(DOM, entities={"release_switch": STEKKER120, "release_now_switch": STEKKER120})
+    inst120 = instellingen(devices=[LAADPAAL, DOM120])
+    inst120["contract"] = inst56["contract"]
+    inst120["strategy"]["schedules"].append({
+        "device": "dev-dom", "enabled": True, "priority": "mid", "per_day": False,
+        "window": {"not_before": "08:00", "start_by": "", "done_by": "16:30"}, "days": [],
+    })
+    huis120 = dict(huis58); huis120[STEKKER120] = "on"
+    hass120, _, coach120 = bouw(huis120, inst120)
+
+    async def ronde120(nu):
+        hass120.services.verstuurd.clear()
+        await hass120.afmaken()
+        await coach120._round(nu)
+        await hass120.afmaken()
+        return coach120.state.get("dev-dom") or {}, [d for d in hass120.services.verstuurd if d[2].get("entity_id") == STEKKER120]
+
+    def vrij120():
+        return "dev-dom" in (inst120.get("ready_devices") or [])
+
+    controle("de schakelaar van de eigen stekker telt niet als vrijgave",
+             coach120._vrijgave_entiteit(DOM120) == "" and coach120._vrijgave_entiteit(DOM120, "release_now_switch") == "", "")
+    controle("een schakelaar op een ander apparaat wel",
+             coach120._vrijgave_entiteit(dict(DOM, entities={"release_switch": "switch.ander_apparaat"})) == "switch.ander_apparaat", "")
+    controle("en een input_boolean ook (die hoort bij geen apparaat)",
+             coach120._vrijgave_entiteit(dict(DOM, entities={"release_switch": "input_boolean.vw"})) == "input_boolean.vw", "")
+    b, v = asyncio.run(ronde120(dt.datetime(2026, 9, 8, 7, 0)))
+    controle("de stekker staat aan bij de eerste ronde: dat is stroom, geen vrijgave",
+             not vrij120() and not v and b.get("rule") == "not-released", f"{vrij120()} {v} {b.get('rule')}")
+    controle("de coach luistert niet naar de stekker", STEKKER120 not in coach120._watched, f"{coach120._watched}")
+    # Vrijgegeven op de kaart: de stekker gaat niet mee (hij staat al aan, en hoort daar te blijven).
+    inst120["ready_devices"] = ["dev-dom"]
+    b, v = asyncio.run(ronde120(dt.datetime(2026, 9, 8, 7, 1)))
+    controle("vrijgegeven op de kaart: de stekker blijft onaangeroerd", vrij120() and not v, f"{v}")
+    for minuut in range(0, 30):
+        hass120.states.zet("sensor.dom_vermogen", "2000" if minuut < 20 else "60")
+        b, v = asyncio.run(ronde120(dt.datetime(2026, 9, 8, 11, 0) + dt.timedelta(minutes=minuut)))
+    controle("tijdens de beurt draait hij, en de stekker blijft aan", b.get("rule") == "running" and not v, f"{b.get('rule')} {v}")
+    hass120.states.zet("sensor.dom_vermogen", "0")
+    uit120 = []
+    for moment in (dt.datetime(2026, 9, 8, 11, 31), dt.datetime(2026, 9, 8, 12, 2), dt.datetime(2026, 9, 8, 12, 3)):
+        b, v = asyncio.run(ronde120(moment))
+        uit120 += v
+    controle("na de beurt gaat de vrijgave eraf, maar de stroom niet",
+             not vrij120() and uit120 == [] and hass120.states.get(STEKKER120).state == "on", f"{vrij120()} {uit120}")
+    # De bewoner zet de stekker uit en weer aan (om welke reden ook): geen vrijgave, geen "zet hem nu aan".
+    hass120.states.zet(STEKKER120, "off")
+    asyncio.run(ronde120(dt.datetime(2026, 9, 8, 12, 10)))
+    hass120.states.zet(STEKKER120, "on")
+    b, v = asyncio.run(ronde120(dt.datetime(2026, 9, 8, 12, 11)))
+    controle("de stekker weer aan is geen ingeruimd en dicht", not vrij120() and b.get("rule") == "not-released", f"{b.get('rule')}")
+    controle("en het log zegt het één keer", coach120._stroom_gemeld == {("dev-dom", STEKKER120)}, f"{coach120._stroom_gemeld}")
+finally:
+    if oud120 is None:
+        sys.modules.pop("homeassistant.helpers.entity_registry", None)
+    else:
+        sys.modules["homeassistant.helpers.entity_registry"] = oud120
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

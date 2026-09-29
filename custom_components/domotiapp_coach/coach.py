@@ -1036,6 +1036,9 @@ class ChargerCoach:
         self._water_loopt_sinds: datetime | None = None
         self._water_gemeld = False
         self._verbruik_gemeld: set[str] = set()
+        # Welke vrijgaveschakelaars de stroom van hun eigen machine zijn, al in
+        # het log gezet. Zie `_vrijgave_entiteit`.
+        self._stroom_gemeld: set[tuple[str, str]] = set()
         # Wanneer de auto aan een laadpunt voor het laatst gewekt is, en of de
         # kabel er de vorige ronde al in zat. Zie `_async_auto_wekken`.
         self._gewekt: dict[str, datetime] = {}
@@ -2103,7 +2106,11 @@ class ChargerCoach:
                 entity
                 for device in programma_apparaten
                 for sleutel in ("release_switch", "release_now_switch", "status", "start", "remote_start")
-                if (entity := (device.get("entities") or {}).get(sleutel))
+                if (entity := (
+                    self._vrijgave_entiteit(device, sleutel)
+                    if sleutel in ("release_switch", "release_now_switch")
+                    else (device.get("entities") or {}).get(sleutel)
+                ))
             }
             # De schakelaar van een boiler, en niet zijn vermogenssensor: die
             # laatste beweegt voortdurend en zou de coach elke seconde wekken.
@@ -3073,9 +3080,9 @@ class ChargerCoach:
         if gestart is None or gestart >= now:
             return None, None
         vrij: datetime | None = None
-        if entities.get("release_switch"):
+        if schakelaar := self._vrijgave_entiteit(device):
             for moment, toestand in await self._async_geschiedenis(
-                entities["release_switch"], gestart - timedelta(days=3), gestart
+                schakelaar, gestart - timedelta(days=3), gestart
             ):
                 if toestand == "on":
                     vrij = moment
@@ -3275,9 +3282,52 @@ class ChargerCoach:
         except Exception:  # noqa: BLE001 - een vrijgave die blijft staan is geen reden om te stoppen
             _LOGGER.exception("kon de vrijgave van %s niet zetten", device_id)
 
+    def _vrijgave_entiteit(self, device: dict[str, Any], sleutel: str = "release_switch") -> str:
+        """De vrijgaveschakelaar (of die van nu starten), of leeg als het de stroom van de machine zelf is.
+
+        In de eerste woning stond tot 29-09-2026 de schakelaar van de meetstekker
+        waar de vaatwasser op hangt als vrijgaveschakelaar ingevuld. De coach
+        zette hem na elke beurt uit, dus de vaatwasser ging van de stroom (na
+        de beurt van 28-09 31 uur lang), en de stekker weer aanzetten las hij
+        als "ingeruimd en dicht", met een kritieke "zet hem nu aan" erachter.
+        Een schakelaar op hetzelfde apparaat in Home Assistant als de
+        vermogenssensor is de stroom en geen vrijgave: die laat de coach
+        helemaal met rust, en het paneel zegt het bij Apparaten.
+        """
+        entity_id = str((device.get("entities") or {}).get(sleutel) or "")
+        if not entity_id:
+            return ""
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            register = er.async_get(self.hass)
+            rij = register.async_get(entity_id)
+            eigen = rij.device_id if rij is not None else None
+            meters = [
+                getattr(register.async_get(meter), "device_id", None)
+                for meter in (device.get("entity"), device.get("energy_entity"))
+                if isinstance(meter, str) and meter
+            ]
+        except Exception:  # noqa: BLE001 - zonder registratie is er niets te vergelijken
+            return entity_id
+        if not eigen or eigen not in meters:
+            return entity_id
+        melding = (device.get("id", ""), entity_id)
+        if melding not in self._stroom_gemeld:
+            self._stroom_gemeld.add(melding)
+            _LOGGER.warning(
+                "%s: de vrijgaveschakelaar %s zit op dezelfde stekker als de vermogenssensor en is dus "
+                "de stroom van de machine; de coach gebruikt hem niet",
+                device.get("name") or device.get("id"), entity_id,
+            )
+        return ""
+
     async def _async_schakelen(self, device: dict[str, Any], aan: bool, sleutel: str = "release_switch") -> None:
         """De vrijgaveschakelaar (of die van nu starten) aan of uit zetten, als er een is en hij anders staat."""
-        entity_id = (device.get("entities") or {}).get(sleutel)
+        if sleutel in ("release_switch", "release_now_switch"):
+            entity_id = self._vrijgave_entiteit(device, sleutel)
+        else:
+            entity_id = (device.get("entities") or {}).get(sleutel)
         if not entity_id:
             return
         stand = _text(self.hass, entity_id).strip().lower()
@@ -3300,7 +3350,7 @@ class ChargerCoach:
         wint een schakelaar die aan staat, want dan heeft de bewoner hem
         aangezet terwijl de coach niet keek.
         """
-        entity_id = (device.get("entities") or {}).get("release_switch")
+        entity_id = self._vrijgave_entiteit(device)
         if not entity_id:
             return released
         tekst = _text(self.hass, entity_id).strip().lower()
@@ -3346,7 +3396,7 @@ class ChargerCoach:
         """
         device_id = device.get("id", "")
         nu = released and device_id in (settings.get("ready_now") or [])
-        entity_id = (device.get("entities") or {}).get("release_now_switch")
+        entity_id = self._vrijgave_entiteit(device, "release_now_switch")
         if not entity_id:
             return released, nu
         tekst = _text(self.hass, entity_id).strip().lower()

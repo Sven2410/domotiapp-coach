@@ -920,6 +920,42 @@ proef("een gemeten programma toont de meting, staat op slot en heeft wissen en o
   assert.ok(html.includes("staat op slot"), "en de uitleg zegt het");
 });
 
+// De eerste woning op 29-09-2026: de schakelaar van de meetstekker onder de vaatwasser
+// stond als vrijgaveschakelaar, en de coach zette na elke beurt de stroom eraf.
+// Apparaten zegt het nu op de ingeklapte regel (v0.101.11).
+
+proef("een vrijgaveschakelaar op de eigen stekker geeft een waarschuwing in Apparaten", async () => {
+  const { releaseOnOwnPlug } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  const registratie = {
+    "sensor.vw_vermogen": { device_id: "stekker" },
+    "switch.vw_stekker": { device_id: "stekker" },
+    "switch.keukenknop": { device_id: "knop" },
+    "input_boolean.vw": {},
+  };
+  const vw = { id: "vw", type: "vaatwasser", brand: "overig", name: "Vaatwasser", controllable: true,
+               entity: "sensor.vw_vermogen", entities: { release_switch: "switch.vw_stekker" }, programs: [] };
+  assert.deepEqual(releaseOnOwnPlug(vw, registratie), ["release_switch"], "de stekker zelf");
+  assert.deepEqual(releaseOnOwnPlug({ ...vw, entities: { release_now_switch: "switch.vw_stekker" } }, registratie),
+    ["release_now_switch"], "ook voor nu starten");
+  assert.deepEqual(releaseOnOwnPlug({ ...vw, entities: { release_switch: "switch.keukenknop" } }, registratie), [],
+    "een schakelaar op een ander apparaat is goed");
+  assert.deepEqual(releaseOnOwnPlug({ ...vw, entities: { release_switch: "input_boolean.vw" } }, registratie), [],
+    "een helper is goed");
+  assert.deepEqual(releaseOnOwnPlug(vw, undefined), [], "zonder registratie weet het paneel het niet");
+  assert.deepEqual(releaseOnOwnPlug({ ...vw, entity: "" }, registratie), [], "zonder vermogenssensor niets te vergelijken");
+
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.hass_ = { entities: registratie };
+  el.draft_ = { devices: [vw] };
+  const regel = el.summary_(vw);
+  assert.ok(regel.warn && regel.text.includes("stekker zelf") && regel.text.includes("stroom"), regel.text);
+  const goed = { ...vw, entities: { release_switch: "input_boolean.vw" } };
+  el.draft_ = { devices: [goed] };
+  assert.ok(!el.summary_(goed).warn, "met een helper geen waarschuwing");
+});
+
 // De eigenaar op 16-09-2026: "ik wil een optie hebben op de kaart dat ik kan aangeven
 // tot hoever de bus laadt. Mijne laadt tot 80% namelijk maar ik kan hem ook op
 // 100% instellen."
