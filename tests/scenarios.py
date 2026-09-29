@@ -631,6 +631,17 @@ vaatwasser_lokaal_deur = vaatwasser_krap.kopie(
     vaatwasser=replace(LOKAAL, deur_open=True),
     gebeurtenissen=[("03:00", "vaatwasser_vrijgeven", None), ("03:08", "vaatwasser_deur", False)],
 )
+# Zonder vrijgave (v0.102.0). De eigenaar op 29-09-2026: "staat dat vinkje uit dan mag
+# de vaatwasser gewoon draaien met de coach als de klep dicht zit." Om 19:00 gaat de
+# klep dicht na het inruimen; na de beurt blijft hij dicht tot het uitruimen om 07:30,
+# en om 07:40 gaat hij na het inruimen weer dicht.
+vaatwasser_klep_dicht = vaatwasser_avond.kopie(
+    naam="vaatwasser-klep-dicht", uitleg="zonder vrijgave: om 19:00 gaat de klep dicht en dat is de vrijgave; hij draait in de goedkope nacht, start niet opnieuw met de schone vaat erin, en is na uitruimen en inruimen om 07:40 weer vrij",
+    vaatwasser=Vaatwasser(vrijgave=False, deur_open=True),
+    duur_uren=14,
+    gebeurtenissen=[("19:00", "vaatwasser_deur", False), ("07:30", "vaatwasser_deur", True),
+                    ("07:40", "vaatwasser_deur", False)],
+)
 vaatwasser_lokaal_afstand_uit = vaatwasser_avond.kopie(
     naam="vaatwasser-lokaal-afstand-uit", uitleg="Home Connect Local met starten op afstand uit: de sensor zegt het, dus de coach drukt niet één keer en zegt wat er aan moet",
     vaatwasser=replace(LOKAAL, afstand_aan=False),
@@ -1185,7 +1196,7 @@ ALLE = [
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,
     vaatwasser_zonpiek, vaatwasser_eindtijd, vaatwasser_eindtijd_bijstellen, vaatwasser_na_klaartijd, vaatwasser_na_klaartijd_nu,
-    vaatwasser_lokaal, vaatwasser_lokaal_deur, vaatwasser_lokaal_afstand_uit,
+    vaatwasser_lokaal, vaatwasser_lokaal_deur, vaatwasser_lokaal_afstand_uit, vaatwasser_klep_dicht,
     forecast_solar_vast, forecast_solar_vaatwasser, forecast_solar_sensoren,
     boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
     *KLANTWONING,

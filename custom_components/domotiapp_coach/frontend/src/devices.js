@@ -432,6 +432,24 @@ export const releaseOnOwnPlug = (device, entities) => {
   });
 };
 
+/**
+ * Een knop die "ingeruimd en dicht" betekent (v0.102.0). De eigenaar op
+ * 29-09-2026: "een fysieke zigbee knop waar men op kan drukken die een event
+ * detecteert." Een druk is altijd vrijgeven, nooit wisselen: een knop heeft
+ * geen lampje. Welke soort druk telt staat in `release_press`, gekozen uit de
+ * soorten die de knop zelf opgeeft; leeg is elke druk.
+ */
+const RELEASE_BUTTON_FIELD = {
+  key: "release_button",
+  label: "Vrijgaveknop",
+  hint: "Optioneel: een knop die hetzelfde betekent als \"Ingeruimd en dicht\", bijvoorbeeld een Zigbee-knop naast de vaatwasser (een event-entiteit), een knop-helper (input_button) of een actiesensor. Eén druk geeft hem vrij; nog een keer drukken doet niets. Je krijgt een melding met wanneer hij start.",
+  filter: "all",
+  hideRow: true,
+};
+
+/** De velden waarmee de bewoner een vaatwasser vrijgeeft; weg als dat niet hoeft. */
+export const RELEASE_KEYS = ["release_switch", "release_now_switch", "release_button"];
+
 export const DISHWASHER_BRANDS = [
   {
     id: "home_connect",
@@ -496,12 +514,13 @@ export const DISHWASHER_BRANDS = [
       },
       RELEASE_SWITCH_FIELD,
       RELEASE_NOW_SWITCH_FIELD,
+      RELEASE_BUTTON_FIELD,
       {
         key: "door",
         label: "Deurstand",
         // Deliberately not `needed`, and deliberately not part of the decision
         // to start: see `releaseCopy`.
-        hint: "Alleen om te laten zien. Of de vaatwasser mag draaien, zegt de klant zelf met de vrijgaveknop.",
+        hint: "Moet hij eerst vrijgegeven worden, dan alleen om te laten zien. Hoeft dat niet, dan is klep dicht de vrijgave, en dan is dit veld nodig.",
         filter: "all",
         values: {
           closed: "Dicht",
@@ -550,7 +569,7 @@ export const DISHWASHER_BRANDS = [
     id: "overig",
     label: "Overig",
     note: "Een vaatwasser zonder koppeling, op een meetstekker: de coach zegt wanneer je hem aan moet zetten en meet wat hij verbruikt.",
-    fields: [RELEASE_SWITCH_FIELD, RELEASE_NOW_SWITCH_FIELD],
+    fields: [RELEASE_SWITCH_FIELD, RELEASE_NOW_SWITCH_FIELD, RELEASE_BUTTON_FIELD],
     manual: true,
   },
 ];
@@ -763,7 +782,12 @@ export const brandMeta = (device) =>
   brandsFor(device?.type).find((brand) => brand.id === device?.brand);
 
 /** The extra entity fields this device asks for, beyond its power sensor. */
-export const brandFields = (device) => brandMeta(device)?.fields ?? typeFields(device);
+export const brandFields = (device) => {
+  const fields = brandMeta(device)?.fields ?? typeFields(device);
+  return device?.release_required === false && canSkipRelease(device)
+    ? fields.filter((field) => !RELEASE_KEYS.includes(field.key))
+    : fields;
+};
 
 /** The entities this brand is steered through, if it works that way. */
 export const brandButtons = (device) => brandMeta(device)?.buttons ?? [];
@@ -961,8 +985,25 @@ export const carsFor = (device) =>
  */
 export const RELEASE_TYPES = ["vaatwasser"];
 
-/** Whether this device waits for the customer before the coach may start it. */
-export const needsRelease = (device) => RELEASE_TYPES.includes(device?.type);
+/**
+ * Whether this device waits for the customer before the coach may start it.
+ *
+ * Sinds v0.102.0 een keuze bij Apparaten, "Moet eerst vrijgegeven worden". De
+ * eigenaar op 29-09-2026: "staat dat vinkje uit dan mag de vaatwasser gewoon
+ * draaien met de coach als de klep dicht zit, en dan heb je ook geen knop
+ * vrijgeven op de vaatwasser kaart." Alleen waar de coach de klep ziet en zelf
+ * kan starten; een domme vaatwasser vraagt altijd.
+ */
+export const needsRelease = (device) =>
+  RELEASE_TYPES.includes(device?.type) && !(device?.release_required === false && canSkipRelease(device));
+
+/** Of dit apparaat zonder vrijgave kan: een merk met een deurstand en een startknop. */
+export const canSkipRelease = (device) => {
+  const meta = brandMeta(device);
+  return RELEASE_TYPES.includes(device?.type) && !meta?.manual
+    && (meta?.fields ?? []).some((field) => field.key === "door")
+    && (meta?.buttons ?? []).some((button) => button.key === "start");
+};
 
 /** What the customer presses to say a device may run right now. */
 export function releaseCopy(device) {
@@ -999,6 +1040,10 @@ export function missingForControl(device) {
 
   const wanted = brandDevice(device);
   if (wanted && !device.device_id) missing.unshift(wanted.label);
+  // Zonder vrijgave is klep dicht de vrijgave: zonder deurstand zou hij nooit starten.
+  if (device.release_required === false && canSkipRelease(device) && !device.entities?.door) {
+    missing.push("Deurstand");
+  }
 
   // Zonder startknop is het vermogen het enige wat de coach van het apparaat
   // ziet: daaraan meet hij of hij draait, hoe lang, en wat het kost.

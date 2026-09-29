@@ -710,6 +710,15 @@ if (vl := v("vaatwasser-lokaal-deur-open")):
     controle("lokaal, deur open: geen 'niet gaan draaien', wel een verslag",
              not meldingen(vl, "niet gaan draaien") and len(meldingen(vl, "is klaar")) == 1, f"{[m for _, m in vl.meldingen]}")
 
+if (vk := v("vaatwasser-klep-dicht")):
+    controle("klep dicht: één druk, in de goedkope nacht en niet in de avondpiek",
+             len(vk.vw_gedrukt) == 1 and vk.vw_gestart is not None and 1 <= vk.vw_gestart.hour < 6,
+             f"gedrukt {[vw_klok(t) for t in vk.vw_gedrukt]}, gestart {vw_klok(vk.vw_gestart)}")
+    controle("klep dicht: na de beurt niet opnieuw, ook niet na uit- en inruimen voor de klaar-tijd van morgen",
+             len(meldingen(vk, "is klaar")) == 1 and not meldingen(vk, "neemt nu geen start aan"),
+             f"{[m for _, m in vk.meldingen]}")
+    controle("klep dicht: na het inruimen om 07:40 staat hij weer vrij", vk.vw_vrij_eind, f"{vk.vw_vrij_eind}")
+
 if (vl := v("vaatwasser-lokaal-afstand-uit")):
     controle("lokaal, afstand uit: de coach drukt geen enkele keer", not vl.vw_gedrukt, f"{vl.vw_gedrukt}")
     controle("lokaal, afstand uit: en zegt één keer wat er aan moet",

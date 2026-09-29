@@ -507,6 +507,9 @@ class Vaatwasser:
     # en de bewoner drukt zelf, zoveel minuten later. None: hij doet het niet.
     # De eigenaar op 06-09-2026: "wel adviseren en meten, met zet hem aan."
     slim: bool = True
+    # Moet hij eerst vrijgegeven worden (v0.102.0)? Uit: klep dicht is de
+    # vrijgave, en de coach start hem zelf.
+    vrijgave: bool = True
     bewoner_reageert_min: int | None = 5
     # Home Connect Local (thuis sinds 23-09-2026) in plaats van de cloud: de
     # startknop is er alleen als de machine een start aanneemt (deur dicht,
@@ -1037,6 +1040,8 @@ class Verloop:
     vw_gemeten: list = field(default_factory=list)
     # Wanneer de coach de bewoner vroeg om hem aan te zetten (domme machine).
     vw_gevraagd: list = field(default_factory=list)
+    # Of de vaatwasser aan het eind vrijgegeven stond (ready_devices).
+    vw_vrij_eind: bool = False
     # De boiler: wanneer de stroom erop en eraf ging, wat erin ging en wat dat
     # kostte, hoe leeg het vat onderweg werd en hoe vol het was op de
     # klaar-tijd. Dat laatste is waar het om gaat: er hoort warm water te zijn
@@ -1227,6 +1232,7 @@ def instellingen(s: Scenario) -> dict:
                 "name": "Vaatwasser",
                 "brand": "home_connect",
                 "controllable": True,
+                "release_required": s.vaatwasser.vrijgave,
                 "entity": E["vw_vermogen"],
                 "entities": {
                     "status": E["vw_status"],
@@ -1840,6 +1846,10 @@ class Wereld:
             return "de bewoner geeft de vaatwasser vrij: ingeruimd en nu starten"
         if actie == "vaatwasser_deur":
             self.vaatwasser.deur_open = bool(arg)
+            # Home Connect staat na een beurt op "finished" tot de deur opengaat.
+            if arg and self.vaatwasser.status == "finished":
+                self.vaatwasser.status = "ready"
+                self.vaatwasser.gestart_op = None
             return "de deur van de vaatwasser gaat " + ("open" if arg else "dicht")
         if actie == "vaatwasser_aan":
             self.vaatwasser.zet_aan(self.nu)
@@ -2193,6 +2203,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
         verloop.paal_terugvallen = wereld.paal.terugvallen
         verloop.geleerd = {int(r["band"]): float(r["kw"]) for r in inst.get("car_pace") or []
                            if isinstance(r, dict) and r.get("car") == "auto"}
+        verloop.vw_vrij_eind = "vaatwasser" in (inst.get("ready_devices") or [])
         verloop.vw_gemeten = [r for r in inst.get("program_measured") or []
                               if isinstance(r, dict) and r.get("device") == "vaatwasser"]
         verloop.boiler_geleerd = next(

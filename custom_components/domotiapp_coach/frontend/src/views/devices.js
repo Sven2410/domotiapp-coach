@@ -38,6 +38,8 @@ import {
   WEEKDAGEN,
   missingForControl,
   releaseOnOwnPlug,
+  canSkipRelease,
+  needsRelease,
   typeMeta,
 } from "../devices.js";
 import { duration } from "../format.js";
@@ -287,7 +289,7 @@ class DacViewDevices extends DacEditorElement {
           <label>${field.label}</label>
           <dac-entity-picker data-entity-key="${field.key}" data-index="${index}"></dac-entity-picker>
           <span class="sub">${field.hint}${field.needed ? " Nodig zodra de coach mag sturen." : ""}</span>
-        </div>`
+        </div>${field.key === "release_button" ? this.pressHtml_(device, index) : ""}`
       )
       .join("");
 
@@ -592,7 +594,7 @@ class DacViewDevices extends DacEditorElement {
         ? "De coach mag over dit apparaat adviseren"
         : "De coach mag dit apparaat noemen";
     const uitleg = stuurbaar
-      ? "Hij komt dan op het overzicht te staan, met een vrijgaveknop en handmatige besturing, en de coach bedient hem zelf op het gunstigste moment."
+      ? `Hij komt dan op het overzicht te staan, met ${needsRelease(device) ? "een vrijgaveknop en " : ""}handmatige besturing, en de coach bedient hem zelf op het gunstigste moment.`
       : manual
         ? "Hij heeft geen startknop, dus sturen kan de coach niet. Hij zegt op de kaart en op je telefoon wanneer je hem aan moet zetten, en meet via de vermogenssensor hoe lang een programma duurt en wat het verbruikt. Het apparaat komt dan op het overzicht te staan, met de vrijgaveknop en de programmakeuze."
         : "Dit apparaat zit alleen op een meetstekker: de coach kan het niet sturen en niet plannen. Met dit vinkje aan noemt hij het wel als je overschot hebt of de stroom goedkoop is; uit, dan volgt hij alleen het verbruik.";
@@ -639,7 +641,22 @@ class DacViewDevices extends DacEditorElement {
         <span class="sub">Het vaste vermogen van Continu. Geeft de zon meer, dan laadt hij mee omhoog; nooit boven je zekering.</span>
       </div>`
       : "";
-    return `${groepHtml}${modusHtml}
+    // De eigenaar op 29-09-2026: "een mogelijkheid bij het toevoegen van een
+    // vaatwasser: moet eerst vrijgegeven worden. Staat dat vinkje uit, dan mag
+    // de vaatwasser gewoon draaien met de coach als de klep dicht zit." Alleen
+    // waar de coach de klep ziet en zelf kan starten (`canSkipRelease`).
+    const vrijgaveHtml = canSkipRelease(device)
+      ? `
+      <label class="check" for="release-${index}">
+        <input type="checkbox" id="release-${index}" data-field="release_required" data-index="${index}"
+               ${device.release_required === false ? "" : "checked"}>
+        <span>
+          <strong>Moet eerst vrijgegeven worden</strong>
+          Aan: de coach wacht tot je hem vrijgeeft met "Ingeruimd en dicht" op de kaart, een schakelaar of een knop. Uit: klep dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de klep open en weer dicht is geweest, zodat hij niet opnieuw start met de schone vaat erin. Een lege machine die na het uitruimen dichtgaat herkent hij niet.
+        </span>
+      </label>`
+      : "";
+    return `${groepHtml}${modusHtml}${vrijgaveHtml}
       <label class="check" for="control-${index}">
         <input type="checkbox" id="control-${index}" data-field="controllable" data-index="${index}"
                ${device.controllable ? "checked" : ""}>
@@ -697,6 +714,28 @@ class DacViewDevices extends DacEditorElement {
     return (this.draft_?.devices ?? []).some(
       (other) => other !== device && other.entity && other.entity === device.entity
     );
+  }
+
+  /**
+   * Welke druk op de vrijgaveknop telt (v0.102.0). De soorten komen van de knop
+   * zelf: een event-entiteit zegt ze in `event_types`, een actiesensor in
+   * `options`. Leeg is elke druk. Zonder knop geen keuze.
+   */
+  pressHtml_(device, index) {
+    const knop = device.entities?.release_button;
+    if (!knop) return "";
+    const attr = this.hass_?.states?.[knop]?.attributes ?? {};
+    const soorten = [...new Set([...(attr.event_types ?? attr.options ?? []), device.release_press].filter(Boolean))];
+    const gekozen = device.release_press ?? "";
+    return `
+        <div class="row">
+          <label for="press-${index}">Welke druk</label>
+          <select id="press-${index}" data-release-press data-index="${index}">
+            <option value=""${gekozen ? "" : " selected"}>Elke druk</option>
+            ${soorten.map((s) => `<option value="${s}"${s === gekozen ? " selected" : ""}>${s}</option>`).join("")}
+          </select>
+          <span class="sub">Bijvoorbeeld alleen een enkele druk, zodat dubbel drukken iets anders kan doen.</span>
+        </div>`;
   }
 
   /** How a device reads when it is folded shut. */
@@ -1182,6 +1221,19 @@ class DacViewDevices extends DacEditorElement {
         this.paintMissing_(index);
         this.paintSummary_(index);
         this.syncSaveBar_();
+        // Een andere knop heeft andere soorten druk.
+        if (key === "release_button") {
+          device.release_press = "";
+          this.paintDevices_();
+        }
+      });
+    }
+
+    for (const keuze of list.querySelectorAll("select[data-release-press]")) {
+      const index = Number(keuze.dataset.index);
+      keuze.addEventListener("change", () => {
+        this.draft_.devices[index].release_press = keuze.value;
+        this.syncSaveBar_();
       });
     }
 
@@ -1205,6 +1257,8 @@ class DacViewDevices extends DacEditorElement {
 
         if (field === "controllable") {
           device.controllable = el.checked;
+        } else if (field === "release_required") {
+          device.release_required = el.checked;
         } else if (field === "continuous_amps") {
           device.continuous_amps = Math.min(32, Math.max(6, Math.round(Number(el.value) || 6)));
         } else {
@@ -1224,8 +1278,9 @@ class DacViewDevices extends DacEditorElement {
           this.paintSummary_(index);
         }
 
-        if (field === "type" || field === "brand") {
+        if (field === "type" || field === "brand" || field === "release_required") {
           // Both decide which fields belong here at all, so the card is redrawn.
+          // Het vinkje van de vrijgave ook: zonder vrijgave geen vrijgavevelden.
           // The name field is not: redrawing on every keystroke would throw the
           // caret away.
           this.paintDevices_();

@@ -956,6 +956,53 @@ proef("een vrijgaveschakelaar op de eigen stekker geeft een waarschuwing in Appa
   assert.ok(!el.summary_(goed).warn, "met een helper geen waarschuwing");
 });
 
+// De eigenaar op 29-09-2026: "bij het toevoegen van een vaatwasser: moet eerst
+// vrijgegeven worden. Als je die aanzet verschijnt er een invulveld voor je helper of
+// knop, en de kaart toont Ingeruimd en dicht. Staat het vinkje uit, dan mag de
+// vaatwasser gewoon draaien met de coach als de klep dicht zit, en dan heb je ook
+// geen knop vrijgeven op de kaart." (v0.102.0)
+
+proef("moet eerst vrijgegeven worden: aan toont de vrijgavevelden, uit is klep dicht", async () => {
+  const { needsRelease, canSkipRelease, brandFields, missingForControl } =
+    await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  const hc = { id: "vw", type: "vaatwasser", brand: "home_connect", name: "Vaatwasser", controllable: true,
+               entity: "sensor.vw_vermogen", entities: { start: "button.vw_start", status: "sensor.vw_status",
+               program: "select.vw_programma" }, programs: [] };
+  const sleutels = (d) => brandFields(d).map((f) => f.key);
+  assert.equal(canSkipRelease(hc), true, "Home Connect ziet de klep en kan starten");
+  assert.equal(needsRelease(hc), true, "zonder keuze: eerst vrijgeven, zoals altijd");
+  assert.ok(["release_switch", "release_now_switch", "release_button"].every((k) => sleutels(hc).includes(k)),
+    "met vrijgave: schakelaar, nu starten en knop");
+  const klep = { ...hc, release_required: false };
+  assert.equal(needsRelease(klep), false, "vinkje uit: geen vrijgaveknop op de kaart");
+  assert.ok(!sleutels(klep).some((k) => k.startsWith("release_")), "en geen vrijgavevelden");
+  assert.ok(sleutels(klep).includes("door"), "de deurstand blijft");
+  assert.deepEqual(missingForControl(klep), ["Deurstand"], "en is dan nodig");
+  assert.deepEqual(missingForControl({ ...klep, entities: { ...klep.entities, door: "binary_sensor.vw_deur" } }), []);
+  const dom = { id: "d", type: "vaatwasser", brand: "overig", controllable: true, entity: "sensor.d", entities: {},
+                release_required: false };
+  assert.equal(canSkipRelease(dom), false, "een domme vaatwasser ziet de klep niet en kan niet starten");
+  assert.equal(needsRelease(dom), true, "dus die vraagt altijd om een vrijgave");
+  assert.ok(sleutels(dom).includes("release_button"), "met de knop erbij");
+
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.draft_ = { devices: [hc, dom], installation: {} };
+  assert.ok(el.controlHtml_(hc, 0).includes('data-field="release_required"'), "het vinkje staat bij Home Connect");
+  assert.ok(el.controlHtml_(hc, 0).includes("checked"), "standaard aan");
+  assert.ok(!el.controlHtml_(dom, 1).includes('data-field="release_required"'), "en niet bij een domme vaatwasser");
+
+  // Welke druk telt: de soorten van de knop zelf, en leeg is elke druk.
+  el.hass_ = { states: { "event.knop": { state: "unknown", attributes: { event_types: ["single", "double", "long"] } } } };
+  const knop = { ...hc, entities: { ...hc.entities, release_button: "event.knop" }, release_press: "double" };
+  const html = el.pressHtml_(knop, 0);
+  assert.ok(html.includes('<option value="">Elke druk</option>') || html.includes('value=""'), html);
+  assert.ok(["single", "double", "long"].every((s) => html.includes(`value="${s}"`)), html);
+  assert.ok(html.includes('value="double" selected'), "de gekozen soort staat geselecteerd");
+  assert.equal(el.pressHtml_(hc, 0), "", "zonder knop geen keuze");
+});
+
 // De eigenaar op 16-09-2026: "ik wil een optie hebben op de kaart dat ik kan aangeven
 // tot hoever de bus laadt. Mijne laadt tot 80% namelijk maar ik kan hem ook op
 // 100% instellen."

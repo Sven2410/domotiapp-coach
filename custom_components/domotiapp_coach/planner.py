@@ -4054,6 +4054,11 @@ class Apparaat:
     # avondpiek, nu. De eigenaar op 13-09-2026, na een vrijgave om 16:33 bij klaar om
     # 16:30: "de keuze ingeruimd en morgen starten of ingeruimd en nu starten."
     start_now: bool = False
+    # Zonder vrijgave (v0.102.0): klep dicht is vrijgegeven. Waarom hij dan
+    # toch nog niet vrij is: "open", "remote" (starten op afstand staat uit),
+    # "unload" (na een beurt nog niet uitgeruimd) of "unknown" (geen
+    # deurstand). Leeg bij een apparaat dat op een vrijgave wacht.
+    door_release: str = ""
 
 
 # Wat Home Connect meldt zolang er een programma loopt of klaarstaat.
@@ -4221,6 +4226,19 @@ def plan_programma(
         return Decision(
             True, 0, "Hij draait.", plan="De coach doet niets tot het programma af is.",
             rule="running",
+        )
+    if not apparaat.released and apparaat.door_release:
+        # De eigenaar op 29-09-2026: "als die optie uit staat dan is het klep
+        # dicht van de vaatwasser en dan is die al vrijgegeven."
+        waarom = {
+            "open": "Wacht tot de klep dicht is.",
+            "remote": "De klep is dicht, maar starten op afstand staat uit. Zet dat aan op de machine.",
+            "unload": "Het programma is klaar. Hij start pas weer als de klep open en weer dicht is geweest.",
+        }.get(apparaat.door_release, "Wacht tot de klep dicht is; de coach ziet de deurstand nu niet.")
+        return Decision(
+            False, 0, waarom,
+            plan="Daarna kiest de coach het goedkoopste moment binnen je schema.",
+            rule="not-released",
         )
     if not apparaat.released:
         gemist = window.missed if window.enabled and window.deadline is not None else None

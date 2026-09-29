@@ -258,10 +258,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 441 controles op het denkwerk
 python tests/test_batterij.py    # 145 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 782 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2067 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 807 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 2075 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 134 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 135 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

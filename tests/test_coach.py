@@ -6645,6 +6645,188 @@ finally:
     else:
         sys.modules["homeassistant.helpers.entity_registry"] = oud120
 
+
+print("=== 121. een knop geeft hem vrij: een Zigbee-knop, een knop-helper, een actiesensor (v0.102.0) ===")
+# De eigenaar op 29-09-2026: "een fysieke zigbee knop waar men op kan drukken die een
+# event detecteert." Zijn keuzes: een druk is altijd vrijgeven (nog een keer doet
+# niets), de soort druk is te kiezen (leeg is elke), en de bewoner krijgt een melding
+# met wanneer hij start.
+KNOP121 = "event.keuken_knop"
+SOORTEN121 = ["single", "double", "long"]
+DOM121 = dict(DOM, entities={"release_button": KNOP121}, release_press="single")
+inst121 = instellingen(devices=[LAADPAAL, DOM121])
+inst121["contract"] = inst56["contract"]
+inst121["strategy"]["schedules"].append({
+    "device": "dev-dom", "enabled": True, "priority": "mid", "per_day": False,
+    "window": {"not_before": "08:00", "start_by": "", "done_by": "16:30"}, "days": [],
+})
+huis121 = dict(huis58); huis121[KNOP121] = {"state": "unknown", "attributes": {"event_types": SOORTEN121}}
+hass121, _, coach121 = bouw(huis121, inst121)
+
+
+async def ronde121(hass, coach, nu):
+    hass.services.verstuurd.clear()
+    await hass.afmaken()
+    await coach._round(nu)
+    await hass.afmaken()
+    return (coach.state.get("dev-dom") or {},
+            [d[2]["message"] for d in hass.services.verstuurd if d[0] == "notify" and "vrijgegeven" in d[2].get("message", "")])
+
+
+def druk121(soort, minuut, hass=hass121, knop=KNOP121):
+    hass.states.zet(knop, {"state": f"2026-09-08T05:{minuut:02d}:00.123+00:00",
+                           "attributes": {"event_type": soort, "event_types": SOORTEN121}})
+
+
+def vrij121(inst=inst121):
+    return "dev-dom" in (inst.get("ready_devices") or [])
+
+
+b, m = asyncio.run(ronde121(hass121, coach121, dt.datetime(2026, 9, 8, 7, 0)))
+controle("nog nooit gedrukt: niets vrijgegeven", not vrij121() and b.get("rule") == "not-released" and not m, f"{b.get('rule')} {m}")
+controle("de coach luistert naar de knop", KNOP121 in coach121._watched, f"{coach121._watched}")
+druk121("double", 1)
+b, m = asyncio.run(ronde121(hass121, coach121, dt.datetime(2026, 9, 8, 7, 1)))
+controle("een dubbele druk telt niet als alleen enkel gekozen is", not vrij121() and not m, f"{m}")
+druk121("single", 2)
+b, m = asyncio.run(ronde121(hass121, coach121, dt.datetime(2026, 9, 8, 7, 2)))
+print(f"  07:02 enkel gedrukt: {b.get('rule')} {m}")
+controle("een enkele druk geeft hem vrij, en de coach plant", vrij121() and b.get("rule") == "wait-for-start", f"{b.get('rule')}")
+controle("met één korte melding: vrijgegeven, en wanneer hij aan moet",
+         m == ["Vaatwasser is vrijgegeven. Zet hem aan om 11:00."], f"{m}")
+druk121("single", 3)
+b, m = asyncio.run(ronde121(hass121, coach121, dt.datetime(2026, 9, 8, 7, 3)))
+controle("nog een keer drukken doet niets: vrij blijft vrij, geen tweede melding", vrij121() and not m, f"{m}")
+# De bewoner haalt de vrijgave op de kaart eraf; de knop valt even weg en komt terug
+# met dezelfde laatste druk. Dat is geen nieuwe druk.
+inst121["ready_devices"] = []
+asyncio.run(ronde121(hass121, coach121, dt.datetime(2026, 9, 8, 7, 4)))
+hass121.states.zet(KNOP121, "unavailable")
+asyncio.run(ronde121(hass121, coach121, dt.datetime(2026, 9, 8, 7, 5)))
+druk121("single", 3)
+b, m = asyncio.run(ronde121(hass121, coach121, dt.datetime(2026, 9, 8, 7, 6)))
+controle("een knop die terugkomt met zijn oude druk geeft niets vrij", not vrij121() and not m, f"{m}")
+
+# Na een herstart: de laatste druk van voor de herstart is geen nieuwe.
+hass121b, _, coach121b = bouw(dict(huis121, **{KNOP121: {"state": "2026-09-08T04:00:00+00:00",
+                                                          "attributes": {"event_type": "single"}}}), inst121)
+inst121["ready_devices"] = []
+b, m = asyncio.run(ronde121(hass121b, coach121b, dt.datetime(2026, 9, 8, 7, 10)))
+controle("na een herstart telt de oude druk niet", not vrij121() and not m, f"{m}")
+
+# Een knop-helper, zonder soort: elke druk.
+inst121c = instellingen(devices=[LAADPAAL, dict(DOM, entities={"release_button": "input_button.vaatwasser"})])
+inst121c["contract"] = inst56["contract"]
+hass121c, _, coach121c = bouw(dict(huis58, **{"input_button.vaatwasser": "2026-09-01T10:00:00+00:00"}), inst121c)
+asyncio.run(ronde121(hass121c, coach121c, dt.datetime(2026, 9, 8, 7, 0)))
+hass121c.states.zet("input_button.vaatwasser", "2026-09-08T05:01:00+00:00")
+b, m = asyncio.run(ronde121(hass121c, coach121c, dt.datetime(2026, 9, 8, 7, 1)))
+controle("een knop-helper: de druk geeft hem vrij", vrij121(inst121c) and len(m) == 1, f"{m}")
+
+# Een actiesensor zoals Zigbee2MQTT hem kent: "single" en daarna weer leeg.
+inst121d = instellingen(devices=[LAADPAAL, dict(DOM, entities={"release_button": "sensor.knop_action"})])
+inst121d["contract"] = inst56["contract"]
+hass121d, _, coach121d = bouw(dict(huis58, **{"sensor.knop_action": ""}), inst121d)
+asyncio.run(ronde121(hass121d, coach121d, dt.datetime(2026, 9, 8, 7, 0)))
+hass121d.states.zet("sensor.knop_action", "single")
+b, m = asyncio.run(ronde121(hass121d, coach121d, dt.datetime(2026, 9, 8, 7, 1)))
+controle("een actiesensor: single geeft hem vrij", vrij121(inst121d) and len(m) == 1, f"{m}")
+inst121d["ready_devices"] = []
+hass121d.states.zet("sensor.knop_action", "")
+b, m = asyncio.run(ronde121(hass121d, coach121d, dt.datetime(2026, 9, 8, 7, 2)))
+controle("en weer leeg is geen druk", not vrij121(inst121d) and not m, f"{m}")
+
+print("=== 122. zonder vrijgave: klep dicht is vrijgegeven (v0.102.0) ===")
+# De eigenaar op 29-09-2026: "staat dat vinkje uit van moet vrijgegeven worden mag de
+# vaatwasser gewoon draaien met de coach als de klep dicht zit zonder vrij te geven."
+AFSTAND122 = "binary_sensor.vaatwasser_afstand"
+VW122 = dict(VAATWASSER, release_required=False,
+             entities={**VAATWASSER["entities"], "remote_start": AFSTAND122, "release_switch": "input_boolean.vw"})
+inst122 = instellingen(devices=[LAADPAAL, VW122])
+inst122["contract"] = inst56["contract"]
+inst122["strategy"]["schedules"].append({
+    "device": "dev-vaatwasser", "enabled": True, "priority": "mid", "per_day": False,
+    "window": {"not_before": "", "start_by": "", "done_by": "07:00"}, "days": [],
+})
+huis122 = dict(huis56)
+huis122.update({"binary_sensor.vaatwasser_deur": "on", AFSTAND122: "on", "input_boolean.vw": "off"})
+hass122, _, coach122 = bouw(huis122, inst122)
+
+
+async def ronde122(nu, hass=None, coach=None):
+    hass = hass or hass122; coach = coach or coach122
+    hass.services.verstuurd.clear()
+    await hass.afmaken()
+    await coach._round(nu)
+    await hass.afmaken()
+    return coach.state.get("dev-vaatwasser") or {}, [d for d in hass.services.verstuurd if d[0] in ("button", "input_boolean")]
+
+
+def vrij122():
+    return "dev-vaatwasser" in (inst122.get("ready_devices") or [])
+
+
+b, v = asyncio.run(ronde122(dt.datetime(2026, 9, 7, 19, 0)))
+controle("klep open: niet vrij, en de reden zegt het", not vrij122() and b.get("reason") == "Wacht tot de klep dicht is.",
+         f"{b.get('reason')}")
+controle("de coach luistert naar de klep", "binary_sensor.vaatwasser_deur" in coach122._watched, "")
+hass122.states.zet("binary_sensor.vaatwasser_deur", "off")
+b, v = asyncio.run(ronde122(dt.datetime(2026, 9, 7, 19, 5)))
+print(f"  19:05 klep dicht: {b.get('rule')} {b.get('starts_at')} {b.get('reason', '')[:70]}")
+controle("klep dicht: vrijgegeven, en hij wacht op het goedkoopste moment",
+         vrij122() and b.get("rule") == "wait-for-start" and (b.get("starts_at") or "").endswith("T01:00:00"), f"{b.get('rule')}")
+controle("de vrijgaveschakelaar telt zonder vrijgave niet, en gaat nergens heen", not v, f"{v}")
+hass122.states.zet("binary_sensor.vaatwasser_deur", "on")
+b, v = asyncio.run(ronde122(dt.datetime(2026, 9, 7, 19, 10)))
+controle("nog een kopje erbij, klep open: de vrijgave gaat eraf", not vrij122() and b.get("rule") == "not-released", "")
+hass122.states.zet("binary_sensor.vaatwasser_deur", "off")
+hass122.states.zet(AFSTAND122, "off")
+b, v = asyncio.run(ronde122(dt.datetime(2026, 9, 7, 19, 15)))
+controle("klep dicht maar starten op afstand uit: dan zegt de machine nee, en de coach wacht",
+         not vrij122() and "starten op afstand staat uit" in b.get("reason", ""), f"{b.get('reason')}")
+hass122.states.zet(AFSTAND122, "on")
+b, v = asyncio.run(ronde122(dt.datetime(2026, 9, 7, 19, 20)))
+controle("starten op afstand aan: weer vrij", vrij122() and b.get("rule") == "wait-for-start", f"{b.get('rule')}")
+hass122.states.zet("sensor.prijs", {"state": "0.18", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen56(7)}})
+b, v = asyncio.run(ronde122(dt.datetime(2026, 9, 8, 1, 0, 30)))
+controle("om 01:00 drukt hij zelf op start",
+         b.get("rule") == "cheapest-start" and v == [("button", "press", {"entity_id": "button.vaatwasser_start"})], f"{v}")
+hass122.states.zet("sensor.vaatwasser_status", "run")
+hass122.states.zet("sensor.vaatwasser_vermogen", "2000")
+for minuut in range(2, 180, 10):
+    asyncio.run(ronde122(dt.datetime(2026, 9, 8, 1, 0) + dt.timedelta(minutes=minuut)))
+hass122.states.zet("sensor.vaatwasser_status", "finished")
+hass122.states.zet("sensor.vaatwasser_vermogen", "0")
+b, v = asyncio.run(ronde122(dt.datetime(2026, 9, 8, 4, 0)))
+controle("klaar: de vrijgave is eraf", not vrij122() and b.get("rule") == "finished", f"{b.get('rule')}")
+b, v = asyncio.run(ronde122(dt.datetime(2026, 9, 8, 4, 1)))
+controle("en met de klep nog dicht start hij niet opnieuw", not vrij122() and not v, f"{v}")
+# Bosch zet de status op ready zodra... stel dat hij dat zonder de deur doet: dan nog niet.
+hass122.states.zet("sensor.vaatwasser_status", "ready")
+b, v = asyncio.run(ronde122(dt.datetime(2026, 9, 8, 4, 2)))
+controle("ook als de machine niet meer klaar zegt: eerst uitruimen",
+         not vrij122() and "open en weer dicht" in b.get("reason", ""), f"{b.get('reason')}")
+hass122.states.zet("binary_sensor.vaatwasser_deur", "on")
+asyncio.run(ronde122(dt.datetime(2026, 9, 8, 7, 30)))
+hass122.states.zet("binary_sensor.vaatwasser_deur", "off")
+b, v = asyncio.run(ronde122(dt.datetime(2026, 9, 8, 7, 31)))
+controle("uitgeruimd en weer ingeruimd, klep dicht: weer vrij", vrij122(), f"{b.get('rule')} {b.get('reason')}")
+
+# Na een herstart met de schone vaat erin: de machine zegt klaar, dus niet vrij.
+inst122["ready_devices"] = []
+hass122b, _, coach122b = bouw(dict(huis122, **{"sensor.vaatwasser_status": "finished",
+                                                "binary_sensor.vaatwasser_deur": "off"}), inst122)
+b, v = asyncio.run(ronde122(dt.datetime(2026, 9, 8, 8, 0), hass122b, coach122b))
+controle("na een herstart met de machine op klaar: niet vrij", not vrij122() and not v, f"{b.get('rule')}")
+
+# Met vrijgave aan (de standaard) verandert er niets: de klep dicht geeft niets vrij.
+inst122c = instellingen(devices=[LAADPAAL, dict(VW122, release_required=True)])
+inst122c["contract"] = inst56["contract"]
+hass122c, _, coach122c = bouw(dict(huis122, **{"binary_sensor.vaatwasser_deur": "off"}), inst122c)
+b, v = asyncio.run(ronde122(dt.datetime(2026, 9, 7, 19, 0), hass122c, coach122c))
+controle("met vrijgave nodig geeft klep dicht niets vrij", "dev-vaatwasser" not in (inst122c.get("ready_devices") or [])
+         and b.get("reason") == "Wacht tot je hem vrijgeeft: ingeruimd en dicht.", f"{b.get('reason')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
