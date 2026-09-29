@@ -1079,6 +1079,19 @@ batterij_knop_traag_start = batterij_paal.kopie(
     batterij=Batterij(soc=80.0, knop_weg=True, opdracht_w=-2500.0, knop_terug_s=14.0),
     stap_seconden=5,
 )
+# "De coach moet de batterij niet zelf sturen ... alleen goedkoop inkopen en de anker
+# stoppen als de laadpaal aan gaat" (de eigenaar, 29-09-2026, v0.101.9). Dezelfde twee
+# dynamische dagen, met een batterij die zelf nul op de meter doet.
+batterij_dynamisch_zelf = batterij_winter.kopie(
+    naam="batterij-dynamisch-zelf",
+    uitleg="dynamisch, bewolkt, de accu doet zelf nul op de meter: de coach neemt hem alleen over om goedkoop bij te laden",
+    batterij=Batterij(soc=8.0, eigen_nul=True, zelf_nul=True),
+)
+batterij_dynamisch_zon_zelf = batterij_zomer.kopie(
+    naam="batterij-dynamisch-zon-zelf",
+    uitleg="dynamisch, heldere dag, de accu doet zelf nul op de meter",
+    batterij=Batterij(soc=8.0, eigen_nul=True, zelf_nul=True),
+)
 batterij_zelf_wisselend = batterij_wisselende_last.kopie(
     naam="batterij-zelf-wisselend",
     uitleg="de wisselende last van 490 W, met een accu die zelf nul op de meter doet: de coach geeft geen enkele opdracht",
@@ -1098,7 +1111,7 @@ BATTERIJ = [
     batterij_meter_weg, batterij_herstart, batterij_anker_sensor, batterij_uurlast,
     batterij_klapperlast, batterij_wisselende_last, batterij_zonder_rendement,
     batterij_zelf_nul, batterij_zelf_knop_weg, batterij_zelf_knop_traag, batterij_knop_traag_start,
-    batterij_zelf_wisselend,
+    batterij_dynamisch_zelf, batterij_dynamisch_zon_zelf, batterij_zelf_wisselend,
 ]
 HERSTART = [herstart_groep, herstart_groep_zonder]
 

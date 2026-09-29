@@ -1706,6 +1706,28 @@ if (vl := v("batterij-zelf-knop-weg")):
                  f"{vl.bat_verloop[-1][3]:.0f}% tegen {zelf.bat_verloop[-1][3]:.0f}%, "
                  f"€{vl.bat_kosten_met:.2f} tegen €{zelf.bat_kosten_met:.2f}")
 
+# Doet de batterij zelf nul, dan grijpt de coach alleen in om goedkoop bij te laden
+# (v0.101.9, de eigenaar op 29-09-2026). Gemeten bij het bouwen: bewolkt € 1,48 met
+# 161 opdrachten als de coach alles stuurt, € 1,49 met 14 als de batterij het zelf doet;
+# een zonnige dag € -1,01 tegen € -0,54, maar dan eindigt hij op 48% in plaats van 39%.
+if (vl := v("batterij-dynamisch-zelf")) and (heel := v("batterij-dynamisch-winter")):
+    standen = {r[4] for r in vl.bat_verloop}
+    print(f"  dynamisch-zelf: {len(vl.bat_opdrachten)} opdrachten, standen {sorted(standen)}, "
+          f"€ {vl.bat_kosten_met:.2f} tegen € {heel.bat_kosten_met:.2f} als de coach alles stuurt")
+    controle("dynamisch-zelf: de coach neemt hem alleen over om van het net te laden",
+             standen <= {"nul", "netladen"} and "netladen" in standen, f"{sorted(standen)}")
+    controle("dynamisch-zelf: en geeft hem daarna terug",
+             [m for _, m in vl.bat_modi][-1:] == ["self_consumption"], f"{vl.bat_modi}")
+    controle("dynamisch-zelf: een handvol opdrachten in plaats van honderden",
+             len(vl.bat_opdrachten) <= 30, f"{len(vl.bat_opdrachten)}")
+    controle("dynamisch-zelf: en het kost hooguit een paar cent meer dan alles sturen",
+             vl.bat_kosten_met <= heel.bat_kosten_met + 0.05, f"€ {vl.bat_kosten_met:.2f} tegen € {heel.bat_kosten_met:.2f}")
+if (vl := v("batterij-dynamisch-zon-zelf")):
+    standen = {r[4] for r in vl.bat_verloop}
+    controle("dynamisch-zon-zelf: op een zonnige dag doet de batterij alles zelf",
+             standen == {"nul"} and not [m for _, m in vl.bat_modi if m == "third_party_control"],
+             f"{sorted(standen)} {vl.bat_modi}")
+
 # De knop kwam in de klantwoning op 29-09-2026 pas veertien seconden na het omzetten
 # terug (v0.101.8). Met v0.101.7 gaf het overnemen het na tien seconden op: in dit
 # scenario 160 minuten 2500 W uit de batterij in de bus, 6,67 kWh, en om 04:30 op 5%.

@@ -4415,6 +4415,7 @@ class ChargerCoach:
                 eigen.get("weekly_full_day"),
                 laatst_vol.replace(tzinfo=None) if laatst_vol is not None else None,
             ),
+            zelf_nul=self._zelf_instelling(device),
         )
 
     @staticmethod
