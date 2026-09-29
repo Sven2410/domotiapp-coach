@@ -1061,6 +1061,24 @@ batterij_zelf_knop_weg = batterij_zelf_nul.kopie(
     uitleg="als batterij-zelf-nul, maar de knop is weg in de eigen stand en er staat nog 2500 W ontladen in het register",
     batterij=Batterij(soc=80.0, eigen_nul=True, zelf_nul=True, knop_weg=True, opdracht_w=-2500.0),
 )
+# In de klantwoning op 29-09-2026 kwam de knop pas veertien seconden na het omzetten
+# terug. Het overnemen van v0.100.2 wachtte tien seconden en gaf het dan op; de
+# regelaar dacht daarna dat de batterij op 0 W stond (v0.101.8).
+batterij_zelf_knop_traag = batterij_zelf_knop_weg.kopie(
+    naam="batterij-zelf-knop-traag",
+    uitleg="als batterij-zelf-knop-weg, maar de knop komt pas veertien seconden na het omzetten terug",
+    batterij=Batterij(soc=80.0, eigen_nul=True, zelf_nul=True, knop_weg=True, opdracht_w=-2500.0,
+                      knop_terug_s=14.0),
+    stap_seconden=5,
+)
+# Dezelfde avond, maar de coach doet de nul zelf: hij begint te sturen terwijl de
+# batterij nog in zijn eigen stand staat, zoals in de klantwoning om 15:51:42.
+batterij_knop_traag_start = batterij_paal.kopie(
+    naam="batterij-knop-traag-start",
+    uitleg="de coach begint te sturen (niet zelf nul); de batterij staat in zijn eigen stand, de knop komt pas na veertien seconden, en in het register staat 2500 W ontladen",
+    batterij=Batterij(soc=80.0, knop_weg=True, opdracht_w=-2500.0, knop_terug_s=14.0),
+    stap_seconden=5,
+)
 batterij_zelf_wisselend = batterij_wisselende_last.kopie(
     naam="batterij-zelf-wisselend",
     uitleg="de wisselende last van 490 W, met een accu die zelf nul op de meter doet: de coach geeft geen enkele opdracht",
@@ -1079,7 +1097,8 @@ BATTERIJ = [
     batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_paal, batterij_sprong,
     batterij_meter_weg, batterij_herstart, batterij_anker_sensor, batterij_uurlast,
     batterij_klapperlast, batterij_wisselende_last, batterij_zonder_rendement,
-    batterij_zelf_nul, batterij_zelf_knop_weg, batterij_zelf_wisselend,
+    batterij_zelf_nul, batterij_zelf_knop_weg, batterij_zelf_knop_traag, batterij_knop_traag_start,
+    batterij_zelf_wisselend,
 ]
 HERSTART = [herstart_groep, herstart_groep_zonder]
 

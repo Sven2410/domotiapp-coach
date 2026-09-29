@@ -4720,7 +4720,17 @@ class ChargerCoach:
             if self._zelf_instelling(device):
                 # Welke modus het wordt kiest `_async_regel` meteen hieronder.
                 sessie["zelf"] = None
+            elif self._knop_weg(device):
+                # Is de knop in de eigen stand weg, dan net als bij het overnemen:
+                # eerst de stand, en de 0 W zodra de knop er is. Tot 29-09-2026
+                # zette dit alleen de modus, en schreef de regelaar zijn eerste
+                # opdracht naar een knop die er nog niet was (in de klantwoning
+                # 14 s weg); daarna dacht hij dat die opdracht stond.
+                sessie["nul_open"] = not await self._async_overnemen_op_nul(device)
+                sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=now, bezonken=False)
+                sessie["zelf"] = False
             else:
+                # De knop is er: de regelaar schrijft in deze ronde meteen zijn opdracht.
                 await self._async_batterij_modus(device, "control_mode")
                 sessie["zelf"] = False
             sessie["stuurt"] = True
@@ -4796,14 +4806,25 @@ class ChargerCoach:
                 if sessie.get("zelf"):
                     return
                 regelaar = sessie["regelaar"]
+            if sessie.get("nul_open"):
+                # Het overnemen of de laatste opdracht kwam niet aan: de knop was
+                # onbereikbaar, en in het register kan nog van alles staan. Zolang
+                # hij weg is valt er niets te sturen; is hij terug, dan eerst 0 W,
+                # en de regelaar begint daar opnieuw.
+                if not await self._async_batterij_zetten(device, 0.0):
+                    return
+                sessie["nul_open"] = False
+                sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=nu, bezonken=False)
+                _LOGGER.info("%s: de stuurknop is er weer, 0 W geschreven", device_id)
+                return
             opdracht = regelaar.stap(
                 nu, net_w=net_w, net_op=net_op, batterij_w=batterij_w,
                 besluit=besluit, b=b,
                 doel_w=regelaar.doel_w(sessie.get("koop"), sessie.get("terug")),
                 ruimte_w=ruimte_w,
             )
-            if opdracht is not None:
-                await self._async_batterij_zetten(device, opdracht)
+            if opdracht is not None and not await self._async_batterij_zetten(device, opdracht):
+                sessie["nul_open"] = True
         except ServiceNotFound:
             _LOGGER.warning("%s kan nog niet aangestuurd worden (nog niet geladen?)", device_id)
         except Exception:  # noqa: BLE001 - de regelaar mag nooit stilvallen op één fout
@@ -4861,14 +4882,15 @@ class ChargerCoach:
                 await self._async_batterij_zetten(device, 0.0)
                 await self._async_batterij_modus(device, "idle_mode")
                 sessie["zelf"] = True
+                sessie["nul_open"] = False
                 sessie["regelaar"] = Regelaar()
                 await self._async_noteer(f"{naam} doet zelf nul op de meter, met zijn eigen meter.", nu)
             return
         sessie.pop("zelf_sinds", None)
         if zelf is False:
             return
-        await self._async_overnemen_op_nul(device)
-        # Hij staat nu op nul; de regelaar wacht tot dat te zien is.
+        sessie["nul_open"] = not await self._async_overnemen_op_nul(device)
+        # Hij staat nu op nul, of zodra de knop er is; de regelaar wacht tot dat te zien is.
         sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=_moment(), bezonken=False)
         sessie["zelf"] = False
         if zelf:
@@ -4880,8 +4902,8 @@ class ChargerCoach:
         staat = self.hass.states.get(knop) if knop else None
         return staat is not None and staat.state == "unavailable"
 
-    async def _async_overnemen_op_nul(self, device: dict[str, Any]) -> None:
-        """De batterij in de externe stand, op 0 W (v0.100.2).
+    async def _async_overnemen_op_nul(self, device: dict[str, Any]) -> bool:
+        """De batterij in de externe stand, op 0 W (v0.100.2). False als de 0 W er nog niet in staat.
 
         Eerst 0 W en dan de stand, zodat hij nooit op een oude opdracht begint.
         Maar de Anker van de eigenaar maakt zijn stuurknop en richting in zijn
@@ -4892,22 +4914,26 @@ class ChargerCoach:
         stand op wat er nog in het register stond: in de eerste woning de
         laatste opdracht van de sturing die er daarvoor was. Is de knop weg,
         dan eerst de stand, wachten tot de knop er weer is, en dan de 0 W.
+
+        Hooguit `KNOP_WACHT_STAPPEN` keer `KNOP_WACHT_STAP`, want zolang wacht
+        de rest van de ronde ook. In de klantwoning kwam de knop op 29-09-2026
+        pas na 14 s terug (15:51:42 omgezet, 15:51:56 terug); dan zet de
+        aanroeper `nul_open` en schrijft de regelaar de 0 W zodra hij er is.
         """
         if not self._knop_weg(device):
             await self._async_batterij_zetten(device, 0.0)
             await self._async_batterij_modus(device, "control_mode")
-            return
+            return True
         await self._async_batterij_modus(device, "control_mode")
         for _ in range(KNOP_WACHT_STAPPEN):
             if not self._knop_weg(device):
-                await self._async_batterij_zetten(device, 0.0)
-                return
+                return await self._async_batterij_zetten(device, 0.0)
             await self._sleep(KNOP_WACHT_STAP)
-        _LOGGER.warning(
-            "%s: de stuurknop %s bleef onbereikbaar na het omzetten naar de externe stand; "
-            "de 0 W kon er niet in",
+        _LOGGER.info(
+            "%s: de stuurknop %s is na het omzetten nog onbereikbaar; de 0 W volgt zodra hij er is",
             device.get("id"), (device.get("entities") or {}).get("setpoint"),
         )
+        return False
 
     async def _async_regel_tik(self, _now: datetime | None = None) -> None:
         """De regelaar van elke gestuurde batterij één stap laten doen."""
@@ -4956,17 +4982,22 @@ class ChargerCoach:
         gekozen = rest if laden else ontladen
         return gekozen[0] if gekozen else None
 
-    async def _async_batterij_zetten(self, device: dict[str, Any], watt: float) -> None:
-        """Een vermogen naar de batterij, laden positief.
+    async def _async_batterij_zetten(self, device: dict[str, Any], watt: float) -> bool:
+        """Een vermogen naar de batterij, laden positief. False als het niet kon.
 
         Met een richting-entiteit ernaast gaat het getal er zonder teken in;
         zonder is het teken de richting. Eerst de richting en dan het getal, en
         de richting alleen als hij verandert.
+
+        Een onbereikbare knop krijgt niets: Home Assistant slaat zo'n dienst
+        zonder fout over, en wie dan denkt dat de opdracht staat, stuurt een
+        batterij die nog op iets anders loopt. Wat de coach daarmee doet staat
+        bij `nul_open` in `_async_regel`.
         """
         entities = device.get("entities") or {}
         knop, richting = entities.get("setpoint"), entities.get("direction")
-        if not knop:
-            return
+        if not knop or self._knop_weg(device):
+            return False
         eigen = device.get("battery") or {}
         if richting:
             staat = self.hass.states.get(richting)
@@ -4982,6 +5013,7 @@ class ChargerCoach:
         await self.hass.services.async_call(
             "number", "set_value", {"entity_id": knop, "value": round(waarde)}, blocking=True
         )
+        return True
 
     async def _async_laadgrens_omhoog(
         self, settings: dict[str, Any], device: dict[str, Any], huidig: float
@@ -5045,6 +5077,7 @@ class ChargerCoach:
         if sessie is not None:
             sessie["stuurt"] = False
             sessie["zelf"] = None
+            sessie["nul_open"] = False
             sessie["regelaar"] = Regelaar()
             if sessie.get("settings") is not None:
                 await self._async_laadgrens_terug(sessie["settings"], device)

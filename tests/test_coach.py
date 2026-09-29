@@ -6413,6 +6413,142 @@ controle("de sensorwacht noemt de kast een onderverdeelkast en de groep een groe
          and namen117.get("sensor.paal_l1") == "de stroommeting van fase L1 van de groep Laadpaal",
          f"{namen117.get('sensor.lounge_l1')} | {namen117.get('sensor.paal_l1')}")
 
+print("=== 118. een stuurknop die pas na veertien seconden terugkomt (v0.101.8) ===")
+# In de klantwoning op 29-09-2026 begon de coach een Anker te sturen zonder "zelf nul
+# op de meter". Om 15:51:42 ging de modus naar de externe stand, en pas om 15:51:56
+# waren het stuurgetal en de richting er weer. De coach zette alleen de modus en
+# schreef zijn eerste opdracht meteen naar de knop die er nog niet was; Home Assistant
+# sloeg die over ("Referenced entities ... are missing or not currently available").
+# Er stond toevallig 0 in het register. Het overnemen van v0.100.2 wachtte tien
+# seconden en gaf het dan op, met de regelaar in de veronderstelling dat hij op 0 W stond.
+
+
+class Anker118(Anker112):
+    """De knop komt pas terug na `tellen` wachtstappen van een halve seconde, en
+    alles wat naar een onbereikbare entiteit gaat wordt opgeschreven."""
+
+    def __init__(self, hass, tellen):
+        super().__init__(hass)
+        self.tellen = tellen
+        self.geteld = 0
+        self.naar_weg = []
+
+    def tel(self):
+        self.geteld += 1
+        if self.geteld >= self.tellen:
+            self.knop()
+        return asyncio.sleep(0)
+
+    async def async_call(self, domein, dienst, data, blocking=False):
+        staat = self.hass.states.get(data.get("entity_id"))
+        if staat is not None and staat.state == "unavailable":
+            self.naar_weg.append(data.get("entity_id"))
+        await super().async_call(domein, dienst, data, blocking)
+        if data.get("entity_id") == "select.batterij_richting" and staat is not None and staat.state != "unavailable":
+            self.hass.states.zet("select.batterij_richting", {"state": data["option"], "attributes": staat.attributes})
+        # De sensor van de batterij laat zien wat er in het register staat, laden positief.
+        laden = (self.hass.states.get("select.batterij_richting").state or "charge") == "charge"
+        self.hass.states.zet("sensor.batterij_vermogen", {"state": f"{self.register if laden else -self.register:.0f}",
+                                                          "attributes": {"unit_of_measurement": "W"}})
+
+
+def meter118(hass, minuten, seconden, netto):
+    """De P1 met de tijd van de proef als stempel, zoals een echte meter die net meldde."""
+    stempel = (NU118 + dt.timedelta(minutes=minuten, seconds=seconden)).replace(tzinfo=dt.timezone.utc)
+    hass.states.zet("sensor.afname", f"{max(0.0, netto):.0f}", last_updated=stempel)
+    hass.states.zet("sensor.teruglevering", f"{max(0.0, -netto):.0f}", last_updated=stempel)
+
+
+def regel118(hass, coach, van_s, tot_s, afname):
+    """De regelaar om de vijf seconden, met elke keer een verse meting: het huis vraagt
+    `afname` plus wat de batterij er zelf van maakt."""
+    for s in range(van_s, tot_s + 1, 5):
+        sensor = float(hass.states.get("sensor.batterij_vermogen").state or 0)
+        meter118(hass, s // 60, s % 60, afname + sensor)
+        tik118(coach, s // 60, s % 60)
+
+
+def bouw118(apparaat):
+    hass, _, coach = bouw(huis75(modus="self_consumption"), instellingen(devices=[LAADPAAL, apparaat]))
+    anker = Anker118(hass, tellen=28)
+    hass.services = anker
+    # De laatste opdracht van de sturing die er hiervoor was.
+    anker.register = 2500.0
+    anker.knop()
+    coach._sleep = lambda seconds: anker.tel()
+    return hass, coach, anker
+
+
+NU118 = dt.datetime(2026, 9, 29, 15, 51)
+
+
+def ronde118(hass, coach, minuten):
+    klok112.utcnow = lambda: NU118 + dt.timedelta(minutes=minuten)
+    try:
+        return asyncio.run(ronde75(hass, coach, NU118 + dt.timedelta(minutes=minuten)))
+    finally:
+        klok112.utcnow = echte_klok112
+
+
+def tik118(coach, minuten, seconden):
+    klok112.utcnow = lambda: NU118 + dt.timedelta(minutes=minuten, seconds=seconden)
+    try:
+        asyncio.run(coach._async_regel_tik())
+    finally:
+        klok112.utcnow = echte_klok112
+
+
+# a. Beginnen met sturen, zonder "zelf nul op de meter".
+hass118, coach118, anker118 = bouw118(BATTERIJ)
+ronde118(hass118, coach118, 0)
+sessie118 = coach118._batterij.get("dev-batterij") or {}
+controle("de knop is na tien seconden nog weg: de modus staat om, en er ging niets naar de onbereikbare knop",
+         hass118.states.get("select.batterij_modus").state == "third_party_control"
+         and anker118.naar_weg == [] and sessie118.get("nul_open") is True,
+         f"{hass118.states.get('select.batterij_modus').state} {anker118.naar_weg} {sessie118.get('nul_open')}")
+tik118(coach118, 0, 5)
+controle("zolang de knop weg is stuurt de regelaar niets", anker118.register == 2500.0 and anker118.naar_weg == [],
+         f"{anker118.register} {anker118.naar_weg}")
+anker118.knop()
+meter118(hass118, 0, 15, 1500)
+tik118(coach118, 0, 15)
+controle("is hij terug, dan eerst de 0 W, in plaats van de oude 2500 in het register",
+         anker118.register == 0.0 and sessie118.get("nul_open") is False, f"{anker118.register}")
+regel118(hass118, coach118, 20, 60, 1500)
+controle("en daarna gewoon nul op de meter: het huis vraagt 1500 W, de batterij ontlaadt",
+         hass118.states.get("select.batterij_richting").state == "discharge" and anker118.register > 1000,
+         f"{hass118.states.get('select.batterij_richting').state} {anker118.register}")
+
+# b. Overnemen met "zelf nul op de meter", als de paal gaat laden.
+hass118b, coach118b, anker118b = bouw118(BATTERIJ106)
+b118b = ronde118(hass118b, coach118b, 0)
+controle("eerst doet hij het zelf", b118b.get("self_zero") is True, f"{b118b.get('self_zero')}")
+hass118b.states.zet("sensor.laadpaal_vermogen", {"state": "7000", "attributes": {"unit_of_measurement": "W"}})
+anker118b.geteld = 0
+b118b = ronde118(hass118b, coach118b, 1)
+sessie118b = coach118b._batterij.get("dev-batterij") or {}
+controle("de paal laadt en de knop blijft veertien seconden weg: overgenomen, de 0 W staat nog open",
+         b118b.get("self_zero") is False and sessie118b.get("nul_open") is True and anker118b.naar_weg == [],
+         f"{b118b.get('self_zero')} {sessie118b.get('nul_open')} {anker118b.naar_weg}")
+anker118b.knop()
+tik118(coach118b, 1, 15)
+controle("en zodra de knop er is staat hij op 0 W, niet op de 2500 W van daarvoor",
+         anker118b.register == 0.0 and sessie118b.get("nul_open") is False, f"{anker118b.register}")
+
+# c. De knop valt midden in het sturen even weg, terwijl er een oven aangaat.
+voor118 = anker118.register
+hass118.states.zet("number.batterij_vermogen", "unavailable")
+regel118(hass118, coach118, 65, 100, 3000)
+controle("een opdracht naar een weggevallen knop gaat er niet heen, en de coach onthoudt dat hij niet aankwam",
+         anker118.naar_weg == [] and sessie118.get("nul_open") is True and anker118.register == voor118,
+         f"{anker118.naar_weg} {sessie118.get('nul_open')} {anker118.register}")
+anker118.knop()
+regel118(hass118, coach118, 105, 105, 3000)
+controle("terug: eerst 0 W, want hij weet niet wat er intussen in staat",
+         anker118.register == 0.0 and sessie118.get("nul_open") is False, f"{anker118.register}")
+regel118(hass118, coach118, 110, 160, 3000)
+controle("en dan volgt hij de oven weer", anker118.register > 2400, f"{anker118.register}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

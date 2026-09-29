@@ -1706,6 +1706,23 @@ if (vl := v("batterij-zelf-knop-weg")):
                  f"{vl.bat_verloop[-1][3]:.0f}% tegen {zelf.bat_verloop[-1][3]:.0f}%, "
                  f"€{vl.bat_kosten_met:.2f} tegen €{zelf.bat_kosten_met:.2f}")
 
+# De knop kwam in de klantwoning op 29-09-2026 pas veertien seconden na het omzetten
+# terug (v0.101.8). Met v0.101.7 gaf het overnemen het na tien seconden op: in dit
+# scenario 160 minuten 2500 W uit de batterij in de bus, 6,67 kWh, en om 04:30 op 5%.
+for naam, basis in (("batterij-zelf-knop-traag", "batterij-zelf-nul"),
+                    ("batterij-knop-traag-start", "batterij-paal-laadt")):
+    if (vl := v(naam)) and (zo := v(basis)):
+        laadt = [r for r, regel in zip(vl.bat_verloop, vl.regels) if regel.paal_w > 1000]
+        ontlaad_min = sum(r[2] < -50 for r in laadt) * vl.stap_uur * 60
+        print(f"  {naam}: eerste opdrachten {[(t.strftime('%H:%M:%S'), round(w)) for t, w in vl.bat_opdrachten[:3]]}, "
+              f"{ontlaad_min:.1f} min ontladen terwijl de paal laadt, eindigt op {vl.bat_verloop[-1][3]:.0f}%")
+        controle(f"{naam}: de eerste opdracht is 0 W, zodra de knop er is",
+                 bool(vl.bat_opdrachten) and vl.bat_opdrachten[0][1] == 0.0, f"{vl.bat_opdrachten[:1]}")
+        controle(f"{naam}: de batterij gaat niet in de auto", ontlaad_min <= 2.0, f"{ontlaad_min:.1f} minuten")
+        controle(f"{naam}: en de avond eindigt als met een knop die meteen terug is",
+                 abs(vl.bat_verloop[-1][3] - zo.bat_verloop[-1][3]) <= 2.0,
+                 f"{vl.bat_verloop[-1][3]:.0f}% tegen {zo.bat_verloop[-1][3]:.0f}%")
+
 if (vl := v("batterij-zelf-wisselend")):
     binnen = sum(abs(r[1]) <= 50 for r in vl.bat_verloop) / len(vl.bat_verloop)
     print(f"  zelf-wisselend: modi {vl.bat_modi}, {len(vl.bat_opdrachten)} opdrachten, P1 {100 * binnen:.0f}% binnen 50 W")
