@@ -609,7 +609,23 @@ def balans_kwh(now: datetime, forecast: Forecast, b: Batterij, weg: float = 0.0)
     return inhoud * (b.rte if b.rte else 1.0)
 
 
-def _vooruitkijk_zin(now: datetime, forecast: Forecast, b: Batterij, auto: float = 0.0) -> str:
+def _vlak(blokken: list[dict]) -> bool:
+    """Of stroom in alle bekende blokken evenveel kost.
+
+    Dan levert van het net laden nooit iets op: elke kWh kost overal hetzelfde,
+    en de batterij verliest er een deel van. Zo is het bij een vast contract
+    zonder dal- en piektarief. De eigenaar op 29-09-2026, bij "het rendement van
+    de batterij is nog niet bekend, dus van het net laden doet hij nog niet":
+    "waarom zegt de coach dit terwijl ik een vast contract heb? Inkopen is niet
+    rendabel en heeft alleen maar verlies."
+    """
+    prijzen = [rij["price"] for rij in blokken if rij.get("price") is not None]
+    return bool(prijzen) and max(prijzen) - min(prijzen) <= PRICE_MARGIN
+
+
+def _vooruitkijk_zin(
+    now: datetime, forecast: Forecast, b: Batterij, auto: float = 0.0, bijladen: bool = True
+) -> str:
     """Twee zinnen: zon, huis en batterij tot morgenvroeg, en de conclusie.
 
     De bewoner van de eerste woning liet op 21-09-2026 zien wat hij van zijn
@@ -644,7 +660,7 @@ def _vooruitkijk_zin(now: datetime, forecast: Forecast, b: Batterij, auto: float
         return zin + f"Je houdt naar verwachting {_kwh(balans)} over in je accu."
     return (
         zin + f"Je komt naar verwachting {_kwh(-balans)} tekort om de nacht te overbruggen; "
-        "hij laadt bij als de stroom goedkoop genoeg is."
+        + ("hij laadt bij als de stroom goedkoop genoeg is." if bijladen else "dat komt van het net.")
     )
 
 
@@ -723,6 +739,18 @@ def plan_batterij(
                 reason="Terugleveren brengt nu evenveel op als stroom kost, dus opslaan kost alleen het verlies in de batterij.",
                 rule="salderen",
             )
+        if _vlak(blokken):
+            # Van het net laden loont hier nooit, wat het rendement ook is; daar
+            # hoeft de bewoner dus ook niets voor in te vullen.
+            return _met_paal(
+                Besluit(
+                    NUL,
+                    reason="Hij houdt de meter op nul: overschot gaat erin, wat het huis vraagt komt eruit.",
+                    plan="Stroom kost bij je contract elk uur hetzelfde, dus van het net laden levert nooit iets op.",
+                    rule="nul",
+                ),
+                paal_laadt, b,
+            )
         return _met_paal(
             Besluit(
                 NUL,
@@ -763,7 +791,7 @@ def plan_batterij(
     nacht_voor_auto = balans_kwh(now, forecast, b)
     auto_ac = _met_auto(uren, b, auto_hulp(uren, b, nacht_voor_auto, auto_laden or [], helpt))
     auto_weg = auto_ac / som.eta
-    kijk = _vooruitkijk_zin(now, forecast, b, auto_ac)
+    kijk = _vooruitkijk_zin(now, forecast, b, auto_ac, bijladen=not _vlak(blokken))
     piek = dicht and in_evening_peak(now)
 
     # Zon opslaan en het huis voeden: elk tegen wat een kilowattuur in de

@@ -984,6 +984,23 @@ proef("de vakantiestand staat in het formulier en op de kaart", async () => {
   assert.ok(rijen.some((r) => r.label === "Vakantiestand" && r.text.includes("60%")), JSON.stringify(rijen));
 });
 
+// De eigenaar op 29-09-2026: "de coach moet niet meer de batterij sturen, dat vinkje moet
+// theoretisch gewoon standaard aan staan" (v0.101.10).
+proef("een nieuwe batterij doet standaard zelf nul op de meter, en het vinkje staat aan", async () => {
+  assert.equal(defaultBattery("anker").self_zero, true);
+  assert.equal(defaultBattery("overig").self_zero, true);
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.feed_ = {};
+  const nieuw = { id: "n", type: "thuisbatterij", brand: "anker", name: "", controllable: true, entities: {}, battery: {} };
+  const html = el.batteryHtml_(nieuw, 0);
+  assert.match(html, /data-bat-field="self_zero" data-index="0"\s+checked/, "het vinkje staat aan zonder dat er iets is opgeslagen");
+  assert.ok(html.includes("Staat standaard aan"), "de uitleg zegt dat het standaard is");
+  const uit = el.batteryHtml_({ ...nieuw, battery: { self_zero: false } }, 0);
+  assert.doesNotMatch(uit, /data-bat-field="self_zero" data-index="0"\s+checked/, "uitgezet blijft uit");
+});
+
 // --- het plan van de batterij op de kaart ------------------------------------------
 //
 // De eigenaar op 22-09-2026: "ik kan nu niet zien wat de coach van plan is met

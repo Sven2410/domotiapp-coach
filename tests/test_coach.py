@@ -4236,7 +4236,10 @@ BATTERIJ = {
         "energy_in": "sensor.batterij_in", "energy_out": "sensor.batterij_uit",
     },
     "battery": {"max_charge_w": 3500, "max_discharge_w": 2500, "phase": "l3",
-                "control_mode": "third_party_control", "idle_mode": "self_consumption"},
+                "control_mode": "third_party_control", "idle_mode": "self_consumption",
+                # De regelaar van de coach zelf, voor een batterij zonder eigen meter.
+                # Sinds v0.101.10 staat "zelf nul" standaard aan; zie proef 119.
+                "self_zero": False},
 }
 
 
@@ -6548,6 +6551,26 @@ controle("terug: eerst 0 W, want hij weet niet wat er intussen in staat",
          anker118.register == 0.0 and sessie118.get("nul_open") is False, f"{anker118.register}")
 regel118(hass118, coach118, 110, 160, 3000)
 controle("en dan volgt hij de oven weer", anker118.register > 2400, f"{anker118.register}")
+
+print("=== 119. de batterij doet standaard zelf nul op de meter (v0.101.10) ===")
+# De eigenaar op 29-09-2026: "de coach moet niet meer de batterij sturen, dat vinkje moet
+# theoretisch gewoon standaard aan staan."
+zonder119 = {**BATTERIJ, "battery": {k: v for k, v in BATTERIJ["battery"].items() if k != "self_zero"}}
+controle("een batterij zonder het veld doet het zelf", coachmod.ChargerCoach._zelf_instelling(zonder119), "")
+controle("uitgezet blijft uit, voor een batterij zonder eigen meter",
+         not coachmod.ChargerCoach._zelf_instelling(BATTERIJ), "")
+geen_modus119 = {**zonder119, "entities": {k: v for k, v in BATTERIJ["entities"].items() if k != "mode"}}
+controle("zonder modus-entiteit kan het niet, en dan regelt de coach", not coachmod.ChargerCoach._zelf_instelling(geen_modus119), "")
+# websocket.py sleept voluptuous mee en laadt hier niet; de bron zegt het ook.
+bron119 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
+           / "websocket.py").read_text(encoding="utf-8")
+controle("wat de server opslaat zonder het vinkje wordt aan",
+         'vol.Optional("self_zero", default=True)' in bron119, "")
+hass119, _, coach119 = bouw(huis75(modus="third_party_control"), instellingen(devices=[LAADPAAL, zonder119]))
+b119 = asyncio.run(ronde75(hass119, coach119, dt.datetime(2026, 9, 29, 21, 0)))
+controle("en in een ronde: de batterij krijgt zijn eigen stand terug, de coach kijkt mee",
+         b119.get("self_zero") is True and hass119.states.get("select.batterij_modus").state == "self_consumption",
+         f"{b119.get('self_zero')} {hass119.states.get('select.batterij_modus').state}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

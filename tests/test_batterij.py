@@ -716,6 +716,33 @@ for uur in (3, 12, 21):
     controle(f"vast contract om {uur}:00: met het vinkje hetzelfde besluit", a35.stand == c35.stand, f"{a35.stand} {c35.stand}")
 
 
+
+print("=== 36. een vast contract: van het net laden loont nooit, en dat zegt hij ook (v0.101.10) ===")
+# De eigenaar op 29-09-2026, bij zijn eigen batterij: "Hij houdt de meter op nul. Het
+# rendement van de batterij is nog niet bekend, dus van het net laden doet hij nog niet."
+# "Waarom zegt de coach dit terwijl ik een vast contract heb? Inkopen is niet rendabel
+# en heeft alleen maar verlies."
+v36 = plan_batterij(DAG.replace(hour=21), [], VAST, verwachting(ZON), anker(rte=None))
+print(f"  vast, geen rendement: {v36.stand} {v36.rule} | {v36.reason} | {v36.plan}")
+controle("vast contract zonder rendement: nul op de meter, zonder te beloven dat hij gaat inkopen",
+         v36.stand == NUL and "rendement" not in v36.reason and "van het net laden doet hij nog niet" not in v36.reason,
+         v36.reason)
+controle("en hij zegt waarom inkopen hier nooit loont", "nooit" in (v36.plan or ""), f"{v36.plan}")
+v36z = plan_batterij(DAG.replace(hour=21), [], VAST, verwachting(ZON), anker(rte=None, zelf_nul=True))
+controle("ook als de batterij het zelf doet", v36z.stand == NUL and "nooit" in (v36z.plan or ""), f"{v36z.plan}")
+m36 = plan_batterij(DAG.replace(hour=21), [], VAST, verwachting(ZON, huis=1.0), anker(soc=20.0))
+print(f"  vast, met rendement, tekort: {m36.plan}")
+controle("met rendement en een tekort voor de nacht: geen 'hij laadt bij als de stroom goedkoop genoeg is'",
+         "goedkoop genoeg" not in (m36.plan or "") and "van het net" in (m36.plan or ""), f"{m36.plan}")
+d36 = plan_batterij(DAG.replace(hour=21), LIJST35, Tariff(), V35, anker(rte=None))
+controle("een dynamisch contract zonder rendement: daar kan inkopen wel lonen, dus die uitleg blijft",
+         d36.rule == "rendement-onbekend", f"{d36.rule}")
+DAL36 = prijzen([0.20] * 7 + [0.26] * 16 + [0.20] + [0.20] * 7 + [0.26] * 16 + [0.20])
+p36 = plan_batterij(DAG.replace(hour=21), DAL36, Tariff(), verwachting(ZON, huis=1.0), anker(soc=20.0))
+controle("een vast contract met dal- en piektarief: bijladen kan lonen, dus dat mag hij blijven zeggen",
+         "goedkoop genoeg" in (p36.plan or "") or p36.stand == NETLADEN, f"{p36.stand} {p36.plan}")
+
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
