@@ -202,7 +202,9 @@ _BATTERY = _schema(
         vol.Optional("idle_mode", default=""): str,
         # De batterij doet zelf nul op de meter, met een eigen meter in de
         # meterkast (v0.97.0); de coach neemt het alleen over voor de uitzonderingen.
-        vol.Optional("self_zero", default=False): bool,
+        # Standaard aan sinds v0.101.10. De eigenaar op 29-09-2026: "de coach moet
+        # niet meer de batterij sturen, dat vinkje moet gewoon standaard aan staan."
+        vol.Optional("self_zero", default=True): bool,
     }
 )
 

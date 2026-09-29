@@ -775,7 +775,7 @@ class DacViewDevices extends DacEditorElement {
             ${getal("rte_percent", 'min="30" max="100" step="0.1"', "alleen zonder kWh-meter")}
           </div>
         </div>
-        <p class="sub">Met het rendement rekent de coach uit of laden van het net loont: bij 75% moet het dure uur een derde duurder zijn dan het goedkope. Met een kWh-meter op de batterij meet hij het zelf, en dan wint de meting. Zonder rendement houdt hij alleen de meter op nul.</p>
+        <p class="sub">Met het rendement rekent de coach uit of laden van het net loont: bij 75% moet het dure uur een derde duurder zijn dan het goedkope. Bij een vast contract zonder dal- en piektarief loont laden van het net nooit; dan bepaalt het rendement alleen of zon opslaan meer oplevert dan terugleveren. Met een kWh-meter op de batterij meet hij het zelf, en dan wint de meting. Zonder rendement houdt hij alleen de meter op nul.</p>
         <div class="two">
           <div class="row">
             <label>Hoogste laadvermogen (W)</label>
@@ -808,7 +808,7 @@ class DacViewDevices extends DacEditorElement {
           </div>
         </div>
         <p class="sub">Stopt de coach, dan zet hij het vermogen op nul en geeft hij de batterij terug aan zijn eigen modus, zodat hij nooit op zijn laatste opdracht blijft staan.</p>
-        ${vink("self_zero", "De batterij doet zelf nul op de meter.", "Alleen als de batterij een eigen meter in de meterkast heeft, zoals de P1 van Anker. Die volgt het huis in een paar seconden; via Home Assistant duurt dat langer. De coach zet hem in zijn eigen modus (hierboven: als de coach stopt) en kijkt mee. Hij neemt het alleen over voor laden van het net, handelen, als de laadpaal laadt, in de vakantiestand, bij de reserve en als de zekering krap wordt, en geeft hem na vijf rustige minuten terug. Stilstaan of alleen ontladen plant hij dan niet, want dat kan de batterij in zijn eigen stand niet.")}
+        ${vink("self_zero", "De batterij doet zelf nul op de meter.", "Staat standaard aan. Zet hem alleen uit bij een batterij zonder eigen meter in de meterkast; dan regelt de coach de meter via Home Assistant, en dat is trager. De coach zet hem in zijn eigen modus (hierboven: als de coach stopt) en kijkt mee. Hij neemt het alleen over voor laden van het net, handelen, als de laadpaal laadt, in de vakantiestand, bij de reserve en als de zekering krap wordt, en geeft hem na vijf rustige minuten terug. Stilstaan of alleen ontladen plant hij dan niet, want dat kan de batterij in zijn eigen stand niet.")}
       </div>
       <div class="block">
         <div class="block-title">Wat jij wilt</div>

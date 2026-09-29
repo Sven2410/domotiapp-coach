@@ -685,6 +685,9 @@ export const defaultBattery = (brandId) => ({
   weekly_full_day: 6,
   holiday: false,
   holiday_max_percent: 50,
+  // De batterij doet zelf nul op de meter; de coach grijpt alleen in om in te
+  // kopen, voor de laadpaal en voor de veiligheid (standaard sinds v0.101.10).
+  self_zero: true,
   ...(BATTERY_BRANDS.find((brand) => brand.id === brandId)?.battery ?? { control_mode: "", idle_mode: "" }),
 });
 

@@ -66,6 +66,19 @@ de eigenaar 78,2%, laat de coach de zon liever naar het net gaan. Zonder
 rendement wordt er niet gepland: alleen nul op de meter (`rendement-onbekend`),
 en met volledig salderen standby, want dan verliest opslaan altijd.
 
+**Kost stroom elk uur hetzelfde, dan zegt de coach dat inkopen nooit loont**
+(v0.101.10, `_vlak` in batterij.py). Bij de eigenaar stond op 29-09-2026 met een
+vast contract "het rendement van de batterij is nog niet bekend, dus van het net
+laden doet hij nog niet", met de oproep het rendement in te vullen. De eigenaar:
+"waarom zegt de coach dit terwijl ik een vast contract heb? Inkopen is niet
+rendabel en heeft alleen maar verlies." Zijn alle bekende prijzen gelijk, dan is
+het besluit gewoon nul op de meter met "stroom kost bij je contract elk uur
+hetzelfde, dus van het net laden levert nooit iets op", en eindigt de nachtbalans
+met "dat komt van het net" in plaats van "hij laadt bij als de stroom goedkoop
+genoeg is". Het gaat om de prijzen en niet om het soort contract: een vast
+contract met dal- en piektarief houdt de oude uitleg, want daar kan bijladen
+lonen. Proef 36 in test_batterij.py.
+
 **Wat niet over geld gaat staat erboven**, zoals bij de paal: geen accustand is
 standby; een negatieve prijs (de prijs die de bewoner betaalt, en de eigenaar op
 21-09-2026: "dit jaar een paar keer voorgekomen") is maximaal laden met
@@ -276,6 +289,18 @@ ontbrekende accustand blijven. In het virtuele huis: `batterij-dynamisch-zelf`
 twee keer overgenomen om goedkoop bij te laden; `batterij-dynamisch-zon-zelf`
 € -0,54 tegen € -1,01, want hij slaat alle zon op waar terugleveren soms meer
 oplevert, en eindigt op 48% in plaats van 39%. Proef 35 in test_batterij.py.
+
+**En het vinkje staat standaard aan** (v0.101.10). De eigenaar op 29-09-2026: "de
+coach moet niet meer de batterij sturen, dat vinkje moet theoretisch gewoon
+standaard aan staan." Een batterij zonder `self_zero` in de opslag telt als aan
+(`_zelf_instelling`), de server vult `True` in (`_BATTERY` in websocket.py) en het
+paneel geeft een nieuwe batterij `self_zero: true` mee (`defaultBattery`). Uit is
+voor een batterij zonder eigen meter in de meterkast; dan regelt de coach de meter
+via Home Assistant, met de `Regelaar` hierboven. Zonder modus-entiteit kan het
+vinkje niets en regelt de coach ook. Wat al in de opslag stond blijft staan: in de
+eerste woning staat het nog uit (daar stuurt een andere sturing en is "mag sturen"
+uit). Proef 119 in test_coach.py (de proeven met de regelaar zetten het vinkje
+nu zelf uit) en een proef in test_rapport.mjs.
 
 Het virtuele huis kent `Batterij.eigen_nul` (een eigen lus van 2 s plus 2 s; een
 opdracht aan de knop doet hij in die stand niet) en `zelf_nul` (het vinkje).

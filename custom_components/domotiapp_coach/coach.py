@@ -4838,7 +4838,7 @@ class ChargerCoach:
         """Of de bewoner de batterij zelf nul op de meter laat doen, en dat kan."""
         eigen = device.get("battery") or {}
         return bool(
-            eigen.get("self_zero") and (device.get("entities") or {}).get("mode")
+            eigen.get("self_zero", True) and (device.get("entities") or {}).get("mode")
             and (eigen.get("idle_mode") or "").strip() and (eigen.get("control_mode") or "").strip()
         )
 
