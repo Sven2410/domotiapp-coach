@@ -252,13 +252,41 @@ class DacViewInstallation extends DacEditorElement {
                   <span class="sub">De kale marktprijs, zonder belasting en btw.</span>
                 </div>
                 <div class="row">
-                  <label for="dyn-tax">Energiebelasting (€ per kWh)</label>
-                  <input type="number" id="dyn-tax" min="0" step="0.0001" inputmode="decimal">
-                  <span class="sub">Wat de overheid per kWh heft. Dit tarief verandert elk jaar op 1 januari, dus kijk het na op je jaarnota.</span>
-                </div>
-                <div class="row">
                   <span class="sub" id="dyn-formula"></span>
                 </div>
+              </div>
+
+              <!-- De reserve (v0.101.3). De eigenaar op 29-09-2026, toen Frank
+                   Energie eruit lag: "ik heb ook Nord Pool draaien, dat wil ik
+                   als fallback hebben." Zie _prijsbron in coach.py. -->
+              <div class="row">
+                <label>Reserveprijssensor</label>
+                <dac-entity-picker id="dyn-reserve"></dac-entity-picker>
+                <span class="sub">
+                  Optioneel. Geeft je prijssensor geen prijs, bijvoorbeeld omdat de integratie van je
+                  leverancier stuk is, dan rekent de coach met deze. Zodra je eigen sensor weer
+                  prijzen heeft, rekent hij weer daarmee. De ingebouwde Nord Pool van Home Assistant
+                  kan hier ook: die prijzen haalt de coach zelf op.
+                </span>
+              </div>
+              <div class="row" id="dyn-reserve-soort-row">
+                <label>Wat geeft de reserve?</label>
+                <div class="segmented" id="dyn-reserve-soort">
+                  <button type="button" data-reserve="market" aria-pressed="false">
+                    <strong>Kale marktprijs</strong>
+                    Zoals Nord Pool. De coach rekent er belasting, opslag en btw bij.
+                  </button>
+                  <button type="button" data-reserve="all_in" aria-pressed="false">
+                    <strong>All-in prijs</strong>
+                    Al compleet, zoals de sensor van een leverancier.
+                  </button>
+                </div>
+              </div>
+
+              <div class="row" id="dyn-tax-row">
+                <label for="dyn-tax">Energiebelasting (€ per kWh)</label>
+                <input type="number" id="dyn-tax" min="0" step="0.0001" inputmode="decimal">
+                <span class="sub">Wat de overheid per kWh heft. Dit tarief verandert elk jaar op 1 januari, dus kijk het na op je jaarnota.</span>
               </div>
 
               <!-- De opslag en de btw staan buiten dat blok, want ze zijn ook
@@ -408,6 +436,14 @@ class DacViewInstallation extends DacEditorElement {
       });
     }
 
+    for (const button of this.$$("#dyn-reserve-soort button")) {
+      button.addEventListener("click", () => {
+        this.draft_.contract.dynamic.fallback_source = button.dataset.reserve;
+        this.paintContract_();
+        this.afterChange_();
+      });
+    }
+
     for (const button of this.$$("#dynamic-interval button")) {
       button.addEventListener("click", () => {
         this.draft_.contract.dynamic.interval = button.dataset.interval;
@@ -429,6 +465,7 @@ class DacViewInstallation extends DacEditorElement {
       ["dyn-allin", "all_in_entity"],
       ["dyn-market", "market_entity"],
       ["dyn-market-feed", "market_entity"],
+      ["dyn-reserve", "fallback_entity"],
     ]) {
       const picker = this.$(`#${id}`);
       picker.filter = "price";
@@ -498,6 +535,7 @@ class DacViewInstallation extends DacEditorElement {
 
     this.$("#dyn-allin").value = contract.dynamic.all_in_entity ?? "";
     this.$("#dyn-market").value = contract.dynamic.market_entity ?? "";
+    this.$("#dyn-reserve").value = contract.dynamic.fallback_entity ?? "";
     this.onFeed_();
 
     this.paintPhases_();
@@ -713,6 +751,17 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#dyn-allin-row").style.display = source === "all_in" ? "" : "none";
     this.$("#dyn-market-feed").value = contract.dynamic.market_entity ?? "";
     this.$("#dyn-market-fields").style.display = source === "market" ? "" : "none";
+    // De reserve: wat voor prijs hij geeft, alleen als er een is. De
+    // energiebelasting is nodig bij een marktprijs, van de eigen bron of van de
+    // reserve.
+    const reserve = contract.dynamic.fallback_entity ?? "";
+    const reserveSoort = contract.dynamic.fallback_source === "all_in" ? "all_in" : "market";
+    this.$("#dyn-reserve-soort-row").style.display = reserve ? "" : "none";
+    for (const button of this.$$("#dyn-reserve-soort button")) {
+      button.setAttribute("aria-pressed", String(button.dataset.reserve === reserveSoort));
+    }
+    this.$("#dyn-tax-row").style.display =
+      source === "market" || (reserve && reserveSoort === "market") ? "" : "none";
     // De opslag doet er bij allebei de bronnen toe, maar om een andere reden.
     this.$("#dyn-markup-hint").textContent =
       source === "market"

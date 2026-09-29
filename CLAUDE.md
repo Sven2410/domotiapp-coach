@@ -195,6 +195,9 @@ dan de andere in dezelfde uitgave.
   haalt het het paneel niet; proef 69 in test_coach.py (`docs/laadpaal.md`).
 - **De vormen van een prijslijst**: `_prijsrijen` in coach.py en
   `readSchedule` in data-source.js lezen dezelfde vier (`docs/batterij.md`).
+  De ingebouwde Nord Pool en de reserveprijssensor (v0.101.3) lopen via de coach:
+  `_prijsbron` en `_async_nordpool` in coach.py, en het paneel neemt die lijst
+  over via `domotiapp_coach/prices` (`laadCoachPrijzen` in data-source.js).
 - **De voorrang**: `zon_regels` en `plan_regels` in planner.py tegenover
   `zonRegels` en `planRegels` in voorrang.js (`docs/batterij.md`).
 - **De vaatwasserprogramma's**: `PROGRAMMAS` in planner.py en

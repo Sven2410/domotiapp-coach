@@ -6232,6 +6232,117 @@ rte_leeg, _ = rte114(None, opslag={"rte": 0.74})
 controle("en leegmaken is leeg: geen rendement, alleen nul op de meter", rte_leeg is None, f"{rte_leeg}")
 controle("met een kWh-meter wint de meting van het veld", b75.get("rte") == 0.736, f"{b75.get('rte')}")
 
+print("=== 115. een reserveprijssensor: Frank Energie valt weg, Nord Pool neemt het over (v0.101.3) ===")
+# De eigenaar op 29-09-2026: de integratie van Frank Energie gaf "Graphql
+# validation error" en alle sensoren stonden op unavailable. "Ik heb ook Nord
+# Pool draaien. Dat wil ik als fallback hebben, zodat als Frank eruit ligt dat
+# hij dat oppakt, en is Frank weer terug dat hij dat weer pakt." De ingebouwde
+# Nord Pool geeft zijn lijst alleen via zijn dienst, in euro per MWh.
+NU115 = coachmod._moment()
+VANDAAG115 = NU115.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def frank115():
+    return {"state": "0.30", "attributes": {"prices": [
+        {"from": (VANDAAG115 + dt.timedelta(hours=u)).astimezone().isoformat(),
+         "till": (VANDAAG115 + dt.timedelta(hours=u + 1)).astimezone().isoformat(), "price": 0.30}
+        for u in range(24)]}}
+
+
+def nordpool_dienst115(dag):
+    begin = dt.datetime.fromisoformat(dag)
+    return [{"start": (begin + dt.timedelta(minutes=15 * k)).astimezone(dt.timezone.utc).isoformat(),
+             "end": (begin + dt.timedelta(minutes=15 * (k + 1))).astimezone(dt.timezone.utc).isoformat(),
+             "price": 100.0} for k in range(96)]
+
+
+inst115 = instellingen()
+inst115["contract"] = {"type": "dynamic", "netting": False, "dynamic": {
+    "source": "all_in", "interval": "hour", "all_in_entity": "sensor.frank_prijs", "market_entity": "",
+    "fallback_entity": "sensor.np_prijs", "fallback_source": "market",
+    "energy_tax": 0.1088, "supplier_markup": 0.02, "vat_percent": 21, "feed_in_costs": 0.0, "feed_in_bonus": 0.0}}
+hass115, _, coach115 = bouw({**huis(), "sensor.frank_prijs": frank115(),
+                            "sensor.np_prijs": {"state": "0.1", "attributes": {"unit_of_measurement": "EUR/kWh"}}}, inst115)
+gevraagd115 = []
+
+
+async def dienst115(domein, dienst, data, blocking=False, return_response=False):
+    hass115.services.verstuurd.append((domein, dienst, dict(data)))
+    if (domein, dienst) == ("nordpool", "get_prices_for_date"):
+        gevraagd115.append(data["date"])
+        return {data["areas"][0]: nordpool_dienst115(data["date"])}
+    return None
+
+
+hass115.services.async_call = dienst115
+er115 = types.ModuleType("homeassistant.helpers.entity_registry")
+er115.async_get = lambda hass: types.SimpleNamespace(async_get=lambda eid: (
+    types.SimpleNamespace(platform="nordpool", config_entry_id="np-1", unique_id="NL-current_price")
+    if eid == "sensor.np_prijs" else None))
+oud115 = sys.modules.get("homeassistant.helpers.entity_registry")
+sys.modules["homeassistant.helpers.entity_registry"] = er115
+hass115.config_entries = types.SimpleNamespace(
+    async_get_entry=lambda eid: types.SimpleNamespace(data={"areas": ["NL"], "currency": "EUR"}) if eid == "np-1" else None)
+try:
+    asyncio.run(coach115._async_nordpool(inst115, NU115))
+    nu115 = [r for r in coach115._prices(inst115) if r["start"] <= NU115 < r["end"]]
+    controle("met Frank erbij rekent hij met Frank, en niet met de reserve",
+             nu115 and abs(nu115[0]["price"] - 0.30) < 1e-9 and not coach115._prijsbron(inst115["contract"]["dynamic"])[1],
+             f"{nu115}")
+    controle("de lijst van Nord Pool is al opgehaald, voor vandaag", gevraagd115[:1] == [NU115.date().isoformat()],
+             f"{gevraagd115}")
+
+    hass115.states.zet("sensor.frank_prijs", "unavailable")
+    nu115 = [r for r in coach115._prices(inst115) if r["start"] <= NU115 < r["end"]]
+    verwacht115 = (0.100 + 0.1088 + 0.02) * 1.21
+    print(f"  Frank weg: {nu115[:1]} (verwacht {verwacht115:.5f})")
+    controle("Frank weg: de marktprijs van Nord Pool, per MWh omgerekend, met belasting, opslag en btw",
+             len(nu115) == 1 and abs(nu115[0]["price"] - verwacht115) < 1e-9
+             and nu115[0]["end"] - nu115[0]["start"] == dt.timedelta(minutes=15), f"{nu115}")
+    controle("met de terugleverprijs van de marktprijs", nu115 and abs(nu115[0]["feed_in"] - 0.100) < 1e-9, f"{nu115}")
+    paneel115 = coach115._prijzen_voor_paneel(inst115)
+    controle("het paneel hoort dat de reserve invalt, met dezelfde lijst",
+             paneel115["reserve"] and len(paneel115["rows"]) >= 96, f"{paneel115['reserve']} {len(paneel115['rows'])}")
+    aantal115 = len(gevraagd115)
+    asyncio.run(coach115._async_nordpool(inst115, NU115 + dt.timedelta(minutes=1)))
+    controle("een dag die er al is wordt niet opnieuw gevraagd", len(gevraagd115) == aantal115, f"{gevraagd115}")
+
+    # De sensorwacht zegt dat de reserve invalt, in plaats van "zonder".
+    hass115.services.verstuurd.clear()
+    asyncio.run(coach115._async_sensorwacht(inst115, NU115))
+    asyncio.run(coach115._async_sensorwacht(inst115, NU115 + dt.timedelta(minutes=11)))
+    melding115 = [d[2]["message"] for d in hass115.services.verstuurd if d[0] == "notify"]
+    print(f"  {melding115}")
+    controle("de melding zegt dat de coach met de reserve rekent",
+             any("Je prijssensor meldt al 11 minuten niets" in m and "met je reserveprijzen" in m for m in melding115),
+             f"{melding115}")
+
+    hass115.states.zet("sensor.frank_prijs", frank115())
+    nu115 = [r for r in coach115._prices(inst115) if r["start"] <= NU115 < r["end"]]
+    controle("Frank terug: weer Frank", nu115 and abs(nu115[0]["price"] - 0.30) < 1e-9, f"{nu115}")
+
+    # Nord Pool als eigen marktprijssensor, zonder reserve: ook dan de lijst van de dienst.
+    inst115b = instellingen()
+    inst115b["contract"] = {"type": "dynamic", "netting": False, "dynamic": {
+        **inst115["contract"]["dynamic"], "source": "market", "all_in_entity": "", "market_entity": "sensor.np_prijs",
+        "fallback_entity": ""}}
+    coach115._nordpool.clear()
+    asyncio.run(coach115._async_nordpool(inst115b, NU115))
+    nu115b = [r for r in coach115._prices(inst115b) if r["start"] <= NU115 < r["end"]]
+    controle("Nord Pool als eigen marktprijs: de lijst van de dienst, all-in gemaakt",
+             nu115b and abs(nu115b[0]["price"] - verwacht115) < 1e-9, f"{nu115b}")
+    # Zonder reserve verandert er niets: Frank weg is geen prijzen.
+    inst115c = instellingen()
+    inst115c["contract"] = {"type": "dynamic", "netting": False, "dynamic": {
+        **inst115["contract"]["dynamic"], "fallback_entity": ""}}
+    hass115.states.zet("sensor.frank_prijs", "unavailable")
+    controle("zonder reserve en zonder Frank: geen prijzen, zoals altijd", coach115._prices(inst115c) == [], "")
+finally:
+    if oud115 is None:
+        sys.modules.pop("homeassistant.helpers.entity_registry", None)
+    else:
+        sys.modules["homeassistant.helpers.entity_registry"] = oud115
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

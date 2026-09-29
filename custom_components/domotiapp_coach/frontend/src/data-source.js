@@ -99,7 +99,7 @@ function readPrice(feed, entityId) {
  *
  * Both figures are entered without VAT, the way they are quoted on a contract.
  */
-function allInFrom(market, dynamic) {
+export function allInFrom(market, dynamic) {
   const tax = Number(dynamic?.energy_tax) || 0;
   const markup = Number(dynamic?.supplier_markup) || 0;
   const vat = Number(dynamic?.vat_percent) || 0;
@@ -124,11 +124,87 @@ export function priceNow(feed, contract) {
     return Number.isFinite(value) ? value : null;
   }
 
+  // Valt de reserve in, dan de prijs waar de coach mee rekent (v0.101.3).
+  const vanCoach = priceAt(coachRijen())?.price ?? null;
+  if (coachPrijzen.reserve && vanCoach !== null) return vanCoach;
+
   const dynamic = contract.dynamic ?? {};
-  if (dynamic.source === "all_in") return readPrice(feed, dynamic.all_in_entity);
+  if (dynamic.source === "all_in") return readPrice(feed, dynamic.all_in_entity) ?? vanCoach;
 
   const market = readPrice(feed, dynamic.market_entity);
-  return market === null ? null : allInFrom(market, dynamic);
+  return market === null ? vanCoach : allInFrom(market, dynamic);
+}
+
+/**
+ * De prijslijst waar de coach mee rekent (v0.101.3), voor als de sensor zelf
+ * geen lijst meegeeft of de reserveprijssensor invalt.
+ *
+ * Van de ingebouwde Nord Pool van Home Assistant staat er geen lijst in de
+ * attributen; die haalt de coach via een dienst op (`_async_nordpool` in
+ * coach.py). En valt de reserve in omdat de eigen sensor niets geeft, dan
+ * hoort het paneel dezelfde prijzen te tekenen als de coach gebruikt. Eén
+ * lijst voor het hele paneel, bijgewerkt door `laadCoachPrijzen`.
+ */
+let coachPrijzen = { reserve: false, rows: [], at: 0 };
+
+/** De lijst van de coach opnieuw ophalen, hooguit eens per minuut. */
+export async function laadCoachPrijzen(hass, nu = Date.now()) {
+  if (!hass?.callWS || nu - coachPrijzen.at < 60_000) return coachPrijzen;
+  coachPrijzen = { ...coachPrijzen, at: nu };
+  try {
+    const antwoord = await hass.callWS({ type: "domotiapp_coach/prices" });
+    coachPrijzen = {
+      reserve: Boolean(antwoord?.reserve),
+      rows: (antwoord?.rows ?? [])
+        .map((rij) => ({
+          start: new Date(rij.start),
+          end: new Date(rij.end),
+          price: Number(rij.price),
+          feedIn: rij.feed_in === null || rij.feed_in === undefined ? null : Number(rij.feed_in),
+        }))
+        .filter((rij) => !Number.isNaN(rij.start.getTime()) && !Number.isNaN(rij.end.getTime()) && Number.isFinite(rij.price)),
+      at: nu,
+    };
+  } catch (error) {
+    // Een coach van voor v0.101.3 kent dit commando niet; dan leest het paneel
+    // de sensor zoals altijd.
+  }
+  return coachPrijzen;
+}
+
+/**
+ * De prijs per vak uit de statistieken, all-in (v0.101.3).
+ *
+ * Een marktprijssensor geeft de kale beursprijs; tot v0.101.3 rekende Historie
+ * die als inkoopprijs, zonder belasting, opslag en btw. En een vak waarin de
+ * eigen sensor niets gaf krijgt de prijs van de reserveprijssensor, op
+ * dezelfde manier omgerekend als de coach dat doet (`_prijsbron`).
+ *
+ * @param {Map<number, number>} eigen de gemiddelde prijs per vak van de eigen sensor
+ * @param {Map<number, number>} reserve die van de reserveprijssensor
+ */
+export function allInPrijzen(eigen, reserve, contract) {
+  const d = contract?.dynamic ?? {};
+  const uit = new Map();
+  for (const [tijd, prijs] of eigen ?? new Map()) {
+    uit.set(tijd, d.source === "market" ? allInFrom(prijs, d) : prijs);
+  }
+  for (const [tijd, prijs] of reserve ?? new Map()) {
+    if (!uit.has(tijd)) uit.set(tijd, d.fallback_source === "all_in" ? prijs : allInFrom(prijs, d));
+  }
+  return uit;
+}
+
+/** Voor de proeven: de lijst van de coach zetten zonder Home Assistant. */
+export function zetCoachPrijzen(waarde) {
+  coachPrijzen = { reserve: false, rows: [], at: 0, ...waarde };
+}
+
+/** Of de reserveprijssensor nu invalt, volgens de coach. */
+export const reserveValtIn = () => coachPrijzen.reserve;
+
+function coachRijen() {
+  return coachPrijzen.rows.map((rij) => ({ start: rij.start, end: rij.end, price: rij.price }));
 }
 
 /**
@@ -221,14 +297,17 @@ function readSchedule(attributes) {
  */
 export function priceForecast(feed, contract) {
   if (contract?.type !== "dynamic") return [];
+  // Valt de reserve in, of geeft de sensor zelf geen lijst (de ingebouwde Nord
+  // Pool), dan de lijst van de coach (v0.101.3).
+  if (coachPrijzen.reserve) return coachRijen();
 
   const dynamic = contract.dynamic ?? {};
   const allIn = dynamic.source === "all_in";
   const state = feed.get(allIn ? dynamic.all_in_entity : dynamic.market_entity);
-  if (!usable(state)) return [];
+  if (!usable(state)) return coachRijen();
 
   const rows = readSchedule(state.attributes);
-  if (!rows.length) return [];
+  if (!rows.length) return coachRijen();
 
   const unit = String(state.attributes?.unit_of_measurement ?? "").toLowerCase();
   const scale = unit.includes("ct") || unit.includes("cent") ? 0.01 : 1;
@@ -369,7 +448,11 @@ export function tariff(feed, contract) {
   // there is no way to get back to it, and a number is left out rather than
   // guessed at.
   let feedIn = null;
-  if (dynamic.source === "market") {
+  if (coachPrijzen.reserve) {
+    // De reserve: wat teruglevering volgens de coach opbrengt.
+    const terug = coachPrijzen.rows.filter((rij) => rij.feedIn !== null).map((rij) => ({ start: rij.start, price: rij.feedIn }));
+    feedIn = mean(terug);
+  } else if (dynamic.source === "market") {
     const market = mean(
       readSchedule(feed.get(dynamic.market_entity)?.attributes ?? {}).map((row) => ({
         start: row.start,

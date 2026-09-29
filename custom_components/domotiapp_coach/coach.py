@@ -144,6 +144,13 @@ SENSOR_STIL = timedelta(minutes=10)
 # stilstaat verandert niet. De eigenaar op 22-09-2026 over de Ford: "zet dat maar
 # op een uur polling."
 SENSOR_STIL_AUTO = timedelta(minutes=60)
+# De ingebouwde Nord Pool van Home Assistant hangt geen prijslijst aan zijn
+# sensoren; die geeft hij alleen via zijn dienst (v0.101.3). Zo vaak vraagt de
+# coach een dag die nog niet binnen is opnieuw, en vanaf dit uur morgen erbij:
+# de beurs maakt de prijzen van morgen rond 13:00 bekend.
+NORDPOOL_DOMEIN = "nordpool"
+NORDPOOL_OPNIEUW = timedelta(minutes=10)
+NORDPOOL_MORGEN_VANAF = 12
 
 # Hoe vaak de coach een slapende auto hooguit wekt om zijn accustand te horen,
 # als de bewoner daarvoor gekozen heeft (`wake_mode` "hourly"). De eigenaar op
@@ -1017,6 +1024,10 @@ class ChargerCoach:
         # Wat daarvan in de opslag staat, zodat er alleen bij een verandering
         # geschreven wordt. Zie `sensor_quiet`.
         self._sensor_gemeld_bewaard: set[str] = set()
+        # De prijslijsten van de ingebouwde Nord Pool, per sensor en per dag, en
+        # wanneer een dag voor het laatst gevraagd is. Zie `_async_nordpool`.
+        self._nordpool: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        self._nordpool_gevraagd: dict[tuple[str, str], datetime] = {}
         # De verbruikswacht: sinds wanneer er onafgebroken water loopt, of dat
         # al gemeld is, en welke dagen al gemeld zijn. Zie `_async_verbruikswacht`.
         self._water_loopt_sinds: datetime | None = None
@@ -1497,6 +1508,8 @@ class ChargerCoach:
                 uit[dynamic["all_in_entity"]] = "je prijssensor"
             elif dynamic.get("market_entity"):
                 uit[dynamic["market_entity"]] = "je marktprijssensor"
+            if dynamic.get("fallback_entity"):
+                uit.setdefault(dynamic["fallback_entity"], "je reserveprijssensor")
         for device in settings.get("devices") or []:
             naam = device.get("name") or "een apparaat"
             if device.get("entity"):
@@ -1638,10 +1651,15 @@ class ChargerCoach:
             _LOGGER.warning(
                 "%s (%s) meldt al %d minuten niets", naam, entity_id, minuten
             )
+            # Valt de reserveprijsbron in, dan rekent de coach niet zonder maar
+            # daarmee (v0.101.3).
+            zolang = "zonder"
+            if self._reserve_valt_in(settings, entity_id):
+                zolang = "met je reserveprijzen"
             await self._async_tell(
                 f"{naam[0].upper()}{naam[1:]} meldt al {minuten} minuten niets. "
                 "Waarschijnlijk hapert de integratie erachter. De coach rekent "
-                "zolang zonder.",
+                f"zolang {zolang}.",
                 kritiek=True,
             )
 
@@ -1656,6 +1674,53 @@ class ChargerCoach:
                 self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
             except Exception:  # noqa: BLE001 - een melding onthouden is geen reden om te stoppen
                 _LOGGER.exception("kon niet bewaren welke sensoren al gemeld zijn")
+
+    async def _async_reserveverloop(
+        self, dynamic: dict[str, Any], van: datetime, tot: datetime
+    ) -> list[tuple[datetime, float]]:
+        """Het all-in prijsverloop van de reserveprijsbron, als de eigen niets had."""
+        reserve = dynamic.get("fallback_entity")
+        if not reserve:
+            return []
+        uit: list[tuple[datetime, float]] = []
+        for moment, toestand in await self._async_geschiedenis(reserve, van, tot):
+            try:
+                prijs = float(toestand)
+            except ValueError:
+                continue
+            if dynamic.get("fallback_source") != "all_in":
+                prijs = self._all_in(prijs, dynamic)
+            uit.append((moment, prijs))
+        return uit
+
+    def _reserve_valt_in(self, settings: dict[str, Any], entity_id: str) -> bool:
+        """Of deze sensor de eigen prijsbron is en de reserve het nu overneemt."""
+        contract = settings.get("contract") or {}
+        if contract.get("type") != "dynamic":
+            return False
+        dynamic = contract.get("dynamic") or {}
+        eigen = dynamic.get("all_in_entity") if dynamic.get("source") == "all_in" else dynamic.get("market_entity")
+        return entity_id == eigen and self._prijsbron(dynamic)[1]
+
+    def _prijzen_voor_paneel(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """De prijslijst waar de coach mee rekent, voor het paneel (v0.101.3).
+
+        Het paneel leest een prijslijst zelf uit de attributen van de sensor.
+        Van de ingebouwde Nord Pool staat daar niets, en valt de reserve in, dan
+        hoort het paneel dezelfde prijzen te tekenen als de coach gebruikt.
+        """
+        contract = settings.get("contract") or {}
+        if contract.get("type") != "dynamic":
+            return {"reserve": False, "rows": []}
+        _, reserve = self._prijsbron(contract.get("dynamic") or {})
+        return {
+            "reserve": reserve,
+            "rows": [
+                {"start": rij["start"].isoformat(), "end": rij["end"].isoformat(),
+                 "price": rij["price"], "feed_in": rij["feed_in"]}
+                for rij in self._prices(settings)
+            ],
+        }
 
     def _zon_w(self, settings: dict[str, Any]) -> float | None:
         """Wat alle omvormers samen nu geven, of None zolang er een niets zegt.
@@ -1991,6 +2056,7 @@ class ChargerCoach:
 
         level = (settings.get("strategy") or {}).get("level", LEVEL_PROPOSE)
         moment = _moment(now)
+        await self._async_nordpool(settings, moment)
 
         chargers = [
             device
@@ -3101,10 +3167,12 @@ class ChargerCoach:
                 prijzen.append((moment, float(toestand)))
             except ValueError:
                 continue
-        if not prijzen:
-            return None
         if dynamic.get("source") != "all_in":
             prijzen = [(m, self._all_in(p, dynamic)) for m, p in prijzen]
+        if not prijzen:
+            prijzen = await self._async_reserveverloop(dynamic, van - timedelta(hours=1), tot)
+        if not prijzen:
+            return None
         markt: list[tuple[datetime, float]] = []
         if not self._salderen(contract) and dynamic.get("market_entity"):
             for moment, toestand in await self._async_geschiedenis(
@@ -5336,6 +5404,136 @@ class ChargerCoach:
         self._nudged[device_id] = now
         return True
 
+    def _prijsbron(
+        self, dynamic: dict[str, Any], now: datetime | None = None
+    ) -> tuple[dict[str, Any], bool]:
+        """Met welke prijzen er nu gerekend wordt, en of dat de reserve is.
+
+        De eigenaar op 29-09-2026, toen de integratie van Frank Energie na een
+        wijziging bij Frank niets meer gaf: "Ik heb ook Nord Pool draaien. Dat
+        wil ik als fallback hebben, zodat als Frank eruit ligt dat hij dat
+        oppakt, en is Frank weer terug dat hij dat weer pakt."
+
+        De eigen prijsbron telt zolang hij een prijs heeft voor dit moment. Heeft
+        hij die niet en de reserve wel, dan de reserve, als marktprijs of als
+        all-in prijs zoals ingevuld; een marktprijs krijgt dezelfde belasting,
+        opslag en btw als altijd. Er wordt niet gemengd: een lijst die half van
+        de een en half van de ander is, rekent met twee soorten prijzen door
+        elkaar.
+        """
+        reserve = dynamic.get("fallback_entity")
+        if not reserve:
+            return dynamic, False
+        nu = _moment(now)
+        interval = str(dynamic.get("interval") or "hour")
+
+        def heeft_nu(entity_id: str | None) -> bool:
+            state = self.hass.states.get(entity_id) if entity_id else None
+            if state is None or state.state in ("unknown", "unavailable", ""):
+                if entity_id not in self._nordpool:
+                    return False
+            return any(start <= nu < end for start, (end, _) in self._slots(entity_id, interval).items())
+
+        eigen = dynamic.get("all_in_entity") if dynamic.get("source") == "all_in" else dynamic.get("market_entity")
+        if heeft_nu(eigen) or not heeft_nu(reserve):
+            return dynamic, False
+        soort = "all_in" if dynamic.get("fallback_source") == "all_in" else "market"
+        vervanger = {**dynamic, "source": soort}
+        if soort == "all_in":
+            vervanger["all_in_entity"] = reserve
+            # Een marktprijs van de eigen bron die nog wel werkt blijft voor de
+            # teruglevering; een die ook weg is zegt niets.
+            if not heeft_nu(dynamic.get("market_entity")):
+                vervanger["market_entity"] = ""
+        else:
+            vervanger["market_entity"] = reserve
+        return vervanger, True
+
+    async def _async_nordpool(self, settings: dict[str, Any], now: datetime) -> None:
+        """De prijslijst van een sensor van de ingebouwde Nord Pool ophalen.
+
+        Die integratie hangt geen lijst aan zijn sensoren, zoals Frank Energie,
+        Zonneplan of de Nord Pool uit HACS dat doen; hij geeft hem alleen via
+        de dienst `nordpool.get_prices_for_date`, in euro per MWh. De coach
+        vraagt vandaag één keer, en morgen vanaf `NORDPOOL_MORGEN_VANAF` tot
+        hij er is, hooguit eens per `NORDPOOL_OPNIEUW`. Welke config entry en
+        welk gebied erbij horen zegt de entiteitregistratie.
+        """
+        contract = settings.get("contract") or {}
+        if contract.get("type") != "dynamic":
+            return
+        dynamic = contract.get("dynamic") or {}
+        sensoren = {
+            dynamic.get("all_in_entity"), dynamic.get("market_entity"), dynamic.get("fallback_entity")
+        } - {None, ""}
+        for entity_id in list(self._nordpool):
+            if entity_id not in sensoren:
+                self._nordpool.pop(entity_id, None)
+        for entity_id in sorted(sensoren):
+            bron = self._nordpool_bron(entity_id)
+            if bron is None:
+                continue
+            state = self.hass.states.get(entity_id)
+            if state is not None and _prijsrijen(state.attributes):
+                continue
+            entry_id, gebied, munt = bron
+            vandaag = now.date()
+            dagen = [vandaag] + ([vandaag + timedelta(days=1)] if now.hour >= NORDPOOL_MORGEN_VANAF else [])
+            cache = self._nordpool.setdefault(entity_id, {})
+            for dag in list(cache):
+                if dag < (vandaag - timedelta(days=1)).isoformat():
+                    cache.pop(dag, None)
+            for dag in dagen:
+                sleutel = dag.isoformat()
+                if cache.get(sleutel):
+                    continue
+                vorige = self._nordpool_gevraagd.get((entity_id, sleutel))
+                if vorige is not None and now - vorige < NORDPOOL_OPNIEUW:
+                    continue
+                self._nordpool_gevraagd[(entity_id, sleutel)] = now
+                try:
+                    antwoord = await self.hass.services.async_call(
+                        NORDPOOL_DOMEIN, "get_prices_for_date",
+                        {"config_entry": entry_id, "date": sleutel, "areas": [gebied], "currency": munt},
+                        blocking=True, return_response=True,
+                    )
+                except Exception:  # noqa: BLE001 - dan straks nog eens
+                    _LOGGER.debug("Nord Pool gaf geen prijzen voor %s", sleutel, exc_info=True)
+                    continue
+                rijen = []
+                for rij in (antwoord or {}).get(gebied) or []:
+                    try:
+                        rijen.append({"start": rij["start"], "end": rij["end"], "value": float(rij["price"]) / 1000.0})
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                if rijen:
+                    cache[sleutel] = rijen
+                    # Het wachten is voor een dag die er nog niet is, niet
+                    # voor een die binnen is.
+                    self._nordpool_gevraagd.pop((entity_id, sleutel), None)
+
+    def _nordpool_bron(self, entity_id: str) -> tuple[str, str, str] | None:
+        """Config entry, gebied en munt van een sensor van de ingebouwde Nord Pool."""
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            rij = er.async_get(self.hass).async_get(entity_id)
+        except Exception:  # noqa: BLE001 - zonder registratie geen Nord Pool
+            return None
+        if rij is None or getattr(rij, "platform", None) != NORDPOOL_DOMEIN or not rij.config_entry_id:
+            return None
+        entry = self.hass.config_entries.async_get_entry(rij.config_entry_id)
+        if entry is None:
+            return None
+        # Het gebied staat vooraan in de unieke id van de sensor ("NL-current_price"),
+        # en de gebieden van de entry in zijn gegevens.
+        uniek = str(getattr(rij, "unique_id", "") or "")
+        gebieden = [str(g) for g in (entry.data or {}).get("areas") or []] or [uniek.split("-")[0]]
+        gebied = next((g for g in gebieden if uniek.lower().startswith(g.lower() + "-")), gebieden[0])
+        if not gebied:
+            return None
+        return rij.config_entry_id, gebied, str((entry.data or {}).get("currency") or "EUR")
+
     def _slots(self, entity_id: str | None, interval: str = "hour") -> dict[datetime, tuple[datetime, float]]:
         """De blokken uit een prijsentiteit, op begintijd.
 
@@ -5347,7 +5545,12 @@ class ChargerCoach:
         if state is None:
             return {}
 
-        rijen = sorted(_prijsrijen(state.attributes), key=lambda r: r[0])
+        rijen = _prijsrijen(state.attributes)
+        if not rijen and entity_id in self._nordpool:
+            # De ingebouwde Nord Pool: de lijst die zijn dienst gaf.
+            dagen = self._nordpool[entity_id]
+            rijen = _prijsrijen({"raw_today": [rij for dag in sorted(dagen) for rij in dagen[dag]]})
+        rijen = sorted(rijen, key=lambda r: r[0])
         vast = timedelta(minutes=15 if interval == "quarter" else 60)
         uit: dict[datetime, tuple[datetime, float]] = {}
         for i, (start, end, price) in enumerate(rijen):
@@ -5398,7 +5601,8 @@ class ChargerCoach:
         if contract.get("type") != "dynamic":
             return []
 
-        dynamic = contract.get("dynamic") or {}
+        # De prijsbron die er nu is: de eigen, en anders de reserve (v0.101.3).
+        dynamic, _ = self._prijsbron(contract.get("dynamic") or {})
         all_in = dynamic.get("source") == "all_in"
         kosten = float(dynamic.get("feed_in_costs") or 0) - float(dynamic.get("feed_in_bonus") or 0)
         salderen = self._salderen(contract)
@@ -7343,6 +7547,8 @@ class ChargerCoach:
                     continue
             if dynamic.get("source") != "all_in":
                 prijzen = [(m, self._all_in(p, dynamic)) for m, p in prijzen]
+            if not prijzen:
+                prijzen = await self._async_reserveverloop(dynamic, plug - timedelta(hours=1), tot)
             if not self._salderen(contract) and dynamic.get("market_entity"):
                 for moment, toestand in await self._async_geschiedenis(
                     dynamic.get("market_entity"), plug - timedelta(hours=1), tot

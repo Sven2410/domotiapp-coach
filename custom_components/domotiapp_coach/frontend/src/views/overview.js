@@ -34,7 +34,7 @@ import {
   valueLabel,
 } from "../devices.js";
 import { batteryRows, nachtConclusie } from "../battery.js";
-import { LiveSource, meterReadings, priceForecast, solarForecast } from "../data-source.js";
+import { LiveSource, laadCoachPrijzen, meterReadings, priceForecast, solarForecast } from "../data-source.js";
 import {
   planFor,
   planSummary,
@@ -1876,11 +1876,16 @@ class DacViewOverview extends DacElement {
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de stand van de coach niet ophalen", error);
     }
+    // De prijslijst waar de coach mee rekent, voor als de sensor zelf er geen
+    // heeft of de reserve invalt (v0.101.3). Bij elk besluit opnieuw, hooguit
+    // eens per minuut.
+    laadCoachPrijzen(this.hass);
 
     try {
       this.coachOff_ = await this.hass.connection.subscribeEvents((event) => {
         const data = event?.data;
         if (!data?.device) return;
+        laadCoachPrijzen(this.hass);
         this.coach_ = { ...(this.coach_ ?? {}), [data.device]: data };
         if (this.rendered_) this.updateSteerable_(this.lastDevices_ ?? []);
       }, "domotiapp_coach_decision");
