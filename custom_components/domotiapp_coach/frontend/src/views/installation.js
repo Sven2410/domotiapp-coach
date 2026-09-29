@@ -307,41 +307,6 @@ class DacViewInstallation extends DacEditorElement {
             </div>
           </div>
         </section>
-
-        <!-- Voor "Terugverdiend" in Historie (v0.101.0). De eigenaar op
-             28-09-2026: "de klant wil natuurlijk ook zijn investering weten,
-             wanneer hij het heeft terugverdiend." -->
-        <section class="card">
-          <h2>${icons.euro} Investeringen</h2>
-          <p class="hint">
-            Wat je in je huis stak. Historie laat dan zien hoeveel ervan al terugverdiend is en
-            wanneer de rest, gemeten aan wat het werkelijk opleverde. De aankoopprijs van een
-            thuisbatterij vul je in bij dat apparaat onder Apparaten.
-          </p>
-          <div class="fields">
-            <div class="two">
-              <div class="row">
-                <label for="inv-solar-price">Zonnepanelen: wat ze kostten (€)</label>
-                <input type="number" id="inv-solar-price" min="0" step="1" inputmode="numeric" placeholder="optioneel">
-              </div>
-              <div class="row">
-                <label for="inv-solar-since">In gebruik sinds</label>
-                <input type="date" id="inv-solar-since">
-              </div>
-            </div>
-            <div class="two">
-              <div class="row">
-                <label for="inv-coach-price">DomotiApp en de installatie (€)</label>
-                <input type="number" id="inv-coach-price" min="0" step="1" inputmode="numeric" placeholder="optioneel">
-                <span class="sub">Wat de coach bespaart door apparaten op je zon en op goedkope uren te laten draaien.</span>
-              </div>
-              <div class="row">
-                <label for="inv-coach-since">In gebruik sinds</label>
-                <input type="date" id="inv-coach-since">
-              </div>
-            </div>
-          </div>
-        </section>
       </div>
 
       ${saveBarHtml}
@@ -368,16 +333,6 @@ class DacViewInstallation extends DacEditorElement {
       this.draft_.installation.max_grid_auto = false;
       this.$("#max-auto").checked = false;
     });
-
-    const investering = () => {
-      const inst = this.draft_.installation;
-      if (!inst.investments || typeof inst.investments !== "object") inst.investments = {};
-      return inst.investments;
-    };
-    bind("inv-solar-price", (v) => (investering().solar_price = v === "" ? null : Number(v)));
-    bind("inv-solar-since", (v) => (investering().solar_since = v || ""));
-    bind("inv-coach-price", (v) => (investering().coach_price = v === "" ? null : Number(v)));
-    bind("inv-coach-since", (v) => (investering().coach_since = v || ""));
 
     bind("gas-price", (v) => (this.draft_.contract.gas_price = Number(v) || 0));
     bind("water-price", (v) => (this.draft_.contract.water_price = Number(v) || 0));
@@ -528,12 +483,6 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#balancer-limit").value = inst.balancer_entity ?? "";
     this.paintBalancer_();
     this.$("#netting").checked = Boolean(this.draft_.contract.netting);
-
-    const inv = inst.investments ?? {};
-    this.$("#inv-solar-price").value = inv.solar_price ?? "";
-    this.$("#inv-solar-since").value = inv.solar_since ?? "";
-    this.$("#inv-coach-price").value = inv.coach_price ?? "";
-    this.$("#inv-coach-since").value = inv.coach_since ?? "";
 
     this.$("#gas-price").value = contract.gas_price || "";
     this.$("#water-price").value = contract.water_price || "";

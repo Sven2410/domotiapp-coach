@@ -497,12 +497,14 @@ paneel doet dat in `data-source.js` (`batteryWatts`). De auto laadt op zon
 zonder verlies en de batterij verliest een kwart, dus de andere apparaten gaan
 voor; de batterij krijgt vanzelf wat er daarna over is.
 
-**Het kasboek en de terugverdientijd.** `verdiend` is per stap het verschil
-tussen de rekening zoals hij loopt en zoals hij zonder batterij gelopen had (de
-meter min wat de batterij doet); het rendement zit er vanzelf in. Het gaat per
-dag naar `battery_state` in de instellingen. `terugverdiend` noemt pas een datum
-na `TERUGVERDIEN_MIN_DAGEN` en zegt over hoeveel dagen hij gemeten heeft. Wat de
-batterij verdiende voordat de coach erbij kwam wordt niet geschat.
+**Het kasboek.** `verdiend` is per stap het verschil tussen de rekening zoals
+hij loopt en zoals hij zonder batterij gelopen had (de meter min wat de batterij
+doet); het rendement zit er vanzelf in. Het gaat per dag naar `battery_state` in
+de instellingen, en staat als "Opgeleverd" op de kaart (`earned` in de stand van
+de coach) en als "Door je thuisbatterij" onder In geld in Historie. Wat de
+batterij verdiende voordat de coach erbij kwam wordt niet geschat. Een
+aankoopprijs en een terugverdientijd stonden er van v0.73.0 tot v0.101.1; zie
+`docs/eerste-woning.md` onder In geld waarom ze eruit zijn.
 
 In het paneel: het type thuisbatterij staat er weer in (`DEVICE_TYPES`; het is
 uit `VERVALLEN_TYPES`), merken Anker en Overig met dezelfde velden

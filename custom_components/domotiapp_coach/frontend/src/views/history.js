@@ -25,8 +25,8 @@ const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
 import { tariff, contractAt } from "../data-source.js";
 import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
-import { beurtenIn, delen, moment, opmerking, perApparaat, totalen, woorden } from "../savings.js";
-import { SALDEREN_TOT, accuVerdiend, balans, prijsOp, salderen, terugverdienen } from "../geld.js";
+import { beurtenIn, delen, opmerking, perApparaat, totalen, woorden } from "../savings.js";
+import { SALDEREN_TOT, accuVerdiend, balans, prijsOp, salderen } from "../geld.js";
 import {
   PERIODS,
   combine,
@@ -375,17 +375,6 @@ class DacViewHistory extends DacElement {
           <p class="note" id="money-note"></p>
         </section>
 
-        <!-- Terugverdiend (v0.101.0): "de klant wil natuurlijk ook zijn
-             investering weten, wanneer hij het heeft terugverdiend." -->
-        <section class="card terug" id="payback-card" hidden>
-          <div class="panel-head">
-            <div class="eyebrow">Terugverdiend</div>
-            <h2>Wat je investeringen al opbrachten</h2>
-          </div>
-          <div class="terug-lijst" id="payback-list"></div>
-          <p class="note" id="payback-note"></p>
-        </section>
-
         <section class="card gas" id="gas-card" hidden>
           <div class="panel-head">
             <div class="eyebrow">Gas</div>
@@ -553,12 +542,9 @@ class DacViewHistory extends DacElement {
     if (run !== this.run_) return;
     this.prices_ = prices;
     this.devices_ = devices;
-    // Voor In geld en Terugverdiend: wat de coach bespaarde, wat de batterij
-    // verdiende, en wat de zonnepanelen sinds hun aankoop opbrachten. Elk op
-    // zijn eigen tempo; ze tekenen zichzelf bij als ze binnen zijn.
+    // Voor In geld: wat de coach bespaarde. De kaart tekent zichzelf bij als
+    // de beurten binnen zijn.
     this.laadBeurten_();
-    this.laadCoach_();
-    this.laadZonTerug_();
 
     this.rows_ = {
       solar: combine(series, roles.solar),
@@ -634,7 +620,6 @@ class DacViewHistory extends DacElement {
     this.$("#korrel-note").hidden = bespaard;
     if (bespaard) {
       this.$("#money-card").hidden = true;
-      this.$("#payback-card").hidden = true;
       this.$("#gas-card").hidden = true;
       this.$("#water-card").hidden = true;
       this.paintSaved_();
@@ -679,7 +664,6 @@ class DacViewHistory extends DacElement {
 
     this.paintChart_();
     this.paintMoney_();
-    this.paintTerug_();
     this.paintGas_();
     this.paintVolume_("water", "Waterverbruik per periode");
   }
@@ -1020,27 +1004,6 @@ class DacViewHistory extends DacElement {
           g.metWater ? cel("Water", euro(g.water)) : null,
           ...this.geldDelen_(g).map((d) => cel(d.naam, euro(d.waarde))),
         ].filter(Boolean);
-    const terugRijen = beknopt ? [] : this.terugRijen_().filter((r) => r.t.prijs > 0);
-    const terug = terugRijen.length
-      ? {
-          kop: ["Investering", "Kostte", "Opgeleverd", "Nog te gaan", "Terugverdiend rond"],
-          rijen: terugRijen.map((r) => [
-            r.naam,
-            euro(r.t.prijs),
-            euro(r.t.verdiend),
-            r.t.klaar ? "" : euro(r.t.rest),
-            r.t.klaar
-              ? "al terugverdiend"
-              : r.t.datum
-                ? r.t.datum.toLocaleDateString("nl-NL", { month: "long", year: "numeric" })
-                : "nog niet te zeggen",
-          ]),
-          uitleg: [
-            "Gemeten aan wat elke investering werkelijk opleverde, en de datum in het tempo van de dagen die er gemeten zijn. Een datum volgt na 28 gemeten dagen.",
-            this.terugUitleg_(),
-          ].filter(Boolean).join(" "),
-        }
-      : null;
 
     const bespaard = this.bespaardRapport_();
     return {
@@ -1058,7 +1021,6 @@ class DacViewHistory extends DacElement {
       energie: energieVakjes,
       geld: geldVakjes,
       geldUitleg: g ? this.geldUitleg_(g) : "",
-      terug,
       // Beknopt: de tegels van Bespaard wel, de regels per beurt niet.
       bespaard: beknopt && bespaard ? { ...bespaard, rijen: [] } : bespaard,
       verloop: rows.map((row) => ({
@@ -1468,91 +1430,6 @@ class DacViewHistory extends DacElement {
       this.beurten_ = [];
     }
     this.paint_();
-    this.zonTerugKey_ = null;
-    this.laadZonTerug_();
-  }
-
-  /** De stand van de coach, voor wat de thuisbatterij terugverdiende (`payback`). */
-  async laadCoach_() {
-    if (!this.hass_?.callWS) return;
-    try {
-      this.coach_ = (await this.hass_.callWS({ type: "domotiapp_coach/coach/state" })) ?? {};
-    } catch (error) {
-      console.warn("[DomotiApp Coach] kon de stand van de coach niet laden", error);
-      this.coach_ = {};
-    }
-    if (this.onderwerp_ === "energie") this.paintTerug_();
-  }
-
-  /**
-   * Wat de zonnepanelen opbrachten sinds de datum bij Investeringen.
-   *
-   * Per maand uit de statistieken van Home Assistant, met dezelfde som als In
-   * geld: het verbruik tegen de prijs van het net min wat de stroom werkelijk
-   * kostte, min wat de thuisbatterij en de coach daarvan al voor hun rekening
-   * nemen. Wat er was voordat Home Assistant het bijhield telt niet mee, en
-   * dat staat erbij.
-   */
-  async laadZonTerug_() {
-    const inv = this.settings_?.installation?.investments ?? {};
-    const prijs = Number(inv.solar_price);
-    const roles = this.meters_();
-    if (!(prijs > 0) || !inv.solar_since || !roles.solar.length || !this.hass_?.callWS) {
-      this.zonTerug_ = null;
-      return;
-    }
-    const sleutel = JSON.stringify([inv.solar_since, roles, this.settings_?.contract, (this.beurten_ ?? []).length]);
-    if (this.zonTerugKey_ === sleutel) return;
-    this.zonTerugKey_ = sleutel;
-    const sinds = new Date(`${inv.solar_since}T00:00:00`);
-    if (Number.isNaN(sinds.getTime())) {
-      this.zonTerug_ = null;
-      return;
-    }
-    const nu = new Date();
-    const vanafMaand = new Date(sinds.getFullYear(), sinds.getMonth(), 1);
-    const ids = [...roles.solar, ...roles.import, ...roles.export];
-    const maanden = [];
-    const prijzen = new Map();
-    for (let jaar = sinds.getFullYear(); jaar <= nu.getFullYear(); jaar += 1) {
-      const begin = new Date(jaar, 0, 1);
-      const [series, p] = await Promise.all([
-        fetchPeriod(this.hass_, ids, "year", begin),
-        fetchPrices(this.hass_, this.priceEntity_(), "year", begin),
-      ]);
-      for (const [k, v] of p) prijzen.set(k, v);
-      const reeks = (rol) => new Map(combine(series, roles[rol]).map((r) => [r.start.getTime(), r.value]));
-      const zon = reeks("solar");
-      const af = reeks("import");
-      const terug = reeks("export");
-      for (const tijd of new Set([...zon.keys(), ...af.keys(), ...terug.keys()])) {
-        if (tijd < vanafMaand.getTime()) continue;
-        const own = Math.max(0, (zon.get(tijd) ?? 0) - (terug.get(tijd) ?? 0));
-        const bought = af.get(tijd) ?? 0;
-        maanden.push({ start: new Date(tijd), own, bought, sold: terug.get(tijd) ?? 0, used: own + bought });
-      }
-    }
-    if (sleutel !== this.zonTerugKey_) return;
-    maanden.sort((a, b) => a.start - b.start);
-    if (!maanden.length) {
-      this.zonTerug_ = { verdiend: 0, dagen: 0, perDag: 0, vanaf: null, sinds };
-      this.paintTerug_();
-      return;
-    }
-    const contract = this.settings_?.contract;
-    const rate = tariff(this.feed_, contract);
-    const coach = totalen((this.beurten_ ?? []).filter((b) => moment(b) !== null && moment(b) >= sinds));
-    const b = balans({
-      rijen: maanden,
-      prijs: (when) => prijsOp(contract, rate, prijzen, when),
-      contract,
-      accu: accuVerdiend(this.settings_, sinds, nu).euro,
-      coach,
-    });
-    const vanaf = maanden[0].start > sinds ? maanden[0].start : sinds;
-    const dagen = Math.max(1, Math.round((nu - vanaf) / 86400000));
-    this.zonTerug_ = { verdiend: b.delen.zon, dagen, perDag: b.delen.zon / dagen, vanaf, sinds };
-    if (this.onderwerp_ === "energie") this.paintTerug_();
   }
 
   /** De beurten van de gekozen periode en wat ze samen bespaarden. */
@@ -1896,120 +1773,6 @@ class DacViewHistory extends DacElement {
     return zinnen.join(" ");
   }
 
-  /** Per investering: hoe ver hij terugverdiend is, en wanneer de rest. Ook voor het rapport. */
-  terugRijen_() {
-    const inv = this.settings_?.installation?.investments ?? {};
-    const rijen = [];
-    const maand = (d) => d.toLocaleDateString("nl-NL", { month: "long", year: "numeric" });
-    const zin = (t, wat, waar) => {
-      if (!(t.prijs > 0)) {
-        return `Tot nu toe ${euro(t.verdiend)} opgeleverd${t.dagen ? `, over ${t.dagen} ${t.dagen === 1 ? "dag" : "dagen"}` : ""}. Vul ${waar} de aankoopprijs in, dan zie je hier wanneer ${wat} terugverdiend is.`;
-      }
-      if (t.klaar) return `Terugverdiend: ${wat} leverde ${euro(t.verdiend)} op, ${euro(t.verdiend - t.prijs)} meer dan het kostte.`;
-      const rest = `Nog ${euro(t.rest)} te gaan.`;
-      if (t.datum) {
-        // Ver weg zegt een maand weinig; dan eerst hoeveel jaar het nog is.
-        const jaren = (t.datum - new Date()) / (365.25 * 86400000);
-        const wanneer = jaren >= 2 ? `over ongeveer ${Math.round(jaren)} jaar, rond ${maand(t.datum)},` : `rond ${maand(t.datum)}`;
-        return `${rest} In het tempo van de afgelopen ${t.dagen} dagen, ${euro(t.perDag * 30.4)} per maand, is het ${wanneer} terugverdiend.`;
-      }
-      if (!(t.perDag > 0)) return `${rest} Tot nu toe levert het niets op, dus een datum is er nog niet.`;
-      return `${rest} Een datum noemt de coach na 28 gemeten dagen; nu zijn het er ${t.dagen}.`;
-    };
-
-    // De thuisbatterij: haar eigen kasboek, uit de stand van de coach.
-    for (const device of (this.settings_?.devices ?? []).filter((d) => d.type === "thuisbatterij")) {
-      const pb = this.coach_?.[device.id]?.payback;
-      const rij = (this.settings_?.battery_state ?? []).find((r) => r.device === device.id) ?? {};
-      const prijs = Number(device.battery?.purchase_price) || null;
-      const verdiend = Number(pb?.earned ?? rij.earned_total) || 0;
-      const dagen = Number(pb?.days ?? Object.keys(rij.earned_days ?? {}).length) || 0;
-      const perDag = Number(pb?.per_day) || (dagen ? verdiend / dagen : 0);
-      const t = terugverdienen(prijs, verdiend, dagen, perDag);
-      // De datum van de coach zelf, als hij er een noemt: dezelfde som, over het
-      // venster van een jaar (`terugverdiend` in batterij.py).
-      if (pb?.date && pb.date !== "klaar" && t.prijs > 0 && !t.klaar) t.datum = new Date(`${pb.date}T00:00:00`);
-      rijen.push({ naam: deviceLabel(device) || "Thuisbatterij", t, tekst: zin(t, "de batterij", "bij Apparaten") });
-    }
-
-    // De zonnepanelen.
-    if (this.meters_().solar.length) {
-      const prijs = Number(inv.solar_price) || null;
-      const z = this.zonTerug_;
-      if (prijs && inv.solar_since && z) {
-        const t = terugverdienen(prijs, z.verdiend, z.dagen, z.perDag);
-        let tekst = zin(t, "het", "bij Installatie");
-        if (z.vanaf && z.vanaf > z.sinds) {
-          tekst += ` Wat de panelen voor ${maand(z.vanaf)} opbrachten telt niet mee: daarvan heeft Home Assistant geen gegevens.`;
-        }
-        rijen.push({ naam: "Zonnepanelen", t, tekst });
-      } else if (prijs && inv.solar_since) {
-        rijen.push({ naam: "Zonnepanelen", t: terugverdienen(prijs, 0, 0, 0), tekst: "Bezig met ophalen…" });
-      } else {
-        rijen.push({
-          naam: "Zonnepanelen",
-          t: terugverdienen(null, 0, 0, 0),
-          tekst: "Vul bij Installatie onder Investeringen in wat je panelen kostten en sinds wanneer ze draaien, dan zie je hier wanneer ze terugverdiend zijn.",
-        });
-      }
-    }
-
-    // De coach zelf: wat de beurten onder Bespaard scheelden sinds de datum.
-    const coachPrijs = Number(inv.coach_price) || null;
-    if (coachPrijs && inv.coach_since && Array.isArray(this.beurten_)) {
-      const sinds = new Date(`${inv.coach_since}T00:00:00`);
-      const items = this.beurten_.filter((b) => moment(b) !== null && moment(b) >= sinds);
-      const verdiend = totalen(items).saved;
-      const dagen = Math.max(1, Math.round((new Date() - sinds) / 86400000));
-      const t = terugverdienen(coachPrijs, verdiend, dagen, verdiend / dagen);
-      rijen.push({ naam: "DomotiApp en de installatie", t, tekst: zin(t, "het", "bij Installatie") });
-    }
-    return rijen;
-  }
-
-  /** De zin onder Terugverdiend, zolang er gesaldeerd wordt. */
-  terugUitleg_() {
-    const metAccu = (this.settings_?.devices ?? []).some((d) => d.type === "thuisbatterij");
-    return metAccu && salderen(this.settings_?.contract, new Date())
-      ? `Zolang je saldeert, tot 1 januari ${SALDEREN_TOT.slice(0, 4)}, levert een thuisbatterij weinig op: een teruggeleverde kWh komt dan bijna volledig terug. Daarna gaat haar tempo omhoog, en schuift haar datum naar voren.`
-      : "";
-  }
-
-  paintTerug_() {
-    const card = this.$("#payback-card");
-    if (!card || this.onderwerp_ !== "energie") return;
-    const rijen = this.terugRijen_();
-    const heel = (v) => `€ ${Math.round(Number(v) || 0).toLocaleString("nl-NL")}`;
-    card.hidden = !rijen.length;
-    this.$("#payback-list").replaceChildren(
-      ...rijen.map((r) => {
-        const box = document.createElement("div");
-        box.className = "terug-rij";
-        const kopRij = document.createElement("div");
-        kopRij.className = "terug-kop";
-        const n = document.createElement("span");
-        n.className = "terug-naam";
-        n.textContent = r.naam;
-        const b = document.createElement("span");
-        b.className = "terug-bedrag";
-        b.textContent = r.t.prijs > 0 ? `${euro(r.t.verdiend)} van ${heel(r.t.prijs)}` : euro(r.t.verdiend);
-        kopRij.append(n, b);
-        const balk = document.createElement("div");
-        balk.className = "terug-balk";
-        balk.hidden = !(r.t.prijs > 0);
-        const vul = document.createElement("i");
-        vul.style.width = `${Math.round((r.t.deel ?? 0) * 1000) / 10}%`;
-        balk.append(vul);
-        const p = document.createElement("p");
-        p.className = "terug-zin";
-        p.textContent = r.tekst;
-        box.append(kopRij, balk, p);
-        return box;
-      })
-    );
-    this.$("#payback-note").textContent = this.terugUitleg_();
-  }
-
   paintGas_() {
     this.paintVolume_("gas", "Gasverbruik per periode");
   }
@@ -2327,19 +2090,6 @@ DacViewHistory.css = /* css */ `
   .geld-regel i { width: 10px; height: 10px; border-radius: 3px; background: var(--tone); }
   .geld-bedrag { color: var(--dac-ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-  /* Terugverdiend (v0.101.0): per investering een balk. */
-  .terug-lijst { display: flex; flex-direction: column; gap: 18px; margin: 16px 0 0; }
-  .terug-rij { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
-  .terug-kop { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-  .terug-naam { font-size: 14.5px; font-weight: 600; color: var(--dac-ink); }
-  .terug-bedrag { font-size: 14px; color: var(--dac-ink-2); font-variant-numeric: tabular-nums; }
-  .terug-balk {
-    display: block; height: 10px; border-radius: var(--dac-radius-pill);
-    background: var(--dac-surface-hi); overflow: hidden;
-  }
-  .terug-balk[hidden] { display: none; }
-  .terug-balk i { display: block; height: 100%; min-width: 2px; background: var(--dac-good); border-radius: inherit; }
-  .terug-zin { margin: 0; font-size: 13px; line-height: 1.5; color: var(--dac-ink-2); }
   .tabel-wrap { overflow-x: auto; margin-top: 16px; }
   .tabel-wrap:has(table:empty) { display: none; }
   table.beurten { border-collapse: collapse; width: 100%; font-size: 13px; }

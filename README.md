@@ -172,10 +172,9 @@ goed voor: die meten aan de accukant en tellen de omzetverliezen niet mee.
 
 Per batterij stel je in: een **reserve voor noodstroom** waaronder niets meer
 ontladen wordt, of er **gehandeld** mag worden, een **wekelijkse volle beurt** voor
-het balanceren van de cellen, en de **aankoopprijs**. Met dat laatste laat de
-kaart zien hoeveel de batterij al heeft terugverdiend, en na vier weken meten
-ook wanneer de rest er ongeveer is. De laadgrens en de ontlaadgrens van de
-batterij leest de coach alleen; hij verandert ze nooit.
+het balanceren van de cellen. De kaart laat zien wat de batterij opleverde sinds
+de coach haar volgt. De laadgrens en de ontlaadgrens van de batterij leest de
+coach alleen; hij verandert ze nooit.
 
 Stopt de integratie, valt de meter weg of gaat het vinkje "mag sturen" eraf, dan
 gaat het vermogen naar nul en krijgt de batterij zijn eigen modus terug. Een

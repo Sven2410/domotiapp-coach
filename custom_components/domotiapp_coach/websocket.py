@@ -191,8 +191,6 @@ _BATTERY = _schema(
         # Boven welke accustand de batterij de auto mag helpen als de paal
         # laadt (v0.90.0); leeg is nooit. De nachtstrategie gaat voor.
         vol.Optional("car_above", default=None): _LEEG_OF(float, 0, 100),
-        # Wat de batterij gekost heeft, voor de terugverdientijd.
-        vol.Optional("purchase_price", default=None): _LEEG_OF(float, 0, 1000000),
         # Welke keuze van de modus-entiteit "de coach stuurt" betekent, en welke
         # er terugkomt als de coach stopt.
         vol.Optional("control_mode", default=""): str,
@@ -410,14 +408,6 @@ _SETTINGS = _schema(
                 vol.Optional("load_balancer"): bool,
                 vol.Optional("balancer_entity"): str,
                 vol.Optional("circuits"): vol.All([_CIRCUIT], vol.Length(max=12)),
-                vol.Optional("investments"): _schema(
-                    {
-                        vol.Optional("solar_price"): _LEEG_OF(float, 0, 10_000_000),
-                        vol.Optional("solar_since"): _DATUM,
-                        vol.Optional("coach_price"): _LEEG_OF(float, 0, 10_000_000),
-                        vol.Optional("coach_since"): _DATUM,
-                    }
-                ),
             }
         ),
         vol.Optional("contract"): _schema(

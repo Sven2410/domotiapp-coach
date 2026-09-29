@@ -427,15 +427,11 @@ v3 = bat.verdiend(1000.0, 1000.0, 0.13, 0.05, 3600.0)
 controle("een uur 1 kW van het net laden kost de prijs van dat uur", abs(v3 + 0.13) < 1e-9, f"{v3}")
 controle("zonder prijs geen bedrag", bat.verdiend(0.0, -1000.0, None, None, 60.0) is None)
 
-print("24. terugverdiend")
-dagen24 = {(DAG - dt.timedelta(days=i)).date().isoformat(): 1.50 for i in range(30)}
-t24 = bat.terugverdiend(dagen24, 4500.0, DAG)
-print(f"  {t24}")
-controle("het totaal klopt", t24["earned"] == 45.0)
-controle("na dertig dagen komt er een datum", t24["date"] is not None and t24["date"] > "2034")
-kort24 = bat.terugverdiend({k: v for k, v in list(dagen24.items())[:10]}, 4500.0, DAG)
-controle("na tien dagen nog niet", kort24["date"] is None and kort24["earned"] == 15.0, f"{kort24}")
-controle("zonder aankoopprijs alleen het bedrag", bat.terugverdiend(dagen24, None, DAG)["date"] is None)
+print("24. geen terugverdientijd (v0.101.1)")
+# De eigenaar op 29-09-2026: een datum in het paneel die afwijkt van wat een
+# installateur de klant voorrekende is niet te verdedigen. Het kasboek blijft.
+controle("batterij.py rekent geen terugverdientijd meer uit",
+         not hasattr(bat, "terugverdiend") and not hasattr(bat, "TERUGVERDIEN_MIN_DAGEN"))
 
 print("25. het rendement uit de tellers van de eerste woning")
 r25 = bat.rendement_uit_tellers(250.0, 184.0, 14.6)

@@ -687,7 +687,6 @@ class Batterij:
     # Boven welke accustand hij de auto mag helpen (v0.90.0), of None: nooit.
     auto_boven: float | None = None
     wekelijks_vol_dag: int | None = None
-    aankoop: float | None = None
     # --- de sensor ---
     # Gemeten aan de Anker van de eerste woning op 22-09-2026, naast een
     # kWh-meter op dezelfde batterij: het vermogen dat de integratie meldt loopt
@@ -1304,7 +1303,6 @@ def instellingen(s: Scenario) -> dict:
                 "car_above": bat.auto_boven,
                 "weekly_full": bat.wekelijks_vol_dag is not None,
                 "weekly_full_day": bat.wekelijks_vol_dag or 0,
-                "purchase_price": bat.aankoop,
                 "control_mode": "third_party_control",
                 "idle_mode": "self_consumption",
                 "self_zero": bat.zelf_nul,

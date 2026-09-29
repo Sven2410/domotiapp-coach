@@ -1352,9 +1352,11 @@ def verdiend(
     batterij doet. Laden kost dus op het moment zelf geld en ontladen levert het
     op, en het rendement zit er vanzelf in omdat er meer in gaat dan eruit komt.
 
-    De bewoner van de eerste woning op 21-09-2026: "Elke consument wil weten
-    hoelang het duurt voor zijn accu terugverdiend is. Dat doet nog geen enkele
-    integratie."
+    Per dag opgeteld is dit het kasboek van de batterij: "Opgeleverd" op haar
+    kaart en "Door je thuisbatterij" onder In geld in Historie. Een
+    terugverdientijd met een aankoopprijs erbij stond er van v0.73.0 tot
+    v0.101.1; de eigenaar op 29-09-2026: niet te verdedigen als een installateur
+    de klant een terugverdientijd voorrekende en het paneel een andere noemt.
     """
     if koop is None:
         return None
@@ -1364,46 +1366,6 @@ def verdiend(
         return watt / 1000.0 * prijs * seconden / 3600.0
 
     return rekening(net_w - batterij_w) - rekening(net_w)
-
-
-# Vanaf hoeveel gemeten dagen de coach een datum noemt. Vier volle weken, zodat
-# elke weekdag even vaak meetelt. Eerder is het een gok met een datum erop.
-TERUGVERDIEN_MIN_DAGEN = 28
-# Over hoeveel dagen het tempo gemeten wordt: een jaar, zodat zomer en winter
-# er allebei in zitten zodra ze er zijn.
-TERUGVERDIEN_VENSTER = 365
-
-
-def terugverdiend(
-    per_dag: dict[str, float], aankoop: float | None, vandaag: datetime
-) -> dict:
-    """Hoeveel er van de aankoopprijs terug is, en wanneer de rest.
-
-    De datum rust op het tempo van de gemeten dagen en zegt dat erbij. Een
-    batterij verdient in juli iets anders dan in december, dus wie in de zomer
-    begint krijgt een te vroege datum en wie in de winter begint een te late;
-    na een jaar klopt hij. Wat de batterij verdiende voordat de coach erbij
-    kwam is niet bekend en wordt niet geschat.
-    """
-    totaal = sum(per_dag.values())
-    dagen = sorted(per_dag)[-TERUGVERDIEN_VENSTER:]
-    uit = {
-        "earned": round(totaal, 2), "days": len(per_dag), "price": aankoop, "date": None,
-        "per_day": None, "min_days": TERUGVERDIEN_MIN_DAGEN,
-    }
-    if not dagen:
-        return uit
-    tempo = sum(per_dag[d] for d in dagen) / len(dagen)
-    uit["per_day"] = round(tempo, 3)
-    if aankoop is None or aankoop <= 0:
-        return uit
-    rest = aankoop - totaal
-    if rest <= 0:
-        uit["date"] = "klaar"
-        return uit
-    if len(dagen) >= TERUGVERDIEN_MIN_DAGEN and tempo > 0:
-        uit["date"] = (vandaag + timedelta(days=rest / tempo)).date().isoformat()
-    return uit
 
 
 # --- Het rendement meten -------------------------------------------------------
