@@ -2206,6 +2206,52 @@ proef("fetchBattery: tellers, een sensor met een teken en twee losse, en van van
   assert.ok(Math.abs(j.get("t")[0].kwh - verstreken) < 1e-9, `${j.get("t")[0].kwh} tegen ${verstreken}`);
 });
 
+// --- een reserveprijssensor (v0.101.3) -----------------------------------------
+// De eigenaar op 29-09-2026, toen Frank Energie eruit lag: "ik heb ook Nord Pool
+// draaien, dat wil ik als fallback hebben." Het paneel tekent dan de lijst van
+// de coach, en Historie vult een vak zonder prijs aan met de reserve.
+const prijsbron = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
+
+proef("reserve: het paneel tekent de lijst van de coach als de reserve invalt of de sensor geen lijst heeft", () => {
+  const nu = new Date();
+  const begin = new Date(nu.getTime() - 5 * 60_000);
+  const eind = new Date(nu.getTime() + 10 * 60_000);
+  const contract = { type: "dynamic", dynamic: { source: "all_in", all_in_entity: "sensor.frank", fallback_entity: "sensor.np" } };
+  const frank = { get: (id) => (id === "sensor.frank" ? { state: "0.30", attributes: { prices: [
+    { from: begin.toISOString(), till: eind.toISOString(), price: 0.3 }] } } : undefined) };
+  const weg = { get: (id) => (id === "sensor.frank" ? { state: "unavailable", attributes: {} } : undefined) };
+  prijsbron.zetCoachPrijzen({ reserve: false, rows: [{ start: begin, end: eind, price: 0.27685, feedIn: 0.1 }] });
+  assert.equal(prijsbron.priceForecast(frank, contract)[0].price, 0.3, "Frank werkt: Frank");
+  assert.equal(prijsbron.priceNow(frank, contract), 0.3);
+  assert.equal(prijsbron.priceForecast(weg, contract)[0].price, 0.27685, "Frank weg: de lijst van de coach");
+  assert.equal(prijsbron.priceNow(weg, contract), 0.27685);
+  prijsbron.zetCoachPrijzen({ reserve: true, rows: [{ start: begin, end: eind, price: 0.27685, feedIn: 0.1 }] });
+  assert.equal(prijsbron.priceForecast(frank, contract)[0].price, 0.27685, "zegt de coach dat de reserve invalt, dan die");
+  assert.ok(Math.abs(prijsbron.tariff(weg, contract).feedIn - 0.1) < 1e-9);
+  assert.equal(prijsbron.reserveValtIn(), true);
+  prijsbron.zetCoachPrijzen({});
+  assert.deepEqual(prijsbron.priceForecast(weg, contract), [], "zonder lijst van de coach: niets, zoals altijd");
+});
+
+proef("Historie: een marktprijs krijgt belasting, opslag en btw, en een vak zonder prijs die van de reserve", () => {
+  const markt = { type: "dynamic", dynamic: { source: "market", energy_tax: 0.1088, supplier_markup: 0.02, vat_percent: 21 } };
+  const m = prijsbron.allInPrijzen(new Map([[1, 0.1]]), new Map([[1, 0.5], [2, 0.2]]), markt);
+  assert.ok(Math.abs(m.get(1) - (0.1 + 0.1088 + 0.02) * 1.21) < 1e-9, `${m.get(1)}`);
+  assert.ok(Math.abs(m.get(2) - (0.2 + 0.1088 + 0.02) * 1.21) < 1e-9, "de reserve is standaard een marktprijs");
+  const allIn = { type: "dynamic", dynamic: { source: "all_in", fallback_source: "all_in", energy_tax: 0.1088, supplier_markup: 0.02, vat_percent: 21 } };
+  const a = prijsbron.allInPrijzen(new Map([[1, 0.3]]), new Map([[1, 0.9], [2, 0.25]]), allIn);
+  assert.equal(a.get(1), 0.3, "de eigen sensor gaat voor");
+  assert.equal(a.get(2), 0.25, "een all-in reserve blijft zoals hij is");
+});
+
+proef("het formulier heeft een reserveprijssensor en zegt wat voor prijs hij geeft", () => {
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/installation.js", import.meta.url), "utf8");
+  assert.ok(bron.includes('id="dyn-reserve"') && bron.includes('["dyn-reserve", "fallback_entity"]'));
+  assert.ok(bron.includes('data-reserve="market"') && bron.includes('data-reserve="all_in"'));
+  const py = readFileSync(new URL("../custom_components/domotiapp_coach/websocket.py", import.meta.url), "utf8");
+  assert.ok(py.includes('vol.Optional("fallback_entity")') && py.includes('vol.Optional("fallback_source")'));
+});
+
 /** Een historieweergave met een dag aan vakken, de batterij en een beurt. */
 function geldweergave() {
   const el = Object.create(Historie.prototype);

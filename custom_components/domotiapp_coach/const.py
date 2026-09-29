@@ -388,6 +388,12 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             "all_in_entity": "",
             # Or the bare market price, with the rest added here.
             "market_entity": "",
+            # Een reserveprijsbron voor als de eigen geen prijzen heeft, en wat
+            # voor prijs hij geeft (v0.101.3). De eigenaar op 29-09-2026, toen
+            # Frank Energie eruit lag: "ik heb ook Nord Pool draaien, dat wil ik
+            # als fallback." Zie `_prijsbron` in coach.py.
+            "fallback_entity": "",
+            "fallback_source": DYNAMIC_MARKET,
             "energy_tax": 0.1088,
             "supplier_markup": 0.02,
             "vat_percent": 21,

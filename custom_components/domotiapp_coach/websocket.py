@@ -432,6 +432,8 @@ _SETTINGS = _schema(
                         ),
                         vol.Optional("all_in_entity"): _ENTITY,
                         vol.Optional("market_entity"): _ENTITY,
+                        vol.Optional("fallback_entity"): _ENTITY,
+                        vol.Optional("fallback_source"): vol.In([DYNAMIC_ALL_IN, DYNAMIC_MARKET]),
                         vol.Optional("energy_tax"): _EURO,
                         vol.Optional("supplier_markup"): _EURO,
                         vol.Optional("vat_percent"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
@@ -982,6 +984,25 @@ async def async_notifications_list(
     connection.send_result(msg["id"], list(reversed(items)))
 
 
+@websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/prices"})
+@websocket_api.async_response
+async def async_prices(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De prijslijst waar de coach mee rekent, en of dat de reserve is (v0.101.3).
+
+    Het paneel leest een prijslijst zelf uit de sensor. Van de ingebouwde Nord
+    Pool staat die daar niet, en als de reserve invalt hoort het paneel te
+    tekenen wat de coach gebruikt.
+    """
+    from .coach import async_get_coach
+
+    settings = await async_get_store(hass).async_load()
+    connection.send_result(msg["id"], async_get_coach(hass)._prijzen_voor_paneel(settings))
+
+
 @websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/coach/state"})
 @callback
 def async_coach_state(
@@ -1231,6 +1252,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_set_car_soc)
     websocket_api.async_register_command(hass, async_history_quarters)
     websocket_api.async_register_command(hass, async_coach_state)
+    websocket_api.async_register_command(hass, async_prices)
     websocket_api.async_register_command(hass, async_notifications_list)
     websocket_api.async_register_command(hass, async_savings_list)
     websocket_api.async_register_command(hass, async_coach_approve)

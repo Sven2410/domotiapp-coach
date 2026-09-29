@@ -23,7 +23,7 @@ import { deviceLabel, deviceLabelMap } from "../devices.js";
 
 /** Het merkteken op het rapport. */
 const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
-import { tariff, contractAt } from "../data-source.js";
+import { allInPrijzen, contractAt, laadCoachPrijzen, tariff } from "../data-source.js";
 import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
 import { beurtenIn, delen, opmerking, perApparaat, totalen, woorden } from "../savings.js";
@@ -521,6 +521,12 @@ class DacViewHistory extends DacElement {
     return dynamic.source === "all_in" ? dynamic.all_in_entity : dynamic.market_entity;
   }
 
+  /** De reserveprijssensor, voor de vakken waarin de eigen niets gaf (v0.101.3). */
+  reserveEntity_() {
+    const contract = this.settings_?.contract;
+    return contract?.type === "dynamic" ? (contract.dynamic?.fallback_entity ?? "") : "";
+  }
+
   /** Which counters this installation has, in the roles the chart needs. */
   meters_() {
     const meters = this.settings_?.sources?.meters ?? {};
@@ -562,14 +568,16 @@ class DacViewHistory extends DacElement {
     }));
 
     const batterijen = (this.settings_?.devices ?? []).filter((device) => device.type === "thuisbatterij");
-    const [series, prices, devices, accu] = await Promise.all([
+    const [series, prices, reservePrijzen, devices, accu] = await Promise.all([
       fetchPeriod(this.hass_, ids, this.period_, start),
       fetchPrices(this.hass_, this.priceEntity_(), this.period_, start),
+      fetchPrices(this.hass_, this.reserveEntity_(), this.period_, start),
       fetchDevices(this.hass_, apparaten, this.period_, start),
       fetchBattery(this.hass_, batterijen, this.period_, start),
+      laadCoachPrijzen(this.hass_),
     ]);
     if (run !== this.run_) return;
-    this.prices_ = prices;
+    this.prices_ = allInPrijzen(prices, reservePrijzen, this.settings_?.contract);
     this.devices_ = devices;
     this.accu_ = accu;
     // Voor In geld: wat de coach bespaarde. De kaart tekent zichzelf bij als

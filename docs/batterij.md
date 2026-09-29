@@ -564,6 +564,39 @@ van een ontladende batterij nu naar het huis (`batteryWatts < 0` in
 energy-flow.js); de bewoner zette er een rode kring om. Proeven bij de
 prijslijst in test_coach.py (na de datetime-proef) en in test_rapport.mjs.
 
+**Een reserveprijssensor, en de ingebouwde Nord Pool** (v0.101.3). Bij de
+eigenaar op 29-09-2026 gaf de integratie van Frank Energie "Graphql validation
+error" (Frank had iets aan zijn kant veranderd) en stonden al zijn sensoren op
+`unavailable`. De eigenaar: "Ik heb ook Nord Pool draaien. Dat wil ik als
+fallback hebben, zodat als Frank eruit ligt dat hij dat oppakt, en is Frank weer
+terug dat hij dat weer pakt." Onder het dynamische contract staan daarvoor twee
+velden: `fallback_entity` en `fallback_source` (marktprijs of all-in). De eigen
+prijsbron telt zolang hij een prijs voor dit moment heeft; anders de reserve,
+en een marktprijs krijgt dezelfde belasting, opslag en btw als altijd. Er wordt
+niet gemengd. Zie `_prijsbron` in coach.py; de sensorwacht zegt dan "de coach
+rekent zolang met je reserveprijzen" in plaats van "zonder", en bewaakt de
+reserve zelf ook. Na een herstart valt de terugrekening op de reserve terug als
+de eigen sensor in dat venster niets gaf (`_async_reserveverloop`).
+
+De ingebouwde Nord Pool van Home Assistant hangt geen lijst aan zijn sensoren,
+anders dan de Nord Pool uit HACS (`raw_today`). Hij geeft hem alleen via de
+dienst `nordpool.get_prices_for_date`: bij de eigenaar 96 kwartieren per dag,
+in euro per MWh (195,3 voor € 0,1953 per kWh), en morgen pas rond 13:00.
+`_async_nordpool` haalt vandaag één keer op en morgen vanaf 12:00 tot hij er is,
+hooguit eens per tien minuten; config entry, gebied en munt uit de
+entiteitregistratie (`platform` nordpool, unieke id "NL-current_price"). Dat
+werkt voor Nord Pool als eigen marktprijs én als reserve.
+
+Het paneel leest een lijst uit de attributen, en daar staat van de ingebouwde
+Nord Pool niets. Daarom geeft de coach zijn lijst via `domotiapp_coach/prices`
+(`_prijzen_voor_paneel`), en tekent het paneel die zodra de reserve invalt of de
+sensor zelf geen lijst heeft (`laadCoachPrijzen`, `priceForecast`, `priceNow`
+en `tariff` in data-source.js). Historie vult een uur zonder prijs van de eigen
+sensor aan met de statistieken van de reserve (`allInPrijzen`); daarbij bleek
+dat Historie bij een marktprijssensor de kale beursprijs als inkoopprijs nam,
+zonder belasting, opslag en btw. Dat is in dezelfde uitgave rechtgezet.
+Proef 115 in test_coach.py, drie proeven in test_rapport.mjs.
+
 **Wat een apparaat uit de batterij kreeg staat in zijn verslag** (v0.101.0). Bij de eigenaar
 op 28-09-2026: een vaatwasser van 0,908 kWh kreeg 0,329 van de zon, 0,553 uit de
 Anker en 0,026 van het net, en het verslag zei "ongeveer € 0,199, bespaard € 0,018,
