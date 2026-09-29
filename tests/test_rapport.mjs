@@ -2359,12 +2359,15 @@ proef("de laadpaalkaart laat de accustand van de auto zien als die in Home Assis
   const regels = (settings) => new LiveSource().sample(feed, { sources: {}, devices: [paal], ...settings }).devices[0].details
     .filter((d) => d.label.startsWith("Accu"));
   assert.deepEqual(regels({ active_cars: [{ device: "p", car: "ford" }] }),
-    [{ label: "Accu auto", text: "68 % · 13,4 van 19,7 kWh" }], "de auto die eraan hangt");
-  assert.deepEqual(regels({}), [
-    { label: "Accu Ford", text: "68 % · 13,4 van 19,7 kWh" },
-    { label: "Accu Tesla", text: "—" },
-  ], "zonder gekozen auto elke auto met een sensor, een gast en een auto zonder sensor niet");
-  assert.deepEqual(regels({ active_cars: [{ device: "p", car: "oud" }] }).map((d) => d.label), ["Accu Ford", "Accu Tesla"],
+    [{ label: "Accu auto", text: "68 % · 13,4 van 19,7 kWh" }], "de gekozen auto");
+  assert.deepEqual(regels({ active_cars: [{ device: "p", car: "tesla" }] }),
+    [{ label: "Accu auto", text: "—" }], "een gekozen auto waarvan de sensor niets zegt");
+  assert.deepEqual(regels({}), [{ label: "Accu auto", text: "68 % · 13,4 van 19,7 kWh" }],
+    "zonder keuze de eerste auto, net als de keuzelijst op de kaart");
+  // De eigenaar op 29-09-2026: "als ik de gastauto kies blijft de accu auto stand staan
+  // in de kaart, dat moet niet" (v0.101.7).
+  assert.deepEqual(regels({ active_cars: [{ device: "p", car: "__guest__" }] }), [], "de gast: geen accustand");
+  assert.deepEqual(regels({ active_cars: [{ device: "p", car: "oud" }] }), [],
     "een gekozen auto zonder sensor vraagt het op de kaart zelf");
 });
 

@@ -16,7 +16,7 @@
  * export (naar het net).
  */
 
-import { brandFields, programOf, valueLabel } from "./devices.js";
+import { brandFields, carsFor, programOf, valueLabel } from "./devices.js";
 import { countdown, duration, toKwh, toWatts } from "./format.js";
 
 const PHASES = ["l1", "l2", "l3"];
@@ -561,15 +561,19 @@ export function accuTekst(procent, inhoudKwh) {
 }
 
 /**
- * De auto's van een laadpaal waarvan de accustand in Home Assistant staat, voor
- * op de kaart (v0.101.6). Hangt er een gekozen auto aan en heeft die een
- * sensor, dan alleen die; anders elke auto van het huis met een sensor.
+ * De auto die op de kaart gekozen staat, als zijn accustand in Home Assistant
+ * staat; anders niets (v0.101.7).
+ *
+ * Dezelfde keuze als de kaart zelf maakt: de gekozen auto, en zonder keuze de
+ * eerste (`carsFor`, met de gast erbij). Tot v0.101.7 bleef de Ford op de kaart
+ * staan als de gast gekozen was; de eigenaar op 29-09-2026: "hij moet de accu
+ * tonen van de auto die geselecteerd is."
  */
-function autosMetStand(device, settings) {
-  const metSensor = (device?.cars ?? []).filter((car) => car?.soc_entity && !car.guest);
+function gekozenAutoMetStand(device, settings) {
+  const autos = carsFor(device);
   const gekozen = (settings?.active_cars ?? []).find((rij) => rij?.device === device?.id)?.car;
-  const actief = metSensor.find((car) => car.id === gekozen);
-  return actief ? [actief] : metSensor;
+  const auto = autos.find((car) => car.id === gekozen) ?? autos[0];
+  return auto && !auto.guest && auto.soc_entity ? auto : null;
 }
 
 function deviceDetails(feed, device, settings) {
@@ -642,12 +646,12 @@ function deviceDetails(feed, device, settings) {
   // zien als die in HA staat." Een auto zonder sensor vraagt zijn stand al op
   // de kaart zelf, en daar staat hij dan ook.
   if (device?.type === "laadpaal") {
-    const autos = autosMetStand(device, settings);
-    for (const car of autos) {
+    const car = gekozenAutoMetStand(device, settings);
+    if (car) {
       const state = feed.get(car.soc_entity);
       const procent = usable(state) ? Number(state.state) : NaN;
       rows.push({
-        label: autos.length > 1 ? `Accu ${car.name?.trim() || "auto"}` : "Accu auto",
+        label: "Accu auto",
         text: Number.isFinite(procent) ? accuTekst(procent, Number(car.capacity_kwh)) : "—",
       });
     }
