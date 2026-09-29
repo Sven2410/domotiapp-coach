@@ -131,6 +131,25 @@ export function zeef(items, { soort = "alles", dag = "" } = {}) {
   });
 }
 
+/**
+ * Hoeveel dagen de geschiedenis laat zien (v0.101.5). De eigenaar op
+ * 29-09-2026: "ik wil dat de geschiedenis onder meldingen max 2 weken toont,
+ * anders teveel scrollen." Vandaag en de dertien dagen ervoor; de opslag houdt
+ * er meer, maar die staan hier niet.
+ */
+export const GESCHIEDENIS_DAGEN = 14;
+
+/** Alleen wat binnen `GESCHIEDENIS_DAGEN` valt, gerekend vanaf middernacht. */
+export function recent(items, nu = new Date(), aantal = GESCHIEDENIS_DAGEN) {
+  const grens = new Date(nu);
+  grens.setHours(0, 0, 0, 0);
+  grens.setDate(grens.getDate() - (aantal - 1));
+  return (items ?? []).filter((item) => {
+    const moment = new Date(item?.at ?? "");
+    return !Number.isNaN(moment.getTime()) && moment >= grens;
+  });
+}
+
 /** De dagen die in de lijst voorkomen, de nieuwste eerst, voor de dagkeuze. */
 export function dagen(items, nu = new Date()) {
   const uit = [];
@@ -471,7 +490,7 @@ class DacViewNotifications extends DacElement {
 
         <section class="blok">
           <h2>${icons.bell} Geschiedenis</h2>
-          <p class="hint">Alles wat de coach deed en meldde, de nieuwste bovenaan. Wat ook naar een telefoon ging staat in een kader; kritiek is wat je zelf moet oplossen.</p>
+          <p class="hint">Alles wat de coach deed en meldde in de afgelopen twee weken, de nieuwste bovenaan. Wat ook naar een telefoon ging staat in een kader; kritiek is wat je zelf moet oplossen.</p>
           <div class="filter" id="filter">
             ${SOORTEN.map(([id, label]) =>
               `<button type="button" data-soort="${id}"${id === "alles" ? ' class="aan"' : ""}>${label}</button>`).join("")}
@@ -917,7 +936,7 @@ class DacViewNotifications extends DacElement {
     const keuze = this.$("#dag");
     if (!keuze) return;
     const gekozen = this.filter_.dag;
-    const opties = dagen(this.items_);
+    const opties = dagen(recent(this.items_));
     if (gekozen && !opties.some((d) => d.sleutel === gekozen)) this.filter_ = { ...this.filter_, dag: "" };
     keuze.replaceChildren();
     const alle = document.createElement("option");
@@ -941,15 +960,15 @@ class DacViewNotifications extends DacElement {
     }
     this.dagen_();
     lijst.replaceChildren();
-    const groepen = groepeer(zeef(this.items_, this.filter_));
+    const groepen = groepeer(zeef(recent(this.items_), this.filter_));
     if (!groepen.length) {
       const leeg = document.createElement("div");
       leeg.className = "leeg";
       leeg.textContent = !this.geladen_
         ? "De meldingen worden opgehaald."
-        : this.items_.length
+        : recent(this.items_).length
           ? "Niets dat aan dit filter voldoet."
-          : "De coach heeft nog niets gemeld.";
+          : "De coach heeft de afgelopen twee weken niets gemeld.";
       lijst.append(leeg);
       return;
     }

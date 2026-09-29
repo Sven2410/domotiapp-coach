@@ -146,6 +146,11 @@ _CIRCUIT = _schema(
         vol.Optional("fuse_amps", default=16): vol.All(vol.Coerce(float), vol.Range(1, 1000)),
         vol.Optional("phases", default=3): vol.In([1, 3]),
         vol.Optional("parent", default=""): str,
+        # Een onderverdeelkast of een groep, en of hij een eigen kWh-meter heeft
+        # (v0.101.5). Alleen voor het scherm: de coach rekent met elke zekering
+        # op dezelfde manier, en met de sensoren als die er zijn.
+        vol.Optional("kind"): vol.In(["kast", "groep"]),
+        vol.Optional("meter"): bool,
         vol.Optional("sensors", default=dict): _schema(
             {vol.Optional(phase): _PHASE for phase in ("l1", "l2", "l3")}
         ),

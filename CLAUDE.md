@@ -177,7 +177,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 |---|---|
 | de laadpaal: de zonverwachting per voorspeller (Forecast.Solar telt op het eind van het uur), een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla | `docs/laadpaal.md` |
 | een Alfen, of iets aan de paalsturing | `docs/alfen.md` |
-| groepen met een eigen zekering (een onderverdeelkast) | `docs/groepen.md` |
+| onderverdeelkasten en groepen met een eigen zekering | `docs/groepen.md` |
 | de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, en hoe de coach prijslijsten leest | `docs/batterij.md` |
 | de vaatwasser: Home Connect, Home Connect Local, een domme vaatwasser, de eindtijd, na de klaar-tijd | `docs/vaatwasser.md` |
 | de boiler | `docs/boiler.md` |
@@ -228,7 +228,7 @@ dan de andere in dezelfde uitgave.
 | `frontend/src/` | het paneel, ES-modules zonder buildstap |
 | `frontend/src/schedule-sheet.js` | het schema van één apparaat, als pop-up achter zijn kaart |
 | `ontvangers.py` | wie welke melding krijgt: personen (een telefoon, een naam, eventueel een gebruiker van Home Assistant) met een schakelaar per soort: kritiek, melding, besluit, belasting. Kent Home Assistant niet |
-| `frontend/src/views/notifications.js` | Meldingen, twee in een sinds 06-09-2026: bovenaan de personen (de admin voegt toe, een bewoner ziet alleen zichzelf en zet zijn eigen schuiven via `notifications/mine`), de zekeringmelding "Zware belasting" (uit Strategie verhuisd), en daaronder alles wat de coach ooit stuurde én elk besluit dat hij nam (`_async_noteer_besluit`), uit `MeldingenStore` in storage.py |
+| `frontend/src/views/notifications.js` | Meldingen, twee in een sinds 06-09-2026: bovenaan de personen (de admin voegt toe, een bewoner ziet alleen zichzelf en zet zijn eigen schuiven via `notifications/mine`), de zekeringmelding "Zware belasting" (uit Strategie verhuisd), en daaronder alles wat de coach de afgelopen twee weken stuurde én elk besluit dat hij nam (`_async_noteer_besluit`, `recent` in notifications.js, sinds v0.101.5), uit `MeldingenStore` in storage.py |
 | `frontend/src/geld.js` | In geld in Historie en het rapport (v0.101.0): uitgegeven, bespaard in zon, thuisbatterij en coach, en salderen zoals de coach. Geen terugverdientijd en geen aankoopprijzen, sinds v0.101.1 (`docs/eerste-woning.md`) |
 | `frontend/src/savings.js` | Bespaard, onder Historie: de laadbeurten uit `BeurtenStore` (storage.py) opgeteld per periode en per apparaat. De coach telt per ronde wat een beurt kost (`_geld_bij`) en wat dezelfde tijd op vol vermogen vanaf het inpluggen met alles van het net gekost had (`_basis_bij`, de maat); bespaard is maat min betaald, nooit onder nul, in twee delen: door de zon (`zon_winst`) en door te wachten. Stapt hij midden in een beurt in, dan rekent `_async_terugrekenen` het begin terug uit de recorder en de kwartieropslag |
 

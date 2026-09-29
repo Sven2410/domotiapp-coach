@@ -598,18 +598,21 @@ class DacViewDevices extends DacEditorElement {
     // De groep waar het apparaat aan hangt, als er groepen zijn (Installatie).
     // De eerste woning, 22-09-2026: de paal en de batterij in de garage, op
     // een onderverdeelkast van 3x16 A onder een aansluiting van 3x25 A.
+    // Sinds v0.101.5 onderverdeelkasten en groepen; `kind` staat er van
+    // daarvoor nog niet bij, en dan heet het gewoon een groep.
     const groepen = (this.draft_?.installation?.circuits ?? []).filter((g) => g?.id);
+    const soort = (g) => (g.kind === "kast" ? "onderverdeelkast" : "groep");
     const groepHtml = groepen.length
       ? `
       <div class="row">
-        <label for="circuit-${index}">Hangt op groep</label>
+        <label for="circuit-${index}">Hangt aan</label>
         <select id="circuit-${index}" data-field="circuit" data-index="${index}">
-          <option value=""${device.circuit ? "" : " selected"}>Hoofdaansluiting</option>
+          <option value=""${device.circuit ? "" : " selected"}>Hoofdkast</option>
           ${groepen
-            .map((g) => `<option value="${g.id}"${device.circuit === g.id ? " selected" : ""}>${g.name || g.id}</option>`)
+            .map((g) => `<option value="${g.id}"${device.circuit === g.id ? " selected" : ""}>${g.name || g.id} (${soort(g)})</option>`)
             .join("")}
         </select>
-        <span class="sub">Voor de zekeringbewaking: de coach blijft onder de zekering van deze groep én onder de hoofdzekering.</span>
+        <span class="sub">Voor de zekeringbewaking: de coach blijft onder deze zekering én onder alles wat erboven hangt, tot de hoofdkast.</span>
       </div>`
       : "";
     // Hoe een laadpaal laadt als er geen planning aanstaat (v0.87.0). De

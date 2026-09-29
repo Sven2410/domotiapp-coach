@@ -1,4 +1,4 @@
-# Groepen met een eigen zekering
+# Onderverdeelkasten en groepen
 
 Uit `CLAUDE.md` gehaald op 24-09-2026, zodat dat bestand kort blijft. De eisen
 van de eigenaar en de werkafspraken staan daar en gaan boven alles hier.
@@ -70,3 +70,33 @@ dan zet dat `_daling` net als een paal die omlaag gaat: om 17:09 stond de Anker
 stil en L3 op 0 A, en de mediaan van 90 s droeg nog 14 A. De snelle
 zekeringcontrole leest de sensor zelf en blijft het vangnet voor de seconden
 waarin de batterij nog wijkt. Proef 96 in test_coach.py.
+
+**Onderverdeelkasten en groepen, elk met een vinkje voor de kWh-meter** (v0.101.5).
+De eigenaar op 29-09-2026: "Groepen met een eigen zekering moet even anders. Dat
+moet heten onderverdeelkast. Bij mij thuis heb ik een hoofdkast 3x25A en dan een
+onderverdeelkast in de lounge. Bij de eerste woning is dat hetzelfde, alleen is de
+lounge een garage." Met een vinkje "deze onderverdeelkast heeft een eigen
+kWh-meter", en pas dan L1, L2 en L3; daaronder een eigen kopje Groepen met "hangt
+onder" en hetzelfde vinkje.
+
+Op Installatie staan nu twee blokken, Onderverdeelkasten (`#kasten`) en Groepen
+(`#circuits`), uit dezelfde lijst `installation.circuits`. Elke rij heeft er twee
+velden bij: `kind` ("kast" of "groep") en `meter` (true of false), in `_CIRCUIT` in
+websocket.py. De coach rekent met elke zekering zoals hij deed; `kind` geeft alleen
+het woord in een zin ("De onderverdeelkast Lounge is te zwaar belast", `soort` op
+`Circuit` en `_soort` in planner.py, de sensorwacht in `_sensoren`). Zonder
+eigen kWh-meter gaan er geen sensoren mee bij het opslaan (`payload_` in
+views/installation.js); in het klad blijven ze staan, zodat het vinkje per ongeluk
+uit en weer aan niets kost. Een kast hangt onder de hoofdkast, of onder een andere
+kast als die er is; een groep onder de hoofdkast, een kast of een groep. Bij
+Apparaten heet de keuze nu "Hangt aan", met de hoofdkast en elke kast en groep met
+zijn soort erbij.
+
+Van voor v0.101.5 staat er geen soort bij, en `kastenIndelen` deelt in: een kast
+is wat onder de hoofdkast hangt en zelf iets draagt of een meter heeft. Bij de
+eigenaar wordt de lounge (20 A, zonder meter) een kast en laadpaal (20 A, 3 fasen)
+en thuisbatterij (16 A, 1 fase) groepen eronder; in de eerste woning wordt de
+garage met zijn meter een kast. Dat gebeurt in het klad én in de opgeslagen kopie,
+zodat het scherm niet meteen op "niet opgeslagen" staat. Proeven in
+test_rapport.mjs (het scherm, het indelen, het opslaan, Apparaten) en proef 117
+in test_coach.py (de zinnen).
