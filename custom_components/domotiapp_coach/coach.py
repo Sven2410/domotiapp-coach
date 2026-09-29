@@ -65,6 +65,7 @@ from .batterij import (
     zon_in_accu,
 )
 from .planner import (
+    _dag_om,
     DAGNAMEN,
     MODI_ZONDER_SOM,
     accu_in_plan,
@@ -2105,7 +2106,8 @@ class ChargerCoach:
             | {
                 entity
                 for device in programma_apparaten
-                for sleutel in ("release_switch", "release_now_switch", "status", "start", "remote_start")
+                for sleutel in ("release_switch", "release_now_switch", "release_button", "door",
+                                "status", "start", "remote_start")
                 if (entity := (
                     self._vrijgave_entiteit(device, sleutel)
                     if sleutel in ("release_switch", "release_now_switch")
@@ -2282,16 +2284,25 @@ class ChargerCoach:
         )
 
         released = device_id in (settings.get("ready_devices") or [])
+        # Zonder vrijgave (v0.102.0) is klep dicht vrijgegeven; dat volgt
+        # hieronder, als de status bekend is. Knop en schakelaars tellen dan niet.
+        zonder_vrijgave = device.get("release_required") is False
+        # Een fysieke knop of een knop-helper (v0.102.0): één druk is "ingeruimd
+        # en dicht", nog een keer drukken doet niets.
+        if not zonder_vrijgave:
+            released = await self._async_knop_volgen(settings, device, sessie, released)
         # Een vrijgaveschakelaar naast de knop op de kaart. De eigenaar op 06-09-2026:
         # een eigen kaart in de keuken met een knop "sturing" die een
         # schakelaar aanzet, "en dan wil ik dat Ingeruimd en dicht aangaat."
         # De twee volgen elkaar: beweegt de schakelaar, dan volgt de vrijgave;
         # beweegt de knop op de kaart, dan volgt de schakelaar; en na een
         # beurt gaan ze allebei uit.
-        released = await self._async_schakelaar_volgen(settings, device, sessie, released)
-        # En "ingeruimd en nu starten", op de kaart of met een eigen schakelaar
-        # (de eigenaar, 13-09-2026).
-        released, nu_starten = await self._async_nu_volgen(settings, device, sessie, released)
+        nu_starten = False
+        if not zonder_vrijgave:
+            released = await self._async_schakelaar_volgen(settings, device, sessie, released)
+            # En "ingeruimd en nu starten", op de kaart of met een eigen schakelaar
+            # (de eigenaar, 13-09-2026).
+            released, nu_starten = await self._async_nu_volgen(settings, device, sessie, released)
         # Wat erop staat: de sensor, en als die het niet zegt de select-entiteit
         # waarmee het gezet wordt. Home Connect Local (thuis sinds 23-09-2026)
         # heeft een sensor die alleen tijdens de beurt iets zegt (het actieve
@@ -2320,6 +2331,10 @@ class ChargerCoach:
             # `programma_van` voor dezelfde afspraak bij het programma.
             status = status.split(".")[-1]
 
+        klep = ""
+        if zonder_vrijgave:
+            released, klep = await self._async_klep_volgen(settings, device, sessie, released, deur_open, status)
+
         if released and sessie["vrijgegeven"] is None:
             sessie["vrijgegeven"] = now
             sessie["programma"] = programma
@@ -2340,7 +2355,7 @@ class ChargerCoach:
         window = resolve_window(now, self._days(settings, device))
         apparaat = Apparaat(
             status=status, released=released, program=programma, door_open=deur_open,
-            manual=handmatig, start_now=nu_starten,
+            manual=handmatig, start_now=nu_starten, door_release=klep,
         )
         decision = plan_programma(
             now, self._prices(settings), self._tariff(settings),
@@ -2354,6 +2369,8 @@ class ChargerCoach:
             # ten minste zag en niet één opklaring (11-09-2026, METER_VENSTER).
             surplus_w=self._meter_zeker(now),
         )
+        if sessie.pop("knop_melden", False):
+            await self._async_tell(self._knop_zin(naam, decision, now, handmatig))
 
         draait = status in DRAAIT
         if not draait and sessie["gestart"] is None and eerste:
@@ -2616,6 +2633,14 @@ class ChargerCoach:
             # Sinds wanneer de coach wil drukken maar de startknop er niet is
             # (Home Connect Local met de deur open), of starten op afstand uit staat.
             "knop_weg": None,
+            # De vrijgaveknop zoals hij de vorige ronde stond (het tijdstip van
+            # de laatste druk), en of er na het besluit een melding moet komen.
+            "knop": None,
+            "knop_melden": False,
+            # Zonder vrijgave: na een beurt eerst uitruimen (de klep open en weer
+            # dicht) voordat klep dicht weer vrijgegeven is; zie `_async_klep_volgen`.
+            "klep_uitruimen": False,
+            "klep_open_gezien": False,
         }
 
     @staticmethod
@@ -2897,7 +2922,10 @@ class ChargerCoach:
         await self._async_vrijgave_zetten(settings, device.get("id", ""), False)
         await self._async_schakelen(device, False)
         await self._async_schakelen(device, False, "release_now_switch")
-        self._programma[device.get("id", "")] = {**self._lege_programma_sessie(now), "gezien": True}
+        self._programma[device.get("id", "")] = {
+            **self._lege_programma_sessie(now), "gezien": True, "knop": sessie.get("knop"),
+            "klep_uitruimen": device.get("release_required") is False,
+        }
 
     def _programma_regel(
         self,
@@ -3321,6 +3349,105 @@ class ChargerCoach:
                 device.get("name") or device.get("id"), entity_id,
             )
         return ""
+
+    async def _async_knop_volgen(
+        self, settings: dict[str, Any], device: dict[str, Any], sessie: dict[str, Any], released: bool
+    ) -> bool:
+        """Een druk op de vrijgaveknop geeft hem vrij; geeft de vrijgave van nu (v0.102.0).
+
+        De eigenaar op 29-09-2026: "een fysieke zigbee knop waar men op kan
+        drukken die een event detecteert." Een knop heeft geen stand, dus een
+        druk is altijd vrijgeven en nooit wisselen; nog een keer drukken doet
+        niets (zijn keuze). Wat telt als druk: een event-entiteit (Zigbee, Hue,
+        Shelly) of een knop-helper krijgt het tijdstip van de druk als
+        toestand, een actiesensor (Zigbee2MQTT) de soort ("single") en daarna
+        weer leeg. `release_press` kiest de soort; leeg is elke druk. Bij de
+        eerste ronde (of na een herstart) is een oude druk geen nieuwe.
+        """
+        entity_id = str((device.get("entities") or {}).get("release_button") or "")
+        if not entity_id:
+            return released
+        toestand = self.hass.states.get(entity_id)
+        if toestand is None or toestand.state == "unavailable":
+            return released
+        stand = str(toestand.state)
+        vorige = sessie.get("knop")
+        sessie["knop"] = stand
+        if vorige is None or stand == vorige or stand in ("unknown", ""):
+            return released
+        domein = entity_id.split(".")[0]
+        soort = (toestand.attributes or {}).get("event_type") if domein == "event" else (
+            stand if domein == "sensor" else None
+        )
+        gewenst = str(device.get("release_press") or "")
+        if gewenst and str(soort or "") != gewenst:
+            return released
+        if released:
+            return released
+        await self._async_vrijgave_zetten(settings, device.get("id", ""), True)
+        # Een knop laat zelf niets zien: één melding na het besluit van deze
+        # ronde, met wanneer hij start (de eigenaar koos dat op 29-09-2026).
+        sessie["knop_melden"] = True
+        return True
+
+    @staticmethod
+    def _knop_zin(naam: str, decision: Decision, now: datetime, handmatig: bool) -> str:
+        """De melding na een druk op de vrijgaveknop: vrijgegeven, en wanneer hij start."""
+        if decision.charge:
+            return f"{naam} is vrijgegeven. " + ("Zet hem nu aan." if handmatig else "Hij start nu.")
+        if decision.rule == "wait-for-start" and decision.starts_at:
+            try:
+                moment = datetime.fromisoformat(str(decision.starts_at)).replace(tzinfo=None)
+            except ValueError:
+                moment = None
+            if moment is not None:
+                wanneer = _dag_om(moment, now)
+                return f"{naam} is vrijgegeven. " + (
+                    f"Zet hem aan {wanneer}." if handmatig else f"Hij start {wanneer}."
+                )
+        return f"{naam} is vrijgegeven. {decision.reason}".strip()
+
+    async def _async_klep_volgen(
+        self,
+        settings: dict[str, Any],
+        device: dict[str, Any],
+        sessie: dict[str, Any],
+        released: bool,
+        deur_open: bool | None,
+        status: str,
+    ) -> tuple[bool, str]:
+        """Zonder vrijgave: klep dicht is vrijgegeven (v0.102.0); geeft (vrijgave, waarom niet).
+
+        De eigenaar op 29-09-2026: "als die optie uit staat dan is het klep dicht
+        van de vaatwasser en dan is die al vrijgegeven." Niet vrij zolang de
+        klep open is, zolang starten op afstand uit staat (dan zegt de machine
+        zelf nee; Bosch en Siemens zetten dat uit zodra de deur opengaat), en
+        na een beurt tot de klep open en weer dicht is geweest: anders start
+        hij meteen weer met de schone vaat erin. Ook niet als de machine zegt
+        dat hij klaar is, want dat is na een herstart het enige teken daarvan.
+        Een lege machine die na het uitruimen dichtgaat herkent de coach niet;
+        dat staat bij het vinkje in Apparaten. Tijdens een beurt blijft alles staan.
+        """
+        if sessie.get("gestart") is not None:
+            return released, ""
+        afstand = _text(self.hass, (device.get("entities") or {}).get("remote_start")).strip().lower()
+        if deur_open:
+            sessie["klep_open_gezien"] = True
+        if deur_open is None:
+            klep = "unknown"
+        elif deur_open:
+            klep = "open"
+        elif (sessie.get("klep_uitruimen") and not sessie.get("klep_open_gezien")) or status in KLAAR:
+            klep = "unload"
+        elif afstand == "off":
+            klep = "remote"
+        else:
+            klep = ""
+        wil = klep == ""
+        if wil != released:
+            await self._async_vrijgave_zetten(settings, device.get("id", ""), wil)
+            released = wil
+        return released, klep
 
     async def _async_schakelen(self, device: dict[str, Any], aan: bool, sleutel: str = "release_switch") -> None:
         """De vrijgaveschakelaar (of die van nu starten) aan of uit zetten, als er een is en hij anders staat."""

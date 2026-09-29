@@ -247,6 +247,13 @@ _DEVICE = _schema(
         # zegt (merk "overig", op een meetstekker). De bewoner kiest het op de
         # kaart; de coach kiest nooit zelf een programma.
         vol.Optional("program", default=""): vol.Match(r"^[a-z0-9_]*$"),
+        # Of een vaatwasser eerst vrijgegeven moet worden (v0.102.0). Uit: klep
+        # dicht is vrijgegeven en de coach start hem zelf. Zonder waarde aan,
+        # zoals het tot v0.102.0 altijd was.
+        vol.Optional("release_required", default=True): bool,
+        # Welke soort druk op de vrijgaveknop telt ("single", "double", ...);
+        # leeg is elke druk.
+        vol.Optional("release_press", default=""): vol.All(str, vol.Length(max=64)),
         # Wat de bewoner over zijn thuisbatterij invult. Alles mag leeg: wat
         # een sensor zegt gaat voor, en wat niemand zegt weet de coach niet.
         vol.Optional("battery", default=dict): _BATTERY,

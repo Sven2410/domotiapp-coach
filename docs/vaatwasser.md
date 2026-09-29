@@ -88,7 +88,47 @@ met rust (`_vrijgave_entiteit` in coach.py, één waarschuwing in het log), en
 Apparaten zegt het op de ingeklapte regel (`releaseOnOwnPlug` in devices.js,
 uit `hass.entities`). De sensor "<apparaat> start" noemt in `release_switch`
 nog wel wat er is ingevuld. Proef 120 in test_coach.py en een proef in
-test_rapport.mjs. **De schakelaar en de status van een
+test_rapport.mjs.
+
+**Een vrijgaveknop** (v0.102.0, `release_button`, bij allebei de merken). De
+eigenaar op 29-09-2026: "een fysieke zigbee knop waar men op kan drukken die
+een event detecteert op input press." Wat telt als druk
+(`_async_knop_volgen` in coach.py): een event-entiteit (Zigbee via ZHA of
+Zigbee2MQTT, Hue, Shelly) of een knop-helper (`input_button`, `button`) krijgt
+het tijdstip van de druk als toestand; een actiesensor (Zigbee2MQTT oud) de
+soort ("single") en daarna weer leeg. Zijn keuzes: een druk is altijd
+vrijgeven en nooit wisselen, want een knop heeft geen lampje; nog een keer
+drukken doet niets. De soort druk is te kiezen (`release_press`, uit
+`event_types` of `options` van de knop zelf, keuzelijst "Welke druk" in
+Apparaten; leeg is elke druk). Na een druk die iets veranderde één melding
+naar de telefoon, na het besluit van die ronde: "Vaatwasser is vrijgegeven.
+Hij start om 01:00." (of "Zet hem aan om 11:00." bij een domme). Een oude druk
+na een herstart of na een knop die even wegviel telt niet. Een knop die Home
+Assistant niet als entiteit kent kan via een eigen automatisering een
+`input_button` indrukken. "Ingeruimd en nu starten" gaat niet met de knop
+(zijn keuze). Proef 121 in test_coach.py.
+
+**Moet eerst vrijgegeven worden** (v0.102.0, `release_required`, standaard
+aan). De eigenaar op 29-09-2026: "bij het toevoegen van een vaatwasser: moet
+eerst vrijgegeven worden. Als je die aanzet verschijnt er een invulveld voor
+je helper of knop, en de kaart toont Ingeruimd en dicht. Staat het vinkje uit,
+dan mag de vaatwasser gewoon draaien met de coach als de klep dicht zit, en
+dan heb je ook geen knop vrijgeven op de kaart." Alleen bij een merk dat de
+klep ziet en zelf kan starten (`canSkipRelease` in devices.js: een deurstand
+en een startknop, dus Home Connect); een domme vaatwasser vraagt altijd.
+Zonder vrijgave verdwijnen de vrijgavevelden (`brandFields`), de kaart vraagt
+nergens om (`needsRelease`), en is de deurstand nodig (`missingForControl`).
+De coach (`_async_klep_volgen`): klep dicht is vrij, klep open niet, en ook
+niet zolang starten op afstand uit staat (dan zegt de machine zelf nee; Bosch
+en Siemens zetten het uit zodra de deur opengaat), na een beurt tot de klep
+open en weer dicht is geweest (anders start hij meteen weer met de schone vaat
+erin), en als de machine zelf "klaar" zegt (na een herstart het enige teken).
+Een lege machine die na het uitruimen dichtgaat herkent hij niet; dat staat
+bij het vinkje. Tijdens een beurt blijft alles staan. De reden op de kaart
+zegt waar hij op wacht (`door_release` in `Apparaat`, planner.py). Proef 122
+in test_coach.py, een proef in test_rapport.mjs, scenario
+`vaatwasser-klep-dicht` in het virtuele huis (de deur gaat daar na een beurt
+van "finished" naar "ready" zodra hij opengaat, zoals bij Home Connect). **De schakelaar en de status van een
 programma-apparaat wekken de coach meteen** (v0.56.1, `_watch`): de eigenaar zette
 de schakelaar aan en binnen vijf seconden weer uit omdat er niets gebeurde,
 terwijl de coach pas bij de volgende minuut keek.
