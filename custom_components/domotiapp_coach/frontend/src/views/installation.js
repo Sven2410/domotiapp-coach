@@ -25,6 +25,28 @@ const VOLTAGE = 230;
 const euro = (v) =>
   Number(v ?? 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/**
+ * Elke kast en groep krijgt zijn soort en of hij een eigen kWh-meter heeft (v0.101.5).
+ *
+ * Van voor v0.101.5 staat er geen soort bij. Een kast is dan wat onder de
+ * hoofdkast hangt en zelf groepen draagt of een meter heeft: bij de eigenaar de
+ * lounge met de laadpaal en de batterij eronder, in de eerste woning de garage
+ * met zijn meter. Een meter heeft wie sensoren heeft.
+ */
+export function kastenIndelen(circuits) {
+  if (!Array.isArray(circuits)) return circuits;
+  for (const g of circuits) {
+    if (!g || typeof g !== "object") continue;
+    const heeftSensor = Object.values(g.sensors ?? {}).some((fase) => Object.values(fase ?? {}).some(Boolean));
+    if (typeof g.meter !== "boolean") g.meter = heeftSensor;
+    if (g.kind !== "kast" && g.kind !== "groep") {
+      const draagt = circuits.some((o) => o !== g && o?.parent === g.id);
+      g.kind = !g.parent && (draagt || heeftSensor) ? "kast" : "groep";
+    }
+  }
+  return circuits;
+}
+
 class DacViewInstallation extends DacEditorElement {
   static sections = ["installation", "contract"];
 
@@ -108,14 +130,34 @@ class DacViewInstallation extends DacEditorElement {
           </div>
         </section>
 
+        <!-- Onderverdeelkasten en groepen (v0.101.5). De eigenaar op 29-09-2026:
+             "Dat moet heten onderverdeelkast. Bij mij thuis heb ik een hoofdkast
+             3x25A en dan een onderverdeelkast in de lounge", en de sensoren per
+             fase pas als de kast of groep een eigen kWh-meter heeft. -->
         <section class="card">
-          <h2>${icons.plug} Groepen met een eigen zekering</h2>
+          <h2>${icons.plug} Onderverdeelkasten</h2>
           <p class="hint">
-            Heb je een onderverdeelkast, bijvoorbeeld in de garage, met een eigen zekering en
-            een eigen meter? Zet hem hier neer en kies bij Apparaten welke apparaten eraan
-            hangen. De coach blijft dan onder de zekering van die groep én onder de
-            hoofdzekering. Een groep zonder meter telt alleen wat de coach er zelf naartoe
-            stuurt.
+            Heb je naast je hoofdkast een onderverdeelkast, bijvoorbeeld in de garage, met een
+            eigen zekering? Zet hem hier neer. De coach blijft dan onder de zekering van die
+            kast én onder die van je hoofdkast. Heeft de kast een eigen kWh-meter, dan weet de
+            coach ook wat er de rest van de kast gebruikt wordt; zonder meter telt hij alleen
+            wat hij er zelf naartoe stuurt.
+          </p>
+          <div class="fields">
+            <div id="kasten"></div>
+            <div class="circuit-actions">
+              <button type="button" id="kast-add">Onderverdeelkast toevoegen</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>${icons.plug} Groepen</h2>
+          <p class="hint">
+            Een groep met een eigen zekering, in je hoofdkast of in een onderverdeelkast,
+            bijvoorbeeld een laadpaal op een eigen B20. Kies bij Apparaten welke apparaten
+            eraan hangen. Een groep zonder eigen kWh-meter telt alleen wat de coach er zelf
+            naartoe stuurt.
           </p>
           <div class="fields">
             <div id="circuits"></div>
@@ -386,19 +428,22 @@ class DacViewInstallation extends DacEditorElement {
       this.afterChange_();
     });
 
-    this.$("#circuit-add").addEventListener("click", () => {
-      const groepen = this.circuits_();
-      groepen.push({
+    const nieuw = (kind) => () => {
+      this.circuits_().push({
         id: `g-${Date.now().toString(36)}`,
+        kind,
         name: "",
-        fuse_amps: 16,
+        fuse_amps: kind === "kast" ? 25 : 16,
         phases: 3,
-        parent: "",
+        parent: kind === "groep" ? (this.circuits_().find((g) => g.kind === "kast")?.id ?? "") : "",
+        meter: false,
         sensors: { l1: {}, l2: {}, l3: {} },
       });
       this.paintCircuits_();
       this.afterChange_();
-    });
+    };
+    this.$("#kast-add").addEventListener("click", nieuw("kast"));
+    this.$("#circuit-add").addEventListener("click", nieuw("groep"));
 
     this.$("#netting").addEventListener("change", (ev) => {
       this.draft_.contract.netting = ev.target.checked;
@@ -600,28 +645,56 @@ class DacViewInstallation extends DacEditorElement {
     }
   }
 
-  /** De groepen in het klad, altijd als lijst. */
+  /**
+   * De onderverdeelkasten en groepen in het klad, altijd als lijst, en elk met
+   * zijn soort en of hij een eigen kWh-meter heeft (v0.101.5).
+   *
+   * Van voor v0.101.5 staat er geen soort bij. Een kast is dan wat onder de
+   * hoofdkast hangt en zelf groepen draagt of een meter heeft: bij de eigenaar de
+   * lounge met de laadpaal en de batterij eronder, in de eerste woning de garage
+   * met zijn meter. En een meter heeft wie sensoren heeft.
+   */
   circuits_() {
     const inst = this.draft_.installation;
     if (!Array.isArray(inst.circuits)) inst.circuits = [];
-    return inst.circuits;
+    // Ook in wat er opgeslagen staat, anders staat het scherm meteen op "niet
+    // opgeslagen" terwijl er niets veranderd is.
+    kastenIndelen(this.saved_?.installation?.circuits);
+    return kastenIndelen(inst.circuits);
   }
 
   /**
-   * Eén groep als blok: naam, zekering, fasen, de groep erboven, en per fase de
-   * sensoren. Zelfde velden als de fasen van de hoofdaansluiting bij Instellingen.
+   * Eén onderverdeelkast of groep als blok: naam, zekering, fasen, waar hij onder
+   * hangt, of hij een eigen kWh-meter heeft, en alleen dan per fase de sensoren.
+   * Zelfde velden als de fasen van de hoofdaansluiting bij Instellingen.
    */
   circuitHtml_(g, index, groepen) {
     const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     const fasen = Number(g.phases) === 1 ? ["l1"] : ["l1", "l2", "l3"];
-    const anderen = groepen.filter((o) => o !== g && o.id !== g.id);
+    const kast = g.kind === "kast";
+    const wat = kast ? "onderverdeelkast" : "groep";
+    // Een kast hangt onder de hoofdkast of een andere kast, een groep ook onder een groep.
+    const anderen = groepen.filter((o) => o !== g && o.id !== g.id && (!kast || o.kind === "kast"));
+    const soortVan = (o) => (o.kind === "kast" ? "" : " (groep)");
+    const onder = kast && !anderen.length
+      ? ""
+      : `
+          <div class="row">
+            <label for="circuit-parent-${index}">Hangt onder</label>
+            <select id="circuit-parent-${index}" data-circuit-field="parent" data-index="${index}">
+              <option value=""${g.parent ? "" : " selected"}>Hoofdkast</option>
+              ${anderen
+                .map((o) => `<option value="${esc(o.id)}"${g.parent === o.id ? " selected" : ""}>${esc(o.name || (o.kind === "kast" ? "Nieuwe onderverdeelkast" : "Nieuwe groep"))}${o.name ? soortVan(o) : ""}</option>`)
+                .join("")}
+            </select>
+          </div>`;
     return `
       <div class="circuit" data-circuit="${index}">
         <div class="two">
           <div class="row">
             <label for="circuit-name-${index}">Naam</label>
             <input type="text" id="circuit-name-${index}" data-circuit-field="name" data-index="${index}"
-                   value="${esc(g.name)}" placeholder="Bijvoorbeeld: Garage" autocomplete="off">
+                   value="${esc(g.name)}" placeholder="${kast ? "Bijvoorbeeld: Garage" : "Bijvoorbeeld: Laadpaal"}" autocomplete="off">
           </div>
           <div class="row">
             <label for="circuit-fuse-${index}">Zekering per fase (A)</label>
@@ -637,17 +710,13 @@ class DacViewInstallation extends DacEditorElement {
               <option value="3"${Number(g.phases) !== 1 ? " selected" : ""}>3 fasen</option>
             </select>
           </div>
-          <div class="row">
-            <label for="circuit-parent-${index}">Hangt onder</label>
-            <select id="circuit-parent-${index}" data-circuit-field="parent" data-index="${index}">
-              <option value=""${g.parent ? "" : " selected"}>Hoofdaansluiting</option>
-              ${anderen
-                .map((o) => `<option value="${esc(o.id)}"${g.parent === o.id ? " selected" : ""}>${esc(o.name || o.id)}</option>`)
-                .join("")}
-            </select>
-          </div>
+          ${onder}
         </div>
-        ${fasen
+        <label class="check">
+          <input type="checkbox" data-circuit-meter="${index}"${g.meter ? " checked" : ""}>
+          <span><strong>Deze ${wat} heeft een eigen kWh-meter</strong> Dan vul je hieronder per fase de sensoren in.</span>
+        </label>
+        ${(g.meter ? fasen : [])
           .map(
             (phase) => `
         <div class="phase-block">
@@ -668,17 +737,42 @@ class DacViewInstallation extends DacEditorElement {
           )
           .join("")}
         <div class="circuit-actions">
-          <button type="button" class="remove" data-circuit-remove="${index}">Groep verwijderen</button>
+          <button type="button" class="remove" data-circuit-remove="${index}">${kast ? "Onderverdeelkast" : "Groep"} verwijderen</button>
         </div>
       </div>`;
   }
 
+  /**
+   * Wat er opgeslagen wordt: zonder eigen kWh-meter geen sensoren, zodat de
+   * coach er niet op rekent (v0.101.5). In het klad blijven ze staan, zodat het
+   * vinkje per ongeluk uit en weer aan niets kost.
+   */
+  payload_(sections) {
+    const uit = super.payload_(sections);
+    const inst = uit?.installation;
+    if (!inst || !Array.isArray(inst.circuits)) return uit;
+    return {
+      ...uit,
+      installation: {
+        ...inst,
+        circuits: inst.circuits.map((g) => (g?.meter === false ? { ...g, sensors: {} } : g)),
+      },
+    };
+  }
+
   paintCircuits_() {
     const host = this.$("#circuits");
-    if (!host) return;
+    const kastHost = this.$("#kasten");
+    if (!host || !kastHost) return;
     const groepen = this.circuits_();
-    host.innerHTML = groepen.map((g, i) => this.circuitHtml_(g, i, groepen)).join("");
+    const blok = (soort) => groepen.map((g, i) => (g.kind === soort ? this.circuitHtml_(g, i, groepen) : "")).join("");
+    kastHost.innerHTML = blok("kast");
+    host.innerHTML = blok("groep");
+    this.wireCircuits_(kastHost, groepen);
+    this.wireCircuits_(host, groepen);
+  }
 
+  wireCircuits_(host, groepen) {
     for (const el of host.querySelectorAll("[data-circuit-field]")) {
       const g = groepen[Number(el.dataset.index)];
       const field = el.dataset.circuitField;
@@ -688,6 +782,13 @@ class DacViewInstallation extends DacEditorElement {
         // Een ander aantal fasen is een ander aantal sensorrijen, en een
         // andere naam hoort meteen in de keuzelijst van de andere groepen.
         if (field === "phases" || field === "parent") this.paintCircuits_();
+        this.afterChange_();
+      });
+    }
+    for (const vink of host.querySelectorAll("[data-circuit-meter]")) {
+      vink.addEventListener("change", () => {
+        groepen[Number(vink.dataset.circuitMeter)].meter = vink.checked;
+        this.paintCircuits_();
         this.afterChange_();
       });
     }
@@ -712,7 +813,7 @@ class DacViewInstallation extends DacEditorElement {
       knop.addEventListener("click", () => {
         const weg = groepen[Number(knop.dataset.circuitRemove)];
         groepen.splice(groepen.indexOf(weg), 1);
-        // Wie onder de verwijderde groep hing, hangt weer aan de hoofdaansluiting.
+        // Wie onder de verwijderde kast of groep hing, hangt weer aan de hoofdkast.
         for (const o of groepen) if (o.parent === weg.id) o.parent = "";
         this.paintCircuits_();
         this.afterChange_();

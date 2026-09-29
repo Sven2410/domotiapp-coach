@@ -1499,7 +1499,8 @@ class ChargerCoach:
             for fase, velden in (groep.get("sensors") or {}).items():
                 if isinstance(velden, dict) and velden.get("current"):
                     uit[velden["current"]] = (
-                        f"de stroommeting van fase {str(fase).upper()} van de groep "
+                        f"de stroommeting van fase {str(fase).upper()} van de "
+                        f"{'onderverdeelkast' if groep.get('kind') == 'kast' else 'groep'} "
                         f"{groep.get('name') or groep.get('id')}"
                     )
         if installation.get("load_balancer") and installation.get("balancer_entity"):
@@ -6244,6 +6245,7 @@ class ChargerCoach:
                     stromen.append(max(0.0, amps - wijkt.get((str(groep.get("id")), key), 0.0)))
             circuits.append(Circuit(
                 name=str(groep.get("name") or groep.get("id") or ""),
+                soort="onderverdeelkast" if groep.get("kind") == "kast" else "groep",
                 phase_amps=stromen,
                 fuse_amps=float(groep.get("fuse_amps") or 16),
                 reserved_amps=float(reserved.get(str(groep.get("id")), 0.0)),

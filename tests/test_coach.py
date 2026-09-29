@@ -6389,6 +6389,30 @@ controle("na 1 januari 2027 ook niets",
          scheelt116(VAST116, dt.datetime(2027, 1, 2, 12, tzinfo=dt.timezone.utc)) is None, "")
 controle("zonder terugleverkosten niets", scheelt116({**VAST116, "fixed": {**VAST116["fixed"], "feed_in_costs": 0}}) is None, "")
 
+print("=== 117. een onderverdeelkast heet in een zin een onderverdeelkast (v0.101.5) ===")
+# De eigenaar op 29-09-2026: "Groepen met een eigen zekering moet even anders. Dat moet
+# heten onderverdeelkast." Een groep blijft een groep.
+P = laad("planner")
+g117 = P.Grid(phase_amps=[3.0, 3.0, 3.0], fuse_amps=25.0, circuits=[
+    P.Circuit(name="Lounge", phase_amps=[19.0, 2.0, 2.0], fuse_amps=20.0, soort="onderverdeelkast")])
+controle("de zekering van de onderverdeelkast Lounge",
+         P.zekering_van("Lounge", g117) == "de zekering van de onderverdeelkast Lounge", P.zekering_van("Lounge", g117))
+controle("een groep blijft een groep, ook zonder dat de soort erbij staat",
+         P.zekering_van("Garage") == "de zekering van de groep Garage", P.zekering_van("Garage"))
+hass117, _, coach117 = bouw(huis(), instellingen())
+inst117 = instellingen()
+inst117["installation"]["circuits"] = [
+    {"id": "lounge", "kind": "kast", "name": "Lounge", "fuse_amps": 20, "phases": 3, "parent": "",
+     "meter": True, "sensors": {"l1": {"current": "sensor.lounge_l1"}}},
+    {"id": "paal", "kind": "groep", "name": "Laadpaal", "fuse_amps": 20, "phases": 3, "parent": "lounge",
+     "meter": True, "sensors": {"l1": {"current": "sensor.paal_l1"}}},
+]
+namen117 = coach117._sensoren(inst117)
+controle("de sensorwacht noemt de kast een onderverdeelkast en de groep een groep",
+         namen117.get("sensor.lounge_l1") == "de stroommeting van fase L1 van de onderverdeelkast Lounge"
+         and namen117.get("sensor.paal_l1") == "de stroommeting van fase L1 van de groep Laadpaal",
+         f"{namen117.get('sensor.lounge_l1')} | {namen117.get('sensor.paal_l1')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

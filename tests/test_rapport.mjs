@@ -241,22 +241,59 @@ proef("het installatiescherm heeft een veld voor wat de lastbewaker vrijgeeft", 
   );
 });
 
-proef("het installatiescherm heeft een plek voor groepen met een eigen zekering", () => {
+// De eigenaar op 29-09-2026: "Groepen met een eigen zekering moet even anders. Dat moet
+// heten onderverdeelkast", met "een optie aanvinken: deze onderverdeelkast heeft een
+// eigen kWh-meter, en dan pas de opties om L1/2/3 in te vullen", en daaronder een
+// kopje Groepen met "hangt onder" en hetzelfde vinkje (v0.101.5).
+proef("het installatiescherm heeft onderverdeelkasten en groepen, elk met een eigen knop", () => {
   const html = Object.create(Installatie.prototype).render();
-  assert.ok(html.includes('id="circuits"'), "de lijst van groepen");
-  assert.ok(html.includes('id="circuit-add"'), "en een knop om er een toe te voegen");
+  assert.ok(html.includes("Onderverdeelkasten") && html.includes('id="kasten"') && html.includes('id="kast-add"'));
+  assert.ok(html.includes('id="circuits"') && html.includes('id="circuit-add"'), "en de groepen");
+  assert.ok(!html.includes("Groepen met een eigen zekering"), "het oude kopje is weg");
 });
 
-proef("een groep wordt een blok met naam, zekering, fasen, de groep erboven en sensoren", () => {
+proef("een kast en een groep: de sensoren per fase pas met een eigen kWh-meter", () => {
   const el = Object.create(Installatie.prototype);
-  const garage = { id: "garage", name: "Garage", fuse_amps: 16, phases: 3, parent: "", sensors: {} };
-  const carport = { id: "carport", name: "Carport", fuse_amps: 16, phases: 1, parent: "garage", sensors: {} };
-  const html = el.circuitHtml_(carport, 1, [garage, carport]);
-  assert.ok(html.includes('value="Carport"'));
-  assert.ok(html.includes('<option value="garage" selected>Garage</option>'), "hangt onder de garage");
-  assert.ok(!html.includes('value="carport"'), "een groep hangt niet onder zichzelf");
-  assert.equal((html.match(/data-kind="current"/g) ?? []).length, 1, "één fase, dus één stroomsensor");
-  assert.equal((el.circuitHtml_(garage, 0, [garage, carport]).match(/data-kind="current"/g) ?? []).length, 3);
+  const kast = { id: "lounge", kind: "kast", name: "Lounge", fuse_amps: 20, phases: 3, parent: "", meter: false, sensors: {} };
+  const paal = { id: "paal", kind: "groep", name: "Laadpaal", fuse_amps: 20, phases: 3, parent: "lounge", meter: false, sensors: {} };
+  const accu = { id: "accu", kind: "groep", name: "Thuisbatterij", fuse_amps: 16, phases: 1, parent: "lounge", meter: true, sensors: {} };
+  const alle = [kast, paal, accu];
+  const kastHtml = el.circuitHtml_(kast, 0, alle);
+  assert.ok(kastHtml.includes("Deze onderverdeelkast heeft een eigen kWh-meter"));
+  assert.equal((kastHtml.match(/data-kind="current"/g) ?? []).length, 0, "zonder meter geen sensoren");
+  assert.ok(!kastHtml.includes("Hangt onder"), "één kast hangt altijd onder de hoofdkast");
+  assert.ok(kastHtml.includes("Onderverdeelkast verwijderen"));
+  const paalHtml = el.circuitHtml_(paal, 1, alle);
+  assert.ok(paalHtml.includes('<option value="lounge" selected>Lounge</option>'), "de groep hangt onder de lounge");
+  assert.ok(paalHtml.includes(">Hoofdkast</option>") && paalHtml.includes("Deze groep heeft een eigen kWh-meter"));
+  assert.ok(!paalHtml.includes('value="paal"'), "een groep hangt niet onder zichzelf");
+  assert.equal((el.circuitHtml_(accu, 2, alle).match(/data-kind="current"/g) ?? []).length, 1, "met meter, één fase: één stroomsensor");
+  assert.equal((el.circuitHtml_({ ...kast, meter: true }, 0, alle).match(/data-kind="current"/g) ?? []).length, 3);
+});
+
+proef("bestaande groepen worden ingedeeld: de lounge en de garage zijn kasten, een losse groep blijft een groep", async () => {
+  const { kastenIndelen } = await import("../custom_components/domotiapp_coach/frontend/src/views/installation.js");
+  const thuis = kastenIndelen([
+    { id: "lounge", name: "Lounge", fuse_amps: 20, parent: "", sensors: {} },
+    { id: "paal", name: "Laadpaal", fuse_amps: 20, parent: "lounge", sensors: {} },
+  ]);
+  assert.deepEqual(thuis.map((g) => [g.kind, g.meter]), [["kast", false], ["groep", false]]);
+  const garage = kastenIndelen([{ id: "garage", name: "Garage", parent: "", sensors: { l1: { current: "sensor.g_l1" } } }]);
+  assert.deepEqual([garage[0].kind, garage[0].meter], ["kast", true], "de garage met zijn meter");
+  const los = kastenIndelen([{ id: "boiler", name: "Boiler", parent: "", sensors: {} }]);
+  assert.equal(los[0].kind, "groep", "een groep in de hoofdkast zonder meter en zonder groepen eronder");
+  const gekozen = kastenIndelen([{ id: "x", kind: "groep", meter: true, parent: "", sensors: {} }]);
+  assert.deepEqual([gekozen[0].kind, gekozen[0].meter], ["groep", true], "wat al gekozen is blijft");
+});
+
+proef("opslaan zonder eigen kWh-meter stuurt geen sensoren mee, en laat het klad staan", () => {
+  const el = Object.create(Installatie.prototype);
+  const sensors = { l1: { current: "sensor.a" } };
+  const draft = { installation: { circuits: [{ id: "g", meter: false, sensors }, { id: "h", meter: true, sensors }] }, contract: {} };
+  const uit = el.payload_(draft);
+  assert.deepEqual(uit.installation.circuits[0].sensors, {}, "zonder meter niets");
+  assert.deepEqual(uit.installation.circuits[1].sensors, sensors, "met meter wel");
+  assert.deepEqual(draft.installation.circuits[0].sensors, sensors, "het klad houdt ze, voor als het vinkje weer aan gaat");
 });
 
 proef("de rij hangt aan het vinkje van de lastbewaker", () => {
@@ -760,10 +797,14 @@ proef("het scherm tekent een kop per dag en een rij per melding", () => {
   el.$$ = () => [];
   el.geladen_ = true;
   el.filter_ = { soort: "alles", dag: "" };
+  // Een dag binnen de twee weken die de geschiedenis toont (v0.101.5).
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const dag = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   el.items_ = [
-    { at: "2026-09-05T13:40:00", message: "De accustand van Ford meldt al 10 minuten niets.", kind: "kritiek" },
-    { at: "2026-09-05T11:10:00", message: "De status van Laadpaal meldt al 10 minuten niets." },
-    { at: "2026-09-05T09:42:00", message: "Laadpaal: laden op 6 A.", kind: "besluit" },
+    { at: `${dag}T13:40:00`, message: "De accustand van Ford meldt al 10 minuten niets.", kind: "kritiek" },
+    { at: `${dag}T11:10:00`, message: "De status van Laadpaal meldt al 10 minuten niets." },
+    { at: `${dag}T09:42:00`, message: "Laadpaal: laden op 6 A.", kind: "besluit" },
   ];
   el.paint_();
   const lijst = knopen.get("#lijst").kinderen;
@@ -786,7 +827,7 @@ proef("het scherm tekent een kop per dag en een rij per melding", () => {
 
   el.items_ = [];
   el.paint_();
-  assert.match(knopen.get("#lijst").kinderen[0].textContent, /nog niets gemeld/, "leeg is een zin, geen leeg scherm");
+  assert.match(knopen.get("#lijst").kinderen[0].textContent, /twee weken niets gemeld/, "leeg is een zin, geen leeg scherm");
 });
 
 // --- Bespaard: de laadbeurten opgeteld --------------------------------------
@@ -2250,6 +2291,32 @@ proef("het formulier heeft een reserveprijssensor en zegt wat voor prijs hij gee
   assert.ok(bron.includes('data-reserve="market"') && bron.includes('data-reserve="all_in"'));
   const py = readFileSync(new URL("../custom_components/domotiapp_coach/websocket.py", import.meta.url), "utf8");
   assert.ok(py.includes('vol.Optional("fallback_entity")') && py.includes('vol.Optional("fallback_source")'));
+});
+
+proef("de geschiedenis onder Meldingen laat twee weken zien (v0.101.5)", async () => {
+  // De eigenaar op 29-09-2026: "max 2 weken, anders teveel scrollen."
+  const { recent, GESCHIEDENIS_DAGEN } = await import("../custom_components/domotiapp_coach/frontend/src/views/notifications.js");
+  assert.equal(GESCHIEDENIS_DAGEN, 14);
+  const nu = new Date(2026, 8, 29, 14, 0);
+  const op = (d, h = 12) => ({ at: new Date(2026, 8, d, h).toISOString(), message: "x" });
+  const lijst = [op(29), op(16, 0), op(15, 23), op(1)];
+  const over = recent(lijst, nu);
+  assert.deepEqual(over.map((i) => new Date(i.at).getDate()), [29, 16], "vandaag en de dertien dagen ervoor, vanaf middernacht");
+  assert.deepEqual(recent([{ at: "geen datum" }], nu), []);
+});
+
+proef("Apparaten: een apparaat hangt aan de hoofdkast, een onderverdeelkast of een groep", () => {
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.feed_ = {};
+  el.draft_ = { installation: { circuits: [
+    { id: "lounge", kind: "kast", name: "Lounge" }, { id: "paal", kind: "groep", name: "Laadpaal", parent: "lounge" },
+  ] }, devices: [] };
+  const paal = { id: "p", type: "laadpaal", brand: "easee", controllable: true, device_id: "x", circuit: "paal",
+    entities: { status: "sensor.s", limit: "number.l" } };
+  const html = el.controlHtml_(paal, 0);
+  assert.ok(html.includes("Hangt aan") && html.includes(">Hoofdkast</option>"), html.slice(0, 200));
+  assert.ok(html.includes(">Lounge (onderverdeelkast)</option>") && html.includes('value="paal" selected>Laadpaal (groep)</option>'));
 });
 
 /** Een historieweergave met een dag aan vakken, de batterij en een beurt. */

@@ -237,6 +237,8 @@ class Circuit:
     fuse_amps: float = 16.0
     margin_amps: float = FUSE_MARGIN_AMPS
     reserved_amps: float = 0.0
+    # Hoe hij in een zin heet: "groep" of "onderverdeelkast" (v0.101.5).
+    soort: str = "groep"
 
 
 @dataclass
@@ -642,9 +644,17 @@ def knelpunt(grid: Grid, car: Car, charger: Charger) -> str | None:
     return min(alle, key=lambda paar: paar[1])[0] if alle else None
 
 
-def zekering_van(naam: str | None) -> str:
-    """Hoe de zekering heet in een zin: "je zekering" of "de zekering van de garage"."""
-    return f"de zekering van de groep {naam}" if naam else "je zekering"
+def _soort(grid: Grid | None, naam: str) -> str:
+    """"groep" of "onderverdeelkast", voor een kast of groep met deze naam."""
+    for groep in (grid.circuits if grid is not None else []):
+        if groep.name == naam:
+            return groep.soort or "groep"
+    return "groep"
+
+
+def zekering_van(naam: str | None, grid: Grid | None = None) -> str:
+    """Hoe de zekering heet in een zin: "je zekering" of "de zekering van de groep Garage"."""
+    return f"de zekering van de {_soort(grid, naam)} {naam}" if naam else "je zekering"
 
 
 def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
@@ -704,7 +714,7 @@ def _aansluiting(grid: Grid, car: Car, charger: Charger) -> str:
     """Het onderwerp van de zin over een volle zekering: de aansluiting of een groep."""
     alle = ruimten(grid, charger)
     krapste = min(alle, key=lambda paar: paar[1])[0] if alle else ""
-    return f"De groep {krapste}" if krapste else "Je aansluiting"
+    return f"De {_soort(grid, krapste)} {krapste}" if krapste else "Je aansluiting"
 
 
 def circuit_ceiling(charger: Charger) -> float | None:
@@ -2859,7 +2869,7 @@ def _decide(
             ceiling,
             (
                 f"Snelladen staat aan, dus hij laadt op {ceiling} A. Meer past er nu "
-                f"niet onder {zekering_van(knelpunt(grid, car, charger))}. Zodra je huis minder vraagt, gaat hij omhoog."
+                f"niet onder {zekering_van(knelpunt(grid, car, charger), grid)}. Zodra je huis minder vraagt, gaat hij omhoog."
                 if fuse_limited(grid, car, charger)
                 else f"Snelladen staat aan, dus hij laadt op {ceiling} A, ongeacht de prijs."
             ),
