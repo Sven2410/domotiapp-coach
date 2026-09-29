@@ -225,31 +225,17 @@ export function batterijVooruit(besluit) {
   return { kop, uren: rijen, voet: String(besluit.plan ?? "") };
 }
 
-/** Wat er over de terugverdientijd te zeggen valt, of niets. */
-export function terugverdiendTekst(payback) {
-  if (!payback) return [];
-  const rijen = [];
-  const verdiend = Number(payback.earned ?? 0);
-  const prijs = Number(payback.price ?? 0);
-  if (prijs > 0) {
-    rijen.push({ label: "Terugverdiend", text: `${euro(verdiend)} van ${euro(prijs, 0)}` });
-    if (payback.date === "klaar") {
-      rijen.push({ label: "Terugverdiend rond", text: "hij heeft zichzelf terugbetaald" });
-    } else if (payback.date) {
-      rijen.push({
-        label: "Terugverdiend rond",
-        text: `${datum(payback.date)}, in het tempo van de laatste ${payback.days} gemeten dagen`,
-      });
-    } else {
-      rijen.push({
-        label: "Terugverdiend rond",
-        text: `nog te vroeg voor een datum: ${payback.days ?? 0} van de ${payback.min_days ?? 28} dagen gemeten`,
-      });
-    }
-  } else if (payback.days) {
-    rijen.push({ label: "Opgeleverd", text: `${euro(verdiend)} in ${payback.days} dagen` });
-  }
-  return rijen;
+/**
+ * Wat de batterij opleverde sinds de coach haar volgt, uit haar kasboek.
+ *
+ * Geen terugverdientijd (v0.101.1): de eigenaar op 29-09-2026 kan geen datum
+ * in het paneel verdedigen die afwijkt van wat een installateur de klant
+ * voorrekende.
+ */
+export function opgeleverdTekst(earned) {
+  if (!earned?.days) return [];
+  const dagen = Number(earned.days);
+  return [{ label: "Opgeleverd", text: `${euro(Number(earned.euro ?? 0))} in ${dagen} ${dagen === 1 ? "dag" : "dagen"}` }];
 }
 
 /** De regels op de kaart van een batterij. */
@@ -293,5 +279,5 @@ export function batteryRows(besluit) {
     });
   }
 
-  return [...rijen, ...terugverdiendTekst(besluit.payback)];
+  return [...rijen, ...opgeleverdTekst(besluit.earned)];
 }

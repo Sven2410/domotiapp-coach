@@ -4297,9 +4297,10 @@ controle("en staat in de opslag, voor na een herstart",
 controle("de laadgrens en de ontlaadgrens zijn alleen gelezen",
          not [d for d in hass75.services.verstuurd if "grens" in str(d[2].get("entity_id"))],
          f"{hass75.services.verstuurd}")
-controle("de kaart krijgt de stand, de accustand en de terugverdientijd",
-         b75.get("kind") == "batterij" and b75.get("soc") == 60.0 and "earned" in (b75.get("payback") or {}),
-         f"{ {k: b75.get(k) for k in ('kind', 'soc', 'payback')} }")
+controle("de kaart krijgt de stand, de accustand en wat hij opleverde, zonder terugverdientijd",
+         b75.get("kind") == "batterij" and b75.get("soc") == 60.0
+         and set(b75.get("earned") or {}) == {"euro", "days"} and "payback" not in b75,
+         f"{ {k: b75.get(k) for k in ('kind', 'soc', 'earned')} }")
 
 # De coach stopt: het vermogen naar nul en de batterij terug naar zijn eigen
 # stand. Op zijn laatste opdracht blijven staan is leeglopen naar het net.

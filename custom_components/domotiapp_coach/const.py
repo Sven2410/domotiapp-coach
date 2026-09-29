@@ -345,18 +345,6 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # voltage, zoals `sources.phases`). Een apparaat wijst met `circuit`
         # naar zijn groep. Zie `Circuit` in planner.py.
         "circuits": [],
-        # Wat de bewoner in zijn huis stak, voor "Terugverdiend" in Historie
-        # (v0.101.0). De eigenaar op 28-09-2026: "de klant wil natuurlijk ook
-        # zijn investering weten, wanneer hij het heeft terugverdiend." De
-        # thuisbatterij heeft haar eigen aankoopprijs bij het apparaat
-        # (`battery.purchase_price`); hier de zonnepanelen en de coach met zijn
-        # installatie, elk met een prijs en een datum vanaf wanneer het telt.
-        "investments": {
-            "solar_price": None,
-            "solar_since": "",
-            "coach_price": None,
-            "coach_since": "",
-        },
     },
     "contract": {
         "type": CONTRACT_FIXED,
@@ -544,7 +532,7 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     "boiler_learned": [],
     # Wat de coach van een thuisbatterij bijhoudt, per apparaat: het gemeten
     # rendement, wanneer hij voor het laatst vol was (voor de wekelijkse volle
-    # beurt) en wat hij per dag verdiende (voor de terugverdientijd). Zie
+    # beurt) en wat hij per dag verdiende (voor In geld in Historie). Zie
     # `_one_batterij` in coach.py.
     "battery_state": [],
     # Het dagverbruik van gas en water dat de coach bijhoudt voor de melding

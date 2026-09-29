@@ -3,8 +3,10 @@
  *
  * De eigenaar op 28-09-2026: "ik wil op het historie overzicht duidelijk hebben
  * wat ik heb bespaard die dag, totaal uitgegeven en totaal bespaard. Maak een
- * mooi overzicht, want de klant wil natuurlijk ook zijn investering weten,
- * wanneer hij het heeft terugverdiend." En: "stel alles goed op elkaar af."
+ * mooi overzicht." En: "stel alles goed op elkaar af." Een terugverdientijd
+ * stond er één uitgave bij en is er in v0.101.1 weer uit: de eigenaar op
+ * 29-09-2026 kan geen datum in het paneel verdedigen die afwijkt van wat een
+ * installateur de klant voorrekende.
  *
  * Eén som voor het scherm en het rapport, zodat die het nooit oneens zijn:
  *
@@ -178,35 +180,4 @@ export function balans({ rijen, prijs, gas = [], water = [], contract, accu = 0,
     zonder: uitgegeven + bespaard,
     onbekend,
   };
-}
-
-/**
- * Hoe ver een investering terugverdiend is, en wanneer de rest.
- *
- * Dezelfde regels als `terugverdiend` in batterij.py: een datum pas na
- * `minDagen` gemeten dagen, op het tempo van die dagen, en "klaar" als het er
- * al uit is.
- *
- * @param {number|null} prijs wat het kostte
- * @param {number} verdiend wat het tot nu toe opleverde
- * @param {number} dagen over hoeveel dagen dat gemeten is
- * @param {number} perDag het tempo, in euro per dag
- * @param {Date} [vandaag]
- * @param {number} [minDagen]
- */
-export function terugverdienen(prijs, verdiend, dagen, perDag, vandaag = new Date(), minDagen = 28) {
-  const uit = { prijs, verdiend, dagen, perDag, rest: null, deel: null, datum: null, klaar: false };
-  if (!(prijs > 0)) return uit;
-  uit.deel = Math.max(0, Math.min(1, verdiend / prijs));
-  uit.rest = Math.max(0, prijs - verdiend);
-  if (uit.rest <= 0) {
-    uit.klaar = true;
-    return uit;
-  }
-  if (dagen >= minDagen && perDag > 0) {
-    const datum = new Date(vandaag);
-    datum.setDate(datum.getDate() + Math.ceil(uit.rest / perDag));
-    uit.datum = datum;
-  }
-  return uit;
 }

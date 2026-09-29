@@ -2857,7 +2857,7 @@ class DacViewOverview extends DacElement {
       this.$(`[data-now="${slot}"]`).textContent = powerText(device.watts);
 
       // Een thuisbatterij krijgt er de regels van de coach bij: de stand, de
-      // opdracht, en wat hij terugverdiend heeft.
+      // opdracht, en wat hij opleverde.
       const details = [...(device.details ?? []), ...batteryRows(this.coach_?.[device.id])];
       const rows = this.$(`[data-rows="${slot}"]`);
       rows.replaceChildren(

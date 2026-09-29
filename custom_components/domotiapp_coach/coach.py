@@ -60,7 +60,6 @@ from .batterij import (
     met_paal,
     plan_batterij,
     rendement_uit_tellers,
-    terugverdiend,
     verdiend,
     vol_voor,
 )
@@ -230,8 +229,8 @@ ZELF_MARGE = 1.0
 KNOP_WACHT_STAP = 0.5
 KNOP_WACHT_STAPPEN = 20
 # Hoe vaak wat de batterij verdiende naar de opslag gaat, en hoeveel dagen
-# daarvan bewaard blijven: ruim een jaar, zodat de terugverdientijd zomer en
-# winter allebei kent.
+# daarvan bewaard blijven: ruim een jaar, zodat In geld in Historie ook over een
+# heel jaar weet wat de batterij opleverde.
 BATTERIJ_BEWAREN = timedelta(minutes=5)
 BATTERIJ_DAGEN_MAX = 400
 
@@ -4487,13 +4486,9 @@ class ChargerCoach:
                       auto_grens=auto_grens(b, nacht_over))
 
         totaal = float(rij.get("earned_total") or 0.0) + sum((sessie.get("geld") or {}).values())
-        eigen = device.get("battery") or {}
-        try:
-            aankoop = float(eigen.get("purchase_price")) if eigen.get("purchase_price") not in (None, "") else None
-        except (TypeError, ValueError):
-            aankoop = None
-        terug_verdiend = terugverdiend(dict(rij.get("earned_days") or {}), aankoop, now)
-        terug_verdiend["earned"] = round(totaal, 2)
+        # Wat ze opleverde sinds de coach haar volgt, voor "Opgeleverd" op de
+        # kaart. Geen terugverdientijd meer (v0.101.1, zie `verdiend`).
+        opgeleverd = {"euro": round(totaal, 2), "days": len(rij.get("earned_days") or {})}
 
         self.state[device_id] = {
             "charge": besluit.stand in (NETLADEN, MAX_LADEN),
@@ -4524,7 +4519,7 @@ class ChargerCoach:
             "floor": b.bodem,
             "ceiling": b.soc_max,
             "full_before": b.vol_voor.isoformat() if b.vol_voor else None,
-            "payback": terug_verdiend,
+            "earned": opgeleverd,
             "boost": device_id in self._boost,
             "drain_to": self._drain.get(device_id),
             "holiday": vakantie is not None,

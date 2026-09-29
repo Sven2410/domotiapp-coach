@@ -224,12 +224,13 @@ eigen meter nul op de meter zelf doen (eigen verbruik) en laat de coach alleen
 de uitzonderingen schakelen. evcc verkocht die avond 6,2 kWh van 81% naar 19%
 zonder aan de nacht te denken.
 
-## In geld en Terugverdiend (v0.101.0)
+## In geld (v0.101.0)
 
 De eigenaar op 28-09-2026: "ik wil op het historie overzicht duidelijk hebben wat
 ik heb bespaard die dag, totaal uitgegeven en totaal bespaard. Maak een mooi
 overzicht, want de klant wil natuurlijk ook zijn investering weten, wanneer hij
-het heeft terugverdiend." En: "stel alles goed op elkaar af."
+het heeft terugverdiend." En: "stel alles goed op elkaar af." Dat laatste deel is
+er in v0.101.1 weer uit, zie onderaan.
 
 **In geld** (kaart onder de grafiek, en dezelfde tegels in het rapport): drie
 getallen, uitgegeven (stroom van het net, gas en water, min wat teruglevering
@@ -247,13 +248,17 @@ geld.js tegenover `_salderen`, `_tariff` en `_prices` in coach.py): tot 1 januar
 dynamisch ook min de opslag). Tot v0.101.0 rekende Historie met de
 terugleververgoeding; bij de eigenaar gaf dat 1,9 cent per kWh waar de coach 18,9 rekende.
 
-**Terugverdiend** (`terugRijen_`, `terugverdienen` in geld.js): de thuisbatterij
-uit haar eigen kasboek (`payback` in de stand van de coach, aankoopprijs bij
-Apparaten), de zonnepanelen en DomotiApp met de installatie uit
-`installation.investments` (prijs en sinds, op Installatie onder Investeringen).
-De panelen per maand uit de statistieken vanaf de datum (`laadZonTerug_`), met
-dezelfde som als In geld, en de zin zegt het als Home Assistant pas later begon.
-De coach uit de beurten sinds zijn datum. Een datum pas na 28 gemeten dagen, net
-als `terugverdiend` in batterij.py; ver weg met het aantal jaren erbij. Proeven
-in test_rapport.mjs.
+**Geen terugverdientijd (v0.101.1).** In v0.101.0 stond onder In geld een kaart
+Terugverdiend: per investering een balk en een datum, met de aankoopprijs van de
+thuisbatterij bij Apparaten (sinds v0.73.0 op haar kaart) en de prijs van de
+zonnepanelen en de coach op Installatie onder Investeringen. De eigenaar op
+29-09-2026: "haal het invullen van de kosten van de panelen weg en de batterij.
+Dat is niet verdedigbaar voor mij als ik een terugverdientijd heb opgegeven bij
+klanten en die wordt niet gehaald." Alles is eruit: de velden, de kaart, de
+tabel in het rapport en de regels "Terugverdiend" op de kaart van de batterij.
+Wat blijft is wat gemeten is, zonder belofte: In geld, en "Opgeleverd" op de
+kaart van de batterij (`earned` in de stand van de coach, `opgeleverdTekst` in
+battery.js). Een oude `investments` valt bij het laden weg (`_prune` in
+storage.py), een oude `purchase_price` bij de volgende opslag (`REMOVE_EXTRA`).
+Proef "geen terugverdientijd" in test_rapport.mjs houdt de woorden uit de bron.
 

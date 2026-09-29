@@ -203,8 +203,7 @@ dan de andere in dezelfde uitgave.
   `PROGRAM_TYPES`, `RELEASE_TYPES` in devices.js (`docs/paneel.md`).
 - **Salderen en de terugleverprijs**: `_salderen`, `_tariff`, `_prices` en
   `NETTING_ENDS` in coach.py en const.py tegenover `salderen`, `prijsOp` en
-  `SALDEREN_TOT` in geld.js; en `terugverdiend` in batterij.py tegenover
-  `terugverdienen` in geld.js (`docs/eerste-woning.md`).
+  `SALDEREN_TOT` in geld.js (`docs/eerste-woning.md`).
 
 ## Hoe het in elkaar zit
 
@@ -212,7 +211,7 @@ dan de andere in dezelfde uitgave.
 |---|---|
 | `planner.py` | alle denkwerk, kent Home Assistant niet, is los te draaien |
 | `planner.py`, onderaan | het denkwerk voor een apparaat met een programma: `plan_programma`, `programma_kosten`, `PROGRAMMAS`, en daaronder dat voor een boiler: `plan_boiler`, `boiler_schijven`, `boiler_nodig` |
-| `batterij.py` | het denkwerk voor een thuisbatterij, kent Home Assistant ook niet: `plan_batterij` (de stand), `Regelaar` (de snelle lus), `verdiend`, `terugverdiend`, `rendement_uit_tellers` |
+| `batterij.py` | het denkwerk voor een thuisbatterij, kent Home Assistant ook niet: `plan_batterij` (de stand), `Regelaar` (de snelle lus), `verdiend` (het kasboek), `rendement_uit_tellers` |
 | `coach.py` | leest sensoren, stuurt de paal aan, houdt de laadbeurt bij |
 | `websocket.py` | wat het paneel mag opvragen en wijzigen |
 | `sensor.py` | de eerste eigen entiteiten (v0.100.0): per apparaat met een programma een sensor "<apparaat> start" ("om 14:00", "morgen om 09:00", het tijdstip in `start`), voor een keukenkaart of een automatisering. Volgt het besluit op de eventbus, rekent zelf niets (`docs/vaatwasser.md`) |
@@ -223,7 +222,7 @@ dan de andere in dezelfde uitgave.
 | `frontend/src/schedule-sheet.js` | het schema van één apparaat, als pop-up achter zijn kaart |
 | `ontvangers.py` | wie welke melding krijgt: personen (een telefoon, een naam, eventueel een gebruiker van Home Assistant) met een schakelaar per soort: kritiek, melding, besluit, belasting. Kent Home Assistant niet |
 | `frontend/src/views/notifications.js` | Meldingen, twee in een sinds 06-09-2026: bovenaan de personen (de admin voegt toe, een bewoner ziet alleen zichzelf en zet zijn eigen schuiven via `notifications/mine`), de zekeringmelding "Zware belasting" (uit Strategie verhuisd), en daaronder alles wat de coach ooit stuurde én elk besluit dat hij nam (`_async_noteer_besluit`), uit `MeldingenStore` in storage.py |
-| `frontend/src/geld.js` | In geld en Terugverdiend in Historie en het rapport (v0.101.0): uitgegeven, bespaard in zon, thuisbatterij en coach, salderen zoals de coach, en hoe ver een investering terugverdiend is |
+| `frontend/src/geld.js` | In geld in Historie en het rapport (v0.101.0): uitgegeven, bespaard in zon, thuisbatterij en coach, en salderen zoals de coach. Geen terugverdientijd en geen aankoopprijzen, sinds v0.101.1 (`docs/eerste-woning.md`) |
 | `frontend/src/savings.js` | Bespaard, onder Historie: de laadbeurten uit `BeurtenStore` (storage.py) opgeteld per periode en per apparaat. De coach telt per ronde wat een beurt kost (`_geld_bij`) en wat dezelfde tijd op vol vermogen vanaf het inpluggen met alles van het net gekost had (`_basis_bij`, de maat); bespaard is maat min betaald, nooit onder nul, in twee delen: door de zon (`zon_winst`) en door te wachten. Stapt hij midden in een beurt in, dan rekent `_async_terugrekenen` het begin terug uit de recorder en de kwartieropslag |
 
 De scheiding tussen `planner.py` en `coach.py` is de kern: het denkwerk is los
