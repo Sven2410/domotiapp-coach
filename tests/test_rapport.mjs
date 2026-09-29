@@ -2319,6 +2319,55 @@ proef("Apparaten: een apparaat hangt aan de hoofdkast, een onderverdeelkast of e
   assert.ok(html.includes(">Lounge (onderverdeelkast)</option>") && html.includes('value="paal" selected>Laadpaal (groep)</option>'));
 });
 
+// --- de accustand in kWh op de kaarten (v0.101.6) --------------------------------
+// De eigenaar op 29-09-2026: "op de laadpaalkaart de batterijstand van de auto zien
+// als die in HA staat, en de accu kWh van de batterij, nu zie ik alleen het percentage."
+proef("accuTekst: het percentage met wat erin zit, en zonder inhoud alleen het percentage", async () => {
+  const { accuTekst } = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
+  assert.equal(accuTekst(39, 14.5), "39 % · 5,7 van 14,5 kWh");
+  assert.equal(accuTekst(68, 19.7), "68 % · 13,4 van 19,7 kWh");
+  assert.equal(accuTekst(39, NaN), "39 %");
+  assert.equal(accuTekst(39, 0), "39 %");
+});
+
+proef("de kaart van de thuisbatterij zegt hoeveel kWh erin zit, uit haar inhoudsensor of zoals ingevuld", () => {
+  const staten = {
+    "sensor.batterij_soc": { state: "39", attributes: { unit_of_measurement: "%" } },
+    "sensor.batterij_inhoud": { state: "14500", attributes: { unit_of_measurement: "Wh" } },
+  };
+  const feed = { get: (id) => staten[id] };
+  const accu = { id: "b", type: "thuisbatterij", brand: "anker", entity: "", entities: { soc: "sensor.batterij_soc", capacity: "sensor.batterij_inhoud" } };
+  const r = new LiveSource().sample(feed, { sources: {}, devices: [accu] });
+  const regel = r.devices[0].details.find((d) => d.label === "Accustand");
+  assert.equal(regel?.text, "39 % · 5,7 van 14,5 kWh", JSON.stringify(r.devices[0].details));
+  const ingevuld = { ...accu, entities: { soc: "sensor.batterij_soc" }, battery: { capacity_kwh: 10 } };
+  const r2 = new LiveSource().sample(feed, { sources: {}, devices: [ingevuld] });
+  assert.equal(r2.devices[0].details.find((d) => d.label === "Accustand")?.text, "39 % · 3,9 van 10,0 kWh");
+});
+
+proef("de laadpaalkaart laat de accustand van de auto zien als die in Home Assistant staat", () => {
+  const staten = {
+    "sensor.ford_soc": { state: "68", attributes: { unit_of_measurement: "%" } },
+    "sensor.tesla_soc": { state: "unavailable", attributes: {} },
+  };
+  const feed = { get: (id) => staten[id] };
+  const ford = { id: "ford", name: "Ford", soc_entity: "sensor.ford_soc", capacity_kwh: 19.7 };
+  const tesla = { id: "tesla", name: "Tesla", soc_entity: "sensor.tesla_soc", capacity_kwh: 75 };
+  const gast = { id: "gast", name: "Gast", guest: true, soc_entity: "sensor.ford_soc" };
+  const zonder = { id: "oud", name: "Oude auto", capacity_kwh: 40 };
+  const paal = { id: "p", type: "laadpaal", brand: "easee", entity: "", entities: {}, cars: [ford, tesla, gast, zonder] };
+  const regels = (settings) => new LiveSource().sample(feed, { sources: {}, devices: [paal], ...settings }).devices[0].details
+    .filter((d) => d.label.startsWith("Accu"));
+  assert.deepEqual(regels({ active_cars: [{ device: "p", car: "ford" }] }),
+    [{ label: "Accu auto", text: "68 % · 13,4 van 19,7 kWh" }], "de auto die eraan hangt");
+  assert.deepEqual(regels({}), [
+    { label: "Accu Ford", text: "68 % · 13,4 van 19,7 kWh" },
+    { label: "Accu Tesla", text: "—" },
+  ], "zonder gekozen auto elke auto met een sensor, een gast en een auto zonder sensor niet");
+  assert.deepEqual(regels({ active_cars: [{ device: "p", car: "oud" }] }).map((d) => d.label), ["Accu Ford", "Accu Tesla"],
+    "een gekozen auto zonder sensor vraagt het op de kaart zelf");
+});
+
 /** Een historieweergave met een dag aan vakken, de batterij en een beurt. */
 function geldweergave() {
   const el = Object.create(Historie.prototype);

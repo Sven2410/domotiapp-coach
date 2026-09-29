@@ -545,6 +545,33 @@ function readNumber(feed, entityId) {
  *
  * A sensor that says nothing gets a dash, never a plausible-looking number.
  */
+/**
+ * Een accustand met wat er in kWh in zit: "39 % · 5,7 van 14,5 kWh" (v0.101.6).
+ *
+ * De eigenaar op 29-09-2026: "de accu kWh van de batterij, nu zie ik alleen het
+ * percentage." Zonder bekende inhoud blijft het bij het percentage; een
+ * geschatte kWh op een onbekende accu zou een verzonnen getal zijn.
+ */
+export function accuTekst(procent, inhoudKwh) {
+  const kwh = (v) => v.toLocaleString("nl-NL", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const pct = `${procent.toLocaleString("nl-NL", { maximumFractionDigits: 0 })} %`;
+  return Number.isFinite(inhoudKwh) && inhoudKwh > 0
+    ? `${pct} · ${kwh((procent / 100) * inhoudKwh)} van ${kwh(inhoudKwh)} kWh`
+    : pct;
+}
+
+/**
+ * De auto's van een laadpaal waarvan de accustand in Home Assistant staat, voor
+ * op de kaart (v0.101.6). Hangt er een gekozen auto aan en heeft die een
+ * sensor, dan alleen die; anders elke auto van het huis met een sensor.
+ */
+function autosMetStand(device, settings) {
+  const metSensor = (device?.cars ?? []).filter((car) => car?.soc_entity && !car.guest);
+  const gekozen = (settings?.active_cars ?? []).find((rij) => rij?.device === device?.id)?.car;
+  const actief = metSensor.find((car) => car.id === gekozen);
+  return actief ? [actief] : metSensor;
+}
+
 function deviceDetails(feed, device, settings) {
   const rows = [];
 
@@ -579,6 +606,17 @@ function deviceDetails(feed, device, settings) {
         // recognisably the sensor's own wording rather than something invented.
         : raw.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()));
 
+    // Een thuisbatterij: naast het percentage wat erin zit (v0.101.6), met de
+    // inhoud uit haar sensor of zoals ingevuld.
+    if (field.key === "soc" && device?.type === "thuisbatterij" && Number.isFinite(number)) {
+      const cap = feed.get(device.entities?.capacity);
+      const inhoud = usable(cap)
+        ? toKwh(cap.state, cap.attributes?.unit_of_measurement)
+        : Number(device.battery?.capacity_kwh);
+      rows.push({ label: field.label, text: accuTekst(number, Number(inhoud)) });
+      continue;
+    }
+
     rows.push({ label: field.label, text });
 
     // What the selected program costs to run comes from the panel's own table
@@ -596,6 +634,22 @@ function deviceDetails(feed, device, settings) {
           })} kWh`,
         });
       }
+    }
+  }
+
+  // De accustand van de auto, als die in Home Assistant staat (v0.101.6). De
+  // eigenaar op 29-09-2026: "op de laadpaalkaart de batterijstand van de auto
+  // zien als die in HA staat." Een auto zonder sensor vraagt zijn stand al op
+  // de kaart zelf, en daar staat hij dan ook.
+  if (device?.type === "laadpaal") {
+    const autos = autosMetStand(device, settings);
+    for (const car of autos) {
+      const state = feed.get(car.soc_entity);
+      const procent = usable(state) ? Number(state.state) : NaN;
+      rows.push({
+        label: autos.length > 1 ? `Accu ${car.name?.trim() || "auto"}` : "Accu auto",
+        text: Number.isFinite(procent) ? accuTekst(procent, Number(car.capacity_kwh)) : "—",
+      });
     }
   }
 
