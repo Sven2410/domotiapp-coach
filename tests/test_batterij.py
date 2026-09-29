@@ -426,6 +426,20 @@ controle("een uur 1 kW zon opslaan kost wat terugleveren had opgebracht", abs(v2
 v3 = bat.verdiend(1000.0, 1000.0, 0.13, 0.05, 3600.0)
 controle("een uur 1 kW van het net laden kost de prijs van dat uur", abs(v3 + 0.13) < 1e-9, f"{v3}")
 controle("zonder prijs geen bedrag", bat.verdiend(0.0, -1000.0, None, None, 60.0) is None)
+# Wat de zon die erin ging minder waard was dan zelf gebruikt (v0.101.2), met
+# salderen: koop 0,24171 en terug 0,24171 min 0,052756 terugleverkosten.
+K, T = 0.24171, 0.24171 - 0.052756
+z1 = bat.zon_in_accu(0.0, 1000.0, K, T, 3600.0)
+controle("een uur 1 kW zon de batterij in, meter op nul: een kWh maal koop min terug",
+         abs(z1 - 0.052756) < 1e-9, f"{z1}")
+controle("van het net laden is geen zon", bat.zon_in_accu(1000.0, 1000.0, K, T, 3600.0) == 0.0)
+controle("ontladen naar het huis ook niet", bat.zon_in_accu(0.0, -1000.0, K, T, 3600.0) == 0.0)
+z4 = bat.zon_in_accu(-1000.0, -1000.0, K, T, 3600.0)
+controle("ontladen naar het net telt terug: de teruglevering kwam uit de batterij",
+         abs(z4 + 0.052756) < 1e-9, f"{z4}")
+z5 = bat.zon_in_accu(-500.0, 1000.0, K, T, 3600.0)
+controle("half opgeslagen, half teruggeleverd: alleen wat erin ging", abs(z5 - 0.052756) < 1e-9, f"{z5}")
+controle("zonder prijs niets", bat.zon_in_accu(0.0, 1000.0, None, None, 60.0) is None)
 
 print("24. geen terugverdientijd (v0.101.1)")
 # De eigenaar op 29-09-2026: een datum in het paneel die afwijkt van wat een

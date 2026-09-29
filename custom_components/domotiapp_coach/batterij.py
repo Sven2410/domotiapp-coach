@@ -1368,6 +1368,30 @@ def verdiend(
     return rekening(net_w - batterij_w) - rekening(net_w)
 
 
+def zon_in_accu(
+    net_w: float, batterij_w: float, koop: float | None, terug: float | None, seconden: float
+) -> float | None:
+    """Wat de zon die de batterij opnam minder waard was dan zelf gebruikt, in euro.
+
+    De zon die de batterij in ging was zonder batterij het net op gegaan: de
+    teruglevering zonder batterij min die met. In geld in Historie telt al het
+    niet teruggeleverde deel van de zon tegen de inkoopprijs, alsof het huis
+    het meteen gebruikte; voor dit deel klopt dat niet, want zonder batterij
+    had het alleen de terugleverprijs opgebracht. Dit verschil gaat eraf, en
+    wat de batterij er later mee deed staat in haar kasboek (`verdiend`).
+
+    Tot v0.101.2 ontbrak dit, en trok Historie het hele kasboek van de zon af:
+    bij de eigenaar op 29-09-2026 om 10:00 "Door je zon € -0,56", na een nacht waarin de
+    batterij het huis voedde. Ontlaadt de batterij naar het net, dan is het
+    verschil negatief en telt de zon weer vol.
+    """
+    if koop is None:
+        return None
+    met = max(0.0, -net_w)
+    zonder = max(0.0, -(net_w - batterij_w))
+    return (zonder - met) / 1000.0 * (koop - (terug or 0.0)) * seconden / 3600.0
+
+
 # --- Het rendement meten -------------------------------------------------------
 
 # Hoeveel keer de inhoud van de batterij er door de meter gegaan moet zijn

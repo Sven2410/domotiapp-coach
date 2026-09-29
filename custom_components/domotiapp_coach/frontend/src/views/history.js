@@ -11,8 +11,9 @@
  * of it was my own", and the second question is the one this panel exists for.
  *
  * Consumption is derived rather than measured, exactly as it is on Overzicht:
- * generation plus what came in, minus what went out. A separate house meter
- * would only add a way for the three to disagree.
+ * generation plus what came in, minus what went out, and since v0.101.2 minus
+ * what a home battery took in net (`fetchBattery`). A separate house meter
+ * would only add a way for them to disagree.
  */
 
 import { DacElement, define } from "../base.js";
@@ -26,10 +27,11 @@ import { tariff, contractAt } from "../data-source.js";
 import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
 import { beurtenIn, delen, opmerking, perApparaat, totalen, woorden } from "../savings.js";
-import { SALDEREN_TOT, accuVerdiend, balans, prijsOp, salderen } from "../geld.js";
+import { SALDEREN_TOT, accuVerdiend, accuZon, balans, prijsOp, salderen } from "../geld.js";
 import {
   PERIODS,
   combine,
+  fetchBattery,
   fetchDevices,
   fetchPeriod,
   fetchPrices,
@@ -56,6 +58,31 @@ const BOTTOM_PAD = 22;
 
 const nl = (value, digits = 1) =>
   value.toLocaleString("nl-NL", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+/**
+ * Wat het huis in één vak gebruikte, met de thuisbatterij erbij (v0.101.2).
+ *
+ * `battery` is wat de batterijen netto opnamen, laden positief. Verbruik is dan
+ * de eigen zon plus wat er van het net kwam, min wat de batterij opnam: een
+ * nacht op de batterij is verbruik, een middag laden niet. Van het net naar het
+ * huis is wat er binnenkwam min wat daarvan de batterij in ging; die laadt eerst
+ * uit de eigen zon, zoals het energiedashboard van Home Assistant het ook
+ * verdeelt. `zonInAccu` is de zon die de batterij in ging, voor In geld over de
+ * tijd dat de coach dat nog niet zelf telde (`voor`).
+ */
+export function huisMetAccu(own, bought, accu = { battery: 0, voor: 0 }) {
+  const battery = Number(accu?.battery) || 0;
+  const used = Math.max(0, own + bought - battery);
+  const vanNetInAccu = Math.max(0, Math.max(0, battery) - own);
+  const fromGrid = Math.min(used, Math.max(0, bought - vanNetInAccu));
+  return {
+    used,
+    fromGrid,
+    ownUse: used - fromGrid,
+    battery,
+    zonInAccu: Math.min(Math.max(0, Number(accu?.voor) || 0), own),
+  };
+}
 
 /** How one bucket is named in the read-out above the chart. */
 function bucketTitle(period, date) {
@@ -306,7 +333,7 @@ class DacViewHistory extends DacElement {
         <header class="intro">
           <div class="eyebrow">Historie</div>
           <h1>Wat je huis heeft gedaan</h1>
-          <p>Uit de geschiedenis die Home Assistant zelf bijhoudt. Boven de lijn staat wat je verbruikt hebt, gesplitst in je eigen zon en wat je van het net kocht. Onder de lijn staat wat je hebt teruggeleverd.</p>
+          <p>Uit de geschiedenis die Home Assistant zelf bijhoudt. Boven de lijn staat wat je verbruikt hebt, gesplitst in je eigen zon (met een thuisbatterij ook wat die gaf) en wat je van het net kocht. Onder de lijn staat wat je hebt teruggeleverd.</p>
         </header>
 
         <div class="controls">
@@ -534,14 +561,17 @@ class DacViewHistory extends DacElement {
       energy: device.energy_entity,
     }));
 
-    const [series, prices, devices] = await Promise.all([
+    const batterijen = (this.settings_?.devices ?? []).filter((device) => device.type === "thuisbatterij");
+    const [series, prices, devices, accu] = await Promise.all([
       fetchPeriod(this.hass_, ids, this.period_, start),
       fetchPrices(this.hass_, this.priceEntity_(), this.period_, start),
       fetchDevices(this.hass_, apparaten, this.period_, start),
+      fetchBattery(this.hass_, batterijen, this.period_, start),
     ]);
     if (run !== this.run_) return;
     this.prices_ = prices;
     this.devices_ = devices;
+    this.accu_ = accu;
     // Voor In geld: wat de coach bespaarde. De kaart tekent zichzelf bij als
     // de beurten binnen zijn.
     this.laadBeurten_();
@@ -676,19 +706,52 @@ class DacViewHistory extends DacElement {
     }
 
     const at = (key, time) => this.rows_[key].find((row) => row.start.getTime() === time)?.value ?? 0;
+    const tijden = [...keys].sort((a, b) => a - b);
+    const einde = periodEnd(this.period_, periodStart(this.period_, this.offset_)).getTime();
+    const vakEinde = (index) => tijden[index + 1] ?? einde;
+    const accu = this.accuPerVak_(tijden, vakEinde);
 
-    return [...keys]
-      .sort((a, b) => a - b)
-      .map((time) => {
-        const solar = at("solar", time);
-        const bought = at("import", time);
-        const sold = at("export", time);
-        // Own use is what the roof made minus what went out. Never negative:
-        // meters are read at slightly different moments and a rounding of a few
-        // watt-hours must not turn into a negative bar.
-        const own = Math.max(0, solar - sold);
-        return { start: new Date(time), own, bought, sold, used: own + bought };
-      });
+    return tijden.map((time, index) => {
+      const solar = at("solar", time);
+      const bought = at("import", time);
+      const sold = at("export", time);
+      // Own use is what the roof made minus what went out. Never negative:
+      // meters are read at slightly different moments and a rounding of a few
+      // watt-hours must not turn into a negative bar.
+      const own = Math.max(0, solar - sold);
+      return { start: new Date(time), own, bought, sold, ...huisMetAccu(own, bought, accu[index]) };
+    });
+  }
+
+  /**
+   * Per vak wat de thuisbatterijen netto opnamen (`battery`), en welk deel
+   * daarvan van batterijen is waarvan de coach toen nog niet bijhield hoeveel
+   * zon erin ging (`voor`): daarvoor schat In geld het uit de vakken zelf.
+   *
+   * De uren of dagen van `fetchBattery` gaan in het vak waarin ze beginnen, met
+   * de grenzen van de vakken zoals Home Assistant ze gaf, dus ook als die in
+   * een andere tijdzone rekent dan deze browser.
+   */
+  accuPerVak_(tijden, vakEinde) {
+    const uit = tijden.map(() => ({ battery: 0, voor: 0 }));
+    const vanaf = new Map(
+      (this.settings_?.battery_state ?? []).map((rij) => [
+        rij?.device,
+        rij?.solar_stored_from ? new Date(rij.solar_stored_from).getTime() : null,
+      ])
+    );
+    for (const [id, rijen] of this.accu_ ?? new Map()) {
+      let index = 0;
+      for (const rij of rijen) {
+        while (index < tijden.length && rij.start >= vakEinde(index)) index += 1;
+        if (index >= tijden.length) break;
+        if (rij.start < tijden[index]) continue;
+        uit[index].battery += rij.kwh;
+        const sinds = vanaf.get(id);
+        if (!Number.isFinite(sinds) || vakEinde(index) <= sinds) uit[index].voor += rij.kwh;
+      }
+    }
+    return uit;
   }
 
   paintChart_() {
@@ -716,13 +779,16 @@ class DacViewHistory extends DacElement {
       bought: sum("bought"),
       sold: sum("sold"),
     };
+    this.metAccu_ = rows.some((row) => Math.abs(row.battery) > 0.001);
     totals.selfUse =
       hasSolar && totals.solar > 0 ? (sum("own") / totals.solar) * 100 : null;
     // Zelfvoorzienend, zoals het energiedashboard van Home Assistant het noemt:
     // welk deel van je verbruik niet van het net kwam. De bewoner van de eerste
     // woning op 22-09-2026: "daar mag zelfvoorzienend nog wel bij."
+    // Met een thuisbatterij telt alleen wat er van het net naar het huis ging;
+    // wat van het net de batterij in ging telt pas als hij het afgeeft.
     totals.selfSufficient =
-      hasSolar && totals.used > 0 ? Math.max(0, (1 - sum("bought") / totals.used) * 100) : null;
+      hasSolar && totals.used > 0 ? Math.max(0, (1 - sum("fromGrid") / totals.used) * 100) : null;
 
     this.paintTotals_(totals);
     this.paintLegend_();
@@ -754,8 +820,8 @@ class DacViewHistory extends DacElement {
         const x = inset + index * colW + (colW - barW) / 2;
         // Stacked upwards: bought sits on top of own use, so the bottom of every
         // bar is the part that cost nothing.
-        const ownH = row.own * scale;
-        const boughtH = row.bought * scale;
+        const ownH = row.ownUse * scale;
+        const boughtH = row.fromGrid * scale;
         const soldH = row.sold * scale;
 
         const parts = [];
@@ -825,7 +891,7 @@ class DacViewHistory extends DacElement {
           bought: row.bought,
           sold: row.sold,
           selfUse: row.own + row.sold > 0 ? (row.own / (row.own + row.sold)) * 100 : null,
-          selfSufficient: row.used > 0 ? Math.max(0, (1 - row.bought / row.used) * 100) : null,
+          selfSufficient: row.used > 0 ? Math.max(0, (1 - row.fromGrid / row.used) * 100) : null,
         },
         bucketTitle(this.period_, row.start)
       );
@@ -1336,7 +1402,7 @@ class DacViewHistory extends DacElement {
 
   paintLegend_() {
     const entries = [
-      { tone: "var(--dac-solar)", label: "Eigen zon gebruikt" },
+      { tone: "var(--dac-solar)", label: this.metAccu_ ? "Eigen zon en batterij" : "Eigen zon gebruikt" },
       { tone: "var(--dac-grid-in)", label: "Van het net" },
       { tone: "var(--dac-grid-out)", label: "Naar het net" },
     ];
@@ -1572,6 +1638,7 @@ class DacViewHistory extends DacElement {
     const end = periodEnd(this.period_, start);
     const beurten = Array.isArray(this.beurten_) ? beurtenIn(this.beurten_, start, end) : [];
     const accu = accuVerdiend(this.settings_, start, end);
+    const zonInAccu = accuZon(this.settings_, start, end);
     return {
       rate,
       start,
@@ -1588,6 +1655,7 @@ class DacViewHistory extends DacElement {
         water: this.rows_?.water ?? [],
         contract,
         accu: accu.euro,
+        accuZon: zonInAccu.euro,
         coach: totalen(beurten),
       }),
     };

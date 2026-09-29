@@ -55,6 +55,14 @@ woning kwam van elke kilowattuur die de kWh-meter op de batterij erin zag gaan
 De eigen tellers van die batterij telden meer eruit dan erin,
 want die meten aan de accukant. `rendement_uit_tellers` wil tien keer de inhoud
 aan doorzet (`RTE_MIN_DOORZET`) en weigert alles buiten 30 tot 100%. Zonder
+kWh-meter geldt wat de bewoner invult, en alleen dat: tot v0.101.2 ging een
+ingevuld rendement ook de opslag in (`rte` in `battery_state`) en won die daarna
+van het veld, zodat aanpassen of leegmaken niets deed. Nu staat daar alleen een
+meting, en telt die alleen met een kWh-meter (`_batterij_van`, proef 114). De
+eigenaar op 29-09-2026: "ik wil wel het rendement erin zetten als ik geen kWh
+meter heb." Zolang er gesaldeerd wordt levert opslaan niet meer op dan de
+terugleverkosten: onder (prijs min terugleverkosten) gedeeld door de prijs, bij
+de eigenaar 78,2%, laat de coach de zon liever naar het net gaan. Zonder
 rendement wordt er niet gepland: alleen nul op de meter (`rendement-onbekend`),
 en met volledig salderen standby, want dan verliest opslaan altijd.
 
@@ -502,7 +510,10 @@ hij loopt en zoals hij zonder batterij gelopen had (de meter min wat de batterij
 doet); het rendement zit er vanzelf in. Het gaat per dag naar `battery_state` in
 de instellingen, en staat als "Opgeleverd" op de kaart (`earned` in de stand van
 de coach) en als "Door je thuisbatterij" onder In geld in Historie. Wat de
-batterij verdiende voordat de coach erbij kwam wordt niet geschat. Een
+batterij verdiende voordat de coach erbij kwam wordt niet geschat. Naast het
+kasboek telt de coach sinds v0.101.2 wat de zon die erin ging minder waard was
+dan zelf gebruikt (`zon_in_accu`, `solar_stored_days`), zodat Historie de zon
+niet meer als rest hoeft te rekenen; zie `docs/eerste-woning.md` onder In geld. Een
 aankoopprijs en een terugverdientijd stonden er van v0.73.0 tot v0.101.1; zie
 `docs/eerste-woning.md` onder In geld waarom ze eruit zijn.
 

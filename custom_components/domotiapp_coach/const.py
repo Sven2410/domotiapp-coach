@@ -532,8 +532,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     "boiler_learned": [],
     # Wat de coach van een thuisbatterij bijhoudt, per apparaat: het gemeten
     # rendement, wanneer hij voor het laatst vol was (voor de wekelijkse volle
-    # beurt) en wat hij per dag verdiende (voor In geld in Historie). Zie
-    # `_one_batterij` in coach.py.
+    # beurt), wat hij per dag verdiende (`earned_days`) en wat de zon die erin
+    # ging per dag minder waard was dan zelf gebruikt (`solar_stored_days`, vanaf
+    # `solar_stored_from`), allebei voor In geld in Historie. Zie `_one_batterij`
+    # en `_async_regel` in coach.py.
     "battery_state": [],
     # Het dagverbruik van gas en water dat de coach bijhoudt voor de melding
     # bij abnormaal verbruik: per meter en per dag de m³, en per meter de

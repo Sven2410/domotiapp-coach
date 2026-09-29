@@ -204,6 +204,10 @@ dan de andere in dezelfde uitgave.
 - **Salderen en de terugleverprijs**: `_salderen`, `_tariff`, `_prices` en
   `NETTING_ENDS` in coach.py en const.py tegenover `salderen`, `prijsOp` en
   `SALDEREN_TOT` in geld.js (`docs/eerste-woning.md`).
+- **De zon in de thuisbatterij**: `zon_in_accu` in batterij.py (per dag in
+  `solar_stored_days`) en de schatting `zonInAccu` in `huisMetAccu`
+  (views/history.js) voor de uren daarvoor; `balans` in geld.js telt ze op
+  dezelfde manier (`docs/eerste-woning.md`).
 
 ## Hoe het in elkaar zit
 
