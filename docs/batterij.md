@@ -610,3 +610,16 @@ van de batterij, en In geld in Historie telt ze samen zonder iets twee keer.
 Onder salderen levert dat deel weinig op: een kWh uit de batterij is eerder
 opgeslagen zon die anders voor de prijs min de terugleverkosten was teruggekomen.
 
+**Waarom eigen zon zo weinig scheelt, staat erbij zolang je saldeert** (v0.101.4).
+Bij de eigenaar op 29-09-2026: "0,9 kWh. 0,7 kWh kwam van je zon en 0,2 kWh uit je
+thuisbatterij. Bespaard € 0,036, allemaal door de zon." De eigenaar: "hoe kan je dan
+uitkomen op 0,036 bespaard, je hebt dan toch alles bespaard? 0,24171 betaal ik per
+kWh." Nagerekend: maat 0,906 × 0,24171 = € 0,2189, betaald 0,678 × 0,188954 (zon,
+teruggeleverd waard) + 0,215 × 0,24171 (batterij, telt als net) + 0,013 × 0,24171 =
+€ 0,1832, bespaard € 0,0357 = 0,678 × 0,052756. Klopt dus, maar de zin legde het
+niet uit. Nu: "Bespaard € 0,036 door de zon: zolang je saldeert scheelt een eigen
+kWh alleen de terugleverkosten." Bij een dynamisch contract "de opslag en de
+terugleverkosten", na het salderen niets erbij (`_zon_scheelt`, `_bespaard_zin`
+in coach.py, voor paal, vaatwasser en boiler; proef 116). Vanaf 1-1-2027 bespaart
+dezelfde beurt 0,678 × (0,24171 − 0,0193) = ongeveer € 0,15 door de zon.
+

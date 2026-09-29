@@ -1024,6 +1024,9 @@ class ChargerCoach:
         # Wat daarvan in de opslag staat, zodat er alleen bij een verandering
         # geschreven wordt. Zie `sensor_quiet`.
         self._sensor_gemeld_bewaard: set[str] = set()
+        # Het contract van de laatste ronde, voor de zin in een verslag dat
+        # buiten de ronde om geschreven wordt (`_zon_scheelt`).
+        self._contract: dict[str, Any] = {}
         # De prijslijsten van de ingebouwde Nord Pool, per sensor en per dag, en
         # wanneer een dag voor het laatst gevraagd is. Zie `_async_nordpool`.
         self._nordpool: dict[str, dict[str, list[dict[str, Any]]]] = {}
@@ -2056,6 +2059,7 @@ class ChargerCoach:
 
         level = (settings.get("strategy") or {}).get("level", LEVEL_PROPOSE)
         moment = _moment(now)
+        self._contract = settings.get("contract") or {}
         await self._async_nordpool(settings, moment)
 
         chargers = [
@@ -2784,7 +2788,7 @@ class ChargerCoach:
                 sessie["maat"] += kwh * koop_toen
 
     @staticmethod
-    def _bespaard_zin(totaal: float, zon: float) -> str:
+    def _bespaard_zin(totaal: float, zon: float, saldeert: str | None = None) -> str:
         """Eén zin voor in het verslag: wat er bespaard is, en waardoor.
 
         `totaal` is de maat min het betaalde: wat dezelfde beurt gekost had
@@ -2792,6 +2796,14 @@ class ChargerCoach:
         inpluggen. `zon` is wat de eigen zon daarvan scheelde; de rest is het
         wachten op een goedkoper moment. De eigenaar op 09-09-2026: "ik wil het
         totaal plaatje."
+
+        `saldeert` is wat een eigen kWh scheelt zolang er gesaldeerd wordt
+        (`_zon_scheelt`), en dan zegt de zin dat erbij (v0.101.4). De eigenaar
+        op 29-09-2026 over "0,9 kWh, 0,7 kWh kwam van je zon en 0,2 kWh uit je
+        thuisbatterij. Bespaard € 0,036, allemaal door de zon": "hoe kan je dan
+        uitkomen op 0,036 bespaard, je hebt dan toch alles bespaard? 0,24171
+        betaal ik per kWh." Klopte wel: 0,678 kWh maal 0,052756 aan
+        terugleverkosten, want die zon was teruggeleverd 0,188954 waard.
         """
         wachten = totaal - zon
         # Eén aantal decimalen per zin, naar het grootste bedrag erin.
@@ -2799,11 +2811,39 @@ class ChargerCoach:
         tot, z, w = (_bedrag(v, grootste) for v in (totaal, zon, abs(wachten)))
         if zon < 0.005:
             return f"Bespaard {tot} door te wachten."
+        uitleg = f"zolang je saldeert scheelt een eigen kWh alleen {saldeert}" if saldeert else ""
         if wachten < -0.005:
-            return f"Bespaard {tot}: de zon scheelde {z}, het wachten kostte {w}."
-        if wachten < 0.005:
+            zin = f"Bespaard {tot}: de zon scheelde {z}, het wachten kostte {w}."
+        elif wachten < 0.005:
+            if uitleg:
+                return f"Bespaard {tot} door de zon: {uitleg}."
             return f"Bespaard {tot}, allemaal door de zon."
-        return f"Bespaard {tot}: {z} door de zon en {w} door te wachten."
+        else:
+            zin = f"Bespaard {tot}: {z} door de zon en {w} door te wachten."
+        return f"{zin} {uitleg[0].upper()}{uitleg[1:]}." if uitleg else zin
+
+    def _zon_scheelt(self) -> str | None:
+        """Wat een eigen kWh scheelt zolang er gesaldeerd wordt, in woorden, of None.
+
+        Bij salderen is een teruggeleverde kWh de inkoopprijs waard min wat er
+        niet mee wegstreept: bij een vast contract de terugleverkosten, bij een
+        dynamisch ook de opslag van de leverancier (`_tariff`, `_prices`). Zelf
+        gebruiken scheelt dus alleen dat. Na het salderen is het de hele
+        inkoopprijs min de vergoeding, en dan hoeft er niets bij.
+        """
+        contract = self._contract or {}
+        if not self._salderen(contract):
+            return None
+        if contract.get("type") != "dynamic":
+            kosten = float((contract.get("fixed") or {}).get("feed_in_costs") or 0)
+            return "de terugleverkosten" if kosten > 0 else None
+        dynamic = contract.get("dynamic") or {}
+        delen = []
+        if float(dynamic.get("supplier_markup") or 0) > 0:
+            delen.append("de opslag")
+        if float(dynamic.get("feed_in_costs") or 0) - float(dynamic.get("feed_in_bonus") or 0) > 0:
+            delen.append("de terugleverkosten")
+        return " en ".join(delen) or None
 
     async def _async_programma_klaar(
         self,
@@ -2833,7 +2873,7 @@ class ChargerCoach:
         herkomst = self._herkomst_tekst(sessie) if kwh > 0 else ""
         bespaard = ""
         if maat is not None and kwh > 0 and maat - betaald >= 0.005:
-            bespaard = " " + self._bespaard_zin(maat - betaald, sessie.get("zon_winst") or 0.0)
+            bespaard = " " + self._bespaard_zin(maat - betaald, sessie.get("zon_winst") or 0.0, self._zon_scheelt())
         await self._async_tell(
             f"{naam} is klaar{wat}: gedraaid van {gestart:%H:%M} tot {einde:%H:%M}"
             + (f", {kwh:.1f} kWh".replace(".", ",") if kwh > 0 else "")
@@ -3716,7 +3756,9 @@ class ChargerCoach:
             maat = None if sessie["maat_onbekend"] or sessie.get("nodig_sinds") is None else sessie["maat"]
             bespaard = ""
             if maat is not None and maat - sessie["betaald"] >= 0.005:
-                bespaard = " " + self._bespaard_zin(maat - sessie["betaald"], sessie.get("zon_winst") or 0.0)
+                bespaard = " " + self._bespaard_zin(
+                    maat - sessie["betaald"], sessie.get("zon_winst") or 0.0, self._zon_scheelt()
+                )
             await self._async_tell(
                 f"{naam} is weer warm: {erin_tekst}{vanaf}."
                 + (f" {herkomst}" if herkomst else "") + bespaard,
@@ -8457,7 +8499,7 @@ class ChargerCoach:
         bespaard = maat - float(geld.get("betaald") or 0.0)
         if bespaard < 0.005:
             return ""
-        return " " + self._bespaard_zin(bespaard, float(geld.get("zon_winst") or 0.0))
+        return " " + self._bespaard_zin(bespaard, float(geld.get("zon_winst") or 0.0), self._zon_scheelt())
 
     async def _async_afgekoppeld(
         self,

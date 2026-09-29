@@ -3518,7 +3518,9 @@ hass64.states.zet("sensor.teruglevering", "3000")
 b, m = asyncio.run(ronde64(dt.datetime(2026, 9, 8, 12, 31)))
 print(f"  verslag: {m}")
 controle("het verslag zegt wat er bespaard is, en dat het allemaal de zon was",
-         len(m) == 1 and "is klaar" in m[0] and "Bespaard € 0,051, allemaal door de zon." in m[0], f"{m}")
+         len(m) == 1 and "is klaar" in m[0]
+         and "Bespaard € 0,051 door de zon: zolang je saldeert scheelt een eigen kWh alleen de terugleverkosten." in m[0],
+         f"{m}")
 controle("en waar de stroom vandaan kwam, zonder een bedrag dat nergens betaald is (v0.101.0)",
          len(m) == 1 and "Alles kwam van je zon." in m[0] and "ongeveer" not in m[0], f"{m}")
 b64 = [b for b in asyncio.run(coachmod.async_get_beurten(hass64).async_list()) if b["device"] == "dev-vaatwasser"]
@@ -6342,6 +6344,50 @@ finally:
         sys.modules.pop("homeassistant.helpers.entity_registry", None)
     else:
         sys.modules["homeassistant.helpers.entity_registry"] = oud115
+
+print("=== 116. het verslag zegt waarom eigen zon zo weinig scheelt zolang je saldeert (v0.101.4) ===")
+# De eigenaar op 29-09-2026 over "Bespaard € 0,036, allemaal door de zon" bij 0,9 kWh
+# waarvan 0,7 van de zon: "je hebt dan toch alles bespaard? 0,24171 betaal ik per
+# kWh." Het klopte: bij salderen is een teruggeleverde kWh 0,188954 waard.
+zin116 = coachmod.ChargerCoach._bespaard_zin
+controle("alleen zon, met salderen: waarom het zo weinig is",
+         zin116(0.036, 0.036, "de terugleverkosten")
+         == "Bespaard € 0,036 door de zon: zolang je saldeert scheelt een eigen kWh alleen de terugleverkosten.",
+         zin116(0.036, 0.036, "de terugleverkosten"))
+controle("zon en wachten: de uitleg als tweede zin",
+         zin116(0.12, 0.08, "de opslag en de terugleverkosten")
+         == "Bespaard € 0,120: € 0,080 door de zon en € 0,040 door te wachten. "
+            "Zolang je saldeert scheelt een eigen kWh alleen de opslag en de terugleverkosten.",
+         zin116(0.12, 0.08, "de opslag en de terugleverkosten"))
+controle("alleen wachten: geen uitleg over zon", zin116(0.04, 0.0, "de terugleverkosten") == "Bespaard € 0,040 door te wachten.", "")
+controle("zonder salderen de zin van altijd", zin116(0.037, 0.037) == "Bespaard € 0,037, allemaal door de zon.", "")
+
+hass116, _, coach116 = bouw(huis(), instellingen())
+
+
+def scheelt116(contract, dag=None):
+    coach116._contract = contract
+    if dag is None:
+        return coach116._zon_scheelt()
+    oud = coachmod.dt_util.utcnow
+    coachmod.dt_util.utcnow = lambda: dag
+    try:
+        return coach116._zon_scheelt()
+    finally:
+        coachmod.dt_util.utcnow = oud
+
+
+VAST116 = {"type": "fixed", "netting": True, "fixed": {"all_in_price": 0.24171, "feed_in_tariff": 0.0721, "feed_in_costs": 0.052756}}
+DYN116 = {"type": "dynamic", "netting": True, "dynamic": {"supplier_markup": 0.02, "feed_in_costs": 0.0182, "feed_in_bonus": 0.0}}
+controle("vast contract met salderen: de terugleverkosten", scheelt116(VAST116) == "de terugleverkosten", f"{scheelt116(VAST116)}")
+controle("dynamisch met salderen: de opslag en de terugleverkosten",
+         scheelt116(DYN116) == "de opslag en de terugleverkosten", f"{scheelt116(DYN116)}")
+controle("dynamisch met een verkoopvergoeding die de kosten opheft: alleen de opslag",
+         scheelt116({**DYN116, "dynamic": {**DYN116["dynamic"], "feed_in_bonus": 0.02}}) == "de opslag", "")
+controle("zonder salderen niets", scheelt116({**VAST116, "netting": False}) is None, "")
+controle("na 1 januari 2027 ook niets",
+         scheelt116(VAST116, dt.datetime(2027, 1, 2, 12, tzinfo=dt.timezone.utc)) is None, "")
+controle("zonder terugleverkosten niets", scheelt116({**VAST116, "fixed": {**VAST116["fixed"], "feed_in_costs": 0}}) is None, "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
