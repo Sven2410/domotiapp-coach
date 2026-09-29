@@ -669,6 +669,53 @@ controle("een oven op zijn thermostaat (45 s) volgt hij zonder geduld, zoals alt
          af18 < zonder18 * 0.35, f"{af18:.3f}")
 
 
+print("=== 35. doet de batterij zelf nul, dan grijpt de coach alleen in om in te kopen (v0.101.9) ===")
+# De eigenaar op 29-09-2026, in de klantwoning: "de coach moet de batterij niet zelf
+# sturen. Eigenlijk is de nul op de meter bij anker zelf beter toch? Dus ik stel voor
+# dat de coach alleen goedkoop inkoopt en de anker stopt als de laadpaal aan gaat."
+# Die middag koos de coach om 15:51 standby: vanavond was een kWh meer waard dan nu.
+# Een dynamisch contract met salderen: teruglevering is de prijs min de opslag.
+UUR35 = [0.24, 0.24, 0.24, 0.24, 0.24, 0.27, 0.31, 0.36, 0.40, 0.33, 0.28, 0.25,
+         0.22, 0.21, 0.22, 0.285, 0.27, 0.35, 0.40, 0.42, 0.36, 0.34, 0.33, 0.30]
+MORGEN35 = [0.24, 0.239, 0.243, 0.244, 0.24, 0.27, 0.31, 0.36, 0.40, 0.33, 0.28, 0.25,
+            0.21, 0.20, 0.22, 0.28, 0.29, 0.37, 0.41, 0.43, 0.37, 0.35, 0.34, 0.31]
+LIJST35 = prijzen(UUR35 + MORGEN35, terug=[p - 0.0242 for p in UUR35 + MORGEN35])
+NU35 = DAG.replace(hour=15, minute=51)
+V35 = verwachting({8: 0.3, 9: 0.8, 10: 1.5, 11: 2.0, 12: 2.2, 13: 2.0, 14: 1.5, 15: 1.0, 16: 0.5}, huis=0.6)
+b35 = plan_batterij(NU35, LIJST35, Tariff(), V35, anker(soc=58.0))
+z35 = plan_batterij(NU35, LIJST35, Tariff(), V35, anker(soc=58.0, zelf_nul=True))
+print(f"  gewoon:    {b35.stand:10s} {b35.rule:12s} {b35.reason}")
+print(f"  zelf nul:  {z35.stand:10s} {z35.rule:12s} {z35.reason}")
+controle("zonder het vinkje kiest de coach die middag stilstaan", b35.stand == STANDBY, f"{b35.stand} {b35.rule}")
+controle("met het vinkje: nul op de meter, en dat doet de batterij zelf", z35.stand == NUL, f"{z35.stand} {z35.rule}")
+standen35 = {u.stand for u in z35.uren}
+controle("in het uurplan staat niets wat de batterij in zijn eigen stand niet kan",
+         standen35 <= {NUL, NETLADEN, STANDBY} and not [u for u in z35.uren if u.stand == STANDBY and u.kwh != 0.0],
+         f"{sorted(standen35)}")
+net35 = [u for u in z35.uren if u.stand == NETLADEN]
+print(f"  van het net: {[(u.start.strftime('%d %H:%M'), round(u.kwh, 2)) for u in net35]}")
+later35 = lambda u: max(v.price for v in z35.uren if v.start > u.start)  # noqa: E731
+controle("goedkoop inkopen doet hij nog wel: 's nachts, en elk inkoopuur loont na het verlies",
+         net35 and any(u.start.hour < 6 for u in net35) and all(u.price <= 0.736 * later35(u) for u in net35),
+         f"{[(u.start, round(u.kwh, 2), u.price, later35(u)) for u in net35]}")
+# Een nacht rond het goedkoopste kwartier: laden van het net blijft een besluit van de coach.
+z35n = plan_batterij(DAG.replace(day=22, hour=1, minute=5), LIJST35, Tariff(), V35, anker(soc=12.0, zelf_nul=True))
+print(f"  01:05 op 12%: {z35n.stand} {z35n.rule} {z35n.power_w}")
+controle("om 01:05 op 12% laadt hij van het net, en dat doet de coach", z35n.stand == NETLADEN, f"{z35n.stand} {z35n.rule}")
+p35 = plan_batterij(NU35, LIJST35, Tariff(), V35, anker(soc=58.0, zelf_nul=True), paal_laadt=True)
+controle("laadt de paal, dan stopt de coach hem, ook met het vinkje",
+         p35.rule == "paal-laadt" and p35.stand in (ZONNELADEN, STANDBY), f"{p35.stand} {p35.rule}")
+# Zonder rendement en met volledig salderen stond hij stil; met het vinkje doet hij het zelf.
+s35 = plan_batterij(DAG.replace(hour=12), [], Tariff(buy=0.24, feed_in=0.24), verwachting(ZON),
+                    anker(rte=None, zelf_nul=True))
+controle("volledig salderen zonder rendement: de batterij doet het zelf in plaats van stilstaan",
+         s35.stand == NUL, f"{s35.stand} {s35.rule}")
+# De eerste proef van dit bestand, een vast contract met zon: met of zonder vinkje hetzelfde.
+for uur in (3, 12, 21):
+    a35, c35 = (plan_batterij(DAG.replace(hour=uur), [], VAST, verwachting(ZON), anker(zelf_nul=z)) for z in (False, True))
+    controle(f"vast contract om {uur}:00: met het vinkje hetzelfde besluit", a35.stand == c35.stand, f"{a35.stand} {c35.stand}")
+
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

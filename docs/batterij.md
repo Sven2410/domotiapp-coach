@@ -254,6 +254,29 @@ geen opdracht. Bij een herstart gaat hij ook uit zijn eigen stand naar 0 W in de
 externe stand, "bij herstart accu op 0 en dan pas kijken". Op de kaart "Wie
 regelt: de batterij zelf" (`self_zero` in de stand, `batteryRows`).
 
+**Met het vinkje plant de coach ook niets anders** (v0.101.9). In de klantwoning
+nam de coach een Anker op 29-09-2026 zelf in handen, zonder het vinkje, met een
+dynamisch contract en een P1 die eens per tien seconden meldt. De batterij liet
+een opdracht pas na mediaan tien seconden zien (tot 27), en de regelaar hield de
+meter maar 6 tot 22% van de tijd binnen 50 W, met ruim honderd opdrachten per
+uur; de Anker zelf had die ochtend 4 tot 13% gehaald. Het plan koos daar ook
+'s middags stilstaan ("vanavond is een kWh meer waard"), en met het vinkje had de
+coach hem daarvoor overgenomen. De eigenaar: "de coach moet de batterij niet zelf
+sturen ... alleen goedkoop inkopen en de anker stoppen als de laadpaal aan gaat."
+
+Met het vinkje (`Batterij.zelf_nul`) mag de som per blok alleen nog wat de
+batterij in zijn eigen stand doet (precies het huis voeden of precies het
+overschot opslaan), van het net laden daarboven, en met handelen aan ontladen
+daaronder (`_zelf_toegestaan` in `_waarde_vooruit` en `_beste_stap`). Het besluit
+van nu is dan nul, van het net laden, handelen of de paal; stilstaan, alleen zon
+opslaan en alleen ontladen komen niet meer voor, ook de salderen-standby zonder
+rendement niet. De overnames voor de vakantiestand, de reserve, de zekering en een
+ontbrekende accustand blijven. In het virtuele huis: `batterij-dynamisch-zelf`
+(bewolkt) € 1,49 met 14 opdrachten tegen € 1,48 met 161 als de coach alles stuurt,
+twee keer overgenomen om goedkoop bij te laden; `batterij-dynamisch-zon-zelf`
+€ -0,54 tegen € -1,01, want hij slaat alle zon op waar terugleveren soms meer
+oplevert, en eindigt op 48% in plaats van 39%. Proef 35 in test_batterij.py.
+
 Het virtuele huis kent `Batterij.eigen_nul` (een eigen lus van 2 s plus 2 s; een
 opdracht aan de knop doet hij in die stand niet) en `zelf_nul` (het vinkje).
 Scenario `batterij-zelf-nul` (de avond van `batterij-paal-laadt`): de paal begint

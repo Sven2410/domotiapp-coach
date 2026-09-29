@@ -133,6 +133,13 @@ class Batterij:
     # Vóór wanneer de batterij een keer helemaal vol hoort te zijn, of None.
     # Zie `vol_voor`.
     vol_voor: datetime | None = None
+    # De batterij doet zelf nul op de meter (v0.97.0), en de coach grijpt alleen
+    # in om van het net te laden, te handelen of als de paal laadt (v0.101.9).
+    # De eigenaar op 29-09-2026: "de coach moet de batterij niet zelf sturen ...
+    # alleen goedkoop inkopen en de anker stoppen als de laadpaal aan gaat."
+    # Stilstaan, alleen zon opslaan en alleen ontladen zijn er dan niet; zie
+    # `_zelf_toegestaan`.
+    zelf_nul: bool = False
 
     @property
     def bodem(self) -> float:
@@ -282,6 +289,32 @@ def _mogelijk(
     return max(op, e), min(neer, e)
 
 
+def _zelf_toegestaan(
+    kandidaten: set[float], e: float, deel: float, huis: float, b: Batterij,
+    som_laag: float, hoog: float, eta: float,
+) -> set[float]:
+    """Wat er van de kandidaten overblijft als de batterij zelf nul op de meter doet.
+
+    Zijn eigen stand is precies het huis voeden of precies het overschot
+    opslaan, zover hij kan. Daarboven is van het net laden, en dat doet de coach;
+    daaronder is handelen, alleen als dat aanstaat. Wat ertussen ligt (stilstaan,
+    of maar een deel) kan de batterij in zijn eigen stand niet.
+    """
+    if not b.zelf_nul:
+        return kandidaten
+    if huis > 0:
+        nul = max(min(som_laag, e), e - min(b.max_discharge_w / 1000.0 * deel, huis) / eta)
+    elif huis < 0:
+        nul = min(max(hoog, e), e + min(b.max_charge_w / 1000.0 * deel, -huis) * eta)
+    else:
+        nul = e
+    uit = {nul}
+    for k in kandidaten:
+        if k > max(e, nul) + 1e-9 or (b.handelen and k < min(e, nul) - 1e-9):
+            uit.add(k)
+    return uit
+
+
 def _blok_kosten(e: float, naar: float, huis: float, rij: dict, eta: float) -> float:
     """Wat dit blok kost als de inhoud van `e` naar `naar` gaat."""
     if naar >= e:
@@ -349,6 +382,7 @@ def _waarde_vooruit(
             laatste = int((op - laag) / stap)
             for i in range(max(0, eerste), min(STAPPEN, laatste) + 1):
                 kandidaten.add(rooster[i])
+            kandidaten = _zelf_toegestaan(kandidaten, e, deel, h, b, bodem, hoog, eta)
             begin.append(
                 min(
                     _blok_kosten(e, naar, h, rij, eta) + _tussen(volgende, stap, laag, naar)
@@ -374,6 +408,7 @@ def _beste_stap(som: _Som, k: int, e: float, b: Batterij) -> float:
     while i <= STAPPEN and som.laag + i * som.stap <= op:
         kandidaten.add(som.laag + i * som.stap)
         i += 1
+    kandidaten = _zelf_toegestaan(kandidaten, e, deel, h, b, bodem, som.hoog, som.eta)
     # Bij gelijke kosten wint niets doen, en daarna het kleinste gebaar: een
     # batterij die zonder reden beweegt slijt voor niets.
     return min(
@@ -682,7 +717,7 @@ def plan_batterij(
         # Zonder rendement valt er niets te vergelijken. Wat wel zeker is: als
         # terugleveren evenveel opbrengt als stroom kost, verliest opslaan
         # altijd, hoe goed de batterij ook is.
-        if terug is not None and terug >= koop - PRICE_MARGIN:
+        if terug is not None and terug >= koop - PRICE_MARGIN and not b.zelf_nul:
             return Besluit(
                 STANDBY,
                 reason="Terugleveren brengt nu evenveel op als stroom kost, dus opslaan kost alleen het verlies in de batterij.",
@@ -787,7 +822,9 @@ def plan_batterij(
                 auto_weg=auto_weg,
             )
 
-    if mag_huis and mag_zon:
+    if b.zelf_nul or (mag_huis and mag_zon):
+        # Doet de batterij het zelf, dan is dit wat hij doet: stilstaan, alleen
+        # zon opslaan of alleen ontladen kan hij in zijn eigen stand niet.
         besluit = Besluit(
             NUL,
             reason="Hij houdt de meter op nul: overschot gaat erin, wat het huis vraagt komt eruit.",
