@@ -276,9 +276,34 @@ opdrachten: de regelaar dacht dat hij op 0 W stond en had niets te veranderen.
 stand om, wacht tot de knop er weer is (`KNOP_WACHT_STAPPEN` keer
 `KNOP_WACHT_STAP`, samen tien seconden) en schrijft dan de 0 W; met een knop die
 er gewoon is blijft het eerst 0 W en dan de stand. Bij het overnemen en bij een
-herstart. Proef 112 in test_coach.py. **Nog niet aan de echte Anker gezien**: hoe
-lang de knop na het omzetten wegblijft, en wat hij in de externe stand uit het
-register doet.
+herstart. Proef 112 in test_coach.py.
+
+**En de knop kan langer wegblijven dan de coach wacht** (v0.101.8). In de
+klantwoning begon de coach op 29-09-2026 een Anker (Solarbank Max AC, firmware
+1.0.1.14) te sturen zonder "zelf nul op de meter": om 15:51:42 naar
+`third_party_control`, om 15:51:51 van 1310 W laden naar 0 W en `standby` (in het
+register stond 0), en pas om 15:51:56 waren het stuurgetal en de richting er weer,
+na veertien seconden. Het wachten van `_async_overnemen_op_nul` hield na tien op, en
+het beginnen met sturen zonder dat vinkje zette alleen de modus en schreef de eerste
+opdracht meteen naar de onbereikbare knop; Home Assistant meldde "Referenced
+entities ... are missing or not currently available" en sloeg hem over. In allebei
+de gevallen dacht de regelaar daarna dat zijn opdracht stond. Nu:
+
+- `_async_batterij_zetten` schrijft niets naar een onbereikbare knop en zegt dat
+  terug; `_async_overnemen_op_nul` zegt of de 0 W erin staat.
+- Kwam een opdracht niet aan, of is de knop na het wachten nog weg, dan onthoudt de
+  sessie dat (`nul_open`). De regelaar stuurt dan niets, en zodra de knop er is
+  schrijft hij eerst 0 W en begint opnieuw, want wat er intussen in het register
+  staat weet hij niet.
+- Beginnen met sturen gaat bij een weggevallen knop via dezelfde weg als het
+  overnemen; met een knop die er gewoon is schrijft de regelaar in dezelfde ronde
+  meteen zijn opdracht, zoals altijd.
+
+In het virtuele huis (`Batterij.knop_terug_s`): `batterij-zelf-knop-traag` gaf met
+v0.101.7 160 minuten 2500 W uit de batterij in de bus (6,67 kWh, eindigt op 5%), nu
+0,3 minuut en 53%, gelijk aan `batterij-zelf-nul`. `batterij-knop-traag-start` is
+het beginnen met sturen. Proef 118 in test_coach.py (acht van de elf controles
+vallen om met v0.101.7).
 
 **De batterij helpt de auto met wat er echt over is, en de nachtstrategie**
 (v0.90.0). De bewoner van de eerste woning op 23-09-2026, naar evcc: "bij laden van

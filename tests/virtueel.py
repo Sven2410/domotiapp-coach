@@ -723,6 +723,11 @@ class Batterij:
     # opdracht daaraan stil over. Wat er dan in het register staat blijft staan
     # (`opdracht_w`), en dat voert hij uit zodra hij weer extern gestuurd wordt.
     knop_weg: bool = False
+    # En na het omzetten naar de externe stand komt de knop pas na zoveel seconden
+    # terug: in de klantwoning op 29-09-2026 veertien (15:51:42 omgezet, 15:51:56
+    # terug). Nul is meteen, zoals de oudere scenario's.
+    knop_terug_s: float = 0.0
+    extern_op: dt.datetime | None = None
     # En wat de bewoner bij de coach instelt: "de batterij doet zelf nul op de meter".
     zelf_nul: bool = False
     # --- toestand ---
@@ -750,6 +755,8 @@ class Batterij:
         self.opdracht_op, self.opdracht_w = nu, watt
 
     def zet_modus(self, modus: str, nu: dt.datetime) -> None:
+        if modus != self.modus:
+            self.extern_op = nu
         self.modus = modus
         self.wachtrij = []
         if not self.zelf:
@@ -1559,7 +1566,9 @@ class Wereld:
     def bat_knoppen(self, hass) -> None:
         """De stuurknop en de richting van de batterij, zoals Home Assistant ze toont."""
         bat = self.batterij
-        if bat.knop_weg and bat.modus != "third_party_control":
+        nog_weg = (bat.knop_terug_s > 0 and bat.extern_op is not None
+                   and (self.nu - bat.extern_op).total_seconds() < bat.knop_terug_s)
+        if bat.knop_weg and (bat.modus != "third_party_control" or nog_weg):
             hass.states.zet(E["bat_richting"], "unavailable")
             hass.states.zet(E["bat_stuur"], "unavailable")
             return
