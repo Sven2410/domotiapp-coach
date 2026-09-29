@@ -604,10 +604,12 @@ percentage." De laadpaalkaart kreeg tot nu alleen een invulveld voor een auto
 zonder eigen sensor; een auto met een sensor stond er niet op.
 
 Nu staat er "Accu auto: 68 % · 13,4 van 19,7 kWh" (`deviceDetails` in
-data-source.js, `autosMetStand` en `accuTekst`): voor de auto die eraan hangt als
-die een sensor heeft, en anders voor elke auto van het huis met een sensor, elk
-met zijn naam. Een gast en een auto zonder sensor niet; die laatste vraagt zijn
-stand op de kaart zelf. Zonder bekende accu blijft het bij het percentage. De
+data-source.js, `gekozenAutoMetStand` en `accuTekst`), voor de auto die op de
+kaart gekozen staat, en zonder keuze de eerste, net als de keuzelijst (`carsFor`).
+Een gast en een auto zonder sensor krijgen geen regel; die laatste vraagt zijn
+stand op de kaart zelf. In v0.101.6 bleef de Ford staan als de gast gekozen was
+(de gast zit niet in `device.cars` maar komt er in `carsFor` bij); de eigenaar:
+"hij moet de accu tonen van de auto die geselecteerd is" (v0.101.7). Zonder bekende accu blijft het bij het percentage. De
 thuisbatterij kreeg dezelfde vorm, "Accustand: 39 % · 5,7 van 14,5 kWh", met de
 inhoud uit haar sensor of zoals ingevuld. Bij de eigenaar stond de Ford die dag op
 0 % (15 → 14 → 2 → 0 % op 28-09 tussen 15:44 en 17:01); dat is ook wat de coach
