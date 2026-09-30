@@ -239,6 +239,8 @@ class Circuit:
     reserved_amps: float = 0.0
     # Hoe hij in een zin heet: "groep" of "onderverdeelkast" (v0.101.5).
     soort: str = "groep"
+    # Per fase de hoogste meting van het venster; zie `Grid.phase_peak_amps`.
+    phase_peak_amps: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -249,6 +251,10 @@ class Grid:
     surplus_w: float = 0.0
     # Current per phase, of which the heaviest is what a fuse cares about.
     phase_amps: list[float] = field(default_factory=list)
+    # Per fase de hoogste meting van het venster waar `phase_amps` de mediaan
+    # van is. Leeg als de coach die niet bijhoudt; dan telt de mediaan. Alleen
+    # voor de vraag of de limiet omhoog mag, zie `ruimten_nu` (v0.102.2).
+    phase_peak_amps: list[float] = field(default_factory=list)
     fuse_amps: float = 25.0
     # How much of the charger's own draw is already in those phase readings.
     # Subtracted before working out what is left, or the coach would take its
@@ -600,27 +606,34 @@ def charger_share(grid: Grid, charger: Charger) -> float:
     return max(grid.charger_amps, min(gevraagde_amps(grid, charger), zwaarste))
 
 
-def ruimten(grid: Grid, charger: Charger, marge: bool = True) -> list[tuple[str, float]]:
+def ruimten(
+    grid: Grid, charger: Charger, marge: bool = True, piek: bool = False
+) -> list[tuple[str, float]]:
     """Wat er onder elke zekering nog past, op naam: "" is de hoofdaansluiting.
 
     Per zekering dezelfde som: de zwaarste fase min wat daarvan van de paal
     zelf is, dat is het huis; de zekering min het huis min de marge min wat er
     deze ronde al aan een ander laadpunt onder dezelfde zekering is toegezegd.
     Een groep zonder meter heeft geen huis: daar telt alleen de toezegging.
+
+    Met `piek` dezelfde som op de hoogste meting van het venster in plaats van
+    op de mediaan, waar de coach die bijhoudt; zie `ruimten_nu`.
     """
     uit: list[tuple[str, float]] = []
-    if grid.phase_amps:
-        household = max(grid.phase_amps) - charger_share(grid, charger)
+    fasen = (grid.phase_peak_amps if piek else []) or grid.phase_amps
+    if fasen:
+        household = max(fasen) - charger_share(grid, charger)
         ruimte = grid.fuse_amps - max(0.0, household) - grid.reserved_amps
         if marge:
             ruimte -= fuse_margin(grid)
         uit.append(("", ruimte))
     for groep in grid.circuits:
-        if groep.phase_amps:
+        fasen = (groep.phase_peak_amps if piek else []) or groep.phase_amps
+        if fasen:
             # De paal zit ook in de meting van zijn eigen groep, en nooit voor
             # meer dan er op die groep werkelijk loopt.
-            aandeel = min(charger_share(grid, charger), max(groep.phase_amps))
-            household = max(groep.phase_amps) - aandeel
+            aandeel = min(charger_share(grid, charger), max(fasen))
+            household = max(fasen) - aandeel
             ruimte = groep.fuse_amps - max(0.0, household) - groep.reserved_amps
         else:
             ruimte = groep.fuse_amps - groep.reserved_amps
@@ -628,6 +641,36 @@ def ruimten(grid: Grid, charger: Charger, marge: bool = True) -> list[tuple[str,
             ruimte -= fuse_margin_van(groep.fuse_amps, groep.margin_amps)
         uit.append((groep.name, ruimte))
     return uit
+
+
+def ruimten_nu(grid: Grid, charger: Charger) -> list[tuple[str, float]]:
+    """`ruimten`, maar omhoog alleen als de hoogste meting van het venster ook past.
+
+    Omlaag gaat op de mediaan, zoals altijd: één sample dat nergens bij hoort
+    mag een laadbeurt niet knijpen. Omhoog is iets anders. Bij de eigenaar op
+    30-09-2026 stond er tijdens het laden een apparaat van zo'n 10 A op één
+    fase dat om de tien tot twintig seconden aan en uit ging. De coach zakte
+    van 16 naar 12 A, en ging een minuut later terug naar 16 op één meting die
+    in een dal viel (12:46:28: de fase op 10 A, twaalf seconden later weer op
+    21); met de auto terug op 16 A stond die fase daarna telkens op 24 A, en
+    dat vier keer in een kwartier: 16, 13, 12, 16.
+
+    Dus: wat er boven de staande limiet bij zou komen, komt er alleen bij als
+    het ook past naast de hoogste meting van het venster. Nooit lager dan wat
+    er al stond, want dat is de vraag van de mediaan. Alleen voor een paal die
+    laadt en zijn limiet teruggeeft; een beurt die begint telt zoals altijd.
+    De metingen van vóór een stap omlaag dragen de oude stroom van de paal
+    nog, dus na zo'n stap blijft hij het venster lang staan. Dat is de bedoeling.
+    """
+    alle = ruimten(grid, charger)
+    staand = charger.limit_amps if charger.charging else None
+    if staand is None or staand < MIN_AMPS:
+        return alle
+    pieken = ruimten(grid, charger, piek=True)
+    return [
+        (naam, ruimte if ruimte <= staand else max(float(staand), min(ruimte, top)))
+        for (naam, ruimte), (_naam, top) in zip(alle, pieken)
+    ]
 
 
 def knelpunt(grid: Grid, car: Car, charger: Charger) -> str | None:
@@ -640,7 +683,7 @@ def knelpunt(grid: Grid, car: Car, charger: Charger) -> str | None:
     """
     if not fuse_limited(grid, car, charger):
         return None
-    alle = ruimten(grid, charger)
+    alle = ruimten_nu(grid, charger)
     return min(alle, key=lambda paar: paar[1])[0] if alle else None
 
 
@@ -680,7 +723,7 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
     if groep is not None:
         limits.append(groep)
 
-    for _naam, ruimte in ruimten(grid, charger):
+    for _naam, ruimte in ruimten_nu(grid, charger):
         if meter_loopt_achter(grid, charger):
             # De veiligheidsrail. Zolang de meter achterloopt is een deel van
             # deze som een aanname, en op een aanname mag er nooit méér gevraagd
@@ -773,7 +816,36 @@ def fuse_limited(grid: Grid, car: Car, charger: Charger) -> bool:
     vroeg toen hij snelladen aanzette en er 8 A uit kwam.
     """
     hardware = [charger.max_amps] + ([car.max_amps] if car.max_amps else [])
-    return any(ruimte < min(hardware) for _naam, ruimte in ruimten(grid, charger))
+    return any(ruimte < min(hardware) for _naam, ruimte in ruimten_nu(grid, charger))
+
+
+def plafond_zin(grid: Grid, car: Car, charger: Charger, ceiling: int) -> str:
+    """Waarom er minder gevraagd wordt dan de paal en de auto kunnen, of "".
+
+    De eigenaar op 30-09-2026 las tien minuten "Snelladen staat aan, dus hij
+    laadt op 14 A, ongeacht de prijs" bij een paal van 16 A. Wat hem op 14
+    hield was de rail van `ceiling_amps`: de auto nam minder dan er gevraagd
+    was, en dan vraagt de coach niet meer. `fuse_limited` kent alleen de
+    zekering, en alles wat het plafond verder laag houdt viel in de zin die
+    zegt dat er niets aan de hand is. Eén reden, de eerste die past.
+    """
+    hardware = min([charger.max_amps] + ([car.max_amps] if car.max_amps else []))
+    if ceiling >= int(hardware):
+        return ""
+    if fuse_limited(grid, car, charger):
+        return (
+            f"Meer past er nu niet onder {zekering_van(knelpunt(grid, car, charger), grid)}. "
+            "Zodra je huis minder vraagt, gaat hij omhoog."
+        )
+    bewaker = beschikbaar_van_bewaker(grid)
+    if bewaker is not None and int(bewaker) <= ceiling:
+        return "Meer geeft je lastbewaker nu niet vrij."
+    groep = circuit_ceiling(charger)
+    if groep is not None and int(groep) <= ceiling:
+        return "Meer past er niet op de groep van de lader."
+    if meter_loopt_achter(grid, charger):
+        return "Hoger gaat hij zodra de auto dat ook neemt."
+    return ""
 
 
 def beschikbaar_van_bewaker(grid: Grid) -> float | None:
@@ -2864,13 +2936,13 @@ def _decide(
         # Boven de prijs en boven het schema, want de bewoner weet iets wat de
         # coach niet weet: dat hij zo weg moet. Wel onder de zekering, want die
         # weet iets wat de bewoner niet weet.
+        waarom_minder = plafond_zin(grid, car, charger, ceiling)
         return Decision(
             True,
             ceiling,
             (
-                f"Snelladen staat aan, dus hij laadt op {ceiling} A. Meer past er nu "
-                f"niet onder {zekering_van(knelpunt(grid, car, charger), grid)}. Zodra je huis minder vraagt, gaat hij omhoog."
-                if fuse_limited(grid, car, charger)
+                f"Snelladen staat aan, dus hij laadt op {ceiling} A. {waarom_minder}"
+                if waarom_minder
                 else f"Snelladen staat aan, dus hij laadt op {ceiling} A, ongeacht de prijs."
             ),
             plan="Blijft op vol vermogen tot je het uitzet of de kabel eruit gaat.",

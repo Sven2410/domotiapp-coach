@@ -87,3 +87,11 @@ grens als "Doet nu" op de kaart (`ACTIVE_WATTS`); de schermlezer hoort " (laadt)
 " (ontlaadt)", " (verwarmt)" of " (aan)". De vrijgave blijft ook groen. Proeven in
 test_rapport.mjs.
 
+**Een tab is het anker van zijn onzichtbare woord** (v0.102.2). In elke tab van
+de rij apparaten staat een woord voor de schermlezer (`.sr`, absoluut
+geplaatst). Zonder `position: relative` op `.steer-tab` hing dat woord aan de
+pagina en schoof het niet mee met de rij: met meer apparaten dan er naast elkaar
+passen werd de hele pagina zo breed als de rij, en schoof het paneel op een
+telefoon zijwaarts. Gemeten op 30-09-2026 met twaalf tabs: op 390 px breed een
+pagina van 1.227 px, met het anker 375; op 320 en 280 px net zo (305 en 265).
+Proef in test_rapport.mjs.

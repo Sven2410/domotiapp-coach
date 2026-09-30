@@ -629,6 +629,64 @@ krijg ik deze melding als de auto al vol is?" `_bewakertip` keek alleen naar die
 twee getallen. Nu alleen bij een besluit dat laadt (`decision.charge` in `_one`);
 proef 123.
 
+**En hij gaat niet naar de telefoon** (v0.102.2). Dat de lastbewaker het tempo
+bepaalt is uitleg, niets dat de bewoner moet oplossen: de tip staat op de kaart
+en in de geschiedenis, als gewone melding (`telefoon=False` in `_one`). Een
+netmeting die wegvalt en een fase-instelling die niet klopt blijven kritiek.
+Proef 127.
+
+**Omhoog alleen als de hoogste meting van het venster ook past** (v0.102.2). De
+eigenaar op 30-09-2026, snelladen op 16 A aan 3x25 A met een lastbewaker, en een
+apparaat van zo'n 10 A op één fase dat om de tien tot twintig seconden aan en
+uit ging. De coach zakte voor de zekering naar 13 en 12 A, en ging een minuut
+later terug naar 16: om 12:46:28 stond die fase op 10 A, twaalf seconden later
+weer op 21, en met de auto terug op 16 A daarna telkens op 24 A. Vier keer in
+een kwartier: 16, 13, 12, 16.
+
+Twee dingen maakten dat. De ronde na een stap omlaag rekent met wat de sensor op
+dat moment zegt (`_daling` in `_gladde_fase`: de metingen van ervoor dragen de
+oude stroom van de paal), en dat is bij zo'n apparaat de helft van de tijd een
+dal. En de mediaan zelf valt bij een last die aan en uit gaat alle kanten op:
+een meter die hele ampères meldt geeft alleen de wissels door, en dan telt hoog
+even vaak als laag.
+
+Omlaag blijft op de mediaan gaan, want één sample dat nergens bij hoort mag een
+laadbeurt niet knijpen (`nood_ruimte`, de nacht van 30-08-2026). Omhoog niet
+meer: wat er boven de staande limiet bij zou komen, komt er alleen bij als het
+ook past naast de hoogste meting van de laatste anderhalve minuut
+(`ruimten_nu` in planner.py, `phase_peak_amps` in `Grid` en `Circuit`,
+`_fase_piek` in coach.py). Nooit lager dan wat er al stond. Alleen voor een paal
+die laadt en zijn limiet teruggeeft (`dynamic_limit`, bij een Easee en bij een
+Alfen); een beurt die begint telt zoals altijd. Na een stap omlaag blijft hij
+dus anderhalve minuut staan, en gaat het apparaat uit, dan is hij binnen
+tweeënhalve minuut terug op vol. De luisteraar op de fasen bewaart daarvoor één
+meting van vóór het venster: die zegt wat er aan het begin ervan stond.
+
+In het virtuele huis (`puls-tijdens-snelladen`, met een meter die hele ampères
+meldt en een auto die iets minder neemt dan de limiet, zoals de echte): 18 keer
+terug naar 16 A in twintig minuten werd 1 keer zakken en 1 keer terug. In de
+scenario's die er al waren verschoof alleen "vol om" met een of twee minuten,
+in vier stuks met een oven, een warmtepomp of een Equalizer (`ford-bijkomen`,
+`ford-oude-opslag`, `klantwoning-oven`, en `equalizer-knijpt` met vier cent
+erbij). Proef 70 in test_planner.py, proef 128 in test_coach.py.
+
+**Waarom hij minder vraagt dan hij kan** (v0.102.2). Diezelfde middag stond er
+tien minuten "Snelladen staat aan, dus hij laadt op 14 A, ongeacht de prijs" bij
+een paal van 16 A. Wat hem op 14 hield was de rail van `ceiling_amps`: de paal
+gaf 13 A door, de auto nam dus meer dan een ampère minder dan er gevraagd was
+(`meter_loopt_achter`), en dan vraagt de coach niet meer. `fuse_limited` kent
+alleen de zekering, dus alles wat het plafond verder laag houdt viel in de zin
+die zegt dat er niets aan de hand is. `plafond_zin` in planner.py geeft nu de
+eerste reden die past: de zekering ("Meer past er nu niet onder je zekering"),
+de lastbewaker ("Meer geeft je lastbewaker nu niet vrij."), de groep van de
+lader ("Meer past er niet op de groep van de lader.") of de auto ("Hoger gaat
+hij zodra de auto dat ook neemt."). Op vol vermogen blijft de zin zoals hij was.
+
+**Niet gebouwd, wel gezien:** die rail heeft geen einde. Een auto die blijvend
+meer dan een ampère onder zijn limiet blijft houdt de limiet vast op wat er
+stond, ook als er allang ruimte is. Dat is een afspraak van 26-08-2026 en die
+staat nog.
+
 ## De accustand op de kaarten (v0.101.6)
 
 De eigenaar op 29-09-2026: "Ook wil ik op de laadpaalkaart de batterijstand van de

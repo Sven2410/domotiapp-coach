@@ -168,11 +168,16 @@ class Huis:
     # of een warmtepomp, zei de eigenaar. Elke sturing op de meter schiet daar
     # op door als hij niet oppast.
     puls: tuple[float, float, float] | None = None
+    # Tussen welke tijden die last er is, ("12:40", "12:50"); None is de hele
+    # dag. Een kookplaat die tien minuten pendelt en dan uit gaat.
+    puls_venster: tuple[str, str] | None = None
 
     def watt(self, moment: dt.datetime, dag_offset: int = 0) -> float:
         u = moment.hour + moment.minute / 60
         puls_w = 0.0
-        if self.puls is not None:
+        if self.puls is not None and (
+            self.puls_venster is None or _uur(self.puls_venster[0]) <= u < _uur(self.puls_venster[1])
+        ):
             watt_p, seconden, elke = self.puls
             minuut = moment.hour * 60 + moment.minute + moment.second / 60
             if (minuut % elke) * 60 < seconden:
@@ -247,6 +252,9 @@ class Auto:
     # Zoveel ampère trekt hij bóven de limiet die hij krijgt. De Ford bij Van
     # den Dam trok op 06-09-2026 16,9 A op een limiet van 16 op één fase.
     overschot_amps: float = 0.0
+    # En zoveel neemt hij mínder dan de limiet, op hoeveel fasen ook: de auto
+    # van de eigenaar trok op 30-09-2026 15,4 A op een limiet van 16 en 11,9 op 12.
+    tekort_amps: float = 0.0
     # Een auto die een herstart van de paal midden in de sessie niet verdraagt:
     # hij gaat in storing en laat de paal "completed" melden. Uit die storing
     # komt hij alleen met een nieuw startcommando, en daar doet hij zo veel
@@ -324,7 +332,7 @@ class Auto:
                 doel = min(doel, self.vast_amps)
             else:
                 self.vast_tot = None
-        self.trekt_amps = doel + (self.overschot_amps if fasen == 1 else 0.0)
+        self.trekt_amps = max(0.0, doel + (self.overschot_amps if fasen == 1 else 0.0) - self.tekort_amps)
 
     def start_ontvangen(self, nu: dt.datetime) -> None:
         """De paal stuurde een start. In storing telt vanaf nu het herstel."""
@@ -962,6 +970,17 @@ class Scenario:
     # met een eigen kWh-meter. None is geen groep.
     groep_amps: float | None = None
     groep_last_w: float = 0.0
+    # De meter meldt de fasestromen in hele ampères, en Home Assistant geeft
+    # alleen door wat verandert: zo doet een slimme meter op de P1-poort het.
+    # De coach krijgt dan alleen de wissels, niet elke stap een meting, en een
+    # last die aan en uit gaat telt in zijn mediaan even vaak hoog als laag.
+    # Standaard uit: dan meldt de meter elke stap, met twee decimalen.
+    fase_hele_amps: bool = False
+    # Een paal die van toestand wisselt wekt de coach meteen, zoals in Home
+    # Assistant: de ronde valt dan in de seconde waarin de auto stopt, met de
+    # meterwaarde van daarvoor. Standaard uit, zodat de oudere scenario's hun
+    # ronden houden waar ze waren.
+    ronde_bij_status: bool = False
 
     def kopie(self, **wijzigingen) -> "Scenario":
         return dataclasses.replace(self, **wijzigingen)
@@ -1020,6 +1039,9 @@ class Verloop:
     fouten: list[str] = field(default_factory=list)
     # De laadbeurten zoals de coach ze in de opslag zette: kWh, betaald, bespaard.
     beurten: list = field(default_factory=list)
+    # Alles wat er in het tabje Meldingen staat, ook wat niet naar de telefoon
+    # ging: rijen met `message` en `kind` (kritiek, melding, besluit).
+    geschiedenis: list = field(default_factory=list)
     # Hoe vaak de paal zelf de sessie herstartte omdat de auto over de groep ging.
     paal_herstarts: int = 0
     # Hoe vaak een Alfen op zijn veilige stroom terugviel omdat de coach
@@ -1630,8 +1652,9 @@ class Wereld:
                 if i == 0:
                     a += self.s.groep_last_w / VOLT
                 z(E[f"g_{naam}"], weg if p1_weg else w(f"{a:.2f}", "A"))
+        cijfers = 0 if self.s.fase_hele_amps else 2
         for naam, a in zip(("l1", "l2", "l3"), self.fase_amps()):
-            z(E[naam], weg if p1_weg else w(f"{a:.2f}", "A"))
+            z(E[naam], weg if p1_weg else w(f"{a:.{cijfers}f}", "A"))
 
         status = self.paal.status(self.auto)
         z(E["status"], status)
@@ -2029,6 +2052,8 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
 
     vorige = (None, None)
     laatste_ronde = None
+    fase_gemeld: dict[str, str] = {}
+    paal_status = None
 
     class Fasemelding:
         """Wat de luisteraar van de coach van Home Assistant krijgt: één toestand."""
@@ -2047,7 +2072,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
         return c
 
     async def lus():
-        nonlocal vorige, laatste_ronde, coach
+        nonlocal vorige, laatste_ronde, coach, paal_status
         while wereld.nu < einde:
             nu = wereld.nu
             while gebeurtenissen and gebeurtenissen[0][0] <= nu:
@@ -2070,10 +2095,22 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
             wereld.meet()
             wereld.publiceer(hass)
             await hass.afmaken()
+            if s.ronde_bij_status:
+                status_nu = wereld.paal.status(wereld.auto)
+                if paal_status is not None and status_nu != paal_status:
+                    laatste_ronde = None
+                paal_status = status_nu
             # De fasen komen bij de coach binnen op het tempo van de meter, en
             # een fase boven de grens wekt hem. Zie `_async_phase_changed`.
             for naam, a in zip(("l1", "l2", "l3"), wereld.fase_amps()):
                 if E[naam] in coach._watched_phases and wereld.p1_weg_tot is None:
+                    if s.fase_hele_amps:
+                        # Alleen een wissel komt langs, zoals in Home Assistant.
+                        if fase_gemeld.get(naam) == f"{a:.0f}":
+                            continue
+                        fase_gemeld[naam] = f"{a:.0f}"
+                        coach._async_phase_changed(Fasemelding(E[naam], fase_gemeld[naam]))
+                        continue
                     coach._async_phase_changed(Fasemelding(E[naam], f"{a:.2f}"))
             gewekt = bool(hass.taken)
             await hass.afmaken()
@@ -2199,6 +2236,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
     asyncio.run(hass.afmaken())
     try:
         verloop.beurten = asyncio.run(coachmod.async_get_beurten(hass).async_list())
+        verloop.geschiedenis = asyncio.run(coachmod.async_get_meldingen(hass).async_list())
         verloop.paal_herstarts = wereld.paal.herstarts
         verloop.paal_terugvallen = wereld.paal.terugvallen
         verloop.geleerd = {int(r["band"]): float(r["kw"]) for r in inst.get("car_pace") or []

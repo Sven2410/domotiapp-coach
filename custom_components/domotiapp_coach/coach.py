@@ -233,6 +233,18 @@ VREEMD_PAUZE = timedelta(hours=1)
 ZELF_WACHT = timedelta(minutes=2)
 ZELF_ZEKERING_W = 500.0
 ZELF_MARGE = 1.0
+# Stopt de laadpaal, dan telt hij voor de batterij nog als ladend tot de meter
+# een waarde gaf van minstens zoveel later. Bij de eigenaar op 30-09-2026 stopte
+# de auto om 13:39:54; de laatste meterwaarde was van 13:39:53 en zei nog
+# 7,3 kW afname, midden in het afbouwen. De regelaar rekende daarmee en zette
+# de batterij in dezelfde seconde op ontladen op vol vermogen, terwijl er 1 kW
+# zon over was: een paar seconden 4,2 kW het net op, en daarna ruim een
+# minuut niets, omdat hij dat zelf voor een korte last aanzag. De waarde van
+# 13:39:55 klopte al; vijf seconden is de tijd die een batterij zelf nodig
+# heeft (`VOLGT_NA` in batterij.py). Een meter die zwijgt houdt dit niet
+# eeuwig vast: na `PAAL_UIT_LANGST` geldt het besluit weer zoals het is.
+PAAL_UIT_WACHT = timedelta(seconds=5)
+PAAL_UIT_LANGST = timedelta(seconds=30)
 # Hoe lang de coach na het omzetten naar de externe stand wacht tot de stuurknop
 # van de batterij er weer is, in stappen van een halve seconde. De Anker van de
 # eigenaar (28-09-2026) maakte hem een seconde na het omzetten onbereikbaar; de
@@ -2011,7 +2023,10 @@ class ChargerCoach:
         historie = self._fase_historie.setdefault(new.entity_id, [])
         historie.append((nu, amps))
         grens = nu - FASE_VENSTER
-        while historie and historie[0][0] < grens:
+        # Eén meting van vóór het venster blijft staan: die zegt wat er aan
+        # het begin van het venster stond. De mediaan telt hem niet, de
+        # hoogste meting wel; zie `_piek_fase`.
+        while len(historie) > 1 and historie[1][0] < grens:
             historie.pop(0)
 
         grens = (self._urgent_above or {}).get(new.entity_id)
@@ -4438,6 +4453,29 @@ class ChargerCoach:
         """Onder welke zekeringen een toezegging aan dit apparaat meetelt."""
         return [""] + [str(g.get("id")) for g in self._groepen_keten(settings, device)]
 
+    def _fase_piek(self, phase: dict[str, Any], now: datetime) -> float | None:
+        """De hoogste meting van deze fase binnen `FASE_VENSTER`.
+
+        Naast de mediaan van `_fase_amps`, en alleen voor de vraag of de limiet
+        van een paal omhoog mag (`ruimten_nu` in planner.py): een apparaat dat
+        om de tien seconden aan en uit gaat heeft een mediaan die alle kanten
+        op valt, en een hoogste meting die zegt wat er straks weer staat. Hier
+        geldt `_daling` niet: de metingen van vóór een stap omlaag dragen de
+        oude stroom van de paal, en dat houdt hem het venster lang beneden.
+        Een fase zonder stroomsensor heeft geen historie; dan telt wat hij nu
+        zegt.
+        """
+        nu_amps = self._fase_amps(phase, now)
+        if nu_amps is None:
+            return None
+        rauw = self._volgehouden(phase.get("current"), _number(self.hass, phase.get("current")), now)
+        historie = self._fase_historie.get(phase.get("current") or "") or []
+        grens = now - FASE_VENSTER
+        # De laatste meting van vóór het venster stond er aan het begin ervan nog.
+        voor = [waarde for stempel, waarde in historie if stempel < grens][-1:]
+        binnen = [waarde for stempel, waarde in historie if stempel >= grens]
+        return max([nu_amps] + ([rauw] if rauw is not None else []) + voor + binnen)
+
     def _fase_amps(self, phase: dict[str, Any], now: datetime) -> float | None:
         """Wat een fase trekt: de stroomsensor (vastgehouden en gladgestreken),
         anders vermogen gedeeld door spanning. Zie `_gladde_fase`."""
@@ -4880,9 +4918,15 @@ class ChargerCoach:
         zelf = bool(stuurt and sessie.get("zelf"))
         self.state[device_id]["self_zero"] = zelf
         if zelf:
-            self.state[device_id]["reason"] = (
-                besluit.reason + " De batterij doet dat zelf, met zijn eigen meter."
-            ).strip()
+            # Alleen als het plan ook nul op de meter is. Loopt het overnemen
+            # nog (de coach wacht op de stuurknop), dan staat hij nog in zijn
+            # eigen stand terwijl het besluit al iets anders zegt, en dan stond
+            # er bij de eigenaar op 30-09-2026 een ronde lang "De laadpaal
+            # laadt, dus de batterij geeft niets af. De batterij doet dat zelf."
+            if besluit.stand == NUL:
+                self.state[device_id]["reason"] = (
+                    besluit.reason + " De batterij doet dat zelf, met zijn eigen meter."
+                ).strip()
             self.state[device_id]["setpoint_w"] = None
 
     async def _async_regel(
@@ -4931,16 +4975,28 @@ class ChargerCoach:
             # Laadt er intussen een paal, dan geeft de batterij niets af, ook
             # als het besluit van deze minuut dat nog niet wist: de regelaar
             # tikt elke paar seconden, de besluitronde eens per minuut (v0.87.1).
+            paal_laadt = self._paal_laadt(settings)
+            besluit = sessie["besluit"]
+            if self._paal_net_uit(sessie, paal_laadt, nu, net_op):
+                # Op een kopie: het besluit van de ronde blijft zoals het is,
+                # en geldt weer zodra de meter bij is.
+                besluit = replace(besluit)
+                paal_laadt = True
             besluit = met_paal(
-                sessie["besluit"], self._paal_laadt(settings), b, sessie.get("nacht_over"),
+                besluit, paal_laadt, b, sessie.get("nacht_over"),
                 grens=sessie.get("auto_grens"), helpt=bool(sessie.get("helpt")),
             )
             sessie["helpt"] = besluit.rule == "auto-helpen"
-            ruimte_w = self._laadruimte_w(
-                settings, device, batterij_w, self._hogere_toezeggingen(settings, device)
-            )
+            hoger = self._hogere_toezeggingen(settings, device)
+            ruimte_w = self._laadruimte_w(settings, device, batterij_w, hoger)
             if self._zelf_instelling(device) or sessie.get("zelf"):
-                waarom = self._zelf_niet(device, besluit, b, batterij_w, ruimte_w)
+                waarom = self._zelf_niet(
+                    device, besluit, b, batterij_w, ruimte_w,
+                    # Zonder wat een ander toezegde, en of dat een laadpaal was:
+                    # dan is het niet de zekering maar de paal die gaat laden.
+                    kaal_w=self._laadruimte_w(settings, device, batterij_w) if hoger else None,
+                    paal_belooft=self._paal_belooft(settings),
+                )
                 await self._async_zelf_wissel(device, sessie, nu, waarom)
                 if sessie.get("zelf"):
                     return
@@ -4983,8 +5039,13 @@ class ChargerCoach:
     def _zelf_niet(
         self, device: dict[str, Any], besluit: Besluit, b: Batterij,
         batterij_w: float | None, ruimte_w: float | None,
+        kaal_w: float | None = None, paal_belooft: bool = False,
     ) -> str | None:
-        """Waarom de batterij het nu niet zelf mag doen, of None als het mag."""
+        """Waarom de batterij het nu niet zelf mag doen, of None als het mag.
+
+        `kaal_w` is de ruimte zonder wat andere apparaten toezegden, of None
+        als niemand iets toezegde.
+        """
         if not self._zelf_instelling(device):
             return "je hebt het uitgezet"
         if besluit.stand != NUL:
@@ -4998,9 +5059,41 @@ class ChargerCoach:
         # Zijn eigen ondergrens kent hij; een hogere reserve van de bewoner niet.
         if b.bodem > b.soc_min and b.soc <= b.bodem + ZELF_MARGE:
             return "hij zit bij de reserve voor noodstroom"
-        if ruimte_w is not None and ruimte_w - max(0.0, batterij_w or 0.0) < ZELF_ZEKERING_W:
+        eigen_w = max(0.0, batterij_w or 0.0)
+        if ruimte_w is not None and ruimte_w - eigen_w < ZELF_ZEKERING_W:
+            # Is het krap door wat een ander apparaat toezegde en nog niet
+            # neemt, dan is dat de reden. Bij de eigenaar op 30-09-2026 om
+            # 12:01:42: de paal had 16 A toegezegd en laadde nog niet, de fase
+            # van de batterij stond op 4 A, en de melding zei "want de zekering
+            # wordt krap".
+            if kaal_w is not None and kaal_w - eigen_w >= ZELF_ZEKERING_W:
+                return "de laadpaal gaat laden" if paal_belooft else "een ander apparaat krijgt de ruimte"
             return "de zekering wordt krap"
         return None
+
+    def _paal_belooft(self, settings: dict[str, Any]) -> bool:
+        """Of een laadpaal deze ronde stroom toezegde die hij nog niet neemt."""
+        soort = {a.get("id"): a.get("type") for a in settings.get("devices") or []}
+        return any(
+            soort.get(apparaat_id) == "laadpaal" and float(toezegging.get("amps") or 0.0) > 0
+            for apparaat_id, toezegging in self._toezeggingen.items()
+        )
+
+    @staticmethod
+    def _paal_net_uit(
+        sessie: dict[str, Any], laadt: bool, nu: datetime, net_op: datetime | None
+    ) -> bool:
+        """Of de paal net stopte en de meter dat nog niet gezien heeft. Zie `PAAL_UIT_WACHT`."""
+        if laadt:
+            sessie["paal_op"] = nu
+            return False
+        gezien = sessie.get("paal_op")
+        if gezien is None:
+            return False
+        if (net_op is not None and net_op > gezien + PAAL_UIT_WACHT) or nu - gezien > PAAL_UIT_LANGST:
+            sessie.pop("paal_op", None)
+            return False
+        return True
 
     async def _async_zelf_wissel(
         self, device: dict[str, Any], sessie: dict[str, Any], nu: datetime, waarom: str | None
@@ -5407,9 +5500,11 @@ class ChargerCoach:
         # auto die vol is of wacht begrenst hij niets. De eigenaar op 30-09-2026,
         # met deze tip als melding op zijn telefoon 24 minuten nadat de auto op
         # zijn doel stond: "waarom krijg ik deze melding als de auto al vol is?"
+        nettip = self._nettip(now)
+        fasetip = "" if nettip else self._fasetip(settings, device, charger)
         tip = (
-            self._nettip(now)
-            or self._fasetip(settings, device, charger)
+            nettip
+            or fasetip
             or (self._bewakertip(settings, device, charger) if decision.charge else "")
         )
         self.state[device_id]["tip"] = tip
@@ -5493,8 +5588,15 @@ class ChargerCoach:
 
         if tip and device_id not in self._getipt:
             self._getipt.add(device_id)
+            # Een meter die zwijgt of een fase die niet klopt moet de bewoner
+            # zelf oplossen, en dat is kritiek. De lastbewaker die het tempo
+            # bepaalt is uitleg: die staat op de kaart en in de geschiedenis,
+            # en gaat niet naar de telefoon. De eigenaar op 06-09-2026: per
+            # beurt één verslag, plus wat de bewoner zelf moet oplossen.
+            uitleg = not nettip and not fasetip
             await self._async_tell(
-                f"{device.get('name') or 'De laadpaal'}: {tip}", kritiek=True
+                f"{device.get('name') or 'De laadpaal'}: {tip}",
+                kritiek=not uitleg, telefoon=not uitleg,
             )
 
         # De pauze van de bewoner wint, ook van de klaar-tijd: het is zijn huis
@@ -6404,10 +6506,13 @@ class ChargerCoach:
         wijkt = self._batterij_wijkt(settings, now, device)
 
         phases = []
+        pieken = []
         for key in ("l1", "l2", "l3"):
-            amps = self._fase_amps((sources.get("phases") or {}).get(key) or {}, now)
+            fase = (sources.get("phases") or {}).get(key) or {}
+            amps = self._fase_amps(fase, now)
             if amps is not None:
                 phases.append(max(0.0, amps - wijkt.get(("", key), 0.0)))
+                pieken.append(max(0.0, (self._fase_piek(fase, now) or amps) - wijkt.get(("", key), 0.0)))
 
         # De groepen waar deze paal aan hangt, elk met de eigen meter en de
         # eigen zekering. Zie `Circuit` in planner.py.
@@ -6415,14 +6520,19 @@ class ChargerCoach:
         circuits = []
         for groep in self._groepen_keten(settings, device):
             stromen = []
+            toppen = []
             for key in ("l1", "l2", "l3"):
-                amps = self._fase_amps((groep.get("sensors") or {}).get(key) or {}, now)
+                fase = (groep.get("sensors") or {}).get(key) or {}
+                amps = self._fase_amps(fase, now)
                 if amps is not None:
-                    stromen.append(max(0.0, amps - wijkt.get((str(groep.get("id")), key), 0.0)))
+                    wijk = wijkt.get((str(groep.get("id")), key), 0.0)
+                    stromen.append(max(0.0, amps - wijk))
+                    toppen.append(max(0.0, (self._fase_piek(fase, now) or amps) - wijk))
             circuits.append(Circuit(
                 name=str(groep.get("name") or groep.get("id") or ""),
                 soort="onderverdeelkast" if groep.get("kind") == "kast" else "groep",
                 phase_amps=stromen,
+                phase_peak_amps=toppen,
                 fuse_amps=float(groep.get("fuse_amps") or 16),
                 reserved_amps=float(reserved.get(str(groep.get("id")), 0.0)),
             ))
@@ -6450,6 +6560,7 @@ class ChargerCoach:
             reserved_amps=float(reserved.get("", 0.0)),
             circuits=circuits,
             phase_amps=phases,
+            phase_peak_amps=pieken,
             fuse_amps=float(installation.get("fuse_amps") or 25),
             charger_amps=charger_amps,
             # An installation with a balancer of its own guards the same fuse in

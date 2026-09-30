@@ -3119,6 +3119,81 @@ controle("'staat op' rondt af, zoals 'ging naar' in het verslag: 92,9% is 93",
          "staat op 93%" in planner.klaar_zin(Car(capacity_kwh=75.0, soc_percent=92.9)), planner.klaar_zin(Car(capacity_kwh=75.0, soc_percent=92.9)))
 
 
+print("=== 70. omhoog alleen als de hoogste meting van het venster ook past (v0.102.2) ===")
+# De eigenaar op 30-09-2026: een apparaat van zo'n 10 A op één fase dat om de tien
+# tot twintig seconden aan en uit ging terwijl de auto laadde. De coach zakte naar
+# 12 A en ging een minuut later op één meting in een dal terug naar 16, vier keer
+# in een kwartier. De mediaan beslist over omlaag, de hoogste meting over omhoog.
+auto70 = Car(capacity_kwh=60.0, phases=3, soc_percent=40.0, max_amps=16.0)
+NU70 = dt.datetime(2026, 9, 30, 12, 46)
+
+
+def paal70(limiet=12.0, laadt=True, **extra):
+    return Charger(max_amps=16.0, connected=True, charging=laadt, actual_amps=limiet if laadt else 0.0,
+                   limit_amps=limiet, started_at=NU70 - dt.timedelta(hours=1) if laadt else None, **extra)
+
+
+def net70(mediaan, piek=None, **extra):
+    # De paal trekt 12 A op elke fase; het apparaat staat op de eerste.
+    return Grid(phase_amps=[mediaan, 12.0, 12.0], phase_peak_amps=[] if piek is None else [piek, 12.0, 12.0],
+                fuse_amps=25.0, charger_amps=12.0, **extra)
+
+
+controle("het dal zegt 16 A, de hoogste meting 13: hij gaat naar 13 en niet naar 16",
+         planner.ceiling_amps(net70(12.0, 22.0), auto70, paal70()) == 13,
+         f"{planner.ceiling_amps(net70(12.0, 22.0), auto70, paal70())}")
+controle("zonder hoogste meting telt de mediaan, zoals altijd",
+         planner.ceiling_amps(net70(12.0), auto70, paal70()) == 16, f"{planner.ceiling_amps(net70(12.0), auto70, paal70())}")
+controle("is het venster rustig, dan gaat hij gewoon naar 16",
+         planner.ceiling_amps(net70(12.0, 13.0), auto70, paal70()) == 16,
+         f"{planner.ceiling_amps(net70(12.0, 13.0), auto70, paal70())}")
+# Vlak na een stap omlaag dragen de metingen de oude stroom van de paal nog.
+controle("een hoogste meting van voor de stap omlaag duwt hem niet onder wat er al stond",
+         planner.ceiling_amps(net70(12.0, 27.0), auto70, paal70()) == 12,
+         f"{planner.ceiling_amps(net70(12.0, 27.0), auto70, paal70())}")
+controle("omlaag gaat op de mediaan: 24 A op de fase is 11 A voor de paal",
+         planner.ceiling_amps(net70(24.0, 24.0), auto70, paal70()) == 11,
+         f"{planner.ceiling_amps(net70(24.0, 24.0), auto70, paal70())}")
+controle("één uitschieter in het venster knijpt een lopende beurt niet",
+         planner.ceiling_amps(Grid(phase_amps=[16.0, 16.0, 16.0], phase_peak_amps=[30.0, 16.0, 16.0],
+                                   fuse_amps=25.0, charger_amps=16.0), auto70, paal70(limiet=16.0)) == 16, "")
+controle("een beurt die nog moet beginnen telt zoals altijd, op de mediaan",
+         planner.ceiling_amps(Grid(phase_amps=[2.0, 2.0, 2.0], phase_peak_amps=[12.0, 2.0, 2.0], fuse_amps=25.0),
+                              auto70, paal70(limiet=0.0, laadt=False)) == 16, "")
+# En een groep met een eigen meter en een eigen zekering, net zo.
+groep70 = planner.Circuit(name="Garage", phase_amps=[12.0, 12.0, 12.0], phase_peak_amps=[17.0, 12.0, 12.0], fuse_amps=20.0)
+net70g = Grid(phase_amps=[12.0, 12.0, 12.0], fuse_amps=35.0, charger_amps=12.0, circuits=[groep70])
+controle("onder de zekering van een groep telt de hoogste meting van die groep: 20 - 2 - 5 = 13",
+         planner.ceiling_amps(net70g, auto70, paal70()) == 13, f"{planner.ceiling_amps(net70g, auto70, paal70())}")
+
+
+def snel70(net, lader):
+    return planner.decide(NU70, [], net, auto70, replace(lader, boost=True), Window(enabled=False))
+
+
+d70 = snel70(net70(12.0, 22.0), paal70())
+print(f"  {d70.amps} A: {d70.reason}")
+controle("snelladen zegt dan dat de zekering het is, niet 'ongeacht de prijs'",
+         d70.amps == 13 and "Meer past er nu niet onder je zekering" in d70.reason and "ongeacht" not in d70.reason, d70.reason)
+d70g = snel70(net70g, paal70())
+controle("en bij een groep welke", "onder de zekering van de groep Garage" in d70g.reason, d70g.reason)
+# De auto neemt minder dan er gevraagd is: de rail van `ceiling_amps` houdt de
+# limiet dan op wat er stond. De eigenaar las tien minuten "14 A, ongeacht de prijs".
+d70r = snel70(Grid(phase_amps=[12.5, 12.5, 12.5], fuse_amps=25.0, charger_amps=12.5), paal70(limiet=14.0))
+print(f"  {d70r.amps} A: {d70r.reason}")
+controle("de auto neemt minder dan er mag: dat staat er dan",
+         d70r.amps == 14 and d70r.reason == "Snelladen staat aan, dus hij laadt op 14 A. Hoger gaat hij zodra de auto dat ook neemt.",
+         d70r.reason)
+d70b = snel70(Grid(phase_amps=[13.0, 13.0, 13.0], fuse_amps=25.0, charger_amps=13.0, balancer_amps=13.0), paal70(limiet=13.0))
+controle("de lastbewaker geeft minder vrij: dat staat er dan",
+         d70b.amps == 13 and d70b.reason.endswith("Meer geeft je lastbewaker nu niet vrij."), d70b.reason)
+d70c = snel70(Grid(phase_amps=[13.0, 13.0, 13.0], fuse_amps=25.0, charger_amps=13.0), paal70(limiet=13.0, circuit_amps=13.0))
+controle("de groep van de lader is kleiner: dat staat er dan",
+         d70c.amps == 13 and d70c.reason.endswith("Meer past er niet op de groep van de lader."), d70c.reason)
+d70v = snel70(Grid(phase_amps=[16.0, 16.0, 16.0], fuse_amps=25.0, charger_amps=16.0), paal70(limiet=16.0))
+controle("en op vol vermogen blijft de zin zoals hij was",
+         d70v.reason == "Snelladen staat aan, dus hij laadt op 16 A, ongeacht de prijs.", d70v.reason)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

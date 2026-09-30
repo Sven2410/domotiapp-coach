@@ -546,6 +546,11 @@ class DacViewOverview extends DacElement {
     .steer-tabs[hidden] { display: none; }
 
     .steer-tab {
+      /* Het anker voor het onzichtbare woord erin (.sr, absoluut). Zonder dit
+         hangt dat woord aan de pagina en schuift het niet mee met de rij: met
+         meer apparaten dan er naast elkaar passen werd de hele pagina dan zo
+         breed als de rij, 610 px op een scherm van 390 (v0.102.2). */
+      position: relative;
       flex: 0 0 auto;
       scroll-snap-align: start;
       display: inline-flex; align-items: center; gap: 8px;

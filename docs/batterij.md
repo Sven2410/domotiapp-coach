@@ -268,6 +268,18 @@ geen opdracht. Bij een herstart gaat hij ook uit zijn eigen stand naar 0 W in de
 externe stand, "bij herstart accu op 0 en dan pas kijken". Op de kaart "Wie
 regelt: de batterij zelf" (`self_zero` in de stand, `batteryRows`).
 
+**De reden van een overname is wat de bewoner ziet gebeuren** (v0.102.2). De
+eigenaar op 30-09-2026 om 12:01:42: "de coach neemt het over, want de zekering
+wordt krap", terwijl de fase van de batterij op 4 A stond. De paal had zestien
+seconden eerder 16 A toegezegd en nam die nog niet (`_hogere_toezeggingen`), en
+daarmee bleef er minder dan `ZELF_ZEKERING_W` over. Is het alleen krap door zo'n
+toezegging, dan zegt `_zelf_niet` nu "want de laadpaal gaat laden", of bij een
+ander apparaat "want een ander apparaat krijgt de ruimte" (`kaal_w`,
+`_paal_belooft`). En de kaart zegt "De batterij doet dat zelf, met zijn eigen
+meter" alleen nog als het plan ook nul op de meter is: terwijl de coach op de
+stuurknop wachtte stond het die dag een ronde lang achter "De laadpaal laadt,
+dus de batterij geeft niets af". Proef 106 en 126.
+
 **Met het vinkje plant de coach ook niets anders** (v0.101.9). In de klantwoning
 nam de coach een Anker op 29-09-2026 zelf in handen, zonder het vinkje, met een
 dynamisch contract en een P1 die eens per tien seconden meldt. De batterij liet
@@ -705,3 +717,33 @@ alleen het bedrag: "Bespaard € 0,036." `_zon_scheelt` bestaat niet meer. De so
 hierboven klopt nog steeds; wat de zon scheelde staat in het paneel onder Bespaard
 ("Door zon"). Zie `docs/laadpaal.md`, "Het verslag is vier korte regels".
 
+## De paal stopt: wachten op een meting van daarna
+
+v0.102.2. De eigenaar op 30-09-2026, met de batterij door de coach overgenomen
+zolang de auto laadde. Om 13:39:53 zei de meter 7.338 W afname, midden in het
+afbouwen van de auto; om 13:39:54 meldde de paal "completed" en 0 W, en in
+diezelfde seconde draaide de ronde. Het besluit werd weer nul op de meter, de
+regelaar rekende met de meterwaarde van een seconde eerder en zette de batterij
+op ontladen op vol vermogen (3.500 W), terwijl er 1 kW zon over was. De meter
+van 13:39:55 zei al 1.020 W teruglevering. De batterij volgde om 13:40:02, van
+13:40:04 tot 13:40:08 ging er 4,2 kW het net op, en daarna hield ze er zelf mee
+op. De regelaar zakte in stappen van een kwartminuut terug (2.033, 782, 0 W),
+zag zijn eigen sprong aan voor een korte last en kreeg er geduld van
+(`_tegenfase`); laden op de zon begon pas om 13:41:10.
+
+Stopt een paal, dan telt hij voor de batterij nog als ladend tot de meter een
+waarde gaf van meer dan `PAAL_UIT_WACHT` (vijf seconden, de `VOLGT_NA` van een
+batterij) na het laatste moment waarop hij laadde (`_paal_net_uit` in coach.py,
+vanuit `_async_regel`). Op een kopie van het besluit, zodat het besluit van de
+ronde blijft wat het is. Een meter die zwijgt houdt dat niet vast: na
+`PAAL_UIT_LANGST` (een halve minuut) geldt het besluit weer, en dan zet de
+regelaar de batterij zelf op nul (`METER_STIL`). Geldt net zo voor een paal die
+de coach zelf stillegt of die een lastbewaker pauzeert, en voor een batterij die
+zelf nul op de meter doet: die krijgt haar eigen stand dan vijf seconden later
+terug.
+
+In het virtuele huis (`batterij-paal-stopt`, een meter die eens per vijf
+seconden meldt en een ronde in de seconde dat de paal stopt,
+`Scenario.ronde_bij_status`): acht seconden 2,25 kW het net op werd niets, en
+acht seconden na het stoppen voedt de batterij het huis. Proef 125 in
+test_coach.py.

@@ -1405,6 +1405,11 @@ proef("de rij apparaten in de volgorde van dit scherm, nieuwe apparaten achteraa
   const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
   assert.ok(kaart.includes("orderDevices(") && kaart.includes("deviceOrder()"), "de rij volgt de gekozen volgorde");
   assert.ok(kaart.includes('id="steer-left"') && kaart.includes('id="steer-right"'), "de pijltjes die het gekozen apparaat opschuiven");
+  // Het onzichtbare woord in een tab (.sr, absoluut) hoort aan zijn tab te
+  // hangen. Zonder anker hing het aan de pagina en werd die op een smal scherm
+  // zo breed als de hele rij: 610 px op 390, met zes apparaten (v0.102.2).
+  assert.ok(/\.steer-tab \{[^}]*position: relative;/.test(kaart), "een tab is het anker van zijn onzichtbare woord");
+  assert.ok(/\.sr \{\s*position: absolute;/.test(kaart), "en dat woord staat er absoluut in");
   assert.ok(kaart.includes("resetDeviceOrder();"), "standaard terugzetten zet ook de apparaten terug");
 });
 

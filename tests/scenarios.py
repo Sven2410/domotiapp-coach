@@ -1056,6 +1056,37 @@ herstart_groep_zonder = herstart_groep.kopie(
     gebeurtenissen=[("22:05", "soc_opgeven", 40)],
 )
 
+# De laadbeurt van de eigenaar op 30-09-2026: snelladen op 3x25 A met een
+# lastbewaker, en een apparaat van 10 A op één fase dat om de 35 seconden een
+# kwartminuut aanstaat (geen deler van een minuut, zodat de ronde van de coach
+# de ene keer op een top valt en de andere keer in een dal). De coach zakte
+# voor de zekering en ging een minuut later op één meting in een dal terug
+# naar 16 A, vier keer in een kwartier (v0.102.2: omhoog alleen als de hoogste
+# meting van het venster ook past).
+puls_snelladen = Scenario(
+    "puls-tijdens-snelladen",
+    "snelladen op 3x25 A met een lastbewaker; van 12:20 tot 12:40 staat er om de 35 seconden een kwartminuut 2 kW op één fase, en de meter meldt hele ampères",
+    contract="vast", zon=Zon(wolken="geen"), voorspeller="geen",
+    huis=Huis(basis_w=350.0, verdeling=(1.0, 0.0, 0.0), puls=(2000.0, 15.0, 35 / 60),
+              puls_venster=("12:20", "12:40")),
+    auto=replace(GROTE, soc=88.0, tekort_amps=0.8), lastbewaker=True, zekering=25.0, aansluiting_fasen=3,
+    fase_hele_amps=True,
+    begin="2026-09-07 11:55", kabel_erin="12:00", schema_aan=False, duur_uren=1.75, stap_seconden=5,
+    gebeurtenissen=[("12:01", "snelladen", True)],
+)
+# Dezelfde dag om 13:39:54: de auto is klaar, de laatste meterwaarde is van een
+# paar seconden eerder en zegt nog de afname van de auto. De regelaar zette de
+# batterij daarop in dezelfde seconde op ontladen op vol vermogen (v0.102.2: de
+# batterij wacht op een meting van na het stoppen).
+batterij_paal_stopt = Scenario(
+    "batterij-paal-stopt",
+    "nacht, vast contract, de coach regelt de batterij zelf en de meter meldt eens per vijf seconden; de bus is om 23:30 vol",
+    contract="vast", zon=Zon(wolken="geen"), voorspeller="geen", auto=replace(BUS, soc=90.0),
+    batterij=Batterij(soc=80.0, volgt_na_s=5.0, meter_tik_s=5.0, meter_fase_s=1.0),
+    begin="2026-09-07 22:55", kabel_erin="23:00", schema_aan=False, duur_uren=1.0, stap_seconden=1,
+    gebeurtenissen=[("23:01", "snelladen", True)], ronde_bij_status=True,
+)
+
 # "Anker mag zelf nul op de meter doen" (de eigenaar, 24-09-2026). De batterij heeft
 # een eigen meter en houdt in zijn eigen stand zelf de meter op nul; de coach
 # neemt het over als de paal laadt en geeft hem daarna terug (v0.97.0).
@@ -1118,7 +1149,7 @@ batterij_zonder_rendement = batterij_winter.kopie(
 
 BATTERIJ = [
     batterij_vast_zon, batterij_vast_salderen, batterij_winter, batterij_zomer, batterij_handelen,
-    batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_paal, batterij_sprong,
+    batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_paal, batterij_paal_stopt, batterij_sprong,
     batterij_meter_weg, batterij_herstart, batterij_anker_sensor, batterij_uurlast,
     batterij_klapperlast, batterij_wisselende_last, batterij_zonder_rendement,
     batterij_zelf_nul, batterij_zelf_knop_weg, batterij_zelf_knop_traag, batterij_knop_traag_start,
@@ -1183,7 +1214,7 @@ ALLE = [
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,
     dyn_zonnig, dyn_bewolkt, dyn_geen_zon, dyn_markt, dyn_salderen, dyn_avond, dyn_grote_auto,
     dyn_negatief, dyn_kwartier_later, dyn_geen_klaar_tijd,
-    meter_teken, meter_teken_om, een_fase_krap, oven, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
+    meter_teken, meter_teken_om, een_fase_krap, oven, puls_snelladen, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
     geen_soc, soc_opgegeven, soc_traag, laadgrens, laadgrens_ingesteld,
     doel_onder_auto, soc_stappen, bijna_vol, auto_slaapt,
     pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,
