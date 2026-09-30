@@ -536,10 +536,30 @@ pop-ups wist ervan.
   9,0 kW, waarvan 1,0 kWh uit je thuisbatterij", een vak "Uit je thuisbatterij, tot
   hij op 70% staat", en de prijsgrafiek telt het niet als net. "Nog te laden" zegt
   nu "in de auto" in plaats van "in de accu", want die pop-up kent nu twee accu's.
-- **Welke uren de auto kiest verandert niet.** De batterij helpt zodra de paal laadt,
-  tot zijn grens, in welk uur dat ook is; hij maakt geen uur goedkoper dan een ander.
-  Wat verandert is hoeveel er van het net komt. Dat is het antwoord op "mogelijk van
-  invloed op de laadstrategie".
+- **Welke uren de auto kiest verandert niet.** De batterij maakt geen uur goedkoper
+  dan een ander; wat verandert is hoeveel er van het net komt. Dat is het antwoord op
+  "mogelijk van invloed op de laadstrategie".
+- **Op de duurste laaduren eerst** (v0.104.1). Tot dan hielp hij zodra de paal laadde,
+  tot zijn grens, dus op het eerste laaduur. De eigenaar op 30-09-2026 om 23:48, bij het
+  plan van de eerste woning (laden om 00:00 voor € 0,319, 02:00 voor € 0,326, 04:00 voor
+  € 0,325, en 2,3 kWh uit de batterij om 00:00): "hij pakt het goedkoopste uur om te
+  ondersteunen. Eigenlijk moet hij meehelpen op de duurste momenten, om daar de
+  financiële pijn het meest te verzachten." Nu verdeelt `auto_hulp` de hulp over de
+  laaduren van duur naar goedkoop: elk krijgt wat er naast het huis van het
+  ontlaadvermogen over is en wat de batterij aan het eind van dat blok boven de grens
+  heeft, zonder dat een later blok dat al hulp kreeg eronder zakt. Het huis mag daarna
+  gewoon verder uit de batterij; de grens is er voor de auto. Beginnen pas `AUTO_MARGE`
+  boven de grens, bij gelijke prijzen het vroegste eerst, zoals het was.
+  **En de regelaar volgt het plan** (`Besluit.auto_hulp_nu`, `_met_paal`): laadt de paal
+  volgens zijn plan in een blok zonder hulp, dan geeft de batterij niets af, en de kaart
+  zegt "De batterij helpt de auto om 02:00, op een duurder laaduur, en geeft nu niets
+  af" (`auto_hulp_om`). Laadt de paal buiten zijn plan (Snel, of een andere sturing zoals
+  evcc in de eerste woning), dan helpt hij zoals altijd boven de grens. De vier
+  hulpscenario's in het virtuele huis (vast contract, overal dezelfde prijs) geven
+  precies hetzelfde als daarvoor. Een dynamisch scenario lukte niet: de accu laadt dan
+  's nachts zelf goedkoop bij, en in zo'n uur helpt hij terecht niet. Proef 39 in
+  test_batterij.py (de nacht van de schermafdruk: alles om 02:00, en 1,91 kWh is precies
+  wat er boven 50% over is).
 
 Gemeten in het virtuele huis, plan vlak voor het laden tegen wat de auto kreeg:
 `batterij-helpt-auto` 2,90 tegen 3,01 kWh, `-zonder-nacht` 5,78 tegen 5,83. Met de
