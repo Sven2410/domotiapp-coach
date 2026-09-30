@@ -405,6 +405,12 @@ class Paal:
     # `WAKE_AMPS` in planner.py.
     fase_drempel: float | None = None
     fasen_nu: int = 3
+    # Een Alfen met de keuzelijst "bruikbare fasen" (v0.104.0): 1 of 3, of None
+    # voor een paal zonder. Een nieuwe keuze geldt vanaf de volgende start. Een
+    # wissel terwijl de auto trekt telt in `wissels_onder_last`, en hoort nul te
+    # zijn: de coach zet eerst 0 A, zoals evcc in de eerste woning op 30-09-2026.
+    fasen_keuze: int | None = None
+    wissels_onder_last: int = 0
     boven_groep_sinds: dt.datetime | None = None
     herstarts: int = 0
     terugvallen: int = 0
@@ -928,6 +934,9 @@ class Scenario:
     continu_amps: int = 6
     # Vanaf welk deel van de ondergrens de modus zon begint, in procent (v0.103.0).
     zon_start: int = 90
+    # Of de coach een Alfen van fasen mag laten wisselen (v0.104.0); de paal heeft
+    # daarvoor `fasen_keuze` nodig.
+    fasen_wisselen: bool = False
     net: str = "split"                  # split | signed | signed-omgekeerd
     aansluiting_fasen: int = 3
     zekering: float = 25.0
@@ -1099,6 +1108,8 @@ class Verloop:
     bat_modi: list = field(default_factory=list)
     # De laadgrens die de coach schreef, voor de wekelijkse volle beurt.
     bat_grenzen: list = field(default_factory=list)
+    # De fasewissels van een Alfen (v0.104.0): (tijd, fasen, trok de auto toen).
+    fase_wissels: list = field(default_factory=list)
     bat_verloop: list = field(default_factory=list)
     bat_afname_kwh: float = 0.0
     bat_levering_kwh: float = 0.0
@@ -1209,6 +1220,7 @@ E = {
     "alfen_connected": "sensor.v_paal_auto_aangesloten",
     "alfen_charging": "sensor.v_paal_auto_laadt",
     "alfen_mode3": "sensor.v_paal_modus3",
+    "alfen_fasen": "select.v_paal_fasen",
 }
 
 
@@ -1370,6 +1382,7 @@ def instellingen(s: Scenario) -> dict:
             "controllable": s.paal_stuurbaar,
             "charge_mode": s.laadmodus,
             "continuous_amps": s.continu_amps,
+            "phase_switching": s.fasen_wisselen,
             "solar_start_percent": s.zon_start,
             "device_id": "" if s.paal.merk == "alfen" else "virtueel",
             "entity": E["vermogen"],
@@ -1382,6 +1395,7 @@ def instellingen(s: Scenario) -> dict:
                         "connected": E["alfen_connected"],
                         "charging": E["alfen_charging"],
                         "mode3": E["alfen_mode3"],
+                        **({"phases": E["alfen_fasen"]} if s.paal.fasen_keuze is not None else {}),
                     }
                 ),
                 "current": E["stroom"],
@@ -1554,7 +1568,9 @@ class Wereld:
         # Op hoeveel fasen deze sessie loopt, of gaat lopen als hij nu begint.
         # Met een drempel kiest de paal naar wat hem op dat moment aangeboden
         # wordt; zie `fase_drempel`.
-        if self.paal.fase_drempel is not None:
+        if self.paal.fasen_keuze is not None:
+            volgende = min(self.paal.fasen, self.paal.fasen_keuze)
+        elif self.paal.fase_drempel is not None:
             volgende = 1 if aanbod < self.paal.fase_drempel else self.paal.fasen
         else:
             volgende = 1 if self.paal.kiest_een_fase else self.paal.fasen
@@ -1684,6 +1700,9 @@ class Wereld:
             z(E["alfen_mode3"], {"disconnected": "A", "charging": "C2"}.get(
                 status, "B2" if self.paal.dyn_limit >= MIN_AMPS else "B1"))
             z(E["alfen_limit"], w(f"{self.paal.dyn_limit:.1f}", "A"))
+            if self.paal.fasen_keuze is not None:
+                z(E["alfen_fasen"], {"state": "1 Phase" if self.paal.fasen_keuze == 1 else "3 Phases",
+                                     "attributes": {"options": ["1 Phase", "3 Phases"]}})
         z(E["stroom"], w(f"{self.auto.trekt_amps:.2f}", "A"))
         z(E["vermogen"], w(f"{self.paal_w:.0f}", "W"))
         z(E["max"], w(f"{self.paal.max_amps:.0f}", "A"))
@@ -1935,6 +1954,16 @@ class Diensten:
                                             "attributes": {"unit_of_measurement": "A"}})
             self.hass.states.zet(E["alfen_limit"], {"state": f"{self.wereld.paal.dyn_limit:.1f}",
                                                     "attributes": {"unit_of_measurement": "A"}})
+        elif domein == "select" and dienst == "select_option" and data.get("entity_id") == E["alfen_fasen"]:
+            paal = self.wereld.paal
+            fasen = 1 if str(data.get("option", "")).startswith("1") else 3
+            trekt = self.wereld.auto.trekt_amps > 0
+            if trekt:
+                paal.wissels_onder_last += 1
+            paal.fasen_keuze = fasen
+            self.verloop.fase_wissels.append((self.wereld.nu, fasen, trekt))
+            self.hass.states.zet(E["alfen_fasen"], {"state": data.get("option"),
+                                                    "attributes": {"options": ["1 Phase", "3 Phases"]}})
         elif domein == "notify":
             self.verloop.meldingen.append((self.wereld.nu, data.get("message", "")))
         elif data.get("entity_id") == E["boiler_switch"] and dienst in ("turn_on", "turn_off"):
@@ -2339,6 +2368,9 @@ def samenvatting(v: Verloop) -> str:
         vol = "" if v.boiler_bij_klaar is None else f", vat {v.boiler_bij_klaar:.1f} kWh op de klaar-tijd"
         opt += (f"  boiler {v.boiler_kwh:.2f} kWh (zon {v.boiler_zon_kwh:.2f}) €{v.boiler_betaald:.2f}"
                 f", {sum(1 for _, aan in v.boiler_schakels if aan)}x aan{vol}")
+    if v.scenario.paal.fasen_keuze is not None:
+        opt += (f"  fasewissels {len(v.fase_wissels)}"
+                f" (onder last {sum(1 for *_, trok in v.fase_wissels if trok)})")
     if v.scenario.batterij is not None:
         eind = v.bat_verloop[-1][3] if v.bat_verloop else 0.0
         opt += (f"  batterij: net {v.bat_afname_kwh:.1f} kWh erin en {v.bat_levering_kwh:.1f} eruit, "

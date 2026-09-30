@@ -251,6 +251,10 @@ _DEVICE = _schema(
         # dicht is vrijgegeven en de coach start hem zelf. Zonder waarde aan,
         # zoals het tot v0.102.0 altijd was.
         vol.Optional("release_required", default=True): bool,
+        # Een Alfen mag van de coach tussen een en drie fasen wisselen (v0.104.0),
+        # met de keuzelijst `phases` bij de entiteiten. Standaard uit. De eigenaar
+        # op 30-09-2026: "Easee houden we zo en alfen passen we aan."
+        vol.Optional("phase_switching", default=False): bool,
         # Welke soort druk op de vrijgaveknop telt ("single", "double", ...);
         # leeg is elke druk.
         vol.Optional("release_press", default=""): vol.All(str, vol.Length(max=64)),

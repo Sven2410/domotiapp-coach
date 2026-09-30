@@ -1225,6 +1225,36 @@ alfen_laadgrens = laadgrens.kopie(
     naam="alfen-laadgrens-80", uitleg="laadgrens-80 aan een Alfen: klaar blijft klaar, en één herstart",
     paal=Paal(merk="alfen"),
 )
+# De fasewissel van een Alfen (v0.104.0). De eigenaar op 30-09-2026: "op die
+# manier kan ik wel al op 1,4 kW zon beginnen met laden iig." Een driefasige auto,
+# de modus zon, een bewolkte dag: zonder wisselen begint hij pas bij 3,7 kW, met
+# wisselen op één fase vanaf 1,2 kW. Telkens hetzelfde huis zonder wissel ernaast.
+alfen_drie_zon = vast_geen_klaar_tijd.kopie(
+    naam="alfen-drie-zon-bewolkt", uitleg="modus zon, bewolkt, driefasige auto aan een Alfen die niet wisselt",
+    laadmodus="zon", zon=Zon(wolken="bewolkt"), auto=replace(GROTE, soc=60.0), duur_uren=36,
+    paal=Paal(merk="alfen"),
+)
+alfen_fasen_zon = alfen_drie_zon.kopie(
+    naam="alfen-fasen-zon-bewolkt", uitleg="dezelfde dag, de Alfen mag wisselen: op één fase vanaf 1,2 kW zon",
+    paal=Paal(merk="alfen", fasen_keuze=3), fasen_wisselen=True,
+)
+alfen_fasen_wisselend = alfen_fasen_zon.kopie(
+    naam="alfen-fasen-wisselend", uitleg="wolkenvelden per twintig minuten: wisselen, maar niet heen en weer",
+    zon=Zon(wolken="wisselend"),
+)
+alfen_fasen_helder = alfen_fasen_zon.kopie(
+    naam="alfen-fasen-helder", uitleg="heldere dag: 's ochtends op één fase, midden op de dag op drie",
+    zon=Zon(wolken="helder"),
+)
+# Met een planning en een dynamisch contract: de nacht van het net op drie fasen.
+alfen_drie_dyn = dyn_zonnig.kopie(
+    naam="alfen-drie-dynamisch", uitleg="dynamisch, planning, driefasige auto aan een Alfen die niet wisselt",
+    auto=GROTE, paal=Paal(merk="alfen"),
+)
+alfen_fasen_dyn = alfen_drie_dyn.kopie(
+    naam="alfen-fasen-dynamisch", uitleg="dezelfde dag, de Alfen mag wisselen: het net op drie fasen, zon op één",
+    paal=Paal(merk="alfen", fasen_keuze=1), fasen_wisselen=True,
+)
 alfen_doel_80 = doel_onder_auto.kopie(
     naam="alfen-doel-80", uitleg="doel-80 aan een Alfen: de 0 blijft elke minuut komen, anders laadt de paal na zijn geldigheidsduur op 16 A door",
     paal=Paal(merk="alfen"),
@@ -1255,6 +1285,7 @@ forecast_solar_vaatwasser = vaatwasser_zon.kopie(
 
 ALLE = [
     alfen_zonnig, alfen_dyn, alfen_doel_80, alfen_laadgrens,
+    alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,

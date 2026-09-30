@@ -108,11 +108,18 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    in zodra er minder dan dat uur over is bovenop wat er nog nodig is, en een
    lopende beurt stopt niet voor een goedkoper uur als er daarna geen uur
    reserve overblijft (`cheap-hour+reserve`).
-3. **Geen fasewissel.** Een auto laadt op één fase of op drie, zoals het
-   autoprofiel zegt, en de coach wisselt dat nooit: dat beschadigt het relais.
-   Hij moduleert van 6 A tot het maximum van de paal, op het aantal fasen dat
-   er is. Er staat nergens code die een fasemodus schrijft; dat hoort zo te
-   blijven. **De paal zelf wisselt wel**, in de automatische fasemodus van
+3. **Geen fasewissel, behalve bij een Alfen die het mag.** Een auto laadt op
+   één fase of op drie, zoals het autoprofiel zegt, en aan een Easee wisselt
+   de coach dat nooit: dat beschadigt het relais. Hij moduleert van 6 A tot
+   het maximum van de paal, op het aantal fasen dat er is. **Sinds v0.104.0
+   wel bij een Alfen** met het vinkje Fasen wisselen en de keuzelijst
+   `phases`: de eigenaar op 30-09-2026, "alfen zegt zelf dat je fase wissel
+   mag doen. Dus Easee houden we zo en alfen passen we aan." Op zon één fase
+   zolang het dak minder geeft dan drie fasen op hun laagst, van het net drie
+   (`kies_fasen` in planner.py), en alleen stilstaand: eerst 0 A, dan de
+   keuzelijst (`_fasen_besluit`, `_async_fasen` in coach.py; `docs/alfen.md`).
+   Buiten `_async_fasen` staat er nergens code die een fasemodus schrijft;
+   dat hoort zo te blijven. **De paal zelf wisselt wel**, in de automatische fasemodus van
    een Easee, en die modus blijft: de eigenaar op 06-09-2026, "belangrijk voor
    gastauto's." In de klantwoning koos hij die nacht om 04:17 één fase op een
    driefasig profiel; de Ford trok 16,9 A op een groep van 16 A, de paal
@@ -196,7 +203,9 @@ Twee plekken die hetzelfde doen en uit elkaar kunnen lopen. Verander je de ene,
 dan de andere in dezelfde uitgave.
 
 - **De paalsturing, voor Easee en Alfen.** Elke wijziging wordt voor allebei
-  gebouwd en beproefd (`CHARGER_CONTROL` in const.py; `docs/alfen.md`).
+  gebouwd en beproefd (`CHARGER_CONTROL` in const.py; `docs/alfen.md`). De ene
+  uitzondering is de fasewissel (v0.104.0), die alleen voor Alfen bestaat; de
+  proef is dan dat een Easee nooit wisselt (proef 130, test_virtueel.py).
 - **Elk nieuw veld van `Plan`** hoort ook in `_tijdlijn` in coach.py, anders
   haalt het het paneel niet; proef 69 in test_coach.py (`docs/laadpaal.md`).
 - **De vormen van een prijslijst**: `_prijsrijen` in coach.py en
@@ -262,10 +271,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 458 controles op het denkwerk
+python tests/test_planner.py     # 470 controles op het denkwerk
 python tests/test_batterij.py    # 161 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 842 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2133 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 856 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 2202 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 135 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

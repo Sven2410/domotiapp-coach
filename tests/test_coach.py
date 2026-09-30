@@ -7071,6 +7071,101 @@ controle("zonder het vinkje heeft de coach hem zodra hij stuurt",
          coach129b._batterij["dev-batterij"]["batterij"].overgenomen is True, "")
 controle("de stand zegt onder welke prijs bijkopen loont", "buy_below" in b129, f"{sorted(b129)}")
 
+print("=== 130. de fasewissel van een Alfen: stil, omzetten, verder (v0.104.0) ===")
+# De eigenaar op 30-09-2026: "alfen zegt zelf dat je fase wissel mag doen. Dus Easee
+# houden we zo en alfen passen we aan." Eerst 0 A, dan de keuzelijst, dan verder,
+# zoals evcc het in de eerste woning deed (01:00:29 0 A, 01:00:59 "1 Phase").
+DRIE_AUTO = dict(LAADPAAL["cars"][0], phases="three", capacity_kwh=60.0)
+ALFEN130 = {
+    **ALFEN, "id": "dev-alfen", "phase_switching": True, "charge_mode": "zon", "cars": [DRIE_AUTO],
+    "entities": {**ALFEN["entities"], "phases": "select.alfen_fasen"},
+}
+FASEN = {"state": "3 Phases", "attributes": {"options": ["1 Phase", "3 Phases"]}}
+
+
+def inst130(device, **extra):
+    uit = instellingen(devices=[device], **extra)
+    uit["strategy"]["schedules"] = []
+    uit["active_cars"] = [{"device": device["id"], "car": "car-1"}]
+    return uit
+
+
+async def ronde130(coach, inst, device, nu, niveau="steer"):
+    hass = coach.hass
+    hass.services.verstuurd.clear()
+    await hass.afmaken()
+    await coach._one(nu, inst, device, niveau)
+    return coach.state[device["id"]], list(hass.services.verstuurd)
+
+
+def selecties(verstuurd):
+    return [d[2].get("option") for d in verstuurd if d[0] == "select" and d[1] == "select_option"]
+
+
+T130 = dt.datetime(2026, 8, 18, 12, 0)
+i130 = inst130(ALFEN130)
+h130, _, c130 = bouw({**huis90(teruglevering=1500.0), "select.alfen_fasen": FASEN}, i130)
+b1, v1 = asyncio.run(ronde130(c130, i130, ALFEN130, T130))
+print(f"  1,5 kW zon, paal stil op drie fasen: {b1['rule']} {b1['amps']} A, keuzelijst {selecties(v1)}")
+controle("stil op drie fasen met 1,5 kW zon: meteen omzetten naar één fase, en 0 A deze ronde",
+         b1["rule"] == "fasewissel" and b1["amps"] == 0 and selecties(v1) == ["1 Phase"], f"{b1['rule']} {v1}")
+h130.states.zet("select.alfen_fasen", {**FASEN, "state": "1 Phase"})
+b2, v2 = asyncio.run(ronde130(c130, i130, ALFEN130, T130 + dt.timedelta(minutes=1)))
+print(f"  de ronde daarna: {b2['rule']} {b2['amps']} A, fasen {b2.get('phases_now')}: {b2['reason']}")
+controle("de ronde daarna laadt hij op één fase, en zegt dat",
+         b2["amps"] >= 6 and b2["rule"].startswith("zon-modus") and b2.get("phases_now") == 1
+         and "één fase" in b2["reason"] and not selecties(v2), f"{b2['rule']} {b2['amps']} {b2['reason']}")
+
+# Het slot, zonder paal eromheen: een lopende beurt wisselt pas na FASE_WACHT, dan
+# eerst stil, en pas als er geen stroom meer loopt de keuzelijst.
+_, _, c130b = bouw(huis90(), i130)
+laadt = coachmod.Charger(max_amps=16.0, connected=True, charging=True, actual_amps=6.0)
+stil = coachmod.Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.0)
+net2 = coachmod.Grid(surplus_w=2000.0, phase_amps=[3.0, 2.0, 2.0], fuse_amps=25.0)
+drie_wacht = coachmod.Decision(False, 0, "", rule="zon-wacht")
+een_zon = coachmod.Decision(True, 8, "Er is 2,0 kW zon over, dus die gaat in de auto.", rule="zon-modus")
+s0 = c130b._fasen_besluit(T130, "p", laadt, drie_wacht, een_zon, net2, 3)
+s4 = c130b._fasen_besluit(T130 + dt.timedelta(minutes=4), "p", laadt, drie_wacht, een_zon, net2, 3)
+s5 = c130b._fasen_besluit(T130 + dt.timedelta(minutes=5), "p", laadt, drie_wacht, een_zon, net2, 3)
+s6 = c130b._fasen_besluit(T130 + dt.timedelta(minutes=6), "p", stil, drie_wacht, een_zon, net2, 3)
+print(f"  lopend: {s0[0].rule}/{s0[2]}, na 4 min {s4[0].rule}/{s4[2]}, na 5 {s5[0].rule}/{s5[2]}, stil {s6[0].rule}/{s6[2]}")
+controle("een lopende beurt wisselt niet meteen", s0[0].rule == "zon-wacht" and s0[2] is None, f"{s0}")
+controle("na vier minuten nog niet", s4[0].rule == "zon-wacht" and s4[2] is None, f"{s4}")
+controle("na vijf minuten: eerst stil, nog niet omzetten", s5[0].rule == "fasewissel" and s5[2] is None, f"{s5}")
+controle("staat hij stil, dan pas omzetten", s6[0].rule == "fasewissel" and s6[2] == 1, f"{s6}")
+c130b._fase_bezig["p"]["omgezet"] = T130 + dt.timedelta(minutes=6)
+c130b._fase_gewisseld["p"] = T130 + dt.timedelta(minutes=6)
+s7 = c130b._fasen_besluit(T130 + dt.timedelta(minutes=7), "p", stil, drie_wacht, een_zon, net2, 1)
+controle("op één fase laadt hij op het besluit van één fase", s7[0].charge and s7[1] and s7[2] is None, f"{s7}")
+# Terug naar drie komt niet binnen FASE_RUST, ook als de zon meteen weer ruim is.
+net5 = coachmod.Grid(surplus_w=5000.0, phase_amps=[3.0, 2.0, 2.0], fuse_amps=25.0)
+drie_zon = coachmod.Decision(True, 7, "", rule="surplus")
+laadt1 = coachmod.Charger(max_amps=16.0, connected=True, charging=True, actual_amps=16.0)
+r12 = c130b._fasen_besluit(T130 + dt.timedelta(minutes=12), "p", laadt1, drie_zon, een_zon, net5, 1)
+r15 = c130b._fasen_besluit(T130 + dt.timedelta(minutes=17), "p", laadt1, drie_zon, een_zon, net5, 1)
+controle("terug naar drie niet binnen tien minuten na de vorige wissel", r12[0].rule != "fasewissel", f"{r12}")
+controle("na tien minuten en vijf minuten dezelfde wens wel", r15[0].rule == "fasewissel", f"{r15}")
+# Volgt de paal de keuzelijst niet, dan geeft hij het na FASE_WACHT op en laadt hij door.
+_, _, c130c = bouw(huis90(), i130)
+c130c._fasen_besluit(T130, "q", stil, drie_wacht, een_zon, net2, 3)
+c130c._fase_bezig["q"]["omgezet"] = T130
+op = c130c._fasen_besluit(T130 + dt.timedelta(minutes=5), "q", stil, drie_wacht, een_zon, net2, 3)
+controle("volgt de paal niet: na vijf minuten opgeven, zonder nog eens om te zetten",
+         op[0].rule != "fasewissel" and op[2] is None and "q" not in c130c._fase_bezig, f"{op}")
+
+# Wie het niet mag: een Easee, een eenfasige auto, zonder vinkje, of op adviseren.
+for naam, apparaat, niveau in (
+    ("een Easee met het vinkje", {**LAADPAAL, "phase_switching": True, "charge_mode": "zon", "cars": [DRIE_AUTO],
+                                  "entities": {**LAADPAAL["entities"], "phases": "select.alfen_fasen"}}, "steer"),
+    ("een eenfasige auto", {**ALFEN130, "cars": [dict(DRIE_AUTO, phases="one")]}, "steer"),
+    ("zonder vinkje", {**ALFEN130, "phase_switching": False}, "steer"),
+    ("op adviseren", ALFEN130, "advise"),
+):
+    inst_n = inst130(apparaat)
+    h_n, _, c_n = bouw({**huis90(teruglevering=1500.0), **huis(teruglevering=1500.0), "select.alfen_fasen": FASEN}, inst_n)
+    bn, vn = asyncio.run(ronde130(c_n, inst_n, apparaat, T130, niveau))
+    controle(f"{naam}: nooit een fasewissel", not selecties(vn) and bn["rule"] != "fasewissel", f"{bn['rule']} {vn}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

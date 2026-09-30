@@ -292,6 +292,12 @@ export const CHARGER_BRANDS = [
         hint: "De stroom op fase 1, in ampère. Samen met het vermogen ziet de coach daaraan op hoeveel fasen de auto laadt.",
         filter: "all",
       },
+      {
+        key: "phases",
+        label: "Bruikbare fasen",
+        hint: "De keuzelijst met 1 Phase en 3 Phases. Alleen nodig als de coach van fasen mag wisselen.",
+        filter: "all",
+      },
     ],
   },
 ];
