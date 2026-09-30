@@ -263,9 +263,9 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 455 controles op het denkwerk
-python tests/test_batterij.py    # 145 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 837 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2108 op hele laadbeurten in het virtuele huis
+python tests/test_batterij.py    # 159 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_coach.py       # 842 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 2120 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 135 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
@@ -305,7 +305,8 @@ kwamen.
 met de uurkromme van het energiedashboard in kWh per lokaal uur, `Huis(profiel=...)`
 met de mediaan van het huisverbruik in watt per uur uit de eigen opslag
 (`domotiapp_coach/history/quarters`), en `Prijzen(per_dag={"2026-09-05": [...]})`
-met de all-in prijzen zoals de klant ze zag. Let op: het energiedashboard en de
+met de all-in prijzen zoals de klant ze zag: 24 per dag, of 96 voor kwartierprijzen
+(sinds v0.102.3, `batterij-kwartier-zelf`). Let op: het energiedashboard en de
 prijssensor geven hun uren in UTC; twee uur erbij voor de lokale lijst. De negen
 `klantwoning-*`-scenario's zijn zo gebouwd, uit de stand van vrijdagavond
 04-09-2026, en `test_virtueel.py` meet er de vijf controlepunten van die

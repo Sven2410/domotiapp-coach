@@ -155,8 +155,18 @@ export function batterijVooruit(besluit) {
       ? `gemiddeld ${euro(prijzen.reduce((s, u) => s + u.price, 0) / prijzen.length, 3)}`
       : "in de uren die er bekend zijn",
   });
-  if (Number.isFinite(besluit.value)) {
-    kop.push({ label: "Een kWh erin", waarde: euro(besluit.value, 3), bij: "is straks waard" });
+  // Onder welke prijs bijkopen nu loont (v0.102.3), in plaats van "Een kWh
+  // erin, is straks waard". De eigenaar op 30-09-2026 bij € 0,301 en een nacht
+  // van € 0,313: "is het niet goedkoper om iets bij te kopen?" Die € 0,301 was
+  // per kWh ín de batterij; met het laadverlies eraf is het € 0,259, en dat
+  // getal kun je naast de prijslijst leggen.
+  if (Number.isFinite(besluit.buy_below)) {
+    const nu = Number(uren[0]?.price);
+    kop.push({
+      label: "Bijkopen loont",
+      waarde: `onder ${euro(besluit.buy_below, 3)}`,
+      bij: Number.isFinite(nu) ? `nu ${euro(nu, 3)}` : "per kWh van het net",
+    });
   }
   // De uren waarin hij de auto helpt, opgeteld (v0.95.0). De bewoner van de
   // eerste woning: "wat gaat hij doen zou moeten zien dat hij om 23 uur mee

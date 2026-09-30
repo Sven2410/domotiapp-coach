@@ -839,19 +839,31 @@ class Prijzen:
     terugleverkosten: float = 0.0
     # Echte all-in prijzen per dag, "2026-09-05": [24 prijzen]. Een dag die
     # hier niet in staat valt terug op `markt`. Zo draait een scenario op
-    # precies de prijzen die een klant op dat moment zag.
+    # precies de prijzen die een klant op dat moment zag. Met 96 prijzen is het
+    # een dag in kwartieren, zoals Frank en Nord Pool ze sinds 2025 geven.
     per_dag: dict[str, list[float]] | None = None
+
+    @staticmethod
+    def _plek(dag: list[float], moment: dt.datetime) -> int:
+        if len(dag) == 96:
+            return moment.hour * 4 + moment.minute // 15
+        return moment.hour
+
+    def blok_min(self, dag: dt.date) -> int:
+        """Hoe lang een prijsblok op die dag duurt, in minuten."""
+        rij = (self.per_dag or {}).get(dag.isoformat())
+        return 15 if rij is not None and len(rij) == 96 else 60
 
     def kaal(self, moment: dt.datetime) -> float:
         dag = (self.per_dag or {}).get(moment.date().isoformat())
         if dag is not None:
-            return dag[moment.hour] / (1 + self.btw / 100) - self.energiebelasting - self.opslag
+            return dag[self._plek(dag, moment)] / (1 + self.btw / 100) - self.energiebelasting - self.opslag
         return self.markt[moment.hour]
 
     def all_in(self, moment: dt.datetime) -> float:
         dag = (self.per_dag or {}).get(moment.date().isoformat())
         if dag is not None:
-            return dag[moment.hour]
+            return dag[self._plek(dag, moment)]
         return (self.kaal(moment) + self.energiebelasting + self.opslag) * (1 + self.btw / 100)
 
     def lijst(self, nu: dt.datetime, all_in: bool, tot_dag: dt.date | None = None) -> list[dict]:
@@ -863,14 +875,16 @@ class Prijzen:
             dagen.append(dagen[-1] + dt.timedelta(days=1))
         uit = []
         for dag in dagen:
-            for uur in range(24):
-                van = dt.datetime.combine(dag, dt.time(uur))
+            blok = dt.timedelta(minutes=self.blok_min(dag))
+            van = dt.datetime.combine(dag, dt.time(0))
+            while van.date() == dag:
                 prijs = self.all_in(van) if all_in else self.kaal(van)
                 uit.append({
                     "from": van.isoformat(),
-                    "till": (van + dt.timedelta(hours=1)).isoformat(),
+                    "till": (van + blok).isoformat(),
                     "price": round(prijs, 5),
                 })
+                van += blok
         return uit
 
 

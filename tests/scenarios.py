@@ -1141,6 +1141,45 @@ batterij_zelf_wisselend = batterij_wisselende_last.kopie(
     batterij=Batterij(soc=60.0, volgt_na_s=5.0, meter_tik_s=5.0, meter_fase_s=1.0,
                       eigen_nul=True, zelf_nul=True, modus="third_party_control", **ANKER_SENSOR),
 )
+# De klantwoning op 30-09-2026: een Anker die zelf nul op de meter doet, een
+# dynamisch contract in kwartieren, en 's nachts een warmtepomp. Om 03:25:39 zei
+# de coach midden in het laden van het net "nul op de meter", en omdat hij de
+# batterij in handen had dekte hij toen het huis eruit: tot 06:00 elke paar
+# minuten laden en ontladen door elkaar, 0,99 kWh eruit terwijl er 3,87 kWh
+# in ging. Overdag laadde hij elk kwartier twaalf minuten en drie niet. Allebei
+# `_rustig_vermogen`: moest er in dit kwartier nog minder dan 1% van de batterij
+# bij, dan stopte hij (v0.102.3). De rondes vallen op :40, zoals die dag; dan
+# zijn er aan het eind van elk kwartier drie rondes "nul", en met `ZELF_WACHT`
+# van twee minuten gaf v0.102.2 de batterij dan elk kwartier terug.
+KWARTIER_30_09 = {
+    "2026-09-30": [
+        0.269, 0.252, 0.257, 0.239, 0.256, 0.248, 0.249, 0.251, 0.245, 0.251, 0.243, 0.246, 0.247, 0.244, 0.246, 0.245,
+        0.248, 0.240, 0.244, 0.254, 0.255, 0.262, 0.267, 0.284, 0.305, 0.323, 0.331, 0.332, 0.362, 0.379, 0.383, 0.377,
+        0.398, 0.381, 0.360, 0.332, 0.366, 0.337, 0.313, 0.298, 0.284, 0.273, 0.264, 0.229, 0.268, 0.242, 0.230, 0.178,
+        0.206, 0.180, 0.171, 0.170, 0.195, 0.211, 0.230, 0.257, 0.236, 0.246, 0.266, 0.279, 0.257, 0.285, 0.294, 0.286,
+        0.284, 0.295, 0.336, 0.360, 0.340, 0.368, 0.388, 0.411, 0.389, 0.406, 0.413, 0.435, 0.425, 0.432, 0.445, 0.446,
+        0.433, 0.431, 0.411, 0.398, 0.425, 0.386, 0.378, 0.339, 0.367, 0.360, 0.364, 0.345, 0.359, 0.339, 0.352, 0.327,
+    ],
+    "2026-10-01": [
+        0.317, 0.313, 0.319, 0.319, 0.327, 0.328, 0.327, 0.322, 0.323, 0.325, 0.325, 0.322, 0.328, 0.328, 0.325, 0.322,
+        0.323, 0.323, 0.320, 0.325, 0.323, 0.324, 0.336, 0.351, 0.346, 0.369, 0.386, 0.401, 0.392, 0.411, 0.423, 0.415,
+        0.446, 0.416, 0.404, 0.390, 0.417, 0.395, 0.385, 0.365, 0.402, 0.376, 0.355, 0.339, 0.336, 0.330, 0.327, 0.319,
+        0.323, 0.327, 0.319, 0.322, 0.323, 0.322, 0.320, 0.319, 0.323, 0.317, 0.321, 0.321, 0.315, 0.315, 0.319, 0.335,
+        0.310, 0.331, 0.367, 0.424, 0.347, 0.399, 0.431, 0.462, 0.427, 0.450, 0.464, 0.505, 0.480, 0.492, 0.510, 0.489,
+        0.468, 0.453, 0.434, 0.407, 0.432, 0.407, 0.397, 0.376, 0.397, 0.380, 0.376, 0.355, 0.373, 0.359, 0.350, 0.336,
+    ],
+}
+batterij_kwartier_zelf = Scenario(
+    "batterij-kwartier-zelf",
+    "dynamisch in kwartieren, de accu doet zelf nul en 's nachts draait een warmtepomp: de coach laadt goedkoop bij zonder tussendoor te ontladen, en houdt hem het hele laadvenster vast",
+    contract="dynamisch-salderen", zon=Zon(piek_kw=2.4, wolken="helder"),
+    huis=Huis(profiel={**{u: 600.0 for u in range(24)}, 3: 1600.0, 4: 1600.0, 5: 1600.0,
+                       7: 900.0, 8: 900.0, 17: 1800.0, 18: 1800.0, 19: 1800.0, 20: 1200.0, 21: 1200.0}),
+    batterij=Batterij(soc=5.0, capaciteit_kwh=14.5, max_ontladen_w=3500.0, meter=False, rte_opgegeven=0.736,
+                      eigen_nul=True, zelf_nul=True, knop_weg=True, knop_terug_s=14.0, **ANKER_SENSOR),
+    prijzen=Prijzen(per_dag=KWARTIER_30_09),
+    begin="2026-09-30 02:30:40", duur_uren=22, **{**ZONDER_AUTO, "stap_seconden": 5},
+)
 batterij_zonder_rendement = batterij_winter.kopie(
     naam="batterij-rendement-onbekend",
     uitleg="geen kWh-meter en niets opgegeven: alleen nul op de meter, niet van het net laden",
@@ -1154,6 +1193,7 @@ BATTERIJ = [
     batterij_klapperlast, batterij_wisselende_last, batterij_zonder_rendement,
     batterij_zelf_nul, batterij_zelf_knop_weg, batterij_zelf_knop_traag, batterij_knop_traag_start,
     batterij_dynamisch_zelf, batterij_dynamisch_zon_zelf, batterij_zelf_wisselend,
+    batterij_kwartier_zelf,
 ]
 HERSTART = [herstart_groep, herstart_groep_zonder]
 

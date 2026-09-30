@@ -1743,6 +1743,32 @@ if (vl := v("batterij-dynamisch-zon-zelf")):
              standen == {"nul"} and not [m for _, m in vl.bat_modi if m == "third_party_control"],
              f"{sorted(standen)} {vl.bat_modi}")
 
+# De klantwoning op 30-09-2026, in kwartieren, met een Anker die zelf nul doet
+# (v0.102.3). Met v0.102.2 in dit scenario: 44 keer de modus om, elk kwartier terug
+# en een minuut later weer over, 160 opdrachten, en in tien kwartieren laden én
+# ontladen; 's nachts dekte hij de warmtepomp uit de batterij terwijl hij inkocht.
+# Gemeten bij het bouwen: 8 wissels (vier echte beurten), 73 opdrachten, één
+# kwartier met allebei, aan het eind van de nachtbeurt.
+if (vl := v("batterij-kwartier-zelf")):
+    per_kwartier = {}
+    for r in vl.bat_verloop:
+        k = r[0].replace(minute=r[0].minute // 15 * 15, second=0)
+        erin, eruit = per_kwartier.get(k, (0.0, 0.0))
+        per_kwartier[k] = (erin + max(0.0, r[2]) * vl.stap_uur / 1000, eruit + max(0.0, -r[2]) * vl.stap_uur / 1000)
+    beide = [k.strftime("%H:%M") for k, (a, b) in sorted(per_kwartier.items()) if a > 0.02 and b > 0.02]
+    over = [t_.strftime("%H:%M:%S") for t_, m in vl.bat_modi if m == "third_party_control"]
+    nacht = [t_ for t_, m in vl.bat_modi if t_.hour < 7]
+    print(f"  kwartier-zelf: {len(vl.bat_modi)} wissels van de modus, overgenomen om {over}, "
+          f"{len(vl.bat_opdrachten)} opdrachten, laden en ontladen in {beide}")
+    controle("kwartier-zelf: geen wissel van de modus per kwartier, alleen voor een echte beurt",
+             len(vl.bat_modi) <= 10, f"{len(vl.bat_modi)}: {vl.bat_modi}")
+    controle("kwartier-zelf: de nachtbeurt is één stuk, één keer over en één keer terug",
+             len(nacht) == 2, f"{nacht}")
+    controle("kwartier-zelf: laden en ontladen in hetzelfde kwartier hooguit aan het eind van een beurt",
+             len(beide) <= 2, f"{beide}")
+    controle("kwartier-zelf: en hij geeft hem aan het eind terug",
+             [m for _, m in vl.bat_modi][-1:] == ["self_consumption"], f"{vl.bat_modi[-1:]}")
+
 # De knop kwam in de klantwoning op 29-09-2026 pas veertien seconden na het omzetten
 # terug (v0.101.8). Met v0.101.7 gaf het overnemen het na tien seconden op: in dit
 # scenario 160 minuten 2500 W uit de batterij in de bus, 6,67 kWh, en om 04:30 op 5%.
