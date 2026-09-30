@@ -452,7 +452,7 @@ if (vl := v("laadgrens-80")):
 # kritieke melding over een auto die precies deed wat hem gevraagd was.
 if (vl := v("laadgrens-80-ingesteld")):
     controle("doel gelijk aan de laadgrens: zegt dat verder niet hoeft",
-             bool(meldingen(vl, "verder hoefde hij niet")), f"{[m for _, m in vl.meldingen]}")
+             bool(meldingen(vl, " geladen van ")), f"{[m for _, m in vl.meldingen]}")
     controle("doel gelijk aan de laadgrens: geen laadgrens-gok",
              not meldingen(vl, "Mogelijk staat er een laadgrens"), "")
     controle("doel gelijk aan de laadgrens: geen herstart",
@@ -902,7 +902,7 @@ if (vl := v("vaatwasser-herstart")):
              vl.vw_gestart is not None and vl.vw_gestart.hour == 2 and len(meldingen(vl, "Vaatwasser is gestart")) == 1
              and not meldingen(vl, "Vaatwasser draait"), f"{[m for _, m in vl.meldingen]}")
     controle("herstart: één verslag, over de hele beurt vanaf 02:00",
-             len(meldingen(vl, "Vaatwasser is klaar")) == 1 and "van 02:0" in meldingen(vl, "Vaatwasser is klaar")[0]
+             len(meldingen(vl, "Vaatwasser is klaar")) == 1 and "kWh, 02:0" in meldingen(vl, "Vaatwasser is klaar")[0]
              and "Bespaard €" in meldingen(vl, "Vaatwasser is klaar")[0], f"{meldingen(vl, 'is klaar')}")
     controle("herstart: de beurt staat één keer in de opslag, afgerond, met bijna alle kWh en een besparing",
              len([b for b in vl.beurten if b["device"] == "vaatwasser"]) == 1
@@ -1221,13 +1221,12 @@ if (vl := v("klantwoning-herstart")) and (basis := v("klantwoning")):
     met_kh, zonder_kh = meldingen(vl, "is vol"), meldingen(basis, "is vol")
     # Sinds v0.101.0 staat bespaard in het verslag; een herstart mist hooguit vijf
     # minuten telling, dus dat bedrag mag net zo ver afwijken als de kosten.
-    kern_kh = lambda m: _re_kh.sub(r"Bespaard [^.]*\.", "Bespaard X.", _re_kh.sub(r"is er \d+ minuten", "is er N minuten", m))
-    minuten_kh = lambda m: int((_re_kh.search(r"is er (\d+) minuten", m) or [0, 0])[1])
+    # Sinds v0.102.1 staat de verloren tijd niet meer in het verslag; de rest wel.
+    kern_kh = lambda m: _re_kh.sub(r"Bespaard [^.]*\.", "Bespaard X.", m)
     bespaard_kh = lambda m: float((_re_kh.search(r"Bespaard € ([\d,]+)", m) or [0, "0"])[1].replace(",", "."))
     controle("herstart: het verslag gaat over de hele beurt, net als zonder herstarts",
-             len(met_kh) == 1 and len(zonder_kh) == 1 and "Geladen van" in met_kh[0]
+             len(met_kh) == 1 and len(zonder_kh) == 1 and _re_kh.search(r"kWh, \d\d:\d\d tot \d\d:\d\d\.", met_kh[0])
              and kern_kh(met_kh[0]) == kern_kh(zonder_kh[0])
-             and abs(minuten_kh(met_kh[0]) - minuten_kh(zonder_kh[0])) <= 5 * 5
              and abs(bespaard_kh(met_kh[0]) - bespaard_kh(zonder_kh[0])) <= 0.10,
              f"{met_kh} tegen {zonder_kh}")
 
@@ -1292,7 +1291,7 @@ if (vl := v("p1-lang-weg")):
 if (vl := v("teller-per-uur")):
     controle("teller per uur: op tijd vol", gehaald(vl), "")
     controle("teller per uur: het verslag noemt de echte hoeveelheid",
-             any("15," in m for m in meldingen(vl, "Geladen van")), f"{[m for _, m in vl.meldingen]}")
+             any("\n15," in m for m in meldingen(vl, "is vol")), f"{[m for _, m in vl.meldingen]}")
 
 
 # --- de boiler ---------------------------------------------------------------
@@ -1656,13 +1655,13 @@ if (vl := v("herstart-groep")) and (zonder := v("herstart-groep-zonder")):
              f"€ {vl.kosten:.2f} tegen € {zonder.kosten:.2f}")
     controle("herstart-groep: de opgegeven accustand blijft, ook als de paal na de herstart even niets zegt",
              not [r for r in vl.regels if r.regel.startswith("no-soc") and r.tijd.hour != 22], "")
-    verslag = next((m for _, m in vl.meldingen if "is vol" in m or "laadt niet verder" in m), "")
-    geladen_hg = _re_hg.search(r"Geladen van \d\d:\d\d tot \d\d:\d\d, ([\d,]+) kWh", verslag)
-    # "X kWh van het net", of sinds v0.101.0 "Alles kwam van het net" als er niets anders was.
-    net_hg = _re_hg.search(r"([\d,]+) kWh (?:kwam )?van het net", verslag) or (
-        geladen_hg if "Alles kwam van het net" in verslag else None)
+    verslag = next((m for _, m in vl.meldingen if "is vol" in m or " geladen " in m or "laadt niet verder" in m), "")
+    geladen_hg = _re_hg.search(r"([\d,]+) kWh, \d\d:\d\d tot \d\d:\d\d\.", verslag)
+    # "X kWh net", of "Alles van het net" als er niets anders was (v0.101.0, korter sinds v0.102.1).
+    net_hg = _re_hg.search(r"([\d,]+) kWh net", verslag) or (
+        geladen_hg if "Alles van het net" in verslag else None)
     controle("herstart-groep: het verslag gaat over de hele beurt, vanaf het begin",
-             "Geladen van 22:3" in verslag and "van 40 naar" in verslag, verslag)
+             " kWh, 22:3" in verslag and "van 40 naar" in verslag, verslag)
     controle("herstart-groep: en de getallen in het verslag kloppen met elkaar",
              geladen_hg is not None and net_hg is not None
              and abs(float(geladen_hg.group(1).replace(",", ".")) - float(net_hg.group(1).replace(",", "."))) <= 0.3,
@@ -1685,8 +1684,9 @@ if (vl := v("batterij-zelf-nul")):
     controle("zelf-nul: en dan geeft de batterij niets af, net als zonder de eigen stand",
              sum(r[2] < -50 for r in laadt) * vl.stap_uur * 60 <= 2.0,
              f"{sum(r[2] < -50 for r in laadt) * vl.stap_uur * 60:.1f} minuten")
-    controle("zelf-nul: is de auto vol, dan krijgt de batterij het na vijf rustige minuten terug",
-             terug is not None and virtueel.dt.timedelta(minutes=5) <= terug - eind_paal <= virtueel.dt.timedelta(minutes=7),
+    # Twee minuten sinds v0.102.1 (de eigenaar op 30-09-2026: "zet die 5 min terug naar 2 min").
+    controle("zelf-nul: is de auto vol, dan krijgt de batterij het na twee rustige minuten terug",
+             terug is not None and virtueel.dt.timedelta(minutes=2) <= terug - eind_paal <= virtueel.dt.timedelta(minutes=4),
              f"{terug} {eind_paal}")
     controle("zelf-nul: de coach schrijft bijna niets", len(vl.bat_opdrachten) <= 5, f"{len(vl.bat_opdrachten)}")
     controle("zelf-nul: de auto haalt zijn klaar-tijd", gehaald(vl), "")

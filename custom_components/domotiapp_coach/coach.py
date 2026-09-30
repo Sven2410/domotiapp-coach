@@ -227,8 +227,10 @@ VREEMD_PAUZE = timedelta(hours=1)
 # de reserve voor noodstroom, en een zekering waar minder dan
 # `ZELF_ZEKERING_W` ruimte op over is. Teruggeven doet hij pas als dat
 # `ZELF_WACHT` zo gebleven is, zodat een plan dat op de rand staat niet elke
-# minuut de modus omzet.
-ZELF_WACHT = timedelta(minutes=5)
+# minuut de modus omzet. Twee minuten sinds v0.102.1: de eigenaar op 30-09-2026,
+# na een laadbeurt waarin de batterij vijf minuten na een volle auto pas weer
+# zelf regelde: "zet die 5 min terug naar 2 min."
+ZELF_WACHT = timedelta(minutes=2)
 ZELF_ZEKERING_W = 500.0
 ZELF_MARGE = 1.0
 # Hoe lang de coach na het omzetten naar de externe stand wacht tot de stuurknop
@@ -773,37 +775,48 @@ HERKOMST_MIN_KWH = 0.05
 
 
 def _herkomst_zin(zon: float, accu: float, net: float, net_eur: float | None) -> str:
-    """Waar de stroom van een beurt vandaan kwam, in één zin (v0.101.0).
+    """Waar de stroom van een beurt vandaan kwam, in één korte regel (v0.101.0).
 
-    Voor elk apparaat dezelfde zin, eigen energie eerst. De eigenaar op
+    Voor elk apparaat dezelfde regel, eigen energie eerst. De eigenaar op
     28-09-2026, bij een vaatwasser die op zon en thuisbatterij draaide en toch
     "ongeveer € 0,199" meldde: "er is niks van het net af gehaald." Het bedrag
     hoort bij het net, want dat is wat er aan de leverancier betaald is; wat de
     thuisbatterij opleverde staat bij de batterij zelf.
+
+    Sinds v0.102.1 een opsomming in plaats van een zin: "1,5 kWh zon, 15,3 kWh
+    net (€ 3,71)." Zie `_verslag`.
     """
+    bedrag = f" ({_bedrag(net_eur)})" if net_eur is not None and net_eur >= 0.005 else ""
     delen = []
     if zon >= HERKOMST_MIN_KWH:
-        delen.append(("zon", f"{_kwh_tekst(zon)} van je zon"))
+        delen.append(("zon", f"{_kwh_tekst(zon)} zon"))
     if accu >= HERKOMST_MIN_KWH:
-        delen.append(("accu", f"{_kwh_tekst(accu)} uit je thuisbatterij"))
+        delen.append(("accu", f"{_kwh_tekst(accu)} thuisbatterij"))
     if net >= HERKOMST_MIN_KWH:
-        bedrag = f" voor {_bedrag(net_eur)}" if net_eur is not None and net_eur >= 0.005 else ""
-        delen.append(("net", f"{_kwh_tekst(net)} van het net{bedrag}"))
+        delen.append(("net", f"{_kwh_tekst(net)} net{bedrag}"))
     if not delen:
         return ""
     if len(delen) == 1:
         soort = delen[0][0]
         if soort == "zon":
-            return "Alles kwam van je zon."
+            return "Alles van je zon."
         if soort == "accu":
-            return "Alles kwam uit je thuisbatterij."
-        bedrag = f", voor {_bedrag(net_eur)}" if net_eur is not None and net_eur >= 0.005 else ""
-        return f"Alles kwam van het net{bedrag}."
-    # "0,3 kWh kwam van je zon, 0,6 kWh uit je thuisbatterij en 0,1 kWh van het net."
-    teksten = [tekst for _, tekst in delen]
-    hoeveel, waarvandaan = teksten[0].split(" kWh ", 1)
-    teksten[0] = f"{hoeveel} kWh kwam {waarvandaan}"
-    return ", ".join(teksten[:-1]) + " en " + teksten[-1] + "."
+            return "Alles uit je thuisbatterij."
+        return f"Alles van het net{bedrag}."
+    return ", ".join(tekst for _, tekst in delen) + "."
+
+
+def _verslag(*regels: str) -> str:
+    """Een verslag van een beurt: een paar korte regels onder elkaar (v0.102.1).
+
+    De eigenaar op 30-09-2026, over een verslag van vijf zinnen: "deze tekst is
+    veel te lang, moet korter en overzichtelijker. Op de telefoon past die
+    melding niet." Dus per regel één ding: wat er klaar is, hoeveel en wanneer,
+    waar het vandaan kwam, wat het scheelde. Elke regel eindigt op een punt,
+    zodat het ook leest waar een regeleinde niet getoond wordt. De uitsplitsing
+    van wat er bespaard is staat in het paneel, onder Bespaard.
+    """
+    return "\n".join(regel.strip() for regel in regels if regel and regel.strip())
 
 
 def _kwh(hass: HomeAssistant, entity_id: str | None) -> float | None:
@@ -1025,9 +1038,6 @@ class ChargerCoach:
         # Wat daarvan in de opslag staat, zodat er alleen bij een verandering
         # geschreven wordt. Zie `sensor_quiet`.
         self._sensor_gemeld_bewaard: set[str] = set()
-        # Het contract van de laatste ronde, voor de zin in een verslag dat
-        # buiten de ronde om geschreven wordt (`_zon_scheelt`).
-        self._contract: dict[str, Any] = {}
         # De prijslijsten van de ingebouwde Nord Pool, per sensor en per dag, en
         # wanneer een dag voor het laatst gevraagd is. Zie `_async_nordpool`.
         self._nordpool: dict[str, dict[str, list[dict[str, Any]]]] = {}
@@ -2064,7 +2074,6 @@ class ChargerCoach:
 
         level = (settings.get("strategy") or {}).get("level", LEVEL_PROPOSE)
         moment = _moment(now)
-        self._contract = settings.get("contract") or {}
         await self._async_nordpool(settings, moment)
 
         chargers = [
@@ -2821,62 +2830,17 @@ class ChargerCoach:
                 sessie["maat"] += kwh * koop_toen
 
     @staticmethod
-    def _bespaard_zin(totaal: float, zon: float, saldeert: str | None = None) -> str:
-        """Eén zin voor in het verslag: wat er bespaard is, en waardoor.
+    def _bespaard_zin(totaal: float) -> str:
+        """Eén korte regel voor in het verslag: wat er bespaard is.
 
         `totaal` is de maat min het betaalde: wat dezelfde beurt gekost had
         als alles van het net was gekomen op het moment van vrijgeven of
-        inpluggen. `zon` is wat de eigen zon daarvan scheelde; de rest is het
-        wachten op een goedkoper moment. De eigenaar op 09-09-2026: "ik wil het
-        totaal plaatje."
-
-        `saldeert` is wat een eigen kWh scheelt zolang er gesaldeerd wordt
-        (`_zon_scheelt`), en dan zegt de zin dat erbij (v0.101.4). De eigenaar
-        op 29-09-2026 over "0,9 kWh, 0,7 kWh kwam van je zon en 0,2 kWh uit je
-        thuisbatterij. Bespaard € 0,036, allemaal door de zon": "hoe kan je dan
-        uitkomen op 0,036 bespaard, je hebt dan toch alles bespaard? 0,24171
-        betaal ik per kWh." Klopte wel: 0,678 kWh maal 0,052756 aan
-        terugleverkosten, want die zon was teruggeleverd 0,188954 waard.
+        inpluggen. Tot v0.102.1 stond erbij waardoor (de zon, het wachten, en
+        bij salderen waarom eigen zon zo weinig scheelt); dat maakte het
+        verslag te lang voor een telefoon. De uitsplitsing staat in het paneel,
+        onder Bespaard (`zon_winst` in de beurt).
         """
-        wachten = totaal - zon
-        # Eén aantal decimalen per zin, naar het grootste bedrag erin.
-        grootste = max(abs(totaal), abs(zon), abs(wachten))
-        tot, z, w = (_bedrag(v, grootste) for v in (totaal, zon, abs(wachten)))
-        if zon < 0.005:
-            return f"Bespaard {tot} door te wachten."
-        uitleg = f"zolang je saldeert scheelt een eigen kWh alleen {saldeert}" if saldeert else ""
-        if wachten < -0.005:
-            zin = f"Bespaard {tot}: de zon scheelde {z}, het wachten kostte {w}."
-        elif wachten < 0.005:
-            if uitleg:
-                return f"Bespaard {tot} door de zon: {uitleg}."
-            return f"Bespaard {tot}, allemaal door de zon."
-        else:
-            zin = f"Bespaard {tot}: {z} door de zon en {w} door te wachten."
-        return f"{zin} {uitleg[0].upper()}{uitleg[1:]}." if uitleg else zin
-
-    def _zon_scheelt(self) -> str | None:
-        """Wat een eigen kWh scheelt zolang er gesaldeerd wordt, in woorden, of None.
-
-        Bij salderen is een teruggeleverde kWh de inkoopprijs waard min wat er
-        niet mee wegstreept: bij een vast contract de terugleverkosten, bij een
-        dynamisch ook de opslag van de leverancier (`_tariff`, `_prices`). Zelf
-        gebruiken scheelt dus alleen dat. Na het salderen is het de hele
-        inkoopprijs min de vergoeding, en dan hoeft er niets bij.
-        """
-        contract = self._contract or {}
-        if not self._salderen(contract):
-            return None
-        if contract.get("type") != "dynamic":
-            kosten = float((contract.get("fixed") or {}).get("feed_in_costs") or 0)
-            return "de terugleverkosten" if kosten > 0 else None
-        dynamic = contract.get("dynamic") or {}
-        delen = []
-        if float(dynamic.get("supplier_markup") or 0) > 0:
-            delen.append("de opslag")
-        if float(dynamic.get("feed_in_costs") or 0) - float(dynamic.get("feed_in_bonus") or 0) > 0:
-            delen.append("de terugleverkosten")
-        return " en ".join(delen) or None
+        return f"Bespaard {_bedrag(totaal)}."
 
     async def _async_programma_klaar(
         self,
@@ -2906,12 +2870,13 @@ class ChargerCoach:
         herkomst = self._herkomst_tekst(sessie) if kwh > 0 else ""
         bespaard = ""
         if maat is not None and kwh > 0 and maat - betaald >= 0.005:
-            bespaard = " " + self._bespaard_zin(maat - betaald, sessie.get("zon_winst") or 0.0, self._zon_scheelt())
-        await self._async_tell(
-            f"{naam} is klaar{wat}: gedraaid van {gestart:%H:%M} tot {einde:%H:%M}"
-            + (f", {kwh:.1f} kWh".replace(".", ",") if kwh > 0 else "")
-            + "." + (f" {herkomst}" if herkomst else "") + bespaard
-        )
+            bespaard = self._bespaard_zin(maat - betaald)
+        await self._async_tell(_verslag(
+            f"{naam} is klaar{wat}.",
+            (f"{_kwh_tekst(kwh)}, " if kwh > 0 else "") + f"{gestart:%H:%M} tot {einde:%H:%M}.",
+            herkomst,
+            bespaard,
+        ))
         # Wat er gemeten is gaat in de instellingen, zodat de volgende beurt
         # met de echte duur, het echte verbruik en het verloop rekent.
         if meten:
@@ -3928,18 +3893,14 @@ class ChargerCoach:
             # een boiler die om drie uur 's nachts warm wordt hoeft niemand te
             # wekken. De eigenaar op 06-09-2026: "niet telkens onnodig meldingen."
             vanaf = f" vanaf {sessie['gestart']:%H:%M}" if sessie.get("gestart") else ""
-            erin_tekst = f"{erin:.1f} kWh".replace(".", ",")
-            # Dezelfde twee zinnen als bij de andere apparaten (v0.101.0).
+            # Dezelfde regels als bij de andere apparaten (v0.101.0, v0.102.1).
             herkomst = self._herkomst_tekst(sessie)
             maat = None if sessie["maat_onbekend"] or sessie.get("nodig_sinds") is None else sessie["maat"]
             bespaard = ""
             if maat is not None and maat - sessie["betaald"] >= 0.005:
-                bespaard = " " + self._bespaard_zin(
-                    maat - sessie["betaald"], sessie.get("zon_winst") or 0.0, self._zon_scheelt()
-                )
+                bespaard = self._bespaard_zin(maat - sessie["betaald"])
             await self._async_tell(
-                f"{naam} is weer warm: {erin_tekst}{vanaf}."
-                + (f" {herkomst}" if herkomst else "") + bespaard,
+                _verslag(f"{naam} is weer warm.", f"{_kwh_tekst(erin)}{vanaf}.", herkomst, bespaard),
                 telefoon=False,
             )
             self._beurt_schrijven(self._boiler_regel(device, naam, sessie, now))
@@ -5442,10 +5403,14 @@ class ChargerCoach:
         # Iets dat alleen de bewoner zelf kan verhelpen, en dat losstaat van
         # het besluit van deze ronde. Het gaat dus naast de reden op de kaart
         # en niet erin.
+        # De lastbewaker alleen zolang de coach ook werkelijk wil laden: bij een
+        # auto die vol is of wacht begrenst hij niets. De eigenaar op 30-09-2026,
+        # met deze tip als melding op zijn telefoon 24 minuten nadat de auto op
+        # zijn doel stond: "waarom krijg ik deze melding als de auto al vol is?"
         tip = (
             self._nettip(now)
             or self._fasetip(settings, device, charger)
-            or self._bewakertip(settings, device, charger)
+            or (self._bewakertip(settings, device, charger) if decision.charge else "")
         )
         self.state[device_id]["tip"] = tip
 
@@ -8590,8 +8555,7 @@ class ChargerCoach:
                 return
             gemeld.add("vol")
             geladen = self._geladen(device, sessie)
-            kwh = f"{geladen:.1f} kWh".replace(".", ",") if geladen else ""
-            waarom = self._waarom(sessie)
+            kwh = _kwh_tekst(geladen) if geladen else ""
             # "Vol" is wat de paal zegt, niet altijd wat de accu doet. Stopt een
             # auto op 80% omdat daar een laadgrens in staat, dan is "de auto is
             # vol" onwaar en leest het als een coach die niet weet wat hij doet.
@@ -8600,18 +8564,28 @@ class ChargerCoach:
             # En staat die 80% als doel in het profiel, dan is er niets bijzonders
             # gebeurd en hoort er ook geen bijzonderheid te staan: dan is dit
             # gewoon het einde van een geslaagde beurt. De eigenaar op 16-09-2026.
-            wie = f"{_hoofdletter(self._hoe_heet(car))} aan {naam}"
+            #
+            # Sinds v0.102.1 staat de accustand in de kop ("geladen van 44 naar
+            # 80%", "is vol, van 30 naar 100%") in plaats van in een eigen zin,
+            # en is "en verder hoefde hij niet" eruit: het verslag moest korter.
+            wie = self._wie(car, naam)
             heel = doel_van(car) >= FULL_PERCENT
-            if car.soc_percent is None or (heel and doel_bereikt(car)):
+            accu = self._accu_verloop(sessie, car)
+            if car.soc_percent is None:
                 klaar = f"{wie} is vol."
-            elif doel_bereikt(car):
-                klaar = f"{wie} staat op {round(car.soc_percent)}%, en verder hoefde hij niet."
-            else:
+            elif not doel_bereikt(car):
                 klaar = (
                     f"{wie} laadt niet verder en staat op "
                     f"{round(car.soc_percent)}%. Mogelijk staat er een laadgrens in "
                     "de auto."
                 )
+            elif heel:
+                klaar = f"{wie} is vol, {accu}." if accu else f"{wie} is vol."
+            elif accu:
+                klaar = f"{wie} geladen {accu}."
+            else:
+                geschat = " (geschat)" if car.soc_estimated else ""
+                klaar = f"{wie} geladen tot {round(car.soc_percent)}%{geschat}."
             # Is de coach midden in de laadbeurt ingestapt, dan weet hij niet
             # hoe laat die begon en hoort hij dat ook niet te suggereren.
             # Vandaar "sinds" en niet "van ... tot"; dat ene woord zegt het al.
@@ -8620,21 +8594,20 @@ class ChargerCoach:
             # meldingen moeten gewoon duidelijk en kort zijn."
             begon = sessie["begon"]
             if sessie.get("ingestapt"):
-                verloop = f" Sinds {begon:%H:%M} ging er {kwh} in." if kwh else ""
+                verloop = f"{kwh} sinds {begon:%H:%M}." if kwh else ""
             elif kwh:
-                verloop = f" Geladen van {begon:%H:%M} tot {now:%H:%M}, {kwh}."
+                verloop = f"{kwh}, {begon:%H:%M} tot {now:%H:%M}."
             else:
-                verloop = f" Geladen van {begon:%H:%M} tot {now:%H:%M}."
+                verloop = f"{begon:%H:%M} tot {now:%H:%M}."
             nog = (
-                f" De coach heeft de paal om {herstart:%H:%M} nog een keer opnieuw "
+                f"De coach heeft de paal om {herstart:%H:%M} nog een keer opnieuw "
                 "gestart, zonder gevolg."
                 if herstart is not None
                 else ""
             )
-            await self._async_tell(
-                klaar + verloop + self._beurt_cijfers(sessie, car) + self._beurt_bespaard(sessie)
-                + (f" {waarom}." if waarom else "") + nog
-            )
+            await self._async_tell(_verslag(
+                klaar, verloop, self._beurt_cijfers(sessie), self._beurt_bespaard(sessie), nog,
+            ))
             return
 
         # De klaar-tijd is verstreken en de auto is niet vol. Te zien aan een
@@ -8670,30 +8643,47 @@ class ChargerCoach:
         )
 
     @staticmethod
-    def _beurt_cijfers(sessie: dict[str, Any], car: Car | None) -> str:
-        """De cijfers van een laadbeurt voor het verslag (v0.89.0).
+    def _wie(car: Car | None, naam: str) -> str:
+        """Wie er in de kop van een verslag staat (v0.102.1).
 
-        De bewoner van de eerste woning op 23-09-2026: "tijdens deze laadsessie
-        is er X kWh geladen, en is de accu gestegen van A% naar B%. C kWh is
-        afgenomen van het net met een totaalprijs van € D; E kWh heb je direct
-        verbruikt van je zonopwek." Alleen wat bekend is: zonder accustand geen
-        procenten, en zonder geteld geld geen bedrag. De kWh zelf staat al in
-        de zin ervoor.
+        Een auto met een eigen naam is genoeg: "De blauwe bus geladen tot 80%".
+        Zonder naam, en bij een gast, hoort de paal erbij, anders zegt "de auto"
+        in een huis met twee palen niet welke.
         """
-        delen = []
+        eigen = ((car.name if car else "") or "").strip()
+        if eigen and not (car is not None and car.guest):
+            return _hoofdletter(eigen)
+        return f"{_hoofdletter(ChargerCoach._hoe_heet(car))} aan {naam}"
+
+    @staticmethod
+    def _accu_verloop(sessie: dict[str, Any], car: Car | None) -> str:
+        """ "van 44 naar 80%" voor in een verslag, of niets als dat niet bekend is.
+
+        De bewoner van de eerste woning op 23-09-2026: "is de accu gestegen van
+        A% naar B%." Alleen wat bekend is: zonder accustand geen procenten.
+        """
         begin = sessie.get("soc_begin")
         eind = car.soc_percent if car is not None else None
-        if begin is not None and eind is not None and round(eind) > round(begin):
-            geschat = " (geschat)" if car.soc_estimated else ""
-            delen.append(f" De accu ging van {int(round(begin))} naar {int(round(eind))}%{geschat}.")
+        if begin is None or eind is None or round(eind) <= round(begin):
+            return ""
+        geschat = " (geschat)" if car.soc_estimated else ""
+        return f"van {int(round(begin))} naar {int(round(eind))}%{geschat}"
+
+    @staticmethod
+    def _beurt_cijfers(sessie: dict[str, Any]) -> str:
+        """Waar de stroom van een laadbeurt vandaan kwam, voor het verslag (v0.89.0).
+
+        De bewoner van de eerste woning op 23-09-2026: "C kWh is afgenomen van
+        het net met een totaalprijs van € D; E kWh heb je direct verbruikt van
+        je zonopwek." Dezelfde regel als bij elk ander apparaat (v0.101.0):
+        eigen zon, de thuisbatterij en het net, met het bedrag bij het net.
+        Zonder geteld geld niets. De kWh zelf en de accustand staan in de
+        regels erboven (`_accu_verloop`).
+        """
         geld = sessie.get("geld") or {}
-        # Dezelfde zin als bij elk ander apparaat (v0.101.0): eigen zon, de
-        # thuisbatterij en het net, met het bedrag bij het net.
         if float(geld.get("kwh") or 0.0) > HERKOMST_MIN_KWH:
-            herkomst = ChargerCoach._herkomst_tekst(geld)
-            if herkomst:
-                delen.append(f" {herkomst}")
-        return "".join(delen)
+            return ChargerCoach._herkomst_tekst(geld)
+        return ""
 
     def _beurt_bespaard(self, sessie: dict[str, Any]) -> str:
         """Wat een laadbeurt bespaarde, in de zin van de andere apparaten (v0.101.0).
@@ -8712,7 +8702,7 @@ class ChargerCoach:
         bespaard = maat - float(geld.get("betaald") or 0.0)
         if bespaard < 0.005:
             return ""
-        return " " + self._bespaard_zin(bespaard, float(geld.get("zon_winst") or 0.0), self._zon_scheelt())
+        return self._bespaard_zin(bespaard)
 
     async def _async_afgekoppeld(
         self,
@@ -8734,27 +8724,28 @@ class ChargerCoach:
         niet vol" bij; dat weet de bewoner zelf.
         """
         geladen = self._geladen(device, sessie)
-        kwh = f"{geladen:.1f} kWh".replace(".", ",") if geladen else ""
+        kwh = _kwh_tekst(geladen) if geladen else ""
         begon = sessie.get("begon")
 
         # "Sinds" en niet "van ... tot", want is de coach midden in de beurt
-        # ingestapt dan weet hij het begin niet. Die ene zin dekt allebei de
+        # ingestapt dan weet hij het begin niet. Die ene regel dekt allebei de
         # gevallen; de bijzin "en toen liep hij al" is eruit (de eigenaar, 21-09-2026).
+        accu = self._accu_verloop(sessie, car)
+        verloop = ""
         if kwh:
-            verloop = f", er ging {kwh} in sinds {begon:%H:%M}."
-        else:
-            verloop = "."
+            verloop = f"{kwh} sinds {begon:%H:%M}" + (f", {accu}" if accu else "") + "."
+        elif accu:
+            verloop = f"{_hoofdletter(accu)}."
 
-        waarom = self._waarom(sessie)
         # Was de auto al als vol gemeld, dan is dit het tweede verslag van
         # dezelfde beurt: wel in de geschiedenis, niet nog eens op de telefoon.
         await self._async_tell(
-            f"{_hoofdletter(self._hoe_heet(car))} aan {naam} is afgekoppeld om "
-            f"{moment:%H:%M}"
-            + verloop
-            + self._beurt_cijfers(sessie, car)
-            + self._beurt_bespaard(sessie)
-            + (f" {waarom}." if waarom else ""),
+            _verslag(
+                f"{self._wie(car, naam)} is afgekoppeld om {moment:%H:%M}.",
+                verloop,
+                self._beurt_cijfers(sessie),
+                self._beurt_bespaard(sessie),
+            ),
             telefoon="vol" not in (sessie.get("gemeld") or set()),
         )
 

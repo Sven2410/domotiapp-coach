@@ -347,7 +347,9 @@ const css = /* css */ `
   .rij.besluit .tekst { color: var(--dac-ink-2, inherit); font-size: 13.5px; }
   .rij.kritiek { border-color: var(--dac-warn); border-left-width: 4px; }
   .tijd { font-variant-numeric: tabular-nums; color: var(--dac-ink-3); font-size: 13px; padding-top: 1px; }
-  .tekst { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+  /* Een verslag is sinds v0.102.1 een paar korte regels onder elkaar; het
+     regeleinde hoort hier ook te zien te zijn. */
+  .tekst { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; white-space: pre-line; }
   @media (max-width: 320px) {
     .rij { grid-template-columns: 44px 1fr; gap: 8px; padding: 8px 10px; }
     .filter select { margin-left: 0; }

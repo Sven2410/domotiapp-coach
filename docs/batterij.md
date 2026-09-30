@@ -257,7 +257,8 @@ meter). Hij neemt het meteen over, op 0 W in `control_mode`, zodra
 standby, de paal die laadt), de vakantiestand, geen accustand, de reserve voor
 noodstroom als die boven de eigen ondergrens van de batterij ligt, of minder dan
 `ZELF_ZEKERING_W` (500 W) ruimte op de krapste zekering in zijn keten. Teruggeven
-doet hij pas als dat `ZELF_WACHT` (vijf minuten) zo bleef. Allebei de kanten op
+doet hij pas als dat `ZELF_WACHT` zo bleef: twee minuten sinds v0.102.1, daarvoor
+vijf (de eigenaar op 30-09-2026: "zet die 5 min terug naar 2 min"). Allebei de kanten op
 eerst 0 W in het register, zodat een overname nooit op een oude opdracht begint.
 Elke wissel gaat in de geschiedenis ("doet zelf nul op de meter", "de coach
 neemt het over, want de laadpaal laadt"). Iets anders dat stuurt herkent hij
@@ -695,4 +696,12 @@ kWh alleen de terugleverkosten." Bij een dynamisch contract "de opslag en de
 terugleverkosten", na het salderen niets erbij (`_zon_scheelt`, `_bespaard_zin`
 in coach.py, voor paal, vaatwasser en boiler; proef 116). Vanaf 1-1-2027 bespaart
 dezelfde beurt 0,678 × (0,24171 − 0,0193) = ongeveer € 0,15 door de zon.
+
+**Die uitleg is er sinds v0.102.1 weer uit, met de hele uitsplitsing.** De
+eigenaar op 30-09-2026, over een laadverslag van vijf zinnen: "deze tekst is veel
+te lang, moet korter en overzichtelijker. Op de telefoon past die melding niet."
+Een verslag is nu een paar korte regels (`_verslag` in coach.py) en de laatste is
+alleen het bedrag: "Bespaard € 0,036." `_zon_scheelt` bestaat niet meer. De som
+hierboven klopt nog steeds; wat de zon scheelde staat in het paneel onder Bespaard
+("Door zon"). Zie `docs/laadpaal.md`, "Het verslag is vier korte regels".
 

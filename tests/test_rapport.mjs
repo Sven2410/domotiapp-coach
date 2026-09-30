@@ -1404,21 +1404,27 @@ proef("de rij apparaten in de volgorde van dit scherm, nieuwe apparaten achteraa
   assert.deepEqual(orderDevices(lijst, ["weg", "boiler"]).map((d) => d.id), ["boiler", "paal", "vaat", "accu"], "een verdwenen apparaat doet niets");
   const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
   assert.ok(kaart.includes("orderDevices(") && kaart.includes("deviceOrder()"), "de rij volgt de gekozen volgorde");
-  assert.ok(kaart.includes('id="steer-left"') && kaart.includes('id="steer-right"'), "pijltjes naast het slepen");
+  assert.ok(kaart.includes('id="steer-left"') && kaart.includes('id="steer-right"'), "de pijltjes die het gekozen apparaat opschuiven");
   assert.ok(kaart.includes("resetDeviceOrder();"), "standaard terugzetten zet ook de apparaten terug");
 });
 
-proef("de rij apparaten: het knopje van Indeling aanpassen, zonder tekst, en dan slepen (v0.96.0)", () => {
+proef("de rij apparaten: het knopje van Indeling aanpassen, zonder tekst, en dan de pijltjes (v0.96.0, v0.102.1)", () => {
   // De eigenaar op 23-09-2026: "waarom kan ik hier de volgorde niet aanpassen,
   // drag en drop wat ik vroeg toch?" en daarna "niet lang indrukken maar het
   // zelfde icoontje als indeling aanpassen beneden, alleen dan zonder tekst, en
-  // dat je dan kan slepen."
+  // dat je dan kan slepen." En op 30-09-2026: "ook werkt de indeling aanpassen
+  // drag en drop niet. Dat moet weg en wel de pijltjes behouden om dat aan te
+  // passen." Sinds v0.102.1 dus alleen nog de pijltjes, bij de apparaten en bij
+  // de kaarten.
   const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
   assert.ok(/id="steer-sort"[^>]*aria-label="Volgorde aanpassen"[^>]*>\$\{icons\.sliders\}<\/button>/.test(kaart),
     "hetzelfde icoon als Indeling aanpassen, zonder tekst");
   assert.ok(kaart.includes("${icons.sliders} Indeling aanpassen"), "dat is het icoon van de knop onderaan");
-  assert.ok(kaart.includes("if (this.arranging_ || this.sorteren_) this.startTabDrag_("), "in die stand slepen");
-  assert.ok(kaart.includes(":host([sorting]) .steer-tab { touch-action: none; cursor: grab; }"), "dan scrolt de rij niet onder de vinger");
+  assert.ok(!/startTabDrag_|startDrag_|setPointerCapture|\.grip|dragging/.test(kaart), "er wordt nergens meer gesleept");
+  assert.ok(!/[Ss]leep de apparaten/.test(kaart) && kaart.includes("<span>Schuif het gekozen apparaat:</span>"), "en de tekst belooft het ook niet meer");
+  assert.ok(kaart.includes('data-move="-1" aria-label="Omhoog"') && kaart.includes('data-move="1" aria-label="Omlaag"'),
+    "de kaarten houden hun pijltjes omhoog en omlaag");
+  assert.ok(!kaart.includes('aria-label="Verslepen"'), "zonder de greep om aan te slepen");
   assert.ok(kaart.includes('this.$("#steer-sort").hidden = list.length < 2;'), "alleen als er iets te ordenen valt");
   assert.ok(!kaart.includes("langDrukken_"), "geen lang indrukken");
 });

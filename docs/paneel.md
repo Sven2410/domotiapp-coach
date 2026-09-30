@@ -32,21 +32,25 @@ Proef 24b in test_coach.py.
 
 **Sinds v0.96.0 ook zonder Indelen, met het knopje rechtsboven in de kaart**
 (`#steer-sort`, `startSorteren_` in overview.js): het icoon van "Indeling aanpassen",
-zonder tekst. Daarna zijn de apparaten te slepen, staan de pijltjes eronder, en
-zet "Klaar" of het knopje zelf het weer uit. De eigenaar op 23-09-2026: "waarom kan
-ik hier de volgorde niet aanpassen, drag en drop wat ik vroeg toch?" en, na een
-versie met lang indrukken: "niet lang indrukken maar het zelfde icoontje als
-indeling aanpassen beneden, alleen dan zonder tekst, en dat je dan kan slepen."
+zonder tekst. Daarna staan de pijltjes onder de rij, en zet "Klaar" of het
+knopje zelf het weer uit. De eigenaar op 23-09-2026: "waarom kan ik hier de
+volgorde niet aanpassen, drag en drop wat ik vroeg toch?" en, na een versie met
+lang indrukken: "niet lang indrukken maar het zelfde icoontje als indeling
+aanpassen beneden, alleen dan zonder tekst, en dat je dan kan slepen."
 
-De kaarten zijn te verslepen sinds de stand "Indelen" (`layout.js`, per scherm in
+**Sinds v0.102.1 wordt er nergens meer gesleept, alleen nog met pijltjes.** De
+eigenaar op 30-09-2026: "ook werkt de indeling aanpassen drag en drop niet. Dat
+moet weg en wel de pijltjes behouden om dat aan te passen." De greep op de
+kaarten (`startDrag_`) en het slepen van de apparaten (`startTabDrag_`) zijn uit
+overview.js; de kaarten houden omhoog en omlaag (`moveCard_`), de apparaten
+links en rechts (`moveDevice_`). Niet opnieuw voorstellen.
+
+De kaarten zijn te verplaatsen in de stand "Indelen" (`layout.js`, per scherm in
 de browser en niet per persoon). Sinds v0.91.0 ook de rij met aanstuurbare
 apparaten, na de bewoner van de eerste woning op 23-09-2026: "apparaten die ik veel
 gebruik wil ik vooraan kunnen zetten." `orderDevices`, `deviceOrder` en
 `saveDeviceOrder` in layout.js (`dac-device-order`); een nieuw apparaat komt
-achteraan. In de stand Indelen zijn de knoppen zijwaarts te slepen
-(`startTabDrag_` in overview.js, pointer events zoals bij de kaarten) en staan er
-twee pijltjes die het gekozen apparaat een plek opschuiven, want slepen is nooit
-de enige manier. "Standaard terugzetten" zet ook de apparaten terug.
+achteraan. "Standaard terugzetten" zet ook de apparaten terug.
 
 ## Waar het schema van een apparaat staat
 

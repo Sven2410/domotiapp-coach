@@ -596,6 +596,39 @@ voor € 6,72", `_herkomst_zin`), met het bedrag alleen voor het net (`net_eur`,
 dan het betaalde inclusief de zon tegen de terugleverprijs), en daarna wat de beurt
 bespaarde met dezelfde maat als Bespaard (`_beurt_bespaard`). Proef 97 en 113.
 
+**Het verslag is vier korte regels** (v0.102.1). De eigenaar op 30-09-2026, met
+het verslag van die middag op zijn telefoon (vijf zinnen, 330 tekens): "deze tekst
+is veel te lang, moet korter en overzichtelijker. Op de telefoon past die melding
+niet." Sindsdien, voor de paal, de vaatwasser en de boiler (`_verslag` in coach.py,
+de regels gescheiden door een regeleinde en elk met een punt erachter):
+
+```
+De blauwe bus geladen van 44 naar 80%.
+16,4 kWh, 12:01 tot 13:41.
+1,5 kWh zon, 14,9 kWh net (€ 3,71).
+Bespaard € 0,080.
+```
+
+Een auto die tot 100% laadt heet nog steeds vol: "De blauwe bus is vol, van 30
+naar 100%." Wat eruit ging: "aan Laadpaal" bij een auto met een eigen naam (`_wie`; zonder
+naam en bij een gast staat de paal er nog bij), "en verder hoefde hij niet", de
+losse zin over de accustand (die staat nu in de kop, `_accu_verloop`), waar de
+tijd bleef ("Sinds de kabel erin ging is er 239 minuten naar wachten op een
+goedkoper uur gegaan"; `_waarom` staat alleen nog in de melding dat de auto te
+laat is), en bij Bespaard de uitsplitsing in zon en wachten en de uitleg over
+salderen. Die uitsplitsing staat in het paneel onder Bespaard. Een auto die onder
+zijn doel stopt houdt zijn volle zin ("laadt niet verder en staat op 74%. Mogelijk
+staat er een laadgrens in de auto."), want dat is een afwijking. Afkoppelen:
+"De blauwe bus is afgekoppeld om 19:12." en dan "4,2 kWh sinds 19:00, van 44 naar
+61%." Proef 15, 97, 113 en 116.
+
+**De tip over de lastbewaker alleen zolang de coach wil laden** (v0.102.1). De
+eigenaar op 30-09-2026 kreeg "Je lastbewaker geeft op dit moment 15 A vrij en je
+lader kan 16 A" als melding, 24 minuten nadat de auto op zijn doel stond: "waarom
+krijg ik deze melding als de auto al vol is?" `_bewakertip` keek alleen naar die
+twee getallen. Nu alleen bij een besluit dat laadt (`decision.charge` in `_one`);
+proef 123.
+
 ## De accustand op de kaarten (v0.101.6)
 
 De eigenaar op 29-09-2026: "Ook wil ik op de laadpaalkaart de batterijstand van de
