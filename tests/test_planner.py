@@ -2833,8 +2833,8 @@ def zon_net(w, laadt_amps=0.0):
 
 d61a = decide(nu, [], zon_net(800.0), sven_auto(), met_modus("zon"), geen_planning, tariff=VAST, sun=ZON_RUIM)
 print(f"  zon, 0,8 kW: {d61a.rule} {d61a.amps} A: {d61a.reason}")
-controle("zon: onder de ondergrens laadt hij niet, en zegt vanaf hoeveel",
-         not d61a.charge and d61a.rule == "zon-wacht" and "1,4 kW" in d61a.reason, d61a.reason)
+controle("zon: onder de ondergrens laadt hij niet, en zegt vanaf hoeveel (90% van 1,38 kW)",
+         not d61a.charge and d61a.rule == "zon-wacht" and "1,2 kW" in d61a.reason, d61a.reason)
 
 d61b = decide(nu, [], zon_net(2500.0), sven_auto(), met_modus("zon"), geen_planning, tariff=VAST, sun=ZON_RUIM)
 print(f"  zon, 2,5 kW: {d61b.rule} {d61b.amps} A: {d61b.reason}")
@@ -2890,6 +2890,26 @@ controle("zon: een wolk breekt een lopende beurt niet meteen af (keep-alive op d
 d61n = decide(nu, [], zon_net(800.0), sven_auto(), _dc.replace(met_modus("zon"), boost=True), geen_planning,
               tariff=VAST, sun=ZON_RUIM)
 controle("snel gaat boven de modus", d61n.charge and d61n.rule == "boost", d61n.rule)
+
+# v0.103.0, de eigenaar op 30-09-2026 over evcc: een driefasige paal begint op
+# zon pas bij 4,1 kW, "in evcc kun je nu instellen dat de lader al mag starten
+# bij bijv 50% van die 4,1 kW ... en vult 2,1 kW aan uit het net."
+drie61 = Car(capacity_kwh=60.0, phases=3, soc_percent=50.0)
+d61o = decide(nu, [], zon_net(2500.0), drie61, met_modus("zon"), geen_planning, tariff=VAST, sun=ZON_RUIM)
+d61p = decide(nu, [], zon_net(2500.0), drie61, _dc.replace(met_modus("zon"), zon_start=0.5), geen_planning,
+              tariff=VAST, sun=ZON_RUIM)
+d61q = decide(nu, [], zon_net(1900.0), drie61, _dc.replace(met_modus("zon"), zon_start=0.5), geen_planning,
+              tariff=VAST, sun=ZON_RUIM)
+print(f"  drie fasen, 2,5 kW zon: standaard {d61o.rule}: {d61o.reason}")
+print(f"  vanaf 50%: {d61p.rule} {d61p.amps} A: {d61p.reason}")
+print(f"  vanaf 50%, 1,9 kW: {d61q.rule}: {d61q.reason}")
+controle("drie fasen op 2,5 kW zon: standaard wacht hij, en zegt vanaf 3,7 kW",
+         not d61o.charge and d61o.rule == "zon-wacht" and "3,7 kW" in d61o.reason, d61o.reason)
+controle("vanaf 50%: hij begint op de ondergrens en zegt wat er van het net bij komt",
+         d61p.charge and d61p.rule == "zon-modus" and d61p.amps == 6 and "1,6 kW van het net" in d61p.reason,
+         f"{d61p.amps} {d61p.reason}")
+controle("vanaf 50%: onder 2,1 kW wacht hij nog, en zegt vanaf hoeveel",
+         not d61q.charge and "2,1 kW" in d61q.reason, d61q.reason)
 
 print()
 print("=== 62. kwartierprijzen: hetzelfde als uren als de kwartieren gelijk zijn, en anders de goedkoopste kwartieren (v0.88.1) ===")

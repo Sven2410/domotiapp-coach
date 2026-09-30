@@ -655,7 +655,7 @@ const BATTERY_FIELDS = (richtingNodig) => [
   {
     key: "charge_limit",
     label: "Laadgrens (%)",
-    hint: "Optioneel: tot hoever de batterij zelf laadt. De coach leest dit en verandert het nooit.",
+    hint: "Optioneel: tot hoever de batterij zelf laadt. De coach leest dit, en zet het alleen voor de wekelijkse volle beurt even op 100%.",
     filter: "all",
     hideRow: true,
   },

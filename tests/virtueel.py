@@ -926,6 +926,8 @@ class Scenario:
     # De voorrang bij planningen (v0.93.0): ids van eerst naar laatst.
     plan_voorrang: list = field(default_factory=list)
     continu_amps: int = 6
+    # Vanaf welk deel van de ondergrens de modus zon begint, in procent (v0.103.0).
+    zon_start: int = 90
     net: str = "split"                  # split | signed | signed-omgekeerd
     aansluiting_fasen: int = 3
     zekering: float = 25.0
@@ -1368,6 +1370,7 @@ def instellingen(s: Scenario) -> dict:
             "controllable": s.paal_stuurbaar,
             "charge_mode": s.laadmodus,
             "continuous_amps": s.continu_amps,
+            "solar_start_percent": s.zon_start,
             "device_id": "" if s.paal.merk == "alfen" else "virtueel",
             "entity": E["vermogen"],
             "entities": {

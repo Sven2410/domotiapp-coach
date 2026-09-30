@@ -313,11 +313,18 @@ def _zelf_toegestaan(
     of maar een deel) kan de batterij in zijn eigen stand niet.
 
     En van het net laden of handelen is minstens één stap van het rooster
-    (`stap`), of zoveel als er in dit blok nog kan (v0.102.3). Anders koos de
-    som voor stilstaan, dat hij hier niet mag, het eerstvolgende roosterpunt
-    erboven: in de klantwoning op 30-09-2026 om 21:45 "laden van het net,
-    0,01 kWh" midden in een avond ontladen. Dat is geen inkoop maar een
-    overname om stil te staan, en die hoort hier niet.
+    (`stap`), of zoveel als de tijd in dit blok nog toelaat (v0.102.3). Anders
+    koos de som voor stilstaan, dat hij hier niet mag, het eerstvolgende
+    roosterpunt erboven: in de klantwoning op 30-09-2026 om 21:45 "laden van
+    het net, 0,01 kWh" midden in een avond ontladen. Dat is geen inkoop maar
+    een overname om stil te staan, en die hoort hier niet.
+
+    De tijd en niet de grens van de batterij (v0.103.0). Tot dan telde ook de
+    95% als "wat er nog kan", en dan vulde hij een batterij die 's nachts op
+    94% stond met 0,14 tot 0,20 kWh bij: nagerekend over 1.320 plannen van de
+    eerste woning op 30-09-2026, tien keer, allemaal op 94 of 95%. Het restje
+    van een kwartier dat bijna om is blijft wel mogen, anders stopte een beurt
+    elk kwartier 2:20 te vroeg (proef 37 in test_batterij.py).
     """
     if not b.zelf_nul:
         return kandidaten
@@ -329,10 +336,11 @@ def _zelf_toegestaan(
         nul = e
     uit = {nul}
     boven, onder = max(e, nul), min(e, nul)
-    op = max(kandidaten | {boven})
-    neer = min(kandidaten | {onder})
-    erop = boven + min(stap, op - boven) - 1e-9
-    eraf = onder - min(stap, onder - neer) + 1e-9
+    # Wat het blok in tijd en vermogen toelaat, zonder de grenzen van de accustand.
+    op_blok = e + b.max_charge_w / 1000.0 * deel * eta
+    neer_blok = e - b.max_discharge_w / 1000.0 * deel / eta
+    erop = boven + min(stap, max(0.0, op_blok - boven)) - 1e-9
+    eraf = onder - min(stap, max(0.0, onder - neer_blok)) + 1e-9
     for k in kandidaten:
         if (k > boven + 1e-9 and k >= erop) or (b.handelen and k < onder - 1e-9 and k <= eraf):
             uit.add(k)

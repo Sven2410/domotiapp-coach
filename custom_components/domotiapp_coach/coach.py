@@ -6657,6 +6657,7 @@ class ChargerCoach:
             boost=device.get("id", "") in self._boost,
             modus=self._modus_van(device),
             continu_amps=int(device.get("continuous_amps") or MIN_AMPS),
+            zon_start=float(device.get("solar_start_percent") or 90) / 100.0,
             paused_by_user=device.get("id", "") in self._paused,
             paused_by_balancer="equalizer" in status or "load_balancing" in status,
             no_current_reason=_text(self.hass, entities.get("no_current_reason")),
