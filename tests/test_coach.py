@@ -5603,7 +5603,7 @@ hass106.states.zet("sensor.laadpaal_vermogen", {"state": "0", "attributes": {"un
 b106 = ronde106(4)
 controle("de paal is klaar: nog niet meteen terug", zet75(hass106)[0] == [], f"{zet75(hass106)[0]}")
 b106 = ronde106(10)
-controle("na vijf rustige minuten wel", zet75(hass106)[0] == ["self_consumption"] and b106.get("self_zero") is True,
+controle("na de wachttijd wel", zet75(hass106)[0] == ["self_consumption"] and b106.get("self_zero") is True,
          f"{zet75(hass106)[0]}")
 
 
@@ -5618,6 +5618,25 @@ controle("bij de reserve voor noodstroom ook",
          waarom106(reserve=60.0, soc=60.5) == "hij zit bij de reserve voor noodstroom", f"{waarom106(reserve=60.0, soc=60.5)}")
 controle("en als de zekering krap wordt", waarom106(ruimte=400.0) == "de zekering wordt krap", f"{waarom106(ruimte=400.0)}")
 controle("met ruimte genoeg mag het", waarom106(ruimte=2400.0) is None, f"{waarom106(ruimte=2400.0)}")
+# Is het krap door wat een paal toezegde en nog niet neemt, dan is dat de reden
+# (v0.102.2). De eigenaar op 30-09-2026 om 12:01:42: "want de zekering wordt krap",
+# met de fase van de batterij op 4 A en de paal die nog moest beginnen.
+b106z = coachmod.Batterij(soc=60.0, soc_min=5.0)
+nul106 = coachmod.Besluit(coachmod.NUL)
+controle("krap door de toezegging van een paal: 'de laadpaal gaat laden'",
+         coach106._zelf_niet(BATTERIJ106, nul106, b106z, -300.0, 400.0, kaal_w=4000.0, paal_belooft=True)
+         == "de laadpaal gaat laden", "")
+controle("krap door de toezegging van iets anders: dat krijgt de ruimte",
+         coach106._zelf_niet(BATTERIJ106, nul106, b106z, -300.0, 400.0, kaal_w=4000.0)
+         == "een ander apparaat krijgt de ruimte", "")
+controle("ook zonder toezegging krap: dan is het de zekering",
+         coach106._zelf_niet(BATTERIJ106, nul106, b106z, -300.0, 400.0, kaal_w=450.0, paal_belooft=True)
+         == "de zekering wordt krap", "")
+coach106._toezeggingen["dev-laadpaal"] = {"amps": 16.0, "sleutels": [""]}
+controle("een paal die 16 A toezegde belooft iets", coach106._paal_belooft(inst106), "")
+coach106._toezeggingen["dev-laadpaal"] = {"amps": 0.0, "sleutels": [""]}
+controle("een paal die al neemt wat hij vroeg belooft niets meer", not coach106._paal_belooft(inst106), "")
+coach106._toezeggingen.pop("dev-laadpaal", None)
 controle("zonder de modi ingevuld kan het niet, ook met het vinkje",
          not coachmod.ChargerCoach._zelf_instelling({**BATTERIJ106, "battery": {"self_zero": True}}), "")
 
@@ -6847,6 +6866,179 @@ print("=== 124. de batterij krijgt na twee minuten zijn eigen stand terug (v0.10
 # met wijken voor de auto en om 13:44:55 pas weer zelf regelde: "zet die 5 min
 # terug naar 2 min." Het teruggeven zelf wordt in het virtuele huis nagemeten.
 controle("teruggeven na twee minuten", coachmod.ZELF_WACHT == dt.timedelta(minutes=2), f"{coachmod.ZELF_WACHT}")
+
+print("=== 125. de paal stopt: de batterij wacht op een meting van daarna (v0.102.2) ===")
+# De eigenaar op 30-09-2026: de auto stopte om 13:39:54, de laatste meterwaarde was
+# van 13:39:53 en zei nog 7,3 kW afname. De regelaar rekende daarmee en zette de
+# batterij in dezelfde seconde op ontladen op vol vermogen, terwijl er 1 kW zon
+# over was: een paar seconden 4,2 kW het net op, en daarna ruim een minuut niets.
+T125 = dt.datetime(2026, 9, 30, 13, 39, 50)
+s125 = {}
+controle("laadt de paal, dan is er niets te wachten", not coachmod.ChargerCoach._paal_net_uit(s125, True, T125, T125), "")
+controle("net gestopt, en de meter is van een seconde eerder: wachten",
+         coachmod.ChargerCoach._paal_net_uit(s125, False, T125 + dt.timedelta(seconds=4), T125 + dt.timedelta(seconds=3)), "")
+controle("een meting van twee seconden erna is nog te vroeg",
+         coachmod.ChargerCoach._paal_net_uit(s125, False, T125 + dt.timedelta(seconds=5), T125 + dt.timedelta(seconds=2)), "")
+controle("een meting van meer dan vijf seconden erna telt",
+         not coachmod.ChargerCoach._paal_net_uit(s125, False, T125 + dt.timedelta(seconds=7), T125 + dt.timedelta(seconds=6))
+         and "paal_op" not in s125, f"{s125}")
+s125b = {}
+coachmod.ChargerCoach._paal_net_uit(s125b, True, T125, None)
+controle("een meter die zwijgt houdt het niet vast: na een halve minuut geldt het besluit weer",
+         coachmod.ChargerCoach._paal_net_uit(s125b, False, T125 + dt.timedelta(seconds=29), None)
+         and not coachmod.ChargerCoach._paal_net_uit(s125b, False, T125 + dt.timedelta(seconds=31), None), "")
+controle("een batterij die nooit een paal zag laden wacht nergens op",
+         not coachmod.ChargerCoach._paal_net_uit({}, False, T125, T125), "")
+
+# En in de regelaar zelf: de paal laadt, stopt, en de meter zegt nog wat hij zei.
+inst125 = instellingen(devices=[LAADPAAL, BATTERIJ])
+waarden125 = huis75(afname=7338.0)
+waarden125.update({"sensor.laadpaal_status": "charging", "sensor.laadpaal_vermogen": "9800", "sensor.laadpaal_stroom": "14.2"})
+hass125, _, coach125 = bouw(waarden125, inst125)
+b125 = asyncio.run(ronde75(hass125, coach125, dt.datetime(2026, 9, 30, 13, 39)))
+controle("de paal laadt: de batterij geeft niets af", b125.get("rule") == "paal-laadt" and "discharge" not in zet75(hass125)[1],
+         f"{b125.get('rule')} {zet75(hass125)}")
+hass125.states.zet("sensor.laadpaal_status", "completed")
+hass125.states.zet("sensor.laadpaal_vermogen", "0")
+hass125.states.zet("sensor.laadpaal_stroom", "0.5")
+b125 = asyncio.run(ronde75(hass125, coach125, dt.datetime(2026, 9, 30, 13, 39, 54)))
+modus125, richting125, vermogen125 = zet75(hass125)
+print(f"  de paal stopt, de meter zegt nog 7338 W afname: {b125.get('rule')}, naar de batterij {richting125} {vermogen125}")
+controle("het besluit van de ronde is weer nul op de meter", b125.get("mode") == "nul", f"{b125.get('mode')}")
+controle("maar op de oude meterwaarde ontlaadt hij niet",
+         "discharge" not in richting125 and all(v == 0 for v in vermogen125), f"{richting125} {vermogen125}")
+controle("het besluit van de ronde zelf blijft heel",
+         coach125._batterij["dev-batterij"]["besluit"].stand == coachmod.NUL, f"{coach125._batterij['dev-batterij']['besluit'].stand}")
+# De meter meldt zich daarna: 1 kW zon over. Dan laadt hij op zon.
+later125 = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=6)
+hass125.states.zet("sensor.afname", "0", last_updated=later125)
+hass125.states.zet("sensor.teruglevering", "1020", last_updated=later125)
+hass125.services.verstuurd.clear()
+asyncio.run(coach125._async_regel("dev-batterij", inst125, BATTERIJ))
+asyncio.run(hass125.afmaken())
+modus125, richting125, vermogen125 = zet75(hass125)
+print(f"  de meter van zes seconden later zegt 1020 W teruglevering: naar de batterij {richting125} {vermogen125}")
+controle("met de meting van daarna laadt hij op de zon die over is",
+         "discharge" not in richting125 and vermogen125 == [1000], f"{richting125} {vermogen125}")
+controle("en het wachten is voorbij", "paal_op" not in coach125._batterij["dev-batterij"], "")
+
+print("=== 126. 'de batterij doet dat zelf' alleen als het plan dat ook is (v0.102.2) ===")
+# De eigenaar op 30-09-2026 om 12:01:42, terwijl de coach de batterij overnam en op
+# de stuurknop wachtte: "De laadpaal laadt, dus de batterij geeft niets af.
+# Zonoverschot gaat er nog wel in. De batterij doet dat zelf, met zijn eigen meter."
+inst126 = instellingen(devices=[LAADPAAL, BATTERIJ106])
+hass126, _, coach126 = bouw(huis75(modus="third_party_control"), inst126)
+b126 = asyncio.run(ronde75(hass126, coach126, dt.datetime(2026, 9, 30, 12, 0)))
+controle("nul op de meter: de batterij doet het zelf, en dat staat erbij",
+         b126.get("self_zero") is True and "doet dat zelf" in (b126.get("reason") or ""), f"{b126.get('reason')}")
+hass126.states.zet("sensor.laadpaal_status", "charging")
+hass126.states.zet("sensor.laadpaal_vermogen", "140")
+# Het overnemen loopt nog: de regelaar is bezig, dus deze ronde wacht erop.
+coach126._batterij["dev-batterij"]["bezig"] = True
+b126 = asyncio.run(ronde75(hass126, coach126, dt.datetime(2026, 9, 30, 12, 1, 42)))
+coach126._batterij["dev-batterij"]["bezig"] = False
+print(f"  tijdens het overnemen: {b126.get('reason')}")
+controle("tijdens het overnemen zegt de kaart niet dat de batterij het zelf doet",
+         b126.get("rule") == "paal-laadt" and "doet dat zelf" not in (b126.get("reason") or ""), f"{b126.get('reason')}")
+
+print("=== 127. de tip over de lastbewaker gaat niet naar de telefoon (v0.102.2) ===")
+# Per beurt één verslag, plus wat de bewoner zelf moet oplossen (de eigenaar op
+# 06-09-2026). Dat de lastbewaker het tempo bepaalt is uitleg: op de kaart en in
+# de geschiedenis, niet als kritieke melding op de telefoon.
+hass127, _, coach127 = bouw(dict(huis(status="charging", stroom=12.0, vermogen=8200.0, teruglevering=0.0, afname=1800.0),
+                                 **{"sensor.equalizer": "12"}), inst123)
+coach127._boost.add("dev-laadpaal")
+b127, verstuurd127 = asyncio.run(ronde(coach127, inst123))
+asyncio.run(hass127.afmaken())
+rijen127 = asyncio.run(coachmod.async_get_meldingen(hass127).async_list()) if hasattr(
+    coachmod.async_get_meldingen(hass127), "async_list") else []
+print(f"  tip: {b127['tip'][:50]!r}, naar de telefoon: {[d for d in hass127.services.verstuurd if d[0] == 'notify']}")
+controle("de tip staat op de kaart", "12 A vrij" in b127["tip"] and "dev-laadpaal" in coach127._getipt, f"{b127['tip']!r}")
+controle("er gaat niets naar de telefoon", not [d for d in hass127.services.verstuurd if d[0] == "notify"],
+         f"{[d for d in hass127.services.verstuurd if d[0] == 'notify']}")
+# Een netmeting die wegvalt moet de bewoner wel oplossen: die blijft kritiek.
+hass127b, _, coach127b = bouw(huis(status="charging", stroom=12.0, vermogen=8200.0), inst123)
+coach127b._net_stil_sinds = dt.datetime(2026, 8, 18, 14, 30)
+gestuurd127 = []
+
+
+async def tell127(message, kritiek=False, telefoon=True):
+    gestuurd127.append((message, kritiek, telefoon))
+
+
+coach127b._async_tell = tell127
+coach127b._nettip = lambda now: "De coach kan je netmeting al 7 minuten niet lezen."
+asyncio.run(ronde(coach127b, inst123))
+controle("een netmeting die wegvalt blijft een kritieke melding op de telefoon",
+         any("netmeting" in m and k and t for m, k, t in gestuurd127), f"{gestuurd127}")
+gestuurd127c = []
+
+
+async def tell127c(message, kritiek=False, telefoon=True):
+    gestuurd127c.append((message, kritiek, telefoon))
+
+
+hass127c, _, coach127c = bouw(dict(huis(status="charging", stroom=12.0, vermogen=8200.0, teruglevering=0.0, afname=1800.0),
+                                   **{"sensor.equalizer": "12"}), inst123)
+coach127c._boost.add("dev-laadpaal")
+coach127c._async_tell = tell127c
+asyncio.run(ronde(coach127c, inst123))
+controle("de tip over de lastbewaker is een gewone melding, alleen voor de geschiedenis",
+         any("lastbewaker" in m and not k and not t for m, k, t in gestuurd127c), f"{gestuurd127c}")
+
+print("=== 128. de hoogste meting van een fase, voor de vraag of de limiet omhoog mag (v0.102.2) ===")
+hass128, _, coach128 = bouw(huis(status="charging", stroom=12.0, vermogen=8200.0, teruglevering=0.0, afname=8000.0), instellingen())
+NU128 = coachmod._moment()
+
+
+class Melding128:
+    def __init__(self, waarde):
+        self.entity_id = "sensor.l1"
+        self.state = str(waarde)
+
+
+coach128._watched_phases = {"sensor.l1"}
+hist128 = coach128._fase_historie.setdefault("sensor.l1", [])
+# Een apparaat dat om de tien seconden aan en uit gaat: 21, 10, 21, 10, ...
+for i, waarde in enumerate([21, 10, 21, 10, 21, 10]):
+    hist128.append((NU128 - dt.timedelta(seconds=60 - 10 * i), float(waarde)))
+hass128.states.zet("sensor.l1", "10")
+fase128 = {"current": "sensor.l1"}
+print(f"  mediaan {coach128._fase_amps(fase128, NU128)}, hoogste {coach128._fase_piek(fase128, NU128)}")
+controle("de hoogste meting van het venster is 21 A, ook als de sensor nu 10 zegt",
+         coach128._fase_piek(fase128, NU128) == 21.0, f"{coach128._fase_piek(fase128, NU128)}")
+# Een waarde die al langer stond dan het venster en net zakte: die stond er aan
+# het begin van het venster nog, en telt dus mee.
+coach128._fase_historie["sensor.l1"] = [(NU128 - dt.timedelta(seconds=200), 19.0), (NU128 - dt.timedelta(seconds=20), 8.0)]
+hass128.states.zet("sensor.l1", "8")
+controle("wat er aan het begin van het venster stond telt mee", coach128._fase_piek(fase128, NU128) == 19.0,
+         f"{coach128._fase_piek(fase128, NU128)}")
+coach128._fase_historie["sensor.l1"] = []
+for waarde in (19, 8):
+    coach128._async_phase_changed(Melding128(waarde))
+coach128._fase_historie["sensor.l1"][0] = (coachmod._moment() - dt.timedelta(seconds=200), 19.0)
+coach128._async_phase_changed(Melding128(9))
+controle("de luisteraar bewaart één meting van voor het venster",
+         [w for _, w in coach128._fase_historie["sensor.l1"]] == [19.0, 8.0, 9.0], f"{coach128._fase_historie['sensor.l1']}")
+coach128._fase_historie["sensor.l1"][1] = (coachmod._moment() - dt.timedelta(seconds=150), 8.0)
+coach128._async_phase_changed(Melding128(9.5))
+controle("en gooit weg wat daarvoor lag",
+         [w for _, w in coach128._fase_historie["sensor.l1"]] == [8.0, 9.0, 9.5], f"{coach128._fase_historie['sensor.l1']}")
+# Een fase zonder stroomsensor heeft geen historie: dan telt wat hij nu zegt.
+hass128.states.zet("sensor.l1_w", {"state": "2300", "attributes": {"unit_of_measurement": "W"}})
+controle("een fase uit vermogen en spanning: de hoogste is wat hij nu zegt",
+         coach128._fase_piek({"power": "sensor.l1_w"}, NU128) == coach128._fase_amps({"power": "sensor.l1_w"}, NU128) == 10.0,
+         f"{coach128._fase_piek({'power': 'sensor.l1_w'}, NU128)}")
+# En het komt bij de planner aan, naast de mediaan.
+coach128._fase_historie["sensor.l1"] = [(NU128 - dt.timedelta(seconds=50), 21.0), (NU128 - dt.timedelta(seconds=40), 10.0),
+                                         (NU128 - dt.timedelta(seconds=30), 21.0), (NU128 - dt.timedelta(seconds=20), 10.0),
+                                         (NU128 - dt.timedelta(seconds=10), 10.0)]
+hass128.states.zet("sensor.l1", "10")
+net128, _, _, _ = coach128._read(NU128, instellingen(), LAADPAAL)
+print(f"  naar de planner: mediaan {net128.phase_amps}, hoogste {net128.phase_peak_amps}")
+controle("de planner krijgt de mediaan en de hoogste meting per fase",
+         net128.phase_amps[0] == 10.0 and net128.phase_peak_amps[0] == 21.0 and len(net128.phase_peak_amps) == 3,
+         f"{net128.phase_amps} {net128.phase_peak_amps}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

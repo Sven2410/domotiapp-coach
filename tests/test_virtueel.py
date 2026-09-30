@@ -1164,8 +1164,14 @@ if (vl := v("klantwoning-oven")):
              net_onder_gemiddelde(vl, [r for r in regels_in(vl, "12:42", "13:00")
                                        if r.tijd.date() == KLANT_ZATERDAG]),
              f"{vl.net_kwh_tussen('12:42', '13:00'):.2f} kWh")
+    # Sinds v0.102.2 in de geschiedenis en op de kaart, niet op de telefoon:
+    # dat de lastbewaker het tempo bepaalt is uitleg, niets om op te lossen.
+    bewaker = [m for m in vl.geschiedenis if "lastbewaker" in (m.get("message") or "")]
     controle("oven: de Equalizer wordt gemeld, niet bevochten",
-             meldingen(vl, "lastbewaker") and len(vl.opdrachten) <= 60, f"{len(vl.opdrachten)} opdrachten")
+             bool(bewaker) and len(vl.opdrachten) <= 60, f"{len(vl.opdrachten)} opdrachten, {len(bewaker)} keer gemeld")
+    controle("oven: en dat is een gewone melding in de geschiedenis, niet een kritieke op de telefoon",
+             all(m.get("kind") == "melding" for m in bewaker) and not meldingen(vl, "lastbewaker"),
+             f"{[m.get('kind') for m in bewaker]} {meldingen(vl, 'lastbewaker')}")
 
 if (vl := v("klantwoning-p1-weg")):
     klant_basis(vl, "p1 weg")
@@ -1898,6 +1904,49 @@ if (auto_eerst := v("planning-auto-eerst")) and (accu_eerst := v("planning-accu-
         controle(f"{naam}: de klaar-tijd blijft heilig, ook met de accu bovenaan", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
         l3 = max((r.fase_amps[2] for r in vl.regels if r.fase_amps and len(r.fase_amps) > 2), default=0.0)
         controle(f"{naam}: fase 3 blijft onder de zekering min de marge", l3 <= 23.5, f"{l3:.1f} A")
+
+# --- een apparaat dat aan en uit gaat terwijl de auto laadt (v0.102.2) ----------
+
+print("=== een apparaat dat aan en uit gaat, en een paal die stopt naast een batterij ===")
+# De eigenaar op 30-09-2026: een apparaat van zo'n 10 A op één fase dat om de tien
+# tot twintig seconden aan en uit ging. De coach zakte van 16 naar 12 A en ging
+# een minuut later op één meting in een dal terug naar 16, en dat bleef hij doen:
+# in dit huis achttien keer in twintig minuten. Omhoog gaat nu alleen als de
+# hoogste meting van het venster ook past.
+if (vl := v("puls-tijdens-snelladen")):
+    limieten = [(t, d.get("current")) for t, dienst, d in vl.opdrachten if dienst == "set_charger_dynamic_limit"]
+    tijdens = [(t, a) for t, a in limieten if "12:20" <= f"{t:%H:%M}" < "12:40"]
+    na = [(t, a) for t, a in limieten if f"{t:%H:%M}" >= "12:40"]
+    print(f"  puls: limieten {[(f'{t:%H:%M:%S}', a) for t, a in limieten if f'{t:%H:%M}' >= '12:20']}")
+    controle("puls: hij zakt één keer voor de zekering, en daar blijft het bij",
+             len(tijdens) == 1 and tijdens[0][1] < 16, f"{[(f'{t:%H:%M:%S}', a) for t, a in tijdens]}")
+    controle("puls: is het apparaat uit, dan staat hij binnen drie minuten weer op 16 A",
+             bool(na) and na[0][1] == 16 and f"{na[0][0]:%H:%M}" <= "12:43", f"{[(f'{t:%H:%M:%S}', a) for t, a in na]}")
+    # Na de eerste keer hoort de fase onder de zekering min de marge te blijven:
+    # 25 A min 3 A, en een halve ampère voor de meter die hele ampères meldt.
+    top = max((max(r.fase_amps) for r in vl.regels if "12:21" <= f"{r.tijd:%H:%M}" < "12:40"), default=0.0)
+    controle("puls: en de zware fase blijft intussen onder de zekering min de marge", top <= 22.5, f"{top:.1f} A")
+    redenen = sorted({r.reden for r in vl.regels if "12:22" <= f"{r.tijd:%H:%M}" < "12:40" and r.regel == "boost"})
+    controle("puls: de kaart zegt dat de zekering het is, niet 'ongeacht de prijs'",
+             bool(redenen) and all("onder je zekering" in reden for reden in redenen), f"{redenen}")
+    controle("puls: de auto raakt gewoon vol", vl.klaar_op is not None, f"{vl.klaar_op}")
+
+# Dezelfde dag om 13:39:54: de auto was klaar, de laatste meterwaarde zei nog
+# 7,3 kW afname, en de regelaar zette de batterij daarop in dezelfde seconde op
+# ontladen op vol vermogen: een paar seconden 4,2 kW het net op. In dit huis
+# acht seconden 2,25 kW. De batterij wacht nu op een meting van na het stoppen.
+if (vl := v("batterij-paal-stopt")):
+    klaar = next((r.tijd for r in vl.regels if r.regel == "complete"), None)
+    erna = [(t, w) for t, w in vl.bat_opdrachten if klaar is not None and t >= klaar - virtueel.dt.timedelta(seconds=5)]
+    naar_net = min((rij[1] for rij in vl.bat_verloop if klaar is not None and rij[0] >= klaar), default=0.0)
+    print(f"  paal stopt om {klaar:%H:%M:%S}: opdrachten {[(f'{t:%H:%M:%S}', round(w)) for t, w in erna[:3]]}, "
+          f"laagste meterstand daarna {naar_net:.0f} W")
+    controle("paal stopt: de batterij ontlaadt niet op de meterwaarde van voor het stoppen",
+             bool(erna) and all(w > -1000 for _, w in erna), f"{[(f'{t:%H:%M:%S}', round(w)) for t, w in erna[:4]]}")
+    controle("paal stopt: er gaat daarna niets van de batterij het net op", naar_net > -100, f"{naar_net:.0f} W")
+    controle("paal stopt: binnen een kwartminuut voedt hij het huis weer",
+             bool(erna) and erna[0][1] < -100 and erna[0][0] - klaar <= virtueel.dt.timedelta(seconds=15),
+             f"{[(f'{t:%H:%M:%S}', round(w)) for t, w in erna[:2]]}")
 
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
