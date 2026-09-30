@@ -7166,6 +7166,25 @@ for naam, apparaat, niveau in (
     bn, vn = asyncio.run(ronde130(c_n, inst_n, apparaat, T130, niveau))
     controle(f"{naam}: nooit een fasewissel", not selecties(vn) and bn["rule"] != "fasewissel", f"{bn['rule']} {vn}")
 
+print("=== 131. eigen ruimtes voor de lijst Apparaten (v0.105.0) ===")
+# De eigenaar op 01-10-2026: "eigen ruimtes in de coach. Alleen in lijst apparaten."
+# De ruimtes staan bovenaan in de instellingen (`rooms`), een apparaat wijst er een
+# aan met `room`. Laden mag ze niet wegsnoeien, en het schema moet ze doorlaten.
+oud131 = {"devices": [{**LAADPAAL, "room": "r-garage"}], "rooms": [{"id": "r-garage", "name": "Garage"}]}
+geladen131 = storage._prune(storage.DEFAULT_SETTINGS, storage._migrate(dict(oud131)))
+controle("na laden staan de ruimtes er nog, in hun volgorde", geladen131.get("rooms") == [{"id": "r-garage", "name": "Garage"}],
+         f"{geladen131.get('rooms')}")
+controle("en het apparaat wijst zijn ruimte nog aan", geladen131["devices"][0].get("room") == "r-garage", "")
+controle("een installatie zonder ruimtes krijgt een lege lijst",
+         storage._prune(storage.DEFAULT_SETTINGS, storage._migrate({"devices": []})).get("rooms") == [], "")
+bron131 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
+           / "websocket.py").read_text(encoding="utf-8")
+controle("het schema kent de ruimtes en de ruimte van een apparaat (het gooit onbekende velden weg)",
+         'vol.Optional("rooms")' in bron131 and 'vol.Optional("room", default="")' in bron131, "")
+# En de coach rekent er nergens mee: alleen het paneel leest ze.
+controle("de coach zelf leest geen ruimtes",
+         '"rooms"' not in (pathlib.Path(coachmod.__file__).read_text(encoding="utf-8")), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

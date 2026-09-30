@@ -255,6 +255,9 @@ _DEVICE = _schema(
         # met de keuzelijst `phases` bij de entiteiten. Standaard uit. De eigenaar
         # op 30-09-2026: "Easee houden we zo en alfen passen we aan."
         vol.Optional("phase_switching", default=False): bool,
+        # In welke eigen ruimte het apparaat staat (v0.105.0), het id uit `rooms`,
+        # of "" voor geen. Alleen voor de indeling van de lijst Apparaten.
+        vol.Optional("room", default=""): vol.All(str, vol.Length(max=40)),
         # Welke soort druk op de vrijgaveknop telt ("single", "double", ...);
         # leeg is elke druk.
         vol.Optional("release_press", default=""): vol.All(str, vol.Length(max=64)),
@@ -466,6 +469,13 @@ _SETTINGS = _schema(
             }
         ),
         vol.Optional("devices"): [_DEVICE],
+        # De eigen ruimtes van de lijst Apparaten (v0.105.0). De eigenaar op
+        # 01-10-2026: "eigen ruimtes in de coach. Alleen in lijst apparaten."
+        vol.Optional("rooms"): vol.All(
+            [_schema({vol.Required("id"): vol.All(str, vol.Length(min=1, max=40)),
+                      vol.Required("name"): vol.All(str, vol.Length(max=40))})],
+            vol.Length(max=50),
+        ),
         vol.Optional("ready_devices"): [str],
         vol.Optional("ready_now"): [str],
         vol.Optional("active_cars"): [

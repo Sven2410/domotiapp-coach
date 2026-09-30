@@ -488,6 +488,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         "schedules": [],
     },
     "devices": [],
+    # Eigen ruimtes om de lijst Apparaten in te delen (v0.105.0): {id, name}, in
+    # de volgorde waarin ze op het scherm staan. Een apparaat wijst er een aan met
+    # `room`. Alleen voor die lijst; de coach zelf rekent er niet mee.
+    "rooms": [],
     # Device ids the customer has released for steering right now: the
     # dishwasher is loaded and its door is shut, the car may charge. Kept as a
     # list rather than a map on purpose -- the storage prunes dictionaries
