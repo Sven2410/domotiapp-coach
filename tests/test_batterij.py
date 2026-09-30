@@ -887,6 +887,56 @@ controle("wel een echte inkoop als hij anders leeg is voor de dure avond (30-32%
 # Het restje van een kwartier dat bijna om is mag wel, anders stopt een beurt elk
 # kwartier te vroeg; dat meet proef 37 hierboven.
 
+print("=== 39. de batterij helpt de auto op de duurste laaduren (v0.104.1) ===")
+# De eigenaar op 30-09-2026 om 23:48, bij het plan van de eerste woning: laden om
+# 00:00 (€ 0,319), 02:00 (€ 0,326) en 04:00 (€ 0,325), en de 2,3 kWh uit de batterij
+# om 00:00. "Eigenlijk moet hij meehelpen op de duurste momenten, om daar de
+# financiële pijn het meest te verzachten."
+N39 = dt.datetime(2026, 10, 1, 0, 0)
+P39 = [0.319, 0.328, 0.326, 0.327, 0.325, 0.335]
+a39 = anker(soc=70.0, auto_boven=50.0, nacht=False, max_discharge_w=2500.0)
+eta39 = 0.736 ** 0.5
+per_uur39 = 0.2 / eta39 / 14.6 * 100.0
+uren39 = [bat.Uur(N39 + dt.timedelta(hours=i), N39 + dt.timedelta(hours=i + 1), bat.NUL, -0.2, 0.0,
+                  70.0 - (i + 1) * per_uur39, P39[i]) for i in range(6)]
+laden39 = [(N39 + dt.timedelta(hours=u), N39 + dt.timedelta(hours=u + 1), 8.0) for u in (0, 2, 4)]
+hulp39 = bat.auto_hulp(uren39, a39, None, laden39)
+print(f"  per uur naar de auto: {[round(x, 2) for x in hulp39]}")
+# Om 03:00 zit hij op 70% min drie uur huis; alles daarboven tot 50% gaat om 02:00 in de auto.
+verwacht39 = (70.0 - 3 * per_uur39 - 50.0) / 100.0 * 14.6 * eta39
+controle("het duurste laaduur (02:00, € 0,326) krijgt alles wat er boven de grens is",
+         abs(hulp39[2] - verwacht39) < 0.01, f"{hulp39} (verwacht {verwacht39:.3f})")
+controle("het goedkoopste laaduur (00:00, € 0,319) krijgt pas iets als er dan nog over is",
+         hulp39[0] < hulp39[2], f"{hulp39}")
+controle("nooit hulp in een uur waarin de auto niet laadt", hulp39[1] == hulp39[3] == hulp39[5] == 0.0, f"{hulp39}")
+# Na alle hulp zakt de batterij in een blok met hulp nooit onder de grens.
+cap39, weg39 = 14.6, 0.0
+laagst39 = []
+for u, h in zip(uren39, hulp39):
+    weg39 += h / eta39
+    if h > 0:
+        laagst39.append(u.soc - weg39 / cap39 * 100.0)
+controle("in elk blok met hulp blijft hij boven de grens van 50%", all(s >= 50.0 - 1e-6 for s in laagst39),
+         f"{[round(s, 1) for s in laagst39]}")
+# Evenveel als vroeger bij gelijke prijzen: dan het vroegste eerst.
+vlak39 = [bat.Uur(u.start, u.end, u.stand, u.kwh, u.net_kwh, u.soc, 0.30) for u in uren39]
+hulp39v = bat.auto_hulp(vlak39, a39, None, laden39)
+controle("bij gelijke prijzen het vroegste laaduur eerst, zoals het was",
+         hulp39v[0] > 0 and hulp39v[0] >= hulp39v[2], f"{hulp39v}")
+
+# En de regelaar: om 00:00 laadt de paal volgens zijn plan, maar de hulp is voor 02:00.
+b39 = anker(soc=70.0, auto_boven=50.0, nacht=False, max_discharge_w=2500.0)
+nu39 = bat.Besluit(bat.NUL, reason="nul", rule="nul", auto_hulp_nu=False, auto_hulp_om=N39 + dt.timedelta(hours=2))
+wacht39 = bat.met_paal(nu39, True, b39, None, grens=50.0)
+print(f"  00:00, paal laadt: {wacht39.rule}: {wacht39.reason}")
+controle("om 00:00 geeft de batterij niets af, en zegt dat de hulp om 02:00 komt",
+         wacht39.rule == "paal-laadt" and "om 02:00" in wacht39.reason and not wacht39.grenzen[1], f"{wacht39.reason}")
+straks39 = bat.met_paal(bat.Besluit(bat.NUL, reason="nul", rule="nul", auto_hulp_nu=True), True, b39, None, grens=50.0)
+controle("om 02:00 helpt hij", straks39.rule == "auto-helpen", f"{straks39.rule}")
+buiten39 = bat.met_paal(bat.Besluit(bat.NUL, reason="nul", rule="nul"), True, b39, None, grens=50.0)
+controle("laadt de paal buiten zijn plan (Snel, een andere sturing), dan helpt hij zoals altijd",
+         buiten39.rule == "auto-helpen", f"{buiten39.rule}")
+
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

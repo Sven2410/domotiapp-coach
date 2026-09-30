@@ -203,6 +203,13 @@ class Besluit:
     # de batterij straks waard is, min het verlies bij het laden (v0.102.3).
     # None als de batterij vol is of er niet gerekend is.
     inkoop_tot: float | None = None
+    # Of de batterij de auto in dit blok helpt volgens het plan (v0.104.1): True,
+    # False als de paal nu volgens zijn plan laadt maar de hulp naar een duurder
+    # laaduur gaat, en None als de paal nu buiten zijn plan laadt (Snel, of een
+    # andere sturing); dan helpt hij zoals altijd boven de grens. En wanneer het
+    # eerstvolgende blok met hulp begint, voor de kaart.
+    auto_hulp_nu: bool | None = None
+    auto_hulp_om: datetime | None = None
 
     @property
     def grenzen(self) -> tuple[bool, bool]:
@@ -914,7 +921,13 @@ def plan_batterij(
     leeg = b.soc <= b.bodem + 1e-6
     uren = _vooruit(som, b)
     nacht_voor_auto = balans_kwh(now, forecast, b)
-    auto_ac = _met_auto(uren, b, auto_hulp(uren, b, nacht_voor_auto, auto_laden or [], helpt))
+    hulp = auto_hulp(uren, b, nacht_voor_auto, auto_laden or [], helpt)
+    # Laadt de paal nu volgens zijn eigen plan? Dan helpt de batterij alleen als
+    # dit blok hulp kreeg (v0.104.1); anders gaat die naar een duurder laaduur.
+    laadt_gepland = any(van <= now < tot and kwh > 0.005 for van, tot, kwh in auto_laden or [])
+    hulp_nu = (hulp[0] > 0.005) if laadt_gepland and hulp else None
+    hulp_om = next((u.start for u, h in zip(uren, hulp) if h > 0.005), None)
+    auto_ac = _met_auto(uren, b, hulp)
     auto_weg = auto_ac / som.eta
     kijk = _vooruitkijk_zin(now, forecast, b, auto_ac, bijladen=not _vlak(blokken), uren=uren)
     piek = dicht and in_evening_peak(now)
@@ -1031,6 +1044,8 @@ def plan_batterij(
             plan=kijk, rule="standby", waarde=eraf, uren=uren, auto_weg=auto_weg,
         )
     besluit.inkoop_tot = inkoop
+    besluit.auto_hulp_nu = hulp_nu
+    besluit.auto_hulp_om = hulp_om
     return _met_paal(besluit, paal_laadt, b, nacht, helpt=helpt)
 
 
@@ -1079,6 +1094,21 @@ def auto_hulp(
     hier valt, naar rato van de tijd.
 
     Aan de wisselstroomkant, zoals de bewoner hem in de auto ziet gaan.
+
+    **Op de duurste laaduren eerst** (v0.104.1). De eigenaar op 30-09-2026 om
+    23:48, bij het plan van de eerste woning (laden om 00:00 voor € 0,319, om
+    02:00 voor € 0,326 en om 04:00 voor € 0,325, en de 2,3 kWh uit de batterij om
+    00:00): "hij pakt het goedkoopste uur om te ondersteunen. Eigenlijk moet hij
+    meehelpen op de duurste momenten, om daar de financiële pijn het meest te
+    verzachten." Tot dan gaf hij vanaf het eerste laaduur tot zijn grens. Nu
+    gaan de laaduren van duur naar goedkoop, en krijgt elk wat er dan nog kan:
+    wat er naast het huis van het ontlaadvermogen over is, en wat de batterij
+    aan het eind van dat blok boven zijn grens heeft, zonder dat een later blok
+    dat al hulp kreeg eronder zakt. De grens is er voor de auto; het huis mag
+    daarna gewoon verder uit de batterij, zoals altijd. Bij gelijke prijzen het vroegste eerst, zoals het
+    was. Beginnen doet hij pas `AUTO_MARGE` boven de grens, zoals `_met_paal`:
+    het vroegste blok met hulp moet dat halen, tenzij hij de vorige ronde al
+    hielp (`helpt`).
     """
     uit = [0.0] * len(uren)
     if b.auto_boven is None or b.capacity_kwh is None or b.soc is None or not laden:
@@ -1094,29 +1124,37 @@ def auto_hulp(
         vrij = max(0.0, over_kwh) / (b.rte if b.rte else 1.0)
     grens = max(float(b.auto_boven), b.bodem) / 100.0 * cap
     marge = AUTO_MARGE / 100.0 * cap
-    e = b.soc / 100.0 * cap
-    weg = 0.0
-    bezig = helpt
-    for i, uur in enumerate(uren):
+    # Per blok: wat de auto van het net zou nemen, wat er naast het huis van het
+    # ontlaadvermogen over is, en wat de batterij aan het eind van het blok
+    # boven zijn grens heeft zonder hulp (accukant).
+    wil, ruimte, boven = [], [], []
+    for uur in uren:
         deel = max(0.0, (uur.end - uur.start).total_seconds() / 3600.0)
-        wil = 0.0
+        w = 0.0
         for van, tot, kwh in laden:
             lengte = (tot - van).total_seconds()
             overlap = (min(tot, uur.end) - max(van, uur.start)).total_seconds()
             if lengte > 0 and overlap > 0:
-                wil += max(0.0, kwh) * overlap / lengte
-        huis_ac = max(0.0, -uur.kwh)
-        nu = e - weg
-        if wil > 0.005 and uur.stand not in (NETLADEN, MAX_LADEN) and deel > 0 and nu > grens + (0.0 if bezig else marge):
-            ruimte = max(0.0, b.max_discharge_w / 1000.0 * deel - huis_ac)
-            boven = nu - huis_ac / eta - grens
-            kan = max(0.0, min(boven, vrij - weg)) * eta
-            geef = min(wil, ruimte, kan)
-            if geef > 0.005:
-                uit[i] = geef
-                weg += geef / eta
-                bezig = True
-        e = uur.soc / 100.0 * cap
+                w += max(0.0, kwh) * overlap / lengte
+        mag = w > 0.005 and uur.stand not in (NETLADEN, MAX_LADEN) and deel > 0
+        wil.append(w if mag else 0.0)
+        ruimte.append(max(0.0, b.max_discharge_w / 1000.0 * deel - max(0.0, -uur.kwh)))
+        boven.append(uur.soc / 100.0 * cap - grens)
+    weg = 0.0
+    volgorde = sorted((i for i in range(len(uren)) if wil[i] > 0), key=lambda i: (-uren[i].price, i))
+    for i in volgorde:
+        if not helpt and not any(uit[:i]):
+            # Het vroegste blok met hulp: begint hij hier, dan pas boven de marge.
+            begin = (uren[i - 1].soc if i else b.soc) / 100.0 * cap
+            if begin <= grens + marge:
+                continue
+        kan = min([boven[i]] + [boven[j] for j in range(i + 1, len(uren)) if uit[j] > 0])
+        geef = min(wil[i], ruimte[i], max(0.0, min(kan, vrij - weg)) * eta)
+        if geef > 0.005:
+            uit[i] = geef
+            weg += geef / eta
+            for j in range(i, len(boven)):
+                boven[j] -= geef / eta
     return uit
 
 
@@ -1193,7 +1231,9 @@ def _met_paal(
         return besluit
     if grens is None and b is not None:
         grens = auto_grens(b, over_kwh)
-    if grens is not None and b is not None and b.soc is not None and b.soc > grens + (0.0 if helpt else AUTO_MARGE):
+    # Het plan bewaart de hulp voor een duurder laaduur (v0.104.1).
+    later = besluit.auto_hulp_nu is False
+    if not later and grens is not None and b is not None and b.soc is not None and b.soc > grens + (0.0 if helpt else AUTO_MARGE):
         besluit.stand = NUL
         besluit.power_w = 0.0
         besluit.reason = (
@@ -1206,8 +1246,13 @@ def _met_paal(
         return besluit
     besluit.stand = ZONNELADEN if besluit.stand == NUL else STANDBY
     besluit.power_w = 0.0
+    om = besluit.auto_hulp_om
     besluit.reason = (
-        "De laadpaal laadt, dus de batterij geeft niets af."
+        (
+            f"De laadpaal laadt. De batterij helpt de auto om {om:%H:%M}, op een duurder laaduur, en geeft nu niets af."
+            if later and om is not None else
+            "De laadpaal laadt, dus de batterij geeft niets af."
+        )
         + (" Zonoverschot gaat er nog wel in." if besluit.stand == ZONNELADEN else "")
     )
     besluit.rule = "paal-laadt"
