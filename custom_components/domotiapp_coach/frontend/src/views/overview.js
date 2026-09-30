@@ -509,10 +509,6 @@ class DacViewOverview extends DacElement {
       padding-bottom: 2px;
     }
     .steer-tabs::-webkit-scrollbar { display: none; }
-    /* Tijdens het indelen zijn de apparaten te slepen (v0.91.0): dan geen
-       scrollen onder de vinger, en een hand als wijzer. */
-    :host([arranging]) .steer-tab,
-    :host([sorting]) .steer-tab { touch-action: none; cursor: grab; }
     /* Het knopje om de volgorde aan te passen (v0.96.0): het icoon van
        "Indeling aanpassen", zonder tekst, rechtsboven in de kaart. */
     #steerable { position: relative; }
@@ -531,10 +527,6 @@ class DacViewOverview extends DacElement {
     .steer-sort[hidden] { display: none; }
     .steer-sort .icon, .steer-sort svg { width: 16px; height: 16px; }
     :host([arranging]) .steer-sort { display: none; }
-    .steer-tab.dragging {
-      position: relative; z-index: 2; cursor: grabbing;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
-    }
     .steer-order {
       display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px;
       font-size: 12.5px; color: var(--dac-ink-3);
@@ -987,11 +979,6 @@ class DacViewOverview extends DacElement {
     /* Cards keep their own look while being arranged; only a bar is added on
        top of them, so you are moving the thing you recognise. */
     :host([arranging]) [data-card] { position: relative; }
-    :host([arranging]) [data-card].dragging {
-      z-index: 5;
-      cursor: grabbing;
-      box-shadow: 0 24px 50px -18px rgba(0,0,0,0.9);
-    }
     /* A card the customer switched off stays in view while arranging, faded,
        so it can be switched back on. Outside this mode it is simply gone.
        Written as "not while arranging" rather than switching display on and
@@ -1030,7 +1017,6 @@ class DacViewOverview extends DacElement {
     }
     .card-edit button:hover:not(:disabled) { color: var(--dac-ink); border-color: var(--dac-accent-hi); }
     .card-edit button:disabled { opacity: 0.3; cursor: default; }
-    .card-edit button.grip { cursor: grab; touch-action: none; }
     .card-edit button.off { border-color: rgba(250,178,25,0.45); color: var(--dac-warn); }
     .card-edit .icon { width: 16px; height: 16px; }
 
@@ -1212,16 +1198,18 @@ class DacViewOverview extends DacElement {
           </div>
           <!-- De volgorde van de rij aanpassen (v0.96.0). De eigenaar op
                23-09-2026: "het zelfde icoontje als indeling aanpassen beneden,
-               alleen dan zonder tekst, en dat je dan kan slepen." -->
+               alleen dan zonder tekst." Slepen kon toen ook; dat is er sinds
+               v0.102.1 uit, zie bij de pijltjes hieronder. -->
           <button type="button" class="steer-sort" id="steer-sort" aria-pressed="false"
                   aria-label="Volgorde aanpassen" title="Volgorde aanpassen" hidden>${icons.sliders}</button>
           <p class="panel-sub">Wat de coach straks zelf mag inschakelen.</p>
           <div class="steer-tabs" id="steer-tabs" role="tablist" aria-label="Aanstuurbare apparaten" hidden></div>
           <!-- Tijdens het indelen, of na het knopje hierboven: het gekozen
-               apparaat een plek opschuiven. Slepen kan ook, maar is nooit de
-               enige manier. -->
+               apparaat een plek opschuiven. Alleen met de pijltjes: de eigenaar
+               op 30-09-2026, "drag en drop werkt niet, dat moet weg en wel de
+               pijltjes behouden." -->
           <div class="steer-order" id="steer-order" hidden>
-            <span>Sleep de apparaten, of schuif het gekozen apparaat:</span>
+            <span>Schuif het gekozen apparaat:</span>
             <button type="button" id="steer-left" aria-label="Naar links">${icons.arrowLeft}</button>
             <button type="button" id="steer-right" aria-label="Naar rechts">${icons.arrowRight}</button>
             <button type="button" class="steer-klaar" id="steer-klaar" hidden>Klaar</button>
@@ -1321,8 +1309,8 @@ class DacViewOverview extends DacElement {
 
   /** Put the cards in the order this person chose, and hide what they hid. */
   applyLayout_() {
-    // Not while somebody is rearranging: adopting a stored arrangement mid-drag
-    // would pull the cards out from under the finger holding them.
+    // Not while somebody is rearranging: adopting a stored arrangement then
+    // would move the cards out from under the arrows being pressed.
     if (this.arranging_) return;
 
     this.layout_ = effectiveLayout();
@@ -1335,7 +1323,7 @@ class DacViewOverview extends DacElement {
       if (!el) return;
       // Order rather than moving nodes: the cards are live and hold their own
       // state, and reordering the DOM under them means rebuilding a diagram
-      // and a set of tabs every time somebody drags something.
+      // and a set of tabs every time somebody moves something.
       el.style.order = String(index + 1);
       el.toggleAttribute("data-off", card.hidden);
     });
@@ -1399,84 +1387,13 @@ class DacViewOverview extends DacElement {
   }
 
   /**
-   * Een apparaat in de rij verslepen, zoals een kaart (`startDrag_`), maar
-   * zijwaarts. Tijdens het slepen schuiven alleen de plekken (`order`), want
-   * de rij opnieuw opbouwen onder een vinger laat hem los; bij loslaten wordt
-   * de volgorde onthouden en de rij opnieuw opgebouwd.
-   */
-  startTabDrag_(event, slot) {
-    const tab = this.$(`[data-tab="${slot}"]`);
-    const list = this.steerDevices_ ?? [];
-    if (!tab || !list[slot]) return;
-    try {
-      tab.setPointerCapture(event.pointerId);
-    } catch {
-      // Een pointer die al weg is: dan volgt het slepen hem gewoon niet.
-    }
-
-    const id = list[slot].id;
-    const ids = list.map((device) => device.id);
-    const knop = (deviceId) => this.$(`[data-tab="${list.findIndex((d) => d.id === deviceId)}"]`);
-    const zet = () => ids.forEach((deviceId, i) => {
-      const el = knop(deviceId);
-      if (el) el.style.order = String(i);
-    });
-    zet();
-
-    const startX = event.clientX;
-    let settled = 0;
-    let bewogen = false;
-
-    const move = (ev) => {
-      const dx = ev.clientX - startX;
-      if (!bewogen && Math.abs(dx) < 6) return;
-      bewogen = true;
-      tab.classList.add("dragging");
-      tab.style.transform = `translateX(${dx + settled}px)`;
-      for (;;) {
-        const index = ids.indexOf(id);
-        const step = dx + settled < 0 ? -1 : 1;
-        const other = ids[index + step];
-        if (!other) break;
-        const box = knop(other)?.getBoundingClientRect();
-        if (!box) break;
-        const self = tab.getBoundingClientRect();
-        const passed = step < 0
-          ? self.left < box.left + box.width / 2
-          : self.right > box.right - box.width / 2;
-        if (!passed) break;
-        const before = tab.getBoundingClientRect().left;
-        ids.splice(index, 1);
-        ids.splice(index + step, 0, id);
-        zet();
-        settled += before - tab.getBoundingClientRect().left;
-        tab.style.transform = `translateX(${dx + settled}px)`;
-      }
-    };
-
-    const stop = () => {
-      tab.removeEventListener("pointermove", move);
-      tab.removeEventListener("pointerup", stop);
-      tab.removeEventListener("pointercancel", stop);
-      tab.classList.remove("dragging");
-      tab.style.transform = "";
-      if (!bewogen) return;
-      saveDeviceOrder(ids);
-      this.steerActive_ = id;
-      this.rebuildSteer_();
-    };
-
-    tab.addEventListener("pointermove", move);
-    tab.addEventListener("pointerup", stop);
-    tab.addEventListener("pointercancel", stop);
-  }
-
-  /**
-   * The handle on each card.
+   * The bar on each card while arranging: its name, two arrows and the switch
+   * that hides it.
    *
-   * Dragging is offered but never the only way: it is the one interaction that
-   * fails silently for anyone using a keyboard, and on a phone it competes with
-   * the scroll. The arrows do the same job and always work.
+   * There used to be a grip to drag the card by as well. It is gone since
+   * v0.102.1: de eigenaar op 30-09-2026, "drag en drop werkt niet, dat moet weg
+   * en wel de pijltjes behouden." The arrows do the same job and always work,
+   * with a keyboard too, and on a phone they do not compete with the scroll.
    */
   paintCardBars_() {
     const order = this.layout_;
@@ -1491,7 +1408,6 @@ class DacViewOverview extends DacElement {
         bar = document.createElement("div");
         bar.className = "card-edit";
         bar.innerHTML = `
-          <button type="button" class="grip" aria-label="Verslepen" title="Verslepen">${icons.menu}</button>
           <span class="name"></span>
           <button type="button" data-move="-1" aria-label="Omhoog">${icons.arrowLeft}</button>
           <button type="button" data-move="1" aria-label="Omlaag">${icons.arrowRight}</button>
@@ -1503,9 +1419,6 @@ class DacViewOverview extends DacElement {
         bar.querySelector('[data-move="1"]').style.transform = "rotate(90deg)";
         el.prepend(bar);
 
-        bar.querySelector(".grip").addEventListener("pointerdown", (ev) =>
-          this.startDrag_(ev, card.id)
-        );
         for (const button of bar.querySelectorAll("[data-move]")) {
           button.addEventListener("click", () =>
             this.moveCard_(card.id, Number(button.dataset.move))
@@ -1544,77 +1457,6 @@ class DacViewOverview extends DacElement {
     card.hidden = !card.hidden;
     this.paintLayout_();
     this.storeArrangement_();
-  }
-
-  /**
-   * Drag a card to a new place.
-   *
-   * Pointer events rather than HTML5 drag and drop, which does not exist on a
-   * touch screen at all. The card follows the finger; the others stay put until
-   * it passes the middle of one, and then the two swap.
-   */
-  startDrag_(event, id) {
-    event.preventDefault();
-    const el = this.$(`[data-card="${id}"]`);
-    if (!el) return;
-
-    const grip = event.currentTarget;
-    grip.setPointerCapture(event.pointerId);
-
-    const startY = event.clientY;
-    el.classList.add("dragging");
-
-    // Every swap moves the card's own resting place, so the offset it is drawn
-    // with has to be corrected by exactly the distance it just jumped. Kept
-    // across moves: recomputing it from the pointer alone would snap the card
-    // back to where it started the moment the finger moved again.
-    let settled = 0;
-
-    const move = (ev) => {
-      const dy = ev.clientY - startY;
-      el.style.transform = `translateY(${dy + settled}px)`;
-
-      // Keep swapping while the card is past the next neighbour, rather than
-      // one place per event: a quick flick delivers few move events, and one
-      // step each would leave the card lagging behind the finger.
-      for (;;) {
-        const index = this.layout_.findIndex((card) => card.id === id);
-        const step = dy + settled < 0 ? -1 : 1;
-        const other = this.layout_[index + step];
-        if (!other) break;
-
-        const box = this.$(`[data-card="${other.id}"]`)?.getBoundingClientRect();
-        if (!box) break;
-
-        const self = el.getBoundingClientRect();
-        const passed =
-          step < 0
-            ? self.top < box.top + box.height / 2
-            : self.bottom > box.bottom - box.height / 2;
-        if (!passed) break;
-
-        const before = el.getBoundingClientRect().top;
-        const [moved] = this.layout_.splice(index, 1);
-        this.layout_.splice(index + step, 0, moved);
-        this.paintLayout_();
-        settled += before - el.getBoundingClientRect().top;
-        el.style.transform = `translateY(${dy + settled}px)`;
-      }
-    };
-
-    const stop = () => {
-      grip.removeEventListener("pointermove", move);
-      grip.removeEventListener("pointerup", stop);
-      grip.removeEventListener("pointercancel", stop);
-      el.classList.remove("dragging");
-      el.style.transform = "";
-      this.paintLayout_();
-      this.storeArrangement_();
-    };
-
-    grip.addEventListener("pointermove", move);
-    grip.addEventListener("pointerup", stop);
-    grip.addEventListener("pointercancel", stop);
   }
 
   storeArrangement_() {
@@ -2840,9 +2682,6 @@ class DacViewOverview extends DacElement {
       button.addEventListener("click", () => this.openManual_(Number(button.dataset.manual)));
     }
     for (const tab of this.$$("[data-tab]")) {
-      tab.addEventListener("pointerdown", (event) => {
-        if (this.arranging_ || this.sorteren_) this.startTabDrag_(event, Number(tab.dataset.tab));
-      });
       tab.addEventListener("click", () => this.selectSteer_(Number(tab.dataset.tab)));
       tab.addEventListener("keydown", (event) => this.stepSteer_(event, Number(tab.dataset.tab)));
     }

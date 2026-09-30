@@ -85,6 +85,12 @@ schoon.
   naam die de bewoner zelf invulde mag erin, de id gaat naar het log
   (`_LOGGER.warning` in `_async_sensorwacht`). Een bijzin die de bewoner niets
   laat doen en niets laat begrijpen hoort er niet te staan (v0.71.1).
+- **Een verslag is een paar korte regels, geen alinea.** De eigenaar op
+  30-09-2026, over een laadverslag van vijf zinnen: "deze tekst is veel te
+  lang, moet korter en overzichtelijker. Op de telefoon past die melding
+  niet." Per regel één ding: wat er klaar is, hoeveel en wanneer, waar het
+  vandaan kwam, wat het scheelde (`_verslag` in coach.py, v0.102.1). Uitleg en
+  uitsplitsingen horen in het paneel, niet in de melding.
 
 ## De eisen van de eigenaar
 
@@ -258,7 +264,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 441 controles op het denkwerk
 python tests/test_batterij.py    # 145 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 807 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 808 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2075 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 135 op het rapport en op het paneel

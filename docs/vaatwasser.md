@@ -226,8 +226,9 @@ in te kopen." De maat is dus alles van het net op het moment van vrijgeven
 of inpluggen (`_basis_bij` en `_programma_tellen` in coach.py), en bespaard
 is maat min betaald, in twee delen: door de zon (`zon_winst`, `solar_saved`
 in het beurtrecord: de zon-kilowatturen maal inkoop min teruglevering) en
-door te wachten (de rest). Het verslag zegt welk deel wat was
-(`_bespaard_zin`); Bespaard toont ze als tegels en als kolom "Door zon"
+door te wachten (de rest). Het verslag zei tot v0.102.1 welk deel wat was;
+sindsdien alleen het totaal, omdat het te lang werd voor een telefoon
+(`_bespaard_zin`, zie `docs/laadpaal.md`). Bespaard toont ze als tegels en als kolom "Door zon"
 (`delen` in savings.js). Een beurt van vóór v0.60.0 heeft geen zondeel:
 bij die beurten zat de zon in de maat en was bespaard alleen het wachten.
 v0.59.0 had het één dag andersom (de zon van het vrijgavemoment in de maat,
@@ -397,8 +398,9 @@ van die avond en met die uit de sensoren van 11:48 kwam 13:00 à 13:15 eruit, ni
 14:00.
 
 **Het verslag zegt waar de stroom vandaan kwam** (v0.101.0), voor elk apparaat met
-dezelfde zin (`_herkomst_zin` in coach.py): "0,3 kWh kwam van je zon en 0,6 kWh uit
-je thuisbatterij." met het bedrag alleen bij het net, want dat is wat er aan de
+dezelfde regel (`_herkomst_zin` in coach.py): "0,3 kWh zon, 0,6 kWh
+thuisbatterij." (tot v0.102.1 een hele zin: "0,3 kWh kwam van je zon en 0,6 kWh
+uit je thuisbatterij."), met het bedrag alleen bij het net, want dat is wat er aan de
 leverancier betaald is. "Ongeveer € 0,199" is eruit: de eigenaar las dat bij een
 beurt die vrijwel niets van het net haalde. Bedragen onder een euro in drie
 decimalen, daarboven in twee, per zin gelijk (`_bedrag`). Proef 113.

@@ -477,14 +477,18 @@ hassA.states.zet("sensor.laadpaal_teller", "106.5")
 _, verstuurd = asyncio.run(ronde(coachA, klaar, dt.datetime(2026, 8, 18, 17, 20)))
 meldingen = [d[2]["message"] for d in verstuurd if d[0] == "notify"]
 print(f"  {meldingen}")
-controle("meldt dat de auto vol is", any("is vol" in m for m in meldingen), f"{meldingen}")
+# Sinds v0.102.1 staat de accustand in de kop en is het verslag een paar korte regels.
+controle("meldt dat de auto vol is", any("is vol, van 80 naar 100%" in m for m in meldingen), f"{meldingen}")
 controle("met begintijd en eindtijd", any("17:00 tot 17:20" in m for m in meldingen),
          f"{meldingen}")
 controle("en met de geladen kWh", any("6,5 kWh" in m for m in meldingen), f"{meldingen}")
 # Er lag geen zon en er was geen krappe klaar-tijd meer, dus hij stond te wachten
 # op de zon. Dat hoort er dan ook zo in te staan.
-controle("en vertelt waar de tijd bleef",
-         any("minuten naar wachten op je eigen zon" in m for m in meldingen), f"{meldingen}")
+# Tot v0.102.1 stond dat er ook in ("... minuten naar wachten op je eigen zon").
+# De eigenaar op 30-09-2026: "deze tekst is veel te lang, moet korter en
+# overzichtelijker. Op de telefoon past die melding niet."
+controle("en het verslag is kort: hooguit vier regels, zonder de zin over waar de tijd bleef",
+         all("minuten naar" not in m and m.count("\n") <= 3 for m in meldingen), f"{meldingen}")
 
 print("=== 15b. herstart midden in de laadbeurt: geen verzonnen begintijd ===")
 # De eigenaar op 20-08-2026. Home Assistant herstartte om 20:57 terwijl de auto vanaf
@@ -530,7 +534,7 @@ controle("maar doet niet alsof hij het begin zag",
 # Sinds 21-09-2026 zonder de bijzin "en toen liep hij al": de eigenaar wil korte
 # meldingen. Het woord "sinds" zegt al dat de coach het begin niet zag.
 controle("en zegt eerlijk vanaf wanneer hij telt",
-         any("Sinds 20:58" in m for m in meldingen)
+         any("sinds 20:58" in m for m in meldingen)
          and all("liep hij al" not in m for m in meldingen), f"{meldingen}")
 
 print("=== 15c. een auto die op 80% stopt is niet vol ===")
@@ -937,7 +941,7 @@ meldingen = [d[2]["message"] for d in verstuurd if d[0] == "notify"]
 print(f"  {meldingen}")
 controle("nu komt er wel een verslag", bool(meldingen), f"{meldingen}")
 controle("in de eigen bewoording",
-         any("afgekoppeld om 19:12, er ging" in m and "kWh in" in m for m in meldingen),
+         any("is afgekoppeld om 19:12.\n" in m and "4,2 kWh sinds" in m for m in meldingen),
          f"{meldingen}")
 controle("en met de begintijd erbij",
          any("sinds 19:00" in m for m in meldingen), f"{meldingen}")
@@ -2128,7 +2132,7 @@ _, los40 = asyncio.run(ronde(coach40n, inst40, paal=PAAL40, nu=dt.datetime(2026,
 bericht40 = [d[2]["message"] for d in los40 if d[0] == "notify"]
 print(f"  {bericht40}")
 controle("en de melding gebruikt hem",
-         any(m.startswith("De blauwe bus aan Laadpaal is afgekoppeld") for m in bericht40),
+         any(m.startswith("De blauwe bus is afgekoppeld") for m in bericht40),
          f"{bericht40}")
 
 # Zonder naam blijft het "de auto", want dat is wat het is. Een lege naam mag
@@ -2923,8 +2927,8 @@ b, v = asyncio.run(ronde56(dt.datetime(2026, 9, 8, 4, 0)))
 verslag = [d[2]["message"] for d in v if d[0] == "notify"]
 print(f"  klaar: {verslag}")
 controle("één verslag als hij klaar is, met de tijden, kWh en kosten erin",
-         len(verslag) == 1 and "Vaatwasser is klaar (Eco 50 °C)" in verslag[0] and "van 01:02 tot 04:00" in verslag[0]
-         and "5,9 kWh" in verslag[0] and "Bespaard €" in verslag[0] and "door te wachten" in verslag[0], f"{verslag}")
+         len(verslag) == 1 and "Vaatwasser is klaar (Eco 50 °C)." in verslag[0] and "5,9 kWh, 01:02 tot 04:00." in verslag[0]
+         and "Bespaard €" in verslag[0] and verslag[0].count("\n") == 3, f"{verslag}")
 controle("en de vrijgave is eraf", "dev-vaatwasser" not in (inst56.get("ready_devices") or []),
          f"{inst56.get('ready_devices')}")
 beurten56 = asyncio.run(coachmod.async_get_beurten(hass56).async_list())
@@ -3089,8 +3093,8 @@ b, v = asyncio.run(ronde58(dt.datetime(2026, 9, 8, 15, 3)))
 verslag = telefoon58(v)
 print(f"  klaar: {verslag}")
 controle("na een half uur stilte één verslag, met het einde op het laatste vermogen en niet op nu",
-         len(verslag) == 1 and "Vaatwasser is klaar (Eco 50 °C)" in verslag[0] and "van 11:12 tot 14:31" in verslag[0]
-         and "1,5 kWh" in verslag[0] and "Bespaard €" in verslag[0], f"{verslag}")
+         len(verslag) == 1 and "Vaatwasser is klaar (Eco 50 °C)" in verslag[0] and "1,5 kWh, 11:12 tot 14:31." in verslag[0]
+         and "Bespaard €" in verslag[0], f"{verslag}")
 controle("de vrijgave is eraf", "dev-dom" not in (inst58.get("ready_devices") or []), f"{inst58.get('ready_devices')}")
 gemeten = [r for r in inst58.get("program_measured") or [] if r.get("device") == "dev-dom"]
 print(f"  gemeten: {[(r['key'], r['minutes'], r['kwh'], r['peak_w'], r['runs'], len(r['profile'])) for r in gemeten]}")
@@ -3339,8 +3343,8 @@ hass62.states.zet("sensor.vaatwasser_vermogen", "0")
 b, m = asyncio.run(ronde62(coach62b, dt.datetime(2026, 9, 8, 3, 0)))
 print(f"  klaar: {m}")
 controle("één verslag over de hele beurt, van voor de herstart tot nu",
-         len(m) == 1 and "van 01:02 tot 03:00" in m[0] and "3,9 kWh" in m[0] and "€ 0,70" in m[0]
-         and "Bespaard € 0,46" in m[0] and "door te wachten" in m[0], f"{m}")
+         len(m) == 1 and "3,9 kWh, 01:02 tot 03:00." in m[0] and "€ 0,70" in m[0]
+         and "Bespaard € 0,46" in m[0], f"{m}")
 klaar62 = beurten62()
 print(f"  opslag: {[(b['id'], b['complete'], b['kwh'], b['saved']) for b in klaar62]}")
 controle("in de opslag één afgeronde beurt, onder dezelfde sleutel, zonder de open regel ernaast",
@@ -3427,7 +3431,7 @@ coach62e._sleep = lambda seconds: asyncio.sleep(0)
 b, m = asyncio.run(ronde62d(coach62e, dt.datetime(2026, 9, 8, 2, 30)))
 print(f"  afgelopen terwijl de coach weg was: {m}")
 controle("een beurt die afliep terwijl de coach weg was krijgt zijn verslag met wat er bewaard was, en de vrijgave gaat eraf",
-         len(m) == 1 and "Vaatwasser is klaar (Eco 50 °C)" in m[0] and "van 01:02 tot 01:27" in m[0]
+         len(m) == 1 and "Vaatwasser is klaar (Eco 50 °C)" in m[0] and "01:02 tot 01:27." in m[0]
          and "dev-vaatwasser" not in (inst62d.get("ready_devices") or []), f"{m} {inst62d.get('ready_devices')}")
 klaar62d = [x for x in asyncio.run(coachmod.async_get_beurten(hass62d).async_list()) if x["device"] == "dev-vaatwasser"]
 controle("en de regel in de opslag is afgerond", len(klaar62d) == 1 and klaar62d[0]["complete"], f"{klaar62d}")
@@ -3459,13 +3463,12 @@ print("=== 64. bespaard is het totaal plaatje: de zon en het wachten ===")
 # gegaan? Ik wil het totaal plaatje." De maat is alles van het net op het
 # moment van vrijgeven; wat de zon scheelde en wat het wachten scheelde
 # staan allebei in bespaard, en het verslag zegt welk deel wat was.
+# Sinds v0.102.1 staat in het verslag alleen het totaal ("moet korter", de
+# eigenaar op 30-09-2026); welk deel de zon was staat onder Bespaard in het paneel.
 zin = coachmod.ChargerCoach._bespaard_zin
-controle("_bespaard_zin: alleen zon, alleen wachten, allebei, en wachten dat geld kostte",
-         zin(0.037, 0.037) == "Bespaard € 0,037, allemaal door de zon."
-         and zin(0.04, 0.0) == "Bespaard € 0,040 door te wachten."
-         and zin(0.12, 0.08) == "Bespaard € 0,120: € 0,080 door de zon en € 0,040 door te wachten."
-         and zin(0.03, 0.05) == "Bespaard € 0,030: de zon scheelde € 0,050, het wachten kostte € 0,020.",
-         f"{zin(0.037, 0.037)!r} {zin(0.04, 0.0)!r} {zin(0.12, 0.08)!r} {zin(0.03, 0.05)!r}")
+controle("_bespaard_zin: alleen het bedrag, onder een euro in drie decimalen en daarboven in twee",
+         zin(0.037) == "Bespaard € 0,037." and zin(0.12) == "Bespaard € 0,120." and zin(3.97) == "Bespaard € 3,97.",
+         f"{zin(0.037)!r} {zin(0.12)!r} {zin(3.97)!r}")
 
 inst64 = instellingen(devices=[LAADPAAL, VAATWASSER])
 inst64["contract"] = {
@@ -3517,12 +3520,10 @@ hass64.states.zet("sensor.vaatwasser_vermogen", "0")
 hass64.states.zet("sensor.teruglevering", "3000")
 b, m = asyncio.run(ronde64(dt.datetime(2026, 9, 8, 12, 31)))
 print(f"  verslag: {m}")
-controle("het verslag zegt wat er bespaard is, en dat het allemaal de zon was",
-         len(m) == 1 and "is klaar" in m[0]
-         and "Bespaard € 0,051 door de zon: zolang je saldeert scheelt een eigen kWh alleen de terugleverkosten." in m[0],
-         f"{m}")
+controle("het verslag zegt wat er bespaard is",
+         len(m) == 1 and "is klaar" in m[0] and m[0].endswith("Bespaard € 0,051."), f"{m}")
 controle("en waar de stroom vandaan kwam, zonder een bedrag dat nergens betaald is (v0.101.0)",
-         len(m) == 1 and "Alles kwam van je zon." in m[0] and "ongeveer" not in m[0], f"{m}")
+         len(m) == 1 and "\nAlles van je zon.\n" in m[0] and "ongeveer" not in m[0], f"{m}")
 b64 = [b for b in asyncio.run(coachmod.async_get_beurten(hass64).async_list()) if b["device"] == "dev-vaatwasser"]
 controle("en onder Bespaard staat het zonaandeel, met het zondeel erbij",
          len(b64) == 1 and abs(b64[0]["saved"] - b64[0]["kwh"] * 0.052756) < 0.001
@@ -5276,20 +5277,32 @@ print("=== 97. het verslag van een laadbeurt: accustand van en naar, net en zon 
 # De bewoner van de eerste woning op 23-09-2026: "tijdens deze laadsessie is er X
 # kWh geladen, en is de accu gestegen van A% naar B%. C kWh is afgenomen van het
 # net met een totaalprijs van € D; E kWh heb je direct verbruikt van je zonopwek."
+# Sinds v0.102.1 twee korte stukken in plaats van twee zinnen: de accustand voor in
+# de kop ("geladen van 44 naar 80%") en de herkomst als eigen regel.
 cijfers = coachmod.ChargerCoach._beurt_cijfers
+accu97 = coachmod.ChargerCoach._accu_verloop
 sessie97 = {"soc_begin": 44.0, "geld": {"kwh": 28.1, "zon_kwh": 6.2, "betaald": 6.72, "net_eur": 6.72}}
 auto97 = coachmod.Car(capacity_kwh=78.0, phases=3, soc_percent=80.0)
-zin97 = cijfers(sessie97, auto97)
-print(f"  {zin97.strip()}")
-# Sinds v0.101.0 dezelfde zin als bij elk apparaat: eigen zon eerst, het bedrag bij het net.
-controle("van en naar, net met bedrag, en zon",
-         zin97 == " De accu ging van 44 naar 80%. 6,2 kWh kwam van je zon en 21,9 kWh van het net voor € 6,72.", zin97)
-geschat97 = cijfers(sessie97, coachmod.Car(capacity_kwh=78.0, phases=3, soc_percent=80.0, soc_estimated=True))
-controle("een geschatte stand zegt dat erbij", "80% (geschat)." in geschat97, geschat97)
-controle("zonder accustand geen procenten", "accu ging" not in cijfers({"geld": sessie97["geld"]}, coachmod.Car()), "")
-controle("alles op zon: geen netzin", cijfers({"geld": {"kwh": 5.0, "zon_kwh": 5.0, "betaald": 0.0}}, None)
-         == " Alles kwam van je zon.", cijfers({"geld": {"kwh": 5.0, "zon_kwh": 5.0, "betaald": 0.0}}, None))
-controle("niets geladen: niets erbij", cijfers({"geld": {}}, None) == "", "")
+print(f"  {accu97(sessie97, auto97)} | {cijfers(sessie97)}")
+controle("van en naar", accu97(sessie97, auto97) == "van 44 naar 80%", accu97(sessie97, auto97))
+# Sinds v0.101.0 dezelfde regel als bij elk apparaat: eigen zon eerst, het bedrag bij het net.
+controle("net met bedrag, en zon", cijfers(sessie97) == "6,2 kWh zon, 21,9 kWh net (€ 6,72).", cijfers(sessie97))
+geschat97 = accu97(sessie97, coachmod.Car(capacity_kwh=78.0, phases=3, soc_percent=80.0, soc_estimated=True))
+controle("een geschatte stand zegt dat erbij", geschat97 == "van 44 naar 80% (geschat)", geschat97)
+controle("zonder accustand geen procenten", accu97({"geld": sessie97["geld"]}, coachmod.Car()) == "", "")
+controle("alles op zon: geen netregel", cijfers({"geld": {"kwh": 5.0, "zon_kwh": 5.0, "betaald": 0.0}})
+         == "Alles van je zon.", cijfers({"geld": {"kwh": 5.0, "zon_kwh": 5.0, "betaald": 0.0}}))
+controle("niets geladen: niets erbij", cijfers({"geld": {}}) == "", "")
+wie97 = coachmod.ChargerCoach._wie
+controle("een auto met een naam heet bij zijn naam, zonder de paal erbij",
+         wie97(coachmod.Car(name="de blauwe bus"), "Laadpaal") == "De blauwe bus", wie97(coachmod.Car(name="de blauwe bus"), "Laadpaal"))
+controle("zonder naam en bij een gast hoort de paal erbij",
+         wie97(coachmod.Car(), "Laadpaal") == "De auto aan Laadpaal"
+         and wie97(coachmod.Car(guest=True, name="Gast"), "Laadpaal") == "Gast aan Laadpaal",
+         f"{wie97(coachmod.Car(), 'Laadpaal')} | {wie97(coachmod.Car(guest=True, name='Gast'), 'Laadpaal')}")
+verslag97 = coachmod._verslag("Ford geladen van 44 naar 80%.", "", "28,1 kWh, 12:01 tot 13:41.", None, " Bespaard € 0,080. ")
+controle("een verslag is een paar regels onder elkaar, zonder lege regels",
+         verslag97 == "Ford geladen van 44 naar 80%.\n28,1 kWh, 12:01 tot 13:41.\nBespaard € 0,080.", repr(verslag97))
 
 print("=== 98. de nachtstrategie en de accu die de auto helpt komen uit de instellingen (v0.90.0) ===")
 bat98 = {**BATTERIJ, "battery": {**BATTERIJ["battery"], "car_above": 40}}
@@ -6116,21 +6129,22 @@ print("=== 113. waar de stroom vandaan kwam: zon, thuisbatterij en net, bij elk 
 # van het net af gehaald." Gemeten in de recorder: 0,908 kWh, 0,329 van de zon,
 # 0,553 uit de thuisbatterij en 0,026 van het net.
 zin113 = coachmod._herkomst_zin
+# Sinds v0.102.1 een opsomming in plaats van een zin, zodat het op een telefoon past.
 controle("de beurt van die middag", zin113(0.329, 0.553, 0.026, 0.006)
-         == "0,3 kWh kwam van je zon en 0,6 kWh uit je thuisbatterij.", zin113(0.329, 0.553, 0.026, 0.006))
+         == "0,3 kWh zon, 0,6 kWh thuisbatterij.", zin113(0.329, 0.553, 0.026, 0.006))
 controle("alle drie, eigen energie eerst en het bedrag bij het net", zin113(6.2, 3.0, 21.9, 6.72)
-         == "6,2 kWh kwam van je zon, 3,0 kWh uit je thuisbatterij en 21,9 kWh van het net voor € 6,72.",
+         == "6,2 kWh zon, 3,0 kWh thuisbatterij, 21,9 kWh net (€ 6,72).",
          zin113(6.2, 3.0, 21.9, 6.72))
-controle("alleen van het net", zin113(0.0, 0.0, 0.9, 0.199) == "Alles kwam van het net, voor € 0,199.",
+controle("alleen van het net", zin113(0.0, 0.0, 0.9, 0.199) == "Alles van het net (€ 0,199).",
          zin113(0.0, 0.0, 0.9, 0.199))
-controle("alleen uit de thuisbatterij", zin113(0.0, 0.9, 0.0, 0.0) == "Alles kwam uit je thuisbatterij.", "")
+controle("alleen uit de thuisbatterij", zin113(0.0, 0.9, 0.0, 0.0) == "Alles uit je thuisbatterij.", "")
 controle("een onbekend bedrag laat het bedrag weg", zin113(0.5, 0.0, 1.0, None)
-         == "0,5 kWh kwam van je zon en 1,0 kWh van het net.", zin113(0.5, 0.0, 1.0, None))
+         == "0,5 kWh zon, 1,0 kWh net.", zin113(0.5, 0.0, 1.0, None))
 controle("een paar wattuur noemt hij niet", zin113(0.01, 0.0, 0.02, 0.005) == "", "")
-controle("één aantal decimalen per zin",
-         coachmod.ChargerCoach._bespaard_zin(1.0, 0.5) == "Bespaard € 1,00: € 0,50 door de zon en € 0,50 door te wachten."
-         and coachmod.ChargerCoach._bespaard_zin(0.018, 0.018) == "Bespaard € 0,018, allemaal door de zon.",
-         coachmod.ChargerCoach._bespaard_zin(1.0, 0.5))
+controle("het bedrag in twee decimalen vanaf een euro, daaronder in drie",
+         coachmod.ChargerCoach._bespaard_zin(1.0) == "Bespaard € 1,00."
+         and coachmod.ChargerCoach._bespaard_zin(0.018) == "Bespaard € 0,018.",
+         coachmod.ChargerCoach._bespaard_zin(1.0))
 
 BAT113 = {**BATTERIJ, "controllable": False}
 inst113 = instellingen(devices=[LAADPAAL, BAT113])
@@ -6159,7 +6173,7 @@ controle("een half uur op 2 kW uit de batterij: 1 kWh uit de batterij, niets van
          and sessie113["zon_kwh"] == 0.0, f"{sessie113['kwh']} {sessie113['accu_kwh']} {sessie113['net_eur']}")
 controle("het geld blijft zoals het was: de batterij telt als net",
          abs(sessie113["betaald"] - 0.24171) < 1e-6, f"{sessie113['betaald']}")
-controle("en de zin zegt het", coachmod.ChargerCoach._herkomst_tekst(sessie113) == "Alles kwam uit je thuisbatterij.",
+controle("en de zin zegt het", coachmod.ChargerCoach._herkomst_tekst(sessie113) == "Alles uit je thuisbatterij.",
          coachmod.ChargerCoach._herkomst_tekst(sessie113))
 sessie113["gestart"] = NU113
 sessie113["vrijgegeven"] = NU113
@@ -6176,7 +6190,7 @@ controle("een beurt zonder begin van het netbedrag slaat geen bedrag op", velden
 geld113 = {"ijk_prijs": 0.3, "kwh": 10.0, "betaald": 2.0, "zon_winst": 0.5, "onbekend_kwh": 0.0,
            "basis_punten": [[10.0, 3.0]], "basis_kwh": 10.0, "basis_kosten": 3.0}
 controle("het laadverslag zegt wat er bespaard is",
-         coach113._beurt_bespaard({"geld": geld113}) == " Bespaard € 1,00: € 0,50 door de zon en € 0,50 door te wachten.",
+         coach113._beurt_bespaard({"geld": geld113}) == "Bespaard € 1,00.",
          coach113._beurt_bespaard({"geld": geld113}))
 controle("zonder maat zegt het niets", coach113._beurt_bespaard({"geld": {**geld113, "ijk_prijs": None}}) == "", "")
 
@@ -6348,49 +6362,30 @@ finally:
     else:
         sys.modules["homeassistant.helpers.entity_registry"] = oud115
 
-print("=== 116. het verslag zegt waarom eigen zon zo weinig scheelt zolang je saldeert (v0.101.4) ===")
-# De eigenaar op 29-09-2026 over "Bespaard € 0,036, allemaal door de zon" bij 0,9 kWh
-# waarvan 0,7 van de zon: "je hebt dan toch alles bespaard? 0,24171 betaal ik per
-# kWh." Het klopte: bij salderen is een teruggeleverde kWh 0,188954 waard.
-zin116 = coachmod.ChargerCoach._bespaard_zin
-controle("alleen zon, met salderen: waarom het zo weinig is",
-         zin116(0.036, 0.036, "de terugleverkosten")
-         == "Bespaard € 0,036 door de zon: zolang je saldeert scheelt een eigen kWh alleen de terugleverkosten.",
-         zin116(0.036, 0.036, "de terugleverkosten"))
-controle("zon en wachten: de uitleg als tweede zin",
-         zin116(0.12, 0.08, "de opslag en de terugleverkosten")
-         == "Bespaard € 0,120: € 0,080 door de zon en € 0,040 door te wachten. "
-            "Zolang je saldeert scheelt een eigen kWh alleen de opslag en de terugleverkosten.",
-         zin116(0.12, 0.08, "de opslag en de terugleverkosten"))
-controle("alleen wachten: geen uitleg over zon", zin116(0.04, 0.0, "de terugleverkosten") == "Bespaard € 0,040 door te wachten.", "")
-controle("zonder salderen de zin van altijd", zin116(0.037, 0.037) == "Bespaard € 0,037, allemaal door de zon.", "")
-
-hass116, _, coach116 = bouw(huis(), instellingen())
-
-
-def scheelt116(contract, dag=None):
-    coach116._contract = contract
-    if dag is None:
-        return coach116._zon_scheelt()
-    oud = coachmod.dt_util.utcnow
-    coachmod.dt_util.utcnow = lambda: dag
-    try:
-        return coach116._zon_scheelt()
-    finally:
-        coachmod.dt_util.utcnow = oud
-
-
-VAST116 = {"type": "fixed", "netting": True, "fixed": {"all_in_price": 0.24171, "feed_in_tariff": 0.0721, "feed_in_costs": 0.052756}}
-DYN116 = {"type": "dynamic", "netting": True, "dynamic": {"supplier_markup": 0.02, "feed_in_costs": 0.0182, "feed_in_bonus": 0.0}}
-controle("vast contract met salderen: de terugleverkosten", scheelt116(VAST116) == "de terugleverkosten", f"{scheelt116(VAST116)}")
-controle("dynamisch met salderen: de opslag en de terugleverkosten",
-         scheelt116(DYN116) == "de opslag en de terugleverkosten", f"{scheelt116(DYN116)}")
-controle("dynamisch met een verkoopvergoeding die de kosten opheft: alleen de opslag",
-         scheelt116({**DYN116, "dynamic": {**DYN116["dynamic"], "feed_in_bonus": 0.02}}) == "de opslag", "")
-controle("zonder salderen niets", scheelt116({**VAST116, "netting": False}) is None, "")
-controle("na 1 januari 2027 ook niets",
-         scheelt116(VAST116, dt.datetime(2027, 1, 2, 12, tzinfo=dt.timezone.utc)) is None, "")
-controle("zonder terugleverkosten niets", scheelt116({**VAST116, "fixed": {**VAST116["fixed"], "feed_in_costs": 0}}) is None, "")
+print("=== 116. het verslag is kort: vier regels, zonder uitleg (v0.102.1) ===")
+# Hier stond sinds v0.101.4 de proef op de zin "zolang je saldeert scheelt een eigen
+# kWh alleen de terugleverkosten" achter Bespaard. De eigenaar op 30-09-2026, over
+# een laadverslag van vijf zinnen en 330 tekens: "deze tekst is veel te lang, moet
+# korter en overzichtelijker. Op de telefoon past die melding niet." De uitleg en
+# de uitsplitsing zijn er daarom uit; wat de zon scheelde staat onder Bespaard.
+bron116 = (BRONMAP / "coach.py").read_text(encoding="utf-8")
+controle("de uitleg over salderen staat niet meer in de coach",
+         "zolang je saldeert" not in bron116 and "_zon_scheelt" not in bron116, "")
+controle("en de oude zinnen ook niet",
+         all(zin not in bron116 for zin in ("en verder hoefde hij niet.", "kwam van je zon", "door te wachten", "De accu ging van")), "")
+# Het verslag van de laadbeurt van die middag, zoals het er nu uit zou zien.
+voorbeeld116 = coachmod._verslag(
+    "Demo-auto geladen van 0 naar 80%.",
+    "16,4 kWh, 12:01 tot 13:41.",
+    coachmod._herkomst_zin(1.5, 0.0, 14.9, 3.71),
+    coachmod.ChargerCoach._bespaard_zin(0.08),
+)
+print(voorbeeld116)
+controle("vier korte regels, samen nog geen 130 tekens",
+         voorbeeld116.count("\n") == 3 and len(voorbeeld116) < 130
+         and voorbeeld116.endswith("1,5 kWh zon, 14,9 kWh net (€ 3,71).\nBespaard € 0,080."), repr(voorbeeld116))
+controle("elke regel eindigt op een punt, zodat het ook zonder regeleinden leest",
+         all(regel.endswith(".") for regel in voorbeeld116.split("\n")), repr(voorbeeld116))
 
 print("=== 117. een onderverdeelkast heet in een zin een onderverdeelkast (v0.101.5) ===")
 # De eigenaar op 29-09-2026: "Groepen met een eigen zekering moet even anders. Dat moet
@@ -6826,6 +6821,32 @@ hass122c, _, coach122c = bouw(dict(huis122, **{"binary_sensor.vaatwasser_deur": 
 b, v = asyncio.run(ronde122(dt.datetime(2026, 9, 7, 19, 0), hass122c, coach122c))
 controle("met vrijgave nodig geeft klep dicht niets vrij", "dev-vaatwasser" not in (inst122c.get("ready_devices") or [])
          and b.get("reason") == "Wacht tot je hem vrijgeeft: ingeruimd en dicht.", f"{b.get('reason')}")
+
+print("=== 123. de tip over de lastbewaker alleen zolang de coach wil laden (v0.102.1) ===")
+# De eigenaar op 30-09-2026, met de tip als melding op zijn telefoon 24 minuten nadat
+# de auto op zijn doel stond: "waarom krijg ik deze melding als de auto al vol is?"
+# De bewaker gaf op dat moment 15 A vrij bij een lader van 16 A; de tip keek alleen
+# naar die twee getallen en niet of er geladen werd.
+inst123 = instellingen()
+inst123["installation"]["balancer_entity"] = "sensor.equalizer"
+hass123, _, coach123 = bouw(dict(huis(status="completed", stroom=0.0), **{"sensor.equalizer": "12"}), inst123)
+b123, _ = asyncio.run(ronde(coach123, inst123))
+print(f"  vol: {b123['rule']}, tip {b123['tip']!r}")
+controle("een auto die klaar is: geen tip op de kaart en niets gemeld",
+         not b123["charge"] and b123["tip"] == "" and "dev-laadpaal" not in coach123._getipt, f"{b123['rule']} {b123['tip']!r}")
+hass123b, _, coach123b = bouw(dict(huis(status="charging", stroom=12.0, vermogen=8200.0, teruglevering=0.0, afname=1800.0),
+                                   **{"sensor.equalizer": "12"}), inst123)
+coach123b._boost.add("dev-laadpaal")
+b123b, _ = asyncio.run(ronde(coach123b, inst123))
+print(f"  laadt: {b123b['rule']} {b123b['amps']} A, tip {b123b['tip'][:60]!r}")
+controle("een auto die laadt en door de bewaker begrensd wordt: de tip staat er, en is één keer gemeld",
+         b123b["charge"] and "12 A vrij" in b123b["tip"] and "dev-laadpaal" in coach123b._getipt, f"{b123b['rule']} {b123b['tip']!r}")
+
+print("=== 124. de batterij krijgt na twee minuten zijn eigen stand terug (v0.102.1) ===")
+# De eigenaar op 30-09-2026, na een laadbeurt waarin de batterij om 13:39:54 klaar was
+# met wijken voor de auto en om 13:44:55 pas weer zelf regelde: "zet die 5 min
+# terug naar 2 min." Het teruggeven zelf wordt in het virtuele huis nagemeten.
+controle("teruggeven na twee minuten", coachmod.ZELF_WACHT == dt.timedelta(minutes=2), f"{coachmod.ZELF_WACHT}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
