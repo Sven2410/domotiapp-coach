@@ -63,6 +63,30 @@ De pijlen staan in één knop van 36 bij 36 px, even hoog als de prullenbak; op 
 scherm tot 360 px valt het pijltje naar rechts weg en wordt het icoon 30 px,
 anders hield de naam op 280 px 45 px over (nu 83).
 
+## Ruimtes in Apparaten
+
+Sinds v0.105.0. De bewoner van de eerste woning op 30-09-2026: "Verder kun je er nog
+over denken om apparaten in een ruimte te zetten. Stel dat iemand 25 apparaten
+heeft, dan is ie snel het overzicht kwijt." De eigenaar op 01-10-2026, op de vraag of
+dat de ruimtes van Home Assistant moesten zijn: "eigen ruimtes in de coach. Alleen in
+lijst apparaten."
+
+- **Opslag**: `rooms` bovenaan in de instellingen (`{id, name}`, in de volgorde van
+  het scherm) en `room` per apparaat (het id, of leeg). Het scherm Apparaten bewaart
+  beide (`sections = ["devices", "rooms"]`). Het schema in websocket.py gooit
+  onbekende velden weg en de opslag snoeit onbekende sleutels, dus allebei staan ze
+  in het schema en in `DEFAULT_SETTINGS`. De coach zelf leest ze niet (proef 131).
+- **Op het scherm**: zonder ruimtes is de lijst zoals hij was. Met ruimtes een
+  tussenkop per ruimte (de naam is een invulveld, het aantal, pijltjes, prullenbak),
+  en onderaan "Zonder ruimte" als daar iets in staat. Bij een apparaat een keuzelijst
+  Ruimte. "Ruimte toevoegen" naast "Apparaat toevoegen" zet een lege ruimte onderaan
+  met de cursor in de naam; opslaan kan pas als elke ruimte een naam heeft.
+- **De pijltjes van een apparaat schuiven binnen zijn ruimte**: het ruilt met de
+  buur in dezelfde groep (`buur` in `paintDevices_`). Een ruimte weg: de apparaten
+  erin blijven, zonder ruimte; niets te bevestigen, want Ongedaan maken zet het terug.
+- **Smal**: tot 360 px valt het aantal weg. Gemeten met "Keuken en bijkeuken": op 390
+  en 320 px past de naam (194 en 189 px), op 280 px valt het eind weg (149 px).
+
 ## Waar het schema van een apparaat staat
 
 Sinds 27-08-2026 staat dat bij het apparaat zelf en niet meer in Strategie. Op de

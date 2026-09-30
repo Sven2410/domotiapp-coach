@@ -195,7 +195,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de vaatwasser: Home Connect, Home Connect Local, een domme vaatwasser, de eindtijd, na de klaar-tijd | `docs/vaatwasser.md` |
 | de boiler | `docs/boiler.md` |
 | Historie en het rapport, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, en de batterij op de kaart en in de pop-up | `docs/eerste-woning.md` |
-| het paneel: de apparaatlijst, de volgorde op het overzicht, waar het schema van een apparaat staat | `docs/paneel.md` |
+| het paneel: de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat | `docs/paneel.md` |
 
 ## Wat gelijk moet blijven
 
@@ -273,7 +273,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 470 controles op het denkwerk
 python tests/test_batterij.py    # 169 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 856 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 861 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2202 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 135 op het rapport en op het paneel

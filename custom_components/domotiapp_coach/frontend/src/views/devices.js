@@ -63,8 +63,13 @@ const missingText = (missing) => {
   return `${missing.length > 1 ? "ontbreken" : "ontbreekt"} nog: ${list}`;
 };
 
+/** Tekst van de bewoner, veilig in een attribuut of tussen tags. */
+const veilig = (tekst) =>
+  String(tekst ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 class DacViewDevices extends DacEditorElement {
-  static sections = ["devices"];
+  // De ruimtes horen bij dit scherm en gaan met de apparaten mee (v0.105.0).
+  static sections = ["devices", "rooms"];
 
   constructor() {
     super();
@@ -93,7 +98,10 @@ class DacViewDevices extends DacEditorElement {
 
         <div id="device-list"></div>
 
-        <button class="add" type="button" id="add-device">${icons.plus} Apparaat toevoegen</button>
+        <div class="adds">
+          <button class="add" type="button" id="add-device">${icons.plus} Apparaat toevoegen</button>
+          <button class="add" type="button" id="add-room">${icons.plus} Ruimte toevoegen</button>
+        </div>
       </div>
 
       <dialog class="sheet" id="confirm" aria-labelledby="confirm-title">
@@ -141,6 +149,19 @@ class DacViewDevices extends DacEditorElement {
       this.syncSaveBar_();
       // A device added from the bottom of a long list is off screen otherwise.
       this.$$(".device").at(-1)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+
+    // Een eigen ruimte om de lijst in te delen (v0.105.0). De eigenaar op
+    // 30-09-2026: "Stel dat iemand 25 apparaten heeft, dan is ie snel het
+    // overzicht kwijt." En op 01-10-2026: "eigen ruimtes in de coach. Alleen in
+    // lijst apparaten." Hij komt onderaan, leeg, met de cursor in zijn naam.
+    this.$("#add-room").addEventListener("click", () => {
+      this.draft_.rooms = [...(this.draft_.rooms ?? []), { id: uid(), name: "" }];
+      this.paintDevices_();
+      this.syncSaveBar_();
+      const veld = this.$$("[data-room-name]").at(-1);
+      veld?.scrollIntoView({ block: "center", behavior: "smooth" });
+      veld?.focus();
     });
 
     const confirm = this.$("#confirm");
@@ -224,6 +245,9 @@ class DacViewDevices extends DacEditorElement {
    * is missing, on the card that is missing it.
    */
   blockers_() {
+    if ((this.draft_?.rooms ?? []).some((ruimte) => !String(ruimte.name ?? "").trim())) {
+      return ["Geef elke ruimte een naam, of verwijder hem."];
+    }
     const broken = (this.draft_?.devices ?? [])
       .map((device) => ({ device, missing: missingForControl(device) }))
       .filter((entry) => entry.missing.length);
@@ -237,6 +261,40 @@ class DacViewDevices extends DacEditorElement {
     return [
       `${broken.length} apparaten kunnen nog niet gestuurd worden, om te beginnen ${this.labelFor_(first.device)}.`,
     ];
+  }
+
+  /**
+   * De kop boven een ruimte in de lijst (v0.105.0): de naam om te veranderen,
+   * hoeveel er in staat, verschuiven en verwijderen. "Zonder ruimte" heeft
+   * alleen een naam.
+   */
+  ruimteKop_(groep, ruimtes) {
+    const n = groep.leden.length;
+    const aantal = `${n} ${n === 1 ? "apparaat" : "apparaten"}`;
+    if (!groep.ruimte) {
+      return `
+        <div class="room-head vast">
+          <span class="room-title">Zonder ruimte</span>
+          <span class="room-count">${aantal}</span>
+        </div>`;
+    }
+    const plek = ruimtes.indexOf(groep.ruimte);
+    return `
+        <div class="room-head">
+          <input class="room-name" type="text" data-room-name="${plek}" value="${veilig(groep.ruimte.name)}"
+                 placeholder="Naam van de ruimte" maxlength="40" autocomplete="off" aria-label="Naam van de ruimte">
+          <span class="room-count">${aantal}</span>
+          ${
+            ruimtes.length > 1
+              ? `<span class="move" role="group" aria-label="Volgorde van de ruimtes">
+            <button type="button" data-move-room="${plek}" data-step="-1" aria-label="Ruimte omhoog"${plek === 0 ? " disabled" : ""}>${icons.arrowLeft}</button>
+            <button type="button" data-move-room="${plek}" data-step="1" aria-label="Ruimte omlaag"${plek === ruimtes.length - 1 ? " disabled" : ""}>${icons.arrowRight}</button>
+          </span>`
+              : ""
+          }
+          <button class="remove" type="button" data-remove-room="${plek}" aria-label="Ruimte verwijderen">${icons.trash}</button>
+        </div>
+        ${n ? "" : `<p class="room-empty">Nog niets in deze ruimte. Kies hem bij een apparaat, onder Ruimte.</p>`}`;
   }
 
   /** Everything is filled in and stored, so the list goes back to being a list. */
@@ -1033,7 +1091,17 @@ class DacViewDevices extends DacEditorElement {
       return;
     }
 
-    list.innerHTML = devices
+    // De ruimtes (v0.105.0). Een apparaat hoort bij de ruimte die het aanwijst,
+    // en anders bij "Zonder ruimte". Zonder ruimtes blijft de lijst zoals hij was.
+    const ruimtes = this.draft_.rooms ?? [];
+    const groepVan = (device) => (ruimtes.some((ruimte) => ruimte.id === device.room) ? device.room : "");
+    // De pijltjes schuiven binnen de eigen groep: daar staan de buren op het scherm.
+    const buur = (index, stap) => {
+      let i = index + stap;
+      while (i >= 0 && i < devices.length && groepVan(devices[i]) !== groepVan(devices[index])) i += stap;
+      return i >= 0 && i < devices.length ? i : -1;
+    };
+    const kaarten = devices
       .map((device, index) => {
         const open = this.open_.has(device.id);
         const summary = this.summary_(device);
@@ -1051,8 +1119,8 @@ class DacViewDevices extends DacEditorElement {
             ${
               devices.length > 1
                 ? `<span class="move" role="group" aria-label="Volgorde">
-                <button type="button" data-move-dev="${index}" data-step="-1" aria-label="Omhoog"${index === 0 ? " disabled" : ""}>${icons.arrowLeft}</button>
-                <button type="button" data-move-dev="${index}" data-step="1" aria-label="Omlaag"${index === devices.length - 1 ? " disabled" : ""}>${icons.arrowRight}</button>
+                <button type="button" data-move-dev="${index}" data-step="-1" aria-label="Omhoog"${buur(index, -1) < 0 ? " disabled" : ""}>${icons.arrowLeft}</button>
+                <button type="button" data-move-dev="${index}" data-step="1" aria-label="Omlaag"${buur(index, 1) < 0 ? " disabled" : ""}>${icons.arrowRight}</button>
               </span>`
                 : ""
             }
@@ -1081,6 +1149,17 @@ class DacViewDevices extends DacEditorElement {
                 }
               </div>
             </div>
+            ${
+              ruimtes.length
+                ? `<div class="row">
+              <label>Ruimte</label>
+              <select data-field="room" data-index="${index}">
+                <option value="">Geen ruimte</option>
+                ${ruimtes.map((ruimte) => `<option value="${veilig(ruimte.id)}"${ruimte.id === device.room ? " selected" : ""}>${veilig(ruimte.name || "Nieuwe ruimte")}</option>`).join("")}
+              </select>
+            </div>`
+                : ""
+            }
             <div class="row">
               <label>Energieteller (optioneel)</label>
               <dac-entity-picker data-energy="${index}"></dac-entity-picker>
@@ -1092,8 +1171,20 @@ class DacViewDevices extends DacEditorElement {
             ${this.controlHtml_(device, index)}
           </div>
         </section>`;
-      })
-      .join("");
+      });
+
+    if (!ruimtes.length) {
+      list.innerHTML = kaarten.join("");
+    } else {
+      const groepen = [...ruimtes.map((ruimte) => ({ ruimte, leden: [] })), { ruimte: null, leden: [] }];
+      for (const [index, device] of devices.entries()) {
+        (groepen.find((groep) => groep.ruimte?.id === groepVan(device)) ?? groepen.at(-1)).leden.push(index);
+      }
+      list.innerHTML = groepen
+        .filter((groep) => groep.ruimte || groep.leden.length)
+        .map((groep) => this.ruimteKop_(groep, ruimtes) + groep.leden.map((index) => kaarten[index]).join(""))
+        .join("");
+    }
 
     // Names are the customer's own text and the entity id comes from Home
     // Assistant, so neither goes in through innerHTML.
@@ -1311,7 +1402,7 @@ class DacViewDevices extends DacEditorElement {
           this.paintSummary_(index);
         }
 
-        if (field === "type" || field === "brand" || field === "release_required") {
+        if (field === "type" || field === "brand" || field === "release_required" || field === "room") {
           // Both decide which fields belong here at all, so the card is redrawn.
           // Het vinkje van de vrijgave ook: zonder vrijgave geen vrijgavevelden.
           // The name field is not: redrawing on every keystroke would throw the
@@ -1336,14 +1427,48 @@ class DacViewDevices extends DacEditorElement {
     for (const button of list.querySelectorAll("[data-move-dev]")) {
       button.addEventListener("click", () => {
         const van = Number(button.dataset.moveDev);
-        const naar = van + Number(button.dataset.step);
-        if (naar < 0 || naar >= devices.length) return;
-        const [weg] = devices.splice(van, 1);
-        devices.splice(naar, 0, weg);
+        const naar = buur(van, Number(button.dataset.step));
+        if (naar < 0) return;
+        [devices[van], devices[naar]] = [devices[naar], devices[van]];
         this.paintDevices_();
         this.syncSaveBar_();
         // De focus blijft bij het apparaat dat schoof, zodat nog een tik hem verder zet.
         this.$(`#device-list [data-move-dev="${naar}"][data-step="${button.dataset.step}"]`)?.focus();
+      });
+    }
+
+    // De koppen van de ruimtes (v0.105.0): de naam verandert bij elke toets,
+    // zonder de lijst opnieuw te tekenen (dan was de cursor weg); de keuzelijsten
+    // bij de apparaten krijgen de nieuwe naam meteen mee.
+    for (const veld of list.querySelectorAll("[data-room-name]")) {
+      veld.addEventListener("input", () => {
+        const ruimte = ruimtes[Number(veld.dataset.roomName)];
+        ruimte.name = veld.value;
+        for (const optie of list.querySelectorAll(`select[data-field="room"] option[value="${CSS.escape(ruimte.id)}"]`)) {
+          optie.textContent = ruimte.name || "Nieuwe ruimte";
+        }
+        this.syncSaveBar_();
+      });
+    }
+    for (const knop of list.querySelectorAll("[data-move-room]")) {
+      knop.addEventListener("click", () => {
+        const van = Number(knop.dataset.moveRoom);
+        const naar = van + Number(knop.dataset.step);
+        if (naar < 0 || naar >= ruimtes.length) return;
+        [ruimtes[van], ruimtes[naar]] = [ruimtes[naar], ruimtes[van]];
+        this.paintDevices_();
+        this.syncSaveBar_();
+        this.$(`#device-list [data-move-room="${naar}"][data-step="${knop.dataset.step}"]`)?.focus();
+      });
+    }
+    // Een ruimte weg: de apparaten erin blijven, zonder ruimte. Niets om te
+    // bevestigen, want er gaat niets verloren dat Ongedaan maken niet terugzet.
+    for (const knop of list.querySelectorAll("[data-remove-room]")) {
+      knop.addEventListener("click", () => {
+        const [weg] = ruimtes.splice(Number(knop.dataset.removeRoom), 1);
+        for (const device of devices) if (device.room === weg.id) device.room = "";
+        this.paintDevices_();
+        this.syncSaveBar_();
       });
     }
 
@@ -1689,7 +1814,8 @@ DacViewDevices.css = /* css */ `
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .device-head button.remove {
+  .device-head button.remove,
+  .room-head button.remove {
     flex: 0 0 auto;
     width: 36px; height: 36px;
     display: grid; place-items: center;
@@ -1699,12 +1825,15 @@ DacViewDevices.css = /* css */ `
     color: var(--dac-ink-3);
     cursor: pointer;
   }
-  .device-head button.remove:hover { color: var(--dac-bad); border-color: rgba(208,59,59,0.5); }
-  .device-head button.remove .icon { width: 16px; height: 16px; }
+  .device-head button.remove:hover,
+  .room-head button.remove:hover { color: var(--dac-bad); border-color: rgba(208,59,59,0.5); }
+  .device-head button.remove .icon,
+  .room-head button.remove .icon { width: 16px; height: 16px; }
 
   /* Omhoog en omlaag: de pijlen van links en rechts, een kwart gedraaid, net als
      op het overzicht. Samen even hoog als de knop ernaast. */
-  .device-head .move {
+  .device-head .move,
+  .room-head .move {
     flex: 0 0 auto;
     display: grid;
     grid-template-rows: 1fr 1fr;
@@ -1713,7 +1842,8 @@ DacViewDevices.css = /* css */ `
     border: 1px solid var(--dac-border);
     overflow: hidden;
   }
-  .device-head .move button {
+  .device-head .move button,
+  .room-head .move button {
     display: grid; place-items: center;
     padding: 0;
     border: 0;
@@ -1721,10 +1851,51 @@ DacViewDevices.css = /* css */ `
     color: var(--dac-ink-3);
     cursor: pointer;
   }
-  .device-head .move button + button { border-top: 1px solid var(--dac-border); }
-  .device-head .move button:hover:not(:disabled) { color: var(--dac-ink); background: var(--dac-accent-soft); }
-  .device-head .move button:disabled { opacity: 0.35; cursor: default; }
-  .device-head .move .icon { width: 14px; height: 14px; transform: rotate(90deg); }
+  .device-head .move button + button,
+  .room-head .move button + button { border-top: 1px solid var(--dac-border); }
+  .device-head .move button:hover:not(:disabled),
+  .room-head .move button:hover:not(:disabled) { color: var(--dac-ink); background: var(--dac-accent-soft); }
+  .device-head .move button:disabled,
+  .room-head .move button:disabled { opacity: 0.35; cursor: default; }
+  .device-head .move .icon,
+  .room-head .move .icon { width: 14px; height: 14px; transform: rotate(90deg); }
+
+  /* De kop van een ruimte (v0.105.0): geen kaart maar een tussenkop, met de
+     naam als invulveld dat pas een rand krijgt als je erop komt. */
+  .room-head {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 14px;
+    padding: 0 2px;
+  }
+  #device-list > .room-head:first-child { margin-top: 0; }
+  .room-head .room-name,
+  .room-head .room-title {
+    flex: 1 1 auto; min-width: 0;
+    font: inherit; font-size: 13px; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--dac-ink-2);
+  }
+  .room-head .room-name {
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: transparent;
+  }
+  .room-head .room-name::placeholder { color: var(--dac-warn); text-transform: none; letter-spacing: 0; }
+  .room-head .room-name:hover { border-color: var(--dac-border); }
+  .room-head .room-name:focus { border-color: var(--dac-accent-hi); background: rgba(255,255,255,0.03); outline: none; color: var(--dac-ink); }
+  .room-head.vast { min-height: 36px; }
+  .room-head.vast .room-title { padding: 0 10px; }
+  .room-head .room-count { flex: 0 0 auto; font-size: 12px; color: var(--dac-ink-3); }
+  .room-empty { margin: 0; padding: 0 12px; font-size: 13px; color: var(--dac-ink-3); }
+  /* Op een telefoon gaat de ruimte naar de naam: gemeten op 320 px hield
+     "Keuken en bijkeuken" er 124 px over, op 280 px 84. */
+  @media (max-width: 360px) {
+    .room-head .room-count { display: none; }
+    .room-head .room-name, .room-head .room-title { letter-spacing: 0.02em; }
+  }
+
+  .adds { display: flex; flex-wrap: wrap; gap: 10px; }
   /* Op een smal scherm kost de volgorde ruimte van de naam. De hele kop opent het
      apparaat al, dus het pijltje ernaast mag daar weg. Gemeten op 280 px: de naam
      ging van 45 naar ruim 80 px. */
