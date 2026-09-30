@@ -4647,6 +4647,13 @@ class ChargerCoach:
         rij = self._batterij_rij(settings, device_id)
         sessie = self._batterij.setdefault(device_id, {"regelaar": Regelaar()})
         b = self._batterij_van(now, settings, device, rij)
+        # Een beurt van het net die al loopt maakt het plan af, en voor een
+        # kleine neemt hij een batterij die zelf nul doet niet over (v0.102.3,
+        # `_rustig_vermogen` in batterij.py).
+        vorig = sessie.get("besluit")
+        b.vorige_stand = vorig.stand if vorig is not None else None
+        b.vorige_op = sessie.get("besluit_op")
+        b.overgenomen = bool(sessie.get("stuurt")) and sessie.get("zelf") is False
         entities = device.get("entities") or {}
         mag = level == LEVEL_STEER or (level == LEVEL_PROPOSE and device_id in self._approved)
         stuurt = mag and level not in (LEVEL_READ, LEVEL_ADVISE) and bool(entities.get("setpoint"))
@@ -4716,6 +4723,7 @@ class ChargerCoach:
                     rule="leeg-laden",
                     waarde=besluit.waarde,
                     uren=besluit.uren,
+                    inkoop_tot=besluit.inkoop_tot,
                 )
 
         # "Nu vol laden": dezelfde knop als snelladen bij de paal, voor wie de
@@ -4740,6 +4748,7 @@ class ChargerCoach:
                     rule="vol-laden",
                     waarde=besluit.waarde,
                     uren=besluit.uren,
+                    inkoop_tot=besluit.inkoop_tot,
                 )
 
         # Het gemeten rendement en de laatste volle stand bewaren, zodat ze een
@@ -4790,7 +4799,7 @@ class ChargerCoach:
             }
         else:
             self._toezeggingen.pop(device_id, None)
-        sessie.update(besluit=besluit, batterij=b, koop=koop, terug=terug,
+        sessie.update(besluit=besluit, besluit_op=now, batterij=b, koop=koop, terug=terug,
                       settings=settings, device=device,
                       # Wat er morgenvroeg over is, voor de snelle regelaar: die
                       # beslist elke paar seconden of de batterij de auto mag
@@ -4827,6 +4836,8 @@ class ChargerCoach:
             "setpoint_w": round(sessie["regelaar"].opdracht_w) if stuurt else None,
             "target_w": round(besluit.power_w),
             "value": None if besluit.waarde is None else round(besluit.waarde, 4),
+            # Onder welke prijs bijkopen nu loont, voor de pop-up (v0.102.3).
+            "buy_below": None if besluit.inkoop_tot is None else round(besluit.inkoop_tot, 4),
             "rte": None if b.rte is None else round(b.rte, 3),
             "capacity_kwh": b.capacity_kwh,
             "floor": b.bodem,

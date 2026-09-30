@@ -739,8 +739,120 @@ controle("een dynamisch contract zonder rendement: daar kan inkopen wel lonen, d
          d36.rule == "rendement-onbekend", f"{d36.rule}")
 DAL36 = prijzen([0.20] * 7 + [0.26] * 16 + [0.20] + [0.20] * 7 + [0.26] * 16 + [0.20])
 p36 = plan_batterij(DAG.replace(hour=21), DAL36, Tariff(), verwachting(ZON, huis=1.0), anker(soc=20.0))
-controle("een vast contract met dal- en piektarief: bijladen kan lonen, dus dat mag hij blijven zeggen",
-         "goedkoop genoeg" in (p36.plan or "") or p36.stand == NETLADEN, f"{p36.stand} {p36.plan}")
+# Sinds v0.102.3 zegt hij daar waarom het vannacht niet loont, met de prijs erbij.
+controle("een vast contract met dal- en piektarief: bijladen kan lonen, dus hij rekent het voor",
+         p36.stand == NETLADEN or ("via de batterij" in (p36.plan or "") and "nooit" not in (p36.plan or "")),
+         f"{p36.stand} {p36.plan}")
+
+
+print("=== 37. een beurt van het net loopt door tot het eind, en een kleine is geen overname (v0.102.3) ===")
+# De klantwoning op 30-09-2026: een Anker die zelf nul doet, prijzen per kwartier.
+# Overdag laadde hij elk kwartier twaalf minuten en drie niet (3,5 kW maal 2:20 is
+# 0,136 kWh, onder de procent van de batterij), en 's nachts zei hij midden in het
+# laden "nul op de meter" en dekte hij de warmtepomp uit de batterij.
+import re  # noqa: E402
+
+from scenarios import KWARTIER_30_09  # noqa: E402
+
+
+def kwartieren(dagen=("2026-09-30", "2026-10-01")):
+    uit = []
+    for dag in dagen:
+        begin = dt.datetime.fromisoformat(dag)
+        for i, p in enumerate(KWARTIER_30_09[dag]):
+            uit.append({"start": begin + dt.timedelta(minutes=15 * i),
+                        "end": begin + dt.timedelta(minutes=15 * (i + 1)),
+                        "price": p, "feed_in": round(p - 0.01815, 5)})
+    return uit
+
+
+K37 = kwartieren()
+DAG37 = dt.datetime(2026, 9, 30)
+V37 = verwachting(huis=0.6, dag=DAG37)
+
+
+def klant37(soc, **kw):
+    return anker(soc, capacity_kwh=14.5, max_discharge_w=3500.0, zelf_nul=True, **kw)
+
+
+# Midden op de dag, 2:20 voor het eind van een goedkoop kwartier (€ 0,180), met
+# nog goedkope kwartieren erna.
+NU37 = dt.datetime(2026, 9, 30, 12, 27, 40)
+a37 = plan_batterij(NU37, K37, Tariff(), V37, klant37(40.0, overgenomen=True, vorige_stand=NETLADEN))
+f37 = plan_batterij(NU37, K37, Tariff(), V37, klant37(40.0))
+print(f"  12:27:40, beurt loopt: {a37.stand} {a37.power_w:.0f} W | {a37.reason}")
+print(f"  12:27:40, vers:        {f37.stand} {f37.power_w:.0f} W")
+controle("de laatste minuten van een goedkoop kwartier laadt hij gewoon door",
+         a37.stand == NETLADEN and a37.power_w > 3000, f"{a37.stand} {a37.power_w:.0f}")
+controle("ook als hij nog niet laadde: de hele beurt telt, niet de rest van dit kwartier",
+         f37.stand == NETLADEN, f"{f37.stand} {f37.power_w:.0f}")
+
+# Het eind van een beurt, in een nagemaakte dag: vier goedkope kwartieren
+# (€ 0,150-0,153) om 12:00, verder € 0,36 en 's avonds € 0,45. Hij wil in alle
+# vier voluit laden, dus om 12:57:40 moet er nog 3,5 kW maal 2:20 bij: 0,136 kWh,
+# minder dan de procent (0,145). En een stap van het rooster is hier
+# (95 - 5)% van 14,5 kWh gedeeld door 40, aan de wisselstroomkant 0,38 kWh.
+def kw37(dag, avond=0.45):
+    uit = []
+    for i in range(96):
+        van = dag + dt.timedelta(minutes=15 * i)
+        p = 0.150 + 0.001 * (i - 48) if 48 <= i < 52 else (avond if i >= 68 else 0.36)
+        uit.append({"start": van, "end": van + dt.timedelta(minutes=15), "price": p, "feed_in": p - 0.01815})
+    return uit
+
+
+S37 = kw37(DAG37) + kw37(DAG37 + dt.timedelta(days=1), avond=0.36)
+W37 = verwachting(huis=1.0, dag=DAG37)
+
+
+def op37(uur, minuut, seconde=0, **kw):
+    return plan_batterij(DAG37.replace(hour=uur, minute=minuut, second=seconde), S37, Tariff(), W37, klant37(40.0, **kw))
+
+
+loopt = op37(12, 57, 40, overgenomen=True, vorige_stand=NETLADEN)
+vers = op37(12, 57, 40, overgenomen=True)
+zelf = op37(12, 57, 40)
+print(f"  12:57:40, rest {loopt.uren[0].net_kwh:.3f} kWh: loopt {loopt.stand} {loopt.power_w:.0f} W, "
+      f"vers {vers.stand}, zelf {zelf.stand}")
+controle("het eind van een beurt die loopt maakt hij af, ook onder de procent",
+         loopt.stand == NETLADEN and loopt.power_w > 3000, f"{loopt.stand} {loopt.power_w:.0f}")
+controle("maar voor zo'n restje begint hij niet", vers.stand == NUL, f"{vers.stand}")
+controle("en een batterij die het zelf doet neemt hij er ook niet voor over", zelf.stand == NUL, f"{zelf.stand}")
+midden = op37(12, 27, 40)
+controle("halverwege de beurt, 2:20 voor het eind van een kwartier: laden, want de beurt loopt door",
+         midden.stand == NETLADEN and midden.power_w > 3000, f"{midden.stand} {midden.power_w:.0f}")
+vijf_zelf, vijf_over = op37(12, 55), op37(12, 55, overgenomen=True)
+print(f"  12:55, rest {vijf_over.uren[0].net_kwh:.3f} kWh: zelf {vijf_zelf.stand}, overgenomen {vijf_over.stand}")
+controle("een beurt onder één stap van het rooster: een batterij die het zelf doet niet overnemen",
+         vijf_zelf.stand == NUL, f"{vijf_zelf.stand}")
+controle("heeft hij hem al, dan laadt hij wel", vijf_over.stand == NETLADEN, f"{vijf_over.stand}")
+tien_zelf = op37(12, 50)
+controle("een beurt van meer dan een stap (0,58 kWh): dan neemt hij hem wel over",
+         tien_zelf.stand == NETLADEN, f"{tien_zelf.stand} {tien_zelf.uren[0].net_kwh:.3f}")
+klein = next((u for u in loopt.uren if u.start >= DAG37.replace(hour=13)), None)
+controle("en na het goedkope uur laadt het plan niet meer", klein is not None and klein.stand != NETLADEN,
+         f"{klein}")
+
+# 's Avonds om 19:47, zoals de eigenaar het zag: 42%, een tekort voor de nacht,
+# en niets van het net. De zin zegt nu waarom: de goedkoopste stroom tot
+# morgenvroeg is € 0,313 om 00:15, via de batterij € 0,313 / 0,736 = € 0,425.
+avond = plan_batterij(dt.datetime(2026, 9, 30, 19, 47, 23), K37, Tariff(),
+                      verwachting(huis=1.2, dag=DAG37), klant37(42.0))
+slot = re.split(r"(?<=\.)\s+(?=[A-Z])", avond.plan)[-1]
+print(f"  19:47 {avond.stand}, bijkopen loont onder {avond.inkoop_tot:.3f} (waarde {avond.waarde:.3f})")
+print(f"    {slot}")
+netuur = [u for u in avond.uren if u.stand == NETLADEN and u.net_kwh > 0.05
+          and u.start < dt.datetime(2026, 10, 1, 7)]
+if not netuur:
+    controle("geen bijladen vannacht: de zin zegt wat een kWh via de batterij minstens kost",
+             "via de batterij minstens € 0,425" in slot and "€ 0,313 om 00:15" in slot, slot)
+else:
+    controle("bijladen vannacht: de zin zegt hoeveel", "van het net bij" in slot, slot)
+controle("de conclusie op de kaart is één zin met het tekort erin", "tekort" in slot, slot)
+controle("bijkopen loont onder de waarde in de batterij min het laadverlies",
+         avond.inkoop_tot is not None and 0 < avond.inkoop_tot < avond.waarde, f"{avond.inkoop_tot} {avond.waarde}")
+vol37 = plan_batterij(dt.datetime(2026, 9, 30, 14, 0), K37, Tariff(), V37, klant37(95.0))
+controle("een volle batterij: geen prijs om onder bij te kopen", vol37.inkoop_tot is None, f"{vol37.inkoop_tot}")
 
 
 print()

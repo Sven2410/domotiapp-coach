@@ -7040,6 +7040,37 @@ controle("de planner krijgt de mediaan en de hoogste meting per fase",
          net128.phase_amps[0] == 10.0 and net128.phase_peak_amps[0] == 21.0 and len(net128.phase_peak_amps) == 3,
          f"{net128.phase_amps} {net128.phase_peak_amps}")
 
+
+print("=== 129. de batterij weet wat hij vorige ronde deed, en of de coach hem heeft (v0.102.3) ===")
+# Een beurt van het net die loopt maakt het plan af, en voor een kleine neemt hij
+# een batterij die zelf nul doet niet over (`_rustig_vermogen` in batterij.py). Daar
+# zijn drie dingen voor nodig uit de ronde: de stand van de vorige ronde, wanneer
+# die was, en of de coach hem nu in de externe stand heeft. En de kaart krijgt
+# onder welke prijs bijkopen loont.
+BATTERIJ129 = {**BATTERIJ, "battery": {**BATTERIJ["battery"], "self_zero": True}}
+hass129, _, coach129 = bouw(huis75(), instellingen(devices=[LAADPAAL, BATTERIJ129]))
+NU129 = dt.datetime(2026, 9, 30, 21, 0)
+b129 = asyncio.run(ronde75(hass129, coach129, NU129))
+sessie129 = coach129._batterij["dev-batterij"]
+eerste129 = sessie129["batterij"]
+controle("de eerste ronde kent geen vorige stand", eerste129.vorige_stand is None and eerste129.vorige_op is None,
+         f"{eerste129.vorige_stand} {eerste129.vorige_op}")
+b129 = asyncio.run(ronde75(hass129, coach129, NU129 + dt.timedelta(minutes=1)))
+tweede129 = sessie129["batterij"]
+print(f"  tweede ronde: vorige {tweede129.vorige_stand} om {tweede129.vorige_op}, overgenomen {tweede129.overgenomen}, "
+      f"zelf {sessie129.get('zelf')}")
+controle("de tweede ronde kent de stand en het moment van de eerste",
+         tweede129.vorige_stand == b129.get("mode") and tweede129.vorige_op == NU129,
+         f"{tweede129.vorige_stand} {tweede129.vorige_op}")
+controle("doet hij het zelf, dan heeft de coach hem niet", tweede129.overgenomen is False and sessie129.get("zelf") is True,
+         f"{tweede129.overgenomen} {sessie129.get('zelf')}")
+hass129b, _, coach129b = bouw(huis75(modus="third_party_control"), instellingen(devices=[LAADPAAL, BATTERIJ]))
+asyncio.run(ronde75(hass129b, coach129b, NU129))
+asyncio.run(ronde75(hass129b, coach129b, NU129 + dt.timedelta(minutes=1)))
+controle("zonder het vinkje heeft de coach hem zodra hij stuurt",
+         coach129b._batterij["dev-batterij"]["batterij"].overgenomen is True, "")
+controle("de stand zegt onder welke prijs bijkopen loont", "buy_below" in b129, f"{sorted(b129)}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

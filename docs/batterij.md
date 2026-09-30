@@ -747,3 +747,87 @@ seconden meldt en een ronde in de seconde dat de paal stopt,
 `Scenario.ronde_bij_status`): acht seconden 2,25 kW het net op werd niets, en
 acht seconden na het stoppen voedt de batterij het huis. Proef 125 in
 test_coach.py.
+
+## Een beurt van het net loopt door, en een kleine is geen overname
+
+v0.102.3. In de klantwoning op 30-09-2026, een Anker die zelf nul op de meter
+doet en een dynamisch contract in kwartieren. Twee dingen uit de recorder:
+
+- **Overdag laadde hij elk kwartier twaalf minuten en drie niet.** Van 10:45 tot
+  14:27 steeds "laadt op 3,5 kW" op :x0:40 en "nul op de meter" op :x2:40.
+  `_rustig_vermogen` begon niet aan wat er in dit blok nog bij moest als dat
+  minder was dan een procent van de batterij (0,145 kWh), en 3,5 kW maal de
+  laatste 2:20 van een kwartier is 0,136. Met uurprijzen speelde dat een paar
+  minuten per uur, met kwartierprijzen elk kwartier.
+- **'s Nachts laden en ontladen door elkaar.** Van 03:15 tot 06:00 ging er per
+  uur 1,40/1,97/0,50 kWh in en 0,37/0,17/0,45 uit. De accustand liep sneller
+  op dan het plan dacht, het restje van het kwartier zakte onder de procent,
+  en het besluit werd nul op de meter. De coach had de batterij in handen, en
+  zijn eigen regelaar dekte toen de warmtepomp (2,4 kW) uit de batterij: om
+  03:26:30 3.500 W eruit, om 03:27:25 weer 3.500 W erin. Elke tik van de
+  accustand (8 ↔ 9%) wisselde het.
+
+En met `ZELF_WACHT` van twee minuten (v0.102.1) werd dat erger: drie rondes
+"nul" aan het eind van een kwartier (met rondes op :40) is teruggeven en een
+minuut later weer overnemen, elk kwartier.
+
+Nu:
+
+- **Of hij begint gaat over de hele beurt** (`_rustig_vermogen`): deze even dure
+  blokken plus de blokken erna waarin het plan ook van het net laadt, wat ze ook
+  kosten. De procent blijft, maar dan over die beurt.
+- **Een beurt die loopt maakt hij af** (`Batterij.vorige_stand`): zolang het plan
+  in dit blok nog iets van het net wil, hoe weinig ook. Dan houdt hij de
+  batterij vast en neemt het huis van het net ("Hij maakt het laden van het net
+  af tot 05:45 en geeft tot dan niets af").
+- **Met het vinkje zelf nul is van het net laden minstens één stap van het
+  rooster, of zoveel als er in het blok nog kan** (`_zelf_toegestaan`). De som
+  kent daar geen stilstaan, en koos voor stilstaan het eerstvolgende
+  roosterpunt erboven: "laden van het net, 0,01 kWh" om 21:45 midden in een
+  avond ontladen. Dat is een overname om stil te staan, en die wil de eigenaar
+  niet ("de coach moet de batterij niet zelf sturen ... alleen goedkoop
+  inkopen"). In het blok waarin hij al laadt mag het restje kleiner
+  (`_loopt_al`), want een procent is 0,145 kWh en een stap 0,33: anders stopte
+  hij na elke tik. In het blok erna weer niet, zodat hij hem niet blok na blok
+  vasthoudt.
+- **Voor een kleine beurt neemt hij een batterij die het zelf doet niet over**
+  (`_overname_drempel`, `Batterij.overgenomen`): minstens één stap van het
+  rooster aan de wisselstroomkant, bij 14,5 kWh 0,38 kWh. Die dag nam hij hem om
+  16:00:41 over voor drie minuten op 1,2 kW, en om 15:00:41 voor een plan van
+  0,35 kWh. Heeft de coach hem al, dan geldt de procent.
+
+In het virtuele huis (`batterij-kwartier-zelf`, de kwartierprijzen van die dag,
+rondes op :40, een warmtepomp van 1,6 kW van 03:00 tot 06:00): met v0.102.2
+44 wissels van de modus, 160 opdrachten en tien kwartieren met laden én
+ontladen; nu 8 wissels (vier echte beurten: 04:15:40, 10:45:40, 11:15:40 en
+14:00:40), 73 opdrachten en één zo'n kwartier, aan het eind van de nachtbeurt.
+Het virtuele huis kent daarvoor dagen met 96 prijzen (`Prijzen.per_dag`).
+`batterij-dynamisch-zelf` (uurprijzen) kost nu € 1,51 met 11 opdrachten, was
+€ 1,49 met 14, tegen € 1,50 als de coach alles stuurt.
+Proef 37 in test_batterij.py, proef 129 in test_coach.py.
+
+**Wat er overblijft:** slaat het plan één kwartier over (13:45 in dat scenario,
+€ 0,257 tussen € 0,230 en € 0,236), dan geeft hij hem na `ZELF_WACHT` terug en
+een kwartier later weer over. Dat is het plan zelf, en twee minuten is de keuze
+van de eigenaar.
+
+## Bijkopen loont onder, op de kaart en in de nachtzin
+
+v0.102.3. De eigenaar op 30-09-2026 om 19:45, met "Een kWh erin € 0,301, is
+straks waard", 8,1 kWh tekort voor de nacht en "Van het net: niets": "hij komt
+te kort, is het niet goedkoper om iets bij te kopen?" Die € 0,301 was `eraf`:
+wat een kWh **in** de batterij waard is. Naast de prijslijst hoort die min het
+verlies bij het laden, maal √0,736: € 0,259 (`Besluit.inkoop_tot`, `erbij`
+maal `eta`, dezelfde grens als waar hij zon opslaat). Het vak in de pop-up
+heet nu "Bijkopen loont, onder € 0,259, nu € 0,446" (`buy_below` in de stand,
+`batterijVooruit` in battery.js). Bij een volle batterij staat het er niet.
+
+En de nachtzin eindigde bij een tekort altijd met "hij laadt bij als de stroom
+goedkoop genoeg is". Nu zegt hij wat het plan tot morgenvroeg van het net haalt
+("hij laadt er 3,1 kWh van op de goedkoopste momenten van het net bij, de rest
+komt rechtstreeks van het net"), of waarom niet: "dat komt van het net, want
+bijladen kost via de batterij minstens € 0,425 per kWh (€ 0,313 om 00:15, plus
+het verlies)", de goedkoopste prijs tot morgenvroeg gedeeld door het rendement
+(`_bijladen_zin`). Reiken de prijzen niet tot morgenvroeg, dan staat er "in de
+bekende uren" bij. Eén zin, want de kaart toont alleen de laatste
+(`nachtConclusie`).

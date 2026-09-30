@@ -105,7 +105,7 @@ pop-up; nu is de kaart best groot en onoverzichtelijk." De knop "Wat gaat hij
 doen" staat nu ook op de batterijkaart zodra er uren in het plan staan, en
 opent dezelfde pop-up als bij de paal (`plan-ahead-sheet.js`, tak
 `paintAccu_`): bovenaan Accu nu, Morgenvroeg (`balance_kwh`), Van het net en
-wat een kWh erin straks waard is; daaronder per uur de tijd, de prijs, de
+(sinds v0.102.3) onder welke prijs bijkopen loont; daaronder per uur de tijd, de prijs, de
 accustand aan het eind van het uur en wat hij doet, met laden van het net in
 groen (`batterijVooruit` in battery.js). Van de kaart zijn "Een kWh erin is
 straks waard" en het plan per stand af; van de nachtzin blijft daar alleen

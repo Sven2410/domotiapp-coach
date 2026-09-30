@@ -1121,7 +1121,7 @@ const { batterijVooruit, nachtConclusie } = await import("../custom_components/d
 
 proef("de pop-up van de batterij: vier vakken, een rij per uur, netladen gekleurd, morgen na middernacht", () => {
   const besluit = {
-    kind: "batterij", soc: 62, capacity_kwh: 14.6, balance_kwh: 17.06, value: 0,
+    kind: "batterij", soc: 62, capacity_kwh: 14.6, balance_kwh: 17.06, value: 0.301, buy_below: 0.2588,
     reason: "Hij houdt de meter op nul.",
     plan: "Tot morgenvroeg verwacht hij 15,7 kWh zon. Je houdt naar verwachting 17,1 kWh over in je accu.",
     hours: [
@@ -1136,7 +1136,10 @@ proef("de pop-up van de batterij: vier vakken, een rij per uur, netladen gekleur
   assert.equal(kop["Accu nu"], "62% | van 14,6 kWh");
   assert.equal(kop["Morgenvroeg"], "17,1 kWh | over na de nacht");
   assert.equal(kop["Van het net"], "2,1 kWh | gemiddeld € 0,120");
-  assert.equal(kop["Een kWh erin"], "€ 0,000 | is straks waard");
+  // Sinds v0.102.3 onder welke prijs bijkopen loont, naast de prijs van nu; de
+  // waarde per kWh in de batterij (€ 0,301) staat er niet meer.
+  assert.equal(kop["Bijkopen loont"], "onder € 0,259 | nu € 0,194");
+  assert.equal(kop["Een kWh erin"], undefined);
   assert.equal(v.uren.length, 4);
   assert.equal(v.uren[0].tijd, "13:16");
   assert.equal(v.uren[0].wat, "Standby");
@@ -1153,6 +1156,9 @@ proef("de pop-up van de batterij: vier vakken, een rij per uur, netladen gekleur
   const tekort = batterijVooruit({ ...besluit, balance_kwh: -2.34, hours: [] });
   assert.equal(tekort.kop.find((k) => k.label === "Morgenvroeg").waarde, "−2,3 kWh");
   assert.equal(tekort.kop.find((k) => k.label === "Van het net").waarde, "niets");
+  assert.equal(tekort.kop.find((k) => k.label === "Bijkopen loont").bij, "per kWh van het net", "zonder uren geen prijs van nu");
+  assert.equal(batterijVooruit({ ...besluit, buy_below: null }).kop.find((k) => k.label === "Bijkopen loont"), undefined,
+    "een volle batterij: geen vak");
   assert.equal(batterijVooruit({ kind: "laadpaal" }), null);
 });
 

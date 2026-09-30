@@ -140,6 +140,14 @@ class Batterij:
     # Stilstaan, alleen zon opslaan en alleen ontladen zijn er dan niet; zie
     # `_zelf_toegestaan`.
     zelf_nul: bool = False
+    # Of de coach hem nu zelf in de externe stand heeft. Zonder `zelf_nul`
+    # altijd zodra hij stuurt; met alleen als hij hem overnam. Voor een kleine
+    # laadbeurt neemt hij hem niet over; zie `_rustig_vermogen`.
+    overgenomen: bool = False
+    # De stand van de vorige ronde, en wanneer die was. Een laadbeurt van het
+    # net die al loopt maakt hij af; zie `_rustig_vermogen` en `_loopt_al`.
+    vorige_stand: str | None = None
+    vorige_op: datetime | None = None
 
     @property
     def bodem(self) -> float:
@@ -191,6 +199,10 @@ class Besluit:
     # Wat er volgens het plan van de paal naar de auto gaat, aan de accukant in
     # kWh (v0.95.0). Voor de nachtbalans op de kaart; zie `auto_hulp`.
     auto_weg: float = 0.0
+    # Onder welke prijs een kWh van het net erbij nu loont, in euro: wat hij in
+    # de batterij straks waard is, min het verlies bij het laden (v0.102.3).
+    # None als de batterij vol is of er niet gerekend is.
+    inkoop_tot: float | None = None
 
     @property
     def grenzen(self) -> tuple[bool, bool]:
@@ -291,7 +303,7 @@ def _mogelijk(
 
 def _zelf_toegestaan(
     kandidaten: set[float], e: float, deel: float, huis: float, b: Batterij,
-    som_laag: float, hoog: float, eta: float,
+    som_laag: float, hoog: float, eta: float, stap: float = 0.0,
 ) -> set[float]:
     """Wat er van de kandidaten overblijft als de batterij zelf nul op de meter doet.
 
@@ -299,6 +311,13 @@ def _zelf_toegestaan(
     opslaan, zover hij kan. Daarboven is van het net laden, en dat doet de coach;
     daaronder is handelen, alleen als dat aanstaat. Wat ertussen ligt (stilstaan,
     of maar een deel) kan de batterij in zijn eigen stand niet.
+
+    En van het net laden of handelen is minstens één stap van het rooster
+    (`stap`), of zoveel als er in dit blok nog kan (v0.102.3). Anders koos de
+    som voor stilstaan, dat hij hier niet mag, het eerstvolgende roosterpunt
+    erboven: in de klantwoning op 30-09-2026 om 21:45 "laden van het net,
+    0,01 kWh" midden in een avond ontladen. Dat is geen inkoop maar een
+    overname om stil te staan, en die hoort hier niet.
     """
     if not b.zelf_nul:
         return kandidaten
@@ -309,10 +328,32 @@ def _zelf_toegestaan(
     else:
         nul = e
     uit = {nul}
+    boven, onder = max(e, nul), min(e, nul)
+    op = max(kandidaten | {boven})
+    neer = min(kandidaten | {onder})
+    erop = boven + min(stap, op - boven) - 1e-9
+    eraf = onder - min(stap, onder - neer) + 1e-9
     for k in kandidaten:
-        if k > max(e, nul) + 1e-9 or (b.handelen and k < min(e, nul) - 1e-9):
+        if (k > boven + 1e-9 and k >= erop) or (b.handelen and k < onder - 1e-9 and k <= eraf):
             uit.add(k)
     return uit
+
+
+def _loopt_al(b: Batterij, rij: dict) -> bool:
+    """Of de coach in dit blok al van het net laadt of eraan levert (v0.102.3).
+
+    Dan mag de som het blok afmaken met minder dan een stap van het rooster
+    (`_zelf_toegestaan`): de accustand loopt in procenten op, een procent is
+    bij 14,5 kWh 0,145 kWh en een stap 0,33, en elke tik liet het restje van
+    het blok onder die stap zakken. In het virtuele huis stopte hij daardoor
+    om 05:47:40 twee minuten na het begin van een kwartier. Alleen in het blok
+    zelf: in het volgende moet een beurt weer een stap zijn, anders kan hij de
+    batterij blok na blok met een beetje laden vasthouden.
+    """
+    return (
+        b.vorige_stand in (NETLADEN, HANDELEN) and b.vorige_op is not None
+        and rij["start"] <= b.vorige_op < rij["end"]
+    )
 
 
 def _blok_kosten(e: float, naar: float, huis: float, rij: dict, eta: float) -> float:
@@ -382,7 +423,9 @@ def _waarde_vooruit(
             laatste = int((op - laag) / stap)
             for i in range(max(0, eerste), min(STAPPEN, laatste) + 1):
                 kandidaten.add(rooster[i])
-            kandidaten = _zelf_toegestaan(kandidaten, e, deel, h, b, bodem, hoog, eta)
+            kandidaten = _zelf_toegestaan(
+                kandidaten, e, deel, h, b, bodem, hoog, eta, 0.0 if k == 0 and _loopt_al(b, rij) else stap
+            )
             begin.append(
                 min(
                     _blok_kosten(e, naar, h, rij, eta) + _tussen(volgende, stap, laag, naar)
@@ -408,7 +451,9 @@ def _beste_stap(som: _Som, k: int, e: float, b: Batterij) -> float:
     while i <= STAPPEN and som.laag + i * som.stap <= op:
         kandidaten.add(som.laag + i * som.stap)
         i += 1
-    kandidaten = _zelf_toegestaan(kandidaten, e, deel, h, b, bodem, som.hoog, som.eta)
+    kandidaten = _zelf_toegestaan(
+        kandidaten, e, deel, h, b, bodem, som.hoog, som.eta, 0.0 if k == 0 and _loopt_al(b, rij) else som.stap
+    )
     # Bij gelijke kosten wint niets doen, en daarna het kleinste gebaar: een
     # batterij die zonder reden beweegt slijt voor niets.
     return min(
@@ -463,7 +508,7 @@ def _vooruit(som: _Som, b: Batterij) -> list[Uur]:
 
 
 def _rustig_vermogen(
-    uren: list[Uur], b: Batterij, ontladen: bool = False, piek: bool = True
+    uren: list[Uur], b: Batterij, ontladen: bool = False, piek: bool = True, drempel: float = 0.0
 ) -> tuple[float, datetime | None]:
     """Op welk vermogen hij van het net laadt (of eraan levert), en tot wanneer.
 
@@ -485,22 +530,57 @@ def _rustig_vermogen(
     Alleen over uren die even duur zijn. Waar de omvormer het zuinigst is wordt
     niet aangenomen; een iets duurder uur erbij nemen om rustiger te laden is
     pas een som als dat rendement per vermogen gemeten is.
+
+    Of hij begint gaat over de hele laadbeurt, en niet over wat er in dit blok
+    nog bij moet (v0.102.3). In de klantwoning op 30-09-2026, met prijzen per
+    kwartier: 3,5 kW maal de laatste 2 minuten en 20 seconden van een kwartier
+    is 0,136 kWh, minder dan de procent hieronder, dus laadde hij elk kwartier
+    twaalf minuten en drie niet. En 's nachts, toen de accustand een procent
+    sneller opliep dan het plan dacht, zei hij midden in het laden van het net
+    "nul op de meter"; hij had de batterij in handen, en dekte de warmtepomp er
+    toen uit. Van 03:25 tot 06:00 laden en ontladen door elkaar, en met een
+    `ZELF_WACHT` van twee minuten was het elk kwartier teruggeven en weer
+    overnemen geworden. Een beurt die al loopt (`vorige_stand`) maakt hij
+    daarom af zolang het plan in dit blok nog iets van het net wil, hoe weinig
+    ook: dan houdt hij de batterij vast en neemt het huis van het net.
+
+    `drempel` is wat een beurt minstens moet zijn om te beginnen, in kWh aan
+    de wisselstroomkant, bovenop de procent; zie de aanroep in `plan_batterij`.
     """
     if not uren:
         return 0.0, None
+
+    def naar_net(uur: Uur) -> float:
+        return max(0.0, -uur.net_kwh if ontladen else uur.net_kwh)
+
+    def dicht(uur: Uur) -> bool:
+        return piek and not ontladen and in_evening_peak(uur.start)
+
     prijs = uren[0].price
-    energie, tijd, tot = 0.0, 0.0, None
+    energie, tijd, tot, n = 0.0, 0.0, None, 0
     for uur in uren:
-        if abs(uur.price - prijs) > PRICE_MARGIN or (piek and not ontladen and in_evening_peak(uur.start)):
+        if abs(uur.price - prijs) > PRICE_MARGIN or dicht(uur):
             break
-        energie += max(0.0, -uur.net_kwh if ontladen else uur.net_kwh)
+        energie += naar_net(uur)
         tijd += (uur.end - uur.start).total_seconds() / 3600.0
         tot = uur.end
-    # Minder dan een procent van de batterij is geen plan maar afronding: een
-    # accusensor is niet fijner dan dat, en in het virtuele huis ging hij er
-    # twee minuten voor van het net laden en hield er dan weer mee op.
-    if tijd <= 0 or energie <= max(SCHIJF_MINIMUM, 0.01 * (b.capacity_kwh or 0.0)):
+        n += 1
+    if tijd <= 0 or energie <= 1e-6:
         return 0.0, tot
+    if b.vorige_stand != (HANDELEN if ontladen else NETLADEN):
+        # Minder dan een procent van de batterij is geen plan maar afronding: een
+        # accusensor is niet fijner dan dat, en in het virtuele huis ging hij er
+        # twee minuten voor van het net laden en hield er dan weer mee op. Dat
+        # gaat over de hele beurt: deze even dure blokken, en de blokken daarna
+        # waarin het plan ook van het net laadt (of eraan levert), wat ze ook
+        # kosten.
+        beurt = energie
+        for uur in uren[n:]:
+            if dicht(uur) or naar_net(uur) <= 1e-6:
+                break
+            beurt += naar_net(uur)
+        if beurt <= max(SCHIJF_MINIMUM, 0.01 * (b.capacity_kwh or 0.0), drempel):
+            return 0.0, tot
     grens = b.max_discharge_w if ontladen else b.max_charge_w
     return min(grens, energie / tijd * 1000.0), tot
 
@@ -514,13 +594,17 @@ def _rustig_vermogen(
 OCHTEND_UUR = 7
 
 
+def _morgenvroeg(now: datetime) -> datetime:
+    """Het eerstvolgende `OCHTEND_UUR`."""
+    eind = now.replace(hour=OCHTEND_UUR, minute=0, second=0, microsecond=0)
+    return eind + timedelta(days=1) if eind <= now else eind
+
+
 def _nacht_uren(now: datetime, forecast: Forecast) -> list[tuple[float, float]]:
     """Per uur tot morgenvroeg: (zon, huis) in kWh, het lopende uur naar rato."""
     uren = []
     uur = now.replace(minute=0, second=0, microsecond=0)
-    eind = now.replace(hour=OCHTEND_UUR, minute=0, second=0, microsecond=0)
-    if eind <= now:
-        eind += timedelta(days=1)
+    eind = _morgenvroeg(now)
     while uur < eind:
         deel = 1.0 if uur >= now else (uur + timedelta(hours=1) - now).total_seconds() / 3600.0
         opbrengst = max(0.0, forecast.solar_kwh.get(uur, 0.0))
@@ -624,7 +708,8 @@ def _vlak(blokken: list[dict]) -> bool:
 
 
 def _vooruitkijk_zin(
-    now: datetime, forecast: Forecast, b: Batterij, auto: float = 0.0, bijladen: bool = True
+    now: datetime, forecast: Forecast, b: Batterij, auto: float = 0.0, bijladen: bool = True,
+    uren: list[Uur] | None = None,
 ) -> str:
     """Twee zinnen: zon, huis en batterij tot morgenvroeg, en de conclusie.
 
@@ -660,7 +745,39 @@ def _vooruitkijk_zin(
         return zin + f"Je houdt naar verwachting {_kwh(balans)} over in je accu."
     return (
         zin + f"Je komt naar verwachting {_kwh(-balans)} tekort om de nacht te overbruggen; "
-        + ("hij laadt bij als de stroom goedkoop genoeg is." if bijladen else "dat komt van het net.")
+        + (_bijladen_zin(now, b, uren or [], -balans) if bijladen else "dat komt van het net.")
+    )
+
+
+def _bijladen_zin(now: datetime, b: Batterij, uren: list[Uur], tekort: float) -> str:
+    """Het slot van de nachtzin bij een tekort: laadt hij bij, en zo niet, waarom niet.
+
+    Tot v0.102.3 stond hier altijd "hij laadt bij als de stroom goedkoop genoeg
+    is". De eigenaar op 30-09-2026 om 19:45, bij 8,1 kWh tekort en "Van het net:
+    niets": "hij komt te kort, is het niet goedkoper om iets bij te kopen?"
+    Het antwoord stond nergens. Nu zegt de zin wat het plan tot morgenvroeg van
+    het net haalt, of wat een kWh via de batterij minstens kost: de goedkoopste
+    prijs tot morgenvroeg gedeeld door het rendement. Eén zin, want de kaart
+    toont alleen de laatste (`nachtConclusie` in battery.js).
+    """
+    eind = _morgenvroeg(now)
+    nacht = [u for u in uren if u.start < eind]
+    erbij = sum(max(0.0, u.net_kwh) for u in nacht if u.stand == NETLADEN)
+    if erbij > 0.05:
+        if erbij >= tekort - 0.05:
+            return "dat laadt hij op de goedkoopste momenten van het net bij."
+        return (
+            f"hij laadt er {_kwh(erbij)} van op de goedkoopste momenten van het net bij, "
+            "de rest komt rechtstreeks van het net."
+        )
+    if not nacht or not b.rte:
+        return "hij laadt bij als de stroom goedkoop genoeg is."
+    goedkoopst = min(nacht, key=lambda u: u.price)
+    bekend = "" if nacht[-1].end >= eind else " in de bekende uren"
+    return (
+        f"dat komt van het net, want bijladen kost via de batterij{bekend} minstens "
+        f"{_euro(goedkoopst.price / b.rte)} per kWh ({_euro(goedkoopst.price)} om "
+        f"{_clock(goedkoopst.start)}, plus het verlies)."
     )
 
 
@@ -791,8 +908,14 @@ def plan_batterij(
     nacht_voor_auto = balans_kwh(now, forecast, b)
     auto_ac = _met_auto(uren, b, auto_hulp(uren, b, nacht_voor_auto, auto_laden or [], helpt))
     auto_weg = auto_ac / som.eta
-    kijk = _vooruitkijk_zin(now, forecast, b, auto_ac, bijladen=not _vlak(blokken))
+    kijk = _vooruitkijk_zin(now, forecast, b, auto_ac, bijladen=not _vlak(blokken), uren=uren)
     piek = dicht and in_evening_peak(now)
+    # Onder welke prijs een kWh van het net erbij nu loont: wat hij in de
+    # batterij waard is, min het verlies bij het laden. Voor de kaart; de
+    # eigenaar op 30-09-2026 bij "Een kWh erin € 0,301, is straks waard" en een
+    # nacht van € 0,313: "is het niet goedkoper om iets bij te kopen?" Die
+    # € 0,301 is per kWh ín de batterij; naast de prijslijst hoort € 0,259.
+    inkoop = None if vol else erbij * som.eta
 
     # Zon opslaan en het huis voeden: elk tegen wat een kilowattuur in de
     # batterij straks waard is.
@@ -807,16 +930,23 @@ def plan_batterij(
     # Van het net laden en handelen: die volgen het plan zelf. Zie
     # `_rustig_vermogen`.
     if not vol and not piek:
-        vermogen, tot = _rustig_vermogen(uren, b, piek=dicht)
+        vermogen, tot = _rustig_vermogen(uren, b, piek=dicht, drempel=_overname_drempel(som, b))
         if vermogen > 0:
             rustig = vermogen < b.max_charge_w - 1.0
+            if _kw(vermogen) == _kw(0.0):
+                # Het einde van een beurt die al liep: er moet bijna niets meer
+                # bij, en hij houdt de batterij vast tot het blok om is.
+                hoe = f"Hij maakt het laden van het net af tot {_clock(tot)} en geeft tot dan niets af."
+            else:
+                hoe = f"Hij laadt van het net op {_kw(vermogen)}" + (
+                    f", rustig verdeeld tot {_clock(tot)}." if rustig and tot else "."
+                )
             return Besluit(
                 NETLADEN,
                 power_w=vermogen,
                 reason=(
                     f"Stroom kost nu {_euro(koop)} en dat is goedkoper dan wat de batterij je straks bespaart. "
-                    f"Hij laadt van het net op {_kw(vermogen)}"
-                    + (f", rustig verdeeld tot {_clock(tot)}." if rustig and tot else ".")
+                    + hoe
                 ) if b.vol_voor is None else (
                     "Vandaag hoort de batterij een keer helemaal vol, voor het balanceren van de cellen. "
                     f"Dit zijn daar de goedkoopste uren voor: hij laadt van het net op {_kw(vermogen)}."
@@ -826,6 +956,7 @@ def plan_batterij(
                 waarde=erbij,
                 uren=uren,
                 auto_weg=auto_weg,
+                inkoop_tot=inkoop,
             )
 
     # Handelen alleen met wat er boven de nacht uitkomt. De eigenaar op
@@ -837,7 +968,7 @@ def plan_batterij(
     nacht = nacht_voor_auto
     na_auto = balans_kwh(now, forecast, b, auto_weg)
     if b.handelen and not leeg and not paal_laadt and (not b.nacht or na_auto is None or na_auto > 0):
-        vermogen, tot = _rustig_vermogen(uren, b, ontladen=True)
+        vermogen, tot = _rustig_vermogen(uren, b, ontladen=True, drempel=_overname_drempel(som, b))
         if vermogen > 0:
             return Besluit(
                 HANDELEN,
@@ -848,6 +979,7 @@ def plan_batterij(
                 waarde=eraf,
                 uren=uren,
                 auto_weg=auto_weg,
+                inkoop_tot=inkoop,
             )
 
     if b.zelf_nul or (mag_huis and mag_zon):
@@ -890,7 +1022,26 @@ def plan_batterij(
             ),
             plan=kijk, rule="standby", waarde=eraf, uren=uren, auto_weg=auto_weg,
         )
+    besluit.inkoop_tot = inkoop
     return _met_paal(besluit, paal_laadt, b, nacht, helpt=helpt)
+
+
+def _overname_drempel(som: _Som, b: Batterij) -> float:
+    """Hoe groot een beurt van of naar het net minstens is om een batterij die zelf nul doet over te nemen.
+
+    Eén stap van het rooster van de som, aan de wisselstroomkant (v0.102.3).
+    Doet de batterij zelf nul, dan kent de som geen stilstaan
+    (`_zelf_toegestaan`), en is het dichtstbijzijnde wat hij wel mag het
+    eerstvolgende punt van het rooster erboven: een beetje van het net laden.
+    Een beurt kleiner dan één stap is dus afronding van de som, en geen plan.
+    In de klantwoning op 30-09-2026 nam de coach de batterij om 16:00:41 over
+    en laadde hij drie minuten op 1,2 kW; om 15:00:41 zeventien minuten voor
+    een plan van 0,35 kWh, bij een stap van 0,38. Heeft de coach hem al in
+    handen, dan geldt alleen de procent in `_rustig_vermogen`.
+    """
+    if not b.zelf_nul or b.overgenomen:
+        return 0.0
+    return som.stap / som.eta
 
 
 def auto_hulp(
