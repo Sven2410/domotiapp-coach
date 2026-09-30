@@ -132,6 +132,7 @@ class DacViewDevices extends DacEditorElement {
         // zoals evcc; een paal die er al stond houdt "goedkoopst".
         charge_mode: "zon",
         continuous_amps: 6,
+        solar_start_percent: 90,
       };
       this.draft_.devices.push(device);
       // A new device has nothing filled in yet, so it opens on its fields.
@@ -639,6 +640,12 @@ class DacViewDevices extends DacEditorElement {
         <input type="number" id="cont-${index}" data-field="continuous_amps" data-index="${index}"
                min="6" max="32" step="1" inputmode="numeric" value="${Number(device.continuous_amps) || 6}">
         <span class="sub">Het vaste vermogen van Continu. Geeft de zon meer, dan laadt hij mee omhoog; nooit boven je zekering.</span>
+      </div>
+      <div class="row">
+        <label for="zonstart-${index}">Zon: beginnen vanaf (%)</label>
+        <input type="number" id="zonstart-${index}" data-field="solar_start_percent" data-index="${index}"
+               min="10" max="100" step="5" inputmode="numeric" value="${Number(device.solar_start_percent) || 90}">
+        <span class="sub">Van het kleinste laadvermogen: 6 A, op drie fasen 4,1 kW. Bij 50% begint Zon al op 2,1 kW zon en komt de rest van het net. Op 100% begint hij pas als de zon het hele vermogen geeft.</span>
       </div>`
       : "";
     // De eigenaar op 29-09-2026: "een mogelijkheid bij het toevoegen van een
@@ -864,7 +871,7 @@ class DacViewDevices extends DacEditorElement {
           ${getal("reserve_percent", 'min="0" max="100" step="5"', "20")}
         </div>
         ${vink("trade", "Handelen: terugleveren op dure uren.", "De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis.")}
-        ${vink("weekly_full", "Een keer per week helemaal vol.", "Voor het balanceren van de cellen. De coach kiest op die dag het goedkoopste moment en slaat de beurt over als de batterij die week al vol was. Vol is de laadgrens van de batterij zelf; daar komt de coach niet aan.")}
+        ${vink("weekly_full", "Een keer per week helemaal vol.", "Tot 100%, voor het balanceren van de cellen. Op die dag zet de coach de laadgrens van de batterij even op 100% en kiest hij het goedkoopste moment; is hij vol, dan zet hij de grens terug op wat er stond. Was de batterij die week al vol, dan slaat hij de beurt over. Is het veld Laadgrens (%) leeg, dan kan hij de grens niet verzetten en is vol wat de batterij zelf toelaat.")}
         <div class="row"${b.weekly_full ? "" : " hidden"} data-bat-day="${index}">
           <label for="bat-day-${index}">Op</label>
           <select id="bat-day-${index}" data-bat-field="weekly_full_day" data-index="${index}">
@@ -1027,6 +1034,14 @@ class DacViewDevices extends DacEditorElement {
               </span>
               <span class="chev">${icons.chevronRight}</span>
             </button>
+            ${
+              devices.length > 1
+                ? `<span class="move" role="group" aria-label="Volgorde">
+                <button type="button" data-move-dev="${index}" data-step="-1" aria-label="Omhoog"${index === 0 ? " disabled" : ""}>${icons.arrowLeft}</button>
+                <button type="button" data-move-dev="${index}" data-step="1" aria-label="Omlaag"${index === devices.length - 1 ? " disabled" : ""}>${icons.arrowRight}</button>
+              </span>`
+                : ""
+            }
             <button class="remove" type="button" data-remove="${index}" aria-label="Verwijderen">${icons.trash}</button>
           </div>
           <div class="fields"${open ? "" : " hidden"}>
@@ -1261,6 +1276,8 @@ class DacViewDevices extends DacEditorElement {
           device.release_required = el.checked;
         } else if (field === "continuous_amps") {
           device.continuous_amps = Math.min(32, Math.max(6, Math.round(Number(el.value) || 6)));
+        } else if (field === "solar_start_percent") {
+          device.solar_start_percent = Math.min(100, Math.max(10, Math.round(Number(el.value) || 90)));
         } else {
           device[field] = el.value;
         }
@@ -1295,6 +1312,23 @@ class DacViewDevices extends DacEditorElement {
 
     for (const button of list.querySelectorAll("[data-remove]")) {
       button.addEventListener("click", () => this.askRemove_(Number(button.dataset.remove)));
+    }
+
+    // De volgorde van de lijst, met pijltjes (v0.103.0). De bewoner van de eerste
+    // woning op 30-09-2026: "zelf slepen op de volgorde die je wil." Pijltjes en
+    // geen slepen, zoals op het overzicht sinds v0.102.1 (docs/paneel.md).
+    for (const button of list.querySelectorAll("[data-move-dev]")) {
+      button.addEventListener("click", () => {
+        const van = Number(button.dataset.moveDev);
+        const naar = van + Number(button.dataset.step);
+        if (naar < 0 || naar >= devices.length) return;
+        const [weg] = devices.splice(van, 1);
+        devices.splice(naar, 0, weg);
+        this.paintDevices_();
+        this.syncSaveBar_();
+        // De focus blijft bij het apparaat dat schoof, zodat nog een tik hem verder zet.
+        this.$(`#device-list [data-move-dev="${naar}"][data-step="${button.dataset.step}"]`)?.focus();
+      });
     }
 
     // De instellingen van een thuisbatterij. Een leeg getal is "niet ingevuld"
@@ -1651,6 +1685,38 @@ DacViewDevices.css = /* css */ `
   }
   .device-head button.remove:hover { color: var(--dac-bad); border-color: rgba(208,59,59,0.5); }
   .device-head button.remove .icon { width: 16px; height: 16px; }
+
+  /* Omhoog en omlaag: de pijlen van links en rechts, een kwart gedraaid, net als
+     op het overzicht. Samen even hoog als de knop ernaast. */
+  .device-head .move {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-rows: 1fr 1fr;
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    border: 1px solid var(--dac-border);
+    overflow: hidden;
+  }
+  .device-head .move button {
+    display: grid; place-items: center;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--dac-ink-3);
+    cursor: pointer;
+  }
+  .device-head .move button + button { border-top: 1px solid var(--dac-border); }
+  .device-head .move button:hover:not(:disabled) { color: var(--dac-ink); background: var(--dac-accent-soft); }
+  .device-head .move button:disabled { opacity: 0.35; cursor: default; }
+  .device-head .move .icon { width: 14px; height: 14px; transform: rotate(90deg); }
+  /* Op een smal scherm kost de volgorde ruimte van de naam. De hele kop opent het
+     apparaat al, dus het pijltje ernaast mag daar weg. Gemeten op 280 px: de naam
+     ging van 45 naar ruim 80 px. */
+  @media (max-width: 360px) {
+    .device-head .chev { display: none; }
+    .device-head button.toggle { gap: 8px; }
+    .device-head .chip { width: 30px; height: 30px; border-radius: 9px; }
+  }
 
   button.add {
     align-self: flex-start;

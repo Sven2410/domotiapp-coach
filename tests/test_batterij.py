@@ -854,6 +854,39 @@ controle("bijkopen loont onder de waarde in de batterij min het laadverlies",
 vol37 = plan_batterij(dt.datetime(2026, 9, 30, 14, 0), K37, Tariff(), V37, klant37(95.0))
 controle("een volle batterij: geen prijs om onder bij te kopen", vol37.inkoop_tot is None, f"{vol37.inkoop_tot}")
 
+print("=== 38. zelf nul: geen restje van het net bij, ook niet onder de bovengrens (v0.103.0) ===")
+# De eerste woning op 30-09-2026 om 22:43, uurprijzen tot morgen 23:00. De nacht
+# (€ 0,319-0,335) is goedkoper dan het gemiddelde van de bekende uren (€ 0,368),
+# dus de som staat 's nachts liever stil dan dat hij het huis uit de batterij
+# voedt. Stilstaan kan niet met zelf nul, en v0.102.2 koos het eerstvolgende
+# roosterpunt: om 02:00 "laden van het net, 0,11 kWh". v0.102.3 vroeg een stap,
+# maar liet op 94-95% nog 0,14-0,20 kWh toe, want dat was "alles wat er nog kan".
+P38 = [0.3608, 0.3460, 0.3188, 0.3278, 0.3255, 0.3274, 0.3246, 0.3351, 0.3772, 0.4121,
+       0.4158, 0.3925, 0.3698, 0.3297, 0.3247, 0.3227, 0.3222, 0.3230, 0.3598, 0.4116,
+       0.4632, 0.4945, 0.4424, 0.4048, 0.3789, 0.3564]
+BEGIN38 = dt.datetime(2026, 9, 30, 22)
+R38 = [{"start": BEGIN38 + dt.timedelta(hours=i), "end": BEGIN38 + dt.timedelta(hours=i + 1),
+        "price": p, "feed_in": None} for i, p in enumerate(P38)]
+HUIS38 = {0: 0.21, 1: 0.22, 2: 0.22, 3: 0.23, 4: 0.23, 5: 0.21, 6: 0.23, 7: 0.29, 8: 0.16, 9: -0.04,
+          10: 0.25, 11: 0.25, 12: 0.04, 13: 0.02, 14: -0.2, 15: -0.03, 16: -0.16, 17: -0.05, 18: 0.2,
+          19: 0.32, 20: 0.31, 21: 0.28, 22: 0.29, 23: 0.27}
+W38 = Forecast(solar_kwh={}, house_kwh=HUIS38)
+klein38, groot38 = [], []
+for soc38 in range(30, 96):
+    for nu38 in (dt.datetime(2026, 9, 30, 22, 43, 46), dt.datetime(2026, 10, 1, 0, 30, 40),
+                 dt.datetime(2026, 10, 1, 2, 0, 40), dt.datetime(2026, 10, 1, 5, 10, 40)):
+        p38 = plan_batterij(nu38, R38, Tariff(), W38,
+                            anker(float(soc38), max_charge_w=2500.0, rte=0.748, handelen=True, zelf_nul=True))
+        for u in p38.uren:
+            if u.stand == NETLADEN:
+                (klein38 if u.kwh < 0.38 else groot38).append((soc38, f"{nu38:%H:%M}", f"{u.start:%H:%M}", round(u.kwh, 3)))
+print(f"  264 plannen: {len(klein38)} kleine inkopen, {len(groot38)} echte: {groot38[:3]}")
+controle("geen inkoop onder één stap van het rooster, op geen enkele accustand", not klein38, f"{klein38[:6]}")
+controle("wel een echte inkoop als hij anders leeg is voor de dure avond (30-32%)",
+         groot38 and all(s <= 35 for s, *_ in groot38), f"{groot38[:6]}")
+# Het restje van een kwartier dat bijna om is mag wel, anders stopt een beurt elk
+# kwartier te vroeg; dat meet proef 37 hierboven.
+
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

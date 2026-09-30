@@ -52,6 +52,17 @@ gebruik wil ik vooraan kunnen zetten." `orderDevices`, `deviceOrder` en
 `saveDeviceOrder` in layout.js (`dac-device-order`); een nieuw apparaat komt
 achteraan. "Standaard terugzetten" zet ook de apparaten terug.
 
+## De volgorde in Apparaten
+
+Sinds v0.103.0 met pijltjes omhoog en omlaag naast de prullenbak, zodra er meer
+dan één apparaat is. De bewoner van de eerste woning op 30-09-2026, bij de lijst van
+negen apparaten: "Deze zou ik ook customizable maken. Zelf slepen op de volgorde
+die je wil." Pijltjes en geen slepen, om dezelfde reden als hierboven. Het is de
+volgorde van `devices` in de instellingen, dus voor iedereen, en pas na Opslaan.
+De pijlen staan in één knop van 36 bij 36 px, even hoog als de prullenbak; op een
+scherm tot 360 px valt het pijltje naar rechts weg en wordt het icoon 30 px,
+anders hield de naam op 280 px 45 px over (nu 83).
+
 ## Waar het schema van een apparaat staat
 
 Sinds 27-08-2026 staat dat bij het apparaat zelf en niet meer in Strategie. Op de

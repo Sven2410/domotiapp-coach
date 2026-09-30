@@ -1817,6 +1817,22 @@ if (vl := v("modus-zon-bewolkt")):
              any("Hij begint vanaf" in (r.reden or "") for r in vl.regels), "")
     controle("modus zon: geen melding om de accustand, want er valt niets te plannen",
              not meldingen(vl, "hoe vol hij is"), f"{meldingen(vl, 'hoe vol')}")
+# v0.103.0: Zon vanaf 50% van de ondergrens, zoals evcc het nu kan. Dezelfde bewolkte
+# dagen: hij begint eerder, haalt meer zon binnen en het net vult aan tot 6 A.
+if (vl := v("modus-zon-half")) and (vb := v("modus-zon-bewolkt")):
+    eerste_h = next((r.tijd for r in vl.regels if r.amps > 0), None)
+    eerste_b = next((r.tijd for r in vb.regels if r.amps > 0), None)
+    print(f"  zon vanaf 50%: begint {eerste_h:%H:%M} (standaard {eerste_b:%H:%M}), zon {vl.uit_zon_kwh:.1f} kWh "
+          f"(standaard {vb.uit_zon_kwh:.1f}), net {vl.uit_net_kwh:.1f} kWh, vol {vl.klaar_op}")
+    controle("zon vanaf 50%: hij begint eerder dan op 90%", eerste_h is not None and eerste_b is not None
+             and eerste_h < eerste_b, f"{eerste_h} tegen {eerste_b}")
+    controle("zon vanaf 50%: meer zon in de auto, en de auto wordt vol",
+             vl.uit_zon_kwh > vb.uit_zon_kwh + 1.0 and vl.klaar_op is not None,
+             f"zon {vl.uit_zon_kwh:.1f} tegen {vb.uit_zon_kwh:.1f}, vol {vl.klaar_op}")
+    controle("zon vanaf 50%: het net vult aan, maar het blijft vooral zon",
+             0.3 < vl.uit_net_kwh < vl.uit_zon_kwh / 3, f"net {vl.uit_net_kwh:.2f}, zon {vl.uit_zon_kwh:.2f}")
+    controle("zon vanaf 50%: de reden zegt wat er van het net bij komt",
+             any("van het net erbij" in (r.reden or "") for r in vl.regels), "")
 if (vl := v("modus-continu")):
     eerste = next((r for r in vl.regels if r.amps > 0), None)
     controle("modus continu: meteen bij het inpluggen laden", eerste is not None and eerste.tijd.hour == 7,

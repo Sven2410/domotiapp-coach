@@ -267,6 +267,10 @@ _DEVICE = _schema(
         vol.Optional("charge_mode", default="goedkoopst"): vol.In(["zon", "continu", "goedkoopst"]),
         # Het vaste vermogen van de modus continu, in ampère.
         vol.Optional("continuous_amps", default=6): vol.All(vol.Coerce(int), vol.Range(6, 32)),
+        # Vanaf welk deel van het kleinste laadvermogen de modus zon begint, in
+        # procent (v0.103.0, naar het voorbeeld van evcc). Standaard 90, zoals
+        # het tot dan vast stond (`SURPLUS_SLACK`). Zie `Charger.zon_start`.
+        vol.Optional("solar_start_percent", default=90): vol.All(vol.Coerce(int), vol.Range(10, 100)),
     }
 )
 

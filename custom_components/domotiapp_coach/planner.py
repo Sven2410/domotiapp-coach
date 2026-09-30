@@ -373,6 +373,13 @@ class Charger:
     # planning (schema met klaar-tijd) wint altijd; zie `_modus_zonder_planning`.
     modus: str = "goedkoopst"
     continu_amps: int = 6
+    # Vanaf welk deel van het kleinste laadvermogen de modus zon begint
+    # (v0.103.0). De eigenaar op 30-09-2026, over evcc: "Stel je hebt een 3F
+    # lader en je wil zoveel mogelijk op de zon laden. Dan start de lader pas
+    # bij 4,1 kW zonopbrengst. In evcc kun je nu instellen dat de lader al mag
+    # starten bij bijv 50% van die 4,1 kW ... en vult 2,1 kW aan uit het net."
+    # Standaard `SURPLUS_SLACK`, zoals het tot dan vast stond.
+    zon_start: float = SURPLUS_SLACK
     # En het omgekeerde: de bewoner heeft zelf op pauze gedrukt. Dat is geen
     # advies maar een opdracht, dus de coach houdt zijn handen thuis tot het
     # weer uit gaat of de kabel eruit komt.
@@ -3705,8 +3712,10 @@ def _modus_zonder_planning(
     ook geen accustand nodig; een bekende accustand stopt hem wel op zijn doel,
     maar dat staat al hoger in `_decide`.
 
-    **Zon**: alleen wat er aan overschot is, en pas vanaf de ondergrens van de
-    paal (`SURPLUS_SLACK` ervan, net als de zonregel). Zakt het overschot eronder
+    **Zon**: alleen wat er aan overschot is, en pas vanaf een deel van de
+    ondergrens van de paal (`Charger.zon_start`, standaard `SURPLUS_SLACK` net
+    als de zonregel; de bewoner kiest het per paal). Wat er onder de ondergrens
+    ontbreekt komt van het net. Zakt het overschot eronder
     terwijl hij laadt, dan houdt `_keep_alive` hem nog even op de ondergrens,
     want een auto stopt niet graag steeds; bij een wolk kan er dan een paar
     minuten wat van het net bijkomen.
@@ -3716,9 +3725,10 @@ def _modus_zonder_planning(
     (eis 4), dan is het een uur lang zon; alleen Snel gaat daaroverheen.
     """
     zon_amps = min(ceiling, int(amps_for(grid.surplus_w, car.phases)))
-    genoeg_zon = grid.surplus_w >= watts_for(MIN_AMPS, car.phases) * SURPLUS_SLACK
+    vanaf_w = watts_for(MIN_AMPS, car.phases) * charger.zon_start
+    genoeg_zon = grid.surplus_w >= vanaf_w
     hoeveel = _kw(grid.surplus_w) if grid.surplus_w > 0 else "geen zon"
-    drempel = _kw(watts_for(MIN_AMPS, car.phases))
+    drempel = _kw(vanaf_w)
 
     piek = piek_dicht(prices) and in_evening_peak(now)
     if charger.modus == "continu" and not piek:
@@ -3740,11 +3750,16 @@ def _modus_zonder_planning(
 
     if genoeg_zon:
         amps = max(MIN_AMPS, zon_amps)
+        bij = watts_for(amps, car.phases) - grid.surplus_w
         return Decision(
             True,
             amps,
-            f"Er is {hoeveel} zon over, dus die gaat in de auto.",
-            plan="Laadt alleen op je eigen zon en loopt mee met wat het dak geeft.",
+            f"Er is {hoeveel} zon over, dus die gaat in de auto"
+            + (f", met {_kw(bij)} van het net erbij." if bij >= 100 else "."),
+            plan=(
+                "Loopt mee met wat het dak geeft; tot de ondergrens van de paal vult het net aan."
+                if bij >= 100 else "Laadt alleen op je eigen zon en loopt mee met wat het dak geeft."
+            ),
             rule="zon-modus",
         )
 
@@ -3756,7 +3771,7 @@ def _modus_zonder_planning(
         plan = f"Gaat om {EVENING_START:%H:%M} weer verder."
     else:
         reden = (
-            f"Hij laadt alleen op zon, en er is nu {hoeveel} over. "
+            f"Hij laadt {'alleen ' if charger.zon_start >= 1.0 else ''}op zon, en er is nu {hoeveel} over. "
             f"Hij begint vanaf {drempel}."
         )
         plan = "Begint vanzelf zodra het dak genoeg geeft. Wil je nu laden, kies dan Snel of Continu."

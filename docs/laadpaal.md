@@ -21,6 +21,19 @@ wellicht een betere benaming; en PV zon noemen."
   (`_keep_alive`), dus dan kan er een paar minuten wat van het net bijkomen:
   in `modus-zon-bewolkt` 0,2 van 10,9 kWh. Geen accustand nodig, dus ook geen
   melding om de accustand; een bekende accustand stopt hem wel op zijn doel.
+- **Vanaf hoeveel zon, per paal** (v0.103.0, `solar_start_percent`,
+  `Charger.zon_start`). De eigenaar op 30-09-2026, over evcc: "Stel je hebt een
+  3F lader en je wil zoveel mogelijk op de zon laden. Dan start de lader pas bij
+  4,1 kW zonopbrengst. In evcc kun je nu instellen dat de lader al mag starten
+  bij bijv 50% van die 4,1 kW ... en vult 2,1 kW aan uit het net." Standaard 90,
+  zoals `SURPLUS_SLACK` het tot dan vast zette; 10 tot 100. De kaart zegt nu de
+  echte drempel ("Hij begint vanaf 3,7 kW", daarvoor stond er 4,1 terwijl hij op
+  3,7 begon) en wat er van het net bij komt ("met 1,6 kW van het net erbij").
+  Alleen de modus Zon: met een planning of op Goedkoopst mengt de som zon en net
+  al op prijs, zonder drempel op het lopende uur. Scenario `modus-zon-half`
+  (bewolkt, 50%): begint om 10:00 in plaats van 11:30, 13,4 in plaats van
+  10,8 kWh zon, 1,9 kWh net, en de bus is dinsdag om 14:14 vol, op 90% niet.
+  Proef 61 in test_planner.py.
 - **Continu** (`continu`): altijd op `continuous_amps` (per paal, standaard 6),
   met meer als de zon meer geeft; nooit boven het plafond. **In de avondpiek van
   een vast contract komt er niets van het net bij** (eis 4): dan is het zon.

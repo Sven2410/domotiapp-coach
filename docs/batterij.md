@@ -111,6 +111,15 @@ in de zomer elke middag op 95% staat nooit aan een volle beurt toe. Proef 79
 in test_coach.py; scenario `batterij-volle-beurt` (grens om 00:05 naar 100,
 om 23:56 op 98,8% terug naar 95).
 
+In het echt gezien in de eerste woning op zondag 27-09-2026: de grens om
+00:00:05 van 95 naar 100, de accu om 14:47 op 95%, om 15:07:01 op 100%, en op
+diezelfde seconde de grens terug op 95. **Het paneel zei tot v0.103.0 het
+omgekeerde** ("Vol is de laadgrens van de batterij zelf; daar komt de coach niet
+aan", en bij het veld Laadgrens "verandert het nooit"), en de eigenaar las het
+zo op 30-09-2026: "Die moet juist tot 100% voor het balanceren van de cellen,
+niet tot de ingestelde max van de accu." Dat deed hij al; alleen de tekst klopte
+niet.
+
 **De regelaar**, na de eigen "als je realistisch kijkt verbruik je nooit steady
 350 W, hoe zorgen we dat we niet gaan pendelen?" Gemeten in de eerste woning,
 waar een andere sturing de batterij toen regelde: 1.713 opdrachten en 233
@@ -805,6 +814,29 @@ Het virtuele huis kent daarvoor dagen met 96 prijzen (`Prijzen.per_dag`).
 `batterij-dynamisch-zelf` (uurprijzen) kost nu € 1,51 met 11 opdrachten, was
 € 1,49 met 14, tegen € 1,50 als de coach alles stuurt.
 Proef 37 in test_batterij.py, proef 129 in test_coach.py.
+
+**Ook niet vlak onder de bovengrens** (v0.103.0). De eigenaar op 30-09-2026 om
+22:42, bij de uurlijst van de eerste woning (77%, overal "nul op de meter" en om
+02:00 "laden van het net, 0,1 kWh"): "Waarom koopt de accu heel iets van het net?"
+Nagebouwd met de echte prijzen: de som waardeert wat er aan het eind van de
+bekende prijzen nog in zit tegen hun gemiddelde (€ 0,368), de nacht kost
+€ 0,319-0,335, dus hij staat 's nachts liever stil dan dat hij het huis voedt.
+Stilstaan kan niet met zelf nul, en v0.102.2 koos het eerstvolgende
+roosterpunt: om 02:00 lag dat 0,097 kWh boven de inhoud, € 0,0037 goedkoper in
+de som. v0.102.3 vroeg een stap, "of zoveel als er in het blok nog kan", en dat
+laatste gold ook voor de 95%: over 1.320 plannen (accu 30-95%, vier tijdstippen)
+tien keer 0,14-0,20 kWh bijvullen, allemaal op 94 of 95%. Nu telt alleen de tijd
+in het blok als "wat er nog kan" (`op_blok` in `_zelf_toegestaan`), niet de
+grens van de accustand: nul keer. Het restje van een kwartier dat bijna om is
+mag wel, anders stopt een beurt elk kwartier te vroeg (proef 37). Proef 38 in
+test_batterij.py doet de 264 plannen van die avond na; op v0.102.3 valt hij om
+op 94 en 95%.
+Wat het elders deed, gemeten over de negen batterijscenario's met zelf nul of
+handelen: alleen `batterij-kwartier-zelf` verandert. De nachtbeurt begint om
+03:45 op 1,6 à 2 kW in plaats van om 04:15 op 3,5 kW en haalt 10,1 in plaats van
+9,5 kWh; de dag kost € 2,48 tegen € 2,35 en hij eindigt op 13 in plaats van 10%
+(0,44 kWh meer over). 9 wissels van de modus, net als eerst; de opdrachten
+(100 tegen 73) zijn de vermogensstappen van het rustige laden.
 
 **Wat er overblijft:** slaat het plan één kwartier over (13:45 in dat scenario,
 € 0,257 tussen € 0,230 en € 0,236), dan geeft hij hem na `ZELF_WACHT` terug en

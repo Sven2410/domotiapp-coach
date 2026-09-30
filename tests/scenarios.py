@@ -148,6 +148,12 @@ bewolkt_zon_modus = vast_zon_modus.kopie(
     naam="modus-zon-bewolkt", uitleg="schema uit, modus zon, bewolkt: pas laden als het dak de ondergrens haalt",
     zon=Zon(wolken="bewolkt"),
 )
+# v0.103.0, de eigenaar op 30-09-2026 over evcc: "In evcc kun je nu instellen dat de
+# lader al mag starten bij bijv 50% van die 4,1 kW ... en vult 2,1 kW aan uit het net."
+half_zon_modus = bewolkt_zon_modus.kopie(
+    naam="modus-zon-half", uitleg="modus zon vanaf 50%, bewolkt: eerder beginnen, het net vult aan tot 6 A",
+    zon_start=50,
+)
 dyn_continu = dyn_geen_klaar_tijd.kopie(
     naam="modus-continu", uitleg="schema uit, modus continu op 8 A: meteen laden, met de zon erbovenop",
     laadmodus="continu", continu_amps=8,
@@ -1272,7 +1278,7 @@ ALLE = [
     boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
     *KLANTWONING,
     *BATTERIJ,
-    vast_zon_modus, bewolkt_zon_modus, dyn_continu,
+    vast_zon_modus, bewolkt_zon_modus, half_zon_modus, dyn_continu,
     batterij_helpt_auto, batterij_helpt_auto_nacht, batterij_helpt_auto_zonder_nacht,
     voorrang_auto_eerst, voorrang_accu_eerst,
     planning_auto_eerst, planning_accu_eerst,
