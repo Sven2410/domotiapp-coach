@@ -663,7 +663,21 @@ class DacViewDevices extends DacEditorElement {
         </span>
       </label>`
       : "";
-    return `${groepHtml}${modusHtml}${vrijgaveHtml}
+    // Fasen wisselen, alleen bij een Alfen (v0.104.0). De eigenaar op
+    // 30-09-2026: "alfen zegt zelf dat je fase wissel mag doen. Dus Easee houden
+    // we zo en alfen passen we aan."
+    const faseHtml = device.type === "laadpaal" && device.brand === "alfen" && stuurbaar
+      ? `
+      <label class="check" for="phases-${index}">
+        <input type="checkbox" id="phases-${index}" data-field="phase_switching" data-index="${index}"
+               ${device.phase_switching ? "checked" : ""}>
+        <span>
+          <strong>Fasen wisselen</strong>
+          Op zon laadt hij op één fase zolang het dak minder geeft dan drie fasen op hun laagst (4,1 kW), dus al vanaf 1,4 kW. Van het net laadt hij op drie fasen. Wisselen doet hij alleen als de auto stilstaat, en tijdens een beurt hooguit eens per tien minuten. Vul hiervoor ook Bruikbare fasen in. Alleen voor een auto die drie fasen kan.
+        </span>
+      </label>`
+      : "";
+    return `${groepHtml}${modusHtml}${faseHtml}${vrijgaveHtml}
       <label class="check" for="control-${index}">
         <input type="checkbox" id="control-${index}" data-field="controllable" data-index="${index}"
                ${device.controllable ? "checked" : ""}>
@@ -1274,6 +1288,8 @@ class DacViewDevices extends DacEditorElement {
           device.controllable = el.checked;
         } else if (field === "release_required") {
           device.release_required = el.checked;
+        } else if (field === "phase_switching") {
+          device.phase_switching = el.checked;
         } else if (field === "continuous_amps") {
           device.continuous_amps = Math.min(32, Math.max(6, Math.round(Number(el.value) || 6)));
         } else if (field === "solar_start_percent") {

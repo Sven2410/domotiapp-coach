@@ -113,6 +113,10 @@ from .planner import (
     decide,
     timeline,
     FULL_PERCENT,
+    FASE_RUST,
+    FASE_WACHT,
+    kies_fasen,
+    op_zon,
     RAMP_MINUTES,
     _dagnaam,
     _euro,
@@ -1102,6 +1106,12 @@ class ChargerCoach:
         self._paused: set[str] = set()
         # Hoeveel ronden een sessie al tegen de ladder in wordt aangehouden.
         self._holding: dict[str, int] = {}
+        # De fasewissel van een Alfen (v0.104.0), per paal: welk aantal fasen het
+        # besluit wil en sinds wanneer, wanneer er voor het laatst gewisseld is,
+        # en een wissel die bezig is (eerst stil, dan omzetten). Zie `_fasen_besluit`.
+        self._fase_wens: dict[str, tuple[int, datetime]] = {}
+        self._fase_gewisseld: dict[str, datetime] = {}
+        self._fase_bezig: dict[str, dict[str, Any]] = {}
         # Het laatste besluit dat in de geschiedenis staat, per paal, zodat
         # alleen een verandering een regel oplevert en niet elke minuut.
         self._besluit_genoteerd: dict[str, tuple[Any, ...]] = {}
@@ -5400,26 +5410,51 @@ class ChargerCoach:
         waking = charger.connected and not charger.charging and (
             device_id not in self._woken or (wektijd is not None and now < wektijd)
         )
-        decision = decide(
-            now, self._prices(settings), grid, car, charger, window,
-            self._tariff(settings), self._sun(settings),
-            Forecast(
-                solar_kwh=self._zon_kwh,
-                house_kwh=self._huis_kwh,
-                estimated=self._zon_geschat,
-                solar_factor=self._zon_gemeten(now),
-                solar_day=now.date(),
-            ),
-            holding=self._holding.get(device_id, 0),
-            waking=waking,
-            asking_seconds=(
-                (now - self._asking_since[device_id]).total_seconds()
-                if device_id in self._asking_since
-                else 0.0
-            ),
-            must_finish=must_finish,
-            overdue=device_id in self._te_laat,
+        prijzen = self._prices(settings)
+        tarief = self._tariff(settings)
+        zon = self._sun(settings)
+        verwachting = Forecast(
+            solar_kwh=self._zon_kwh,
+            house_kwh=self._huis_kwh,
+            estimated=self._zon_geschat,
+            solar_factor=self._zon_gemeten(now),
+            solar_day=now.date(),
         )
+
+        def besluit(auto: Car) -> Decision:
+            return decide(
+                now, prijzen, grid, auto, charger, window, tarief, zon, verwachting,
+                holding=self._holding.get(device_id, 0),
+                waking=waking,
+                asking_seconds=(
+                    (now - self._asking_since[device_id]).total_seconds()
+                    if device_id in self._asking_since
+                    else 0.0
+                ),
+                must_finish=must_finish,
+                overdue=device_id in self._te_laat,
+            )
+
+        decision = besluit(car)
+        may_act = level == LEVEL_STEER or (
+            level == LEVEL_PROPOSE and device_id in self._approved
+        )
+        # Een Alfen mag van fasen wisselen (v0.104.0): hetzelfde besluit op een
+        # fase ernaast, en `kies_fasen` kiest. Het plan blijft dat van het
+        # profiel, want drie fasen is wat de paal kan als het moet. `car_nu` is de
+        # auto zoals hij deze ronde werkelijk laadt, voor het tempo.
+        car_nu = car
+        fasen_nu: int | None = None
+        omzetten: int | None = None
+        if may_act and car.phases == 3 and self._fasewissel_aan(device):
+            fasen_nu = self._fasen_stand(device)
+            if fasen_nu is not None:
+                car_een = replace(car, phases=1, phases_measured=False)
+                decision, een_fase, omzetten = self._fasen_besluit(
+                    now, device_id, charger, decision, besluit(car_een), grid, fasen_nu
+                )
+                if een_fase:
+                    car_nu = car_een
 
         if decision.rule == "complete":
             self._te_laat.discard(device_id)
@@ -5447,7 +5482,7 @@ class ChargerCoach:
         else:
             self._asking_since.pop(device_id, None)
         self._bijhouden(now, device, car, charger, window, decision, grid, settings)
-        self._tempo_leren(now, settings, device, car, charger, grid)
+        self._tempo_leren(now, settings, device, car_nu, charger, grid)
         # Een nieuwe meting van het laadrendement bewaren (v0.94.0).
         if device_id in self._rend_meting:
             self.hass.async_create_task(self._async_rendement_bewaren(settings, device_id))
@@ -5477,6 +5512,9 @@ class ChargerCoach:
                 if not window.enabled and charger.modus in MODI_ZONDER_SOM
                 else self._tijdlijn(now, settings, grid, car, charger, window)
             ),
+            # Op hoeveel fasen een Alfen die mag wisselen nu staat (v0.104.0),
+            # of niets als de coach daar niet over gaat.
+            "phases_now": fasen_nu,
             # Welke modus er geldt, en of dat de keuze van deze beurt is of de
             # voorkeur van de paal. Snel is `boost`; een planning wint.
             "mode": "snel" if charger.boost else charger.modus,
@@ -5519,10 +5557,6 @@ class ChargerCoach:
             or (self._bewakertip(settings, device, charger) if decision.charge else "")
         )
         self.state[device_id]["tip"] = tip
-
-        may_act = level == LEVEL_STEER or (
-            level == LEVEL_PROPOSE and device_id in self._approved
-        )
         # Eerst opruimen, dan pas opschrijven wat de stand is. Andersom bleef er
         # op de kaart nog een minuut "snelladen staat aan" staan nadat de kabel
         # er al uit was, en dat leest als een knop die blijft hangen.
@@ -5655,6 +5689,11 @@ class ChargerCoach:
             # waits five minutes for it has waited four too many.
             self._nudged.pop(device_id, None)
 
+        # De paal staat stil voor een fasewissel: nu omzetten, en de volgende
+        # ronde laadt hij verder op het nieuwe aantal fasen.
+        if omzetten is not None:
+            await self._async_fasen(now, device, omzetten)
+
         if await self._apply(device, charger, decision, now):
             self._last[device_id] = decision
             # A session that a balancer is holding has not begun, so it must not
@@ -5666,6 +5705,126 @@ class ChargerCoach:
                 self._since.pop(device_id, None)
 
         return claim
+
+    @staticmethod
+    def _fasewissel_aan(device: dict[str, Any]) -> bool:
+        """Of de coach deze paal van fasen mag laten wisselen (v0.104.0).
+
+        Alleen een Alfen, met de keuzelijst van de fasen ingevuld en het vinkje
+        aan. De eigenaar op 30-09-2026: "Easee houden we zo en alfen passen we aan."
+        """
+        return (
+            device.get("brand") == "alfen"
+            and bool(device.get("phase_switching"))
+            and bool((device.get("entities") or {}).get("phases"))
+        )
+
+    def _fasen_stand(self, device: dict[str, Any]) -> int | None:
+        """Op hoeveel fasen de paal nu staat, uit zijn keuzelijst ("1 Phase", "3 Phases")."""
+        tekst = _text(self.hass, (device.get("entities") or {}).get("phases")).strip()
+        if tekst[:1] in ("1", "3"):
+            return int(tekst[:1])
+        return None
+
+    def _fasen_besluit(
+        self,
+        now: datetime,
+        device_id: str,
+        charger: Charger,
+        drie: Decision,
+        een: Decision,
+        grid: Grid,
+        fasen_nu: int,
+    ) -> tuple[Decision, bool, int | None]:
+        """Welk besluit er deze ronde geldt, of dat op een fase is, en of er omgezet moet worden.
+
+        Wisselen doet hij alleen stilstaand: eerst 0 A, en pas als er geen stroom
+        meer loopt de keuzelijst om (`_async_fasen`); de ronde daarna laadt hij
+        verder. Een paal die al stilstaat wisselt meteen. Een lopende beurt
+        wisselt pas als de wens `FASE_WACHT` blijft staan en de vorige wissel
+        `FASE_RUST` geleden is. Komt de auto niet binnen `FASE_WACHT` tot
+        stilstand, of volgt de paal de keuzelijst niet, dan laat hij het een
+        `FASE_RUST` rusten.
+        """
+        wens = kies_fasen(drie, een, grid.surplus_w, fasen_nu)
+        vorige = self._fase_wens.get(device_id)
+        if vorige is None or vorige[0] != wens:
+            self._fase_wens[device_id] = (wens, now)
+        sinds = self._fase_wens[device_id][1]
+        # Het besluit op één fase telt alleen als het op zon laadt. Anders rekent
+        # het met een auto die alleen één fase kan, en dan zegt de klaar-tijd al
+        # gauw "nu van het net" terwijl drie fasen straks ruim op tijd zijn.
+        if fasen_nu == 1 and op_zon(een):
+            huidig = replace(een, reason=f"{een.reason} Hij laadt op één fase.".strip())
+        else:
+            huidig = drie
+        bezig = self._fase_bezig.get(device_id)
+
+        if wens in (0, fasen_nu):
+            self._fase_bezig.pop(device_id, None)
+            return huidig, fasen_nu == 1, None
+
+        stil = not charger.charging and charger.actual_amps < 1.0
+        if bezig is None:
+            laatste = self._fase_gewisseld.get(device_id)
+            if not stil and (
+                now - sinds < FASE_WACHT or (laatste is not None and now - laatste < FASE_RUST)
+            ):
+                return huidig, fasen_nu == 1, None
+            bezig = self._fase_bezig[device_id] = {"naar": wens, "sinds": now}
+        elif now - bezig["sinds"] >= FASE_WACHT:
+            # Hij komt niet tot stilstand, of de paal volgt de keuzelijst niet.
+            _LOGGER.warning(
+                "%s: de fasewissel naar %s lukt niet (laadt nog: %s, staat op %s fasen)",
+                device_id, wens, charger.charging, fasen_nu,
+            )
+            self._fase_bezig.pop(device_id, None)
+            self._fase_gewisseld[device_id] = now
+            return huidig, fasen_nu == 1, None
+
+        kw = f"{grid.surplus_w / 1000:.1f}".replace(".", ",")
+        if wens == 1:
+            reden = (
+                f"Er is {kw} kW zon over, te weinig voor drie fasen. "
+                "Hij zet de paal op één fase: even stil, dan verder."
+            )
+        elif op_zon(drie):
+            reden = (
+                f"Er is {kw} kW zon over, genoeg voor drie fasen. "
+                "Hij zet de paal op drie fasen: even stil, dan verder."
+            )
+        else:
+            reden = "Hij zet de paal op drie fasen om op vol vermogen te laden: even stil, dan verder."
+        doel = een if wens == 1 else drie
+        stop = Decision(False, 0, reden, plan=doel.plan, rule="fasewissel")
+        return stop, fasen_nu == 1, (wens if stil and not bezig.get("omgezet") else None)
+
+    async def _async_fasen(self, now: datetime, device: dict[str, Any], fasen: int) -> None:
+        """De keuzelijst van de fasen omzetten, op een paal die stilstaat."""
+        device_id = device.get("id", "")
+        entity = (device.get("entities") or {}).get("phases")
+        staat = self.hass.states.get(entity) if entity else None
+        opties = [str(o) for o in ((staat.attributes or {}).get("options") or [])] if staat else []
+        keuze = next((o for o in opties if o.strip().startswith(str(fasen))), None)
+        bezig = self._fase_bezig.get(device_id)
+        if keuze is None:
+            _LOGGER.warning("%s: de keuzelijst %s kent geen %s fasen (%s)", device_id, entity, fasen, opties)
+            self._fase_bezig.pop(device_id, None)
+            self._fase_gewisseld[device_id] = now
+            return
+        try:
+            await self.hass.services.async_call(
+                "select", "select_option", {"entity_id": entity, "option": keuze}, blocking=True
+            )
+        except ServiceNotFound:
+            _LOGGER.warning("%s: de keuzelijst %s is er niet (nog niet geladen?)", device_id, entity)
+            self._fase_bezig.pop(device_id, None)
+            self._fase_gewisseld[device_id] = now
+            return
+        if bezig is not None:
+            bezig["omgezet"] = now
+        self._fase_gewisseld[device_id] = now
+        _LOGGER.info("%s: fasen omgezet naar %s (%s)", device_id, fasen, keuze)
 
     def _smooth(self, device_id: str, surplus: float, now: datetime) -> float:
         """Het overschot, ontdaan van het gerimpel van een enkele minuut.
@@ -6904,7 +7063,11 @@ class ChargerCoach:
         # er werkelijk loopt, want anders denkt hij drie keer zo snel te zijn.
         device_id = device.get("id", "")
         gemeten = self._fase_nu.get(device_id)
-        phases_measured = phases == 3 and gemeten == 1 and charger.charging
+        # Niet bij een Alfen die van de coach mag wisselen (v0.104.0): daar is een
+        # fase zijn eigen keuze, en rekent het plan met wat de paal kan.
+        phases_measured = (
+            phases == 3 and gemeten == 1 and charger.charging and not self._fasewissel_aan(device)
+        )
         if phases_measured:
             phases = 1
 
@@ -8966,8 +9129,11 @@ class ChargerCoach:
         laderlimiet onder `PHASE_START_AMPS` staat, aan een merk waar dat aan
         gemeten is. Een auto die zelf maar één fase kan, kan er niets aan doen
         en krijgt dus niets te lezen.
+
+        Een Alfen die van de coach mag wisselen krijgt niets: een fase is dan
+        zijn eigen keuze (v0.104.0).
         """
-        if not charger.charging:
+        if not charger.charging or self._fasewissel_aan(device):
             return ""
         gemeten = self._fase_nu.get(device.get("id", ""))
         if gemeten is None:

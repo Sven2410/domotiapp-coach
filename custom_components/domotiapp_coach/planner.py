@@ -3778,6 +3778,65 @@ def _modus_zonder_planning(
     return Decision(False, 0, reden, plan=plan, rule="zon-wacht")
 
 
+# --- de fasewissel van een Alfen (v0.104.0) -------------------------------------
+# Eis 3 zei tot 30-09-2026 voor elke paal: de coach wisselt nooit van fasen. De
+# eigenaar die avond, over evcc: "Wat wel top zou zijn, is als je nog kunt kiezen
+# voor phase-switching. De Alfen ondersteunt 't namelijk gewoon ... op die manier
+# kan ik wel al op 1,4 kW zon beginnen met laden iig. Easee gaan we phase
+# switching niet doen." En daarna: "alfen zegt zelf dat je fase wissel mag doen.
+# Dus Easee houden we zo en alfen passen we aan."
+#
+# Het plan rekent met het profiel van de auto, drie fasen, want dat is wat de
+# paal kan als het moet. Alleen het besluit van deze ronde kiest: op zon één fase
+# zolang het dak minder geeft dan drie fasen op hun laagst, en anders drie. De
+# wissel zelf staat in coach.py (`_async_fasen`): alleen stilstaand, eerst 0 A,
+# net als evcc het in de eerste woning deed (30-09-2026, 01:00:29 0 A, 01:00:59
+# "1 Phase").
+
+# Hoe lang de wens voor het andere aantal fasen moet blijven staan voordat een
+# lopende beurt ervoor stopt, en hoe lang er minstens tussen twee wissels zit.
+# Een wissel is de auto stilzetten en opnieuw laten beginnen; een wolk is dat niet
+# waard. Een paal die stilstaat wisselt meteen, want daar valt niets te onderbreken.
+FASE_WACHT = timedelta(minutes=5)
+FASE_RUST = timedelta(minutes=10)
+
+# De besluiten waarbij het vermogen de zon volgt. De rest (een goedkoop uur, de
+# klaar-tijd, Snel, Continu) is laden van het net, en dat gaat op drie fasen.
+ZON_REGELS = frozenset({"surplus", "zon-modus"})
+
+
+def op_zon(decision: Decision) -> bool:
+    """Of een besluit om te laden op de zon draait, ook met wekken of doorladen erachter."""
+    return decision.charge and decision.rule.split("+")[0] in ZON_REGELS
+
+
+def kies_fasen(drie: Decision, een: Decision, surplus_w: float, nu_fasen: int) -> int:
+    """Op hoeveel fasen deze ronde hoort te laden, of 0 als er niets te kiezen is.
+
+    `drie` en `een` zijn hetzelfde besluit voor dezelfde auto op drie en op één
+    fase; `nu_fasen` is waar de paal nu op staat. Een besluit dat een lopende
+    beurt vasthoudt (`+hold`) houdt ook zijn fasen, want wisselen is stoppen.
+
+    Op zon is de grens het laagste vermogen op drie fasen (6 A, 4,1 kW), met
+    speling tegen heen en weer: van één naar drie pas als het dak dat hele
+    vermogen geeft, van drie naar één zodra het onder `SURPLUS_SLACK` ervan zakt.
+    """
+    if drie.rule.endswith("+hold") or een.rule.endswith("+hold"):
+        return nu_fasen
+    drie_min = watts_for(MIN_AMPS, 3)
+    if drie.charge and not op_zon(drie):
+        return 3
+    genoeg_een = een.rule.split("+")[0] == "zon-modus" or surplus_w >= watts_for(MIN_AMPS, 1) * SURPLUS_SLACK
+    if op_zon(drie):
+        grens = drie_min if nu_fasen == 1 else drie_min * SURPLUS_SLACK
+        if surplus_w >= grens:
+            return 3
+        return 1 if op_zon(een) and genoeg_een else 3
+    if op_zon(een) and genoeg_een:
+        return 1
+    return 0
+
+
 NEVER_HOLD = frozenset(
     {"disconnected", "complete", "user-hold", "no-room", "tight", "no-prices", "no-soc"}
 )

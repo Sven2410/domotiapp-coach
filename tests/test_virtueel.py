@@ -244,6 +244,49 @@ if (va := v("alfen-laadgrens-80")) and (ve := v("laadgrens-80")):
     controle("alfen laadgrens: evenveel geladen als aan een Easee",
              abs(va.geladen_kwh - ve.geladen_kwh) < 0.3, f"alfen {va.geladen_kwh:.2f}, easee {ve.geladen_kwh:.2f}")
 
+# De fasewissel van een Alfen (v0.104.0). De eigenaar op 30-09-2026: "op die manier
+# kan ik wel al op 1,4 kW zon beginnen met laden iig." En eis 3: nooit wisselen
+# terwijl de auto trekt; eerst 0 A, zoals evcc het in de eerste woning deed.
+if (vf := v("alfen-fasen-zon-bewolkt")) and (vd := v("alfen-drie-zon-bewolkt")):
+    print(f"  bewolkt, driefasige auto in de modus zon: zonder wisselen {vd.geladen_kwh:.1f} kWh, "
+          f"met {vf.geladen_kwh:.1f} kWh (zon {vf.uit_zon_kwh:.1f}), {len(vf.fase_wissels)} wissels")
+    controle("fasen: op een bewolkte dag laadt hij op één fase waar drie fasen niets deden",
+             vf.geladen_kwh > vd.geladen_kwh + 5 and vf.uit_zon_kwh > vf.uit_net_kwh * 10,
+             f"{vf.geladen_kwh:.1f} tegen {vd.geladen_kwh:.1f}, zon {vf.uit_zon_kwh:.1f} net {vf.uit_net_kwh:.1f}")
+    controle("fasen: de paal die niet mag wisselen krijgt nooit een wissel",
+             not vd.fase_wissels and not vd.regels_met("fasewissel"), f"{vd.fase_wissels}")
+for naam in ("alfen-fasen-zon-bewolkt", "alfen-fasen-wisselend", "alfen-fasen-helder", "alfen-fasen-dynamisch"):
+    if (vl := v(naam)):
+        tijden = [t for t, *_ in vl.fase_wissels]
+        gaten = [(b - a).total_seconds() / 60 for a, b in zip(tijden, tijden[1:])]
+        controle(f"{naam}: nooit wisselen terwijl de auto trekt",
+                 vl.fase_wissels and not any(trok for *_, trok in vl.fase_wissels), f"{vl.fase_wissels}")
+        controle(f"{naam}: minstens tien minuten tussen twee wissels",
+                 all(g >= 10 for g in gaten), f"{[round(g) for g in gaten]}")
+        controle(f"{naam}: de paal valt nooit terug op zijn veilige stroom",
+                 vl.paal_terugvallen == 0, f"{vl.paal_terugvallen}")
+if (vl := v("alfen-fasen-wisselend")):
+    controle("fasen, wolkenvelden: niet heen en weer (hooguit zes wissels per dag)",
+             len(vl.fase_wissels) <= 12, f"{len(vl.fase_wissels)}")
+if (vl := v("alfen-fasen-helder")):
+    controle("fasen, helder: 's ochtends op één fase, midden op de dag op drie, 's middags weer één",
+             [f for _, f, _ in vl.fase_wissels] == [1, 3, 1], f"{vl.fase_wissels}")
+if (vf := v("alfen-fasen-dynamisch")) and (vd := v("alfen-drie-dynamisch")):
+    print(f"  dynamisch met planning: zonder wisselen €{vd.kosten:.2f}, met €{vf.kosten:.2f}, "
+          f"wissels {[(f'{t:%H:%M}', f) for t, f, _ in vf.fase_wissels]}")
+    controle("fasen, dynamisch: op tijd vol, net als zonder wisselen", gehaald(vf) and gehaald(vd),
+             f"{vf.soc_bij_klaar_tijd} / {vd.soc_bij_klaar_tijd}")
+    controle("fasen, dynamisch: niet duurder dan zonder wisselen", vf.kosten <= vd.kosten + 0.02,
+             f"€{vf.kosten:.2f} tegen €{vd.kosten:.2f}")
+    eerste_net = next((r.tijd for r in vf.regels if r.regel.startswith("cheap-hour")), None)
+    naar_drie = next((t for t, f, _ in vf.fase_wissels if f == 3), None)
+    controle("fasen, dynamisch: vóór het eerste goedkope uur van het net staat hij op drie fasen",
+             eerste_net is not None and naar_drie is not None and naar_drie <= eerste_net, f"{naar_drie} / {eerste_net}")
+# Easee wisselt nooit, ook niet met de vink: die hoort alleen bij een Alfen.
+fout_easee = [naam for naam, vl in V.items()
+              if vl.scenario.paal.merk != "alfen" and (vl.fase_wissels or vl.regels_met("fasewissel"))]
+controle("fasen: geen enkel scenario aan een Easee wisselt", not fout_easee, f"{fout_easee}")
+
 if (vl := v("vast-bewolkt")):
     controle("bewolkt: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
     # Vóór acht uur komt er alleen net bij als aanvulling onder de ondergrens

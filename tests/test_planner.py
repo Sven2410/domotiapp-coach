@@ -3214,6 +3214,41 @@ d70v = snel70(Grid(phase_amps=[16.0, 16.0, 16.0], fuse_amps=25.0, charger_amps=1
 controle("en op vol vermogen blijft de zin zoals hij was",
          d70v.reason == "Snelladen staat aan, dus hij laadt op 16 A, ongeacht de prijs.", d70v.reason)
 
+print("=== 71. de fasewissel van een Alfen: op zon één fase, van het net drie (v0.104.0) ===")
+# De eigenaar op 30-09-2026: "op die manier kan ik wel al op 1,4 kW zon beginnen met
+# laden iig." Het besluit op drie fasen en hetzelfde op één fase; kies_fasen kiest.
+from planner import kies_fasen, op_zon  # noqa: E402
+
+
+def bs(rule, charge=True, amps=6):
+    return Decision(charge, amps if charge else 0, "", rule=rule)
+
+
+wacht3, wacht1 = bs("zon-wacht", False), bs("zon-wacht", False)
+k71 = [
+    ("van het net: drie fasen", kies_fasen(bs("cheap-hour", amps=16), bs("cheap-hour", amps=16), 0.0, 1), 3),
+    ("klaar-tijd: drie fasen", kies_fasen(bs("deadline", amps=16), wacht1, 500.0, 1), 3),
+    ("1,5 kW zon, drie fasen wachten, één fase laadt (met wekken): één fase",
+     kies_fasen(wacht3, bs("zon-modus+wake", amps=16), 1500.0, 3), 1),
+    ("3,0 kW zon, drie fasen op de ondergrens met net erbij: één fase",
+     kies_fasen(bs("zon-modus"), bs("zon-modus", amps=13), 3000.0, 3), 1),
+    ("3,9 kW zon op drie fasen: blijft drie (boven 90% van 4,1 kW)",
+     kies_fasen(bs("surplus"), bs("surplus", amps=16), 3900.0, 3), 3),
+    ("3,9 kW zon op één fase: blijft één (pas bij de hele 4,1 kW naar drie)",
+     kies_fasen(bs("surplus"), bs("surplus", amps=16), 3900.0, 1), 1),
+    ("4,2 kW zon op één fase: naar drie", kies_fasen(bs("surplus"), bs("surplus", amps=16), 4200.0, 1), 3),
+    ("een lopende beurt die doorlaadt houdt zijn fasen", kies_fasen(bs("zon-wacht+hold"), bs("zon-modus"), 900.0, 3), 3),
+    ("niemand laadt: niets te kiezen", kies_fasen(wacht3, wacht1, 300.0, 3), 0),
+    ("alleen op één fase de klaar-tijd (auto kan drie): niets te kiezen",
+     kies_fasen(bs("wait-for-cheap", False), bs("deadline", amps=16), 200.0, 1), 0),
+    ("0,6 kW zon, één fase koopt tot de ondergrens bij: niet op één fase beginnen",
+     kies_fasen(wacht3, bs("surplus"), 600.0, 3), 0),
+]
+for naam, kreeg, hoort in k71:
+    controle(f"kies_fasen: {naam}", kreeg == hoort, f"{kreeg} in plaats van {hoort}")
+controle("op_zon: ook met wekken en doorladen erachter",
+         op_zon(bs("zon-modus+wake")) and op_zon(bs("surplus+near")) and not op_zon(bs("cheap-hour")), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

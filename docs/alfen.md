@@ -88,6 +88,76 @@ stopt zelf op 80%): met v0.98.0 de hele nacht de lus en geen herstartmelding, nu
 één herstart, het verslag, en klaar tot de ochtend, net als `laadgrens-80` aan een Easee.
 Proef 90 in test_coach.py.
 
+## De fasewissel (v0.104.0)
+
+Eis 3 zei tot 30-09-2026 voor elke paal: de coach wisselt nooit van fasen. De
+eigenaar die avond, over evcc: "Wat wel top zou zijn, is als je nog kunt kiezen
+voor phase-switching. De Alfen ondersteunt 't namelijk gewoon. Ik weet alleen
+niet exact hoe ie werkt en hoevaak ie wisselt tussen 1 en 3F. Maar op die
+manier kan ik wel al op 1,4 kW zon beginnen met laden iig. Easee gaan we phase
+switching niet doen." En op het voorstel: "alfen zegt zelf dat je fase wissel
+mag doen. Dus Easee houden we zo en alfen passen we aan."
+
+**Hoe evcc het in de eerste woning doet**, uit de recorder van 30-09-2026. De
+integratie alfen_modbus heeft een keuzelijst "bruikbare fasen" (`1 Phase`,
+`3 Phases`) en een sensor "laadmodus" die hem volgt. evcc zet de paal stil op
+1 Phase, en bij elk kwartierblok van het net op drie: om 00:45:29 3 Phases en
+15 A in dezelfde poll, om 01:00:29 0 A (de auto naar B1) en 30 s later 1 Phase.
+Die nacht vijf keer naar drie en zes keer naar één, altijd zonder stroom.
+
+**Wat de coach doet:**
+
+- **Alleen een Alfen, met het vinkje Fasen wisselen** (`phase_switching`,
+  standaard uit) **en de keuzelijst bij de entiteiten** (`phases`). Alleen voor
+  een auto met een driefasig profiel of een gastauto (`_fasewissel_aan`).
+- **Het plan blijft drie fasen.** De klaar-tijd en de goedkoopste uren rekenen
+  met wat de paal kan als het moet. Alleen het besluit van deze ronde kiest:
+  `decide` gaat twee keer, voor drie fasen en voor één, en `kies_fasen` in
+  planner.py kiest. Van het net (een goedkoop uur, de klaar-tijd, Snel,
+  Continu) drie fasen. Op zon (`surplus`, `zon-modus`, ook met `+wake` of
+  `+near` erachter) één fase zolang het dak minder geeft dan drie fasen op hun
+  laagst: van drie naar één onder 90% van 4,1 kW, van één naar drie pas bij de
+  hele 4,1 kW. Een lopende beurt die doorlaadt (`+hold`) houdt zijn fasen.
+- **Het besluit op één fase telt alleen als het op zon laadt.** Anders rekent
+  het met een auto die alleen één fase kan, en zegt de klaar-tijd al gauw "nu
+  van het net" terwijl drie fasen straks ruim op tijd zijn.
+- **Wisselen alleen stilstaand** (`_fasen_besluit`, `_async_fasen` in
+  coach.py): eerst 0 A (regel `fasewissel`, "even stil, dan verder"), en pas als
+  er geen stroom meer loopt de keuzelijst om; de ronde daarna laadt hij verder.
+  Een paal die al stilstaat wisselt meteen. Een lopende beurt wisselt pas als de
+  wens `FASE_WACHT` (5 min) blijft staan en de vorige wissel `FASE_RUST`
+  (10 min) geleden is. Komt de auto niet binnen `FASE_WACHT` tot stilstand, of
+  volgt de paal de keuzelijst niet, dan geeft hij het op, zegt het in het log,
+  en laat het een `FASE_RUST` rusten.
+- **De gemeten fase is dan geen fout.** `phases_measured` en de fasetip slaan
+  een paal over die van de coach mag wisselen: één fase is zijn eigen keuze.
+  Het tempo-leren krijgt de auto op het aantal fasen waarop hij laadt (`car_nu`);
+  de maat voor Bespaard blijft het profiel.
+- **Op de kaart**: "Hij laadt op één fase." achter de reden, en `phases_now` in
+  de stand.
+
+In het virtuele huis (`Paal(fasen_keuze=...)`, `Scenario.fasen_wisselen`; een
+wissel terwijl de auto trekt telt en hoort nul te zijn), met een driefasige auto
+van 77 kWh:
+
+| scenario | kWh | zon | net | kosten | wissels |
+|---|---|---|---|---|---|
+| `alfen-drie-zon-bewolkt` (niet wisselen) | 0,0 | 0,0 | 0,0 | € 0,00 | |
+| `alfen-fasen-zon-bewolkt` | 10,9 | 10,7 | 0,2 | € 0,80 | 1 |
+| `alfen-fasen-helder` | 34,2 | 33,8 | 0,4 | € 2,48 | 3 |
+| `alfen-fasen-wisselend` | 34,2 | 31,4 | 2,9 | € 3,00 | 10, minstens 18 min ertussen |
+| `alfen-drie-dynamisch` (niet wisselen) | 68,5 | 34,7 | 33,8 | € 7,58 | |
+| `alfen-fasen-dynamisch` | 68,5 | 35,8 | 32,6 | € 7,38 | 2 |
+
+Nul wissels onder stroom. Proef 71 in test_planner.py (`kies_fasen`), proef 130
+in test_coach.py (de volgorde, de timers, opgeven, en wie het niet mag: een
+Easee, een eenfasige auto, zonder vinkje, op adviseren).
+
+**Nog niet in het echt gezien.** In de eerste woning stuurt evcc de Alfen;
+wisselt de coach daar, dan moet evcc er eerst af. Na te kijken: of de paal de
+keuzelijst binnen een ronde volgt, of de Tesla na de wissel weer begint, en of
+de wekstroom op één fase (14 A, 3,2 kW) een minuut te veel van het net haalt.
+
 **Nog nooit aan een echte Alfen gestuurd.** Wat er in het echt gemeten moet
 worden, in de eerste woning, met de toestanden-logger erbij (`plus=alfen`):
 
