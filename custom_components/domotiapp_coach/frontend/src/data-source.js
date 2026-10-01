@@ -576,6 +576,78 @@ function gekozenAutoMetStand(device, settings) {
   return auto && !auto.guest && auto.soc_entity ? auto : null;
 }
 
+/** Kilometers per eenheid van een afstandsensor; een onbekende eenheid telt niet. */
+const KM_PER = { km: 1, mi: 1.609344, m: 0.001 };
+
+/** Onder deze stand reken je de volle actieradius niet meer na (v0.106.0). */
+const RADIUS_MIN_PROCENT = 10;
+
+/**
+ * Wat de auto zelf zegt over zijn actieradius: de kilometers van nu, en hoeveel
+ * kilometer één procent waard is. Allebei uit zijn eigen sensoren, of niets.
+ *
+ * De bewoner van de eerste woning op 01-10-2026, bij "Accu auto 28 % · 21,8 van
+ * 78,0 kWh": "Ik denk dat de meeste consumenten dat niets zegt. Persoonlijk zou
+ * ik daar de range in km's zetten. Omdat je het percentage en de beschikbare
+ * range weet, kun je de max range laten berekenen." Dat is een deling van twee
+ * metingen. Alleen vanaf `RADIUS_MIN_PROCENT`: een accustand komt in hele
+ * procenten, en op 5% kan dat de volle radius tien procent laten schuiven.
+ */
+export function actieradius(feed, car) {
+  if (!car?.range_entity || !car?.soc_entity) return null;
+  const bereik = feed.get(car.range_entity);
+  if (!usable(bereik)) return null;
+  const per = KM_PER[String(bereik.attributes?.unit_of_measurement ?? "").trim().toLowerCase()];
+  const km = Number(bereik.state) * per;
+  if (!per || !Number.isFinite(km) || km < 0) return null;
+  const stand = feed.get(car.soc_entity);
+  const procent = usable(stand) ? Number(stand.state) : NaN;
+  return {
+    km,
+    perProcent: Number.isFinite(procent) && procent >= RADIUS_MIN_PROCENT ? km / procent : null,
+  };
+}
+
+/** "28% · 138 van 493 km", of "6% · 30 km" als de volle radius niet na te rekenen is. */
+export function radiusTekst(procent, radius) {
+  const pct = `${Math.round(procent)}%`;
+  const km = Math.round(radius.km).toLocaleString("nl-NL");
+  return radius.perProcent
+    ? `${pct} · ${km} van ${Math.round(radius.perProcent * 100).toLocaleString("nl-NL")} km`
+    : `${pct} · ${km} km`;
+}
+
+/**
+ * Wat er in deze laadbeurt al in ging, of in de laatste als de kabel eruit is
+ * (v0.106.0). De coach telt het (`session` in zijn besluit, uit `_geladen`).
+ *
+ * De bewoner van de eerste woning op 01-10-2026: "'Deze sessie - x kWh', of
+ * 'geladen deze laadbeurt' ... Evt + x% of + x km als extra toevoeging. Op die
+ * manier weet je dat er tijdens de huidige sessie al daadwerkelijk is gebeurd."
+ * En meteen erna: "Of 'laatste sessie' oid. De waardes zouden kunnen blijven
+ * staan, totdat een nieuwe laadbeurt wordt gestart."
+ *
+ * De procenten alleen als de auto ze zelf meldt; een opgegeven stand plus de
+ * teller van de paal is een schatting, en de kWh zegt dan al alles. De
+ * kilometers uit de procenten, tegen wat één procent nu waard is.
+ */
+export function laadbeurtRegels(feed, device, settings, besluit) {
+  const beurt = besluit?.session;
+  if (device?.type !== "laadpaal" || !beurt || !Number.isFinite(beurt.kwh)) return [];
+  const label = beurt.active ? "Deze laadbeurt" : "Laatste laadbeurt";
+  if (beurt.kwh < 0.05) return [{ label, text: "nog niets" }];
+  const delen = [`${beurt.kwh.toLocaleString("nl-NL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kWh`];
+  const erbij = Number.isFinite(beurt.soc_start) && Number.isFinite(beurt.soc_end) && !beurt.soc_estimated
+    ? Math.round(beurt.soc_end) - Math.round(beurt.soc_start)
+    : 0;
+  if (erbij >= 1) {
+    delen.push(`+${erbij}%`);
+    const radius = actieradius(feed, gekozenAutoMetStand(device, settings));
+    if (radius?.perProcent) delen.push(`+${Math.round(erbij * radius.perProcent).toLocaleString("nl-NL")} km`);
+  }
+  return [{ label, text: delen.join(" · ") }];
+}
+
 function deviceDetails(feed, device, settings) {
   const rows = [];
 
@@ -645,14 +717,21 @@ function deviceDetails(feed, device, settings) {
   // eigenaar op 29-09-2026: "op de laadpaalkaart de batterijstand van de auto
   // zien als die in HA staat." Een auto zonder sensor vraagt zijn stand al op
   // de kaart zelf, en daar staat hij dan ook.
+  // Met een sensor voor de actieradius in kilometers in plaats van kWh (v0.106.0);
+  // zie `actieradius`.
   if (device?.type === "laadpaal") {
     const car = gekozenAutoMetStand(device, settings);
     if (car) {
       const state = feed.get(car.soc_entity);
       const procent = usable(state) ? Number(state.state) : NaN;
+      const radius = actieradius(feed, car);
       rows.push({
         label: "Accu auto",
-        text: Number.isFinite(procent) ? accuTekst(procent, Number(car.capacity_kwh)) : "—",
+        text: !Number.isFinite(procent)
+          ? "—"
+          : radius
+            ? radiusTekst(procent, radius)
+            : accuTekst(procent, Number(car.capacity_kwh)),
       });
     }
   }

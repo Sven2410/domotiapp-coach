@@ -43,6 +43,8 @@ const MATCHERS = {
   current: (attrs, unit) => unit === "a" || attrs.device_class === "current",
   // Iets waar je uit kunt kiezen: een select of input_select heeft opties.
   select: (attrs) => Array.isArray(attrs.options),
+  // Een afstand, voor de actieradius van een auto (v0.106.0).
+  distance: (attrs, unit) => attrs.device_class === "distance" || unit === "km" || unit === "mi",
   all: () => true,
 };
 

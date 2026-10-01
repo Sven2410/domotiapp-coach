@@ -94,6 +94,9 @@ _CAR = _schema(
         # customer says so, and without that it simply charges the cheapest
         # hours until the car stops by itself.
         vol.Optional("soc_entity", default=""): _ENTITY,
+        # De actieradius volgens de auto zelf (v0.106.0). Alleen voor de kaart:
+        # kilometers in plaats van kWh, en wat een beurt aan kilometers opleverde.
+        vol.Optional("range_entity", default=""): _ENTITY,
         # Het merk kiest welke velden er bij de auto horen (v0.76.0). Leeg is
         # een profiel van voor het merk bestond, en dat blijft gewoon werken.
         vol.Optional("brand", default=""): vol.In(["", "ford", "tesla"]),

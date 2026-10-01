@@ -1050,6 +1050,13 @@ class DacViewDevices extends DacEditorElement {
               ? "De sensor \"Battery level\" van de Tesla-integratie. Daarmee weet de coach zelf hoeveel er nog in moet."
               : "Optioneel. Staat de auto in Home Assistant, wijs dan de sensor aan die zegt hoe vol hij is; dan weet de coach zelf hoeveel er nog in moet. Zonder deze vraagt hij het aan jou."}</span>
           </div>
+          <div class="row">
+            <label>Actieradius (optioneel)</label>
+            <dac-entity-picker data-car-range="${index}:${slot}"></dac-entity-picker>
+            <span class="sub">${tesla
+              ? "De sensor \"Battery range\" van de Tesla-integratie. Dan staat er op de kaart hoeveel kilometer er in de accu zit in plaats van hoeveel kWh, en wat een laadbeurt aan kilometers opleverde."
+              : "Zegt de auto in Home Assistant hoe ver hij nog komt, wijs die sensor dan aan. Dan staat er op de kaart hoeveel kilometer er in de accu zit in plaats van hoeveel kWh, en wat een laadbeurt aan kilometers opleverde. Werkt samen met het accupercentage hierboven."}</span>
+          </div>
           ${wekken}
           <div class="row">
             <label>Laadt op</label>
@@ -1237,6 +1244,18 @@ class DacViewDevices extends DacEditorElement {
       });
     }
 
+    for (const picker of list.querySelectorAll("[data-car-range]")) {
+      const [index, slot] = picker.dataset.carRange.split(":").map(Number);
+      picker.filter = "distance";
+      picker.placeholder = "Zoek de actieradius…";
+      picker.stateFeed = this.feed_;
+      picker.value = this.draft_.devices[index].cars[slot].range_entity ?? "";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        this.draft_.devices[index].cars[slot].range_entity = ev.detail.value;
+        this.syncSaveBar_();
+      });
+    }
+
     for (const picker of list.querySelectorAll("[data-car-wake]")) {
       const [index, slot] = picker.dataset.carWake.split(":").map(Number);
       picker.filter = "all";
@@ -1279,6 +1298,7 @@ class DacViewDevices extends DacEditorElement {
           phases: "three",
           max_amps: 0,
           soc_entity: "",
+          range_entity: "",
           brand: "",
           wake_entity: "",
           wake_mode: "manual",
