@@ -789,6 +789,10 @@ def _bedrag(waarde: float, grootste: float | None = None) -> str:
 # als een fout, en een paar wattuur zegt de bewoner niets.
 HERKOMST_MIN_KWH = 0.05
 
+# Een beurt waarin minder ging dan dit is geen laadbeurt voor de kaart: de kabel
+# ging erin en er weer uit zonder te laden. Dan blijft de vorige staan (v0.106.0).
+BEURT_KAART_MIN_KWH = 0.05
+
 
 def _herkomst_zin(zon: float, accu: float, net: float, net_eur: float | None) -> str:
     """Waar de stroom van een beurt vandaan kwam, in één korte regel (v0.101.0).
@@ -1217,6 +1221,9 @@ class ChargerCoach:
         # hoort te komen. Staat los van `_sessie`, want die is dan al opgeruimd
         # en mag ook niet blijven staan: een nieuwe kabel is een nieuwe beurt.
         self._afscheid: dict[str, tuple[datetime, dict[str, Any]]] = {}
+        # De laatste beurt waarin werkelijk geladen werd, voor de kaart zolang
+        # de kabel eruit is (v0.106.0). Zie `_beurt_kaart`.
+        self._vorige_beurt: dict[str, dict[str, Any]] = {}
         # Naar welke klaar-tijd een sessie op vol vermogen aan het toewerken is.
         # Zodra hij daaraan begonnen is, blijft hij dat doen tot de auto vol is
         # of de klaar-tijd verandert: terugnemen betekent alsnog te laat.
@@ -5536,6 +5543,13 @@ class ChargerCoach:
             # zegt het onder "Hoe vol is de auto nu?" (v0.89.0).
             "soc_now": None if car.soc_percent is None else round(car.soc_percent, 1),
             "soc_estimated": bool(car.soc_estimated),
+            # Wat er deze beurt in ging, of in de laatste als de kabel eruit is
+            # (v0.106.0); zie `_beurt_kaart`.
+            "session": (
+                self._beurt_kaart(device, self._sessie[device_id], actief=True)
+                if device_id in self._sessie
+                else self._vorige_beurt.get(device_id)
+            ),
             "planned": bool(window.enabled),
             # Of er een knop "accustand opvragen" op de kaart hoort, en wanneer
             # de auto voor het laatst gewekt is.
@@ -7919,6 +7933,14 @@ class ChargerCoach:
             **self._herkomst_velden(geld),
             "price_unknown": ijk is None or onbekend_kwh > 0,
             "unknown_kwh": onbekend_kwh,
+            # Voor de kaart na een herstart (v0.106.0): de kWh zoals het verslag
+            # ze telt, naast die van het geld hierboven, en de accustand van
+            # begin en eind. Zie `_beurt_kaart`.
+            **{
+                {"kwh": "charged_kwh"}.get(sleutel, sleutel): waarde
+                for sleutel, waarde in self._beurt_kaart(device, sessie, actief=False).items()
+                if sleutel != "active"
+            },
             "baseline": {
                 "kwh": round(float(geld.get("basis_kwh") or 0.0), 3),
                 "cost": round(float(geld.get("basis_kosten") or 0.0), 4),
@@ -8285,6 +8307,17 @@ class ChargerCoach:
                             self._herstart_gedaan[device_id] = hervat["herstart_op"]
         except Exception:  # noqa: BLE001 - zonder geschiedenis begint hij gewoon opnieuw
             _LOGGER.exception("kon de lopende laadbeurten niet lezen")
+        # De laatste afgesloten beurt per paal, voor de kaart (v0.106.0). De
+        # lijst staat op inplugmoment, dus de laatste die telt wint.
+        try:
+            for entry in await async_get_beurten(self.hass).async_list():
+                if entry.get("kind") != "laden" or not entry.get("complete"):
+                    continue
+                kaart = self._beurt_kaart_uit(entry)
+                if kaart is not None:
+                    self._vorige_beurt[str(entry.get("device") or "")] = kaart
+        except Exception:  # noqa: BLE001 - dan staat er tot de volgende beurt niets
+            _LOGGER.exception("kon de laatste laadbeurten niet lezen")
 
     @staticmethod
     def _hervat_uit(bewaard: dict[str, Any]) -> dict[str, Any] | None:
@@ -8347,6 +8380,9 @@ class ChargerCoach:
             # Afsluiten met wat er bekend is, want anders blijft hij eeuwig lopen.
             open_beurt = self._beurt_open.pop(device_id, None)
             if open_beurt is not None:
+                kaart = self._beurt_kaart_uit(open_beurt)
+                if kaart is not None:
+                    self._vorige_beurt[device_id] = kaart
                 self._beurt_schrijven({**open_beurt, "complete": True,
                                        "ended": open_beurt.get("ended") or now.isoformat()})
             # De kabel is eruit. Voordat deze beurt wordt vergeten gaat hij naar
@@ -8358,6 +8394,10 @@ class ChargerCoach:
             # over gezegd is: een auto die vol was en daarna van de kabel gaat
             # heeft zijn verslag al gehad.
             beurt = self._sessie.pop(device_id, None)
+            if beurt:
+                kaart = self._beurt_kaart(device, beurt, actief=False)
+                if kaart["kwh"] >= BEURT_KAART_MIN_KWH:
+                    self._vorige_beurt[device_id] = kaart
             if beurt and beurt.get("geld"):
                 self._beurt_schrijven(self._beurt_regel(device, car, beurt, now, klaar=True))
             if beurt and beurt.get("begon") and "vol" not in beurt.get("gemeld", set()):
@@ -8521,6 +8561,11 @@ class ChargerCoach:
         gemeten = self._soc_ruw.get(device_id, car.soc_percent)
         if sessie.get("soc_begin") is None and car.soc_percent is not None:
             sessie["soc_begin"] = car.soc_percent
+        # En de laatste, voor de kaart na het loskoppelen (v0.106.0): dan is de
+        # auto er niet meer om het te vragen.
+        if car.soc_percent is not None:
+            sessie["soc_eind"] = car.soc_percent
+            sessie["soc_eind_geschat"] = bool(car.soc_estimated)
         if gemeten is not None and gemeten != sessie.get("soc_gezien"):
             sessie["soc_gezien"] = gemeten
             sessie["soc_moment"] = now
@@ -8657,6 +8702,52 @@ class ChargerCoach:
             return staart or None
         eerder = sessie.get("ijk_kwh", 0.0) if sessie.get("geijkt") else 0.0
         return eerder + max(0.0, meter - float(sessie["meter"])) + staart
+
+    def _beurt_kaart(
+        self, device: dict[str, Any], sessie: dict[str, Any], actief: bool
+    ) -> dict[str, Any]:
+        """Wat de kaart over een laadbeurt zegt: hoeveel erin ging en van welke
+        accustand naar welke (v0.106.0).
+
+        De bewoner van de eerste woning op 01-10-2026: "'Deze sessie - x kWh' ...
+        Op die manier weet je dat er tijdens de huidige sessie al daadwerkelijk
+        is gebeurd", en "de waardes zouden kunnen blijven staan, totdat een
+        nieuwe laadbeurt wordt gestart." Dezelfde kWh als het verslag
+        (`_geladen`) en dezelfde accustanden (`_accu_verloop`), zodat de kaart en
+        de melding niet uit elkaar lopen. De kilometers rekent het paneel uit de
+        sensoren van de auto zelf (`laadbeurtRegels` in data-source.js).
+        """
+        rond = lambda waarde: None if waarde is None else round(float(waarde), 1)  # noqa: E731
+        # Voor het laden begon is er niets geteld: `_geladen` meet vanaf `begon`,
+        # en daarvoor zou hij de eigen meting van de vorige beurt teruggeven.
+        geladen = self._geladen(device, sessie) if sessie.get("begon") is not None else 0.0
+        return {
+            "active": actief,
+            "kwh": round(geladen or 0.0, 2),
+            "soc_start": rond(sessie.get("soc_begin")),
+            "soc_end": rond(sessie.get("soc_eind")),
+            "soc_estimated": bool(sessie.get("soc_eind_geschat")),
+        }
+
+    @staticmethod
+    def _beurt_kaart_uit(regel: dict[str, Any]) -> dict[str, Any] | None:
+        """De kaart van een bewaarde beurt (`_beurt_regel`), of niets als er in
+        die beurt niet geladen werd. Een regel van voor v0.106.0 heeft alleen de
+        kWh van het geld; dan staan er geen procenten bij."""
+        try:
+            kwh = float(regel.get("charged_kwh", regel.get("kwh")) or 0.0)
+        except (TypeError, ValueError):
+            return None
+        if kwh < BEURT_KAART_MIN_KWH:
+            return None
+        getal = lambda waarde: waarde if isinstance(waarde, (int, float)) else None  # noqa: E731
+        return {
+            "active": False,
+            "kwh": round(kwh, 2),
+            "soc_start": getal(regel.get("soc_start")),
+            "soc_end": getal(regel.get("soc_end")),
+            "soc_estimated": bool(regel.get("soc_estimated")),
+        }
 
     @staticmethod
     def _hoe_heet(car: Car | None) -> str:

@@ -34,7 +34,7 @@ import {
   valueLabel,
 } from "../devices.js";
 import { batteryRows, nachtConclusie } from "../battery.js";
-import { LiveSource, laadCoachPrijzen, meterReadings, priceForecast, solarForecast } from "../data-source.js";
+import { LiveSource, laadCoachPrijzen, laadbeurtRegels, meterReadings, priceForecast, solarForecast } from "../data-source.js";
 import {
   planFor,
   planSummary,
@@ -2706,8 +2706,12 @@ class DacViewOverview extends DacElement {
       this.$(`[data-now="${slot}"]`).textContent = powerText(device.watts);
 
       // Een thuisbatterij krijgt er de regels van de coach bij: de stand, de
-      // opdracht, en wat hij opleverde.
-      const details = [...(device.details ?? []), ...batteryRows(this.coach_?.[device.id])];
+      // opdracht, en wat hij opleverde. Een laadpaal wat er deze beurt in ging.
+      const details = [
+        ...(device.details ?? []),
+        ...batteryRows(this.coach_?.[device.id]),
+        ...laadbeurtRegels(this.feed_, device, this.settings_, this.coach_?.[device.id]),
+      ];
       const rows = this.$(`[data-rows="${slot}"]`);
       rows.replaceChildren(
         ...details.map((row) => {

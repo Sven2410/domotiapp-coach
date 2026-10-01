@@ -1049,6 +1049,9 @@ proef("een nieuwe auto begint met het merk, en een Tesla krijgt de wekknop en de
   // Een profiel van voor er merken waren houdt zijn velden.
   const oud = el.carsHtml_({ ...paal, cars: [{ id: "a", name: "Bus", capacity_kwh: 19.7 }] }, 0);
   assert.ok(oud.includes('data-car-field="capacity_kwh"'));
+  // De actieradius (v0.106.0) bij elk merk, bij een Tesla met de naam van zijn sensor.
+  assert.ok(ford.includes('data-car-range="0:0"') && tesla.includes('data-car-range="0:0"'), "het veld voor de actieradius");
+  assert.ok(tesla.includes('"Battery range"'), "bij een Tesla met de naam van de sensor");
 });
 
 proef("de vakantiestand staat in het formulier en op de kaart", async () => {
@@ -2486,6 +2489,65 @@ proef("de laadpaalkaart laat de accustand van de auto zien als die in Home Assis
   assert.deepEqual(regels({ active_cars: [{ device: "p", car: "__guest__" }] }), [], "de gast: geen accustand");
   assert.deepEqual(regels({ active_cars: [{ device: "p", car: "oud" }] }), [],
     "een gekozen auto zonder sensor vraagt het op de kaart zelf");
+});
+
+// De bewoner van de eerste woning op 01-10-2026, bij "Accu auto 28 % · 21,8 van 78,0 kWh":
+// "Ik denk dat de meeste consumenten dat niets zegt ... Dus 'accu auto - 28% - 138 van
+// 493 km'." Met een sensor voor de actieradius in kilometers (v0.106.0).
+proef("de laadpaalkaart zegt de actieradius in kilometers als de auto die meldt", async () => {
+  const { actieradius, radiusTekst } = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
+  const staten = {
+    "sensor.tesla_soc": { state: "28", attributes: { unit_of_measurement: "%" } },
+    "sensor.tesla_range": { state: "137.9", attributes: { unit_of_measurement: "km", device_class: "distance" } },
+    "sensor.mijl": { state: "85.7", attributes: { unit_of_measurement: "mi" } },
+    "sensor.vreemd": { state: "137.9", attributes: { unit_of_measurement: "parsec" } },
+    "sensor.weg": { state: "unavailable", attributes: { unit_of_measurement: "km" } },
+    "sensor.laag": { state: "6", attributes: { unit_of_measurement: "%" } },
+  };
+  const feed = { get: (id) => staten[id] };
+  const tesla = { id: "tesla", name: "Model Y", soc_entity: "sensor.tesla_soc", range_entity: "sensor.tesla_range", capacity_kwh: 78 };
+  const paal = { id: "p", type: "laadpaal", brand: "alfen", entity: "", entities: {}, cars: [tesla] };
+  const regel = (auto) => new LiveSource().sample(feed, { sources: {}, devices: [{ ...paal, cars: [auto] }] })
+    .devices[0].details.find((d) => d.label === "Accu auto")?.text;
+  assert.equal(regel(tesla), "28% · 138 van 493 km", "het voorbeeld van de bewoner");
+  assert.equal(regel({ ...tesla, range_entity: "sensor.mijl" }), "28% · 138 van 493 km", "mijlen worden kilometers");
+  assert.equal(regel({ ...tesla, range_entity: "sensor.vreemd" }), "28 % · 21,8 van 78,0 kWh", "een onbekende eenheid telt niet");
+  assert.equal(regel({ ...tesla, range_entity: "sensor.weg" }), "28 % · 21,8 van 78,0 kWh", "een sensor die niets zegt ook niet");
+  assert.equal(regel({ ...tesla, range_entity: "" }), "28 % · 21,8 van 78,0 kWh", "zonder sensor zoals het was");
+  // Onder 10% is de volle radius uit hele procenten niet na te rekenen.
+  const laag = actieradius(feed, { ...tesla, soc_entity: "sensor.laag" });
+  assert.equal(laag.perProcent, null);
+  assert.equal(radiusTekst(6, laag), "6% · 138 km");
+  assert.equal(actieradius(feed, { ...tesla, soc_entity: "" }), null, "zonder accustand geen radius");
+});
+
+proef("de laadpaalkaart zegt wat er deze laadbeurt in ging, en daarna wat de laatste opleverde", async () => {
+  const { laadbeurtRegels } = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
+  const staten = {
+    "sensor.tesla_soc": { state: "33", attributes: { unit_of_measurement: "%" } },
+    "sensor.tesla_range": { state: "162.5", attributes: { unit_of_measurement: "km" } },
+  };
+  const feed = { get: (id) => staten[id] };
+  const tesla = { id: "tesla", name: "Model Y", soc_entity: "sensor.tesla_soc", range_entity: "sensor.tesla_range", capacity_kwh: 78 };
+  const paal = { id: "p", type: "laadpaal", brand: "alfen", entity: "", entities: {}, cars: [tesla] };
+  const beurt = (session) => laadbeurtRegels(feed, paal, {}, { session });
+  assert.deepEqual(beurt({ active: true, kwh: 0, soc_start: 28, soc_end: 28 }),
+    [{ label: "Deze laadbeurt", text: "nog niets" }], "de kabel zit erin en hij wacht");
+  assert.deepEqual(beurt({ active: true, kwh: 4.234, soc_start: 28, soc_end: 32.6 }),
+    [{ label: "Deze laadbeurt", text: "4,2 kWh · +5% · +25 km" }], "kWh, procenten en kilometers");
+  assert.deepEqual(beurt({ active: false, kwh: 20.4, soc_start: 28, soc_end: 54 }),
+    [{ label: "Laatste laadbeurt", text: "20,4 kWh · +26% · +128 km" }], "na het loskoppelen blijft hij staan");
+  assert.deepEqual(beurt({ active: false, kwh: 3.21, soc_start: null, soc_end: null }),
+    [{ label: "Laatste laadbeurt", text: "3,2 kWh" }], "een beurt van voor v0.106.0: alleen de kWh");
+  assert.deepEqual(beurt({ active: true, kwh: 4.2, soc_start: 28, soc_end: 33, soc_estimated: true }),
+    [{ label: "Deze laadbeurt", text: "4,2 kWh" }], "een geschatte stand geeft geen procenten");
+  // Zonder sensor voor de actieradius alleen kWh en procenten.
+  const zonder = { ...paal, cars: [{ ...tesla, range_entity: "" }] };
+  assert.deepEqual(laadbeurtRegels(feed, zonder, {}, { session: { active: true, kwh: 4.2, soc_start: 28, soc_end: 33 } }),
+    [{ label: "Deze laadbeurt", text: "4,2 kWh · +5%" }]);
+  assert.deepEqual(beurt(null), [], "nog nooit geladen: geen regel");
+  assert.deepEqual(laadbeurtRegels(feed, { ...paal, type: "boiler" }, {}, { session: { active: true, kwh: 1 } }), [],
+    "alleen bij een laadpaal");
 });
 
 /** Een historieweergave met een dag aan vakken, de batterij en een beurt. */

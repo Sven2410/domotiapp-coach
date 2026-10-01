@@ -719,3 +719,49 @@ inhoud uit haar sensor of zoals ingevuld. Bij de eigenaar stond de Ford die dag 
 0 % (15 → 14 → 2 → 0 % op 28-09 tussen 15:44 en 17:01); dat is ook wat de coach
 gebruikt, dus dat staat er. Proeven in test_rapport.mjs.
 
+## De laadbeurt en de actieradius op de kaart (v0.106.0)
+
+De bewoner van de eerste woning op 01-10-2026, met een schermafdruk van de
+laadpaalkaart: "'Deze sessie - x kWh', of 'geladen deze laadbeurt' ... Evt + x% of
++ x km als extra toevoeging. Op die manier weet je dat er tijdens de huidige sessie
+al daadwerkelijk is gebeurd." Even later: "Of 'laatste sessie' oid. De waardes
+zouden kunnen blijven staan, totdat een nieuwe laadbeurt wordt gestart." En over
+"Accu auto 28 % · 21,8 van 78,0 kWh": "Ik denk dat de meeste consumenten dat niets
+zegt ... Omdat je het percentage en de beschikbare range weet, kun je de max range
+laten berekenen. Dus 'accu auto - 28% - 138 van 493 km'."
+
+**De laadbeurt.** De coach geeft in zijn besluit `session` mee: `active`, `kwh`,
+`soc_start`, `soc_end`, `soc_estimated` (`_beurt_kaart` in coach.py). De kWh zijn
+die van het verslag (`_geladen`), de procenten die van `_accu_verloop`, zodat kaart
+en melding hetzelfde zeggen. Op de kaart (`laadbeurtRegels` in data-source.js):
+
+- kabel erin: "Deze laadbeurt: 4,2 kWh · +5% · +25 km", of "nog niets" zolang hij
+  wacht. Een nieuwe kabel is een nieuwe beurt, ook voor er stroom loopt: dat is
+  precies wat de bewoner wilde zien.
+- kabel eruit: "Laatste laadbeurt: 20,4 kWh · +26% · +128 km". Die blijft staan tot
+  de volgende beurt; een kabel die erin en eruit gaat zonder te laden (minder dan
+  `BEURT_KAART_MIN_KWH`) laat hem staan.
+- na een herstart van Home Assistant komt de laatste uit de opslag van de beurten
+  (`_async_beurten_laden`, `_beurt_kaart_uit`). Elke beurtregel heeft daarvoor
+  `charged_kwh`, `soc_start`, `soc_end` en `soc_estimated` naast de kWh van het
+  geld. Een regel van vóór v0.106.0 geeft alleen de kWh van het geld.
+
+Geen procenten bij een geschatte stand (een opgegeven stand plus de teller van de
+paal): dan zegt de kWh al alles. `soc_end` is de bijgetelde stand (`_soc_bijgeteld`),
+dus net als in het verslag soms een paar tienden boven de sensor; de kaart rondt af.
+
+**De actieradius.** Een auto kan in zijn profiel een sensor voor de actieradius
+krijgen (`range_entity`, het filter `distance` in de entiteitkiezer). Dan staat er
+"Accu auto: 28% · 138 van 493 km" (`actieradius`, `radiusTekst`). De volle radius
+is radius gedeeld door procent, twee metingen van de auto zelf; een opgave van de
+fabrikant of een aangenomen verbruik per kilometer is er niet. Alleen vanaf
+`RADIUS_MIN_PROCENT` (10%): de accustand komt in hele procenten, en op 5% kan dat
+de volle radius tien procent laten schuiven. Daaronder "6% · 30 km". Eenheden km,
+mi en m; een andere eenheid telt niet en dan blijft het bij de kWh. De kilometers
+van een beurt zijn de procenten erbij maal wat één procent nu waard is. Zonder
+sensor blijft de regel zoals hij was. De coach zelf leest de radius niet (proef 132).
+
+Gemeten in de preview op 390, 320 en 280 px: geen overloop; op 280 lopen beide
+waarden over twee regels, zoals "Reden geen stroomvraag" erboven. Proeven: 132 in
+test_coach.py, drie in test_rapport.mjs.
+

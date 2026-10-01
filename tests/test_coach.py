@@ -7185,6 +7185,94 @@ controle("het schema kent de ruimtes en de ruimte van een apparaat (het gooit on
 controle("de coach zelf leest geen ruimtes",
          '"rooms"' not in (pathlib.Path(coachmod.__file__).read_text(encoding="utf-8")), "")
 
+print("=== 132. de kaart zegt wat er deze beurt in ging, en daarna wat de laatste opleverde (v0.106.0) ===")
+# De bewoner van de eerste woning op 01-10-2026: "'Deze sessie - x kWh' ... Evt + x% of
+# + x km", en "de waardes zouden kunnen blijven staan, totdat een nieuwe laadbeurt
+# wordt gestart." De coach geeft `session` mee in zijn besluit: dezelfde kWh als het
+# verslag (`_geladen`) en de accustand van begin en eind.
+auto132 = dict(LAADPAAL["cars"][0], soc_entity="sensor.ford_soc")
+paal132 = {**LAADPAAL, "cars": [auto132]}
+inst132 = instellingen(devices=[paal132])
+hass132, _, coach132 = bouw({**huis(teruglevering=1500.0), "sensor.ford_soc": "40"}, inst132)
+t132 = dt.datetime(2026, 8, 18, 14, 37)
+
+def zet132(status, stroom, vermogen):
+    hass132.states.zet("sensor.laadpaal_status", status)
+    hass132.states.zet("sensor.laadpaal_stroom", str(stroom))
+    hass132.states.zet("sensor.laadpaal_vermogen", str(vermogen))
+
+def ronde132(minuten, c=None):
+    return asyncio.run(ronde(c or coach132, inst132, t132 + dt.timedelta(minutes=minuten), paal132))[0]
+
+b0 = ronde132(0)
+print(f"  kabel erin: {b0.get('session')}")
+controle("kabel erin, nog niets geladen: een beurt van nul",
+         b0.get("session") == {"active": True, "kwh": 0.0, "soc_start": 40.0, "soc_end": 40.0, "soc_estimated": False},
+         f"{b0.get('session')}")
+zet132("charging", 6.0, 4140)
+ronde132(1)
+ronde132(10)
+hass132.states.zet("sensor.ford_soc", "44")
+b11 = ronde132(11)
+print(f"  tien minuten op 4,14 kW: {b11.get('session')}")
+controle("onder het laden telt hij mee, met de stand van nu",
+         b11["session"]["active"] and abs(b11["session"]["kwh"] - 0.69) < 0.02
+         and b11["session"]["soc_start"] == 40.0 and b11["session"]["soc_end"] == 44.0, f"{b11.get('session')}")
+zet132("disconnected", 0.05, 0)
+ronde132(12)
+b13 = ronde132(13)
+asyncio.run(hass132.afmaken())
+print(f"  kabel eruit: {b13.get('session')}")
+controle("na het loskoppelen blijft de laatste beurt staan, met hetzelfde getal als het verslag",
+         b13.get("session") is not None and not b13["session"]["active"]
+         and abs(b13["session"]["kwh"] - 0.76) < 0.02 and round(b13["session"]["soc_end"]) == 44, f"{b13.get('session')}")
+laatste132 = b13.get("session")
+# De coach telt de accustand tussen twee meldingen van de sensor bij met wat de paal
+# leverde (`_soc_bijgeteld`), net als in het verslag; de kaart rondt af.
+# Weer een kabel erin: een nieuwe beurt, ook als er nog niets loopt.
+zet132("awaiting_start", 0.05, 0)
+b20 = ronde132(20)
+controle("een nieuwe kabel is een nieuwe beurt, ook zolang hij wacht",
+         b20["session"]["active"] and b20["session"]["kwh"] == 0.0, f"{b20.get('session')}")
+# En gaat die er weer uit zonder te laden, dan was het geen laadbeurt.
+zet132("disconnected", 0.05, 0)
+ronde132(21)
+b22 = ronde132(22)
+controle("een kabel erin en eruit zonder te laden laat de vorige beurt staan",
+         b22.get("session") == laatste132, f"{b22.get('session')} tegen {laatste132}")
+# Een herstart van Home Assistant: een nieuwe coach, dezelfde opslag.
+beurten132 = asyncio.run(coachmod.async_get_beurten(hass132).async_list())
+controle("de opslag heeft de kWh van het verslag en de accustanden",
+         any(b.get("complete") and abs((b.get("charged_kwh") or 0) - 0.76) < 0.02 and round(b.get("soc_end")) == 44
+             for b in beurten132), f"{beurten132}")
+controle("en de beurt zonder lading staat erin met nul",
+         any(b.get("complete") and b.get("charged_kwh") == 0.0 for b in beurten132), f"{beurten132}")
+nieuw132 = coachmod.ChargerCoach(hass132)
+nieuw132._sleep = lambda seconds: asyncio.sleep(0)
+asyncio.run(nieuw132._async_beurten_laden())
+b30 = ronde132(30, nieuw132)
+print(f"  na een herstart: {b30.get('session')}")
+controle("na een herstart staat de laatste beurt er nog",
+         b30.get("session") is not None and not b30["session"]["active"]
+         and abs(b30["session"]["kwh"] - laatste132["kwh"]) < 0.01 and b30["session"]["soc_start"] == 40.0
+         and round(b30["session"]["soc_end"]) == 44, f"{b30.get('session')}")
+# Een regel van voor v0.106.0 heeft alleen de kWh van het geld.
+oud132 = coachmod.ChargerCoach._beurt_kaart_uit({"kwh": 3.21, "complete": True})
+controle("een oude regel geeft alleen de kWh", oud132 == {"active": False, "kwh": 3.21, "soc_start": None,
+         "soc_end": None, "soc_estimated": False}, f"{oud132}")
+controle("en een oude regel zonder lading niets", coachmod.ChargerCoach._beurt_kaart_uit({"kwh": 0.0}) is None, "")
+# Een gast zonder accustand: alleen de kWh, geen procenten.
+gast132 = {"begon": None, "soc_begin": None}
+kaart_gast = coach132._beurt_kaart(paal132, gast132, actief=True)
+controle("zonder accustand geen procenten", kaart_gast["soc_start"] is None and kaart_gast["soc_end"] is None,
+         f"{kaart_gast}")
+# De sensor voor de actieradius staat in het autoprofiel; het schema gooit onbekende
+# velden weg, dus hij moet erin staan. De coach zelf rekent er niet mee.
+bron132 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
+           / "websocket.py").read_text(encoding="utf-8")
+controle("het schema van een auto kent de actieradius", 'vol.Optional("range_entity", default="")' in bron132, "")
+controle("de coach leest de actieradius niet", "range_entity" not in pathlib.Path(coachmod.__file__).read_text(encoding="utf-8"), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
