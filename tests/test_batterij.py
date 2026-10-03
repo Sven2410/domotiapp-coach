@@ -937,6 +937,35 @@ buiten39 = bat.met_paal(bat.Besluit(bat.NUL, reason="nul", rule="nul"), True, b3
 controle("laadt de paal buiten zijn plan (Snel, een andere sturing), dan helpt hij zoals altijd",
          buiten39.rule == "auto-helpen", f"{buiten39.rule}")
 
+print("=== 40. geen handelen zonder terugleverprijs (v0.106.2) ===")
+# De eerste woning op 03-10-2026, 09:00 tot 12:01: drie keer "handelen. Terugleveren
+# brengt nu € 0,000 op". De marktsensor is daar de all-in sensor, dus de opbrengst van
+# teruglevering is onbekend en telt als nul. De dag had meer zon dan er in de batterij
+# past, dus de som vond zon nu opslaan even veel waard als straks; stilstaan mag niet
+# met zelf nul, en bij gelijke kosten won het kleinste gebaar: één stap naar het net.
+# Gemeten: 4,57 kWh zon naar het net, de batterij bleef op 21% en gaf er 0,48 kWh aan
+# het net bij. Om 12:16 kwam de auto, en die gaat voor.
+P40 = [0.30] * 7 + [0.33, 0.30, 0.24, 0.24, 0.23, 0.21, 0.22, 0.27, 0.32, 0.37, 0.40, 0.41, 0.40,
+                    0.36, 0.33, 0.31, 0.30]
+ZON40 = {8: 0.5, 9: 1.5, 10: 2.5, 11: 3.5, 12: 4.5, 13: 4.5, 14: 4.0, 15: 3.5, 16: 2.5, 17: 1.0}
+N40 = DAG + dt.timedelta(hours=9)
+for naam40, terug40 in (("onbekend", None), ("bekend, 0,05", 0.05)):
+    b40 = anker(21.0, handelen=True, zelf_nul=True)
+    p40 = plan_batterij(N40, prijzen(P40, terug=terug40), Tariff(), verwachting(ZON40, huis=0.3, dagen=1), b40)
+    ochtend40 = [(f"{u.start:%H:%M}", u.stand, round(u.kwh, 2)) for u in p40.uren if u.start.hour < 12]
+    print(f"  terugleverprijs {naam40}: {p40.rule}, ochtend {ochtend40}")
+    if terug40 is None:
+        controle("zonder terugleverprijs geen handelen, nu niet en niet in het plan",
+                 p40.stand != HANDELEN and not any(u.stand == HANDELEN for u in p40.uren), f"{p40.rule} {ochtend40}")
+        controle("en de ochtendzon gaat erin: nul op de meter", p40.stand == NUL and all(k > 0 for *_, k in ochtend40),
+                 f"{p40.rule} {ochtend40}")
+# Met een bekende terugleverprijs mag de som nog altijd handelen: dat is een echte som.
+b40h = anker(80.0, handelen=True)
+avond40 = plan_batterij(DAG + dt.timedelta(hours=17), prijzen(P40, terug=[p - 0.02 for p in P40]), Tariff(),
+                        verwachting({}, huis=0.3, dagen=1), b40h)
+controle("met een bekende terugleverprijs kan hij nog handelen", any(u.stand == HANDELEN for u in avond40.uren),
+         f"{[(f'{u.start:%H:%M}', u.stand) for u in avond40.uren]}")
+
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

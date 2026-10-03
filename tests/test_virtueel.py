@@ -1450,6 +1450,21 @@ def bat_tussen(vl, van, tot, dag=0):
     return [r for r in vl.bat_verloop if a <= r[0] < b]
 
 
+# Geen handelen zonder terugleverprijs (v0.106.2). De eerste woning op 03-10-2026:
+# de marktsensor is de all-in sensor, en de batterij stond de hele ochtend op
+# "handelen, terugleveren brengt nu € 0,000 op" terwijl de zon naar het net ging.
+# Met v0.106.1 hier 5,6 uur handelen, 9,7% om 12:00 en 41% om 22:00.
+if (vz := v("batterij-zonder-terugleverprijs")):
+    s09, s12, s22 = vz.bat_soc_op("09:00"), vz.bat_soc_op("12:00"), vz.bat_soc_op("22:00")
+    print(f"  zonder terugleverprijs: {s09:.0f}% om 09:00, {s12:.0f}% om 12:00, {s22:.0f}% om 22:00, "
+          f"{vz.bat_minuten('handelen'):.0f} min handelen")
+    controle("zonder terugleverprijs: nooit handelen", vz.bat_minuten("handelen") == 0,
+             f"{vz.bat_minuten('handelen'):.0f} min")
+    controle("zonder terugleverprijs: de ochtendzon gaat in de batterij", s12 >= s09 + 40, f"{s09:.0f} -> {s12:.0f}")
+    controle("zonder terugleverprijs: 's avonds zit er meer in dan met handelen voor niets (41%)", s22 >= 60,
+             f"{s22:.0f}%")
+
+
 for naam, vl in V.items():
     if vl.scenario.batterij is None:
         continue

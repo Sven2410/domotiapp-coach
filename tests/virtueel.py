@@ -914,6 +914,9 @@ class Scenario:
     naam: str
     uitleg: str = ""
     contract: str = "vast"   # vast | vast-salderen | dynamisch | dynamisch-markt | dynamisch-salderen
+    # De marktsensor is dezelfde als de all-in sensor, zoals in de eerste woning: dan
+    # is de opbrengst van teruglevering onbekend (`_prices` in coach.py).
+    markt_is_all_in: bool = False
     zon: Zon = field(default_factory=Zon)
     huis: Huis = field(default_factory=Huis)
     auto: Auto = field(default_factory=Auto)
@@ -1277,7 +1280,7 @@ def instellingen(s: Scenario) -> dict:
                 "source": "market" if markt else "all_in",
                 "interval": "hour",
                 "all_in_entity": "" if markt else E["prijs"],
-                "market_entity": E["markt"],
+                "market_entity": E["prijs"] if s.markt_is_all_in else E["markt"],
                 "energy_tax": s.prijzen.energiebelasting,
                 "supplier_markup": s.prijzen.opslag,
                 "vat_percent": s.prijzen.btw,
