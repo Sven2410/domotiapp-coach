@@ -5770,6 +5770,12 @@ class ChargerCoach:
         # gauw "nu van het net" terwijl drie fasen straks ruim op tijd zijn.
         if fasen_nu == 1 and op_zon(een):
             huidig = replace(een, reason=f"{een.reason} Hij laadt op één fase.".strip())
+        elif drie.rule == een.rule == "zon-wacht":
+            # Allebei wachten op zon: dan begint hij op één fase, en is dat de
+            # drempel die de bewoner hoort te lezen (v0.106.3). In de eerste
+            # woning op 03-10-2026 om 13:57 stond er "Hij begint vanaf 3,7 kW",
+            # terwijl hij met de wissel al bij 1,2 kW begint.
+            huidig = een
         else:
             huidig = drie
         bezig = self._fase_bezig.get(device_id)

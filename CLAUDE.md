@@ -273,7 +273,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 470 controles op het denkwerk
 python tests/test_batterij.py    # 172 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 884 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 887 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2234 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 137 op het rapport en op het paneel

@@ -7153,6 +7153,23 @@ op = c130c._fasen_besluit(T130 + dt.timedelta(minutes=5), "q", stil, drie_wacht,
 controle("volgt de paal niet: na vijf minuten opgeven, zonder nog eens om te zetten",
          op[0].rule != "fasewissel" and op[2] is None and "q" not in c130c._fase_bezig, f"{op}")
 
+# Te weinig zon voor allebei: dan wacht hij, en de drempel is die van één fase, want
+# daar begint hij (v0.106.3). In de eerste woning op 03-10-2026 om 13:57 stond er
+# "Hij begint vanaf 3,7 kW" bij een Alfen die al op 1,2 kW op één fase begint.
+for keuze130 in ("3 Phases", "1 Phase"):
+    h130w, _, c130w = bouw({**huis90(teruglevering=300.0), "select.alfen_fasen": {**FASEN, "state": keuze130}}, i130)
+    bw, vw = asyncio.run(ronde130(c130w, i130, ALFEN130, T130))
+    print(f"  0,3 kW zon, stil op {keuze130}: {bw['rule']}: {bw['reason']}")
+    controle(f"te weinig zon, stil op {keuze130}: hij wacht en noemt de drempel van één fase",
+             bw["rule"] == "zon-wacht" and "1,2 kW" in bw["reason"] and "3,7" not in bw["reason"] and not selecties(vw),
+             f"{bw['rule']} {bw['reason']} {vw}")
+# Zonder vinkje blijft het de drempel van drie fasen: daar begint hij ook pas.
+geen130 = {**ALFEN130, "phase_switching": False}
+i130g = inst130(geen130)
+_, _, c130g = bouw({**huis90(teruglevering=300.0), "select.alfen_fasen": FASEN}, i130g)
+bg, _ = asyncio.run(ronde130(c130g, i130g, geen130, T130))
+controle("zonder vinkje noemt hij de drempel van drie fasen", "3,7 kW" in bg["reason"], f"{bg['reason']}")
+
 # Wie het niet mag: een Easee, een eenfasige auto, zonder vinkje, of op adviseren.
 for naam, apparaat, niveau in (
     ("een Easee met het vinkje", {**LAADPAAL, "phase_switching": True, "charge_mode": "zon", "cars": [DRIE_AUTO],

@@ -134,7 +134,10 @@ Die nacht vijf keer naar drie en zes keer naar één, altijd zonder stroom.
   Het tempo-leren krijgt de auto op het aantal fasen waarop hij laadt (`car_nu`);
   de maat voor Bespaard blijft het profiel.
 - **Op de kaart**: "Hij laadt op één fase." achter de reden, en `phases_now` in
-  de stand.
+  de stand. Wacht hij op zon, dan noemt hij de drempel van één fase (v0.106.3):
+  daar begint hij. In de eerste woning stond er op 03-10-2026 om 13:57, met het
+  vinkje aan, "Hij begint vanaf 3,7 kW", de drempel van drie fasen; nu "vanaf
+  1,2 kW". Zonder vinkje blijft het 3,7 kW (proef 130).
 
 In het virtuele huis (`Paal(fasen_keuze=...)`, `Scenario.fasen_wisselen`; een
 wissel terwijl de auto trekt telt en hoort nul te zijn), met een driefasige auto
