@@ -9498,17 +9498,25 @@ class ChargerCoach:
         instelling niet klopt. Een meting die weifelt zet de teller op nul, dus
         er wordt alleen iets gezegd over een paal die er al minuten stabiel bij
         staat.
+
+        Een ronde zonder bruikbare meting weifelt niet, die zegt niets: de stand
+        van deze beurt blijft staan, en de teller ook (v0.106.1). In de eerste
+        woning op 03-10-2026 wiste zo'n ronde de gemeten fase. De Alfen meldt
+        elke 30 s, en een stroom die gelijk bleef was 30 s ouder dan het
+        vermogen; dan rekende de coach met het driefasige profiel en ging de
+        paal met 4,3 kW zon van 13 naar 6 A, drie keer in twintig minuten.
+        Alleen een andere meting, drie ronden lang, of een nieuwe beurt zet hem om.
         """
         device_id = device.get("id", "")
+        vast = self._fase_nu.get(device_id)
         gemeten = self._measured_phases(device)
         if gemeten is None:
-            self._fasen_gemeten.pop(device_id, None)
-            return None
+            return vast
 
         vorig, keer = self._fasen_gemeten.get(device_id, (0, 0))
         keer = keer + 1 if vorig == gemeten else 1
         self._fasen_gemeten[device_id] = (gemeten, keer)
-        return gemeten if keer >= FASEMETING_RONDEN else None
+        return gemeten if keer >= FASEMETING_RONDEN else vast
 
     def _restore(self, settings: dict[str, Any]) -> None:
         """De knoppen van de bewoner terughalen na een herstart.

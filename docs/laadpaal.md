@@ -765,3 +765,34 @@ Gemeten in de preview op 390, 320 en 280 px: geen overloop; op 280 lopen beide
 waarden over twee regels, zoals "Reden geen stroomvraag" erboven. Proeven: 132 in
 test_coach.py, drie in test_rapport.mjs.
 
+
+## Een ronde zonder fasemeting laat de gemeten fase staan (v0.106.1)
+
+In de eerste woning op 03-10-2026, van 12:29 tot 12:53: een Tesla met een driefasig
+profiel aan een Alfen die op "1 Phase" stond, modus Zon, 4,0 tot 4,3 kW over. De
+limiet ging om de paar minuten van 13 naar 6 A en terug (12:29:18 13, 12:35:18 6
+"4,3 kW zon over", 12:38:18 13, 12:42:18 6 "3,9 kW, met 0,3 kW van het net erbij",
+12:45:18 13, 12:53:18 6). Op 6 A slokte de thuisbatterij de rest op, 2,5 kW. De
+bewoner: "blijft op en neer pendelen."
+
+De fasemeting (`_measured_phases`) gebruikt vermogen en stroom alleen als ze binnen
+`FASEMETING_VERS` (10 s) van elkaar gemeld zijn. De integratie alfen_modbus pollt
+elke 30 s en schrijft een sensor alleen als zijn waarde verandert; het vermogen
+schommelt met de spanning, maar de stroom bleef soms gelijk (13,09 om 12:34:46 en
+12:35:16). Dan was de stroom 30 s ouder dan het vermogen en zei de meting niets.
+`_fasen_stabiel` wiste daarop de gemeten fase, `phases_measured` viel weg, en de
+coach rekende met de drie fasen van het profiel: 4,3 kW is op drie fasen 6 A. Drie
+ronden later mat hij weer één fase. `last_reported` helpt hier niet: nagemeten om
+13:00, een gelijke waarde schuift ook die niet op.
+
+Nu laat een ronde zonder bruikbare meting de stand van deze beurt staan, en de
+teller ook. Alleen een andere meting, drie ronden lang, of een nieuwe beurt zet hem
+om. Een meting die weifelt (een andere uitkomst) zet de teller zoals altijd op nul.
+
+In het virtuele huis (`Paal.stroom_meldt_wissel`, met de schommeling van de stroom
+zoals die middag gemeten, `STROOM_RUIS`): `alfen-een-fase-zon` met v0.106.0 16 en 6 A
+om de zeven minuten en vol om 16:25, nu de hele middag 16 A en vol om 13:32, gelijk
+aan `alfen-een-fase-zon-vers` met een stroom die elke ronde meldt (13:31). Proef 133
+in test_coach.py, voor een Easee en een Alfen. Een Alfen met het vinkje Fasen
+wisselen gebruikt deze meting niet (v0.104.0); in de eerste woning staat dat vinkje
+sinds 03-10-2026 13:08 aan.

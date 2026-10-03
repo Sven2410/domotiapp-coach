@@ -282,6 +282,23 @@ if (vf := v("alfen-fasen-dynamisch")) and (vd := v("alfen-drie-dynamisch")):
     naar_drie = next((t for t, f, _ in vf.fase_wissels if f == 3), None)
     controle("fasen, dynamisch: vóór het eerste goedkope uur van het net staat hij op drie fasen",
              eerste_net is not None and naar_drie is not None and naar_drie <= eerste_net, f"{naar_drie} / {eerste_net}")
+# Een ronde zonder fasemeting laat de gemeten fase staan (v0.106.1). In de eerste
+# woning op 03-10-2026 ging de paal met 4,3 kW zon om de paar minuten van 13 naar
+# 6 A, omdat de stroom van de Alfen niet opnieuw meldt als hij gelijk blijft. Met
+# v0.106.0 hier 16 en 6 A om de zeven minuten, en vol om 16:25 in plaats van 13:32.
+if (vs := v("alfen-een-fase-zon")) and (vv := v("alfen-een-fase-zon-vers")):
+    terug = [r for r in regels_in(vs, "11:00", "15:00")
+             if r.tijd.date() == vs.regels[0].tijd.date() and r.regel.startswith("zon-modus") and r.amps <= 8]
+    print(f"  driefasig profiel op 1 Phase, helder: vol om {vs.klaar_op:%a %H:%M} "
+          f"(met een stroom die elke ronde meldt {vv.klaar_op:%a %H:%M}), {len(terug)} rondes op 8 A of minder tussen 11 en 15")
+    controle("een fase: midden op een heldere dag nooit terug naar de ondergrens", not terug,
+             f"{[(f'{r.tijd:%H:%M}', r.amps) for r in terug[:6]]}")
+    controle("een fase: even snel vol als met een stroom die elke ronde meldt",
+             vs.klaar_op is not None and vv.klaar_op is not None
+             and abs((vs.klaar_op - vv.klaar_op).total_seconds()) <= 600, f"{vs.klaar_op} / {vv.klaar_op}")
+    controle("een fase: de bewoner hoort één keer dat het profiel niet klopt",
+             len(meldingen(vs, "één fase geladen")) == 1, f"{[m for _, m in vs.meldingen]}")
+
 # Easee wisselt nooit, ook niet met de vink: die hoort alleen bij een Alfen.
 fout_easee = [naam for naam, vl in V.items()
               if vl.scenario.paal.merk != "alfen" and (vl.fase_wissels or vl.regels_met("fasewissel"))]

@@ -1255,6 +1255,18 @@ alfen_fasen_dyn = alfen_drie_dyn.kopie(
     naam="alfen-fasen-dynamisch", uitleg="dezelfde dag, de Alfen mag wisselen: het net op drie fasen, zon op één",
     paal=Paal(merk="alfen", fasen_keuze=1), fasen_wisselen=True,
 )
+# Een driefasig profiel aan een Alfen die op "1 Phase" staat en niet wisselt, in de
+# modus zon, zoals in de eerste woning op 03-10-2026. De stroom meldt alleen als hij
+# verandert; tot v0.106.1 wiste een ronde zonder fasemeting de gemeten fase, en dan
+# ging de paal met 4,3 kW zon van 13 naar 6 A, drie keer in twintig minuten.
+alfen_een_fase = alfen_drie_zon.kopie(
+    naam="alfen-een-fase-zon", uitleg="driefasige auto aan een Alfen op 1 Phase, helder, de stroom meldt alleen een wissel",
+    zon=Zon(wolken="helder"), paal=Paal(merk="alfen", fasen_keuze=1, stroom_meldt_wissel=True),
+)
+alfen_een_fase_vers = alfen_een_fase.kopie(
+    naam="alfen-een-fase-zon-vers", uitleg="dezelfde dag, de stroom meldt elke ronde",
+    paal=Paal(merk="alfen", fasen_keuze=1),
+)
 alfen_doel_80 = doel_onder_auto.kopie(
     naam="alfen-doel-80", uitleg="doel-80 aan een Alfen: de 0 blijft elke minuut komen, anders laadt de paal na zijn geldigheidsduur op 16 A door",
     paal=Paal(merk="alfen"),
@@ -1286,6 +1298,7 @@ forecast_solar_vaatwasser = vaatwasser_zon.kopie(
 ALLE = [
     alfen_zonnig, alfen_dyn, alfen_doel_80, alfen_laadgrens,
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,
+    alfen_een_fase, alfen_een_fase_vers,
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,
