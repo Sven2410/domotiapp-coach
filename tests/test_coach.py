@@ -7273,6 +7273,56 @@ bron132 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" 
 controle("het schema van een auto kent de actieradius", 'vol.Optional("range_entity", default="")' in bron132, "")
 controle("de coach leest de actieradius niet", "range_entity" not in pathlib.Path(coachmod.__file__).read_text(encoding="utf-8"), "")
 
+print("=== 133. een ronde zonder fasemeting laat de gemeten fase staan (v0.106.1) ===")
+# In de eerste woning op 03-10-2026, 12:29 tot 12:53: een driefasig profiel, de paal
+# op één fase, modus Zon met 4,0 tot 4,3 kW over. De limiet ging om de paar minuten
+# van 13 naar 6 A en terug. De Alfen meldt elke 30 s; was de stroom gelijk aan de
+# vorige keer, dan was hij 30 s ouder dan het vermogen (12:35:18, 12:42:18,
+# 12:53:18), gaf de fasemeting niets, rekende de coach met de drie fasen van het
+# profiel en werd 4,3 kW 6 A. Drie ronden later weer één fase en 13 A.
+DRIE133 = dict(LAADPAAL["cars"][0], phases="three", capacity_kwh=60.0)
+for naam133, paal133, waarden133, laadt133 in (
+    ("Easee", {**LAADPAAL, "charge_mode": "zon", "cars": [DRIE133]},
+     huis(status="ready_to_charge", teruglevering=1200.0), {"sensor.laadpaal_status": "charging"}),
+    ("Alfen", {**ALFEN, "charge_mode": "zon", "cars": [DRIE133]},
+     huis90(teruglevering=1200.0), {"sensor.alfen_laadt": "on", "sensor.alfen_modus3": "C2"}),
+):
+    i133 = inst130(paal133)
+    h133, _, c133 = bouw(waarden133, i133)
+    T133 = dt.datetime(2026, 8, 18, 12, 0)
+    asyncio.run(ronde130(c133, i133, paal133, T133))
+    for sleutel, waarde in laadt133.items():
+        h133.states.zet(sleutel, waarde)
+    for minuut in range(1, 7):
+        h133.states.zet("sensor.laadpaal_stroom", "13.1")
+        h133.states.zet("sensor.laadpaal_vermogen", "3100")
+        voor133, _ = asyncio.run(ronde130(c133, i133, paal133, T133 + dt.timedelta(minutes=minuut)))
+    print(f"  {naam133}, 4,3 kW zon, gemeten op één fase: {voor133['rule']} {voor133['amps']} A")
+    controle(f"{naam133}: op één fase gemeten gaat 4,3 kW zon naar boven de 6 A",
+             voor133["amps"] >= 12 and voor133["rule"].startswith("zon-modus"),
+             f"{voor133['rule']} {voor133['amps']}")
+    # De stroom meldde niets nieuws: hij is 30 s ouder dan het vermogen.
+    h133.states.zet("sensor.laadpaal_vermogen", "3100")
+    h133.states.verouder("sensor.laadpaal_stroom", 30)
+    controle(f"{naam133}: de meting zelf zegt die ronde niets", c133._measured_phases(paal133) is None,
+             f"{c133._measured_phases(paal133)}")
+    na133, _ = asyncio.run(ronde130(c133, i133, paal133, T133 + dt.timedelta(minutes=7)))
+    print(f"  {naam133}, de stroom 30 s oud: {na133['rule']} {na133['amps']} A")
+    controle(f"{naam133}: een ronde zonder meting zet hem niet terug op 6 A",
+             na133["amps"] == voor133["amps"] and na133["rule"].startswith("zon-modus"),
+             f"{na133['rule']} {na133['amps']} tegen {voor133['amps']}")
+    controle(f"{naam133}: en de kaart zegt nog steeds dat hij op één fase laadt",
+             "één fase" in na133["tip"], f"{na133['tip']}")
+    # Een nieuwe beurt begint opnieuw: na het stoppen telt de oude fase niet meer.
+    h133.states.zet("sensor.laadpaal_stroom", "0")
+    h133.states.zet("sensor.laadpaal_vermogen", "0")
+    for sleutel, waarde in ({"sensor.laadpaal_status": "ready_to_charge"} if naam133 == "Easee"
+                            else {"sensor.alfen_laadt": "off", "sensor.alfen_modus3": "B2"}).items():
+        h133.states.zet(sleutel, waarde)
+    asyncio.run(ronde130(c133, i133, paal133, T133 + dt.timedelta(minutes=8)))
+    controle(f"{naam133}: na het stoppen is de gemeten fase weg",
+             c133._fase_nu.get(paal133["id"]) is None, f"{c133._fase_nu}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

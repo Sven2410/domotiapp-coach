@@ -363,6 +363,12 @@ class Auto:
 
 # --- de laadpaal -------------------------------------------------------------
 
+# De gemelde stroom van de Tesla aan de Alfen in de eerste woning, 03-10-2026
+# 12:30 tot 12:36 op een limiet van 13 A, per minuut: 13,03 / 13,07 / 13,09 /
+# 13,13 / 13,01 / 13,09 en nog eens 13,09, hier rond het gemiddelde. Eén ronde op
+# de zeven is hij gelijk aan de vorige; zie `Paal.stroom_meldt_wissel`.
+STROOM_RUIS = (-0.04, 0.0, 0.02, 0.06, -0.06, 0.02, 0.02)
+
 
 @dataclass
 class Paal:
@@ -411,6 +417,12 @@ class Paal:
     # zijn: de coach zet eerst 0 A, zoals evcc in de eerste woning op 30-09-2026.
     fasen_keuze: int | None = None
     wissels_onder_last: int = 0
+    # Zoals de Alfen in de eerste woning op 03-10-2026: de integratie schrijft een
+    # sensor alleen als zijn waarde verandert. Het vermogen schommelt met de
+    # spanning en is elke poll nieuw; een stroom die gelijk bleef houdt zijn oude
+    # tijd. Met dit aan krijgen stroom en vermogen de tijd van de wereld, en
+    # schommelt de gemelde stroom zoals daar gemeten (`STROOM_RUIS`).
+    stroom_meldt_wissel: bool = False
     boven_groep_sinds: dt.datetime | None = None
     herstarts: int = 0
     terugvallen: int = 0
@@ -1509,6 +1521,7 @@ class Wereld:
         self.p1_weg_tot: dt.datetime | None = None
         # De laatste melding van een P1 die niet elke stap meldt: (tijd, netto).
         self.meter_melding: tuple[dt.datetime, float] | None = None
+        self.stroom_gemeld: tuple[str, dt.datetime | None] = ("", None)
         self.prijzen_weg_tot: dt.datetime | None = None
         self.oven_tot: dt.datetime | None = None
         self.equalizer_vrij: float | None = None
@@ -1703,8 +1716,18 @@ class Wereld:
             if self.paal.fasen_keuze is not None:
                 z(E["alfen_fasen"], {"state": "1 Phase" if self.paal.fasen_keuze == 1 else "3 Phases",
                                      "attributes": {"options": ["1 Phase", "3 Phases"]}})
-        z(E["stroom"], w(f"{self.auto.trekt_amps:.2f}", "A"))
-        z(E["vermogen"], w(f"{self.paal_w:.0f}", "W"))
+        if self.paal.stroom_meldt_wissel:
+            amps = self.auto.trekt_amps
+            if amps > 0:
+                amps += STROOM_RUIS[(nu.hour * 60 + nu.minute) % len(STROOM_RUIS)]
+            if f"{amps:.2f}" != self.stroom_gemeld[0]:
+                self.stroom_gemeld = (f"{amps:.2f}", nu)
+            z(E["stroom"], w(self.stroom_gemeld[0], "A"),
+              last_updated=self.stroom_gemeld[1].replace(tzinfo=dt.timezone.utc))
+            z(E["vermogen"], w(f"{self.paal_w:.0f}", "W"), last_updated=nu.replace(tzinfo=dt.timezone.utc))
+        else:
+            z(E["stroom"], w(f"{self.auto.trekt_amps:.2f}", "A"))
+            z(E["vermogen"], w(f"{self.paal_w:.0f}", "W"))
         z(E["max"], w(f"{self.paal.max_amps:.0f}", "A"))
         z(E["dyn"], w(f"{self.paal.dyn_limit:.0f}", "A"))
         if self.paal.circuit_amps is not None:
