@@ -291,6 +291,22 @@ class _Som:
     piek: bool = True
 
 
+def _mag_handelen(b: Batterij, rij: dict) -> bool:
+    """Of de batterij in dit blok aan het net mag leveren.
+
+    Alleen met handelen aan en een terugleverprijs die bekend is (v0.106.2).
+    Zonder die prijs telt teruglevering in `_kosten` als nul, en dan is aan het
+    net leveren nooit winst maar hooguit gelijkspel. In de eerste woning op
+    03-10-2026 won dat gelijkspel: de marktsensor was daar de all-in sensor, de
+    dag had meer zon dan er in de batterij paste, en met zelf nul (stilstaan mag
+    niet) was één stap naar het net een kleiner gebaar dan de ochtendzon opslaan.
+    Van 09:00 tot 12:00 ging er 4,57 kWh zon naar het net, de batterij bleef op
+    21% en gaf er 0,48 kWh bij, "Terugleveren brengt nu € 0,000 op". Om 12:16
+    kwam de auto en die ging voor, dus die zon kwam er die dag niet meer in.
+    """
+    return b.handelen and rij.get("feed_in") is not None
+
+
 def _mogelijk(
     e: float, rij: dict, deel: float, huis: float, b: Batterij, som_laag: float,
     hoog: float, eta: float, piek: bool = True,
@@ -301,7 +317,7 @@ def _mogelijk(
         # Eis 4: in de avondpiek komt er niets van het net bij. Zon mag.
         op = min(op, e + max(0.0, -huis) * eta)
     neer_w = b.max_discharge_w / 1000.0 * deel
-    if not b.handelen:
+    if not _mag_handelen(b, rij):
         # Zonder handelen gaat er niets naar het net: hooguit wat het huis vraagt.
         neer_w = min(neer_w, max(0.0, huis))
     neer = max(min(som_laag, e), e - neer_w / eta)
@@ -310,7 +326,7 @@ def _mogelijk(
 
 def _zelf_toegestaan(
     kandidaten: set[float], e: float, deel: float, huis: float, b: Batterij,
-    som_laag: float, hoog: float, eta: float, stap: float = 0.0,
+    som_laag: float, hoog: float, eta: float, stap: float = 0.0, handelen: bool | None = None,
 ) -> set[float]:
     """Wat er van de kandidaten overblijft als de batterij zelf nul op de meter doet.
 
@@ -332,9 +348,14 @@ def _zelf_toegestaan(
     eerste woning op 30-09-2026, tien keer, allemaal op 94 of 95%. Het restje
     van een kwartier dat bijna om is blijft wel mogen, anders stopte een beurt
     elk kwartier 2:20 te vroeg (proef 37 in test_batterij.py).
+
+    `handelen` is of dit blok aan het net mag leveren (`_mag_handelen`);
+    zonder is het de instelling van de batterij.
     """
     if not b.zelf_nul:
         return kandidaten
+    if handelen is None:
+        handelen = b.handelen
     if huis > 0:
         nul = max(min(som_laag, e), e - min(b.max_discharge_w / 1000.0 * deel, huis) / eta)
     elif huis < 0:
@@ -349,7 +370,7 @@ def _zelf_toegestaan(
     erop = boven + min(stap, max(0.0, op_blok - boven)) - 1e-9
     eraf = onder - min(stap, max(0.0, onder - neer_blok)) + 1e-9
     for k in kandidaten:
-        if (k > boven + 1e-9 and k >= erop) or (b.handelen and k < onder - 1e-9 and k <= eraf):
+        if (k > boven + 1e-9 and k >= erop) or (handelen and k < onder - 1e-9 and k <= eraf):
             uit.add(k)
     return uit
 
@@ -439,7 +460,8 @@ def _waarde_vooruit(
             for i in range(max(0, eerste), min(STAPPEN, laatste) + 1):
                 kandidaten.add(rooster[i])
             kandidaten = _zelf_toegestaan(
-                kandidaten, e, deel, h, b, bodem, hoog, eta, 0.0 if k == 0 and _loopt_al(b, rij) else stap
+                kandidaten, e, deel, h, b, bodem, hoog, eta, 0.0 if k == 0 and _loopt_al(b, rij) else stap,
+                handelen=_mag_handelen(b, rij),
             )
             begin.append(
                 min(
@@ -467,7 +489,8 @@ def _beste_stap(som: _Som, k: int, e: float, b: Batterij) -> float:
         kandidaten.add(som.laag + i * som.stap)
         i += 1
     kandidaten = _zelf_toegestaan(
-        kandidaten, e, deel, h, b, bodem, som.hoog, som.eta, 0.0 if k == 0 and _loopt_al(b, rij) else som.stap
+        kandidaten, e, deel, h, b, bodem, som.hoog, som.eta, 0.0 if k == 0 and _loopt_al(b, rij) else som.stap,
+        handelen=_mag_handelen(b, rij),
     )
     # Bij gelijke kosten wint niets doen, en daarna het kleinste gebaar: een
     # batterij die zonder reden beweegt slijt voor niets.

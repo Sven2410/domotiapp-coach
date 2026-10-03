@@ -883,3 +883,27 @@ het verlies)", de goedkoopste prijs tot morgenvroeg gedeeld door het rendement
 (`_bijladen_zin`). Reiken de prijzen niet tot morgenvroeg, dan staat er "in de
 bekende uren" bij. Eén zin, want de kaart toont alleen de laatste
 (`nachtConclusie`).
+
+## Geen handelen zonder terugleverprijs (v0.106.2)
+
+In de eerste woning op 03-10-2026 stond de batterij van 09:00 tot 12:01 drie keer op
+"handelen. Terugleveren brengt nu € 0,000 op". De marktsensor is daar de all-in sensor,
+dus wat teruglevering oplevert is onbekend (`_prices` in coach.py geeft dan `feed_in`
+None), en `_kosten` telt het als nul. De dag had meer zon dan er in de batterij paste
+("van die zon past 6,7 kWh niet meer in de accu"), dus voor de som was zon nu opslaan
+even veel waard als straks. Stilstaan mag niet als de batterij zelf nul doet
+(`_zelf_toegestaan`), en bij gelijke kosten wint in `_beste_stap` het kleinste gebaar:
+één stap naar het net (0,33 kWh) was kleiner dan de ochtendzon opslaan.
+
+Gemeten: 4,57 kWh zon naar het net (P1 export 09:00 tot 12:00), de batterij bleef op
+21% en gaf er 0,48 kWh aan het net bij. Om 12:16 kwam de auto en die gaat voor, dus die
+zon kwam er die dag niet meer in. Om 13:22 nog eens: de kabel was een minuut uit de
+auto, en meteen leverde de batterij 200 W aan het net terwijl er 3,8 kW zon heen ging.
+
+Nu mag de batterij alleen aan het net leveren in een blok met een bekende
+terugleverprijs (`_mag_handelen`, in `_mogelijk` en `_zelf_toegestaan`). Zonder valt hij
+terug op nul op de meter en slaat hij de zon op. Met een bekende terugleverprijs
+verandert er niets: met € 0,05 koos dezelfde som de ochtendzon al op te slaan, en een
+avond met een prijs die hoger is dan de nacht wordt nog gewoon verhandeld. Proef 40 in
+test_batterij.py (valt om met v0.106.1). Een echte terugleverprijs krijgt de coach met
+een marktsensor die niet de all-in sensor is; het paneel zegt dat bij de prijsbron.

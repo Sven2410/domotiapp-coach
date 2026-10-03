@@ -870,6 +870,16 @@ batterij_vast_zon = Scenario(
     "vast contract, heldere dag, batterij op 20%: overschot erin, de avond en de nacht eruit",
     contract="vast", zon=Zon(wolken="helder"), batterij=Batterij(soc=20.0), **ZONDER_AUTO,
 )
+# De eerste woning op 03-10-2026: de marktsensor is daar de all-in sensor, dus wat
+# teruglevering oplevert is onbekend. Met handelen aan en zelf nul stond de batterij
+# tot v0.106.2 de hele ochtend op "handelen, terugleveren brengt nu € 0,000 op": 4,57
+# kWh zon naar het net, de batterij bleef op 21% en gaf er 0,48 kWh bij.
+batterij_zonder_terug = batterij_vast_zon.kopie(
+    naam="batterij-zonder-terugleverprijs",
+    uitleg="dynamisch, de marktsensor is de all-in sensor, handelen aan, zelf nul, heldere dag, batterij op 21%: de ochtendzon gaat erin",
+    contract="dynamisch", markt_is_all_in=True,
+    batterij=Batterij(soc=21.0, eigen_nul=True, zelf_nul=True, handelen=True),
+)
 batterij_vast_salderen = batterij_vast_zon.kopie(
     naam="batterij-vast-salderen",
     uitleg="vast contract met salderen: opslaan kost alleen het verlies, dus wat erin zit gaat eruit en er komt niets bij",
@@ -1193,7 +1203,7 @@ batterij_zonder_rendement = batterij_winter.kopie(
 )
 
 BATTERIJ = [
-    batterij_vast_zon, batterij_vast_salderen, batterij_winter, batterij_zomer, batterij_handelen,
+    batterij_vast_zon, batterij_zonder_terug, batterij_vast_salderen, batterij_winter, batterij_zomer, batterij_handelen,
     batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_paal, batterij_paal_stopt, batterij_sprong,
     batterij_meter_weg, batterij_herstart, batterij_anker_sensor, batterij_uurlast,
     batterij_klapperlast, batterij_wisselende_last, batterij_zonder_rendement,
