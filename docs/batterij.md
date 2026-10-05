@@ -632,6 +632,47 @@ niet meer als rest hoeft te rekenen; zie `docs/eerste-woning.md` onder In geld. 
 aankoopprijs en een terugverdientijd stonden er van v0.73.0 tot v0.101.1; zie
 `docs/eerste-woning.md` onder In geld waarom ze eruit zijn.
 
+**Laden is inkopen (v0.107.0).** De eigenaar op 05-10-2026, bij "Opgeleverd € 0,74
+in 8 dagen" op de kaart thuis: "dat geld fluctueert telkens en klopt niet, waar
+wordt dat vandaan gehaald? Komt ook niet overeen met de historie." Het kasboek
+rekent laden af op het moment zelf (van het net de inkoop, uit de zon wat
+terugleveren had opgebracht, met salderen bijna de hele prijs) en ontladen
+levert het later terug, dus zakte "Opgeleverd" elke dag terwijl de batterij
+laadde. In het virtuele huis (`batterij-dynamisch-winter`, dinsdag): 09:00
+€ 1,39, 17:00 € 0,85, 23:00 € 2,69, voor een dag die € 1,45 opleverde. En de
+kaart telde alle dagen plus vandaag tot nu, Historie alleen de gekozen periode.
+Op de schermafdruk van de eigenaar was het deel van de batterij in de week
+ongeveer € 1,9 (afgelezen van de balk), tegen € 0,74 op de kaart.
+
+Nu houdt de coach naast het kasboek een voorraad bij (`Voorraad` in
+batterij.py): wat laden kostte gaat erin, en bij ontladen gaat er een deel uit,
+zoveel als wat eruit komt van wat er boven de ondergrens nog uit kan
+(gemiddelde kostprijs). Wat er nog uit kan komt bij elke nieuwe accustand uit
+die stand en de inhoud, met het rendement voor het verlies; daartussen telt hij
+de kWh zelf. Niet per procent afrekenen: de accustand komt in hele procenten, en
+zo gerekend zakte het bedrag op proef 41 bij de eerste stap na het laden 2,7
+cent onder nul. Wat ze opleverde staat per dag in `realized_days` (en
+`realized_total`), wat er nog in zit in `stock_euro`, allebei in
+`battery_state`, naast het kasboek. Opgeleverd min wat er nog in zit is altijd
+het kasboek; leeg is het precies het kasboek. Een dag van voor v0.107.0 telt
+zoals hij geteld is (`_opgeleverd_dagen`), en wat er al in zat toen de coach
+begon te tellen kostte niets, net als in het kasboek.
+
+Op de kaart: "Opgeleverd" uit `realized_total`, en "Wat erin zit: ingekocht
+voor € 0,55" (`stock_euro` in `earned`, `opgeleverdTekst` in battery.js). In
+Historie telt Door je thuisbatterij wat ze opleverde, en staat wat er in de
+periode in de batterij bij kwam onder Uitgegeven ("Waarvan nog in je batterij",
+of "En uit je batterij, eerder betaald"); zonder trekt het eraf, zodat dat
+blijft wat het gekost had zonder batterij (`accuVerdiend` en `balans` in
+geld.js). Met salderen laat opgeleverd thuis na het ontladen eerlijk een klein
+min zien: zon erin kost bijna de hele prijs, en het verlies is er echt.
+
+Nagemeten in het virtuele huis: dinsdag blijft de kaart de hele laaddag (09:00
+tot 17:00) op € 1,40 staan terwijl de voorraad van € 0,01 naar € 0,55 loopt, en
+om 23:00 staat er € 2,88 met € 0,19 in de batterij (kasboek € 2,69). Elk
+batterijscenario in test_virtueel.py controleert nu dat opgeleverd min de
+voorraad het kasboek is, en dat de kaart niet zakt terwijl de batterij laadt.
+
 In het paneel: het type thuisbatterij staat er weer in (`DEVICE_TYPES`; het is
 uit `VERVALLEN_TYPES`), merken Anker en Overig met dezelfde velden
 (`BATTERY_FIELDS` in devices.js), de instellingen van de bewoner in

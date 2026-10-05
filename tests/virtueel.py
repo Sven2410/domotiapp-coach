@@ -1126,6 +1126,8 @@ class Verloop:
     # De fasewissels van een Alfen (v0.104.0): (tijd, fasen, trok de auto toen).
     fase_wissels: list = field(default_factory=list)
     bat_verloop: list = field(default_factory=list)
+    # Wat de kaart van de batterij per stap zei: (tijd, opgeleverd, voorraad).
+    bat_kaart: list = field(default_factory=list)
     bat_afname_kwh: float = 0.0
     bat_levering_kwh: float = 0.0
     bat_kosten_met: float = 0.0
@@ -2223,6 +2225,8 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                 zonder = netto - wereld.bat_w
                 stand = (coach.state.get("batterij") or {}).get("mode", "")
                 verloop.bat_verloop.append((nu, netto, wereld.bat_w, wereld.batterij.soc, stand))
+                kaart = (coach.state.get("batterij") or {}).get("earned") or {}
+                verloop.bat_kaart.append((nu, kaart.get("euro"), kaart.get("stock_euro")))
                 verloop.bat_afname_kwh += max(0.0, netto) * deel_b
                 verloop.bat_levering_kwh += max(0.0, -netto) * deel_b
                 if prijs is not None:

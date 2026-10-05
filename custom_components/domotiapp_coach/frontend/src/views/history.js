@@ -1066,6 +1066,7 @@ class DacViewHistory extends DacElement {
     // In geld: dezelfde som als de kaart op het scherm (geld.js), zodat het
     // rapport en Historie het nooit oneens zijn (v0.101.0).
     const g = this.geld_();
+    const batterijRegel = g ? this.voorraadRegel_(g) : null;
     const geldVakjes = !g
       ? []
       : [
@@ -1076,6 +1077,7 @@ class DacViewHistory extends DacElement {
           g.metTerug ? cel("Teruglevering", `− ${euro(g.terug)}`) : null,
           g.metGas ? cel("Gas", euro(g.gas)) : null,
           g.metWater ? cel("Water", euro(g.water)) : null,
+          batterijRegel ? cel(batterijRegel.naam, batterijRegel.tekst) : null,
           ...this.geldDelen_(g).map((d) => cel(d.naam, euro(d.waarde))),
         ].filter(Boolean);
 
@@ -1663,6 +1665,7 @@ class DacViewHistory extends DacElement {
         water: this.rows_?.water ?? [],
         contract,
         accu: accu.euro,
+        accuVoorraad: accu.voorraad,
         accuZon: zonInAccu.euro,
         coach: totalen(beurten),
       }),
@@ -1736,7 +1739,19 @@ class DacViewHistory extends DacElement {
     // De balk: wat het gekost had, verdeeld in wat je uitgaf en wat er bespaard
     // werd. Alleen als alle delen positief zijn; een negatief deel valt niet te
     // tekenen zonder te liegen over de lengte.
-    const stukken = [{ naam: "Uitgegeven", waarde: g.uitgegeven, tone: "var(--dac-grid-in)" }, ...bespaardDelen];
+    // Wat er aan stroom in de batterij bij kwam is uitgegeven maar nog niet
+    // gebruikt, en telt pas bij Bespaard als het eruit gaat (v0.107.0). In de
+    // balk staat daarom wat je uitgaf aan wat je gebruikte, zodat hij precies
+    // op "Zonder" uitkomt.
+    const metVoorraad = Math.abs(g.voorraad) >= 0.005;
+    const stukken = [
+      {
+        naam: metVoorraad ? "Uitgegeven aan wat je gebruikte" : "Uitgegeven",
+        waarde: g.uitgegeven - g.voorraad,
+        tone: "var(--dac-grid-in)",
+      },
+      ...bespaardDelen,
+    ];
     const balk = this.$("#money-bar");
     const totaal = stukken.reduce((som, d) => som + d.waarde, 0);
     if (stukken.every((d) => d.waarde >= 0) && totaal > 0.005) {
@@ -1785,6 +1800,8 @@ class DacViewHistory extends DacElement {
     if (g.metTerug) uit.push({ naam: "Teruglevering", tekst: `− ${euro(g.terug)}`, tone: "var(--dac-grid-out)" });
     if (g.metGas) uit.push({ naam: "Gas", tekst: euro(g.gas), tone: "var(--dac-warn)" });
     if (g.metWater) uit.push({ naam: "Water", tekst: euro(g.water), tone: "var(--dac-grid-in)" });
+    const batterijRegel = this.voorraadRegel_(g);
+    if (batterijRegel) uit.push({ ...batterijRegel, tone: "var(--dac-ink-3)" });
     const bij = bespaardDelen.map((d) => ({ naam: d.naam, tekst: euro(d.waarde), tone: d.tone }));
     this.$("#money-parts").replaceChildren(
       kolom(verdiend ? "Verdiend" : "Uitgegeven", uit),
@@ -1792,6 +1809,18 @@ class DacViewHistory extends DacElement {
     );
 
     this.$("#money-note").textContent = this.geldUitleg_(g);
+  }
+
+  /**
+   * Wat er aan stroom in de thuisbatterij bij kwam of uit ging, als regel onder
+   * Uitgegeven, of null. Laden is inkopen (v0.107.0): betaald, maar pas bij
+   * Bespaard als ze ontlaadt.
+   */
+  voorraadRegel_(g) {
+    if (!g.metAccu || Math.abs(g.voorraad) < 0.005) return null;
+    return g.voorraad > 0
+      ? { naam: "Waarvan nog in je batterij", tekst: euro(g.voorraad) }
+      : { naam: "En uit je batterij, eerder betaald", tekst: euro(-g.voorraad) };
   }
 
   /** Hoe hard de getallen van In geld zijn, en waar ze vandaan komen. Ook voor het rapport. */
@@ -1831,7 +1860,7 @@ class DacViewHistory extends DacElement {
     if (g.metAccu) {
       zinnen.push(
         g.accuDagen
-          ? "Wat de thuisbatterij bespaarde komt uit haar eigen kasboek, en dat telt sinds de coach haar volgt."
+          ? "Wat de thuisbatterij bespaarde telt pas als ze ontlaadt: wat dat opbracht, min wat die stroom kostte toen ze laadde. Wat er aan het eind nog in zit is wel uitgegeven, en staat bij Uitgegeven. Dat telt sinds de coach haar volgt."
           : "De thuisbatterij heeft in deze periode nog geen kasboek: dat begint zodra de coach haar volgt."
       );
     }
@@ -2153,7 +2182,8 @@ DacViewHistory.css = /* css */ `
   .geld-balk i { display: block; flex: 1 1 0; min-width: 3px; background: var(--tone); }
   .geld-delen {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    /* Nooit breder dan de kaart: op 280 px is er 211 px en liep hij 14 px over. */
+    grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
     gap: 10px 28px;
     margin: 16px 0 0;
   }

@@ -226,6 +226,11 @@ dan de andere in dezelfde uitgave.
   `solar_stored_days`) en de schatting `zonInAccu` in `huisMetAccu`
   (views/history.js) voor de uren daarvoor; `balans` in geld.js telt ze op
   dezelfde manier (`docs/eerste-woning.md`).
+- **Opgeleverd en wat er in de batterij zit** (v0.107.0): `Voorraad` in
+  batterij.py schrijft per dag `realized_days` naast het kasboek `earned_days`,
+  en `stock_euro`; `accuVerdiend` in geld.js leest ze allebei, `balans` haalt
+  het verschil van zonder af, en `opgeleverdTekst` in battery.js zet het op de
+  kaart (`docs/batterij.md`).
 
 ## Hoe het in elkaar zit
 
@@ -272,11 +277,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 470 controles op het denkwerk
-python tests/test_batterij.py    # 172 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 887 op de bedrading, met een nagebouwde HA
+python tests/test_batterij.py    # 183 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_coach.py       # 894 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2234 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 138 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 140 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

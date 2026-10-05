@@ -2295,6 +2295,50 @@ proef("het kasboek van de batterij telt alleen de dagen van de periode", () => {
   assert.ok(Math.abs(r.euro - 0.034) < 1e-9 && r.dagen === 1, `${r.euro} ${r.dagen}`);
 });
 
+// De eigenaar op 05-10-2026, bij "Opgeleverd € 0,74 in 8 dagen": "dat geld fluctueert
+// telkens en klopt niet ... Komt ook niet overeen met de historie." Laden is nu
+// inkopen: opgeleverd telt pas bij ontladen (v0.107.0, `Voorraad` in batterij.py).
+proef("laden is inkopen: Historie telt opgeleverd, en wat er in de batterij bij kwam staat bij Uitgegeven", () => {
+  const settings = { battery_state: [{
+    device: "b",
+    // 27-09 van voor v0.107.0: alleen het kasboek. 28-09: 's nachts € 1,00 van het
+    // net erin, overdag eruit voor € 1,20, en € 0,40 ervan zit er 's avonds nog in.
+    earned_days: { "2026-09-27": 0.5, "2026-09-28": -0.2 },
+    realized_days: { "2026-09-27": 0.5, "2026-09-28": 0.2 },
+  }] };
+  const dag = geld.accuVerdiend(settings, new Date(2026, 8, 28), new Date(2026, 8, 29));
+  assert.ok(Math.abs(dag.euro - 0.2) < 1e-9 && Math.abs(dag.voorraad - 0.4) < 1e-9 && dag.dagen === 1,
+    `${dag.euro} ${dag.voorraad}`);
+  const oud = geld.accuVerdiend(settings, new Date(2026, 8, 27), new Date(2026, 8, 28));
+  assert.ok(Math.abs(oud.euro - 0.5) < 1e-9 && oud.voorraad === 0, "een dag van voor v0.107.0 telt zoals hij geteld is");
+
+  // Zonder telt de stroom die er nog in zit niet als verbruik: zonder is wat het
+  // gekost had zonder batterij, en die had die € 0,40 niet ingekocht.
+  const rij = { start: new Date(2026, 8, 28, 12), own: 0, bought: 10, sold: 0 };
+  const prijs = () => ({ koop: 0.3, terug: 0.1 });
+  const met = geld.balans({ rijen: [rij], prijs, accu: dag.euro, accuVoorraad: dag.voorraad });
+  const kasboek = geld.balans({ rijen: [rij], prijs, accu: -0.2 });
+  assert.ok(Math.abs(met.uitgegeven - 3) < 1e-9 && Math.abs(met.delen.accu - 0.2) < 1e-9);
+  assert.ok(Math.abs(met.zonder - kasboek.zonder) < 1e-9,
+    `zonder hoort niet te veranderen door anders te boeken: ${met.zonder} tegen ${kasboek.zonder}`);
+  assert.ok(Math.abs(met.voorraad - 0.4) < 1e-9);
+
+  // De regel onder Uitgegeven, en in het rapport.
+  const el = Object.create(Historie.prototype);
+  assert.deepEqual(el.voorraadRegel_({ metAccu: true, voorraad: 0.4 }), { naam: "Waarvan nog in je batterij", tekst: "€ 0,40" });
+  assert.deepEqual(el.voorraadRegel_({ metAccu: true, voorraad: -0.8 }), { naam: "En uit je batterij, eerder betaald", tekst: "€ 0,80" });
+  assert.equal(el.voorraadRegel_({ metAccu: true, voorraad: 0.001 }), null);
+});
+
+proef("de kaart van de batterij zegt wat de stroom die erin zit kostte", () => {
+  const rijen = (earned) => Object.fromEntries(batteryRows({ ...BESLUIT_BATTERIJ, earned }).map((r) => [r.label, r.text]));
+  assert.equal(rijen({ euro: 1.4, days: 2, stock_euro: 0.55 })["Wat erin zit"], "ingekocht voor € 0,55");
+  assert.equal(rijen({ euro: 1.4, days: 2, stock_euro: 0.55 })["Opgeleverd"], "€ 1,40 in 2 dagen");
+  assert.equal(rijen({ euro: 1.4, days: 2, stock_euro: 0.004 })["Wat erin zit"], undefined, "minder dan een halve cent is niets");
+  assert.equal(rijen({ euro: 1.4, days: 2, stock_euro: -0.3 })["Wat erin zit"], "je kreeg er € 0,30 bij");
+  assert.equal(rijen({ euro: 1.4, days: 2 })["Wat erin zit"], undefined, "een coach van voor v0.107.0 stuurt het niet mee");
+});
+
 proef("geen terugverdientijd en geen aankoopprijzen meer, nergens (v0.101.1)", () => {
   // De eigenaar op 29-09-2026: een datum in het paneel die afwijkt van wat een
   // installateur de klant voorrekende is niet te verdedigen. "Haal het invullen
@@ -2653,7 +2697,7 @@ proef("de uitleg van In geld noemt het salderen en waar de delen vandaan komen",
   const el = geldweergave();
   const zin = el.geldUitleg_(el.geld_());
   assert.match(zin, /Je saldeert nog tot 1 januari 2027/);
-  assert.match(zin, /kasboek/);
+  assert.match(zin, /pas als ze ontlaadt/);
   assert.match(zin, /Door de coach/);
 });
 
