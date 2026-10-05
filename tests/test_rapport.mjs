@@ -2167,6 +2167,69 @@ proef("de knoppen van de batterij hebben eigen iconen: een accu met een pijl eri
   assert.ok(bron.includes('const wilIcoon = batterij ? "accuVol" : "bolt"'), "vol laden draagt de accu met de pijl erin, de paal de bliksem");
 });
 
+// De eigenaar op 05-10-2026, op een iPhone in de eerste woning: "Kan die 50%
+// niet aanpassen. Ik kan er 30 van maken, maar verandert hem weer naar 50."
+// Het veld keek naar `document.activeElement`, dat binnen een shadow root nooit
+// het veld is, en een ander getal ging nooit naar de coach.
+proef("leegladen: wat de bewoner in het veld zet blijft staan en gaat naar de coach", async () => {
+  const { leegTot } = await import("../custom_components/domotiapp_coach/frontend/src/views/overview.js");
+  assert.equal(leegTot("30"), 30);
+  assert.equal(leegTot("2"), 5);
+  assert.equal(leegTot("120"), 95);
+  assert.equal(leegTot(""), 50);
+
+  const Overzicht = geregistreerd.get("dac-view-overview");
+  const veld = { value: "50", dataset: {} };
+  const verstuurd = [];
+  const el = Object.create(Overzicht.prototype);
+  el.$ = (kiezer) => (kiezer === '[data-drain-to="0"]' ? veld : null);
+  el.steerDevices_ = [{ id: "accu" }];
+  el.lastDevices_ = [];
+  el.coach_ = { accu: { kind: "batterij", drain_to: 50 } };
+  el.updateSteerable_ = () => el.syncLeegVeld_(0, el.coach_.accu);
+  el.hass = {
+    callWS: async (msg) => {
+      if (msg.type === "domotiapp_coach/coach/drain") {
+        verstuurd.push(msg.to_percent);
+        el.coach_.accu.drain_to = msg.to_percent;
+        return {};
+      }
+      return el.coach_;
+    },
+  };
+
+  // Terwijl hij typt: een ververs van de coach laat het veld met rust.
+  el.shadowRoot = { activeElement: veld };
+  veld.value = "30";
+  veld.dataset.bewerkt = "1";
+  el.syncLeegVeld_(0, el.coach_.accu);
+  assert.equal(veld.value, "30", "het veld met de focus wordt niet overschreven");
+  // Het toetsenbord dicht, nog niets doorgegeven: ook dan niet.
+  el.shadowRoot = { activeElement: null };
+  el.syncLeegVeld_(0, el.coach_.accu);
+  assert.equal(veld.value, "30", "wat ingetypt is blijft staan tot het doorgegeven is");
+  // De change van het veld: loopt hij al leeg, dan gaat 30 meteen naar de coach.
+  await el.zetLeegTot_(0);
+  assert.deepEqual(verstuurd, [30]);
+  assert.equal(veld.dataset.bewerkt, undefined);
+  assert.equal(Number(veld.value), 30, "daarna volgt het veld de coach, en die zegt 30");
+
+  // Loopt hij nog niet leeg, dan gaat er niets heen en blijft het getal staan.
+  el.coach_.accu.drain_to = null;
+  veld.value = "40";
+  veld.dataset.bewerkt = "1";
+  await el.zetLeegTot_(0);
+  assert.deepEqual(verstuurd, [30]);
+  assert.equal(Number(veld.value), 40);
+  // De knop neemt dat getal mee.
+  await el.toggleDrain_(0);
+  assert.deepEqual(verstuurd, [30, 40]);
+
+  // De bron kijkt nergens meer naar document.activeElement.
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf8");
+  assert.ok(!/document\.activeElement\s*[!=]==/.test(bron), "binnen een shadow root is dat nooit het veld");
+});
+
 proef("de woning telt mee wat de batterij afgeeft", () => {
   const r = woningMetBatterij(-2250);
   assert.equal(r.house, 2274);
