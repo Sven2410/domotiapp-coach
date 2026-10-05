@@ -90,6 +90,11 @@ function minutenGeleden(stempel) {
   return Math.max(0, Math.round((Date.now() - toen) / 60000));
 }
 
+/** Tot welke accustand "Nu leegladen" gaat: het getal in het veld, tussen 5 en 95. */
+export function leegTot(waarde) {
+  return Math.round(Math.min(95, Math.max(5, Number(waarde) || 50)));
+}
+
 /** Import worth mentioning, in watts. */
 const HEAVY_IMPORT_W = 2500;
 
@@ -1815,18 +1820,57 @@ class DacViewOverview extends DacElement {
     if (!device || !this.hass) return;
     const aan = !Number.isFinite(this.coach_?.[device.id]?.drain_to);
     const veld = this.$(`[data-drain-to="${slot}"]`);
-    const tot = Math.min(95, Math.max(5, Number(veld?.value) || 50));
+    await this.zendLeeg_(slot, device, aan ? leegTot(veld?.value) : null);
+  }
+
+  /**
+   * Een ander getal in het veld terwijl hij al leegloopt: meteen doorgeven.
+   * Loopt hij nog niet leeg, dan blijft het staan tot de knop.
+   *
+   * De eigenaar op 05-10-2026, op een iPhone in de eerste woning: "Kan die
+   * 50% niet aanpassen. Ik kan er 30 van maken, maar verandert hem weer naar
+   * 50." Er ging niets naar de coach, en elke ververs zette zijn 50 terug.
+   */
+  async zetLeegTot_(slot) {
+    const device = this.steerDevices_?.[slot];
+    const veld = this.$(`[data-drain-to="${slot}"]`);
+    if (!device || !this.hass || !veld) return;
+    const tot = leegTot(veld.value);
+    veld.value = tot;
+    if (!Number.isFinite(this.coach_?.[device.id]?.drain_to)) return;
+    await this.zendLeeg_(slot, device, tot);
+  }
+
+  async zendLeeg_(slot, device, tot) {
     try {
       await this.hass.callWS({
         type: "domotiapp_coach/coach/drain",
         device_id: device.id,
-        to_percent: aan ? tot : null,
+        to_percent: tot,
       });
       this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
-      this.updateSteerable_(this.lastDevices_ ?? []);
     } catch (error) {
       console.warn("[DomotiApp Coach] kon het leegladen niet omzetten", error);
     }
+    // Ook als het misging: dan zet de kaart terug wat de coach werkelijk doet.
+    const veld = this.$(`[data-drain-to="${slot}"]`);
+    if (veld) delete veld.dataset.bewerkt;
+    this.updateSteerable_(this.lastDevices_ ?? []);
+  }
+
+  /**
+   * Het veld naast "Nu leegladen" volgt de coach, behalve terwijl iemand erin
+   * typt of iets invulde dat nog niet doorgegeven is.
+   *
+   * Tot v0.106.4 stond hier `document.activeElement`, en dat is binnen een
+   * shadow root nooit het veld zelf maar het element eromheen: elke ververs
+   * overschreef wat de bewoner aan het typen was.
+   */
+  syncLeegVeld_(slot, besluit) {
+    const veld = this.$(`[data-drain-to="${slot}"]`);
+    if (!veld || !Number.isFinite(besluit?.drain_to)) return;
+    if (this.shadowRoot?.activeElement === veld || veld.dataset.bewerkt === "1") return;
+    veld.value = Math.round(besluit.drain_to);
   }
 
   /**
@@ -1986,8 +2030,7 @@ class DacViewOverview extends DacElement {
     this.$(`[data-drain-text="${slot}"]`).textContent = Number.isFinite(besluit.drain_to)
       ? `Laadt leeg tot ${Math.round(besluit.drain_to)}%`
       : "Nu leegladen";
-    const veld = this.$(`[data-drain-to="${slot}"]`);
-    if (Number.isFinite(besluit.drain_to) && document.activeElement !== veld) veld.value = Math.round(besluit.drain_to);
+    this.syncLeegVeld_(slot, besluit);
 
     const wek = this.$(`[data-wake="${slot}"]`);
     wek.hidden = !(besluit.wake && besluit.level !== "advise" && besluit.kind !== "programma"
@@ -2636,6 +2679,12 @@ class DacViewOverview extends DacElement {
     }
     for (const button of this.$$("[data-drain]")) {
       button.addEventListener("click", () => this.toggleDrain_(Number(button.dataset.drain)));
+    }
+    for (const veld of this.$$("[data-drain-to]")) {
+      veld.addEventListener("input", () => { veld.dataset.bewerkt = "1"; });
+      veld.addEventListener("change", () => this.zetLeegTot_(Number(veld.dataset.drainTo)));
+      // Enter laat het veld los, en dan volgt de change hierboven.
+      veld.addEventListener("keydown", (event) => { if (event.key === "Enter") veld.blur(); });
     }
     for (const select of this.$$("[data-car-select]")) {
       select.addEventListener("change", () =>

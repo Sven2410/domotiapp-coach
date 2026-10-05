@@ -200,6 +200,16 @@ de laatste punten van de eerste woning op 22-09-2026).
   nooit onder zijn eigen ondergrens, niet zolang de paal laadt, en daarna
   weer het plan. "Nu maximaal ontladen tot 50%, daarna terug naar normale
   modus." Onthouden over een herstart (`drain_to` in `sessions`). Proef 88.
+  **Het veld (v0.106.4).** De eigenaar op 05-10-2026, op een iPhone in deze
+  woning: "Kan die 50% niet aanpassen. Ik kan er 30 van maken, maar verandert
+  hem weer naar 50." Twee fouten: een ander getal ging nooit naar de coach
+  zolang hij al leegliep, en het veld keek naar `document.activeElement`,
+  dat binnen de shadow root het paneel zelf is (in de preview nagemeten:
+  `DOMOTIAPP-COACH-PANEL`) en nooit het veld, dus elke ververs overschreef
+  wat er getypt werd. Nu `syncLeegVeld_` (focus in de eigen shadow root, of
+  ingetypt en nog niet doorgegeven) en `zetLeegTot_` op de change van het
+  veld: loopt hij al leeg, dan gaat het nieuwe getal meteen naar de coach.
+  Proef "leegladen: wat de bewoner in het veld zet" in test_rapport.mjs.
 - **Wat de accu afgeeft is nooit een kans**, wie hem ook stuurt: `advise`
   trekt de gemeten afgifte van elke thuisbatterij (`r.devices`) van de
   teruglevering af. Om 23:01 zei de kaart "gebruik je overschot, 1,73 kW"
