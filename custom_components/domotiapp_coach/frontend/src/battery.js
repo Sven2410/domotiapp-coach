@@ -236,7 +236,12 @@ export function batterijVooruit(besluit) {
 }
 
 /**
- * Wat de batterij opleverde sinds de coach haar volgt, uit haar kasboek.
+ * Wat de batterij opleverde sinds de coach haar volgt, en wat de stroom kostte
+ * die er nog in zit.
+ *
+ * Tot v0.107.0 was dit het kasboek zelf, en dat zakte elke dag terwijl ze
+ * laadde: de eigenaar op 05-10-2026, "dat geld fluctueert telkens en klopt
+ * niet." Nu telt ontladen pas, min wat die stroom kostte.
  *
  * Geen terugverdientijd (v0.101.1): de eigenaar op 29-09-2026 kan geen datum
  * in het paneel verdedigen die afwijkt van wat een installateur de klant
@@ -245,7 +250,17 @@ export function batterijVooruit(besluit) {
 export function opgeleverdTekst(earned) {
   if (!earned?.days) return [];
   const dagen = Number(earned.days);
-  return [{ label: "Opgeleverd", text: `${euro(Number(earned.euro ?? 0))} in ${dagen} ${dagen === 1 ? "dag" : "dagen"}` }];
+  const rijen = [{ label: "Opgeleverd", text: `${euro(Number(earned.euro ?? 0))} in ${dagen} ${dagen === 1 ? "dag" : "dagen"}` }];
+  // Laden is inkopen (v0.107.0): wat de stroom die erin zit kostte, telt pas
+  // bij Opgeleverd als hij eruit gaat. Zie `Voorraad` in batterij.py.
+  const voorraad = Number(earned.stock_euro);
+  if (Number.isFinite(voorraad) && Math.abs(voorraad) >= 0.005) {
+    rijen.push({
+      label: "Wat erin zit",
+      text: voorraad > 0 ? `ingekocht voor ${euro(voorraad)}` : `je kreeg er ${euro(-voorraad)} bij`,
+    });
+  }
+  return rijen;
 }
 
 /** De regels op de kaart van een batterij. */

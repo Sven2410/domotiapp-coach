@@ -1684,6 +1684,71 @@ def zon_in_accu(
     return (zonder - met) / 1000.0 * (koop - (terug or 0.0)) * seconden / 3600.0
 
 
+@dataclass
+class Voorraad:
+    """Wat de stroom in de batterij kostte, zodat "Opgeleverd" pas telt als ze ontlaadt (v0.107.0).
+
+    Het kasboek (`verdiend`) rekent laden af op het moment zelf: van het net de
+    inkoop, uit de zon wat terugleveren had opgebracht, en met salderen is dat
+    bijna de hele prijs. Ontladen levert het later terug. Op de kaart zakte
+    "Opgeleverd" daardoor elke dag terwijl de batterij laadde, en steeg het 's
+    avonds weer; de eigenaar op 05-10-2026, bij "€ 0,74 in 8 dagen": "dat geld
+    fluctueert telkens en klopt niet."
+
+    Hier is laden inkopen: wat het kostte gaat in de voorraad. Ontlaadt ze, dan
+    gaat er een deel uit, zoveel als wat eruit komt van wat er boven haar
+    ondergrens nog uit kan, en wat ontladen opbracht min dat deel is wat ze
+    opleverde (gemiddelde kostprijs). Wat er nog uit kan komt bij elke nieuwe
+    accustand opnieuw uit die stand en de inhoud, met het rendement voor wat
+    er na het verlies van over is; tussen twee standen telt hij de kWh zelf.
+
+    Niet per procent afrekenen: de accustand komt in hele procenten, dus één
+    stap is in werkelijkheid ergens tussen niets en twee procent. Zo gerekend
+    zakte het bedrag op de proef (test_batterij.py, proef 41) bij de eerste
+    stap na het laden 2,7 cent onder nul. Nu loopt het mee met de kWh.
+
+    Wat er al in zat toen de coach begon te tellen kostte niets: wat het kostte
+    is niet bekend, dus telt dat deel voluit, net als in het kasboek. Zonder
+    accustand of inhoud is er niets om naar te rekenen, en telt het kasboek.
+    """
+
+    # Wat de stroom die erin zit kostte, in euro. Negatief als ze bij een
+    # negatieve prijs laadde: dan kreeg ze geld toe.
+    euro: float = 0.0
+    # Wat er boven de ondergrens nog uit kan, in kWh aan de wisselstroomkant.
+    kwh: float | None = None
+    # De accustand waaruit `kwh` het laatst vastgesteld is.
+    soc: float | None = None
+
+    def stap(
+        self, euro: float, kwh: float, soc: float | None, bodem: float,
+        capaciteit_kwh: float | None, rte: float | None,
+    ) -> float:
+        """Wat de batterij in deze stap opleverde.
+
+        `euro` komt uit `verdiend`, `kwh` is wat ze deed aan de
+        wisselstroomkant, laden positief.
+        """
+        if soc is None or not capaciteit_kwh:
+            return euro
+        eta = min(max(rte, 0.05), 1.0) if rte else 1.0
+        if self.kwh is None or soc != self.soc:
+            self.kwh = max(0.0, soc - bodem) / 100.0 * capaciteit_kwh * sqrt(eta)
+            self.soc = soc
+        if kwh > 0:
+            # Laden: wat het kostte gaat erin, het levert nog niets op.
+            self.euro -= euro
+            self.kwh += kwh * eta
+            return 0.0
+        if kwh < 0:
+            deel = 1.0 if self.kwh <= -kwh else -kwh / self.kwh
+            kost = self.euro * deel
+            self.euro -= kost
+            self.kwh = max(0.0, self.kwh + kwh)
+            return euro - kost
+        return euro
+
+
 # --- Het rendement meten -------------------------------------------------------
 
 # Hoeveel keer de inhoud van de batterij er door de meter gegaan moet zijn

@@ -4305,7 +4305,7 @@ controle("de laadgrens en de ontlaadgrens zijn alleen gelezen",
          f"{hass75.services.verstuurd}")
 controle("de kaart krijgt de stand, de accustand en wat hij opleverde, zonder terugverdientijd",
          b75.get("kind") == "batterij" and b75.get("soc") == 60.0
-         and set(b75.get("earned") or {}) == {"euro", "days"} and "payback" not in b75,
+         and set(b75.get("earned") or {}) == {"euro", "days", "stock_euro"} and "payback" not in b75,
          f"{ {k: b75.get(k) for k in ('kind', 'soc', 'earned')} }")
 
 # De coach stopt: het vermogen naar nul en de batterij terug naar zijn eigen
@@ -7339,6 +7339,54 @@ for naam133, paal133, waarden133, laadt133 in (
     asyncio.run(ronde130(c133, i133, paal133, T133 + dt.timedelta(minutes=8)))
     controle(f"{naam133}: na het stoppen is de gemeten fase weg",
              c133._fase_nu.get(paal133["id"]) is None, f"{c133._fase_nu}")
+
+print("=== 134. laden is inkopen: Opgeleverd zakt niet terwijl de batterij laadt (v0.107.0) ===")
+# De eigenaar op 05-10-2026, bij "Opgeleverd € 0,74 in 8 dagen": "dat geld fluctueert
+# telkens en klopt niet." Een batterij van voor deze versie: alleen het kasboek.
+inst134 = instellingen(devices=[LAADPAAL, BATTERIJ])
+inst134["battery_state"] = [{"device": "dev-batterij", "earned_days": {"2026-09-20": 0.5}, "earned_total": 0.5}]
+hass134, store134, coach134 = bouw(huis75(afname=1000.0, teruglevering=0.0, batterij="1000", soc="60"), inst134)
+voor134 = asyncio.run(ronde75(hass134, coach134, dt.datetime(2026, 9, 21, 12, 0)))
+controle("een batterij van voor deze versie houdt wat ze opleverde",
+         voor134.get("earned") == {"euro": 0.5, "days": 1, "stock_euro": 0.0}, f"{voor134.get('earned')}")
+sessie134 = coach134._batterij["dev-batterij"]
+# Een minuut 1 kW van het net erin.
+sessie134["regelaar"].opdracht_w = 1000.0
+sessie134["geteld_op"] = coachmod._moment() - dt.timedelta(seconds=60)
+asyncio.run(coach134._async_regel("dev-batterij", inst134, BATTERIJ))
+kost134 = -sum((sessie134.get("geld") or {}).values())
+print(f"  een minuut 1 kW van het net erin: kasboek {-kost134:.5f}, voorraad {sessie134['voorraad'].euro:.5f}")
+controle("laden kost in het kasboek, en gaat in de voorraad",
+         kost134 > 0.003 and abs(sessie134["voorraad"].euro - kost134) < 1e-9
+         and sum((sessie134.get("opgeleverd") or {}).values()) == 0.0, f"{kost134} {sessie134['voorraad']}")
+na134 = asyncio.run(ronde75(hass134, coach134, dt.datetime(2026, 9, 21, 12, 1)))
+rij134 = next(r for r in store134.instellingen["battery_state"] if r["device"] == "dev-batterij")
+controle("op de kaart blijft Opgeleverd staan, en staat wat erin zit",
+         na134["earned"]["euro"] == 0.5 and abs(na134["earned"]["stock_euro"] - round(kost134, 2)) < 1e-9,
+         f"{na134.get('earned')}")
+controle("in de opslag: de oude dag zoals hij was, het kasboek en wat ze opleverde naast elkaar, en de voorraad",
+         rij134["realized_days"].get("2026-09-20") == 0.5 and abs(rij134["realized_total"] - 0.5) < 1e-9
+         and abs(rij134["earned_total"] - (0.5 - kost134)) < 1e-5 and abs(rij134["stock_euro"] - kost134) < 1e-5,
+         f"{ {k: rij134.get(k) for k in ('earned_total', 'realized_total', 'realized_days', 'stock_euro')} }")
+# Een minuut 1 kW eruit, naar het huis, en de accustand een procent lager.
+hass134.states.zet("sensor.afname", "0")
+hass134.states.zet("sensor.batterij_vermogen", {"state": "-1000", "attributes": {"unit_of_measurement": "W"}})
+hass134.states.zet("sensor.batterij_soc", "59")
+sessie134["regelaar"].opdracht_w = -1000.0
+sessie134["geteld_op"] = coachmod._moment() - dt.timedelta(seconds=60)
+asyncio.run(coach134._async_regel("dev-batterij", inst134, BATTERIJ))
+erbij134 = sum((sessie134.get("opgeleverd") or {}).values())
+print(f"  een minuut 1 kW eruit: opgeleverd {erbij134:.5f}, voorraad {sessie134['voorraad'].euro:.5f}")
+controle("ontladen levert op, min wat dat deel kostte",
+         erbij134 > 0 and sessie134["voorraad"].euro < kost134, f"{erbij134} {sessie134['voorraad']}")
+asyncio.run(ronde75(hass134, coach134, dt.datetime(2026, 9, 21, 12, 7)))
+rij134 = next(r for r in store134.instellingen["battery_state"] if r["device"] == "dev-batterij")
+controle("opgeleverd min wat erin zit is het kasboek",
+         abs(rij134["realized_total"] - rij134["stock_euro"] - rij134["earned_total"]) < 1e-4,
+         f"{ {k: rij134.get(k) for k in ('earned_total', 'realized_total', 'stock_euro')} }")
+# Na een herstart weet hij nog wat erin zit.
+controle("de voorraad overleeft een herstart",
+         abs(coachmod.ChargerCoach._voorraad_uit(rij134).euro - rij134["stock_euro"]) < 1e-12, "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

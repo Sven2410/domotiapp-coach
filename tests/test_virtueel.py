@@ -1513,6 +1513,20 @@ for naam, vl in V.items():
     controle(f"{naam}: het kasboek klopt met wat de dag werkelijk scheelde",
              abs(geboekt - (vl.bat_kosten_zonder - vl.bat_kosten_met)) <= 0.10,
              f"geboekt {geboekt:.2f}, werkelijk {vl.bat_kosten_zonder - vl.bat_kosten_met:.2f}")
+    # Laden is inkopen (v0.107.0): opgeleverd min wat er nog in zit is het kasboek,
+    # en "Opgeleverd" op de kaart zakt niet terwijl de batterij laadt. De eigenaar
+    # op 05-10-2026: "dat geld fluctueert telkens en klopt niet."
+    opgeleverd = float(vl.bat_stand.get("realized_total") or 0.0)
+    voorraad = float(vl.bat_stand.get("stock_euro") or 0.0)
+    controle(f"{naam}: opgeleverd min wat er nog in zit is het kasboek",
+             abs(opgeleverd - voorraad - geboekt) <= 0.001,
+             f"opgeleverd {opgeleverd:.4f}, voorraad {voorraad:.4f}, kasboek {geboekt:.4f}")
+    zakt = [
+        (f"{vl.bat_verloop[i][0]:%H:%M}", vorige, nu)
+        for i, ((_, vorige, _), (_, nu, _)) in enumerate(zip(vl.bat_kaart, vl.bat_kaart[1:]), start=1)
+        if vl.bat_verloop[i][2] > 0 and vorige is not None and nu is not None and nu < vorige - 0.005
+    ]
+    controle(f"{naam}: Opgeleverd op de kaart zakt niet terwijl de batterij laadt", not zakt, f"{zakt[:3]}")
 
 if (vl := v("batterij-vast-zon")):
     controle("vast met zon: de hele dag nul op de meter, of vol",

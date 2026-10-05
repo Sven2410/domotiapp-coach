@@ -19,7 +19,8 @@
  *
  *   de coach      wat de beurten onder Bespaard bespaarden: de zon die hij naar
  *                 een apparaat stuurde en het wachten op een goedkoper uur
- *   de batterij   haar eigen kasboek (`verdiend` in batterij.py), per dag
+ *   de batterij   wat ze opleverde: pas als ze ontlaadt, min wat die stroom
+ *                 kostte (`Voorraad` in batterij.py, sinds v0.107.0), per dag
  *   de zon        wat je panelen opleverden zonder dat iemand iets stuurde
  *
  * Niets wordt twee keer geteld: wat een apparaat uit de thuisbatterij kreeg telt
@@ -91,27 +92,40 @@ export function prijsOp(contract, rate, prijzen, when) {
 }
 
 /**
- * Wat alle thuisbatterijen samen verdienden in [start, end), uit hun kasboek.
+ * Wat alle thuisbatterijen samen opleverden in [start, end), en wat er in die
+ * periode in ging voor later.
  *
- * `battery_state` in de instellingen houdt per batterij `earned_days` bij: per
- * dag wat de rekening met de batterij scheelde tegenover zonder. Dat kasboek
- * begint pas als de coach de batterij volgt; wat ze daarvoor deed is niet
- * bekend en wordt niet geschat.
+ * `battery_state` in de instellingen houdt per batterij twee dingen per dag bij.
+ * Het kasboek (`earned_days`): wat de rekening met de batterij scheelde
+ * tegenover zonder, met laden afgerekend op het moment zelf. En wat ze
+ * opleverde (`realized_days`, sinds v0.107.0): laden is inkopen, en pas als ze
+ * ontlaadt telt wat dat opbracht min wat die stroom kostte (`Voorraad` in
+ * batterij.py). Het verschil is wat er die dag aan stroom in de batterij bij
+ * kwam, in euro (`voorraad`): positief als er meer in ging dan eruit.
+ *
+ * Een dag van voor v0.107.0 heeft alleen het kasboek, en telt zoals hij geteld
+ * is. Dat kasboek begint pas als de coach de batterij volgt; wat ze daarvoor
+ * deed is niet bekend en wordt niet geschat.
  */
 export function accuVerdiend(settings, start, end) {
   const van = lokaleDag(start);
   const tot = lokaleDag(end);
   let som = 0;
+  let voorraad = 0;
   let dagen = 0;
   for (const rij of settings?.battery_state ?? []) {
+    const echt = rij?.realized_days ?? {};
     for (const [dag, bedrag] of Object.entries(rij?.earned_days ?? {})) {
       if (dag >= van && dag < tot) {
-        som += Number(bedrag) || 0;
+        const kasboek = Number(bedrag) || 0;
+        const opgeleverd = dag in echt ? Number(echt[dag]) || 0 : kasboek;
+        som += opgeleverd;
+        voorraad += opgeleverd - kasboek;
         dagen += 1;
       }
     }
   }
-  return { euro: som, dagen };
+  return { euro: som, voorraad, dagen };
 }
 
 /**
@@ -143,13 +157,15 @@ export function accuZon(settings, start, end) {
  * @param {{start: Date, value: number}[]} [o.gas]
  * @param {{start: Date, value: number}[]} [o.water]
  * @param {object} [o.contract]
- * @param {number} [o.accu] wat de thuisbatterij in deze periode verdiende
+ * @param {number} [o.accu] wat de thuisbatterij in deze periode opleverde
+ * @param {number} [o.accuVoorraad] wat er in deze periode aan stroom in de
+ *   batterij bij kwam, in euro (`accuVerdiend`): betaald, en nog niet gebruikt
  * @param {number} [o.accuZon] wat de zon die ze opnam minder waard was, uit de
  *   telling van de coach (`accuZon`)
  * @param {{saved: number, solar_saved: number, wait_saved: number}} [o.coach]
  *   de beurten van deze periode opgeteld (`totalen` in savings.js)
  */
-export function balans({ rijen, prijs, gas = [], water = [], contract, accu = 0, accuZon = 0, coach = null }) {
+export function balans({ rijen, prijs, gas = [], water = [], contract, accu = 0, accuVoorraad = 0, accuZon = 0, coach = null }) {
   let stroom = 0;
   let terug = 0;
   let eigen = 0;
@@ -197,6 +213,10 @@ export function balans({ rijen, prijs, gas = [], water = [], contract, accu = 0,
   const zon = zonWaarde - coachZon;
   const bespaard = zonWaarde + accuEuro + wachten;
   const uitgegeven = stroom - terug + g.euro + w.euro;
+  // Wat er aan stroom in de batterij bij kwam is uitgegeven maar nog niet
+  // gebruikt; telt opgeleverd het pas als het eruit gaat, dan hoort het hier
+  // van zonder af, anders telt zonder het als verbruik (v0.107.0).
+  const voorraad = Number(accuVoorraad) || 0;
 
   return {
     stroom,
@@ -209,8 +229,9 @@ export function balans({ rijen, prijs, gas = [], water = [], contract, accu = 0,
     uitgegeven,
     bespaard,
     delen: { zon, accu: accuEuro, coach: coachTotaal },
+    voorraad,
     // Wat dezelfde periode gekost had zonder zon, batterij en coach.
-    zonder: uitgegeven + bespaard,
+    zonder: uitgegeven + bespaard - voorraad,
     onbekend,
   };
 }

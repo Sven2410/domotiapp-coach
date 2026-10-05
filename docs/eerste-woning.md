@@ -301,6 +301,16 @@ vak zelf: wat de batterij opnam, hooguit de eigen zon (`zonInAccu`). Met de uren
 van 29-09 tot 10:00: verbruikt 4,37 wordt 6,85 kWh, zelfvoorzienend 22,8 wordt
 50,7%, "Door je zon" € -0,28 wordt € 0,24, bespaard € 0,25 wordt € 0,77.
 
+**Laden is inkopen (v0.107.0).** Door je thuisbatterij is sindsdien wat ze
+opleverde: pas als ze ontlaadt, min wat die stroom kostte (`realized_days`). Wat
+er in de periode aan stroom in de batterij bij kwam is wel uitgegeven, staat onder
+Uitgegeven als "Waarvan nog in je batterij" (of "En uit je batterij, eerder
+betaald" als er meer uit ging dan in), en gaat van zonder af; de balk begint met
+wat je uitgaf aan wat je gebruikte, zodat hij op zonder uitkomt. Zie
+`docs/batterij.md` onder Het kasboek. Dezelfde uitgave: de twee kolommen onder In
+geld waren minstens 240 px breed en liepen op 280 px 14 px over de kaart
+(`minmax(min(240px, 100%), 1fr)`).
+
 Wat blijft: het kasboek telt alleen sinds de coach de batterij stuurt. Een
 batterij die hij niet stuurt telt in het verbruik wel mee, maar wat ze bespaarde
 niet. En "Zonder" in geld en verbruikt maal de prijs kunnen een paar cent

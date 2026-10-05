@@ -55,6 +55,7 @@ from .batterij import (
     VOL_MARGE,
     Batterij,
     Regelaar,
+    Voorraad,
     auto_grens,
     balans_kwh,
     met_paal,
@@ -4514,12 +4515,30 @@ class ChargerCoach:
                 return dict(rij)
         return {"device": device_id}
 
+    @staticmethod
+    def _voorraad_uit(rij: dict[str, Any]) -> Voorraad:
+        """De voorraad zoals hij bewaard is, of leeg: wat er al in zat kostte niets."""
+        return Voorraad(euro=float(rij.get("stock_euro") or 0.0))
+
+    @staticmethod
+    def _opgeleverd_dagen(rij: dict[str, Any]) -> dict[str, float]:
+        """Wat de batterij per dag opleverde; van voor v0.107.0 het kasboek."""
+        if isinstance(rij.get("realized_days"), dict):
+            return rij["realized_days"]
+        return rij.get("earned_days") or {}
+
+    @staticmethod
+    def _opgeleverd_totaal(rij: dict[str, Any]) -> float:
+        if rij.get("realized_total") is not None:
+            return float(rij["realized_total"])
+        return float(rij.get("earned_total") or 0.0)
+
     async def _async_batterij_bewaren(
         self, settings: dict[str, Any], device_id: str, nieuw: dict[str, Any]
     ) -> None:
         """Wat de coach van deze batterij bijhoudt naar de instellingen."""
         rij = {**self._batterij_rij(settings, device_id), **nieuw}
-        for sleutel in ("earned_days", "solar_stored_days"):
+        for sleutel in ("earned_days", "realized_days", "solar_stored_days"):
             dagen = rij.get(sleutel) or {}
             if len(dagen) > BATTERIJ_DAGEN_MAX:
                 rij[sleutel] = dict(sorted(dagen.items())[-BATTERIJ_DAGEN_MAX:])
@@ -4663,6 +4682,8 @@ class ChargerCoach:
         naam = device.get("name") or "De batterij"
         rij = self._batterij_rij(settings, device_id)
         sessie = self._batterij.setdefault(device_id, {"regelaar": Regelaar()})
+        if "voorraad" not in sessie:
+            sessie["voorraad"] = self._voorraad_uit(rij)
         b = self._batterij_van(now, settings, device, rij)
         # Een beurt van het net die al loopt maakt het plan af, en voor een
         # kleine neemt hij een batterij die zelf nul doet niet over (v0.102.3,
@@ -4787,6 +4808,18 @@ class ChargerCoach:
             nieuw["earned_days"] = dagen
             nieuw["earned_total"] = round(float(rij.get("earned_total") or 0.0) + sum(geld.values()), 5)
             sessie["geld"] = {}
+            # Wat ze werkelijk opleverde (v0.107.0, `Voorraad`), en wat er nog
+            # in zit. Van voor deze versie is alleen het kasboek bekend: die
+            # dagen tellen zoals ze geteld zijn.
+            echt = dict(self._opgeleverd_dagen(rij))
+            for dag, euro in (sessie.get("opgeleverd") or {}).items():
+                echt[dag] = round(float(echt.get(dag) or 0.0) + euro, 5)
+            nieuw["realized_days"] = echt
+            nieuw["realized_total"] = round(
+                self._opgeleverd_totaal(rij) + sum((sessie.get("opgeleverd") or {}).values()), 5)
+            sessie["opgeleverd"] = {}
+            voorraad: Voorraad = sessie["voorraad"]
+            nieuw["stock_euro"] = round(voorraad.euro, 5)
             # De zon die erin ging (`zon_in_accu`), per dag, en vanaf wanneer dat
             # geteld wordt: wat daarvoor lag schat Historie uit de statistieken.
             zon_dagen = dict(rij.get("solar_stored_days") or {})
@@ -4824,10 +4857,16 @@ class ChargerCoach:
                       nacht_over=(nacht_over := balans_kwh(now, verwachting, b)),
                       auto_grens=auto_grens(b, nacht_over))
 
-        totaal = float(rij.get("earned_total") or 0.0) + sum((sessie.get("geld") or {}).values())
+        totaal = self._opgeleverd_totaal(rij) + sum((sessie.get("opgeleverd") or {}).values())
         # Wat ze opleverde sinds de coach haar volgt, voor "Opgeleverd" op de
-        # kaart. Geen terugverdientijd meer (v0.101.1, zie `verdiend`).
-        opgeleverd = {"euro": round(totaal, 2), "days": len(rij.get("earned_days") or {})}
+        # kaart, en wat de stroom kostte die er nog in zit. Laden is inkopen,
+        # dus het bedrag zakt niet meer terwijl ze laadt (v0.107.0, `Voorraad`).
+        # Geen terugverdientijd meer (v0.101.1, zie `verdiend`).
+        opgeleverd = {
+            "euro": round(totaal, 2),
+            "days": len(self._opgeleverd_dagen(rij)),
+            "stock_euro": round(sessie["voorraad"].euro, 2),
+        }
 
         self.state[device_id] = {
             "charge": besluit.stand in (NETLADEN, MAX_LADEN),
@@ -4992,6 +5031,13 @@ class ChargerCoach:
                     dag = nu.date().isoformat()
                     geld = sessie.setdefault("geld", {})
                     geld[dag] = geld.get(dag, 0.0) + euro
+                    # En wat ze werkelijk opleverde: laden is inkopen, pas
+                    # ontladen levert op (v0.107.0, `Voorraad`).
+                    if "voorraad" not in sessie:
+                        sessie["voorraad"] = self._voorraad_uit(self._batterij_rij(settings, device_id))
+                    opgeleverd = sessie.setdefault("opgeleverd", {})
+                    opgeleverd[dag] = opgeleverd.get(dag, 0.0) + sessie["voorraad"].stap(
+                        euro, bat_w * seconden / 3_600_000.0, b.soc, b.bodem, b.capacity_kwh, b.rte)
                     # En wat de zon die erin ging minder waard was dan zelf
                     # gebruikt, voor "Door je zon" in Historie (v0.101.2).
                     zon = sessie.setdefault("zon", {})

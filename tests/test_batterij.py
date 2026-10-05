@@ -967,6 +967,82 @@ controle("met een bekende terugleverprijs kan hij nog handelen", any(u.stand == 
          f"{[(f'{u.start:%H:%M}', u.stand) for u in avond40.uren]}")
 
 
+print("=== 41. laden is inkopen: opgeleverd telt pas bij ontladen (v0.107.0) ===")
+# De eigenaar op 05-10-2026, bij "Opgeleverd € 0,74 in 8 dagen": "dat geld fluctueert
+# telkens en klopt niet." Het kasboek rekende laden af op het moment zelf.
+
+
+def cyclus41(laad_prijs, terug, ontlaad_prijs, uit_zon=False, cap=14.6, rte=0.75, echt_rte=0.75):
+    """Een batterij op 10% (de ondergrens): drie uur laden op 2 kW, dan op 1 kW het
+    huis voeden tot ze leeg is. De accustand in hele procenten, zoals een Anker hem
+    meldt. `rte` is wat de coach weet, `echt_rte` wat de batterij doet. Per minuut:
+    (kasboek, opgeleverd, voorraad, fase)."""
+    v = bat.Voorraad()
+    eta = echt_rte ** 0.5
+    inhoud = 0.10 * cap
+    rij = []
+    for _ in range(180):
+        # Uit de zon: 2 kW die anders het net op ging, de meter op nul. Van het
+        # net: het huis 300 W, de batterij er 2 kW bovenop.
+        net_w = 0.0 if uit_zon else 2300.0
+        e = bat.verdiend(net_w, 2000.0, laad_prijs, terug, 60.0)
+        inhoud += 2.0 / 60 * eta
+        rij.append((e, v.stap(e, 2.0 / 60, round(inhoud / cap * 100), 10.0, cap, rte), v.euro, "laden"))
+    while inhoud > 0.10 * cap:
+        e = bat.verdiend(0.0, -1000.0, ontlaad_prijs, terug, 60.0)
+        inhoud -= 1.0 / 60 / eta
+        rij.append((e, v.stap(e, -1.0 / 60, round(inhoud / cap * 100), 10.0, cap, rte), v.euro, "ontladen"))
+    return v, rij
+
+
+v41, rij41 = cyclus41(0.20, 0.05, 0.40)
+kasboek41 = sum(r[0] for r in rij41)
+echt41 = sum(r[1] for r in rij41)
+laden41 = [r for r in rij41 if r[3] == "laden"]
+kosten41 = -sum(r[0] for r in laden41)
+print(f"  van het net op 0,20, het huis op 0,40: kasboek {kasboek41:.4f}, opgeleverd {echt41:.4f}, "
+      f"voorraad na het laden {laden41[-1][2]:.4f}, aan het eind {v41.euro:.6f}, "
+      f"kleinste stap {min(r[1] for r in rij41):.6f}")
+controle("terwijl ze laadt levert ze niets op en kost ze niets: het bedrag blijft staan",
+         all(r[1] == 0.0 for r in laden41), f"{[r[1] for r in laden41 if r[1] != 0.0][:3]}")
+controle("wat het laden kostte zit in de voorraad", abs(laden41[-1][2] - kosten41) < 1e-9,
+         f"{laden41[-1][2]} {kosten41}")
+controle("opgeleverd min wat er nog in zit is altijd precies het kasboek",
+         abs(echt41 - v41.euro - kasboek41) < 1e-9, f"{echt41} {v41.euro} {kasboek41}")
+controle("leeg is de voorraad (op een cent na) op", abs(v41.euro) < 0.01, f"{v41.euro}")
+# Per procent afrekenen gaf hier bij de eerste stap na het laden 2,7 cent onder nul.
+controle("met een goedkope nacht en een dure avond stijgt opgeleverd tijdens ontladen alleen",
+         all(r[1] >= 0.0 for r in rij41), f"kleinste stap {min(r[1] for r in rij41):.6f}")
+
+# Met salderen: zon erin kost bijna de hele prijs, en met het verlies erbij levert
+# opslaan niets op. Dat hoort opgeleverd dan ook te zeggen, en pas bij ontladen.
+v41s, rij41s = cyclus41(0.30, 0.25, 0.30, uit_zon=True)
+kasboek41s = sum(r[0] for r in rij41s)
+echt41s = sum(r[1] for r in rij41s)
+print(f"  zon erin met salderen (0,30 en 0,25 terug): kasboek {kasboek41s:.4f}, opgeleverd {echt41s:.4f}, "
+      f"aan het eind {v41s.euro:.6f}")
+controle("met salderen zegt opgeleverd eerlijk dat opslaan verlies is, maar niet tijdens het laden",
+         echt41s < 0 and abs(echt41s - v41s.euro - kasboek41s) < 1e-9
+         and all(r[1] == 0.0 for r in rij41s if r[3] == "laden"), f"{echt41s} {kasboek41s}")
+
+# Zonder bekend rendement rekent hij met wat er aan accustand uit gaat: wat leeg is
+# blijft leeg, op een paar cent na.
+v41z, rij41z = cyclus41(0.20, 0.05, 0.40, rte=None)
+print(f"  rendement onbekend: aan het eind {v41z.euro:.6f}, kleinste stap {min(r[1] for r in rij41z):.6f}")
+controle("zonder rendement is hij leeg ook (bijna) op", abs(v41z.euro) < 0.05, f"{v41z.euro}")
+
+# Wat er al in zat toen de coach begon te tellen kostte niets: dat telt voluit.
+v41o = bat.Voorraad()
+controle("wat er al in zat telt voluit", v41o.stap(0.10, -0.5, 60.0, 10.0, 14.6, 0.75) == 0.10, f"{v41o}")
+# Zonder accustand of inhoud is er niets om naar te rekenen: dan het kasboek.
+controle("zonder accustand telt het kasboek",
+         bat.Voorraad(euro=1.0).stap(-0.05, 0.25, None, 10.0, 14.6, 0.75) == -0.05, "")
+controle("stilstand verandert niets", bat.Voorraad(euro=1.0).stap(0.0, 0.0, 50.0, 10.0, 14.6, 0.75) == 0.0, "")
+# Bij een negatieve prijs kreeg ze geld toe om te laden: een voorraad onder nul.
+v41m = bat.Voorraad()
+v41m.stap(bat.verdiend(2300.0, 2000.0, -0.05, -0.07, 60.0), 2.0 / 60, 20.0, 10.0, 14.6, 0.75)
+controle("laden bij een negatieve prijs geeft een voorraad onder nul", v41m.euro < 0, f"{v41m}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
