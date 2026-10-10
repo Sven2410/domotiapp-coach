@@ -796,3 +796,55 @@ aan `alfen-een-fase-zon-vers` met een stroom die elke ronde meldt (13:31). Proef
 in test_coach.py, voor een Easee en een Alfen. Een Alfen met het vinkje Fasen
 wisselen gebruikt deze meting niet (v0.104.0); in de eerste woning staat dat vinkje
 sinds 03-10-2026 13:08 aan.
+
+## De klantwoning nagelopen, 30-09 tot 10-10-2026 (v0.108.1)
+
+Vier dingen uit de recorder en de meldingengeschiedenis van tien dagen, met twee
+laadbeurten van de Ford (04/05-10 en 09/10-10).
+
+**De groep van de paal is de laagste van twee grenzen** (`_groep_amps` in coach.py,
+veld `circuit_max` in devices.js). Een Easee kent een dynamische en een vaste
+circuitlimiet en houdt zich aan de laagste. In de klantwoning stond de dynamische
+sinds 30-09 op 40 A, de vaste op 16 A, en het veld "Dynamisch limiet stroomcircuit"
+wees naar de dynamische; op 06-09-2026 stond die nog op 16. In de nacht van
+10-10-2026 koos de Easee na een 0 A van de coach (de zekering, door iets van 2,2 kW
+op L3) om 00:41:20 zelf één fase, de Ford trok om 00:43:52 16,83 A op een limiet van
+16, de coach rekende met 40 A in plaats van 16 (`circuit_ceiling`), en om 00:50:50
+hield de paal ermee op: de Ford in storing, net als op 06-09. Het nieuwe veld
+"Maximale limiet stroomcircuit" is de vaste grens; zonder dat veld blijft het zoals
+het was. Proef 136 in test_coach.py.
+
+**Na "laadt niet verder" komt er nog een verslag als hij toch vol wordt.** De Ford
+ging om 00:51:54 in storing op 36% (`elvehcharging` FAULT), de herstart van de coach
+om 00:55 deed niets, en om 01:22:01 begon hij uit zichzelf weer: 27 minuten na de
+herstart. Om 01:10 kwam "laadt niet verder en staat op 36%. Mogelijk staat er een
+laadgrens in de auto ... zonder gevolg", en toen hij om 06:48 vol was kwam er niets,
+want "vol" stond al in `gemeld`. Gaat de auto na zo'n verslag weer laden, dan gaat
+die vlag eraf (`niet_vol` in de sessie, `_async_verslag`), en het verslag van daarna
+zegt niet "zonder gevolg". De zin noemt nu ook een storing. Scenario
+`ford-storing-traag` (`storing_herstel_min=27`).
+
+**Wat de auto hoger aanneemt kon hij lager ook** (`_tempo_weerleggen`). Op
+04-10-2026 leerde de coach 5,98 kW voor 50 tot 60 procent, bij 59,7%: de Ford
+startte op 6 A, ging na negen minuten naar 8,7 A en pas na negentien naar 13,2 A.
+Om 15:36:30 nam hij 9,1 kW op 61%, in de volgende band, en weerleggen kon alleen
+tussen 59,7 en 60%. Nu vervalt elke band tot en met de huidige, gemeten bij een
+lagere of gelijke stand, zodra de auto twee ronden duidelijk meer neemt. Een band
+erboven blijft. Proef 138, en proef 71 aangepast (daar bleef een lagere band staan).
+
+**Wat er niet veranderd is: het tempo bovenin geldt voor de hele band.** Band 9
+staat op 1,57 kW, gemeten bij 99,5%. `_uren_met_afbouw` rekent daarmee voor 90 tot
+100 procent, 4,4 uur, terwijl de Ford op 10-10 van 95 naar 99% in zestien minuten ging
+en het laatste procent 66 minuten duurde. Op 05-10 greep de klaar-tijdregel daardoor
+om 00:51 in in plaats van op 02:45 te wachten; vol om 02:41, € 0,22 duurder dan het
+optimum. Zo bedoeld ("liever te vroeg vol dan te laat"); een keuze voor de eigenaar.
+
+**Een stille paal is geen stille meter, en het wordt één keer gezegd** (`_nettip`,
+`_getipt`). Van 25-09 15:00 tot 27-09 22:00 had de Easee geen vermogen; de slimme
+meter liep gewoon door (tarief 1 van 52.791,9 naar 52.837,6 kWh). De coach meldde
+"De coach kan je netmeting al ... minuten niet lezen", als kritiek, en elke minuut
+opnieuw: 2.540 keer, tot "3279 minuten", omdat een paal zonder kabel elke ronde wiste
+wat er al gezegd was. Nu noemt de tip de laadpaal als het diens vermogen is dat
+ontbreekt (`_net_stil_wat`), en blijft een stilte gemeld tot hij voorbij is, ook
+zonder kabel. De vloed duwde ook alles van voor 26-09 uit de geschiedenis
+(`MELDINGEN_MAX`, 3.000). Proef 137.

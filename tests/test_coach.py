@@ -3989,7 +3989,9 @@ controle("een auto die ruim na een verhoging minder neemt wordt wel geleerd",
 # Een bewaard tempo vervalt zodra de auto in die band aantoonbaar meer neemt,
 # zoals de oude rijen van de klantwoning: zonder accustand, dus onderin de band.
 OUD71 = {"device": "dev-laadpaal", "car": "car-1", "band": 6, "kw": 1.84, "at": "x"}
-ANDER71 = {"device": "dev-laadpaal", "car": "car-1", "band": 4, "kw": 1.84, "at": "x"}
+# Een band erboven blijft: daar kan de auto best minder aannemen (v0.108.1; tot
+# dan stond hier band 4, en die blijft sindsdien niet meer staan, zie proef 138).
+ANDER71 = {"device": "dev-laadpaal", "car": "car-1", "band": 8, "kw": 1.84, "at": "x"}
 inst71b, hass71b, coach71b = beurt71([OUD71, ANDER71], soc="68")
 op71(coach71b, inst71b, 3, 44)
 hass71b.states.zet("sensor.laadpaal_stroom", "13.5")
@@ -4003,7 +4005,7 @@ weg71 = list(inst71b.get("car_pace") or [])
 print(f"  op 68% 13,5 A tegen een bewaarde 1,84 kW: {weg71}")
 controle("twee ronden duidelijk meer: de band vervalt", not any(r.get("band") == 6 for r in weg71),
          f"{weg71}")
-controle("en een andere band blijft staan", ANDER71 in weg71, f"{weg71}")
+controle("en een hogere band blijft staan", ANDER71 in weg71, f"{weg71}")
 
 # Maar een afbouw die hoger in de band gemeten is blijft, want onderin de band
 # nam de auto toen ook nog meer.
@@ -7527,6 +7529,184 @@ controle("in een gewone ronde gaat de ventilator aan",
 asyncio.run(ronde75(hass135b, coach135b, T135 + dt.timedelta(minutes=2)))
 controle("en komt na twee minuten het bericht",
          any(d[0] == "notify" and "boven je grens van 45 °C" in d[2]["message"] for d in hass135b.services.verstuurd), "")
+
+print("=== 136. de groep van de paal: de laagste van de dynamische en de vaste grens (v0.108.1) ===")
+# De klantwoning in de nacht van 10-10-2026: de dynamische circuitlimiet van de Easee
+# stond sinds 30-09 op 40 A, de vaste op 16 A, en het veld wees naar de dynamische.
+# Om 00:43 trok de Ford 16,8 A op één fase; om 00:50 hield de paal ermee op en ging
+# de Ford in storing, net als op 06-09-2026.
+PAAL136 = dict(PAAL50, entities={**PAAL50["entities"], "circuit_max": "sensor.laadpaal_circuit_max"})
+inst136 = instellingen(devices=[PAAL136])
+inst136["strategy"]["schedules"][0]["window"]["done_by"] = "06:00"
+huis136 = dict(huis50, **{"sensor.laadpaal_circuit": "40", "sensor.laadpaal_circuit_max": "16"})
+hass136, _, coach136 = bouw(huis136, inst136)
+coach136.async_boost("dev-laadpaal", True)
+b136, _ = asyncio.run(ronde(coach136, inst136, paal=PAAL136, nu=dt.datetime(2026, 10, 10, 0, 44)))
+print(f"  dynamisch 40 A, vast 16 A, de auto trekt 16,88 op 16: {b136['rule']} {b136['amps']} A")
+controle("met de vaste grens van 16 A erbij vraagt hij 15 A, niet 16",
+         b136["amps"] == 15, f"{b136['amps']} A ({b136['rule']})")
+hass136b, _, coach136b = bouw(huis136, instellingen(devices=[PAAL50]))
+coach136b.async_boost("dev-laadpaal", True)
+b136b, _ = asyncio.run(ronde(coach136b, instellingen(devices=[PAAL50]), paal=PAAL50,
+                             nu=dt.datetime(2026, 10, 10, 0, 44)))
+controle("alleen de dynamische van 40 A: zoals in de klantwoning, 16 A", b136b["amps"] == 16,
+         f"{b136b['amps']} A ({b136b['rule']})")
+huis136c = dict(huis136, **{"sensor.laadpaal_circuit": "12"})
+hass136c, _, coach136c = bouw(huis136c, inst136)
+coach136c.async_boost("dev-laadpaal", True)
+b136c, _ = asyncio.run(ronde(coach136c, inst136, paal=PAAL136, nu=dt.datetime(2026, 10, 10, 0, 44)))
+controle("staat de dynamische lager dan de vaste, dan telt de dynamische", b136c["amps"] <= 12,
+         f"{b136c['amps']} A ({b136c['rule']})")
+
+print("=== 137. een stille meter of paal: één melding per stilte, en de juiste (v0.108.1) ===")
+# De klantwoning van 25 tot 27-09-2026: de Easee was twee dagen weg, de slimme meter
+# niet. De coach meldde "De coach kan je netmeting al ... minuten niet lezen", elke
+# minuut opnieuw als kritiek, 2.540 keer, want de kabel was eruit en een paal zonder
+# kabel wiste elke ronde wat er al gezegd was.
+inst137 = instellingen()
+huis137 = huis(status="disconnected", vermogen=0.0)
+huis137["sensor.laadpaal_vermogen"] = "unavailable"
+hass137, _, coach137 = bouw(huis137, inst137)
+telefoon137 = []
+for minuut in range(0, 15):
+    asyncio.run(ronde(coach137, inst137, dt.datetime(2026, 9, 26, 4, minuut)))
+    telefoon137 += [d[2]["message"] for d in hass137.services.verstuurd if d[0] == "notify"]
+print(f"  paal stil, kabel eruit, vijftien minuten: {len(telefoon137)} meldingen: {telefoon137[:1]}")
+controle("één melding in een kwartier, niet elke minuut", len(telefoon137) == 1, f"{telefoon137}")
+controle("en die gaat over de laadpaal, niet over de slimme meter",
+         telefoon137 and "vermogen van je laadpaal" in telefoon137[0] and "netmeting" not in telefoon137[0],
+         f"{telefoon137}")
+controle("op de kaart staat het wel elke minuut, met de tijd erbij",
+         "14 minuten" in (coach137.state["dev-laadpaal"].get("tip") or ""), f"{coach137.state['dev-laadpaal'].get('tip')}")
+# Komt de paal terug en valt daarna de meter weg, dan is dat een nieuwe stilte.
+hass137.states.zet("sensor.laadpaal_vermogen", "0")
+asyncio.run(ronde(coach137, inst137, dt.datetime(2026, 9, 26, 4, 15)))
+for entiteit in ("sensor.teruglevering", "sensor.afname"):
+    hass137.states.zet(entiteit, "unavailable")
+nieuw137 = []
+for minuut in range(16, 40):
+    asyncio.run(ronde(coach137, inst137, dt.datetime(2026, 9, 26, 4, minuut)))
+    nieuw137 += [d[2]["message"] for d in hass137.services.verstuurd if d[0] == "notify"]
+print(f"  daarna de meter weg: {len(nieuw137)} meldingen: {[m[:60] for m in nieuw137]}")
+controle("een nieuwe stilte van de meter wordt één keer gemeld, als netmeting",
+         len(nieuw137) == 1 and "netmeting" in nieuw137[0], f"{nieuw137}")
+
+print("=== 138. wat de auto hoger aanneemt kon hij lager ook: een tempo uit een lagere band vervalt (v0.108.1) ===")
+# De klantwoning op 04-10-2026: 5,98 kW voor band 5, geleerd bij 59,7% terwijl de
+# Ford nog opstartte. Om 15:36:30 nam hij 9,1 kW op 61%. Hier op één fase en met
+# het plafond van deze proefpaal, dus kleinere getallen: 1,84 kW bewaard bij 59,7%,
+# en op 61% 13,5 A.
+OPSTART138 = {"device": "dev-laadpaal", "car": "car-1", "band": 5, "kw": 1.84, "soc": 59.7, "at": "x"}
+inst138, hass138, coach138 = beurt71([OPSTART138, ANDER71], soc="61")
+# Eerst een ronde op de 8 A van de opzet: de knop van snelladen draait er een mee.
+op71(coach138, inst138, 3, 43)
+hass138.states.zet("sensor.laadpaal_stroom", "13.5")
+hass138.states.zet("sensor.laadpaal_vermogen", "3100")
+op71(coach138, inst138, 3, 44)
+controle("één ronde meer is nog geen weerlegging", OPSTART138 in (inst138.get("car_pace") or []),
+         f"{inst138.get('car_pace')}")
+op71(coach138, inst138, 3, 45)
+op71(coach138, inst138, 3, 46)
+na138 = list(inst138.get("car_pace") or [])
+print(f"  op 61% 13,5 A tegen 1,84 kW bewaard voor band 5 bij 59,7%: {na138}")
+controle("twee ronden op 61% duidelijk meer: band 5 vervalt", not any(r.get("band") == 5 for r in na138),
+         f"{na138}")
+controle("en de band erboven blijft", ANDER71 in na138, f"{na138}")
+
+print("=== 139. een bewoner zonder beheerder volgt de coach via een eigen abonnement (v0.108.1) ===")
+# De klantwoning: sinds 08-10-2026 23 keer "Refusing to allow ... to subscribe to event
+# domotiapp_coach_settings_updated" in het log. Home Assistant laat een gewone
+# gebruiker niet op de events van een integratie abonneren, en het overzicht van een
+# bewoner werkte na het openen nooit meer bij. websocket.py sleept voluptuous en de
+# websocket-API mee (zie proef 49); hier staan die er als lege huls voor.
+import types as _types  # noqa: E402
+
+
+class _Huls:
+    def __init__(self, *a, **k):
+        pass
+
+    def __call__(self, *a, **k):
+        return _Huls()
+
+    def __getattr__(self, naam):
+        return _Huls()
+
+    def __getitem__(self, sleutel):
+        return _Huls()
+
+
+_vol139 = _types.ModuleType("voluptuous")
+_vol139.__getattr__ = lambda naam: _Huls()
+_ws139 = _types.ModuleType("homeassistant.components.websocket_api")
+_ws139.websocket_command = lambda schema: (lambda f: f)
+_ws139.async_response = lambda f: f
+_ws139.require_admin = lambda f: f
+_ws139.ActiveConnection = object
+_ws139.event_message = lambda i, data: {"id": i, "type": "event", "event": data}
+_rep139 = _types.ModuleType("domotiapp_coach.report")
+_rep139.__getattr__ = lambda naam: _Huls()
+_comp139 = sys.modules.get("homeassistant.components") or _types.ModuleType("homeassistant.components")
+_comp139.websocket_api = _ws139
+for _naam, _mod in (("voluptuous", _vol139), ("homeassistant.components", _comp139),
+                    ("homeassistant.components.websocket_api", _ws139), ("domotiapp_coach.report", _rep139)):
+    sys.modules.setdefault(_naam, _mod)
+import domotiapp_coach as _pakket139  # noqa: E402
+
+_pakket139.report = sys.modules["domotiapp_coach.report"]
+import importlib as _importlib  # noqa: E402
+
+ws139 = _importlib.import_module("domotiapp_coach.websocket")
+
+
+class _Bus139:
+    def __init__(self):
+        self.luisteraars = {}
+
+    def async_listen(self, soort, f):
+        self.luisteraars.setdefault(soort, []).append(f)
+        return lambda: self.luisteraars[soort].remove(f)
+
+    def vuur(self, soort, data):
+        for f in list(self.luisteraars.get(soort, [])):
+            f(_types.SimpleNamespace(data=data))
+
+
+class _Verbinding139:
+    def __init__(self, admin, uid):
+        self.user = _types.SimpleNamespace(is_admin=admin, id=uid)
+        self.subscriptions, self.berichten, self.resultaten = {}, [], []
+
+    def send_message(self, bericht):
+        self.berichten.append(bericht)
+
+    def send_result(self, i, resultaat=None):
+        self.resultaten.append(i)
+
+
+hass139 = _types.SimpleNamespace(bus=_Bus139())
+bewoner139, beheer139 = _Verbinding139(False, "u-2"), _Verbinding139(True, "u-1")
+for v139 in (bewoner139, beheer139):
+    ws139.async_subscribe(hass139, v139, {"id": 7, "type": "domotiapp_coach/subscribe", "event": "settings"})
+    ws139.async_subscribe(hass139, v139, {"id": 8, "type": "domotiapp_coach/subscribe", "event": "decision"})
+mensen139 = [{"id": "p-1", "name": "Eigenaar", "user_id": "u-1", "target": "a", "kinds": {}},
+             {"id": "p-2", "name": "Bewoner", "user_id": "u-2", "target": "b", "kinds": {}}]
+hass139.bus.vuur("domotiapp_coach_settings_updated", {"settings": {"notifications": {"people": mensen139}}})
+hass139.bus.vuur("domotiapp_coach_decision", {"device": "dev-laadpaal", "amps": 16})
+eigen139 = [b["event"]["settings"]["notifications"]["people"] for b in bewoner139.berichten if b["id"] == 7]
+print(f"  bewoner: {len(bewoner139.berichten)} berichten, personen {[[p['name'] for p in m] for m in eigen139]}")
+controle("de bewoner krijgt het besluit van de coach", any(
+    b["id"] == 8 and b["event"].get("amps") == 16 for b in bewoner139.berichten), f"{bewoner139.berichten}")
+controle("en van de instellingen alleen zichzelf, zoals bij settings/get",
+         eigen139 == [[mensen139[1]]], f"{eigen139}")
+controle("de beheerder krijgt alle personen", any(
+    b["id"] == 7 and len(b["event"]["settings"]["notifications"]["people"]) == 2 for b in beheer139.berichten), "")
+bewoner139.subscriptions[8]()
+hass139.bus.vuur("domotiapp_coach_decision", {"device": "dev-laadpaal", "amps": 6})
+controle("na afmelden komt er niets meer", not any(
+    b["id"] == 8 and b["event"].get("amps") == 6 for b in bewoner139.berichten), "")
+controle("het commando is er voor iedereen, niet alleen voor de beheerder",
+         "async_subscribe" in bron49 and "@websocket_api.require_admin\n@websocket_api.websocket_command(\n    {\n        vol.Required(\"type\"): \"domotiapp_coach/subscribe\"" not in bron49, "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

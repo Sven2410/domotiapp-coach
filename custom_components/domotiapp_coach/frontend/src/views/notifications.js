@@ -23,15 +23,16 @@
  * en op de tijd." Vandaar de knoppen boven de lijst en de dagkeuze.
  *
  * De lijst komt van `domotiapp_coach/notifications/list` en groeit live mee via
- * het event `domotiapp_coach_notification`. Wie wat krijgt staat in de
+ * het event `domotiapp_coach_notification`, sinds v0.108.1 via
+ * `domotiapp_coach/subscribe` (`volgCoach`), zodat ook een bewoner zonder
+ * beheerdersrechten hem ziet groeien. Wie wat krijgt staat in de
  * instellingen onder `notifications` en gaat via `notifications/set` (admin)
  * of `notifications/mine` (de eigen schuiven).
  */
 
 import { DacElement, define } from "../base.js";
+import { volgCoach } from "../data-source.js";
 import { icons } from "../icons.js";
-
-const EVENT_NOTIFICATION = "domotiapp_coach_notification";
 
 const DAGEN = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
 const MAANDEN = [
@@ -1010,14 +1011,13 @@ class DacViewNotifications extends DacElement {
   }
 
   async volg_() {
-    if (!this.hass_?.connection?.subscribeEvents || this.off_) return;
+    if (!this.hass_?.connection || this.off_) return;
     try {
-      this.off_ = await this.hass_.connection.subscribeEvents((event) => {
-        const item = event?.data;
+      this.off_ = await volgCoach(this.hass_, "notification", (item) => {
         if (!item?.message) return;
         this.items_ = [item, ...this.items_];
         this.paint_();
-      }, EVENT_NOTIFICATION);
+      });
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de meldingen niet volgen", error);
     }

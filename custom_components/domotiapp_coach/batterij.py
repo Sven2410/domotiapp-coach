@@ -545,8 +545,37 @@ def _vooruit(som: _Som, b: Batterij) -> list[Uur]:
     return uit
 
 
+def _houden_tot(b: Batterij, som: _Som) -> datetime | None:
+    """Het eind van het blok waarin al van het net geladen wordt, of None.
+
+    Een accustand in hele procenten loopt soms een tik voor op het plan, en dan
+    wil het plan in de rest van het blok niets meer van het net. Tot v0.108.0
+    viel het besluit dan naar nul op de meter, en een batterij die dat zelf
+    doet dekte het huis uit wat hij net gekocht had. In de klantwoning in de
+    nacht van 05 op 06-10-2026: 7,68 kWh erin en 2,36 kWh eruit tussen 22:45 en
+    05:30, in gaten van een paar minuten tot een half uur tussen de kwartieren
+    door; op 10-10-2026 tussen 15:46 en 16:00 tikte de stand elke minuut tussen
+    83 en 84%, met vier moduswissels. Het besluit om dit blok te laden is aan
+    het begin van het blok genomen, dus hij houdt de batterij vast tot het blok
+    om is: niets eruit, zon er nog wel in.
+    """
+    if b.vorige_stand != NETLADEN:
+        return None
+    for k, rij in enumerate(som.blokken):
+        if som.delen[k] > 0:
+            return rij["end"] if _loopt_al(b, rij) else None
+    return None
+
+
+# Vasthouden is laden van het net op niets: de regelaar haalt dan niets uit de
+# batterij, en het telt overal als een lopende netlading. Eén watt en geen nul,
+# want nul betekent bij een netlading "het volle vermogen" (`doel_w` in coach.py).
+HOUD_W = 1.0
+
+
 def _rustig_vermogen(
-    uren: list[Uur], b: Batterij, ontladen: bool = False, piek: bool = True, drempel: float = 0.0
+    uren: list[Uur], b: Batterij, ontladen: bool = False, piek: bool = True, drempel: float = 0.0,
+    houden_tot: datetime | None = None,
 ) -> tuple[float, datetime | None]:
     """Op welk vermogen hij van het net laadt (of eraan levert), en tot wanneer.
 
@@ -604,6 +633,8 @@ def _rustig_vermogen(
         tot = uur.end
         n += 1
     if tijd <= 0 or energie <= 1e-6:
+        if houden_tot is not None and not ontladen:
+            return HOUD_W, houden_tot
         return 0.0, tot
     if b.vorige_stand != (HANDELEN if ontladen else NETLADEN):
         # Minder dan een procent van de batterij is geen plan maar afronding: een
@@ -974,7 +1005,9 @@ def plan_batterij(
     # Van het net laden en handelen: die volgen het plan zelf. Zie
     # `_rustig_vermogen`.
     if not vol and not piek:
-        vermogen, tot = _rustig_vermogen(uren, b, piek=dicht, drempel=_overname_drempel(som, b))
+        vermogen, tot = _rustig_vermogen(
+            uren, b, piek=dicht, drempel=_overname_drempel(som, b), houden_tot=_houden_tot(b, som),
+        )
         if vermogen > 0:
             rustig = vermogen < b.max_charge_w - 1.0
             if _kw(vermogen) == _kw(0.0):

@@ -1060,6 +1060,7 @@ class ChargerCoach:
         # wanneer hij zwijgt. Alleen om het te kunnen zeggen; zie `_nettip`.
         self._net_gezien: datetime | None = None
         self._net_stil_sinds: datetime | None = None
+        self._net_stil_wat = "meter"
         # Sinds wanneer een paal zegt dat er geen kabel in zit. Pas als hij dat
         # `KABEL_ONTDREUN` lang volhoudt telt het, en dan is dít het moment dat
         # in het verslag komt. Zie `_read`.
@@ -1234,9 +1235,9 @@ class ChargerCoach:
         # ging. Zie `TEMPO_HERSTEL`.
         self._limiet_vorig: dict[str, float] = {}
         self._limiet_omhoog: dict[str, datetime] = {}
-        # De band waarin de vorige ronde meer liep dan het bekende tempo. Twee
+        # De banden waarvan het tempo de vorige ronde overtroffen werd. Twee
         # ronden achter elkaar voordat een tempo vervalt, net als bij het leren.
-        self._weerleg_vorig: dict[str, int] = {}
+        self._weerleg_vorig: dict[str, set[int]] = {}
         self._auto_id: dict[str, str] = {}
         # De accustand van de auto aan elke paal bij de vorige ronde, voor de
         # voorrang bij zonoverschot ("auto tot 60%"). Zie `_zon_correctie`.
@@ -1290,7 +1291,15 @@ class ChargerCoach:
         # Wie er al gewezen is op een laderlimiet die zijn laadbeurten op één
         # fase zet. Ook één keer per sessie: het is een instelling in de app van
         # de paal, en die verandert niet doordat je het twee keer zegt.
-        self._getipt: set[str] = set()
+        #
+        # Per apparaat de soort tip die gemeld is: "net", "fase" of "uitleg".
+        # Een netmeting die zwijgt hoort niet bij een sessie maar bij een
+        # stilte, en die blijft gemeld tot hij voorbij is, ook als er geen kabel
+        # in zit. Zonder dat kwam "De coach kan je netmeting al ... minuten niet
+        # lezen" in de klantwoning op 26 en 27-09-2026 elke minuut opnieuw, 2.540
+        # keer als kritiek: de kabel was eruit, en een paal zonder kabel wiste
+        # elke ronde wat er al gezegd was.
+        self._getipt: dict[str, str] = {}
         # Wanneer er voor het laatst om een accustand is gevraagd, per apparaat.
         # Eén melding per sessie is genoeg; vaker is zeuren en dan zet iemand de
         # meldingen uit.
@@ -5178,6 +5187,18 @@ class ChargerCoach:
             if vorige is not None and net_w is not None:
                 seconden = min(60.0, max(0.0, (nu - vorige).total_seconds()))
                 bat_w = batterij_w if sessie.get("zelf") else regelaar.vermogen_w(batterij_w)
+                # Nooit meer dan de batterij kan. De ontlaadsensor van de Anker
+                # in de klantwoning gaf tussen 30-09 en 10-10-2026 2.856 keer meer
+                # dan 3.600 W, tot 7.000 W, bij een batterij van 3.500 W; op
+                # 02-10-2026 om 15:52:30 zag de meter op zijn fase 5,1 kW
+                # teruglevering met 6,0 kW zon over drie fasen, en dat past bij
+                # 3,5 kW uit de batterij, niet bij 7. Elk van die tikken telde
+                # in het kasboek als stroom die het huis niet hoefde te kopen.
+                if bat_w is not None:
+                    if b.max_charge_w > 0:
+                        bat_w = min(bat_w, b.max_charge_w)
+                    if b.max_discharge_w > 0:
+                        bat_w = max(bat_w, -b.max_discharge_w)
                 euro = verdiend(net_w, bat_w,
                                 sessie.get("koop"), sessie.get("terug"), seconden)
                 if euro is not None:
@@ -5769,6 +5790,10 @@ class ChargerCoach:
             or fasetip
             or (self._bewakertip(settings, device, charger) if decision.charge else "")
         )
+        tipsoort = "net" if nettip else ("fase" if fasetip else ("uitleg" if tip else ""))
+        # Is de netmeting terug, dan mag een volgende stilte weer gemeld worden.
+        if not nettip and self._getipt.get(device_id) == "net":
+            self._getipt.pop(device_id, None)
         self.state[device_id]["tip"] = tip
         # Eerst opruimen, dan pas opschrijven wat de stand is. Andersom bleef er
         # op de kaart nog een minuut "snelladen staat aan" staan nadat de kabel
@@ -5805,7 +5830,8 @@ class ChargerCoach:
             self._weerleg_vorig.pop(device_id, None)
             self._soc_asked.discard(device_id)
             self._warned.pop(device_id, None)
-            self._getipt.discard(device_id)
+            if self._getipt.get(device_id) != "net":
+                self._getipt.pop(device_id, None)
             # Wat er over deze sessie bewaard is gaat mee weg. Een opgegeven
             # accustand hoort bij de auto die eraan hing: blijft die staan, dan
             # rekent de coach morgen met het percentage van gisteren terwijl er
@@ -5844,8 +5870,8 @@ class ChargerCoach:
         if decision.needs_soc:
             await self._async_ask_soc(device, decision)
 
-        if tip and device_id not in self._getipt:
-            self._getipt.add(device_id)
+        if tip and self._getipt.get(device_id) != tipsoort:
+            self._getipt[device_id] = tipsoort
             # Een meter die zwijgt of een fase die niet klopt moet de bewoner
             # zelf oplossen, en dat is kritiek. De lastbewaker die het tempo
             # bepaalt is uitleg: die staat op de kaart en in de geschiedenis,
@@ -6858,6 +6884,11 @@ class ChargerCoach:
             # waarin hij er nog was: de naijl hierboven heeft er al een paar
             # minuten overheen gelaten voordat het hier terechtkomt.
             self._net_stil_sinds = self._net_stil_sinds or self._net_gezien or now
+            # Wat er zwijgt: de meter zelf, of alleen het vermogen van de paal.
+            # In de klantwoning was het van 25 tot 27-09-2026 de Easee, twee
+            # dagen lang, terwijl de slimme meter gewoon doorliep; de melding
+            # stuurde de bewoner naar de verkeerde integratie.
+            self._net_stil_wat = "meter" if netto is None else "paal"
             surplus = 0.0
             self._zon.pop(device.get("id", ""), None)
         else:
@@ -7042,7 +7073,7 @@ class ChargerCoach:
             # Wat er op de paal staat, zodat de klaar-tijdsom kan zien of de
             # coach zelf de rem is. Zie `throttled_by_coach` in planner.py.
             limit_amps=_number(self.hass, entities.get("dynamic_limit")),
-            circuit_amps=_number(self.hass, entities.get("circuit_limit")),
+            circuit_amps=self._groep_amps(entities),
         )
         # Wat er de afgelopen uren gemiddeld overbleef voor deze paal, uit de
         # boekhouding van de beurt (`_bijhouden`). Een meting van deze beurt,
@@ -7562,6 +7593,15 @@ class ChargerCoach:
         Een rij van vóór v0.69.0 weet niet bij welke stand hij gemeten is en telt
         als gemeten onderin zijn band. Een echte afbouw die zo wegvalt meet de
         coach later in de band opnieuw.
+
+        En niet alleen in de eigen band (v0.108.1): wat een auto bij een hogere
+        accustand aanneemt, kon hij lager ook. In de klantwoning op 04-10-2026
+        leerde de coach 5,98 kW voor 50 tot 60 procent, bij 59,7%, terwijl de Ford
+        nog opstartte (eerst 6 A, dan 8,7, pas na negentien minuten 13,2 A). Om
+        15:36:30 nam hij 9,1 kW, maar toen stond hij al op 61% en dus in de
+        volgende band. Weerleggen kon alleen tussen 59,7 en 60%, en de Ford meldt
+        per halve procent: tot 10-10 bleef die 5,98 kW staan, en elke beurt door
+        die band rekende een half uur te lang.
         """
         auto_id = self._auto_id.get(device_id)
         if (
@@ -7574,28 +7614,30 @@ class ChargerCoach:
             return
         band = int(car.soc_percent // 10)
         gezien = self._tempo_gezien.get(device_id) or {}
-        if band in gezien:
-            bekend = (gezien[band], (self._tempo_soc.get(device_id) or {}).get(band, band * 10.0))
-        else:
-            bekend = self._tempo_bewaard(settings, device_id, auto_id).get(band)
+        socs = self._tempo_soc.get(device_id) or {}
+        # Wat er van deze beurt is gemeten gaat voor wat er bewaard staat.
+        bekend = dict(self._tempo_bewaard(settings, device_id, auto_id))
+        for b, kw in gezien.items():
+            bekend[b] = (kw, socs.get(b, b * 10.0))
         kw_nu = watts_for(charger.actual_amps, car.phases) / 1000.0
-        if (
-            bekend is None
-            or car.soc_percent < bekend[1]
-            or kw_nu <= bekend[0] + TEMPO_SPELING
-        ):
+        # Elke band tot en met deze, gemeten bij deze of een lagere stand, met
+        # een tempo dat de auto nu duidelijk overtreft.
+        kandidaten = {
+            b for b, (kw, soc) in bekend.items()
+            if b <= band and soc <= car.soc_percent and kw_nu > kw + TEMPO_SPELING
+        }
+        vorige = self._weerleg_vorig.get(device_id) or set()
+        if not kandidaten:
             self._weerleg_vorig.pop(device_id, None)
             return
-        if self._weerleg_vorig.get(device_id) != band:
-            self._weerleg_vorig[device_id] = band
-            return
-        self._weerleg_vorig.pop(device_id, None)
-        gezien.pop(band, None)
-        (self._tempo_soc.get(device_id) or {}).pop(band, None)
-        self._tempo_vorig.pop(device_id, None)
-        self.hass.async_create_task(
-            self._async_tempo_wissen(settings, device_id, auto_id, band)
-        )
+        for b in sorted(kandidaten & vorige):
+            gezien.pop(b, None)
+            socs.pop(b, None)
+            self._tempo_vorig.pop(device_id, None)
+            self.hass.async_create_task(
+                self._async_tempo_wissen(settings, device_id, auto_id, b)
+            )
+        self._weerleg_vorig[device_id] = kandidaten - vorige
 
     async def _async_tempo_wissen(
         self, settings: dict[str, Any], device_id: str, auto_id: str, band: int
@@ -9122,6 +9164,16 @@ class ChargerCoach:
                 kritiek=True,
             )
 
+        # Gaat een auto na "laadt niet verder" toch weer laden, dan was dat
+        # verslag niet het einde van de beurt, en hoort er nog een te komen als
+        # hij echt klaar is. In de klantwoning op 10-10-2026: de Ford ging om
+        # 00:51 in storing op 36%, kwam om 01:22 uit zichzelf terug en was om
+        # 06:48 vol, en het enige verslag van die nacht zei "36%, zonder gevolg".
+        if "vol" in gemeld and sessie.get("niet_vol") and charger.charging and decision.rule != "complete":
+            gemeld.discard("vol")
+            sessie["niet_vol"] = False
+            sessie["klaar_sinds"] = None
+
         # De auto is vol.
         if decision.rule == "complete" and "vol" not in gemeld and sessie["begon"]:
             if sessie.get("klaar_sinds") is None:
@@ -9156,11 +9208,14 @@ class ChargerCoach:
             if car.soc_percent is None:
                 klaar = f"{wie} is vol."
             elif not doel_bereikt(car):
+                # Een laadgrens is één reden, een storing in de auto een andere:
+                # de Ford op 10-10-2026 stond op 36% met een doel van 100%.
                 klaar = (
                     f"{wie} laadt niet verder en staat op "
                     f"{round(car.soc_percent)}%. Mogelijk staat er een laadgrens in "
-                    "de auto."
+                    "de auto, of meldt hij een storing."
                 )
+                sessie["niet_vol"] = True
             elif heel:
                 klaar = f"{wie} is vol, {accu}." if accu else f"{wie} is vol."
             elif accu:
@@ -9181,10 +9236,12 @@ class ChargerCoach:
                 verloop = f"{kwh}, {begon:%H:%M} tot {now:%H:%M}."
             else:
                 verloop = f"{begon:%H:%M} tot {now:%H:%M}."
+            # "Zonder gevolg" alleen bij een auto die ook echt niet verder kwam;
+            # niet in het verslag van een auto die daarna alsnog vol werd.
             nog = (
                 f"De coach heeft de paal om {herstart:%H:%M} nog een keer opnieuw "
                 "gestart, zonder gevolg."
-                if herstart is not None
+                if herstart is not None and sessie.get("niet_vol")
                 else ""
             )
             await self._async_tell(_verslag(
@@ -9648,6 +9705,26 @@ class ChargerCoach:
                 tot = sessie["auto_grens"] if tot is None else max(tot, sessie["auto_grens"])
         return hulp, tot
 
+    def _groep_amps(self, entities: dict[str, Any]) -> float | None:
+        """De grens van de groep waar de paal op zit: de laagste die bekend is.
+
+        Een Easee kent er twee, een dynamische en een vaste, en houdt zich aan
+        de laagste. In de klantwoning stond de dynamische sinds 30-09-2026 op
+        40 A bij een vaste van 16 A, en het veld wees naar de dynamische. In de
+        nacht van 10-10-2026 trok de Ford om 00:43 16,8 A op één fase, de coach
+        rekende met 40 A in plaats van 16, en om 00:50 hield de paal ermee op en
+        ging de Ford in storing, net als op 06-09-2026. Zie `circuit_ceiling`.
+        """
+        grenzen = [
+            waarde
+            for waarde in (
+                _number(self.hass, entities.get("circuit_limit")),
+                _number(self.hass, entities.get("circuit_max")),
+            )
+            if waarde is not None
+        ]
+        return min(grenzen) if grenzen else None
+
     def _nettip(self, now: datetime) -> str:
         """Zeggen dat de netmeting er niet is, want dat verklaart de stilstand.
 
@@ -9663,6 +9740,12 @@ class ChargerCoach:
         if minuten < 1:
             return ""
         duur = "een minuut" if minuten == 1 else f"{minuten} minuten"
+        if self._net_stil_wat == "paal":
+            return (
+                f"De coach kan het vermogen van je laadpaal al {duur} niet lezen, "
+                "dus hij ziet niet hoeveel zon er over is en stuurt alleen op prijs "
+                "en op je klaar-tijd. Kijk of de integratie van je laadpaal nog draait."
+            )
         return (
             f"De coach kan je netmeting al {duur} niet lezen, dus hij "
             "ziet niet hoeveel zon er over is en stuurt alleen op prijs en op je "

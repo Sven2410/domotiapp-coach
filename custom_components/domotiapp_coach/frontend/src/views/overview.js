@@ -34,7 +34,7 @@ import {
   valueLabel,
 } from "../devices.js";
 import { batteryRows, nachtConclusie } from "../battery.js";
-import { LiveSource, laadCoachPrijzen, laadbeurtRegels, meterReadings, priceForecast, solarForecast } from "../data-source.js";
+import { LiveSource, laadCoachPrijzen, laadbeurtRegels, meterReadings, priceForecast, solarForecast, volgCoach } from "../data-source.js";
 import {
   planFor,
   planSummary,
@@ -1734,13 +1734,12 @@ class DacViewOverview extends DacElement {
     laadCoachPrijzen(this.hass);
 
     try {
-      this.coachOff_ = await this.hass.connection.subscribeEvents((event) => {
-        const data = event?.data;
+      this.coachOff_ = await volgCoach(this.hass, "decision", (data) => {
         if (!data?.device) return;
         laadCoachPrijzen(this.hass);
         this.coach_ = { ...(this.coach_ ?? {}), [data.device]: data };
         if (this.rendered_) this.updateSteerable_(this.lastDevices_ ?? []);
-      }, "domotiapp_coach_decision");
+      });
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de coach niet volgen", error);
     }

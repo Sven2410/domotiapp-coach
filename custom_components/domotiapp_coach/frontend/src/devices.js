@@ -214,6 +214,16 @@ export const CHARGER_BRANDS = [
         filter: "all",
       },
       {
+        key: "circuit_max",
+        label: "Maximale limiet stroomcircuit",
+        // De vaste grens van de groep. De dynamische hierboven kan erboven
+        // staan: in de klantwoning stond die sinds 30-09-2026 op 40 A bij een
+        // groep van 16 A, en dan keek de coach naar 40. De paal houdt zich aan
+        // de laagste van de twee, en de coach dus ook.
+        hint: "De vaste grens van de groep waar de paal op zit, in ampère. De coach neemt de laagste van deze en de dynamische limiet hierboven.",
+        filter: "all",
+      },
+      {
         key: "current",
         label: "Stroom",
         hint: "Wat de lader op dit moment levert, in ampère.",

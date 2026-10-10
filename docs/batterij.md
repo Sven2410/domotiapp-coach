@@ -995,3 +995,55 @@ Proef 135 in test_coach.py (de melding, de ventilator, de niveaus, Fahrenheit, d
 sensorwacht en een gewone ronde), en vier in test_rapport.mjs (de kaart, de
 keuzelijst, het blok in Meldingen, de velden). In het virtuele huis zit geen
 temperatuur, dus daar is geen scenario voor.
+
+## Een tik voor op het plan: vasthouden tot het blok om is (v0.108.1)
+
+In de klantwoning in de nacht van 05 op 06-10-2026 laadde de coach rustig van het net
+in kwartieren van € 0,309 tot € 0,322. Elke keer dat de accustand een procent
+voorliep op het plan (23:42 naar 46%, 00:25, 00:42, 01:28) wilde het plan in de rest
+van het kwartier niets meer, gaf `_rustig_vermogen` 0, en viel `plan_batterij` met
+zelf nul naar nul op de meter: de Anker dekte de warmtepomp uit wat hij net gekocht
+had, en na `ZELF_WACHT` gaf de coach hem terug. Tussen 22:45 en 05:30 7,68 kWh erin
+en 2,36 kWh eruit. Op 10-10-2026 tussen 15:46 en 16:00 tikte de stand elke minuut
+tussen 83 en 84%, met vier moduswissels.
+
+Het besluit om dit blok te laden is aan het begin van het blok genomen. Loopt de
+beurt al in dit blok (`_houden_tot`, met `_loopt_al`), dan houdt hij de batterij nu
+vast tot het blok om is: laden van het net op één watt (`HOUD_W`), niets eruit, zon
+er nog wel in, met "Hij maakt het laden van het net af tot HH:MM en geeft tot dan
+niets af." Het volgende blok besluit opnieuw. Dit was voorstel (1) van 30-09-2026;
+v0.102.3 bouwde het doorladen, niet het vasthouden.
+
+Scenario `batterij-kwartier-voorloper`, met de echte kwartierprijzen van die nacht
+(`KWARTIER_05_10`): v0.108.0 12 keer de modus om en laden en ontladen in zes
+kwartieren, nu 8 keer en alleen aan het eind van de nachtbeurt. De kosten tot
+10:30 bleven gelijk (€ 2,89 en € 2,91, met een procent meer in de batterij): het
+scheelt moduswissels, geen geld. Proef 42 in test_batterij.py.
+
+**Open, in hetzelfde scenario gezien:** rustig verdeeld laden met een accustand in hele
+procenten geeft een zaagtand. `_rustig_vermogen` rekent elke ronde wat er in de rest
+van de even dure blokken nog bij moet, de stand blijft een paar minuten op hetzelfde
+procent staan terwijl de batterij laadt, dus het vermogen loopt elke minuut op tot de
+stand tikt en zakt dan terug: 03:00 tot 05:30 zo'n 50 opdrachten per uur, met v0.108.0
+precies zo. In de eerste woning gezien als twee à drie nieuwe opdrachten per minuut
+(03-10-2026). Bijtellen zoals bij de auto (`_soc_bijgeteld`) zou het rustiger maken;
+niet gebouwd. Het scenario valt daarom buiten de algemene controles op opdrachten,
+wissels en kosten per dag in test_virtueel.py.
+
+## Het kasboek telt niet meer dan de batterij kan (v0.108.1)
+
+De ontlaadsensor van de Anker gaf tussen 30-09 en 10-10-2026 2.856 keer meer dan
+3.600 W, tot 7.000 W, bij een batterij van 3.500 W. Op 02-10-2026 om 15:52:30 zag de
+meter op L1 5,1 kW teruglevering bij 6,0 kW zon over drie fasen; dat past bij 3,5 kW
+uit de batterij, niet bij 7. In zijn eigen stand telde de coach de sensor zoals hij
+was, en elke tik ging in het kasboek als stroom die het huis niet hoefde te kopen:
+tot ongeveer € 2,35 van de € 19,81 "Opgeleverd" van die dagen (een bovengrens; dat
+deel is niet teruggerekend). Nu begrenst het kasboek op het hoogste laad- en
+ontlaadvermogen uit Apparaten (`_async_regel`).
+
+**Niet veranderd, wel gezien:** van de negen overnames "want de zekering wordt krap"
+zonder auto waren er zeven bij teruglevering op L1 (18 tot 23 A), niet bij afname.
+De fasestromen van een DSMR-meter zijn hele ampères zonder teken, en `_laadruimte_w`
+neemt `abs()`. Voor de zekering zelf klopt dat, maar laden verlaagt de stroom bij
+teruglevering. Om dat te onderscheiden is de richting per fase nodig, en een fout
+daarin haalt een beveiliging weg; voorgelegd, niet gebouwd.

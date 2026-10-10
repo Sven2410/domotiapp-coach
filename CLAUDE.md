@@ -128,7 +128,8 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    vermogen en stroom, drie ronden stabiel), dan rekent de coach die beurt
    met één fase (`Car.phases_measured`); en trekt de auto meer dan de
    limiet, dan blijft de coach evenveel onder de groep van de paal
-   (`circuit_ceiling` in planner.py, met de entiteit `circuit_limit`).
+   (`circuit_ceiling` in planner.py, met de laagste van `circuit_limit` en
+   `circuit_max`, sinds v0.108.1; `docs/laadpaal.md`).
 4. **Niets van het net in de avondpiek**, van `EVENING_PEAK_START` (18:00,
    de keuze van 05-09-2026; 17:00 kostte die dag 1,65 euro) tot
    `EVENING_START` (20:00). **Sinds v0.79.0 alleen bij een vast contract**
@@ -277,11 +278,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 470 controles op het denkwerk
-python tests/test_batterij.py    # 183 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 923 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2302 op hele laadbeurten in het virtuele huis
+python tests/test_batterij.py    # 187 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_coach.py       # 938 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 2324 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 145 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 146 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

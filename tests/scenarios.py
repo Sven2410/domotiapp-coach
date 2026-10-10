@@ -514,6 +514,13 @@ ford_storing = dyn_zonnig.kopie(
     auto=replace(GROTE, soc=60.0, storing_bij_herstart=True),
     gebeurtenissen=[("13:00", "storing", None)],
 )
+ford_storing_traag = ford_storing.kopie(
+    naam="ford-storing-traag",
+    uitleg="als ford-storing, maar de auto komt pas 27 minuten na de herstart terug: eerst 'laadt niet verder', en als hij later vol is nog een verslag",
+    # De klantwoning op 10-10-2026: storing om 00:51 op 36%, herstart door de
+    # coach om 00:55:19, de Ford laadde om 01:22:01 weer en was om 06:48 vol.
+    auto=replace(GROTE, soc=60.0, storing_bij_herstart=True, storing_herstel_min=27),
+)
 een_fase_groep = dyn_zonnig.kopie(
     naam="easee-een-fase-groep", uitleg="de Easee kiest bij de start één fase, de auto trekt 0,9 A boven de limiet, de groep is 16 A en de coach ziet die",
     auto=replace(GROTE, soc=60.0, overschot_amps=0.9, storing_bij_herstart=True),
@@ -1196,6 +1203,37 @@ batterij_kwartier_zelf = Scenario(
     prijzen=Prijzen(per_dag=KWARTIER_30_09),
     begin="2026-09-30 02:30:40", duur_uren=22, **{**ZONDER_AUTO, "stap_seconden": 5},
 )
+# De klantwoning in de nacht van 05 op 06-10-2026, all-in per kwartier (één
+# ontbrekend kwartier, 05-10 03:30, is het gemiddelde van de twee ernaast). De
+# nacht ligt tussen € 0,309 en € 0,322; de coach laadde rustig verdeeld van het
+# net, en elke keer dat de accustand een procent voorliep op het plan viel hij
+# midden in een kwartier naar nul op de meter: 7,68 kWh erin, 2,36 kWh eruit.
+KWARTIER_05_10 = {
+    "2026-10-05": [
+        0.339, 0.333, 0.340, 0.335, 0.335, 0.322, 0.331, 0.325, 0.328, 0.319, 0.321, 0.317, 0.316, 0.315, 0.315, 0.315,
+        0.317, 0.317, 0.311, 0.315, 0.315, 0.318, 0.320, 0.332, 0.338, 0.355, 0.358, 0.374, 0.374, 0.392, 0.410, 0.421,
+        0.449, 0.421, 0.401, 0.378, 0.391, 0.369, 0.327, 0.311, 0.361, 0.335, 0.313, 0.283, 0.304, 0.282, 0.255, 0.239,
+        0.266, 0.225, 0.208, 0.184, 0.174, 0.167, 0.161, 0.160, 0.148, 0.160, 0.184, 0.208, 0.187, 0.226, 0.245, 0.271,
+        0.219, 0.285, 0.317, 0.339, 0.317, 0.347, 0.378, 0.398, 0.374, 0.400, 0.415, 0.442, 0.426, 0.438, 0.458, 0.446,
+        0.447, 0.408, 0.399, 0.379, 0.397, 0.383, 0.385, 0.353, 0.374, 0.360, 0.343, 0.310, 0.368, 0.336, 0.328, 0.311,
+    ],
+    "2026-10-06": [
+        0.329, 0.320, 0.313, 0.309, 0.314, 0.312, 0.311, 0.317, 0.320, 0.315, 0.315, 0.313, 0.315, 0.315, 0.315, 0.317,
+        0.314, 0.322, 0.318, 0.321, 0.309, 0.320, 0.338, 0.369, 0.362, 0.376, 0.384, 0.397, 0.398, 0.421, 0.430, 0.435,
+        0.475, 0.439, 0.425, 0.387, 0.442, 0.398, 0.375, 0.322, 0.371, 0.339, 0.334, 0.316, 0.330, 0.333, 0.312, 0.302,
+        0.320, 0.310, 0.311, 0.296, 0.302, 0.293, 0.287, 0.290, 0.297, 0.305, 0.310, 0.313, 0.304, 0.314, 0.317, 0.331,
+        0.317, 0.334, 0.368, 0.403, 0.362, 0.400, 0.436, 0.517, 0.465, 0.499, 0.559, 0.620, 0.606, 0.588, 0.601, 0.554,
+        0.545, 0.488, 0.468, 0.448, 0.461, 0.436, 0.428, 0.400, 0.409, 0.403, 0.403, 0.394, 0.392, 0.385, 0.380, 0.373,
+    ],
+}
+batterij_kwartier_voorloper = batterij_kwartier_zelf.kopie(
+    naam="batterij-kwartier-voorloper",
+    uitleg="de nacht van 05 op 06-10-2026: rustig bijladen in kwartieren met een accu die zelf nul doet; loopt zijn stand een tik voor op het plan, dan houdt de coach hem vast tot het kwartier om is in plaats van nul op de meter",
+    batterij=Batterij(soc=47.0, capaciteit_kwh=14.5, max_ontladen_w=3500.0, meter=False, rte_opgegeven=0.736,
+                      eigen_nul=True, zelf_nul=True, knop_weg=True, knop_terug_s=14.0, **ANKER_SENSOR),
+    prijzen=Prijzen(per_dag=KWARTIER_05_10),
+    begin="2026-10-05 22:30:40", duur_uren=12,
+)
 batterij_zonder_rendement = batterij_winter.kopie(
     naam="batterij-rendement-onbekend",
     uitleg="geen kWh-meter en niets opgegeven: alleen nul op de meter, niet van het net laden",
@@ -1209,7 +1247,7 @@ BATTERIJ = [
     batterij_klapperlast, batterij_wisselende_last, batterij_zonder_rendement,
     batterij_zelf_nul, batterij_zelf_knop_weg, batterij_zelf_knop_traag, batterij_knop_traag_start,
     batterij_dynamisch_zelf, batterij_dynamisch_zon_zelf, batterij_zelf_wisselend,
-    batterij_kwartier_zelf,
+    batterij_kwartier_zelf, batterij_kwartier_voorloper,
 ]
 HERSTART = [herstart_groep, herstart_groep_zonder]
 
@@ -1321,7 +1359,7 @@ ALLE = [
     p1_weg, p1_lang_weg, paal_traag,
     tien_uur, tien_uur_zon, tien_uur_valt_tegen, tien_uur_vast, equalizer, prijzen_weg,
     weekend, weekend_geen_zon, weekend_voorspelling_mis,
-    ford_storing, een_fase_groep, een_fase_blind, afbouw, afbouw_geleerd,
+    ford_storing, ford_storing_traag, een_fase_groep, een_fase_blind, afbouw, afbouw_geleerd,
     afbouw_krap, afbouw_krap_geleerd, fasekeuze, zon_belofte, zon_belofte_dyn,
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
