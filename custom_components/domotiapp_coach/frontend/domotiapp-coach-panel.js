@@ -18,6 +18,7 @@
 
 import { DacElement, define } from "./src/base.js";
 import { StateFeed } from "./src/state-feed.js";
+import { volgCoach } from "./src/data-source.js";
 import { navItemsFor } from "./src/header.js";
 import "./src/header.js";
 import "./src/views/overview.js";
@@ -29,7 +30,6 @@ import "./src/views/installation.js";
 import "./src/views/settings.js";
 
 const DEFAULT_VIEW = "overzicht";
-const EVENT_SETTINGS_UPDATED = "domotiapp_coach_settings_updated";
 
 /** Which element renders which section. */
 const BUILT = {
@@ -143,10 +143,7 @@ class DomotiAppCoachPanel extends DacElement {
     }
 
     try {
-      this.unsubscribe_ = await this.hass_.connection.subscribeEvents(
-        (event) => this.applySettings_(event?.data?.settings),
-        EVENT_SETTINGS_UPDATED
-      );
+      this.unsubscribe_ = await volgCoach(this.hass_, "settings", (data) => this.applySettings_(data?.settings));
     } catch (error) {
       console.warn("[DomotiApp Coach] kon instellingen niet volgen", error);
     }

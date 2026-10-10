@@ -147,6 +147,44 @@ export function priceNow(feed, contract) {
  */
 let coachPrijzen = { reserve: false, rows: [], at: 0 };
 
+/** Onder welk event de coach elk van deze op de bus van Home Assistant zet. */
+const COACH_EVENTS = {
+  decision: "domotiapp_coach_decision",
+  notification: "domotiapp_coach_notification",
+  settings: "domotiapp_coach_settings_updated",
+};
+
+/**
+ * De besluiten, meldingen of instellingen van de coach volgen (v0.108.1).
+ *
+ * Via het eigen commando `domotiapp_coach/subscribe`, en niet rechtstreeks op
+ * de events: Home Assistant laat een gebruiker zonder beheerdersrechten zich
+ * daar niet op abonneren. In de klantwoning werkte het overzicht van een
+ * bewoner daardoor na het openen nooit meer bij, en stond het log vol met
+ * "Refusing to allow ... to subscribe". De terugval op de events is er voor
+ * een omgeving die het commando niet kent, zoals de preview.
+ *
+ * @param {object} hass
+ * @param {"decision"|"notification"|"settings"} soort
+ * @param {(data: object) => void} terug krijgt wat het event meedraagt
+ * @returns {Promise<(() => void) | null>} om af te melden
+ */
+export async function volgCoach(hass, soort, terug) {
+  const verbinding = hass?.connection;
+  if (verbinding?.subscribeMessage) {
+    try {
+      return await verbinding.subscribeMessage((data) => terug(data), {
+        type: "domotiapp_coach/subscribe",
+        event: soort,
+      });
+    } catch (error) {
+      // Dan de events zelf, zoals voor v0.108.1.
+    }
+  }
+  if (!verbinding?.subscribeEvents) return null;
+  return verbinding.subscribeEvents((event) => terug(event?.data), COACH_EVENTS[soort]);
+}
+
 /** De lijst van de coach opnieuw ophalen, hooguit eens per minuut. */
 export async function laadCoachPrijzen(hass, nu = Date.now()) {
   if (!hass?.callWS || nu - coachPrijzen.at < 60_000) return coachPrijzen;

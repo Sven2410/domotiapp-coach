@@ -2831,6 +2831,68 @@ proef("het bolletje van de laadpaal en de boiler is groen als ze aan staan", () 
 
 // --- draaien ----------------------------------------------------------------
 
+// De klantwoning: sinds 08-10-2026 23 keer "Refusing to allow ... to subscribe to event
+// domotiapp_coach_settings_updated" in het log, en het overzicht van een bewoner zonder
+// beheerdersrechten werkte na het openen niet meer bij. Sinds v0.108.1 via het eigen
+// commando van de coach, dat iedereen mag gebruiken.
+proef("het paneel volgt de coach via domotiapp_coach/subscribe, ook zonder beheerder", async () => {
+  const { volgCoach } = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
+  const gevraagd = [];
+  let terugroep = null;
+  const hass = {
+    connection: {
+      async subscribeMessage(cb, bericht) {
+        gevraagd.push(bericht);
+        terugroep = cb;
+        return () => {};
+      },
+      async subscribeEvents() {
+        throw new Error("niet voor een gewone gebruiker");
+      },
+    },
+  };
+  const ontvangen = [];
+  await volgCoach(hass, "decision", (data) => ontvangen.push(data));
+  assert.deepEqual(gevraagd, [{ type: "domotiapp_coach/subscribe", event: "decision" }]);
+  terugroep({ device: "dev-1", amps: 16 });
+  assert.deepEqual(ontvangen, [{ device: "dev-1", amps: 16 }], "wat het event meedraagt komt er kaal uit");
+  // Zonder het commando, zoals in de preview: de events zelf, met dezelfde vorm.
+  const events = [];
+  const preview = {
+    connection: {
+      async subscribeEvents(cb, soort) {
+        events.push(soort);
+        cb({ data: { message: "hallo" } });
+        return () => {};
+      },
+    },
+  };
+  const meldingen = [];
+  await volgCoach(preview, "notification", (data) => meldingen.push(data));
+  assert.deepEqual(events, ["domotiapp_coach_notification"]);
+  assert.deepEqual(meldingen, [{ message: "hallo" }]);
+  assert.equal(await volgCoach({}, "settings", () => {}), null, "zonder verbinding niets");
+  // En geen enkel deel van het paneel abonneert zich nog rechtstreeks op een event van de coach.
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const wortel = new URL("../custom_components/domotiapp_coach/frontend/", import.meta.url);
+  const bestanden = [];
+  const loop = (map) => {
+    for (const naam of fs.readdirSync(map, { withFileTypes: true })) {
+      const vol = path.join(map, naam.name);
+      if (naam.isDirectory()) loop(vol);
+      else if (naam.name.endsWith(".js")) bestanden.push(vol);
+    }
+  };
+  loop(new URL(wortel).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+  // state_changed mag iedereen volgen (state-feed.js); de terugval staat in data-source.js.
+  const direct = bestanden
+    .filter((f) => fs.readFileSync(f, "utf8").includes("subscribeEvents("))
+    .map((f) => path.basename(f))
+    .filter((naam) => !["state-feed.js", "data-source.js"].includes(naam));
+  assert.deepEqual(direct, [], "alles van de coach loopt via volgCoach");
+});
+
 let goed = 0;
 let fout = 0;
 for (const [naam, fn] of proeven) {

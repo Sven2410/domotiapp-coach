@@ -130,3 +130,17 @@ passen werd de hele pagina zo breed als de rij, en schoof het paneel op een
 telefoon zijwaarts. Gemeten op 30-09-2026 met twaalf tabs: op 390 px breed een
 pagina van 1.227 px, met het anker 375; op 320 en 280 px net zo (305 en 265).
 Proef in test_rapport.mjs.
+
+## Volgen zonder beheerder te zijn (v0.108.1)
+
+Home Assistant laat een gebruiker zonder beheerdersrechten zich niet abonneren op de
+events van een integratie. In de klantwoning stond het log sinds 08-10-2026 23 keer
+vol met "Refusing to allow ... to subscribe to event domotiapp_coach_settings_updated",
+en het overzicht van een bewoner haalde de stand van de coach één keer op en werkte
+daarna nooit meer bij. Het paneel volgt de coach nu via een eigen commando,
+`domotiapp_coach/subscribe` (`async_subscribe` in websocket.py, `volgCoach` in
+data-source.js), voor besluiten, meldingen en instellingen. Het geeft door wat zo
+iemand al mag opvragen, en van de instellingen net als `settings/get` alleen zijn
+eigen persoon. Proef 139 in test_coach.py en een proef in test_rapport.mjs, die ook
+nagaat dat er buiten `state-feed.js` en `data-source.js` geen `subscribeEvents` meer
+staat.

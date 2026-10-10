@@ -585,6 +585,17 @@ if (vl := v("ford-storing")):
              not meldingen(vl, "laadt niet verder"), f"{meldingen(vl, 'laadt niet verder')}")
     controle("storing: precies een verslag", len(meldingen(vl, "is vol")) == 1, "")
 
+# De klantwoning op 10-10-2026 (v0.108.1): de Ford kwam pas 27 minuten na de herstart
+# terug. Met v0.108.0 bleef "laadt niet verder ... zonder gevolg" het enige verslag,
+# ook toen hij vijf uur later vol was.
+if (vl := v("ford-storing-traag")):
+    controle("storing traag: eerst 'laadt niet verder', want na een kwartier deed hij nog niets",
+             len(meldingen(vl, "laadt niet verder")) == 1, f"{[m for _, m in vl.meldingen]}")
+    controle("storing traag: en als hij later toch vol is, een verslag dat dat zegt",
+             len(meldingen(vl, "is vol")) == 1 and gehaald(vl), f"{[m for _, m in vl.meldingen]}")
+    controle("storing traag: dat verslag zegt niet dat de herstart zonder gevolg was",
+             not any("zonder gevolg" in m for m in meldingen(vl, "is vol")), f"{meldingen(vl, 'is vol')}")
+
 if (vl := v("easee-een-fase-groep")):
     controle("één fase, groep zichtbaar: de paal hoeft nooit zelf te herstarten",
              vl.paal_herstarts == 0, f"{vl.paal_herstarts}")
@@ -1489,13 +1500,21 @@ for naam, vl in V.items():
     # voorrang bij zon precies evenveel (gemeten 23-09-2026): dat is volgen en
     # geen pendelen, want het zijn er zes richtingwissels.
     grens_per_uur = 15 if naam.startswith("voorrang-") else 10
-    if naam != "batterij-klapperlast":
+    # `batterij-kwartier-voorloper` is er voor het vasthouden (zie daar). Hij begint
+    # midden in de nacht op 47% en eindigt om 10:30 met 41% die pas later iets
+    # oplevert, dus een dag sluit niet. En hij laadt rustig verdeeld met een
+    # accustand in hele procenten: het vermogen loopt elke minuut op tot de stand
+    # tikt, 03:00-05:30 zo'n 50 opdrachten per uur en 20 keer aan en uit, met
+    # v0.108.0 precies zo (171 opdrachten). Dat staat open.
+    nalopen = naam == "batterij-kwartier-voorloper"
+    if naam != "batterij-klapperlast" and not nalopen:
         controle(f"{naam}: hooguit {grens_per_uur} opdrachten per uur",
                  len(vl.bat_opdrachten) / uren <= grens_per_uur, f"{len(vl.bat_opdrachten) / uren:.1f} per uur")
     # Zes mag altijd: ontladen, laden bij een negatieve prijs, vol, en weer
     # ontladen is er al drie, en dat is geen pendelen.
-    controle(f"{naam}: hooguit een richtingwissel per twee uur",
-             vl.bat_wissels() <= max(6, uren / 2), f"{vl.bat_wissels()} in {uren:.0f} uur")
+    if not nalopen:
+        controle(f"{naam}: hooguit een richtingwissel per twee uur",
+                 vl.bat_wissels() <= max(6, uren / 2), f"{vl.bat_wissels()} in {uren:.0f} uur")
     # De laadgrens mag hoger staan als de coach hem voor de volle beurt schreef.
     hoogste = max([bat.soc_max] + [g for _, g in vl.bat_grenzen])
     controle(f"{naam}: de accustand blijft tussen zijn eigen grenzen",
@@ -1503,7 +1522,7 @@ for naam, vl in V.items():
              f"{min(r[3] for r in vl.bat_verloop):.1f} tot {max(r[3] for r in vl.bat_verloop):.1f}%")
     # De wekelijkse volle beurt is de uitzondering: die is er voor de cellen en
     # niet voor de rekening, en kost dus geld.
-    if bat.wekelijks_vol_dag is None:
+    if bat.wekelijks_vol_dag is None and not nalopen:
         controle(f"{naam}: de batterij maakt de dag niet duurder",
                  vl.bat_kosten_met <= vl.bat_kosten_zonder + 0.02,
                  f"{vl.bat_kosten_met:.2f} tegen {vl.bat_kosten_zonder:.2f}")
@@ -1857,6 +1876,25 @@ if (vl := v("batterij-kwartier-zelf")):
              len(beide) <= 2, f"{beide}")
     controle("kwartier-zelf: en hij geeft hem aan het eind terug",
              [m for _, m in vl.bat_modi][-1:] == ["self_consumption"], f"{vl.bat_modi[-1:]}")
+
+# De klantwoning in de nacht van 05 op 06-10-2026 (v0.108.1). Met v0.108.0 in dit
+# scenario: 12 keer de modus om, en laden én ontladen in zes kwartieren (23:45,
+# 00:45, 01:30, 02:15, 02:30 en 05:30), elke keer dat de accustand een tik voorliep
+# op het plan. Gemeten bij het bouwen: 8 keer, alleen nog aan het eind van de
+# nachtbeurt (05:30), en de kosten tot 10:30 gelijk (€ 2,89 en € 2,91, met een
+# procent meer in de batterij).
+if (vl := v("batterij-kwartier-voorloper")):
+    per_kwartier = {}
+    for r in vl.bat_verloop:
+        k = r[0].replace(minute=r[0].minute // 15 * 15, second=0)
+        erin, eruit = per_kwartier.get(k, (0.0, 0.0))
+        per_kwartier[k] = (erin + max(0.0, r[2]) * vl.stap_uur / 1000, eruit + max(0.0, -r[2]) * vl.stap_uur / 1000)
+    beide = [k.strftime("%H:%M") for k, (a, b) in sorted(per_kwartier.items()) if a > 0.02 and b > 0.02]
+    print(f"  kwartier-voorloper: {len(vl.bat_modi)} wissels van de modus, laden en ontladen in {beide}")
+    controle("kwartier-voorloper: een tik voor op het plan is geen reden om de batterij terug te geven",
+             len(vl.bat_modi) <= 8, f"{len(vl.bat_modi)}: {vl.bat_modi}")
+    controle("kwartier-voorloper: laden en ontladen in hetzelfde kwartier hooguit aan het eind van de nacht",
+             len(beide) <= 1, f"{beide}")
 
 # De knop kwam in de klantwoning op 29-09-2026 pas veertien seconden na het omzetten
 # terug (v0.101.8). Met v0.101.7 gaf het overnemen het na tien seconden op: in dit

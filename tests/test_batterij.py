@@ -1043,6 +1043,62 @@ v41m = bat.Voorraad()
 v41m.stap(bat.verdiend(2300.0, 2000.0, -0.05, -0.07, 60.0), 2.0 / 60, 20.0, 10.0, 14.6, 0.75)
 controle("laden bij een negatieve prijs geeft een voorraad onder nul", v41m.euro < 0, f"{v41m}")
 
+print("=== 42. een tik voor op het plan: vasthouden tot het blok om is, niet nul op de meter (v0.108.1) ===")
+# De klantwoning in de nacht van 05 op 06-10-2026: prijzen per kwartier van € 0,309
+# tot € 0,320, een Anker die zelf nul doet, rustig laden van het net. Tikte de
+# accustand een procent voor op het plan, dan wilde het plan in de rest van het
+# kwartier niets meer, viel het besluit naar nul op de meter en dekte de Anker de
+# warmtepomp uit wat hij net gekocht had: 7,68 kWh erin, 2,36 kWh eruit.
+DAG42 = dt.datetime(2026, 10, 5)
+
+
+def nacht42(dag):
+    uit = []
+    for i in range(96):
+        van, u = dag + dt.timedelta(minutes=15 * i), i // 4
+        if u >= 22 or u < 6:
+            p = 0.309 + 0.002 * ((i * 5) % 7)
+        else:
+            p = 0.40 if 7 <= u < 10 else (0.45 if 17 <= u < 22 else 0.36)
+        uit.append({"start": van, "end": van + dt.timedelta(minutes=15), "price": round(p, 3),
+                    "feed_in": round(p - 0.01815, 5)})
+    return uit
+
+
+S42 = sum((nacht42(DAG42 + dt.timedelta(days=d)) for d in range(3)), [])
+W42 = verwachting(huis=0.6, dag=DAG42)
+
+
+def op42(uur, minuut, soc, **kw):
+    nu = DAG42.replace(hour=uur, minute=minuut)
+    return plan_batterij(nu, S42, Tariff(), W42, anker(
+        float(soc), capacity_kwh=14.5, max_discharge_w=3500.0, zelf_nul=True, **kw))
+
+
+laadt42 = op42(22, 46, 38, overgenomen=True, vorige_stand=NETLADEN,
+               vorige_op=DAG42.replace(hour=22, minute=45))
+tik42 = op42(22, 46, 39, overgenomen=True, vorige_stand=NETLADEN,
+             vorige_op=DAG42.replace(hour=22, minute=45))
+vers42 = op42(22, 46, 39)
+print(f"  22:46 op 38%: {laadt42.stand} {laadt42.power_w:.0f} W; op 39% {tik42.stand} {tik42.power_w:.0f} W: "
+      f"{tik42.reason}")
+controle("op 38% laadt hij van het net", laadt42.stand == NETLADEN and laadt42.power_w > 100,
+         f"{laadt42.stand} {laadt42.power_w:.0f}")
+controle("een tik verder houdt hij vast tot het kwartier om is, in plaats van nul op de meter",
+         tik42.stand == NETLADEN and tik42.power_w < 5 and "af tot 23:00" in tik42.reason,
+         f"{tik42.stand} {tik42.power_w:.0f} {tik42.reason}")
+controle("zonder lopende beurt begint hij daar niet aan", vers42.stand == NUL, f"{vers42.stand}")
+# In het volgende kwartier geldt een nieuw besluit: vasthouden hoort bij het blok
+# waarin hij laadde, anders kon hij een batterij blok na blok vasthouden.
+volgend42 = op42(23, 1, 39, overgenomen=True, vorige_stand=NETLADEN,
+                 vorige_op=DAG42.replace(hour=22, minute=59))
+volgend42b = op42(23, 1, 39, overgenomen=True, vorige_stand=NETLADEN,
+                  vorige_op=DAG42.replace(hour=23, minute=0))
+print(f"  23:01 op 39%: na een ronde in het vorige kwartier {volgend42.stand} {volgend42.power_w:.0f} W, "
+      f"na een in dit kwartier {volgend42b.stand} {volgend42b.power_w:.0f} W")
+controle("na een ronde in het vorige kwartier geen vasthouden",
+         not (volgend42.stand == NETLADEN and volgend42.power_w < 5), f"{volgend42.stand} {volgend42.power_w:.0f}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

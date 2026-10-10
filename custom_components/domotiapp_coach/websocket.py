@@ -28,6 +28,8 @@ from .const import (
     DEVICE_TYPES,
     DYNAMIC_ALL_IN,
     DYNAMIC_MARKET,
+    EVENT_DECISION,
+    EVENT_NOTIFICATION,
     EVENT_SETTINGS_UPDATED,
     GRID_MODE_SIGNED,
     GRID_MODE_SPLIT,
@@ -1281,6 +1283,51 @@ def async_coach_pause(
     connection.send_result(msg["id"], {"paused": msg["paused"]})
 
 
+# Wat het paneel volgt, en onder welk event het op de bus van Home Assistant staat.
+_VOLGEN = {
+    "decision": EVENT_DECISION,
+    "notification": EVENT_NOTIFICATION,
+    "settings": EVENT_SETTINGS_UPDATED,
+}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/subscribe",
+        vol.Required("event"): vol.In(sorted(_VOLGEN)),
+    }
+)
+@callback
+def async_subscribe(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De besluiten, meldingen of instellingen volgen, ook zonder beheerder te zijn.
+
+    Home Assistant laat een gewone gebruiker zich niet abonneren op de events van
+    een integratie. In de klantwoning stond het log sinds 08-10-2026 vol met
+    "Refusing to allow ... to subscribe to event domotiapp_coach_settings_updated",
+    en het overzicht van een bewoner haalde de stand van de coach één keer op en
+    werkte daarna nooit meer bij. Dit geeft hetzelfde door als wat zo iemand al
+    mag opvragen (`coach/state`, `notifications/list`, `settings/get`), en van
+    de instellingen net als daar alleen zijn eigen persoon.
+    """
+    soort = msg["event"]
+    user = getattr(connection, "user", None)
+    gewoon = user is not None and not getattr(user, "is_admin", True)
+
+    @callback
+    def doorgeven(event: Any) -> None:
+        data = dict(event.data)
+        if soort == "settings" and gewoon:
+            data["settings"] = alleen_eigen(data.get("settings") or {}, str(getattr(user, "id", "") or ""))
+        connection.send_message(websocket_api.event_message(msg["id"], data))
+
+    connection.subscriptions[msg["id"]] = hass.bus.async_listen(_VOLGEN[soort], doorgeven)
+    connection.send_result(msg["id"])
+
+
 @callback
 def async_register(hass: HomeAssistant) -> None:
     """Register the panel's websocket commands."""
@@ -1308,3 +1355,4 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_coach_wake)
     websocket_api.async_register_command(hass, async_coach_drain)
     websocket_api.async_register_command(hass, async_coach_pause)
+    websocket_api.async_register_command(hass, async_subscribe)
