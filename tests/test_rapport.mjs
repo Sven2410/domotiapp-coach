@@ -780,6 +780,43 @@ proef("het filter zeeft op soort en op dag", () => {
   ], "de dagkeuze kent elke dag één keer, de nieuwste eerst");
 });
 
+// De eigenaar op 10-10-2026: "ook wil ik een melding kunnen laten sturen wanneer de
+// temperatuur te hoog is en dat je zelf een doel kan instellen zoals boven x dan melding."
+proef("Thuisbatterij te warm in Meldingen: alleen met een batterij, en de hint zegt wat er nog moet (v0.108.0)", () => {
+  const knoop = () => ({ hidden: false, value: "", textContent: "", attrs: {}, setAttribute(n, v) { this.attrs[n] = v; } });
+  const knopen = new Map(["#warmte", "#warmte-aan", "#warmte-velden", "#warmte-grens", "#warmte-grens-hint"].map((k) => [k, knoop()]));
+  const el = Object.create(Meldingen.prototype);
+  el.$ = (kiezer) => knopen.get(kiezer) ?? null;
+  el.hass_ = { user: { is_admin: true }, states: { "sensor.accu_temp": { state: "28.0" } } };
+  el.settings_ = { devices: [{ type: "laadpaal" }], notifications: {} };
+  el.paintWarmte_();
+  assert.equal(knopen.get("#warmte").hidden, true, "zonder thuisbatterij geen blok");
+
+  const accu = { type: "thuisbatterij", name: "Accu", entities: {} };
+  el.settings_ = { devices: [accu], notifications: { temp_alert: { enabled: false, max_c: null } } };
+  el.paintWarmte_();
+  assert.equal(knopen.get("#warmte").hidden, false);
+  assert.equal(knopen.get("#warmte-aan").attrs["aria-checked"], "false");
+  assert.equal(knopen.get("#warmte-velden").hidden, true, "uit: geen grens te zien");
+  assert.match(knopen.get("#warmte-grens-hint").textContent, /^Vul eerst de temperatuur van de batterij in onder Apparaten/);
+
+  accu.entities.temperature = "sensor.accu_temp";
+  el.settings_.notifications.temp_alert.enabled = true;
+  el.paintWarmte_();
+  assert.equal(knopen.get("#warmte-velden").hidden, false);
+  assert.equal(knopen.get("#warmte-grens").value, "", "geen grens die niemand koos");
+  assert.equal(knopen.get("#warmte-grens-hint").textContent, "Vul in boven welke temperatuur je een bericht wilt.");
+
+  el.settings_.notifications.temp_alert.max_c = 45;
+  el.paintWarmte_();
+  assert.equal(knopen.get("#warmte-grens").value, 45);
+  assert.equal(knopen.get("#warmte-grens-hint").textContent, "Nu 28 °C.");
+
+  el.hass_.user.is_admin = false;
+  el.paintWarmte_();
+  assert.equal(knopen.get("#warmte").hidden, true, "net als de andere meldingen alleen voor de beheerder");
+});
+
 proef("het scherm tekent een kop per dag en een rij per melding", () => {
   const knopen = new Map();
   const maak = () => {
@@ -2570,6 +2607,79 @@ proef("de kaart van de thuisbatterij zegt hoeveel kWh erin zit, uit haar inhouds
   const ingevuld = { ...accu, entities: { soc: "sensor.batterij_soc" }, battery: { capacity_kwh: 10 } };
   const r2 = new LiveSource().sample(feed, { sources: {}, devices: [ingevuld] });
   assert.equal(r2.devices[0].details.find((d) => d.label === "Accustand")?.text, "39 % · 3,9 van 10,0 kWh");
+});
+
+// De eigenaar op 10-10-2026: "ik heb nu ook een batterijtemperatuur van de anker, ik wil
+// dat ik die kan invullen en dat je die toont op de batterijkaart." Een optioneel veld
+// voor elk merk, op de kaart direct onder de accustand, met één cijfer achter de komma.
+proef("de temperatuur van de thuisbatterij is in te vullen en staat onder de accustand (v0.108.0)", () => {
+  for (const brand of ["anker", "overig"]) {
+    const veld = veldenVan({ type: "thuisbatterij", brand }).find((f) => f.key === "temperature");
+    assert.ok(veld, `${brand} heeft een veld voor de temperatuur`);
+    assert.ok(!veld.needed && !veld.hideRow, "optioneel, en wel op de kaart");
+  }
+  const staten = {
+    "sensor.batterij_soc": { state: "39", attributes: { unit_of_measurement: "%" } },
+    "sensor.batterij_temp": { state: "28.0", attributes: { unit_of_measurement: "°C", device_class: "temperature" } },
+    "select.batterij_modus": { state: "third_party_control", attributes: { options: [] } },
+  };
+  const feed = { get: (id) => staten[id] };
+  const accu = { id: "b", type: "thuisbatterij", brand: "anker", entity: "",
+    entities: { soc: "sensor.batterij_soc", temperature: "sensor.batterij_temp", mode: "select.batterij_modus" } };
+  const labels = (r) => r.devices[0].details.map((d) => d.label);
+  const r = new LiveSource().sample(feed, { sources: {}, devices: [accu] });
+  assert.deepEqual(labels(r).slice(0, 3), ["Accustand", "Temperatuur", "Bedrijfsmodus"], JSON.stringify(labels(r)));
+  assert.equal(r.devices[0].details[1].text, "28 °C");
+  staten["sensor.batterij_temp"].state = "27.46";
+  assert.equal(new LiveSource().sample(feed, { sources: {}, devices: [accu] }).devices[0].details[1].text, "27,5 °C");
+  staten["sensor.batterij_temp"].state = "unavailable";
+  assert.equal(new LiveSource().sample(feed, { sources: {}, devices: [accu] }).devices[0].details[1].text, "—");
+  const zonder = { ...accu, entities: { soc: "sensor.batterij_soc" } };
+  assert.ok(!labels(new LiveSource().sample(feed, { sources: {}, devices: [zonder] })).includes("Temperatuur"),
+    "niet ingevuld, geen regel");
+});
+
+// De eigenaar op 10-10-2026: "ik wil de mogelijkheid om een smart plug in te schakelen om
+// een ventilator aan te sturen als de batterij te heet wordt." De plug is een veld van de
+// batterij, de grens staat onder Wat jij wilt, en de kaart zegt of hij aan staat.
+proef("de ventilator van de thuisbatterij: een veld, een grens die leeg begint, en aan of uit op de kaart", () => {
+  const veld = veldenVan({ type: "thuisbatterij", brand: "anker" }).find((f) => f.key === "fan");
+  assert.ok(veld && !veld.needed && !veld.hideRow, "optioneel, en op de kaart");
+  assert.equal(defaultBattery("anker").fan_above_c, null, "geen grens die niemand koos");
+  const staten = {
+    "sensor.batterij_soc": { state: "39", attributes: { unit_of_measurement: "%" } },
+    "sensor.batterij_temp": { state: "36.4", attributes: { unit_of_measurement: "°C" } },
+    "switch.ventilator": { state: "on", attributes: {} },
+  };
+  const feed = { get: (id) => staten[id] };
+  const accu = { id: "b", type: "thuisbatterij", brand: "overig", entity: "",
+    entities: { soc: "sensor.batterij_soc", temperature: "sensor.batterij_temp", fan: "switch.ventilator" } };
+  const rijen = new LiveSource().sample(feed, { sources: {}, devices: [accu] }).devices[0].details;
+  assert.deepEqual(rijen.slice(0, 3).map((r) => `${r.label}: ${r.text}`),
+    ["Accustand: 39 %", "Temperatuur: 36,4 °C", "Ventilator: Aan"], JSON.stringify(rijen));
+});
+
+// Gemeten op 10-10-2026 in Chrome: "Hoogste accustand in vakantiestand" stond in beeld met
+// de vakantiestand uit. De rij had hidden, maar display: grid van .row won.
+proef("de rijen onder een vinkje van de batterij verdwijnen echt als het vinkje uit staat", () => {
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/devices.js", import.meta.url), "utf-8");
+  assert.match(bron, /\.row\[hidden\] \{ display: none; \}/);
+  assert.equal((bron.match(/<div class="row"\$\{b\.\w+ \? "" : " hidden"\}/g) ?? []).length, 3, "reserve, de dag en de vakantiestand");
+});
+
+proef("de keuzelijst zet temperatuursensoren bovenaan bij de temperatuur van de batterij", () => {
+  const Kiezer = geregistreerd.get("dac-entity-picker");
+  const kiezer = Object.create(Kiezer.prototype);
+  kiezer.hass_ = { states: {
+    "sensor.accu_temperatuur": { attributes: { device_class: "temperature", unit_of_measurement: "°C" } },
+    "sensor.zolder": { attributes: { unit_of_measurement: "°F" } },
+    "sensor.accu_soc": { attributes: { device_class: "battery", unit_of_measurement: "%" } },
+  } };
+  kiezer.filter = "temperature";
+  assert.equal(kiezer.filter_, "temperature", "een filter dat de kiezer kent, anders wordt het stil 'all'");
+  const { preferred, other } = kiezer.candidates_("");
+  assert.deepEqual(preferred, ["sensor.accu_temperatuur", "sensor.zolder"]);
+  assert.deepEqual(other, ["sensor.accu_soc"], "de rest blijft te kiezen");
 });
 
 proef("de laadpaalkaart laat de accustand van de auto zien als die in Home Assistant staat", () => {

@@ -199,6 +199,9 @@ _BATTERY = _schema(
         # Boven welke accustand de batterij de auto mag helpen als de paal
         # laadt (v0.90.0); leeg is nooit. De nachtstrategie gaat voor.
         vol.Optional("car_above", default=None): _LEEG_OF(float, 0, 100),
+        # Boven welke temperatuur de coach de ventilator bij de batterij aanzet
+        # (v0.108.0), met de plug in `entities.fan`; leeg is nooit.
+        vol.Optional("fan_above_c", default=None): _LEEG_OF(float, 0, 100),
         # Welke keuze van de modus-entiteit "de coach stuurt" betekent, en welke
         # er terugkomt als de coach stopt.
         vol.Optional("control_mode", default=""): str,
@@ -376,6 +379,14 @@ _NOTIFICATIONS = _schema(
                 ),
                 vol.Optional("min_duration_seconds"): vol.All(
                     vol.Coerce(int), vol.Range(0, 3600)
+                ),
+            }
+        ),
+        vol.Optional("temp_alert"): _schema(
+            {
+                vol.Optional("enabled"): bool,
+                vol.Optional("max_c"): vol.Any(
+                    None, vol.All(vol.Coerce(float), vol.Range(0, 100))
                 ),
             }
         ),

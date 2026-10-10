@@ -948,3 +948,50 @@ verandert er niets: met € 0,05 koos dezelfde som de ochtendzon al op te slaan,
 avond met een prijs die hoger is dan de nacht wordt nog gewoon verhandeld. Proef 40 in
 test_batterij.py (valt om met v0.106.1). Een echte terugleverprijs krijgt de coach met
 een marktsensor die niet de all-in sensor is; het paneel zegt dat bij de prijsbron.
+
+## De temperatuur, de melding en de ventilator (v0.108.0)
+
+De eigenaar op 10-10-2026, met een schermafdruk van de batterijtemperatuur van zijn
+Anker: "ik wil dat ik die kan invullen en dat je die toont op de batterijkaart." En
+daarna, in hetzelfde gesprek: "ook wil ik een melding kunnen laten sturen wanneer de
+temperatuur te hoog is en dat je zelf een doel kan instellen zoals boven x dan
+melding", en "ik wil de mogelijkheid om een smart plug in te schakelen om een
+ventilator aan te sturen als de batterij te heet wordt."
+
+Drie dingen, voor elk merk (`BATTERY_FIELDS` in devices.js), en de coach stuurt de
+batterij er niet anders door:
+
+- **Twee velden bij de batterij**: Temperatuur (`temperature`) en Ventilator (`fan`),
+  allebei optioneel. De kaart toont ze onder de accustand, de temperatuur met één
+  cijfer achter de komma (`decimals` in het veld, `deviceDetails` in data-source.js).
+  De keuzelijst zet temperatuursensoren bovenaan (`temperature` in de `MATCHERS` van
+  entity-picker.js; zonder die regel werd een onbekend filter stil `all`).
+- **De melding** staat in Meldingen onder "Thuisbatterij te warm" (`temp_alert` in
+  const.py: `enabled` en `max_c`), naast lekkage en zware belasting. Geen
+  standaardgrens: welke temperatuur te hoog is weet de fabrikant, niet de coach. Eén
+  bericht als hij er `TEMP_AANHOUDEND` (twee minuten) boven blijft, zodat één
+  verkeerde meting niemand wekt, als kritiek. Weer gewoon is hij `TEMP_TERUG` (een
+  graad) onder de grens, en dat staat alleen in de geschiedenis. Een sensor in
+  Fahrenheit rekent de coach om (`_celsius`). Na een herstart van Home Assistant
+  terwijl hij nog warm is komt het bericht één keer opnieuw: wat al gemeld is staat
+  in het geheugen, niet op schijf.
+- **De ventilator**: een plug bij de batterij en een grens onder Wat jij wilt
+  (`fan_above_c`, leeg is nooit). Boven de grens gaat hij aan, een graad eronder uit,
+  ertussen blijft hij staan zoals hij staat (`_async_ventilator` in coach.py). Een
+  plug die `unavailable` is laat de coach met rust. Niet bij Alleen uitlezen en
+  Adviseren, want daar belooft de coach niets aan te raken; wel bij Voorstellen, want
+  wie een plug en een grens invult heeft ja gezegd. Elke keer dat hij schakelt staat
+  in de geschiedenis, niet op de telefoon. Wie de ventilator met de hand aanzet
+  terwijl de batterij koeler is dan de grens min een graad, ziet hem de volgende
+  minuut weer uitgaan: de coach bedient hem.
+
+Hangt er een melding of een ventilator aan de temperatuur, dan bewaakt de
+sensorwacht de sensor ook (`_temp_nodig`), met als slotzin "Zolang weet de coach niet
+of hij te warm wordt." Dat is er voor het geval bij de eigenaar: de Anker-integratie
+heeft de temperatuur (nog) niet zelf, hij zette hem er met de hand in, en na elke
+update van die integratie is hij weg.
+
+Proef 135 in test_coach.py (de melding, de ventilator, de niveaus, Fahrenheit, de
+sensorwacht en een gewone ronde), en vier in test_rapport.mjs (de kaart, de
+keuzelijst, het blok in Meldingen, de velden). In het virtuele huis zit geen
+temperatuur, dus daar is geen scenario voor.

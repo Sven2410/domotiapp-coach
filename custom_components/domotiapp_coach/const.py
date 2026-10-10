@@ -442,6 +442,15 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             # its rating holds for the better part of an hour.
             "min_duration_seconds": 60,
         },
+        # Een thuisbatterij die te warm wordt (v0.108.0). De eigenaar op
+        # 10-10-2026: "ook wil ik een melding kunnen laten sturen wanneer de
+        # temperatuur te hoog is en dat je zelf een doel kan instellen zoals
+        # boven x dan melding." Geen standaardgrens: welke temperatuur te hoog
+        # is weet de fabrikant van de batterij, niet de coach.
+        "temp_alert": {
+            "enabled": False,
+            "max_c": None,
+        },
     },
     "strategy": {
         # How far the coach may go on its own. It starts at "propose": it works

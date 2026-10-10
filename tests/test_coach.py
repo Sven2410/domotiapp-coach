@@ -7388,6 +7388,146 @@ controle("opgeleverd min wat erin zit is het kasboek",
 controle("de voorraad overleeft een herstart",
          abs(coachmod.ChargerCoach._voorraad_uit(rij134).euro - rij134["stock_euro"]) < 1e-12, "")
 
+print("=== 135. de temperatuur van de thuisbatterij: een melding boven je grens, en een ventilator (v0.108.0) ===")
+# De eigenaar op 10-10-2026: "ik heb nu ook een batterijtemperatuur van de anker", "ook wil
+# ik een melding kunnen laten sturen wanneer de temperatuur te hoog is en dat je zelf een
+# doel kan instellen zoals boven x dan melding", en "ik wil de mogelijkheid om een smart
+# plug in te schakelen om een ventilator aan te sturen als de batterij te heet wordt."
+BATTERIJ135 = {**BATTERIJ, "name": "Accu",
+               "entities": {**BATTERIJ["entities"], "temperature": "sensor.batterij_temp", "fan": "switch.ventilator"},
+               "battery": {**BATTERIJ["battery"], "fan_above_c": 35}}
+inst135 = instellingen(devices=[LAADPAAL, BATTERIJ135])
+inst135["notifications"] = {**inst135["notifications"], "temp_alert": {"enabled": True, "max_c": 45}}
+hass135, store135, coach135 = bouw({**huis75(), "sensor.batterij_temp": {"state": "28.0", "attributes": {"unit_of_measurement": "°C"}},
+                                    "switch.ventilator": "off"}, inst135)
+T135 = dt.datetime(2026, 10, 10, 14, 0)
+
+
+def temp135(graden, eenheid="°C"):
+    hass135.states.zet("sensor.batterij_temp", {"state": str(graden), "attributes": {"unit_of_measurement": eenheid}})
+
+
+def wacht135(minuten, level="steer", inst=None):
+    """Een ronde van de temperatuurwacht: (meldingen naar de telefoon, schakelopdrachten)."""
+    hass135.services.verstuurd.clear()
+    asyncio.run(coach135._async_temperatuurwacht(inst or inst135, T135 + dt.timedelta(minutes=minuten), level))
+    telefoon = [d[2]["message"] for d in hass135.services.verstuurd if d[0] == "notify"]
+    schakel = [f"{d[1]} {d[2]['entity_id']}" for d in hass135.services.verstuurd if d[0] == "switch"]
+    return telefoon, schakel
+
+
+def geschiedenis135():
+    return [g["message"] for g in asyncio.run(coachmod.async_get_meldingen(hass135).async_list())]
+
+
+controle("28 °C: geen bericht en de ventilator blijft uit", wacht135(0) == ([], []), "")
+temp135(46.2)
+eerste135 = wacht135(1)
+controle("boven de grens nog geen bericht, want het moet aanhouden; de ventilator gaat wel meteen aan",
+         eerste135 == ([], ["turn_on switch.ventilator"]), f"{eerste135}")
+hass135.states.zet("switch.ventilator", "on")
+controle("na een minuut nog niet", wacht135(2) == ([], []), "")
+bericht135, _ = wacht135(3)
+print(f"  na twee minuten boven de grens: {bericht135}")
+controle("na twee minuten één bericht, kort, met de naam en de grens",
+         bericht135 == ["De temperatuur van Accu is 46,2 °C, boven je grens van 45 °C."], f"{bericht135}")
+controle("zonder entiteit-id", "sensor." not in bericht135[0], "")
+controle("en het gaat naar wie kritiek aan heeft",
+         any(m["kind"] == "kritiek" and m["message"] == bericht135[0]
+             for m in asyncio.run(coachmod.async_get_meldingen(hass135).async_list())), "")
+controle("en niet nog een keer zolang hij warm is", wacht135(30) == ([], []), "")
+temp135(44.5)
+wacht135(31)
+temp135(47)
+controle("net onder de grens en weer erboven is geen tweede bericht", wacht135(40) == ([], []), "")
+temp135(43.9)
+terug135 = wacht135(41)
+controle("een graad eronder: niets naar de telefoon", terug135[0] == [], f"{terug135}")
+controle("wel in de geschiedenis", "De temperatuur van Accu is weer 43,9 °C." in geschiedenis135(), f"{geschiedenis135()[-3:]}")
+temp135(45.5)
+wacht135(50)
+controle("daarna weer erboven, twee minuten lang: een nieuw bericht",
+         wacht135(52)[0] == ["De temperatuur van Accu is 45,5 °C, boven je grens van 45 °C."], "")
+# Fahrenheit: 115 °F is 46,1 °C.
+temp135(30)
+wacht135(53)
+temp135(115, "°F")
+wacht135(60)
+controle("een sensor in Fahrenheit rekent de coach om",
+         wacht135(62)[0] == ["De temperatuur van Accu is 46,1 °C, boven je grens van 45 °C."], "")
+uit135 = {**inst135, "notifications": {**inst135["notifications"], "temp_alert": {"enabled": False, "max_c": 45}}}
+temp135(30)
+wacht135(63, inst=uit135)
+temp135(50)
+wacht135(64, inst=uit135)
+controle("met de melding uit geen bericht", wacht135(70, inst=uit135)[0] == [], "")
+
+# De ventilator: aan boven 35 °C, uit een graad eronder, ertussen laat hij hem staan.
+hass135.states.zet("switch.ventilator", "on")
+temp135(34.5)
+controle("tussen 34 en 35 °C blijft hij aan", wacht135(80, inst=uit135)[1] == [], "")
+temp135(33.9)
+uit_ronde135 = wacht135(81, inst=uit135)
+controle("op 33,9 °C gaat hij uit", uit_ronde135[1] == ["turn_off switch.ventilator"], f"{uit_ronde135}")
+controle("en dat staat in de geschiedenis, niet op de telefoon",
+         uit_ronde135[0] == [] and "De ventilator van Accu staat uit: 33,9 °C." in geschiedenis135(), "")
+hass135.states.zet("switch.ventilator", "off")
+temp135(35.5)
+controle("op 35,5 °C gaat hij weer aan", wacht135(82, inst=uit135)[1] == ["turn_on switch.ventilator"], "")
+hass135.states.zet("switch.ventilator", "on")
+controle("staat hij al goed, dan stuurt de coach niets", wacht135(83, inst=uit135)[1] == [], "")
+hass135.states.zet("switch.ventilator", "off")
+for niveau in ("read", "advise"):
+    controle(f"op {niveau} raakt de coach de ventilator niet aan", wacht135(84, level=niveau, inst=uit135)[1] == [], "")
+controle("op propose wel: wie een plug en een grens invult zei ja",
+         wacht135(85, level="propose", inst=uit135)[1] == ["turn_on switch.ventilator"], "")
+hass135.states.zet("switch.ventilator", "off")
+echt135 = hass135.services.async_call
+
+
+async def weigert135(domein, dienst, data, blocking=False):
+    if domein == "switch":
+        raise RuntimeError("de plug reageert niet")
+    return await echt135(domein, dienst, data, blocking)
+
+
+hass135.services.async_call = weigert135
+voor135 = len(geschiedenis135())
+temp135(36)
+wacht135(85, inst=uit135)
+hass135.services.async_call = echt135
+controle("weigert de plug, dan staat er niet dat hij aan is", len(geschiedenis135()) == voor135, f"{geschiedenis135()[voor135:]}")
+hass135.states.zet("switch.ventilator", "unavailable")
+controle("een plug die niets zegt laat hij met rust", wacht135(86, inst=uit135)[1] == [], "")
+hass135.states.zet("switch.ventilator", "off")
+zonder135 = {**uit135, "devices": [LAADPAAL, {**BATTERIJ135, "battery": {**BATTERIJ135["battery"], "fan_above_c": None}}]}
+controle("zonder grens nooit", wacht135(87, inst=zonder135)[1] == [], "")
+
+# De sensorwacht kent de temperatuur alleen als er een melding of een ventilator aan hangt.
+controle("met een ventilator bewaakt de coach de temperatuursensor",
+         coach135._sensoren(uit135).get("sensor.batterij_temp") == "de temperatuur van Accu", "")
+niets135 = {**zonder135, "notifications": uit135["notifications"]}
+controle("zonder melding en zonder ventilator niet", "sensor.batterij_temp" not in coach135._sensoren(niets135), "")
+hass135.states.zet("sensor.batterij_temp", "unavailable")
+hass135.services.verstuurd.clear()
+for minuten in (100, 111):
+    asyncio.run(coach135._async_sensorwacht(inst135, T135 + dt.timedelta(minutes=minuten)))
+stil135 = [d[2]["message"] for d in hass135.services.verstuurd if d[0] == "notify"]
+print(f"  temperatuursensor elf minuten stil: {stil135}")
+controle("een stille temperatuursensor wordt gemeld, met wat dat betekent",
+         len(stil135) == 1 and stil135[0].startswith("De temperatuur van Accu meldt al 11 minuten niets.")
+         and stil135[0].endswith("Zolang weet de coach niet of hij te warm wordt."), f"{stil135}")
+
+# En de wacht draait in elke ronde van de coach.
+hass135b, _, coach135b = bouw({**huis75(), "sensor.batterij_temp": {"state": "50", "attributes": {"unit_of_measurement": "°C"}},
+                               "switch.ventilator": "off"}, inst135)
+asyncio.run(ronde75(hass135b, coach135b, T135))
+controle("in een gewone ronde gaat de ventilator aan",
+         ("switch", "turn_on", {"entity_id": "switch.ventilator"}) in hass135b.services.verstuurd, "")
+asyncio.run(ronde75(hass135b, coach135b, T135 + dt.timedelta(minutes=2)))
+controle("en komt na twee minuten het bericht",
+         any(d[0] == "notify" and "boven je grens van 45 °C" in d[2]["message"] for d in hass135b.services.verstuurd), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
