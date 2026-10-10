@@ -677,7 +677,7 @@ function deviceDetails(feed, device, settings) {
       (field.format === "countdown" ? countdown(raw, unit) : null) ??
       valueLabel(field.values, raw) ??
       (Number.isFinite(number)
-        ? `${number.toLocaleString("nl-NL", { maximumFractionDigits: 2 })}${unit ? ` ${unit}` : ""}`
+        ? `${number.toLocaleString("nl-NL", { maximumFractionDigits: field.decimals ?? 2 })}${unit ? ` ${unit}` : ""}`
         // A word we have no translation for is still shown -- readable, but
         // recognisably the sensor's own wording rather than something invented.
         : raw.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()));

@@ -191,7 +191,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de laadpaal: de zonverwachting per voorspeller (Forecast.Solar telt op het eind van het uur), een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla, de laadbeurt en de actieradius op de kaart | `docs/laadpaal.md` |
 | een Alfen, of iets aan de paalsturing | `docs/alfen.md` |
 | onderverdeelkasten en groepen met een eigen zekering | `docs/groepen.md` |
-| de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, en hoe de coach prijslijsten leest | `docs/batterij.md` |
+| de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, hoe de coach prijslijsten leest, en de temperatuur met de melding en de ventilator | `docs/batterij.md` |
 | de vaatwasser: Home Connect, Home Connect Local, een domme vaatwasser, de eindtijd, na de klaar-tijd | `docs/vaatwasser.md` |
 | de boiler | `docs/boiler.md` |
 | Historie en het rapport, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, en de batterij op de kaart en in de pop-up | `docs/eerste-woning.md` |
@@ -278,10 +278,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 470 controles op het denkwerk
 python tests/test_batterij.py    # 183 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 894 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2234 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 923 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 2302 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 140 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 145 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

@@ -960,6 +960,11 @@ class DacViewDevices extends DacEditorElement {
           ${getal("car_above", 'min="0" max="100" step="5"', "nooit")}
           <span class="sub">Laadt de auto, dan geeft de batterij normaal niets af: laden en ontladen van de accu en laden van de auto is drie keer verlies. Vul je hier een accustand in, dan mag wat er dáárboven zit naar de auto. Met de nachtstrategie aan (Strategie) houdt hij altijd genoeg over voor de nacht. Leeg is nooit.</span>
         </div>
+        <div class="row">
+          <label>Ventilator aan boven (°C)</label>
+          ${getal("fan_above_c", 'min="0" max="100" step="0.5"', "nooit")}
+          <span class="sub">Met een Temperatuur en een Ventilator hierboven zet de coach de ventilator aan zodra de batterij warmer is dan dit, en weer uit als hij een graad eronder zakt. Niet als de coach op Alleen uitlezen of Adviseren staat. Leeg is nooit.</span>
+        </div>
       </div>`;
   }
 
@@ -1769,6 +1774,11 @@ DacViewDevices.css = /* css */ `
   section.card.device { padding: 12px 12px 12px 14px; }
   section.card.device.open { padding-bottom: 20px; }
   .device .fields[hidden] { display: none; }
+  /* De rijen onder een vinkje van de batterij (reserve, de dag van de volle
+     beurt, de vakantiestand). Zonder deze regel won display: grid van .row
+     het van hidden, en stond "Hoogste accustand in vakantiestand" in beeld
+     terwijl de vakantiestand uit stond (gemeten 10-10-2026). */
+  .row[hidden] { display: none; }
 
   .device-head { display: flex; align-items: center; gap: 8px; }
 

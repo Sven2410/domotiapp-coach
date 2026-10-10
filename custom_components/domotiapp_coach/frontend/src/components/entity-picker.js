@@ -45,6 +45,8 @@ const MATCHERS = {
   select: (attrs) => Array.isArray(attrs.options),
   // Een afstand, voor de actieradius van een auto (v0.106.0).
   distance: (attrs, unit) => attrs.device_class === "distance" || unit === "km" || unit === "mi",
+  // Een temperatuur, voor die van een thuisbatterij (v0.108.0).
+  temperature: (attrs, unit) => attrs.device_class === "temperature" || unit === "°c" || unit === "°f",
   all: () => true,
 };
 

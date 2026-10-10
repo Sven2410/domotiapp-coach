@@ -46,7 +46,7 @@ export const SOORTEN_INFO = [
   {
     id: "kritiek",
     label: "Kritiek",
-    uitleg: "Wat je zelf moet oplossen: een sensor die zwijgt, een auto die niet op tijd vol raakt, een paal die opnieuw gestart is.",
+    uitleg: "Wat je zelf moet oplossen: een sensor die zwijgt, een auto die niet op tijd vol raakt, een paal die opnieuw gestart is, een thuisbatterij die te warm wordt.",
   },
   {
     id: "melding",
@@ -490,6 +490,26 @@ class DacViewNotifications extends DacElement {
           <div class="status" id="verbruik-status"></div>
         </section>
 
+        <section class="blok" id="warmte" hidden>
+          <h2>${icons.warning} Thuisbatterij te warm</h2>
+          <p class="hint">Een bericht als de temperatuur van de thuisbatterij boven je grens komt, en blijft. Welke temperatuur te hoog is staat in de handleiding van de batterij. Het gaat naar wie Kritiek aan heeft staan.</p>
+          <div class="aanzet">
+            <div>
+              <strong>Melding aanzetten</strong>
+              <span>Zakt hij weer een graad onder de grens, dan staat dat alleen in de geschiedenis hieronder.</span>
+            </div>
+            <button type="button" class="schuif" role="switch" aria-checked="false" id="warmte-aan" aria-label="Thuisbatterij te warm aan"><span class="knob"></span></button>
+          </div>
+          <div class="velden" id="warmte-velden" hidden>
+            <div class="veld">
+              <label for="warmte-grens">Bericht boven (°C)</label>
+              <input type="number" id="warmte-grens" min="0" max="100" step="0.5" inputmode="decimal">
+              <span class="uitleg" id="warmte-grens-hint"></span>
+            </div>
+          </div>
+          <div class="status" id="warmte-status"></div>
+        </section>
+
         <section class="blok">
           <h2>${icons.bell} Geschiedenis</h2>
           <p class="hint">Alles wat de coach deed en meldde in de afgelopen twee weken, de nieuwste bovenaan. Wat ook naar een telefoon ging staat in een kader; kritiek is wat je zelf moet oplossen.</p>
@@ -536,6 +556,16 @@ class DacViewNotifications extends DacElement {
       this.bewaarVerbruik_({ water_flow_minutes: Number(e.target.value) }));
     this.$("#verbruik-factor")?.addEventListener("change", (e) =>
       this.bewaarVerbruik_({ factor: Number(e.target.value) }));
+    this.$("#warmte-aan")?.addEventListener("click", () => {
+      const aan = this.$("#warmte-aan").getAttribute("aria-checked") !== "true";
+      this.bewaarWarmte_({ enabled: aan });
+    });
+    this.$("#warmte-grens")?.addEventListener("change", (e) => {
+      const tekst = String(e.target.value).trim();
+      const waarde = Number(tekst);
+      if (!tekst) this.bewaarWarmte_({ max_c: null });
+      else if (waarde >= 0 && waarde <= 100) this.bewaarWarmte_({ max_c: waarde });
+    });
     this.paintAlles_();
   }
 
@@ -555,6 +585,7 @@ class DacViewNotifications extends DacElement {
     this.paintPersonen_();
     this.paintBelasting_();
     this.paintVerbruik_();
+    this.paintWarmte_();
     this.paint_();
   }
 
@@ -863,6 +894,65 @@ class DacViewNotifications extends DacElement {
       this.status_("#verbruik-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
     }
     this.paintVerbruik_();
+  }
+
+  // ------------------------------------------------------------------
+  // thuisbatterij te warm (v0.108.0)
+
+  warmte_() {
+    return this.meldingen_().temp_alert ?? {};
+  }
+
+  /** Elke thuisbatterij, met de temperatuur die haar sensor nu geeft (of null). */
+  batterijTemperaturen_() {
+    return (this.settings_?.devices ?? [])
+      .filter((d) => d?.type === "thuisbatterij")
+      .map((d) => {
+        const id = d.entities?.temperature;
+        const waarde = id ? Number(this.hass_?.states?.[id]?.state) : NaN;
+        return { naam: d.name || "Thuisbatterij", sensor: Boolean(id), graden: Number.isFinite(waarde) ? waarde : null };
+      });
+  }
+
+  paintWarmte_() {
+    const blok = this.$("#warmte");
+    if (!blok) return;
+    const accus = this.batterijTemperaturen_();
+    // Alleen voor wie een thuisbatterij heeft; zonder is er niets om te meten.
+    blok.hidden = !this.isAdmin_() || !this.settings_ || !accus.length;
+    if (blok.hidden) return;
+    const alert = this.warmte_();
+    this.$("#warmte-aan").setAttribute("aria-checked", String(Boolean(alert.enabled)));
+    this.$("#warmte-velden").hidden = !alert.enabled;
+    const veld = this.$("#warmte-grens");
+    if (this.shadowRoot?.activeElement !== veld) veld.value = alert.max_c ?? "";
+    const metSensor = accus.filter((a) => a.sensor);
+    const graden = (g) => `${g.toLocaleString("nl-NL", { maximumFractionDigits: 1 })} °C`;
+    let hint;
+    if (!metSensor.length) hint = "Vul eerst de temperatuur van de batterij in onder Apparaten; zonder sensor is er niets te melden.";
+    else if (alert.max_c === null || alert.max_c === undefined) hint = "Vul in boven welke temperatuur je een bericht wilt.";
+    else {
+      hint = metSensor
+        .map((a) => `${metSensor.length > 1 ? `${a.naam} nu` : "Nu"} ${a.graden === null ? "onbekend" : graden(a.graden)}`)
+        .join(", ") + ".";
+    }
+    this.$("#warmte-grens-hint").textContent = hint;
+  }
+
+  async bewaarWarmte_(wijziging) {
+    if (!this.hass_?.callWS) return;
+    try {
+      const settings = await this.hass_.callWS({
+        type: "domotiapp_coach/notifications/set",
+        notifications: { temp_alert: { ...this.warmte_(), ...wijziging } },
+      });
+      this.settings_ = settings;
+      this.status_("#warmte-status", "Opgeslagen", false);
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de temperatuurmelding niet opslaan", error);
+      this.status_("#warmte-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
+    }
+    this.paintWarmte_();
   }
 
   paintBelasting_() {

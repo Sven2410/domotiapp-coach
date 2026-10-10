@@ -150,6 +150,13 @@ SENSOR_STIL = timedelta(minutes=10)
 # stilstaat verandert niet. De eigenaar op 22-09-2026 over de Ford: "zet dat maar
 # op een uur polling."
 SENSOR_STIL_AUTO = timedelta(minutes=60)
+# De temperatuurmelding van een thuisbatterij (v0.108.0). Zo lang blijft hij
+# boven de grens voor er bericht uitgaat, zodat één verkeerde meting van de
+# integratie niemand wekt; en zoveel graden moet hij weer onder de grens zakken
+# voor een volgende keer erboven een nieuwe melding is. Een temperatuur die op
+# de grens heen en weer gaat geeft zo één bericht, niet elke paar minuten een.
+TEMP_AANHOUDEND = timedelta(minutes=2)
+TEMP_TERUG = 1.0
 # De ingebouwde Nord Pool van Home Assistant hangt geen prijslijst aan zijn
 # sensoren; die geeft hij alleen via zijn dienst (v0.101.3). Zo vaak vraagt de
 # coach een dag die nog niet binnen is opnieuw, en vanaf dit uur morgen erbij:
@@ -762,6 +769,41 @@ def _unit(hass: HomeAssistant, entity_id: str | None) -> str | None:
     return None if state is None else state.attributes.get("unit_of_measurement")
 
 
+def _celsius(hass: HomeAssistant, entity_id: str | None) -> float | None:
+    """Een temperatuursensor in graden Celsius, ook als hij Fahrenheit geeft."""
+    waarde = _number(hass, entity_id)
+    if waarde is not None and _unit(hass, entity_id) in ("°F", "℉"):
+        return (waarde - 32) * 5 / 9
+    return waarde
+
+
+def _temp_grens(settings: dict[str, Any]) -> float | None:
+    """De grens van de temperatuurmelding, of None als die uit staat."""
+    alert = (settings.get("notifications") or {}).get("temp_alert") or {}
+    if not alert.get("enabled"):
+        return None
+    try:
+        return float(alert["max_c"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _temp_nodig(settings: dict[str, Any], device: dict[str, Any]) -> bool:
+    """Of de coach iets doet met de temperatuur van deze batterij: een melding
+    (`temp_alert`) of een ventilator (`fan` met `fan_above_c`)."""
+    entities = device.get("entities") or {}
+    if device.get("type") != "thuisbatterij" or not entities.get("temperature"):
+        return False
+    ventilator = entities.get("fan") and (device.get("battery") or {}).get("fan_above_c") is not None
+    return bool(ventilator) or _temp_grens(settings) is not None
+
+
+def _graden(waarde: float) -> str:
+    """46,2 °C, of 45 °C als er niets achter de komma staat."""
+    tekst = f"{waarde:.1f}".replace(".", ",")
+    return f"{tekst[:-2] if tekst.endswith(',0') else tekst} °C"
+
+
 def _watts(hass: HomeAssistant, entity_id: str | None) -> float | None:
     """Een vermogenssensor in watt, wat hij zichzelf ook noemt.
 
@@ -1068,6 +1110,10 @@ class ChargerCoach:
         self._water_loopt_sinds: datetime | None = None
         self._water_gemeld = False
         self._verbruik_gemeld: set[str] = set()
+        # De temperatuurwacht: per thuisbatterij sinds wanneer hij boven de grens
+        # is, en welke al gemeld zijn. Zie `_async_temperatuurwacht`.
+        self._temp_boven: dict[str, datetime] = {}
+        self._temp_gemeld: set[str] = set()
         # Welke vrijgaveschakelaars de stroom van hun eigen machine zijn, al in
         # het log gezet. Zie `_vrijgave_entiteit`.
         self._stroom_gemeld: set[tuple[str, str]] = set()
@@ -1574,6 +1620,10 @@ class ChargerCoach:
             ):
                 if entities.get(sleutel):
                     uit[entities[sleutel]] = f"{wat} van {naam}"
+            # De temperatuur alleen als er een melding of een ventilator aan
+            # hangt (v0.108.0): wie daarop rekent, hoort het als de sensor zwijgt.
+            if _temp_nodig(settings, device):
+                uit[entities["temperature"]] = f"de temperatuur van {naam}"
             for car in device.get("cars") or []:
                 # Een auto met een wekknop slaapt als hij niet laadt en meldt
                 # dan niets; dat is geen storing maar zijn aard. De eigenaar op
@@ -1666,6 +1716,11 @@ class ChargerCoach:
             for car in device.get("cars") or []
             if car.get("soc_entity")
         }
+        temperaturen = {
+            device["entities"]["temperature"]
+            for device in settings.get("devices") or []
+            if _temp_nodig(settings, device)
+        }
         for entity_id, naam in self._sensoren(settings).items():
             state = self.hass.states.get(entity_id)
             stil = state is None or state.state in ("unknown", "unavailable", "")
@@ -1701,13 +1756,16 @@ class ChargerCoach:
             )
             # Valt de reserveprijsbron in, dan rekent de coach niet zonder maar
             # daarmee (v0.101.3).
-            zolang = "zonder"
+            zolang = "De coach rekent zolang zonder."
             if self._reserve_valt_in(settings, entity_id):
-                zolang = "met je reserveprijzen"
+                zolang = "De coach rekent zolang met je reserveprijzen."
+            # Met de temperatuur rekent de coach niet; die is er voor de
+            # melding en de ventilator.
+            if entity_id in temperaturen:
+                zolang = "Zolang weet de coach niet of hij te warm wordt."
             await self._async_tell(
                 f"{naam[0].upper()}{naam[1:]} meldt al {minuten} minuten niets. "
-                "Waarschijnlijk hapert de integratie erachter. De coach rekent "
-                f"zolang {zolang}.",
+                f"Waarschijnlijk hapert de integratie erachter. {zolang}",
                 kritiek=True,
             )
 
@@ -1781,6 +1839,95 @@ class ChargerCoach:
         if not waarden or any(w is None for w in waarden):
             return None
         return sum(waarden)
+
+    async def _async_temperatuurwacht(
+        self, settings: dict[str, Any], now: datetime, level: str
+    ) -> None:
+        """Wat de coach doet met de temperatuur van een thuisbatterij (v0.108.0).
+
+        Twee dingen, allebei alleen voor een batterij met een temperatuursensor
+        (`temperature`). Een sensor die niets zegt verandert hier niets; dat
+        meldt `_async_sensorwacht`.
+
+        1. **Een bericht als hij te warm wordt.** De eigenaar op 10-10-2026: "ook
+           wil ik een melding kunnen laten sturen wanneer de temperatuur te hoog
+           is en dat je zelf een doel kan instellen zoals boven x dan melding."
+           De grens staat in Meldingen (`temp_alert`) en geldt voor elke
+           batterij. Eén bericht per keer dat hij erboven komt, pas als hij er
+           `TEMP_AANHOUDEND` boven blijft. Weer gewoon is hij `TEMP_TERUG`
+           graden onder de grens, en dat gaat alleen in de geschiedenis.
+        2. **Een ventilator**, zie `_async_ventilator`.
+        """
+        grens = _temp_grens(settings)
+        if grens is None:
+            self._temp_boven.clear()
+            self._temp_gemeld.clear()
+        for device in settings.get("devices") or []:
+            entity_id = (device.get("entities") or {}).get("temperature")
+            if device.get("type") != "thuisbatterij" or not entity_id:
+                continue
+            sleutel = device.get("id") or entity_id
+            temp = _celsius(self.hass, entity_id)
+            if temp is None:
+                continue
+            naam = device.get("name") or "de thuisbatterij"
+            await self._async_ventilator(device, naam, temp, level)
+            if grens is None:
+                continue
+            if temp > grens:
+                sinds = self._temp_boven.setdefault(sleutel, now)
+                if sleutel not in self._temp_gemeld and now - sinds >= TEMP_AANHOUDEND:
+                    self._temp_gemeld.add(sleutel)
+                    await self._async_tell(
+                        f"De temperatuur van {naam} is {_graden(temp)}, boven je grens van {_graden(grens)}.",
+                        kritiek=True,
+                    )
+                continue
+            self._temp_boven.pop(sleutel, None)
+            if sleutel in self._temp_gemeld and temp <= grens - TEMP_TERUG:
+                self._temp_gemeld.discard(sleutel)
+                await self._async_tell(
+                    f"De temperatuur van {naam} is weer {_graden(temp)}.", telefoon=False
+                )
+
+    async def _async_ventilator(
+        self, device: dict[str, Any], naam: str, temp: float, level: str
+    ) -> None:
+        """De ventilator bij de batterij aan boven zijn grens, en een graad eronder uit.
+
+        De eigenaar op 10-10-2026: "ik wil de mogelijkheid om een smart plug in te
+        schakelen om een ventilator aan te sturen als de batterij te heet wordt."
+        De plug staat bij de batterij (`fan`), de grens ook (`fan_above_c`); leeg
+        is nooit. Ertussen blijft hij staan zoals hij staat, zodat een
+        temperatuur op de grens hem niet elke minuut aan en uit zet.
+
+        Niet bij Alleen uitlezen en Adviseren: daar belooft de coach dat hij
+        niets aanraakt. Wel bij Voorstellen, want wie een plug en een grens
+        invult heeft daarmee ja gezegd. Elke keer dat hij schakelt staat in de
+        geschiedenis, niet op de telefoon.
+        """
+        plug = (device.get("entities") or {}).get("fan")
+        try:
+            aan_boven = float((device.get("battery") or {}).get("fan_above_c"))
+        except (TypeError, ValueError):
+            return
+        if not plug or level in (LEVEL_READ, LEVEL_ADVISE):
+            return
+        if temp > aan_boven:
+            aan = True
+        elif temp <= aan_boven - TEMP_TERUG:
+            aan = False
+        else:
+            return
+        # Een plug die niets zegt laat de coach met rust: aan of uit weet hij dan niet.
+        if _text(self.hass, plug) != ("off" if aan else "on"):
+            return
+        if not await self._async_schakelen(device, aan, "fan"):
+            return
+        await self._async_tell(
+            f"De ventilator van {naam} staat {'aan' if aan else 'uit'}: {_graden(temp)}.",
+            telefoon=False,
+        )
 
     async def _async_verbruikswacht(self, settings: dict[str, Any], now: datetime) -> None:
         """Lekkage of abnormaal verbruik van water en gas, één melding per geval.
@@ -2183,6 +2330,7 @@ class ChargerCoach:
         await self._async_huisverbruik(settings, moment)
         await self._async_sensorwacht(settings, moment)
         await self._async_verbruikswacht(settings, moment)
+        await self._async_temperatuurwacht(settings, moment, level)
         await self._async_zonkromme(settings, moment)
         self._meter_bijhouden(settings, moment)
 
@@ -3447,24 +3595,29 @@ class ChargerCoach:
             released = wil
         return released, klep
 
-    async def _async_schakelen(self, device: dict[str, Any], aan: bool, sleutel: str = "release_switch") -> None:
-        """De vrijgaveschakelaar (of die van nu starten) aan of uit zetten, als er een is en hij anders staat."""
+    async def _async_schakelen(self, device: dict[str, Any], aan: bool, sleutel: str = "release_switch") -> bool:
+        """De vrijgaveschakelaar (of die van nu starten) aan of uit zetten, als er een is en hij anders staat.
+
+        Geeft terug of er geschakeld is.
+        """
         if sleutel in ("release_switch", "release_now_switch"):
             entity_id = self._vrijgave_entiteit(device, sleutel)
         else:
             entity_id = (device.get("entities") or {}).get(sleutel)
         if not entity_id:
-            return
+            return False
         stand = _text(self.hass, entity_id).strip().lower()
         if stand == ("on" if aan else "off"):
-            return
+            return False
         domein = entity_id.split(".")[0]
         try:
             await self.hass.services.async_call(
                 domein, "turn_on" if aan else "turn_off", {"entity_id": entity_id}, blocking=True
             )
         except Exception:  # noqa: BLE001 - een schakelaar die blijft staan is geen reden om te stoppen
-            _LOGGER.exception("kon de vrijgaveschakelaar %s niet zetten", entity_id)
+            _LOGGER.exception("kon de schakelaar %s niet zetten", entity_id)
+            return False
+        return True
 
     async def _async_schakelaar_volgen(
         self, settings: dict[str, Any], device: dict[str, Any], sessie: dict[str, Any], released: bool

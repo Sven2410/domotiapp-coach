@@ -603,6 +603,27 @@ const BATTERY_FIELDS = (richtingNodig) => [
     filter: "all",
     needed: true,
   },
+  // Onder de accustand op de kaart, en voor de melding "Thuisbatterij te warm"
+  // (v0.108.0). De eigenaar op 10-10-2026: "ik heb nu ook een
+  // batterijtemperatuur van de anker, ik wil dat ik die kan invullen en dat je
+  // die toont op de batterijkaart." De coach stuurt er niet op.
+  {
+    key: "temperature",
+    label: "Temperatuur",
+    hint: "Optioneel: de temperatuur van de batterij. Die staat dan op de kaart, en onder Meldingen kun je een bericht krijgen als hij te warm wordt. De coach stuurt er niet op.",
+    filter: "temperature",
+    decimals: 1,
+  },
+  // De eigenaar op 10-10-2026: "ik wil de mogelijkheid om een smart plug in te
+  // schakelen om een ventilator aan te sturen als de batterij te heet wordt."
+  // De grens staat onder Wat jij wilt (`fan_above_c`); zie `_async_ventilator`.
+  {
+    key: "fan",
+    label: "Ventilator",
+    hint: "Optioneel: de smart plug of schakelaar van een ventilator bij de batterij. Met de temperatuur hierboven en een grens onder Wat jij wilt zet de coach hem aan als de batterij te warm wordt.",
+    filter: "all",
+    values: { on: "Aan", off: "Uit" },
+  },
   {
     key: "setpoint",
     label: "Vermogen zetten",
@@ -732,6 +753,8 @@ export const defaultBattery = (brandId) => ({
   // De batterij doet zelf nul op de meter; de coach grijpt alleen in om in te
   // kopen, voor de laadpaal en voor de veiligheid (standaard sinds v0.101.10).
   self_zero: true,
+  // Boven welke temperatuur de ventilator aan gaat (v0.108.0); leeg is nooit.
+  fan_above_c: null,
   ...(BATTERY_BRANDS.find((brand) => brand.id === brandId)?.battery ?? { control_mode: "", idle_mode: "" }),
 });
 
