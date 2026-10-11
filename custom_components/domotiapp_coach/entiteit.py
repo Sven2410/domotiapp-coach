@@ -395,12 +395,14 @@ async def async_schema(hass: HomeAssistant, device_id: str, **velden: Any) -> No
     coach_verversen(hass)
 
 
-def paal_apparaat(hass: HomeAssistant, device: dict[str, Any]) -> tuple[str, str]:
-    """Fabrikant en model zoals de integratie van de paal ze in het register zet (v0.112.0).
+def register_apparaat(hass: HomeAssistant, device: dict[str, Any], sleutels: tuple[str, ...]) -> tuple[str, str]:
+    """Fabrikant en model zoals de integratie van het apparaat ze in het register zet.
 
-    Voor de foto op de laadpaalkaart: `brand` is hoe de coach stuurt (easee, alfen),
-    niet welk model het is. Eerst het apparaat dat bij de coach is ingevuld, anders
-    het apparaat van de statussensor of de vermogenssensor.
+    Voor de foto op een kaart (de paal sinds v0.112.0, de batterij sinds v0.112.1):
+    `brand` is hoe de coach stuurt (easee, alfen, anker), niet welk model het is.
+    Eerst het apparaat dat bij de coach is ingevuld, anders het apparaat van de
+    eerste entiteit uit `sleutels` die er een heeft, en dan de vermogenssensor.
+    Leeg als er niets te vinden is; dan kiest de kaart zelf.
     """
     try:
         from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -411,16 +413,28 @@ def paal_apparaat(hass: HomeAssistant, device: dict[str, Any]) -> tuple[str, str
         apparaat = apparaten.async_get(device.get("device_id")) if device.get("device_id") else None
         if apparaat is None:
             register = er.async_get(hass)
-            for entiteit in ((device.get("entities") or {}).get("status"), device.get("entity")):
+            eigen = device.get("entities") or {}
+            for entiteit in (*(eigen.get(sleutel) for sleutel in sleutels), device.get("entity")):
                 rij = register.async_get(entiteit) if entiteit else None
                 if rij is not None and rij.device_id:
                     apparaat = apparaten.async_get(rij.device_id)
-                    break
+                    if apparaat is not None:
+                        break
         if apparaat is None:
             return "", ""
         return str(apparaat.manufacturer or ""), str(apparaat.model or "")
     except Exception:  # noqa: BLE001 - zonder model kiest de kaart zelf
         return "", ""
+
+
+def paal_apparaat(hass: HomeAssistant, device: dict[str, Any]) -> tuple[str, str]:
+    """Fabrikant en model van de laadpaal (v0.112.0), via de statussensor."""
+    return register_apparaat(hass, device, ("status",))
+
+
+def accu_apparaat(hass: HomeAssistant, device: dict[str, Any]) -> tuple[str, str]:
+    """Fabrikant en model van de thuisbatterij (v0.112.1), via de accustand of de modus."""
+    return register_apparaat(hass, device, ("soc", "mode", "setpoint"))
 
 
 # --- De thuisbatterij (v0.112.0) -----------------------------------------------

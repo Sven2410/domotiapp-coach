@@ -31,6 +31,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     NETTING_ENDS,
+    HOLIDAY_MAX_DEFAULT,
     CHARGER_CONTROL,
     DOMAIN,
     EVENT_DECISION,
@@ -4816,9 +4817,9 @@ class ChargerCoach:
         if not eigen.get("holiday"):
             return None
         try:
-            return float(eigen.get("holiday_max_percent") or 50)
+            return float(eigen.get("holiday_max_percent") or HOLIDAY_MAX_DEFAULT)
         except (TypeError, ValueError):
-            return 50.0
+            return float(HOLIDAY_MAX_DEFAULT)
 
     def _paal_laadt(self, settings: dict[str, Any]) -> bool:
         """Of er op dit moment een laadpaal laadt, van wie hij ook de opdracht kreeg.
