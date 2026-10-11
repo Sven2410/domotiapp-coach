@@ -5893,8 +5893,10 @@ class Invoer110:
 
 toegevoegd110 = []
 asyncio.run(sensormod.async_setup_entry(hass110, Invoer110(), lambda nieuw: toegevoegd110.extend(nieuw)))
+# Sinds v0.110.0 heet hij naar zijn vertaling ("Start") op een eigen apparaat
+# "Vaatwasser"; de unique_id en dus de entity_id blijven.
 controle("één sensor, voor de vaatwasser en niet voor de laadpaal",
-         len(toegevoegd110) == 1 and toegevoegd110[0].name == "Vaatwasser start"
+         len(toegevoegd110) == 1 and toegevoegd110[0]._attr_translation_key == "start"
          and toegevoegd110[0].unique_id == "dev-vw_start_om", f"{[(s.name, s.unique_id) for s in toegevoegd110]}")
 s110 = toegevoegd110[0]
 controle("hij begint met wat de coach al besloten had, en noemt het tijdstip en de vrijgaveschakelaar",
@@ -7852,6 +7854,77 @@ controle("de minuutronde en de regelaar sturen daarna niets meer: geen modus, ge
 controle("en de batterij blijft in de externe modus tot de coach terug is",
          hass142.states.get("select.batterij_modus").state == "third_party_control",
          f"{hass142.states.get('select.batterij_modus').state}")
+
+print("=== 143. de vaatwasserkaart: een eigen apparaat, drie knoppen en de vrijgave (v0.110.0) ===")
+# De eigenaar op 11-10-2026, over "Ingeruimd, morgen starten" en "Ingeruimd, nu
+# starten" in het paneel: "Dat moet ook op de vaatwasser kaart komen." De coach
+# levert per apparaat entiteiten; de kaart vindt ze aan het apparaat en de
+# translation_key, en leest de attributen uit het contract (entiteit.py).
+entiteitmod = sys.modules["domotiapp_coach.entiteit"]
+VW143 = {"id": "dev-vw", "type": "vaatwasser", "name": "Vaatwasser", "entity": "sensor.vw_vermogen",
+         "entities": {"status": "sensor.vw_status", "release_switch": "input_boolean.vw_vrij",
+                      "start": "button.vw_start"}}
+inst143 = instellingen()
+inst143["devices"] = [LAADPAAL, VW143]
+inst143["ready_devices"], inst143["ready_now"] = [], []
+hass143, store143, coach143 = bouw(huis(), inst143)
+hass143.data["domotiapp_coach"]["coach"] = coach143
+coach143.state["dev-vw"] = dict(WACHT110, deadline="2026-10-12T07:00:00", start_now=False, later=None)
+ververst143 = []
+coach143.async_refresh = lambda: ververst143.append(1)
+knoppen143, binair143, sensor143 = [], [], []
+asyncio.run(knopmod.async_setup_entry(hass143, Invoer110(), lambda nieuw: knoppen143.extend(nieuw)))
+asyncio.run(binairmod.async_setup_entry(hass143, Invoer110(), lambda nieuw: binair143.extend(nieuw)))
+asyncio.run(sensormod.async_setup_entry(hass143, Invoer110(), lambda nieuw: sensor143.extend(nieuw)))
+print(f"  knoppen {[k._attr_translation_key for k in knoppen143]}, binair {[b._attr_translation_key for b in binair143]}")
+controle("drie knoppen en een vrijgave, alleen voor de vaatwasser",
+         [k._attr_translation_key for k in knoppen143] == ["ingeruimd_morgen", "ingeruimd_nu", "vrijgave_intrekken"]
+         and [b._attr_translation_key for b in binair143] == ["vrijgegeven"]
+         and all(e.unique_id.startswith("dev-vw_") for e in knoppen143 + binair143), "")
+apparaat143 = knoppen143[0]._attr_device_info
+controle("ze horen bij een eigen apparaat: fabrikant DomotiApp Coach, model Vaatwasser",
+         apparaat143["identifiers"] == {("domotiapp_coach", "dev-vw")} and apparaat143["manufacturer"] == "DomotiApp Coach"
+         and apparaat143["model"] == "Vaatwasser" and sensor143[0]._attr_device_info == apparaat143, f"{apparaat143}")
+a143 = sensor143[0].extra_state_attributes
+print(f"  startsensor: stand {a143['stand']}, klaar_om {a143['klaar_om']}, entiteiten {a143['entiteiten']}")
+controle("de startsensor draagt het contract: contract, type, stand, vrijgegeven, nu, klaar_om, entiteiten",
+         a143["contract"] == 1 and a143["type"] == "vaatwasser" and a143["stand"] == "gepland"
+         and a143["vrijgegeven"] is True and a143["nu"] is False
+         and a143["klaar_om"] == "2026-10-12T07:00:00+02:00"
+         and a143["entiteiten"] == {"status": "sensor.vw_status", "release_switch": "input_boolean.vw_vrij",
+                                    "start": "button.vw_start", "power": "sensor.vw_vermogen"}
+         and a143["release_switch"] == "input_boolean.vw_vrij" and a143["start"] is not None, f"{a143}")
+controle("en de stand in vaste sleutels",
+         sensormod.programma_stand(None) == "niet_vrijgegeven"
+         and sensormod.programma_stand({"rule": "not-released", "released": False}) == "niet_vrijgegeven"
+         and sensormod.programma_stand({"rule": "cheapest-start", "charge": True, "released": True}) == "start_nu"
+         and sensormod.programma_stand({"rule": "running", "running": True, "released": True}) == "draait"
+         and sensormod.programma_stand({"rule": "finished", "released": False}) == "klaar", "")
+knop = {k._attr_translation_key: k for k in knoppen143}
+for k in knoppen143:
+    k.hass = hass143
+asyncio.run(knop["ingeruimd_nu"].async_press())
+nu143 = (store143.instellingen.get("ready_devices"), store143.instellingen.get("ready_now"))
+asyncio.run(knop["ingeruimd_morgen"].async_press())
+morgen143 = (store143.instellingen.get("ready_devices"), store143.instellingen.get("ready_now"))
+asyncio.run(knop["vrijgave_intrekken"].async_press())
+weg143 = (store143.instellingen.get("ready_devices"), store143.instellingen.get("ready_now"))
+print(f"  nu {nu143}, morgen {morgen143}, intrekken {weg143}")
+controle("Ingeruimd, nu starten: vrijgegeven en nu",
+         nu143 == (["dev-vw"], ["dev-vw"]), f"{nu143}")
+controle("Ingeruimd, goedkoopste moment: vrijgegeven, en nu gaat eraf",
+         morgen143 == (["dev-vw"], []), f"{morgen143}")
+controle("Vrijgave intrekken: allebei weg", weg143 == ([], []), f"{weg143}")
+controle("elke druk zegt het tegen het paneel en laat de coach meteen kijken",
+         sum(1 for soort, _ in hass143.bus.gebeurtenissen if soort == coachmod.EVENT_SETTINGS_UPDATED) == 3
+         and len(ververst143) == 3, f"{len(ververst143)}")
+b143 = binair143[0]
+b143.hass = hass143
+controle("de vrijgave volgt het besluit van de coach", b143.is_on is True, "")
+b143.bijwerken({"device": "dev-vw", **dict(WACHT110, released=False, rule="not-released")})
+b143.bijwerken({"device": "dev-vw", **dict(WACHT110, released=False, rule="not-released")})
+controle("en schrijft alleen als hij omslaat", b143.is_on is False and getattr(b143, "geschreven", 0) == 1,
+         f"{b143.is_on} {getattr(b143, 'geschreven', 0)}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

@@ -405,3 +405,51 @@ leverancier betaald is. "Ongeveer € 0,199" is eruit: de eigenaar las dat bij e
 beurt die vrijwel niets van het net haalde. Bedragen onder een euro in drie
 decimalen, daarboven in twee, per zin gelijk (`_bedrag`). Proef 113.
 
+
+## De vaatwasserkaart en de coach: een eigen apparaat en drie knoppen (v0.110.0)
+
+De eigenaar op 11-10-2026, over de knoppen "Ingeruimd, morgen starten" en "Ingeruimd, nu
+starten" in het paneel: "Dat moet ook op de vaatwasser kaart komen." En: kaarten voor de
+vaatwasser, de laadpaal en de thuisbatterij in een pop-up, "dan hoeven klanten niet
+telkens naar de coach toe". De kaarten bouwt DomotiApp Lovelace; de coach levert gewone
+entiteiten, zodat ze ook in een gewone kaart, een bubble-card en een automatisering werken.
+De afspraak tussen die twee heet het contract; dit is versie 1 (`CONTRACT` in entiteit.py).
+
+**Algemeen.** Per apparaat van de coach één apparaat in Home Assistant: identifiers
+`(domotiapp_coach, <id bij de coach>)`, de naam van de klant, fabrikant "DomotiApp Coach",
+model de soort (Vaatwasser, Wasmachine, Droger, Boiler, Laadpaal, Thuisbatterij;
+`apparaat_info`). Elke entiteit heeft `has_entity_name` en een vaste `translation_key`; een
+kaart vindt de entiteiten aan het apparaat en die sleutel, dus hernoemen breekt niets. De
+toestand is tekst voor mensen en mag veranderen; **de attributen zijn het contract.** De
+vaatwasserkaart werd ooit gebouwd tegen een toestand die een avond later tekst werd
+(v0.100.0 en v0.100.1), en zag daarna niets meer.
+
+**Een apparaat met een programma** (`PROGRAMMA_TYPES`):
+
+| entiteit | translation_key | wat |
+|---|---|---|
+| sensor | `start` | bestond al (v0.100.0); state "om 14:00", "morgen om 09:00", "nu" of leeg |
+| binary_sensor | `vrijgegeven` | de vrijgave in de coach (`ready_devices`): de waarheid |
+| button | `ingeruimd_morgen` | vrijgeven, starten op het goedkoopste moment (heet "Ingeruimd, goedkoopste moment": wie 's ochtends drukt start vandaag) |
+| button | `ingeruimd_nu` | vrijgeven en nu starten |
+| button | `vrijgave_intrekken` | vrijgave en "nu" eraf |
+
+Op de startsensor, naast `start` (ISO met zone) en `release_switch` die bestaande kaarten
+al lezen: `contract` (1), `type`, `stand` (`niet_vrijgegeven`, `gepland`, `start_nu`,
+`draait`, `klaar`; `programma_stand`), `vrijgegeven`, `nu`, `klaar_om` (de klaar-tijd uit het
+schema, ISO met zone), `later` (de dag waar hij naar opschuift als de klaar-tijd van vandaag
+voorbij is: dan zegt het paneel "Ingeruimd, morgen starten") en `entiteiten` (wat de klant bij
+de coach invulde, zodat de kaart het niet nog eens vraagt).
+
+De knoppen doen dezelfde som als de knop in het paneel (`async_vrijgave`, dat
+`domotiapp_coach/device/ready` nu ook gebruikt) en laten de coach meteen kijken. De
+vrijgaveschakelaar van de klant volgt in de ronde erna, zoals altijd: wie het laatst bewoog
+wint (`_async_schakelaar_volgen`).
+
+Het oude apparaat "DomotiApp Coach", waar de startsensor tot nu aan hing, haalt de coach een
+minuut na het opstarten weg zodra er niets meer aan hangt (`oude_coach_opruimen`); de
+entity_id van de startsensor blijft, want de unique_id blijft.
+
+De laadpaal en de thuisbatterij volgen in een eigen uitgave, met hetzelfde contract (sleutels
+staan in het bericht aan de lovelace-sessie van 11-10-2026 en komen hier bij die uitgave).
+Proef 143 in test_coach.py.

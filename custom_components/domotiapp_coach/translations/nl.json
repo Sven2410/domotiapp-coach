@@ -9,5 +9,28 @@
     "abort": {
       "already_configured": "DomotiApp Coach is al ingesteld."
     }
+  },
+  "entity": {
+    "sensor": {
+      "start": {
+        "name": "Start"
+      }
+    },
+    "binary_sensor": {
+      "vrijgegeven": {
+        "name": "Vrijgegeven"
+      }
+    },
+    "button": {
+      "ingeruimd_morgen": {
+        "name": "Ingeruimd, goedkoopste moment"
+      },
+      "ingeruimd_nu": {
+        "name": "Ingeruimd, nu starten"
+      },
+      "vrijgave_intrekken": {
+        "name": "Vrijgave intrekken"
+      }
+    }
   }
 }

@@ -9,5 +9,28 @@
     "abort": {
       "already_configured": "DomotiApp Coach is already set up."
     }
+  },
+  "entity": {
+    "sensor": {
+      "start": {
+        "name": "Start"
+      }
+    },
+    "binary_sensor": {
+      "vrijgegeven": {
+        "name": "Released"
+      }
+    },
+    "button": {
+      "ingeruimd_morgen": {
+        "name": "Loaded, cheapest time"
+      },
+      "ingeruimd_nu": {
+        "name": "Loaded, start now"
+      },
+      "vrijgave_intrekken": {
+        "name": "Withdraw release"
+      }
+    }
   }
 }
