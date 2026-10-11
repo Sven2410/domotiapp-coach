@@ -1,8 +1,10 @@
 """De modus van een laadbeurt, voor de laadpaalkaart (v0.111.0).
 
-Dezelfde knoppen als op de coachkaart: Planning, Snel, Continu, Zon. Ze gelden
-voor deze beurt en vervallen als de kabel eruit gaat (`async_mode` in coach.py).
-Zie entiteit.py voor het contract met de kaarten.
+Dezelfde knoppen als op de coachkaart: Snel, Continu, Zon, en Planning als
+toestand (de planning zet het schema aan, `modus_keuzes`). Ze gelden voor deze
+beurt en vervallen als de kabel eruit gaat (`async_mode` in coach.py). Nog een
+keer de modus die al geldt kiezen gaat terug naar de voorkeur, zoals op de
+coachkaart (v0.112.3). Zie entiteit.py voor het contract met de kaarten.
 """
 
 from __future__ import annotations
@@ -48,4 +50,11 @@ class ModusSelect(CoachEntiteit, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         from .coach import async_get_coach
 
-        async_get_coach(self.hass).async_mode(self._device_id, PAAL_MODI.get(option, "goedkoopst"))
+        coach = async_get_coach(self.hass)
+        if option == self.current_option and (option == "snel" or self._stand.get("mode_session")):
+            # Nog een keer op de knop die aan staat: terug naar de voorkeur (v0.112.3).
+            # Met een planning is Snel de enige knop, en anders kreeg je hem van de
+            # kaart niet meer uit tot de kabel eruit ging.
+            coach.async_mode(self._device_id, "")
+            return
+        coach.async_mode(self._device_id, PAAL_MODI.get(option, "goedkoopst"))

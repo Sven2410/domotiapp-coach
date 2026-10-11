@@ -305,10 +305,16 @@ def paal_modus_actief(stand: dict[str, Any] | None) -> str:
 
 
 def paal_modus_keuzes(stand: dict[str, Any] | None) -> list[str]:
-    """Welke knoppen er deze beurt iets doen: met een planning alleen Planning en Snel."""
+    """Welke modusknoppen er deze beurt zijn, zoals op de coachkaart (v0.112.3).
+
+    Planning is geen knop: dat is wat het schema aanzet. De eigenaar op 11-10-2026,
+    bij een kaart met vier knoppen waarvan de tekst afgekapt werd: "wat is de knop
+    planning", en hij koos voor de knoppen van de coach. Met een planning voor
+    vandaag alleen Snel, zonder Snel, Continu en Zon (docs/laadpaal.md, v0.87.0).
+    """
     if (stand or {}).get("planned"):
-        return ["planning", "snel"]
-    return list(PAAL_MODI)
+        return ["snel"]
+    return ["snel", "continu", "zon"]
 
 
 def paal_blokken(stand: dict[str, Any] | None) -> list[dict[str, Any]]:
