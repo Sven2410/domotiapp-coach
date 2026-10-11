@@ -229,6 +229,16 @@ dan de andere in dezelfde uitgave.
   `solar_stored_days`) en de schatting `zonInAccu` in `huisMetAccu`
   (views/history.js) voor de uren daarvoor; `balans` in geld.js telt ze op
   dezelfde manier (`docs/eerste-woning.md`).
+- **Het contract met de kaarten van DomotiApp Lovelace** (v0.110.0, `CONTRACT` in
+  entiteit.py, `docs/vaatwasser.md`). De eigenaar op 11-10-2026: "wanneer er iets bij komt in
+  de coach wat invloed heeft op de lovelace kaart, dat dat goed opgepakt wordt." Een kaart
+  vindt de entiteiten aan het apparaat en de `translation_key`, en leest alleen attributen
+  (`contract`, `type`, `stand`, `entiteiten`, ...), nooit de tekst van de toestand. Dus: niets
+  daarvan hernoemen of weghalen; toevoegen mag. Moet er toch iets anders, dan `CONTRACT`
+  omhoog en de docs mee. Zeg het in dezelfde sessie tegen de lovelace-sessie (of in de
+  notities als die niet open staat), en geef na de uitgave een echte dump van de entiteiten
+  door. De vaatwasserkaart ging eerder stuk doordat de startsensor van tijdstip naar tekst
+  ging (v0.100.1), en niemand zag het.
 - **Opgeleverd en wat er in de batterij zit** (v0.107.0): `Voorraad` in
   batterij.py schrijft per dag `realized_days` naast het kasboek `earned_days`,
   en `stock_euro`; `accuVerdiend` in geld.js leest ze allebei, `balans` haalt
