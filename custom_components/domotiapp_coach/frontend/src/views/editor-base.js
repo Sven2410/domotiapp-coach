@@ -55,7 +55,7 @@ export const editorCss = /* css */ `
     padding: 10px 12px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border-hi);
-    background: rgba(255,255,255,0.04);
+    background: rgba(var(--dac-veil),0.04);
     color: var(--dac-ink);
     font: inherit;
     font-size: 14px;
@@ -70,7 +70,7 @@ export const editorCss = /* css */ `
   }
   input:focus, select:focus { border-color: var(--dac-accent-hi); outline: none; }
   select { appearance: none; background-image: none; }
-  select option { background: #12120f; color: var(--dac-ink); }
+  select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
 
   /* minmax(0, 1fr) rather than 1fr: a bare 1fr column never shrinks below the
      min-content of what is in it, so one wide child pushes the whole column --
@@ -88,7 +88,7 @@ export const editorCss = /* css */ `
     padding: 12px 14px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border);
-    background: rgba(255,255,255,0.022);
+    background: rgba(var(--dac-veil),0.022);
     cursor: pointer;
     font-size: 12.5px;
     line-height: 1.5;
@@ -136,7 +136,7 @@ export const editorCss = /* css */ `
     padding: 12px 14px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border-hi);
-    background: rgba(255,255,255,0.03);
+    background: rgba(var(--dac-veil),0.03);
     color: var(--dac-ink-2);
     font: inherit;
     font-size: 13.5px;
@@ -157,7 +157,7 @@ export const editorCss = /* css */ `
     left: 0; right: 0; bottom: 0;
     z-index: 30;
     padding: 12px max(22px, var(--dac-safe-r)) calc(12px + var(--dac-safe-b)) max(22px, var(--dac-safe-l));
-    background: linear-gradient(0deg, rgba(12,12,10,0.98) 60%, rgba(12,12,10,0.0));
+    background: linear-gradient(0deg, rgba(var(--dac-bg-rgb),0.98) 60%, rgba(var(--dac-bg-rgb),0.0));
     display: flex; align-items: center; gap: 12px; justify-content: flex-end;
     transform: translateY(120%);
     transition: transform 260ms cubic-bezier(0.22,0.61,0.36,1);
@@ -221,9 +221,9 @@ export const editorCss = /* css */ `
     gap: 10px;
     padding: 12px 18px;
     border-radius: var(--dac-radius-pill);
-    background: #171714;
+    background: var(--dac-popover);
     border: 1px solid var(--dac-border-hi);
-    box-shadow: 0 20px 44px -18px rgba(0,0,0,0.95);
+    box-shadow: 0 20px 44px -18px rgba(0,0,0,var(--dac-shadow-deep));
     font-size: 14px;
     font-weight: 500;
     color: var(--dac-ink);
@@ -260,7 +260,7 @@ export const editorCss = /* css */ `
     cursor: pointer;
     line-height: 0;
   }
-  .toast button.dismiss:hover { color: var(--dac-ink); background: rgba(255,255,255,0.07); }
+  .toast button.dismiss:hover { color: var(--dac-ink); background: rgba(var(--dac-veil),0.07); }
   .toast button.dismiss .icon { width: 14px; height: 14px; }
   .toast.ok button.dismiss { display: none; }
 

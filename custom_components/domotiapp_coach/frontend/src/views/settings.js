@@ -521,7 +521,7 @@ DacViewSettings.css = /* css */ `
     padding: 12px 14px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border-hi);
-    background: rgba(255,255,255,0.03);
+    background: rgba(var(--dac-veil),0.03);
     color: var(--dac-ink-2);
     font: inherit;
     font-size: 13.5px;
@@ -541,7 +541,7 @@ DacViewSettings.css = /* css */ `
     padding: 14px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border);
-    background: rgba(255,255,255,0.022);
+    background: rgba(var(--dac-veil),0.022);
     display: grid;
     gap: 12px;
   }
@@ -557,7 +557,7 @@ DacViewSettings.css = /* css */ `
   .extra-line .remove, button.add {
     font: inherit; font-size: 13px; padding: 8px 12px;
     border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border);
-    background: rgba(255,255,255,0.04); color: var(--dac-ink); cursor: pointer;
+    background: rgba(var(--dac-veil),0.04); color: var(--dac-ink); cursor: pointer;
   }
   .extra-line .remove { padding: 6px 8px; display: inline-flex; }
   .extra-line .remove svg { width: 16px; height: 16px; }

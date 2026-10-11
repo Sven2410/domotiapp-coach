@@ -196,7 +196,7 @@ export const prijsCss = /* css */ `
     padding: 12px 12px 8px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border);
-    background: rgba(255,255,255,0.02);
+    background: rgba(var(--dac-veil),0.02);
   }
   .prijs-blok[hidden] { display: none; }
   .prijs-kop {

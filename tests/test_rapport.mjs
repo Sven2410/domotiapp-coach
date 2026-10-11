@@ -2893,6 +2893,50 @@ proef("het paneel volgt de coach via domotiapp_coach/subscribe, ook zonder behee
   assert.deepEqual(direct, [], "alles van de coach loopt via volgCoach");
 });
 
+proef("licht en donker: geen scherm draagt nog een kleur van alleen het donkere thema (v0.113.0)", async () => {
+  // De eigenaar op 11-10-2026: "alles moet ook goed licht zijn. Ook de coach." Elke
+  // kleur die bij het thema hoort komt uit theme.js; een tint over de achtergrond is
+  // rgba(var(--dac-veil), ...), wit in het donker en zwart in het licht.
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const wortel = new URL("../custom_components/domotiapp_coach/frontend/", import.meta.url);
+  const bestanden = [];
+  const loop = (map) => {
+    for (const naam of fs.readdirSync(map, { withFileTypes: true })) {
+      const vol = path.join(map, naam.name);
+      if (naam.isDirectory()) loop(vol);
+      else if (naam.name.endsWith(".js")) bestanden.push(vol);
+    }
+  };
+  loop(new URL(wortel).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+  // Het rapport en de pdf zijn papier: altijd wit, dus eigen kleuren.
+  const donker = /rgba\(\s*(255\s*,\s*255\s*,\s*255|232\s*,\s*228\s*,\s*222|12\s*,\s*12\s*,\s*10|18\s*,\s*18\s*,\s*15)\s*,|#12120f|#161613|#171714|#0c0c0a|#e8e4de|color-scheme:\s*dark/i;
+  const fout = bestanden
+    .filter((f) => !["theme.js", "report.js", "pdf.js"].includes(path.basename(f)))
+    .flatMap((f) => fs.readFileSync(f, "utf8").split(/\r?\n/).map((regel, i) => [path.basename(f), i + 1, regel]))
+    .filter(([, , regel]) => donker.test(regel))
+    .map(([f, i, regel]) => `${f}:${i} ${regel.trim().slice(0, 60)}`);
+  assert.deepEqual(fout, [], "kleuren van het thema horen in theme.js");
+  // En het lichte thema zet elke tint die de schermen gebruiken.
+  const thema = await import("../custom_components/domotiapp_coach/frontend/src/theme.js");
+  for (const token of ["--dac-veil", "--dac-ink-rgb", "--dac-bg-rgb", "--dac-raise-rgb", "--dac-popover", "--dac-knob",
+                       "--dac-shadow-deep", "--dac-scheme", "--dac-bg", "--dac-surface", "--dac-ink", "--dac-ink-2", "--dac-ink-3"]) {
+    assert.ok(thema.tokens.includes(`${token}:`), `${token} in het donker`);
+    assert.ok(thema.lightTokens.includes(`${token}:`), `${token} in het licht`);
+  }
+  // Het thema volgt Home Assistant: elk element krijgt het attribuut light, ook als het later komt.
+  const a = { attrs: new Set(), toggleAttribute(n, aan) { aan ? this.attrs.add(n) : this.attrs.delete(n); } };
+  const b = { attrs: new Set(), toggleAttribute(n, aan) { aan ? this.attrs.add(n) : this.attrs.delete(n); } };
+  thema.followTheme(a, true);
+  thema.setLight(true);
+  thema.followTheme(b, true);
+  assert.ok(a.attrs.has("light") && b.attrs.has("light"), "licht op elk element");
+  thema.setLight(false);
+  assert.ok(!a.attrs.has("light") && !b.attrs.has("light"), "en weer donker");
+  thema.followTheme(a, false);
+  thema.followTheme(b, false);
+});
+
 let goed = 0;
 let fout = 0;
 for (const [naam, fn] of proeven) {

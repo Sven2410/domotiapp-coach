@@ -61,6 +61,18 @@ export const tokens = /* css */ `
 
   --dac-shadow:        0 1px 0 rgba(255, 255, 255, 0.04) inset,
                        0 18px 40px -24px rgba(0, 0, 0, 0.9);
+
+  /* The same colours as bare channels, for the tints the views lay over the
+     background: rgba(var(--dac-veil), 0.04) is white over dark here and black
+     over light in the light set, so a view never has to know which it is. */
+  --dac-veil:          255, 255, 255;
+  --dac-ink-rgb:       232, 228, 222;
+  --dac-bg-rgb:        12, 12, 10;
+  --dac-raise-rgb:     18, 18, 15;
+  --dac-popover:       #171714;
+  --dac-knob:          rgba(232, 228, 222, 0.65);
+  --dac-shadow-deep:   0.95;
+  --dac-scheme:        dark;
   --dac-header-h:      64px;
   --dac-maxw:          1440px;
 
@@ -73,6 +85,81 @@ export const tokens = /* css */ `
   --dac-safe-b:        env(safe-area-inset-bottom, 0px);
   --dac-safe-l:        env(safe-area-inset-left, 0px);
 `;
+
+/**
+ * The light set, for when Home Assistant itself is light (`hass.themes.darkMode`
+ * false). The owner on 11-10-2026: "alles moet ook goed licht zijn. Ook de coach."
+ *
+ * Only what has to change is here; everything else falls through from `tokens`.
+ * The stream colours stay: they are fills that always come with an icon and a
+ * label, and on white they keep their order and their distance. The status
+ * colours go darker, because they are also used as text, and the amber of
+ * `--dac-warn` is unreadable on white at its dark-theme lightness.
+ */
+export const lightTokens = /* css */ `
+  --dac-bg:            #f1f0ec;
+  --dac-bg-raise:      #ffffff;
+  --dac-surface:       #ffffff;
+  --dac-surface-hi:    rgba(20, 20, 15, 0.045);
+  --dac-border:        rgba(20, 20, 15, 0.11);
+  --dac-border-hi:     rgba(20, 20, 15, 0.22);
+
+  --dac-ink:           #1c1b18;
+  --dac-ink-2:         rgba(28, 27, 24, 0.74);
+  --dac-ink-3:         rgba(28, 27, 24, 0.60);
+
+  --dac-accent:        #026fa1;
+  --dac-accent-hi:     #0a6aa6;
+  --dac-accent-soft:   rgba(2, 111, 161, 0.12);
+  --dac-accent-glow:   rgba(10, 106, 166, 0.20);
+
+  --dac-good:          #0a8a0a;
+  --dac-warn:          #946200;
+  --dac-bad:           #c63131;
+
+  --dac-shadow:        0 1px 2px rgba(20, 20, 15, 0.06),
+                       0 12px 32px -20px rgba(20, 20, 15, 0.30);
+
+  --dac-veil:          20, 20, 15;
+  --dac-ink-rgb:       28, 27, 24;
+  --dac-bg-rgb:        241, 240, 236;
+  --dac-raise-rgb:     255, 255, 255;
+  --dac-popover:       #ffffff;
+  --dac-knob:          #ffffff;
+  --dac-shadow-deep:   0.28;
+  --dac-scheme:        light;
+`;
+
+/*
+ * Which of the two sets is on. Every component sets its own tokens on its own
+ * :host, so a property set on the panel alone would not reach into them; each
+ * element carries a `light` attribute instead, kept in step from here. The panel
+ * sets it from `hass.themes.darkMode` (domotiapp-coach-panel.js).
+ */
+const members_ = new Set();
+let light_ = false;
+
+/** Whether the light set is on. */
+export function isLight() {
+  return light_;
+}
+
+/** Switch every element of the panel to the light or the dark set. */
+export function setLight(on) {
+  if (!!on === light_) return;
+  light_ = !!on;
+  for (const el of members_) el.toggleAttribute("light", light_);
+}
+
+/** Follow the theme: called by every element as it attaches and detaches. */
+export function followTheme(el, attached) {
+  if (attached) {
+    members_.add(el);
+    el.toggleAttribute("light", light_);
+  } else {
+    members_.delete(el);
+  }
+}
 
 /** Styles shared by every component in the panel. */
 export const baseCss = /* css */ `

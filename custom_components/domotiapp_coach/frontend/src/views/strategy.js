@@ -529,7 +529,7 @@ DacViewStrategy.css = /* css */ `
     display: grid; grid-template-columns: 34px 22px minmax(0, 1fr) auto auto;
     align-items: center; gap: 8px; padding: 8px 10px;
     border: 1px solid var(--dac-border); border-radius: var(--dac-radius-sm);
-    background: rgba(255,255,255,0.02);
+    background: rgba(var(--dac-veil),0.02);
   }
   .zon-rij.sleept { position: relative; z-index: 2; box-shadow: 0 8px 22px rgba(0,0,0,0.4); }
   .zon-rij .greep {
@@ -544,7 +544,7 @@ DacViewStrategy.css = /* css */ `
   .zon-rij .grens input {
     width: 64px; min-height: 34px; padding: 4px 8px; font: inherit;
     border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border-hi);
-    background: rgba(255,255,255,0.04); color: var(--dac-ink);
+    background: rgba(var(--dac-veil),0.04); color: var(--dac-ink);
   }
   .zon-rij .knoppen { display: inline-flex; gap: 2px; }
   .zon-rij .knoppen button {
@@ -563,7 +563,7 @@ DacViewStrategy.css = /* css */ `
   .zon-voeg select, .zon-voeg button {
     min-height: 38px; padding: 6px 12px; font: inherit; font-size: 13px;
     border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border-hi);
-    background: rgba(255,255,255,0.04); color: var(--dac-ink);
+    background: rgba(var(--dac-veil),0.04); color: var(--dac-ink);
   }
   .zon-voeg select { width: auto; flex: 1 1 180px; max-width: 280px; }
   .zon-voeg button { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }

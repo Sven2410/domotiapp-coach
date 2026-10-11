@@ -44,7 +44,7 @@ class DacHeader extends DacElement {
          readable, so the header's own background fills that strip and the bar
          starts below it. Zero everywhere that has no cutout. */
       padding-top: var(--dac-safe-t);
-      background: linear-gradient(180deg, rgba(12,12,10,0.96) 0%, rgba(12,12,10,0.82) 100%);
+      background: linear-gradient(180deg, rgba(var(--dac-bg-rgb),0.96) 0%, rgba(var(--dac-bg-rgb),0.82) 100%);
       backdrop-filter: blur(22px) saturate(150%);
       -webkit-backdrop-filter: blur(22px) saturate(150%);
       border-bottom: 1px solid var(--dac-border);

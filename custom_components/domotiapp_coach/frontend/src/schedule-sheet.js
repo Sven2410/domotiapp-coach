@@ -221,7 +221,7 @@ const css = /* css */ `
     padding: 11px 13px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border);
-    background: rgba(255,255,255,0.03);
+    background: rgba(var(--dac-veil),0.03);
     color: var(--dac-ink-2);
     font: inherit; font-size: 12px; line-height: 1.45;
     text-align: left; cursor: pointer;
@@ -240,7 +240,7 @@ const css = /* css */ `
     padding: 10px 12px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border-hi);
-    background: rgba(255,255,255,0.04);
+    background: rgba(var(--dac-veil),0.04);
     color: var(--dac-ink);
     font: inherit; font-size: 14px;
     font-variant-numeric: tabular-nums;
@@ -251,7 +251,7 @@ const css = /* css */ `
     padding: 10px 12px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border-hi);
-    background: rgba(255,255,255,0.04);
+    background: rgba(var(--dac-veil),0.04);
     color: var(--dac-ink);
     font: inherit; font-size: 14px;
     font-variant-numeric: tabular-nums;
@@ -280,7 +280,7 @@ const css = /* css */ `
     padding: 12px 13px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border);
-    background: rgba(255,255,255,0.022);
+    background: rgba(var(--dac-veil),0.022);
   }
   .check { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
   .check input { margin: 2px 0 0; width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--dac-accent-hi); }

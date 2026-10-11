@@ -165,7 +165,7 @@ class DacEnergyFlow extends DacElement {
 
     .node .halo { fill: var(--tone); opacity: 0.10; transition: opacity 500ms ease; }
     .node .disc {
-      fill: rgba(18, 18, 15, 0.94);
+      fill: rgba(var(--dac-raise-rgb), 0.94);
       stroke: color-mix(in srgb, var(--tone) 48%, transparent);
       stroke-width: 1.5;
       transition: stroke 400ms ease;
@@ -201,9 +201,9 @@ class DacEnergyFlow extends DacElement {
       max-width: 320px;
       padding: 14px 16px;
       border-radius: var(--dac-radius-sm);
-      background: rgba(18, 18, 15, 0.97);
+      background: rgba(var(--dac-raise-rgb), 0.97);
       border: 1px solid var(--dac-border-hi);
-      box-shadow: 0 20px 44px -20px rgba(0,0,0,0.95);
+      box-shadow: 0 20px 44px -20px rgba(0,0,0,var(--dac-shadow-deep));
       font-size: 13px;
     }
     .detail[hidden] { display: none; }
