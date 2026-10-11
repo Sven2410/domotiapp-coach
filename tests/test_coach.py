@@ -7708,6 +7708,75 @@ controle("na afmelden komt er niets meer", not any(
 controle("het commando is er voor iedereen, niet alleen voor de beheerder",
          "async_subscribe" in bron49 and "@websocket_api.require_admin\n@websocket_api.websocket_command(\n    {\n        vol.Required(\"type\"): \"domotiapp_coach/subscribe\"" not in bron49, "")
 
+print("=== 140. overnemen terwijl er rondes lopen: geen valse 'iets anders stuurt' (v0.108.2) ===")
+# Bij de eigenaar op 11-10-2026 om 12:08:04 ging de kabel erin. De regelaar (een tik
+# van de meter, naast de ronde) nam de batterij over voor de paal, zette om 12:08:05
+# de modus om en wachtte op de stuurknop, die pas om 12:08:08 terug was. Intussen
+# draaiden er rondes, want elke wissel van de paal geeft er een. Die zagen de modus
+# die de coach net zelf zette, vergeleken hem met de eigen stand, want de sessie
+# stond tot het eind van het overnemen nog op "zelf", en om 12:08:08 kwam de kritieke
+# melding "Iets anders stuurt Batterij". De coach liet de batterij een uur los.
+hass140, _, coach140 = bouw(huis75(modus="self_consumption"), instellingen(devices=[LAADPAAL, BATTERIJ106]))
+anker140 = Anker112(hass140)
+hass140.services = anker140
+anker140.knop()
+NU140 = dt.datetime(2026, 10, 11, 12, 7)
+tussendoor140 = []
+
+
+async def wacht140(_seconden):
+    # Twee rondes terwijl het overnemen op de knop wacht, dan komt de knop terug.
+    if len(tussendoor140) < 2:
+        tussendoor140.append(len(tussendoor140))
+        await coach140._round(NU140 + dt.timedelta(seconds=63 + 2 * len(tussendoor140)))
+    else:
+        anker140.knop()
+    await asyncio.sleep(0)
+
+
+def ronde140(seconden):
+    klok112.utcnow = lambda: NU140 + dt.timedelta(seconds=seconden)
+    try:
+        return asyncio.run(ronde75(hass140, coach140, NU140 + dt.timedelta(seconds=seconden)))
+    finally:
+        klok112.utcnow = echte_klok112
+
+
+b140 = ronde140(0)
+controle("eerst doet hij het zelf, en de knop is weg", b140.get("self_zero") is True
+         and hass140.states.get("number.batterij_vermogen").state == "unavailable", f"{b140.get('self_zero')}")
+hass140.services.verstuurd.clear()
+hass140.states.zet("sensor.laadpaal_vermogen", {"state": "4600", "attributes": {"unit_of_measurement": "W"}})
+coach140._sleep = wacht140
+klok112.utcnow = lambda: NU140 + dt.timedelta(seconds=64)
+try:
+    asyncio.run(coach140._async_regel_tik())
+    asyncio.run(hass140.afmaken())
+finally:
+    klok112.utcnow = echte_klok112
+sessie140 = coach140._batterij.get("dev-batterij") or {}
+meldingen140 = [d[2].get("message", "") for d in hass140.services.verstuurd if d[0] == "notify"]
+print(f"  rondes tijdens het overnemen: {len(tussendoor140)}, meldingen: {meldingen140}")
+controle("er liepen twee rondes terwijl de regelaar op de knop wachtte", len(tussendoor140) == 2, f"{tussendoor140}")
+controle("de modus van de coach zelf is geen andere sturing: geen melding",
+         not any("Iets anders stuurt" in m for m in meldingen140), f"{meldingen140}")
+controle("en de coach houdt de batterij: overgenomen, op 0 W",
+         sessie140.get("stuurt") is True and sessie140.get("vreemd") is None and sessie140.get("zelf") is False
+         and anker140.register == 0.0 and hass140.states.get("select.batterij_modus").state == "third_party_control",
+         f"{sessie140.get('stuurt')} {sessie140.get('vreemd')} {sessie140.get('zelf')} {anker140.register}")
+b140 = ronde140(120)
+controle("de ronde daarna stuurt hij gewoon", b140.get("applied") is True and not b140.get("foreign"),
+         f"{b140.get('applied')} {b140.get('foreign')}")
+# Een echte andere sturing ziet hij nog steeds.
+hass140.services.verstuurd.clear()
+hass140.states.zet("select.batterij_modus", "self_consumption")
+ronde140(180)
+b140 = ronde140(240)
+controle("zet iets anders hem wel om, dan laat hij na twee ronden los en zegt hij het",
+         b140.get("applied") is False and b140.get("foreign") is True
+         and any("Iets anders stuurt" in d[2].get("message", "") for d in hass140.services.verstuurd if d[0] == "notify"),
+         f"{b140.get('applied')} {b140.get('foreign')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

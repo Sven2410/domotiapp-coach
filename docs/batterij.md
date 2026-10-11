@@ -1047,3 +1047,25 @@ De fasestromen van een DSMR-meter zijn hele ampères zonder teken, en `_laadruim
 neemt `abs()`. Voor de zekering zelf klopt dat, maar laden verlaagt de stroom bij
 teruglevering. Om dat te onderscheiden is de richting per fase nodig, en een fout
 daarin haalt een beveiliging weg; voorgelegd, niet gebouwd.
+
+## Overnemen terwijl er rondes lopen (v0.108.2)
+
+Bij de eigenaar op 11-10-2026 om 12:08:04 ging de kabel van de bus erin. De batterij
+deed zelf nul op de meter, en de regelaar (een tik van de meter, die naast de ronde
+loopt) nam hem over voor de paal: om 12:08:05 de modus naar de externe stand, en dan
+wachten op de stuurknop, die in de eigen stand van deze Anker weg is en pas om
+12:08:08 terugkwam (`_async_overnemen_op_nul`). Pas daarna zet `_async_zelf_wissel`
+de sessie op "niet zelf". Intussen kwamen er rondes, want elke wissel van de paal
+geeft er een (`awaiting_authorization`, `awaiting_start`). Die vergeleken de modus
+met de eigen stand, want de sessie stond nog op "zelf", zagen twee keer iets anders
+(`VREEMD_RONDEN`), en om 12:08:08 kwam de kritieke melding "Iets anders stuurt
+Batterij: de bedrijfsmodus staat niet meer op wat de coach zette." De coach liet de
+batterij een uur los (`VREEMD_PAUZE`), in de externe stand op 0 W. In de logboeken
+staat de melding van het overnemen ("de coach neemt het over, want de laadpaal gaat
+laden", met de tijd 12:08:04) ná die van 12:08:08: het overnemen was nog niet klaar.
+
+Nu telt een ronde de modus niet zolang de regelaar bezig is (`bezig` in de sessie),
+en zet hij de teller dan ook niet terug. Een echte andere sturing houdt de modus
+langer dan één stap van de regelaar om, en die ziet hij nog steeds. Proef 140 in
+test_coach.py draait twee rondes in het wachten op de knop: met v0.108.1 de melding
+en een uur los, nu niets, en een omgezette modus daarna wordt nog gezien.

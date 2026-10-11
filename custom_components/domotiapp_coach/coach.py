@@ -5093,7 +5093,16 @@ class ChargerCoach:
         # laat los zonder zelf nog iets te schrijven (een 0 W zou de ander
         # overschrijven), zegt het één keer, en probeert het na
         # `VREEMD_PAUZE` opnieuw.
-        if stuurt and sessie.get("stuurt"):
+        #
+        # Niet terwijl de regelaar bezig is. Die kan net de modus omzetten en
+        # dan op de stuurknop wachten, en wat de sessie wil ("zelf") staat er
+        # pas als dat klaar is. Bij de eigenaar op 11-10-2026 nam een tik van de
+        # meter de batterij over voor de paal, zette om 12:08:05 de modus om en
+        # wachtte tot 12:08:08 op de knop; de rondes die intussen kwamen, één
+        # per wissel van de paal, zagen de modus van de coach zelf als een
+        # andere sturing, en de coach liet de batterij een uur los. Zo'n ronde
+        # telt niet en zet de teller ook niet terug.
+        if stuurt and sessie.get("stuurt") and not sessie.get("bezig"):
             modus_entity = entities.get("mode")
             # Doet hij zelf nul op de meter, dan zette de coach zijn eigen stand.
             welke = "idle_mode" if sessie.get("zelf") else "control_mode"
