@@ -71,7 +71,7 @@ class DacEntityPicker extends DacElement {
       padding: 0 8px 0 12px;
       border-radius: var(--dac-radius-sm);
       border: 1px solid var(--dac-border-hi);
-      background: rgba(255,255,255,0.04);
+      background: rgba(var(--dac-veil),0.04);
       min-height: 44px;
       transition: border-color 160ms ease, background 160ms ease;
     }
@@ -106,7 +106,7 @@ class DacEntityPicker extends DacElement {
       color: var(--dac-ink-3);
       cursor: pointer;
     }
-    button:hover { color: var(--dac-ink); background: rgba(255,255,255,0.06); }
+    button:hover { color: var(--dac-ink); background: rgba(var(--dac-veil),0.06); }
     button .icon { width: 15px; height: 15px; }
     button[hidden] { display: none; }
 
@@ -132,7 +132,7 @@ class DacEntityPicker extends DacElement {
       margin-left: auto;
       padding: 2px 8px;
       border-radius: var(--dac-radius-pill);
-      background: rgba(255,255,255,0.06);
+      background: rgba(var(--dac-veil),0.06);
       color: var(--dac-ink-2);
       font-variant-numeric: tabular-nums;
     }
@@ -152,8 +152,8 @@ class DacEntityPicker extends DacElement {
       -webkit-overflow-scrolling: touch;
       border-radius: var(--dac-radius-sm);
       border: 1px solid var(--dac-border-hi);
-      background: #161613;
-      box-shadow: 0 24px 50px -18px rgba(0,0,0,0.95);
+      background: var(--dac-popover);
+      box-shadow: 0 24px 50px -18px rgba(0,0,0,var(--dac-shadow-deep));
     }
     .options[hidden] { display: none; }
     :host([drop-up]) .options { bottom: 100%; margin: 0 0 4px; }

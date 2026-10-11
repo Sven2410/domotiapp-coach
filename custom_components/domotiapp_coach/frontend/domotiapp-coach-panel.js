@@ -18,6 +18,7 @@
 
 import { DacElement, define } from "./src/base.js";
 import { StateFeed } from "./src/state-feed.js";
+import { setLight } from "./src/theme.js";
 import { volgCoach } from "./src/data-source.js";
 import { navItemsFor } from "./src/header.js";
 import "./src/header.js";
@@ -95,6 +96,8 @@ class DomotiAppCoachPanel extends DacElement {
 
   set hass(value) {
     this.hass_ = value;
+    // Light or dark, the way Home Assistant itself is set (theme.js, `setLight`).
+    setLight(value?.themes?.darkMode === false);
     // Seeds the feed and, the first time, starts the subscription that keeps it
     // current regardless of whether this property is ever set again.
     this.feed_.connect(value);

@@ -467,7 +467,7 @@ class DacViewOverview extends DacElement {
       position: relative;
       height: 8px;
       border-radius: 99px;
-      background: rgba(255,255,255,0.07);
+      background: rgba(var(--dac-veil),0.07);
       overflow: hidden;
     }
     .phase-row .bar i {
@@ -601,7 +601,7 @@ class DacViewOverview extends DacElement {
       padding: 14px 15px 15px;
       border-radius: var(--dac-radius-sm);
       border: 1px solid var(--dac-border);
-      background: rgba(255,255,255,0.022);
+      background: rgba(var(--dac-veil),0.022);
     }
 
     .steer-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -738,7 +738,7 @@ class DacViewOverview extends DacElement {
     .says-plan:empty { display: none; }
     .drain-to { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--dac-ink-2); }
     .drain-to[hidden] { display: none; }
-    .drain-to input { width: 56px; font: inherit; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--dac-border); background: rgba(255,255,255,0.04); color: var(--dac-ink); }
+    .drain-to input { width: 56px; font: inherit; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.04); color: var(--dac-ink); }
     .says-plan.good { color: var(--dac-good); }
     .says-plan.warn { color: var(--dac-warn); }
     /* Iets aan de installatie dat de bewoner zelf moet verhelpen. Apart van de
@@ -779,13 +779,13 @@ class DacViewOverview extends DacElement {
       padding: 10px 12px;
       border-radius: var(--dac-radius-sm);
       border: 1px solid var(--dac-border-hi);
-      background: rgba(255,255,255,0.04);
+      background: rgba(var(--dac-veil),0.04);
       color: var(--dac-ink);
       font: inherit; font-size: 14px;
       min-height: 44px;
       width: 100%;
     }
-    .car-pick select option { background: #12120f; color: var(--dac-ink); }
+    .car-pick select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
     @media (pointer: coarse) { .car-pick select { font-size: 16px; } }
     @supports (-webkit-touch-callout: none) { .car-pick select { font-size: 16px; } }
 
@@ -800,7 +800,7 @@ class DacViewOverview extends DacElement {
       padding: 10px 12px;
       border-radius: var(--dac-radius-sm);
       border: 1px solid var(--dac-border-hi);
-      background: rgba(255,255,255,0.04);
+      background: rgba(var(--dac-veil),0.04);
       color: var(--dac-ink);
       font: inherit; font-size: 14px;
     }
@@ -856,7 +856,7 @@ class DacViewOverview extends DacElement {
       width: 46px; min-width: 46px; height: 27px; padding: 0;
       border-radius: var(--dac-radius-pill);
       border: 1px solid transparent;
-      background: rgba(232,228,222,0.16);
+      background: rgba(var(--dac-ink-rgb),0.16);
       cursor: pointer;
       position: relative;
       transition: background 120ms linear, border-color 120ms linear;
@@ -866,7 +866,7 @@ class DacViewOverview extends DacElement {
       transform: translate(0, 0);
       width: 19px; height: 19px;
       border-radius: 50%;
-      background: rgba(232,228,222,0.65);
+      background: var(--dac-knob);
       box-shadow: 0 1px 2px rgba(0,0,0,0.35);
       transition: transform 120ms linear, background 120ms linear;
     }
@@ -891,13 +891,13 @@ class DacViewOverview extends DacElement {
       padding: 8px 10px;
       border-radius: var(--dac-radius-pill);
       border: 1px solid var(--dac-border-hi);
-      background: rgba(255,255,255,0.04);
+      background: rgba(var(--dac-veil),0.04);
       color: var(--dac-ink);
       font: inherit; font-size: 13.5px;
       min-height: 44px;
       flex: 1 1 auto; min-width: 0; width: auto;
     }
-    .plan-prio select option { background: #12120f; color: var(--dac-ink); }
+    .plan-prio select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
     @media (pointer: coarse) { .plan-prio select { font-size: 16px; } }
     @supports (-webkit-touch-callout: none) { .plan-prio select { font-size: 16px; } }
 
@@ -931,13 +931,13 @@ class DacViewOverview extends DacElement {
       padding: 11px 12px;
       border-radius: var(--dac-radius-sm);
       border: 1px solid var(--dac-border-hi);
-      background: rgba(255,255,255,0.04);
+      background: rgba(var(--dac-veil),0.04);
       color: var(--dac-ink);
       font: inherit; font-size: 14px;
       appearance: none;
     }
     .cmd-pick select:disabled { opacity: 0.45; }
-    .cmd-pick select option { background: #12120f; color: var(--dac-ink); }
+    .cmd-pick select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
     .cmd-pick .cmd-note { margin: 0; }
     @media (pointer: coarse) { .cmd-pick select { font-size: 16px; } }
     @supports (-webkit-touch-callout: none) { .cmd-pick select { font-size: 16px; } }
@@ -1006,7 +1006,7 @@ class DacViewOverview extends DacElement {
       gap: 6px;
       padding: 8px 10px;
       border-radius: var(--dac-radius) var(--dac-radius) 0 0;
-      background: linear-gradient(180deg, rgba(12,12,10,0.96), rgba(12,12,10,0.72) 70%, transparent);
+      background: linear-gradient(180deg, rgba(var(--dac-bg-rgb),0.96), rgba(var(--dac-bg-rgb),0.72) 70%, transparent);
       backdrop-filter: blur(2px);
     }
     .card-edit .name {
@@ -1020,7 +1020,7 @@ class DacViewOverview extends DacElement {
       display: grid; place-items: center;
       border-radius: 10px;
       border: 1px solid var(--dac-border-hi);
-      background: rgba(18,18,15,0.9);
+      background: rgba(var(--dac-raise-rgb),0.9);
       color: var(--dac-ink-2);
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
@@ -1040,7 +1040,7 @@ class DacViewOverview extends DacElement {
       left: 0; right: 0; bottom: 0;
       z-index: 30;
       padding: 12px max(22px, var(--dac-safe-r)) calc(12px + var(--dac-safe-b)) max(22px, var(--dac-safe-l));
-      background: linear-gradient(0deg, rgba(12,12,10,0.98) 60%, rgba(12,12,10,0));
+      background: linear-gradient(0deg, rgba(var(--dac-bg-rgb),0.98) 60%, rgba(var(--dac-bg-rgb),0));
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     }
     .arrange-bar[hidden] { display: none; }
@@ -1091,7 +1091,7 @@ class DacViewOverview extends DacElement {
       padding: 12px 14px;
       border-radius: var(--dac-radius-sm);
       border: 1px solid var(--dac-border);
-      background: rgba(255,255,255,0.022);
+      background: rgba(var(--dac-veil),0.022);
       min-width: 0;
     }
     .meter-row .k { font-size: 12.5px; color: var(--dac-ink-2); min-width: 0; }

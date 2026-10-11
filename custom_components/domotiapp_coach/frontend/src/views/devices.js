@@ -1687,7 +1687,7 @@ DacViewDevices.css = /* css */ `
     padding: 14px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border);
-    background: rgba(255,255,255,0.022);
+    background: rgba(var(--dac-veil),0.022);
   }
   .car-head { display: flex; align-items: center; gap: 10px; }
   .car-head input { flex: 1 1 auto; min-width: 0; }
@@ -1763,7 +1763,7 @@ DacViewDevices.css = /* css */ `
   .prog-actions button {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 8px 12px; border-radius: var(--dac-radius-sm);
-    border: 1px solid var(--dac-border-hi); background: rgba(255,255,255,0.04);
+    border: 1px solid var(--dac-border-hi); background: rgba(var(--dac-veil),0.04);
     color: var(--dac-ink); font: inherit; font-size: 13px; cursor: pointer;
   }
   .prog-actions button svg { width: 14px; height: 14px; }
@@ -1913,7 +1913,7 @@ DacViewDevices.css = /* css */ `
   }
   .room-head .room-name::placeholder { color: var(--dac-warn); text-transform: none; letter-spacing: 0; }
   .room-head .room-name:hover { border-color: var(--dac-border); }
-  .room-head .room-name:focus { border-color: var(--dac-accent-hi); background: rgba(255,255,255,0.03); outline: none; color: var(--dac-ink); }
+  .room-head .room-name:focus { border-color: var(--dac-accent-hi); background: rgba(var(--dac-veil),0.03); outline: none; color: var(--dac-ink); }
   .room-head.vast { min-height: 36px; }
   .room-head.vast .room-title { padding: 0 10px; }
   .room-head .room-count { flex: 0 0 auto; font-size: 12px; color: var(--dac-ink-3); }

@@ -144,3 +144,31 @@ iemand al mag opvragen, en van de instellingen net als `settings/get` alleen zij
 eigen persoon. Proef 139 in test_coach.py en een proef in test_rapport.mjs, die ook
 nagaat dat er buiten `state-feed.js` en `data-source.js` geen `subscribeEvents` meer
 staat.
+
+## Licht en donker (v0.113.0)
+
+De eigenaar op 11-10-2026, bij de lichte kaarten van DomotiApp Lovelace: "alles moet ook goed
+licht zijn. Ook de coach." Het paneel volgt nu Home Assistant zelf: staat dat licht
+(`hass.themes.darkMode` false), dan is het paneel licht (`setLight` in theme.js, vanuit `set hass`
+in domotiapp-coach-panel.js).
+
+- **Twee sets in theme.js.** `tokens` is het donkere thema zoals het was, `lightTokens` zet alleen
+  wat in het licht anders moet. Elk element zet de tokens op zijn eigen `:host`, dus een eigenschap
+  op het paneel alleen bereikt ze niet; elk element krijgt daarom het attribuut `light`
+  (`followTheme` in `DacElement`), ook een element dat later bijkomt, en `:host([light])` zet de
+  lichte set.
+- **Tinten over de achtergrond** zijn `rgba(var(--dac-veil), a)`: wit in het donker, zwart in het
+  licht. Net zo `--dac-ink-rgb`, `--dac-bg-rgb` en `--dac-raise-rgb` voor de verlopen onder de kop
+  en de balk onderaan, `--dac-popover` voor uitklaplijsten, `--dac-knob` voor de schuifjes en
+  `--dac-shadow-deep` voor zware schaduwen. `color-scheme` volgt mee (`--dac-scheme`), zodat de
+  browser een uitklaplijst of een datumveld in hetzelfde thema tekent.
+- **De stroomkleuren blijven**: het zijn vlakken met een eigen icoon en naam, en op wit houden ze
+  hun volgorde. De statuskleuren en de blauwe tekst gaan in het licht donkerder, want ze zijn ook
+  tekst: gemeten in de preview (`?licht=1`) over alle zeven schermen was het laagste contrast eerst
+  3,05 (blauwe tekst op een blauw labeltje bij Meldingen) en 3,1 (oranje waarschuwing bij
+  Apparaten). Daarna is het laagste 4,08 (datzelfde labeltje), en de lichtste grijze tekst 4,33.
+- Het rapport en de pdf zijn papier en houden hun eigen kleuren.
+
+Proef "licht en donker" in test_rapport.mjs leest elk scherm en valt om zodra er weer een kleur van
+alleen het donkere thema in staat (wit over donker, `#12120f`, `color-scheme: dark`). In de preview
+op de pc staat `?licht=1` (preview.html staat niet in git).

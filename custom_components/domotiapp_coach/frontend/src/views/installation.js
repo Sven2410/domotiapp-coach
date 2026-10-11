@@ -913,7 +913,7 @@ DacViewInstallation.css = /* css */ `
     padding: 14px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border);
-    background: rgba(255,255,255,0.022);
+    background: rgba(var(--dac-veil),0.022);
     display: grid;
     gap: 12px;
     margin-bottom: 12px;
@@ -938,7 +938,7 @@ DacViewInstallation.css = /* css */ `
     padding: 8px 14px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border);
-    background: rgba(255,255,255,0.04);
+    background: rgba(var(--dac-veil),0.04);
     color: var(--dac-ink);
     cursor: pointer;
   }

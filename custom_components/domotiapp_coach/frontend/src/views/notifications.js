@@ -228,7 +228,7 @@ const css = /* css */ `
   .personen { display: grid; gap: 12px; }
   .persoon {
     border: 1px solid var(--dac-border); border-radius: var(--dac-radius-sm);
-    background: rgba(255,255,255,0.03); padding: 12px 14px 6px;
+    background: rgba(var(--dac-veil),0.03); padding: 12px 14px 6px;
   }
   .persoon .kop { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
   .persoon .naam { font-size: 15px; font-weight: 600; }
@@ -263,13 +263,13 @@ const css = /* css */ `
     flex: 0 0 auto; box-sizing: border-box; display: inline-block; vertical-align: middle;
     width: 46px; min-width: 46px; height: 27px; padding: 0; margin: 0; line-height: 0; font-size: 0;
     border-radius: var(--dac-radius-pill); border: 1px solid transparent;
-    background: rgba(232,228,222,0.16); cursor: pointer; position: relative;
+    background: rgba(var(--dac-ink-rgb),0.16); cursor: pointer; position: relative;
     transition: background 120ms linear, border-color 120ms linear;
   }
   .schuif .knob {
     position: absolute; top: 0; bottom: 0; margin: auto 0; left: 3px; width: 19px; height: 19px; border-radius: 50%;
     transform: translate(0, 0);
-    background: rgba(232,228,222,0.65); transition: transform 120ms linear, background 120ms linear;
+    background: var(--dac-knob); transition: transform 120ms linear, background 120ms linear;
     box-shadow: 0 1px 2px rgba(0,0,0,0.35);
   }
   .schuif[aria-checked="true"] { background: var(--dac-accent-hi); }
@@ -300,15 +300,15 @@ const css = /* css */ `
   .veld .uitleg { font-size: 12px; color: var(--dac-ink-3); line-height: 1.45; }
   input, select {
     font: inherit; font-size: 14px; padding: 8px 10px; border-radius: var(--dac-radius-sm);
-    border: 1px solid var(--dac-border); background: rgba(255,255,255,0.04); color: var(--dac-ink);
+    border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.04); color: var(--dac-ink);
     min-height: 40px; width: 100%; box-sizing: border-box;
   }
   input:focus, select:focus { outline: 2px solid var(--dac-accent); outline-offset: 1px; }
   /* De uitklaplijst tekent de browser zelf, buiten onze stijlen om. Zonder
      color-scheme kwam hij wit met onze lichte letters erin: onleesbaar. De eigenaar
      op 06-09-2026, met een schermafdruk waarop hij "amper wat kon lezen". */
-  select { color-scheme: dark; }
-  select option { background: #12120f; color: #e8e4de; }
+  select { color-scheme: var(--dac-scheme); }
+  select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
   @media (pointer: coarse) { input, select { font-size: 16px; } }
   .rij-knoppen { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .status { font-size: 12.5px; color: var(--dac-ink-3); min-height: 18px; margin-top: 6px; }
@@ -339,7 +339,7 @@ const css = /* css */ `
   .rij {
     display: grid; grid-template-columns: 52px 1fr; gap: 10px; align-items: start;
     padding: 10px 12px; border-radius: var(--dac-radius-sm);
-    border: 1px solid var(--dac-border); background: rgba(255,255,255,0.03);
+    border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.03);
     margin-bottom: 6px;
   }
   /* Een besluit is wat de coach deed; een melding ging ook naar de telefoon

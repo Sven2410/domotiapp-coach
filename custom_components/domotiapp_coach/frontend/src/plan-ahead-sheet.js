@@ -65,7 +65,7 @@ const css = /* css */ `
     padding: 10px 12px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border);
-    background: rgba(255,255,255,0.03);
+    background: rgba(var(--dac-veil),0.03);
   }
   .kop .label {
     font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
@@ -87,7 +87,7 @@ const css = /* css */ `
     padding: 9px 11px;
     border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border);
-    background: rgba(255,255,255,0.02);
+    background: rgba(var(--dac-veil),0.02);
     font-size: 13px;
   }
   /* Een uur waarin geladen wordt is het nieuws, dus dat is het enige dat kleur

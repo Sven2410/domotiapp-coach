@@ -1,6 +1,6 @@
 /** Minimal base class for the panel's web components -- no framework, no build step. */
 
-import { baseCss, sheet, tokens } from "./theme.js";
+import { baseCss, followTheme, lightTokens, sheet, tokens } from "./theme.js";
 
 const hostCss = /* css */ `
   :host {
@@ -8,7 +8,13 @@ const hostCss = /* css */ `
     display: block;
     font-family: var(--dac-font);
     color: var(--dac-ink);
+    /* So the browser draws its own parts -- the list of a select, a date field,
+       a scrollbar -- in the same theme as the panel around them. */
+    color-scheme: var(--dac-scheme);
     -webkit-font-smoothing: antialiased;
+  }
+  :host([light]) {
+    ${lightTokens}
   }
 `;
 
@@ -46,6 +52,7 @@ export class DacElement extends HTMLElement {
    * again.
    */
   connectedCallback() {
+    followTheme(this, true);
     if (!this.rendered_) {
       const tpl = document.createElement("template");
       tpl.innerHTML = this.render();
@@ -57,6 +64,7 @@ export class DacElement extends HTMLElement {
   }
 
   disconnectedCallback() {
+    followTheme(this, false);
     this.onDisconnect();
   }
 
