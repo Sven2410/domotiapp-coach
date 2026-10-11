@@ -7820,6 +7820,39 @@ controle("begint de paal daarna opnieuw, dan is hij wel net begonnen",
          coach141._since.get("dev-laadpaal") == dt.datetime(2026, 10, 11, 13, stop141 + 3),
          f"{coach141._since.get('dev-laadpaal')}")
 
+print("=== 142. Home Assistant gaat uit: daarna besluit de coach niets meer (v0.108.4) ===")
+# Bij de eigenaar op 11-10-2026: `_async_bij_stop` zette de batterij om 14:41:40 op 0 W
+# in de externe modus, om 14:41:40 viel de slimme meter weg, en om 14:41:46 draaide de
+# minuutronde nog: de batterij terug in zijn eigen stand en 16 A naar de paal om de bus
+# te wekken. Tijdens de herstart laadde de bus op 10,8 kW en gaf de batterij er 3,45 kW aan.
+huis142 = huis75(afname=300.0, teruglevering=0.0, modus="self_consumption")
+huis142["sensor.laadpaal_status"] = "awaiting_start"
+hass142, _, coach142 = bouw(huis142, instellingen(devices=[LAADPAAL, BATTERIJ106]))
+NU142 = dt.datetime(2026, 10, 11, 14, 40)
+b142 = asyncio.run(ronde75(hass142, coach142, NU142))
+controle("voor de herstart doet de batterij het zelf en wacht de paal",
+         b142.get("self_zero") is True and (coach142.state.get("dev-laadpaal") or {}).get("amps") == 0,
+         f"{b142.get('self_zero')} {(coach142.state.get('dev-laadpaal') or {}).get('rule')}")
+hass142.services.verstuurd.clear()
+asyncio.run(coach142._async_bij_stop())
+asyncio.run(hass142.afmaken())
+volg75(hass142)
+controle("bij het afsluiten: externe modus op 0 W",
+         hass142.states.get("select.batterij_modus").state == "third_party_control" and zet75(hass142)[2][-1:] == [0],
+         f"{hass142.states.get('select.batterij_modus').state} {zet75(hass142)}")
+hass142.services.verstuurd.clear()
+for e142 in ("sensor.afname", "sensor.teruglevering", "sensor.l1", "sensor.l2", "sensor.l3"):
+    hass142.states.zet(e142, "unavailable")
+asyncio.run(coach142._tick(NU142 + dt.timedelta(minutes=1)))
+asyncio.run(coach142._async_regel_tik())
+asyncio.run(hass142.afmaken())
+print(f"  na het afsluiten: {hass142.services.verstuurd}")
+controle("de minuutronde en de regelaar sturen daarna niets meer: geen modus, geen vermogen, geen paal",
+         hass142.services.verstuurd == [], f"{hass142.services.verstuurd}")
+controle("en de batterij blijft in de externe modus tot de coach terug is",
+         hass142.states.get("select.batterij_modus").state == "third_party_control",
+         f"{hass142.states.get('select.batterij_modus').state}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

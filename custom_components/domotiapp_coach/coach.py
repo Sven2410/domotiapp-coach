@@ -263,6 +263,10 @@ PAAL_UIT_LANGST = timedelta(seconds=30)
 # weg terug duurt naar verwachting even lang. Zie `_async_overnemen_op_nul`.
 KNOP_WACHT_STAP = 0.5
 KNOP_WACHT_STAPPEN = 20
+# Hoe lang `_async_bij_stop` hooguit wacht op een ronde of een stap van de
+# regelaar die nog loopt, in dezelfde stappen. Een ronde duurt een seconde of
+# twee; het overnemen van een batterij met een trage knop tot tien.
+STOP_WACHT_STAPPEN = 30
 # Hoe vaak wat de batterij verdiende naar de opslag gaat, en hoeveel dagen
 # daarvan bewaard blijven: ruim een jaar, zodat In geld in Historie ook over een
 # heel jaar weet wat de batterij opleverde.
@@ -1312,6 +1316,8 @@ class ChargerCoach:
         # Draait er op dit moment een ronde? Er kan er maar één tegelijk, want
         # een ronde stuurt opdrachten en twee tegelijk zouden elkaar overschrijven.
         self._running = False
+        # Gaat Home Assistant uit, dan besluit de coach niets meer. Zie `_async_bij_stop`.
+        self._stopt = False
         # De statussensoren waar we op meeluisteren, en hoe we dat weer opzeggen.
         self._watched: set[str] = set()
         self._watched_phases: set[str] = set()
@@ -2221,7 +2227,7 @@ class ChargerCoach:
         van toestand wisselt, en twee rondes die tegelijk opdrachten sturen
         zouden elkaar in de weg zitten.
         """
-        if self._running:
+        if self._running or self._stopt:
             return
         self._running = True
         try:
@@ -5430,6 +5436,8 @@ class ChargerCoach:
         # opslag: een meter die per seconde meldt zou anders elke seconde een
         # kopie van alle instellingen maken. Wat er verandert (het vinkje eraf,
         # een andere sensor) pakt de ronde binnen een minuut op.
+        if self._stopt:
+            return
         for device_id, sessie in list(self._batterij.items()):
             if sessie.get("stuurt") and sessie.get("settings") is not None:
                 await self._async_regel(device_id, sessie["settings"], sessie["device"])
@@ -8535,7 +8543,23 @@ class ChargerCoach:
         accu op 0 en dan pas kijken." Stil blijven staan kan geen kwaad; na de
         herstart kijkt de coach zelf weer. Het echt uitzetten van de integratie
         (`async_stop`) geeft hem wel terug, want dan komt de coach niet terug.
+
+        **En daarna besluit de coach niets meer** (v0.108.4). Home Assistant doet
+        er na dit event nog even over, en in die tijd vallen de integraties één
+        voor één weg. Bij de eigenaar op 11-10-2026 zette dit de batterij om
+        14:41:40 op 0 W in de externe modus, viel om 14:41:40 de slimme meter
+        weg, en draaide om 14:41:46 gewoon de minuutronde: "Batterij doet zelf
+        nul op de meter" en "Laadpaal: laden op 16 A ... om hem wakker te
+        maken", op een paal die tot 20:00 moest wachten. Tijdens de herstart
+        laadde de bus op 10,8 kW, en gaf de batterij er 3,45 kW aan, tot de
+        coach om 14:43:20 terug was. Dus: geen rondes en geen regelaar meer, en
+        een ronde die al liep eerst laten aflopen.
         """
+        self._stopt = True
+        for _ in range(STOP_WACHT_STAPPEN):
+            if not self._running and not any(s.get("bezig") for s in self._batterij.values()):
+                break
+            await self._sleep(KNOP_WACHT_STAP)
         try:
             settings = await async_get_store(self.hass).async_load()
         except Exception:  # noqa: BLE001

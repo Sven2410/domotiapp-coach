@@ -866,3 +866,32 @@ Nu krijgt een paal die laadt zonder begin alleen een begin als het laatste wat d
 coach stuurde geen stop was. Een paal die na een stop uit zichzelf weer gaat laden
 valt eerst uit `charging` en krijgt dan wel een nieuw begin, zoals altijd. Proef 141
 in test_coach.py: met v0.108.2 "Net begonnen" en 6 A in de ronde na de stop, nu 0.
+
+## Home Assistant gaat uit: daarna besluit de coach niets meer (v0.108.4)
+
+Bij de eigenaar op 11-10-2026, bij het installeren van v0.108.3. De bus stond tot 20:00
+stil (de 0 A had een houdbaarheid tot dan), de batterij deed zelf nul op de meter.
+
+| tijd | wat |
+|---|---|
+| 14:41:40 | `homeassistant_stop`: `_async_bij_stop` zet de batterij op 0 W in de externe modus (v0.96.0) |
+| 14:41:40 | de slimme meter valt weg, de integraties gaan één voor één uit |
+| 14:41:46 | de gewone minuutronde draait nog: "Batterij doet zelf nul op de meter" en "Laadpaal: laden op 16 A ... om hem wakker te maken" |
+| 14:41:47 | de Easee neemt 16 A aan; 14:42:12 `charging`, 14:42:44 10,8 kW |
+| 14:42:32 | de batterij, terug in zijn eigen stand, geeft 3,45 kW aan de auto |
+| 14:43:14 | de coach is terug, neemt de batterij over; 14:43:20 de paal op 6 A |
+
+Waarom die ronde zonder meter tot laden besloot is niet nagegaan: de besluitenlogger
+was om 14:41:41 al weg, en in het nagebouwde Home Assistant besluit de coach zonder
+meter gewoon te wachten. Het hoeft ook niet: na `homeassistant_stop` hoort de coach
+helemaal niets meer te besluiten. Nu zet `_async_bij_stop` `_stopt`, wacht hij een
+ronde of een stap van de regelaar die al liep af (`STOP_WACHT_STAPPEN`), en doen
+`_tick` en `_async_regel_tik` daarna niets meer. Bij een herstart zonder ronde in die
+paar seconden (12:03 en 12:28 die dag) ging het al goed. Proef 142 in test_coach.py:
+met v0.108.3 na het afsluiten nog 0 W, `self_consumption` en een limiet naar de paal,
+nu niets.
+
+Na de herstart zag de coach een paal die al laadde, en dat is een herstart midden in
+een beurt (`_hervat`): 14:43:20 6 A ("Er is 0,2 kW zon over ..."), 14:44:15 "Net
+begonnen met laden, dus hij houdt het nog even vol". Dat gedrag is bewust (v0.98.0);
+het begin lag hier alleen bij de coach zelf.
