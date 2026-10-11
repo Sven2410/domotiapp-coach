@@ -5217,8 +5217,13 @@ class ChargerCoach:
                         bat_w = min(bat_w, b.max_charge_w)
                     if b.max_discharge_w > 0:
                         bat_w = max(bat_w, -b.max_discharge_w)
+                # Doet hij het zelf en is zijn sensor weg, dan valt er deze stap
+                # niets te tellen. Tot v0.112.1 viel `verdiend` hier om, en daarmee
+                # alles hieronder: thuis bij de eigenaar op 11-10-2026 rond de
+                # herstarts, en een paal die toen ging laden had de batterij niet
+                # uit haar eigen stand gekregen (proef 148).
                 euro = verdiend(net_w, bat_w,
-                                sessie.get("koop"), sessie.get("terug"), seconden)
+                                sessie.get("koop"), sessie.get("terug"), seconden) if bat_w is not None else None
                 if euro is not None:
                     dag = nu.date().isoformat()
                     geld = sessie.setdefault("geld", {})

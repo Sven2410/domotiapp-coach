@@ -8218,6 +8218,50 @@ controle("vakantie_max: zonder ingevulde grens die waarmee de coach rekent, niet
          a147.get("vakantie_max") == coach146._vakantie({"battery": {"holiday": True}}) == 50.0,
          f"{a147.get('vakantie_max')}")
 
+print("=== 148. zelf nul op de meter zonder vermogenssensor: de regelaar struikelt niet (v0.112.2) ===")
+# De schaduw thuis op 11-10-2026: 47 keer "de regelaar struikelde", een TypeError
+# in `verdiend`, terwijl de vermogenssensor van de batterij rond de herstarts
+# onbekend was. Het kasboek viel om, en daarmee ook alles erna: `_zelf_niet`,
+# dat de batterij uit haar eigen stand haalt als de paal gaat laden.
+inst148 = instellingen(devices=[LAADPAAL, BATTERIJ106])
+hass148, store148, coach148 = bouw(huis75(modus="third_party_control"), inst148)
+NU148 = dt.datetime(2026, 10, 11, 22, 30)
+struikel148 = []
+echt_exc148 = coachmod._LOGGER.exception
+coachmod._LOGGER.exception = lambda *a, **k: struikel148.append(a[0] % a[1:] if len(a) > 1 else a[0])
+
+
+def ronde148(minuten):
+    klok106.utcnow = lambda: NU148 + dt.timedelta(minutes=minuten)
+    try:
+        return asyncio.run(ronde75(hass148, coach148, NU148 + dt.timedelta(minutes=minuten)))
+    finally:
+        klok106.utcnow = echte_klok106
+
+
+try:
+    ronde148(0)
+    hass148.states.zet("sensor.batterij_vermogen", {"state": "-1400", "attributes": {"unit_of_measurement": "W"}})
+    ronde148(1)
+    b148 = ronde148(2)
+    zelf148 = b148.get("self_zero")
+    hass148.states.zet("sensor.batterij_vermogen", "unavailable")
+    ronde148(3)
+    ronde148(4)
+    stil148 = list(struikel148)
+    hass148.states.zet("sensor.laadpaal_vermogen", {"state": "7000", "attributes": {"unit_of_measurement": "W"}})
+    b148 = ronde148(5)
+    modus148, _, vermogen148 = zet75(hass148)
+finally:
+    coachmod._LOGGER.exception = echt_exc148
+print(f"  zelf voor het wegvallen: {zelf148}; gestruikeld: {struikel148}; "
+      f"paal laadt: modus {modus148}, vermogen {vermogen148}, zelf {b148.get('self_zero')}")
+controle("eerst doet de batterij het zelf", zelf148 is True, f"{zelf148}")
+controle("de sensor van de batterij weg: geen struikelende regelaar", stil148 == [] and struikel148 == [], f"{struikel148}")
+controle("en de paal gaat laden: de coach neemt het nog steeds meteen over, op 0 W",
+         modus148 == ["third_party_control"] and vermogen148[:1] == [0] and b148.get("self_zero") is False,
+         f"{modus148} {vermogen148} {b148.get('self_zero')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
