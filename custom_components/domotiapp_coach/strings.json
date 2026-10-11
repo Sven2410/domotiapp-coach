@@ -14,6 +14,9 @@
     "sensor": {
       "start": {
         "name": "Start"
+      },
+      "coach": {
+        "name": "Coach"
       }
     },
     "binary_sensor": {
@@ -30,6 +33,35 @@
       },
       "vrijgave_intrekken": {
         "name": "Withdraw release"
+      }
+    },
+    "select": {
+      "modus": {
+        "name": "Mode",
+        "state": {
+          "planning": "Planning",
+          "snel": "Fast",
+          "continu": "Continuous",
+          "zon": "Solar"
+        }
+      }
+    },
+    "switch": {
+      "pauze": {
+        "name": "Pause"
+      },
+      "schema": {
+        "name": "Schedule"
+      }
+    },
+    "time": {
+      "klaar_om": {
+        "name": "Ready by"
+      }
+    },
+    "number": {
+      "laden_tot": {
+        "name": "Charge to"
       }
     }
   }

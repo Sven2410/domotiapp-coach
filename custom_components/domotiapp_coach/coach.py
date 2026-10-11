@@ -5794,6 +5794,8 @@ class ChargerCoach:
             # de auto voor het laatst gewekt is.
             "wake": self._wekbaar(settings, device),
             "woke_at": self._gewekt[device_id].isoformat() if device_id in self._gewekt else None,
+            # De actieradius van de auto in km, voor de laadpaalkaart (v0.111.0).
+            "range_km": self._actieradius(settings, device),
         }
         # Iets dat alleen de bewoner zelf kan verhelpen, en dat losstaat van
         # het besluit van deze ronde. Het gaat dus naast de reden op de kaart
@@ -7291,6 +7293,13 @@ class ChargerCoach:
 
         return {}
 
+    def _actieradius(self, settings: dict[str, Any], device: dict[str, Any]) -> float | None:
+        """De actieradius in km uit de sensor in het autoprofiel, of niets."""
+        _gekozen, profiel = self._chosen_car(settings, device)
+        entiteit = (profiel or {}).get("range_entity")
+        waarde = _number(self.hass, entiteit) if entiteit else None
+        return None if waarde is None else round(waarde)
+
     def _chosen_car(
         self, settings: dict[str, Any], device: dict[str, Any]
     ) -> tuple[str, dict[str, Any] | None]:
@@ -8213,7 +8222,10 @@ class ChargerCoach:
             **{
                 {"kwh": "charged_kwh"}.get(sleutel, sleutel): waarde
                 for sleutel, waarde in self._beurt_kaart(device, sessie, actief=False).items()
-                if sleutel != "active"
+                # Alleen wat de kaart van v0.106.0 had: het ingeplugde moment, het
+                # geld en de zon van de laadpaalkaart (v0.111.0) staan hierboven al
+                # in de regel zelf, en mogen die niet overschrijven.
+                if sleutel in ("kwh", "soc_start", "soc_end", "soc_estimated")
             },
             "baseline": {
                 "kwh": round(float(geld.get("basis_kwh") or 0.0), 3),
@@ -9011,12 +9023,20 @@ class ChargerCoach:
         # Voor het laden begon is er niets geteld: `_geladen` meet vanaf `begon`,
         # en daarvoor zou hij de eigen meting van de vorige beurt teruggeven.
         geladen = self._geladen(device, sessie) if sessie.get("begon") is not None else 0.0
+        geld = sessie.get("geld") or {}
+        ingeplugd = geld.get("ingeplugd")
         return {
             "active": actief,
             "kwh": round(geladen or 0.0, 2),
             "soc_start": rond(sessie.get("soc_begin")),
             "soc_end": rond(sessie.get("soc_eind")),
             "soc_estimated": bool(sessie.get("soc_eind_geschat")),
+            # Voor de laadpaalkaart van DomotiApp Lovelace (v0.111.0): sinds
+            # wanneer, wat het tot nu kostte en hoeveel van de zon kwam.
+            "plugged_at": ingeplugd.replace(microsecond=0).isoformat() if ingeplugd else None,
+            "ended": None,
+            "paid": round(float(geld.get("betaald") or 0.0), 2),
+            "solar_kwh": round(float(geld.get("zon_kwh") or 0.0), 2),
         }
 
     @staticmethod
@@ -9037,6 +9057,10 @@ class ChargerCoach:
             "soc_start": getal(regel.get("soc_start")),
             "soc_end": getal(regel.get("soc_end")),
             "soc_estimated": bool(regel.get("soc_estimated")),
+            "plugged_at": regel.get("plugged_at"),
+            "ended": regel.get("ended"),
+            "paid": getal(regel.get("paid")),
+            "solar_kwh": getal(regel.get("solar_kwh")),
         }
 
     @staticmethod

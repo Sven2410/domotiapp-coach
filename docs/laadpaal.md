@@ -935,3 +935,41 @@ Proef 30 en 72 in test_planner.py.
 
 De zin "Er is 0,0 kW zon over" laat het getal weg als het in een tiende kW op nul
 uitkomt. Bij een vast contract vóór 20:00 kan dat nu niet meer voorkomen.
+
+## De laadpaalkaart en de coach: entiteiten per paal (v0.111.0)
+
+De eigenaar op 11-10-2026: een laadpaalkaart in DomotiApp Lovelace "met een afbeelding
+van de laadpaal en de noodzakelijke sensoren en aansturingsknoppen en instellingen zoals
+schema", en "in de laadpaal kaart moet ook de batterij % komen van de auto". Hetzelfde
+contract als de vaatwasser (contract 1, `entiteit.py`, zie docs/vaatwasser.md): een eigen
+apparaat per paal (model "Laadpaal"), vaste `translation_key`s, en de kaart leest de
+attributen, niet de tekst.
+
+| entiteit | translation_key | wat |
+|---|---|---|
+| sensor | `coach` | state "Laadt op zon", "Wacht tot 20:00", "Vol", ...; de rest in de attributen |
+| select | `modus` | `planning`, `snel`, `continu`, `zon`, voor deze beurt (`async_mode`) |
+| switch | `pauze` | via de coach (`async_pause`), vervalt als de kabel eruit gaat |
+| switch | `schema` | de planning met een klaar-tijd aan of uit |
+| time | `klaar_om` | de tijd voor elke dag; `unavailable` zolang het schema per dag is |
+| number | `laden_tot` | 10-100 %, stap 5, voor deze beurt (`async_target`) |
+
+Attributen van de sensor: `contract`, `type`, `stand` (`laadt_zon`, `laadt`, `wacht`, `vol`,
+`geen_auto`, `pauze`, `storing`; `paal_stand`), `rule`, `amps`, `reason`, `brand`, `soc`,
+`soc_geschat`, `actieradius_km` (uit de sensor in het autoprofiel, `_actieradius`; de coach
+rekent er niet mee), `target_percent`, `doel_beurt`, `modus`, `modus_beurt`, `pauze`,
+`expected_done`, `kwh_needed`, `plan` (de blokken van de tijdlijn met tijden met zone en de
+prijs), `sessie` (`actief`, `begin`, `einde`, `kwh`, `kosten`, `zon_kwh`, `soc_begin`,
+`soc_eind`), `schema_aan`, `per_dag`, `schema_dagen` (altijd zeven, **index 0 is maandag**,
+zoals `weekday()`; let op in JavaScript, waar `getDay()` 0 voor zondag geeft),
+`klaar_om_volgende` en `entiteiten` (wat de klant bij de paal invulde, plus `soc` en `range`
+uit het autoprofiel).
+
+De laadbeurt op de coachkaart (`_beurt_kaart`) heeft er `plugged_at`, `ended`, `paid` en
+`solar_kwh` bij. Die gaan **niet** mee in de bewaarde beurt (`_beurt_regel`): daar staan ze
+al, met meer decimalen en het echte eind, en de eerste versie overschreef ze (proef 48 viel
+om: betaald 0,02 in plaats van 0,0256, en het eind leeg).
+
+Bij deze uitgave ook het opruimen van het oude lege apparaat "DomotiApp Coach": in v0.110.0
+liep dat buiten de lus van Home Assistant en faalde het (`oude_coach_opruimen`, nu een
+callback). Proef 144 in test_coach.py.

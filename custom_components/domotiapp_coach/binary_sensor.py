@@ -25,7 +25,7 @@ async def async_setup_entry(
     await async_per_apparaat(
         hass, entry, async_add_entities,
         lambda device: device.get("type") in PROGRAMMA_TYPES,
-        lambda device, stand: [VrijgegevenSensor(device, stand)],
+        lambda device, stand, settings: [VrijgegevenSensor(device, stand)],
     )
 
 
