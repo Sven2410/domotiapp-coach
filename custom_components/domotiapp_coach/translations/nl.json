@@ -33,6 +33,15 @@
       },
       "vrijgave_intrekken": {
         "name": "Vrijgave intrekken"
+      },
+      "vol_laden": {
+        "name": "Nu vol laden"
+      },
+      "leegladen": {
+        "name": "Nu leegladen"
+      },
+      "terug_naar_plan": {
+        "name": "Terug naar het plan"
       }
     },
     "select": {
@@ -52,6 +61,9 @@
       },
       "schema": {
         "name": "Schema"
+      },
+      "vakantiestand": {
+        "name": "Vakantiestand"
       }
     },
     "time": {
@@ -62,6 +74,9 @@
     "number": {
       "laden_tot": {
         "name": "Laden tot"
+      },
+      "leeg_tot": {
+        "name": "Leegladen tot"
       }
     }
   }

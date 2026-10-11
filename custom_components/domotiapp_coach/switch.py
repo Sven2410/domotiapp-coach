@@ -15,7 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entiteit import CoachEntiteit, async_per_apparaat, async_schema, paal_schema
+from .entiteit import CoachEntiteit, async_batterij_veld, async_per_apparaat, async_schema, paal_schema
 
 
 async def async_setup_entry(
@@ -25,6 +25,12 @@ async def async_setup_entry(
         hass, entry, async_add_entities,
         lambda device: device.get("type") == "laadpaal",
         lambda device, stand, settings: [PauzeSwitch(device, stand), SchemaSwitch(device, stand, settings)],
+    )
+    # De thuisbatterij (v0.112.0).
+    await async_per_apparaat(
+        hass, entry, async_add_entities,
+        lambda device: device.get("type") == "thuisbatterij",
+        lambda device, stand, settings: [VakantieSwitch(device, stand)],
     )
 
 
@@ -71,3 +77,22 @@ class SchemaSwitch(CoachEntiteit, SwitchEntity):
 
     async def async_turn_off(self, **_kwargs: Any) -> None:
         await async_schema(self.hass, self._device_id, enabled=False)
+
+
+class VakantieSwitch(CoachEntiteit, SwitchEntity):
+    """De vakantiestand van de thuisbatterij (v0.112.0): onder de grens uit Apparaten blijven."""
+
+    _attr_icon = "mdi:palm-tree"
+
+    def __init__(self, device: dict[str, Any], stand: dict[str, Any] | None) -> None:
+        super().__init__(device, stand, "vakantiestand")
+
+    @property
+    def is_on(self) -> bool:
+        return bool((self._device.get("battery") or {}).get("holiday"))
+
+    async def async_turn_on(self, **_kwargs: Any) -> None:
+        await async_batterij_veld(self.hass, self._device_id, "holiday", True)
+
+    async def async_turn_off(self, **_kwargs: Any) -> None:
+        await async_batterij_veld(self.hass, self._device_id, "holiday", False)

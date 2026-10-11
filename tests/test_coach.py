@@ -8040,6 +8040,114 @@ tijd144b = store144.instellingen["strategy"]["schedules"][0]["window"]["done_by"
 controle("het schema uit, en een nieuwe klaar-tijd, in de opslag",
          uit144 is False and tijd144b == "07:15", f"{uit144} {tijd144b}")
 
+print("=== 145. een herstart midden in een beurt: wat de coach zelf telde blijft (v0.112.0) ===")
+# Bij de eigenaar op 11-10-2026 stapte de teller van de Easee na 18:10 niet meer, en
+# herstartte Home Assistant om 20:19, 20:31 en 20:46, midden in de beurt. Het verslag
+# zei "12,5 kWh" (precies de teller) terwijl er volgens de paal 15,0 in ging: wat de
+# coach sinds de laatste stap zelf telde stond alleen in het geheugen.
+klok145 = sys.modules["homeassistant.util.dt"]
+echte_klok145 = klok145.utcnow
+NU145 = dt.datetime(2026, 10, 11, 20, 31)
+klok145.utcnow = lambda: NU145.replace(tzinfo=dt.timezone.utc)
+try:
+    sessie145 = {
+        "at": (NU145 - dt.timedelta(minutes=1)).isoformat(), "begon": "2026-10-11T12:08:00",
+        "meter": 223.11, "geijkt": True, "ijk_kwh": 0.0, "staart_kwh": 2.1, "soc_begin": 4.0,
+        "laadt_sinds": "2026-10-11T20:00:42", "plafond": [], "kwijt": {}, "gemeld": [], "ingestapt": False,
+    }
+    beurt145 = {
+        "id": "dev-laadpaal:2026-10-11T12:08:00", "device": "dev-laadpaal", "name": "Laadpaal", "kind": "laden",
+        "car": "Ford", "plugged_at": "2026-10-11T12:08:00", "started": "2026-10-11T12:08:00", "ended": None,
+        "kwh": 14.6, "solar_kwh": 2.1, "paid": 3.4, "ref_price": 0.24, "ref_feed_in": 0.02, "ref_cost": 3.5,
+        "saved": 0.1, "solar_saved": 0.0, "price_unknown": False, "unknown_kwh": 0.0,
+        "baseline": {"kwh": 20.0, "cost": 4.8, "unknown_kwh": 0.0, "points": []},
+        "resumed": False, "complete": False, "session": sessie145,
+    }
+    inst145 = instellingen()
+    hass145, _, coach145 = bouw(huis(status="charging", stroom=6.0, vermogen=4140.0, teller=235.62), inst145)
+    asyncio.run(coachmod.async_get_beurten(hass145).async_upsert(beurt145))
+    coach145._restore(inst145)
+    asyncio.run(coach145._async_beurten_laden())
+    for minuut145 in range(0, 11):
+        asyncio.run(ronde(coach145, inst145, NU145 + dt.timedelta(minutes=minuut145)))
+    s145 = coach145._sessie.get("dev-laadpaal") or {}
+    k145 = coach145._geladen(LAADPAAL, s145)
+    print(f"  na de herstart, teller stil op 235,62: {k145:.2f} kWh (teller 12,51 + bewaard 2,1 + tien minuten eigen meting)")
+    controle("de bewaarde staart telt mee zolang de teller niet stapt",
+             s145.get("staart_hervat") == 2.1 and 12.51 + 2.1 + 0.5 < k145 < 12.51 + 2.1 + 0.9, f"{k145}")
+    controle("en gaat mee in wat er opnieuw bewaard wordt",
+             abs(coach145._sessie_bewaren("dev-laadpaal", s145, NU145)["staart_kwh"] - (k145 - 12.51)) < 0.01,
+             f"{coach145._sessie_bewaren('dev-laadpaal', s145, NU145)['staart_kwh']}")
+    # Dan stapt de teller: hij heeft die staart nu zelf, dus geen dubbeltelling.
+    hass145.states.zet("sensor.laadpaal_teller", "238.4")
+    asyncio.run(ronde(coach145, inst145, NU145 + dt.timedelta(minutes=11)))
+    s145 = coach145._sessie.get("dev-laadpaal") or {}
+    k145b = coach145._geladen(LAADPAAL, s145)
+    print(f"  na een stap van de teller naar 238,4: {k145b:.2f} kWh")
+    controle("na een echte stap van de teller valt de bewaarde staart weg",
+             "staart_hervat" not in s145 and abs(k145b - (238.4 - 223.11)) < 0.2, f"{k145b} {s145.get('staart_hervat')}")
+finally:
+    klok145.utcnow = echte_klok145
+
+print("=== 146. de batterijkaart: de sensor van de coach, vol, leeg, terug naar het plan, vakantie (v0.112.0) ===")
+# De eigenaar op 11-10-2026: kaarten voor de laadpaal en de thuisbatterij in een
+# pop-up, "dan hoeven klanten niet telkens naar de coach toe". Contract in docs/batterij.md.
+ent146 = sys.modules["domotiapp_coach.entiteit"]
+inst146 = instellingen(devices=[LAADPAAL, BATTERIJ106])
+hass146, store146, coach146 = bouw(huis75(soc="60"), inst146)
+hass146.data["domotiapp_coach"]["coach"] = coach146
+b146 = asyncio.run(ronde75(hass146, coach146, dt.datetime(2026, 10, 11, 21, 0)))
+sensoren146, knoppen146, getallen146, schakel146 = [], [], [], []
+for module, lijst in ((sensormod, sensoren146), (knopmod, knoppen146), (getalmod, getallen146), (schakelmod, schakel146)):
+    asyncio.run(module.async_setup_entry(hass146, Invoer110(), lambda nieuw, lijst=lijst: lijst.extend(nieuw)))
+accu146 = next(s for s in sensoren146 if s._attr_translation_key == "coach" and s.unique_id == "dev-batterij_coach")
+accu146.hass = hass146
+a146 = accu146.extra_state_attributes
+print(f"  {accu146.native_value}: stand {a146['stand']}, zelf {a146['zelf']}, soc {a146['soc']}, "
+      f"{len(a146['plan'])} uren, ondergrens {a146['ondergrens']}, override {a146['override']}")
+controle("de sensor draagt het contract, de stand in vaste sleutels en het plan per uur",
+         a146["contract"] == 1 and a146["type"] == "thuisbatterij" and a146["stand"] in ent146.ACCU_STAND.values()
+         and a146["soc"] == 60.0 and a146["override"] is None and a146["vakantie"] is False
+         and a146["plan"] and all(set(u) == {"start", "end", "actie", "kw", "price", "soc_eind"} for u in a146["plan"])
+         and all(str(u["start"]).endswith("+02:00") for u in a146["plan"]), f"{a146}")
+controle("de stand: elke stand van de coach heeft een sleutel",
+         ent146.accu_stand({"mode": "nul"}) == "nul_op_de_meter" and ent146.accu_stand({"mode": "zonneladen"}) == "zonneladen"
+         and ent146.accu_stand({"mode": "netladen"}) == "laden" and ent146.accu_stand({"mode": "handelen"}) == "ontladen"
+         and ent146.accu_stand({"mode": "standby"}) == "stil", "")
+knop146 = {k._attr_translation_key: k for k in knoppen146 if k.unique_id.startswith("dev-batterij_")}
+leeg146 = next(g for g in getallen146 if g.unique_id == "dev-batterij_leeg_tot")
+aangeroepen146 = []
+coach146.async_boost = lambda dev, aan: aangeroepen146.append(("vol", dev, aan))
+coach146.async_drain = lambda dev, tot: aangeroepen146.append(("leeg", dev, tot))
+for e146 in (*knop146.values(), leeg146):
+    e146.hass = hass146
+ondergrens146 = float(b146.get("floor") or 0.0)
+asyncio.run(leeg146.async_set_native_value(ondergrens146 - 5))
+onder146 = leeg146.native_value
+asyncio.run(leeg146.async_set_native_value(50))
+asyncio.run(knop146["vol_laden"].async_press())
+asyncio.run(knop146["leegladen"].async_press())
+asyncio.run(knop146["terug_naar_plan"].async_press())
+print(f"  ondergrens {ondergrens146}, onder de grens gezet: {onder146}; aangeroepen {aangeroepen146}")
+controle("leegladen tot gaat nooit onder de ondergrens van de batterij", onder146 == ondergrens146, f"{onder146}")
+controle("vol, leeg tot 50% en terug naar het plan gaan door de coach",
+         aangeroepen146 == [("vol", "dev-batterij", True), ("leeg", "dev-batterij", 50.0),
+                            ("vol", "dev-batterij", False), ("leeg", "dev-batterij", None)], f"{aangeroepen146}")
+vakantie146 = next(s for s in schakel146 if s._attr_translation_key == "vakantiestand")
+vakantie146.hass = hass146
+asyncio.run(vakantie146.async_turn_on())
+apparaat146 = next(d for d in store146.instellingen["devices"] if d["id"] == "dev-batterij")
+controle("de vakantiestand gaat in de instellingen van de batterij, en verder verandert er niets",
+         apparaat146["battery"]["holiday"] is True
+         and {k: v for k, v in apparaat146["battery"].items() if k != "holiday"}
+         == {k: v for k, v in BATTERIJ106["battery"].items() if k != "holiday"}, f"{apparaat146['battery']}")
+accu146._stand = dict(accu146._stand, boost=True)
+vol146 = accu146.extra_state_attributes["override"]
+accu146._stand = dict(accu146._stand, boost=False, drain_to=50.0)
+leeg146b = (accu146.extra_state_attributes["override"], accu146.extra_state_attributes["leeg_tot"])
+controle("en vol of leeg staat als override op de sensor", vol146 == "vol" and leeg146b == ("leeg", 50.0),
+         f"{vol146} {leeg146b}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

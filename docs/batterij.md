@@ -1069,3 +1069,30 @@ en zet hij de teller dan ook niet terug. Een echte andere sturing houdt de modus
 langer dan één stap van de regelaar om, en die ziet hij nog steeds. Proef 140 in
 test_coach.py draait twee rondes in het wachten op de knop: met v0.108.1 de melding
 en een uur los, nu niets, en een omgezette modus daarna wordt nog gezien.
+
+## De batterijkaart en de coach: entiteiten per batterij (v0.112.0)
+
+Voor de batterijkaart van DomotiApp Lovelace, met hetzelfde contract als de vaatwasser en de
+laadpaal (contract 1, `entiteit.py`, docs/vaatwasser.md): een eigen apparaat per batterij
+(model "Thuisbatterij"), vaste `translation_key`s, en de kaart leest de attributen.
+
+| entiteit | translation_key | wat |
+|---|---|---|
+| sensor | `coach` | state de naam van de stand ("Nul op de meter"); de rest in de attributen |
+| button | `vol_laden` | nu vol laden (`async_boost`), gaat vanzelf uit als hij vol is |
+| button | `leegladen` | nu leegladen tot `leeg_tot` (`async_drain`), nooit onder de ondergrens |
+| button | `terug_naar_plan` | vol en leeg eraf |
+| number | `leeg_tot` | tot welk % leegladen gaat; staat in het geheugen, na een herstart weer de ondergrens |
+| switch | `vakantiestand` | `battery.holiday` in Apparaten; de grens blijft een instelling van de installateur |
+
+Attributen van de sensor: `contract`, `type`, `stand` (`nul_op_de_meter`, `zonneladen`,
+`laden`, `ontladen`, `stil`; `accu_stand`), `zelf` (doet hij zelf nul op de meter), `soc`,
+`reason`, `temperatuur` (uit de temperatuursensor van Apparaten), `plan` (per uur: `start`,
+`end`, `actie` uit `nul`, `laden`, `ontladen`, `stil`, `kw` positief laden en negatief
+ontladen, `price`, `soc_eind`), `opgeleverd_vandaag`, `opgeleverd_maand` (uit
+`realized_days`), `opgeleverd_totaal`, `opgeleverd_sinds`, `override` (`vol`, `leeg` of
+niets), `leeg_tot`, `vakantie`, `vakantie_max`, `reserve` (alleen als die aan staat),
+`ondergrens` en `entiteiten`. Proef 146 in test_coach.py.
+
+Wat er in dezelfde uitgave voor de laadpaalkaart bij kwam, en de reparatie van het verslag
+na een herstart, staat in docs/laadpaal.md.

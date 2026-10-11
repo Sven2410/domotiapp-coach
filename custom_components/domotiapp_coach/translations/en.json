@@ -33,6 +33,15 @@
       },
       "vrijgave_intrekken": {
         "name": "Withdraw release"
+      },
+      "vol_laden": {
+        "name": "Charge full now"
+      },
+      "leegladen": {
+        "name": "Discharge now"
+      },
+      "terug_naar_plan": {
+        "name": "Back to the plan"
       }
     },
     "select": {
@@ -52,6 +61,9 @@
       },
       "schema": {
         "name": "Schedule"
+      },
+      "vakantiestand": {
+        "name": "Holiday mode"
       }
     },
     "time": {
@@ -62,6 +74,9 @@
     "number": {
       "laden_tot": {
         "name": "Charge to"
+      },
+      "leeg_tot": {
+        "name": "Discharge to"
       }
     }
   }
