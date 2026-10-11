@@ -8018,6 +8018,21 @@ controle("modus, pauze en laden tot gaan door de coach, zoals de knoppen op zijn
          aangeroepen144 == [("modus", "dev-laadpaal", "zon"), ("modus", "dev-laadpaal", "goedkoopst"),
                             ("pauze", "dev-laadpaal", True), ("doel", "dev-laadpaal", 80.0)], f"{aangeroepen144}")
 controle("de modus noemt de keuzes als sleutels", modus144._attr_options == ["planning", "snel", "continu", "zon"], "")
+# Welke modus er echt geldt (v0.111.1): een planning wint van Continu en Zon, Snel
+# gaat erboven. Bij de eigenaar stond de paal op zon terwijl het schema won.
+ent144 = sys.modules["domotiapp_coach.entiteit"]
+controle("met een planning geldt Planning, ook als de paal op zon staat; Snel gaat erboven",
+         ent144.paal_modus_actief({"mode": "zon", "planned": True}) == "planning"
+         and ent144.paal_modus_actief({"mode": "snel", "planned": True}) == "snel"
+         and ent144.paal_modus_actief({"mode": "zon", "planned": False}) == "zon"
+         and ent144.paal_modus_actief({"mode": "goedkoopst", "planned": False}) == "planning", "")
+controle("en dan doen alleen Planning en Snel iets",
+         ent144.paal_modus_keuzes({"planned": True}) == ["planning", "snel"]
+         and ent144.paal_modus_keuzes({"planned": False}) == ["planning", "snel", "continu", "zon"], "")
+controle("de sensor en de select zeggen wat er geldt",
+         a144["modus_actief"] == "planning" and a144["planning_nu"] is True
+         and a144["modus_keuzes"] == ["planning", "snel"] and modus144.current_option == "planning",
+         f"{a144['modus_actief']} {a144['modus_keuzes']} {modus144.current_option}")
 asyncio.run(schema144.async_turn_off())
 uit144 = store144.instellingen["strategy"]["schedules"][0]["enabled"]
 asyncio.run(klaar144.async_set_value(dt.time(7, 15)))

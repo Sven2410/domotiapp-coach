@@ -14,7 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entiteit import PAAL_MODI, CoachEntiteit, async_per_apparaat
+from .entiteit import PAAL_MODI, CoachEntiteit, async_per_apparaat, paal_modus_actief
 
 
 async def async_setup_entry(
@@ -41,8 +41,9 @@ class ModusSelect(CoachEntiteit, SelectEntity):
 
     @property
     def current_option(self) -> str:
-        modus = str(self._stand.get("mode") or "goedkoopst")
-        return modus if modus in PAAL_MODI else "planning"
+        # Wat er echt geldt, niet de voorkeur van de paal: met een planning is dat
+        # Planning, ook als de paal op Zon staat (v0.111.1).
+        return paal_modus_actief(self._stand)
 
     async def async_select_option(self, option: str) -> None:
         from .coach import async_get_coach

@@ -973,3 +973,12 @@ om: betaald 0,02 in plaats van 0,0256, en het eind leeg).
 Bij deze uitgave ook het opruimen van het oude lege apparaat "DomotiApp Coach": in v0.110.0
 liep dat buiten de lus van Home Assistant en faalde het (`oude_coach_opruimen`, nu een
 callback). Proef 144 in test_coach.py.
+
+**Welke modus geldt (v0.111.1).** De lovelace-sessie op 11-10-2026: bij de eigenaar stond
+de select op "zon" (de voorkeur van zijn paal) terwijl het schema won; welke knop is dan
+aan? Nu zegt de coach het zelf: `modus_actief` (`snel` als snelladen aan staat, anders
+`planning` als er deze beurt een planning geldt, anders de modus; `paal_modus_actief`),
+`modus_keuzes` (met een planning alleen `planning` en `snel`, want Continu en Zon doen dan
+niets; `paal_modus_keuzes`) en `planning_nu` (het venster van vandaag, niet "schema aan":
+een weekschema kan vandaag uit staan). De select toont `modus_actief` als toestand. Proef
+144.
