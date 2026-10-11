@@ -848,3 +848,21 @@ wat er al gezegd was. Nu noemt de tip de laadpaal als het diens vermogen is dat
 ontbreekt (`_net_stil_wat`), en blijft een stilte gemeld tot hij voorbij is, ook
 zonder kabel. De vloed duwde ook alles van voor 26-09 uit de geschiedenis
 (`MELDINGEN_MAX`, 3.000). Proef 137.
+
+## Een stop die de paal nog niet volgt is geen nieuwe beurt (v0.108.3)
+
+Bij de eigenaar op 11-10-2026, met de bus op een vast contract en klaar om 06:00.
+Om 13:35:46 viel de zon weg en hield de coach de paal tien rondes vast op 6 A
+(`_keep_alive`, `STOP_ROUNDS`); om 13:45:46 besloot hij te stoppen tot 20:00 ("Hij
+wacht tot 20:00. Elk uur kost hetzelfde ..."). Een stop wist het begin van de beurt
+(`_since` in `_one`). De Easee zette de 0 A pas om 13:47:00 door, dus de ronde van
+13:46:46 zag nog "charging", zonder begin, en dan werd "nu" het begin: "Net begonnen
+met laden, dus hij houdt het nog even vol op de laagste stand", 6 A naar de paal.
+Die 6 kwam niet meer aan (om 13:47:02 `awaiting_start`, en de ronde daarna zei weer
+0), maar was hij na de 0 aangekomen, dan had de bus nog tien minuten van het net
+geladen en had het daarna opnieuw gekund.
+
+Nu krijgt een paal die laadt zonder begin alleen een begin als het laatste wat de
+coach stuurde geen stop was. Een paal die na een stop uit zichzelf weer gaat laden
+valt eerst uit `charging` en krijgt dan wel een nieuw begin, zoals altijd. Proef 141
+in test_coach.py: met v0.108.2 "Net begonnen" en 6 A in de ronde na de stop, nu 0.

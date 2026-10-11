@@ -7126,7 +7126,15 @@ class ChargerCoach:
                 self._since[device_id] = now
             charger.started_at = self._since[device_id]
         elif charger.charging and charger.started_at is None:
-            charger.started_at = self._since.setdefault(device_id, now)
+            # Was het laatste wat de coach stuurde een stop, dan is dit geen beurt
+            # die net begon maar een paal die zijn stop nog niet doorzette. Bij de
+            # eigenaar op 11-10-2026 besloot de coach om 13:45:46 te stoppen, zette
+            # de Easee de 0 A pas om 13:47:00 door, en las de ronde van 13:46:46
+            # "charging" zonder begin als "Net begonnen met laden": 6 A en tien
+            # minuten vasthouden, van het net.
+            vorige = self._last.get(device_id)
+            if vorige is None or vorige.charge:
+                charger.started_at = self._since.setdefault(device_id, now)
         self._laadde[device_id] = charger.charging
 
         # Eén fasemeting per ronde; `_fasetip` en `_car` lezen allebei deze.
