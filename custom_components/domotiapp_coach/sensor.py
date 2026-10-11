@@ -39,8 +39,8 @@ from homeassistant.util import dt as dt_util
 from .const import EVENT_DECISION, EVENT_SETTINGS_UPDATED, PROGRAMMA_TYPES
 from .entiteit import (
     CONTRACT, CoachEntiteit, apparaat_info, async_per_apparaat, entiteiten_van, met_zone,
-    oude_coach_opruimen, paal_blokken, paal_modus_actief, paal_modus_keuzes, paal_schema, paal_sessie,
-    paal_stand, paal_tekst,
+    oude_coach_opruimen, paal_apparaat, paal_blokken, paal_modus_actief, paal_modus_keuzes, paal_schema, paal_sessie,
+    paal_stand, paal_tekst, accu_opgeleverd, accu_plan, accu_stand,
 )
 from .planner import _dag_om
 from .storage import async_get_store
@@ -155,6 +155,13 @@ async def async_setup_entry(
         lambda device, stand, settings: [LaadpaalCoachSensor(device, stand, settings)],
     )
 
+    # De thuisbatterij (v0.112.0): de sensor van de coach voor de batterijkaart.
+    await async_per_apparaat(
+        hass, entry, async_add_entities,
+        lambda device: device.get("type") == "thuisbatterij",
+        lambda device, stand, settings: [BatterijCoachSensor(device, stand, settings)],
+    )
+
 
 class StartOmSensor(SensorEntity):
     """Wanneer de coach dit apparaat wil starten.
@@ -246,6 +253,10 @@ class LaadpaalCoachSensor(CoachEntiteit, SensorEntity):
     def __init__(self, device: dict[str, Any], stand: dict[str, Any] | None, settings: dict[str, Any]) -> None:
         super().__init__(device, stand, "coach", settings)
 
+    @property
+    def _paal(self) -> tuple[str, str]:
+        return paal_apparaat(self.hass, self._device) if self.hass is not None else ("", "")
+
     def _kern(self) -> Any:
         return (self.native_value, repr(self.extra_state_attributes))
 
@@ -267,6 +278,9 @@ class LaadpaalCoachSensor(CoachEntiteit, SensorEntity):
             "amps": st.get("amps"),
             "reason": st.get("reason") or "",
             "brand": str(self._device.get("brand") or ""),
+            # Wat de integratie van de paal zelf zegt, voor de foto (v0.112.0).
+            "paal_fabrikant": self._paal[0],
+            "paal_model": self._paal[1],
             "soc": st.get("soc_now"),
             "soc_geschat": bool(st.get("soc_estimated")),
             "actieradius_km": st.get("range_km"),
@@ -300,3 +314,55 @@ class LaadpaalCoachSensor(CoachEntiteit, SensorEntity):
         if auto.get("range_entity"):
             uit["range"] = str(auto["range_entity"])
         return uit
+
+
+class BatterijCoachSensor(CoachEntiteit, SensorEntity):
+    """Wat de coach met deze thuisbatterij doet, voor de batterijkaart (v0.112.0).
+
+    De toestand is de naam van de stand ("Nul op de meter"); de kaart leest de
+    attributen. Zie entiteit.py en docs/batterij.md voor het contract.
+    """
+
+    _attr_icon = "mdi:home-battery"
+    _unrecorded_attributes = frozenset({"reason", "plan", "entiteiten"})
+
+    def __init__(self, device: dict[str, Any], stand: dict[str, Any] | None, settings: dict[str, Any]) -> None:
+        super().__init__(device, stand, "coach", settings)
+
+    def _kern(self) -> Any:
+        return (self.native_value, repr(self.extra_state_attributes))
+
+    @property
+    def native_value(self) -> str:
+        return str(self._stand.get("mode_name") or "")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        st = self._stand
+        eigen = self._device.get("battery") or {}
+        temperatuur = None
+        entiteit = (self._device.get("entities") or {}).get("temperature")
+        staat = self.hass.states.get(entiteit) if self.hass is not None and entiteit else None
+        try:
+            temperatuur = float(staat.state) if staat is not None else None
+        except (TypeError, ValueError):
+            temperatuur = None
+        override = "vol" if st.get("boost") else ("leeg" if st.get("drain_to") is not None else None)
+        return {
+            "contract": CONTRACT,
+            "type": "thuisbatterij",
+            "stand": accu_stand(st),
+            "zelf": bool(st.get("self_zero")),
+            "soc": st.get("soc"),
+            "reason": st.get("reason") or "",
+            "temperatuur": temperatuur,
+            "plan": accu_plan(st),
+            **accu_opgeleverd(self._settings, self._device_id, st),
+            "override": override,
+            "leeg_tot": st.get("drain_to"),
+            "vakantie": bool(eigen.get("holiday")),
+            "vakantie_max": eigen.get("holiday_max_percent"),
+            "reserve": eigen.get("reserve_percent") if eigen.get("reserve_enabled") else None,
+            "ondergrens": st.get("floor"),
+            "entiteiten": entiteiten_van(self._device),
+        }

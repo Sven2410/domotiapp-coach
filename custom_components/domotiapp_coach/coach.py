@@ -8255,6 +8255,9 @@ class ChargerCoach:
             "meter": sessie.get("meter"),
             "geijkt": bool(sessie.get("geijkt")),
             "ijk_kwh": round(float(sessie.get("ijk_kwh") or 0.0), 4),
+            # Wat de coach zelf telde sinds de laatste stap van de teller (v0.112.0).
+            # Zie `_staart`.
+            "staart_kwh": round(self._staart(device_id, sessie), 4),
             "soc_begin": sessie.get("soc_begin"),
             "laadt_sinds": laadt_sinds.replace(microsecond=0).isoformat() if laadt_sinds else None,
             "plafond": [
@@ -8649,6 +8652,7 @@ class ChargerCoach:
             "meter": bewaard.get("meter"),
             "geijkt": bool(bewaard.get("geijkt")),
             "ijk_kwh": float(bewaard.get("ijk_kwh") or 0.0),
+            "staart_kwh": float(bewaard.get("staart_kwh") or 0.0),
             "soc_begin": bewaard.get("soc_begin"),
             "laadt_sinds": tijd(bewaard.get("laadt_sinds")),
             "plafond_reeks": reeks,
@@ -8774,6 +8778,7 @@ class ChargerCoach:
                     geijkt=hervat["geijkt"] and hervat["meter"] is not None,
                     ijk_kwh=hervat["ijk_kwh"],
                     eigen_bij_begin=0.0,
+                    staart_hervat=hervat.get("staart_kwh", 0.0),
                     ingestapt=hervat["ingestapt"],
                 )
                 # Wat er tussen de laatste opslag en nu geladen werd staat nog
@@ -8917,6 +8922,11 @@ class ChargerCoach:
             vorige_bij = eigen["meter_bij"]
             eigen["meter_stand"] = meter
             eigen["meter_bij"] = eigen["kwh"]
+            # Een echte stap na een herstart neemt de bewaarde staart mee: die
+            # telt de teller nu zelf (v0.112.0). De eerste ronde na een herstart
+            # is geen stap, want toen kende de coach de teller nog niet.
+            if vorige_stand is not None:
+                sessie.pop("staart_hervat", None)
             # De eerste stap ná het begin van deze beurt valt met één been aan
             # elke kant ervan: hij dekt de tijd vanaf de vorige stap, en die lag
             # vóór het begin. Alleen het deel dat bij deze beurt hoort telt mee,
@@ -8989,21 +8999,29 @@ class ChargerCoach:
         meting, want die is wél bij, en vanaf dat punt weer de teller. Zo hoort
         elke kWh bij precies één beurt.
         """
-        eigen = self._eigen.get(device.get("id", "")) or {}
-        # Waar de staart begint. Zolang de teller nog niet gestapt is sinds deze
-        # beurt begon is dat het begin van de beurt, want alles ervoor was van
-        # een andere. Daarna is het de laatste stap.
-        basis = (
-            eigen.get("meter_bij", 0.0)
-            if sessie.get("geijkt")
-            else sessie.get("eigen_bij_begin", 0.0)
-        )
-        staart = max(0.0, eigen.get("kwh", 0.0) - basis)
+        staart = self._staart(device.get("id", ""), sessie)
         meter = self._teller(device)
         if meter is None or sessie.get("meter") is None:
             return staart or None
         eerder = sessie.get("ijk_kwh", 0.0) if sessie.get("geijkt") else 0.0
         return eerder + max(0.0, meter - float(sessie["meter"])) + staart
+
+    def _staart(self, device_id: str, sessie: dict[str, Any]) -> float:
+        """Wat de coach zelf telde sinds de laatste stap van de teller, voor de opslag.
+
+        Bij de eigenaar op 11-10-2026 stapte de teller van de Easee na 18:10 niet
+        meer, en herstartte Home Assistant om 20:19, 20:31 en 20:46, midden in de
+        beurt. De eigen meting stond alleen in het geheugen, dus het verslag zei
+        "12,5 kWh" (precies de teller) terwijl er volgens de paal 15,0 in ging en
+        het geld 15,4 telde. Nu gaat de staart mee in de bewaarde beurt
+        (`_sessie_bewaren`), en telt hij na een herstart mee tot de teller stapt.
+        """
+        eigen = self._eigen.get(device_id) or {}
+        # Waar de staart begint. Zolang de teller nog niet gestapt is sinds deze
+        # beurt begon is dat het begin van de beurt, want alles ervoor was van
+        # een andere. Daarna is het de laatste stap.
+        basis = eigen.get("meter_bij", 0.0) if sessie.get("geijkt") else sessie.get("eigen_bij_begin", 0.0)
+        return max(0.0, eigen.get("kwh", 0.0) - basis) + float(sessie.get("staart_hervat") or 0.0)
 
     def _beurt_kaart(
         self, device: dict[str, Any], sessie: dict[str, Any], actief: bool
@@ -9037,6 +9055,11 @@ class ChargerCoach:
             "ended": None,
             "paid": round(float(geld.get("betaald") or 0.0), 2),
             "solar_kwh": round(float(geld.get("zon_kwh") or 0.0), 2),
+            # Alleen het net, zoals het verslag het noemt (v0.112.0), en de batterij.
+            "grid_cost": None if geld.get("net_eur_onbekend") else round(float(geld.get("net_eur") or 0.0), 2),
+            "battery_kwh": round(float(geld.get("accu_kwh") or 0.0), 2),
+            "grid_kwh": round(max(0.0, float(geld.get("kwh") or 0.0) - float(geld.get("zon_kwh") or 0.0)
+                                  - float(geld.get("accu_kwh") or 0.0)), 2),
         }
 
     @staticmethod
@@ -9061,6 +9084,12 @@ class ChargerCoach:
             "ended": regel.get("ended"),
             "paid": getal(regel.get("paid")),
             "solar_kwh": getal(regel.get("solar_kwh")),
+            "grid_cost": getal(regel.get("grid_cost")),
+            "battery_kwh": getal(regel.get("battery_kwh")),
+            "grid_kwh": (
+                round(max(0.0, kwh - float(regel.get("solar_kwh") or 0.0) - float(regel.get("battery_kwh") or 0.0)), 2)
+                if regel.get("solar_kwh") is not None else None
+            ),
         }
 
     @staticmethod

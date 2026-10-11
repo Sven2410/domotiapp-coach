@@ -982,3 +982,19 @@ aan? Nu zegt de coach het zelf: `modus_actief` (`snel` als snelladen aan staat, 
 niets; `paal_modus_keuzes`) en `planning_nu` (het venster van vandaag, niet "schema aan":
 een weekschema kan vandaag uit staan). De select toont `modus_actief` als toestand. Proef
 144.
+
+**Meer voor de laadpaalkaart (v0.112.0).** `paal_fabrikant` en `paal_model` komen uit het
+apparatenregister van de paal zelf (`paal_apparaat`), zodat de kaart de juiste foto kan
+kiezen zonder dat de klant het opnieuw invult; leeg als de paal geen apparaat heeft. In
+`sessie` staan er `kosten_net` (alleen wat het net kostte, het bedrag van het verslag),
+`net_kwh` en `accu_kwh` bij; op de coachkaart heet dat `grid_cost`, `grid_kwh` en
+`battery_kwh` (`_beurt_kaart`).
+
+**Het verslag na een herstart midden in een beurt (v0.112.0).** De teller van een Easee
+stapt traag, en wat er sinds de laatste stap in ging telt de coach zelf (de staart,
+`_geladen`). Die staart stond alleen in het geheugen. Bij de eigenaar op 11-10-2026 stapte
+de teller na 18:10 niet meer en herstartte Home Assistant drie keer tijdens het laden; het
+verslag zei 12,5 kWh, precies de teller, terwijl de paal 15,0 zei en het geld 15,4 telde.
+Nu gaat de staart mee in de bewaarde beurt (`staart_kwh` in `_sessie_bewaren`), telt hij
+na een herstart mee bovenop wat de nieuwe coach zelf telt (`staart_hervat`), en vervalt hij
+zodra de teller weer stapt, want dan zit hij in de teller. Proef 145 in test_coach.py.

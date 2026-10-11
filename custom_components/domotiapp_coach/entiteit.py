@@ -376,6 +376,10 @@ def paal_sessie(stand: dict[str, Any] | None) -> dict[str, Any] | None:
         "zon_kwh": beurt.get("solar_kwh"),
         "soc_begin": beurt.get("soc_start"),
         "soc_eind": beurt.get("soc_end"),
+        # Alleen het net, het bedrag van het verslag, en de batterij (v0.112.0).
+        "kosten_net": beurt.get("grid_cost"),
+        "net_kwh": beurt.get("grid_kwh"),
+        "accu_kwh": beurt.get("battery_kwh"),
     }
 
 
@@ -387,5 +391,116 @@ async def async_schema(hass: HomeAssistant, device_id: str, **velden: Any) -> No
     settings = await store.async_load()
     strategy = schema_bijwerken(settings.get("strategy"), device_id, **velden)
     settings = await store.async_save({"strategy": strategy})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    coach_verversen(hass)
+
+
+def paal_apparaat(hass: HomeAssistant, device: dict[str, Any]) -> tuple[str, str]:
+    """Fabrikant en model zoals de integratie van de paal ze in het register zet (v0.112.0).
+
+    Voor de foto op de laadpaalkaart: `brand` is hoe de coach stuurt (easee, alfen),
+    niet welk model het is. Eerst het apparaat dat bij de coach is ingevuld, anders
+    het apparaat van de statussensor of de vermogenssensor.
+    """
+    try:
+        from homeassistant.helpers import device_registry as dr, entity_registry as er
+    except ImportError:  # pragma: no cover - het nagebouwde Home Assistant van de proeven
+        return "", ""
+    try:
+        apparaten = dr.async_get(hass)
+        apparaat = apparaten.async_get(device.get("device_id")) if device.get("device_id") else None
+        if apparaat is None:
+            register = er.async_get(hass)
+            for entiteit in ((device.get("entities") or {}).get("status"), device.get("entity")):
+                rij = register.async_get(entiteit) if entiteit else None
+                if rij is not None and rij.device_id:
+                    apparaat = apparaten.async_get(rij.device_id)
+                    break
+        if apparaat is None:
+            return "", ""
+        return str(apparaat.manufacturer or ""), str(apparaat.model or "")
+    except Exception:  # noqa: BLE001 - zonder model kiest de kaart zelf
+        return "", ""
+
+
+# --- De thuisbatterij (v0.112.0) -----------------------------------------------
+
+ACCU_STAND = {
+    "nul": "nul_op_de_meter",
+    "zonneladen": "zonneladen",
+    "netladen": "laden",
+    "max-laden": "laden",
+    "ontladen": "ontladen",
+    "handelen": "ontladen",
+    "standby": "stil",
+}
+ACCU_ACTIE = {
+    "nul": "nul",
+    "zonneladen": "laden",
+    "netladen": "laden",
+    "max-laden": "laden",
+    "ontladen": "ontladen",
+    "handelen": "ontladen",
+    "standby": "stil",
+}
+# Tot hoeveel procent "leegladen" gaat, per batterij; de number `leeg_tot` zet het,
+# de knop `leegladen` leest het. Leeg is de eigen ondergrens van de batterij.
+LEEG_TOT: dict[str, float] = {}
+
+
+def accu_stand(stand: dict[str, Any] | None) -> str:
+    """De stand van een thuisbatterij als vaste sleutel voor een kaart."""
+    return ACCU_STAND.get(str((stand or {}).get("mode") or ""), "stil")
+
+
+def accu_plan(stand: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Het plan per uur, met kW (positief laden, negatief ontladen) en de stand aan het eind."""
+    from datetime import datetime
+
+    uit = []
+    for uur in (stand or {}).get("hours") or []:
+        try:
+            duur = (datetime.fromisoformat(str(uur["end"])) - datetime.fromisoformat(str(uur["start"]))).total_seconds() / 3600
+        except (KeyError, ValueError):
+            duur = 1.0
+        kwh = float(uur.get("kwh") or 0.0)
+        uit.append({
+            "start": met_zone(uur.get("start")),
+            "end": met_zone(uur.get("end")),
+            "actie": ACCU_ACTIE.get(str(uur.get("mode") or ""), "stil"),
+            "kw": round(kwh / duur, 2) if duur > 0 else None,
+            "price": uur.get("price"),
+            "soc_eind": uur.get("soc"),
+        })
+    return uit
+
+
+def accu_opgeleverd(settings: dict[str, Any], device_id: str, stand: dict[str, Any] | None) -> dict[str, Any]:
+    """Wat de batterij opleverde: vandaag, deze maand, in totaal en sinds wanneer."""
+    from homeassistant.util import dt as dt_util
+
+    rij = next((r for r in settings.get("battery_state") or []
+                if isinstance(r, dict) and r.get("device") == device_id), None) or {}
+    dagen = {str(k): float(v) for k, v in (rij.get("realized_days") or {}).items()}
+    vandaag = dt_util.now().date().isoformat()
+    totaal = ((stand or {}).get("earned") or {}).get("euro")
+    return {
+        "opgeleverd_vandaag": round(dagen.get(vandaag, 0.0), 2) if dagen else None,
+        "opgeleverd_maand": round(sum(v for k, v in dagen.items() if k[:7] == vandaag[:7]), 2) if dagen else None,
+        "opgeleverd_totaal": totaal if totaal is not None else (round(sum(dagen.values()), 2) if dagen else None),
+        "opgeleverd_sinds": min(dagen) if dagen else None,
+    }
+
+
+async def async_batterij_veld(hass: HomeAssistant, device_id: str, veld: str, waarde: Any) -> None:
+    """Eén veld in `battery` van één apparaat, zoals de bewoner het in Apparaten zou zetten."""
+    store = async_get_store(hass)
+    settings = await store.async_load()
+    apparaten = []
+    for device in settings.get("devices") or []:
+        if device.get("id") == device_id:
+            device = {**device, "battery": {**(device.get("battery") or {}), veld: waarde}}
+        apparaten.append(device)
+    settings = await store.async_save({"devices": apparaten})
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
     coach_verversen(hass)

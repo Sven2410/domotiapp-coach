@@ -17,7 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import PROGRAMMA_TYPES
-from .entiteit import CoachEntiteit, async_per_apparaat, async_vrijgave, coach_verversen
+from .entiteit import LEEG_TOT, CoachEntiteit, async_per_apparaat, async_vrijgave, coach_verversen
 
 # sleutel: (vrijgeven, nu starten, icoon)
 KNOPPEN = {
@@ -35,6 +35,12 @@ async def async_setup_entry(
         lambda device: device.get("type") in PROGRAMMA_TYPES,
         lambda device, stand, settings: [VrijgaveKnop(device, stand, sleutel) for sleutel in KNOPPEN],
     )
+    # De thuisbatterij (v0.112.0).
+    await async_per_apparaat(
+        hass, entry, async_add_entities,
+        lambda device: device.get("type") == "thuisbatterij",
+        lambda device, stand, settings: [BatterijKnop(device, stand, sleutel) for sleutel in ACCU_KNOPPEN],
+    )
 
 
 class VrijgaveKnop(CoachEntiteit, ButtonEntity):
@@ -47,3 +53,36 @@ class VrijgaveKnop(CoachEntiteit, ButtonEntity):
     async def async_press(self) -> None:
         await async_vrijgave(self.hass, self._device_id, self._vrij, self._nu)
         coach_verversen(self.hass)
+
+
+ACCU_KNOPPEN = {
+    "vol_laden": "mdi:battery-arrow-up",
+    "leegladen": "mdi:battery-arrow-down",
+    "terug_naar_plan": "mdi:calendar-sync",
+}
+
+
+class BatterijKnop(CoachEntiteit, ButtonEntity):
+    """Nu vol laden, nu leegladen (tot `leeg_tot`), of terug naar het plan (v0.112.0).
+
+    Dezelfde knoppen als op de batterijkaart van de coach (`async_boost`,
+    `async_drain`); vol en leeg gaan vanzelf uit op hun doel.
+    """
+
+    def __init__(self, device: dict[str, Any], stand: dict[str, Any] | None, sleutel: str) -> None:
+        super().__init__(device, stand, sleutel)
+        self._sleutel = sleutel
+        self._attr_icon = ACCU_KNOPPEN[sleutel]
+
+    async def async_press(self) -> None:
+        from .coach import async_get_coach
+
+        coach = async_get_coach(self.hass)
+        if self._sleutel == "vol_laden":
+            coach.async_boost(self._device_id, True)
+        elif self._sleutel == "leegladen":
+            ondergrens = float(self._stand.get("floor") or 0.0)
+            coach.async_drain(self._device_id, max(ondergrens, LEEG_TOT.get(self._device_id, ondergrens)))
+        else:
+            coach.async_boost(self._device_id, False)
+            coach.async_drain(self._device_id, None)
