@@ -46,7 +46,7 @@ _ARCHIVE_KEY = "archive_started"
 
 # De sensoren van de coach: wanneer hij een apparaat met een programma wil
 # starten (v0.100.0). Zie sensor.py.
-PLATFORMS = ["sensor", "binary_sensor", "button"]
+PLATFORMS = ["sensor", "binary_sensor", "button", "select", "switch", "time", "number"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

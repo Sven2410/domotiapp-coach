@@ -5895,15 +5895,22 @@ toegevoegd110 = []
 asyncio.run(sensormod.async_setup_entry(hass110, Invoer110(), lambda nieuw: toegevoegd110.extend(nieuw)))
 # Sinds v0.110.0 heet hij naar zijn vertaling ("Start") op een eigen apparaat
 # "Vaatwasser"; de unique_id en dus de entity_id blijven.
-controle("één sensor, voor de vaatwasser en niet voor de laadpaal",
-         len(toegevoegd110) == 1 and toegevoegd110[0]._attr_translation_key == "start"
-         and toegevoegd110[0].unique_id == "dev-vw_start_om", f"{[(s.name, s.unique_id) for s in toegevoegd110]}")
-s110 = toegevoegd110[0]
+# Sinds v0.111.0 krijgt de laadpaal hier ook een sensor, die van de coach voor
+# de laadpaalkaart (`LaadpaalCoachSensor`); de startsensor blijft er één.
+start110 = [s for s in toegevoegd110 if s._attr_translation_key == "start"]
+controle("één startsensor, voor de vaatwasser en niet voor de laadpaal",
+         len(start110) == 1 and start110[0].unique_id == "dev-vw_start_om"
+         and [s.unique_id for s in toegevoegd110 if s._attr_translation_key == "coach"] == ["dev-laadpaal_coach"],
+         f"{[(s._attr_translation_key, s.unique_id) for s in toegevoegd110]}")
+s110 = start110[0]
 controle("hij begint met wat de coach al besloten had, en noemt het tijdstip en de vrijgaveschakelaar",
          s110.extra_state_attributes["start"] == moment110.isoformat()
          and s110.extra_state_attributes["release_switch"] == "input_boolean.vw_vrij"
          and s110.extra_state_attributes["reason"].startswith("Hij start om 14:00"), f"{s110.extra_state_attributes}")
-luister110 = dict((soort, wat) for soort, wat in hass110.bus.luisteraars)
+# Elke luisteraar op het besluit, zoals de eventbus ze allemaal aanroept: sinds
+# v0.111.0 luistert de sensor van de laadpaal ook mee.
+luister110 = {coachmod.EVENT_DECISION: lambda event: [wat(event) for soort, wat in hass110.bus.luisteraars
+                                                    if soort == coachmod.EVENT_DECISION]}
 s110.hass = hass110
 luister110[coachmod.EVENT_DECISION](types.SimpleNamespace(
     data={"device": "dev-vw", **dict(WACHT110, rule="running", running=True, charge=True, starts_at=None,
@@ -7228,7 +7235,11 @@ def ronde132(minuten, c=None):
 b0 = ronde132(0)
 print(f"  kabel erin: {b0.get('session')}")
 controle("kabel erin, nog niets geladen: een beurt van nul",
-         b0.get("session") == {"active": True, "kwh": 0.0, "soc_start": 40.0, "soc_end": 40.0, "soc_estimated": False},
+         {k: (b0.get("session") or {}).get(k) for k in ("active", "kwh", "soc_start", "soc_end", "soc_estimated")}
+         == {"active": True, "kwh": 0.0, "soc_start": 40.0, "soc_end": 40.0, "soc_estimated": False}
+         # En voor de laadpaalkaart (v0.111.0): sinds wanneer, het geld en de zon.
+         and (b0.get("session") or {}).get("plugged_at") == "2026-08-18T14:37:00"
+         and (b0.get("session") or {}).get("paid") == 0.0 and (b0.get("session") or {}).get("ended") is None,
          f"{b0.get('session')}")
 zet132("charging", 6.0, 4140)
 ronde132(1)
@@ -7279,8 +7290,8 @@ controle("na een herstart staat de laatste beurt er nog",
          and round(b30["session"]["soc_end"]) == 44, f"{b30.get('session')}")
 # Een regel van voor v0.106.0 heeft alleen de kWh van het geld.
 oud132 = coachmod.ChargerCoach._beurt_kaart_uit({"kwh": 3.21, "complete": True})
-controle("een oude regel geeft alleen de kWh", oud132 == {"active": False, "kwh": 3.21, "soc_start": None,
-         "soc_end": None, "soc_estimated": False}, f"{oud132}")
+controle("een oude regel geeft alleen de kWh",
+         {k: v for k, v in oud132.items() if v not in (None, False)} == {"kwh": 3.21}, f"{oud132}")
 controle("en een oude regel zonder lading niets", coachmod.ChargerCoach._beurt_kaart_uit({"kwh": 0.0}) is None, "")
 # Een gast zonder accustand: alleen de kWh, geen procenten.
 gast132 = {"begon": None, "soc_begin": None}
@@ -7292,7 +7303,14 @@ controle("zonder accustand geen procenten", kaart_gast["soc_start"] is None and 
 bron132 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
            / "websocket.py").read_text(encoding="utf-8")
 controle("het schema van een auto kent de actieradius", 'vol.Optional("range_entity", default="")' in bron132, "")
-controle("de coach leest de actieradius niet", "range_entity" not in pathlib.Path(coachmod.__file__).read_text(encoding="utf-8"), "")
+# Sinds v0.111.0 leest de coach hem wel, alleen om hem door te geven aan de
+# laadpaalkaart (`range_km`, `_actieradius`); rekenen doet hij er niet mee.
+inst132b = dict(inst132, devices=[dict(paal132, cars=[dict(paal132["cars"][0], range_entity="sensor.ford_range")])])
+hass132.states.zet("sensor.ford_range", "187.4")
+controle("de coach geeft de actieradius door aan de kaart, en rekent er niet mee",
+         coach132._actieradius(inst132b, inst132b["devices"][0]) == 187
+         and coach132._actieradius(inst132, paal132) is None
+         and pathlib.Path(coachmod.__file__).read_text(encoding="utf-8").count("range_entity") == 1, "")
 
 print("=== 133. een ronde zonder fasemeting laat de gemeten fase staan (v0.106.1) ===")
 # In de eerste woning op 03-10-2026, 12:29 tot 12:53: een driefasig profiel, de paal
@@ -7925,6 +7943,87 @@ b143.bijwerken({"device": "dev-vw", **dict(WACHT110, released=False, rule="not-r
 b143.bijwerken({"device": "dev-vw", **dict(WACHT110, released=False, rule="not-released")})
 controle("en schrijft alleen als hij omslaat", b143.is_on is False and getattr(b143, "geschreven", 0) == 1,
          f"{b143.is_on} {getattr(b143, 'geschreven', 0)}")
+
+print("=== 144. de laadpaalkaart: de sensor van de coach, modus, pauze, schema, klaar om, laden tot (v0.111.0) ===")
+# De eigenaar op 11-10-2026: een laadpaalkaart "met de noodzakelijke sensoren en
+# aansturingsknoppen en instellingen zoals schema", en "in de laadpaal kaart moet
+# ook de batterij % komen van de auto". Het contract staat in docs/laadpaal.md.
+ford144 = dict(LAADPAAL["cars"][0], soc_entity="sensor.auto_soc", range_entity="sensor.auto_bereik")
+PAAL144 = dict(LAADPAAL, brand="easee", cars=[ford144])
+inst144 = instellingen(devices=[PAAL144])
+inst144["strategy"]["schedules"][0].update(per_day=False, window={"not_before": "", "start_by": "", "done_by": "06:00"})
+hass144, store144, coach144 = bouw(dict(huis(status="charging", stroom=6.0, vermogen=1380.0, teruglevering=0.0, afname=2000.0),
+                                       **{"sensor.auto_soc": "62", "sensor.auto_bereik": "141.6"}), inst144)
+hass144.data["domotiapp_coach"]["coach"] = coach144
+asyncio.run(ronde(coach144, inst144, nu=dt.datetime(2026, 10, 11, 20, 30), paal=PAAL144))
+st144 = coach144.state["dev-laadpaal"]
+sensoren144, keuze144, schakel144, tijd144, getal144 = [], [], [], [], []
+for module, lijst in ((sensormod, sensoren144), (keuzemod, keuze144), (schakelmod, schakel144),
+                      (tijdmod, tijd144), (getalmod, getal144)):
+    asyncio.run(module.async_setup_entry(hass144, Invoer110(), lambda nieuw, lijst=lijst: lijst.extend(nieuw)))
+coach144s = next(s for s in sensoren144 if s._attr_translation_key == "coach")
+a144 = coach144s.extra_state_attributes
+print(f"  {coach144s.native_value}: stand {a144['stand']}, soc {a144['soc']}, bereik {a144['actieradius_km']}, "
+      f"modus {a144['modus']}, schema {a144['schema_aan']} per_dag {a144['per_dag']}, {len(a144['plan'])} blokken")
+controle("de sensor draagt het contract en de accustand van de auto",
+         a144["contract"] == 1 and a144["type"] == "laadpaal" and a144["brand"] == "easee"
+         and a144["soc"] == 62.0 and a144["soc_geschat"] is False and a144["actieradius_km"] == 142
+         and a144["stand"] in ("laadt", "laadt_zon", "wacht") and a144["modus"] == "planning"
+         and a144["entiteiten"].get("soc") == "sensor.auto_soc" and a144["entiteiten"].get("range") == "sensor.auto_bereik",
+         f"{a144}")
+controle("het plan en de klaar-tijd met de zone van het huis",
+         a144["plan"] and all(str(b["start"]).endswith("+02:00") for b in a144["plan"])
+         and str(a144["klaar_om_volgende"]).endswith("+02:00"), f"{a144['plan'][:1]} {a144['klaar_om_volgende']}")
+controle("zeven dagen, elke dag 06:00 als het schema niet per dag is",
+         a144["schema_dagen"] == [{"aan": True, "klaar_om": "06:00"}] * 7, f"{a144['schema_dagen']}")
+controle("de stand in vaste sleutels",
+         sys.modules["domotiapp_coach.entiteit"].paal_stand({"rule": "disconnected"}) == "geen_auto"
+         and sys.modules["domotiapp_coach.entiteit"].paal_stand({"rule": "surplus", "charge": True}) == "laadt_zon"
+         and sys.modules["domotiapp_coach.entiteit"].paal_stand({"rule": "cheap-hour", "charge": True}) == "laadt"
+         and sys.modules["domotiapp_coach.entiteit"].paal_stand({"rule": "complete"}) == "vol"
+         and sys.modules["domotiapp_coach.entiteit"].paal_stand({"rule": "cheap-hour", "charge": True, "paused": True}) == "pauze"
+         and sys.modules["domotiapp_coach.entiteit"].paal_stand({"rule": "wait-for-sun"}) == "wacht", "")
+# Per dag: index 0 is maandag, en de tijd voor elke dag is er dan niet.
+per144 = {"strategy": {"schedules": [{"device": "dev-laadpaal", "enabled": True, "per_day": True,
+                                      "window": {"done_by": "06:00"},
+                                      "days": [{"day": 0, "enabled": True, "done_by": "07:30"},
+                                               {"day": 6, "enabled": False, "done_by": "06:00"}]}]}}
+s144 = sys.modules["domotiapp_coach.entiteit"].paal_schema(per144, "dev-laadpaal")
+controle("per dag: maandag is dag 0, een dag die er niet staat is uit",
+         s144["per_dag"] and s144["schema_dagen"][0] == {"aan": True, "klaar_om": "07:30"}
+         and s144["schema_dagen"][6]["aan"] is False and s144["schema_dagen"][3]["aan"] is False, f"{s144}")
+klaar144 = tijd144[0]
+klaar144._settings = per144
+controle("klaar om is unavailable zolang het schema per dag is", klaar144.available is False, "")
+klaar144._settings = store144.instellingen
+controle("en anders de tijd voor elke dag", klaar144.available and klaar144.native_value == dt.time(6, 0),
+         f"{klaar144.native_value}")
+# De knoppen doen wat de coachkaart doet.
+aangeroepen144 = []
+coach144.async_mode = lambda dev, modus: aangeroepen144.append(("modus", dev, modus))
+coach144.async_pause = lambda dev, aan: aangeroepen144.append(("pauze", dev, aan))
+coach144.async_target = lambda dev, pct: aangeroepen144.append(("doel", dev, pct))
+coach144.async_refresh = lambda: None
+modus144 = keuze144[0]
+pauze144 = next(s for s in schakel144 if s._attr_translation_key == "pauze")
+schema144 = next(s for s in schakel144 if s._attr_translation_key == "schema")
+for e144 in (modus144, pauze144, schema144, klaar144, getal144[0]):
+    e144.hass = hass144
+asyncio.run(modus144.async_select_option("zon"))
+asyncio.run(modus144.async_select_option("planning"))
+asyncio.run(pauze144.async_turn_on())
+asyncio.run(getal144[0].async_set_native_value(80))
+print(f"  aangeroepen: {aangeroepen144}")
+controle("modus, pauze en laden tot gaan door de coach, zoals de knoppen op zijn kaart",
+         aangeroepen144 == [("modus", "dev-laadpaal", "zon"), ("modus", "dev-laadpaal", "goedkoopst"),
+                            ("pauze", "dev-laadpaal", True), ("doel", "dev-laadpaal", 80.0)], f"{aangeroepen144}")
+controle("de modus noemt de keuzes als sleutels", modus144._attr_options == ["planning", "snel", "continu", "zon"], "")
+asyncio.run(schema144.async_turn_off())
+uit144 = store144.instellingen["strategy"]["schedules"][0]["enabled"]
+asyncio.run(klaar144.async_set_value(dt.time(7, 15)))
+tijd144b = store144.instellingen["strategy"]["schedules"][0]["window"]["done_by"]
+controle("het schema uit, en een nieuwe klaar-tijd, in de opslag",
+         uit144 is False and tijd144b == "07:15", f"{uit144} {tijd144b}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

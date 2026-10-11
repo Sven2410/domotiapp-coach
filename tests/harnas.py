@@ -175,6 +175,15 @@ class ButtonEntity(SensorEntity):  # noqa: D101
 
 binairmod_ha.BinarySensorEntity = BinarySensorEntity
 knopmod_ha.ButtonEntity = ButtonEntity
+# En de laadpaal (v0.111.0): select, switch, time en number.
+keuzemod_ha = types.ModuleType("homeassistant.components.select")
+schakelmod_ha = types.ModuleType("homeassistant.components.switch")
+tijdmod_ha = types.ModuleType("homeassistant.components.time")
+getalmod_ha = types.ModuleType("homeassistant.components.number")
+keuzemod_ha.SelectEntity = type("SelectEntity", (SensorEntity,), {})
+schakelmod_ha.SwitchEntity = type("SwitchEntity", (SensorEntity,), {})
+tijdmod_ha.TimeEntity = type("TimeEntity", (SensorEntity,), {})
+getalmod_ha.NumberEntity = type("NumberEntity", (SensorEntity,), {})
 configitems = types.ModuleType("homeassistant.config_entries")
 configitems.ConfigEntry = object
 apparaatreg = types.ModuleType("homeassistant.helpers.device_registry")
@@ -203,6 +212,10 @@ sys.modules.update({
     "homeassistant.components.sensor": sensormod_ha,
     "homeassistant.components.binary_sensor": binairmod_ha,
     "homeassistant.components.button": knopmod_ha,
+    "homeassistant.components.select": keuzemod_ha,
+    "homeassistant.components.switch": schakelmod_ha,
+    "homeassistant.components.time": tijdmod_ha,
+    "homeassistant.components.number": getalmod_ha,
     "homeassistant.config_entries": configitems,
     "homeassistant.helpers.device_registry": apparaatreg,
     "homeassistant.helpers.entity_platform": entiteitplatform,
@@ -233,6 +246,10 @@ coachmod = laad("coach")
 sensormod = laad("sensor")
 binairmod = laad("binary_sensor")
 knopmod = laad("button")
+keuzemod = laad("select")
+schakelmod = laad("switch")
+tijdmod = laad("time")
+getalmod = laad("number")
 monitormod = laad("monitor")
 
 # --- een huis om in te meten ------------------------------------------------

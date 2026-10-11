@@ -37,7 +37,10 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import EVENT_DECISION, EVENT_SETTINGS_UPDATED, PROGRAMMA_TYPES
-from .entiteit import CONTRACT, apparaat_info, entiteiten_van, oude_coach_opruimen
+from .entiteit import (
+    CONTRACT, CoachEntiteit, apparaat_info, async_per_apparaat, entiteiten_van, met_zone,
+    oude_coach_opruimen, paal_blokken, paal_schema, paal_sessie, paal_stand, paal_tekst,
+)
 from .planner import _dag_om
 from .storage import async_get_store
 
@@ -98,19 +101,6 @@ def programma_stand(stand: dict[str, Any] | None) -> str:
     return "gepland"
 
 
-def _met_zone(rauw: Any) -> str | None:
-    """Een tijd van de coach (lokaal, zonder zone) als ISO met de zone van het huis."""
-    if not rauw:
-        return None
-    try:
-        moment = datetime.fromisoformat(str(rauw))
-    except ValueError:
-        return None
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=dt_util.get_default_time_zone())
-    return moment.isoformat()
-
-
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -156,6 +146,13 @@ async def async_setup_entry(
     entry.async_on_unload(hass.bus.async_listen(EVENT_DECISION, besluit))
     entry.async_on_unload(hass.bus.async_listen(EVENT_SETTINGS_UPDATED, instellingen))
     oude_coach_opruimen(hass)
+
+    # De laadpaal (v0.111.0): de sensor van de coach voor de laadpaalkaart.
+    await async_per_apparaat(
+        hass, entry, async_add_entities,
+        lambda device: device.get("type") == "laadpaal",
+        lambda device, stand, settings: [LaadpaalCoachSensor(device, stand, settings)],
+    )
 
 
 class StartOmSensor(SensorEntity):
@@ -227,9 +224,73 @@ class StartOmSensor(SensorEntity):
             "stand": programma_stand(self._stand),
             "vrijgegeven": bool(self._stand.get("released")),
             "nu": bool(self._stand.get("start_now")),
-            "klaar_om": _met_zone(self._stand.get("deadline")),
+            "klaar_om": met_zone(self._stand.get("deadline")),
             # Is de klaar-tijd van vandaag voorbij, dan de dag waar hij naar
             # opschuift ("morgen"): het paneel zegt dan "Ingeruimd, morgen starten".
             "later": self._stand.get("later") or None,
             "entiteiten": dict(self._entiteiten),
         }
+
+
+class LaadpaalCoachSensor(CoachEntiteit, SensorEntity):
+    """Wat de coach met deze laadpaal doet, voor de laadpaalkaart (v0.111.0).
+
+    De toestand is een korte zin ("Laadt op zon", "Wacht tot 20:00"); de kaart
+    leest de attributen. Zie entiteit.py en docs/laadpaal.md voor het contract.
+    """
+
+    _attr_icon = "mdi:ev-station"
+    _unrecorded_attributes = frozenset({"reason", "plan", "schema_dagen", "entiteiten", "sessie"})
+
+    def __init__(self, device: dict[str, Any], stand: dict[str, Any] | None, settings: dict[str, Any]) -> None:
+        super().__init__(device, stand, "coach", settings)
+
+    def _kern(self) -> Any:
+        return (self.native_value, repr(self.extra_state_attributes))
+
+    @property
+    def native_value(self) -> str:
+        return paal_tekst(self._stand)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        st = self._stand
+        modus = str(st.get("mode") or "goedkoopst")
+        plan = st.get("plan_ahead") or {}
+        schema = paal_schema(self._settings, self._device_id)
+        return {
+            "contract": CONTRACT,
+            "type": "laadpaal",
+            "stand": paal_stand(st),
+            "rule": st.get("rule") or "",
+            "amps": st.get("amps"),
+            "reason": st.get("reason") or "",
+            "brand": str(self._device.get("brand") or ""),
+            "soc": st.get("soc_now"),
+            "soc_geschat": bool(st.get("soc_estimated")),
+            "actieradius_km": st.get("range_km"),
+            "target_percent": st.get("target_percent"),
+            "doel_beurt": bool(st.get("target_session")),
+            "modus": "planning" if modus == "goedkoopst" else modus,
+            "modus_beurt": bool(st.get("mode_session")) or modus == "snel",
+            "pauze": bool(st.get("paused")),
+            "expected_done": met_zone(plan.get("expected_done")),
+            "kwh_needed": plan.get("kwh_needed"),
+            "plan": paal_blokken(st),
+            "sessie": paal_sessie(st),
+            "schema_aan": schema["schema_aan"],
+            "per_dag": schema["per_dag"],
+            "schema_dagen": schema["schema_dagen"],
+            "klaar_om_volgende": met_zone(plan.get("deadline")),
+            "entiteiten": {**entiteiten_van(self._device), **self._auto_entiteiten()},
+        }
+
+    def _auto_entiteiten(self) -> dict[str, str]:
+        """De accusensor en de actieradius van de auto, uit het autoprofiel."""
+        auto = next(iter(self._device.get("cars") or []), None) or {}
+        uit = {}
+        if auto.get("soc_entity"):
+            uit["soc"] = str(auto["soc_entity"])
+        if auto.get("range_entity"):
+            uit["range"] = str(auto["range_entity"])
+        return uit
