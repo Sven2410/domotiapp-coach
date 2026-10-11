@@ -1107,3 +1107,15 @@ de batterij onder de helft hield.
 
 Wat er in dezelfde uitgave voor de laadpaalkaart bij kwam, en de reparatie van het verslag
 na een herstart, staat in docs/laadpaal.md.
+
+## Zelf nul op de meter zonder vermogenssensor (v0.112.2)
+
+Doet de batterij zelf nul op de meter, dan is haar vermogenssensor de enige bron voor het
+kasboek (`verdiend` in `_async_regel`). Was die sensor onbekend, dan viel het kasboek om met
+een TypeError, en daarmee de rest van de stap van de regelaar: ook `_zelf_niet`, dat de
+batterij uit haar eigen stand haalt als de paal gaat laden, de zekering krap wordt of de
+vakantiestand aan gaat. De schaduw zag het bij de eigenaar op 11-10-2026 tussen 22:34 en 22:36,
+toen de integratie van de batterij onbekend was: 47 keer "de regelaar struikelde". Nu telt
+het kasboek die stap niet (er valt niets te weten) en loopt de rest gewoon door. Proef 148
+bouwt het na: sensor weg, paal gaat laden, en de coach neemt de batterij meteen over op 0 W.
+Daarvoor bleef ze in haar eigen stand.
