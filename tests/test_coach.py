@@ -7777,6 +7777,49 @@ controle("zet iets anders hem wel om, dan laat hij na twee ronden los en zegt hi
          and any("Iets anders stuurt" in d[2].get("message", "") for d in hass140.services.verstuurd if d[0] == "notify"),
          f"{b140.get('applied')} {b140.get('foreign')}")
 
+print("=== 141. een stop die de paal nog niet volgt is geen nieuwe beurt (v0.108.3) ===")
+# Bij de eigenaar op 11-10-2026: na tien rondes vasthouden door een wolk besloot de
+# coach om 13:45:46 te stoppen tot 20:00. De Easee zette de 0 A pas om 13:47:00 door
+# en zei de ronde van 13:46:46 dus nog "charging". De stop had het begin van de beurt
+# gewist, en een paal die laadt zonder begin kreeg "nu" als begin: "Net begonnen met
+# laden, dus hij houdt het nog even vol op de laagste stand", laden op 6 A. Was die
+# opdracht na de 0 aangekomen, dan had de bus nog tien minuten van het net geladen.
+inst141 = instellingen(devices=[PAAL52])
+huis141 = huis(status="charging", stroom=6.0, vermogen=1380.0, teruglevering=0.0, afname=3000.0, zon_rest=0.0)
+huis141["sensor.auto_soc"] = "40"
+hass141, _, coach141 = bouw(huis141, inst141)
+coach141._since["dev-laadpaal"] = dt.datetime(2026, 10, 11, 12, 10)
+coach141._laadde["dev-laadpaal"] = True
+stop141 = None
+for minuut141 in range(30, 60):
+    b141, _ = asyncio.run(ronde(coach141, inst141, paal=PAAL52, nu=dt.datetime(2026, 10, 11, 13, minuut141)))
+    if b141.get("amps") == 0:
+        stop141 = minuut141
+        break
+print(f"  stop om 13:{stop141}: {b141.get('rule')}, {b141.get('reason')}")
+controle("zonder zon en voor 20:00 stopt hij na het vasthouden", stop141 is not None and "+hold" not in (b141.get("rule") or ""),
+         f"{stop141} {b141.get('rule')}")
+# De paal heeft de 0 nog niet doorgezet: hij zegt nog "charging".
+b141, verstuurd141 = asyncio.run(ronde(coach141, inst141, paal=PAAL52, nu=dt.datetime(2026, 10, 11, 13, stop141 + 1)))
+print(f"  de ronde erna, paal nog op charging: {b141.get('rule')} {b141.get('amps')} A, {b141.get('reason')}")
+controle("een paal die zijn stop nog niet volgt is niet net begonnen",
+         b141.get("amps") == 0 and "Net begonnen" not in (b141.get("reason") or ""),
+         f"{b141.get('rule')} {b141.get('amps')} {b141.get('reason')}")
+controle("en er gaat geen 6 A naar de paal",
+         not any(d[1] == "set_charger_dynamic_limit" and (d[2].get("current") or 0) > 0 for d in verstuurd141),
+         f"{verstuurd141}")
+hass141.states.zet("sensor.laadpaal_status", "awaiting_start")
+hass141.states.zet("sensor.laadpaal_vermogen", "0")
+b141, _ = asyncio.run(ronde(coach141, inst141, paal=PAAL52, nu=dt.datetime(2026, 10, 11, 13, stop141 + 2)))
+controle("de paal volgt: hij blijft stil", b141.get("amps") == 0, f"{b141.get('rule')} {b141.get('amps')}")
+# Een beurt die wel echt begint houdt zijn aanloop.
+hass141.states.zet("sensor.laadpaal_status", "charging")
+hass141.states.zet("sensor.laadpaal_vermogen", "1380")
+b141, _ = asyncio.run(ronde(coach141, inst141, paal=PAAL52, nu=dt.datetime(2026, 10, 11, 13, stop141 + 3)))
+controle("begint de paal daarna opnieuw, dan is hij wel net begonnen",
+         coach141._since.get("dev-laadpaal") == dt.datetime(2026, 10, 11, 13, stop141 + 3),
+         f"{coach141._since.get('dev-laadpaal')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
