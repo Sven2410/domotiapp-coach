@@ -8148,6 +8148,76 @@ leeg146b = (accu146.extra_state_attributes["override"], accu146.extra_state_attr
 controle("en vol of leeg staat als override op de sensor", vol146 == "vol" and leeg146b == ("leeg", 50.0),
          f"{vol146} {leeg146b}")
 
+print("=== 147. merk en model van de paal en de batterij, uit het register, voor de foto (v0.112.1) ===")
+# De lovelace-sessie op 11-10-2026: met `accu_fabrikant` en `accu_model` kan de
+# batterijkaart "Automatisch" de juiste foto kiezen, zoals de laadpaalkaart.
+ent147 = sys.modules["domotiapp_coach.entiteit"]
+apparaten147 = {
+    "app-paal": types.SimpleNamespace(manufacturer="Merk P", model="Paal 1"),
+    "app-accu": types.SimpleNamespace(manufacturer="Merk A", model="Accu 2"),
+    "app-leeg": types.SimpleNamespace(manufacturer=None, model=None),
+}
+register147 = {"sensor.paal_status": "app-paal", "sensor.batterij_soc": None, "select.batterij_modus": "app-accu"}
+fout147 = {"aan": False}
+
+
+def register_get147(_hass):
+    if fout147["aan"]:
+        raise RuntimeError("register nog niet geladen")
+    return types.SimpleNamespace(async_get=lambda eid: (
+        types.SimpleNamespace(device_id=register147[eid]) if eid in register147 else None))
+
+
+dr147 = types.ModuleType("homeassistant.helpers.device_registry")
+dr147.async_get = lambda _hass: types.SimpleNamespace(async_get=lambda did: apparaten147.get(did))
+er147 = types.ModuleType("homeassistant.helpers.entity_registry")
+er147.async_get = register_get147
+namen147 = ("homeassistant.helpers.device_registry", "homeassistant.helpers.entity_registry")
+oud147 = {k: sys.modules.get(k) for k in namen147}
+helpers147 = sys.modules.get("homeassistant.helpers")
+oud_attr147 = {k: getattr(helpers147, k, None) for k in ("device_registry", "entity_registry")} if helpers147 else {}
+sys.modules.update({namen147[0]: dr147, namen147[1]: er147})
+if helpers147 is not None:
+    helpers147.device_registry, helpers147.entity_registry = dr147, er147
+try:
+    paal147 = ent147.paal_apparaat(None, {"entities": {"status": "sensor.paal_status"}, "entity": "sensor.paal_vermogen"})
+    eigen147 = ent147.paal_apparaat(None, {"device_id": "app-accu", "entities": {"status": "sensor.paal_status"}})
+    accu147 = ent147.accu_apparaat(None, BATTERIJ)
+    niets147 = ent147.accu_apparaat(None, {"entities": {}, "entity": "sensor.onbekend"})
+    leeg147 = ent147.accu_apparaat(None, {"device_id": "app-leeg"})
+    fout147["aan"] = True
+    stuk147 = ent147.accu_apparaat(None, BATTERIJ)
+    fout147["aan"] = False
+    sensoren147 = []
+    asyncio.run(sensormod.async_setup_entry(hass146, Invoer110(), lambda nieuw: sensoren147.extend(nieuw)))
+    accu_s147 = next(s for s in sensoren147 if s.unique_id == "dev-batterij_coach")
+    accu_s147.hass = hass146
+    a147 = accu_s147.extra_state_attributes
+finally:
+    for k, v in oud147.items():
+        if v is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = v
+    for k, v in oud_attr147.items():
+        if v is None:
+            if hasattr(helpers147, k):
+                delattr(helpers147, k)
+        else:
+            setattr(helpers147, k, v)
+print(f"  paal {paal147}, paal met eigen apparaat {eigen147}, accu {accu147}, niets {niets147}, "
+      f"leeg {leeg147}, register stuk {stuk147}; sensor {a147.get('accu_fabrikant')!r} {a147.get('accu_model')!r}")
+controle("de paal: het apparaat van de statussensor", paal147 == ("Merk P", "Paal 1"), f"{paal147}")
+controle("een ingevuld apparaat gaat voor", eigen147 == ("Merk A", "Accu 2"), f"{eigen147}")
+controle("de batterij: de accustand heeft geen apparaat, dan dat van de modus", accu147 == ("Merk A", "Accu 2"), f"{accu147}")
+controle("niets te vinden, geen merk of een register dat faalt: lege tekst, geen fout",
+         niets147 == ("", "") and leeg147 == ("", "") and stuk147 == ("", ""), f"{niets147} {leeg147} {stuk147}")
+controle("en de sensor van de batterij draagt ze als accu_fabrikant en accu_model",
+         a147.get("accu_fabrikant") == "Merk A" and a147.get("accu_model") == "Accu 2", f"{a147}")
+controle("vakantie_max: zonder ingevulde grens die waarmee de coach rekent, niet leeg",
+         a147.get("vakantie_max") == coach146._vakantie({"battery": {"holiday": True}}) == 50.0,
+         f"{a147.get('vakantie_max')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

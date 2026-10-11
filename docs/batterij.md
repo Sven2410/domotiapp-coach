@@ -1094,5 +1094,16 @@ ontladen, `price`, `soc_eind`), `opgeleverd_vandaag`, `opgeleverd_maand` (uit
 niets), `leeg_tot`, `vakantie`, `vakantie_max`, `reserve` (alleen als die aan staat),
 `ondergrens` en `entiteiten`. Proef 146 in test_coach.py.
 
+Sinds v0.112.1 ook `accu_fabrikant` en `accu_model`, zoals `paal_fabrikant` en `paal_model` bij de
+laadpaal: wat de integratie van de batterij in het apparatenregister zet, zodat de kaart
+"Automatisch" de juiste foto kiest. Eerst het apparaat dat bij de coach is ingevuld, anders dat
+van de accustand, de modus, het vermogen (`accu_apparaat`, `register_apparaat` in entiteit.py);
+een lege tekst als er niets te vinden is. Gevraagd door de lovelace-sessie op 11-10-2026. Proef 147.
+
+En `vakantie_max` is sindsdien altijd een getal, ook als de vakantiestand uit staat: zonder ingevulde
+grens 50, waar de coach al mee rekende (`HOLIDAY_MAX_DEFAULT` in const.py, voor `_vakantie` en de
+sensor allebei). In v0.112.0 gaf de sensor dan niets, en zag de kaart geen grens terwijl de coach
+de batterij onder de helft hield.
+
 Wat er in dezelfde uitgave voor de laadpaalkaart bij kwam, en de reparatie van het verslag
 na een herstart, staat in docs/laadpaal.md.

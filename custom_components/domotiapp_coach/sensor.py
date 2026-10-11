@@ -36,11 +36,11 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import EVENT_DECISION, EVENT_SETTINGS_UPDATED, PROGRAMMA_TYPES
+from .const import EVENT_DECISION, EVENT_SETTINGS_UPDATED, HOLIDAY_MAX_DEFAULT, PROGRAMMA_TYPES
 from .entiteit import (
     CONTRACT, CoachEntiteit, apparaat_info, async_per_apparaat, entiteiten_van, met_zone,
     oude_coach_opruimen, paal_apparaat, paal_blokken, paal_modus_actief, paal_modus_keuzes, paal_schema, paal_sessie,
-    paal_stand, paal_tekst, accu_opgeleverd, accu_plan, accu_stand,
+    paal_stand, paal_tekst, accu_apparaat, accu_opgeleverd, accu_plan, accu_stand,
 )
 from .planner import _dag_om
 from .storage import async_get_store
@@ -253,10 +253,6 @@ class LaadpaalCoachSensor(CoachEntiteit, SensorEntity):
     def __init__(self, device: dict[str, Any], stand: dict[str, Any] | None, settings: dict[str, Any]) -> None:
         super().__init__(device, stand, "coach", settings)
 
-    @property
-    def _paal(self) -> tuple[str, str]:
-        return paal_apparaat(self.hass, self._device) if self.hass is not None else ("", "")
-
     def _kern(self) -> Any:
         return (self.native_value, repr(self.extra_state_attributes))
 
@@ -270,6 +266,7 @@ class LaadpaalCoachSensor(CoachEntiteit, SensorEntity):
         modus = str(st.get("mode") or "goedkoopst")
         plan = st.get("plan_ahead") or {}
         schema = paal_schema(self._settings, self._device_id)
+        fabrikant, model = paal_apparaat(self.hass, self._device) if self.hass is not None else ("", "")
         return {
             "contract": CONTRACT,
             "type": "laadpaal",
@@ -279,8 +276,8 @@ class LaadpaalCoachSensor(CoachEntiteit, SensorEntity):
             "reason": st.get("reason") or "",
             "brand": str(self._device.get("brand") or ""),
             # Wat de integratie van de paal zelf zegt, voor de foto (v0.112.0).
-            "paal_fabrikant": self._paal[0],
-            "paal_model": self._paal[1],
+            "paal_fabrikant": fabrikant,
+            "paal_model": model,
             "soc": st.get("soc_now"),
             "soc_geschat": bool(st.get("soc_estimated")),
             "actieradius_km": st.get("range_km"),
@@ -348,10 +345,14 @@ class BatterijCoachSensor(CoachEntiteit, SensorEntity):
         except (TypeError, ValueError):
             temperatuur = None
         override = "vol" if st.get("boost") else ("leeg" if st.get("drain_to") is not None else None)
+        fabrikant, model = accu_apparaat(self.hass, self._device) if self.hass is not None else ("", "")
         return {
             "contract": CONTRACT,
             "type": "thuisbatterij",
             "stand": accu_stand(st),
+            # Wat de integratie van de batterij zelf zegt, voor de foto (v0.112.1).
+            "accu_fabrikant": fabrikant,
+            "accu_model": model,
             "zelf": bool(st.get("self_zero")),
             "soc": st.get("soc"),
             "reason": st.get("reason") or "",
@@ -361,8 +362,18 @@ class BatterijCoachSensor(CoachEntiteit, SensorEntity):
             "override": override,
             "leeg_tot": st.get("drain_to"),
             "vakantie": bool(eigen.get("holiday")),
-            "vakantie_max": eigen.get("holiday_max_percent"),
+            # Ook als hij uit staat, en met de grens waarmee de coach rekent als
+            # de installateur er geen invulde (v0.112.1).
+            "vakantie_max": vakantie_max(eigen),
             "reserve": eigen.get("reserve_percent") if eigen.get("reserve_enabled") else None,
             "ondergrens": st.get("floor"),
             "entiteiten": entiteiten_van(self._device),
         }
+
+
+def vakantie_max(eigen: dict[str, Any]) -> float:
+    """De bovengrens van de vakantiestand, zoals de coach hem gebruikt (`_vakantie`)."""
+    try:
+        return float(eigen.get("holiday_max_percent") or HOLIDAY_MAX_DEFAULT)
+    except (TypeError, ValueError):
+        return float(HOLIDAY_MAX_DEFAULT)

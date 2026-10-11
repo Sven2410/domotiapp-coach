@@ -590,3 +590,8 @@ PROGRAMMA_TYPES = ("vaatwasser",)
 # klaar-tijdregel twintig uur voor één band. Hier en niet in coach.py, omdat de
 # opslag zulke rijen ook opruimt. Zie `_tempo_leren` en `_tempo_uit`.
 TEMPO_ONDERGRENS = 6 * 230.0 / 1000.0
+
+# De bovengrens van de vakantiestand als de installateur er geen invulde, in
+# procent. De coach rekent ermee (`_vakantie`) en de sensor van de batterij
+# toont hem (`vakantie_max`), dus allebei hier vandaan.
+HOLIDAY_MAX_DEFAULT = 50
