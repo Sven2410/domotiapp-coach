@@ -33,11 +33,11 @@ from typing import Any
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, EVENT_DECISION, EVENT_SETTINGS_UPDATED, PROGRAMMA_TYPES
+from .const import EVENT_DECISION, EVENT_SETTINGS_UPDATED, PROGRAMMA_TYPES
+from .entiteit import CONTRACT, apparaat_info, entiteiten_van, oude_coach_opruimen
 from .planner import _dag_om
 from .storage import async_get_store
 
@@ -83,14 +83,32 @@ def start_tekst(stand: dict[str, Any] | None, now: datetime) -> str | None:
     return _dag_om(moment.replace(tzinfo=None), now)
 
 
-def _coach_apparaat() -> DeviceInfo:
-    """Eén apparaat voor de coach zelf, zodat zijn sensoren bij elkaar staan."""
-    return DeviceInfo(
-        identifiers={(DOMAIN, "coach")},
-        name="DomotiApp Coach",
-        manufacturer="DomotiApp",
-        entry_type=DeviceEntryType.SERVICE,
-    )
+def programma_stand(stand: dict[str, Any] | None) -> str:
+    """De stand van een apparaat met een programma, als vaste sleutel voor een kaart (v0.110.0)."""
+    if not stand:
+        return "niet_vrijgegeven"
+    if stand.get("running"):
+        return "draait"
+    if stand.get("rule") == "finished":
+        return "klaar"
+    if not stand.get("released"):
+        return "niet_vrijgegeven"
+    if stand.get("rule") in NU_STARTEN and stand.get("charge"):
+        return "start_nu"
+    return "gepland"
+
+
+def _met_zone(rauw: Any) -> str | None:
+    """Een tijd van de coach (lokaal, zonder zone) als ISO met de zone van het huis."""
+    if not rauw:
+        return None
+    try:
+        moment = datetime.fromisoformat(str(rauw))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=dt_util.get_default_time_zone())
+    return moment.isoformat()
 
 
 async def async_setup_entry(
@@ -137,31 +155,41 @@ async def async_setup_entry(
 
     entry.async_on_unload(hass.bus.async_listen(EVENT_DECISION, besluit))
     entry.async_on_unload(hass.bus.async_listen(EVENT_SETTINGS_UPDATED, instellingen))
+    oude_coach_opruimen(hass)
 
 
 class StartOmSensor(SensorEntity):
-    """Wanneer de coach dit apparaat wil starten."""
+    """Wanneer de coach dit apparaat wil starten.
+
+    Sinds v0.110.0 op een eigen apparaat in Home Assistant (`apparaat_info`), en
+    de sensor van de coach voor dat apparaat in het contract met de kaarten:
+    zie `entiteit.py`.
+    """
 
     _attr_should_poll = False
     _attr_has_entity_name = True
+    _attr_translation_key = "start"
     _attr_icon = "mdi:clock-start"
     # De zinnen van de coach veranderen soms per ronde (wat nu starten zou
     # kosten); die horen niet elke minuut in de recorder.
-    _unrecorded_attributes = frozenset({"reason", "plan"})
+    _unrecorded_attributes = frozenset({"reason", "plan", "entiteiten"})
 
     def __init__(self, device: dict[str, Any], stand: dict[str, Any] | None) -> None:
         self._device_id = device["id"]
         # "_start_om" uit v0.100.0, toen de naam nog "start om" was. Blijft zo:
         # een andere unique_id is een nieuwe entiteit en een verweesde oude.
         self._attr_unique_id = f"{device['id']}_start_om"
-        self._attr_device_info = _coach_apparaat()
+        self._attr_device_info = apparaat_info(device)
         self._stand: dict[str, Any] = dict(stand or {})
         self._schakelaar: str | None = None
+        self._soort = ""
+        self._entiteiten: dict[str, str] = {}
         self._zet_apparaat(device)
 
     def _zet_apparaat(self, device: dict[str, Any]) -> None:
-        self._attr_name = f"{device.get('name') or 'Apparaat'} start"
         self._schakelaar = (device.get("entities") or {}).get("release_switch") or None
+        self._soort = str(device.get("type") or "")
+        self._entiteiten = entiteiten_van(device)
 
     @callback
     def bijwerken_apparaat(self, device: dict[str, Any]) -> None:
@@ -193,4 +221,15 @@ class StartOmSensor(SensorEntity):
             "released": bool(self._stand.get("released")),
             "running": bool(self._stand.get("running")),
             "release_switch": self._schakelaar,
+            # Het contract met de kaarten (v0.110.0), zie entiteit.py.
+            "contract": CONTRACT,
+            "type": self._soort,
+            "stand": programma_stand(self._stand),
+            "vrijgegeven": bool(self._stand.get("released")),
+            "nu": bool(self._stand.get("start_now")),
+            "klaar_om": _met_zone(self._stand.get("deadline")),
+            # Is de klaar-tijd van vandaag voorbij, dan de dag waar hij naar
+            # opschuift ("morgen"): het paneel zegt dan "Ingeruimd, morgen starten".
+            "later": self._stand.get("later") or None,
+            "entiteiten": dict(self._entiteiten),
         }

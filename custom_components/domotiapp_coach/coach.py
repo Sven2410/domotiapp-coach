@@ -2679,6 +2679,8 @@ class ChargerCoach:
             "ends_at": eind.isoformat() if draait and eind is not None else None,
             "released": released,
             "start_now": nu_starten,
+            # De klaar-tijd uit het schema, voor de kaart: "klaar vóór 07:00" (v0.110.0).
+            "deadline": window.deadline.isoformat() if window.deadline is not None else None,
             # De klaar-tijd van vandaag als die voorbij is, en de dag waar het
             # schema dan naar opschuift: de kaart vraagt dan morgen of nu.
             "missed": window.missed.isoformat() if window.missed is not None and window.deadline is not None else None,

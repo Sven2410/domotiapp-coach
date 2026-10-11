@@ -159,6 +159,22 @@ class SensorEntity:
 
 sensormod_ha.SensorDeviceClass = SensorDeviceClass
 sensormod_ha.SensorEntity = SensorEntity
+# En de knoppen en de vrijgave van de vaatwasser (v0.110.0, button.py en
+# binary_sensor.py): dezelfde huls.
+binairmod_ha = types.ModuleType("homeassistant.components.binary_sensor")
+knopmod_ha = types.ModuleType("homeassistant.components.button")
+
+
+class BinarySensorEntity(SensorEntity):  # noqa: D101
+    pass
+
+
+class ButtonEntity(SensorEntity):  # noqa: D101
+    pass
+
+
+binairmod_ha.BinarySensorEntity = BinarySensorEntity
+knopmod_ha.ButtonEntity = ButtonEntity
 configitems = types.ModuleType("homeassistant.config_entries")
 configitems.ConfigEntry = object
 apparaatreg = types.ModuleType("homeassistant.helpers.device_registry")
@@ -185,6 +201,8 @@ sys.modules.update({
     "homeassistant.util.dt": dtutil,
     "homeassistant.components": componenten,
     "homeassistant.components.sensor": sensormod_ha,
+    "homeassistant.components.binary_sensor": binairmod_ha,
+    "homeassistant.components.button": knopmod_ha,
     "homeassistant.config_entries": configitems,
     "homeassistant.helpers.device_registry": apparaatreg,
     "homeassistant.helpers.entity_platform": entiteitplatform,
@@ -213,6 +231,8 @@ laad("batterij")
 storage = laad("storage")
 coachmod = laad("coach")
 sensormod = laad("sensor")
+binairmod = laad("binary_sensor")
+knopmod = laad("button")
 monitormod = laad("monitor")
 
 # --- een huis om in te meten ------------------------------------------------

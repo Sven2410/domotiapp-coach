@@ -650,23 +650,12 @@ async def async_set_device_ready(
     dashboard cannot undo somebody else's release by handing back the list it
     happened to be holding.
     """
-    store = async_get_store(hass)
-    settings = await store.async_load()
+    # Dezelfde som als de knoppen van de vaatwasserkaart (v0.110.0).
+    from .entiteit import async_vrijgave
 
-    ready = set(settings.get("ready_devices") or [])
-    now = set(settings.get("ready_now") or [])
-    if msg["ready"]:
-        ready.add(msg["device_id"])
-        if msg.get("now"):
-            now.add(msg["device_id"])
-        elif "now" in msg:
-            now.discard(msg["device_id"])
-    else:
-        ready.discard(msg["device_id"])
-        now.discard(msg["device_id"])
-
-    settings = await store.async_save({"ready_devices": sorted(ready), "ready_now": sorted(now & ready)})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    settings = await async_vrijgave(
+        hass, msg["device_id"], msg["ready"], (bool(msg.get("now")) if "now" in msg else None)
+    )
     connection.send_result(msg["id"], settings)
 
 
