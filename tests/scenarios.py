@@ -1343,6 +1343,25 @@ forecast_solar_vaatwasser = vaatwasser_zon.kopie(
 )
 
 
+# Bij de eigenaar op 11-10-2026: vast contract met salderen, een middag met weinig
+# zon, de thuisbatterij doet zelf nul op de meter en laadt in zijn eigen stand een
+# paar honderd watt van het dak. Die telde voor de coach als zon voor de auto (de
+# auto gaat voor), en elke kruimel zon maakte bij een vast contract het lopende uur
+# goedkoper dan 20:00: om 15:22 en 17:05 de bus wekken op 16 A en een uur van het net,
+# en na het overnemen van de batterij was die zon weg. Sinds v0.109.0 opent pas een
+# kwart van de ondergrens dat uur (`ZON_AANDEEL`).
+vast_kruimelzon = Scenario(
+    "vast-kruimelzon",
+    "vast contract met salderen, zwakke middagzon, accu doet zelf nul op 10%, "
+    "driefasige bus op 40% om 15:00 erin, klaar 06:00",
+    contract="vast-salderen", vast_terugleverkosten=0.05,
+    zon=Zon(kromme={15: 0.8, 16: 0.75, 17: 0.6, 18: 0.2, 19: 0.05}),
+    auto=replace(BUS, soc=40.0, fasen=3),
+    batterij=Batterij(soc=10.0, eigen_nul=True, zelf_nul=True),
+    begin="2026-09-07 14:55", kabel_erin="15:00", duur_uren=16, stap_seconden=15,
+)
+
+
 ALLE = [
     alfen_zonnig, alfen_dyn, alfen_doel_80, alfen_laadgrens,
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,
@@ -1372,7 +1391,7 @@ ALLE = [
     *BATTERIJ,
     vast_zon_modus, bewolkt_zon_modus, half_zon_modus, dyn_continu,
     batterij_helpt_auto, batterij_helpt_auto_nacht, batterij_helpt_auto_zonder_nacht,
-    voorrang_auto_eerst, voorrang_accu_eerst,
+    voorrang_auto_eerst, voorrang_accu_eerst, vast_kruimelzon,
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,
 ]

@@ -154,7 +154,9 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    tot ze er zijn alleen zon in: geen geschatte prijzen, geen uur zonder zon
    van het net (`alleen_zon` in planner.py). Een uur mét zon telt wel, ook
    als het dak te weinig geeft om zonder net te laden: dan vult hij aan tot
-   de ondergrens van de paal tegen de bekende prijs van dat uur. De eigenaar op
+   de ondergrens van de paal tegen de bekende prijs van dat uur; bij een
+   vast contract vóór 20:00 pas vanaf een kwart van die ondergrens, ook voor
+   het uur van nu (`ZON_AANDEEL`, v0.109.0). De eigenaar op
    05-09-2026: "wat zon om 14 uur met een goedkope prijs weegt zwaarder dan
    een iets goedkopere nacht." Met zondag uitgevinkt en klaar-tijd maandag
    06:00 laadt hij dus het hele weekend op zon, en plant hij de nacht zodra
@@ -277,10 +279,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 470 controles op het denkwerk
+python tests/test_planner.py     # 476 controles op het denkwerk
 python tests/test_batterij.py    # 187 op het denkwerk van de thuisbatterij en op de regelaar
 python tests/test_coach.py       # 953 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2324 op hele laadbeurten in het virtuele huis
+python tests/test_virtueel.py    # 2346 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 146 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

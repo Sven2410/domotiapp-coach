@@ -895,3 +895,43 @@ Na de herstart zag de coach een paal die al laadde, en dat is een herstart midde
 een beurt (`_hervat`): 14:43:20 6 A ("Er is 0,2 kW zon over ..."), 14:44:15 "Net
 begonnen met laden, dus hij houdt het nog even vol". Dat gedrag is bewust (v0.98.0);
 het begin lag hier alleen bij de coach zelf.
+
+## Een kruimel zon opent bij een vast contract geen uur van het net (v0.109.0)
+
+Bij de eigenaar op 11-10-2026: vast contract met salderen, de bus op 42% om 15:22,
+klaar om 06:00, een middag met weinig zon. De thuisbatterij deed zelf nul op de meter
+en laadde in zijn eigen stand 510 W van het dak; voor de coach was dat zon voor de
+auto (de auto gaat standaard voor). In `schijven` maakt elke gemeten zon in het lopende
+uur een vloerschijf ("wat zon, aangevuld tot de ondergrens van je paal"), en bij een
+vast contract is die altijd net iets goedkoper dan een netuur na 20:00. Dus:
+
+| tijd | wat | zon in het blok | totaal |
+|---|---|---|---|
+| 15:22 | bus wekken op 16 A, laden tot 16:17 | 0,29 kWh | 2,6 kWh |
+| 16:06 | "Er is 0,0 kW zon over. Met de ondergrens ... goedkoper" | 0,03 kWh | 3,71 kWh |
+| 17:05 | opnieuw wekken, laden tot 17:22 | 0,016 kWh | 3,77 kWh |
+
+Na het overnemen van de batterij was die zon weg (de meter zag 3,6 kW afname), en
+dan hield "Net begonnen met laden" hem nog tien minuten vast. Scheelde per uur een
+paar tienden van een cent, tegen de avondregel (eis 4) en de eigen reden om op 20:00
+te wachten.
+
+De regel van 17-09-2026 (`ZON_AANDEEL`: een uur dat voor minder dan een kwart op zon
+draait is geen zonuur) gold alleen voor komende uren; het uur van nu liet hij bewust
+vrij, want "een meting is nooit een gok" (de som van 30-08-2026, 0,9 kW op een
+driefasige paal). Nu geldt hij bij een vast contract vóór de avond ook voor het uur
+van nu. Voorgelegd met drie opties; eerst stelde ik "Zon: beginnen vanaf" van de paal
+(90%) voor, maar dat liet een driefasige auto op een gewone zonnige dag met 2 à 3 kW
+over helemaal niet meer op zon laden (proef 30 in test_planner.py). De eigenaar koos
+"25%, je regel van 17-09". Het geval van 30-08 (22%) valt er daarmee net onder: met
+salderen ongeveer 5 cent per uur, zonder ongeveer 21 cent. Bij een dynamisch contract
+en na 20:00 verandert er niets.
+
+Scenario `vast-kruimelzon` (salderen, zwakke middagzon, de batterij doet zelf nul op
+10%, driefasige bus op 40% om 15:00): met v0.108.4 4 wissels, 1,1 kWh zon en 12,0 kWh
+van het net, € 3,62, 10,9 A op de zwaarste fase en de batterij twee keer van stand
+gewisseld; nu 2 wissels, alles na 20:00, € 3,68 (gelijk aan het optimum), 7,4 A.
+Proef 30 en 72 in test_planner.py.
+
+De zin "Er is 0,0 kW zon over" laat het getal weg als het in een tiende kW op nul
+uitkomt. Bij een vast contract vóór 20:00 kan dat nu niet meer voorkomen.

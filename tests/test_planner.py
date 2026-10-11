@@ -643,8 +643,19 @@ controle("en zegt hoe laat hij begint", "1" in d.plan and "Van plan" in d.plan, 
 # dus (0,9 x 0,019 + 3,2 x 0,242) / 4,1 = 0,19 per kWh, tegen 0,242 vanavond.
 # Die 0,9 kW is straks weg, en de 3,2 die je erbij koopt kost vanavond precies
 # hetzelfde. Wachten laat dus geld liggen.
+#
+# **Sinds 11-10-2026 (v0.109.0) pas vanaf een kwart van de ondergrens** (`ZON_AANDEEL`),
+# bij een vast contract vóór de avond ook voor het uur van nu. Die dag opende 0,5 kW
+# (12%) bij de eigenaar drie keer een uur van het net; hij koos "25%, je regel van
+# 17-09". De 0,9 kW van hierboven is 22% van 4,14 kW en wacht dus voortaan; met
+# 1,2 kW (29%) is de som van 30-08 nog precies dezelfde.
+DERDE_ZON = Grid(surplus_w=1200.0, phase_amps=[4.0, 3.0, 3.0], fuse_amps=25.0)
 d = ochtend_besluit(voorspeld=DAG_LEEG)
 print(f"  zelfde ochtend, maar de dag is op  {d.rule}: {d.amps} A  {d.reason}")
+controle("0,9 kW is minder dan een kwart van de ondergrens: bij een vast contract wacht hij",
+         not d.charge and d.rule == "wait-for-sun", f"{d.rule} {d.amps} A")
+d = ochtend_besluit(net=DERDE_ZON, voorspeld=DAG_LEEG)
+print(f"  met 1,2 kW over                    {d.rule}: {d.amps} A  {d.reason}")
 controle("te weinig zon op komst: dan pakt hij wat er is",
          d.charge and d.rule == "surplus", f"{d.rule} {d.amps} A")
 controle("op de ondergrens, want meer geeft het dak niet", d.amps == MIN_AMPS,
@@ -658,7 +669,7 @@ controle("genoeg overschot: gewoon laden", d.charge and d.rule == "surplus",
          f"{d.rule} {d.amps} A")
 
 # Zonder verwachting is er niets om op te wachten, en de zon van nu telt gewoon.
-d = ochtend_besluit(zon=Sun(remaining_kwh=None, now_w=2200.0, next_w=2600.0))
+d = ochtend_besluit(net=DERDE_ZON, zon=Sun(remaining_kwh=None, now_w=2200.0, next_w=2600.0))
 print(f"  zonder zonverwachting  {d.rule}: {d.amps} A")
 controle("zonder verwachting pakt hij de zon van nu", d.charge, f"{d.rule} {d.amps} A")
 
@@ -3248,6 +3259,50 @@ for naam, kreeg, hoort in k71:
     controle(f"kies_fasen: {naam}", kreeg == hoort, f"{kreeg} in plaats van {hoort}")
 controle("op_zon: ook met wekken en doorladen erachter",
          op_zon(bs("zon-modus+wake")) and op_zon(bs("surplus+near")) and not op_zon(bs("cheap-hour")), "")
+
+print("=== 72. een kruimel zon opent bij een vast contract geen uur van het net meer (v0.109.0) ===")
+# De eigenaar op 11-10-2026, bus op 42% om 15:22, klaar 06:00, vast contract. De meter
+# zag 510 W over: de thuisbatterij die in zijn eigen stand van het dak laadde. Dat
+# opende het lopende uur ("wat zon, aangevuld tot de ondergrens"), de bus werd gewekt
+# op 16 A en laadde een uur bijna alles van het net. Om 16:06 en 17:05 nog eens, de
+# laatste keer met 0,016 kWh zon tegen 3,77 kWh. Hij koos: een kwart van de
+# ondergrens, zijn regel van 17-09 (`ZON_AANDEEL`), nu ook voor het uur van nu.
+NU72 = dt.datetime(2026, 10, 11, 15, 22)
+KLAAR72 = dt.datetime(2026, 10, 12, 6, 0)
+AUTO72 = Car(capacity_kwh=19.7, phases=3, soc_percent=42.0, target_percent=80.0)
+PAAL72 = Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.0)
+VENSTER72 = Window(enabled=True, opens=None, deadline=KLAAR72)
+
+
+def besluit72(over_w, prijzen=None, nu=NU72, tarief=VAST):
+    return decide(nu, prijzen or [], Grid(surplus_w=over_w, phase_amps=[2.0, 1.0, 1.0], fuse_amps=25.0),
+                  AUTO72, PAAL72, VENSTER72, tariff=tarief,
+                  sun=Sun(remaining_kwh=0.5, now_w=over_w, next_w=0.0), forecast=Forecast())
+
+
+for over72, wanneer72 in ((510.0, "15:22, de batterij laadt 510 W"), (30.0, "16:06, vrijwel niets")):
+    d72 = besluit72(over72)
+    print(f"  {wanneer72}: {d72.rule} {d72.amps} A  {d72.reason}")
+    controle(f"vast, {wanneer72}: hij wacht tot 20:00",
+             not d72.charge and d72.rule == "wait-for-sun", f"{d72.rule} {d72.amps} A")
+d72 = besluit72(1200.0)
+controle("vast, 1,2 kW over (29%): dat is wel een zonuur, op de ondergrens",
+         d72.charge and d72.rule == "surplus" and d72.amps == MIN_AMPS, f"{d72.rule} {d72.amps} A")
+# Na 20:00 mag het net toch al (eis 4), dan blijft de kruimel gewoon in de prijs.
+na72 = planner.schijven(dt.datetime(2026, 10, 11, 20, 30), [], Grid(surplus_w=510.0), AUTO72, 16,
+                        None, KLAAR72, VAST, Forecast())
+controle("na 20:00 telt dezelfde 510 W wel, als vloerschijf",
+         any(s.kind == "vloer" and s.start.hour == 20 for s in na72), f"{[(s.kind, s.start.hour) for s in na72]}")
+# Bij een dynamisch contract beslist de prijs van het uur, zoals altijd.
+prijzen72 = []
+for uur72 in range(15, 30):
+    begin72 = dt.datetime(2026, 10, 11, 0, 0) + dt.timedelta(hours=uur72)
+    prijzen72.append({"start": begin72, "end": begin72 + dt.timedelta(hours=1),
+                      "price": 0.10 if uur72 == 15 else 0.30, "feed_in": 0.05})
+dyn72 = planner.schijven(NU72, prijzen72, Grid(surplus_w=510.0), AUTO72, 16, None, KLAAR72,
+                         DYNAMISCH, Forecast())
+controle("dynamisch: de 510 W van nu blijft een vloerschijf",
+         any(s.kind == "vloer" and s.start.hour == 15 for s in dyn72), f"{[(s.kind, s.start.hour) for s in dyn72]}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
