@@ -286,6 +286,31 @@ def paal_stand(stand: dict[str, Any] | None) -> str:
     return "wacht"
 
 
+def paal_modus_actief(stand: dict[str, Any] | None) -> str:
+    """Welke modus er deze beurt echt geldt, als sleutel van de select (v0.111.1).
+
+    Een planning wint van Continu en Zon; alleen Snel gaat erboven (docs/laadpaal.md,
+    "Een planning wint"). Of er deze beurt een planning geldt staat in `planned`
+    (het venster van vandaag), niet in "schema aan": een weekschema kan vandaag uit
+    staan, en dan geldt de modus wel. De lovelace-sessie op 11-10-2026: bij de
+    eigenaar stond de paal op zon terwijl het schema won; welke knop is dan aan?
+    """
+    st = stand or {}
+    modus = str(st.get("mode") or "goedkoopst")
+    if modus == "snel":
+        return "snel"
+    if st.get("planned"):
+        return "planning"
+    return modus if modus in ("continu", "zon") else "planning"
+
+
+def paal_modus_keuzes(stand: dict[str, Any] | None) -> list[str]:
+    """Welke knoppen er deze beurt iets doen: met een planning alleen Planning en Snel."""
+    if (stand or {}).get("planned"):
+        return ["planning", "snel"]
+    return list(PAAL_MODI)
+
+
 def paal_blokken(stand: dict[str, Any] | None) -> list[dict[str, Any]]:
     """De tijdlijn van de coachkaart, met tijden met zone."""
     blokken = ((stand or {}).get("plan_ahead") or {}).get("blocks") or []

@@ -39,7 +39,8 @@ from homeassistant.util import dt as dt_util
 from .const import EVENT_DECISION, EVENT_SETTINGS_UPDATED, PROGRAMMA_TYPES
 from .entiteit import (
     CONTRACT, CoachEntiteit, apparaat_info, async_per_apparaat, entiteiten_van, met_zone,
-    oude_coach_opruimen, paal_blokken, paal_schema, paal_sessie, paal_stand, paal_tekst,
+    oude_coach_opruimen, paal_blokken, paal_modus_actief, paal_modus_keuzes, paal_schema, paal_sessie,
+    paal_stand, paal_tekst,
 )
 from .planner import _dag_om
 from .storage import async_get_store
@@ -273,6 +274,11 @@ class LaadpaalCoachSensor(CoachEntiteit, SensorEntity):
             "doel_beurt": bool(st.get("target_session")),
             "modus": "planning" if modus == "goedkoopst" else modus,
             "modus_beurt": bool(st.get("mode_session")) or modus == "snel",
+            # Welke modus er echt geldt en welke knoppen iets doen (v0.111.1): een
+            # planning wint van Continu en Zon.
+            "modus_actief": paal_modus_actief(st),
+            "modus_keuzes": paal_modus_keuzes(st),
+            "planning_nu": bool(st.get("planned")),
             "pauze": bool(st.get("paused")),
             "expected_done": met_zone(plan.get("expected_done")),
             "kwh_needed": plan.get("kwh_needed"),
