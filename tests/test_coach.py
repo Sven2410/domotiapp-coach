@@ -8026,13 +8026,29 @@ controle("met een planning geldt Planning, ook als de paal op zon staat; Snel ga
          and ent144.paal_modus_actief({"mode": "snel", "planned": True}) == "snel"
          and ent144.paal_modus_actief({"mode": "zon", "planned": False}) == "zon"
          and ent144.paal_modus_actief({"mode": "goedkoopst", "planned": False}) == "planning", "")
-controle("en dan doen alleen Planning en Snel iets",
-         ent144.paal_modus_keuzes({"planned": True}) == ["planning", "snel"]
-         and ent144.paal_modus_keuzes({"planned": False}) == ["planning", "snel", "continu", "zon"], "")
+# Planning is geen knop maar wat het schema aanzet (v0.112.3): de eigenaar op
+# 11-10-2026, "wat is de knop planning", en hij koos de knoppen van de coach.
+controle("de knoppen zijn die van de coachkaart: met een planning alleen Snel, zonder Snel, Continu en Zon",
+         ent144.paal_modus_keuzes({"planned": True}) == ["snel"]
+         and ent144.paal_modus_keuzes({"planned": False}) == ["snel", "continu", "zon"], "")
 controle("de sensor en de select zeggen wat er geldt",
          a144["modus_actief"] == "planning" and a144["planning_nu"] is True
-         and a144["modus_keuzes"] == ["planning", "snel"] and modus144.current_option == "planning",
+         and a144["modus_keuzes"] == ["snel"] and modus144.current_option == "planning",
          f"{a144['modus_actief']} {a144['modus_keuzes']} {modus144.current_option}")
+# Nog een keer op de knop die aan staat: terug naar de voorkeur, zoals op de
+# coachkaart. Met alleen Snel kreeg je hem anders niet meer uit.
+aangeroepen144.clear()
+bewaard144 = modus144._stand
+modus144._stand = {**bewaard144, "mode": "snel", "planned": True}
+asyncio.run(modus144.async_select_option("snel"))
+modus144._stand = {**bewaard144, "mode": "zon", "mode_session": True, "planned": False}
+asyncio.run(modus144.async_select_option("zon"))
+modus144._stand = {**bewaard144, "mode": "zon", "mode_session": False, "planned": False}
+asyncio.run(modus144.async_select_option("snel"))
+modus144._stand = bewaard144
+controle("Snel nog een keer zet hem uit, net als een gekozen Zon; een andere knop kiest gewoon",
+         aangeroepen144 == [("modus", "dev-laadpaal", ""), ("modus", "dev-laadpaal", ""),
+                            ("modus", "dev-laadpaal", "snel")], f"{aangeroepen144}")
 asyncio.run(schema144.async_turn_off())
 uit144 = store144.instellingen["strategy"]["schedules"][0]["enabled"]
 asyncio.run(klaar144.async_set_value(dt.time(7, 15)))

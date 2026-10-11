@@ -948,7 +948,7 @@ attributen, niet de tekst.
 | entiteit | translation_key | wat |
 |---|---|---|
 | sensor | `coach` | state "Laadt op zon", "Wacht tot 20:00", "Vol", ...; de rest in de attributen |
-| select | `modus` | `planning`, `snel`, `continu`, `zon`, voor deze beurt (`async_mode`) |
+| select | `modus` | `planning`, `snel`, `continu`, `zon`, voor deze beurt (`async_mode`); nog een keer de actieve kiezen gaat terug naar de voorkeur (v0.112.3) |
 | switch | `pauze` | via de coach (`async_pause`), vervalt als de kabel eruit gaat |
 | switch | `schema` | de planning met een klaar-tijd aan of uit |
 | time | `klaar_om` | de tijd voor elke dag; `unavailable` zolang het schema per dag is |
@@ -978,8 +978,8 @@ callback). Proef 144 in test_coach.py.
 de select op "zon" (de voorkeur van zijn paal) terwijl het schema won; welke knop is dan
 aan? Nu zegt de coach het zelf: `modus_actief` (`snel` als snelladen aan staat, anders
 `planning` als er deze beurt een planning geldt, anders de modus; `paal_modus_actief`),
-`modus_keuzes` (met een planning alleen `planning` en `snel`, want Continu en Zon doen dan
-niets; `paal_modus_keuzes`) en `planning_nu` (het venster van vandaag, niet "schema aan":
+`modus_keuzes` (welke knoppen er zijn; sinds v0.112.3 zonder Planning, zie hieronder;
+`paal_modus_keuzes`) en `planning_nu` (het venster van vandaag, niet "schema aan":
 een weekschema kan vandaag uit staan). De select toont `modus_actief` als toestand. Proef
 144.
 
@@ -998,3 +998,16 @@ verslag zei 12,5 kWh, precies de teller, terwijl de paal 15,0 zei en het geld 15
 Nu gaat de staart mee in de bewaarde beurt (`staart_kwh` in `_sessie_bewaren`), telt hij
 na een herstart mee bovenop wat de nieuwe coach zelf telt (`staart_hervat`), en vervalt hij
 zodra de teller weer stapt, want dan zit hij in de teller. Proef 145 in test_coach.py.
+
+**Planning is geen knop (v0.112.3).** De eigenaar op 11-10-2026 bij de laadpaalkaart 0.59.0: met het
+schema uit stonden er vier modusknoppen, afgekapt op de pc en nog meer op de telefoon, en "wat is
+de knop planning". Planning is wat het schema aanzet; zonder schema betekende die knop Goedkoopst,
+dat in de coach een voorkeur is en geen knop (zie Zonder planning bepaalt de modus, v0.87.0). Hij
+koos de knoppen van de coachkaart: `modus_keuzes` is met een planning voor vandaag `["snel"]`,
+zonder `["snel", "continu", "zon"]` (`paal_modus_keuzes`). De select houdt zijn vier opties en
+`modus_actief` blijft `planning` als die geldt; de kaart zet dat als toestand neer naast Snel.
+Nog een keer de modus kiezen die al geldt gaat terug naar de voorkeur (`async_mode(device, "")`),
+voor Snel en voor een gekozen Continu of Zon, zoals op de coachkaart; daarvoor kreeg je Snel van
+de kaart niet meer uit tot de kabel eruit ging. En zonder auto (`geen_auto`) laat de kaart het
+percentage weg: "Als er geen auto aan hangt moet hij dat zeggen en de percentages weg laten."
+De coach geeft `soc` wel door, als laatst bekende stand. Proef 144.
