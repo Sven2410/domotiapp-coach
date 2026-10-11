@@ -2117,5 +2117,22 @@ if (vl := v("batterij-paal-stopt")):
              bool(erna) and erna[0][1] < -100 and erna[0][0] - klaar <= virtueel.dt.timedelta(seconds=15),
              f"{[(f'{t:%H:%M:%S}', round(w)) for t, w in erna[:2]]}")
 
+# De eigenaar op 11-10-2026: een paar honderd watt zon, die de thuisbatterij in zijn eigen
+# stand van het dak laadde, opende bij een vast contract drie keer een uur van het net
+# en liet de bus steeds wekken. Sinds v0.109.0 telt het lopende uur pas vanaf een
+# kwart van de ondergrens (`ZON_AANDEEL`). Met v0.108.4 gaf dit scenario 4 wissels,
+# 1,1 kWh zon en 12,0 kWh van het net, € 3,62, 10,9 A op de zwaarste fase; nu 2
+# wissels, alles na 20:00, € 3,68, 7,4 A.
+if (vl := v("vast-kruimelzon")):
+    voor_avond = vl.net_kwh_tussen("15:00", "20:00")
+    print(f"  kruimelzon: {vl.wissels()} wissels, {voor_avond:.2f} kWh van het net voor 20:00, "
+          f"€{vl.kosten:.2f} tegen optimum €{vl.optimum or 0:.2f}, zware fase {vl.hoogste_fase:.1f} A")
+    controle("kruimelzon: een paar honderd watt zon wekt de bus niet: hij gaat één keer aan en uit",
+             vl.wissels() <= 2, f"{vl.wissels()} wissels")
+    controle("kruimelzon: vóór 20:00 niets van het net (eis 4)", voor_avond < 0.1, f"{voor_avond:.2f} kWh")
+    controle("kruimelzon: de klaar-tijd gehaald", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+    controle("kruimelzon: en het kost niet meer dan het optimum met een dubbeltje marge",
+             vl.optimum is not None and vl.kosten <= vl.optimum + 0.10, f"€{vl.kosten:.2f} tegen €{vl.optimum}")
+
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

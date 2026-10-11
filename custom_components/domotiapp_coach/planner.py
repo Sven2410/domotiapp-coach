@@ -1663,6 +1663,8 @@ def schijven(
                     )
             elif (piek_dicht(prices) and in_evening_peak(rij["start"])) or (
                 not nu_blok and over < vloer_kwh * ZON_AANDEEL
+            ) or (
+                not prices and rij["end"] <= netto_vanaf and over < vloer_kwh * ZON_AANDEEL
             ):
                 # Bijkopen tot de ondergrens is ook net, en in de avondpiek
                 # komt er niets van het net bij. De zon van dat uur is dan te
@@ -1687,6 +1689,20 @@ def schijven(
                 # zwaarder dan op een iets goedkopere prijs laden in de
                 # nacht." Een uur met zon is een zonuur, ook als er net bij
                 # moet; een uur zonder zon wacht op de prijzen.
+                #
+                # **Bij een vast contract vóór de avond ook voor het uur van nu**
+                # (v0.109.0). Daar kost elk uur van het net hetzelfde, dus maakte
+                # elke kruimel gemeten zon het lopende uur goedkoper dan 20:00,
+                # en ging de avondregel (eis 4) open voor bijna alles van het
+                # net. Bij de eigenaar op 11-10-2026 drie keer: om 15:22 en 17:05
+                # 510 en 520 W, en dat was de thuisbatterij die in zijn eigen
+                # stand van het dak laadde (12% van de ondergrens van 4,14 kW;
+                # na het overnemen was het weg), en om 16:06 vrijwel niets. Elke
+                # keer de bus wekken op 16 A en laden van het net. Het geval
+                # van 30-08-2026 hierboven (0,9 kW, 22%) valt daarmee ook onder
+                # de grens; de eigenaar koos dat bewust: "25%, je regel van
+                # 17-09". Bij een dynamisch contract beslist de prijs van het uur,
+                # en na 20:00 mag het net toch al.
                 pass
             else:
                 gedekt = min(vloer_kwh, plafond_kwh)
@@ -3370,12 +3386,16 @@ def _decide(
         # ondergrens van de paal het antwoord en zit het bijkopen al in de prijs
         # waarop dit uur gekozen is.
         hoeveel = f"{grid.surplus_w / 1000:.1f}".replace(".", ",")
+        # "Er is 0,0 kW zon over. ... goedkoper" zei de kaart bij de eigenaar op
+        # 11-10-2026 om 16:06 en 17:09. Is het overschot te klein om in een
+        # tiende kW te noemen, dan noemt hij het niet.
+        zon_zin = f"Er is {hoeveel} kW zon over. " if hoeveel != "0,0" else ""
         return Decision(
             True,
             MIN_AMPS if nu_vloer else amps_zon,
             (
-                f"Er is {hoeveel} kW zon over. Met de ondergrens van je paal erbij "
-                "is dit uur goedkoper dan wachten op het net."
+                f"{zon_zin}Met de ondergrens van je paal erbij is dit uur goedkoper "
+                "dan wachten op het net."
                 if nu_vloer
                 else f"Er is {hoeveel} kW zon over en die is goedkoper dan het net. "
                 "De rest haalt hij op een uur dat minder kost."
