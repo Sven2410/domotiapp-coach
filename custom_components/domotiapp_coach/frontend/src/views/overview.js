@@ -40,6 +40,7 @@ import {
   planSummary,
   planTimes,
 } from "../schedule-sheet.js";
+import { heeftVoorkeuren } from "../voorkeur-velden.js";
 import "../plan-ahead-sheet.js";
 import {
   OVERVIEW_CARDS,
@@ -122,7 +123,7 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
       tag: "Instellen",
       title: "Koppel je sensoren",
       body:
-        "De coach weet nog niet welke sensoren jouw opwek, verbruik en meterstand meten. Ga naar Instellingen en kies ze onder Energiebronnen. Daarna vult dit scherm zich met je eigen cijfers.",
+        "De coach weet nog niet welke sensoren jouw opwek, verbruik en meterstand meten. Ga naar Installatie en kies ze onder Energiebronnen. Daarna vult dit scherm zich met je eigen cijfers.",
     };
   }
 
@@ -132,7 +133,7 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
       tag: "Let op",
       title: "Geen meetwaarden",
       body:
-        "De gekozen sensoren geven op dit moment niets bruikbaars terug. Controleer onder Instellingen of ze nog bestaan en of ze een waarde hebben.",
+        "De gekozen sensoren geven op dit moment niets bruikbaars terug. Controleer onder Installatie of ze nog bestaan en of ze een waarde hebben.",
     };
   }
 
@@ -643,9 +644,11 @@ class DacViewOverview extends DacElement {
       display: flex; flex-wrap: wrap; gap: 8px;
     }
     .steer-actions button { flex: 1 1 170px; }
+    .steer-actions button.instellen { flex: 1 1 100%; }
     @media (max-width: 560px) {
       .steer-actions button { flex: 1 1 calc(50% - 4px); padding: 9px 10px; font-size: 13px; }
       .steer-actions .plan-row .plan-prio, .steer-actions .plan-row .plan-link { flex: 1 1 100%; }
+      .steer-actions button.instellen { flex: 1 1 100%; }
     }
 
     /* Voor de eigen display-regel hieronder uit, anders wint die van het
@@ -2600,13 +2603,21 @@ class DacViewOverview extends DacElement {
               </div>
               <div class="plan-row">
                 <!-- Het keuzelijstje "Prioriteit" stond hier tot v0.93.0. Wie
-                     voorgaat op de aansluiting staat nu op Strategie, in de
+                     voorgaat op de aansluiting staat nu op Voorkeuren, in de
                      voorrang bij planningen, voor alle apparaten samen. -->
                 <button type="button" class="plan-link" data-plan-link="${slot}">
-                  ${icons.sliders} Schema instellen
+                  ${icons.sliders} Instellen
                 </button>
               </div>
             </div>
+            <!-- Instellen (v0.114.0): wat de bewoner aan dit apparaat kiest, voor
+                 een apparaat zonder schema, op de plek waar anders het schema
+                 staat. Met een schema zit het achter de knop daar, in dezelfde
+                 pop-up. Over de hele breedte, anders komt hij naast "tot 50 %"
+                 van Nu leegladen te staan en leest dat als één knop. -->
+            <button class="manual instellen" type="button" data-settings="${slot}" hidden>
+              ${icons.sliders}<span>Instellen</span>
+            </button>
             <button class="release" type="button" data-release="${slot}" aria-pressed="false">
               <span class="mark" data-mark="${slot}"></span>
               <span data-release-text="${slot}"></span>
@@ -2733,6 +2744,9 @@ class DacViewOverview extends DacElement {
     }
     for (const button of this.$$("[data-manual]")) {
       button.addEventListener("click", () => this.openManual_(Number(button.dataset.manual)));
+    }
+    for (const button of this.$$("[data-settings]")) {
+      button.addEventListener("click", () => this.openSchedule_(Number(button.dataset.settings)));
     }
     for (const tab of this.$$("[data-tab]")) {
       tab.addEventListener("click", () => this.selectSteer_(Number(tab.dataset.tab)));
@@ -2986,6 +3000,8 @@ class DacViewOverview extends DacElement {
     // maar heeft geen klaar-tijd om van terug te rekenen, en een schuif die
     // nergens op aangrijpt is erger dan geen schuif.
     blok.hidden = !canHaveDeadline(device);
+    const instellen = this.$(`[data-settings="${slot}"]`);
+    if (instellen) instellen.hidden = !blok.hidden || !heeftVoorkeuren(device);
     if (blok.hidden) return;
 
     const plan = planFor(this.settings_, device.id);

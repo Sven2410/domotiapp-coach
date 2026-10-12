@@ -20,12 +20,15 @@ export const NAV_ITEMS = [
   { id: "overzicht", label: "Overzicht", icon: "gauge" },
   { id: "historie", label: "Historie", icon: "gauge" },
   { id: "meldingen", label: "Meldingen", icon: "bell" },
+  // Heette Strategie tot v0.114.0; het id blijft, zodat een bladwijzer werkt.
+  { id: "strategie", label: "Voorkeuren", icon: "compass" },
+  // Van de installateur, en de bewoner ziet ze niet, ook niet grijs (v0.114.0).
+  // De eigenaar op 08-10-2026: "voorop staat dat de klant geen entiteiten moet
+  // kunnen kiezen". Wat hij wel instelt staat achter de kaart (Instellen), onder
+  // Voorkeuren en onder Meldingen. Instellingen is opgegaan in Installatie.
   { id: "apparaten", label: "Apparaten", icon: "devices", adminOnly: true },
-  { id: "strategie", label: "Strategie", icon: "compass" },
-  { id: "installatie", label: "Installatie", icon: "plug" },
-  // Points straight at raw entities, so it is for the installer only. Customers
-  // do get Installatie, where the same configuration is shown in their terms.
-  { id: "instellingen", label: "Instellingen", icon: "sliders", adminOnly: true },
+  { id: "installatie", label: "Installatie", icon: "plug", adminOnly: true },
+  { id: "contract", label: "Contract", icon: "euro", adminOnly: true },
 ];
 
 /** The sections this user may open. */

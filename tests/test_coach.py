@@ -7717,8 +7717,10 @@ eigen139 = [b["event"]["settings"]["notifications"]["people"] for b in bewoner13
 print(f"  bewoner: {len(bewoner139.berichten)} berichten, personen {[[p['name'] for p in m] for m in eigen139]}")
 controle("de bewoner krijgt het besluit van de coach", any(
     b["id"] == 8 and b["event"].get("amps") == 16 for b in bewoner139.berichten), f"{bewoner139.berichten}")
-controle("en van de instellingen alleen zichzelf, zoals bij settings/get",
-         eigen139 == [[mensen139[1]]], f"{eigen139}")
+# Tot v0.114.0 zag een bewoner hier alleen zichzelf. De eigenaar op 12-10-2026:
+# de bewoner beheert de personen en ziet iedereen, "Ja dat mag de bewoner."
+controle("en van de instellingen iedereen, zoals bij settings/get (v0.114.0)",
+         eigen139 == [mensen139], f"{eigen139}")
 controle("de beheerder krijgt alle personen", any(
     b["id"] == 7 and len(b["event"]["settings"]["notifications"]["people"]) == 2 for b in beheer139.berichten), "")
 bewoner139.subscriptions[8]()
@@ -8307,6 +8309,127 @@ hass149.states.zet("sensor.laadpaal_status", "awaiting_start")
 net149, _, _, _ = coach149._read(NU149 + dt.timedelta(minutes=8), instellingen(), LAADPAAL)
 controle("een paal die niet laadt heeft geen klok", net149.achter_s == 0.0 and not coach149._achter_sinds,
          f"{net149.achter_s} {coach149._achter_sinds}")
+
+print("=== 150. de bewoner stelt zelf in: voorkeuren, personen en het overzicht (v0.114.0) ===")
+# De eigenaar op 12-10-2026: wat de klant moet kunnen instellen komt in een pop-up
+# achter de kaart, de personen bij Meldingen beheert hij zelf, en "voorop staat dat
+# de klant geen entiteiten moet kunnen kiezen". Drie eigen commando's die alleen
+# hun eigen velden aannemen; geen admin-slot gaat open.
+apparaten150 = [
+    {"id": "paal", "type": "laadpaal", "entity": "sensor.p", "charge_mode": "zon", "continuous_amps": 6,
+     "cars": [{"id": "c1", "name": "Bus", "target_percent": 100, "wake_mode": "manual", "max_amps": 16}]},
+    {"id": "accu", "type": "thuisbatterij", "battery": {"capacity_kwh": 10, "reserve_enabled": False}},
+    {"id": "vaat", "type": "vaatwasser", "release_required": True},
+]
+voor150 = [dict(a) for a in apparaten150]
+na150 = storage.voorkeuren_bijwerken(apparaten150, "paal", {
+    "charge_mode": "continu", "continuous_amps": 10, "cars": [{"id": "c1", "target_percent": 80}]})
+paal150 = next(a for a in na150 if a["id"] == "paal")
+controle("laadpaal: modus, stroom en laden tot van de auto veranderen",
+         paal150["charge_mode"] == "continu" and paal150["continuous_amps"] == 10
+         and paal150["cars"][0]["target_percent"] == 80 and paal150["cars"][0]["max_amps"] == 16,
+         f"{paal150}")
+controle("de lijst die erin ging is niet veranderd", apparaten150 == voor150, "")
+na150 = storage.voorkeuren_bijwerken(apparaten150, "accu", {"battery": {"reserve_enabled": True, "reserve_percent": 30}})
+accu150 = next(a for a in na150 if a["id"] == "accu")["battery"]
+controle("batterij: wat jij wilt verandert, de capaciteit blijft",
+         accu150 == {"capacity_kwh": 10, "reserve_enabled": True, "reserve_percent": 30}, f"{accu150}")
+na150 = storage.voorkeuren_bijwerken(apparaten150, "vaat", {"release_required": False})
+controle("vaatwasser: het vinkje vrijgeven",
+         next(a for a in na150 if a["id"] == "vaat")["release_required"] is False, "")
+geweigerd150 = []
+for apparaat150, wijziging150 in (
+    ("paal", {"entity": "sensor.x"}),
+    ("paal", {"cars": [{"id": "c1", "max_amps": 32}]}),
+    ("paal", {"battery": {"trade": True}}),
+    ("accu", {"battery": {"capacity_kwh": 99}}),
+    ("accu", {"charge_mode": "zon"}),
+    ("vaat", {"continuous_amps": 16}),
+):
+    try:
+        storage.voorkeuren_bijwerken(apparaten150, apparaat150, wijziging150)
+    except ValueError:
+        geweigerd150.append(apparaat150)
+controle("een entiteit, een grens van de hardware of een veld van een ander type: geweigerd",
+         len(geweigerd150) == 6, f"{geweigerd150}")
+for apparaat150, wijziging150 in (("weg", {"charge_mode": "zon"}), ("paal", {"cars": [{"id": "c9", "target_percent": 50}]})):
+    try:
+        storage.voorkeuren_bijwerken(apparaten150, apparaat150, wijziging150)
+        controle(f"onbekend {apparaat150}: een fout", False, "geen fout")
+    except KeyError:
+        controle(f"onbekend apparaat of auto ({apparaat150}): KeyError", True, "")
+
+# De personen: de koppeling aan een gebruiker blijft van de admin.
+inst150 = {"notifications": {"people": [
+    {"id": "p-1", "name": "Eigenaar", "target": "mobile_app_a", "user_id": "u-1", "kinds": {"besluit": True}},
+    {"id": "p-2", "name": "Partner", "target": "mobile_app_b", "user_id": "u-2", "kinds": {}},
+]}}
+mensen150 = ontv.huishouden_bijwerken(inst150, [
+    {"id": "p-1", "name": "Ik", "target": "mobile_app_a", "user_id": "u-9", "kinds": {"besluit": False}},
+    {"name": "Oppas", "target": "mobile_app_c", "user_id": "u-1"},
+])
+print(f"  personen: {[(m['id'][:2], m['name'], m['user_id']) for m in mensen150]}")
+controle("een bestaande persoon houdt zijn koppeling, ook als er een andere meekomt",
+         mensen150[0]["id"] == "p-1" and mensen150[0]["user_id"] == "u-1" and mensen150[0]["name"] == "Ik"
+         and mensen150[0]["kinds"]["besluit"] is False, f"{mensen150[0]}")
+controle("een nieuwe persoon krijgt een id en geen koppeling",
+         mensen150[1]["id"].startswith("p-") and mensen150[1]["id"] not in ("p-1", "p-2")
+         and mensen150[1]["user_id"] == "", f"{mensen150[1]}")
+controle("wie er niet meer in staat is weg", [m["name"] for m in mensen150] == ["Ik", "Oppas"], "")
+
+
+class _Verbinding150:
+    def __init__(self):
+        self.user = _types.SimpleNamespace(is_admin=False, id="u-2")
+        self.resultaten, self.fouten = [], []
+
+    def send_result(self, i, resultaat=None):
+        self.resultaten.append(resultaat)
+
+    def send_error(self, i, code, tekst):
+        self.fouten.append((code, tekst))
+
+
+opslag150 = NepStore({"devices": [dict(a) for a in apparaten150], "notifications": dict(inst150["notifications"])})
+hass150 = _types.SimpleNamespace(bus=_types.SimpleNamespace(async_fire=lambda *a, **k: None),
+                                 data={"domotiapp_coach": {"store": opslag150}})
+v150 = _Verbinding150()
+asyncio.run(ws139.async_set_device_preferences(hass150, v150, {
+    "id": 1, "type": "domotiapp_coach/device/preferences", "device_id": "paal", "solar_start_percent": 50}))
+controle("device/preferences slaat op voor een bewoner",
+         next(a for a in opslag150.instellingen["devices"] if a["id"] == "paal").get("solar_start_percent") == 50,
+         f"{v150.fouten}")
+asyncio.run(ws139.async_set_device_preferences(hass150, v150, {
+    "id": 2, "type": "domotiapp_coach/device/preferences", "device_id": "accu", "charge_mode": "zon"}))
+controle("en weigert een veld dat niet bij het type hoort, met een fout",
+         v150.fouten and v150.fouten[-1][0] == "invalid_format", f"{v150.fouten}")
+asyncio.run(ws139.async_set_household(hass150, v150, {"id": 3, "type": "domotiapp_coach/notifications/household",
+    "notifications": {"people": [{"id": "p-2", "name": "Partner", "target": "mobile_app_b", "user_id": ""}],
+                      "load_alert": {"threshold_percent": 90}}}))
+mensen150 = opslag150.instellingen["notifications"]["people"]
+controle("notifications/household: personen en drempel, de koppeling blijft",
+         len(mensen150) == 1 and mensen150[0]["user_id"] == "u-2"
+         and opslag150.instellingen["notifications"]["load_alert"] == {"threshold_percent": 90}, f"{mensen150}")
+
+# Elk van de drie staat open voor iedereen en is aangemeld; `strategy/set` neemt
+# geen schema's meer aan (die gingen terug als Strategie met een oude kopie opsloeg).
+for naam150 in ("device/preferences", "notifications/household", "display/set"):
+    blok150 = bron49.split(f'"domotiapp_coach/{naam150}"')[0].rsplit("\n\n\n", 1)[-1]
+    controle(f"{naam150}: niet alleen voor de beheerder", "require_admin" not in blok150, blok150[-120:])
+controle("de drie zijn aangemeld",
+         {"async_set_device_preferences", "async_set_household", "async_set_display"} <= aangemeld49, "")
+strategie150 = bron49.split("_STRATEGY = _schema(")[1].split("\n)\n")[0]
+controle("strategy/set kent geen schema's meer", '"schedules"' not in strategie150, "")
+# De grenzen voor de bewoner zijn dezelfde als die van de installateur.
+accu_bron150 = bron49.split("_BATTERY = _schema(")[1].split("\n)\n")[0]
+voorkeur_bron150 = bron49.split("_BATTERY_VOORKEUREN = vol.Schema(")[1].split("\n)\n")[0]
+verschil150 = []
+for veld150 in sorted(storage.VOORKEUREN_ACCU):
+    eigen = _re.search(rf'vol\.Optional\("{veld150}"\): (.+),', voorkeur_bron150)
+    hun = _re.search(rf'vol\.Optional\("{veld150}", default=[^)]*\): (.+),', accu_bron150)
+    if not eigen or not hun or eigen.group(1) != hun.group(1):
+        verschil150.append(veld150)
+controle("de batterijvelden van de bewoner hebben dezelfde grenzen als in _BATTERY", not verschil150, f"{verschil150}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

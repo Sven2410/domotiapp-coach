@@ -1,5 +1,12 @@
 /**
- * Strategie -- what the coach should do on its own, without being watched.
+ * Voorkeuren (tot v0.114.0 Strategie) -- what the coach should do on its own,
+ * without being watched, and how the overview looks.
+ *
+ * Sinds v0.114.0 ook de kleurdrempels en de kaart met de fasen, die in
+ * Instellingen stonden; dat zag alleen de admin. De eigenaar op 12-10-2026: "De
+ * klant mag kiezen en de strategie instellen." Die twee slaan meteen op, via
+ * `display/set`, want ze horen niet bij `strategy` en dit scherm slaat met één
+ * commando op.
  *
  * Sinds 06-09-2026 alleen nog het niveau: hoeveel de coach zelf mag. De
  * melding "Zware belasting" en wie hem krijgt staan in het tabje Meldingen
@@ -82,9 +89,9 @@ class DacViewStrategy extends DacEditorElement {
     return `
       <div class="wrap">
         <header class="intro">
-          <div class="eyebrow">Strategie</div>
+          <div class="eyebrow">Voorkeuren</div>
           <h1>Wat de coach uit zichzelf doet</h1>
-          <p>Hier bepaal je hoeveel de coach zelf mag. Wie welke berichten krijgt staat onder Meldingen.</p>
+          <p>Hier bepaal je hoeveel de coach zelf mag, wie voorgaat en hoe het overzicht eruitziet. Wat je per apparaat wilt stel je in op de kaart van dat apparaat, onder Instellen. Wie welke berichten krijgt staat onder Meldingen.</p>
         </header>
 
         ${adminNoticeHtml}
@@ -179,6 +186,48 @@ class DacViewStrategy extends DacEditorElement {
             </span>
           </label>
         </section>
+
+        <!-- Uit Instellingen (v0.114.0): hoe het overzicht eruitziet. Slaat
+             meteen op, los van de balk hieronder. -->
+        <section class="card" id="weergave">
+          <h2>${icons.sliders} Het overzicht</h2>
+          <p class="hint">Waar de kleuren op het overzicht omslaan van groen naar oranje naar rood. Een wijziging hier slaat meteen op.</p>
+          <div class="fields">
+            <div class="row">
+              <label>Zelfbenutting (%)</label>
+              <div class="two">
+                <div class="row">
+                  <span class="sub">Onder deze waarde rood</span>
+                  <input type="number" id="self-low" data-drempel="self_use.low" min="0" max="100" step="1" inputmode="numeric">
+                </div>
+                <div class="row">
+                  <span class="sub">Vanaf deze waarde groen</span>
+                  <input type="number" id="self-high" data-drempel="self_use.high" min="0" max="100" step="1" inputmode="numeric">
+                </div>
+              </div>
+            </div>
+            <div class="row">
+              <label>Energieprijs (€ per kWh)</label>
+              <div class="two">
+                <div class="row">
+                  <span class="sub">Tot deze prijs groen</span>
+                  <input type="number" id="price-low" data-drempel="price.low" min="0" max="10" step="0.01" inputmode="decimal">
+                </div>
+                <div class="row">
+                  <span class="sub">Boven deze prijs rood</span>
+                  <input type="number" id="price-high" data-drempel="price.high" min="0" max="10" step="0.01" inputmode="decimal">
+                </div>
+              </div>
+            </div>
+            <label class="check" for="phases-overview" id="phases-overview-row">
+              <input type="checkbox" id="phases-overview">
+              <span>
+                <strong>De fasen tonen op het overzicht</strong>
+                Een kaart met de belasting per fase.
+              </span>
+            </label>
+          </div>
+        </section>
       </div>
 
       ${saveBarHtml}
@@ -206,18 +255,60 @@ class DacViewStrategy extends DacEditorElement {
       this.draft_.strategy.night_strategy = event.target.checked;
       this.afterChange_();
     });
+    for (const veld of this.$$("[data-drempel]")) {
+      veld.addEventListener("change", () => {
+        const [soort, rand] = veld.dataset.drempel.split(".");
+        const getal = Number(veld.value);
+        if (veld.value === "" || !Number.isFinite(getal)) return;
+        this.weergave_({ thresholds: { [soort]: { [rand]: getal } } });
+      });
+    }
+    this.$("#phases-overview").addEventListener("change", (event) => {
+      this.weergave_({ phases_on_overview: event.target.checked });
+    });
     this.wireSaveBar_();
     this.paint_();
   }
 
-  /** A schedule for a device that no longer exists is nothing but a leftover. */
-  reconcile_() {
-    const schedules = this.draft_?.strategy?.schedules;
-    if (!Array.isArray(schedules)) return;
+  /**
+   * Zonder de schema's (v0.114.0). Die horen bij de kaarten en gaan via
+   * `device/schedule`; `strategy/set` neemt ze niet meer aan. Bleven ze hier in
+   * de vergelijking, dan stond de balk op "niet opgeslagen" zodra iemand op een
+   * kaart een schema wijzigde terwijl dit scherm openstond.
+   */
+  slice_(settings) {
+    const uit = super.slice_(settings);
+    if (uit.strategy) {
+      const { schedules: _schemas, ...rest } = uit.strategy;
+      uit.strategy = rest;
+    }
+    return uit;
+  }
 
-    const known = new Set((this.draft_?.devices ?? []).map((device) => device.id));
-    const kept = schedules.filter((entry) => known.has(entry.device));
-    if (kept.length !== schedules.length) this.draft_.strategy.schedules = kept;
+  /** Het overzicht meteen opslaan, los van de balk (v0.114.0). */
+  async weergave_(wijziging) {
+    try {
+      const saved = await this.hass_.callWS({ type: "domotiapp_coach/display/set", ...wijziging });
+      this.fire("dac-settings-saved", { settings: saved });
+      this.toast_("Opgeslagen", true);
+    } catch (error) {
+      this.toast_(`Opslaan mislukt: ${error?.message ?? error}`, false);
+    }
+  }
+
+  paintWeergave_() {
+    const d = this.draft_;
+    for (const veld of this.$$("[data-drempel]")) {
+      // Niet overschrijven waar iemand nog in typt.
+      if (this.shadowRoot?.activeElement === veld) continue;
+      const [soort, rand] = veld.dataset.drempel.split(".");
+      veld.value = d?.thresholds?.[soort]?.[rand] ?? "";
+    }
+    this.$("#phases-overview").checked = Boolean(d?.sources?.phases_on_overview);
+    // Alleen waar de fasen ook gemeten worden; anders is er geen kaart te tonen.
+    const rij = this.$("#phases-overview-row");
+    rij.hidden = !d?.sources?.phases_enabled;
+    rij.style.display = rij.hidden ? "none" : "";
   }
 
   blockers_() {
@@ -238,6 +329,7 @@ class DacViewStrategy extends DacEditorElement {
     this.paintZon_();
     this.paintPlan_();
     this.$("#night").checked = this.draft_?.strategy?.night_strategy !== false;
+    this.paintWeergave_();
     this.syncSaveBar_();
   }
 

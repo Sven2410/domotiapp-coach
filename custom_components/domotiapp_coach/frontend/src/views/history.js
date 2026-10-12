@@ -674,7 +674,7 @@ class DacViewHistory extends DacElement {
       this.$("#gas-card").hidden = true;
       this.$("#water-card").hidden = true;
       note.textContent =
-        "Er zijn nog geen meterstanden gekozen. Onder Instellingen bij Meterstanden wijs je de tellers aan; daarna staat hier je geschiedenis.";
+        "Er zijn nog geen meterstanden gekozen. Onder Installatie bij Meterstanden wijs je de tellers aan; daarna staat hier je geschiedenis.";
       return;
     }
 
@@ -690,7 +690,7 @@ class DacViewHistory extends DacElement {
     const zinnen = [];
     if (!roles.solar.length) {
       zinnen.push(
-        "Je opwekteller staat nog niet ingesteld, dus je ziet hier alleen wat er van het net kwam en wat er naar het net ging. Vul bij Instellingen onder Meterstanden de teller van je omvormer in, dan komen je opwek, je verbruik en je zelfbenutting er ook bij te staan."
+        "Je opwekteller staat nog niet ingesteld, dus je ziet hier alleen wat er van het net kwam en wat er naar het net ging. Vul bij Installatie onder Meterstanden de teller van je omvormer in, dan komen je opwek, je verbruik en je zelfbenutting er ook bij te staan."
       );
     }
     if (missing.length) {

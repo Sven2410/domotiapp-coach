@@ -4,6 +4,62 @@ Uit `CLAUDE.md` gehaald op 24-09-2026, zodat dat bestand kort blijft. De eisen
 van de eigenaar en de werkafspraken staan daar en gaan boven alles hier.
 Komt er bij een uitgave iets bij over dit onderwerp, schrijf het dan hier.
 
+## Wie wat ziet: de bewoner en de installateur (v0.114.0)
+
+De eigenaar op 08-10-2026, nadat hij wilde dat een klant zonder beheerrechten
+"overal bij kan": "Ik wil inderdaad niet dat een klant iets kan wijzigen wat
+kritisch is. [...] Voorop staat dat de klant geen entiteiten moet kunnen kiezen,
+alleen bij meldingen de telefoon entiteiten kunnen kiezen." Op 12-10-2026 gaf hij
+de antwoorden op de acht vragen (privénotities, `indeling-bewoner-installateur.md`).
+
+| tab | wie | wat |
+|---|---|---|
+| Overzicht | iedereen | de kaarten, met per apparaat **Instellen** |
+| Historie | iedereen | |
+| Meldingen | iedereen | personen toevoegen en weghalen, de schuiven, de drempels (zware belasting, lekkage, temperatuur van de batterij) |
+| Voorkeuren | iedereen | hoeveel de coach zelf doet, de voorrang, de nacht, en het overzicht (kleurdrempels, de kaart met de fasen) |
+| Apparaten | installateur | alleen de hardware: type, merk, entiteiten, mag sturen, fasen wisselen, de technische kant van de batterij, de auto's (merk, accu, stroom, fasen, sensoren, wekknop), de programmatabel, ruimtes |
+| Installatie | installateur | woning en aansluiting, kasten en groepen, energiebronnen, fasen, zonverwachting, meterstanden, navigatie |
+| Contract | installateur | het contract van nu en de eerdere |
+
+De bewoner ziet de tabs van de installateur niet, ook niet grijs
+(`adminOnly` in header.js). Voorkeuren heette Strategie; het id `strategie`
+bleef, zodat een bladwijzer blijft werken. Instellingen is opgegaan in
+Installatie, het contract kreeg een eigen tab (`views/contract.js`).
+
+**Instellen achter de kaart.** De eigenaar koos "A": één pop-up met het schema
+erin. Dat is `schedule-sheet.js`, met bovenaan het schema (als het apparaat er
+een heeft) en daaronder "Zo wil je het" uit `voorkeur-velden.js`: bij de laadpaal
+de modus zonder planning, continu laden op, zon beginnen vanaf, en per auto
+laden tot en (bij een Tesla met wekknop) hoe vaak hij gewekt wordt; bij de
+thuisbatterij de reserve, handelen, een keer per week vol, de vakantiestand, de
+auto helpen en de ventilator (alleen met een ventilator); bij een vaatwasser die
+zelf kan starten het vinkje vrijgeven. Op de kaart heet de knop bij het schema
+"Instellen"; een apparaat zonder schema met iets in te stellen (de batterij)
+krijgt een eigen knop (`data-settings`). Elk veld slaat meteen op.
+
+**De server dwingt het af.** Geen admin-slot gaat open; de bewoner krijgt eigen
+commando's die alleen hun eigen velden aannemen:
+
+- `device/preferences`: per type de velden uit `VOORKEUREN`, `VOORKEUREN_AUTO`
+  en `VOORKEUREN_ACCU` in storage.py (`voorkeuren_bijwerken`). Een veld dat niet
+  bij het type hoort is een fout, geen stille no-op.
+- `notifications/household`: de personen en de drempels. De koppeling aan een
+  account laat hij staan (`huishouden_bijwerken` in ontvangers.py).
+- `display/set`: de kleurdrempels en `sources.phases_on_overview`.
+- `strategy/set` neemt geen `schedules` meer aan: wie Voorkeuren opsloeg met
+  een oude kopie zette een schema terug dat iemand net op een kaart wijzigde.
+  Schema's gaan alleen via `device/schedule`.
+
+**Iedereen ziet alle personen.** Tot v0.114.0 zag een bewoner alleen zichzelf
+(de eigenaar op 06-09-2026); op 12-10-2026: "Ja dat mag de bewoner." Daarmee had
+de koppeling aan een account geen taak meer op het scherm, en die keuze is uit
+het formulier. Wat er al gekoppeld is blijft bewaard, en `notifications/mine`
+bestaat nog.
+
+Proef 150 in test_coach.py; in test_rapport.mjs de proeven onder "de indeling
+bewoner en installateur".
+
 ## De apparaatlijst
 
 **De apparaatlijst noemt alleen wat de coach werkelijk kan** (v0.70.0). De eigenaar op
@@ -89,17 +145,19 @@ lijst apparaten."
 
 ## Waar het schema van een apparaat staat
 
-Sinds 27-08-2026 staat dat bij het apparaat zelf en niet meer in Strategie. Op de
-kaart in Overzicht: de schuif die het schema aan en uit zet. Wie er voorgaat
-staat sinds v0.93.0 op Strategie ("Voorrang bij planningen"). Achter de knop Schema: de tijden en het per-dag-werk, in
+Sinds 27-08-2026 staat dat bij het apparaat zelf en niet meer in Strategie (nu
+Voorkeuren). Op de kaart in Overzicht: de schuif die het schema aan en uit zet.
+Wie er voorgaat staat sinds v0.93.0 op Voorkeuren ("Voorrang bij planningen").
+Achter de knop Instellen (tot v0.114.0 Schema): de tijden en het per-dag-werk, in
 `schedule-sheet.js`. Voor een laadpaal is dat sinds 04-09-2026 alleen nog
 "klaar om" (`timesFor` in dat bestand); `_days` in coach.py negeert de andere
 twee voor een laadpaal, ook als ze nog in oude instellingen staan. Alles gaat langs één commando,
 `domotiapp_coach/device/schedule`, dat precies dat ene apparaat aanraakt en de
 nieuwe lijst zelf uitrekent.
 
-**Strategie gaat alleen nog over hoeveel de coach zelf mag.** De meldingen
-staan sinds 06-09-2026 onder Meldingen, en de apparaten op hun eigen kaart.
+**Voorkeuren gaat over hoeveel de coach zelf mag, de voorrang, de nacht en het
+overzicht.** De meldingen staan sinds 06-09-2026 onder Meldingen, en de
+apparaten op hun eigen kaart.
 
 Het schuifje is geen apart begrip: het is de `enabled` die elk schema al had.
 Staat hij uit, dan slaat `_days` in `coach.py` het schema over en vervalt in

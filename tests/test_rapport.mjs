@@ -228,6 +228,37 @@ proef("een stroom van -0,017 A wordt 0,0 en niet -0,0", () => {
 await import("../custom_components/domotiapp_coach/frontend/src/views/installation.js");
 const Installatie = geregistreerd.get("dac-view-installation");
 assert.ok(Installatie, "het installatiescherm hoort zich te registreren");
+await import("../custom_components/domotiapp_coach/frontend/src/views/contract.js");
+const Contract = geregistreerd.get("dac-view-contract");
+assert.ok(Contract, "het contractscherm hoort zich te registreren (v0.114.0)");
+const { heeftVoorkeuren, voorkeurHtml, vulVoorkeuren, voorkeurWijziging } = await import(
+  "../custom_components/domotiapp_coach/frontend/src/voorkeur-velden.js"
+);
+
+/** De velden van Instellen als nepelementen, zodat `vulVoorkeuren` ze kan zetten. */
+function nepVelden(html) {
+  const camel = (s) => s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  const els = [];
+  for (const m of html.matchAll(/<(input|select|button)([^>]*)>/g)) {
+    const attrs = Object.fromEntries([...m[2].matchAll(/([a-z-]+)="([^"]*)"/g)].map(([, k, v]) => [k, v]));
+    const dataset = {};
+    for (const [k, v] of Object.entries(attrs)) if (k.startsWith("data-")) dataset[camel(k.slice(5))] = v;
+    els.push({ tag: m[1], type: attrs.type ?? "", dataset, value: "", checked: false, attrs: {},
+               setAttribute(n, v) { this.attrs[n] = v; } });
+  }
+  const rijen = [...html.matchAll(/data-vk-rij="([^"]+)"/g)].map(([, s]) => ({ sleutel: s, hidden: false }));
+  return {
+    els, rijen,
+    veld: (attr, sleutel) => els.find((e) => e.dataset[camel(attr.slice(5))] === sleutel),
+    querySelectorAll(kiezer) {
+      const sleutel = camel(kiezer.match(/^\[data-([a-z-]+)\]$/)[1]);
+      return els.filter((e) => sleutel in e.dataset);
+    },
+    querySelector(kiezer) {
+      return rijen.find((r) => r.sleutel === kiezer.match(/data-vk-rij="([^"]+)"/)?.[1]) ?? null;
+    },
+  };
+}
 
 proef("het installatiescherm heeft een veld voor wat de lastbewaker vrijgeeft", () => {
   const html = Object.create(Installatie.prototype).render();
@@ -715,7 +746,7 @@ const { groepeer, dagkop, zeef, dagen, zichtbaar, naamVanTelefoon, STANDAARD_SOO
 
 // De eigenaar op 06-09-2026: "de admin voegt de personen toe, en die persoon ziet
 // alleen zichzelf."
-proef("een bewoner ziet alleen zichzelf, de admin iedereen", () => {
+proef("iedereen ziet alle personen (v0.114.0, was: een bewoner alleen zichzelf)", () => {
   const mensen = [
     { id: "p-1", name: "Bewoner", target: "mobile_app_telefoon", user_id: "u-1" },
     { id: "p-2", name: "Partner", target: "mobile_app_partner", user_id: "u-partner" },
@@ -723,8 +754,9 @@ proef("een bewoner ziet alleen zichzelf, de admin iedereen", () => {
     { id: "p-4", name: "leeg", target: "" },
   ];
   assert.deepEqual(zichtbaar(mensen, { id: "u-x", is_admin: true }).map((p) => p.id), ["p-1", "p-2", "p-3"]);
-  assert.deepEqual(zichtbaar(mensen, { id: "u-partner", is_admin: false }).map((p) => p.id), ["p-2"]);
-  assert.deepEqual(zichtbaar(mensen, { id: "u-niemand", is_admin: false }), [], "niet gekoppeld: niets");
+  // De eigenaar op 12-10-2026: de bewoner beheert de personen, "Ja dat mag de bewoner."
+  assert.deepEqual(zichtbaar(mensen, { id: "u-partner", is_admin: false }).map((p) => p.id), ["p-1", "p-2", "p-3"]);
+  assert.deepEqual(zichtbaar(mensen, { id: "u-niemand", is_admin: false }).length, 3, "niet gekoppeld: ook iedereen");
   assert.deepEqual(zichtbaar(mensen, null).length, 3, "zonder gebruiker (het voorbeeld) alles");
   assert.equal(naamVanTelefoon("mobile_app_iphone_van_de_keuken"), "Iphone van de keuken");
   assert.equal(naamVanTelefoon(""), "");
@@ -814,7 +846,7 @@ proef("Thuisbatterij te warm in Meldingen: alleen met een batterij, en de hint z
 
   el.hass_.user.is_admin = false;
   el.paintWarmte_();
-  assert.equal(knopen.get("#warmte").hidden, true, "net als de andere meldingen alleen voor de beheerder");
+  assert.equal(knopen.get("#warmte").hidden, false, "sinds v0.114.0 ook voor de bewoner, net als de andere meldingen");
 });
 
 proef("het scherm tekent een kop per dag en een rij per melding", () => {
@@ -1026,9 +1058,16 @@ proef("moet eerst vrijgegeven worden: aan toont de vrijgavevelden, uit is klep d
   const Apparaten = geregistreerd.get("dac-view-devices");
   const el = Object.create(Apparaten.prototype);
   el.draft_ = { devices: [hc, dom], installation: {} };
-  assert.ok(el.controlHtml_(hc, 0).includes('data-field="release_required"'), "het vinkje staat bij Home Connect");
-  assert.ok(el.controlHtml_(hc, 0).includes("checked"), "standaard aan");
-  assert.ok(!el.controlHtml_(dom, 1).includes('data-field="release_required"'), "en niet bij een domme vaatwasser");
+  // Sinds v0.114.0 in Instellen op de kaart, en niet meer onder Apparaten.
+  assert.ok(!el.controlHtml_(hc, 0).includes("release_required"), "niet meer onder Apparaten");
+  const vrij = nepVelden(voorkeurHtml(hc));
+  assert.ok(vrij.veld("data-vk", "release_required"), "het vinkje staat in Instellen bij Home Connect");
+  vulVoorkeuren(vrij, hc);
+  assert.equal(vrij.veld("data-vk", "release_required").checked, true, "standaard aan");
+  vrij.veld("data-vk", "release_required").checked = false;
+  assert.deepEqual(voorkeurWijziging(vrij.veld("data-vk", "release_required")), { release_required: false });
+  assert.equal(voorkeurHtml(dom), "", "en niet bij een domme vaatwasser");
+  assert.equal(heeftVoorkeuren(dom), false);
 
   // Welke druk telt: de soorten van de knop zelf, en leeg is elke druk.
   el.hass_ = { states: { "event.knop": { state: "unknown", attributes: { event_types: ["single", "double", "long"] } } } };
@@ -1053,18 +1092,26 @@ proef("het autoprofiel heeft een doel, standaard 100, en een lege invoer is geen
     id: "paal", type: "laadpaal", brand: "easee", name: "Laadpaal", controllable: true,
     entities: {}, cars: [{ id: "auto", name: "Bus", capacity_kwh: 19.7, phases: "three", max_amps: 0 }],
   };
-  const html = el.carsHtml_(paal, 0);
-  assert.ok(html.includes('data-car-field="target_percent"'), "het veld staat er");
-  assert.ok(html.includes("Laadt tot"), "en heet naar wat het doet");
+  // Sinds v0.114.0 in Instellen op de kaart van de paal, niet meer onder Apparaten.
+  assert.ok(!el.carsHtml_(paal, 0).includes('data-car-field="target_percent"'), "niet meer onder Apparaten");
+  const html = voorkeurHtml(paal);
+  assert.ok(html.includes('data-vk-auto="auto:target_percent"'), "het veld staat in Instellen");
+  assert.ok(html.includes("Bus: laadt tot (%)"), "en heet naar wat het doet, met de naam van de auto");
   // Een auto zonder het veld is een oude instelling: die laadt gewoon vol.
-  const doelVeld = (h) => h.match(/data-car-field="target_percent"[\s\S]*?value="(\d+)"/)?.[1];
-  assert.equal(doelVeld(html), "100", "zonder ingevuld doel staat er 100");
-  const tot80 = el.carsHtml_({ ...paal, cars: [{ ...paal.cars[0], target_percent: 80 }] }, 0);
-  assert.equal(doelVeld(tot80), "80", "en een ingevuld doel staat er zoals het is");
+  const velden = nepVelden(html);
+  vulVoorkeuren(velden, paal);
+  assert.equal(velden.veld("data-vk-auto", "auto:target_percent").value, 100, "zonder ingevuld doel staat er 100");
+  vulVoorkeuren(velden, { ...paal, cars: [{ ...paal.cars[0], target_percent: 80 }] });
+  assert.equal(velden.veld("data-vk-auto", "auto:target_percent").value, 80, "en een ingevuld doel staat er zoals het is");
   // De server weigert alles onder de 10, dus een veld dat leeggemaakt wordt mag
   // geen nul opleveren: dat zou een foutmelding geven over iets wat de klant
   // niet deed.
   assert.ok(html.includes('min="10"') && html.includes('max="100"'), "de invoer blijft binnen bereik");
+  const veld = velden.veld("data-vk-auto", "auto:target_percent");
+  veld.value = "";
+  assert.equal(voorkeurWijziging(veld), null, "leeg is niets om op te slaan");
+  veld.value = "5";
+  assert.deepEqual(voorkeurWijziging(veld), { cars: [{ id: "auto", target_percent: 10 }] }, "en onder de 10 wordt 10");
 });
 
 proef("een nieuwe auto begint met het merk, en een Tesla krijgt de wekknop en de keuze", async () => {
@@ -1081,8 +1128,16 @@ proef("een nieuwe auto begint met het merk, en een Tesla krijgt de wekknop en de
   assert.ok(!ford.includes("data-car-wake="), "maar geen wekknop");
   const tesla = el.carsHtml_({ ...paal, cars: [{ id: "a", name: "Model Y", capacity_kwh: 75, brand: "tesla", wake_mode: "hourly" }] }, 0);
   assert.ok(tesla.includes("data-car-wake="), "een Tesla heeft de wekknop");
-  assert.ok(tesla.includes('data-car-wake-mode="0:0:manual"') && tesla.includes('data-car-wake-mode="0:0:hourly"'), "en de keuze");
-  assert.ok(tesla.includes('data-car-wake-mode="0:0:hourly"\n                        aria-pressed="true"'), "met de gekozen stand ingedrukt");
+  // De keuze handmatig of elk uur is sinds v0.114.0 van de bewoner: Instellen.
+  assert.ok(!tesla.includes("data-car-wake-mode"), "de keuze staat niet meer onder Apparaten");
+  const teslaPaal = { ...paal, cars: [{ id: "a", name: "Model Y", brand: "tesla", wake_entity: "button.wake", wake_mode: "hourly" }] };
+  const wek = nepVelden(voorkeurHtml(teslaPaal));
+  assert.ok(wek.veld("data-vk-wek", "a:manual") && wek.veld("data-vk-wek", "a:hourly"), "en de keuze in Instellen");
+  vulVoorkeuren(wek, teslaPaal);
+  assert.equal(wek.veld("data-vk-wek", "a:hourly").attrs["aria-pressed"], "true", "met de gekozen stand ingedrukt");
+  assert.deepEqual(voorkeurWijziging(wek.veld("data-vk-wek", "a:manual")), { cars: [{ id: "a", wake_mode: "manual" }] });
+  assert.ok(!voorkeurHtml({ ...teslaPaal, cars: [{ ...teslaPaal.cars[0], wake_entity: "" }] }).includes("data-vk-wek"),
+    "zonder wekknop valt er niets te kiezen");
   // Een profiel van voor er merken waren houdt zijn velden.
   const oud = el.carsHtml_({ ...paal, cars: [{ id: "a", name: "Bus", capacity_kwh: 19.7 }] }, 0);
   assert.ok(oud.includes('data-car-field="capacity_kwh"'));
@@ -1098,11 +1153,19 @@ proef("de vakantiestand staat in het formulier en op de kaart", async () => {
   el.feed_ = {};
   const accu = { id: "b", type: "thuisbatterij", brand: "anker", name: "Anker", controllable: true, entities: {},
     battery: { ...defaultBattery("anker"), holiday: true, holiday_max_percent: 60 } };
-  const html = el.batteryHtml_(accu, 0);
-  assert.ok(html.includes('data-bat-field="holiday"') && html.includes('data-bat-field="holiday_max_percent"'));
-  assert.ok(html.includes('data-bat-holiday="0"') && !html.includes('hidden data-bat-holiday="0"'), "de grens is zichtbaar als de stand aanstaat");
-  assert.equal(html.split('data-bat-field="holiday_max_percent"').length - 1, 1, "de grens staat precies een keer in het formulier (23-09-2026: hij stond er twee keer)");
-  assert.equal(html.split('data-bat-field="holiday"').length - 1, 1, "de vink staat precies een keer");
+  // Sinds v0.114.0 in Instellen op de kaart van de batterij.
+  assert.ok(!el.batteryHtml_(accu, 0).includes('data-bat-field="holiday"'), "niet meer onder Apparaten");
+  const html = voorkeurHtml(accu);
+  assert.ok(html.includes('data-vk-accu="holiday"') && html.includes('data-vk-accu="holiday_max_percent"'));
+  const velden = nepVelden(html);
+  vulVoorkeuren(velden, accu);
+  const rij = velden.rijen.find((r) => r.sleutel === "holiday_max_percent");
+  assert.equal(rij.hidden, false, "de grens is zichtbaar als de stand aanstaat");
+  assert.equal(velden.veld("data-vk-accu", "holiday_max_percent").value, 60);
+  vulVoorkeuren(velden, { ...accu, battery: { ...accu.battery, holiday: false } });
+  assert.equal(rij.hidden, true, "en weg als hij uit staat");
+  assert.equal(html.split('data-vk-accu="holiday_max_percent"').length - 1, 1, "de grens staat precies een keer in het formulier (23-09-2026: hij stond er twee keer)");
+  assert.equal(html.split('data-vk-accu="holiday"').length - 1, 1, "de vink staat precies een keer");
   const rijen = batteryRows({ kind: "batterij", mode: "nul", mode_name: "Nul op de meter", holiday: true, ceiling: 60 });
   assert.ok(rijen.some((r) => r.label === "Vakantiestand" && r.text.includes("60%")), JSON.stringify(rijen));
 });
@@ -1382,14 +1445,19 @@ proef("bij een stuurbare laadpaal kies je de modus zonder planning en het vermog
   el.draft_ = { installation: { circuits: [] }, devices: [] };
   const paal = { id: "p", type: "laadpaal", brand: "easee", controllable: true, device_id: "x",
     entities: { status: "sensor.s", limit: "number.l" }, charge_mode: "continu", continuous_amps: 10 };
-  const html = el.controlHtml_(paal, 0);
-  assert.ok(html.includes('data-field="charge_mode"'), "de keuzelijst staat erin");
-  assert.ok(html.includes('value="continu" selected'), "met de keuze van de paal");
-  assert.ok(html.includes('data-field="continuous_amps"') && html.includes('value="10"'));
-  const oud = el.controlHtml_({ ...paal, charge_mode: undefined }, 0);
-  assert.ok(oud.includes('value="goedkoopst" selected'), "een paal zonder keuze is goedkoopst, zoals hij altijd deed");
-  const boiler = el.controlHtml_({ id: "b", type: "boiler", controllable: true, entities: { switch: "switch.b" } }, 0);
-  assert.ok(!boiler.includes("charge_mode"), "een boiler heeft geen laadmodus");
+  // Sinds v0.114.0 in Instellen op de kaart, niet meer onder Apparaten.
+  assert.ok(!el.controlHtml_(paal, 0).includes("charge_mode"), "niet meer onder Apparaten");
+  const velden = nepVelden(voorkeurHtml(paal));
+  assert.ok(velden.veld("data-vk", "charge_mode"), "de keuzelijst staat erin");
+  vulVoorkeuren(velden, paal);
+  assert.equal(velden.veld("data-vk", "charge_mode").value, "continu", "met de keuze van de paal");
+  assert.equal(velden.veld("data-vk", "continuous_amps").value, 10);
+  vulVoorkeuren(velden, { ...paal, charge_mode: undefined });
+  assert.equal(velden.veld("data-vk", "charge_mode").value, "goedkoopst", "een paal zonder keuze is goedkoopst, zoals hij altijd deed");
+  const stroom = velden.veld("data-vk", "continuous_amps");
+  stroom.value = "40";
+  assert.deepEqual(voorkeurWijziging(stroom), { continuous_amps: 32 }, "nooit boven de 32");
+  assert.equal(voorkeurHtml({ id: "b", type: "boiler", controllable: true, entities: { switch: "switch.b" } }), "", "een boiler heeft geen laadmodus");
 });
 
 proef("een nieuwe paal begint op zon, en de kaart heeft Continu en Zon naast Snel", () => {
@@ -1429,16 +1497,19 @@ proef("'hoe vol is de auto nu' loopt live mee, en wat de bewoner typt blijft sta
   assert.ok(kaart.includes("delete field.dataset.bewerkt;"), "na doorgeven loopt hij weer mee");
 });
 
-proef("bij de batterij de grens voor de auto, op Strategie de nachtstrategie (v0.90.0)", () => {
+proef("bij de batterij de grens voor de auto, op Voorkeuren de nachtstrategie (v0.90.0)", () => {
   const Apparaten = geregistreerd.get("dac-view-devices");
   const el = Object.create(Apparaten.prototype);
   el.feed_ = {};
   const accu = { id: "b", type: "thuisbatterij", brand: "anker", name: "Anker", controllable: true, entities: {},
     battery: { ...defaultBattery("anker"), car_above: 40 } };
-  const html = el.batteryHtml_(accu, 0);
-  assert.ok(html.includes('data-bat-field="car_above"') && html.includes('value="40"'), "het veld met de grens");
+  const velden = nepVelden(voorkeurHtml(accu));
+  vulVoorkeuren(velden, accu);
+  assert.equal(velden.veld("data-vk-accu", "car_above").value, 40, "het veld met de grens, in Instellen (v0.114.0)");
+  velden.veld("data-vk-accu", "car_above").value = "";
+  assert.deepEqual(voorkeurWijziging(velden.veld("data-vk-accu", "car_above")), { battery: { car_above: null } }, "leeg is nooit");
   const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/strategy.js", import.meta.url), "utf-8");
-  assert.ok(bron.includes('id="night"') && bron.includes("night_strategy"), "de schakelaar op Strategie");
+  assert.ok(bron.includes('id="night"') && bron.includes("night_strategy"), "de schakelaar op Voorkeuren");
   assert.ok(bron.includes("night_strategy !== false"), "standaard aan");
 });
 
@@ -1619,7 +1690,7 @@ proef("een negatieve prijs krijgt zijn eigen tip, en de verkoopvergoeding staat 
   const tip = advise(r, drempels, true, 80, null, [{ type: "overig", name: "Droger", controllable: true }], null);
   assert.equal(tip.title, "De stroomprijs is negatief");
   assert.ok(tip.body.includes("de Droger"), tip.body);
-  const html = Object.create(Installatie.prototype).render();
+  const html = Object.create(Contract.prototype).render();
   assert.ok(html.includes('id="dyn-feedbonus"'));
   assert.ok(html.includes("0,0025"), "de kwart cent van na het salderen staat erbij");
 });
@@ -1635,11 +1706,10 @@ proef("water hoort erbij: prijs per dag, meterstand, formulier en de lekmelding"
   const feed = { get: (id) => staten[id] };
   assert.equal(meterReadings(feed, { meters: { water: "sensor.water", water_enabled: false } }).length, 0);
   assert.equal(meterReadings(feed, { meters: { water: "sensor.water", water_enabled: true } })[0].label, "Water");
-  const inst = Object.create(Installatie.prototype).render();
-  assert.ok(inst.includes('id="water-price"'));
-  await import("../custom_components/domotiapp_coach/frontend/src/views/settings.js");
-  const Instellingen = geregistreerd.get("dac-view-settings");
-  const set = Object.create(Instellingen.prototype).render();
+  const prijzen = Object.create(Contract.prototype).render();
+  assert.ok(prijzen.includes('id="water-price"'));
+  // Instellingen is sinds v0.114.0 opgegaan in Installatie.
+  const set = Object.create(Installatie.prototype).render();
   assert.ok(set.includes('id="water-enabled"') && set.includes('data-meter="water_flow"'));
   await import("../custom_components/domotiapp_coach/frontend/src/views/notifications.js");
   const Meldingen = geregistreerd.get("dac-view-notifications");
@@ -1660,8 +1730,8 @@ proef("Historie opent op vandaag, de eerste knop van de rij (22-09-2026)", () =>
   assert.ok(html.indexOf('data-period="day"') < html.indexOf('data-period="week"'));
 });
 
-proef("het installatiescherm heeft de gasprijs en de eerdere contracten", () => {
-  const html = Object.create(Installatie.prototype).render();
+proef("het contractscherm heeft de gasprijs en de eerdere contracten", () => {
+  const html = Object.create(Contract.prototype).render();
   assert.ok(html.includes('id="gas-price"'));
   assert.ok(html.includes('id="periods"') && html.includes('id="period-add"'));
 });
@@ -2550,7 +2620,7 @@ proef("Historie: een marktprijs krijgt belasting, opslag en btw, en een vak zond
 });
 
 proef("het formulier heeft een reserveprijssensor en zegt wat voor prijs hij geeft", () => {
-  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/installation.js", import.meta.url), "utf8");
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/contract.js", import.meta.url), "utf8");
   assert.ok(bron.includes('id="dyn-reserve"') && bron.includes('["dyn-reserve", "fallback_entity"]'));
   assert.ok(bron.includes('data-reserve="market"') && bron.includes('data-reserve="all_in"'));
   const py = readFileSync(new URL("../custom_components/domotiapp_coach/websocket.py", import.meta.url), "utf8");
@@ -2662,9 +2732,14 @@ proef("de ventilator van de thuisbatterij: een veld, een grens die leeg begint, 
 // Gemeten op 10-10-2026 in Chrome: "Hoogste accustand in vakantiestand" stond in beeld met
 // de vakantiestand uit. De rij had hidden, maar display: grid van .row won.
 proef("de rijen onder een vinkje van de batterij verdwijnen echt als het vinkje uit staat", () => {
-  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/devices.js", import.meta.url), "utf-8");
-  assert.match(bron, /\.row\[hidden\] \{ display: none; \}/);
-  assert.equal((bron.match(/<div class="row"\$\{b\.\w+ \? "" : " hidden"\}/g) ?? []).length, 3, "reserve, de dag en de vakantiestand");
+  // Sinds v0.114.0 in Instellen: daar zet `vulVoorkeuren` het attribuut hidden,
+  // en de pop-up heeft de regel die het laat winnen van elke display.
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js", import.meta.url), "utf-8");
+  assert.match(bron, /\[hidden\] \{ display: none !important; \}/);
+  const velden = nepVelden(voorkeurHtml({ id: "b", type: "thuisbatterij", battery: {} }));
+  vulVoorkeuren(velden, { id: "b", type: "thuisbatterij", battery: {} });
+  assert.deepEqual(velden.rijen.filter((r) => r.hidden).map((r) => r.sleutel).sort(),
+    ["holiday_max_percent", "reserve_percent", "weekly_full_day"], "reserve, de dag en de vakantiestand");
 });
 
 proef("de keuzelijst zet temperatuursensoren bovenaan bij de temperatuur van de batterij", () => {
@@ -2829,6 +2904,19 @@ proef("het bolletje van de laadpaal en de boiler is groen als ze aan staan", () 
   assert.equal(boiler.staat, " (verwarmt)");
 });
 
+// De eigenaar op 08-10-2026, met een schermafdruk van "Laden tot" in het schema van
+// de laadpaal: "algemeen staat niet helemaal lekker in het veld." Op 96 px stond er
+// "algemee". Gemeten in Chrome: het woord is 61 px op 14 px letters en 69 px op 16
+// (een telefoon), de pijltjes van een getalveld ongeveer 15, opvulling 2 × 12, rand 2.
+proef("in het veld Laden tot past het woord algemeen helemaal", () => {
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js", import.meta.url), "utf-8");
+  const regel = bron.match(/\.time-field input\.doel \{[^}]*?\bwidth: (\d+)px/);
+  assert.ok(regel, "de breedte van het veld staat in de stijl");
+  const ruimte = Number(regel[1]) - 24 - 2 - 15;
+  assert.ok(ruimte >= 69, `er is ${ruimte} px voor een woord van 69 px`);
+  assert.equal((bron.match(/placeholder="algemeen"/g) ?? []).length, 2, "allebei de velden, elke dag en per dag");
+});
+
 // --- draaien ----------------------------------------------------------------
 
 // De klantwoning: sinds 08-10-2026 23 keer "Refusing to allow ... to subscribe to event
@@ -2939,6 +3027,92 @@ proef("licht en donker: geen scherm draagt nog een kleur van alleen het donkere 
 
 let goed = 0;
 let fout = 0;
+// --- de indeling bewoner en installateur (v0.114.0) ----------------------------
+//
+// De eigenaar op 08-10-2026: "voorop staat dat de klant geen entiteiten moet kunnen
+// kiezen", en op 12-10-2026 zijn antwoorden: Instellen achter de kaart met het
+// schema erin, de strategie van de bewoner, de personen bij Meldingen ook.
+proef("de bewoner ziet Overzicht, Historie, Meldingen en Voorkeuren; de installateur ook Apparaten, Installatie en Contract", async () => {
+  const { navItemsFor, NAV_ITEMS } = await import("../custom_components/domotiapp_coach/frontend/src/header.js");
+  assert.deepEqual(navItemsFor(false).map((i) => i.label), ["Overzicht", "Historie", "Meldingen", "Voorkeuren"]);
+  assert.deepEqual(navItemsFor(true).map((i) => i.label),
+    ["Overzicht", "Historie", "Meldingen", "Voorkeuren", "Apparaten", "Installatie", "Contract"]);
+  assert.ok(!NAV_ITEMS.some((i) => i.id === "instellingen"), "Instellingen is opgegaan in Installatie");
+  assert.equal(NAV_ITEMS.find((i) => i.label === "Voorkeuren").id, "strategie", "het oude pad blijft werken");
+  const paneel = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/domotiapp-coach-panel.js", import.meta.url), "utf8");
+  assert.ok(paneel.includes('contract: "dac-view-contract"') && !paneel.includes("settings.js"), "elk tabje heeft zijn scherm");
+});
+
+proef("Installatie heeft de sensoren van Instellingen, maar niet de kleuren en niet de fasenkaart", () => {
+  const html = Object.create(Installatie.prototype).render();
+  for (const stuk of ['id="home-path"', 'id="grid-mode"', 'data-forecast="this_hour"', 'id="phases-enabled"',
+                      'data-meter="import_low"', 'id="solar-extra-add"', 'id="kast-add"']) {
+    assert.ok(html.includes(stuk), stuk);
+  }
+  assert.ok(!html.includes('id="self-low"') && !html.includes('id="phases-overview"'), "die staan onder Voorkeuren");
+  assert.ok(!html.includes('id="contract-type"'), "het contract staat op een eigen scherm");
+  assert.deepEqual(Installatie.sections, ["installation", "navigation", "sources"]);
+  assert.deepEqual(Contract.sections, ["contract"]);
+  // Opslaan stuurt de fasenkaart niet mee: die zet de bewoner onder Voorkeuren,
+  // en een oude kopie hier mag hem niet terugzetten.
+  const el = Object.create(Installatie.prototype);
+  const uit = el.payload_({ installation: { circuits: [] }, navigation: {}, sources: { phases_on_overview: true, solar: "sensor.zon" } });
+  assert.equal("phases_on_overview" in uit.sources, false);
+  assert.equal(uit.sources.solar, "sensor.zon");
+  // De sensoren van de hoofdaansluiting en die van een groep zitten elkaar niet in de weg.
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/installation.js", import.meta.url), "utf8");
+  assert.ok(bron.includes('#phase-fields dac-entity-picker[data-phase]'), "de fasen van de hoofdaansluiting apart van die van een groep");
+});
+
+proef("Voorkeuren heeft het overzicht erbij, en slaat dat meteen op via display/set", async () => {
+  await import("../custom_components/domotiapp_coach/frontend/src/views/strategy.js");
+  const Voorkeuren = geregistreerd.get("dac-view-strategy");
+  const html = Object.create(Voorkeuren.prototype).render();
+  assert.ok(html.includes(">Voorkeuren<"), "de kop heet Voorkeuren");
+  assert.ok(html.includes('data-drempel="self_use.low"') && html.includes('data-drempel="price.high"'));
+  assert.ok(html.includes('id="phases-overview"'));
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/strategy.js", import.meta.url), "utf8");
+  assert.ok(bron.includes('"domotiapp_coach/display/set"'));
+  // De schema's horen niet bij dit scherm: niet in wat er opgeslagen wordt, en
+  // niet in de vraag of er iets niet opgeslagen is.
+  const el = Object.create(Voorkeuren.prototype);
+  const stuk = el.slice_({ strategy: { level: "steer", schedules: [{ device: "x" }] } });
+  assert.deepEqual(stuk, { strategy: { level: "steer" } });
+});
+
+proef("op de kaart heet het Instellen, en de batterij krijgt een eigen knop", () => {
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf8");
+  assert.ok(bron.includes("${icons.sliders} Instellen") && !bron.includes("Schema instellen"));
+  assert.ok(bron.includes('data-settings="${slot}"'), "de knop voor een apparaat zonder schema");
+  assert.ok(bron.includes("instellen.hidden = !blok.hidden || !heeftVoorkeuren(device)"), "alleen waar geen schema is en wel iets in te stellen");
+  assert.equal(heeftVoorkeuren({ type: "thuisbatterij" }), true);
+  assert.equal(heeftVoorkeuren({ type: "laadpaal" }), true);
+  assert.equal(heeftVoorkeuren({ type: "boiler" }), false);
+  const sheet = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js", import.meta.url), "utf8");
+  assert.ok(sheet.includes('"domotiapp_coach/device/preferences"'), "de pop-up slaat op via het commando van de bewoner");
+  // Nooit een entiteit in Instellen.
+  const accu = voorkeurHtml({ id: "b", type: "thuisbatterij", entities: { fan: "switch.fan" }, battery: {} });
+  const paal = voorkeurHtml({ id: "p", type: "laadpaal", cars: [{ id: "a", name: "Bus", brand: "tesla", wake_entity: "button.w" }] });
+  for (const html of [accu, paal]) assert.ok(!html.includes("dac-entity-picker"), "geen entiteit te kiezen");
+  assert.ok(accu.includes('data-vk-accu="fan_above_c"'), "de ventilator alleen met een ventilator");
+  assert.ok(!voorkeurHtml({ id: "b", type: "thuisbatterij", entities: {}, battery: {} }).includes("fan_above_c"));
+});
+
+proef("Meldingen: iedereen voegt personen toe, en er staat geen account meer bij", async () => {
+  await import("../custom_components/domotiapp_coach/frontend/src/views/notifications.js");
+  const Meldingen = geregistreerd.get("dac-view-notifications");
+  const html = Object.create(Meldingen.prototype).render();
+  assert.ok(!html.includes('id="nieuw-gebruiker"'), "geen keuze van een account");
+  const el = Object.create(Meldingen.prototype);
+  el.hass_ = { user: { is_admin: false } };
+  assert.equal(el.opslagCommando_(), "domotiapp_coach/notifications/household");
+  el.hass_ = { user: { is_admin: true } };
+  assert.equal(el.opslagCommando_(), "domotiapp_coach/notifications/set");
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/notifications.js", import.meta.url), "utf8");
+  assert.ok(!bron.includes("!this.isAdmin_() || !this.settings_"), "de drempels zijn er voor iedereen");
+  assert.ok(!bron.includes("config/auth/list"), "de lijst gebruikers wordt niet meer opgevraagd");
+});
+
 for (const [naam, fn] of proeven) {
   try {
     await fn();

@@ -1,5 +1,9 @@
 /**
- * Het schema van één apparaat, als pop-up achter zijn eigen kaart.
+ * Het schema van één apparaat, als pop-up achter zijn eigen kaart. Sinds
+ * v0.114.0 heet hij Instellen en staat er ook in wat de bewoner verder aan dat
+ * apparaat kiest (`voorkeur-velden.js`): de eigenaar op 12-10-2026 koos voor
+ * "achter de kaart, één pop-up Instellen met het schema erin". Een apparaat
+ * zonder schema, zoals de thuisbatterij, heeft alleen dat tweede deel.
  *
  * Stond tot 27-08-2026 in Strategie, achter een lijstje apparaten. De eigenaar wilde
  * het bij het apparaat zelf hebben: op de kaart de schuif en de voorrang, en
@@ -15,7 +19,8 @@
 
 import { DacElement, define } from "./base.js";
 import { icons } from "./icons.js";
-import { DEADLINE_ONLY_TYPES, PROGRAM_TYPES, needsRelease, programOf, typeMeta } from "./devices.js";
+import { DEADLINE_ONLY_TYPES, PROGRAM_TYPES, canHaveDeadline, needsRelease, programOf, typeMeta } from "./devices.js";
+import { heeftVoorkeuren, voorkeurHtml, voorkeurWijziging, vulVoorkeuren } from "./voorkeur-velden.js";
 import { priceForecast } from "./data-source.js";
 import { clock, duration } from "./format.js";
 import { sheetCss } from "./theme.js";
@@ -245,8 +250,11 @@ const css = /* css */ `
     font: inherit; font-size: 14px;
     font-variant-numeric: tabular-nums;
   }
+  /* Breed genoeg voor "algemeen" naast de pijltjes van een getalveld: op 96 px
+     viel het eind eraf (de eigenaar op 08-10-2026). Gemeten: het woord is 61 px
+     op 14 px letters en 69 px op 16, de pijltjes ongeveer 15. */
   .time-field input.doel {
-    flex: 0 1 auto; min-width: 0; width: 96px;
+    flex: 0 1 auto; min-width: 0; width: 124px;
     min-height: 44px;
     padding: 10px 12px;
     border-radius: var(--dac-radius-sm);
@@ -282,6 +290,19 @@ const css = /* css */ `
     border: 1px solid var(--dac-border);
     background: rgba(var(--dac-veil),0.022);
   }
+  /* De twee delen van Instellen (v0.114.0). */
+  .sheet-kop {
+    margin: 22px 0 0; font-size: 12px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--dac-accent-hi);
+  }
+  #plan-blok > .sheet-kop:first-child { margin-top: 16px; }
+  .row select, input.getal {
+    min-height: 44px; padding: 10px 12px; min-width: 0;
+    border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border-hi);
+    background: rgba(var(--dac-veil),0.04); color: var(--dac-ink);
+    font: inherit; font-size: 14px;
+  }
+  input.getal { width: 124px; font-variant-numeric: tabular-nums; }
   .check { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
   .check input { margin: 2px 0 0; width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--dac-accent-hi); }
   .check span { display: grid; gap: 2px; font-size: 12.5px; color: var(--dac-ink-2); }
@@ -317,6 +338,9 @@ export class DacScheduleSheet extends DacElement {
 
   set settings(value) {
     this.settings_ = value;
+    // Het apparaat zoals het nu is opgeslagen, voor de voorkeuren.
+    const nu = (value?.devices ?? []).find((d) => d.id === this.device_?.id);
+    if (nu) this.device_ = nu;
     // Ververst terwijl hij openstaat: iemand anders kan op zijn telefoon iets
     // veranderd hebben. Niet terwijl er getypt wordt, dat regelt `paint_`.
     if (this.rendered_ && this.$("dialog")?.open) this.paint_();
@@ -339,6 +363,8 @@ export class DacScheduleSheet extends DacElement {
             ${icons.close}
           </button>
         </div>
+        <section id="plan-blok">
+        <h4 class="sheet-kop" id="plan-kop">Schema</h4>
         <p class="sheet-sub">Zeg binnen welke grenzen de coach mag werken. Vul alleen in wat je belangrijk vindt, want elk van de drie tijden mag leeg blijven.</p>
 
         <div class="fields">
@@ -371,6 +397,12 @@ export class DacScheduleSheet extends DacElement {
             <span>Vrijgeven blijft nodig. De coach start dit apparaat alleen als je op het overzicht hebt aangegeven dat het mag draaien. Een tijd instellen is niet hetzelfde als toestemming geven.</span>
           </div>
         </div>
+        </section>
+
+        <section id="vk-blok" hidden>
+          <h4 class="sheet-kop">Zo wil je het</h4>
+          <div class="fields" id="vk"></div>
+        </section>
 
         <p class="sheet-status" id="plan-status" role="status" aria-live="polite"></p>
       </dialog>
@@ -388,11 +420,28 @@ export class DacScheduleSheet extends DacElement {
     for (const button of this.$$("#plan-mode button")) {
       button.addEventListener("click", () => this.setMode_(button.dataset.mode === "per-day"));
     }
+    // De voorkeuren: één luisteraar voor het hele blok, want de velden worden
+    // per apparaat opnieuw opgebouwd.
+    const vk = this.$("#vk");
+    vk.addEventListener("change", (event) => {
+      const patch = voorkeurWijziging(event.target);
+      if (patch) this.saveVoorkeur_(patch);
+      else this.paintVoorkeur_();
+    });
+    vk.addEventListener("click", (event) => {
+      const knop = event.target.closest?.("[data-vk-wek]");
+      if (!knop) return;
+      for (const ander of vk.querySelectorAll(`[data-vk-wek^="${knop.dataset.vkWek.split(":")[0]}:"]`)) {
+        ander.setAttribute("aria-pressed", String(ander === knop));
+      }
+      this.saveVoorkeur_(voorkeurWijziging(knop));
+    });
   }
 
   /** Openen voor dit apparaat. */
   open(device, label) {
     this.device_ = device;
+    this.vkVoor_ = "";
     this.label_ = label || "";
     this.paint_();
     const dialog = this.$("dialog");
@@ -413,6 +462,13 @@ export class DacScheduleSheet extends DacElement {
 
     this.$("#plan-eyebrow").textContent = typeMeta(this.device_.type).label;
     this.$("#plan-title").textContent = this.label_;
+
+    this.paintVoorkeur_();
+    const schema = canHaveDeadline(this.device_);
+    this.$("#plan-blok").hidden = !schema;
+    // Alleen een kopje Schema als er ook iets anders in de pop-up staat.
+    this.$("#plan-kop").hidden = !heeftVoorkeuren(this.device_);
+    if (!schema) return;
 
     for (const button of this.$$("#plan-mode button")) {
       button.setAttribute(
@@ -752,6 +808,49 @@ export class DacScheduleSheet extends DacElement {
       days.push(entry);
     }
     this.save_({ days });
+  }
+
+  /**
+   * De voorkeuren van dit apparaat. De velden worden alleen opnieuw gebouwd als
+   * het apparaat anders in elkaar zit (een andere paal, een auto erbij); anders
+   * krijgen ze alleen hun waarden, en niet het veld waar iemand in typt.
+   */
+  paintVoorkeur_() {
+    const device = this.device_;
+    const blok = this.$("#vk-blok");
+    blok.hidden = !heeftVoorkeuren(device);
+    if (blok.hidden) return;
+    const vk = this.$("#vk");
+    const vorm = JSON.stringify([device.id, device.type, (device.cars ?? []).map((c) => [c.id, c.name, c.brand, Boolean(c.wake_entity)]),
+      Boolean(device.entities?.fan), device.brand]);
+    if (vorm !== this.vkVoor_) {
+      vk.innerHTML = voorkeurHtml(device);
+      this.vkVoor_ = vorm;
+    }
+    vulVoorkeuren(vk, device, this.shadowRoot?.activeElement ?? null);
+  }
+
+  async saveVoorkeur_(patch) {
+    if (!this.device_ || !this.hass || !patch) return;
+    const status = this.$("#plan-status");
+    try {
+      const settings = await this.hass.callWS({
+        type: "domotiapp_coach/device/preferences",
+        device_id: this.device_.id,
+        ...patch,
+      });
+      this.settings = settings;
+      status.textContent = "";
+      status.classList.remove("bad");
+      this.fire("dac-settings-saved", { settings });
+      this.paintVoorkeur_();
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de voorkeur niet opslaan", error);
+      status.textContent = "Dit is niet opgeslagen. Probeer het nog een keer.";
+      status.classList.add("bad");
+      // Terug naar wat er wel is opgeslagen.
+      vulVoorkeuren(this.$("#vk"), this.device_);
+    }
   }
 
   async save_(patch) {
