@@ -426,6 +426,12 @@ bij de apparaten).
   `sleepZon_` in views/strategy.js), met een greep om te slepen, pijltjes, een
   grens per regel, "regel toevoegen" (een tweede regel voor een auto of batterij)
   en "standaard terugzetten".
+- **De grens is voorrang, geen eindpunt** (v0.114.1). Het veld heet "eerst tot
+  __ %" en de regel zegt "eerst tot 40%, daarna wat er over is" (`regelUitleg` in
+  voorrang.js). Ik had op 08-10-2026 voorgesteld hem samen te voegen met "Laden
+  tot" van de auto, en trok dat op 12-10-2026 in: dan kan "eerst de accu tot 40%,
+  daarna de auto" niet meer. De eigenaar koos "A": allebei houden, met een naam
+  die zegt wat hij doet. Waar het laden stopt staat op de kaart, onder Instellen.
 
 Scenario's `voorrang-auto-eerst` en `voorrang-accu-eerst` (heldere dag, bus op
 30%, accu op 20%): om 11:00 standaard auto 56% en accu 17%, met de accu eerst tot

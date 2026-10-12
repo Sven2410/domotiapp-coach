@@ -42,7 +42,12 @@ export function regelUitleg(type, grens) {
   if (grens === null || grens === undefined) {
     return type === "laadpaal" ? "tot het doel van de auto" : "tot vol";
   }
-  return type === "laadpaal" ? `tot de auto op ${grens}% staat` : `tot ${grens}%`;
+  // Een grens hier is voorrang en geen eindpunt (v0.114.1). De eigenaar koos op
+  // 12-10-2026 om "Laden tot" van de auto en deze grens apart te houden, met een
+  // naam die zegt wat hij doet: daarna laadt het apparaat door op wat er over is.
+  return type === "laadpaal"
+    ? `eerst tot de auto op ${grens}% staat, daarna wat er over is`
+    : `eerst tot ${grens}%, daarna wat er over is`;
 }
 
 // --- Voorrang bij planningen (v0.93.0) ----------------------------------------

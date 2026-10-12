@@ -127,8 +127,10 @@ class DacViewStrategy extends DacEditorElement {
           <p class="hint">
             Wie het overschot van je zonnepanelen als eerste krijgt, van boven naar beneden.
             Elke regel krijgt wat hij kan opnemen tot zijn grens, en wat er dan over is gaat
-            naar de volgende. Dit geldt alleen voor overschot: wat er volgens een planning van
-            het net geladen wordt staat hier los van.
+            naar de volgende. Boven zijn grens laadt een apparaat gewoon verder met wat er dan
+            nog over is; waar het laden van de auto stopt, stel je in op de kaart van de
+            laadpaal, onder Instellen. Dit geldt alleen voor overschot: wat er volgens een
+            planning van het net geladen wordt staat hier los van.
           </p>
           <div class="zon-rij vast" aria-hidden="false">
             <span class="greep"></span><span class="nr">0</span>
@@ -398,14 +400,14 @@ class DacViewStrategy extends DacEditorElement {
         veld.inputMode = "numeric";
         veld.placeholder = type === "laadpaal" ? "doel" : "vol";
         veld.value = rij.limit ?? "";
-        veld.setAttribute("aria-label", `Grens voor ${naam.textContent} in procent`);
+        veld.setAttribute("aria-label", `Voorrang voor ${naam.textContent} tot hoeveel procent`);
         veld.addEventListener("change", () => {
           const nieuw = this.zonRegels_();
           const waarde = veld.value.trim();
           nieuw[plek].limit = waarde === "" ? null : Math.max(0, Math.min(100, Number(waarde)));
           this.zetZon_(nieuw);
         });
-        grens.append("tot ", veld, " %");
+        grens.append("eerst tot ", veld, " %");
       }
 
       const knoppen = document.createElement("span");

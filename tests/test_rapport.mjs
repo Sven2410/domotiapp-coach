@@ -1591,7 +1591,11 @@ proef("voorrang bij zonoverschot: het paneel vult aan zoals de coach (zie proef 
       { device: "weg", limit: 10 }], apparaten),
     [{ device: "accu", limit: 50 }, { device: "paal", limit: 60 }, { device: "boiler", limit: null }],
     "dezelfde uitkomst als zon_regels in planner.py");
-  assert.equal(regelUitleg("thuisbatterij", 50), "tot 50%");
+  // v0.114.1: een grens is voorrang, geen eindpunt (de eigenaar op 12-10-2026: "A").
+  assert.equal(regelUitleg("thuisbatterij", 50), "eerst tot 50%, daarna wat er over is");
+  assert.equal(regelUitleg("laadpaal", 40), "eerst tot de auto op 40% staat, daarna wat er over is");
+  const bron8 = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/strategy.js", import.meta.url), "utf8");
+  assert.ok(bron8.includes('grens.append("eerst tot ", veld, " %")'), "het veld zegt eerst tot");
   assert.equal(regelUitleg("laadpaal", null), "tot het doel van de auto");
   assert.equal(regelUitleg("boiler", null), "tot hij warm is");
   const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/strategy.js", import.meta.url), "utf-8");
