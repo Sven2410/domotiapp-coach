@@ -60,6 +60,13 @@ bestaat nog.
 Proef 150 in test_coach.py; in test_rapport.mjs de proeven onder "de indeling
 bewoner en installateur".
 
+**Een uitklaplijst krijgt de kleuren van het thema** (v0.114.2). De keuzelijst
+"Zonder planning" in Instellen was wit met lichte letters: de browser tekent de
+opties zelf. De eigenaar op 12-10-2026: "dit is wit moet ook donker zijn". Op
+06-09-2026 gebeurde precies dat bij Meldingen. Nu staat het in een proef: elk
+bestand met een uitklaplijst heeft `select option` met `--dac-bg-raise`, of de
+stijlen van de bewerkschermen (`editorCss`) waar die regel in zit.
+
 ## De apparaatlijst
 
 **De apparaatlijst noemt alleen wat de coach werkelijk kan** (v0.70.0). De eigenaar op

@@ -303,6 +303,11 @@ const css = /* css */ `
     font: inherit; font-size: 14px;
   }
   input.getal { width: 124px; font-variant-numeric: tabular-nums; }
+  /* De uitklaplijst tekent de browser zelf; zonder deze twee kwam hij wit met
+     lichte letters erin, zoals op 06-09-2026 bij Meldingen. De eigenaar op
+     12-10-2026 zag het hier opnieuw: "dit is wit moet ook donker zijn". */
+  .row select, input.getal { color-scheme: var(--dac-scheme); }
+  .row select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
   .check { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
   .check input { margin: 2px 0 0; width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--dac-accent-hi); }
   .check span { display: grid; gap: 2px; font-size: 12.5px; color: var(--dac-ink-2); }
