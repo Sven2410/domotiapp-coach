@@ -3117,6 +3117,31 @@ proef("Meldingen: iedereen voegt personen toe, en er staat geen account meer bij
   assert.ok(!bron.includes("config/auth/list"), "de lijst gebruikers wordt niet meer opgevraagd");
 });
 
+// De eigenaar op 12-10-2026, met een schermafdruk van de pop-up Instellen: "dit is wit
+// moet ook donker zijn". De uitklaplijst tekent de browser zelf; zonder een eigen regel
+// voor de opties is hij wit, en met onze lichte letters onleesbaar. Op 06-09-2026
+// gebeurde hetzelfde bij Meldingen. Elk scherm met een uitklaplijst krijgt dus de
+// kleuren van het thema, of de stijlen van de bewerkschermen waar die regel in zit.
+proef("elke uitklaplijst heeft de kleuren van het thema, ook in Instellen", async () => {
+  const { readdirSync } = await import("node:fs");
+  const map = new URL("../custom_components/domotiapp_coach/frontend/src/", import.meta.url);
+  const bestanden = [...readdirSync(map).filter((n) => n.endsWith(".js")),
+                     ...readdirSync(new URL("views/", map)).filter((n) => n.endsWith(".js")).map((n) => `views/${n}`)];
+  // Wie de velden maakt en wie de stijl levert: voorkeur-velden.js tekent in schedule-sheet.js.
+  const stijlVan = { "voorkeur-velden.js": "schedule-sheet.js" };
+  const missen = [];
+  for (const naam of bestanden) {
+    const bron = readFileSync(new URL(naam, map), "utf8");
+    if (!/<select\b|createElement\("select"\)/.test(bron)) continue;
+    const stijl = readFileSync(new URL(stijlVan[naam] ?? naam, map), "utf8");
+    const heeft = /select option \{ background: var\(--dac-bg-raise\)/.test(stijl) || stijl.includes("${editorCss}");
+    if (!heeft) missen.push(naam);
+  }
+  assert.deepEqual(missen, [], "zonder kleuren voor de opties");
+  const blad = readFileSync(new URL("schedule-sheet.js", map), "utf8");
+  assert.ok(blad.includes("color-scheme: var(--dac-scheme)"), "en de lijst zelf volgt licht en donker");
+});
+
 for (const [naam, fn] of proeven) {
   try {
     await fn();
