@@ -695,10 +695,26 @@ de lastbewaker ("Meer geeft je lastbewaker nu niet vrij."), de groep van de
 lader ("Meer past er niet op de groep van de lader.") of de auto ("Hoger gaat
 hij zodra de auto dat ook neemt."). Op vol vermogen blijft de zin zoals hij was.
 
-**Niet gebouwd, wel gezien:** die rail heeft geen einde. Een auto die blijvend
-meer dan een ampère onder zijn limiet blijft houdt de limiet vast op wat er
-stond, ook als er allang ruimte is. Dat is een afspraak van 26-08-2026 en die
-staat nog.
+**De rail heeft een einde** (v0.113.1). Een auto die blijvend meer dan een
+ampère onder zijn limiet bleef, hield de limiet vast op wat er stond, ook als er
+allang ruimte was; tot 12-10-2026 was dat alleen gemeld, op grond van de
+afspraak van 26-08-2026. De eigenaar op 12-10-2026: "ja is goed". Nu houdt de
+coach bij hoe lang de paal al onder zijn limiet blijft (`_achter_sinds` in
+coach.py, `achter_s` in de meting). Langer dan de aanloop (`RAMP_MINUTES`, drie
+minuten: daarna zegt de meting wat de beurt doet) is het geen naijl meer maar
+de auto, en dan rekent het plafond met wat de paal zelf meet. Elke stap omhoog
+begint de klok opnieuw, want daarna loopt de meter echt even achter. De naijl
+na een stop blijft zoals hij was. Geen nieuw getal, en de marge is
+onaangeroerd.
+
+Het was ook een kwestie van veiligheid. Zolang de rail stond rekende de som de
+paal de limiet toe in plaats van wat hij trok, dus het huis 1,5 A lichter dan
+het was. Scenario `auto-neemt-minder` (snelladen, 3x25 A, de auto neemt 1,5 A
+minder, een oven van 2,5 kW op de eerste fase van 12:15 tot 12:30): vóór
+v0.113.1 zakte hij naar 12 A en bleef daar de hele beurt, met de zware fase op
+22,9 A tijdens de oven, boven de zekering min de marge (22). Nu zakt hij naar
+10 A, staat die fase op 20,9 A, en om 12:31:45 is hij terug op 16 A. Proef 73
+in test_planner.py, proef 149 in test_coach.py.
 
 ## De accustand op de kaarten (v0.101.6)
 

@@ -2100,6 +2100,20 @@ if (vl := v("puls-tijdens-snelladen")):
              bool(redenen) and all("onder je zekering" in reden for reden in redenen), f"{redenen}")
     controle("puls: de auto raakt gewoon vol", vl.klaar_op is not None, f"{vl.klaar_op}")
 
+# Een auto die blijvend 1,5 A minder neemt dan de limiet (v0.113.1). Vóór die
+# uitgave bleef hij na de oven de hele beurt op 12 A, en tijdens de oven stond
+# de zware fase op 22,9 A: boven de zekering min de marge, omdat de rail de
+# paal 1,5 A meer toerekende dan hij trok.
+if (vl := v("auto-neemt-minder")):
+    limieten = [(t, d.get("current")) for t, dienst, d in vl.opdrachten if dienst == "set_charger_dynamic_limit"]
+    print(f"  neemt minder: limieten {[(f'{t:%H:%M:%S}', a) for t, a in limieten]}")
+    na = [(t, a) for t, a in limieten if f"{t:%H:%M}" >= "12:30"]
+    controle("neemt minder: na de oven staat hij binnen drie minuten weer op 16 A",
+             bool(na) and na[0][1] == 16 and f"{na[0][0]:%H:%M}" <= "12:33", f"{[(f'{t:%H:%M:%S}', a) for t, a in na]}")
+    top = max((max(r.fase_amps) for r in vl.regels if "12:17" <= f"{r.tijd:%H:%M}" < "12:30"), default=0.0)
+    controle("neemt minder: tijdens de oven blijft de zware fase onder de zekering min de marge",
+             top <= 22.0, f"{top:.1f} A")
+
 # Dezelfde dag om 13:39:54: de auto was klaar, de laatste meterwaarde zei nog
 # 7,3 kW afname, en de regelaar zette de batterij daarop in dezelfde seconde op
 # ontladen op vol vermogen: een paar seconden 4,2 kW het net op. In dit huis

@@ -1052,6 +1052,9 @@ class ChargerCoach:
         # erbij. Alleen om de na-ijl van de fasemeting op te vangen als de paal
         # net gestopt is; zie `_read`.
         self._laatste_stroom: dict[str, tuple[float, datetime]] = {}
+        # Sinds wanneer een laadpunt onder zijn limiet blijft, en bij welke
+        # limiet die klok begon. Zie `achter_s` in planner.py.
+        self._achter_sinds: dict[str, tuple[datetime, float]] = {}
         # De laatste bruikbare status per laadpunt, zodat een entiteit die even
         # wegvalt niet als een losgekoppelde kabel leest. Zie `_read`.
         self._laatste_status: dict[str, str] = {}
@@ -7102,6 +7105,19 @@ class ChargerCoach:
             limit_amps=_number(self.hass, entities.get("dynamic_limit")),
             circuit_amps=self._groep_amps(entities),
         )
+        # Hoe lang de paal al onder zijn limiet blijft. Een naijl na een stap
+        # omhoog is na de aanloop voorbij; een verschil dat daarna blijft staan
+        # is de auto, en dan mag het plafond weer op de meting rusten (v0.113.1,
+        # `meter_loopt_achter` in planner.py). Elke stap omhoog begint opnieuw.
+        limiet = charger.limit_amps
+        if charger.charging and limiet is not None and limiet - charger_amps > STEP_AMPS:
+            klok = self._achter_sinds.get(device_id)
+            if klok is None or limiet > klok[1]:
+                klok = (now, limiet)
+            self._achter_sinds[device_id] = (klok[0], limiet)
+            grid.achter_s = (now - klok[0]).total_seconds()
+        else:
+            self._achter_sinds.pop(device_id, None)
         # Wat er de afgelopen uren gemiddeld overbleef voor deze paal, uit de
         # boekhouding van de beurt (`_bijhouden`). Een meting van deze beurt,
         # niet van gisteren: na de kabel eruit begint hij op nul. Na een

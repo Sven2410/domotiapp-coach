@@ -3304,6 +3304,42 @@ dyn72 = planner.schijven(NU72, prijzen72, Grid(surplus_w=510.0), AUTO72, 16, Non
 controle("dynamisch: de 510 W van nu blijft een vloerschijf",
          any(s.kind == "vloer" and s.start.hour == 15 for s in dyn72), f"{[(s.kind, s.start.hour) for s in dyn72]}")
 
+print("=== 73. de rail van de naijl heeft een einde (v0.113.1) ===")
+# De eigenaar op 30-09-2026: snelladen bleef tien minuten op 14 A bij een paal
+# van 16, want de Easee gaf 13 A door en een verschil van meer dan een ampère
+# las als een meter die nog moest bijkomen. Na de aanloop is het de auto.
+NEEMT_MINDER = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=12.5,
+                       limit_amps=14.0, boost=True)
+def rustig73(achter_s):
+    return Grid(surplus_w=0.0, phase_amps=[14.0, 12.5, 12.5], fuse_amps=25.0, charger_amps=12.5,
+                margin_amps=3.0, achter_s=achter_s)
+AUTO73 = Car(capacity_kwh=77.0, phases=3, soc_percent=40.0)
+vroeg73 = planner.ceiling_amps(rustig73(0.0), AUTO73, NEEMT_MINDER)
+net73 = planner.ceiling_amps(rustig73(planner.RAMP_MINUTES * 60 - 1), AUTO73, NEEMT_MINDER)
+laat73 = planner.ceiling_amps(rustig73(planner.RAMP_MINUTES * 60), AUTO73, NEEMT_MINDER)
+print(f"  limiet 14, auto 12,5 A: plafond na 0 s {vroeg73} A, net voor de aanloop {net73} A, daarna {laat73} A")
+controle("binnen de aanloop houdt de rail hem op wat er gevraagd is", vroeg73 == 14 and net73 == 14, f"{vroeg73} {net73}")
+controle("na de aanloop mag hij omhoog naar wat de paal kan", laat73 == 16, f"{laat73}")
+controle("en dan heet het geen achterlopende meter meer",
+         planner.meter_loopt_achter(rustig73(0.0), NEEMT_MINDER)
+         and not planner.meter_loopt_achter(rustig73(planner.RAMP_MINUTES * 60), NEEMT_MINDER))
+controle("de zin 'Hoger gaat hij zodra de auto dat ook neemt' verdwijnt mee",
+         planner.plafond_zin(rustig73(0.0), AUTO73, NEEMT_MINDER, vroeg73) == "Hoger gaat hij zodra de auto dat ook neemt."
+         and planner.plafond_zin(rustig73(180.0), AUTO73, NEEMT_MINDER, laat73) == "",
+         planner.plafond_zin(rustig73(180.0), AUTO73, NEEMT_MINDER, laat73))
+# Na de aanloop telt de meting, en die rekent het huis eerlijk: met de oven
+# erbij past er niet meer, en daar komt nu niets meer van de aanname bij.
+OVEN73 = Grid(surplus_w=0.0, phase_amps=[25.4, 12.5, 12.5], fuse_amps=25.0, charger_amps=12.5,
+              margin_amps=3.0, achter_s=600.0)
+oven73 = planner.ceiling_amps(OVEN73, AUTO73, NEEMT_MINDER)
+controle("en een zwaarder huis drukt hem op de gemeten stroom omlaag", oven73 == 9, f"{oven73} A")
+# Stilstaand of net gestopt verandert er niets: daar telt de klok niet.
+GESTOPT73 = Grid(surplus_w=0.0, phase_amps=[14.0, 3.0, 3.0], fuse_amps=25.0, charger_amps=0.0,
+                 margin_amps=3.0, recent_charger_amps=13.0, achter_s=600.0)
+controle("de naijl na een stop blijft gewoon gelden",
+         planner.meter_loopt_achter(GESTOPT73, Charger(max_amps=16.0, connected=True, charging=False,
+                                                       actual_amps=0.0, limit_amps=0.0)))
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

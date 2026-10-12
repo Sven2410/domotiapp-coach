@@ -274,6 +274,11 @@ class Grid:
     # toegerekend en denkt de coach dat de aansluiting vol zit. Zie
     # `meter_loopt_achter`.
     recent_charger_amps: float = 0.0
+    # Hoeveel seconden de paal al onafgebroken meer dan een stap onder zijn
+    # limiet trekt, sinds de laatste keer dat die limiet omhoog ging. Langer
+    # dan de aanloop is het geen naijl meer maar een auto die minder neemt. Zie
+    # `meter_loopt_achter`.
+    achter_s: float = 0.0
     # Hoeveel de lastbewaker van de installatie op dit moment vrijgeeft voor
     # het laden, als hij dat meldt. Zie `beschikbaar_van_bewaker`.
     balancer_amps: float | None = None
@@ -577,11 +582,23 @@ def meter_loopt_achter(grid: Grid, charger: Charger) -> bool:
     verschil werd dan aan het huis toegerekend, en de coach meldde dat de
     aansluiting te zwaar belast was terwijl er niets liep. Gezien in de klantwoning
     op 29-08-2026 om 11:27:06, met de kabel er al uit: `regel=no-room`.
+
+    **En een naijl duurt niet eeuwig** (v0.113.1). Een auto die blijvend meer
+    dan een stap onder zijn limiet blijft, leek hier altijd een meter die nog
+    moest bijkomen, en dan hield de rail van `ceiling_amps` het plafond vast
+    op wat er stond. Bij de eigenaar op 30-09-2026 gaf de Easee 13 A door op
+    een limiet van 14, en snelladen bleef tien minuten op 14 terwijl er 16
+    paste. Blijft het verschil langer staan dan de aanloop (`RAMP_MINUTES`),
+    dan is het de auto en niet de meter, en telt wat de paal zelf meet. Elke
+    stap omhoog begint die klok opnieuw, want daarna loopt de meter echt even
+    achter (`achter_s`, bijgehouden in coach.py).
     """
     if charger.limit_amps is None:
         return False
     if not charger.charging:
         return grid.recent_charger_amps > STEP_AMPS
+    if grid.achter_s >= RAMP_MINUTES * 60:
+        return False
     return charger.limit_amps - grid.charger_amps > STEP_AMPS
 
 
@@ -739,6 +756,10 @@ def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
             # opschroeven wacht tot de paal het zelf bevestigt, en dat is één
             # ronde later. De marge blijft dus onaangeroerd, zoals afgesproken
             # met de eigenaar op 26-08-2026.
+            #
+            # Sinds v0.113.1 heeft hij een einde: na de aanloop is een verschil
+            # dat blijft staan de auto en niet de meter, en dan rekent deze som
+            # met wat de paal meet. Zie `meter_loopt_achter`.
             #
             # **Maar hij mag nooit onder de ondergrens duwen.** Deze rail zegt
             # "niet meer dan je al vroeg", en dat is iets anders dan "stop".
