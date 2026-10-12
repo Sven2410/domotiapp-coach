@@ -104,6 +104,13 @@ De keuzelijst op de kaart blijft de algemene limiet (`target_general`), met eron
 `target_day`). Een boiler kent geen limiet. Proef 67 in test_planner.py, proef 105
 in test_coach.py, het veld en de zin in test_rapport.mjs.
 
+Het veld is sinds v0.114.0 124 px breed in plaats van 96. De eigenaar op
+08-10-2026, met een schermafdruk waarin "algemee" stond: "algemeen staat niet
+helemaal lekker in het veld." Gemeten in Chrome: het woord is 61 px op 14 px
+letters en 69 px op de 16 van een telefoon, de pijltjes van een getalveld zo'n
+15; op 96 px bleef er 55 over. Nu 83, ook op 280 px breed en per dag zonder
+overloop. Proef in test_rapport.mjs.
+
 **En per beurt op de kaart** (v0.88.0): "Laden tot", met als eerste keuze
 het doel uit het autoprofiel en daarna 50 tot 100%. De bewoner van de eerste
 woning op 23-09-2026, over evcc: "in de auto een harde max (100%), en in evcc

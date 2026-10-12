@@ -15,6 +15,12 @@ het paneel, plus de zekeringmelding van monitor.py:
   besluit    elk besluit van de coach; standaard uit, want dat zijn er veel
   belasting  de aansluiting wordt te zwaar belast
 
+Sinds v0.114.0 beheert de bewoner de personen zelf. De eigenaar op 12-10-2026,
+op de vraag of de bewoner personen toevoegt en weghaalt en iedereen ziet: "Ja
+dat mag de bewoner." De koppeling aan een gebruiker van Home Assistant blijft
+van de admin, want alleen een admin mag de lijst gebruikers opvragen
+(`huishouden_bijwerken`).
+
 Dit bestand kent Home Assistant niet en is los te beproeven.
 """
 
@@ -84,6 +90,29 @@ def ontvangers(settings: dict[str, Any], soort: str) -> list[str]:
     for persoon in personen(settings):
         if (persoon.get("kinds") or {}).get(soort) and persoon["target"] not in uit:
             uit.append(persoon["target"])
+    return uit
+
+
+def huishouden_bijwerken(
+    settings: dict[str, Any], rijen: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """De lijst personen zoals de bewoner hem opslaat (v0.114.0).
+
+    Naam, telefoon en schakelaars komen uit `rijen`; de koppeling aan een
+    gebruiker niet. Een bestaande persoon (zelfde id) houdt de koppeling die de
+    admin legde, een nieuwe krijgt er geen. Wie er niet meer in staat is weg.
+    """
+    bestaand = {p.get("id"): p for p in personen(settings) if p.get("id")}
+    uit = []
+    for rij in rijen:
+        oud = bestaand.get(rij.get("id") or "")
+        persoon = nieuwe_persoon(
+            rij.get("name", ""), rij.get("target", ""),
+            (oud or {}).get("user_id", ""), rij.get("kinds"),
+        )
+        if oud is not None:
+            persoon["id"] = oud["id"]
+        uit.append(persoon)
     return uit
 
 

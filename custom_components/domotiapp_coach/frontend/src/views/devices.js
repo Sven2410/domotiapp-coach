@@ -13,7 +13,6 @@ import { icons } from "../icons.js";
 import {
   CAR_BRANDS,
   CAR_PHASES,
-  WAKE_MODES,
   DEVICE_TYPES,
   PROGRAM_TYPES,
   hasOwnPrograms,
@@ -35,10 +34,8 @@ import {
   hasCars,
   isBattery,
   defaultBattery,
-  WEEKDAGEN,
   missingForControl,
   releaseOnOwnPlug,
-  canSkipRelease,
   needsRelease,
   typeMeta,
 } from "../devices.js";
@@ -677,50 +674,11 @@ class DacViewDevices extends DacEditorElement {
         <span class="sub">Voor de zekeringbewaking: de coach blijft onder deze zekering én onder alles wat erboven hangt, tot de hoofdkast.</span>
       </div>`
       : "";
-    // Hoe een laadpaal laadt als er geen planning aanstaat (v0.87.0). De
-    // eigenaar op 23-09-2026: "geen planning, standaard terug naar zon, of welke
-    // voorkeursmodus dan ook." Op de kaart kan de bewoner per beurt kiezen;
-    // de kabel eruit en het is weer dit.
-    const modus = device.charge_mode || "goedkoopst";
-    const modusHtml = device.type === "laadpaal" && stuurbaar
-      ? `
-      <div class="row">
-        <label for="mode-${index}">Zonder planning</label>
-        <select id="mode-${index}" data-field="charge_mode" data-index="${index}">
-          <option value="zon"${modus === "zon" ? " selected" : ""}>Zon: alleen op zonoverschot</option>
-          <option value="continu"${modus === "continu" ? " selected" : ""}>Continu: altijd, met zon erbovenop</option>
-          <option value="goedkoopst"${modus === "goedkoopst" ? " selected" : ""}>Goedkoopst: de goedkoopste bekende uren</option>
-        </select>
-        <span class="sub">Staat het schema aan, dan wint de planning. Op de kaart kies je per beurt Snel, Continu of Zon; als de kabel eruit gaat, geldt dit weer.</span>
-      </div>
-      <div class="row">
-        <label for="cont-${index}">Continu laden op (A)</label>
-        <input type="number" id="cont-${index}" data-field="continuous_amps" data-index="${index}"
-               min="6" max="32" step="1" inputmode="numeric" value="${Number(device.continuous_amps) || 6}">
-        <span class="sub">Het vaste vermogen van Continu. Geeft de zon meer, dan laadt hij mee omhoog; nooit boven je zekering.</span>
-      </div>
-      <div class="row">
-        <label for="zonstart-${index}">Zon: beginnen vanaf (%)</label>
-        <input type="number" id="zonstart-${index}" data-field="solar_start_percent" data-index="${index}"
-               min="10" max="100" step="5" inputmode="numeric" value="${Number(device.solar_start_percent) || 90}">
-        <span class="sub">Van het kleinste laadvermogen: 6 A, op drie fasen 4,1 kW. Bij 50% begint Zon al op 2,1 kW zon en komt de rest van het net. Op 100% begint hij pas als de zon het hele vermogen geeft.</span>
-      </div>`
-      : "";
-    // De eigenaar op 29-09-2026: "een mogelijkheid bij het toevoegen van een
-    // vaatwasser: moet eerst vrijgegeven worden. Staat dat vinkje uit, dan mag
-    // de vaatwasser gewoon draaien met de coach als de klep dicht zit." Alleen
-    // waar de coach de klep ziet en zelf kan starten (`canSkipRelease`).
-    const vrijgaveHtml = canSkipRelease(device)
-      ? `
-      <label class="check" for="release-${index}">
-        <input type="checkbox" id="release-${index}" data-field="release_required" data-index="${index}"
-               ${device.release_required === false ? "" : "checked"}>
-        <span>
-          <strong>Moet eerst vrijgegeven worden</strong>
-          Aan: de coach wacht tot je hem vrijgeeft met "Ingeruimd en dicht" op de kaart, een schakelaar of een knop. Uit: klep dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de klep open en weer dicht is geweest, zodat hij niet opnieuw start met de schone vaat erin. Een lege machine die na het uitruimen dichtgaat herkent hij niet.
-        </span>
-      </label>`
-      : "";
+    // Hoe een laadpaal laadt zonder planning, continu laden op en zon beginnen
+    // vanaf stonden hier tot v0.114.0. Ze zijn van de bewoner en staan nu op de
+    // kaart, onder Instellen (`voorkeur-velden.js`).
+    // "Moet eerst vrijgegeven worden" stond hier tot v0.114.0 en staat nu op de
+    // kaart, onder Instellen: de eigenaar op 12-10-2026, "Klopt helemaal".
     // Fasen wisselen, alleen bij een Alfen (v0.104.0). De eigenaar op
     // 30-09-2026: "alfen zegt zelf dat je fase wissel mag doen. Dus Easee houden
     // we zo en alfen passen we aan."
@@ -735,7 +693,7 @@ class DacViewDevices extends DacEditorElement {
         </span>
       </label>`
       : "";
-    return `${groepHtml}${modusHtml}${faseHtml}${vrijgaveHtml}
+    return `${groepHtml}${faseHtml}
       <label class="check" for="control-${index}">
         <input type="checkbox" id="control-${index}" data-field="controllable" data-index="${index}"
                ${device.controllable ? "checked" : ""}>
@@ -935,37 +893,7 @@ class DacViewDevices extends DacEditorElement {
         <p class="sub">Stopt de coach, dan zet hij het vermogen op nul en geeft hij de batterij terug aan zijn eigen modus, zodat hij nooit op zijn laatste opdracht blijft staan.</p>
         ${vink("self_zero", "De batterij doet zelf nul op de meter.", "Staat standaard aan. Zet hem alleen uit bij een batterij zonder eigen meter in de meterkast; dan regelt de coach de meter via Home Assistant, en dat is trager. De coach zet hem in zijn eigen modus (hierboven: als de coach stopt) en kijkt mee. Hij neemt het alleen over voor laden van het net, handelen, als de laadpaal laadt, in de vakantiestand, bij de reserve en als de zekering krap wordt, en geeft hem na vijf rustige minuten terug. Stilstaan of alleen ontladen plant hij dan niet, want dat kan de batterij in zijn eigen stand niet.")}
       </div>
-      <div class="block">
-        <div class="block-title">Wat jij wilt</div>
-        ${vink("reserve_enabled", "Reserve houden voor noodstroom.", "Onder deze accustand komt er niets meer uit, wat de prijzen ook zeggen.")}
-        <div class="row"${b.reserve_enabled ? "" : " hidden"} data-bat-reserve="${index}">
-          <label>Reserve (%)</label>
-          ${getal("reserve_percent", 'min="0" max="100" step="5"', "20")}
-        </div>
-        ${vink("trade", "Handelen: terugleveren op dure uren.", "De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis.")}
-        ${vink("weekly_full", "Een keer per week helemaal vol.", "Tot 100%, voor het balanceren van de cellen. Op die dag zet de coach de laadgrens van de batterij even op 100% en kiest hij het goedkoopste moment; is hij vol, dan zet hij de grens terug op wat er stond. Was de batterij die week al vol, dan slaat hij de beurt over. Is het veld Laadgrens (%) leeg, dan kan hij de grens niet verzetten en is vol wat de batterij zelf toelaat.")}
-        <div class="row"${b.weekly_full ? "" : " hidden"} data-bat-day="${index}">
-          <label for="bat-day-${index}">Op</label>
-          <select id="bat-day-${index}" data-bat-field="weekly_full_day" data-index="${index}">
-            ${WEEKDAGEN.map((dag, i) => `<option value="${i}"${Number(b.weekly_full_day) === i ? " selected" : ""}>${dag}</option>`).join("")}
-          </select>
-        </div>
-        ${vink("holiday", "Vakantiestand.", "Ben je weg en is er veel zon en weinig verbruik, dan staat een batterij dagenlang vol, en dat is slecht voor de cellen. In deze stand houdt de coach hem onder de grens hieronder: wat erboven zit gaat naar je huis (of naar het net, als handelen aanstaat), en er komt pas weer zon in als hij eronder zit. De wekelijkse volle beurt slaat hij over. Aan de laadgrens van de batterij zelf komt hij niet.")}
-        <div class="row"${b.holiday ? "" : " hidden"} data-bat-holiday="${index}">
-          <label>Hoogste accustand in vakantiestand (%)</label>
-          ${getal("holiday_max_percent", 'min="10" max="90" step="5"', "50")}
-        </div>
-        <div class="row">
-          <label>De auto mag de accu gebruiken boven (%)</label>
-          ${getal("car_above", 'min="0" max="100" step="5"', "nooit")}
-          <span class="sub">Laadt de auto, dan geeft de batterij normaal niets af: laden en ontladen van de accu en laden van de auto is drie keer verlies. Vul je hier een accustand in, dan mag wat er dáárboven zit naar de auto. Met de nachtstrategie aan (Strategie) houdt hij altijd genoeg over voor de nacht. Leeg is nooit.</span>
-        </div>
-        <div class="row">
-          <label>Ventilator aan boven (°C)</label>
-          ${getal("fan_above_c", 'min="0" max="100" step="0.5"', "nooit")}
-          <span class="sub">Met een Temperatuur en een Ventilator hierboven zet de coach de ventilator aan zodra de batterij warmer is dan dit, en weer uit als hij een graad eronder zakt. Niet als de coach op Alleen uitlezen of Adviseren staat. Leeg is nooit.</span>
-        </div>
-      </div>`;
+      <p class="sub">Wat de bewoner wil (de reserve, handelen, een keer per week vol, de vakantiestand, de auto helpen en de ventilator) staat sinds v0.114.0 op de kaart van de batterij, onder Instellen.</p>`;
   }
 
   carsHtml_(device, index) {
@@ -1003,19 +931,7 @@ class DacViewDevices extends DacEditorElement {
             <dac-entity-picker data-car-wake="${index}:${slot}"></dac-entity-picker>
             <span class="sub">De knop "Wake up" van de Tesla-integratie. Een Tesla slaapt als hij niet laadt en meldt dan geen accustand; met deze knop kan de coach hem wekken. Bij het inpluggen doet hij dat altijd één keer, anders weet hij niet hoeveel er nog in moet.</span>
           </div>
-          <div class="row">
-            <label>Accustand opvragen</label>
-            <div class="segmented">
-              ${WAKE_MODES.map(
-                (item) => `
-                <button type="button" data-car-wake-mode="${index}:${slot}:${item.id}"
-                        aria-pressed="${(car.wake_mode ?? "manual") === item.id}">
-                  <strong>${item.label}</strong>
-                  ${item.blurb}
-                </button>`
-              ).join("")}
-            </div>
-          </div>`
+`
           : "";
         return `
         <div class="car" data-car="${index}:${slot}">
@@ -1026,20 +942,12 @@ class DacViewDevices extends DacEditorElement {
             <button type="button" class="remove" data-car-remove="${index}:${slot}" aria-label="Auto verwijderen">${icons.trash}</button>
           </div>
           ${merkKeuze}
-          <div class="two">
-            <div class="row">
-              <label>Accu (kWh)</label>
-              <input type="number" min="0" max="500" step="1" inputmode="decimal"
-                     data-car-field="capacity_kwh" data-car-index="${index}:${slot}"
-                     value="${car.capacity_kwh || ""}" placeholder="bijvoorbeeld 58">
-            </div>
-            <div class="row">
-              <label>Laadt tot (%)</label>
-              <input type="number" min="10" max="100" step="5" inputmode="numeric"
-                     data-car-field="target_percent" data-car-index="${index}:${slot}"
-                     value="${car.target_percent || 100}" placeholder="100">
-              <span class="sub">Staat er een laadgrens in de auto, zet hem hier ook. Dan weet de coach wanneer hij klaar is in plaats van het achteraf te merken.</span>
-            </div>
+          <div class="row">
+            <label>Accu (kWh)</label>
+            <input type="number" min="0" max="500" step="1" inputmode="decimal"
+                   data-car-field="capacity_kwh" data-car-index="${index}:${slot}"
+                   value="${car.capacity_kwh || ""}" placeholder="bijvoorbeeld 58">
+            <span class="sub">Tot hoever hij laadt staat op de kaart van de laadpaal, onder Instellen.</span>
           </div>
           <div class="row">
             <label>Hoogste stroom (A)</label>
@@ -1219,7 +1127,6 @@ class DacViewDevices extends DacEditorElement {
         // Een leeg doel is geen doel van nul maar gewoon vol. Zonder deze regel
         // wordt het veld tijdens het wissen even 0, en dat weigert de server
         // (10 tot 100) met een foutmelding over iets wat de klant niet deed.
-        else if (key === "target_percent") car[key] = Number(input.value) || 100;
         else car[key] = Number(input.value) || 0;
         this.syncSaveBar_();
       });
@@ -1269,15 +1176,6 @@ class DacViewDevices extends DacEditorElement {
       picker.value = this.draft_.devices[index].cars[slot].wake_entity ?? "";
       picker.addEventListener("dac-entity-change", (ev) => {
         this.draft_.devices[index].cars[slot].wake_entity = ev.detail.value;
-        this.syncSaveBar_();
-      });
-    }
-
-    for (const button of list.querySelectorAll("[data-car-wake-mode]")) {
-      const [index, slot, mode] = button.dataset.carWakeMode.split(":");
-      button.addEventListener("click", () => {
-        this.draft_.devices[Number(index)].cars[Number(slot)].wake_mode = mode;
-        this.paintDevices_();
         this.syncSaveBar_();
       });
     }
@@ -1402,14 +1300,8 @@ class DacViewDevices extends DacEditorElement {
 
         if (field === "controllable") {
           device.controllable = el.checked;
-        } else if (field === "release_required") {
-          device.release_required = el.checked;
         } else if (field === "phase_switching") {
           device.phase_switching = el.checked;
-        } else if (field === "continuous_amps") {
-          device.continuous_amps = Math.min(32, Math.max(6, Math.round(Number(el.value) || 6)));
-        } else if (field === "solar_start_percent") {
-          device.solar_start_percent = Math.min(100, Math.max(10, Math.round(Number(el.value) || 90)));
         } else {
           device[field] = el.value;
         }
@@ -1427,9 +1319,8 @@ class DacViewDevices extends DacEditorElement {
           this.paintSummary_(index);
         }
 
-        if (field === "type" || field === "brand" || field === "release_required" || field === "room") {
+        if (field === "type" || field === "brand" || field === "room") {
           // Both decide which fields belong here at all, so the card is redrawn.
-          // Het vinkje van de vrijgave ook: zonder vrijgave geen vrijgavevelden.
           // The name field is not: redrawing on every keystroke would throw the
           // caret away.
           this.paintDevices_();
@@ -1509,12 +1400,7 @@ class DacViewDevices extends DacEditorElement {
         device.battery = { ...defaultBattery(device.brand), ...(device.battery ?? {}) };
         if (vink) device.battery[key] = el.checked;
         else if (el.type === "number") device.battery[key] = el.value === "" ? null : Number(el.value);
-        else if (key === "weekly_full_day") device.battery[key] = Number(el.value);
         else device.battery[key] = el.value;
-        if (key === "reserve_enabled") list.querySelector(`[data-bat-reserve="${index}"]`).hidden = !el.checked;
-        if (key === "weekly_full") list.querySelector(`[data-bat-day="${index}"]`).hidden = !el.checked;
-        if (key === "holiday") list.querySelector(`[data-bat-holiday="${index}"]`).hidden = !el.checked;
-        if (key === "holiday") list.querySelector(`[data-bat-holiday="${index}"]`).hidden = !el.checked;
         this.syncSaveBar_();
       });
     }
@@ -1626,7 +1512,7 @@ class DacViewDevices extends DacEditorElement {
     this.$("#confirm-sub").textContent = this.storedDevices_().some(
       (stored) => stored.id === device.id
     )
-      ? "Dit apparaat verdwijnt uit de lijst, met alles wat je eraan gekoppeld hebt en met zijn tijden onder Strategie. Verwijderen gaat meteen door en is niet terug te draaien."
+      ? "Dit apparaat verdwijnt uit de lijst, met alles wat je eraan gekoppeld hebt en met zijn schema. Verwijderen gaat meteen door en is niet terug te draaien."
       : "Dit apparaat is nog niet opgeslagen, dus het verdwijnt gewoon weer uit de lijst.";
     this.$("#confirm").showModal();
   }

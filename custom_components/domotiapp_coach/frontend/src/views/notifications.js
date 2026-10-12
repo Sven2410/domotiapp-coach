@@ -7,11 +7,11 @@
  * met welke soorten meldingen hij of zij krijgt."
  *
  * Bovenaan staan de personen. Een persoon is een telefoon (een notify-dienst
- * van Home Assistant) met een naam, eventueel gekoppeld aan een gebruiker, en
- * per soort melding een schuif. De admin voegt personen toe en haalt ze weg;
- * een gewone bewoner ziet alleen zijn eigen kaart en zet daar zelf zijn
- * schuiven. Daaronder de zekeringmelding "Zware belasting", die tot 06-09-2026
- * onder Strategie stond, alleen voor de admin. En daaronder de geschiedenis.
+ * van Home Assistant) met een naam en per soort melding een schuif. Sinds
+ * v0.114.0 voegt de bewoner ze zelf toe en haalt ze weg, en ziet hij iedereen;
+ * de eigenaar op 12-10-2026: "Ja dat mag de bewoner." Daaronder de meldingen
+ * met een drempel, ook van de bewoner: "Zware belasting", lekkage en de
+ * temperatuur van de batterij. En daaronder de geschiedenis.
  *
  * Vier soorten, dezelfde als `kind` in de geschiedenis op de server, plus de
  * zekeringmelding van monitor.py:
@@ -27,7 +27,7 @@
  * `domotiapp_coach/subscribe` (`volgCoach`), zodat ook een bewoner zonder
  * beheerdersrechten hem ziet groeien. Wie wat krijgt staat in de
  * instellingen onder `notifications` en gaat via `notifications/set` (admin)
- * of `notifications/mine` (de eigen schuiven).
+ * of `notifications/household` (iedereen, zonder de koppeling aan een account).
  */
 
 import { DacElement, define } from "../base.js";
@@ -82,15 +82,15 @@ export function naamVanTelefoon(target) {
 }
 
 /**
- * Welke personen deze gebruiker ziet: de admin allemaal, een bewoner alleen
- * de persoon die aan zijn account hangt. De server stuurt een bewoner al
- * alleen zichzelf; dit is het vangnet voor de instellingen die via het event
- * binnenkomen, want die zijn compleet.
+ * Welke personen deze gebruiker ziet: iedereen, sinds v0.114.0.
+ *
+ * Tot dan zag een bewoner alleen de persoon die aan zijn account hing (de
+ * eigenaar op 06-09-2026). Op 12-10-2026, op de vraag of de bewoner zelf
+ * personen toevoegt en weghaalt en iedereen ziet: "Ja dat mag de bewoner."
+ * Daarmee had de koppeling aan een account geen taak meer op dit scherm.
  */
-export function zichtbaar(people, user) {
-  const lijst = (people ?? []).filter((p) => p && p.target);
-  if (!user || user.is_admin !== false) return lijst;
-  return lijst.filter((p) => p.user_id && p.user_id === user.id);
+export function zichtbaar(people, _user) {
+  return (people ?? []).filter((p) => p && p.target);
 }
 
 /** De soort van een regel; oudere regels hebben het veld niet en zijn meldingen. */
@@ -237,12 +237,6 @@ const css = /* css */ `
     color: var(--dac-ink-3); overflow-wrap: anywhere;
   }
   .persoon .tel.weg { color: var(--dac-warn); }
-  .persoon .koppel {
-    margin-left: auto; font-size: 11px; letter-spacing: 0.04em; font-weight: 600;
-    padding: 2px 9px; border-radius: var(--dac-radius-pill); border: 1px solid var(--dac-border);
-    color: var(--dac-ink-3); white-space: nowrap;
-  }
-  .persoon .koppel.aan { border-color: rgba(25,143,217,0.45); background: var(--dac-accent-soft); color: var(--dac-accent-hi); }
   .soort {
     display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;
     padding: 9px 0; border-top: 1px solid var(--dac-border);
@@ -355,7 +349,6 @@ const css = /* css */ `
     .rij { grid-template-columns: 44px 1fr; gap: 8px; padding: 8px 10px; }
     .filter select { margin-left: 0; }
     .soort { grid-template-columns: 1fr; }
-    .persoon .koppel { margin-left: 0; }
   }
 `;
 
@@ -370,9 +363,6 @@ class DacViewNotifications extends DacElement {
     this.geladen_ = false;
     this.off_ = null;
     this.filter_ = { soort: "alles", dag: "" };
-    // De gebruikers van Home Assistant, alleen voor de admin en alleen om
-    // een persoon aan te koppelen. Eén keer opgehaald.
-    this.gebruikers_ = null;
     this.bezig_ = false;
     this.zekerWeg_ = "";
   }
@@ -422,11 +412,6 @@ class DacViewNotifications extends DacElement {
                 <select id="nieuw-telefoon"></select>
                 <span class="uitleg">Elke telefoon met de Home Assistant-app staat hier, zodra de app erop ingelogd is.</span>
               </div>
-              <div class="veld">
-                <label for="nieuw-gebruiker">Account in Home Assistant</label>
-                <select id="nieuw-gebruiker"></select>
-                <span class="uitleg">Met een gekoppeld account ziet deze persoon hier alleen zichzelf en zet hij zijn eigen meldingen aan en uit.</span>
-              </div>
             </div>
             <div class="rij-knoppen" style="margin-top: 10px;">
               <button type="button" class="knop primair" id="nieuw-knop">${icons.plus} Persoon toevoegen</button>
@@ -468,7 +453,7 @@ class DacViewNotifications extends DacElement {
 
         <section class="blok" id="verbruik" hidden>
           <h2>${icons.warning} Lekkage of abnormaal verbruik</h2>
-          <p class="hint">Een bericht als er te lang onafgebroken water loopt, of als een dag veel meer gas of water vraagt dan gewoon. Water vraagt een watermeter onder Instellingen; voor het lopende water ook de sensor van het verbruik nu.</p>
+          <p class="hint">Een bericht als er te lang onafgebroken water loopt, of als een dag veel meer gas of water vraagt dan gewoon. Water vraagt een watermeter onder Installatie; voor het lopende water ook de sensor van het verbruik nu.</p>
           <div class="aanzet">
             <div>
               <strong>Melding aanzetten</strong>
@@ -600,58 +585,36 @@ class DacViewNotifications extends DacElement {
       .sort();
   }
 
-  async gebruikers_ophalen_() {
-    if (this.gebruikers_ || !this.isAdmin_() || !this.hass_?.callWS) return;
-    try {
-      const lijst = await this.hass_.callWS({ type: "config/auth/list" });
-      this.gebruikers_ = (lijst ?? []).filter((u) => !u.system_generated);
-    } catch (error) {
-      console.warn("[DomotiApp Coach] kon de gebruikers niet ophalen", error);
-      this.gebruikers_ = [];
-    }
-    // De kaarten noemen het account bij naam, dus die tekenen opnieuw. Geen
-    // kringetje: met de lijst binnen komt deze functie meteen terug.
-    this.paintPersonen_();
-  }
-
   paintPersonen_() {
     const holder = this.$("#personen");
     if (!holder) return;
-    const admin = this.isAdmin_();
     const mensen = zichtbaar(this.meldingen_().people, this.hass_?.user);
     const hint = this.$("#wie-hint");
     if (hint) {
-      hint.textContent = admin
-        ? "Per persoon welke berichten er naar zijn telefoon gaan. Voeg hieronder een persoon toe; koppel je zijn account, dan ziet hij hier alleen zichzelf."
-        : mensen.length
-          ? "Dit zijn jouw meldingen. Zet aan wat je op je telefoon wilt krijgen."
-          : "";
+      hint.textContent = "Per persoon welke berichten er naar zijn telefoon gaan. Voeg hieronder iemand toe met de telefoon waarop de Home Assistant-app staat.";
     }
     holder.replaceChildren();
     if (!mensen.length) {
       const leeg = document.createElement("div");
       leeg.className = "leeg";
-      leeg.textContent = admin
-        ? "Er is nog niemand toegevoegd. Zonder personen gaat er niets naar een telefoon; de geschiedenis hieronder vult zich wel."
-        : "Er is nog geen persoon aan jouw account gekoppeld. Vraag de beheerder om je toe te voegen bij Meldingen.";
+      leeg.textContent = "Er is nog niemand toegevoegd. Zonder personen gaat er niets naar een telefoon; de geschiedenis hieronder vult zich wel.";
       holder.append(leeg);
     }
     const bekend = this.telefoons_();
     for (const persoon of mensen) {
-      holder.append(this.kaart_(persoon, admin, bekend));
+      holder.append(this.kaart_(persoon, bekend));
     }
+    // Toevoegen kan iedereen (v0.114.0). Een account koppelen staat er niet
+    // meer bij: dat diende alleen om een bewoner hier zichzelf te laten zien.
     const toevoegen = this.$("#toevoegen");
     if (toevoegen) {
-      toevoegen.hidden = !admin;
-      if (admin) {
-        this.paintToevoegen_();
-        this.gebruikers_ophalen_();
-      }
+      toevoegen.hidden = false;
+      this.paintToevoegen_();
     }
   }
 
-  /** De kaart van één persoon: naam, telefoon, koppeling, en een schuif per soort. */
-  kaart_(persoon, admin, bekend) {
+  /** De kaart van één persoon: naam, telefoon, en een schuif per soort. */
+  kaart_(persoon, bekend) {
     const el = document.createElement("div");
     el.className = "persoon";
     el.dataset.persoon = persoon.id;
@@ -666,15 +629,6 @@ class DacViewNotifications extends DacElement {
     tel.className = `tel${weg ? " weg" : ""}`;
     tel.textContent = `notify.${persoon.target}${weg ? " (bestaat niet meer in Home Assistant)" : ""}`;
     kop.append(naam, tel);
-    if (admin) {
-      const koppel = document.createElement("span");
-      const gebruiker = (this.gebruikers_ ?? []).find((u) => u.id === persoon.user_id);
-      koppel.className = `koppel${persoon.user_id ? " aan" : ""}`;
-      koppel.textContent = persoon.user_id
-        ? `Account: ${gebruiker?.name ?? "gekoppeld"}`
-        : "Geen account";
-      kop.append(koppel);
-    }
     el.append(kop);
 
     for (const soort of SOORTEN_INFO) {
@@ -702,7 +656,7 @@ class DacViewNotifications extends DacElement {
       el.append(rij);
     }
 
-    if (admin) {
+    {
       const voet = document.createElement("div");
       voet.className = "voet";
       const knop = document.createElement("button");
@@ -719,8 +673,7 @@ class DacViewNotifications extends DacElement {
 
   paintToevoegen_() {
     const telefoon = this.$("#nieuw-telefoon");
-    const gebruiker = this.$("#nieuw-gebruiker");
-    if (!telefoon || !gebruiker) return;
+    if (!telefoon) return;
     const gekozen = telefoon.value;
     telefoon.replaceChildren();
     const bekend = this.telefoons_();
@@ -738,19 +691,6 @@ class DacViewNotifications extends DacElement {
     }
     if (gekozen && bekend.includes(gekozen)) telefoon.value = gekozen;
 
-    const gekozenGebruiker = gebruiker.value;
-    gebruiker.replaceChildren();
-    const geen = document.createElement("option");
-    geen.value = "";
-    geen.textContent = this.gebruikers_ === null ? "Ophalen..." : "Geen account koppelen";
-    gebruiker.append(geen);
-    for (const u of this.gebruikers_ ?? []) {
-      const optie = document.createElement("option");
-      optie.value = u.id;
-      optie.textContent = u.name || u.username || u.id;
-      gebruiker.append(optie);
-    }
-    if (gekozenGebruiker) gebruiker.value = gekozenGebruiker;
     const knop = this.$("#nieuw-knop");
     if (knop) knop.disabled = !bekend.length || this.bezig_;
   }
@@ -758,25 +698,21 @@ class DacViewNotifications extends DacElement {
   async toevoegen_() {
     const naam = this.$("#nieuw-naam")?.value?.trim() ?? "";
     const target = this.$("#nieuw-telefoon")?.value ?? "";
-    const user_id = this.$("#nieuw-gebruiker")?.value ?? "";
     if (!target) return;
     const mensen = [...(this.meldingen_().people ?? [])];
-    if (mensen.some((p) => p.target === target && (p.user_id || "") === user_id)) {
+    if (mensen.some((p) => p.target === target)) {
       this.status_("#wie-status", "Die telefoon staat er al.", true);
       return;
     }
     mensen.push({
       name: naam || naamVanTelefoon(target),
       target,
-      user_id,
       kinds: { ...STANDAARD_SOORTEN },
     });
     const gelukt = await this.bewaarPersonen_(mensen, "#wie-status");
     if (gelukt) {
       const veld = this.$("#nieuw-naam");
       if (veld) veld.value = "";
-      const account = this.$("#nieuw-gebruiker");
-      if (account) account.value = "";
     }
   }
 
@@ -807,11 +743,16 @@ class DacViewNotifications extends DacElement {
     persoon.kinds[soort] = aan;
     // Meteen laten zien; gaat het opslaan mis, dan tekent de kaart zich terug.
     schuif.setAttribute("aria-checked", String(aan));
-    if (this.isAdmin_()) {
-      await this.bewaarPersonen_(mensen, "#mijn-status");
-    } else {
-      await this.bewaarEigen_(persoon.kinds);
-    }
+    await this.bewaarPersonen_(mensen, "#mijn-status");
+  }
+
+  /**
+   * Waarlangs dit scherm opslaat: de admin via `notifications/set` en iedereen
+   * anders via `notifications/household` (v0.114.0). Die laatste laat een
+   * koppeling aan een account staan die er van vroeger nog is.
+   */
+  opslagCommando_() {
+    return this.isAdmin_() ? "domotiapp_coach/notifications/set" : "domotiapp_coach/notifications/household";
   }
 
   async bewaarPersonen_(mensen, statusId) {
@@ -819,7 +760,7 @@ class DacViewNotifications extends DacElement {
     this.bezig_ = true;
     try {
       const settings = await this.hass_.callWS({
-        type: "domotiapp_coach/notifications/set",
+        type: this.opslagCommando_(),
         notifications: { people: mensen.map((p) => ({
           id: p.id ?? "", name: p.name ?? "", target: p.target, user_id: p.user_id ?? "", kinds: p.kinds ?? {},
         })) },
@@ -835,19 +776,6 @@ class DacViewNotifications extends DacElement {
       this.bezig_ = false;
       this.paintPersonen_();
     }
-  }
-
-  async bewaarEigen_(kinds) {
-    if (!this.hass_?.callWS) return;
-    try {
-      const settings = await this.hass_.callWS({ type: "domotiapp_coach/notifications/mine", kinds });
-      this.settings_ = settings;
-      this.status_("#mijn-status", "Opgeslagen", false);
-    } catch (error) {
-      console.warn("[DomotiApp Coach] kon je meldingen niet opslaan", error);
-      this.status_("#mijn-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
-    }
-    this.paintPersonen_();
   }
 
   status_(kiezer, tekst, fout) {
@@ -872,7 +800,7 @@ class DacViewNotifications extends DacElement {
   paintVerbruik_() {
     const blok = this.$("#verbruik");
     if (!blok) return;
-    blok.hidden = !this.isAdmin_() || !this.settings_;
+    blok.hidden = !this.settings_;
     if (blok.hidden) return;
     const alert = this.verbruik_();
     this.$("#verbruik-aan").setAttribute("aria-checked", String(Boolean(alert.enabled)));
@@ -885,7 +813,7 @@ class DacViewNotifications extends DacElement {
     if (!this.hass_?.callWS) return;
     try {
       const settings = await this.hass_.callWS({
-        type: "domotiapp_coach/notifications/set",
+        type: this.opslagCommando_(),
         notifications: { usage_alert: { ...this.verbruik_(), ...wijziging } },
       });
       this.settings_ = settings;
@@ -920,7 +848,7 @@ class DacViewNotifications extends DacElement {
     if (!blok) return;
     const accus = this.batterijTemperaturen_();
     // Alleen voor wie een thuisbatterij heeft; zonder is er niets om te meten.
-    blok.hidden = !this.isAdmin_() || !this.settings_ || !accus.length;
+    blok.hidden = !this.settings_ || !accus.length;
     if (blok.hidden) return;
     const alert = this.warmte_();
     this.$("#warmte-aan").setAttribute("aria-checked", String(Boolean(alert.enabled)));
@@ -930,7 +858,13 @@ class DacViewNotifications extends DacElement {
     const metSensor = accus.filter((a) => a.sensor);
     const graden = (g) => `${g.toLocaleString("nl-NL", { maximumFractionDigits: 1 })} °C`;
     let hint;
-    if (!metSensor.length) hint = "Vul eerst de temperatuur van de batterij in onder Apparaten; zonder sensor is er niets te melden.";
+    // Apparaten ziet alleen de installateur (v0.114.0); de bewoner krijgt te
+    // horen wie het kan regelen.
+    if (!metSensor.length) {
+      hint = this.isAdmin_()
+        ? "Vul eerst de temperatuur van de batterij in onder Apparaten; zonder sensor is er niets te melden."
+        : "Je installateur moet eerst de temperatuur van de batterij koppelen; zonder sensor is er niets te melden.";
+    }
     else if (alert.max_c === null || alert.max_c === undefined) hint = "Vul in boven welke temperatuur je een bericht wilt.";
     else {
       hint = metSensor
@@ -944,7 +878,7 @@ class DacViewNotifications extends DacElement {
     if (!this.hass_?.callWS) return;
     try {
       const settings = await this.hass_.callWS({
-        type: "domotiapp_coach/notifications/set",
+        type: this.opslagCommando_(),
         notifications: { temp_alert: { ...this.warmte_(), ...wijziging } },
       });
       this.settings_ = settings;
@@ -959,7 +893,7 @@ class DacViewNotifications extends DacElement {
   paintBelasting_() {
     const blok = this.$("#belasting");
     if (!blok) return;
-    blok.hidden = !this.isAdmin_() || !this.settings_;
+    blok.hidden = !this.settings_;
     if (blok.hidden) return;
     const alert = this.belasting_();
     this.$("#belasting-aan").setAttribute("aria-checked", String(Boolean(alert.enabled)));
@@ -983,7 +917,7 @@ class DacViewNotifications extends DacElement {
     if (!this.hass_?.callWS) return;
     try {
       const settings = await this.hass_.callWS({
-        type: "domotiapp_coach/notifications/set",
+        type: this.opslagCommando_(),
         notifications: { load_alert: { ...this.belasting_(), ...wijziging } },
       });
       this.settings_ = settings;

@@ -91,6 +91,64 @@ def schema_bijwerken(
     return uit
 
 
+# Wat de bewoner zelf aan een apparaat mag instellen, per type (de eigenaar op
+# 08-10 en 12-10-2026: "voorop staat dat de klant geen entiteiten moet kunnen
+# kiezen"). Geen entiteit, geen merk, geen zekering of stroomgrens van de
+# hardware: alleen hoe hij het wil hebben. Alles daarbuiten blijft van de
+# installateur, via `settings/set`.
+VOORKEUREN: dict[str, frozenset[str]] = {
+    "laadpaal": frozenset({"charge_mode", "continuous_amps", "solar_start_percent"}),
+    "vaatwasser": frozenset({"release_required"}),
+}
+VOORKEUREN_AUTO = frozenset({"target_percent", "wake_mode"})
+VOORKEUREN_ACCU = frozenset({
+    "reserve_enabled", "reserve_percent", "trade", "weekly_full", "weekly_full_day",
+    "holiday", "holiday_max_percent", "car_above", "fan_above_c",
+})
+
+
+def voorkeuren_bijwerken(
+    devices: list[dict[str, Any]] | None, device_id: str, wijziging: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """De voorkeuren van één apparaat bijwerken, en verder niets aanraken.
+
+    Voor de pop-up "Instellen" achter de kaart (v0.114.0), die ook een bewoner
+    zonder beheerrechten opent. Zoals `schema_bijwerken`: alleen het genoemde
+    apparaat, alleen de meegestuurde velden, en de lijst die erin gaat blijft
+    zoals hij was. Een veld dat niet bij dit type hoort is een fout en geen
+    stille no-op: dan klopt het paneel niet, en dat moet je zien.
+    """
+    lijst = [dict(rij) for rij in (devices or []) if isinstance(rij, dict)]
+    apparaat = next((rij for rij in lijst if rij.get("id") == device_id), None)
+    if apparaat is None:
+        raise KeyError(device_id)
+    soort = apparaat.get("type")
+    mag = VOORKEUREN.get(soort, frozenset())
+    for veld, waarde in wijziging.items():
+        if veld == "battery":
+            if soort != "thuisbatterij" or not set(waarde) <= VOORKEUREN_ACCU:
+                raise ValueError(f"{veld} hoort niet bij een {soort}")
+            apparaat["battery"] = {**(apparaat.get("battery") or {}), **waarde}
+        elif veld == "cars":
+            if soort != "laadpaal":
+                raise ValueError(f"{veld} hoort niet bij een {soort}")
+            autos = [dict(auto) for auto in (apparaat.get("cars") or []) if isinstance(auto, dict)]
+            for rij in waarde:
+                velden = {k: v for k, v in rij.items() if k != "id"}
+                if not set(velden) <= VOORKEUREN_AUTO:
+                    raise ValueError("alleen laden tot en wekken horen bij de auto")
+                auto = next((a for a in autos if a.get("id") == rij.get("id")), None)
+                if auto is None:
+                    raise KeyError(rij.get("id"))
+                auto.update(velden)
+            apparaat["cars"] = autos
+        elif veld in mag:
+            apparaat[veld] = waarde
+        else:
+            raise ValueError(f"{veld} hoort niet bij een {soort}")
+    return lijst
+
+
 def _prune(defaults: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     """Drop keys that the current version no longer knows about.
 

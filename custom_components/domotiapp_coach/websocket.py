@@ -36,8 +36,8 @@ from .const import (
     PRICE_INTERVAL_HOUR,
     PRICE_INTERVAL_QUARTER,
 )
-from .ontvangers import SOORTEN, alleen_eigen, nieuwe_persoon, zet_eigen_soorten
-from .storage import async_get_store, met_soort, schema_bijwerken
+from .ontvangers import SOORTEN, huishouden_bijwerken, nieuwe_persoon, zet_eigen_soorten
+from .storage import async_get_store, met_soort, schema_bijwerken, voorkeuren_bijwerken
 from .units import to_kwh
 
 
@@ -312,22 +312,6 @@ _PLAN_DAY = _schema(
     }
 )
 
-# When an appliance may run, per device.
-_SCHEDULE = _schema(
-    {
-        vol.Required("device"): str,
-        vol.Optional("enabled", default=False): bool,
-        vol.Optional("per_day", default=False): bool,
-        # Who goes first when two appliances want the same room on the
-        # connection. Not a schedule, but it belongs with one: both answer
-        # "when may this run", and splitting them over two screens would mean
-        # setting up one appliance in two places.
-        vol.Optional("priority", default="mid"): vol.In(["low", "mid", "high"]),
-        vol.Optional("window"): _schema(dict(_WINDOW)),
-        vol.Optional("days", default=list): vol.All([_PLAN_DAY], vol.Length(max=7)),
-    }
-)
-
 _STRATEGY = _schema(
     {
         vol.Optional("level"): vol.In(LEVELS),
@@ -342,7 +326,12 @@ _STRATEGY = _schema(
         ),
         # `load_alert` stond hier tot v0.52.0; zie `_NOTIFICATIONS`. Een oud
         # paneel dat hem nog meestuurt raakt hem hier kwijt, en dat is goed.
-        vol.Optional("schedules"): [_SCHEDULE],
+        #
+        # `schedules` ook, sinds v0.114.0. Strategie stuurde de hele lijst mee,
+        # en wie Strategie opsloeg met een oude kopie zette een schema terug dat
+        # iemand net op een kaart had gewijzigd. Schema's gaan alleen nog via
+        # `device/schedule`; wat hier niet staat valt weg, en de opslag voegt
+        # samen, dus de bewaarde schema's blijven staan.
     }
 )
 
@@ -390,6 +379,24 @@ _NOTIFICATIONS = _schema(
                 vol.Optional("max_c"): vol.Any(
                     None, vol.All(vol.Coerce(float), vol.Range(0, 100))
                 ),
+            }
+        ),
+    }
+)
+
+# Waar de kleuren op het overzicht omslaan.
+_THRESHOLDS = _schema(
+    {
+        vol.Optional("self_use"): _schema(
+            {
+                vol.Optional("low"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
+                vol.Optional("high"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
+            }
+        ),
+        vol.Optional("price"): _schema(
+            {
+                vol.Optional("low"): vol.All(vol.Coerce(float), vol.Range(0, 10)),
+                vol.Optional("high"): vol.All(vol.Coerce(float), vol.Range(0, 10)),
             }
         ),
     }
@@ -497,22 +504,7 @@ _SETTINGS = _schema(
         vol.Optional("active_cars"): [
             _schema({vol.Required("device"): str, vol.Required("car"): str})
         ],
-        vol.Optional("thresholds"): _schema(
-            {
-                vol.Optional("self_use"): _schema(
-                    {
-                        vol.Optional("low"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
-                        vol.Optional("high"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
-                    }
-                ),
-                vol.Optional("price"): _schema(
-                    {
-                        vol.Optional("low"): vol.All(vol.Coerce(float), vol.Range(0, 10)),
-                        vol.Optional("high"): vol.All(vol.Coerce(float), vol.Range(0, 10)),
-                    }
-                ),
-            }
-        ),
+        vol.Optional("thresholds"): _THRESHOLDS,
     }
 )
 
@@ -526,14 +518,12 @@ async def async_get_settings(
 ) -> None:
     """Send the current settings to the panel.
 
-    Een gewone bewoner ziet van de personen alleen zichzelf. De eigenaar op
-    06-09-2026: "dat die persoon alleen zichzelf ziet." De rest van de
-    instellingen gaat gewoon mee, want het paneel tekent daarmee.
+    Tot v0.114.0 zag een gewone bewoner van de personen alleen zichzelf (de
+    eigenaar op 06-09-2026). Sinds 12-10-2026 beheert de bewoner de personen
+    zelf en ziet hij iedereen: "Ja dat mag de bewoner." Zie
+    `async_set_household`.
     """
     settings = await async_get_store(hass).async_load()
-    user = getattr(connection, "user", None)
-    if user is not None and not getattr(user, "is_admin", True):
-        settings = alleen_eigen(settings, str(getattr(user, "id", "") or ""))
     connection.send_result(msg["id"], settings)
 
 
@@ -572,6 +562,35 @@ async def async_set_notifications(
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): "domotiapp_coach/notifications/household",
+        vol.Required("notifications"): _NOTIFICATIONS,
+    }
+)
+@websocket_api.async_response
+async def async_set_household(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De personen en de drempels van Meldingen, voor iedereen (v0.114.0).
+
+    De eigenaar op 12-10-2026: de bewoner voegt personen toe en haalt ze weg,
+    en stelt de drempels van Zware belasting, Lekkage en de temperatuur van de
+    batterij zelf in. Alleen de koppeling aan een gebruiker van Home Assistant
+    blijft van de admin (`notifications/set`): die lijst mag alleen een admin
+    opvragen. Een `user_id` die hier toch meekomt telt niet.
+    """
+    wijziging = dict(msg["notifications"])
+    if "people" in wijziging:
+        settings = await async_get_store(hass).async_load()
+        wijziging["people"] = huishouden_bijwerken(settings, wijziging["people"])
+    settings = await async_get_store(hass).async_save({"notifications": wijziging})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], settings)
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): "domotiapp_coach/notifications/mine",
         vol.Required("kinds"): _KINDS,
     }
@@ -600,7 +619,7 @@ async def async_set_my_notifications(
         return
     settings = await async_get_store(hass).async_save({"notifications": {"people": mensen}})
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
-    connection.send_result(msg["id"], alleen_eigen(settings, user_id))
+    connection.send_result(msg["id"], settings)
 
 
 @websocket_api.require_admin
@@ -833,6 +852,101 @@ async def async_set_device_schedule(
         days=msg.get("days"),
     )
     settings = await store.async_save({"strategy": strategy})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], settings)
+
+
+# Wat de bewoner aan zijn batterij mag zetten (`VOORKEUREN_ACCU` in storage.py):
+# dezelfde velden en grenzen als in `_BATTERY`, zonder standaardwaarden, want
+# alleen wat meekomt verandert. Proef 150 in test_coach.py legt ze naast elkaar.
+_BATTERY_VOORKEUREN = vol.Schema(
+    {
+        vol.Optional("reserve_enabled"): bool,
+        vol.Optional("reserve_percent"): vol.All(vol.Coerce(int), vol.Range(0, 100)),
+        vol.Optional("trade"): bool,
+        vol.Optional("weekly_full"): bool,
+        vol.Optional("weekly_full_day"): vol.All(vol.Coerce(int), vol.Range(0, 6)),
+        vol.Optional("holiday"): bool,
+        vol.Optional("holiday_max_percent"): vol.All(vol.Coerce(int), vol.Range(10, 90)),
+        vol.Optional("car_above"): _LEEG_OF(float, 0, 100),
+        vol.Optional("fan_above_c"): _LEEG_OF(float, 0, 100),
+    }
+)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/device/preferences",
+        vol.Required("device_id"): str,
+        vol.Optional("charge_mode"): vol.In(["zon", "continu", "goedkoopst"]),
+        vol.Optional("continuous_amps"): vol.All(vol.Coerce(int), vol.Range(6, 32)),
+        vol.Optional("solar_start_percent"): vol.All(vol.Coerce(int), vol.Range(10, 100)),
+        vol.Optional("release_required"): bool,
+        vol.Optional("battery"): _BATTERY_VOORKEUREN,
+        vol.Optional("cars"): vol.All(
+            [vol.Schema({
+                vol.Required("id"): str,
+                vol.Optional("target_percent"): vol.All(vol.Coerce(float), vol.Range(10, 100)),
+                vol.Optional("wake_mode"): vol.In(["manual", "hourly"]),
+            })],
+            vol.Length(max=8),
+        ),
+    }
+)
+@websocket_api.async_response
+async def async_set_device_preferences(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De voorkeuren van één apparaat, uit de pop-up Instellen (v0.114.0).
+
+    Voor iedereen, zoals `device/schedule`: hoe de bewoner zijn paal, zijn auto
+    of zijn batterij wil hebben, nooit een entiteit, een merk of een grens van
+    de hardware. Welke velden bij welk type horen staat in `VOORKEUREN` in
+    storage.py.
+    """
+    store = async_get_store(hass)
+    settings = await store.async_load()
+    wijziging = {k: v for k, v in msg.items() if k not in ("id", "type", "device_id")}
+    try:
+        devices = voorkeuren_bijwerken(settings.get("devices"), msg["device_id"], wijziging)
+    except KeyError:
+        connection.send_error(msg["id"], "not_found", "Dit apparaat of deze auto bestaat niet meer.")
+        return
+    except ValueError as fout:
+        connection.send_error(msg["id"], "invalid_format", str(fout))
+        return
+    settings = await store.async_save({"devices": devices})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], settings)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/display/set",
+        vol.Optional("thresholds"): _THRESHOLDS,
+        vol.Optional("phases_on_overview"): bool,
+    }
+)
+@websocket_api.async_response
+async def async_set_display(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Hoe het overzicht eruitziet, voor iedereen (v0.114.0).
+
+    De kleurdrempels en de kaart met de fasen stonden in Instellingen, dat alleen
+    de admin zag. Het zijn geen instellingen van de installatie maar van wie
+    ernaar kijkt, en ze staan nu onder Voorkeuren.
+    """
+    wijziging: dict[str, Any] = {}
+    if "thresholds" in msg:
+        wijziging["thresholds"] = msg["thresholds"]
+    if "phases_on_overview" in msg:
+        wijziging["sources"] = {"phases_on_overview": msg["phases_on_overview"]}
+    settings = await async_get_store(hass).async_save(wijziging)
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
     connection.send_result(msg["id"], settings)
 
@@ -1299,19 +1413,14 @@ def async_subscribe(
     "Refusing to allow ... to subscribe to event domotiapp_coach_settings_updated",
     en het overzicht van een bewoner haalde de stand van de coach één keer op en
     werkte daarna nooit meer bij. Dit geeft hetzelfde door als wat zo iemand al
-    mag opvragen (`coach/state`, `notifications/list`, `settings/get`), en van
-    de instellingen net als daar alleen zijn eigen persoon.
+    mag opvragen (`coach/state`, `notifications/list`, `settings/get`). Sinds
+    v0.114.0 ziet een bewoner daar alle personen, dus hier ook.
     """
     soort = msg["event"]
-    user = getattr(connection, "user", None)
-    gewoon = user is not None and not getattr(user, "is_admin", True)
 
     @callback
     def doorgeven(event: Any) -> None:
-        data = dict(event.data)
-        if soort == "settings" and gewoon:
-            data["settings"] = alleen_eigen(data.get("settings") or {}, str(getattr(user, "id", "") or ""))
-        connection.send_message(websocket_api.event_message(msg["id"], data))
+        connection.send_message(websocket_api.event_message(msg["id"], dict(event.data)))
 
     connection.subscriptions[msg["id"]] = hass.bus.async_listen(_VOLGEN[soort], doorgeven)
     connection.send_result(msg["id"])
@@ -1329,6 +1438,9 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_set_strategy)
     websocket_api.async_register_command(hass, async_set_notifications)
     websocket_api.async_register_command(hass, async_set_my_notifications)
+    websocket_api.async_register_command(hass, async_set_household)
+    websocket_api.async_register_command(hass, async_set_device_preferences)
+    websocket_api.async_register_command(hass, async_set_display)
     websocket_api.async_register_command(hass, async_set_device_schedule)
     websocket_api.async_register_command(hass, async_set_active_car)
     websocket_api.async_register_command(hass, async_set_car_soc)

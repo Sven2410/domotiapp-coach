@@ -198,7 +198,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de vaatwasser: Home Connect, Home Connect Local, een domme vaatwasser, de eindtijd, na de klaar-tijd | `docs/vaatwasser.md` |
 | de boiler | `docs/boiler.md` |
 | Historie en het rapport, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, en de batterij op de kaart en in de pop-up | `docs/eerste-woning.md` |
-| het paneel: de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat | `docs/paneel.md` |
+| het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat | `docs/paneel.md` |
 
 ## Wat gelijk moet blijven
 
@@ -260,9 +260,9 @@ dan de andere in dezelfde uitgave.
 | `monitor.py` | de zekeringbewaking en de wachthond |
 | `report.py` | het pdf-rapport |
 | `frontend/src/` | het paneel, ES-modules zonder buildstap |
-| `frontend/src/schedule-sheet.js` | het schema van één apparaat, als pop-up achter zijn kaart |
+| `frontend/src/schedule-sheet.js` | Instellen: het schema van één apparaat en wat de bewoner eraan kiest (`voorkeur-velden.js`), als pop-up achter zijn kaart. Wie wat ziet: `docs/paneel.md` |
 | `ontvangers.py` | wie welke melding krijgt: personen (een telefoon, een naam, eventueel een gebruiker van Home Assistant) met een schakelaar per soort: kritiek, melding, besluit, belasting. Kent Home Assistant niet |
-| `frontend/src/views/notifications.js` | Meldingen, twee in een sinds 06-09-2026: bovenaan de personen (de admin voegt toe, een bewoner ziet alleen zichzelf en zet zijn eigen schuiven via `notifications/mine`), de zekeringmelding "Zware belasting" (uit Strategie verhuisd), en daaronder alles wat de coach de afgelopen twee weken stuurde én elk besluit dat hij nam (`_async_noteer_besluit`, `recent` in notifications.js, sinds v0.101.5), uit `MeldingenStore` in storage.py |
+| `frontend/src/views/notifications.js` | Meldingen, twee in een sinds 06-09-2026: bovenaan de personen (sinds v0.114.0 voegt de bewoner ze zelf toe en ziet hij iedereen, via `notifications/household`), de zekeringmelding "Zware belasting" (uit Strategie verhuisd), en daaronder alles wat de coach de afgelopen twee weken stuurde én elk besluit dat hij nam (`_async_noteer_besluit`, `recent` in notifications.js, sinds v0.101.5), uit `MeldingenStore` in storage.py |
 | `frontend/src/geld.js` | In geld in Historie en het rapport (v0.101.0): uitgegeven, bespaard in zon, thuisbatterij en coach, en salderen zoals de coach. Geen terugverdientijd en geen aankoopprijzen, sinds v0.101.1 (`docs/eerste-woning.md`) |
 | `frontend/src/savings.js` | Bespaard, onder Historie: de laadbeurten uit `BeurtenStore` (storage.py) opgeteld per periode en per apparaat. De coach telt per ronde wat een beurt kost (`_geld_bij`) en wat dezelfde tijd op vol vermogen vanaf het inpluggen met alles van het net gekost had (`_basis_bij`, de maat); bespaard is maat min betaald, nooit onder nul, in twee delen: door de zon (`zon_winst`) en door te wachten. Stapt hij midden in een beurt in, dan rekent `_async_terugrekenen` het begin terug uit de recorder en de kwartieropslag |
 
@@ -292,10 +292,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 482 controles op het denkwerk
 python tests/test_batterij.py    # 187 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1000 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 1019 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2356 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 147 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 153 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

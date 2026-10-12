@@ -28,7 +28,7 @@ import "./src/views/notifications.js";
 import "./src/views/devices.js";
 import "./src/views/strategy.js";
 import "./src/views/installation.js";
-import "./src/views/settings.js";
+import "./src/views/contract.js";
 
 const DEFAULT_VIEW = "overzicht";
 
@@ -40,7 +40,7 @@ const BUILT = {
   apparaten: "dac-view-devices",
   strategie: "dac-view-strategy",
   installatie: "dac-view-installation",
-  instellingen: "dac-view-settings",
+  contract: "dac-view-contract",
 };
 
 class DomotiAppCoachPanel extends DacElement {

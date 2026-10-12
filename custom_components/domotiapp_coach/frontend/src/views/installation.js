@@ -1,12 +1,11 @@
 /**
- * Installatie -- the facts about this house that do not change from minute to
- * minute: the connection it has, and the contract it runs on.
+ * Installatie -- hoe dit huis gemeten wordt en wat het aankan: de aansluiting,
+ * de kasten en groepen, de sensoren van de meter en de zon, de meterstanden.
  *
- * Customers may read this page and cannot change it. That is deliberate: the
- * numbers here decide what the coach advises, so a customer spotting that their
- * fuse or their tariff is wrong and saying so is worth more than protecting them
- * from the sight of it. Instellingen, which points at raw entities, they do not
- * see at all.
+ * Sinds v0.114.0 alleen voor de installateur, en met Instellingen erin. De
+ * eigenaar op 08-10-2026: "voorop staat dat de klant geen entiteiten moet kunnen
+ * kiezen", en "het moet beter gecategoriseerd worden". Wat het kost staat onder
+ * Contract, hoe het overzicht eruitziet onder Voorkeuren.
  */
 
 import { define } from "../base.js";
@@ -21,9 +20,6 @@ import "../components/entity-picker.js";
 
 /** Nominal voltage per phase: 3 x 25 A -> 17250 W, 1 x 25 A -> 5750 W. */
 const VOLTAGE = 230;
-
-const euro = (v) =>
-  Number(v ?? 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /**
  * Elke kast en groep krijgt zijn soort en of hij een eigen kWh-meter heeft (v0.101.5).
@@ -48,15 +44,15 @@ export function kastenIndelen(circuits) {
 }
 
 class DacViewInstallation extends DacEditorElement {
-  static sections = ["installation", "contract"];
+  static sections = ["installation", "navigation", "sources"];
 
   render() {
     return `
       <div class="wrap">
         <header class="intro">
           <div class="eyebrow">Installatie</div>
-          <h1>Je woning, je aansluiting, je contract</h1>
-          <p>Hier staat waar de coach mee rekent. Klopt er iets niet, geef het dan door aan je installateur. Wijzigen kan alleen een beheerder.</p>
+          <h1>Hoe je huis gemeten wordt</h1>
+          <p>Je aansluiting, je kasten en groepen, en welke sensoren meten wat er gebeurt. Hierop rekent de coach. Je hoeft niet alles in te vullen; zonder gekoppelde sensoren blijven de cijfers leeg.</p>
         </header>
 
         ${adminNoticeHtml}
@@ -168,215 +164,216 @@ class DacViewInstallation extends DacEditorElement {
         </section>
 
         <section class="card">
-          <h2>${icons.euro} Contract en prijzen</h2>
-          <p class="hint">Waar de energieprijs op het overzicht vandaan komt.</p>
+          <h2>${icons.grid} Energiebronnen</h2>
+          <p class="hint">Welke sensoren meten je opwek en je meterstand. Of de sensor in watt of kilowatt meet maakt niet uit, dat rekent de coach zelf om. Het verbruik van de woning wordt hieruit berekend.</p>
           <div class="fields">
             <div class="row">
-              <label>Soort contract</label>
-              <div class="segmented" id="contract-type">
-                <button type="button" data-type="fixed" aria-pressed="false">
-                  <strong>Vast</strong>
-                  Eén prijs die je hele contractperiode geldt.
+              <label>Opwek zonnepanelen</label>
+              <dac-entity-picker id="src-solar" data-key="solar"></dac-entity-picker>
+            </div>
+            <div id="solar-extra"></div>
+            <div class="row">
+              <button type="button" class="add" id="solar-extra-add">Nog een omvormer</button>
+              <span class="sub">Heb je meer omvormers, zet ze hier erbij; de coach telt ze op.</span>
+            </div>
+            <div class="row">
+              <label>Hoe meet je slimme meter?</label>
+              <div class="segmented" id="grid-mode">
+                <button type="button" data-mode="split" aria-pressed="false">
+                  <strong>Afzonderlijk</strong>
+                  Twee sensoren: verbruik en productie. Eén van de twee staat altijd op nul.
                 </button>
-                <button type="button" data-type="dynamic" aria-pressed="false">
-                  <strong>Dynamisch</strong>
-                  Een prijs die per uur of per kwartier meebeweegt met de markt.
+                <button type="button" data-mode="signed" aria-pressed="false">
+                  <strong>Gecombineerd</strong>
+                  Eén sensor die negatief wordt zodra je teruglevert.
                 </button>
               </div>
             </div>
 
-            <label class="check" for="netting">
-              <input type="checkbox" id="netting">
+            <div id="grid-split" class="two">
+              <div class="row">
+                <label>Energieverbruik (van het net)</label>
+                <dac-entity-picker id="src-import" data-key="grid_import"></dac-entity-picker>
+              </div>
+              <div class="row">
+                <label>Energieproductie (naar het net)</label>
+                <dac-entity-picker id="src-export" data-key="grid_export"></dac-entity-picker>
+              </div>
+            </div>
+
+            <div class="row" id="grid-signed">
+              <label>Netvermogen</label>
+              <dac-entity-picker id="src-signed" data-key="grid_signed"></dac-entity-picker>
+              <span class="sub">Normaal is positief inkoop en negatief teruglevering.</span>
+              <label class="check" for="src-invert">
+                <input type="checkbox" id="src-invert">
+                <span>
+                  <strong>Meting omgekeerd</strong>
+                  Aanvinken als je meter het andersom doet: positief bij teruglevering.
+                  Herken je aan een diagram dat precies verkeerd om staat.
+                </span>
+              </label>
+            </div>
+
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>${icons.plug} Fasen</h2>
+          <p class="hint">Heeft de meter van deze woning losse waarden per fase, vul ze dan hier in. Daarmee wordt de belastbaarheid per fase berekend in plaats van op het totaal. Een zekering gaat er immers uit op de zwaarste fase en niet op het gemiddelde.</p>
+          <div class="fields">
+            <label class="check" for="phases-enabled">
+              <input type="checkbox" id="phases-enabled">
               <span>
-                <strong>Je levert nog gesaldeerd terug</strong>
-                Dan streept elke teruggeleverde kWh weg tegen een ingekochte, en is hij dus
-                precies je inkoopprijs waard in plaats van je terugleververgoeding. De coach
-                rekent daar dan mee, en dat verandert wat het waard is om je eigen zon te
-                gebruiken. De regeling loopt af op 1 januari 2027.
+                <strong>Fasen beschikbaar</strong>
+                Aanzetten als deze woning per fase meet.
               </span>
             </label>
 
-            <div class="two">
-              <div class="row">
-                <label for="gas-price">Gasprijs (€ per m³)</label>
-                <input type="number" id="gas-price" min="0" step="0.001" inputmode="decimal">
-                <span class="sub">All-in, voor de historie en het rapport. Leeg laten als je geen gas hebt.</span>
-              </div>
-              <div class="row">
-                <label for="water-price">Waterprijs (€ per m³)</label>
-                <input type="number" id="water-price" min="0" step="0.001" inputmode="decimal">
-                <span class="sub">All-in, inclusief belasting. Leeg laten zonder watermeter.</span>
-              </div>
-            </div>
-
-            <!-- vast -->
-            <div id="fixed-fields" class="fields">
-              <div class="two">
-                <div class="row">
-                  <label for="fx-price">All-in prijs (€ per kWh)</label>
-                  <input type="number" id="fx-price" min="0" step="0.001" inputmode="decimal">
-                  <span class="sub">Inclusief energiebelasting, opslag en btw.</span>
-                </div>
-                <div class="row">
-                  <label for="fx-feedin">Terugleververgoeding (€ per kWh)</label>
-                  <input type="number" id="fx-feedin" min="0" step="0.001" inputmode="decimal">
-                  <span class="sub">Wat je krijgt voor wat je teruglevert. Zonder salderen (vanaf 2027) is dat bij de grote leveranciers ongeveer een kwart cent: 0,0025.</span>
-                </div>
-              </div>
-              <div class="row">
-                <label for="fx-feedcost">Terugleverkosten (€ per kWh)</label>
-                <input type="number" id="fx-feedcost" min="0" step="0.001" inputmode="decimal">
-                <span class="sub">Wat je leverancier rekent over wat je teruglevert.</span>
-              </div>
-            </div>
-
-            <!-- dynamisch -->
-            <div id="dynamic-fields" class="fields">
-              <div class="row">
-                <label>Hoe vaak verandert de prijs?</label>
-                <div class="segmented" id="dynamic-interval">
-                  <button type="button" data-interval="hour" aria-pressed="false">
-                    <strong>Per uur</strong>
-                    Eén prijs per klokuur.
-                  </button>
-                  <button type="button" data-interval="quarter" aria-pressed="false">
-                    <strong>Per kwartier</strong>
-                    Vier prijzen per uur.
-                  </button>
-                </div>
-                <span class="sub">Kijk op je contract of in de app van je leverancier. Dit is de lengte van de blokken waarin de coach straks plant. Met kwartieren komt hij dichter bij het goedkoopste moment, maar alleen als je leverancier ook zo afrekent.</span>
-              </div>
-
-              <div class="row">
-                <label>Waar komt de prijs vandaan?</label>
-                <div class="segmented" id="dynamic-source">
-                  <button type="button" data-source="all_in" aria-pressed="false">
-                    <strong>All-in prijs als entiteit</strong>
-                    Eén sensor die de prijs al compleet levert.
-                  </button>
-                  <button type="button" data-source="market" aria-pressed="false">
-                    <strong>Zelf opbouwen</strong>
-                    Marktprijs uit een sensor, de rest vul je hier in.
-                  </button>
-                </div>
-              </div>
-
-              <div id="dyn-allin-row">
-                <div class="row">
-                  <label>All-in prijssensor</label>
-                  <dac-entity-picker id="dyn-allin"></dac-entity-picker>
-                  <span class="sub">Deze prijs wordt ongewijzigd overgenomen.</span>
-                </div>
-                <div class="row">
-                  <label>Marktprijssensor (voor teruglevering)</label>
-                  <dac-entity-picker id="dyn-market-feed"></dac-entity-picker>
-                  <span class="sub">
-                    De kale marktprijs, zonder belasting en btw. Dit is wat teruglevering
-                    opbrengt, en in een all-in prijs zit die niet meer. Vul je hem in, dan
-                    kan de coach uitrekenen wanneer het goedkoper is om je eigen zon te
-                    gebruiken dan om op een goedkoop uur te wachten. Laat je hem leeg, dan
-                    laadt hij op zon alleen als de zon het grotendeels zelf dekt. Het moet
-                    een andere sensor zijn dan de all-in sensor: dezelfde sensor twee keer
-                    telt niet, want een all-in prijs is geen marktprijs.
-                  </span>
-                </div>
-              </div>
-
-              <div class="notice" id="dyn-missing" hidden>
-                ${icons.warning}
-                <span id="dyn-missing-text"></span>
-              </div>
-
-              <div id="dyn-market-fields" class="fields">
-                <div class="row">
-                  <label>Marktprijssensor</label>
-                  <dac-entity-picker id="dyn-market"></dac-entity-picker>
-                  <span class="sub">De kale marktprijs, zonder belasting en btw.</span>
-                </div>
-                <div class="row">
-                  <span class="sub" id="dyn-formula"></span>
-                </div>
-              </div>
-
-              <!-- De reserve (v0.101.3). De eigenaar op 29-09-2026, toen Frank
-                   Energie eruit lag: "ik heb ook Nord Pool draaien, dat wil ik
-                   als fallback hebben." Zie _prijsbron in coach.py. -->
-              <div class="row">
-                <label>Reserveprijssensor</label>
-                <dac-entity-picker id="dyn-reserve"></dac-entity-picker>
-                <span class="sub">
-                  Optioneel. Geeft je prijssensor geen prijs, bijvoorbeeld omdat de integratie van je
-                  leverancier stuk is, dan rekent de coach met deze. Zodra je eigen sensor weer
-                  prijzen heeft, rekent hij weer daarmee. De ingebouwde Nord Pool van Home Assistant
-                  kan hier ook: die prijzen haalt de coach zelf op.
-                </span>
-              </div>
-              <div class="row" id="dyn-reserve-soort-row">
-                <label>Wat geeft de reserve?</label>
-                <div class="segmented" id="dyn-reserve-soort">
-                  <button type="button" data-reserve="market" aria-pressed="false">
-                    <strong>Kale marktprijs</strong>
-                    Zoals Nord Pool. De coach rekent er belasting, opslag en btw bij.
-                  </button>
-                  <button type="button" data-reserve="all_in" aria-pressed="false">
-                    <strong>All-in prijs</strong>
-                    Al compleet, zoals de sensor van een leverancier.
-                  </button>
-                </div>
-              </div>
-
-              <div class="row" id="dyn-tax-row">
-                <label for="dyn-tax">Energiebelasting (€ per kWh)</label>
-                <input type="number" id="dyn-tax" min="0" step="0.0001" inputmode="decimal">
-                <span class="sub">Wat de overheid per kWh heft. Dit tarief verandert elk jaar op 1 januari, dus kijk het na op je jaarnota.</span>
-              </div>
-
-              <!-- De opslag en de btw staan buiten dat blok, want ze zijn ook
-                   nodig bij een all-in sensor. Salderen streept de
-                   energiebelasting weg tegen die bij afname, maar de opslag
-                   niet: die betaal je per ingekochte kWh en krijg je nergens
-                   terug. Zonder dit veld zou daar een standaardwaarde voor
-                   gebruikt worden die niemand heeft ingevuld. -->
-              <div class="two">
-                <div class="row">
-                  <label for="dyn-markup">Opslag leverancier (€ per kWh)</label>
-                  <input type="number" id="dyn-markup" min="0" step="0.0001" inputmode="decimal">
-                  <span class="sub" id="dyn-markup-hint"></span>
-                </div>
-                <div class="row">
-                  <label for="dyn-vat">Btw (%)</label>
-                  <input type="number" id="dyn-vat" min="0" max="100" step="1" inputmode="numeric">
-                </div>
-              </div>
-
-              <div class="two">
-                <div class="row">
-                  <label for="dyn-feedcost">Terugleverkosten (€ per kWh)</label>
-                  <input type="number" id="dyn-feedcost" min="0" step="0.001" inputmode="decimal">
-                  <span class="sub">Wat je leverancier rekent over wat je teruglevert.</span>
-                </div>
-                <div class="row">
-                  <label for="dyn-feedbonus">Verkoopvergoeding (€ per kWh)</label>
-                  <input type="number" id="dyn-feedbonus" step="0.001" inputmode="decimal">
-                  <span class="sub">Wat je leverancier bovenop de marktprijs betaalt voor wat je teruglevert. Verschilt per leverancier: de een geeft 2 cent, de ander niets, en er zijn er die er 2 cent afhalen; dan vul je een negatief getal in.</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="row">
-              <label>Eerdere contracten</label>
-              <span class="sub">
-                Ben je van leverancier of van contract gewisseld? Zet hier per contract van wanneer
-                tot wanneer het gold en wat het kostte. Historie en rapport rekenen dan elke dag
-                met de prijs van toen. Wat de coach nu doet rekent altijd met het contract hierboven.
-              </span>
-            </div>
-            <div id="periods"></div>
-            <div class="circuit-actions">
-              <button type="button" id="period-add">Eerder contract toevoegen</button>
+            <div id="phase-fields" class="fields">
+              ${["l1", "l2", "l3"]
+                .map(
+                  (phase) => `
+                <div class="phase-block">
+                  <div class="phase-title">${phase.toUpperCase()}</div>
+                  <div class="row">
+                    <label>Stroom (A)</label>
+                    <dac-entity-picker data-phase="${phase}" data-kind="current"></dac-entity-picker>
+                  </div>
+                  <div class="row">
+                    <label>Vermogen</label>
+                    <dac-entity-picker data-phase="${phase}" data-kind="power"></dac-entity-picker>
+                  </div>
+                  <div class="row">
+                    <label>Spanning (V)</label>
+                    <dac-entity-picker data-phase="${phase}" data-kind="voltage"></dac-entity-picker>
+                  </div>
+                </div>`
+                )
+                .join("")}
             </div>
           </div>
         </section>
+
+        <section class="card">
+          <h2>${icons.sun} Zonverwachting</h2>
+          <p class="hint">Wat er vandaag en morgen aan zon verwacht wordt. Daarmee kan de coach besluiten of het de moeite is om te wachten, of dat hij beter vannacht op de goedkope uren kan draaien. Integraties als Forecast.Solar en Solcast leveren deze waarden als sensoren; vul in wat je hebt.</p>
+          <div class="fields">
+            <div class="two">
+              <div class="row">
+                <label>Verwacht vandaag nog</label>
+                <dac-entity-picker data-forecast="remaining_today"></dac-entity-picker>
+              </div>
+              <div class="row">
+                <label>Verwacht morgen</label>
+                <dac-entity-picker data-forecast="tomorrow"></dac-entity-picker>
+              </div>
+            </div>
+            <div class="two">
+              <div class="row">
+                <label>Verwacht dit uur</label>
+                <dac-entity-picker data-forecast="this_hour"></dac-entity-picker>
+              </div>
+              <div class="row">
+                <label>Verwacht volgend uur</label>
+                <dac-entity-picker data-forecast="next_hour"></dac-entity-picker>
+              </div>
+              <span class="sub">
+                In kWh over dat uur. Dit zijn de twee die de coach echt gebruikt om te
+                beslissen: moet hij nu stroom bijkopen om op de zon te laden terwijl er
+                volgend uur veel meer aankomt, dan wacht hij dat uur af. Met alleen
+                dagtotalen kan hij dat niet weten.
+              </span>
+            </div>
+            <div class="row">
+              <label>Tijdstip hoogste opwek vandaag</label>
+              <dac-entity-picker data-forecast="peak_today"></dac-entity-picker>
+              <span class="sub">Optioneel. Hiermee kan de coach zeggen rond welk uur het overschot het grootst is.</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>${icons.gauge} Meterstanden</h2>
+          <p class="hint">De tellers van je slimme meter, zoals ze op de meter zelf staan. Vul in wat je hebt; alleen de ingevulde standen komen op het overzicht te staan. Dit zijn totalen in kWh en m³, dus geen vermogens.</p>
+          <div class="fields">
+            <div class="row">
+              <label>Opwek totaal (teller)</label>
+              <dac-entity-picker data-meter="solar_total"></dac-entity-picker>
+              <span class="sub">De teller van je omvormer in kWh, niet het vermogen. Zonder deze kan het paneel niet terugkijken op wat je hebt opgewekt.</span>
+            </div>
+            <div id="solar-total-extra"></div>
+            <div class="row">
+              <button type="button" class="add" id="solar-total-extra-add">Nog een opwekteller</button>
+              <span class="sub">De teller van elke andere omvormer; het paneel telt ze op.</span>
+            </div>
+            <div class="two">
+              <div class="row">
+                <label>Geleverd, laag tarief</label>
+                <dac-entity-picker data-meter="import_low"></dac-entity-picker>
+              </div>
+              <div class="row">
+                <label>Geleverd, hoog tarief</label>
+                <dac-entity-picker data-meter="import_high"></dac-entity-picker>
+              </div>
+              <div class="row">
+                <label>Teruggeleverd, laag tarief</label>
+                <dac-entity-picker data-meter="export_low"></dac-entity-picker>
+              </div>
+              <div class="row">
+                <label>Teruggeleverd, hoog tarief</label>
+                <dac-entity-picker data-meter="export_high"></dac-entity-picker>
+              </div>
+            </div>
+
+            <label class="check" for="gas-enabled">
+              <input type="checkbox" id="gas-enabled">
+              <span>
+                <strong>Deze woning gebruikt gas</strong>
+                Staat dit uit, dan blijft gas van het overzicht weg.
+              </span>
+            </label>
+
+            <div class="row" id="gas-field">
+              <label>Gasmeter (m³)</label>
+              <dac-entity-picker data-meter="gas"></dac-entity-picker>
+            </div>
+
+            <label class="check" for="water-enabled">
+              <input type="checkbox" id="water-enabled">
+              <span>
+                <strong>Deze woning heeft een watermeter in Home Assistant</strong>
+                Bijvoorbeeld de HomeWizard Watermeter. Dan staat water bij de standen, in de historie en in het rapport.
+              </span>
+            </label>
+
+            <div class="fields" id="water-field">
+              <div class="row">
+                <label>Watermeter (m³)</label>
+                <dac-entity-picker data-meter="water"></dac-entity-picker>
+                <span class="sub">De teller, in m³.</span>
+              </div>
+              <div class="row">
+                <label>Waterverbruik nu (L/min)</label>
+                <dac-entity-picker data-meter="water_flow"></dac-entity-picker>
+                <span class="sub">Optioneel. Met deze sensor kan de coach melden als er te lang onafgebroken water loopt; zie Meldingen.</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>${icons.home} Navigatie</h2>
+          <p class="hint">De Home-knop rechtsboven brengt je terug naar je eigen dashboard. Draai je Kiosk Mode, dan is dat de enige weg terug.</p>
+          <div class="fields">
+            <div class="row">
+              <label for="home-path">Pad van je thuisdashboard</label>
+              <input type="text" id="home-path" inputmode="url" placeholder="/lovelace/0" autocomplete="off">
+              <span class="sub">Bijvoorbeeld <code>/lovelace/0</code> of <code>/dashboard-woning/overzicht</code>.</span>
+            </div>
+          </div>
+        </section>
+
       </div>
 
       ${saveBarHtml}
@@ -404,17 +401,93 @@ class DacViewInstallation extends DacEditorElement {
       this.$("#max-auto").checked = false;
     });
 
-    bind("gas-price", (v) => (this.draft_.contract.gas_price = Number(v) || 0));
-    bind("water-price", (v) => (this.draft_.contract.water_price = Number(v) || 0));
-    bind("fx-price", (v) => (this.draft_.contract.fixed.all_in_price = Number(v)));
-    bind("fx-feedin", (v) => (this.draft_.contract.fixed.feed_in_tariff = Number(v)));
-    bind("fx-feedcost", (v) => (this.draft_.contract.fixed.feed_in_costs = Number(v)));
+    bind("home-path", (v) => (this.draft_.navigation.home_path = v));
 
-    bind("dyn-tax", (v) => (this.draft_.contract.dynamic.energy_tax = Number(v)));
-    bind("dyn-markup", (v) => (this.draft_.contract.dynamic.supplier_markup = Number(v)));
-    bind("dyn-vat", (v) => (this.draft_.contract.dynamic.vat_percent = Number(v)));
-    bind("dyn-feedcost", (v) => (this.draft_.contract.dynamic.feed_in_costs = Number(v)));
-    bind("dyn-feedbonus", (v) => (this.draft_.contract.dynamic.feed_in_bonus = Number(v) || 0));
+    for (const picker of this.$$("dac-entity-picker[data-key]")) {
+      picker.filter = "power";
+      picker.placeholder = "Zoek een vermogenssensor…";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        this.draft_.sources[picker.dataset.key] = ev.detail.value;
+        this.afterChange_();
+      });
+    }
+
+    for (const picker of this.$$("#phase-fields dac-entity-picker[data-phase]")) {
+      const { phase, kind } = picker.dataset;
+      picker.filter = kind === "power" ? "power" : "all";
+      picker.placeholder =
+        kind === "current" ? "Zoek een stroomsensor…"
+        : kind === "voltage" ? "Zoek een spanningssensor…"
+        : "Zoek een vermogenssensor…";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        this.draft_.sources.phases[phase][kind] = ev.detail.value;
+        this.afterChange_();
+      });
+    }
+
+    // Meter readings are counters in kWh or m3, so the picker looks for energy
+    // rather than power: a customer searching "verbruik" otherwise gets the
+    // watts they already mapped above.
+    for (const picker of this.$$("dac-entity-picker[data-forecast]")) {
+      picker.filter = "all";
+      picker.placeholder =
+        picker.dataset.forecast === "peak_today" ? "Zoek een tijdstip…" : "Zoek een verwachting in kWh…";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        (this.draft_.sources.solar_forecast ??= {})[picker.dataset.forecast] = ev.detail.value;
+        this.afterChange_();
+      });
+    }
+
+    this.$("#solar-extra-add").addEventListener("click", () => {
+      (this.draft_.sources.solar_extra ??= []).push("");
+      this.paintExtra_();
+      this.afterChange_();
+    });
+    this.$("#solar-total-extra-add").addEventListener("click", () => {
+      ((this.draft_.sources.meters ??= {}).solar_total_extra ??= []).push("");
+      this.paintExtra_();
+      this.afterChange_();
+    });
+
+    for (const picker of this.$$("dac-entity-picker[data-meter]")) {
+      picker.filter = "all";
+      picker.placeholder =
+        picker.dataset.meter === "gas" ? "Zoek je gasmeter…" : "Zoek een meterstand…";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        // Created on demand: settings written before this section existed have
+        // no `meters` at all until the server merges its defaults in.
+        (this.draft_.sources.meters ??= {})[picker.dataset.meter] = ev.detail.value;
+        this.afterChange_();
+      });
+    }
+
+    for (const [id, apply] of [
+      ["phases-enabled", (on) => (this.draft_.sources.phases_enabled = on)],
+      ["gas-enabled", (on) => ((this.draft_.sources.meters ??= {}).gas_enabled = on)],
+      ["water-enabled", (on) => ((this.draft_.sources.meters ??= {}).water_enabled = on)],
+    ]) {
+      const box = this.$(`#${id}`);
+      box.addEventListener("change", () => {
+        apply(box.checked);
+        this.paintFaseVelden_();
+        this.paintGas_();
+        this.afterChange_();
+      });
+    }
+
+    const invert = this.$("#src-invert");
+    invert.addEventListener("change", () => {
+      this.draft_.sources.grid_signed_invert = invert.checked;
+      this.afterChange_();
+    });
+
+    for (const button of this.$$("#grid-mode button")) {
+      button.addEventListener("click", () => {
+        this.draft_.sources.grid_mode = button.dataset.mode;
+        this.paintGridMode_();
+        this.afterChange_();
+      });
+    }
 
     this.$("#max-auto").addEventListener("change", (ev) => {
       this.draft_.installation.max_grid_auto = ev.target.checked;
@@ -422,11 +495,6 @@ class DacViewInstallation extends DacEditorElement {
       this.afterChange_();
     });
 
-    this.$("#period-add").addEventListener("click", () => {
-      this.periods_().push({ from: "", to: "", all_in_price: 0, feed_in_tariff: 0, gas_price: 0, water_price: 0 });
-      this.paintPeriods_();
-      this.afterChange_();
-    });
 
     const nieuw = (kind) => () => {
       this.circuits_().push({
@@ -445,11 +513,6 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#kast-add").addEventListener("click", nieuw("kast"));
     this.$("#circuit-add").addEventListener("click", nieuw("groep"));
 
-    this.$("#netting").addEventListener("change", (ev) => {
-      this.draft_.contract.netting = ev.target.checked;
-      this.afterChange_();
-    });
-
     this.$("#balancer").addEventListener("change", (ev) => {
       this.draft_.installation.load_balancer = ev.target.checked;
       this.paintBalancer_();
@@ -465,38 +528,6 @@ class DacViewInstallation extends DacEditorElement {
       });
     }
 
-    for (const button of this.$$("#contract-type button")) {
-      button.addEventListener("click", () => {
-        this.draft_.contract.type = button.dataset.type;
-        this.paintContract_();
-        this.afterChange_();
-      });
-    }
-
-    for (const button of this.$$("#dynamic-source button")) {
-      button.addEventListener("click", () => {
-        this.draft_.contract.dynamic.source = button.dataset.source;
-        this.paintContract_();
-        this.afterChange_();
-      });
-    }
-
-    for (const button of this.$$("#dyn-reserve-soort button")) {
-      button.addEventListener("click", () => {
-        this.draft_.contract.dynamic.fallback_source = button.dataset.reserve;
-        this.paintContract_();
-        this.afterChange_();
-      });
-    }
-
-    for (const button of this.$$("#dynamic-interval button")) {
-      button.addEventListener("click", () => {
-        this.draft_.contract.dynamic.interval = button.dataset.interval;
-        this.paintContract_();
-        this.afterChange_();
-      });
-    }
-
     const balancer = this.$("#balancer-limit");
     balancer.filter = "current";
     balancer.placeholder = "Zoek een stroomsensor…";
@@ -505,22 +536,6 @@ class DacViewInstallation extends DacEditorElement {
       this.paintBalancer_();
       this.afterChange_();
     });
-
-    for (const [id, key] of [
-      ["dyn-allin", "all_in_entity"],
-      ["dyn-market", "market_entity"],
-      ["dyn-market-feed", "market_entity"],
-      ["dyn-reserve", "fallback_entity"],
-    ]) {
-      const picker = this.$(`#${id}`);
-      picker.filter = "price";
-      picker.placeholder = "Zoek een prijssensor…";
-      picker.addEventListener("dac-entity-change", (ev) => {
-        this.draft_.contract.dynamic[key] = ev.detail.value;
-        this.paintContract_();
-        this.afterChange_();
-      });
-    }
 
     this.wireSaveBar_();
     this.paint_();
@@ -554,8 +569,17 @@ class DacViewInstallation extends DacEditorElement {
 
   paint_() {
     if (!this.draft_ || !this.rendered_) return;
+    // De lijsten die dit scherm tekent bestaan in het klad én in wat er
+    // opgeslagen staat, anders staat de balk op "niet opgeslagen" zonder dat er
+    // iets veranderde. De server geeft ze standaard mee; dit is voor oudere
+    // instellingen zonder.
+    for (const d of [this.draft_, this.saved_]) {
+      if (!d?.sources) continue;
+      d.sources.solar_extra ??= [];
+      (d.sources.meters ??= {}).solar_total_extra ??= [];
+      if (d.installation) d.installation.circuits ??= [];
+    }
     const inst = this.draft_.installation;
-    const contract = this.draft_.contract;
 
     this.$("#home-name").value = inst.home_name ?? "";
     this.$("#fuse").value = inst.fuse_amps;
@@ -564,86 +588,38 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#balancer").checked = Boolean(inst.load_balancer);
     this.$("#balancer-limit").value = inst.balancer_entity ?? "";
     this.paintBalancer_();
-    this.$("#netting").checked = Boolean(this.draft_.contract.netting);
-
-    this.$("#gas-price").value = contract.gas_price || "";
-    this.$("#water-price").value = contract.water_price || "";
-    this.$("#fx-price").value = contract.fixed.all_in_price;
-    this.$("#fx-feedin").value = contract.fixed.feed_in_tariff;
-    this.$("#fx-feedcost").value = contract.fixed.feed_in_costs;
-
-    this.$("#dyn-tax").value = contract.dynamic.energy_tax;
-    this.$("#dyn-markup").value = contract.dynamic.supplier_markup;
-    this.$("#dyn-vat").value = contract.dynamic.vat_percent;
-    this.$("#dyn-feedcost").value = contract.dynamic.feed_in_costs;
-    this.$("#dyn-feedbonus").value = contract.dynamic.feed_in_bonus ?? 0;
-
-    this.$("#dyn-allin").value = contract.dynamic.all_in_entity ?? "";
-    this.$("#dyn-market").value = contract.dynamic.market_entity ?? "";
-    this.$("#dyn-reserve").value = contract.dynamic.fallback_entity ?? "";
+    // Hoe het huis gemeten wordt, uit Instellingen (tot v0.114.0).
+    const d = this.draft_;
+    this.$("#home-path").value = d.navigation.home_path ?? "";
+    this.$("#src-invert").checked = Boolean(d.sources.grid_signed_invert);
+    for (const picker of this.$$("dac-entity-picker[data-key]")) {
+      picker.value = d.sources[picker.dataset.key] ?? "";
+    }
+    for (const picker of this.$$("#phase-fields dac-entity-picker[data-phase]")) {
+      const { phase, kind } = picker.dataset;
+      picker.value = d.sources.phases?.[phase]?.[kind] ?? "";
+    }
+    this.$("#phases-enabled").checked = Boolean(d.sources.phases_enabled);
+    for (const picker of this.$$("dac-entity-picker[data-forecast]")) {
+      picker.value = d.sources.solar_forecast?.[picker.dataset.forecast] ?? "";
+    }
+    for (const picker of this.$$("dac-entity-picker[data-meter]")) {
+      picker.value = d.sources.meters?.[picker.dataset.meter] ?? "";
+    }
+    this.$("#gas-enabled").checked = Boolean(d.sources.meters?.gas_enabled);
+    this.$("#water-enabled").checked = Boolean(d.sources.meters?.water_enabled);
+    this.paintExtra_();
+    this.paintGridMode_();
+    this.paintFaseVelden_();
+    this.paintGas_();
     this.onFeed_();
 
     this.paintPhases_();
     this.paintCircuits_();
-    this.paintPeriods_();
-    this.paintContract_();
     this.paintHints_();
     this.syncSaveBar_();
   }
 
-  /** De eerdere contracten in het klad, altijd als lijst. */
-  periods_() {
-    const contract = this.draft_.contract;
-    if (!Array.isArray(contract.periods)) contract.periods = [];
-    return contract.periods;
-  }
-
-  /** Eén eerder contract per rij: van, tot, stroom, teruglevering, gas. */
-  paintPeriods_() {
-    const host = this.$("#periods");
-    if (!host) return;
-    const lijst = this.periods_();
-    const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-    const veld = (i, key, type, extra, waarde) =>
-      `<input type="${type}" data-period-field="${key}" data-index="${i}" ${extra} value="${esc(waarde)}">`;
-    host.innerHTML = lijst
-      .map(
-        (p, i) => `
-      <div class="circuit period" data-period="${i}">
-        <div class="two">
-          <div class="row"><label>Van</label>${veld(i, "from", "date", "", p.from)}</div>
-          <div class="row"><label>Tot</label>${veld(i, "to", "date", "", p.to)}</div>
-        </div>
-        <div class="two">
-          <div class="row"><label>Stroom, all-in (€ per kWh)</label>${veld(i, "all_in_price", "number", 'min="0" step="0.001" inputmode="decimal"', p.all_in_price || "")}</div>
-          <div class="row"><label>Terugleververgoeding (€ per kWh)</label>${veld(i, "feed_in_tariff", "number", 'min="0" step="0.001" inputmode="decimal"', p.feed_in_tariff || "")}</div>
-        </div>
-        <div class="two">
-          <div class="row"><label>Gas (€ per m³)</label>${veld(i, "gas_price", "number", 'min="0" step="0.001" inputmode="decimal"', p.gas_price || "")}</div>
-          <div class="row"><label>Water (€ per m³)</label>${veld(i, "water_price", "number", 'min="0" step="0.001" inputmode="decimal"', p.water_price || "")}</div>
-        </div>
-        <div class="circuit-actions">
-          <button type="button" class="remove" data-period-remove="${i}">Contract weghalen</button>
-        </div>
-      </div>`
-      )
-      .join("");
-    for (const el of host.querySelectorAll("[data-period-field]")) {
-      const p = lijst[Number(el.dataset.index)];
-      const key = el.dataset.periodField;
-      el.addEventListener("input", () => {
-        p[key] = el.type === "number" ? Number(el.value) || 0 : el.value;
-        this.afterChange_();
-      });
-    }
-    for (const knop of host.querySelectorAll("[data-period-remove]")) {
-      knop.addEventListener("click", () => {
-        lijst.splice(Number(knop.dataset.periodRemove), 1);
-        this.paintPeriods_();
-        this.afterChange_();
-      });
-    }
-  }
 
   /**
    * De onderverdeelkasten en groepen in het klad, altijd als lijst, en elk met
@@ -748,7 +724,14 @@ class DacViewInstallation extends DacEditorElement {
    * vinkje per ongeluk uit en weer aan niets kost.
    */
   payload_(sections) {
-    const uit = super.payload_(sections);
+    const uit = { ...super.payload_(sections) };
+    // "Fasen tonen op het overzicht" staat sinds v0.114.0 onder Voorkeuren, en
+    // de bewoner zet hem daar. Een oude kopie hier mag hem niet terugzetten; de
+    // opslag voegt samen, dus wat niet meekomt blijft staan.
+    if (uit.sources && "phases_on_overview" in uit.sources) {
+      const { phases_on_overview: _weg, ...bronnen } = uit.sources;
+      uit.sources = bronnen;
+    }
     const inst = uit?.installation;
     if (!inst || !Array.isArray(inst.circuits)) return uit;
     return {
@@ -828,62 +811,76 @@ class DacViewInstallation extends DacEditorElement {
     }
   }
 
-  paintContract_() {
-    const contract = this.draft_.contract;
-    const dynamic = contract.type === "dynamic";
 
-    this.$("#fixed-fields").style.display = dynamic ? "none" : "";
-    this.$("#dynamic-fields").style.display = dynamic ? "" : "none";
-    for (const button of this.$$("#contract-type button")) {
-      button.setAttribute("aria-pressed", String(button.dataset.type === contract.type));
-    }
-
-    const source = contract.dynamic.source;
-    for (const button of this.$$("#dynamic-source button")) {
-      button.setAttribute("aria-pressed", String(button.dataset.source === source));
-    }
-
-    const interval = contract.dynamic.interval ?? "hour";
-    for (const button of this.$$("#dynamic-interval button")) {
-      button.setAttribute("aria-pressed", String(button.dataset.interval === interval));
-    }
-    // With an all-in entity the tax, markup and VAT fields are not just unused,
-    // they are misleading: the price already contains them.
-    this.$("#dyn-allin-row").style.display = source === "all_in" ? "" : "none";
-    this.$("#dyn-market-feed").value = contract.dynamic.market_entity ?? "";
-    this.$("#dyn-market-fields").style.display = source === "market" ? "" : "none";
-    // De reserve: wat voor prijs hij geeft, alleen als er een is. De
-    // energiebelasting is nodig bij een marktprijs, van de eigen bron of van de
-    // reserve.
-    const reserve = contract.dynamic.fallback_entity ?? "";
-    const reserveSoort = contract.dynamic.fallback_source === "all_in" ? "all_in" : "market";
-    this.$("#dyn-reserve-soort-row").style.display = reserve ? "" : "none";
-    for (const button of this.$$("#dyn-reserve-soort button")) {
-      button.setAttribute("aria-pressed", String(button.dataset.reserve === reserveSoort));
-    }
-    this.$("#dyn-tax-row").style.display =
-      source === "market" || (reserve && reserveSoort === "market") ? "" : "none";
-    // De opslag doet er bij allebei de bronnen toe, maar om een andere reden.
-    this.$("#dyn-markup-hint").textContent =
-      source === "market"
-        ? "Wat je leverancier per kWh bovenop de marktprijs rekent. Zit in je inkoopprijs, en telt niet mee in wat teruglevering opbrengt."
-        : "Wat je leverancier per kWh bovenop de marktprijs rekent. Je all-in sensor kent dit bedrag al; de coach heeft het los nodig om uit te rekenen wat teruglevering je oplevert als je saldeert.";
-
-    // A dynamic contract without the sensor it is supposed to read leaves the
-    // price tile on a dash forever, and nothing on this screen would say why.
-    const entity =
-      source === "all_in" ? contract.dynamic.all_in_entity : contract.dynamic.market_entity;
-    const notice = this.$("#dyn-missing");
-    notice.hidden = !dynamic || Boolean(entity);
-    if (!notice.hidden) {
-      this.$("#dyn-missing-text").textContent =
-        source === "all_in"
-          ? "Er is nog geen all-in prijssensor gekozen, dus de energieprijs blijft leeg op het overzicht."
-          : "Er is nog geen marktprijssensor gekozen, dus de energieprijs blijft leeg op het overzicht.";
-    }
+  /**
+   * De extra omvormers en hun tellers: een kiezer per stuk, met een kruisje.
+   *
+   * Meer omvormers: de bewoner van de eerste woning op 22-09-2026, "steeds
+   * meer consumenten hebben meerdere omvormers." Een lijst en niet een tweede
+   * en derde vast veld, want drie is niet het einde.
+   */
+  paintExtra_() {
+    const d = this.draft_;
+    if (!d) return;
+    const teken = (host, lijst, kind, placeholder) => {
+      host.innerHTML = lijst
+        .map(
+          (_, i) => `
+          <div class="row extra-row">
+            <label>${kind === "solar" ? `Omvormer ${i + 2}` : `Opwekteller ${i + 2}`}</label>
+            <div class="extra-line">
+              <dac-entity-picker data-extra="${kind}" data-index="${i}"></dac-entity-picker>
+              <button type="button" class="remove" data-extra-remove="${kind}:${i}" aria-label="Weghalen">${icons.trash}</button>
+            </div>
+          </div>`
+        )
+        .join("");
+      for (const picker of host.querySelectorAll("dac-entity-picker[data-extra]")) {
+        const i = Number(picker.dataset.index);
+        picker.filter = kind === "solar" ? "power" : "all";
+        picker.placeholder = placeholder;
+        picker.stateFeed = this.feed_;
+        picker.value = lijst[i] ?? "";
+        picker.addEventListener("dac-entity-change", (ev) => {
+          lijst[i] = ev.detail.value;
+          this.afterChange_();
+        });
+      }
+      for (const knop of host.querySelectorAll("[data-extra-remove]")) {
+        knop.addEventListener("click", () => {
+          lijst.splice(Number(knop.dataset.extraRemove.split(":")[1]), 1);
+          this.paintExtra_();
+          this.afterChange_();
+        });
+      }
+    };
+    teken(this.$("#solar-extra"), (d.sources.solar_extra ??= []), "solar", "Zoek een vermogenssensor…");
+    teken(this.$("#solar-total-extra"), ((d.sources.meters ??= {}).solar_total_extra ??= []), "meter", "Zoek een meterstand…");
   }
 
-  /** The two places the arithmetic is spelled out, so it can be checked. */
+
+  paintFaseVelden_() {
+    this.$("#phase-fields").style.display = this.draft_.sources.phases_enabled ? "" : "none";
+  }
+
+
+  paintGas_() {
+    this.$("#gas-field").style.display = this.draft_.sources.meters?.gas_enabled ? "" : "none";
+    this.$("#water-field").style.display = this.draft_.sources.meters?.water_enabled ? "" : "none";
+  }
+
+
+  paintGridMode_() {
+    const mode = this.draft_.sources.grid_mode ?? "split";
+    for (const button of this.$$("#grid-mode button")) {
+      button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+    }
+    this.$("#grid-split").style.display = mode === "split" ? "" : "none";
+    this.$("#grid-signed").style.display = mode === "signed" ? "" : "none";
+  }
+
+
+  /** Where the arithmetic is spelled out, so it can be checked. */
   paintHints_() {
     const inst = this.draft_.installation;
     const phases = Number(inst.phases) || 1;
@@ -897,11 +894,6 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#max-grid-hint").textContent = inst.max_grid_auto
       ? `${phases} × ${fuse} A × ${VOLTAGE} V = ${kw(computed)} kW`
       : `Handmatig ingesteld op ${kw(Number(inst.max_grid_watts) || 0)} kW; berekend zou ${kw(computed)} kW zijn`;
-
-    const d = this.draft_.contract.dynamic;
-    const vat = Number(d.vat_percent) || 0;
-    this.$("#dyn-formula").textContent =
-      `Berekening: (marktprijs + € ${euro(d.energy_tax)} + € ${euro(d.supplier_markup)}) × ${(1 + vat / 100).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 }
 
@@ -943,6 +935,17 @@ DacViewInstallation.css = /* css */ `
     cursor: pointer;
   }
   .circuit-actions button.remove { color: var(--dac-danger, #e5484d); }
+
+  /* ---- extra omvormers ---- */
+  .extra-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .extra-line .remove, button.add {
+    font: inherit; font-size: 13px; padding: 8px 12px;
+    border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border);
+    background: rgba(var(--dac-veil),0.04); color: var(--dac-ink); cursor: pointer;
+  }
+  .extra-line .remove { padding: 6px 8px; display: inline-flex; }
+  .extra-line .remove svg { width: 16px; height: 16px; }
+  button.add { justify-self: start; }
 `;
 
 define("dac-view-installation", DacViewInstallation);
