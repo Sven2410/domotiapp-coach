@@ -1097,6 +1097,19 @@ puls_snelladen = Scenario(
     begin="2026-09-07 11:55", kabel_erin="12:00", schema_aan=False, duur_uren=1.75, stap_seconden=5,
     gebeurtenissen=[("12:01", "snelladen", True)],
 )
+# Een auto die blijvend meer dan een ampère minder neemt dan de limiet. Bij de
+# eigenaar op 30-09-2026 gaf de Easee 13 A door op een limiet van 14, en dan
+# hield de rail van `ceiling_amps` hem tien minuten op 14 terwijl er ruimte was.
+# Hier zakt hij voor een oven, en daarna moet hij weer omhoog kunnen.
+auto_neemt_minder = Scenario(
+    "auto-neemt-minder",
+    "snelladen op 3x25 A; de auto neemt 1,5 A minder dan de limiet, van 12:15 tot 12:30 staat er een oven op de eerste fase, om 13:05 gaat de kabel eruit",
+    contract="vast", zon=Zon(wolken="geen"), voorspeller="geen",
+    huis=Huis(basis_w=350.0, verdeling=(1.0, 0.0, 0.0)), oven_w=2500.0,
+    auto=replace(GROTE, soc=40.0, tekort_amps=1.5), zekering=25.0, aansluiting_fasen=3,
+    begin="2026-09-07 11:55", kabel_erin="12:00", schema_aan=False, duur_uren=1.25, stap_seconden=5,
+    gebeurtenissen=[("12:01", "snelladen", True), ("12:15", "oven", 15), ("13:05", "kabel_uit", None)],
+)
 # Dezelfde dag om 13:39:54: de auto is klaar, de laatste meterwaarde is van een
 # paar seconden eerder en zegt nog de afname van de auto. De regelaar zette de
 # batterij daarop in dezelfde seconde op ontladen op vol vermogen (v0.102.2: de
@@ -1371,7 +1384,7 @@ ALLE = [
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,
     dyn_zonnig, dyn_bewolkt, dyn_geen_zon, dyn_markt, dyn_salderen, dyn_avond, dyn_grote_auto,
     dyn_negatief, dyn_kwartier_later, dyn_geen_klaar_tijd,
-    meter_teken, meter_teken_om, een_fase_krap, oven, puls_snelladen, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
+    meter_teken, meter_teken_om, een_fase_krap, oven, puls_snelladen, auto_neemt_minder, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
     geen_soc, soc_opgegeven, soc_traag, laadgrens, laadgrens_ingesteld,
     doel_onder_auto, soc_stappen, bijna_vol, auto_slaapt,
     pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,

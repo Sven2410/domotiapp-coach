@@ -8278,6 +8278,36 @@ controle("en de paal gaat laden: de coach neemt het nog steeds meteen over, op 0
          modus148 == ["third_party_control"] and vermogen148[:1] == [0] and b148.get("self_zero") is False,
          f"{modus148} {vermogen148} {b148.get('self_zero')}")
 
+print("=== 149. de rail van de naijl heeft een einde: de klok in de coach (v0.113.1) ===")
+# De coach houdt bij hoe lang de paal onder zijn limiet blijft, en geeft dat de
+# planner mee (`achter_s`). Een stap omhoog begint opnieuw; een paal die bij is
+# wist de klok. Zie `meter_loopt_achter` in planner.py.
+hass149, _, coach149 = bouw(huis(status="charging", stroom=12.5, vermogen=8600.0, teruglevering=0.0, afname=8600.0),
+                            instellingen())
+hass149.states.zet("sensor.laadpaal_dyn", "14")
+NU149 = coachmod._moment()
+klok149 = []
+for minuut in (0, 2, 4):
+    net149, _, paal149, _ = coach149._read(NU149 + dt.timedelta(minutes=minuut), instellingen(), LAADPAAL)
+    klok149.append(net149.achter_s)
+print(f"  limiet 14, paal 12,5 A: achter_s {klok149}, paal meet {paal149.actual_amps} A")
+controle("de klok loopt zolang de paal onder zijn limiet blijft", klok149 == [0.0, 120.0, 240.0], f"{klok149}")
+hass149.states.zet("sensor.laadpaal_dyn", "16")
+net149, _, _, _ = coach149._read(NU149 + dt.timedelta(minutes=5), instellingen(), LAADPAAL)
+controle("een stap omhoog begint hem opnieuw", net149.achter_s == 0.0, f"{net149.achter_s}")
+net149, _, _, _ = coach149._read(NU149 + dt.timedelta(minutes=6), instellingen(), LAADPAAL)
+controle("en daarna loopt hij weer", net149.achter_s == 60.0, f"{net149.achter_s}")
+hass149.states.zet("sensor.laadpaal_dyn", "12")
+net149, _, _, _ = coach149._read(NU149 + dt.timedelta(minutes=7), instellingen(), LAADPAAL)
+controle("een paal die zijn limiet haalt wist de klok",
+         net149.achter_s == 0.0 and "laadpaal" not in coach149._achter_sinds and not coach149._achter_sinds,
+         f"{net149.achter_s} {coach149._achter_sinds}")
+hass149.states.zet("sensor.laadpaal_dyn", "16")
+hass149.states.zet("sensor.laadpaal_status", "awaiting_start")
+net149, _, _, _ = coach149._read(NU149 + dt.timedelta(minutes=8), instellingen(), LAADPAAL)
+controle("een paal die niet laadt heeft geen klok", net149.achter_s == 0.0 and not coach149._achter_sinds,
+         f"{net149.achter_s} {coach149._achter_sinds}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
