@@ -423,3 +423,17 @@ Op 11-10 nam de auto de zon (15,6 kWh), en zolang de paal laadde stond de
 batterij op alleen zonneladen. Met salderen verdient een batterij pas als er meer
 dan 78% terugkomt (€ 0,1890 / € 0,2417 bij dat contract). Over 12 en 13-10 samen
 ging er 16,0 kWh in en kwam er 13,0 uit, voor € 0,07.
+
+**v0.116.1, dezelfde avond.** De eigenaar, bij Week: "waarom is de tijdlijn weg die
+wil ik wel behouden", "check pijltje bij verloop die komt er buiten" en "leg eens
+beurten uit dat snap ik niet".
+
+- **De tijdlijn staat ook bij Week**: zeven dagen naast elkaar, de dag langs de as
+  en een lijntje per dag (`TIJDLIJN_PERIODES` in history.js, `meerDagen` in
+  tijdlijn.js). De tekst bij een klik noemt dan de dag: "za 10 22:30 tot zo 11
+  01:40". Bij Maand en Jaar staat er "De tijdlijn staat bij Dag en Week."; zonder
+  die regel leek hij weg.
+- **Het pijltje van een uitklaplijst** stond naast de lijst, omdat het omhulsel zo
+  breed werd als het opschrift erboven. Nu is het zo breed als de lijst.
+- **Beurten** begint met wat een beurt is: "Een beurt is één keer dat de coach een
+  apparaat liet draaien, zoals de auto laden of de vaatwasser."
