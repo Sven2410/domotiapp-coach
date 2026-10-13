@@ -1731,7 +1731,8 @@ proef("Historie opent op vandaag, de eerste knop van de rij (22-09-2026)", () =>
   assert.ok(/this\.period_ = "day";/.test(bron), "de constructor begint op day");
   assert.ok(!/this\.period_ = "week";/.test(bron));
   const html = Object.create(Historie.prototype).render();
-  assert.ok(html.indexOf('data-period="day"') < html.indexOf('data-period="week"'));
+  // Sinds v0.116.0 een uitklaplijst: Dag staat er als eerste in.
+  assert.ok(html.indexOf('<option value="day">') > 0 && html.indexOf('<option value="day">') < html.indexOf('<option value="week">'));
 });
 
 proef("het contractscherm heeft de gasprijs en de eerdere contracten", () => {
@@ -2885,9 +2886,14 @@ proef("In geld rekent met het kasboek van de batterij en met de beurten van die 
 proef("de uitleg van In geld noemt het salderen en waar de delen vandaan komen", () => {
   const el = geldweergave();
   const zin = el.geldUitleg_(el.geld_());
-  assert.match(zin, /Je saldeert nog tot 1 januari 2027/);
-  assert.match(zin, /pas als ze ontlaadt/);
-  assert.match(zin, /Door de coach/);
+  assert.match(zin, /Tot 1 januari 2027 saldeer je/);
+  assert.match(zin, /Thuisbatterij: wat ontladen opbracht, min wat het laden kostte/);
+  assert.match(zin, /Coach: /);
+  // De eigenaar op 13-10-2026: "zo duidelijk mogelijk en zo kort mogelijk". Met
+  // salderen staat erbij wat opslaan per kWh scheelt: de stroomprijs min wat
+  // terugleveren opbrengt.
+  assert.match(zin, /scheelt maar € \d+,\d\d per kWh/);
+  for (const z of zin.split(/(?<=\.) /)) assert.ok(z.length <= 150, `te lange zin: ${z}`);
 });
 
 proef("het bolletje van de laadpaal en de boiler is groen als ze aan staan", () => {
@@ -3349,6 +3355,88 @@ proef("Tijdlijn: de kaart staat alleen bij Dag, en alleen als de coach iets stuu
   el.settings_ = { ...el.settings_, devices: [TL_APPARATEN[4]] };
   el.paintTijdlijn_();
   assert.equal(vakken["#tijdlijn-card"].hidden, true, "alleen een apparaat dat de coach meet");
+});
+
+// --- Historie overzichtelijk (v0.116.0) ---------------------------------------
+// De eigenaar op 13-10-2026: "ik wil alles zo duidelijk mogelijk hebben en zo kort
+// mogelijk", "Het moet niet zo zijn dat het gigantisch veel wordt alle data dat
+// mensen het niet meer snappen", en "periode onderwerp en verloop moet een drop
+// down worden".
+
+/** Een element zonder browser: genoeg voor wat de teken-methoden aanraken. */
+function nepEl(tag = "div") {
+  return {
+    tag, className: "", textContent: "", hidden: false, kinderen: [], style: { setProperty() {} },
+    append(...k) { this.kinderen.push(...k); },
+    replaceChildren(...k) { this.kinderen = k; },
+    setAttribute() {},
+  };
+}
+function metNepDocument(fn) {
+  const oud = globalThis.document.createElement;
+  globalThis.document.createElement = (tag) => nepEl(tag);
+  try { return fn(); } finally { globalThis.document.createElement = oud; }
+}
+
+proef("Historie: onderwerp, periode en verloop zijn uitklaplijsten, en er is één knop Rapport", () => {
+  const html = Object.create(Historie.prototype).render();
+  for (const id of ["onderwerp", "periode", "korrel"]) assert.ok(html.includes(`<select id="${id}">`), id);
+  assert.ok(!html.includes('class="segmented'), "geen rijen knoppen meer");
+  assert.ok(!html.includes("korrel-note"), "geen regel over het aantal rapportregels");
+  assert.ok(html.includes('<option value="bespaard">Beurten</option>'), "het onderwerp heet Beurten");
+  assert.equal((html.match(/id="rapport-knop"/g) ?? []).length, 1);
+  assert.ok(/id="rapport-menu"[^>]*hidden/.test(html), "het menu is dicht tot je op Rapport tikt");
+  assert.ok(html.includes("Boven de lijn wat je verbruikte, onder de lijn wat je teruggaf."), "de inleiding is één zin");
+});
+
+proef("Historie: een verloop dat bij de periode niet kan valt terug op wat erbij past", () => {
+  const el = Object.create(Historie.prototype);
+  el.period_ = "day";
+  el.korrel_ = "month";
+  assert.equal(el.korrel_id(), "quarter", "een maand per kwartier op een dag bestaat niet");
+  el.korrel_ = "hour";
+  assert.equal(el.korrel_id(), "hour");
+  el.period_ = "year";
+  assert.equal(el.korrel_id(), "hour", "een jaar per uur kan wel");
+  el.korrel_ = "";
+  assert.equal(el.korrel_id(), "month");
+});
+
+proef("Energie: vier tegels en één percentage, en geen 'Hele periode'", () => {
+  const el = Object.create(Historie.prototype);
+  const vak = { totals: nepEl(), titel: nepEl() };
+  el.$ = (sel) => (sel === "#totals" ? vak.totals : vak.titel);
+  metNepDocument(() => el.paintTotals_({ solar: 25.8, used: 18.2, bought: 4.7, sold: 12.2, selfUse: 53, selfSufficient: 75 }));
+  const labels = vak.totals.kinderen.map((cel) => cel.kinderen[0].textContent);
+  assert.deepEqual(labels, ["Opgewekt", "Verbruikt", "Van het net", "Naar het net", "Zelfvoorzienend"]);
+  assert.ok(!Historie.css.includes("Hele periode"));
+});
+
+proef("In geld: twee getallen bovenaan, de derde volgde uit die twee", () => {
+  const bron = Historie.toString();
+  assert.ok(!/kop\("Zonder zon, batterij en coach"/.test(bron), "niet op het scherm");
+  assert.ok(!/cel\("Zonder zon, batterij en coach"/.test(bron), "en niet in het rapport");
+});
+
+proef("Beurten: drie tegels met de uitsplitsing eronder, één lijst met vijf kolommen", () => {
+  const el = Object.create(Historie.prototype);
+  const vak = { "#saved-note": nepEl("p"), "#saved-totals": nepEl(), "#saved-list": nepEl("table") };
+  el.$ = (sel) => vak[sel];
+  el.period_ = "month";
+  el.offset_ = 0;
+  const nu = new Date();
+  el.beurten_ = [
+    { device: "p", name: "Laadpaal", kind: "laden", car: "De blauwe", plugged_at: nu.toISOString(), ended: nu.toISOString(),
+      complete: true, kwh: 21.9, solar_kwh: 2.4, battery_kwh: 0.7, paid: 4.95, ref_cost: 6.1, saved: 1.15, solar_saved: 0.39 },
+  ];
+  metNepDocument(() => el.paintSaved_());
+  const tegels = vak["#saved-totals"].kinderen;
+  assert.deepEqual(tegels.map((t) => t.kinderen[0].textContent), ["Bespaard", "Betaald", "Geladen"]);
+  assert.match(tegels[0].kinderen[2].textContent, /door zon, .* door wachten$/);
+  assert.match(tegels[2].kinderen[2].textContent, /zon, .* uit de batterij$/);
+  const kop = vak["#saved-list"].kinderen[0].kinderen.map((c) => c.textContent);
+  assert.deepEqual(kop, ["Ingeplugd", "Apparaat", "Geladen", "Betaald", "Bespaard"]);
+  for (const zin of vak["#saved-note"].textContent.split(/(?<=\.) /)) assert.ok(zin.length <= 120, `te lang: ${zin}`);
 });
 
 for (const [naam, fn] of proeven) {

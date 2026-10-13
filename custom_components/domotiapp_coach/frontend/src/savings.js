@@ -114,10 +114,7 @@ export function woorden(items) {
       wanneer: "Vrijgegeven",
       hoeveel: "Verbruikt",
       vanaf: "Meteen starten",
-      uitleg:
-        "Bespaard is wat dezelfde beurt gekost had als het apparaat meteen bij het vrijgeven was gestart " +
-        "met alles van het net, tegen de prijs van dat moment, min wat hij werkelijk kostte. " +
-        "Door de zon is wat eigen zon scheelde tegenover inkopen; door te wachten is wat het latere moment scheelde.",
+      uitleg: "Bespaard is wat meteen starten na het vrijgeven gekost had, met alles van het net, min wat het kostte.",
     };
   }
   if (alleen("boiler")) {
@@ -125,10 +122,7 @@ export function woorden(items) {
       wanneer: "Warmte nodig",
       hoeveel: "Verbruikt",
       vanaf: "Meteen verwarmen",
-      uitleg:
-        "Bespaard is wat dezelfde beurt gekost had als de boiler meteen was gaan verwarmen toen er warm water " +
-        "bij moest, met alles van het net tegen de prijs van dat moment, min wat hij werkelijk kostte. " +
-        "Door de zon is wat eigen zon scheelde tegenover inkopen; door te wachten is wat de goedkopere uren scheelden.",
+      uitleg: "Bespaard is wat meteen verwarmen gekost had, met alles van het net, min wat het kostte.",
     };
   }
   if (alleen("laden") || !soorten.size) {
@@ -136,22 +130,14 @@ export function woorden(items) {
       wanneer: "Ingeplugd",
       hoeveel: "Geladen",
       vanaf: "Vanaf inpluggen",
-      uitleg:
-        "Bespaard is wat dezelfde kilowatturen gekost hadden als de paal vanaf het inpluggen gewoon op vol " +
-        "vermogen was doorgegaan met alles van het net, uur na uur tegen de prijs van dat uur, min wat ze " +
-        "werkelijk kostten. Door de zon is wat eigen zon scheelde tegenover inkopen; door te wachten is wat " +
-        "de goedkopere uren scheelden.",
+      uitleg: "Bespaard is wat laden op vol vermogen vanaf het inpluggen gekost had, met alles van het net, min wat het kostte.",
     };
   }
   return {
     wanneer: "Vanaf",
     hoeveel: "Verbruikt",
     vanaf: "Zonder coach",
-    uitleg:
-      "Bespaard is wat dezelfde beurt zonder de coach en met alles van het net gekost had, min wat hij werkelijk " +
-      "kostte: voor een auto vanaf het inpluggen op vol vermogen, uur na uur tegen de prijs van dat uur; voor een " +
-      "vaatwasser meteen bij het vrijgeven gestart. Door de zon is wat eigen zon scheelde tegenover inkopen; " +
-      "door te wachten is wat het latere moment scheelde.",
+    uitleg: "Bespaard is wat het zonder de coach gekost had, met alles van het net, min wat het kostte.",
   };
 }
 

@@ -11,7 +11,8 @@ allemaal gebouwd in v0.77.0.
    dashboard": welk deel van het verbruik niet van het net kwam, `1 - bought /
    used` (`totals.selfSufficient` in views/history.js), naast "Zelf gebruikt"
    (welk deel van de opwek zelf gebruikt is), ook per balk en in de tegels van
-   het rapport.
+   het rapport. Sinds v0.116.0 staat op het scherm alleen Zelfvoorzienend;
+   Zelf gebruikt staat nog in het rapport (zie "Historie overzichtelijk").
 2. **De batterijzin loopt tot morgenvroeg en sluit af met een conclusie.**
    "De meeste consumenten hebben een accu om de nacht te overbruggen." `OCHTEND_UUR`
    (zeven uur), `nachtbalans` en `balans_kwh` in batterij.py: zon, huis en wat er
@@ -243,7 +244,7 @@ het heeft terugverdiend." En: "stel alles goed op elkaar af." Dat laatste deel i
 er in v0.101.1 weer uit, zie onderaan.
 
 **In geld** (kaart onder de grafiek, en dezelfde tegels in het rapport): drie
-getallen, uitgegeven (stroom van het net, gas en water, min wat teruglevering
+getallen (sinds v0.116.0 twee, zie "Historie overzichtelijk"), uitgegeven (stroom van het net, gas en water, min wat teruglevering
 opbracht; onder nul heet het verdiend), bespaard, en wat het zonder zon, batterij
 en coach gekost had; een balk met die verdeling; en twee kolommen. De som staat
 in `geld.js` (`balans`), zodat Historie en het rapport (`reportData_`) hem delen:
@@ -379,3 +380,46 @@ gaat erin op (`samenvoegen`).
 de preview draait op een verzonnen dag (`?licht=1` en `?phone=390` gemeten, 280
 px zonder overloop). Met de gegevens van de eigenaar van 10 tot 12-10 is de som
 in node nagerekend, niet op het scherm.
+
+## Historie overzichtelijk (v0.116.0)
+
+De eigenaar op 13-10-2026, bij een batterij op € 0,00 bespaard waarvan de uitleg
+in een alinea van zes zinnen stond: "ik wil alles zo duidelijk mogelijk hebben en
+zo kort mogelijk", en daarna: "kijk ook waar verbeterpunten liggen het moet
+overzichtelijk zijn. Het moet niet zo zijn dat het gigantisch veel wordt alle
+datat dat mensen het niet meer snappen." En: "periode onderwerp en verloop moet
+een drop down worden wat je kiest". Hij koos alle vier de voorstellen:
+
+- **Bovenaan.** De inleiding is één zin. Onderwerp, Periode en Verloop in het
+  rapport zijn uitklaplijsten in plaats van rijen knoppen. Een verloop dat bij de
+  periode niet kan is uitgegrijsd, en een eerdere keuze valt terug op wat bij de
+  periode past (`korrel_id`). De regel "ongeveer 768 regels over 8 apparaten" is
+  weg. Kort en uitgebreid rapport zitten achter één knop Rapport.
+- **Energie.** Vier tegels en één percentage: Zelfvoorzienend. "Zelf gebruikt"
+  leek er te veel op en staat alleen nog in het rapport. "Hele periode" boven de
+  tegels is weg.
+- **In geld.** Twee getallen: "Zonder zon, batterij en coach" was Uitgegeven plus
+  Bespaard, en is weg van het scherm en uit het rapport. De uitleg is per zin één
+  ding. Met salderen staat erbij wat zelf gebruiken of opslaan per kWh scheelt:
+  de stroomprijs min wat terugleveren opbrengt (`prijsOp`), bij de eigenaar
+  € 0,05. Dat is het antwoord op de vraag waarom de batterij zo weinig bespaart.
+- **Beurten** (heette Bespaard; botste met Bespaard in In geld). Drie tegels:
+  Bespaard (met zon en wachten eronder), Betaald, en Geladen of Verbruikt (met zon
+  en batterij eronder). Eén zin uitleg (`woorden` in savings.js), en één lijst met
+  Wanneer, Apparaat, kWh, Betaald, Bespaard. De tabel per apparaat en de kolommen
+  zon, accu, ijkpunt en door zon staan alleen nog in het uitgebreide rapport.
+
+Wat de batterij bij de eigenaar opleverde, nagerekend op 13-10-2026. De kWh komen
+uit de kwartieren van de vermogenssensoren van de batterij, de bedragen uit
+`realized_days`:
+
+| dag | erin | eruit | opgeleverd |
+|---|---|---|---|
+| 10-10 | 9,65 kWh | 8,28 kWh | € 0,13 |
+| 11-10 | 2,21 kWh | 1,55 kWh | € 0,005 |
+| 12-10 | 14,29 kWh | 7,98 kWh | € 0,22 |
+
+Op 11-10 nam de auto de zon (15,6 kWh), en zolang de paal laadde stond de
+batterij op alleen zonneladen. Met salderen verdient een batterij pas als er meer
+dan 78% terugkomt (€ 0,1890 / € 0,2417 bij dat contract). Over 12 en 13-10 samen
+ging er 16,0 kWh in en kwam er 13,0 uit, voor € 0,07.

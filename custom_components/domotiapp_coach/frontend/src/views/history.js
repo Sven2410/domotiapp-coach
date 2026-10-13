@@ -337,42 +337,46 @@ class DacViewHistory extends DacElement {
         <header class="intro">
           <div class="eyebrow">Historie</div>
           <h1>Wat je huis heeft gedaan</h1>
-          <p>Uit de geschiedenis die Home Assistant zelf bijhoudt. Boven de lijn staat wat je verbruikt hebt, gesplitst in je eigen zon (met een thuisbatterij ook wat die gaf) en wat je van het net kocht. Onder de lijn staat wat je hebt teruggeleverd.</p>
+          <p id="intro-lijn">Boven de lijn wat je verbruikte, onder de lijn wat je teruggaf.</p>
         </header>
 
+        <!-- De keuzes als uitklaplijst, en een knop Rapport. De eigenaar op
+             13-10-2026: "periode onderwerp en verloop moet een drop down worden
+             wat je kiest", en het moet overzichtelijk zijn: vier rijen knoppen
+             en een regel over 768 rapportregels was te veel. -->
         <div class="controls">
-          <div class="keuze">
+          <label class="keuze">
             <span class="keuze-kop">Onderwerp</span>
-            <div class="segmented" id="onderwerpen">
-              <button type="button" data-onderwerp="energie" aria-pressed="true">Energie</button>
-              <button type="button" data-onderwerp="bespaard" aria-pressed="false">Bespaard</button>
-            </div>
-          </div>
-          <div class="keuze">
+            <span class="kies"><select id="onderwerp">
+              <option value="energie">Energie</option>
+              <option value="bespaard">Beurten</option>
+            </select></span>
+          </label>
+          <label class="keuze">
             <span class="keuze-kop">Periode</span>
-            <div class="segmented" id="periods">
-            ${PERIODS.map(
-              (item) => `<button type="button" data-period="${item.id}" aria-pressed="false">${item.label}</button>`
-            ).join("")}
-            </div>
-          </div>
-          <div class="keuze">
+            <span class="kies"><select id="periode">
+              ${PERIODS.map((item) => `<option value="${item.id}">${item.label}</option>`).join("")}
+            </select></span>
+          </label>
+          <label class="keuze" title="Hoe fijn het verloop in het rapport komt te staan">
             <span class="keuze-kop">Verloop in het rapport</span>
-            <div class="segmented detail" id="korrels" title="Hoe fijn het verloop in het rapport komt te staan">
-              ${KORREL_KNOPPEN.map(
-                (item) => `<button type="button" data-korrel="${item.id}" aria-pressed="false">${item.label}</button>`
-              ).join("")}
+            <span class="kies"><select id="korrel">
+              ${KORREL_KNOPPEN.map((item) => `<option value="${item.id}">${item.label}</option>`).join("")}
+            </select></span>
+          </label>
+          <!-- Twee rapporten achter één knop. De bewoner van de eerste woning op
+               22-09-2026: "omdat ie nu zó uitgebreid is downloaden consumenten m
+               straks niet meer; dus twee varianten bieden, een onepager en een
+               uitgebreide." -->
+          <div class="rapport">
+            <button type="button" class="download" id="rapport-knop" aria-haspopup="true" aria-expanded="false">
+              ${icons.compass}<span>Rapport</span>
+            </button>
+            <div class="rapport-menu" id="rapport-menu" hidden>
+              <button type="button" id="report-short"><span>Kort rapport</span><small>Eén pagina: de cijfers, het geld en bespaard</small></button>
+              <button type="button" id="report"><span>Uitgebreid rapport</span><small>Alles, met het verloop per apparaat</small></button>
             </div>
           </div>
-          <!-- Twee rapporten. De bewoner van de eerste woning op 22-09-2026:
-               "omdat ie nu zó uitgebreid is downloaden consumenten m straks niet
-               meer; dus twee varianten bieden, een onepager en een uitgebreide." -->
-          <button type="button" class="download" id="report-short" title="Eén pagina: de cijfers, het geld, bespaard en het verloop">
-            ${icons.compass}<span>Kort rapport</span>
-          </button>
-          <button type="button" class="download" id="report" title="Alles, met het verloop per apparaat en alle cijfers">
-            ${icons.compass}<span>Uitgebreid rapport</span>
-          </button>
           <div class="stepper">
             <button type="button" class="now" id="now" hidden></button>
             <button type="button" id="prev" aria-label="Vorige">${icons.arrowLeft}</button>
@@ -380,8 +384,6 @@ class DacViewHistory extends DacElement {
             <button type="button" id="next" aria-label="Volgende">${icons.arrowRight}</button>
           </div>
         </div>
-
-        <p class="note korrel-note" id="korrel-note"></p>
 
         <section class="card" id="card">
           <div class="totals-title" id="totals-title"></div>
@@ -439,12 +441,11 @@ class DacViewHistory extends DacElement {
 
         <section class="card saved" id="saved-card" hidden>
           <div class="panel-head">
-            <div class="eyebrow">Bespaard</div>
+            <div class="eyebrow">Beurten</div>
             <h2>Wat de coach je bespaarde</h2>
           </div>
           <div class="totals" id="saved-totals"></div>
           <p class="note" id="saved-note"></p>
-          <div class="tabel-wrap"><table class="beurten" id="saved-devices"></table></div>
           <div class="tabel-wrap"><table class="beurten" id="saved-list"></table></div>
         </section>
       </div>
@@ -452,35 +453,52 @@ class DacViewHistory extends DacElement {
   }
 
   afterRender() {
-    for (const button of this.$$("#onderwerpen button")) {
-      button.addEventListener("click", () => {
-        if (this.onderwerp_ === button.dataset.onderwerp) return;
-        this.onderwerp_ = button.dataset.onderwerp;
-        for (const knop of this.$$("#onderwerpen button")) {
-          knop.setAttribute("aria-pressed", String(knop.dataset.onderwerp === this.onderwerp_));
-        }
-        if (this.onderwerp_ === "bespaard") this.laadBeurten_();
-        this.paint_();
-      });
-    }
-    for (const button of this.$$("#periods button")) {
-      button.addEventListener("click", () => {
-        if (this.period_ === button.dataset.period) return;
-        this.period_ = button.dataset.period;
-        this.offset_ = 0;
-        this.load_();
-      });
-    }
-    for (const button of this.$$("#korrels button")) {
-      button.addEventListener("click", () => {
-        // Nog eens op dezelfde knop laat de keuze weer los, en dan volgt hij
-        // de periode. Zonder die weg terug zit je eraan vast.
-        this.korrel_ = this.korrel_ === button.dataset.korrel ? "" : button.dataset.korrel;
-        this.paintKorrel_();
-      });
-    }
-    this.$("#report").addEventListener("click", () => this.report_(false));
-    this.$("#report-short").addEventListener("click", () => this.report_(true));
+    this.$("#onderwerp").addEventListener("change", (event) => {
+      this.onderwerp_ = event.target.value;
+      if (this.onderwerp_ === "bespaard") this.laadBeurten_();
+      this.paint_();
+    });
+    this.$("#periode").addEventListener("change", (event) => {
+      this.period_ = event.target.value;
+      this.offset_ = 0;
+      this.load_();
+    });
+    this.$("#korrel").addEventListener("change", (event) => {
+      this.korrel_ = event.target.value;
+      this.paintKorrel_();
+    });
+
+    // Rapport: één knop, en daaronder de keuze tussen kort en uitgebreid.
+    const menu = this.$("#rapport-menu");
+    const rapportKnop = this.$("#rapport-knop");
+    const zetMenu = (open) => {
+      menu.hidden = !open;
+      rapportKnop.setAttribute("aria-expanded", String(open));
+      menu.style.left = "";
+      if (!open) return;
+      // Op een telefoon past het menu niet altijd rechts van de knop; dan
+      // schuift het naar links, anders scrolt de hele pagina opzij.
+      const rand = (window.innerWidth || document.documentElement.clientWidth) - 12;
+      const over = menu.getBoundingClientRect().right - rand;
+      if (over > 0) menu.style.left = `${-over}px`;
+    };
+    rapportKnop.addEventListener("click", () => zetMenu(menu.hidden));
+    this.$("#report").addEventListener("click", () => {
+      zetMenu(false);
+      this.report_(false);
+    });
+    this.$("#report-short").addEventListener("click", () => {
+      zetMenu(false);
+      this.report_(true);
+    });
+    this.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || menu.hidden) return;
+      zetMenu(false);
+      rapportKnop.focus();
+    });
+    this.addEventListener("pointerdown", (event) => {
+      if (!menu.hidden && !event.composedPath().some((node) => node?.classList?.contains?.("rapport"))) zetMenu(false);
+    });
     this.$("#prev").addEventListener("click", () => this.step_(-1));
     this.$("#next").addEventListener("click", () => this.step_(1));
     this.$("#now").addEventListener("click", () => {
@@ -649,40 +667,23 @@ class DacViewHistory extends DacElement {
 
   /** Welke fijnheid er gekozen is, en wat dat aan regels gaat kosten. */
   korrel_id() {
-    return this.korrel_ || STANDAARD_KORREL[this.period_];
+    const eigen = this.korrel_;
+    return eigen && REGELS[this.period_]?.[eigen] ? eigen : STANDAARD_KORREL[this.period_];
   }
 
   paintKorrel_() {
-    const gekozen = this.korrel_id();
-    for (const button of this.$$("#korrels button")) {
-      const id = button.dataset.korrel;
-      button.setAttribute("aria-pressed", String(id === gekozen));
-      // Zeggen wat het gaat kosten voordat er iemand op Rapport drukt. Bij een
-      // jaar per kwartier zijn dat tienduizenden regels, en dat is geen reden
-      // om het te verbieden maar wel om het niet te verzwijgen.
-      const regels = REGELS[this.period_]?.[id];
-      button.title = regels
-        ? `Ongeveer ${nl(regels, 0)} regels per apparaat in het rapport`
-        : "";
-      button.disabled = !regels;
-    }
-    const uitleg = this.$("#korrel-note");
-    if (uitleg) {
-      const regels = REGELS[this.period_]?.[gekozen] ?? 0;
-      const apparaten = Math.max(1, this.vermogenBronnen_().length);
-      uitleg.textContent = regels
-        ? `Het rapport krijgt het verloop per ${KORRELS[gekozen].kop.toLowerCase()}: ` +
-          `ongeveer ${nl(regels * apparaten, 0)} regels over ${apparaten} ` +
-          `${apparaten === 1 ? "apparaat" : "apparaten"}.`
-        : "";
-    }
+    const lijst = this.$("#korrel");
+    if (!lijst) return;
+    // Wat bij deze periode niet kan staat er wel, maar is niet te kiezen: een
+    // dag per maand bestaat niet.
+    for (const optie of lijst.options) optie.disabled = !REGELS[this.period_]?.[optie.value];
+    lijst.value = this.korrel_id();
   }
 
   paintPeriod_() {
     this.paintKorrel_();
-    for (const button of this.$$("#periods button")) {
-      button.setAttribute("aria-pressed", String(button.dataset.period === this.period_));
-    }
+    this.$("#periode").value = this.period_;
+    this.$("#onderwerp").value = this.onderwerp_;
     this.$("#period-label").textContent = periodLabel(
       this.period_,
       periodStart(this.period_, this.offset_)
@@ -707,8 +708,9 @@ class DacViewHistory extends DacElement {
     // energiekaarten gaan dicht en de besparingskaart open, of andersom.
     const bespaard = this.onderwerp_ === "bespaard";
     this.$("#saved-card").hidden = !bespaard;
+    // De zin over de lijn hoort bij de grafiek, en die staat bij Beurten niet.
+    this.$("#intro-lijn").hidden = bespaard;
     this.$("#card").hidden = bespaard;
-    this.$("#korrel-note").hidden = bespaard;
     if (bespaard) {
       this.$("#money-card").hidden = true;
       this.$("#gas-card").hidden = true;
@@ -1242,7 +1244,6 @@ class DacViewHistory extends DacElement {
       : [
           cel(g.uitgegeven < 0 ? "Verdiend" : "Uitgegeven", euro(Math.abs(g.uitgegeven))),
           cel("Bespaard", euro(g.bespaard)),
-          g.uitgegeven < 0 ? null : cel("Zonder zon, batterij en coach", euro(g.zonder)),
           cel("Stroom van het net", euro(g.stroom)),
           g.metTerug ? cel("Teruglevering", `− ${euro(g.terug)}`) : null,
           g.metGas ? cel("Gas", euro(g.gas)) : null,
@@ -1428,7 +1429,7 @@ class DacViewHistory extends DacElement {
    * werkt het op elk apparaat op dezelfde manier.
    */
   async report_(beknopt = false) {
-    const knop = this.$(beknopt ? "#report-short" : "#report");
+    const knop = this.$("#rapport-knop");
     if (knop?.disabled) return;
 
     const gegevens = await this.reportData_(beknopt);
@@ -1548,9 +1549,9 @@ class DacViewHistory extends DacElement {
     }
     rows.push({ label: "Van het net", value: energy(totals.bought), tone: "var(--dac-grid-in)" });
     rows.push({ label: "Naar het net", value: energy(totals.sold), tone: "var(--dac-grid-out)" });
-    if (totals.selfUse !== null) {
-      rows.push({ label: "Zelf gebruikt", value: percent(totals.selfUse), tone: "var(--dac-good)" });
-    }
+    // Eén percentage en niet twee (v0.116.0): "Zelf gebruikt" en
+    // "Zelfvoorzienend" naast elkaar leken op hetzelfde. Dit is het deel van je
+    // verbruik dat je zelf opwekte; het andere staat in het rapport.
     if (totals.selfSufficient !== null && totals.selfSufficient !== undefined) {
       rows.push({ label: "Zelfvoorzienend", value: percent(totals.selfSufficient), tone: "var(--dac-good)" });
     }
@@ -1686,28 +1687,35 @@ class DacViewHistory extends DacElement {
     return { items, totaal: totalen(items), apparaten: perApparaat(items) };
   }
 
+  /**
+   * Beurten (heette Bespaard tot v0.116.0): wat de coach per beurt scheelde.
+   *
+   * De eigenaar op 13-10-2026: "Het moet niet zo zijn dat het gigantisch veel
+   * wordt alle data dat mensen het niet meer snappen." Daarom drie tegels in
+   * plaats van zeven, met de uitsplitsing eronder in kleine letters, en één lijst
+   * met vijf kolommen in plaats van twee tabellen met acht. Wat zon, batterij en
+   * het ijkpunt per beurt waren staat in het uitgebreide rapport.
+   */
   paintSaved_() {
     const note = this.$("#saved-note");
     const tegels = this.$("#saved-totals");
-    const apparaten = this.$("#saved-devices");
     const lijst = this.$("#saved-list");
     tegels.replaceChildren();
-    apparaten.replaceChildren();
     lijst.replaceChildren();
 
     if (this.beurten_ === undefined || this.beurten_ === null) {
       note.textContent = "Bezig met ophalen…";
       return;
     }
-    const { items, totaal, apparaten: perDevice } = this.bespaard_();
+    const { items, totaal } = this.bespaard_();
     if (!items.length) {
       note.textContent = this.beurten_.length
-        ? "Geen laadbeurten in deze periode."
-        : "Nog geen laadbeurten. Vanaf de eerstvolgende beurt staat hier wat hij kostte en bespaarde.";
+        ? "Geen beurten in deze periode."
+        : "Nog geen beurten. Vanaf de eerstvolgende staat hier wat hij kostte en bespaarde.";
       return;
     }
 
-    const tegel = (label, value, tone) => {
+    const tegel = (label, value, tone, sub = "") => {
       const box = document.createElement("div");
       box.className = "total";
       if (tone) box.style.setProperty("--tone", tone);
@@ -1718,6 +1726,12 @@ class DacViewHistory extends DacElement {
       v.className = "t-value";
       v.textContent = value;
       box.append(l, v);
+      if (sub) {
+        const o = document.createElement("span");
+        o.className = "t-sub";
+        o.textContent = sub;
+        box.append(o);
+      }
       return box;
     };
     const kwh = (value) => {
@@ -1727,30 +1741,23 @@ class DacViewHistory extends DacElement {
     // De woorden naar wat er in de lijst staat: een auto wordt ingeplugd en
     // geladen, een vaatwasser vrijgegeven en verbruikt. De eigenaar op 07-09-2026.
     const w = woorden(items);
-    // Het totaal plaatje, de eigenaar op 09-09-2026: wat er bespaard is, en daarvan
-    // wat de zon deed en wat het wachten op een goedkoper moment.
-    tegels.append(
-      tegel("Bespaard", euro(totaal.saved), "var(--dac-solar)"),
-      tegel("Door de zon", euro(totaal.solar_saved), "var(--dac-solar)"),
-      tegel("Door te wachten", euro(totaal.wait_saved), "var(--dac-solar)"),
-      tegel("Betaald", euro(totaal.paid), "var(--dac-grid-in)"),
-      tegel(w.hoeveel, kwh(totaal.kwh)),
-      tegel("Waarvan zon", kwh(totaal.solar_kwh), "var(--dac-solar)")
-    );
-    // Waar de rest vandaan kwam (v0.101.0): de eigenaar op 28-09-2026 bij een
-    // vaatwasser op zon en thuisbatterij, "moet daar niet iets van de batterij bij?"
     const metAccu = totaal.battery_kwh >= 0.05;
-    if (metAccu) tegels.append(tegel("Uit je thuisbatterij", kwh(totaal.battery_kwh), "var(--dac-good)"));
+    // Wat er bespaard is, en daarvan wat de zon deed en wat het wachten op een
+    // goedkoper moment (de eigenaar op 09-09-2026); waar de stroom vandaan kwam
+    // (op 28-09-2026: "moet daar niet iets van de batterij bij?").
+    tegels.append(
+      tegel("Bespaard", euro(totaal.saved), "var(--dac-solar)",
+        `${euro(totaal.solar_saved)} door zon, ${euro(totaal.wait_saved)} door wachten`),
+      tegel("Betaald", euro(totaal.paid), "var(--dac-grid-in)"),
+      tegel(w.hoeveel, kwh(totaal.kwh), "",
+        `${kwh(totaal.solar_kwh)} zon${metAccu ? `, ${kwh(totaal.battery_kwh)} uit de batterij` : ""}`)
+    );
 
     const zinnen = [w.uitleg];
-    if (metAccu) {
-      zinnen.push(
-        "Wat uit je thuisbatterij kwam telt hier in Betaald als stroom van het net: wat de batterij daarmee verdient staat bij de batterij zelf, en zo telt het niet twee keer."
-      );
-    }
+    if (metAccu) zinnen.push("Stroom uit de batterij telt als netstroom, zodat niets dubbel telt.");
     if (totaal.onbekend) {
       zinnen.push(
-        `${totaal.onbekend === 1 ? "Eén beurt telt" : `${totaal.onbekend} beurten tellen`} niet mee in het geld, omdat de prijs toen niet bekend was.`
+        `${totaal.onbekend === 1 ? "Eén beurt telt" : `${totaal.onbekend} beurten tellen`} niet mee: de prijs was niet bekend.`
       );
     }
     if (totaal.lopend) zinnen.push("Een beurt die nog loopt telt mee tot nu.");
@@ -1765,18 +1772,6 @@ class DacViewHistory extends DacElement {
       }
       return tr;
     };
-    const accuCel = (waarde) => (metAccu ? [kwh(Number(waarde) || 0)] : []);
-    const accuKop = metAccu ? ["Accu"] : [];
-    if (perDevice.length > 1) {
-      apparaten.append(rij(["Apparaat", "Beurten", w.hoeveel, "Zon", ...accuKop, "Betaald", "Bespaard", "Door zon"], true));
-      for (const a of perDevice) {
-        apparaten.append(
-          rij([a.name, String(a.beurten), kwh(a.kwh), kwh(a.solar_kwh), ...accuCel(a.battery_kwh),
-            euro(a.paid), euro(a.saved), euro(a.solar_saved)])
-        );
-      }
-    }
-
     const wanneer = (b) => {
       const t = new Date(b.plugged_at);
       if (Number.isNaN(t.getTime())) return "";
@@ -1784,21 +1779,16 @@ class DacViewHistory extends DacElement {
       const klok = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
       return this.period_ === "day" ? klok : `${dag} ${klok}`;
     };
-    lijst.append(rij([w.wanneer, "Apparaat", w.hoeveel, "Zon", ...accuKop, w.vanaf, "Betaald", "Bespaard", "Door zon", ""], true));
+    lijst.append(rij([w.wanneer, "Apparaat", w.hoeveel, "Betaald", "Bespaard"], true));
     for (const b of items) {
-      const d = delen(b);
+      const extra = opmerking(b);
       lijst.append(
         rij([
           wanneer(b),
-          b.car ? `${b.name}, ${b.car}` : b.name,
+          `${b.car ? `${b.name}, ${b.car}` : b.name}${extra ? ` (${extra})` : ""}`,
           kwh(b.kwh),
-          kwh(b.solar_kwh),
-          ...accuCel(b.battery_kwh),
-          b.ref_cost === null || b.ref_cost === undefined ? "" : euro(b.ref_cost),
           euro(b.paid),
           b.saved === null || b.saved === undefined ? "" : euro(b.saved),
-          d.zon === null ? "" : euro(d.zon),
-          opmerking(b),
         ])
       );
     }
@@ -1865,7 +1855,7 @@ class DacViewHistory extends DacElement {
       ? "Wat vandaag tot nu kostte en opleverde"
       : `Wat deze ${{ day: "dag", week: "week", month: "maand", year: "periode" }[this.period_]} kostte en opleverde`;
 
-    // Drie getallen bovenaan. Levert teruglevering meer op dan de rest kost,
+    // Twee getallen bovenaan. Levert teruglevering meer op dan de rest kost,
     // dan heet het verdiend: een minteken voor een euroteken leest als een fout.
     const kop = (label, waarde, uitleg, tone) => {
       const box = document.createElement("div");
@@ -1901,9 +1891,8 @@ class DacViewHistory extends DacElement {
         "var(--dac-solar)"
       ),
     ];
-    if (!verdiend) {
-      hero.push(kop("Zonder zon, batterij en coach", g.zonder, "had het zoveel gekost", "var(--dac-ink-3)"));
-    }
+    // Een derde getal "Zonder zon, batterij en coach" stond hier tot v0.116.0;
+    // dat is Uitgegeven plus Bespaard, en de balk eronder laat het al zien.
     this.$("#money-hero").replaceChildren(...hero);
 
     // De balk: wat het gekost had, verdeeld in wat je uitgaf en wat er bespaard
@@ -1994,57 +1983,59 @@ class DacViewHistory extends DacElement {
   }
 
   /** Hoe hard de getallen van In geld zijn, en waar ze vandaan komen. Ook voor het rapport. */
+  /**
+   * De uitleg onder In geld: per zin één ding, zo kort als het kan. De eigenaar
+   * op 13-10-2026, na een alinea van zes zinnen waarin hij niet terugvond waarom
+   * de batterij op € 0,00 stond: "ik wil alles zo duidelijk mogelijk hebben en
+   * zo kort mogelijk." Met salderen staat erbij wat opslaan per kWh scheelt,
+   * want dat is het antwoord op die vraag.
+   */
   geldUitleg_(g) {
     const rate = g.rate;
     const perBucket = g.prices.size > 0;
     const vast = rate.basis === "je vaste tarief";
     const contract = this.settings_?.contract;
     const rijen = this.rowsShown_ ?? [];
-    const zinnen = [
-      "Bespaard is wat hetzelfde verbruik gekost had met alles van het net, tegen de prijs van dat moment, min wat je werkelijk betaalde.",
-    ];
+    const zinnen = ["Bespaard is wat alles van het net gekost had, min wat je betaalde."];
     zinnen.push(
       vast
-        ? `Gerekend met je vaste tarief van ${euro(rate.buy)} per kWh.`
+        ? `Stroom kost ${euro(rate.buy)} per kWh.`
         : perBucket
           ? this.period_ === "day"
-            ? "Gerekend met de werkelijke prijs van elk uur, uit de geschiedenis die Home Assistant bewaart."
-            : `Gerekend met de werkelijke ${
-                this.period_ === "year" ? "maandgemiddelden" : "daggemiddelden"
-              } uit de geschiedenis die Home Assistant bewaart. Binnen zo'n ${
-                this.period_ === "year" ? "maand" : "dag"
-              } wisselt de prijs nog, dus het is een benadering en geen factuur.`
-          : `Gerekend met ${rate.basis}, ${euro(rate.buy)} per kWh. Van deze prijsentiteit bewaart Home Assistant nog geen geschiedenis.`
+            ? "Gerekend met de prijs van elk uur."
+            : `Gerekend met ${this.period_ === "year" ? "maandgemiddelden" : "daggemiddelden"} van de prijs, dus ongeveer.`
+          : `Gerekend met ${rate.basis}, ${euro(rate.buy)} per kWh.`
     );
     if (rijen.some((r) => salderen(contract, r.start))) {
       const p = prijsOp(contract, rate, g.prices, g.start);
+      const jaar = SALDEREN_TOT.slice(0, 4);
       zinnen.push(
-        `Je saldeert nog tot 1 januari ${SALDEREN_TOT.slice(0, 4)}: tot dan is een teruggeleverde kWh ${
-          p.terug !== null ? `${euro(p.terug)} waard, ` : ""
-        }je stroomprijs min de terugleverkosten. Zelf gebruiken scheelt daardoor alleen die kosten; daarna telt elke eigen kWh volledig.`
+        p.terug !== null && p.koop !== null
+          ? `Tot 1 januari ${jaar} saldeer je: terugleveren levert ${euro(p.terug)} per kWh op, dus zelf gebruiken of opslaan scheelt maar ${euro(p.koop - p.terug)} per kWh.`
+          : `Tot 1 januari ${jaar} saldeer je: zelf gebruiken of opslaan scheelt dan alleen de terugleverkosten.`
       );
     }
     if (rijen.some((row) => contractAt(contract, row.start).period)) {
-      zinnen.push("Dagen die in een eerder contract vallen zijn gerekend met de prijs van dat contract.");
+      zinnen.push("Dagen in een eerder contract rekenen met dat contract.");
     }
     if (g.metAccu) {
       zinnen.push(
         g.accuDagen
-          ? "Wat de thuisbatterij bespaarde telt pas als ze ontlaadt: wat dat opbracht, min wat die stroom kostte toen ze laadde. Wat er aan het eind nog in zit is wel uitgegeven, en staat bij Uitgegeven. Dat telt sinds de coach haar volgt."
-          : "De thuisbatterij heeft in deze periode nog geen kasboek: dat begint zodra de coach haar volgt."
+          ? "Thuisbatterij: wat ontladen opbracht, min wat het laden kostte. Wat er nog in zit staat bij Uitgegeven."
+          : "Thuisbatterij: telt vanaf de dag dat de coach haar volgt."
       );
     }
     if (g.metCoach) {
       zinnen.push(
         g.beurtenGeladen
-          ? "Door de coach is wat de beurten onder Bespaard scheelden: de zon die hij naar een apparaat stuurde en het wachten op een goedkoper moment."
+          ? "Coach: zon naar een apparaat sturen en wachten op een goedkoper moment."
           : "Wat de coach bespaarde wordt nog opgehaald."
       );
     }
     if (!g.metTerug) {
-      zinnen.push("Wat teruglevering opbrengt staat er niet bij, want bij een all-in prijsentiteit is de kale marktprijs er niet uit te halen.");
+      zinnen.push("Wat terugleveren opbrengt ontbreekt: uit een all-in prijs is de marktprijs niet te halen.");
     }
-    if (g.onbekend) zinnen.push("Van een deel van de periode is de prijs niet bekend; dat deel telt niet mee in het geld.");
+    if (g.onbekend) zinnen.push("Van een deel van de periode is de prijs niet bekend; dat deel telt niet mee.");
     return zinnen.join(" ");
   }
 
@@ -2198,33 +2189,61 @@ DacViewHistory.css = /* css */ `
      laatste twee boven de knoppen laten zweven. */
   .controls { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
 
-  /* Twee rijen knoppen naast elkaar zijn niet uit zichzelf te onderscheiden.
-     Zonder opschrift lijkt Maand bij Periode en bij Verloop hetzelfde ding. */
-  .keuze { display: flex; flex-direction: column; gap: 4px; }
+  /* Elke keuze een uitklaplijst met een opschrift erboven (v0.116.0). */
+  .keuze { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .keuze-kop {
     font-size: 11px; font-weight: 600; letter-spacing: .02em;
     color: var(--dac-ink-3); text-transform: uppercase;
   }
-  .segmented { display: flex; gap: 6px; flex-wrap: wrap; }
-  .segmented.detail button[disabled] { opacity: .4; cursor: default; }
-  .korrel-note { margin: -4px 0 12px; }
-  .korrel-note:empty { display: none; }
-  .segmented button {
-    padding: 9px 16px;
+  .kies { position: relative; display: block; }
+  /* Het pijltje van de lijst, want "appearance: none" haalt dat van de browser weg. */
+  .kies::after {
+    content: ""; position: absolute; right: 14px; top: 50%;
+    width: 7px; height: 7px; margin-top: -5px;
+    border-right: 1.5px solid var(--dac-ink-2); border-bottom: 1.5px solid var(--dac-ink-2);
+    transform: rotate(45deg); pointer-events: none;
+  }
+  .kies select {
+    appearance: none; -webkit-appearance: none;
+    min-width: 128px; min-height: 40px; padding: 8px 36px 8px 14px;
     border-radius: var(--dac-radius-pill);
-    border: 1px solid var(--dac-border);
-    background: transparent;
-    color: var(--dac-ink-2);
+    border: 1px solid var(--dac-border-hi);
+    background: rgba(var(--dac-veil), 0.04);
+    color: var(--dac-ink);
     font: inherit; font-size: 13.5px;
     cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    transition: border-color 200ms ease, background 200ms ease, color 200ms ease;
+    color-scheme: var(--dac-scheme);
   }
-  .segmented button[aria-pressed="true"] {
-    border-color: rgba(25,143,217,0.6);
-    background: var(--dac-accent-soft);
-    color: var(--dac-ink);
+  .kies select:hover { border-color: var(--dac-ink-3); }
+  .kies select:focus-visible { outline: none; border-color: var(--dac-accent-hi); }
+  /* De lijst die opklapt tekent de browser zelf: zonder deze regel wit met
+     lichte letters (zie proef "elke uitklaplijst" in test_rapport.mjs). */
+  select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
+  /* Onder 16 px zoomt iOS in zodra je de lijst aantikt, en blijft daar. */
+  @media (pointer: coarse) { .kies select { font-size: 16px; } }
+
+  .rapport { position: relative; }
+  .rapport-menu {
+    position: absolute; z-index: 5; top: calc(100% + 6px); left: 0;
+    display: flex; flex-direction: column; gap: 2px;
+    width: max-content; max-width: min(300px, calc(100vw - 32px));
+    padding: 6px;
+    border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border-hi);
+    background: var(--dac-popover);
+    box-shadow: 0 18px 40px -20px rgba(0, 0, 0, var(--dac-shadow-deep));
   }
+  .rapport-menu[hidden] { display: none; }
+  .rapport-menu button {
+    display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+    padding: 9px 12px; border: 0; border-radius: 8px;
+    background: transparent; color: var(--dac-ink);
+    font: inherit; font-size: 13.5px; text-align: left; cursor: pointer;
+  }
+  .rapport-menu button:hover, .rapport-menu button:focus-visible {
+    background: rgba(var(--dac-veil), 0.06); outline: none;
+  }
+  .rapport-menu small { font-size: 12px; color: var(--dac-ink-3); }
 
   button.download {
     display: inline-flex; align-items: center; gap: 8px;
@@ -2279,7 +2298,6 @@ DacViewHistory.css = /* css */ `
     margin-bottom: 10px;
     min-height: 1.2em;
   }
-  .totals-title:empty::before { content: "Hele periode"; color: var(--dac-ink-3); }
 
   .totals {
     display: grid;
@@ -2298,6 +2316,7 @@ DacViewHistory.css = /* css */ `
     white-space: nowrap;
   }
   .t-unit { font-size: 12px; font-weight: 600; color: var(--dac-ink-3); margin-left: 5px; }
+  .t-sub { font-size: 12px; line-height: 1.4; color: var(--dac-ink-3); }
 
   svg { width: 100%; height: auto; display: block; }
   .zero { stroke: var(--dac-border-hi); stroke-width: 1; }
@@ -2453,7 +2472,6 @@ DacViewHistory.css = /* css */ `
     white-space: nowrap; font-variant-numeric: tabular-nums;
   }
   table.beurten th { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dac-ink-3); }
-  table.beurten td:last-child { color: var(--dac-ink-3); }
   .note { margin: 12px 0 0; font-size: 13px; line-height: 1.5; color: var(--dac-ink-2); }
   .note:empty { display: none; }
 
