@@ -23,7 +23,8 @@ import { deviceLabel, deviceLabelMap } from "../devices.js";
 
 /** Het merkteken op het rapport. */
 const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
-import { allInPrijzen, contractAt, laadCoachPrijzen, tariff } from "../data-source.js";
+import { allInPrijzen, contractAt, laadCoachPrijzen, tariff, volgCoach } from "../data-source.js";
+import { balkSoort, legenda, metHerkomst, netReeks, stippen, tekenTijdlijn, tekenUitleg, tijdlijn } from "../tijdlijn.js";
 import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
 import { beurtenIn, delen, opmerking, perApparaat, totalen, woorden } from "../savings.js";
@@ -50,6 +51,9 @@ const NOW_LABEL = {
   month: "Deze maand",
   year: "Dit jaar",
 };
+
+/** Hoe oud de kwartieren van de tijdlijn van vandaag mogen zijn voor ze opnieuw komen. */
+const TIJDLIJN_VERS_MS = 5 * 60 * 1000;
 
 /** Drawing units; the chart measures itself in pixels like the price chart. */
 const MIN_W = 240;
@@ -387,6 +391,21 @@ class DacViewHistory extends DacElement {
           <p class="note" id="note"></p>
         </section>
 
+        <!-- De tijdlijn (v0.115.0). De eigenaar op 11-10-2026: "Ik wil kunnen zien
+             wat de coach en de aanstuurbare apparaten hebben gedaan", als tijdlijn,
+             "en als je op de tijdlijn klikt een korte tekst". De som staat in
+             tijdlijn.js. -->
+        <section class="card" id="tijdlijn-card" hidden>
+          <div class="panel-head">
+            <div class="eyebrow">Tijdlijn</div>
+            <h2>Wat de coach deed</h2>
+          </div>
+          <div id="tijdlijn"></div>
+          <div class="legend" id="tijdlijn-legenda"></div>
+          <div class="tl-uitleg" id="tijdlijn-uitleg" role="status" hidden></div>
+          <p class="note" id="tijdlijn-note"></p>
+        </section>
+
         <!-- In geld (v0.101.0). De eigenaar op 28-09-2026: "ik wil op het historie
              overzicht duidelijk hebben wat ik heb bespaard die dag, totaal
              uitgegeven en totaal bespaard. Maak een mooi overzicht." De som
@@ -482,6 +501,24 @@ class DacViewHistory extends DacElement {
       }
     });
 
+    // Een tik op een stuk van de tijdlijn zet de korte tekst eronder; nog een
+    // keer op hetzelfde stuk haalt hem weg.
+    this.$("#tijdlijn").addEventListener("click", (event) => {
+      const knop = event.target.closest?.("button[data-rij], button[data-stip]");
+      if (!knop) return;
+      const sleutel = knop.dataset.stip !== undefined ? `stip:${knop.dataset.stip}` : `${knop.dataset.rij}:${knop.dataset.stuk}`;
+      this.tlGekozen_ = this.tlGekozen_ === sleutel ? "" : sleutel;
+      this.paintTijdlijn_();
+      // Met het toetsenbord blijft de focus op het stuk staan, ook nu het
+      // opnieuw getekend is.
+      if (event.detail === 0) {
+        const selector = knop.dataset.stip !== undefined
+          ? `[data-stip="${knop.dataset.stip}"]`
+          : `[data-rij="${knop.dataset.rij}"][data-stuk="${knop.dataset.stuk}"]`;
+        this.$(`#tijdlijn ${selector}`)?.focus({ preventScroll: true });
+      }
+    });
+
     this.load_();
   }
 
@@ -495,10 +532,24 @@ class DacViewHistory extends DacElement {
       this.paint_();
     });
     this.observer_.observe(this);
+
+    // De tijdlijn van vandaag loopt mee: elke minuut schuift nu op, en om de
+    // vijf minuten komen de kwartieren opnieuw.
+    this.tlKlok_ ??= setInterval(() => {
+      if (this.period_ !== "day" || this.offset_ !== 0 || this.onderwerp_ !== "energie") return;
+      if (this.tl_ && Date.now() - this.tl_.gehaald > TIJDLIJN_VERS_MS) this.laadTijdlijn_();
+      else this.paintTijdlijn_();
+    }, 60_000);
+    this.volgMeldingen_();
   }
 
   onDisconnect() {
     this.observer_?.disconnect();
+    clearInterval(this.tlKlok_);
+    this.tlKlok_ = null;
+    this.tlAf_?.();
+    this.tlAf_ = null;
+    this.tlVolg_ = false;
   }
 
   step_(direction) {
@@ -544,6 +595,8 @@ class DacViewHistory extends DacElement {
     const ids = [...roles.solar, ...roles.import, ...roles.export, ...roles.gas, ...roles.water];
 
     this.paintPeriod_();
+    // Los van de meterstanden: de tijdlijn heeft die niet nodig.
+    this.laadTijdlijn_();
 
     if (!ids.length) {
       this.rows_ = null;
@@ -660,9 +713,11 @@ class DacViewHistory extends DacElement {
       this.$("#money-card").hidden = true;
       this.$("#gas-card").hidden = true;
       this.$("#water-card").hidden = true;
+      this.$("#tijdlijn-card").hidden = true;
       this.paintSaved_();
       return;
     }
+    this.paintTijdlijn_();
 
     const note = this.$("#note");
     const roles = this.meters_();
@@ -704,6 +759,121 @@ class DacViewHistory extends DacElement {
     this.paintMoney_();
     this.paintGas_();
     this.paintVolume_("water", "Waterverbruik per periode");
+  }
+
+  /** De apparaten die een balk op de tijdlijn krijgen: wat de coach stuurt. */
+  tijdlijnApparaten_() {
+    return (this.settings_?.devices ?? []).filter((device) => balkSoort(device));
+  }
+
+  /**
+   * Wat de tijdlijn van de gekozen dag nodig heeft (v0.115.0): de besluiten uit
+   * Meldingen, en de kwartieren van de apparaten en van het net voor de kleur.
+   *
+   * Alleen bij Dag. Een week aan balken leest niemand meer in één oogopslag, en
+   * daar ging het om.
+   */
+  async laadTijdlijn_() {
+    if (this.period_ !== "day" || !this.hass_?.callWS) return;
+    const apparaten = this.tijdlijnApparaten_();
+    if (!apparaten.length) return;
+    const run = (this.tlRun_ = (this.tlRun_ ?? 0) + 1);
+    const van = periodStart("day", this.offset_);
+    if (this.tl_?.dag !== van.getTime()) this.tlGekozen_ = "";
+
+    const bronnen = this.settings_?.sources ?? {};
+    const netId = bronnen.grid_mode === "signed" ? bronnen.grid_signed : bronnen.grid_import;
+    let meldingen = [];
+    try {
+      meldingen = (await this.hass_.callWS({ type: "domotiapp_coach/notifications/list" })) ?? [];
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de meldingen voor de tijdlijn niet ophalen", error);
+    }
+    const kwartieren = await quarters(
+      this.hass_,
+      [...apparaten.map((device) => device.entity), netId],
+      van,
+      periodEnd("day", van)
+    );
+    if (run !== this.tlRun_) return;
+    this.tl_ = { dag: van.getTime(), meldingen, kwartieren, gehaald: Date.now() };
+    this.volgMeldingen_();
+    this.paintTijdlijn_();
+  }
+
+  /** Nieuwe meldingen komen er meteen bij, zodat vandaag niet op een herlaad wacht. */
+  async volgMeldingen_() {
+    if (this.tlVolg_ || !this.hass_ || !this.isConnected) return;
+    this.tlVolg_ = true;
+    const af = await volgCoach(this.hass_, "notification", (item) => {
+      if (!item?.at || !this.tl_) return;
+      this.tl_.meldingen = [item, ...this.tl_.meldingen];
+      if (this.period_ === "day" && this.offset_ === 0) this.paintTijdlijn_();
+    });
+    if (!this.isConnected) {
+      af?.();
+      this.tlVolg_ = false;
+      return;
+    }
+    this.tlAf_ = af;
+  }
+
+  paintTijdlijn_() {
+    const kaart = this.$("#tijdlijn-card");
+    if (!kaart) return;
+    const apparaten = this.tijdlijnApparaten_();
+    kaart.hidden = this.onderwerp_ !== "energie" || this.period_ !== "day" || !apparaten.length;
+    if (kaart.hidden) return;
+
+    const stage = this.$("#tijdlijn");
+    const legendaVak = this.$("#tijdlijn-legenda");
+    const uitleg = this.$("#tijdlijn-uitleg");
+    const note = this.$("#tijdlijn-note");
+    const van = periodStart("day", this.offset_);
+    const tot = periodEnd("day", van);
+    const tl = this.tl_;
+    if (!tl || tl.dag !== van.getTime()) {
+      stage.innerHTML = "";
+      legendaVak.replaceChildren();
+      uitleg.hidden = true;
+      note.textContent = "Bezig met ophalen…";
+      return;
+    }
+
+    const nu = new Date();
+    const alle = this.settings_?.devices ?? [];
+    const namen = deviceLabelMap(alle);
+    const bronnen = this.settings_?.sources ?? {};
+    const metAccu = alle.some((device) => device.type === "thuisbatterij");
+    const rijen = metHerkomst(
+      tijdlijn(tl.meldingen, alle, van, tot, nu),
+      (id) => tl.kwartieren.get(alle.find((device) => device.id === id)?.entity) ?? [],
+      netReeks(bronnen, tl.kwartieren)
+    );
+    for (const rij of rijen) rij.naam = namen.get(rij.device) ?? rij.naam;
+    const punten = stippen(tl.meldingen, van, tot);
+
+    if (!rijen.length && !punten.length) {
+      stage.innerHTML = "";
+      legendaVak.replaceChildren();
+      uitleg.hidden = true;
+      const oudste = tl.meldingen.reduce((min, item) => (item?.at && item.at < min ? item.at : min), "9999");
+      note.textContent =
+        oudste !== "9999" && new Date(oudste) >= tot
+          ? `Van deze dag heeft de coach niets bewaard. De tijdlijn begint op ${new Date(oudste).toLocaleDateString("nl-NL", { day: "numeric", month: "long" })}.`
+          : "Op deze dag heeft de coach geen apparaten gestuurd.";
+      return;
+    }
+
+    const gekozen = this.tlGekozen_ ?? "";
+    stage.innerHTML = tekenTijdlijn({ rijen, stippen: punten, van, tot, nu, gekozen, metAccu });
+    legendaVak.innerHTML = legenda(rijen, metAccu)
+      .map((item) => `<span><i class="vlek ${item.klasse}"></i>${item.label}</span>`)
+      .join("");
+    const tekst = gekozen ? tekenUitleg({ rijen, stippen: punten, gekozen, tot, nu, metAccu }) : "";
+    uitleg.innerHTML = tekst;
+    uitleg.hidden = !tekst;
+    note.textContent = tekst ? "" : "Tik op een balk of een stip voor wat er gebeurde.";
   }
 
   /** The buckets of this period, in order, with everything that belongs to one. */
@@ -2152,6 +2322,85 @@ DacViewHistory.css = /* css */ `
   .legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dac-ink-2); }
   .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: 0 0 auto; }
 
+  /* De tijdlijn (v0.115.0): een baan per apparaat over de hele dag. Oranje is
+     eigen stroom en blauw het net, net als in de grafiek erboven. De lijntjes in
+     de baan staan om de drie uur. */
+  .tijdlijn { margin-top: 18px; }
+  .tijdlijn .rijen { position: relative; display: flex; flex-direction: column; gap: 10px; }
+  .tijdlijn .rij { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 12px; }
+  .tijdlijn .naam {
+    font-size: 13px; color: var(--dac-ink-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tijdlijn .baan {
+    position: relative; height: 28px; border-radius: 8px;
+    background-color: rgba(var(--dac-veil), 0.035);
+    background-image: repeating-linear-gradient(to right,
+      transparent 0, transparent calc(12.5% - 1px),
+      rgba(var(--dac-veil), 0.08) calc(12.5% - 1px), rgba(var(--dac-veil), 0.08) 12.5%);
+  }
+  .tijdlijn .stippen .baan { height: 18px; background: none; }
+  .stuk {
+    position: absolute; top: 0; bottom: 0; min-width: 3px;
+    padding: 0; border: 0; border-radius: 6px;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: opacity 150ms ease, box-shadow 150ms ease;
+  }
+  .stuk:focus, .stip:focus { outline: none; }
+  .stuk:focus-visible, .stip:focus-visible { box-shadow: 0 0 0 2px var(--dac-accent); }
+  .stuk.gekozen { box-shadow: 0 0 0 2px var(--dac-ink); z-index: 1; }
+  /* Iets aangetikt: de rest gaat zachter, de kleur zelf blijft wat hij betekent. */
+  .rijen:has(.gekozen) .stuk:not(.gekozen),
+  .rijen:has(.gekozen) .stip:not(.gekozen) { opacity: 0.35; }
+  .vlek { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+  .stuk.zon, .vlek.zon { background: var(--dac-solar); }
+  .stuk.net, .vlek.net { background: var(--dac-grid-in); }
+  .stuk.nul, .vlek.nul { background: var(--dac-device-2); }
+  .stuk.ontladen, .vlek.ontladen { background: var(--dac-device-1); }
+  .stuk.wacht, .vlek.wacht { background: rgba(var(--dac-veil), 0.16); }
+  .stuk.stil, .vlek.stil { background: rgba(var(--dac-veil), 0.10); }
+  .stuk.aan, .vlek.aan { background: rgba(var(--dac-veil), 0.28); }
+  .stuk.leeg, .vlek.leeg { background: transparent; border: 1.5px dashed rgba(var(--dac-veil), 0.30); }
+  .stuk.vol, .vlek.vol { background: color-mix(in srgb, var(--dac-good) 50%, transparent); }
+  .stip {
+    position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px;
+    padding: 0; border: 2px solid var(--dac-surface); border-radius: 50%;
+    background: var(--dac-ink-3);
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: opacity 150ms ease;
+  }
+  /* Een vinger is breder dan twaalf pixels. */
+  .stip::before { content: ""; position: absolute; inset: -8px; }
+  .stip.kritiek { background: var(--dac-bad); }
+  .stip.gekozen { box-shadow: 0 0 0 2px var(--dac-ink); }
+  .tijdlijn .nu {
+    position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px;
+    border-radius: 1px; background: var(--dac-accent); pointer-events: none; z-index: 2;
+  }
+  .tijdlijn .uren {
+    position: relative; height: 16px; margin: 8px 0 0 124px;
+    font-size: 11px; color: var(--dac-ink-3); font-variant-numeric: tabular-nums;
+  }
+  .tijdlijn .uren span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+  .tijdlijn .uren span:first-child { transform: none; }
+  .tijdlijn .uren span:last-child { transform: translateX(-100%); }
+  #tijdlijn-legenda:empty { display: none; }
+  .tl-uitleg {
+    margin-top: 14px; padding: 12px 14px;
+    border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border);
+    background: rgba(var(--dac-veil), 0.03);
+  }
+  .tl-uitleg[hidden] { display: none; }
+  .tl-uitleg .tijd { font-size: 12.5px; color: var(--dac-ink-2); }
+  .tl-uitleg .tijd strong { color: var(--dac-ink); font-weight: 600; }
+  .tl-uitleg .wat {
+    margin: 6px 0 0; font-size: 14px; line-height: 1.45; color: var(--dac-ink);
+    white-space: pre-line;
+  }
+  .tl-uitleg .wat .vlek { margin-right: 8px; }
+  .tl-uitleg .reden { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--dac-ink-2); }
+
   .money .totals { margin: 16px 0 0; }
   .saved .totals { margin: 16px 0 0; }
 
@@ -2213,6 +2462,10 @@ DacViewHistory.css = /* css */ `
     section.card { padding: 16px 14px 18px; }
     .stepper { margin-left: 0; flex-basis: 100%; }
     .t-value { font-size: 19px; }
+    /* Op een telefoon de naam boven de baan: de baan krijgt de hele breedte. */
+    .tijdlijn .rij { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    .tijdlijn .naam { font-size: 12px; }
+    .tijdlijn .uren { margin-left: 0; }
   }
 `;
 

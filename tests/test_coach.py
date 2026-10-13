@@ -8431,6 +8431,52 @@ for veld150 in sorted(storage.VOORKEUREN_ACCU):
         verschil150.append(veld150)
 controle("de batterijvelden van de bewoner hebben dezelfde grenzen als in _BATTERY", not verschil150, f"{verschil150}")
 
+print("=== 151. de tijdlijn: een besluit draagt het apparaat, de regel en de stand (v0.115.0) ===")
+# De eigenaar op 11-10-2026: in Historie een tijdlijn van wat de coach en de
+# apparaten deden. Die leest de besluiten uit Meldingen; de tekst alleen is te
+# los om op te bouwen, dus staan bij een besluit ook het apparaat, de regel en
+# de stand (`extra` in MeldingenStore.async_add, tijdlijn.js in het paneel).
+inst151 = instellingen()
+hass151, _, coach151 = bouw(huis(), inst151)
+b151, _ = asyncio.run(ronde(coach151, inst151))
+asyncio.run(hass151.afmaken())
+paal151 = [g for g in asyncio.run(coachmod.async_get_meldingen(hass151).async_list()) if g.get("kind") == "besluit"]
+print(f"  paal: {[{k: v for k, v in g.items() if k not in ('message', 'at')} for g in paal151]}")
+controle("het besluit van de paal noemt het apparaat, de regel en of hij laadt",
+         paal151 and paal151[-1].get("device") == "dev-laadpaal" and paal151[-1].get("rule") == b151["rule"]
+         and paal151[-1].get("charge") is True, f"{paal151}")
+
+hass151b, _, coach151b = bouw(huis75(), inst75)
+asyncio.run(ronde75(hass151b, coach151b, NU75))
+accu151 = [g for g in asyncio.run(coachmod.async_get_meldingen(hass151b).async_list())
+           if g.get("kind") == "besluit" and g.get("device") == "dev-batterij"]
+print(f"  batterij: {[{k: v for k, v in g.items() if k not in ('message', 'at')} for g in accu151]}")
+controle("het besluit van de batterij noemt de stand", accu151 and accu151[-1].get("mode") == "nul", f"{accu151}")
+
+# Een leeg veld komt er niet in: een melding blijft een melding.
+meld151 = asyncio.run(coachmod.async_get_meldingen(hass151).async_add(
+    "Iets.", dt.datetime(2026, 8, 18, 15, 0), "besluit", {"device": "dev-x", "amps": None}))
+controle("zonder lege velden", meld151 == {"at": "2026-08-18T15:00:00", "message": "Iets.", "kind": "besluit",
+                                          "device": "dev-x"}, f"{meld151}")
+meld151b = asyncio.run(coachmod.async_get_meldingen(hass151).async_add("Gewoon.", dt.datetime(2026, 8, 18, 15, 1)))
+controle("en een melding zonder extra is zoals altijd", set(meld151b) == {"at", "message", "kind"}, f"{meld151b}")
+
+# Elk besluit dat de coach noteert draagt het apparaat; een nieuwe plek die het
+# vergeet valt hier om, want dan staat dat besluit niet op de tijdlijn.
+bron151 = (pathlib.Path(coachmod.__file__)).read_text(encoding="utf-8")
+aanroepen151 = []
+for begin151 in [m.end() for m in _re.finditer(r"await self\._async_noteer\(", bron151)]:
+    # Tot het haakje dat deze aanroep sluit; een regex haalt `bool(st.get(...))` niet.
+    diepte151, i151 = 1, begin151
+    while diepte151:
+        diepte151 += {"(": 1, ")": -1}.get(bron151[i151], 0)
+        i151 += 1
+    aanroepen151.append(bron151[begin151:i151])
+zonder151 = [a.strip()[:90] for a in aanroepen151 if '"device"' not in a]
+print(f"  {len(aanroepen151)} plekken die een besluit noteren")
+controle("elke aanroep van _async_noteer geeft het apparaat mee",
+         len(aanroepen151) >= 7 and not zonder151, f"{len(aanroepen151)}: {zonder151}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

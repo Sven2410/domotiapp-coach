@@ -1488,7 +1488,9 @@ class ChargerCoach:
             except Exception:  # noqa: BLE001 - één slechte ontvanger is niet alle
                 _LOGGER.exception("Kon melding niet versturen naar notify.%s", target)
 
-    async def _async_noteer(self, message: str, now: datetime) -> None:
+    async def _async_noteer(
+        self, message: str, now: datetime, extra: dict[str, Any] | None = None
+    ) -> None:
         """Een besluit in de geschiedenis, en naar wie dat per se wil.
 
         Elk besluit hoort terug te lezen te zijn, maar niemand wil er 's nachts
@@ -1497,7 +1499,7 @@ class ChargerCoach:
         """
         await self._async_versturen(message, "besluit")
         try:
-            entry = await async_get_meldingen(self.hass).async_add(message, now, "besluit")
+            entry = await async_get_meldingen(self.hass).async_add(message, now, "besluit", extra)
             self.hass.bus.async_fire(EVENT_NOTIFICATION, entry)
         except Exception:  # noqa: BLE001 - de geschiedenis mag de ronde niet kosten
             _LOGGER.exception("kon het besluit niet in de geschiedenis zetten")
@@ -1530,7 +1532,10 @@ class ChargerCoach:
         if not st.get("applied"):
             kop = f"zou {kop}, maar de coach stuurt nu niet"
         reden = (st.get("reason") or "").strip()
-        await self._async_noteer(f"{naam}: {kop}. {reden}".strip(), now)
+        await self._async_noteer(f"{naam}: {kop}. {reden}".strip(), now, {
+            "device": device_id, "rule": st.get("rule"), "charge": bool(st.get("charge")),
+            "amps": st.get("amps"), "applied": bool(st.get("applied")),
+        })
 
     def _status_afgeleid(self, device_id: str, entities: dict[str, Any], now: datetime) -> str:
         """De status van een paal die er zelf geen heeft, in de woorden van Easee.
@@ -3804,7 +3809,10 @@ class ChargerCoach:
         if not st.get("applied") and st.get("charge") and st.get("rule") != "running":
             kop = "zou nu starten, maar de coach stuurt nu niet"
         reden = (st.get("reason") or "").strip()
-        await self._async_noteer(f"{naam}: {kop}. {reden}".strip(), now)
+        await self._async_noteer(f"{naam}: {kop}. {reden}".strip(), now, {
+            "device": device_id, "rule": st.get("rule"), "charge": bool(st.get("charge")),
+            "applied": bool(st.get("applied")),
+        })
 
     @staticmethod
     def _priority(settings: dict[str, Any], device: dict[str, Any]) -> int:
@@ -4922,7 +4930,8 @@ class ChargerCoach:
             if b.soc is not None and b.soc <= grens + VOL_MARGE - 1.0:
                 self._drain.pop(device_id, None)
                 self._remember(device_id)
-                await self._async_noteer(f"{naam} is leeggeladen tot {grens:.0f}%; hij volgt het plan weer.", now)
+                await self._async_noteer(f"{naam} is leeggeladen tot {grens:.0f}%; hij volgt het plan weer.", now,
+                                         {"device": device_id})
             elif b.soc is not None and b.max_discharge_w > 0 and not self._paal_laadt(settings):
                 besluit = Besluit(
                     HANDELEN,
@@ -4947,7 +4956,7 @@ class ChargerCoach:
             if b.soc is not None and b.soc >= b.soc_max - VOL_MARGE:
                 self._boost.discard(device_id)
                 self._remember(device_id)
-                await self._async_noteer(f"{naam} is vol; hij volgt het plan weer.", now)
+                await self._async_noteer(f"{naam} is vol; hij volgt het plan weer.", now, {"device": device_id})
             elif b.soc is not None and b.max_charge_w > 0:
                 besluit = Besluit(
                     MAX_LADEN,
@@ -5095,7 +5104,9 @@ class ChargerCoach:
             kop = STAND_NAMEN.get(besluit.stand, besluit.stand).lower()
             if not stuurt:
                 kop = f"zou op {kop} staan, maar de coach stuurt nu niet"
-            await self._async_noteer(f"{naam}: {kop}. {besluit.reason}".strip(), now)
+            await self._async_noteer(f"{naam}: {kop}. {besluit.reason}".strip(), now, {
+                "device": device_id, "mode": besluit.stand, "rule": besluit.rule, "applied": stuurt,
+            })
 
         # Iets anders stuurt de batterij: de modus staat niet meer op wat de
         # coach zette. In de eerste woning op 22-09-2026 nam evcc de Anker
@@ -5390,7 +5401,8 @@ class ChargerCoach:
                 sessie["zelf"] = True
                 sessie["nul_open"] = False
                 sessie["regelaar"] = Regelaar()
-                await self._async_noteer(f"{naam} doet zelf nul op de meter, met zijn eigen meter.", nu)
+                await self._async_noteer(f"{naam} doet zelf nul op de meter, met zijn eigen meter.", nu,
+                                         {"device": device.get("id"), "self_zero": True})
             return
         sessie.pop("zelf_sinds", None)
         if zelf is False:
@@ -5400,7 +5412,8 @@ class ChargerCoach:
         sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=_moment(), bezonken=False)
         sessie["zelf"] = False
         if zelf:
-            await self._async_noteer(f"{naam}: de coach neemt het over, want {waarom}.", nu)
+            await self._async_noteer(f"{naam}: de coach neemt het over, want {waarom}.", nu,
+                                     {"device": device.get("id"), "self_zero": False})
 
     def _knop_weg(self, device: dict[str, Any]) -> bool:
         """Of de stuurknop van de batterij nu onbereikbaar is."""
