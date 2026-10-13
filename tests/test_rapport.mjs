@@ -3142,6 +3142,215 @@ proef("elke uitklaplijst heeft de kleuren van het thema, ook in Instellen", asyn
   assert.ok(blad.includes("color-scheme: var(--dac-scheme)"), "en de lijst zelf volgt licht en donker");
 });
 
+// --- de tijdlijn in Historie (v0.115.0) --------------------------------------
+// De eigenaar op 11-10-2026: wat de coach en de apparaten deden, als tijdlijn,
+// met een korte tekst bij een klik. De kleur is wat de meter zegt; zie
+// tijdlijn.js voor de dag waarop de regel loog.
+
+const T = await import("../custom_components/domotiapp_coach/frontend/src/tijdlijn.js");
+const TL_DAG = new Date(2026, 9, 11);
+const tlOm = (klok, dagen = 0) => {
+  const [u, m] = klok.split(":").map(Number);
+  const t = new Date(TL_DAG); t.setDate(t.getDate() + dagen); t.setHours(u, m, 0, 0);
+  return t;
+};
+const tlTot = new Date(TL_DAG.getTime() + 864e5);
+const tlBesluit = (klok, device, message, extra = {}) =>
+  ({ at: tlOm(klok).toISOString(), kind: "besluit", message, ...(device ? { device } : {}), ...extra });
+/** Kwartieren met een vast vermogen tussen twee kloktijden, zoals `quarters` ze geeft. */
+const tlWatt = (van, tot, watt) => {
+  const uit = [];
+  const eind = tot === "24:00" ? tlTot : tlOm(tot);
+  for (let t = tlOm(van); t < eind; t = new Date(t.getTime() + 9e5)) {
+    uit.push({ start: t, laagste: watt, piek: watt, gemiddeld: watt, seconden: 900 });
+  }
+  return uit;
+};
+const TL_APPARATEN = [
+  { id: "p", type: "laadpaal", name: "Laadpaal", entity: "sensor.paal" },
+  { id: "a", type: "thuisbatterij", name: "Batterij", entity: "" },
+  { id: "v", type: "vaatwasser", name: "Vaatwasser", entity: "sensor.vaat" },
+  { id: "b", type: "boiler", name: "Boiler", entity: "sensor.boiler" },
+  { id: "o", type: "overig", name: "Printer", entity: "sensor.printer" },
+];
+const TL_BEURT = [
+  tlBesluit("12:08", "p", "Laadpaal: laden op 6 A. De auto is nog niet begonnen, dus hij biedt even 16 A aan om hem wakker te maken.",
+    { rule: "surplus+wake", charge: true }),
+  tlBesluit("12:11", "p", "Laadpaal: laden op 6 A. Er is 1,5 kW zon over.", { rule: "surplus", charge: true }),
+  tlBesluit("13:45", "p", "Laadpaal: niet laden. Hij wacht tot 20:00.", { rule: "wait", charge: false }),
+];
+const tlRijen = (items, vermogen = {}, net = []) =>
+  T.metHerkomst(T.tijdlijn(items, TL_APPARATEN, TL_DAG, tlTot, tlOm("23:59", 1)),
+    (id) => vermogen[id] ?? [], net);
+
+proef("Tijdlijn: de kleur van een laadbeurt is de meter, niet de regel", () => {
+  // De regel zei zon, de meter zei dat 65% van het net kwam: bij de eigenaar op 11-10-2026
+  // stond zo'n beurt eerst oranje.
+  const rijen = tlRijen(TL_BEURT, { p: tlWatt("12:00", "13:45", 4000) }, tlWatt("00:00", "24:00", 2600));
+  const laden = rijen[0].stukken[0];
+  assert.equal(laden.stand, "laden");
+  assert.equal(T.klasseVan(laden), "net", "blauw, want het meeste kwam van het net");
+  assert.equal(Math.round(laden.netDeel * 100), 65);
+  assert.match(T.klikTekst(rijen[0], laden).wat, /^Laden, \d+,\d kWh, ongeveer 65% van het net\.$/);
+  // En met een zonnige meter wordt hij oranje.
+  const zonnig = tlRijen(TL_BEURT, { p: tlWatt("12:00", "13:45", 4000) }, tlWatt("00:00", "24:00", 200));
+  assert.equal(T.klasseVan(zonnig[0].stukken[0]), "zon");
+  assert.match(T.klikTekst(zonnig[0], zonnig[0].stukken[0]).wat, /ongeveer 5% van het net|op zon/);
+});
+
+proef("Tijdlijn: de reden bij een klik is de reden die het langst gold, niet het wekken", () => {
+  const rijen = tlRijen(TL_BEURT);
+  assert.equal(T.hoofdreden(rijen[0].stukken[0]), "Er is 1,5 kW zon over.");
+  // Alleen wekken: dan is dat het, want er is niets anders.
+  const alleenWekken = tlRijen([TL_BEURT[0], TL_BEURT[2]]);
+  assert.match(T.hoofdreden(alleenWekken[0].stukken[0]), /wakker te maken/);
+  // Zonder regel erbij herkend aan de tekst, en "nog even door" is ook een bijzaak.
+  assert.ok(T.bijzaak({}, "Hij laadt nog even door op de laagste stand. Een auto stopt niet graag steeds."));
+  assert.ok(T.bijzaak({ rule: "cheap-hour+hold" }, ""));
+  assert.ok(!T.bijzaak({ rule: "surplus" }, "Er is 1,5 kW zon over."));
+});
+
+proef("Tijdlijn: van het net bij een gesplitste meter en bij een meter met een teken, in allebei de richtingen", () => {
+  const rij = (watt) => [{ start: tlOm("12:00"), laagste: watt, piek: watt, gemiddeld: watt, seconden: 900 }];
+  const gesplitst = T.netReeks({ grid_mode: "split", grid_import: "sensor.af" }, new Map([["sensor.af", rij(800)]]));
+  assert.equal(gesplitst[0].gemiddeld, 800);
+  const teken = (invert, watt) =>
+    T.netReeks({ grid_mode: "signed", grid_signed: "sensor.p1", grid_signed_invert: invert },
+      new Map([["sensor.p1", rij(watt)]]))[0].gemiddeld;
+  assert.equal(teken(false, 800), 800, "plus is afname");
+  assert.equal(teken(false, -800), 0, "min is teruglevering, dus niets van het net");
+  assert.equal(teken(true, -800), 800, "omgekeerd: min is afname");
+  assert.equal(teken(true, 800), 0);
+  assert.deepEqual(T.netReeks({ grid_mode: "split", grid_import: "" }, new Map()), [], "zonder meter niets");
+});
+
+proef("Tijdlijn: aan zonder dat er iets liep is geen zon en geen net", () => {
+  // Een auto die niet wakker werd: de paal stond aan, de meter van de paal zag niets.
+  const rijen = tlRijen(TL_BEURT, { p: tlWatt("12:00", "13:45", 0) }, tlWatt("00:00", "24:00", 500));
+  const stuk = rijen[0].stukken[0];
+  assert.equal(T.klasseVan(stuk), "leeg");
+  assert.equal(T.klikTekst(rijen[0], stuk).wat, "Laden, er liep niets.");
+});
+
+proef("Tijdlijn: zonder kwartieren valt de kleur terug op de regel, en dat zegt de tekst", () => {
+  const rijen = tlRijen(TL_BEURT);
+  const stuk = rijen[0].stukken[0];
+  assert.equal(stuk.kwh, undefined, "niets gemeten");
+  assert.equal(T.klasseVan(stuk), "zon", "de regel was zon");
+  assert.equal(T.klikTekst(rijen[0], stuk).wat, "Laden, vooral op zon.");
+});
+
+proef("Tijdlijn: de stand van gisteren loopt door tot er iets anders komt, en vandaag houdt op bij nu", () => {
+  const items = [
+    { at: tlOm("22:00", -1).toISOString(), kind: "besluit", device: "a", mode: "nul",
+      message: "Batterij: nul op de meter. Hij houdt de meter op nul." },
+    tlBesluit("18:00", "a", "Batterij: handelen. Het net betaalt nu veel.", { mode: "handelen" }),
+  ];
+  const heel = T.tijdlijn(items, TL_APPARATEN, TL_DAG, tlTot, tlOm("23:59", 1));
+  assert.deepEqual(heel[0].stukken.map((s) => [T.klok(s.van), s.stand]), [["00:00", "nul"], ["18:00", "ontladen"]]);
+  assert.equal(T.klikTekst(heel[0], heel[0].stukken[1], { dagEind: tlTot }).tijd, "18:00 tot 24:00");
+  const nu = tlOm("19:30");
+  const vandaag = T.tijdlijn(items, TL_APPARATEN, TL_DAG, tlTot, nu);
+  assert.equal(vandaag[0].stukken[1].tot.getTime(), nu.getTime());
+  assert.equal(T.klikTekst(vandaag[0], vandaag[0].stukken[1], { dagEind: tlTot, nu }).tijd, "18:00 tot nu");
+});
+
+proef("Tijdlijn: regels van voor v0.115.0 worden herkend aan de naam vooraan", () => {
+  const apparaten = [
+    { id: "p1", type: "laadpaal", name: "Bus" },
+    { id: "p2", type: "laadpaal", name: "Bus achter" },
+    { id: "a", type: "thuisbatterij", name: "Batterij" },
+  ];
+  const items = [
+    tlBesluit("09:00", null, "Bus achter: laden op 6 A. Er is 1,5 kW zon over."),
+    tlBesluit("10:00", null, "Bus achter: niet laden. Er hangt geen auto aan de lader."),
+    tlBesluit("09:30", null, "Batterij doet zelf nul op de meter, met zijn eigen meter."),
+  ];
+  const rijen = T.tijdlijn(items, apparaten, TL_DAG, tlTot, tlOm("23:59", 1));
+  assert.deepEqual(rijen.map((r) => r.device), ["p2", "a"], "de langste naam wint, en Bus zelf deed niets");
+  assert.equal(rijen[0].stukken[0].bron, "zon");
+  assert.equal(T.klok(rijen[0].stukken[0].tot), "10:00", "geen auto: daar houdt de baan op");
+  assert.equal(rijen[1].stukken[0].stand, "nul");
+});
+
+proef("Tijdlijn: alleen wat de coach stuurt krijgt een baan, en een boiler en een vaatwasser kleuren ook naar de meter", () => {
+  const items = [
+    tlBesluit("11:00", "b", "Boiler: start nu. Er is zon over.", { rule: "zon", charge: true }),
+    tlBesluit("12:00", "b", "Boiler: wacht. Het vat is vol.", { rule: "vol", charge: false }),
+    tlBesluit("13:00", "v", "Vaatwasser: draait. Hij draait.", { rule: "running", charge: true }),
+    tlBesluit("14:30", "v", "Vaatwasser: wacht. Het programma is klaar.", { rule: "done", charge: false }),
+    tlBesluit("15:00", "o", "Printer: iets."),
+  ];
+  const rijen = tlRijen(items,
+    { b: tlWatt("11:00", "12:00", 2000), v: tlWatt("13:00", "14:30", 800) },
+    [...tlWatt("11:00", "13:00", 0), ...tlWatt("13:00", "14:30", 800)]);
+  assert.deepEqual(rijen.map((r) => r.device), ["v", "b"], "de printer stuurt de coach niet");
+  const vaat = rijen.find((r) => r.device === "v").stukken[0];
+  const boiler = rijen.find((r) => r.device === "b").stukken[0];
+  assert.equal(T.klasseVan(boiler), "zon");
+  assert.equal(T.klikTekst({ naam: "Boiler" }, boiler, { metAccu: true }).wat, "Stroom erop, 2,0 kWh, op zon of batterij.");
+  assert.equal(T.klasseVan(vaat), "net");
+  assert.equal(T.klikTekst({ naam: "Vaatwasser" }, vaat).wat, "Draait, 1,2 kWh, van het net.");
+});
+
+proef("Tijdlijn: een kort tussenstuk gaat op in de beurt eromheen", () => {
+  const items = [
+    tlBesluit("12:00", "p", "Laadpaal: laden op 6 A. Er is zon over.", { rule: "surplus", charge: true }),
+    tlBesluit("12:30", "p", "Laadpaal: niet laden. Even niet.", { rule: "wait", charge: false }),
+    tlBesluit("12:32", "p", "Laadpaal: laden op 6 A. Dit uur is goedkoop.", { rule: "cheap-hour", charge: true }),
+    tlBesluit("14:00", "p", "Laadpaal: niet laden. De auto staat op 80% en verder hoeft hij niet.", { rule: "complete", charge: false }),
+  ];
+  const rijen = T.tijdlijn(items, TL_APPARATEN, TL_DAG, tlTot, tlOm("23:59", 1));
+  assert.deepEqual(rijen[0].stukken.map((s) => [T.klok(s.van), T.klok(s.tot), s.stand]),
+    [["12:00", "14:00", "laden"], ["14:00", "00:00", "vol"]]);
+  assert.equal(rijen[0].stukken[0].bron, "net", "88 minuten goedkoop uur tegen 30 minuten zon");
+});
+
+proef("Tijdlijn: de tekening, met een knop per stuk, de stippen en de streep op nu", () => {
+  const items = [...TL_BEURT,
+    { at: tlOm("08:10").toISOString(), kind: "kritiek", message: "De accustand meldt al 60 minuten niets." },
+    { at: tlOm("13:46").toISOString(), kind: "melding", message: "Geladen.\n6,4 kWh." }];
+  const rijen = tlRijen(items, { p: tlWatt("12:00", "13:45", 4000) }, tlWatt("00:00", "24:00", 200));
+  const punten = T.stippen(items, TL_DAG, tlTot);
+  const html = T.tekenTijdlijn({ rijen, stippen: punten, van: TL_DAG, tot: tlTot, nu: tlOm("15:00"), gekozen: "0:0", metAccu: true });
+  assert.equal((html.match(/class="stuk /g) ?? []).length, rijen[0].stukken.length);
+  assert.equal((html.match(/class="stip/g) ?? []).length, 2);
+  assert.ok(html.includes('class="stip kritiek'), "kritiek is rood");
+  assert.equal((html.match(/class="nu"/g) ?? []).length, 2, "een streep in elke baan, ook die van de meldingen");
+  assert.ok(/class="stuk zon gekozen"/.test(html), "het aangetikte stuk");
+  const gisteren = T.tekenTijdlijn({ rijen, stippen: punten, van: TL_DAG, tot: tlTot, nu: tlOm("12:00", 1) });
+  assert.ok(!gisteren.includes('class="nu"'), "een dag die voorbij is heeft geen nu");
+  const uitleg = T.tekenUitleg({ rijen, stippen: punten, gekozen: "stip:1", tot: tlTot });
+  assert.ok(uitleg.includes("13:46") && uitleg.includes("Geladen."), "een stip zegt de melding");
+  assert.deepEqual(T.legenda(rijen, true).map((l) => l.label), ["Eigen zon en batterij", "Wacht"]);
+  assert.deepEqual(T.legenda(rijen, false).map((l) => l.label), ["Eigen zon", "Wacht"]);
+});
+
+proef("Tijdlijn: de kaart staat alleen bij Dag, en alleen als de coach iets stuurt", () => {
+  const vak = () => ({ hidden: false, innerHTML: "", textContent: "", replaceChildren() { this.innerHTML = ""; } });
+  const el = Object.create(Historie.prototype);
+  const vakken = { "#tijdlijn-card": vak(), "#tijdlijn": vak(), "#tijdlijn-legenda": vak(), "#tijdlijn-uitleg": vak(), "#tijdlijn-note": vak() };
+  el.$ = (sel) => vakken[sel];
+  el.onderwerp_ = "energie";
+  el.period_ = "day";
+  el.offset_ = 0;
+  el.settings_ = { sources: { grid_mode: "split", grid_import: "sensor.net" }, devices: TL_APPARATEN };
+  const van = new Date(); van.setHours(0, 0, 0, 0);
+  el.tl_ = { dag: van.getTime(), meldingen: [{ at: new Date(van.getTime() + 36e5).toISOString(), kind: "besluit",
+    device: "a", mode: "nul", message: "Batterij: nul op de meter. Hij houdt de meter op nul." }], kwartieren: new Map(), gehaald: Date.now() };
+  el.paintTijdlijn_();
+  assert.equal(vakken["#tijdlijn-card"].hidden, false);
+  assert.ok(vakken["#tijdlijn"].innerHTML.includes('class="stuk nul'), "de batterij staat erop");
+  assert.equal(vakken["#tijdlijn-uitleg"].hidden, true, "nog niets aangetikt");
+  el.period_ = "week";
+  el.paintTijdlijn_();
+  assert.equal(vakken["#tijdlijn-card"].hidden, true, "een week aan balken leest niemand");
+  el.period_ = "day";
+  el.settings_ = { ...el.settings_, devices: [TL_APPARATEN[4]] };
+  el.paintTijdlijn_();
+  assert.equal(vakken["#tijdlijn-card"].hidden, true, "alleen een apparaat dat de coach meet");
+});
+
 for (const [naam, fn] of proeven) {
   try {
     await fn();

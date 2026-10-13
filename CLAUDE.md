@@ -197,7 +197,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, hoe de coach prijslijsten leest, en de temperatuur met de melding en de ventilator | `docs/batterij.md` |
 | de vaatwasser: Home Connect, Home Connect Local, een domme vaatwasser, de eindtijd, na de klaar-tijd | `docs/vaatwasser.md` |
 | de boiler | `docs/boiler.md` |
-| Historie en het rapport, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, en de batterij op de kaart en in de pop-up | `docs/eerste-woning.md` |
+| Historie en het rapport, de tijdlijn in Historie, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, en de batterij op de kaart en in de pop-up | `docs/eerste-woning.md` |
 | het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat | `docs/paneel.md` |
 
 ## Wat gelijk moet blijven
@@ -265,6 +265,7 @@ dan de andere in dezelfde uitgave.
 | `frontend/src/views/notifications.js` | Meldingen, twee in een sinds 06-09-2026: bovenaan de personen (sinds v0.114.0 voegt de bewoner ze zelf toe en ziet hij iedereen, via `notifications/household`), de zekeringmelding "Zware belasting" (uit Strategie verhuisd), en daaronder alles wat de coach de afgelopen twee weken stuurde én elk besluit dat hij nam (`_async_noteer_besluit`, `recent` in notifications.js, sinds v0.101.5), uit `MeldingenStore` in storage.py |
 | `frontend/src/geld.js` | In geld in Historie en het rapport (v0.101.0): uitgegeven, bespaard in zon, thuisbatterij en coach, en salderen zoals de coach. Geen terugverdientijd en geen aankoopprijzen, sinds v0.101.1 (`docs/eerste-woning.md`) |
 | `frontend/src/savings.js` | Bespaard, onder Historie: de laadbeurten uit `BeurtenStore` (storage.py) opgeteld per periode en per apparaat. De coach telt per ronde wat een beurt kost (`_geld_bij`) en wat dezelfde tijd op vol vermogen vanaf het inpluggen met alles van het net gekost had (`_basis_bij`, de maat); bespaard is maat min betaald, nooit onder nul, in twee delen: door de zon (`zon_winst`) en door te wachten. Stapt hij midden in een beurt in, dan rekent `_async_terugrekenen` het begin terug uit de recorder en de kwartieropslag |
+| `frontend/src/tijdlijn.js` | De tijdlijn in Historie (v0.115.0): per dag een baan per apparaat dat de coach stuurt, uit de besluiten in Meldingen (sinds v0.115.0 met `device`, `rule`, `mode`, `charge` erbij), en de kleur zon of net uit de kwartieren van het apparaat en het net, niet uit de regel. Kent Home Assistant niet (`docs/eerste-woning.md`) |
 
 De scheiding tussen `planner.py` en `coach.py` is de kern: het denkwerk is los
 te draaien tegen een hele dag echte historie voordat er ook maar iets geschakeld
@@ -292,10 +293,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 482 controles op het denkwerk
 python tests/test_batterij.py    # 187 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1019 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 1024 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2356 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 154 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 165 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

@@ -317,3 +317,65 @@ niet. En "Zonder" in geld en verbruikt maal de prijs kunnen een paar cent
 verschillen: het kasboek rekent met de metingen van de coach, het verbruik met
 de uurgemiddelden van Home Assistant (op 29-09 2,48 tegen 2,61 kWh ontladen).
 
+## De tijdlijn (v0.115.0)
+
+De eigenaar op 11-10-2026: "Ik wil kunnen zien wat de coach en de aanstuurbare
+apparaten hebben gedaan ... de geschiedenis kort en krachtig", en over de vorm:
+"een tijdlijn inderdaad en als je op de tijdlijn klikt een korte tekst. Het moet
+visueel sterk zijn. Niet teveel tekst, alles heel overzichtelijk." Twee weken
+terug is genoeg. Op 12-10-2026 nog eens: "zoals de verloop van wat hij heeft
+gedaan".
+
+**Waar hij staat.** Een kaart onder de energiegrafiek in Historie, alleen bij
+Dag: een week aan balken leest niemand meer in één oogopslag. Een baan per
+apparaat dat de coach stuurt (laadpaal, thuisbatterij, vaatwasser, wasmachine,
+droger, boiler; `balkSoort` in tijdlijn.js), de uren eronder, een streep op nu,
+en de meldingen en verslagen van die dag als stippen erboven (kritiek rood).
+Een tik op een stuk of een stip zet een korte tekst eronder: wanneer, wat,
+hoeveel, en waarom. Wie de coach niets laat sturen ziet de kaart niet.
+
+**Wat er gebeurde komt uit Meldingen.** Elk besluit staat daar al op het moment
+dat het veranderde (`_async_noteer` in coach.py), en daar bouwt `tijdlijn` de
+stukken uit: een stand loopt tot het volgende besluit dat iets anders zegt, de
+stand van gisteravond loopt door in de ochtend, en vandaag houdt op bij nu. De
+tekst alleen is te los om op te bouwen, dus staan bij een besluit sinds v0.115.0
+ook het apparaat, de regel, de stand en of er geladen wordt (`extra` in
+`MeldingenStore.async_add`). Een regel van daarvoor wordt herkend aan de naam
+vooraan, zodat de weken van voor de update er meteen staan. Proef 151 in
+test_coach.py houdt bij dat elke plek die een besluit noteert het apparaat
+meegeeft.
+
+**De kleur is een meting.** Oranje is eigen stroom, blauw het net, net als in de
+grafiek erboven. De eerste opzet (tak `historie-tijdlijn`, 11-10-2026) kleurde
+een laadbeurt naar de regel van de coach, en dat loog: bij de eigenaar stond
+12:08 tot 13:47 als "vooral op zon" (82% van de tijd een zonregel), terwijl de
+meter per kwartier 3,7 van de 6,6 kWh van het net zag. Nu komt de kleur van een
+stuk waar stroom door liep (laden, een programma, een boiler met stroom erop)
+uit de kwartieren van de eigen opslag (`history/quarters`): per kwartier wat
+het apparaat trok en wat er van het net kwam, tot wat het apparaat trok. Dat is
+dezelfde som als de coach per ronde maakt (`_geld_bij`: het huis krijgt eerst de
+zon). Meer dan de helft van het net is blauw. Met een thuisbatterij is wat niet
+van het net kwam zon of batterij, want de meter ziet het verschil niet, en zo
+heet het dan ook ("Eigen zon en batterij", zoals in de grafiek). Een gesplitste
+meter en een meter met een teken, in beide richtingen: `netReeks`.
+
+Nagerekend op de beurt van de eigenaar van 11-10-2026: de kwartieren zeggen
+15,57 kWh, waarvan 12,23 van het net; het eigen kasboek van de coach zei
+15,53 kWh met 13,19 van het net. Bij de vaatwasser op 10, 11 en 12-10: 10%, 65%
+en 60% van het net tegen 3%, 60% en 56% in het kasboek. Binnen een kwartier
+middelen afname en zon uit, dus de tekst zegt "ongeveer", op vijf procent.
+
+Aan zonder dat er iets liep (een auto die niet wakker werd, een vol vat) is geen
+zon en geen net: een gestippelde rand, "er liep niets". Zonder kwartieren valt
+de kleur terug op de regel en zegt de tekst "vooral op zon".
+
+**De reden bij een klik is de reden die het langst gold.** Wekken en nog even
+doorladen op de laagste stand (`+wake`, `+hold`) zijn bijzaken; anders stond
+"hij biedt even 16 A aan om hem wakker te maken" bij elke laadbeurt als de
+reden. Een stuk korter dan drie minuten tussen twee stukken van dezelfde stand
+gaat erin op (`samenvoegen`).
+
+**Niet in het echt gezien:** de kaart met de eigen gegevens van een installatie;
+de preview draait op een verzonnen dag (`?licht=1` en `?phone=390` gemeten, 280
+px zonder overloop). Met de gegevens van de eigenaar van 10 tot 12-10 is de som
+in node nagerekend, niet op het scherm.

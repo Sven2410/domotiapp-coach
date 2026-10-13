@@ -385,13 +385,20 @@ class MeldingenStore:
         return list(self._items)
 
     async def async_add(
-        self, message: str, at: datetime, kind: str = "melding"
+        self, message: str, at: datetime, kind: str = "melding",
+        extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Een regel erbij. `kind` is "melding" (ging ook naar de telefoon),
         "kritiek" (idem, en de bewoner moet er iets mee) of "besluit" (alleen
-        hier: wat de coach deed en waarom)."""
+        hier: wat de coach deed en waarom).
+
+        `extra` is bij een besluit wat de tijdlijn in Historie nodig heeft
+        (v0.115.0): het apparaat, de regel, de stand, of het laadt. De tekst
+        alleen is daar te los voor; zie `tijdlijn.js`.
+        """
         items = await self.async_list()
         entry = {"at": at.replace(microsecond=0).isoformat(), "message": message, "kind": kind}
+        entry.update({sleutel: waarde for sleutel, waarde in (extra or {}).items() if waarde is not None})
         items.append(entry)
         self._items = items[-MELDINGEN_MAX:]
         await self._store.async_save({"items": self._items})
