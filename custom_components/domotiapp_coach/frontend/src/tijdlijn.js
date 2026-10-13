@@ -436,11 +436,27 @@ export function klok(moment) {
   return `${String(moment.getHours()).padStart(2, "0")}:${String(moment.getMinutes()).padStart(2, "0")}`;
 }
 
-/** Het eind van een stuk: "24:00" aan het eind van de dag, "nu" als hij nog loopt. */
-function eindKlok(moment, dagEind, nu) {
-  if (moment.getTime() >= dagEind.getTime()) return "24:00";
-  if (nu && Math.abs(moment.getTime() - nu.getTime()) < 60_000) return "nu";
-  return klok(moment);
+/** "ma 12": de dag op de as van een week en in de tekst bij een klik. */
+export function dagKort(moment) {
+  return `${moment.toLocaleDateString("nl-NL", { weekday: "short" }).replace(".", "")} ${moment.getDate()}`;
+}
+
+const zelfdeDag = (a, b) =>
+  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+/**
+ * Van wanneer tot wanneer een stuk liep: "12:08 tot 13:47", en bij een week met
+ * de dag erbij, "za 11 12:08 tot 13:47" of "za 11 22:30 tot zo 12 01:40". Een
+ * stuk dat om middernacht ophoudt eindigt om 24:00, en een stuk dat nog loopt
+ * "nu".
+ */
+function tijdVan(stuk, { nu, metDag = false } = {}) {
+  const begin = metDag ? `${dagKort(stuk.van)} ${klok(stuk.van)}` : klok(stuk.van);
+  if (nu && Math.abs(stuk.tot.getTime() - nu.getTime()) < 60_000) return `${begin} tot nu`;
+  const middernacht = stuk.tot.getHours() === 0 && stuk.tot.getMinutes() === 0;
+  const dag = middernacht ? new Date(stuk.tot.getTime() - 1) : stuk.tot;
+  const uur = middernacht ? "24:00" : klok(stuk.tot);
+  return `${begin} tot ${metDag && !zelfdeDag(dag, stuk.van) ? `${dagKort(dag)} ${uur}` : uur}`;
 }
 
 const kommagetal = (waarde, cijfers = 1) =>
@@ -457,8 +473,8 @@ function ongeveer(deel) {
  * `metAccu`: of er een thuisbatterij is. Wat niet van het net kwam is dan zon of
  * batterij, en dat zegt de tekst ook, want de meter ziet het verschil niet.
  */
-export function klikTekst(rij, stuk, { dagEind, nu, metAccu = false } = {}) {
-  const tijd = `${klok(stuk.van)} tot ${eindKlok(stuk.tot, dagEind ?? stuk.tot, nu)}`;
+export function klikTekst(rij, stuk, { nu, metAccu = false, metDag = false } = {}) {
+  const tijd = tijdVan(stuk, { nu, metDag });
   let wat = STAND_TEKST[stuk.stand] ?? "";
   if (stuk.leeg) {
     wat += ", er liep niets";
@@ -490,7 +506,9 @@ export function legenda(rijen, metAccu = false) {
 
 /**
  * De tijdlijn als HTML: een rij per apparaat, de meldingen als stippen erboven,
- * de uren eronder en een streep op nu.
+ * de uren eronder en een streep op nu. Voor een week (v0.116.1) staan er dagen
+ * langs de as en een lijntje per dag; de eigenaar op 13-10-2026, bij Week:
+ * "waarom is de tijdlijn weg die wil ik wel behouden".
  *
  * Elk stuk en elke stip is een knop met `data-rij` en `data-stuk` (of
  * `data-stip`), zodat een klik in history.js de tekst eronder kan zetten.
@@ -498,6 +516,7 @@ export function legenda(rijen, metAccu = false) {
  */
 export function tekenTijdlijn({ rijen, stippen: punten = [], van, tot, nu, gekozen = "", metAccu = false }) {
   const lengte = tot - van;
+  const metDag = meerDagen(van, tot);
   const plek = (moment) => Math.max(0, Math.min(100, ((moment - van) / lengte) * 100));
   const rond = (getal) => Math.round(getal * 100) / 100;
   // De streep op nu staat in elke baan apart, zodat hij op een telefoon, waar
@@ -511,7 +530,7 @@ export function tekenTijdlijn({ rijen, stippen: punten = [], van, tot, nu, gekoz
         .map((stuk, s) => {
           const links = plek(stuk.van);
           const breed = Math.max(0, plek(stuk.tot) - links);
-          const tekst = klikTekst(rij, stuk, { dagEind: tot, nu, metAccu });
+          const tekst = klikTekst(rij, stuk, { nu, metAccu, metDag });
           const sleutel = `${r}:${s}`;
           return `<button type="button" class="stuk ${klasseVan(stuk)}${gekozen === sleutel ? " gekozen" : ""}"
             data-rij="${r}" data-stuk="${s}" style="left:${rond(links)}%;width:${rond(breed)}%"
@@ -526,34 +545,58 @@ export function tekenTijdlijn({ rijen, stippen: punten = [], van, tot, nu, gekoz
     ? `<div class="rij stippen"><div class="naam">Meldingen</div><div class="baan">${punten
         .map((stip, i) => `<button type="button" class="stip${stip.kritiek ? " kritiek" : ""}${gekozen === `stip:${i}` ? " gekozen" : ""}"
           data-stip="${i}" style="left:${rond(plek(stip.at))}%" aria-pressed="${gekozen === `stip:${i}`}"
-          aria-label="${escape(`${klok(stip.at)}: ${stip.tekst}`)}"></button>`)
+          aria-label="${escape(`${stipTijd(stip, metDag)}: ${stip.tekst}`)}"></button>`)
         .join("")}${nuStreep}</div></div>`
     : "";
 
-  const uren = [0, 6, 12, 18, 24]
-    .map((uur) => `<span style="left:${(uur / 24) * 100}%">${String(uur).padStart(2, "0")}:00</span>`)
-    .join("");
+  const dagen = [];
+  for (let dag = new Date(van); dag < tot; dag = new Date(dag.getFullYear(), dag.getMonth(), dag.getDate() + 1)) {
+    dagen.push(dag);
+  }
+  const uren = metDag
+    ? dagen
+        .map((dag) => {
+          const morgen = new Date(dag.getFullYear(), dag.getMonth(), dag.getDate() + 1);
+          const midden = new Date((dag.getTime() + morgen.getTime()) / 2);
+          return `<span class="dag" style="left:${rond(plek(midden))}%">${dagKort(dag)}</span>`;
+        })
+        .join("")
+    : [0, 6, 12, 18, 24]
+        .map((uur) => `<span style="left:${(uur / 24) * 100}%">${String(uur).padStart(2, "0")}:00</span>`)
+        .join("");
+  // Het lijntje in de baan: om de drie uur op een dag, om de dag in een week.
+  const raster = metDag ? rond(100 / Math.max(1, dagen.length)) : 12.5;
   return `
-    <div class="tijdlijn">
+    <div class="tijdlijn" style="--raster:${raster}%">
       <div class="rijen">${stipRij}${balken}</div>
       <div class="uren" aria-hidden="true">${uren}</div>
     </div>`;
 }
 
 /** De tekst onder de tijdlijn bij wat er gekozen is, of leeg. */
-export function tekenUitleg({ rijen, stippen: punten = [], gekozen = "", tot, nu, metAccu = false }) {
+export function tekenUitleg({ rijen, stippen: punten = [], gekozen = "", van, tot, nu, metAccu = false }) {
+  const metDag = van && tot ? meerDagen(van, tot) : false;
   if (gekozen.startsWith("stip:")) {
     const stip = punten[Number(gekozen.slice(5))];
     if (!stip) return "";
-    return `<div class="tijd">${klok(stip.at)}${stip.kritiek ? " · moet je iets mee" : ""}</div>
+    return `<div class="tijd">${stipTijd(stip, metDag)}${stip.kritiek ? " · moet je iets mee" : ""}</div>
       <p class="wat">${escape(stip.tekst)}</p>`;
   }
   const [r, s] = gekozen.split(":").map(Number);
   const rij = rijen[r];
   const stuk = rij?.stukken[s];
   if (!stuk) return "";
-  const tekst = klikTekst(rij, stuk, { dagEind: tot, nu, metAccu });
+  const tekst = klikTekst(rij, stuk, { nu, metAccu, metDag });
   return `<div class="tijd"><strong>${escape(tekst.naam)}</strong> · ${tekst.tijd}</div>
     <p class="wat"><span class="vlek ${klasseVan(stuk)}"></span>${escape(tekst.wat)}</p>
     ${tekst.reden ? `<p class="reden">${escape(tekst.reden)}</p>` : ""}`;
+}
+
+/** Of een tijdlijn meer dan een dag beslaat; een dag waarop de klok verzet wordt telt nog als een. */
+function meerDagen(van, tot) {
+  return tot - van > 26 * 3600 * 1000;
+}
+
+function stipTijd(stip, metDag) {
+  return metDag ? `${dagKort(stip.at)} ${klok(stip.at)}` : klok(stip.at);
 }

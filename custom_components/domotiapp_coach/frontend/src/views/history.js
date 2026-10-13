@@ -55,6 +55,13 @@ const NOW_LABEL = {
 /** Hoe oud de kwartieren van de tijdlijn van vandaag mogen zijn voor ze opnieuw komen. */
 const TIJDLIJN_VERS_MS = 5 * 60 * 1000;
 
+/**
+ * Bij welke periodes de tijdlijn staat. Een dag sinds v0.115.0, een week sinds
+ * v0.116.1: de eigenaar op 13-10-2026, bij Week, "waarom is de tijdlijn weg die
+ * wil ik wel behouden". Een maand aan balken leest niemand meer.
+ */
+const TIJDLIJN_PERIODES = new Set(["day", "week"]);
+
 /** Drawing units; the chart measures itself in pixels like the price chart. */
 const MIN_W = 240;
 const TOP = 18;
@@ -554,7 +561,7 @@ class DacViewHistory extends DacElement {
     // De tijdlijn van vandaag loopt mee: elke minuut schuift nu op, en om de
     // vijf minuten komen de kwartieren opnieuw.
     this.tlKlok_ ??= setInterval(() => {
-      if (this.period_ !== "day" || this.offset_ !== 0 || this.onderwerp_ !== "energie") return;
+      if (!TIJDLIJN_PERIODES.has(this.period_) || this.offset_ !== 0 || this.onderwerp_ !== "energie") return;
       if (this.tl_ && Date.now() - this.tl_.gehaald > TIJDLIJN_VERS_MS) this.laadTijdlijn_();
       else this.paintTijdlijn_();
     }, 60_000);
@@ -769,19 +776,18 @@ class DacViewHistory extends DacElement {
   }
 
   /**
-   * Wat de tijdlijn van de gekozen dag nodig heeft (v0.115.0): de besluiten uit
-   * Meldingen, en de kwartieren van de apparaten en van het net voor de kleur.
-   *
-   * Alleen bij Dag. Een week aan balken leest niemand meer in één oogopslag, en
-   * daar ging het om.
+   * Wat de tijdlijn van de gekozen dag of week nodig heeft (v0.115.0): de
+   * besluiten uit Meldingen, en de kwartieren van de apparaten en van het net
+   * voor de kleur.
    */
   async laadTijdlijn_() {
-    if (this.period_ !== "day" || !this.hass_?.callWS) return;
+    if (!TIJDLIJN_PERIODES.has(this.period_) || !this.hass_?.callWS) return;
     const apparaten = this.tijdlijnApparaten_();
     if (!apparaten.length) return;
     const run = (this.tlRun_ = (this.tlRun_ ?? 0) + 1);
-    const van = periodStart("day", this.offset_);
-    if (this.tl_?.dag !== van.getTime()) this.tlGekozen_ = "";
+    const van = periodStart(this.period_, this.offset_);
+    const sleutel = `${this.period_}:${van.getTime()}`;
+    if (this.tl_?.dag !== sleutel) this.tlGekozen_ = "";
 
     const bronnen = this.settings_?.sources ?? {};
     const netId = bronnen.grid_mode === "signed" ? bronnen.grid_signed : bronnen.grid_import;
@@ -795,10 +801,10 @@ class DacViewHistory extends DacElement {
       this.hass_,
       [...apparaten.map((device) => device.entity), netId],
       van,
-      periodEnd("day", van)
+      periodEnd(this.period_, van)
     );
     if (run !== this.tlRun_) return;
-    this.tl_ = { dag: van.getTime(), meldingen, kwartieren, gehaald: Date.now() };
+    this.tl_ = { dag: sleutel, meldingen, kwartieren, gehaald: Date.now() };
     this.volgMeldingen_();
     this.paintTijdlijn_();
   }
@@ -810,7 +816,7 @@ class DacViewHistory extends DacElement {
     const af = await volgCoach(this.hass_, "notification", (item) => {
       if (!item?.at || !this.tl_) return;
       this.tl_.meldingen = [item, ...this.tl_.meldingen];
-      if (this.period_ === "day" && this.offset_ === 0) this.paintTijdlijn_();
+      if (TIJDLIJN_PERIODES.has(this.period_) && this.offset_ === 0) this.paintTijdlijn_();
     });
     if (!this.isConnected) {
       af?.();
@@ -824,17 +830,26 @@ class DacViewHistory extends DacElement {
     const kaart = this.$("#tijdlijn-card");
     if (!kaart) return;
     const apparaten = this.tijdlijnApparaten_();
-    kaart.hidden = this.onderwerp_ !== "energie" || this.period_ !== "day" || !apparaten.length;
+    kaart.hidden = this.onderwerp_ !== "energie" || !apparaten.length;
     if (kaart.hidden) return;
 
     const stage = this.$("#tijdlijn");
     const legendaVak = this.$("#tijdlijn-legenda");
     const uitleg = this.$("#tijdlijn-uitleg");
     const note = this.$("#tijdlijn-note");
-    const van = periodStart("day", this.offset_);
-    const tot = periodEnd("day", van);
+    // Bij een maand of een jaar staat er één regel in plaats van niets, zodat de
+    // kaart niet zomaar verdwijnt.
+    if (!TIJDLIJN_PERIODES.has(this.period_)) {
+      stage.innerHTML = "";
+      legendaVak.replaceChildren();
+      uitleg.hidden = true;
+      note.textContent = "De tijdlijn staat bij Dag en Week.";
+      return;
+    }
+    const van = periodStart(this.period_, this.offset_);
+    const tot = periodEnd(this.period_, van);
     const tl = this.tl_;
-    if (!tl || tl.dag !== van.getTime()) {
+    if (!tl || tl.dag !== `${this.period_}:${van.getTime()}`) {
       stage.innerHTML = "";
       legendaVak.replaceChildren();
       uitleg.hidden = true;
@@ -860,10 +875,11 @@ class DacViewHistory extends DacElement {
       legendaVak.replaceChildren();
       uitleg.hidden = true;
       const oudste = tl.meldingen.reduce((min, item) => (item?.at && item.at < min ? item.at : min), "9999");
+      const deze = this.period_ === "day" ? "deze dag" : "deze week";
       note.textContent =
         oudste !== "9999" && new Date(oudste) >= tot
-          ? `Van deze dag heeft de coach niets bewaard. De tijdlijn begint op ${new Date(oudste).toLocaleDateString("nl-NL", { day: "numeric", month: "long" })}.`
-          : "Op deze dag heeft de coach geen apparaten gestuurd.";
+          ? `Van ${deze} heeft de coach niets bewaard. De tijdlijn begint op ${new Date(oudste).toLocaleDateString("nl-NL", { day: "numeric", month: "long" })}.`
+          : `In ${deze} heeft de coach geen apparaten gestuurd.`;
       return;
     }
 
@@ -872,7 +888,7 @@ class DacViewHistory extends DacElement {
     legendaVak.innerHTML = legenda(rijen, metAccu)
       .map((item) => `<span><i class="vlek ${item.klasse}"></i>${item.label}</span>`)
       .join("");
-    const tekst = gekozen ? tekenUitleg({ rijen, stippen: punten, gekozen, tot, nu, metAccu }) : "";
+    const tekst = gekozen ? tekenUitleg({ rijen, stippen: punten, gekozen, van, tot, nu, metAccu }) : "";
     uitleg.innerHTML = tekst;
     uitleg.hidden = !tekst;
     note.textContent = tekst ? "" : "Tik op een balk of een stip voor wat er gebeurde.";
@@ -1753,7 +1769,8 @@ class DacViewHistory extends DacElement {
         `${kwh(totaal.solar_kwh)} zon${metAccu ? `, ${kwh(totaal.battery_kwh)} uit de batterij` : ""}`)
     );
 
-    const zinnen = [w.uitleg];
+    // De eigenaar op 13-10-2026: "leg eens beurten uit dat snap ik niet."
+    const zinnen = ["Een beurt is één keer dat de coach een apparaat liet draaien, zoals de auto laden of de vaatwasser.", w.uitleg];
     if (metAccu) zinnen.push("Stroom uit de batterij telt als netstroom, zodat niets dubbel telt.");
     if (totaal.onbekend) {
       zinnen.push(
@@ -2195,7 +2212,9 @@ DacViewHistory.css = /* css */ `
     font-size: 11px; font-weight: 600; letter-spacing: .02em;
     color: var(--dac-ink-3); text-transform: uppercase;
   }
-  .kies { position: relative; display: block; }
+  /* Zo breed als de lijst, niet als het opschrift erboven: anders stond het
+     pijltje bij "Verloop in het rapport" naast de lijst (13-10-2026). */
+  .kies { position: relative; display: block; align-self: flex-start; }
   /* Het pijltje van de lijst, want "appearance: none" haalt dat van de browser weg. */
   .kies::after {
     content: ""; position: absolute; right: 14px; top: 50%;
@@ -2355,8 +2374,8 @@ DacViewHistory.css = /* css */ `
     position: relative; height: 28px; border-radius: 8px;
     background-color: rgba(var(--dac-veil), 0.035);
     background-image: repeating-linear-gradient(to right,
-      transparent 0, transparent calc(12.5% - 1px),
-      rgba(var(--dac-veil), 0.08) calc(12.5% - 1px), rgba(var(--dac-veil), 0.08) 12.5%);
+      transparent 0, transparent calc(var(--raster, 12.5%) - 1px),
+      rgba(var(--dac-veil), 0.08) calc(var(--raster, 12.5%) - 1px), rgba(var(--dac-veil), 0.08) var(--raster, 12.5%));
   }
   .tijdlijn .stippen .baan { height: 18px; background: none; }
   .stuk {
@@ -2403,6 +2422,8 @@ DacViewHistory.css = /* css */ `
   .tijdlijn .uren span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
   .tijdlijn .uren span:first-child { transform: none; }
   .tijdlijn .uren span:last-child { transform: translateX(-100%); }
+  /* Bij een week staat de dag in het midden van zijn eigen vak. */
+  .tijdlijn .uren span.dag { transform: translateX(-50%); }
   #tijdlijn-legenda:empty { display: none; }
   .tl-uitleg {
     margin-top: 14px; padding: 12px 14px;

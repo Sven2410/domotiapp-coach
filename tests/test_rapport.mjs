@@ -3332,7 +3332,7 @@ proef("Tijdlijn: de tekening, met een knop per stuk, de stippen en de streep op 
   assert.deepEqual(T.legenda(rijen, false).map((l) => l.label), ["Eigen zon", "Wacht"]);
 });
 
-proef("Tijdlijn: de kaart staat alleen bij Dag, en alleen als de coach iets stuurt", () => {
+proef("Tijdlijn: de kaart staat bij Dag en Week, en zegt het bij Maand; alleen als de coach iets stuurt", () => {
   const vak = () => ({ hidden: false, innerHTML: "", textContent: "", replaceChildren() { this.innerHTML = ""; } });
   const el = Object.create(Historie.prototype);
   const vakken = { "#tijdlijn-card": vak(), "#tijdlijn": vak(), "#tijdlijn-legenda": vak(), "#tijdlijn-uitleg": vak(), "#tijdlijn-note": vak() };
@@ -3342,15 +3342,21 @@ proef("Tijdlijn: de kaart staat alleen bij Dag, en alleen als de coach iets stuu
   el.offset_ = 0;
   el.settings_ = { sources: { grid_mode: "split", grid_import: "sensor.net" }, devices: TL_APPARATEN };
   const van = new Date(); van.setHours(0, 0, 0, 0);
-  el.tl_ = { dag: van.getTime(), meldingen: [{ at: new Date(van.getTime() + 36e5).toISOString(), kind: "besluit",
+  el.tl_ = { dag: `day:${van.getTime()}`, meldingen: [{ at: new Date(van.getTime() + 36e5).toISOString(), kind: "besluit",
     device: "a", mode: "nul", message: "Batterij: nul op de meter. Hij houdt de meter op nul." }], kwartieren: new Map(), gehaald: Date.now() };
   el.paintTijdlijn_();
   assert.equal(vakken["#tijdlijn-card"].hidden, false);
   assert.ok(vakken["#tijdlijn"].innerHTML.includes('class="stuk nul'), "de batterij staat erop");
   assert.equal(vakken["#tijdlijn-uitleg"].hidden, true, "nog niets aangetikt");
+  // De eigenaar op 13-10-2026, bij Week: "waarom is de tijdlijn weg die wil ik wel behouden".
   el.period_ = "week";
   el.paintTijdlijn_();
-  assert.equal(vakken["#tijdlijn-card"].hidden, true, "een week aan balken leest niemand");
+  assert.equal(vakken["#tijdlijn-card"].hidden, false, "bij een week blijft hij staan");
+  el.period_ = "month";
+  el.paintTijdlijn_();
+  assert.equal(vakken["#tijdlijn-card"].hidden, false, "bij een maand verdwijnt hij niet zomaar");
+  assert.equal(vakken["#tijdlijn-note"].textContent, "De tijdlijn staat bij Dag en Week.");
+  assert.equal(vakken["#tijdlijn"].innerHTML, "");
   el.period_ = "day";
   el.settings_ = { ...el.settings_, devices: [TL_APPARATEN[4]] };
   el.paintTijdlijn_();
@@ -3437,6 +3443,46 @@ proef("Beurten: drie tegels met de uitsplitsing eronder, één lijst met vijf ko
   const kop = vak["#saved-list"].kinderen[0].kinderen.map((c) => c.textContent);
   assert.deepEqual(kop, ["Ingeplugd", "Apparaat", "Geladen", "Betaald", "Bespaard"]);
   for (const zin of vak["#saved-note"].textContent.split(/(?<=\.) /)) assert.ok(zin.length <= 120, `te lang: ${zin}`);
+});
+
+proef("Tijdlijn: een week heeft dagen langs de as, en de tekst bij een klik noemt de dag", () => {
+  const maandag = new Date(2026, 9, 5);
+  const zondagEind = new Date(2026, 9, 12);
+  const items = [
+    { at: new Date(2026, 9, 10, 22, 30).toISOString(), kind: "besluit", device: "p", rule: "cheap-hour", charge: true,
+      message: "Laadpaal: laden op 16 A. Dit uur is goedkoop." },
+    { at: new Date(2026, 9, 11, 1, 40).toISOString(), kind: "besluit", device: "p", rule: "complete", charge: false,
+      message: "Laadpaal: niet laden. De auto staat op 80% en verder hoeft hij niet." },
+    { at: new Date(2026, 9, 11, 7, 30).toISOString(), kind: "besluit", device: "p", rule: "disconnected", charge: false,
+      message: "Laadpaal: niet laden. Er hangt geen auto aan de lader." },
+  ];
+  const rijen = T.tijdlijn(items, TL_APPARATEN, maandag, zondagEind, new Date(2026, 9, 20));
+  const html = T.tekenTijdlijn({ rijen, van: maandag, tot: zondagEind, nu: new Date(2026, 9, 20) });
+  assert.equal((html.match(/class="dag"/g) ?? []).length, 7, "zeven dagen langs de as");
+  assert.ok(html.includes(">ma 5<") && html.includes(">zo 11<"), "van maandag tot zondag");
+  assert.ok(html.includes("--raster:14.29%"), "een lijntje per dag");
+  assert.equal(T.klikTekst(rijen[0], rijen[0].stukken[0], { metDag: true }).tijd, "za 10 22:30 tot zo 11 01:40");
+  assert.equal(T.klikTekst(rijen[0], rijen[0].stukken[1], { metDag: true }).tijd, "zo 11 01:40 tot 07:30");
+  // En een dag blijft zoals hij was.
+  const dag = T.tekenTijdlijn({ rijen: [], van: TL_DAG, tot: tlTot });
+  assert.ok(dag.includes(">00:00<") && !dag.includes('class="dag"') && dag.includes("--raster:12.5%"));
+});
+
+proef("Historie: het pijltje van een uitklaplijst hoort bij de lijst, niet bij het opschrift", () => {
+  assert.match(Historie.css, /\.kies \{[^}]*align-self: flex-start/);
+});
+
+proef("Beurten: de uitleg zegt eerst wat een beurt is", () => {
+  const el = Object.create(Historie.prototype);
+  const vak = { "#saved-note": nepEl("p"), "#saved-totals": nepEl(), "#saved-list": nepEl("table") };
+  el.$ = (sel) => vak[sel];
+  el.period_ = "month";
+  el.offset_ = 0;
+  const nu = new Date();
+  el.beurten_ = [{ device: "v", name: "Vaatwasser", kind: "programma", plugged_at: nu.toISOString(), ended: nu.toISOString(),
+    complete: true, kwh: 0.9, solar_kwh: 0.3, battery_kwh: 0, paid: 0.2, ref_cost: 0.22, saved: 0.02, solar_saved: 0.02 }];
+  metNepDocument(() => el.paintSaved_());
+  assert.match(vak["#saved-note"].textContent, /^Een beurt is één keer dat de coach een apparaat liet draaien/);
 });
 
 for (const [naam, fn] of proeven) {
