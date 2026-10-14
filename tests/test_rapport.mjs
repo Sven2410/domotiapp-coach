@@ -2789,6 +2789,33 @@ proef("het rendement op de batterijkaart: gemeten, opgegeven, ongeveer uit de ac
   assert.equal(regel({}, {}), "nog niet bekend");
 });
 
+// De eigenaar op 14-10-2026 over de airco: "De klant stelt gewoon op de kaart in welke temperatuur
+// het moet zijn en kan instellen alleen op zon aan zetten." Het typeplaatje is van de installateur.
+proef("de airco: stuurbaar met een climate, een vermogen, en de wens van de bewoner in Instellen (v0.119.0)", () => {
+  const leeg = { type: "airco", controllable: true, entities: {} };
+  assert.equal(canSteer(leeg), true);
+  assert.deepEqual(brandFields(leeg).map((f) => f.key), ["climate", "temperature"]);
+  assert.deepEqual(missingForControl(leeg), ["Airco", "Vermogenssensor of typeplaatje"]);
+  assert.deepEqual(missingForControl({ ...leeg, entities: { climate: "climate.kamer" }, airco: { power_w: 1200 } }), []);
+  assert.deepEqual(missingForControl({ ...leeg, entities: { climate: "climate.kamer" }, entity: "sensor.airco_w" }), []);
+  assert.equal(canHaveDeadline({ ...leeg, entities: { climate: "climate.kamer" } }), false, "geen klaar-tijd");
+
+  const device = { id: "a", type: "airco", airco: { power_w: 1200, target_c: 22.5, solar_only: true, paused: false } };
+  assert.equal(heeftVoorkeuren(device), true);
+  const html = voorkeurHtml(device);
+  assert.ok(!/power_w|typeplaatje/i.test(html), "het typeplaatje staat niet bij de bewoner");
+  const velden = nepVelden(html);
+  vulVoorkeuren(velden, device);
+  assert.equal(velden.veld("data-vk-airco", "target_c").value, 22.5);
+  assert.equal(velden.veld("data-vk-airco", "solar_only").checked, true);
+  assert.equal(velden.veld("data-vk-airco", "paused").checked, false);
+  const doel = velden.veld("data-vk-airco", "target_c");
+  assert.deepEqual(voorkeurWijziging({ ...doel, value: "21.3" }), { airco: { target_c: 21.5 } }, "op een halve graad");
+  assert.deepEqual(voorkeurWijziging({ ...doel, value: "" }), { airco: { target_c: null } }, "leeg is wat er op de airco staat");
+  const zon = velden.veld("data-vk-airco", "solar_only");
+  assert.deepEqual(voorkeurWijziging({ ...zon, checked: false }), { airco: { solar_only: false } });
+});
+
 // Gemeten op 10-10-2026 in Chrome: "Hoogste accustand in vakantiestand" stond in beeld met
 // de vakantiestand uit. De rij had hidden, maar display: grid van .row won.
 proef("de rijen onder een vinkje van de batterij verdwijnen echt als het vinkje uit staat", () => {

@@ -47,6 +47,8 @@ const MATCHERS = {
   distance: (attrs, unit) => attrs.device_class === "distance" || unit === "km" || unit === "mi",
   // Een temperatuur, voor die van een thuisbatterij (v0.108.0).
   temperature: (attrs, unit) => attrs.device_class === "temperature" || unit === "°c" || unit === "°f",
+  // Een airco: een climate heeft standen om uit te kiezen (v0.119.0).
+  climate: (attrs) => Array.isArray(attrs.hvac_modes),
   all: () => true,
 };
 

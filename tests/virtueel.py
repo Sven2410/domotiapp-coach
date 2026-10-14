@@ -683,6 +683,69 @@ class Boiler:
 
 
 @dataclass
+class Airco:
+    """Een airco in één kamer, via een climate in de cloud (v0.119.0).
+
+    De kamer trekt elk uur een stuk naar de buitentemperatuur (`lek_per_uur`).
+    Draait hij, dan koelt of verwarmt hij `graden_per_uur` tot hij op de
+    temperatuur staat die hij kreeg, en trekt hij `vermogen_w`; op temperatuur
+    trekt hij niets, zoals een echte thermostaat. Wat de coach vraagt doet en
+    laat hij pas `vertraging_s` later zien, zoals een airco in de cloud (in de
+    klantwoning op 13-10-2026: elke ~60 s een nieuwe stand). Wat de bewoner doet
+    is meteen.
+    """
+
+    vermogen_w: float = 1200.0
+    kamer_c: float = 26.5
+    # De buitentemperatuur per uur van de dag; daartussen recht.
+    buiten: dict = field(default_factory=lambda: {0: 18.0, 6: 16.0, 10: 23.0, 14: 30.0, 17: 29.0, 20: 24.0, 23: 19.0})
+    lek_per_uur: float = 0.12
+    graden_per_uur: float = 2.5
+    hvac: str = "off"
+    doel_c: float = 24.0
+    vertraging_s: float = 60.0
+
+    # toestand
+    wachtrij: list = field(default_factory=list)
+    laagste_c: float | None = None
+    hoogste_c: float | None = None
+
+    def buiten_c(self, nu: dt.datetime) -> float:
+        u = nu.hour + nu.minute / 60.0
+        punten = sorted(self.buiten.items())
+        # Rond de klok: het laatste punt van gisteren en het eerste van morgen erbij.
+        punten = [(punten[-1][0] - 24, punten[-1][1])] + punten + [(punten[0][0] + 24, punten[0][1])]
+        for (a, ta), (b, tb) in zip(punten, punten[1:]):
+            if a <= u <= b:
+                return ta + (tb - ta) * (u - a) / (b - a)
+        return punten[0][1]
+
+    def opdracht(self, nu: dt.datetime, hvac: str | None = None, temperatuur: float | None = None) -> None:
+        self.wachtrij.append((nu + dt.timedelta(seconds=self.vertraging_s), hvac, temperatuur))
+
+    def stap(self, nu: dt.datetime, seconden: float) -> float:
+        """Eén stap; geeft het vermogen van dit moment in watt."""
+        for item in [w for w in self.wachtrij if w[0] <= nu]:
+            self.wachtrij.remove(item)
+            if item[1] is not None:
+                self.hvac = item[1]
+            if item[2] is not None:
+                self.doel_c = float(item[2])
+        uren = seconden / 3600.0
+        self.kamer_c += (self.buiten_c(nu) - self.kamer_c) * self.lek_per_uur * uren
+        watt = 0.0
+        if self.hvac == "cool" and self.kamer_c > self.doel_c:
+            self.kamer_c = max(self.doel_c, self.kamer_c - self.graden_per_uur * uren)
+            watt = self.vermogen_w
+        elif self.hvac == "heat" and self.kamer_c < self.doel_c:
+            self.kamer_c = min(self.doel_c, self.kamer_c + self.graden_per_uur * uren)
+            watt = self.vermogen_w
+        self.laagste_c = self.kamer_c if self.laagste_c is None else min(self.laagste_c, self.kamer_c)
+        self.hoogste_c = self.kamer_c if self.hoogste_c is None else max(self.hoogste_c, self.kamer_c)
+        return watt
+
+
+@dataclass
 class Batterij:
     """Een thuisbatterij die precies doet wat hem gezegd wordt, een paar tellen later.
 
@@ -987,6 +1050,13 @@ class Scenario:
     # Wat de coach van deze boiler al geleerd had (een rij zoals
     # `boiler_learned` in de instellingen); leeg is: hij begint met meten.
     boiler_geleerd: dict = field(default_factory=dict)
+    # Een airco (v0.119.0); None is geen. De temperatuur die de bewoner wil, of
+    # alleen op zon, en of er alleen een typeplaatje is (geen vermogenssensor).
+    # Het typeplaatje vult de installateur altijd in.
+    airco: Airco | None = None
+    airco_doel: float = 23.0
+    airco_alleen_zon: bool = False
+    airco_plaatje: bool = False
     # Een thuisbatterij; None is geen. En of de coach de paal stuurt: in de
     # eerste woning deed iets anders dat, en dan ziet de coach alleen zijn
     # vermogen.
@@ -1116,6 +1186,17 @@ class Verloop:
     boiler_laagste: float | None = None
     # Wat de coach aan het eind van deze boiler geleerd had.
     boiler_geleerd: dict = field(default_factory=dict)
+    # De airco (v0.119.0): elke opdracht van de coach (tijd, stand), wat de
+    # bewoner deed, wat hij trok en hoeveel daarvan zon was, en de kamer.
+    airco_opdrachten: list = field(default_factory=list)
+    airco_bewoner: list = field(default_factory=list)
+    airco_kwh: float = 0.0
+    airco_zon_kwh: float = 0.0
+    airco_betaald: float = 0.0
+    airco_aan: list = field(default_factory=list)
+    airco_laagste: float | None = None
+    airco_hoogste: float | None = None
+    airco_standen: list = field(default_factory=list)
     # De thuisbatterij: elke opdracht die de coach gaf, het verloop per stap
     # (tijd, meter, batterij, accustand, stand), wat het huis van het net nam en
     # eraan gaf, en wat de dag kostte met en zonder batterij.
@@ -1223,6 +1304,8 @@ E = {
     "vw_vermogen": "sensor.v_vaatwasser_vermogen",
     "boiler_vermogen": "sensor.v_boiler_vermogen",
     "boiler_switch": "switch.v_boiler",
+    "airco_klimaat": "climate.v_airco",
+    "airco_vermogen": "sensor.v_airco_vermogen",
     "bat_soc": "sensor.v_batterij_soc",
     "bat_vermogen": "sensor.v_batterij_vermogen",
     "bat_stuur": "number.v_batterij_vermogen",
@@ -1352,6 +1435,17 @@ def instellingen(s: Scenario) -> dict:
             "per_day": False,
             "window": {"not_before": "", "start_by": "", "done_by": s.boiler_klaar_om or ""},
             "days": [],
+        })
+    if s.airco is not None:
+        apparaten.append({
+            "id": "airco",
+            "type": "airco",
+            "name": "Airco",
+            "controllable": True,
+            "entity": "" if s.airco_plaatje else E["airco_vermogen"],
+            "entities": {"climate": E["airco_klimaat"]},
+            "airco": {"power_w": s.airco.vermogen_w, "target_c": s.airco_doel,
+                      "solar_only": s.airco_alleen_zon, "paused": False},
         })
     if s.batterij is not None:
         bat = s.batterij
@@ -1501,6 +1595,8 @@ class Wereld:
         self.vaatwasser = dataclasses.replace(s.vaatwasser) if s.vaatwasser is not None else None
         self.boiler = dataclasses.replace(s.boiler, getapt=set()) if s.boiler is not None else None
         self.boiler_w = 0.0
+        self.airco = dataclasses.replace(s.airco, wachtrij=[]) if s.airco is not None else None
+        self.airco_w = 0.0
         self.batterij = (dataclasses.replace(s.batterij, wachtrij=[], sensor_verloop=[])
                          if s.batterij is not None else None)
         self.bat_w = 0.0
@@ -1562,6 +1658,10 @@ class Wereld:
         if self.boiler is not None:
             self.boiler_w = self.boiler.stap(nu, self.s.stap_seconden)
             self.huis_w += self.boiler_w
+        # En de airco net zo.
+        if self.airco is not None:
+            self.airco_w = self.airco.stap(nu, self.s.stap_seconden)
+            self.huis_w += self.airco_w
         if self.batterij is not None:
             # Zijn eigen meter ziet het huis, de paal van de vorige stap en de zon.
             self.batterij.eigen_regel(nu, self.huis_w + self.paal_w - self.zon_w)
@@ -1769,6 +1869,13 @@ class Wereld:
         if self.boiler is not None:
             z(E["boiler_switch"], "on" if self.boiler.aan else "off")
             z(E["boiler_vermogen"], w(f"{self.boiler_w:.0f}", "W"))
+        if self.airco is not None:
+            z(E["airco_klimaat"], {"state": self.airco.hvac, "attributes": {
+                "hvac_modes": ["off", "heat", "cool", "dry", "fan_only"],
+                "current_temperature": round(self.airco.kamer_c, 1), "temperature": self.airco.doel_c,
+                "min_temp": 16, "max_temp": 31, "target_temp_step": 0.5,
+            }})
+            z(E["airco_vermogen"], w(f"{self.airco_w:.0f}", "W"))
         if self.s.equalizer:
             z(E["equalizer"], w(f"{self.equalizer_vrij:.1f}", "A"))
             z(E["reden"], self.reden or "none")
@@ -1941,6 +2048,12 @@ class Wereld:
         if actie == "vaatwasser_aan":
             self.vaatwasser.zet_aan(self.nu)
             return "de bewoner zet de vaatwasser zelf aan"
+        if actie == "airco_bewoner":
+            self.airco.hvac = str(arg)
+            return f"de bewoner zet de airco zelf op {arg}"
+        if actie == "airco_temp":
+            self.airco.doel_c = float(arg)
+            return f"de bewoner zet de airco zelf op {arg} graden"
         if actie == "sensor_weg":
             naam, minuten = arg
             self.weg[naam] = self.nu + dt.timedelta(minutes=int(minuten))
@@ -1994,6 +2107,11 @@ class Diensten:
                                                     "attributes": {"options": ["1 Phase", "3 Phases"]}})
         elif domein == "notify":
             self.verloop.meldingen.append((self.wereld.nu, data.get("message", "")))
+        elif domein == "climate" and data.get("entity_id") == E["airco_klimaat"]:
+            if self.wereld.airco is not None:
+                stand = data.get("hvac_mode")
+                self.wereld.airco.opdracht(self.wereld.nu, stand, data.get("temperature"))
+                self.verloop.airco_opdrachten.append((self.wereld.nu, stand, data.get("temperature")))
         elif data.get("entity_id") == E["boiler_switch"] and dienst in ("turn_on", "turn_off"):
             if self.wereld.boiler is not None:
                 self.wereld.boiler.aan = dienst == "turn_on"
@@ -2281,6 +2399,23 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                     verloop.vw_kwh += wereld.vw_w * deel
                     if prijs is not None:
                         verloop.vw_betaald += wereld.vw_w * deel * prijs
+            if wereld.airco is not None:
+                if wereld.airco_w > 0:
+                    verloop.airco_kwh += wereld.airco_w * deel
+                    vrij = max(0.0, wereld.zon_w - (wereld.huis_w - wereld.airco_w) - wereld.paal_w)
+                    uit_zon_a = min(wereld.airco_w, vrij)
+                    verloop.airco_zon_kwh += uit_zon_a * deel
+                    if prijs is not None:
+                        verloop.airco_betaald += (wereld.airco_w - uit_zon_a) * deel * prijs
+                if wereld.airco.hvac != "off" and (not verloop.airco_aan or verloop.airco_aan[-1][1] is not None):
+                    verloop.airco_aan.append([nu, None, wereld.airco.hvac])
+                if wereld.airco.hvac == "off" and verloop.airco_aan and verloop.airco_aan[-1][1] is None:
+                    verloop.airco_aan[-1][1] = nu
+                verloop.airco_laagste = wereld.airco.laagste_c
+                verloop.airco_hoogste = wereld.airco.hoogste_c
+                stand = (coach.state.get("airco") or {}).get("stand")
+                if stand and (not verloop.airco_standen or verloop.airco_standen[-1][1] != stand):
+                    verloop.airco_standen.append((nu, stand))
             if wereld.boiler is not None:
                 if wereld.boiler_w > 0:
                     verloop.boiler_kwh += wereld.boiler_w * deel

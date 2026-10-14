@@ -96,6 +96,8 @@ export function balkSoort(device) {
   if (device?.type === "laadpaal") return "laadpaal";
   if (device?.type === "thuisbatterij") return "thuisbatterij";
   if (device?.type === "boiler") return "boiler";
+  // Een airco staat aan of uit, net als een boiler (v0.119.0).
+  if (device?.type === "airco") return "boiler";
   if (["vaatwasser", "wasmachine", "droger"].includes(device?.type)) return "programma";
   return null;
 }

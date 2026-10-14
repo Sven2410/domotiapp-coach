@@ -64,6 +64,9 @@
       },
       "vakantiestand": {
         "name": "Vakantiestand"
+      },
+      "alleen_zon": {
+        "name": "Alleen op zon"
       }
     },
     "time": {
@@ -80,6 +83,9 @@
       },
       "leeg_tot": {
         "name": "Leegladen tot"
+      },
+      "doeltemperatuur": {
+        "name": "Gewenste temperatuur"
       }
     }
   }

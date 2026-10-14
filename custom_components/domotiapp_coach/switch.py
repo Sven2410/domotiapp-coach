@@ -15,7 +15,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entiteit import CoachEntiteit, async_batterij_veld, async_per_apparaat, async_schema, paal_schema
+from .entiteit import (
+    CoachEntiteit, async_airco_veld, async_batterij_veld, async_per_apparaat, async_schema, paal_schema,
+)
 
 
 async def async_setup_entry(
@@ -31,6 +33,15 @@ async def async_setup_entry(
         hass, entry, async_add_entities,
         lambda device: device.get("type") == "thuisbatterij",
         lambda device, stand, settings: [VakantieSwitch(device, stand)],
+    )
+    # De airco (v0.119.0): alleen op zon, en de pauze.
+    await async_per_apparaat(
+        hass, entry, async_add_entities,
+        lambda device: device.get("type") == "airco",
+        lambda device, stand, settings: [
+            AircoSchakelaar(device, stand, "alleen_zon", "solar_only", "mdi:solar-power"),
+            AircoSchakelaar(device, stand, "pauze", "paused", "mdi:pause-circle-outline"),
+        ],
     )
 
 
@@ -96,3 +107,32 @@ class VakantieSwitch(CoachEntiteit, SwitchEntity):
 
     async def async_turn_off(self, **_kwargs: Any) -> None:
         await async_batterij_veld(self.hass, self._device_id, "holiday", False)
+
+
+class AircoSchakelaar(CoachEntiteit, SwitchEntity):
+    """Een keuze van de bewoner voor zijn airco (v0.119.0): alleen op zon, of pauze.
+
+    Hetzelfde veld als in Instellen achter de kaart (`airco` in de instellingen
+    van het apparaat). Bij pauze zet de coach uit wat hij zelf aanzette en doet
+    verder niets; zie docs/airco.md.
+    """
+
+    def __init__(
+        self, device: dict[str, Any], stand: dict[str, Any] | None, sleutel: str, veld: str, icoon: str
+    ) -> None:
+        super().__init__(device, stand, sleutel)
+        self._veld = veld
+        self._attr_icon = icoon
+
+    def _kern(self) -> Any:
+        return self.is_on
+
+    @property
+    def is_on(self) -> bool:
+        return bool((self._device.get("airco") or {}).get(self._veld))
+
+    async def async_turn_on(self, **_kwargs: Any) -> None:
+        await async_airco_veld(self.hass, self._device_id, self._veld, True)
+
+    async def async_turn_off(self, **_kwargs: Any) -> None:
+        await async_airco_veld(self.hass, self._device_id, self._veld, False)
