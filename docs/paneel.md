@@ -238,3 +238,13 @@ in domotiapp-coach-panel.js).
 Proef "licht en donker" in test_rapport.mjs leest elk scherm en valt om zodra er weer een kleur van
 alleen het donkere thema in staat (wit over donker, `#12120f`, `color-scheme: dark`). In de preview
 op de pc staat `?licht=1` (preview.html staat niet in git).
+
+## Hoofdletters op de kaart (v0.119.2)
+
+Elke waarde in de regels van een apparaatkaart begint met een hoofdletter. De
+eigenaar op 14-10-2026, bij de batterijkaart met "ontlaadt", "ongeveer 89%,
+gemeten in de accu" en "de batterij zelf, met zijn eigen meter; de coach kijkt
+mee": "even alles met een hoofdletter beginnen." Dat gebeurt op één plek, waar
+de kaart de regel neerzet (`metHoofdletter` in format.js, in `views/overview.js`),
+en niet in de teksten zelf: dezelfde woorden staan elders midden in een zin. Een
+getal of een teken vooraan ("58 %", "€ 4,26") blijft zoals het is.

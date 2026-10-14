@@ -58,6 +58,7 @@ import {
   clock,
   level,
   levelTone,
+  metHoofdletter,
   percent,
   power,
   powerText,
@@ -2789,7 +2790,7 @@ class DacViewOverview extends DacElement {
           key.textContent = row.label;
           const value = document.createElement("span");
           value.className = "v";
-          value.textContent = row.text;
+          value.textContent = metHoofdletter(row.text);
           line.append(key, value);
           return line;
         })
