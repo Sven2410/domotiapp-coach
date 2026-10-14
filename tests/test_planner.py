@@ -3340,6 +3340,38 @@ controle("de naijl na een stop blijft gewoon gelden",
          planner.meter_loopt_achter(GESTOPT73, Charger(max_amps=16.0, connected=True, charging=False,
                                                        actual_amps=0.0, limit_amps=0.0)))
 
+print("=== 74. de zin onder het besluit noemt dezelfde uren als de tijdlijn (v0.117.1) ===")
+# De eigenaar op 14-10-2026 om 16:20, vast contract, 21% met 80% als doel, klaar 06:00:
+# "Van plan te laden tussen 20:00 en 22:00" boven een tijdlijn die van 20:00 tot 22:57
+# op 6 A laadde. "ja dat is een beetje raar inderdaad zoek het uit." Bij gelijke prijzen
+# laadt de coach rustig (`easy-pace`) en spreidt de tijdlijn (`_rustig_spreiden`); de zin
+# nam de knapzak op vol vermogen, die de eerste uren volpropt.
+NU74 = dt.datetime(2026, 10, 14, 16, 20)
+AUTO74 = Car(capacity_kwh=19.7, phases=3, soc_percent=21.0, target_percent=80.0)
+NET74 = Grid(surplus_w=0.0, phase_amps=[2.0, 1.0, 1.0], fuse_amps=25.0)
+VENSTER74 = Window(enabled=True, opens=None, deadline=dt.datetime(2026, 10, 15, 6, 0))
+d74 = decide(NU74, [], NET74, AUTO74, PAAL72, VENSTER74, tariff=VAST, forecast=Forecast())
+plan74 = planner.timeline(NU74, [], NET74, AUTO74, PAAL72, VENSTER74, planner.ceiling_amps(NET74, AUTO74, PAAL72), VAST)
+laden74 = [b for b in plan74.blocks if b.charging]
+print(f"  besluit: {d74.rule}, \"{d74.plan}\"")
+print(f"  tijdlijn: {laden74[0].start:%H:%M} tot {laden74[-1].end:%H:%M}, vol rond {plan74.expected_done:%H:%M}, "
+      f"{[round(b.kw, 2) for b in laden74]} kW")
+controle("de zin noemt het begin en het eind van de tijdlijn",
+         d74.plan.startswith(f"Van plan te laden tussen {laden74[0].start:%H:%M} en {laden74[-1].end:%H:%M},"),
+         f"{d74.plan} / {laden74[0].start:%H:%M}-{laden74[-1].end:%H:%M}")
+controle("en de rest van het besluit blijft wat het was: wachten tot 20:00",
+         not d74.charge and d74.rule == "wait-for-sun" and "20:00" in d74.reason, f"{d74.rule} {d74.reason}")
+# Bij een dynamisch contract spreidt niets: daar noemt de zin de goedkoopste uren, zoals altijd.
+prijzen74 = []
+for uur74 in range(16, 30):
+    begin74 = dt.datetime(2026, 10, 14, 0, 0) + dt.timedelta(hours=uur74)
+    prijzen74.append({"start": begin74, "end": begin74 + dt.timedelta(hours=1),
+                      "price": 0.15 if uur74 in (26, 27) else 0.30, "feed_in": 0.05})
+dyn74 = decide(NU74, prijzen74, NET74, AUTO74, PAAL72, VENSTER74, tariff=DYNAMISCH, forecast=Forecast())
+print(f"  dynamisch: {dyn74.rule}, \"{dyn74.plan}\"")
+controle("dynamisch: de zin noemt de twee goedkope nachturen",
+         dyn74.plan.startswith("Van plan te laden tussen 02:00 en 04:00,"), dyn74.plan)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

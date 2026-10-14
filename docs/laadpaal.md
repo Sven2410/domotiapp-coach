@@ -1087,3 +1087,22 @@ Proef 153 in test_coach.py: sensor stil en geen opgave (onbekend, vragen, wacht,
 35 opgegeven (bewaard met auto en meterstand, daarna 35 en niet meer wachten), de sensor
 terug op 70 (geen veld meer), en zonder sensor, een gast en zonder kabel. Proef 102 leest
 de meterstand sinds deze uitgave in entiteit.py in plaats van websocket.py.
+
+## De zin onder het besluit noemt de uren van de tijdlijn (v0.117.1)
+
+De eigenaar op 14-10-2026 om 16:20, vast contract, 21% met 80% als doel, klaar 06:00: op de
+kaart stond "Van plan te laden tussen 20:00 en 22:00", terwijl de tijdlijn van 20:00 tot
+22:57 op 6 A laadde (drie uur van 4,14 kW). "ja dat is een beetje raar inderdaad zoek het
+uit."
+
+Bij gelijke prijzen laadt de coach rustig (`easy-pace` in `_decide`) en spreidt de tijdlijn
+(`_rustig_spreiden`, proef 59 in test_planner.py), maar de zin (`_describe`) nam de uren van
+de knapzak op vol vermogen, die de eerste uren volpropt. Nu neemt de zin bij gelijke prijzen
+dezelfde spreiding (`_uren_gespreid`, `plan_zin`). Alleen de zin: wanneer hij begint en
+waarom hij wacht blijven uit de knapzak komen. Het eind is het hele uur van het laatste
+laadblok, net als voorheen; "vol rond" staat in de tijdlijn. Bij een dynamisch contract
+verandert er niets.
+
+Proef 74 in test_planner.py, met de cijfers van die middag: de zin zegt nu "tussen 20:00 en
+00:00" boven een tijdlijn van 20:00 tot 23:07 (de proef rekent met 90% laadrendement, thuis
+gold 94,8%, vandaar 22:57 daar).
