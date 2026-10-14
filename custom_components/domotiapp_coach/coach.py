@@ -5804,6 +5804,19 @@ class ChargerCoach:
             # zegt het onder "Hoe vol is de auto nu?" (v0.89.0).
             "soc_now": None if car.soc_percent is None else round(car.soc_percent, 1),
             "soc_estimated": bool(car.soc_estimated),
+            # Of de kaart moet vragen hoe vol de auto is (v0.117.0): er zit een
+            # kabel in, de auto is geen gast, zijn accu is bekend, en hij zegt
+            # het zelf niet, want hij heeft geen sensor of die zwijgt (`_soc_ruw`
+            # staat er alleen bij een getal). Dezelfde grens als `vraagAccustand`
+            # in devices.js. De number `accustand` geeft het door aan de
+            # laadpaalkaart van DomotiApp Lovelace, met `soc_sensor` voor de uitleg.
+            "soc_ask": (
+                decision.rule != "disconnected" and not car.guest
+                and car.capacity_kwh > 0 and device_id not in self._soc_ruw
+            ),
+            "soc_sensor": not car.guest and bool(
+                (self._chosen_car(settings, device)[1] or {}).get("soc_entity")
+            ),
             # Wat er deze beurt in ging, of in de laatste als de kabel eruit is
             # (v0.106.0); zie `_beurt_kaart`.
             "session": (

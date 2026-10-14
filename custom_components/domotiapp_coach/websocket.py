@@ -37,8 +37,8 @@ from .const import (
     PRICE_INTERVAL_QUARTER,
 )
 from .ontvangers import SOORTEN, huishouden_bijwerken, nieuwe_persoon, zet_eigen_soorten
+from .entiteit import async_accustand
 from .storage import async_get_store, met_soort, schema_bijwerken, voorkeuren_bijwerken
-from .units import to_kwh
 
 
 def _schema(mapping: dict) -> vol.Schema:
@@ -1007,61 +1007,10 @@ async def async_set_car_soc(
     """Doorgeven hoe vol de auto is die eraan hangt.
 
     Net als het kiezen van een auto geen beheerderswerk: degene die het weet is
-    degene die naast de auto staat.
-
-    De meterstand van de laadpaal wordt er hier bij gezet en niet door het
-    paneel meegestuurd. Daarmee telt de coach zelf verder zodra er stroom loopt,
-    en hoeft er hooguit één keer per sessie iets ingevuld te worden. Dat het hier
-    gebeurt en niet in de browser is met opzet: de stand van dat moment is een
-    feit van de installatie, geen invoer van een scherm dat een minuut oud kan zijn.
+    degene die naast de auto staat. Zie `async_accustand` in entiteit.py, die de
+    number `accustand` van de laadpaalkaart ook gebruikt (v0.117.0).
     """
-    store = async_get_store(hass)
-    settings = await store.async_load()
-
-    device = next(
-        (
-            row
-            for row in (settings.get("devices") or [])
-            if isinstance(row, dict) and row.get("id") == msg["device_id"]
-        ),
-        None,
-    )
-    meter = None
-    if device:
-        # Het merkveld eerst en anders de Energieteller. Die twee vroegen om
-        # dezelfde sensor, en alleen Easee heeft dat merkveld; zie `_teller` in
-        # coach.py voor het hele verhaal.
-        entiteit = (device.get("entities") or {}).get("lifetime_energy") or device.get(
-            "energy_entity"
-        )
-        state = hass.states.get(entiteit or "")
-        if state is not None:
-            # In kWh, zoals `_teller` hem leest. Een Alfen telt in Wh; bewaard
-            # als kale toestand stond de proefauto in de eerste woning op
-            # 23-09-2026 de hele beurt op 60%, want de teller in kWh min dezelfde
-            # teller in Wh is onder nul.
-            try:
-                meter = to_kwh(float(state.state), state.attributes.get("unit_of_measurement"))
-            except (TypeError, ValueError):
-                meter = None
-
-    rows = [
-        row
-        for row in (settings.get("car_soc") or [])
-        if isinstance(row, dict) and row.get("device") != msg["device_id"]
-    ]
-    if msg["percent"] is not None:
-        rows.append(
-            {
-                "device": msg["device_id"],
-                "car": msg["car"],
-                "percent": float(msg["percent"]),
-                "meter": meter,
-            }
-        )
-
-    settings = await store.async_save({"car_soc": rows})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    settings = await async_accustand(hass, msg["device_id"], msg["car"], msg["percent"])
     connection.send_result(msg["id"], settings)
 
 

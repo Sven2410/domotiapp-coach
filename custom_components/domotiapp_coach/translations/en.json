@@ -72,6 +72,9 @@
       }
     },
     "number": {
+      "accustand": {
+        "name": "Car battery level"
+      },
       "laden_tot": {
         "name": "Charge to"
       },

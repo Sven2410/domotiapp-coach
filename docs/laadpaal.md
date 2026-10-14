@@ -976,6 +976,7 @@ attributen, niet de tekst.
 | switch | `schema` | de planning met een klaar-tijd aan of uit |
 | time | `klaar_om` | de tijd voor elke dag; `unavailable` zolang het schema per dag is |
 | number | `laden_tot` | 10-100 %, stap 5, voor deze beurt (`async_target`) |
+| number | `accustand` | 0-100 %, stap 1, invulvak: hoe vol de auto is als hij het zelf niet zegt (v0.117.0) |
 
 Attributen van de sensor: `contract`, `type`, `stand` (`laadt_zon`, `laadt`, `wacht`, `vol`,
 `geen_auto`, `pauze`, `storing`; `paal_stand`), `rule`, `amps`, `reason`, `brand`, `soc`,
@@ -1061,3 +1062,28 @@ staat daar als geschatte stand.
 Proef 152 in test_coach.py (eerst `no-soc`, met 40% opgegeven `soc_now` 40 en geschat,
 de sensor terug op 70% en dan 70 en niet geschat), een in test_rapport.mjs. In de preview
 `?coach=soc&stil=1`, gemeten op 320 en 280 px zonder overloop.
+
+## De accustand opgeven op de laadpaalkaart van DomotiApp Lovelace (v0.117.0)
+
+De eigenaar op 14-10-2026, na v0.116.2: "ja ook op de lovelace kaart wil ik die." Aan
+het laadpaal-apparaat komt de number `accustand` (0-100 %, stap 1, invulvak; contract
+blijft 1, er komt alleen iets bij).
+
+- **Toestand**: na een opgave de stand waar de coach nu mee rekent, afgerond, die meeloopt
+  met wat de paal erin doet; zonder opgave onbekend. Hetzelfde als het veld op de
+  coachkaart (`socVeld`).
+- **Schrijven** gaat door `async_accustand` in entiteit.py, dezelfde weg als Doorgeven op
+  de coachkaart (`domotiapp_coach/device/soc`): de gekozen auto (`_chosen_car`, en zonder
+  keuze de eerste), de meterstand van de paal erbij, en meteen een ronde
+  (`coach_verversen`).
+- **Attributen**: `vragen` (de kaart toont het veld; `soc_ask` in het besluit: kabel erin,
+  geen gast, accu bekend, en geen sensor of een sensor die zwijgt, dezelfde grens als
+  `vraagAccustand`), `wacht` (`needs_soc`) en `sensor` (de gekozen auto heeft een
+  accusensor in zijn profiel, `soc_sensor`). Om dat laatste vroeg de lovelace-sessie: de
+  zin "De auto geeft zijn accustand nu niet door." hoort alleen bij een auto met sensor,
+  en raden mag de kaart niet.
+
+Proef 153 in test_coach.py: sensor stil en geen opgave (onbekend, vragen, wacht, sensor),
+35 opgegeven (bewaard met auto en meterstand, daarna 35 en niet meer wachten), de sensor
+terug op 70 (geen veld meer), en zonder sensor, een gast en zonder kabel. Proef 102 leest
+de meterstand sinds deze uitgave in entiteit.py in plaats van websocket.py.

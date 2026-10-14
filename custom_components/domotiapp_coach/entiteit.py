@@ -95,6 +95,67 @@ async def async_vrijgave(
     return settings
 
 
+
+async def async_accustand(
+    hass: HomeAssistant, device_id: str, car: str, percent: float | None
+) -> dict[str, Any]:
+    """Doorgeven hoe vol de auto aan deze paal is; None wist de opgave.
+
+    Voor het veld op de coachkaart (`domotiapp_coach/device/soc`) en de number
+    `accustand` van de laadpaalkaart (v0.117.0), zodat die twee hetzelfde
+    bewaren. De coach gebruikt de opgave zolang de sensor van de auto niets
+    zegt (`_typed_soc` in coach.py).
+
+    De meterstand van de laadpaal wordt er hier bij gezet en niet door het
+    paneel meegestuurd. Daarmee telt de coach zelf verder zodra er stroom loopt,
+    en hoeft er hooguit één keer per sessie iets ingevuld te worden. Dat het hier
+    gebeurt en niet in de browser is met opzet: de stand van dat moment is een
+    feit van de installatie, geen invoer van een scherm dat een minuut oud kan zijn.
+    """
+    from .units import to_kwh
+
+    store = async_get_store(hass)
+    settings = await store.async_load()
+
+    device = next(
+        (
+            row
+            for row in (settings.get("devices") or [])
+            if isinstance(row, dict) and row.get("id") == device_id
+        ),
+        None,
+    )
+    meter = None
+    if device:
+        # Het merkveld eerst en anders de Energieteller. Die twee vroegen om
+        # dezelfde sensor, en alleen Easee heeft dat merkveld; zie `_teller` in
+        # coach.py voor het hele verhaal.
+        entiteit = (device.get("entities") or {}).get("lifetime_energy") or device.get(
+            "energy_entity"
+        )
+        state = hass.states.get(entiteit or "")
+        if state is not None:
+            # In kWh, zoals `_teller` hem leest. Een Alfen telt in Wh; bewaard
+            # als kale toestand stond de proefauto in de eerste woning op
+            # 23-09-2026 de hele beurt op 60%, want de teller in kWh min dezelfde
+            # teller in Wh is onder nul.
+            try:
+                meter = to_kwh(float(state.state), state.attributes.get("unit_of_measurement"))
+            except (TypeError, ValueError):
+                meter = None
+
+    rows = [
+        row
+        for row in (settings.get("car_soc") or [])
+        if isinstance(row, dict) and row.get("device") != device_id
+    ]
+    if percent is not None:
+        rows.append({"device": device_id, "car": car, "percent": float(percent), "meter": meter})
+
+    settings = await store.async_save({"car_soc": rows})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    return settings
+
 def coach_verversen(hass: HomeAssistant) -> None:
     """Meteen een ronde, zodat een knop op de kaart niet een minuut niets lijkt te doen."""
     coach = (hass.data.get(DOMAIN) or {}).get("coach")
