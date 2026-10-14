@@ -2013,6 +2013,26 @@ def _uren_van(gekozen: list[tuple[Schijf, float]]) -> list[dict]:
     return uit
 
 
+
+def _uren_gespreid(gespreid: dict[datetime, float], alle: list[Schijf]) -> list[dict]:
+    """De uren van `_rustig_spreiden` in de vorm van `_uren_van`, voor `_describe`.
+
+    Per uur eerst de goedkoopste schijf, net als de knapzak: zon voor het net.
+    """
+    per_uur: dict[datetime, list[Schijf]] = {}
+    for schijf in alle:
+        per_uur.setdefault(schijf.start, []).append(schijf)
+    gekozen: list[tuple[Schijf, float]] = []
+    for start in sorted(gespreid):
+        rest = gespreid[start]
+        for schijf in sorted(per_uur.get(start, []), key=lambda s: s.price):
+            if rest <= SCHIJF_MINIMUM:
+                break
+            pak = min(schijf.kwh, rest)
+            gekozen.append((schijf, pak))
+            rest -= pak
+    return _uren_van(gekozen)
+
 def _kwh(waarde: float) -> str:
     """Kilowattuur zoals het paneel ze schrijft."""
     return f"{waarde:.1f} kWh".replace(".", ",")
@@ -3271,6 +3291,17 @@ def _decide(
     nu_zon = next((s for s, _ in gekozen if s.solar and s.start <= now < s.end), None)
     nu_vloer = nu_zon is not None and nu_zon.kind == "vloer"
     uren = _uren_van(gekozen)
+    # De zin noemt de uren van de tijdlijn (v0.117.1). Bij gelijke prijzen laadt
+    # de coach rustig (`easy-pace`) en spreidt de tijdlijn (`_rustig_spreiden`),
+    # maar de zin nam de knapzak op vol vermogen. De eigenaar op 14-10-2026: "Van
+    # plan te laden tussen 20:00 en 22:00" boven een tijdlijn die tot 22:57 op
+    # 6 A laadde. Alleen de zin: wanneer hij begint blijft uit `uren` komen.
+    gespreid = (
+        _rustig_spreiden(alle, nodig_kwh, car, ceiling, now, einde_plan)
+        if vlakke_prijzen(alle) and nodig_kwh is not None
+        else None
+    )
+    plan_zin = _describe(_uren_gespreid(gespreid, alle) if gespreid else uren)
 
     if nu_net is not None:
         # Dit uur zit met zijn netschijf in het plan, dus er is geen goedkopere
@@ -3324,7 +3355,7 @@ def _decide(
                 "Elk uur kost hetzelfde, dus haasten levert niets op. Hij laadt "
                 f"rustig door en is op tijd klaar; zo belast hij je aansluiting "
                 "het minst.",
-                plan=_describe(uren),
+                plan=plan_zin,
                 # Een eigen naam, want dit is niet "dit uur is goedkoop" maar
                 # "alle uren zijn even duur". Op het scherm leest dat als een
                 # coach die bewust rustig aan doet in plaats van een die niet
@@ -3337,7 +3368,7 @@ def _decide(
             amps,
             f"Dit uur kost {_euro(nu_net.price)} per kWh en dat is een van de "
             f"goedkoopste manieren om de {_kwh(nodig_kwh)} erin te krijgen.",
-            plan=_describe(uren),
+            plan=plan_zin,
             rule="cheap-hour",
         )
 
@@ -3357,7 +3388,7 @@ def _decide(
                 f"Dit uur kost {_euro(hier.price)} per kWh en dat scheelt niets met "
                 "de uren die hij gepland had, dus hij laadt door in plaats van te "
                 "stoppen en zo weer te beginnen.",
-                plan=_describe(uren),
+                plan=plan_zin,
                 rule="cheap-hour+near",
             )
 
@@ -3378,7 +3409,7 @@ def _decide(
                     f"Dit uur kost {_euro(hier.price)} per kWh, iets meer dan de uren "
                     f"die hij gepland had, maar stoppen laat te weinig speling over "
                     f"voor {_wanneer(end, now)}. Dus hij laadt door.",
-                    plan=_describe(uren),
+                    plan=plan_zin,
                     rule="cheap-hour+reserve",
                 )
 
@@ -3397,7 +3428,7 @@ def _decide(
                 f"Er is {hoeveel} kW zon over, en dit uur scheelt bijna niets met de "
                 "uren die hij gepland had, dus hij laadt door in plaats van te stoppen "
                 "en zo weer te beginnen.",
-                plan=_describe(uren),
+                plan=plan_zin,
                 rule="surplus+near",
             )
 
@@ -3421,7 +3452,7 @@ def _decide(
                 else f"Er is {hoeveel} kW zon over en die is goedkoper dan het net. "
                 "De rest haalt hij op een uur dat minder kost."
             ),
-            plan=_describe(uren),
+            plan=plan_zin,
             rule="surplus",
         )
 
@@ -3474,7 +3505,7 @@ def _decide(
         False,
         0,
         reden,
-        plan=_describe(uren),
+        plan=plan_zin,
         rule=regel,
         # Tot het eerste uur dat hij van plan is te gebruiken. Verloopt de pauze
         # doordat de coach wegvalt, dan laadt de auto vanaf dat moment gewoon
