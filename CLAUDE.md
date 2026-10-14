@@ -245,8 +245,8 @@ dan de andere in dezelfde uitgave.
 - **Opgeleverd en wat er in de batterij zit** (v0.107.0): `Voorraad` in
   batterij.py schrijft per dag `realized_days` naast het kasboek `earned_days`,
   en `stock_euro`; `accuVerdiend` in geld.js leest ze allebei, `balans` haalt
-  het verschil van zonder af, en `opgeleverdTekst` in battery.js zet het op de
-  kaart (`docs/batterij.md`).
+  het verschil van zonder af, en `opgeleverdTekst` in battery.js zet Opgeleverd op
+  de kaart (sinds v0.118.1 zonder "Wat erin zit"; `docs/batterij.md`).
 
 ## Hoe het in elkaar zit
 

@@ -680,8 +680,12 @@ het kasboek; leeg is het precies het kasboek. Een dag van voor v0.107.0 telt
 zoals hij geteld is (`_opgeleverd_dagen`), en wat er al in zat toen de coach
 begon te tellen kostte niets, net als in het kasboek.
 
-Op de kaart: "Opgeleverd" uit `realized_total`, en "Wat erin zit: ingekocht
-voor € 0,55" (`stock_euro` in `earned`, `opgeleverdTekst` in battery.js). In
+Op de kaart: "Opgeleverd" uit `realized_total` (`opgeleverdTekst` in
+battery.js). Tot v0.118.1 stond eronder "Wat erin zit: ingekocht voor € 0,55"
+(`stock_euro` in `earned`); de eigenaar op 14-10-2026, bij "ingekocht voor
+€ 2,02" met een vast contract waarin alles zon was: "snap ik nog niet
+helemaal", en daarna weghalen. `stock_euro` blijft in `earned` en in de
+opslag, want Historie en de sommen hebben hem nodig. In
 Historie telt Door je thuisbatterij wat ze opleverde, en staat wat er in de
 periode in de batterij bij kwam onder Uitgegeven ("Waarvan nog in je batterij",
 of "En uit je batterij, eerder betaald"); zonder trekt het eraf, zodat dat

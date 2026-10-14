@@ -2472,13 +2472,17 @@ proef("laden is inkopen: Historie telt opgeleverd, en wat er in de batterij bij 
   assert.equal(el.voorraadRegel_({ metAccu: true, voorraad: 0.001 }), null);
 });
 
-proef("de kaart van de batterij zegt wat de stroom die erin zit kostte", () => {
+// De eigenaar op 14-10-2026, bij "Wat erin zit: ingekocht voor € 2,02": "snap ik nog niet
+// helemaal", en daarna: weghalen. Op de kaart alleen Opgeleverd; Historie houdt de voorraad.
+proef("de kaart van de batterij zegt wat ze opleverde, en niet meer wat erin zit (v0.118.1)", () => {
   const rijen = (earned) => Object.fromEntries(batteryRows({ ...BESLUIT_BATTERIJ, earned }).map((r) => [r.label, r.text]));
-  assert.equal(rijen({ euro: 1.4, days: 2, stock_euro: 0.55 })["Wat erin zit"], "ingekocht voor € 0,55");
-  assert.equal(rijen({ euro: 1.4, days: 2, stock_euro: 0.55 })["Opgeleverd"], "€ 1,40 in 2 dagen");
-  assert.equal(rijen({ euro: 1.4, days: 2, stock_euro: 0.004 })["Wat erin zit"], undefined, "minder dan een halve cent is niets");
-  assert.equal(rijen({ euro: 1.4, days: 2, stock_euro: -0.3 })["Wat erin zit"], "je kreeg er € 0,30 bij");
-  assert.equal(rijen({ euro: 1.4, days: 2 })["Wat erin zit"], undefined, "een coach van voor v0.107.0 stuurt het niet mee");
+  for (const voorraad of [0.55, -0.3, 2.02]) {
+    const r = rijen({ euro: 1.4, days: 2, stock_euro: voorraad });
+    assert.equal(r["Opgeleverd"], "€ 1,40 in 2 dagen");
+    assert.equal(r["Wat erin zit"], undefined, `geen regel bij ${voorraad}`);
+  }
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/battery.js", import.meta.url), "utf-8");
+  assert.doesNotMatch(bron, /`ingekocht voor|label: "Wat erin zit"/, "alleen nog in de uitleg");
 });
 
 proef("geen terugverdientijd en geen aankoopprijzen meer, nergens (v0.101.1)", () => {
