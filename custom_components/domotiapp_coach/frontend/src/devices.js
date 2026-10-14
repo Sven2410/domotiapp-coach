@@ -819,10 +819,33 @@ const BOILER_SWITCH_FIELD = {
 };
 
 /**
+ * De airco (v0.119.0). De coach zet hem aan of uit, op de temperatuur die de
+ * bewoner koos, in verwarmen of koelen; hoe hard hij draait is aan de airco
+ * zelf. De eigenaar op 14-10-2026; zie docs/airco.md.
+ */
+const AIRCO_FIELDS = [
+  {
+    key: "climate",
+    label: "Airco",
+    hint:
+      "De airco zelf, zoals Home Assistant hem kent (een climate). Hiermee zet de coach hem aan of uit, " +
+      "in verwarmen of koelen, op de temperatuur die de bewoner kiest.",
+    filter: "climate",
+    needed: true,
+  },
+  {
+    key: "temperature",
+    label: "Kamertemperatuur",
+    hint: "Optioneel: een eigen sensor in de kamer. Leeg is de temperatuur die de airco zelf meet.",
+    filter: "temperature",
+  },
+];
+
+/**
  * De entiteiten die bij een type horen zonder dat er een merk aan te pas komt.
  * Een boiler is overal dezelfde boiler; een laadpaal is dat niet.
  */
-const FIELDS_BY_TYPE = new Map([["boiler", [BOILER_SWITCH_FIELD]]]);
+const FIELDS_BY_TYPE = new Map([["boiler", [BOILER_SWITCH_FIELD]], ["airco", AIRCO_FIELDS]]);
 
 /** De velden van dit type, los van welk merk er gekozen is. */
 export const typeFields = (device) => FIELDS_BY_TYPE.get(device?.type) ?? [];
@@ -1125,6 +1148,11 @@ export function missingForControl(device) {
   // En bij een boiler net zo: daaraan ziet hij dat het vat vol is, want dan
   // vraagt de boiler niets meer. Zonder die sensor zou hij blind schakelen.
   if (POWER_NEEDED_TYPES.includes(device?.type) && !device.entity) missing.unshift("Vermogenssensor");
+  // Een airco: zonder vermogen weet de coach niet wanneer er genoeg zon voor is.
+  // Een sensor, of anders het typeplaatje (v0.119.0).
+  if (device?.type === "airco" && !device.entity && !(Number(device.airco?.power_w) > 0)) {
+    missing.push("Vermogenssensor of typeplaatje");
+  }
 
   return missing;
 }

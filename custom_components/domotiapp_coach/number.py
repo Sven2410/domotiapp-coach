@@ -14,7 +14,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entiteit import LEEG_TOT, CoachEntiteit, async_accustand, async_per_apparaat, coach_verversen
+from .entiteit import (
+    LEEG_TOT, CoachEntiteit, async_accustand, async_per_apparaat, coach_verversen, klimaat_attributen,
+)
 
 
 async def async_setup_entry(
@@ -30,6 +32,12 @@ async def async_setup_entry(
         hass, entry, async_add_entities,
         lambda device: device.get("type") == "thuisbatterij",
         lambda device, stand, settings: [LeegTotNumber(device, stand)],
+    )
+    # De airco (v0.119.0).
+    await async_per_apparaat(
+        hass, entry, async_add_entities,
+        lambda device: device.get("type") == "airco",
+        lambda device, stand, settings: [DoeltemperatuurNumber(device, stand)],
     )
 
 
@@ -150,3 +158,64 @@ class LeegTotNumber(CoachEntiteit, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         LEEG_TOT[self._device_id] = max(float(self._stand.get("floor") or 0.0), float(value))
         self._schrijf()
+
+
+class DoeltemperatuurNumber(CoachEntiteit, NumberEntity):
+    """De temperatuur die de bewoner wil, voor de airco-kaart (v0.119.0).
+
+    De kaart schrijft hierheen en niet naar de airco: één schrijver, de coach.
+    Staat de airco aan, dan zet de coach hem meteen op deze temperatuur
+    (`async_airco_doel`); staat hij uit, dan bewaart hij hem tot hij aangaat.
+    Zolang de bewoner niets koos, is het wat er op de airco staat. Het bereik
+    komt van de airco zelf, en anders van wat Home Assistant een thermostaat
+    standaard laat kiezen (7 tot 35 graden, in stappen van een halve).
+    """
+
+    _attr_icon = "mdi:thermometer"
+    _attr_native_unit_of_measurement = "°C"
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, device: dict[str, Any], stand: dict[str, Any] | None) -> None:
+        super().__init__(device, stand, "doeltemperatuur")
+
+    def _kern(self) -> Any:
+        return (self.native_value, self.native_min_value, self.native_max_value, self.native_step)
+
+    def _attrs(self) -> dict[str, Any]:
+        return klimaat_attributen(getattr(self, "hass", None), self._device)
+
+    def _getal(self, sleutel: str, standaard: float) -> float:
+        try:
+            waarde = self._attrs().get(sleutel)
+            return float(waarde) if waarde is not None else standaard
+        except (TypeError, ValueError):
+            return standaard
+
+    @property
+    def native_min_value(self) -> float:
+        return self._getal("min_temp", 7.0)
+
+    @property
+    def native_max_value(self) -> float:
+        return self._getal("max_temp", 35.0)
+
+    @property
+    def native_step(self) -> float:
+        return self._getal("target_temp_step", 0.5)
+
+    @property
+    def native_value(self) -> float | None:
+        for waarde in ((self._device.get("airco") or {}).get("target_c"), self._stand.get("target_c"),
+                       self._attrs().get("temperature")):
+            try:
+                if waarde not in (None, ""):
+                    return float(waarde)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    async def async_set_native_value(self, value: float) -> None:
+        from .coach import async_get_coach
+
+        await async_get_coach(self.hass).async_airco_doel(self._device_id, float(value))
+        coach_verversen(self.hass)

@@ -101,6 +101,9 @@ VOORKEUREN: dict[str, frozenset[str]] = {
     "vaatwasser": frozenset({"release_required"}),
 }
 VOORKEUREN_AUTO = frozenset({"target_percent", "wake_mode"})
+# Een airco (v0.119.0): de temperatuur, alleen op zon, en de pauze. Het
+# typeplaatje is van de installateur.
+VOORKEUREN_AIRCO = frozenset({"target_c", "solar_only", "paused"})
 VOORKEUREN_ACCU = frozenset({
     "reserve_enabled", "reserve_percent", "trade", "weekly_full", "weekly_full_day",
     "holiday", "holiday_max_percent", "car_above", "fan_above_c",
@@ -129,6 +132,10 @@ def voorkeuren_bijwerken(
             if soort != "thuisbatterij" or not set(waarde) <= VOORKEUREN_ACCU:
                 raise ValueError(f"{veld} hoort niet bij een {soort}")
             apparaat["battery"] = {**(apparaat.get("battery") or {}), **waarde}
+        elif veld == "airco":
+            if soort != "airco" or not set(waarde) <= VOORKEUREN_AIRCO:
+                raise ValueError(f"{veld} hoort niet bij een {soort}")
+            apparaat["airco"] = {**(apparaat.get("airco") or {}), **waarde}
         elif veld == "cars":
             if soort != "laadpaal":
                 raise ValueError(f"{veld} hoort niet bij een {soort}")

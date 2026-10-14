@@ -829,6 +829,26 @@ class DacViewDevices extends DacEditorElement {
    * worden. Wat een sensor al zegt hoeft hij niet in te vullen, en wat niemand
    * zegt weet de coach niet: een leeg veld blijft leeg en wordt geen aanname.
    */
+  /**
+   * Wat de installateur over een airco invult (v0.119.0): wat hij trekt, van
+   * het typeplaatje, voor wie geen vermogenssensor heeft. De temperatuur en
+   * "alleen op zon" zijn van de bewoner, in Instellen achter de kaart.
+   */
+  aircoHtml_(device, index) {
+    if (device?.type !== "airco") return "";
+    const waarde = device.airco?.power_w ?? "";
+    return `
+      <div class="block">
+        <div class="block-title">De airco</div>
+        <div class="row">
+          <label>Vermogen van het typeplaatje (W)</label>
+          <input type="number" inputmode="decimal" min="0" step="50" data-airco-field="power_w" data-index="${index}"
+                 value="${waarde}" placeholder="alleen zonder vermogenssensor">
+          <span class="sub">Wat de airco trekt als hij draait. Daaraan ziet de coach of er genoeg zon over is om hem aan te zetten. Met een vermogenssensor meet hij het zelf, en dan wint de meting. Staan er twee getallen op het plaatje, voor koelen en verwarmen, neem dan het hoogste.</span>
+        </div>
+      </div>`;
+  }
+
   batteryHtml_(device, index) {
     if (!isBattery(device) || !brandMeta(device)) return "";
     const b = { ...defaultBattery(device.brand), ...(device.battery ?? {}) };
@@ -1088,6 +1108,7 @@ class DacViewDevices extends DacEditorElement {
             ${this.brandHtml_(device, index)}
             ${this.carsHtml_(device, index)}
             ${this.batteryHtml_(device, index)}
+            ${this.aircoHtml_(device, index)}
             ${this.controlHtml_(device, index)}
           </div>
         </section>`;
@@ -1401,6 +1422,16 @@ class DacViewDevices extends DacEditorElement {
         if (vink) device.battery[key] = el.checked;
         else if (el.type === "number") device.battery[key] = el.value === "" ? null : Number(el.value);
         else device.battery[key] = el.value;
+        this.syncSaveBar_();
+      });
+    }
+
+    // Het typeplaatje van een airco (v0.119.0). Leeg is "niet ingevuld", geen nul.
+    for (const el of list.querySelectorAll("[data-airco-field]")) {
+      const index = Number(el.dataset.index);
+      el.addEventListener("input", () => {
+        const device = this.draft_.devices[index];
+        device.airco = { ...(device.airco ?? {}), [el.dataset.aircoField]: el.value === "" ? null : Number(el.value) };
         this.syncSaveBar_();
       });
     }

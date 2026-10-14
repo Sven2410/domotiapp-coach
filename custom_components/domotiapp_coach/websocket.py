@@ -162,6 +162,28 @@ _CIRCUIT = _schema(
     }
 )
 
+# Een airco (v0.119.0). Het typeplaatje is van de installateur; de rest van de
+# bewoner (`_AIRCO_VOORKEUREN`). De temperatuur binnen wat Home Assistant een
+# thermostaat standaard laat kiezen (7 tot 35 graden); de airco zelf kan
+# strenger zijn, en dan geldt die.
+_AIRCO = _schema(
+    {
+        # Wat hij trekt als hij draait, van het typeplaatje, voor wie geen
+        # vermogenssensor heeft. Met een sensor wint de meting.
+        vol.Optional("power_w", default=None): _LEEG_OF(int, 0, 20000),
+        vol.Optional("target_c", default=None): _LEEG_OF(float, 7, 35),
+        vol.Optional("solar_only", default=False): bool,
+        vol.Optional("paused", default=False): bool,
+    }
+)
+_AIRCO_VOORKEUREN = vol.Schema(
+    {
+        vol.Optional("target_c"): _LEEG_OF(float, 7, 35),
+        vol.Optional("solar_only"): bool,
+        vol.Optional("paused"): bool,
+    }
+)
+
 _BATTERY = _schema(
     {
         # Alleen nodig waar geen sensor voor is ingevuld.
@@ -272,6 +294,8 @@ _DEVICE = _schema(
         # Wat de bewoner over zijn thuisbatterij invult. Alles mag leeg: wat
         # een sensor zegt gaat voor, en wat niemand zegt weet de coach niet.
         vol.Optional("battery", default=dict): _BATTERY,
+        # En over een airco (v0.119.0).
+        vol.Optional("airco", default=dict): _AIRCO,
         # De groep waar dit apparaat aan hangt (`installation.circuits`), of ""
         # voor de hoofdaansluiting.
         vol.Optional("circuit", default=""): str,
@@ -885,6 +909,7 @@ _BATTERY_VOORKEUREN = vol.Schema(
         vol.Optional("solar_start_percent"): vol.All(vol.Coerce(int), vol.Range(10, 100)),
         vol.Optional("release_required"): bool,
         vol.Optional("battery"): _BATTERY_VOORKEUREN,
+        vol.Optional("airco"): _AIRCO_VOORKEUREN,
         vol.Optional("cars"): vol.All(
             [vol.Schema({
                 vol.Required("id"): str,

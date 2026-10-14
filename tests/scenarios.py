@@ -16,7 +16,7 @@ bewaken:
 
 from dataclasses import replace
 
-from virtueel import Auto, Batterij, Boiler, Huis, Paal, Prijzen, Scenario, Vaatwasser, Zon
+from virtueel import Airco, Auto, Batterij, Boiler, Huis, Paal, Prijzen, Scenario, Vaatwasser, Zon
 
 # Twee auto's die er in het echt hangen: een kleine bus op één fase, en een
 # grote op drie.
@@ -859,6 +859,38 @@ boiler_stekker_stuk = boiler_nacht.kopie(
                     "getrokken_op": "2026-09-07T06:00:00", "runs": 3},
 )
 
+# --- de airco (v0.119.0) ------------------------------------------------------
+#
+# De eigenaar op 14-10-2026: "hij moet de airco aan zetten als er overschot is en als
+# de temperatuur nog niet bereikt is. Hij mag trouwens wel de temperatuur instellen
+# en de modus wijzigen van verwarmen en koelen." Goedkoop is elk uur onder het
+# gemiddelde van die dag, en zet de bewoner hem zelf aan of uit, dan blijft de coach
+# er de rest van de dag vanaf.
+airco_zon = vast_zonnig.kopie(
+    naam="airco-zon",
+    uitleg="vast contract, heldere warme dag, kamer 26,5 graden, de bewoner wil 23: koelen op eigen zon, niet van het net",
+    auto=VOL, kabel_erin=None,
+    airco=Airco(), airco_doel=23.0,
+    begin="2026-09-07 07:55", duur_uren=14,
+)
+airco_plaatje = airco_zon.kopie(
+    naam="airco-plaatje",
+    uitleg="dezelfde dag, maar zonder vermogenssensor: de coach rekent alleen met het typeplaatje (1200 W)",
+    airco_plaatje=True,
+)
+airco_bewoner = airco_zon.kopie(
+    naam="airco-bewoner",
+    uitleg="dezelfde dag, maar om 13:30 zet de bewoner hem zelf uit: de coach blijft er de rest van de dag vanaf",
+    gebeurtenissen=[("13:30", "airco_bewoner", "off")],
+)
+airco_goedkoop = dyn_geen_zon.kopie(
+    naam="airco-goedkoop",
+    uitleg="dynamisch, geen panelen, koude kamer (17 graden), de bewoner wil 20: verwarmen op de uren onder het daggemiddelde",
+    auto=VOL, kabel_erin=None,
+    airco=Airco(kamer_c=17.0, buiten={0: 6.0, 6: 4.0, 12: 9.0, 16: 10.0, 20: 7.0}), airco_doel=20.0,
+    begin="2026-09-07 00:05", duur_uren=23,
+)
+
 # --- de thuisbatterij --------------------------------------------------------
 #
 # De eigenaar op 21-09-2026: "Ik wil de coach gaan uitbreiden met een
@@ -1400,6 +1432,7 @@ ALLE = [
     vaatwasser_lokaal, vaatwasser_lokaal_deur, vaatwasser_lokaal_afstand_uit, vaatwasser_klep_dicht,
     forecast_solar_vast, forecast_solar_vaatwasser, forecast_solar_sensoren,
     boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
+    airco_zon, airco_plaatje, airco_bewoner, airco_goedkoop,
     *KLANTWONING,
     *BATTERIJ,
     vast_zon_modus, bewolkt_zon_modus, half_zon_modus, dyn_continu,

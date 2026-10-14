@@ -64,6 +64,9 @@
       },
       "vakantiestand": {
         "name": "Holiday mode"
+      },
+      "alleen_zon": {
+        "name": "Solar only"
       }
     },
     "time": {
@@ -80,6 +83,9 @@
       },
       "leeg_tot": {
         "name": "Discharge to"
+      },
+      "doeltemperatuur": {
+        "name": "Target temperature"
       }
     }
   }

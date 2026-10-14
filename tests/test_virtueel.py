@@ -13,6 +13,7 @@ klaar-tijd gehaald is.
     python tests/test_virtueel.py vast        # alleen de scenario's met "vast" in de naam
 """
 
+import datetime as dt
 import sys
 
 import scenarios
@@ -1436,6 +1437,68 @@ if (vl := v("boiler-stekker-stuk")):
              f"{[m for _, m in vl.meldingen]}")
     controle("stekker stuk: hij blijft niet eindeloos schakelen",
              len(vl.boiler_schakels) <= 20, f"{len(vl.boiler_schakels)} schakelingen")
+
+# --- de airco (v0.119.0) -------------------------------------------------------
+#
+# De eigenaar op 14-10-2026: aan bij zon over of op een uur onder het gemiddelde van
+# vandaag, zolang de kamer de temperatuur van de bewoner nog niet heeft; de coach zet
+# die temperatuur en kiest verwarmen of koelen; zet de bewoner hem zelf aan of uit,
+# dan blijft de coach er de rest van de dag vanaf. Wat de bewoner merkt: een koele
+# kamer op eigen zon, en de coach die niet terugvecht.
+
+print("=== de airco ===")
+
+
+def airco_klok(rij):
+    return [(a.strftime("%H:%M"), b.strftime("%H:%M") if b else None, m) for a, b, m in rij]
+
+
+for naam in ("airco-zon", "airco-plaatje"):
+    if (vl := v(naam)):
+        print(f"  {naam}: {vl.airco_kwh:.2f} kWh, zon {vl.airco_zon_kwh:.2f}, kamer {vl.airco_laagste:.1f} tot "
+              f"{vl.airco_hoogste:.1f}, aan {airco_klok(vl.airco_aan)}")
+        controle(f"{naam}: hij koelt, en alleen op eigen zon",
+                 vl.airco_kwh > 1.0 and vl.airco_zon_kwh >= 0.95 * vl.airco_kwh, f"{vl.airco_zon_kwh:.2f} van {vl.airco_kwh:.2f}")
+        controle(f"{naam}: overdag aan, nooit verwarmen",
+                 vl.airco_aan and all(8 <= a.hour < 20 and m == "cool" for a, _, m in vl.airco_aan),
+                 f"{airco_klok(vl.airco_aan)}")
+        controle(f"{naam}: de kamer haalt de 23 graden van de bewoner, en niet lager",
+                 abs((vl.airco_laagste or 0) - 23.0) < 0.05, f"{vl.airco_laagste}")
+        controle(f"{naam}: met de temperatuur van de bewoner, in een handvol opdrachten",
+                 len(vl.airco_opdrachten) <= 6 and all(tp in (None, 23.0) for _, _, tp in vl.airco_opdrachten),
+                 f"{vl.airco_opdrachten}")
+        controle(f"{naam}: en als de zon op is gaat hij uit",
+                 vl.airco_aan and vl.airco_aan[-1][1] is not None and vl.airco_aan[-1][1].hour < 20,
+                 f"{airco_klok(vl.airco_aan)}")
+
+if (vl := v("airco-bewoner")):
+    print(f"  airco-bewoner: opdrachten {[(t.strftime('%H:%M'), s) for t, s, _ in vl.airco_opdrachten]}, "
+          f"standen {[(t.strftime('%H:%M'), s) for t, s in vl.airco_standen]}")
+    controle("airco bewoner: na 13:30 stuurt de coach hem die dag niet meer aan",
+             not any(t.hour * 60 + t.minute >= 13 * 60 + 30 for t, _, _ in vl.airco_opdrachten),
+             f"{vl.airco_opdrachten}")
+    controle("airco bewoner: de kaart zegt dat de bewoner hem bedient",
+             any(s == "bewoner" for _, s in vl.airco_standen), f"{vl.airco_standen}")
+
+if (vl := v("airco-goedkoop")):
+    prijzen = vl.scenario.prijzen
+    dag = vl.airco_opdrachten[0][0].date() if vl.airco_opdrachten else None
+    per_uur = {u: prijzen.all_in(dt.datetime.combine(dag, dt.time(u))) for u in range(24)} if dag else {}
+    gemiddeld = sum(per_uur.values()) / 24 if per_uur else 0.0
+    print(f"  airco-goedkoop: {vl.airco_kwh:.2f} kWh, €{vl.airco_betaald:.2f}, gemiddeld €{gemiddeld:.3f}, "
+          f"aan {airco_klok(vl.airco_aan)}")
+    controle("airco goedkoop: hij verwarmt, en koelt nooit",
+             vl.airco_aan and all(m == "heat" for _, _, m in vl.airco_aan), f"{airco_klok(vl.airco_aan)}")
+    aan = [(t, per_uur.get(t.hour)) for t, s, _ in vl.airco_opdrachten if s == "heat" and t.date() == dag]
+    controle("airco goedkoop: hij gaat alleen aan op een uur onder het daggemiddelde",
+             aan and all(p is not None and p < gemiddeld for _, p in aan),
+             f"{[(t.strftime('%H:%M'), round(p, 3)) for t, p in aan]} tegen {gemiddeld:.3f}")
+    uit = [(t, per_uur.get(t.hour)) for t, s, _ in vl.airco_opdrachten if s == "off" and t.date() == dag]
+    controle("airco goedkoop: en uit op het eerste uur dat niet goedkoop is",
+             uit and all(p is not None and p >= gemiddeld for _, p in uit),
+             f"{[(t.strftime('%H:%M'), round(p, 3)) for t, p in uit]}")
+    controle("airco goedkoop: niet in de avondpiek, want die is niet goedkoop",
+             not any(17 <= a.hour < 21 for a, _, _ in vl.airco_aan), f"{airco_klok(vl.airco_aan)}")
 
 print("=== de thuisbatterij ===")
 # De eigenaar op 21-09-2026: "Laden, ontladen, blokkeren als de laadpaal laadt.

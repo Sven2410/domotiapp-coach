@@ -73,7 +73,8 @@ stijlen van de bewerkschermen (`editorCss`) waar die regel in zit.
 19-09-2026: bij Apparaten gingen de thuisbatterij, de warmtepomp, de wasmachine,
 de droger en de zwembadpomp eruit, en bij een laadpaal het merk "overig". Over
 blijven: laadpaal, boiler, vaatwasser, airco en overig. (De thuisbatterij kwam
-in v0.73.0 terug, en nu omdat de coach hem werkelijk stuurt.) Hetzelfde argument als
+in v0.73.0 terug, en nu omdat de coach hem werkelijk stuurt. De airco stuurt hij
+sinds v0.119.0: `docs/airco.md`.) Hetzelfde argument als
 bij de merken van 04-09-2026, een regel in een lijst leest als een belofte. Wat
 er niet in staat past onder "overig" met een eigen naam, en wordt gemeten zoals
 elk apparaat met een vermogenssensor.

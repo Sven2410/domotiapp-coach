@@ -3372,6 +3372,82 @@ print(f"  dynamisch: {dyn74.rule}, \"{dyn74.plan}\"")
 controle("dynamisch: de zin noemt de twee goedkope nachturen",
          dyn74.plan.startswith("Van plan te laden tussen 02:00 en 04:00,"), dyn74.plan)
 
+print("=== 75. de airco: aan op zon of op een goedkoop uur, nooit de temperatuur zelf (v0.119.0) ===")
+# De eigenaar op 14-10-2026: "hij moet de airco aan zetten als er overschot is en als de
+# temperatuur nog niet bereikt is. Hij mag trouwens wel de temperatuur instellen en de modus
+# wijzigen van verwarmen en koelen." Goedkoop is elk uur onder het gemiddelde van die dag.
+Airco75, plan_airco75 = planner.Airco, planner.plan_airco
+NU75 = dt.datetime(2026, 7, 14, 13, 0)
+
+
+def airco75(**kw):
+    basis = dict(aan=False, modus=None, kamer_c=27.0, doel_c=23.0, stap_c=0.5, vermogen_w=1200.0)
+    basis.update(kw)
+    return Airco75(**basis)
+
+
+def dag75(prijzen, dag=dt.date(2026, 7, 14)):
+    begin = dt.datetime.combine(dag, dt.time())
+    return [{"start": begin + dt.timedelta(hours=i), "end": begin + dt.timedelta(hours=i + 1),
+             "price": p, "feed_in": 0.05} for i, p in enumerate(prijzen)]
+
+
+zon75 = plan_airco75(NU75, [], airco75(), surplus_w=1500.0)
+print(f"  27 graden, wil 23, 1,5 kW zon over: {zon75.aan} {zon75.modus} {zon75.stand}: {zon75.reason}")
+controle("warmer dan gewenst en genoeg zon: aan, koelen", zon75.aan is True and zon75.modus == "cool"
+         and zon75.stand == "zon", f"{zon75}")
+weinig75 = plan_airco75(NU75, [], airco75(), surplus_w=900.0)
+controle("minder zon dan hij trekt, vast contract: blijft uit", weinig75.aan is None and weinig75.stand == "uit",
+         f"{weinig75}")
+koud75 = plan_airco75(NU75, [], airco75(kamer_c=19.0, doel_c=21.0), surplus_w=1500.0)
+controle("kouder dan gewenst: verwarmen", koud75.aan is True and koud75.modus == "heat", f"{koud75}")
+marge75 = plan_airco75(NU75, [], airco75(kamer_c=23.3), surplus_w=3000.0)
+controle("binnen een stap van de gewenste temperatuur: niets", marge75.aan is None
+         and marge75.stand == "op_temperatuur", f"{marge75}")
+kan75 = plan_airco75(NU75, [], airco75(kamer_c=19.0, doel_c=21.0, kan_verwarmen=False), surplus_w=3000.0)
+controle("een airco die niet kan verwarmen wordt niet aangezet om te verwarmen", kan75.aan is None, f"{kan75}")
+
+# Loopt hij al door de coach, dan wisselt hij nooit van stand, ook niet voorbij het doel.
+loopt75 = airco75(aan=True, modus="cool", kamer_c=22.0, coach_sinds=NU75 - dt.timedelta(hours=1), coach_reden="zon")
+door75 = plan_airco75(NU75, [], loopt75, surplus_w=1500.0)
+controle("koelt hij al en is het koeler dan gewenst, dan geen verwarmen: hij blijft zoals hij is",
+         door75.aan is None and door75.stand == "op_temperatuur", f"{door75}")
+wolk75 = plan_airco75(NU75, [], airco75(aan=True, modus="cool", coach_sinds=NU75 - dt.timedelta(minutes=4),
+                                         coach_reden="zon"), surplus_w=200.0)
+controle("een wolk binnen tien minuten na aanzetten: blijft aan", wolk75.aan is None and wolk75.rule == "hold",
+         f"{wolk75}")
+weg75 = plan_airco75(NU75, [], airco75(aan=True, modus="cool", coach_sinds=NU75 - dt.timedelta(minutes=11),
+                                        coach_reden="zon"), surplus_w=200.0)
+controle("daarna gaat hij uit", weg75.aan is False and weg75.stand == "uit", f"{weg75}")
+vreemd75 = plan_airco75(NU75, [], airco75(aan=True, modus="cool"), surplus_w=0.0)
+controle("wat de coach niet aanzette zet hij ook niet uit", vreemd75.aan is None, f"{vreemd75}")
+
+# Een dynamisch contract: elk uur onder het gemiddelde van vandaag.
+prijzen75 = dag75([0.30] * 13 + [0.10] + [0.30] * 10)
+goed75 = plan_airco75(NU75, prijzen75, airco75(), surplus_w=0.0)
+print(f"  13:00 kost 0,10, gemiddeld 0,29: {goed75.aan} {goed75.stand}: {goed75.reason}")
+controle("een uur onder het daggemiddelde, zonder zon: aan", goed75.aan is True and goed75.stand == "goedkoop",
+         f"{goed75}")
+alleen75 = plan_airco75(NU75, prijzen75, airco75(alleen_zon=True), surplus_w=0.0)
+controle("met alleen op zon niet", alleen75.aan is None and alleen75.stand == "uit", f"{alleen75}")
+duur75 = plan_airco75(NU75, dag75([0.10] * 13 + [0.30] + [0.10] * 10), airco75(), surplus_w=0.0)
+controle("een uur boven het gemiddelde: niet", duur75.aan is None, f"{duur75}")
+vlak75 = plan_airco75(NU75, dag75([0.25] * 24), airco75(), surplus_w=0.0)
+controle("elk uur even duur: geen uur is goedkoper", vlak75.aan is None, f"{vlak75}")
+klaar75 = plan_airco75(NU75 + dt.timedelta(hours=1), prijzen75,
+                        airco75(aan=True, modus="cool", coach_sinds=NU75, coach_reden="goedkoop"), surplus_w=0.0)
+controle("het goedkope uur voorbij: uit", klaar75.aan is False
+         and "goedkope uur is voorbij" in klaar75.reason, f"{klaar75}")
+
+# Zonder meting doet hij niets, en zonder vermogen zegt hij wat er mist.
+blind75 = plan_airco75(NU75, [], airco75(kamer_c=None), surplus_w=3000.0)
+controle("zonder kamertemperatuur: niets", blind75.aan is None and blind75.stand == "geen_meting", f"{blind75}")
+geen75 = plan_airco75(NU75, [], airco75(vermogen_w=None), surplus_w=3000.0)
+controle("zonder vermogen: niet op zon, en de reden noemt het typeplaatje",
+         geen75.aan is None and geen75.stand == "geen_meting" and "typeplaatje" in geen75.reason, f"{geen75}")
+controle("een temperatuur met een halve graad op z'n Nederlands",
+         planner._graden(21.5) == "21,5 °C" and planner._graden(23.0) == "23 °C", planner._graden(21.5))
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

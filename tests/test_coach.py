@@ -8677,6 +8677,212 @@ controle("het lege oude apparaat gaat weg, de rest blijft", weg155 == ["a-oud"],
 controle("hangt er nog iets aan, dan blijft het", weg155b == [], f"{weg155b}")
 controle("een apparaat met dezelfde naam onder een andere integratie blijft", weg155c == [], f"{weg155c}")
 
+print("=== 156. de airco: aan op zon, de bewoner wint, en één schrijver voor de temperatuur (v0.119.0) ===")
+# De eigenaar op 14-10-2026: aan bij zon over en op de goedkoopste uren, zolang de kamer de
+# temperatuur van de bewoner nog niet heeft; de coach zet die temperatuur en kiest verwarmen of
+# koelen; zet de bewoner hem zelf aan of uit, dan blijft de coach er de rest van de dag vanaf.
+AIRCO = {
+    "id": "dev-airco", "type": "airco", "name": "Airco", "controllable": True,
+    "entity": "",
+    "entities": {"climate": "climate.woonkamer"},
+    "airco": {"power_w": 1200, "target_c": 23.0, "solar_only": False, "paused": False},
+}
+KLIMAAT156 = {"hvac_modes": ["off", "heat", "cool", "dry"], "current_temperature": 27.0, "temperature": 25.0,
+              "min_temp": 16, "max_temp": 31, "target_temp_step": 1}
+
+
+def klimaat156(stand, **attrs):
+    return {"state": stand, "attributes": {**KLIMAAT156, **attrs}}
+
+
+def bouw156(stand="off", teruglevering=1500.0, airco=None, **attrs):
+    inst = instellingen(devices=[airco or AIRCO])
+    waarden = {**huis(status="disconnected", afname=0.0, teruglevering=teruglevering),
+               "climate.woonkamer": klimaat156(stand, **attrs)}
+    hass, store, coach = bouw(waarden, inst)
+    hass.data["domotiapp_coach"]["coach"] = coach
+    return hass, store, coach
+
+
+async def ronde156(hass, coach, nu, volgen=True):
+    """Een ronde; met `volgen` doet de airco daarna wat hem gezegd werd, zoals een echte."""
+    hass.services.verstuurd.clear()
+    await hass.afmaken()
+    await coach._round(nu)
+    await hass.afmaken()
+    diensten = list(hass.services.verstuurd)
+    if volgen:
+        volg156(hass, diensten)
+    return coach.state.get("dev-airco") or {}, diensten
+
+
+def volg156(hass, diensten):
+    for domein, dienst, data in diensten:
+        if domein != "climate" or data.get("entity_id") != "climate.woonkamer":
+            continue
+        oud = hass.states.get("climate.woonkamer")
+        attrs = dict(oud.attributes)
+        if "temperature" in data:
+            attrs["temperature"] = data["temperature"]
+        stand = data.get("hvac_mode", oud.state)
+        hass.states.zet("climate.woonkamer", {"state": stand, "attributes": attrs})
+
+
+def zon156(coach, nu, watt):
+    """Tien minuten meter vooraf: de coach gelooft zon pas na acht minuten (`METER_DEKKING`)."""
+    coach._meter.extend((nu - dt.timedelta(minutes=m), float(watt)) for m in range(10, 0, -1))
+
+
+def klimaatdiensten(diensten):
+    return [(d[1], {k: v for k, v in d[2].items() if k != "entity_id"}) for d in diensten if d[0] == "climate"]
+
+
+NU156 = dt.datetime(2026, 7, 14, 13, 0)
+hass156, store156, coach156 = bouw156()
+zon156(coach156, NU156, 1500)
+a156, d156 = asyncio.run(ronde156(hass156, coach156, NU156))
+print(f"  13:00 {a156.get('stand')}: {a156.get('reason')}")
+print(f"  naar de airco: {klimaatdiensten(d156)}")
+controle("27 graden, de bewoner wil 23, 1,5 kW zon over: koelen op 23, in één opdracht",
+         klimaatdiensten(d156) == [("set_temperature", {"temperature": 23.0, "hvac_mode": "cool"})], f"{d156}")
+controle("de stand is zon, en de coach weet dat hij hem aanzette",
+         a156.get("stand") == "zon" and coach156._airco["dev-airco"]["aan_sinds"] == NU156, f"{a156}")
+
+# Hij draait en eet zelf 1,2 kW van de zon: de meter ziet nog 300 W naar het net.
+hass156.states.zet("sensor.teruglevering", "300")
+a156, d156 = asyncio.run(ronde156(hass156, coach156, NU156 + dt.timedelta(minutes=1)))
+controle("zijn eigen verbruik telt als zon: hij blijft aan, zonder opdracht",
+         a156.get("stand") == "zon" and klimaatdiensten(d156) == [], f"{a156} {d156}")
+
+# Een wolk: van het net. Binnen tien minuten blijft hij aan, daarna uit.
+hass156.states.zet("sensor.teruglevering", "0")
+hass156.states.zet("sensor.afname", "800")
+a156, d156 = asyncio.run(ronde156(hass156, coach156, NU156 + dt.timedelta(minutes=5)))
+controle("een wolk na vijf minuten: blijft aan", a156.get("rule") == "hold" and klimaatdiensten(d156) == [],
+         f"{a156.get('rule')} {d156}")
+a156, d156 = asyncio.run(ronde156(hass156, coach156, NU156 + dt.timedelta(minutes=11)))
+print(f"  13:11 {a156.get('stand')}: {a156.get('reason')}")
+controle("na tien minuten: uit, met de stand van Home Assistant",
+         klimaatdiensten(d156) == [("set_hvac_mode", {"hvac_mode": "off"})] and a156.get("stand") == "uit", f"{d156}")
+controle("en dat is geen bewoner", coach156._airco["dev-airco"]["bewoner_tot"] is None, "")
+
+# Een cloud doet er een minuut over: de opdracht is er nog niet, en dat is niet de bewoner.
+hass156b, store156b, coach156b = bouw156()
+zon156(coach156b, NU156, 1500)
+asyncio.run(ronde156(hass156b, coach156b, NU156, volgen=False))
+a156b, _ = asyncio.run(ronde156(hass156b, coach156b, NU156 + dt.timedelta(minutes=1), volgen=False))
+controle("staat hij een ronde later nog uit, dan wacht de coach en telt het niet als de bewoner",
+         a156b.get("stand") != "bewoner" and coach156b._airco["dev-airco"]["bewoner_tot"] is None
+         and coach156b._airco["dev-airco"]["aan_sinds"] == NU156, f"{a156b}")
+
+# De bewoner zet hem zelf aan: de coach blijft er de rest van de dag vanaf.
+hass156c, store156c, coach156c = bouw156(teruglevering=0.0)
+asyncio.run(ronde156(hass156c, coach156c, NU156))
+hass156c.states.zet("climate.woonkamer", klimaat156("heat"))
+a156c, d156c = asyncio.run(ronde156(hass156c, coach156c, NU156 + dt.timedelta(minutes=1)))
+print(f"  de bewoner zet hem op verwarmen: {a156c.get('stand')} tot {a156c.get('resident_until')}: {a156c.get('reason')}")
+controle("de bewoner schakelde: stand bewoner, tot middernacht",
+         a156c.get("stand") == "bewoner" and a156c.get("resident_until") == "2026-07-15T00:00:00", f"{a156c}")
+hass156c.states.zet("climate.woonkamer", klimaat156("off"))
+asyncio.run(ronde156(hass156c, coach156c, NU156 + dt.timedelta(minutes=2)))
+hass156c.states.zet("sensor.teruglevering", "3000")
+zon156(coach156c, NU156 + dt.timedelta(minutes=3), 3000)
+a156c, d156c = asyncio.run(ronde156(hass156c, coach156c, NU156 + dt.timedelta(minutes=3)))
+controle("ook na uitzetten en met 3 kW zon zet de coach hem vandaag niet meer aan",
+         klimaatdiensten(d156c) == [] and a156c.get("stand") == "bewoner", f"{a156c} {d156c}")
+zon156(coach156c, dt.datetime(2026, 7, 15, 13, 0), 3000)
+a156c, d156c = asyncio.run(ronde156(hass156c, coach156c, dt.datetime(2026, 7, 15, 13, 0)))
+controle("de volgende dag weer wel", klimaatdiensten(d156c) == [("set_temperature", {"temperature": 23.0, "hvac_mode": "cool"})],
+         f"{d156c}")
+
+# Een andere temperatuur op de afstandsbediening is geen schakelen, maar de nieuwe wens.
+asyncio.run(ronde156(hass156c, coach156c, dt.datetime(2026, 7, 15, 13, 1)))
+hass156c.states.zet("climate.woonkamer", klimaat156("cool", temperature=24.0))
+a156c, d156c = asyncio.run(ronde156(hass156c, coach156c, dt.datetime(2026, 7, 15, 13, 2)))
+doel156 = store156c.instellingen["devices"][0]["airco"]["target_c"]
+controle("24 graden op de afstandsbediening: de coach neemt het over, en de bewoner wint niet",
+         doel156 == 24.0 and a156c.get("stand") != "bewoner", f"{doel156} {a156c.get('stand')}")
+
+# De kaart: de number schrijft de wens, en de coach zet hem meteen op de airco.
+getallen156 = []
+asyncio.run(getalmod.async_setup_entry(hass156c, Invoer110(), lambda nieuw: getallen156.extend(nieuw)))
+doelnr156 = next(g for g in getallen156 if g.unique_id == "dev-airco_doeltemperatuur")
+doelnr156.hass = hass156c
+doelnr156.async_write_ha_state = lambda: None
+controle("de number: het bereik en de stap van de airco zelf, en de wens van nu",
+         (doelnr156.native_min_value, doelnr156.native_max_value, doelnr156.native_step) == (16.0, 31.0, 1.0)
+         and doelnr156._attr_translation_key == "doeltemperatuur", "")
+hass156c.services.verstuurd.clear()
+
+
+async def kaart156(waarde):
+    await doelnr156.async_set_native_value(waarde)
+    await hass156c.afmaken()
+
+
+# De kaart laat de coach meteen kijken (`coach_verversen`); hier niet, want die
+# ronde liep op de klok van vandaag en niet op die van de proef.
+coach156c.async_refresh = lambda: None
+asyncio.run(kaart156(22.0))
+controle("22 op de kaart: bewaard, en meteen naar de airco die aan staat",
+         store156c.instellingen["devices"][0]["airco"]["target_c"] == 22.0
+         and ("set_temperature", {"temperature": 22.0}) in klimaatdiensten(hass156c.services.verstuurd),
+         f"{hass156c.services.verstuurd}")
+volg156(hass156c, list(hass156c.services.verstuurd))
+a156c, _ = asyncio.run(ronde156(hass156c, coach156c, dt.datetime(2026, 7, 15, 13, 3)))
+controle("en dat is geen bewoner", a156c.get("stand") != "bewoner", f"{a156c.get('stand')}")
+
+# Pauze: de coach zet uit wat hij zelf aanzette en doet verder niets.
+inst156 = store156c.instellingen
+inst156["devices"][0]["airco"]["paused"] = True
+a156c, d156c = asyncio.run(ronde156(hass156c, coach156c, dt.datetime(2026, 7, 15, 13, 4)))
+controle("pauze: uit wat de coach aanzette, stand pauze",
+         klimaatdiensten(d156c) == [("set_hvac_mode", {"hvac_mode": "off"})] and a156c.get("stand") == "pauze",
+         f"{a156c} {d156c}")
+
+# De entiteiten voor de airco-kaart.
+sensoren156, schakel156 = [], []
+asyncio.run(sensormod.async_setup_entry(hass156c, Invoer110(), lambda nieuw: sensoren156.extend(nieuw)))
+asyncio.run(schakelmod.async_setup_entry(hass156c, Invoer110(), lambda nieuw: schakel156.extend(nieuw)))
+coach_s156 = next(s for s in sensoren156 if s.unique_id == "dev-airco_coach")
+coach_s156.hass = hass156c
+coach_s156.bijwerken(coach156c.state["dev-airco"])
+attr156 = coach_s156.extra_state_attributes
+print(f"  sensor: {coach_s156.native_value}, {({k: attr156[k] for k in ('stand', 'modus', 'klimaat', 'dynamisch', 'pauze')})}")
+controle("de sensor: contract 1, type airco, de stand als sleutel, de climate erbij, vast contract",
+         attr156["contract"] == 1 and attr156["type"] == "airco" and attr156["stand"] == "pauze"
+         and attr156["klimaat"] == "climate.woonkamer" and attr156["dynamisch"] is False
+         and coach_s156.native_value == "Gepauzeerd", f"{attr156}")
+sleutels156 = sorted(s._attr_translation_key for s in schakel156 if s.unique_id.startswith("dev-airco"))
+controle("twee schakelaars: alleen op zon en pauze", sleutels156 == ["alleen_zon", "pauze"], f"{sleutels156}")
+pauze156 = next(s for s in schakel156 if s.unique_id == "dev-airco_pauze")
+controle("de pauze leest de instelling", pauze156.is_on is True, "")
+
+# Wat de bewoner mag zetten, en wat van de installateur blijft.
+lijst156 = storage.voorkeuren_bijwerken([AIRCO], "dev-airco", {"airco": {"target_c": 21.5, "solar_only": True}})
+controle("de bewoner zet de temperatuur en alleen op zon",
+         lijst156[0]["airco"]["target_c"] == 21.5 and lijst156[0]["airco"]["solar_only"] is True
+         and lijst156[0]["airco"]["power_w"] == 1200, f"{lijst156[0]['airco']}")
+try:
+    storage.voorkeuren_bijwerken([AIRCO], "dev-airco", {"airco": {"power_w": 3000}})
+    typeplaatje156 = False
+except ValueError:
+    typeplaatje156 = True
+controle("het typeplaatje is van de installateur", typeplaatje156, "")
+
+# Na een herstart weet de coach dat hij hem aanzette.
+inst156d = instellingen(devices=[AIRCO], sessions=[{
+    "device": "dev-airco", "airco_on": "2026-07-14T12:30:00", "airco_reason": "zon",
+    "at": coachmod.dt_util.utcnow().isoformat(),
+}])
+hass156d, _, coach156d = bouw(dict(huis(status="disconnected", teruglevering=1500.0),
+                                   **{"climate.woonkamer": klimaat156("cool")}), inst156d)
+zon156(coach156d, NU156, 300)
+a156d, _ = asyncio.run(ronde156(hass156d, coach156d, NU156))
+controle("na een herstart: nog steeds van de coach, en niet van de bewoner",
+         a156d.get("stand") == "zon" and coach156d._airco["dev-airco"]["aan_sinds"] == dt.datetime(2026, 7, 14, 12, 30),
+         f"{a156d}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

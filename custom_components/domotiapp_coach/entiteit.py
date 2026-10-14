@@ -40,6 +40,7 @@ MODELLEN = {
     "boiler": "Boiler",
     "laadpaal": "Laadpaal",
     "thuisbatterij": "Thuisbatterij",
+    "airco": "Airco",
 }
 
 
@@ -588,6 +589,64 @@ async def async_batterij_veld(hass: HomeAssistant, device_id: str, veld: str, wa
     for device in settings.get("devices") or []:
         if device.get("id") == device_id:
             device = {**device, "battery": {**(device.get("battery") or {}), veld: waarde}}
+        apparaten.append(device)
+    settings = await store.async_save({"devices": apparaten})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    coach_verversen(hass)
+
+
+# --- De airco (v0.119.0) -------------------------------------------------------
+#
+# De kaart vindt dit apparaat bij zijn climate (`klimaat` op de sensor van de
+# coach), en schrijft de temperatuur naar de number `doeltemperatuur` en niet
+# naar de airco: één schrijver, de coach. Afgesproken met de lovelace-sessie op
+# 14-10-2026; zie docs/airco.md.
+
+# De stand als vaste sleutel, met de woorden voor de toestand van de sensor.
+AIRCO_STAND_NAMEN = {
+    "zon": "Aan op zon",
+    "goedkoop": "Aan op een goedkoop uur",
+    "op_temperatuur": "Op temperatuur",
+    "uit": "Uit",
+    "bewoner": "Door jou bediend",
+    "pauze": "Gepauzeerd",
+    "geen_meting": "Weet het niet",
+}
+
+
+def airco_stand(stand: dict[str, Any] | None) -> str:
+    """De stand van een airco als vaste sleutel voor een kaart."""
+    sleutel = str((stand or {}).get("stand") or "")
+    return sleutel if sleutel in AIRCO_STAND_NAMEN else "geen_meting"
+
+
+def ruimte_naam(settings: dict[str, Any], device: dict[str, Any]) -> str | None:
+    """De naam van de eigen ruimte waar dit apparaat staat (v0.105.0), of None."""
+    kamer = device.get("room")
+    if not kamer:
+        return None
+    return next(
+        (str(r.get("name") or "") or None for r in settings.get("rooms") or []
+         if isinstance(r, dict) and r.get("id") == kamer),
+        None,
+    )
+
+
+def klimaat_attributen(hass: HomeAssistant | None, device: dict[str, Any]) -> dict[str, Any]:
+    """De attributen van de climate van deze airco, of niets."""
+    entiteit = (device.get("entities") or {}).get("climate")
+    staat = hass.states.get(entiteit) if hass is not None and entiteit else None
+    return dict(getattr(staat, "attributes", None) or {})
+
+
+async def async_airco_veld(hass: HomeAssistant, device_id: str, veld: str, waarde: Any) -> None:
+    """Eén veld in `airco` van één apparaat, zoals de bewoner het in Instellen zou zetten."""
+    store = async_get_store(hass)
+    settings = await store.async_load()
+    apparaten = []
+    for device in settings.get("devices") or []:
+        if device.get("id") == device_id:
+            device = {**device, "airco": {**(device.get("airco") or {}), veld: waarde}}
         apparaten.append(device)
     settings = await store.async_save({"devices": apparaten})
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})

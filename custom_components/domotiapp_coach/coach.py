@@ -79,6 +79,11 @@ from .planner import (
     zon_regels,
     Apparaat,
     BALANCER_MARGIN_AMPS,
+    AIRCO_STAP_C,
+    Airco,
+    AircoBesluit,
+    airco_nodig,
+    plan_airco,
     Boiler,
     BOILER_KIJKEN,
     BOILER_VERDACHT,
@@ -468,6 +473,21 @@ BOILER_PROEF_ELKE = BOILER_KIJKEN
 # dan dit is een proefmoment of een thermostaat die even aantikte, en daar valt
 # niets uit te leren.
 BOILER_MIN_KWH = 0.05
+
+# Hoe lang de coach wacht tot een airco laat zien wat hij hem vroeg, voor een
+# andere stand als iets van de bewoner telt (v0.119.0). Een airco in de cloud
+# wordt eens per minuut gelezen (in de klantwoning op 13-10-2026 gemeten: elke
+# ~60 s een nieuwe regel), en een opdracht gaat eerst de cloud in; vijf rondes
+# is ruim genoeg voor allebei.
+AIRCO_VOLGT = timedelta(minutes=5)
+
+
+def _gelijk(a: Any, b: Any) -> bool:
+    """Twee temperaturen gelijk, op een honderdste; wat geen getal is, is niet gelijk."""
+    try:
+        return abs(float(a) - float(b)) < 0.01
+    except (TypeError, ValueError):
+        return False
 
 FASEMETING_VERS = timedelta(seconds=10)
 
@@ -1199,6 +1219,8 @@ class ChargerCoach:
         # Bespaard. Wat hij geléérd heeft staat in de instellingen, want dat
         # moet een herstart overleven. Zie `_one_boiler`.
         self._boiler: dict[str, dict[str, Any]] = {}
+        # Per airco: wie hem aanzette, wat de coach net vroeg, wat de bewoner deed (v0.119.0).
+        self._airco: dict[str, dict[str, Any]] = {}
         # Wat er de afgelopen METER_VENSTER per ronde naar het net ging:
         # (moment, watt). Zie `_meter_zeker`.
         self._meter: list[tuple[datetime, float]] = []
@@ -2445,6 +2467,21 @@ class ChargerCoach:
             except ServiceNotFound:
                 _LOGGER.warning(
                     "%s kan nog niet aangestuurd worden: de schakelaar bestaat niet (nog niet geladen?)",
+                    device.get("name") or device.get("id"),
+                )
+            except Exception:  # noqa: BLE001 - one broken device is not all of them
+                _LOGGER.exception("kon %s niet beoordelen", device.get("id"))
+
+        # En de airco's (v0.119.0): aan of uit, met de temperatuur van de bewoner.
+        for device in settings.get("devices") or []:
+            if device.get("type") != "airco" or not device.get("controllable"):
+                continue
+            try:
+                await self._one_airco(moment, settings, device, level)
+                self._besluit_melden(device.get("id", ""))
+            except ServiceNotFound:
+                _LOGGER.warning(
+                    "%s kan nog niet aangestuurd worden: de airco bestaat niet (nog niet geladen?)",
                     device.get("name") or device.get("id"),
                 )
             except Exception:  # noqa: BLE001 - one broken device is not all of them
@@ -3824,6 +3861,330 @@ class ChargerCoach:
         return 1
 
     # ------------------------------------------------------------------
+    # De airco (v0.119.0)
+    #
+    # De eigenaar op 14-10-2026: aan bij zon over of op een uur onder het
+    # gemiddelde van vandaag, zolang de kamer de temperatuur van de bewoner nog
+    # niet heeft; de coach zet die temperatuur en kiest verwarmen of koelen. Zet
+    # de bewoner hem zelf aan of uit, dan blijft de coach er de rest van de dag
+    # vanaf. Het denkwerk staat in `plan_airco` in planner.py; hier staat wat er
+    # gebeurde: wie hem aanzette, wat de bewoner deed, en de opdrachten.
+
+    def _airco_sessie(self, device_id: str) -> dict[str, Any]:
+        return self._airco.setdefault(device_id, {
+            # Sinds wanneer de coach hem aanzette, en waarom. Alleen wat de
+            # coach aanzette zet hij ook uit.
+            "aan_sinds": None, "reden": None,
+            # Wat de coach net vroeg en nog niet terugzag: een cloud doet daar
+            # een minuut over, en dat is dan de bewoner niet.
+            "verwacht": None, "verwacht_sinds": None,
+            "temp_verwacht": None,
+            # Wat er de vorige ronde stond, om te zien dat iemand anders iets deed.
+            "vorige": None, "temp_vorige": None,
+            # Tot wanneer de bewoner wint.
+            "bewoner_tot": None,
+            # Het meeste dat hij trok terwijl hij draaide, als er een sensor is:
+            # zonder typeplaatje de maat voor "genoeg zon". Het meeste, want een
+            # airco begint hard en regelt terug als hij bijna op temperatuur is.
+            "gemeten_w": None,
+        })
+
+    def _airco_staat(self, device: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        """De stand van de climate ("off", "heat", "cool", ...) en zijn attributen."""
+        entiteit = (device.get("entities") or {}).get("climate")
+        staat = self.hass.states.get(entiteit) if entiteit else None
+        if staat is None:
+            return "", {}
+        return str(staat.state or "").strip().lower(), dict(getattr(staat, "attributes", None) or {})
+
+    @staticmethod
+    def _airco_doel(device: dict[str, Any], attrs: dict[str, Any]) -> float | None:
+        """Wat de bewoner wil; zolang hij niets koos, wat er op de airco staat."""
+        for waarde in ((device.get("airco") or {}).get("target_c"), attrs.get("temperature")):
+            try:
+                if waarde not in (None, ""):
+                    return float(waarde)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _airco_neemt_w(self, device: dict[str, Any]) -> float:
+        """Wat deze airco nu trekt: gemeten, of het typeplaatje als de coach hem aanzette."""
+        gemeten = _watts(self.hass, device.get("entity"))
+        if gemeten is not None:
+            return max(0.0, gemeten)
+        sessie = self._airco.get(device.get("id", "")) or {}
+        if sessie.get("aan_sinds") is None:
+            return 0.0
+        try:
+            return float((device.get("airco") or {}).get("power_w") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    async def _one_airco(
+        self,
+        now: datetime,
+        settings: dict[str, Any],
+        device: dict[str, Any],
+        level: str,
+    ) -> None:
+        device_id = device.get("id", "")
+        entities = device.get("entities") or {}
+        eigen = device.get("airco") or {}
+        naam = device.get("name") or "De airco"
+        klimaat = entities.get("climate")
+        sessie = self._airco_sessie(device_id)
+        hvac, attrs = self._airco_staat(device)
+        bereikbaar = hvac not in ("", "unavailable", "unknown")
+        aan = bereikbaar and hvac != "off"
+        temp = attrs.get("temperature")
+
+        # Kwam wat de coach vroeg aan? Dan is dat de nieuwe maat waaraan de
+        # bewoner gemeten wordt, en niet iets wat de bewoner deed. Zo niet
+        # binnen AIRCO_VOLGT, dan ging de opdracht niet door, en blijft de maat
+        # wat er voor de opdracht stond: wat de bewoner intussen deed, telt dan.
+        if sessie["verwacht"] is not None:
+            if hvac == sessie["verwacht"]:
+                sessie["verwacht"] = None
+                sessie["vorige"] = hvac
+            elif now - sessie["verwacht_sinds"] > AIRCO_VOLGT:
+                sessie["verwacht"] = None
+        if sessie["temp_verwacht"] is not None:
+            if _gelijk(temp, sessie["temp_verwacht"]):
+                sessie["temp_verwacht"] = None
+                sessie["temp_vorige"] = temp
+            elif now - (sessie["verwacht_sinds"] or now) > AIRCO_VOLGT:
+                sessie["temp_verwacht"] = None
+
+        # Deed de bewoner iets? Aan, uit of een andere stand, terwijl de coach
+        # niets vroeg: dan wint hij de rest van de dag. Een andere temperatuur
+        # is geen schakelen maar zijn nieuwe wens (`target_c`).
+        if bereikbaar and sessie["verwacht"] is None and sessie["vorige"] is not None and hvac != sessie["vorige"]:
+            sessie["bewoner_tot"] = datetime.combine(now.date() + timedelta(days=1), datetime.min.time())
+            sessie["aan_sinds"] = None
+            sessie["reden"] = None
+            self._remember(device_id)
+        if (
+            aan and sessie["temp_verwacht"] is None and sessie["temp_vorige"] is not None
+            and temp is not None and not _gelijk(temp, sessie["temp_vorige"])
+        ):
+            await self._async_airco_voorkeur(device_id, "target_c", float(temp))
+            eigen = {**eigen, "target_c": float(temp)}
+        if not aan and sessie["aan_sinds"] is not None and sessie["verwacht"] is None:
+            # Uit, door wie dan ook (ook een airco die zelf uitviel): niet meer van de coach.
+            sessie["aan_sinds"] = None
+            sessie["reden"] = None
+        if bereikbaar:
+            sessie["vorige"] = hvac
+            sessie["temp_vorige"] = temp
+        if sessie["bewoner_tot"] is not None and now >= sessie["bewoner_tot"]:
+            sessie["bewoner_tot"] = None
+            self._remember(device_id)
+
+        watts = _watts(self.hass, device.get("entity"))
+        if aan and watts is not None and watts > (sessie.get("gemeten_w") or 0.0):
+            sessie["gemeten_w"] = watts
+            self._remember(device_id)
+        try:
+            plaatje = float(eigen.get("power_w")) if eigen.get("power_w") not in (None, "") else None
+        except (TypeError, ValueError):
+            plaatje = None
+        vermogen = plaatje or sessie.get("gemeten_w")
+        kamer = _number(self.hass, entities.get("temperature")) if entities.get("temperature") else None
+        if kamer is None:
+            try:
+                kamer = float(attrs["current_temperature"]) if attrs.get("current_temperature") is not None else None
+            except (TypeError, ValueError):
+                kamer = None
+        modi = [str(m).lower() for m in attrs.get("hvac_modes") or []]
+        try:
+            stap = float(attrs.get("target_temp_step") or AIRCO_STAP_C)
+        except (TypeError, ValueError):
+            stap = AIRCO_STAP_C
+
+        airco = Airco(
+            aan=aan,
+            modus=hvac if aan else None,
+            kamer_c=kamer,
+            doel_c=self._airco_doel(device, attrs),
+            stap_c=stap,
+            vermogen_w=vermogen,
+            kan_verwarmen=not modi or "heat" in modi,
+            kan_koelen=not modi or "cool" in modi,
+            alleen_zon=bool(eigen.get("solar_only")),
+            coach_sinds=sessie["aan_sinds"],
+            coach_reden=sessie["reden"],
+        )
+        # Wat er naar het net zou gaan als deze airco uit stond, zoals bij de
+        # boiler (valkuil 2): anders eet hij zijn eigen zon op.
+        gemeten = self._meter_zeker(now)
+        if gemeten is not None:
+            kaal = gemeten - self._batterijen_w(settings)
+            gemeten = kaal + self._zon_correctie(settings, device, kaal)
+        surplus = None if gemeten is None else gemeten + (self._airco_neemt_w(device) if aan else 0.0)
+        prijzen = self._prices(settings)
+        besluit = plan_airco(now, prijzen, airco, surplus_w=surplus)
+
+        # Wat er boven de som gaat: de pauze en de bewoner.
+        if eigen.get("paused"):
+            besluit = AircoBesluit(
+                aan=False if sessie["aan_sinds"] is not None and aan else None, modus=None,
+                stand="pauze", rule="pauze",
+                reason="Gepauzeerd: de coach doet niets met de airco.",
+            )
+        elif sessie["bewoner_tot"] is not None or (aan and sessie["aan_sinds"] is None):
+            besluit = AircoBesluit(
+                aan=None, modus=airco.modus, stand="bewoner", rule="bewoner",
+                reason=(
+                    "Je zette hem zelf aan of uit, dus de coach blijft er vandaag vanaf."
+                    if sessie["bewoner_tot"] is not None
+                    else "Hij staat aan, maar niet door de coach. De coach laat hem met rust."
+                ),
+            )
+
+        mag = level == LEVEL_STEER or (level == LEVEL_PROPOSE and device_id in self._approved)
+        self.state[device_id] = {
+            "kind": "airco",
+            "at": now.isoformat(),
+            "level": level,
+            "applied": mag and level not in (LEVEL_READ, LEVEL_ADVISE),
+            "approved": device_id in self._approved,
+            "charge": aan if besluit.aan is None else besluit.aan,
+            "rule": besluit.rule,
+            "reason": besluit.reason,
+            "plan": "",
+            "stand": besluit.stand,
+            "modus": besluit.modus or airco_nodig(airco),
+            "on": aan,
+            "hvac": hvac,
+            "climate": klimaat,
+            "room_c": kamer,
+            "target_c": airco.doel_c,
+            "power_w": None if watts is None else round(watts),
+            "vermogen_w": vermogen,
+            "solar_only": airco.alleen_zon,
+            "paused": bool(eigen.get("paused")),
+            "dynamic": bool(prijzen),
+            "resident_until": sessie["bewoner_tot"].isoformat() if sessie["bewoner_tot"] else None,
+        }
+        await self._async_noteer_airco(naam, device_id, now)
+        self._toezeggingen.pop(device_id, None)
+
+        if level in (LEVEL_READ, LEVEL_ADVISE) or not mag or not klimaat or not bereikbaar:
+            return
+        # Een opdracht die nog onderweg is wordt niet nog eens gestuurd: een
+        # cloudkoppeling doet er een minuut over, en elke opdracht kost er weer een.
+        if sessie["verwacht"] is not None:
+            return
+        if besluit.aan is False and aan:
+            await self._async_airco_zetten(device, sessie, now, "off")
+            sessie["aan_sinds"] = None
+            sessie["reden"] = None
+            self._remember(device_id)
+            return
+        if besluit.aan is True and not aan and besluit.modus:
+            # Past hij nog onder de zekeringen, na wie hoger staat in de voorrang?
+            ruimte = (
+                self._laadruimte_w(settings, device, 0.0, self._hogere_toezeggingen(settings, device))
+                if vermogen else None
+            )
+            if ruimte is not None and vermogen > ruimte:
+                self.state[device_id].update(
+                    charge=False, rule="no-room", stand="uit",
+                    reason="Er is nu geen ruimte op de aansluiting voor de airco. Zodra er ruimte is, gaat hij aan.",
+                )
+                return
+            await self._async_airco_zetten(device, sessie, now, besluit.modus, airco.doel_c)
+            sessie["aan_sinds"] = now
+            sessie["reden"] = besluit.stand
+            self._remember(device_id)
+        if sessie["aan_sinds"] is not None and vermogen:
+            self._toezeggingen[device_id] = {
+                "amps": float(vermogen) / VOLTS,
+                "sleutels": self._groep_sleutels(settings, device),
+            }
+
+    async def _async_airco_zetten(
+        self, device: dict[str, Any], sessie: dict[str, Any], now: datetime,
+        modus: str, temperatuur: float | None = None,
+    ) -> None:
+        """De airco aan in een stand (met de temperatuur van de bewoner) of uit."""
+        klimaat = (device.get("entities") or {}).get("climate")
+        if not klimaat:
+            return
+        if modus == "off":
+            dienst, data = "set_hvac_mode", {"entity_id": klimaat, "hvac_mode": "off"}
+        elif temperatuur is not None:
+            # Eén opdracht met de stand erin: een cloudkoppeling doet over elke
+            # opdracht een minuut.
+            dienst, data = "set_temperature", {"entity_id": klimaat, "temperature": temperatuur, "hvac_mode": modus}
+            sessie["temp_verwacht"] = temperatuur
+        else:
+            dienst, data = "set_hvac_mode", {"entity_id": klimaat, "hvac_mode": modus}
+        sessie["verwacht"] = modus
+        sessie["verwacht_sinds"] = now
+        try:
+            await self.hass.services.async_call("climate", dienst, data, blocking=True)
+        except Exception:  # noqa: BLE001 - een airco die blijft staan is geen reden om te stoppen
+            _LOGGER.exception("kon de airco %s niet zetten", klimaat)
+            sessie["verwacht"] = None
+            sessie["temp_verwacht"] = None
+
+    async def async_airco_doel(self, device_id: str, graden: float) -> None:
+        """De temperatuur van de bewoner, van de kaart; staat de airco aan, dan meteen erop.
+
+        Eén schrijver: de kaart zet de number, de coach zet de airco. Meteen, en
+        niet pas bij de volgende ronde, want een cloud doet er al een minuut over.
+        """
+        await self._async_airco_voorkeur(device_id, "target_c", float(graden))
+        settings = await async_get_store(self.hass).async_load()
+        device = next((d for d in settings.get("devices") or [] if d.get("id") == device_id), None)
+        if device is None:
+            return
+        hvac, _ = self._airco_staat(device)
+        if hvac in ("", "off", "unavailable", "unknown"):
+            return
+        sessie = self._airco_sessie(device_id)
+        klimaat = (device.get("entities") or {}).get("climate")
+        sessie["temp_verwacht"] = float(graden)
+        sessie["verwacht_sinds"] = _moment()
+        try:
+            await self.hass.services.async_call(
+                "climate", "set_temperature", {"entity_id": klimaat, "temperature": float(graden)}, blocking=True
+            )
+        except Exception:  # noqa: BLE001 - dan staat hij in de opslag en zet de bewoner hem zelf
+            _LOGGER.exception("kon de temperatuur van %s niet zetten", klimaat)
+            sessie["temp_verwacht"] = None
+
+    async def _async_airco_voorkeur(self, device_id: str, veld: str, waarde: Any) -> None:
+        """Eén veld in `airco` van één apparaat bewaren, zoals de bewoner het zou zetten."""
+        store = async_get_store(self.hass)
+        settings = await store.async_load()
+        apparaten = []
+        for device in settings.get("devices") or []:
+            if device.get("id") == device_id:
+                device = {**device, "airco": {**(device.get("airco") or {}), veld: waarde}}
+            apparaten.append(device)
+        saved = await store.async_save({"devices": apparaten})
+        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+
+    async def _async_noteer_airco(self, naam: str, device_id: str, now: datetime) -> None:
+        """Het besluit over een airco in de geschiedenis, bij verandering."""
+        st = self.state.get(device_id) or {}
+        kern = (st.get("stand"), bool(st.get("applied")))
+        if self._besluit_genoteerd.get(device_id) == kern:
+            return
+        self._besluit_genoteerd[device_id] = kern
+        kop = {
+            "zon": "aan op zon", "goedkoop": "aan op een goedkoop uur", "op_temperatuur": "op temperatuur",
+            "uit": "uit", "bewoner": "door jou bediend", "pauze": "gepauzeerd", "geen_meting": "weet het niet",
+        }.get(str(st.get("stand")), str(st.get("stand")))
+        await self._async_noteer(f"{naam}: {kop}. {(st.get('reason') or '').strip()}".strip(), now, {
+            "device": device_id, "rule": st.get("rule"), "charge": bool(st.get("charge")),
+            "applied": bool(st.get("applied")), "mode": st.get("stand"),
+        })
+
+    # ------------------------------------------------------------------
     # De boiler
     #
     # De eigenaar op 19-09-2026: "ik wil gewoon een sturing maken op een boiler waar
@@ -4520,14 +4881,19 @@ class ChargerCoach:
             # Hij staat hoger en wil nog: zijn lading telt niet, zijn ruimte gaat eraf.
             beschikbaar -= max(0.0, b.max_charge_w - max(0.0, w))
         for apparaat in settings.get("devices") or []:
-            if apparaat is device or apparaat.get("type") not in ("laadpaal", "boiler"):
+            if apparaat is device or apparaat.get("type") not in ("laadpaal", "boiler", "airco"):
                 continue
             if not apparaat.get("controllable"):
                 continue
             plek = rang.get(apparaat.get("id", ""), len(regels) + 1)
             if plek <= mijn:
                 continue
-            neemt = max(0.0, _watts(self.hass, apparaat.get("entity")) or 0.0)
+            # Een airco staat niet in de voorrang en wijkt dus voor iedereen die
+            # er wel in staat (v0.119.0); zonder vermogenssensor met zijn typeplaatje.
+            neemt = (
+                self._airco_neemt_w(apparaat) if apparaat.get("type") == "airco"
+                else max(0.0, _watts(self.hass, apparaat.get("entity")) or 0.0)
+            )
             if neemt <= 0:
                 continue
             beschikbaar += max(0.0, min(neemt, beschikbaar + neemt))
@@ -10015,6 +10381,18 @@ class ChargerCoach:
                     self._drain[device_id] = float(row["drain_to"])
                 except (TypeError, ValueError):
                     pass
+            if row.get("airco_on") or row.get("resident_until") or row.get("airco_w"):
+                sessie = self._airco_sessie(device_id)
+                try:
+                    sessie["gemeten_w"] = float(row["airco_w"]) if row.get("airco_w") else None
+                except (TypeError, ValueError):
+                    sessie["gemeten_w"] = None
+                for sleutel, veld in (("airco_on", "aan_sinds"), ("resident_until", "bewoner_tot")):
+                    try:
+                        sessie[veld] = datetime.fromisoformat(str(row[sleutel])) if row.get(sleutel) else None
+                    except ValueError:
+                        sessie[veld] = None
+                sessie["reden"] = row.get("airco_reason")
 
     def _remember(self, device_id: str) -> None:
         """Vastleggen wat er nu voor dit apparaat aan staat.
@@ -10036,6 +10414,14 @@ class ChargerCoach:
             "mode": self._modus.get(device_id),
             "target": self._doel.get(device_id),
         }
+        # Van een airco: dat de coach hem aanzette, en tot wanneer de bewoner
+        # wint (v0.119.0). Anders zou na een herstart een airco die de coach op
+        # zon aanzette voor eeuwig van de bewoner lijken.
+        airco = self._airco.get(device_id) or {}
+        for sleutel, waarde in (("airco_on", airco.get("aan_sinds")), ("airco_reason", airco.get("reden")),
+                                ("resident_until", airco.get("bewoner_tot")), ("airco_w", airco.get("gemeten_w"))):
+            if waarde:
+                aan[sleutel] = waarde.isoformat() if isinstance(waarde, datetime) else waarde
         try:
             store = async_get_store(self.hass)
             settings = await store.async_load()

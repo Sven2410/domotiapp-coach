@@ -1992,6 +1992,8 @@ class DacViewOverview extends DacElement {
       && besluit.level !== "advise"
       && besluit.kind !== "programma"
       && besluit.kind !== "boiler"
+      // Een airco heeft zijn pauze in Instellen en op de kaart van Lovelace.
+      && besluit.kind !== "airco"
       // Een thuisbatterij heeft geen auto die haast heeft en geen beurt om te
       // pauzeren: wie hem wil stilzetten haalt het vinkje "mag sturen" weg.
       // Wel kan hij nu vol: dezelfde knop, andere woorden (22-09-2026).
@@ -2037,7 +2039,7 @@ class DacViewOverview extends DacElement {
 
     const wek = this.$(`[data-wake="${slot}"]`);
     wek.hidden = !(besluit.wake && besluit.level !== "advise" && besluit.kind !== "programma"
-      && besluit.kind !== "boiler" && besluit.kind !== "batterij");
+      && besluit.kind !== "boiler" && besluit.kind !== "batterij" && besluit.kind !== "airco");
 
     const pauze = this.$(`[data-pause="${slot}"]`);
     pauze.hidden = !kan;
@@ -2109,6 +2111,9 @@ class DacViewOverview extends DacElement {
       // verwarmt; wachten op het goedkoopste moment is geen werk.
       if (besluit.kind === "programma" && !besluit.charge) continue;
       if (besluit.kind === "boiler" && !besluit.running) continue;
+      // En een airco alleen als de coach hem aanzette (v0.119.0).
+      if (besluit.kind === "airco" && !["zon", "goedkoop", "op_temperatuur"].includes(besluit.stand)) continue;
+      if (besluit.kind === "airco" && !besluit.on) continue;
       // Een batterij stuurt de coach de hele dag; dat bovenaan zetten zou de
       // auto en de vaatwasser verdringen, en zijn kaart zegt het al.
       if (besluit.kind === "batterij") continue;

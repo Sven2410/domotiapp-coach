@@ -41,6 +41,7 @@ from .entiteit import (
     CONTRACT, CoachEntiteit, apparaat_info, async_per_apparaat, entiteiten_van, met_zone,
     oude_coach_opruimen, paal_apparaat, paal_blokken, paal_modus_actief, paal_modus_keuzes, paal_schema, paal_sessie,
     paal_stand, paal_tekst, accu_apparaat, accu_opgeleverd, accu_plan, accu_stand,
+    AIRCO_STAND_NAMEN, airco_stand, ruimte_naam,
 )
 from .planner import _dag_om
 from .storage import async_get_store
@@ -160,6 +161,13 @@ async def async_setup_entry(
         hass, entry, async_add_entities,
         lambda device: device.get("type") == "thuisbatterij",
         lambda device, stand, settings: [BatterijCoachSensor(device, stand, settings)],
+    )
+
+    # De airco (v0.119.0): de sensor van de coach voor de airco-kaart.
+    await async_per_apparaat(
+        hass, entry, async_add_entities,
+        lambda device: device.get("type") == "airco",
+        lambda device, stand, settings: [AircoCoachSensor(device, stand, settings)],
     )
 
 
@@ -377,3 +385,49 @@ def vakantie_max(eigen: dict[str, Any]) -> float:
         return float(eigen.get("holiday_max_percent") or HOLIDAY_MAX_DEFAULT)
     except (TypeError, ValueError):
         return float(HOLIDAY_MAX_DEFAULT)
+
+
+class AircoCoachSensor(CoachEntiteit, SensorEntity):
+    """Wat de coach met deze airco doet, voor de airco-kaart (v0.119.0).
+
+    De toestand is de stand in woorden ("Aan op zon"); de kaart leest de
+    attributen, en vindt dit apparaat bij zijn climate via `klimaat`. Zie
+    entiteit.py en docs/airco.md voor het contract.
+    """
+
+    _attr_icon = "mdi:air-conditioner"
+    _unrecorded_attributes = frozenset({"reason", "entiteiten"})
+
+    def __init__(self, device: dict[str, Any], stand: dict[str, Any] | None, settings: dict[str, Any]) -> None:
+        super().__init__(device, stand, "coach", settings)
+
+    def _kern(self) -> Any:
+        return (self.native_value, repr(self.extra_state_attributes))
+
+    @property
+    def native_value(self) -> str:
+        return AIRCO_STAND_NAMEN[airco_stand(self._stand)]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        st = self._stand
+        eigen = self._device.get("airco") or {}
+        return {
+            "contract": CONTRACT,
+            "type": "airco",
+            "stand": airco_stand(st),
+            # De stand die de coach koos of zou kiezen: "heat" of "cool".
+            "modus": st.get("modus"),
+            "reason": st.get("reason") or "",
+            "klimaat": (self._device.get("entities") or {}).get("climate"),
+            "ruimte": ruimte_naam(self._settings, self._device),
+            "kamer": st.get("room_c"),
+            "doel": st.get("target_c"),
+            "alleen_zon": bool(eigen.get("solar_only")),
+            "pauze": bool(eigen.get("paused")),
+            # Bij een vast contract is er geen goedkoper uur, en zegt "alleen op
+            # zon" niets: de kaart verbergt die schakelaar dan.
+            "dynamisch": bool(st.get("dynamic")),
+            "bewoner_tot": met_zone(st.get("resident_until")),
+            "entiteiten": entiteiten_van(self._device),
+        }
