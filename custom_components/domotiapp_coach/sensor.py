@@ -146,7 +146,7 @@ async def async_setup_entry(
 
     entry.async_on_unload(hass.bus.async_listen(EVENT_DECISION, besluit))
     entry.async_on_unload(hass.bus.async_listen(EVENT_SETTINGS_UPDATED, instellingen))
-    oude_coach_opruimen(hass)
+    oude_coach_opruimen(hass, entry.entry_id)
 
     # De laadpaal (v0.111.0): de sensor van de coach voor de laadpaalkaart.
     await async_per_apparaat(

@@ -66,6 +66,22 @@ de eigenaar 78,2%, laat de coach de zon liever naar het net gaan. Zonder
 rendement wordt er niet gepland: alleen nul op de meter (`rendement-onbekend`),
 en met volledig salderen standby, want dan verliest opslaan altijd.
 
+**Op de kaart: ongeveer, uit de tellers van de batterij zelf** (v0.118.0). Zonder
+kWh-meter en zonder opgave stond er "Rendement: nog niet bekend", terwijl de
+meeste batterijen zelf tellen wat erin en eruit gaat. Twee optionele velden
+onder de kWh-meter, "Batterij zelf: geladen" en "Batterij zelf: ontladen"
+(`accu_in`, `accu_out`), geven dan op de kaart "ongeveer 88%, gemeten in de
+accu". Met dezelfde toets als de kWh-meter (`rendement_uit_tellers`: tien keer
+de inhoud aan doorzet, 30 tot 100%), maar in een eigen sleutel `rte_accu` in
+`battery_state`, die `_batterij_van` nooit leest. **De coach rekent er niet
+mee**, want die tellers zien het verlies in de omvormer niet: in de eerste
+woning telden ze 102,6% tegen 73,6% op de kWh-meter, en bij salderen begint
+opslaan pas boven ongeveer 78% iets op te leveren. Een te hoog rendement laat
+laden van het net en handelen lonen terwijl het geld kost. De eigenaar op
+14-10-2026: "ja alleen op de kaart". Volgorde op de kaart: gemeten, opgegeven,
+ongeveer uit de accu, nog niet bekend; het wissen van de metingen (`device/measurements/clear`) haalt `rte_accu` ook
+weg. Proef 154 in test_coach.py.
+
 **Kost stroom elk uur hetzelfde, dan zegt de coach dat inkopen nooit loont**
 (v0.101.10, `_vlak` in batterij.py). Bij de eigenaar stond op 29-09-2026 met een
 vast contract "het rendement van de batterij is nog niet bekend, dus van het net

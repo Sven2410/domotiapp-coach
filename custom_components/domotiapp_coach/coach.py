@@ -4737,12 +4737,17 @@ class ChargerCoach:
         self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
         settings["battery_state"] = rows
 
-    def _rte_gemeten(self, device: dict[str, Any], capaciteit: float | None) -> float | None:
-        """Het rendement uit de tellers van een kWh-meter op de batterij, of None."""
+    def _rte_gemeten(
+        self,
+        device: dict[str, Any],
+        capaciteit: float | None,
+        tellers: tuple[str, str] = ("energy_in", "energy_out"),
+    ) -> float | None:
+        """Het rendement uit twee tellers, standaard die van een kWh-meter op de batterij, of None."""
         entities = device.get("entities") or {}
         return rendement_uit_tellers(
-            _kwh(self.hass, entities.get("energy_in")),
-            _kwh(self.hass, entities.get("energy_out")),
+            _kwh(self.hass, entities.get(tellers[0])),
+            _kwh(self.hass, entities.get(tellers[1])),
             capaciteit,
         )
 
@@ -4979,6 +4984,13 @@ class ChargerCoach:
         gemeten = self._rte_gemeten(device, b.capacity_kwh)
         if gemeten is not None and abs(float(rij.get("rte") or 0.0) - gemeten) > 0.002:
             nieuw["rte"] = round(gemeten, 4)
+        # Wat de eigen tellers van de batterij zeggen, alleen voor de kaart
+        # (v0.118.0). Die meten aan de accukant en zien het verlies in de
+        # omvormer niet, dus `_batterij_van` leest dit nooit. De eigenaar op
+        # 14-10-2026: "ja alleen op de kaart".
+        accu = self._rte_gemeten(device, b.capacity_kwh, ("accu_in", "accu_out"))
+        if accu is not None and abs(float(rij.get("rte_accu") or 0.0) - accu) > 0.002:
+            nieuw["rte_accu"] = round(accu, 4)
         if vol_nu:
             vorige = _tijdstip(rij.get("full_at"))
             if vorige is None or now - vorige.replace(tzinfo=None) > timedelta(hours=1):

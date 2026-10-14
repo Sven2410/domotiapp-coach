@@ -775,6 +775,8 @@ function deviceDetails(feed, device, settings) {
 
   // Een thuisbatterij: wat de coach zelf bijhoudt. Het rendement is een meting
   // of een opgave, nooit een aanname; zonder staat er dat het niet bekend is.
+  // Daartussen, sinds v0.118.0, wat de tellers van de batterij zelf zeggen: een
+  // benadering die alleen hier staat, de coach rekent er niet mee (`rte_accu`).
   if (device?.type === "thuisbatterij") {
     const rij = (settings?.battery_state ?? []).find((r) => r?.device === device.id) ?? {};
     const opgave = device.battery?.rte_percent;
@@ -784,7 +786,9 @@ function deviceDetails(feed, device, settings) {
         ? `${(rij.rte * 100).toLocaleString("nl-NL", { maximumFractionDigits: 1 })}% gemeten`
         : opgave
           ? `${Number(opgave).toLocaleString("nl-NL", { maximumFractionDigits: 1 })}% opgegeven`
-          : "nog niet bekend",
+          : rij.rte_accu
+            ? `ongeveer ${Math.round(rij.rte_accu * 100)}%, gemeten in de accu`
+            : "nog niet bekend",
     });
   }
 

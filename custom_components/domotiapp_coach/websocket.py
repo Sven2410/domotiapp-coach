@@ -761,7 +761,9 @@ async def async_clear_measurements(
     # blijft staan: dat is geen meting die verkeerd kan zijn gegaan maar een
     # kasboek.
     batterijen = [
-        {**row, "rte": None} if isinstance(row, dict) and row.get("device") == msg["device_id"] else row
+        {**row, "rte": None, "rte_accu": None}
+        if isinstance(row, dict) and row.get("device") == msg["device_id"]
+        else row
         for row in (settings.get("battery_state") or [])
     ]
     settings = await store.async_save(
