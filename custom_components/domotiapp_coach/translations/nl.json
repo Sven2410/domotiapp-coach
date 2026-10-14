@@ -53,6 +53,14 @@
           "continu": "Continu",
           "zon": "Zon"
         }
+      },
+      "aan_op": {
+        "name": "Aan op",
+        "state": {
+          "zon": "Zon over",
+          "goedkoop": "Goedkope uren",
+          "beide": "Zon en goedkope uren"
+        }
       }
     },
     "switch": {
@@ -64,9 +72,6 @@
       },
       "vakantiestand": {
         "name": "Vakantiestand"
-      },
-      "alleen_zon": {
-        "name": "Alleen op zon"
       }
     },
     "time": {

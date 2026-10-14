@@ -79,6 +79,7 @@ from .planner import (
     zon_regels,
     Apparaat,
     BALANCER_MARGIN_AMPS,
+    AIRCO_AAN_OP,
     AIRCO_STAP_C,
     Airco,
     AircoBesluit,
@@ -3864,10 +3865,10 @@ class ChargerCoach:
     # De airco (v0.119.0)
     #
     # De eigenaar op 14-10-2026: aan bij zon over of op een uur onder het
-    # gemiddelde van vandaag, zolang de kamer de temperatuur van de bewoner nog
-    # niet heeft; de coach zet die temperatuur en kiest verwarmen of koelen. Zet
-    # de bewoner hem zelf aan of uit, dan blijft de coach er de rest van de dag
-    # vanaf. Het denkwerk staat in `plan_airco` in planner.py; hier staat wat er
+    # gemiddelde van vandaag, wat de bewoner kiest (standaard alleen zon, sinds
+    # v0.119.1), zolang de kamer de temperatuur van de bewoner nog niet heeft; de
+    # coach zet die temperatuur en kiest verwarmen of koelen. Zet de bewoner hem
+    # zelf aan of uit, dan blijft de coach er de rest van de dag vanaf. Het denkwerk staat in `plan_airco` in planner.py; hier staat wat er
     # gebeurde: wie hem aanzette, wat de bewoner deed, en de opdrachten.
 
     def _airco_sessie(self, device_id: str) -> dict[str, Any]:
@@ -3997,6 +3998,9 @@ class ChargerCoach:
             except (TypeError, ValueError):
                 kamer = None
         modi = [str(m).lower() for m in attrs.get("hvac_modes") or []]
+        aan_op = str(eigen.get("run_on") or AIRCO_AAN_OP[0])
+        if aan_op not in AIRCO_AAN_OP:
+            aan_op = AIRCO_AAN_OP[0]
         try:
             stap = float(attrs.get("target_temp_step") or AIRCO_STAP_C)
         except (TypeError, ValueError):
@@ -4011,7 +4015,7 @@ class ChargerCoach:
             vermogen_w=vermogen,
             kan_verwarmen=not modi or "heat" in modi,
             kan_koelen=not modi or "cool" in modi,
-            alleen_zon=bool(eigen.get("solar_only")),
+            aan_op=aan_op,
             coach_sinds=sessie["aan_sinds"],
             coach_reden=sessie["reden"],
         )
@@ -4062,7 +4066,7 @@ class ChargerCoach:
             "target_c": airco.doel_c,
             "power_w": None if watts is None else round(watts),
             "vermogen_w": vermogen,
-            "solar_only": airco.alleen_zon,
+            "run_on": aan_op,
             "paused": bool(eigen.get("paused")),
             "dynamic": bool(prijzen),
             "resident_until": sessie["bewoner_tot"].isoformat() if sessie["bewoner_tot"] else None,

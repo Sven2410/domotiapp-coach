@@ -423,10 +423,12 @@ class AircoCoachSensor(CoachEntiteit, SensorEntity):
             "ruimte": ruimte_naam(self._settings, self._device),
             "kamer": st.get("room_c"),
             "doel": st.get("target_c"),
-            "alleen_zon": bool(eigen.get("solar_only")),
+            # Waarop hij aan mag: "zon", "goedkoop" of "beide" (v0.119.1), de
+            # select `aan_op`.
+            "aan_op": st.get("run_on") or "zon",
             "pauze": bool(eigen.get("paused")),
-            # Bij een vast contract is er geen goedkoper uur, en zegt "alleen op
-            # zon" niets: de kaart verbergt die schakelaar dan.
+            # Bij een vast contract is er geen goedkoper uur, en zegt de keuze
+            # niets: de kaart kan de select dan verbergen.
             "dynamisch": bool(st.get("dynamic")),
             "bewoner_tot": met_zone(st.get("resident_until")),
             "entiteiten": entiteiten_van(self._device),

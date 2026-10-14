@@ -109,16 +109,23 @@ function vaatwasser() {
 }
 
 /**
- * Een airco (v0.119.0): welke temperatuur de bewoner wil, of hij alleen op zon
- * aan mag, en de pauze. De coach zet die temperatuur op de airco en kiest zelf
- * verwarmen of koelen; zie docs/airco.md.
+ * Een airco (v0.119.0): welke temperatuur de bewoner wil, waarop hij aan mag
+ * (v0.119.1: zon, goedkope uren of beide) en de pauze. De coach zet die
+ * temperatuur op de airco en kiest zelf verwarmen of koelen; zie docs/airco.md.
  */
 function airco() {
   return `
     ${getal("data-vk-airco", "target_c", "Gewenste temperatuur (°C)", 'min="7" max="35" step="0.5"', "wat er op de airco staat",
-      "De coach zet de airco aan als er zon over is, of op een uur dat goedkoper is dan gemiddeld, zolang het in de kamer nog niet deze temperatuur is. Kouder dan dit: verwarmen. Warmer: koelen.")}
-    ${vink("data-vk-airco", "solar_only", "Alleen op zon.",
-      "Niet op een goedkoop uur, alleen als er zon over is. Bij een vast contract gaat hij sowieso alleen op zon aan.")}
+      "Kouder dan dit: hij verwarmt bij. Warmer: hij koelt bij. Op temperatuur doet hij niets.")}
+    <div class="row">
+      <label for="vk-aan-op">Aan op</label>
+      <select id="vk-aan-op" data-vk-airco="run_on">
+        <option value="zon">Zon: alleen met zon over</option>
+        <option value="goedkoop">Goedkope uren: uren onder het daggemiddelde</option>
+        <option value="beide">Beide: zon over of een goedkoop uur</option>
+      </select>
+      <span class="sub">De coach zet de airco nooit zomaar aan om de temperatuur te houden: alleen om bij te verwarmen of bij te koelen als er zon over is, of op een uur dat goedkoper is dan gemiddeld, zoals je hier kiest. Bij een vast contract is geen uur goedkoper dan een ander.</span>
+    </div>
     ${vink("data-vk-airco", "paused", "Pauze.",
       "De coach doet niets met de airco. Wat hij zelf aanzette, zet hij uit.")}`;
 }
@@ -154,7 +161,8 @@ export function vulVoorkeuren(root, device, actief = null) {
     zet(el, b[sleutel] ?? standaard);
   }
   for (const el of root.querySelectorAll("[data-vk-airco]")) {
-    zet(el, (device?.airco ?? {})[el.dataset.vkAirco]);
+    const sleutel = el.dataset.vkAirco;
+    zet(el, (device?.airco ?? {})[sleutel] ?? (sleutel === "run_on" ? "zon" : undefined));
   }
   for (const el of root.querySelectorAll("[data-vk-auto]")) {
     const [id, sleutel] = el.dataset.vkAuto.split(":");
@@ -212,6 +220,7 @@ export function voorkeurWijziging(el) {
   if (el.dataset.vkAirco) {
     const sleutel = el.dataset.vkAirco;
     if (el.type === "checkbox") return { airco: { [sleutel]: el.checked } };
+    if (sleutel === "run_on") return { airco: { run_on: el.value } };
     const n = getalVan();
     // Leeg is: wat er op de airco staat.
     if (n === null) return { airco: { target_c: null } };

@@ -5097,10 +5097,14 @@ def plan_boiler(
 # De eigenaar op 14-10-2026: "hij moet de airco aan zetten als er overschot is en
 # als de temperatuur nog niet bereikt is. Hij mag trouwens wel de temperatuur
 # instellen en de modus wijzigen van verwarmen en koelen. De klant stelt gewoon op
-# de kaart in welke temperatuur het moet zijn en kan instellen alleen op zon aan
-# zetten." Daarbij: de goedkoopste uren zijn elk uur onder het gemiddelde van die
-# dag, en zet de bewoner hem zelf aan of uit, dan blijft de coach er de rest van
-# de dag vanaf (dat laatste in coach.py, `_one_airco`).
+# de kaart in welke temperatuur het moet zijn." En na v0.119.0, die hem ook op een
+# goedkoop uur aanzette: "de airco moet alleen bijverwarmen of koelen bij
+# overschot he! niet gewoon aan om de temperatuur te regelen", en meteen daarna:
+# "goedkoop uur mag de bewoner zelf kiezen dus 3 opties of op zon of goedkope uren
+# of beide." Standaard dus alleen op zon (`AIRCO_AAN_OP`, v0.119.1). Goedkoop is
+# elk uur onder het gemiddelde van die dag. Zet de bewoner hem zelf aan of uit,
+# dan blijft de coach er de rest van de dag vanaf (dat laatste in coach.py,
+# `_one_airco`).
 #
 # De coach verzint geen temperatuur en schuift er niet mee: hij zet de
 # temperatuur die de bewoner koos op de airco, kiest verwarmen of koelen, en zet
@@ -5116,6 +5120,9 @@ AIRCO_STAP_C = 0.5
 # De standen van een airco, zoals de kaart ze leest (het contract, entiteit.py).
 AIRCO_STANDEN = ("zon", "goedkoop", "op_temperatuur", "uit", "bewoner", "pauze", "geen_meting")
 
+# Waarop de bewoner hem aan laat gaan; de eerste is de standaard.
+AIRCO_AAN_OP = ("zon", "goedkoop", "beide")
+
 
 @dataclass
 class Airco:
@@ -5128,11 +5135,12 @@ class Airco:
     kamer_c: float | None
     doel_c: float | None
     stap_c: float = AIRCO_STAP_C
-    # Wat hij trekt als hij draait: gemeten, of van het typeplaatje.
+    # Wat hij trekt als hij draait: van het typeplaatje, of gemeten.
     vermogen_w: float | None = None
     kan_verwarmen: bool = True
     kan_koelen: bool = True
-    alleen_zon: bool = False
+    # Waarop de bewoner hem aan laat gaan: "zon", "goedkoop" of "beide".
+    aan_op: str = "zon"
     # Sinds wanneer de coach hem aanzette, en waarom ("zon" of "goedkoop"). None
     # als de coach hem niet aanzette: dan zet de coach hem ook niet uit.
     coach_sinds: datetime | None = None
@@ -5157,6 +5165,10 @@ def _graden(waarde: float) -> str:
     """Een temperatuur zoals het paneel hem schrijft: 21 °C, 21,5 °C."""
     tekst = f"{waarde:.1f}".rstrip("0").rstrip(".")
     return f"{tekst} °C".replace(".", ",")
+
+
+def _kw(watt: float) -> str:
+    return f"{watt / 1000:.1f} kW".replace(".", ",")
 
 
 def airco_goedkoop(prices: list[dict], now: datetime) -> tuple[bool, float | None, float | None]:
@@ -5196,17 +5208,17 @@ def airco_nodig(airco: Airco) -> str | None:
 
 
 def plan_airco(
-    now: datetime,
-    prices: list[dict],
-    airco: Airco,
-    surplus_w: float | None = None,
+    now: datetime, prices: list[dict], airco: Airco, surplus_w: float | None = None
 ) -> AircoBesluit:
-    """Of de airco nu aan hoort, op zon of op een goedkoop uur.
+    """Of de airco nu aan hoort: met zon over of op een goedkoop uur, zoals de bewoner koos.
 
-    `surplus_w` is wat er naar het net zou gaan als deze airco uit stond (valkuil
-    2 bij de boiler: anders eet hij zijn eigen overschot op en zet hij zichzelf
-    uit). De bewoner die zelf schakelde en de pauze staan in coach.py, want die
-    gaan over wat er gebeurde en niet over de som.
+    Alleen als de kamer het nodig heeft, en nooit "gewoon aan" om de temperatuur
+    te houden: zonder zon over (of een goedkoop uur, als de bewoner dat koos) gaat
+    hij niet aan, wat het in de kamer ook is. `surplus_w` is wat er naar het net
+    zou gaan als deze airco uit stond (valkuil 2 bij de boiler: anders eet hij
+    zijn eigen overschot op en zet hij zichzelf uit). De bewoner die zelf
+    schakelde en de pauze staan in coach.py, want die gaan over wat er gebeurde
+    en niet over de som.
     """
     eigen = airco.coach_sinds is not None and airco.aan
     if airco.kamer_c is None or airco.doel_c is None:
@@ -5215,43 +5227,57 @@ def plan_airco(
             reason="De coach weet de temperatuur in de kamer niet, dus hij laat de airco met rust.",
         )
 
-    werk = "verwarmt" if airco.modus == "heat" else "koelt"
     nodig = airco_nodig(airco)
+    op_zon = airco.aan_op in ("zon", "beide")
+    op_prijs = airco.aan_op in ("goedkoop", "beide")
     zon = (
-        airco.vermogen_w is not None and airco.vermogen_w > 0
+        op_zon and airco.vermogen_w is not None and airco.vermogen_w > 0
         and surplus_w is not None and surplus_w >= airco.vermogen_w
     )
-    goedkoop, prijs, gemiddeld = (False, None, None) if airco.alleen_zon else airco_goedkoop(prices, now)
+    goedkoop, prijs, gemiddeld = airco_goedkoop(prices, now) if op_prijs else (False, None, None)
     doel = _graden(airco.doel_c)
     kamer = _graden(airco.kamer_c)
 
+    def waarom(werk: str) -> str:
+        if zon:
+            return f"Er is {_kw(surplus_w)} zon over. Hij {werk} naar {doel}; het is nu {kamer}."
+        return (
+            f"Stroom kost nu {_euro(prijs)}, onder het gemiddelde van vandaag ({_euro(gemiddeld)}). "
+            f"Hij {werk} naar {doel}; het is nu {kamer}."
+        )
+
     if eigen:
         if zon or goedkoop:
-            stand = ("zon" if zon else "goedkoop") if nodig else "op_temperatuur"
+            stand = "zon" if zon else "goedkoop"
             if not nodig:
-                reden = f"Het is {kamer}, en je wilt {doel}. De airco houdt het zo."
-            elif zon:
-                reden = f"Er is {surplus_w / 1000:.1f} kW zon over. Hij {werk} naar {doel}; het is nu {kamer}.".replace(".", ",", 1)
-            else:
-                reden = (
-                    f"Stroom kost nu {_euro(prijs)}, onder het gemiddelde van vandaag ({_euro(gemiddeld)}). "
-                    f"Hij {werk} naar {doel}; het is nu {kamer}."
+                return AircoBesluit(
+                    aan=None, modus=airco.modus, stand="op_temperatuur", rule="op-temperatuur",
+                    reason=f"Het is {kamer}, en je wilt {doel}. De airco houdt het zo.",
                 )
-            return AircoBesluit(aan=None, modus=airco.modus, stand=stand, rule=stand, reason=reden)
+            return AircoBesluit(
+                aan=None, modus=airco.modus, stand=stand, rule=stand,
+                reason=waarom("verwarmt" if airco.modus == "heat" else "koelt"),
+            )
         # Een wolk: hij blijft even aan, want een airco gaat niet graag steeds
         # aan en uit. Dezelfde tien minuten als de paal (`MIN_RUN_MINUTES`).
         if now - airco.coach_sinds < timedelta(minutes=MIN_RUN_MINUTES):
             stand = airco.coach_reden if airco.coach_reden in ("zon", "goedkoop") else "zon"
             return AircoBesluit(
                 aan=None, modus=airco.modus, stand=stand, rule="hold",
-                reason="Er is even minder zon. Hij blijft nog even aan: een airco gaat niet graag steeds aan en uit.",
+                reason=(
+                    "Er is even minder zon. Hij blijft nog even aan: een airco gaat niet graag steeds aan en uit."
+                    if stand == "zon" else
+                    "Hij blijft nog even aan: een airco gaat niet graag steeds aan en uit."
+                ),
             )
-        reden = (
-            "De zon is op, dus de coach zet hem uit."
-            if airco.coach_reden == "zon" or airco.alleen_zon or not prices
-            else "Het goedkope uur is voorbij, dus de coach zet hem uit."
+        return AircoBesluit(
+            aan=False, modus=None, stand="uit", rule="uit",
+            reason=(
+                "Het goedkope uur is voorbij, dus de coach zet hem uit."
+                if airco.coach_reden == "goedkoop" else
+                "Er is geen zon meer over, dus de coach zet hem uit."
+            ),
         )
-        return AircoBesluit(aan=False, modus=None, stand="uit", rule="uit", reason=reden)
 
     if nodig is None:
         return AircoBesluit(
@@ -5259,17 +5285,17 @@ def plan_airco(
             reason=f"Het is {kamer}, en je wilt {doel}. Er hoeft niets te gebeuren.",
         )
     werk = "verwarmen" if nodig == "heat" else "koelen"
-    if zon:
+    if zon or goedkoop:
+        stand = "zon" if zon else "goedkoop"
+        return AircoBesluit(aan=True, modus=nodig, stand=stand, rule=stand, reason=waarom(f"gaat {werk}"))
+    if not op_zon:
         return AircoBesluit(
-            aan=True, modus=nodig, stand="zon", rule="zon",
-            reason=f"Er is {surplus_w / 1000:.1f} kW zon over, dus hij gaat {werk} naar {doel}; het is nu {kamer}.".replace(".", ",", 1),
-        )
-    if goedkoop:
-        return AircoBesluit(
-            aan=True, modus=nodig, stand="goedkoop", rule="goedkoop",
+            aan=None, modus=None, stand="uit", rule="wacht",
             reason=(
-                f"Stroom kost nu {_euro(prijs)}, onder het gemiddelde van vandaag ({_euro(gemiddeld)}). "
-                f"Hij gaat {werk} naar {doel}; het is nu {kamer}."
+                f"Het is {kamer}, en je wilt {doel}. Hij gaat {werk} op een uur onder het gemiddelde van vandaag."
+                if prices else
+                f"Het is {kamer}, en je wilt {doel}. Je koos goedkope uren, maar bij een vast contract "
+                f"kost elk uur hetzelfde. Kies zon of beide, dan gaat hij aan als er zon over is."
             ),
         )
     if airco.vermogen_w is None or airco.vermogen_w <= 0:
@@ -5281,11 +5307,9 @@ def plan_airco(
                 "het ook zodra de airco een keer gedraaid heeft."
             ),
         )
-    wanneer = (
-        f"zodra er {airco.vermogen_w / 1000:.1f} kW zon over is".replace(".", ",", 1)
-        if airco.alleen_zon or not prices
-        else f"zodra er {airco.vermogen_w / 1000:.1f} kW zon over is, of op een uur onder het gemiddelde van vandaag".replace(".", ",", 1)
-    )
+    wanneer = f"zodra er {_kw(airco.vermogen_w)} zon over is"
+    if op_prijs and prices:
+        wanneer += ", of op een uur onder het gemiddelde van vandaag"
     return AircoBesluit(
         aan=None, modus=None, stand="uit", rule="wacht",
         reason=f"Het is {kamer}, en je wilt {doel}. Hij gaat {werk} {wanneer}.",

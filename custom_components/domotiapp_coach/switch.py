@@ -34,12 +34,12 @@ async def async_setup_entry(
         lambda device: device.get("type") == "thuisbatterij",
         lambda device, stand, settings: [VakantieSwitch(device, stand)],
     )
-    # De airco (v0.119.0): alleen op zon, en de pauze.
+    # De airco (v0.119.0): de pauze. Waarop hij aan mag is sinds v0.119.1 een
+    # select met drie keuzes (`AanOpSelect` in select.py).
     await async_per_apparaat(
         hass, entry, async_add_entities,
         lambda device: device.get("type") == "airco",
         lambda device, stand, settings: [
-            AircoSchakelaar(device, stand, "alleen_zon", "solar_only", "mdi:solar-power"),
             AircoSchakelaar(device, stand, "pauze", "paused", "mdi:pause-circle-outline"),
         ],
     )
@@ -110,7 +110,7 @@ class VakantieSwitch(CoachEntiteit, SwitchEntity):
 
 
 class AircoSchakelaar(CoachEntiteit, SwitchEntity):
-    """Een keuze van de bewoner voor zijn airco (v0.119.0): alleen op zon, of pauze.
+    """Een keuze van de bewoner voor zijn airco (v0.119.0): de pauze.
 
     Hetzelfde veld als in Instellen achter de kaart (`airco` in de instellingen
     van het apparaat). Bij pauze zet de coach uit wat hij zelf aanzette en doet

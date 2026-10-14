@@ -3422,20 +3422,38 @@ controle("daarna gaat hij uit", weg75.aan is False and weg75.stand == "uit", f"{
 vreemd75 = plan_airco75(NU75, [], airco75(aan=True, modus="cool"), surplus_w=0.0)
 controle("wat de coach niet aanzette zet hij ook niet uit", vreemd75.aan is None, f"{vreemd75}")
 
-# Een dynamisch contract: elk uur onder het gemiddelde van vandaag.
+# Een dynamisch contract: elk uur onder het gemiddelde van vandaag, maar alleen als
+# de bewoner dat koos. De eigenaar na v0.119.0: "de airco moet alleen bijverwarmen of
+# koelen bij overschot he! niet gewoon aan om de temperatuur te regelen", en: "goedkoop
+# uur mag de bewoner zelf kiezen dus 3 opties of op zon of goedkope uren of beide."
 prijzen75 = dag75([0.30] * 13 + [0.10] + [0.30] * 10)
-goed75 = plan_airco75(NU75, prijzen75, airco75(), surplus_w=0.0)
-print(f"  13:00 kost 0,10, gemiddeld 0,29: {goed75.aan} {goed75.stand}: {goed75.reason}")
-controle("een uur onder het daggemiddelde, zonder zon: aan", goed75.aan is True and goed75.stand == "goedkoop",
-         f"{goed75}")
-alleen75 = plan_airco75(NU75, prijzen75, airco75(alleen_zon=True), surplus_w=0.0)
-controle("met alleen op zon niet", alleen75.aan is None and alleen75.stand == "uit", f"{alleen75}")
-duur75 = plan_airco75(NU75, dag75([0.10] * 13 + [0.30] + [0.10] * 10), airco75(), surplus_w=0.0)
+standaard75 = plan_airco75(NU75, prijzen75, airco75(), surplus_w=0.0)
+print(f"  13:00 kost 0,10, standaard: {standaard75.aan} {standaard75.stand}: {standaard75.reason}")
+controle("standaard alleen zon: een goedkoop uur zonder zon zet hem niet aan",
+         standaard75.aan is None and standaard75.stand == "uit" and "goedkoop" not in standaard75.reason
+         and "gemiddelde" not in standaard75.reason, f"{standaard75}")
+goed75 = plan_airco75(NU75, prijzen75, airco75(aan_op="goedkoop"), surplus_w=0.0)
+print(f"  13:00 kost 0,10, gemiddeld 0,29, goedkope uren: {goed75.aan} {goed75.stand}: {goed75.reason}")
+controle("op goedkope uren: een uur onder het daggemiddelde, zonder zon: aan",
+         goed75.aan is True and goed75.stand == "goedkoop", f"{goed75}")
+beide75 = plan_airco75(NU75, prijzen75, airco75(aan_op="beide"), surplus_w=0.0)
+controle("op beide ook", beide75.aan is True and beide75.stand == "goedkoop", f"{beide75}")
+alleenprijs75 = plan_airco75(NU75, dag75([0.10] * 13 + [0.30] + [0.10] * 10), airco75(aan_op="goedkoop"),
+                             surplus_w=3000.0)
+controle("op goedkope uren: veel zon op een duur uur zet hem niet aan", alleenprijs75.aan is None, f"{alleenprijs75}")
+beidezon75 = plan_airco75(NU75, dag75([0.10] * 13 + [0.30] + [0.10] * 10), airco75(aan_op="beide"),
+                          surplus_w=3000.0)
+controle("op beide wel, op zon", beidezon75.aan is True and beidezon75.stand == "zon", f"{beidezon75}")
+duur75 = plan_airco75(NU75, dag75([0.10] * 13 + [0.30] + [0.10] * 10), airco75(aan_op="beide"), surplus_w=0.0)
 controle("een uur boven het gemiddelde: niet", duur75.aan is None, f"{duur75}")
-vlak75 = plan_airco75(NU75, dag75([0.25] * 24), airco75(), surplus_w=0.0)
+vlak75 = plan_airco75(NU75, dag75([0.25] * 24), airco75(aan_op="beide"), surplus_w=0.0)
 controle("elk uur even duur: geen uur is goedkoper", vlak75.aan is None, f"{vlak75}")
+vast75 = plan_airco75(NU75, [], airco75(aan_op="goedkoop"), surplus_w=3000.0)
+controle("goedkope uren bij een vast contract: nooit, en de reden zegt waarom",
+         vast75.aan is None and "vast contract" in vast75.reason, f"{vast75}")
 klaar75 = plan_airco75(NU75 + dt.timedelta(hours=1), prijzen75,
-                        airco75(aan=True, modus="cool", coach_sinds=NU75, coach_reden="goedkoop"), surplus_w=0.0)
+                        airco75(aan=True, modus="cool", coach_sinds=NU75, coach_reden="goedkoop", aan_op="goedkoop"),
+                        surplus_w=0.0)
 controle("het goedkope uur voorbij: uit", klaar75.aan is False
          and "goedkope uur is voorbij" in klaar75.reason, f"{klaar75}")
 

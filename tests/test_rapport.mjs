@@ -2790,9 +2790,15 @@ proef("het rendement op de batterijkaart: gemeten, opgegeven, ongeveer uit de ac
 });
 
 // De eigenaar op 14-10-2026 over de airco: "De klant stelt gewoon op de kaart in welke temperatuur
-// het moet zijn en kan instellen alleen op zon aan zetten." Het typeplaatje is van de installateur.
-proef("de airco: stuurbaar met een climate, een vermogen, en de wens van de bewoner in Instellen (v0.119.0)", () => {
-  const leeg = { type: "airco", controllable: true, entities: {} };
+// het moet zijn", en na v0.119.0: "goedkoop uur mag de bewoner zelf kiezen dus 3 opties of op zon of
+// goedkope uren of beide" en "Bij apparaten toevoegen alleen nog de optie Mitsubishi Electric kunnen
+// kiezen." Het typeplaatje is van de installateur.
+proef("de airco: alleen Mitsubishi Electric, een climate, een vermogen, en de keuze van de bewoner (v0.119.1)", () => {
+  assert.deepEqual(brandsFor("airco").map((b) => b.id), ["mitsubishi_electric"], "één merk");
+  const zonder = { type: "airco", controllable: true, entities: {} };
+  assert.equal(canSteer(zonder), false, "zonder merk niet");
+  assert.deepEqual(brandFields(zonder), [], "zonder merk nog geen velden");
+  const leeg = { ...zonder, brand: "mitsubishi_electric" };
   assert.equal(canSteer(leeg), true);
   assert.deepEqual(brandFields(leeg).map((f) => f.key), ["climate", "temperature"]);
   assert.deepEqual(missingForControl(leeg), ["Airco", "Vermogenssensor of typeplaatje"]);
@@ -2800,20 +2806,28 @@ proef("de airco: stuurbaar met een climate, een vermogen, en de wens van de bewo
   assert.deepEqual(missingForControl({ ...leeg, entities: { climate: "climate.kamer" }, entity: "sensor.airco_w" }), []);
   assert.equal(canHaveDeadline({ ...leeg, entities: { climate: "climate.kamer" } }), false, "geen klaar-tijd");
 
-  const device = { id: "a", type: "airco", airco: { power_w: 1200, target_c: 22.5, solar_only: true, paused: false } };
+  const device = { id: "a", type: "airco", brand: "mitsubishi_electric",
+    airco: { power_w: 1200, target_c: 22.5, run_on: "beide", paused: false } };
   assert.equal(heeftVoorkeuren(device), true);
   const html = voorkeurHtml(device);
   assert.ok(!/power_w|typeplaatje/i.test(html), "het typeplaatje staat niet bij de bewoner");
+  assert.ok(!/solar_only/.test(html), "geen vinkje alleen op zon meer");
+  assert.match(html, /value="zon"[^>]*>Zon/);
+  assert.match(html, /value="goedkoop"/);
+  assert.match(html, /value="beide"/);
   const velden = nepVelden(html);
   vulVoorkeuren(velden, device);
   assert.equal(velden.veld("data-vk-airco", "target_c").value, 22.5);
-  assert.equal(velden.veld("data-vk-airco", "solar_only").checked, true);
+  assert.equal(velden.veld("data-vk-airco", "run_on").value, "beide");
   assert.equal(velden.veld("data-vk-airco", "paused").checked, false);
+  const nieuw = nepVelden(html);
+  vulVoorkeuren(nieuw, { ...device, airco: {} });
+  assert.equal(nieuw.veld("data-vk-airco", "run_on").value, "zon", "standaard zon");
   const doel = velden.veld("data-vk-airco", "target_c");
   assert.deepEqual(voorkeurWijziging({ ...doel, value: "21.3" }), { airco: { target_c: 21.5 } }, "op een halve graad");
   assert.deepEqual(voorkeurWijziging({ ...doel, value: "" }), { airco: { target_c: null } }, "leeg is wat er op de airco staat");
-  const zon = velden.veld("data-vk-airco", "solar_only");
-  assert.deepEqual(voorkeurWijziging({ ...zon, checked: false }), { airco: { solar_only: false } });
+  const keuze = velden.veld("data-vk-airco", "run_on");
+  assert.deepEqual(voorkeurWijziging({ ...keuze, value: "goedkoop" }), { airco: { run_on: "goedkoop" } });
 });
 
 // Gemeten op 10-10-2026 in Chrome: "Hoogste accustand in vakantiestand" stond in beeld met
