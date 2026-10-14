@@ -5885,6 +5885,9 @@ coach110.state["dev-vw"] = dict(WACHT110)
 
 
 class Invoer110:
+    # Een echte ConfigEntry heeft altijd een id; het opruimen zoekt daaronder (v0.118.0).
+    entry_id = "entry-coach"
+
     def __init__(self):
         self.afmelden = []
 
@@ -8579,6 +8582,100 @@ print(f"  zonder sensor {b153b['soc_ask']}/{b153b['soc_sensor']}, gast {b153c['s
 controle("zonder sensor: vragen, maar geen sensor", b153b["soc_ask"] is True and b153b["soc_sensor"] is False, f"{b153b}")
 controle("een gast: niet vragen", b153c["soc_ask"] is False and b153c["soc_sensor"] is False, f"{b153c}")
 controle("zonder kabel: niet vragen", b153d["rule"] == "disconnected" and b153d["soc_ask"] is False, f"{b153d}")
+
+print("=== 154. het rendement uit de eigen tellers van de batterij, alleen voor de kaart (v0.118.0) ===")
+# Zonder kWh-meter op de batterij stond er "Rendement: nog niet bekend". De eigen
+# tellers van de batterij meten aan de accukant en zien het verlies in de
+# omvormer niet; in de eerste woning telden ze zelfs meer eruit dan erin. De
+# eigenaar op 14-10-2026: "ja alleen op de kaart". Dus wel bewaard, nooit gerekend.
+
+
+def tellers154(erin, eruit, apparaat=None, rte_percent=None):
+    apparaat = apparaat or ZONDER_METER
+    eigen = {**apparaat,
+             "entities": {**apparaat["entities"], "accu_in": "sensor.accu_geladen", "accu_out": "sensor.accu_ontladen"},
+             "battery": {**apparaat["battery"], "rte_percent": rte_percent}}
+    waarden = huis75()
+    waarden["sensor.accu_geladen"] = {"state": str(erin), "attributes": {"unit_of_measurement": "kWh"}}
+    waarden["sensor.accu_ontladen"] = {"state": str(eruit), "attributes": {"unit_of_measurement": "kWh"}}
+    inst = instellingen(devices=[LAADPAAL, eigen])
+    hass, store, coach = bouw(waarden, inst)
+    b = asyncio.run(ronde75(hass, coach, dt.datetime(2026, 9, 21, 21, 0)))
+    return b, (store.instellingen.get("battery_state") or [{}])[0]
+
+
+b154, rij154 = tellers154(250.0, 220.0)
+print(f"  250 erin, 220 eruit, 14,6 kWh: rte_accu {rij154.get('rte_accu')}, rekent met {b154.get('rte')}, "
+      f"{b154.get('rule')}")
+controle("de tellers van de batterij zelf: 88%, bewaard voor de kaart",
+         rij154.get("rte_accu") == 0.88, f"{rij154}")
+controle("en de coach rekent er niet mee: geen rendement, geen meting in `rte`",
+         b154.get("rte") is None and rij154.get("rte") is None, f"{b154.get('rte')} {rij154.get('rte')}")
+b154b, rij154b = tellers154(250.0, 220.0, rte_percent=80)
+controle("met een ingevuld rendement rekent hij met dat, de tellers ernaast veranderen niets",
+         b154b.get("rte") == 0.8 and rij154b.get("rte_accu") == 0.88, f"{b154b.get('rte')} {rij154b}")
+_, rij154c = tellers154(100.0, 88.0)
+_, rij154d = tellers154(221.0, 226.7)
+print(f"  te weinig doorzet: {rij154c.get('rte_accu')}, meer eruit dan erin: {rij154d.get('rte_accu')}")
+controle("onder tien keer de inhoud aan doorzet nog niets", rij154c.get("rte_accu") is None, f"{rij154c}")
+controle("meer eruit dan erin, zoals in de eerste woning: niets", rij154d.get("rte_accu") is None, f"{rij154d}")
+b154e, rij154e = tellers154(250.0, 220.0, apparaat=BATTERIJ)
+controle("met een kWh-meter wint die in de sommen, en de tellers staan er los naast",
+         b154e.get("rte") == 0.736 and rij154e.get("rte") == 0.736 and rij154e.get("rte_accu") == 0.88,
+         f"{b154e.get('rte')} {rij154e}")
+
+print("=== 155. het oude apparaat opruimen zonder de afgeschreven zoekfunctie (v0.118.0) ===")
+# Home Assistant 2026.10 schreef in het systeemlog dat `async_get_device` op een
+# identifier is afgeschreven en in 2027.8 ophoudt. Nu zoekt de coach onder zijn
+# eigen integratie, met `async_entries_for_config_entry`.
+_dr155 = sys.modules["homeassistant.helpers.device_registry"]
+_er155 = _types.ModuleType("homeassistant.helpers.entity_registry")
+
+
+class Apparaten155:
+    def __init__(self, apparaten):
+        self.apparaten = apparaten
+        self.weg = []
+
+    def async_get_device(self, **_):
+        raise AssertionError("afgeschreven sinds Home Assistant 2026.10")
+
+    def async_remove_device(self, device_id):
+        self.weg.append(device_id)
+
+
+def opruimen155(apparaten, entiteiten):
+    reg = Apparaten155(apparaten)
+    _dr155.async_get = lambda hass: reg
+    _dr155.async_entries_for_config_entry = lambda r, entry_id: [a for a in r.apparaten if a.entry == entry_id]
+    _er155.async_get = lambda hass: None
+    _er155.async_entries_for_device = lambda r, device_id, include_disabled_entities=False: entiteiten.get(device_id, [])
+    oud_er = sys.modules.get("homeassistant.helpers.entity_registry")
+    oud_later = gebeurtenis.async_call_later
+    sys.modules["homeassistant.helpers.entity_registry"] = _er155
+    gebeurtenis.async_call_later = lambda hass, wacht, actie: actie(None)
+    try:
+        entiteitmod.oude_coach_opruimen(None, "entry-coach")
+    finally:
+        gebeurtenis.async_call_later = oud_later
+        if oud_er is None:
+            del sys.modules["homeassistant.helpers.entity_registry"]
+        else:
+            sys.modules["homeassistant.helpers.entity_registry"] = oud_er
+    return reg.weg
+
+
+def apparaat155(id_, entry, sleutel):
+    return _types.SimpleNamespace(id=id_, entry=entry, identifiers={("domotiapp_coach", sleutel)})
+
+
+weg155 = opruimen155([apparaat155("a-oud", "entry-coach", "coach"), apparaat155("a-vw", "entry-coach", "dev-vw")], {})
+weg155b = opruimen155([apparaat155("a-oud", "entry-coach", "coach")], {"a-oud": ["sensor.iets"]})
+weg155c = opruimen155([apparaat155("a-vreemd", "entry-ander", "coach")], {})
+print(f"  leeg: {weg155}, met een entiteit: {weg155b}, van een andere integratie: {weg155c}")
+controle("het lege oude apparaat gaat weg, de rest blijft", weg155 == ["a-oud"], f"{weg155}")
+controle("hangt er nog iets aan, dan blijft het", weg155b == [], f"{weg155b}")
+controle("een apparaat met dezelfde naam onder een andere integratie blijft", weg155c == [], f"{weg155c}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

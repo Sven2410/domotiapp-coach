@@ -2764,6 +2764,27 @@ proef("de ventilator van de thuisbatterij: een veld, een grens die leeg begint, 
     ["Accustand: 39 %", "Temperatuur: 36,4 °C", "Ventilator: Aan"], JSON.stringify(rijen));
 });
 
+// De eigenaar op 14-10-2026, over "Rendement: nog niet bekend" zonder kWh-meter op de batterij:
+// "ja alleen op de kaart". De eigen tellers van de batterij als benadering, met dat erbij.
+proef("het rendement op de batterijkaart: gemeten, opgegeven, ongeveer uit de accu, of nog niet bekend", () => {
+  const velden = veldenVan({ type: "thuisbatterij", brand: "anker" });
+  for (const key of ["accu_in", "accu_out"]) {
+    const veld = velden.find((f) => f.key === key);
+    assert.ok(veld && !veld.needed && veld.hideRow, `${key}: optioneel, en zelf geen regel op de kaart`);
+  }
+  const staten = { "sensor.batterij_soc": { state: "39", attributes: { unit_of_measurement: "%" } } };
+  const feed = { get: (id) => staten[id] };
+  const regel = (battery, rij) => new LiveSource().sample(feed, {
+    sources: {},
+    devices: [{ id: "b", type: "thuisbatterij", brand: "overig", entity: "", entities: { soc: "sensor.batterij_soc" }, battery }],
+    battery_state: [{ device: "b", ...rij }],
+  }).devices[0].details.find((d) => d.label === "Rendement")?.text;
+  assert.equal(regel({}, { rte_accu: 0.8792 }), "ongeveer 88%, gemeten in de accu");
+  assert.equal(regel({ rte_percent: 80 }, { rte_accu: 0.8792 }), "80% opgegeven", "wat de coach gebruikt gaat voor");
+  assert.equal(regel({}, { rte: 0.736, rte_accu: 0.8792 }), "73,6% gemeten", "een kWh-meter gaat voor");
+  assert.equal(regel({}, {}), "nog niet bekend");
+});
+
 // Gemeten op 10-10-2026 in Chrome: "Hoogste accustand in vakantiestand" stond in beeld met
 // de vakantiestand uit. De rij had hidden, maar display: grid van .row won.
 proef("de rijen onder een vinkje van de batterij verdwijnen echt als het vinkje uit staat", () => {

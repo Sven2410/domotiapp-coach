@@ -257,7 +257,7 @@ async def async_per_apparaat(hass: HomeAssistant, entry: Any, async_add_entities
     entry.async_on_unload(hass.bus.async_listen(EVENT_SETTINGS_UPDATED, instellingen))
 
 
-def oude_coach_opruimen(hass: HomeAssistant) -> None:
+def oude_coach_opruimen(hass: HomeAssistant, entry_id: str) -> None:
     """Het apparaat "DomotiApp Coach" van v0.100.0 weghalen zodra er niets meer aan hangt.
 
     Tot v0.110.0 hing de startsensor van elke vaatwasser aan één apparaat voor de
@@ -278,7 +278,14 @@ def oude_coach_opruimen(hass: HomeAssistant) -> None:
     def opruimen(_now: Any) -> None:
         try:
             apparaten = dr.async_get(hass)
-            oud = apparaten.async_get_device(identifiers={(DOMAIN, "coach")})
+            # Gezocht onder de eigen integratie: `async_get_device` op een
+            # identifier is sinds Home Assistant 2026.10 afgeschreven, omdat die
+            # niet meer uniek hoeft te zijn over integraties heen.
+            oud = next(
+                (a for a in dr.async_entries_for_config_entry(apparaten, entry_id)
+                 if (DOMAIN, "coach") in a.identifiers),
+                None,
+            )
             if oud is None:
                 return
             if er.async_entries_for_device(er.async_get(hass), oud.id, include_disabled_entities=True):

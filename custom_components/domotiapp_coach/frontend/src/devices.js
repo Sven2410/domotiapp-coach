@@ -717,6 +717,23 @@ const BATTERY_FIELDS = (richtingNodig) => [
     filter: "all",
     hideRow: true,
   },
+  // Alleen voor de kaart (v0.118.0): "ongeveer 88%, gemeten in de accu". De
+  // coach rekent er niet mee, want deze tellers zien het verlies in de
+  // omvormer niet; zie `rte_accu` in coach.py.
+  {
+    key: "accu_in",
+    label: "Batterij zelf: geladen",
+    hint: "Optioneel, voor wie geen kWh-meter op de batterij heeft: de eigen teller van de batterij, wat erin ging. Dan staat er op de kaart ongeveer hoeveel er weer uit komt. De coach rekent er niet mee: deze tellers meten aan de accukant, zonder het verlies in de omvormer.",
+    filter: "all",
+    hideRow: true,
+  },
+  {
+    key: "accu_out",
+    label: "Batterij zelf: ontladen",
+    hint: "En wat eruit ging.",
+    filter: "all",
+    hideRow: true,
+  },
 ];
 
 export const BATTERY_BRANDS = [
