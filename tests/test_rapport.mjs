@@ -2830,6 +2830,24 @@ proef("de airco: alleen Mitsubishi Electric, een climate, een vermogen, en de ke
   assert.deepEqual(voorkeurWijziging({ ...keuze, value: "goedkoop" }), { airco: { run_on: "goedkoop" } });
 });
 
+// De eigenaar op 14-10-2026, bij de batterijkaart met "ontlaadt", "ongeveer 89%, gemeten in de accu"
+// en "de batterij zelf, met zijn eigen meter; de coach kijkt mee": "even alles met een hoofdletter beginnen."
+proef("een waarde op een apparaatkaart begint met een hoofdletter (v0.119.2)", async () => {
+  const { metHoofdletter } = await import("../custom_components/domotiapp_coach/frontend/src/format.js");
+  assert.equal(metHoofdletter("ontlaadt"), "Ontlaadt");
+  assert.equal(metHoofdletter("ongeveer 89%, gemeten in de accu"), "Ongeveer 89%, gemeten in de accu");
+  assert.equal(metHoofdletter("de batterij zelf, met zijn eigen meter; de coach kijkt mee"),
+    "De batterij zelf, met zijn eigen meter; de coach kijkt mee");
+  assert.equal(metHoofdletter("Eigen verbruik"), "Eigen verbruik");
+  assert.equal(metHoofdletter("58 % · 8,2 van 14,2 kWh"), "58 % · 8,2 van 14,2 kWh");
+  assert.equal(metHoofdletter("€ 4,26 in 17 dagen"), "€ 4,26 in 17 dagen");
+  assert.equal(metHoofdletter("—"), "—");
+  assert.equal(metHoofdletter(""), "");
+  assert.equal(metHoofdletter(undefined), "");
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
+  assert.match(bron, /value\.textContent = metHoofdletter\(row\.text\)/, "de kaart zet hem ervoor");
+});
+
 // Gemeten op 10-10-2026 in Chrome: "Hoogste accustand in vakantiestand" stond in beeld met
 // de vakantiestand uit. De rij had hidden, maar display: grid van .row won.
 proef("de rijen onder een vinkje van de batterij verdwijnen echt als het vinkje uit staat", () => {

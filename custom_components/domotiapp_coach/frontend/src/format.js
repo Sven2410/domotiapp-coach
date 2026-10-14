@@ -249,6 +249,15 @@ export function moment(raw) {
   return `${date.toLocaleDateString(LOCALE, { day: "2-digit", month: "2-digit" })} ${clock(date)}`;
 }
 
+/**
+ * Een waarde op een apparaatkaart begint met een hoofdletter (v0.119.2). De
+ * eigenaar op 14-10-2026, bij "ontlaadt" en "ongeveer 89%, gemeten in de accu"
+ * op de batterijkaart: "even alles met een hoofdletter beginnen." Op één plek
+ * en niet in elke tekst, zodat dezelfde tekst midden in een zin klein blijft.
+ * Een getal of een teken vooraan ("58 %", "€ 4,26") blijft zoals het is.
+ */
+export const metHoofdletter = (tekst) => String(tekst ?? "").replace(/^\p{Ll}/u, (c) => c.toUpperCase());
+
 /** Format euro amounts. */
 export function euro(value) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
