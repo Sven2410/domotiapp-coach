@@ -8477,6 +8477,38 @@ print(f"  {len(aanroepen151)} plekken die een besluit noteren")
 controle("elke aanroep van _async_noteer geeft het apparaat mee",
          len(aanroepen151) >= 7 and not zonder151, f"{len(aanroepen151)}: {zonder151}")
 
+print("=== 152. een auto met een sensor die zwijgt neemt een opgegeven stand aan (v0.116.2) ===")
+# De eigenaar op 14-10-2026, met de integratie van de auto even uit Home Assistant:
+# de coach vroeg om de accustand, maar het veld op de kaart stond er alleen bij een
+# auto zonder sensor. Het paneel vraagt het nu ook hier (`vraagAccustand` in
+# devices.js); deze proef legt vast dat de coach zo'n opgave ook gebruikt, en dat
+# de sensor weer voorgaat zodra hij iets zegt.
+auto152 = dict(LAADPAAL["cars"][0], soc_entity="sensor.auto_soc")
+paal152 = dict(LAADPAAL, cars=[auto152])
+inst152 = instellingen(devices=[paal152])
+huis152 = huis(teruglevering=0.0, afname=1200.0)
+huis152["sensor.auto_soc"] = "unavailable"
+hass152, _, coach152 = bouw(huis152, inst152)
+asyncio.run(ronde(coach152, inst152, paal=paal152))
+b152 = coach152.state["dev-laadpaal"]
+print(f"  sensor stil: {b152['rule']}, needs_soc={b152['needs_soc']}, soc_now={b152.get('soc_now')}")
+controle("zonder stand vraagt hij erom", b152["needs_soc"] and b152.get("soc_now") is None, f"{b152}")
+
+inst152["car_soc"] = [{"device": "dev-laadpaal", "car": "car-1", "percent": 40.0, "meter": 100.0}]
+asyncio.run(ronde(coach152, inst152, dt.datetime(2026, 8, 18, 14, 38), paal=paal152))
+b152 = coach152.state["dev-laadpaal"]
+print(f"  opgegeven 40%: {b152['rule']}, needs_soc={b152['needs_soc']}, soc_now={b152.get('soc_now')}, "
+      f"geschat={b152.get('soc_estimated')}")
+controle("met een opgave rekent hij met 40%, als schatting",
+         not b152["needs_soc"] and b152.get("soc_now") == 40.0 and b152.get("soc_estimated"), f"{b152}")
+
+hass152.states.zet("sensor.auto_soc", "70")
+asyncio.run(ronde(coach152, inst152, dt.datetime(2026, 8, 18, 14, 39), paal=paal152))
+b152 = coach152.state["dev-laadpaal"]
+print(f"  sensor terug op 70%: soc_now={b152.get('soc_now')}, geschat={b152.get('soc_estimated')}")
+controle("zegt de sensor weer iets, dan gaat die voor",
+         b152.get("soc_now") == 70.0 and not b152.get("soc_estimated"), f"{b152}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

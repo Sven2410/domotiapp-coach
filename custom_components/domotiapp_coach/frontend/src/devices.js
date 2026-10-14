@@ -967,6 +967,24 @@ export function socVeld(opgave, socNu) {
   return String(Math.round(Number.isFinite(nu) ? nu : Number(opgegeven)));
 }
 
+/**
+ * Of de kaart vraagt hoe vol deze auto is (v0.116.2): bij een auto zonder
+ * sensor, en ook bij een auto waarvan de sensor nu niets zegt. Tot v0.116.2
+ * alleen het eerste. De eigenaar op 14-10-2026, met de integratie van de auto
+ * even uit Home Assistant: de coach vroeg "geef de accustand door op de
+ * laadpaalkaart", "maar ik kan nergens de accustand doorgeven." De coach zelf
+ * nam een opgave toen al aan zodra de sensor zweeg (`_typed_soc` in coach.py);
+ * zegt de sensor weer iets, dan gaat die voor en verdwijnt het veld.
+ * Dezelfde grens als `_number` in coach.py. Een gast en een auto zonder
+ * accu in zijn profiel krijgen geen veld, want daar zegt een percentage niets.
+ */
+export function vraagAccustand(car, feed) {
+  if (!car || car.guest || !(Number(car.capacity_kwh) > 0)) return false;
+  if (!car.soc_entity) return true;
+  const stand = feed?.get(car.soc_entity)?.state;
+  return stand === undefined || stand === null || String(stand).trim() === "" || !Number.isFinite(Number(stand));
+}
+
 export const CAR_BRANDS = [
   { id: "ford", label: "Ford" },
   { id: "tesla", label: "Tesla" },

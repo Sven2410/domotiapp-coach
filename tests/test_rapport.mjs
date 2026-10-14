@@ -1497,6 +1497,36 @@ proef("'hoe vol is de auto nu' loopt live mee, en wat de bewoner typt blijft sta
   assert.ok(kaart.includes("delete field.dataset.bewerkt;"), "na doorgeven loopt hij weer mee");
 });
 
+// De eigenaar op 14-10-2026, met de integratie van de auto even uit Home Assistant: de
+// coach vroeg om de accustand op de laadpaalkaart, "maar ik kan nergens de accustand
+// doorgeven." Het veld stond er alleen bij een auto zonder sensor (v0.116.2).
+proef("'hoe vol is de auto nu' staat er ook als de sensor van de auto niets zegt (v0.116.2)", async () => {
+  const { vraagAccustand } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  const staten = {
+    "sensor.auto_soc": { state: "unavailable" },
+    "sensor.leeg": { state: "" },
+    "sensor.onbekend": { state: "unknown" },
+    "sensor.goed": { state: "68" },
+    "sensor.nul": { state: "0" },
+  };
+  const feed = { get: (id) => staten[id] };
+  const auto = (extra) => ({ id: "a", name: "Auto", capacity_kwh: 68, ...extra });
+  assert.equal(vraagAccustand(auto({}), feed), true, "zonder sensor, zoals altijd");
+  assert.equal(vraagAccustand(auto({ soc_entity: "sensor.auto_soc" }), feed), true, "de sensor is unavailable");
+  assert.equal(vraagAccustand(auto({ soc_entity: "sensor.onbekend" }), feed), true, "de sensor is unknown");
+  assert.equal(vraagAccustand(auto({ soc_entity: "sensor.leeg" }), feed), true, "de sensor is leeg");
+  assert.equal(vraagAccustand(auto({ soc_entity: "sensor.weg" }), feed), true, "de sensor bestaat niet meer");
+  assert.equal(vraagAccustand(auto({ soc_entity: "sensor.goed" }), feed), false, "de auto zegt het zelf");
+  assert.equal(vraagAccustand(auto({ soc_entity: "sensor.nul" }), feed), false, "0% is ook een stand");
+  assert.equal(vraagAccustand(auto({ soc_entity: "sensor.auto_soc", guest: true }), feed), false, "een gast niet");
+  assert.equal(vraagAccustand(auto({ capacity_kwh: 0 }), feed), false, "zonder accu zegt een percentage niets");
+  assert.equal(vraagAccustand(undefined, feed), false);
+  const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
+  assert.ok(kaart.includes("socPick.hidden = !(hangt && vraagAccustand(gekozen, this.feed_));"),
+    "de kaart vraagt het met dezelfde grens");
+  assert.ok(kaart.includes('"De auto geeft zijn accustand nu niet door. "'), "en zegt waarom");
+});
+
 proef("bij de batterij de grens voor de auto, op Voorkeuren de nachtstrategie (v0.90.0)", () => {
   const Apparaten = geregistreerd.get("dac-view-devices");
   const el = Object.create(Apparaten.prototype);
@@ -2777,8 +2807,9 @@ proef("de laadpaalkaart laat de accustand van de auto zien als die in Home Assis
     .filter((d) => d.label.startsWith("Accu"));
   assert.deepEqual(regels({ active_cars: [{ device: "p", car: "ford" }] }),
     [{ label: "Accu auto", text: "68 % · 13,4 van 19,7 kWh" }], "de gekozen auto");
-  assert.deepEqual(regels({ active_cars: [{ device: "p", car: "tesla" }] }),
-    [{ label: "Accu auto", text: "—" }], "een gekozen auto waarvan de sensor niets zegt");
+  // Tot v0.116.2 een regel met een streepje; nu vraagt de kaart de stand zelf.
+  assert.deepEqual(regels({ active_cars: [{ device: "p", car: "tesla" }] }), [],
+    "een gekozen auto waarvan de sensor niets zegt: geen streepje, de kaart vraagt het");
   assert.deepEqual(regels({}), [{ label: "Accu auto", text: "68 % · 13,4 van 19,7 kWh" }],
     "zonder keuze de eerste auto, net als de keuzelijst op de kaart");
   // De eigenaar op 29-09-2026: "als ik de gastauto kies blijft de accu auto stand staan
