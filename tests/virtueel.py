@@ -1050,12 +1050,13 @@ class Scenario:
     # Wat de coach van deze boiler al geleerd had (een rij zoals
     # `boiler_learned` in de instellingen); leeg is: hij begint met meten.
     boiler_geleerd: dict = field(default_factory=dict)
-    # Een airco (v0.119.0); None is geen. De temperatuur die de bewoner wil, of
-    # alleen op zon, en of er alleen een typeplaatje is (geen vermogenssensor).
-    # Het typeplaatje vult de installateur altijd in.
+    # Een airco (v0.119.0); None is geen. De temperatuur die de bewoner wil,
+    # waarop hij aan mag ("zon", "goedkoop" of "beide", v0.119.1), en of er
+    # alleen een typeplaatje is (geen vermogenssensor). Het typeplaatje vult de
+    # installateur altijd in.
     airco: Airco | None = None
     airco_doel: float = 23.0
-    airco_alleen_zon: bool = False
+    airco_aan_op: str = "zon"
     airco_plaatje: bool = False
     # Een thuisbatterij; None is geen. En of de coach de paal stuurt: in de
     # eerste woning deed iets anders dat, en dan ziet de coach alleen zijn
@@ -1441,11 +1442,12 @@ def instellingen(s: Scenario) -> dict:
             "id": "airco",
             "type": "airco",
             "name": "Airco",
+            "brand": "mitsubishi_electric",
             "controllable": True,
             "entity": "" if s.airco_plaatje else E["airco_vermogen"],
             "entities": {"climate": E["airco_klimaat"]},
             "airco": {"power_w": s.airco.vermogen_w, "target_c": s.airco_doel,
-                      "solar_only": s.airco_alleen_zon, "paused": False},
+                      "run_on": s.airco_aan_op, "paused": False},
         })
     if s.batterij is not None:
         bat = s.batterij

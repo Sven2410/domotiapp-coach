@@ -197,7 +197,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, hoe de coach prijslijsten leest, en de temperatuur met de melding en de ventilator | `docs/batterij.md` |
 | de vaatwasser: Home Connect, Home Connect Local, een domme vaatwasser, de eindtijd, na de klaar-tijd | `docs/vaatwasser.md` |
 | de boiler | `docs/boiler.md` |
-| de airco: aan op zon of een goedkoop uur, verwarmen of koelen naar de wens van de bewoner, de bewoner die wint, de cloud die een minuut doet, en het contract met de airco-kaart | `docs/airco.md` |
+| de airco: bijverwarmen of bijkoelen op zon (of op goedkope uren als de bewoner dat kiest), geen thermostaat, Mitsubishi Electric als merk, de bewoner die wint, de cloud die een minuut doet, en het contract met de airco-kaart | `docs/airco.md` |
 | Historie en het rapport, de tijdlijn in Historie, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, en de batterij op de kaart en in de pop-up | `docs/eerste-woning.md` |
 | het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat | `docs/paneel.md` |
 
@@ -254,7 +254,7 @@ dan de andere in dezelfde uitgave.
 | bestand | wat het doet |
 |---|---|
 | `planner.py` | alle denkwerk, kent Home Assistant niet, is los te draaien |
-| `planner.py`, onderaan | het denkwerk voor een apparaat met een programma: `plan_programma`, `programma_kosten`, `PROGRAMMAS`, en daaronder dat voor een boiler: `plan_boiler`, `boiler_schijven`, `boiler_nodig`, en voor een airco: `plan_airco`, `airco_nodig`, `airco_goedkoop` (v0.119.0) |
+| `planner.py`, onderaan | het denkwerk voor een apparaat met een programma: `plan_programma`, `programma_kosten`, `PROGRAMMAS`, en daaronder dat voor een boiler: `plan_boiler`, `boiler_schijven`, `boiler_nodig`, en voor een airco: `plan_airco`, `airco_nodig`, `airco_goedkoop`, `AIRCO_AAN_OP` (v0.119.0) |
 | `batterij.py` | het denkwerk voor een thuisbatterij, kent Home Assistant ook niet: `plan_batterij` (de stand), `Regelaar` (de snelle lus), `verdiend` (het kasboek), `rendement_uit_tellers` |
 | `coach.py` | leest sensoren, stuurt de paal aan, houdt de laadbeurt bij |
 | `websocket.py` | wat het paneel mag opvragen en wijzigen |
@@ -295,10 +295,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 502 controles op het denkwerk
+python tests/test_planner.py     # 506 controles op het denkwerk
 python tests/test_batterij.py    # 187 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1065 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2395 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 1067 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 2401 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 176 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

@@ -863,9 +863,11 @@ boiler_stekker_stuk = boiler_nacht.kopie(
 #
 # De eigenaar op 14-10-2026: "hij moet de airco aan zetten als er overschot is en als
 # de temperatuur nog niet bereikt is. Hij mag trouwens wel de temperatuur instellen
-# en de modus wijzigen van verwarmen en koelen." Goedkoop is elk uur onder het
-# gemiddelde van die dag, en zet de bewoner hem zelf aan of uit, dan blijft de coach
-# er de rest van de dag vanaf.
+# en de modus wijzigen van verwarmen en koelen." Na v0.119.0: "de airco moet alleen
+# bijverwarmen of koelen bij overschot he! niet gewoon aan om de temperatuur te
+# regelen", en "goedkoop uur mag de bewoner zelf kiezen dus 3 opties of op zon of
+# goedkope uren of beide." Goedkoop is elk uur onder het gemiddelde van die dag, en
+# zet de bewoner hem zelf aan of uit, dan blijft de coach er de rest van de dag vanaf.
 airco_zon = vast_zonnig.kopie(
     naam="airco-zon",
     uitleg="vast contract, heldere warme dag, kamer 26,5 graden, de bewoner wil 23: koelen op eigen zon, niet van het net",
@@ -885,10 +887,18 @@ airco_bewoner = airco_zon.kopie(
 )
 airco_goedkoop = dyn_geen_zon.kopie(
     naam="airco-goedkoop",
-    uitleg="dynamisch, geen panelen, koude kamer (17 graden), de bewoner wil 20: verwarmen op de uren onder het daggemiddelde",
+    uitleg="dynamisch, geen panelen, koude kamer (17 graden), de bewoner wil 20 en koos goedkope uren: verwarmen op de uren onder het daggemiddelde",
     auto=VOL, kabel_erin=None,
     airco=Airco(kamer_c=17.0, buiten={0: 6.0, 6: 4.0, 12: 9.0, 16: 10.0, 20: 7.0}), airco_doel=20.0,
+    airco_aan_op="goedkoop",
     begin="2026-09-07 00:05", duur_uren=23,
+)
+# En dezelfde dag zoals hij standaard staat, op zon: geen zon, dus nooit aan, hoe
+# koud het ook is. Hij is geen thermostaat.
+airco_geen_zon = airco_goedkoop.kopie(
+    naam="airco-geen-zon",
+    uitleg="dezelfde koude dag zonder panelen, maar standaard op zon: de coach zet hem niet aan",
+    airco_aan_op="zon",
 )
 
 # --- de thuisbatterij --------------------------------------------------------
@@ -1432,7 +1442,7 @@ ALLE = [
     vaatwasser_lokaal, vaatwasser_lokaal_deur, vaatwasser_lokaal_afstand_uit, vaatwasser_klep_dicht,
     forecast_solar_vast, forecast_solar_vaatwasser, forecast_solar_sensoren,
     boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
-    airco_zon, airco_plaatje, airco_bewoner, airco_goedkoop,
+    airco_zon, airco_plaatje, airco_bewoner, airco_goedkoop, airco_geen_zon,
     *KLANTWONING,
     *BATTERIJ,
     vast_zon_modus, bewolkt_zon_modus, half_zon_modus, dyn_continu,

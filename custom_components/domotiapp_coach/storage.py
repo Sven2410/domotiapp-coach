@@ -101,9 +101,9 @@ VOORKEUREN: dict[str, frozenset[str]] = {
     "vaatwasser": frozenset({"release_required"}),
 }
 VOORKEUREN_AUTO = frozenset({"target_percent", "wake_mode"})
-# Een airco (v0.119.0): de temperatuur, alleen op zon, en de pauze. Het
-# typeplaatje is van de installateur.
-VOORKEUREN_AIRCO = frozenset({"target_c", "solar_only", "paused"})
+# Een airco (v0.119.0): de temperatuur, waarop hij aan mag (v0.119.1), en de
+# pauze. Het typeplaatje is van de installateur.
+VOORKEUREN_AIRCO = frozenset({"target_c", "run_on", "paused"})
 VOORKEUREN_ACCU = frozenset({
     "reserve_enabled", "reserve_percent", "trade", "weekly_full", "weekly_full_day",
     "holiday", "holiday_max_percent", "car_above", "fan_above_c",

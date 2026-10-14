@@ -172,14 +172,17 @@ _AIRCO = _schema(
         # vermogenssensor heeft. Met een sensor wint de meting.
         vol.Optional("power_w", default=None): _LEEG_OF(int, 0, 20000),
         vol.Optional("target_c", default=None): _LEEG_OF(float, 7, 35),
-        vol.Optional("solar_only", default=False): bool,
+        # Waarop hij aan mag (v0.119.1): "zon", "goedkoop" of "beide". De
+        # eigenaar op 14-10-2026: "goedkoop uur mag de bewoner zelf kiezen dus 3
+        # opties of op zon of goedkope uren of beide." Standaard zon.
+        vol.Optional("run_on", default="zon"): vol.In(["zon", "goedkoop", "beide"]),
         vol.Optional("paused", default=False): bool,
     }
 )
 _AIRCO_VOORKEUREN = vol.Schema(
     {
         vol.Optional("target_c"): _LEEG_OF(float, 7, 35),
-        vol.Optional("solar_only"): bool,
+        vol.Optional("run_on"): vol.In(["zon", "goedkoop", "beide"]),
         vol.Optional("paused"): bool,
     }
 )

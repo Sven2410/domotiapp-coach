@@ -53,6 +53,14 @@
           "continu": "Continuous",
           "zon": "Solar"
         }
+      },
+      "aan_op": {
+        "name": "Turn on with",
+        "state": {
+          "zon": "Solar surplus",
+          "goedkoop": "Cheap hours",
+          "beide": "Solar and cheap hours"
+        }
       }
     },
     "switch": {
@@ -64,9 +72,6 @@
       },
       "vakantiestand": {
         "name": "Holiday mode"
-      },
-      "alleen_zon": {
-        "name": "Solar only"
       }
     },
     "time": {

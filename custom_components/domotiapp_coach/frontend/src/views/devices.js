@@ -835,7 +835,7 @@ class DacViewDevices extends DacEditorElement {
    * "alleen op zon" zijn van de bewoner, in Instellen achter de kaart.
    */
   aircoHtml_(device, index) {
-    if (device?.type !== "airco") return "";
+    if (device?.type !== "airco" || !brandMeta(device)) return "";
     const waarde = device.airco?.power_w ?? "";
     return `
       <div class="block">

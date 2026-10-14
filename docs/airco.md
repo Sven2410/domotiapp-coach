@@ -14,6 +14,17 @@ goedkoopste uren zijn elk uur onder het gemiddelde van die dag, en zet de bewone
 hem zelf aan of uit, dan blijft de coach er de rest van de dag vanaf. Zonder
 vermogenssensor geldt het vermogen van het typeplaatje.
 
+**Geen thermostaat** (v0.119.1). v0.119.0 zette hem standaard ook aan op een
+goedkoop uur, en de eigenaar zei die avond: "de airco moet alleen bijverwarmen
+of koelen bij overschot he! niet gewoon aan om de temperatuur te regelen", en
+meteen daarna: "goedkoop uur mag de bewoner zelf kiezen dus 3 opties of op zon
+of goedkope uren of beide." Dus een keuze `run_on` (`AIRCO_AAN_OP` in
+planner.py): zon (de standaard), goedkoop of beide. Zonder zon over gaat hij
+standaard nooit aan, hoe koud of warm het ook is; het scenario `airco-geen-zon`
+laat dat zien. En: "Bij apparaten toevoegen alleen nog de optie Mitsubishi
+Electric kunnen kiezen." Een airco heeft sinds v0.119.1 een merk, en dat is er
+één (`AIRCO_BRANDS` in devices.js); zonder merk geen velden en geen sturing.
+
 **De coach verzint geen temperatuur.** Hij zet de temperatuur die de bewoner
 koos op de airco, kiest verwarmen of koelen, en zet hem aan of uit. Hij schuift
 niet met het doel, en ventilator, swing en lamellen raakt hij nooit aan. Hoe hard
@@ -24,8 +35,8 @@ of dure uren te ontwijken, is daarmee van tafel.
 
 ## Velden
 
-Van de installateur, onder Apparaten (`AIRCO_FIELDS` in devices.js, `_AIRCO` in
-websocket.py):
+Van de installateur, onder Apparaten (`AIRCO_BRANDS` en `AIRCO_FIELDS` in
+devices.js, `_AIRCO` in websocket.py), na het merk Mitsubishi Electric:
 
 - **Airco**: de climate-entiteit, verplicht. De kiezer toont alles met
   `hvac_modes` (`climate` in entity-picker.js).
@@ -37,8 +48,9 @@ websocket.py):
 
 Van de bewoner, in Instellen achter de kaart (`airco()` in voorkeur-velden.js,
 `VOORKEUREN_AIRCO` in storage.py): de gewenste temperatuur (`target_c`, leeg is
-wat er op de airco staat), alleen op zon (`solar_only`) en de pauze (`paused`).
-Een airco heeft geen schema en geen klaar-tijd.
+wat er op de airco staat), waarop hij aan mag (`run_on`: zon, goedkoop of beide,
+standaard zon) en de pauze (`paused`). Een airco heeft geen schema en geen
+klaar-tijd.
 
 ## Wanneer aan, wanneer uit
 
@@ -56,10 +68,12 @@ aanzette, wat de bewoner deed, de opdrachten) in `_one_airco` in coach.py.
   overschot op en zet hij zichzelf uit. De meter telt pas na acht minuten
   (`METER_DEKKING`) en neemt het minste van tien minuten (`_meter_zeker`), dus
   hij gaat aan op zon die blijft.
-- **Goedkoop** (`airco_goedkoop`): het uur van nu ligt onder het gemiddelde van
-  alle uren van vandaag in de prijslijst. Alleen bij een dynamisch contract: een
-  vast contract heeft geen prijslijst, en een dag waarop elk uur even duur is
-  heeft geen uur onder het gemiddelde. "Alleen op zon" zet dit uit.
+- **Goedkoop** (`airco_goedkoop`), alleen als de bewoner goedkoop of beide koos:
+  het uur van nu ligt onder het gemiddelde van alle uren van vandaag in de
+  prijslijst. Alleen bij een dynamisch contract: een vast contract heeft geen
+  prijslijst, en een dag waarop elk uur even duur is heeft geen uur onder het
+  gemiddelde. Koos de bewoner goedkoop bij een vast contract, dan zegt de reden
+  dat hij beter zon of beide kan kiezen.
 - **Uit** zet de coach alleen wat hij zelf aanzette: als de zon op is of het
   goedkope uur voorbij, maar niet binnen tien minuten na het aanzetten
   (`MIN_RUN_MINUTES`, dezelfde als de paal bij een wolk). Op temperatuur doet de
@@ -122,14 +136,21 @@ alleen iets bij (model "Airco" in `MODELLEN`).
   uit, bewoner, pauze, geen_meting), `modus` ("heat" of "cool": wat de coach
   koos of zou kiezen), `reason` (tekst), `klimaat` (de entity_id van de climate:
   zo vindt de kaart de coach bij een airco), `ruimte`, `kamer`, `doel`,
-  `alleen_zon`, `pauze`, `dynamisch` (bij false verbergt de kaart "alleen op
-  zon"), `bewoner_tot`, `entiteiten`.
+  `aan_op` (zon, goedkoop of beide), `pauze`, `dynamisch` (bij false is er geen
+  goedkoper uur, en zegt de keuze weinig), `bewoner_tot`, `entiteiten`.
 - number `doeltemperatuur` (`DoeltemperatuurNumber`): de wens van de bewoner,
   met min, max en stap van de airco zelf (anders 7, 35 en 0,5: de standaard van
   Home Assistant). Vóór de eerste keuze wat er op de airco staat. De kaart
   schrijft hierheen en niet naar de climate: één schrijver, de coach, en meteen
   (`async_airco_doel`) als de airco aan staat.
-- switch `alleen_zon` en switch `pauze` (`AircoSchakelaar`).
+- select `aan_op` (`AanOpSelect`, v0.119.1): zon, goedkoop of beide.
+- switch `pauze` (`AircoSchakelaar`).
+
+**Weggehaald in v0.119.1: de switch `alleen_zon` en het attribuut `alleen_zon`**,
+een uur na v0.119.0, toen er nog nergens een airco aan de coach hing. De kaart van
+lovelace 0.65.0 toonde die schakelaar alleen bij `dynamisch` en met de
+schakelaar erbij; zonder schakelaar laat ze hem weg. De select komt ervoor in de
+plaats. Gezegd tegen de lovelace-sessie in dezelfde sessie.
 
 Aan, uit en de stand stuurt de kaart gewoon naar de climate; voor de coach is dat
 de bewoner.
@@ -145,8 +166,9 @@ de bewoner.
 - test_rapport.mjs: de velden, wat er nog mist, Instellen.
 - Het virtuele huis (`Airco` in virtueel.py): `airco-zon` en `airco-plaatje`
   (koelen op eigen zon, met en zonder vermogenssensor), `airco-bewoner` (om 13:30
-  zelf uit, daarna niets meer), `airco-goedkoop` (verwarmen op de uren onder het
-  daggemiddelde, en niet in de avondpiek).
+  zelf uit, daarna niets meer), `airco-goedkoop` (de bewoner koos goedkope uren:
+  verwarmen op de uren onder het daggemiddelde, en niet in de avondpiek) en
+  `airco-geen-zon` (dezelfde koude dag standaard op zon: geen enkele opdracht).
 
 ## Niet gebouwd
 

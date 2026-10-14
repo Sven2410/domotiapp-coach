@@ -1441,10 +1441,11 @@ if (vl := v("boiler-stekker-stuk")):
 # --- de airco (v0.119.0) -------------------------------------------------------
 #
 # De eigenaar op 14-10-2026: aan bij zon over of op een uur onder het gemiddelde van
-# vandaag, zolang de kamer de temperatuur van de bewoner nog niet heeft; de coach zet
-# die temperatuur en kiest verwarmen of koelen; zet de bewoner hem zelf aan of uit,
-# dan blijft de coach er de rest van de dag vanaf. Wat de bewoner merkt: een koele
-# kamer op eigen zon, en de coach die niet terugvecht.
+# vandaag, wat de bewoner kiest (standaard zon, v0.119.1), zolang de kamer de
+# temperatuur van de bewoner nog niet heeft; de coach zet die temperatuur en kiest
+# verwarmen of koelen; zet de bewoner hem zelf aan of uit, dan blijft de coach er de
+# rest van de dag vanaf. Wat de bewoner merkt: een koele kamer op eigen zon, en de
+# coach die niet terugvecht en geen thermostaat speelt.
 
 print("=== de airco ===")
 
@@ -1499,6 +1500,12 @@ if (vl := v("airco-goedkoop")):
              f"{[(t.strftime('%H:%M'), round(p, 3)) for t, p in uit]}")
     controle("airco goedkoop: niet in de avondpiek, want die is niet goedkoop",
              not any(17 <= a.hour < 21 for a, _, _ in vl.airco_aan), f"{airco_klok(vl.airco_aan)}")
+
+if (vl := v("airco-geen-zon")):
+    print(f"  airco-geen-zon: {len(vl.airco_opdrachten)} opdrachten, kamer {vl.airco_laagste:.1f} tot "
+          f"{vl.airco_hoogste:.1f}, standen {sorted({s for _, s in vl.airco_standen})}")
+    controle("airco standaard op zon: zonder zon geen enkele opdracht, ook in een koude kamer",
+             vl.airco_opdrachten == [] and vl.airco_kwh == 0.0, f"{vl.airco_opdrachten}")
 
 print("=== de thuisbatterij ===")
 # De eigenaar op 21-09-2026: "Laden, ontladen, blokkeren als de laadpaal laadt.

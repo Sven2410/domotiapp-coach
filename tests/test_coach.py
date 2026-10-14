@@ -8685,7 +8685,8 @@ AIRCO = {
     "id": "dev-airco", "type": "airco", "name": "Airco", "controllable": True,
     "entity": "",
     "entities": {"climate": "climate.woonkamer"},
-    "airco": {"power_w": 1200, "target_c": 23.0, "solar_only": False, "paused": False},
+    "brand": "mitsubishi_electric",
+    "airco": {"power_w": 1200, "target_c": 23.0, "run_on": "zon", "paused": False},
 }
 KLIMAAT156 = {"hvac_modes": ["off", "heat", "cool", "dry"], "current_temperature": 27.0, "temperature": 25.0,
               "min_temp": 16, "max_temp": 31, "target_temp_step": 1}
@@ -8854,14 +8855,21 @@ controle("de sensor: contract 1, type airco, de stand als sleutel, de climate er
          and attr156["klimaat"] == "climate.woonkamer" and attr156["dynamisch"] is False
          and coach_s156.native_value == "Gepauzeerd", f"{attr156}")
 sleutels156 = sorted(s._attr_translation_key for s in schakel156 if s.unique_id.startswith("dev-airco"))
-controle("twee schakelaars: alleen op zon en pauze", sleutels156 == ["alleen_zon", "pauze"], f"{sleutels156}")
+controle("één schakelaar: pauze (alleen op zon werd in v0.119.1 een keuze)", sleutels156 == ["pauze"], f"{sleutels156}")
+keuzes156 = []
+asyncio.run(keuzemod.async_setup_entry(hass156c, Invoer110(), lambda nieuw: keuzes156.extend(nieuw)))
+aan_op156 = next(k for k in keuzes156 if k.unique_id == "dev-airco_aan_op")
+controle("en een keuze waarop hij aan mag: zon, goedkope uren of beide, standaard zon",
+         aan_op156._attr_options == ["zon", "goedkoop", "beide"] and aan_op156.current_option == "zon"
+         and aan_op156._attr_translation_key == "aan_op", f"{aan_op156._attr_options} {aan_op156.current_option}")
+controle("de sensor zegt de keuze erbij", attr156.get("aan_op") == "zon", f"{attr156.get('aan_op')}")
 pauze156 = next(s for s in schakel156 if s.unique_id == "dev-airco_pauze")
 controle("de pauze leest de instelling", pauze156.is_on is True, "")
 
 # Wat de bewoner mag zetten, en wat van de installateur blijft.
-lijst156 = storage.voorkeuren_bijwerken([AIRCO], "dev-airco", {"airco": {"target_c": 21.5, "solar_only": True}})
-controle("de bewoner zet de temperatuur en alleen op zon",
-         lijst156[0]["airco"]["target_c"] == 21.5 and lijst156[0]["airco"]["solar_only"] is True
+lijst156 = storage.voorkeuren_bijwerken([AIRCO], "dev-airco", {"airco": {"target_c": 21.5, "run_on": "beide"}})
+controle("de bewoner zet de temperatuur en waarop hij aan mag",
+         lijst156[0]["airco"]["target_c"] == 21.5 and lijst156[0]["airco"]["run_on"] == "beide"
          and lijst156[0]["airco"]["power_w"] == 1200, f"{lijst156[0]['airco']}")
 try:
     storage.voorkeuren_bijwerken([AIRCO], "dev-airco", {"airco": {"power_w": 3000}})

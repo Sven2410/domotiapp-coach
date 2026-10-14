@@ -786,6 +786,45 @@ export const defaultBattery = (brandId) => ({
 });
 
 /**
+ * De airco (v0.119.0). De coach zet hem aan of uit, op de temperatuur die de
+ * bewoner koos, in verwarmen of koelen; hoe hard hij draait is aan de airco
+ * zelf. De eigenaar op 14-10-2026; zie docs/airco.md.
+ */
+const AIRCO_FIELDS = [
+  {
+    key: "climate",
+    label: "Airco",
+    hint:
+      "De airco zelf, zoals Home Assistant hem kent (een climate). Hiermee zet de coach hem aan of uit, " +
+      "in verwarmen of koelen, op de temperatuur die de bewoner kiest.",
+    filter: "climate",
+    needed: true,
+  },
+  {
+    key: "temperature",
+    label: "Kamertemperatuur",
+    hint: "Optioneel: een eigen sensor in de kamer. Leeg is de temperatuur die de airco zelf meet.",
+    filter: "temperature",
+  },
+];
+
+/**
+ * De merken van een airco (v0.119.1). De eigenaar op 14-10-2026: "Bij apparaten
+ * toevoegen alleen nog de optie Mitsubishi Electric kunnen kiezen." Zonder merk
+ * staan de velden er niet en mag hij niet sturen, net als een thuisbatterij.
+ */
+export const AIRCO_BRANDS = [
+  {
+    id: "mitsubishi_electric",
+    label: "Mitsubishi Electric",
+    note:
+      "Voor Mitsubishi Electric is dat de airco zoals de MELCloud-integratie hem in Home Assistant zet. " +
+      "Die praat via de cloud: een opdracht van de coach staat er na ongeveer een minuut.",
+    fields: AIRCO_FIELDS,
+  },
+];
+
+/**
  * Which brands belong to which device type.
  *
  * A type that is not in here has no brands at all and goes straight to its
@@ -795,6 +834,7 @@ const BRANDS_BY_TYPE = new Map([
   ["laadpaal", CHARGER_BRANDS],
   ["vaatwasser", DISHWASHER_BRANDS],
   ["thuisbatterij", BATTERY_BRANDS],
+  ["airco", AIRCO_BRANDS],
 ]);
 
 /**
@@ -819,33 +859,10 @@ const BOILER_SWITCH_FIELD = {
 };
 
 /**
- * De airco (v0.119.0). De coach zet hem aan of uit, op de temperatuur die de
- * bewoner koos, in verwarmen of koelen; hoe hard hij draait is aan de airco
- * zelf. De eigenaar op 14-10-2026; zie docs/airco.md.
- */
-const AIRCO_FIELDS = [
-  {
-    key: "climate",
-    label: "Airco",
-    hint:
-      "De airco zelf, zoals Home Assistant hem kent (een climate). Hiermee zet de coach hem aan of uit, " +
-      "in verwarmen of koelen, op de temperatuur die de bewoner kiest.",
-    filter: "climate",
-    needed: true,
-  },
-  {
-    key: "temperature",
-    label: "Kamertemperatuur",
-    hint: "Optioneel: een eigen sensor in de kamer. Leeg is de temperatuur die de airco zelf meet.",
-    filter: "temperature",
-  },
-];
-
-/**
  * De entiteiten die bij een type horen zonder dat er een merk aan te pas komt.
  * Een boiler is overal dezelfde boiler; een laadpaal is dat niet.
  */
-const FIELDS_BY_TYPE = new Map([["boiler", [BOILER_SWITCH_FIELD]], ["airco", AIRCO_FIELDS]]);
+const FIELDS_BY_TYPE = new Map([["boiler", [BOILER_SWITCH_FIELD]]]);
 
 /** De velden van dit type, los van welk merk er gekozen is. */
 export const typeFields = (device) => FIELDS_BY_TYPE.get(device?.type) ?? [];
