@@ -31,6 +31,7 @@ import {
   releaseCopy,
   socVeld,
   typeMeta,
+  vraagAccustand,
   valueLabel,
 } from "../devices.js";
 import { batteryRows, nachtConclusie } from "../battery.js";
@@ -2823,20 +2824,15 @@ class DacViewOverview extends DacElement {
         select.value = chosen ?? cars[0]?.id ?? "";
       }
 
-      // Hoe vol die auto is. Alleen vragen waar de auto het zelf niet vertelt,
-      // waar de capaciteit bekend is (anders zegt een percentage niets) en
-      // terwijl er werkelijk een kabel in zit.
+      // Hoe vol die auto is. Alleen vragen waar de auto het nu zelf niet
+      // vertelt, ook als hij een sensor heeft die zwijgt (v0.116.2), waar de
+      // capaciteit bekend is (anders zegt een percentage niets) en terwijl er
+      // werkelijk een kabel in zit. Zie `vraagAccustand`.
       const socPick = this.$(`[data-soc-pick="${slot}"]`);
       const gekozen = cars.find((car) => car.id === (this.activeCar_(device.id) ?? cars[0]?.id));
       const oordeel = this.coach_?.[device.id];
       const hangt = Boolean(oordeel) && oordeel.rule !== "disconnected";
-      socPick.hidden = !(
-        hangt &&
-        gekozen &&
-        !gekozen.guest &&
-        !gekozen.soc_entity &&
-        Number(gekozen.capacity_kwh) > 0
-      );
+      socPick.hidden = !(hangt && vraagAccustand(gekozen, this.feed_));
       if (!socPick.hidden) {
         const opgave = (this.settings_?.car_soc ?? []).find((row) => row?.device === device.id);
         const field = this.$(`[data-soc-input="${slot}"]`);
@@ -2857,15 +2853,23 @@ class DacViewOverview extends DacElement {
         const cap = Number(gekozen.capacity_kwh);
         const opgegeven = Number(opgave?.percent);
         const erbij = Number.isFinite(nu) && Number.isFinite(opgegeven) ? (nu - opgegeven) / 100 * cap : NaN;
-        this.$(`[data-soc-hint="${slot}"]`).textContent = opgave
+        // Een auto met een sensor die zwijgt (v0.116.2). Zag de coach eerder in
+        // deze beurt een stand, dan rekent hij daarmee verder (`_onthouden_soc`)
+        // en staat dat erbij; anders wacht hij net als bij een auto zonder sensor.
+        const stil = gekozen.soc_entity ? "De auto geeft zijn accustand nu niet door. " : "";
+        this.$(`[data-soc-hint="${slot}"]`).textContent = !opgave && stil && oordeel?.soc_estimated
+          && Number.isFinite(nu)
+          ? `${stil}De coach rekent met wat hij het laatst zei, nu ongeveer ${Math.round(nu)}%. `
+            + "Klopt dat niet, vul het in en druk op Doorgeven."
+          : opgave
           ? (Number.isFinite(erbij) && erbij >= 0.05
             ? `Dit loopt mee met wat de paal erin doet: sinds je ${Math.round(opgegeven)}% doorgaf is er `
               + `${erbij.toFixed(1).replace(".", ",")} kWh geladen. `
             : "Dit loopt mee met wat de paal erin doet. ")
             + "Zegt de auto iets anders, vul dat in en druk op Doorgeven."
-          : oordeel?.needs_soc
+          : stil + (oordeel?.needs_soc
             ? "Hier wacht de coach op. Zonder dit gaat hij uit van een lege accu."
-            : "Geef dit door, dan kan de coach het gunstigste moment kiezen.";
+            : "Geef dit door, dan kan de coach het gunstigste moment kiezen.");
       }
 
       // Tot hoeveel procent: bij elke auto van het huis die er hangt. Een gast

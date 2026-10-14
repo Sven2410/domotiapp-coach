@@ -1034,3 +1034,30 @@ voor Snel en voor een gekozen Continu of Zon, zoals op de coachkaart; daarvoor k
 de kaart niet meer uit tot de kabel eruit ging. En zonder auto (`geen_auto`) laat de kaart het
 percentage weg: "Als er geen auto aan hangt moet hij dat zeggen en de percentages weg laten."
 De coach geeft `soc` wel door, als laatst bekende stand. Proef 144.
+
+## De accustand opgeven als de sensor van de auto zwijgt (v0.116.2)
+
+De eigenaar op 14-10-2026, met de integratie van de auto voor een proef even uit Home
+Assistant. De coach meldde "De coach wil de auto aan Laadpaal gaan laden, maar weet niet
+hoe vol hij is. Geef de accustand door op de laadpaalkaart", en: "Maar ik kan nergens de
+accustand doorgeven. ... dat wanneer de accustand niet bekend is dat ik hem toch kan
+invullen."
+
+Het veld "Hoe vol is de auto nu?" stond er alleen bij een auto zonder sensor in zijn
+profiel. De coach zelf nam een opgave al aan zodra de sensor niets zei (`_typed_soc` in
+`_car`, met de sensor voorop), dus het ontbrak alleen op de kaart. Nu vraagt de kaart het
+ook als de sensor `unavailable`, `unknown`, leeg of geen getal is, of niet meer bestaat
+(`vraagAccustand` in devices.js, dezelfde grens als `_number` in coach.py). Zegt de sensor
+weer iets, dan gaat die voor en verdwijnt het veld; gaat de kabel eruit, dan is de opgave
+vergeten zoals altijd (`_async_forget`).
+
+Onder het veld staat dan eerst "De auto geeft zijn accustand nu niet door." Zag de coach
+eerder in deze beurt wel een stand, dan rekent hij daarmee verder (`_onthouden_soc`) en
+zegt de kaart dat, met het getal: "De coach rekent met wat hij het laatst zei, nu ongeveer
+62%." De regel "Accu auto: —" boven het veld is weg: met de vraag eronder zei die niets.
+DomotiApp Lovelace leest de stand uit de coach (`soc`, `soc_geschat`), dus een opgave
+staat daar als geschatte stand.
+
+Proef 152 in test_coach.py (eerst `no-soc`, met 40% opgegeven `soc_now` 40 en geschat,
+de sensor terug op 70% en dan 70 en niet geschat), een in test_rapport.mjs. In de preview
+`?coach=soc&stil=1`, gemeten op 320 en 280 px zonder overloop.

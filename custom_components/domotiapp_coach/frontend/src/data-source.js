@@ -759,17 +759,16 @@ function deviceDetails(feed, device, settings) {
   // zie `actieradius`.
   if (device?.type === "laadpaal") {
     const car = gekozenAutoMetStand(device, settings);
-    if (car) {
-      const state = feed.get(car.soc_entity);
-      const procent = usable(state) ? Number(state.state) : NaN;
+    // Zegt de sensor niets, dan geen regel met een streepje: de kaart vraagt de
+    // stand dan zelf, net als bij een auto zonder sensor (v0.116.2,
+    // `vraagAccustand` in devices.js).
+    const state = car ? feed.get(car.soc_entity) : undefined;
+    const procent = usable(state) ? Number(state.state) : NaN;
+    if (car && Number.isFinite(procent)) {
       const radius = actieradius(feed, car);
       rows.push({
         label: "Accu auto",
-        text: !Number.isFinite(procent)
-          ? "—"
-          : radius
-            ? radiusTekst(procent, radius)
-            : accuTekst(procent, Number(car.capacity_kwh)),
+        text: radius ? radiusTekst(procent, radius) : accuTekst(procent, Number(car.capacity_kwh)),
       });
     }
   }
