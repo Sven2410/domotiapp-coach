@@ -5438,8 +5438,9 @@ controle("een oude stand in Wh telt gewoon door", abs(soc102 - (60.0 + 4.065 * 0
 inst102["car_soc"][0]["meter"] = 12000.0
 controle("en een stand in kWh net zo",
          abs(coach102._typed_soc(inst102, PAAL102, PROFIEL102) - soc102) < 1e-6, "")
+# Sinds v0.117.0 in `async_accustand` in entiteit.py, voor de coachkaart en de number samen.
 bron102 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
-           / "websocket.py").read_text(encoding="utf-8")
+           / "entiteit.py").read_text(encoding="utf-8")
 controle("het paneel bewaart de teller in kWh, met de eenheid van de sensor",
          'to_kwh(float(state.state), state.attributes.get("unit_of_measurement"))' in bron102, "")
 
@@ -8508,6 +8509,76 @@ b152 = coach152.state["dev-laadpaal"]
 print(f"  sensor terug op 70%: soc_now={b152.get('soc_now')}, geschat={b152.get('soc_estimated')}")
 controle("zegt de sensor weer iets, dan gaat die voor",
          b152.get("soc_now") == 70.0 and not b152.get("soc_estimated"), f"{b152}")
+
+print("=== 153. de number `accustand` voor de laadpaalkaart van DomotiApp Lovelace (v0.117.0) ===")
+# De eigenaar op 14-10-2026, na v0.116.2: "ja ook op de lovelace kaart wil ik die."
+# De number bewaart via dezelfde weg als Doorgeven op de coachkaart (`async_accustand`).
+auto153 = dict(LAADPAAL["cars"][0], soc_entity="sensor.auto_soc")
+paal153 = dict(LAADPAAL, cars=[auto153])
+inst153 = instellingen(devices=[paal153])
+huis153 = huis(teruglevering=0.0, afname=1200.0)
+huis153["sensor.auto_soc"] = "unavailable"
+hass153, store153, coach153 = bouw(huis153, inst153)
+hass153.data["domotiapp_coach"]["coach"] = coach153
+asyncio.run(ronde(coach153, inst153, paal=paal153))
+getallen153 = []
+asyncio.run(getalmod.async_setup_entry(hass153, Invoer110(), lambda nieuw: getallen153.extend(nieuw)))
+accu153 = next(g for g in getallen153 if g.unique_id == "dev-laadpaal_accustand")
+accu153.hass = hass153
+accu153.async_write_ha_state = lambda: None
+a153 = accu153.extra_state_attributes
+print(f"  sensor stil: {accu153.native_value}, {a153}")
+controle("sensor stil, geen opgave: onbekend, vragen, de coach wacht, de auto heeft een sensor",
+         accu153.native_value is None and a153 == {"vragen": True, "wacht": True, "sensor": True},
+         f"{accu153.native_value} {a153}")
+controle("een invulvak van 0 tot 100 in hele procenten",
+         accu153._attr_translation_key == "accustand" and accu153._attr_native_min_value == 0
+         and accu153._attr_native_max_value == 100 and accu153._attr_native_step == 1
+         and accu153._attr_mode == "box" and accu153._attr_native_unit_of_measurement == "%", "")
+
+
+async def opgeven153(waarde):
+    await accu153.async_set_native_value(waarde)
+    await hass153.afmaken()
+
+
+asyncio.run(opgeven153(35))
+print(f"  opgegeven 35: car_soc {store153.instellingen['car_soc']}")
+controle("bewaard zoals Doorgeven op de coachkaart: de gekozen auto en de meterstand van de paal",
+         store153.instellingen["car_soc"] == [{"device": "dev-laadpaal", "car": "car-1", "percent": 35.0, "meter": 100.0}],
+         f"{store153.instellingen['car_soc']}")
+asyncio.run(ronde(coach153, store153.instellingen, dt.datetime(2026, 8, 18, 14, 38), paal=paal153))
+accu153.bijwerken(coach153.state["dev-laadpaal"])
+print(f"  na een ronde: {accu153.native_value}, {accu153.extra_state_attributes}, "
+      f"soc_now {coach153.state['dev-laadpaal'].get('soc_now')}")
+controle("de coach rekent ermee en de number toont de stand van nu",
+         accu153.native_value == 35.0 and accu153.extra_state_attributes == {"vragen": True, "wacht": False, "sensor": True}
+         and coach153.state["dev-laadpaal"].get("soc_now") == 35.0, f"{accu153.native_value} {accu153.extra_state_attributes}")
+
+hass153.states.zet("sensor.auto_soc", "70")
+asyncio.run(ronde(coach153, store153.instellingen, dt.datetime(2026, 8, 18, 14, 39), paal=paal153))
+accu153.bijwerken(coach153.state["dev-laadpaal"])
+print(f"  sensor terug op 70: {accu153.native_value}, {accu153.extra_state_attributes}")
+controle("zegt de auto het weer zelf, dan geen veld meer",
+         accu153.native_value == 70.0 and accu153.extra_state_attributes["vragen"] is False, f"{accu153.extra_state_attributes}")
+
+# Een auto zonder sensor, een gast, en een paal zonder kabel. Een eigen profiel
+# zonder sensor: proef 41b zet er een in het gedeelde `LAADPAAL`.
+kaal153 = dict(LAADPAAL, cars=[dict(LAADPAAL["cars"][0], soc_entity="")])
+inst153b = instellingen(devices=[kaal153])
+hass153b, _, coach153b = bouw(huis(teruglevering=0.0, afname=1200.0), inst153b)
+b153b = asyncio.run(ronde(coach153b, inst153b, paal=kaal153))[0]
+inst153c = instellingen(active_cars=[{"device": "dev-laadpaal", "car": "__guest__"}])
+hass153c, _, coach153c = bouw(huis(teruglevering=0.0, afname=1200.0), inst153c)
+b153c = asyncio.run(ronde(coach153c, inst153c))[0]
+inst153d = instellingen()
+hass153d, _, coach153d = bouw(huis(status="disconnected"), inst153d)
+b153d = asyncio.run(ronde(coach153d, inst153d))[0]
+print(f"  zonder sensor {b153b['soc_ask']}/{b153b['soc_sensor']}, gast {b153c['soc_ask']}/{b153c['soc_sensor']}, "
+      f"zonder kabel {b153d['rule']} {b153d['soc_ask']}")
+controle("zonder sensor: vragen, maar geen sensor", b153b["soc_ask"] is True and b153b["soc_sensor"] is False, f"{b153b}")
+controle("een gast: niet vragen", b153c["soc_ask"] is False and b153c["soc_sensor"] is False, f"{b153c}")
+controle("zonder kabel: niet vragen", b153d["rule"] == "disconnected" and b153d["soc_ask"] is False, f"{b153d}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

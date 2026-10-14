@@ -239,6 +239,9 @@ dan de andere in dezelfde uitgave.
   notities als die niet open staat), en geef na de uitgave een echte dump van de entiteiten
   door. De vaatwasserkaart ging eerder stuk doordat de startsensor van tijdstip naar tekst
   ging (v0.100.1), en niemand zag het.
+- **Wanneer een kaart vraagt hoe vol de auto is** (v0.117.0): `soc_ask` in coach.py
+  (de number `accustand` voor DomotiApp Lovelace) en `vraagAccustand` in devices.js
+  trekken dezelfde grens (`docs/laadpaal.md`).
 - **Opgeleverd en wat er in de batterij zit** (v0.107.0): `Voorraad` in
   batterij.py schrijft per dag `realized_days` naast het kasboek `earned_days`,
   en `stock_euro`; `accuVerdiend` in geld.js leest ze allebei, `balans` haalt
@@ -293,7 +296,7 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 482 controles op het denkwerk
 python tests/test_batterij.py    # 187 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1027 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 1035 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2356 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 174 op het rapport en op het paneel

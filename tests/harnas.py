@@ -184,6 +184,7 @@ keuzemod_ha.SelectEntity = type("SelectEntity", (SensorEntity,), {})
 schakelmod_ha.SwitchEntity = type("SwitchEntity", (SensorEntity,), {})
 tijdmod_ha.TimeEntity = type("TimeEntity", (SensorEntity,), {})
 getalmod_ha.NumberEntity = type("NumberEntity", (SensorEntity,), {})
+getalmod_ha.NumberMode = types.SimpleNamespace(AUTO="auto", BOX="box", SLIDER="slider")
 configitems = types.ModuleType("homeassistant.config_entries")
 configitems.ConfigEntry = object
 apparaatreg = types.ModuleType("homeassistant.helpers.device_registry")
