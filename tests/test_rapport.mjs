@@ -2848,6 +2848,49 @@ proef("een waarde op een apparaatkaart begint met een hoofdletter (v0.119.2)", a
   assert.match(bron, /value\.textContent = metHoofdletter\(row\.text\)/, "de kaart zet hem ervoor");
 });
 
+// De eigenaar op 15-10-2026, bij de pop-up van de batterij in de energiestroom met "laadt" en
+// "ongeveer 93%, gemeten in de accu": "hier ook hoofdletters toepassen."
+proef("de pop-up in de energiestroom begint elke waarde met een hoofdletter (v0.119.3)", async () => {
+  await import("../custom_components/domotiapp_coach/frontend/src/components/energy-flow.js");
+  const Stroom = geregistreerd.get("dac-energy-flow");
+  const knoop = () => {
+    const kinderen = [];
+    return {
+      className: "", textContent: "", hidden: true, kinderen,
+      append(...items) { kinderen.push(...items); },
+      replaceChildren(...items) { kinderen.length = 0; kinderen.push(...items); },
+    };
+  };
+  const knopen = new Map(["#detail", "#detail-title", "#detail-list"].map((k) => [k, knoop()]));
+  const el = Object.create(Stroom.prototype);
+  el.$ = (kiezer) => knopen.get(kiezer);
+  el.slots_ = [{
+    id: "a", type: "thuisbatterij", name: "Batterij", watts: 2940,
+    details: [
+      { label: "Doet nu", text: "laadt" },
+      { label: "Accustand", text: "28 % · 4,1 van 14,5 kWh" },
+      { label: "Bedrijfsmodus", text: "Eigen verbruik" },
+      { label: "Rendement", text: "ongeveer 93%, gemeten in de accu" },
+    ],
+  }];
+  const echt = globalThis.document.createElement;
+  globalThis.document.createElement = knoop;
+  try {
+    el.openDetail_("dev1");
+  } finally {
+    globalThis.document.createElement = echt;
+  }
+  const rijen = knopen.get("#detail-list").kinderen.map((li) => li.kinderen.map((s) => s.textContent));
+  assert.deepEqual(rijen, [
+    ["Vermogen", "2,94 kW"],
+    ["Doet nu", "Laadt"],
+    ["Accustand", "28 % · 4,1 van 14,5 kWh"],
+    ["Bedrijfsmodus", "Eigen verbruik"],
+    ["Rendement", "Ongeveer 93%, gemeten in de accu"],
+  ]);
+  assert.equal(knopen.get("#detail").hidden, false, "de pop-up gaat open");
+});
+
 // Gemeten op 10-10-2026 in Chrome: "Hoogste accustand in vakantiestand" stond in beeld met
 // de vakantiestand uit. De rij had hidden, maar display: grid van .row won.
 proef("de rijen onder een vinkje van de batterij verdwijnen echt als het vinkje uit staat", () => {
