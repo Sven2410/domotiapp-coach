@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .entiteit import (
-    LEEG_TOT, CoachEntiteit, async_accustand, async_per_apparaat, coach_verversen, klimaat_attributen,
+    LEEG_TOT, AccuBediening, CoachEntiteit, async_accustand, async_per_apparaat, coach_verversen, klimaat_attributen,
 )
 
 
@@ -131,7 +131,7 @@ class AccustandNumber(CoachEntiteit, NumberEntity):
         coach_verversen(self.hass)
 
 
-class LeegTotNumber(CoachEntiteit, NumberEntity):
+class LeegTotNumber(AccuBediening, CoachEntiteit, NumberEntity):
     """Tot welk % "leegladen" gaat (v0.112.0); nooit onder de ondergrens van de batterij.
 
     Leeg is die ondergrens. Het getal staat in het geheugen van de coach en is na

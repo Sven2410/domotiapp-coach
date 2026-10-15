@@ -512,6 +512,28 @@ def accu_apparaat(hass: HomeAssistant, device: dict[str, Any]) -> tuple[str, str
     return register_apparaat(hass, device, ("soc", "mode", "setpoint"))
 
 
+def accu_alleen_lezen(device: dict[str, Any]) -> bool:
+    """Of de coach deze thuisbatterij alleen uitleest (v0.123.0): een Growatt altijd,
+    een ander merk als hij hem niet mag sturen. Dan draait er geen stand voor hem."""
+    from .const import BATTERIJ_ALLEEN_LEZEN
+
+    return not device.get("controllable") or device.get("brand") in BATTERIJ_ALLEEN_LEZEN
+
+
+class AccuBediening:
+    """Een knop, schakelaar of getal van een thuisbatterij (v0.123.1).
+
+    Bij een batterij die de coach alleen uitleest doen ze niets, dus staan ze op
+    niet beschikbaar. Weghalen zou ze als wees in het register laten staan, en ze
+    komen vanzelf terug zodra de coach hem mag sturen. De beheersessie op
+    15-10-2026, bij een Growatt: "Die doen bij een Growatt niets."
+    """
+
+    @property
+    def available(self) -> bool:
+        return not accu_alleen_lezen(self._device)  # type: ignore[attr-defined]
+
+
 def accu_capaciteit(hass: HomeAssistant | None, device: dict[str, Any]) -> float | None:
     """De capaciteit waarmee de coach rekent, in kWh, of None (v0.123.0).
 

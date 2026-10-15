@@ -17,7 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import PROGRAMMA_TYPES
-from .entiteit import LEEG_TOT, CoachEntiteit, async_per_apparaat, async_vrijgave, coach_verversen
+from .entiteit import LEEG_TOT, AccuBediening, CoachEntiteit, async_per_apparaat, async_vrijgave, coach_verversen
 
 # sleutel: (vrijgeven, nu starten, icoon)
 KNOPPEN = {
@@ -62,7 +62,7 @@ ACCU_KNOPPEN = {
 }
 
 
-class BatterijKnop(CoachEntiteit, ButtonEntity):
+class BatterijKnop(AccuBediening, CoachEntiteit, ButtonEntity):
     """Nu vol laden, nu leegladen (tot `leeg_tot`), of terug naar het plan (v0.112.0).
 
     Dezelfde knoppen als op de batterijkaart van de coach (`async_boost`,
