@@ -3770,6 +3770,130 @@ proef("Apparaat staat uit in Meldingen: alleen met iets dat altijd aan moet, en 
   assert.ok(html.includes('id="stekker" hidden') && html.includes("Apparaat staat uit"), "het blok staat in Meldingen");
 });
 
+// --- per apparaat in Historie (v0.121.0) -------------------------------------------
+//
+// De eigenaar op 15-10-2026: "ik wil ook het energieverbruik per apparaat kunnen zien in
+// historie zoals het HA energy dashboard snap je? En dat per dag per jaar etc moet op die
+// pagina's er bij komen."
+
+proef("per apparaat: een schatting uit het vermogen komt per uur, en een dag die loopt telt alleen zijn uren", async () => {
+  const { fetchDevices, periodStart } = await import("../custom_components/domotiapp_coach/frontend/src/statistics.js");
+  const vragen = [];
+  const nu = new Date();
+  const vandaag = new Date(nu); vandaag.setHours(0, 0, 0, 0);
+  const gisteren = new Date(vandaag); gisteren.setDate(gisteren.getDate() - 1);
+  const hass = {
+    callWS: async (msg) => {
+      vragen.push(msg);
+      if (msg.types[0] === "change") return { "sensor.vriezer_kwh": [{ start: gisteren.getTime(), change: 1.2 }] };
+      return { "sensor.was_w": [{ start: gisteren.getTime(), mean: 100 }, { start: vandaag.getTime(), mean: 100 }] };
+    },
+  };
+  const apparaten = [{ id: "v", energy: "sensor.vriezer_kwh", power: "sensor.v_w" }, { id: "w", energy: "", power: "sensor.was_w" }];
+
+  await fetchDevices(hass, apparaten, "month", periodStart("month", 0));
+  assert.equal(vragen.find((v) => v.types[0] === "change").period, "day", "een teller per vak van de grafiek");
+  assert.equal(vragen.find((v) => v.types[0] === "mean").period, "hour", "een vermogen per uur");
+
+  vragen.length = 0;
+  const jaar = await fetchDevices(hass, apparaten, "year", periodStart("year", 0));
+  assert.equal(vragen.find((v) => v.types[0] === "change").period, "month");
+  assert.equal(vragen.find((v) => v.types[0] === "mean").period, "day", "over een jaar per dag");
+  const was = jaar.get("w");
+  assert.equal(was.exact, false);
+  assert.equal(was.rows.get(gisteren.getTime()), 2.4, "een hele dag: 100 W maal 24 uur");
+  const uren = Math.max(0, Math.floor((Date.now() - vandaag.getTime()) / 3600000));
+  assert.ok(Math.abs(was.rows.get(vandaag.getTime()) - (100 * uren) / 1000) < 1e-9, "vandaag alleen de uren die voorbij zijn, geen 24");
+  assert.equal(jaar.get("v").exact, true);
+  assert.equal(jaar.get("v").rows.get(gisteren.getTime()), 1.2);
+});
+
+proef("per apparaat: rijen per uur vallen in hun vak, en wat erbuiten valt telt niet", async () => {
+  await import("../custom_components/domotiapp_coach/frontend/src/views/history.js");
+  const { perVak } = await import("../custom_components/domotiapp_coach/frontend/src/views/history.js");
+  const dag = 86400000;
+  const tijden = [0, dag, 2 * dag];
+  const rijen = new Map([[0, 1], [3600000, 2], [dag + 7200000, 4], [2 * dag, 8], [3 * dag, 16], [-3600000, 32]]);
+  assert.deepEqual(perVak(rijen, tijden, 3 * dag), [3, 4, 8]);
+  assert.deepEqual(perVak(new Map(), tijden, 3 * dag), [0, 0, 0]);
+  assert.deepEqual(perVak(undefined, tijden, 3 * dag), [0, 0, 0]);
+});
+
+proef("per apparaat: geen batterij, een vaste kleur op de volgorde van Apparaten, vanaf de zevende grijs", async () => {
+  const { apparaatReeksen } = await import("../custom_components/domotiapp_coach/frontend/src/views/history.js");
+  const tijden = [0, 3600000];
+  const apparaat = (id, extra = {}) => ({ id, type: "overig", name: `App ${id}`, entity: `sensor.${id}`, ...extra });
+  const devices = [
+    apparaat("a"), { id: "accu", type: "thuisbatterij", entity: "sensor.accu" }, apparaat("b"), apparaat("c"),
+    apparaat("d"), apparaat("e"), apparaat("f"), apparaat("g"), apparaat("h"), apparaat("zonder", { entity: "" }),
+  ];
+  const stats = new Map([
+    ["accu", { rows: new Map([[0, 5]]), exact: false }],
+    ["a", { rows: new Map([[0, 1], [3600000, -0.5]]), exact: true }],
+    ["c", { rows: new Map([[0, 2]]), exact: false }],
+    ["d", { rows: new Map([[0, 0.001]]), exact: true }],
+    ["g", { rows: new Map([[0, 0.3]]), exact: true }],
+    ["h", { rows: new Map([[3600000, 0.2]]), exact: false }],
+  ]);
+  const reeksen = apparaatReeksen(devices, stats, tijden, 7200000);
+  assert.ok(!reeksen.some((r) => r.id === "accu"), "de batterij verbruikt niet");
+  assert.deepEqual(reeksen.map((r) => [r.id, r.kleur]), [["a", 1], ["c", 3], ["__overig__", "rest"]],
+    "b zonder gegevens houdt zijn plek, d is te weinig, g en h zijn de zevende en achtste");
+  assert.deepEqual(reeksen[0].vakken, [1, 0], "een vak onder nul telt als nul");
+  const overig = reeksen.at(-1);
+  assert.equal(overig.label, "Overige apparaten");
+  assert.deepEqual(overig.vakken, [0.3, 0.2]);
+  assert.equal(overig.exact, false, "een geschatte erin maakt het geheel geschat");
+  assert.equal(reeksen[1].label, "App c");
+  // Een andere periode met andere gegevens verandert de kleur van c niet.
+  const later = apparaatReeksen(devices, new Map([["c", { rows: new Map([[0, 9]]), exact: true }]]), tijden, 7200000);
+  assert.deepEqual(later.map((r) => [r.id, r.kleur]), [["c", 3]]);
+});
+
+proef("per apparaat: de lijst met kWh, het deel van het huis, en de rest van het huis", async () => {
+  const el = Object.create(Historie.prototype);
+  const lijst = nepEl("ul");
+  lijst.klassen = new Set();
+  lijst.classList = { toggle: (k, aan) => (aan ? lijst.klassen.add(k) : lijst.klassen.delete(k)) };
+  const vak = { "#apparaten-lijst": lijst, "#apparaten-note": nepEl("p") };
+  el.$ = (sel) => vak[sel];
+  el.appReeksen_ = [
+    { id: "p", label: "Laadpaal", kleur: 1, vakken: [6, 4], totaal: 10, exact: true },
+    { id: "w", label: "Wasmachine", kleur: 2, vakken: [0, 1.5], totaal: 1.5, exact: false },
+  ];
+  el.appHuis_ = [10, 10];
+  metNepDocument(() => el.paintAppLijst_(null));
+  const rijen = () => lijst.kinderen.map((li) => li.kinderen.map((k) => k.textContent));
+  assert.deepEqual(rijen(), [
+    ["", "Laadpaal", "10,0 kWh", "50%"],
+    ["", "Wasmachine", "≈ 1,50 kWh", "8%"],
+    ["", "Rest van het huis", "8,50 kWh", "43%"],
+  ]);
+  assert.equal(lijst.kinderen[2].className, "rest");
+  assert.ok(!lijst.klassen.has("zonder-deel"));
+  assert.match(vak["#apparaten-note"].textContent, /≈ is geschat uit het vermogen/);
+
+  metNepDocument(() => el.paintAppLijst_(0));
+  assert.deepEqual(rijen(), [["", "Laadpaal", "6,00 kWh", "60%"], ["", "Rest van het huis", "4,00 kWh", "40%"]],
+    "één vak: alleen wat daarin verbruikte");
+
+  // Schattingen boven het huis: geen deel, geen rest, en de zin zegt waarom.
+  el.appHuis_ = [5, 5];
+  metNepDocument(() => el.paintAppLijst_(null));
+  assert.deepEqual(rijen(), [["", "Laadpaal", "10,0 kWh", ""], ["", "Wasmachine", "≈ 1,50 kWh", ""]]);
+  assert.ok(lijst.klassen.has("zonder-deel"));
+  assert.match(vak["#apparaten-note"].textContent, /boven wat het huis verbruikte/);
+
+  // Zonder opwekteller weet Historie niet wat het huis verbruikte: alleen kWh.
+  el.appHuis_ = null;
+  metNepDocument(() => el.paintAppLijst_(null));
+  assert.equal(rijen().length, 2);
+  assert.ok(!/boven wat het huis/.test(vak["#apparaten-note"].textContent));
+
+  const html = Object.create(Historie.prototype).render();
+  assert.ok(html.includes('id="apparaten-card" hidden') && html.includes("Per apparaat"), "de kaart staat in Historie");
+});
+
 for (const [naam, fn] of proeven) {
   try {
     await fn();

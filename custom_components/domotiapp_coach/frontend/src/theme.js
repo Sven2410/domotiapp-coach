@@ -45,6 +45,18 @@ export const tokens = /* css */ `
   --dac-device-1:      #fd0774;
   --dac-device-2:      #039580;
 
+  /* Het verbruik per apparaat in Historie (v0.121.0): zes kleuren in een vaste
+     volgorde, de categorische reeks van de dataviz-richtlijn zonder rood en
+     groen (die zijn van de status). Gecontroleerd op #161613: buren CVD ΔE 8,4,
+     normaal 19,3, allemaal boven 3:1. Een zevende apparaat valt onder grijs. */
+  --dac-app-1:         #3987e5;
+  --dac-app-2:         #d95926;
+  --dac-app-3:         #199e70;
+  --dac-app-4:         #c98500;
+  --dac-app-5:         #d55181;
+  --dac-app-6:         #9085e9;
+  --dac-app-rest:      rgba(232, 228, 222, 0.34);
+
   /* Status -- reserved meaning, always shipped with an icon and a label. */
   --dac-good:          #0ca30c;
   --dac-warn:          #fab219;
@@ -116,6 +128,17 @@ export const lightTokens = /* css */ `
   --dac-good:          #0a8a0a;
   --dac-warn:          #946200;
   --dac-bad:           #c63131;
+
+  /* Dezelfde zes, gestapt voor wit (v0.121.0): buren CVD ΔE 9,1, normaal 19,6.
+     Drie zitten onder 3:1 tegen wit; de lijst eronder noemt elk apparaat met
+     zijn kWh, dus de kleur staat nooit alleen. */
+  --dac-app-1:         #2a78d6;
+  --dac-app-2:         #eb6834;
+  --dac-app-3:         #1baf7a;
+  --dac-app-4:         #eda100;
+  --dac-app-5:         #e87ba4;
+  --dac-app-6:         #6250d6;
+  --dac-app-rest:      rgba(28, 27, 24, 0.30);
 
   --dac-shadow:        0 1px 2px rgba(20, 20, 15, 0.06),
                        0 12px 32px -20px rgba(20, 20, 15, 0.30);
