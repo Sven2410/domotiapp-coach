@@ -738,6 +738,52 @@ const BATTERY_FIELDS = (richtingNodig) => [
   },
 ];
 
+/**
+ * Growatt (v0.123.0): alleen uitlezen. De eigenaar op 15-10-2026: "nee sturen niet
+ * voor growatt alleen uitlezen", en "dat ik dus alleen invulvelden krijg die
+ * noodzakelijk zijn voor growatt". De Growatt-integratie van Home Assistant haalt
+ * alles eens per vijf minuten uit de cloud en heeft voor een MIX alleen sensoren.
+ * Dus de accustand, wat hij laadt en ontlaadt, en zijn eigen tellers, voor het
+ * rendement in de pop-up. De capaciteit is een getal onder De batterij, want een
+ * sensor daarvoor heeft de integratie niet.
+ */
+const GROWATT_FIELDS = [
+  {
+    key: "soc",
+    label: "Accustand",
+    hint: "Hoe vol de batterij is, in procent. Kies je die van een Growatt, dan vult het paneel de vier hieronder vanzelf in, als hetzelfde apparaat ze heeft.",
+    filter: "all",
+  },
+  {
+    key: "charge_power",
+    label: "Laadvermogen",
+    hint: "Wat de batterij nu laadt. In kW of in W, dat rekent de coach zelf om.",
+    filter: "power",
+    hideRow: true,
+  },
+  {
+    key: "discharge_power",
+    label: "Ontlaadvermogen",
+    hint: "En wat hij nu ontlaadt.",
+    filter: "power",
+    hideRow: true,
+  },
+  {
+    key: "accu_in",
+    label: "Batterij zelf: geladen",
+    hint: "De teller van alles wat er ooit in ging (levenslang), niet die van vandaag. Daarmee staat het rendement in de pop-up van de batterij.",
+    filter: "all",
+    hideRow: true,
+  },
+  {
+    key: "accu_out",
+    label: "Batterij zelf: ontladen",
+    hint: "En van alles wat er ooit uit ging.",
+    filter: "all",
+    hideRow: true,
+  },
+];
+
 export const BATTERY_BRANDS = [
   {
     id: "anker",
@@ -747,6 +793,16 @@ export const BATTERY_BRANDS = [
     // Wat er in de bedrijfsmodus hoort te staan terwijl de coach stuurt, en
     // wat er terugkomt als hij stopt. De woorden van de integratie zelf.
     battery: { control_mode: "third_party_control", idle_mode: "self_consumption" },
+  },
+  {
+    id: "growatt",
+    label: "Growatt",
+    note: "Een Growatt leest de coach alleen uit, via de Growatt-integratie.",
+    fields: GROWATT_FIELDS,
+    // Alleen uitlezen: geen vinkje om te sturen en geen instellingen daarvoor.
+    // Dezelfde lijst als `BATTERIJ_ALLEEN_LEZEN` in const.py.
+    readOnly: true,
+    battery: { control_mode: "", idle_mode: "" },
   },
   {
     id: "overig",
@@ -759,6 +815,58 @@ export const BATTERY_BRANDS = [
 
 /** De types die een thuisbatterij zijn, met hun eigen blok instellingen. */
 export const isBattery = (device) => device?.type === "thuisbatterij";
+
+/** Een merk dat de coach alleen uitleest (v0.123.0): Growatt. */
+export const isReadOnly = (device) => Boolean(brandMeta(device)?.readOnly);
+
+/**
+ * Een batterij die naar een merk gaat dat alleen uitgelezen wordt (v0.123.0): niet
+ * sturen, en geen sensor laten staan die daar geen veld heeft. De coach zou hem
+ * anders nog lezen; een vermogenssensor met een teken gaat bij hem zelfs voor.
+ */
+export function alleenUitlezen(device) {
+  if (!isReadOnly(device)) return device;
+  const velden = brandFields(device).map((veld) => veld.key);
+  return {
+    ...device,
+    controllable: false,
+    entity: "",
+    entities: Object.fromEntries(Object.entries(device.entities ?? {}).filter(([key]) => velden.includes(key))),
+  };
+}
+
+/**
+ * Wat het paneel bij een Growatt vanzelf invult zodra de accustand gekozen is
+ * (v0.123.0): de sensoren van hetzelfde apparaat, op hun `translation_key`. Alleen
+ * de vorm `mix_*`, die een MIX en een SPH allebei hebben; zo staan ze in de bron
+ * van de integratie, en zo stonden ze op 15-10-2026 in een klantwoning. Een SPH
+ * heeft geen ontlaadvermogen in kW, vandaar de tweede keus. Wat er al staat
+ * blijft staan.
+ *
+ * `entities` is `hass.entities` van Home Assistant: per entiteit `device_id`,
+ * `platform` en `translation_key`.
+ */
+const GROWATT_KEYS = {
+  charge_power: ["mix_battery_charge"],
+  discharge_power: ["mix_battery_discharge_kw", "mix_battery_discharge_w"],
+  accu_in: ["mix_battery_charge_lifetime"],
+  accu_out: ["mix_battery_discharge_lifetime"],
+};
+
+export function growattVanzelf(device, entities) {
+  const soc = entities?.[device?.entities?.soc ?? ""];
+  if (!soc?.device_id || soc.platform !== "growatt_server") return {};
+  const zelfde = Object.values(entities).filter(
+    (e) => e?.device_id === soc.device_id && e.platform === "growatt_server"
+  );
+  const uit = {};
+  for (const [key, sleutels] of Object.entries(GROWATT_KEYS)) {
+    if (device.entities?.[key]) continue;
+    const treffer = sleutels.map((tk) => zelfde.find((e) => e.translation_key === tk)).find(Boolean);
+    if (treffer) uit[key] = treffer.entity_id;
+  }
+  return uit;
+}
 
 /** De dagen van de week zoals de coach ze telt: nul is maandag. */
 export const WEEKDAGEN = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"];
@@ -1271,7 +1379,8 @@ export const isManualProgram = (device) =>
  * de coach helemaal niet aansturen maar wel adviseren."
  */
 export const canSteer = (device) =>
-  (Boolean(brandMeta(device)) && !isManualProgram(device)) || typeFields(device).length > 0;
+  (Boolean(brandMeta(device)) && !isManualProgram(device) && !isReadOnly(device)) ||
+  typeFields(device).length > 0;
 
 /**
  * The device types that run a program of a known length.

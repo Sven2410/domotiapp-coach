@@ -31,6 +31,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    BATTERIJ_ALLEEN_LEZEN,
     NETTING_ENDS,
     HOLIDAY_MAX_DEFAULT,
     CHARGER_CONTROL,
@@ -2460,10 +2461,13 @@ class ChargerCoach:
             for device in settings.get("devices") or []
             if device.get("type") == "boiler" and device.get("controllable")
         ]
+        # Een merk dat de coach alleen uitleest (Growatt, v0.123.0) stuurt hij
+        # nooit, ook niet met het vinkje aan.
         batterijen = [
             device
             for device in settings.get("devices") or []
             if device.get("type") == "thuisbatterij" and device.get("controllable")
+            and device.get("brand") not in BATTERIJ_ALLEEN_LEZEN
         ]
         self._watch_batterij(settings, batterijen)
         self._watch(
@@ -2538,6 +2542,11 @@ class ChargerCoach:
                 )
             except Exception:  # noqa: BLE001 - one broken device is not all of them
                 _LOGGER.exception("kon %s niet beoordelen", device.get("id"))
+        # Een batterij die de coach niet stuurt meet hij wel (v0.123.0).
+        gestuurd = {d.get("id") for d in batterijen}
+        for device in settings.get("devices") or []:
+            if device.get("type") == "thuisbatterij" and device.get("id") not in gestuurd:
+                await self._async_batterij_uitlezen(settings, device)
         # Een batterij die niet meer gestuurd mag worden gaat terug naar zijn
         # eigen stand, ook als het vinkje eraf ging.
         for device_id, sessie in list(self._batterij.items()):
@@ -5264,6 +5273,26 @@ class ChargerCoach:
             _kwh(self.hass, entities.get(tellers[1])),
             capaciteit,
         )
+
+    async def _async_batterij_uitlezen(self, settings: dict[str, Any], device: dict[str, Any]) -> None:
+        """Een batterij die de coach niet stuurt: het rendement uit zijn eigen tellers (v0.123.0).
+
+        Voor de pop-up, net als bij een batterij die hij wel stuurt ("ongeveer
+        90%, gemeten in de accu"). Een Growatt leest de coach alleen uit, en
+        daarvan zijn de tellers wat er voor de bewoner overblijft. Meer doet hij
+        er niet mee: geen stand, geen plan, geen kasboek.
+        """
+        device_id = device.get("id", "")
+        rij = self._batterij_rij(settings, device_id)
+        entities = device.get("entities") or {}
+        try:
+            opgave = float((device.get("battery") or {}).get("capacity_kwh") or 0.0) or None
+        except (TypeError, ValueError):
+            opgave = None
+        capaciteit = _kwh(self.hass, entities.get("capacity")) or opgave
+        accu = self._rte_gemeten(device, capaciteit, ("accu_in", "accu_out"))
+        if accu is not None and abs(float(rij.get("rte_accu") or 0.0) - accu) > 0.002:
+            await self._async_batterij_bewaren(settings, device_id, {"rte_accu": round(accu, 4)})
 
     def _batterij_van(
         self, now: datetime, settings: dict[str, Any], device: dict[str, Any], rij: dict[str, Any]

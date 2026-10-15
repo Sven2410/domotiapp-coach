@@ -36,11 +36,13 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import EVENT_DECISION, EVENT_SETTINGS_UPDATED, HOLIDAY_MAX_DEFAULT, PROGRAMMA_TYPES
+from .const import (
+    BATTERIJ_ALLEEN_LEZEN, EVENT_DECISION, EVENT_SETTINGS_UPDATED, HOLIDAY_MAX_DEFAULT, PROGRAMMA_TYPES,
+)
 from .entiteit import (
     CONTRACT, CoachEntiteit, apparaat_info, async_per_apparaat, entiteiten_van, met_zone,
     oude_coach_opruimen, paal_apparaat, paal_blokken, paal_modus_actief, paal_modus_keuzes, paal_schema, paal_sessie,
-    paal_stand, paal_tekst, accu_apparaat, accu_opgeleverd, accu_plan, accu_stand,
+    paal_stand, paal_tekst, accu_apparaat, accu_capaciteit, accu_opgeleverd, accu_plan, accu_stand,
     AIRCO_STAND_NAMEN, airco_stand, ruimte_naam,
 )
 from .planner import _dag_om
@@ -361,6 +363,15 @@ class BatterijCoachSensor(CoachEntiteit, SensorEntity):
             # Wat de integratie van de batterij zelf zegt, voor de foto (v0.112.1).
             "accu_fabrikant": fabrikant,
             "accu_model": model,
+            # Hoe de coach hem kent (v0.123.0), zoals `brand` bij de laadpaal, en of
+            # hij hem alleen uitleest: een Growatt altijd, een ander merk als hij
+            # niet mag sturen. Dan is er geen stand, geen plan en geen accustand
+            # hierin; de kaart leest die uit `entiteiten`, en de knoppen doen niets.
+            "brand": str(self._device.get("brand") or ""),
+            "alleen_lezen": not self._device.get("controllable")
+            or self._device.get("brand") in BATTERIJ_ALLEEN_LEZEN,
+            # De capaciteit in kWh (v0.123.0): de sensor, anders wat er ingetypt is.
+            "capaciteit": accu_capaciteit(self.hass, self._device),
             "zelf": bool(st.get("self_zero")),
             "soc": st.get("soc"),
             "reason": st.get("reason") or "",

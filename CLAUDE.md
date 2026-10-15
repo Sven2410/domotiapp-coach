@@ -194,7 +194,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de laadpaal: de zonverwachting per voorspeller (Forecast.Solar telt op het eind van het uur), een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla, de laadbeurt en de actieradius op de kaart | `docs/laadpaal.md` |
 | een Alfen, of iets aan de paalsturing | `docs/alfen.md` |
 | onderverdeelkasten en groepen met een eigen zekering | `docs/groepen.md` |
-| de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, hoe de coach prijslijsten leest, en de temperatuur met de melding en de ventilator | `docs/batterij.md` |
+| de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, hoe de coach prijslijsten leest, de temperatuur met de melding en de ventilator, en Growatt (alleen uitlezen) | `docs/batterij.md` |
 | de vaatwasser: Home Connect, Home Connect Local, een domme vaatwasser, de eindtijd, na de klaar-tijd | `docs/vaatwasser.md` |
 | de boiler | `docs/boiler.md` |
 | de airco: bijverwarmen of bijkoelen op zon (of op goedkope uren als de bewoner dat kiest), geen thermostaat, Mitsubishi Electric als merk, de bewoner die wint, de cloud die een minuut doet, en het contract met de airco-kaart | `docs/airco.md` |
@@ -223,6 +223,8 @@ dan de andere in dezelfde uitgave.
 - **Wat er aan een smart plug hangt** (v0.120.0): `STEKKER_APPARATEN` in const.py
   (met het lidwoord voor een melding) en `PLUG_APPLIANCES` in devices.js (met het
   icoon); test_rapport.mjs legt ze naast elkaar (`docs/smart-plug.md`).
+- **Een batterij die de coach alleen uitleest** (v0.123.0, Growatt): `BATTERIJ_ALLEEN_LEZEN` in
+  const.py en `readOnly` in `BATTERY_BRANDS` (devices.js); test_rapport.mjs legt ze naast elkaar.
 - **De vaatwasserprogramma's**: `PROGRAMMAS` in planner.py en
   `DISHWASHER_PROGRAMS` in devices.js; test_rapport.mjs legt ze naast elkaar.
 - **De typen met een programma**: `PROGRAMMA_TYPES` in const.py en
