@@ -29,7 +29,7 @@
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
 import { metHoofdletter, power, powerText } from "../format.js";
-import { ACTIVE_WATTS, deviceLabel, deviceLabelMap, typeMeta } from "../devices.js";
+import { ACTIVE_WATTS, deviceIcon, deviceLabel, deviceLabelMap } from "../devices.js";
 
 /** Below this width the wide layout stops being legible and it goes portrait. */
 const NARROW_AT = 470;
@@ -428,7 +428,7 @@ class DacEnergyFlow extends DacElement {
 
       const rolled = device.rolled?.length ?? 0;
       const label = rolled ? `+ ${rolled} andere` : this.labelFor_(device);
-      const iconKey = rolled ? "overig" : typeMeta(device.type).icon;
+      const iconKey = rolled ? "overig" : deviceIcon(device);
 
       node.querySelector("[data-icon]").innerHTML = icons[iconKey];
       // Openable when there is more to say: what got folded into a summed

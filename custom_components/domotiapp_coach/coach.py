@@ -24,6 +24,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ServiceNotFound
 from homeassistant.helpers.event import (
+    async_call_later,
     async_track_state_change_event,
     async_track_time_interval,
 )
@@ -43,6 +44,7 @@ from .const import (
     LEVEL_STEER,
     PHASE_START_AMPS,
     PROGRAMMA_TYPES,
+    STEKKER_APPARATEN,
     TEMPO_ONDERGRENS,
 )
 from .archive import async_get_archive
@@ -164,6 +166,10 @@ SENSOR_STIL_AUTO = timedelta(minutes=60)
 # de grens heen en weer gaat geeft zo één bericht, niet elke paar minuten een.
 TEMP_AANHOUDEND = timedelta(minutes=2)
 TEMP_TERUG = 1.0
+# Een smart plug die altijd aan moet staan (v0.120.0): zo lang mag hij uit zijn
+# voor er een melding komt. De eigenaar op 15-10-2026: "Lukt dat niet wil ik na
+# 2 min een melding ontvangen."
+ALTIJD_AAN_WACHT = timedelta(minutes=2)
 # De ingebouwde Nord Pool van Home Assistant hangt geen prijslijst aan zijn
 # sensoren; die geeft hij alleen via zijn dienst (v0.101.3). Zo vaak vraagt de
 # coach een dag die nog niet binnen is opnieuw, en vanaf dit uur morgen erbij:
@@ -824,6 +830,27 @@ def _temp_nodig(settings: dict[str, Any], device: dict[str, Any]) -> bool:
     return bool(ventilator) or _temp_grens(settings) is not None
 
 
+def _altijd_aan(device: dict[str, Any]) -> str | None:
+    """De schakelaar van een smart plug die altijd aan moet staan, of None (v0.120.0)."""
+    if device.get("type") != "smartplug" or not device.get("always_on"):
+        return None
+    return (device.get("entities") or {}).get("switch") or None
+
+
+def _altijd_aan_melden(settings: dict[str, Any]) -> bool:
+    """Of een stekker die uit blijft naar de telefoon gaat (Meldingen, `always_on_alert`)."""
+    return bool(((settings.get("notifications") or {}).get("always_on_alert") or {}).get("enabled"))
+
+
+def _stekker_naam(device: dict[str, Any]) -> str:
+    """Een smart plug vooraan in een melding: zijn eigen naam, of "De vriezer"."""
+    eigen = str(device.get("name") or "").strip()
+    if eigen:
+        return eigen[0].upper() + eigen[1:]
+    label, lidwoord = STEKKER_APPARATEN.get(str(device.get("appliance") or ""), STEKKER_APPARATEN["overig"])
+    return f"{lidwoord.capitalize()} {label.lower()}"
+
+
 def _graden(waarde: float) -> str:
     """46,2 °C, of 45 °C als er niets achter de komma staat."""
     tekst = f"{waarde:.1f}".replace(".", ",")
@@ -1144,6 +1171,13 @@ class ChargerCoach:
         # is, en welke al gemeld zijn. Zie `_async_temperatuurwacht`.
         self._temp_boven: dict[str, datetime] = {}
         self._temp_gemeld: set[str] = set()
+        # De smart plugs die altijd aan moeten staan (v0.120.0): sinds wanneer
+        # hij uit is, welke al gemeld zijn, welke de coach zelf weer aanzette, en
+        # de klok die na `ALTIJD_AAN_WACHT` nog een keer kijkt. Zie `_async_altijd_aan`.
+        self._stekker_uit: dict[str, datetime] = {}
+        self._stekker_gemeld: set[str] = set()
+        self._stekker_gezet: set[str] = set()
+        self._stekker_klok: dict[str, Any] = {}
         # Welke vrijgaveschakelaars de stroom van hun eigen machine zijn, al in
         # het log gezet. Zie `_vrijgave_entiteit`.
         self._stroom_gemeld: set[tuple[str, str]] = set()
@@ -1399,6 +1433,8 @@ class ChargerCoach:
                 opzeggen()
         self._unwatch_batterij = self._cancel_regel = None
         self._batterij_meters = set()
+        for sleutel in list(self._stekker_klok):
+            self._stekker_klok_stop(sleutel)
         if self._cancel is not None:
             self._cancel()
             self._cancel = None
@@ -1651,9 +1687,13 @@ class ChargerCoach:
                 uit[dynamic["market_entity"]] = "je marktprijssensor"
             if dynamic.get("fallback_entity"):
                 uit.setdefault(dynamic["fallback_entity"], "je reserveprijssensor")
+        stekker_meldt = _altijd_aan_melden(settings)
         for device in settings.get("devices") or []:
             naam = device.get("name") or "een apparaat"
-            if device.get("entity"):
+            # Een smart plug die altijd aan moet staan heeft zijn eigen melding,
+            # na twee minuten (v0.120.0). Na tien minuten nog een over zijn
+            # vermogen zou twee berichten zijn over één stekker die van het net is.
+            if device.get("entity") and not (stekker_meldt and _altijd_aan(device)):
                 uit[device["entity"]] = f"het vermogen van {naam}"
             entities = device.get("entities") or {}
             for sleutel, wat in (
@@ -1975,6 +2015,95 @@ class ChargerCoach:
             f"De ventilator van {naam} staat {'aan' if aan else 'uit'}: {_graden(temp)}.",
             telefoon=False,
         )
+
+    async def _async_altijd_aan(
+        self, settings: dict[str, Any], now: datetime, level: str
+    ) -> None:
+        """Een smart plug die altijd aan moet staan weer aanzetten (v0.120.0).
+
+        De eigenaar op 15-10-2026: "een belangrijke optie, dit apparaat moet
+        altijd aan staan. Als die aan staat moet de coach dat blijven
+        controleren en als die door wat voor een reden dan uit gegaan is moet
+        de coach hem weer aan zetten. Lukt dat niet wil ik na 2 min een melding
+        ontvangen. Pas de melding sturen als je dat hebt ingesteld in meldingen."
+
+        Staat de schakelaar uit, dan zet de coach hem aan, en elke ronde
+        opnieuw zolang dat niet lukt. De schakelaar wekt de coach zelf
+        (`_watch`), dus dat is binnen een seconde en niet pas bij de volgende
+        minuut. Staat hij na `ALTIJD_AAN_WACHT` nog niet aan, dan één melding,
+        als kritiek: naar de telefoon alleen als `always_on_alert` aan staat,
+        in de geschiedenis altijd. Een stekker die niets zegt is van het
+        netwerk af; die kan de coach niet aanzetten, en dat zegt de melding.
+
+        Niet bij Alleen uitlezen en Adviseren, net als de ventilator: daar
+        belooft de coach dat hij niets aanraakt. De melding komt dan wel. Dat
+        hij hem weer aankreeg, en dat hij het weer doet, staat alleen in de
+        geschiedenis.
+        """
+        telefoon = _altijd_aan_melden(settings)
+        gezien: set[str] = set()
+        for device in settings.get("devices") or []:
+            plug = _altijd_aan(device)
+            if not plug:
+                continue
+            sleutel = str(device.get("id") or plug)
+            gezien.add(sleutel)
+            naam = _stekker_naam(device)
+            stand = _text(self.hass, plug).strip()
+            if stand == "on":
+                self._stekker_uit.pop(sleutel, None)
+                self._stekker_klok_stop(sleutel)
+                if sleutel in self._stekker_gemeld:
+                    self._stekker_gemeld.discard(sleutel)
+                    await self._async_tell(f"{naam} staat weer aan.", telefoon=False)
+                elif sleutel in self._stekker_gezet:
+                    await self._async_tell(f"{naam} stond uit; de coach heeft hem weer aangezet.", telefoon=False)
+                self._stekker_gezet.discard(sleutel)
+                continue
+            if sleutel not in self._stekker_uit:
+                self._stekker_uit[sleutel] = now
+                # De ronde loopt eens per minuut; deze klok kijkt precies als
+                # de wachttijd om is, zodat de melding na twee minuten komt en
+                # niet na bijna drie.
+                self._stekker_klok_stop(sleutel)
+                self._stekker_klok[sleutel] = async_call_later(
+                    self.hass, ALTIJD_AAN_WACHT.total_seconds() + 1, self._stekker_klok_af
+                )
+            sinds = self._stekker_uit[sleutel]
+            mag = level not in (LEVEL_READ, LEVEL_ADVISE)
+            if stand == "off" and mag and await self._async_schakelen(device, True, "switch"):
+                self._stekker_gezet.add(sleutel)
+            if sleutel in self._stekker_gemeld or now - sinds < ALTIJD_AAN_WACHT:
+                continue
+            self._stekker_gemeld.add(sleutel)
+            minuten = int((now - sinds).total_seconds() // 60)
+            # De entiteit-id in het log en niet in de melding, zoals bij de sensorwacht.
+            _LOGGER.warning("%s (%s) staat al %d minuten %s", naam, plug, minuten, stand or "nergens")
+            if stand != "off":
+                tekst = f"{naam} is al {minuten} minuten niet bereikbaar; de coach weet niet of hij aan staat."
+            elif mag:
+                tekst = f"{naam} staat al {minuten} minuten uit en de coach krijgt hem niet aan."
+            else:
+                tekst = f"{naam} staat al {minuten} minuten uit."
+            await self._async_tell(tekst, kritiek=True, telefoon=telefoon)
+
+        # Een stekker die er niet meer is, of niet meer aan hoeft, telt niet meer.
+        for sleutel in set(self._stekker_uit) - gezien:
+            self._stekker_uit.pop(sleutel, None)
+            self._stekker_klok_stop(sleutel)
+        self._stekker_gemeld &= gezien
+        self._stekker_gezet &= gezien
+
+    def _stekker_klok_stop(self, sleutel: str) -> None:
+        """De klok van een stekker die uit stond opzeggen, als die er is."""
+        opzeggen = self._stekker_klok.pop(sleutel, None)
+        if opzeggen is not None:
+            opzeggen()
+
+    @callback
+    def _stekker_klok_af(self, _now: Any) -> None:
+        """De wachttijd van een stekker die uit staat is om: nu kijken."""
+        self.async_refresh()
 
     async def _async_verbruikswacht(self, settings: dict[str, Any], now: datetime) -> None:
         """Lekkage of abnormaal verbruik van water en gas, één melding per geval.
@@ -2359,6 +2488,13 @@ class ChargerCoach:
                 for device in boilers
                 if (entity := (device.get("entities") or {}).get("switch"))
             }
+            # En de schakelaar van een smart plug die altijd aan moet staan
+            # (v0.120.0): gaat hij uit, dan hoort hij meteen weer aan te gaan.
+            | {
+                entity
+                for device in settings.get("devices") or []
+                if (entity := _altijd_aan(device))
+            }
             | self._watched_phases
         )
 
@@ -2378,6 +2514,7 @@ class ChargerCoach:
         await self._async_sensorwacht(settings, moment)
         await self._async_verbruikswacht(settings, moment)
         await self._async_temperatuurwacht(settings, moment, level)
+        await self._async_altijd_aan(settings, moment, level)
         await self._async_zonkromme(settings, moment)
         self._meter_bijhouden(settings, moment)
 

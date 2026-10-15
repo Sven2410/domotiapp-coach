@@ -62,8 +62,42 @@ DEVICE_TYPES: Final = [
     "boiler",
     "vaatwasser",
     "airco",
+    # Sinds v0.120.0: een smart plug, met wat eraan hangt (`STEKKER_APPARATEN`).
+    "smartplug",
     "overig",
 ]
+
+# Wat er aan een smart plug hangt (v0.120.0), met het lidwoord voor een melding
+# ("De vriezer staat al 2 minuten uit"). Dezelfde lijst staat in het paneel
+# (`PLUG_APPLIANCES` in devices.js), met een icoon erbij; test_rapport.mjs legt
+# ze naast elkaar. De eigenaar op 15-10-2026: "een hele lijst met apparaten
+# zoals wasmachine, oven vriezer etc etc. Allemaal met de naam en icon."
+STEKKER_APPARATEN: Final = {
+    "airfryer": ("Airfryer", "de"),
+    "aquarium": ("Aquarium", "het"),
+    "computer": ("Computer", "de"),
+    "droger": ("Droger", "de"),
+    "kachel": ("Elektrische kachel", "de"),
+    "fietslader": ("Fietslader", "de"),
+    "koelkast": ("Koelkast", "de"),
+    "koffiezetapparaat": ("Koffiezetapparaat", "het"),
+    "lamp": ("Lamp", "de"),
+    "maairobot": ("Maairobot", "de"),
+    "magnetron": ("Magnetron", "de"),
+    "ontvochtiger": ("Ontvochtiger", "de"),
+    "oven": ("Oven", "de"),
+    "router": ("Router", "de"),
+    "server": ("Server", "de"),
+    "spelcomputer": ("Spelcomputer", "de"),
+    "televisie": ("Televisie", "de"),
+    "vaatwasser": ("Vaatwasser", "de"),
+    "ventilator": ("Ventilator", "de"),
+    "vijverpomp": ("Vijverpomp", "de"),
+    "vriezer": ("Vriezer", "de"),
+    "wasmachine": ("Wasmachine", "de"),
+    "waterkoker": ("Waterkoker", "de"),
+    "overig": ("Smart plug", "de"),
+}
 
 # De types die er ooit in stonden, met hoe ze in het paneel heetten. Alleen om
 # een apparaat dat er al staat netjes om te zetten naar "overig" zonder dat de
@@ -450,6 +484,13 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         "temp_alert": {
             "enabled": False,
             "max_c": None,
+        },
+        # Een apparaat dat altijd aan moet staan en dat de coach niet weer aan
+        # krijgt (v0.120.0). De eigenaar op 15-10-2026: "Lukt dat niet wil ik na
+        # 2 min een melding ontvangen. Pas de melding sturen als je dat hebt
+        # ingesteld in meldingen." Dus standaard uit.
+        "always_on_alert": {
+            "enabled": False,
         },
     },
     "strategy": {
