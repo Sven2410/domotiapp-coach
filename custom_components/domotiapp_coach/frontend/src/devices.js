@@ -22,6 +22,8 @@ export const DEVICE_TYPES = [
   // Wasmachine droger en vriezer."
   { id: "wasmachine", label: "Wasmachine", icon: "wasmachine" },
   { id: "droger", label: "Droger", icon: "droger" },
+  // Sinds v0.125.0: een vriezer die de coach in de gaten houdt en niet stuurt.
+  { id: "vriezer", label: "Vriezer", icon: "vriezer" },
   { id: "airco", label: "Airco", icon: "airco" },
   // Sinds v0.120.0: wat aan een smart plug hangt, zie `PLUG_APPLIANCES`.
   { id: "smartplug", label: "Smart plug", icon: "plug" },
@@ -689,6 +691,58 @@ const WASHER_BRANDS = (wat) => [
 export const WASMACHINE_BRANDS = WASHER_BRANDS("wasmachine");
 export const DROGER_BRANDS = WASHER_BRANDS("droger");
 
+/**
+ * Een vriezer, per merk (v0.125.0). De eigenaar op 15-10-2026: "Uitlezen en
+ * melden": de temperatuur en de deur bijhouden, en een melding als de deur te
+ * lang openstaat, de temperatuur oploopt of de vriezer een storing meldt. De
+ * coach stuurt hem niet (`readOnly`); de meldingen staan in
+ * `_async_vriezerwacht` in coach.py. Dezelfde lijst als `VRIEZER_BRANDS` in const.py.
+ */
+const VRIEZER_FIELDS = (miele) => [
+  {
+    key: "temperature",
+    label: "Temperatuur",
+    hint: miele
+      ? "De sensor Temperatuur van de vriezer. Is hij een half uur warmer dan -15 °C, dan krijg je een melding. Niet de zones 2 en 3: die bestaan bij deze vriezer niet echt."
+      : "Een temperatuursensor in de vriezer. Is hij een half uur warmer dan -15 °C, dan krijg je een melding.",
+    filter: "temperature",
+    decimals: 1,
+  },
+  {
+    key: "door",
+    label: "Deur",
+    hint: "Optioneel: de deursensor. Staat de deur 3 minuten open, dan krijg je een melding.",
+    filter: "all",
+    values: { on: "Open", off: "Dicht", open: "Open", closed: "Dicht" },
+  },
+  {
+    key: "problem",
+    label: "Storing",
+    hint: miele
+      ? "Optioneel: de sensor Probleem van de vriezer. Meldt hij een storing, dan krijg je een melding."
+      : "Optioneel: een sensor die aan gaat bij een storing. Dan krijg je een melding.",
+    filter: "all",
+    values: { on: "Storing", off: "Geen" },
+  },
+];
+
+export const VRIEZER_BRANDS = [
+  {
+    id: "miele",
+    label: "Miele",
+    note: "Voor Miele is dat de integratie Miele van Home Assistant zelf.",
+    fields: VRIEZER_FIELDS(true),
+    readOnly: true,
+  },
+  {
+    id: "overig",
+    label: "Overig",
+    note: "Onder Overig past elke vriezer met een temperatuursensor erin.",
+    fields: VRIEZER_FIELDS(false),
+    readOnly: true,
+  },
+];
+
 
 /**
  * Thuisbatterijen, per merk.
@@ -899,6 +953,8 @@ export const BATTERY_BRANDS = [
     // Alleen uitlezen: geen vinkje om te sturen en geen instellingen daarvoor.
     // Dezelfde lijst als `BATTERIJ_ALLEEN_LEZEN` in const.py.
     readOnly: true,
+    // En geen vermogenssensor met een teken: laden en ontladen staan in de velden.
+    noPower: true,
     battery: { control_mode: "", idle_mode: "" },
   },
   {
@@ -1042,6 +1098,7 @@ const BRANDS_BY_TYPE = new Map([
   ["vaatwasser", DISHWASHER_BRANDS],
   ["wasmachine", WASMACHINE_BRANDS],
   ["droger", DROGER_BRANDS],
+  ["vriezer", VRIEZER_BRANDS],
   ["thuisbatterij", BATTERY_BRANDS],
   ["airco", AIRCO_BRANDS],
 ]);

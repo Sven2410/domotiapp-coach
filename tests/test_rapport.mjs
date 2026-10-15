@@ -4087,7 +4087,7 @@ proef("elk merk dat het paneel aanbiedt neemt de coach aan bij het opslaan (v0.1
   for (const blok of bron.matchAll(/^[A-Z_]+_BRANDS: Final = \[([\s\S]*?)\]/gm)) {
     for (const m of blok[1].matchAll(/"([a-z_]+)"/g)) python.add(m[1]);
   }
-  const alle = ["laadpaal", "vaatwasser", "wasmachine", "droger", "thuisbatterij", "airco"]
+  const alle = ["laadpaal", "vaatwasser", "wasmachine", "droger", "vriezer", "thuisbatterij", "airco"]
     .flatMap((soort) => devs.brandsFor(soort).map((b) => `${soort}:${b.id}`));
   const mist = alle.filter((naam) => !python.has(naam.split(":")[1]));
   assert.deepEqual(mist, [], `niet in const.py: ${mist.join(", ")}`);
@@ -4172,6 +4172,50 @@ proef("wasmachine: zonder vrijgave is deur dicht genoeg, met de woorden van een 
   assert.ok(!html.includes("Ingeruimd") && !html.includes("vaat"));
   const vaat = voorkeurHtml({ id: "v", type: "vaatwasser", brand: "home_connect", controllable: true, entities: {} });
   assert.ok(vaat.includes("Ingeruimd en dicht") && vaat.includes("schone vaat"), "de vaatwasser houdt de zijne");
+});
+
+// --- de vriezer (v0.125.0) ------------------------------------------------------------
+//
+// De eigenaar op 15-10-2026: "Uitlezen en melden", niet sturen.
+proef("de vriezer: Miele en Overig, temperatuur, deur en storing, en niets om te sturen (v0.125.0)", async () => {
+  const devs = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  assert.ok(devs.DEVICE_TYPES.some((t) => t.id === "vriezer"));
+  assert.deepEqual(devs.brandsFor("vriezer").map((b) => b.id), ["miele", "overig"]);
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/const.py", import.meta.url), "utf8");
+  const blok = bron.slice(bron.indexOf("VRIEZER_BRANDS: Final = ["));
+  assert.deepEqual([...blok.slice(0, blok.indexOf("]")).matchAll(/"([a-z_]+)"/g)].map((m) => m[1]),
+                   devs.VRIEZER_BRANDS.map((b) => b.id));
+  const vriezer = { id: "v", type: "vriezer", brand: "miele", name: "", controllable: false, entity: "", entities: {} };
+  assert.deepEqual(devs.brandFields(vriezer).map((f) => f.key), ["temperature", "door", "problem"]);
+  assert.equal(devs.canSteer(vriezer), false);
+  assert.equal(devs.isReadOnly(vriezer), true);
+  assert.equal(devs.isReadOnly({ ...vriezer, brand: "overig" }), true);
+
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.feed_ = {};
+  el.draft_ = { devices: [vriezer] };
+  const html = el.brandHtml_(vriezer, 0);
+  assert.ok(html.includes('data-entity-key="temperature"') && html.includes('data-entity-key="door"')
+            && html.includes('data-entity-key="problem"'));
+  assert.ok(html.includes("data-power"), "een vriezer op een meetstekker mag zijn vermogen houden");
+  const stuur = el.controlHtml_({ ...vriezer, controllable: true }, 0);
+  assert.ok(!stuur.includes('data-field="controllable"') && stuur.includes("3 minuten") && stuur.includes("-15 °C"));
+  assert.equal(el.summary_(vriezer).text, "Miele · meldingen");
+  // Een Growatt houdt geen vermogenssensor.
+  assert.ok(!el.brandHtml_({ ...vriezer, type: "thuisbatterij", brand: "growatt" }, 0).includes("data-power"));
+
+  const staten = {
+    "sensor.v_temp": { entity_id: "sensor.v_temp", state: "-18.25", attributes: { unit_of_measurement: "°C" } },
+    "binary_sensor.v_deur": { entity_id: "binary_sensor.v_deur", state: "off", attributes: {} },
+  };
+  const r = new LiveSource().sample({ get: (id) => staten[id] }, {
+    sources: {}, devices: [{ ...vriezer, entities: { temperature: "sensor.v_temp", door: "binary_sensor.v_deur" } }],
+  });
+  const rij = (label) => r.devices[0].details.find((d) => d.label === label)?.text;
+  assert.equal(rij("Temperatuur"), "-18,3 °C");
+  assert.equal(rij("Deur"), "Dicht");
 });
 
 for (const [naam, fn] of proeven) {

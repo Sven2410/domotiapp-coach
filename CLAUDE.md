@@ -2,7 +2,8 @@
 
 Een custom integration voor Home Assistant die apparaten in huis op het
 gunstigste moment laat draaien: de laadpaal, de thuisbatterij, de vaatwasser, de wasmachine, de droger,
-de boiler en de airco, en houdt een smart plug aan als dat moet. Hij
+de boiler en de airco, houdt een smart plug aan als dat moet, en meldt het als de vriezer
+openstaat of te warm wordt. Hij
 wordt via HACS verspreid, dus alleen `custom_components/` gaat mee naar de klant.
 
 De eigenaar beoordeelt en beslist; ik bouw, test, commit, tag en breng uit.
@@ -200,6 +201,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de airco: bijverwarmen of bijkoelen op zon (of op goedkope uren als de bewoner dat kiest), geen thermostaat, Mitsubishi Electric als merk, de bewoner die wint, de cloud die een minuut doet, en het contract met de airco-kaart | `docs/airco.md` |
 | Historie en het rapport, het verbruik per apparaat (zoals het energiedashboard), de tijdlijn in Historie, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, en de batterij op de kaart en in de pop-up | `docs/eerste-woning.md` |
 | een smart plug: de lijst met apparaten en hun iconen, altijd aan (ook voor een vaatwasser aan een smart plug), en de melding Apparaat staat uit | `docs/smart-plug.md` |
+| de vriezer: uitlezen en melden (deur open, te warm, storing), niet sturen | `docs/vriezer.md` |
 | het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat | `docs/paneel.md` |
 
 ## Wat gelijk moet blijven
