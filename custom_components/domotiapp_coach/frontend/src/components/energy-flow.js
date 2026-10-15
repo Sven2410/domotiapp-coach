@@ -28,7 +28,7 @@
 
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
-import { power, powerText } from "../format.js";
+import { metHoofdletter, power, powerText } from "../format.js";
 import { ACTIVE_WATTS, deviceLabel, deviceLabelMap, typeMeta } from "../devices.js";
 
 /** Below this width the wide layout stops being legible and it goes portrait. */
@@ -597,7 +597,10 @@ class DacEnergyFlow extends DacElement {
         key.textContent = row.k;
         const value = document.createElement("span");
         value.className = "v";
-        value.textContent = row.v;
+        // Dezelfde regels als op de apparaatkaart, dus ook hier met een
+        // hoofdletter (v0.119.3): de eigenaar op 15-10-2026, bij "laadt" en
+        // "ongeveer 93%, gemeten in de accu" in deze pop-up.
+        value.textContent = metHoofdletter(row.v);
         item.append(key, value);
         return item;
       })

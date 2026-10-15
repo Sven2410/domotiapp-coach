@@ -248,3 +248,8 @@ mee": "even alles met een hoofdletter beginnen." Dat gebeurt op één plek, waar
 de kaart de regel neerzet (`metHoofdletter` in format.js, in `views/overview.js`),
 en niet in de teksten zelf: dezelfde woorden staan elders midden in een zin. Een
 getal of een teken vooraan ("58 %", "€ 4,26") blijft zoals het is.
+
+Sinds v0.119.3 ook in de pop-up van een bel in de energiestroom (`openDetail_` in
+`components/energy-flow.js`), want daar staan dezelfde regels. De eigenaar op
+15-10-2026, bij de pop-up van de batterij met "laadt" en "ongeveer 93%, gemeten in
+de accu": "hier ook hoofdletters toepassen."
