@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .entiteit import (
-    CoachEntiteit, async_airco_veld, async_batterij_veld, async_per_apparaat, async_schema, paal_schema,
+    AccuBediening, CoachEntiteit, async_airco_veld, async_batterij_veld, async_per_apparaat, async_schema, paal_schema,
 )
 
 
@@ -90,7 +90,7 @@ class SchemaSwitch(CoachEntiteit, SwitchEntity):
         await async_schema(self.hass, self._device_id, enabled=False)
 
 
-class VakantieSwitch(CoachEntiteit, SwitchEntity):
+class VakantieSwitch(AccuBediening, CoachEntiteit, SwitchEntity):
     """De vakantiestand van de thuisbatterij (v0.112.0): onder de grens uit Apparaten blijven."""
 
     _attr_icon = "mdi:palm-tree"

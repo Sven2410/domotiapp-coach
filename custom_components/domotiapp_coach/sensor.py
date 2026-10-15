@@ -36,13 +36,12 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import (
-    BATTERIJ_ALLEEN_LEZEN, EVENT_DECISION, EVENT_SETTINGS_UPDATED, HOLIDAY_MAX_DEFAULT, PROGRAMMA_TYPES,
-)
+from .const import EVENT_DECISION, EVENT_SETTINGS_UPDATED, HOLIDAY_MAX_DEFAULT, PROGRAMMA_TYPES
 from .entiteit import (
     CONTRACT, CoachEntiteit, apparaat_info, async_per_apparaat, entiteiten_van, met_zone,
     oude_coach_opruimen, paal_apparaat, paal_blokken, paal_modus_actief, paal_modus_keuzes, paal_schema, paal_sessie,
-    paal_stand, paal_tekst, accu_apparaat, accu_capaciteit, accu_opgeleverd, accu_plan, accu_stand,
+    paal_stand, paal_tekst, accu_alleen_lezen, accu_apparaat, accu_capaciteit, accu_opgeleverd, accu_plan,
+    accu_stand,
     AIRCO_STAND_NAMEN, airco_stand, ruimte_naam,
 )
 from .planner import _dag_om
@@ -341,6 +340,10 @@ class BatterijCoachSensor(CoachEntiteit, SensorEntity):
 
     @property
     def native_value(self) -> str:
+        # Een batterij die de coach alleen uitleest heeft geen stand (v0.123.1);
+        # leeg las als een fout.
+        if not self._stand.get("mode_name") and accu_alleen_lezen(self._device):
+            return "Alleen uitlezen"
         return str(self._stand.get("mode_name") or "")
 
     @property
@@ -368,8 +371,7 @@ class BatterijCoachSensor(CoachEntiteit, SensorEntity):
             # niet mag sturen. Dan is er geen stand, geen plan en geen accustand
             # hierin; de kaart leest die uit `entiteiten`, en de knoppen doen niets.
             "brand": str(self._device.get("brand") or ""),
-            "alleen_lezen": not self._device.get("controllable")
-            or self._device.get("brand") in BATTERIJ_ALLEEN_LEZEN,
+            "alleen_lezen": accu_alleen_lezen(self._device),
             # De capaciteit in kWh (v0.123.0): de sensor, anders wat er ingetypt is.
             "capaciteit": accu_capaciteit(self.hass, self._device),
             "zelf": bool(st.get("self_zero")),

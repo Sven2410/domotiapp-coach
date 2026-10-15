@@ -1199,7 +1199,14 @@ entiteit.py, waarmee de kaart bij een Growatt het type kiest), `brand` (hoe de
 coach hem kent, `growatt`, zoals `brand` bij de laadpaal) en `alleen_lezen` (waar bij een
 Growatt altijd, en bij elke batterij die de coach niet mag sturen). Dan is er geen stand
 (`stil`), geen plan en geen accustand in de attributen, want `_one_batterij` draait voor hem
-niet; de kaart leest de accustand, het laden en het ontladen zelf uit `entiteiten`, en de
-knoppen doen niets. Het merk voor de foto komt zoals bij elke batterij uit het register
-(`accu_fabrikant`): de Growatt-integratie zet daar "Growatt", en bij een MIX geen model.
-Proef 159.
+niet; de kaart leest de accustand, het laden en het ontladen zelf uit `entiteiten`. Het merk
+voor de foto komt zoals bij elke batterij uit het register (`accu_fabrikant`): de
+Growatt-integratie zet daar "Growatt", en bij een MIX geen model. Proef 159.
+
+**Sinds v0.123.1** zegt die sensor dan "Alleen uitlezen" in plaats van niets, en staan vol
+laden, leegladen, terug naar het plan, de vakantiestand en leegladen tot op niet beschikbaar
+(`AccuBediening`, `accu_alleen_lezen` in entiteit.py). De beheersessie zag ze op 15-10-2026 bij
+een Growatt en vroeg: "Die doen bij een Growatt niets." Niet weggehaald, want dan blijven ze
+als wees in het register staan, en bij een batterij die de coach later wel mag sturen komen
+ze vanzelf terug. De accustand blijft bewust leeg op de sensor: die wordt alleen bij een
+besluit of een wijziging in Apparaten opnieuw geschreven, en zou dus een oude waarde tonen.

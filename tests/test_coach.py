@@ -9152,6 +9152,10 @@ controle("Growatt is een merk dat alleen gelezen wordt", coachmod.BATTERIJ_ALLEE
 hass159.data["domotiapp_coach"]["coach"] = coach159
 sensoren159 = []
 asyncio.run(sensormod.async_setup_entry(hass159, Invoer110(), lambda nieuw: sensoren159.extend(nieuw)))
+bediening159 = []
+for module159 in (knopmod, schakelmod, getalmod):
+    asyncio.run(module159.async_setup_entry(hass159, Invoer110(), lambda nieuw: bediening159.extend(nieuw)))
+accu_bediening159 = [e for e in bediening159 if e.unique_id.startswith("dev-growatt_")]
 kaart159 = next(s for s in sensoren159 if s.unique_id == "dev-growatt_coach")
 kaart159.hass = hass159
 a159 = kaart159.extra_state_attributes
@@ -9159,6 +9163,15 @@ controle("de kaart leest: merk growatt, alleen uitlezen, de capaciteit, en de en
          a159["contract"] == 1 and a159["brand"] == "growatt" and a159["alleen_lezen"] is True
          and a159["capaciteit"] == 15.3
          and a159["stand"] == "stil" and a159["entiteiten"].get("soc") == "sensor.growatt_soc", f"{a159}")
+# De beheersessie op 15-10-2026, bij een Growatt: de knoppen, de vakantiestand en leegladen
+# tot "doen bij een Growatt niets". Niet beschikbaar, en de sensor zegt waarom (v0.123.1).
+print(f"  {kaart159.native_value!r}; bediening: {sorted((e.unique_id, e.available) for e in accu_bediening159)}")
+controle("de sensor zegt Alleen uitlezen in plaats van niets", kaart159.native_value == "Alleen uitlezen",
+         f"{kaart159.native_value!r}")
+controle("vol laden, leegladen, terug naar het plan, de vakantiestand en leegladen tot: niet beschikbaar",
+         sorted(e.unique_id.split("_", 1)[1] for e in accu_bediening159)
+         == ["leeg_tot", "leegladen", "terug_naar_plan", "vakantiestand", "vol_laden"]
+         and not any(e.available for e in accu_bediening159), f"{[(e.unique_id, e.available) for e in accu_bediening159]}")
 
 # Een Anker met hetzelfde vinkje stuurt hij gewoon.
 hass159b, _, coach159b = bouw(huis75(), instellingen(devices=[LAADPAAL, BATTERIJ]))
@@ -9173,6 +9186,13 @@ controle("en op de kaart is een Anker die hij stuurt niet alleen uitlezen, met d
          kaart159b.extra_state_attributes["alleen_lezen"] is False
          and kaart159b.extra_state_attributes["brand"] == "anker"
          and kaart159b.extra_state_attributes["capaciteit"] == 14.6, f"{kaart159b.extra_state_attributes}")
+bediening159b = []
+for module159 in (knopmod, schakelmod, getalmod):
+    asyncio.run(module159.async_setup_entry(hass159b, Invoer110(), lambda nieuw: bediening159b.extend(nieuw)))
+anker159 = [e for e in bediening159b if e.unique_id.startswith("dev-batterij_")]
+controle("bij een Anker die hij stuurt is alles beschikbaar, en de sensor heeft zijn stand",
+         len(anker159) == 5 and all(e.available for e in anker159)
+         and kaart159b.native_value not in ("", "Alleen uitlezen"), f"{kaart159b.native_value!r}")
 controle("zonder capaciteit: null",
          sys.modules["domotiapp_coach.entiteit"].accu_capaciteit(None, {"battery": {"capacity_kwh": None}}) is None
          and sys.modules["domotiapp_coach.entiteit"].accu_capaciteit(None, {"battery": {}}) is None, "")
