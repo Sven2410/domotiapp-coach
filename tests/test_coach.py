@@ -9105,6 +9105,87 @@ devices_js158 = (pathlib.Path(__file__).resolve().parent.parent / "custom_compon
 controle("het paneel kent dezelfde types als de coach",
          f'export const ALWAYS_ON_TYPES = {list(coachmod.ALTIJD_AAN_TYPES)}'.replace("'", '"') in devices_js158, "")
 
+print("=== 159. Growatt: de coach leest hem alleen uit en stuurt hem nooit (v0.123.0) ===")
+# De eigenaar op 15-10-2026: "nee sturen niet voor growatt alleen uitlezen." De
+# Growatt-integratie haalt alles eens per vijf minuten uit de cloud en heeft voor
+# een MIX alleen sensoren, laden en ontladen in kW. Zoals in een klantwoning op
+# 15-10-2026: rond de 90% uit de eigen tellers, en ontladen in kW.
+GROWATT159 = {
+    "id": "dev-growatt", "type": "thuisbatterij", "name": "", "brand": "growatt",
+    # Het vinkje staat aan en er staat nog een stuurgetal van vroeger: allebei
+    # kan het paneel niet meer zo opslaan, en ook dan stuurt de coach niet.
+    "controllable": True, "entity": "",
+    "entities": {
+        "soc": "sensor.growatt_soc", "charge_power": "sensor.growatt_laden",
+        "discharge_power": "sensor.growatt_ontladen", "accu_in": "sensor.growatt_in",
+        "accu_out": "sensor.growatt_uit", "setpoint": "number.batterij_vermogen",
+    },
+    "battery": {"capacity_kwh": 15.3},
+}
+waarden159 = {
+    **huis75(),
+    "sensor.growatt_soc": {"state": "68", "attributes": {"unit_of_measurement": "%"}},
+    "sensor.growatt_laden": {"state": "0", "attributes": {"unit_of_measurement": "kW"}},
+    "sensor.growatt_ontladen": {"state": "5.4", "attributes": {"unit_of_measurement": "kW"}},
+    "sensor.growatt_in": {"state": "1000.0", "attributes": {"unit_of_measurement": "kWh"}},
+    "sensor.growatt_uit": {"state": "901.5", "attributes": {"unit_of_measurement": "kWh"}},
+}
+inst159 = instellingen(devices=[LAADPAAL, GROWATT159])
+hass159, store159, coach159 = bouw(waarden159, inst159)
+asyncio.run(ronde75(hass159, coach159, dt.datetime(2026, 10, 15, 18, 0)))
+naar159 = [d for d in hass159.services.verstuurd if str(d[2].get("entity_id", "")).startswith(("number.batterij", "select.batterij"))
+           or "growatt" in str(d[2].get("entity_id", ""))]
+controle("met het vinkje aan en een stuurgetal: niets naar de batterij", naar159 == [], f"{naar159}")
+controle("en geen stand, geen plan", "dev-growatt" not in coach159._batterij and "dev-growatt" not in coach159.state,
+         f"{list(coach159._batterij)} {list(coach159.state)}")
+controle("5,4 kW ontladen leest hij als 5400 W eruit", coach159._batterij_w(GROWATT159) == -5400.0,
+         f"{coach159._batterij_w(GROWATT159)}")
+rij159 = next((r for r in store159.instellingen.get("battery_state") or [] if r.get("device") == "dev-growatt"), {})
+print(f"  1000 erin, 901,5 eruit: rte_accu {rij159.get('rte_accu')}")
+controle("het rendement uit zijn eigen tellers staat klaar voor de pop-up: ongeveer 90%",
+         rij159.get("rte_accu") == 0.9015, f"{rij159}")
+controle("en verder bewaart hij niets van hem", set(rij159) == {"device", "rte_accu"}, f"{rij159}")
+controle("Growatt is een merk dat alleen gelezen wordt", coachmod.BATTERIJ_ALLEEN_LEZEN == ("growatt",), "")
+
+# Voor de batterijkaart van DomotiApp Lovelace: het merk, en dat hij alleen uitgelezen
+# wordt. Dat komt erbij; het contract blijft hetzelfde.
+hass159.data["domotiapp_coach"]["coach"] = coach159
+sensoren159 = []
+asyncio.run(sensormod.async_setup_entry(hass159, Invoer110(), lambda nieuw: sensoren159.extend(nieuw)))
+kaart159 = next(s for s in sensoren159 if s.unique_id == "dev-growatt_coach")
+kaart159.hass = hass159
+a159 = kaart159.extra_state_attributes
+controle("de kaart leest: merk growatt, alleen uitlezen, de capaciteit, en de entiteiten om zelf te lezen",
+         a159["contract"] == 1 and a159["brand"] == "growatt" and a159["alleen_lezen"] is True
+         and a159["capaciteit"] == 15.3
+         and a159["stand"] == "stil" and a159["entiteiten"].get("soc") == "sensor.growatt_soc", f"{a159}")
+
+# Een Anker met hetzelfde vinkje stuurt hij gewoon.
+hass159b, _, coach159b = bouw(huis75(), instellingen(devices=[LAADPAAL, BATTERIJ]))
+asyncio.run(ronde75(hass159b, coach159b, dt.datetime(2026, 10, 15, 18, 0)))
+controle("een Anker stuurt hij wel", "dev-batterij" in coach159b._batterij, f"{list(coach159b._batterij)}")
+hass159b.data["domotiapp_coach"]["coach"] = coach159b
+sensoren159b = []
+asyncio.run(sensormod.async_setup_entry(hass159b, Invoer110(), lambda nieuw: sensoren159b.extend(nieuw)))
+kaart159b = next(s for s in sensoren159b if s.unique_id == "dev-batterij_coach")
+kaart159b.hass = hass159b
+controle("en op de kaart is een Anker die hij stuurt niet alleen uitlezen, met de capaciteit van zijn sensor",
+         kaart159b.extra_state_attributes["alleen_lezen"] is False
+         and kaart159b.extra_state_attributes["brand"] == "anker"
+         and kaart159b.extra_state_attributes["capaciteit"] == 14.6, f"{kaart159b.extra_state_attributes}")
+controle("zonder capaciteit: null",
+         sys.modules["domotiapp_coach.entiteit"].accu_capaciteit(None, {"battery": {"capacity_kwh": None}}) is None
+         and sys.modules["domotiapp_coach.entiteit"].accu_capaciteit(None, {"battery": {}}) is None, "")
+
+# Ook een Anker die hij niet mag sturen krijgt zijn rendement uit de tellers.
+eigen159 = {**BATTERIJ, "controllable": False,
+            "entities": {**BATTERIJ["entities"], "accu_in": "sensor.growatt_in", "accu_out": "sensor.growatt_uit"}}
+hass159c, store159c, coach159c = bouw(waarden159, instellingen(devices=[LAADPAAL, eigen159]))
+asyncio.run(ronde75(hass159c, coach159c, dt.datetime(2026, 10, 15, 18, 0)))
+rij159c = next((r for r in store159c.instellingen.get("battery_state") or [] if r.get("device") == "dev-batterij"), {})
+controle("een batterij die hij niet stuurt: ook het rendement uit de tellers, met de capaciteit van de sensor",
+         rij159c.get("rte_accu") == 0.9015 and "dev-batterij" not in coach159c._batterij, f"{rij159c}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

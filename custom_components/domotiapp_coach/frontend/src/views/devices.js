@@ -38,6 +38,9 @@ import {
   deviceLabelMap,
   hasCars,
   isBattery,
+  isReadOnly,
+  alleenUitlezen,
+  growattVanzelf,
   isSmartPlug,
   kindLabel,
   plugAppliance,
@@ -341,7 +344,11 @@ class DacViewDevices extends DacEditorElement {
     // Something with brands but none picked has nothing to ask for yet.
     if (brands.length && !brand) return brandRow;
 
-    const power = `
+    // Een merk dat alleen uitgelezen wordt (Growatt, v0.123.0) heeft geen
+    // vermogenssensor met een teken: laden en ontladen staan in zijn velden.
+    const power = isReadOnly(device)
+      ? ""
+      : `
       <div class="row">
         <label>Vermogenssensor</label>
         <dac-entity-picker data-power data-index="${index}"></dac-entity-picker>
@@ -748,6 +755,11 @@ class DacViewDevices extends DacEditorElement {
     // Nothing to decide yet on an appliance whose brand is still unknown.
     if (brandsFor(device.type).length && !brandMeta(device)) return "";
     if (isSmartPlug(device) && !plugAppliance(device)) return "";
+    // Alleen uitlezen (Growatt, v0.123.0): geen vinkje, maar wel zeggen waarom.
+    if (isReadOnly(device)) {
+      return `
+      <p class="sub" data-read-only="${index}">De coach leest deze batterij alleen uit: hoe vol hij is, wat hij laadt en ontlaadt, en zijn tellers. Sturen doet hij hem niet.</p>`;
+    }
 
     const missing = missingForControl(device);
     // Eén vinkje, drie woorden. De eigenaar op 07-09-2026: "er is een verschil tussen
@@ -930,7 +942,8 @@ class DacViewDevices extends DacEditorElement {
     // in the warning colour. The type only earns a place when the heading above
     // it is a name of the customer's own, otherwise it would say the same word
     // twice.
-    const what = device.entity || "geen vermogenssensor";
+    // Een merk dat alleen uitgelezen wordt heeft geen vermogenssensor (v0.123.0).
+    const what = device.entity || (isReadOnly(device) ? "alleen uitlezen" : "geen vermogenssensor");
     const brand = brandMeta(device)?.label;
     const prefix = brand ?? ((device.name ?? "").trim() ? kindLabel(device) : "");
     const altijd = canAlwaysOn(device) && device.always_on ? " · altijd aan" : "";
@@ -981,6 +994,19 @@ class DacViewDevices extends DacEditorElement {
     const getal = (key, attrs, placeholder) => `
       <input type="number" inputmode="decimal" ${attrs} data-bat-field="${key}" data-index="${index}"
              value="${b[key] ?? ""}" placeholder="${placeholder}">`;
+    // Alleen uitlezen (Growatt, v0.123.0): alleen de capaciteit, de rest is om
+    // te sturen. Die integratie heeft er geen sensor voor.
+    if (isReadOnly(device)) {
+      return `
+      <div class="block">
+        <div class="block-title">De batterij</div>
+        <div class="row">
+          <label>Capaciteit (kWh)</label>
+          ${getal("capacity_kwh", 'min="0" step="0.1"', "de inhoud van de accu")}
+          <span class="sub">De integratie geeft hem niet door, dus vul hem hier in.</span>
+        </div>
+      </div>`;
+    }
     const vink = (key, kop, uitleg) => `
       <label class="check" for="bat-${key}-${index}">
         <input type="checkbox" id="bat-${key}-${index}" data-bat-field="${key}" data-index="${index}"
@@ -1412,6 +1438,14 @@ class DacViewDevices extends DacEditorElement {
           device.release_press = "";
           this.paintDevices_();
         }
+        // De accustand van een Growatt: de rest van hetzelfde apparaat erbij (v0.123.0).
+        if (key === "soc" && device.brand === "growatt") {
+          const erbij = growattVanzelf(device, this.hass_?.entities);
+          if (Object.keys(erbij).length) {
+            device.entities = { ...device.entities, ...erbij };
+            this.paintDevices_();
+          }
+        }
       });
     }
 
@@ -1457,6 +1491,9 @@ class DacViewDevices extends DacEditorElement {
           const merk = defaultBattery(device.brand);
           if (!device.battery.control_mode) device.battery.control_mode = merk.control_mode;
           if (!device.battery.idle_mode) device.battery.idle_mode = merk.idle_mode;
+          // Alleen uitlezen (Growatt, v0.123.0): niet sturen, en geen sensor
+          // laten staan die hier geen veld heeft.
+          Object.assign(device, alleenUitlezen(device));
         }
 
         if (field === "controllable" || field === "device_id" || field === "always_on") {

@@ -141,10 +141,19 @@ DISHWASHER_BRANDS: Final = [
 # Home Assistant dezelfde knoppen heeft: een getal voor het vermogen (met een
 # teken, of met een richting ernaast) en eventueel een modus. Welke tekst er in
 # die modus hoort staat per merk in devices.js en gaat mee in `battery`.
+# Growatt sinds v0.123.0, alleen om uit te lezen (zie hieronder).
 BATTERY_BRANDS: Final = [
     "anker",
+    "growatt",
     "overig",
 ]
+
+# De merken die de coach alleen uitleest (v0.123.0). De eigenaar op 15-10-2026:
+# "nee sturen niet voor growatt alleen uitlezen." De Growatt-integratie van Home
+# Assistant haalt alles eens per vijf minuten uit de cloud en heeft voor een MIX
+# alleen sensoren. Zo'n batterij stuurt de coach nooit, ook niet met het vinkje
+# aan; dezelfde lijst als `readOnly` in devices.js.
+BATTERIJ_ALLEEN_LEZEN: Final = ("growatt",)
 
 # Every brand id the panel may send, whatever the device type. Kept as one set
 # so the websocket schema does not have to know which brands belong to which

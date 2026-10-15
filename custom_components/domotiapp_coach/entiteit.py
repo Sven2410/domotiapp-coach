@@ -512,6 +512,32 @@ def accu_apparaat(hass: HomeAssistant, device: dict[str, Any]) -> tuple[str, str
     return register_apparaat(hass, device, ("soc", "mode", "setpoint"))
 
 
+def accu_capaciteit(hass: HomeAssistant | None, device: dict[str, Any]) -> float | None:
+    """De capaciteit waarmee de coach rekent, in kWh, of None (v0.123.0).
+
+    Eerst de sensor uit Apparaten, anders wat de installateur intypte, zoals
+    `_batterij_van` in coach.py. Gevraagd door de lovelace-sessie op 15-10-2026:
+    bij een Growatt kiest de kaart daarmee het type, want het model staat niet
+    in het register.
+    """
+    from .units import to_kwh
+
+    entiteit = (device.get("entities") or {}).get("capacity")
+    staat = hass.states.get(entiteit) if hass is not None and entiteit else None
+    if staat is not None:
+        try:
+            gemeten = to_kwh(float(staat.state), staat.attributes.get("unit_of_measurement"))
+        except (TypeError, ValueError):
+            gemeten = None
+        if gemeten:
+            return round(gemeten, 2)
+    try:
+        opgave = float((device.get("battery") or {}).get("capacity_kwh") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return opgave if opgave > 0 else None
+
+
 # --- De thuisbatterij (v0.112.0) -----------------------------------------------
 
 ACCU_STAND = {

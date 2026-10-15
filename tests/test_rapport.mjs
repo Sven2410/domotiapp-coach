@@ -2157,9 +2157,9 @@ const { batteryRows, volgendeNetlading, opgeleverdTekst } = await import(
   "../custom_components/domotiapp_coach/frontend/src/battery.js"
 );
 
-proef("de thuisbatterij staat weer in de lijst, met Anker en Overig als merk", () => {
+proef("de thuisbatterij staat weer in de lijst, met Anker, Growatt en Overig als merk", () => {
   assert.ok(TYPES.some((t) => t.id === "thuisbatterij"));
-  assert.deepEqual(BATTERY_BRANDS.map((b) => b.id), ["anker", "overig"]);
+  assert.deepEqual(BATTERY_BRANDS.map((b) => b.id), ["anker", "growatt", "overig"]);
 });
 
 proef("Alfen is een laadpaalmerk: velden zonder apparaat-id of dienst, dezelfde lijst als const.py", async () => {
@@ -3931,6 +3931,130 @@ proef("per apparaat: de lijst met kWh, het deel van het huis, en de rest van het
 
   const html = Object.create(Historie.prototype).render();
   assert.ok(html.includes('id="apparaten-card" hidden') && html.includes("Per apparaat"), "de kaart staat in Historie");
+});
+
+// --- Growatt: alleen uitlezen (v0.123.0) -------------------------------------------
+//
+// De eigenaar op 15-10-2026: "nee sturen niet voor growatt alleen uitlezen", en "dat ik
+// dus alleen invulvelden krijg die noodzakelijk zijn voor growatt".
+proef("Growatt: alleen de velden om uit te lezen, en niets om te sturen (v0.123.0)", async () => {
+  const devs = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  const accu = { id: "g", type: "thuisbatterij", brand: "growatt", name: "", entity: "", entities: {}, controllable: false, battery: {} };
+  assert.deepEqual(devs.brandFields(accu).map((f) => f.key), ["soc", "charge_power", "discharge_power", "accu_in", "accu_out"]);
+  assert.ok(!devs.brandFields(accu).some((f) => f.needed), "geen veld met 'nodig zodra de coach mag sturen'");
+  assert.equal(devs.isReadOnly(accu), true);
+  assert.equal(devs.canSteer(accu), false, "een Growatt is niet te sturen");
+  assert.deepEqual(devs.missingForControl({ ...accu, controllable: true }), [], "en mist dus ook niets om te sturen");
+  assert.equal(devs.isReadOnly({ ...accu, brand: "anker" }), false);
+
+  // Dezelfde lijst als const.py.
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/const.py", import.meta.url), "utf8");
+  const blok = bron.slice(bron.indexOf("BATTERIJ_ALLEEN_LEZEN: Final = ("));
+  const python = [...blok.slice(0, blok.indexOf(")")).matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(python, devs.BATTERY_BRANDS.filter((b) => b.readOnly).map((b) => b.id));
+
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.feed_ = {};
+  el.draft_ = { devices: [accu] };
+  const html = el.brandHtml_(accu, 0);
+  for (const key of ["soc", "charge_power", "discharge_power", "accu_in", "accu_out"]) {
+    assert.ok(html.includes(`data-entity-key="${key}"`), `het veld ${key}`);
+  }
+  for (const key of ["setpoint", "direction", "mode", "charge_limit", "discharge_limit", "temperature", "fan", "energy_in", "energy_out", "capacity"]) {
+    assert.ok(!html.includes(`data-entity-key="${key}"`), `geen veld ${key}`);
+  }
+  assert.ok(!html.includes("data-power"), "geen vermogenssensor met een teken");
+  assert.ok(!html.includes("Nodig zodra de coach mag sturen"));
+  assert.match(html, /Een Growatt leest de coach alleen uit/, "het merk zegt het");
+
+  const vink = el.controlHtml_({ ...accu, controllable: true }, 0);
+  assert.ok(!vink.includes('data-field="controllable"'), "geen vinkje om te sturen");
+  assert.match(vink, /alleen uit/);
+
+  const blokHtml = el.batteryHtml_(accu, 0);
+  assert.ok(blokHtml.includes('data-bat-field="capacity_kwh"'), "de capaciteit als getal");
+  for (const veld of ["rte_percent", "max_charge_w", "max_discharge_w", "phase", "power_invert", "setpoint_invert", "control_mode", "idle_mode", "self_zero"]) {
+    assert.ok(!blokHtml.includes(`data-bat-field="${veld}"`), `geen ${veld}`);
+  }
+  assert.ok(!blokHtml.includes("onder Instellen"), "en geen verwijzing naar de instellingen van de bewoner");
+  assert.equal(el.summary_(accu).text, "Growatt · alleen uitlezen");
+
+  // Een Anker houdt alles.
+  const anker = el.batteryHtml_({ ...accu, brand: "anker" }, 0);
+  assert.ok(anker.includes('data-bat-field="self_zero"') && anker.includes('data-bat-field="max_charge_w"'));
+  assert.ok(el.brandHtml_({ ...accu, brand: "anker" }, 0).includes("data-power"));
+});
+
+proef("Growatt: van een ander merk naar Growatt laat niets staan om te sturen (v0.123.0)", async () => {
+  const { alleenUitlezen } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  const was = {
+    id: "g", type: "thuisbatterij", brand: "growatt", controllable: true, entity: "sensor.accu_w",
+    entities: { soc: "sensor.soc", setpoint: "number.accu", energy_in: "sensor.in", accu_in: "sensor.accu_in" },
+  };
+  const nu = alleenUitlezen(was);
+  assert.equal(nu.controllable, false);
+  assert.equal(nu.entity, "", "de vermogenssensor met een teken gaat eraf, want die gaat bij de coach voor");
+  assert.deepEqual(nu.entities, { soc: "sensor.soc", accu_in: "sensor.accu_in" });
+  const anker = { ...was, brand: "anker" };
+  assert.equal(alleenUitlezen(anker), anker, "een ander merk blijft zoals het is");
+});
+
+proef("Growatt: de accustand gekozen, de rest van hetzelfde apparaat vanzelf (v0.123.0)", async () => {
+  const { growattVanzelf } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  // Zoals hass.entities ze geeft: per entiteit device_id, platform en translation_key.
+  const rij = (id, tk, toestel = "d1", platform = "growatt_server") => [id, { entity_id: id, device_id: toestel, platform, translation_key: tk }];
+  const mix = Object.fromEntries([
+    rij("sensor.a_soc", "mix_statement_of_charge"),
+    rij("sensor.a_laden", "mix_battery_charge"),
+    rij("sensor.a_ontladen_w", "mix_battery_discharge_w"),
+    rij("sensor.a_ontladen_kw", "mix_battery_discharge_kw"),
+    rij("sensor.a_in_vandaag", "mix_battery_charge_today"),
+    rij("sensor.a_in", "mix_battery_charge_lifetime"),
+    rij("sensor.a_uit_vandaag", "mix_battery_discharge_today"),
+    rij("sensor.a_uit", "mix_battery_discharge_lifetime"),
+    // Een tweede omvormer met dezelfde sleutels hoort er niet bij.
+    rij("sensor.b_laden", "mix_battery_charge", "d2"),
+  ]);
+  const accu = { type: "thuisbatterij", brand: "growatt", entities: { soc: "sensor.a_soc" } };
+  assert.deepEqual(growattVanzelf(accu, mix), {
+    charge_power: "sensor.a_laden",
+    discharge_power: "sensor.a_ontladen_kw",
+    accu_in: "sensor.a_in",
+    accu_out: "sensor.a_uit",
+  }, "een MIX: het ontladen in kW, en de tellers voor levenslang");
+
+  // Een SPH heeft geen ontladen in kW.
+  const sph = { ...mix };
+  delete sph["sensor.a_ontladen_kw"];
+  assert.equal(growattVanzelf(accu, sph).discharge_power, "sensor.a_ontladen_w");
+
+  // Wat er al staat blijft staan.
+  const half = { ...accu, entities: { soc: "sensor.a_soc", charge_power: "sensor.eigen" } };
+  assert.equal(growattVanzelf(half, mix).charge_power, undefined);
+
+  // Een accustand van iets anders dan de Growatt-integratie: niets.
+  const ander = { ...mix, "sensor.x_soc": { entity_id: "sensor.x_soc", device_id: "d1", platform: "template" } };
+  assert.deepEqual(growattVanzelf({ ...accu, entities: { soc: "sensor.x_soc" } }, ander), {});
+  assert.deepEqual(growattVanzelf(accu, undefined), {}, "zonder register ook niets");
+});
+
+proef("Growatt: laden en ontladen in kW op de energiestroom, en het rendement uit zijn tellers (v0.123.0)", () => {
+  const staten = {
+    "sensor.g_soc": { state: "68", attributes: { unit_of_measurement: "%" } },
+    "sensor.g_laden": { state: "0", attributes: { unit_of_measurement: "kW" } },
+    "sensor.g_ontladen": { state: "5.4", attributes: { unit_of_measurement: "kW" } },
+  };
+  const accu = {
+    id: "g", type: "thuisbatterij", brand: "growatt", entity: "", controllable: false, battery: { capacity_kwh: 15.3 },
+    entities: { soc: "sensor.g_soc", charge_power: "sensor.g_laden", discharge_power: "sensor.g_ontladen" },
+  };
+  const r = new LiveSource().sample({ get: (id) => staten[id] }, {
+    sources: {}, devices: [accu], battery_state: [{ device: "g", rte_accu: 0.9015 }],
+  });
+  assert.equal(r.devices[0].batteryWatts, -5400, "5,4 kW ontladen is 5400 W eruit");
+  assert.equal(r.devices[0].details.find((d) => d.label === "Rendement")?.text, "ongeveer 90%, gemeten in de accu");
 });
 
 for (const [naam, fn] of proeven) {

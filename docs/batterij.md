@@ -1118,7 +1118,8 @@ Attributen van de sensor: `contract`, `type`, `stand` (`nul_op_de_meter`, `zonne
 ontladen, `price`, `soc_eind`), `opgeleverd_vandaag`, `opgeleverd_maand` (uit
 `realized_days`), `opgeleverd_totaal`, `opgeleverd_sinds`, `override` (`vol`, `leeg` of
 niets), `leeg_tot`, `vakantie`, `vakantie_max`, `reserve` (alleen als die aan staat),
-`ondergrens` en `entiteiten`. Proef 146 in test_coach.py.
+`ondergrens` en `entiteiten`. Proef 146 in test_coach.py. Sinds v0.123.0 ook `capaciteit`,
+`brand` en `alleen_lezen` (zie Growatt, onderaan).
 
 Sinds v0.112.1 ook `accu_fabrikant` en `accu_model`, zoals `paal_fabrikant` en `paal_model` bij de
 laadpaal: wat de integratie van de batterij in het apparatenregister zet, zodat de kaart
@@ -1145,3 +1146,60 @@ toen de integratie van de batterij onbekend was: 47 keer "de regelaar struikelde
 het kasboek die stap niet (er valt niets te weten) en loopt de rest gewoon door. Proef 148
 bouwt het na: sensor weg, paal gaat laden, en de coach neemt de batterij meteen over op 0 W.
 Daarvoor bleef ze in haar eigen stand.
+
+## Growatt: alleen uitlezen (v0.123.0)
+
+De eigenaar op 15-10-2026: "nee sturen niet voor growatt alleen uitlezen", en "dat ik dus
+alleen invulvelden krijg die noodzakelijk zijn voor growatt". De Growatt-integratie van Home
+Assistant (`growatt_server`) haalt alles eens per vijf minuten uit de cloud, en heeft voor
+een MIX alleen sensoren: laden en ontladen in kW, de accustand, en tellers per dag en voor
+levenslang. Een stuurgetal in watt, waar de regelaar van de coach op draait, is er niet.
+
+**Wat er in Apparaten staat.** Bij het merk Growatt vijf velden: Accustand, Laadvermogen,
+Ontlaadvermogen, Batterij zelf: geladen en Batterij zelf: ontladen. Geen vermogenssensor
+met een teken, geen stuurgetal, richting of modus, geen grenzen, temperatuur, ventilator of
+kWh-meter. Onder De batterij alleen de capaciteit als getal, want een sensor daarvoor heeft
+de integratie niet. Waar bij een ander merk het vinkje "De coach mag dit apparaat aansturen"
+staat, staat hier dat de coach hem alleen uitleest (`readOnly` in `BATTERY_BRANDS`,
+`isReadOnly` in devices.js; `canSteer` is dan onwaar). Wie van een ander merk naar Growatt
+gaat, verliest het vinkje en alles wat hier geen veld heeft (`alleenUitlezen`), want de coach
+zou zo'n sensor nog lezen: een vermogenssensor met een teken gaat bij `_batterij_w` voor.
+
+**Vanzelf invullen.** Kies je de accustand van een Growatt, dan vult het paneel de andere
+vier in uit hetzelfde apparaat, op hun `translation_key` in `hass.entities`
+(`growattVanzelf`). Alleen de vorm `mix_*`, die een MIX en een SPH allebei hebben:
+`mix_battery_charge`, `mix_battery_discharge_kw` (een SPH heeft die niet, dan
+`mix_battery_discharge_w`), `mix_battery_charge_lifetime` en `mix_battery_discharge_lifetime`.
+Zo staan ze in de bron van de integratie, en zo stonden ze op 15-10-2026 in een klantwoning.
+De tellers voor levenslang en niet die van vandaag: een dagteller begint om middernacht
+opnieuw. Een MIN (`tlx_*`) en een opslag (`storage_*`) heten anders, en een MIN kan twee
+accu's hebben; daar kiest de installateur zelf. Wat er al staat blijft staan.
+
+**De coach stuurt hem nooit**, ook niet met het vinkje aan of een stuurgetal van vroeger:
+`BATTERIJ_ALLEEN_LEZEN` in const.py haalt hem uit de lijst die `_one_batterij` krijgt. Dus geen
+stand, geen plan, geen kasboek. Wat hij wel doet, voor elke batterij die hij niet stuurt:
+het rendement uit de eigen tellers voor de pop-up ("ongeveer 90%, gemeten in de accu",
+`_async_batterij_uitlezen`, net als `rte_accu` in `_one_batterij` sinds v0.118.0). Laden en
+ontladen tellen mee in de energiestroom, in het overschot (`_batterijen_w`) en in Historie;
+kW of W maakt niet uit (`to_watts`). Op het overzicht staat hij niet als kaart: daar staan
+alleen apparaten die de coach mag sturen.
+
+In de klantwoning gaf de datasheet 15,3 kWh, en kwam er op 15-10-2026 ongeveer 12 kWh uit
+per 100% van de accustand. De installateur vult in wat hij wil; het paneel zegt er niets over.
+
+Proef 159 in test_coach.py (een Growatt met het vinkje aan en een stuurgetal: niets naar de
+batterij, 5,4 kW ontladen is -5400 W, het rendement uit de twee tellers), en vier
+proeven in test_rapport.mjs (de velden, van een ander merk naar Growatt, het vanzelf invullen,
+kW en het rendement in de pop-up).
+
+Voor de batterijkaart van DomotiApp Lovelace komen er drie attributen bij op de sensor
+`coach`, zonder dat het contract verandert (alleen toegevoegd, contract 1): `capaciteit` (in
+kWh, de sensor uit Apparaten en anders wat er ingetypt is, of null; `accu_capaciteit` in
+entiteit.py, waarmee de kaart bij een Growatt het type kiest), `brand` (hoe de
+coach hem kent, `growatt`, zoals `brand` bij de laadpaal) en `alleen_lezen` (waar bij een
+Growatt altijd, en bij elke batterij die de coach niet mag sturen). Dan is er geen stand
+(`stil`), geen plan en geen accustand in de attributen, want `_one_batterij` draait voor hem
+niet; de kaart leest de accustand, het laden en het ontladen zelf uit `entiteiten`, en de
+knoppen doen niets. Het merk voor de foto komt zoals bij elke batterij uit het register
+(`accu_fabrikant`): de Growatt-integratie zet daar "Growatt", en bij een MIX geen model.
+Proef 159.
