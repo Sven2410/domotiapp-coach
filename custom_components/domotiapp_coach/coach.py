@@ -170,6 +170,11 @@ TEMP_TERUG = 1.0
 # voor er een melding komt. De eigenaar op 15-10-2026: "Lukt dat niet wil ik na
 # 2 min een melding ontvangen."
 ALTIJD_AAN_WACHT = timedelta(minutes=2)
+# Welke apparaten "altijd aan" kunnen hebben. Een vaatwasser sinds v0.122.0: de
+# eigenaar op 15-10-2026, "sommige vaatwassers hangen namelijk ook aan een smart
+# plug om alles te meten." De schakelaar van de stekker staat bij allebei in
+# `entities.switch`.
+ALTIJD_AAN_TYPES = ("smartplug", "vaatwasser")
 # De ingebouwde Nord Pool van Home Assistant hangt geen prijslijst aan zijn
 # sensoren; die geeft hij alleen via zijn dienst (v0.101.3). Zo vaak vraagt de
 # coach een dag die nog niet binnen is opnieuw, en vanaf dit uur morgen erbij:
@@ -831,8 +836,8 @@ def _temp_nodig(settings: dict[str, Any], device: dict[str, Any]) -> bool:
 
 
 def _altijd_aan(device: dict[str, Any]) -> str | None:
-    """De schakelaar van een smart plug die altijd aan moet staan, of None (v0.120.0)."""
-    if device.get("type") != "smartplug" or not device.get("always_on"):
+    """De schakelaar van een stekker die altijd aan moet staan, of None (v0.120.0)."""
+    if device.get("type") not in ALTIJD_AAN_TYPES or not device.get("always_on"):
         return None
     return (device.get("entities") or {}).get("switch") or None
 
@@ -843,11 +848,13 @@ def _altijd_aan_melden(settings: dict[str, Any]) -> bool:
 
 
 def _stekker_naam(device: dict[str, Any]) -> str:
-    """Een smart plug vooraan in een melding: zijn eigen naam, of "De vriezer"."""
+    """Een stekker vooraan in een melding: zijn eigen naam, of "De vriezer", "De vaatwasser"."""
     eigen = str(device.get("name") or "").strip()
     if eigen:
         return eigen[0].upper() + eigen[1:]
-    label, lidwoord = STEKKER_APPARATEN.get(str(device.get("appliance") or ""), STEKKER_APPARATEN["overig"])
+    # Bij een smart plug wat eraan hangt, bij een ander type het type zelf.
+    soort = device.get("appliance") if device.get("type") == "smartplug" else device.get("type")
+    label, lidwoord = STEKKER_APPARATEN.get(str(soort or ""), STEKKER_APPARATEN["overig"])
     return f"{lidwoord.capitalize()} {label.lower()}"
 
 

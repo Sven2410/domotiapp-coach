@@ -9047,6 +9047,64 @@ controle("wat er bewaard is overleeft het laden",
          geladen157["devices"][0]["appliance"] == "vriezer" and geladen157["devices"][0]["always_on"] is True
          and geladen157["notifications"]["always_on_alert"] == {"enabled": True}, f"{geladen157['devices'][0]}")
 
+print("=== 158. ook een vaatwasser aan een smart plug kan altijd aan (v0.122.0) ===")
+# De eigenaar op 15-10-2026: "bij het apparaat vaatwasser ook de optie kunnen aanzetten dat
+# hij nooit uit mag sommige vaatwassers hangen namelijk ook aan een smart plug om alles te meten."
+VW158 = {"id": "dev-vw", "type": "vaatwasser", "brand": "overig", "name": "", "entity": "sensor.vw_w",
+         "energy_entity": "", "always_on": True, "controllable": True, "release_required": True,
+         "entities": {"switch": "switch.vw_stekker"}, "programs": []}
+inst158 = instellingen(devices=[LAADPAAL, VW158])
+inst158["notifications"] = {**inst158["notifications"], "always_on_alert": {"enabled": True}}
+hass158, _, coach158 = bouw({**huis(), "switch.vw_stekker": "off", "sensor.vw_w": "0"}, inst158)
+T158 = dt.datetime(2026, 10, 15, 18, 0)
+
+
+def wacht158(minuten, inst=None):
+    hass158.services.verstuurd.clear()
+    asyncio.run(coach158._async_altijd_aan(inst or inst158, T158 + dt.timedelta(minutes=minuten), "steer"))
+    telefoon = [d[2]["message"] for d in hass158.services.verstuurd if d[0] == "notify"]
+    schakel = [f"{d[1]} {d[2]['entity_id']}" for d in hass158.services.verstuurd if d[0] == "switch"]
+    return telefoon, schakel
+
+
+controle("een vaatwasser met altijd aan gaat weer aan", wacht158(0) == ([], ["turn_on switch.vw_stekker"]), "")
+melding158 = wacht158(2)
+controle("en na twee minuten zegt de melding de vaatwasser",
+         melding158[0] == ["De vaatwasser staat al 2 minuten uit en de coach krijgt hem niet aan."], f"{melding158}")
+hass158.states.zet("switch.vw_stekker", "on")
+wacht158(3)
+controle("met een eigen naam die naam",
+         coachmod._stekker_naam({**VW158, "name": "keuken"}) == "Keuken", coachmod._stekker_naam({**VW158, "name": "keuken"}))
+hass158.states.zet("switch.vw_stekker", "off")
+zonder158 = {**inst158, "devices": [LAADPAAL, {**VW158, "always_on": False}]}
+wacht158(10, inst=zonder158)
+controle("zonder het vinkje laat de coach de stekker van een vaatwasser met rust",
+         wacht158(15, inst=zonder158) == ([], []), "")
+controle("een laadpaal kan geen altijd aan hebben, ook niet met een schakelaar en het vinkje",
+         coachmod._altijd_aan({**LAADPAAL, "always_on": True, "entities": {"switch": "switch.x"}}) is None, "")
+
+
+# In een volle ronde, met de vaatwasser die de coach ook plant: alleen aan, nooit uit.
+async def ronde158(nu):
+    hass158.services.verstuurd.clear()
+    await hass158.afmaken()
+    await coach158._round(nu)
+    await hass158.afmaken()
+    return [f"{d[1]} {d[2]['entity_id']}" for d in hass158.services.verstuurd if d[2].get("entity_id") == "switch.vw_stekker"]
+
+volle158 = asyncio.run(ronde158(T158 + dt.timedelta(minutes=30)))
+controle("in een ronde gaat de stekker aan, en de planning van de vaatwasser zet hem niet uit",
+         volle158 == ["turn_on switch.vw_stekker"], f"{volle158}")
+controle("en de coach luistert naar die stekker", "switch.vw_stekker" in coach158._watched, "")
+hass158.states.zet("switch.vw_stekker", "on")
+controle("staat hij aan, dan doet de ronde niets met hem", asyncio.run(ronde158(T158 + dt.timedelta(minutes=31))) == [], "")
+
+# Dezelfde types in het paneel (`ALWAYS_ON_TYPES` in devices.js).
+devices_js158 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
+                 / "frontend" / "src" / "devices.js").read_text(encoding="utf-8")
+controle("het paneel kent dezelfde types als de coach",
+         f'export const ALWAYS_ON_TYPES = {list(coachmod.ALTIJD_AAN_TYPES)}'.replace("'", '"') in devices_js158, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

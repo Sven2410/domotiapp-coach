@@ -65,10 +65,26 @@ apparaat.
 Na een herstart van Home Assistant weet de coach niet meer dat hij al gemeld had; staat
 de stekker dan nog uit, dan komt er na twee minuten één nieuwe melding.
 
+## Ook een vaatwasser (v0.122.0)
+
+De eigenaar op 15-10-2026: "bij het apparaat vaatwasser ook de optie kunnen aanzetten dat
+hij nooit uit mag sommige vaatwassers hangen namelijk ook aan een smart plug om alles te
+meten." Een vaatwasser krijgt, zodra er een merk gekozen is, onder de programmatabel het
+blok Stekker: het veld "Smart plug (optioneel)" (`DISHWASHER_PLUG_FIELD`, ook in
+`entities.switch`) en hetzelfde vinkje (`dishwasherPlugHtml_` in views/devices.js).
+Welke types het kunnen staat twee keer, `ALTIJD_AAN_TYPES` in coach.py en
+`ALWAYS_ON_TYPES` in devices.js; proef 158 legt ze naast elkaar.
+
+Dit bijt de vrijgave niet: een vrijgaveschakelaar die de stekker zelf is gebruikt de
+coach al sinds v0.101.11 niet (`_vrijgave_entiteit`), dus de planning van de vaatwasser
+zet de stekker nooit uit; proef 158 draait daarvoor een volle ronde. In de sensor van de
+vaatwasser voor DomotiApp Lovelace staat de stekker erbij in `entiteiten` als `switch`;
+dat is iets toevoegen, het contract blijft 1.
+
 ## Proeven
 
-Proef 157 in test_coach.py (de bewaking, de meldingen, de niveaus, de sensorwacht, een
-volle ronde), en vijf proeven "smart plug" in test_rapport.mjs (de lijst tegen const.py,
+Proef 157 en 158 in test_coach.py (de bewaking, de meldingen, de niveaus, de sensorwacht, een
+volle ronde, de vaatwasser), en zes proeven "smart plug" in test_rapport.mjs (de lijst tegen const.py,
 naam en icoon, de kaart, Apparaten en Meldingen).
 
 ## Nog niet in het echt gezien

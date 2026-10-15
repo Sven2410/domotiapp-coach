@@ -32,7 +32,7 @@
 
 import { DacElement, define } from "../base.js";
 import { volgCoach } from "../data-source.js";
-import { deviceLabel, deviceLabelMap } from "../devices.js";
+import { canAlwaysOn, deviceLabel, deviceLabelMap } from "../devices.js";
 import { icons } from "../icons.js";
 
 const DAGEN = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
@@ -916,9 +916,9 @@ class DacViewNotifications extends DacElement {
     return this.meldingen_().always_on_alert ?? {};
   }
 
-  /** De apparaten op een smart plug die altijd aan moeten staan. */
+  /** De apparaten die altijd aan moeten staan: een smart plug, of een vaatwasser (v0.122.0). */
   altijdAan_() {
-    return (this.settings_?.devices ?? []).filter((d) => d?.type === "smartplug" && d.always_on);
+    return (this.settings_?.devices ?? []).filter((d) => canAlwaysOn(d) && d.always_on);
   }
 
   /**

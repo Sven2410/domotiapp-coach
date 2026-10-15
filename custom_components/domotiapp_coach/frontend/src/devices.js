@@ -918,6 +918,16 @@ const PLUG_BY_ID = new Map(PLUG_APPLIANCES.map((apparaat) => [apparaat.id, appar
 
 export const isSmartPlug = (device) => device?.type === "smartplug";
 
+/**
+ * Wat "altijd aan" kan hebben (v0.120.0): een smart plug, en sinds v0.122.0 een
+ * vaatwasser. De eigenaar op 15-10-2026: "bij het apparaat vaatwasser ook de optie
+ * kunnen aanzetten dat hij nooit uit mag, sommige vaatwassers hangen namelijk ook
+ * aan een smart plug om alles te meten." Dezelfde lijst als `ALTIJD_AAN_TYPES` in
+ * coach.py; de schakelaar staat bij allebei in `entities.switch`.
+ */
+export const ALWAYS_ON_TYPES = ["smartplug", "vaatwasser"];
+export const canAlwaysOn = (device) => ALWAYS_ON_TYPES.includes(device?.type);
+
 /** Wat er aan deze smart plug hangt, of undefined (geen smart plug, of nog niets gekozen). */
 export const plugAppliance = (device) => (isSmartPlug(device) ? PLUG_BY_ID.get(device?.appliance) : undefined);
 
@@ -934,6 +944,15 @@ export const PLUG_SWITCH_FIELD = {
     "voor meten is het vermogen genoeg.",
   filter: "all",
   values: { on: "Aan", off: "Uit" },
+};
+
+/** Hetzelfde veld bij een vaatwasser (v0.122.0), die er lang niet altijd een heeft. */
+export const DISHWASHER_PLUG_FIELD = {
+  ...PLUG_SWITCH_FIELD,
+  label: "Smart plug (optioneel)",
+  hint:
+    "Hangt de vaatwasser aan een smart plug, dan de schakelaar daarvan. Alleen nodig om hem altijd aan " +
+    "te houden; de coach zet hem nooit zelf uit.",
 };
 
 /** The brands offered for a device type, or an empty list. */
