@@ -782,6 +782,36 @@ if (vl := v("vaatwasser-lokaal-deur-open")):
     controle("lokaal, deur open: geen 'niet gaan draaien', wel een verslag",
              not meldingen(vl, "niet gaan draaien") and len(meldingen(vl, "is klaar")) == 1, f"{[m for _, m in vl.meldingen]}")
 
+# Een Miele-wasmachine (v0.124.0): de duur van de machine, geen vermogen, een teller
+# per programma. De eigenaar op 15-10-2026: "Starten, zoals vaatwasser".
+def besluiten_vw(vl):
+    return [g["message"] for g in vl.geschiedenis if g.get("kind") == "besluit" and g.get("device") == "vaatwasser"]
+
+if (vl := v("wasmachine-miele")):
+    controle("miele: in de goedkope nacht gestart, één druk, op tijd klaar",
+             vl.vw_gestart is not None and 0 <= vl.vw_gestart.hour < 6 and len(vl.vw_gedrukt) == 1
+             and vl.vw_klaar is not None and vl.vw_klaar.hour < 7,
+             f"gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, gedrukt {vl.vw_gedrukt}")
+    controle("miele: een programma dat hij nog niet kent plant hij zonder bedrag",
+             besluiten_vw(vl) and not any("€" in b for b in besluiten_vw(vl)), f"{besluiten_vw(vl)}")
+    controle("miele: 'is gestart' met de naam en een klaar-tijd van de machine",
+             any(m.startswith("Wasmachine is gestart (Cottons), klaar rond") for _, m in vl.meldingen),
+             f"{[m for _, m in vl.meldingen]}")
+    verslag = meldingen(vl, "Wasmachine is klaar")
+    controle("miele: het verslag noemt wat de teller zegt, en 's nachts alles van het net",
+             len(verslag) == 1 and "0,9 kWh" in verslag[0] and "Alles van het net" in verslag[0], f"{verslag}")
+    controle("miele: de meting staat er, met de duur van de beurt, de kWh van de teller en zonder verloop",
+             len(vl.vw_gemeten) == 1 and vl.vw_gemeten[0]["key"] == "cottons" and vl.vw_gemeten[0]["kwh"] == 0.9
+             and vl.vw_gemeten[0]["profile"] == [] and abs(vl.vw_gemeten[0]["minutes"] - 225) <= 2,
+             f"{vl.vw_gemeten}")
+
+if (vl := v("wasmachine-miele-gemeten")):
+    controle("miele gemeten: met een meting noemt hij wel een bedrag",
+             any("Katoen kost nu ongeveer €" in b for b in besluiten_vw(vl)), f"{besluiten_vw(vl)}")
+    controle("miele gemeten: de naam uit de meting, en de meting loopt door (twee beurten)",
+             any("(Katoen)" in m for _, m in vl.meldingen) and vl.vw_gemeten and vl.vw_gemeten[0]["runs"] == 2,
+             f"{vl.vw_gemeten}")
+
 if (vk := v("vaatwasser-klep-dicht")):
     controle("klep dicht: één druk, in de goedkope nacht en niet in de avondpiek",
              len(vk.vw_gedrukt) == 1 and vk.vw_gestart is not None and 1 <= vk.vw_gestart.hour < 6,

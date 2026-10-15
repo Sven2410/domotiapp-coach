@@ -545,12 +545,23 @@ class Vaatwasser:
     # juist dan wegvalt; de resterende tijd staat in uren; en "starten op
     # afstand" is een eigen sensor.
     lokaal: bool = False
+    # Een Miele-wasmachine (v0.124.0, de integratie `miele` van Home Assistant)
+    # in plaats van een Home Connect-vaatwasser: de standen van Miele
+    # ("programmed", "in_use", "program_ended"), het programma als sensor met de
+    # sleutel van de machine, de resterende tijd in minuten die al de duur geeft
+    # zolang het programma klaarstaat, een energieteller per programma in
+    # stappen van een tiende kWh, en geen vermogenssensor. De knop Starten is er
+    # alleen als de machine een start aanneemt, zoals bij Home Connect Local.
+    miele: bool = False
 
     # toestand
     status: str = "ready"
     gestart_op: dt.datetime | None = None
     gedrukt_op: dt.datetime | None = None
     kwh_geleverd: float = 0.0
+    # De energieteller van Miele: begint bij elke start op nul.
+    teller_kwh: float = 0.0
+    vorige_stap: dt.datetime | None = None
 
     def druk_start(self, nu: dt.datetime) -> None:
         if self.afstand_aan and not self.deur_open and self.status in ("ready", "inactive"):
@@ -567,11 +578,20 @@ class Vaatwasser:
 
     def stap(self, nu: dt.datetime) -> float:
         """Eén stap; geeft het vermogen van dit moment in watt."""
+        watt = self._watt(nu)
+        # De teller van Miele: wat er sinds de vorige stap in ging.
+        if self.vorige_stap is not None and watt > 0:
+            self.teller_kwh += watt / 1000.0 * (nu - self.vorige_stap).total_seconds() / 3600.0
+        self.vorige_stap = nu
+        return watt
+
+    def _watt(self, nu: dt.datetime) -> float:
         if self.gedrukt_op is not None and self.status != "run":
             if nu - self.gedrukt_op >= dt.timedelta(minutes=self.aanloop_min):
                 self.status = "run"
                 self.gestart_op = nu
                 self.gedrukt_op = None
+                self.teller_kwh = 0.0
         if self.status != "run" or self.gestart_op is None:
             return 0.0
         verstreken = (nu - self.gestart_op).total_seconds() / 60
@@ -1303,6 +1323,7 @@ E = {
     "vw_actief": "sensor.v_vaatwasser_actief",
     "vw_afstand": "binary_sensor.v_vaatwasser_afstand",
     "vw_vermogen": "sensor.v_vaatwasser_vermogen",
+    "vw_teller": "sensor.v_vaatwasser_teller",
     "boiler_vermogen": "sensor.v_boiler_vermogen",
     "boiler_switch": "switch.v_boiler",
     "airco_klimaat": "climate.v_airco",
@@ -1376,7 +1397,28 @@ def instellingen(s: Scenario) -> dict:
     apparaten = []
     schemas = []
     if s.vaatwasser is not None:
-        if s.vaatwasser.slim:
+        if s.vaatwasser.miele:
+            # Een Miele-wasmachine (v0.124.0): geen vermogenssensor, wel een teller.
+            apparaten.append({
+                "id": "vaatwasser",
+                "type": "wasmachine",
+                "name": "Wasmachine",
+                "brand": "miele",
+                "controllable": True,
+                "release_required": s.vaatwasser.vrijgave,
+                "entity": "",
+                "energy_entity": E["vw_teller"],
+                "entities": {
+                    "status": E["vw_status"],
+                    "program": E["vw_actief"],
+                    "remaining": E["vw_rest"],
+                    "door": E["vw_deur"],
+                    "start": E["vw_start"],
+                    "remote_start": E["vw_afstand"],
+                },
+                "programs": list(s.vaatwasser_tabel or []),
+            })
+        elif s.vaatwasser.slim:
             apparaten.append({
                 "id": "vaatwasser",
                 "type": "vaatwasser",
@@ -1843,7 +1885,20 @@ class Wereld:
 
         soc = self.auto.gemelde_soc(nu)
         z(E["soc"], "unavailable" if soc is None else w(str(soc), "%"))
-        if self.vaatwasser is not None:
+        if self.vaatwasser is not None and self.vaatwasser.miele:
+            vw = self.vaatwasser
+            draait = vw.status == "run"
+            z(E["vw_status"], {"ready": "programmed", "run": "in_use", "finished": "program_ended",
+                               "inactive": "off"}.get(vw.status, vw.status))
+            z(E["vw_actief"], vw.programma)
+            rest = vw.resterend(nu) if draait else (None if vw.status == "finished" else vw.minuten)
+            z(E["vw_rest"], "unknown" if rest is None else w(str(rest), "min"))
+            z(E["vw_afstand"], "on" if vw.afstand_aan else "off")
+            z(E["vw_start"], "unavailable" if (vw.deur_open or draait) else "unknown")
+            z(E["vw_deur"], "on" if vw.deur_open else "off")
+            # In stappen van een tiende, zoals Miele hem geeft.
+            z(E["vw_teller"], w(f"{int(vw.teller_kwh * 10) / 10:.1f}", "kWh"))
+        elif self.vaatwasser is not None:
             vw = self.vaatwasser
             z(E["vw_status"], vw.status)
             if vw.lokaal:

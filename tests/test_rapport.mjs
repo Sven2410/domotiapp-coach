@@ -4057,6 +4057,123 @@ proef("Growatt: laden en ontladen in kW op de energiestroom, en het rendement ui
   assert.equal(r.devices[0].details.find((d) => d.label === "Rendement")?.text, "ongeveer 90%, gemeten in de accu");
 });
 
+// --- Miele: wasmachine en droger (v0.124.0) -----------------------------------------
+//
+// De eigenaar op 15-10-2026: "Ik wil dat de coach wel weer de apparaten aanmaakt:
+// Wasmachine droger en vriezer", en "Starten, zoals vaatwasser", met Miele en Overig.
+proef("wasmachine en droger zijn er weer, met Miele en Overig, dezelfde lijst als const.py (v0.124.0)", async () => {
+  const devs = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  for (const soort of ["wasmachine", "droger"]) {
+    assert.ok(devs.DEVICE_TYPES.some((t) => t.id === soort), `${soort} is een type`);
+    assert.deepEqual(devs.brandsFor(soort).map((b) => b.id), ["miele", "overig"], `${soort}: Miele en Overig`);
+    assert.ok(devs.PROGRAM_TYPES.includes(soort) && devs.RELEASE_TYPES.includes(soort));
+  }
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/const.py", import.meta.url), "utf8");
+  const lijst = (naam) => {
+    const blok = bron.slice(bron.indexOf(`${naam}: Final = [`));
+    return [...blok.slice(0, blok.indexOf("]")).matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  };
+  assert.deepEqual(lijst("WASMACHINE_BRANDS"), devs.WASMACHINE_BRANDS.map((b) => b.id));
+  const programmaTypes = bron.match(/PROGRAMMA_TYPES = \(([^)]*)\)/)[1].match(/"([a-z]+)"/g).map((s) => s.slice(1, -1));
+  assert.deepEqual(programmaTypes, devs.PROGRAM_TYPES, "PROGRAMMA_TYPES in const.py en PROGRAM_TYPES in devices.js");
+});
+
+// Tot v0.124.0 stond Mitsubishi Electric alleen in het paneel, en weigerde de coach een
+// airco met dat merk bij het opslaan. Elk merk dat het paneel aanbiedt moet in ALL_BRANDS.
+proef("elk merk dat het paneel aanbiedt neemt de coach aan bij het opslaan (v0.124.0)", async () => {
+  const devs = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/const.py", import.meta.url), "utf8");
+  const python = new Set();
+  for (const blok of bron.matchAll(/^[A-Z_]+_BRANDS: Final = \[([\s\S]*?)\]/gm)) {
+    for (const m of blok[1].matchAll(/"([a-z_]+)"/g)) python.add(m[1]);
+  }
+  const alle = ["laadpaal", "vaatwasser", "wasmachine", "droger", "thuisbatterij", "airco"]
+    .flatMap((soort) => devs.brandsFor(soort).map((b) => `${soort}:${b.id}`));
+  const mist = alle.filter((naam) => !python.has(naam.split(":")[1]));
+  assert.deepEqual(mist, [], `niet in const.py: ${mist.join(", ")}`);
+  assert.ok(/ALL_BRANDS: Final = sorted\(\s*\{[^}]*\*AIRCO_BRANDS/.test(bron), "AIRCO_BRANDS zit in ALL_BRANDS");
+});
+
+proef("Miele: de velden, de vrijgave, het programma op de machine en geen tabel vooraf (v0.124.0)", async () => {
+  const devs = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  const was = { id: "w", type: "wasmachine", brand: "miele", name: "", controllable: true, entity: "",
+                energy_entity: "", entities: {} };
+  const nodig = devs.brandEntityFields(was).filter((f) => f.needed).map((f) => f.key);
+  assert.deepEqual(nodig, ["status", "program", "remaining", "start"]);
+  assert.equal(devs.canSteer(was), true, "Miele drukt zelf op Starten");
+  assert.equal(devs.canSkipRelease(was), true, "deur en startknop: deur dicht kan de vrijgave zijn");
+  assert.equal(devs.releaseCopy(was).short, "Mag draaien", "geen 'Ingeruimd', net als de kaart van DomotiApp Lovelace");
+  assert.equal(devs.releaseCopy({ type: "vaatwasser" }).short, "Ingeruimd");
+  assert.deepEqual(devs.programPicker({ ...was, entities: { program: "sensor.w_programma" } }),
+                   { kind: "machine", entityId: "sensor.w_programma" });
+  assert.deepEqual(devs.defaultPrograms(was), [], "geen opgave van de fabrikant");
+  assert.equal(devs.defaultPrograms({ type: "vaatwasser" }).length, devs.DISHWASHER_PROGRAMS.length);
+  assert.equal(devs.isManualProgram({ ...was, brand: "overig" }), true, "Overig is op een meetstekker");
+  assert.deepEqual(devs.programsFor({ ...was, brand: "overig" }), [], "ook zonder vaatwasserprogramma's");
+
+  // Een gemeten Miele-programma: de naam en de duur uit de meting.
+  const settings = { program_measured: [{ device: "w", key: "cottons", label: "Katoen", minutes: 95, kwh: 1.2, peak_w: 0, profile: [], runs: 2 }] };
+  const prog = devs.programOf(was, "cottons", settings);
+  assert.equal(prog?.label, "Katoen");
+  assert.equal(prog?.minutes, 95);
+  assert.equal(devs.programOf(was, "cottons_eco", settings), undefined, "een ander programma is niet gemeten");
+
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.feed_ = {};
+  el.draft_ = { devices: [was], program_measured: [] };
+  let html = el.brandHtml_(was, 0);
+  // De energieteller staat bij elk apparaat bovenaan; bij Miele zonder "(optioneel)".
+  const teller = el.energyHtml_(was, 0);
+  assert.ok(teller.includes("Energieteller</label>") && teller.includes("Een vermogenssensor heeft hij niet"),
+            "bij Miele is de energieteller waar hij het verbruik uit telt");
+  assert.ok(el.energyHtml_({ ...was, brand: "overig" }, 0).includes("Energieteller (optioneel)"));
+  assert.ok(!html.includes("data-energy"), "niet nog een keer bij het merk");
+  assert.ok(html.includes("Er is nog niets gemeten"), "geen tabel vooraf");
+  assert.ok(!html.includes("Eco 50"), "geen vaatwasserprogramma's");
+  el.draft_ = { devices: [was], ...settings };
+  html = el.brandHtml_(was, 0);
+  assert.ok(html.includes("Katoen") && html.includes("2 beurten") && html.includes('data-prog-forget="cottons"'),
+            "een gemeten programma staat erin, te wissen");
+  assert.ok(!html.includes("data-prog-add"), "niets toe te voegen: de machine noemt ze zelf");
+
+  // Overig: een eigen tabel, leeg om mee te beginnen, zonder "Opgaven terugzetten".
+  const dom = { ...was, brand: "overig", entity: "sensor.w_w", programs: [] };
+  el.draft_ = { devices: [dom], program_measured: [] };
+  html = el.brandHtml_(dom, 0);
+  assert.ok(html.includes("data-prog-add") && html.includes("Voeg de programma's toe die je gebruikt"));
+  assert.match(html, /data-prog-reset="0" hidden/);
+});
+
+proef("Miele: de kaart noemt het programma zoals Home Assistant het vertaalt (v0.124.0)", async () => {
+  const was = { id: "w", type: "wasmachine", brand: "miele", name: "", controllable: true, entity: "",
+                entities: { status: "sensor.w", program: "sensor.w_programma" } };
+  const staten = {
+    "sensor.w": { entity_id: "sensor.w", state: "programmed", attributes: {} },
+    "sensor.w_programma": { entity_id: "sensor.w_programma", state: "cottons", attributes: {} },
+  };
+  const vertaald = { programmed: "Geprogrammeerd", cottons: "Katoen" };
+  const feed = { get: (id) => staten[id], label: (id) => vertaald[staten[id]?.state] };
+  const r = new LiveSource().sample(feed, { sources: {}, devices: [was] });
+  const rij = (label) => r.devices[0].details.find((d) => d.label === label)?.text;
+  assert.equal(rij("Programma"), "Katoen");
+  assert.equal(rij("Status"), "Geprogrammeerd");
+  // Zonder vertaling de waarde zelf, netjes.
+  const kaal = new LiveSource().sample({ get: (id) => staten[id] }, { sources: {}, devices: [was] });
+  assert.equal(kaal.devices[0].details.find((d) => d.label === "Programma")?.text, "Cottons");
+});
+
+proef("wasmachine: zonder vrijgave is deur dicht genoeg, met de woorden van een wasmachine (v0.124.0)", async () => {
+  const { voorkeurHtml } = await import("../custom_components/domotiapp_coach/frontend/src/voorkeur-velden.js");
+  const was = { id: "w", type: "wasmachine", brand: "miele", controllable: true, entities: {} };
+  const html = voorkeurHtml(was);
+  assert.ok(html.includes("Mag meedraaien") && html.includes("deur dicht") && html.includes("schone was"), "de woorden van een wasmachine");
+  assert.ok(!html.includes("Ingeruimd") && !html.includes("vaat"));
+  const vaat = voorkeurHtml({ id: "v", type: "vaatwasser", brand: "home_connect", controllable: true, entities: {} });
+  assert.ok(vaat.includes("Ingeruimd en dicht") && vaat.includes("schone vaat"), "de vaatwasser houdt de zijne");
+});
+
 for (const [naam, fn] of proeven) {
   try {
     await fn();

@@ -714,6 +714,8 @@ function deviceDetails(feed, device, settings) {
     const text =
       (field.format === "countdown" ? countdown(raw, unit) : null) ??
       valueLabel(field.values, raw) ??
+      // Een woord dat Home Assistant zelf vertaalt, zoals de standen van Miele (v0.124.0).
+      (!Number.isFinite(number) ? feed.label?.(state.entity_id ?? entityId) : undefined) ??
       (Number.isFinite(number)
         ? `${number.toLocaleString("nl-NL", { maximumFractionDigits: field.decimals ?? 2 })}${unit ? ` ${unit}` : ""}`
         // A word we have no translation for is still shown -- readable, but

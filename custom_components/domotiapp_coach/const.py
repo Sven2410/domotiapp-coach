@@ -61,6 +61,11 @@ DEVICE_TYPES: Final = [
     "thuisbatterij",
     "boiler",
     "vaatwasser",
+    # Terug sinds v0.124.0, nu de coach ze start zoals de vaatwasser. De eigenaar
+    # op 15-10-2026: "Ik wil dat de coach wel weer de apparaten aanmaakt:
+    # Wasmachine droger en vriezer."
+    "wasmachine",
+    "droger",
     "airco",
     # Sinds v0.120.0: een smart plug, met wat eraan hangt (`STEKKER_APPARATEN`).
     "smartplug",
@@ -104,8 +109,6 @@ STEKKER_APPARATEN: Final = {
 # bewoner kwijt is wat het was; zie `_migrate` in storage.py.
 VERVALLEN_TYPES: Final = {
     "warmtepomp": "Warmtepomp",
-    "wasmachine": "Wasmachine",
-    "droger": "Droger",
     "zwembadpomp": "Zwembadpomp",
 }
 
@@ -135,6 +138,18 @@ DISHWASHER_BRANDS: Final = [
     "overig",
 ]
 
+# --- Washing machine and dryer brands (v0.124.0) ----------------------------
+# Miele via de integratie van Home Assistant zelf (`miele`, via de cloud): een
+# status, het programma, de resterende tijd, een startknop en "start op
+# afstand", maar geen vermogenssensor; het verbruik komt uit de energieteller
+# per programma. "overig" is een machine op een meetstekker, zoals de domme
+# vaatwasser: de coach zegt wanneer, de bewoner drukt. De eigenaar op
+# 15-10-2026: "Starten, zoals vaatwasser", en Miele en Overig als merken.
+WASMACHINE_BRANDS: Final = [
+    "miele",
+    "overig",
+]
+
 # --- Battery brands ----------------------------------------------------------
 # Anker is de officiele Anker SOLIX-integratie, die lokaal via Modbus praat:
 # een modus, een vermogen en een richting. "overig" is elke batterij die in
@@ -158,7 +173,18 @@ BATTERIJ_ALLEEN_LEZEN: Final = ("growatt",)
 # Every brand id the panel may send, whatever the device type. Kept as one set
 # so the websocket schema does not have to know which brands belong to which
 # type -- the panel decides that, and it only ever sends one it offered.
-ALL_BRANDS: Final = sorted({*CHARGER_BRANDS, *DISHWASHER_BRANDS, *BATTERY_BRANDS})
+# --- Airco brands (v0.119.1) -------------------------------------------------
+# Tot v0.124.0 stond dit merk alleen in het paneel (`AIRCO_BRANDS` in
+# devices.js), en weigerde het schema van de websocket een airco met merk bij
+# het opslaan. test_rapport.mjs legt sindsdien elke merkenlijst van het paneel
+# naast `ALL_BRANDS`.
+AIRCO_BRANDS: Final = [
+    "mitsubishi_electric",
+]
+
+ALL_BRANDS: Final = sorted(
+    {*CHARGER_BRANDS, *DISHWASHER_BRANDS, *WASMACHINE_BRANDS, *BATTERY_BRANDS, *AIRCO_BRANDS}
+)
 
 # --- Grid metering patterns ------------------------------------------------
 # Customers have one of two: a pair of sensors where one is always zero, or a
@@ -631,7 +657,7 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
 # Apparaten met een programma die de coach start. De eigenaar op 06-09-2026: eerst
 # alleen de vaatwasser. Hier en niet in coach.py, omdat de opslag ze ook nodig heeft: een beurt
 # van zo'n apparaat is een "programma" en geen laadbeurt.
-PROGRAMMA_TYPES = ("vaatwasser",)
+PROGRAMMA_TYPES = ("vaatwasser", "wasmachine", "droger")
 
 # Wat een laadtempo minstens moet zijn om er een te heten: zes ampère op één
 # fase, de laagste stand die een paal kan leveren. Wat daaronder gemeten wordt

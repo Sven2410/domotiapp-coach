@@ -4100,6 +4100,12 @@ class Programma:
     profile: tuple[float, ...] = ()
     # Of duur en verbruik gemeten zijn bij de klant thuis, of opgaven zijn.
     measured: bool = False
+    # Of het verbruik bekend is (v0.124.0). Een Miele-programma dat de coach nog
+    # niet gemeten heeft kent alleen de duur, die de machine zelf geeft. De
+    # eigenaar op 15-10-2026 koos: plannen op die duur, alsof het verbruik gelijk
+    # over de duur valt, zonder kWh; na de eerste beurt met de meting. Dan is
+    # `kwh` 1,0 als gewicht en zegt de coach geen bedrag (`programma_kosten`).
+    kwh_bekend: bool = True
 
 
 PROGRAMMAS: tuple[Programma, ...] = (
@@ -4147,12 +4153,16 @@ def sleutel_van(label: str) -> str:
     return "_".join(woorden) or "programma"
 
 
-def tabel_van(rows: list[dict] | None) -> tuple[Programma, ...]:
+def tabel_van(
+    rows: list[dict] | None, standaard: tuple[Programma, ...] = PROGRAMMAS
+) -> tuple[Programma, ...]:
     """De programmatabel van één apparaat, uit de instellingen.
 
-    Leeg of ontbrekend is de opgave van de fabrikant. Wat de klant invulde
-    wordt genomen zoals het er staat: een rij zonder bruikbare duur of
-    verbruik telt niet mee, want daar valt niets mee te plannen.
+    Leeg of ontbrekend is de opgave van de fabrikant: de vaatwasser heeft er een
+    (`PROGRAMMAS`), een wasmachine en een droger niet (v0.124.0, `standaard`
+    leeg). Wat de klant invulde wordt genomen zoals het er staat: een rij
+    zonder bruikbare duur of verbruik telt niet mee, want daar valt niets mee
+    te plannen.
     """
     uit: list[Programma] = []
     for row in rows or []:
@@ -4169,15 +4179,21 @@ def tabel_van(rows: list[dict] | None) -> tuple[Programma, ...]:
             continue
         key = str(row.get("key") or "").strip() or sleutel_van(label)
         uit.append(Programma(key, label, minutes, kwh, peak_w))
-    return tuple(uit) if uit else PROGRAMMAS
+    return tuple(uit) if uit else standaard
 
 
-def met_metingen(tabel: tuple[Programma, ...], metingen: list[dict] | None, device_id: str) -> tuple[Programma, ...]:
+def met_metingen(
+    tabel: tuple[Programma, ...], metingen: list[dict] | None, device_id: str, ook_nieuw: bool = False
+) -> tuple[Programma, ...]:
     """De tabel met de metingen van dit apparaat eroverheen.
 
     Een meting wint van een opgave zodra hij er is: duur, verbruik en de piek
     komen dan van de meetstekker, en het profiel erbij. De naam blijft van de
     tabel.
+
+    Met `ook_nieuw` komen gemeten programma's die niet in de tabel staan erbij,
+    met de naam uit de meting (v0.124.0): een Miele noemt zijn programma's zelf,
+    en heeft geen tabel vooraf.
     """
     per_key: dict[str, dict] = {}
     for row in metingen or []:
@@ -4203,6 +4219,22 @@ def met_metingen(tabel: tuple[Programma, ...], metingen: list[dict] | None, devi
             uit.append(programma)
             continue
         uit.append(replace(programma, minutes=minutes, kwh=kwh, peak_w=peak_w, profile=profiel, measured=True))
+    if ook_nieuw:
+        bekend = {programma.key for programma in tabel}
+        for key, meting in per_key.items():
+            if key in bekend:
+                continue
+            try:
+                minutes = int(float(meting.get("minutes") or 0))
+                kwh = float(meting.get("kwh") or 0.0)
+                peak_w = int(float(meting.get("peak_w") or 0))
+                profiel = tuple(float(w) for w in (meting.get("profile") or []))
+            except (TypeError, ValueError):
+                continue
+            if minutes <= 0:
+                continue
+            label = str(meting.get("label") or "").strip() or key.replace("_", " ").capitalize()
+            uit.append(Programma(key, label, minutes, kwh, peak_w, profiel, measured=True))
     return tuple(uit)
 
 
@@ -4277,11 +4309,27 @@ class Apparaat:
     # "unload" (na een beurt nog niet uitgeruimd) of "unknown" (geen
     # deurstand). Leeg bij een apparaat dat op een vrijgave wacht.
     door_release: str = ""
+    # Hoe de vrijgave heet (v0.124.0): "ingeruimd" bij een vaatwasser, en niets
+    # bij een wasmachine of droger, waar de knop "Mag draaien" heet
+    # (`VRIJGAVE_WOORD`).
+    vrijgave: str = "ingeruimd"
+
+
+# Hoe de vrijgave per soort apparaat heet, in de teksten van de coach. Dezelfde
+# woorden als `releaseCopy` in devices.js: "Ingeruimd en dicht" bij een
+# vaatwasser, en bij de rest "Mag draaien", zoals de kaart van DomotiApp
+# Lovelace (0.70.0) het ook zegt.
+VRIJGAVE_WOORD = {"vaatwasser": "ingeruimd"}
 
 
 # Wat Home Connect meldt zolang er een programma loopt of klaarstaat.
 DRAAIT = frozenset({"run", "delayedstart", "pause", "aborting"})
 KLAAR = frozenset({"finished"})
+
+
+def _en_nu(vrijgave: str) -> str:
+    """De keuze "nu starten" zoals de knop heet: "ingeruimd en nu starten", of "nu starten"."""
+    return f"{vrijgave} en nu starten" if vrijgave else "nu starten"
 
 
 def _in_avondpiek(start: datetime, einde: datetime) -> bool:
@@ -4355,6 +4403,11 @@ def programma_kosten(
             over = overschot_kwh(forecast, uur)
         over *= deel_uur
         zon = min(kwh, over) if terug is not None else 0.0
+        if not programma.kwh_bekend and terug is not None:
+            # Zonder verbruik weet de coach niet hoeveel zon hij nodig heeft:
+            # een stuk met overschot telt als zon, een stuk zonder als net
+            # (v0.124.0). Een gewicht, geen bedrag; zie `kwh_bekend`.
+            zon = kwh if over > 0 else 0.0
         kosten += (zon * terug if zon > 0 else 0.0) + (kwh - zon) * koop
     return kosten
 
@@ -4466,7 +4519,9 @@ def plan_programma(
                 f"Wacht tot je hem vrijgeeft. {_clock(gemist)} is vandaag voorbij: kies of hij "
                 f"{_dagnaam(window.deadline, now)} op het goedkoopste moment start, of nu."
                 if gemist is not None
-                else "Wacht tot je hem vrijgeeft: ingeruimd en dicht."
+                else f"Wacht tot je hem vrijgeeft: {apparaat.vrijgave} en dicht."
+                if apparaat.vrijgave
+                else "Wacht tot je hem vrijgeeft."
             ),
             plan="Daarna kiest de coach het goedkoopste moment binnen je schema.",
             rule="not-released",
@@ -4483,8 +4538,8 @@ def plan_programma(
     if apparaat.start_now:
         return Decision(
             True, 0,
-            "Zet hem nu aan: je koos ingeruimd en nu starten." if hand
-            else "Je koos ingeruimd en nu starten, dus hij start nu.",
+            f"Zet hem nu aan: je koos {_en_nu(apparaat.vrijgave)}." if hand
+            else f"Je koos {_en_nu(apparaat.vrijgave)}, dus hij start nu.",
             plan=(
                 f"Klaar rond {_dag_klok(now + timedelta(minutes=programma.minutes), now)}."
                 if programma is not None and programma.minutes else ""
@@ -4648,7 +4703,12 @@ def plan_programma(
             True, 0,
             ("Zet hem nu aan: dit is het goedkoopste moment" if hand else "Dit is het goedkoopste moment")
             + (f" tot {_wanneer(einde, now)}" if einde is not None else "")
-            + f": {programma.label} kost nu ongeveer {_euro(goedkoopst)}.",
+            + (
+                f": {programma.label} kost nu ongeveer {_euro(goedkoopst)}."
+                if programma.kwh_bekend
+                # Zonder verbruik geen bedrag (v0.124.0): het is een gewicht.
+                else f" voor {programma.label}."
+            ),
             plan=f"Klaar rond {_wanneer(now + duur, now)}.",
             rule="cheapest-start",
         )
@@ -4660,7 +4720,7 @@ def plan_programma(
     kosten_echt_nu = kosten_nu if eerste == now else programma_kosten(
         now, programma, prices, tariff, forecast, now=now, surplus_w=surplus_w
     )
-    if kosten_echt_nu is not None and kosten_echt_nu - goedkoopst >= 0.005:
+    if kosten_echt_nu is not None and kosten_echt_nu - goedkoopst >= 0.005 and programma.kwh_bekend:
         verschil = f" Nu starten zou ongeveer {_euro(kosten_echt_nu)} kosten, dan {_euro(goedkoopst)}."
     # Even duur als nu en toch later: dan is het de avondpiek die nu dichtzit.
     waarom = (

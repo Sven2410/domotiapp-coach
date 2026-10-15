@@ -9206,6 +9206,151 @@ rij159c = next((r for r in store159c.instellingen.get("battery_state") or [] if 
 controle("een batterij die hij niet stuurt: ook het rendement uit de tellers, met de capaciteit van de sensor",
          rij159c.get("rte_accu") == 0.9015 and "dev-batterij" not in coach159c._batterij, f"{rij159c}")
 
+print("=== 160. Miele: een wasmachine start zoals de vaatwasser, op de duur van de machine (v0.124.0) ===")
+# De eigenaar op 15-10-2026: "Ik wil dat de coach wel weer de apparaten aanmaakt:
+# Wasmachine droger en vriezer", en voor de wasmachine en de droger "Starten, zoals
+# vaatwasser". Miele (de integratie `miele`) geeft geen vermogen, wel een
+# energieteller per programma, en de duur zolang het programma klaarstaat. Zijn keuze
+# voor een programma dat nog niet gemeten is: plannen op die duur, zonder kWh.
+WAS160 = {
+    "id": "dev-was", "type": "wasmachine", "name": "", "brand": "miele", "controllable": True,
+    "entity": "", "energy_entity": "sensor.was_energie",
+    "entities": {
+        "status": "sensor.was", "program": "sensor.was_programma", "remaining": "sensor.was_rest",
+        "remote_start": "binary_sensor.was_afstand", "door": "binary_sensor.was_deur",
+        "start": "button.was_start",
+    },
+}
+inst160 = instellingen(devices=[LAADPAAL, WAS160])
+inst160["contract"] = dict(inst56["contract"])
+inst160["strategy"]["schedules"].append({
+    "device": "dev-was", "enabled": True, "priority": "mid", "per_day": False,
+    "window": {"not_before": "", "start_by": "", "done_by": "07:00"}, "days": [],
+})
+huis160 = huis(status="ready_to_charge", teruglevering=0.0, afname=300.0)
+huis160.update({
+    "sensor.was": "programmed",
+    "sensor.was_programma": "cottons",
+    "sensor.was_rest": {"state": "95", "attributes": {"unit_of_measurement": "min"}},
+    "binary_sensor.was_afstand": "on",
+    "binary_sensor.was_deur": "off",
+    "button.was_start": "unknown",
+    "sensor.was_energie": {"state": "0.0", "attributes": {"unit_of_measurement": "kWh"}},
+    "sensor.prijs": {"state": "0.30", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen56(7)}},
+})
+hass160, store160, coach160 = bouw(huis160, inst160)
+
+
+async def ronde160(nu):
+    hass160.services.verstuurd.clear()
+    await hass160.afmaken()
+    await coach160._round(nu)
+    await hass160.afmaken()
+    return coach160.state.get("dev-was") or {}, list(hass160.services.verstuurd)
+
+
+def telefoon160(v):
+    return [d[2].get("message", "") for d in v if d[0] == "notify"]
+
+
+b160, v160 = asyncio.run(ronde160(dt.datetime(2026, 9, 7, 19, 0)))
+controle("Miele 'programmed' is klaar voor een start: zonder vrijgave wacht hij, zonder 'ingeruimd'",
+         b160.get("rule") == "not-released" and (b160.get("reason") or "").startswith("Wacht tot je hem vrijgeeft.")
+         and "ingeruimd" not in (b160.get("reason") or ""), f"{b160.get('rule')} {b160.get('reason')}")
+inst160["ready_devices"] = ["dev-was"]
+b160, v160 = asyncio.run(ronde160(dt.datetime(2026, 9, 7, 19, 5)))
+print(f"  19:05 vrijgegeven: {b160.get('rule')} {b160.get('starts_at')}  {b160.get('reason')}")
+controle("vrijgegeven: hij plant op de 95 minuten van de machine, in de goedkope nacht",
+         b160.get("rule") == "wait-for-start" and (b160.get("starts_at") or "").endswith("T01:00:00")
+         and b160.get("program") == "cottons", f"{b160.get('rule')} {b160.get('starts_at')} {b160.get('program')}")
+controle("zonder verbruik noemt hij geen bedrag", "€" not in (b160.get("reason") or ""), f"{b160.get('reason')}")
+controle("en de naam van het programma staat erbij", b160.get("program_label") == "Cottons", f"{b160.get('program_label')}")
+controle("en hij drukt nog niet", not [d for d in v160 if d[0] == "button"], f"{v160}")
+
+hass160.states.zet("sensor.prijs", {"state": "0.18", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen56(7)}})
+b160, v160 = asyncio.run(ronde160(dt.datetime(2026, 9, 8, 1, 0, 30)))
+gedrukt160 = [d for d in v160 if d[0] == "button" and d[2].get("entity_id") == "button.was_start"]
+controle("om 01:00 drukt hij op Starten", len(gedrukt160) == 1, f"{v160}")
+
+# De machine draait; de teller loopt in stappen van een tiende op.
+hass160.states.zet("sensor.was", "in_use")
+stappen160 = [(1, 5, "0.0"), (1, 10, "0.0"), (1, 15, "0.1"), (1, 20, "0.3"), (1, 30, "0.5"), (1, 45, "0.8"),
+              (2, 0, "1.0"), (2, 15, "1.1"), (2, 30, "1.2")]
+meldingen160 = []
+for uur, minuut, stand in stappen160:
+    hass160.states.zet("sensor.was_energie", {"state": stand, "attributes": {"unit_of_measurement": "kWh"}})
+    hass160.states.zet("sensor.was_rest", {"state": str(max(0, 95 - ((uur - 1) * 60 + minuut))),
+                                           "attributes": {"unit_of_measurement": "min"}})
+    b160, v160 = asyncio.run(ronde160(dt.datetime(2026, 9, 8, uur, minuut)))
+    meldingen160 += telefoon160(v160)
+controle("in_use is draaien", b160.get("rule") == "running" and b160.get("running") is True, f"{b160.get('rule')}")
+controle("hij meldt dat hij gestart is, met de naam die Miele geeft",
+         any(m.startswith("De wasmachine is gestart (Cottons)") for m in meldingen160), f"{meldingen160}")
+hass160.states.zet("sensor.was", "program_ended")
+b160, v160 = asyncio.run(ronde160(dt.datetime(2026, 9, 8, 2, 36)))
+verslag160 = [m for m in telefoon160(v160) if "is klaar" in m]
+print(f"  verslag: {verslag160}")
+controle("program_ended is klaar: het verslag noemt de 1,2 kWh van de teller",
+         len(verslag160) == 1 and "1,2 kWh" in verslag160[0] and verslag160[0].startswith("De wasmachine is klaar (Cottons)"),
+         f"{verslag160}")
+meting160 = next((r for r in store160.instellingen.get("program_measured") or [] if r.get("device") == "dev-was"), {})
+print(f"  meting: {meting160}")
+controle("de meting: de duur, de kWh van de teller, de naam, en geen piek of verloop",
+         meting160.get("key") == "cottons" and meting160.get("label") == "Cottons" and meting160.get("kwh") == 1.2
+         and meting160.get("peak_w") == 0 and meting160.get("profile") == [] and 90 <= meting160.get("minutes", 0) <= 100,
+         f"{meting160}")
+controle("de vrijgave gaat eraf", "dev-was" not in (store160.instellingen.get("ready_devices") or []), "")
+
+# De volgende keer kent hij het programma: dan met kWh, en dus met een bedrag.
+inst160["program_measured"] = store160.instellingen.get("program_measured")
+inst160["ready_devices"] = ["dev-was"]
+hass160.states.zet("sensor.was", "programmed")
+hass160.states.zet("sensor.was_energie", {"state": "1.2", "attributes": {"unit_of_measurement": "kWh"}})
+hass160.states.zet("sensor.prijs", {"state": "0.30", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen56(8)}})
+b160, v160 = asyncio.run(ronde160(dt.datetime(2026, 9, 8, 19, 5)))
+print(f"  tweede keer: {b160.get('rule')} {b160.get('reason')}")
+controle("een gemeten programma plant hij met zijn kWh, en dan noemt hij wel een bedrag",
+         b160.get("rule") == "wait-for-start" and "€" in (b160.get("reason") or ""), f"{b160.get('reason')}")
+
+# Start op afstand uit: niet drukken, en het één keer zeggen.
+hass160.states.zet("binary_sensor.was_afstand", "off")
+hass160.states.zet("sensor.prijs", {"state": "0.18", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen56(8)}})
+v160_alles = []
+for minuut in (0, 2, 4, 6):
+    b160, v160 = asyncio.run(ronde160(dt.datetime(2026, 9, 9, 1, minuut, 30)))
+    v160_alles += v160
+controle("met start op afstand uit drukt hij niet",
+         not [d for d in v160_alles if d[0] == "button"], f"{[d for d in v160_alles if d[0] == 'button']}")
+controle("en zegt hij één keer wat er aan moet",
+         sum("Zet starten op afstand aan op het apparaat" in m for m in telefoon160(v160_alles)) == 1,
+         f"{telefoon160(v160_alles)}")
+
+# De standen van Miele in de woorden van de rest van de coach.
+controle("de standen van Miele: programmed klaar, in_use draait, program_ended afgelopen",
+         coachmod.MIELE_STATUS["programmed"] == "ready" and coachmod.MIELE_STATUS["waiting_to_start"] == "ready"
+         and coachmod.MIELE_STATUS["in_use"] == "run" and coachmod.MIELE_STATUS["program_ended"] == "finished", "")
+controle("een droger zonder naam heet in een melding De droger",
+         coachmod._programma_naam({"type": "droger"}) == "De droger"
+         and coachmod._programma_naam({"type": "vaatwasser"}) == "De vaatwasser", "")
+
+# Een wasmachine van het merk Overig, op een meetstekker, zonder eigen tabel: geen
+# opgave van de fabrikant, dus niets te plannen tot de bewoner een programma invult.
+DOM160 = {"id": "dev-dom", "type": "wasmachine", "name": "", "brand": "overig", "controllable": True,
+          "entity": "sensor.dom_w", "entities": {}, "program": ""}
+inst160b = instellingen(devices=[LAADPAAL, DOM160])
+inst160b["ready_devices"] = ["dev-dom"]
+hass160b, _, coach160b = bouw({**huis(), "sensor.dom_w": "0"}, inst160b)
+asyncio.run(coach160b._round(dt.datetime(2026, 9, 7, 19, 0)))
+dom160 = coach160b.state.get("dev-dom") or {}
+controle("een domme wasmachine zonder tabel: geen vaatwasserprogramma's, hij zegt dat hij het niet weet",
+         dom160.get("rule") == "no-program" and dom160.get("program") == "", f"{dom160.get('rule')} {dom160.get('program')}")
+DOM160b = {**DOM160, "program": "katoen_40", "programs": [{"key": "katoen_40", "label": "Katoen 40", "minutes": 120, "kwh": 0.9, "peak_w": 2000}]}
+inst160b["devices"] = [LAADPAAL, DOM160b]
+asyncio.run(coach160b._round(dt.datetime(2026, 9, 7, 19, 1)))
+dom160 = coach160b.state.get("dev-dom") or {}
+controle("met een eigen rij plant hij hem gewoon", dom160.get("program") == "katoen_40"
+         and dom160.get("rule") in ("wait-for-start", "cheapest-start"), f"{dom160.get('rule')} {dom160.get('program')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
