@@ -58,6 +58,8 @@ export class StateFeed {
    */
   connect(hass) {
     if (hass?.states) this.seed_ = hass.states;
+    // Voor `label`: Home Assistant vertaalt de standen zelf.
+    if (hass) this.hass_ = hass;
 
     const connection = hass?.connection;
     // Bail out only when this is the same connection we are already on. A new
@@ -130,6 +132,21 @@ export class StateFeed {
     // the seed goes stale when `hass` is not handed over, and the event map
     // goes stale across a dropped connection.
     return stampOf(seed) > stampOf(live) ? seed : live;
+  }
+
+  /**
+   * Een stand zoals Home Assistant hem in de eigen taal noemt (v0.124.0): bij
+   * Miele "Katoen" in plaats van "cottons". Undefined als dat niet kan.
+   * @param {string} entityId
+   */
+  label(entityId) {
+    const state = this.get(entityId);
+    if (!state || !this.hass_?.formatEntityState) return undefined;
+    try {
+      return this.hass_.formatEntityState(state) || undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /** Every entity id we know about, for the picker. */

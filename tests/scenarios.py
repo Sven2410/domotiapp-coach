@@ -655,6 +655,19 @@ vaatwasser_klep_dicht = vaatwasser_avond.kopie(
     gebeurtenissen=[("19:00", "vaatwasser_deur", False), ("07:30", "vaatwasser_deur", True),
                     ("07:40", "vaatwasser_deur", False)],
 )
+# Een Miele-wasmachine (v0.124.0). De eigenaar op 15-10-2026: "Starten, zoals
+# vaatwasser", en voor een programma dat de coach nog niet gemeten heeft "de
+# duur van de machine": Miele geeft die zolang het programma klaarstaat, en een
+# vermogen heeft hij niet, alleen een teller per programma.
+wasmachine_miele = vaatwasser_avond.kopie(
+    naam="wasmachine-miele", uitleg="Miele-wasmachine, om 19:00 vrijgegeven, klaar om 07:00, programma nog niet gemeten: hij plant op de duur van de machine, zonder kWh en zonder bedrag, in de goedkope nacht, en meet de beurt uit de teller",
+    vaatwasser=Vaatwasser(miele=True, programma="cottons"),
+)
+wasmachine_miele_gemeten = wasmachine_miele.kopie(
+    naam="wasmachine-miele-gemeten", uitleg="dezelfde wasmachine, nu met een eerdere meting van het programma: dan rekent hij met de kWh en noemt hij een bedrag",
+    vaatwasser_gemeten=[{"device": "vaatwasser", "key": "cottons", "label": "Katoen", "minutes": 225, "kwh": 0.8,
+                         "peak_w": 0, "profile": [], "runs": 1}],
+)
 vaatwasser_lokaal_afstand_uit = vaatwasser_avond.kopie(
     naam="vaatwasser-lokaal-afstand-uit", uitleg="Home Connect Local met starten op afstand uit: de sensor zegt het, dus de coach drukt niet één keer en zegt wat er aan moet",
     vaatwasser=replace(LOKAAL, afstand_aan=False),
@@ -1440,6 +1453,7 @@ ALLE = [
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,
     vaatwasser_zonpiek, vaatwasser_eindtijd, vaatwasser_eindtijd_bijstellen, vaatwasser_na_klaartijd, vaatwasser_na_klaartijd_nu,
     vaatwasser_lokaal, vaatwasser_lokaal_deur, vaatwasser_lokaal_afstand_uit, vaatwasser_klep_dicht,
+    wasmachine_miele, wasmachine_miele_gemeten,
     forecast_solar_vast, forecast_solar_vaatwasser, forecast_solar_sensoren,
     boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
     airco_zon, airco_plaatje, airco_bewoner, airco_goedkoop, airco_geen_zon,

@@ -20,6 +20,7 @@ import {
   canAlwaysOn,
   PROGRAM_TYPES,
   hasOwnPrograms,
+  defaultPrograms,
   isManualProgram,
   canSteer,
   measuredFor,
@@ -392,8 +393,8 @@ class DacViewDevices extends DacEditorElement {
             ).join("")}
           </select>
           <span class="sub">${
-            gekozen?.id === "vaatwasser"
-              ? "Op een smart plug meet de coach hem alleen. Moet hij hem plannen, voeg hem dan toe als Vaatwasser."
+            ["vaatwasser", "wasmachine", "droger"].includes(gekozen?.id)
+              ? `Op een smart plug meet de coach hem alleen. Moet hij hem plannen, voeg hem dan toe als ${gekozen.label}.`
               : "Daarmee krijgt hij zijn naam en zijn icoon."
           }</span>
         </div>`;
@@ -466,13 +467,16 @@ class DacViewDevices extends DacEditorElement {
   /** De energieteller; bij een smart plug in zijn eigen blok, anders onder de naam. */
   energyHtml_(device, index) {
     const stekker = isSmartPlug(device);
+    const machine = brandMeta(device)?.energyCounter;
     return `
             <div class="row">
-              <label>Energieteller (optioneel)</label>
+              <label>Energieteller${machine ? "" : " (optioneel)"}</label>
               <dac-entity-picker data-energy="${index}"></dac-entity-picker>
               <span class="sub">${
                 stekker
                   ? "De teller van de smart plug in kWh, als die er een heeft. Daarmee klopt het verbruik in je rapport tot op de komma; zonder wordt het afgeleid uit het gemiddelde vermogen."
+                  : machine
+                  ? "De sensor Energieverbruik van de machine, in kWh. Een vermogenssensor heeft hij niet: hieruit telt de coach wat een programma verbruikt en wat het kost. Zonder plant hij alleen op de duur."
                   : "De teller van dit apparaat in kWh, als die er is. Bij een laadpaal is dat de teller van alles wat hij ooit geladen heeft. Daarmee klopt het verbruik in je rapport tot op de komma en klopt het aantal kWh in het verslag na een laadbeurt; zonder wordt allebei afgeleid uit het gemiddelde vermogen."
               }</span>
             </div>`;
@@ -528,6 +532,7 @@ class DacViewDevices extends DacEditorElement {
    */
   programsHtml_(device, index) {
     if (!PROGRAM_TYPES.includes(device.type) || !brandMeta(device)) return "";
+    if (brandMeta(device).programOnMachine) return this.machineProgramsHtml_(device, index);
 
     const measured = measuredFor(this.draft_, device);
     const own = hasOwnPrograms(device);
@@ -580,8 +585,12 @@ class DacViewDevices extends DacEditorElement {
     const gemetenUitleg = measured.size
       ? " Een gemeten programma staat op slot en toont de meting, want daar rekent de coach mee. \"Wissen\" geeft je eigen getallen terug, \"overnemen\" maakt de meting je eigen opgave."
       : "";
+    const opgave = defaultPrograms(device).length > 0;
     const uitleg = (manual
-      ? "Deze programma's kun je op de kaart kiezen; typ de namen zoals ze op je machine heten. Duur en verbruik zijn opgaven van de fabrikant als uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft op de vermogenssensor, rekent de coach met wat er gemeten is."
+      ? opgave
+        ? "Deze programma's kun je op de kaart kiezen; typ de namen zoals ze op je machine heten. Duur en verbruik zijn opgaven van de fabrikant als uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft op de vermogenssensor, rekent de coach met wat er gemeten is."
+        // Een wasmachine of droger heeft geen opgave vooraf (v0.124.0).
+        : "Deze programma's kun je op de kaart kiezen. Voeg de programma's toe die je gebruikt, met hoe lang ze duren en wat ze ongeveer verbruiken. Zodra een programma een keer gedraaid heeft op de vermogenssensor, rekent de coach met wat er gemeten is."
       : options.length
         ? "De programma's van je machine, zoals de select-entiteit ze noemt. De opgaven van de fabrikant zijn het uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft, rekent de coach met wat er bij jou gemeten is."
         : "Vul hierboven \"Programma kiezen\" in, dan komen hier de programma's van je machine te staan. Tot die tijd rekent de coach met de opgaven van de fabrikant hieronder.") + gemetenUitleg;
@@ -598,7 +607,47 @@ class DacViewDevices extends DacEditorElement {
         </div>
         <div class="prog-actions">
           ${vast ? "" : `<button type="button" data-prog-add="${index}">${icons.plus} Programma toevoegen</button>`}
-          <button type="button" data-prog-reset="${index}"${own ? "" : " hidden"}>Opgaven terugzetten</button>
+          <button type="button" data-prog-reset="${index}"${own && opgave ? "" : " hidden"}>Opgaven terugzetten</button>
+        </div>
+      </div>`;
+  }
+
+  /**
+   * De programma's van een machine die ze zelf noemt en de duur zelf geeft (Miele,
+   * v0.124.0): geen tabel vooraf, alleen wat de coach gemeten heeft, per
+   * programma te wissen. De eigenaar op 15-10-2026 koos: plannen op de duur van
+   * de machine, en na een beurt met de meting.
+   */
+  machineProgramsHtml_(device, index) {
+    const measured = [...measuredFor(this.draft_, device).entries()];
+    const text = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const uitleg = "Het programma kies je op de machine. Zolang het klaarstaat geeft de machine de duur, en daarmee plant de coach; het verbruik weet hij dan nog niet. Na een beurt staat het programma hieronder met wat hij gemeten heeft, en dan rekent hij daarmee.";
+    if (!measured.length) {
+      return `
+      <div class="row">
+        <label>Programma's</label>
+        <span class="sub">${uitleg} Er is nog niets gemeten.</span>
+      </div>`;
+    }
+    const rows = measured
+      .map(([key, meting]) => `
+      <tr class="locked">
+        <td><span class="name">${text(meting.label || key)}</span></td>
+        <td class="tnum">${duration(Number(meting.minutes))}</td>
+        <td class="tnum">${Number(meting.kwh).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWh</td>
+        <td class="measured"><span>${Number(meting.runs) > 1 ? `${meting.runs} beurten` : "1 beurt"}</span>
+          <button type="button" class="link" data-prog-forget="${text(key)}" data-index="${index}" title="Deze meting weggooien">wissen</button></td>
+      </tr>`)
+      .join("");
+    return `
+      <div class="row">
+        <label>Programma's</label>
+        <span class="sub">${uitleg}</span>
+        <div class="table-scroll">
+          <table class="programs">
+            <thead><tr><th>Programma</th><th>Duur</th><th>Energie</th><th>Gemeten</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
         </div>
       </div>`;
   }

@@ -15,7 +15,7 @@
  * van de pop-up.
  */
 
-import { WAKE_MODES, WEEKDAGEN, canSkipRelease } from "./devices.js";
+import { WAKE_MODES, WEEKDAGEN, canSkipRelease, releaseCopy } from "./devices.js";
 
 const esc = (s) =>
   String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -103,9 +103,15 @@ function thuisbatterij(device) {
     ${ventilator}`;
 }
 
-function vaatwasser() {
+function vaatwasser(device) {
+  // Een wasmachine of droger (v0.124.0) heeft een deur en geen klep, en de knop
+  // heet daar "Mag draaien" (`releaseCopy`).
+  const vaat = device?.type === "vaatwasser";
+  const knop = releaseCopy(device).label;
   return vink("data-vk", "release_required", "Moet eerst vrijgegeven worden.",
-    'Aan: de coach wacht tot je hem vrijgeeft met "Ingeruimd en dicht" op de kaart. Uit: klep dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de klep open en weer dicht is geweest, zodat hij niet opnieuw start met de schone vaat erin.');
+    vaat
+      ? 'Aan: de coach wacht tot je hem vrijgeeft met "Ingeruimd en dicht" op de kaart. Uit: klep dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de klep open en weer dicht is geweest, zodat hij niet opnieuw start met de schone vaat erin.'
+      : `Aan: de coach wacht tot je hem vrijgeeft met "${knop}" op de kaart. Uit: deur dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de deur open en weer dicht is geweest, zodat hij niet opnieuw start met de schone was erin.`);
 }
 
 /**
@@ -135,7 +141,7 @@ export function voorkeurHtml(device) {
   if (device?.type === "laadpaal") return laadpaal(device);
   if (device?.type === "thuisbatterij") return thuisbatterij(device);
   if (device?.type === "airco") return airco();
-  if (canSkipRelease(device)) return vaatwasser();
+  if (canSkipRelease(device)) return vaatwasser(device);
   return "";
 }
 

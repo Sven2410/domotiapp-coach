@@ -101,6 +101,9 @@ from .planner import (
     programma_van,
     tabel_van,
     met_metingen,
+    Programma,
+    PROGRAMMAS,
+    VRIJGAVE_WOORD,
     PROFIEL_STAP_MIN,
     profiel_van,
     profiel_gemiddeld,
@@ -979,6 +982,38 @@ def _text(hass: HomeAssistant, entity_id: str | None) -> str:
     return "" if state is None else str(state.state).lower()
 
 
+# De standen van Miele (de integratie `miele` van Home Assistant) in de woorden
+# van Home Connect, waar de rest van de coach mee rekent (v0.124.0; `DRAAIT`,
+# `KLAAR` in planner.py). "programmed" en "waiting_to_start" zijn: het
+# programma staat klaar en wacht op een start, dus "ready". Een programma dat
+# afgebroken is ("program_interrupted") is ook voorbij.
+MIELE_STATUS = {
+    "off": "inactive",
+    "on": "ready",
+    "idle": "ready",
+    "programmed": "ready",
+    "waiting_to_start": "ready",
+    "in_use": "run",
+    "pause": "pause",
+    "rinse_hold": "pause",
+    "program_ended": "finished",
+    "program_interrupted": "finished",
+    "failure": "error",
+    "not_connected": "",
+}
+
+# Hoe een programma-apparaat in een melding heet zonder eigen naam.
+PROGRAMMA_NAAM = {"vaatwasser": "De vaatwasser", "wasmachine": "De wasmachine", "droger": "De droger"}
+
+# Wat Miele zegt als er geen programma gekozen is.
+GEEN_PROGRAMMA = frozenset({"", "no_program", "unknown", "unavailable", "none"})
+
+
+def _programma_naam(device: dict[str, Any]) -> str:
+    """De naam van een programma-apparaat vooraan in een melding."""
+    return device.get("name") or PROGRAMMA_NAAM.get(str(device.get("type") or ""), "Het apparaat")
+
+
 def _eindtijd(
     hass: HomeAssistant, entity_id: str | None, now: datetime, sinds: datetime | None = None
 ) -> datetime | None:
@@ -1082,6 +1117,9 @@ class ChargerCoach:
         """Set up without touching anything yet."""
         self.hass = hass
         self._cancel = None
+        # De naam van een stand zoals Home Assistant hem vertaalt, per
+        # (entiteit, waarde): "cottons" wordt "Katoen" (v0.124.0).
+        self._staat_namen: dict[tuple[str, str], str] = {}
         # What we last decided per device, so a charger is not re-commanded for
         # a fraction of an amp.
         self._last: dict[str, Decision] = {}
@@ -2672,7 +2710,10 @@ class ChargerCoach:
     ) -> None:
         device_id = device.get("id", "")
         entities = device.get("entities") or {}
-        naam = device.get("name") or "De vaatwasser"
+        naam = _programma_naam(device)
+        soort = str(device.get("type") or "")
+        # Een Miele noemt zijn programma's zelf en geeft de duur (v0.124.0).
+        miele = device.get("brand") == "miele"
         sessie = self._programma.setdefault(device_id, self._lege_programma_sessie(now))
         # De eerste ronde waarin deze coach het apparaat ziet: liep er toen al
         # een beurt, dan is dit een herstart middenin.
@@ -2684,8 +2725,13 @@ class ChargerCoach:
         handmatig = not entities.get("start")
         # De tabel van dit apparaat: wat de klant invulde (of de opgave van de
         # fabrikant), met de metingen van eerdere beurten eroverheen.
+        # Een wasmachine en een droger hebben geen opgave van de fabrikant
+        # (v0.124.0): de tabel is wat de klant invulde, met wat de coach mat,
+        # ook van programma's die er niet in staan.
+        vaat = soort == "vaatwasser"
         tabel = met_metingen(
-            tabel_van(device.get("programs")), settings.get("program_measured"), device_id
+            tabel_van(device.get("programs"), PROGRAMMAS if vaat else ()),
+            settings.get("program_measured"), device_id, ook_nieuw=not vaat,
         )
 
         released = device_id in (settings.get("ready_devices") or [])
@@ -2715,7 +2761,16 @@ class ChargerCoach:
         # weten ze het altijd. Bij de andere integraties zegt de sensor het
         # al, en dan komt de select niet aan de beurt.
         programma = None
-        if entities.get("program") or entities.get("program_select"):
+        if miele:
+            # Precies op de sleutel: bij Miele is de ene naam soms het eind van
+            # een andere ("denim" en "gentle_denim"), en dan zou `programma_van`
+            # de verkeerde kunnen vinden.
+            ruw = _text(self.hass, entities.get("program")).strip()
+            if ruw.lower() not in GEEN_PROGRAMMA:
+                programma = next((p for p in tabel if p.key == ruw), None)
+                if programma is None:
+                    programma = await self._async_machine_programma(entities, ruw, sessie, now)
+        elif entities.get("program") or entities.get("program_select"):
             for sleutel in ("program", "program_select"):
                 if entities.get(sleutel):
                     programma = programma_van(_text(self.hass, entities[sleutel]), tabel)
@@ -2735,6 +2790,8 @@ class ChargerCoach:
             # `Dishcare...OperationState.Run` en `run` zijn hetzelfde; zie
             # `programma_van` voor dezelfde afspraak bij het programma.
             status = status.split(".")[-1]
+            # En Miele in dezelfde woorden (v0.124.0).
+            status = MIELE_STATUS.get(status, status)
 
         klep = ""
         if zonder_vrijgave:
@@ -2761,6 +2818,7 @@ class ChargerCoach:
         apparaat = Apparaat(
             status=status, released=released, program=programma, door_open=deur_open,
             manual=handmatig, start_now=nu_starten, door_release=klep,
+            vrijgave=VRIJGAVE_WOORD.get(soort, ""),
         )
         decision = plan_programma(
             now, self._prices(settings), self._tariff(settings),
@@ -2845,11 +2903,17 @@ class ChargerCoach:
             else:
                 klaar = ""
             await self._async_tell(f"{naam} {'is gestart' if zelf else 'draait'}{wat}{klaar}.")
-        if draait:
+        # Geen vermogenssensor maar wel een energieteller (Miele, v0.124.0): dan
+        # telt de coach per stap van de teller (`_teller_tellen`).
+        op_teller = watts is None and not device.get("entity") and bool(device.get("energy_entity"))
+        if draait and op_teller:
+            self._teller_tellen(settings, sessie, now, _kwh(self.hass, device["energy_entity"]))
+        elif draait:
             self._programma_tellen(settings, sessie, now, watts)
             # Het verloop van deze beurt, voor het profiel: minuten sinds de
-            # start en wat hij op dat moment trok.
-            if watts is not None and sessie["gestart"] is not None:
+            # start en wat hij op dat moment trok. Niet uit een teller: die
+            # loopt in stappen achter, en dat is geen verloop.
+            if watts is not None and sessie["gestart"] is not None and not sessie.get("teller"):
                 sessie["punten"].append(((now - sessie["gestart"]).total_seconds() / 60.0, watts))
             # Het gat van een herstart, zodra de kwartieropslag het heeft.
             gat = sessie.get("terugrekenen")
@@ -2887,6 +2951,8 @@ class ChargerCoach:
             "later": _dagnaam(window.deadline, now) if window.missed is not None and window.deadline is not None else None,
             "manual": handmatig,
             "program": programma.key if programma is not None else "",
+            # De naam zoals de machine hem noemt, voor de kaart (v0.124.0).
+            "program_label": programma.label if programma is not None else "",
             "tip": "",
         }
         await self._async_noteer_programma(device, device_id, now)
@@ -3048,7 +3114,152 @@ class ChargerCoach:
             # dicht) voordat klep dicht weer vrijgegeven is; zie `_async_klep_volgen`.
             "klep_uitruimen": False,
             "klep_open_gezien": False,
+            # Zonder vermogenssensor, met een energieteller (Miele, v0.124.0):
+            # of er geteld wordt, de stand bij de vorige stap, en de ronden
+            # sinds die stap (`_teller_tellen`).
+            "teller": False,
+            "teller_waarde": None,
+            "teller_ronden": [],
+            # De duur die de machine per programma gaf zolang hij klaarstond.
+            "machine_duur": {},
         }
+
+    def _teller_tellen(
+        self, settings: dict[str, Any], sessie: dict[str, Any], now: datetime, waarde: float | None
+    ) -> None:
+        """Een beurt tellen op een energieteller, voor een machine zonder vermogenssensor (v0.124.0).
+
+        Miele geeft per programma een teller in kWh, in stappen van een tiende,
+        en geen watt. Elke ronde gaat in een buffer: hoe lang hij was, de prijs,
+        en wat de meter naar het net zag gaan. Zet de teller een stap, dan wordt
+        die stap over de ronden sinds de vorige verdeeld. Hoeveel daarvan zon
+        was volgt uit de meter over dezelfde ronden: wat er netto terugging plus
+        de stap is wat er zonder de machine terug was gegaan. Zo liggen de twee
+        altijd naast elkaar; een vermogen uit de teller loopt een stap achter, en
+        dat telde in het virtuele huis 's nachts zon. Een teller die terugvalt
+        begint een nieuw programma.
+        """
+        uren = max(0.0, (now - sessie["laatst"]).total_seconds()) / 3600.0
+        if not sessie.get("teller"):
+            # De eerste ronde van de beurt: alleen de stand van nu onthouden.
+            sessie["teller"] = True
+            sessie["teller_waarde"] = waarde
+            sessie["teller_ronden"] = []
+            return
+        if 0 < uren <= 0.5:
+            koop, terug = self._prijs_nu(settings, now)
+            koop_toen = None
+            vrij, gestart = sessie.get("vrijgegeven"), sessie.get("gestart")
+            if vrij is not None and gestart is not None:
+                toen = vrij + (now - gestart)
+                rij = price_now(sessie.get("prijzen") or [], toen)
+                koop_toen = rij["price"] if rij is not None else self._prijs_nu(settings, toen)[0]
+            sessie["teller_ronden"].append({
+                "uren": uren, "koop": koop, "terug": terug, "export_w": self._netto_export_w(settings),
+                "accu": self._uit_accu(settings), "koop_toen": koop_toen,
+            })
+        vorige = sessie.get("teller_waarde")
+        if waarde is None or (vorige is not None and abs(waarde - vorige) < 1e-9):
+            return
+        stap = waarde - vorige if vorige is not None and waarde >= vorige else waarde
+        sessie["teller_waarde"] = waarde
+        ronden = sessie.get("teller_ronden") or []
+        sessie["teller_ronden"] = []
+        if stap <= 0:
+            return
+        totaal = sum(r["uren"] for r in ronden)
+        if not ronden or totaal <= 0:
+            koop, terug = self._prijs_nu(settings, now)
+            ronden = [{"uren": 1.0, "koop": koop, "terug": terug, "export_w": None, "accu": self._uit_accu(settings),
+                       "koop_toen": koop}]
+            totaal = 1.0
+        # Wat er zonder de machine terug was gegaan, over dezelfde ronden.
+        if all(r["export_w"] is not None for r in ronden):
+            terug_kwh = sum(r["export_w"] * r["uren"] for r in ronden) / 1000.0
+            zon_deel = max(0.0, min(1.0, (terug_kwh + stap) / stap))
+        else:
+            zon_deel = 0.0
+        for r in ronden:
+            kwh = stap * r["uren"] / totaal
+            deel = zon_deel if r["terug"] is not None else 0.0
+            sessie["kwh"] += kwh
+            sessie["zon_kwh"] += kwh * deel
+            rest = kwh * (1.0 - deel)
+            accu = rest * r["accu"]
+            sessie["accu_kwh"] = float(sessie.get("accu_kwh") or 0.0) + accu
+            if r["koop"] is not None:
+                if not sessie.get("net_eur_onbekend"):
+                    sessie["net_eur"] = float(sessie.get("net_eur") or 0.0) + (rest - accu) * r["koop"]
+                sessie["betaald"] += kwh * ((1 - deel) * r["koop"] + deel * (r["terug"] or 0.0))
+                sessie["zon_winst"] += kwh * deel * max(0.0, r["koop"] - (r["terug"] or 0.0))
+            if sessie.get("vrijgegeven") is not None and sessie.get("gestart") is not None:
+                if r["koop_toen"] is None:
+                    sessie["maat_onbekend"] = True
+                else:
+                    sessie["maat"] += kwh * r["koop_toen"]
+
+    def _teller_afronden(
+        self, settings: dict[str, Any], device: dict[str, Any], sessie: dict[str, Any], now: datetime
+    ) -> None:
+        """Aan het eind: de laatste stap van de teller nog meetellen (v0.124.0).
+
+        Miele zet de teller soms pas bij "afgelopen" op zijn laatste stand, en
+        in die ronde draait hij al niet meer.
+        """
+        if sessie.get("teller") and device.get("energy_entity"):
+            self._teller_tellen(settings, sessie, now, _kwh(self.hass, device["energy_entity"]))
+
+    async def _async_machine_programma(
+        self, entities: dict[str, Any], ruw: str, sessie: dict[str, Any], now: datetime
+    ) -> Programma | None:
+        """Een programma dat de coach nog niet gemeten heeft, met de duur van de machine (v0.124.0).
+
+        De eigenaar op 15-10-2026 koos: plannen op de duur die de machine zelf
+        geeft, alsof het verbruik gelijk over die duur valt, zonder kWh. Die duur
+        is de resterende tijd zolang het programma klaarstaat; draait hij al,
+        dan wat er bij het klaarstaan stond, of anders gedraaid plus resterend.
+        Zonder duur is er niets te plannen, en dan None.
+        """
+        duur = sessie.setdefault("machine_duur", {})
+        eind = _eindtijd(self.hass, entities.get("remaining"), now)
+        minuten = (eind - now).total_seconds() / 60.0 if eind is not None else None
+        if minuten is not None and minuten > 0 and sessie.get("gestart") is None:
+            duur[ruw] = int(round(minuten))
+        elif minuten is not None and minuten > 0 and ruw not in duur:
+            duur[ruw] = int(round(minuten + (now - sessie["gestart"]).total_seconds() / 60.0))
+        if not duur.get(ruw):
+            return None
+        naam = await self._async_staat_naam(entities.get("program"), ruw)
+        return Programma(ruw, naam, duur[ruw], 1.0, 0, kwh_bekend=False)
+
+    async def _async_staat_naam(self, entity_id: str | None, waarde: str) -> str:
+        """Een stand zoals Home Assistant hem in de eigen taal noemt: "cottons" is "Katoen".
+
+        Uit de vertalingen van de integratie, via de `translation_key` van de
+        entiteit (v0.124.0). Lukt dat niet, dan de waarde zelf, netjes.
+        """
+        sleutel = (str(entity_id or ""), waarde)
+        if sleutel in self._staat_namen:
+            return self._staat_namen[sleutel]
+        naam = None
+        try:
+            from homeassistant.helpers import entity_registry as er
+            from homeassistant.helpers.translation import async_get_translations
+
+            rij = er.async_get(self.hass).async_get(entity_id) if entity_id else None
+            if rij is not None and rij.translation_key and rij.platform:
+                teksten = await async_get_translations(
+                    self.hass, self.hass.config.language, "entity", {rij.platform}
+                )
+                domein = str(entity_id).split(".")[0]
+                naam = teksten.get(
+                    f"component.{rij.platform}.entity.{domein}.{rij.translation_key}.state.{waarde}"
+                )
+        except Exception:  # noqa: BLE001 - zonder vertaling de waarde zelf
+            naam = None
+        naam = naam or (waarde.replace("_", " ").strip().capitalize() or waarde)
+        self._staat_namen[sleutel] = naam
+        return naam
 
     @staticmethod
     def _status_uit_vermogen(sessie: dict[str, Any], now: datetime, watts: float | None) -> str:
@@ -3258,6 +3469,7 @@ class ChargerCoach:
         programma = sessie.get("programma")
         gestart: datetime = sessie["gestart"]
         einde = einde or now
+        self._teller_afronden(settings, device, sessie, now)
         kwh = sessie["kwh"]
         betaald = sessie["betaald"]
         maat = None if sessie["maat_onbekend"] or sessie["vrijgegeven"] is None else sessie["maat"]
@@ -3939,14 +4151,20 @@ class ChargerCoach:
         # de coach nog een kwartier of hij echt stil blijft, en die stille
         # minuten horen niet in het profiel.
         punten = [(m, w) for m, w in (sessie.get("punten") or []) if m <= minuten + 0.5]
-        if minuten < 5 or sessie["kwh"] <= 0.02 or not punten:
+        # Op een energieteller (Miele, v0.124.0) is er geen verloop, alleen het
+        # totaal: dan zonder piek en zonder profiel, en rekent de coach het
+        # verbruik gelijk over de duur.
+        teller = bool(sessie.get("teller"))
+        if minuten < 5 or sessie["kwh"] <= 0.02 or not (punten or teller):
             return
         device_id = device.get("id", "")
         nieuw = {
             "minutes": int(round(minuten)),
             "kwh": round(sessie["kwh"], 3),
-            "peak_w": int(round(max(w for _, w in punten))),
-            "profile": list(profiel_van(punten)),
+            "peak_w": 0 if teller else int(round(max(w for _, w in punten))),
+            "profile": [] if teller else list(profiel_van(punten)),
+            # De naam, voor een programma dat niet in de tabel staan (v0.124.0).
+            "label": programma.label,
         }
         rows = [
             row for row in (settings.get("program_measured") or [])
@@ -3990,7 +4208,7 @@ class ChargerCoach:
         if self._besluit_genoteerd.get(device_id) == kern:
             return
         self._besluit_genoteerd[device_id] = kern
-        naam = device.get("name") or "De vaatwasser"
+        naam = _programma_naam(device)
         if st.get("rule") == "running":
             kop = "draait"
         elif st.get("charge"):

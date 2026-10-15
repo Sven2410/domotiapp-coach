@@ -1,7 +1,7 @@
 # DomotiApp Coach
 
 Een custom integration voor Home Assistant die apparaten in huis op het
-gunstigste moment laat draaien: de laadpaal, de thuisbatterij, de vaatwasser,
+gunstigste moment laat draaien: de laadpaal, de thuisbatterij, de vaatwasser, de wasmachine, de droger,
 de boiler en de airco, en houdt een smart plug aan als dat moet. Hij
 wordt via HACS verspreid, dus alleen `custom_components/` gaat mee naar de klant.
 
@@ -195,7 +195,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | een Alfen, of iets aan de paalsturing | `docs/alfen.md` |
 | onderverdeelkasten en groepen met een eigen zekering | `docs/groepen.md` |
 | de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, hoe de coach prijslijsten leest, de temperatuur met de melding en de ventilator, en Growatt (alleen uitlezen) | `docs/batterij.md` |
-| de vaatwasser: Home Connect, Home Connect Local, een domme vaatwasser, de eindtijd, na de klaar-tijd | `docs/vaatwasser.md` |
+| de vaatwasser: Home Connect, Home Connect Local, een domme vaatwasser, de eindtijd, na de klaar-tijd; en de wasmachine en de droger (Miele, tellen op een energieteller) | `docs/vaatwasser.md` |
 | de boiler | `docs/boiler.md` |
 | de airco: bijverwarmen of bijkoelen op zon (of op goedkope uren als de bewoner dat kiest), geen thermostaat, Mitsubishi Electric als merk, de bewoner die wint, de cloud die een minuut doet, en het contract met de airco-kaart | `docs/airco.md` |
 | Historie en het rapport, het verbruik per apparaat (zoals het energiedashboard), de tijdlijn in Historie, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, en de batterij op de kaart en in de pop-up | `docs/eerste-woning.md` |
@@ -228,7 +228,10 @@ dan de andere in dezelfde uitgave.
 - **De vaatwasserprogramma's**: `PROGRAMMAS` in planner.py en
   `DISHWASHER_PROGRAMS` in devices.js; test_rapport.mjs legt ze naast elkaar.
 - **De typen met een programma**: `PROGRAMMA_TYPES` in const.py en
-  `PROGRAM_TYPES`, `RELEASE_TYPES` in devices.js (`docs/paneel.md`).
+  `PROGRAM_TYPES`, `RELEASE_TYPES` in devices.js (`docs/paneel.md`); sinds v0.124.0 ook
+  wasmachine en droger, en test_rapport.mjs legt ze naast elkaar.
+- **De merken**: elke lijst in devices.js hoort in `ALL_BRANDS` van const.py, anders weigert de
+  websocket het opslaan (de airco tot v0.124.0); test_rapport.mjs controleert het.
 - **Salderen en de terugleverprijs**: `_salderen`, `_tariff`, `_prices` en
   `NETTING_ENDS` in coach.py en const.py tegenover `salderen`, `prijsOp` en
   `SALDEREN_TOT` in geld.js (`docs/eerste-woning.md`).

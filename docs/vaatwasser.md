@@ -453,3 +453,78 @@ entity_id van de startsensor blijft, want de unique_id blijft.
 De laadpaal en de thuisbatterij volgen in een eigen uitgave, met hetzelfde contract (sleutels
 staan in het bericht aan de lovelace-sessie van 11-10-2026 en komen hier bij die uitgave).
 Proef 143 in test_coach.py.
+
+## Wasmachine en droger, met Miele (v0.124.0)
+
+De eigenaar op 15-10-2026: "Ik wil dat de coach wel weer de apparaten aanmaakt: Wasmachine
+droger en vriezer." Aanleiding was een klantwoning met een Miele-wasmachine, -droger en
+-vriezer aan de integratie `miele` van Home Assistant (via de cloud). Voor de wasmachine en de
+droger koos hij "Starten, zoals vaatwasser", met de merken **Miele en Overig**. De vriezer komt
+in een eigen uitgave.
+
+Wasmachine en droger zijn dus weer types (`DEVICE_TYPES`, niet meer in `VERVALLEN_TYPES`) en
+programma-apparaten (`PROGRAMMA_TYPES` in const.py, `PROGRAM_TYPES` en `RELEASE_TYPES` in
+devices.js; test_rapport.mjs legt die twee naast elkaar). Alles van hierboven geldt: de
+vrijgave, het goedkoopste moment, de knop, de melding als hij niet gaat draaien, de klaar-tijd,
+zonder vrijgave deur dicht, het verslag, Beurten, de meting, en de kaarten van DomotiApp
+Lovelace (dezelfde entiteiten, `type` "wasmachine" of "droger").
+
+**De vrijgave heet "Mag meedraaien".** "Ingeruimd en dicht" is een vaatwasserwoord. De andere
+types hadden al "Mag meedraaien" (`releaseCopy`), en de kaart van DomotiApp Lovelace zegt
+hetzelfde (0.70.0). In de teksten van de coach staat dan "Wacht tot je hem vrijgeeft." en "Je
+koos nu starten" (`VRIJGAVE_WOORD`, `Apparaat.vrijgave` in planner.py). Zonder vrijgave zegt
+Apparaten "deur dicht" en "de schone was" (`vaatwasser` in voorkeur-velden.js).
+
+**Miele.** Wat de integratie geeft en wat de coach ermee doet:
+
+| veld | Miele | wat de coach ermee doet |
+|---|---|---|
+| Status | de sensor met de naam van de machine (`status`, een enum van 19) | vertaald naar de woorden van Home Connect (`MIELE_STATUS` in coach.py): `programmed` en `waiting_to_start` zijn "ready", `in_use` is "run", `pause` en `rinse_hold` zijn "pause", `program_ended` en `program_interrupted` zijn "finished" |
+| Programma | de sensor Programma (`program_id`), een sleutel als `cottons` | precies op de sleutel opgezocht, niet zoals `programma_van` (bij Miele is "denim" het eind van "gentle_denim") |
+| Resterende tijd | `remaining_time`, minuten | zolang het programma klaarstaat de duur waarmee hij plant; tijdens de beurt "klaar rond" |
+| Start op afstand | `mobile_start` | uit: niet drukken, en één keer zeggen dat het aan moet |
+| Deur | `door` | zoals bij de vaatwasser |
+| Starten, Stoppen | buttons `start`, `stop` | staan in Home Assistant standaard uit, de installateur zet ze aan; ze zijn er alleen als de machine een start aanneemt, en dan wacht de coach zoals bij Home Connect Local |
+| Energieteller | `energy_consumption`, kWh per programma, in stappen van een tiende | `energy_entity`; daar telt hij de beurt uit (zie hieronder) |
+
+Er is geen vermogenssensor, en geen tabel vooraf (`programOnMachine`, `energyCounter` in
+devices.js). Het programma kies je op de machine; de kaart toont welk (`programPicker` geeft
+`machine`) met de naam zoals Home Assistant hem vertaalt: het paneel via `formatEntityState`
+(`label` in state-feed.js), de coach via de vertalingen van de integratie
+(`_async_staat_naam`, "cottons" wordt "Katoen"), en anders de sleutel netjes.
+
+**Een programma dat de coach nog niet gemeten heeft** plant hij op de duur die de machine geeft,
+alsof het verbruik gelijk over die duur valt, zonder kWh: de keuze van de eigenaar op 15-10-2026
+uit drie (`_async_machine_programma`, `Programma.kwh_bekend`). In `programma_kosten` telt een
+stuk met verwacht overschot dan als zon en een stuk zonder als net; de uitkomst is een gewicht en
+geen bedrag, dus noemt de coach er geen (`plan_programma`). Na de beurt staat de meting in
+`program_measured` met de naam erbij (`label`), en komt hij de volgende keer in de tabel ook
+zonder rij (`met_metingen` met `ook_nieuw`); dan rekent hij met de kWh, gelijk over de duur,
+want een teller heeft geen verloop (geen piek, geen profiel). In Apparaten staan bij Miele alleen
+de gemeten programma's, per stuk te wissen (`machineProgramsHtml_`).
+
+**Tellen op een teller** (`_teller_tellen`). Elke ronde gaat in een buffer met de prijs en wat
+de meter naar het net zag gaan; zet de teller een stap, dan wordt die over de ronden sinds de
+vorige stap verdeeld, en het zondeel komt uit de meter over diezelfde ronden (netto terug plus
+de stap). Een eerste versie rekende een vermogen uit de teller en legde dat per minuut naast de
+meter; in het virtuele huis zei het verslag van een nachtelijke beurt toen "0,5 kWh zon", want
+dat vermogen loopt een stap achter. Bij "afgelopen" telt de laatste stap nog mee
+(`_teller_afronden`). Wat er onder een tiende overblijft ziet de coach niet: het verslag zegt
+wat de teller zegt.
+
+**Overig** is een machine op een meetstekker, zoals de domme vaatwasser: de coach zegt wanneer,
+de bewoner drukt. Zonder opgave van de fabrikant begint de tabel leeg (`tabel_van` met
+`standaard`, `defaultPrograms(device)`); de bewoner voegt de programma's toe die hij gebruikt.
+
+**Niet in het echt gezien.** Nog open bij Miele: of `remaining_time` de duur al geeft zolang het
+programma klaarstaat (zonder duur zegt de coach dat hij het programma niet kent), en wat de
+teller doet tussen twee programma's. De beheersessie stuurt een dump van een draaiend programma.
+
+Proef 160 in test_coach.py; scenario's `wasmachine-miele` en `wasmachine-miele-gemeten` in het
+virtuele huis (`Vaatwasser(miele=True)`: de standen, de sleutel, de duur, de teller in tienden,
+geen vermogenssensor); vijf proeven in test_rapport.mjs.
+
+**Ook in deze uitgave:** het airco-merk Mitsubishi Electric (v0.119.1) stond alleen in het
+paneel, en het schema van de websocket weigerde een airco met dat merk bij het opslaan.
+`AIRCO_BRANDS` staat nu in const.py, en test_rapport.mjs legt elke merkenlijst van het paneel
+naast const.py.

@@ -17,6 +17,11 @@ export const DEVICE_TYPES = [
   { id: "thuisbatterij", label: "Thuisbatterij", icon: "thuisbatterij" },
   { id: "boiler", label: "Boiler", icon: "boiler" },
   { id: "vaatwasser", label: "Vaatwasser", icon: "vaatwasser" },
+  // Terug sinds v0.124.0, nu de coach ze start zoals de vaatwasser. De eigenaar
+  // op 15-10-2026: "Ik wil dat de coach wel weer de apparaten aanmaakt:
+  // Wasmachine droger en vriezer."
+  { id: "wasmachine", label: "Wasmachine", icon: "wasmachine" },
+  { id: "droger", label: "Droger", icon: "droger" },
   { id: "airco", label: "Airco", icon: "airco" },
   // Sinds v0.120.0: wat aan een smart plug hangt, zie `PLUG_APPLIANCES`.
   { id: "smartplug", label: "Smart plug", icon: "plug" },
@@ -592,6 +597,98 @@ export const DISHWASHER_BRANDS = [
   },
 ];
 
+/**
+ * Wasmachines en drogers, per merk (v0.124.0).
+ *
+ * De eigenaar op 15-10-2026: "Starten, zoals vaatwasser", met Miele en Overig.
+ * Miele via de integratie van Home Assistant zelf (`miele`, via de cloud): het
+ * programma kies je op de machine, en die geeft de duur zolang het klaarstaat.
+ * Een vermogenssensor heeft hij niet; het verbruik telt de coach uit de
+ * energieteller per programma (`energy_entity`, `_teller_watts` in coach.py).
+ * Dezelfde lijst als `WASMACHINE_BRANDS` in const.py.
+ */
+const WASHER_BRANDS = (wat) => [
+  {
+    id: "miele",
+    label: "Miele",
+    note: `Voor Miele is dat de integratie Miele van Home Assistant zelf. De coach start de ${wat} alleen als "start op afstand" aan staat op de machine.`,
+    fields: [
+      {
+        key: "status",
+        label: "Status",
+        hint: `De sensor die zegt waar de ${wat} mee bezig is, bij Miele de sensor met de naam van de machine zelf.`,
+        filter: "all",
+        needed: true,
+      },
+      {
+        key: "program",
+        label: "Programma",
+        hint: "De sensor Programma. Het programma kies je op de machine; de coach leest het en plant op de duur die de machine geeft. Na een beurt rekent hij met wat hij gemeten heeft.",
+        filter: "all",
+        needed: true,
+      },
+      {
+        key: "remaining",
+        label: "Resterende tijd",
+        hint: "Hoe lang het programma nog duurt. Zolang het klaarstaat is dat de duur waarmee de coach plant.",
+        filter: "all",
+        format: "countdown",
+        needed: true,
+      },
+      {
+        key: "remote_start",
+        label: "Start op afstand",
+        hint: "Optioneel: de sensor Start op afstand. Staat hij uit, dan drukt de coach niet en zegt hij dat je het op de machine aan moet zetten.",
+        filter: "all",
+        values: { on: "Aan", off: "Uit" },
+      },
+      RELEASE_SWITCH_FIELD,
+      RELEASE_NOW_SWITCH_FIELD,
+      RELEASE_BUTTON_FIELD,
+      {
+        key: "door",
+        label: "Deur",
+        hint: "Moet hij eerst vrijgegeven worden, dan alleen om te laten zien. Hoeft dat niet, dan is deur dicht de vrijgave, en dan is dit veld nodig.",
+        filter: "all",
+        values: { off: "Dicht", on: "Open" },
+      },
+    ],
+    buttons: [
+      {
+        key: "start",
+        label: "Starten",
+        icon: "play",
+        needed: true,
+        hint: "De knop Starten van de machine. Die staat in Home Assistant standaard uit: zet hem eerst aan bij de entiteit. Hij is er alleen als de machine een start aanneemt; tot die tijd wacht de coach.",
+        filter: "all",
+      },
+      {
+        key: "stop",
+        label: "Stoppen",
+        icon: "stop",
+        hint: "Optioneel: de knop Stoppen, die een lopend programma afbreekt. Ook die staat standaard uit.",
+        note: "Breekt het lopende programma af.",
+        filter: "all",
+      },
+    ],
+    programField: "program",
+    // De machine noemt het programma en geeft de duur; er is geen tabel vooraf.
+    programOnMachine: true,
+    // Geen vermogenssensor: het verbruik komt uit de energieteller.
+    energyCounter: true,
+  },
+  {
+    id: "overig",
+    label: "Overig",
+    note: `Een ${wat} zonder koppeling, op een meetstekker: de coach zegt wanneer je hem aan moet zetten en meet wat hij verbruikt.`,
+    fields: [RELEASE_SWITCH_FIELD, RELEASE_NOW_SWITCH_FIELD, RELEASE_BUTTON_FIELD],
+    manual: true,
+  },
+];
+
+export const WASMACHINE_BRANDS = WASHER_BRANDS("wasmachine");
+export const DROGER_BRANDS = WASHER_BRANDS("droger");
+
 
 /**
  * Thuisbatterijen, per merk.
@@ -943,6 +1040,8 @@ export const AIRCO_BRANDS = [
 const BRANDS_BY_TYPE = new Map([
   ["laadpaal", CHARGER_BRANDS],
   ["vaatwasser", DISHWASHER_BRANDS],
+  ["wasmachine", WASMACHINE_BRANDS],
+  ["droger", DROGER_BRANDS],
   ["thuisbatterij", BATTERY_BRANDS],
   ["airco", AIRCO_BRANDS],
 ]);
@@ -1290,7 +1389,7 @@ export const carsFor = (device) =>
  * with no cable in it cannot start whatever anybody says. Asking for a second
  * yes on the dashboard was a step that only ever cost a walk to the phone.
  */
-export const RELEASE_TYPES = ["vaatwasser"];
+export const RELEASE_TYPES = ["vaatwasser", "wasmachine", "droger"];
 
 /**
  * Whether this device waits for the customer before the coach may start it.
@@ -1320,6 +1419,15 @@ export function releaseCopy(device) {
         label: "Ingeruimd en dicht",
         short: "Ingeruimd",
         hint: "Zet dit aan als de vaatwasser vol staat en de klep dicht zit. Anders zou de coach hem leeg kunnen laten spoelen.",
+      };
+    // Dezelfde knop als de rest, met wat er bij een wasmachine of droger bij
+    // hoort (v0.124.0). De kaart van DomotiApp Lovelace zegt ook "Mag draaien".
+    case "wasmachine":
+    case "droger":
+      return {
+        label: "Mag meedraaien",
+        short: "Mag draaien",
+        hint: "Zet dit aan als de machine gevuld is, het programma klaarstaat en starten op afstand aan staat.",
       };
     default:
       return {
@@ -1388,7 +1496,7 @@ export const canSteer = (device) =>
  * The length is what lets the panel work back from "done by" to "start by", so
  * this list is about the sum, not about permission to plan.
  */
-export const PROGRAM_TYPES = ["vaatwasser"];
+export const PROGRAM_TYPES = ["vaatwasser", "wasmachine", "droger"];
 
 /**
  * De programmatabel van één apparaat.
@@ -1399,8 +1507,9 @@ export const PROGRAM_TYPES = ["vaatwasser"];
  * De eigenaar op 06-09-2026: "ik wil dat kunnen aanpassen, wel moet hij dit als
  * uitgangspunt hebben."
  */
-export const defaultPrograms = () =>
-  DISHWASHER_PROGRAMS.map((program) => ({
+export const defaultPrograms = (device) =>
+  // Een wasmachine en een droger hebben geen opgave vooraf (v0.124.0).
+  (device && device.type !== "vaatwasser" ? [] : DISHWASHER_PROGRAMS).map((program) => ({
     key: program.key,
     label: program.label,
     minutes: program.minutes,
@@ -1452,7 +1561,7 @@ export function programOptions(device, feed) {
 export function programRows(device, options = []) {
   if (!options.length) return programsFor(device).map((row) => ({ ...row }));
   const eigen = new Map((device?.programs ?? []).map((row) => [row.key || programKey(row.label), row]));
-  const opgave = new Map(defaultPrograms().map((row) => [row.key, row]));
+  const opgave = new Map(defaultPrograms(device).map((row) => [row.key, row]));
   return options.map((option) => {
     const row = eigen.get(option.key) ?? opgave.get(option.key) ?? { minutes: 120, kwh: 1, peak_w: 2000 };
     return { key: option.key, label: option.label, minutes: row.minutes, kwh: row.kwh, peak_w: row.peak_w ?? 0 };
@@ -1463,7 +1572,7 @@ export const hasOwnPrograms = (device) =>
   Array.isArray(device?.programs) && device.programs.length > 0;
 
 export const programsFor = (device) =>
-  hasOwnPrograms(device) ? device.programs : defaultPrograms();
+  hasOwnPrograms(device) ? device.programs : defaultPrograms(device);
 
 /** Dezelfde sleutel als `sleutel_van` in planner.py: "Glas 40 °C" wordt "glas_40_c". */
 export const programKey = (label) =>
@@ -1501,7 +1610,21 @@ export function programOf(device, raw, settings) {
       return key && (heel.endsWith(key) || staart === key);
     }) ??
     table.find((program) => heel === squash(program.label) || staart === squash(program.label));
-  if (!found) return undefined;
+  if (!found) {
+    // Een Miele heeft geen tabel: dan wat de coach van dit programma mat, op de
+    // sleutel zoals de machine hem noemt (v0.124.0).
+    const meting = brandMeta(device)?.programOnMachine && settings
+      ? measuredFor(settings, device).get(String(raw))
+      : undefined;
+    if (!meting || !(Number(meting.minutes) > 0)) return undefined;
+    return {
+      key: String(raw),
+      label: meting.label || String(raw),
+      minutes: Number(meting.minutes),
+      kwh: Number(meting.kwh) || 0,
+      measured: true,
+    };
+  }
   const meting = settings ? measuredFor(settings, device).get(keyOf(found)) : undefined;
   if (!meting) return { ...found, key: keyOf(found) };
   return {
@@ -1524,6 +1647,8 @@ export function programOf(device, raw, settings) {
  */
 export function programPicker(device) {
   if (!PROGRAM_TYPES.includes(device?.type)) return undefined;
+  // Een Miele: het programma kies je op de machine; de kaart laat zien welk (v0.124.0).
+  if (brandMeta(device)?.programOnMachine) return { kind: "machine", entityId: device?.entities?.program };
   const chooser = programChooser(device);
   if (chooser) return { kind: "entity", entityId: chooser.entityId };
   // Een merk dat het programma van de machine leest maar zonder select om het

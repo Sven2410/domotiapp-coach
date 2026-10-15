@@ -2150,6 +2150,23 @@ class DacViewOverview extends DacElement {
     if (!picker) return;
 
     const select = this.$(`[data-program-select="${slot}"]`);
+    if (picker.kind === "machine") {
+      // Een Miele (v0.124.0): het programma staat op de machine; hier alleen welk.
+      const naam = this.coach_?.[device.id]?.program_label || this.feed_?.label?.(picker.entityId) || "";
+      const sleutel = `machine|${naam}`;
+      if (select.dataset.key !== sleutel) {
+        select.dataset.key = sleutel;
+        const el = document.createElement("option");
+        el.value = "";
+        // De naam komt van de machine, dus als tekst.
+        el.textContent = naam || "Nog geen programma gekozen";
+        select.replaceChildren(el);
+      }
+      select.disabled = true;
+      this.$(`[data-program-hint="${slot}"]`).textContent =
+        "Het programma kies je op de machine zelf. De coach leest het en start hem op het goedkoopste moment.";
+      return;
+    }
     if (picker.kind === "missing") {
       select.replaceChildren();
       select.disabled = true;
