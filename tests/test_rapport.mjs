@@ -3770,6 +3770,45 @@ proef("Apparaat staat uit in Meldingen: alleen met iets dat altijd aan moet, en 
   assert.ok(html.includes('id="stekker" hidden') && html.includes("Apparaat staat uit"), "het blok staat in Meldingen");
 });
 
+// De eigenaar op 15-10-2026: "bij het apparaat vaatwasser ook de optie kunnen aanzetten dat
+// hij nooit uit mag sommige vaatwassers hangen namelijk ook aan een smart plug om alles te meten."
+proef("vaatwasser: een eigen stekker en altijd aan, zodra het merk gekozen is (v0.122.0)", async () => {
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  const vw = { id: "vw", type: "vaatwasser", brand: "", name: "", entity: "sensor.vw_w", entities: {}, controllable: true, programs: [] };
+  el.draft_ = { devices: [vw] };
+  assert.ok(!el.brandHtml_(vw, 0).includes("Smart plug (optioneel)"), "zonder merk nog niet");
+  for (const merk of ["overig", "home_connect"]) {
+    vw.brand = merk;
+    const html = el.brandHtml_(vw, 0);
+    assert.ok(html.includes("Smart plug (optioneel)") && html.includes('data-entity-key="switch"'), `bij ${merk} het veld`);
+    assert.ok(html.includes("Dit apparaat moet altijd aan staan"), `bij ${merk} het vinkje`);
+  }
+  assert.equal(el.entityField_(vw, "switch")?.values?.off, "Uit", "de kiezer zegt Aan en Uit");
+  vw.brand = "overig";
+  vw.always_on = true;
+  assert.equal(el.plugMissing_(vw), true, "altijd aan zonder stekker: waarschuwing");
+  vw.entities = { switch: "switch.vw_stekker" };
+  assert.equal(el.plugMissing_(vw), false);
+  assert.match(el.summary_(vw).text, / · altijd aan$/);
+  // Een laadpaal heeft het niet.
+  assert.ok(!el.brandHtml_({ id: "p", type: "laadpaal", brand: "easee", entities: {} }, 0).includes("altijd aan staan"));
+
+  const staten = { "switch.vw_stekker": { state: "off", attributes: {} } };
+  const r = new LiveSource().sample({ get: (id) => staten[id] }, { sources: {}, devices: [vw] });
+  assert.equal(r.devices[0].details.find((d) => d.label === "Stekker")?.text, "Uit", "de kaart zegt het ook bij een vaatwasser");
+
+  const knoop = () => ({ hidden: false, textContent: "", attrs: {}, setAttribute(n, v) { this.attrs[n] = v; } });
+  const knopen = new Map(["#stekker", "#stekker-aan", "#stekker-wie"].map((k) => [k, knoop()]));
+  const m = Object.create(Meldingen.prototype);
+  m.$ = (kiezer) => knopen.get(kiezer) ?? null;
+  m.settings_ = { devices: [vw], notifications: {} };
+  m.paintStekker_();
+  assert.equal(knopen.get("#stekker").hidden, false, "Apparaat staat uit staat er ook voor alleen een vaatwasser");
+  assert.match(knopen.get("#stekker-wie").textContent, /^Geldt voor Vaatwasser\./);
+});
+
 // --- per apparaat in Historie (v0.121.0) -------------------------------------------
 //
 // De eigenaar op 15-10-2026: "ik wil ook het energieverbruik per apparaat kunnen zien in

@@ -14,8 +14,10 @@ import {
   CAR_BRANDS,
   CAR_PHASES,
   DEVICE_TYPES,
+  DISHWASHER_PLUG_FIELD,
   PLUG_APPLIANCES,
   PLUG_SWITCH_FIELD,
+  canAlwaysOn,
   PROGRAM_TYPES,
   hasOwnPrograms,
   isManualProgram,
@@ -361,7 +363,7 @@ class DacViewDevices extends DacEditorElement {
         ? `<p class="sub">Voor dit merk zijn de velden nog niet uitgewerkt. Het vermogen wordt wel meegenomen.</p>`
         : "";
 
-    return `${brandRow}${this.integrationHtml_(device, index)}${power}${extra}${this.buttonsHtml_(device, index)}${this.actionsHtml_(device, index)}${this.programsHtml_(device, index)}${note}`;
+    return `${brandRow}${this.integrationHtml_(device, index)}${power}${extra}${this.buttonsHtml_(device, index)}${this.actionsHtml_(device, index)}${this.programsHtml_(device, index)}${note}${this.dishwasherPlugHtml_(device, index)}`;
   }
 
   /**
@@ -400,6 +402,15 @@ class DacViewDevices extends DacEditorElement {
           <dac-entity-picker data-power data-index="${index}"></dac-entity-picker>
         </div>
         ${this.energyHtml_(device, index)}
+        ${this.alwaysOnHtml_(device, index)}`;
+  }
+
+  /**
+   * Het vinkje "altijd aan" met de waarschuwing eronder (v0.120.0), bij een smart
+   * plug en sinds v0.122.0 bij een vaatwasser.
+   */
+  alwaysOnHtml_(device, index) {
+    return `
         <label class="check" for="always-on-${index}">
           <input type="checkbox" id="always-on-${index}" data-field="always_on" data-index="${index}"
                  ${device.always_on ? "checked" : ""}>
@@ -414,15 +425,35 @@ class DacViewDevices extends DacEditorElement {
         </div>`;
   }
 
+  /**
+   * Een vaatwasser aan een smart plug (v0.122.0): de schakelaar van die stekker en
+   * het vinkje. De eigenaar op 15-10-2026: "bij het apparaat vaatwasser ook de optie
+   * kunnen aanzetten dat hij nooit uit mag."
+   */
+  dishwasherPlugHtml_(device, index) {
+    if (device.type !== "vaatwasser") return "";
+    return `
+        <div class="block">
+          <div class="block-title">Stekker</div>
+          <div class="row">
+            <label>${DISHWASHER_PLUG_FIELD.label}</label>
+            <dac-entity-picker data-entity-key="${DISHWASHER_PLUG_FIELD.key}" data-index="${index}"></dac-entity-picker>
+            <span class="sub">${DISHWASHER_PLUG_FIELD.hint}</span>
+          </div>
+          ${this.alwaysOnHtml_(device, index)}
+        </div>`;
+  }
+
   /** Wat er over een entiteitveld bekend is: van het merk, of de schakelaar van een smart plug. */
   entityField_(device, key) {
-    const velden = isSmartPlug(device) ? [PLUG_SWITCH_FIELD] : brandEntityFields(device);
-    return velden.find((field) => field.key === key);
+    if (isSmartPlug(device)) return key === PLUG_SWITCH_FIELD.key ? PLUG_SWITCH_FIELD : undefined;
+    if (device?.type === "vaatwasser" && key === DISHWASHER_PLUG_FIELD.key) return DISHWASHER_PLUG_FIELD;
+    return brandEntityFields(device).find((field) => field.key === key);
   }
 
   /** Altijd aan zonder schakelaar: dan valt er niets aan te houden. */
   plugMissing_(device) {
-    return isSmartPlug(device) && Boolean(device.always_on) && !device.entities?.switch;
+    return canAlwaysOn(device) && Boolean(device.always_on) && !device.entities?.switch;
   }
 
   /** De energieteller; bij een smart plug in zijn eigen blok, anders onder de naam. */
@@ -902,7 +933,7 @@ class DacViewDevices extends DacEditorElement {
     const what = device.entity || "geen vermogenssensor";
     const brand = brandMeta(device)?.label;
     const prefix = brand ?? ((device.name ?? "").trim() ? kindLabel(device) : "");
-    const altijd = isSmartPlug(device) && device.always_on ? " · altijd aan" : "";
+    const altijd = canAlwaysOn(device) && device.always_on ? " · altijd aan" : "";
     return {
       text: `${prefix ? `${prefix} · ${what}` : what}${altijd}`,
       warn: false,

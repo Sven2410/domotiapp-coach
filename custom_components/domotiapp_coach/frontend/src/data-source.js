@@ -16,7 +16,7 @@
  * export (naar het net).
  */
 
-import { brandFields, carsFor, isSmartPlug, programOf, valueLabel } from "./devices.js";
+import { brandFields, canAlwaysOn, carsFor, programOf, valueLabel } from "./devices.js";
 import { countdown, duration, toKwh, toWatts } from "./format.js";
 
 const PHASES = ["l1", "l2", "l3"];
@@ -773,9 +773,10 @@ function deviceDetails(feed, device, settings) {
     }
   }
 
-  // Een smart plug (v0.120.0): of de stekker aan staat. Dat is wat "altijd aan"
-  // bewaakt, en een stekker die uit staat meet ook niets.
-  if (isSmartPlug(device) && device.entities?.switch) {
+  // Een smart plug (v0.120.0), of een vaatwasser aan een smart plug (v0.122.0):
+  // of de stekker aan staat. Dat is wat "altijd aan" bewaakt, en een stekker
+  // die uit staat meet ook niets.
+  if (canAlwaysOn(device) && device.entities?.switch) {
     const stand = feed.get(device.entities.switch);
     const tekst = usable(stand) ? valueLabel({ on: "Aan", off: "Uit" }, String(stand.state)) : null;
     rows.push({ label: "Stekker", text: tekst ?? "—" });
