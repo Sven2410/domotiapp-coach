@@ -16,7 +16,7 @@
  * export (naar het net).
  */
 
-import { brandFields, carsFor, programOf, valueLabel } from "./devices.js";
+import { brandFields, carsFor, isSmartPlug, programOf, valueLabel } from "./devices.js";
 import { countdown, duration, toKwh, toWatts } from "./format.js";
 
 const PHASES = ["l1", "l2", "l3"];
@@ -771,6 +771,14 @@ function deviceDetails(feed, device, settings) {
         text: radius ? radiusTekst(procent, radius) : accuTekst(procent, Number(car.capacity_kwh)),
       });
     }
+  }
+
+  // Een smart plug (v0.120.0): of de stekker aan staat. Dat is wat "altijd aan"
+  // bewaakt, en een stekker die uit staat meet ook niets.
+  if (isSmartPlug(device) && device.entities?.switch) {
+    const stand = feed.get(device.entities.switch);
+    const tekst = usable(stand) ? valueLabel({ on: "Aan", off: "Uit" }, String(stand.state)) : null;
+    rows.push({ label: "Stekker", text: tekst ?? "—" });
   }
 
   // Een thuisbatterij: wat de coach zelf bijhoudt. Het rendement is een meting

@@ -35,6 +35,7 @@ from .const import (
     GRID_MODE_SPLIT,
     PRICE_INTERVAL_HOUR,
     PRICE_INTERVAL_QUARTER,
+    STEKKER_APPARATEN,
 )
 from .ontvangers import SOORTEN, huishouden_bijwerken, nieuwe_persoon, zet_eigen_soorten
 from .entiteit import async_accustand
@@ -299,6 +300,12 @@ _DEVICE = _schema(
         vol.Optional("battery", default=dict): _BATTERY,
         # En over een airco (v0.119.0).
         vol.Optional("airco", default=dict): _AIRCO,
+        # Wat er aan een smart plug hangt (v0.120.0), uit `STEKKER_APPARATEN`,
+        # of "" zolang er niets gekozen is.
+        vol.Optional("appliance", default=""): vol.In([*STEKKER_APPARATEN, ""]),
+        # Of de coach een smart plug aan houdt (v0.120.0), met de schakelaar in
+        # `entities.switch`. Zie `_async_altijd_aan` in coach.py.
+        vol.Optional("always_on", default=False): bool,
         # De groep waar dit apparaat aan hangt (`installation.circuits`), of ""
         # voor de hoofdaansluiting.
         vol.Optional("circuit", default=""): str,
@@ -408,6 +415,8 @@ _NOTIFICATIONS = _schema(
                 ),
             }
         ),
+        # Een apparaat dat altijd aan moet staan (v0.120.0).
+        vol.Optional("always_on_alert"): _schema({vol.Optional("enabled"): bool}),
     }
 )
 

@@ -8891,6 +8891,162 @@ controle("na een herstart: nog steeds van de coach, en niet van de bewoner",
          a156d.get("stand") == "zon" and coach156d._airco["dev-airco"]["aan_sinds"] == dt.datetime(2026, 7, 14, 12, 30),
          f"{a156d}")
 
+print("=== 157. een smart plug die altijd aan moet staan (v0.120.0) ===")
+# De eigenaar op 15-10-2026: "een belangrijke optie, dit apparaat moet altijd aan staan.
+# Als die aan staat moet de coach dat blijven controlleren en als die door wat voor een
+# reden dan uit gegaan is moet de coach hem weer aan zetten. Lukt dat niet wil ik na 2 min
+# een melding ontvangen. Pas de melding sturen als je dat hebt ingesteld in meldingen."
+VRIEZER = {"id": "dev-vriezer", "type": "smartplug", "appliance": "vriezer", "name": "",
+           "entity": "sensor.vriezer_w", "energy_entity": "sensor.vriezer_kwh", "always_on": True,
+           "controllable": False, "entities": {"switch": "switch.vriezer"}}
+inst157 = instellingen(devices=[LAADPAAL, VRIEZER])
+inst157["notifications"] = {**inst157["notifications"], "always_on_alert": {"enabled": True}}
+hass157, _, coach157 = bouw({**huis(), "switch.vriezer": "on", "sensor.vriezer_w": "85"}, inst157)
+T157 = dt.datetime(2026, 10, 15, 14, 0)
+
+
+def wacht157(minuten, level="steer", inst=None):
+    """Een ronde van de bewaking: (meldingen naar de telefoon, schakelopdrachten)."""
+    hass157.services.verstuurd.clear()
+    asyncio.run(coach157._async_altijd_aan(inst or inst157, T157 + dt.timedelta(minutes=minuten), level))
+    telefoon = [d[2]["message"] for d in hass157.services.verstuurd if d[0] == "notify"]
+    schakel = [f"{d[1]} {d[2]['entity_id']}" for d in hass157.services.verstuurd if d[0] == "switch"]
+    return telefoon, schakel
+
+
+def geschiedenis157():
+    return [(g["kind"], g["message"]) for g in asyncio.run(coachmod.async_get_meldingen(hass157).async_list())]
+
+
+controle("aan: de coach doet niets", wacht157(0) == ([], []), "")
+hass157.states.zet("switch.vriezer", "off")
+eerste157 = wacht157(1)
+controle("uit: meteen weer aan, en nog geen bericht", eerste157 == ([], ["turn_on switch.vriezer"]), f"{eerste157}")
+controle("na een minuut nog een poging, nog steeds geen bericht",
+         wacht157(2) == ([], ["turn_on switch.vriezer"]), "")
+bericht157, poging157 = wacht157(3)
+print(f"  na twee minuten uit: {bericht157}")
+controle("na twee minuten één bericht, kort, met het lidwoord",
+         bericht157 == ["De vriezer staat al 2 minuten uit en de coach krijgt hem niet aan."], f"{bericht157}")
+controle("zonder entiteit-id", "switch." not in bericht157[0], "")
+controle("als kritiek", ("kritiek", bericht157[0]) in geschiedenis157(), f"{geschiedenis157()[-2:]}")
+controle("de coach blijft het proberen", poging157 == ["turn_on switch.vriezer"], f"{poging157}")
+controle("en meldt het niet nog een keer", wacht157(10)[0] == [], "")
+hass157.states.zet("switch.vriezer", "on")
+terug157 = wacht157(11)
+controle("weer aan: niets naar de telefoon", terug157 == ([], []), f"{terug157}")
+controle("wel in de geschiedenis", ("melding", "De vriezer staat weer aan.") in geschiedenis157(), f"{geschiedenis157()[-2:]}")
+
+# Gaat hij uit en krijgt de coach hem weer aan, dan staat dat alleen in de geschiedenis.
+hass157.states.zet("switch.vriezer", "off")
+controle("weer uit: de coach zet hem aan", wacht157(20)[1] == ["turn_on switch.vriezer"], "")
+hass157.states.zet("switch.vriezer", "on")
+gelukt157 = wacht157(20.1)
+controle("dat lukte: geen bericht naar de telefoon", gelukt157 == ([], []), f"{gelukt157}")
+controle("wel in de geschiedenis",
+         ("melding", "De vriezer stond uit; de coach heeft hem weer aangezet.") in geschiedenis157(), f"{geschiedenis157()[-2:]}")
+controle("en geen bericht na twee minuten", wacht157(23) == ([], []), "")
+
+# Een stekker die niets zegt is van het netwerk af: aanzetten kan niet.
+hass157.states.zet("switch.vriezer", "unavailable")
+controle("niet bereikbaar: de coach probeert niets", wacht157(30) == ([], []), "")
+weg157 = wacht157(32)
+controle("na twee minuten zegt het bericht dat hij niet bereikbaar is",
+         weg157 == (["De vriezer is al 2 minuten niet bereikbaar; de coach weet niet of hij aan staat."], []), f"{weg157}")
+hass157.states.zet("switch.vriezer", "on")
+wacht157(33)
+
+# Zonder de melding in Meldingen: niets naar de telefoon, wel in de geschiedenis.
+stil157 = {**inst157, "notifications": {**inst157["notifications"], "always_on_alert": {"enabled": False}}}
+hass157.states.zet("switch.vriezer", "off")
+wacht157(40, inst=stil157)
+stilbericht157 = wacht157(42, inst=stil157)
+controle("melding uit in Meldingen: niets naar de telefoon", stilbericht157[0] == [], f"{stilbericht157}")
+controle("wel als kritiek in de geschiedenis",
+         ("kritiek", "De vriezer staat al 2 minuten uit en de coach krijgt hem niet aan.") in geschiedenis157()[-1:],
+         f"{geschiedenis157()[-1:]}")
+hass157.states.zet("switch.vriezer", "on")
+wacht157(43, inst=stil157)
+
+# Bij Alleen uitlezen en Adviseren raakt de coach hem niet aan, maar meldt hij het wel.
+for stap157, niveau in enumerate(("read", "advise")):
+    t = 50 + stap157 * 10
+    hass157.states.zet("switch.vriezer", "off")
+    controle(f"op {niveau} zet de coach hem niet aan", wacht157(t, level=niveau)[1] == [], "")
+    controle(f"op {niveau} wel een bericht na twee minuten",
+             wacht157(t + 2, level=niveau) == (["De vriezer staat al 2 minuten uit."], []), "")
+    hass157.states.zet("switch.vriezer", "on")
+    wacht157(t + 3, level=niveau)
+hass157.states.zet("switch.vriezer", "off")
+controle("op propose wel: wie altijd aan aanvinkt zei ja", wacht157(80, level="propose")[1] == ["turn_on switch.vriezer"], "")
+hass157.states.zet("switch.vriezer", "on")
+wacht157(81)
+
+# Zijn eigen naam, en een apparaat met "het".
+for apparaat, naam, verwacht in (("aquarium", "", "Het aquarium"), ("vriezer", "vriezer garage", "Vriezer garage"),
+                                 ("overig", "", "De smart plug"), ("kachel", "", "De elektrische kachel")):
+    controle(f"{apparaat} {naam!r} heet {verwacht!r}",
+             coachmod._stekker_naam({**VRIEZER, "appliance": apparaat, "name": naam}) == verwacht,
+             coachmod._stekker_naam({**VRIEZER, "appliance": apparaat, "name": naam}))
+
+# Zonder het vinkje, of zonder schakelaar, laat de coach hem met rust.
+for wat, apparaat in (("zonder altijd aan", {**VRIEZER, "always_on": False}),
+                      ("zonder schakelaar", {**VRIEZER, "entities": {}})):
+    hass157.states.zet("switch.vriezer", "off")
+    los157 = {**inst157, "devices": [LAADPAAL, apparaat]}
+    wacht157(90, inst=los157)
+    controle(f"{wat}: niets", wacht157(95, inst=los157) == ([], []), "")
+hass157.states.zet("switch.vriezer", "on")
+wacht157(96)
+
+# Geen tweede melding over dezelfde stekker: zijn vermogen hoort dan niet bij de sensorwacht.
+controle("met de melding aan valt zijn vermogen buiten de sensorwacht",
+         "sensor.vriezer_w" not in coach157._sensoren(inst157), "")
+controle("met de melding uit blijft de sensorwacht hem zeggen",
+         "sensor.vriezer_w" in coach157._sensoren(stil157), "")
+controle("en zonder altijd aan ook",
+         "sensor.vriezer_w" in coach157._sensoren({**inst157, "devices": [LAADPAAL, {**VRIEZER, "always_on": False}]}), "")
+
+
+# In een gewone ronde: de coach luistert naar de schakelaar en zet hem aan.
+async def ronde157(nu):
+    hass157.services.verstuurd.clear()
+    await hass157.afmaken()
+    await coach157._round(nu)
+    await hass157.afmaken()
+    return [f"{d[1]} {d[2]['entity_id']}" for d in hass157.services.verstuurd if d[0] == "switch"]
+
+hass157.states.zet("switch.vriezer", "off")
+volle157 = asyncio.run(ronde157(T157 + dt.timedelta(minutes=120)))
+controle("in een ronde gaat hij weer aan", volle157 == ["turn_on switch.vriezer"], f"{volle157}")
+controle("en de coach luistert naar de schakelaar, zodat dat binnen een seconde is",
+         "switch.vriezer" in coach157._watched, f"{sorted(coach157._watched)}")
+controle("en er staat een klok die na twee minuten nog een keer kijkt", "dev-vriezer" in coach157._stekker_klok, "")
+hass157.states.zet("switch.vriezer", "on")
+asyncio.run(ronde157(T157 + dt.timedelta(minutes=121)))
+controle("weer aan: de klok is weg", "dev-vriezer" not in coach157._stekker_klok, "")
+asyncio.run(coach157._async_altijd_aan({**inst157, "devices": [LAADPAAL]}, T157 + dt.timedelta(minutes=122), "steer"))
+controle("een stekker die weg is laat niets achter",
+         not coach157._stekker_uit and not coach157._stekker_gemeld and not coach157._stekker_gezet, "")
+
+# Het schema laat velden die het niet kent vallen (`_schema` in websocket.py), dus de
+# twee nieuwe moeten erin staan; websocket.py laadt hier niet, dus de bron.
+bron157 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
+           / "websocket.py").read_text(encoding="utf-8")
+controle("het schema kent wat eraan hangt, uit de lijst",
+         'vol.Optional("appliance", default=""): vol.In([*STEKKER_APPARATEN, ""])' in bron157, "")
+controle("het schema kent altijd aan", 'vol.Optional("always_on", default=False): bool' in bron157, "")
+controle("en de melding in Meldingen", 'vol.Optional("always_on_alert"): _schema({vol.Optional("enabled"): bool})' in bron157, "")
+controle("smart plug is een type", "smartplug" in coachmod.DEVICE_TYPES if hasattr(coachmod, "DEVICE_TYPES")
+         else "smartplug" in storage.DEVICE_TYPES, "")
+controle("de melding in Meldingen staat standaard uit",
+         storage.DEFAULT_SETTINGS["notifications"]["always_on_alert"] == {"enabled": False}, "")
+geladen157 = storage._prune(storage.DEFAULT_SETTINGS, storage._migrate({
+    "devices": [VRIEZER], "notifications": {"always_on_alert": {"enabled": True}}}))
+controle("wat er bewaard is overleeft het laden",
+         geladen157["devices"][0]["appliance"] == "vriezer" and geladen157["devices"][0]["always_on"] is True
+         and geladen157["notifications"]["always_on_alert"] == {"enabled": True}, f"{geladen157['devices'][0]}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

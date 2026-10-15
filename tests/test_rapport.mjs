@@ -3643,6 +3643,133 @@ proef("Beurten: de uitleg zegt eerst wat een beurt is", () => {
   assert.match(vak["#saved-note"].textContent, /^Een beurt is één keer dat de coach een apparaat liet draaien/);
 });
 
+// --- de smart plug (v0.120.0) ----------------------------------------------------
+//
+// De eigenaar op 15-10-2026: "Ik wil bij apparaten toevoegen dan de optie smart plug. En
+// dan als ik die heb gekozen een hele lijst met apparaten zoals wasmachine, oven vriezer
+// etc etc. Allemaal met de naam en icon. Dan de optie energieteller, vermogensteller en
+// een belangrijke optie, dit apparaat moet altijd aan staan."
+
+proef("smart plug: de lijst in het paneel is dezelfde als in const.py, en elk apparaat heeft een eigen icoon", async () => {
+  const { PLUG_APPLIANCES, DEVICE_TYPES } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  const { icons } = await import("../custom_components/domotiapp_coach/frontend/src/icons.js");
+  assert.ok(DEVICE_TYPES.some((t) => t.id === "smartplug" && t.label === "Smart plug"), "een type");
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/const.py", import.meta.url), "utf-8")
+    .replace(/\r/g, "");
+  const blok = bron.slice(bron.indexOf("STEKKER_APPARATEN: Final = {"), bron.indexOf("}", bron.indexOf("STEKKER_APPARATEN: Final = {")));
+  const python = new Map([...blok.matchAll(/"([a-z_]+)": \("([^"]+)", "(de|het)"\)/g)].map((m) => [m[1], m[2]]));
+  assert.equal(python.size, PLUG_APPLIANCES.length, "evenveel apparaten");
+  for (const a of PLUG_APPLIANCES) {
+    assert.ok(python.has(a.id), `${a.id} staat ook in const.py`);
+    if (a.id !== "overig") assert.equal(python.get(a.id), a.label, a.id);
+    assert.ok(icons[a.icon], `${a.id} heeft een icoon`);
+  }
+  assert.ok(PLUG_APPLIANCES.length >= 20, "een hele lijst");
+  assert.equal(PLUG_APPLIANCES.at(-1).id, "overig", "Iets anders onderaan");
+  const namen = PLUG_APPLIANCES.slice(0, -1).map((a) => a.label);
+  assert.deepEqual(namen, [...namen].sort((a, b) => a.localeCompare(b, "nl")), "de rest op naam");
+  const eigen = PLUG_APPLIANCES.filter((a) => a.id !== "overig" && a.id !== "vaatwasser").map((a) => a.icon);
+  assert.equal(new Set(eigen).size, eigen.length, "geen twee apparaten met hetzelfde icoon");
+});
+
+proef("smart plug: de naam en het icoon komen van wat eraan hangt, ook in de tip", async () => {
+  const { deviceLabel, deviceLabels, deviceIcon, kindLabel, apparatenZin, canSteer } =
+    await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  const vriezer = { id: "v", type: "smartplug", appliance: "vriezer", name: "" };
+  assert.equal(deviceLabel(vriezer), "Vriezer");
+  assert.equal(deviceIcon(vriezer), "vriezer");
+  assert.equal(deviceLabel({ ...vriezer, name: "Vriezer garage" }), "Vriezer garage", "een eigen naam wint");
+  assert.equal(deviceLabel({ ...vriezer, appliance: "overig" }), "Smart plug", "Iets anders heet Smart plug");
+  assert.equal(deviceIcon({ ...vriezer, appliance: "overig" }), "plug");
+  assert.equal(deviceLabel({ ...vriezer, appliance: "" }), "Smart plug", "nog niets gekozen");
+  assert.equal(deviceIcon({ ...vriezer, appliance: "" }), "plug");
+  assert.equal(kindLabel({ type: "laadpaal" }), "Laadpaal", "een ander type blijft zoals het was");
+  assert.equal(deviceIcon({ type: "laadpaal" }), "laadpaal");
+  assert.deepEqual(deviceLabels([vriezer, { ...vriezer, id: "w" }]), ["Vriezer 1", "Vriezer 2"], "twee vriezers krijgen een nummer");
+  // Een smart plug telt niet als stuurbaar, dus de tip mag hem noemen.
+  const was = { id: "w", type: "smartplug", appliance: "wasmachine", name: "", controllable: true, entities: { switch: "switch.was" } };
+  assert.equal(canSteer(was), false);
+  assert.match(apparatenZin([was]), /wasmachine/, "met het woord van wat eraan hangt, klein midden in een zin");
+  assert.equal(apparatenZin([{ ...was, controllable: false }]), "", "zonder het vinkje niet");
+});
+
+proef("smart plug: de kaart en de pop-up zeggen of de stekker aan staat", () => {
+  const plug = { id: "v", type: "smartplug", appliance: "vriezer", entity: "sensor.v_w", entities: { switch: "switch.v" } };
+  const rij = (stand) => {
+    const staten = { "switch.v": stand === undefined ? undefined : { state: stand, attributes: {} },
+                     "sensor.v_w": { state: "85", attributes: { unit_of_measurement: "W" } } };
+    const r = new LiveSource().sample({ get: (id) => staten[id] }, { sources: {}, devices: [plug] });
+    return r.devices[0].details.find((d) => d.label === "Stekker")?.text;
+  };
+  assert.equal(rij("on"), "Aan");
+  assert.equal(rij("off"), "Uit");
+  assert.equal(rij("unavailable"), "—");
+  const zonder = new LiveSource().sample({ get: () => undefined }, { sources: {}, devices: [{ ...plug, entities: {} }] });
+  assert.equal(zonder.devices[0].details.length, 0, "zonder schakelaar geen regel");
+});
+
+proef("smart plug in Apparaten: eerst wat eraan hangt, dan schakelaar, vermogen, teller en altijd aan", async () => {
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  const plug = { id: "v", type: "smartplug", appliance: "", name: "", entity: "", entities: {}, controllable: false };
+  el.draft_ = { devices: [plug] };
+  let html = el.brandHtml_(plug, 0);
+  assert.ok(html.includes('data-field="appliance"') && html.includes("Kies wat eraan hangt"), "eerst de keuze");
+  assert.ok(html.includes('<option value="vriezer">Vriezer</option>') && html.includes('<option value="overig">Iets anders</option>'));
+  assert.ok(!html.includes("data-power") && !html.includes("always_on"), "verder nog niets");
+  assert.equal(el.controlHtml_(plug, 0), "", "en geen vinkje zolang er niets gekozen is");
+  assert.deepEqual(el.summary_(plug), { text: "nog niet gekozen wat eraan hangt", warn: true });
+
+  plug.appliance = "vriezer";
+  html = el.brandHtml_(plug, 0);
+  const plek = (stuk) => html.indexOf(stuk);
+  assert.ok(plek('data-field="appliance"') < plek('data-entity-key="switch"'), "apparaat, dan schakelaar");
+  assert.ok(plek('data-entity-key="switch"') < plek("data-power"), "schakelaar, dan vermogen");
+  assert.ok(plek("data-power") < plek("data-energy"), "vermogen, dan energieteller");
+  assert.ok(plek("data-energy") < plek('data-field="always_on"'), "en dan altijd aan");
+  assert.ok(html.includes("Dit apparaat moet altijd aan staan"));
+  assert.ok(html.includes("na 2 minuten") && html.includes("Meldingen"), "de uitleg zegt wanneer er een bericht komt, en waar");
+  assert.ok(/data-plug-missing="0"[^>]*>/.test(html) && /class="notice" hidden data-plug-missing/.test(html),
+    "geen waarschuwing zolang altijd aan uit staat");
+  assert.ok(el.controlHtml_(plug, 0).includes("De coach mag dit apparaat noemen"), "het vinkje om hem te noemen blijft");
+  assert.equal(el.entityField_(plug, "switch")?.values?.on, "Aan", "de kiezer zegt Aan en Uit");
+
+  plug.always_on = true;
+  assert.ok(/class="notice" data-plug-missing/.test(el.brandHtml_(plug, 0)), "altijd aan zonder schakelaar: waarschuwing");
+  assert.deepEqual(el.summary_(plug), { text: "altijd aan, maar zonder schakelaar", warn: true });
+  plug.entities = { switch: "switch.v" };
+  plug.entity = "sensor.v_w";
+  assert.deepEqual(el.summary_(plug), { text: "sensor.v_w · altijd aan", warn: false });
+  plug.name = "Vriezer garage";
+  assert.deepEqual(el.summary_(plug), { text: "Vriezer · sensor.v_w · altijd aan", warn: false }, "met een eigen naam het soortwoord ervoor");
+
+  // Een vaatwasser op een stekker: zeggen waar hij moet als de coach hem moet plannen.
+  assert.match(el.brandHtml_({ ...plug, appliance: "vaatwasser" }, 0), /voeg hem dan toe als Vaatwasser/);
+});
+
+proef("Apparaat staat uit in Meldingen: alleen met iets dat altijd aan moet, en standaard uit", () => {
+  const knoop = () => ({ hidden: false, textContent: "", attrs: {}, setAttribute(n, v) { this.attrs[n] = v; },
+    getAttribute(n) { return this.attrs[n]; } });
+  const knopen = new Map(["#stekker", "#stekker-aan", "#stekker-wie"].map((k) => [k, knoop()]));
+  const el = Object.create(Meldingen.prototype);
+  el.$ = (kiezer) => knopen.get(kiezer) ?? null;
+  const vriezer = { id: "v", type: "smartplug", appliance: "vriezer", always_on: true };
+  el.settings_ = { devices: [{ ...vriezer, always_on: false }], notifications: {} };
+  el.paintStekker_();
+  assert.equal(knopen.get("#stekker").hidden, true, "zonder altijd aan geen blok");
+  el.settings_ = { devices: [vriezer, { id: "a", type: "smartplug", appliance: "aquarium", always_on: true }], notifications: {} };
+  el.paintStekker_();
+  assert.equal(knopen.get("#stekker").hidden, false);
+  assert.equal(knopen.get("#stekker-aan").attrs["aria-checked"], "false", "standaard uit");
+  assert.match(knopen.get("#stekker-wie").textContent, /^Geldt voor Vriezer en Aquarium\./);
+  el.settings_.notifications = { always_on_alert: { enabled: true } };
+  el.paintStekker_();
+  assert.equal(knopen.get("#stekker-aan").attrs["aria-checked"], "true");
+  const html = Object.create(Meldingen.prototype).render();
+  assert.ok(html.includes('id="stekker" hidden') && html.includes("Apparaat staat uit"), "het blok staat in Meldingen");
+});
+
 for (const [naam, fn] of proeven) {
   try {
     await fn();

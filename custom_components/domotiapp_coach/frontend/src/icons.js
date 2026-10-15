@@ -144,6 +144,144 @@ export const icons = {
      <circle cx="15.6" cy="12" r="1"/>`
   ),
 
+  // ---- wat er aan een smart plug hangt (v0.120.0) ----------------------------
+  // Een stip is een pad van nul lang: de ronde lijnkap maakt er een rondje van
+  // in dezelfde dikte als de rest.
+
+  wasmachine: svg(
+    `<rect x="4" y="2.8" width="16" height="18.4" rx="2.2"/>
+     <path d="M4 7.4h16M7 5.1h2.4M16.4 5.1h.01"/>
+     <circle cx="12" cy="14.2" r="4.4"/>
+     <path d="M9.4 14.8c1-.8 1.8-.8 2.6 0s1.6.8 2.6 0"/>`
+  ),
+
+  droger: svg(
+    `<rect x="4" y="2.8" width="16" height="18.4" rx="2.2"/>
+     <path d="M4 7.4h16M7 5.1h2.4M16.4 5.1h.01"/>
+     <circle cx="12" cy="14.2" r="4.4"/>
+     <circle cx="12" cy="14.2" r="1.6"/>`
+  ),
+
+  koelkast: svg(
+    `<rect x="5.4" y="2.6" width="13.2" height="18.8" rx="2"/>
+     <path d="M5.4 9.6h13.2M8.4 5.2v2M8.4 12.2v3.2"/>`
+  ),
+
+  vriezer: svg(
+    `<rect x="5.4" y="2.6" width="13.2" height="18.8" rx="2"/>
+     <path d="M8.4 5.2v2.2"/>
+     <path d="M12 10.4v7.4M8.8 12.25l6.4 3.7M8.8 15.95l6.4-3.7"/>`
+  ),
+
+  oven: svg(
+    `<rect x="3.4" y="3.6" width="17.2" height="16.8" rx="2"/>
+     <path d="M3.4 8.4h17.2M6.6 6h.01M9.4 6h.01M14.4 6h3"/>
+     <rect x="6.6" y="11.2" width="10.8" height="6.2" rx="1"/>`
+  ),
+
+  magnetron: svg(
+    `<rect x="2.6" y="5" width="18.8" height="14" rx="2"/>
+     <rect x="5.2" y="7.8" width="9.4" height="8.4" rx="1"/>
+     <path d="M17.8 8.6h.01M17.8 11.4h.01M17.8 14.2v1.8"/>`
+  ),
+
+  airfryer: svg(
+    `<path d="M4.6 9.6A5.4 5.4 0 0 1 10 4.2h4a5.4 5.4 0 0 1 5.4 5.4V19a1.6 1.6 0 0 1-1.6 1.6H6.2A1.6 1.6 0 0 1 4.6 19Z"/>
+     <path d="M4.6 13.2h14.8M9.4 16.8h5.2"/>
+     <circle cx="12" cy="8.6" r="1.6"/>`
+  ),
+
+  waterkoker: svg(
+    `<path d="M5.4 20.6h10.8"/>
+     <path d="M6.2 20.6 7.4 8h7l1.2 12.6"/>
+     <path d="M8.4 8 9 5.6h3.8l.6 2.4"/>
+     <path d="M15 10.4h1.8a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-1.3"/>`
+  ),
+
+  koffiezetapparaat: svg(
+    `<rect x="4" y="2.8" width="16" height="18.4" rx="2"/>
+     <path d="M4 7.2h16M12 9.2v1.8"/>
+     <path d="M9 13h5.6v2.8a2.4 2.4 0 0 1-2.4 2.4h-.8A2.4 2.4 0 0 1 9 15.8Z"/>
+     <path d="M14.6 13.8h.6a1.2 1.2 0 0 1 0 2.4h-.6"/>`
+  ),
+
+  televisie: svg(
+    `<rect x="2.6" y="4" width="18.8" height="12.6" rx="1.8"/>
+     <path d="M8.4 20.4h7.2M12 16.6v3.8"/>`
+  ),
+
+  computer: svg(
+    `<rect x="4.6" y="4.6" width="14.8" height="10.4" rx="1.4"/>
+     <path d="M2.6 18.6h18.8L19.8 15H4.2Z"/>`
+  ),
+
+  server: svg(
+    `<rect x="5" y="2.8" width="14" height="18.4" rx="2"/>
+     <path d="M5 8.9h14M5 15.1h14"/>
+     <path d="M8 5.9h.01M8 12h.01M8 18.1h.01M12 5.9h4M12 12h4M12 18.1h4"/>`
+  ),
+
+  router: svg(
+    `<rect x="3" y="13" width="18" height="6.6" rx="1.8"/>
+     <path d="M7 16.3h.01M10 16.3h.01M14.4 16.3h3"/>
+     <path d="M9.6 9.6a3.4 3.4 0 0 1 4.8 0M7.4 7.2a6.6 6.6 0 0 1 9.2 0"/>`
+  ),
+
+  aquarium: svg(
+    `<rect x="2.8" y="5.4" width="18.4" height="13.6" rx="1.6"/>
+     <path d="M2.8 8.8c1.5 1 3.1 1 4.6 0s3.1-1 4.6 0 3.1 1 4.6 0 3.1-1 4.6 0"/>
+     <path d="M7.4 14c1.6-2 4.4-2 6 0-1.6 2-4.4 2-6 0Z"/>
+     <path d="m13.4 14 2.4-1.6v3.2Z"/>`
+  ),
+
+  vijverpomp: svg(
+    `<path d="M12 15.6V5"/>
+     <path d="M12 7.2c-2.4-1-4.8.2-5.8 3.4M12 7.2c2.4-1 4.8.2 5.8 3.4"/>
+     <path d="M2.6 16c1.5 1 3.1 1 4.6 0s3.1-1 4.6 0 3.1 1 4.6 0 3.1-1 4.6 0M2.6 20c1.5 1 3.1 1 4.6 0s3.1-1 4.6 0 3.1 1 4.6 0 3.1-1 4.6 0"/>`
+  ),
+
+  kachel: svg(
+    `<rect x="3.4" y="10" width="17.2" height="9.4" rx="1.8"/>
+     <path d="M7.6 10v9.4M12 10v9.4M16.4 10v9.4M5.6 19.4v1.4M18.4 19.4v1.4"/>
+     <path d="M8 3.4c-.9 1-.9 2 0 3.2M12 3.4c-.9 1-.9 2 0 3.2M16 3.4c-.9 1-.9 2 0 3.2"/>`
+  ),
+
+  ventilator: svg(
+    `<circle cx="12" cy="9.8" r="7"/>
+     <path d="M12 9.8c-.4-2.6.6-4.2 2.6-4.4M12 9.8c2.4.9 3.2 2.6 2.2 4.4M12 9.8c-2 1.7-3.8 1.6-4.8 0"/>
+     <path d="M12 16.8v3.6M8.4 20.4h7.2"/>`
+  ),
+
+  ontvochtiger: svg(
+    `<rect x="5.4" y="2.8" width="13.2" height="18.4" rx="2.4"/>
+     <path d="M8.4 5.8h7.2M8.4 8h7.2"/>
+     <path d="M12 10.6c-1.8 2.1-2.7 3.4-2.7 4.7a2.7 2.7 0 0 0 5.4 0c0-1.3-.9-2.6-2.7-4.7Z"/>`
+  ),
+
+  fietslader: svg(
+    `<circle cx="5.6" cy="16" r="3.4"/>
+     <circle cx="18.4" cy="16" r="3.4"/>
+     <path d="M5.6 16 9 9.6h6.4M9 9.6l3 6.4 3.4-6.4 3 6.4M12 16H5.6M7.8 7.6h2.6M15.4 9.6l-.6-2h1.8"/>`
+  ),
+
+  maairobot: svg(
+    `<rect x="2.8" y="11" width="18.4" height="5.6" rx="2.8"/>
+     <path d="M7.6 11c.6-2 2.3-3.2 4.4-3.2s3.8 1.2 4.4 3.2"/>
+     <circle cx="7" cy="18.2" r="1.8"/>
+     <circle cx="17" cy="18.2" r="1.8"/>
+     <path d="M2.6 21.4h1.6M10 21.4h4M19.8 21.4h1.6"/>`
+  ),
+
+  lamp: svg(
+    `<path d="M12 3.2a6 6 0 0 0-3.6 10.8c.6.5.8 1.1.8 1.8v1.4h5.6v-1.4c0-.7.2-1.3.8-1.8A6 6 0 0 0 12 3.2Z"/>
+     <path d="M10 20.4h4"/>`
+  ),
+
+  spelcomputer: svg(
+    `<path d="M7.4 7.6h9.2a4.4 4.4 0 0 1 4.3 3.5l1 4.9a2.6 2.6 0 0 1-4.4 2.3L15.4 16H8.6l-2.1 2.3A2.6 2.6 0 0 1 2.1 16l1-4.9a4.4 4.4 0 0 1 4.3-3.5Z"/>
+     <path d="M7.6 10.4v3.2M6 12h3.2M15.8 11h.01M17.6 12.8h.01"/>`
+  ),
+
   // ---- interface ----------------------------------------------------------
 
   arrowRight: svg(`<path d="M4.5 12h14M13 6.5l5.5 5.5-5.5 5.5"/>`),

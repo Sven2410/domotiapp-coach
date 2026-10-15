@@ -14,6 +14,8 @@ import {
   CAR_BRANDS,
   CAR_PHASES,
   DEVICE_TYPES,
+  PLUG_APPLIANCES,
+  PLUG_SWITCH_FIELD,
   PROGRAM_TYPES,
   hasOwnPrograms,
   isManualProgram,
@@ -29,10 +31,14 @@ import {
   brandFields,
   brandMeta,
   brandsFor,
+  deviceIcon,
   deviceLabel,
   deviceLabelMap,
   hasCars,
   isBattery,
+  isSmartPlug,
+  kindLabel,
+  plugAppliance,
   defaultBattery,
   missingForControl,
   releaseOnOwnPlug,
@@ -311,6 +317,7 @@ class DacViewDevices extends DacEditorElement {
    * on the energy flow at all.
    */
   brandHtml_(device, index) {
+    if (isSmartPlug(device)) return this.plugHtml_(device, index);
     const brands = brandsFor(device.type);
     const brand = brandMeta(device);
     const what = typeMeta(device.type).label.toLowerCase();
@@ -355,6 +362,82 @@ class DacViewDevices extends DacEditorElement {
         : "";
 
     return `${brandRow}${this.integrationHtml_(device, index)}${power}${extra}${this.buttonsHtml_(device, index)}${this.actionsHtml_(device, index)}${this.programsHtml_(device, index)}${note}`;
+  }
+
+  /**
+   * Een smart plug (v0.120.0): eerst wat eraan hangt, dan de schakelaar, wat
+   * hij meet en of hij altijd aan moet staan. In de volgorde waarin de eigenaar
+   * het op 15-10-2026 opsomde: "een hele lijst met apparaten ... Dan de optie
+   * energieteller, vermogensteller en een belangrijke optie, dit apparaat moet
+   * altijd aan staan." Wat de coach daarmee doet: `_async_altijd_aan` in coach.py.
+   */
+  plugHtml_(device, index) {
+    const gekozen = plugAppliance(device);
+    const keuze = `
+        <div class="row">
+          <label for="appliance-${index}">Apparaat</label>
+          <select id="appliance-${index}" data-field="appliance" data-index="${index}">
+            <option value=""${gekozen ? "" : " selected"}>Kies wat eraan hangt…</option>
+            ${PLUG_APPLIANCES.map(
+              (a) => `<option value="${a.id}"${a.id === gekozen?.id ? " selected" : ""}>${a.label}</option>`
+            ).join("")}
+          </select>
+          <span class="sub">${
+            gekozen?.id === "vaatwasser"
+              ? "Op een smart plug meet de coach hem alleen. Moet hij hem plannen, voeg hem dan toe als Vaatwasser."
+              : "Daarmee krijgt hij zijn naam en zijn icoon."
+          }</span>
+        </div>`;
+    if (!gekozen) return keuze;
+    return `${keuze}
+        <div class="row">
+          <label>${PLUG_SWITCH_FIELD.label}</label>
+          <dac-entity-picker data-entity-key="${PLUG_SWITCH_FIELD.key}" data-index="${index}"></dac-entity-picker>
+          <span class="sub">${PLUG_SWITCH_FIELD.hint}</span>
+        </div>
+        <div class="row">
+          <label>Vermogenssensor</label>
+          <dac-entity-picker data-power data-index="${index}"></dac-entity-picker>
+        </div>
+        ${this.energyHtml_(device, index)}
+        <label class="check" for="always-on-${index}">
+          <input type="checkbox" id="always-on-${index}" data-field="always_on" data-index="${index}"
+                 ${device.always_on ? "checked" : ""}>
+          <span>
+            <strong>Dit apparaat moet altijd aan staan</strong>
+            Gaat de stekker uit, om wat voor reden ook, dan zet de coach hem meteen weer aan. Lukt dat na 2 minuten nog niet, dan krijg je een melding als je die aanzet onder Meldingen. Bij Alleen uitlezen en Adviseren zet hij hem niet zelf aan, maar meldt hij het wel.
+          </span>
+        </label>
+        <div class="notice"${this.plugMissing_(device) ? "" : " hidden"} data-plug-missing="${index}">
+          ${icons.warning}
+          <span>Kies de schakelaar, anders kan de coach hem niet aanhouden.</span>
+        </div>`;
+  }
+
+  /** Wat er over een entiteitveld bekend is: van het merk, of de schakelaar van een smart plug. */
+  entityField_(device, key) {
+    const velden = isSmartPlug(device) ? [PLUG_SWITCH_FIELD] : brandEntityFields(device);
+    return velden.find((field) => field.key === key);
+  }
+
+  /** Altijd aan zonder schakelaar: dan valt er niets aan te houden. */
+  plugMissing_(device) {
+    return isSmartPlug(device) && Boolean(device.always_on) && !device.entities?.switch;
+  }
+
+  /** De energieteller; bij een smart plug in zijn eigen blok, anders onder de naam. */
+  energyHtml_(device, index) {
+    const stekker = isSmartPlug(device);
+    return `
+            <div class="row">
+              <label>Energieteller (optioneel)</label>
+              <dac-entity-picker data-energy="${index}"></dac-entity-picker>
+              <span class="sub">${
+                stekker
+                  ? "De teller van de smart plug in kWh, als die er een heeft. Daarmee klopt het verbruik in je rapport tot op de komma; zonder wordt het afgeleid uit het gemiddelde vermogen."
+                  : "De teller van dit apparaat in kWh, als die er is. Bij een laadpaal is dat de teller van alles wat hij ooit geladen heeft. Daarmee klopt het verbruik in je rapport tot op de komma en klopt het aantal kWh in het verslag na een laadbeurt; zonder wordt allebei afgeleid uit het gemiddelde vermogen."
+              }</span>
+            </div>`;
   }
 
   /**
@@ -633,6 +716,7 @@ class DacViewDevices extends DacEditorElement {
   controlHtml_(device, index) {
     // Nothing to decide yet on an appliance whose brand is still unknown.
     if (brandsFor(device.type).length && !brandMeta(device)) return "";
+    if (isSmartPlug(device) && !plugAppliance(device)) return "";
 
     const missing = missingForControl(device);
     // Eén vinkje, drie woorden. De eigenaar op 07-09-2026: "er is een verschil tussen
@@ -653,7 +737,9 @@ class DacViewDevices extends DacEditorElement {
       ? `Hij komt dan op het overzicht te staan, met ${needsRelease(device) ? "een vrijgaveknop en " : ""}handmatige besturing, en de coach bedient hem zelf op het gunstigste moment.`
       : manual
         ? "Hij heeft geen startknop, dus sturen kan de coach niet. Hij zegt op de kaart en op je telefoon wanneer je hem aan moet zetten, en meet via de vermogenssensor hoe lang een programma duurt en wat het verbruikt. Het apparaat komt dan op het overzicht te staan, met de vrijgaveknop en de programmakeuze."
-        : "Dit apparaat zit alleen op een meetstekker: de coach kan het niet sturen en niet plannen. Met dit vinkje aan noemt hij het wel als je overschot hebt of de stroom goedkoop is; uit, dan volgt hij alleen het verbruik.";
+        : isSmartPlug(device)
+          ? "De coach plant dit apparaat niet. Met dit vinkje aan noemt hij het wel als je overschot hebt of de stroom goedkoop is; uit, dan volgt hij alleen het verbruik."
+          : "Dit apparaat zit alleen op een meetstekker: de coach kan het niet sturen en niet plannen. Met dit vinkje aan noemt hij het wel als je overschot hebt of de stroom goedkoop is; uit, dan volgt hij alleen het verbruik.";
     // De groep waar het apparaat aan hangt, als er groepen zijn (Installatie).
     // De eerste woning, 22-09-2026: de paal en de batterij in de garage, op
     // een onderverdeelkast van 3x16 A onder een aansluiting van 3x25 A.
@@ -710,6 +796,8 @@ class DacViewDevices extends DacEditorElement {
 
   /** Say on the spot what steering this device would still need. */
   paintMissing_(index) {
+    const plug = this.$(`[data-plug-missing="${index}"]`);
+    if (plug) plug.hidden = !this.plugMissing_(this.draft_.devices[index]);
     const notice = this.$(`[data-missing="${index}"]`);
     if (!notice) return;
     const missing = missingForControl(this.draft_.devices[index]);
@@ -791,6 +879,12 @@ class DacViewDevices extends DacEditorElement {
     if (brandsFor(device.type).length && !device.brand) {
       return { text: "nog geen merk gekozen", warn: true };
     }
+    if (isSmartPlug(device) && !plugAppliance(device)) {
+      return { text: "nog niet gekozen wat eraan hangt", warn: true };
+    }
+    if (this.plugMissing_(device)) {
+      return { text: "altijd aan, maar zonder schakelaar", warn: true };
+    }
     // Two devices on one power sensor means the energy flow counts those watts
     // twice, and the second bubble is a copy of the first. Almost always a
     // sensor picked in a hurry.
@@ -807,9 +901,10 @@ class DacViewDevices extends DacEditorElement {
     // twice.
     const what = device.entity || "geen vermogenssensor";
     const brand = brandMeta(device)?.label;
-    const prefix = brand ?? ((device.name ?? "").trim() ? typeMeta(device.type).label : "");
+    const prefix = brand ?? ((device.name ?? "").trim() ? kindLabel(device) : "");
+    const altijd = isSmartPlug(device) && device.always_on ? " · altijd aan" : "";
     return {
-      text: prefix ? `${prefix} · ${what}` : what,
+      text: `${prefix ? `${prefix} · ${what}` : what}${altijd}`,
       warn: false,
     };
   }
@@ -1049,7 +1144,7 @@ class DacViewDevices extends DacEditorElement {
         <section class="card device${open ? " open" : ""}" data-index="${index}">
           <div class="device-head">
             <button class="toggle" type="button" data-toggle="${index}" aria-expanded="${open}">
-              <span class="chip">${icons[typeMeta(device.type).icon]}</span>
+              <span class="chip">${icons[deviceIcon(device)]}</span>
               <span class="head-body">
                 <span class="name" data-title="${index}"></span>
                 <span class="sub${summary.warn ? " warn" : ""}" data-summary="${index}"></span>
@@ -1080,11 +1175,11 @@ class DacViewDevices extends DacEditorElement {
                 <label>Eigen naam</label>
                 <input type="text" data-field="name" data-index="${index}"
                        value="${(device.name ?? "").replace(/"/g, "&quot;")}"
-                       placeholder="${device.type === "overig" ? "Bijvoorbeeld: serverkast" : "optioneel"}"
+                       placeholder="${device.type === "overig" || plugAppliance(device)?.id === "overig" ? "Bijvoorbeeld: serverkast" : "optioneel"}"
                        autocomplete="off">
                 ${
                   this.sharesLabel_(device)
-                    ? `<span class="sub">Er staan er twee van dit type. Zonder eigen naam heten ze hier en op het overzicht "${typeMeta(device.type).label} 1" en "${typeMeta(device.type).label} 2"; met een naam weet je meteen welke welke is.</span>`
+                    ? `<span class="sub">Er staan er twee van dit type. Zonder eigen naam heten ze hier en op het overzicht "${kindLabel(device)} 1" en "${kindLabel(device)} 2"; met een naam weet je meteen welke welke is.</span>`
                     : ""
                 }
               </div>
@@ -1100,11 +1195,7 @@ class DacViewDevices extends DacEditorElement {
             </div>`
                 : ""
             }
-            <div class="row">
-              <label>Energieteller (optioneel)</label>
-              <dac-entity-picker data-energy="${index}"></dac-entity-picker>
-              <span class="sub">De teller van dit apparaat in kWh, als die er is. Bij een laadpaal is dat de teller van alles wat hij ooit geladen heeft. Daarmee klopt het verbruik in je rapport tot op de komma en klopt het aantal kWh in het verslag na een laadbeurt; zonder wordt allebei afgeleid uit het gemiddelde vermogen.</span>
-            </div>
+            ${isSmartPlug(device) ? "" : this.energyHtml_(device, index)}
             ${this.brandHtml_(device, index)}
             ${this.carsHtml_(device, index)}
             ${this.batteryHtml_(device, index)}
@@ -1269,13 +1360,13 @@ class DacViewDevices extends DacEditorElement {
       // Not a power filter: a status or a limit is anything but watts, and the
       // filter is a ranking rather than a restriction anyway. Een veld dat om
       // een select vraagt zet die bovenaan.
-      picker.filter = brandEntityFields(this.draft_.devices[index]).find((f) => f.key === key)?.filter ?? "all";
+      picker.filter = this.entityField_(this.draft_.devices[index], key)?.filter ?? "all";
       picker.placeholder = "Zoek een entiteit…";
       picker.stateFeed = this.feed_;
       // A charger reports its status in English keys whatever the language Home
       // Assistant is set to, so the check "is this the right sensor?" is only
       // useful if it reads the same here as on the overview.
-      const meta = brandEntityFields(devices[index]).find((field) => field.key === key);
+      const meta = this.entityField_(devices[index], key);
       picker.values = meta?.values;
       picker.format = meta?.format;
       picker.value = devices[index].entities?.[key] ?? "";
@@ -1321,6 +1412,8 @@ class DacViewDevices extends DacEditorElement {
 
         if (field === "controllable") {
           device.controllable = el.checked;
+        } else if (field === "always_on") {
+          device.always_on = el.checked;
         } else if (field === "phase_switching") {
           device.phase_switching = el.checked;
         } else {
@@ -1335,12 +1428,12 @@ class DacViewDevices extends DacEditorElement {
           if (!device.battery.idle_mode) device.battery.idle_mode = merk.idle_mode;
         }
 
-        if (field === "controllable" || field === "device_id") {
+        if (field === "controllable" || field === "device_id" || field === "always_on") {
           this.paintMissing_(index);
           this.paintSummary_(index);
         }
 
-        if (field === "type" || field === "brand" || field === "room") {
+        if (field === "type" || field === "brand" || field === "room" || field === "appliance") {
           // Both decide which fields belong here at all, so the card is redrawn.
           // The name field is not: redrawing on every keystroke would throw the
           // caret away.

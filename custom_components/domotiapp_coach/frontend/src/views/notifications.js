@@ -32,6 +32,7 @@
 
 import { DacElement, define } from "../base.js";
 import { volgCoach } from "../data-source.js";
+import { deviceLabel, deviceLabelMap } from "../devices.js";
 import { icons } from "../icons.js";
 
 const DAGEN = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
@@ -496,6 +497,19 @@ class DacViewNotifications extends DacElement {
           <div class="status" id="warmte-status"></div>
         </section>
 
+        <section class="blok" id="stekker" hidden>
+          <h2>${icons.warning} Apparaat staat uit</h2>
+          <p class="hint">Een bericht als een apparaat dat altijd aan moet staan uit gaat en de coach het na 2 minuten nog niet weer aan heeft gekregen. Het gaat naar wie Kritiek aan heeft staan.</p>
+          <div class="aanzet">
+            <div>
+              <strong>Melding aanzetten</strong>
+              <span id="stekker-wie"></span>
+            </div>
+            <button type="button" class="schuif" role="switch" aria-checked="false" id="stekker-aan" aria-label="Apparaat staat uit aan"><span class="knob"></span></button>
+          </div>
+          <div class="status" id="stekker-status"></div>
+        </section>
+
         <section class="blok">
           <h2>${icons.bell} Geschiedenis</h2>
           <p class="hint">Alles wat de coach deed en meldde in de afgelopen twee weken, de nieuwste bovenaan. Wat ook naar een telefoon ging staat in een kader; kritiek is wat je zelf moet oplossen.</p>
@@ -546,6 +560,10 @@ class DacViewNotifications extends DacElement {
       const aan = this.$("#warmte-aan").getAttribute("aria-checked") !== "true";
       this.bewaarWarmte_({ enabled: aan });
     });
+    this.$("#stekker-aan")?.addEventListener("click", () => {
+      const aan = this.$("#stekker-aan").getAttribute("aria-checked") !== "true";
+      this.bewaarStekker_({ enabled: aan });
+    });
     this.$("#warmte-grens")?.addEventListener("change", (e) => {
       const tekst = String(e.target.value).trim();
       const waarde = Number(tekst);
@@ -572,6 +590,7 @@ class DacViewNotifications extends DacElement {
     this.paintBelasting_();
     this.paintVerbruik_();
     this.paintWarmte_();
+    this.paintStekker_();
     this.paint_();
   }
 
@@ -888,6 +907,52 @@ class DacViewNotifications extends DacElement {
       this.status_("#warmte-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
     }
     this.paintWarmte_();
+  }
+
+  // ------------------------------------------------------------------
+  // apparaat staat uit (v0.120.0)
+
+  stekker_() {
+    return this.meldingen_().always_on_alert ?? {};
+  }
+
+  /** De apparaten op een smart plug die altijd aan moeten staan. */
+  altijdAan_() {
+    return (this.settings_?.devices ?? []).filter((d) => d?.type === "smartplug" && d.always_on);
+  }
+
+  /**
+   * De eigenaar op 15-10-2026: "Lukt dat niet wil ik na 2 min een melding
+   * ontvangen. Pas de melding sturen als je dat hebt ingesteld in meldingen."
+   * Alleen te zien als er iets altijd aan moet staan; zonder is er niets te melden.
+   */
+  paintStekker_() {
+    const blok = this.$("#stekker");
+    if (!blok) return;
+    const apparaten = this.altijdAan_();
+    blok.hidden = !this.settings_ || !apparaten.length;
+    if (blok.hidden) return;
+    this.$("#stekker-aan").setAttribute("aria-checked", String(Boolean(this.stekker_().enabled)));
+    const labels = deviceLabelMap(this.settings_?.devices ?? []);
+    const namen = apparaten.map((d) => labels.get(d.id) ?? deviceLabel(d));
+    this.$("#stekker-wie").textContent =
+      `Geldt voor ${namen.join(", ").replace(/, ([^,]*)$/, " en $1")}. Krijgt de coach het weer aan, dan staat dat alleen in de geschiedenis hieronder.`;
+  }
+
+  async bewaarStekker_(wijziging) {
+    if (!this.hass_?.callWS) return;
+    try {
+      const settings = await this.hass_.callWS({
+        type: this.opslagCommando_(),
+        notifications: { always_on_alert: { ...this.stekker_(), ...wijziging } },
+      });
+      this.settings_ = settings;
+      this.status_("#stekker-status", "Opgeslagen", false);
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de melding over een apparaat dat uit staat niet opslaan", error);
+      this.status_("#stekker-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
+    }
+    this.paintStekker_();
   }
 
   paintBelasting_() {

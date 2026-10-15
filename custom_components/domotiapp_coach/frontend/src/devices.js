@@ -18,6 +18,8 @@ export const DEVICE_TYPES = [
   { id: "boiler", label: "Boiler", icon: "boiler" },
   { id: "vaatwasser", label: "Vaatwasser", icon: "vaatwasser" },
   { id: "airco", label: "Airco", icon: "airco" },
+  // Sinds v0.120.0: wat aan een smart plug hangt, zie `PLUG_APPLIANCES`.
+  { id: "smartplug", label: "Smart plug", icon: "plug" },
   { id: "overig", label: "Overig", icon: "overig" },
 ];
 
@@ -870,6 +872,70 @@ export const typeFields = (device) => FIELDS_BY_TYPE.get(device?.type) ?? [];
 /** De types waarvoor de vermogenssensor geen luxe is maar het enige zintuig. */
 const POWER_NEEDED_TYPES = ["boiler"];
 
+/**
+ * Wat er aan een smart plug hangt (v0.120.0).
+ *
+ * De eigenaar op 15-10-2026: "Heel veel mensen hebben smart plugs om het
+ * vermogen te meten van een apparaat. Ik wil bij apparaten toevoegen dan de
+ * optie smart plug. En dan als ik die heb gekozen een hele lijst met apparaten
+ * zoals wasmachine, oven vriezer etc etc. Allemaal met de naam en icon."
+ *
+ * Een belofte is het niet: de coach plant en stuurt ze niet. Hij meet ze, noemt
+ * ze in een tip als dat mag (`controllable`), en houdt de stekker aan als dat
+ * gevraagd is (`always_on`, `_async_altijd_aan` in coach.py). Op naam, met
+ * "Iets anders" onderaan voor wat er niet tussen staat. Dezelfde lijst staat in
+ * const.py (`STEKKER_APPARATEN`) voor de meldingen; test_rapport.mjs legt ze
+ * naast elkaar.
+ */
+export const PLUG_APPLIANCES = [
+  { id: "airfryer", label: "Airfryer", icon: "airfryer" },
+  { id: "aquarium", label: "Aquarium", icon: "aquarium" },
+  { id: "computer", label: "Computer", icon: "computer" },
+  { id: "droger", label: "Droger", icon: "droger" },
+  { id: "kachel", label: "Elektrische kachel", icon: "kachel" },
+  { id: "fietslader", label: "Fietslader", icon: "fietslader" },
+  { id: "koelkast", label: "Koelkast", icon: "koelkast" },
+  { id: "koffiezetapparaat", label: "Koffiezetapparaat", icon: "koffiezetapparaat" },
+  { id: "lamp", label: "Lamp", icon: "lamp" },
+  { id: "maairobot", label: "Maairobot", icon: "maairobot" },
+  { id: "magnetron", label: "Magnetron", icon: "magnetron" },
+  { id: "ontvochtiger", label: "Ontvochtiger", icon: "ontvochtiger" },
+  { id: "oven", label: "Oven", icon: "oven" },
+  { id: "router", label: "Router", icon: "router" },
+  { id: "server", label: "Server", icon: "server" },
+  { id: "spelcomputer", label: "Spelcomputer", icon: "spelcomputer" },
+  { id: "televisie", label: "Televisie", icon: "televisie" },
+  { id: "vaatwasser", label: "Vaatwasser", icon: "vaatwasser" },
+  { id: "ventilator", label: "Ventilator", icon: "ventilator" },
+  { id: "vijverpomp", label: "Vijverpomp", icon: "vijverpomp" },
+  { id: "vriezer", label: "Vriezer", icon: "vriezer" },
+  { id: "wasmachine", label: "Wasmachine", icon: "wasmachine" },
+  { id: "waterkoker", label: "Waterkoker", icon: "waterkoker" },
+  { id: "overig", label: "Iets anders", icon: "plug" },
+];
+
+const PLUG_BY_ID = new Map(PLUG_APPLIANCES.map((apparaat) => [apparaat.id, apparaat]));
+
+export const isSmartPlug = (device) => device?.type === "smartplug";
+
+/** Wat er aan deze smart plug hangt, of undefined (geen smart plug, of nog niets gekozen). */
+export const plugAppliance = (device) => (isSmartPlug(device) ? PLUG_BY_ID.get(device?.appliance) : undefined);
+
+/**
+ * De schakelaar van een smart plug (v0.120.0). Een eigen veld en geen veld van
+ * het type zoals bij de boiler: een type met velden telt als stuurbaar
+ * (`canSteer`), en dan viel de stekker uit de tip die hem mag noemen.
+ */
+export const PLUG_SWITCH_FIELD = {
+  key: "switch",
+  label: "Schakelaar",
+  hint:
+    "De schakelaar van de smart plug zelf. Die heeft de coach alleen nodig om hem aan te houden; " +
+    "voor meten is het vermogen genoeg.",
+  filter: "all",
+  values: { on: "Aan", off: "Uit" },
+};
+
 /** The brands offered for a device type, or an empty list. */
 export const brandsFor = (type) => BRANDS_BY_TYPE.get(type) ?? [];
 
@@ -1368,11 +1434,25 @@ const BY_ID = new Map(DEVICE_TYPES.map((t) => [t.id, t]));
 /** Metadata for a device type, falling back to "Overig" for unknown ids. */
 export const typeMeta = (type) => BY_ID.get(type) ?? BY_ID.get("overig");
 
+/**
+ * Het woord voor wat een apparaat is: zijn type, en bij een smart plug wat
+ * eraan hangt (v0.120.0). "Iets anders" is geen woord voor een apparaat; dan
+ * blijft het "Smart plug".
+ */
+export function kindLabel(device) {
+  const apparaat = plugAppliance(device);
+  if (apparaat && apparaat.id !== "overig") return apparaat.label;
+  return typeMeta(device?.type).label;
+}
+
+/** Het icoon van een apparaat: dat van zijn type, of van wat aan de smart plug hangt. */
+export const deviceIcon = (device) => plugAppliance(device)?.icon ?? typeMeta(device?.type).icon;
+
 /** What to call a configured device: its own name if it has one, else its type. */
 export function deviceLabel(device) {
   const name = (device?.name || "").trim();
   if (name) return name;
-  return typeMeta(device?.type).label;
+  return kindLabel(device);
 }
 
 /**
@@ -1459,7 +1539,7 @@ export function apparatenZin(devices, voegwoord = "of") {
       // het is zijn woord en niet het mijne. Alleen het woord dat wij er zelf
       // bij verzinnen als hij niets invulde ("Laadpaal") gaat naar
       // kleine letters, want dat staat middenin een zin.
-      const soort = typeMeta(device?.type).label;
+      const soort = kindLabel(device);
       // Vulde hij precies het soortwoord in ("Laadpaal"), dan is dat geen naam
       // maar hetzelfde woord met een hoofdletter omdat het in een lijst stond.
       // Middenin een zin hoort dat klein. In de klantwoning las het anders als

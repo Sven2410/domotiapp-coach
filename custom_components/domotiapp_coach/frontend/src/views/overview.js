@@ -30,7 +30,7 @@ import {
   programPicker,
   releaseCopy,
   socVeld,
-  typeMeta,
+  deviceIcon,
   vraagAccustand,
   valueLabel,
 } from "../devices.js";
@@ -2554,7 +2554,7 @@ class DacViewOverview extends DacElement {
         <article class="steer" data-slot="${slot}" id="steer-panel-${slot}"
                  role="tabpanel" aria-labelledby="steer-tab-${slot}">
           <div class="steer-head">
-            <span class="chip">${icons[typeMeta(device.type).icon]}</span>
+            <span class="chip">${icons[deviceIcon(device)]}</span>
             <span class="steer-name" data-name="${slot}"></span>
             <span class="steer-car" data-car-one="${slot}" hidden></span>
             <span class="steer-now tnum" data-now="${slot}"></span>
