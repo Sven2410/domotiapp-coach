@@ -95,6 +95,66 @@ export function huisMetAccu(own, bought, accu = { battery: 0, voor: 0 }) {
   };
 }
 
+/** Hoeveel apparaten een eigen kleur krijgen (`--dac-app-1` tot en met 6); de rest is grijs. */
+const APP_KLEUREN = 6;
+
+/**
+ * Wat er in elk vak van de grafiek valt, uit rijen van een uur, een dag of een
+ * maand (v0.121.0). `tijden` zijn de begintijden van de vakken, `einde` het
+ * eind van de periode; een rij erbuiten telt niet mee. Een teller geeft zijn
+ * vakken al, een schatting uit het vermogen komt per uur (`fetchDevices`).
+ */
+export function perVak(rijen, tijden, einde) {
+  const uit = tijden.map(() => 0);
+  for (const [tijd, kwh] of rijen ?? []) {
+    let i = tijden.length - 1;
+    while (i >= 0 && tijden[i] > tijd) i -= 1;
+    if (i < 0 || tijd >= (tijden[i + 1] ?? einde)) continue;
+    uit[i] += Number(kwh) || 0;
+  }
+  return uit;
+}
+
+/**
+ * Het verbruik per apparaat over de vakken van de grafiek (v0.121.0), zoals
+ * "Afzonderlijke apparaten" in het energiedashboard van Home Assistant. De
+ * eigenaar op 15-10-2026: "ik wil ook het energieverbruik per apparaat kunnen
+ * zien in historie zoals het HA energy dashboard", "per dag per jaar etc".
+ *
+ * De thuisbatterij hoort er niet bij: die verbruikt niet, die schuift op. Elk
+ * apparaat houdt zijn kleur op de volgorde van Apparaten en niet op grootte,
+ * zodat een andere periode hem niet overschildert; vanaf het zevende valt het
+ * onder "Overige apparaten". Een vak telt nooit onder nul (een teller die
+ * opnieuw begint).
+ *
+ * @returns {{id: string, label: string, kleur: number|"rest", vakken: number[],
+ *   totaal: number, exact: boolean}[]} op de volgorde van Apparaten
+ */
+export function apparaatReeksen(devices, stats, tijden, einde) {
+  const labels = deviceLabelMap(devices ?? []);
+  const reeksen = [];
+  const overig = { id: "__overig__", label: "Overige apparaten", kleur: "rest", vakken: tijden.map(() => 0), totaal: 0, exact: true };
+  let plek = 0;
+  for (const device of devices ?? []) {
+    if (!device || device.type === "thuisbatterij" || (!device.entity && !device.energy_entity)) continue;
+    plek += 1;
+    const gevonden = stats?.get(device.id);
+    if (!gevonden) continue;
+    const vakken = perVak(gevonden.rows, tijden, einde).map((kwh) => Math.max(0, kwh));
+    const totaal = vakken.reduce((som, kwh) => som + kwh, 0);
+    if (totaal < 0.01) continue;
+    if (plek > APP_KLEUREN) {
+      vakken.forEach((kwh, i) => { overig.vakken[i] += kwh; });
+      overig.totaal += totaal;
+      overig.exact &&= gevonden.exact !== false;
+      continue;
+    }
+    reeksen.push({ id: device.id, label: labels.get(device.id) ?? deviceLabel(device), kleur: plek, vakken, totaal, exact: gevonden.exact !== false });
+  }
+  if (overig.totaal >= 0.01) reeksen.push(overig);
+  return reeksen;
+}
+
 /** How one bucket is named in the read-out above the chart. */
 function bucketTitle(period, date) {
   if (period === "day") {
@@ -400,6 +460,19 @@ class DacViewHistory extends DacElement {
           <p class="note" id="note"></p>
         </section>
 
+        <!-- Per apparaat (v0.121.0), zoals het energiedashboard van Home
+             Assistant. De eigenaar op 15-10-2026: "ik wil ook het energieverbruik
+             per apparaat kunnen zien in historie", bij elke periode. -->
+        <section class="card" id="apparaten-card" hidden>
+          <div class="panel-head">
+            <div class="eyebrow">Per apparaat</div>
+            <h2 id="apparaten-titel">Wat je apparaten verbruikten</h2>
+          </div>
+          <div id="apparaten-stage"></div>
+          <ul class="app-lijst" id="apparaten-lijst"></ul>
+          <p class="note" id="apparaten-note"></p>
+        </section>
+
         <!-- De tijdlijn (v0.115.0). De eigenaar op 11-10-2026: "Ik wil kunnen zien
              wat de coach en de aanstuurbare apparaten hebben gedaan", als tijdlijn,
              "en als je op de tijdlijn klikt een korte tekst". De som staat in
@@ -520,9 +593,10 @@ class DacViewHistory extends DacElement {
     this.addEventListener("pointerdown", (event) => {
       if (event.pointerType === "mouse") return;
       const path = event.composedPath();
-      if (!path.some((node) => node?.id === "stage" || node?.id === "gas-stage" || node?.id === "water-stage")) {
+      if (!path.some((node) => ["stage", "gas-stage", "water-stage", "apparaten-stage"].includes(node?.id))) {
         this.clearPick_();
         this.clearGasPick_();
+        this.clearAppPick_();
       }
     });
 
@@ -720,6 +794,7 @@ class DacViewHistory extends DacElement {
     this.$("#card").hidden = bespaard;
     if (bespaard) {
       this.$("#money-card").hidden = true;
+      this.$("#apparaten-card").hidden = true;
       this.$("#gas-card").hidden = true;
       this.$("#water-card").hidden = true;
       this.$("#tijdlijn-card").hidden = true;
@@ -735,6 +810,7 @@ class DacViewHistory extends DacElement {
       this.$("#stage").innerHTML = "";
       this.$("#totals").replaceChildren();
       this.$("#legend").replaceChildren();
+      this.$("#apparaten-card").hidden = true;
       this.$("#gas-card").hidden = true;
       this.$("#water-card").hidden = true;
       note.textContent =
@@ -765,6 +841,7 @@ class DacViewHistory extends DacElement {
     note.textContent = zinnen.join(" ");
 
     this.paintChart_();
+    this.paintApparaten_();
     this.paintMoney_();
     this.paintGas_();
     this.paintVolume_("water", "Waterverbruik per periode");
@@ -1531,15 +1608,22 @@ class DacViewHistory extends DacElement {
     const prices = this.prices_ ?? new Map();
     const rate = tariff(this.feed_, this.settings_?.contract);
     const labels = deviceLabelMap(this.settings_?.devices);
+    // In de vakken van de grafiek, zodat elk vak zijn eigen prijs krijgt: een
+    // schatting uit het vermogen komt sinds v0.121.0 per uur (`fetchDevices`).
+    const tijden = this.rows_ ? this.buckets_().map((row) => row.start.getTime()) : [];
+    const einde = periodEnd(this.period_, periodStart(this.period_, this.offset_)).getTime();
 
     return (this.settings_?.devices ?? [])
       .map((device) => {
         const found = stats.get(device.id);
         if (!found) return null;
 
+        const paren = tijden.length
+          ? perVak(found.rows, tijden, einde).map((value, i) => [tijden[i], value])
+          : [...found.rows];
         let kwh = 0;
         let cost = 0;
-        for (const [time, value] of found.rows) {
+        for (const [time, value] of paren) {
           kwh += value;
           cost += value * (prices.get(time) ?? rate.buy ?? 0);
         }
@@ -2056,6 +2140,170 @@ class DacViewHistory extends DacElement {
     return zinnen.join(" ");
   }
 
+  /**
+   * Per apparaat (v0.121.0): gestapelde balken over dezelfde vakken als de
+   * grafiek erboven, en een lijst met per apparaat zijn kWh en zijn deel van
+   * wat het huis verbruikte. Aanwijzen zet de lijst op dat ene vak, zoals de
+   * kop bij gas. Wat de apparaten samen niet verklaren staat onderaan als
+   * "Rest van het huis", net als het niet-gemeten verbruik in Home Assistant.
+   */
+  paintApparaten_() {
+    const card = this.$("#apparaten-card");
+    if (!card) return;
+    const vakken = this.buckets_();
+    const tijden = vakken.map((row) => row.start.getTime());
+    const einde = periodEnd(this.period_, periodStart(this.period_, this.offset_)).getTime();
+    const reeksen = apparaatReeksen(this.settings_?.devices, this.devices_, tijden, einde);
+    card.hidden = !tijden.length || !reeksen.length;
+    if (card.hidden) return;
+
+    // Het verbruik van het huis is er alleen met een opwekteller (`paintChart_`).
+    const huis = this.meters_().solar.length > 0 ? vakken.map((row) => row.used) : null;
+    this.appReeksen_ = reeksen;
+    this.appHuis_ = huis;
+    this.$("#apparaten-titel").textContent = "Wat je apparaten verbruikten";
+    this.paintAppLijst_(null);
+
+    const stage = this.$("#apparaten-stage");
+    const W = Math.max(MIN_W, Math.round(stage.getBoundingClientRect().width) || MIN_W);
+    const H = W < 420 ? 160 : 200;
+    const BOTTOM = H - BOTTOM_PAD;
+    const som = tijden.map((_, i) => reeksen.reduce((totaal, reeks) => totaal + reeks.vakken[i], 0));
+    const top = Math.max(...som, 0.001);
+    const colW = Math.min(W / tijden.length, 64);
+    const inset = (W - colW * tijden.length) / 2;
+    const barW = Math.max(1.5, colW - (colW < 9 ? 1 : Math.min(8, colW * 0.22)));
+    const schaal = (BOTTOM - 8) / (top * 1.05);
+    // Twee pixels lucht tussen de stukken van een balk, zodat twee buren met
+    // een kleur die op elkaar lijkt toch twee stukken blijven.
+    const GAT = 2;
+
+    const balken = tijden
+      .map((_, i) => {
+        const x = inset + i * colW + (colW - barW) / 2;
+        let y = BOTTOM;
+        const delen = reeksen.filter((reeks) => reeks.vakken[i] * schaal > 0.4);
+        const stukken = delen.map((reeks, d) => {
+          const h = reeks.vakken[i] * schaal;
+          y -= h;
+          const kleur = reeks.kleur === "rest" ? "var(--dac-app-rest)" : `var(--dac-app-${reeks.kleur})`;
+          const zicht = h > GAT + 1 ? h - GAT : h;
+          // Alleen de bovenste krijgt de ronde kop, de rest staat er recht op.
+          return d === delen.length - 1
+            ? `<path d="${block(x, barW, y, zicht, Math.min(4, barW / 2))}" fill="${kleur}"/>`
+            : `<rect x="${x.toFixed(1)}" y="${(y + GAT).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0.5, zicht).toFixed(1)}" fill="${kleur}"/>`;
+        });
+        return stukken.length ? `<g class="b app">${stukken.join("")}</g>` : `<g class="b app"></g>`;
+      })
+      .join("");
+
+    const every = Math.max(1, Math.ceil(tijden.length / Math.max(4, Math.floor(W / 46))));
+    const ticks = vakken
+      .map((row, index) =>
+        index % every === 0
+          ? `<text class="tick" x="${inset + index * colW + colW / 2}" y="${H - 6}" text-anchor="middle">${bucketLabel(this.period_, row.start)}</text>`
+          : ""
+      )
+      .join("");
+    const hits = tijden
+      .map((_, index) => `<rect class="hit" data-index="${index}" x="${inset + index * colW}" y="0" width="${colW}" height="${BOTTOM}"/>`)
+      .join("");
+
+    stage.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Verbruik per apparaat">${balken}${ticks}${hits}</svg>`;
+
+    const svg = stage.querySelector("svg");
+    const at = (event) => {
+      const box = svg.getBoundingClientRect();
+      const x = ((event.clientX - box.left) / box.width) * W;
+      return Math.min(tijden.length - 1, Math.max(0, Math.floor((x - inset) / colW)));
+    };
+    const pick = (index) => {
+      this.$("#apparaten-titel").textContent = `Wat je apparaten verbruikten op ${bucketTitle(this.period_, vakken[index].start)}`;
+      this.paintAppLijst_(index);
+      svg.querySelectorAll(".b").forEach((balk, i) => balk.classList.toggle("dim", i !== index));
+    };
+    svg.addEventListener("pointerdown", (event) => {
+      this.appScrub_ = true;
+      pick(at(event));
+    });
+    svg.addEventListener("pointermove", (event) => {
+      if (this.appScrub_ || event.pointerType === "mouse") pick(at(event));
+    });
+    for (const done of ["pointerup", "pointercancel"]) {
+      svg.addEventListener(done, () => {
+        this.appScrub_ = false;
+      });
+    }
+    svg.addEventListener("pointerleave", (event) => {
+      if (event.pointerType === "mouse") this.clearAppPick_();
+    });
+  }
+
+  /**
+   * De lijst onder de balken: per apparaat zijn kWh en zijn deel van het huis,
+   * van groot naar klein, over de hele periode of over één vak (`index`).
+   * Een deel staat er alleen als de apparaten samen in het huis passen; een
+   * schatting uit het vermogen kan te hoog uitvallen, en "112 %" kan niemand
+   * plaatsen (dezelfde regel als in het rapport).
+   */
+  paintAppLijst_(index) {
+    const reeksen = this.appReeksen_ ?? [];
+    const waarde = (reeks) => (index === null ? reeks.totaal : reeks.vakken[index]);
+    const huis = this.appHuis_ ? (index === null ? this.appHuis_.reduce((a, b) => a + b, 0) : this.appHuis_[index]) : null;
+    const samen = reeksen.reduce((totaal, reeks) => totaal + waarde(reeks), 0);
+    const deelKlopt = huis !== null && huis > 0 && samen <= huis * 1.02;
+
+    const rijen = reeksen
+      .filter((reeks) => waarde(reeks) >= 0.005)
+      .sort((a, b) => waarde(b) - waarde(a))
+      .map((reeks) => ({
+        label: reeks.label,
+        kleur: reeks.kleur === "rest" ? "var(--dac-app-rest)" : `var(--dac-app-${reeks.kleur})`,
+        kwh: waarde(reeks),
+        exact: reeks.exact,
+      }));
+    if (deelKlopt && huis - samen >= 0.05) {
+      rijen.push({ label: "Rest van het huis", kleur: null, kwh: huis - samen, exact: true, rest: true });
+    }
+
+    // Zonder deel geen lege kolom: op een smal scherm is dat ruimte voor de naam.
+    this.$("#apparaten-lijst").classList.toggle("zonder-deel", !deelKlopt);
+    this.$("#apparaten-lijst").replaceChildren(
+      ...rijen.map((rij) => {
+        const li = document.createElement("li");
+        if (rij.rest) li.className = "rest";
+        const vlak = document.createElement("i");
+        if (rij.kleur) vlak.style.background = rij.kleur;
+        const naam = document.createElement("span");
+        naam.className = "app-naam";
+        naam.textContent = rij.label;
+        const kwh = document.createElement("span");
+        kwh.className = "app-kwh";
+        kwh.textContent = `${rij.exact ? "" : "≈ "}${nl(rij.kwh, rij.kwh < 10 ? 2 : 1)} kWh`;
+        const deel = document.createElement("span");
+        deel.className = "app-deel";
+        deel.textContent = deelKlopt ? `${Math.round((rij.kwh / huis) * 100)}%` : "";
+        li.append(vlak, naam, kwh, deel);
+        return li;
+      })
+    );
+
+    const zinnen = [];
+    if (!rijen.length) zinnen.push("In dit vak verbruikte geen van je apparaten iets.");
+    if (rijen.some((rij) => !rij.exact)) zinnen.push("≈ is geschat uit het vermogen, voor een apparaat zonder energieteller.");
+    if (huis !== null && !deelKlopt && samen > 0) {
+      zinnen.push("Samen komen de schattingen boven wat het huis verbruikte, dus er staat geen deel bij.");
+    }
+    this.$("#apparaten-note").textContent = zinnen.join(" ");
+  }
+
+  clearAppPick_() {
+    if (!this.appReeksen_ || this.$("#apparaten-card")?.hidden) return;
+    this.$("#apparaten-titel").textContent = "Wat je apparaten verbruikten";
+    this.paintAppLijst_(null);
+    for (const balk of this.$$("#apparaten-stage .b")) balk.classList.remove("dim");
+  }
+
   paintGas_() {
     this.paintVolume_("gas", "Gasverbruik per periode");
   }
@@ -2357,6 +2605,28 @@ DacViewHistory.css = /* css */ `
   }
 
   .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
+
+  /* Per apparaat (v0.121.0): een regel per apparaat met zijn kleur, zijn naam,
+     zijn kWh en zijn deel van het huis. De lijst is ook de legenda. */
+  .app-lijst { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 2px; }
+  .app-lijst li {
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr) auto 3.2em;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+    border-top: 1px solid var(--dac-border);
+    font-size: 13px;
+  }
+  .app-lijst.zonder-deel li { grid-template-columns: 12px minmax(0, 1fr) auto; }
+  .app-lijst.zonder-deel .app-deel { display: none; }
+  .app-lijst li:first-child { border-top: 0; }
+  .app-lijst i { width: 12px; height: 12px; border-radius: 3px; display: block; }
+  .app-lijst li.rest i { border: 1px dashed var(--dac-border-hi); box-sizing: border-box; }
+  .app-lijst li.rest .app-naam { color: var(--dac-ink-2); }
+  .app-naam { color: var(--dac-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app-kwh { color: var(--dac-ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .app-deel { color: var(--dac-ink-3); font-variant-numeric: tabular-nums; text-align: right; }
   .legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dac-ink-2); }
   .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: 0 0 auto; }
 

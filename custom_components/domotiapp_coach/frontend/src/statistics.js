@@ -209,6 +209,14 @@ export async function fetchPrices(hass, entityId, period, start) {
  * enough to say what a dishwasher costs in a month, not a meter reading, and
  * the report says so.
  *
+ * Het gemiddelde komt per uur (over een jaar per dag), net als bij
+ * `fetchBattery`, en wordt pas in het paneel per vak opgeteld (v0.121.0). Tot
+ * dan was het het gemiddelde van een heel vak maal 24 uur of 730: een dag die
+ * nog liep telde alsof hij al om was, en een maand had altijd 730 uur. Het
+ * rapport zag daardoor apparaten die samen meer verbruikten dan het huis.
+ * De tijden van een teller zijn die van het vak, die van een schatting die van
+ * het uur of de dag; `perVak` in history.js legt ze allebei in hun vak.
+ *
  * @returns {Promise<Map<string, {rows: Map<number, number>, exact: boolean}>>}
  */
 export async function fetchDevices(hass, devices, period, start) {
@@ -216,12 +224,12 @@ export async function fetchDevices(hass, devices, period, start) {
   if (!hass || !devices.length) return out;
 
   const bucket = PERIODS.find((item) => item.id === period)?.bucket ?? "day";
-  const hours = { hour: 1, day: 24, month: 730 }[bucket] ?? 24;
+  const fijn = period === "year" ? "day" : "hour";
 
   const counters = devices.filter((device) => device.energy);
   const meters = devices.filter((device) => !device.energy && device.power);
 
-  const ask = async (ids, types) => {
+  const ask = async (ids, types, vak) => {
     if (!ids.length) return {};
     try {
       return (
@@ -230,7 +238,7 @@ export async function fetchDevices(hass, devices, period, start) {
           start_time: start.toISOString(),
           end_time: periodEnd(period, start).toISOString(),
           statistic_ids: ids,
-          period: bucket,
+          period: vak,
           types,
           units: { energy: "kWh", power: "W" },
         })) ?? {}
@@ -242,9 +250,18 @@ export async function fetchDevices(hass, devices, period, start) {
   };
 
   const [sums, means] = await Promise.all([
-    ask(counters.map((device) => device.energy), ["change"]),
-    ask(meters.map((device) => device.power), ["mean"]),
+    ask(counters.map((device) => device.energy), ["change"], bucket),
+    ask(meters.map((device) => device.power), ["mean"], fijn),
   ]);
+
+  const middernacht = new Date();
+  middernacht.setHours(0, 0, 0, 0);
+  const uren = (tijd) => {
+    if (fijn === "hour") return 1;
+    // Het gemiddelde van vandaag gaat alleen over de uren die er al zijn.
+    if (tijd >= middernacht.getTime()) return Math.max(0, Math.floor((Date.now() - tijd) / 3600000));
+    return 24;
+  };
 
   for (const device of counters) {
     const rows = new Map();
@@ -259,8 +276,9 @@ export async function fetchDevices(hass, devices, period, start) {
     const rows = new Map();
     for (const row of means[device.power] ?? []) {
       if (row.mean === null || row.mean === undefined) continue;
-      // Gemiddeld vermogen maal de lengte van het vak, van watt naar kWh.
-      rows.set(new Date(row.start).getTime(), (Number(row.mean) * hours) / 1000);
+      // Gemiddeld vermogen maal de uren van het uur of de dag, van watt naar kWh.
+      const tijd = new Date(row.start).getTime();
+      rows.set(tijd, (Number(row.mean) * uren(tijd)) / 1000);
     }
     if (rows.size) out.set(device.id, { rows, exact: false });
   }

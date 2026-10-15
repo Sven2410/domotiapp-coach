@@ -437,3 +437,38 @@ beurten uit dat snap ik niet".
   breed werd als het opschrift erboven. Nu is het zo breed als de lijst.
 - **Beurten** begint met wat een beurt is: "Een beurt is één keer dat de coach een
   apparaat liet draaien, zoals de auto laden of de vaatwasser."
+
+## Per apparaat (v0.121.0)
+
+De eigenaar op 15-10-2026: "ik wil ook het energieverbruik per apparaat kunnen zien in
+historie zoals het HA energy dashboard snap je? En dat per dag per jaar etc moet op die
+pagina's er bij komen."
+
+Onder de grafiek van Energie staat bij elke periode de kaart **Per apparaat**, zoals
+"Afzonderlijke apparaten" in het energiedashboard van Home Assistant (`paintApparaten_`
+in views/history.js):
+
+- **Gestapelde balken** over dezelfde vakken als de grafiek erboven: bij Dag per uur, bij
+  Week en Maand per dag, bij Jaar per maand. Elk apparaat houdt zijn kleur op de volgorde
+  van Apparaten en niet op grootte (`--dac-app-1` tot en met 6 in theme.js, de reeks van
+  de dataviz-richtlijn zonder rood en groen, die zijn van de status). Vanaf het zevende
+  apparaat is het grijs: "Overige apparaten" (`apparaatReeksen`).
+- **Een lijst** eronder, van groot naar klein: per apparaat zijn kWh en zijn deel van wat
+  het huis verbruikte, en onderaan "Rest van het huis", wat de apparaten samen niet
+  verklaren. Aanwijzen of tikken zet de lijst en de kop op dat ene uur, die dag of die
+  maand, zoals bij gas (`paintAppLijst_`).
+- De thuisbatterij staat er niet in: die verbruikt niet, die schuift op.
+- Het deel en de rest staan er alleen als het huisverbruik bekend is (met een
+  opwekteller) en de apparaten samen niet meer dan 2% boven het huis uitkomen; dezelfde
+  regel als in het rapport. Anders staat er waarom.
+- Een apparaat zonder energieteller wordt geschat uit zijn vermogen en krijgt een ≈.
+
+**De schatting zelf is rechtgezet.** `fetchDevices` in statistics.js nam het gemiddelde
+vermogen van een heel vak maal 24 uur, of maal 730 voor een maand. Een dag die nog liep
+telde daardoor alsof hij om was, en het rapport zag apparaten die samen meer
+verbruikten dan het huis. Nu komt het gemiddelde per uur (over een jaar per dag, en van
+vandaag alleen de uren die voorbij zijn), net als bij de batterij, en legt `perVak` het
+in de vakken van de grafiek. Het rapport rekent daarmee ook per vak met de prijs van dat
+vak (`deviceRows_`).
+
+Proeven: vier "per apparaat" in test_rapport.mjs.
