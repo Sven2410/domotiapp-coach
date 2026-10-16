@@ -3466,6 +3466,68 @@ controle("zonder vermogen: niet op zon, en de reden noemt het typeplaatje",
 controle("een temperatuur met een halve graad op z'n Nederlands",
          planner._graden(21.5) == "21,5 °C" and planner._graden(23.0) == "23 °C", planner._graden(21.5))
 
+print("=== 76. de afbouw bovenin: het gemiddelde vanaf waar de auto remt, niet het laagste punt (v0.128.0) ===")
+# De eerste woning op 10-10-2026, op 13 A driefasig: tot 96% 9,15 kW, 98% 7,7 kW,
+# 99% 4,1 kW, vlak voor 100% 1,6 kW. Van 90 naar 100 duurde 70 minuten, 7,74 kWh
+# aan de stekker (de teller van de paal). De coach had 1,69 kW onthouden en
+# rekende daarmee de hele band: 4,85 uur. Gemiddeld nam hij vanaf 97,5% ongeveer
+# 3,6 kW (1,94 kWh in 32 minuten).
+auto76 = Car(capacity_kwh=73.7, phases=3, soc_percent=90.0, efficiency=0.952)
+oud76 = planner._uren_met_afbouw(replace(auto76, tempo_per_band={9: 1.69}), 9.15, 7.74)
+nieuw76 = planner._uren_met_afbouw(
+    replace(auto76, tempo_per_band={9: 3.6}, tempo_vanaf={9: 97.5}), 9.15, 7.74)
+print(f"  90 tot 100%: laagste punt over de hele band {oud76:.2f} u, gemiddelde vanaf 97,5% {nieuw76:.2f} u, gemeten 1,14 u")
+controle("het laagste punt over de hele band rekende meer dan vier uur", oud76 > 4.0, f"{oud76}")
+controle("het gemiddelde vanaf waar hij remt zit binnen tien minuten van de 70 gemeten minuten",
+         abs(nieuw76 - 70 / 60) < 10 / 60, f"{nieuw76}")
+heel76 = planner._uren_met_afbouw(
+    replace(auto76, tempo_per_band={9: 1.69}, tempo_vanaf={9: 90.0}), 9.15, 7.74)
+controle("een grens onderin de band rekent zoals de hele band", abs(heel76 - oud76) < 1e-9, f"{heel76} tegen {oud76}")
+# Op één fase (3,2 kW) neemt hij tot 99% alles wat de paal geeft: dan maakt de
+# afbouw van 3,6 kW niets uit, en een gemiddelde van de hele band zou dat wel.
+een76 = planner._uren_met_afbouw(
+    replace(auto76, tempo_per_band={9: 3.6}, tempo_vanaf={9: 97.5}), 3.2, 7.74)
+controle("op een paal die minder geeft dan het gemiddelde telt alleen de paal",
+         abs(een76 - 7.74 / 3.2) < 0.05, f"{een76} tegen {7.74 / 3.2}")
+# Midden in de band, boven de grens: alles wat nog komt is afbouw.
+boven76 = planner._uren_met_afbouw(
+    replace(auto76, soc_percent=98.0, tempo_per_band={9: 3.6}, tempo_vanaf={9: 97.5}), 9.15, 1.55)
+controle("boven de grens rekent hij alleen nog met het gemiddelde",
+         abs(boven76 - 2.0 / 100 * 73.7 / 0.952 / 3.6) < 1e-6, f"{boven76}")
+
+print("=== 77. de tijdlijn als de klaar-tijdregel laadt (v0.128.0) ===")
+# De eerste woning op 16-10-2026 om 21:33: de paal laadde sinds 20:17 op de
+# klaar-tijdregel, en de tijdlijn zei "Wachten, duurder dan wat hij nodig heeft"
+# voor de uren tot 01:00.
+nu77 = dt.datetime(2026, 10, 16, 21, 37)
+prijzen77 = [
+    {"start": dt.datetime(2026, 10, 16, 21) + dt.timedelta(hours=i),
+     "end": dt.datetime(2026, 10, 16, 22) + dt.timedelta(hours=i), "price": p}
+    for i, p in enumerate([0.397, 0.382, 0.366, 0.376, 0.356, 0.335, 0.316, 0.312, 0.314, 0.313, 0.33, 0.35])
+]
+auto77 = Car(capacity_kwh=73.7, phases=3, soc_percent=45.0, efficiency=0.952, max_amps=16.0)
+paal77 = Charger(connected=True, charging=True, max_amps=13)
+venster77 = Window(enabled=True, deadline=dt.datetime(2026, 10, 17, 8, 0))
+gewoon77 = planner.timeline(nu77, prijzen77, Grid(), auto77, paal77, venster77, 13)
+door77 = planner.timeline(nu77, prijzen77, Grid(), auto77, paal77, venster77, 13, doorladen=True)
+print(f"  gewoon: {[(b.start.strftime('%H'), b.charging) for b in gewoon77.blocks][:5]}")
+print(f"  doorladen: {[(b.start.strftime('%H'), b.charging, b.why) for b in door77.blocks][:7]}")
+controle("zonder de regel wacht de tijdlijn het eerste uur", not gewoon77.blocks[0].charging, "")
+laden77 = [b for b in door77.blocks if b.charging]
+controle("met de regel laadt de tijdlijn vanaf nu, aaneengesloten",
+         door77.blocks[0].charging and all(b.charging for b in door77.blocks[:len(laden77)]),
+         f"{[(b.start, b.charging) for b in door77.blocks]}")
+controle("op het plafond van de paal", all(b.amps == 13 for b in laden77), f"{[b.amps for b in laden77]}")
+controle("en het laatste uur zegt wanneer hij vol is",
+         "vol rond" in laden77[-1].why and door77.expected_done is not None
+         and laden77[-1].start <= door77.expected_done <= laden77[-1].end, f"{laden77[-1].why}")
+controle("de kilowatturen tellen op tot wat er nog in moet",
+         abs(sum(b.kwh for b in laden77) - door77.kwh_needed) < 0.01,
+         f"{sum(b.kwh for b in laden77)} tegen {door77.kwh_needed}")
+controle("en het vol-moment komt uit dezelfde som als de klaar-tijdregel",
+         abs((door77.expected_done - nu77).total_seconds() / 3600 - door77.hours_needed) < 1 / 60,
+         f"{door77.expected_done} tegen {door77.hours_needed}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

@@ -549,6 +549,22 @@ afbouw_krap_geleerd = afbouw_krap.kopie(
     naam="afbouw-krap-geleerd", uitleg="hetzelfde, en de coach weet het van een vorige beurt",
     geleerd_tempo={8: 1.84, 9: 1.84},
 )
+# Een auto die pas vlak voor vol afremt (v0.128.0). In de eerste woning bleef de
+# auto op 10-10-2026 tot 96% op vol vermogen en ging hij van 90 naar 100 in 70
+# minuten; de coach had het laagste punt van die band onthouden (1,69 kW, vlak
+# voor 100%) en rekende ermee voor de hele band. Op 16-10-2026 liet de
+# klaar-tijdregel hem daardoor om 20:17 laden in plaats van om 01:00. `-oud`
+# rekent zoals tot v0.128.0: het tempo van bovenin over de hele band.
+afbouw_bovenin = dyn_geen_zon.kopie(
+    naam="afbouw-bovenin", uitleg="dynamisch zonder panelen, grote auto op 45% om 22:00 erin, klaar om 06:00; vanaf 96% neemt hij nog 6 A, en de coach weet vanaf waar",
+    begin="2026-09-07 21:55", kabel_erin="22:00", duur_uren=9,
+    auto=replace(GROTE, soc=45.0, afbouw_vanaf=96.0, afbouw_deel=0.375),
+    geleerd_tempo={9: (4.14, 96.0)},
+)
+afbouw_bovenin_oud = afbouw_bovenin.kopie(
+    naam="afbouw-bovenin-oud", uitleg="hetzelfde, maar met het tempo van bovenin voor de hele band, zoals tot v0.128.0",
+    geleerd_tempo={9: 4.14},
+)
 
 # --- wat 17-09-2026 thuis leerde ---------------------------------------------
 #
@@ -1454,7 +1470,7 @@ ALLE = [
     tien_uur, tien_uur_zon, tien_uur_valt_tegen, tien_uur_vast, equalizer, prijzen_weg,
     weekend, weekend_geen_zon, weekend_voorspelling_mis,
     ford_storing, ford_storing_traag, een_fase_groep, een_fase_blind, afbouw, afbouw_geleerd,
-    afbouw_krap, afbouw_krap_geleerd, fasekeuze, zon_belofte, zon_belofte_dyn,
+    afbouw_krap, afbouw_krap_geleerd, afbouw_bovenin, afbouw_bovenin_oud, fasekeuze, zon_belofte, zon_belofte_dyn,
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,

@@ -316,6 +316,11 @@ class Car:
     # Leeg zolang er niets gemeten is; dan rekent de coach met de paal. Zie
     # `hours_needed` en `_tempo_leren` in coach.py.
     tempo_per_band: dict[int, float] = field(default_factory=dict)
+    # Vanaf welke accustand de auto in die band zelf begon te remmen (v0.128.0).
+    # Daaronder nam hij alles wat de paal gaf, daarboven gemiddeld het tempo
+    # van `tempo_per_band`. Een band zonder deze grens remt over zijn hele
+    # breedte. Zie `_uren_met_afbouw`.
+    tempo_vanaf: dict[int, float] = field(default_factory=dict)
     # Of het aantal fasen hierboven van een meting komt en niet uit het profiel.
     # In de klantwoning koos de Easee op 06-09-2026 om 04:17 in zijn automatische
     # fasemodus zelf één fase, terwijl het profiel drie zegt. Dan hoort de coach
@@ -1201,26 +1206,40 @@ def _uren_met_afbouw(car: Car, kw: float, energy: float) -> float:
     zelf hun doorlaatbaarheid in ampère terug, zodat de accu het laatste stuk
     niet volle bak geladen wordt." Wat zo'n auto per band van tien procent
     aankan staat in `Car.tempo_per_band`, gemeten bij eerdere beurten; zonder
-    die meting is het gewoon energie gedeeld door vermogen. Per band telt het
-    laagste van wat de paal geeft en wat de auto daar aannam.
+    die meting is het gewoon energie gedeeld door vermogen.
+
+    Per band: tot de accustand waar de auto begon te remmen (`Car.tempo_vanaf`)
+    wat de paal geeft, daarboven het laagste van wat de paal geeft en wat de
+    auto daar gemiddeld aannam (v0.128.0). Tot dan gold het laagste punt voor
+    de hele band. De eigenaar op 16-10-2026: "ik wil een gemiddelde hebben en
+    niet de laagste band kiezen." In de eerste woning stond 1,69 kW voor 90 tot
+    100 procent, gemeten vlak voor 100%. Dat werd 4,85 uur, terwijl de auto op
+    10-10-2026 tot 96% op 9,15 kW bleef en van 90 naar 100 in 70 minuten ging;
+    de klaar-tijdregel liet hem daardoor om 20:17 laden voor € 0,39 in plaats
+    van om 01:00.
     """
     if not car.tempo_per_band or car.soc_percent is None or not car.capacity_kwh:
         return energy / kw
     uren = 0.0
     soc = car.soc_percent
     grens = doel_van(car)
-    # Dezelfde verhouding als `energy_needed_kwh`: wat er aan de stekker in
-    # moet is wat er in de accu bij moet, gedeeld door het rendement. Tot het
-    # doel, want banden daarboven worden nooit geladen en hun trage tempo hoort
-    # de klaar-tijd dus ook niet naar voren te halen.
+
+    def kwh(van: float, tot: float) -> float:
+        # Dezelfde verhouding als `energy_needed_kwh`: wat er aan de stekker in
+        # moet is wat er in de accu bij moet, gedeeld door het rendement.
+        return max(0.0, tot - van) / 100.0 * car.capacity_kwh / rendement_van(car)
+
+    # Tot het doel, want banden daarboven worden nooit geladen en hun trage
+    # tempo hoort de klaar-tijd dus ook niet naar voren te halen.
     while soc < grens:
         band = int(soc // 10)
         tot = min(grens, (band + 1) * 10.0)
-        kwh = (tot - soc) / 100.0 * car.capacity_kwh / rendement_van(car)
-        tempo = min(kw, car.tempo_per_band.get(band, kw))
-        if tempo <= 0:
-            tempo = kw
-        uren += kwh / tempo
+        tempo = car.tempo_per_band.get(band)
+        if tempo is None or tempo <= 0:
+            uren += kwh(soc, tot) / kw
+        else:
+            rem = min(tot, max(soc, car.tempo_vanaf.get(band, band * 10.0)))
+            uren += kwh(soc, rem) / kw + kwh(rem, tot) / min(kw, tempo)
         soc = tot
     return uren
 
@@ -2153,6 +2172,7 @@ def timeline(
     ceiling: int,
     tariff: Tariff = Tariff(),
     forecast: Forecast = Forecast(),
+    doorladen: bool = False,
 ) -> Plan:
     """De hele tijdlijn tot de auto vol moet zijn.
 
@@ -2164,6 +2184,9 @@ def timeline(
 
     De eigenaar op 30-08-2026: "ik wil zien wat de coach van plan is met hele tijdlijn
     tot dat hij vol moet zijn."
+
+    `doorladen`: de klaar-tijdregel laadt (v0.128.0). Dan volgt de tijdlijn die
+    en niet de goedkoopste uren, zie `_doorladen`.
     """
     klaar = window.deadline if window.enabled else None
     # De tijdlijn eindigt waar het plan eindigt: een uur voor de klaar-tijd.
@@ -2196,6 +2219,9 @@ def timeline(
         estimated=forecast.estimated,
         solar_note=solar_measured_note(forecast),
     )
+    if doorladen and kwh is not None:
+        _doorladen(plan, now, prices, tariff, car, amps, structureel, kwh, einde)
+        return plan
 
     horizon = max((rij["end"] for rij in prices), default=None)
     alleen_zon = bool(prices) and einde is not None and horizon < einde
@@ -2378,6 +2404,66 @@ def timeline(
     if not plan.blocks:
         plan.note = "Er is niets te plannen voor deze periode."
     return plan
+
+
+def _doorladen(
+    plan: Plan,
+    now: datetime,
+    prices: list[dict],
+    tariff: Tariff,
+    car: Car,
+    amps: int,
+    structureel: int,
+    kwh: float,
+    einde: datetime | None,
+) -> None:
+    """De tijdlijn als de klaar-tijdregel laadt: vanaf nu op vol vermogen tot vol.
+
+    Tot v0.128.0 rekende de tijdlijn ook dan de goedkoopste uren uit. In de
+    eerste woning stond er op 16-10-2026 om 21:33 "Wachten, duurder dan wat hij
+    nodig heeft" voor de uren tot 01:00, terwijl de paal sinds 20:17 op 13 A
+    laadde. De eigenaar: "Sterker nog, hij is NU aan t laden tegen 0,394." En de
+    batterij leest deze blokken om te weten wanneer de auto laadt
+    (`_auto_laden` in coach.py).
+
+    Hoe lang het duurt komt uit dezelfde som als de klaar-tijdregel
+    (`hours_needed`, met de afbouw bovenin), en de kilowatturen gaan naar rato
+    van de tijd over de blokken.
+    """
+    kw_vol = watts_for(structureel, car.phases) / 1000.0
+    uren = hours_needed(car, structureel) or (kwh / kw_vol if kw_vol > 0 else 0.0)
+    vol = now + timedelta(hours=uren)
+    klaar_om = vol.replace(second=0, microsecond=0)
+    grens = max(einde or vol, vol)
+    blokken = prices or _vlakke_blokken(now, grens, tariff)
+    for rij in blokken:
+        if rij["end"] <= now or rij["start"] >= grens:
+            continue
+        van = max(rij["start"], now)
+        tot = min(rij["end"], vol)
+        laadt = tot > van and uren > 0
+        stroom = amps if rij["start"] <= now < rij["end"] else structureel
+        kwh_blok = kwh * (tot - van).total_seconds() / 3600.0 / uren if laadt else 0.0
+        if not laadt:
+            waarom = "hij is dan al klaar"
+        elif rij["start"] <= klaar_om <= rij["end"]:
+            waarom = f"nog {_kwh(kwh_blok)}, vol rond {_clock(klaar_om)}"
+        else:
+            waarom = "op vol vermogen, anders is hij niet op tijd vol"
+        plan.blocks.append(
+            Blok(
+                start=rij["start"],
+                end=rij["end"],
+                price=rij["price"],
+                charging=laadt,
+                why=waarom,
+                kwh=kwh_blok,
+                amps=stroom if laadt else 0,
+                kw=round(watts_for(stroom, car.phases) / 1000.0, 2) if laadt else 0.0,
+            )
+        )
+    plan.expected_done = klaar_om
+    plan.planned_kwh = kwh
 
 
 

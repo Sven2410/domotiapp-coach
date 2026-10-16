@@ -638,6 +638,26 @@ if (vk := v("afbouw-krap")) and (vg := v("afbouw-krap-geleerd")):
              f"begin {eerste(vg)}, vol {vg.klaar_op}, klaar-tijd {vg.klaar_tijd}")
     controle("afbouw krap: allebei op tijd vol", gehaald(vk) and gehaald(vg), "")
 
+# v0.128.0: per band het gemiddelde en vanaf waar de auto remt, in plaats van het
+# laagste punt voor de hele band. De eerste woning op 16-10-2026: de
+# klaar-tijdregel liet hem om 20:17 laden in plaats van om 01:00.
+if (vb := v("afbouw-bovenin")) and (vo := v("afbouw-bovenin-oud")):
+    eerste = lambda vl: next((r.tijd for r in vl.regels if r.paal_w > 0), None)
+    print(f"  afbouw bovenin: begin {eerste(vb)}, vol {vb.klaar_op}, € {vb.betaald:.2f}; "
+          f"oud: begin {eerste(vo)}, vol {vo.klaar_op}, € {vo.betaald:.2f}; geleerd {vb.geleerd} vanaf {vb.geleerd_van}")
+    controle("afbouw bovenin: met de grens begint hij later dan met het tempo van bovenin over de hele band",
+             eerste(vb) is not None and eerste(vo) is not None and eerste(vb) > eerste(vo),
+             f"{eerste(vb)} tegen {eerste(vo)}")
+    controle("afbouw bovenin: en dat is goedkoper", vb.betaald < vo.betaald - 0.1,
+             f"€ {vb.betaald:.2f} tegen € {vo.betaald:.2f}")
+    controle("afbouw bovenin: en toch een uur voor de klaar-tijd vol",
+             gehaald(vb) and vb.klaar_op is not None
+             and vb.klaar_op <= vb.klaar_tijd - virtueel.dt.timedelta(minutes=55),
+             f"vol {vb.klaar_op}, klaar-tijd {vb.klaar_tijd}")
+    controle("afbouw bovenin: de coach leert het gemiddelde vanaf 96%, niet de hele band",
+             abs(vb.geleerd.get(9, 0) - 4.14) < 0.1 and abs(vb.geleerd_van.get(9, 0) - 96.0) < 0.6,
+             f"{vb.geleerd} vanaf {vb.geleerd_van}")
+
 # --- 17-09-2026 thuis: de wekstroom en de fasekeuze van de paal ---------------
 #
 # De Easee koos bij een wekstroom van tien ampère één fase. Sinds de wekstroom

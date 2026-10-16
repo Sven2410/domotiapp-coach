@@ -855,12 +855,71 @@ tussen 59,7 en 60%. Nu vervalt elke band tot en met de huidige, gemeten bij een
 lagere of gelijke stand, zodra de auto twee ronden duidelijk meer neemt. Een band
 erboven blijft. Proef 138, en proef 71 aangepast (daar bleef een lagere band staan).
 
-**Wat er niet veranderd is: het tempo bovenin geldt voor de hele band.** Band 9
-staat op 1,57 kW, gemeten bij 99,5%. `_uren_met_afbouw` rekent daarmee voor 90 tot
+**Wat er toen niet veranderde: het tempo bovenin gold voor de hele band.** Band 9
+stond op 1,57 kW, gemeten bij 99,5%. `_uren_met_afbouw` rekende daarmee voor 90 tot
 100 procent, 4,4 uur, terwijl de Ford op 10-10 van 95 naar 99% in zestien minuten ging
 en het laatste procent 66 minuten duurde. Op 05-10 greep de klaar-tijdregel daardoor
 om 00:51 in in plaats van op 02:45 te wachten; vol om 02:41, € 0,22 duurder dan het
-optimum. Zo bedoeld ("liever te vroeg vol dan te laat"); een keuze voor de eigenaar.
+optimum. Toen nog zo bedoeld; zie hieronder.
+
+## De afbouw bovenin: het gemiddelde vanaf waar hij remt (v0.128.0)
+
+In de eerste woning op 16-10-2026, met de auto op 13 A driefasig en klaar om 08:00.
+Om 20:17:40 sloeg de klaar-tijdregel aan ("Nu doorladen, anders is de auto om 08:00
+niet vol") en hij laadde de hele avond voor € 0,38 tot € 0,40, terwijl het plan op
+de kaart pas om 01:00 begon. De eigenaar om 21:33: "Sterker nog, hij is NU aan t
+laden tegen 0,394."
+
+De oorzaak was band 9: 1,69 kW, geleerd op 10-10-2026 om 06:12:20 vlak voor 100%.
+Daarmee rekende de som 8,2 kWh / 1,69 = 4,85 uur voor 90 tot 100 procent, samen 9,31
+uur. Gemeten op 10-10 (de recorder van de paal):
+
+| tijd | accustand | vermogen | stroom |
+|---|---|---|---|
+| 05:03:49 | 90% | 9.159 W | 13,15 A |
+| 05:33:49 | 96% | 9.157 W | 13,13 A |
+| 05:43:49 | 98% | 7.709 W | 11,01 A |
+| 05:53:49 | 99% | 4.053 W | 5,87 A |
+| 06:12:20 | | 1.611 W | 2,45 A |
+| 06:13:49 | 100% | 0 W | 0 A |
+
+Van 90 naar 100 in 70 minuten, 7,74 kWh aan de stekker. De eigenaar: "ik wil een
+gemiddelde hebben en niet de laagste band kiezen."
+
+**Per band nu twee dingen: het gemiddelde van de remronden (`kw`) en de accustand
+waar het remmen begon (`van`).** `_uren_met_afbouw` rekent tot `van` met wat de paal
+geeft en daarboven met het laagste van paal en gemiddelde (`Car.tempo_vanaf`). Een
+gemiddelde over de hele band had afgehangen van wat de paal toen gaf: gemeten op één
+fase en later op drie (een Alfen die wisselt) rekende het dan veel te traag. Zo niet:
+op één fase (3,2 kW) neemt de auto tot 99% alles, en de afbouw van 3,6 kW maakt dan
+niets uit. Met de getallen van 10-10 wordt het 1,17 uur tegen 1,14 gemeten (proef 76
+in test_planner.py).
+
+- **Een remronde telt pas als de volgende er ook een is**, en dan telt de eerste
+  alsnog mee (`_tempo_vorig`). Hetzelfde tempo hoeven ze niet te geven: een auto die
+  afbouwt zakt soms meer dan `TEMPO_SPELING` per minuut.
+- **Hij schrijft als het gemiddelde `TEMPO_STAP` (0,1 kW) verschuift**, de grens een
+  halve procent of de meting een procent hoger komt (`_tempo_te_schrijven`). Het
+  bewaarde kan dus tot 0,1 kW naast het laatste gemiddelde liggen.
+- **Een meting die minder hoog in de band kwam vervangt er geen die hoger kwam**
+  (`TEMPO_BEREIK`, een procentpunt): een beurt tot 98% weet niet wat er tussen 98 en
+  100 gebeurt.
+- **Rijen zonder `van` vallen eruit**, bij het lezen (`_tempo_uit`) en bij het opslaan
+  (`_tempo_klopt` in storage.py). Dat zijn de laagste punten van daarvoor. De volgende
+  beurt door die band meet het opnieuw; tot dan rekent de som die band op de paal, en
+  daar is het uur reserve voor.
+- **Weerleggen blijft** (`_tempo_weerleggen`): binnen een band loopt het tempo alleen
+  af, dus wat de auto na de meting duidelijk meer neemt dan het gemiddelde, kon hij
+  tijdens de meting ook.
+
+**En de tijdlijn zegt het als de klaar-tijdregel laadt** (`_doorladen` in planner.py,
+`doorladen` in `_tijdlijn`). Tot nu toe rekende de tijdlijn dan gewoon de goedkoopste
+uren en stond er "Wachten, duurder dan wat hij nodig heeft" boven een paal die laadde.
+Nu laadt de tijdlijn vanaf nu op het plafond tot hij vol is, en komt "vol rond" uit
+dezelfde som als de regel (`hours_needed`, met de afbouw). De batterij leest die
+blokken ook (`_auto_laden`). Proef 77 in test_planner.py, 163 en 164 in test_coach.py;
+scenario's `afbouw-bovenin` en `afbouw-bovenin-oud` (begin 00:02 tegen 23:29, € 10,98
+tegen € 11,14, optimum € 10,92).
 
 **Een stille paal is geen stille meter, en het wordt één keer gezegd** (`_nettip`,
 `_getipt`). Van 25-09 15:00 tot 27-09 22:00 had de Easee geen vermogen; de slimme
