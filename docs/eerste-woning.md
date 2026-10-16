@@ -318,6 +318,30 @@ niet. En "Zonder" in geld en verbruikt maal de prijs kunnen een paar cent
 verschillen: het kasboek rekent met de metingen van de coach, het verbruik met
 de uurgemiddelden van Home Assistant (op 29-09 2,48 tegen 2,61 kWh ontladen).
 
+**Batterij geladen en ontladen (v0.126.0).** De eigenaar op 16-10-2026: "bij
+historie zie ik nu niet de thuisbatterij van zoveel geladen en zoveel
+ontladen kan dat er ook nog in?" Twee tegels onder Energie, na Naar het net en
+voor Zelfvoorzienend, en dezelfde twee vakjes in het rapport; bij het
+aanwijzen van een balk die van dat uur of die dag. Ze staan er alleen als de
+batterij in de periode samen minstens 0,05 kWh deed (`accuTegels_`), en tellen
+nergens bij op: wat erin ging kwam van de zon of van het net.
+
+De bron is dezelfde als die van het verbruik (`fetchBattery`), die nu per uur
+ook `erin` en `eruit` apart geeft, zodat geladen min ontladen precies is wat
+Verbruikt eraf haalt. Tellers en losse sensoren voor laden en ontladen meten
+dat apart. Eén vermogenssensor met een teken geeft per uur alleen netto, en
+wordt daarom ook over een jaar per uur gevraagd: per dag valt middag laden en
+avond ontladen tegen elkaar weg. Laden en ontladen binnen één uur ziet die nog
+steeds niet.
+
+Het energiedashboard van Home Assistant kan andere getallen geven, want daar
+kiest de bewoner zelf welke sensoren erin staan, vaak de tellers van de
+batterij zelf. Bij de eigenaar op 14-10-2026: het energiedashboard (de
+tellers van de Anker) 12,5 kWh geladen en 5,9 ontladen, het gemiddelde van de
+twee vermogenssensoren waarmee Historie rekent 13,4 en 5,7; op 15-10 11,2 en
+13,2 tegen 12,4 en 14,6. De tellers van de batterij zelf (`accu_in`,
+`accu_out`) gebruikt Historie niet: die meten aan de accukant.
+
 ## De tijdlijn (v0.115.0)
 
 De eigenaar op 11-10-2026: "Ik wil kunnen zien wat de coach en de aanstuurbare

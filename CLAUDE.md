@@ -199,7 +199,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de vaatwasser: Home Connect, Home Connect Local, een domme vaatwasser, de eindtijd, na de klaar-tijd; en de wasmachine en de droger (Miele, tellen op een energieteller) | `docs/vaatwasser.md` |
 | de boiler | `docs/boiler.md` |
 | de airco: bijverwarmen of bijkoelen op zon (of op goedkope uren als de bewoner dat kiest), geen thermostaat, Mitsubishi Electric als merk, de bewoner die wint, de cloud die een minuut doet, en het contract met de airco-kaart | `docs/airco.md` |
-| Historie en het rapport, het verbruik per apparaat (zoals het energiedashboard), de tijdlijn in Historie, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, en de batterij op de kaart en in de pop-up | `docs/eerste-woning.md` |
+| Historie en het rapport, het verbruik per apparaat (zoals het energiedashboard), batterij geladen en ontladen, de tijdlijn in Historie, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, en de batterij op de kaart en in de pop-up | `docs/eerste-woning.md` |
 | een smart plug: de lijst met apparaten en hun iconen, altijd aan (ook voor een vaatwasser aan een smart plug), en de melding Apparaat staat uit | `docs/smart-plug.md` |
 | de vriezer: uitlezen en melden (deur open, te warm, storing), niet sturen | `docs/vriezer.md` |
 | het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat | `docs/paneel.md` |
@@ -308,10 +308,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 506 controles op het denkwerk
 python tests/test_batterij.py    # 187 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1119 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2401 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 1165 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 2418 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-node   tests/test_rapport.mjs    # 188 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 199 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

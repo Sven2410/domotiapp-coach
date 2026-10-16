@@ -992,21 +992,30 @@ class DacViewHistory extends DacElement {
       // meters are read at slightly different moments and a rounding of a few
       // watt-hours must not turn into a negative bar.
       const own = Math.max(0, solar - sold);
-      return { start: new Date(time), own, bought, sold, ...huisMetAccu(own, bought, accu[index]) };
+      return {
+        start: new Date(time),
+        own,
+        bought,
+        sold,
+        ...huisMetAccu(own, bought, accu[index]),
+        accuIn: accu[index].erin,
+        accuUit: accu[index].eruit,
+      };
     });
   }
 
   /**
    * Per vak wat de thuisbatterijen netto opnamen (`battery`), en welk deel
    * daarvan van batterijen is waarvan de coach toen nog niet bijhield hoeveel
-   * zon erin ging (`voor`): daarvoor schat In geld het uit de vakken zelf.
+   * zon erin ging (`voor`): daarvoor schat In geld het uit de vakken zelf. En
+   * apart wat erin ging en eruit kwam (`erin`, `eruit`), voor de tegels.
    *
    * De uren of dagen van `fetchBattery` gaan in het vak waarin ze beginnen, met
    * de grenzen van de vakken zoals Home Assistant ze gaf, dus ook als die in
    * een andere tijdzone rekent dan deze browser.
    */
   accuPerVak_(tijden, vakEinde) {
-    const uit = tijden.map(() => ({ battery: 0, voor: 0 }));
+    const uit = tijden.map(() => ({ battery: 0, voor: 0, erin: 0, eruit: 0 }));
     const vanaf = new Map(
       (this.settings_?.battery_state ?? []).map((rij) => [
         rij?.device,
@@ -1020,6 +1029,8 @@ class DacViewHistory extends DacElement {
         if (index >= tijden.length) break;
         if (rij.start < tijden[index]) continue;
         uit[index].battery += rij.kwh;
+        uit[index].erin += rij.erin ?? 0;
+        uit[index].eruit += rij.eruit ?? 0;
         const sinds = vanaf.get(id);
         if (!Number.isFinite(sinds) || vakEinde(index) <= sinds) uit[index].voor += rij.kwh;
       }
@@ -1051,8 +1062,11 @@ class DacViewHistory extends DacElement {
       used: hasSolar ? sum("used") : null,
       bought: sum("bought"),
       sold: sum("sold"),
+      accuIn: sum("accuIn"),
+      accuUit: sum("accuUit"),
     };
     this.metAccu_ = rows.some((row) => Math.abs(row.battery) > 0.001);
+    this.accuTegels_ = totals.accuIn + totals.accuUit >= 0.05;
     totals.selfUse =
       hasSolar && totals.solar > 0 ? (sum("own") / totals.solar) * 100 : null;
     // Zelfvoorzienend, zoals het energiedashboard van Home Assistant het noemt:
@@ -1163,6 +1177,8 @@ class DacViewHistory extends DacElement {
           used: row.used,
           bought: row.bought,
           sold: row.sold,
+          accuIn: row.accuIn,
+          accuUit: row.accuUit,
           selfUse: row.own + row.sold > 0 ? (row.own / (row.own + row.sold)) * 100 : null,
           selfSufficient: row.used > 0 ? Math.max(0, (1 - row.fromGrid / row.used) * 100) : null,
         },
@@ -1314,6 +1330,8 @@ class DacViewHistory extends DacElement {
       hasSolar ? cel("Verbruikt", kwh(totals.used)) : null,
       cel("Van het net", kwh(totals.bought)),
       cel("Naar het net", kwh(totals.sold)),
+      this.accuTegels_ ? cel("Batterij geladen", kwh(totals.accuIn ?? 0)) : null,
+      this.accuTegels_ ? cel("Batterij ontladen", kwh(totals.accuUit ?? 0)) : null,
       totals.selfUse === null || totals.selfUse === undefined
         ? null
         : cel("Zelf gebruikt", `${percent(totals.selfUse).value} %`),
@@ -1649,6 +1667,14 @@ class DacViewHistory extends DacElement {
     }
     rows.push({ label: "Van het net", value: energy(totals.bought), tone: "var(--dac-grid-in)" });
     rows.push({ label: "Naar het net", value: energy(totals.sold), tone: "var(--dac-grid-out)" });
+    // De thuisbatterij (v0.126.0), zoals het energiedashboard haar toont. De
+    // eigenaar op 16-10-2026: "bij historie zie ik nu niet de thuisbatterij van
+    // zoveel geladen en zoveel ontladen". Wat erin ging komt van je zon of van
+    // het net, dus het staat naast die twee en telt nergens bij op.
+    if (this.accuTegels_) {
+      rows.push({ label: "Batterij geladen", value: energy(totals.accuIn ?? 0), tone: "var(--dac-good)" });
+      rows.push({ label: "Batterij ontladen", value: energy(totals.accuUit ?? 0), tone: "var(--dac-good)" });
+    }
     // Eén percentage en niet twee (v0.116.0): "Zelf gebruikt" en
     // "Zelfvoorzienend" naast elkaar leken op hetzelfde. Dit is het deel van je
     // verbruik dat je zelf opwekte; het andere staat in het rapport.
