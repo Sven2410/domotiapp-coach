@@ -1369,7 +1369,7 @@ class DacViewHistory extends DacElement {
       this.accuTegels_ ? cel("Batterij ontladen", kwh(totals.accuUit ?? 0)) : null,
       totals.selfUse === null || totals.selfUse === undefined
         ? null
-        : cel("Zelf gebruikt", `${percent(totals.selfUse).value} %`),
+        : cel("Zon zelf gebruikt", `${percent(totals.selfUse).value} %`),
       totals.selfSufficient === null || totals.selfSufficient === undefined
         ? null
         : cel("Zelfvoorzienend", `${percent(totals.selfSufficient).value} %`),
@@ -1706,9 +1706,15 @@ class DacViewHistory extends DacElement {
       rows.push({ label: "Batterij geladen", value: energy(totals.accuIn ?? 0), tone: "var(--dac-good)" });
       rows.push({ label: "Batterij ontladen", value: energy(totals.accuUit ?? 0), tone: "var(--dac-good)" });
     }
-    // Eén percentage en niet twee (v0.116.0): "Zelf gebruikt" en
-    // "Zelfvoorzienend" naast elkaar leken op hetzelfde. Dit is het deel van je
-    // verbruik dat je zelf opwekte; het andere staat in het rapport.
+    // Twee percentages, zoals het energiedashboard ze naast elkaar zet. Van
+    // v0.116.0 tot v0.126.5 stond alleen Zelfvoorzienend er, omdat "Zelf
+    // gebruikt" erop leek; de eigenaar op 16-10-2026: "ik wil zelf verbruikte
+    // zonne-energie wel terug hebben weer." Vandaar "Zon" in de naam: dit is
+    // het deel van je eigen zon dat je niet teruggaf (ook wat de batterij in
+    // ging), Zelfvoorzienend het deel van je verbruik dat niet van het net kwam.
+    if (totals.selfUse !== null && totals.selfUse !== undefined) {
+      rows.push({ label: "Zon zelf gebruikt", value: percent(totals.selfUse), tone: "var(--dac-solar)" });
+    }
     if (totals.selfSufficient !== null && totals.selfSufficient !== undefined) {
       rows.push({ label: "Zelfvoorzienend", value: percent(totals.selfSufficient), tone: "var(--dac-good)" });
     }
