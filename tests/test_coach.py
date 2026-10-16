@@ -9491,6 +9491,9 @@ afgebroken162 = [m for m in telefoon160(alles162b) if "afgebroken" in m or "is k
 print(f"  onderbroken en uit: {afgebroken162}")
 controle("onderbroken en dan uit: één verslag, en dat zegt afgebroken",
          len(afgebroken162) == 1 and afgebroken162[0].startswith("De wasmachine is afgebroken (Cottons)."), f"{afgebroken162}")
+controle("en het hele verloop: gestart, onderbroken en uit (v0.128.1)",
+         afgebroken162 and "0,4 kWh, gestart om 19:05, onderbroken om 19:30, uit om 19:50." in afgebroken162[0],
+         f"{afgebroken162}")
 controle("een afgebroken programma geeft geen meting",
          not [r for r in store162b.instellingen.get("program_measured") or [] if r.get("device") == "dev-was"],
          f"{store162b.instellingen.get('program_measured')}")
@@ -9498,6 +9501,20 @@ controle("de vrijgave gaat er wel af, zoals na elke beurt",
          "dev-was" not in (store162b.instellingen.get("ready_devices") or []), "")
 controle("een onderbreking zonder beurt is nog steeds voorbij, zoals voorheen",
          coachmod.MIELE_STATUS["program_interrupted"] == "finished", "")
+
+# Twee keer onderbroken, en dan een nieuw programma gekozen: het verslag noemt de laatste
+# onderbreking, en "afgebroken om" in plaats van "uit om" (v0.128.1).
+hass162c, store162c, coach162c, ronde162c = bouw162(WAS162)
+alles162c = []
+for stap in [(19, 0, None, None), (19, 5, "in_use", "0.0"), (19, 30, "program_interrupted", "0.4"), (19, 32, "in_use", "0.4"),
+             (19, 45, "program_interrupted", "0.6"), (19, 50, None, None), (20, 10, "programmed", "0.0")]:
+    b162c, v162c = ronde162c(*stap)
+    alles162c += v162c
+afgebroken162c = [m for m in telefoon160(alles162c) if "afgebroken" in m or "is klaar" in m]
+print(f"  twee keer onderbroken, nieuw programma: {afgebroken162c}")
+controle("twee keer onderbroken en een nieuw programma: één verslag met de laatste onderbreking",
+         len(afgebroken162c) == 1 and "gestart om 19:05, onderbroken om 19:45, afgebroken om 20:10." in afgebroken162c[0],
+         f"{afgebroken162c}")
 
 # Alleen uitlezen: volgen, nooit starten, niet aan de vrijgave of de schakelaar komen.
 WAS162L = {**WAS162, "controllable": False}
