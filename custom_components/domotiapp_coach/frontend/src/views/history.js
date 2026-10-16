@@ -2649,7 +2649,8 @@ DacViewHistory.css = /* css */ `
   .b.bought { fill: var(--dac-grid-in); }
   .b.sold { fill: var(--dac-grid-out); }
   /* De batterij in haar eigen kleur, dezelfde als in de energiestroom en de
-     tijdlijn; boven de lijn eruit, onder de lijn erin (v0.126.2). */
+     tijdlijn; boven de lijn eruit, onder de lijn erin (v0.126.2). Groenblauw
+     sinds v0.126.3, daarvoor roze. */
   .b.accu { fill: var(--dac-device-1); }
   .b.gas { fill: var(--dac-warn); }
   .b { transition: opacity 150ms ease; }
@@ -2724,7 +2725,10 @@ DacViewHistory.css = /* css */ `
   .vlek { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
   .stuk.zon, .vlek.zon { background: var(--dac-solar); }
   .stuk.net, .vlek.net { background: var(--dac-grid-in); }
-  .stuk.nul, .vlek.nul { background: var(--dac-device-2); }
+  /* Allebei de kleur van de batterij (v0.126.3): nul op de meter is wat ze
+     meestal doet en staat zachter, ontladen in de volle kleur. Nul had het
+     tweede bolletje, en dat is nu roze. */
+  .stuk.nul, .vlek.nul { background: color-mix(in srgb, var(--dac-device-1) 45%, transparent); }
   .stuk.ontladen, .vlek.ontladen { background: var(--dac-device-1); }
   .stuk.wacht, .vlek.wacht { background: rgba(var(--dac-veil), 0.16); }
   .stuk.stil, .vlek.stil { background: rgba(var(--dac-veil), 0.10); }

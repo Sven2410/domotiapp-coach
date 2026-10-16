@@ -363,8 +363,8 @@ blijven ze daarom alleen voor de kaart.
 tegels van v0.126.1 met de juiste getallen: "ik zie geen geschiedenis van de
 batterij?" Uit drie voorstellen (in de grafiek, een eigen kaart met de
 accustand, of allebei) koos hij de grafiek, zoals het energiedashboard. De
-batterij heeft één kleur, `--dac-device-1`, hetzelfde roze als in de
-energiestroom en bij ontladen in de tijdlijn; boven de lijn is wat eruit kwam,
+batterij heeft één kleur, `--dac-device-1`, dezelfde als in de energiestroom
+en bij ontladen in de tijdlijn (sinds v0.126.3 groenblauw, zie hieronder); boven de lijn is wat eruit kwam,
 onder de lijn wat erin ging. Boven: eigen zon gebruikt, batterij, van het net;
 onder: batterij, naar het net. De legenda zegt "Batterij", de zin boven de
 grafiek "onder de lijn wat naar de batterij of het net ging", en wie een balk
@@ -379,9 +379,28 @@ stroom die 's nachts van het net de batterij in ging en 's avonds eruit dus als
 van het net, net als in Zelfvoorzienend. De kleuren zijn nagemeten met het
 script van de dataviz-richtlijn, op #161613 en op wit, alle paren: slechtste
 paar het bestaande van het net tegen naar het net (ΔE 8,2 voor kleurenblinden),
-batterij tegen naar het net ΔE 19,4. In het rapport haalt dat bestaande paar in
-de printkleuren (#0f7fbb tegen #a30fae) maar ΔE 5,0; niet aangepast, wel
-genoemd aan de eigenaar.
+batterij tegen naar het net ΔE 19,4. In het rapport haalde dat bestaande paar in
+de printkleuren (#0f7fbb tegen #a30fae) maar ΔE 5,0.
+
+**Geen roze voor de batterij (v0.126.3).** De eigenaar op 16-10-2026: "ja fix ook
+voor kleurenblinden en ik wil geen roze hebben voor de batterij dat moet een
+andere kleur zijn." Een nieuwe kleur naast de vijf andere stroomkleuren is
+gezocht met hetzelfde script (OKLCH, licht 0,48 tot 0,67, alle paren, op
+#12120f en op wit, zonder rood, groen en amber van de status): wat slaagt is
+bruin, olijf of grijsblauw met chroma 0,10, want de levendige plekken zijn bezet.
+Daarom zijn de twee bolletjes omgedraaid: `--dac-device-1` (de batterij, die
+altijd in het eerste bolletje staat) is nu het groenblauw #039580 en
+`--dac-device-2` het roze. Dezelfde zes kleuren dus, met dezelfde marges als
+voorheen: in de energiestroom slechtste paar ΔE 8,0 voor kleurenblinden, in de
+grafiek van Historie (zon, batterij, van en naar het net) 8,2, normaal 15,2.
+In de tijdlijn had nul op de meter het tweede bolletje; dat werd roze, dus nul
+staat nu in de kleur van de batterij op 45%, ontladen in de volle kleur.
+
+Het rapport tekent sindsdien met de kleuren van het scherm (#dc7300, #039580,
+#129be4, #bc10c8): op wit alle paren ΔE 8,2 of meer voor kleurenblinden en 15,2
+normaal, alle vier boven 3:1. Met de oude printkleuren had ook het net tegen de
+batterij gefaald (normaal ΔE 12,8). "Coach" in de kop houdt #0f7fbb, want dat is
+tekst (`KLEUR.merk` in report.js).
 
 ## De tijdlijn (v0.115.0)
 

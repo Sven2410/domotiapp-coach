@@ -3671,6 +3671,14 @@ proef("de grafiek: de batterij in haar eigen kleur, boven de lijn eruit en onder
   const bron = Historie.toString() + Historie.css;
   assert.ok(Historie.css.includes(".b.accu { fill: var(--dac-device-1); }"));
   assert.ok(/label: "Batterij"/.test(Historie.toString()));
+  // Geen roze voor de batterij (v0.126.3): het eerste bolletje, waar de batterij
+  // altijd staat, is groenblauw, en het rapport tekent haar in dezelfde kleur.
+  const tokens = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/theme.js", import.meta.url), "utf8");
+  assert.ok(/--dac-device-1:\s*#039580;/.test(tokens), "de batterij is groenblauw");
+  assert.ok(/--dac-device-2:\s*#fd0774;/.test(tokens), "het roze is naar het tweede bolletje");
+  assert.ok(/\.stuk\.nul, \.vlek\.nul \{ background: color-mix\(in srgb, var\(--dac-device-1\)/.test(Historie.css), "nul op de meter is geen roze");
+  const rbron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/report.js", import.meta.url), "utf8");
+  assert.ok(/accu: "#039580"/.test(rbron) && /net: "#129be4"/.test(rbron) && /terug: "#bc10c8"/.test(rbron), "het rapport heeft de kleuren van het scherm");
   assert.ok(/verloop: rows\.map\(\(row\) => \(\{ label: bucketLabel\(this\.period_, row\.start\), \.\.\.stapel\(row\) \}\)\)/.test(bron), "het rapport tekent dezelfde stapel");
 });
 
