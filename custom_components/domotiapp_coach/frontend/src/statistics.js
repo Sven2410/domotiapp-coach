@@ -295,8 +295,11 @@ export async function fetchDevices(hass, devices, period, start) {
  * gebruikte.
  *
  * Per batterij de beste bron die er is: de twee tellers van een kWh-meter op de
- * batterij (exact), anders de vermogenssensor met een teken, anders de losse
- * sensoren voor laden en ontladen, zoals `batteryWatts` in data-source.js. Van
+ * batterij (exact), anders de eigen tellers van de batterij (`accu_in`,
+ * `accu_out`, sinds v0.126.1), anders de vermogenssensor met een teken, anders
+ * de losse sensoren voor laden en ontladen, zoals `batteryWatts` in
+ * data-source.js. Een bron die over de periode niets oplevert (geen statistiek
+ * in Home Assistant) slaat hij over voor de volgende. Van
  * vermogen is het het gemiddelde per uur maal dat uur. Fijner dan het vak van de
  * grafiek, zodat een vak dat nog loopt niet met een heel vak vermenigvuldigd
  * wordt; over een jaar per dag, en van vandaag alleen de uren die voorbij zijn.
@@ -310,6 +313,15 @@ export async function fetchDevices(hass, devices, period, start) {
  * ontladen valt per dag tegen elkaar weg. Laden en ontladen binnen hetzelfde uur
  * ziet hij nog steeds niet.
  *
+ * De eigen tellers van de batterij gaan sinds v0.126.1 voor de vermogenssensoren.
+ * Bij de eigenaar telde het gemiddelde van de twee vermogenssensoren over 434
+ * uur vanaf 28-09-2026 181,1 kWh erin en 150,6 eruit, de tellers 165,1 en 149,3;
+ * op dagen als 12-10 telde het vermogen ook bij ontladen meer (8,0 tegen 6,8),
+ * dus het is geen netkant tegen accukant maar een gemiddelde dat te hoog uitvalt.
+ * De tellers zijn wat het energiedashboard van Home Assistant ook laat zien. De
+ * eigenaar: "bouw maar wat jij aanraadt". Een kWh-meter blijft voorgaan, want
+ * aan de accukant mist het verlies in de omvormer (zie `docs/batterij.md`).
+ *
  * @returns {Promise<Map<string, {start: number, kwh: number, erin: number, eruit: number}[]>>}
  *   per apparaat, op volgorde van tijd
  */
@@ -318,22 +330,22 @@ export async function fetchBattery(hass, batteries, period, start) {
   if (!hass || !batteries.length) return out;
 
   const fijn = period === "year" ? "day" : "hour";
-  const bronnen = batteries
+  const kandidaten = batteries
     .map((device) => {
       const e = device.entities ?? {};
-      if (e.energy_in && e.energy_out) {
-        return { id: device.id, teller: true, erin: e.energy_in, eruit: e.energy_out, teken: 1 };
-      }
+      const rij = [];
+      if (e.energy_in && e.energy_out) rij.push({ teller: true, erin: e.energy_in, eruit: e.energy_out, teken: 1 });
+      if (e.accu_in && e.accu_out) rij.push({ teller: true, erin: e.accu_in, eruit: e.accu_out, teken: 1 });
       if (device.entity) {
-        return { id: device.id, teller: false, erin: device.entity, eruit: "", teken: device.battery?.power_invert ? -1 : 1, metTeken: true };
+        rij.push({ teller: false, erin: device.entity, eruit: "", teken: device.battery?.power_invert ? -1 : 1, metTeken: true });
+      } else if (e.charge_power || e.discharge_power) {
+        rij.push({ teller: false, erin: e.charge_power ?? "", eruit: e.discharge_power ?? "", teken: 1 });
       }
-      if (e.charge_power || e.discharge_power) {
-        return { id: device.id, teller: false, erin: e.charge_power ?? "", eruit: e.discharge_power ?? "", teken: 1 };
-      }
-      return null;
+      return rij.length ? { id: device.id, rij } : null;
     })
     .filter(Boolean);
-  if (!bronnen.length) return out;
+  if (!kandidaten.length) return out;
+  const bronnen = kandidaten.flatMap((k) => k.rij);
 
   const ask = async (ids, types, vak = fijn) => {
     if (!ids.length) return {};
@@ -370,13 +382,16 @@ export async function fetchBattery(hass, batteries, period, start) {
     return 24;
   };
 
-  for (const bron of bronnen) {
+  const reeks = (bron) => {
     const per = new Map();
     const bij = (tijd) => {
       if (!per.has(tijd)) per.set(tijd, { start: tijd, kwh: 0, erin: 0, eruit: 0 });
       return per.get(tijd);
     };
     const bak = bron.teller ? sums : bron.metTeken ? perUur : means;
+    // Van een paar tellers allebei of geen van beide: met alleen erin zou
+    // ontladen op nul staan en de batterij alleen maar laden.
+    if (bron.teller && !(bak[bron.erin]?.length && bak[bron.eruit]?.length)) return per;
     const tel = (entityId, teken) => {
       if (!entityId) return;
       for (const row of bak[entityId] ?? []) {
@@ -399,7 +414,16 @@ export async function fetchBattery(hass, batteries, period, start) {
         rij.eruit = Math.max(0, -rij.kwh);
       }
     }
-    if (per.size) out.set(bron.id, [...per.values()].sort((a, b) => a.start - b.start));
+    return per;
+  };
+
+  for (const { id, rij } of kandidaten) {
+    for (const bron of rij) {
+      const per = reeks(bron);
+      if (!per.size) continue;
+      out.set(id, [...per.values()].sort((a, b) => a.start - b.start));
+      break;
+    }
   }
   return out;
 }

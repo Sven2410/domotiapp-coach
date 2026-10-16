@@ -2650,6 +2650,45 @@ proef("fetchBattery: tellers, een sensor met een teken en twee losse, en van van
   assert.ok(Math.abs(j.get("s")[0].kwh - 1) < 1e-9, "een uur van 1000 W");
 });
 
+proef("fetchBattery: de eigen tellers van de batterij voor de vermogenssensoren, een kWh-meter daarvoor (v0.126.1)", async () => {
+  const { fetchBattery } = await import("../custom_components/domotiapp_coach/frontend/src/statistics.js");
+  const uur = new Date(2026, 9, 14, 12).getTime();
+  // Wat Home Assistant van elke sensor heeft; een sensor die er niet in staat
+  // heeft geen statistiek.
+  const bekend = {
+    "sensor.m_in": 1.0, "sensor.m_uit": 0.1,
+    "sensor.a_in": 1.25, "sensor.a_uit": 0.5,
+    "sensor.laad": 1340, "sensor.ontlaad": 570,
+    "sensor.half_in": 0.9,
+  };
+  const hass = {
+    callWS: async (v) => {
+      const uit = {};
+      for (const id of v.statistic_ids) {
+        if (!(id in bekend)) continue;
+        uit[id] = [v.types[0] === "change" ? { start: uur, change: bekend[id] } : { start: uur, mean: bekend[id] }];
+      }
+      return uit;
+    },
+  };
+  const vermogen = { charge_power: "sensor.laad", discharge_power: "sensor.ontlaad" };
+  const accus = [
+    { id: "meter", entities: { energy_in: "sensor.m_in", energy_out: "sensor.m_uit", accu_in: "sensor.a_in", accu_out: "sensor.a_uit", ...vermogen } },
+    { id: "accu", entities: { accu_in: "sensor.a_in", accu_out: "sensor.a_uit", ...vermogen } },
+    { id: "geen-statistiek", entities: { accu_in: "sensor.weg_in", accu_out: "sensor.weg_uit", ...vermogen } },
+    { id: "half", entities: { accu_in: "sensor.half_in", accu_out: "sensor.weg_uit", ...vermogen } },
+    { id: "alleen-vermogen", entities: vermogen },
+  ];
+  const r = await fetchBattery(hass, accus, "day", new Date(2026, 9, 14));
+  const apart = (id) => [r.get(id)[0].erin, r.get(id)[0].eruit].map((x) => Math.round(x * 1000) / 1000);
+  assert.deepEqual(apart("meter"), [1.0, 0.1], "de kWh-meter gaat voor alles");
+  assert.deepEqual(apart("accu"), [1.25, 0.5], "de tellers van de batterij voor het vermogen");
+  assert.deepEqual(apart("geen-statistiek"), [1.34, 0.57], "tellers zonder statistiek: terug naar het vermogen");
+  assert.deepEqual(apart("half"), [1.34, 0.57], "één teller is geen paar");
+  assert.deepEqual(apart("alleen-vermogen"), [1.34, 0.57]);
+  assert.ok(Math.abs(r.get("accu")[0].kwh - 0.75) < 1e-9, "netto is erin min eruit, uit dezelfde bron");
+});
+
 // --- een reserveprijssensor (v0.101.3) -----------------------------------------
 // De eigenaar op 29-09-2026, toen Frank Energie eruit lag: "ik heb ook Nord Pool
 // draaien, dat wil ik als fallback hebben." Het paneel tekent dan de lijst van

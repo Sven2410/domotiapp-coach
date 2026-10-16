@@ -334,13 +334,30 @@ wordt daarom ook over een jaar per uur gevraagd: per dag valt middag laden en
 avond ontladen tegen elkaar weg. Laden en ontladen binnen één uur ziet die nog
 steeds niet.
 
-Het energiedashboard van Home Assistant kan andere getallen geven, want daar
-kiest de bewoner zelf welke sensoren erin staan, vaak de tellers van de
-batterij zelf. Bij de eigenaar op 14-10-2026: het energiedashboard (de
-tellers van de Anker) 12,5 kWh geladen en 5,9 ontladen, het gemiddelde van de
-twee vermogenssensoren waarmee Historie rekent 13,4 en 5,7; op 15-10 11,2 en
-13,2 tegen 12,4 en 14,6. De tellers van de batterij zelf (`accu_in`,
-`accu_out`) gebruikt Historie niet: die meten aan de accukant.
+**De eigen tellers van de batterij voor de vermogenssensoren (v0.126.1).** In
+v0.126.0 rekende Historie bij de eigenaar met de twee vermogenssensoren van de
+batterij, en het energiedashboard van Home Assistant met haar eigen tellers.
+Dat gaf andere getallen: op 14-10-2026 13,4 kWh geladen en 5,7 ontladen tegen
+12,5 en 5,9 op het dashboard, op 15-10 12,4 en 14,6 tegen 11,2 en 13,2. Over
+434 uur vanaf 28-09 telde het vermogen 181,1 erin en 150,6 eruit, de tellers
+165,1 en 149,3. Dat is geen netkant tegen accukant: dan zou het vermogen bij
+ontladen minder tellen, en op dagen als 12-10 telde het meer (8,0 tegen 6,8).
+Het gemiddelde van een vermogenssensor valt hier te hoog uit, de teller is de
+batterij die zelf optelt. De eigenaar, voor de keuze gezet: "bouw maar wat jij
+aanraadt".
+
+Sindsdien is de volgorde in `fetchBattery`: een kWh-meter op de batterij
+(`energy_in`, `energy_out`), dan de eigen tellers van de batterij (`accu_in`,
+`accu_out`), dan de vermogenssensoren. Een bron zonder statistiek over de
+periode, of een paar tellers waarvan er maar één statistiek heeft, slaat hij
+over. Het geldt voor de tegels én voor Verbruikt, Zelfvoorzienend en In geld,
+want die rekenen met hetzelfde netto. Bij de eigenaar, met dezelfde meters als
+het dashboard en opgeteld over de dag: Verbruikt op 14-10 34,09 kWh werd 35,19,
+op 15-10 24,32 werd 24,07, en het energiedashboard zei 35,19 en 24,07. De
+kWh-meter gaat voor, omdat de tellers van de batterij het verlies in de
+omvormer niet zien; in de eerste woning telden ze 102,6% rendement tegen 73,6%
+op de kWh-meter (`docs/batterij.md`). In de sommen van de coach (het rendement)
+blijven ze daarom alleen voor de kaart.
 
 ## De tijdlijn (v0.115.0)
 
