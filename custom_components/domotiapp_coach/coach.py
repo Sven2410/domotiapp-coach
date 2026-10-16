@@ -2921,9 +2921,13 @@ class ChargerCoach:
             # zonder meting: een afgebroken programma zegt niets over de duur.
             if ruw == "program_interrupted" and sessie["gestart"] is not None:
                 status = "pause"
+                # Wanneer hij stilviel, voor het verslag (v0.128.1).
+                if not sessie.get("afgebroken"):
+                    sessie["onderbroken_om"] = now
                 sessie["afgebroken"] = True
             elif status in DRAAIT or status in KLAAR:
                 sessie["afgebroken"] = False
+                sessie["onderbroken_om"] = None
 
         klep = ""
         if zonder_vrijgave and not alleen_lezen:
@@ -3105,7 +3109,9 @@ class ChargerCoach:
                 # Zonder statussensor is "klaar" het moment waarop hij voor het
                 # laatst iets trok, niet het moment waarop de coach dat doorhad.
                 einde = sessie.get("laatst_actief") if handmatig else None
-                await self._async_programma_klaar(settings, device, naam, sessie, now, einde or now)
+                await self._async_programma_klaar(
+                    settings, device, naam, sessie, now, einde or now, uit=status != "ready"
+                )
             return
 
         if not (decision.charge and mag) or draait or status in KLAAR:
@@ -3597,14 +3603,17 @@ class ChargerCoach:
         now: datetime,
         einde: datetime | None = None,
         meten: bool = True,
+        uit: bool = True,
     ) -> None:
         """Het verslag, de beurt in de opslag, de meting bewaren, en de vrijgave eraf.
 
         `meten` uit als het einde niet echt gezien is (afgelopen terwijl de
         coach weg was): een te korte duur hoort niet in de tabel. Een
         afgebroken programma (v0.127.0) meet ook niet, en het verslag zegt
-        "afgebroken". Bij alleen uitlezen geen sessie en geen vrijgave: de
-        coach liet hem niet draaien en komt niet aan de schakelaars.
+        "afgebroken", met het hele verloop erbij (v0.128.1): wanneer hij
+        startte, wanneer hij stilviel en wanneer hij uit ging (`uit`) of een
+        nieuw programma klaarstond. Bij alleen uitlezen geen sessie en geen
+        vrijgave: de coach liet hem niet draaien en komt niet aan de schakelaars.
         """
         afgebroken = bool(sessie.get("afgebroken"))
         alleen_lezen = _programma_alleen_lezen(device)
@@ -3623,9 +3632,20 @@ class ChargerCoach:
         bespaard = ""
         if maat is not None and kwh > 0 and maat - betaald >= 0.005:
             bespaard = self._bespaard_zin(maat - betaald)
+        wanneer = f"{gestart:%H:%M} tot {einde:%H:%M}."
+        onderbroken = sessie.get("onderbroken_om") if afgebroken else None
+        if onderbroken is not None:
+            # De eigenaar op 16-10-2026: "ik wil een compleet verslag". Tot
+            # v0.128.1 stond er alleen van de start tot het uitgaan, en zag je
+            # niet dat hij het grootste deel daarvan stillag.
+            wanneer = (
+                f"gestart om {gestart:%H:%M}, onderbroken om {onderbroken:%H:%M}, "
+                f"{'uit' if uit else 'afgebroken'} om {einde:%H:%M}."
+            )
+        wanneer = f"{_kwh_tekst(kwh)}, {wanneer}" if kwh > 0 else wanneer[:1].upper() + wanneer[1:]
         await self._async_tell(_verslag(
             f"{naam} is {'afgebroken' if afgebroken else 'klaar'}{wat}.",
-            (f"{_kwh_tekst(kwh)}, " if kwh > 0 else "") + f"{gestart:%H:%M} tot {einde:%H:%M}.",
+            wanneer,
             herkomst,
             bespaard,
         ))

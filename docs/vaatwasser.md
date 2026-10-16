@@ -532,6 +532,15 @@ afgebroken" en komt er geen meting (`_async_programma_klaar`), want de duur zegt
 het programma. Zonder lopende beurt blijft het "finished", zoals eerst. Geen tijdslimiet: die
 zou verzonnen zijn.
 
+**Het verslag van een afgebroken programma is compleet (v0.128.1).** Tot dan stond er "19:05 tot
+21:10": van de start tot het uitgaan, en je zag niet dat hij het grootste deel daarvan stillag. De
+eigenaar op 16-10-2026: "ik wil een compleet verslag". Nu: "0,4 kWh, gestart om 19:05, onderbroken
+om 19:30, uit om 21:10." (`sessie["onderbroken_om"]`, gezet bij de eerste ronde van een
+onderbreking en gewist als hij weer draait). Staat er na de onderbreking een nieuw programma klaar
+in plaats van uit, dan "afgebroken om" (`uit` in `_async_programma_klaar`). Wordt hij meer dan een
+keer onderbroken, dan noemt het verslag de laatste. Een programma dat na een onderbreking gewoon
+afmaakt houdt het gewone verslag.
+
 **Alleen uitlezen (v0.127.0).** Zonder het vinkje "mag sturen" sloeg de coach een apparaat met
 een programma helemaal over. In dezelfde klantwoning zette de eigenaar de wasmachine en de droger
 die middag op alleen uitlezen; de startsensor bleef staan op "Wacht tot je hem vrijgeeft.", de
