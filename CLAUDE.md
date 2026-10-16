@@ -176,7 +176,9 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    auto die bovenin gas terugneemt wordt gemeten terwijl hij zelf de rem is,
    per band van tien procent, en de volgende beurt rekent daarmee
    (`car_pace` in de instellingen, `_tempo_leren` in coach.py,
-   `_uren_met_afbouw` in planner.py). En is de klaar-tijd voorbij terwijl de
+   `_uren_met_afbouw` in planner.py). Sinds v0.128.0 het gemiddelde van de
+   remronden vanaf de accustand waar hij begon te remmen, niet het laagste
+   punt voor de hele band (`docs/laadpaal.md`). En is de klaar-tijd voorbij terwijl de
    auto niet vol is, dan laadt hij op vol vermogen door (`overdue`).
 
 ## Waar de rest staat
@@ -306,10 +308,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 506 controles op het denkwerk
+python tests/test_planner.py     # 517 controles op het denkwerk
 python tests/test_batterij.py    # 187 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1182 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2425 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 1193 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 2449 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 node   tests/test_rapport.mjs    # 202 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in

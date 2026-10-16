@@ -613,6 +613,13 @@ SOC_STAP_MAX = 25.0
 # genoeg dat een tussenstand van bijna nul er niet doorheen komt.
 TEMPO_SPELING = 0.3
 
+# Hoeveel het gemiddelde tempo van een band moet verschuiven voordat de coach
+# het opnieuw bewaart, en hoeveel procentpunt een bewaarde meting hoger in de
+# band mag zijn gekomen voordat een nieuwe hem niet meer vervangt (v0.128.0).
+# Zie `_tempo_te_schrijven`.
+TEMPO_STAP = 0.1
+TEMPO_BEREIK = 1.0
+
 # Hoe lang de auto na een verhoging van de limiet de tijd krijgt om bij te
 # komen voordat wat hij neemt als zijn eigen tempo telt. Gemeten in de klantwoning
 # in de nacht van 18 op 19-09-2026: na een verlaging voor de zekering bleef de
@@ -1357,15 +1364,14 @@ class ChargerCoach:
         # meting per ronde, want `_fasen_stabiel` telt ronden.
         self._fase_nu: dict[str, int | None] = {}
         # Wat de auto deze beurt per band van tien procent aannam terwijl hij
-        # zelf de rem was, in kW: het laagste per band. Zie `_tempo_leren`.
-        self._tempo_gezien: dict[str, dict[int, float]] = {}
-        # De meting van de vorige ronde, per apparaat: band en kW. Een tempo
-        # telt pas als twee ronden achter elkaar hetzelfde zeggen; zie
-        # `_tempo_leren`.
-        self._tempo_vorig: dict[str, tuple[int, float]] = {}
-        # Bij welke accustand het laagste per band gemeten is, zodat een latere
-        # meting erboven hem kan weerleggen; zie `_tempo_weerleggen`.
-        self._tempo_soc: dict[str, dict[int, float]] = {}
+        # zelf de rem was (v0.128.0): de som van de kW per ronde, het aantal
+        # ronden, vanaf welke en tot welke accustand, en wat er het laatst van
+        # bewaard is. Zie `_tempo_leren`.
+        self._tempo_band: dict[str, dict[int, dict[str, Any]]] = {}
+        # De ronde ervoor als die ook een remronde was, per apparaat: band, kW,
+        # accustand en of hij al meetelt. Een remronde telt pas als de volgende
+        # er ook een is; zie `_tempo_leren`.
+        self._tempo_vorig: dict[str, tuple[int, float, float, bool]] = {}
         # De limiet van de vorige ronde en wanneer hij voor het laatst omhoog
         # ging. Zie `TEMPO_HERSTEL`.
         self._limiet_vorig: dict[str, float] = {}
@@ -6693,7 +6699,12 @@ class ChargerCoach:
             "plan_ahead": (
                 None
                 if not window.enabled and charger.modus in MODI_ZONDER_SOM
-                else self._tijdlijn(now, settings, grid, car, charger, window)
+                else self._tijdlijn(
+                    now, settings, grid, car, charger, window,
+                    # Laadt de klaar-tijdregel, dan zegt de tijdlijn dat ook
+                    # (v0.128.0), en niet "wachten" boven een paal die laadt.
+                    doorladen=decision.charge and decision.rule.startswith("deadline"),
+                )
             ),
             # Op hoeveel fasen een Alfen die mag wisselen nu staat (v0.104.0),
             # of niets als de coach daar niet over gaat.
@@ -6794,8 +6805,8 @@ class ChargerCoach:
             self._herstart_open.discard(device_id)
             self._herstart_gedaan.pop(device_id, None)
             self._herstart_melden.discard(device_id)
-            self._tempo_gezien.pop(device_id, None)
-            self._tempo_soc.pop(device_id, None)
+            self._tempo_band.pop(device_id, None)
+            self._tempo_vorig.pop(device_id, None)
             self._limiet_vorig.pop(device_id, None)
             self._limiet_omhoog.pop(device_id, None)
             self._weerleg_vorig.pop(device_id, None)
@@ -8357,6 +8368,7 @@ class ChargerCoach:
             soc_percent=soc,
             soc_estimated=geschat,
             tempo_per_band=self._tempo_uit(settings, device_id, auto_id),
+            tempo_vanaf=self._tempo_vanaf(settings, device_id, auto_id),
             efficiency=gemeten_rendement,
         )
 
@@ -8496,14 +8508,23 @@ class ChargerCoach:
         procent zelf hun doorlaatbaarheid in ampère terug." Dat is alleen te
         meten als de auto zélf de rem is: de paal biedt meer dan hij neemt, en
         niets anders houdt hem tegen. Niet de coach (zijn limiet ligt hoger dan
-        wat er loopt), niet de lastbewaker, niet de groep. Per band het laagste
-        van deze beurt, want een auto die afbouwt doet dat bovenin de band het
-        sterkst, en de eigenaar wil liever te vroeg vol dan te laat.
+        wat er loopt), niet de lastbewaker, niet de groep.
+
+        Per band het gemiddelde van de remronden, en vanaf welke accustand hij
+        begon te remmen (v0.128.0). Tot dan was het het laagste van de beurt,
+        en dat gold voor de hele band. In de eerste woning werd dat 1,69 kW voor
+        90 tot 100 procent, gemeten op 10-10-2026 om 06:12 vlak voor 100%,
+        terwijl de auto tot 96% gewoon 9,15 kW nam: 4,85 uur waar het er 1,14
+        waren. De eigenaar op 16-10-2026: "ik wil een gemiddelde hebben en niet
+        de laagste band kiezen." Een gemiddelde over de hele band zou afhangen
+        van wat de paal toen gaf (één fase of drie); dit niet, want onder de
+        grens rekent `_uren_met_afbouw` met de paal en erboven met de auto.
 
         Het staat per auto in de instellingen (`car_pace`) en de volgende beurt
         rekent ermee, zie `hours_needed` in planner.py. Een nieuwe beurt
         overschrijft de banden die hij zelf meet, zodat een auto die vandaag
-        anders doet dan vorige maand morgen ook anders gepland wordt.
+        anders doet dan vorige maand morgen ook anders gepland wordt; behalve
+        een meting die minder hoog in de band kwam (`TEMPO_BEREIK`).
         """
         device_id = device.get("id", "")
         limiet = charger.limit_amps
@@ -8554,22 +8575,70 @@ class ChargerCoach:
             self._tempo_vorig.pop(device_id, None)
             return
 
-        # Twee ronden hetzelfde voordat het telt, zoals `_eindtijd_vast` bij de
-        # vaatwasser en `_fasen_stabiel` bij de fasen. Een stroomsensor loopt
-        # een ronde achter, en één zo'n ronde is hier duur: op 17-09-2026 werd
-        # een tussenstand van 0,152 A het tempo van een hele band. Wat er echt
-        # gebeurt houdt langer dan een minuut aan, dus dit kost niets.
+        # Twee remronden achter elkaar voordat het telt, zoals `_eindtijd_vast`
+        # bij de vaatwasser en `_fasen_stabiel` bij de fasen. Een stroomsensor
+        # loopt een ronde achter, en één zo'n ronde is hier duur: op 17-09-2026
+        # werd een tussenstand van 0,152 A het tempo van een hele band. Telt de
+        # tweede, dan telt de eerste alsnog mee. Hetzelfde tempo hoeven ze niet
+        # meer te geven: een auto die afbouwt zakt soms meer dan `TEMPO_SPELING`
+        # per minuut, en die ronden horen juist in het gemiddelde.
+        soc = round(car.soc_percent, 1)
         vorig = self._tempo_vorig.get(device_id)
-        self._tempo_vorig[device_id] = (band, kw)
-        if vorig is None or vorig[0] != band or abs(vorig[1] - kw) > TEMPO_SPELING:
+        if vorig is None or vorig[0] != band:
+            self._tempo_vorig[device_id] = (band, kw, soc, False)
             return
+        meting = self._tempo_band.setdefault(device_id, {}).setdefault(
+            band, {"som": 0.0, "n": 0, "van": soc, "tot": soc, "bewaard": None}
+        )
+        for r_kw, r_soc in ([(kw, soc)] if vorig[3] else [(vorig[1], vorig[2]), (kw, soc)]):
+            meting["som"] += r_kw
+            meting["n"] += 1
+            meting["van"] = min(meting["van"], r_soc)
+            meting["tot"] = max(meting["tot"], r_soc)
+        self._tempo_vorig[device_id] = (band, kw, soc, True)
 
-        gezien = self._tempo_gezien.setdefault(device_id, {})
-        if band in gezien and gezien[band] <= kw:
-            return
-        gezien[band] = kw
-        self._tempo_soc.setdefault(device_id, {})[band] = round(car.soc_percent, 1)
-        self.hass.async_create_task(self._async_tempo_schrijven(settings, device_id, now))
+        banden = self._tempo_te_schrijven(settings, device_id)
+        if banden:
+            # Meteen onthouden en niet pas na het opslaan, anders schrijft de
+            # ronde erna hetzelfde nog een keer.
+            for band, rij in banden.items():
+                self._tempo_band[device_id][band]["bewaard"] = (rij["kw"], rij["van"], rij["soc"])
+            self.hass.async_create_task(
+                self._async_tempo_schrijven(settings, device_id, banden, now)
+            )
+
+    def _tempo_te_schrijven(
+        self, settings: dict[str, Any], device_id: str
+    ) -> dict[int, dict[str, Any]]:
+        """De banden van deze beurt die anders zijn dan wat er bewaard staat.
+
+        Pas na twee remronden, en alleen als het gemiddelde `TEMPO_STAP`
+        verschoof, de grens een halve procent of de meting een procent hoger
+        kwam: zo schrijft hij bovenin hooguit om het procent en niet elke minuut.
+        En een meting die minder hoog in de band kwam dan de bewaarde
+        (`TEMPO_BEREIK`) vervangt die niet: een beurt tot 98% weet niet wat de
+        auto tussen 98 en 100 doet, en die van daarvoor wel.
+        """
+        auto_id = self._auto_id.get(device_id)
+        if not auto_id:
+            return {}
+        bewaard = self._tempo_bewaard(settings, device_id, auto_id)
+        uit: dict[int, dict[str, Any]] = {}
+        for band, meting in (self._tempo_band.get(device_id) or {}).items():
+            if meting["n"] < 2:
+                continue
+            kw = round(meting["som"] / meting["n"], 2)
+            vorige = meting["bewaard"]
+            if vorige is not None and (
+                abs(kw - vorige[0]) < TEMPO_STAP
+                and abs(meting["van"] - vorige[1]) < 0.5
+                and meting["tot"] - vorige[2] < 1.0
+            ):
+                continue
+            if vorige is None and band in bewaard and bewaard[band][1] > meting["tot"] + TEMPO_BEREIK:
+                continue
+            uit[band] = {"kw": kw, "van": meting["van"], "soc": meting["tot"]}
+        return uit
 
     def _tempo_weerleggen(
         self,
@@ -8612,12 +8681,15 @@ class ChargerCoach:
             self._weerleg_vorig.pop(device_id, None)
             return
         band = int(car.soc_percent // 10)
-        gezien = self._tempo_gezien.get(device_id) or {}
-        socs = self._tempo_soc.get(device_id) or {}
-        # Wat er van deze beurt is gemeten gaat voor wat er bewaard staat.
+        metingen = self._tempo_band.get(device_id) or {}
+        # Wat er van deze beurt is gemeten gaat voor wat er bewaard staat. Een
+        # gemiddelde (v0.128.0) weerleg je net zo: binnen een band loopt het
+        # tempo alleen maar af, dus wat de auto na de meting nog duidelijk meer
+        # neemt dan het gemiddelde ervan, kon hij tijdens de meting ook.
         bekend = dict(self._tempo_bewaard(settings, device_id, auto_id))
-        for b, kw in gezien.items():
-            bekend[b] = (kw, socs.get(b, b * 10.0))
+        for b, meting in metingen.items():
+            if meting["n"] >= 2:
+                bekend[b] = (meting["som"] / meting["n"], meting["tot"])
         kw_nu = watts_for(charger.actual_amps, car.phases) / 1000.0
         # Elke band tot en met deze, gemeten bij deze of een lagere stand, met
         # een tempo dat de auto nu duidelijk overtreft.
@@ -8630,8 +8702,7 @@ class ChargerCoach:
             self._weerleg_vorig.pop(device_id, None)
             return
         for b in sorted(kandidaten & vorige):
-            gezien.pop(b, None)
-            socs.pop(b, None)
+            metingen.pop(b, None)
             self._tempo_vorig.pop(device_id, None)
             self.hass.async_create_task(
                 self._async_tempo_wissen(settings, device_id, auto_id, b)
@@ -8682,12 +8753,19 @@ class ChargerCoach:
         return uit
 
     async def _async_tempo_schrijven(
-        self, settings: dict[str, Any], device_id: str, now: datetime
+        self,
+        settings: dict[str, Any],
+        device_id: str,
+        banden: dict[int, dict[str, Any]],
+        now: datetime,
     ) -> None:
-        """De gemeten banden van deze beurt in de instellingen zetten."""
+        """De gemeten banden van deze beurt in de instellingen zetten.
+
+        Per band het gemiddelde tempo (`kw`), vanaf welke accustand de auto
+        remde (`van`) en tot welke hij gemeten is (`soc`). Zie `_tempo_leren`.
+        """
         auto_id = self._auto_id.get(device_id)
-        gezien = self._tempo_gezien.get(device_id) or {}
-        if not auto_id or not gezien:
+        if not auto_id or not banden:
             return
         rows = [
             row
@@ -8696,16 +8774,12 @@ class ChargerCoach:
             and not (
                 row.get("device") == device_id
                 and row.get("car") == auto_id
-                and row.get("band") in gezien
+                and row.get("band") in banden
             )
         ]
-        socs = self._tempo_soc.get(device_id) or {}
-        for band, kw in sorted(gezien.items()):
-            row = {"device": device_id, "car": auto_id, "band": band, "kw": kw,
-                   "at": now.isoformat()}
-            if band in socs:
-                row["soc"] = socs[band]
-            rows.append(row)
+        for band, rij in sorted(banden.items()):
+            rows.append({"device": device_id, "car": auto_id, "band": band, **rij,
+                         "at": now.isoformat()})
         try:
             saved = await async_get_store(self.hass).async_save({"car_pace": rows})
         except Exception:  # noqa: BLE001 - een gemist tempo is geen reden om te stoppen
@@ -8725,8 +8799,24 @@ class ChargerCoach:
         een herstart haalt ze er niet uit. Thuis stond er op 17-09-2026 0,1 kW
         voor band 0; daarmee rekende de klaar-tijdregel 21,41 uur waar het er
         1,93 waren.
+
+        En een rij zonder `van` is het laagste punt van vóór v0.128.0, dat voor
+        de hele band gold; die telt niet meer (zie `_tempo_leren`). De volgende
+        beurt door die band meet het gemiddelde.
         """
-        uit: dict[int, float] = {}
+        return {band: kw for band, (kw, _van) in ChargerCoach._tempo_rijen(settings, device_id, auto_id).items()}
+
+    @staticmethod
+    def _tempo_vanaf(settings: dict[str, Any], device_id: str, auto_id: str) -> dict[int, float]:
+        """Per band vanaf welke accustand de auto zelf remde. Zie `_tempo_uit`."""
+        return {band: van for band, (_kw, van) in ChargerCoach._tempo_rijen(settings, device_id, auto_id).items()}
+
+    @staticmethod
+    def _tempo_rijen(
+        settings: dict[str, Any], device_id: str, auto_id: str
+    ) -> dict[int, tuple[float, float]]:
+        """De bruikbare rijen van `car_pace` voor deze auto: band, kW en grens."""
+        uit: dict[int, tuple[float, float]] = {}
         for row in settings.get("car_pace") or []:
             if (
                 isinstance(row, dict)
@@ -8735,8 +8825,9 @@ class ChargerCoach:
             ):
                 try:
                     kw = float(row["kw"])
+                    van = float(row["van"])
                     if kw >= TEMPO_ONDERGRENS:
-                        uit[int(row["band"])] = kw
+                        uit[int(row["band"])] = (kw, van)
                 except (KeyError, TypeError, ValueError):
                     continue
         return uit
@@ -10643,6 +10734,7 @@ class ChargerCoach:
         car: Car,
         charger: Charger,
         window: Window,
+        doorladen: bool = False,
     ) -> dict[str, Any]:
         """De tijdlijn van de planner, klaar om over de websocket te gaan.
 
@@ -10666,6 +10758,7 @@ class ChargerCoach:
                 solar_factor=self._zon_gemeten(now),
                 solar_day=now.date(),
             ),
+            doorladen=doorladen,
         )
 
         hulp, tot = self._accu_hulp()

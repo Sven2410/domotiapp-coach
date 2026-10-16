@@ -1068,7 +1068,8 @@ class Scenario:
     # ingevulde sensoren, en die sensoren zelf een uur achter (v0.100.1).
     voorspeller: str = "dashboard"
     # Wat de coach bij een eerdere beurt over deze auto leerde: kW per band van
-    # tien procent, zoals `car_pace` in de instellingen. Zie `_tempo_leren`.
+    # tien procent, zoals `car_pace` in de instellingen, of (kW, vanaf welke
+    # accustand hij remde). Zie `_tempo_leren`.
     geleerd_tempo: dict = field(default_factory=dict)
     # Een vaatwasser in huis, met haar eigen schema ("klaar om"); None is geen.
     vaatwasser: Vaatwasser | None = None
@@ -1196,8 +1197,10 @@ class Verloop:
     # Hoe vaak een Alfen op zijn veilige stroom terugviel omdat de coach
     # zijn limiet niet op tijd opnieuw schreef. Hoort nul te zijn.
     paal_terugvallen: int = 0
-    # Wat de coach aan het eind over de auto geleerd had: kW per band.
+    # Wat de coach aan het eind over de auto geleerd had: kW per band, en per
+    # band vanaf welke accustand de auto remde (v0.128.0).
     geleerd: dict = field(default_factory=dict)
+    geleerd_van: dict = field(default_factory=dict)
     # De vaatwasser: wanneer de coach op start drukte, wanneer hij draaide,
     # wanneer hij klaar was, en wat hij aan energie en geld kostte.
     vw_gedrukt: list = field(default_factory=list)
@@ -1633,7 +1636,11 @@ def instellingen(s: Scenario) -> dict:
         },
         "car_soc": [],
         # Wat een eerdere beurt over deze auto leerde, per band van tien procent.
-        "car_pace": [{"device": "paal", "car": "auto", "band": band, "kw": kw, "at": ""}
+        # Een getal is een band waarin de auto over de hele breedte remde; een
+        # paar (kW, vanaf) een auto die pas vanaf die accustand remde (v0.128.0).
+        "car_pace": [{"device": "paal", "car": "auto", "band": band,
+                      "kw": kw[0] if isinstance(kw, tuple) else kw,
+                      "van": kw[1] if isinstance(kw, tuple) else band * 10.0, "at": ""}
                      for band, kw in sorted(s.geleerd_tempo.items())],
         "ready_devices": [],
         "sessions": [],
@@ -2531,6 +2538,8 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
         verloop.paal_terugvallen = wereld.paal.terugvallen
         verloop.geleerd = {int(r["band"]): float(r["kw"]) for r in inst.get("car_pace") or []
                            if isinstance(r, dict) and r.get("car") == "auto"}
+        verloop.geleerd_van = {int(r["band"]): float(r["van"]) for r in inst.get("car_pace") or []
+                               if isinstance(r, dict) and r.get("car") == "auto" and "van" in r}
         verloop.vw_vrij_eind = "vaatwasser" in (inst.get("ready_devices") or [])
         verloop.vw_gemeten = [r for r in inst.get("program_measured") or []
                               if isinstance(r, dict) and r.get("device") == "vaatwasser"]

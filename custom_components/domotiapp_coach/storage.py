@@ -204,8 +204,14 @@ def _tempo_klopt(entry: dict[str, Any]) -> bool:
     rekende de klaar-tijdregel bijna twintig uur voor die ene band. Zo'n rij
     gaat er bij de eerstvolgende opslag uit; `_tempo_uit` in coach.py negeert
     hem tot het zover is.
+
+    Net als een rij zonder `van` (v0.128.0): dat is het laagste punt van een
+    band, dat tot dan voor de hele band gold. In de eerste woning stond zo 1,69
+    kW voor 90 tot 100 procent, en de klaar-tijdregel rekende daarmee 4,85 uur
+    waar het er 1,14 waren. De volgende beurt door die band meet het opnieuw.
     """
     try:
+        float(entry["van"])
         return float(entry["kw"]) >= TEMPO_ONDERGRENS
     except (KeyError, TypeError, ValueError):
         return False

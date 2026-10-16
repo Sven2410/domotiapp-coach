@@ -2629,9 +2629,9 @@ controle("na de aanloop staat band 8 in de instellingen, op 1,84 kW",
 huis53b = dict(huis53, **{"sensor.laadpaal_status": "ready_to_charge",
                          "sensor.laadpaal_stroom": "0.05", "sensor.laadpaal_vermogen": "0"})
 inst53b = instellingen(devices=[PAAL52], car_pace=[{"device": "dev-laadpaal", "car": "car-1",
-                                                     "band": 8, "kw": 1.84, "at": "x"},
+                                                     "band": 8, "kw": 1.84, "van": 80.0, "at": "x"},
                                                     {"device": "dev-laadpaal", "car": "car-1",
-                                                     "band": 9, "kw": 1.2, "at": "x"}])
+                                                     "band": 9, "kw": 1.2, "van": 90.0, "at": "x"}])
 inst53b["strategy"]["schedules"][0]["window"]["done_by"] = "06:00"
 hass53b, _, coach53b = bouw(huis53b, inst53b)
 b53b, _ = asyncio.run(ronde(coach53b, inst53b, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 21, 0)))
@@ -2704,12 +2704,17 @@ controle("één losse ronde telt niet, de twee gelijke wel",
 # een herstart haalt hem niet uit de opslag en hij blijft anders bijten zodra
 # de auto weer in die band komt.
 inst53f = instellingen(devices=[PAAL52], car_pace=[
-    {"device": "dev-laadpaal", "car": "car-1", "band": 0, "kw": 0.1, "at": "x"},
-    {"device": "dev-laadpaal", "car": "car-1", "band": 8, "kw": 1.84, "at": "x"}])
+    {"device": "dev-laadpaal", "car": "car-1", "band": 0, "kw": 0.1, "van": 0.0, "at": "x"},
+    {"device": "dev-laadpaal", "car": "car-1", "band": 8, "kw": 1.84, "van": 85.0, "at": "x"},
+    # Het laagste punt van vóór v0.128.0, zonder grens: dat gold voor de hele band.
+    {"device": "dev-laadpaal", "car": "car-1", "band": 9, "kw": 1.69, "soc": 100.0, "at": "x"}])
 gelezen53 = coachmod.ChargerCoach._tempo_uit(inst53f, "dev-laadpaal", "car-1")
 print(f"  uit de opslag gelezen: {gelezen53}")
 controle("0,1 kW uit een oude opslag telt niet meer mee, 1,84 wel",
          gelezen53 == {8: 1.84}, f"{gelezen53}")
+controle("en een laagste punt zonder grens (vóór v0.128.0) ook niet", 9 not in gelezen53, f"{gelezen53}")
+controle("de grens van band 8 gaat mee", coachmod.ChargerCoach._tempo_vanaf(inst53f, "dev-laadpaal", "car-1") == {8: 85.0},
+         f"{coachmod.ChargerCoach._tempo_vanaf(inst53f, 'dev-laadpaal', 'car-1')}")
 
 print("=== 54. 'klaar' op 86%: één herstart, dan geloven, en na een kwartier laden opnieuw ===")
 inst54 = instellingen(devices=[PAAL52])
@@ -3988,10 +3993,10 @@ controle("een auto die ruim na een verhoging minder neemt wordt wel geleerd",
 
 # Een bewaard tempo vervalt zodra de auto in die band aantoonbaar meer neemt,
 # zoals de oude rijen van de klantwoning: zonder accustand, dus onderin de band.
-OUD71 = {"device": "dev-laadpaal", "car": "car-1", "band": 6, "kw": 1.84, "at": "x"}
+OUD71 = {"device": "dev-laadpaal", "car": "car-1", "band": 6, "kw": 1.84, "van": 60.0, "at": "x"}
 # Een band erboven blijft: daar kan de auto best minder aannemen (v0.108.1; tot
 # dan stond hier band 4, en die blijft sindsdien niet meer staan, zie proef 138).
-ANDER71 = {"device": "dev-laadpaal", "car": "car-1", "band": 8, "kw": 1.84, "at": "x"}
+ANDER71 = {"device": "dev-laadpaal", "car": "car-1", "band": 8, "kw": 1.84, "van": 80.0, "at": "x"}
 inst71b, hass71b, coach71b = beurt71([OUD71, ANDER71], soc="68")
 op71(coach71b, inst71b, 3, 44)
 hass71b.states.zet("sensor.laadpaal_stroom", "13.5")
@@ -7623,7 +7628,7 @@ print("=== 138. wat de auto hoger aanneemt kon hij lager ook: een tempo uit een 
 # Ford nog opstartte. Om 15:36:30 nam hij 9,1 kW op 61%. Hier op één fase en met
 # het plafond van deze proefpaal, dus kleinere getallen: 1,84 kW bewaard bij 59,7%,
 # en op 61% 13,5 A.
-OPSTART138 = {"device": "dev-laadpaal", "car": "car-1", "band": 5, "kw": 1.84, "soc": 59.7, "at": "x"}
+OPSTART138 = {"device": "dev-laadpaal", "car": "car-1", "band": 5, "kw": 1.84, "van": 59.7, "soc": 59.7, "at": "x"}
 inst138, hass138, coach138 = beurt71([OPSTART138, ANDER71], soc="61")
 # Eerst een ronde op de 8 A van de opzet: de knop van snelladen draait er een mee.
 op71(coach138, inst138, 3, 43)
@@ -9543,6 +9548,67 @@ for e in was162:
 start162.bijwerken_apparaat({**WAS162L, "controllable": True})
 controle("mag hij weer sturen, dan zijn ze er weer",
          all(e.available for e in was162) and start162.extra_state_attributes.get("alleen_lezen") is False, "")
+
+print("=== 163. de afbouw bovenin: het gemiddelde vanaf waar hij remt, niet het laagste punt (v0.128.0) ===")
+# De eerste woning: op 10-10-2026 leerde de coach 1,69 kW voor 90 tot 100 procent,
+# vlak voor 100%, terwijl de auto tot 96% vol vermogen nam. Op 16-10-2026 liet de
+# klaar-tijdregel hem daardoor om 20:17 laden in plaats van om 01:00. De eigenaar:
+# "ik wil een gemiddelde hebben en niet de laagste band kiezen." Hier op één fase
+# en met het plafond van deze proefpaal (14 A): tot 97% alles, dan 10, 8 en 6,5 A.
+inst163, hass163, coach163 = beurt71(soc="96")
+hass163.states.zet("sensor.laadpaal_dyn", "14")
+hass163.states.zet("sensor.laadpaal_stroom", "13.5")
+hass163.states.zet("sensor.laadpaal_vermogen", "3100")
+for minuut in range(0, 20):
+    op71(coach163, inst163, 3, minuut)
+controle("zolang hij alles neemt leert de coach niets", not (inst163.get("car_pace") or []),
+         f"{inst163.get('car_pace')}")
+for soc, stroom, minuten in (("97", 10.0, range(20, 25)), ("98", 8.0, range(25, 30)), ("99", 6.5, range(30, 35))):
+    hass163.states.zet("sensor.auto_soc", soc)
+    hass163.states.zet("sensor.laadpaal_stroom", str(stroom))
+    hass163.states.zet("sensor.laadpaal_vermogen", str(stroom * 230))
+    for minuut in minuten:
+        op71(coach163, inst163, 3, minuut)
+rij163 = next((r for r in inst163.get("car_pace") or [] if r.get("band") == 9), {})
+gemiddeld163 = (5 * 2.3 + 5 * 1.84 + 5 * 1.495) / 15
+print(f"  bewaard: {rij163}  (gemiddelde {gemiddeld163:.3f} kW, laagste 1,495)")
+controle("band 9 krijgt het gemiddelde van de remronden, niet het laagste punt",
+         abs(rij163.get("kw", 0) - gemiddeld163) < 0.1 and rij163.get("kw", 0) > 1.495 + 0.2, f"{rij163}")
+controle("met de accustand waar hij begon te remmen", 96.9 <= rij163.get("van", 0) <= 97.6, f"{rij163}")
+controle("en tot waar het gemeten is", rij163.get("soc", 0) >= 98.9, f"{rij163}")
+# Een volgende beurt rekent ermee: van 90 tot 97 wat de paal geeft.
+auto163 = coachmod.ChargerCoach._tempo_vanaf(inst163, "dev-laadpaal", "car-1")
+controle("de grens gaat mee naar de som", auto163.get(9) == rij163.get("van"), f"{auto163}")
+
+# Een beurt die minder hoog komt vervangt hem niet: tot 97,x weet niet wat er
+# tussen 98 en 100 gebeurt.
+HOOG163 = {"device": "dev-laadpaal", "car": "car-1", "band": 9, "kw": 1.9, "van": 96.0, "soc": 100.0, "at": "x"}
+inst163b, hass163b, coach163b = beurt71([HOOG163], soc="97")
+hass163b.states.zet("sensor.laadpaal_dyn", "14")
+hass163b.states.zet("sensor.laadpaal_stroom", "7.0")
+hass163b.states.zet("sensor.laadpaal_vermogen", "1610")
+for minuut in range(20, 30):
+    op71(coach163b, inst163b, 3, minuut)
+controle("een meting tot 97% laat die tot 100% staan", HOOG163 in (inst163b.get("car_pace") or []),
+         f"{inst163b.get('car_pace')}")
+
+print("=== 164. de tijdlijn zegt het als de klaar-tijdregel laadt (v0.128.0) ===")
+# De eerste woning op 16-10-2026 om 21:33: de paal laadde sinds 20:17 op de
+# klaar-tijdregel, en op de kaart stond "Wachten, duurder dan wat hij nodig heeft"
+# voor de uren tot 01:00. De eigenaar: "Sterker nog, hij is NU aan t laden tegen 0,394."
+inst164 = instellingen(devices=[PAAL52])
+inst164["strategy"]["schedules"][0]["window"]["done_by"] = "23:00"
+huis164 = huis(status="charging", stroom=13.5, vermogen=3070.0, teruglevering=0.0, afname=1800.0)
+huis164["sensor.auto_soc"] = "20"
+hass164, _, coach164 = bouw(huis164, inst164)
+b164, _ = asyncio.run(ronde(coach164, inst164, paal=PAAL52, nu=dt.datetime(2026, 9, 5, 20, 0)))
+blokken164 = (b164.get("plan_ahead") or {}).get("blocks") or []
+print(f"  {b164.get('rule')}: {[(b['start'][11:16], b['charging'], b['why']) for b in blokken164][:4]}")
+controle("de klaar-tijdregel laadt", (b164.get("rule") or "").startswith("deadline"), f"{b164.get('rule')}")
+controle("en het uur van nu laadt ook op de tijdlijn",
+         blokken164 and blokken164[0]["charging"], f"{blokken164[:1]}")
+controle("geen uur ertussen dat wacht",
+         not any(not b["charging"] and "duurder" in b["why"] for b in blokken164), f"{blokken164}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
