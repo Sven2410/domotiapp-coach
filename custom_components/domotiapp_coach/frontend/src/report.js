@@ -23,11 +23,16 @@ const KLEUR = {
   zacht: "#5d6b7a",
   lijn: "#d9e1e9",
   vlak: "#f4f7fa",
+  // De kleuren van het scherm (v0.126.3). Het rapport had eigen, donkerder
+  // kleuren voor het net, en daarin waren van en naar het net voor kleurenblinden
+  // bijna gelijk (ΔE 5,0, de ondergrens is 8). Deze vier halen op wit 8,2, het
+  // slechtste paar is dan van tegen naar het net.
   zon: "#dc7300",
-  net: "#0f7fbb",
-  terug: "#a30fae",
-  // De batterij (v0.126.2), hetzelfde roze als op het scherm.
-  accu: "#fd0774",
+  net: "#129be4",
+  terug: "#bc10c8",
+  accu: "#039580",
+  // "Coach" in de kop houdt het donkere blauw: dat is tekst, geen grafiek.
+  merk: "#0f7fbb",
 };
 
 /**
@@ -130,7 +135,7 @@ function schrijfHoofd(pdf, vel, gegevens, logo) {
   pdf.text(links + textWidth("DomotiApp ", 14, true), boven + 13, "Coach", {
     size: 14,
     bold: true,
-    color: KLEUR.net,
+    color: KLEUR.merk,
   });
   if (gegevens.woning) {
     pdf.text(links, boven + 26, gegevens.woning, { size: 9, color: KLEUR.zacht });

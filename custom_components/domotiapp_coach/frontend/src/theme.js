@@ -42,8 +42,13 @@ export const tokens = /* css */ `
   --dac-house:         #235efa;
   --dac-grid-in:       #129be4;
   --dac-grid-out:      #bc10c8;
-  --dac-device-1:      #fd0774;
-  --dac-device-2:      #039580;
+  /* De thuisbatterij staat altijd in het eerste bolletje, dus dit is haar kleur,
+     ook in Historie en de tijdlijn. Tot v0.126.3 waren deze twee andersom; de
+     eigenaar op 16-10-2026: "ik wil geen roze hebben voor de batterij". Omgedraaid
+     en niet vervangen, want naast de vier andere was er geen tweede levendige
+     kleur die de zoektocht haalt: dezelfde zes, dus dezelfde marges. */
+  --dac-device-1:      #039580;
+  --dac-device-2:      #fd0774;
 
   /* Het verbruik per apparaat in Historie (v0.121.0): zes kleuren in een vaste
      volgorde, de categorische reeks van de dataviz-richtlijn zonder rood en
