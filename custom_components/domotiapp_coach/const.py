@@ -66,6 +66,8 @@ DEVICE_TYPES: Final = [
     # Wasmachine droger en vriezer."
     "wasmachine",
     "droger",
+    # Sinds v0.125.0: een vriezer die de coach in de gaten houdt en niet stuurt.
+    "vriezer",
     "airco",
     # Sinds v0.120.0: een smart plug, met wat eraan hangt (`STEKKER_APPARATEN`).
     "smartplug",
@@ -150,6 +152,15 @@ WASMACHINE_BRANDS: Final = [
     "overig",
 ]
 
+# --- Freezer brands (v0.125.0) ------------------------------------------------
+# De eigenaar op 15-10-2026 over de vriezer: "Uitlezen en melden", niet sturen.
+# Miele via de integratie van Home Assistant zelf; "overig" is elke vriezer met
+# een temperatuursensor, en eventueel een deursensor.
+VRIEZER_BRANDS: Final = [
+    "miele",
+    "overig",
+]
+
 # --- Battery brands ----------------------------------------------------------
 # Anker is de officiele Anker SOLIX-integratie, die lokaal via Modbus praat:
 # een modus, een vermogen en een richting. "overig" is elke batterij die in
@@ -183,7 +194,7 @@ AIRCO_BRANDS: Final = [
 ]
 
 ALL_BRANDS: Final = sorted(
-    {*CHARGER_BRANDS, *DISHWASHER_BRANDS, *WASMACHINE_BRANDS, *BATTERY_BRANDS, *AIRCO_BRANDS}
+    {*CHARGER_BRANDS, *DISHWASHER_BRANDS, *WASMACHINE_BRANDS, *VRIEZER_BRANDS, *BATTERY_BRANDS, *AIRCO_BRANDS}
 )
 
 # --- Grid metering patterns ------------------------------------------------

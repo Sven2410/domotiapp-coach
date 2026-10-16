@@ -170,6 +170,12 @@ SENSOR_STIL_AUTO = timedelta(minutes=60)
 # de grens heen en weer gaat geeft zo één bericht, niet elke paar minuten een.
 TEMP_AANHOUDEND = timedelta(minutes=2)
 TEMP_TERUG = 1.0
+# De vriezer (v0.125.0): de coach stuurt hem niet, hij meldt. De keuzes van de
+# eigenaar op 15-10-2026: een melding als de deur 3 minuten openstaat, en als hij
+# een half uur warmer is dan -15 °C. Weer koud is hij TEMP_TERUG onder de grens.
+VRIEZER_DEUR = timedelta(minutes=3)
+VRIEZER_GRENS_C = -15.0
+VRIEZER_WARM = timedelta(minutes=30)
 # Een smart plug die altijd aan moet staan (v0.120.0): zo lang mag hij uit zijn
 # voor er een melding komt. De eigenaar op 15-10-2026: "Lukt dat niet wil ik na
 # 2 min een melding ontvangen."
@@ -833,6 +839,9 @@ def _temp_nodig(settings: dict[str, Any], device: dict[str, Any]) -> bool:
     """Of de coach iets doet met de temperatuur van deze batterij: een melding
     (`temp_alert`) of een ventilator (`fan` met `fan_above_c`)."""
     entities = device.get("entities") or {}
+    # Bij een vriezer is de temperatuur het hele punt (v0.125.0).
+    if device.get("type") == "vriezer" and entities.get("temperature"):
+        return True
     if device.get("type") != "thuisbatterij" or not entities.get("temperature"):
         return False
     ventilator = entities.get("fan") and (device.get("battery") or {}).get("fan_above_c") is not None
@@ -1217,6 +1226,10 @@ class ChargerCoach:
         # is, en welke al gemeld zijn. Zie `_async_temperatuurwacht`.
         self._temp_boven: dict[str, datetime] = {}
         self._temp_gemeld: set[str] = set()
+        # De vriezerwacht (v0.125.0): per vriezer en per soort (deur, warm,
+        # storing) sinds wanneer, en wat al gemeld is. Zie `_async_vriezerwacht`.
+        self._vriezer_sinds: dict[tuple[str, str], datetime] = {}
+        self._vriezer_gemeld: set[tuple[str, str]] = set()
         # De smart plugs die altijd aan moeten staan (v0.120.0): sinds wanneer
         # hij uit is, welke al gemeld zijn, welke de coach zelf weer aanzette, en
         # de klok die na `ALTIJD_AAN_WACHT` nog een keer kijkt. Zie `_async_altijd_aan`.
@@ -2023,6 +2036,86 @@ class ChargerCoach:
                     f"De temperatuur van {naam} is weer {_graden(temp)}.", telefoon=False
                 )
 
+    def _vriezer_temp(self, entity_id: str | None) -> float | None:
+        """De temperatuur van een vriezer: een sensor, of de climate van de vriezer zelf."""
+        if entity_id and entity_id.startswith("climate."):
+            state = self.hass.states.get(entity_id)
+            try:
+                return float((getattr(state, "attributes", None) or {}).get("current_temperature"))
+            except (TypeError, ValueError):
+                return None
+        return _celsius(self.hass, entity_id)
+
+    async def _async_vriezerwacht(self, settings: dict[str, Any], now: datetime) -> None:
+        """De vriezer in de gaten houden en melden (v0.125.0).
+
+        De eigenaar op 15-10-2026 over de vriezer: "Uitlezen en melden", niet
+        sturen, met drie meldingen: de deur die te lang openstaat (na
+        `VRIEZER_DEUR`), de temperatuur die oploopt (een half uur warmer dan
+        `VRIEZER_GRENS_C`), en een storing die de vriezer zelf meldt. Elk één
+        keer, kritiek, want dat moet de bewoner oplossen; weer goed staat
+        alleen in de geschiedenis. Een sensor die niets zegt verandert hier
+        niets; dat meldt `_async_sensorwacht`.
+        """
+        actief: set[tuple[str, str]] = set()
+        for device in settings.get("devices") or []:
+            if device.get("type") != "vriezer":
+                continue
+            entities = device.get("entities") or {}
+            sleutel = str(device.get("id") or "")
+            eigen = str(device.get("name") or "").strip()
+            naam = (eigen[0].upper() + eigen[1:]) if eigen else "De vriezer"
+            van = eigen or "de vriezer"
+
+            deur = _text(self.hass, entities.get("door")).strip().lower()
+            if deur in ("on", "open", "off", "closed"):
+                await self._vriezer_stand(
+                    (sleutel, "deur"), deur in ("on", "open"), now, VRIEZER_DEUR, actief,
+                    f"De deur van {van} staat al {int(VRIEZER_DEUR.total_seconds() // 60)} minuten open.",
+                    f"De deur van {van} is weer dicht.",
+                )
+            temp = self._vriezer_temp(entities.get("temperature"))
+            if temp is not None:
+                warm = temp > VRIEZER_GRENS_C
+                koud = temp <= VRIEZER_GRENS_C - TEMP_TERUG
+                if warm or koud:
+                    await self._vriezer_stand(
+                        (sleutel, "warm"), warm, now, VRIEZER_WARM, actief,
+                        f"{naam} is al een half uur warmer dan {_graden(VRIEZER_GRENS_C)}: nu {_graden(temp)}.",
+                        f"{naam} is weer {_graden(temp)}.",
+                    )
+                elif (sleutel, "warm") in self._vriezer_sinds or (sleutel, "warm") in self._vriezer_gemeld:
+                    # Tussen de grens en een graad eronder blijft het zoals het was.
+                    actief.add((sleutel, "warm"))
+            storing = _text(self.hass, entities.get("problem")).strip().lower()
+            if storing in ("on", "off"):
+                await self._vriezer_stand(
+                    (sleutel, "storing"), storing == "on", now, timedelta(0), actief,
+                    f"{naam} meldt een storing.",
+                    f"{naam} meldt geen storing meer.",
+                )
+        # Een vriezer die er niet meer is, of een sensor die verdween: vergeten.
+        for weg in set(self._vriezer_sinds) - actief:
+            self._vriezer_sinds.pop(weg, None)
+        self._vriezer_gemeld &= actief
+
+    async def _vriezer_stand(
+        self, sleutel: tuple[str, str], mis: bool, now: datetime, wacht: timedelta,
+        actief: set[tuple[str, str]], melding: str, terug: str,
+    ) -> None:
+        """Eén ding van een vriezer: `mis` sinds wanneer, één melding na `wacht`, en terug."""
+        actief.add(sleutel)
+        if mis:
+            sinds = self._vriezer_sinds.setdefault(sleutel, now)
+            if sleutel not in self._vriezer_gemeld and now - sinds >= wacht:
+                self._vriezer_gemeld.add(sleutel)
+                await self._async_tell(melding, kritiek=True)
+            return
+        self._vriezer_sinds.pop(sleutel, None)
+        if sleutel in self._vriezer_gemeld:
+            self._vriezer_gemeld.discard(sleutel)
+            await self._async_tell(terug, telefoon=False)
+
     async def _async_ventilator(
         self, device: dict[str, Any], naam: str, temp: float, level: str
     ) -> None:
@@ -2563,6 +2656,7 @@ class ChargerCoach:
         await self._async_sensorwacht(settings, moment)
         await self._async_verbruikswacht(settings, moment)
         await self._async_temperatuurwacht(settings, moment, level)
+        await self._async_vriezerwacht(settings, moment)
         await self._async_altijd_aan(settings, moment, level)
         await self._async_zonkromme(settings, moment)
         self._meter_bijhouden(settings, moment)

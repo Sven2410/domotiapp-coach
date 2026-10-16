@@ -28,6 +28,7 @@ import {
   programChooser,
   programKey,
   programPicker,
+  isReadOnly,
   releaseCopy,
   socVeld,
   deviceIcon,
@@ -2519,7 +2520,9 @@ class DacViewOverview extends DacElement {
     // bewaard, zodat een nieuwe volgorde de rij meteen opnieuw kan opbouwen.
     this.allSteer_ = devices;
     const list = orderDevices(
-      (devices ?? []).filter((device) => device.controllable),
+      // Wat de coach alleen uitleest hoort hier niet (v0.125.0), ook niet als het
+      // vinkje van vroeger nog aan staat.
+      (devices ?? []).filter((device) => device.controllable && !isReadOnly(device)),
       deviceOrder()
     );
 

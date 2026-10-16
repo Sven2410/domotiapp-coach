@@ -9351,6 +9351,64 @@ dom160 = coach160b.state.get("dev-dom") or {}
 controle("met een eigen rij plant hij hem gewoon", dom160.get("program") == "katoen_40"
          and dom160.get("rule") in ("wait-for-start", "cheapest-start"), f"{dom160.get('rule')} {dom160.get('program')}")
 
+print("=== 161. de vriezer: uitlezen en melden (v0.125.0) ===")
+# De eigenaar op 15-10-2026 over de vriezer: "Uitlezen en melden", niet sturen. Een
+# melding als de deur 3 minuten openstaat, als hij een half uur warmer is dan -15 °C,
+# en als de vriezer zelf een storing meldt.
+VRIEZER161 = {"id": "dev-vriezer", "type": "vriezer", "name": "", "brand": "miele", "controllable": False,
+              "entity": "", "entities": {"temperature": "sensor.vriezer_temp", "door": "binary_sensor.vriezer_deur",
+                                         "problem": "binary_sensor.vriezer_probleem"}}
+inst161 = instellingen(devices=[LAADPAAL, VRIEZER161])
+hass161, _, coach161 = bouw({**huis(), "sensor.vriezer_temp": {"state": "-18.0", "attributes": {"unit_of_measurement": "°C"}},
+                             "binary_sensor.vriezer_deur": "off", "binary_sensor.vriezer_probleem": "off"}, inst161)
+T161 = dt.datetime(2026, 10, 15, 20, 0)
+
+
+def wacht161(minuten, inst=None):
+    hass161.services.verstuurd.clear()
+    asyncio.run(coach161._async_vriezerwacht(inst or inst161, T161 + dt.timedelta(minutes=minuten)))
+    return [d[2]["message"] for d in hass161.services.verstuurd if d[0] == "notify"]
+
+
+controle("dicht en koud: niets", wacht161(0) == [], "")
+hass161.states.zet("binary_sensor.vriezer_deur", "on")
+controle("de deur open: nog niets", wacht161(1) == [] and wacht161(3) == [], "")
+deur161 = wacht161(4)
+controle("na 3 minuten één melding", deur161 == ["De deur van de vriezer staat al 3 minuten open."], f"{deur161}")
+controle("en niet nog een keer", wacht161(6) == [], "")
+hass161.states.zet("binary_sensor.vriezer_deur", "off")
+controle("weer dicht: alleen in de geschiedenis", wacht161(7) == [], "")
+
+hass161.states.zet("sensor.vriezer_temp", {"state": "-13.5", "attributes": {"unit_of_measurement": "°C"}})
+controle("warmer dan -15: nog geen melding", wacht161(10) == [] and wacht161(39) == [], "")
+warm161 = wacht161(40)
+controle("na een half uur één melding met de temperatuur", warm161 == ["De vriezer is al een half uur warmer dan -15 °C: nu -13,5 °C."],
+         f"{warm161}")
+hass161.states.zet("sensor.vriezer_temp", {"state": "-15.5", "attributes": {"unit_of_measurement": "°C"}})
+controle("net onder de grens: nog niet terug", wacht161(41) == [] and ("dev-vriezer", "warm") in coach161._vriezer_gemeld, "")
+hass161.states.zet("sensor.vriezer_temp", {"state": "-17.0", "attributes": {"unit_of_measurement": "°C"}})
+controle("een graad eronder: terug, alleen in de geschiedenis",
+         wacht161(42) == [] and ("dev-vriezer", "warm") not in coach161._vriezer_gemeld, "")
+
+hass161.states.zet("binary_sensor.vriezer_probleem", "on")
+storing161 = wacht161(50)
+controle("een storing meteen", storing161 == ["De vriezer meldt een storing."], f"{storing161}")
+hass161.states.zet("binary_sensor.vriezer_probleem", "off")
+controle("weg: alleen in de geschiedenis", wacht161(51) == [], "")
+
+# Met een eigen naam, en de temperatuur uit de climate van de vriezer zelf.
+eigen161 = {**VRIEZER161, "name": "vriezer garage", "entities": {"temperature": "climate.vriezer"}}
+hass161.states.zet("climate.vriezer", {"state": "cool", "attributes": {"current_temperature": -10, "temperature": -18}})
+inst161b = {**inst161, "devices": [LAADPAAL, eigen161]}
+wacht161(60, inst161b)
+naam161 = wacht161(91, inst161b)
+controle("met een eigen naam, uit de climate", naam161 == ["Vriezer garage is al een half uur warmer dan -15 °C: nu -10 °C."],
+         f"{naam161}")
+controle("de temperatuur van een vriezer bewaakt de sensorwacht ook",
+         coachmod._temp_nodig(inst161, VRIEZER161), "")
+controle("een vriezer stuurt de coach niet: hij staat niet bij wat hij stuurt",
+         "dev-vriezer" not in coach161.state, f"{list(coach161.state)}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

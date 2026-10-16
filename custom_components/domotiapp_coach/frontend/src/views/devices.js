@@ -347,7 +347,7 @@ class DacViewDevices extends DacEditorElement {
 
     // Een merk dat alleen uitgelezen wordt (Growatt, v0.123.0) heeft geen
     // vermogenssensor met een teken: laden en ontladen staan in zijn velden.
-    const power = isReadOnly(device)
+    const power = brand?.noPower
       ? ""
       : `
       <div class="row">
@@ -804,10 +804,14 @@ class DacViewDevices extends DacEditorElement {
     // Nothing to decide yet on an appliance whose brand is still unknown.
     if (brandsFor(device.type).length && !brandMeta(device)) return "";
     if (isSmartPlug(device) && !plugAppliance(device)) return "";
-    // Alleen uitlezen (Growatt, v0.123.0): geen vinkje, maar wel zeggen waarom.
+    // Alleen uitlezen (Growatt, v0.123.0; een vriezer, v0.125.0): geen vinkje,
+    // maar wel zeggen waarom.
     if (isReadOnly(device)) {
+      const wat = device.type === "vriezer"
+        ? "De coach stuurt de vriezer niet. Hij houdt hem in de gaten en stuurt een melding als de deur 3 minuten openstaat, als hij een half uur warmer is dan -15 °C, of als de vriezer een storing meldt."
+        : "De coach leest deze batterij alleen uit: hoe vol hij is, wat hij laadt en ontlaadt, en zijn tellers. Sturen doet hij hem niet.";
       return `
-      <p class="sub" data-read-only="${index}">De coach leest deze batterij alleen uit: hoe vol hij is, wat hij laadt en ontlaadt, en zijn tellers. Sturen doet hij hem niet.</p>`;
+      <p class="sub" data-read-only="${index}">${wat}</p>`;
     }
 
     const missing = missingForControl(device);
@@ -992,7 +996,8 @@ class DacViewDevices extends DacEditorElement {
     // it is a name of the customer's own, otherwise it would say the same word
     // twice.
     // Een merk dat alleen uitgelezen wordt heeft geen vermogenssensor (v0.123.0).
-    const what = device.entity || (isReadOnly(device) ? "alleen uitlezen" : "geen vermogenssensor");
+    const what = device.entity
+      || (isReadOnly(device) ? (device.type === "vriezer" ? "meldingen" : "alleen uitlezen") : "geen vermogenssensor");
     const brand = brandMeta(device)?.label;
     const prefix = brand ?? ((device.name ?? "").trim() ? kindLabel(device) : "");
     const altijd = canAlwaysOn(device) && device.always_on ? " · altijd aan" : "";
@@ -1543,6 +1548,11 @@ class DacViewDevices extends DacEditorElement {
           // Alleen uitlezen (Growatt, v0.123.0): niet sturen, en geen sensor
           // laten staan die hier geen veld heeft.
           Object.assign(device, alleenUitlezen(device));
+        }
+        // Een vriezer stuurt de coach niet (v0.125.0): dan ook niet op het
+        // overzicht als iets om te sturen.
+        if (!isBattery(device) && isReadOnly(device) && (field === "brand" || field === "type")) {
+          device.controllable = false;
         }
 
         if (field === "controllable" || field === "device_id" || field === "always_on") {
