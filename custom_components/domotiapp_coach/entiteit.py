@@ -520,6 +520,26 @@ def accu_alleen_lezen(device: dict[str, Any]) -> bool:
     return not device.get("controllable") or device.get("brand") in BATTERIJ_ALLEEN_LEZEN
 
 
+def programma_alleen_lezen(device: dict[str, Any]) -> bool:
+    """Of de coach dit apparaat met een programma alleen volgt (v0.127.0): zonder
+    het vinkje "mag sturen". Hetzelfde als `_programma_alleen_lezen` in coach.py."""
+    return not device.get("controllable")
+
+
+class ProgrammaBediening:
+    """De knoppen en de vrijgave van een apparaat met een programma (v0.127.0).
+
+    Bij alleen uitlezen start de coach hem nooit, dus staan ze op niet
+    beschikbaar, zoals bij een batterij (`AccuBediening`). De beheersessie op
+    16-10-2026, bij een Miele-wasmachine die alleen uitgelezen wordt: de knoppen
+    bleven staan, en "Wacht tot je hem vrijgeeft" ook.
+    """
+
+    @property
+    def available(self) -> bool:
+        return not programma_alleen_lezen(self._device)  # type: ignore[attr-defined]
+
+
 class AccuBediening:
     """Een knop, schakelaar of getal van een thuisbatterij (v0.123.1).
 

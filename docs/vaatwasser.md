@@ -438,8 +438,9 @@ Op de startsensor, naast `start` (ISO met zone) en `release_switch` die bestaand
 al lezen: `contract` (1), `type`, `stand` (`niet_vrijgegeven`, `gepland`, `start_nu`,
 `draait`, `klaar`; `programma_stand`), `vrijgegeven`, `nu`, `klaar_om` (de klaar-tijd uit het
 schema, ISO met zone), `later` (de dag waar hij naar opschuift als de klaar-tijd van vandaag
-voorbij is: dan zegt het paneel "Ingeruimd, morgen starten") en `entiteiten` (wat de klant bij
-de coach invulde, zodat de kaart het niet nog eens vraagt).
+voorbij is: dan zegt het paneel "Ingeruimd, morgen starten"), `entiteiten` (wat de klant bij
+de coach invulde, zodat de kaart het niet nog eens vraagt) en sinds v0.127.0 `alleen_lezen`
+(zie "Alleen uitlezen" onder Miele).
 
 De knoppen doen dezelfde som als de knop in het paneel (`async_vrijgave`, dat
 `domotiapp_coach/device/ready` nu ook gebruikt) en laten de coach meteen kijken. De
@@ -479,7 +480,7 @@ Apparaten "deur dicht" en "de schone was" (`vaatwasser` in voorkeur-velden.js).
 
 | veld | Miele | wat de coach ermee doet |
 |---|---|---|
-| Status | de sensor met de naam van de machine (`status`, een enum van 19) | vertaald naar de woorden van Home Connect (`MIELE_STATUS` in coach.py): `programmed` en `waiting_to_start` zijn "ready", `in_use` is "run", `pause` en `rinse_hold` zijn "pause", `program_ended` en `program_interrupted` zijn "finished" |
+| Status | de sensor met de naam van de machine (`status`, een enum van 19) | vertaald naar de woorden van Home Connect (`MIELE_STATUS` in coach.py): `programmed` en `waiting_to_start` zijn "ready", `in_use` is "run", `pause` en `rinse_hold` zijn "pause", `program_ended` is "finished"; `program_interrupted` is midden in een beurt een pauze en anders "finished" (v0.127.0) |
 | Programma | de sensor Programma (`program_id`), een sleutel als `cottons` | precies op de sleutel opgezocht, niet zoals `programma_van` (bij Miele is "denim" het eind van "gentle_denim") |
 | Resterende tijd | `remaining_time`, minuten | zolang het programma klaarstaat de duur waarmee hij plant; tijdens de beurt "klaar rond" |
 | Start op afstand | `mobile_start` | uit: niet drukken, en één keer zeggen dat het aan moet |
@@ -519,6 +520,31 @@ de bewoner drukt. Zonder opgave van de fabrikant begint de tabel leeg (`tabel_va
 **Niet in het echt gezien.** Nog open bij Miele: of `remaining_time` de duur al geeft zolang het
 programma klaarstaat (zonder duur zegt de coach dat hij het programma niet kent), en wat de
 teller doet tussen twee programma's. De beheersessie stuurt een dump van een draaiend programma.
+
+**Een onderbreking is een pauze (v0.127.0).** In de klantwoning op 16-10-2026, gemeten door de
+beheersessie: 08:59:26 `in_use`, 08:59:42 `program_interrupted`, 09:00:16 weer `in_use`; 16
+seconden, waarin de temperatuur werd bijgesteld. De coach las "afgebroken" als klaar,
+en bij een machine die hij stuurt had dat een valse melding "is klaar" gegeven, een beurt van 16
+seconden en een vrijgave die eraf ging. Nu telt `program_interrupted` midden in een beurt als een
+pauze (`sessie["afgebroken"]` in `_one_programma`): gaat hij weer draaien, dan loopt de beurt
+door; gaat hij daarna uit of staat hij weer klaar, dan is de beurt voorbij, zegt het verslag "is
+afgebroken" en komt er geen meting (`_async_programma_klaar`), want de duur zegt dan niets over
+het programma. Zonder lopende beurt blijft het "finished", zoals eerst. Geen tijdslimiet: die
+zou verzonnen zijn.
+
+**Alleen uitlezen (v0.127.0).** Zonder het vinkje "mag sturen" sloeg de coach een apparaat met
+een programma helemaal over. In dezelfde klantwoning zette de eigenaar de wasmachine en de droger
+die middag op alleen uitlezen; de startsensor bleef staan op "Wacht tot je hem vrijgeeft.", de
+knoppen bleven er, en er was geen draait, klaar of meting meer. Nu volgt hij zo'n apparaat zoals
+bij Alleen uitlezen in Strategie (`LEVEL_READ` voor dat ene apparaat): draait en klaar op de
+kaart, de meldingen en het verslag, en de meting, maar hij start hem nooit. Hij leest de vrijgave
+niet en komt niet aan de knop, de vrijgaveschakelaar of de klep (`_programma_alleen_lezen`), en
+zolang hij niet draait is het besluit `read-only`, "Alleen uitlezen: de coach start hem niet."
+Het is geen sessie: Sessies in Historie is wat de coach liet draaien. Voor de kaarten:
+`alleen_lezen` op de startsensor, en de drie knoppen en `vrijgegeven` op niet beschikbaar
+(`ProgrammaBediening` in entiteit.py, zoals `AccuBediening` bij een batterij); ze komen terug
+zodra het vinkje weer aan staat. `stand` blijft een van de bestaande sleutels. Proef 162 in
+test_coach.py.
 
 Proef 160 in test_coach.py; scenario's `wasmachine-miele` en `wasmachine-miele-gemeten` in het
 virtuele huis (`Vaatwasser(miele=True)`: de standen, de sleutel, de duur, de teller in tienden,

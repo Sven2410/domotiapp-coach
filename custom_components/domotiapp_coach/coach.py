@@ -995,7 +995,8 @@ def _text(hass: HomeAssistant, entity_id: str | None) -> str:
 # van Home Connect, waar de rest van de coach mee rekent (v0.124.0; `DRAAIT`,
 # `KLAAR` in planner.py). "programmed" en "waiting_to_start" zijn: het
 # programma staat klaar en wacht op een start, dus "ready". Een programma dat
-# afgebroken is ("program_interrupted") is ook voorbij.
+# afgebroken is ("program_interrupted") is voorbij als er geen beurt loopt;
+# midden in een beurt is het een pauze (v0.127.0, in `_one_programma`).
 MIELE_STATUS = {
     "off": "inactive",
     "on": "ready",
@@ -1010,6 +1011,16 @@ MIELE_STATUS = {
     "failure": "error",
     "not_connected": "",
 }
+
+def _programma_alleen_lezen(device: dict[str, Any]) -> bool:
+    """Of de coach dit apparaat met een programma alleen volgt (v0.127.0).
+
+    Zonder het vinkje "mag sturen": draait, klaar, het verslag en de meting wel,
+    starten, de vrijgave en een sessie niet. Hetzelfde als
+    `programma_alleen_lezen` in entiteit.py, voor de kaarten.
+    """
+    return not device.get("controllable")
+
 
 # Hoe een programma-apparaat in een melding heet zonder eigen naam.
 PROGRAMMA_NAAM = {"vaatwasser": "De vaatwasser", "wasmachine": "De wasmachine", "droger": "De droger"}
@@ -2727,12 +2738,17 @@ class ChargerCoach:
             except Exception:  # noqa: BLE001 - one broken device is not all of them
                 _LOGGER.exception("kon %s niet beoordelen", device.get("id"))
 
-        # En de apparaten met een programma: die starten één keer.
+        # En de apparaten met een programma: die starten één keer. Een apparaat
+        # dat de coach niet mag sturen volgt hij wel (v0.127.0): draait, klaar,
+        # het verslag en de meting, maar hij start het nooit. Tot dan sloeg hij
+        # het helemaal over, en bleef de kaart staan op het laatste besluit; de
+        # beheersessie op 16-10-2026 bij een Miele-wasmachine en -droger die
+        # alleen uitgelezen worden.
         for device in settings.get("devices") or []:
-            if device.get("type") not in PROGRAMMA_TYPES or not device.get("controllable"):
+            if device.get("type") not in PROGRAMMA_TYPES:
                 continue
             try:
-                await self._one_programma(moment, settings, device, level)
+                await self._one_programma(moment, settings, device, level if device.get("controllable") else LEVEL_READ)
                 self._besluit_melden(device.get("id", ""))
             except ServiceNotFound:
                 _LOGGER.warning(
@@ -2828,13 +2844,16 @@ class ChargerCoach:
             settings.get("program_measured"), device_id, ook_nieuw=not vaat,
         )
 
-        released = device_id in (settings.get("ready_devices") or [])
+        # Alleen uitlezen (v0.127.0): geen vrijgave, en de coach komt niet aan
+        # de knop, de schakelaars of de klep; die zijn van de bewoner.
+        alleen_lezen = _programma_alleen_lezen(device)
+        released = not alleen_lezen and device_id in (settings.get("ready_devices") or [])
         # Zonder vrijgave (v0.102.0) is klep dicht vrijgegeven; dat volgt
         # hieronder, als de status bekend is. Knop en schakelaars tellen dan niet.
         zonder_vrijgave = device.get("release_required") is False
         # Een fysieke knop of een knop-helper (v0.102.0): één druk is "ingeruimd
         # en dicht", nog een keer drukken doet niets.
-        if not zonder_vrijgave:
+        if not zonder_vrijgave and not alleen_lezen:
             released = await self._async_knop_volgen(settings, device, sessie, released)
         # Een vrijgaveschakelaar naast de knop op de kaart. De eigenaar op 06-09-2026:
         # een eigen kaart in de keuken met een knop "sturing" die een
@@ -2843,7 +2862,7 @@ class ChargerCoach:
         # beweegt de knop op de kaart, dan volgt de schakelaar; en na een
         # beurt gaan ze allebei uit.
         nu_starten = False
-        if not zonder_vrijgave:
+        if not zonder_vrijgave and not alleen_lezen:
             released = await self._async_schakelaar_volgen(settings, device, sessie, released)
             # En "ingeruimd en nu starten", op de kaart of met een eigen schakelaar
             # (de eigenaar, 13-09-2026).
@@ -2884,11 +2903,24 @@ class ChargerCoach:
             # `Dishcare...OperationState.Run` en `run` zijn hetzelfde; zie
             # `programma_van` voor dezelfde afspraak bij het programma.
             status = status.split(".")[-1]
+            ruw = status
             # En Miele in dezelfde woorden (v0.124.0).
             status = MIELE_STATUS.get(status, status)
+            # Een onderbreking midden in een beurt is een pauze (v0.127.0). In
+            # de klantwoning op 16-10-2026: 08:59:26 in_use, 08:59:42
+            # program_interrupted, 09:00:16 weer in_use; 16 seconden om de
+            # temperatuur bij te stellen. Als "klaar" gaf dat een valse
+            # melding, een beurt van 16 seconden, en de vrijgave eraf. Voorbij
+            # is hij pas als hij daarna uit gaat of weer klaarstaat, en dan
+            # zonder meting: een afgebroken programma zegt niets over de duur.
+            if ruw == "program_interrupted" and sessie["gestart"] is not None:
+                status = "pause"
+                sessie["afgebroken"] = True
+            elif status in DRAAIT or status in KLAAR:
+                sessie["afgebroken"] = False
 
         klep = ""
-        if zonder_vrijgave:
+        if zonder_vrijgave and not alleen_lezen:
             released, klep = await self._async_klep_volgen(settings, device, sessie, released, deur_open, status)
 
         if released and sessie["vrijgegeven"] is None:
@@ -2926,6 +2958,8 @@ class ChargerCoach:
             # ten minste zag en niet één opklaring (11-09-2026, METER_VENSTER).
             surplus_w=self._meter_zeker(now),
         )
+        if alleen_lezen and decision.rule not in ("running", "finished"):
+            decision = Decision(False, 0, "Alleen uitlezen: de coach start hem niet.", rule="read-only")
         if sessie.pop("knop_melden", False):
             await self._async_tell(self._knop_zin(naam, decision, now, handmatig))
 
@@ -3015,9 +3049,10 @@ class ChargerCoach:
                 sessie["terugrekenen"] = None
                 await self._async_programma_terugrekenen(settings, device, sessie, *gat)
             # Elke vijf minuten naar de opslag, en meteen als de beurt net
-            # begint: zo overleeft een lopende beurt een herstart.
+            # begint: zo overleeft een lopende beurt een herstart. Niet bij
+            # alleen uitlezen: een sessie is wat de coach liet draaien.
             bewaard = sessie.get("bewaard")
-            if bewaard is None or (now - bewaard).total_seconds() >= 300:
+            if not alleen_lezen and (bewaard is None or (now - bewaard).total_seconds() >= 300):
                 sessie["bewaard"] = now
                 self._beurt_schrijven(self._programma_regel(device, naam, sessie, now, now, klaar=False))
         sessie["laatst"] = now
@@ -3036,6 +3071,8 @@ class ChargerCoach:
             "started_at": sessie["gestart"].isoformat() if sessie["gestart"] else None,
             "ends_at": eind.isoformat() if draait and eind is not None else None,
             "released": released,
+            # Volgen zonder te starten (v0.127.0), voor de kaart en het paneel.
+            "read_only": alleen_lezen,
             "start_now": nu_starten,
             # De klaar-tijd uit het schema, voor de kaart: "klaar vóór 07:00" (v0.110.0).
             "deadline": window.deadline.isoformat() if window.deadline is not None else None,
@@ -3558,8 +3595,13 @@ class ChargerCoach:
         """Het verslag, de beurt in de opslag, de meting bewaren, en de vrijgave eraf.
 
         `meten` uit als het einde niet echt gezien is (afgelopen terwijl de
-        coach weg was): een te korte duur hoort niet in de tabel.
+        coach weg was): een te korte duur hoort niet in de tabel. Een
+        afgebroken programma (v0.127.0) meet ook niet, en het verslag zegt
+        "afgebroken". Bij alleen uitlezen geen sessie en geen vrijgave: de
+        coach liet hem niet draaien en komt niet aan de schakelaars.
         """
+        afgebroken = bool(sessie.get("afgebroken"))
+        alleen_lezen = _programma_alleen_lezen(device)
         programma = sessie.get("programma")
         gestart: datetime = sessie["gestart"]
         einde = einde or now
@@ -3576,21 +3618,22 @@ class ChargerCoach:
         if maat is not None and kwh > 0 and maat - betaald >= 0.005:
             bespaard = self._bespaard_zin(maat - betaald)
         await self._async_tell(_verslag(
-            f"{naam} is klaar{wat}.",
+            f"{naam} is {'afgebroken' if afgebroken else 'klaar'}{wat}.",
             (f"{_kwh_tekst(kwh)}, " if kwh > 0 else "") + f"{gestart:%H:%M} tot {einde:%H:%M}.",
             herkomst,
             bespaard,
         ))
         # Wat er gemeten is gaat in de instellingen, zodat de volgende beurt
         # met de echte duur, het echte verbruik en het verloop rekent.
-        if meten:
+        if meten and not afgebroken:
             await self._async_meting_bewaren(settings, device, programma, sessie, gestart, einde)
-        self._beurt_schrijven(self._programma_regel(device, naam, sessie, now, einde, klaar=True))
-        # De vrijgave eraf, en de schakelaar mee: de volgende lading vraagt om
-        # een nieuwe.
-        await self._async_vrijgave_zetten(settings, device.get("id", ""), False)
-        await self._async_schakelen(device, False)
-        await self._async_schakelen(device, False, "release_now_switch")
+        if not alleen_lezen:
+            self._beurt_schrijven(self._programma_regel(device, naam, sessie, now, einde, klaar=True))
+            # De vrijgave eraf, en de schakelaar mee: de volgende lading vraagt
+            # om een nieuwe.
+            await self._async_vrijgave_zetten(settings, device.get("id", ""), False)
+            await self._async_schakelen(device, False)
+            await self._async_schakelen(device, False, "release_now_switch")
         self._programma[device.get("id", "")] = {
             **self._lege_programma_sessie(now), "gezien": True, "knop": sessie.get("knop"),
             "klep_uitruimen": device.get("release_required") is False,
@@ -4303,6 +4346,11 @@ class ChargerCoach:
             return
         self._besluit_genoteerd[device_id] = kern
         naam = _programma_naam(device)
+        if st.get("rule") == "read-only":
+            await self._async_noteer(f"{naam}: alleen uitlezen, de coach start hem niet.", now, {
+                "device": device_id, "rule": "read-only", "charge": False, "applied": False,
+            })
+            return
         if st.get("rule") == "running":
             kop = "draait"
         elif st.get("charge"):

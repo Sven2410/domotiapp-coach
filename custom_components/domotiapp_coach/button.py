@@ -17,7 +17,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import PROGRAMMA_TYPES
-from .entiteit import LEEG_TOT, AccuBediening, CoachEntiteit, async_per_apparaat, async_vrijgave, coach_verversen
+from .entiteit import (
+    LEEG_TOT, AccuBediening, CoachEntiteit, ProgrammaBediening, async_per_apparaat, async_vrijgave, coach_verversen,
+)
 
 # sleutel: (vrijgeven, nu starten, icoon)
 KNOPPEN = {
@@ -43,8 +45,11 @@ async def async_setup_entry(
     )
 
 
-class VrijgaveKnop(CoachEntiteit, ButtonEntity):
-    """Ingeruimd en op het goedkoopste moment starten, ingeruimd en nu, of toch niet."""
+class VrijgaveKnop(ProgrammaBediening, CoachEntiteit, ButtonEntity):
+    """Ingeruimd en op het goedkoopste moment starten, ingeruimd en nu, of toch niet.
+
+    Niet beschikbaar bij alleen uitlezen (v0.127.0).
+    """
 
     def __init__(self, device: dict[str, Any], stand: dict[str, Any] | None, sleutel: str) -> None:
         super().__init__(device, stand, sleutel)

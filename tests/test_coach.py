@@ -5464,8 +5464,11 @@ controle("en een boiler of vaatwasser ook, een apparaat zonder stand niet",
          "")
 bron103 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
            / "coach.py").read_text(encoding="utf-8")
+# Een apparaat met een programma krijgt sinds v0.127.0 Alleen uitlezen als hij niet
+# gestuurd mag worden; vandaar dat er na `level` nog iets mag staan.
 controle("na elke ronde van een batterij, vaatwasser en boiler",
-         all(f"await self._one_{soort}(moment, settings, device, level)\n                self._besluit_melden(" in bron103
+         all(_re.search(rf"await self\._one_{soort}\(moment, settings, device, level[^\n]*\)\n                self\._besluit_melden\(",
+                       bron103)
              for soort in ("batterij", "programma", "boiler")), "")
 
 print("=== 104. de batterij kent het plan van de paal, en de paal de hulp van de batterij (v0.95.0) ===")
@@ -9408,6 +9411,138 @@ controle("de temperatuur van een vriezer bewaakt de sensorwacht ook",
          coachmod._temp_nodig(inst161, VRIEZER161), "")
 controle("een vriezer stuurt de coach niet: hij staat niet bij wat hij stuurt",
          "dev-vriezer" not in coach161.state, f"{list(coach161.state)}")
+
+print("=== 162. Miele: een onderbreking is een pauze, en een machine die alleen uitgelezen wordt (v0.127.0) ===")
+# De beheersessie op 16-10-2026, in een klantwoning met een Miele-wasmachine en -droger:
+# 08:59:26 in_use, 08:59:42 program_interrupted, 09:00:16 weer in_use (16 seconden, de
+# temperatuur bijgesteld), en de coach las dat als klaar. En met het vinkje "mag sturen"
+# uit sloeg hij de machine helemaal over: de kaart bleef op "Wacht tot je hem vrijgeeft".
+WAS162 = {**WAS160, "entities": {**WAS160["entities"], "release_switch": "input_boolean.was_vrij"}}
+
+
+def bouw162(apparaat):
+    inst = instellingen(devices=[LAADPAAL, apparaat])
+    inst["contract"] = dict(inst56["contract"])
+    inst["ready_devices"] = ["dev-was"]
+    waarden = huis(status="ready_to_charge", teruglevering=0.0, afname=300.0)
+    waarden.update({
+        "sensor.was": "programmed", "sensor.was_programma": "cottons",
+        "sensor.was_rest": {"state": "95", "attributes": {"unit_of_measurement": "min"}},
+        "binary_sensor.was_afstand": "on", "binary_sensor.was_deur": "off", "button.was_start": "unknown",
+        "input_boolean.was_vrij": "on",
+        "sensor.was_energie": {"state": "0.0", "attributes": {"unit_of_measurement": "kWh"}},
+        "sensor.prijs": {"state": "0.18", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen56(7)}},
+    })
+    h, s, c = bouw(waarden, inst)
+
+    async def _ronde(nu):
+        h.services.verstuurd.clear()
+        await h.afmaken()
+        await c._round(nu)
+        await h.afmaken()
+        return c.state.get("dev-was") or {}, list(h.services.verstuurd)
+
+    def ronde(uur, minuut, status=None, teller=None, dag=7):
+        if status is not None:
+            h.states.zet("sensor.was", status)
+        if teller is not None:
+            h.states.zet("sensor.was_energie", {"state": teller, "attributes": {"unit_of_measurement": "kWh"}})
+        return asyncio.run(_ronde(dt.datetime(2026, 9, dag, uur, minuut)))
+
+    return h, s, c, ronde
+
+
+# Een onderbreking van een minuut midden in de beurt, en dan draait hij verder.
+hass162, store162, coach162, ronde162 = bouw162(WAS162)
+alles162 = []
+for stap in [(19, 0, None, None), (19, 5, "in_use", "0.0"), (19, 20, None, "0.3"), (19, 30, "program_interrupted", "0.4")]:
+    b162, v162 = ronde162(*stap)
+    alles162 += v162
+print(f"  19:30 onderbroken: {b162.get('rule')} running={b162.get('running')}  {b162.get('reason')}")
+controle("onderbroken midden in een beurt: hij draait nog, en er komt geen verslag",
+         b162.get("running") is True and not [m for m in telefoon160(alles162) if "is klaar" in m or "afgebroken" in m],
+         f"{b162.get('rule')} {telefoon160(alles162)}")
+controle("en de vrijgave blijft staan", "dev-was" in (store162.instellingen.get("ready_devices") or ["dev-was"])
+         and not [d for d in alles162 if d[0] == "input_boolean"], f"{[d for d in alles162 if d[0] == 'input_boolean']}")
+for stap in [(19, 31, "in_use", "0.4"), (20, 0, None, "0.9"), (20, 40, "program_ended", "1.2")]:
+    b162, v162 = ronde162(*stap)
+    alles162 += v162
+verslag162 = [m for m in telefoon160(alles162) if "is klaar" in m]
+meting162 = next((r for r in store162.instellingen.get("program_measured") or [] if r.get("device") == "dev-was"), {})
+print(f"  verslag: {verslag162}  meting: {meting162.get('minutes')} min, {meting162.get('kwh')} kWh")
+controle("pas bij program_ended één verslag, over de hele beurt",
+         len(verslag162) == 1 and "1,2 kWh" in verslag162[0] and "19:05 tot 20:40" in verslag162[0], f"{verslag162}")
+controle("en de meting over de hele beurt: 95 minuten, 1,2 kWh",
+         meting162.get("kwh") == 1.2 and meting162.get("minutes") == 95, f"{meting162}")
+
+# Onderbroken en dan uit: afgebroken, zonder meting.
+hass162b, store162b, coach162b, ronde162b = bouw162(WAS162)
+alles162b = []
+for stap in [(19, 0, None, None), (19, 5, "in_use", "0.0"), (19, 20, None, "0.3"), (19, 30, "program_interrupted", "0.4"),
+             (19, 40, None, None), (19, 50, "off", "unknown")]:
+    b162b, v162b = ronde162b(*stap)
+    alles162b += v162b
+afgebroken162 = [m for m in telefoon160(alles162b) if "afgebroken" in m or "is klaar" in m]
+print(f"  onderbroken en uit: {afgebroken162}")
+controle("onderbroken en dan uit: één verslag, en dat zegt afgebroken",
+         len(afgebroken162) == 1 and afgebroken162[0].startswith("De wasmachine is afgebroken (Cottons)."), f"{afgebroken162}")
+controle("een afgebroken programma geeft geen meting",
+         not [r for r in store162b.instellingen.get("program_measured") or [] if r.get("device") == "dev-was"],
+         f"{store162b.instellingen.get('program_measured')}")
+controle("de vrijgave gaat er wel af, zoals na elke beurt",
+         "dev-was" not in (store162b.instellingen.get("ready_devices") or []), "")
+controle("een onderbreking zonder beurt is nog steeds voorbij, zoals voorheen",
+         coachmod.MIELE_STATUS["program_interrupted"] == "finished", "")
+
+# Alleen uitlezen: volgen, nooit starten, niet aan de vrijgave of de schakelaar komen.
+WAS162L = {**WAS162, "controllable": False}
+hass162l, store162l, coach162l, ronde162l = bouw162(WAS162L)
+alles162l = []
+b162l, v162l = ronde162l(19, 0)
+alles162l += v162l
+print(f"  alleen uitlezen, 19:00: {b162l.get('rule')} released={b162l.get('released')}  {b162l.get('reason')}")
+controle("alleen uitlezen: geen vrijgave, ook als hij in de lijst staat, en dat zegt hij",
+         b162l.get("rule") == "read-only" and b162l.get("released") is False and b162l.get("read_only") is True
+         and b162l.get("reason") == "Alleen uitlezen: de coach start hem niet." and not b162l.get("charge"), f"{b162l}")
+for stap in [(1, 0, None, None, 8), (1, 30, None, None, 8)]:
+    b162l, v162l = ronde162l(*stap)
+    alles162l += v162l
+for stap in [(9, 0, "in_use", "0.0", 8), (9, 20, None, "0.3", 8)]:
+    b162l, v162l = ronde162l(*stap)
+    alles162l += v162l
+controle("hij volgt de beurt: draait, met een melding", b162l.get("running") is True and b162l.get("rule") == "running"
+         and any(m.startswith("De wasmachine draait (Cottons)") for m in telefoon160(alles162l)), f"{telefoon160(alles162l)}")
+for stap in [(10, 0, None, "0.9", 8), (10, 35, "program_ended", "1.2", 8)]:
+    b162l, v162l = ronde162l(*stap)
+    alles162l += v162l
+verslag162l = [m for m in telefoon160(alles162l) if "is klaar" in m]
+meting162l = next((r for r in store162l.instellingen.get("program_measured") or [] if r.get("device") == "dev-was"), {})
+print(f"  alleen uitlezen, verslag: {verslag162l}  meting: {meting162l.get('minutes')} min")
+controle("en klaar: het verslag en de meting", len(verslag162l) == 1 and meting162l.get("kwh") == 1.2, f"{verslag162l} {meting162l}")
+controle("maar hij drukt nooit en komt niet aan de schakelaar",
+         not [d for d in alles162l if d[0] in ("button", "input_boolean", "switch")],
+         f"{[d for d in alles162l if d[0] in ('button', 'input_boolean', 'switch')]}")
+controle("de vrijgave in de coach laat hij ook staan",
+         store162l.instellingen.get("ready_devices", ["dev-was"]) == ["dev-was"], f"{store162l.instellingen.get('ready_devices')}")
+sessies162l = [b for b in asyncio.run(coachmod.async_get_beurten(hass162l).async_list()) if b["device"] == "dev-was"]
+controle("en het is geen sessie: de coach liet hem niet draaien", sessies162l == [], f"{sessies162l}")
+
+# Voor de kaarten: de knoppen en de vrijgave niet beschikbaar, en alleen_lezen op de startsensor.
+hass162l.data["domotiapp_coach"]["coach"] = coach162l
+knoppen162, binair162, sensor162 = [], [], []
+asyncio.run(knopmod.async_setup_entry(hass162l, Invoer110(), lambda nieuw: knoppen162.extend(nieuw)))
+asyncio.run(binairmod.async_setup_entry(hass162l, Invoer110(), lambda nieuw: binair162.extend(nieuw)))
+asyncio.run(sensormod.async_setup_entry(hass162l, Invoer110(), lambda nieuw: sensor162.extend(nieuw)))
+was162 = [e for e in knoppen162 + binair162 if e.unique_id.startswith("dev-was_")]
+start162 = next(s for s in sensor162 if s.unique_id.startswith("dev-was_"))
+controle("alleen uitlezen: de drie knoppen en vrijgegeven zijn niet beschikbaar",
+         len(was162) == 4 and not any(e.available for e in was162), f"{[(e.unique_id, e.available) for e in was162]}")
+controle("en de startsensor zegt alleen_lezen", start162.extra_state_attributes.get("alleen_lezen") is True, "")
+for e in was162:
+    e.bijwerken_apparaat({**WAS162L, "controllable": True})
+start162.bijwerken_apparaat({**WAS162L, "controllable": True})
+controle("mag hij weer sturen, dan zijn ze er weer",
+         all(e.available for e in was162) and start162.extra_state_attributes.get("alleen_lezen") is False, "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
