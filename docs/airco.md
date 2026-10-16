@@ -174,7 +174,7 @@ de bewoner.
 
 - Een airco in de voorrang bij zon en bij planningen; nu wijkt hij voor iedereen
   die erin staat.
-- Beurten en Bespaard voor een airco.
+- Sessies en Bespaard voor een airco.
 - Een airco die alleen met `target_temp_high` en `target_temp_low` werkt
   (`heat_cool`); de coach zet alleen `temperature`.
 - Twee airco's in één ruimte gelijk laten lopen; elk volgt zijn eigen wens.

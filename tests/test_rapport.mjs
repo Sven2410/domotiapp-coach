@@ -2508,6 +2508,24 @@ proef("geen terugverdientijd en geen aankoopprijzen meer, nergens (v0.101.1)", (
   }
 });
 
+proef("Historie: Energie en Sessies, niet meer Beurten (v0.126.4)", () => {
+  // De eigenaar op 16-10-2026: "maak daar Energie en Sessies van."
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/history.js", import.meta.url), "utf8");
+  assert.ok(bron.includes('<option value="energie">Energie</option>'), "Energie in de keuzelijst");
+  assert.ok(bron.includes('<option value="bespaard">Sessies</option>'), "Sessies in de keuzelijst, de waarde blijft bespaard");
+  assert.ok(bron.includes('<div class="eyebrow">Sessies</div>'), "de kop van de kaart");
+  // Alles tussen aanhalingstekens dat de bewoner leest: geen beurt meer. Het
+  // commentaar eruit (daar citeert het de eigenaar), en de klasse van de tabel.
+  const zonder = bron
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/^\s*\/\/.*$/gm, "")
+    .replace(/table\.beurten|class="beurten"/g, "");
+  const teksten = zonder.match(/"[^"\n]*"|`[^`]*`/g) ?? [];
+  const fout = teksten.filter((t) => /\bbeurt(en)?\b/i.test(t));
+  assert.deepEqual(fout, [], "nog beurt in een tekst van Historie");
+});
+
 // --- de thuisbatterij in Historie (v0.101.2) ---------------------------------
 // Bij de eigenaar op 29-09-2026 om 10:00: "Door je zon € -0,56" naast "Door je
 // thuisbatterij € 0,60", en 2,65 kWh verbruikt waar het huis er ruim vijf
@@ -3616,7 +3634,7 @@ proef("Historie: onderwerp, periode en verloop zijn uitklaplijsten, en er is é�
   for (const id of ["onderwerp", "periode", "korrel"]) assert.ok(html.includes(`<select id="${id}">`), id);
   assert.ok(!html.includes('class="segmented'), "geen rijen knoppen meer");
   assert.ok(!html.includes("korrel-note"), "geen regel over het aantal rapportregels");
-  assert.ok(html.includes('<option value="bespaard">Beurten</option>'), "het onderwerp heet Beurten");
+  assert.ok(html.includes('<option value="bespaard">Sessies</option>'), "het onderwerp heet Sessies (v0.126.4)");
   assert.equal((html.match(/id="rapport-knop"/g) ?? []).length, 1);
   assert.ok(/id="rapport-menu"[^>]*hidden/.test(html), "het menu is dicht tot je op Rapport tikt");
   assert.ok(html.includes("Boven de lijn wat je verbruikte, onder de lijn wat je teruggaf."), "de inleiding is één zin");
@@ -3763,7 +3781,7 @@ proef("Historie: het pijltje van een uitklaplijst hoort bij de lijst, niet bij h
   assert.match(Historie.css, /\.kies \{[^}]*align-self: flex-start/);
 });
 
-proef("Beurten: de uitleg zegt eerst wat een beurt is", () => {
+proef("Sessies: de uitleg zegt eerst wat een sessie is", () => {
   const el = Object.create(Historie.prototype);
   const vak = { "#saved-note": nepEl("p"), "#saved-totals": nepEl(), "#saved-list": nepEl("table") };
   el.$ = (sel) => vak[sel];
@@ -3773,7 +3791,7 @@ proef("Beurten: de uitleg zegt eerst wat een beurt is", () => {
   el.beurten_ = [{ device: "v", name: "Vaatwasser", kind: "programma", plugged_at: nu.toISOString(), ended: nu.toISOString(),
     complete: true, kwh: 0.9, solar_kwh: 0.3, battery_kwh: 0, paid: 0.2, ref_cost: 0.22, saved: 0.02, solar_saved: 0.02 }];
   metNepDocument(() => el.paintSaved_());
-  assert.match(vak["#saved-note"].textContent, /^Een beurt is één keer dat de coach een apparaat liet draaien/);
+  assert.match(vak["#saved-note"].textContent, /^Een sessie is één keer dat de coach een apparaat liet draaien/);
 });
 
 // --- de smart plug (v0.120.0) ----------------------------------------------------

@@ -452,7 +452,7 @@ class DacViewHistory extends DacElement {
             <span class="keuze-kop">Onderwerp</span>
             <span class="kies"><select id="onderwerp">
               <option value="energie">Energie</option>
-              <option value="bespaard">Beurten</option>
+              <option value="bespaard">Sessies</option>
             </select></span>
           </label>
           <label class="keuze">
@@ -557,7 +557,7 @@ class DacViewHistory extends DacElement {
 
         <section class="card saved" id="saved-card" hidden>
           <div class="panel-head">
-            <div class="eyebrow">Beurten</div>
+            <div class="eyebrow">Sessies</div>
             <h2>Wat de coach je bespaarde</h2>
           </div>
           <div class="totals" id="saved-totals"></div>
@@ -825,7 +825,7 @@ class DacViewHistory extends DacElement {
     // energiekaarten gaan dicht en de besparingskaart open, of andersom.
     const bespaard = this.onderwerp_ === "bespaard";
     this.$("#saved-card").hidden = !bespaard;
-    // De zin over de lijn hoort bij de grafiek, en die staat bij Beurten niet.
+    // De zin over de lijn hoort bij de grafiek, en die staat bij Sessies niet.
     this.$("#intro-lijn").hidden = bespaard;
     this.$("#card").hidden = bespaard;
     if (bespaard) {
@@ -1803,7 +1803,7 @@ class DacViewHistory extends DacElement {
       uitleg:
         w.uitleg +
         (totaal.onbekend
-          ? ` ${totaal.onbekend === 1 ? "Eén beurt telt" : `${totaal.onbekend} beurten tellen`} niet mee in het geld, omdat de prijs toen niet bekend was.`
+          ? ` ${totaal.onbekend === 1 ? "Eén sessie telt" : `${totaal.onbekend} sessies tellen`} niet mee in het geld, omdat de prijs toen niet bekend was.`
           : ""),
       kop: [w.wanneer, "Apparaat", w.hoeveel, "Zon", ...(metAccu ? ["Accu"] : []), w.vanaf, "Betaald", "Bespaard", "Door zon"],
       rijen: items.map((b) => [
@@ -1846,7 +1846,8 @@ class DacViewHistory extends DacElement {
   }
 
   /**
-   * Beurten (heette Bespaard tot v0.116.0): wat de coach per beurt scheelde.
+   * Sessies (heette Bespaard tot v0.116.0, Beurten tot v0.126.4): wat de coach
+   * per sessie scheelde. De eigenaar op 16-10-2026: "maak daar Energie en Sessies van."
    *
    * De eigenaar op 13-10-2026: "Het moet niet zo zijn dat het gigantisch veel
    * wordt alle data dat mensen het niet meer snappen." Daarom drie tegels in
@@ -1868,8 +1869,8 @@ class DacViewHistory extends DacElement {
     const { items, totaal } = this.bespaard_();
     if (!items.length) {
       note.textContent = this.beurten_.length
-        ? "Geen beurten in deze periode."
-        : "Nog geen beurten. Vanaf de eerstvolgende staat hier wat hij kostte en bespaarde.";
+        ? "Geen sessies in deze periode."
+        : "Nog geen sessies. Vanaf de volgende sessie staat hier wat die kostte en bespaarde.";
       return;
     }
 
@@ -1912,14 +1913,14 @@ class DacViewHistory extends DacElement {
     );
 
     // De eigenaar op 13-10-2026: "leg eens beurten uit dat snap ik niet."
-    const zinnen = ["Een beurt is één keer dat de coach een apparaat liet draaien, zoals de auto laden of de vaatwasser.", w.uitleg];
+    const zinnen = ["Een sessie is één keer dat de coach een apparaat liet draaien, zoals de auto laden of de vaatwasser.", w.uitleg];
     if (metAccu) zinnen.push("Stroom uit de batterij telt als netstroom, zodat niets dubbel telt.");
     if (totaal.onbekend) {
       zinnen.push(
-        `${totaal.onbekend === 1 ? "Eén beurt telt" : `${totaal.onbekend} beurten tellen`} niet mee: de prijs was niet bekend.`
+        `${totaal.onbekend === 1 ? "Eén sessie telt" : `${totaal.onbekend} sessies tellen`} niet mee: de prijs was niet bekend.`
       );
     }
-    if (totaal.lopend) zinnen.push("Een beurt die nog loopt telt mee tot nu.");
+    if (totaal.lopend) zinnen.push("Een sessie die nog loopt telt mee tot nu.");
     note.textContent = zinnen.join(" ");
 
     const rij = (cellen, kop = false) => {

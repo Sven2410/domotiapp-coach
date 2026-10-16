@@ -522,6 +522,14 @@ beurten uit dat snap ik niet".
 - **Beurten** begint met wat een beurt is: "Een beurt is één keer dat de coach een
   apparaat liet draaien, zoals de auto laden of de vaatwasser."
 
+**v0.126.4: Beurten heet Sessies.** De eigenaar op 16-10-2026: "we hebben nu in de
+geschiedenis Energie en Beurten maar maak daar Energie en Sessies van." De keuzelijst
+Onderwerp, de kop van de kaart en de zinnen eronder zeggen nu sessie ("Een sessie is één
+keer dat de coach een apparaat liet draaien"). De waarde in de keuzelijst blijft
+`bespaard`, de opslag `BeurtenStore`, en het hoofdstuk in het rapport heet nog Bespaard.
+Elders blijft beurt staan waar het over één apparaat gaat: de laadbeurt op de kaart van de
+laadpaal en het aantal beurten achter een gemeten programma.
+
 ## Per apparaat (v0.121.0)
 
 De eigenaar op 15-10-2026: "ik wil ook het energieverbruik per apparaat kunnen zien in
