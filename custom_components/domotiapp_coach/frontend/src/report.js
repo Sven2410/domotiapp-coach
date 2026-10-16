@@ -26,6 +26,8 @@ const KLEUR = {
   zon: "#dc7300",
   net: "#0f7fbb",
   terug: "#a30fae",
+  // De batterij (v0.126.2), hetzelfde roze als op het scherm.
+  accu: "#fd0774",
 };
 
 /**
@@ -187,17 +189,21 @@ function schrijfVakjes(pdf, vel, vakjes) {
  *
  * Eigen zon onderin, ingekochte stroom daarbovenop, teruglevering onder de
  * nullijn. De volgorde is niet willekeurig: onderaan staat het deel dat niets
- * gekost heeft, dus hoe hoger het blauw begint, hoe duurder de dag was.
+ * gekost heeft, dus hoe hoger het blauw begint, hoe duurder de dag was. Sinds
+ * v0.126.2 met de batterij ertussen, boven de lijn eruit en onder de lijn
+ * erin; de stapeling zelf komt uit `stapel` in views/history.js.
  */
-function schrijfGrafiek(pdf, vel, rijen, metZon) {
+function schrijfGrafiek(pdf, vel, rijen, metZon, metAccu = false) {
+  const kleur = { own: KLEUR.zon, accu: KLEUR.accu, bought: KLEUR.net, sold: KLEUR.terug };
+  const som = (delen) => (delen ?? []).reduce((totaal, [, kwh]) => totaal + kwh, 0);
   const hoog = 170;
   vel.ruimte(hoog + 30);
 
   const boven = vel.y;
   const onder = boven + hoog;
 
-  const op = Math.max(...rijen.map((r) => r.own + r.bought), 0.001);
-  const neer = Math.max(...rijen.map((r) => r.sold), 0);
+  const op = Math.max(...rijen.map((r) => som(r.boven)), 0.001);
+  const neer = Math.max(...rijen.map((r) => som(r.onder)), 0);
   const spanne = (op + neer) * 1.05 || 1;
   const nul = boven + ((op * 1.05) / spanne) * hoog;
   const schaal = hoog / spanne;
@@ -210,22 +216,17 @@ function schrijfGrafiek(pdf, vel, rijen, metZon) {
 
   rijen.forEach((rij, i) => {
     const x = inspring + i * kolom + (kolom - balk) / 2;
-    const eigen = rij.own * schaal;
-    const gekocht = rij.bought * schaal;
-    const verkocht = rij.sold * schaal;
-
-    if (eigen > 0.4) {
-      pdf.rect(x, nul - eigen, balk, eigen, {
-        fill: KLEUR.zon,
-        radius: gekocht > 0.4 ? 0 : bocht,
+    const teken = (delen, neerwaarts) => {
+      const zichtbaar = (delen ?? []).map(([soort, kwh]) => [soort, kwh * schaal]).filter(([, h]) => h > 0.4);
+      let rand = nul;
+      zichtbaar.forEach(([soort, h], j) => {
+        const y = neerwaarts ? rand : rand - h;
+        pdf.rect(x, y, balk, h, { fill: kleur[soort], radius: j === zichtbaar.length - 1 ? bocht : 0 });
+        rand = neerwaarts ? rand + h : rand - h;
       });
-    }
-    if (gekocht > 0.4) {
-      pdf.rect(x, nul - eigen - gekocht, balk, gekocht, { fill: KLEUR.net, radius: bocht });
-    }
-    if (verkocht > 0.4) {
-      pdf.rect(x, nul, balk, verkocht, { fill: KLEUR.terug, radius: bocht });
-    }
+    };
+    teken(rij.boven, false);
+    teken(rij.onder, true);
   });
 
   pdf.line(MARGE, nul, MARGE + BREEDTE, nul, { color: KLEUR.lijn, width: 0.8 });
@@ -247,6 +248,7 @@ function schrijfGrafiek(pdf, vel, rijen, metZon) {
   // De legenda, op één regel en gecentreerd onder de grafiek.
   const stukken = [
     metZon ? { kleur: KLEUR.zon, tekst: "Eigen zon gebruikt" } : null,
+    metAccu ? { kleur: KLEUR.accu, tekst: "Batterij" } : null,
     { kleur: KLEUR.net, tekst: "Van het net" },
     { kleur: KLEUR.terug, tekst: "Naar het net" },
   ].filter(Boolean);
@@ -468,7 +470,7 @@ export async function reportPdf(gegevens) {
 
   if (gegevens.verloop?.length) {
     vel.kop("Verloop");
-    schrijfGrafiek(pdf, vel, gegevens.verloop, gegevens.metZon);
+    schrijfGrafiek(pdf, vel, gegevens.verloop, gegevens.metZon, gegevens.metAccu);
   }
 
   if (gegevens.apparaten?.rijen?.length) {

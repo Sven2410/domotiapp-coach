@@ -95,6 +95,42 @@ export function huisMetAccu(own, bought, accu = { battery: 0, voor: 0 }) {
   };
 }
 
+/**
+ * Hoe één vak van de grafiek gestapeld wordt (v0.126.2), op het scherm en in het
+ * rapport hetzelfde. Boven de lijn wat het huis gebruikte: eigen zon onderin,
+ * dan wat uit de batterij kwam, dan wat van het net kwam, zodat onderaan staat
+ * wat niets kostte of al betaald was. Onder de lijn wat het huis verliet: eerst
+ * wat de batterij in ging, dan wat naar het net ging. De batterij heeft één
+ * kleur; boven of onder de lijn zegt welke kant op. De eigenaar op 16-10-2026,
+ * bij Historie met de tegels Batterij geladen en ontladen erboven: "ik zie geen
+ * geschiedenis van de batterij?", en hij koos de grafiek zoals het
+ * energiedashboard.
+ *
+ * Uit de batterij is hooguit wat het huis niet van het net kreeg (`ownUse`),
+ * zodat de balk precies Verbruikt blijft. In een vak van een dag kan de batterij
+ * 's nachts van het net geladen en 's avonds ontladen zijn; die stroom telt dan
+ * als van het net, net als in Zelfvoorzienend.
+ *
+ * @returns {{boven: [string, number][], onder: [string, number][]}} per deel de
+ *   klasse en de kWh, van de lijn af
+ */
+export function stapel(row) {
+  const kwh = (waarde) => Math.max(0, Number(waarde) || 0);
+  const nietNet = kwh(row.ownUse);
+  const uit = Math.min(kwh(row.accuUit), nietNet);
+  return {
+    boven: [
+      ["own", nietNet - uit],
+      ["accu", uit],
+      ["bought", kwh(row.fromGrid)],
+    ],
+    onder: [
+      ["accu", kwh(row.accuIn)],
+      ["sold", kwh(row.sold)],
+    ],
+  };
+}
+
 /** Hoeveel apparaten een eigen kleur krijgen (`--dac-app-1` tot en met 6); de rest is grijs. */
 const APP_KLEUREN = 6;
 
@@ -1065,7 +1101,6 @@ class DacViewHistory extends DacElement {
       accuIn: sum("accuIn"),
       accuUit: sum("accuUit"),
     };
-    this.metAccu_ = rows.some((row) => Math.abs(row.battery) > 0.001);
     this.accuTegels_ = totals.accuIn + totals.accuUit >= 0.05;
     totals.selfUse =
       hasSolar && totals.solar > 0 ? (sum("own") / totals.solar) * 100 : null;
@@ -1079,6 +1114,9 @@ class DacViewHistory extends DacElement {
 
     this.paintTotals_(totals);
     this.paintLegend_();
+    this.$("#intro-lijn").textContent = this.accuTegels_
+      ? "Boven de lijn wat je verbruikte, onder de lijn wat naar de batterij of het net ging."
+      : "Boven de lijn wat je verbruikte, onder de lijn wat je teruggaf.";
 
     // De breedte van het tekenvlak zelf, niet die van het scherm: de kaart
     // heeft eigen marges, en meten op het verkeerde element schaalt de hele
@@ -1087,8 +1125,10 @@ class DacViewHistory extends DacElement {
     const H = W < 420 ? 200 : 260;
     const BOTTOM = H - BOTTOM_PAD;
 
-    const up = Math.max(...rows.map((row) => row.used), 0.001);
-    const down = Math.max(...rows.map((row) => row.sold), 0);
+    const stapels = rows.map(stapel);
+    const som = (delen) => delen.reduce((totaal, [, kwh]) => totaal + kwh, 0);
+    const up = Math.max(...stapels.map((s) => som(s.boven)), 0.001);
+    const down = Math.max(...stapels.map((s) => som(s.onder)), 0);
     const span = up + down || 1;
     const zero = TOP + ((up * 1.05) / (span * 1.05)) * (BOTTOM - TOP);
     const scale = (BOTTOM - TOP) / (span * 1.05);
@@ -1102,29 +1142,24 @@ class DacViewHistory extends DacElement {
     const barW = Math.max(1.5, colW - gap);
     const radius = Math.min(4, barW / 2);
 
-    const bars = rows
-      .map((row, index) => {
+    // Van de lijn af gestapeld (`stapel`); alleen het verste deel krijgt een
+    // ronde kop.
+    const bars = stapels
+      .map(({ boven, onder }, index) => {
         const x = inset + index * colW + (colW - barW) / 2;
-        // Stacked upwards: bought sits on top of own use, so the bottom of every
-        // bar is the part that cost nothing.
-        const ownH = row.ownUse * scale;
-        const boughtH = row.fromGrid * scale;
-        const soldH = row.sold * scale;
-
         const parts = [];
-        if (ownH > 0.4) {
-          parts.push(
-            `<path class="b own" data-index="${index}" d="${block(x, barW, zero - ownH, ownH, boughtH > 0.4 ? 0 : radius)}"/>`
-          );
-        }
-        if (boughtH > 0.4) {
-          parts.push(
-            `<path class="b bought" data-index="${index}" d="${block(x, barW, zero - ownH - boughtH, boughtH, radius)}"/>`
-          );
-        }
-        if (soldH > 0.4) {
-          parts.push(`<path class="b sold" data-index="${index}" d="${block(x, barW, zero, soldH, radius, true)}"/>`);
-        }
+        const teken = (delen, down) => {
+          const zichtbaar = delen.map(([soort, kwh]) => [soort, kwh * scale]).filter(([, h]) => h > 0.4);
+          let rand = zero;
+          zichtbaar.forEach(([soort, h], i) => {
+            const kop = i === zichtbaar.length - 1 ? radius : 0;
+            const y = down ? rand : rand - h;
+            parts.push(`<path class="b ${soort}" data-index="${index}" d="${block(x, barW, y, h, kop, down)}"/>`);
+            rand = down ? rand + h : rand - h;
+          });
+        };
+        teken(boven, false);
+        teken(onder, true);
         return parts.join("");
       })
       .join("");
@@ -1371,6 +1406,7 @@ class DacViewHistory extends DacElement {
       korrel: beknopt ? "Beknopt" : korrel,
       beknopt,
       metZon: hasSolar,
+      metAccu: Boolean(this.accuTegels_),
       gemaakt: new Date().toLocaleDateString("nl-NL", {
         day: "numeric",
         month: "long",
@@ -1381,12 +1417,7 @@ class DacViewHistory extends DacElement {
       geldUitleg: g ? this.geldUitleg_(g) : "",
       // Beknopt: de tegels van Bespaard wel, de regels per beurt niet.
       bespaard: beknopt && bespaard ? { ...bespaard, rijen: [] } : bespaard,
-      verloop: rows.map((row) => ({
-        label: bucketLabel(this.period_, row.start),
-        own: row.own,
-        bought: row.bought,
-        sold: row.sold,
-      })),
+      verloop: rows.map((row) => ({ label: bucketLabel(this.period_, row.start), ...stapel(row) })),
       apparaten: { kop: apparaatKop, rijen: apparaatRijen, uitleg: apparaatUitleg },
       vermogen: vermogen.samenvatting,
       vermogenDetail: vermogen.detail,
@@ -1709,7 +1740,8 @@ class DacViewHistory extends DacElement {
 
   paintLegend_() {
     const entries = [
-      { tone: "var(--dac-solar)", label: this.metAccu_ ? "Eigen zon en batterij" : "Eigen zon gebruikt" },
+      { tone: "var(--dac-solar)", label: "Eigen zon gebruikt" },
+      ...(this.accuTegels_ ? [{ tone: "var(--dac-device-1)", label: "Batterij" }] : []),
       { tone: "var(--dac-grid-in)", label: "Van het net" },
       { tone: "var(--dac-grid-out)", label: "Naar het net" },
     ];
@@ -2616,6 +2648,9 @@ DacViewHistory.css = /* css */ `
   .b.own { fill: var(--dac-solar); }
   .b.bought { fill: var(--dac-grid-in); }
   .b.sold { fill: var(--dac-grid-out); }
+  /* De batterij in haar eigen kleur, dezelfde als in de energiestroom en de
+     tijdlijn; boven de lijn eruit, onder de lijn erin (v0.126.2). */
+  .b.accu { fill: var(--dac-device-1); }
   .b.gas { fill: var(--dac-warn); }
   .b { transition: opacity 150ms ease; }
   /* Aanwijzen licht er één uit door de rest te dempen: de balk zelf verandert
