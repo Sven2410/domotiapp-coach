@@ -3645,6 +3645,35 @@ proef("Energie: vier tegels en één percentage, en geen 'Hele periode'", () => 
   assert.ok(!Historie.css.includes("Hele periode"));
 });
 
+proef("de grafiek: de batterij in haar eigen kleur, boven de lijn eruit en onder de lijn erin (v0.126.2)", async () => {
+  const { stapel, huisMetAccu: huis } = await import("../custom_components/domotiapp_coach/frontend/src/views/history.js");
+  const vak = (own, bought, sold, erin, eruit) => ({ own, bought, sold, accuIn: erin, accuUit: eruit, ...huis(own, bought, { battery: erin - eruit, voor: 0 }) });
+  const kwh = (delen) => Object.fromEntries(delen.map(([soort, w]) => [soort, Math.round(w * 1000) / 1000]));
+  const som = (delen) => delen.reduce((t, [, w]) => t + w, 0);
+  // Een uur zon: 1 kWh zelf gebruikt, 2 de batterij in, 1 naar het net.
+  const middag = vak(3, 0.2, 1, 2, 0);
+  assert.deepEqual(kwh(stapel(middag).boven), { own: 1, accu: 0, bought: 0.2 });
+  assert.deepEqual(kwh(stapel(middag).onder), { accu: 2, sold: 1 });
+  // Een uur in de avond: 0,85 uit de batterij, 0,1 van het net.
+  const avond = vak(0, 0.1, 0, 0, 0.85);
+  assert.deepEqual(kwh(stapel(avond).boven), { own: 0, accu: 0.85, bought: 0.1 });
+  assert.deepEqual(kwh(stapel(avond).onder), { accu: 0, sold: 0 });
+  // Een nacht laden van het net is geen verbruik; het staat onder de lijn.
+  const nacht = vak(0, 3, 0, 2.5, 0);
+  assert.deepEqual(kwh(stapel(nacht).boven), { own: 0, accu: 0, bought: 0.5 });
+  assert.deepEqual(kwh(stapel(nacht).onder), { accu: 2.5, sold: 0 });
+  // Een dag: 's nachts 5 van het net de batterij in en 's avonds eruit telt als
+  // van het net, zoals in Zelfvoorzienend; de balk blijft precies Verbruikt.
+  const dag = vak(0, 7, 0, 5, 5);
+  assert.deepEqual(kwh(stapel(dag).boven), { own: 0, accu: 0, bought: 7 });
+  for (const v of [middag, avond, nacht, dag]) assert.ok(Math.abs(som(stapel(v).boven) - v.used) < 1e-9, "boven is Verbruikt");
+  // Het scherm, de legenda en het rapport.
+  const bron = Historie.toString() + Historie.css;
+  assert.ok(Historie.css.includes(".b.accu { fill: var(--dac-device-1); }"));
+  assert.ok(/label: "Batterij"/.test(Historie.toString()));
+  assert.ok(/verloop: rows\.map\(\(row\) => \(\{ label: bucketLabel\(this\.period_, row\.start\), \.\.\.stapel\(row\) \}\)\)/.test(bron), "het rapport tekent dezelfde stapel");
+});
+
 proef("Energie: met een thuisbatterij ook geladen en ontladen, naast het net (v0.126.0)", () => {
   const el = Object.create(Historie.prototype);
   const vak = { totals: nepEl(), titel: nepEl() };

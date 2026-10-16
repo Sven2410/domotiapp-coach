@@ -359,6 +359,30 @@ omvormer niet zien; in de eerste woning telden ze 102,6% rendement tegen 73,6%
 op de kWh-meter (`docs/batterij.md`). In de sommen van de coach (het rendement)
 blijven ze daarom alleen voor de kaart.
 
+**De batterij in de grafiek (v0.126.2).** De eigenaar op 16-10-2026, bij de
+tegels van v0.126.1 met de juiste getallen: "ik zie geen geschiedenis van de
+batterij?" Uit drie voorstellen (in de grafiek, een eigen kaart met de
+accustand, of allebei) koos hij de grafiek, zoals het energiedashboard. De
+batterij heeft één kleur, `--dac-device-1`, hetzelfde roze als in de
+energiestroom en bij ontladen in de tijdlijn; boven de lijn is wat eruit kwam,
+onder de lijn wat erin ging. Boven: eigen zon gebruikt, batterij, van het net;
+onder: batterij, naar het net. De legenda zegt "Batterij", de zin boven de
+grafiek "onder de lijn wat naar de batterij of het net ging", en wie een balk
+aanwijst ziet de getallen in de tegels. Tot nu toe zat wat de batterij afgaf in
+het oranje ("Eigen zon en batterij") en stond laden nergens.
+
+De stapeling staat in `stapel` (views/history.js), en het rapport tekent
+dezelfde (`schrijfGrafiek` in report.js); die tekende tot nu toe nog zon plus
+inkoop zonder de batterij. Uit de batterij is hooguit wat het huis niet van het
+net kreeg, zodat de balk precies Verbruikt blijft; in een vak van een dag telt
+stroom die 's nachts van het net de batterij in ging en 's avonds eruit dus als
+van het net, net als in Zelfvoorzienend. De kleuren zijn nagemeten met het
+script van de dataviz-richtlijn, op #161613 en op wit, alle paren: slechtste
+paar het bestaande van het net tegen naar het net (ΔE 8,2 voor kleurenblinden),
+batterij tegen naar het net ΔE 19,4. In het rapport haalt dat bestaande paar in
+de printkleuren (#0f7fbb tegen #a30fae) maar ΔE 5,0; niet aangepast, wel
+genoemd aan de eigenaar.
+
 ## De tijdlijn (v0.115.0)
 
 De eigenaar op 11-10-2026: "Ik wil kunnen zien wat de coach en de aanstuurbare
