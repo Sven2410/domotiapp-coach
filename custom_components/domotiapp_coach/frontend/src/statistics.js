@@ -301,8 +301,17 @@ export async function fetchDevices(hass, devices, period, start) {
  * grafiek, zodat een vak dat nog loopt niet met een heel vak vermenigvuldigd
  * wordt; over een jaar per dag, en van vandaag alleen de uren die voorbij zijn.
  *
- * @returns {Promise<Map<string, {start: number, kwh: number}[]>>} per apparaat,
- *   op volgorde van tijd
+ * Sinds v0.126.0 ook apart wat erin ging en wat eruit kwam (`erin`, `eruit`),
+ * voor de tegels Batterij geladen en ontladen. De eigenaar op 16-10-2026: "bij
+ * historie zie ik nu niet de thuisbatterij van zoveel geladen en zoveel
+ * ontladen". Tellers en losse sensoren meten dat apart. Eén vermogenssensor met
+ * een teken geeft per uur alleen wat er netto bij kwam; die wordt daarom altijd
+ * per uur gevraagd, ook over een jaar, want een dag middag laden en avond
+ * ontladen valt per dag tegen elkaar weg. Laden en ontladen binnen hetzelfde uur
+ * ziet hij nog steeds niet.
+ *
+ * @returns {Promise<Map<string, {start: number, kwh: number, erin: number, eruit: number}[]>>}
+ *   per apparaat, op volgorde van tijd
  */
 export async function fetchBattery(hass, batteries, period, start) {
   const out = new Map();
@@ -316,7 +325,7 @@ export async function fetchBattery(hass, batteries, period, start) {
         return { id: device.id, teller: true, erin: e.energy_in, eruit: e.energy_out, teken: 1 };
       }
       if (device.entity) {
-        return { id: device.id, teller: false, erin: device.entity, eruit: "", teken: device.battery?.power_invert ? -1 : 1 };
+        return { id: device.id, teller: false, erin: device.entity, eruit: "", teken: device.battery?.power_invert ? -1 : 1, metTeken: true };
       }
       if (e.charge_power || e.discharge_power) {
         return { id: device.id, teller: false, erin: e.charge_power ?? "", eruit: e.discharge_power ?? "", teken: 1 };
@@ -326,7 +335,7 @@ export async function fetchBattery(hass, batteries, period, start) {
     .filter(Boolean);
   if (!bronnen.length) return out;
 
-  const ask = async (ids, types) => {
+  const ask = async (ids, types, vak = fijn) => {
     if (!ids.length) return {};
     try {
       return (
@@ -335,7 +344,7 @@ export async function fetchBattery(hass, batteries, period, start) {
           start_time: start.toISOString(),
           end_time: periodEnd(period, start).toISOString(),
           statistic_ids: ids,
-          period: fijn,
+          period: vak,
           types,
           units: { energy: "kWh", power: "W" },
         })) ?? {}
@@ -345,13 +354,17 @@ export async function fetchBattery(hass, batteries, period, start) {
       return {};
     }
   };
-  const ids = (teller) => [...new Set(bronnen.filter((b) => b.teller === teller).flatMap((b) => [b.erin, b.eruit]).filter(Boolean))];
-  const [sums, means] = await Promise.all([ask(ids(true), ["change"]), ask(ids(false), ["mean"])]);
+  const ids = (wie) => [...new Set(bronnen.filter(wie).flatMap((b) => [b.erin, b.eruit]).filter(Boolean))];
+  const [sums, means, perUur] = await Promise.all([
+    ask(ids((b) => b.teller), ["change"]),
+    ask(ids((b) => !b.teller && !b.metTeken), ["mean"]),
+    ask(ids((b) => b.metTeken), ["mean"], "hour"),
+  ]);
 
   const middernacht = new Date();
   middernacht.setHours(0, 0, 0, 0);
-  const uren = (tijd) => {
-    if (fijn === "hour") return 1;
+  const uren = (tijd, vak = fijn) => {
+    if (vak === "hour") return 1;
     // Het gemiddelde van vandaag gaat alleen over de uren die er al zijn.
     if (tijd >= middernacht.getTime()) return Math.max(0, Math.floor((Date.now() - tijd) / 3600000));
     return 24;
@@ -359,21 +372,34 @@ export async function fetchBattery(hass, batteries, period, start) {
 
   for (const bron of bronnen) {
     const per = new Map();
+    const bij = (tijd) => {
+      if (!per.has(tijd)) per.set(tijd, { start: tijd, kwh: 0, erin: 0, eruit: 0 });
+      return per.get(tijd);
+    };
+    const bak = bron.teller ? sums : bron.metTeken ? perUur : means;
     const tel = (entityId, teken) => {
       if (!entityId) return;
-      for (const row of (bron.teller ? sums : means)[entityId] ?? []) {
+      for (const row of bak[entityId] ?? []) {
         const waarde = bron.teller ? row.change : row.mean;
         if (waarde === null || waarde === undefined) continue;
         const tijd = new Date(row.start).getTime();
-        const kwh = bron.teller ? Number(waarde) : (Number(waarde) * uren(tijd)) / 1000;
-        per.set(tijd, (per.get(tijd) ?? 0) + teken * kwh);
+        const kwh = bron.teller ? Number(waarde) : (Number(waarde) * uren(tijd, bron.metTeken ? "hour" : fijn)) / 1000;
+        const rij = bij(tijd);
+        rij.kwh += teken * kwh;
+        if (bron.metTeken) continue;
+        if (teken > 0) rij.erin += kwh;
+        else rij.eruit += kwh;
       }
     };
     tel(bron.erin, bron.teken);
     tel(bron.eruit, -1);
-    if (per.size) {
-      out.set(bron.id, [...per.entries()].sort((a, b) => a[0] - b[0]).map(([tijd, kwh]) => ({ start: tijd, kwh })));
+    if (bron.metTeken) {
+      for (const rij of per.values()) {
+        rij.erin = Math.max(0, rij.kwh);
+        rij.eruit = Math.max(0, -rij.kwh);
+      }
     }
+    if (per.size) out.set(bron.id, [...per.values()].sort((a, b) => a.start - b.start));
   }
   return out;
 }

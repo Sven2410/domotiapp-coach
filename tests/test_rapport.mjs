@@ -2580,6 +2580,13 @@ proef("de batterij per vak: uren in hun dag, en de schatting alleen voor wat de 
   assert.equal(perUur[10].voor, 0.8);
   assert.equal(perUur[15].voor, 0);
   assert.equal(perUur[15].battery, 0.6);
+  // Geladen en ontladen per vak, apart (v0.126.0).
+  el.accu_ = new Map([
+    ["b", [{ start: uur(d1, 10), kwh: 1, erin: 1.2, eruit: 0.2 }, { start: uur(d1, 22), kwh: -0.5, erin: 0, eruit: 0.5 }]],
+    ["c", [{ start: uur(d1, 12), kwh: 0.3, erin: 0.3, eruit: 0 }, { start: uur(d2, 2), kwh: -0.3, erin: 0, eruit: 0.3 }]],
+  ]);
+  const apart = el.accuPerVak_(tijden, (i) => tijden[i + 1] ?? d3 + 86400000);
+  assert.deepEqual(apart.map((v) => [v.erin, v.eruit].map((x) => Math.round(x * 1000) / 1000)), [[1.5, 0.7], [0, 0.3], [0, 0]]);
 });
 
 proef("fetchBattery: tellers, een sensor met een teken en twee losse, en van vandaag alleen de verstreken uren", async () => {
@@ -2609,15 +2616,38 @@ proef("fetchBattery: tellers, een sensor met een teken en twee losse, en van van
   assert.ok(Math.abs(r.get("teken")[0].kwh + 0.5) < 1e-9, "omgekeerd teken: 500 W is ontladen");
   assert.equal(r.has("niets"), false);
   assert.ok(vragen.every((v) => v.period === "hour"), "per uur, ook als het vak een uur is");
+  // Geladen en ontladen apart (v0.126.0): tellers en losse sensoren meten het
+  // zelf, een sensor met een teken alleen netto per uur.
+  const apart = (id) => [r.get(id)[0].erin, r.get(id)[0].eruit].map((x) => Math.round(x * 1000) / 1000);
+  assert.deepEqual(apart("meter"), [1.2, 0.2]);
+  assert.deepEqual(apart("twee"), [0.8, 0.1]);
+  assert.deepEqual(apart("teken"), [0, 0.5]);
   // Over een jaar per dag; de dag van vandaag telt alleen de uren die voorbij zijn.
   const vandaag = new Date();
   vandaag.setHours(0, 0, 0, 0);
+  const jaarVragen = [];
   const jaar = {
-    callWS: async (v) => ({ "sensor.teken": [{ start: vandaag.getTime(), mean: 1000 }] }),
+    callWS: async (v) => {
+      jaarVragen.push(v);
+      return { "sensor.laad": [{ start: vandaag.getTime(), mean: 1000 }], "sensor.teken": [{ start: vandaag.getTime(), mean: 1000 }] };
+    },
   };
-  const j = await fetchBattery(jaar, [{ id: "t", entity: "sensor.teken", entities: {} }], "year", new Date(vandaag.getFullYear(), 0, 1));
+  const j = await fetchBattery(
+    jaar,
+    [{ id: "t", entities: { charge_power: "sensor.laad" } }, { id: "s", entity: "sensor.teken", entities: {} }],
+    "year",
+    new Date(vandaag.getFullYear(), 0, 1)
+  );
   const verstreken = Math.floor((Date.now() - vandaag.getTime()) / 3600000);
   assert.ok(Math.abs(j.get("t")[0].kwh - verstreken) < 1e-9, `${j.get("t")[0].kwh} tegen ${verstreken}`);
+  assert.ok(Math.abs(j.get("t")[0].erin - verstreken) < 1e-9);
+  // Een sensor met een teken ook over een jaar per uur: per dag valt middag
+  // laden en avond ontladen tegen elkaar weg.
+  const vraagTeken = jaarVragen.find((v) => v.statistic_ids.includes("sensor.teken"));
+  assert.equal(vraagTeken.period, "hour");
+  assert.ok(!vraagTeken.statistic_ids.includes("sensor.laad"));
+  assert.equal(jaarVragen.find((v) => v.statistic_ids.includes("sensor.laad")).period, "day");
+  assert.ok(Math.abs(j.get("s")[0].kwh - 1) < 1e-9, "een uur van 1000 W");
 });
 
 // --- een reserveprijssensor (v0.101.3) -----------------------------------------
@@ -3574,6 +3604,33 @@ proef("Energie: vier tegels en één percentage, en geen 'Hele periode'", () => 
   const labels = vak.totals.kinderen.map((cel) => cel.kinderen[0].textContent);
   assert.deepEqual(labels, ["Opgewekt", "Verbruikt", "Van het net", "Naar het net", "Zelfvoorzienend"]);
   assert.ok(!Historie.css.includes("Hele periode"));
+});
+
+proef("Energie: met een thuisbatterij ook geladen en ontladen, naast het net (v0.126.0)", () => {
+  const el = Object.create(Historie.prototype);
+  const vak = { totals: nepEl(), titel: nepEl() };
+  el.$ = (sel) => (sel === "#totals" ? vak.totals : vak.titel);
+  el.accuTegels_ = true;
+  metNepDocument(() =>
+    el.paintTotals_({ solar: 25.8, used: 18.2, bought: 4.7, sold: 12.2, accuIn: 6.4, accuUit: 5.1, selfSufficient: 75 })
+  );
+  const tegels = vak.totals.kinderen.map((cel) => [cel.kinderen[0].textContent, cel.kinderen[1].textContent]);
+  assert.deepEqual(tegels.map((t) => t[0]), [
+    "Opgewekt", "Verbruikt", "Van het net", "Naar het net", "Batterij geladen", "Batterij ontladen", "Zelfvoorzienend",
+  ]);
+  assert.ok(tegels[4][1].startsWith("6,4"), tegels[4][1]);
+  assert.ok(tegels[5][1].startsWith("5,1"), tegels[5][1]);
+  // Een vak aangewezen waarin de batterij niets deed: dan 0, niet weg.
+  vak.totals = nepEl();
+  metNepDocument(() => el.paintTotals_({ solar: 1, used: 1, bought: 0, sold: 0, accuIn: 0, accuUit: 0, selfSufficient: 100 }));
+  assert.equal(vak.totals.kinderen.length, 7);
+  // Zonder batterij geen tegels; en het rapport zegt hetzelfde.
+  el.accuTegels_ = false;
+  vak.totals = nepEl();
+  metNepDocument(() => el.paintTotals_({ solar: 1, used: 1, bought: 0, sold: 0, selfSufficient: 100 }));
+  assert.equal(vak.totals.kinderen.length, 5);
+  const bron = Historie.toString();
+  assert.ok(/cel\("Batterij geladen"/.test(bron) && /cel\("Batterij ontladen"/.test(bron), "ook in het rapport");
 });
 
 proef("In geld: twee getallen bovenaan, de derde volgde uit die twee", () => {
