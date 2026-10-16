@@ -812,6 +812,17 @@ if (vl := v("wasmachine-miele-gemeten")):
              any("(Katoen)" in m for _, m in vl.meldingen) and vl.vw_gemeten and vl.vw_gemeten[0]["runs"] == 2,
              f"{vl.vw_gemeten}")
 
+# Een onderbreking midden in de beurt is een pauze (v0.127.0). In de klantwoning op
+# 16-10-2026 las de coach 16 seconden program_interrupted als klaar.
+if (vl := v("wasmachine-miele-onderbroken")):
+    verslag = meldingen(vl, "Wasmachine is klaar")
+    controle("miele onderbroken: een minuut stilstaan is een pauze: één verslag, geen tweede start, niets afgebroken",
+             len(verslag) == 1 and not meldingen(vl, "Wasmachine draait") and not meldingen(vl, "afgebroken"),
+             f"{[m for _, m in vl.meldingen]}")
+    controle("miele onderbroken: één druk, en de meting over de hele beurt, met de minuut erbij",
+             len(vl.vw_gedrukt) == 1 and len(vl.vw_gemeten) == 1 and abs(vl.vw_gemeten[0]["minutes"] - 226) <= 2
+             and vl.vw_gemeten[0]["kwh"] == 0.9, f"{vl.vw_gedrukt} {vl.vw_gemeten}")
+
 if (vk := v("vaatwasser-klep-dicht")):
     controle("klep dicht: één druk, in de goedkope nacht en niet in de avondpiek",
              len(vk.vw_gedrukt) == 1 and vk.vw_gestart is not None and 1 <= vk.vw_gestart.hour < 6,

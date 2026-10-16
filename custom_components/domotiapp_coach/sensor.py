@@ -41,7 +41,7 @@ from .entiteit import (
     CONTRACT, CoachEntiteit, apparaat_info, async_per_apparaat, entiteiten_van, met_zone,
     oude_coach_opruimen, paal_apparaat, paal_blokken, paal_modus_actief, paal_modus_keuzes, paal_schema, paal_sessie,
     paal_stand, paal_tekst, accu_alleen_lezen, accu_apparaat, accu_capaciteit, accu_opgeleverd, accu_plan,
-    accu_stand,
+    accu_stand, programma_alleen_lezen,
     AIRCO_STAND_NAMEN, airco_stand, ruimte_naam,
 )
 from .planner import _dag_om
@@ -198,12 +198,14 @@ class StartOmSensor(SensorEntity):
         self._schakelaar: str | None = None
         self._soort = ""
         self._entiteiten: dict[str, str] = {}
+        self._alleen_lezen = False
         self._zet_apparaat(device)
 
     def _zet_apparaat(self, device: dict[str, Any]) -> None:
         self._schakelaar = (device.get("entities") or {}).get("release_switch") or None
         self._soort = str(device.get("type") or "")
         self._entiteiten = entiteiten_van(device)
+        self._alleen_lezen = programma_alleen_lezen(device)
 
     @callback
     def bijwerken_apparaat(self, device: dict[str, Any]) -> None:
@@ -246,6 +248,10 @@ class StartOmSensor(SensorEntity):
             # opschuift ("morgen"): het paneel zegt dan "Ingeruimd, morgen starten".
             "later": self._stand.get("later") or None,
             "entiteiten": dict(self._entiteiten),
+            # Volgt de coach hem alleen (v0.127.0): dan start hij hem nooit, zijn
+            # de knoppen en `vrijgegeven` niet beschikbaar, en zegt `stand`
+            # alleen draait, klaar of niet_vrijgegeven.
+            "alleen_lezen": self._alleen_lezen,
         }
 
 

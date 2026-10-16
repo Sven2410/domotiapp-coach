@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import PROGRAMMA_TYPES
-from .entiteit import CoachEntiteit, async_per_apparaat
+from .entiteit import CoachEntiteit, ProgrammaBediening, async_per_apparaat
 
 
 async def async_setup_entry(
@@ -29,8 +29,8 @@ async def async_setup_entry(
     )
 
 
-class VrijgegevenSensor(CoachEntiteit, BinarySensorEntity):
-    """Aan als het apparaat ingeruimd en vrijgegeven is."""
+class VrijgegevenSensor(ProgrammaBediening, CoachEntiteit, BinarySensorEntity):
+    """Aan als het apparaat ingeruimd en vrijgegeven is; niet beschikbaar bij alleen uitlezen (v0.127.0)."""
 
     _attr_icon = "mdi:check-circle-outline"
 

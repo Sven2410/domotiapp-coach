@@ -562,6 +562,19 @@ class Vaatwasser:
     # De energieteller van Miele: begint bij elke start op nul.
     teller_kwh: float = 0.0
     vorige_stap: dt.datetime | None = None
+    # Een onderbreking (v0.127.0): Miele zegt dan "program_interrupted", de
+    # machine staat stil, en daarna loopt het programma verder waar het was.
+    onderbroken_tot: dt.datetime | None = None
+
+    def onderbreek(self, nu: dt.datetime, minuten: int) -> bool:
+        """De bewoner onderbreekt het programma, bijvoorbeeld om de temperatuur bij te stellen."""
+        if self.status != "run":
+            return False
+        self.status = "interrupted"
+        self.onderbroken_tot = nu + dt.timedelta(minutes=minuten)
+        if self.gestart_op is not None:
+            self.gestart_op += dt.timedelta(minutes=minuten)
+        return True
 
     def druk_start(self, nu: dt.datetime) -> None:
         if self.afstand_aan and not self.deur_open and self.status in ("ready", "inactive"):
@@ -586,6 +599,11 @@ class Vaatwasser:
         return watt
 
     def _watt(self, nu: dt.datetime) -> float:
+        if self.status == "interrupted":
+            if self.onderbroken_tot is not None and nu < self.onderbroken_tot:
+                return 0.0
+            self.status = "run"
+            self.onderbroken_tot = None
         if self.gedrukt_op is not None and self.status != "run":
             if nu - self.gedrukt_op >= dt.timedelta(minutes=self.aanloop_min):
                 self.status = "run"
@@ -1889,9 +1907,9 @@ class Wereld:
             vw = self.vaatwasser
             draait = vw.status == "run"
             z(E["vw_status"], {"ready": "programmed", "run": "in_use", "finished": "program_ended",
-                               "inactive": "off"}.get(vw.status, vw.status))
+                               "inactive": "off", "interrupted": "program_interrupted"}.get(vw.status, vw.status))
             z(E["vw_actief"], vw.programma)
-            rest = vw.resterend(nu) if draait else (None if vw.status == "finished" else vw.minuten)
+            rest = vw.resterend(nu) if draait else (None if vw.status in ("finished", "interrupted") else vw.minuten)
             z(E["vw_rest"], "unknown" if rest is None else w(str(rest), "min"))
             z(E["vw_afstand"], "on" if vw.afstand_aan else "off")
             z(E["vw_start"], "unavailable" if (vw.deur_open or draait) else "unknown")
@@ -2105,6 +2123,10 @@ class Wereld:
         if actie == "vaatwasser_aan":
             self.vaatwasser.zet_aan(self.nu)
             return "de bewoner zet de vaatwasser zelf aan"
+        if actie == "vaatwasser_onderbreek":
+            # Een Miele die even stilstaat (v0.127.0); `arg` is hoeveel minuten.
+            self.vaatwasser.onderbreek(self.nu, int(arg))
+            return f"de bewoner onderbreekt het programma {arg} minuut"
         if actie == "airco_bewoner":
             self.airco.hvac = str(arg)
             return f"de bewoner zet de airco zelf op {arg}"

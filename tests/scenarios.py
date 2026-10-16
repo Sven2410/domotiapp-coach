@@ -668,6 +668,13 @@ wasmachine_miele_gemeten = wasmachine_miele.kopie(
     vaatwasser_gemeten=[{"device": "vaatwasser", "key": "cottons", "label": "Katoen", "minutes": 225, "kwh": 0.8,
                          "peak_w": 0, "profile": [], "runs": 1}],
 )
+# Een onderbreking midden in de beurt (v0.127.0). In de klantwoning op 16-10-2026:
+# 08:59:26 in_use, 08:59:42 program_interrupted, 09:00:16 weer in_use. De coach las
+# dat als klaar: een valse melding, een beurt van 16 seconden, en de vrijgave eraf.
+wasmachine_miele_onderbroken = wasmachine_miele.kopie(
+    naam="wasmachine-miele-onderbroken", uitleg="dezelfde wasmachine, om 02:00 een minuut onderbroken: dat is een pauze, de beurt loopt door, één verslag en een meting over de hele beurt",
+    gebeurtenissen=list(wasmachine_miele.gebeurtenissen) + [("02:00", "vaatwasser_onderbreek", 1)],
+)
 vaatwasser_lokaal_afstand_uit = vaatwasser_avond.kopie(
     naam="vaatwasser-lokaal-afstand-uit", uitleg="Home Connect Local met starten op afstand uit: de sensor zegt het, dus de coach drukt niet één keer en zegt wat er aan moet",
     vaatwasser=replace(LOKAAL, afstand_aan=False),
@@ -1453,7 +1460,7 @@ ALLE = [
     vaatwasser_eigen_tabel, vaatwasser_gemeten, vaatwasser_meter_wint, vaatwasser_vroeg, vaatwasser_vroeg_verwacht, vaatwasser_herstart,
     vaatwasser_zonpiek, vaatwasser_eindtijd, vaatwasser_eindtijd_bijstellen, vaatwasser_na_klaartijd, vaatwasser_na_klaartijd_nu,
     vaatwasser_lokaal, vaatwasser_lokaal_deur, vaatwasser_lokaal_afstand_uit, vaatwasser_klep_dicht,
-    wasmachine_miele, wasmachine_miele_gemeten,
+    wasmachine_miele, wasmachine_miele_gemeten, wasmachine_miele_onderbroken,
     forecast_solar_vast, forecast_solar_vaatwasser, forecast_solar_sensoren,
     boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
     airco_zon, airco_plaatje, airco_bewoner, airco_goedkoop, airco_geen_zon,
