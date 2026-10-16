@@ -870,13 +870,14 @@ const BATTERY_FIELDS = (richtingNodig) => [
     filter: "all",
     hideRow: true,
   },
-  // Alleen voor de kaart (v0.118.0): "ongeveer 88%, gemeten in de accu". De
-  // coach rekent er niet mee, want deze tellers zien het verlies in de
-  // omvormer niet; zie `rte_accu` in coach.py.
+  // Voor de kaart (v0.118.0): "ongeveer 88%, gemeten in de accu". De coach
+  // rekent er in zijn sommen niet mee, want deze tellers zien het verlies in de
+  // omvormer niet; zie `rte_accu` in coach.py. Historie telt er sinds v0.126.1
+  // wel geladen en ontladen mee, zoals het energiedashboard (`fetchBattery`).
   {
     key: "accu_in",
     label: "Batterij zelf: geladen",
-    hint: "Optioneel, voor wie geen kWh-meter op de batterij heeft: de eigen teller van de batterij, wat erin ging. Dan staat er op de kaart ongeveer hoeveel er weer uit komt. De coach rekent er niet mee: deze tellers meten aan de accukant, zonder het verlies in de omvormer.",
+    hint: "Optioneel, voor wie geen kWh-meter op de batterij heeft: de eigen teller van de batterij, wat erin ging. Daarmee telt Historie wat de batterij laadt en ontlaadt, en staat er op de kaart ongeveer hoeveel er weer uit komt. In zijn sommen rekent de coach er niet mee: deze tellers meten aan de accukant, zonder het verlies in de omvormer.",
     filter: "all",
     hideRow: true,
   },
@@ -922,7 +923,7 @@ const GROWATT_FIELDS = [
   {
     key: "accu_in",
     label: "Batterij zelf: geladen",
-    hint: "De teller van alles wat er ooit in ging (levenslang), niet die van vandaag. Daarmee staat het rendement in de pop-up van de batterij.",
+    hint: "De teller van alles wat er ooit in ging (levenslang), niet die van vandaag. Daarmee staat het rendement in de pop-up van de batterij, en telt Historie wat hij laadt en ontlaadt.",
     filter: "all",
     hideRow: true,
   },

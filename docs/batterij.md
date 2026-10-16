@@ -80,7 +80,9 @@ opslaan pas boven ongeveer 78% iets op te leveren. Een te hoog rendement laat
 laden van het net en handelen lonen terwijl het geld kost. De eigenaar op
 14-10-2026: "ja alleen op de kaart". Volgorde op de kaart: gemeten, opgegeven,
 ongeveer uit de accu, nog niet bekend; het wissen van de metingen (`device/measurements/clear`) haalt `rte_accu` ook
-weg. Proef 154 in test_coach.py.
+weg. Proef 154 in test_coach.py. Historie telt er sinds v0.126.1 wel geladen en
+ontladen mee, na een kWh-meter en voor de vermogenssensoren (`fetchBattery`,
+`docs/eerste-woning.md`); dat raakt geen besluit van de coach.
 
 **Kost stroom elk uur hetzelfde, dan zegt de coach dat inkopen nooit loont**
 (v0.101.10, `_vlak` in batterij.py). Bij de eigenaar stond op 29-09-2026 met een
