@@ -3653,13 +3653,18 @@ proef("Historie: een verloop dat bij de periode niet kan valt terug op wat erbij
   assert.equal(el.korrel_id(), "month");
 });
 
-proef("Energie: vier tegels en één percentage, en geen 'Hele periode'", () => {
+proef("Energie: vier tegels en twee percentages, en geen 'Hele periode'", () => {
   const el = Object.create(Historie.prototype);
   const vak = { totals: nepEl(), titel: nepEl() };
   el.$ = (sel) => (sel === "#totals" ? vak.totals : vak.titel);
   metNepDocument(() => el.paintTotals_({ solar: 25.8, used: 18.2, bought: 4.7, sold: 12.2, selfUse: 53, selfSufficient: 75 }));
   const labels = vak.totals.kinderen.map((cel) => cel.kinderen[0].textContent);
-  assert.deepEqual(labels, ["Opgewekt", "Verbruikt", "Van het net", "Naar het net", "Zelfvoorzienend"]);
+  // Zon zelf gebruikt is terug sinds v0.126.5: "ik wil zelf verbruikte zonne-energie wel terug hebben weer."
+  assert.deepEqual(labels, ["Opgewekt", "Verbruikt", "Van het net", "Naar het net", "Zon zelf gebruikt", "Zelfvoorzienend"]);
+  const waarde = vak.totals.kinderen[4].kinderen[1];
+  assert.equal(`${waarde.textContent}${waarde.kinderen[0].textContent}`, "53%");
+  metNepDocument(() => el.paintTotals_({ solar: null, used: null, bought: 4.7, sold: 0, selfUse: null, selfSufficient: null }));
+  assert.ok(!vak.totals.kinderen.some((cel) => cel.kinderen[0].textContent === "Zon zelf gebruikt"), "zonder zon geen percentage");
   assert.ok(!Historie.css.includes("Hele periode"));
 });
 

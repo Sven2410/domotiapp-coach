@@ -11,8 +11,9 @@ allemaal gebouwd in v0.77.0.
    dashboard": welk deel van het verbruik niet van het net kwam, `1 - bought /
    used` (`totals.selfSufficient` in views/history.js), naast "Zelf gebruikt"
    (welk deel van de opwek zelf gebruikt is), ook per balk en in de tegels van
-   het rapport. Sinds v0.116.0 staat op het scherm alleen Zelfvoorzienend;
-   Zelf gebruikt staat nog in het rapport (zie "Historie overzichtelijk").
+   het rapport. Van v0.116.0 tot v0.126.5 stond op het scherm alleen
+   Zelfvoorzienend; sinds v0.126.5 staat hij er weer, als "Zon zelf gebruikt"
+   (zie "Historie overzichtelijk").
 2. **De batterijzin loopt tot morgenvroeg en sluit af met een conclusie.**
    "De meeste consumenten hebben een accu om de nacht te overbruggen." `OCHTEND_UUR`
    (zeven uur), `nachtbalans` en `balans_kwh` in batterij.py: zon, huis en wat er
@@ -529,6 +530,14 @@ keer dat de coach een apparaat liet draaien"). De waarde in de keuzelijst blijft
 `bespaard`, de opslag `BeurtenStore`, en het hoofdstuk in het rapport heet nog Bespaard.
 Elders blijft beurt staan waar het over één apparaat gaat: de laadbeurt op de kaart van de
 laadpaal en het aantal beurten achter een gemeten programma.
+
+**v0.126.5: Zon zelf gebruikt is terug.** De eigenaar op 16-10-2026: "ik wil zelf
+verbruikte zonne-energie wel terug hebben weer." Het percentage dat tot v0.116.0 "Zelf
+gebruikt" heette staat weer als tegel voor Zelfvoorzienend, ook bij aanwijzen per vak,
+zoals het energiedashboard die twee naast elkaar zet: `(opgewekt - naar het net) /
+opgewekt`, dus wat de batterij in ging telt als zelf gebruikt. "Zon" staat erin omdat
+"Zelf gebruikt" naast Zelfvoorzienend op hetzelfde leek; het rapport heet nu net zo.
+Thuis op 14-10: 21,1 kWh opgewekt, 0,23 naar het net, dus 99%.
 
 ## Per apparaat (v0.121.0)
 
