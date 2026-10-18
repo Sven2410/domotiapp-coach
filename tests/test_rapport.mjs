@@ -1306,7 +1306,7 @@ proef("de prijsgrafiek: groen waar hij laadt, het gemiddelde gewogen naar de kWh
   assert.equal(b.nul, 96);
   // Een tijd onder elk derde hele uur.
   assert.deepEqual(b.balken.map((x) => x.label), ["12", "", "", "15"]);
-  assert.match(b.balken[1].tip, /hij laadt$/);
+  assert.match(b.balken[1].tip, /, laden$/);
 });
 
 proef("de prijsgrafiek: een negatieve prijs zakt onder de nullijn, zon telt niet mee in het gemiddelde", () => {
@@ -4489,7 +4489,7 @@ proef("de prijsgrafiek: morgen om middernacht, leveren in een eigen kleur, en br
   assert.equal(middernacht, 2, "om 00:00 begint morgen");
   assert.equal(b.balken[2].label, "morgen");
   assert.equal(b.balken.filter((x) => x.dagGrens).length, 2, "en de dag daarna ook een streep");
-  assert.ok(b.balken[10].leveren && b.balken[10].tip.includes("levert aan het net"), b.balken[10].tip);
+  assert.ok(b.balken[10].leveren && b.balken[10].tip.includes("ontladen aan het net"), b.balken[10].tip);
   assert.ok(b.balken[3].groen && !b.balken[3].leveren, "laden gaat voor leveren");
   assert.equal(b.minBreedte, 30 * 14, "14 px per uur");
   // De prijsas: ronde stappen van nul tot boven de hoogste prijs.
@@ -4505,7 +4505,21 @@ proef("de prijsgrafiek: morgen om middernacht, leveren in een eigen kleur, en br
   assert.ok(later.onder === "13% duurder dan nu, hij wacht", later.onder);
   assert.ok(prijsUitleg(b, 10, { leveren: "hij levert aan het net" }).onder.endsWith("hij levert aan het net"));
   const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js", import.meta.url), "utf8");
-  assert.ok(bron.includes("Tik op een staafje") && bron.includes("hij levert aan het net"));
+  assert.ok(bron.includes("Tik op een staafje"));
+  // De woorden van de legenda bij een batterij (v0.130.0, de eerste woning op 19-10-2026).
+  assert.ok(bron.includes('"Laden van het net"') && bron.includes('"Ontladen aan het net"') && bron.includes('"Nul op de meter"'));
+  // Een blok met een eigen stand houdt die naam in de kaart, zoals "Standby".
+  const eigen = prijsBalken(rijen.map((r, i) => ({ ...r, label: i === 5 ? "Standby" : "Nul op de meter" })));
+  assert.ok(prijsUitleg(eigen, 5, { groen: "Laden van het net", wacht: "Nul op de meter" }).onder.endsWith("standby"));
+  assert.ok(prijsUitleg(eigen, 6, { groen: "Laden van het net", wacht: "Nul op de meter" }).onder.endsWith("nul op de meter"));
+  // De lijst eronder in dezelfde kleuren: oranje als hij aan het net levert.
+  const { batterijVooruit } = await import("../custom_components/domotiapp_coach/frontend/src/battery.js");
+  const plan = batterijVooruit({ hours: [
+    { start: "2026-10-19T08:00:00", end: "2026-10-19T09:00:00", mode: "handelen", kwh: -2.5, grid_kwh: -2.15, soc: 54, price: 0.469 },
+    { start: "2026-10-19T09:00:00", end: "2026-10-19T10:00:00", mode: "nul", kwh: -0.3, grid_kwh: 0, soc: 52, price: 0.446 },
+    { start: "2026-10-19T03:00:00", end: "2026-10-19T04:00:00", mode: "netladen", kwh: 2, grid_kwh: 2, soc: 60, price: 0.30 },
+  ], soc: 60, capacity_kwh: 14.6 });
+  assert.deepEqual(plan.uren.map((u) => [u.levert, u.net]), [[true, false], [false, false], [false, true]]);
 });
 
 // De bewoner van de eerste woning op 18-10-2026: "Invullen, laten zien hoe de prijs tot

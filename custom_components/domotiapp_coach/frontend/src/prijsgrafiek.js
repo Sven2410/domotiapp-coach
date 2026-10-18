@@ -101,7 +101,7 @@ export function prijsBalken(rijen = []) {
       leveren: Boolean(r.leveren) && !r.groen,
       dagGrens,
       label,
-      tip: `${tijd}: ${prijsTekst(r.price)}${r.groen ? ", hij laadt" : r.leveren ? ", hij levert aan het net" : ""}`,
+      tip: `${tijd}: ${prijsTekst(r.price)}${r.groen ? ", laden" : r.leveren ? ", ontladen aan het net" : ""}`,
     };
   });
 
@@ -139,7 +139,7 @@ export function prijsBalken(rijen = []) {
   const hoogte = (p) => nul - schaal(p);
   const stappen = as.stappen.map((v) => ({ waarde: v, y: hoogte(v) }));
   const blokken = metPrijs.map((r) => ({ start: r.start, end: r.end, price: r.price, groen: Boolean(r.groen),
-    leveren: Boolean(r.leveren) && !r.groen }));
+    leveren: Boolean(r.leveren) && !r.groen, label: r.label ?? "" }));
   return { balken, nul, gemiddeld, kwh, stap, minBreedte, gemiddeldAlles, gemiddeldY: hoogte(gemiddeldAlles),
     stappen, blokken };
 }
@@ -319,11 +319,14 @@ export function prijsUitleg(berekend, i, wat = {}) {
     const pct = procent(b.price, berekend.blokken[0].price);
     if (pct !== null) vergelijk = pct === 0 ? "even duur als nu" : pct < 0 ? `${-pct}% goedkoper dan nu` : `${pct}% duurder dan nu`;
   }
-  const doet = b.groen ? wat.groen : b.leveren ? wat.leveren : wat.wacht;
+  // Wat het apparaat doet, in de woorden van de legenda; een blok met een eigen
+  // naam (de stand van een batterij, zoals "Standby") houdt die.
+  const doet = (b.groen ? wat.groen : b.leveren ? wat.leveren : (b.label || wat.wacht)) ?? "";
+  const klein = doet ? doet.charAt(0).toLowerCase() + doet.slice(1) : "";
   return {
     kop: i === 0 ? `Nu: ${tijd}` : tijd,
     prijs: prijsTekst(b.price),
-    onder: [vergelijk, doet].filter(Boolean).join(", "),
+    onder: [vergelijk, klein].filter(Boolean).join(", "),
   };
 }
 
