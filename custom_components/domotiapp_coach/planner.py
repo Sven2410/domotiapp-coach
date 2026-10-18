@@ -552,6 +552,10 @@ class Decision:
     # beginnen, als dat later is dan nu. Tekst (ISO), want dit gaat zo het
     # paneel in. Zie `plan_programma`.
     starts_at: str | None = None
+    # De blokken die het plan koos, voor de vooruitblik op het overzicht
+    # (v0.133.0): [{"start", "end", "kwh"}], momenten als tekst. Alleen bij een
+    # boiler; zie `plan_boiler` en `vooruitblik` in coach.py.
+    blokken: list[dict] | None = None
 
 
 # --- The sums -------------------------------------------------------------
@@ -5218,6 +5222,8 @@ def plan_boiler(
         )
 
     eerste = gekozen[0][0]
+    # Het hele plan, voor de vooruitblik (v0.133.0).
+    blokken = [{"start": s.start.isoformat(), "end": s.end.isoformat(), "kwh": round(kwh, 3)} for s, kwh in gekozen]
     if eerste.start <= now < eerste.end:
         return Decision(
             True, 0,
@@ -5225,6 +5231,7 @@ def plan_boiler(
             if einde is not None else "Dit is een van de goedkoopste uren, dus hij verwarmt nu.",
             plan="Hij gaat uit zodra de boiler zelf afslaat.",
             rule="cheapest-hour",
+            blokken=blokken,
         )
 
     return Decision(
@@ -5237,6 +5244,7 @@ def plan_boiler(
         ),
         rule="wait-for-cheap",
         starts_at=eerste.start.isoformat(),
+        blokken=blokken,
     )
 
 

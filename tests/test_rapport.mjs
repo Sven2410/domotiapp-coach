@@ -1457,7 +1457,8 @@ proef("het uurplan van de batterij zegt welke uren hij de auto helpt (v0.95.0)",
 
 proef("de pop-up tekent de grafiek bij de paal en bij de batterij", () => {
   const sheet = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js", import.meta.url), "utf-8");
-  assert.equal(sheet.split("this.paintPrijs_(").length - 1, 3, "leeg maken, de paal, en de batterij");
+  // Sinds v0.133.0 ook de boiler en de programma's (`paintAnder_`).
+  assert.equal(sheet.split("this.paintPrijs_(").length - 1, 4, "leeg maken, de paal, de batterij, en de boiler en programma's");
   assert.ok(sheet.includes("Number(b.kwh) - Number(b.solar_kwh || 0)"), "bij de paal telt alleen wat van het net komt");
 });
 
@@ -4301,6 +4302,111 @@ proef("elk merk dat het paneel aanbiedt neemt de coach aan bij het opslaan (v0.1
   const mist = alle.filter((naam) => !python.has(naam.split(":")[1]));
   assert.deepEqual(mist, [], `niet in const.py: ${mist.join(", ")}`);
   assert.ok(/ALL_BRANDS: Final = sorted\(\s*\{[^}]*\*AIRCO_BRANDS/.test(bron), "AIRCO_BRANDS zit in ALL_BRANDS");
+});
+
+// De vooruitblik op het overzicht (v0.133.0). De eigenaar op 19-10-2026: "Dan zie je in
+// één oogopslag wat er toekomstig gaat gebeuren, en krijg je een visuele bevestiging of je
+// ingestelde prioriteiten ook kloppen." De vorm van de gegevens is die van `vooruitblik`
+// in coach.py (proef 174 in test_coach.py).
+proef("de vooruitblik: per uur de prijs, de zon, het huis en elk plan, in de volgorde van de voorrang (v0.133.0)", async () => {
+  const vb = await import("../custom_components/domotiapp_coach/frontend/src/vooruitblik.js");
+  const data = {
+    van: "2026-10-18T18:00:00", tot: "2026-10-18T22:00:00",
+    prijzen: [
+      { start: "2026-10-18T18:00:00", end: "2026-10-18T18:15:00", price: 0.40, feed_in: 0.30 },
+      { start: "2026-10-18T18:15:00", end: "2026-10-18T19:00:00", price: 0.44, feed_in: 0.32 },
+      { start: "2026-10-18T19:00:00", end: "2026-10-18T20:00:00", price: 0.46, feed_in: null },
+    ],
+    zon: { "2026-10-18T18:00:00": 0.4 }, huis: { "2026-10-18T18:00:00": 0.6, "2026-10-18T19:00:00": 0.8 },
+    apparaten: [
+      { id: "b", type: "thuisbatterij", blokken: [
+        { start: "2026-10-18T18:00:00", end: "2026-10-18T18:30:00", kw: -1.0, wat: "Nul op de meter", soc: 61 },
+        { start: "2026-10-18T18:30:00", end: "2026-10-18T19:00:00", kw: -2.0, wat: "Handelen", soc: 55 },
+      ] },
+      { id: "p", type: "laadpaal", blokken: [
+        { start: "2026-10-18T18:00:00", end: "2026-10-18T19:00:00", kw: 0, wat: "wacht", why: "duurder dan nodig" },
+        { start: "2026-10-18T21:00:00", end: "2026-10-18T22:00:00", kw: 11, zon_kw: 0, accu_kw: 1, wat: "laadt" },
+      ] },
+      { id: "v", type: "vaatwasser", blokken: [{ start: "2026-10-18T20:30:00", end: "2026-10-18T21:30:00", kw: null, wat: "start, Katoen" }] },
+    ],
+    voorrang_zon: ["p", "b"], voorrang_plan: ["b", "p"],
+  };
+  const uren = vb.vooruitUren(data);
+  assert.equal(uren.length, 4, "18, 19, 20 en 21 uur");
+  assert.ok(Math.abs(uren[0].prijs - (0.40 * 0.25 + 0.44 * 0.75)) < 1e-12, "het tijdgewogen gemiddelde van de kwartieren");
+  assert.equal(uren[2].prijs, null, "een uur zonder prijs blijft zonder");
+  assert.equal(uren[1].terug, null, "een terugleverprijs die er niet is ook");
+  assert.equal(uren[0].zon, 0.4);
+  assert.equal(uren[1].huis, 0.8);
+  const accu = uren[0].apparaten.b;
+  assert.ok(Math.abs(accu.kw - (-1.5)) < 1e-12 && accu.soc === 55, `de batterij: het gemiddelde vermogen en de accustand aan het eind: ${JSON.stringify(accu)}`);
+  assert.equal(uren[2].apparaten.v.onbekend, true, "een onbekend verbruik blijft onbekend");
+  assert.deepEqual(vb.volgorde(data), ["p", "b", "v"], "eerst de voorrang bij zon, dan bij planningen, dan de rest");
+  const zichtbaar = { prijs: true, zon: true, huis: true, soc: true, p: true, b: true, v: true };
+  const labels = new Map([["p", "Laadpaal"], ["b", "Thuisbatterij"], ["v", "Vaatwasser"]]);
+  const soorten = new Map([["p", "laadpaal"], ["b", "thuisbatterij"], ["v", "vaatwasser"]]);
+  const regels = vb.momentRegels(uren[0], { ids: vb.volgorde(data), labels, soorten, zichtbaar }).map((r) => r.tekst);
+  assert.deepEqual(regels, ["Zon: 0,4 kW verwacht", "Huis: 0,6 kW verwacht", "Laadpaal: wacht, duurder dan nodig",
+    "Thuisbatterij: Handelen, 1,5 kW eruit, naar 55%", "Vaatwasser: niets gepland"], JSON.stringify(regels));
+  const later = vb.momentRegels(uren[3], { ids: vb.volgorde(data), labels, soorten, zichtbaar }).map((r) => r.tekst);
+  assert.ok(later.includes("Laadpaal: laadt 11,0 kW (1,0 uit de batterij)"), JSON.stringify(later));
+  assert.ok(vb.momentRegels(uren[2], { ids: ["v"], labels, soorten, zichtbaar }).some((r) => r.tekst === "Vaatwasser: start, Katoen"),
+    "zonder verbruik geen kW");
+  const zonderHuis = vb.momentRegels(uren[0], { ids: [], labels, soorten, zichtbaar: { ...zichtbaar, huis: false } }).map((r) => r.tekst);
+  assert.ok(!zonderHuis.some((t) => t.startsWith("Huis")), "een uitgezette laag staat er niet");
+  const s = vb.schalen(uren, { ids: vb.volgorde(data), zichtbaar });
+  assert.ok(s.boven >= 11 && Math.abs(s.onder - 1.5) < 1e-12, JSON.stringify(s));
+  const svg = vb.vooruitSvg(uren, { ids: vb.volgorde(data), soorten, zichtbaar, drempels: { low: 0.2, high: 0.3 }, gekozen: 1 });
+  assert.ok(svg.includes('width="104"') && svg.includes('class="gekozen" x="26"'), "een kolom per uur");
+  assert.ok(!svg.includes('class="soc"'), "een accustand van één uur is nog geen lijn");
+  assert.ok(svg.includes("var(--dac-bad)"), "een prijs boven de grens in rood");
+  // De kaart op het overzicht, direct onder de coach, ook voor wie de volgorde al eens veranderde.
+  const store = {};
+  globalThis.localStorage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; }, removeItem: (k) => { delete store[k]; } };
+  const layout = await import("../custom_components/domotiapp_coach/frontend/src/layout.js");
+  assert.equal(layout.OVERVIEW_CARDS[1].id, "vooruit");
+  store["dac-overview-layout"] = JSON.stringify([{ id: "flow" }, { id: "coach" }, { id: "tiles", hidden: true }]);
+  assert.deepEqual(layout.effectiveLayout().map((c) => c.id), ["flow", "coach", "vooruit", "tiles", "phases", "meters", "steerable"],
+    "een nieuwe kaart komt na zijn voorganger, niet achteraan");
+  const ov = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf8");
+  assert.ok(ov.includes('data-card="vooruit"') && ov.includes('type: "domotiapp_coach/forecast"'));
+});
+
+// "Wat gaat hij doen" voor de boiler en een apparaat met een programma (v0.133.0), zoals bij
+// de laadpaal en de batterij. De eigenaar op 18-10-2026: "Zou bij zowel batterij, als ev
+// laden, als boiler, etc op dezelfde manier weergegeven mogen worden."
+proef("Wat gaat hij doen: de boiler en een programma in dezelfde prijsgrafiek (v0.133.0)", async () => {
+  const { apparaatVooruit } = await import("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js");
+  const nu = new Date(2026, 9, 18, 18, 20);
+  const rijen = [12, 13, 14, 21, 22, 23].map((h) => ({
+    start: new Date(2026, 9, 18, h), end: new Date(2026, 9, 18, h + 1), price: h >= 21 ? 0.20 + (h - 21) * 0.01 : 0.40,
+  }));
+  const boiler = apparaatVooruit({ kind: "boiler", needed_kwh: 3.2, blokken: [
+    { start: "2026-10-18T22:00:00", end: "2026-10-18T23:00:00", kwh: 2.0 },
+    { start: "2026-10-18T23:00:00", end: "2026-10-19T00:00:00", kwh: 1.84 },
+  ] }, rijen, nu);
+  assert.deepEqual(boiler.kop.map((k) => k[1]), ["3,2 kWh", "2 blokken", "22:00"]);
+  assert.equal(boiler.kop[2][2], "vandaag");
+  assert.deepEqual(boiler.rijen.map((r) => r.groen), [false, true, true], "de uren van vandaag die nog komen, groen waar hij verwarmt");
+  assert.equal(boiler.uren[0].tijd, "22:00 tot 23:00");
+  assert.equal(boiler.uren[0].prijs, "€ 0,210");
+  assert.equal(boiler.uren[0].wat, "verwarmt, 2,0 kWh");
+  assert.equal(boiler.woorden.groen, "Verwarmen");
+  const vw = apparaatVooruit({ kind: "programma", starts_at: "2026-10-18T21:30:00", program_minutes: 90, program_label: "Eco 50 °C" }, rijen, nu);
+  assert.deepEqual(vw.kop.map((k) => k[1]), ["Eco 50 °C", "21:30", "rond 23:00"]);
+  assert.deepEqual(vw.rijen.map((r) => r.groen), [true, true, false], "21 en 22 uur groen");
+  assert.equal(vw.uren[0].wat, "start, Eco 50 °C");
+  const loopt = apparaatVooruit({ kind: "programma", running: true, started_at: "2026-10-18T18:00:00", ends_at: "2026-10-18T19:10:00" }, [], nu);
+  assert.equal(loopt.kop[1][0], "Begonnen");
+  assert.equal(loopt.uren[0].wat, "draait");
+  assert.equal(loopt.rijen.length, 0, "zonder prijzen geen grafiek, wel de vakken");
+  const onbekend = apparaatVooruit({ kind: "programma", starts_at: "2026-10-19T09:00:00" }, rijen, nu);
+  assert.equal(onbekend.kop[2][1], "onbekend", "zonder duur geen verzonnen eindtijd");
+  assert.equal(onbekend.kop[1][2], "morgen");
+  assert.equal(apparaatVooruit({ kind: "boiler", blokken: [] }, rijen, nu), null);
+  assert.equal(apparaatVooruit({ kind: "airco" }, rijen, nu), null, "een airco heeft geen plan");
+  const ov = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf8");
+  assert.ok(ov.includes('besluit.kind === "boiler"\n        ? !(besluit.blokken ?? []).length') || ov.includes("!(besluit.blokken ?? []).length"));
 });
 
 // Het jaar in Historie met een startmaand (v0.132.0), zodat het met het contract

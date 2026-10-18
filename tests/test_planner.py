@@ -2571,6 +2571,11 @@ print(f"  19:00: {avond_b.rule} {avond_b.starts_at}  {avond_b.reason}")
 controle("om 19:00 wacht hij op de nacht en zegt wanneer",
          avond_b.rule == "wait-for-cheap" and not avond_b.charge
          and avond_b.starts_at == "2026-09-08T01:00:00", f"{avond_b}")
+# De vooruitblik op het overzicht (v0.133.0) krijgt het hele plan: elk gekozen blok,
+# het eerste op de start die hij noemt.
+controle("en het hele plan gaat mee voor de vooruitblik",
+         bool(avond_b.blokken) and avond_b.blokken[0]["start"] == avond_b.starts_at
+         and all(b["kwh"] > 0 for b in avond_b.blokken), f"{avond_b.blokken}")
 
 nacht_b = planner.plan_boiler(
     dt.datetime(2026, 9, 8, 1, 0), prijzen_b, Tariff(), Forecast(), venster_b,

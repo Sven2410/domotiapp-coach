@@ -204,7 +204,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | Historie en het rapport, het verbruik per apparaat (zoals het energiedashboard), batterij geladen en ontladen, de tijdlijn in Historie, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, en de batterij op de kaart en in de pop-up | `docs/eerste-woning.md` |
 | een smart plug: de lijst met apparaten en hun iconen, altijd aan (ook voor een vaatwasser aan een smart plug), en de melding Apparaat staat uit | `docs/smart-plug.md` |
 | de vriezer en de koelkast: uitlezen en melden (deur open, te warm, storing), niet sturen | `docs/vriezer.md` |
-| het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat | `docs/paneel.md` |
+| het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat, de vooruitblik op het overzicht en "Wat gaat hij doen" voor boiler en programma's | `docs/paneel.md` |
 | de berichtenbox (het belletje), de herinnering voor de meterstanden, het bericht dat een contract afloopt of dat de prijscontrole omslaat | `docs/berichten.md` |
 | het contract: de leverancierscatalogus, de prijsopbouw en de controle tegen de all-in sensor, "Ja, dit klopt", de kale marktprijs als reserve, gas en water per energiebron, vast/variabel/dynamisch, looptijden en "nieuw contract afgesloten" | `docs/contract.md` |
 
@@ -261,6 +261,10 @@ dan de andere in dezelfde uitgave.
   notities als die niet open staat), en geef na de uitgave een echte dump van de entiteiten
   door. De vaatwasserkaart ging eerder stuk doordat de startsensor van tijdstip naar tekst
   ging (v0.100.1), en niemand zag het.
+- **De vooruitblik** (v0.133.0): `vooruitblik` in coach.py schrijft de vorm die `vooruitUren`
+  en `momentRegels` in vooruitblik.js lezen (`van`, `tot`, `prijzen`, `zon`, `huis`,
+  `apparaten` met `blokken`, `voorrang_zon`, `voorrang_plan`); proef 174 in test_coach.py en de
+  proef "de vooruitblik" in test_rapport.mjs (`docs/paneel.md`).
 - **Wanneer een kaart vraagt hoe vol de auto is** (v0.117.0): `soc_ask` in coach.py
   (de number `accustand` voor DomotiApp Lovelace) en `vraagAccustand` in devices.js
   trekken dezelfde grens (`docs/laadpaal.md`).
@@ -294,6 +298,7 @@ dan de andere in dezelfde uitgave.
 | `frontend/src/leveranciers.js`, `leveranciers-data.js` | De leverancierscatalogus (v0.129.0): per leverancier en soort de velden die Contract voorinvult, de woorden voor de opbouw, bronnen, peildatum en wat onzeker is, en de energiebelasting per jaar. Een voorstel; de coach rekent alleen met wat de klant bevestigde |
 | `berichten.py`, `frontend/src/berichten-sheet.js` | De berichtenbox (v0.130.0): wanneer een herinnering aan de beurt is (meterstanden, een vast contract dat afloopt, de prijscontrole die omslaat), en de pop-up achter het belletje in de kop. Bewaard in `BerichtenStore` (storage.py) (`docs/berichten.md`) |
 | `frontend/src/opbouw.js` | "Zo komt je prijs tot stand" (v0.129.0), op Contract (sinds v0.130.1 ook voor de bewoner): toont wat de coach uitrekent, in woorden en cijfers, in de volgorde van de leverancier |
+| `frontend/src/vooruitblik.js` | De vooruitblik op het overzicht (v0.133.0): per uur de prijs, de zon, het huis en wat elk apparaat doet, in de volgorde van de voorrang, uit `domotiapp_coach/forecast` (`vooruitblik` in coach.py). Rekent zelf niets bij (`docs/paneel.md`) |
 | `frontend/src/tijdlijn.js` | De tijdlijn in Historie (v0.115.0): per dag een baan per apparaat dat de coach stuurt, uit de besluiten in Meldingen (sinds v0.115.0 met `device`, `rule`, `mode`, `charge` erbij), en de kleur zon of net uit de kwartieren van het apparaat en het net, niet uit de regel. Kent Home Assistant niet (`docs/eerste-woning.md`) |
 
 De scheiding tussen `planner.py` en `coach.py` is de kern: het denkwerk is los
@@ -320,13 +325,13 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 517 controles op het denkwerk
+python tests/test_planner.py     # 518 controles op het denkwerk
 python tests/test_batterij.py    # 200 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1265 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 1276 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2449 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 python tests/test_prijsopbouw.py # 39 op de prijsopbouw, de controle en zonsopkomst
-node   tests/test_rapport.mjs    # 215 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 217 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

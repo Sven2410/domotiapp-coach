@@ -48,6 +48,7 @@ export function paalPerUur(blokken = []) {
   });
 }
 import { DacElement, define } from "./base.js";
+import { coachRijen } from "./data-source.js";
 import { icons } from "./icons.js";
 import { sheetCss } from "./theme.js";
 
@@ -182,6 +183,100 @@ const uren = (value) => {
   return u ? `${u} u ${String(m).padStart(2, "0")} m` : `${m} min`;
 };
 
+const twee = (n) => String(n).padStart(2, "0");
+const klokje = (d) => `${twee(d.getHours())}:${twee(d.getMinutes())}`;
+const kommagetal = (n, d = 1) => Number(n).toLocaleString("nl-NL", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+/** "vandaag", "morgen" of de dag, voor een start die later komt. */
+function welkeDag(d, nu) {
+  const dag = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const verschil = Math.round((dag(d) - dag(nu)) / 86400000);
+  if (verschil === 0) return "vandaag";
+  if (verschil === 1) return "morgen";
+  return d.toLocaleDateString("nl-NL", { weekday: "long" });
+}
+
+/**
+ * Het plan van een boiler of een apparaat met een programma, voor dezelfde
+ * pop-up als de laadpaal en de batterij (v0.133.0). De eigenaar op 18-10-2026,
+ * bij de prijsgrafiek: "Zou bij zowel batterij, als ev laden, als boiler, etc
+ * op dezelfde manier weergegeven mogen worden." Groen zijn de uren waarin hij
+ * draait. De prijzen zijn die van de coach (`coachRijen`); zonder dynamisch
+ * contract is er geen grafiek, wel de vakken en de lijst.
+ *
+ * @returns {{kop: Array, rijen: Array, woorden: object, uren: Array}|null}
+ */
+export function apparaatVooruit(besluit, rijen, nu = new Date()) {
+  if (!besluit) return null;
+  let vensters = [];
+  let woorden;
+  let kop;
+  let wat;
+  if (besluit.kind === "boiler") {
+    vensters = (besluit.blokken ?? []).map((b) => ({ start: new Date(b.start), eind: new Date(b.end), kwh: Number(b.kwh) || 0 }));
+    if (!vensters.length) return null;
+    const nodig = Number(besluit.needed_kwh);
+    kop = [
+      ["Nodig", Number.isFinite(nodig) && nodig > 0 ? `${kommagetal(nodig)} kWh` : "onbekend", "tot het vat vol is"],
+      ["Gepland", `${vensters.length} ${vensters.length === 1 ? "blok" : "blokken"}`, "de goedkoopste"],
+      ["Begint", klokje(vensters[0].start), welkeDag(vensters[0].start, nu)],
+    ];
+    woorden = { groen: "Verwarmen", wacht: "Wacht" };
+    wat = (v) => `verwarmt, ${kommagetal(v.kwh)} kWh`;
+  } else if (besluit.kind === "programma") {
+    let start = null;
+    let eind = null;
+    if (besluit.running && besluit.started_at && besluit.ends_at) {
+      start = new Date(besluit.started_at);
+      eind = new Date(besluit.ends_at);
+    } else if (besluit.starts_at) {
+      start = new Date(besluit.starts_at);
+      const minuten = Number(besluit.program_minutes);
+      eind = Number.isFinite(minuten) && minuten > 0 ? new Date(start.getTime() + minuten * 60000) : null;
+    }
+    if (!start) return null;
+    vensters = [{ start, eind: eind ?? new Date(start.getTime() + 60000), kwh: null }];
+    kop = [
+      ["Programma", besluit.program_label || "onbekend", ""],
+      [besluit.running ? "Begonnen" : "Start", klokje(start), welkeDag(start, nu)],
+      ["Klaar", eind ? `rond ${klokje(eind)}` : "onbekend", eind ? welkeDag(eind, nu) : ""],
+    ];
+    woorden = { groen: "Draait", wacht: "Wacht" };
+    wat = () => (besluit.running ? "draait" : `start${besluit.program_label ? `, ${besluit.program_label}` : ""}`);
+  } else {
+    return null;
+  }
+  const draait = (a, b) => vensters.some((v) => v.start < b && v.eind > a);
+  const prijsRijen = (rijen ?? [])
+    .filter((r) => new Date(r.end) > nu)
+    .map((r) => ({ start: r.start, end: r.end, price: r.price, groen: draait(new Date(r.start), new Date(r.end)) }));
+  const gemiddeld = (a, b) => {
+    let som = 0;
+    let duur = 0;
+    for (const r of rijen ?? []) {
+      const s = new Date(r.start).getTime();
+      const e = new Date(r.end).getTime();
+      const deel = Math.max(0, Math.min(e, b.getTime()) - Math.max(s, a.getTime()));
+      if (deel && r.price !== null && r.price !== undefined) {
+        som += r.price * deel;
+        duur += deel;
+      }
+    }
+    return duur ? som / duur : null;
+  };
+  const uren = vensters.map((v) => {
+    const prijs = gemiddeld(v.start, v.eind);
+    return {
+      start: v.start,
+      eind: v.eind,
+      tijd: `${klokje(v.start)} tot ${klokje(v.eind)}`,
+      prijs: prijs === null ? "" : `€ ${kommagetal(prijs, 3)}`,
+      wat: wat(v),
+    };
+  });
+  return { kop, rijen: prijsRijen, woorden, uren };
+}
+
 export class DacPlanAheadSheet extends DacElement {
   static css = css;
 
@@ -278,6 +373,12 @@ export class DacPlanAheadSheet extends DacElement {
     const accu = batterijVooruit(this.besluit_);
     if (accu) {
       this.paintAccu_(accu);
+      return;
+    }
+    // Een boiler of een apparaat met een programma (v0.133.0).
+    const ander = apparaatVooruit(this.besluit_, coachRijen());
+    if (ander) {
+      this.paintAnder_(ander);
       return;
     }
 
@@ -569,6 +670,28 @@ export class DacPlanAheadSheet extends DacElement {
   }
 
   /** Het plan van een thuisbatterij, uur voor uur. */
+  /** De boiler en de apparaten met een programma (v0.133.0); zie `apparaatVooruit`. */
+  paintAnder_(ander) {
+    this.paintKop_(ander.kop);
+    this.paintPrijs_(ander.rijen, ander.woorden);
+    const uurlijst = this.$("#vooruit-uren");
+    const nu = Date.now();
+    for (const uur of ander.uren) {
+      const rij = document.createElement("div");
+      rij.className = "uur laadt";
+      if (uur.start.getTime() <= nu && nu < uur.eind.getTime()) rij.classList.add("nu");
+      for (const [klasse, tekst] of [["tijd", uur.tijd], ["prijs", uur.prijs], ["wat", uur.wat]]) {
+        const vak = document.createElement("span");
+        vak.className = klasse;
+        vak.textContent = tekst;
+        rij.append(vak);
+      }
+      uurlijst.append(rij);
+    }
+    this.$("#vooruit-voet").textContent =
+      "Dit is wat de coach nu van plan is. Verandert de zon of de prijs, dan rekent hij het opnieuw uit.";
+  }
+
   paintAccu_(accu) {
     // De nachtzin staat in de voet; bovenaan alleen wat hij nu doet.
     this.$("#vooruit-nu").textContent = this.besluit_?.reason ?? "";
