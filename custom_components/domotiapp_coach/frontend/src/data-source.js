@@ -119,7 +119,7 @@ export function allInFrom(market, dynamic) {
 export function priceNow(feed, contract) {
   if (!contract) return null;
 
-  if (contract.type === "fixed") {
+  if (contract.type !== "dynamic") {
     const value = Number(contract.fixed?.all_in_price);
     return Number.isFinite(value) ? value : null;
   }
@@ -193,6 +193,8 @@ export async function laadCoachPrijzen(hass, nu = Date.now()) {
     const antwoord = await hass.callWS({ type: "domotiapp_coach/prices" });
     coachPrijzen = {
       reserve: Boolean(antwoord?.reserve),
+      // Of de opbouw bevestigd is (v0.129.0); undefined bij een oudere coach.
+      bevestigd: antwoord?.bevestigd,
       rows: (antwoord?.rows ?? [])
         .map((rij) => ({
           start: new Date(rij.start),
@@ -227,8 +229,11 @@ export function allInPrijzen(eigen, reserve, contract) {
   for (const [tijd, prijs] of eigen ?? new Map()) {
     uit.set(tijd, d.source === "market" ? allInFrom(prijs, d) : prijs);
   }
+  // Een reservesensor kan all-in zijn; de kale marktprijs die sinds v0.129.0
+  // vanzelf de reserve is (`reserveEntity_` in views/history.js) niet.
+  const reserveAllIn = Boolean(d.fallback_entity) && d.fallback_source === "all_in";
   for (const [tijd, prijs] of reserve ?? new Map()) {
-    if (!uit.has(tijd)) uit.set(tijd, d.fallback_source === "all_in" ? prijs : allInFrom(prijs, d));
+    if (!uit.has(tijd)) uit.set(tijd, reserveAllIn ? prijs : allInFrom(prijs, d));
   }
   return uit;
 }
@@ -240,6 +245,8 @@ export function zetCoachPrijzen(waarde) {
 
 /** Of de reserveprijssensor nu invalt, volgens de coach. */
 export const reserveValtIn = () => coachPrijzen.reserve;
+/** False als de bewoner de prijsopbouw nog niet bevestigde (v0.129.0). */
+export const prijsBevestigd = () => coachPrijzen.bevestigd;
 
 function coachRijen() {
   return coachPrijzen.rows.map((rij) => ({ start: rij.start, end: rij.end, price: rij.price }));
@@ -406,39 +413,46 @@ export function solarForecast(feed, sources) {
 }
 
 /**
- * Het contract dat op een dag gold: een eerder contract uit `contract.periods`
- * als de dag erin valt, anders het huidige.
+ * Het contract dat op een dag gold: een eerder contract als de dag erin valt,
+ * anders het huidige. Per energiebron (v0.129.0): stroom uit `contract.periods`,
+ * gas uit `contract.gas.periods`, water uit `contract.water.periods`, want wie
+ * van stroomleverancier wisselde hoeft dat niet ook van gas te doen.
  *
  * De bewoner van de eerste woning op 22-09-2026: van-tot met een prijs, per
  * contract, voor stroom en voor gas, "dan kun je een goede weergave bieden van
  * kosten, ook bij wijzigen van aanbieder." Een prijs van nul in een periode
  * betekent "niet ingevuld" en valt terug op het huidige contract. Een dynamisch
- * contract heeft geen vaste inkoopprijs: `buy` is dan null en de historie pakt
- * de prijs uit de geschiedenis van de prijsentiteit.
+ * contract heeft geen vaste inkoopprijs: `buy` (of `gas`) is dan null en de
+ * historie pakt de prijs uit de geschiedenis van de prijsentiteit.
  *
- * @returns {{buy: number|null, feedIn: number|null, gas: number|null, period: object|null}}
+ * @returns {{buy: number|null, feedIn: number|null, gas: number|null, water: number|null, period: object|null}}
  */
 export function contractAt(contract, when) {
   const dag = when instanceof Date ? when : new Date(when);
   const key = Number.isNaN(dag.getTime()) ? null : dag.toISOString().slice(0, 10);
   const lokaal = key === null ? null
     : `${dag.getFullYear()}-${String(dag.getMonth() + 1).padStart(2, "0")}-${String(dag.getDate()).padStart(2, "0")}`;
-  const periods = Array.isArray(contract?.periods) ? contract.periods : [];
-  const period = lokaal === null ? null
-    : periods.find((p) => p && (!p.from || p.from <= lokaal) && (!p.to || lokaal <= p.to)) ?? null;
+  const binnen = (lijst) => (lokaal === null || !Array.isArray(lijst) ? null
+    : lijst.find((p) => p && (!p.from || p.from <= lokaal) && (!p.to || lokaal <= p.to)) ?? null);
+  const period = binnen(contract?.periods);
+  const gasPeriode = binnen(contract?.gas?.periods);
+  const waterPeriode = binnen(contract?.water?.periods);
   const fixed = contract?.type !== "dynamic";
   const huidig = Number(contract?.fixed?.all_in_price);
   const huidigTerug = fixed
     ? (Number(contract?.fixed?.feed_in_tariff) || 0) - (Number(contract?.fixed?.feed_in_costs) || 0)
     : null;
-  const huidigGas = Number(contract?.gas_price) > 0 ? Number(contract.gas_price) : null;
-  const huidigWater = Number(contract?.water_price) > 0 ? Number(contract.water_price) : null;
+  // Dynamisch gas heeft geen vaste prijs: die komt uit de sensor (`gasPrijzen` in balans).
+  const gasVast = (contract?.gas?.type ?? "fixed") !== "dynamic";
+  const huidigGas = gasVast && Number(contract?.gas?.price) > 0 ? Number(contract.gas.price) : null;
+  const huidigWater = Number(contract?.water?.price) > 0 ? Number(contract.water.price) : null;
   const getal = (v) => (Number(v) > 0 ? Number(v) : null);
   return {
-    buy: getal(period?.all_in_price) ?? (fixed && Number.isFinite(huidig) ? huidig : null),
+    // Een eerder dynamisch contract heeft geen vaste prijs: die komt uit de sensor.
+    buy: period?.type === "dynamic" ? null : getal(period?.all_in_price) ?? (fixed && Number.isFinite(huidig) ? huidig : null),
     feedIn: getal(period?.feed_in_tariff) ?? huidigTerug,
-    gas: getal(period?.gas_price) ?? huidigGas,
-    water: getal(period?.water_price) ?? huidigWater,
+    gas: getal(gasPeriode?.price) ?? huidigGas,
+    water: getal(waterPeriode?.price) ?? huidigWater,
     period,
   };
 }
@@ -486,7 +500,9 @@ export function tariff(feed, contract) {
   // there is no way to get back to it, and a number is left out rather than
   // guessed at.
   let feedIn = null;
-  if (coachPrijzen.reserve) {
+  // Wat de coach als terugleverprijs rekent, ook met een all-in sensor en een
+  // kale marktprijs ernaast (v0.129.0); tot dan alleen als de reserve inviel.
+  if (coachPrijzen.rows.some((rij) => rij.feedIn !== null)) {
     // De reserve: wat teruglevering volgens de coach opbrengt.
     const terug = coachPrijzen.rows.filter((rij) => rij.feedIn !== null).map((rij) => ({ start: rij.start, price: rij.feedIn }));
     feedIn = mean(terug);

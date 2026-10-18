@@ -368,8 +368,13 @@ function vooruitScherm(planAhead) {
       kinderen,
       attrs: {},
       setAttribute(naam, waarde) { this.attrs[naam] = waarde; },
+      getAttribute(naam) { return this.attrs[naam] ?? null; },
       append(...items) { kinderen.push(...items); },
       replaceChildren(...items) { kinderen.length = 0; kinderen.push(...items); },
+      // Sinds v0.129.0 wacht de prijsgrafiek op een tik.
+      luisteraars: {},
+      addEventListener(soort, fn) { this.luisteraars[soort] = fn; },
+      querySelectorAll() { return []; },
     };
   };
   // Sinds v0.86.0 ook de prijsgrafiek, die svg-knopen maakt.
@@ -1321,7 +1326,8 @@ proef("de pop-up van de paal toont de prijsgrafiek met het gewogen gemiddelde va
   el.paint_();
   const blok = knopen.get("#vooruit-prijs");
   assert.equal(blok.hidden, false);
-  const kop = blok.kinderen[0].kinderen[1].kinderen;
+  // Sinds v0.129.0 staat de kaart met het moment erboven; de kop op naam.
+  const kop = blok.kinderen.find((k) => k.className === "prijs-kop").kinderen[1].kinderen;
   // 03:00: 11,0 kWh van het net tegen 0,2215; 04:00: 11,0 - 2,4 = 8,6 kWh tegen 0,2113.
   // (0,2215 x 11 + 0,2113 x 8,6) / 19,6 = 0,2170.
   assert.equal(kop[1].textContent, "€ 0,217", JSON.stringify(kop));
@@ -1375,7 +1381,7 @@ proef("de pop-up zegt 'prijs per kwartier' bij kwartierprijzen", () => {
     solar_kwh: 0, kwh: charging ? 2.7 : 0, amps: charging ? 16 : 0, kw: charging ? 11 : 0 });
   const { el, knopen } = vooruitScherm({ ...NACHT, blocks: [k(0, false), k(15, true), k(30, true), k(45, false)] });
   el.paint_();
-  const kop = knopen.get("#vooruit-prijs").kinderen[0].kinderen[0];
+  const kop = knopen.get("#vooruit-prijs").kinderen.find((k) => k.className === "prijs-kop").kinderen[0];
   assert.equal(kop.textContent, "Prijs per kwartier");
   assert.equal(knopen.get("#vooruit-uren").kinderen.length, 1, "een regel voor het hele uur");
 });
@@ -1687,13 +1693,18 @@ proef("onder het schemaschuifje staat wat hij zonder planning doet", async () =>
 const { contractAt } = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
 
 proef("een dag in een eerder contract rekent met de prijs van toen, daarbuiten met het huidige", () => {
+  // Sinds v0.129.0 heeft gas zijn eigen eerdere contracten (`contract.gas.periods`).
   const contract = {
-    type: "fixed", gas_price: 1.3,
+    type: "fixed",
     fixed: { all_in_price: 0.28, feed_in_tariff: 0.07, feed_in_costs: 0.01 },
     periods: [
-      { from: "2025-01-01", to: "2025-12-31", all_in_price: 0.35, feed_in_tariff: 0.09, gas_price: 1.5 },
-      { from: "2024-01-01", to: "2024-12-31", all_in_price: 0.4, feed_in_tariff: 0, gas_price: 0 },
+      { from: "2025-01-01", to: "2025-12-31", all_in_price: 0.35, feed_in_tariff: 0.09 },
+      { from: "2024-01-01", to: "2024-12-31", all_in_price: 0.4, feed_in_tariff: 0 },
     ],
+    gas: { type: "fixed", price: 1.3, periods: [
+      { from: "2025-01-01", to: "2025-12-31", price: 1.5 },
+      { from: "2024-01-01", to: "2024-12-31", price: 0 },
+    ] },
   };
   const toen = contractAt(contract, new Date(2025, 5, 15, 12));
   assert.equal(toen.buy, 0.35);
@@ -1726,12 +1737,17 @@ proef("een negatieve prijs krijgt zijn eigen tip, en de verkoopvergoeding staat 
   assert.ok(tip.body.includes("de Droger"), tip.body);
   const html = Object.create(Contract.prototype).render();
   assert.ok(html.includes('id="dyn-feedbonus"'));
-  assert.ok(html.includes("0,0025"), "de kwart cent van na het salderen staat erbij");
+  // De "kwart cent van na het salderen" (0,0025) staat er sinds v0.129.0 niet meer:
+  // dat was geen bedrag met een bron, en de wet zegt vanaf 2027 minstens de helft
+  // van de kale prijs. Wat een leverancier geeft vult de catalogus in.
+  assert.ok(!html.includes("0,0025"));
 });
 
 proef("water hoort erbij: prijs per dag, meterstand, formulier en de lekmelding", async () => {
-  const contract = { type: "fixed", gas_price: 1.3, water_price: 1.1, fixed: { all_in_price: 0.28 },
-    periods: [{ from: "2025-01-01", to: "2025-12-31", all_in_price: 0.35, gas_price: 1.5, water_price: 0.9 }] };
+  const contract = { type: "fixed", fixed: { all_in_price: 0.28 },
+    periods: [{ from: "2025-01-01", to: "2025-12-31", all_in_price: 0.35 }],
+    gas: { type: "fixed", price: 1.3, periods: [{ from: "2025-01-01", to: "2025-12-31", price: 1.5 }] },
+    water: { price: 1.1, periods: [{ from: "2025-01-01", to: "2025-12-31", price: 0.9 }] } };
   assert.equal(contractAt(contract, new Date(2025, 5, 1)).water, 0.9);
   assert.equal(contractAt(contract, new Date(2026, 5, 1)).water, 1.1);
   assert.equal(contractAt({ type: "fixed" }, new Date()).water, null);
@@ -1765,10 +1781,14 @@ proef("Historie opent op vandaag, de eerste knop van de rij (22-09-2026)", () =>
   assert.ok(html.indexOf('<option value="day">') > 0 && html.indexOf('<option value="day">') < html.indexOf('<option value="week">'));
 });
 
-proef("het contractscherm heeft de gasprijs en de eerdere contracten", () => {
+proef("het contractscherm heeft de gasprijs en de eerdere contracten, per energiebron (v0.129.0)", () => {
   const html = Object.create(Contract.prototype).render();
   assert.ok(html.includes('id="gas-price"'));
-  assert.ok(html.includes('id="periods"') && html.includes('id="period-add"'));
+  for (const bron of ["stroom", "gas", "water"]) {
+    assert.ok(html.includes(`id="periods-${bron}"`) && html.includes(`data-period-add="${bron}"`), bron);
+  }
+  // Eerst alles over stroom, dan gas, dan water.
+  assert.ok(html.indexOf('id="stroom"') < html.indexOf('id="gas"') && html.indexOf('id="gas"') < html.indexOf('id="water"'));
 });
 
 proef("de historie biedt een kort en een uitgebreid rapport", () => {
@@ -2416,7 +2436,7 @@ proef("de balans: uitgegeven en bespaard, en de drie delen tellen samen op tot b
     rijen: [{ start: dag, own: 10, bought: 4, sold: 6, used: 14 }],
     prijs: (w) => geld.prijsOp(VAST, TARIEF, new Map(), w),
     gas: [{ start: dag, value: 2 }],
-    contract: { ...VAST, gas_price: 1.33 },
+    contract: { ...VAST, gas: { type: "fixed", price: 1.33 } },
     accu: 0.034,
     coach: { saved: 0.3, solar_saved: 0.2, wait_saved: 0.1 },
   });
@@ -2739,16 +2759,23 @@ proef("Historie: een marktprijs krijgt belasting, opslag en btw, en een vak zond
   const m = prijsbron.allInPrijzen(new Map([[1, 0.1]]), new Map([[1, 0.5], [2, 0.2]]), markt);
   assert.ok(Math.abs(m.get(1) - (0.1 + 0.1088 + 0.02) * 1.21) < 1e-9, `${m.get(1)}`);
   assert.ok(Math.abs(m.get(2) - (0.2 + 0.1088 + 0.02) * 1.21) < 1e-9, "de reserve is standaard een marktprijs");
-  const allIn = { type: "dynamic", dynamic: { source: "all_in", fallback_source: "all_in", energy_tax: 0.1088, supplier_markup: 0.02, vat_percent: 21 } };
+  const allIn = { type: "dynamic", dynamic: { source: "all_in", fallback_entity: "sensor.reserve", fallback_source: "all_in", energy_tax: 0.1088, supplier_markup: 0.02, vat_percent: 21 } };
   const a = prijsbron.allInPrijzen(new Map([[1, 0.3]]), new Map([[1, 0.9], [2, 0.25]]), allIn);
   assert.equal(a.get(1), 0.3, "de eigen sensor gaat voor");
   assert.equal(a.get(2), 0.25, "een all-in reserve blijft zoals hij is");
+  // v0.129.0: zonder reservesensor is de kale marktprijs de reserve, en die krijgt
+  // belasting, opslag en btw.
+  const kaal = { type: "dynamic", dynamic: { source: "all_in", market_entity: "sensor.np", energy_tax: 0.09161, supplier_markup: 0.016529, vat_percent: 21 } };
+  const k = prijsbron.allInPrijzen(new Map([[1, 0.3]]), new Map([[2, 0.2]]), kaal);
+  assert.ok(Math.abs(k.get(2) - (0.2 + 0.09161 + 0.016529) * 1.21) < 1e-9, `${k.get(2)}`);
 });
 
-proef("het formulier heeft een reserveprijssensor en zegt wat voor prijs hij geeft", () => {
+// Sinds v0.129.0 is de kale marktprijs vanzelf de reserve; de reservesensor blijft
+// voor een tweede all-in prijs, en staat er alleen als hij is ingevuld.
+proef("het formulier heeft een reserveprijssensor, als tweede all-in prijs", () => {
   const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/contract.js", import.meta.url), "utf8");
   assert.ok(bron.includes('id="dyn-reserve"') && bron.includes('["dyn-reserve", "fallback_entity"]'));
-  assert.ok(bron.includes('data-reserve="market"') && bron.includes('data-reserve="all_in"'));
+  assert.ok(bron.includes('d.fallback_source = "all_in"'));
   const py = readFileSync(new URL("../custom_components/domotiapp_coach/websocket.py", import.meta.url), "utf8");
   assert.ok(py.includes('vol.Optional("fallback_entity")') && py.includes('vol.Optional("fallback_source")'));
 });
@@ -3585,9 +3612,11 @@ proef("Tijdlijn: de kaart staat bij Dag en Week, en zegt het bij Maand; alleen a
   el.$ = (sel) => vakken[sel];
   el.onderwerp_ = "energie";
   el.period_ = "day";
-  el.offset_ = 0;
+  // Gisteren, en niet vandaag: tussen middernacht en 01:00 lag een besluit om 01:00
+  // vandaag in de toekomst, en dan viel deze proef 's nachts om (19-10-2026, 00:05).
+  el.offset_ = -1;
   el.settings_ = { sources: { grid_mode: "split", grid_import: "sensor.net" }, devices: TL_APPARATEN };
-  const van = new Date(); van.setHours(0, 0, 0, 0);
+  const van = new Date(); van.setHours(0, 0, 0, 0); van.setDate(van.getDate() - 1);
   el.tl_ = { dag: `day:${van.getTime()}`, meldingen: [{ at: new Date(van.getTime() + 36e5).toISOString(), kind: "besluit",
     device: "a", mode: "nul", message: "Batterij: nul op de meter. Hij houdt de meter op nul." }], kwartieren: new Map(), gehaald: Date.now() };
   el.paintTijdlijn_();
@@ -4428,6 +4457,183 @@ proef("handelen zonder terugleverprijs: het vinkje kan niet aan, en Contract zeg
   el.draft_.contract.dynamic.market_entity = "sensor.nordpool";
   el.paintContract_();
   assert.equal(nep["#dyn-same"].hidden, true, "een andere sensor: geen melding");
+});
+
+// De eigenaar op 18-10-2026, bij de grafiek van de batterij: "Deze laat nu alleen vandaag
+// zien. Ik zou hem horizontaal scrollable/swipable maken", en "als ik op een bar klik in
+// de diagram, wil ik de prijs zien van dat moment" (v0.129.0).
+proef("de prijsgrafiek: morgen om middernacht, leveren in een eigen kleur, en breed genoeg om te vegen (v0.129.0)", async () => {
+  const { prijsBalken } = await import("../custom_components/domotiapp_coach/frontend/src/prijsgrafiek.js");
+  const begin = new Date(2026, 9, 18, 22, 0);
+  const rijen = Array.from({ length: 30 }, (_, i) => {
+    const s = new Date(begin.getTime() + i * 3600000);
+    return { start: s.toISOString(), end: new Date(s.getTime() + 3600000).toISOString(), price: 0.3 + (i % 5) / 100,
+      groen: i === 3, leveren: i === 10 || i === 3, kwh: i === 3 ? 1 : 0 };
+  });
+  const b = prijsBalken(rijen);
+  const middernacht = b.balken.findIndex((x) => x.dagGrens);
+  assert.equal(middernacht, 2, "om 00:00 begint morgen");
+  assert.equal(b.balken[2].label, "morgen");
+  assert.equal(b.balken.filter((x) => x.dagGrens).length, 2, "en de dag daarna ook een streep");
+  assert.ok(b.balken[10].leveren && b.balken[10].tip.includes("levert aan het net"), b.balken[10].tip);
+  assert.ok(b.balken[3].groen && !b.balken[3].leveren, "laden gaat voor leveren");
+  assert.equal(b.minBreedte, 30 * 14, "14 px per uur");
+  // De prijsas: ronde stappen van nul tot boven de hoogste prijs.
+  const { prijsStappen, prijsUitleg } = await import("../custom_components/domotiapp_coach/frontend/src/prijsgrafiek.js");
+  assert.deepEqual(prijsStappen(0, 0.469).stappen, [0, 0.1, 0.2, 0.3, 0.4, 0.5]);
+  assert.deepEqual(prijsStappen(-0.03, 0.12).stappen, [-0.05, 0, 0.05, 0.1, 0.15]);
+  assert.equal(b.stappen[0].waarde, 0);
+  assert.ok(Math.abs(b.stappen[0].y - b.nul) < 1e-9, "de nul van de as is de nullijn");
+  // De kaart: nu tegen het gemiddelde, een gekozen blok tegen nu, en wat hij dan doet.
+  const nu = prijsUitleg(b, 0, { groen: "hij laadt", leveren: "hij levert aan het net", wacht: "hij wacht" });
+  assert.ok(nu.kop.startsWith("Nu: ") && nu.prijs === "€ 0,300" && nu.onder.includes("onder het gemiddelde"), JSON.stringify(nu));
+  const later = prijsUitleg(b, 4, { groen: "hij laadt", leveren: "hij levert aan het net", wacht: "hij wacht" });
+  assert.ok(later.onder === "13% duurder dan nu, hij wacht", later.onder);
+  assert.ok(prijsUitleg(b, 10, { leveren: "hij levert aan het net" }).onder.endsWith("hij levert aan het net"));
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js", import.meta.url), "utf8");
+  assert.ok(bron.includes("Tik op een staafje") && bron.includes("hij levert aan het net"));
+});
+
+// De bewoner van de eerste woning op 18-10-2026: "Invullen, laten zien hoe de prijs tot
+// stand is gekomen in woord én cijfers, en het all-in resultaat tonen", en "indien het
+// resultaat overeen komt, krijg je automatisch de melding: de ingevoerde gegevens zijn
+// correct" (v0.129.0).
+proef("de opbouw in woorden en cijfers, in de volgorde van de leverancier, met de controle (v0.129.0)", async () => {
+  const { opbouwHtml, controleZin, bevestigdZin } = await import("../custom_components/domotiapp_coach/frontend/src/opbouw.js");
+  const check = {
+    soort: "dynamic", salderen: false, bevestigd: false, bevestigd_op: null,
+    blok: { start: "2026-10-18T21:00:00", einde: "2026-10-18T22:00:00" },
+    bron: { all_in: "sensor.a", markt: "sensor.np", zelfde: false, interval: "hour", markt_minuten: 15 },
+    inkoop: { markt: 0.22989, belasting: 0.09161, opslag: 0.016529, subtotaal: 0.338029, btw_procent: 21, btw: 0.070986,
+      totaal: 0.409015, zonder_opslag: 0.3215, btw_zonder_opslag: 0.067515, opslag_met_btw: 0.02 },
+    all_in: 0.4090149,
+    terug: { bedrag: 0.298167, salderen: false, basis: 0.278167, opslag: 0, kosten: 0, vergoeding: 0.02, bonus: 0, met_btw: true },
+    bonus_procent: 10, bonus_overdag: true, overdag: false,
+    controle: { status: "correct", blokken: 24, stap_minuten: 60, grootste: 0.00001, vast: true },
+  };
+  const html = opbouwHtml(check, { opslag: "Inkoopvergoeding", bonus: "Zonnebonus", leverancier: "Zonneplan", opslagNaBtw: true });
+  for (const woord of ["Kale marktprijs, gemiddelde van vier kwartieren", "Energiebelasting", "Inkoopvergoeding, met btw",
+    "All-in", "Wat Zonneplan zegt", "€ 0,4090", "Zonnebonus 10%, alleen overdag: nu niet", "Kale marktprijs, met btw",
+    "De ingevoerde gegevens zijn correct", "Niet te controleren: Zonneplan geeft de terugleverprijs niet door"]) {
+    assert.ok(html.includes(woord), woord);
+  }
+  assert.ok(html.indexOf("Energiebelasting") < html.indexOf("Btw 21%") && html.indexOf("Btw 21%") < html.indexOf("Inkoopvergoeding, met btw"),
+    "Zonneplan telt zijn opslag na de btw op, en zo staat hij er ook");
+  const fout = controleZin({ ...check, controle: { status: "afwijking", grootste: -0.025, vast: true, stap_minuten: 60 } },
+    { opslag: "Inkoopvergoeding", leverancier: "Zonneplan" });
+  assert.equal(fout.toon, "fout");
+  assert.ok(fout.tekst.includes("€ 0,0250 hoger") && fout.tekst.includes("energiebelasting"), fout.tekst);
+  const zelfde = controleZin({ ...check, bron: { ...check.bron, zelfde: true }, controle: { status: "onbekend" } });
+  assert.ok(zelfde.tekst.includes("dezelfde sensor"), zelfde.tekst);
+  const vast = controleZin({ soort: "fixed" });
+  assert.ok(vast.tekst.startsWith("Niet te controleren"), vast.tekst);
+  assert.equal(bevestigdZin({ bevestigd: false, bevestigd_op: null }), "Nog niet bevestigd.");
+  assert.ok(bevestigdZin({ bevestigd: true, bevestigd_op: "2026-10-18T21:41:00", bevestigd_door: "Bewoner" }).startsWith("Bevestigd door Bewoner op 18 oktober 2026"));
+  assert.ok(bevestigdZin({ bevestigd: false, bevestigd_op: "2026-10-18T21:41:00" }).includes("opnieuw"));
+});
+
+proef("Contract per energiebron: soort, leverancier, looptijd, opbouw, bevestigen en een nieuw contract (v0.129.0)", () => {
+  const html = Object.create(Contract.prototype).render();
+  for (const id of ["stroom-soort", "stroom-lev", "stroom-start", "stroom-end", "opbouw", "bevestig", "gas-soort", "gas-lev",
+    "gas-start", "gas-end", "gas-entity", "dyn-feedvat", "dyn-bonuspct", "dyn-bonusdag", "dyn-bonusbase"]) {
+    assert.ok(html.includes(`id="${id}"`), id);
+  }
+  assert.ok(html.includes('data-soort="variable"'), "variabel staat er als soort");
+  assert.ok(html.includes("Mijn contract loopt af op") && html.includes("Mijn huidige stroomcontract"));
+  assert.ok(html.includes('data-nieuw="stroom"') && html.includes('data-nieuw="gas"'));
+  // "Ik heb een nieuw contract afgesloten": het huidige bij de eerdere, en een leeg formulier.
+  const el = Object.create(Contract.prototype);
+  el.draft_ = { contract: { type: "fixed", supplier: "zonneplan", start: "2025-11-01", end: "2026-10-31",
+    fixed: { all_in_price: 0.28, feed_in_tariff: 0.07, feed_in_costs: 0.01 }, dynamic: {}, periods: [],
+    gas: { type: "fixed", price: 1.3, start: "2025-11-01", periods: [] } } };
+  el.paint_ = () => {}; el.afterChange_ = () => {}; el.vraagControle_ = () => {};
+  el.nieuwContract_("stroom");
+  const c = el.draft_.contract;
+  assert.equal(c.periods.length, 1);
+  assert.equal(c.periods[0].from, "2025-11-01");
+  assert.equal(c.periods[0].all_in_price, 0.28);
+  assert.equal(c.periods[0].type, "fixed");
+  assert.equal(c.periods[0].supplier, "zonneplan");
+  // Een naam om zelf aan te passen (19-10-2026: "Zonneplan Elektra 2026").
+  assert.ok(c.periods[0].name.startsWith("Zonneplan stroom, vast 01-11-2025 tot "), c.periods[0].name);
+  assert.equal(c.supplier, "");
+  assert.equal(c.fixed.all_in_price, 0);
+  assert.equal(c.end, "");
+  assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(c.start), "het nieuwe contract gaat vandaag in");
+  el.nieuwContract_("gas");
+  assert.equal(c.gas.periods[0].price, 1.3);
+  assert.ok(c.gas.periods[0].name.startsWith("gas, vast 01-11-2025 tot "), c.gas.periods[0].name);
+  assert.equal(c.gas.price, 0);
+});
+
+proef("de catalogus: elk voorstel rust op een bron en een datum, en vult alleen bekende velden (v0.129.0)", async () => {
+  const cat = await import("../custom_components/domotiapp_coach/frontend/src/leveranciers.js");
+  const VELDEN = new Set(["supplier_markup", "feed_in_costs", "feed_in_bonus", "feed_in_vat", "feed_in_bonus_percent",
+    "bonus_daytime", "bonus_base", "energy_tax", "vat_percent", "feed_in_tariff", "all_in_price", "price"]);
+  assert.ok(cat.LEVERANCIERS.length >= 1);
+  const ids = new Set();
+  for (const l of cat.LEVERANCIERS) {
+    assert.ok(l.id && l.naam && /^\d{4}-\d{2}-\d{2}$/.test(l.peildatum), `${l.id}: id, naam en peildatum`);
+    assert.ok(!ids.has(l.id), `${l.id} staat er twee keer in`);
+    ids.add(l.id);
+    for (const bron of ["stroom", "gas"]) {
+      for (const [soort, deel] of Object.entries(l[bron] ?? {})) {
+        assert.ok(["vast", "variabel", "dynamisch"].includes(soort), `${l.id} ${bron} ${soort}`);
+        assert.ok(Array.isArray(deel.bronnen) && deel.bronnen.every((u) => /^https?:\/\//.test(u)), `${l.id} ${bron} ${soort}: bronnen`);
+        for (const [veld, waarde] of Object.entries(deel.velden ?? {})) {
+          assert.ok(VELDEN.has(veld), `${l.id} ${bron} ${soort}: onbekend veld ${veld}`);
+          assert.ok(typeof waarde === "number" || typeof waarde === "boolean" || typeof waarde === "string", `${l.id}: ${veld}`);
+        }
+      }
+    }
+  }
+  // Zonneplan: het eigen rekenvoorbeeld.
+  const v = cat.voorstel("zonneplan", "dynamic", "stroom", 2026);
+  assert.ok(Math.abs(v.velden.supplier_markup * 1.21 - 0.02) < 1e-5, "de € 0,02 met btw");
+  assert.equal(v.velden.energy_tax, 0.09161, "de energiebelasting van dat jaar");
+  assert.equal(cat.belastingStroom(2027), 0.08802);
+  assert.ok(cat.BELASTING[2027].voorlopig, "2027 is nog voorlopig");
+  assert.ok(cat.soortenVan("zonneplan", "stroom").includes("dynamic"));
+  assert.equal(cat.sensorVan("zonneplan", { "sensor.zonneplan_current_electricity_tariff": {}, "sensor.x": {} }), "sensor.zonneplan_current_electricity_tariff");
+  assert.equal(cat.nordPoolVan({ "sensor.nord_pool_nl_huidige_prijs": {} }), "sensor.nord_pool_nl_huidige_prijs");
+});
+
+proef("Voorkeuren toont de opbouw aan de bewoner, en het overzicht vraagt erom tot hij bevestigt (v0.129.0)", async () => {
+  await import("../custom_components/domotiapp_coach/frontend/src/views/strategy.js");
+  const Voorkeuren = geregistreerd.get("dac-view-strategy");
+  const html = Object.create(Voorkeuren.prototype).render();
+  assert.ok(html.includes('id="prijs"') && html.includes('id="prijs-opbouw"') && html.includes('id="prijs-bevestig"'));
+  await import("../custom_components/domotiapp_coach/frontend/src/views/overview.js");
+  const Overzicht = geregistreerd.get("dac-view-overview");
+  const ov = Object.create(Overzicht.prototype).render();
+  assert.ok(ov.includes('id="prijs-melding"') && ov.includes("Klopt je energieprijs?"));
+  const ds = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
+  ds.zetCoachPrijzen({ bevestigd: false });
+  assert.equal(ds.prijsBevestigd(), false);
+  ds.zetCoachPrijzen({ bevestigd: true });
+  assert.equal(ds.prijsBevestigd(), true);
+  ds.zetCoachPrijzen({});
+});
+
+proef("geld.js rekent teruglevering en de bonus zoals prijsopbouw.py (v0.129.0)", () => {
+  const zp = { vat_percent: 21, feed_in_bonus: 0.02, feed_in_bonus_percent: 10, bonus_daytime: true, bonus_base: "market_plus_fee", feed_in_vat: true };
+  assert.ok(Math.abs(geld.terugOp(0.08 / 1.21, null, zp, false, true) - 0.11) < 1e-9, "Zonneplan: € 0,08 + € 0,02 + 10%");
+  assert.ok(Math.abs(geld.terugOp(0.08 / 1.21, null, zp, false, false) - 0.10) < 1e-9, "zonder bonus na zonsondergang");
+  assert.equal(geld.bonusOp(-0.05, zp, true), 0, "niet als markt plus vergoeding negatief is");
+  const zon = geld.zonOpOnder(new Date(Date.UTC(2026, 9, 18, 12)), 52.09, 5.12);
+  const op = zon[0].getUTCHours() * 60 + zon[0].getUTCMinutes();
+  assert.ok(Math.abs(op - (6 * 60 + 7)) <= 3, `zonsopkomst Utrecht 18-10-2026 rond 06:07 UTC, kreeg ${zon[0].toISOString()}`);
+  const ligging = { lat: 52.09, lon: 5.12 };
+  assert.ok(geld.overdag(new Date(Date.UTC(2026, 9, 18, 10)), new Date(Date.UTC(2026, 9, 18, 11)), ligging));
+  assert.ok(!geld.overdag(new Date(Date.UTC(2026, 9, 18, 19)), new Date(Date.UTC(2026, 9, 18, 20)), ligging));
+  // Historie per vak: de kale prijs uit de all-in prijs en de velden, en zonder salderen de bonus overdag.
+  const contract = { type: "dynamic", netting: false, dynamic: { ...zp, source: "all_in", all_in_entity: "sensor.a",
+    market_entity: "sensor.np", energy_tax: 0.09161, supplier_markup: 0.02 / 1.21 } };
+  const middag = new Date(2026, 9, 18, 12);
+  const koop = (0.15 + 0.09161) * 1.21 + 0.02;
+  const p = geld.prijsOp(contract, { buy: null, feedIn: null }, new Map([[middag.getTime(), koop]]), middag, ligging);
+  const verwacht = 0.15 * 1.21 + 0.02 + 0.1 * (0.15 * 1.21 + 0.02);
+  assert.ok(Math.abs(p.terug - verwacht) < 1e-9, `${p.terug} tegen ${verwacht}`);
 });
 
 for (const [naam, fn] of proeven) {

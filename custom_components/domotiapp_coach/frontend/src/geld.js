@@ -74,6 +74,69 @@ export function terugleverBekend(contract, when = new Date()) {
 }
 
 /**
+ * Zonsopkomst en zonsondergang op die dag, in UTC, of null als de zon niet op
+ * of onder gaat (v0.129.0). De vergelijking van de NOAA, zoals `zon_op_onder`
+ * in prijsopbouw.py: dezelfde uren voor een bonus die alleen overdag geldt.
+ *
+ * @param {Date} dag een moment op die dag (UTC telt)
+ * @returns {[Date, Date]|null}
+ */
+export function zonOpOnder(dag, lat, lon) {
+  const jaarBegin = Date.UTC(dag.getUTCFullYear(), 0, 1);
+  const n = Math.floor((Date.UTC(dag.getUTCFullYear(), dag.getUTCMonth(), dag.getUTCDate()) - jaarBegin) / 86400000) + 1;
+  const hoek = (2 * Math.PI / 365) * (n - 1);
+  const vereffening = 229.18 * (0.000075 + 0.001868 * Math.cos(hoek) - 0.032077 * Math.sin(hoek)
+    - 0.014615 * Math.cos(2 * hoek) - 0.040849 * Math.sin(2 * hoek));
+  const declinatie = 0.006918 - 0.399912 * Math.cos(hoek) + 0.070257 * Math.sin(hoek) - 0.006758 * Math.cos(2 * hoek)
+    + 0.000907 * Math.sin(2 * hoek) - 0.002697 * Math.cos(3 * hoek) + 0.00148 * Math.sin(3 * hoek);
+  const breedte = (lat * Math.PI) / 180;
+  const x = Math.cos((90.833 * Math.PI) / 180) / (Math.cos(breedte) * Math.cos(declinatie))
+    - Math.tan(breedte) * Math.tan(declinatie);
+  if (x < -1 || x > 1) return null;
+  const uurhoek = (Math.acos(x) * 180) / Math.PI;
+  const middag = 720 - 4 * lon - vereffening;
+  const middernacht = Date.UTC(dag.getUTCFullYear(), dag.getUTCMonth(), dag.getUTCDate());
+  return [new Date(middernacht + (middag - 4 * uurhoek) * 60000), new Date(middernacht + (middag + 4 * uurhoek) * 60000)];
+}
+
+/** Of het midden van [start, einde) tussen zonsopkomst en zonsondergang valt, zoals `overdag` in prijsopbouw.py. */
+export function overdag(start, einde, ligging) {
+  if (!ligging || !Number.isFinite(ligging.lat) || !Number.isFinite(ligging.lon)) return false;
+  const midden = new Date((start.getTime() + einde.getTime()) / 2);
+  const zon = zonOpOnder(midden, ligging.lat, ligging.lon);
+  return zon !== null && zon[0] <= midden && midden < zon[1];
+}
+
+/** De marktprijs voor teruglevering, met of zonder btw, zoals `markt_terug` in prijsopbouw.py. */
+export function marktTerug(markt, d) {
+  return d?.feed_in_vat ? markt * (1 + (Number(d?.vat_percent) || 0) / 100) : markt;
+}
+
+/** De terugleverbonus in procenten, per kWh, zoals `bonus` in prijsopbouw.py. */
+export function bonusOp(markt, d, isOverdag) {
+  const procent = Number(d?.feed_in_bonus_percent) || 0;
+  if (procent <= 0 || (d?.bonus_daytime && !isOverdag)) return 0;
+  const basis = marktTerug(markt, d);
+  const over = d?.bonus_base === "market_plus_fee" ? basis + (Number(d?.feed_in_bonus) || 0) : basis;
+  return over > 0 ? (procent / 100) * over : 0;
+}
+
+/**
+ * Wat een teruggeleverde kWh opbrengt bij een dynamisch contract, zoals
+ * `terug` in prijsopbouw.py (v0.129.0). Met salderen de all-in prijs min de
+ * opslag en de kosten, plus de vergoeding; zonder de kale prijs min de kosten
+ * plus de vergoeding; en in allebei een bonus in procenten.
+ */
+export function terugOp(markt, allIn, d, metSalderen, isOverdag) {
+  const kosten = Number(d?.feed_in_costs) || 0;
+  const vergoeding = Number(d?.feed_in_bonus) || 0;
+  const opslag = (Number(d?.supplier_markup) || 0) * (1 + (Number(d?.vat_percent) || 0) / 100);
+  const extra = markt === null || markt === undefined ? 0 : bonusOp(markt, d, isOverdag);
+  if (metSalderen) return allIn === null || allIn === undefined ? null : allIn - opslag - kosten + vergoeding + extra;
+  return markt === null || markt === undefined ? null : marktTerug(markt, d) - kosten + vergoeding + extra;
+}
+
+/**
  * Wat een kWh op dat moment kost en wat een teruggeleverde opbrengt.
  *
  * Dezelfde regels als `_tariff` en `_prices` in coach.py. Bij salderen streept
@@ -87,23 +150,33 @@ export function terugleverBekend(contract, when = new Date()) {
  * @param {object} contract de instellingen van het contract
  * @param {{buy: number|null, feedIn: number|null}} rate het huidige tarief (`tariff`)
  * @param {Map<number, number>} prijzen de prijs per vak uit de geschiedenis
+ * Bij een dynamisch contract (v0.129.0) volgt de kale prijs van het vak uit de
+ * all-in prijs en de velden (de som van `inkoop` in prijsopbouw.py
+ * achterstevoren), zodat een bonus in procenten en teruglevering zonder
+ * salderen per vak kloppen in plaats van met het gemiddelde van vandaag. Dat
+ * alleen als de coach de terugleverprijs kent (`terugleverBekend`); de
+ * controle bij Contract zegt of die velden kloppen.
+ *
  * @param {Date} when het begin van het vak
+ * @param {{lat: number, lon: number}} [ligging] waar de woning ligt, voor een bonus die alleen overdag geldt
+ * @param {number} [lengte] hoe lang het vak duurt, in ms; standaard een uur
  * @returns {{koop: number|null, terug: number|null}}
  */
-export function prijsOp(contract, rate, prijzen, when) {
+export function prijsOp(contract, rate, prijzen, when, ligging = null, lengte = 3600000) {
   const c = contractAt(contract, when);
   const t = new Date(when).getTime();
   const koop = c.period?.all_in_price > 0 ? c.buy : (prijzen?.get(t) ?? rate?.buy ?? null);
   if (koop === null || koop === undefined) return { koop: null, terug: null };
-  if (salderen(contract, when)) {
-    if (contract?.type === "dynamic") {
-      const d = contract.dynamic ?? {};
-      const opslag = (Number(d.supplier_markup) || 0) * (1 + (Number(d.vat_percent) || 0) / 100);
-      const kosten = (Number(d.feed_in_costs) || 0) - (Number(d.feed_in_bonus) || 0);
-      return { koop, terug: koop - opslag - kosten };
-    }
-    return { koop, terug: koop - (Number(contract?.fixed?.feed_in_costs) || 0) };
+  const metSalderen = salderen(contract, when);
+  if (contract?.type === "dynamic" && !(c.period?.all_in_price > 0)) {
+    const d = contract.dynamic ?? {};
+    if (!terugleverBekend(contract, when)) return { koop, terug: c.feedIn ?? rate?.feedIn ?? null };
+    const markt = koop / (1 + (Number(d.vat_percent) || 0) / 100) - (Number(d.energy_tax) || 0) - (Number(d.supplier_markup) || 0);
+    const begin = new Date(when);
+    const dag = overdag(begin, new Date(begin.getTime() + lengte), ligging);
+    return { koop, terug: terugOp(markt, koop, d, metSalderen, dag) };
   }
+  if (metSalderen) return { koop, terug: koop - (Number(contract?.fixed?.feed_in_costs) || 0) };
   return { koop, terug: c.feedIn ?? rate?.feedIn ?? null };
 }
 
@@ -171,6 +244,7 @@ export function accuZon(settings, start, end) {
  *   (`huisMetAccu` in views/history.js)
  * @param {(when: Date) => {koop: number|null, terug: number|null}} o.prijs
  * @param {{start: Date, value: number}[]} [o.gas]
+ * @param {Map<number, number>} [o.gasPrijzen] de gasprijs per vak uit de sensor, bij dynamisch gas (v0.129.0)
  * @param {{start: Date, value: number}[]} [o.water]
  * @param {object} [o.contract]
  * @param {number} [o.accu] wat de thuisbatterij in deze periode opleverde
@@ -181,7 +255,7 @@ export function accuZon(settings, start, end) {
  * @param {{saved: number, solar_saved: number, wait_saved: number}} [o.coach]
  *   de beurten van deze periode opgeteld (`totalen` in savings.js)
  */
-export function balans({ rijen, prijs, gas = [], water = [], contract, accu = 0, accuVoorraad = 0, accuZon = 0, coach = null }) {
+export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], contract, accu = 0, accuVoorraad = 0, accuZon = 0, coach = null }) {
   let stroom = 0;
   let terug = 0;
   let eigen = 0;
@@ -204,18 +278,20 @@ export function balans({ rijen, prijs, gas = [], water = [], contract, accu = 0,
     // Van voor de coach het telde: de zon die de batterij in ging, uit het vak zelf.
     zonInAccu += (Number(r.zonInAccu) || 0) * (p.koop - (terugPrijs ?? 0));
   }
-  const volume = (rijenVan, sleutel) => {
+  const volume = (rijenVan, sleutel, perVak = null) => {
     let euro = 0;
     let met = false;
     for (const r of rijenVan ?? []) {
-      const prijsM3 = contractAt(contract, r.start)[sleutel];
+      // Een eerder contract gaat voor; anders bij dynamisch gas de sensor.
+      const vast = contractAt(contract, r.start)[sleutel];
+      const prijsM3 = vast ?? perVak?.get(new Date(r.start).getTime()) ?? null;
       if (prijsM3 === null || prijsM3 === undefined) continue;
       euro += r.value * prijsM3;
       met = true;
     }
     return { euro, met };
   };
-  const g = volume(gas, "gas");
+  const g = volume(gas, "gas", gasPrijzen);
   const w = volume(water, "water");
 
   const coachTotaal = Number(coach?.saved) || 0;

@@ -71,6 +71,7 @@ from .batterij import (
     vol_voor,
     zon_in_accu,
 )
+from . import prijsopbouw
 from .planner import (
     _dag_om,
     DAGNAMEN,
@@ -1981,10 +1982,14 @@ class ChargerCoach:
         hoort het paneel dezelfde prijzen te tekenen als de coach gebruikt.
         """
         contract = settings.get("contract") or {}
+        # Of de bewoner de opbouw bevestigde (v0.129.0): het overzicht vraagt
+        # het anders tot hij dat doet.
+        bevestigd = (contract.get("confirmed") or {}).get("values") == prijsopbouw.vingerafdruk(contract)
         if contract.get("type") != "dynamic":
-            return {"reserve": False, "rows": []}
+            return {"reserve": False, "rows": [], "bevestigd": bevestigd}
         _, reserve = self._prijsbron(contract.get("dynamic") or {})
         return {
+            "bevestigd": bevestigd,
             "reserve": reserve,
             "rows": [
                 {"start": rij["start"].isoformat(), "end": rij["end"].isoformat(),
@@ -1992,6 +1997,82 @@ class ChargerCoach:
                 for rij in self._prices(settings)
             ],
         }
+
+    async def async_prijscontrole(
+        self, settings: dict[str, Any], contract: dict[str, Any] | None = None, now: datetime | None = None
+    ) -> dict[str, Any]:
+        """De opbouw van de stroomprijs van nu, en of die klopt met de all-in sensor (v0.129.0).
+
+        Voor Contract en Voorkeuren in het paneel: dat toont dit in woorden en
+        cijfers, en rekent zelf niets. `contract` is een concept dat nog niet is
+        opgeslagen; zonder is het het opgeslagen contract. Zie prijsopbouw.py.
+        """
+        moment = _moment(now)
+        contract = contract if contract is not None else (settings.get("contract") or {})
+        bevestigd = contract.get("confirmed") or {}
+        uit: dict[str, Any] = {
+            "soort": contract.get("type") or "fixed",
+            "salderen": self._salderen(contract, now),
+            "bevestigd": bool(bevestigd.get("values"))
+            and bevestigd.get("values") == prijsopbouw.vingerafdruk(contract),
+            "bevestigd_op": bevestigd.get("at") or None,
+            "bevestigd_door": bevestigd.get("by") or None,
+        }
+        if contract.get("type") != "dynamic":
+            vast = self._tariff({"contract": contract})
+            uit.update(inkoop=vast.buy, terug=vast.feed_in, controle={"status": "vast"})
+            return uit
+
+        d = contract.get("dynamic") or {}
+        await self._async_nordpool({"contract": contract}, moment, opruimen=False)
+        interval = str(d.get("interval") or "hour")
+        all_in_id = d.get("all_in_entity") if d.get("source") == "all_in" else ""
+        markt_id = d.get("market_entity") or ""
+        zelfde = bool(all_in_id) and markt_id == all_in_id
+        all_in = self._slots(all_in_id, interval) if all_in_id else {}
+        markt = {} if zelfde else self._slots(markt_id, interval)
+        controle = prijsopbouw.controleer(all_in, markt, d, moment)
+
+        # Het blok van nu: dat van de controle, en anders dat van de sensor die er is.
+        blok = controle.get("blok")
+        if blok is None:
+            bron = all_in or markt
+            nu = next(((s, e) for s, (e, _) in bron.items() if s <= moment < e), None)
+            if nu is not None:
+                blok = {"start": nu[0], "einde": nu[1],
+                        "all_in": prijsopbouw.gemiddeld(all_in, *nu) if all_in else None,
+                        "markt": prijsopbouw.gemiddeld(markt, *nu) if markt else None}
+        opbouw = terug = None
+        dag = False
+        if blok is not None:
+            zone = dt_util.get_default_time_zone()
+            dag = prijsopbouw.overdag(
+                blok["start"].replace(tzinfo=zone), blok["einde"].replace(tzinfo=zone),
+                getattr(self.hass.config, "latitude", None), getattr(self.hass.config, "longitude", None),
+            )
+            if blok.get("markt") is not None:
+                opbouw = prijsopbouw.inkoop(blok["markt"], d)
+            prijs = blok.get("all_in") if all_in_id else (opbouw or {}).get("totaal")
+            terug = prijsopbouw.terug(blok.get("markt"), prijs, d, uit["salderen"], dag)
+
+        def tijd(waarde):
+            return waarde.isoformat() if isinstance(waarde, datetime) else waarde
+
+        uit.update(
+            bron={"all_in": all_in_id or None, "markt": None if zelfde else (markt_id or None),
+                  "zelfde": zelfde, "interval": interval,
+                  "markt_minuten": int(prijsopbouw.lengte(markt).total_seconds() // 60) if markt else None},
+            bonus_procent=float(d.get("feed_in_bonus_percent") or 0),
+            bonus_overdag=bool(d.get("bonus_daytime")),
+            blok=None if blok is None else {k: tijd(v) for k, v in blok.items()},
+            inkoop=opbouw,
+            all_in=None if blok is None else blok.get("all_in"),
+            terug=terug,
+            overdag=dag,
+            controle={k: (tijd(v) if not isinstance(v, dict) else {a: tijd(b) for a, b in v.items()})
+                      for k, v in controle.items()},
+        )
+        return uit
 
     def _zon_w(self, settings: dict[str, Any]) -> float | None:
         """Wat alle omvormers samen nu geven, of None zolang er een niets zegt.
@@ -7164,6 +7245,16 @@ class ChargerCoach:
         elkaar.
         """
         reserve = dynamic.get("fallback_entity")
+        reserve_soort = dynamic.get("fallback_source")
+        # Een kale marktprijs naast een all-in prijs is vanzelf de reserve
+        # (v0.129.0). De bewoner van de eerste woning op 18-10-2026: "Als de
+        # integratie met een leverancier wegvalt, weet je 100% zeker dat de
+        # opgebouwde prijs ook klopt aan de hand van Nord Pool plus de losse
+        # elementen." Of die opbouw klopt zegt `prijsopbouw.controleer`.
+        markt = dynamic.get("market_entity")
+        if (not reserve and dynamic.get("source") == "all_in" and markt
+                and markt != dynamic.get("all_in_entity")):
+            reserve, reserve_soort = markt, "market"
         if not reserve:
             return dynamic, False
         nu = _moment(now)
@@ -7179,7 +7270,7 @@ class ChargerCoach:
         eigen = dynamic.get("all_in_entity") if dynamic.get("source") == "all_in" else dynamic.get("market_entity")
         if heeft_nu(eigen) or not heeft_nu(reserve):
             return dynamic, False
-        soort = "all_in" if dynamic.get("fallback_source") == "all_in" else "market"
+        soort = "all_in" if reserve_soort == "all_in" else "market"
         vervanger = {**dynamic, "source": soort}
         if soort == "all_in":
             vervanger["all_in_entity"] = reserve
@@ -7191,7 +7282,7 @@ class ChargerCoach:
             vervanger["market_entity"] = reserve
         return vervanger, True
 
-    async def _async_nordpool(self, settings: dict[str, Any], now: datetime) -> None:
+    async def _async_nordpool(self, settings: dict[str, Any], now: datetime, opruimen: bool = True) -> None:
         """De prijslijst van een sensor van de ingebouwde Nord Pool ophalen.
 
         Die integratie hangt geen lijst aan zijn sensoren, zoals Frank Energie,
@@ -7208,7 +7299,9 @@ class ChargerCoach:
         sensoren = {
             dynamic.get("all_in_entity"), dynamic.get("market_entity"), dynamic.get("fallback_entity")
         } - {None, ""}
-        for entity_id in list(self._nordpool):
+        # Een controle van een contract dat nog niet is opgeslagen (v0.129.0)
+        # haalt erbij, maar gooit de lijsten van het echte contract niet weg.
+        for entity_id in list(self._nordpool) if opruimen else []:
             if entity_id not in sensoren:
                 self._nordpool.pop(entity_id, None)
         for entity_id in sorted(sensoren):
@@ -7325,7 +7418,7 @@ class ChargerCoach:
         vandaag = dt_util.as_local(now or dt_util.utcnow()).date()
         return vandaag < NETTING_ENDS
 
-    def _prices(self, settings: dict[str, Any]) -> list[dict]:
+    def _prices(self, settings: dict[str, Any], now: datetime | None = None) -> list[dict]:
         """De prijslijst, met per blok wat het kost én wat teruglevering opbrengt.
 
         Uit dezelfde entiteit die het paneel tekent, zodat de twee het nooit
@@ -7344,19 +7437,16 @@ class ChargerCoach:
             return []
 
         # De prijsbron die er nu is: de eigen, en anders de reserve (v0.101.3).
-        dynamic, _ = self._prijsbron(contract.get("dynamic") or {})
+        dynamic, _ = self._prijsbron(contract.get("dynamic") or {}, now)
         all_in = dynamic.get("source") == "all_in"
-        kosten = float(dynamic.get("feed_in_costs") or 0) - float(dynamic.get("feed_in_bonus") or 0)
         salderen = self._salderen(contract)
         # De opslag van de leverancier zit wel in wat je betaalt en niet in wat
         # je terugkrijgt. Bij salderen streept de energiebelasting weg tegen die
         # bij afname, maar die opslag niet: die betaal je per ingekochte kWh en
-        # krijg je nergens terug. Zonder deze aftrek stond de terugleveropbrengst
+        # krijg je nergens terug. Zonder die aftrek stond de terugleveropbrengst
         # er ruim twee cent te hoog in en leek eigen zon gebruiken even duur als
         # het weggeven ervan. Gevonden op 27-08-2026, uit een eigen energienota.
-        opslag = float(dynamic.get("supplier_markup") or 0) * (
-            1 + float(dynamic.get("vat_percent") or 0) / 100
-        )
+        # De som staat sinds v0.129.0 in `prijsopbouw.terug`.
 
         interval = str(dynamic.get("interval") or "hour")
         # Dezelfde sensor twee keer zegt niets over teruglevering: een all-in
@@ -7373,23 +7463,23 @@ class ChargerCoach:
             return []
 
         rows: list[dict] = []
+        # Voor een bonus die alleen overdag geldt (v0.129.0): waar de woning ligt.
+        lat = getattr(self.hass.config, "latitude", None)
+        lon = getattr(self.hass.config, "longitude", None)
+        zone = dt_util.get_default_time_zone()
         for start, (end, prijs) in inkoop.items():
-            terug = None
+            # De kale prijs van dit blok: bij een all-in prijs per uur het
+            # gemiddelde van de marktkwartieren erin. Tot v0.129.0 was dat het
+            # kwartier dat op het hele uur begon.
+            kaal = prijsopbouw.gemiddeld(markt, start, end) if all_in else prijs
             if not all_in:
                 prijs = self._all_in(prijs, dynamic)
-
-            if salderen:
-                # Salderen betekent dat een teruggeleverde kWh wegstreept tegen
-                # een ingekochte. Wat je daarmee bespaart is de inkoopprijs min
-                # de opslag van je leverancier, want die opslag hangt aan de
-                # afname en niet aan de kWh. Er is geen marktprijssensor voor
-                # nodig: het antwoord staat al in de prijs die er is.
-                terug = prijs - opslag - kosten
-            elif all_in:
-                if start in markt:
-                    terug = markt[start][1] - kosten
-            else:
-                terug = markt[start][1] - kosten if start in markt else None
+            # Salderen betekent dat een teruggeleverde kWh wegstreept tegen een
+            # ingekochte: de inkoopprijs min de opslag van je leverancier, want
+            # die opslag hangt aan de afname en niet aan de kWh. Daar is geen
+            # marktprijssensor voor nodig, behalve voor een bonus in procenten.
+            dag = prijsopbouw.overdag(start.replace(tzinfo=zone), end.replace(tzinfo=zone), lat, lon)
+            terug = prijsopbouw.terug(kaal, prijs, dynamic, salderen, dag)["bedrag"]
 
             rows.append({"start": start, "end": end, "price": prijs, "feed_in": terug})
         # Verder dan de lijst reikt weet de coach niets, en dat hoort zo.

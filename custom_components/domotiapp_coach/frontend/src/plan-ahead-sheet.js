@@ -15,7 +15,7 @@
  */
 
 import { batterijVooruit } from "./battery.js";
-import { perUur, prijsBalken, prijsCss, prijsLabels, prijsSvg } from "./prijsgrafiek.js";
+import { perUur, prijsAs, prijsBalken, prijsCss, prijsStrook, prijsUitleg } from "./prijsgrafiek.js";
 
 /**
  * Kwartierblokken van de paal samengenomen tot een regel per uur (v0.88.1).
@@ -220,6 +220,8 @@ export class DacPlanAheadSheet extends DacElement {
 
   /** Openen met de tijdlijn zoals de coach hem net heeft uitgerekend. */
   open(label, besluit) {
+    // Een ander apparaat: geen gekozen moment van het vorige.
+    this.gekozenStart_ = null;
     this.label_ = label || "";
     this.besluit_ = besluit ?? null;
     this.plan_ = besluit?.plan_ahead ?? null;
@@ -455,14 +457,55 @@ export class DacPlanAheadSheet extends DacElement {
 
     const legenda = document.createElement("div");
     legenda.className = "prijs-legenda";
-    for (const [klasse, tekst] of [["groen", `hij gaat ${wat}`], ["", "hij wacht"]]) {
+    const levert = berekend.balken.some((b) => b.leveren);
+    for (const [klasse, tekst] of [["groen", `hij gaat ${wat}`], ...(levert ? [["leveren", "hij levert aan het net"]] : []), ["", "hij wacht"]]) {
       const item = document.createElement("span");
       const blokje = document.createElement("i");
       if (klasse) blokje.className = klasse;
       item.append(blokje, tekst);
       legenda.append(item);
     }
-    blok.append(kop, prijsSvg(berekend), prijsLabels(berekend), legenda);
+    // Tik op een staafje: de tijd en de prijs van dat moment (v0.129.0). De
+    // eigenaar op 18-10-2026: "als ik op een bar klik in de diagram, wil ik de
+    // prijs zien van dat moment." De tooltip van de muis werkt op een telefoon niet.
+    // Bovenaan het moment: eerst nu, na een tik het gekozen blok, zoals de app
+    // van een leverancier dat doet (v0.129.0).
+    const woorden = { groen: `hij gaat ${wat}`, leveren: "hij levert aan het net", wacht: "hij wacht" };
+    const moment = document.createElement("div");
+    moment.className = "prijs-moment";
+    const zet = (i) => {
+      const u = prijsUitleg(berekend, i, woorden);
+      moment.replaceChildren();
+      if (!u) return;
+      for (const [klasse, tekst] of [["wanneer", u.kop], ["bedrag", u.prijs], ["wat", u.onder]]) {
+        const regel = document.createElement("span");
+        regel.className = klasse;
+        regel.textContent = tekst;
+        moment.append(regel);
+      }
+      moment.className = i === 0 ? "prijs-moment" : "prijs-moment gekozen";
+    };
+    const strook = prijsStrook(berekend);
+    const kies = (i) => {
+      for (const ander of strook.querySelectorAll("g.gekozen")) ander.classList.remove("gekozen");
+      if (i > 0) strook.querySelector(`g[data-i="${i}"]`)?.classList.add("gekozen");
+      zet(i);
+    };
+    strook.addEventListener("click", (ev) => {
+      const g = ev.target?.closest?.("g[data-i]");
+      if (!g) return;
+      const i = Number(g.getAttribute("data-i"));
+      // Onthouden op begintijd: de coach denkt elke minuut opnieuw en dan wordt
+      // dit opnieuw getekend, en een keuze die dan terugspringt naar nu is weg.
+      this.gekozenStart_ = berekend.blokken[i]?.start ?? null;
+      kies(i);
+    });
+    const eerder = this.gekozenStart_ ? berekend.blokken.findIndex((b) => b.start === this.gekozenStart_) : -1;
+    kies(eerder > 0 ? eerder : 0);
+    const raam = document.createElement("div");
+    raam.className = "prijs-raam";
+    raam.append(prijsAs(berekend), strook);
+    blok.append(moment, kop, raam, legenda);
   }
 
   /** De vakken bovenaan: label, waarde en een regel eronder. */
@@ -497,6 +540,8 @@ export class DacPlanAheadSheet extends DacElement {
       (this.besluit_?.hours ?? []).map((u) => ({
         start: u.start, end: u.end, price: u.price,
         groen: Number(u.grid_kwh) > 0.05, kwh: Number(u.grid_kwh) || 0,
+        // Aan het net leveren (handelen) heeft een eigen kleur (v0.129.0).
+        leveren: Number(u.grid_kwh) < -0.05,
       })),
       "van het net laden"
     );
