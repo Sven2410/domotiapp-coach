@@ -4528,6 +4528,13 @@ proef("de opbouw in woorden en cijfers, in de volgorde van de leverancier, met d
   const vast = controleZin({ soort: "fixed" });
   assert.ok(vast.tekst.startsWith("Niet te controleren"), vast.tekst);
   assert.equal(bevestigdZin({ bevestigd: false, bevestigd_op: null }), "Nog niet bevestigd.");
+  // Salderen uit voor 2027: de opbouw zegt dat het nog geldt (v0.129.1, de eerste woning op 19-10-2026).
+  const { salderenNoot } = await import("../custom_components/domotiapp_coach/frontend/src/opbouw.js");
+  assert.ok(salderenNoot({ salderen: false }, new Date(2026, 9, 19)).includes("Je levert nog gesaldeerd terug"));
+  assert.equal(salderenNoot({ salderen: true }, new Date(2026, 9, 19)), "", "met salderen aan niets");
+  assert.equal(salderenNoot({ salderen: false }, new Date(2027, 0, 2)), "", "na 2026 geldt het niet meer");
+  assert.ok(html.includes("Je saldeert niet volgens de instellingen") || new Date() >= new Date(2027, 0, 1),
+    "en het staat in het blok teruglevering");
   assert.ok(bevestigdZin({ bevestigd: true, bevestigd_op: "2026-10-18T21:41:00", bevestigd_door: "Bewoner" }).startsWith("Bevestigd door Bewoner op 18 oktober 2026"));
   assert.ok(bevestigdZin({ bevestigd: false, bevestigd_op: "2026-10-18T21:41:00" }).includes("opnieuw"));
 });

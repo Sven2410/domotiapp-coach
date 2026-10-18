@@ -39,6 +39,18 @@ function woorden(namen = {}) {
   };
 }
 
+/**
+ * Salderen staat uit terwijl het nog geldt (v0.129.1). De bewoner van de eerste
+ * woning op 19-10-2026, met salderen uit: "Op dit moment krijg je namelijk ook de
+ * btw en energiebelasting nog terug! Dat verandert wel per 1-1-27." Dat vinkje
+ * is een afspraak met de leverancier en geen meting, dus de coach zet het niet
+ * zelf; hij zegt het wel.
+ */
+export function salderenNoot(check, nu = new Date()) {
+  if (!check || check.salderen || nu >= new Date(2027, 0, 1)) return "";
+  return `<p class="ob-noot ob-let">Je saldeert niet volgens de instellingen. Tot 1 januari 2027 krijg je over wat je teruglevert, tot aan je eigen verbruik, ook de energiebelasting en btw terug. Klopt dat bij jou, zet dan bij Contract "Je levert nog gesaldeerd terug" aan.</p>`;
+}
+
 /** De zin onder de inkoop: klopt het, klopt het niet, of valt er niets te controleren. */
 export function controleZin(check, namen = {}) {
   const w = woorden(namen);
@@ -134,7 +146,8 @@ export function opbouwHtml(check, namen = {}) {
       }
       regels.push(rij("=", "Per teruggeleverde kWh", euro4(t.bedrag), "ob-totaal"));
       delen.push(`<div class="ob-blok"><h4>Teruglevering nu</h4>${regels.join("")}
-        <p class="ob-noot">Niet te controleren: ${esc(w.leverancier)} geeft de terugleverprijs niet door. Zo rekent de coach.</p></div>`);
+        <p class="ob-noot">Niet te controleren: ${esc(w.leverancier)} geeft de terugleverprijs niet door. Zo rekent de coach.</p>
+        ${salderenNoot(check)}</div>`);
     } else {
       delen.push(`<div class="ob-blok"><h4>Teruglevering</h4><p class="ob-leeg">${
         check.salderen ? "Onbekend: er is nu geen all-in prijs." : "Onbekend: zonder kale marktprijs weet de coach niet wat teruglevering opbrengt, en kan een thuisbatterij niet handelen."
@@ -173,6 +186,7 @@ export const opbouwCss = /* css */ `
   .ob-totaal .ob-woord, .ob-totaal .ob-bedrag { color: var(--dac-ink); }
   .ob-sensor .ob-woord { font-style: italic; }
   .ob-noot, .ob-leeg { margin: 4px 0 0; font-size: 12px; color: var(--dac-ink-2); }
+  .ob-let { padding: 8px 10px; border-radius: var(--dac-radius-sm); border: 1px solid rgba(250,178,25,0.4); background: rgba(250,178,25,0.08); color: var(--dac-ink); }
   .ob-controle { margin: 0; padding: 10px 12px; border-radius: var(--dac-radius-sm); font-size: 13px; line-height: 1.45; }
   .ob-controle.goed { border: 1px solid rgba(48,164,108,0.4); background: rgba(48,164,108,0.10); color: var(--dac-ink); }
   .ob-controle.fout { border: 1px solid rgba(250,178,25,0.4); background: rgba(250,178,25,0.10); color: var(--dac-ink); }
