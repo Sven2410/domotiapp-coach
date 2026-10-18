@@ -312,6 +312,8 @@ const css = /* css */ `
   .check input { margin: 2px 0 0; width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--dac-accent-hi); }
   .check span { display: grid; gap: 2px; font-size: 12.5px; color: var(--dac-ink-2); }
   .check strong { font-size: 13.5px; font-weight: 600; color: var(--dac-ink); }
+  /* Handelen zonder terugleverprijs kan niet aan (v0.128.2). */
+  .check:has(input:disabled) { cursor: not-allowed; opacity: 0.55; }
   .day-times { display: grid; gap: 8px; margin: 10px 0 0 28px; }
   /* Op een smal scherm is die inspringing 28 px die niets doet behalve de
      tijdvelden krap maken. */
@@ -832,7 +834,7 @@ export class DacScheduleSheet extends DacElement {
       vk.innerHTML = voorkeurHtml(device);
       this.vkVoor_ = vorm;
     }
-    vulVoorkeuren(vk, device, this.shadowRoot?.activeElement ?? null);
+    vulVoorkeuren(vk, device, this.shadowRoot?.activeElement ?? null, this.settings_?.contract ?? null);
   }
 
   async saveVoorkeur_(patch) {
@@ -854,7 +856,7 @@ export class DacScheduleSheet extends DacElement {
       status.textContent = "Dit is niet opgeslagen. Probeer het nog een keer.";
       status.classList.add("bad");
       // Terug naar wat er wel is opgeslagen.
-      vulVoorkeuren(this.$("#vk"), this.device_);
+      vulVoorkeuren(this.$("#vk"), this.device_, null, this.settings_?.contract ?? null);
     }
   }
 

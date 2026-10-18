@@ -1100,5 +1100,38 @@ controle("na een ronde in het vorige kwartier geen vasthouden",
          not (volgend42.stand == NETLADEN and volgend42.power_w < 5), f"{volgend42.stand} {volgend42.power_w:.0f}")
 
 print()
+print("=== 43. handelen aan zonder terugleverprijs: de kaart zegt het (v0.128.2) ===")
+# De eerste woning op 18-10-2026: handelen aan, in beide prijsvelden dezelfde
+# all-in sensor en salderen uit, dus in alle blokken `feed_in` None. De batterij
+# handelde nooit (`_mag_handelen`), en niets op het scherm zei waarom.
+NU43 = dt.datetime(2026, 10, 18, 18, 10)
+R43 = [{"start": dt.datetime(2026, 10, 18, 17) + dt.timedelta(hours=i),
+        "end": dt.datetime(2026, 10, 18, 18) + dt.timedelta(hours=i),
+        "price": p, "feed_in": None} for i, p in enumerate([0.409, 0.460, 0.464, 0.448, 0.409])]
+met_terug43 = [dict(r, feed_in=round(r["price"] - 0.0242, 4)) for r in R43]
+een_terug43 = [dict(r) for r in R43]
+een_terug43[3]["feed_in"] = 0.42
+verleden43 = [dict(R43[0], feed_in=0.38)] + R43[1:]
+kan_niet43 = bat.handelen_kan_niet(anker(95.0, handelen=True), R43, NU43)
+controle("handelen aan, geen enkel blok met een terugleverprijs: de kaart zegt het", kan_niet43)
+controle("de zin noemt waar het aan ligt en wat er nodig is",
+         "terugleverprijs" in bat.HANDELEN_KAN_NIET and "Contract" in bat.HANDELEN_KAN_NIET
+         and "salderen" in bat.HANDELEN_KAN_NIET, bat.HANDELEN_KAN_NIET)
+controle("handelen uit: niets te zeggen", not bat.handelen_kan_niet(anker(95.0), R43, NU43))
+controle("met een terugleverprijs: niets te zeggen",
+         not bat.handelen_kan_niet(anker(95.0, handelen=True), met_terug43, NU43))
+controle("één komend blok met een terugleverprijs is genoeg",
+         not bat.handelen_kan_niet(anker(95.0, handelen=True), een_terug43, NU43))
+controle("een blok dat voorbij is telt niet",
+         bat.handelen_kan_niet(anker(95.0, handelen=True), verleden43, NU43))
+controle("zonder prijzen staat er al een andere reden, dus hier niets",
+         not bat.handelen_kan_niet(anker(95.0, handelen=True), [], NU43))
+# En het besluit zelf blijft wat het was: nooit naar het net zonder terugleverprijs.
+b43 = plan_batterij(NU43, R43, Tariff(), Forecast(solar_kwh={}, house_kwh={h: 0.25 for h in range(24)}),
+                    anker(95.0, handelen=True, zelf_nul=True, rte=0.7395))
+print(f"  18:10 op 95%: {b43.stand} ({b43.rule}): {b43.reason}")
+controle("zonder terugleverprijs handelt hij niet", b43.stand != HANDELEN, b43.stand)
+
+print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

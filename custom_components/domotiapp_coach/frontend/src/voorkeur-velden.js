@@ -16,6 +16,7 @@
  */
 
 import { WAKE_MODES, WEEKDAGEN, canSkipRelease, releaseCopy } from "./devices.js";
+import { terugleverBekend } from "./geld.js";
 
 const esc = (s) =>
   String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -80,6 +81,14 @@ function laadpaal(device) {
     ${autoUitleg}`;
 }
 
+/**
+ * Bij het vinkje Handelen als de coach de terugleverprijs niet kent (v0.128.2).
+ * Dan kan het vinkje niet aan, wel uit. De kaart zegt het ook, uit de prijzen
+ * zelf (`HANDELEN_KAN_NIET` in batterij.py).
+ */
+export const HANDELEN_KAN_NIET =
+  "Handelen kan nu niet: de coach kent je terugleverprijs niet. Daarvoor is bij Contract een marktprijssensor nodig, of salderen.";
+
 function thuisbatterij(device) {
   const ventilator = device.entities?.fan
     ? getal("data-vk-accu", "fan_above_c", "Ventilator aan boven (°C)", 'min="0" max="100" step="0.5"', "nooit",
@@ -89,6 +98,7 @@ function thuisbatterij(device) {
     ${vink("data-vk-accu", "reserve_enabled", "Reserve houden voor noodstroom.", "Onder deze accustand komt er niets meer uit, wat de prijzen ook zeggen.")}
     ${getal("data-vk-accu", "reserve_percent", "Reserve (%)", 'min="0" max="100" step="5"', "20")}
     ${vink("data-vk-accu", "trade", "Handelen: terugleveren op dure uren.", "De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis.")}
+    <div class="notice" data-vk-rij="trade_kan_niet" hidden>${HANDELEN_KAN_NIET}</div>
     ${vink("data-vk-accu", "weekly_full", "Een keer per week helemaal vol.", "Tot 100%, voor het balanceren van de cellen. De coach kiest op die dag het goedkoopste moment, en slaat de beurt over als de batterij die week al vol was.")}
     <div class="row" data-vk-rij="weekly_full_day">
       <label for="vk-dag">Op</label>
@@ -148,8 +158,11 @@ export function voorkeurHtml(device) {
 /**
  * De waarden van het apparaat in de velden, behalve in het veld waar iemand
  * in typt. En de rijen die bij een vinkje horen alleen als dat aanstaat.
+ *
+ * `contract` is dat uit de instellingen, voor het vinkje Handelen; zonder
+ * contract blijft dat vinkje vrij.
  */
-export function vulVoorkeuren(root, device, actief = null) {
+export function vulVoorkeuren(root, device, actief = null, contract = null) {
   const b = device?.battery ?? {};
   const zet = (el, waarde) => {
     if (el === actief) return;
@@ -187,6 +200,11 @@ export function vulVoorkeuren(root, device, actief = null) {
   rij("reserve_percent", b.reserve_enabled);
   rij("weekly_full_day", b.weekly_full);
   rij("holiday_max_percent", b.holiday);
+  // Handelen zonder terugleverprijs: uitzetten mag, aanzetten niet.
+  const handel = [...root.querySelectorAll("[data-vk-accu]")].find((el) => el.dataset.vkAccu === "trade");
+  const kanNiet = Boolean(handel) && contract !== null && !terugleverBekend(contract);
+  if (handel) handel.disabled = kanNiet && !handel.checked;
+  rij("trade_kan_niet", kanNiet);
 }
 
 const binnen = (waarde, laag, hoog) => Math.min(hoog, Math.max(laag, Math.round(waarde)));
