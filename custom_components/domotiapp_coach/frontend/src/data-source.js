@@ -152,6 +152,7 @@ const COACH_EVENTS = {
   decision: "domotiapp_coach_decision",
   notification: "domotiapp_coach_notification",
   settings: "domotiapp_coach_settings_updated",
+  berichten: "domotiapp_coach_berichten",
 };
 
 /**

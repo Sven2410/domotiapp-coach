@@ -22,6 +22,7 @@ import { setLight } from "./src/theme.js";
 import { volgCoach } from "./src/data-source.js";
 import { navItemsFor } from "./src/header.js";
 import "./src/header.js";
+import { ongelezen } from "./src/berichten-sheet.js";
 import "./src/views/overview.js";
 import "./src/views/history.js";
 import "./src/views/notifications.js";
@@ -150,6 +151,38 @@ class DomotiAppCoachPanel extends DacElement {
     } catch (error) {
       console.warn("[DomotiApp Coach] kon instellingen niet volgen", error);
     }
+
+    // De berichtenbox (v0.130.0): een keer ophalen, dan volgen.
+    this.laadBerichten_();
+    try {
+      this.berichtenOff_ = await volgCoach(this.hass_, "berichten", (data) => this.zetBerichten_(data?.items));
+    } catch (error) {
+      // Een coach van voor v0.130.0 kent dit niet; dan blijft het belletje stil.
+    }
+  }
+
+  async laadBerichten_() {
+    try {
+      this.zetBerichten_(await this.hass_.callWS({ type: "domotiapp_coach/berichten/list" }));
+    } catch (error) {
+      this.zetBerichten_([]);
+    }
+  }
+
+  zetBerichten_(items) {
+    if (!Array.isArray(items)) return;
+    this.berichten_ = items;
+    if (!this.rendered_) return;
+    this.$("dac-header").ongelezen = ongelezen(items);
+    this.$("dac-berichten-sheet").items = items;
+  }
+
+  async berichtGelezen_(id) {
+    try {
+      this.zetBerichten_(await this.hass_.callWS({ type: "domotiapp_coach/berichten/read", ...(id ? { id } : {}) }));
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon het bericht niet als gelezen markeren", error);
+    }
   }
 
   applySettings_(settings) {
@@ -166,6 +199,7 @@ class DomotiAppCoachPanel extends DacElement {
       <div class="shell">
         <dac-header></dac-header>
         <main id="main"></main>
+        <dac-berichten-sheet></dac-berichten-sheet>
       </div>
     `;
   }
@@ -178,6 +212,9 @@ class DomotiAppCoachPanel extends DacElement {
     // sends the same event, and it has to be routed the same way.
     this.addEventListener("dac-navigate", (ev) => this.navigate_(ev.detail.id));
     header.addEventListener("dac-home", () => this.goHome_());
+    header.addEventListener("dac-berichten", () => this.$("dac-berichten-sheet").open());
+    this.addEventListener("dac-bericht-gelezen", (ev) => this.berichtGelezen_(ev.detail?.id ?? null));
+    if (this.berichten_) this.zetBerichten_(this.berichten_);
     // Deliberately no button that opens Home Assistant's sidebar. Customers run
     // Kiosk Mode precisely so they cannot get to the rest of the system, and a
     // hamburger in our own header handed it back to them.

@@ -1306,7 +1306,7 @@ proef("de prijsgrafiek: groen waar hij laadt, het gemiddelde gewogen naar de kWh
   assert.equal(b.nul, 96);
   // Een tijd onder elk derde hele uur.
   assert.deepEqual(b.balken.map((x) => x.label), ["12", "", "", "15"]);
-  assert.match(b.balken[1].tip, /hij laadt$/);
+  assert.match(b.balken[1].tip, /, laden$/);
 });
 
 proef("de prijsgrafiek: een negatieve prijs zakt onder de nullijn, zon telt niet mee in het gemiddelde", () => {
@@ -4489,7 +4489,7 @@ proef("de prijsgrafiek: morgen om middernacht, leveren in een eigen kleur, en br
   assert.equal(middernacht, 2, "om 00:00 begint morgen");
   assert.equal(b.balken[2].label, "morgen");
   assert.equal(b.balken.filter((x) => x.dagGrens).length, 2, "en de dag daarna ook een streep");
-  assert.ok(b.balken[10].leveren && b.balken[10].tip.includes("levert aan het net"), b.balken[10].tip);
+  assert.ok(b.balken[10].leveren && b.balken[10].tip.includes("ontladen aan het net"), b.balken[10].tip);
   assert.ok(b.balken[3].groen && !b.balken[3].leveren, "laden gaat voor leveren");
   assert.equal(b.minBreedte, 30 * 14, "14 px per uur");
   // De prijsas: ronde stappen van nul tot boven de hoogste prijs.
@@ -4505,7 +4505,21 @@ proef("de prijsgrafiek: morgen om middernacht, leveren in een eigen kleur, en br
   assert.ok(later.onder === "13% duurder dan nu, hij wacht", later.onder);
   assert.ok(prijsUitleg(b, 10, { leveren: "hij levert aan het net" }).onder.endsWith("hij levert aan het net"));
   const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js", import.meta.url), "utf8");
-  assert.ok(bron.includes("Tik op een staafje") && bron.includes("hij levert aan het net"));
+  assert.ok(bron.includes("Tik op een staafje"));
+  // De woorden van de legenda bij een batterij (v0.130.0, de eerste woning op 19-10-2026).
+  assert.ok(bron.includes('"Laden van het net"') && bron.includes('"Ontladen aan het net"') && bron.includes('"Nul op de meter"'));
+  // Een blok met een eigen stand houdt die naam in de kaart, zoals "Standby".
+  const eigen = prijsBalken(rijen.map((r, i) => ({ ...r, label: i === 5 ? "Standby" : "Nul op de meter" })));
+  assert.ok(prijsUitleg(eigen, 5, { groen: "Laden van het net", wacht: "Nul op de meter" }).onder.endsWith("standby"));
+  assert.ok(prijsUitleg(eigen, 6, { groen: "Laden van het net", wacht: "Nul op de meter" }).onder.endsWith("nul op de meter"));
+  // De lijst eronder in dezelfde kleuren: oranje als hij aan het net levert.
+  const { batterijVooruit } = await import("../custom_components/domotiapp_coach/frontend/src/battery.js");
+  const plan = batterijVooruit({ hours: [
+    { start: "2026-10-19T08:00:00", end: "2026-10-19T09:00:00", mode: "handelen", kwh: -2.5, grid_kwh: -2.15, soc: 54, price: 0.469 },
+    { start: "2026-10-19T09:00:00", end: "2026-10-19T10:00:00", mode: "nul", kwh: -0.3, grid_kwh: 0, soc: 52, price: 0.446 },
+    { start: "2026-10-19T03:00:00", end: "2026-10-19T04:00:00", mode: "netladen", kwh: 2, grid_kwh: 2, soc: 60, price: 0.30 },
+  ], kind: "batterij", soc: 60, capacity_kwh: 14.6 });
+  assert.deepEqual(plan.uren.map((u) => [u.levert, u.net]), [[true, false], [false, false], [false, true]]);
 });
 
 // De bewoner van de eerste woning op 18-10-2026: "Invullen, laten zien hoe de prijs tot
@@ -4671,6 +4685,46 @@ proef("geld.js rekent teruglevering en de bonus zoals prijsopbouw.py (v0.129.0)"
   const p = geld.prijsOp(contract, { buy: null, feedIn: null }, new Map([[middag.getTime(), koop]]), middag, ligging);
   const verwacht = 0.15 * 1.21 + 0.02 + 0.1 * (0.15 * 1.21 + 0.02);
   assert.ok(Math.abs(p.terug - verwacht) < 1e-9, `${p.terug} tegen ${verwacht}`);
+});
+
+// De eigenaar op 18-10-2026: "ik wil een soort berichtenbox met zo'n 1tje wat optelt en dat
+// je dat kan wegvinken van is gelezen", en "een invulveld voor herinnering meterstanden
+// doorgeven" (v0.130.0).
+proef("de berichtenbox: het tellertje, de lijst met Gelezen, en de herinnering voor de meterstanden (v0.130.0)", async () => {
+  const b = await import("../custom_components/domotiapp_coach/frontend/src/berichten-sheet.js");
+  const items = [
+    { id: "1", at: "2026-10-19T08:00:00", kind: "meterstanden", title: "Geef je meterstanden door", body: "Ze staan op het overzicht.", read: false },
+    { id: "2", at: "2026-10-12T08:00:00", kind: "contract", title: "Je stroomcontract loopt af op 10 november 2026", body: "Kijk of je verlengt.", read: true },
+  ];
+  assert.equal(b.ongelezen(items), 1);
+  const nu = new Date(2026, 9, 19, 12, 0);
+  assert.equal(b.wanneerTekst("2026-10-19T08:00:00", nu), "vandaag 08:00");
+  assert.equal(b.wanneerTekst("2026-10-18T21:30:00", nu), "gisteren 21:30");
+  assert.equal(b.wanneerTekst("2026-10-12T08:00:00", nu), "12 oktober");
+  const html = b.berichtenHtml(items, nu);
+  assert.ok(html.indexOf("Geef je meterstanden door") < html.indexOf("Je stroomcontract"), "nieuwste bovenaan");
+  assert.equal(html.split("data-gelezen=").length - 1, 1, "alleen een ongelezen bericht heeft de knop Gelezen");
+  assert.ok(html.includes('class="bericht gelezen"'), "een gelezen bericht ziet er anders uit");
+  assert.ok(b.berichtenHtml([], nu).includes("Geen berichten"));
+  // Het belletje in de kop.
+  const kop = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/header.js", import.meta.url), "utf8");
+  assert.ok(kop.includes('id="berichten"') && kop.includes('id="teller"') && kop.includes("dac-berichten"));
+  assert.ok(kop.includes('<i class="teller"'), "het getal is geen span, anders verdwijnt het op een telefoon");
+  // De volgende keer meterstanden: dezelfde som als berichten.py (proef 170 in test_coach.py).
+  const { volgendeMeterstand } = await import("../custom_components/domotiapp_coach/frontend/src/views/notifications.js");
+  const dag = (d) => d && `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const v = new Date(2026, 9, 19);
+  assert.equal(dag(volgendeMeterstand(v, "2026-01-31", "month")), "2026-10-31");
+  assert.equal(dag(volgendeMeterstand(v, "2026-10-15", "quarter")), "2027-01-15");
+  assert.equal(dag(volgendeMeterstand(v, "2025-11-01", "year")), "2026-11-01");
+  assert.equal(volgendeMeterstand(v, "2026-10-01", "once"), null);
+  assert.equal(dag(volgendeMeterstand(v, "2026-11-01", "once")), "2026-11-01", "nog niet geweest: die dag");
+  // De velden: onder Meldingen voor de bewoner, en de dagen vooraf bij Contract.
+  const Meldingen = geregistreerd.get("dac-view-notifications");
+  const m = Object.create(Meldingen.prototype).render();
+  assert.ok(m.includes('id="meter-datum"') && m.includes('id="meter-herhaling"'));
+  const c = Object.create(Contract.prototype).render();
+  assert.ok(c.includes('id="stroom-dagen"') && c.includes('id="gas-dagen"'));
 });
 
 for (const [naam, fn] of proeven) {

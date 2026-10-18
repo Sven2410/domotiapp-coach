@@ -31,6 +31,12 @@ export function volgendeNetlading(hours = []) {
   return { start: hours[eerste].start, end: hours[laatste].end, kwh };
 }
 
+/** De naam van een stand met een hoofdletter, voor de grafiek ("Nul op de meter"). */
+export function standNaam(stand) {
+  const naam = STAND_NAMEN[stand] ?? stand ?? "";
+  return naam.charAt(0).toUpperCase() + naam.slice(1);
+}
+
 const STAND_NAMEN = {
   nul: "nul op de meter",
   zonneladen: "alleen zonneladen",
@@ -229,6 +235,8 @@ export function batterijVooruit(besluit) {
       soc: Number.isFinite(u.soc) ? `${Math.round(u.soc)}%` : "",
       wat,
       net: net > 0.05,
+      // Aan het net leveren (handelen), voor de oranje regel (v0.130.0).
+      levert: net < -0.05,
     };
   });
 

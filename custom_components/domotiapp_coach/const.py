@@ -37,6 +37,11 @@ EVENT_NOTIFICATION: Final = f"{DOMAIN}_notification"
 MELDINGEN_KEY: Final = f"{DOMAIN}.meldingen"
 MELDINGEN_VERSION: Final = 1
 MELDINGEN_MAX: Final = 3000
+# De berichtenbox (v0.130.0): wat de bewoner zelf moet doen, met gelezen of niet.
+BERICHTEN_KEY: Final = f"{DOMAIN}.berichten"
+BERICHTEN_VERSION: Final = 1
+BERICHTEN_MAX: Final = 200
+EVENT_BERICHTEN: Final = f"{DOMAIN}_berichten"
 
 # De laadbeurten, met wat ze kostten en wat ze bespaarden. Eigen bestand, net
 # als de meldingen. Tweeduizend beurten is jaren.
@@ -433,6 +438,11 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # naar zijn groep. Zie `Circuit` in planner.py.
         "circuits": [],
     },
+    # Herinneringen in de berichtenbox (v0.130.0): de meterstanden doorgeven, de
+    # eerste keer op `meter_date` en daarna elke maand, elk kwartaal, elk jaar of
+    # eenmalig (`meter_repeat`). Leeg is geen herinnering. De bewoner zet dit zelf,
+    # onder Meldingen. Zie berichten.py.
+    "reminders": {"meter_date": "", "meter_repeat": "year"},
     "contract": {
         "type": CONTRACT_FIXED,
         # De leverancier uit de catalogus (`LEVERANCIERS` in leveranciers.js), of
@@ -445,6 +455,8 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # dus ook een melding van contract bijna verlopen."
         "start": "",
         "end": "",
+        # Hoeveel dagen voor het einde de berichtenbox het meldt (v0.130.0).
+        "reminder_days": 30,
         # Wie de opbouw bevestigde ("Ja, dit klopt"), wanneer, en welke waarden
         # dat waren (`vingerafdruk` in prijsopbouw.py). Verandert er daarna iets,
         # dan geldt de bevestiging niet meer. De eigenaar op 18-10-2026: "ik laat
@@ -480,7 +492,7 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # een sensor met de all-in gasprijs. Nul of leeg is onbekend, en dan
         # staat er geen bedrag.
         "gas": {"type": CONTRACT_FIXED, "supplier": "", "price": 0.0, "entity": "", "start": "", "end": "",
-                "periods": []},
+                "reminder_days": 30, "periods": []},
         # Water: een prijs per m³, all-in, en eerdere contracten.
         "water": {"supplier": "", "price": 0.0, "periods": []},
         "fixed": {

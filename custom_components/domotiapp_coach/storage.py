@@ -28,6 +28,9 @@ from .const import (
     BEURTEN_VERSION,
     DEFAULT_SETTINGS,
     DOMAIN,
+    BERICHTEN_KEY,
+    BERICHTEN_MAX,
+    BERICHTEN_VERSION,
     MELDINGEN_KEY,
     MELDINGEN_MAX,
     MELDINGEN_VERSION,
@@ -446,6 +449,57 @@ class MeldingenStore:
         return entry
 
 
+class BerichtenStore:
+    """De berichtenbox (v0.130.0): wat de bewoner zelf moet doen, gelezen of niet.
+
+    Los van de geschiedenis onder Meldingen: daar staat alles wat de coach
+    meldde en besloot, hier alleen wat iemand iets laat doen, met een vinkje
+    gelezen. Op `sleutel` uniek: een herinnering die al eens kwam, komt niet
+    nog eens, ook niet na een herstart. Nooit meer dan `BERICHTEN_MAX`.
+    """
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._store: Store[dict[str, Any]] = Store(hass, BERICHTEN_VERSION, BERICHTEN_KEY)
+        self._items: list[dict[str, Any]] | None = None
+
+    async def async_list(self) -> list[dict[str, Any]]:
+        if self._items is None:
+            data = await self._store.async_load()
+            items = (data or {}).get("items") if isinstance(data, dict) else None
+            self._items = [item for item in (items or []) if isinstance(item, dict) and item.get("id")]
+        return [dict(item) for item in self._items]
+
+    async def async_add(self, bericht: dict[str, Any], at: datetime) -> dict[str, Any] | None:
+        """Een bericht erbij, of None als er al een met deze sleutel is."""
+        items = await self.async_list()
+        sleutel = bericht.get("sleutel") or ""
+        if sleutel and any(item.get("key") == sleutel for item in items):
+            return None
+        entry = {
+            "id": f"{int(at.timestamp())}-{len(items)}",
+            "at": at.replace(microsecond=0).isoformat(),
+            "key": sleutel,
+            "kind": bericht.get("soort") or "",
+            "title": bericht.get("titel") or "",
+            "body": bericht.get("tekst") or "",
+            "read": False,
+        }
+        items.append(entry)
+        self._items = items[-BERICHTEN_MAX:]
+        await self._store.async_save({"items": self._items})
+        return entry
+
+    async def async_read(self, bericht_id: str | None) -> list[dict[str, Any]]:
+        """Als gelezen markeren: dat ene bericht, of alles bij None."""
+        items = await self.async_list()
+        for item in items:
+            if bericht_id is None or item.get("id") == bericht_id:
+                item["read"] = True
+        self._items = items
+        await self._store.async_save({"items": self._items})
+        return [dict(item) for item in items]
+
+
 class BeurtenStore:
     """Elke laadbeurt, met wat hij kostte en wat hij bespaarde.
 
@@ -524,6 +578,14 @@ def async_get_beurten(hass: HomeAssistant) -> BeurtenStore:
     if "beurten" not in data:
         data["beurten"] = BeurtenStore(hass)
     return data["beurten"]
+
+
+def async_get_berichten(hass: HomeAssistant) -> BerichtenStore:
+    """De ene berichtenbox van deze installatie (v0.130.0)."""
+    data = hass.data.setdefault(DOMAIN, {})
+    if "berichten" not in data:
+        data["berichten"] = BerichtenStore(hass)
+    return data["berichten"]
 
 
 def async_get_meldingen(hass: HomeAssistant) -> MeldingenStore:

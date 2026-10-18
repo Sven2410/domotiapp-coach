@@ -14,7 +14,7 @@
  * precies dezelfde aanroep van `cheapest_hours` als het besluit van die minuut.
  */
 
-import { batterijVooruit } from "./battery.js";
+import { batterijVooruit, standNaam } from "./battery.js";
 import { perUur, prijsAs, prijsBalken, prijsCss, prijsStrook, prijsUitleg } from "./prijsgrafiek.js";
 
 /**
@@ -96,6 +96,11 @@ const css = /* css */ `
     border-color: rgba(56,189,124,0.45);
     background: rgba(56,189,124,0.10);
   }
+  .uur.levert {
+    border-color: rgba(240,160,40,0.5);
+    background: rgba(240,160,40,0.10);
+  }
+  .uur.levert .wat { color: var(--dac-ink-2); }
   .uur.nu { outline: 2px solid var(--dac-accent-hi); outline-offset: 1px; }
 
   .uur .tijd { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--dac-ink-1); }
@@ -444,7 +449,15 @@ export class DacPlanAheadSheet extends DacElement {
    * gebruiker een visuele check dat de laadpaal inderdaad op de goedkoopste
    * momenten gaat laden." Zie prijsgrafiek.js.
    */
-  paintPrijs_(rijen, wat = "laden") {
+  /**
+   * `wat` zijn de woorden van de legenda (v0.130.0). De bewoner van de eerste
+   * woning op 19-10-2026, bij de grafiek van de batterij: "Laden van het net",
+   * "Ontladen aan het net", "Eigen gebruik of Nul op de meter"; "hij wacht" klopte
+   * daar niet, want dan voedt de batterij het huis. Bij de laadpaal blijft het
+   * laden en wachten.
+   */
+  paintPrijs_(rijen, wat = { groen: "Laden", wacht: "Wacht" }) {
+    const woorden = { leveren: "Ontladen aan het net", ...wat };
     if (rijen) this.prijsGezet_ = true;
     const blok = this.$("#vooruit-prijs");
     // Dezelfde prijzen en hetzelfde plan: laten staan zoals hij staat, met waar
@@ -479,7 +492,7 @@ export class DacPlanAheadSheet extends DacElement {
     const legenda = document.createElement("div");
     legenda.className = "prijs-legenda";
     const levert = berekend.balken.some((b) => b.leveren);
-    for (const [klasse, tekst] of [["groen", `hij gaat ${wat}`], ...(levert ? [["leveren", "hij levert aan het net"]] : []), ["", "hij wacht"]]) {
+    for (const [klasse, tekst] of [["groen", woorden.groen], ...(levert ? [["leveren", woorden.leveren]] : []), ["", woorden.wacht]]) {
       const item = document.createElement("span");
       const blokje = document.createElement("i");
       if (klasse) blokje.className = klasse;
@@ -491,7 +504,6 @@ export class DacPlanAheadSheet extends DacElement {
     // prijs zien van dat moment." De tooltip van de muis werkt op een telefoon niet.
     // Bovenaan het moment: eerst nu, na een tik het gekozen blok, zoals de app
     // van een leverancier dat doet (v0.129.0).
-    const woorden = { groen: `hij gaat ${wat}`, leveren: "hij levert aan het net", wacht: "hij wacht" };
     const moment = document.createElement("div");
     moment.className = "prijs-moment";
     const zet = (i) => {
@@ -566,8 +578,9 @@ export class DacPlanAheadSheet extends DacElement {
         groen: Number(u.grid_kwh) > 0.05, kwh: Number(u.grid_kwh) || 0,
         // Aan het net leveren (handelen) heeft een eigen kleur (v0.129.0).
         leveren: Number(u.grid_kwh) < -0.05,
+        label: standNaam(u.mode),
       })),
-      "van het net laden"
+      { groen: "Laden van het net", leveren: "Ontladen aan het net", wacht: "Nul op de meter" }
     );
     const uurlijst = this.$("#vooruit-uren");
     const nu = Date.now();
@@ -577,6 +590,8 @@ export class DacPlanAheadSheet extends DacElement {
       // Laden van het net is wat geld kost, dus dat krijgt kleur; de rest is
       // de batterij die met het huis en de zon meebeweegt.
       if (uur.net) rij.classList.add("laadt");
+      // Dezelfde kleuren als de grafiek (v0.130.0): oranje als hij aan het net levert.
+      if (uur.levert) rij.classList.add("levert");
       const start = new Date(uur.start).getTime();
       const eind = new Date(uur.end).getTime();
       if (start <= nu && nu < eind) rij.classList.add("nu");
