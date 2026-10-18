@@ -37,6 +37,7 @@ from .const import (
     CHARGER_CONTROL,
     DOMAIN,
     EVENT_DECISION,
+    EVENT_BERICHTEN,
     EVENT_NOTIFICATION,
     EVENT_SETTINGS_UPDATED,
     LEVEL_ADVISE,
@@ -71,7 +72,7 @@ from .batterij import (
     vol_voor,
     zon_in_accu,
 )
-from . import prijsopbouw
+from . import berichten, prijsopbouw
 from .planner import (
     _dag_om,
     DAGNAMEN,
@@ -149,7 +150,7 @@ from .planner import (
     watts_for,
 )
 from .ontvangers import ontvangers
-from .storage import async_get_beurten, async_get_meldingen, async_get_store
+from .storage import async_get_berichten, async_get_beurten, async_get_meldingen, async_get_store
 from .units import hour_to_watts, to_kwh, to_watts
 
 _LOGGER = logging.getLogger(__name__)
@@ -172,6 +173,11 @@ SENSOR_STIL_AUTO = timedelta(minutes=60)
 # voor een volgende keer erboven een nieuwe melding is. Een temperatuur die op
 # de grens heen en weer gaat geeft zo één bericht, niet elke paar minuten een.
 TEMP_AANHOUDEND = timedelta(minutes=2)
+# Hoe vaak de coach kijkt of er een herinnering aan de beurt is (v0.130.0), en
+# hoe vaak hij de prijsopbouw naast de all-in sensor legt voor een bericht als
+# die omslaat. Een herinnering gaat per dag; tien minuten is ruim op tijd.
+BERICHTEN_RONDE = timedelta(minutes=10)
+CONTROLE_RONDE = timedelta(hours=1)
 TEMP_TERUG = 1.0
 # De vriezer (v0.125.0): de coach stuurt hem niet, hij meldt. De keuzes van de
 # eigenaar op 15-10-2026: een melding als de deur 3 minuten openstaat, en als hij
@@ -1444,6 +1450,11 @@ class ChargerCoach:
         # keer als kritiek: de kabel was eruit, en een paal zonder kabel wiste
         # elke ronde wat er al gezegd was.
         self._getipt: dict[str, str] = {}
+        # De berichtenbox (v0.130.0): wanneer er het laatst gekeken is, en hoe de
+        # prijscontrole de vorige keer uitviel, voor een bericht als hij omslaat.
+        self._berichten_op: datetime | None = None
+        self._controle_op: datetime | None = None
+        self._controle_status: str | None = None
         # Wanneer er voor het laatst om een accustand is gevraagd, per apparaat.
         # Eén melding per sessie is genoeg; vaker is zeuren en dan zet iemand de
         # meldingen uit.
@@ -1579,6 +1590,46 @@ class ChargerCoach:
             "logboek van Home Assistant wat er misging.",
             kritiek=True,
         )
+
+    async def _async_berichten(self, settings: dict[str, Any], now: datetime) -> None:
+        """De berichtenbox bijwerken (v0.130.0): wat de bewoner zelf moet doen.
+
+        Elke `BERICHTEN_RONDE` de herinneringen (meterstanden, een vast contract
+        dat afloopt), en elk uur of de prijscontrole is omgeslagen. Een nieuw
+        bericht gaat in de box en naar de telefoon, want het laat iemand iets
+        doen; de eigenaar op 06-09-2026: per beurt een verslag "plus wat de
+        bewoner zelf moet oplossen". Wat er al stond (op sleutel) komt niet nog
+        eens. Zie berichten.py.
+        """
+        if self._berichten_op is not None and now - self._berichten_op < BERICHTEN_RONDE:
+            return
+        self._berichten_op = now
+        vandaag = now.date()
+        nieuw = []
+        meter = berichten.meterstand_bericht(vandaag, settings.get("reminders") or {})
+        if meter:
+            nieuw.append(meter)
+        contract = settings.get("contract") or {}
+        nieuw.extend(berichten.contract_berichten(vandaag, contract))
+        if contract.get("type") == "dynamic" and (
+            self._controle_op is None or now - self._controle_op >= CONTROLE_RONDE
+        ):
+            self._controle_op = now
+            controle = (await self.async_prijscontrole(settings, None, now)).get("controle") or {}
+            omslag = berichten.controle_bericht(vandaag, self._controle_status, controle)
+            if controle.get("status") in ("correct", "afwijking"):
+                self._controle_status = controle.get("status")
+            if omslag:
+                nieuw.append(omslag)
+        if not nieuw:
+            return
+        box = async_get_berichten(self.hass)
+        for bericht in nieuw:
+            entry = await box.async_add(bericht, now)
+            if entry is None:
+                continue
+            self.hass.bus.async_fire(EVENT_BERICHTEN, {"items": await box.async_list()})
+            await self._async_tell(f"{entry['title']}. {entry['body']}")
 
     async def _async_tell(
         self, message: str, kritiek: bool = False, telefoon: bool = True
@@ -2670,6 +2721,10 @@ class ChargerCoach:
         level = (settings.get("strategy") or {}).get("level", LEVEL_PROPOSE)
         moment = _moment(now)
         await self._async_nordpool(settings, moment)
+        try:
+            await self._async_berichten(settings, moment)
+        except Exception:  # noqa: BLE001 - een herinnering mag een ronde niet kosten
+            _LOGGER.exception("kon de berichtenbox niet bijwerken")
 
         chargers = [
             device

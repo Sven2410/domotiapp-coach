@@ -191,6 +191,13 @@ class DacHeader extends DacElement {
       -webkit-tap-highlight-color: transparent;
     }
     button.ghost .icon { width: 18px; height: 18px; }
+    button.bel { position: relative; }
+    button.bel .teller {
+      position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 5px;
+      border-radius: 9px; background: rgb(229,72,77); color: #fff; font-style: normal;
+      font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; box-sizing: border-box;
+    }
+    button.bel .teller[hidden] { display: none; }
     button.ghost:hover {
       color: var(--dac-ink);
       border-color: rgba(25,143,217,0.55);
@@ -244,6 +251,20 @@ class DacHeader extends DacElement {
     return this.active_;
   }
 
+  /** Hoeveel berichten er ongelezen zijn (v0.130.0); het belletje laat het zien. */
+  set ongelezen(aantal) {
+    this.ongelezen_ = Number(aantal) || 0;
+    this.paintTeller_();
+  }
+
+  paintTeller_() {
+    const teller = this.rendered_ ? this.$("#teller") : null;
+    if (!teller) return;
+    teller.hidden = !this.ongelezen_;
+    teller.textContent = this.ongelezen_ > 9 ? "9+" : String(this.ongelezen_ || "");
+    this.$("#berichten").setAttribute("aria-label", this.ongelezen_ ? `Berichten, ${this.ongelezen_} ongelezen` : "Berichten");
+  }
+
   /** Rebuild the bar when the user's rights become known. */
   set isAdmin(value) {
     const next = value !== false;
@@ -282,6 +303,11 @@ class DacHeader extends DacElement {
           ${pills}
         </nav>
         <div class="actions">
+          <!-- De berichtenbox (v0.130.0). Het getal is een <i> en geen <span>:
+               op een smal scherm verdwijnt de tekst van een knop hier. -->
+          <button class="ghost bel" type="button" id="berichten" title="Berichten" aria-label="Berichten">
+            ${icons.bell}<span>Berichten</span><i class="teller" id="teller" hidden></i>
+          </button>
           <button class="ghost" type="button" id="home" title="Terug naar je eigen dashboard">
             ${icons.home}<span>Home</span>
           </button>
@@ -292,6 +318,8 @@ class DacHeader extends DacElement {
 
   afterRender() {
     this.$("#home").addEventListener("click", () => this.fire("dac-home"));
+    this.$("#berichten").addEventListener("click", () => this.fire("dac-berichten"));
+    this.paintTeller_();
 
     for (const pill of this.$$("button.pill")) {
       pill.addEventListener("click", () =>

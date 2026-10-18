@@ -35,6 +35,29 @@ import { volgCoach } from "../data-source.js";
 import { canAlwaysOn, deviceLabel, deviceLabelMap } from "../devices.js";
 import { icons } from "../icons.js";
 
+/**
+ * Wanneer de meterstanden de volgende keer aan de beurt zijn, voor onder het
+ * veld (v0.130.0). Dezelfde som als `meterstand_volgende` in berichten.py: de
+ * eerste keer, en dan elke maand, elk kwartaal of elk jaar, waarbij de 31e in
+ * een kortere maand de laatste dag wordt. Null als er geen volgende is.
+ */
+export function volgendeMeterstand(vandaag, start, herhaling) {
+  if (!start) return null;
+  const [j, m, d] = String(start).split("-").map(Number);
+  if (!j || !m || !d) return null;
+  const opDag = (jaar, maand) => new Date(jaar, maand, Math.min(d, new Date(jaar, maand + 1, 0).getDate()));
+  const eerste = opDag(j, m - 1);
+  const nu = new Date(vandaag.getFullYear(), vandaag.getMonth(), vandaag.getDate());
+  if (eerste > nu) return eerste;
+  const stap = { month: 1, quarter: 3, year: 12 }[herhaling] ?? 0;
+  if (!stap) return null;
+  for (let n = 1; n < 1200; n += 1) {
+    const keer = opDag(j, m - 1 + n * stap);
+    if (keer > nu) return keer;
+  }
+  return null;
+}
+
 const DAGEN = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
 const MAANDEN = [
   "januari", "februari", "maart", "april", "mei", "juni",
@@ -422,6 +445,31 @@ class DacViewNotifications extends DacElement {
           <div class="status" id="mijn-status"></div>
         </section>
 
+        <!-- De herinnering voor de meterstanden (v0.130.0). De eigenaar op
+             18-10-2026: "ook wil ik een invulveld voor herinnering meterstanden
+             doorgeven." Komt in de berichtenbox (het belletje) en op de telefoon. -->
+        <section class="blok" id="herinnering">
+          <h2>${icons.bell} Herinneringen</h2>
+          <p class="hint">Een bericht in je berichtenbox (het belletje bovenin) en op je telefoon, zodat je het niet vergeet.</p>
+          <div class="velden twee">
+            <div class="veld">
+              <label for="meter-datum">Meterstanden doorgeven, de eerste keer op</label>
+              <input id="meter-datum" type="date">
+              <span class="uitleg" id="meter-volgende"></span>
+            </div>
+            <div class="veld">
+              <label for="meter-herhaling">Daarna</label>
+              <select id="meter-herhaling">
+                <option value="month">elke maand</option>
+                <option value="quarter">elk kwartaal</option>
+                <option value="year">elk jaar</option>
+                <option value="once">niet meer, eenmalig</option>
+              </select>
+            </div>
+          </div>
+          <div class="status" id="meter-status"></div>
+        </section>
+
         <section class="blok" id="belasting" hidden>
           <h2>${icons.warning} Zware belasting</h2>
           <p class="hint">Een bericht zodra je aansluiting te zwaar belast wordt. De coach kijkt naar de zwaarst belaste fase als die bekend is, anders naar je totale netvermogen. Wie het krijgt staat hierboven per persoon.</p>
@@ -525,6 +573,8 @@ class DacViewNotifications extends DacElement {
   }
 
   afterRender() {
+    this.$("#meter-datum").addEventListener("change", (ev) => this.bewaarHerinnering_({ meter_date: ev.target.value || "" }));
+    this.$("#meter-herhaling").addEventListener("change", (ev) => this.bewaarHerinnering_({ meter_repeat: ev.target.value }));
     this.$("#filter")?.addEventListener("click", (e) => {
       const knop = e.target?.closest?.("button[data-soort]");
       if (!knop) return;
@@ -586,6 +636,7 @@ class DacViewNotifications extends DacElement {
   }
 
   paintAlles_() {
+    this.paintHerinnering_();
     this.paintPersonen_();
     this.paintBelasting_();
     this.paintVerbruik_();
@@ -795,6 +846,36 @@ class DacViewNotifications extends DacElement {
       this.bezig_ = false;
       this.paintPersonen_();
     }
+  }
+
+  // ------------------------------------------------------------------
+  // herinneringen (v0.130.0)
+
+  paintHerinnering_() {
+    const r = this.settings_?.reminders ?? {};
+    const datum = this.$("#meter-datum");
+    if (!datum) return;
+    if (this.shadowRoot?.activeElement !== datum) datum.value = r.meter_date || "";
+    this.$("#meter-herhaling").value = r.meter_repeat || "year";
+    const volgende = volgendeMeterstand(new Date(), r.meter_date, r.meter_repeat || "year");
+    this.$("#meter-volgende").textContent = !r.meter_date
+      ? "Leeg is geen herinnering."
+      : volgende
+        ? `De volgende keer: ${volgende.toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" })}.`
+        : "Dit was eenmalig; er komt geen herinnering meer.";
+  }
+
+  async bewaarHerinnering_(wijziging) {
+    if (!this.hass_?.callWS) return;
+    try {
+      const settings = await this.hass_.callWS({ type: "domotiapp_coach/reminders/set", ...wijziging });
+      this.settings_ = settings;
+      this.status_("#meter-status", "Opgeslagen", false);
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon de herinnering niet opslaan", error);
+      this.status_("#meter-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
+    }
+    this.paintHerinnering_();
   }
 
   status_(kiezer, tekst, fout) {

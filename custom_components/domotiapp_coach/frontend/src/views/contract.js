@@ -131,6 +131,8 @@ class DacViewContract extends DacEditorElement {
                 <label for="stroom-end">Mijn contract loopt af op</label>
                 <input type="date" id="stroom-end">
                 <span class="sub">Alleen bij een vast contract. Variabel en dynamisch zijn maandelijks opzegbaar.</span>
+                <label for="stroom-dagen" class="klein">Herinner me zoveel dagen vooraf</label>
+                <input type="number" id="stroom-dagen" min="0" max="365" step="1" inputmode="numeric">
               </div>
             </div>
 
@@ -304,6 +306,8 @@ class DacViewContract extends DacEditorElement {
               <div class="row" id="gas-eind-rij">
                 <label for="gas-end">Mijn contract loopt af op</label>
                 <input type="date" id="gas-end">
+                <label for="gas-dagen" class="klein">Herinner me zoveel dagen vooraf</label>
+                <input type="number" id="gas-dagen" min="0" max="365" step="1" inputmode="numeric">
               </div>
             </div>
             <div class="row" id="gas-prijs-rij">
@@ -376,6 +380,8 @@ class DacViewContract extends DacEditorElement {
 
     bind("stroom-start", (v) => (c().start = v));
     bind("stroom-end", (v) => (c().end = v));
+    bind("stroom-dagen", (v) => (c().reminder_days = v === "" ? 30 : Math.max(0, Math.round(Number(v) || 0))));
+    bind("gas-dagen", (v) => (this.gas_().reminder_days = v === "" ? 30 : Math.max(0, Math.round(Number(v) || 0))));
     bind("fx-price", (v) => (c().fixed.all_in_price = getal(v)));
     bind("fx-feedin", (v) => (c().fixed.feed_in_tariff = getal(v)));
     bind("fx-feedcost", (v) => (c().fixed.feed_in_costs = getal(v)));
@@ -625,6 +631,7 @@ class DacViewContract extends DacEditorElement {
     this.$("#stroom-lev").value = leverancier(contract.supplier) ? contract.supplier : "";
     this.$("#stroom-start").value = contract.start || "";
     this.$("#stroom-end").value = contract.end || "";
+    this.$("#stroom-dagen").value = contract.reminder_days ?? 30;
     this.$("#netting").checked = Boolean(contract.netting);
     this.$("#fx-price").value = contract.fixed.all_in_price || "";
     this.$("#fx-feedin").value = contract.fixed.feed_in_tariff || "";
@@ -648,6 +655,7 @@ class DacViewContract extends DacEditorElement {
     this.$("#gas-lev").value = leverancier(gas.supplier) ? gas.supplier : "";
     this.$("#gas-start").value = gas.start || "";
     this.$("#gas-end").value = gas.end || "";
+    this.$("#gas-dagen").value = gas.reminder_days ?? 30;
     this.$("#gas-price").value = gas.price || "";
     this.$("#gas-entity").value = gas.entity || "";
     this.$("#water-price").value = this.water_().price || "";
@@ -835,6 +843,7 @@ DacViewContract.css = /* css */ `
   }
   select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
   .sub a { color: var(--dac-accent-hi); }
+  label.klein { margin-top: 6px; font-size: 12.5px; font-weight: 500; color: var(--dac-ink-2); }
 
   .bevestig, .nieuw { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
   .bevestig[hidden], .nieuw[hidden] { display: none; }

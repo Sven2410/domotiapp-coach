@@ -21,6 +21,7 @@ from homeassistant.util import dt as dt_util
 
 from . import report
 from .const import (
+    EVENT_BERICHTEN,
     BONUS_OVER_MARKT,
     BONUS_OVER_MARKT_EN_VERGOEDING,
     ALL_BRANDS,
@@ -525,6 +526,7 @@ _SETTINGS = _schema(
                 vol.Optional("supplier"): vol.All(str, vol.Length(max=60)),
                 vol.Optional("start"): _DATUM,
                 vol.Optional("end"): _DATUM,
+                vol.Optional("reminder_days"): vol.All(vol.Coerce(int), vol.Range(0, 365)),
                 vol.Optional("confirmed"): _schema(
                     {
                         vol.Optional("at"): vol.All(str, vol.Length(max=40)),
@@ -543,6 +545,7 @@ _SETTINGS = _schema(
                         vol.Optional("entity"): _ENTITY,
                         vol.Optional("start"): _DATUM,
                         vol.Optional("end"): _DATUM,
+                        vol.Optional("reminder_days"): vol.All(vol.Coerce(int), vol.Range(0, 365)),
                         vol.Optional("periods"): vol.All([_VOLUME_PERIOD], vol.Length(max=24)),
                     }
                 ),
@@ -601,6 +604,12 @@ _SETTINGS = _schema(
             _schema({vol.Required("device"): str, vol.Required("car"): str})
         ],
         vol.Optional("thresholds"): _THRESHOLDS,
+        vol.Optional("reminders"): _schema(
+            {
+                vol.Optional("meter_date"): _DATUM,
+                vol.Optional("meter_repeat"): vol.In(["once", "month", "quarter", "year"]),
+            }
+        ),
     }
 )
 
@@ -1273,6 +1282,60 @@ async def async_contract_confirm(
     connection.send_result(msg["id"], settings)
 
 
+@websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/berichten/list"})
+@websocket_api.async_response
+async def async_berichten_list(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De berichtenbox (v0.130.0), voor iedereen: het zijn berichten aan de bewoner."""
+    from .storage import async_get_berichten
+
+    connection.send_result(msg["id"], await async_get_berichten(hass).async_list())
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/berichten/read",
+        # Leeg of weggelaten is alles.
+        vol.Optional("id"): vol.Any(None, str),
+    }
+)
+@websocket_api.async_response
+async def async_berichten_read(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Een bericht, of alles, als gelezen markeren (v0.130.0)."""
+    from .storage import async_get_berichten
+
+    items = await async_get_berichten(hass).async_read(msg.get("id") or None)
+    hass.bus.async_fire(EVENT_BERICHTEN, {"items": items})
+    connection.send_result(msg["id"], items)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/reminders/set",
+        vol.Optional("meter_date"): _DATUM,
+        vol.Optional("meter_repeat"): vol.In(["once", "month", "quarter", "year"]),
+    }
+)
+@websocket_api.async_response
+async def async_reminders_set(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De herinnering voor de meterstanden (v0.130.0). De bewoner zet hem zelf, onder Meldingen."""
+    wijziging = {k: msg[k] for k in ("meter_date", "meter_repeat") if k in msg}
+    settings = await async_get_store(hass).async_save({"reminders": wijziging})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], settings)
+
+
 @websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/coach/state"})
 @callback
 def async_coach_state(
@@ -1507,6 +1570,7 @@ def async_coach_pause(
 
 # Wat het paneel volgt, en onder welk event het op de bus van Home Assistant staat.
 _VOLGEN = {
+    "berichten": EVENT_BERICHTEN,
     "decision": EVENT_DECISION,
     "notification": EVENT_NOTIFICATION,
     "settings": EVENT_SETTINGS_UPDATED,
@@ -1568,6 +1632,9 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_prices)
     websocket_api.async_register_command(hass, async_contract_check)
     websocket_api.async_register_command(hass, async_contract_confirm)
+    websocket_api.async_register_command(hass, async_berichten_list)
+    websocket_api.async_register_command(hass, async_berichten_read)
+    websocket_api.async_register_command(hass, async_reminders_set)
     websocket_api.async_register_command(hass, async_notifications_list)
     websocket_api.async_register_command(hass, async_savings_list)
     websocket_api.async_register_command(hass, async_coach_approve)

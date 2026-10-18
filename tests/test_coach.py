@@ -9805,6 +9805,65 @@ c169 = v169b.resultaten[-1] if v169b.resultaten else {}
 controle("een bewoner kan geen concept laten narekenen: hij krijgt het opgeslagen contract",
          (c169.get("inkoop") or {}).get("belasting") == 0.09161, f"{c169.get('inkoop')}")
 
+print("=== 170. de berichtenbox: meterstanden, een contract dat afloopt, en een prijscontrole die omslaat (v0.130.0) ===")
+from domotiapp_coach import berichten as bm170  # noqa: E402
+from domotiapp_coach.storage import async_get_berichten as box170  # noqa: E402
+
+V170 = dt.date(2026, 10, 19)
+controle("maandelijks vanaf de 31e: in september de 30e", bm170.meterstand_wanneer(V170, "2026-01-31", "month") == dt.date(2026, 9, 30))
+controle("en de volgende keer 31 oktober", bm170.meterstand_volgende(V170, "2026-01-31", "month") == dt.date(2026, 10, 31))
+controle("elk kwartaal vanaf 15 oktober: de volgende is 15 januari",
+         bm170.meterstand_volgende(V170, "2026-10-15", "quarter") == dt.date(2027, 1, 15))
+controle("eenmalig: na die dag niets meer", bm170.meterstand_volgende(V170, "2026-10-01", "once") is None)
+controle("nog niet begonnen: geen bericht", bm170.meterstand_bericht(V170, {"meter_date": "2026-11-01"}) is None)
+controle("langer dan een week geleden: geen bericht meer",
+         bm170.meterstand_bericht(V170, {"meter_date": "2026-10-01", "meter_repeat": "once"}) is None)
+gas170 = {"type": "fixed", "end": "2026-10-17"}
+c170 = bm170.contract_berichten(V170, {"type": "fixed", "end": "2026-11-10", "gas": gas170})
+controle("stroom loopt af binnen 30 dagen, gas is net afgelopen",
+         [b["sleutel"] for b in c170] == ["contract:stroom:2026-11-10:voor", "contract:gas:2026-10-17:af"], f"{c170}")
+controle("een dynamisch contract heeft geen einde om te melden",
+         bm170.contract_berichten(V170, {"type": "dynamic", "end": "2026-11-10"}) == [])
+controle("met 0 dagen vooraf alleen op de einddatum",
+         bm170.contract_berichten(V170, {"type": "fixed", "end": "2026-11-10", "reminder_days": 0}) == [])
+controle("de prijscontrole: alleen bij een omslag van correct naar afwijking",
+         bm170.controle_bericht(V170, "correct", {"status": "afwijking", "grootste": -0.025}) is not None
+         and bm170.controle_bericht(V170, None, {"status": "afwijking"}) is None
+         and bm170.controle_bericht(V170, "afwijking", {"status": "afwijking"}) is None)
+
+# In de coach: de box krijgt ze, een keer, en ze gaan ook naar de geschiedenis.
+inst170 = instellingen()
+inst170["reminders"] = {"meter_date": "2026-10-19", "meter_repeat": "month"}
+inst170["contract"] = {**inst170["contract"], "end": "2026-11-10", "reminder_days": 30}
+hass170, store170, coach170 = bouw(huis(), inst170)
+NU170 = dt.datetime(2026, 10, 19, 8, 0)
+asyncio.run(coach170._async_berichten(inst170, NU170))
+items170 = asyncio.run(box170(hass170).async_list())
+print(f"  in de box: {[(i['kind'], i['title']) for i in items170]}")
+controle("twee berichten: de meterstanden en het contract", sorted(i["kind"] for i in items170) == ["contract", "meterstanden"],
+         f"{items170}")
+controle("ongelezen", all(i["read"] is False for i in items170))
+asyncio.run(coach170._async_berichten(inst170, NU170 + dt.timedelta(minutes=30)))
+controle("een halfuur later komt er niets bij", len(asyncio.run(box170(hass170).async_list())) == 2)
+asyncio.run(coach170._async_berichten(inst170, NU170 + dt.timedelta(days=1)))
+controle("de dag erna ook niet: dezelfde herinnering", len(asyncio.run(box170(hass170).async_list())) == 2)
+gelezen170 = asyncio.run(box170(hass170).async_read(items170[0]["id"]))
+controle("een bericht als gelezen markeren", sum(1 for i in gelezen170 if i["read"]) == 1)
+alles170 = asyncio.run(box170(hass170).async_read(None))
+controle("en alles", all(i["read"] for i in alles170))
+meld170 = asyncio.run(coachmod.async_get_meldingen(hass170).async_list())
+controle("het staat ook in de geschiedenis onder Meldingen",
+         any("meterstanden" in m["message"] for m in meld170), f"{[m['message'][:50] for m in meld170]}")
+
+# De prijscontrole slaat om: was correct, nu met de belasting van 2024.
+inst170b = instellingen()
+inst170b["contract"] = {**DYN166, "dynamic": {**DYN166["dynamic"], "energy_tax": 0.1088}}
+hass170b, _, coach170b = bouw(huis166, inst170b)
+coach170b._controle_status = "correct"
+asyncio.run(coach170b._async_berichten(inst170b, NU166))
+items170b = asyncio.run(box170(hass170b).async_list())
+controle("de prijscontrole slaat om: een bericht", [i["kind"] for i in items170b] == ["prijs"], f"{items170b}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
