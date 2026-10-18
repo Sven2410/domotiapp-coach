@@ -1255,6 +1255,12 @@ class Verloop:
     bat_levering_kwh: float = 0.0
     bat_kosten_met: float = 0.0
     bat_kosten_zonder: float = 0.0
+    # Per stap wat het huis zonder batterij van het net vroeg (W), en de prijs en
+    # de terugleverprijs van dat moment: de invoer voor de optimizer (v0.132.0).
+    bat_stappen: list = field(default_factory=list)
+    # Wat de dag met de batterij gekost had als een optimizer hem had gestuurd
+    # die alles vooraf wist, per kwartier; zie `bat_optimizer`.
+    bat_optimizer: float | None = None
     bat_stand: dict = field(default_factory=dict)
 
     def bat_wissels(self) -> int:
@@ -2431,6 +2437,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                 verloop.bat_verloop.append((nu, netto, wereld.bat_w, wereld.batterij.soc, stand))
                 kaart = (coach.state.get("batterij") or {}).get("earned") or {}
                 verloop.bat_kaart.append((nu, kaart.get("euro"), kaart.get("stock_euro")))
+                verloop.bat_stappen.append((zonder, prijs, terug))
                 verloop.bat_afname_kwh += max(0.0, netto) * deel_b
                 verloop.bat_levering_kwh += max(0.0, -netto) * deel_b
                 if prijs is not None:
@@ -2559,7 +2566,80 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
         verloop.optimum = optimum(s, coach, inst, kabel_in)
     except Exception as fout:  # noqa: BLE001 - het optimum is een maatstaf, geen proef
         verloop.fouten.append(f"optimum niet te bepalen: {fout!r}")
+    if s.batterij is not None and verloop.bat_verloop:
+        try:
+            verloop.bat_optimizer = bat_optimizer(s.batterij, verloop)
+        except Exception as fout:  # noqa: BLE001 - een maatstaf, geen proef
+            verloop.fouten.append(f"optimizer niet te bepalen: {fout!r}")
     return verloop
+
+
+def bat_optimizer(bat: Batterij, v: Verloop, kwartier_uur: float = 0.25, stap_kwh: float = 0.05) -> float:
+    """Wat de batterij die dag had kunnen opleveren met alles vooraf bekend (v0.132.0).
+
+    De bewoner van de eerste woning stuurde op 18-10-2026 het plan van de
+    optimizer van evcc (bèta): per kwartier wat de batterij doet, met de
+    verwachting van zon, huis en prijzen. Dit is zo'n optimizer, als maatstaf
+    voor de coach en niet als onderdeel ervan: dynamisch programmeren over wat
+    er in de batterij zit, per kwartier één vermogen, met hetzelfde huis,
+    dezelfde zon, dezelfde prijzen en dezelfde grenzen van de batterij als de
+    coach had (laden en ontladen, de accustand tussen zijn grenzen, het
+    rendement gelijk over heen en terug). Een kwartier kost wat het per minuut
+    kost, zoals de rekening van het virtuele huis (`bat_kosten_met`).
+
+    Hij eindigt minstens op de accustand waar de coach eindigde, anders zou
+    hij de batterij aan het eind gratis leegtrekken. Hij kent geen reserve,
+    geen volle beurt en geen voorrang voor de auto: wat de coach daarvoor
+    laat liggen is te zien als verschil.
+    """
+    stappen_per_kwartier = max(1, round(kwartier_uur / v.stap_uur))
+    eta = math.sqrt(min(max(bat.rte, 0.05), 1.0))
+    e_min = bat.capaciteit_kwh * bat.soc_min / 100.0
+    e_max = bat.capaciteit_kwh * bat.soc_max / 100.0
+    standen = int((e_max - e_min) / stap_kwh) + 1
+
+    def stand(soc: float) -> int:
+        return min(standen - 1, max(0, round((bat.capaciteit_kwh * soc / 100.0 - e_min) / stap_kwh)))
+
+    begin = stand(bat.soc)
+    eind_soc = v.bat_verloop[-1][3]
+    eind = min(standen - 1, max(0, int((bat.capaciteit_kwh * eind_soc / 100.0 - e_min) / stap_kwh)))
+
+    kwartieren = [v.bat_stappen[i:i + stappen_per_kwartier] for i in range(0, len(v.bat_stappen), stappen_per_kwartier)]
+    # Per kwartier de mogelijke stappen in de batterij, en wat het kwartier dan kost.
+    keuzes: list[list[tuple[int, float]]] = []
+    for kw in kwartieren:
+        duur = len(kw) * v.stap_uur
+        hoogste_in = int(bat.max_laden_w / 1000.0 * duur * eta / stap_kwh + 1e-9)
+        hoogste_uit = int(bat.max_ontladen_w / 1000.0 * duur / eta / stap_kwh + 1e-9)
+        opties = []
+        for k in range(-hoogste_uit, hoogste_in + 1):
+            ac_kwh = k * stap_kwh / eta if k > 0 else k * stap_kwh * eta
+            vermogen_w = ac_kwh / duur * 1000.0 if duur > 0 else 0.0
+            kosten = 0.0
+            for zonder, prijs, terug in kw:
+                if prijs is None:
+                    continue
+                netto = zonder + vermogen_w
+                kosten += netto * v.stap_uur / 1000.0 * (prijs if netto >= 0 else (terug or 0.0))
+            opties.append((k, kosten))
+        keuzes.append(opties)
+
+    oneindig = float("inf")
+    waarde = [0.0 if s >= eind else oneindig for s in range(standen)]
+    for opties in reversed(keuzes):
+        nieuw = [oneindig] * standen
+        for s in range(standen):
+            beste = oneindig
+            for k, kosten in opties:
+                t = s + k
+                if 0 <= t < standen:
+                    som = kosten + waarde[t]
+                    if som < beste:
+                        beste = som
+            nieuw[s] = beste
+        waarde = nieuw
+    return waarde[begin]
 
 
 def klaar_tijd_na(s: Scenario, moment: dt.datetime) -> dt.datetime | None:
@@ -2627,7 +2707,8 @@ def samenvatting(v: Verloop) -> str:
     if v.scenario.batterij is not None:
         eind = v.bat_verloop[-1][3] if v.bat_verloop else 0.0
         opt += (f"  batterij: net {v.bat_afname_kwh:.1f} kWh erin en {v.bat_levering_kwh:.1f} eruit, "
-                f"€{v.bat_kosten_met:.2f} tegen €{v.bat_kosten_zonder:.2f} zonder, "
+                f"€{v.bat_kosten_met:.2f} tegen €{v.bat_kosten_zonder:.2f} zonder"
+                f"{'' if v.bat_optimizer is None else f' en €{v.bat_optimizer:.2f} met de optimizer'}, "
                 f"{len(v.bat_opdrachten)} opdrachten, {v.bat_wissels()} wissels, eindigt op {eind:.0f}%")
     return (
         f"{s.naam:<28} {v.geladen_kwh:5.1f} kWh (zon {v.uit_zon_kwh:4.1f}, net {v.uit_net_kwh:4.1f})"

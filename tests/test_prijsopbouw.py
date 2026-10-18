@@ -132,6 +132,24 @@ controle("zonder het vinkje binnen salderen de all-in prijs min de opslag",
          abs(po.terug(0.15, 0.40, {**es, "netting_full": False, "feed_in_bonus": 0}, True, False)["bedrag"]
              - (0.40 - 0.02089 * 1.21)) < 1e-12)
 
+# Een vaste terugleververgoeding naast een dynamische inkoop (v0.132.0): buiten
+# salderen het vaste bedrag min de kosten, wat de markt ook doet; binnen salderen
+# blijft het de inkoopprijs.
+vt = {"vat_percent": 21, "supplier_markup": 0.02, "feed_in_costs": 0.01, "feed_in_mode": "fixed", "feed_in_fixed": 0.07,
+      "feed_in_bonus": 0.02, "feed_in_bonus_percent": 10}
+t = po.terug(0.15, 0.40, vt, salderen=False, overdag=True)
+print(f"  vast: {t['basis']:.4f} - {t['kosten']:.4f} = {t['bedrag']:.4f}")
+controle("vast bedrag: 0,07 min 0,01 kosten, zonder vergoeding of bonus over de markt",
+         abs(t["bedrag"] - 0.06) < 1e-12 and t.get("vast") is True and t["bonus"] == 0.0, f"{t}")
+controle("ook zonder marktprijs bekend", abs(po.terug(None, 0.40, vt, False, True)["bedrag"] - 0.06) < 1e-12)
+controle("binnen salderen nog steeds de inkoopprijs", po.terug(0.15, 0.40, vt, salderen=True, overdag=False).get("vast") is None)
+basis = {"type": "dynamic", "netting": True, "supplier": "", "fixed": {}, "dynamic": {"energy_tax": 0.09161, "vat_percent": 21}}
+met_standaard = {**basis, "dynamic": {**basis["dynamic"], "feed_in_mode": "market", "feed_in_fixed": 0.0}}
+controle("de nieuwe velden op hun standaard laten een bevestiging staan",
+         po.vingerafdruk(basis) == po.vingerafdruk(met_standaard))
+controle("maar een vast bedrag kiezen vraagt opnieuw om Ja, dit klopt",
+         po.vingerafdruk(basis) != po.vingerafdruk({**basis, "dynamic": {**met_standaard["dynamic"], "feed_in_mode": "fixed"}}))
+
 print("4. zonsopkomst en zonsondergang")
 def lokaal(d, lat=52.09, lon=5.12, uren=2):
     op, onder = po.zon_op_onder(d, lat, lon)

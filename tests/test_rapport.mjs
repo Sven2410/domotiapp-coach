@@ -4303,6 +4303,43 @@ proef("elk merk dat het paneel aanbiedt neemt de coach aan bij het opslaan (v0.1
   assert.ok(/ALL_BRANDS: Final = sorted\(\s*\{[^}]*\*AIRCO_BRANDS/.test(bron), "AIRCO_BRANDS zit in ALL_BRANDS");
 });
 
+// Het jaar in Historie met een startmaand (v0.132.0), zodat het met het contract
+// gelijkloopt. Wat vandaag is hangt van de klok af, dus de proef rekent per maand na
+// dat het jaar in die maand begint en vandaag erin valt.
+proef("Historie: het jaar begint in de gekozen maand, en vandaag valt erin (v0.132.0)", async () => {
+  const { periodStart, periodEnd, periodLabel } = await import("../custom_components/domotiapp_coach/frontend/src/statistics.js");
+  const nu = new Date();
+  for (let maand = 1; maand <= 12; maand++) {
+    const van = periodStart("year", 0, maand);
+    const tot = periodEnd("year", van);
+    assert.equal(van.getMonth(), maand - 1, `begint in maand ${maand}`);
+    assert.equal(van.getDate(), 1);
+    assert.ok(van <= nu && nu < tot, `vandaag valt in het jaar vanaf maand ${maand}: ${van.toISOString()}`);
+    const vorig = periodStart("year", -1, maand);
+    assert.equal(vorig.getFullYear(), van.getFullYear() - 1, "een jaar terug");
+  }
+  assert.equal(periodStart("year", 0).getMonth(), 0, "zonder keuze januari, zoals altijd");
+  assert.equal(periodLabel("year", new Date(2026, 6, 1)), "juli 2026 tot juni 2027");
+  assert.equal(periodLabel("year", new Date(2026, 0, 1)), "2026", "een kalenderjaar blijft een jaartal");
+  const vk = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/strategy.js", import.meta.url), "utf8");
+  assert.ok(vk.includes('id="jaar-start"') && vk.includes("year_start_month: Number(event.target.value)"));
+  const hist = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/history.js", import.meta.url), "utf8");
+  assert.ok(!hist.includes("periodStart(this.period_, this.offset_)"), "elke periode in Historie gaat via periodeStart_");
+});
+
+// Teruglevering tegen een vast bedrag (v0.132.0): de opbouw toont het bedrag en de kosten.
+proef("de opbouw van een vaste terugleververgoeding (v0.132.0)", async () => {
+  const { opbouwHtml } = await import("../custom_components/domotiapp_coach/frontend/src/opbouw.js");
+  const html = opbouwHtml({ soort: "dynamic", salderen: false, inkoop: { markt: 0.15, belasting: 0.09161, opslag: 0.02, subtotaal: 0.26161, btw_procent: 21, btw: 0.0549, totaal: 0.3165 },
+    terug: { bedrag: 0.06, salderen: false, basis: 0.07, kosten: 0.01, vergoeding: 0, bonus: 0, vast: true },
+    controle: { status: "onbekend", blokken: 0 } });
+  assert.ok(html.includes("Vaste terugleververgoeding") && html.includes("0,0700") && html.includes("0,0600"), html);
+  const terugDeel = html.slice(html.indexOf("Teruglevering nu"));
+  assert.ok(!terugDeel.includes("Kale marktprijs") && terugDeel.includes("uit je contract"), "geen marktprijs in de teruglevering");
+  const contract = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/contract.js", import.meta.url), "utf8");
+  assert.ok(contract.includes('data-terug="fixed"') && contract.includes('id="dyn-feedfixed"'));
+});
+
 // De koelkast (v0.131.0): net als de vriezer uitlezen en melden, met een grens van
 // 10 °C. De eigenaar op 19-10-2026: "boven de 10 graden".
 proef("de koelkast: een soort naast de vriezer, Miele en Overig, alleen meldingen, 10 °C (v0.131.0)", async () => {
@@ -4464,6 +4501,13 @@ proef("handelen zonder terugleverprijs: het vinkje kan niet aan, en Contract zeg
   assert.equal(geld.terugleverBekend({ type: "dynamic", netting: false, dynamic: { source: "market", market_entity: "sensor.nordpool" } }, nu),
     true, "een zelf opgebouwde prijs heeft de marktprijs al");
   assert.equal(geld.terugleverBekend({ type: "fixed", netting: false, fixed: {} }, nu), true, "een vast contract heeft een vergoeding");
+  // Een dynamische inkoop met een vaste terugleververgoeding (v0.132.0) is ook bekend,
+  // en rekent zoals `terug` in prijsopbouw.py (test_prijsopbouw.py).
+  const vastTerug = { ...dubbel, dynamic: { ...dubbel.dynamic, feed_in_mode: "fixed", feed_in_fixed: 0.07, feed_in_costs: 0.01 } };
+  assert.equal(geld.terugleverBekend(vastTerug, nu), true, "een vaste terugleververgoeding");
+  assert.ok(Math.abs(geld.terugOp(null, 0.40, vastTerug.dynamic, false, true) - 0.06) < 1e-12, "0,07 min 0,01");
+  assert.ok(Math.abs(geld.terugOp(0.15, 0.40, { ...vastTerug.dynamic, supplier_markup: 0 }, true, true) - 0.39) < 1e-12,
+    "binnen salderen de inkoopprijs min de kosten");
 
   const accu = { id: "b", type: "thuisbatterij", brand: "anker", name: "Anker", controllable: true, entities: {},
     battery: { ...defaultBattery("anker"), trade: false } };

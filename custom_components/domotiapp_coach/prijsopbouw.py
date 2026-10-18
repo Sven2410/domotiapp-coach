@@ -134,6 +134,13 @@ def terug(markt: float | None, all_in: float | None, d: dict, salderen: bool, ov
         bedrag = all_in - opslag - kosten + vergoeding + extra
         return {"bedrag": bedrag, "salderen": True, "basis": all_in, "opslag": opslag,
                 "kosten": kosten, "vergoeding": vergoeding, "bonus": extra}
+    if d.get("feed_in_mode") == "fixed":
+        # Een vaste terugleververgoeding naast een dynamische inkoop (v0.132.0):
+        # dan telt de marktprijs niet, en een bonus in procenten daarover ook
+        # niet. Wel de terugleverkosten.
+        vast = _getal(d.get("feed_in_fixed"))
+        return {"bedrag": vast - kosten, "salderen": False, "basis": vast, "opslag": 0.0,
+                "kosten": kosten, "vergoeding": 0.0, "bonus": 0.0, "vast": True}
     if markt is None:
         return {"bedrag": None, "salderen": False}
     basis = markt_terug(markt, d)
@@ -260,6 +267,11 @@ def overdag(start: datetime, einde: datetime, lat: float | None, lon: float | No
     return zon is not None and zon[0] <= midden < zon[1]
 
 
+# Velden van een dynamisch contract die er later bij kwamen, met hun standaard
+# (v0.132.0); zie `vingerafdruk`.
+LATER = {"feed_in_mode": "market", "feed_in_fixed": 0.0}
+
+
 def vingerafdruk(contract: dict) -> str:
     """Een korte handtekening van alles wat de prijs bepaalt, voor de bevestiging.
 
@@ -274,12 +286,18 @@ def vingerafdruk(contract: dict) -> str:
             return waarde if waarde is not None else ""
         return round(float(waarde), 6)
 
+    def dynamisch(velden: dict) -> dict:
+        # Een veld dat later kwam telt pas mee als het iets anders zegt dan
+        # zijn standaard: anders gold elke bevestiging van voor die uitgave
+        # niet meer, terwijl er niets aan de prijs veranderde.
+        return {k: gewoon(v) for k, v in velden.items() if LATER.get(k, object()) != v}
+
     deel = {
         "type": contract.get("type"),
         "netting": bool(contract.get("netting")),
         "supplier": contract.get("supplier") or "",
         "fixed": {k: gewoon(v) for k, v in (contract.get("fixed") or {}).items()},
-        "dynamic": {k: gewoon(v) for k, v in (contract.get("dynamic") or {}).items()},
+        "dynamic": dynamisch(contract.get("dynamic") or {}),
         "gas": {k: gewoon(v) for k, v in (contract.get("gas") or {}).items() if k != "periods"},
         "water": {k: gewoon(v) for k, v in (contract.get("water") or {}).items() if k != "periods"},
     }

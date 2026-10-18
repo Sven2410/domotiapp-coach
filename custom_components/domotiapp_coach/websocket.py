@@ -25,6 +25,8 @@ from .const import (
     BONUS_OVER_MARKT,
     BONUS_OVER_MARKT_EN_VERGOEDING,
     ALL_BRANDS,
+    FEED_IN_FIXED,
+    FEED_IN_MARKET,
     LEVELS,
     CONTRACT_DYNAMIC,
     CONTRACT_FIXED,
@@ -586,6 +588,8 @@ _SETTINGS = _schema(
                         ),
                         vol.Optional("feed_in_vat"): bool,
                         vol.Optional("netting_full"): bool,
+                        vol.Optional("feed_in_mode"): vol.In([FEED_IN_MARKET, FEED_IN_FIXED]),
+                        vol.Optional("feed_in_fixed"): _EURO,
                     }
                 ),
             }
@@ -1035,6 +1039,8 @@ async def async_set_device_preferences(
         vol.Required("type"): "domotiapp_coach/display/set",
         vol.Optional("thresholds"): _THRESHOLDS,
         vol.Optional("phases_on_overview"): bool,
+        # De maand waarin het jaar in Historie begint (v0.132.0).
+        vol.Optional("year_start_month"): vol.All(int, vol.Range(min=1, max=12)),
     }
 )
 @websocket_api.async_response
@@ -1054,6 +1060,8 @@ async def async_set_display(
         wijziging["thresholds"] = msg["thresholds"]
     if "phases_on_overview" in msg:
         wijziging["sources"] = {"phases_on_overview": msg["phases_on_overview"]}
+    if "year_start_month" in msg:
+        wijziging["history"] = {"year_start_month": msg["year_start_month"]}
     settings = await async_get_store(hass).async_save(wijziging)
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
     connection.send_result(msg["id"], settings)

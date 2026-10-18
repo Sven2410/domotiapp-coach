@@ -573,3 +573,16 @@ in de vakken van de grafiek. Het rapport rekent daarmee ook per vak met de prijs
 vak (`deviceRows_`).
 
 Proeven: vier "per apparaat" in test_rapport.mjs.
+
+## Het jaar begint in een gekozen maand (v0.132.0)
+
+Uit de voorbeelden die de eigenaar op 19-10-2026 stuurde: een andere energie-app laat het jaar
+beginnen in de maand waarin het contract ingaat. Onder Voorkeuren, bij Het overzicht, staat nu
+**Het jaar in Historie begint in** met de twaalf maanden; standaard januari. Het slaat meteen op
+via `display/set` (`year_start_month`, in `settings.history`), dus ook de bewoner kan het kiezen.
+
+`periodStart` in statistics.js krijgt de maand mee: het jaar van nu begon dit jaar of vorig jaar,
+afhankelijk van of die maand al geweest is. Elke periode in Historie gaat via `periodeStart_`
+(views/history.js), zodat de grafiek, In geld, de tijdlijn en het rapport hetzelfde jaar nemen.
+Een jaar dat niet in januari begint heet "juli 2026 tot juni 2027". Proef 173 in test_coach.py
+(het opslaan) en "Historie: het jaar begint in de gekozen maand" in test_rapport.mjs.

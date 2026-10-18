@@ -144,7 +144,27 @@ is, ook zonder reserve.
 test_prijsopbouw.py, proef 166 tot 168 in test_coach.py, en "geld.js rekent teruglevering en
 de bonus zoals prijsopbouw.py" in test_rapport.mjs.
 
-## Nog niet
+## Teruglevering apart: marktprijs of vast bedrag (v0.132.0)
 
-Een melding als de controle omslaat, en de herinnering dat een contract afloopt, komen in
-v0.130.0 met de berichtenbox.
+Sommige leveranciers combineren een dynamische inkoop met een vaste terugleververgoeding. Uit
+de voorbeelden die de eigenaar op 19-10-2026 stuurde (een andere energie-app, waar je inkoop
+en teruglevering los kiest). Bij een dynamisch contract staat daarom onder Contract de keuze
+**Teruglevering: Marktprijs of Vast bedrag** (`feed_in_mode`, `feed_in_fixed`).
+
+- **Buiten salderen** is een teruggeleverde kWh dan het vaste bedrag min de terugleverkosten
+  waard, wat de markt ook doet (`terug` in prijsopbouw.py, `terugOp` in geld.js). Een vergoeding
+  bovenop de markt, een bonus in procenten en teruglevering met btw gaan over de marktprijs en
+  staan dan niet op het scherm (`alleen-markt` in contract.js).
+- **Binnen salderen** blijft het de inkoopprijs, zoals altijd: salderen is een regel van de wet en
+  niet van de leverancier.
+- Een vaste vergoeding is altijd bekend, dus een batterij kan handelen zonder kale marktprijs
+  (`terugleverBekend` in geld.js; `_prices` in coach.py rekent hem zonder marktsensor).
+- De opbouw toont "Vaste terugleververgoeding" en de kosten, met "Het vaste bedrag uit je
+  contract" eronder (`terugRegels` in opbouw.js).
+
+De twee nieuwe velden tellen pas mee in de vingerafdruk van "Ja, dit klopt" als ze iets anders
+zeggen dan hun standaard (`LATER` in prijsopbouw.py). Anders gold na de update elke bevestiging
+niet meer, terwijl er aan de prijs niets veranderde.
+
+Proef 173 in test_coach.py, de vaste teruglevering in test_prijsopbouw.py, en twee proeven in
+test_rapport.mjs.

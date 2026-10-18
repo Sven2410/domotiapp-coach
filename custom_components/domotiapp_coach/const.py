@@ -236,6 +236,9 @@ PRICE_INTERVAL_QUARTER: Final = "quarter"
 # de kale prijs plus de vergoeding per kWh. Zie `prijsopbouw.bonus`.
 BONUS_OVER_MARKT: Final = "market"
 BONUS_OVER_MARKT_EN_VERGOEDING: Final = "market_plus_fee"
+# Waar de terugleverprijs van een dynamisch contract op rust (v0.132.0).
+FEED_IN_MARKET: Final = "market"
+FEED_IN_FIXED: Final = "fixed"
 
 # Nominal voltage per phase, used to turn the main fuse into a power ceiling.
 # 3 x 25 A -> 17250 W, 1 x 25 A -> 5750 W.
@@ -548,6 +551,13 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             # ook zijn opslag (v0.129.1). Zo niet, dan all-in min de opslag; zie
             # `prijsopbouw.terug`.
             "netting_full": False,
+            # Teruglevering tegen de marktprijs of tegen een vast bedrag
+            # (v0.132.0): sommige leveranciers combineren een dynamische inkoop
+            # met een vaste terugleververgoeding. Uit de voorbeelden van de
+            # eigenaar op 19-10-2026. Buiten salderen is een teruggeleverde kWh
+            # dan `feed_in_fixed` min de terugleverkosten waard.
+            "feed_in_mode": FEED_IN_MARKET,
+            "feed_in_fixed": 0.0,
         },
     },
     # Wie welke melding krijgt, en de zekeringmelding zelf. De eigenaar op 06-09-2026:
@@ -727,6 +737,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # Energy price in euro per kWh: below `low` is good, above `high` is bad.
         "price": {"low": 0.20, "high": 0.30},
     },
+    # Historie (v0.132.0): de maand waarin een jaar begint, zodat het jaar kan
+    # gelijklopen met het contract. Uit de voorbeelden van de eigenaar op
+    # 19-10-2026 (een andere energie-app met een startmaand). 1 is januari.
+    "history": {"year_start_month": 1},
 }
 
 # Apparaten met een programma die de coach start. De eigenaar op 06-09-2026: eerst
