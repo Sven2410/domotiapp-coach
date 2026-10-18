@@ -51,9 +51,13 @@ voorlopig (€ 0,08802 en € 0,61628, de Fiscale sleuteltabel 2027 na de tabelc
 
 `inkoop`: (kale marktprijs + energiebelasting + opslag) maal de btw. Een leverancier die zijn
 opslag na de btw optelt (Zonneplan: "(EB + EPEX) x 1,21 + 0,02", Frank Energie net zo) is
-rekenkundig hetzelfde met de opslag zonder btw (0,02 / 1,21 = 0,016529); de uitwerking laat
-hem in de volgorde van de leverancier zien (`opslagNaBtw` in de catalogus), zodat de klant hem
-naast de site van zijn leverancier kan leggen.
+rekenkundig hetzelfde met de opslag zonder btw (0,02 / 1,21 = 0,016529). De uitwerking zet
+sinds v0.129.1 alles zonder btw en dan een regel btw, bij inkoop en bij teruglevering; de
+eigenaar op 19-10-2026: "Doe alles mét, of alles zónder btw. Alles op dezelfde manier is
+eenvoudiger vergelijken en checken." En de bewoner van de eerste woning: teruglevering
+"identiek opbouwen als het overzicht van de afnameprijs", dus ook daar de kale prijs en de
+energiebelasting en btw als eigen regel. Staat salderen uit voor 2027, dan zegt het blok
+teruglevering dat het nog geldt (`salderenNoot` in opbouw.js).
 
 `controleer`: die opbouw naast de all-in sensor, over alle blokken die allebei kennen (een
 dag terug en wat er vooruit bekend is). Op de grofste van de twee: een leverancier per uur

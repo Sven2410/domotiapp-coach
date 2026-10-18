@@ -51,6 +51,55 @@ export function salderenNoot(check, nu = new Date()) {
   return `<p class="ob-noot ob-let">Je saldeert niet volgens de instellingen. Tot 1 januari 2027 krijg je over wat je teruglevert, tot aan je eigen verbruik, ook de energiebelasting en btw terug. Klopt dat bij jou, zet dan bij Contract "Je levert nog gesaldeerd terug" aan.</p>`;
 }
 
+/**
+ * De regels van de teruglevering tot aan de vergoeding, in dezelfde vorm als
+ * de inkoop: de kale marktprijs, dan wat er bij komt. Met salderen de
+ * energiebelasting en de btw, en de opslag alleen als de leverancier die ook
+ * teruggeeft (`netting_full`); zonder salderen de btw als hij met btw uitbetaalt.
+ */
+function terugRegels(check, t, w) {
+  const o = check.inkoop;
+  if (!o) {
+    // Zonder opbouw (geen kale marktprijs): alleen wat er is.
+    return [rij("", t.salderen ? "All-in prijs (je saldeert)" : "Kale marktprijs", euro4(t.basis))];
+  }
+  const procent = Number(o.btw_procent) || 0;
+  const factor = 1 + procent / 100;
+  // Wordt er met btw uitbetaald (bij salderen, of als de leverancier dat zo
+  // doet), dan staan de vergoeding, de kosten en de bonus hier zonder btw,
+  // net als bij de inkoop, en komt de btw er als een regel bij.
+  const metBtw = t.salderen || t.met_btw;
+  const zonder = (bedrag) => (metBtw ? bedrag / factor : bedrag);
+  const regels = [rij("", "Kale marktprijs", euro4(o.markt))];
+  let som = o.markt;
+  if (t.salderen) {
+    regels.push(rij("+", "Energiebelasting, terug omdat je saldeert", euro4(o.belasting)));
+    som += o.belasting;
+    if (t.vol) {
+      regels.push(rij("+", `${esc(w.opslag)}, ook terug`, euro4(o.opslag)));
+      som += o.opslag;
+    }
+  }
+  if (t.vergoeding) {
+    regels.push(rij(t.vergoeding < 0 ? "−" : "+", esc(w.vergoeding), euro4(Math.abs(zonder(t.vergoeding)))));
+    som += zonder(t.vergoeding);
+  }
+  if (t.kosten) {
+    regels.push(rij("−", esc(w.kosten), euro4(zonder(t.kosten))));
+    som -= zonder(t.kosten);
+  }
+  if (check.bonus_procent) {
+    const wanneer = check.bonus_overdag ? (check.overdag ? ", overdag" : ", alleen overdag: nu niet") : "";
+    regels.push(rij("+", `${esc(w.bonus)} ${String(check.bonus_procent).replace(".", ",")}%${wanneer}`, euro4(zonder(t.bonus || 0))));
+    som += zonder(t.bonus || 0);
+  }
+  if (metBtw) {
+    regels.push(rij("=", "Samen, zonder btw", euro4(som), "ob-tussen"));
+    regels.push(rij("+", `Btw ${String(procent).replace(".", ",")}%`, euro4(som * (factor - 1))));
+  }
+  return regels;
+}
+
 /** De zin onder de inkoop: klopt het, klopt het niet, of valt er niets te controleren. */
 export function controleZin(check, namen = {}) {
   const w = woorden(namen);
@@ -105,20 +154,17 @@ export function opbouwHtml(check, namen = {}) {
       const markt = marktMin && blokMin > marktMin
         ? `Kale marktprijs, gemiddelde van ${blokMin / marktMin === 4 ? "vier" : blokMin / marktMin} ${marktMin === 15 ? "kwartieren" : "blokken"}`
         : "Kale marktprijs";
-      const btw = `Btw ${String(o.btw_procent).replace(".", ",")}%`;
-      // In de volgorde van de leverancier: wie zijn opslag na de btw optelt
-      // (Zonneplan: "(EB + EPEX) x 1,21 + 0,02"), krijgt hem ook zo te zien.
-      const stappen = namen.opslagNaBtw
-        ? [rij("", esc(markt), euro4(o.markt)),
-          rij("+", "Energiebelasting", euro4(o.belasting)),
-          rij("=", "Samen, zonder btw", euro4(o.zonder_opslag), "ob-tussen"),
-          rij("+", btw, euro4(o.btw_zonder_opslag)),
-          rij("+", `${esc(w.opslag)}, met btw`, euro4(o.opslag_met_btw))]
-        : [rij("", esc(markt), euro4(o.markt)),
-          rij("+", "Energiebelasting", euro4(o.belasting)),
-          rij("+", esc(w.opslag), euro4(o.opslag)),
-          rij("=", "Samen, zonder btw", euro4(o.subtotaal), "ob-tussen"),
-          rij("+", btw, euro4(o.btw))];
+      // Alles zonder btw, dan een regel btw (v0.129.1). De eigenaar op
+      // 19-10-2026: "Doe alles mét, of alles zónder btw. Alles op dezelfde
+      // manier is eenvoudiger vergelijken en checken." Een leverancier die zijn
+      // opslag met btw noemt (Zonneplan: € 0,02) staat hier dus zonder.
+      const stappen = [
+        rij("", esc(markt), euro4(o.markt)),
+        rij("+", "Energiebelasting", euro4(o.belasting)),
+        rij("+", esc(w.opslag), euro4(o.opslag)),
+        rij("=", "Samen, zonder btw", euro4(o.subtotaal), "ob-tussen"),
+        rij("+", `Btw ${String(o.btw_procent).replace(".", ",")}%`, euro4(o.btw)),
+      ];
       delen.push(`<div class="ob-blok"><h4>Inkoop nu${tijd}</h4>
         ${stappen.join("")}
         ${rij("=", "All-in", euro4(o.totaal), "ob-totaal")}
@@ -134,16 +180,12 @@ export function opbouwHtml(check, namen = {}) {
 
     const t = check.terug;
     if (t && t.bedrag !== null && t.bedrag !== undefined) {
-      const regels = t.salderen
-        ? (t.vol
-          ? [rij("", "All-in prijs (je saldeert, en krijgt hem helemaal terug)", euro4(t.basis))]
-          : [rij("", "All-in prijs (je saldeert)", euro4(t.basis)), rij("−", `${esc(w.opslag)}, die komt niet terug`, euro4(t.opslag))])
-        : [rij("", t.met_btw ? "Kale marktprijs, met btw" : "Kale marktprijs", euro4(t.basis))];
-      if (t.kosten) regels.push(rij("−", esc(w.kosten), euro4(t.kosten)));
-      if (t.vergoeding) regels.push(rij(t.vergoeding < 0 ? "−" : "+", esc(w.vergoeding), euro4(Math.abs(t.vergoeding))));
-      if (check.bonus_procent) {
-        regels.push(rij("+", `${esc(w.bonus)} ${String(check.bonus_procent).replace(".", ",")}%${check.bonus_overdag ? (check.overdag ? ", overdag" : ", alleen overdag: nu niet") : ""}`, euro4(t.bonus)));
-      }
+      // Dezelfde opbouw als de inkoop erboven (v0.129.1). De bewoner van de
+      // eerste woning op 19-10-2026: "identiek opbouwen als het overzicht van
+      // de afnameprijs. Bij afname geef je de post kale marktprijs, bij
+      // teruglevering zeg je marktprijs met btw." Dus ook hier de kale prijs,
+      // en de btw en de energiebelasting als eigen regel.
+      const regels = terugRegels(check, t, w);
       regels.push(rij("=", "Per teruggeleverde kWh", euro4(t.bedrag), "ob-totaal"));
       delen.push(`<div class="ob-blok"><h4>Teruglevering nu</h4>${regels.join("")}
         <p class="ob-noot">Niet te controleren: ${esc(w.leverancier)} geeft de terugleverprijs niet door. Zo rekent de coach.</p>

@@ -4512,13 +4512,25 @@ proef("de opbouw in woorden en cijfers, in de volgorde van de leverancier, met d
     controle: { status: "correct", blokken: 24, stap_minuten: 60, grootste: 0.00001, vast: true },
   };
   const html = opbouwHtml(check, { opslag: "Inkoopvergoeding", bonus: "Zonnebonus", leverancier: "Zonneplan", opslagNaBtw: true });
-  for (const woord of ["Kale marktprijs, gemiddelde van vier kwartieren", "Energiebelasting", "Inkoopvergoeding, met btw",
-    "All-in", "Wat Zonneplan zegt", "€ 0,4090", "Zonnebonus 10%, alleen overdag: nu niet", "Kale marktprijs, met btw",
+  for (const woord of ["Kale marktprijs, gemiddelde van vier kwartieren", "Energiebelasting", "Inkoopvergoeding",
+    "All-in", "Wat Zonneplan zegt", "€ 0,4090", "Zonnebonus 10%, alleen overdag: nu niet",
     "De ingevoerde gegevens zijn correct", "Niet te controleren: Zonneplan geeft de terugleverprijs niet door"]) {
     assert.ok(html.includes(woord), woord);
   }
-  assert.ok(html.indexOf("Energiebelasting") < html.indexOf("Btw 21%") && html.indexOf("Btw 21%") < html.indexOf("Inkoopvergoeding, met btw"),
-    "Zonneplan telt zijn opslag na de btw op, en zo staat hij er ook");
+  // Alles zonder btw, dan een regel btw, bij inkoop en teruglevering (v0.129.1, de eigenaar op
+  // 19-10-2026: "Doe alles mét, of alles zónder btw").
+  assert.ok(!html.includes("met btw"), "geen bedrag met btw tussen de bedragen zonder");
+  assert.ok(html.indexOf("Energiebelasting") < html.indexOf("Inkoopvergoeding") && html.indexOf("Inkoopvergoeding") < html.indexOf("Btw 21%"),
+    "de opslag zonder btw voor de btw-regel, ook als de leverancier hem met btw noemt");
+  const terug = html.slice(html.indexOf("Teruglevering nu"));
+  assert.ok(terug.includes("Kale marktprijs") && terug.includes("Samen, zonder btw") && terug.includes("Btw 21%"),
+    "teruglevering in dezelfde vorm: de kale prijs, en de btw als eigen regel");
+  assert.ok(terug.includes("€ 0,0165"), "de € 0,02 van Zonneplan zonder btw");
+  const vol = opbouwHtml({ ...check, salderen: true, terug: { bedrag: 0.4090149, salderen: true, basis: 0.4090149, opslag: 0, kosten: 0,
+    vergoeding: 0, bonus: 0, vol: true } }, { opslag: "Inkoopvergoeding", leverancier: "Zonneplan" });
+  const volTerug = vol.slice(vol.indexOf("Teruglevering nu"));
+  assert.ok(volTerug.includes("Energiebelasting, terug omdat je saldeert") && volTerug.includes("Inkoopvergoeding, ook terug"),
+    "met salderen de energiebelasting en de opslag als eigen regel");
   const fout = controleZin({ ...check, controle: { status: "afwijking", grootste: -0.025, vast: true, stap_minuten: 60 } },
     { opslag: "Inkoopvergoeding", leverancier: "Zonneplan" });
   assert.equal(fout.toon, "fout");
