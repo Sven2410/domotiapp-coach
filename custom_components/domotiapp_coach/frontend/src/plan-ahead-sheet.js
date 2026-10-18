@@ -220,8 +220,10 @@ export class DacPlanAheadSheet extends DacElement {
 
   /** Openen met de tijdlijn zoals de coach hem net heeft uitgerekend. */
   open(label, besluit) {
-    // Een ander apparaat: geen gekozen moment van het vorige.
+    // Een ander apparaat: geen gekozen moment van het vorige, en de grafiek
+    // opnieuw vanaf het begin.
     this.gekozenStart_ = null;
+    this.prijsSleutel_ = null;
     this.label_ = label || "";
     this.besluit_ = besluit ?? null;
     this.plan_ = besluit?.plan_ahead ?? null;
@@ -244,7 +246,19 @@ export class DacPlanAheadSheet extends DacElement {
     this.$("dialog")?.close();
   }
 
+  /**
+   * Alles opnieuw, behalve de prijsgrafiek als die niet veranderd is (v0.129.1).
+   * De eigenaar op 19-10-2026: "als ik de slider naar rechts swipe schiet hij
+   * weer terug naar links." De coach geeft bij een batterij om de paar seconden
+   * een besluit, en elke keer werd de grafiek opnieuw gebouwd, terug naar het begin.
+   */
   paint_() {
+    this.prijsGezet_ = false;
+    this.paintInhoud_();
+    if (!this.prijsGezet_) this.paintPrijs_(null);
+  }
+
+  paintInhoud_() {
     this.$("#vooruit-title").textContent = this.label_;
     this.$("#vooruit-nu").textContent = this.reason_;
 
@@ -253,7 +267,6 @@ export class DacPlanAheadSheet extends DacElement {
     const uurlijst = this.$("#vooruit-uren");
     kop.replaceChildren();
     uurlijst.replaceChildren();
-    this.paintPrijs_(null);
 
     // Een thuisbatterij heeft geen tijdlijn tot een klaar-tijd maar een plan
     // per uur tot de prijzen ophouden; zie `batterijVooruit` in battery.js.
@@ -432,7 +445,15 @@ export class DacPlanAheadSheet extends DacElement {
    * momenten gaat laden." Zie prijsgrafiek.js.
    */
   paintPrijs_(rijen, wat = "laden") {
+    if (rijen) this.prijsGezet_ = true;
     const blok = this.$("#vooruit-prijs");
+    // Dezelfde prijzen en hetzelfde plan: laten staan zoals hij staat, met waar
+    // je naartoe veegde en wat je aantikte.
+    const sleutel = rijen ? JSON.stringify([rijen, wat]) : null;
+    if (sleutel !== null && sleutel === this.prijsSleutel_) return;
+    this.prijsSleutel_ = sleutel;
+    // Toch opnieuw: dan op dezelfde plek verder.
+    const veegPlek = blok.querySelector?.(".prijs-strook")?.scrollLeft ?? 0;
     blok.replaceChildren();
     const berekend = rijen ? prijsBalken(rijen) : null;
     blok.hidden = !berekend;
@@ -506,6 +527,9 @@ export class DacPlanAheadSheet extends DacElement {
     raam.className = "prijs-raam";
     raam.append(prijsAs(berekend), strook);
     blok.append(moment, kop, raam, legenda);
+    if (veegPlek && globalThis.requestAnimationFrame) {
+      globalThis.requestAnimationFrame(() => { strook.scrollLeft = veegPlek; });
+    }
   }
 
   /** De vakken bovenaan: label, waarde en een regel eronder. */

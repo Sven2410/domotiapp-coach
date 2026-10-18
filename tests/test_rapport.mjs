@@ -1375,6 +1375,20 @@ proef("kwartierprijzen: een staafje per kwartier, en de lijst een regel per uur 
   assert.equal(acc.uren[0].soc, "60%");
 });
 
+// De eigenaar op 19-10-2026: "als ik de slider naar rechts swipe schiet hij weer terug naar
+// links." De pop-up tekende bij elk besluit van de coach de grafiek opnieuw (v0.129.1).
+proef("hetzelfde plan opnieuw tekenen laat de prijsgrafiek staan, een ander plan bouwt hem opnieuw", () => {
+  const { el, knopen } = vooruitScherm(NACHT);
+  el.paint_();
+  const blok = knopen.get("#vooruit-prijs");
+  const eerst = blok.kinderen[0];
+  el.paint_();
+  assert.equal(blok.kinderen[0], eerst, "hetzelfde plan: dezelfde grafiek, dus waar je veegde blijft staan");
+  el.plan_ = { ...NACHT, blocks: NACHT.blocks.map((b, i) => (i === 0 ? { ...b, price: (b.price ?? 0) + 0.01 } : b)) };
+  el.paint_();
+  assert.notEqual(blok.kinderen[0], eerst, "een ander plan: opnieuw getekend");
+});
+
 proef("de pop-up zegt 'prijs per kwartier' bij kwartierprijzen", () => {
   const k = (m, charging) => ({ start: `2026-08-30T03:${String(m).padStart(2, "0")}:00`,
     end: `2026-08-30T03:${String(m + 14).padStart(2, "0")}:59`, price: 0.2 + m / 1000, charging, why: "x",
@@ -4512,13 +4526,25 @@ proef("de opbouw in woorden en cijfers, in de volgorde van de leverancier, met d
     controle: { status: "correct", blokken: 24, stap_minuten: 60, grootste: 0.00001, vast: true },
   };
   const html = opbouwHtml(check, { opslag: "Inkoopvergoeding", bonus: "Zonnebonus", leverancier: "Zonneplan", opslagNaBtw: true });
-  for (const woord of ["Kale marktprijs, gemiddelde van vier kwartieren", "Energiebelasting", "Inkoopvergoeding, met btw",
-    "All-in", "Wat Zonneplan zegt", "€ 0,4090", "Zonnebonus 10%, alleen overdag: nu niet", "Kale marktprijs, met btw",
+  for (const woord of ["Kale marktprijs, gemiddelde van vier kwartieren", "Energiebelasting", "Inkoopvergoeding",
+    "All-in", "Wat Zonneplan zegt", "€ 0,4090", "Zonnebonus 10%, alleen overdag: nu niet",
     "De ingevoerde gegevens zijn correct", "Niet te controleren: Zonneplan geeft de terugleverprijs niet door"]) {
     assert.ok(html.includes(woord), woord);
   }
-  assert.ok(html.indexOf("Energiebelasting") < html.indexOf("Btw 21%") && html.indexOf("Btw 21%") < html.indexOf("Inkoopvergoeding, met btw"),
-    "Zonneplan telt zijn opslag na de btw op, en zo staat hij er ook");
+  // Alles zonder btw, dan een regel btw, bij inkoop en teruglevering (v0.129.1, de eigenaar op
+  // 19-10-2026: "Doe alles mét, of alles zónder btw").
+  assert.ok(!html.includes("met btw"), "geen bedrag met btw tussen de bedragen zonder");
+  assert.ok(html.indexOf("Energiebelasting") < html.indexOf("Inkoopvergoeding") && html.indexOf("Inkoopvergoeding") < html.indexOf("Btw 21%"),
+    "de opslag zonder btw voor de btw-regel, ook als de leverancier hem met btw noemt");
+  const terug = html.slice(html.indexOf("Teruglevering nu"));
+  assert.ok(terug.includes("Kale marktprijs") && terug.includes("Samen, zonder btw") && terug.includes("Btw 21%"),
+    "teruglevering in dezelfde vorm: de kale prijs, en de btw als eigen regel");
+  assert.ok(terug.includes("€ 0,0165"), "de € 0,02 van Zonneplan zonder btw");
+  const vol = opbouwHtml({ ...check, salderen: true, terug: { bedrag: 0.4090149, salderen: true, basis: 0.4090149, opslag: 0, kosten: 0,
+    vergoeding: 0, bonus: 0, vol: true } }, { opslag: "Inkoopvergoeding", leverancier: "Zonneplan" });
+  const volTerug = vol.slice(vol.indexOf("Teruglevering nu"));
+  assert.ok(volTerug.includes("Energiebelasting, terug omdat je saldeert") && volTerug.includes("Inkoopvergoeding, ook terug"),
+    "met salderen de energiebelasting en de opslag als eigen regel");
   const fout = controleZin({ ...check, controle: { status: "afwijking", grootste: -0.025, vast: true, stap_minuten: 60 } },
     { opslag: "Inkoopvergoeding", leverancier: "Zonneplan" });
   assert.equal(fout.toon, "fout");
@@ -4528,6 +4554,13 @@ proef("de opbouw in woorden en cijfers, in de volgorde van de leverancier, met d
   const vast = controleZin({ soort: "fixed" });
   assert.ok(vast.tekst.startsWith("Niet te controleren"), vast.tekst);
   assert.equal(bevestigdZin({ bevestigd: false, bevestigd_op: null }), "Nog niet bevestigd.");
+  // Salderen uit voor 2027: de opbouw zegt dat het nog geldt (v0.129.1, de eerste woning op 19-10-2026).
+  const { salderenNoot } = await import("../custom_components/domotiapp_coach/frontend/src/opbouw.js");
+  assert.ok(salderenNoot({ salderen: false }, new Date(2026, 9, 19)).includes("Je levert nog gesaldeerd terug"));
+  assert.equal(salderenNoot({ salderen: true }, new Date(2026, 9, 19)), "", "met salderen aan niets");
+  assert.equal(salderenNoot({ salderen: false }, new Date(2027, 0, 2)), "", "na 2026 geldt het niet meer");
+  assert.ok(html.includes("Je saldeert niet volgens de instellingen") || new Date() >= new Date(2027, 0, 1),
+    "en het staat in het blok teruglevering");
   assert.ok(bevestigdZin({ bevestigd: true, bevestigd_op: "2026-10-18T21:41:00", bevestigd_door: "Bewoner" }).startsWith("Bevestigd door Bewoner op 18 oktober 2026"));
   assert.ok(bevestigdZin({ bevestigd: false, bevestigd_op: "2026-10-18T21:41:00" }).includes("opnieuw"));
 });
@@ -4569,7 +4602,7 @@ proef("Contract per energiebron: soort, leverancier, looptijd, opbouw, bevestige
 proef("de catalogus: elk voorstel rust op een bron en een datum, en vult alleen bekende velden (v0.129.0)", async () => {
   const cat = await import("../custom_components/domotiapp_coach/frontend/src/leveranciers.js");
   const VELDEN = new Set(["supplier_markup", "feed_in_costs", "feed_in_bonus", "feed_in_vat", "feed_in_bonus_percent",
-    "bonus_daytime", "bonus_base", "energy_tax", "vat_percent", "feed_in_tariff", "all_in_price", "price"]);
+    "bonus_daytime", "bonus_base", "energy_tax", "vat_percent", "feed_in_tariff", "all_in_price", "price", "netting_full"]);
   assert.ok(cat.LEVERANCIERS.length >= 1);
   const ids = new Set();
   for (const l of cat.LEVERANCIERS) {
@@ -4620,6 +4653,10 @@ proef("geld.js rekent teruglevering en de bonus zoals prijsopbouw.py (v0.129.0)"
   assert.ok(Math.abs(geld.terugOp(0.08 / 1.21, null, zp, false, true) - 0.11) < 1e-9, "Zonneplan: € 0,08 + € 0,02 + 10%");
   assert.ok(Math.abs(geld.terugOp(0.08 / 1.21, null, zp, false, false) - 0.10) < 1e-9, "zonder bonus na zonsondergang");
   assert.equal(geld.bonusOp(-0.05, zp, true), 0, "niet als markt plus vergoeding negatief is");
+  // Binnen salderen de hele all-in prijs terug (v0.129.1, Essent), zoals prijsopbouw.py.
+  const es = { vat_percent: 21, supplier_markup: 0.02089, feed_in_bonus: -0.02089, netting_full: true };
+  assert.equal(geld.terugOp(0.15, 0.40, es, true, false), 0.40);
+  assert.ok(Math.abs(geld.terugOp(0.15, 0.40, es, false, false) - (0.15 - 0.02089)) < 1e-12);
   const zon = geld.zonOpOnder(new Date(Date.UTC(2026, 9, 18, 12)), 52.09, 5.12);
   const op = zon[0].getUTCHours() * 60 + zon[0].getUTCMinutes();
   assert.ok(Math.abs(op - (6 * 60 + 7)) <= 3, `zonsopkomst Utrecht 18-10-2026 rond 06:07 UTC, kreeg ${zon[0].toISOString()}`);

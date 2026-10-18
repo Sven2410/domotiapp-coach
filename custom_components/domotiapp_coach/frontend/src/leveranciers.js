@@ -79,6 +79,7 @@ const ZONNEPLAN = {
           feed_in_costs: 0,
           feed_in_bonus: 0.02,
           feed_in_vat: true,
+          netting_full: true,
           feed_in_bonus_percent: 10,
           bonus_daytime: true,
           bonus_base: "market_plus_fee",

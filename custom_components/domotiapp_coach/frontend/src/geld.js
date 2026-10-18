@@ -132,7 +132,11 @@ export function terugOp(markt, allIn, d, metSalderen, isOverdag) {
   const vergoeding = Number(d?.feed_in_bonus) || 0;
   const opslag = (Number(d?.supplier_markup) || 0) * (1 + (Number(d?.vat_percent) || 0) / 100);
   const extra = markt === null || markt === undefined ? 0 : bonusOp(markt, d, isOverdag);
-  if (metSalderen) return allIn === null || allIn === undefined ? null : allIn - opslag - kosten + vergoeding + extra;
+  if (metSalderen) {
+    if (allIn === null || allIn === undefined) return null;
+    // De hele all-in prijs terug, ook de opslag, zoals `terug` in prijsopbouw.py (v0.129.1).
+    return d?.netting_full ? allIn + extra : allIn - opslag - kosten + vergoeding + extra;
+  }
   return markt === null || markt === undefined ? null : marktTerug(markt, d) - kosten + vergoeding + extra;
 }
 

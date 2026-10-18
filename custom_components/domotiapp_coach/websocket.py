@@ -582,6 +582,7 @@ _SETTINGS = _schema(
                             [BONUS_OVER_MARKT, BONUS_OVER_MARKT_EN_VERGOEDING]
                         ),
                         vol.Optional("feed_in_vat"): bool,
+                        vol.Optional("netting_full"): bool,
                     }
                 ),
             }

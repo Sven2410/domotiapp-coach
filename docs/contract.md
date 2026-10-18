@@ -28,6 +28,15 @@ de peildatum, en wat er onzeker bleef. Uitgezocht op 18-10-2026 van de sites, ta
 en voorwaarden van de leveranciers zelf; waar alleen een vergelijker iets noemt staat dat bij
 het bedrag. Gestopte leveranciers staan er niet in.
 
+Sinds v0.129.1 de hele lijst: Zonneplan met de hand in leveranciers.js, de andere 44 in
+leveranciers-data.js, omgezet uit het onderzoek van zeven groepen. Weggelaten: 16 gestopte
+leveranciers, 5 die waarschijnlijk niet meer leveren, 9 die alleen zakelijk leveren,
+coöperaties die doorverwijzen, en 2 zonder gegevens. Voorzichtig ingevuld: een opslag waarvan
+niet zeker is of hij met of zonder btw is, of waarover bronnen elkaar tegenspreken, staat niet
+in `velden` maar in `onzeker`, en Contract laat dat zien ("Niet zeker: ..."). Kiezen zet de
+soort contract niet om: de lijst kan een soort missen, en dan zou hij een goede keuze
+overschrijven.
+
 **Het is een voorstel, geen rekenregel.** Kiezen vult de velden; wat er daarna staat is van
 de klant, en de coach rekent alleen met die velden. Daarmee blijft de regel "nooit verzonnen
 getallen" heel: elk bedrag is een instelling die de klant bevestigde, en de controle meet
@@ -42,9 +51,13 @@ voorlopig (€ 0,08802 en € 0,61628, de Fiscale sleuteltabel 2027 na de tabelc
 
 `inkoop`: (kale marktprijs + energiebelasting + opslag) maal de btw. Een leverancier die zijn
 opslag na de btw optelt (Zonneplan: "(EB + EPEX) x 1,21 + 0,02", Frank Energie net zo) is
-rekenkundig hetzelfde met de opslag zonder btw (0,02 / 1,21 = 0,016529); de uitwerking laat
-hem in de volgorde van de leverancier zien (`opslagNaBtw` in de catalogus), zodat de klant hem
-naast de site van zijn leverancier kan leggen.
+rekenkundig hetzelfde met de opslag zonder btw (0,02 / 1,21 = 0,016529). De uitwerking zet
+sinds v0.129.1 alles zonder btw en dan een regel btw, bij inkoop en bij teruglevering; de
+eigenaar op 19-10-2026: "Doe alles mét, of alles zónder btw. Alles op dezelfde manier is
+eenvoudiger vergelijken en checken." En de bewoner van de eerste woning: teruglevering
+"identiek opbouwen als het overzicht van de afnameprijs", dus ook daar de kale prijs en de
+energiebelasting en btw als eigen regel. Staat salderen uit voor 2027, dan zegt het blok
+teruglevering dat het nog geldt (`salderenNoot` in opbouw.js).
 
 `controleer`: die opbouw naast de all-in sensor, over alle blokken die allebei kennen (een
 dag terug en wat er vooruit bekend is). Op de grofste van de twee: een leverancier per uur
@@ -55,7 +68,11 @@ zegt `vast` of het verschil elk uur even groot is: dan zit het in een bedrag per
 belasting van 2024 was dat in die woning 2,5 cent per kWh.
 
 `terug`: met salderen de all-in prijs min de opslag (die hangt aan de afname en komt niet
-terug), min de terugleverkosten, plus de vergoeding; zonder salderen de kale prijs (met btw
+terug; uit een energienota van 27-08-2026), min de terugleverkosten, plus de vergoeding. Of,
+met `netting_full` (v0.129.1), de hele all-in prijs: Essent en Energiedirect geven binnen
+salderen "per uur hetzelfde tarief terug als je betaalt, inclusief btw, energiebelasting en
+inkoopvergoeding", en ANWB, Oxxio en Zonneplan ook; hun aftrek of vergoeding geldt dan alleen
+daarbuiten; zonder salderen de kale prijs (met btw
 als `feed_in_vat`: Zonneplan betaalt in 2026 "de geldende stroomprijs exclusief
 energiebelasting") min de kosten plus de vergoeding. In allebei een bonus in procenten
 (`feed_in_bonus_percent`), over de marktprijs of over marktprijs plus vergoeding

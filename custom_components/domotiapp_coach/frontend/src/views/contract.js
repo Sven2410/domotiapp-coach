@@ -36,7 +36,6 @@ import {
   namenVan,
   nordPoolVan,
   sensorVan,
-  soortenVan,
   voorstel,
 } from "../leveranciers.js";
 
@@ -220,6 +219,10 @@ class DacViewContract extends DacEditorElement {
                   <span class="sub">Wat je leverancier per teruggeleverde kWh bovenop de marktprijs betaalt. Haalt hij er iets af, dan een negatief getal.</span>
                 </div>
               </div>
+              <label class="check" for="dyn-nettingfull">
+                <input type="checkbox" id="dyn-nettingfull">
+                <span><strong>Binnen salderen de hele all-in prijs terug</strong> Ook de opslag. Anders rekent de coach binnen salderen met de all-in prijs min de opslag.</span>
+              </label>
               <label class="check" for="dyn-feedvat">
                 <input type="checkbox" id="dyn-feedvat">
                 <span><strong>Teruglevering met btw</strong> De leverancier betaalt de marktprijs voor teruglevering inclusief btw.</span>
@@ -382,6 +385,7 @@ class DacViewContract extends DacEditorElement {
     bind("dyn-feedcost", (v) => (c().dynamic.feed_in_costs = getal(v)));
     bind("dyn-feedbonus", (v) => (c().dynamic.feed_in_bonus = getal(v)));
     bind("dyn-feedvat", (v) => (c().dynamic.feed_in_vat = Boolean(v)));
+    bind("dyn-nettingfull", (v) => (c().dynamic.netting_full = Boolean(v)));
     bind("dyn-bonuspct", (v) => (c().dynamic.feed_in_bonus_percent = getal(v)));
     bind("dyn-bonusbase", (v) => (c().dynamic.bonus_base = v));
     bind("dyn-bonusdag", (v) => (c().dynamic.bonus_daytime = Boolean(v)));
@@ -497,8 +501,9 @@ class DacViewContract extends DacEditorElement {
     deel.supplier = id;
     const l = leverancier(id);
     if (l) {
-      const soorten = soortenVan(id, bron);
-      if (soorten.length && !soorten.includes(deel.type)) deel.type = soorten[0];
+      // De soort blijft wat de klant koos: de catalogus kan een soort missen, en
+      // dan zou hij een goede keuze overschrijven. Heeft de leverancier die soort
+      // niet in de lijst, dan zegt de hint dat.
       const v = voorstel(id, deel.type, bron);
       if (v && bron === "stroom") {
         const doel = deel.type === "dynamic" ? deel.dynamic : deel.fixed;
@@ -634,6 +639,7 @@ class DacViewContract extends DacEditorElement {
     this.$("#dyn-feedcost").value = d.feed_in_costs ?? "";
     this.$("#dyn-feedbonus").value = d.feed_in_bonus ?? "";
     this.$("#dyn-feedvat").checked = Boolean(d.feed_in_vat);
+    this.$("#dyn-nettingfull").checked = Boolean(d.netting_full);
     this.$("#dyn-bonuspct").value = d.feed_in_bonus_percent || "";
     this.$("#dyn-bonusbase").value = d.bonus_base === "market_plus_fee" ? "market_plus_fee" : "market";
     this.$("#dyn-bonusdag").checked = Boolean(d.bonus_daytime);
