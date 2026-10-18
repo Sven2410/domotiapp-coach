@@ -64,7 +64,7 @@ const css = /* css */ `
     font: inherit; font-size: 13px; padding: 7px 12px; border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.04); color: var(--dac-ink); cursor: pointer;
   }
-  .gelezen-knop .icon { width: 14px; height: 14px; }
+  .gelezen-knop .icon, .alles .icon { width: 14px; height: 14px; flex: 0 0 auto; }
   .alles { margin: 0 0 12px; }
   .alles[hidden] { display: none; }
   .leeg { margin: 0; font-size: 13px; color: var(--dac-ink-2); }
