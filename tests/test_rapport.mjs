@@ -4296,11 +4296,32 @@ proef("elk merk dat het paneel aanbiedt neemt de coach aan bij het opslaan (v0.1
   for (const blok of bron.matchAll(/^[A-Z_]+_BRANDS: Final = \[([\s\S]*?)\]/gm)) {
     for (const m of blok[1].matchAll(/"([a-z_]+)"/g)) python.add(m[1]);
   }
-  const alle = ["laadpaal", "vaatwasser", "wasmachine", "droger", "vriezer", "thuisbatterij", "airco"]
+  const alle = ["laadpaal", "vaatwasser", "wasmachine", "droger", "vriezer", "koelkast", "thuisbatterij", "airco"]
     .flatMap((soort) => devs.brandsFor(soort).map((b) => `${soort}:${b.id}`));
   const mist = alle.filter((naam) => !python.has(naam.split(":")[1]));
   assert.deepEqual(mist, [], `niet in const.py: ${mist.join(", ")}`);
   assert.ok(/ALL_BRANDS: Final = sorted\(\s*\{[^}]*\*AIRCO_BRANDS/.test(bron), "AIRCO_BRANDS zit in ALL_BRANDS");
+});
+
+// De koelkast (v0.131.0): net als de vriezer uitlezen en melden, met een grens van
+// 10 °C. De eigenaar op 19-10-2026: "boven de 10 graden".
+proef("de koelkast: een soort naast de vriezer, Miele en Overig, alleen meldingen, 10 °C (v0.131.0)", async () => {
+  const devs = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  assert.ok(devs.DEVICE_TYPES.some((t) => t.id === "koelkast" && t.icon === "koelkast"));
+  assert.deepEqual(devs.brandsFor("koelkast").map((b) => [b.id, b.readOnly]), [["miele", true], ["overig", true]]);
+  const koel = { id: "k", type: "koelkast", brand: "miele", entities: {} };
+  assert.equal(devs.isReadOnly(koel), true, "de coach stuurt hem niet");
+  assert.ok(devs.brandMeta(koel).fields.find((f) => f.key === "temperature").hint.includes("warmer dan 10 °C"));
+  assert.ok(devs.koelUitleg("koelkast").includes("de koelkast") && devs.koelUitleg("koelkast").includes("10 °C"));
+  assert.ok(devs.koelUitleg("vriezer").includes("-15 °C"), "de vriezer houdt zijn grens");
+  assert.equal(devs.koelUitleg("airco"), "");
+  // Dezelfde soorten als const.py, in dezelfde volgorde, anders weigert het opslaan.
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/const.py", import.meta.url), "utf8");
+  const blok = bron.slice(bron.indexOf("DEVICE_TYPES: Final = ["));
+  const python = [...blok.slice(0, blok.indexOf("]")).matchAll(/^\s*"([a-z_]+)",/gm)].map((m) => m[1]);
+  assert.deepEqual(devs.DEVICE_TYPES.map((t) => t.id), python, "DEVICE_TYPES in devices.js en const.py");
+  const coach = readFileSync(new URL("../custom_components/domotiapp_coach/coach.py", import.meta.url), "utf8");
+  assert.ok(coach.includes('"koelkast": ("de koelkast", KOELKAST_GRENS_C)') && coach.includes("KOELKAST_GRENS_C = 10.0"));
 });
 
 proef("Miele: de velden, de vrijgave, het programma op de machine en geen tabel vooraf (v0.124.0)", async () => {

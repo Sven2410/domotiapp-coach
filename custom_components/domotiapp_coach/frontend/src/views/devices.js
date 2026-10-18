@@ -40,6 +40,8 @@ import {
   hasCars,
   isBattery,
   isReadOnly,
+  KOELWAREN,
+  koelUitleg,
   alleenUitlezen,
   growattVanzelf,
   isSmartPlug,
@@ -830,9 +832,8 @@ class DacViewDevices extends DacEditorElement {
     // Alleen uitlezen (Growatt, v0.123.0; een vriezer, v0.125.0): geen vinkje,
     // maar wel zeggen waarom.
     if (isReadOnly(device)) {
-      const wat = device.type === "vriezer"
-        ? "De coach stuurt de vriezer niet. Hij houdt hem in de gaten en stuurt een melding als de deur 3 minuten openstaat, als hij een half uur warmer is dan -15 °C, of als de vriezer een storing meldt."
-        : "De coach leest deze batterij alleen uit: hoe vol hij is, wat hij laadt en ontlaadt, en zijn tellers. Sturen doet hij hem niet.";
+      const wat = koelUitleg(device.type)
+        || "De coach leest deze batterij alleen uit: hoe vol hij is, wat hij laadt en ontlaadt, en zijn tellers. Sturen doet hij hem niet.";
       return `
       <p class="sub" data-read-only="${index}">${wat}</p>`;
     }
@@ -1020,7 +1021,7 @@ class DacViewDevices extends DacEditorElement {
     // twice.
     // Een merk dat alleen uitgelezen wordt heeft geen vermogenssensor (v0.123.0).
     const what = device.entity
-      || (isReadOnly(device) ? (device.type === "vriezer" ? "meldingen" : "alleen uitlezen") : "geen vermogenssensor");
+      || (isReadOnly(device) ? (KOELWAREN[device.type] ? "meldingen" : "alleen uitlezen") : "geen vermogenssensor");
     const brand = brandMeta(device)?.label;
     const prefix = brand ?? ((device.name ?? "").trim() ? kindLabel(device) : "");
     const altijd = canAlwaysOn(device) && device.always_on ? " · altijd aan" : "";
@@ -1636,7 +1637,7 @@ class DacViewDevices extends DacEditorElement {
           // laten staan die hier geen veld heeft.
           Object.assign(device, alleenUitlezen(device));
         }
-        // Een vriezer stuurt de coach niet (v0.125.0): dan ook niet op het
+        // Een vriezer of koelkast stuurt de coach niet (v0.125.0): dan ook niet op het
         // overzicht als iets om te sturen.
         if (!isBattery(device) && isReadOnly(device) && (field === "brand" || field === "type")) {
           device.controllable = false;

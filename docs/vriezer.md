@@ -1,4 +1,4 @@
-# De vriezer
+# De vriezer en de koelkast
 
 Komt er bij een uitgave iets bij over dit onderwerp, schrijf het dan hier. De eisen van de
 eigenaar en de werkafspraken staan in `CLAUDE.md` en gaan boven alles hier.
@@ -44,3 +44,28 @@ Miele zelf; een entiteit van de coach is er niet voor nodig, en die is er dus oo
 Proef 161 in test_coach.py, een proef in test_rapport.mjs. Geen scenario in het virtuele huis:
 de vriezer heeft geen energie, prijs of planning, en de meldingen zijn per ronde volledig na te
 bootsen in de proef.
+
+## De koelkast (v0.131.0)
+
+Uit een beheersessie in een klantwoning met een Miele-koelkast aan de integratie `miele`
+(18-10-2026). De eigenaar koos daar "ja, meldingen voor de koelkast ook": alleen uitlezen en
+melden, net als de vriezer. De grens koos hij op 19-10-2026: "boven de 10 graden". Met die van
+de vriezer zou een koelkast op 5 °C na een half uur elke keer melden.
+
+| melding | wanneer | constante in coach.py |
+|---|---|---|
+| de deur staat open | na 3 minuten, net als de vriezer | `VRIEZER_DEUR` |
+| de koelkast is te warm | een half uur warmer dan 10 °C | `KOELKAST_GRENS_C`, `VRIEZER_WARM` |
+| de koelkast meldt een storing | meteen | |
+
+Het is dezelfde wacht (`_async_vriezerwacht`), met per soort de naam en de grens in
+`KOELWAREN`; `KOELWAREN` in devices.js zegt hetzelfde in het paneel (de hints en de zin onder
+het apparaat, `koelUitleg`). Weer goed is een graad onder de grens, dus 9 °C. De merken zijn die
+van de vriezer (`KOELKAST_BRANDS` in const.py), allebei `readOnly`. Bij Miele zijn het de
+sensor Temperatuur (of de climate van de koelkast zelf), de binary_sensor Deur en de
+binary_sensor Probleem; ook hier zet Miele er twee spookzones bij (`zone_2`, `zone_3`).
+
+Een koelkast aan een smart plug blijft ook kunnen (`STEKKER_APPARATEN`): dan meet de coach het
+verbruik en kan hij hem altijd aan houden, maar meldt hij niets over de temperatuur.
+
+Proef 172 in test_coach.py, de proef "de koelkast" in test_rapport.mjs.

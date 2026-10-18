@@ -3,7 +3,7 @@
 Een custom integration voor Home Assistant die apparaten in huis op het
 gunstigste moment laat draaien: de laadpaal, de thuisbatterij, de vaatwasser, de wasmachine, de droger,
 de boiler en de airco, houdt een smart plug aan als dat moet, en meldt het als de vriezer
-openstaat of te warm wordt. Hij
+of de koelkast openstaat of te warm wordt. Hij
 wordt via HACS verspreid, dus alleen `custom_components/` gaat mee naar de klant.
 
 De eigenaar beoordeelt en beslist; ik bouw, test, commit, tag en breng uit.
@@ -203,7 +203,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de airco: bijverwarmen of bijkoelen op zon (of op goedkope uren als de bewoner dat kiest), geen thermostaat, Mitsubishi Electric als merk, de bewoner die wint, de cloud die een minuut doet, en het contract met de airco-kaart | `docs/airco.md` |
 | Historie en het rapport, het verbruik per apparaat (zoals het energiedashboard), batterij geladen en ontladen, de tijdlijn in Historie, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, en de batterij op de kaart en in de pop-up | `docs/eerste-woning.md` |
 | een smart plug: de lijst met apparaten en hun iconen, altijd aan (ook voor een vaatwasser aan een smart plug), en de melding Apparaat staat uit | `docs/smart-plug.md` |
-| de vriezer: uitlezen en melden (deur open, te warm, storing), niet sturen | `docs/vriezer.md` |
+| de vriezer en de koelkast: uitlezen en melden (deur open, te warm, storing), niet sturen | `docs/vriezer.md` |
 | het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat | `docs/paneel.md` |
 | de berichtenbox (het belletje), de herinnering voor de meterstanden, het bericht dat een contract afloopt of dat de prijscontrole omslaat | `docs/berichten.md` |
 | het contract: de leverancierscatalogus, de prijsopbouw en de controle tegen de all-in sensor, "Ja, dit klopt", de kale marktprijs als reserve, gas en water per energiebron, vast/variabel/dynamisch, looptijden en "nieuw contract afgesloten" | `docs/contract.md` |
@@ -322,11 +322,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 517 controles op het denkwerk
 python tests/test_batterij.py    # 200 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1252 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 1262 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2449 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 python tests/test_prijsopbouw.py # 34 op de prijsopbouw, de controle en zonsopkomst
-node   tests/test_rapport.mjs    # 212 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 213 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

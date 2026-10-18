@@ -73,6 +73,8 @@ DEVICE_TYPES: Final = [
     "droger",
     # Sinds v0.125.0: een vriezer die de coach in de gaten houdt en niet stuurt.
     "vriezer",
+    # Sinds v0.131.0: een koelkast, net als de vriezer, met een eigen grens.
+    "koelkast",
     "airco",
     # Sinds v0.120.0: een smart plug, met wat eraan hangt (`STEKKER_APPARATEN`).
     "smartplug",
@@ -165,6 +167,9 @@ VRIEZER_BRANDS: Final = [
     "miele",
     "overig",
 ]
+# De koelkast (v0.131.0) kent dezelfde twee: Miele en elke koelkast met een
+# temperatuursensor.
+KOELKAST_BRANDS: Final = VRIEZER_BRANDS
 
 # --- Battery brands ----------------------------------------------------------
 # Anker is de officiele Anker SOLIX-integratie, die lokaal via Modbus praat:
@@ -199,7 +204,8 @@ AIRCO_BRANDS: Final = [
 ]
 
 ALL_BRANDS: Final = sorted(
-    {*CHARGER_BRANDS, *DISHWASHER_BRANDS, *WASMACHINE_BRANDS, *VRIEZER_BRANDS, *BATTERY_BRANDS, *AIRCO_BRANDS}
+    {*CHARGER_BRANDS, *DISHWASHER_BRANDS, *WASMACHINE_BRANDS, *VRIEZER_BRANDS, *KOELKAST_BRANDS, *BATTERY_BRANDS,
+     *AIRCO_BRANDS}
 )
 
 # --- Grid metering patterns ------------------------------------------------
