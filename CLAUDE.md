@@ -238,7 +238,8 @@ dan de andere in dezelfde uitgave.
   websocket het opslaan (de airco tot v0.124.0); test_rapport.mjs controleert het.
 - **Salderen en de terugleverprijs**: `_salderen`, `_tariff`, `_prices` en
   `NETTING_ENDS` in coach.py en const.py tegenover `salderen`, `prijsOp` en
-  `SALDEREN_TOT` in geld.js (`docs/eerste-woning.md`).
+  `SALDEREN_TOT` in geld.js (`docs/eerste-woning.md`), en `terugleverBekend`
+  in geld.js, dat zegt of een batterij kan handelen (v0.128.2, `docs/batterij.md`).
 - **De zon in de thuisbatterij**: `zon_in_accu` in batterij.py (per dag in
   `solar_stored_days`) en de schatting `zonInAccu` in `huisMetAccu`
   (views/history.js) voor de uren daarvoor; `balans` in geld.js telt ze op

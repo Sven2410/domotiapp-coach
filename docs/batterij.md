@@ -977,6 +977,42 @@ avond met een prijs die hoger is dan de nacht wordt nog gewoon verhandeld. Proef
 test_batterij.py (valt om met v0.106.1). Een echte terugleverprijs krijgt de coach met
 een marktsensor die niet de all-in sensor is; het paneel zegt dat bij de prijsbron.
 
+## Handelen zonder terugleverprijs: het scherm zegt het (v0.128.2)
+
+De bewoner van de eerste woning op 18-10-2026, met de batterij op 95%, "7,1 kWh over" tot
+morgenvroeg en een avond van 17:45 tot 20:15 boven de 45 cent: "Het enige waar ik op dit
+moment nog niet echt tevreden over ben is het handelen (of eigenlijk het ontbreken ervan)."
+Handelen stond aan, maar in beide prijsvelden stond dezelfde all-in sensor en salderen stond
+uit. Dus was `feed_in` None in alle 50 blokken, liet `_mag_handelen` nooit iets naar het net
+gaan (v0.106.2), en zei de kaart alleen "Hij houdt de meter op nul". Dat het marktveld niet
+telde stond in de kleine letters erboven, en verder nergens.
+
+Nu zegt het scherm het op drie plekken, elk voor wie daar kijkt:
+
+- **De kaart van de batterij**, als tip naast de reden (`tip` in de toestand, zoals de tips
+  van de laadpaal): "Handelen staat aan, maar kan nu niet: de coach kent je terugleverprijs
+  niet. Daarvoor is bij Contract een marktprijssensor nodig, of salderen." Uit de prijzen
+  zelf (`handelen_kan_niet` in batterij.py): handelen aan en geen enkel komend blok met een
+  terugleverprijs. Zonder prijzen staat er al een andere reden, en een vast contract heeft
+  altijd een vergoeding. Niet naar de telefoon: het is een instelling, geen gebeurtenis.
+- **Het vinkje Handelen in Instellen**: zonder terugleverprijs kan het niet aan, wel uit, en
+  eronder staat waarom. Uit het contract (`terugleverBekend` in geld.js, dezelfde regels als
+  `_prices` en `_tariff`): een vast contract, salderen tot 2027, of een marktprijs die niet
+  de all-in sensor is.
+- **Contract**, bij het marktveld: een melding zodra daar dezelfde sensor staat als bij de
+  all-in prijs. Met salderen zegt die dat het tot 2027 niets uitmaakt.
+
+Proef 43 in test_batterij.py, 165 in test_coach.py, en de proef "handelen zonder
+terugleverprijs" in test_rapport.mjs.
+
+Wat de coach vanavond met een terugleverprijs had gedaan, nagerekend met de instellingen
+van de woning (rendement 74%, per richting 0,86): de batterij kwam de volgende dag om 14:00
+toch vol van de zon, dus een kWh die om 19:00 (€ 0,464) naar het net ging was vervangen
+door zon van 13:00 (€ 0,326). Met salderen en de verkoopvergoeding gelijk aan de opslag
+scheelt dat ongeveer 2 cent per kWh; met de Zonnebonus van die leverancier erbij (10% van
+de kale prijs overdag, die de coach niet kent) ongeveer niets. Handelen tegen eigen zon
+levert bij salderen weinig op: een teruggeleverde kWh is dan bijna de inkoopprijs waard.
+
 ## De temperatuur, de melding en de ventilator (v0.108.0)
 
 De eigenaar op 10-10-2026, met een schermafdruk van de batterijtemperatuur van zijn

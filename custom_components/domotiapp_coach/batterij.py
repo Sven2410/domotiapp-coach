@@ -307,6 +307,35 @@ def _mag_handelen(b: Batterij, rij: dict) -> bool:
     return b.handelen and rij.get("feed_in") is not None
 
 
+# Wat de kaart zegt als handelen aanstaat en niet kan (v0.128.2). Het paneel
+# zegt het ook, bij het vinkje (`HANDELEN_KAN_NIET` in voorkeur-velden.js) en
+# bij het marktveld van Contract.
+HANDELEN_KAN_NIET = (
+    "Handelen staat aan, maar kan nu niet: de coach kent je terugleverprijs niet. "
+    "Daarvoor is bij Contract een marktprijssensor nodig, of salderen."
+)
+
+
+def handelen_kan_niet(b: Batterij, prijzen: list[dict], now: datetime) -> bool:
+    """Of handelen aanstaat terwijl geen enkel komend blok een terugleverprijs heeft.
+
+    Dan laat `_mag_handelen` nooit iets naar het net, en tot v0.128.2 zei niets
+    op het scherm dat. De bewoner van de eerste woning op 18-10-2026, met de
+    batterij op 95%, "7,1 kWh over" tot morgenvroeg en een avond boven de 45
+    cent: "Het enige waar ik op dit moment nog niet echt tevreden over ben is
+    het handelen (of eigenlijk het ontbreken ervan)." Handelen stond aan, maar
+    in beide prijsvelden stond dezelfde all-in sensor en salderen stond uit,
+    dus in alle 50 blokken was `feed_in` None.
+
+    Een vast contract heeft altijd een terugleverprijs (`_vlakke_blokken`), en
+    zonder prijzen staat er al een andere reden op de kaart.
+    """
+    if not b.handelen:
+        return False
+    komend = [rij for rij in prijzen if rij["end"] > now]
+    return bool(komend) and all(rij.get("feed_in") is None for rij in komend)
+
+
 def _mogelijk(
     e: float, rij: dict, deel: float, huis: float, b: Batterij, som_laag: float,
     hoog: float, eta: float, piek: bool = True,

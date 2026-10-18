@@ -51,6 +51,7 @@ from .const import (
 from .archive import async_get_archive
 from .batterij import (
     HANDELEN,
+    HANDELEN_KAN_NIET,
     Besluit,
     MAX_LADEN,
     NETLADEN,
@@ -62,6 +63,7 @@ from .batterij import (
     Voorraad,
     auto_grens,
     balans_kwh,
+    handelen_kan_niet,
     met_paal,
     plan_batterij,
     rendement_uit_tellers,
@@ -6036,7 +6038,9 @@ class ChargerCoach:
                 }
                 for uur in besluit.uren[:48]
             ],
-            "tip": "",
+            # Iets dat alleen de bewoner of de installateur kan verhelpen, naast
+            # de reden op de kaart (v0.128.2). Zie `handelen_kan_niet`.
+            "tip": HANDELEN_KAN_NIET if handelen_kan_niet(b, prijzen, now) else "",
         }
 
         kern = (besluit.stand, besluit.rule, stuurt)

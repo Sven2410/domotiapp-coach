@@ -58,6 +58,22 @@ export function salderen(contract, when) {
 }
 
 /**
+ * Of de coach weet wat teruglevering opbrengt, zoals `_prices` en `_tariff` in
+ * coach.py (v0.128.2). Een vast contract heeft een terugleververgoeding, bij
+ * salderen volgt hij uit de inkoopprijs, en een zelf opgebouwde prijs heeft de
+ * marktprijs al. Alleen een all-in prijs zonder een andere marktprijssensor
+ * laat hem open: dezelfde sensor twee keer telt niet. Zonder kan een
+ * thuisbatterij niet handelen (`_mag_handelen` in batterij.py).
+ */
+export function terugleverBekend(contract, when = new Date()) {
+  if (contract?.type !== "dynamic") return true;
+  if (salderen(contract, when)) return true;
+  const d = contract.dynamic ?? {};
+  if (d.source !== "all_in") return Boolean(d.market_entity);
+  return Boolean(d.market_entity) && d.market_entity !== d.all_in_entity;
+}
+
+/**
  * Wat een kWh op dat moment kost en wat een teruggeleverde opbrengt.
  *
  * Dezelfde regels als `_tariff` en `_prices` in coach.py. Bij salderen streept

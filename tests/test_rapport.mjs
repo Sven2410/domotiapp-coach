@@ -2988,7 +2988,8 @@ proef("de rijen onder een vinkje van de batterij verdwijnen echt als het vinkje 
   const velden = nepVelden(voorkeurHtml({ id: "b", type: "thuisbatterij", battery: {} }));
   vulVoorkeuren(velden, { id: "b", type: "thuisbatterij", battery: {} });
   assert.deepEqual(velden.rijen.filter((r) => r.hidden).map((r) => r.sleutel).sort(),
-    ["holiday_max_percent", "reserve_percent", "weekly_full_day"], "reserve, de dag en de vakantiestand");
+    // En de melding bij Handelen zonder terugleverprijs (v0.128.2), die hier geen contract heeft.
+    ["holiday_max_percent", "reserve_percent", "trade_kan_niet", "weekly_full_day"], "reserve, de dag en de vakantiestand");
 });
 
 proef("de keuzelijst zet temperatuursensoren bovenaan bij de temperatuur van de batterij", () => {
@@ -4372,6 +4373,61 @@ proef("de vriezer: Miele en Overig, temperatuur, deur en storing, en niets om te
   const rij = (label) => r.devices[0].details.find((d) => d.label === label)?.text;
   assert.equal(rij("Temperatuur"), "-18,3 °C");
   assert.equal(rij("Deur"), "Dicht");
+});
+
+// De eerste woning op 18-10-2026: handelen aan, in beide prijsvelden dezelfde all-in
+// sensor en salderen uit. De coach kende de terugleverprijs niet en handelde nooit, en
+// dat stond alleen in de kleine letters bij het marktveld (v0.128.2).
+proef("handelen zonder terugleverprijs: het vinkje kan niet aan, en Contract zegt waarom (v0.128.2)", async () => {
+  const dubbel = { type: "dynamic", netting: false,
+    dynamic: { source: "all_in", all_in_entity: "sensor.prijs", market_entity: "sensor.prijs" } };
+  const nu = new Date(2026, 9, 18, 18, 10);
+  assert.equal(geld.terugleverBekend(dubbel, nu), false, "dezelfde sensor twee keer: onbekend");
+  assert.equal(geld.terugleverBekend({ ...dubbel, netting: true }, nu), true, "met salderen volgt hij uit de inkoopprijs");
+  assert.equal(geld.terugleverBekend({ ...dubbel, netting: true }, new Date(2027, 0, 2)), false, "maar na 2026 niet meer");
+  assert.equal(geld.terugleverBekend({ ...dubbel, dynamic: { ...dubbel.dynamic, market_entity: "sensor.nordpool" } }, nu), true,
+    "een andere marktprijssensor");
+  assert.equal(geld.terugleverBekend({ ...dubbel, dynamic: { ...dubbel.dynamic, market_entity: "" } }, nu), false, "geen marktprijssensor");
+  assert.equal(geld.terugleverBekend({ type: "dynamic", netting: false, dynamic: { source: "market", market_entity: "sensor.nordpool" } }, nu),
+    true, "een zelf opgebouwde prijs heeft de marktprijs al");
+  assert.equal(geld.terugleverBekend({ type: "fixed", netting: false, fixed: {} }, nu), true, "een vast contract heeft een vergoeding");
+
+  const accu = { id: "b", type: "thuisbatterij", brand: "anker", name: "Anker", controllable: true, entities: {},
+    battery: { ...defaultBattery("anker"), trade: false } };
+  const velden = nepVelden(voorkeurHtml(accu));
+  const handel = velden.veld("data-vk-accu", "trade");
+  const melding = velden.rijen.find((r) => r.sleutel === "trade_kan_niet");
+  assert.ok(handel && melding, "het vinkje en de melding staan in Instellen");
+  vulVoorkeuren(velden, accu, null, dubbel);
+  assert.equal(handel.disabled, true, "uit en geen terugleverprijs: aanzetten kan niet");
+  assert.equal(melding.hidden, false, "en er staat waarom");
+  vulVoorkeuren(velden, { ...accu, battery: { ...accu.battery, trade: true } }, null, dubbel);
+  assert.equal(handel.checked, true);
+  assert.equal(handel.disabled, false, "stond hij al aan, dan mag hij nog wel uit");
+  assert.equal(melding.hidden, false, "met de melding erbij");
+  vulVoorkeuren(velden, accu, null, { ...dubbel, netting: true });
+  assert.equal(handel.disabled, false, "met een terugleverprijs is het vinkje vrij");
+  assert.equal(melding.hidden, true, "en de melding weg");
+  vulVoorkeuren(velden, accu);
+  assert.equal(handel.disabled, false, "zonder contract erbij blijft het vinkje vrij");
+
+  const html = Object.create(Contract.prototype).render();
+  assert.ok(html.includes('id="dyn-same"') && html.includes('id="dyn-same-text"'), "Contract heeft een melding bij het marktveld");
+  const el = Object.create(Contract.prototype);
+  const nep = {};
+  el.$ = (kiezer) => (nep[kiezer] ??= { style: {}, hidden: false, textContent: "", value: "",
+    classList: { toggle() {} }, setAttribute() {} });
+  el.$$ = () => [];
+  el.draft_ = { contract: { ...dubbel, dynamic: { ...dubbel.dynamic } } };
+  el.paintContract_();
+  assert.equal(nep["#dyn-same"].hidden, false, "dezelfde sensor twee keer: de melding staat er");
+  assert.match(nep["#dyn-same-text"].textContent, /niet handelen/, nep["#dyn-same-text"].textContent);
+  el.draft_.contract.netting = true;
+  el.paintContract_();
+  assert.match(nep["#dyn-same-text"].textContent, /Zolang je saldeert/, "met salderen een andere zin");
+  el.draft_.contract.dynamic.market_entity = "sensor.nordpool";
+  el.paintContract_();
+  assert.equal(nep["#dyn-same"].hidden, true, "een andere sensor: geen melding");
 });
 
 for (const [naam, fn] of proeven) {

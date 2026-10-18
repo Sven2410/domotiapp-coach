@@ -17,6 +17,7 @@ import {
   saveBarHtml,
 } from "./editor-base.js";
 import "../components/entity-picker.js";
+import { salderen } from "../geld.js";
 
 const euro = (v) =>
   Number(v ?? 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -147,6 +148,10 @@ class DacViewContract extends DacEditorElement {
                     een andere sensor zijn dan de all-in sensor: dezelfde sensor twee keer
                     telt niet, want een all-in prijs is geen marktprijs.
                   </span>
+                </div>
+                <div class="notice" id="dyn-same" hidden>
+                  ${icons.warning}
+                  <span id="dyn-same-text"></span>
                 </div>
               </div>
 
@@ -279,6 +284,8 @@ class DacViewContract extends DacEditorElement {
 
     this.$("#netting").addEventListener("change", (ev) => {
       this.draft_.contract.netting = ev.target.checked;
+      // De waarschuwing bij het marktveld hangt ervan af.
+      this.paintContract_();
       this.afterChange_();
     });
 
@@ -445,6 +452,16 @@ class DacViewContract extends DacEditorElement {
     // they are misleading: the price already contains them.
     this.$("#dyn-allin-row").style.display = source === "all_in" ? "" : "none";
     this.$("#dyn-market-feed").value = contract.dynamic.market_entity ?? "";
+    // Dezelfde sensor twee keer laat de coach het marktveld leeg (`_prices` in
+    // coach.py), en tot v0.128.2 stond dat alleen in de kleine letters erboven.
+    // In de eerste woning op 18-10-2026 stond hij zo, met salderen uit, en
+    // handelde de batterij nooit.
+    const zelfde = source === "all_in" && Boolean(contract.dynamic.market_entity)
+      && contract.dynamic.market_entity === contract.dynamic.all_in_entity;
+    this.$("#dyn-same").hidden = !zelfde;
+    this.$("#dyn-same-text").textContent = !zelfde ? "" : salderen(contract, new Date())
+      ? "Dit is dezelfde sensor als de all-in prijs, en die telt niet als marktprijs. Zolang je saldeert rekent de coach de terugleverprijs uit de all-in prijs; daarna heeft hij een kale marktprijs nodig, zoals de ingebouwde Nord Pool."
+      : "Dit is dezelfde sensor als de all-in prijs, en die telt niet als marktprijs. Zo kent de coach je terugleverprijs niet, en kan een thuisbatterij niet handelen. Kies een kale marktprijs, zoals de ingebouwde Nord Pool.";
     this.$("#dyn-market-fields").style.display = source === "market" ? "" : "none";
     // De reserve: wat voor prijs hij geeft, alleen als er een is. De
     // energiebelasting is nodig bij een marktprijs, van de eigen bron of van de

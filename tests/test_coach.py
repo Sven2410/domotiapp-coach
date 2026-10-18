@@ -9627,6 +9627,47 @@ controle("en het uur van nu laadt ook op de tijdlijn",
 controle("geen uur ertussen dat wacht",
          not any(not b["charging"] and "duurder" in b["why"] for b in blokken164), f"{blokken164}")
 
+print("=== 165. handelen aan zonder terugleverprijs: de kaart zegt het (v0.128.2) ===")
+# De eerste woning op 18-10-2026: handelen aan, in beide prijsvelden dezelfde
+# all-in sensor en salderen uit. De batterij handelde nooit, en de kaart zei
+# alleen "Hij houdt de meter op nul".
+from domotiapp_coach.batterij import HANDELEN_KAN_NIET  # noqa: E402
+
+def prijzen165():
+    rijen = []
+    for i in range(30):
+        start = dt.datetime(2026, 10, 18, 0, 0) + dt.timedelta(hours=i)
+        prijs = 0.46 if 18 <= start.hour < 21 else 0.35
+        rijen.append({"from": start.isoformat() + "+02:00",
+                      "till": (start + dt.timedelta(hours=1)).isoformat() + "+02:00", "price": prijs})
+    return rijen
+
+ACCU165 = {**BATTERIJ, "battery": {**BATTERIJ["battery"], "trade": True}}
+DUBBEL165 = {"type": "dynamic", "netting": False,
+             "dynamic": {"source": "all_in", "interval": "hour", "all_in_entity": "sensor.prijs",
+                         "market_entity": "sensor.prijs", "energy_tax": 0.0916, "supplier_markup": 0.0165,
+                         "vat_percent": 21, "feed_in_costs": 0}}
+huis165 = {**huis75(soc="95"), "sensor.prijs": {"state": "0.46", "attributes": {
+    "unit_of_measurement": "€/kWh", "prices": prijzen165()}}}
+NU165 = dt.datetime(2026, 10, 18, 18, 10)
+
+def tip165(accu, contract):
+    inst = instellingen(devices=[LAADPAAL, accu])
+    inst["contract"] = contract
+    hass, _, coach = bouw(huis165, inst)
+    return asyncio.run(ronde75(hass, coach, NU165))
+
+b165 = tip165(ACCU165, DUBBEL165)
+print(f"  dezelfde sensor, salderen uit: {b165.get('mode')}, tip: {b165.get('tip')!r}")
+controle("de kaart zegt dat handelen niet kan, en waarom", b165.get("tip") == HANDELEN_KAN_NIET, f"{b165.get('tip')}")
+controle("en hij handelt niet", b165.get("mode") != "handelen", f"{b165.get('mode')}")
+b165s = tip165(ACCU165, {**DUBBEL165, "netting": True})
+controle("met salderen kent hij de terugleverprijs: geen tip", not b165s.get("tip"), f"{b165s.get('tip')}")
+b165u = tip165(BATTERIJ, DUBBEL165)
+controle("handelen uit: geen tip", not b165u.get("tip"), f"{b165u.get('tip')}")
+b165v = tip165(ACCU165, instellingen()["contract"])
+controle("een vast contract heeft altijd een terugleverprijs: geen tip", not b165v.get("tip"), f"{b165v.get('tip')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
