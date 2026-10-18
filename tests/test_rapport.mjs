@@ -1375,6 +1375,20 @@ proef("kwartierprijzen: een staafje per kwartier, en de lijst een regel per uur 
   assert.equal(acc.uren[0].soc, "60%");
 });
 
+// De eigenaar op 19-10-2026: "als ik de slider naar rechts swipe schiet hij weer terug naar
+// links." De pop-up tekende bij elk besluit van de coach de grafiek opnieuw (v0.129.1).
+proef("hetzelfde plan opnieuw tekenen laat de prijsgrafiek staan, een ander plan bouwt hem opnieuw", () => {
+  const { el, knopen } = vooruitScherm(NACHT);
+  el.paint_();
+  const blok = knopen.get("#vooruit-prijs");
+  const eerst = blok.kinderen[0];
+  el.paint_();
+  assert.equal(blok.kinderen[0], eerst, "hetzelfde plan: dezelfde grafiek, dus waar je veegde blijft staan");
+  el.plan_ = { ...NACHT, blocks: NACHT.blocks.map((b, i) => (i === 0 ? { ...b, price: (b.price ?? 0) + 0.01 } : b)) };
+  el.paint_();
+  assert.notEqual(blok.kinderen[0], eerst, "een ander plan: opnieuw getekend");
+});
+
 proef("de pop-up zegt 'prijs per kwartier' bij kwartierprijzen", () => {
   const k = (m, charging) => ({ start: `2026-08-30T03:${String(m).padStart(2, "0")}:00`,
     end: `2026-08-30T03:${String(m + 14).padStart(2, "0")}:59`, price: 0.2 + m / 1000, charging, why: "x",
