@@ -1,11 +1,20 @@
 /**
- * Contract -- wat de stroom kost, nu en vroeger.
+ * Contract -- wat stroom, gas en water kosten, nu en vroeger.
  *
  * Stond tot v0.114.0 onder Installatie. De eigenaar op 08-10-2026: "sommige
  * dingen kunnen van installatie naar instellingen of andersom, het moet beter
  * gecategoriseerd worden." Installatie is nu hoe het huis gemeten wordt en wat
  * het aankan; wat het kost is een eigen onderwerp, en alleen de installateur
  * ziet het.
+ *
+ * Sinds v0.129.0 per energiebron. De bewoner van de eerste woning op
+ * 18-10-2026: "Eerst álles uitvragen over elektriciteit (incl historische
+ * contracten), dán pas alles over gas (en mogelijk ook te kiezen tussen vast en
+ * dynamisch), en daarna pas water." Per bron een leverancier uit de catalogus
+ * (`leveranciers.js`) die de velden voorinvult, de looptijd, en de knop "Ik heb
+ * een nieuw contract afgesloten" die het huidige contract bij de eerdere zet.
+ * Bij stroom de opbouw in woorden en cijfers (`opbouw.js`), nagerekend door de
+ * coach tegen de all-in sensor, en "Ja, dit klopt".
  */
 
 import { define } from "../base.js";
@@ -18,84 +27,132 @@ import {
 } from "./editor-base.js";
 import "../components/entity-picker.js";
 import { salderen } from "../geld.js";
+import { bevestigdZin, opbouwCss, opbouwHtml } from "../opbouw.js";
+import {
+  SOORTEN,
+  belastingStroom,
+  leverancier,
+  leveranciersVoor,
+  namenVan,
+  nordPoolVan,
+  sensorVan,
+  soortenVan,
+  voorstel,
+} from "../leveranciers.js";
 
-const euro = (v) =>
-  Number(v ?? 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+
+const SOORT_NAAM = { fixed: "vast", variable: "variabel", dynamic: "dynamisch" };
+
+/** Een datum als "18-10-2026", voor een naam. */
+const kortDatum = (tekst) => (tekst ? tekst.split("-").reverse().join("-") : "");
+
+/**
+ * De naam die een eerder contract voorgesteld krijgt (v0.129.0): leverancier,
+ * soort en de datums. De bewoner van de eerste woning op 19-10-2026: "ook
+ * handmatig een naam kunnen ingeven van dat contract", zoals "Zonneplan Elektra
+ * 2026"; dit is alleen het begin, hij past hem aan.
+ */
+function voorgesteldeNaam(bron, supplier, soort, van, tot) {
+  const naam = leverancier(supplier)?.naam ?? "";
+  const wat = { stroom: "stroom", gas: "gas", water: "water" }[bron];
+  const datums = van || tot ? `${kortDatum(van) || "?"} tot ${kortDatum(tot) || "nu"}` : "";
+  return [naam, soort ? `${wat}, ${SOORT_NAAM[soort] ?? ""}` : wat, datums].filter(Boolean).join(" ");
+}
+
+/** Vandaag en gisteren als "2026-10-18", in de tijd van het huis. */
+function dagTekst(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function datumLang(tekst) {
+  if (!tekst) return "";
+  const d = new Date(`${tekst}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? tekst : d.toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" });
+}
+
+const soortKnoppen = (id) => `
+  <div class="segmented drie" id="${id}">
+    ${SOORTEN.map((s) => `
+      <button type="button" data-soort="${s.key}" aria-pressed="false">
+        <strong>${s.label}</strong>
+        ${s.uitleg}
+      </button>`).join("")}
+  </div>`;
+
+const levKeuze = (id, bron) => `
+  <select id="${id}">
+    <option value="">Andere leverancier</option>
+    ${leveranciersVoor(bron).map((l) => `<option value="${esc(l.id)}">${esc(l.naam)}</option>`).join("")}
+  </select>`;
 
 class DacViewContract extends DacEditorElement {
   static sections = ["contract"];
+
+  constructor() {
+    super();
+    this.check_ = null;
+    this.checkTimer_ = null;
+    this.checkRun_ = 0;
+  }
 
   render() {
     return `
       <div class="wrap">
         <header class="intro">
           <div class="eyebrow">Contract</div>
-          <h1>Wat je stroom kost</h1>
-          <p>Hier staat met welke prijzen de coach rekent: je contract van nu, en wat je eerder had voor de historie en het rapport.</p>
+          <h1>Wat je energie kost</h1>
+          <p>Per energiebron je contract van nu en wat je eerder had. De coach rekent met je stroomcontract; gas en water zijn voor de historie en het rapport.</p>
         </header>
 
         ${adminNoticeHtml}
 
-        <section class="card">
-          <h2>${icons.euro} Contract en prijzen</h2>
-          <p class="hint">Waar de energieprijs op het overzicht vandaan komt.</p>
+        <!-- ================= stroom ================= -->
+        <section class="card" id="stroom">
+          <h2>${icons.bolt} Mijn huidige stroomcontract</h2>
+          <p class="hint" id="stroom-samenvatting"></p>
           <div class="fields">
             <div class="row">
               <label>Soort contract</label>
-              <div class="segmented" id="contract-type">
-                <button type="button" data-type="fixed" aria-pressed="false">
-                  <strong>Vast</strong>
-                  Eén prijs die je hele contractperiode geldt.
-                </button>
-                <button type="button" data-type="dynamic" aria-pressed="false">
-                  <strong>Dynamisch</strong>
-                  Een prijs die per uur of per kwartier meebeweegt met de markt.
-                </button>
-              </div>
+              ${soortKnoppen("stroom-soort")}
             </div>
 
-            <label class="check" for="netting">
-              <input type="checkbox" id="netting">
-              <span>
-                <strong>Je levert nog gesaldeerd terug</strong>
-                Dan streept elke teruggeleverde kWh weg tegen een ingekochte, en is hij dus
-                precies je inkoopprijs waard in plaats van je terugleververgoeding. De coach
-                rekent daar dan mee, en dat verandert wat het waard is om je eigen zon te
-                gebruiken. De regeling loopt af op 1 januari 2027.
-              </span>
-            </label>
+            <div class="row">
+              <label for="stroom-lev">Leverancier</label>
+              ${levKeuze("stroom-lev", "stroom")}
+              <span class="sub" id="stroom-lev-hint"></span>
+            </div>
 
             <div class="two">
               <div class="row">
-                <label for="gas-price">Gasprijs (€ per m³)</label>
-                <input type="number" id="gas-price" min="0" step="0.001" inputmode="decimal">
-                <span class="sub">All-in, voor de historie en het rapport. Leeg laten als je geen gas hebt.</span>
+                <label for="stroom-start">Mijn contract is ingegaan op</label>
+                <input type="date" id="stroom-start">
               </div>
-              <div class="row">
-                <label for="water-price">Waterprijs (€ per m³)</label>
-                <input type="number" id="water-price" min="0" step="0.001" inputmode="decimal">
-                <span class="sub">All-in, inclusief belasting. Leeg laten zonder watermeter.</span>
+              <div class="row" id="stroom-eind-rij">
+                <label for="stroom-end">Mijn contract loopt af op</label>
+                <input type="date" id="stroom-end">
+                <span class="sub">Alleen bij een vast contract. Variabel en dynamisch zijn maandelijks opzegbaar.</span>
               </div>
             </div>
 
-            <!-- vast -->
+            <!-- vast en variabel -->
             <div id="fixed-fields" class="fields">
               <div class="two">
                 <div class="row">
                   <label for="fx-price">All-in prijs (€ per kWh)</label>
-                  <input type="number" id="fx-price" min="0" step="0.001" inputmode="decimal">
-                  <span class="sub">Inclusief energiebelasting, opslag en btw.</span>
+                  <input type="number" id="fx-price" min="0" step="0.0001" inputmode="decimal">
+                  <span class="sub">Inclusief energiebelasting, opslag en btw, zoals op je contract.</span>
                 </div>
                 <div class="row">
                   <label for="fx-feedin">Terugleververgoeding (€ per kWh)</label>
-                  <input type="number" id="fx-feedin" min="0" step="0.001" inputmode="decimal">
-                  <span class="sub">Wat je krijgt voor wat je teruglevert. Zonder salderen (vanaf 2027) is dat bij de grote leveranciers ongeveer een kwart cent: 0,0025.</span>
+                  <input type="number" id="fx-feedin" min="0" step="0.0001" inputmode="decimal">
+                  <span class="sub">Wat je krijgt voor wat je teruglevert boven je eigen verbruik.</span>
                 </div>
               </div>
               <div class="row">
                 <label for="fx-feedcost">Terugleverkosten (€ per kWh)</label>
-                <input type="number" id="fx-feedcost" min="0" step="0.001" inputmode="decimal">
-                <span class="sub">Wat je leverancier rekent over wat je teruglevert.</span>
+                <input type="number" id="fx-feedcost" min="0" step="0.0001" inputmode="decimal">
+                <span class="sub" id="fx-feedcost-hint">Wat je leverancier per teruggeleverde kWh rekent. Een vast bedrag per maand (een staffel) hoort hier niet: dat verandert niet met wat je teruglevert.</span>
               </div>
             </div>
 
@@ -113,140 +170,181 @@ class DacViewContract extends DacEditorElement {
                     Vier prijzen per uur.
                   </button>
                 </div>
-                <span class="sub">Kijk op je contract of in de app van je leverancier. Dit is de lengte van de blokken waarin de coach straks plant. Met kwartieren komt hij dichter bij het goedkoopste moment, maar alleen als je leverancier ook zo afrekent.</span>
+                <span class="sub">De lengte van de blokken waarin de coach plant. Met kwartieren komt hij dichter bij het goedkoopste moment, als je leverancier ook zo afrekent.</span>
               </div>
 
               <div class="row">
-                <label>Waar komt de prijs vandaan?</label>
-                <div class="segmented" id="dynamic-source">
-                  <button type="button" data-source="all_in" aria-pressed="false">
-                    <strong>All-in prijs als entiteit</strong>
-                    Eén sensor die de prijs al compleet levert.
-                  </button>
-                  <button type="button" data-source="market" aria-pressed="false">
-                    <strong>Zelf opbouwen</strong>
-                    Marktprijs uit een sensor, de rest vul je hier in.
-                  </button>
-                </div>
+                <label>All-in prijssensor van je leverancier</label>
+                <dac-entity-picker id="dyn-allin"></dac-entity-picker>
+                <span class="sub">De prijs zoals je hem betaalt. Dit is de prijs waar de coach mee rekent.</span>
               </div>
-
-              <div id="dyn-allin-row">
-                <div class="row">
-                  <label>All-in prijssensor</label>
-                  <dac-entity-picker id="dyn-allin"></dac-entity-picker>
-                  <span class="sub">Deze prijs wordt ongewijzigd overgenomen.</span>
-                </div>
-                <div class="row">
-                  <label>Marktprijssensor (voor teruglevering)</label>
-                  <dac-entity-picker id="dyn-market-feed"></dac-entity-picker>
-                  <span class="sub">
-                    De kale marktprijs, zonder belasting en btw. Dit is wat teruglevering
-                    opbrengt, en in een all-in prijs zit die niet meer. Vul je hem in, dan
-                    kan de coach uitrekenen wanneer het goedkoper is om je eigen zon te
-                    gebruiken dan om op een goedkoop uur te wachten. Laat je hem leeg, dan
-                    laadt hij op zon alleen als de zon het grotendeels zelf dekt. Het moet
-                    een andere sensor zijn dan de all-in sensor: dezelfde sensor twee keer
-                    telt niet, want een all-in prijs is geen marktprijs.
-                  </span>
-                </div>
-                <div class="notice" id="dyn-same" hidden>
-                  ${icons.warning}
-                  <span id="dyn-same-text"></span>
-                </div>
+              <div class="row">
+                <label>Kale marktprijs</label>
+                <dac-entity-picker id="dyn-market"></dac-entity-picker>
+                <span class="sub">Zonder belasting en btw, zoals de ingebouwde Nord Pool van Home Assistant. Hiermee rekent de coach je prijs na, weet hij wat teruglevering opbrengt, en neemt hij het over als je leverancier geen prijs geeft. Zonder all-in sensor rekent hij er je prijs mee uit.</span>
               </div>
-
-              <div class="notice" id="dyn-missing" hidden>
+              <div class="notice" id="dyn-same" hidden>
                 ${icons.warning}
-                <span id="dyn-missing-text"></span>
+                <span id="dyn-same-text"></span>
               </div>
-
-              <div id="dyn-market-fields" class="fields">
-                <div class="row">
-                  <label>Marktprijssensor</label>
-                  <dac-entity-picker id="dyn-market"></dac-entity-picker>
-                  <span class="sub">De kale marktprijs, zonder belasting en btw.</span>
-                </div>
-                <div class="row">
-                  <span class="sub" id="dyn-formula"></span>
-                </div>
-              </div>
-
-              <!-- De reserve (v0.101.3). De eigenaar op 29-09-2026, toen Frank
-                   Energie eruit lag: "ik heb ook Nord Pool draaien, dat wil ik
-                   als fallback hebben." Zie _prijsbron in coach.py. -->
-              <div class="row">
+              <div class="row" id="dyn-reserve-row">
                 <label>Reserveprijssensor</label>
                 <dac-entity-picker id="dyn-reserve"></dac-entity-picker>
-                <span class="sub">
-                  Optioneel. Geeft je prijssensor geen prijs, bijvoorbeeld omdat de integratie van je
-                  leverancier stuk is, dan rekent de coach met deze. Zodra je eigen sensor weer
-                  prijzen heeft, rekent hij weer daarmee. De ingebouwde Nord Pool van Home Assistant
-                  kan hier ook: die prijzen haalt de coach zelf op.
-                </span>
-              </div>
-              <div class="row" id="dyn-reserve-soort-row">
-                <label>Wat geeft de reserve?</label>
-                <div class="segmented" id="dyn-reserve-soort">
-                  <button type="button" data-reserve="market" aria-pressed="false">
-                    <strong>Kale marktprijs</strong>
-                    Zoals Nord Pool. De coach rekent er belasting, opslag en btw bij.
-                  </button>
-                  <button type="button" data-reserve="all_in" aria-pressed="false">
-                    <strong>All-in prijs</strong>
-                    Al compleet, zoals de sensor van een leverancier.
-                  </button>
-                </div>
+                <span class="sub">Een tweede all-in prijs voor als die van je leverancier wegvalt. Meestal niet nodig: de kale marktprijs neemt het dan al over.</span>
               </div>
 
-              <div class="row" id="dyn-tax-row">
-                <label for="dyn-tax">Energiebelasting (€ per kWh)</label>
-                <input type="number" id="dyn-tax" min="0" step="0.0001" inputmode="decimal">
-                <span class="sub">Wat de overheid per kWh heft. Dit tarief verandert elk jaar op 1 januari, dus kijk het na op je jaarnota.</span>
-              </div>
-
-              <!-- De opslag en de btw staan buiten dat blok, want ze zijn ook
-                   nodig bij een all-in sensor. Salderen streept de
-                   energiebelasting weg tegen die bij afname, maar de opslag
-                   niet: die betaal je per ingekochte kWh en krijg je nergens
-                   terug. Zonder dit veld zou daar een standaardwaarde voor
-                   gebruikt worden die niemand heeft ingevuld. -->
               <div class="two">
                 <div class="row">
-                  <label for="dyn-markup">Opslag leverancier (€ per kWh)</label>
-                  <input type="number" id="dyn-markup" min="0" step="0.0001" inputmode="decimal">
-                  <span class="sub" id="dyn-markup-hint"></span>
+                  <label for="dyn-tax">Energiebelasting (€ per kWh, zonder btw)</label>
+                  <input type="number" id="dyn-tax" min="0" step="0.00001" inputmode="decimal">
+                  <span class="sub" id="dyn-tax-hint"></span>
                 </div>
                 <div class="row">
                   <label for="dyn-vat">Btw (%)</label>
                   <input type="number" id="dyn-vat" min="0" max="100" step="1" inputmode="numeric">
                 </div>
               </div>
-
+              <div class="row">
+                <label for="dyn-markup" id="dyn-markup-label">Opslag van je leverancier (€ per kWh, zonder btw)</label>
+                <input type="number" id="dyn-markup" min="0" step="0.000001" inputmode="decimal">
+                <span class="sub" id="dyn-markup-hint"></span>
+              </div>
               <div class="two">
                 <div class="row">
                   <label for="dyn-feedcost">Terugleverkosten (€ per kWh)</label>
-                  <input type="number" id="dyn-feedcost" min="0" step="0.001" inputmode="decimal">
-                  <span class="sub">Wat je leverancier rekent over wat je teruglevert.</span>
+                  <input type="number" id="dyn-feedcost" min="0" step="0.0001" inputmode="decimal">
                 </div>
                 <div class="row">
-                  <label for="dyn-feedbonus">Verkoopvergoeding (€ per kWh)</label>
-                  <input type="number" id="dyn-feedbonus" step="0.001" inputmode="decimal">
-                  <span class="sub">Wat je leverancier bovenop de marktprijs betaalt voor wat je teruglevert. Verschilt per leverancier: de een geeft 2 cent, de ander niets, en er zijn er die er 2 cent afhalen; dan vul je een negatief getal in.</span>
+                  <label for="dyn-feedbonus">Vergoeding bij teruglevering (€ per kWh)</label>
+                  <input type="number" id="dyn-feedbonus" step="0.0001" inputmode="decimal">
+                  <span class="sub">Wat je leverancier per teruggeleverde kWh bovenop de marktprijs betaalt. Haalt hij er iets af, dan een negatief getal.</span>
                 </div>
               </div>
+              <label class="check" for="dyn-feedvat">
+                <input type="checkbox" id="dyn-feedvat">
+                <span><strong>Teruglevering met btw</strong> De leverancier betaalt de marktprijs voor teruglevering inclusief btw.</span>
+              </label>
+              <div class="two">
+                <div class="row">
+                  <label for="dyn-bonuspct">Bonus op teruglevering (%)</label>
+                  <input type="number" id="dyn-bonuspct" min="0" max="100" step="0.1" inputmode="decimal">
+                  <span class="sub">Een bonus in procenten, zoals de Zonnebonus. Leeg of 0 is geen bonus.</span>
+                </div>
+                <div class="row">
+                  <label for="dyn-bonusbase">Over</label>
+                  <select id="dyn-bonusbase">
+                    <option value="market">de marktprijs</option>
+                    <option value="market_plus_fee">de marktprijs plus de vergoeding</option>
+                  </select>
+                </div>
+              </div>
+              <label class="check" for="dyn-bonusdag">
+                <input type="checkbox" id="dyn-bonusdag">
+                <span><strong>Bonus alleen overdag</strong> Van zonsopkomst tot zonsondergang, uitgerekend voor waar het huis staat.</span>
+              </label>
+            </div>
+
+            <label class="check" for="netting">
+              <input type="checkbox" id="netting">
+              <span>
+                <strong>Je levert nog gesaldeerd terug</strong>
+                Dan streept elke teruggeleverde kWh weg tegen een ingekochte, tot aan wat je zelf
+                verbruikt, en is hij je inkoopprijs waard in plaats van je terugleververgoeding. De
+                regeling loopt af op 1 januari 2027.
+              </span>
+            </label>
+
+            <div class="row">
+              <label>Zo komt je prijs tot stand</label>
+              <div class="ob" id="opbouw"></div>
+            </div>
+            <div class="bevestig">
+              <button type="button" class="primary" id="bevestig">Ja, dit klopt</button>
+              <span class="sub" id="bevestigd-zin"></span>
+            </div>
+
+            <div class="nieuw">
+              <button type="button" data-nieuw="stroom">Ik heb een nieuw stroomcontract afgesloten</button>
+              <span class="sub">Zet dit contract bij de eerdere, en begin een nieuw formulier.</span>
             </div>
 
             <div class="row">
-              <label>Eerdere contracten</label>
-              <span class="sub">
-                Ben je van leverancier of van contract gewisseld? Zet hier per contract van wanneer
-                tot wanneer het gold en wat het kostte. Historie en rapport rekenen dan elke dag
-                met de prijs van toen. Wat de coach nu doet rekent altijd met het contract hierboven.
-              </span>
+              <label>Eerdere stroomcontracten</label>
+              <span class="sub">Historie en rapport rekenen elke dag met de prijs van toen. Wat de coach nu doet rekent altijd met het contract hierboven.</span>
             </div>
-            <div id="periods"></div>
+            <div id="periods-stroom"></div>
             <div class="circuit-actions">
-              <button type="button" id="period-add">Eerder contract toevoegen</button>
+              <button type="button" data-period-add="stroom">Eerder stroomcontract toevoegen</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= gas ================= -->
+        <section class="card" id="gas">
+          <h2>${icons.vlam} Mijn huidige gascontract</h2>
+          <p class="hint" id="gas-samenvatting"></p>
+          <div class="fields">
+            <div class="row">
+              <label>Soort contract</label>
+              ${soortKnoppen("gas-soort")}
+            </div>
+            <div class="row">
+              <label for="gas-lev">Leverancier</label>
+              ${levKeuze("gas-lev", "gas")}
+              <span class="sub" id="gas-lev-hint">Mag een andere zijn dan die van je stroom.</span>
+            </div>
+            <div class="two">
+              <div class="row">
+                <label for="gas-start">Mijn contract is ingegaan op</label>
+                <input type="date" id="gas-start">
+              </div>
+              <div class="row" id="gas-eind-rij">
+                <label for="gas-end">Mijn contract loopt af op</label>
+                <input type="date" id="gas-end">
+              </div>
+            </div>
+            <div class="row" id="gas-prijs-rij">
+              <label for="gas-price">Gasprijs, all-in (€ per m³)</label>
+              <input type="number" id="gas-price" min="0" step="0.0001" inputmode="decimal">
+              <span class="sub">Inclusief energiebelasting, opslag en btw. Leeg laten als je geen gas hebt.</span>
+            </div>
+            <div class="row" id="gas-sensor-rij">
+              <label>Sensor met de all-in gasprijs</label>
+              <dac-entity-picker id="gas-entity"></dac-entity-picker>
+              <span class="sub" id="gas-sensor-hint">Een dynamische gasprijs verandert per dag. Historie neemt de prijs van elke dag uit deze sensor.</span>
+            </div>
+            <div class="nieuw">
+              <button type="button" data-nieuw="gas">Ik heb een nieuw gascontract afgesloten</button>
+            </div>
+            <div class="row">
+              <label>Eerdere gascontracten</label>
+            </div>
+            <div id="periods-gas"></div>
+            <div class="circuit-actions">
+              <button type="button" data-period-add="gas">Eerder gascontract toevoegen</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= water ================= -->
+        <section class="card" id="water">
+          <h2>${icons.druppel} Mijn huidige waterprijs</h2>
+          <div class="fields">
+            <div class="row">
+              <label for="water-lev">Waterbedrijf</label>
+              <input type="text" id="water-lev" maxlength="60" placeholder="Bijvoorbeeld Vitens">
+            </div>
+            <div class="row">
+              <label for="water-price">Waterprijs, all-in (€ per m³)</label>
+              <input type="number" id="water-price" min="0" step="0.0001" inputmode="decimal">
+              <span class="sub">Inclusief belasting. Leeg laten zonder watermeter.</span>
+            </div>
+            <div class="row">
+              <label>Eerdere waterprijzen</label>
+            </div>
+            <div id="periods-water"></div>
+            <div class="circuit-actions">
+              <button type="button" data-period-add="water">Eerdere waterprijs toevoegen</button>
             </div>
           </div>
         </section>
@@ -257,161 +355,439 @@ class DacViewContract extends DacEditorElement {
   }
 
   afterRender() {
+    const c = () => this.draft_.contract;
     const bind = (id, apply) => {
       const el = this.$(`#${id}`);
       el.addEventListener("input", () => {
-        apply(el.value);
-        this.afterChange_();
+        apply(el.type === "checkbox" ? el.checked : el.value);
+        this.wijziging_();
       });
+      if (el.type === "checkbox" || el.tagName === "SELECT") {
+        el.addEventListener("change", () => {
+          apply(el.type === "checkbox" ? el.checked : el.value);
+          this.wijziging_();
+        });
+      }
     };
+    const getal = (v) => (v === "" ? 0 : Number(v) || 0);
 
-    bind("gas-price", (v) => (this.draft_.contract.gas_price = Number(v) || 0));
-    bind("water-price", (v) => (this.draft_.contract.water_price = Number(v) || 0));
-    bind("fx-price", (v) => (this.draft_.contract.fixed.all_in_price = Number(v)));
-    bind("fx-feedin", (v) => (this.draft_.contract.fixed.feed_in_tariff = Number(v)));
-    bind("fx-feedcost", (v) => (this.draft_.contract.fixed.feed_in_costs = Number(v)));
-    bind("dyn-tax", (v) => (this.draft_.contract.dynamic.energy_tax = Number(v)));
-    bind("dyn-markup", (v) => (this.draft_.contract.dynamic.supplier_markup = Number(v)));
-    bind("dyn-vat", (v) => (this.draft_.contract.dynamic.vat_percent = Number(v)));
-    bind("dyn-feedcost", (v) => (this.draft_.contract.dynamic.feed_in_costs = Number(v)));
-    bind("dyn-feedbonus", (v) => (this.draft_.contract.dynamic.feed_in_bonus = Number(v) || 0));
+    bind("stroom-start", (v) => (c().start = v));
+    bind("stroom-end", (v) => (c().end = v));
+    bind("fx-price", (v) => (c().fixed.all_in_price = getal(v)));
+    bind("fx-feedin", (v) => (c().fixed.feed_in_tariff = getal(v)));
+    bind("fx-feedcost", (v) => (c().fixed.feed_in_costs = getal(v)));
+    bind("dyn-tax", (v) => (c().dynamic.energy_tax = getal(v)));
+    bind("dyn-markup", (v) => (c().dynamic.supplier_markup = getal(v)));
+    bind("dyn-vat", (v) => (c().dynamic.vat_percent = getal(v)));
+    bind("dyn-feedcost", (v) => (c().dynamic.feed_in_costs = getal(v)));
+    bind("dyn-feedbonus", (v) => (c().dynamic.feed_in_bonus = getal(v)));
+    bind("dyn-feedvat", (v) => (c().dynamic.feed_in_vat = Boolean(v)));
+    bind("dyn-bonuspct", (v) => (c().dynamic.feed_in_bonus_percent = getal(v)));
+    bind("dyn-bonusbase", (v) => (c().dynamic.bonus_base = v));
+    bind("dyn-bonusdag", (v) => (c().dynamic.bonus_daytime = Boolean(v)));
+    bind("netting", (v) => (c().netting = Boolean(v)));
+    bind("gas-start", (v) => (this.gas_().start = v));
+    bind("gas-end", (v) => (this.gas_().end = v));
+    bind("gas-price", (v) => (this.gas_().price = getal(v)));
+    bind("water-price", (v) => (this.water_().price = getal(v)));
+    bind("water-lev", (v) => (this.water_().supplier = v));
 
-    this.$("#period-add").addEventListener("click", () => {
-      this.periods_().push({ from: "", to: "", all_in_price: 0, feed_in_tariff: 0, gas_price: 0, water_price: 0 });
-      this.paintPeriods_();
-      this.afterChange_();
-    });
+    this.$("#stroom-lev").addEventListener("change", (ev) => this.kiesLeverancier_("stroom", ev.target.value));
+    this.$("#gas-lev").addEventListener("change", (ev) => this.kiesLeverancier_("gas", ev.target.value));
 
-    this.$("#netting").addEventListener("change", (ev) => {
-      this.draft_.contract.netting = ev.target.checked;
-      // De waarschuwing bij het marktveld hangt ervan af.
-      this.paintContract_();
-      this.afterChange_();
-    });
-
-    for (const button of this.$$("#contract-type button")) {
-      button.addEventListener("click", () => {
-        this.draft_.contract.type = button.dataset.type;
-        this.paintContract_();
-        this.afterChange_();
-      });
+    for (const [id, zet] of [["stroom-soort", (s) => (c().type = s)], ["gas-soort", (s) => (this.gas_().type = s)]]) {
+      for (const button of this.$$(`#${id} button`)) {
+        button.addEventListener("click", () => {
+          zet(button.dataset.soort);
+          this.wijziging_();
+        });
+      }
     }
-
-    for (const button of this.$$("#dynamic-source button")) {
-      button.addEventListener("click", () => {
-        this.draft_.contract.dynamic.source = button.dataset.source;
-        this.paintContract_();
-        this.afterChange_();
-      });
-    }
-
-    for (const button of this.$$("#dyn-reserve-soort button")) {
-      button.addEventListener("click", () => {
-        this.draft_.contract.dynamic.fallback_source = button.dataset.reserve;
-        this.paintContract_();
-        this.afterChange_();
-      });
-    }
-
     for (const button of this.$$("#dynamic-interval button")) {
       button.addEventListener("click", () => {
-        this.draft_.contract.dynamic.interval = button.dataset.interval;
-        this.paintContract_();
-        this.afterChange_();
+        c().dynamic.interval = button.dataset.interval;
+        this.wijziging_();
       });
     }
 
-    for (const [id, key] of [
-      ["dyn-allin", "all_in_entity"],
-      ["dyn-market", "market_entity"],
-      ["dyn-market-feed", "market_entity"],
-      ["dyn-reserve", "fallback_entity"],
-    ]) {
+    for (const [id, key] of [["dyn-allin", "all_in_entity"], ["dyn-market", "market_entity"], ["dyn-reserve", "fallback_entity"]]) {
       const picker = this.$(`#${id}`);
       picker.filter = "price";
       picker.placeholder = "Zoek een prijssensor…";
       picker.addEventListener("dac-entity-change", (ev) => {
-        this.draft_.contract.dynamic[key] = ev.detail.value;
-        this.paintContract_();
+        const d = c().dynamic;
+        d[key] = ev.detail.value;
+        // Met een all-in sensor is die de prijs; zonder bouwt de coach hem op
+        // uit de kale marktprijs (v0.129.0: geen aparte keuze meer).
+        d.source = d.all_in_entity ? "all_in" : "market";
+        if (key === "fallback_entity" && ev.detail.value) d.fallback_source = "all_in";
+        this.wijziging_();
+      });
+    }
+    const gasPicker = this.$("#gas-entity");
+    gasPicker.filter = "price";
+    gasPicker.placeholder = "Zoek een gasprijssensor…";
+    gasPicker.addEventListener("dac-entity-change", (ev) => {
+      this.gas_().entity = ev.detail.value;
+      this.wijziging_();
+    });
+
+    for (const knop of this.$$("[data-period-add]")) {
+      knop.addEventListener("click", () => {
+        const bron = knop.dataset.periodAdd;
+        const lijst = this.periodsVan_(bron);
+        lijst.push(bron === "stroom"
+          ? { name: "", from: "", to: "", type: "fixed", supplier: "", all_in_price: 0, feed_in_tariff: 0 }
+          : { name: "", from: "", to: "", price: 0 });
+        this.openPeriode_ = `${bron}:${lijst.length - 1}`;
+        this.paintPeriods_(bron);
         this.afterChange_();
       });
     }
+    for (const knop of this.$$("[data-nieuw]")) {
+      knop.addEventListener("click", () => this.nieuwContract_(knop.dataset.nieuw));
+    }
+    this.$("#bevestig").addEventListener("click", () => this.bevestig_());
 
     this.wireSaveBar_();
     this.paint_();
   }
 
+  gas_() {
+    const contract = this.draft_.contract;
+    contract.gas ??= { type: "fixed", supplier: "", price: 0, entity: "", start: "", end: "", periods: [] };
+    return contract.gas;
+  }
+
+  water_() {
+    const contract = this.draft_.contract;
+    contract.water ??= { price: 0, periods: [] };
+    return contract.water;
+  }
+
+  periodsVan_(bron) {
+    if (bron === "stroom") {
+      const contract = this.draft_.contract;
+      if (!Array.isArray(contract.periods)) contract.periods = [];
+      return contract.periods;
+    }
+    const deel = bron === "gas" ? this.gas_() : this.water_();
+    if (!Array.isArray(deel.periods)) deel.periods = [];
+    return deel.periods;
+  }
+
+  /** Na elke wijziging: tekenen, de opslagbalk, en de controle opnieuw vragen. */
+  wijziging_() {
+    this.paintContract_();
+    this.afterChange_();
+    this.vraagControle_();
+  }
+
   afterChange_() {
-    this.paintHints_();
     this.syncSaveBar_();
+  }
+
+  /**
+   * Een leverancier kiezen vult de velden voor (v0.129.0). Wat er staat wordt
+   * overschreven door wat de catalogus van die leverancier weet; wat hij niet
+   * weet blijft staan. Bij een dynamisch contract zoekt hij ook de sensoren op.
+   */
+  kiesLeverancier_(bron, id) {
+    const deel = bron === "stroom" ? this.draft_.contract : this.gas_();
+    deel.supplier = id;
+    const l = leverancier(id);
+    if (l) {
+      const soorten = soortenVan(id, bron);
+      if (soorten.length && !soorten.includes(deel.type)) deel.type = soorten[0];
+      const v = voorstel(id, deel.type, bron);
+      if (v && bron === "stroom") {
+        const doel = deel.type === "dynamic" ? deel.dynamic : deel.fixed;
+        Object.assign(doel, v.velden);
+        if (deel.type === "dynamic" && v.interval) deel.dynamic.interval = v.interval;
+      }
+      if (v && bron === "gas" && v.velden?.price !== undefined) deel.price = v.velden.price;
+      const staten = this.hass_?.states;
+      if (bron === "stroom" && deel.type === "dynamic") {
+        const d = deel.dynamic;
+        d.all_in_entity = d.all_in_entity || sensorVan(id, staten, "stroom") || "";
+        d.market_entity = d.market_entity && d.market_entity !== d.all_in_entity ? d.market_entity : (nordPoolVan(staten) || "");
+        d.source = d.all_in_entity ? "all_in" : "market";
+      }
+      if (bron === "gas" && deel.type === "dynamic") {
+        deel.entity = deel.entity || sensorVan(id, staten, "gas") || "";
+      }
+    }
+    this.paint_();
+    this.afterChange_();
+    this.vraagControle_();
+  }
+
+  /**
+   * "Ik heb een nieuw contract afgesloten": het huidige contract bij de eerdere,
+   * van de ingangsdatum tot gisteren, en een leeg formulier dat vandaag ingaat.
+   * De bewoner van de eerste woning op 18-10-2026: "waarmee je het huidige
+   * contract automatisch archiveert en er een nieuw (leeg) formulier komt voor
+   * het nieuwe contract."
+   */
+  nieuwContract_(bron) {
+    const nu = new Date();
+    const gisteren = new Date(nu.getTime() - 86400000);
+    const contract = this.draft_.contract;
+    if (bron === "stroom") {
+      const vast = contract.type !== "dynamic";
+      this.periodsVan_("stroom").unshift({
+        name: voorgesteldeNaam("stroom", contract.supplier, contract.type, contract.start, dagTekst(gisteren)),
+        from: contract.start || "",
+        to: dagTekst(gisteren),
+        type: contract.type || "fixed",
+        supplier: contract.supplier || "",
+        all_in_price: vast ? Number(contract.fixed?.all_in_price) || 0 : 0,
+        feed_in_tariff: vast ? Number(contract.fixed?.feed_in_tariff) || 0 : 0,
+      });
+      contract.supplier = "";
+      contract.start = dagTekst(nu);
+      contract.end = "";
+      contract.fixed = { ...contract.fixed, all_in_price: 0, feed_in_tariff: 0, feed_in_costs: 0 };
+      contract.dynamic = { ...contract.dynamic, supplier_markup: 0, feed_in_costs: 0, feed_in_bonus: 0,
+        feed_in_bonus_percent: 0, bonus_daytime: false, feed_in_vat: false };
+    } else if (bron === "gas") {
+      const gas = this.gas_();
+      this.periodsVan_("gas").unshift({
+        name: voorgesteldeNaam("gas", gas.supplier, gas.type, gas.start, dagTekst(gisteren)),
+        from: gas.start || "", to: dagTekst(gisteren), price: Number(gas.price) || 0,
+      });
+      Object.assign(gas, { supplier: "", start: dagTekst(nu), end: "", price: 0 });
+    }
+    this.paint_();
+    this.afterChange_();
+    this.vraagControle_();
+  }
+
+  /** De opbouw opnieuw laten uitrekenen door de coach, met het concept erbij. */
+  vraagControle_() {
+    clearTimeout(this.checkTimer_);
+    this.checkTimer_ = setTimeout(() => this.haalControle_(), 350);
+  }
+
+  async haalControle_() {
+    if (!this.hass_?.callWS || !this.draft_) return;
+    const run = ++this.checkRun_;
+    try {
+      const vraag = { type: "domotiapp_coach/contract/check" };
+      if (this.canEdit_()) vraag.contract = this.draft_.contract;
+      const antwoord = await this.hass_.callWS(vraag);
+      if (run !== this.checkRun_) return;
+      this.check_ = antwoord;
+    } catch (error) {
+      if (run !== this.checkRun_) return;
+      this.check_ = null;
+      console.warn("[DomotiApp Coach] de opbouw kon niet worden opgehaald", error);
+    }
+    this.paintOpbouw_();
+  }
+
+  /** "Ja, dit klopt": eerst opslaan wat er veranderde, dan bevestigen. */
+  async bevestig_() {
+    if (!this.hass_?.callWS) return;
+    if (this.dirty_()) {
+      await this.save_();
+      if (this.dirty_()) return;
+    }
+    try {
+      const settings = await this.hass_.callWS({ type: "domotiapp_coach/contract/confirm" });
+      this.saved_ = JSON.parse(JSON.stringify(settings));
+      this.draft_ = JSON.parse(JSON.stringify(settings));
+      this.fire("dac-settings-saved", { settings });
+      this.toast_("Bevestigd", true);
+    } catch (error) {
+      this.toast_(`Bevestigen mislukt: ${error?.message ?? error}`, false);
+    }
+    this.paint_();
+    this.vraagControle_();
+  }
+
+  afterSave_() {
+    this.vraagControle_();
   }
 
   paint_() {
     if (!this.draft_ || !this.rendered_) return;
-    // Zoals in Installatie: de lijst die dit scherm tekent ook in wat er
-    // opgeslagen staat, anders staat de balk aan zonder dat er iets veranderde.
     for (const d of [this.draft_, this.saved_]) if (d?.contract) d.contract.periods ??= [];
     const contract = this.draft_.contract;
+    contract.dynamic ??= {};
+    contract.fixed ??= {};
 
-    this.$("#netting").checked = Boolean(this.draft_.contract.netting);
-    this.$("#gas-price").value = contract.gas_price || "";
-    this.$("#water-price").value = contract.water_price || "";
-    this.$("#fx-price").value = contract.fixed.all_in_price;
-    this.$("#fx-feedin").value = contract.fixed.feed_in_tariff;
-    this.$("#fx-feedcost").value = contract.fixed.feed_in_costs;
-    this.$("#dyn-tax").value = contract.dynamic.energy_tax;
-    this.$("#dyn-markup").value = contract.dynamic.supplier_markup;
-    this.$("#dyn-vat").value = contract.dynamic.vat_percent;
-    this.$("#dyn-feedcost").value = contract.dynamic.feed_in_costs;
-    this.$("#dyn-feedbonus").value = contract.dynamic.feed_in_bonus ?? 0;
-    this.$("#dyn-allin").value = contract.dynamic.all_in_entity ?? "";
-    this.$("#dyn-market").value = contract.dynamic.market_entity ?? "";
-    this.$("#dyn-reserve").value = contract.dynamic.fallback_entity ?? "";
-    this.onFeed_();
+    this.$("#stroom-lev").value = leverancier(contract.supplier) ? contract.supplier : "";
+    this.$("#stroom-start").value = contract.start || "";
+    this.$("#stroom-end").value = contract.end || "";
+    this.$("#netting").checked = Boolean(contract.netting);
+    this.$("#fx-price").value = contract.fixed.all_in_price || "";
+    this.$("#fx-feedin").value = contract.fixed.feed_in_tariff || "";
+    this.$("#fx-feedcost").value = contract.fixed.feed_in_costs || "";
+    const d = contract.dynamic;
+    this.$("#dyn-allin").value = d.source === "all_in" ? d.all_in_entity ?? "" : (d.all_in_entity ?? "");
+    this.$("#dyn-market").value = d.market_entity ?? "";
+    this.$("#dyn-reserve").value = d.fallback_entity ?? "";
+    this.$("#dyn-tax").value = d.energy_tax ?? "";
+    this.$("#dyn-markup").value = d.supplier_markup ?? "";
+    this.$("#dyn-vat").value = d.vat_percent ?? "";
+    this.$("#dyn-feedcost").value = d.feed_in_costs ?? "";
+    this.$("#dyn-feedbonus").value = d.feed_in_bonus ?? "";
+    this.$("#dyn-feedvat").checked = Boolean(d.feed_in_vat);
+    this.$("#dyn-bonuspct").value = d.feed_in_bonus_percent || "";
+    this.$("#dyn-bonusbase").value = d.bonus_base === "market_plus_fee" ? "market_plus_fee" : "market";
+    this.$("#dyn-bonusdag").checked = Boolean(d.bonus_daytime);
 
-    this.paintPeriods_();
+    const gas = this.gas_();
+    this.$("#gas-lev").value = leverancier(gas.supplier) ? gas.supplier : "";
+    this.$("#gas-start").value = gas.start || "";
+    this.$("#gas-end").value = gas.end || "";
+    this.$("#gas-price").value = gas.price || "";
+    this.$("#gas-entity").value = gas.entity || "";
+    this.$("#water-price").value = this.water_().price || "";
+    this.$("#water-lev").value = this.water_().supplier || "";
+
     this.paintContract_();
-    this.paintHints_();
-    this.syncSaveBar_();
+    for (const bron of ["stroom", "gas", "water"]) this.paintPeriods_(bron);
+    this.paintOpbouw_();
+    if (!this.check_) this.vraagControle_();
   }
 
-  /** De eerdere contracten in het klad, altijd als lijst. */
-  periods_() {
+  /** Wat er zichtbaar is hangt af van de soort, en de hints van de leverancier. */
+  paintContract_() {
     const contract = this.draft_.contract;
-    if (!Array.isArray(contract.periods)) contract.periods = [];
-    return contract.periods;
+    const d = contract.dynamic ?? {};
+    const dynamic = contract.type === "dynamic";
+    const vast = contract.type === "fixed";
+
+    for (const button of this.$$("#stroom-soort button")) {
+      button.setAttribute("aria-pressed", String(button.dataset.soort === (contract.type || "fixed")));
+    }
+    this.$("#fixed-fields").style.display = dynamic ? "none" : "";
+    this.$("#dynamic-fields").style.display = dynamic ? "" : "none";
+    this.$("#stroom-eind-rij").style.display = vast ? "" : "none";
+    for (const button of this.$$("#dynamic-interval button")) {
+      button.setAttribute("aria-pressed", String(button.dataset.interval === (d.interval ?? "hour")));
+    }
+    this.$("#dyn-reserve-row").style.display = d.fallback_entity ? "" : "none";
+
+    // De samenvatting bovenaan: wat voor contract, bij wie, sinds wanneer, tot wanneer.
+    const l = leverancier(contract.supplier);
+    const delen = [`${(SOORT_NAAM[contract.type] ?? "vast").replace(/^./, (x) => x.toUpperCase())} contract`];
+    if (l) delen[0] += ` bij ${l.naam}`;
+    if (contract.start) delen.push(`ingegaan op ${datumLang(contract.start)}`);
+    if (vast && contract.end) delen.push(`loopt af op ${datumLang(contract.end)}`);
+    this.$("#stroom-samenvatting").textContent = `${delen.join(", ")}.`;
+
+    // Waar het voorstel vandaan kwam.
+    const v = l ? voorstel(l.id, contract.type, "stroom") : null;
+    const hint = this.$("#stroom-lev-hint");
+    if (l && v) {
+      hint.innerHTML = `${esc(v.uitleg)}${v.terug ? ` ${esc(v.terug)}` : ""} Ingevuld uit de gegevens van ${esc(l.naam)}, nagekeken op ${esc(datumLang(v.peildatum))}${
+        v.bronnen.length ? ` (<a href="${esc(v.bronnen[0])}" target="_blank" rel="noopener">bron</a>)` : ""}. Kijk ze na en bevestig onderaan.${
+        v.onzeker.length ? ` <strong>Niet zeker:</strong> ${v.onzeker.map(esc).join(" ")}` : ""}`;
+    } else if (l) {
+      hint.textContent = `${l.naam} heeft geen ${SOORT_NAAM[contract.type] ?? ""} stroomcontract in de lijst. Vul de bedragen van je contract zelf in.`;
+    } else {
+      hint.textContent = "Staat je leverancier er niet tussen? Vul de bedragen van je contract zelf in.";
+    }
+
+    const namen = namenVan(contract.supplier, contract.type);
+    this.$("#dyn-markup-label").textContent = `${namen.opslag || "Opslag van je leverancier"} (€ per kWh, zonder btw)`;
+    const markup = Number(d.supplier_markup) || 0;
+    const vat = Number(d.vat_percent) || 0;
+    this.$("#dyn-markup-hint").textContent = markup
+      ? `Met btw € ${(markup * (1 + vat / 100)).toLocaleString("nl-NL", { minimumFractionDigits: 4, maximumFractionDigits: 4 })} per kWh. Bij salderen komt dit bedrag niet terug: het hangt aan wat je afneemt.`
+      : "Wat je leverancier per kWh bovenop de marktprijs rekent, zonder btw.";
+    const jaar = new Date().getFullYear();
+    const eb = belastingStroom(jaar);
+    this.$("#dyn-tax-hint").textContent = eb !== null
+      ? `In ${jaar} € ${eb.toLocaleString("nl-NL", { minimumFractionDigits: 5 })} zonder btw. Verandert elk jaar op 1 januari.`
+      : "Verandert elk jaar op 1 januari; kijk het na op je jaarnota.";
+
+    // Dezelfde sensor twee keer laat de coach het marktveld leeg (`_prices` in
+    // coach.py), en tot v0.128.2 stond dat alleen in de kleine letters erboven.
+    // In de eerste woning op 18-10-2026 stond hij zo, met salderen uit, en
+    // handelde de batterij nooit.
+    const zelfde = Boolean(d.market_entity) && d.market_entity === d.all_in_entity;
+    this.$("#dyn-same").hidden = !zelfde;
+    this.$("#dyn-same-text").textContent = !zelfde ? "" : salderen(contract, new Date())
+      ? "Dit is dezelfde sensor als de all-in prijs, en die telt niet als marktprijs. Zolang je saldeert rekent de coach de terugleverprijs uit de all-in prijs; daarna heeft hij een kale marktprijs nodig, zoals de ingebouwde Nord Pool."
+      : "Dit is dezelfde sensor als de all-in prijs, en die telt niet als marktprijs. Zo kent de coach je terugleverprijs niet, en kan een thuisbatterij niet handelen. Kies een kale marktprijs, zoals de ingebouwde Nord Pool.";
+
+    // Gas.
+    const gas = this.gas_();
+    const gasType = gas.type || "fixed";
+    for (const button of this.$$("#gas-soort button")) {
+      button.setAttribute("aria-pressed", String(button.dataset.soort === gasType));
+    }
+    this.$("#gas-eind-rij").style.display = gasType === "fixed" ? "" : "none";
+    this.$("#gas-prijs-rij").style.display = gasType === "dynamic" ? "none" : "";
+    this.$("#gas-sensor-rij").style.display = gasType === "dynamic" ? "" : "none";
+    const gl = leverancier(gas.supplier);
+    const gdelen = [`${(SOORT_NAAM[gasType] ?? "vast").replace(/^./, (x) => x.toUpperCase())} contract`];
+    if (gl) gdelen[0] += ` bij ${gl.naam}`;
+    if (gas.start) gdelen.push(`ingegaan op ${datumLang(gas.start)}`);
+    if (gasType === "fixed" && gas.end) gdelen.push(`loopt af op ${datumLang(gas.end)}`);
+    this.$("#gas-samenvatting").textContent = `${gdelen.join(", ")}.`;
+    const gv = gl ? voorstel(gl.id, gasType, "gas") : null;
+    this.$("#gas-lev-hint").textContent = gv
+      ? `${gv.uitleg} Uit de gegevens van ${gl.naam}, nagekeken op ${datumLang(gv.peildatum)}.`
+      : "Mag een andere zijn dan die van je stroom.";
   }
 
-  /** Eén eerder contract per rij: van, tot, stroom, teruglevering, gas. */
-  paintPeriods_() {
-    const host = this.$("#periods");
+  /** De eerdere contracten van een bron, een per rij. */
+  paintPeriods_(bron) {
+    const host = this.$(`#periods-${bron}`);
     if (!host) return;
-    const lijst = this.periods_();
-    const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    const lijst = this.periodsVan_(bron);
     const veld = (i, key, type, extra, waarde) =>
       `<input type="${type}" data-period-field="${key}" data-index="${i}" ${extra} value="${esc(waarde)}">`;
-    host.innerHTML = lijst
-      .map(
-        (p, i) => `
-      <div class="circuit period" data-period="${i}">
+    const getal = 'min="0" step="0.0001" inputmode="decimal"';
+    host.innerHTML = lijst.map((p, i) => {
+      const voorbeeld = { stroom: "Bijvoorbeeld Zonneplan Elektra 2026", gas: "Bijvoorbeeld Delta Gas 07/26 tot 06/27", water: "Bijvoorbeeld Waterbedrijf 2025" }[bron];
+      const kop = `
+        <div class="row"><label>Naam</label>${veld(i, "name", "text", `maxlength="80" placeholder="${voorbeeld}"`, p.name ?? "")}</div>
         <div class="two">
           <div class="row"><label>Van</label>${veld(i, "from", "date", "", p.from)}</div>
           <div class="row"><label>Tot</label>${veld(i, "to", "date", "", p.to)}</div>
-        </div>
-        <div class="two">
-          <div class="row"><label>Stroom, all-in (€ per kWh)</label>${veld(i, "all_in_price", "number", 'min="0" step="0.001" inputmode="decimal"', p.all_in_price || "")}</div>
-          <div class="row"><label>Terugleververgoeding (€ per kWh)</label>${veld(i, "feed_in_tariff", "number", 'min="0" step="0.001" inputmode="decimal"', p.feed_in_tariff || "")}</div>
-        </div>
-        <div class="two">
-          <div class="row"><label>Gas (€ per m³)</label>${veld(i, "gas_price", "number", 'min="0" step="0.001" inputmode="decimal"', p.gas_price || "")}</div>
-          <div class="row"><label>Water (€ per m³)</label>${veld(i, "water_price", "number", 'min="0" step="0.001" inputmode="decimal"', p.water_price || "")}</div>
-        </div>
-        <div class="circuit-actions">
-          <button type="button" class="remove" data-period-remove="${i}">Contract weghalen</button>
-        </div>
-      </div>`
-      )
-      .join("");
+        </div>`;
+      let prijzen;
+      if (bron === "stroom") {
+        const naam = leverancier(p.supplier)?.naam;
+        const wat = `${(SOORT_NAAM[p.type] ?? "vast").replace(/^./, (x) => x.toUpperCase())}${naam ? ` bij ${esc(naam)}` : ""}`;
+        prijzen = p.type === "dynamic"
+          ? `<p class="sub">${wat}: Historie neemt de prijzen van toen uit de prijssensor.</p>`
+          : `<p class="sub">${wat}</p>
+            <div class="two">
+              <div class="row"><label>Stroom, all-in (€ per kWh)</label>${veld(i, "all_in_price", "number", getal, p.all_in_price || "")}</div>
+              <div class="row"><label>Terugleververgoeding (€ per kWh)</label>${veld(i, "feed_in_tariff", "number", getal, p.feed_in_tariff || "")}</div>
+            </div>`;
+      } else {
+        prijzen = `<div class="row"><label>${bron === "gas" ? "Gas" : "Water"}, all-in (€ per m³)</label>${veld(i, "price", "number", getal, p.price || "")}</div>`;
+      }
+      // Ingeklapt een regel, zoals een lijst van contracten in de app van een
+      // meter (19-10-2026): naam of leverancier, en van wanneer tot wanneer.
+      const titel = p.name || leverancier(p.supplier)?.naam || "Eerder contract";
+      const wanneer = p.from || p.to ? `${kortDatum(p.from) || "?"} tot ${kortDatum(p.to) || "nu"}` : "nog geen datums";
+      const open = this.openPeriode_ === `${bron}:${i}` ? " open" : "";
+      return `
+        <details class="circuit period" data-period="${i}"${open}>
+          <summary><span class="p-naam">${esc(titel)}</span><span class="p-wanneer">${esc(wanneer)}</span></summary>
+          ${kop}
+          ${prijzen}
+          <div class="circuit-actions">
+            <button type="button" class="remove" data-period-remove="${i}">Weghalen</button>
+          </div>
+        </details>`;
+    }).join("");
+    // Wat openstaat blijft open als er opnieuw getekend wordt.
+    for (const blok of host.querySelectorAll("details[data-period]")) {
+      blok.addEventListener("toggle", () => {
+        if (blok.open) this.openPeriode_ = `${bron}:${blok.dataset.period}`;
+        else if (this.openPeriode_ === `${bron}:${blok.dataset.period}`) this.openPeriode_ = null;
+      });
+    }
     for (const el of host.querySelectorAll("[data-period-field]")) {
       const p = lijst[Number(el.dataset.index)];
       const key = el.dataset.periodField;
@@ -423,88 +799,45 @@ class DacViewContract extends DacEditorElement {
     for (const knop of host.querySelectorAll("[data-period-remove]")) {
       knop.addEventListener("click", () => {
         lijst.splice(Number(knop.dataset.periodRemove), 1);
-        this.paintPeriods_();
+        this.paintPeriods_(bron);
         this.afterChange_();
       });
     }
   }
 
-  paintContract_() {
+  /** De opbouw van de coach, en of hij bevestigd is. */
+  paintOpbouw_() {
+    if (!this.rendered_ || !this.draft_) return;
     const contract = this.draft_.contract;
-    const dynamic = contract.type === "dynamic";
-
-    this.$("#fixed-fields").style.display = dynamic ? "none" : "";
-    this.$("#dynamic-fields").style.display = dynamic ? "" : "none";
-    for (const button of this.$$("#contract-type button")) {
-      button.setAttribute("aria-pressed", String(button.dataset.type === contract.type));
-    }
-
-    const source = contract.dynamic.source;
-    for (const button of this.$$("#dynamic-source button")) {
-      button.setAttribute("aria-pressed", String(button.dataset.source === source));
-    }
-
-    const interval = contract.dynamic.interval ?? "hour";
-    for (const button of this.$$("#dynamic-interval button")) {
-      button.setAttribute("aria-pressed", String(button.dataset.interval === interval));
-    }
-    // With an all-in entity the tax, markup and VAT fields are not just unused,
-    // they are misleading: the price already contains them.
-    this.$("#dyn-allin-row").style.display = source === "all_in" ? "" : "none";
-    this.$("#dyn-market-feed").value = contract.dynamic.market_entity ?? "";
-    // Dezelfde sensor twee keer laat de coach het marktveld leeg (`_prices` in
-    // coach.py), en tot v0.128.2 stond dat alleen in de kleine letters erboven.
-    // In de eerste woning op 18-10-2026 stond hij zo, met salderen uit, en
-    // handelde de batterij nooit.
-    const zelfde = source === "all_in" && Boolean(contract.dynamic.market_entity)
-      && contract.dynamic.market_entity === contract.dynamic.all_in_entity;
-    this.$("#dyn-same").hidden = !zelfde;
-    this.$("#dyn-same-text").textContent = !zelfde ? "" : salderen(contract, new Date())
-      ? "Dit is dezelfde sensor als de all-in prijs, en die telt niet als marktprijs. Zolang je saldeert rekent de coach de terugleverprijs uit de all-in prijs; daarna heeft hij een kale marktprijs nodig, zoals de ingebouwde Nord Pool."
-      : "Dit is dezelfde sensor als de all-in prijs, en die telt niet als marktprijs. Zo kent de coach je terugleverprijs niet, en kan een thuisbatterij niet handelen. Kies een kale marktprijs, zoals de ingebouwde Nord Pool.";
-    this.$("#dyn-market-fields").style.display = source === "market" ? "" : "none";
-    // De reserve: wat voor prijs hij geeft, alleen als er een is. De
-    // energiebelasting is nodig bij een marktprijs, van de eigen bron of van de
-    // reserve.
-    const reserve = contract.dynamic.fallback_entity ?? "";
-    const reserveSoort = contract.dynamic.fallback_source === "all_in" ? "all_in" : "market";
-    this.$("#dyn-reserve-soort-row").style.display = reserve ? "" : "none";
-    for (const button of this.$$("#dyn-reserve-soort button")) {
-      button.setAttribute("aria-pressed", String(button.dataset.reserve === reserveSoort));
-    }
-    this.$("#dyn-tax-row").style.display =
-      source === "market" || (reserve && reserveSoort === "market") ? "" : "none";
-    // De opslag doet er bij allebei de bronnen toe, maar om een andere reden.
-    this.$("#dyn-markup-hint").textContent =
-      source === "market"
-        ? "Wat je leverancier per kWh bovenop de marktprijs rekent. Zit in je inkoopprijs, en telt niet mee in wat teruglevering opbrengt."
-        : "Wat je leverancier per kWh bovenop de marktprijs rekent. Je all-in sensor kent dit bedrag al; de coach heeft het los nodig om uit te rekenen wat teruglevering je oplevert als je saldeert.";
-
-    // A dynamic contract without the sensor it is supposed to read leaves the
-    // price tile on a dash forever, and nothing on this screen would say why.
-    const entity =
-      source === "all_in" ? contract.dynamic.all_in_entity : contract.dynamic.market_entity;
-    const notice = this.$("#dyn-missing");
-    notice.hidden = !dynamic || Boolean(entity);
-    if (!notice.hidden) {
-      this.$("#dyn-missing-text").textContent =
-        source === "all_in"
-          ? "Er is nog geen all-in prijssensor gekozen, dus de energieprijs blijft leeg op het overzicht."
-          : "Er is nog geen marktprijssensor gekozen, dus de energieprijs blijft leeg op het overzicht.";
-    }
-  }
-
-  /** De som achter een zelf opgebouwde prijs, zodat hij na te rekenen is. */
-  paintHints_() {
-    const d = this.draft_.contract.dynamic;
-    const vat = Number(d.vat_percent) || 0;
-    this.$("#dyn-formula").textContent =
-      `Berekening: (marktprijs + € ${euro(d.energy_tax)} + € ${euro(d.supplier_markup)}) × ${(1 + vat / 100).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    this.$("#opbouw").innerHTML = opbouwHtml(this.check_, namenVan(contract.supplier, contract.type));
+    const zin = bevestigdZin(this.check_);
+    this.$("#bevestigd-zin").textContent = this.dirty_() ? "Je wijzigingen worden eerst opgeslagen." : zin;
+    this.$("#bevestig").hidden = Boolean(this.check_?.bevestigd) && !this.dirty_();
   }
 }
 
 DacViewContract.css = /* css */ `
   ${editorCss}
+  ${opbouwCss}
+
+  .segmented.drie { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 720px) { .segmented.drie { grid-template-columns: minmax(0, 1fr); } }
+  select {
+    width: 100%; min-height: 44px; padding: 10px 12px; border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border-hi); background: rgba(var(--dac-veil),0.04); color: var(--dac-ink);
+    font: inherit; font-size: 14px; color-scheme: var(--dac-scheme);
+  }
+  select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
+  .sub a { color: var(--dac-accent-hi); }
+
+  .bevestig, .nieuw { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+  .bevestig[hidden], .nieuw[hidden] { display: none; }
+  .bevestig button, .nieuw button {
+    font: inherit; font-size: 14px; padding: 10px 16px; border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.04); color: var(--dac-ink); cursor: pointer;
+  }
+  .bevestig button.primary { background: var(--dac-accent); border-color: var(--dac-accent); color: var(--dac-on-accent, #fff); font-weight: 600; }
+  .bevestig button[hidden] { display: none; }
 
   /* ---- eerdere contracten ---- */
   .circuit {
@@ -516,6 +849,17 @@ DacViewContract.css = /* css */ `
     gap: 12px;
     margin-bottom: 12px;
   }
+  .circuit .sub { margin: 0; }
+  details.period > summary {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px; cursor: pointer;
+    list-style: none; font-size: 14px; color: var(--dac-ink);
+  }
+  details.period > summary::-webkit-details-marker { display: none; }
+  details.period > summary::after { content: "›"; color: var(--dac-ink-3); margin-left: 6px; transition: transform 150ms ease; }
+  details.period[open] > summary::after { transform: rotate(90deg); }
+  details.period > summary .p-naam { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+  details.period > summary .p-wanneer { margin-left: auto; font-size: 12.5px; color: var(--dac-ink-2); white-space: nowrap; }
+  details.period:not([open]) { gap: 0; }
   .circuit-actions { display: flex; justify-content: flex-end; }
   .circuit-actions button {
     font: inherit;

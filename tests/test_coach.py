@@ -9668,6 +9668,143 @@ controle("handelen uit: geen tip", not b165u.get("tip"), f"{b165u.get('tip')}")
 b165v = tip165(ACCU165, instellingen()["contract"])
 controle("een vast contract heeft altijd een terugleverprijs: geen tip", not b165v.get("tip"), f"{b165v.get('tip')}")
 
+print("=== 166. de prijsopbouw: de controle tegen de all-in sensor, en bevestigen (v0.129.0) ===")
+# De leverancier per uur en Nord Pool per kwartier, de getallen van een avond in de
+# eerste woning op 18-10-2026 (marktprijzen). Zonneplan rekent (markt + belasting)
+# x 1,21 + 0,02.
+from domotiapp_coach import prijsopbouw as po166  # noqa: E402
+
+KW166 = [0.28563, 0.25721, 0.25704, 0.24944, 0.24205, 0.23912, 0.22556, 0.21283]
+uren166 = [{"from": dt.datetime(2026, 10, 18, 20 + i).isoformat() + "+02:00",
+            "till": dt.datetime(2026, 10, 18, 21 + i).isoformat() + "+02:00", "price": p}
+           for i, p in enumerate([0.4482672, 0.4090149])]
+kw166 = [{"start": (dt.datetime(2026, 10, 18, 20) + dt.timedelta(minutes=15 * i)).isoformat() + "+02:00",
+          "end": (dt.datetime(2026, 10, 18, 20) + dt.timedelta(minutes=15 * (i + 1))).isoformat() + "+02:00",
+          "value": p} for i, p in enumerate(KW166)]
+DYN166 = {"type": "dynamic", "netting": False, "supplier": "zonneplan",
+          "dynamic": {"source": "all_in", "interval": "hour", "all_in_entity": "sensor.zp_prijs",
+                      "market_entity": "sensor.np_prijs", "energy_tax": 0.09161, "supplier_markup": 0.016529,
+                      "vat_percent": 21, "feed_in_costs": 0, "feed_in_bonus": 0.02, "feed_in_vat": True,
+                      "feed_in_bonus_percent": 10, "bonus_daytime": True, "bonus_base": "market_plus_fee"}}
+huis166 = {**huis(), "sensor.zp_prijs": {"state": "0.4090149", "attributes": {"prices": uren166}},
+           "sensor.np_prijs": {"state": "0.22556", "attributes": {"raw_today": kw166}}}
+inst166 = instellingen()
+inst166["contract"] = DYN166
+hass166, store166, coach166 = bouw(huis166, inst166)
+NU166 = dt.datetime(2026, 10, 18, 21, 40)
+c166 = asyncio.run(coach166.async_prijscontrole(inst166, None, NU166))
+print(f"  {c166['controle']['status']} over {c166['controle']['blokken']} uur; inkoop {c166['inkoop']['totaal']:.5f}, "
+      f"sensor {c166['all_in']:.5f}, terug {c166['terug']['bedrag']:.5f}")
+controle("de opbouw klopt met de all-in sensor", c166["controle"]["status"] == "correct", f"{c166['controle']}")
+controle("het blok van nu is 21:00, met het gemiddelde van de vier kwartieren",
+         c166["blok"]["start"].startswith("2026-10-18T21:00") and abs(c166["inkoop"]["markt"] - 0.22989) < 1e-5,
+         f"{c166['blok']}")
+controle("de marktprijs komt in kwartieren", c166["bron"]["markt_minuten"] == 15, f"{c166['bron']}")
+controle("teruglevering zonder salderen: kaal met btw plus 0,02, 's avonds zonder bonus",
+         abs(c166["terug"]["bedrag"] - (0.22989 * 1.21 + 0.02)) < 1e-5 and c166["terug"]["bonus"] == 0.0,
+         f"{c166['terug']}")
+controle("nog niet bevestigd", c166["bevestigd"] is False)
+oud166 = {**DYN166, "dynamic": {**DYN166["dynamic"], "energy_tax": 0.1088}}
+c166b = asyncio.run(coach166.async_prijscontrole(inst166, oud166, NU166))
+controle("met de energiebelasting van 2024: afwijking, elk uur even groot",
+         c166b["controle"]["status"] == "afwijking" and c166b["controle"]["vast"]
+         and abs(c166b["controle"]["grootste"] + 0.0208) < 0.0003, f"{c166b['controle']}")
+inst166["contract"] = {**DYN166, "confirmed": {"at": "2026-10-18T21:41:00", "by": "Bewoner",
+                                               "values": po166.vingerafdruk(DYN166)}}
+c166c = asyncio.run(coach166.async_prijscontrole(inst166, None, NU166))
+controle("bevestigd met deze waarden", c166c["bevestigd"] is True and c166c["bevestigd_door"] == "Bewoner")
+anders166 = {**inst166["contract"], "dynamic": {**DYN166["dynamic"], "supplier_markup": 0.02}}
+c166d = asyncio.run(coach166.async_prijscontrole(inst166, anders166, NU166))
+controle("een ander bedrag: niet meer bevestigd", c166d["bevestigd"] is False)
+controle("21 en 21.0 zijn hetzelfde bedrag",
+         po166.vingerafdruk(DYN166) == po166.vingerafdruk({**DYN166, "dynamic": {**DYN166["dynamic"], "vat_percent": 21.0}}))
+controle("eerdere contracten tellen niet mee",
+         po166.vingerafdruk(DYN166) == po166.vingerafdruk({**DYN166, "periods": [{"from": "2025-01-01"}]}))
+controle("de prijslijst voor het paneel zegt of het bevestigd is",
+         coach166._prijzen_voor_paneel(inst166)["bevestigd"] is True)
+c166e = asyncio.run(coach166.async_prijscontrole(inst166, instellingen()["contract"], NU166))
+controle("een vast contract is niet te controleren", c166e["controle"]["status"] == "vast"
+         and abs(c166e["inkoop"] - 0.24171) < 1e-9, f"{c166e}")
+zelfde166 = {**DYN166, "dynamic": {**DYN166["dynamic"], "market_entity": "sensor.zp_prijs"}}
+c166f = asyncio.run(coach166.async_prijscontrole(inst166, zelfde166, NU166))
+controle("dezelfde sensor twee keer: onbekend, en zelfde staat erbij",
+         c166f["controle"]["status"] == "onbekend" and c166f["bron"]["zelfde"], f"{c166f['bron']}")
+
+print("=== 167. de terugleverprijs per uur is het gemiddelde van de kwartieren, en de kale prijs is de reserve (v0.129.0) ===")
+rijen167 = {r["start"]: r for r in coach166._prices(inst166)}
+r21 = rijen167.get(dt.datetime(2026, 10, 18, 21))
+print(f"  21:00: prijs {r21['price']:.5f}, terug {r21['feed_in']:.5f}")
+controle("teruglevering om 21:00 rekent met het uurgemiddelde, niet met het eerste kwartier",
+         abs(r21["feed_in"] - (0.22989 * 1.21 + 0.02)) < 1e-5, f"{r21}")
+hass166.states.zet("sensor.zp_prijs", "unavailable")
+dyn167, reserve167 = coach166._prijsbron(DYN166["dynamic"], dt.datetime(2026, 10, 18, 21, 10))
+controle("zonder all-in prijs valt de kale marktprijs in, zonder dat er een reserve is ingevuld",
+         reserve167 and dyn167["source"] == "market" and dyn167["market_entity"] == "sensor.np_prijs", f"{dyn167}")
+rijen167b = {r["start"]: r for r in coach166._prices({**inst166, "contract": DYN166}, dt.datetime(2026, 10, 18, 21, 10))}
+kw = rijen167b.get(dt.datetime(2026, 10, 18, 21))
+controle("en die rekent hem precies uit zoals de leverancier",
+         kw is not None and abs(kw["price"] - po166.inkoop(0.24205, DYN166["dynamic"])["totaal"]) < 1e-9, f"{kw}")
+
+print("=== 168. oude instellingen: gas en water krijgen een eigen onderdeel (v0.129.0) ===")
+oud168 = {"contract": {"type": "fixed", "gas_price": 1.3, "water_price": 1.1, "fixed": {"all_in_price": 0.28},
+                       "periods": [{"from": "2025-01-01", "to": "2025-12-31", "all_in_price": 0.35,
+                                    "gas_price": 1.5, "water_price": 0.9}],
+                       "dynamic": {"source": "all_in", "all_in_entity": "sensor.frank", "fallback_entity": "sensor.np",
+                                   "fallback_source": "market"}}}
+nieuw168 = storage._prune(storage.DEFAULT_SETTINGS, storage._merge(storage.DEFAULT_SETTINGS, storage._migrate(oud168)))
+c168 = nieuw168["contract"]
+print(f"  gas {c168['gas']}, water {c168['water']}")
+controle("de gasprijs van nu gaat mee", c168["gas"]["price"] == 1.3 and c168["gas"]["type"] == "fixed")
+controle("de waterprijs van nu ook", c168["water"]["price"] == 1.1)
+controle("de gas- en waterprijs van een eerder contract krijgen een eigen eerder contract",
+         c168["gas"]["periods"] == [{"from": "2025-01-01", "to": "2025-12-31", "price": 1.5}]
+         and c168["water"]["periods"] == [{"from": "2025-01-01", "to": "2025-12-31", "price": 0.9}], f"{c168}")
+controle("en het eerdere stroomcontract houdt alleen stroom",
+         "gas_price" not in c168["periods"][0] and c168["periods"][0]["all_in_price"] == 0.35, f"{c168['periods']}")
+controle("de oude velden zijn weg", "gas_price" not in c168 and "water_price" not in c168)
+controle("een reserve die een kale marktprijs was wordt het marktveld",
+         c168["dynamic"]["market_entity"] == "sensor.np" and not c168["dynamic"].get("fallback_entity"), f"{c168['dynamic']}")
+controle("een nieuw veld krijgt zijn standaard: de energiebelasting van 2026",
+         storage.DEFAULT_SETTINGS["contract"]["dynamic"]["energy_tax"] == 0.09161)
+
+print("=== 169. 'Ja, dit klopt' en de controle via de websocket (v0.129.0) ===")
+# Het commando zelf, zoals proef 139 de websocket laadt. De bewoner mag bevestigen
+# (geen admin nodig), maar geen concept laten narekenen.
+
+
+class _Verbinding169:
+    def __init__(self, admin):
+        self.user = _types.SimpleNamespace(is_admin=admin, id="u-2", name="Bewoner")
+        self.resultaten, self.fouten = [], []
+
+    def send_result(self, i, resultaat=None):
+        self.resultaten.append(resultaat)
+
+    def send_error(self, i, code, tekst):
+        self.fouten.append((code, tekst))
+
+
+inst169 = instellingen()
+inst169["contract"] = dict(DYN166)
+hass169, store169, coach169 = bouw(huis166, inst169)
+hass169.data["domotiapp_coach"]["coach"] = coach169
+coachmod.async_get_coach = lambda hass: hass.data["domotiapp_coach"]["coach"]
+v169 = _Verbinding169(False)
+asyncio.run(ws139.async_contract_confirm(hass169, v169, {"id": 1, "type": "domotiapp_coach/contract/confirm"}))
+bev169 = (store169.instellingen.get("contract") or {}).get("confirmed") or {}
+print(f"  bevestigd: {bev169}")
+controle("de bewoner bevestigt: wie, wanneer en de vingerafdruk van de waarden",
+         bev169.get("by") == "Bewoner" and bev169.get("at") and bev169.get("values") == po166.vingerafdruk(DYN166),
+         f"{bev169}")
+# De controle: een bewoner krijgt het opgeslagen contract, ook als hij een concept stuurt.
+inst169["contract"] = dict(DYN166)
+v169b = _Verbinding169(False)
+concept169 = {**DYN166, "dynamic": {**DYN166["dynamic"], "energy_tax": 0.5}}
+asyncio.run(ws139.async_contract_check(hass169, v169b, {"id": 2, "contract": concept169}))
+c169 = v169b.resultaten[-1] if v169b.resultaten else {}
+controle("een bewoner kan geen concept laten narekenen: hij krijgt het opgeslagen contract",
+         (c169.get("inkoop") or {}).get("belasting") == 0.09161, f"{c169.get('inkoop')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

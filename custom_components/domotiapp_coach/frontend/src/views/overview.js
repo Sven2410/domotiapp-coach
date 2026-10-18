@@ -36,7 +36,7 @@ import {
   valueLabel,
 } from "../devices.js";
 import { batteryRows, nachtConclusie } from "../battery.js";
-import { LiveSource, laadCoachPrijzen, laadbeurtRegels, meterReadings, priceForecast, solarForecast, volgCoach } from "../data-source.js";
+import { LiveSource, laadCoachPrijzen, laadbeurtRegels, meterReadings, priceForecast, prijsBevestigd, solarForecast, volgCoach } from "../data-source.js";
 import {
   planFor,
   planSummary,
@@ -347,6 +347,16 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
 
 class DacViewOverview extends DacElement {
   static css = /* css */ `
+    /* Klopt je energieprijs? (v0.129.0) Een knop naar Voorkeuren. */
+    .prijs-melding {
+      display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left;
+      font: inherit; font-size: 13.5px; line-height: 1.5; color: var(--dac-ink-2); cursor: pointer;
+      padding: 12px 14px; border-radius: var(--dac-radius-sm);
+      border: 1px solid rgba(250,178,25,0.35); background: rgba(250,178,25,0.08);
+    }
+    .prijs-melding strong { color: var(--dac-ink); }
+    .prijs-melding .icon { width: 18px; height: 18px; flex: 0 0 auto; color: var(--dac-warn); margin-top: 1px; }
+    .prijs-melding[hidden] { display: none; }
     :host { display: block; }
 
     .wrap {
@@ -1186,6 +1196,12 @@ class DacViewOverview extends DacElement {
           <p class="coach-sun" id="coach-sun" hidden></p>
         </article>
 
+        <!-- Tot de bewoner de prijsopbouw bevestigt (v0.129.0, Voorkeuren). -->
+        <button type="button" class="prijs-melding" id="prijs-melding" hidden>
+          ${icons.euro}
+          <span><strong>Klopt je energieprijs?</strong> Kijk onder Voorkeuren hoe de coach hem opbouwt, en bevestig hem.</span>
+        </button>
+
         <section class="tiles" aria-label="Live meetwaarden" data-card="tiles">
           ${tile("t-solar")}${tile("t-house")}${tile("t-grid")}${tile("t-load")}${tile("t-self")}${tile("t-price")}
         </section>
@@ -1288,7 +1304,14 @@ class DacViewOverview extends DacElement {
     `;
   }
 
+  /** Tot de prijsopbouw bevestigd is (v0.129.0); een oudere coach zegt niets. */
+  paintPrijsMelding_() {
+    const knop = this.rendered_ ? this.$("#prijs-melding") : null;
+    if (knop) knop.hidden = prijsBevestigd() !== false;
+  }
+
   afterRender() {
+    this.$("#prijs-melding").addEventListener("click", () => this.fire("dac-navigate", { id: "strategie" }));
     this.tiles_ = {
       solar: this.$("#t-solar"),
       house: this.$("#t-house"),
@@ -1737,7 +1760,7 @@ class DacViewOverview extends DacElement {
     // De prijslijst waar de coach mee rekent, voor als de sensor zelf er geen
     // heeft of de reserve invalt (v0.101.3). Bij elk besluit opnieuw, hooguit
     // eens per minuut.
-    laadCoachPrijzen(this.hass);
+    laadCoachPrijzen(this.hass).then(() => this.paintPrijsMelding_());
 
     try {
       this.coachOff_ = await volgCoach(this.hass, "decision", (data) => {

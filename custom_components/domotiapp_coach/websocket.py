@@ -21,10 +21,13 @@ from homeassistant.util import dt as dt_util
 
 from . import report
 from .const import (
+    BONUS_OVER_MARKT,
+    BONUS_OVER_MARKT_EN_VERGOEDING,
     ALL_BRANDS,
     LEVELS,
     CONTRACT_DYNAMIC,
     CONTRACT_FIXED,
+    CONTRACT_VARIABLE,
     DEVICE_TYPES,
     DYNAMIC_ALL_IN,
     DYNAMIC_MARKET,
@@ -134,12 +137,32 @@ _DATUM = vol.Any("", vol.Match(r"^\d{4}-\d{2}-\d{2}$"))
 # Een eerder contract; zie `contract.periods` in const.py.
 _PERIOD = _schema(
     {
+        # Een naam die de klant zelf geeft (v0.129.0), zoals "Zonneplan Elektra 2026".
+        vol.Optional("name", default=""): vol.All(str, vol.Length(max=80)),
         vol.Optional("from", default=""): _DATUM,
         vol.Optional("to", default=""): _DATUM,
         vol.Optional("all_in_price", default=0.0): vol.All(vol.Coerce(float), vol.Range(-10, 10)),
         vol.Optional("feed_in_tariff", default=0.0): vol.All(vol.Coerce(float), vol.Range(-10, 10)),
-        vol.Optional("gas_price", default=0.0): vol.All(vol.Coerce(float), vol.Range(0, 100)),
-        vol.Optional("water_price", default=0.0): vol.All(vol.Coerce(float), vol.Range(0, 100)),
+        # Wat voor contract het was en bij wie (v0.129.0, "Ik heb een nieuw contract
+        # afgesloten"). Bij een dynamisch contract neemt Historie de prijs van toen
+        # uit de prijssensor.
+        vol.Optional("type", default=CONTRACT_FIXED): vol.In([CONTRACT_FIXED, CONTRACT_VARIABLE, CONTRACT_DYNAMIC]),
+        vol.Optional("supplier", default=""): vol.All(str, vol.Length(max=60)),
+        # Tot v0.129.0 stonden gas en water in hetzelfde eerdere contract; een
+        # paneel dat nog in de cache zit stuurt ze nog mee. De opslag zet ze
+        # over (`_migrate` in storage.py).
+        vol.Optional("gas_price"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
+        vol.Optional("water_price"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
+    }
+)
+
+# Een eerder gas- of watercontract (v0.129.0): van, tot en de prijs per m³.
+_VOLUME_PERIOD = _schema(
+    {
+        vol.Optional("name", default=""): vol.All(str, vol.Length(max=80)),
+        vol.Optional("from", default=""): _DATUM,
+        vol.Optional("to", default=""): _DATUM,
+        vol.Optional("price", default=0.0): vol.All(vol.Coerce(float), vol.Range(0, 100)),
     }
 )
 
@@ -496,11 +519,41 @@ _SETTINGS = _schema(
         ),
         vol.Optional("contract"): _schema(
             {
-                vol.Optional("type"): vol.In([CONTRACT_FIXED, CONTRACT_DYNAMIC]),
+                vol.Optional("type"): vol.In([CONTRACT_FIXED, CONTRACT_VARIABLE, CONTRACT_DYNAMIC]),
                 vol.Optional("netting"): bool,
+                # De leverancier uit de catalogus en de bevestiging (v0.129.0).
+                vol.Optional("supplier"): vol.All(str, vol.Length(max=60)),
+                vol.Optional("start"): _DATUM,
+                vol.Optional("end"): _DATUM,
+                vol.Optional("confirmed"): _schema(
+                    {
+                        vol.Optional("at"): vol.All(str, vol.Length(max=40)),
+                        vol.Optional("by"): vol.All(str, vol.Length(max=120)),
+                        vol.Optional("values"): vol.All(str, vol.Length(max=80)),
+                    }
+                ),
                 vol.Optional("gas_price"): _EURO,
                 vol.Optional("water_price"): _EURO,
                 vol.Optional("periods"): vol.All([_PERIOD], vol.Length(max=24)),
+                vol.Optional("gas"): _schema(
+                    {
+                        vol.Optional("type"): vol.In([CONTRACT_FIXED, CONTRACT_VARIABLE, CONTRACT_DYNAMIC]),
+                        vol.Optional("supplier"): vol.All(str, vol.Length(max=60)),
+                        vol.Optional("price"): _EURO,
+                        vol.Optional("entity"): _ENTITY,
+                        vol.Optional("start"): _DATUM,
+                        vol.Optional("end"): _DATUM,
+                        vol.Optional("periods"): vol.All([_VOLUME_PERIOD], vol.Length(max=24)),
+                    }
+                ),
+                vol.Optional("water"): _schema(
+                    {
+                        # Het waterbedrijf, vrij in te vullen (v0.129.0).
+                        vol.Optional("supplier"): vol.All(str, vol.Length(max=60)),
+                        vol.Optional("price"): _EURO,
+                        vol.Optional("periods"): vol.All([_VOLUME_PERIOD], vol.Length(max=24)),
+                    }
+                ),
                 vol.Optional("fixed"): _schema(
                     {
                         vol.Optional("all_in_price"): _EURO,
@@ -523,6 +576,12 @@ _SETTINGS = _schema(
                         vol.Optional("vat_percent"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
                         vol.Optional("feed_in_costs"): _EURO,
                         vol.Optional("feed_in_bonus"): vol.All(vol.Coerce(float), vol.Range(-1, 1)),
+                        vol.Optional("feed_in_bonus_percent"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
+                        vol.Optional("bonus_daytime"): bool,
+                        vol.Optional("bonus_base"): vol.In(
+                            [BONUS_OVER_MARKT, BONUS_OVER_MARKT_EN_VERGOEDING]
+                        ),
+                        vol.Optional("feed_in_vat"): bool,
                     }
                 ),
             }
@@ -1142,6 +1201,77 @@ async def async_prices(
     connection.send_result(msg["id"], async_get_coach(hass)._prijzen_voor_paneel(settings))
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/contract/check",
+        # Een concept van Contract dat nog niet is opgeslagen; alleen voor de
+        # installateur, de bewoner krijgt het opgeslagen contract.
+        vol.Optional("contract"): dict,
+    }
+)
+@websocket_api.async_response
+async def async_contract_check(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De opbouw van de stroomprijs van nu en of die klopt (v0.129.0).
+
+    De eigenaar op 18-10-2026: "Invullen, laten zien hoe de prijs tot stand is
+    gekomen in woord én cijfers, en het all-in resultaat tonen." Het paneel
+    toont wat hier uitkomt; zie `async_prijscontrole` in coach.py.
+    """
+    from .coach import async_get_coach
+
+    settings = await async_get_store(hass).async_load()
+    concept = None
+    user = getattr(connection, "user", None)
+    if msg.get("contract") is not None and getattr(user, "is_admin", False):
+        try:
+            concept = _merge_contract(settings.get("contract") or {}, _SETTINGS({"contract": msg["contract"]})["contract"])
+        except vol.Invalid as err:
+            connection.send_error(msg["id"], "invalid_format", str(err))
+            return
+    connection.send_result(msg["id"], await async_get_coach(hass).async_prijscontrole(settings, concept))
+
+
+def _merge_contract(oud: dict[str, Any], nieuw: dict[str, Any]) -> dict[str, Any]:
+    """Het concept over het opgeslagen contract heen, per onderdeel."""
+    uit = {**oud, **nieuw}
+    for deel in ("fixed", "dynamic", "gas", "water", "confirmed"):
+        if isinstance(oud.get(deel), dict) or isinstance(nieuw.get(deel), dict):
+            uit[deel] = {**(oud.get(deel) or {}), **(nieuw.get(deel) or {})}
+    return uit
+
+
+@websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/contract/confirm"})
+@websocket_api.async_response
+async def async_contract_confirm(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """"Ja, dit klopt": de bewoner of de installateur bevestigt het opgeslagen contract (v0.129.0).
+
+    Met wie en wanneer, en de waarden die er toen stonden (`vingerafdruk`):
+    verandert er daarna iets, dan geldt de bevestiging niet meer. Iedereen
+    mag dit, want het verandert geen bedrag en geen sensor.
+    """
+    from .prijsopbouw import vingerafdruk
+
+    store = async_get_store(hass)
+    settings = await store.async_load()
+    user = getattr(connection, "user", None)
+    bevestigd = {
+        "at": dt_util.now().isoformat(timespec="seconds"),
+        "by": str(getattr(user, "name", "") or ""),
+        "values": vingerafdruk(settings.get("contract") or {}),
+    }
+    settings = await store.async_save({"contract": {"confirmed": bevestigd}})
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    connection.send_result(msg["id"], settings)
+
+
 @websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/coach/state"})
 @callback
 def async_coach_state(
@@ -1435,6 +1565,8 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_history_quarters)
     websocket_api.async_register_command(hass, async_coach_state)
     websocket_api.async_register_command(hass, async_prices)
+    websocket_api.async_register_command(hass, async_contract_check)
+    websocket_api.async_register_command(hass, async_contract_confirm)
     websocket_api.async_register_command(hass, async_notifications_list)
     websocket_api.async_register_command(hass, async_savings_list)
     websocket_api.async_register_command(hass, async_coach_approve)

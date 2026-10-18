@@ -206,6 +206,9 @@ GRID_MODE_SIGNED: Final = "signed"
 # --- Contract --------------------------------------------------------------
 CONTRACT_FIXED: Final = "fixed"
 CONTRACT_DYNAMIC: Final = "dynamic"
+# Variabel (v0.129.0): de leverancier past de prijs per maand of kwartaal aan,
+# maandelijks opzegbaar. Voor de coach een vaste prijs tot de klant hem bijwerkt.
+CONTRACT_VARIABLE: Final = "variable"
 
 # A dynamic contract either has one entity that already carries the all-in
 # price, or a market price that still needs tax, markup and VAT applied.
@@ -218,6 +221,10 @@ DYNAMIC_MARKET: Final = "market"
 # block size the coach plans in.
 PRICE_INTERVAL_HOUR: Final = "hour"
 PRICE_INTERVAL_QUARTER: Final = "quarter"
+# Waarover een terugleverbonus in procenten gaat (v0.129.0): de kale prijs, of
+# de kale prijs plus de vergoeding per kWh. Zie `prijsopbouw.bonus`.
+BONUS_OVER_MARKT: Final = "market"
+BONUS_OVER_MARKT_EN_VERGOEDING: Final = "market_plus_fee"
 
 # Nominal voltage per phase, used to turn the main fuse into a power ceiling.
 # 3 x 25 A -> 17250 W, 1 x 25 A -> 5750 W.
@@ -428,6 +435,22 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     },
     "contract": {
         "type": CONTRACT_FIXED,
+        # De leverancier uit de catalogus (`LEVERANCIERS` in leveranciers.js), of
+        # leeg voor een andere (v0.129.0). Kiezen vult de velden hieronder voor;
+        # wat er daarna staat is van de klant, en de coach rekent alleen daarmee.
+        "supplier": "",
+        # De looptijd van een vast contract (v0.129.0), als "2026-01-01", of leeg.
+        # Variabel en dynamisch zijn maandelijks opzegbaar en hebben er geen. De
+        # bewoner van de eerste woning op 18-10-2026: "verschillende looptijden,
+        # dus ook een melding van contract bijna verlopen."
+        "start": "",
+        "end": "",
+        # Wie de opbouw bevestigde ("Ja, dit klopt"), wanneer, en welke waarden
+        # dat waren (`vingerafdruk` in prijsopbouw.py). Verandert er daarna iets,
+        # dan geldt de bevestiging niet meer. De eigenaar op 18-10-2026: "ik laat
+        # de coach alles vooraf invullen en de eindgebruiker moet de Ja-klap
+        # geven en het bevestigen."
+        "confirmed": {"at": "", "by": "", "values": ""},
         # Of teruggeleverde stroom nog gesaldeerd wordt. Dat is geen strategie
         # maar één getal: bij salderen is een teruggeleverde kWh precies zoveel
         # waard als een ingekochte, dus wordt de terugleververgoeding de
@@ -438,21 +461,28 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # afspraak met je leverancier en geen sensor. De regeling loopt af op
         # 1 januari 2027, dus dit vinkje gaat vanzelf uit de praktijk verdwijnen.
         "netting": False,
-        # Wat gas kost, in euro per m³, voor de historie en het rapport. Nul is
-        # onbekend, en dan staat er geen bedrag. De bewoner van de eerste
-        # woning op 22-09-2026: "prijs van gas laten invullen."
-        "gas_price": 0.0,
-        # Wat water kost, in euro per m³, net als gas.
-        "water_price": 0.0,
-        # Eerdere contracten, voor wie van leverancier wisselde: de historie
-        # rekent elke dag met de prijs die toen gold. Per contract van, tot
-        # (leeg is nog lopend), de all-in stroomprijs, de terugleververgoeding
-        # en de gasprijs. Dezelfde bewoner: "gascontract 1: van-tot + prijs,
-        # gascontract 2: van-tot + prijs; dat kun je ook doen bij de
-        # stroomprijzen, dan kun je een goede weergave bieden van kosten, ook
-        # bij wijzigen van aanbieder." Wat de coach nú doet rekent met het
-        # contract hierboven; dit is alleen voor terugkijken.
+        # Eerdere stroomcontracten, voor wie van leverancier wisselde: de
+        # historie rekent elke dag met de prijs die toen gold. Per contract van,
+        # tot (leeg is nog lopend), de all-in stroomprijs en de
+        # terugleververgoeding. De bewoner van de eerste woning op 22-09-2026:
+        # "gascontract 1: van-tot + prijs, gascontract 2: van-tot + prijs; dat
+        # kun je ook doen bij de stroomprijzen, dan kun je een goede weergave
+        # bieden van kosten, ook bij wijzigen van aanbieder." Wat de coach nú
+        # doet rekent met het contract hierboven; dit is alleen voor
+        # terugkijken. Gas en water hebben sinds v0.129.0 hun eigen lijst.
         "periods": [],
+        # Gas, los van stroom (v0.129.0): een eigen soort, een eigen
+        # leverancier en eigen eerdere contracten. De eigenaar op 18-10-2026:
+        # "rekening houden dat je stroom dynamisch kan hebben en gas vast en
+        # andersom", en "verschillende leveranciers zoals Vattenfall alleen
+        # stroom en dan Frank gas". Alleen voor de historie en het rapport: de
+        # coach stuurt niets op gas. Vast is een all-in prijs per m³; dynamisch
+        # een sensor met de all-in gasprijs. Nul of leeg is onbekend, en dan
+        # staat er geen bedrag.
+        "gas": {"type": CONTRACT_FIXED, "supplier": "", "price": 0.0, "entity": "", "start": "", "end": "",
+                "periods": []},
+        # Water: een prijs per m³, all-in, en eerdere contracten.
+        "water": {"supplier": "", "price": 0.0, "periods": []},
         "fixed": {
             "all_in_price": 0.28,
             "feed_in_tariff": 0.07,
@@ -474,7 +504,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             # als fallback." Zie `_prijsbron` in coach.py.
             "fallback_entity": "",
             "fallback_source": DYNAMIC_MARKET,
-            "energy_tax": 0.1088,
+            # De energiebelasting van 2026, zonder btw (Belastingdienst). Tot
+            # v0.129.0 stond hier die van 2024, en die bleef staan bij wie het
+            # veld nooit aanraakte; de controle bij Contract ziet zoiets nu.
+            "energy_tax": 0.09161,
             "supplier_markup": 0.02,
             "vat_percent": 21,
             "feed_in_costs": 0.0,
@@ -484,6 +517,15 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             # ANWB 2 cent, Tibber niets, Next Energy 2,19 cent eraf. Mag dus
             # ook negatief zijn.
             "feed_in_bonus": 0.0,
+            # Een bonus in procenten bovenop de terugleverprijs (v0.129.0), zoals
+            # de Zonnebonus van Zonneplan: 10% over (marktprijs + vergoeding),
+            # alleen van zonsopkomst tot zonsondergang. Zie `prijsopbouw.bonus`.
+            "feed_in_bonus_percent": 0.0,
+            "bonus_daytime": False,
+            "bonus_base": BONUS_OVER_MARKT,
+            # Of de leverancier de marktprijs voor teruglevering met btw betaalt
+            # (v0.129.0). Zonneplan in 2026: ja, de kale prijs maal 1,21.
+            "feed_in_vat": False,
         },
     },
     # Wie welke melding krijgt, en de zekeringmelding zelf. De eigenaar op 06-09-2026:

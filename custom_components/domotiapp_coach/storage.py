@@ -272,6 +272,34 @@ def _migrate(stored: dict[str, Any]) -> dict[str, Any]:
     setting on the floor: pruning removes keys the current version does not
     know, and it cannot tell a removed setting from a renamed one.
     """
+    # v0.129.0: gas en water hebben elk een eigen onderdeel in het contract, met
+    # eigen eerdere contracten. De prijs van nu en de prijzen in de eerdere
+    # contracten gaan mee; zonder deze stap snoeit `_prune` ze weg.
+    contract = stored.get("contract")
+    if isinstance(contract, dict):
+        for bron in ("gas", "water"):
+            oud = contract.pop(f"{bron}_price", None)
+            deel = contract.get(bron)
+            if not isinstance(deel, dict):
+                deel = contract[bron] = {}
+            if oud and not deel.get("price"):
+                deel["price"] = oud
+            perioden = deel.setdefault("periods", [])
+            for periode in contract.get("periods") or []:
+                if not isinstance(periode, dict):
+                    continue
+                prijs = periode.pop(f"{bron}_price", None)
+                if prijs:
+                    perioden.append({"from": periode.get("from", ""), "to": periode.get("to", ""), "price": prijs})
+
+        # Een reserve die een kale marktprijs was en geen marktprijs ernaast: die
+        # wordt het marktveld, dat sinds v0.129.0 vanzelf de reserve is
+        # (`_prijsbron` in coach.py) en daarnaast de controle en de teruglevering.
+        dyn = contract.get("dynamic")
+        if (isinstance(dyn, dict) and dyn.get("fallback_entity") and not dyn.get("market_entity")
+                and dyn.get("fallback_source", "market") == "market" and dyn.get("source") == "all_in"):
+            dyn["market_entity"] = dyn.pop("fallback_entity")
+
     # v0.43.0 kent nog maar twee fasekeuzes. "Allebei" bestond omdat een auto
     # die kan wisselen zich pas verraadt als hij laadt, maar dat maakte elke
     # voorspelling het traagste geval: 17 uur waar er 6 nodig waren. De eigenaar op

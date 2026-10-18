@@ -205,6 +205,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | een smart plug: de lijst met apparaten en hun iconen, altijd aan (ook voor een vaatwasser aan een smart plug), en de melding Apparaat staat uit | `docs/smart-plug.md` |
 | de vriezer: uitlezen en melden (deur open, te warm, storing), niet sturen | `docs/vriezer.md` |
 | het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat | `docs/paneel.md` |
+| het contract: de leverancierscatalogus, de prijsopbouw en de controle tegen de all-in sensor, "Ja, dit klopt", de kale marktprijs als reserve, gas en water per energiebron, vast/variabel/dynamisch, looptijden en "nieuw contract afgesloten" | `docs/contract.md` |
 
 ## Wat gelijk moet blijven
 
@@ -244,6 +245,9 @@ dan de andere in dezelfde uitgave.
   `solar_stored_days`) en de schatting `zonInAccu` in `huisMetAccu`
   (views/history.js) voor de uren daarvoor; `balans` in geld.js telt ze op
   dezelfde manier (`docs/eerste-woning.md`).
+- **De prijsopbouw** (v0.129.0): `zon_op_onder`, `overdag`, `bonus`, `markt_terug` en `terug` in
+  prijsopbouw.py tegenover `zonOpOnder`, `overdag`, `bonusOp`, `marktTerug` en `terugOp` in geld.js
+  (`docs/contract.md`).
 - **Het contract met de kaarten van DomotiApp Lovelace** (v0.110.0, `CONTRACT` in
   entiteit.py, `docs/vaatwasser.md`). De eigenaar op 11-10-2026: "wanneer er iets bij komt in
   de coach wat invloed heeft op de lovelace kaart, dat dat goed opgepakt wordt." Een kaart
@@ -283,6 +287,9 @@ dan de andere in dezelfde uitgave.
 | `frontend/src/views/notifications.js` | Meldingen, twee in een sinds 06-09-2026: bovenaan de personen (sinds v0.114.0 voegt de bewoner ze zelf toe en ziet hij iedereen, via `notifications/household`), de zekeringmelding "Zware belasting" (uit Strategie verhuisd), en daaronder alles wat de coach de afgelopen twee weken stuurde én elk besluit dat hij nam (`_async_noteer_besluit`, `recent` in notifications.js, sinds v0.101.5), uit `MeldingenStore` in storage.py |
 | `frontend/src/geld.js` | In geld in Historie en het rapport (v0.101.0): uitgegeven, bespaard in zon, thuisbatterij en coach, en salderen zoals de coach. Geen terugverdientijd en geen aankoopprijzen, sinds v0.101.1 (`docs/eerste-woning.md`) |
 | `frontend/src/savings.js` | Sessies (tot v0.116.0 Bespaard, tot v0.126.4 Beurten), onder Historie: de laadbeurten uit `BeurtenStore` (storage.py) opgeteld per periode en per apparaat. De coach telt per ronde wat een beurt kost (`_geld_bij`) en wat dezelfde tijd op vol vermogen vanaf het inpluggen met alles van het net gekost had (`_basis_bij`, de maat); bespaard is maat min betaald, nooit onder nul, in twee delen: door de zon (`zon_winst`) en door te wachten. Stapt hij midden in een beurt in, dan rekent `_async_terugrekenen` het begin terug uit de recorder en de kwartieropslag |
+| `prijsopbouw.py` | De prijsopbouw (v0.129.0): de inkoopprijs uit de kale prijs en de velden, de controle tegen de all-in sensor (uur tegen kwartier), de terugleverprijs met bonus, zonsopkomst en -ondergang, de vingerafdruk voor "Ja, dit klopt". Kent Home Assistant niet; `async_prijscontrole` in coach.py en `contract/check` in websocket.py gebruiken hem (`docs/contract.md`) |
+| `frontend/src/leveranciers.js`, `leveranciers-data.js` | De leverancierscatalogus (v0.129.0): per leverancier en soort de velden die Contract voorinvult, de woorden voor de opbouw, bronnen, peildatum en wat onzeker is, en de energiebelasting per jaar. Een voorstel; de coach rekent alleen met wat de klant bevestigde |
+| `frontend/src/opbouw.js` | "Zo komt je prijs tot stand" (v0.129.0), voor Contract en Voorkeuren: toont wat de coach uitrekent, in woorden en cijfers, in de volgorde van de leverancier |
 | `frontend/src/tijdlijn.js` | De tijdlijn in Historie (v0.115.0): per dag een baan per apparaat dat de coach stuurt, uit de besluiten in Meldingen (sinds v0.115.0 met `device`, `rule`, `mode`, `charge` erbij), en de kleur zon of net uit de kwartieren van het apparaat en het net, niet uit de regel. Kent Home Assistant niet (`docs/eerste-woning.md`) |
 
 De scheiding tussen `planner.py` en `coach.py` is de kern: het denkwerk is los
@@ -314,6 +321,7 @@ python tests/test_batterij.py    # 187 op het denkwerk van de thuisbatterij en o
 python tests/test_coach.py       # 1195 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2449 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
+python tests/test_prijsopbouw.py # 31 op de prijsopbouw, de controle en zonsopkomst
 node   tests/test_rapport.mjs    # 202 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar

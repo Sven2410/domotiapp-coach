@@ -710,7 +710,36 @@ class DacViewHistory extends DacElement {
   /** De reserveprijssensor, voor de vakken waarin de eigen niets gaf (v0.101.3). */
   reserveEntity_() {
     const contract = this.settings_?.contract;
-    return contract?.type === "dynamic" ? (contract.dynamic?.fallback_entity ?? "") : "";
+    if (contract?.type !== "dynamic") return "";
+    const d = contract.dynamic ?? {};
+    if (d.fallback_entity) return d.fallback_entity;
+    // Sinds v0.129.0 is de kale marktprijs naast een all-in prijs vanzelf de
+    // reserve, zoals `_prijsbron` in coach.py.
+    return d.source === "all_in" && d.market_entity && d.market_entity !== d.all_in_entity ? d.market_entity : "";
+  }
+
+  /** Waar het huis staat, voor een terugleverbonus die alleen overdag geldt (v0.129.0). */
+  ligging_() {
+    const lat = Number(this.hass_?.config?.latitude);
+    const lon = Number(this.hass_?.config?.longitude);
+    return Number.isFinite(lat) && Number.isFinite(lon) && (lat || lon) ? { lat, lon } : null;
+  }
+
+  /**
+   * Hoe lang een vak van de grafiek duurt, in ms (`bucket` in statistics.js).
+   * Een dag of een maand als één vak telt overdag als het midden erin valt; de
+   * bonus komt dan over het hele vak, en dat is bij teruglevering van zon ook
+   * zo, want die is er alleen overdag.
+   */
+  vakLengte_() {
+    const vak = PERIODS.find((p) => p.id === this.period_)?.bucket ?? "hour";
+    return { hour: 3600000, day: 86400000, month: 30 * 86400000 }[vak] ?? 3600000;
+  }
+
+  /** De sensor met de gasprijs, bij dynamisch gas (v0.129.0). */
+  gasEntity_() {
+    const gas = this.settings_?.contract?.gas;
+    return gas?.type === "dynamic" ? (gas.entity ?? "") : "";
   }
 
   /** Which counters this installation has, in the roles the chart needs. */
@@ -756,16 +785,18 @@ class DacViewHistory extends DacElement {
     }));
 
     const batterijen = (this.settings_?.devices ?? []).filter((device) => device.type === "thuisbatterij");
-    const [series, prices, reservePrijzen, devices, accu] = await Promise.all([
+    const [series, prices, reservePrijzen, devices, accu, , gasPrijzen] = await Promise.all([
       fetchPeriod(this.hass_, ids, this.period_, start),
       fetchPrices(this.hass_, this.priceEntity_(), this.period_, start),
       fetchPrices(this.hass_, this.reserveEntity_(), this.period_, start),
       fetchDevices(this.hass_, apparaten, this.period_, start),
       fetchBattery(this.hass_, batterijen, this.period_, start),
       laadCoachPrijzen(this.hass_),
+      fetchPrices(this.hass_, this.gasEntity_(), this.period_, start),
     ]);
     if (run !== this.run_) return;
     this.prices_ = allInPrijzen(prices, reservePrijzen, this.settings_?.contract);
+    this.gasPrijzen_ = gasPrijzen;
     this.devices_ = devices;
     this.accu_ = accu;
     // Voor In geld: wat de coach bespaarde. De kaart tekent zichzelf bij als
@@ -1986,8 +2017,9 @@ class DacViewHistory extends DacElement {
       beurtenGeladen: Array.isArray(this.beurten_),
       ...balans({
         rijen: rows,
-        prijs: (when) => prijsOp(contract, rate, prices, when),
+        prijs: (when) => prijsOp(contract, rate, prices, when, this.ligging_(), this.vakLengte_()),
         gas: this.rows_?.gas ?? [],
+        gasPrijzen: this.gasPrijzen_ ?? null,
         water: this.rows_?.water ?? [],
         contract,
         accu: accu.euro,
