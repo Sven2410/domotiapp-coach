@@ -414,7 +414,7 @@ export class DacPlanAheadSheet extends DacElement {
       const leeg = document.createElement("div");
       leeg.className = "leeg";
       leeg.textContent =
-        plan.note || "Er is niets te plannen: er hangt geen auto of er zijn geen prijzen.";
+        plan.note || "Er is niets te plannen: er is geen auto aangesloten of er zijn geen prijzen.";
       uurlijst.append(leeg);
       this.$("#vooruit-voet").textContent = "";
       return;
@@ -476,18 +476,19 @@ export class DacPlanAheadSheet extends DacElement {
     kop.className = "prijs-kop";
     const links = document.createElement("span");
     links.textContent = berekend.stap <= 20 ? "Prijs per kwartier" : "Prijs per uur";
-    const rechts = document.createElement("span");
-    const groen = berekend.balken.some((b) => b.groen);
-    if (berekend.gemiddeld !== null) {
+    kop.append(links);
+    // Rechts alleen wat een kWh van het net gemiddeld kost, en alleen waar dat
+    // nergens anders staat (v0.130.1). De bewoner van de eerste woning op
+    // 19-10-2026, bij "in deze uren niets van het net" boven de grafiek van de
+    // batterij: "overbodig veldje nu, door dat nieuwe tekstveld erboven". Bij
+    // de batterij staat "Van het net" al in een vak erboven.
+    if (berekend.gemiddeld !== null && woorden.gemiddelde !== false) {
+      const rechts = document.createElement("span");
       const sterk = document.createElement("strong");
       sterk.textContent = `€ ${berekend.gemiddeld.toFixed(3).replace(".", ",")}`;
       rechts.append("gemiddeld ", sterk, " per kWh van het net");
-    } else {
-      rechts.textContent = groen
-        ? "alles op je eigen zon"
-        : "in deze uren niets van het net";
+      kop.append(rechts);
     }
-    kop.append(links, rechts);
 
     const legenda = document.createElement("div");
     legenda.className = "prijs-legenda";
@@ -580,7 +581,7 @@ export class DacPlanAheadSheet extends DacElement {
         leveren: Number(u.grid_kwh) < -0.05,
         label: standNaam(u.mode),
       })),
-      { groen: "Laden van het net", leveren: "Ontladen aan het net", wacht: "Nul op de meter" }
+      { groen: "Laden van het net", leveren: "Ontladen aan het net", wacht: "Nul op de meter", gemiddelde: false }
     );
     const uurlijst = this.$("#vooruit-uren");
     const nu = Date.now();

@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict, replace
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from functools import partial
 from typing import Any
 
@@ -65,6 +65,7 @@ from .batterij import (
     auto_grens,
     balans_kwh,
     handelen_kan_niet,
+    herreken,
     met_paal,
     plan_batterij,
     rendement_uit_tellers,
@@ -7381,26 +7382,62 @@ class ChargerCoach:
                 if vorige is not None and now - vorige < NORDPOOL_OPNIEUW:
                     continue
                 self._nordpool_gevraagd[(entity_id, sleutel)] = now
-                try:
-                    antwoord = await self.hass.services.async_call(
-                        NORDPOOL_DOMEIN, "get_prices_for_date",
-                        {"config_entry": entry_id, "date": sleutel, "areas": [gebied], "currency": munt},
-                        blocking=True, return_response=True,
-                    )
-                except Exception:  # noqa: BLE001 - dan straks nog eens
-                    _LOGGER.debug("Nord Pool gaf geen prijzen voor %s", sleutel, exc_info=True)
-                    continue
-                rijen = []
-                for rij in (antwoord or {}).get(gebied) or []:
-                    try:
-                        rijen.append({"start": rij["start"], "end": rij["end"], "value": float(rij["price"]) / 1000.0})
-                    except (KeyError, TypeError, ValueError):
-                        continue
+                rijen = await self._async_nordpool_vraag(entry_id, gebied, munt, sleutel)
                 if rijen:
                     cache[sleutel] = rijen
                     # Het wachten is voor een dag die er nog niet is, niet
                     # voor een die binnen is.
                     self._nordpool_gevraagd.pop((entity_id, sleutel), None)
+
+    async def _async_nordpool_vraag(self, entry_id: str, gebied: str, munt: str, dag: str) -> list[dict[str, Any]]:
+        """De prijzen van één dag bij de ingebouwde Nord Pool, in euro per kWh.
+
+        Leeg als de dienst niets geeft; dan vraagt de coach het later nog eens.
+        """
+        try:
+            antwoord = await self.hass.services.async_call(
+                NORDPOOL_DOMEIN, "get_prices_for_date",
+                {"config_entry": entry_id, "date": dag, "areas": [gebied], "currency": munt},
+                blocking=True, return_response=True,
+            )
+        except Exception:  # noqa: BLE001 - dan straks nog eens
+            _LOGGER.debug("Nord Pool gaf geen prijzen voor %s", dag, exc_info=True)
+            return []
+        rijen = []
+        for rij in (antwoord or {}).get(gebied) or []:
+            try:
+                rijen.append({"start": rij["start"], "end": rij["end"], "value": float(rij["price"]) / 1000.0})
+            except (KeyError, TypeError, ValueError):
+                continue
+        return rijen
+
+    async def _async_marktprijzen(self, entity_id: str, van: date, tot: date) -> dict[datetime, float]:
+        """De kale marktprijs per kwartier over voorbije dagen (v0.130.1).
+
+        Voor het opnieuw uitrekenen van "Opgeleverd": de ingebouwde Nord Pool
+        geeft met zijn dienst ook dagen die voorbij zijn, en een prijssensor
+        heeft niet altijd een statistiek in Home Assistant. {lokaal begin van het
+        kwartier: euro per kWh}; een uurprijs geldt voor alle vier zijn
+        kwartieren. Leeg als het geen sensor van de ingebouwde Nord Pool is.
+        """
+        bron = self._nordpool_bron(entity_id) if entity_id else None
+        if bron is None:
+            return {}
+        entry_id, gebied, munt = bron
+        uit: dict[datetime, float] = {}
+        dag = van
+        while dag <= tot:
+            for rij in await self._async_nordpool_vraag(entry_id, gebied, munt, dag.isoformat()):
+                begin, eind = dt_util.parse_datetime(str(rij["start"])), dt_util.parse_datetime(str(rij["end"]))
+                if begin is None or eind is None:
+                    continue
+                t = dt_util.as_local(begin).replace(tzinfo=None)
+                eind_lokaal = dt_util.as_local(eind).replace(tzinfo=None)
+                while t < eind_lokaal:
+                    uit[t] = rij["value"]
+                    t += timedelta(minutes=15)
+            dag += timedelta(days=1)
+        return uit
 
     def _nordpool_bron(self, entity_id: str) -> tuple[str, str, str] | None:
         """Config entry, gebied en munt van een sensor van de ingebouwde Nord Pool."""
@@ -9535,6 +9572,168 @@ class ChargerCoach:
         uit: list[tuple[datetime, str]] = []
         for st in (gevonden or {}).get(entity_id, []):
             uit.append((dt_util.as_local(st.last_changed).replace(tzinfo=None), str(st.state)))
+        return uit
+
+    async def _async_uurgemiddelden(
+        self, entity_ids: list[str], start: datetime, einde: datetime
+    ) -> dict[str, dict[datetime, float]]:
+        """Het gemiddelde per uur uit de statistieken van Home Assistant (v0.130.1).
+
+        Voor wat verder terug ligt dan de tien dagen waarin de recorder elke
+        toestand bewaart: de accustand en de prijzen van toen. Per sensor
+        {lokaal uur: gemiddelde}; leeg als de recorder er niet is.
+        """
+        ids = {e for e in entity_ids if e}
+        if not ids:
+            return {}
+        try:
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.statistics import statistics_during_period
+
+            begin = dt_util.as_utc(start.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE))
+            eind = dt_util.as_utc(einde.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE))
+            gevonden = await get_instance(self.hass).async_add_executor_job(
+                statistics_during_period, self.hass, begin, eind, ids, "hour", None, {"mean"}
+            )
+        except Exception as fout:  # noqa: BLE001 - zonder recorder geen statistieken
+            _LOGGER.warning("kon de statistieken niet lezen: %s", fout)
+            return {}
+        uit: dict[str, dict[datetime, float]] = {}
+        for entity_id, rijen in (gevonden or {}).items():
+            for rij in rijen or []:
+                moment = rij.get("start")
+                if isinstance(moment, (int, float)):
+                    moment = datetime.fromtimestamp(moment, tz=timezone.utc)
+                if not isinstance(moment, datetime) or rij.get("mean") is None:
+                    continue
+                uur = dt_util.as_local(moment).replace(tzinfo=None, minute=0, second=0, microsecond=0)
+                uit.setdefault(entity_id, {})[uur] = float(rij["mean"])
+        return uit
+
+    async def async_herreken_batterij(
+        self, settings: dict[str, Any], device_id: str, van: date, toepassen: bool = False
+    ) -> dict[str, Any]:
+        """"Opgeleverd" van een batterij opnieuw uitrekenen vanaf een dag (v0.130.1).
+
+        In de eerste woning telde het kasboek van 22-09 tot 19-10-2026
+        teruglevering als € 0 (de terugleverprijs was onbekend), en stond
+        "Opgeleverd" te hoog. Dit rekent het opnieuw met de prijzen zoals het
+        contract ze nu beschrijft, uit de kwartieren van het net en de batterij
+        (de eigen opslag) en de accustand en de prijzen per uur (de statistieken
+        van Home Assistant). Per kwartier en niet per minuut, dus het is de beste
+        schatting achteraf; zie `herreken` in batterij.py.
+
+        Zonder `toepassen` alleen wat het zou worden, zodat het paneel het eerst
+        kan laten zien. Met: de dagen vanaf `van` vervangen, en de lopende
+        tellingen van vandaag opnieuw beginnen.
+        """
+        device = next((d for d in settings.get("devices") or []
+                       if d.get("id") == device_id and d.get("type") == "thuisbatterij"), None)
+        if device is None:
+            return {"fout": "Die batterij bestaat niet."}
+        nu = _moment(None)
+        # Tot het begin van dit uur: wat daarna komt telt de ronde zelf.
+        tot = nu.replace(minute=0, second=0, microsecond=0)
+        begin = datetime(van.year, van.month, van.day)
+        if begin >= tot:
+            return {"fout": "Kies een dag in het verleden."}
+        rij = self._batterij_rij(settings, device_id)
+        b = self._batterij_van(nu, settings, device, rij)
+        bronnen = settings.get("sources") or {}
+        eigen = device.get("entities") or {}
+        getekend = bronnen.get("grid_mode") == "signed"
+        net_ids = [bronnen.get("grid_signed")] if getekend else [bronnen.get("grid_import"), bronnen.get("grid_export")]
+        bat_ids = [device.get("entity"), eigen.get("charge_power"), eigen.get("discharge_power")]
+        ids = sorted({e for e in net_ids + bat_ids if e})
+        kwartieren = await self._async_kwartieren(ids, begin, tot)
+        per = {e: {int(r["start"]): r for r in kwartieren.get(e, [])} for e in ids}
+
+        def gemiddeld(entity_id: str | None, moment: int) -> float | None:
+            r = per.get(entity_id, {}).get(moment) if entity_id else None
+            return None if r is None or r.get("gemiddeld") is None else float(r["gemiddeld"])
+
+        contract = settings.get("contract") or {}
+        d = contract.get("dynamic") or {}
+        dynamisch = contract.get("type") == "dynamic"
+        all_in_id = d.get("all_in_entity") if dynamisch and d.get("source") == "all_in" else ""
+        markt_id = d.get("market_entity") if dynamisch and d.get("market_entity") != d.get("all_in_entity") else ""
+        uur = await self._async_uurgemiddelden([eigen.get("soc"), all_in_id, markt_id], begin, tot)
+        kwartier_markt = await self._async_marktprijzen(markt_id, begin.date(), (tot - timedelta(seconds=1)).date()) if markt_id else {}
+        lat = getattr(self.hass.config, "latitude", None)
+        lon = getattr(self.hass.config, "longitude", None)
+        zone = dt_util.get_default_time_zone()
+        vast = self._tariff({"contract": contract})
+        zonder_prijs = 0
+
+        def prijs(moment: datetime) -> tuple[float | None, float | None]:
+            nonlocal zonder_prijs
+            if not dynamisch:
+                return vast.buy, vast.feed_in
+            u = moment.replace(minute=0, second=0, microsecond=0)
+            markt = kwartier_markt.get(moment.replace(second=0, microsecond=0))
+            if markt is None and markt_id:
+                markt = uur.get(markt_id, {}).get(u)
+            all_in = uur.get(all_in_id, {}).get(u) if all_in_id else None
+            if all_in is None and markt is not None:
+                all_in = prijsopbouw.inkoop(markt, d)["totaal"]
+            if all_in is None:
+                zonder_prijs += 1
+                return None, None
+            dag = prijsopbouw.overdag(u.replace(tzinfo=zone), (u + timedelta(hours=1)).replace(tzinfo=zone), lat, lon)
+            return all_in, prijsopbouw.terug(markt, all_in, d, self._salderen(contract, moment), dag)["bedrag"]
+
+        stappen = []
+        for moment in sorted({t for e in ids for t in per.get(e, {})}):
+            start = dt_util.as_local(datetime.fromtimestamp(moment, tz=timezone.utc)).replace(tzinfo=None)
+            if getekend:
+                g = gemiddeld(bronnen.get("grid_signed"), moment)
+                net_w = None if g is None else (-g if bronnen.get("grid_signed_invert") else g)
+            else:
+                invoer, export = gemiddeld(bronnen.get("grid_import"), moment), gemiddeld(bronnen.get("grid_export"), moment)
+                net_w = None if invoer is None and export is None else (invoer or 0.0) - (export or 0.0)
+            getal = gemiddeld(device.get("entity"), moment)
+            if getal is not None:
+                bat_w = -getal if (device.get("battery") or {}).get("power_invert") else getal
+            else:
+                laden, ontladen = gemiddeld(eigen.get("charge_power"), moment), gemiddeld(eigen.get("discharge_power"), moment)
+                bat_w = None if laden is None and ontladen is None else (laden or 0.0) - (ontladen or 0.0)
+            soc = uur.get(eigen.get("soc"), {}).get(start.replace(minute=0, second=0, microsecond=0)) if eigen.get("soc") else None
+            stappen.append((start, 900.0, net_w, bat_w, soc))
+
+        dagen, voorraad = herreken(
+            stappen, prijs, bodem=b.bodem, capacity_kwh=b.capacity_kwh, rte=b.rte,
+            max_charge_w=b.max_charge_w, max_discharge_w=b.max_discharge_w,
+        )
+        vanaf = van.isoformat()
+        oud_kasboek = {k: float(v) for k, v in (rij.get("earned_days") or {}).items()}
+        oud_echt = dict(self._opgeleverd_dagen(rij))
+        voor = sum(oud_echt.get(k, oud_kasboek.get(k, 0.0)) for k in oud_kasboek if k >= vanaf)
+        na = sum(w["realized"] for w in dagen.values())
+        uit = {
+            "van": vanaf, "dagen": len(dagen), "kwartieren": len(stappen), "zonder_prijs": zonder_prijs,
+            "voor": round(voor, 2), "na": round(na, 2), "toegepast": False,
+            # Waar de marktprijs van toen vandaan kwam, voor de uitleg op het paneel.
+            "nordpool": bool(kwartier_markt),
+        }
+        if not toepassen or not dagen:
+            return uit
+        kasboek = {k: v for k, v in oud_kasboek.items() if k < vanaf}
+        echt = {k: float(v) for k, v in oud_echt.items() if k < vanaf}
+        zon_dagen = {k: float(v) for k, v in (rij.get("solar_stored_days") or {}).items() if k < vanaf}
+        for dag, w in dagen.items():
+            kasboek[dag] = round(w["earned"], 5)
+            echt[dag] = round(w["realized"], 5)
+            zon_dagen[dag] = round(w["solar"], 5)
+        await self._async_batterij_bewaren(settings, device_id, {
+            "earned_days": kasboek, "earned_total": round(sum(kasboek.values()), 5),
+            "realized_days": echt, "realized_total": round(sum(echt.values()), 5),
+            "solar_stored_days": zon_dagen, "stock_euro": round(voorraad.euro, 5),
+        })
+        # De lopende tellingen beginnen opnieuw vanaf het uur waar de
+        # herberekening ophield, met de voorraad die daaruit kwam.
+        sessie = self._batterij.setdefault(device_id, {"regelaar": Regelaar()})
+        sessie.update(geld={}, opgeleverd={}, zon={}, voorraad=voorraad, bewaard_op=nu)
+        uit["toegepast"] = True
         return uit
 
     async def _async_kwartieren(

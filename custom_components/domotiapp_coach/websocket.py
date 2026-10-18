@@ -1282,6 +1282,43 @@ async def async_contract_confirm(
     connection.send_result(msg["id"], settings)
 
 
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/battery/recalculate",
+        vol.Required("device_id"): str,
+        vol.Required("from"): _DATUM,
+        # Zonder: alleen laten zien wat het zou worden.
+        vol.Optional("apply", default=False): bool,
+    }
+)
+@websocket_api.async_response
+async def async_battery_recalculate(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """"Opgeleverd" van een batterij opnieuw uitrekenen vanaf een dag (v0.130.1).
+
+    Eerst zonder `apply`, zodat de installateur ziet wat het wordt; dan met.
+    Zie `async_herreken_batterij` in coach.py.
+    """
+    from datetime import date as _date
+
+    from .coach import async_get_coach
+
+    if not msg.get("from"):
+        connection.send_error(msg["id"], "invalid_format", "geen dag gekozen")
+        return
+    settings = await async_get_store(hass).async_load()
+    uit = await async_get_coach(hass).async_herreken_batterij(
+        settings, msg["device_id"], _date.fromisoformat(msg["from"]), bool(msg.get("apply"))
+    )
+    if uit.get("toegepast"):
+        hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": await async_get_store(hass).async_load()})
+    connection.send_result(msg["id"], uit)
+
+
 @websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/berichten/list"})
 @websocket_api.async_response
 async def async_berichten_list(
@@ -1633,6 +1670,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_contract_check)
     websocket_api.async_register_command(hass, async_contract_confirm)
     websocket_api.async_register_command(hass, async_berichten_list)
+    websocket_api.async_register_command(hass, async_battery_recalculate)
     websocket_api.async_register_command(hass, async_berichten_read)
     websocket_api.async_register_command(hass, async_reminders_set)
     websocket_api.async_register_command(hass, async_notifications_list)

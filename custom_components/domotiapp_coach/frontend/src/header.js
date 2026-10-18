@@ -28,7 +28,9 @@ export const NAV_ITEMS = [
   // Voorkeuren en onder Meldingen. Instellingen is opgegaan in Installatie.
   { id: "apparaten", label: "Apparaten", icon: "devices", adminOnly: true },
   { id: "installatie", label: "Installatie", icon: "plug", adminOnly: true },
-  { id: "contract", label: "Contract", icon: "euro", adminOnly: true },
+  // Sinds v0.130.1 ook voor de bewoner, om te lezen en zijn prijs te
+  // bevestigen; wijzigen blijft van de installateur (`views/contract.js`).
+  { id: "contract", label: "Contract", icon: "euro" },
 ];
 
 /** The sections this user may open. */

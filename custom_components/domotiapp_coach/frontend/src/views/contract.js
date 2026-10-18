@@ -15,13 +15,19 @@
  * een nieuw contract afgesloten" die het huidige contract bij de eerdere zet.
  * Bij stroom de opbouw in woorden en cijfers (`opbouw.js`), nagerekend door de
  * coach tegen de all-in sensor, en "Ja, dit klopt".
+ *
+ * Sinds v0.130.1 ziet de bewoner dit scherm ook, alleen om te lezen: per bron
+ * wat voor contract, bij wie, van wanneer tot wanneer, de opbouw van zijn
+ * stroomprijs en "Ja, dit klopt". Die prijs stond tot dan onder Voorkeuren; de
+ * eigenaar op 19-10-2026: "je energieprijs staat nu in voorkeuren maar dat moet
+ * onder contract." Wat met `data-installateur` gemerkt is ziet hij niet, want
+ * daar staan sensoren en bedragen die de installateur kiest.
  */
 
 import { define } from "../base.js";
 import { icons } from "../icons.js";
 import {
   DacEditorElement,
-  adminNoticeHtml,
   editorCss,
   saveBarHtml,
 } from "./editor-base.js";
@@ -64,6 +70,8 @@ function dagTekst(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+const euroTekst = (n) => `€ ${Number(n).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+
 function datumLang(tekst) {
   if (!tekst) return "";
   const d = new Date(`${tekst}T12:00:00`);
@@ -85,6 +93,29 @@ const levKeuze = (id, bron) => `
     ${leveranciersVoor(bron).map((l) => `<option value="${esc(l.id)}">${esc(l.naam)}</option>`).join("")}
   </select>`;
 
+/**
+ * De eerdere contracten voor de bewoner (v0.130.1): een regel per contract met
+ * de naam, de datums en de prijs, zonder velden.
+ */
+export function periodesLezen(bron, lijst) {
+  if (!lijst?.length) return `<p class="sub geen">Geen eerdere contracten.</p>`;
+  return lijst.map((p) => {
+    const titel = p.name || leverancier(p.supplier)?.naam || "Eerder contract";
+    const wanneer = p.from || p.to ? `${kortDatum(p.from) || "?"} tot ${kortDatum(p.to) || "nu"}` : "";
+    let prijs = "";
+    if (bron === "stroom") {
+      prijs = p.type === "dynamic" ? "Dynamisch" : Number(p.all_in_price) > 0 ? `${euroTekst(p.all_in_price)} per kWh` : "";
+    } else if (Number(p.price) > 0) {
+      prijs = `${euroTekst(p.price)} per m³`;
+    }
+    return `
+      <div class="circuit period lezen">
+        <div class="p-kop"><span class="p-naam">${esc(titel)}</span><span class="p-wanneer">${esc(wanneer)}</span></div>
+        ${prijs ? `<span class="sub">${esc(prijs)}</span>` : ""}
+      </div>`;
+  }).join("");
+}
+
 class DacViewContract extends DacEditorElement {
   static sections = ["contract"];
 
@@ -102,27 +133,26 @@ class DacViewContract extends DacEditorElement {
           <div class="eyebrow">Contract</div>
           <h1>Wat je energie kost</h1>
           <p>Per energiebron je contract van nu en wat je eerder had. De coach rekent met je stroomcontract; gas en water zijn voor de historie en het rapport.</p>
+          <p class="bewoner-uitleg">Je installateur vult je contract in. Kijk hieronder of je stroomprijs klopt met de app of site van je leverancier, en bevestig hem. Klopt er iets niet, laat het je installateur dan weten.</p>
         </header>
-
-        ${adminNoticeHtml}
 
         <!-- ================= stroom ================= -->
         <section class="card" id="stroom">
           <h2>${icons.bolt} Mijn huidige stroomcontract</h2>
           <p class="hint" id="stroom-samenvatting"></p>
           <div class="fields">
-            <div class="row">
+            <div class="row" data-installateur>
               <label>Soort contract</label>
               ${soortKnoppen("stroom-soort")}
             </div>
 
-            <div class="row">
+            <div class="row" data-installateur>
               <label for="stroom-lev">Leverancier</label>
               ${levKeuze("stroom-lev", "stroom")}
               <span class="sub" id="stroom-lev-hint"></span>
             </div>
 
-            <div class="two">
+            <div class="two" data-installateur>
               <div class="row">
                 <label for="stroom-start">Mijn contract is ingegaan op</label>
                 <input type="date" id="stroom-start">
@@ -137,7 +167,7 @@ class DacViewContract extends DacEditorElement {
             </div>
 
             <!-- vast en variabel -->
-            <div id="fixed-fields" class="fields">
+            <div id="fixed-fields" class="fields" data-installateur>
               <div class="two">
                 <div class="row">
                   <label for="fx-price">All-in prijs (€ per kWh)</label>
@@ -158,7 +188,7 @@ class DacViewContract extends DacEditorElement {
             </div>
 
             <!-- dynamisch -->
-            <div id="dynamic-fields" class="fields">
+            <div id="dynamic-fields" class="fields" data-installateur>
               <div class="row">
                 <label>Hoe vaak verandert de prijs?</label>
                 <div class="segmented" id="dynamic-interval">
@@ -249,7 +279,7 @@ class DacViewContract extends DacEditorElement {
               </label>
             </div>
 
-            <label class="check" for="netting">
+            <label class="check" for="netting" data-installateur>
               <input type="checkbox" id="netting">
               <span>
                 <strong>Je levert nog gesaldeerd terug</strong>
@@ -264,11 +294,11 @@ class DacViewContract extends DacEditorElement {
               <div class="ob" id="opbouw"></div>
             </div>
             <div class="bevestig">
-              <button type="button" class="primary" id="bevestig">Ja, dit klopt</button>
+              <button type="button" class="primary vrij" id="bevestig">Ja, dit klopt</button>
               <span class="sub" id="bevestigd-zin"></span>
             </div>
 
-            <div class="nieuw">
+            <div class="nieuw" data-installateur>
               <button type="button" data-nieuw="stroom">Ik heb een nieuw stroomcontract afgesloten</button>
               <span class="sub">Zet dit contract bij de eerdere, en begin een nieuw formulier.</span>
             </div>
@@ -278,7 +308,7 @@ class DacViewContract extends DacEditorElement {
               <span class="sub">Historie en rapport rekenen elke dag met de prijs van toen. Wat de coach nu doet rekent altijd met het contract hierboven.</span>
             </div>
             <div id="periods-stroom"></div>
-            <div class="circuit-actions">
+            <div class="circuit-actions" data-installateur>
               <button type="button" data-period-add="stroom">Eerder stroomcontract toevoegen</button>
             </div>
           </div>
@@ -289,16 +319,16 @@ class DacViewContract extends DacEditorElement {
           <h2>${icons.vlam} Mijn huidige gascontract</h2>
           <p class="hint" id="gas-samenvatting"></p>
           <div class="fields">
-            <div class="row">
+            <div class="row" data-installateur>
               <label>Soort contract</label>
               ${soortKnoppen("gas-soort")}
             </div>
-            <div class="row">
+            <div class="row" data-installateur>
               <label for="gas-lev">Leverancier</label>
               ${levKeuze("gas-lev", "gas")}
               <span class="sub" id="gas-lev-hint">Mag een andere zijn dan die van je stroom.</span>
             </div>
-            <div class="two">
+            <div class="two" data-installateur>
               <div class="row">
                 <label for="gas-start">Mijn contract is ingegaan op</label>
                 <input type="date" id="gas-start">
@@ -310,24 +340,24 @@ class DacViewContract extends DacEditorElement {
                 <input type="number" id="gas-dagen" min="0" max="365" step="1" inputmode="numeric">
               </div>
             </div>
-            <div class="row" id="gas-prijs-rij">
+            <div class="row" id="gas-prijs-rij" data-installateur>
               <label for="gas-price">Gasprijs, all-in (€ per m³)</label>
               <input type="number" id="gas-price" min="0" step="0.0001" inputmode="decimal">
               <span class="sub">Inclusief energiebelasting, opslag en btw. Leeg laten als je geen gas hebt.</span>
             </div>
-            <div class="row" id="gas-sensor-rij">
+            <div class="row" id="gas-sensor-rij" data-installateur>
               <label>Sensor met de all-in gasprijs</label>
               <dac-entity-picker id="gas-entity"></dac-entity-picker>
               <span class="sub" id="gas-sensor-hint">Een dynamische gasprijs verandert per dag. Historie neemt de prijs van elke dag uit deze sensor.</span>
             </div>
-            <div class="nieuw">
+            <div class="nieuw" data-installateur>
               <button type="button" data-nieuw="gas">Ik heb een nieuw gascontract afgesloten</button>
             </div>
             <div class="row">
               <label>Eerdere gascontracten</label>
             </div>
             <div id="periods-gas"></div>
-            <div class="circuit-actions">
+            <div class="circuit-actions" data-installateur>
               <button type="button" data-period-add="gas">Eerder gascontract toevoegen</button>
             </div>
           </div>
@@ -336,12 +366,13 @@ class DacViewContract extends DacEditorElement {
         <!-- ================= water ================= -->
         <section class="card" id="water">
           <h2>${icons.druppel} Mijn huidige waterprijs</h2>
+          <p class="hint" id="water-samenvatting"></p>
           <div class="fields">
-            <div class="row">
+            <div class="row" data-installateur>
               <label for="water-lev">Waterbedrijf</label>
               <input type="text" id="water-lev" maxlength="60" placeholder="Bijvoorbeeld Vitens">
             </div>
-            <div class="row">
+            <div class="row" data-installateur>
               <label for="water-price">Waterprijs, all-in (€ per m³)</label>
               <input type="number" id="water-price" min="0" step="0.0001" inputmode="decimal">
               <span class="sub">Inclusief belasting. Leeg laten zonder watermeter.</span>
@@ -350,7 +381,7 @@ class DacViewContract extends DacEditorElement {
               <label>Eerdere waterprijzen</label>
             </div>
             <div id="periods-water"></div>
-            <div class="circuit-actions">
+            <div class="circuit-actions" data-installateur>
               <button type="button" data-period-add="water">Eerdere waterprijs toevoegen</button>
             </div>
           </div>
@@ -621,6 +652,12 @@ class DacViewContract extends DacEditorElement {
     this.vraagControle_();
   }
 
+  /** Wie het scherm bekijkt kan veranderen; de eerdere contracten tekenen dan opnieuw. */
+  applyPermissions_() {
+    super.applyPermissions_();
+    if (this.draft_) for (const bron of ["stroom", "gas", "water"]) this.paintPeriods_(bron);
+  }
+
   paint_() {
     if (!this.draft_ || !this.rendered_) return;
     for (const d of [this.draft_, this.saved_]) if (d?.contract) d.contract.periods ??= [];
@@ -743,7 +780,13 @@ class DacViewContract extends DacEditorElement {
     if (gl) gdelen[0] += ` bij ${gl.naam}`;
     if (gas.start) gdelen.push(`ingegaan op ${datumLang(gas.start)}`);
     if (gasType === "fixed" && gas.end) gdelen.push(`loopt af op ${datumLang(gas.end)}`);
+    if (gasType !== "dynamic" && Number(gas.price) > 0) gdelen.push(`${euroTekst(gas.price)} per m³`);
     this.$("#gas-samenvatting").textContent = `${gdelen.join(", ")}.`;
+    // Water (v0.130.1): het waterbedrijf en de prijs in een zin, voor wie de
+    // velden niet ziet.
+    const water = this.water_();
+    const wdelen = [water.supplier ? `Bij ${water.supplier}` : "", Number(water.price) > 0 ? `${euroTekst(water.price)} per m³` : ""].filter(Boolean);
+    this.$("#water-samenvatting").textContent = wdelen.length ? `${wdelen.join(", ")}.` : "Nog geen waterprijs ingevuld.";
     const gv = gl ? voorstel(gl.id, gasType, "gas") : null;
     this.$("#gas-lev-hint").textContent = gv
       ? `${gv.uitleg} Uit de gegevens van ${gl.naam}, nagekeken op ${datumLang(gv.peildatum)}.`
@@ -755,6 +798,10 @@ class DacViewContract extends DacEditorElement {
     const host = this.$(`#periods-${bron}`);
     if (!host) return;
     const lijst = this.periodsVan_(bron);
+    if (!this.canEdit_()) {
+      host.innerHTML = periodesLezen(bron, lijst);
+      return;
+    }
     const veld = (i, key, type, extra, waarde) =>
       `<input type="${type}" data-period-field="${key}" data-index="${i}" ${extra} value="${esc(waarde)}">`;
     const getal = 'min="0" step="0.0001" inputmode="decimal"';
@@ -843,6 +890,16 @@ DacViewContract.css = /* css */ `
   }
   select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
   .sub a { color: var(--dac-accent-hi); }
+
+  /* De bewoner leest (v0.130.1): wat de installateur kiest is er niet. */
+  :host([readonly]) [data-installateur] { display: none !important; }
+  .bewoner-uitleg { display: none; }
+  :host([readonly]) .bewoner-uitleg { display: block; }
+  .period.lezen { gap: 4px; }
+  .period.lezen .p-kop { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 14px; color: var(--dac-ink); }
+  .period.lezen .p-naam { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+  .period.lezen .p-wanneer { margin-left: auto; font-size: 12.5px; color: var(--dac-ink-2); white-space: nowrap; }
+  .sub.geen { margin: 0 0 12px; }
   label.klein { margin-top: 6px; font-size: 12.5px; font-weight: 500; color: var(--dac-ink-2); }
 
   .bevestig, .nieuw { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }

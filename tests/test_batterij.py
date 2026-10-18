@@ -1133,5 +1133,31 @@ print(f"  18:10 op 95%: {b43.stand} ({b43.rule}): {b43.reason}")
 controle("zonder terugleverprijs handelt hij niet", b43.stand != HANDELEN, b43.stand)
 
 print()
+print("=== 44. Opgeleverd opnieuw uitrekenen uit de kwartieren (v0.130.1) ===")
+# De eerste woning, 22-09 tot 19-10-2026: teruglevering telde als € 0, dus zon opslaan
+# leek gratis. Twee kwartieren: overdag gaat er 2 kW zon in de batterij die anders
+# naar het net was gegaan (de meter levert 1 kW terug in plaats van 3), 's avonds
+# komt er 1,5 kW uit en neemt het huis 0,5 kW in plaats van 2 van het net.
+D44 = dt.datetime(2026, 10, 1, 12, 0)
+stappen44 = [
+    (D44, 900.0, -1000.0, 2000.0, 50.0),
+    (D44.replace(hour=20), 900.0, 500.0, -1500.0, 52.0),
+    (D44.replace(hour=21), 900.0, None, -1500.0, 52.0),  # zonder meter: telt niet
+]
+def prijs44(terug):
+    return lambda moment: (0.40, terug)
+oud44, _ = bat.herreken(stappen44, prijs44(0.0), bodem=5.0, capacity_kwh=14.6, rte=0.74)
+nieuw44, voorraad44 = bat.herreken(stappen44, prijs44(0.30), bodem=5.0, capacity_kwh=14.6, rte=0.74)
+dag44 = "2026-10-01"
+print(f"  kasboek met teruglevering 0: {oud44[dag44]['earned']:.4f}, met 0,30: {nieuw44[dag44]['earned']:.4f}")
+controle("met een terugleverprijs van niets kost zon opslaan niets",
+         abs(oud44[dag44]["earned"] - 0.375 * 0.40) < 1e-9, f"{oud44}")
+controle("met 0,30 kost hij wat het terugleveren had opgebracht: 0,5 kWh maal 0,30",
+         abs(nieuw44[dag44]["earned"] - (0.375 * 0.40 - 0.5 * 0.30)) < 1e-9, f"{nieuw44}")
+controle("een kwartier zonder netmeting telt niet", abs(nieuw44[dag44]["earned"] - (0.15 - 0.15)) < 1e-9)
+controle("de zon die erin ging telt mee voor Historie", nieuw44[dag44]["solar"] != 0.0, f"{nieuw44}")
+controle("en de voorraad komt eruit", voorraad44 is not None)
+
+print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

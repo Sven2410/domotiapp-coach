@@ -19,8 +19,6 @@ import { define } from "../base.js";
 import { deviceLabelMap } from "../devices.js";
 import { icons } from "../icons.js";
 import { planRegels, regelUitleg, zonRegels } from "../voorrang.js";
-import { bevestigdZin, opbouwCss, opbouwHtml } from "../opbouw.js";
-import { leverancier, namenVan } from "../leveranciers.js";
 import {
   DacEditorElement,
   adminNoticeHtml,
@@ -97,20 +95,6 @@ class DacViewStrategy extends DacEditorElement {
         </header>
 
         ${adminNoticeHtml}
-
-        <!-- De prijs zoals de coach hem rekent, voor de bewoner (v0.129.0). De
-             eigenaar op 18-10-2026: "ik laat de coach alles vooraf invullen en
-             de eindgebruiker moet de Ja-klap geven en het bevestigen." Alleen
-             lezen: de bedragen en sensoren kiest de installateur bij Contract. -->
-        <section class="card" id="prijs">
-          <h2>${icons.euro} Je energieprijs</h2>
-          <p class="hint" id="prijs-lev"></p>
-          <div class="ob" id="prijs-opbouw"></div>
-          <div class="bevestig">
-            <button type="button" class="primary" id="prijs-bevestig">Ja, dit klopt</button>
-            <span class="sub" id="prijs-bevestigd"></span>
-          </div>
-        </section>
 
         <section class="card">
           <h2>${icons.compass} Hoeveel doet de coach zelf?</h2>
@@ -284,46 +268,8 @@ class DacViewStrategy extends DacEditorElement {
     this.$("#phases-overview").addEventListener("change", (event) => {
       this.weergave_({ phases_on_overview: event.target.checked });
     });
-    this.$("#prijs-bevestig").addEventListener("click", () => this.bevestigPrijs_());
     this.wireSaveBar_();
     this.paint_();
-  }
-
-  /** De opbouw van de coach ophalen (`contract/check`, zonder concept). */
-  async haalPrijs_() {
-    if (!this.hass_?.callWS) return;
-    const run = (this.prijsRun_ = (this.prijsRun_ ?? 0) + 1);
-    try {
-      const antwoord = await this.hass_.callWS({ type: "domotiapp_coach/contract/check" });
-      if (run === this.prijsRun_) this.prijs_ = antwoord;
-    } catch (error) {
-      // Een coach van voor v0.129.0 kent dit niet; dan blijft de kaart leeg.
-      if (run === this.prijsRun_) this.prijs_ = null;
-    }
-    this.paintPrijs_();
-  }
-
-  async bevestigPrijs_() {
-    try {
-      const settings = await this.hass_.callWS({ type: "domotiapp_coach/contract/confirm" });
-      this.fire("dac-settings-saved", { settings });
-      this.settings = settings;
-      this.toast_("Bevestigd", true);
-    } catch (error) {
-      this.toast_(`Bevestigen mislukt: ${error?.message ?? error}`, false);
-    }
-    this.haalPrijs_();
-  }
-
-  paintPrijs_() {
-    if (!this.rendered_) return;
-    const contract = this.draft_?.contract ?? {};
-    const l = leverancier(contract.supplier);
-    const soort = { fixed: "Een vast", variable: "Een variabel", dynamic: "Een dynamisch" }[contract.type] ?? "Een";
-    this.$("#prijs-lev").textContent = `${soort} stroomcontract${l ? ` bij ${l.naam}` : ""}. Klopt dit met je contract en met de app of site van je leverancier?`;
-    this.$("#prijs-opbouw").innerHTML = opbouwHtml(this.prijs_, namenVan(contract.supplier, contract.type));
-    this.$("#prijs-bevestigd").textContent = bevestigdZin(this.prijs_);
-    this.$("#prijs-bevestig").hidden = !this.prijs_ || Boolean(this.prijs_?.bevestigd);
   }
 
   /**
@@ -387,14 +333,6 @@ class DacViewStrategy extends DacEditorElement {
     this.$("#night").checked = this.draft_?.strategy?.night_strategy !== false;
     this.paintWeergave_();
     this.syncSaveBar_();
-    // Het contract kan veranderd zijn (Contract, een ander scherm): opnieuw vragen.
-    const vinger = JSON.stringify(this.draft_?.contract ?? {});
-    if (vinger !== this.prijsVinger_) {
-      this.prijsVinger_ = vinger;
-      this.haalPrijs_();
-    } else {
-      this.paintPrijs_();
-    }
   }
 
   // --- voorrang bij zonoverschot (v0.92.0) --------------------------------
@@ -674,14 +612,6 @@ class DacViewStrategy extends DacEditorElement {
 
 DacViewStrategy.css = /* css */ `
   ${editorCss}
-  ${opbouwCss}
-
-  .bevestig { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 12px; }
-  .bevestig button {
-    font: inherit; font-size: 14px; padding: 10px 16px; border-radius: var(--dac-radius-sm); cursor: pointer;
-    background: var(--dac-accent); border: 1px solid var(--dac-accent); color: var(--dac-on-accent, #fff); font-weight: 600;
-  }
-  .bevestig button[hidden] { display: none; }
 
   /* Vier keuzes onder elkaar: het zijn zinnen, geen knoppen, en naast elkaar
      wordt elke zin een kolom van drie woorden breed. */

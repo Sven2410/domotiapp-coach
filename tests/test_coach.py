@@ -9864,6 +9864,90 @@ asyncio.run(coach170b._async_berichten(inst170b, NU166))
 items170b = asyncio.run(box170(hass170b).async_list())
 controle("de prijscontrole slaat om: een bericht", [i["kind"] for i in items170b] == ["prijs"], f"{items170b}")
 
+print("=== 171. Opgeleverd opnieuw uitrekenen: eerst laten zien, dan overnemen (v0.130.1) ===")
+# Een batterij met een kasboek dat teruglevering als € 0 telde. De kwartieren komen uit
+# de eigen opslag, de prijzen en de accustand per uur uit de statistieken.
+import types as _t171  # noqa: E402
+
+ACCU171 = {**BATTERIJ, "battery": {**BATTERIJ["battery"], "capacity_kwh": 14.6, "rte_percent": 74}}
+inst171 = instellingen(devices=[LAADPAAL, ACCU171])
+inst171["sources"] = {**inst171["sources"], "grid_mode": "signed", "grid_signed": "sensor.p1"}
+inst171["contract"] = {**DYN166, "netting": True}
+inst171["battery_state"] = [{"device": "dev-batterij", "earned_days": {"2026-09-30": 1.0, "2026-10-01": 0.9},
+                             "realized_days": {"2026-09-30": 1.0, "2026-10-01": 0.9}, "earned_total": 1.9,
+                             "realized_total": 1.9, "solar_stored_days": {}}]
+hass171, store171, coach171 = bouw(huis75(), inst171)
+middag171 = dt.datetime(2026, 10, 1, 12, 0).replace(tzinfo=dt.timezone.utc).timestamp()
+avond171 = dt.datetime(2026, 10, 1, 20, 0).replace(tzinfo=dt.timezone.utc).timestamp()
+
+
+async def _kwartieren171(ids, start, einde):
+    rij = lambda t, w: {"start": t, "gemiddeld": w, "seconden": 900}  # noqa: E731
+    return {"sensor.p1": [rij(middag171, -1000.0), rij(avond171, 500.0)],
+            "sensor.batterij_vermogen": [rij(middag171, 2000.0), rij(avond171, -1500.0)]}
+
+
+async def _uren171(ids, start, einde):
+    u = lambda h: dt.datetime(2026, 10, 1, h)  # noqa: E731
+    return {"sensor.zp_prijs": {u(12): 0.33, u(20): 0.45}, "sensor.np_prijs": {u(12): 0.15, u(20): 0.24},
+            "sensor.batterij_soc": {u(12): 50.0, u(20): 52.0}}
+
+
+coach171._async_kwartieren = _kwartieren171
+coach171._async_uurgemiddelden = _uren171
+voor171 = asyncio.run(coach171.async_herreken_batterij(inst171, "dev-batterij", dt.date(2026, 10, 1), False))
+print(f"  laten zien: {voor171}")
+controle("eerst alleen laten zien: niets veranderd", voor171.get("toegepast") is False
+         and store171.instellingen["battery_state"][0]["earned_days"]["2026-10-01"] == 0.9, f"{voor171}")
+controle("met wat het was en wat het wordt", voor171.get("voor") == 0.9 and voor171.get("kwartieren") == 2, f"{voor171}")
+# Met salderen en de hele all-in prijs terug kost zon opslaan om 12:00 0,5 kWh maal 0,33.
+na171 = asyncio.run(coach171.async_herreken_batterij(inst171, "dev-batterij", dt.date(2026, 10, 1), True))
+rij171 = store171.instellingen["battery_state"][0]
+print(f"  overgenomen: {na171}; kasboek {rij171['earned_days']}")
+controle("overgenomen: de dag vanaf de gekozen datum is vervangen, de dag ervoor niet",
+         na171.get("toegepast") is True and rij171["earned_days"]["2026-09-30"] == 1.0
+         and rij171["earned_days"]["2026-10-01"] != 0.9, f"{rij171}")
+controle("de totalen kloppen met de dagen", abs(rij171["earned_total"] - sum(rij171["earned_days"].values())) < 1e-6
+         and abs(rij171["realized_total"] - sum(rij171["realized_days"].values())) < 1e-6, f"{rij171}")
+controle("een dag in de toekomst kan niet",
+         "fout" in asyncio.run(coach171.async_herreken_batterij(inst171, "dev-batterij", dt.date(2099, 1, 1), False)))
+controle("een batterij die niet bestaat ook niet",
+         "fout" in asyncio.run(coach171.async_herreken_batterij(inst171, "dev-niets", dt.date(2026, 10, 1), False)))
+# Zonder statistiek van de prijssensoren: de marktprijs van toen komt van de
+# ingebouwde Nord Pool, die ook voorbije dagen geeft, en de all-in prijs bouwt
+# de coach daaruit op met het contract.
+gevraagd171 = []
+
+
+async def _dienst171(domein, dienst, data, blocking=False, return_response=False):
+    if (domein, dienst) != ("nordpool", "get_prices_for_date"):
+        return None
+    gevraagd171.append(data["date"])
+    begin = dt.datetime.fromisoformat(data["date"]).replace(tzinfo=dt.timezone.utc)
+    return {data["areas"][0]: [
+        {"start": (begin + dt.timedelta(minutes=15 * k)).isoformat(),
+         "end": (begin + dt.timedelta(minutes=15 * (k + 1))).isoformat(),
+         "price": 240.0 if k // 4 == 20 else 150.0} for k in range(96)]}
+
+
+async def _alleen_soc171(ids, start, einde):
+    return {"sensor.batterij_soc": {dt.datetime(2026, 10, 1, 12): 50.0, dt.datetime(2026, 10, 1, 20): 52.0}}
+
+
+coach171._async_uurgemiddelden = _alleen_soc171
+hass171.services.async_call = _dienst171
+coach171._nordpool_bron = lambda e: ("np-1", "NL", "EUR") if e == "sensor.np_prijs" else None
+np171 = asyncio.run(coach171.async_herreken_batterij(inst171, "dev-batterij", dt.date(2026, 10, 1), False))
+print(f"  uit Nord Pool: {np171}, gevraagd {gevraagd171[:3]}")
+controle("zonder statistiek haalt hij de marktprijs van toen bij Nord Pool",
+         np171.get("nordpool") is True and np171.get("zonder_prijs") == 0 and "2026-10-01" in gevraagd171, f"{np171}")
+markt171 = asyncio.run(coach171._async_marktprijzen("sensor.np_prijs", dt.date(2026, 10, 1), dt.date(2026, 10, 1)))
+controle("per kwartier, in euro per kWh", len(markt171) == 96
+         and abs(markt171[dt.datetime(2026, 10, 1, 20, 15)] - 0.24) < 1e-9
+         and abs(markt171[dt.datetime(2026, 10, 1, 12, 0)] - 0.15) < 1e-9, f"{len(markt171)}")
+controle("een sensor die niet van Nord Pool is geeft niets",
+         asyncio.run(coach171._async_marktprijzen("sensor.zp_prijs", dt.date(2026, 10, 1), dt.date(2026, 10, 1))) == {})
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
