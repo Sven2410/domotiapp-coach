@@ -4518,7 +4518,7 @@ proef("de prijsgrafiek: morgen om middernacht, leveren in een eigen kleur, en br
     { start: "2026-10-19T08:00:00", end: "2026-10-19T09:00:00", mode: "handelen", kwh: -2.5, grid_kwh: -2.15, soc: 54, price: 0.469 },
     { start: "2026-10-19T09:00:00", end: "2026-10-19T10:00:00", mode: "nul", kwh: -0.3, grid_kwh: 0, soc: 52, price: 0.446 },
     { start: "2026-10-19T03:00:00", end: "2026-10-19T04:00:00", mode: "netladen", kwh: 2, grid_kwh: 2, soc: 60, price: 0.30 },
-  ], soc: 60, capacity_kwh: 14.6 });
+  ], kind: "batterij", soc: 60, capacity_kwh: 14.6 });
   assert.deepEqual(plan.uren.map((u) => [u.levert, u.net]), [[true, false], [false, false], [false, true]]);
 });
 
