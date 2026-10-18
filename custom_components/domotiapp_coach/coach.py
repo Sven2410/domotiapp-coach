@@ -186,6 +186,16 @@ TEMP_TERUG = 1.0
 VRIEZER_DEUR = timedelta(minutes=3)
 VRIEZER_GRENS_C = -15.0
 VRIEZER_WARM = timedelta(minutes=30)
+# De koelkast (v0.131.0): dezelfde drie meldingen, met dezelfde 3 minuten voor de
+# deur en hetzelfde half uur, maar een eigen grens. De eigenaar op 19-10-2026:
+# "boven de 10 graden". Met die van de vriezer zou een koelkast op 5 °C elke keer
+# melden.
+KOELKAST_GRENS_C = 10.0
+# Per soort: hoe hij in een melding heet zonder eigen naam, en de grens.
+KOELWAREN: dict[str, tuple[str, float]] = {
+    "vriezer": ("de vriezer", VRIEZER_GRENS_C),
+    "koelkast": ("de koelkast", KOELKAST_GRENS_C),
+}
 # Een smart plug die altijd aan moet staan (v0.120.0): zo lang mag hij uit zijn
 # voor er een melding komt. De eigenaar op 15-10-2026: "Lukt dat niet wil ik na
 # 2 min een melding ontvangen."
@@ -856,8 +866,8 @@ def _temp_nodig(settings: dict[str, Any], device: dict[str, Any]) -> bool:
     """Of de coach iets doet met de temperatuur van deze batterij: een melding
     (`temp_alert`) of een ventilator (`fan` met `fan_above_c`)."""
     entities = device.get("entities") or {}
-    # Bij een vriezer is de temperatuur het hele punt (v0.125.0).
-    if device.get("type") == "vriezer" and entities.get("temperature"):
+    # Bij een vriezer (v0.125.0) en een koelkast (v0.131.0) is de temperatuur het hele punt.
+    if device.get("type") in KOELWAREN and entities.get("temperature"):
         return True
     if device.get("type") != "thuisbatterij" or not entities.get("temperature"):
         return False
@@ -2208,16 +2218,19 @@ class ChargerCoach:
         keer, kritiek, want dat moet de bewoner oplossen; weer goed staat
         alleen in de geschiedenis. Een sensor die niets zegt verandert hier
         niets; dat meldt `_async_sensorwacht`.
+
+        Sinds v0.131.0 ook de koelkast, met zijn eigen grens (`KOELWAREN`).
         """
         actief: set[tuple[str, str]] = set()
         for device in settings.get("devices") or []:
-            if device.get("type") != "vriezer":
+            if device.get("type") not in KOELWAREN:
                 continue
+            standaard, grens = KOELWAREN[device["type"]]
             entities = device.get("entities") or {}
             sleutel = str(device.get("id") or "")
             eigen = str(device.get("name") or "").strip()
-            naam = (eigen[0].upper() + eigen[1:]) if eigen else "De vriezer"
-            van = eigen or "de vriezer"
+            naam = (eigen[0].upper() + eigen[1:]) if eigen else standaard[0].upper() + standaard[1:]
+            van = eigen or standaard
 
             deur = _text(self.hass, entities.get("door")).strip().lower()
             if deur in ("on", "open", "off", "closed"):
@@ -2228,12 +2241,12 @@ class ChargerCoach:
                 )
             temp = self._vriezer_temp(entities.get("temperature"))
             if temp is not None:
-                warm = temp > VRIEZER_GRENS_C
-                koud = temp <= VRIEZER_GRENS_C - TEMP_TERUG
+                warm = temp > grens
+                koud = temp <= grens - TEMP_TERUG
                 if warm or koud:
                     await self._vriezer_stand(
                         (sleutel, "warm"), warm, now, VRIEZER_WARM, actief,
-                        f"{naam} is al een half uur warmer dan {_graden(VRIEZER_GRENS_C)}: nu {_graden(temp)}.",
+                        f"{naam} is al een half uur warmer dan {_graden(grens)}: nu {_graden(temp)}.",
                         f"{naam} is weer {_graden(temp)}.",
                     )
                 elif (sleutel, "warm") in self._vriezer_sinds or (sleutel, "warm") in self._vriezer_gemeld:

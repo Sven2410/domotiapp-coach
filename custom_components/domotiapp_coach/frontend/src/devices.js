@@ -24,6 +24,8 @@ export const DEVICE_TYPES = [
   { id: "droger", label: "Droger", icon: "droger" },
   // Sinds v0.125.0: een vriezer die de coach in de gaten houdt en niet stuurt.
   { id: "vriezer", label: "Vriezer", icon: "vriezer" },
+  // Sinds v0.131.0: een koelkast, net zo, met een grens van 10 °C.
+  { id: "koelkast", label: "Koelkast", icon: "koelkast" },
   { id: "airco", label: "Airco", icon: "airco" },
   // Sinds v0.120.0: wat aan een smart plug hangt, zie `PLUG_APPLIANCES`.
   { id: "smartplug", label: "Smart plug", icon: "plug" },
@@ -698,13 +700,30 @@ export const DROGER_BRANDS = WASHER_BRANDS("droger");
  * coach stuurt hem niet (`readOnly`); de meldingen staan in
  * `_async_vriezerwacht` in coach.py. Dezelfde lijst als `VRIEZER_BRANDS` in const.py.
  */
-const VRIEZER_FIELDS = (miele) => [
+/**
+ * Wat de coach met een vriezer of een koelkast doet (v0.131.0: de koelkast erbij),
+ * met de grens van `KOELWAREN` in coach.py. De eigenaar op 19-10-2026 over de
+ * koelkast: "boven de 10 graden".
+ */
+export const KOELWAREN = {
+  vriezer: { naam: "de vriezer", grens: -15 },
+  koelkast: { naam: "de koelkast", grens: 10 },
+};
+
+/** De zin onder een vriezer of koelkast in Apparaten: wat de coach doet in plaats van sturen. */
+export function koelUitleg(type) {
+  const k = KOELWAREN[type];
+  if (!k) return "";
+  return `De coach stuurt ${k.naam} niet. Hij houdt hem in de gaten en stuurt een melding als de deur 3 minuten openstaat, als hij een half uur warmer is dan ${k.grens} °C, of als ${k.naam} een storing meldt.`;
+}
+
+const VRIEZER_FIELDS = (miele, soort = "vriezer") => [
   {
     key: "temperature",
     label: "Temperatuur",
     hint: miele
-      ? "De sensor Temperatuur van de vriezer. Is hij een half uur warmer dan -15 °C, dan krijg je een melding. Niet de zones 2 en 3: die bestaan bij deze vriezer niet echt."
-      : "Een temperatuursensor in de vriezer. Is hij een half uur warmer dan -15 °C, dan krijg je een melding.",
+      ? `De sensor Temperatuur van ${KOELWAREN[soort].naam}. Is hij een half uur warmer dan ${KOELWAREN[soort].grens} °C, dan krijg je een melding. Niet de zones 2 en 3: die bestaan bij ${soort === "vriezer" ? "deze vriezer" : "deze koelkast"} niet echt.`
+      : `Een temperatuursensor in ${KOELWAREN[soort].naam}. Is hij een half uur warmer dan ${KOELWAREN[soort].grens} °C, dan krijg je een melding.`,
     filter: "temperature",
     decimals: 1,
   },
@@ -719,7 +738,7 @@ const VRIEZER_FIELDS = (miele) => [
     key: "problem",
     label: "Storing",
     hint: miele
-      ? "Optioneel: de sensor Probleem van de vriezer. Meldt hij een storing, dan krijg je een melding."
+      ? `Optioneel: de sensor Probleem van ${KOELWAREN[soort].naam}. Meldt hij een storing, dan krijg je een melding.`
       : "Optioneel: een sensor die aan gaat bij een storing. Dan krijg je een melding.",
     filter: "all",
     values: { on: "Storing", off: "Geen" },
@@ -739,6 +758,24 @@ export const VRIEZER_BRANDS = [
     label: "Overig",
     note: "Onder Overig past elke vriezer met een temperatuursensor erin.",
     fields: VRIEZER_FIELDS(false),
+    readOnly: true,
+  },
+];
+
+/** De koelkast (v0.131.0): dezelfde merken als de vriezer, `KOELKAST_BRANDS` in const.py. */
+export const KOELKAST_BRANDS = [
+  {
+    id: "miele",
+    label: "Miele",
+    note: "Voor Miele is dat de integratie Miele van Home Assistant zelf.",
+    fields: VRIEZER_FIELDS(true, "koelkast"),
+    readOnly: true,
+  },
+  {
+    id: "overig",
+    label: "Overig",
+    note: "Onder Overig past elke koelkast met een temperatuursensor erin.",
+    fields: VRIEZER_FIELDS(false, "koelkast"),
     readOnly: true,
   },
 ];
@@ -1100,6 +1137,7 @@ const BRANDS_BY_TYPE = new Map([
   ["wasmachine", WASMACHINE_BRANDS],
   ["droger", DROGER_BRANDS],
   ["vriezer", VRIEZER_BRANDS],
+  ["koelkast", KOELKAST_BRANDS],
   ["thuisbatterij", BATTERY_BRANDS],
   ["airco", AIRCO_BRANDS],
 ]);

@@ -9948,6 +9948,51 @@ controle("per kwartier, in euro per kWh", len(markt171) == 96
 controle("een sensor die niet van Nord Pool is geeft niets",
          asyncio.run(coach171._async_marktprijzen("sensor.zp_prijs", dt.date(2026, 10, 1), dt.date(2026, 10, 1))) == {})
 
+print("=== 172. de koelkast: uitlezen en melden, boven de 10 °C (v0.131.0) ===")
+# Net als de vriezer (proef 161), met een eigen grens. De eigenaar op 19-10-2026:
+# "boven de 10 graden". Met de grens van de vriezer zou een koelkast op 5 °C na een
+# half uur elke keer melden.
+KOEL172 = {"id": "dev-koelkast", "type": "koelkast", "name": "", "brand": "miele", "controllable": False,
+           "entity": "", "entities": {"temperature": "sensor.koelkast_temp", "door": "binary_sensor.koelkast_deur",
+                                      "problem": "binary_sensor.koelkast_probleem"}}
+inst172 = instellingen(devices=[LAADPAAL, KOEL172, VRIEZER161])
+hass172, _, coach172 = bouw({**huis(), "sensor.koelkast_temp": {"state": "5.0", "attributes": {"unit_of_measurement": "°C"}},
+                             "binary_sensor.koelkast_deur": "off", "binary_sensor.koelkast_probleem": "off",
+                             "sensor.vriezer_temp": {"state": "-18.0", "attributes": {"unit_of_measurement": "°C"}},
+                             "binary_sensor.vriezer_deur": "off", "binary_sensor.vriezer_probleem": "off"}, inst172)
+T172 = dt.datetime(2026, 10, 19, 20, 0)
+
+
+def wacht172(minuten):
+    hass172.services.verstuurd.clear()
+    asyncio.run(coach172._async_vriezerwacht(inst172, T172 + dt.timedelta(minutes=minuten)))
+    return [d[2]["message"] for d in hass172.services.verstuurd if d[0] == "notify"]
+
+
+controle("een koelkast op 5 °C: niets, ook niet na een uur", wacht172(0) == [] and wacht172(60) == [], "")
+hass172.states.zet("binary_sensor.koelkast_deur", "on")
+wacht172(61)
+deur172 = wacht172(65)
+controle("de deur na 3 minuten open", deur172 == ["De deur van de koelkast staat al 3 minuten open."], f"{deur172}")
+hass172.states.zet("binary_sensor.koelkast_deur", "off")
+hass172.states.zet("sensor.koelkast_temp", {"state": "10.0", "attributes": {"unit_of_measurement": "°C"}})
+controle("precies 10 °C is niet warmer dan 10", wacht172(70) == [] and wacht172(110) == [], "")
+hass172.states.zet("sensor.koelkast_temp", {"state": "11.5", "attributes": {"unit_of_measurement": "°C"}})
+wacht172(111)
+warm172 = wacht172(141)
+controle("een half uur boven de 10 °C: één melding", warm172 == ["De koelkast is al een half uur warmer dan 10 °C: nu 11,5 °C."],
+         f"{warm172}")
+hass172.states.zet("sensor.koelkast_temp", {"state": "8.5", "attributes": {"unit_of_measurement": "°C"}})
+controle("een graad en meer eronder: terug, alleen in de geschiedenis",
+         wacht172(142) == [] and ("dev-koelkast", "warm") not in coach172._vriezer_gemeld, "")
+hass172.states.zet("binary_sensor.koelkast_probleem", "on")
+controle("een storing meteen", wacht172(150) == ["De koelkast meldt een storing."], "")
+controle("de vriezer ernaast houdt zijn eigen grens", ("dev-vriezer", "warm") not in coach172._vriezer_gemeld
+         and coachmod.KOELWAREN["vriezer"][1] == -15.0 and coachmod.KOELWAREN["koelkast"][1] == 10.0, "")
+controle("de sensorwacht kijkt ook naar de temperatuur van een koelkast", coachmod._temp_nodig(inst172, KOEL172), "")
+controle("een koelkast stuurt de coach niet", "dev-koelkast" not in coach172.state, f"{list(coach172.state)}")
+controle("koelkast is een soort die het paneel mag opslaan", "koelkast" in storage.DEVICE_TYPES, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
