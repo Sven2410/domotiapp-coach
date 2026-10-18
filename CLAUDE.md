@@ -321,7 +321,7 @@ python tests/test_batterij.py    # 187 op het denkwerk van de thuisbatterij en o
 python tests/test_coach.py       # 1195 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2449 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-python tests/test_prijsopbouw.py # 31 op de prijsopbouw, de controle en zonsopkomst
+python tests/test_prijsopbouw.py # 34 op de prijsopbouw, de controle en zonsopkomst
 node   tests/test_rapport.mjs    # 202 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar

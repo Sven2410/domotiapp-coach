@@ -123,7 +123,9 @@ export function opbouwHtml(check, namen = {}) {
     const t = check.terug;
     if (t && t.bedrag !== null && t.bedrag !== undefined) {
       const regels = t.salderen
-        ? [rij("", "All-in prijs (je saldeert)", euro4(t.basis)), rij("−", `${esc(w.opslag)}, die komt niet terug`, euro4(t.opslag))]
+        ? (t.vol
+          ? [rij("", "All-in prijs (je saldeert, en krijgt hem helemaal terug)", euro4(t.basis))]
+          : [rij("", "All-in prijs (je saldeert)", euro4(t.basis)), rij("−", `${esc(w.opslag)}, die komt niet terug`, euro4(t.opslag))])
         : [rij("", t.met_btw ? "Kale marktprijs, met btw" : "Kale marktprijs", euro4(t.basis))];
       if (t.kosten) regels.push(rij("−", esc(w.kosten), euro4(t.kosten)));
       if (t.vergoeding) regels.push(rij(t.vergoeding < 0 ? "−" : "+", esc(w.vergoeding), euro4(Math.abs(t.vergoeding))));

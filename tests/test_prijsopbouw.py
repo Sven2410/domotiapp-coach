@@ -121,6 +121,17 @@ controle("de opslag na de btw is dezelfde som: (markt + belasting) x 1,21 + 0,02
          abs((o["zonder_opslag"] + o["btw_zonder_opslag"] + o["opslag_met_btw"]) - o["totaal"]) < 1e-12
          and abs(o["opslag_met_btw"] - 0.02) < 1e-12)
 
+# Essent: binnen salderen "per uur hetzelfde tarief terug als je betaalt, inclusief
+# btw, energiebelasting en inkoopvergoeding"; buiten salderen de beursprijs min
+# 0,02089 (v0.129.1).
+es = {"vat_percent": 21, "supplier_markup": 0.02089, "feed_in_bonus": -0.02089, "netting_full": True}
+controle("binnen salderen de hele all-in prijs terug", po.terug(0.15, 0.40, es, salderen=True, overdag=False)["bedrag"] == 0.40)
+controle("en buiten salderen de beursprijs min de aftrek",
+         abs(po.terug(0.15, 0.40, es, salderen=False, overdag=False)["bedrag"] - (0.15 - 0.02089)) < 1e-12)
+controle("zonder het vinkje binnen salderen de all-in prijs min de opslag",
+         abs(po.terug(0.15, 0.40, {**es, "netting_full": False, "feed_in_bonus": 0}, True, False)["bedrag"]
+             - (0.40 - 0.02089 * 1.21)) < 1e-12)
+
 print("4. zonsopkomst en zonsondergang")
 def lokaal(d, lat=52.09, lon=5.12, uren=2):
     op, onder = po.zon_op_onder(d, lat, lon)

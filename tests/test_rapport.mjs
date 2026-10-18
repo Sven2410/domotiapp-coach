@@ -4569,7 +4569,7 @@ proef("Contract per energiebron: soort, leverancier, looptijd, opbouw, bevestige
 proef("de catalogus: elk voorstel rust op een bron en een datum, en vult alleen bekende velden (v0.129.0)", async () => {
   const cat = await import("../custom_components/domotiapp_coach/frontend/src/leveranciers.js");
   const VELDEN = new Set(["supplier_markup", "feed_in_costs", "feed_in_bonus", "feed_in_vat", "feed_in_bonus_percent",
-    "bonus_daytime", "bonus_base", "energy_tax", "vat_percent", "feed_in_tariff", "all_in_price", "price"]);
+    "bonus_daytime", "bonus_base", "energy_tax", "vat_percent", "feed_in_tariff", "all_in_price", "price", "netting_full"]);
   assert.ok(cat.LEVERANCIERS.length >= 1);
   const ids = new Set();
   for (const l of cat.LEVERANCIERS) {
@@ -4620,6 +4620,10 @@ proef("geld.js rekent teruglevering en de bonus zoals prijsopbouw.py (v0.129.0)"
   assert.ok(Math.abs(geld.terugOp(0.08 / 1.21, null, zp, false, true) - 0.11) < 1e-9, "Zonneplan: € 0,08 + € 0,02 + 10%");
   assert.ok(Math.abs(geld.terugOp(0.08 / 1.21, null, zp, false, false) - 0.10) < 1e-9, "zonder bonus na zonsondergang");
   assert.equal(geld.bonusOp(-0.05, zp, true), 0, "niet als markt plus vergoeding negatief is");
+  // Binnen salderen de hele all-in prijs terug (v0.129.1, Essent), zoals prijsopbouw.py.
+  const es = { vat_percent: 21, supplier_markup: 0.02089, feed_in_bonus: -0.02089, netting_full: true };
+  assert.equal(geld.terugOp(0.15, 0.40, es, true, false), 0.40);
+  assert.ok(Math.abs(geld.terugOp(0.15, 0.40, es, false, false) - (0.15 - 0.02089)) < 1e-12);
   const zon = geld.zonOpOnder(new Date(Date.UTC(2026, 9, 18, 12)), 52.09, 5.12);
   const op = zon[0].getUTCHours() * 60 + zon[0].getUTCMinutes();
   assert.ok(Math.abs(op - (6 * 60 + 7)) <= 3, `zonsopkomst Utrecht 18-10-2026 rond 06:07 UTC, kreeg ${zon[0].toISOString()}`);

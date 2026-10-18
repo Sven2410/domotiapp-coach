@@ -526,6 +526,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             # Of de leverancier de marktprijs voor teruglevering met btw betaalt
             # (v0.129.0). Zonneplan in 2026: ja, de kale prijs maal 1,21.
             "feed_in_vat": False,
+            # Of de leverancier binnen salderen de hele all-in prijs teruggeeft,
+            # ook zijn opslag (v0.129.1). Zo niet, dan all-in min de opslag; zie
+            # `prijsopbouw.terug`.
+            "netting_full": False,
         },
     },
     # Wie welke melding krijgt, en de zekeringmelding zelf. De eigenaar op 06-09-2026:

@@ -123,6 +123,14 @@ def terug(markt: float | None, all_in: float | None, d: dict, salderen: bool, ov
     if salderen:
         if all_in is None:
             return {"bedrag": None, "salderen": True}
+        if d.get("netting_full"):
+            # Sommige leveranciers geven binnen salderen de hele all-in prijs
+            # terug, ook hun opslag (v0.129.1): Essent "per uur hetzelfde tarief
+            # terug als je betaalt, inclusief btw, energiebelasting en
+            # inkoopvergoeding". De vergoeding en de kosten gelden dan alleen
+            # buiten salderen.
+            return {"bedrag": all_in + extra, "salderen": True, "basis": all_in, "opslag": 0.0,
+                    "kosten": 0.0, "vergoeding": 0.0, "bonus": extra, "vol": True}
         bedrag = all_in - opslag - kosten + vergoeding + extra
         return {"bedrag": bedrag, "salderen": True, "basis": all_in, "opslag": opslag,
                 "kosten": kosten, "vergoeding": vergoeding, "bonus": extra}
