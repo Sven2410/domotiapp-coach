@@ -1811,6 +1811,51 @@ class Voorraad:
         return euro
 
 
+def herreken(
+    stappen: list[tuple[datetime, float, float | None, float | None, float | None]],
+    prijs,
+    *,
+    bodem: float,
+    capacity_kwh: float | None,
+    rte: float | None,
+    max_charge_w: float = 0.0,
+    max_discharge_w: float = 0.0,
+) -> tuple[dict[str, dict[str, float]], Voorraad]:
+    """Het kasboek over een stuk tijd opnieuw, uit metingen van toen (v0.130.1).
+
+    In de eerste woning telde het kasboek van 22-09 tot 19-10-2026 teruglevering
+    als € 0, omdat de terugleverprijs onbekend was (dezelfde sensor twee keer,
+    salderen uit). Dan lijkt zon in de batterij opslaan gratis en levert elke
+    ontlading de volle prijs op: "Opgeleverd" stond er te hoog. Hier rekent
+    hetzelfde kasboek het opnieuw, met `verdiend`, `Voorraad` en `zon_in_accu`
+    zoals de coach ze per ronde gebruikt.
+
+    `stappen` is (begin, seconden, netvermogen, batterijvermogen laden
+    positief, accustand) in tijdsvolgorde; in de coach een per kwartier, uit de
+    kwartieropslag. `prijs(begin)` geeft (inkoop, terugleveren). Een stap
+    zonder net- of batterijvermogen telt niet, zoals in de ronde. Geeft per dag
+    "earned", "realized" en "solar", en de voorraad aan het eind.
+    """
+    voorraad = Voorraad()
+    dagen: dict[str, dict[str, float]] = {}
+    for begin, seconden, net_w, bat_w, soc in stappen:
+        if net_w is None or bat_w is None or seconden <= 0:
+            continue
+        if max_charge_w > 0:
+            bat_w = min(bat_w, max_charge_w)
+        if max_discharge_w > 0:
+            bat_w = max(bat_w, -max_discharge_w)
+        koop, terug = prijs(begin)
+        euro = verdiend(net_w, bat_w, koop, terug, seconden)
+        if euro is None:
+            continue
+        dag = dagen.setdefault(begin.date().isoformat(), {"earned": 0.0, "realized": 0.0, "solar": 0.0})
+        dag["earned"] += euro
+        dag["realized"] += voorraad.stap(euro, bat_w * seconden / 3_600_000.0, soc, bodem, capacity_kwh, rte)
+        dag["solar"] += zon_in_accu(net_w, bat_w, koop, terug, seconden) or 0.0
+    return dagen, voorraad
+
+
 # --- Het rendement meten -------------------------------------------------------
 
 # Hoeveel keer de inhoud van de batterij er door de meter gegaan moet zijn

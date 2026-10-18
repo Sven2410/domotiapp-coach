@@ -347,7 +347,7 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
 
 class DacViewOverview extends DacElement {
   static css = /* css */ `
-    /* Klopt je energieprijs? (v0.129.0) Een knop naar Voorkeuren. */
+    /* Klopt je energieprijs? (v0.129.0) Een knop naar Contract (v0.130.1). */
     .prijs-melding {
       display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left;
       font: inherit; font-size: 13.5px; line-height: 1.5; color: var(--dac-ink-2); cursor: pointer;
@@ -356,6 +356,9 @@ class DacViewOverview extends DacElement {
     }
     .prijs-melding strong { color: var(--dac-ink); }
     .prijs-melding .icon { width: 18px; height: 18px; flex: 0 0 auto; color: var(--dac-warn); margin-top: 1px; }
+    .prijs-melding .tekst { flex: 1 1 auto; min-width: 0; }
+    .prijs-melding .pijl { display: flex; align-self: center; }
+    .prijs-melding .pijl .icon { color: var(--dac-ink-3); margin-top: 0; }
     .prijs-melding[hidden] { display: none; }
     :host { display: block; }
 
@@ -1196,10 +1199,15 @@ class DacViewOverview extends DacElement {
           <p class="coach-sun" id="coach-sun" hidden></p>
         </article>
 
-        <!-- Tot de bewoner de prijsopbouw bevestigt (v0.129.0, Voorkeuren). -->
+        <!-- Tot de bewoner de prijsopbouw bevestigt (v0.129.0, sinds v0.130.1 op Contract). Geen
+             verwijzing naar een tabblad: de bewoner van de eerste woning op
+             19-10-2026, bij "Kijk onder Voorkeuren": "voorkeuren ken ik niet".
+             Op de telefoon staat dat tabblad half buiten beeld; de melding is
+             zelf de knop erheen (v0.130.1). -->
         <button type="button" class="prijs-melding" id="prijs-melding" hidden>
           ${icons.euro}
-          <span><strong>Klopt je energieprijs?</strong> Kijk onder Voorkeuren hoe de coach hem opbouwt, en bevestig hem.</span>
+          <span class="tekst"><strong>Klopt je energieprijs?</strong> Tik hier en zie hoe de coach hem opbouwt. Klopt hij, bevestig hem dan.</span>
+          <span class="pijl">${icons.chevronRight}</span>
         </button>
 
         <section class="tiles" aria-label="Live meetwaarden" data-card="tiles">
@@ -1311,7 +1319,7 @@ class DacViewOverview extends DacElement {
   }
 
   afterRender() {
-    this.$("#prijs-melding").addEventListener("click", () => this.fire("dac-navigate", { id: "strategie" }));
+    this.$("#prijs-melding").addEventListener("click", () => this.fire("dac-navigate", { id: "contract" }));
     this.tiles_ = {
       solar: this.$("#t-solar"),
       house: this.$("#t-house"),

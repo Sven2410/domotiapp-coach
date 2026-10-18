@@ -76,6 +76,26 @@ const missingText = (missing) => {
 const veilig = (tekst) =>
   String(tekst ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+const euroKort = (n) => `€ ${Number(n || 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Wat het opnieuw uitrekenen van "Opgeleverd" gaf (v0.130.1), in een paar zinnen.
+ * `uit` komt van `battery/recalculate` (`async_herreken_batterij` in coach.py).
+ */
+export function herrekenZin(uit) {
+  if (!uit) return "";
+  if (uit.fout) return uit.fout;
+  if (!uit.dagen) return "Over die dagen staan er geen kwartieren van de meter en de batterij in de opslag van de coach.";
+  const datum = new Date(`${uit.van}T12:00:00`).toLocaleDateString("nl-NL", { day: "numeric", month: "long" });
+  const zinnen = [
+    `Vanaf ${datum}, ${uit.dagen} ${uit.dagen === 1 ? "dag" : "dagen"}: Opgeleverd was ${euroKort(uit.voor)}, en wordt ${euroKort(uit.na)}.`,
+  ];
+  if (uit.zonder_prijs) zinnen.push(`${uit.zonder_prijs} kwartieren hadden geen prijs en tellen niet mee.`);
+  zinnen.push(uit.nordpool ? "De marktprijs van toen komt van Nord Pool." : "De prijzen van toen komen uit de statistiek van Home Assistant.");
+  if (uit.toegepast) zinnen.push("Overgenomen.");
+  return zinnen.join(" ");
+}
+
 class DacViewDevices extends DacEditorElement {
   // De ruimtes horen bij dit scherm en gaan met de apparaten mee (v0.105.0).
   static sections = ["devices", "rooms"];
@@ -92,6 +112,9 @@ class DacViewDevices extends DacEditorElement {
      * is for, and a house has more than two appliances.
      */
     this.open_ = new Set();
+    // Opgeleverd opnieuw uitrekenen (v0.130.1): per batterij de gekozen dag en
+    // wat het gaf, zodat het een nieuwe tekening overleeft.
+    this.herrekend_ = new Map();
   }
 
   render() {
@@ -1119,7 +1142,56 @@ class DacViewDevices extends DacEditorElement {
         <p class="sub">Stopt de coach, dan zet hij het vermogen op nul en geeft hij de batterij terug aan zijn eigen modus, zodat hij nooit op zijn laatste opdracht blijft staan.</p>
         ${vink("self_zero", "De batterij doet zelf nul op de meter.", "Staat standaard aan. Zet hem alleen uit bij een batterij zonder eigen meter in de meterkast; dan regelt de coach de meter via Home Assistant, en dat is trager. De coach zet hem in zijn eigen modus (hierboven: als de coach stopt) en kijkt mee. Hij neemt het alleen over voor laden van het net, handelen, als de laadpaal laadt, in de vakantiestand, bij de reserve en als de zekering krap wordt, en geeft hem na vijf rustige minuten terug. Stilstaan of alleen ontladen plant hij dan niet, want dat kan de batterij in zijn eigen stand niet.")}
       </div>
+      ${this.herrekenHtml_(device, index)}
       <p class="sub">Wat de bewoner wil (de reserve, handelen, een keer per week vol, de vakantiestand, de auto helpen en de ventilator) staat sinds v0.114.0 op de kaart van de batterij, onder Instellen.</p>`;
+  }
+
+  /**
+   * "Opgeleverd" opnieuw uitrekenen vanaf een dag (v0.130.1). In de eerste
+   * woning telde het kasboek van 22-09 tot 19-10-2026 teruglevering als € 0,
+   * omdat de terugleverprijs onbekend was, en stond Opgeleverd te hoog. Eerst
+   * laten zien wat het wordt, pas met Overnemen verandert er iets.
+   */
+  herrekenHtml_(device, index) {
+    const stand = this.herrekend_?.get(device.id) ?? {};
+    const kan = Boolean(stand.uit && !stand.uit.fout && stand.uit.dagen && !stand.uit.toegepast);
+    return `
+      <div class="block">
+        <div class="block-title">Opgeleverd opnieuw uitrekenen</div>
+        <p class="sub">Stond de terugleverprijs een tijd verkeerd of leeg, dan klopt Opgeleverd over die dagen niet. De coach rekent het opnieuw vanaf de dag die je kiest, met het contract zoals het nu is: uit de kwartieren van de meter en de batterij in zijn eigen opslag, en de accustand en de prijzen van toen. Eerst zie je wat het wordt; pas met Overnemen verandert er iets.</p>
+        <div class="row">
+          <label for="herreken-van-${index}">Vanaf</label>
+          <input type="date" id="herreken-van-${index}" data-herreken-van="${index}" value="${veilig(stand.van ?? "")}">
+        </div>
+        <div class="herreken-knoppen">
+          <button type="button" class="add" data-herreken="${index}"${stand.bezig ? " disabled" : ""}>${stand.bezig ? "Bezig…" : "Uitrekenen"}</button>
+          ${kan ? `<button type="button" class="add" data-herreken-over="${index}">Overnemen</button>` : ""}
+        </div>
+        ${stand.uit ? `<p class="sub herreken-uit">${veilig(herrekenZin(stand.uit))}</p>` : ""}
+      </div>`;
+  }
+
+  /** Vraag de coach om de herberekening; met `toepassen` neemt hij hem over. */
+  async herreken_(index, toepassen) {
+    const device = this.draft_?.devices?.[index];
+    if (!device || !this.hass_) return;
+    const stand = this.herrekend_.get(device.id) ?? {};
+    if (!stand.van) {
+      this.toast_("Kies eerst een dag.", false);
+      return;
+    }
+    this.herrekend_.set(device.id, { ...stand, bezig: true });
+    this.paintDevices_();
+    try {
+      const uit = await this.hass_.callWS({
+        type: "domotiapp_coach/battery/recalculate", device_id: device.id, from: stand.van, apply: toepassen,
+      });
+      this.herrekend_.set(device.id, { van: stand.van, uit });
+      if (uit?.toegepast) this.toast_("Opgeleverd is opnieuw uitgerekend", true);
+    } catch (error) {
+      this.herrekend_.set(device.id, { van: stand.van, uit: { fout: `Uitrekenen mislukt: ${error?.message ?? error}` } });
+    }
+    this.paintDevices_();
   }
 
   carsHtml_(device, index) {
@@ -1441,6 +1513,21 @@ class DacViewDevices extends DacEditorElement {
         this.paintDevices_();
         this.syncSaveBar_();
       });
+    }
+
+    for (const veld of list.querySelectorAll("[data-herreken-van]")) {
+      const device = devices[Number(veld.dataset.herrekenVan)];
+      veld.addEventListener("change", () => {
+        // Een andere dag: wat er stond hoort bij de vorige.
+        this.herrekend_.set(device.id, { van: veld.value });
+        this.paintDevices_();
+      });
+    }
+    for (const knop of list.querySelectorAll("[data-herreken]")) {
+      knop.addEventListener("click", () => this.herreken_(Number(knop.dataset.herreken), false));
+    }
+    for (const knop of list.querySelectorAll("[data-herreken-over]")) {
+      knop.addEventListener("click", () => this.herreken_(Number(knop.dataset.herrekenOver), true));
     }
 
     for (const toggle of list.querySelectorAll("[data-toggle]")) {
@@ -1813,6 +1900,8 @@ DacViewDevices.css = /* css */ `
   .block-title { font-size: 13px; font-weight: 600; color: var(--dac-ink); }
   .block > .sub { font-size: 12px; line-height: 1.5; color: var(--dac-ink-3); margin: 0; }
   .block button.add { margin-top: 4px; }
+  .herreken-knoppen { display: flex; flex-wrap: wrap; gap: 8px; }
+  .herreken-uit { color: var(--dac-ink-2) !important; }
 
   /* ---- auto's bij een laadpaal ----
      Elk profiel in een eigen kader, want het zijn losse dingen met dezelfde

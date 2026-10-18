@@ -1331,6 +1331,14 @@ proef("de pop-up van de paal toont de prijsgrafiek met het gewogen gemiddelde va
   // 03:00: 11,0 kWh van het net tegen 0,2215; 04:00: 11,0 - 2,4 = 8,6 kWh tegen 0,2113.
   // (0,2215 x 11 + 0,2113 x 8,6) / 19,6 = 0,2170.
   assert.equal(kop[1].textContent, "€ 0,217", JSON.stringify(kop));
+  // Zonder iets van het net staat er rechts niets meer (v0.130.1): het vlak met
+  // het moment erboven zegt het al.
+  const zon = vooruitScherm({ ...NACHT, blocks: NACHT.blocks.map((b) => ({ ...b, solar_kwh: b.kwh })) });
+  zon.el.paint_();
+  const zonKop = zon.knopen.get("#vooruit-prijs").kinderen.find((k) => k.className === "prijs-kop");
+  assert.equal(zonKop.kinderen.length, 1, JSON.stringify(zonKop.kinderen.map((k) => k.textContent)));
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/plan-ahead-sheet.js", import.meta.url), "utf8");
+  assert.ok(!bron.includes(': "in deze uren niets van het net"') && bron.includes('wacht: "Nul op de meter", gemiddelde: false'));
   // Een vast contract: geen prijzen, dus geen grafiek.
   const vast = vooruitScherm({ ...NACHT, blocks: NACHT.blocks.map((b) => ({ ...b, price: null })) });
   vast.el.paint_();
@@ -3329,9 +3337,10 @@ let fout = 0;
 // De eigenaar op 08-10-2026: "voorop staat dat de klant geen entiteiten moet kunnen
 // kiezen", en op 12-10-2026 zijn antwoorden: Instellen achter de kaart met het
 // schema erin, de strategie van de bewoner, de personen bij Meldingen ook.
-proef("de bewoner ziet Overzicht, Historie, Meldingen en Voorkeuren; de installateur ook Apparaten, Installatie en Contract", async () => {
+// Contract ziet de bewoner sinds v0.130.1 ook, om te lezen en zijn prijs te bevestigen.
+proef("de bewoner ziet Overzicht, Historie, Meldingen, Voorkeuren en Contract; de installateur ook Apparaten en Installatie", async () => {
   const { navItemsFor, NAV_ITEMS } = await import("../custom_components/domotiapp_coach/frontend/src/header.js");
-  assert.deepEqual(navItemsFor(false).map((i) => i.label), ["Overzicht", "Historie", "Meldingen", "Voorkeuren"]);
+  assert.deepEqual(navItemsFor(false).map((i) => i.label), ["Overzicht", "Historie", "Meldingen", "Voorkeuren", "Contract"]);
   assert.deepEqual(navItemsFor(true).map((i) => i.label),
     ["Overzicht", "Historie", "Meldingen", "Voorkeuren", "Apparaten", "Installatie", "Contract"]);
   assert.ok(!NAV_ITEMS.some((i) => i.id === "instellingen"), "Instellingen is opgegaan in Installatie");
@@ -3812,7 +3821,7 @@ proef("Tijdlijn: een week heeft dagen langs de as, en de tekst bij een klik noem
     { at: new Date(2026, 9, 11, 1, 40).toISOString(), kind: "besluit", device: "p", rule: "complete", charge: false,
       message: "Laadpaal: niet laden. De auto staat op 80% en verder hoeft hij niet." },
     { at: new Date(2026, 9, 11, 7, 30).toISOString(), kind: "besluit", device: "p", rule: "disconnected", charge: false,
-      message: "Laadpaal: niet laden. Er hangt geen auto aan de lader." },
+      message: "Laadpaal: niet laden. Er is geen auto aangesloten op de laadpaal." },
   ];
   const rijen = T.tijdlijn(items, TL_APPARATEN, maandag, zondagEind, new Date(2026, 9, 20));
   const html = T.tekenTijdlijn({ rijen, van: maandag, tot: zondagEind, nu: new Date(2026, 9, 20) });
@@ -4645,21 +4654,77 @@ proef("de catalogus: elk voorstel rust op een bron en een datum, en vult alleen 
   assert.equal(cat.nordPoolVan({ "sensor.nord_pool_nl_huidige_prijs": {} }), "sensor.nord_pool_nl_huidige_prijs");
 });
 
-proef("Voorkeuren toont de opbouw aan de bewoner, en het overzicht vraagt erom tot hij bevestigt (v0.129.0)", async () => {
+// Sinds v0.130.1 op Contract, niet meer onder Voorkeuren. De eigenaar op
+// 19-10-2026: "je energieprijs staat nu in voorkeuren maar dat moet onder
+// contract", en bij "Kijk onder Voorkeuren": "voorkeuren ken ik niet".
+proef("Contract toont de bewoner zijn prijs om te bevestigen, en het overzicht wijst erheen (v0.130.1)", async () => {
   await import("../custom_components/domotiapp_coach/frontend/src/views/strategy.js");
   const Voorkeuren = geregistreerd.get("dac-view-strategy");
-  const html = Object.create(Voorkeuren.prototype).render();
-  assert.ok(html.includes('id="prijs"') && html.includes('id="prijs-opbouw"') && html.includes('id="prijs-bevestig"'));
+  const vk = Object.create(Voorkeuren.prototype).render();
+  assert.ok(!vk.includes('id="prijs"') && !vk.includes("Ja, dit klopt"), "niet meer onder Voorkeuren");
+  const contractMod = await import("../custom_components/domotiapp_coach/frontend/src/views/contract.js");
+  const Contract = geregistreerd.get("dac-view-contract");
+  const html = Object.create(Contract.prototype).render();
+  assert.ok(html.includes('class="primary vrij" id="bevestig"'), "Ja, dit klopt mag de bewoner zelf");
+  assert.ok(html.includes('id="opbouw"') && html.includes("bewoner-uitleg"));
+  // Wat de bewoner niet ziet: elke sensor en elk bedrag is van de installateur.
+  const zonderInstallateur = html.replace(/<(div|label)[^>]*data-installateur[^>]*>[\s\S]*?<\/\1>/g, "");
+  assert.ok(!/<dac-entity-picker/.test(html.split("data-installateur").slice(-1)[0]), "geen sensorkiezer na het laatste installateursblok");
+  for (const id of ["dyn-allin", "dyn-market", "fx-price", "gas-entity", "water-price"]) {
+    const plek = html.indexOf(`id="${id}"`);
+    const ervoor = html.lastIndexOf("data-installateur", plek);
+    assert.ok(plek > 0 && ervoor > 0, `${id} staat in een blok van de installateur`);
+  }
+  assert.ok(zonderInstallateur.length > 0);
+  const css = Contract.css;
+  assert.ok(css.includes(":host([readonly]) [data-installateur] { display: none !important; }"));
+  const basis = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/editor-base.js", import.meta.url), "utf8");
+  assert.ok(basis.includes(":not(.sheet-close):not(.vrij)"), "de leesstand laat een vrije knop met rust");
+  // De eerdere contracten leest de bewoner als regels, zonder velden.
+  const lezen = contractMod.periodesLezen("stroom", [
+    { name: "Elektra 2025", from: "2025-01-01", to: "2025-12-31", type: "fixed", all_in_price: 0.31 },
+    { name: "", from: "2026-01-01", to: "", type: "dynamic", supplier: "" },
+  ]);
+  assert.ok(lezen.includes("Elektra 2025") && lezen.includes("01-01-2025 tot 31-12-2025") && lezen.includes("€ 0,31 per kWh"), lezen);
+  assert.ok(lezen.includes("Eerder contract") && lezen.includes("Dynamisch") && !lezen.includes("<input"), lezen);
+  assert.ok(contractMod.periodesLezen("gas", []).includes("Geen eerdere contracten"));
   await import("../custom_components/domotiapp_coach/frontend/src/views/overview.js");
   const Overzicht = geregistreerd.get("dac-view-overview");
   const ov = Object.create(Overzicht.prototype).render();
   assert.ok(ov.includes('id="prijs-melding"') && ov.includes("Klopt je energieprijs?"));
+  assert.ok(!ov.includes("</strong> Kijk onder") && ov.includes("</strong> Tik hier en zie hoe de coach hem opbouwt."), "geen tabblad in de tekst");
+  const ovBron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf8");
+  assert.ok(ovBron.includes('#prijs-melding").addEventListener("click", () => this.fire("dac-navigate", { id: "contract" })'));
   const ds = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
   ds.zetCoachPrijzen({ bevestigd: false });
   assert.equal(ds.prijsBevestigd(), false);
   ds.zetCoachPrijzen({ bevestigd: true });
   assert.equal(ds.prijsBevestigd(), true);
   ds.zetCoachPrijzen({});
+});
+
+// Opgeleverd opnieuw uitrekenen onder de batterij (v0.130.1): eerst de som,
+// dan Overnemen. Wat er staat komt van battery/recalculate (coach.py, proef 171).
+proef("Apparaten: Opgeleverd opnieuw uitrekenen, eerst laten zien en dan overnemen (v0.130.1)", async () => {
+  const mod = await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const zin = mod.herrekenZin({ van: "2026-09-22", dagen: 27, kwartieren: 2592, zonder_prijs: 4, voor: 18.42, na: 9.87, toegepast: false, nordpool: true });
+  assert.ok(zin.startsWith("Vanaf 22 september, 27 dagen: Opgeleverd was € 18,42, en wordt € 9,87."), zin);
+  assert.ok(zin.includes("4 kwartieren hadden geen prijs") && zin.includes("Nord Pool") && !zin.includes("Overgenomen"), zin);
+  assert.ok(mod.herrekenZin({ van: "2026-10-01", dagen: 1, voor: 1, na: 1, toegepast: true }).endsWith("Overgenomen."));
+  assert.ok(mod.herrekenZin({ van: "2026-10-01", dagen: 1, voor: 1, na: 1 }).includes("statistiek van Home Assistant"));
+  assert.equal(mod.herrekenZin({ fout: "Kies een dag in het verleden." }), "Kies een dag in het verleden.");
+  assert.ok(mod.herrekenZin({ van: "2026-10-01", dagen: 0 }).includes("geen kwartieren"));
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.herrekend_ = new Map();
+  const leeg = el.herrekenHtml_({ id: "dev-b" }, 2);
+  assert.ok(leeg.includes('data-herreken-van="2"') && leeg.includes('data-herreken="2"') && !leeg.includes("data-herreken-over"), "Overnemen pas na de som");
+  el.herrekend_.set("dev-b", { van: "2026-09-22", uit: { van: "2026-09-22", dagen: 27, voor: 18.42, na: 9.87 } });
+  assert.ok(el.herrekenHtml_({ id: "dev-b" }, 2).includes('data-herreken-over="2"'));
+  el.herrekend_.set("dev-b", { van: "2026-09-22", uit: { van: "2026-09-22", dagen: 27, voor: 18.42, na: 9.87, toegepast: true } });
+  assert.ok(!el.herrekenHtml_({ id: "dev-b" }, 2).includes("data-herreken-over"), "na Overnemen niet nog eens");
+  const basis = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/editor-base.js", import.meta.url), "utf8");
+  assert.ok(basis.includes('input[type="time"], input[type="date"], select {'), "een datumveld heeft de stijl van de andere velden");
 });
 
 proef("geld.js rekent teruglevering en de bonus zoals prijsopbouw.py (v0.129.0)", () => {
@@ -4706,6 +4771,10 @@ proef("de berichtenbox: het tellertje, de lijst met Gelezen, en de herinnering v
   assert.equal(html.split("data-gelezen=").length - 1, 1, "alleen een ongelezen bericht heeft de knop Gelezen");
   assert.ok(html.includes('class="bericht gelezen"'), "een gelezen bericht ziet er anders uit");
   assert.ok(b.berichtenHtml([], nu).includes("Geen berichten"));
+  // Een prijsbericht wijst met een knop naar Contract, niet met een tabblad in de tekst (v0.130.1).
+  const prijs = b.berichtenHtml([{ id: "3", at: "2026-10-19T09:00:00", kind: "prijs", title: "Je energieprijs klopt niet meer", body: "Kijk na hoe de coach hem opbouwt.", read: true }], nu);
+  assert.ok(prijs.includes('data-naar="contract"') && prijs.includes("Bekijk je energieprijs"), prijs);
+  assert.ok(!html.includes("data-naar"), "een bericht zonder bestemming heeft die knop niet");
   // Het belletje in de kop.
   const kop = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/header.js", import.meta.url), "utf8");
   assert.ok(kop.includes('id="berichten"') && kop.includes('id="teller"') && kop.includes("dac-berichten"));

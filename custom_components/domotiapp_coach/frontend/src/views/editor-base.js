@@ -50,7 +50,9 @@ export const editorCss = /* css */ `
   .row > label { font-size: 13px; font-weight: 500; color: var(--dac-ink); }
   .row > .sub { font-size: 12px; color: var(--dac-ink-3); line-height: 1.45; }
 
-  input[type="text"], input[type="number"], input[type="time"], select {
+  /* De datum hoort erbij sinds v0.130.1: de velden op Contract en onder de
+     batterij stonden kaal, met de stijl van de browser. */
+  input[type="text"], input[type="number"], input[type="time"], input[type="date"], select {
     width: 100%;
     padding: 10px 12px;
     border-radius: var(--dac-radius-sm);
@@ -63,12 +65,14 @@ export const editorCss = /* css */ `
   }
   /* See theme.js: below 16px iOS zooms the page in on focus and stays there. */
   @media (pointer: coarse) {
-    input[type="text"], input[type="number"], input[type="time"], select, textarea { font-size: 16px; }
+    input[type="text"], input[type="number"], input[type="time"], input[type="date"], select, textarea { font-size: 16px; }
   }
   @supports (-webkit-touch-callout: none) {
-    input[type="text"], input[type="number"], input[type="time"], select, textarea { font-size: 16px; }
+    input[type="text"], input[type="number"], input[type="time"], input[type="date"], select, textarea { font-size: 16px; }
   }
   input:focus, select:focus { border-color: var(--dac-accent-hi); outline: none; }
+  /* Anders is het kalendertje zwart op het donkere thema. */
+  input[type="date"] { color-scheme: var(--dac-scheme); }
   select { appearance: none; background-image: none; }
   select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
 
@@ -272,12 +276,14 @@ export const editorCss = /* css */ `
      rather than the other way round. Naming the controls to lock meant every
      button added later was unlocked by default -- which is how a customer could
      still empty a time field on Strategie. Reading, unfolding a card and
-     stepping into a sub-screen stay open: they change nothing. */
+     stepping into a sub-screen stay open: they change nothing. A button with
+     .vrij is something the resident may do himself through a command of its
+     own, such as "Ja, dit klopt" on Contract (contract/confirm, v0.130.1). */
   :host([readonly]) input,
   :host([readonly]) select,
   :host([readonly]) textarea,
   :host([readonly]) label.check,
-  :host([readonly]) button:not(.link):not(.back):not(.toggle):not(.dismiss):not(.sheet-close) {
+  :host([readonly]) button:not(.link):not(.back):not(.toggle):not(.dismiss):not(.sheet-close):not(.vrij) {
     pointer-events: none;
     opacity: 0.55;
   }

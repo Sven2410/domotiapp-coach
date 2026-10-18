@@ -2988,7 +2988,9 @@ def _decide(
     ceiling = ceiling_amps(grid, car, charger)
 
     if not charger.connected:
-        return Decision(False, 0, "Er hangt geen auto aan de lader.", rule="disconnected")
+        # Geen spreektaal (v0.130.1). De eigenaar op 19-10-2026, bij "Er hangt geen
+        # auto aan de lader": "iets teveel spreektaal".
+        return Decision(False, 0, "Er is geen auto aangesloten op de laadpaal.", rule="disconnected")
 
     if charger.complete:
         # Er hangt nog een kabel, maar de auto neemt niets meer af. Zonder deze
@@ -3103,7 +3105,7 @@ def _decide(
         return Decision(
             True,
             ceiling,
-            "Er hangt een gast aan de lader, dus die laadt meteen.",
+            "Er is een gastauto aangesloten op de laadpaal, die laadt meteen.",
             plan="Laadt door tot de kabel eruit gaat.",
             rule="guest",
         )

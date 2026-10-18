@@ -92,16 +92,22 @@ was wordt bij het laden het marktveld (`_migrate` in storage.py).
 ## Bevestigen
 
 `contract/check` (websocket) geeft de opbouw van nu en de controle; Contract stuurt zijn
-concept mee (alleen de installateur), Voorkeuren niet. `contract/confirm` legt vast wie
+concept mee als de installateur kijkt, en zonder concept als de bewoner kijkt. `contract/confirm` legt vast wie
 bevestigde, wanneer, en een vingerafdruk van de waarden (`vingerafdruk`): verandert er
 daarna een bedrag, een sensor, salderen of de leverancier, dan geldt de bevestiging niet
 meer. Eerdere contracten tellen niet mee, en 21 en 21.0 zijn hetzelfde. Iedereen mag
 bevestigen; het verandert geen bedrag.
 
 Wie wat ziet: de installateur kiest bij Contract de sensoren en ziet de opbouw met "Ja, dit
-klopt"; de bewoner ziet dezelfde opbouw onder Voorkeuren, alleen lezen, met dezelfde knop.
-Tot er bevestigd is staat er op het overzicht "Klopt je energieprijs?" (`bevestigd` bij
-`domotiapp_coach/prices`).
+klopt". Sinds v0.130.1 ziet de bewoner dezelfde pagina, alleen lezen: de samenvatting per
+bron, de opbouw met dezelfde knop, en de eerdere contracten als regels (`periodesLezen`).
+Tot dan stond zijn kopie onder Voorkeuren; de eigenaar op 19-10-2026: "je energieprijs staat
+nu in voorkeuren maar dat moet onder contract." Tot er bevestigd is staat er op het overzicht
+"Klopt je energieprijs?" (`bevestigd` bij `domotiapp_coach/prices`), en die melding is zelf de
+knop naar Contract. Er staat geen tabblad meer in de tekst: bij "Kijk onder Voorkeuren" zei de
+bewoner van de eerste woning "voorkeuren ken ik niet", want op een telefoon staat dat tabblad
+half buiten beeld. Om dezelfde reden heeft een prijsbericht in de berichtenbox een knop
+"Bekijk je energieprijs" (`NAAR` in berichten-sheet.js).
 
 ## Contract per energiebron
 

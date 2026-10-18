@@ -155,7 +155,8 @@ export function standVan(item, device) {
       return { stand: "laden", bron: /zon over|op zon|eigen zon/.test(tekst) ? "zon" : "net" };
     }
     if (kop.startsWith("niet laden") || kop.startsWith("zou niet laden")) {
-      if (tekst.includes("geen auto aan de lader")) return null;
+      // De tekst van sinds v0.130.1, en die van daarvoor voor wat al in de geschiedenis staat.
+      if (tekst.includes("geen auto aangesloten") || tekst.includes("geen auto aan de lader")) return null;
       if (tekst.includes("verder hoeft hij niet") || tekst.includes("is vol")) return { stand: "vol" };
       return { stand: "wacht" };
     }

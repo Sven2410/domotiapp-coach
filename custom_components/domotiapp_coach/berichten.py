@@ -156,6 +156,6 @@ def controle_bericht(vandaag: date, oud: str | None, nieuw: dict) -> dict | None
         "titel": "Je energieprijs klopt niet meer",
         "tekst": (
             f"De opbouw in de coach wijkt € {f'{verschil:.4f}'.replace('.', ',')} per kWh af van wat je leverancier zegt. "
-            "Kijk het na bij Voorkeuren onder Je energieprijs."
+            "Kijk na hoe de coach hem opbouwt."
         ),
     }

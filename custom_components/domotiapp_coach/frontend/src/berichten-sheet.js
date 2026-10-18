@@ -32,6 +32,11 @@ export function wanneerTekst(iso, nu = new Date()) {
   return d.toLocaleDateString("nl-NL", { day: "numeric", month: "long", ...(d.getFullYear() !== nu.getFullYear() ? { year: "numeric" } : {}) });
 }
 
+// Een bericht dat ergens heen wijst krijgt een knop erheen, in plaats van een
+// tabblad in de tekst (v0.130.1). De bewoner van de eerste woning op 19-10-2026,
+// bij "Kijk onder Voorkeuren": "voorkeuren ken ik niet".
+const NAAR = { prijs: { id: "contract", tekst: "Bekijk je energieprijs" } };
+
 /** De lijst als html: nieuwste bovenaan, ongelezen met een knop "Gelezen". */
 export function berichtenHtml(items, nu = new Date()) {
   const lijst = [...(items ?? [])].sort((a, b) => String(b.at).localeCompare(String(a.at)));
@@ -43,7 +48,10 @@ export function berichtenHtml(items, nu = new Date()) {
         <span class="b-wanneer">${esc(wanneerTekst(b.at, nu))}</span>
       </div>
       <p>${esc(b.body)}</p>
-      ${b.read ? "" : `<button type="button" class="gelezen-knop" data-gelezen="${esc(b.id)}">${icons.check}<span>Gelezen</span></button>`}
+      ${NAAR[b.kind] || !b.read ? `<div class="knoppen">
+        ${NAAR[b.kind] ? `<button type="button" class="gelezen-knop naar" data-naar="${esc(NAAR[b.kind].id)}">${esc(NAAR[b.kind].tekst)}${icons.chevronRight}</button>` : ""}
+        ${b.read ? "" : `<button type="button" class="gelezen-knop" data-gelezen="${esc(b.id)}">${icons.check}<span>Gelezen</span></button>`}
+      </div>` : ""}
     </article>`).join("");
 }
 
@@ -65,6 +73,7 @@ const css = /* css */ `
     border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.04); color: var(--dac-ink); cursor: pointer;
   }
   .gelezen-knop .icon, .alles .icon { width: 14px; height: 14px; flex: 0 0 auto; }
+  .knoppen { display: flex; flex-wrap: wrap; gap: 8px; }
   .alles { margin: 0 0 12px; }
   .alles[hidden] { display: none; }
   .leeg { margin: 0; font-size: 13px; color: var(--dac-ink-2); }
@@ -104,6 +113,11 @@ export class DacBerichtenSheet extends DacElement {
     this.$("#lijst").addEventListener("click", (event) => {
       const knop = event.target?.closest?.("[data-gelezen]");
       if (knop) this.fire("dac-bericht-gelezen", { id: knop.dataset.gelezen });
+      const naar = event.target?.closest?.("[data-naar]");
+      if (naar) {
+        dialog.close();
+        this.fire("dac-navigate", { id: naar.dataset.naar });
+      }
     });
     this.paint_();
   }

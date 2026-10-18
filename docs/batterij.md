@@ -1013,6 +1013,38 @@ scheelt dat ongeveer 2 cent per kWh; met de Zonnebonus van die leverancier erbij
 de kale prijs overdag, die de coach niet kent) ongeveer niets. Handelen tegen eigen zon
 levert bij salderen weinig op: een teruggeleverde kWh is dan bijna de inkoopprijs waard.
 
+## Opgeleverd opnieuw uitrekenen (v0.130.1)
+
+In de eerste woning telde het kasboek van 22-09 tot 19-10-2026 teruglevering als € 0: de
+terugleverprijs was onbekend (zie hierboven). Dan lijkt zon in de batterij opslaan gratis en
+levert elke ontlading de volle prijs op, en stond "Opgeleverd" te hoog. Die dagen komen niet
+vanzelf goed, want het kasboek telt per ronde en kijkt niet terug.
+
+Onder de batterij in Apparaten (alleen de installateur) staat daarom "Opgeleverd opnieuw
+uitrekenen": een dag kiezen, Uitrekenen, en dan pas Overnemen. `battery/recalculate`
+(websocket) roept `async_herreken_batterij` in coach.py aan, eerst zonder `apply`.
+
+- **De metingen**: per kwartier het net en de batterij uit de eigen kwartieropslag
+  (`_async_kwartieren`), de accustand per uur uit de statistiek van Home Assistant
+  (`_async_uurgemiddelden`).
+- **De prijzen van toen**: de kale marktprijs per kwartier bij de ingebouwde Nord Pool, die
+  met zijn dienst ook voorbije dagen geeft (`_async_marktprijzen`); een prijssensor heeft niet
+  altijd een statistiek. Lukt dat niet, dan de statistiek van de sensoren. De all-in prijs uit
+  de statistiek van de all-in sensor, en anders opgebouwd uit de marktprijs met het contract
+  zoals het nu is (`prijsopbouw.inkoop`); de terugleverprijs met `prijsopbouw.terug`, met
+  salderen zoals het op die dag gold. Een kwartier zonder prijs telt niet mee, en het paneel
+  zegt hoeveel.
+- **De som**: `herreken` in batterij.py, met `verdiend`, `Voorraad` en `zon_in_accu` zoals de
+  ronde ze gebruikt, en dezelfde grenzen voor laden en ontladen. Wat er op de gekozen dag al
+  in zat telt als gratis, net als bij de eerste ronde van de coach.
+- **Overnemen** vervangt de dagen vanaf de gekozen dag in `earned_days`, `realized_days` en
+  `solar_stored_days`, zet de totalen opnieuw en de voorraad op wat eruit kwam, en begint de
+  lopende tellingen van vandaag opnieuw. Wat ervoor ligt blijft staan.
+
+Per kwartier en niet per minuut, dus het is de beste schatting achteraf. Proef 44 in
+test_batterij.py (de som) en 171 in test_coach.py (laten zien, overnemen, Nord Pool), en de
+proef "Opgeleverd opnieuw uitrekenen" in test_rapport.mjs.
+
 ## De temperatuur, de melding en de ventilator (v0.108.0)
 
 De eigenaar op 10-10-2026, met een schermafdruk van de batterijtemperatuur van zijn

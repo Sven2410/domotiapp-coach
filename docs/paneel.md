@@ -20,10 +20,17 @@ de antwoorden op de acht vragen (privénotities, `indeling-bewoner-installateur.
 | Voorkeuren | iedereen | hoeveel de coach zelf doet, de voorrang, de nacht, en het overzicht (kleurdrempels, de kaart met de fasen) |
 | Apparaten | installateur | alleen de hardware: type, merk, entiteiten, mag sturen, fasen wisselen, de technische kant van de batterij, de auto's (merk, accu, stroom, fasen, sensoren, wekknop), de programmatabel, ruimtes |
 | Installatie | installateur | woning en aansluiting, kasten en groepen, energiebronnen, fasen, zonverwachting, meterstanden, navigatie |
-| Contract | installateur | het contract van nu en de eerdere |
+| Contract | iedereen | het contract van nu en de eerdere; de bewoner leest, en bevestigt zijn stroomprijs met "Ja, dit klopt" |
 
 De bewoner ziet de tabs van de installateur niet, ook niet grijs
-(`adminOnly` in header.js). Voorkeuren heette Strategie; het id `strategie`
+(`adminOnly` in header.js). Contract is sinds v0.130.1 de uitzondering: de
+eigenaar op 19-10-2026, "je energieprijs staat nu in voorkeuren maar dat moet
+onder contract". De bewoner ziet daar per bron wat voor contract, bij wie en van
+wanneer tot wanneer, de opbouw van zijn stroomprijs en de eerdere contracten als
+regels; elke sensor en elk bedrag staat in een blok met `data-installateur`, en
+dat is er in de leesstand niet (`:host([readonly])` in contract.js). "Ja, dit
+klopt" heeft de klasse `vrij`, die de leesstand in editor-base.js met rust laat,
+want `contract/confirm` is niet alleen voor de beheerder. Voorkeuren heette Strategie; het id `strategie`
 bleef, zodat een bladwijzer blijft werken. Instellingen is opgegaan in
 Installatie, het contract kreeg een eigen tab (`views/contract.js`).
 
