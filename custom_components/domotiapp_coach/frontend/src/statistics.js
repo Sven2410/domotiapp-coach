@@ -26,8 +26,13 @@ export const PERIODS = [
   { id: "year", label: "Jaar", bucket: "month" },
 ];
 
-/** The first moment of the period `offset` steps back from today. */
-export function periodStart(period, offset) {
+/**
+ * The first moment of the period `offset` steps back from today.
+ *
+ * `startMaand` (1 is januari) is where a year begins, sinds v0.132.0: the
+ * year in Historie can run with the contract, from July to June for instance.
+ */
+export function periodStart(period, offset, startMaand = 1) {
   const at = new Date();
   at.setHours(0, 0, 0, 0);
 
@@ -45,10 +50,14 @@ export function periodStart(period, offset) {
       at.setDate(1);
       at.setMonth(at.getMonth() + offset);
       return at;
-    default:
-      at.setMonth(0, 1);
-      at.setFullYear(at.getFullYear() + offset);
+    default: {
+      const maand = Math.min(12, Math.max(1, Math.round(Number(startMaand) || 1))) - 1;
+      // The year we are in started this year or last year, depending on
+      // whether that month has come round yet.
+      const jaar = at.getMonth() >= maand ? at.getFullYear() : at.getFullYear() - 1;
+      at.setFullYear(jaar + offset, maand, 1);
       return at;
+    }
   }
 }
 
@@ -83,6 +92,12 @@ export function periodLabel(period, start) {
   if (period === "week") {
     const end = new Date(periodEnd(period, start).getTime() - 1);
     return `${start.toLocaleDateString("nl-NL", opts)} tot ${end.toLocaleDateString("nl-NL", opts)}`;
+  }
+  // Een jaar dat niet in januari begint (v0.132.0): "juli 2026 tot juni 2027".
+  if (period === "year" && start.getMonth() !== 0) {
+    const end = new Date(periodEnd(period, start).getTime() - 1);
+    const maand = { month: "long", year: "numeric" };
+    return `${start.toLocaleDateString("nl-NL", maand)} tot ${end.toLocaleDateString("nl-NL", maand)}`;
   }
   return start.toLocaleDateString("nl-NL", opts);
 }

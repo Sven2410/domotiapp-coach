@@ -426,12 +426,23 @@ class DacViewHistory extends DacElement {
     if (this.rendered_) this.paint_();
   }
 
+  /**
+   * Het begin van de periode die in beeld is, met de maand waarin een jaar
+   * begint (v0.132.0, Voorkeuren).
+   */
+  periodeStart_() {
+    return periodStart(this.period_, this.offset_, this.settings_?.history?.year_start_month ?? 1);
+  }
+
   set settings(value) {
+    // Een andere startmaand van het jaar is een andere periode.
+    const jaarStart = value?.history?.year_start_month ?? 1;
+    const jaarAnders = this.settings_ && jaarStart !== (this.settings_?.history?.year_start_month ?? 1);
     const before = JSON.stringify(value?.sources?.meters ?? {});
     const changed = before !== this.metersKey_;
     this.metersKey_ = before;
     this.settings_ = value;
-    if (this.rendered_ && changed) this.load_();
+    if (this.rendered_ && (changed || (jaarAnders && this.period_ === "year"))) this.load_();
   }
 
   render() {
@@ -771,7 +782,7 @@ class DacViewHistory extends DacElement {
     // A run of its own, so a slow answer for last month cannot overwrite the
     // week somebody clicked on in the meantime.
     const run = (this.run_ = (this.run_ ?? 0) + 1);
-    const start = periodStart(this.period_, this.offset_);
+    const start = this.periodeStart_();
 
     if (!this.checked_) {
       this.checked_ = true;
@@ -834,7 +845,7 @@ class DacViewHistory extends DacElement {
     this.$("#onderwerp").value = this.onderwerp_;
     this.$("#period-label").textContent = periodLabel(
       this.period_,
-      periodStart(this.period_, this.offset_)
+      this.periodeStart_()
     );
     this.$("#next").disabled = this.offset_ >= 0;
 
@@ -929,7 +940,7 @@ class DacViewHistory extends DacElement {
     const apparaten = this.tijdlijnApparaten_();
     if (!apparaten.length) return;
     const run = (this.tlRun_ = (this.tlRun_ ?? 0) + 1);
-    const van = periodStart(this.period_, this.offset_);
+    const van = this.periodeStart_();
     const sleutel = `${this.period_}:${van.getTime()}`;
     if (this.tl_?.dag !== sleutel) this.tlGekozen_ = "";
 
@@ -990,7 +1001,7 @@ class DacViewHistory extends DacElement {
       note.textContent = "De tijdlijn staat bij Dag en Week.";
       return;
     }
-    const van = periodStart(this.period_, this.offset_);
+    const van = this.periodeStart_();
     const tot = periodEnd(this.period_, van);
     const tl = this.tl_;
     if (!tl || tl.dag !== `${this.period_}:${van.getTime()}`) {
@@ -1047,7 +1058,7 @@ class DacViewHistory extends DacElement {
 
     const at = (key, time) => this.rows_[key].find((row) => row.start.getTime() === time)?.value ?? 0;
     const tijden = [...keys].sort((a, b) => a - b);
-    const einde = periodEnd(this.period_, periodStart(this.period_, this.offset_)).getTime();
+    const einde = periodEnd(this.period_, this.periodeStart_()).getTime();
     const vakEinde = (index) => tijden[index + 1] ?? einde;
     const accu = this.accuPerVak_(tijden, vakEinde);
 
@@ -1295,7 +1306,7 @@ class DacViewHistory extends DacElement {
     const totals = this.totals_ ?? {};
 
     const woning = (this.settings_?.installation?.home_name ?? "").trim();
-    const periode = periodLabel(this.period_, periodStart(this.period_, this.offset_));
+    const periode = periodLabel(this.period_, this.periodeStart_());
     // Er staan twee fijnheden in dit rapport en die zijn niet hetzelfde: de
     // grafiek en Alle cijfers volgen de periode, het verloop volgt wat de klant
     // gekozen heeft. "Per uur" in de kop terwijl er Kwartier aanstond leest als
@@ -1501,7 +1512,7 @@ class DacViewHistory extends DacElement {
     const wilde = this.vermogenBronnen_();
     if (!wilde.length) return { samenvatting: null, detail: null };
 
-    const start = periodStart(this.period_, this.offset_);
+    const start = this.periodeStart_();
     const gevonden = await quarters(
       this.hass_,
       wilde.map((rij) => rij.entity),
@@ -1691,7 +1702,7 @@ class DacViewHistory extends DacElement {
     // In de vakken van de grafiek, zodat elk vak zijn eigen prijs krijgt: een
     // schatting uit het vermogen komt sinds v0.121.0 per uur (`fetchDevices`).
     const tijden = this.rows_ ? this.buckets_().map((row) => row.start.getTime()) : [];
-    const einde = periodEnd(this.period_, periodStart(this.period_, this.offset_)).getTime();
+    const einde = periodEnd(this.period_, this.periodeStart_()).getTime();
 
     return (this.settings_?.devices ?? [])
       .map((device) => {
@@ -1876,7 +1887,7 @@ class DacViewHistory extends DacElement {
 
   /** De beurten van de gekozen periode en wat ze samen bespaarden. */
   bespaard_() {
-    const start = periodStart(this.period_, this.offset_);
+    const start = this.periodeStart_();
     const end = periodEnd(this.period_, start);
     const items = beurtenIn(this.beurten_ ?? [], start, end);
     return { items, totaal: totalen(items), apparaten: perApparaat(items) };
@@ -2001,7 +2012,7 @@ class DacViewHistory extends DacElement {
     const rate = tariff(this.feed_, contract);
     if (!rows.length || rate.buy === null) return null;
     const prices = this.prices_ ?? new Map();
-    const start = periodStart(this.period_, this.offset_);
+    const start = this.periodeStart_();
     const end = periodEnd(this.period_, start);
     const beurten = Array.isArray(this.beurten_) ? beurtenIn(this.beurten_, start, end) : [];
     const accu = accuVerdiend(this.settings_, start, end);
@@ -2249,7 +2260,7 @@ class DacViewHistory extends DacElement {
     if (!card) return;
     const vakken = this.buckets_();
     const tijden = vakken.map((row) => row.start.getTime());
-    const einde = periodEnd(this.period_, periodStart(this.period_, this.offset_)).getTime();
+    const einde = periodEnd(this.period_, this.periodeStart_()).getTime();
     const reeksen = apparaatReeksen(this.settings_?.devices, this.devices_, tijden, einde);
     card.hidden = !tijden.length || !reeksen.length;
     if (card.hidden) return;

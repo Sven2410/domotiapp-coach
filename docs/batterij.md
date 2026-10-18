@@ -1013,6 +1013,46 @@ scheelt dat ongeveer 2 cent per kWh; met de Zonnebonus van die leverancier erbij
 de kale prijs overdag, die de coach niet kent) ongeveer niets. Handelen tegen eigen zon
 levert bij salderen weinig op: een teruggeleverde kWh is dan bijna de inkoopprijs waard.
 
+## De optimizer in het virtuele huis (v0.132.0)
+
+De bewoner van de eerste woning stuurde op 18-10-2026 het plan van de optimizer van evcc
+(bèta): per kwartier wat de batterij doet, met de verwachting van zon, huis en prijzen, en de
+ruwe gegevens die erin gaan. De afspraak met de eigenaar: hun aanpak als vergelijking in het
+virtuele huis, geen afhankelijkheid. evcc rekende daar met 90% rendement per richting (de coach
+mat 74% heen en terug) en een terugleverprijs gelijk aan de inkoopprijs, dus die getallen zijn
+niet over te nemen; de aanpak wel.
+
+`bat_optimizer` in virtueel.py is zo'n optimizer, met alles vooraf bekend: dynamisch
+programmeren over wat er in de batterij zit (stappen van 0,05 kWh), per kwartier één vermogen,
+met hetzelfde huis, dezelfde zon, dezelfde prijzen en dezelfde grenzen als de coach had. Een
+kwartier kost wat het per minuut kost, zoals `bat_kosten_met`. Hij eindigt minstens op de
+accustand waar de coach eindigde. Hij kent geen reserve, geen volle beurt en geen voorrang voor
+de auto. Er is geen solver geïnstalleerd en de proeven horen zonder downloads te draaien; daarom
+dit en geen lineair programma.
+
+Gemeten op 19-10-2026, 36 scenario's met een batterij (coach, optimizer, zonder batterij):
+
+| scenario | coach | optimizer | verschil |
+|---|---|---|---|
+| batterij-kwartier-zelf | € 2,48 | € 1,77 | € 0,70 |
+| batterij-volle-beurt | € 3,12 | € 2,73 | € 0,40 (de volle beurt, bewust) |
+| batterij-dynamisch-zon-zelf | € -0,54 | € -0,93 | € 0,38 |
+| batterij-kwartier-voorloper | € 2,91 | € 2,53 | € 0,38 |
+| batterij-handelen | € -1,33 | € -1,62 | € 0,28 |
+| planning-auto-eerst | € 10,88 | € 10,67 | € 0,20 |
+| batterij-dynamisch-zon | € -1,01 | € -1,16 | € 0,15 |
+| batterij-rendement-onbekend | € 1,29 | € 1,14 | € 0,15 (de coach kent het rendement niet) |
+
+De andere 28 zitten binnen € 0,06, of de coach doet het beter, tot € 0,15 in
+batterij-uurlast. Dat kan, want de coach volgt het huis per minuut en de optimizer rekent per
+kwartier. `test_virtueel.py` print per scenario de drie bedragen en valt om zodra de coach
+meer dan € 0,75 boven de optimizer zit (de volle beurt niet meegeteld).
+
+**Wat er te vinden is**, en nog open staat: de drie scenario's waarin de batterij zelf nul op de
+meter doet (`-zelf`) en het kwartierscenario. Daar zit de coach het verst van het optimum. Het
+verschil is deels de verwachting: de coach kent de zon van morgen alleen als verwachting, de
+optimizer weet hem precies.
+
 ## Opgeleverd opnieuw uitrekenen (v0.130.1)
 
 In de eerste woning telde het kasboek van 22-09 tot 19-10-2026 teruglevering als € 0: de

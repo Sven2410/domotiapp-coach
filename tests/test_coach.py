@@ -9993,6 +9993,29 @@ controle("de sensorwacht kijkt ook naar de temperatuur van een koelkast", coachm
 controle("een koelkast stuurt de coach niet", "dev-koelkast" not in coach172.state, f"{list(coach172.state)}")
 controle("koelkast is een soort die het paneel mag opslaan", "koelkast" in storage.DEVICE_TYPES, "")
 
+print("=== 173. teruglevering tegen een vast bedrag, en het jaar in Historie (v0.132.0) ===")
+# Een dynamische inkoop met een vaste terugleververgoeding: zonder marktprijssensor
+# en zonder salderen kent de coach de terugleverprijs toch, dus kan een batterij
+# handelen.
+VAST173 = {**DYN166, "netting": False, "dynamic": {**DYN166["dynamic"], "market_entity": "",
+                                                    "feed_in_mode": "fixed", "feed_in_fixed": 0.07, "feed_in_costs": 0.01}}
+inst173 = instellingen()
+inst173["contract"] = VAST173
+hass173, store173, coach173 = bouw(huis166, inst173)
+rijen173 = coach173._prices(inst173)
+print(f"  {len(rijen173)} blokken, teruglevering {sorted({round(r['feed_in'], 4) for r in rijen173 if r['feed_in'] is not None})}")
+controle("elk blok levert 0,07 min 0,01 kosten op, zonder marktprijs",
+         rijen173 and all(r["feed_in"] is not None and abs(r["feed_in"] - 0.06) < 1e-9 for r in rijen173), f"{rijen173[:2]}")
+markt173 = coach173._prices({**inst173, "contract": {**VAST173, "dynamic": {**VAST173["dynamic"], "feed_in_mode": "market"}}})
+controle("met de marktprijs als keuze en geen marktprijssensor is hij onbekend",
+         all(r["feed_in"] is None for r in markt173), f"{markt173[:1]}")
+# Het jaar in Historie: de startmaand gaat via display/set, en alleen 1 tot en met 12.
+hass173.data["domotiapp_coach"]["coach"] = coach173
+v173 = _Verbinding169(False)
+asyncio.run(ws139.async_set_display(hass173, v173, {"id": 3, "type": "domotiapp_coach/display/set", "year_start_month": 7}))
+controle("de bewoner zet het jaar op juli", (store173.instellingen.get("history") or {}).get("year_start_month") == 7,
+         f"{store173.instellingen.get('history')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

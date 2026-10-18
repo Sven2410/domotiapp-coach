@@ -293,7 +293,7 @@ dan de andere in dezelfde uitgave.
 | `prijsopbouw.py` | De prijsopbouw (v0.129.0): de inkoopprijs uit de kale prijs en de velden, de controle tegen de all-in sensor (uur tegen kwartier), de terugleverprijs met bonus, zonsopkomst en -ondergang, de vingerafdruk voor "Ja, dit klopt". Kent Home Assistant niet; `async_prijscontrole` in coach.py en `contract/check` in websocket.py gebruiken hem (`docs/contract.md`) |
 | `frontend/src/leveranciers.js`, `leveranciers-data.js` | De leverancierscatalogus (v0.129.0): per leverancier en soort de velden die Contract voorinvult, de woorden voor de opbouw, bronnen, peildatum en wat onzeker is, en de energiebelasting per jaar. Een voorstel; de coach rekent alleen met wat de klant bevestigde |
 | `berichten.py`, `frontend/src/berichten-sheet.js` | De berichtenbox (v0.130.0): wanneer een herinnering aan de beurt is (meterstanden, een vast contract dat afloopt, de prijscontrole die omslaat), en de pop-up achter het belletje in de kop. Bewaard in `BerichtenStore` (storage.py) (`docs/berichten.md`) |
-| `frontend/src/opbouw.js` | "Zo komt je prijs tot stand" (v0.129.0), voor Contract en Voorkeuren: toont wat de coach uitrekent, in woorden en cijfers, in de volgorde van de leverancier |
+| `frontend/src/opbouw.js` | "Zo komt je prijs tot stand" (v0.129.0), op Contract (sinds v0.130.1 ook voor de bewoner): toont wat de coach uitrekent, in woorden en cijfers, in de volgorde van de leverancier |
 | `frontend/src/tijdlijn.js` | De tijdlijn in Historie (v0.115.0): per dag een baan per apparaat dat de coach stuurt, uit de besluiten in Meldingen (sinds v0.115.0 met `device`, `rule`, `mode`, `charge` erbij), en de kleur zon of net uit de kwartieren van het apparaat en het net, niet uit de regel. Kent Home Assistant niet (`docs/eerste-woning.md`) |
 
 De scheiding tussen `planner.py` en `coach.py` is de kern: het denkwerk is los
@@ -322,11 +322,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 517 controles op het denkwerk
 python tests/test_batterij.py    # 200 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1262 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 1265 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2449 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-python tests/test_prijsopbouw.py # 34 op de prijsopbouw, de controle en zonsopkomst
-node   tests/test_rapport.mjs    # 213 op het rapport en op het paneel
+python tests/test_prijsopbouw.py # 39 op de prijsopbouw, de controle en zonsopkomst
+node   tests/test_rapport.mjs    # 215 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

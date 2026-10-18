@@ -221,6 +221,12 @@ class DacViewStrategy extends DacEditorElement {
                 </div>
               </div>
             </div>
+            <!-- Historie (v0.132.0): het jaar kan met het contract meelopen. -->
+            <div class="row">
+              <label for="jaar-start">Het jaar in Historie begint in</label>
+              <select id="jaar-start"><option value="1">januari</option><option value="2">februari</option><option value="3">maart</option><option value="4">april</option><option value="5">mei</option><option value="6">juni</option><option value="7">juli</option><option value="8">augustus</option><option value="9">september</option><option value="10">oktober</option><option value="11">november</option><option value="12">december</option></select>
+              <span class="sub">Kies de maand waarin je contract ingaat, dan loopt het jaar daarmee gelijk.</span>
+            </div>
             <label class="check" for="phases-overview" id="phases-overview-row">
               <input type="checkbox" id="phases-overview">
               <span>
@@ -268,6 +274,9 @@ class DacViewStrategy extends DacEditorElement {
     this.$("#phases-overview").addEventListener("change", (event) => {
       this.weergave_({ phases_on_overview: event.target.checked });
     });
+    this.$("#jaar-start").addEventListener("change", (event) => {
+      this.weergave_({ year_start_month: Number(event.target.value) });
+    });
     this.wireSaveBar_();
     this.paint_();
   }
@@ -307,6 +316,7 @@ class DacViewStrategy extends DacEditorElement {
       veld.value = d?.thresholds?.[soort]?.[rand] ?? "";
     }
     this.$("#phases-overview").checked = Boolean(d?.sources?.phases_on_overview);
+    this.$("#jaar-start").value = String(d?.history?.year_start_month ?? 1);
     // Alleen waar de fasen ook gemeten worden; anders is er geen kaart te tonen.
     const rij = this.$("#phases-overview-row");
     rij.hidden = !d?.sources?.phases_enabled;

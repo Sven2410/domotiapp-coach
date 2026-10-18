@@ -1677,6 +1677,19 @@ for naam, vl in V.items():
         if vl.bat_verloop[i][2] > 0 and vorige is not None and nu is not None and nu < vorige - 0.005
     ]
     controle(f"{naam}: Opgeleverd op de kaart zakt niet terwijl de batterij laadt", not zakt, f"{zakt[:3]}")
+    # De optimizer (v0.132.0): wat de dag gekost had met alles vooraf bekend, per
+    # kwartier (`bat_optimizer` in virtueel.py). Gemeten op 19-10-2026 over de 36
+    # scenario's met een batterij: 28 binnen € 0,06 of beter (de coach volgt het
+    # huis per minuut, de optimizer per kwartier), het grootste verschil € 0,70 in
+    # batterij-kwartier-zelf. De volle beurt kost bewust geld (€ 0,40) en telt hier
+    # niet. Dit is een grens tegen achteruitgang, geen doel; zie docs/batterij.md.
+    if vl.bat_optimizer is not None:
+        print(f"  {naam}: coach €{vl.bat_kosten_met:.2f}, optimizer €{vl.bat_optimizer:.2f}, "
+              f"zonder batterij €{vl.bat_kosten_zonder:.2f}")
+        if bat.wekelijks_vol_dag is None:
+            controle(f"{naam}: niet verder dan € 0,75 boven de optimizer",
+                     vl.bat_kosten_met <= vl.bat_optimizer + 0.75,
+                     f"coach {vl.bat_kosten_met:.2f}, optimizer {vl.bat_optimizer:.2f}")
 
 if (vl := v("batterij-vast-zon")):
     controle("vast met zon: de hele dag nul op de meter, of vol",

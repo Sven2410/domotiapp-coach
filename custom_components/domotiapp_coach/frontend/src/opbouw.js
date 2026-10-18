@@ -58,6 +58,12 @@ export function salderenNoot(check, nu = new Date()) {
  * teruggeeft (`netting_full`); zonder salderen de btw als hij met btw uitbetaalt.
  */
 function terugRegels(check, t, w) {
+  // Een vaste terugleververgoeding (v0.132.0): het bedrag, en de kosten eraf.
+  if (t.vast) {
+    const regels = [rij("", "Vaste terugleververgoeding", euro4(t.basis))];
+    if (t.kosten) regels.push(rij("−", esc(w.kosten), euro4(t.kosten)));
+    return regels;
+  }
   const o = check.inkoop;
   if (!o) {
     // Zonder opbouw (geen kale marktprijs): alleen wat er is.
@@ -188,7 +194,7 @@ export function opbouwHtml(check, namen = {}) {
       const regels = terugRegels(check, t, w);
       regels.push(rij("=", "Per teruggeleverde kWh", euro4(t.bedrag), "ob-totaal"));
       delen.push(`<div class="ob-blok"><h4>Teruglevering nu</h4>${regels.join("")}
-        <p class="ob-noot">Niet te controleren: ${esc(w.leverancier)} geeft de terugleverprijs niet door. Zo rekent de coach.</p>
+        <p class="ob-noot">${t.vast ? "Het vaste bedrag uit je contract." : `Niet te controleren: ${esc(w.leverancier)} geeft de terugleverprijs niet door. Zo rekent de coach.`}</p>
         ${salderenNoot(check)}</div>`);
     } else {
       delen.push(`<div class="ob-blok"><h4>Teruglevering</h4><p class="ob-leeg">${

@@ -69,6 +69,8 @@ export function terugleverBekend(contract, when = new Date()) {
   if (contract?.type !== "dynamic") return true;
   if (salderen(contract, when)) return true;
   const d = contract.dynamic ?? {};
+  // Een vaste terugleververgoeding (v0.132.0) is altijd bekend.
+  if (d.feed_in_mode === "fixed") return true;
   if (d.source !== "all_in") return Boolean(d.market_entity);
   return Boolean(d.market_entity) && d.market_entity !== d.all_in_entity;
 }
@@ -137,6 +139,8 @@ export function terugOp(markt, allIn, d, metSalderen, isOverdag) {
     // De hele all-in prijs terug, ook de opslag, zoals `terug` in prijsopbouw.py (v0.129.1).
     return d?.netting_full ? allIn + extra : allIn - opslag - kosten + vergoeding + extra;
   }
+  // Een vaste terugleververgoeding (v0.132.0), zoals `terug` in prijsopbouw.py.
+  if (d?.feed_in_mode === "fixed") return (Number(d?.feed_in_fixed) || 0) - kosten;
   return markt === null || markt === undefined ? null : marktTerug(markt, d) - kosten + vergoeding + extra;
 }
 

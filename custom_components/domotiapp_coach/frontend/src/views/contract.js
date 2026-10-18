@@ -240,12 +240,32 @@ class DacViewContract extends DacEditorElement {
                 <input type="number" id="dyn-markup" min="0" step="0.000001" inputmode="decimal">
                 <span class="sub" id="dyn-markup-hint"></span>
               </div>
+              <!-- Teruglevering apart (v0.132.0): de marktprijs, of een vast bedrag
+                   naast de dynamische inkoop. -->
+              <div class="row">
+                <label>Teruglevering</label>
+                <div class="segmented" id="dyn-terug">
+                  <button type="button" data-terug="market" aria-pressed="false">
+                    <strong>Marktprijs</strong>
+                    Per uur of kwartier, zoals de inkoop.
+                  </button>
+                  <button type="button" data-terug="fixed" aria-pressed="false">
+                    <strong>Vast bedrag</strong>
+                    Een vaste vergoeding per kWh.
+                  </button>
+                </div>
+                <span class="sub">Zolang je saldeert telt een teruggeleverde kWh tot aan je eigen verbruik als je inkoopprijs, wat je hier ook kiest.</span>
+              </div>
+              <div class="row" id="dyn-vast-rij">
+                <label for="dyn-feedfixed">Vaste terugleververgoeding (€ per kWh)</label>
+                <input type="number" id="dyn-feedfixed" min="0" step="0.0001" inputmode="decimal">
+              </div>
               <div class="two">
                 <div class="row">
                   <label for="dyn-feedcost">Terugleverkosten (€ per kWh)</label>
                   <input type="number" id="dyn-feedcost" min="0" step="0.0001" inputmode="decimal">
                 </div>
-                <div class="row">
+                <div class="row alleen-markt">
                   <label for="dyn-feedbonus">Vergoeding bij teruglevering (€ per kWh)</label>
                   <input type="number" id="dyn-feedbonus" step="0.0001" inputmode="decimal">
                   <span class="sub">Wat je leverancier per teruggeleverde kWh bovenop de marktprijs betaalt. Haalt hij er iets af, dan een negatief getal.</span>
@@ -255,11 +275,11 @@ class DacViewContract extends DacEditorElement {
                 <input type="checkbox" id="dyn-nettingfull">
                 <span><strong>Binnen salderen de hele all-in prijs terug</strong> Ook de opslag. Anders rekent de coach binnen salderen met de all-in prijs min de opslag.</span>
               </label>
-              <label class="check" for="dyn-feedvat">
+              <label class="check alleen-markt" for="dyn-feedvat">
                 <input type="checkbox" id="dyn-feedvat">
                 <span><strong>Teruglevering met btw</strong> De leverancier betaalt de marktprijs voor teruglevering inclusief btw.</span>
               </label>
-              <div class="two">
+              <div class="two alleen-markt">
                 <div class="row">
                   <label for="dyn-bonuspct">Bonus op teruglevering (%)</label>
                   <input type="number" id="dyn-bonuspct" min="0" max="100" step="0.1" inputmode="decimal">
@@ -273,7 +293,7 @@ class DacViewContract extends DacEditorElement {
                   </select>
                 </div>
               </div>
-              <label class="check" for="dyn-bonusdag">
+              <label class="check alleen-markt" for="dyn-bonusdag">
                 <input type="checkbox" id="dyn-bonusdag">
                 <span><strong>Bonus alleen overdag</strong> Van zonsopkomst tot zonsondergang, uitgerekend voor waar het huis staat.</span>
               </label>
@@ -426,6 +446,7 @@ class DacViewContract extends DacEditorElement {
     bind("dyn-bonuspct", (v) => (c().dynamic.feed_in_bonus_percent = getal(v)));
     bind("dyn-bonusbase", (v) => (c().dynamic.bonus_base = v));
     bind("dyn-bonusdag", (v) => (c().dynamic.bonus_daytime = Boolean(v)));
+    bind("dyn-feedfixed", (v) => (c().dynamic.feed_in_fixed = getal(v)));
     bind("netting", (v) => (c().netting = Boolean(v)));
     bind("gas-start", (v) => (this.gas_().start = v));
     bind("gas-end", (v) => (this.gas_().end = v));
@@ -447,6 +468,12 @@ class DacViewContract extends DacEditorElement {
     for (const button of this.$$("#dynamic-interval button")) {
       button.addEventListener("click", () => {
         c().dynamic.interval = button.dataset.interval;
+        this.wijziging_();
+      });
+    }
+    for (const button of this.$$("#dyn-terug button")) {
+      button.addEventListener("click", () => {
+        c().dynamic.feed_in_mode = button.dataset.terug;
         this.wijziging_();
       });
     }
@@ -687,6 +714,7 @@ class DacViewContract extends DacEditorElement {
     this.$("#dyn-bonuspct").value = d.feed_in_bonus_percent || "";
     this.$("#dyn-bonusbase").value = d.bonus_base === "market_plus_fee" ? "market_plus_fee" : "market";
     this.$("#dyn-bonusdag").checked = Boolean(d.bonus_daytime);
+    this.$("#dyn-feedfixed").value = d.feed_in_fixed || "";
 
     const gas = this.gas_();
     this.$("#gas-lev").value = leverancier(gas.supplier) ? gas.supplier : "";
@@ -721,6 +749,13 @@ class DacViewContract extends DacEditorElement {
       button.setAttribute("aria-pressed", String(button.dataset.interval === (d.interval ?? "hour")));
     }
     this.$("#dyn-reserve-row").style.display = d.fallback_entity ? "" : "none";
+    // Teruglevering tegen de marktprijs of een vast bedrag (v0.132.0).
+    const terugVast = d.feed_in_mode === "fixed";
+    for (const button of this.$$("#dyn-terug button")) {
+      button.setAttribute("aria-pressed", String(button.dataset.terug === (terugVast ? "fixed" : "market")));
+    }
+    this.$("#dyn-vast-rij").style.display = terugVast ? "" : "none";
+    for (const el of this.$$(".alleen-markt")) el.style.display = terugVast ? "none" : "";
 
     // De samenvatting bovenaan: wat voor contract, bij wie, sinds wanneer, tot wanneer.
     const l = leverancier(contract.supplier);
