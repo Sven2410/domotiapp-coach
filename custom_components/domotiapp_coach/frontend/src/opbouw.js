@@ -294,6 +294,18 @@ export function opbouwHtml(check, namen = {}) {
 }
 
 /**
+ * Wanneer de daluren zijn, in een zin, of leeg bij simples (een prijs). Op Contract en
+ * onder de prijsgrafiek van het overzicht (v0.138.0). `pt` is het Portugese contract of
+ * `pt` van `contract/check`: allebei met `tarifa` en `ciclo`.
+ */
+export function ptTijden(pt) {
+  if (pt?.tarifa === "simples") return "";
+  return pt?.ciclo === "semanal"
+    ? "Daluren doordeweeks van 00:00 tot 07:00, op zaterdag het grootste deel van de dag en op zondag de hele dag, in de tijd van Portugal."
+    : "Daluren elke dag van 22:00 tot 08:00, in de tijd van Portugal.";
+}
+
+/**
  * Een Portugees contract (v0.137.0): per tijdvak de prijs zonder belastingen, de IEC en
  * de IVA, en wat het samen kost. `pt` van `contract/check` (`tarifas.opbouw`).
  */
@@ -305,10 +317,7 @@ export function ptBlok(check) {
     const som = r.energia > 0 ? `${euro4(r.energia)} + IEC ${euro4(r.iec)}, plus ${procent(r.iva)} IVA` : "niet ingevuld";
     return rij("", `${esc(NAMEN[r.periodo] ?? r.periodo)}${nu}: ${som}`, r.all_in === null || r.all_in === undefined ? "onbekend" : euro4(r.all_in), r.periodo === p.nu ? "ob-totaal" : "");
   });
-  const tijden = p.tarifa === "simples" ? ""
-    : p.ciclo === "semanal"
-      ? "Daluren doordeweeks van 00:00 tot 07:00, op zaterdag het grootste deel van de dag en op zondag de hele dag, in de tijd van Portugal."
-      : "Daluren elke dag van 22:00 tot 08:00, in de tijd van Portugal.";
+  const tijden = ptTijden(p);
   const terug = {
     onbekend: "Teruglevering: nog niet ingevuld, dus weet de coach niet wat het opbrengt. In Portugal is er geen salderen.",
     nenhum: "Teruglevering: niet verkocht, dus niets. In Portugal is er geen salderen.",

@@ -327,6 +327,11 @@ tegeltje, het tegeltje Energieprijs zelf, en de zin van de coach ("Stroom is nu 
 "Goedkoop moment"). De legenda van de prijsgrafiek noemt dan geen bedragen maar derden. Proef
 "prijskleuren naar de bekende prijzen" in test_rapport.mjs.
 
+In Portugal (v0.138.0) krijgen het tegeltje en de prijsgrafiek de lijst van de coach, dezelfde als
+de vooruitblik, en is het tegeltje klikbaar zoals bij een dynamisch contract: daar zijn twee of
+drie prijzen per dag. De kaart Je meter staat er dan niet. Zie `docs/contract.md`, Portugal op het
+overzicht.
+
 ## Meldingen in groepen die uitklappen (v0.133.2)
 
 De eigenaar op 19-10-2026: "ik wil wel bij meldingen dat je alles groepeert en alles kan

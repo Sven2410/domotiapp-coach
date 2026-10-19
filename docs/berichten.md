@@ -19,6 +19,12 @@ in de geschiedenis.
 - **Meterstanden doorgeven**: de eerste keer op `reminders.meter_date`, daarna elke maand,
   elk kwartaal, elk jaar of eenmalig (`meter_repeat`). De 31e in een kortere maand wordt de
   laatste dag. Het bericht komt op die dag of in de week erna; daarna niet meer.
+  **Niet in Portugal** (v0.138.0, `meterstand_bericht` met het land van het contract): daar leest
+  de netbeheerder (E-REDES) de slimme meter op afstand, en geeft niemand een stand met laag en
+  hoog door. De eigenaar op 19-10-2026: "portugal heeft geen meterstanden dit is iets in
+  Nederland." Onder Meldingen staat de groep Herinneringen dan niet, en op het overzicht de kaart
+  Je meter niet (`updateMeters_`). Een meter die nog niet op afstand gelezen wordt kan daar wel
+  een stand doorgeven, aan E-REDES; daar is de coach niet voor.
 - **Een vast contract dat afloopt** (stroom en gas apart): `reminder_days` dagen vooraf
   (standaard 30, `HERINNER_DAGEN`, in te stellen bij de looptijd onder Contract; 0 is
   alleen op de einddatum), en op de einddatum zelf "is afgelopen", tot een week erna.

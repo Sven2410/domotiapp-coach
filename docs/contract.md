@@ -426,3 +426,44 @@ Proeven: Portugal in test_prijsopbouw.py (22 gevallen van tijdvakken), proef 179
 "Portugal: dezelfde tijdvakken als de coach" in test_rapport.mjs (dezelfde 22 gevallen met
 tarifas.js), en het scenario `pt-bihorario` in het virtuele huis: de bus gaat om 18:30 aan de paal
 en laadt in de daluren, alles tegen 0,1661.
+
+## Portugal op het overzicht, de keuzelijst en gas uit (v0.138.0)
+
+De eigenaar op 19-10-2026, bij de klant in Portugal, vijf dingen in een middag:
+
+- **"ik wil een dropdown menu van het land hebben nu staat er 2 velden groot in beeld."** Het
+  land is een keuzelijst (`#land`), met de zin van het gekozen land eronder (`#land-hint`).
+  Portugal kiezen zet nog steeds type fixed en salderen uit, zoals de knop deed. De keuzelijsten
+  op Contract hebben sindsdien een pijltje: de gedeelde stijl van de bewerkschermen haalt dat van
+  de browser weg (`appearance: none` in editor-base.js), en zonder pijltje leek het land op een
+  gewoon veld.
+- **"ook onder contract staat gas etc maar dat heeft deze klant niet je moet het kunnen
+  uitzetten."** Gas en water hebben op Contract hetzelfde vinkje als bij Installatie
+  (`sources.meters.gas_enabled` en `water_enabled`). Uit: alleen het vinkje en "Geen gas." of
+  "Geen watermeter.", en de velden weg. Contract slaat daarvoor naast `contract` alleen die twee
+  vlaggen op (`slice_` in contract.js), zodat opslaan de sensoren van Installatie niet terugzet;
+  de server voegt ze samen. De velden van gas en water blijven bewaard, dus de vingerafdruk van
+  "Ja, dit klopt" verandert er niet door.
+- **"hij zegt gemiddeld tarief maar de grafiek is rood."** De tegel Energieprijs las bij elk
+  contract dat niet dynamisch is `fixed.all_in_price`, en bij een Portugees contract stond daar
+  nog de Nederlandse standaard van 0,28: "€ 0,280, Gemiddeld tarief" naast een rode balk van
+  0,272. Nu geeft `priceNow` het tijdvak van nu (`ptPrijsOp`, dezelfde som als `tariff`), en
+  `priceForecast` de lijst van de coach (`_pt_rijen`), dezelfde als de vooruitblik. De kleur komt
+  dan uit dezelfde `prijsGrenzen` als de balken. Na het binnenkomen van die lijst tekent het
+  overzicht de tegels opnieuw (`followCoach_`), anders bleef de eerste kleur staan tot de
+  volgende meting.
+- **"ik wil op de prijs kunnen klikken. In nederland is een vast contract gewoon 1 prijs maar
+  hier heb je 2 prijzen."** De tegel opent de prijsgrafiek zodra de lijst meer dan een prijs
+  heeft (niet meer dan een rij: simples heeft ook een lijst, met een rechte lijn). In Portugal
+  heet de pop-up "Tarief per tijdvak", en staat eronder wanneer de daluren zijn (`ptTijden` in
+  opbouw.js, dezelfde zin als op Contract).
+- **"portugal heeft geen meterstanden dit is iets in Nederland."** Zie `docs/berichten.md`: geen
+  kaart Je meter en geen herinnering om standen door te geven.
+
+Wat niet veranderd is: de coach rekent overal in de lokale tijd van Home Assistant, en het paneel
+leest die tijden als de tijd van de browser. Staat de browser op een andere tijdzone dan Home
+Assistant (de installateur in Nederland die naar een woning in Portugal kijkt), dan schuiven de
+vooruitblik en de prijsgrafiek een uur ten opzichte van "nu". De prijs op de tegel niet, want die
+rekent `ptPrijsOp` in de tijd van Lissabon.
+
+Proef 180 in test_coach.py en "Portugal op het overzicht en op Contract" in test_rapport.mjs.

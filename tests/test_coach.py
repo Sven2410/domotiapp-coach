@@ -10580,6 +10580,22 @@ controle("de bevestiging van een Nederlands contract blijft gelden; in Portugal 
          po166.vingerafdruk(from_nl179) == po166.vingerafdruk({**from_nl179, "country": "NL", "pt": PT179["pt"]})
          and po166.vingerafdruk(PT179) != po166.vingerafdruk({**PT179, "pt": {**PT179["pt"], "iva": 6}}), "")
 
+print("=== 180. in Portugal geen meterstanden doorgeven (v0.138.0) ===")
+# De eigenaar op 19-10-2026: "portugal heeft geen meterstanden dit is iets in Nederland."
+# Daar leest de netbeheerder de slimme meter op afstand.
+H180 = {"meter_date": "2026-10-19", "meter_repeat": "month"}
+controle("in Nederland is de herinnering aan de beurt", bm170.meterstand_bericht(V170, H180) is not None)
+controle("in Portugal niet", bm170.meterstand_bericht(V170, H180, "PT") is None)
+inst180 = instellingen()
+inst180["reminders"] = dict(H180)
+inst180["contract"] = {**PT179, "end": "2026-11-10", "reminder_days": 30}
+hass180, _, coach180 = bouw(huis(), inst180)
+asyncio.run(coach180._async_berichten(inst180, dt.datetime(2026, 10, 19, 8, 0)))
+items180 = asyncio.run(box170(hass180).async_list())
+print(f"  in de box: {[(i['kind'], i['title']) for i in items180]}")
+controle("in de coach: wel het contract dat afloopt, geen meterstanden",
+         [i["kind"] for i in items180] == ["contract"], f"{items180}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

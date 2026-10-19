@@ -994,6 +994,9 @@ class DacViewNotifications extends DacElement {
     const r = this.settings_?.reminders ?? {};
     const datum = this.$("#meter-datum");
     if (!datum) return;
+    // In Portugal geen meterstanden doorgeven (v0.138.0), en dan is dit de enige
+    // herinnering: de hele groep weg. Zie `meterstand_bericht` in berichten.py.
+    this.$('details.groep[data-groep="herinnering"]').hidden = this.settings_?.contract?.country === "PT";
     if (this.shadowRoot?.activeElement !== datum) datum.value = r.meter_date || "";
     this.$("#meter-herhaling").value = r.meter_repeat || "year";
     const volgende = volgendeMeterstand(new Date(), r.meter_date, r.meter_repeat || "year");

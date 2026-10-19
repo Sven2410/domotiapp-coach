@@ -260,7 +260,8 @@ dan de andere in dezelfde uitgave.
   `kostenPerKwh` en `schaalPerJaar`, en salderen per afrekenperiode: `async_afrekening` in coach.py
   levert wat `aandeelOp` en `schaalKosten` in geld.js voor Historie lezen.
 - **De volgende keer meterstanden** (v0.130.0): `meterstand_volgende` in berichten.py en
-  `volgendeMeterstand` in views/notifications.js (`docs/berichten.md`).
+  `volgendeMeterstand` in views/notifications.js (`docs/berichten.md`). In Portugal geen van
+  beide (v0.138.0): `meterstand_bericht` met het land, en de groep Herinneringen weg.
 - **Het contract met de kaarten van DomotiApp Lovelace** (v0.110.0, `CONTRACT` in
   entiteit.py, `docs/vaatwasser.md`). De eigenaar op 11-10-2026: "wanneer er iets bij komt in
   de coach wat invloed heeft op de lovelace kaart, dat dat goed opgepakt wordt." Een kaart
@@ -338,11 +339,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 518 controles op het denkwerk
 python tests/test_batterij.py    # 206 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1346 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 1349 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2586 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 python tests/test_prijsopbouw.py # 53 op de prijsopbouw, de controle, zonsopkomst en Portugal
-node   tests/test_rapport.mjs    # 225 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 226 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

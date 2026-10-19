@@ -120,6 +120,12 @@ export function allInFrom(market, dynamic) {
 export function priceNow(feed, contract) {
   if (!contract) return null;
 
+  // Portugal (v0.138.0): de prijs van het tijdvak van nu, zoals `tariff` hem rekent.
+  // Tot dan las de tegel hier de vaste all-in prijs van een Nederlands contract.
+  if (contract.country === "PT") {
+    return ptPrijsOp(contract.pt, new Date(), 900000).koop ?? priceAt(coachRijen())?.price ?? null;
+  }
+
   if (contract.type !== "dynamic") {
     const value = Number(contract.fixed?.all_in_price);
     return Number.isFinite(value) ? value : null;
@@ -343,6 +349,11 @@ function readSchedule(attributes) {
  *   contract is fixed or the entity publishes nothing.
  */
 export function priceForecast(feed, contract) {
+  // Portugal (v0.138.0): twee of drie prijzen per dag, dus wel een lijst. Die van de
+  // coach (`_pt_rijen` in coach.py), dezelfde als in de vooruitblik. De eigenaar op
+  // 19-10-2026: "hier heb je 2 prijzen dus dan moet je kunnen zien in de grafiek wanneer
+  // hij goedkoper is."
+  if (contract?.country === "PT") return coachRijen();
   if (contract?.type !== "dynamic") return [];
   // Valt de reserve in, of geeft de sensor zelf geen lijst (de ingebouwde Nord
   // Pool), dan de lijst van de coach (v0.101.3).
