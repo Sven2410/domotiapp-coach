@@ -10596,6 +10596,65 @@ print(f"  in de box: {[(i['kind'], i['title']) for i in items180]}")
 controle("in de coach: wel het contract dat afloopt, geen meterstanden",
          [i["kind"] for i in items180] == ["contract"], f"{items180}")
 
+print("=== 181. de wintertijd: 25-10-2026 vanzelf goed (v0.139.1) ===")
+# De eigenaar op 19-10-2026: "ik wil dat je sowieso rekening houd met de zomer en
+# wintertijd. Dat moet allemaal vanzelf gaan." Om 01:00 UTC gaat de klok in Nederland van
+# 03:00 terug naar 02:00, in Portugal van 02:00 naar 01:00. Het harnas rekent normaal in een
+# vaste UTC+2; hier tijdelijk met de echte Europese regels (tests/zomertijd.py).
+from zomertijd import AMSTERDAM, LISSABON, UTC as UTC181  # noqa: E402
+du181 = coachmod.dt_util
+oud181 = (du181.as_local, du181.as_utc, du181.get_default_time_zone)
+
+
+def _zone181(zone):
+    du181.get_default_time_zone = lambda: zone
+    du181.as_local = lambda m: m.astimezone(zone) if m.tzinfo else m
+    du181.as_utc = lambda m: m.astimezone(UTC181) if m.tzinfo else m.replace(tzinfo=zone).astimezone(UTC181)
+
+
+try:
+    _zone181(AMSTERDAM)
+    # Hoe lang iets echt duurde: een vaatwasser van 01:30 tot 03:30 liep drie uur.
+    controle("over de klokwissel heen: 01:30 tot 03:30 is drie uur",
+             coachmod._tussen(dt.datetime(2026, 10, 25, 1, 30), dt.datetime(2026, 10, 25, 3, 30)) == dt.timedelta(hours=3))
+    controle("en 02:50 tot de tweede keer 02:10 is twintig minuten, niet min veertig",
+             coachmod._tussen(dt.datetime(2026, 10, 25, 2, 50), dt.datetime(2026, 10, 25, 2, 10, fold=1)) == dt.timedelta(minutes=20))
+    # De klok van de regelaar loopt niet terug.
+    controle("de regelaar: zijn klok loopt door waar de lokale klok terugspringt",
+             coachmod._regelklok(dt.datetime(2026, 10, 25, 2, 50)) < coachmod._regelklok(dt.datetime(2026, 10, 25, 2, 10, fold=1)))
+    bron181 = (pathlib.Path(coachmod.__file__)).read_text(encoding="utf-8")
+    controle("en krijgt die klok bij elke stap en elke nieuwe opdracht",
+             "_regelklok(), net_w=net_w, net_op=None if net_op is None else _regelklok(net_op)" in bron181
+             and "opdracht_op=_moment()" not in bron181 and "opdracht_op=now" not in bron181 and "opdracht_op=nu" not in bron181)
+
+    # Een prijssensor met tijdzone, zoals Nord Pool: vijf uur, waarvan twee keer 02:00.
+    uren181 = [("2026-10-25T00:00:00+02:00", 0.20), ("2026-10-25T01:00:00+02:00", 0.21), ("2026-10-25T02:00:00+02:00", 0.30),
+               ("2026-10-25T02:00:00+01:00", 0.10), ("2026-10-25T03:00:00+01:00", 0.22), ("2026-10-25T04:00:00+01:00", 0.23)]
+    hass181, _, coach181 = bouw(huis(), instellingen())
+    hass181.states.zet("sensor.prijs181", {"state": "0.2", "attributes": {"raw_today": [{"start": s_, "end": None, "value": p_} for s_, p_ in uren181]}})
+    slots181 = coach181._slots("sensor.prijs181")
+    print(f"  slots: {[(k.strftime('%H:%M'), v[0].strftime('%H:%M'), round(v[1], 3)) for k, v in sorted(slots181.items())]}")
+    twee181 = slots181.get(dt.datetime(2026, 10, 25, 2, 0))
+    controle("de twee uren van 02:00: één blok tot 03:00, met het gemiddelde van beide prijzen",
+             twee181 is not None and twee181[0] == dt.datetime(2026, 10, 25, 3, 0) and abs(twee181[1] - 0.20) < 1e-9, f"{twee181}")
+    controle("geen blok met een einde voor zijn begin", all(e > b for b, (e, *_r) in slots181.items()), f"{slots181}")
+
+    # Portugal: 48 uur vanaf de middag ervoor, per kwartier.
+    _zone181(LISSABON)
+    inst181 = instellingen()
+    inst181["contract"] = PT179
+    hass181b, _, coach181b = bouw(huis(), inst181)
+    rijen181 = coach181b._pt_rijen(PT179, dt.datetime(2026, 10, 24, 12, 0))
+    starts181 = [r["start"] for r in rijen181]
+    print(f"  Portugal: {len(rijen181)} rijen; rond de wissel: "
+          f"{[(r['start'].strftime('%H:%M'), r['end'].strftime('%H:%M')) for r in rijen181 if dt.datetime(2026, 10, 25, 0, 30) <= r['start'] < dt.datetime(2026, 10, 25, 2, 30)]}")
+    controle("Portugal: geen kwartier twee keer", len(starts181) == len(set(starts181)))
+    controle("Portugal: geen kwartier met een einde voor zijn begin", all(r["end"] > r["start"] for r in rijen181))
+    controle("Portugal: het herhaalde uur van 01:00 is vazio, en de rest blijft per kwartier",
+             len(rijen181) == 188 and all(r["price"] == round((0.1340 + 0.001) * 1.23, 6) for r in rijen181 if r["start"].date() == dt.date(2026, 10, 25) and r["start"].hour == 1), f"{len(rijen181)}")
+finally:
+    du181.as_local, du181.as_utc, du181.get_default_time_zone = oud181
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

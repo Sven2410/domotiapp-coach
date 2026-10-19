@@ -111,9 +111,10 @@ def t(uur, minuut, seconde=0):
 
 
 print("=== 1. het kwartier waar een moment in valt ===")
-controle("14:07 hoort bij 14:00", archive.bucket_start(t(14, 7)) == t(14, 0))
-controle("14:15 begint zelf een kwartier", archive.bucket_start(t(14, 15)) == t(14, 15))
-controle("14:59 hoort bij 14:45", archive.bucket_start(t(14, 59)) == t(14, 45))
+# Sinds v0.139.1 geeft bucket_start het kwartier in UTC; hetzelfde moment, dus gelijk.
+controle("14:07 hoort bij 14:00", archive.bucket_start(t(14, 7)) == archive._utc(t(14, 0)))
+controle("14:15 begint zelf een kwartier", archive.bucket_start(t(14, 15)) == archive._utc(t(14, 15)))
+controle("14:59 hoort bij 14:45", archive.bucket_start(t(14, 59)) == archive._utc(t(14, 45)))
 
 
 print("=== 2. het gemiddelde weegt naar tijd, niet naar aantal metingen ===")
@@ -176,7 +177,7 @@ controle("een uur stilte geeft vier kwartieren", len(rijen) == 4, f"{len(rijen)}
 controle("die allemaal 500 W zeggen",
          all(abs(r[3] - 500.0) < 1e-6 for r in rijen), f"{rijen}")
 controle("en die op de kwartieren beginnen",
-         [r[0] for r in rijen] == [t(14, 0), t(14, 15), t(14, 30), t(14, 45)],
+         [r[0] for r in rijen] == [archive._utc(t(14, m)) for m in (0, 15, 30, 45)],
          f"{[r[0] for r in rijen]}")
 
 print("=== 5. stilte is geen gat, maar wegvallen wel ===")
@@ -338,6 +339,60 @@ in_ms = {"sensor.proef": [{"start": sec * 1000 / 1_000_000, "min": 1.0, "max": 2
 controle("een tijdstempel uit 1970 wordt niet weggeschreven",
          archive.Archive.kwartieren_uit_blokjes(in_ms) == [],
          f"{archive.Archive.kwartieren_uit_blokjes(in_ms)}")
+
+print("=== 10. de wintertijd: het uur van 02:00 twee keer, elk zijn eigen kwartieren (v0.139.1) ===")
+# De eigenaar op 19-10-2026: "ik wil dat je sowieso rekening houd met de zomer en
+# wintertijd. Dat moet allemaal vanzelf gaan." Op 25-10-2026 gaat in Nederland om 01:00 UTC
+# de klok van 03:00 terug naar 02:00. Tot v0.139.1 rekende de opslag in naïeve lokale tijd:
+# het hele tweede uur kwam in één kwartier van 75 minuten.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from zomertijd import AMSTERDAM, UTC  # noqa: E402
+
+oud_utc, oud_zone = dtutil.as_utc, dtutil.DEFAULT_TIME_ZONE
+# Zoals Home Assistant: een naïeve tijd is de lokale tijd, met fold voor het herhaalde uur.
+dtutil.DEFAULT_TIME_ZONE = AMSTERDAM
+dtutil.as_utc = lambda m: m.astimezone(UTC) if m.tzinfo else m.replace(tzinfo=AMSTERDAM).astimezone(UTC)
+try:
+    z = lambda u, m: dt.datetime(2026, 10, 25, u, m, tzinfo=UTC)
+    meter10 = archive._Meter("sensor.proef")
+    meter10.meet(z(0, 50), 1000.0)      # 02:50 zomertijd
+    meter10.meet(z(1, 10), 2000.0)      # 02:10 wintertijd: de klok ging terug
+    meter10.tot(z(2, 5))                # 03:05
+    rijen10 = meter10.oogst()
+    starts10 = [r[0].strftime("%H:%MZ") for r in rijen10]
+    print(f"  kwartieren: {[(s, round(r[4])) for s, r in zip(starts10, rijen10)]}")
+    controle("elk kwartier apart, ook het herhaalde uur",
+             starts10 == ["00:45Z", "01:00Z", "01:15Z", "01:30Z", "01:45Z"], f"{starts10}")
+    controle("geen kwartier langer dan 900 seconden", all(r[4] <= 900.0 for r in rijen10), f"{rijen10}")
+    controle("de waarde van na de klokwissel in de kwartieren erna",
+             abs(rijen10[2][3] - 2000.0) < 1e-6 and abs(rijen10[1][3] - (1000 * 600 + 2000 * 300) / 900) < 1e-6, f"{rijen10}")
+
+    # Dezelfde nacht met naïeve lokale tijden, zoals een aanroeper ze kan geven: fold houdt
+    # de twee keer 02:10 uit elkaar.
+    meter10b = archive._Meter("sensor.proef")
+    meter10b.meet(dt.datetime(2026, 10, 25, 2, 50), 1000.0)
+    meter10b.meet(dt.datetime(2026, 10, 25, 2, 10, fold=1), 2000.0)
+    meter10b.tot(dt.datetime(2026, 10, 25, 3, 5))
+    controle("naïeve lokale tijden met fold geven hetzelfde",
+             [(r[0], r[4]) for r in meter10b.oogst()] == [(r[0], r[4]) for r in rijen10])
+
+    # Uit de recorder: blokjes van vijf minuten over beide uren van 02:00.
+    blokjes10 = [{"start": z(0, 0).timestamp() + 300 * i, "mean": 100.0 + i, "min": 0, "max": 500}
+                 for i in range(24)]
+    uit10 = archive.Archive.kwartieren_uit_blokjes({"sensor.proef": blokjes10})
+    controle("uit de recorder: acht kwartieren van 900 seconden, niet vier van 1800",
+             len(uit10) == 8 and all(r[5] == 900.0 for r in uit10) and len({r[1] for r in uit10}) == 8,
+             f"{[(r[1], r[5]) for r in uit10]}")
+
+    # Een dag van 25 uur heeft 100 kwartieren, en elk is een kandidaat als hij leeg is.
+    van10 = dt.datetime(2026, 10, 25, 0, 0)            # middernacht in Amsterdam
+    tot10 = dt.datetime(2026, 10, 26, 0, 0)
+    gaten10 = archive.Archive.gaten(["sensor.proef"], {}, van10, tot10)
+    controle("25-10 heeft 100 kwartieren", len(gaten10) == 100, f"{len(gaten10)}")
+    gaten10b = archive.Archive.gaten(["sensor.proef"], {}, dt.datetime(2027, 3, 28), dt.datetime(2027, 3, 29))
+    controle("28-03-2027 heeft er 92", len(gaten10b) == 92, f"{len(gaten10b)}")
+finally:
+    dtutil.as_utc, dtutil.DEFAULT_TIME_ZONE = oud_utc, oud_zone
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

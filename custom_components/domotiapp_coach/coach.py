@@ -779,6 +779,54 @@ def _moment(now: datetime | None = None) -> datetime:
     return dt_util.as_local(now or dt_util.utcnow()).replace(tzinfo=None)
 
 
+def _tussen(van: datetime, tot: datetime) -> timedelta:
+    """Hoe lang het echt duurde van `van` tot `tot`, ook over de klokwissel heen (v0.139.1).
+
+    De coach rekent in lokale tijd zonder tijdzone. Over de wintertijd heen (25-10-2026,
+    03:00 wordt weer 02:00) is het verschil tussen twee van die tijden een uur korter dan
+    wat er echt verstreek: een vaatwasser die om 01:30 begon en om 03:30 klaar was, liep
+    volgens de klok twee uur en echt drie, en onthield de coach de kortste. Via `as_utc`,
+    die het herhaalde uur met `fold` uit elkaar houdt, is het de echte tijd.
+    """
+    if van.tzinfo is None and tot.tzinfo is None:
+        return dt_util.as_utc(tot) - dt_util.as_utc(van)
+    return tot.astimezone(timezone.utc) - van.astimezone(timezone.utc)
+
+
+def _regelklok(moment: datetime | None = None) -> datetime:
+    """De klok van de regelaar van de thuisbatterij: UTC, zonder tijdzone erbij (v0.139.1).
+
+    De regelaar rekent in seconden en wacht op zijn eigen opdrachten. Bij het ingaan van
+    de wintertijd loopt de lokale klok een uur terug (25-10-2026, 03:00 weer 02:00), en
+    met `_moment` werd "sinds de opdracht" dan negatief: de regelaar wachtte een uur op
+    een opdracht die al lang stond, en de bewaking van een stille meter stond zo lang
+    uit. UTC loopt nooit terug. Een lokale tijd gaat via `as_utc`, die het herhaalde uur
+    met `fold` uit elkaar houdt. Alleen voor de regelaar; de rest van de coach blijft
+    lokaal rekenen.
+    """
+    if moment is None:
+        moment = dt_util.utcnow()
+    return (moment.astimezone(timezone.utc) if moment.tzinfo else dt_util.as_utc(moment)).replace(tzinfo=None)
+
+
+def _naast_elkaar(uit: dict, start: datetime, einde: datetime, prijs: float | None) -> None:
+    """Een prijsblok in een lijst op lokale begintijd, ook als die tijd twee keer komt (v0.139.1).
+
+    Bij het ingaan van de wintertijd (25-10-2026) komt 02:00 tot 03:00 twee keer, met elk
+    zijn eigen prijs. Op de lokale klok van de coach is dat een uur, en dat uur duurt twee
+    echte uren. Tot v0.139.1 overschreef het tweede uur het eerste: de coach rekende het
+    eerste uur met de prijs van het tweede, en het laatste kwartier van het eerste uur kreeg
+    een einde vóór zijn begin. Nu worden ze samengevoegd: het gemiddelde van de twee prijzen,
+    en het einde van de laatste.
+    """
+    if start in uit:
+        oud_einde, oud_prijs = uit[start][0], uit[start][1]
+        samen = prijs if oud_prijs is None else oud_prijs if prijs is None else (oud_prijs + prijs) / 2
+        uit[start] = (max(oud_einde, einde), samen, *uit[start][2:])
+        return
+    uit[start] = (einde, prijs)
+
+
 def _jaar_eerder(dag: date) -> date:
     """Dezelfde dag een jaar eerder; 29 februari wordt 28 februari."""
     try:
@@ -2099,7 +2147,7 @@ class ChargerCoach:
             if entity_id in self._sensor_gemeld or now - sinds < grens:
                 continue
             self._sensor_gemeld.add(entity_id)
-            minuten = int((now - sinds).total_seconds() // 60)
+            minuten = int(_tussen(sinds, now).total_seconds() // 60)
             # De entiteit-id staat in het log en niet in de melding. De eigenaar op
             # 21-09-2026, over precies deze zin: "meld zo'n sensor niet
             # volledig, zeg gewoon dat er iets mis is met de integratie". Wie
@@ -2545,7 +2593,7 @@ class ChargerCoach:
             if sleutel in self._stekker_gemeld or now - sinds < ALTIJD_AAN_WACHT:
                 continue
             self._stekker_gemeld.add(sleutel)
-            minuten = int((now - sinds).total_seconds() // 60)
+            minuten = int(_tussen(sinds, now).total_seconds() // 60)
             # De entiteit-id in het log en niet in de melding, zoals bij de sensorwacht.
             _LOGGER.warning("%s (%s) staat al %d minuten %s", naam, plug, minuten, stand or "nergens")
             if stand != "off":
@@ -2610,7 +2658,7 @@ class ChargerCoach:
                 grens = timedelta(minutes=int(alert.get("water_flow_minutes") or 120))
                 if now - sinds >= grens and not self._water_gemeld:
                     self._water_gemeld = True
-                    minuten = int((now - sinds).total_seconds() // 60)
+                    minuten = int(_tussen(sinds, now).total_seconds() // 60)
                     await self._async_tell(
                         f"Er loopt al {minuten} minuten onafgebroken water ({str(round(debiet, 1)).replace('.', ',')} L/min). "
                         "Mogelijk een lekkage of een kraan die openstaat.",
@@ -3345,7 +3393,7 @@ class ChargerCoach:
         # Heeft het apparaat een eindtijd, dan wacht de melding tot die bij
         # deze beurt hoort, hooguit EINDTIJD_WACHT.
         if draait and sessie["gestart"] is not None and "gestart" not in sessie["gemeld"] and not (
-            eind is None and entities.get("remaining") and now - sessie["gestart"] < EINDTIJD_WACHT
+            eind is None and entities.get("remaining") and _tussen(sessie["gestart"], now) < EINDTIJD_WACHT
         ):
             sessie["gemeld"].add("gestart")
             zelf = sessie.get("door_coach", False)
@@ -3371,7 +3419,7 @@ class ChargerCoach:
             # start en wat hij op dat moment trok. Niet uit een teller: die
             # loopt in stappen achter, en dat is geen verloop.
             if watts is not None and sessie["gestart"] is not None and not sessie.get("teller"):
-                sessie["punten"].append(((now - sessie["gestart"]).total_seconds() / 60.0, watts))
+                sessie["punten"].append((_tussen(sessie["gestart"], now).total_seconds() / 60.0, watts))
             # Het gat van een herstart, zodra de kwartieropslag het heeft.
             gat = sessie.get("terugrekenen")
             if gat is not None and now >= (sessie.get("terugrekenen_na") or now):
@@ -3690,7 +3738,7 @@ class ChargerCoach:
         if minuten is not None and minuten > 0 and sessie.get("gestart") is None:
             duur[ruw] = int(round(minuten))
         elif minuten is not None and minuten > 0 and ruw not in duur:
-            duur[ruw] = int(round(minuten + (now - sessie["gestart"]).total_seconds() / 60.0))
+            duur[ruw] = int(round(minuten + _tussen(sessie["gestart"], now).total_seconds() / 60.0))
         if not duur.get(ruw):
             return None
         naam = await self._async_staat_naam(entities.get("program"), ruw)
@@ -3741,7 +3789,7 @@ class ChargerCoach:
             return "ready"
         stil = sessie.get("stil_sinds") or now
         sessie["stil_sinds"] = stil
-        return "run" if now - stil < STIL_KLAAR else "finished"
+        return "run" if _tussen(stil, now) < STIL_KLAAR else "finished"
 
     async def _async_druk(self, device: dict[str, Any], knop: str) -> None:
         """Op een knop van het apparaat drukken: bij Home Connect een button-entiteit."""
@@ -4635,7 +4683,7 @@ class ChargerCoach:
         """
         if programma is None:
             return
-        minuten = (einde - gestart).total_seconds() / 60.0
+        minuten = _tussen(gestart, einde).total_seconds() / 60.0
         # Alleen wat er tot het einde gemeten is: zonder statussensor kijkt
         # de coach nog een kwartier of hij echt stil blijft, en die stille
         # minuten horen niet in het profiel.
@@ -6437,7 +6485,7 @@ class ChargerCoach:
                 # opdracht naar een knop die er nog niet was (in de klantwoning
                 # 14 s weg); daarna dacht hij dat die opdracht stond.
                 sessie["nul_open"] = not await self._async_overnemen_op_nul(device)
-                sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=now, bezonken=False)
+                sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=_regelklok(), bezonken=False)
                 sessie["zelf"] = False
             else:
                 # De knop is er: de regelaar schrijft in deze ronde meteen zijn opdracht.
@@ -6566,11 +6614,12 @@ class ChargerCoach:
                 if not await self._async_batterij_zetten(device, 0.0):
                     return
                 sessie["nul_open"] = False
-                sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=nu, bezonken=False)
+                sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=_regelklok(), bezonken=False)
                 _LOGGER.info("%s: de stuurknop is er weer, 0 W geschreven", device_id)
                 return
+            # Op zijn eigen klok, die bij de wintertijd niet terugloopt (v0.139.1).
             opdracht = regelaar.stap(
-                nu, net_w=net_w, net_op=net_op, batterij_w=batterij_w,
+                _regelklok(), net_w=net_w, net_op=None if net_op is None else _regelklok(net_op), batterij_w=batterij_w,
                 besluit=besluit, b=b,
                 doel_w=regelaar.doel_w(sessie.get("koop"), sessie.get("terug")),
                 ruimte_w=ruimte_w,
@@ -6681,7 +6730,7 @@ class ChargerCoach:
             return
         sessie["nul_open"] = not await self._async_overnemen_op_nul(device)
         # Hij staat nu op nul, of zodra de knop er is; de regelaar wacht tot dat te zien is.
-        sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=_moment(), bezonken=False)
+        sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=_regelklok(), bezonken=False)
         sessie["zelf"] = False
         if zelf:
             await self._async_noteer(f"{naam}: de coach neemt het over, want {waarom}.", nu,
@@ -7680,10 +7729,7 @@ class ChargerCoach:
                     end = start + vast
             if end <= start:
                 continue
-            uit[dt_util.as_local(start).replace(tzinfo=None)] = (
-                dt_util.as_local(end).replace(tzinfo=None),
-                price,
-            )
+            _naast_elkaar(uit, dt_util.as_local(start).replace(tzinfo=None), dt_util.as_local(end).replace(tzinfo=None), price)
         return uit
 
     @staticmethod
@@ -7908,7 +7954,19 @@ class ChargerCoach:
                 return []
             markt = next((p for s, (eind, p) in omie.items() if s <= start < eind), None)
             rijen.append({"start": start, "end": einde, "price": prijs, "feed_in": tarifas.terug(pt, markt)})
-        return rijen
+        # Het uur dat bij de wintertijd twee keer komt (v0.139.1): op de lokale klok één rij
+        # die twee echte kwartieren duurt, zoals `_naast_elkaar` bij een prijssensor. Tot dan
+        # stond elk kwartier van dat uur er twee keer, en één met een einde vóór zijn begin.
+        samen: dict[datetime, dict] = {}
+        for rij in rijen:
+            oud = samen.get(rij["start"])
+            if oud is None:
+                samen[rij["start"]] = rij
+                continue
+            oud["end"] = max(oud["end"], rij["end"])
+            oud["price"] = (oud["price"] + rij["price"]) / 2
+            oud["feed_in"] = None if oud["feed_in"] is None or rij["feed_in"] is None else (oud["feed_in"] + rij["feed_in"]) / 2
+        return sorted(samen.values(), key=lambda rij: rij["start"])
 
     def _sun(self, settings: dict[str, Any]) -> Sun:
         """De zonverwachting, voor zover die is ingevuld.
@@ -11502,7 +11560,7 @@ class ChargerCoach:
             and "stil" not in gemeld
         ):
             gemeld.add("stil")
-            minuten = int((now - sinds).total_seconds() // 60)
+            minuten = int(_tussen(sinds, now).total_seconds() // 60)
             stand = (
                 f" Hij staat op {round(car.soc_percent)}%."
                 if car.soc_percent is not None
@@ -12112,7 +12170,7 @@ class ChargerCoach:
         """
         if self._net_stil_sinds is None:
             return ""
-        minuten = int((now - self._net_stil_sinds).total_seconds() // 60)
+        minuten = int(_tussen(self._net_stil_sinds, now).total_seconds() // 60)
         if minuten < 1:
             return ""
         duur = "een minuut" if minuten == 1 else f"{minuten} minuten"
