@@ -29,6 +29,8 @@
  * narekenen.
  */
 
+import { alsHuis, huisNu } from "./format.js";
+
 /** De kleuren, met de naam in de legenda. Oranje is eigen stroom, blauw het net. */
 export const KLASSEN = {
   zon: "Eigen zon",
@@ -201,7 +203,7 @@ export function standVan(item, device) {
  * `nu`. Per stuk staat bij elke reden hoe lang hij gold, zodat de hoofdreden
  * de reden is die het langst gold en niet de eerste.
  */
-export function tijdlijn(items, devices, van, tot, nu = new Date()) {
+export function tijdlijn(items, devices, van, tot, nu = huisNu()) {
   const eind = new Date(Math.min(tot.getTime(), nu.getTime()));
   const rijen = [];
   for (const device of devices) {
@@ -342,12 +344,14 @@ const KWARTIER_MS = 15 * 60 * 1000;
  */
 export function herkomst(stuk, vermogen, net) {
   if (!vermogen?.length) return null;
-  const netOp = new Map((net ?? []).map((rij) => [rij.start.getTime(), rij]));
+  // De kwartieren zijn echte momenten, de stukken staan op de klok van het huis zoals
+  // de besluiten van de coach (v0.138.1): de kwartieren dus ook op die klok.
+  const netOp = new Map((net ?? []).map((rij) => [alsHuis(rij.start).getTime(), rij]));
   let kwh = 0;
   let netKwh = 0;
   let gedekt = 0;
   for (const rij of vermogen) {
-    const begin = rij.start.getTime();
+    const begin = alsHuis(rij.start).getTime();
     const einde = begin + KWARTIER_MS;
     const deel = (Math.min(einde, stuk.tot.getTime()) - Math.max(begin, stuk.van.getTime())) / KWARTIER_MS;
     if (deel <= 0) continue;

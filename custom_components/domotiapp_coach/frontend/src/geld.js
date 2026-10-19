@@ -38,6 +38,7 @@
 
 import { contractAt } from "./data-source.js";
 import { ptPrijsOp } from "./tarifas.js";
+import { huisNu } from "./format.js";
 
 /**
  * De dag waarop salderen ophoudt. Gelijk aan `NETTING_ENDS` in const.py: de
@@ -238,7 +239,7 @@ export function aandeelOp(afrekening, when) {
  * Wat de schaal van de terugleverkosten kost in [start, end) (v0.135.0): het
  * jaarbedrag per dag, over de dagen van de schaal die al voorbij zijn.
  */
-export function schaalKosten(afrekening, start, end, nu = new Date()) {
+export function schaalKosten(afrekening, start, end, nu = huisNu()) {
   const s = afrekening?.schaal;
   if (!s || !(Number(s.per_dag) > 0)) return 0;
   const van = Math.max(new Date(`${s.van}T00:00:00`).getTime(), new Date(start).getTime());

@@ -17,7 +17,7 @@
  */
 
 import { DacElement, define } from "../base.js";
-import { clock, price as fmtPrice, level, levelTone, prijsGrenzen } from "../format.js";
+import { clock, huisNu, price as fmtPrice, level, levelTone, prijsGrenzen } from "../format.js";
 
 /**
  * The drawing is measured in real pixels, not in an abstract grid.
@@ -274,7 +274,8 @@ class DacPriceChart extends DacElement {
   }
 
   draw_() {
-    this.now_ = new Date();
+    // Op de klok van het huis, zoals de rijen van de coach (v0.138.1).
+    this.now_ = huisNu();
 
     const W = Math.max(MIN_W, Math.round(this.getBoundingClientRect().width) || MIN_W);
     // Taller in proportion when there is less width to work with, so a phone
@@ -531,7 +532,7 @@ const DAYS = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag"
 
 /** "Morgen" when it is, the weekday when it is not. */
 function dayName(date) {
-  const tomorrow = new Date();
+  const tomorrow = huisNu();
   tomorrow.setDate(tomorrow.getDate() + 1);
   return sameDay(date, tomorrow) ? "Morgen" : DAYS[date.getDay()];
 }

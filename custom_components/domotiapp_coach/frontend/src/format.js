@@ -182,6 +182,60 @@ export function duration(minutes) {
 export const clock = (date) =>
   date.toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" });
 
+/*
+ * De klok van het huis (v0.138.1). De coach schrijft elke tijd in de tijd van Home
+ * Assistant en zonder tijdzone ("2026-10-19T15:45:00"); de browser leest zo'n tijd als
+ * zijn eigen tijd. Dat klopt zolang de browser in dezelfde tijdzone staat als het huis.
+ * Bij een woning in Portugal, bekeken vanaf een pc in Nederland, stond "nu" in de
+ * prijsgrafiek daardoor een uur verder dan de vooruitblik erboven. Daarom rekent het
+ * paneel "nu" in de tijd van het huis: een Date waarvan uur en dag die van het huis zijn,
+ * zoals de tijden van de coach ook binnenkomen. Wat uit Home Assistant zelf komt met een
+ * tijdzone erbij (een prijssensor) gaat door `alsHuis`. Zonder tijdzone (de preview, de
+ * proeven) is het gewoon de klok van de browser.
+ */
+let huisZone_ = null;
+let huisKlok_ = null;
+
+/** De tijdzone van het huis, uit `hass.config.time_zone`; de panel-module zet hem. */
+export function zetHuisZone(zone) {
+  const nieuw = typeof zone === "string" && zone ? zone : null;
+  if (nieuw === huisZone_) return;
+  huisZone_ = nieuw;
+  try {
+    huisKlok_ = nieuw ? new Intl.DateTimeFormat("en-CA", {
+      timeZone: nieuw, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    }) : null;
+  } catch {
+    // Een tijdzone die de browser niet kent: dan de klok van de browser.
+    huisZone_ = null;
+    huisKlok_ = null;
+  }
+}
+
+/** Een echt moment zoals de klok van het huis het aanwijst, als Date in de tijd van de browser. */
+export function alsHuis(moment) {
+  const echt = moment instanceof Date ? moment : new Date(moment);
+  if (!huisKlok_ || Number.isNaN(echt.getTime())) return echt;
+  const d = Object.fromEntries(huisKlok_.formatToParts(echt).map((deel) => [deel.type, deel.value]));
+  return new Date(Number(d.year), Number(d.month) - 1, Number(d.day), Number(d.hour), Number(d.minute), Number(d.second), echt.getMilliseconds());
+}
+
+/** Nu, op de klok van het huis. Vergelijk tijden van de coach hiermee, niet met `new Date()`. */
+export const huisNu = () => alsHuis(new Date());
+
+/**
+ * Een tijd uit Home Assistant op de klok van het huis: met een tijdzone erbij ("Z",
+ * "+02:00") omgerekend, zonder (zoals de coach ze schrijft) zoals hij is.
+ */
+export function huisTijd(raw) {
+  if (raw instanceof Date) return raw;
+  // Milliseconden sinds 1970 zijn een echt moment.
+  if (typeof raw === "number") return alsHuis(new Date(raw));
+  const tekst = String(raw ?? "");
+  return /(?:Z|[+-]\d{2}:?\d{2})$/.test(tekst.trim()) ? alsHuis(new Date(tekst)) : new Date(tekst);
+}
+
 /**
  * An ISO timestamp, or null for anything else.
  *
@@ -307,7 +361,7 @@ export function level(value, bounds, lowIsGood) {
  * @param {Date} [nu]
  * @returns {(moment?: Date|string) => {low:number, high:number}}
  */
-export function prijsGrenzen(bounds, rijen, nu = new Date()) {
+export function prijsGrenzen(bounds, rijen, nu = huisNu()) {
   const vast = { low: Number(bounds?.low ?? 0.2), high: Number(bounds?.high ?? 0.3) };
   if (!bounds?.relative) return () => vast;
   const uur = new Date(nu);

@@ -19,6 +19,7 @@
 import { DacElement, define } from "./src/base.js";
 import { StateFeed } from "./src/state-feed.js";
 import { setLight } from "./src/theme.js";
+import { zetHuisZone } from "./src/format.js";
 import { volgCoach } from "./src/data-source.js";
 import { navItemsFor } from "./src/header.js";
 import "./src/header.js";
@@ -99,6 +100,9 @@ class DomotiAppCoachPanel extends DacElement {
     this.hass_ = value;
     // Light or dark, the way Home Assistant itself is set (theme.js, `setLight`).
     setLight(value?.themes?.darkMode === false);
+    // De klok van het huis (format.js, `zetHuisZone`): de tijden van de coach staan in
+    // de tijd van Home Assistant, ook als de browser in een ander land staat (v0.138.1).
+    zetHuisZone(value?.config?.time_zone);
     // Seeds the feed and, the first time, starts the subscription that keeps it
     // current regardless of whether this property is ever set again.
     this.feed_.connect(value);

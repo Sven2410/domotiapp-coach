@@ -18,7 +18,7 @@
 
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
-import { energy, euro, percent, signedPower } from "../format.js";
+import { energy, euro, huisNu, percent, signedPower } from "../format.js";
 import { deviceLabel, deviceLabelMap } from "../devices.js";
 
 /** Het merkteken op het rapport. */
@@ -1056,7 +1056,7 @@ class DacViewHistory extends DacElement {
       return;
     }
 
-    const nu = new Date();
+    const nu = huisNu();
     const alle = this.settings_?.devices ?? [];
     const namen = deviceLabelMap(alle);
     const bronnen = this.settings_?.sources ?? {};

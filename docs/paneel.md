@@ -363,3 +363,37 @@ ook onder de lijn, en 20% leek dan ontladen. Nu staat 0% op de 0-lijn en 100% bo
 in vooruitblik.js), en krijgt de ruimte boven de lijn minstens evenveel hoogte als die eronder zodra
 er een accustand te tekenen is (`schalen`). De legenda zegt "Accustand: 0% op de lijn, 100%
 bovenaan". Proef in test_rapport.mjs.
+
+## De klok van het huis (v0.138.1)
+
+De coach schrijft elke tijd in de tijd van Home Assistant en zonder tijdzone: een prijsrij,
+de vooruitblik, een besluit, een melding ("2026-10-19T15:45:00"). De browser leest zo'n tijd als
+zijn eigen tijd. Dat ging goed zolang huis en browser in hetzelfde land stonden. Gemeten op
+19-10-2026 bij de woning in Portugal, vanaf een pc op Nederlandse tijd: de vooruitblik zei "15:00
+tot 16:00", de prijsgrafiek eronder "Nu 16:45 tot 17:00" en "Duurst: vandaag 15:45". De eigenaar:
+"bouw inderdaad een reparatie voor een installatie niet in NL."
+
+Sindsdien rekent het paneel "nu" op de klok van het huis: `huisNu()` in format.js, een Date
+waarvan dag en uur die van Home Assistant zijn, net als de tijden van de coach. De tijdzone komt
+uit `hass.config.time_zone` (`zetHuisZone` in domotiapp-coach-panel.js). Een tijd uit Home
+Assistant met een tijdzone erbij, zoals de lijst van een prijssensor (Nord Pool, Frank), gaat door
+`huisTijd`/`alsHuis` naar dezelfde klok (`readSchedule` in data-source.js). Zonder tijdzone (de
+preview, de proeven) is het de klok van de browser, dus bij een Nederlands huis vanuit Nederland
+verandert er niets.
+
+Waar het gebruikt wordt: `priceAt` en het daggemiddelde in data-source.js, `prijsGrenzen`, de
+prijsgrafiek ("Nu", wat voorbij is, Morgen), de vooruitblik ("morgen"), Wat gaat hij doen, het
+schema, de zin "De coach heeft N minuten niets beslist" (`minutenGeleden`, die met een uur
+verschil altijd in beeld stond), de dag bij de batterij (`dagKlok` in battery.js, die de dag in
+UTC nam), de tijdlijn in Historie en wat er per kwartier van het net kwam (`herkomst`), de lijsten
+onder Meldingen en in de berichtenbox, en de schaal in geld.js.
+
+Wat er niet onder valt: `ptPrijsOp` (tarifas.js) rekent zelf vanuit UTC in de tijd van Lissabon en
+krijgt dus het echte moment. De dagen en perioden van Historie (`periodStart` in statistics.js)
+zijn nog die van de browser, want daar vraagt het paneel de recorder om echte momenten; een
+installateur in een ander land ziet de grafieken van Historie dus nog in zijn eigen tijd.
+
+**Een nieuwe vergelijking met een tijd van de coach gaat tegen `huisNu()`, niet tegen
+`new Date()`.** Proef "de klok van het huis" in test_rapport.mjs rekent het na in Lissabon en
+Kiritimati, wat de tijdzone van de machine ook is, en kijkt of de bekende plekken geen
+`new Date()` meer hebben. In de preview: `?pt=1&tz=Europe/Lisbon`.

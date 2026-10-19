@@ -7,6 +7,7 @@
  * weet.
  */
 
+import { huisNu } from "./format.js";
 import { perUur } from "./prijsgrafiek.js";
 
 const euro = (bedrag, cijfers = 2) =>
@@ -80,7 +81,9 @@ export function planRegels(hours = [], maxRegels = 8) {
     }
   }
   const dagKlok = (iso) => {
-    const vandaag = new Date().toISOString().slice(0, 10);
+    // De dag van het huis (v0.138.1); toISOString gaf de dag in UTC.
+    const n = huisNu();
+    const vandaag = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
     const dag = String(iso ?? "").slice(0, 10);
     return `${dag && dag !== vandaag && dag > vandaag ? "morgen " : ""}${klok(iso)}`;
   };
