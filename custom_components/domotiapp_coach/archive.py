@@ -45,7 +45,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -116,11 +116,26 @@ CREATE TABLE IF NOT EXISTS kwartieren (
 
 # Vóór deze datum bestond er geen meting die hier thuishoort. Een tijdstempel
 # die eronder valt komt uit een rekenfout en niet uit een meter.
-ONDERGRENS = datetime(2015, 1, 1)
+ONDERGRENS = datetime(2015, 1, 1, tzinfo=timezone.utc)
+
+
+def _utc(moment: datetime) -> datetime:
+    """Een moment als UTC (v0.139.1).
+
+    De opslag rekent sinds v0.139.1 alleen nog in UTC. Tot dan rekende hij in naïeve
+    lokale tijd, en bij het ingaan van de wintertijd (25-10-2026, 02:00 tot 03:00 komt
+    twee keer) liep die klok een uur terug: het hele tweede uur kwam in één kwartier van
+    75 minuten, en het uur ervoor viel weg. Een tijdstempel hing bovendien af van de
+    tijdzone van de container, niet van die van Home Assistant. Een naïeve tijd die een
+    aanroeper meegeeft is de lokale tijd van Home Assistant; `as_utc` leest hem zo, en
+    houdt het herhaalde uur uit elkaar met `fold`.
+    """
+    return moment.astimezone(timezone.utc) if moment.tzinfo else dt_util.as_utc(moment)
 
 
 def bucket_start(moment: datetime) -> datetime:
-    """Het begin van het kwartier waar dit moment in valt."""
+    """Het begin van het kwartier waar dit moment in valt, in UTC."""
+    moment = _utc(moment)
     return moment.replace(
         minute=moment.minute - moment.minute % 15, second=0, microsecond=0
     )
@@ -188,6 +203,7 @@ class _Meter:
         Zo nodig over kwartiergrenzen heen, want een meter die een uur lang
         hetzelfde meldt hoort in vier regels te staan en niet in één.
         """
+        moment = _utc(moment)
         if self.waarde is None or self.sinds is None or moment <= self.sinds:
             return
 
@@ -206,6 +222,7 @@ class _Meter:
 
     def meet(self, moment: datetime, waarde: float) -> None:
         """Een nieuwe meting: eerst de tijd afsluiten, dan de waarde omzetten."""
+        moment = _utc(moment)
         self.tot(moment)
         self.waarde = waarde
         self.sinds = moment
@@ -274,7 +291,7 @@ class Archive:
         self._uit.append(
             self.hass.bus.async_listen_once("homeassistant_stop", self._async_afsluiten)
         )
-        self._gestart = dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
+        self._gestart = dt_util.utcnow()
 
     async def _async_afsluiten(self, _event: Event | None = None) -> None:
         """Home Assistant gaat uit: alles wat in het geheugen staat naar schijf."""
@@ -290,7 +307,7 @@ class Archive:
 
     async def _async_opgestart(self, _hass: HomeAssistant | None = None) -> None:
         """Home Assistant is helemaal op; nu pas kan de recorder bevraagd worden."""
-        nu = dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
+        nu = dt_util.utcnow()
         await self._async_inhalen(nu)
         await self._async_gaten_vullen(nu)
 
@@ -305,7 +322,7 @@ class Archive:
 
         # Wie eraf gaat wordt eerst netjes afgesloten, anders blijft er een half
         # kwartier in het geheugen hangen dat nooit meer weggeschreven wordt.
-        nu = dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
+        nu = dt_util.utcnow()
         for entity_id in list(self._meters):
             if entity_id not in wilde:
                 self._meters[entity_id].verloren(nu)
@@ -456,7 +473,7 @@ class Archive:
         kandidaten = self.gaten(ids, bestaand, van, tot)
         if not kandidaten:
             return
-        vroegste = datetime.fromtimestamp(min(start for _, start in kandidaten))
+        vroegste = dt_util.utc_from_timestamp(min(start for _, start in kandidaten))
         try:
             rijen = await self._async_uit_recorder_tussen(ids, vroegste, tot + BUCKET)
         except Exception as fout:  # noqa: BLE001 - de recorder-API wisselt per versie
@@ -485,7 +502,7 @@ class Archive:
                 for rij in db.execute(
                     f"SELECT entity_id, start, seconden FROM kwartieren "
                     f"WHERE entity_id IN ({vragen}) AND start >= ? AND start < ?",
-                    (*entity_ids, int(van.timestamp()), int(tot.timestamp())),
+                    (*entity_ids, int(_utc(van).timestamp()), int(_utc(tot).timestamp())),
                 )
             }
 
@@ -499,6 +516,7 @@ class Archive:
         """Welke kwartieren tussen `van` en `tot` ontbreken of half zijn."""
         uit: set[tuple[str, int]] = set()
         start = bucket_start(van)
+        tot = _utc(tot)
         while start < tot:
             stempel = int(start.timestamp())
             for entity_id in entity_ids:
@@ -541,16 +559,14 @@ class Archive:
     async def _async_uit_recorder_tussen(
         self, entity_ids: list[str], van: datetime, tot: datetime
     ) -> list[tuple[str, int, float, float, float, float]]:
-        """De vijfminutenblokken tussen twee lokale momenten, per kwartier."""
+        """De vijfminutenblokken tussen twee momenten, per kwartier."""
         from homeassistant.components.recorder import get_instance
         from homeassistant.components.recorder.statistics import (
             statistics_during_period,
         )
 
-        # Naïef lokaal. `as_local` van Home Assistant leest een naïeve tijd
-        # als UTC, dus die eerst een tijdzone geven en dan pas omrekenen.
-        einde = dt_util.as_utc(tot.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE))
-        begin = dt_util.as_utc(van.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE))
+        einde = _utc(tot)
+        begin = _utc(van)
         gevonden = await get_instance(self.hass).async_add_executor_job(
             statistics_during_period,
             self.hass,
@@ -588,11 +604,9 @@ class Archive:
                 # eerste opruimronde ze meteen weer weg: nul regels, geen fout,
                 # niets in het logboek. Gevonden bij de eerste klant op
                 # 28-08-2026, door de broncode van zijn HA-versie erbij te halen.
-                moment = dt_util.as_local(
-                    dt_util.utc_from_timestamp(ruw)
-                    if isinstance(ruw, (int, float))
-                    else ruw
-                ).replace(tzinfo=None)
+                # In UTC (v0.139.1): in lokale tijd vielen de twee uren van 02:00
+                # bij de wintertijd in dezelfde emmers.
+                moment = dt_util.utc_from_timestamp(ruw) if isinstance(ruw, (int, float)) else ruw
                 begin = bucket_start(moment)
                 if begin < ONDERGRENS:
                     # Een tijdstempel die nergens op slaat is geen meting. Liever
@@ -653,7 +667,7 @@ class Archive:
         meter = self._meters.get(event.data.get("entity_id"))
         if meter is None:
             return
-        nu = dt_util.as_local(event.time_fired).replace(tzinfo=None)
+        nu = _utc(event.time_fired)
         self._verwerk(meter, event.data.get("new_state"), nu)
 
     # --- wegschrijven -------------------------------------------------------
@@ -668,7 +682,7 @@ class Archive:
         geen, en `_async_gaten_vullen` maakt hem straks vol als de recorder
         meer heeft.
         """
-        nu = dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
+        nu = dt_util.utcnow()
         rijen: list[tuple[str, int, float, float, float, float]] = []
         for meter in self._meters.values():
             meter.tot(nu)
@@ -724,7 +738,7 @@ class Archive:
                     rijen,
                 )
             if opruimen:
-                grens = int((nu - KEEP).timestamp())
+                grens = int((_utc(nu) - KEEP).timestamp())
                 db.execute("DELETE FROM kwartieren WHERE start < ?", (grens,))
 
     # --- teruglezen ---------------------------------------------------------
@@ -756,7 +770,7 @@ class Archive:
                 f"SELECT entity_id, start, laagste, piek, gemiddeld, seconden "
                 f"FROM kwartieren WHERE entity_id IN ({vragen}) "
                 f"AND start >= ? AND start < ? ORDER BY start",
-                (*entity_ids, int(start.timestamp()), int(einde.timestamp())),
+                (*entity_ids, int(_utc(start).timestamp()), int(_utc(einde).timestamp())),
             ):
                 uit[rij[0]].append(
                     {
