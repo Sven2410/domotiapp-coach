@@ -13,12 +13,14 @@
  * zonder scherm kan nameten.
  */
 
+import { datum, getal, t } from "./i18n.js";
+
 const HOOGTE = 96;      // tekenhoogte van de staafjes, in eenheden van de viewBox
 const BREEDTE = 300;
 const TUSSEN = 2;       // ruimte tussen twee staafjes
 const RAND = 4;         // afgeronde bovenkant
 
-const prijsTekst = (p) => `€ ${Number(p).toFixed(3).replace(".", ",")}`;
+const prijsTekst = (p) => `€ ${getal(p, 3)}`;
 
 const klok = (iso) => {
   const d = new Date(iso);
@@ -88,10 +90,10 @@ export function prijsBalken(rijen = []) {
     // 00, met een streep, anders lijkt een lijst tot morgenavond één dag.
     const dagGrens = i > 0 && heel && uur === 0 && uur !== vorigeUur;
     if (dagGrens) dagen += 1;
-    const dagNaam = dagen === 1 ? "morgen" : d.toLocaleDateString("nl-NL", { weekday: "short" });
+    const dagNaam = dagen === 1 ? t("morgen") : datum(d, { weekday: "short" });
     const label = dagGrens ? dagNaam : heel && uur % 3 === 0 && uur !== vorigeUur ? String(uur).padStart(2, "0") : "";
     vorigeUur = uur;
-    const tijd = r.end ? `${klok(r.start)} tot ${klok(r.end)}` : klok(r.start);
+    const tijd = r.end ? t("{van} tot {tot}", { van: klok(r.start), tot: klok(r.end) }) : klok(r.start);
     return {
       x: i * (w + TUSSEN),
       y,
@@ -101,7 +103,7 @@ export function prijsBalken(rijen = []) {
       leveren: Boolean(r.leveren) && !r.groen,
       dagGrens,
       label,
-      tip: `${tijd}: ${prijsTekst(r.price)}${r.groen ? ", laden" : r.leveren ? ", ontladen aan het net" : ""}`,
+      tip: `${tijd}: ${prijsTekst(r.price)}${r.groen ? `, ${t("laden")}` : r.leveren ? `, ${t("ontladen aan het net")}` : ""}`,
     };
   });
 
@@ -180,7 +182,7 @@ export function prijsSvg(berekend, doc = document) {
   const groen = berekend.balken.filter((b) => b.groen).length;
   svg.setAttribute(
     "aria-label",
-    `Prijs per uur; in ${groen} van de ${berekend.balken.length} uren laadt hij.`
+    t("Prijs per uur; in {groen} van de {n} uren laadt hij.", { groen, n: berekend.balken.length })
   );
 
   berekend.balken.forEach((b, i) => {
@@ -255,11 +257,11 @@ export function prijsLabels(berekend, doc = document) {
   rij.className = "prijs-tijden";
   for (const b of berekend.balken) {
     if (!b.label) continue;
-    const t = doc.createElement("span");
-    t.textContent = b.label;
-    if (b.dagGrens) t.className = "dag";
-    t.style.left = `${((b.x + b.w / 2) / BREEDTE) * 100}%`;
-    rij.append(t);
+    const tijd = doc.createElement("span");
+    tijd.textContent = b.label;
+    if (b.dagGrens) tijd.className = "dag";
+    tijd.style.left = `${((b.x + b.w / 2) / BREEDTE) * 100}%`;
+    rij.append(tijd);
   }
   return rij;
 }
@@ -287,10 +289,10 @@ export function prijsAs(berekend, doc = document) {
   const as = doc.createElement("div");
   as.className = "prijs-as";
   for (const s of berekend.stappen ?? []) {
-    const t = doc.createElement("span");
-    t.textContent = `€ ${s.waarde.toFixed(2).replace(".", ",")}`;
-    t.style.top = `${(s.y / HOOGTE) * 100}%`;
-    as.append(t);
+    const bedrag = doc.createElement("span");
+    bedrag.textContent = `€ ${getal(s.waarde, 2)}`;
+    bedrag.style.top = `${(s.y / HOOGTE) * 100}%`;
+    as.append(bedrag);
   }
   return as;
 }
@@ -308,23 +310,23 @@ export function prijsAs(berekend, doc = document) {
 export function prijsUitleg(berekend, i, wat = {}) {
   const b = berekend?.blokken?.[i];
   if (!b) return null;
-  const tijd = b.end ? `${klok(b.start)} tot ${klok(b.end)}` : klok(b.start);
+  const tijd = b.end ? t("{van} tot {tot}", { van: klok(b.start), tot: klok(b.end) }) : klok(b.start);
   const procent = (prijs, met) => (Number.isFinite(met) && Math.abs(met) > 1e-9
     ? Math.round(((prijs - met) / Math.abs(met)) * 100) : null);
   let vergelijk = "";
   if (i === 0) {
     const pct = procent(b.price, berekend.gemiddeldAlles);
-    if (pct !== null) vergelijk = pct === 0 ? "precies het gemiddelde" : pct < 0 ? `${-pct}% onder het gemiddelde` : `${pct}% boven het gemiddelde`;
+    if (pct !== null) vergelijk = pct === 0 ? t("precies het gemiddelde") : pct < 0 ? t("{pct}% onder het gemiddelde", { pct: -pct }) : t("{pct}% boven het gemiddelde", { pct });
   } else {
     const pct = procent(b.price, berekend.blokken[0].price);
-    if (pct !== null) vergelijk = pct === 0 ? "even duur als nu" : pct < 0 ? `${-pct}% goedkoper dan nu` : `${pct}% duurder dan nu`;
+    if (pct !== null) vergelijk = pct === 0 ? t("even duur als nu") : pct < 0 ? t("{pct}% goedkoper dan nu", { pct: -pct }) : t("{pct}% duurder dan nu", { pct });
   }
   // Wat het apparaat doet, in de woorden van de legenda; een blok met een eigen
   // naam (de stand van een batterij, zoals "Standby") houdt die.
   const doet = (b.groen ? wat.groen : b.leveren ? wat.leveren : (b.label || wat.wacht)) ?? "";
   const klein = doet ? doet.charAt(0).toLowerCase() + doet.slice(1) : "";
   return {
-    kop: i === 0 ? `Nu: ${tijd}` : tijd,
+    kop: i === 0 ? t("Nu: {tijd}", { tijd }) : tijd,
     prijs: prijsTekst(b.price),
     onder: [vergelijk, klein].filter(Boolean).join(", "),
   };

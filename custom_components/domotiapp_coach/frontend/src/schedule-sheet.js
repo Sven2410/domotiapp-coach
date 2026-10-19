@@ -23,13 +23,23 @@ import { DEADLINE_ONLY_TYPES, PROGRAM_TYPES, canHaveDeadline, needsRelease, prog
 import { heeftVoorkeuren, voorkeurHtml, voorkeurWijziging, vulVoorkeuren } from "./voorkeur-velden.js";
 import { priceForecast } from "./data-source.js";
 import { clock, duration, huisNu } from "./format.js";
+import { datum, nt, t } from "./i18n.js";
 import { sheetCss } from "./theme.js";
 
-/** Maandag eerst, zoals een week hier opgeschreven wordt. */
-export const DAYS = [
-  "Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag",
-];
-export const DAYS_SHORT = ["ma", "di", "wo", "do", "vr", "za", "zo"];
+/** De dagen van de week als nummer, maandag (0) eerst, zoals een week hier opgeschreven wordt. */
+export const DAYS = [0, 1, 2, 3, 4, 5, 6];
+
+/** Een dag van die week als datum: 5 januari 2026 is een maandag. */
+const opDag = (day) => new Date(2026, 0, 5 + day);
+
+/** "Maandag", in de taal van nu (v0.139.0). */
+export function dayName(day) {
+  const naam = datum(opDag(day), { weekday: "long" });
+  return naam.charAt(0).toUpperCase() + naam.slice(1);
+}
+
+/** "ma", kort, voor de samenvatting op de kaart. */
+export const dayShort = (day) => datum(opDag(day), { weekday: "short" });
 
 /**
  * De drie randen van een planvenster, alle drie optioneel.
@@ -41,21 +51,21 @@ export const DAYS_SHORT = ["ma", "di", "wo", "do", "vr", "za", "zo"];
 export const TIMES = [
   {
     key: "not_before",
-    label: "Niet eerder dan",
-    short: "Niet eerder dan",
-    hint: "Vóór deze tijd begint de coach er niet aan, hoe goedkoop de stroom ook is.",
+    label: nt("Niet eerder dan"),
+    short: nt("Niet eerder dan"),
+    hint: nt("Vóór deze tijd begint de coach er niet aan, hoe goedkoop de stroom ook is."),
   },
   {
     key: "start_by",
-    label: "Uiterlijk starten om",
-    short: "Starten vóór",
-    hint: "Op deze tijd start hij hoe dan ook, ook als het dan een duur moment is.",
+    label: nt("Uiterlijk starten om"),
+    short: nt("Starten vóór"),
+    hint: nt("Op deze tijd start hij hoe dan ook, ook als het dan een duur moment is."),
   },
   {
     key: "done_by",
-    label: "Uiterlijk klaar om",
-    short: "Klaar om",
-    hint: "Hier rekent de coach van terug wanneer hij moet beginnen. Bij een programma gebruikt hij de duur die eronder staat.",
+    label: nt("Uiterlijk klaar om"),
+    short: nt("Klaar om"),
+    hint: nt("Hier rekent de coach van terug wanneer hij moet beginnen. Bij een programma gebruikt hij de duur die eronder staat."),
   },
 ];
 
@@ -67,9 +77,9 @@ export const TIMES = [
  * die ooit opkomt welke er wacht.
  */
 export const PRIORITIES = [
-  { key: "high", label: "Hoog", blurb: "Gaat voor de rest." },
-  { key: "mid", label: "Middel", blurb: "De gewone stand." },
-  { key: "low", label: "Laag", blurb: "Wacht op de anderen." },
+  { key: "high", label: nt("Hoog"), blurb: nt("Gaat voor de rest.") },
+  { key: "mid", label: nt("Middel"), blurb: nt("De gewone stand.") },
+  { key: "low", label: nt("Laag"), blurb: nt("Wacht op de anderen.") },
 ];
 
 /**
@@ -105,10 +115,10 @@ export function doelUit(waarde) {
 }
 
 const DOEL_HINT =
-  "Leeg is de algemene limiet (Laden tot op de kaart). Ingevuld laadt hij voor deze klaar-tijd tot dit percentage.";
+  nt("Leeg is de algemene limiet (Laden tot op de kaart). Ingevuld laadt hij voor deze klaar-tijd tot dit percentage.");
 
 export const priorityLabel = (key) =>
-  PRIORITIES.find((item) => item.key === key)?.label ?? "Middel";
+  t(PRIORITIES.find((item) => item.key === key)?.label ?? "Middel");
 
 /** Een leeg schema, met alle helften ingevuld zodat er nergens op None gerekend wordt. */
 export const blankPlan = (deviceId) => ({
@@ -156,25 +166,25 @@ export function planSummary(plan, modus = "") {
   if (!plan.enabled) {
     // Een laadpaal is zonder planning in een modus (v0.87.0); zie de knoppen
     // Snel, Continu en Zon op de kaart.
-    if (modus === "zon") return "Uit. Zonder planning laadt hij alleen op zon.";
-    if (modus === "continu") return "Uit. Zonder planning laadt hij continu, met zon erbovenop.";
-    if (modus === "snel") return "Uit. Snel staat aan: hij laadt op vol vermogen.";
-    return "Uit. De coach bepaalt zelf wanneer en kijkt puur naar het gunstigste moment.";
+    if (modus === "zon") return t("Uit. Zonder planning laadt hij alleen op zon.");
+    if (modus === "continu") return t("Uit. Zonder planning laadt hij continu, met zon erbovenop.");
+    if (modus === "snel") return t("Uit. Snel staat aan: hij laadt op vol vermogen.");
+    return t("Uit. De coach bepaalt zelf wanneer en kijkt puur naar het gunstigste moment.");
   }
   if (!planTimes(plan).length) {
-    return "Aan, maar er staat nog geen enkele tijd in.";
+    return t("Aan, maar er staat nog geen enkele tijd in.");
   }
   if (plan.per_day) {
     const days = plan.days
       .filter((day) => day.enabled && (day.not_before || day.start_by || day.done_by))
-      .map((day) => `${DAYS_SHORT[day.day]}${doelUit(day.target) !== null ? ` ${doelUit(day.target)}%` : ""}`);
-    return `Per dag · ${days.join(", ")}`;
+      .map((day) => `${dayShort(day.day)}${doelUit(day.target) !== null ? ` ${doelUit(day.target)}%` : ""}`);
+    return t("Per dag · {dagen}", { dagen: days.join(", ") });
   }
   const parts = TIMES.filter((time) => plan.window[time.key]).map(
-    (time) => `${time.short.toLowerCase()} ${plan.window[time.key]}`
+    (time) => `${t(time.short).toLowerCase()} ${plan.window[time.key]}`
   );
-  if (doelUit(plan.window.target) !== null) parts.push(`tot ${doelUit(plan.window.target)}%`);
-  return `Elke dag · ${parts.join(" · ")}`;
+  if (doelUit(plan.window.target) !== null) parts.push(t("tot {doel}%", { doel: doelUit(plan.window.target) }));
+  return t("Elke dag · {delen}", { delen: parts.join(" · ") });
 }
 
 /** Het eerstvolgende moment dat de klok deze tijd aanwijst, vandaag of morgen. */
@@ -363,28 +373,28 @@ export class DacScheduleSheet extends DacElement {
       <dialog class="sheet wide" tabindex="-1" aria-labelledby="plan-title">
         <div class="sheet-head">
           <div>
-            <div class="eyebrow" id="plan-eyebrow">Apparaat</div>
+            <div class="eyebrow" id="plan-eyebrow">${t("Apparaat")}</div>
             <h3 id="plan-title"></h3>
           </div>
-          <button class="sheet-close" type="button" id="plan-close" aria-label="Sluiten">
+          <button class="sheet-close" type="button" id="plan-close" aria-label="${t("Sluiten")}">
             ${icons.close}
           </button>
         </div>
         <section id="plan-blok">
-        <h4 class="sheet-kop" id="plan-kop">Schema</h4>
-        <p class="sheet-sub">Zeg binnen welke grenzen de coach mag werken. Vul alleen in wat je belangrijk vindt, want elk van de drie tijden mag leeg blijven.</p>
+        <h4 class="sheet-kop" id="plan-kop">${t("Schema")}</h4>
+        <p class="sheet-sub">${t("Zeg binnen welke grenzen de coach mag werken. Vul alleen in wat je belangrijk vindt, want elk van de drie tijden mag leeg blijven.")}</p>
 
         <div class="fields">
           <div class="row">
-            <label>Voor welke dagen?</label>
+            <label>${t("Voor welke dagen?")}</label>
             <div class="segmented" id="plan-mode">
               <button type="button" data-mode="same" aria-pressed="false">
-                <strong>Elke dag hetzelfde</strong>
-                Eén stel tijden voor de hele week.
+                <strong>${t("Elke dag hetzelfde")}</strong>
+                ${t("Eén stel tijden voor de hele week.")}
               </button>
               <button type="button" data-mode="per-day" aria-pressed="false">
-                <strong>Per dag</strong>
-                In het weekend andere tijden dan doordeweeks.
+                <strong>${t("Per dag")}</strong>
+                ${t("In het weekend andere tijden dan doordeweeks.")}
               </button>
             </div>
           </div>
@@ -401,13 +411,13 @@ export class DacScheduleSheet extends DacElement {
 
           <div class="notice" id="plan-release" hidden>
             ${icons.warning}
-            <span>Vrijgeven blijft nodig. De coach start dit apparaat alleen als je op het overzicht hebt aangegeven dat het mag draaien. Een tijd instellen is niet hetzelfde als toestemming geven.</span>
+            <span>${t("Vrijgeven blijft nodig. De coach start dit apparaat alleen als je op het overzicht hebt aangegeven dat het mag draaien. Een tijd instellen is niet hetzelfde als toestemming geven.")}</span>
           </div>
         </div>
         </section>
 
         <section id="vk-blok" hidden>
-          <h4 class="sheet-kop">Zo wil je het</h4>
+          <h4 class="sheet-kop">${t("Zo wil je het")}</h4>
           <div class="fields" id="vk"></div>
         </section>
 
@@ -467,7 +477,7 @@ export class DacScheduleSheet extends DacElement {
     if (!this.device_) return;
     const plan = this.plan_();
 
-    this.$("#plan-eyebrow").textContent = typeMeta(this.device_.type).label;
+    this.$("#plan-eyebrow").textContent = t(typeMeta(this.device_.type).label);
     this.$("#plan-title").textContent = this.label_;
 
     this.paintVoorkeur_();
@@ -505,30 +515,32 @@ export class DacScheduleSheet extends DacElement {
       holder.innerHTML = TIMES.map(
         (time) => `
         <div class="row">
-          <label for="w-${time.key}">${time.label}</label>
+          <label for="w-${time.key}">${t(time.label)}</label>
           <div class="time-field">
             <input type="time" id="w-${time.key}" step="300" data-window="${time.key}">
             <button type="button" class="wipe" data-wipe="${time.key}"
-                    aria-label="${time.label} leegmaken">${icons.close}</button>
+                    aria-label="${t("{veld} leegmaken", { veld: t(time.label) })}">${icons.close}</button>
           </div>
-          <span class="sub">${time.hint}</span>
+          <span class="sub">${t(time.hint)}</span>
         </div>`
       ).join("") + (kentDoel(this.device_) ? `
         <div class="row">
-          <label for="w-target">Laden tot</label>
+          <label for="w-target">${t("Laden tot")}</label>
           <div class="time-field">
             <input type="number" class="doel" id="w-target" min="10" max="100" step="5"
                    inputmode="numeric" placeholder="algemeen" data-window-target>
             <span class="procent">%</span>
             <button type="button" class="wipe" data-wipe-target
-                    aria-label="Laden tot leegmaken">${icons.close}</button>
+                    aria-label="${t("{veld} leegmaken", { veld: t("Laden tot") })}">${icons.close}</button>
           </div>
-          <span class="sub">${DOEL_HINT}</span>
+          <span class="sub">${t(DOEL_HINT)}</span>
         </div>` : "");
       holder.dataset.built = this.device_.type;
 
       const doelVeld = holder.querySelector("[data-window-target]");
       if (doelVeld) {
+        // Het woord in de taal van nu; in de opmaak staat het Nederlands, waar de breedte op gemeten is.
+        doelVeld.placeholder = t("algemeen");
         doelVeld.addEventListener("change", () => this.saveWindow_());
         holder.querySelector("[data-wipe-target]").addEventListener("click", () => {
           doelVeld.value = "";
@@ -567,34 +579,34 @@ export class DacScheduleSheet extends DacElement {
     const TIMES = timesFor(this.device_);
     if (holder.dataset.built !== this.device_.type) {
       holder.innerHTML = DAYS.map(
-        (name, day) => `
+        (day) => `
         <div class="plan-day">
           <label class="check" for="d-${day}">
             <input type="checkbox" id="d-${day}" data-day="${day}">
-            <span><strong>${name}</strong></span>
+            <span><strong>${dayName(day)}</strong></span>
           </label>
           <div class="day-times" data-times="${day}">
             ${TIMES.map(
               (time) => `
               <div class="row">
-                <label for="d-${day}-${time.key}">${time.short}</label>
+                <label for="d-${day}-${time.key}">${t(time.short)}</label>
                 <div class="time-field">
                   <input type="time" id="d-${day}-${time.key}" step="300"
                          data-day-time="${day}:${time.key}">
                   <button type="button" class="wipe" data-day-wipe="${day}:${time.key}"
-                          aria-label="${time.label} leegmaken">${icons.close}</button>
+                          aria-label="${t("{veld} leegmaken", { veld: t(time.label) })}">${icons.close}</button>
                 </div>
               </div>`
             ).join("")}
             ${kentDoel(this.device_) ? `
               <div class="row">
-                <label for="d-${day}-target">Laden tot</label>
+                <label for="d-${day}-target">${t("Laden tot")}</label>
                 <div class="time-field">
                   <input type="number" class="doel" id="d-${day}-target" min="10" max="100" step="5"
                          inputmode="numeric" placeholder="algemeen" data-day-target="${day}">
                   <span class="procent">%</span>
                   <button type="button" class="wipe" data-day-wipe-target="${day}"
-                          aria-label="Laden tot leegmaken">${icons.close}</button>
+                          aria-label="${t("{veld} leegmaken", { veld: t("Laden tot") })}">${icons.close}</button>
                 </div>
               </div>` : ""}
           </div>
@@ -608,6 +620,7 @@ export class DacScheduleSheet extends DacElement {
         );
         const doelVeld = holder.querySelector(`[data-day-target="${day}"]`);
         if (doelVeld) {
+          doelVeld.placeholder = t("algemeen");
           doelVeld.addEventListener("change", () => this.saveDays_());
           holder.querySelector(`[data-day-wipe-target="${day}"]`).addEventListener("click", () => {
             doelVeld.value = "";
@@ -667,7 +680,7 @@ export class DacScheduleSheet extends DacElement {
 
     if (!planTimes(plan).length) {
       hint.textContent =
-        "Nog geen tijd ingevuld. Zolang er geen enkele grens staat, is later altijd goedkoper en begint de coach nooit.";
+        t("Nog geen tijd ingevuld. Zolang er geen enkele grens staat, is later altijd goedkoper en begint de coach nooit.");
       return;
     }
 
@@ -677,7 +690,7 @@ export class DacScheduleSheet extends DacElement {
 
     if (!doneBy) {
       hint.textContent =
-        "De coach kiest binnen deze grenzen het goedkoopste moment om te starten.";
+        t("De coach kiest binnen deze grenzen het goedkoopste moment om te starten.");
       return;
     }
     // Een laadpaal heeft geen programma om van terug te rekenen: hoe lang een
@@ -685,21 +698,24 @@ export class DacScheduleSheet extends DacElement {
     // paal mag leveren. Hier een starttijd beloven zou een getal zijn waar
     // niemand achter kan staan.
     if (!PROGRAM_TYPES.includes(this.device_.type)) {
-      hint.textContent = `De auto moet om ${doneBy} opgeladen zijn. Hoe lang dat duurt hangt van de auto af, dus de coach begint zo vroeg als nodig is en laadt bij voorkeur op de goedkoopste uren daarvoor.`;
+      hint.textContent = t("De auto moet om {tijd} opgeladen zijn. Hoe lang dat duurt hangt van de auto af, dus de coach begint zo vroeg als nodig is en laadt bij voorkeur op de goedkoopste uren daarvoor.", { tijd: doneBy });
       return;
     }
 
     const program = this.program_();
     if (!program) {
       hint.textContent =
-        "Klaar om is het einde van het programma, niet het begin. Hoe lang het duurt leest de coach van het apparaat af.";
+        t("Klaar om is het einde van het programma, niet het begin. Hoe lang het duurt leest de coach van het apparaat af.");
       return;
     }
 
     const [hours, minutes] = doneBy.split(":").map(Number);
     const start = huisNu();
     start.setHours(hours, minutes - program.minutes, 0, 0);
-    hint.textContent = `${program.label} duurt ${program.measured ? "gemeten" : "ongeveer"} ${duration(program.minutes)}, dus starten moet uiterlijk om ${clock(start)}.`;
+    const waarden = { programma: t(program.label), duur: duration(program.minutes), klok: clock(start) };
+    hint.textContent = program.measured
+      ? t("{programma} duurt gemeten {duur}, dus starten moet uiterlijk om {klok}.", waarden)
+      : t("{programma} duurt ongeveer {duur}, dus starten moet uiterlijk om {klok}.", waarden);
   }
 
   /**
@@ -753,16 +769,16 @@ export class DacScheduleSheet extends DacElement {
     // en dat leest als "bekend tot morgen" terwijl het het omgekeerde betekent.
     // Het laatste moment dat werkelijk gedekt is, is waar de zin over gaat.
     const last = new Date(horizon.getTime() - 1);
-    const day = sameDayAsToday(last) ? "vandaag" : "morgen";
+    const vandaag = sameDayAsToday(last);
     const when =
       horizon.getHours() === 0 && horizon.getMinutes() === 0
-        ? `het einde van ${day}`
-        : `${day} ${clock(horizon)}`;
+        ? (vandaag ? t("het einde van vandaag") : t("het einde van morgen"))
+        : vandaag ? t("vandaag {klok}", { klok: clock(horizon) }) : t("morgen {klok}", { klok: clock(horizon) });
     notice.hidden = false;
-    this.$("#plan-horizon-text").textContent =
-      `De prijzen zijn bekend tot ${when}. Een klaar-tijd daarna kan de coach niet doorrekenen. ` +
-      "Hij plant dan met wat hij weet, en dat is zelden het goedkoopste moment. " +
-      "De prijzen voor de volgende dag komen meestal in de loop van de middag binnen; daarna klopt de planning weer.";
+    this.$("#plan-horizon-text").textContent = t(
+      "De prijzen zijn bekend tot {wanneer}. Een klaar-tijd daarna kan de coach niet doorrekenen. Hij plant dan met wat hij weet, en dat is zelden het goedkoopste moment. De prijzen voor de volgende dag komen meestal in de loop van de middag binnen; daarna klopt de planning weer.",
+      { wanneer: when }
+    );
   }
 
   /**
@@ -853,7 +869,7 @@ export class DacScheduleSheet extends DacElement {
       this.paintVoorkeur_();
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de voorkeur niet opslaan", error);
-      status.textContent = "Dit is niet opgeslagen. Probeer het nog een keer.";
+      status.textContent = t("Dit is niet opgeslagen. Probeer het nog een keer.");
       status.classList.add("bad");
       // Terug naar wat er wel is opgeslagen.
       vulVoorkeuren(this.$("#vk"), this.device_, null, this.settings_?.contract ?? null);
@@ -876,7 +892,7 @@ export class DacScheduleSheet extends DacElement {
       this.paint_();
     } catch (error) {
       console.warn("[DomotiApp Coach] kon het schema niet opslaan", error);
-      status.textContent = "Dit is niet opgeslagen. Probeer het nog een keer.";
+      status.textContent = t("Dit is niet opgeslagen. Probeer het nog een keer.");
       status.classList.add("bad");
       // Terugzetten wat er op het scherm al veranderd was, anders staat er iets
       // dat nergens is opgeschreven.

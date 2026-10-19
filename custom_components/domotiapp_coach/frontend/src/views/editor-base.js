@@ -9,6 +9,7 @@
 
 import { DacElement } from "../base.js";
 import { icons } from "../icons.js";
+import { t } from "../i18n.js";
 
 /** How long a confirmation stays up. Long enough to notice, then gone. */
 const TOAST_MS = 3200;
@@ -291,25 +292,32 @@ export const editorCss = /* css */ `
   :host([readonly]) .savebar { display: none; }
 `;
 
-export const adminNoticeHtml = /* html */ `
+/**
+ * Html die pas bij het tekenen zijn tekst krijgt (v0.139.0): bij het laden van de module is
+ * de taal nog niet bekend. Een scherm zet hem in zijn template als `${saveBarHtml}`, en dat
+ * roept `toString` aan; `saveBarHtml()` mag ook.
+ */
+const bijHetTekenen = (bouw) => Object.assign(() => bouw(), { toString: bouw });
+
+export const adminNoticeHtml = bijHetTekenen(() => /* html */ `
   <div class="notice admin-notice" hidden>
     ${icons.warning}
-    <span>Je bent geen beheerder in Home Assistant, dus je kunt dit wel bekijken maar niet opslaan.</span>
+    <span>${t("Je bent geen beheerder in Home Assistant, dus je kunt dit wel bekijken maar niet opslaan.")}</span>
   </div>
-`;
+`);
 
-export const saveBarHtml = /* html */ `
+export const saveBarHtml = bijHetTekenen(() => /* html */ `
   <div class="savebar" id="savebar">
     <span class="status" id="save-status"></span>
-    <button type="button" id="revert">Ongedaan maken</button>
-    <button type="button" class="primary" id="save">Opslaan</button>
+    <button type="button" id="revert">${t("Ongedaan maken")}</button>
+    <button type="button" class="primary" id="save">${t("Opslaan")}</button>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite">
     <span id="toast-icon"></span>
     <span id="toast-text"></span>
-    <button type="button" class="dismiss" id="toast-dismiss" aria-label="Sluiten">${icons.close}</button>
+    <button type="button" class="dismiss" id="toast-dismiss" aria-label="${t("Sluiten")}">${icons.close}</button>
   </div>
-`;
+`);
 
 export class DacEditorElement extends DacElement {
   /**
@@ -486,7 +494,7 @@ export class DacEditorElement extends DacElement {
     this.$("#save-status").textContent = blockers.length
       ? blockers[0]
       : dirty
-        ? "Niet-opgeslagen wijzigingen"
+        ? t("Niet-opgeslagen wijzigingen")
         : "";
     this.$("#save-status").classList.toggle("blocked", blockers.length > 0);
   }
@@ -501,7 +509,7 @@ export class DacEditorElement extends DacElement {
     const status = this.$("#save-status");
     const button = this.$("#save");
     button.disabled = true;
-    status.textContent = "Opslaan…";
+    status.textContent = t("Opslaan…");
 
     try {
       const saved = await this.hass_.callWS({
@@ -512,11 +520,11 @@ export class DacEditorElement extends DacElement {
       this.draft_ = clone(saved);
       this.fire("dac-settings-saved", { settings: saved });
       status.textContent = "";
-      this.toast_("Opgeslagen", true);
+      this.toast_(t("Opgeslagen"), true);
       this.afterSave_();
     } catch (error) {
       status.textContent = "";
-      this.toast_(`Opslaan mislukt: ${error?.message ?? error}`, false);
+      this.toast_(t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), false);
     } finally {
       button.disabled = false;
       this.$("#savebar").classList.toggle("on", this.dirty_());
@@ -551,7 +559,7 @@ export class DacEditorElement extends DacElement {
       this.fire("dac-settings-saved", { settings: saved });
       this.toast_(message, true);
     } catch (error) {
-      this.toast_(`Opslaan mislukt: ${error?.message ?? error}`, false);
+      this.toast_(t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), false);
     } finally {
       this.syncSaveBar_();
     }

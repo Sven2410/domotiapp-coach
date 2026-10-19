@@ -8,6 +8,8 @@
  * de twee naast elkaar.
  */
 
+import { t } from "./i18n.js";
+
 /** Welke soorten zon kunnen opnemen, in de volgorde van de standaard. */
 export const ZON_SOORTEN = ["laadpaal", "boiler", "thuisbatterij"];
 
@@ -38,16 +40,16 @@ export function zonRegels(opgeslagen, apparaten) {
 
 /** Wat een regel zegt, in gewone woorden, voor onder de naam. */
 export function regelUitleg(type, grens) {
-  if (type === "boiler") return "tot hij warm is";
+  if (type === "boiler") return t("tot hij warm is");
   if (grens === null || grens === undefined) {
-    return type === "laadpaal" ? "tot het doel van de auto" : "tot vol";
+    return type === "laadpaal" ? t("tot het doel van de auto") : t("tot vol");
   }
   // Een grens hier is voorrang en geen eindpunt (v0.114.1). De eigenaar koos op
   // 12-10-2026 om "Laden tot" van de auto en deze grens apart te houden, met een
   // naam die zegt wat hij doet: daarna laadt het apparaat door op wat er over is.
   return type === "laadpaal"
-    ? `eerst tot de auto op ${grens}% staat, daarna wat er over is`
-    : `eerst tot ${grens}%, daarna wat er over is`;
+    ? t("eerst tot de auto op {grens}% staat, daarna wat er over is", { grens })
+    : t("eerst tot {grens}%, daarna wat er over is", { grens });
 }
 
 // --- Voorrang bij planningen (v0.93.0) ----------------------------------------

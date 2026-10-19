@@ -12,7 +12,8 @@
  *    idling at "0,08 kW" is unreadable; "80 W" is not.
  */
 
-const LOCALE = "nl-NL";
+import { locale, t } from "./i18n.js";
+
 
 /** Multiplier from a sensor's stated power unit to watts. */
 const POWER_TO_WATT = {
@@ -33,7 +34,7 @@ const ENERGY_TO_KWH = {
 };
 
 const num = (value, digits) =>
-  value.toLocaleString(LOCALE, {
+  value.toLocaleString(locale(), {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
@@ -175,12 +176,12 @@ export function duration(minutes) {
 
   const hours = Math.floor(total / 60);
   const rest = total % 60;
-  return rest ? `${hours} u ${rest} min` : `${hours} u`;
+  return rest ? t("{u} u {m} min", { u: hours, m: rest }) : t("{u} u", { u: hours });
 }
 
 /** A time of day from a Date, as "21:30". */
 export const clock = (date) =>
-  date.toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" });
+  date.toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
 
 /*
  * De klok van het huis (v0.138.1). De coach schrijft elke tijd in de tijd van Home
@@ -302,15 +303,15 @@ export function countdown(raw, unit) {
       : eenheid === "h" || eenheid === "hr" || eenheid === "hrs" || eenheid === "hours" || eenheid === "uur" || eenheid === "u" ? number * 60
       : eenheid === "d" || eenheid === "days" || eenheid === "dagen" ? number * 1440
       : number;
-    return minutes <= 0 ? "Klaar" : `nog ${duration(minutes)}`;
+    return minutes <= 0 ? t("Klaar") : t("nog {duur}", { duur: duration(minutes) });
   }
 
   const end = asDate(raw);
   if (!end) return null;
 
   const minutes = (end.getTime() - Date.now()) / 60_000;
-  if (minutes <= 0) return "Klaar";
-  return `nog ${duration(minutes)} (klaar om ${clock(end)})`;
+  if (minutes <= 0) return t("Klaar");
+  return t("nog {duur} (klaar om {klok})", { duur: duration(minutes), klok: clock(end) });
 }
 
 /**
@@ -330,8 +331,8 @@ export function moment(raw) {
     date.getMonth() === today.getMonth() &&
     date.getFullYear() === today.getFullYear();
 
-  if (sameDay) return `vandaag ${clock(date)}`;
-  return `${date.toLocaleDateString(LOCALE, { day: "2-digit", month: "2-digit" })} ${clock(date)}`;
+  if (sameDay) return t("vandaag {klok}", { klok: clock(date) });
+  return `${date.toLocaleDateString(locale(), { day: "2-digit", month: "2-digit" })} ${clock(date)}`;
 }
 
 /**

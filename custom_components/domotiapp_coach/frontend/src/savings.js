@@ -13,6 +13,8 @@
  * en dat staat erbij: liever een gat dan een verzonnen getal.
  */
 
+import { getal, nt, t } from "./i18n.js";
+
 /** Het moment waarop een beurt in het overzicht valt: het eind, of nu als hij nog loopt. */
 export function moment(beurt) {
   const t = new Date(beurt?.ended ?? beurt?.plugged_at ?? "");
@@ -105,39 +107,42 @@ export const soort = (beurt) =>
  * De eigenaar op 09-09-2026: "wat het heeft gekost nu tegenover een duurder moment
  * van het vrijgeven, en wat je op zonne-energie laadt bespaar je natuurlijk
  * ook door minder stroom in te kopen."
+ *
+ * De woorden blijven Nederlands (`nt`): het rapport neemt ze zo over, en het scherm
+ * vertaalt ze waar het ze toont, met `t(w.hoeveel)`.
  */
 export function woorden(items) {
   const soorten = new Set((items ?? []).map(soort));
   const alleen = (s) => soorten.size === 1 && soorten.has(s);
   if (alleen("programma")) {
     return {
-      wanneer: "Vrijgegeven",
-      hoeveel: "Verbruikt",
-      vanaf: "Meteen starten",
-      uitleg: "Bespaard is wat meteen starten na het vrijgeven gekost had, met alles van het net, min wat het kostte.",
+      wanneer: nt("Vrijgegeven"),
+      hoeveel: nt("Verbruikt"),
+      vanaf: nt("Meteen starten"),
+      uitleg: nt("Bespaard is wat meteen starten na het vrijgeven gekost had, met alles van het net, min wat het kostte."),
     };
   }
   if (alleen("boiler")) {
     return {
-      wanneer: "Warmte nodig",
-      hoeveel: "Verbruikt",
-      vanaf: "Meteen verwarmen",
-      uitleg: "Bespaard is wat meteen verwarmen gekost had, met alles van het net, min wat het kostte.",
+      wanneer: nt("Warmte nodig"),
+      hoeveel: nt("Verbruikt"),
+      vanaf: nt("Meteen verwarmen"),
+      uitleg: nt("Bespaard is wat meteen verwarmen gekost had, met alles van het net, min wat het kostte."),
     };
   }
   if (alleen("laden") || !soorten.size) {
     return {
-      wanneer: "Ingeplugd",
-      hoeveel: "Geladen",
-      vanaf: "Vanaf inpluggen",
-      uitleg: "Bespaard is wat laden op vol vermogen vanaf het inpluggen gekost had, met alles van het net, min wat het kostte.",
+      wanneer: nt("Ingeplugd"),
+      hoeveel: nt("Geladen"),
+      vanaf: nt("Vanaf inpluggen"),
+      uitleg: nt("Bespaard is wat laden op vol vermogen vanaf het inpluggen gekost had, met alles van het net, min wat het kostte."),
     };
   }
   return {
-    wanneer: "Vanaf",
-    hoeveel: "Verbruikt",
-    vanaf: "Zonder coach",
-    uitleg: "Bespaard is wat het zonder de coach gekost had, met alles van het net, min wat het kostte.",
+    wanneer: nt("Vanaf"),
+    hoeveel: nt("Verbruikt"),
+    vanaf: nt("Zonder coach"),
+    uitleg: nt("Bespaard is wat het zonder de coach gekost had, met alles van het net, min wat het kostte."),
   };
 }
 
@@ -145,25 +150,25 @@ export function woorden(items) {
 export function opmerking(beurt) {
   if (!beurt) return "";
   const delen = [];
-  if (!beurt.complete) delen.push("loopt nog");
+  if (!beurt.complete) delen.push(t("loopt nog"));
   if (beurt.resumed && (beurt.ref_price === null || beurt.ref_price === undefined)) {
     // De coach stapte midden in de beurt in en kent het begin niet, dus ook
     // de prijs van toen niet: geen ijkpunt, geen verzonnen bedrag.
     delen.push(
       {
-        programma: "na een herstart, prijs bij vrijgeven onbekend",
-        boiler: "na een herstart, prijs van het moment onbekend",
-      }[soort(beurt)] ?? "na een herstart, prijs bij inpluggen onbekend"
+        programma: t("na een herstart, prijs bij vrijgeven onbekend"),
+        boiler: t("na een herstart, prijs van het moment onbekend"),
+      }[soort(beurt)] ?? t("na een herstart, prijs bij inpluggen onbekend")
     );
   } else if (beurt.price_unknown) {
     const zonder = Number(beurt.unknown_kwh) || 0;
     delen.push(
       beurt.saved !== null && beurt.saved !== undefined && zonder > 0
-        ? `${zonder.toFixed(1).replace(".", ",")} kWh zonder prijs`
-        : "prijs onbekend"
+        ? t("{kwh} kWh zonder prijs", { kwh: getal(zonder, 1) })
+        : t("prijs onbekend")
     );
   } else if (beurt.resumed) {
-    delen.push("na een herstart");
+    delen.push(t("na een herstart"));
   }
   return delen.join(", ");
 }

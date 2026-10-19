@@ -37,7 +37,7 @@ export function paalPerUur(blokken = []) {
       price: prijzen.length ? prijzen.reduce((t, p) => t + p, 0) / prijzen.length : null,
       charging: laden.length > 0,
       why: laden.length && laden.length < groep.length
-        ? `${eerste.why} (in ${laden.length} van de ${groep.length} kwartieren)`
+        ? t("{waarom} (in {n} van de {m} kwartieren)", { waarom: eerste.why, n: laden.length, m: groep.length })
         : eerste.why,
       solar_kwh: som(groep, "solar_kwh"),
       accu_kwh: som(groep, "accu_kwh"),
@@ -52,6 +52,7 @@ import { coachRijen } from "./data-source.js";
 import { huisNu } from "./format.js";
 import { icons } from "./icons.js";
 import { sheetCss } from "./theme.js";
+import { datum, getal, locale, nt, t, tn } from "./i18n.js";
 
 const css = /* css */ `
   ${sheetCss}
@@ -153,7 +154,7 @@ const klok = (iso) => {
 // het weekend loopt zegt anders "uiterlijk beginnen 22:36" en dan zoek je op
 // de verkeerde avond. Zonder dag als het wel vandaag is, want "vr 22:36" leest
 // op vrijdag als een raadsel.
-const DAGEN = ["zo", "ma", "di", "wo", "do", "vr", "za"];
+// De dag uit Intl ("zo", "Sun"), in de taal van nu (v0.139.0).
 const wanneer = (iso) => {
   if (!iso) return "–";
   const moment = new Date(iso);
@@ -163,38 +164,38 @@ const wanneer = (iso) => {
     moment.getFullYear() === vandaag.getFullYear() &&
     moment.getMonth() === vandaag.getMonth() &&
     moment.getDate() === vandaag.getDate();
-  return zelfde ? klok(iso) : `${DAGEN[moment.getDay()]} ${klok(iso)}`;
+  return zelfde ? klok(iso) : `${datum(moment, { weekday: "short" })} ${klok(iso)}`;
 };
 
 const kwh = (value) =>
   value === null || value === undefined
     ? "–"
-    : `${Number(value).toFixed(1).replace(".", ",")} kWh`;
+    : `${getal(value, 1)} kWh`;
 
 const euro = (value) =>
   value === null || value === undefined
     ? ""
-    : `€ ${Number(value).toFixed(3)}`.replace(".", ",");
+    : `€ ${getal(value, 3)}`;
 
 const uren = (value) => {
   if (value === null || value === undefined) return "–";
   const totaal = Math.round(Number(value) * 60);
   const u = Math.floor(totaal / 60);
   const m = totaal % 60;
-  return u ? `${u} u ${String(m).padStart(2, "0")} m` : `${m} min`;
+  return u ? t("{u} u {m} m", { u, m: String(m).padStart(2, "0") }) : `${m} min`;
 };
 
 const twee = (n) => String(n).padStart(2, "0");
 const klokje = (d) => `${twee(d.getHours())}:${twee(d.getMinutes())}`;
-const kommagetal = (n, d = 1) => Number(n).toLocaleString("nl-NL", { minimumFractionDigits: d, maximumFractionDigits: d });
+const kommagetal = (n, d = 1) => Number(n).toLocaleString(locale(), { minimumFractionDigits: d, maximumFractionDigits: d });
 
 /** "vandaag", "morgen" of de dag, voor een start die later komt. */
 function welkeDag(d, nu) {
   const dag = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const verschil = Math.round((dag(d) - dag(nu)) / 86400000);
-  if (verschil === 0) return "vandaag";
-  if (verschil === 1) return "morgen";
-  return d.toLocaleDateString("nl-NL", { weekday: "long" });
+  if (verschil === 0) return t("vandaag");
+  if (verschil === 1) return t("morgen");
+  return datum(d, { weekday: "long" });
 }
 
 /**
@@ -218,12 +219,12 @@ export function apparaatVooruit(besluit, rijen, nu = huisNu()) {
     if (!vensters.length) return null;
     const nodig = Number(besluit.needed_kwh);
     kop = [
-      ["Nodig", Number.isFinite(nodig) && nodig > 0 ? `${kommagetal(nodig)} kWh` : "onbekend", "tot het vat vol is"],
-      ["Gepland", `${vensters.length} ${vensters.length === 1 ? "blok" : "blokken"}`, "de goedkoopste"],
-      ["Begint", klokje(vensters[0].start), welkeDag(vensters[0].start, nu)],
+      [t("Nodig"), Number.isFinite(nodig) && nodig > 0 ? `${kommagetal(nodig)} kWh` : t("onbekend"), t("tot het vat vol is")],
+      [t("Gepland"), tn(vensters.length, "{n} blok", "{n} blokken"), t("de goedkoopste")],
+      [t("Begint"), klokje(vensters[0].start), welkeDag(vensters[0].start, nu)],
     ];
-    woorden = { groen: "Verwarmen", wacht: "Wacht" };
-    wat = (v) => `verwarmt, ${kommagetal(v.kwh)} kWh`;
+    woorden = { groen: nt("Verwarmen"), wacht: nt("Wacht") };
+    wat = (v) => t("verwarmt, {kwh} kWh", { kwh: kommagetal(v.kwh) });
   } else if (besluit.kind === "programma") {
     let start = null;
     let eind = null;
@@ -238,12 +239,12 @@ export function apparaatVooruit(besluit, rijen, nu = huisNu()) {
     if (!start) return null;
     vensters = [{ start, eind: eind ?? new Date(start.getTime() + 60000), kwh: null }];
     kop = [
-      ["Programma", besluit.program_label || "onbekend", ""],
-      [besluit.running ? "Begonnen" : "Start", klokje(start), welkeDag(start, nu)],
-      ["Klaar", eind ? `rond ${klokje(eind)}` : "onbekend", eind ? welkeDag(eind, nu) : ""],
+      [t("Programma"), besluit.program_label || t("onbekend"), ""],
+      [besluit.running ? t("Begonnen") : t("Start"), klokje(start), welkeDag(start, nu)],
+      [t("Klaar"), eind ? t("rond {klok}", { klok: klokje(eind) }) : t("onbekend"), eind ? welkeDag(eind, nu) : ""],
     ];
-    woorden = { groen: "Draait", wacht: "Wacht" };
-    wat = () => (besluit.running ? "draait" : `start${besluit.program_label ? `, ${besluit.program_label}` : ""}`);
+    woorden = { groen: nt("Draait"), wacht: nt("Wacht") };
+    wat = () => (besluit.running ? t("draait") : [t("start"), besluit.program_label].filter(Boolean).join(", "));
   } else {
     return null;
   }
@@ -270,7 +271,7 @@ export function apparaatVooruit(besluit, rijen, nu = huisNu()) {
     return {
       start: v.start,
       eind: v.eind,
-      tijd: `${klokje(v.start)} tot ${klokje(v.eind)}`,
+      tijd: t("{van} tot {tot}", { van: klokje(v.start), tot: klokje(v.eind) }),
       prijs: prijs === null ? "" : `€ ${kommagetal(prijs, 3)}`,
       wat: wat(v),
     };
@@ -294,10 +295,10 @@ export class DacPlanAheadSheet extends DacElement {
       <dialog class="sheet wide" tabindex="-1" aria-labelledby="vooruit-title">
         <div class="sheet-head">
           <div>
-            <div class="eyebrow">Wat gaat hij doen</div>
+            <div class="eyebrow">${t("Wat gaat hij doen")}</div>
             <h3 id="vooruit-title"></h3>
           </div>
-          <button class="sheet-close" type="button" id="vooruit-close" aria-label="Sluiten">
+          <button class="sheet-close" type="button" id="vooruit-close" aria-label="${t("Sluiten")}">
             ${icons.close}
           </button>
         </div>
@@ -388,7 +389,7 @@ export class DacPlanAheadSheet extends DacElement {
       const leeg = document.createElement("div");
       leeg.className = "leeg";
       leeg.textContent =
-        "De coach heeft nog geen plan. Dat komt zodra hij een ronde gedraaid heeft.";
+        t("De coach heeft nog geen plan. Dat komt zodra hij een ronde gedraaid heeft.");
       uurlijst.append(leeg);
       return;
     }
@@ -410,12 +411,12 @@ export class DacPlanAheadSheet extends DacElement {
       plan.planned_kwh !== null && plan.planned_kwh !== undefined &&
       Number.isFinite(nodig) && gepland > 0 && gepland + 0.05 < nodig;
     const laatste = tekort
-      ? ["Gepland", kwh(gepland),
+      ? [t("Gepland"), kwh(gepland),
           plan.solar_only
-            ? `van ${kwh(nodig)}; de rest zodra de prijzen er zijn`
-            : `van ${kwh(nodig)}; meer past er niet vóór de klaar-tijd`]
-      : ["Vol rond", wanneer(plan.expected_done),
-          plan.deadline ? `klaar om ${wanneer(plan.deadline)}` : "geen klaar-tijd"];
+            ? t("van {kwh}; de rest zodra de prijzen er zijn", { kwh: kwh(nodig) })
+            : t("van {kwh}; meer past er niet vóór de klaar-tijd", { kwh: kwh(nodig) })]
+      : [t("Vol rond"), wanneer(plan.expected_done),
+          plan.deadline ? t("klaar om {klok}", { klok: wanneer(plan.deadline) }) : t("geen klaar-tijd")];
 
     // Aan de paal, en wat daarvan in de accu komt (v0.94.0). De bewoner van de
     // eerste woning rekende 78 kWh x 30% = 23,4 en las 26,0: dat was aan de
@@ -424,11 +425,12 @@ export class DacPlanAheadSheet extends DacElement {
     const verlies = plan.efficiency ? Math.round((1 - plan.efficiency) * 100) : null;
     const nogBij = inAccu === null || verlies === null
       ? ""
-      : `aan de paal; ${kwh(inAccu)} in de auto, ${verlies}% laadverlies `
-        + (plan.efficiency_measured ? "(gemeten aan deze auto)" : "(aangenomen, nog niet gemeten)");
+      : plan.efficiency_measured
+        ? t("aan de paal; {kwh} in de auto, {verlies}% laadverlies (gemeten aan deze auto)", { kwh: kwh(inAccu), verlies })
+        : t("aan de paal; {kwh} in de auto, {verlies}% laadverlies (aangenomen, nog niet gemeten)", { kwh: kwh(inAccu), verlies });
     this.paintKop_([
-      ["Nog te laden", kwh(plan.kwh_needed), nogBij],
-      ["Op vol vermogen", uren(plan.hours_needed),
+      [t("Nog te laden"), kwh(plan.kwh_needed), nogBij],
+      [t("Op vol vermogen"), uren(plan.hours_needed),
         // Sinds v0.61.0 kan dit een meting zijn: wat er de afgelopen uren
         // gemiddeld onder de zekering overbleef, bij een huis met een
         // warmtepomp die om het kwartier aangaat. Zie structural_ceiling.
@@ -437,19 +439,21 @@ export class DacPlanAheadSheet extends DacElement {
         // na een herstart, als er nog niets gemeten is.
         plan.amps
           ? plan.measured
-            ? `${plan.amps} A, wat er de afgelopen uren gemiddeld overbleef onder je zekering`
+            ? t("{a} A, wat er de afgelopen uren gemiddeld overbleef onder je zekering", { a: plan.amps })
             : typeof plan.fuse_name === "string"
-              ? `${plan.amps} A, meer past er niet onder ${plan.fuse_name ? `de zekering van de groep ${plan.fuse_name}` : "je zekering"}`
-              : `${plan.amps} A, wat paal en auto kunnen`
+              ? plan.fuse_name
+                ? t("{a} A, meer past er niet onder de zekering van de groep {groep}", { a: plan.amps, groep: plan.fuse_name })
+                : t("{a} A, meer past er niet onder je zekering", { a: plan.amps })
+              : t("{a} A, wat paal en auto kunnen", { a: plan.amps })
           : ""],
-      ["Uiterlijk beginnen", wanneer(plan.latest_start), "met een uur speling"],
+      [t("Uiterlijk beginnen"), wanneer(plan.latest_start), t("met een uur speling")],
       laatste,
       // De thuisbatterij helpt mee (v0.95.0): wat er daardoor niet van het net
       // komt. De bewoner van de eerste woning: "de EV-laadplanning zou nu moeten
       // weten dat de accu mee gaat helpen."
       ...(Number(plan.accu_kwh) > 0.05
-        ? [["Uit je thuisbatterij", kwh(plan.accu_kwh),
-            Number.isFinite(plan.accu_to) ? `tot hij op ${plan.accu_to}% staat` : "de rest komt van het net"]]
+        ? [[t("Uit je thuisbatterij"), kwh(plan.accu_kwh),
+            Number.isFinite(plan.accu_to) ? t("tot hij op {n}% staat", { n: plan.accu_to }) : t("de rest komt van het net")]]
         : []),
     ]);
 
@@ -487,25 +491,25 @@ export class DacPlanAheadSheet extends DacElement {
       // kW." Een server van vóór v0.47.5 stuurt geen amps mee; dan blijft de
       // zonkolom zoals hij was.
       const zonTekst = blok.solar_kwh > 0.05
-        ? `${Number(blok.solar_kwh).toFixed(1).replace(".", ",")} kWh zon`
+        ? t("{kwh} kWh zon", { kwh: getal(blok.solar_kwh, 1) })
         : "";
       const accuTekst = Number(blok.accu_kwh) > 0.05
-        ? `${Number(blok.accu_kwh).toFixed(1).replace(".", ",")} kWh uit je thuisbatterij`
+        ? t("{kwh} kWh uit je thuisbatterij", { kwh: getal(blok.accu_kwh, 1) })
         : "";
-      const waarvan = [zonTekst, accuTekst].filter(Boolean).join(" en ");
+      const waarvan = [zonTekst, accuTekst].filter(Boolean).join(` ${t("en")} `);
       const zon = document.createElement("span");
       zon.className = "zon";
       const wat = document.createElement("span");
       wat.className = "wat";
       if (blok.charging && blok.amps) {
         zon.textContent = `${blok.amps} A`;
-        const kw = `${Number(blok.kw).toFixed(1).replace(".", ",")} kW`;
+        const kw = `${getal(blok.kw, 1)} kW`;
         wat.textContent = waarvan
-          ? `Laden op ${kw}, waarvan ${waarvan}: ${blok.why}`
-          : `Laden op ${kw}: ${blok.why}`;
+          ? t("Laden op {kw}, waarvan {waarvan}: {waarom}", { kw, waarvan, waarom: blok.why })
+          : t("Laden op {kw}: {waarom}", { kw, waarom: blok.why });
       } else {
         zon.textContent = zonTekst;
-        wat.textContent = blok.charging ? `Laden, ${blok.why}` : `Wachten, ${blok.why}`;
+        wat.textContent = blok.charging ? t("Laden, {waarom}", { waarom: blok.why }) : t("Wachten, {waarom}", { waarom: blok.why });
       }
 
       rij.append(tijd, prijs, zon, wat);
@@ -516,29 +520,24 @@ export class DacPlanAheadSheet extends DacElement {
       const leeg = document.createElement("div");
       leeg.className = "leeg";
       leeg.textContent =
-        plan.note || "Er is niets te plannen: er is geen auto aangesloten of er zijn geen prijzen.";
+        plan.note || t("Er is niets te plannen: er is geen auto aangesloten of er zijn geen prijzen.");
       uurlijst.append(leeg);
       this.$("#vooruit-voet").textContent = "";
       return;
     }
 
     const geschat = plan.estimated
-      ? " De zon per uur is een schatting: er staat geen uurverwachting klaar, dus " +
-        "de dagverwachting is over de daglichturen verdeeld."
+      ? ` ${t("De zon per uur is een schatting: er staat geen uurverwachting klaar, dus de dagverwachting is over de daglichturen verdeeld.")}`
       : "";
     const gemeten = plan.measured
-      ? ` De afgelopen uren bleef er gemiddeld ${plan.amps} A over voor de paal, omdat ` +
-        "je huis bij vlagen veel trok. Daarmee rekent hij voor de uren die komen, " +
-        "zodat hij op tijd begint."
+      ? ` ${t("De afgelopen uren bleef er gemiddeld {a} A over voor de paal, omdat je huis bij vlagen veel trok. Daarmee rekent hij voor de uren die komen, zodat hij op tijd begint.", { a: plan.amps })}`
       : "";
     // Sinds v0.67.0: de zonverwachting bijgesteld met wat de meter gaf. Zie
     // solar_measured_note in planner.py.
     const zon = plan.solar_note ? ` ${plan.solar_note}` : "";
     this.$("#vooruit-voet").textContent =
       (plan.note ||
-        "Dit is wat de coach nu van plan is. Hij vergelijkt elk uur tot je klaar-tijd, " +
-          "en per uur wat je eigen zon kost tegen wat het net kost. Verandert je " +
-          "accustand, de prijs of de verwachting, dan rekent hij het opnieuw uit.") +
+        t("Dit is wat de coach nu van plan is. Hij vergelijkt elk uur tot je klaar-tijd, en per uur wat je eigen zon kost tegen wat het net kost. Verandert je accustand, de prijs of de verwachting, dan rekent hij het opnieuw uit.")) +
       geschat +
       gemeten +
       zon;
@@ -558,8 +557,12 @@ export class DacPlanAheadSheet extends DacElement {
    * daar niet, want dan voedt de batterij het huis. Bij de laadpaal blijft het
    * laden en wachten.
    */
-  paintPrijs_(rijen, wat = { groen: "Laden", wacht: "Wacht" }) {
-    const woorden = { leveren: "Ontladen aan het net", ...wat };
+  paintPrijs_(rijen, wat = { groen: nt("Laden"), wacht: nt("Wacht") }) {
+    // De woorden staan in het Nederlands in de bron en worden hier vertaald (v0.139.0).
+    const woorden = { leveren: nt("Ontladen aan het net"), ...wat };
+    for (const naam of ["groen", "leveren", "wacht"]) {
+      if (typeof woorden[naam] === "string") woorden[naam] = t(woorden[naam]);
+    }
     if (rijen) this.prijsGezet_ = true;
     const blok = this.$("#vooruit-prijs");
     // Dezelfde prijzen en hetzelfde plan: laten staan zoals hij staat, met waar
@@ -577,7 +580,7 @@ export class DacPlanAheadSheet extends DacElement {
     const kop = document.createElement("div");
     kop.className = "prijs-kop";
     const links = document.createElement("span");
-    links.textContent = berekend.stap <= 20 ? "Prijs per kwartier" : "Prijs per uur";
+    links.textContent = berekend.stap <= 20 ? t("Prijs per kwartier") : t("Prijs per uur");
     kop.append(links);
     // Rechts alleen wat een kWh van het net gemiddeld kost, en alleen waar dat
     // nergens anders staat (v0.130.1). De bewoner van de eerste woning op
@@ -587,8 +590,9 @@ export class DacPlanAheadSheet extends DacElement {
     if (berekend.gemiddeld !== null && woorden.gemiddelde !== false) {
       const rechts = document.createElement("span");
       const sterk = document.createElement("strong");
-      sterk.textContent = `€ ${berekend.gemiddeld.toFixed(3).replace(".", ",")}`;
-      rechts.append("gemiddeld ", sterk, " per kWh van het net");
+      sterk.textContent = `€ ${getal(berekend.gemiddeld, 3)}`;
+      const [voor, na] = t("gemiddeld {prijs} per kWh van het net").split("{prijs}");
+      rechts.append(voor, sterk, na);
       kop.append(rechts);
     }
 
@@ -690,7 +694,7 @@ export class DacPlanAheadSheet extends DacElement {
       uurlijst.append(rij);
     }
     this.$("#vooruit-voet").textContent =
-      "Dit is wat de coach nu van plan is. Verandert de zon of de prijs, dan rekent hij het opnieuw uit.";
+      t("Dit is wat de coach nu van plan is. Verandert de zon of de prijs, dan rekent hij het opnieuw uit.");
   }
 
   paintAccu_(accu) {
@@ -734,13 +738,12 @@ export class DacPlanAheadSheet extends DacElement {
       const leeg = document.createElement("div");
       leeg.className = "leeg";
       leeg.textContent =
-        "De coach heeft nog geen plan: er zijn geen prijzen, of hij weet de accustand niet.";
+        t("De coach heeft nog geen plan: er zijn geen prijzen, of hij weet de accustand niet.");
       uurlijst.append(leeg);
     }
     this.$("#vooruit-voet").textContent =
       (accu.voet ? `${accu.voet} ` : "") +
-      "De accustand is die aan het eind van het uur. Dit is wat de coach nu van plan " +
-      "is; verandert de zon, het huis of de prijs, dan rekent hij het elke minuut opnieuw uit.";
+      t("De accustand is die aan het eind van het uur. Dit is wat de coach nu van plan is; verandert de zon, het huis of de prijs, dan rekent hij het elke minuut opnieuw uit.");
   }
 }
 

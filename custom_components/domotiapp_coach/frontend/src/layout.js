@@ -13,22 +13,26 @@
  * nothing that can reach another device, and nothing to ask the customer about.
  */
 
+import { nt } from "./i18n.js";
+
 /**
  * The cards on the overview, in the order a fresh install shows them.
  *
  * Order matters here: it is the default arrangement, and it is also where a
  * card added in a later version ends up. `label` is what the customer sees
  * while rearranging, so it names the card rather than the code behind it.
+ * Dutch here, marked with `nt`; overview.js translates it where it is shown
+ * (v0.139.0), because the language is not known yet when this module loads.
  */
 export const OVERVIEW_CARDS = [
-  { id: "coach", label: "Energiecoach" },
+  { id: "coach", label: nt("Energiecoach") },
   // Sinds v0.133.0: wat er de komende uren gebeurt (vooruitblik.js).
-  { id: "vooruit", label: "Vooruitblik" },
-  { id: "tiles", label: "Meetwaarden" },
-  { id: "phases", label: "Belasting per fase" },
-  { id: "meters", label: "Je meter" },
-  { id: "steerable", label: "Aanstuurbare apparaten" },
-  { id: "flow", label: "Energiestroom" },
+  { id: "vooruit", label: nt("Vooruitblik") },
+  { id: "tiles", label: nt("Meetwaarden") },
+  { id: "phases", label: nt("Belasting per fase") },
+  { id: "meters", label: nt("Je meter") },
+  { id: "steerable", label: nt("Aanstuurbare apparaten") },
+  { id: "flow", label: nt("Energiestroom") },
 ];
 
 const KNOWN = new Set(OVERVIEW_CARDS.map((card) => card.id));

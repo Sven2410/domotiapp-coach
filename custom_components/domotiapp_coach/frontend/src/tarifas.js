@@ -5,12 +5,15 @@
  * coach. Zie daar en docs/contract.md, Portugal. Kent Home Assistant niet.
  */
 
+import { nt } from "./i18n.js";
+
+/** De namen van de tijdvakken; vertaald waar ze getoond worden, met `t(NAMEN[...])`. */
 export const NAMEN = {
-  simples: "Enkel (simples)",
-  vazio: "Daluren (vazio)",
-  fora_vazio: "Buiten de daluren (fora do vazio)",
-  cheias: "Normaal (cheias)",
-  ponta: "Piek (ponta)",
+  simples: nt("Enkel (simples)"),
+  vazio: nt("Daluren (vazio)"),
+  fora_vazio: nt("Buiten de daluren (fora do vazio)"),
+  cheias: nt("Normaal (cheias)"),
+  ponta: nt("Piek (ponta)"),
 };
 
 const DIARIO_VAZIO = [[0, 480], [1320, 1440]];

@@ -38,6 +38,7 @@ import {
   deviceLabel,
   deviceLabelMap,
   hasCars,
+  inTaal,
   isBattery,
   isReadOnly,
   KOELWAREN,
@@ -54,6 +55,7 @@ import {
   typeMeta,
 } from "../devices.js";
 import { duration } from "../format.js";
+import { datum, getal, locale, t } from "../i18n.js";
 import {
   DacEditorElement,
   adminNoticeHtml,
@@ -65,20 +67,23 @@ import "../components/entity-picker.js";
 
 const uid = () => `dev-${Math.random().toString(36).slice(2, 9)}`;
 
-/** "ontbreekt nog: Status" / "ontbreken nog: Status, Programma en Starten". */
-const missingText = (missing) => {
-  const list =
-    missing.length > 1
-      ? `${missing.slice(0, -1).join(", ")} en ${missing.at(-1)}`
-      : missing.join("");
-  return `${missing.length > 1 ? "ontbreken" : "ontbreekt"} nog: ${list}`;
-};
+/** "Status" / "Status, Programma en Starten", in de taal van nu. */
+const missingList = (missing) =>
+  missing.length > 1
+    ? t("{rest} en {laatste}", { rest: missing.slice(0, -1).join(", "), laatste: missing.at(-1) })
+    : missing.join("");
+
+/** "Om te kunnen sturen ontbreekt nog: Status." / "... ontbreken nog: Status en Starten." */
+const missingSentence = (missing) =>
+  missing.length > 1
+    ? t("Om te kunnen sturen ontbreken nog: {lijst}.", { lijst: missingList(missing) })
+    : t("Om te kunnen sturen ontbreekt nog: {lijst}.", { lijst: missingList(missing) });
 
 /** Tekst van de bewoner, veilig in een attribuut of tussen tags. */
 const veilig = (tekst) =>
   String(tekst ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-const euroKort = (n) => `€ ${Number(n || 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const euroKort = (n) => `€ ${getal(n || 0, 2)}`;
 
 /**
  * Wat het opnieuw uitrekenen van "Opgeleverd" gaf (v0.130.1), in een paar zinnen.
@@ -87,14 +92,17 @@ const euroKort = (n) => `€ ${Number(n || 0).toLocaleString("nl-NL", { minimumF
 export function herrekenZin(uit) {
   if (!uit) return "";
   if (uit.fout) return uit.fout;
-  if (!uit.dagen) return "Over die dagen staan er geen kwartieren van de meter en de batterij in de opslag van de coach.";
-  const datum = new Date(`${uit.van}T12:00:00`).toLocaleDateString("nl-NL", { day: "numeric", month: "long" });
+  if (!uit.dagen) return t("Over die dagen staan er geen kwartieren van de meter en de batterij in de opslag van de coach.");
+  const dag = datum(`${uit.van}T12:00:00`, { day: "numeric", month: "long" });
+  const bedragen = { datum: dag, n: uit.dagen, voor: euroKort(uit.voor), na: euroKort(uit.na) };
   const zinnen = [
-    `Vanaf ${datum}, ${uit.dagen} ${uit.dagen === 1 ? "dag" : "dagen"}: Opgeleverd was ${euroKort(uit.voor)}, en wordt ${euroKort(uit.na)}.`,
+    uit.dagen === 1
+      ? t("Vanaf {datum}, {n} dag: Opgeleverd was {voor}, en wordt {na}.", bedragen)
+      : t("Vanaf {datum}, {n} dagen: Opgeleverd was {voor}, en wordt {na}.", bedragen),
   ];
-  if (uit.zonder_prijs) zinnen.push(`${uit.zonder_prijs} kwartieren hadden geen prijs en tellen niet mee.`);
-  zinnen.push(uit.nordpool ? "De marktprijs van toen komt van Nord Pool." : "De prijzen van toen komen uit de statistiek van Home Assistant.");
-  if (uit.toegepast) zinnen.push("Overgenomen.");
+  if (uit.zonder_prijs) zinnen.push(t("{n} kwartieren hadden geen prijs en tellen niet mee.", { n: uit.zonder_prijs }));
+  zinnen.push(uit.nordpool ? t("De marktprijs van toen komt van Nord Pool.") : t("De prijzen van toen komen uit de statistiek van Home Assistant."));
+  if (uit.toegepast) zinnen.push(t("Overgenomen."));
   return zinnen.join(" ");
 }
 
@@ -123,9 +131,9 @@ class DacViewDevices extends DacEditorElement {
     return `
       <div class="wrap">
         <header class="intro">
-          <div class="eyebrow">Apparaten</div>
-          <h1>Wat er in huis energie vraagt</h1>
-          <p>Deze apparaten verschijnen als bollen in de energiestroom op het overzicht. Er staan er altijd hoogstens twee in beeld: draaien er meer, dan krijgt de zwaarste zijn eigen bol en worden de rest bij elkaar opgeteld in de tweede.</p>
+          <div class="eyebrow">${t("Apparaten")}</div>
+          <h1>${t("Wat er in huis energie vraagt")}</h1>
+          <p>${t("Deze apparaten verschijnen als bollen in de energiestroom op het overzicht. Er staan er altijd hoogstens twee in beeld: draaien er meer, dan krijgt de zwaarste zijn eigen bol en worden de rest bij elkaar opgeteld in de tweede.")}</p>
         </header>
 
         ${adminNoticeHtml}
@@ -133,23 +141,23 @@ class DacViewDevices extends DacEditorElement {
         <div id="device-list"></div>
 
         <div class="adds">
-          <button class="add" type="button" id="add-device">${icons.plus} Apparaat toevoegen</button>
-          <button class="add" type="button" id="add-room">${icons.plus} Ruimte toevoegen</button>
+          <button class="add" type="button" id="add-device">${icons.plus} ${t("Apparaat toevoegen")}</button>
+          <button class="add" type="button" id="add-room">${icons.plus} ${t("Ruimte toevoegen")}</button>
         </div>
       </div>
 
       <dialog class="sheet" id="confirm" aria-labelledby="confirm-title">
         <div class="sheet-head">
           <div>
-            <div class="eyebrow">Verwijderen</div>
+            <div class="eyebrow">${t("Verwijderen")}</div>
             <h3 id="confirm-title"></h3>
           </div>
-          <button class="sheet-close" type="button" id="confirm-close" aria-label="Sluiten">${icons.close}</button>
+          <button class="sheet-close" type="button" id="confirm-close" aria-label="${t("Sluiten")}">${icons.close}</button>
         </div>
         <p class="sheet-sub" id="confirm-sub"></p>
         <div class="sheet-buttons">
-          <button type="button" id="confirm-no">Laat staan</button>
-          <button type="button" class="danger" id="confirm-yes">Verwijderen</button>
+          <button type="button" id="confirm-no">${t("Laat staan")}</button>
+          <button type="button" class="danger" id="confirm-yes">${t("Verwijderen")}</button>
         </div>
       </dialog>
 
@@ -280,7 +288,7 @@ class DacViewDevices extends DacEditorElement {
    */
   blockers_() {
     if ((this.draft_?.rooms ?? []).some((ruimte) => !String(ruimte.name ?? "").trim())) {
-      return ["Geef elke ruimte een naam, of verwijder hem."];
+      return [t("Geef elke ruimte een naam, of verwijder hem.")];
     }
     const broken = (this.draft_?.devices ?? [])
       .map((device) => ({ device, missing: missingForControl(device) }))
@@ -290,10 +298,14 @@ class DacViewDevices extends DacEditorElement {
 
     const [first] = broken;
     if (broken.length === 1) {
-      return [`${this.labelFor_(first.device)}: om te kunnen sturen ${missingText(first.missing)}.`];
+      const naam = this.labelFor_(first.device);
+      const lijst = missingList(first.missing);
+      return [first.missing.length > 1
+        ? t("{naam}: om te kunnen sturen ontbreken nog: {lijst}.", { naam, lijst })
+        : t("{naam}: om te kunnen sturen ontbreekt nog: {lijst}.", { naam, lijst })];
     }
     return [
-      `${broken.length} apparaten kunnen nog niet gestuurd worden, om te beginnen ${this.labelFor_(first.device)}.`,
+      t("{n} apparaten kunnen nog niet gestuurd worden, om te beginnen {naam}.", { n: broken.length, naam: this.labelFor_(first.device) }),
     ];
   }
 
@@ -304,11 +316,11 @@ class DacViewDevices extends DacEditorElement {
    */
   ruimteKop_(groep, ruimtes) {
     const n = groep.leden.length;
-    const aantal = `${n} ${n === 1 ? "apparaat" : "apparaten"}`;
+    const aantal = n === 1 ? t("{n} apparaat", { n }) : t("{n} apparaten", { n });
     if (!groep.ruimte) {
       return `
         <div class="room-head vast">
-          <span class="room-title">Zonder ruimte</span>
+          <span class="room-title">${t("Zonder ruimte")}</span>
           <span class="room-count">${aantal}</span>
         </div>`;
     }
@@ -316,19 +328,19 @@ class DacViewDevices extends DacEditorElement {
     return `
         <div class="room-head">
           <input class="room-name" type="text" data-room-name="${plek}" value="${veilig(groep.ruimte.name)}"
-                 placeholder="Naam van de ruimte" maxlength="40" autocomplete="off" aria-label="Naam van de ruimte">
+                 placeholder="${t("Naam van de ruimte")}" maxlength="40" autocomplete="off" aria-label="${t("Naam van de ruimte")}">
           <span class="room-count">${aantal}</span>
           ${
             ruimtes.length > 1
-              ? `<span class="move" role="group" aria-label="Volgorde van de ruimtes">
-            <button type="button" data-move-room="${plek}" data-step="-1" aria-label="Ruimte omhoog"${plek === 0 ? " disabled" : ""}>${icons.arrowLeft}</button>
-            <button type="button" data-move-room="${plek}" data-step="1" aria-label="Ruimte omlaag"${plek === ruimtes.length - 1 ? " disabled" : ""}>${icons.arrowRight}</button>
+              ? `<span class="move" role="group" aria-label="${t("Volgorde van de ruimtes")}">
+            <button type="button" data-move-room="${plek}" data-step="-1" aria-label="${t("Ruimte omhoog")}"${plek === 0 ? " disabled" : ""}>${icons.arrowLeft}</button>
+            <button type="button" data-move-room="${plek}" data-step="1" aria-label="${t("Ruimte omlaag")}"${plek === ruimtes.length - 1 ? " disabled" : ""}>${icons.arrowRight}</button>
           </span>`
               : ""
           }
-          <button class="remove" type="button" data-remove-room="${plek}" aria-label="Ruimte verwijderen">${icons.trash}</button>
+          <button class="remove" type="button" data-remove-room="${plek}" aria-label="${t("Ruimte verwijderen")}">${icons.trash}</button>
         </div>
-        ${n ? "" : `<p class="room-empty">Nog niets in deze ruimte. Kies hem bij een apparaat, onder Ruimte.</p>`}`;
+        ${n ? "" : `<p class="room-empty">${t("Nog niets in deze ruimte. Kies hem bij een apparaat, onder Ruimte.")}</p>`}`;
   }
 
   /** Everything is filled in and stored, so the list goes back to being a list. */
@@ -357,14 +369,14 @@ class DacViewDevices extends DacEditorElement {
       ? ""
       : `
         <div class="row">
-          <label for="brand-${index}">Merk</label>
+          <label for="brand-${index}">${t("Merk")}</label>
           <select id="brand-${index}" data-field="brand" data-index="${index}">
-            <option value=""${device.brand ? "" : " selected"}>Kies een merk…</option>
+            <option value=""${device.brand ? "" : " selected"}>${t("Kies een merk…")}</option>
             ${brands.map(
-              (b) => `<option value="${b.id}"${b.id === device.brand ? " selected" : ""}>${b.label}</option>`
+              (b) => `<option value="${b.id}"${b.id === device.brand ? " selected" : ""}>${t(b.label)}</option>`
             ).join("")}
           </select>
-          <span class="sub">Welke gegevens een ${what} levert, hangt van het merk af. Kies er een en de bijbehorende velden verschijnen.${brands.some((b) => b.note) ? ` ${brands.filter((b) => b.note).map((b) => b.note).join(" ")}` : ""}</span>
+          <span class="sub">${t("Welke gegevens een {wat} levert, hangt van het merk af. Kies er een en de bijbehorende velden verschijnen.", { wat: what })}${brands.some((b) => b.note) ? ` ${brands.filter((b) => b.note).map((b) => inTaal(b).note).join(" ")}` : ""}</span>
         </div>`;
 
     // Something with brands but none picked has nothing to ask for yet.
@@ -376,7 +388,7 @@ class DacViewDevices extends DacEditorElement {
       ? ""
       : `
       <div class="row">
-        <label>Vermogenssensor</label>
+        <label>${t("Vermogenssensor")}</label>
         <dac-entity-picker data-power data-index="${index}"></dac-entity-picker>
       </div>`;
 
@@ -386,14 +398,14 @@ class DacViewDevices extends DacEditorElement {
         <div class="row">
           <label>${field.label}</label>
           <dac-entity-picker data-entity-key="${field.key}" data-index="${index}"></dac-entity-picker>
-          <span class="sub">${field.hint}${field.needed ? " Nodig zodra de coach mag sturen." : ""}</span>
+          <span class="sub">${field.hint}${field.needed ? ` ${t("Nodig zodra de coach mag sturen.")}` : ""}</span>
         </div>${field.key === "release_button" ? this.pressHtml_(device, index) : ""}`
       )
       .join("");
 
     const note =
       brands.length && !extra
-        ? `<p class="sub">Voor dit merk zijn de velden nog niet uitgewerkt. Het vermogen wordt wel meegenomen.</p>`
+        ? `<p class="sub">${t("Voor dit merk zijn de velden nog niet uitgewerkt. Het vermogen wordt wel meegenomen.")}</p>`
         : "";
 
     return `${brandRow}${this.integrationHtml_(device, index)}${power}${extra}${this.buttonsHtml_(device, index)}${this.actionsHtml_(device, index)}${this.programsHtml_(device, index)}${note}${this.dishwasherPlugHtml_(device, index)}`;
@@ -408,30 +420,38 @@ class DacViewDevices extends DacEditorElement {
    */
   plugHtml_(device, index) {
     const gekozen = plugAppliance(device);
+    // Op naam in de taal van nu, met "Iets anders" onderaan; in het Nederlands de volgorde
+    // van de tabel zelf.
+    const opNaam = (lijst) => lijst.map(inTaal).sort((a, b) => a.label.localeCompare(b.label, locale()));
+    const keuzes = [
+      ...opNaam(PLUG_APPLIANCES.filter((a) => a.id !== "overig")),
+      ...PLUG_APPLIANCES.filter((a) => a.id === "overig").map(inTaal),
+    ];
     const keuze = `
         <div class="row">
-          <label for="appliance-${index}">Apparaat</label>
+          <label for="appliance-${index}">${t("Apparaat")}</label>
           <select id="appliance-${index}" data-field="appliance" data-index="${index}">
-            <option value=""${gekozen ? "" : " selected"}>Kies wat eraan hangt…</option>
-            ${PLUG_APPLIANCES.map(
+            <option value=""${gekozen ? "" : " selected"}>${t("Kies wat eraan hangt…")}</option>
+            ${keuzes.map(
               (a) => `<option value="${a.id}"${a.id === gekozen?.id ? " selected" : ""}>${a.label}</option>`
             ).join("")}
           </select>
           <span class="sub">${
             ["vaatwasser", "wasmachine", "droger"].includes(gekozen?.id)
-              ? `Op een smart plug meet de coach hem alleen. Moet hij hem plannen, voeg hem dan toe als ${gekozen.label}.`
-              : "Daarmee krijgt hij zijn naam en zijn icoon."
+              ? t("Op een smart plug meet de coach hem alleen. Moet hij hem plannen, voeg hem dan toe als {soort}.", { soort: t(gekozen.label) })
+              : t("Daarmee krijgt hij zijn naam en zijn icoon.")
           }</span>
         </div>`;
     if (!gekozen) return keuze;
+    const schakelaar = inTaal(PLUG_SWITCH_FIELD);
     return `${keuze}
         <div class="row">
-          <label>${PLUG_SWITCH_FIELD.label}</label>
-          <dac-entity-picker data-entity-key="${PLUG_SWITCH_FIELD.key}" data-index="${index}"></dac-entity-picker>
-          <span class="sub">${PLUG_SWITCH_FIELD.hint}</span>
+          <label>${schakelaar.label}</label>
+          <dac-entity-picker data-entity-key="${schakelaar.key}" data-index="${index}"></dac-entity-picker>
+          <span class="sub">${schakelaar.hint}</span>
         </div>
         <div class="row">
-          <label>Vermogenssensor</label>
+          <label>${t("Vermogenssensor")}</label>
           <dac-entity-picker data-power data-index="${index}"></dac-entity-picker>
         </div>
         ${this.energyHtml_(device, index)}
@@ -448,13 +468,13 @@ class DacViewDevices extends DacEditorElement {
           <input type="checkbox" id="always-on-${index}" data-field="always_on" data-index="${index}"
                  ${device.always_on ? "checked" : ""}>
           <span>
-            <strong>Dit apparaat moet altijd aan staan</strong>
-            Gaat de stekker uit, om wat voor reden ook, dan zet de coach hem meteen weer aan. Lukt dat na 2 minuten nog niet, dan krijg je een melding als je die aanzet onder Meldingen. Bij Alleen uitlezen en Adviseren zet hij hem niet zelf aan, maar meldt hij het wel.
+            <strong>${t("Dit apparaat moet altijd aan staan")}</strong>
+            ${t("Gaat de stekker uit, om wat voor reden ook, dan zet de coach hem meteen weer aan. Lukt dat na 2 minuten nog niet, dan krijg je een melding als je die aanzet onder Meldingen. Bij Alleen uitlezen en Adviseren zet hij hem niet zelf aan, maar meldt hij het wel.")}
           </span>
         </label>
         <div class="notice"${this.plugMissing_(device) ? "" : " hidden"} data-plug-missing="${index}">
           ${icons.warning}
-          <span>Kies de schakelaar, anders kan de coach hem niet aanhouden.</span>
+          <span>${t("Kies de schakelaar, anders kan de coach hem niet aanhouden.")}</span>
         </div>`;
   }
 
@@ -465,13 +485,14 @@ class DacViewDevices extends DacEditorElement {
    */
   dishwasherPlugHtml_(device, index) {
     if (device.type !== "vaatwasser") return "";
+    const stekker = inTaal(DISHWASHER_PLUG_FIELD);
     return `
         <div class="block">
-          <div class="block-title">Stekker</div>
+          <div class="block-title">${t("Stekker")}</div>
           <div class="row">
-            <label>${DISHWASHER_PLUG_FIELD.label}</label>
-            <dac-entity-picker data-entity-key="${DISHWASHER_PLUG_FIELD.key}" data-index="${index}"></dac-entity-picker>
-            <span class="sub">${DISHWASHER_PLUG_FIELD.hint}</span>
+            <label>${stekker.label}</label>
+            <dac-entity-picker data-entity-key="${stekker.key}" data-index="${index}"></dac-entity-picker>
+            <span class="sub">${stekker.hint}</span>
           </div>
           ${this.alwaysOnHtml_(device, index)}
         </div>`;
@@ -495,14 +516,14 @@ class DacViewDevices extends DacEditorElement {
     const machine = brandMeta(device)?.energyCounter;
     return `
             <div class="row">
-              <label>Energieteller${machine ? "" : " (optioneel)"}</label>
+              <label>${machine ? t("Energieteller") : t("Energieteller (optioneel)")}</label>
               <dac-entity-picker data-energy="${index}"></dac-entity-picker>
               <span class="sub">${
                 stekker
-                  ? "De teller van de smart plug in kWh, als die er een heeft. Daarmee klopt het verbruik in je rapport tot op de komma; zonder wordt het afgeleid uit het gemiddelde vermogen."
+                  ? t("De teller van de smart plug in kWh, als die er een heeft. Daarmee klopt het verbruik in je rapport tot op de komma; zonder wordt het afgeleid uit het gemiddelde vermogen.")
                   : machine
-                  ? "De sensor Energieverbruik van de machine, in kWh. Een vermogenssensor heeft hij niet: hieruit telt de coach wat een programma verbruikt en wat het kost. Zonder plant hij alleen op de duur."
-                  : "De teller van dit apparaat in kWh, als die er is. Bij een laadpaal is dat de teller van alles wat hij ooit geladen heeft. Daarmee klopt het verbruik in je rapport tot op de komma en klopt het aantal kWh in het verslag na een laadbeurt; zonder wordt allebei afgeleid uit het gemiddelde vermogen."
+                  ? t("De sensor Energieverbruik van de machine, in kWh. Een vermogenssensor heeft hij niet: hieruit telt de coach wat een programma verbruikt en wat het kost. Zonder plant hij alleen op de duur.")
+                  : t("De teller van dit apparaat in kWh, als die er is. Bij een laadpaal is dat de teller van alles wat hij ooit geladen heeft. Daarmee klopt het verbruik in je rapport tot op de komma en klopt het aantal kWh in het verslag na een laadbeurt; zonder wordt allebei afgeleid uit het gemiddelde vermogen.")
               }</span>
             </div>`;
   }
@@ -523,15 +544,15 @@ class DacViewDevices extends DacEditorElement {
         <div class="row">
           <label>${button.label}</label>
           <dac-entity-picker data-entity-key="${button.key}" data-index="${index}"></dac-entity-picker>
-          <span class="sub">${button.hint}${button.needed ? " Nodig zodra de coach mag sturen." : ""}</span>
+          <span class="sub">${button.hint}${button.needed ? ` ${t("Nodig zodra de coach mag sturen.")}` : ""}</span>
         </div>`
       )
       .join("");
 
     return `
       <div class="row">
-        <label>Bediening</label>
-        <span class="sub">Wat er ingedrukt wordt om dit apparaat te laten lopen. Dit is wat de knoppen onder Handmatige besturing op het overzicht doen; de coach doet het nog niet uit zichzelf.</span>
+        <label>${t("Bediening")}</label>
+        <span class="sub">${t("Wat er ingedrukt wordt om dit apparaat te laten lopen. Dit is wat de knoppen onder Handmatige besturing op het overzicht doen; de coach doet het nog niet uit zichzelf.")}</span>
         <div class="fields">${rows}</div>
       </div>`;
   }
@@ -575,14 +596,16 @@ class DacViewDevices extends DacEditorElement {
         const key = program.key || programKey(program.label);
         const meting = measured.get(key);
         const gemeten = meting
-          ? `${duration(meting.minutes)}, ${Number(meting.kwh).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWh`
-            + (Number(meting.peak_w) > 0 ? `, piek ${Math.round(Number(meting.peak_w))} W` : "")
-            + (Number(meting.runs) > 1 ? ` (${meting.runs} beurten)` : "")
+          ? [`${duration(meting.minutes)}`, `${getal(meting.kwh, 2)} kWh`,
+             ...(Number(meting.peak_w) > 0 ? [t("piek {w} W", { w: Math.round(Number(meting.peak_w)) })] : [])].join(", ")
+            + (Number(meting.runs) > 1 ? ` (${t("{n} beurten", { n: meting.runs })})` : "")
           : "";
+        // De naam van de machine of uit de tabel, en dan alleen ter weergave vertaald: wat
+        // de bewoner zelf typt en wat er bewaard wordt blijft zoals het is.
         const naam = vast
-          ? `<span class="name">${text(program.label)}</span>`
+          ? `<span class="name">${text(t(program.label))}</span>`
           : `<input type="text" data-prog-field="label" data-index="${index}" data-row="${row}"
-                   value="${attr(program.label)}" placeholder="Naam" autocomplete="off" spellcheck="false">`;
+                   value="${attr(program.label)}" placeholder="${t("Naam")}" autocomplete="off" spellcheck="false">`;
         // Gemeten: de velden tonen de meting en staan op slot.
         const slot = meting ? " disabled" : "";
         const minuten = meting ? Math.round(Number(meting.minutes)) : program.minutes;
@@ -599,40 +622,40 @@ class DacViewDevices extends DacEditorElement {
                    data-prog-field="peak_w" data-index="${index}" data-row="${row}" value="${attr(piek)}"> W</td>
         <td class="measured">${gemeten
           ? `<span>${gemeten}</span>
-             <button type="button" class="link" data-prog-take="${key}" data-index="${index}" title="De meting wordt je eigen opgave">overnemen</button>
-             <button type="button" class="link" data-prog-forget="${key}" data-index="${index}" title="Terug naar je eigen getallen">wissen</button>`
-          : `<span class="none">nog niet gemeten</span>`}</td>
-        ${vast ? "" : `<td><button type="button" class="remove small" data-prog-remove="${row}" data-index="${index}" aria-label="Programma verwijderen">${icons.trash}</button></td>`}
+             <button type="button" class="link" data-prog-take="${key}" data-index="${index}" title="${t("De meting wordt je eigen opgave")}">${t("overnemen")}</button>
+             <button type="button" class="link" data-prog-forget="${key}" data-index="${index}" title="${t("Terug naar je eigen getallen")}">${t("wissen")}</button>`
+          : `<span class="none">${t("nog niet gemeten")}</span>`}</td>
+        ${vast ? "" : `<td><button type="button" class="remove small" data-prog-remove="${row}" data-index="${index}" aria-label="${t("Programma verwijderen")}">${icons.trash}</button></td>`}
       </tr>`;
       })
       .join("");
 
     const gemetenUitleg = measured.size
-      ? " Een gemeten programma staat op slot en toont de meting, want daar rekent de coach mee. \"Wissen\" geeft je eigen getallen terug, \"overnemen\" maakt de meting je eigen opgave."
+      ? ` ${t("Een gemeten programma staat op slot en toont de meting, want daar rekent de coach mee. \"Wissen\" geeft je eigen getallen terug, \"overnemen\" maakt de meting je eigen opgave.")}`
       : "";
     const opgave = defaultPrograms(device).length > 0;
     const uitleg = (manual
       ? opgave
-        ? "Deze programma's kun je op de kaart kiezen; typ de namen zoals ze op je machine heten. Duur en verbruik zijn opgaven van de fabrikant als uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft op de vermogenssensor, rekent de coach met wat er gemeten is."
+        ? t("Deze programma's kun je op de kaart kiezen; typ de namen zoals ze op je machine heten. Duur en verbruik zijn opgaven van de fabrikant als uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft op de vermogenssensor, rekent de coach met wat er gemeten is.")
         // Een wasmachine of droger heeft geen opgave vooraf (v0.124.0).
-        : "Deze programma's kun je op de kaart kiezen. Voeg de programma's toe die je gebruikt, met hoe lang ze duren en wat ze ongeveer verbruiken. Zodra een programma een keer gedraaid heeft op de vermogenssensor, rekent de coach met wat er gemeten is."
+        : t("Deze programma's kun je op de kaart kiezen. Voeg de programma's toe die je gebruikt, met hoe lang ze duren en wat ze ongeveer verbruiken. Zodra een programma een keer gedraaid heeft op de vermogenssensor, rekent de coach met wat er gemeten is.")
       : options.length
-        ? "De programma's van je machine, zoals de select-entiteit ze noemt. De opgaven van de fabrikant zijn het uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft, rekent de coach met wat er bij jou gemeten is."
-        : "Vul hierboven \"Programma kiezen\" in, dan komen hier de programma's van je machine te staan. Tot die tijd rekent de coach met de opgaven van de fabrikant hieronder.") + gemetenUitleg;
+        ? t("De programma's van je machine, zoals de select-entiteit ze noemt. De opgaven van de fabrikant zijn het uitgangspunt; pas ze aan als je ze beter weet. Zodra een programma een keer gedraaid heeft, rekent de coach met wat er bij jou gemeten is.")
+        : t("Vul hierboven \"Programma kiezen\" in, dan komen hier de programma's van je machine te staan. Tot die tijd rekent de coach met de opgaven van de fabrikant hieronder.")) + gemetenUitleg;
 
     return `
       <div class="row">
-        <label>Programma's</label>
+        <label>${t("Programma's")}</label>
         <span class="sub">${uitleg}</span>
         <div class="table-scroll">
           <table class="programs edit">
-            <thead><tr><th>Programma</th><th>Duur</th><th>Energie</th><th>Piek</th><th>Gemeten</th>${vast ? "" : "<th></th>"}</tr></thead>
+            <thead><tr><th>${t("Programma")}</th><th>${t("Duur")}</th><th>${t("Energie")}</th><th>${t("Piek")}</th><th>${t("Gemeten")}</th>${vast ? "" : "<th></th>"}</tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
         <div class="prog-actions">
-          ${vast ? "" : `<button type="button" data-prog-add="${index}">${icons.plus} Programma toevoegen</button>`}
-          <button type="button" data-prog-reset="${index}"${own && opgave ? "" : " hidden"}>Opgaven terugzetten</button>
+          ${vast ? "" : `<button type="button" data-prog-add="${index}">${icons.plus} ${t("Programma toevoegen")}</button>`}
+          <button type="button" data-prog-reset="${index}"${own && opgave ? "" : " hidden"}>${t("Opgaven terugzetten")}</button>
         </div>
       </div>`;
   }
@@ -646,12 +669,12 @@ class DacViewDevices extends DacEditorElement {
   machineProgramsHtml_(device, index) {
     const measured = [...measuredFor(this.draft_, device).entries()];
     const text = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const uitleg = "Het programma kies je op de machine. Zolang het klaarstaat geeft de machine de duur, en daarmee plant de coach; het verbruik weet hij dan nog niet. Na een beurt staat het programma hieronder met wat hij gemeten heeft, en dan rekent hij daarmee.";
+    const uitleg = t("Het programma kies je op de machine. Zolang het klaarstaat geeft de machine de duur, en daarmee plant de coach; het verbruik weet hij dan nog niet. Na een beurt staat het programma hieronder met wat hij gemeten heeft, en dan rekent hij daarmee.");
     if (!measured.length) {
       return `
       <div class="row">
-        <label>Programma's</label>
-        <span class="sub">${uitleg} Er is nog niets gemeten.</span>
+        <label>${t("Programma's")}</label>
+        <span class="sub">${uitleg} ${t("Er is nog niets gemeten.")}</span>
       </div>`;
     }
     const rows = measured
@@ -659,18 +682,18 @@ class DacViewDevices extends DacEditorElement {
       <tr class="locked">
         <td><span class="name">${text(meting.label || key)}</span></td>
         <td class="tnum">${duration(Number(meting.minutes))}</td>
-        <td class="tnum">${Number(meting.kwh).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWh</td>
-        <td class="measured"><span>${Number(meting.runs) > 1 ? `${meting.runs} beurten` : "1 beurt"}</span>
-          <button type="button" class="link" data-prog-forget="${text(key)}" data-index="${index}" title="Deze meting weggooien">wissen</button></td>
+        <td class="tnum">${getal(meting.kwh, 2)} kWh</td>
+        <td class="measured"><span>${Number(meting.runs) > 1 ? t("{n} beurten", { n: meting.runs }) : t("1 beurt")}</span>
+          <button type="button" class="link" data-prog-forget="${text(key)}" data-index="${index}" title="${t("Deze meting weggooien")}">${t("wissen")}</button></td>
       </tr>`)
       .join("");
     return `
       <div class="row">
-        <label>Programma's</label>
+        <label>${t("Programma's")}</label>
         <span class="sub">${uitleg}</span>
         <div class="table-scroll">
           <table class="programs">
-            <thead><tr><th>Programma</th><th>Duur</th><th>Energie</th><th>Gemeten</th></tr></thead>
+            <thead><tr><th>${t("Programma")}</th><th>${t("Duur")}</th><th>${t("Energie")}</th><th>${t("Gemeten")}</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
@@ -774,14 +797,14 @@ class DacViewDevices extends DacEditorElement {
       .join("");
 
     const empty = !found.length
-      ? `<span class="sub warn">Home Assistant kent nog geen ${wanted.label}. Installeer die integratie eerst.</span>`
+      ? `<span class="sub warn">${t("Home Assistant kent nog geen {naam}. Installeer die integratie eerst.", { naam: wanted.label })}</span>`
       : "";
 
     return `
       <div class="row">
         <label for="hadev-${index}">${wanted.label}</label>
         <select id="hadev-${index}" data-field="device_id" data-index="${index}"${found.length ? "" : " disabled"}>
-          <option value=""${device.device_id ? "" : " selected"}>Kies je laadpaal…</option>
+          <option value=""${device.device_id ? "" : " selected"}>${t("Kies je laadpaal…")}</option>
           ${options}
         </select>
         <span class="sub">${wanted.hint}</span>
@@ -818,8 +841,8 @@ class DacViewDevices extends DacEditorElement {
 
     return `
       <div class="row">
-        <label>Opdrachten</label>
-        <span class="sub">Wat er naar <code>${brand.service}</code> gestuurd wordt als <code>${brand.field}</code>. De ingevulde woorden zijn wat Easee vandaag gebruikt; wijkt jouw paal af, dan pas je ze hier aan. Pauzeren en hervatten staan er niet bij: die schrijven een getal in de dynamische laderlimiet en hebben geen woord nodig.</span>
+        <label>${t("Opdrachten")}</label>
+        <span class="sub">${t("Wat er naar <code>{dienst}</code> gestuurd wordt als <code>{veld}</code>. De ingevulde woorden zijn wat Easee vandaag gebruikt; wijkt jouw paal af, dan pas je ze hier aan. Pauzeren en hervatten staan er niet bij: die schrijven een getal in de dynamische laderlimiet en hebben geen woord nodig.", { dienst: brand.service, veld: brand.field })}</span>
         <div class="two commands">${fields}</div>
       </div>`;
   }
@@ -833,7 +856,7 @@ class DacViewDevices extends DacEditorElement {
     // maar wel zeggen waarom.
     if (isReadOnly(device)) {
       const wat = koelUitleg(device.type)
-        || "De coach leest deze batterij alleen uit: hoe vol hij is, wat hij laadt en ontlaadt, en zijn tellers. Sturen doet hij hem niet.";
+        || t("De coach leest deze batterij alleen uit: hoe vol hij is, wat hij laadt en ontlaadt, en zijn tellers. Sturen doet hij hem niet.");
       return `
       <p class="sub" data-read-only="${index}">${wat}</p>`;
     }
@@ -849,35 +872,37 @@ class DacViewDevices extends DacEditorElement {
     const manual = isManualProgram(device);
     const stuurbaar = canSteer(device);
     const kop = stuurbaar
-      ? "De coach mag dit apparaat aansturen"
+      ? t("De coach mag dit apparaat aansturen")
       : manual
-        ? "De coach mag over dit apparaat adviseren"
-        : "De coach mag dit apparaat noemen";
+        ? t("De coach mag over dit apparaat adviseren")
+        : t("De coach mag dit apparaat noemen");
     const uitleg = stuurbaar
-      ? `Hij komt dan op het overzicht te staan, met ${needsRelease(device) ? "een vrijgaveknop en " : ""}handmatige besturing, en de coach bedient hem zelf op het gunstigste moment.`
+      ? needsRelease(device)
+        ? t("Hij komt dan op het overzicht te staan, met een vrijgaveknop en handmatige besturing, en de coach bedient hem zelf op het gunstigste moment.")
+        : t("Hij komt dan op het overzicht te staan, met handmatige besturing, en de coach bedient hem zelf op het gunstigste moment.")
       : manual
-        ? "Hij heeft geen startknop, dus sturen kan de coach niet. Hij zegt op de kaart en op je telefoon wanneer je hem aan moet zetten, en meet via de vermogenssensor hoe lang een programma duurt en wat het verbruikt. Het apparaat komt dan op het overzicht te staan, met de vrijgaveknop en de programmakeuze."
+        ? t("Hij heeft geen startknop, dus sturen kan de coach niet. Hij zegt op de kaart en op je telefoon wanneer je hem aan moet zetten, en meet via de vermogenssensor hoe lang een programma duurt en wat het verbruikt. Het apparaat komt dan op het overzicht te staan, met de vrijgaveknop en de programmakeuze.")
         : isSmartPlug(device)
-          ? "De coach plant dit apparaat niet. Met dit vinkje aan noemt hij het wel als je overschot hebt of de stroom goedkoop is; uit, dan volgt hij alleen het verbruik."
-          : "Dit apparaat zit alleen op een meetstekker: de coach kan het niet sturen en niet plannen. Met dit vinkje aan noemt hij het wel als je overschot hebt of de stroom goedkoop is; uit, dan volgt hij alleen het verbruik.";
+          ? t("De coach plant dit apparaat niet. Met dit vinkje aan noemt hij het wel als je overschot hebt of de stroom goedkoop is; uit, dan volgt hij alleen het verbruik.")
+          : t("Dit apparaat zit alleen op een meetstekker: de coach kan het niet sturen en niet plannen. Met dit vinkje aan noemt hij het wel als je overschot hebt of de stroom goedkoop is; uit, dan volgt hij alleen het verbruik.");
     // De groep waar het apparaat aan hangt, als er groepen zijn (Installatie).
     // De eerste woning, 22-09-2026: de paal en de batterij in de garage, op
     // een onderverdeelkast van 3x16 A onder een aansluiting van 3x25 A.
     // Sinds v0.101.5 onderverdeelkasten en groepen; `kind` staat er van
     // daarvoor nog niet bij, en dan heet het gewoon een groep.
     const groepen = (this.draft_?.installation?.circuits ?? []).filter((g) => g?.id);
-    const soort = (g) => (g.kind === "kast" ? "onderverdeelkast" : "groep");
+    const soort = (g) => (g.kind === "kast" ? t("onderverdeelkast") : t("groep"));
     const groepHtml = groepen.length
       ? `
       <div class="row">
-        <label for="circuit-${index}">Hangt aan</label>
+        <label for="circuit-${index}">${t("Hangt aan")}</label>
         <select id="circuit-${index}" data-field="circuit" data-index="${index}">
-          <option value=""${device.circuit ? "" : " selected"}>Hoofdkast</option>
+          <option value=""${device.circuit ? "" : " selected"}>${t("Hoofdkast")}</option>
           ${groepen
             .map((g) => `<option value="${g.id}"${device.circuit === g.id ? " selected" : ""}>${g.name || g.id} (${soort(g)})</option>`)
             .join("")}
         </select>
-        <span class="sub">Voor de zekeringbewaking: de coach blijft onder deze zekering én onder alles wat erboven hangt, tot de hoofdkast.</span>
+        <span class="sub">${t("Voor de zekeringbewaking: de coach blijft onder deze zekering én onder alles wat erboven hangt, tot de hoofdkast.")}</span>
       </div>`
       : "";
     // Hoe een laadpaal laadt zonder planning, continu laden op en zon beginnen
@@ -894,8 +919,8 @@ class DacViewDevices extends DacEditorElement {
         <input type="checkbox" id="phases-${index}" data-field="phase_switching" data-index="${index}"
                ${device.phase_switching ? "checked" : ""}>
         <span>
-          <strong>Fasen wisselen</strong>
-          Op zon laadt hij op één fase zolang het dak minder geeft dan drie fasen op hun laagst (4,1 kW), dus al vanaf 1,4 kW. Van het net laadt hij op drie fasen. Wisselen doet hij alleen als de auto stilstaat, en tijdens een beurt hooguit eens per tien minuten. Vul hiervoor ook Bruikbare fasen in. Alleen voor een auto die drie fasen kan.
+          <strong>${t("Fasen wisselen")}</strong>
+          ${t("Op zon laadt hij op één fase zolang het dak minder geeft dan drie fasen op hun laagst (4,1 kW), dus al vanaf 1,4 kW. Van het net laadt hij op drie fasen. Wisselen doet hij alleen als de auto stilstaat, en tijdens een beurt hooguit eens per tien minuten. Vul hiervoor ook Bruikbare fasen in. Alleen voor een auto die drie fasen kan.")}
         </span>
       </label>`
       : "";
@@ -910,7 +935,7 @@ class DacViewDevices extends DacEditorElement {
       </label>
       <div class="notice"${missing.length ? "" : " hidden"} data-missing="${index}">
         ${icons.warning}
-        <span>Om te kunnen sturen ${missingText(missing)}.</span>
+        <span>${missingSentence(missing)}</span>
       </div>`;
   }
 
@@ -923,7 +948,7 @@ class DacViewDevices extends DacEditorElement {
     const missing = missingForControl(this.draft_.devices[index]);
     notice.hidden = !missing.length;
     if (missing.length) {
-      notice.querySelector("span").textContent = `Om te kunnen sturen ${missingText(missing)}.`;
+      notice.querySelector("span").textContent = missingSentence(missing);
     }
   }
 
@@ -974,12 +999,12 @@ class DacViewDevices extends DacEditorElement {
     const gekozen = device.release_press ?? "";
     return `
         <div class="row">
-          <label for="press-${index}">Welke druk</label>
+          <label for="press-${index}">${t("Welke druk")}</label>
           <select id="press-${index}" data-release-press data-index="${index}">
-            <option value=""${gekozen ? "" : " selected"}>Elke druk</option>
+            <option value=""${gekozen ? "" : " selected"}>${t("Elke druk")}</option>
             ${soorten.map((s) => `<option value="${s}"${s === gekozen ? " selected" : ""}>${s}</option>`).join("")}
           </select>
-          <span class="sub">Bijvoorbeeld alleen een enkele druk, zodat dubbel drukken iets anders kan doen.</span>
+          <span class="sub">${t("Bijvoorbeeld alleen een enkele druk, zodat dubbel drukken iets anders kan doen.")}</span>
         </div>`;
   }
 
@@ -989,27 +1014,35 @@ class DacViewDevices extends DacEditorElement {
     // steered while it is set to be steered is the one thing worth saying on a
     // folded-shut line.
     const missing = missingForControl(device);
-    if (missing.length) return { text: `om te kunnen sturen ${missingText(missing)}`, warn: true };
+    if (missing.length) {
+      const lijst = missingList(missing);
+      return {
+        text: missing.length > 1
+          ? t("om te kunnen sturen ontbreken nog: {lijst}", { lijst })
+          : t("om te kunnen sturen ontbreekt nog: {lijst}", { lijst }),
+        warn: true,
+      };
+    }
     // De schakelaar van de eigen stekker als vrijgave: na de beurt zou de
     // stroom van de machine eraf gaan. De coach laat hem met rust, en dat hoort
     // de bewoner hier te lezen in plaats van te merken aan een dode vaatwasser.
     if (releaseOnOwnPlug(device, this.hass_?.entities).length) {
-      return { text: "de vrijgaveschakelaar is de stekker zelf en haalt de stroom eraf; de coach gebruikt hem niet", warn: true };
+      return { text: t("de vrijgaveschakelaar is de stekker zelf en haalt de stroom eraf; de coach gebruikt hem niet"), warn: true };
     }
     if (brandsFor(device.type).length && !device.brand) {
-      return { text: "nog geen merk gekozen", warn: true };
+      return { text: t("nog geen merk gekozen"), warn: true };
     }
     if (isSmartPlug(device) && !plugAppliance(device)) {
-      return { text: "nog niet gekozen wat eraan hangt", warn: true };
+      return { text: t("nog niet gekozen wat eraan hangt"), warn: true };
     }
     if (this.plugMissing_(device)) {
-      return { text: "altijd aan, maar zonder schakelaar", warn: true };
+      return { text: t("altijd aan, maar zonder schakelaar"), warn: true };
     }
     // Two devices on one power sensor means the energy flow counts those watts
     // twice, and the second bubble is a copy of the first. Almost always a
     // sensor picked in a hurry.
     if (device.entity && this.sharesSensor_(device)) {
-      return { text: `${device.entity} zit al op een ander apparaat`, warn: true };
+      return { text: t("{entiteit} zit al op een ander apparaat", { entiteit: device.entity }), warn: true };
     }
 
     // The sensor is the one thing worth checking without opening the card: it is
@@ -1021,10 +1054,11 @@ class DacViewDevices extends DacEditorElement {
     // twice.
     // Een merk dat alleen uitgelezen wordt heeft geen vermogenssensor (v0.123.0).
     const what = device.entity
-      || (isReadOnly(device) ? (KOELWAREN[device.type] ? "meldingen" : "alleen uitlezen") : "geen vermogenssensor");
-    const brand = brandMeta(device)?.label;
+      || (isReadOnly(device) ? (KOELWAREN[device.type] ? t("meldingen") : t("alleen uitlezen")) : t("geen vermogenssensor"));
+    const merk = brandMeta(device)?.label;
+    const brand = merk === undefined ? undefined : t(merk);
     const prefix = brand ?? ((device.name ?? "").trim() ? kindLabel(device) : "");
-    const altijd = canAlwaysOn(device) && device.always_on ? " · altijd aan" : "";
+    const altijd = canAlwaysOn(device) && device.always_on ? ` · ${t("altijd aan")}` : "";
     return {
       text: `${prefix ? `${prefix} · ${what}` : what}${altijd}`,
       warn: false,
@@ -1056,12 +1090,12 @@ class DacViewDevices extends DacEditorElement {
     const waarde = device.airco?.power_w ?? "";
     return `
       <div class="block">
-        <div class="block-title">De airco</div>
+        <div class="block-title">${t("De airco")}</div>
         <div class="row">
-          <label>Vermogen van het typeplaatje (W)</label>
+          <label>${t("Vermogen van het typeplaatje (W)")}</label>
           <input type="number" inputmode="decimal" min="0" step="50" data-airco-field="power_w" data-index="${index}"
-                 value="${waarde}" placeholder="alleen zonder vermogenssensor">
-          <span class="sub">Wat de airco trekt als hij draait. Daaraan ziet de coach of er genoeg zon over is om hem aan te zetten. Met een vermogenssensor meet hij het zelf, en dan wint de meting. Staan er twee getallen op het plaatje, voor koelen en verwarmen, neem dan het hoogste.</span>
+                 value="${waarde}" placeholder="${t("alleen zonder vermogenssensor")}">
+          <span class="sub">${t("Wat de airco trekt als hij draait. Daaraan ziet de coach of er genoeg zon over is om hem aan te zetten. Met een vermogenssensor meet hij het zelf, en dan wint de meting. Staan er twee getallen op het plaatje, voor koelen en verwarmen, neem dan het hoogste.")}</span>
         </div>
       </div>`;
   }
@@ -1077,11 +1111,11 @@ class DacViewDevices extends DacEditorElement {
     if (isReadOnly(device)) {
       return `
       <div class="block">
-        <div class="block-title">De batterij</div>
+        <div class="block-title">${t("De batterij")}</div>
         <div class="row">
-          <label>Capaciteit (kWh)</label>
-          ${getal("capacity_kwh", 'min="0" step="0.1"', "de inhoud van de accu")}
-          <span class="sub">De integratie geeft hem niet door, dus vul hem hier in.</span>
+          <label>${t("Capaciteit (kWh)")}</label>
+          ${getal("capacity_kwh", 'min="0" step="0.1"', t("de inhoud van de accu"))}
+          <span class="sub">${t("De integratie geeft hem niet door, dus vul hem hier in.")}</span>
         </div>
       </div>`;
     }
@@ -1097,54 +1131,54 @@ class DacViewDevices extends DacEditorElement {
 
     return `
       <div class="block">
-        <div class="block-title">De batterij</div>
+        <div class="block-title">${t("De batterij")}</div>
         <div class="two">
           <div class="row">
-            <label>Capaciteit (kWh)</label>
-            ${getal("capacity_kwh", 'min="0" step="0.1"', "alleen zonder sensor")}
+            <label>${t("Capaciteit (kWh)")}</label>
+            ${getal("capacity_kwh", 'min="0" step="0.1"', t("alleen zonder sensor"))}
           </div>
           <div class="row">
-            <label>Rendement heen en terug (%)</label>
-            ${getal("rte_percent", 'min="30" max="100" step="0.1"', "alleen zonder kWh-meter")}
+            <label>${t("Rendement heen en terug (%)")}</label>
+            ${getal("rte_percent", 'min="30" max="100" step="0.1"', t("alleen zonder kWh-meter"))}
           </div>
         </div>
-        <p class="sub">Met het rendement rekent de coach uit of laden van het net loont: bij 75% moet het dure uur een derde duurder zijn dan het goedkope. Bij een vast contract zonder dal- en piektarief loont laden van het net nooit; dan bepaalt het rendement alleen of zon opslaan meer oplevert dan terugleveren. Met een kWh-meter op de batterij meet hij het zelf, en dan wint de meting. Zonder rendement houdt hij alleen de meter op nul.</p>
+        <p class="sub">${t("Met het rendement rekent de coach uit of laden van het net loont: bij 75% moet het dure uur een derde duurder zijn dan het goedkope. Bij een vast contract zonder dal- en piektarief loont laden van het net nooit; dan bepaalt het rendement alleen of zon opslaan meer oplevert dan terugleveren. Met een kWh-meter op de batterij meet hij het zelf, en dan wint de meting. Zonder rendement houdt hij alleen de meter op nul.")}</p>
         <div class="two">
           <div class="row">
-            <label>Hoogste laadvermogen (W)</label>
-            ${getal("max_charge_w", 'min="0" step="50"', "bijvoorbeeld 3500")}
+            <label>${t("Hoogste laadvermogen (W)")}</label>
+            ${getal("max_charge_w", 'min="0" step="50"', t("bijvoorbeeld {n}", { n: 3500 }))}
           </div>
           <div class="row">
-            <label>Hoogste ontlaadvermogen (W)</label>
-            ${getal("max_discharge_w", 'min="0" step="50"', "bijvoorbeeld 2500")}
+            <label>${t("Hoogste ontlaadvermogen (W)")}</label>
+            ${getal("max_discharge_w", 'min="0" step="50"', t("bijvoorbeeld {n}", { n: 2500 }))}
           </div>
         </div>
         <div class="row">
-          <label for="bat-phase-${index}">Hangt op fase</label>
+          <label for="bat-phase-${index}">${t("Hangt op fase")}</label>
           <select id="bat-phase-${index}" data-bat-field="phase" data-index="${index}">
-            ${[["", "Weet ik niet"], ["l1", "L1"], ["l2", "L2"], ["l3", "L3"]]
+            ${[["", t("Weet ik niet")], ["l1", "L1"], ["l2", "L2"], ["l3", "L3"]]
               .map(([id, label]) => `<option value="${id}"${b.phase === id ? " selected" : ""}>${label}</option>`)
               .join("")}
           </select>
-          <span class="sub">Voor de zekeringbewaking: laadt de auto tegelijk, dan blijft de batterij onder wat die fase nog overlaat. Weet je het niet, dan telt de zwaarste fase.</span>
+          <span class="sub">${t("Voor de zekeringbewaking: laadt de auto tegelijk, dan blijft de batterij onder wat die fase nog overlaat. Weet je het niet, dan telt de zwaarste fase.")}</span>
         </div>
-        ${vink("power_invert", "De vermogenssensor is positief bij ontladen.", "Standaard leest de coach plus als laden.")}
-        ${device.entities?.direction ? "" : vink("setpoint_invert", "Het stuurgetal is positief bij ontladen.", "Alleen van belang zonder aparte richting.")}
+        ${vink("power_invert", t("De vermogenssensor is positief bij ontladen."), t("Standaard leest de coach plus als laden."))}
+        ${device.entities?.direction ? "" : vink("setpoint_invert", t("Het stuurgetal is positief bij ontladen."), t("Alleen van belang zonder aparte richting."))}
         <div class="two">
           <div class="row">
-            <label>Modus als de coach stuurt</label>
-            ${tekst("control_mode", "de keuze in de bedrijfsmodus")}
+            <label>${t("Modus als de coach stuurt")}</label>
+            ${tekst("control_mode", t("de keuze in de bedrijfsmodus"))}
           </div>
           <div class="row">
-            <label>Modus als de coach stopt</label>
-            ${tekst("idle_mode", "de keuze in de bedrijfsmodus")}
+            <label>${t("Modus als de coach stopt")}</label>
+            ${tekst("idle_mode", t("de keuze in de bedrijfsmodus"))}
           </div>
         </div>
-        <p class="sub">Stopt de coach, dan zet hij het vermogen op nul en geeft hij de batterij terug aan zijn eigen modus, zodat hij nooit op zijn laatste opdracht blijft staan.</p>
-        ${vink("self_zero", "De batterij doet zelf nul op de meter.", "Staat standaard aan. Zet hem alleen uit bij een batterij zonder eigen meter in de meterkast; dan regelt de coach de meter via Home Assistant, en dat is trager. De coach zet hem in zijn eigen modus (hierboven: als de coach stopt) en kijkt mee. Hij neemt het alleen over voor laden van het net, handelen, als de laadpaal laadt, in de vakantiestand, bij de reserve en als de zekering krap wordt, en geeft hem na vijf rustige minuten terug. Stilstaan of alleen ontladen plant hij dan niet, want dat kan de batterij in zijn eigen stand niet.")}
+        <p class="sub">${t("Stopt de coach, dan zet hij het vermogen op nul en geeft hij de batterij terug aan zijn eigen modus, zodat hij nooit op zijn laatste opdracht blijft staan.")}</p>
+        ${vink("self_zero", t("De batterij doet zelf nul op de meter."), t("Staat standaard aan. Zet hem alleen uit bij een batterij zonder eigen meter in de meterkast; dan regelt de coach de meter via Home Assistant, en dat is trager. De coach zet hem in zijn eigen modus (hierboven: als de coach stopt) en kijkt mee. Hij neemt het alleen over voor laden van het net, handelen, als de laadpaal laadt, in de vakantiestand, bij de reserve en als de zekering krap wordt, en geeft hem na vijf rustige minuten terug. Stilstaan of alleen ontladen plant hij dan niet, want dat kan de batterij in zijn eigen stand niet."))}
       </div>
       ${this.herrekenHtml_(device, index)}
-      <p class="sub">Wat de bewoner wil (de reserve, handelen, een keer per week vol, de vakantiestand, de auto helpen en de ventilator) staat sinds v0.114.0 op de kaart van de batterij, onder Instellen.</p>`;
+      <p class="sub">${t("Wat de bewoner wil (de reserve, handelen, een keer per week vol, de vakantiestand, de auto helpen en de ventilator) staat sinds v0.114.0 op de kaart van de batterij, onder Instellen.")}</p>`;
   }
 
   /**
@@ -1158,15 +1192,15 @@ class DacViewDevices extends DacEditorElement {
     const kan = Boolean(stand.uit && !stand.uit.fout && stand.uit.dagen && !stand.uit.toegepast);
     return `
       <div class="block">
-        <div class="block-title">Opgeleverd opnieuw uitrekenen</div>
-        <p class="sub">Stond de terugleverprijs een tijd verkeerd of leeg, dan klopt Opgeleverd over die dagen niet. De coach rekent het opnieuw vanaf de dag die je kiest, met het contract zoals het nu is: uit de kwartieren van de meter en de batterij in zijn eigen opslag, en de accustand en de prijzen van toen. Eerst zie je wat het wordt; pas met Overnemen verandert er iets.</p>
+        <div class="block-title">${t("Opgeleverd opnieuw uitrekenen")}</div>
+        <p class="sub">${t("Stond de terugleverprijs een tijd verkeerd of leeg, dan klopt Opgeleverd over die dagen niet. De coach rekent het opnieuw vanaf de dag die je kiest, met het contract zoals het nu is: uit de kwartieren van de meter en de batterij in zijn eigen opslag, en de accustand en de prijzen van toen. Eerst zie je wat het wordt; pas met Overnemen verandert er iets.")}</p>
         <div class="row">
-          <label for="herreken-van-${index}">Vanaf</label>
+          <label for="herreken-van-${index}">${t("Vanaf")}</label>
           <input type="date" id="herreken-van-${index}" data-herreken-van="${index}" value="${veilig(stand.van ?? "")}">
         </div>
         <div class="herreken-knoppen">
-          <button type="button" class="add" data-herreken="${index}"${stand.bezig ? " disabled" : ""}>${stand.bezig ? "Bezig…" : "Uitrekenen"}</button>
-          ${kan ? `<button type="button" class="add" data-herreken-over="${index}">Overnemen</button>` : ""}
+          <button type="button" class="add" data-herreken="${index}"${stand.bezig ? " disabled" : ""}>${stand.bezig ? t("Bezig…") : t("Uitrekenen")}</button>
+          ${kan ? `<button type="button" class="add" data-herreken-over="${index}">${t("Overnemen")}</button>` : ""}
         </div>
         ${stand.uit ? `<p class="sub herreken-uit">${veilig(herrekenZin(stand.uit))}</p>` : ""}
       </div>`;
@@ -1178,7 +1212,7 @@ class DacViewDevices extends DacEditorElement {
     if (!device || !this.hass_) return;
     const stand = this.herrekend_.get(device.id) ?? {};
     if (!stand.van) {
-      this.toast_("Kies eerst een dag.", false);
+      this.toast_(t("Kies eerst een dag."), false);
       return;
     }
     this.herrekend_.set(device.id, { ...stand, bezig: true });
@@ -1188,9 +1222,9 @@ class DacViewDevices extends DacEditorElement {
         type: "domotiapp_coach/battery/recalculate", device_id: device.id, from: stand.van, apply: toepassen,
       });
       this.herrekend_.set(device.id, { van: stand.van, uit });
-      if (uit?.toegepast) this.toast_("Opgeleverd is opnieuw uitgerekend", true);
+      if (uit?.toegepast) this.toast_(t("Opgeleverd is opnieuw uitgerekend"), true);
     } catch (error) {
-      this.herrekend_.set(device.id, { van: stand.van, uit: { fout: `Uitrekenen mislukt: ${error?.message ?? error}` } });
+      this.herrekend_.set(device.id, { van: stand.van, uit: { fout: t("Uitrekenen mislukt: {fout}", { fout: error?.message ?? error }) } });
     }
     this.paintDevices_();
   }
@@ -1206,9 +1240,9 @@ class DacViewDevices extends DacEditorElement {
         // en houdt zijn velden gewoon.
         const merkKeuze = `
           <div class="row">
-            <label>Merk</label>
+            <label>${t("Merk")}</label>
             <select data-car-field="brand" data-car-index="${index}:${slot}">
-              <option value=""${car.brand ? "" : " selected"}>Kies een merk…</option>
+              <option value=""${car.brand ? "" : " selected"}>${t("Kies een merk…")}</option>
               ${CAR_BRANDS.map((b) => `<option value="${b.id}"${car.brand === b.id ? " selected" : ""}>${b.label}</option>`).join("")}
             </select>
           </div>`;
@@ -1218,7 +1252,7 @@ class DacViewDevices extends DacEditorElement {
         <div class="car" data-car="${index}:${slot}">
           <div class="car-head">
             ${merkKeuze}
-            <button type="button" class="remove" data-car-remove="${index}:${slot}" aria-label="Auto verwijderen">${icons.trash}</button>
+            <button type="button" class="remove" data-car-remove="${index}:${slot}" aria-label="${t("Auto verwijderen")}">${icons.trash}</button>
           </div>
         </div>`;
         }
@@ -1226,9 +1260,9 @@ class DacViewDevices extends DacEditorElement {
         const wekken = tesla
           ? `
           <div class="row">
-            <label>Wekknop</label>
+            <label>${t("Wekknop")}</label>
             <dac-entity-picker data-car-wake="${index}:${slot}"></dac-entity-picker>
-            <span class="sub">De knop "Wake up" van de Tesla-integratie. Een Tesla slaapt als hij niet laadt en meldt dan geen accustand; met deze knop kan de coach hem wekken. Bij het inpluggen doet hij dat altijd één keer, anders weet hij niet hoeveel er nog in moet.</span>
+            <span class="sub">${t("De knop \"Wake up\" van de Tesla-integratie. Een Tesla slaapt als hij niet laadt en meldt dan geen accustand; met deze knop kan de coach hem wekken. Bij het inpluggen doet hij dat altijd één keer, anders weet hij niet hoeveel er nog in moet.")}</span>
           </div>
 `
           : "";
@@ -1237,43 +1271,43 @@ class DacViewDevices extends DacEditorElement {
           <div class="car-head">
             <input type="text" data-car-field="name" data-car-index="${index}:${slot}"
                    value="${(car.name ?? "").replace(/"/g, "&quot;")}"
-                   placeholder="Bijvoorbeeld: de blauwe" autocomplete="off">
-            <button type="button" class="remove" data-car-remove="${index}:${slot}" aria-label="Auto verwijderen">${icons.trash}</button>
+                   placeholder="${t("Bijvoorbeeld: de blauwe")}" autocomplete="off">
+            <button type="button" class="remove" data-car-remove="${index}:${slot}" aria-label="${t("Auto verwijderen")}">${icons.trash}</button>
           </div>
           ${merkKeuze}
           <div class="row">
-            <label>Accu (kWh)</label>
+            <label>${t("Accu (kWh)")}</label>
             <input type="number" min="0" max="500" step="1" inputmode="decimal"
                    data-car-field="capacity_kwh" data-car-index="${index}:${slot}"
-                   value="${car.capacity_kwh || ""}" placeholder="bijvoorbeeld 58">
-            <span class="sub">Tot hoever hij laadt staat op de kaart van de laadpaal, onder Instellen.</span>
+                   value="${car.capacity_kwh || ""}" placeholder="${t("bijvoorbeeld {n}", { n: 58 })}">
+            <span class="sub">${t("Tot hoever hij laadt staat op de kaart van de laadpaal, onder Instellen.")}</span>
           </div>
           <div class="row">
-            <label>Hoogste stroom (A)</label>
+            <label>${t("Hoogste stroom (A)")}</label>
             <input type="number" min="0" max="100" step="1" inputmode="numeric"
                    data-car-field="max_amps" data-car-index="${index}:${slot}"
-                   value="${car.max_amps || ""}" placeholder="optioneel">
-            <span class="sub">Alleen invullen als de auto zelf lager blijft dan je paal aankan.</span>
+                   value="${car.max_amps || ""}" placeholder="${t("optioneel")}">
+            <span class="sub">${t("Alleen invullen als de auto zelf lager blijft dan je paal aankan.")}</span>
           </div>
           <div class="row">
-            <label>Accupercentage van de auto</label>
+            <label>${t("Accupercentage van de auto")}</label>
             <dac-entity-picker data-car-entity="${index}:${slot}"></dac-entity-picker>
             <span class="sub">${tesla
-              ? "De sensor \"Battery level\" van de Tesla-integratie. Daarmee weet de coach zelf hoeveel er nog in moet."
-              : "Optioneel. Staat de auto in Home Assistant, wijs dan de sensor aan die zegt hoe vol hij is; dan weet de coach zelf hoeveel er nog in moet. Zonder deze vraagt hij het aan jou."}</span>
+              ? t("De sensor \"Battery level\" van de Tesla-integratie. Daarmee weet de coach zelf hoeveel er nog in moet.")
+              : t("Optioneel. Staat de auto in Home Assistant, wijs dan de sensor aan die zegt hoe vol hij is; dan weet de coach zelf hoeveel er nog in moet. Zonder deze vraagt hij het aan jou.")}</span>
           </div>
           <div class="row">
-            <label>Actieradius (optioneel)</label>
+            <label>${t("Actieradius (optioneel)")}</label>
             <dac-entity-picker data-car-range="${index}:${slot}"></dac-entity-picker>
             <span class="sub">${tesla
-              ? "De sensor \"Battery range\" van de Tesla-integratie. Dan staat er op de kaart hoeveel kilometer er in de accu zit in plaats van hoeveel kWh, en wat een laadbeurt aan kilometers opleverde."
-              : "Zegt de auto in Home Assistant hoe ver hij nog komt, wijs die sensor dan aan. Dan staat er op de kaart hoeveel kilometer er in de accu zit in plaats van hoeveel kWh, en wat een laadbeurt aan kilometers opleverde. Werkt samen met het accupercentage hierboven."}</span>
+              ? t("De sensor \"Battery range\" van de Tesla-integratie. Dan staat er op de kaart hoeveel kilometer er in de accu zit in plaats van hoeveel kWh, en wat een laadbeurt aan kilometers opleverde.")
+              : t("Zegt de auto in Home Assistant hoe ver hij nog komt, wijs die sensor dan aan. Dan staat er op de kaart hoeveel kilometer er in de accu zit in plaats van hoeveel kWh, en wat een laadbeurt aan kilometers opleverde. Werkt samen met het accupercentage hierboven.")}</span>
           </div>
           ${wekken}
           <div class="row">
-            <label>Laadt op</label>
+            <label>${t("Laadt op")}</label>
             <div class="segmented three">
-              ${CAR_PHASES.map(
+              ${CAR_PHASES.map(inTaal).map(
                 (item) => `
                 <button type="button" data-car-phases="${index}:${slot}:${item.id}"
                         aria-pressed="${(car.phases ?? "three") === item.id}">
@@ -1289,10 +1323,10 @@ class DacViewDevices extends DacEditorElement {
 
     return `
       <div class="block">
-        <div class="block-title">Auto's</div>
-        <p class="sub">Welke auto's hier laden. Op het overzicht kies je welke er op dat moment aan hangt, en de coach rekent met de accu en het aantal fasen van die auto. Een gast hoef je niet toe te voegen; die staat er altijd bij en laadt meteen.</p>
+        <div class="block-title">${t("Auto's")}</div>
+        <p class="sub">${t("Welke auto's hier laden. Op het overzicht kies je welke er op dat moment aan hangt, en de coach rekent met de accu en het aantal fasen van die auto. Een gast hoef je niet toe te voegen; die staat er altijd bij en laadt meteen.")}</p>
         <div class="cars">${rows}</div>
-        <button class="add" type="button" data-car-add="${index}">${icons.plus} Auto toevoegen</button>
+        <button class="add" type="button" data-car-add="${index}">${icons.plus} ${t("Auto toevoegen")}</button>
       </div>`;
   }
 
@@ -1304,8 +1338,8 @@ class DacViewDevices extends DacEditorElement {
       list.innerHTML = `
         <section class="card empty">
           <div class="empty-mark">${icons.devices}</div>
-          <h2>Nog geen apparaten</h2>
-          <p>Voeg je laadpaal, warmtepomp of vaatwasser toe om te zien wanneer ze draaien en wat ze op dat moment vragen.</p>
+          <h2>${t("Nog geen apparaten")}</h2>
+          <p>${t("Voeg je laadpaal, warmtepomp of vaatwasser toe om te zien wanneer ze draaien en wat ze op dat moment vragen.")}</p>
         </section>`;
       return;
     }
@@ -1337,33 +1371,33 @@ class DacViewDevices extends DacEditorElement {
             </button>
             ${
               devices.length > 1
-                ? `<span class="move" role="group" aria-label="Volgorde">
-                <button type="button" data-move-dev="${index}" data-step="-1" aria-label="Omhoog"${buur(index, -1) < 0 ? " disabled" : ""}>${icons.arrowLeft}</button>
-                <button type="button" data-move-dev="${index}" data-step="1" aria-label="Omlaag"${buur(index, 1) < 0 ? " disabled" : ""}>${icons.arrowRight}</button>
+                ? `<span class="move" role="group" aria-label="${t("Volgorde")}">
+                <button type="button" data-move-dev="${index}" data-step="-1" aria-label="${t("Omhoog")}"${buur(index, -1) < 0 ? " disabled" : ""}>${icons.arrowLeft}</button>
+                <button type="button" data-move-dev="${index}" data-step="1" aria-label="${t("Omlaag")}"${buur(index, 1) < 0 ? " disabled" : ""}>${icons.arrowRight}</button>
               </span>`
                 : ""
             }
-            <button class="remove" type="button" data-remove="${index}" aria-label="Verwijderen">${icons.trash}</button>
+            <button class="remove" type="button" data-remove="${index}" aria-label="${t("Verwijderen")}">${icons.trash}</button>
           </div>
           <div class="fields"${open ? "" : " hidden"}>
             <div class="two">
               <div class="row">
-                <label>Type</label>
+                <label>${t("Type")}</label>
                 <select data-field="type" data-index="${index}">
                   ${DEVICE_TYPES.map(
-                    (t) => `<option value="${t.id}"${t.id === device.type ? " selected" : ""}>${t.label}</option>`
+                    (soort) => `<option value="${soort.id}"${soort.id === device.type ? " selected" : ""}>${t(soort.label)}</option>`
                   ).join("")}
                 </select>
               </div>
               <div class="row">
-                <label>Eigen naam</label>
+                <label>${t("Eigen naam")}</label>
                 <input type="text" data-field="name" data-index="${index}"
                        value="${(device.name ?? "").replace(/"/g, "&quot;")}"
-                       placeholder="${device.type === "overig" || plugAppliance(device)?.id === "overig" ? "Bijvoorbeeld: serverkast" : "optioneel"}"
+                       placeholder="${device.type === "overig" || plugAppliance(device)?.id === "overig" ? t("Bijvoorbeeld: serverkast") : t("optioneel")}"
                        autocomplete="off">
                 ${
                   this.sharesLabel_(device)
-                    ? `<span class="sub">Er staan er twee van dit type. Zonder eigen naam heten ze hier en op het overzicht "${kindLabel(device)} 1" en "${kindLabel(device)} 2"; met een naam weet je meteen welke welke is.</span>`
+                    ? `<span class="sub">${t("Er staan er twee van dit type. Zonder eigen naam heten ze hier en op het overzicht \"{soort} 1\" en \"{soort} 2\"; met een naam weet je meteen welke welke is.", { soort: kindLabel(device) })}</span>`
                     : ""
                 }
               </div>
@@ -1371,10 +1405,10 @@ class DacViewDevices extends DacEditorElement {
             ${
               ruimtes.length
                 ? `<div class="row">
-              <label>Ruimte</label>
+              <label>${t("Ruimte")}</label>
               <select data-field="room" data-index="${index}">
-                <option value="">Geen ruimte</option>
-                ${ruimtes.map((ruimte) => `<option value="${veilig(ruimte.id)}"${ruimte.id === device.room ? " selected" : ""}>${veilig(ruimte.name || "Nieuwe ruimte")}</option>`).join("")}
+                <option value="">${t("Geen ruimte")}</option>
+                ${ruimtes.map((ruimte) => `<option value="${veilig(ruimte.id)}"${ruimte.id === device.room ? " selected" : ""}>${veilig(ruimte.name || t("Nieuwe ruimte"))}</option>`).join("")}
               </select>
             </div>`
                 : ""
@@ -1431,7 +1465,7 @@ class DacViewDevices extends DacEditorElement {
     for (const picker of list.querySelectorAll("[data-energy]")) {
       const index = Number(picker.dataset.energy);
       picker.filter = "all";
-      picker.placeholder = "Zoek een energieteller…";
+      picker.placeholder = t("Zoek een energieteller…");
       picker.stateFeed = this.feed_;
       picker.value = this.draft_.devices[index].energy_entity ?? "";
       picker.addEventListener("dac-entity-change", (ev) => {
@@ -1443,7 +1477,7 @@ class DacViewDevices extends DacEditorElement {
     for (const picker of list.querySelectorAll("[data-car-entity]")) {
       const [index, slot] = picker.dataset.carEntity.split(":").map(Number);
       picker.filter = "all";
-      picker.placeholder = "Zoek het accupercentage…";
+      picker.placeholder = t("Zoek het accupercentage…");
       picker.stateFeed = this.feed_;
       picker.value = this.draft_.devices[index].cars[slot].soc_entity ?? "";
       picker.addEventListener("dac-entity-change", (ev) => {
@@ -1455,7 +1489,7 @@ class DacViewDevices extends DacEditorElement {
     for (const picker of list.querySelectorAll("[data-car-range]")) {
       const [index, slot] = picker.dataset.carRange.split(":").map(Number);
       picker.filter = "distance";
-      picker.placeholder = "Zoek de actieradius…";
+      picker.placeholder = t("Zoek de actieradius…");
       picker.stateFeed = this.feed_;
       picker.value = this.draft_.devices[index].cars[slot].range_entity ?? "";
       picker.addEventListener("dac-entity-change", (ev) => {
@@ -1467,7 +1501,7 @@ class DacViewDevices extends DacEditorElement {
     for (const picker of list.querySelectorAll("[data-car-wake]")) {
       const [index, slot] = picker.dataset.carWake.split(":").map(Number);
       picker.filter = "all";
-      picker.placeholder = "Zoek de wekknop…";
+      picker.placeholder = t("Zoek de wekknop…");
       picker.stateFeed = this.feed_;
       picker.value = this.draft_.devices[index].cars[slot].wake_entity ?? "";
       picker.addEventListener("dac-entity-change", (ev) => {
@@ -1543,7 +1577,7 @@ class DacViewDevices extends DacEditorElement {
     for (const picker of list.querySelectorAll("dac-entity-picker[data-power]")) {
       const index = Number(picker.dataset.index);
       picker.filter = "power";
-      picker.placeholder = "Zoek een vermogenssensor…";
+      picker.placeholder = t("Zoek een vermogenssensor…");
       picker.stateFeed = this.feed_;
       picker.value = devices[index].entity ?? "";
       picker.addEventListener("dac-entity-change", (ev) => {
@@ -1560,7 +1594,7 @@ class DacViewDevices extends DacEditorElement {
       // filter is a ranking rather than a restriction anyway. Een veld dat om
       // een select vraagt zet die bovenaan.
       picker.filter = this.entityField_(this.draft_.devices[index], key)?.filter ?? "all";
-      picker.placeholder = "Zoek een entiteit…";
+      picker.placeholder = t("Zoek een entiteit…");
       picker.stateFeed = this.feed_;
       // A charger reports its status in English keys whatever the language Home
       // Assistant is set to, so the check "is this the right sensor?" is only
@@ -1690,7 +1724,7 @@ class DacViewDevices extends DacEditorElement {
         const ruimte = ruimtes[Number(veld.dataset.roomName)];
         ruimte.name = veld.value;
         for (const optie of list.querySelectorAll(`select[data-field="room"] option[value="${CSS.escape(ruimte.id)}"]`)) {
-          optie.textContent = ruimte.name || "Nieuwe ruimte";
+          optie.textContent = ruimte.name || t("Nieuwe ruimte");
         }
         this.syncSaveBar_();
       });
@@ -1851,8 +1885,8 @@ class DacViewDevices extends DacEditorElement {
     this.$("#confirm-sub").textContent = this.storedDevices_().some(
       (stored) => stored.id === device.id
     )
-      ? "Dit apparaat verdwijnt uit de lijst, met alles wat je eraan gekoppeld hebt en met zijn schema. Verwijderen gaat meteen door en is niet terug te draaien."
-      : "Dit apparaat is nog niet opgeslagen, dus het verdwijnt gewoon weer uit de lijst.";
+      ? t("Dit apparaat verdwijnt uit de lijst, met alles wat je eraan gekoppeld hebt en met zijn schema. Verwijderen gaat meteen door en is niet terug te draaien.")
+      : t("Dit apparaat is nog niet opgeslagen, dus het verdwijnt gewoon weer uit de lijst.");
     this.$("#confirm").showModal();
   }
 
@@ -1883,7 +1917,7 @@ class DacViewDevices extends DacEditorElement {
     // entity somewhere else on the screen does not get saved along with it.
     this.persist_(
       { devices: stored.filter((device) => device.id !== id) },
-      "Apparaat verwijderd"
+      t("Apparaat verwijderd")
     );
   }
 }

@@ -22,11 +22,15 @@ import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
 import { countdown, moment, power, toWatts } from "../format.js";
 import { valueLabel } from "../devices.js";
+import { t } from "../i18n.js";
 
 /** How many options to render at once -- enough to browse, not enough to lag. */
 const MAX_OPTIONS = 60;
 
 const POWER_UNITS = new Set(["w", "kw", "mw"]);
+
+/** Een woord uit een tabel van devices.js, in de taal van nu (v0.139.0). */
+const vertaald = (woord) => (woord === null || woord === undefined ? woord : t(woord));
 
 /**
  * The one picker whose list is open, across every shadow root on the page.
@@ -282,9 +286,9 @@ class DacEntityPicker extends DacElement {
       <div class="field">
         <input type="text" role="combobox" aria-expanded="false" aria-autocomplete="list"
                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-               placeholder="${this.placeholder_ ?? "Zoek een sensor…"}">
-        <button type="button" id="clear" aria-label="Wissen" hidden>${icons.close}</button>
-        <button type="button" id="open" aria-label="Toon lijst" tabindex="-1">${icons.search}</button>
+               placeholder="${this.placeholder_ ?? t("Zoek een sensor…")}">
+        <button type="button" id="clear" aria-label="${t("Wissen")}" hidden>${icons.close}</button>
+        <button type="button" id="open" aria-label="${t("Toon lijst")}" tabindex="-1">${icons.search}</button>
       </div>
       <div class="chosen" id="chosen" hidden>
         <span class="id" id="chosen-id"></span>
@@ -403,9 +407,9 @@ class DacEntityPicker extends DacElement {
     section(preferred, "");
     // Only worth offering the rest once the customer has narrowed things down;
     // unfiltered it is thousands of entities and no help at all.
-    if (query.trim() && other.length) section(other, "Overige entiteiten");
+    if (query.trim() && other.length) section(other, t("Overige entiteiten"));
 
-    if (!html) html = `<li class="none">Niets gevonden voor “${query}”</li>`;
+    if (!html) html = `<li class="none">${t("Niets gevonden voor “{zoek}”", { zoek: query })}</li>`;
 
     list.innerHTML = html;
     list.hidden = false;
@@ -514,12 +518,12 @@ class DacEntityPicker extends DacElement {
     const state = this.state_(this.value_);
 
     if (!state) {
-      now.textContent = "bestaat niet";
+      now.textContent = t("bestaat niet");
       now.classList.add("bad");
       return;
     }
     if (state.state === "unavailable" || state.state === "unknown") {
-      now.textContent = "niet beschikbaar";
+      now.textContent = t("niet beschikbaar");
       now.classList.add("bad");
       return;
     }
@@ -539,7 +543,7 @@ class DacEntityPicker extends DacElement {
       // help -- checking that the right entity was picked.
       now.textContent =
         (this.format_ === "countdown" ? countdown(state.state, unit) : null) ??
-        valueLabel(this.values_, state.state) ??
+        vertaald(valueLabel(this.values_, state.state)) ??
         moment(state.state) ??
         (unit ? `${state.state} ${unit}` : state.state);
     }

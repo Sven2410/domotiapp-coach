@@ -15,8 +15,9 @@
  * van de pop-up.
  */
 
-import { WAKE_MODES, WEEKDAGEN, canSkipRelease, releaseCopy } from "./devices.js";
+import { WAKE_MODES, WEEKDAGEN, canSkipRelease, inTaal, releaseCopy, weekdag } from "./devices.js";
 import { terugleverBekend } from "./geld.js";
+import { nt, t } from "./i18n.js";
 
 const esc = (s) =>
   String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -41,13 +42,13 @@ const getal = (attr, sleutel, label, grenzen, leeg, uitleg = "") => `
 
 function laadpaal(device) {
   const autos = (device.cars ?? []).map((car) => {
-    const naam = esc(car.name || "de auto");
+    const naam = esc(car.name || t("de auto"));
     const wekken = car.brand === "tesla" && car.wake_entity
       ? `
       <div class="row">
-        <label>${naam}: accustand opvragen</label>
+        <label>${t("{naam}: accustand opvragen", { naam })}</label>
         <div class="segmented">
-          ${WAKE_MODES.map((m) => `
+          ${WAKE_MODES.map(inTaal).map((m) => `
             <button type="button" data-vk-wek="${esc(car.id)}:${m.id}" aria-pressed="false">
               <strong>${m.label}</strong>
               ${m.blurb}
@@ -56,27 +57,27 @@ function laadpaal(device) {
       </div>`
       : "";
     return `
-      ${getal("data-vk-auto", `${esc(car.id)}:target_percent`, `${naam}: laadt tot (%)`, 'min="10" max="100" step="5"', "100")}
+      ${getal("data-vk-auto", `${esc(car.id)}:target_percent`, t("{naam}: laadt tot (%)", { naam }), 'min="10" max="100" step="5"', "100")}
       ${wekken}`;
   }).join("");
   // De uitleg één keer, onder de auto's, en niet bij elke auto opnieuw.
   const autoUitleg = (device.cars ?? []).length
-    ? `<p class="sub">Staat er een laadgrens in de auto, zet hem hier ook. Dan weet de coach wanneer hij klaar is in plaats van het achteraf te merken.</p>`
+    ? `<p class="sub">${t("Staat er een laadgrens in de auto, zet hem hier ook. Dan weet de coach wanneer hij klaar is in plaats van het achteraf te merken.")}</p>`
     : "";
   return `
     <div class="row">
-      <label for="vk-modus">Zonder planning</label>
+      <label for="vk-modus">${t("Zonder planning")}</label>
       <select id="vk-modus" data-vk="charge_mode">
-        <option value="zon">Zon: alleen op zonoverschot</option>
-        <option value="continu">Continu: altijd, met zon erbovenop</option>
-        <option value="goedkoopst">Goedkoopst: de goedkoopste bekende uren</option>
+        <option value="zon">${t("Zon: alleen op zonoverschot")}</option>
+        <option value="continu">${t("Continu: altijd, met zon erbovenop")}</option>
+        <option value="goedkoopst">${t("Goedkoopst: de goedkoopste bekende uren")}</option>
       </select>
-      <span class="sub">Staat het schema aan, dan wint de planning. Op de kaart kies je per beurt Snel, Continu of Zon; als de kabel eruit gaat, geldt dit weer.</span>
+      <span class="sub">${t("Staat het schema aan, dan wint de planning. Op de kaart kies je per beurt Snel, Continu of Zon; als de kabel eruit gaat, geldt dit weer.")}</span>
     </div>
-    ${getal("data-vk", "continuous_amps", "Continu laden op (A)", 'min="6" max="32" step="1"', "6",
-      "Het vaste vermogen van Continu. Geeft de zon meer, dan laadt hij mee omhoog; nooit boven je zekering.")}
-    ${getal("data-vk", "solar_start_percent", "Zon: beginnen vanaf (%)", 'min="10" max="100" step="5"', "90",
-      "Van het kleinste laadvermogen: 6 A, op drie fasen 4,1 kW. Bij 50% begint Zon al op 2,1 kW zon en komt de rest van het net. Op 100% begint hij pas als de zon het hele vermogen geeft.")}
+    ${getal("data-vk", "continuous_amps", t("Continu laden op (A)"), 'min="6" max="32" step="1"', "6",
+      t("Het vaste vermogen van Continu. Geeft de zon meer, dan laadt hij mee omhoog; nooit boven je zekering."))}
+    ${getal("data-vk", "solar_start_percent", t("Zon: beginnen vanaf (%)"), 'min="10" max="100" step="5"', "90",
+      t("Van het kleinste laadvermogen: 6 A, op drie fasen 4,1 kW. Bij 50% begint Zon al op 2,1 kW zon en komt de rest van het net. Op 100% begint hij pas als de zon het hele vermogen geeft."))}
     ${autos}
     ${autoUitleg}`;
 }
@@ -87,29 +88,29 @@ function laadpaal(device) {
  * zelf (`HANDELEN_KAN_NIET` in batterij.py).
  */
 export const HANDELEN_KAN_NIET =
-  "Handelen kan nu niet: de coach kent je terugleverprijs niet. Daarvoor is bij Contract een marktprijssensor nodig, of salderen.";
+  nt("Handelen kan nu niet: de coach kent je terugleverprijs niet. Daarvoor is bij Contract een marktprijssensor nodig, of salderen.");
 
 function thuisbatterij(device) {
   const ventilator = device.entities?.fan
-    ? getal("data-vk-accu", "fan_above_c", "Ventilator aan boven (°C)", 'min="0" max="100" step="0.5"', "nooit",
-      "De coach zet de ventilator aan zodra de batterij warmer is dan dit, en weer uit als hij een graad eronder zakt. Niet als de coach op Alleen uitlezen of Adviseren staat. Leeg is nooit.")
+    ? getal("data-vk-accu", "fan_above_c", t("Ventilator aan boven (°C)"), 'min="0" max="100" step="0.5"', t("nooit"),
+      t("De coach zet de ventilator aan zodra de batterij warmer is dan dit, en weer uit als hij een graad eronder zakt. Niet als de coach op Alleen uitlezen of Adviseren staat. Leeg is nooit."))
     : "";
   return `
-    ${vink("data-vk-accu", "reserve_enabled", "Reserve houden voor noodstroom.", "Onder deze accustand komt er niets meer uit, wat de prijzen ook zeggen.")}
-    ${getal("data-vk-accu", "reserve_percent", "Reserve (%)", 'min="0" max="100" step="5"', "20")}
-    ${vink("data-vk-accu", "trade", "Handelen: terugleveren op dure uren.", "De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis.")}
-    <div class="notice" data-vk-rij="trade_kan_niet" hidden>${HANDELEN_KAN_NIET}</div>
-    ${vink("data-vk-accu", "weekly_full", "Een keer per week helemaal vol.", "Tot 100%, voor het balanceren van de cellen. De coach kiest op die dag het goedkoopste moment, en slaat de beurt over als de batterij die week al vol was.")}
+    ${vink("data-vk-accu", "reserve_enabled", t("Reserve houden voor noodstroom."), t("Onder deze accustand komt er niets meer uit, wat de prijzen ook zeggen."))}
+    ${getal("data-vk-accu", "reserve_percent", t("Reserve (%)"), 'min="0" max="100" step="5"', "20")}
+    ${vink("data-vk-accu", "trade", t("Handelen: terugleveren op dure uren."), t("De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis."))}
+    <div class="notice" data-vk-rij="trade_kan_niet" hidden>${t(HANDELEN_KAN_NIET)}</div>
+    ${vink("data-vk-accu", "weekly_full", t("Een keer per week helemaal vol."), t("Tot 100%, voor het balanceren van de cellen. De coach kiest op die dag het goedkoopste moment, en slaat de beurt over als de batterij die week al vol was."))}
     <div class="row" data-vk-rij="weekly_full_day">
-      <label for="vk-dag">Op</label>
+      <label for="vk-dag">${t("Op")}</label>
       <select id="vk-dag" data-vk-accu="weekly_full_day">
-        ${WEEKDAGEN.map((dag, i) => `<option value="${i}">${dag}</option>`).join("")}
+        ${WEEKDAGEN.map((_, i) => `<option value="${i}">${weekdag(i)}</option>`).join("")}
       </select>
     </div>
-    ${vink("data-vk-accu", "holiday", "Vakantiestand.", "Ben je weg en is er veel zon en weinig verbruik, dan staat een batterij dagenlang vol, en dat is slecht voor de cellen. In deze stand houdt de coach hem onder de grens hieronder; de wekelijkse volle beurt slaat hij over.")}
-    ${getal("data-vk-accu", "holiday_max_percent", "Hoogste accustand in vakantiestand (%)", 'min="10" max="90" step="5"', "50")}
-    ${getal("data-vk-accu", "car_above", "De auto mag de accu gebruiken boven (%)", 'min="0" max="100" step="5"', "nooit",
-      "Laadt de auto, dan geeft de batterij normaal niets af: laden en ontladen van de accu en laden van de auto is drie keer verlies. Vul je hier een accustand in, dan mag wat er dáárboven zit naar de auto. Met de nachtstrategie aan (Voorkeuren) houdt hij altijd genoeg over voor de nacht. Leeg is nooit.")}
+    ${vink("data-vk-accu", "holiday", t("Vakantiestand."), t("Ben je weg en is er veel zon en weinig verbruik, dan staat een batterij dagenlang vol, en dat is slecht voor de cellen. In deze stand houdt de coach hem onder de grens hieronder; de wekelijkse volle beurt slaat hij over."))}
+    ${getal("data-vk-accu", "holiday_max_percent", t("Hoogste accustand in vakantiestand (%)"), 'min="10" max="90" step="5"', "50")}
+    ${getal("data-vk-accu", "car_above", t("De auto mag de accu gebruiken boven (%)"), 'min="0" max="100" step="5"', t("nooit"),
+      t("Laadt de auto, dan geeft de batterij normaal niets af: laden en ontladen van de accu en laden van de auto is drie keer verlies. Vul je hier een accustand in, dan mag wat er dáárboven zit naar de auto. Met de nachtstrategie aan (Voorkeuren) houdt hij altijd genoeg over voor de nacht. Leeg is nooit."))}
     ${ventilator}`;
 }
 
@@ -118,10 +119,10 @@ function vaatwasser(device) {
   // heet daar "Mag draaien" (`releaseCopy`).
   const vaat = device?.type === "vaatwasser";
   const knop = releaseCopy(device).label;
-  return vink("data-vk", "release_required", "Moet eerst vrijgegeven worden.",
+  return vink("data-vk", "release_required", t("Moet eerst vrijgegeven worden."),
     vaat
-      ? 'Aan: de coach wacht tot je hem vrijgeeft met "Ingeruimd en dicht" op de kaart. Uit: klep dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de klep open en weer dicht is geweest, zodat hij niet opnieuw start met de schone vaat erin.'
-      : `Aan: de coach wacht tot je hem vrijgeeft met "${knop}" op de kaart. Uit: deur dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de deur open en weer dicht is geweest, zodat hij niet opnieuw start met de schone was erin.`);
+      ? t("Aan: de coach wacht tot je hem vrijgeeft met \"Ingeruimd en dicht\" op de kaart. Uit: klep dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de klep open en weer dicht is geweest, zodat hij niet opnieuw start met de schone vaat erin.")
+      : t("Aan: de coach wacht tot je hem vrijgeeft met \"{knop}\" op de kaart. Uit: deur dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de deur open en weer dicht is geweest, zodat hij niet opnieuw start met de schone was erin.", { knop }));
 }
 
 /**
@@ -131,19 +132,19 @@ function vaatwasser(device) {
  */
 function airco() {
   return `
-    ${getal("data-vk-airco", "target_c", "Gewenste temperatuur (°C)", 'min="7" max="35" step="0.5"', "wat er op de airco staat",
-      "Kouder dan dit: hij verwarmt bij. Warmer: hij koelt bij. Op temperatuur doet hij niets.")}
+    ${getal("data-vk-airco", "target_c", t("Gewenste temperatuur (°C)"), 'min="7" max="35" step="0.5"', t("wat er op de airco staat"),
+      t("Kouder dan dit: hij verwarmt bij. Warmer: hij koelt bij. Op temperatuur doet hij niets."))}
     <div class="row">
-      <label for="vk-aan-op">Aan op</label>
+      <label for="vk-aan-op">${t("Aan op")}</label>
       <select id="vk-aan-op" data-vk-airco="run_on">
-        <option value="zon">Zon: alleen met zon over</option>
-        <option value="goedkoop">Goedkope uren: uren onder het daggemiddelde</option>
-        <option value="beide">Beide: zon over of een goedkoop uur</option>
+        <option value="zon">${t("Zon: alleen met zon over")}</option>
+        <option value="goedkoop">${t("Goedkope uren: uren onder het daggemiddelde")}</option>
+        <option value="beide">${t("Beide: zon over of een goedkoop uur")}</option>
       </select>
-      <span class="sub">De coach zet de airco nooit zomaar aan om de temperatuur te houden: alleen om bij te verwarmen of bij te koelen als er zon over is, of op een uur dat goedkoper is dan gemiddeld, zoals je hier kiest. Bij een vast contract is geen uur goedkoper dan een ander.</span>
+      <span class="sub">${t("De coach zet de airco nooit zomaar aan om de temperatuur te houden: alleen om bij te verwarmen of bij te koelen als er zon over is, of op een uur dat goedkoper is dan gemiddeld, zoals je hier kiest. Bij een vast contract is geen uur goedkoper dan een ander.")}</span>
     </div>
-    ${vink("data-vk-airco", "paused", "Pauze.",
-      "De coach doet niets met de airco. Wat hij zelf aanzette, zet hij uit.")}`;
+    ${vink("data-vk-airco", "paused", t("Pauze."),
+      t("De coach doet niets met de airco. Wat hij zelf aanzette, zet hij uit."))}`;
 }
 
 /** De velden voor dit apparaat, zonder waarden; `vulVoorkeuren` zet ze. */

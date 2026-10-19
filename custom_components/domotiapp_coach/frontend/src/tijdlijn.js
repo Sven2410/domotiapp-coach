@@ -30,32 +30,36 @@
  */
 
 import { huisNu } from "./format.js";
+import { getal, locale, nt, t } from "./i18n.js";
 
-/** De kleuren, met de naam in de legenda. Oranje is eigen stroom, blauw het net. */
+/**
+ * De kleuren, met de naam in de legenda. Oranje is eigen stroom, blauw het net.
+ * Vertaald waar hij getoond wordt (`legenda`), want bij het laden is de taal nog niet bekend.
+ */
 export const KLASSEN = {
-  zon: "Eigen zon",
-  net: "Van het net",
-  wacht: "Wacht",
-  vol: "Klaar",
-  nul: "Nul op de meter",
-  ontladen: "Ontladen",
-  stil: "Stil",
-  aan: "Aan",
-  leeg: "Er liep niets",
+  zon: nt("Eigen zon"),
+  net: nt("Van het net"),
+  wacht: nt("Wacht"),
+  vol: nt("Klaar"),
+  nul: nt("Nul op de meter"),
+  ontladen: nt("Ontladen"),
+  stil: nt("Stil"),
+  aan: nt("Aan"),
+  leeg: nt("Er liep niets"),
 };
 
-/** Wat een stand op het scherm heet, in de korte tekst bij een klik. */
+/** Wat een stand op het scherm heet, in de korte tekst bij een klik (`klikTekst`). */
 const STAND_TEKST = {
-  laden: "Laden",
-  wacht: "Wacht",
-  vol: "Klaar",
-  nul: "Nul op de meter",
-  "accu-zon": "Alleen zonneladen",
-  "accu-net": "Laden van het net",
-  ontladen: "Ontladen",
-  stil: "Stil",
-  draait: "Draait",
-  aan: "Stroom erop",
+  laden: nt("Laden"),
+  wacht: nt("Wacht"),
+  vol: nt("Klaar"),
+  nul: nt("Nul op de meter"),
+  "accu-zon": nt("Alleen zonneladen"),
+  "accu-net": nt("Laden van het net"),
+  ontladen: nt("Ontladen"),
+  stil: nt("Stil"),
+  draait: nt("Draait"),
+  aan: nt("Stroom erop"),
 };
 
 /** Bij welke stand de herkomst gemeten wordt: er loopt stroom door het apparaat heen. */
@@ -445,7 +449,7 @@ export function klok(moment) {
 
 /** "ma 12": de dag op de as van een week en in de tekst bij een klik. */
 export function dagKort(moment) {
-  return `${moment.toLocaleDateString("nl-NL", { weekday: "short" }).replace(".", "")} ${moment.getDate()}`;
+  return `${moment.toLocaleDateString(locale(), { weekday: "short" }).replace(".", "")} ${moment.getDate()}`;
 }
 
 const zelfdeDag = (a, b) =>
@@ -459,19 +463,16 @@ const zelfdeDag = (a, b) =>
  */
 function tijdVan(stuk, { nu, metDag = false } = {}) {
   const begin = metDag ? `${dagKort(stuk.van)} ${klok(stuk.van)}` : klok(stuk.van);
-  if (nu && Math.abs(stuk.tot.getTime() - nu.getTime()) < 60_000) return `${begin} tot nu`;
+  if (nu && Math.abs(stuk.tot.getTime() - nu.getTime()) < 60_000) return t("{van} tot nu", { van: begin });
   const middernacht = stuk.tot.getHours() === 0 && stuk.tot.getMinutes() === 0;
   const dag = middernacht ? new Date(stuk.tot.getTime() - 1) : stuk.tot;
   const uur = middernacht ? "24:00" : klok(stuk.tot);
-  return `${begin} tot ${metDag && !zelfdeDag(dag, stuk.van) ? `${dagKort(dag)} ${uur}` : uur}`;
+  return t("{van} tot {tot}", { van: begin, tot: metDag && !zelfdeDag(dag, stuk.van) ? `${dagKort(dag)} ${uur}` : uur });
 }
 
-const kommagetal = (waarde, cijfers = 1) =>
-  waarde.toLocaleString("nl-NL", { minimumFractionDigits: cijfers, maximumFractionDigits: cijfers });
-
-/** Een deel als "ongeveer 55%", op vijf procent, want het is een kwartiermeting. */
+/** Een deel als 55, op vijf procent, want het is een kwartiermeting: "ongeveer 55%". */
 function ongeveer(deel) {
-  return `ongeveer ${Math.round((deel * 100) / 5) * 5}%`;
+  return Math.round((deel * 100) / 5) * 5;
 }
 
 /**
@@ -482,19 +483,18 @@ function ongeveer(deel) {
  */
 export function klikTekst(rij, stuk, { nu, metAccu = false, metDag = false } = {}) {
   const tijd = tijdVan(stuk, { nu, metDag });
-  let wat = STAND_TEKST[stuk.stand] ?? "";
+  let wat = STAND_TEKST[stuk.stand] ? t(STAND_TEKST[stuk.stand]) : "";
   if (stuk.leeg) {
-    wat += ", er liep niets";
+    wat = t("{wat}, er liep niets", { wat });
   } else if (Number.isFinite(stuk.kwh) && stuk.kwh >= NIETS_KWH) {
-    wat += `, ${kommagetal(stuk.kwh)} kWh`;
+    wat += `, ${getal(stuk.kwh, 1)} kWh`;
     if (Number.isFinite(stuk.netDeel)) {
-      const eigen = metAccu ? "zon of batterij" : "zon";
-      if (stuk.netDeel >= 0.95) wat += ", van het net";
-      else if (stuk.netDeel <= 0.05) wat += `, op ${eigen}`;
-      else wat += `, ${ongeveer(stuk.netDeel)} van het net`;
+      if (stuk.netDeel >= 0.95) wat = t("{wat}, van het net", { wat });
+      else if (stuk.netDeel <= 0.05) wat = metAccu ? t("{wat}, op zon of batterij", { wat }) : t("{wat}, op zon", { wat });
+      else wat = t("{wat}, ongeveer {procent}% van het net", { wat, procent: ongeveer(stuk.netDeel) });
     }
   } else if (stuk.stand === "laden" && stuk.bron) {
-    wat += stuk.bron === "zon" ? ", vooral op zon" : ", vooral van het net";
+    wat = stuk.bron === "zon" ? t("{wat}, vooral op zon", { wat }) : t("{wat}, vooral van het net", { wat });
   }
   return { naam: rij.naam, tijd, wat: `${wat}.`, reden: hoofdreden(stuk) };
 }
@@ -508,7 +508,7 @@ export function legenda(rijen, metAccu = false) {
   return Object.keys(KLASSEN)
     .filter((klasse) => gebruikt.has(klasse))
     // Zoals de grafiek erboven het noemt (`paintLegend_` in history.js).
-    .map((klasse) => ({ klasse, label: klasse === "zon" && metAccu ? "Eigen zon en batterij" : KLASSEN[klasse] }));
+    .map((klasse) => ({ klasse, label: klasse === "zon" && metAccu ? t("Eigen zon en batterij") : t(KLASSEN[klasse]) }));
 }
 
 /**
@@ -549,7 +549,7 @@ export function tekenTijdlijn({ rijen, stippen: punten = [], van, tot, nu, gekoz
     .join("");
 
   const stipRij = punten.length
-    ? `<div class="rij stippen"><div class="naam">Meldingen</div><div class="baan">${punten
+    ? `<div class="rij stippen"><div class="naam">${t("Meldingen")}</div><div class="baan">${punten
         .map((stip, i) => `<button type="button" class="stip${stip.kritiek ? " kritiek" : ""}${gekozen === `stip:${i}` ? " gekozen" : ""}"
           data-stip="${i}" style="left:${rond(plek(stip.at))}%" aria-pressed="${gekozen === `stip:${i}`}"
           aria-label="${escape(`${stipTijd(stip, metDag)}: ${stip.tekst}`)}"></button>`)
@@ -586,7 +586,7 @@ export function tekenUitleg({ rijen, stippen: punten = [], gekozen = "", van, to
   if (gekozen.startsWith("stip:")) {
     const stip = punten[Number(gekozen.slice(5))];
     if (!stip) return "";
-    return `<div class="tijd">${stipTijd(stip, metDag)}${stip.kritiek ? " · moet je iets mee" : ""}</div>
+    return `<div class="tijd">${stipTijd(stip, metDag)}${stip.kritiek ? ` · ${t("moet je iets mee")}` : ""}</div>
       <p class="wat">${escape(stip.tekst)}</p>`;
   }
   const [r, s] = gekozen.split(":").map(Number);

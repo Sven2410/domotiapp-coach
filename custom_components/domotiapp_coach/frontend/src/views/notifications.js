@@ -43,6 +43,7 @@ import { volgCoach } from "../data-source.js";
 import { canAlwaysOn, deviceLabel, deviceLabelMap } from "../devices.js";
 import { icons } from "../icons.js";
 import { huisNu } from "../format.js";
+import { datum, locale, nt, t, tn } from "../i18n.js";
 
 /**
  * Wanneer de meterstanden de volgende keer aan de beurt zijn, voor onder het
@@ -67,35 +68,29 @@ export function volgendeMeterstand(vandaag, start, herhaling) {
   return null;
 }
 
-const DAGEN = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
-const MAANDEN = [
-  "januari", "februari", "maart", "april", "mei", "juni",
-  "juli", "augustus", "september", "oktober", "november", "december",
-];
-
 const twee = (n) => String(n).padStart(2, "0");
 
 /** De soorten, in de volgorde op de kaart van een persoon. */
 export const SOORTEN_INFO = [
   {
     id: "kritiek",
-    label: "Kritiek",
-    uitleg: "Wat je zelf moet oplossen: een sensor die zwijgt, een auto die niet op tijd vol raakt, een paal die opnieuw gestart is, een thuisbatterij die te warm wordt.",
+    label: nt("Kritiek"),
+    uitleg: nt("Wat je zelf moet oplossen: een sensor die zwijgt, een auto die niet op tijd vol raakt, een paal die opnieuw gestart is, een thuisbatterij die te warm wordt."),
   },
   {
     id: "melding",
-    label: "Verslagen",
-    uitleg: "Als een laadbeurt klaar is, de kabel eruit gaat, of een sensor het weer doet.",
+    label: nt("Verslagen"),
+    uitleg: nt("Als een laadbeurt klaar is, de kabel eruit gaat, of een sensor het weer doet."),
   },
   {
     id: "belasting",
-    label: "Zware belasting",
-    uitleg: "Als je aansluiting te zwaar belast wordt, zodat je iets uit kunt zetten voor de zekering eruit gaat.",
+    label: nt("Zware belasting"),
+    uitleg: nt("Als je aansluiting te zwaar belast wordt, zodat je iets uit kunt zetten voor de zekering eruit gaat."),
   },
   {
     id: "besluit",
-    label: "Elk besluit",
-    uitleg: "Elke keer dat de coach iets anders gaat doen. Dat zijn er veel; alleen als je alles wilt volgen.",
+    label: nt("Elk besluit"),
+    uitleg: nt("Elke keer dat de coach iets anders gaat doen. Dat zijn er veel; alleen als je alles wilt volgen."),
   },
 ];
 
@@ -136,9 +131,10 @@ export function dagkop(moment, nu = huisNu()) {
   const dag = new Date(moment.getFullYear(), moment.getMonth(), moment.getDate());
   const vandaag = new Date(nu.getFullYear(), nu.getMonth(), nu.getDate());
   const verschil = Math.round((vandaag - dag) / 86400000);
-  if (verschil === 0) return "Vandaag";
-  if (verschil === 1) return "Gisteren";
-  const kop = `${DAGEN[dag.getDay()]} ${dag.getDate()} ${MAANDEN[dag.getMonth()]}`;
+  if (verschil === 0) return t("Vandaag");
+  if (verschil === 1) return t("Gisteren");
+  // De namen van dag en maand in de taal van nu (v0.139.0).
+  const kop = `${datum(dag, { weekday: "long" })} ${datum(dag, { day: "numeric", month: "long" })}`;
   return dag.getFullYear() === vandaag.getFullYear() ? kop : `${kop} ${dag.getFullYear()}`;
 }
 
@@ -233,9 +229,11 @@ export function geschiedenisStand(items, nu = huisNu()) {
     const moment = new Date(item?.at ?? "");
     return !Number.isNaN(moment.getTime()) && dagsleutel(moment) === dagsleutel(nu);
   });
-  if (!vandaag.length) return "Niets vandaag";
+  if (!vandaag.length) return t("Niets vandaag");
   const kritiek = vandaag.filter((item) => soortVan(item) === "kritiek").length;
-  return `${vandaag.length} vandaag${kritiek ? `, ${kritiek} kritiek` : ""}`;
+  return kritiek
+    ? t("{n} vandaag, {k} kritiek", { n: vandaag.length, k: kritiek })
+    : t("{n} vandaag", { n: vandaag.length });
 }
 
 /** Wat er per groep openstaat, per scherm (v0.133.2). Standaard alleen de geschiedenis. */
@@ -259,26 +257,26 @@ function bewaarOpen(open) {
 }
 
 const SOORTEN = [
-  ["alles", "Alles"],
-  ["besluit", "Besluiten"],
-  ["melding", "Meldingen"],
-  ["kritiek", "Kritiek"],
+  ["alles", nt("Alles")],
+  ["besluit", nt("Besluiten")],
+  ["melding", nt("Meldingen")],
+  ["kritiek", nt("Kritiek")],
 ];
 
 /** "na ..." in woorden. */
 function wachtLabel(seconds) {
   const value = Number(seconds) || 0;
-  if (value < 60) return `${value} seconden`;
+  if (value < 60) return t("{n} seconden", { n: value });
   const minutes = value / 60;
-  return minutes === 1 ? "1 minuut" : `${minutes} minuten`;
+  return tn(minutes, "{n} minuut", "{n} minuten");
 }
 
 /** "eens per ..." in woorden. */
 function tussenLabel(minutes) {
   const value = Number(minutes) || 0;
-  if (value < 60) return `${value} minuten`;
+  if (value < 60) return t("{n} minuten", { n: value });
   const hours = value / 60;
-  return hours === 1 ? "uur" : `${hours} uur`;
+  return hours === 1 ? t("uur") : t("{n} uur", { n: hours });
 }
 
 const css = /* css */ `
@@ -489,11 +487,11 @@ class DacViewNotifications extends DacElement {
   render() {
     return /* html */ `
       <section class="page">
-        <h1>${icons.bell} Meldingen</h1>
-        <p class="sub">Wie welke berichten op zijn telefoon krijgt, en alles wat de coach deed en meldde.</p>
+        <h1>${icons.bell} ${t("Meldingen")}</h1>
+        <p class="sub">${t("Wie welke berichten op zijn telefoon krijgt, en alles wat de coach deed en meldde.")}</p>
 
         <details class="groep" data-groep="wie">
-          <summary><span class="kop">${icons.devices}<span>Wie krijgt wat</span></span><span class="stand" id="stand-wie"></span></summary>
+          <summary><span class="kop">${icons.devices}<span>${t("Wie krijgt wat")}</span></span><span class="stand" id="stand-wie"></span></summary>
           <div class="inhoud">
         <section class="blok" id="wie">
           <p class="hint" id="wie-hint"></p>
@@ -501,17 +499,17 @@ class DacViewNotifications extends DacElement {
           <div id="toevoegen" hidden>
             <div class="velden twee">
               <div class="veld">
-                <label for="nieuw-naam">Naam</label>
-                <input id="nieuw-naam" type="text" maxlength="40" placeholder="Naam van de bewoner" autocomplete="off">
+                <label for="nieuw-naam">${t("Naam")}</label>
+                <input id="nieuw-naam" type="text" maxlength="40" placeholder="${t("Naam van de bewoner")}" autocomplete="off">
               </div>
               <div class="veld">
-                <label for="nieuw-telefoon">Telefoon</label>
+                <label for="nieuw-telefoon">${t("Telefoon")}</label>
                 <select id="nieuw-telefoon"></select>
-                <span class="uitleg">Elke telefoon met de Home Assistant-app staat hier, zodra de app erop ingelogd is.</span>
+                <span class="uitleg">${t("Elke telefoon met de Home Assistant-app staat hier, zodra de app erop ingelogd is.")}</span>
               </div>
             </div>
             <div class="rij-knoppen" style="margin-top: 10px;">
-              <button type="button" class="knop primair" id="nieuw-knop">${icons.plus} Persoon toevoegen</button>
+              <button type="button" class="knop primair" id="nieuw-knop">${icons.plus} ${t("Persoon toevoegen")}</button>
               <span class="status" id="wie-status"></span>
             </div>
           </div>
@@ -524,23 +522,23 @@ class DacViewNotifications extends DacElement {
              18-10-2026: "ook wil ik een invulveld voor herinnering meterstanden
              doorgeven." Komt in de berichtenbox (het belletje) en op de telefoon. -->
         <details class="groep" data-groep="herinnering">
-          <summary><span class="kop">${icons.bell}<span>Herinneringen</span></span><span class="stand" id="stand-herinnering"></span></summary>
+          <summary><span class="kop">${icons.bell}<span>${t("Herinneringen")}</span></span><span class="stand" id="stand-herinnering"></span></summary>
           <div class="inhoud">
         <section class="blok" id="herinnering">
-          <p class="hint">Een bericht in je berichtenbox (het belletje bovenin) en op je telefoon, zodat je het niet vergeet.</p>
+          <p class="hint">${t("Een bericht in je berichtenbox (het belletje bovenin) en op je telefoon, zodat je het niet vergeet.")}</p>
           <div class="velden twee">
             <div class="veld">
-              <label for="meter-datum">Meterstanden doorgeven, de eerste keer op</label>
+              <label for="meter-datum">${t("Meterstanden doorgeven, de eerste keer op")}</label>
               <input id="meter-datum" type="date">
               <span class="uitleg" id="meter-volgende"></span>
             </div>
             <div class="veld">
-              <label for="meter-herhaling">Daarna</label>
+              <label for="meter-herhaling">${t("Daarna")}</label>
               <select id="meter-herhaling">
-                <option value="month">elke maand</option>
-                <option value="quarter">elk kwartaal</option>
-                <option value="year">elk jaar</option>
-                <option value="once">niet meer, eenmalig</option>
+                <option value="month">${t("elke maand")}</option>
+                <option value="quarter">${t("elk kwartaal")}</option>
+                <option value="year">${t("elk jaar")}</option>
+                <option value="once">${t("niet meer, eenmalig")}</option>
               </select>
             </div>
           </div>
@@ -551,34 +549,34 @@ class DacViewNotifications extends DacElement {
 
         <!-- De meldingen met een drempel, elk apart uit te klappen (v0.133.2). -->
         <details class="groep" data-groep="waarschuwingen" id="waarschuwingen">
-          <summary><span class="kop">${icons.warning}<span>Waarschuwingen</span></span><span class="stand" id="stand-waarschuwingen"></span></summary>
+          <summary><span class="kop">${icons.warning}<span>${t("Waarschuwingen")}</span></span><span class="stand" id="stand-waarschuwingen"></span></summary>
           <div class="inhoud">
         <details class="blok sub" id="belasting" hidden>
-          <summary><span class="titel">Zware belasting</span><span class="stand" id="stand-belasting"></span></summary>
+          <summary><span class="titel">${t("Zware belasting")}</span><span class="stand" id="stand-belasting"></span></summary>
           <div class="inhoud">
-          <p class="hint">Een bericht zodra je aansluiting te zwaar belast wordt. De coach kijkt naar de zwaarst belaste fase als die bekend is, anders naar je totale netvermogen. Wie het krijgt staat hierboven per persoon.</p>
+          <p class="hint">${t("Een bericht zodra je aansluiting te zwaar belast wordt. De coach kijkt naar de zwaarst belaste fase als die bekend is, anders naar je totale netvermogen. Wie het krijgt staat hierboven per persoon.")}</p>
           <div class="aanzet">
             <div>
-              <strong>Melding aanzetten</strong>
-              <span>Zonder dit blijft de belastbaarheid gewoon op het overzicht staan, maar krijgt niemand er bericht van.</span>
+              <strong>${t("Melding aanzetten")}</strong>
+              <span>${t("Zonder dit blijft de belastbaarheid gewoon op het overzicht staan, maar krijgt niemand er bericht van.")}</span>
             </div>
-            <button type="button" class="schuif" role="switch" aria-checked="false" id="belasting-aan" aria-label="Zware belasting aan"><span class="knob"></span></button>
+            <button type="button" class="schuif" role="switch" aria-checked="false" id="belasting-aan" aria-label="${t("Zware belasting aan")}"><span class="knob"></span></button>
           </div>
           <div class="velden" id="belasting-velden" hidden>
             <div class="veld">
-              <label for="belasting-grens">Waarschuw vanaf (%)</label>
+              <label for="belasting-grens">${t("Waarschuw vanaf (%)")}</label>
               <input type="number" id="belasting-grens" min="1" max="200" step="1" inputmode="numeric">
               <span class="uitleg" id="belasting-grens-hint"></span>
             </div>
             <div class="veld">
-              <label for="belasting-wacht">Pas melden als het aanhoudt</label>
+              <label for="belasting-wacht">${t("Pas melden als het aanhoudt")}</label>
               <select id="belasting-wacht">${HOLDS.map((s) => `<option value="${s}">${wachtLabel(s)}</option>`).join("")}</select>
-              <span class="uitleg">Een oven of een motor die aanslaat geeft een piek van een seconde waar geen zekering van uit gaat. Pas als de belasting zo lang boven de grens blijft, gaat er bericht uit.</span>
+              <span class="uitleg">${t("Een oven of een motor die aanslaat geeft een piek van een seconde waar geen zekering van uit gaat. Pas als de belasting zo lang boven de grens blijft, gaat er bericht uit.")}</span>
             </div>
             <div class="veld">
-              <label for="belasting-tussen">Niet vaker dan eens per</label>
+              <label for="belasting-tussen">${t("Niet vaker dan eens per")}</label>
               <select id="belasting-tussen">${INTERVALS.map((m) => `<option value="${m}">${tussenLabel(m)}</option>`).join("")}</select>
-              <span class="uitleg">De belasting schommelt heen en weer over de grens; zonder tussentijd zou je een reeks berichten krijgen voor één druk uur.</span>
+              <span class="uitleg">${t("De belasting schommelt heen en weer over de grens; zonder tussentijd zou je een reeks berichten krijgen voor één druk uur.")}</span>
             </div>
           </div>
           <div class="status" id="belasting-status"></div>
@@ -586,26 +584,26 @@ class DacViewNotifications extends DacElement {
         </details>
 
         <details class="blok sub" id="verbruik" hidden>
-          <summary><span class="titel">Lekkage of abnormaal verbruik</span><span class="stand" id="stand-verbruik"></span></summary>
+          <summary><span class="titel">${t("Lekkage of abnormaal verbruik")}</span><span class="stand" id="stand-verbruik"></span></summary>
           <div class="inhoud">
-          <p class="hint">Een bericht als er te lang onafgebroken water loopt, of als een dag veel meer gas of water vraagt dan gewoon. Water vraagt een watermeter onder Installatie; voor het lopende water ook de sensor van het verbruik nu.</p>
+          <p class="hint">${t("Een bericht als er te lang onafgebroken water loopt, of als een dag veel meer gas of water vraagt dan gewoon. Water vraagt een watermeter onder Installatie; voor het lopende water ook de sensor van het verbruik nu.")}</p>
           <div class="aanzet">
             <div>
-              <strong>Melding aanzetten</strong>
-              <span>De coach houdt het dagverbruik van gas en water sowieso bij; met dit aan zegt hij het als een dag uit de toon valt.</span>
+              <strong>${t("Melding aanzetten")}</strong>
+              <span>${t("De coach houdt het dagverbruik van gas en water sowieso bij; met dit aan zegt hij het als een dag uit de toon valt.")}</span>
             </div>
-            <button type="button" class="schuif" role="switch" aria-checked="false" id="verbruik-aan" aria-label="Lekkage of abnormaal verbruik aan"><span class="knob"></span></button>
+            <button type="button" class="schuif" role="switch" aria-checked="false" id="verbruik-aan" aria-label="${t("Lekkage of abnormaal verbruik aan")}"><span class="knob"></span></button>
           </div>
           <div class="velden" id="verbruik-velden" hidden>
             <div class="veld">
-              <label for="verbruik-water">Water dat blijft lopen, langer dan</label>
-              <select id="verbruik-water">${[30, 60, 120, 240, 480].map((m) => `<option value="${m}">${m < 60 ? `${m} minuten` : `${m / 60} uur`}</option>`).join("")}</select>
-              <span class="uitleg">Een bad of een wasmachine loopt een half uur; een kraan die openstaat of een lekkende leiding loopt de hele nacht.</span>
+              <label for="verbruik-water">${t("Water dat blijft lopen, langer dan")}</label>
+              <select id="verbruik-water">${[30, 60, 120, 240, 480].map((m) => `<option value="${m}">${m < 60 ? t("{n} minuten", { n: m }) : m === 60 ? t("1 uur") : t("{n} uur", { n: m / 60 })}</option>`).join("")}</select>
+              <span class="uitleg">${t("Een bad of een wasmachine loopt een half uur; een kraan die openstaat of een lekkende leiding loopt de hele nacht.")}</span>
             </div>
             <div class="veld">
-              <label for="verbruik-factor">Een dag valt uit de toon vanaf</label>
-              <select id="verbruik-factor">${[2, 3, 4, 5].map((f) => `<option value="${f}">${f} keer het gewone dagverbruik</option>`).join("")}</select>
-              <span class="uitleg">Gewoon is de middelste dag van de laatste dertig. Een wasdag of een koude dag komt daar niet zomaar overheen; een lekkage wel.</span>
+              <label for="verbruik-factor">${t("Een dag valt uit de toon vanaf")}</label>
+              <select id="verbruik-factor">${[2, 3, 4, 5].map((f) => `<option value="${f}">${t("{n} keer het gewone dagverbruik", { n: f })}</option>`).join("")}</select>
+              <span class="uitleg">${t("Gewoon is de middelste dag van de laatste dertig. Een wasdag of een koude dag komt daar niet zomaar overheen; een lekkage wel.")}</span>
             </div>
           </div>
           <div class="status" id="verbruik-status"></div>
@@ -613,19 +611,19 @@ class DacViewNotifications extends DacElement {
         </details>
 
         <details class="blok sub" id="warmte" hidden>
-          <summary><span class="titel">Thuisbatterij te warm</span><span class="stand" id="stand-warmte"></span></summary>
+          <summary><span class="titel">${t("Thuisbatterij te warm")}</span><span class="stand" id="stand-warmte"></span></summary>
           <div class="inhoud">
-          <p class="hint">Een bericht als de temperatuur van de thuisbatterij boven je grens komt, en blijft. Welke temperatuur te hoog is staat in de handleiding van de batterij. Het gaat naar wie Kritiek aan heeft staan.</p>
+          <p class="hint">${t("Een bericht als de temperatuur van de thuisbatterij boven je grens komt, en blijft. Welke temperatuur te hoog is staat in de handleiding van de batterij. Het gaat naar wie Kritiek aan heeft staan.")}</p>
           <div class="aanzet">
             <div>
-              <strong>Melding aanzetten</strong>
-              <span>Zakt hij weer een graad onder de grens, dan staat dat alleen in de geschiedenis hieronder.</span>
+              <strong>${t("Melding aanzetten")}</strong>
+              <span>${t("Zakt hij weer een graad onder de grens, dan staat dat alleen in de geschiedenis hieronder.")}</span>
             </div>
-            <button type="button" class="schuif" role="switch" aria-checked="false" id="warmte-aan" aria-label="Thuisbatterij te warm aan"><span class="knob"></span></button>
+            <button type="button" class="schuif" role="switch" aria-checked="false" id="warmte-aan" aria-label="${t("Thuisbatterij te warm aan")}"><span class="knob"></span></button>
           </div>
           <div class="velden" id="warmte-velden" hidden>
             <div class="veld">
-              <label for="warmte-grens">Bericht boven (°C)</label>
+              <label for="warmte-grens">${t("Bericht boven (°C)")}</label>
               <input type="number" id="warmte-grens" min="0" max="100" step="0.5" inputmode="decimal">
               <span class="uitleg" id="warmte-grens-hint"></span>
             </div>
@@ -635,15 +633,15 @@ class DacViewNotifications extends DacElement {
         </details>
 
         <details class="blok sub" id="stekker" hidden>
-          <summary><span class="titel">Apparaat staat uit</span><span class="stand" id="stand-stekker"></span></summary>
+          <summary><span class="titel">${t("Apparaat staat uit")}</span><span class="stand" id="stand-stekker"></span></summary>
           <div class="inhoud">
-          <p class="hint">Een bericht als een apparaat dat altijd aan moet staan uit gaat en de coach het na 2 minuten nog niet weer aan heeft gekregen. Het gaat naar wie Kritiek aan heeft staan.</p>
+          <p class="hint">${t("Een bericht als een apparaat dat altijd aan moet staan uit gaat en de coach het na 2 minuten nog niet weer aan heeft gekregen. Het gaat naar wie Kritiek aan heeft staan.")}</p>
           <div class="aanzet">
             <div>
-              <strong>Melding aanzetten</strong>
+              <strong>${t("Melding aanzetten")}</strong>
               <span id="stekker-wie"></span>
             </div>
-            <button type="button" class="schuif" role="switch" aria-checked="false" id="stekker-aan" aria-label="Apparaat staat uit aan"><span class="knob"></span></button>
+            <button type="button" class="schuif" role="switch" aria-checked="false" id="stekker-aan" aria-label="${t("Apparaat staat uit aan")}"><span class="knob"></span></button>
           </div>
           <div class="status" id="stekker-status"></div>
           </div>
@@ -652,14 +650,14 @@ class DacViewNotifications extends DacElement {
         </details>
 
         <details class="groep" data-groep="geschiedenis">
-          <summary><span class="kop">${icons.bell}<span>Geschiedenis</span></span><span class="stand" id="stand-geschiedenis"></span></summary>
+          <summary><span class="kop">${icons.bell}<span>${t("Geschiedenis")}</span></span><span class="stand" id="stand-geschiedenis"></span></summary>
           <div class="inhoud">
         <section class="blok">
-          <p class="hint">Alles wat de coach deed en meldde in de afgelopen twee weken, de nieuwste bovenaan. Wat ook naar een telefoon ging staat in een kader; kritiek is wat je zelf moet oplossen.</p>
+          <p class="hint">${t("Alles wat de coach deed en meldde in de afgelopen twee weken, de nieuwste bovenaan. Wat ook naar een telefoon ging staat in een kader; kritiek is wat je zelf moet oplossen.")}</p>
           <div class="filter" id="filter">
             ${SOORTEN.map(([id, label]) =>
-              `<button type="button" data-soort="${id}"${id === "alles" ? ' class="aan"' : ""}>${label}</button>`).join("")}
-            <select id="dag" aria-label="Dag"><option value="">Alle dagen</option></select>
+              `<button type="button" data-soort="${id}"${id === "alles" ? ' class="aan"' : ""}>${t(label)}</button>`).join("")}
+            <select id="dag" aria-label="${t("Dag")}"><option value="">${t("Alle dagen")}</option></select>
           </div>
           <div id="lijst"></div>
         </section>
@@ -762,11 +760,11 @@ class DacViewNotifications extends DacElement {
       el.classList?.toggle("aan", aan);
     };
     const mensen = zichtbaar(this.meldingen_().people, this.hass_?.user).length;
-    zet("#stand-wie", mensen ? `${mensen} ${mensen === 1 ? "persoon" : "personen"}` : "Nog niemand");
+    zet("#stand-wie", mensen ? tn(mensen, "{n} persoon", "{n} personen") : t("Nog niemand"));
     const r = this.settings_?.reminders ?? {};
     const volgende = volgendeMeterstand(new Date(), r.meter_date, r.meter_repeat || "year");
-    zet("#stand-herinnering", !r.meter_date ? "Niets ingesteld"
-      : volgende ? `Meterstanden op ${volgende.toLocaleDateString("nl-NL", { day: "numeric", month: "long" })}` : "Geweest");
+    zet("#stand-herinnering", !r.meter_date ? t("Niets ingesteld")
+      : volgende ? t("Meterstanden op {datum}", { datum: datum(volgende, { day: "numeric", month: "long" }) }) : t("Geweest"));
     const meldingen = this.meldingen_();
     let aan = 0;
     let zichtbaarAantal = 0;
@@ -776,11 +774,11 @@ class DacViewNotifications extends DacElement {
       zichtbaarAantal += 1;
       const staat = Boolean((meldingen[sleutel] ?? {}).enabled);
       if (staat) aan += 1;
-      zet(`#stand-${id}`, staat ? "aan" : "uit", staat);
+      zet(`#stand-${id}`, staat ? t("aan") : t("uit"), staat);
     }
     const groep = this.$("#waarschuwingen");
     if (groep) groep.hidden = !zichtbaarAantal;
-    zet("#stand-waarschuwingen", `${aan} van ${zichtbaarAantal} aan`);
+    zet("#stand-waarschuwingen", t("{aan} van {totaal} aan", { aan, totaal: zichtbaarAantal }));
     zet("#stand-geschiedenis", this.geladen_ ? geschiedenisStand(recent(this.items_)) : "");
   }
 
@@ -800,13 +798,13 @@ class DacViewNotifications extends DacElement {
     const mensen = zichtbaar(this.meldingen_().people, this.hass_?.user);
     const hint = this.$("#wie-hint");
     if (hint) {
-      hint.textContent = "Per persoon welke berichten er naar zijn telefoon gaan. Voeg hieronder iemand toe met de telefoon waarop de Home Assistant-app staat.";
+      hint.textContent = t("Per persoon welke berichten er naar zijn telefoon gaan. Voeg hieronder iemand toe met de telefoon waarop de Home Assistant-app staat.");
     }
     holder.replaceChildren();
     if (!mensen.length) {
       const leeg = document.createElement("div");
       leeg.className = "leeg";
-      leeg.textContent = "Er is nog niemand toegevoegd. Zonder personen gaat er niets naar een telefoon; de geschiedenis hieronder vult zich wel.";
+      leeg.textContent = t("Er is nog niemand toegevoegd. Zonder personen gaat er niets naar een telefoon; de geschiedenis hieronder vult zich wel.");
       holder.append(leeg);
     }
     const bekend = this.telefoons_();
@@ -836,7 +834,9 @@ class DacViewNotifications extends DacElement {
     const tel = document.createElement("span");
     const weg = bekend.length && !bekend.includes(persoon.target);
     tel.className = `tel${weg ? " weg" : ""}`;
-    tel.textContent = `notify.${persoon.target}${weg ? " (bestaat niet meer in Home Assistant)" : ""}`;
+    tel.textContent = weg
+      ? t("{dienst} (bestaat niet meer in Home Assistant)", { dienst: `notify.${persoon.target}` })
+      : `notify.${persoon.target}`;
     kop.append(naam, tel);
     el.append(kop);
 
@@ -845,10 +845,10 @@ class DacViewNotifications extends DacElement {
       rij.className = "soort";
       const tekst = document.createElement("div");
       const label = document.createElement("strong");
-      label.textContent = soort.label;
+      label.textContent = t(soort.label);
       label.id = `soort-${persoon.id}-${soort.id}`;
       const uitleg = document.createElement("span");
-      uitleg.textContent = soort.uitleg;
+      uitleg.textContent = t(soort.uitleg);
       tekst.append(label, uitleg);
       const schuif = document.createElement("button");
       schuif.type = "button";
@@ -872,7 +872,7 @@ class DacViewNotifications extends DacElement {
       knop.type = "button";
       const zeker = this.zekerWeg_ === persoon.id;
       knop.className = `knop weg${zeker ? " zeker" : ""}`;
-      knop.innerHTML = `${icons.trash} <span>${zeker ? "Echt verwijderen?" : "Verwijderen"}</span>`;
+      knop.innerHTML = `${icons.trash} <span>${zeker ? t("Echt verwijderen?") : t("Verwijderen")}</span>`;
       knop.addEventListener("click", () => this.verwijderen_(persoon.id));
       voet.append(knop);
       el.append(voet);
@@ -889,7 +889,7 @@ class DacViewNotifications extends DacElement {
     if (!bekend.length) {
       const optie = document.createElement("option");
       optie.value = "";
-      optie.textContent = "Nog geen telefoon met de app ingelogd";
+      optie.textContent = t("Nog geen telefoon met de app ingelogd");
       telefoon.append(optie);
     }
     for (const name of bekend) {
@@ -910,7 +910,7 @@ class DacViewNotifications extends DacElement {
     if (!target) return;
     const mensen = [...(this.meldingen_().people ?? [])];
     if (mensen.some((p) => p.target === target)) {
-      this.status_("#wie-status", "Die telefoon staat er al.", true);
+      this.status_("#wie-status", t("Die telefoon staat er al."), true);
       return;
     }
     mensen.push({
@@ -975,11 +975,11 @@ class DacViewNotifications extends DacElement {
         })) },
       });
       this.settings_ = settings;
-      this.status_(statusId, "Opgeslagen", false);
+      this.status_(statusId, t("Opgeslagen"), false);
       return true;
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de personen niet opslaan", error);
-      this.status_(statusId, `Opslaan mislukt: ${error?.message ?? error}`, true);
+      this.status_(statusId, t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), true);
       return false;
     } finally {
       this.bezig_ = false;
@@ -1002,10 +1002,10 @@ class DacViewNotifications extends DacElement {
     this.$("#meter-herhaling").value = r.meter_repeat || "year";
     const volgende = volgendeMeterstand(new Date(), r.meter_date, r.meter_repeat || "year");
     this.$("#meter-volgende").textContent = !r.meter_date
-      ? "Leeg is geen herinnering."
+      ? t("Leeg is geen herinnering.")
       : volgende
-        ? `De volgende keer: ${volgende.toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" })}.`
-        : "Dit was eenmalig; er komt geen herinnering meer.";
+        ? t("De volgende keer: {datum}.", { datum: volgende.toLocaleDateString(locale(), { day: "numeric", month: "long", year: "numeric" }) })
+        : t("Dit was eenmalig; er komt geen herinnering meer.");
   }
 
   async bewaarHerinnering_(wijziging) {
@@ -1013,10 +1013,10 @@ class DacViewNotifications extends DacElement {
     try {
       const settings = await this.hass_.callWS({ type: "domotiapp_coach/reminders/set", ...wijziging });
       this.settings_ = settings;
-      this.status_("#meter-status", "Opgeslagen", false);
+      this.status_("#meter-status", t("Opgeslagen"), false);
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de herinnering niet opslaan", error);
-      this.status_("#meter-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
+      this.status_("#meter-status", t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), true);
     }
     this.paintHerinnering_();
     this.paintStanden_();
@@ -1061,10 +1061,10 @@ class DacViewNotifications extends DacElement {
         notifications: { usage_alert: { ...this.verbruik_(), ...wijziging } },
       });
       this.settings_ = settings;
-      this.status_("#verbruik-status", "Opgeslagen", false);
+      this.status_("#verbruik-status", t("Opgeslagen"), false);
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de verbruiksmelding niet opslaan", error);
-      this.status_("#verbruik-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
+      this.status_("#verbruik-status", t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), true);
     }
     this.paintVerbruik_();
     this.paintStanden_();
@@ -1084,7 +1084,7 @@ class DacViewNotifications extends DacElement {
       .map((d) => {
         const id = d.entities?.temperature;
         const waarde = id ? Number(this.hass_?.states?.[id]?.state) : NaN;
-        return { naam: d.name || "Thuisbatterij", sensor: Boolean(id), graden: Number.isFinite(waarde) ? waarde : null };
+        return { naam: d.name || t("Thuisbatterij"), sensor: Boolean(id), graden: Number.isFinite(waarde) ? waarde : null };
       });
   }
 
@@ -1101,19 +1101,22 @@ class DacViewNotifications extends DacElement {
     const veld = this.$("#warmte-grens");
     if (this.shadowRoot?.activeElement !== veld) veld.value = alert.max_c ?? "";
     const metSensor = accus.filter((a) => a.sensor);
-    const graden = (g) => `${g.toLocaleString("nl-NL", { maximumFractionDigits: 1 })} °C`;
+    const graden = (g) => `${g.toLocaleString(locale(), { maximumFractionDigits: 1 })} °C`;
     let hint;
     // Apparaten ziet alleen de installateur (v0.114.0); de bewoner krijgt te
     // horen wie het kan regelen.
     if (!metSensor.length) {
       hint = this.isAdmin_()
-        ? "Vul eerst de temperatuur van de batterij in onder Apparaten; zonder sensor is er niets te melden."
-        : "Je installateur moet eerst de temperatuur van de batterij koppelen; zonder sensor is er niets te melden.";
+        ? t("Vul eerst de temperatuur van de batterij in onder Apparaten; zonder sensor is er niets te melden.")
+        : t("Je installateur moet eerst de temperatuur van de batterij koppelen; zonder sensor is er niets te melden.");
     }
-    else if (alert.max_c === null || alert.max_c === undefined) hint = "Vul in boven welke temperatuur je een bericht wilt.";
+    else if (alert.max_c === null || alert.max_c === undefined) hint = t("Vul in boven welke temperatuur je een bericht wilt.");
     else {
       hint = metSensor
-        .map((a) => `${metSensor.length > 1 ? `${a.naam} nu` : "Nu"} ${a.graden === null ? "onbekend" : graden(a.graden)}`)
+        .map((a) => {
+          const waarde = a.graden === null ? t("onbekend") : graden(a.graden);
+          return metSensor.length > 1 ? t("{naam} nu {waarde}", { naam: a.naam, waarde }) : t("Nu {waarde}", { waarde });
+        })
         .join(", ") + ".";
     }
     this.$("#warmte-grens-hint").textContent = hint;
@@ -1127,10 +1130,10 @@ class DacViewNotifications extends DacElement {
         notifications: { temp_alert: { ...this.warmte_(), ...wijziging } },
       });
       this.settings_ = settings;
-      this.status_("#warmte-status", "Opgeslagen", false);
+      this.status_("#warmte-status", t("Opgeslagen"), false);
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de temperatuurmelding niet opslaan", error);
-      this.status_("#warmte-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
+      this.status_("#warmte-status", t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), true);
     }
     this.paintWarmte_();
     this.paintStanden_();
@@ -1162,8 +1165,10 @@ class DacViewNotifications extends DacElement {
     this.$("#stekker-aan").setAttribute("aria-checked", String(Boolean(this.stekker_().enabled)));
     const labels = deviceLabelMap(this.settings_?.devices ?? []);
     const namen = apparaten.map((d) => labels.get(d.id) ?? deviceLabel(d));
-    this.$("#stekker-wie").textContent =
-      `Geldt voor ${namen.join(", ").replace(/, ([^,]*)$/, " en $1")}. Krijgt de coach het weer aan, dan staat dat alleen in de geschiedenis hieronder.`;
+    this.$("#stekker-wie").textContent = t(
+      "Geldt voor {namen}. Krijgt de coach het weer aan, dan staat dat alleen in de geschiedenis hieronder.",
+      { namen: namen.join(", ").replace(/, ([^,]*)$/, ` ${t("en")} $1`) }
+    );
   }
 
   async bewaarStekker_(wijziging) {
@@ -1174,10 +1179,10 @@ class DacViewNotifications extends DacElement {
         notifications: { always_on_alert: { ...this.stekker_(), ...wijziging } },
       });
       this.settings_ = settings;
-      this.status_("#stekker-status", "Opgeslagen", false);
+      this.status_("#stekker-status", t("Opgeslagen"), false);
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de melding over een apparaat dat uit staat niet opslaan", error);
-      this.status_("#stekker-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
+      this.status_("#stekker-status", t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), true);
     }
     this.paintStekker_();
     this.paintStanden_();
@@ -1199,10 +1204,10 @@ class DacViewNotifications extends DacElement {
     const percent = Number(alert.threshold_percent) || 0;
     const hint = this.$("#belasting-grens-hint");
     if (!fuse) {
-      hint.textContent = "Vul eerst je aansluiting in onder Installatie.";
+      hint.textContent = t("Vul eerst je aansluiting in onder Installatie.");
     } else {
-      const amps = ((fuse * percent) / 100).toLocaleString("nl-NL", { maximumFractionDigits: 1 });
-      hint.textContent = `Bij ${phases} × ${fuse} A komt dat neer op ${amps} A per fase.`;
+      const amps = ((fuse * percent) / 100).toLocaleString(locale(), { maximumFractionDigits: 1 });
+      hint.textContent = t("Bij {fasen} × {zekering} A komt dat neer op {stroom} A per fase.", { fasen: phases, zekering: fuse, stroom: amps });
     }
   }
 
@@ -1214,10 +1219,10 @@ class DacViewNotifications extends DacElement {
         notifications: { load_alert: { ...this.belasting_(), ...wijziging } },
       });
       this.settings_ = settings;
-      this.status_("#belasting-status", "Opgeslagen", false);
+      this.status_("#belasting-status", t("Opgeslagen"), false);
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de zekeringmelding niet opslaan", error);
-      this.status_("#belasting-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
+      this.status_("#belasting-status", t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), true);
     }
     this.paintBelasting_();
     this.paintVerbruik_();
@@ -1261,7 +1266,7 @@ class DacViewNotifications extends DacElement {
     keuze.replaceChildren();
     const alle = document.createElement("option");
     alle.value = "";
-    alle.textContent = "Alle dagen";
+    alle.textContent = t("Alle dagen");
     keuze.append(alle);
     for (const d of opties) {
       const optie = document.createElement("option");
@@ -1286,10 +1291,10 @@ class DacViewNotifications extends DacElement {
       const leeg = document.createElement("div");
       leeg.className = "leeg";
       leeg.textContent = !this.geladen_
-        ? "De meldingen worden opgehaald."
+        ? t("De meldingen worden opgehaald.")
         : recent(this.items_).length
-          ? "Niets dat aan dit filter voldoet."
-          : "De coach heeft de afgelopen twee weken niets gemeld.";
+          ? t("Niets dat aan dit filter voldoet.")
+          : t("De coach heeft de afgelopen twee weken niets gemeld.");
       lijst.append(leeg);
       return;
     }
@@ -1297,10 +1302,12 @@ class DacViewNotifications extends DacElement {
     // eerste dag als er vandaag niets was, of de dag die je koos; wat je zelf
     // open- of dichtklapt blijft zo tot het scherm ververst.
     this.dagOpen_ ??= new Map();
+    // Op de dag zelf en niet op de kop, want die staat in de taal van nu.
+    const vandaag = dagsleutel(huisNu());
     groepen.forEach((groep, i) => {
       const blok = document.createElement("details");
       blok.className = "dag";
-      const vanzelf = groep.kop === "Vandaag" || Boolean(this.filter_.dag) || (i === 0 && groepen[0].kop !== "Vandaag");
+      const vanzelf = groep.sleutel === vandaag || Boolean(this.filter_.dag) || (i === 0 && groepen[0].sleutel !== vandaag);
       blok.open = this.dagOpen_.has(groep.sleutel) ? this.dagOpen_.get(groep.sleutel) : vanzelf;
       blok.addEventListener?.("toggle", () => this.dagOpen_.set(groep.sleutel, blok.open));
       const kop = document.createElement("summary");
@@ -1310,7 +1317,9 @@ class DacViewNotifications extends DacElement {
       const aantal = document.createElement("span");
       aantal.className = "stand";
       const kritiek = groep.rijen.filter((r) => r.soort === "kritiek").length;
-      aantal.textContent = `${groep.rijen.length}${kritiek ? `, ${kritiek} kritiek` : ""}`;
+      aantal.textContent = kritiek
+        ? t("{n}, {k} kritiek", { n: groep.rijen.length, k: kritiek })
+        : String(groep.rijen.length);
       kop.append(titel, aantal);
       blok.append(kop);
       lijst.append(blok);

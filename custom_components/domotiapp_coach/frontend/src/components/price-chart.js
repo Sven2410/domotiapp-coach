@@ -18,6 +18,7 @@
 
 import { DacElement, define } from "../base.js";
 import { clock, huisNu, price as fmtPrice, level, levelTone, prijsGrenzen } from "../format.js";
+import { datum, t } from "../i18n.js";
 
 /**
  * The drawing is measured in real pixels, not in an abstract grid.
@@ -215,7 +216,7 @@ class DacPriceChart extends DacElement {
 
     if (!has) {
       empty.textContent =
-        "Je leverancier publiceert (nog) geen prijslijst bij deze entiteit. Zodra dat gebeurt, staat het verloop hier.";
+        t("Je leverancier publiceert (nog) geen prijslijst bij deze entiteit. Zodra dat gebeurt, staat het verloop hier.");
       this.$("#stage").innerHTML = "";
       this.$("#note").textContent = "";
       return;
@@ -251,13 +252,13 @@ class DacPriceChart extends DacElement {
     const { low, high } = this.bounds_;
     // Naar de bekende prijzen (v0.133.1): geen bedragen, want die schuiven mee.
     const rows = this.bounds_?.relative ? [
-      { name: "good", text: "Goedkoopste derde" },
-      { name: "warn", text: "Middelste derde" },
-      { name: "bad", text: "Duurste derde, van de bekende prijzen" },
+      { name: "good", text: t("Goedkoopste derde") },
+      { name: "warn", text: t("Middelste derde") },
+      { name: "bad", text: t("Duurste derde, van de bekende prijzen") },
     ] : [
-      { name: "good", text: `Laag (tot ${fmtPrice(low).value})` },
-      { name: "warn", text: `Gemiddeld (tot ${fmtPrice(high).value})` },
-      { name: "bad", text: `Hoog (boven ${fmtPrice(high).value})` },
+      { name: "good", text: t("Laag (tot {prijs})", { prijs: fmtPrice(low).value }) },
+      { name: "warn", text: t("Gemiddeld (tot {prijs})", { prijs: fmtPrice(high).value }) },
+      { name: "bad", text: t("Hoog (boven {prijs})", { prijs: fmtPrice(high).value }) },
     ];
 
     this.$("#legend").replaceChildren(
@@ -365,7 +366,7 @@ class DacPriceChart extends DacElement {
       nowIndex < 0
         ? ""
         : `<line class="now-line" x1="${nowX}" y1="${TOP - 14}" x2="${nowX}" y2="${BOTTOM}"/>
-           <text class="flag" x="${nowX}" y="${TOP - 18}" text-anchor="${nowAnchor}">Nu</text>`;
+           <text class="flag" x="${nowX}" y="${TOP - 18}" text-anchor="${nowAnchor}">${t("Nu")}</text>`;
 
     // The two boundaries the colours turn on, drawn where they fall. They are
     // the only scale this chart has -- and the pair of numbers somebody would
@@ -389,7 +390,7 @@ class DacPriceChart extends DacElement {
 
     this.$("#stage").innerHTML = `
       <svg viewBox="0 0 ${W} ${H}" role="img"
-           aria-label="Energieprijs per uur, voor vandaag en zover bekend morgen">
+           aria-label="${t("Energieprijs per uur, voor vandaag en zover bekend morgen")}">
         ${splits}
         <line class="zero" x1="0" y1="${zero}" x2="${PLOT}" y2="${zero}"/>
         ${bars}
@@ -410,8 +411,8 @@ class DacPriceChart extends DacElement {
     // on a phone the hours already spent are left out of the picture, and
     // "cheapest of today and tomorrow" then quietly meant something else.
     this.$("#note").replaceChildren(
-      this.extreme_("Goedkoopst", (a, b) => b.price < a.price),
-      this.extreme_("Duurst", (a, b) => b.price > a.price)
+      this.extreme_(t("Goedkoopst"), (a, b) => b.price < a.price),
+      this.extreme_(t("Duurst"), (a, b) => b.price > a.price)
     );
 
     const svg = this.$("svg");
@@ -475,11 +476,14 @@ class DacPriceChart extends DacElement {
 
     const pick = rows.reduce((a, b) => (better(a, b) ? b : a));
     const running = this.now_ >= pick.start && this.now_ < pick.end;
-    const day = sameDay(pick.start, this.now_) ? "vandaag" : dayName(pick.start).toLowerCase();
+    // Midden in de zin: "morgen" met een kleine letter, een weekdag zoals de taal hem schrijft.
+    const day = sameDay(pick.start, this.now_) ? t("vandaag") : dayName(pick.start, true);
 
-    line.textContent = `${label}: ${running ? "nu" : `${day} ${clock(pick.start)}`}, ${
-      fmtPrice(pick.price).value
-    } per kWh.`;
+    line.textContent = t("{wat}: {wanneer}, {prijs} per kWh.", {
+      wat: label,
+      wanneer: running ? t("nu") : `${day} ${clock(pick.start)}`,
+      prijs: fmtPrice(pick.price).value,
+    });
     return line;
   }
 
@@ -494,7 +498,7 @@ class DacPriceChart extends DacElement {
     }
 
     if (!row) {
-      this.$("#read-when").textContent = "Geen prijs voor dit moment";
+      this.$("#read-when").textContent = t("Geen prijs voor dit moment");
       this.$("#read-num").textContent = "—";
       this.$("#read-unit").textContent = "";
       return;
@@ -504,7 +508,7 @@ class DacPriceChart extends DacElement {
     const day = sameDay(row.start, this.now_) ? "" : `${dayName(row.start)} `;
     const { value, unit } = fmtPrice(row.price);
 
-    this.$("#read-when").textContent = `${running ? "Nu · " : ""}${day}${clock(row.start)} tot ${clock(row.end)}`;
+    this.$("#read-when").textContent = `${running ? `${t("Nu")} · ` : ""}${day}${t("{van} tot {tot}", { van: clock(row.start), tot: clock(row.end) })}`;
     this.$("#read-num").textContent = value;
     this.$("#read-unit").textContent = unit;
   }
@@ -528,13 +532,16 @@ function barPath(x, w, base, height, up, r) {
   ].join(" ");
 }
 
-const DAYS = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
-
-/** "Morgen" when it is, the weekday when it is not. */
-function dayName(date) {
+/**
+ * "Morgen" when it is, the weekday when it is not. The weekday comes from the
+ * language (v0.139.0): "maandag" in Dutch, "Monday" in English. `klein` is for
+ * the middle of a sentence, where only "morgen" loses its capital.
+ */
+function dayName(date, klein = false) {
   const tomorrow = huisNu();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  return sameDay(date, tomorrow) ? "Morgen" : DAYS[date.getDay()];
+  if (sameDay(date, tomorrow)) return klein ? t("morgen") : t("Morgen");
+  return datum(date, { weekday: "long" });
 }
 
 define("dac-price-chart", DacPriceChart);
