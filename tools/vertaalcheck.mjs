@@ -13,8 +13,8 @@ import { join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const WORTEL = fileURLToPath(new URL("../custom_components/domotiapp_coach/frontend/", import.meta.url));
-// Stap 3 van het Engels (de eigenaar op 19-10-2026): het rapport en de leverancierslijst.
-const LATER = ["src/report.js", "src/pdf.js", "src/leveranciers.js", "src/leveranciers-data.js"];
+// Stap 3 van het Engels (het rapport en de leverancierslijst) hoort er sinds v0.140.0 bij.
+const LATER = [];
 
 export function bestanden() {
   const uit = [];

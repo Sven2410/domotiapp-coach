@@ -12,6 +12,7 @@
  * donker thema onbruikbaar, dus het rapport is licht.
  */
 
+import { t } from "./i18n.js";
 import { A4, Pdf, jpegVan, textWidth, wrap } from "./pdf.js";
 
 const MARGE = 40;
@@ -70,7 +71,7 @@ class Vel {
     const y = A4.height - 32;
     this.pdf.line(MARGE, y - 12, MARGE + BREEDTE, y - 12, { color: KLEUR.lijn, width: 0.5 });
     this.pdf.text(MARGE, y, this.voet, { size: 8, color: KLEUR.zacht });
-    this.pdf.text(MARGE + BREEDTE, y, `Bladzijde ${this.paginas}`, {
+    this.pdf.text(MARGE + BREEDTE, y, t("Bladzijde {n}", { n: this.paginas }), {
       size: 8,
       color: KLEUR.zacht,
       align: "right",
@@ -252,10 +253,10 @@ function schrijfGrafiek(pdf, vel, rijen, metZon, metAccu = false) {
 
   // De legenda, op één regel en gecentreerd onder de grafiek.
   const stukken = [
-    metZon ? { kleur: KLEUR.zon, tekst: "Eigen zon gebruikt" } : null,
-    metAccu ? { kleur: KLEUR.accu, tekst: "Batterij" } : null,
-    { kleur: KLEUR.net, tekst: "Van het net" },
-    { kleur: KLEUR.terug, tekst: "Naar het net" },
+    metZon ? { kleur: KLEUR.zon, tekst: t("Eigen zon gebruikt") } : null,
+    metAccu ? { kleur: KLEUR.accu, tekst: t("Batterij") } : null,
+    { kleur: KLEUR.net, tekst: t("Van het net") },
+    { kleur: KLEUR.terug, tekst: t("Naar het net") },
   ].filter(Boolean);
 
   const totaal = stukken.reduce((som, s) => som + 10 + textWidth(s.tekst, 8) + 16, -16);
@@ -303,7 +304,7 @@ function schrijfTabel(pdf, vel, kop, rijen, totaal, naam = "") {
   let eerste = true;
   const schrijfKop = () => {
     if (naam && !eerste) {
-      pdf.text(MARGE, vel.y + 8, `${naam} (vervolg)`, {
+      pdf.text(MARGE, vel.y + 8, t("{naam} (vervolg)", { naam }), {
         size: 9,
         bold: true,
         color: KLEUR.zacht,
@@ -438,8 +439,8 @@ export async function reportPdf(gegevens) {
   const vel = new Vel(
     pdf,
     gegevens.woning
-      ? `${gegevens.woning}, gemaakt op ${gegevens.gemaakt}`
-      : `Gemaakt op ${gegevens.gemaakt}`
+      ? t("{woning}, gemaakt op {datum}", { woning: gegevens.woning, datum: gegevens.gemaakt })
+      : t("Gemaakt op {datum}", { datum: gegevens.gemaakt })
   );
 
   // Een logo dat niet laadt is geen reden om geen rapport te maken.
@@ -452,11 +453,11 @@ export async function reportPdf(gegevens) {
 
   schrijfHoofd(pdf, vel, gegevens, logo);
 
-  vel.kop("Energie");
+  vel.kop(t("Energie"));
   schrijfVakjes(pdf, vel, gegevens.energie);
 
   if (gegevens.geld?.length) {
-    vel.kop("In geld");
+    vel.kop(t("In geld"));
     schrijfVakjes(pdf, vel, gegevens.geld);
     vel.uitleg(gegevens.geldUitleg);
   }
@@ -465,7 +466,7 @@ export async function reportPdf(gegevens) {
     // Wat de coach bespaarde, per laadbeurt tegen de prijs van het
     // inplugmoment. De eigenaar op 05-09-2026: "dat is natuurlijk het belangrijkste
     // voor de klant", dus vóór het verloop en de tabellen.
-    vel.kop("Bespaard");
+    vel.kop(t("Bespaard"));
     schrijfVakjes(pdf, vel, gegevens.bespaard.vakjes);
     vel.uitleg(gegevens.bespaard.uitleg);
     if (gegevens.bespaard.rijen?.length) {
@@ -474,12 +475,12 @@ export async function reportPdf(gegevens) {
   }
 
   if (gegevens.verloop?.length) {
-    vel.kop("Verloop");
+    vel.kop(t("Verloop"));
     schrijfGrafiek(pdf, vel, gegevens.verloop, gegevens.metZon, gegevens.metAccu);
   }
 
   if (gegevens.apparaten?.rijen?.length) {
-    vel.kop("Per apparaat");
+    vel.kop(t("Per apparaat"));
     schrijfTabel(pdf, vel, gegevens.apparaten.kop, gegevens.apparaten.rijen);
     vel.uitleg(gegevens.apparaten.uitleg);
   }
@@ -487,7 +488,7 @@ export async function reportPdf(gegevens) {
   if (gegevens.vermogen?.rijen?.length) {
     // Bewust na "Per apparaat" en voor "Alle cijfers": eerst waar de stroom
     // heen ging, dan hoe hard het ging, dan de tabel voor wie het narekent.
-    vel.kop("Vermogen en pieken");
+    vel.kop(t("Vermogen en pieken"));
     schrijfTabel(pdf, vel, gegevens.vermogen.kop, gegevens.vermogen.rijen);
     vel.uitleg(gegevens.vermogen.uitleg);
   }
@@ -496,7 +497,7 @@ export async function reportPdf(gegevens) {
     // Per apparaat een eigen tabel, want dertien kolommen naast elkaar leest
     // niemand. De kop staat er één keer boven en daarna draagt elke tabel zijn
     // eigen naam.
-    vel.kop(`Verloop per ${gegevens.vermogenDetail.korrel.toLowerCase()}`);
+    vel.kop(t("Verloop per {korrel}", { korrel: gegevens.vermogenDetail.korrel.toLowerCase() }));
     vel.uitleg(gegevens.vermogenDetail.uitleg);
     for (const tabel of gegevens.vermogenDetail.tabellen) {
       vel.tussenkop(tabel.naam);
@@ -505,7 +506,7 @@ export async function reportPdf(gegevens) {
   }
 
   if (gegevens.cijfers?.rijen?.length) {
-    vel.kop("Alle cijfers");
+    vel.kop(t("Alle cijfers"));
     schrijfTabel(
       pdf,
       vel,

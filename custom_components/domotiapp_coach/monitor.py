@@ -31,6 +31,7 @@ from homeassistant.util import dt as dt_util
 from .const import EVENT_NOTIFICATION, EVENT_SETTINGS_UPDATED, GRID_MODE_SIGNED, LEVEL_STEER
 from .ontvangers import ontvangers
 from .storage import async_get_meldingen, async_get_store
+from .taal import getal, t
 from .units import to_watts
 
 _LOGGER = logging.getLogger(__name__)
@@ -390,32 +391,32 @@ class LoadMonitor:
         # dan is de eerste gedachte "wat staat er in vredesnaam aan". Een paal
         # die niets doet meldt zijn rustverbruik in honderdsten en die hoort
         # hier niet als "0,0 A van de laadpaal" te verschijnen.
+        # De stroom per fase staat er met een punt, ook in het Nederlands: zo
+        # stond hij er altijd, en het kilowatt met een komma.
         if reading.basis == "phase":
-            detail = f"Fase {reading.worst_phase} trekt {reading.amps:.1f} A"
+            detail = t("Fase {fase} trekt {a} A", fase=reading.worst_phase, a=f"{reading.amps:.1f}")
             if reading.eigen >= 0.5:
-                detail += f", waarvan {reading.eigen:.1f} A van de laadpaal"
+                detail += t(", waarvan {a} A van de laadpaal", a=f"{reading.eigen:.1f}")
         else:
-            detail = f"Je trekt {reading.watts / 1000:.2f} kW uit het net".replace(".", ",")
+            detail = t("Je trekt {kw} kW uit het net", kw=getal(reading.watts / 1000, 2))
             if reading.eigen >= 50:
-                detail += (
-                    f", waarvan {reading.eigen / 1000:.2f} kW van de laadpaal"
-                ).replace(".", ",")
+                detail += t(", waarvan {kw} kW van de laadpaal", kw=getal(reading.eigen / 1000, 2))
 
         # How long it has been going on is the difference between "act on this"
         # and "you missed a spike", so it goes in the message.
         held = ""
         if self._above_since is not None:
             seconds = int((dt_util.utcnow() - self._above_since).total_seconds())
-            held = (
-                f" en dat al {seconds} seconden"
+            held = " " + (
+                t("en dat al {n} seconden", n=seconds)
                 if seconds < 90
-                else f" en dat al {round(seconds / 60)} minuten"
+                else t("en dat al {n} minuten", n=round(seconds / 60))
             )
 
-        message = (
-            f"{where}je aansluiting zit op {reading.percent:.0f}%{held} "
-            f"(waarschuwing vanaf {threshold:.0f}%). {detail}. "
-            "Zet iets zwaars uit of wacht ermee."
+        message = t(
+            "{waar}je aansluiting zit op {pct}%{duur} (waarschuwing vanaf {drempel}%). {detail}. "
+            "Zet iets zwaars uit of wacht ermee.",
+            waar=where, pct=f"{reading.percent:.0f}", duur=held, drempel=f"{threshold:.0f}", detail=detail,
         )
 
         for target in targets:

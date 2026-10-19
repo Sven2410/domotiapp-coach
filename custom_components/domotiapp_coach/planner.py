@@ -28,6 +28,23 @@ import math
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 
+try:
+    from .taal import getal, t, tn
+except ImportError:
+    # Los ingeladen, zoals tests/test_planner.py dit bestand laadt, zonder pakket: dan
+    # taal.py ernaast zelf inladen. Die kent Home Assistant ook niet.
+    import importlib.util as _iu
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _taal = _sys.modules.get("taal")
+    if _taal is None:
+        _spec = _iu.spec_from_file_location("taal", _Path(__file__).with_name("taal.py"))
+        _taal = _iu.module_from_spec(_spec)
+        _sys.modules["taal"] = _taal
+        _spec.loader.exec_module(_taal)
+    getal, t, tn = _taal.getal, _taal.t, _taal.tn
+
 # --- The hard limits ------------------------------------------------------
 
 # Below this a charging point cannot deliver at all. Every brand lands on the
@@ -730,7 +747,9 @@ def _soort(grid: Grid | None, naam: str) -> str:
 
 def zekering_van(naam: str | None, grid: Grid | None = None) -> str:
     """Hoe de zekering heet in een zin: "je zekering" of "de zekering van de groep Garage"."""
-    return f"de zekering van de {_soort(grid, naam)} {naam}" if naam else "je zekering"
+    if not naam:
+        return t("je zekering")
+    return t("de zekering van de {soort} {naam}", soort=t(_soort(grid, naam)), naam=naam)
 
 
 def ceiling_amps(grid: Grid, car: Car, charger: Charger) -> int:
@@ -794,7 +813,9 @@ def _aansluiting(grid: Grid, car: Car, charger: Charger) -> str:
     """Het onderwerp van de zin over een volle zekering: de aansluiting of een groep."""
     alle = ruimten(grid, charger)
     krapste = min(alle, key=lambda paar: paar[1])[0] if alle else ""
-    return f"De {_soort(grid, krapste)} {krapste}" if krapste else "Je aansluiting"
+    if not krapste:
+        return t("Je aansluiting")
+    return t("De {soort} {naam}", soort=t(_soort(grid, krapste)), naam=krapste)
 
 
 def circuit_ceiling(charger: Charger) -> float | None:
@@ -870,18 +891,18 @@ def plafond_zin(grid: Grid, car: Car, charger: Charger, ceiling: int) -> str:
     if ceiling >= int(hardware):
         return ""
     if fuse_limited(grid, car, charger):
-        return (
-            f"Meer past er nu niet onder {zekering_van(knelpunt(grid, car, charger), grid)}. "
-            "Zodra je huis minder vraagt, gaat hij omhoog."
+        return t(
+            "Meer past er nu niet onder {zekering}. Zodra je huis minder vraagt, gaat hij omhoog.",
+            zekering=zekering_van(knelpunt(grid, car, charger), grid),
         )
     bewaker = beschikbaar_van_bewaker(grid)
     if bewaker is not None and int(bewaker) <= ceiling:
-        return "Meer geeft je lastbewaker nu niet vrij."
+        return t("Meer geeft je lastbewaker nu niet vrij.")
     groep = circuit_ceiling(charger)
     if groep is not None and int(groep) <= ceiling:
-        return "Meer past er niet op de groep van de lader."
+        return t("Meer past er niet op de groep van de lader.")
     if meter_loopt_achter(grid, charger):
-        return "Hoger gaat hij zodra de auto dat ook neemt."
+        return t("Hoger gaat hij zodra de auto dat ook neemt.")
     return ""
 
 
@@ -1080,25 +1101,25 @@ def klaar_zin(car: Car, volgens_accu: bool = False) -> str:
     dat de coach ermee ophoudt en niet dat de auto niet meer wil.
     """
     if car.soc_percent is None:
-        return "De auto is vol."
+        return t("De auto is vol.")
     # Afgerond en niet afgekapt, net als "de accu ging van ... naar ...%" in het
     # verslag: op 25-09-2026 stond er "staat op 92%" en "naar 93%" in één bericht.
     stand = round(car.soc_percent)
     if not doel_bereikt(car):
-        return (
-            f"De auto laadt niet verder en staat op {stand}%. "
-            "Mogelijk staat er een laadgrens in de auto."
+        return t(
+            "De auto laadt niet verder en staat op {stand}%. Mogelijk staat er een laadgrens in de auto.",
+            stand=stand,
         )
     if doel_van(car) >= FULL_PERCENT:
         return (
-            "De auto is vol volgens zijn accustand."
+            t("De auto is vol volgens zijn accustand.")
             if volgens_accu
-            else "De auto is vol."
+            else t("De auto is vol.")
         )
     return (
-        f"De auto staat op {stand}% en dat is waar je hem wilde hebben."
+        t("De auto staat op {stand}% en dat is waar je hem wilde hebben.", stand=stand)
         if volgens_accu
-        else f"De auto staat op {stand}% en verder hoeft hij niet."
+        else t("De auto staat op {stand}% en verder hoeft hij niet.", stand=stand)
     )
 
 
@@ -1477,9 +1498,9 @@ def solar_measured_note(forecast: Forecast) -> str:
     """Eén zin over een zonverwachting die de meter niet waarmaakt, of niets."""
     if forecast.solar_factor is None or forecast.solar_factor > ZON_NOTE_ONDER:
         return ""
-    return (
-        f"Je dak gaf de afgelopen uren {round((1 - forecast.solar_factor) * 100)}% minder "
-        "dan de zonverwachting zei, dus hij rekent verder met wat hij mat."
+    return t(
+        "Je dak gaf de afgelopen uren {procent}% minder dan de zonverwachting zei, dus hij rekent verder met wat hij mat.",
+        procent=round((1 - forecast.solar_factor) * 100),
     )
 
 
@@ -1581,9 +1602,9 @@ def measured_ceiling_note(car: Car, charger: Charger) -> str:
     gemeten = structural_ceiling(car, charger)
     if charger.expected_amps is None or gemeten >= vast_plafond(car, charger):
         return ""
-    return (
-        f"De afgelopen uren bleef er gemiddeld {gemeten} A over voor de paal, "
-        f"en daarmee rekent hij voor de uren die komen."
+    return t(
+        "De afgelopen uren bleef er gemiddeld {gemeten} A over voor de paal, en daarmee rekent hij voor de uren die komen.",
+        gemeten=gemeten,
     )
 
 
@@ -2058,23 +2079,24 @@ def _uren_gespreid(gespreid: dict[datetime, float], alle: list[Schijf]) -> list[
 
 def _kwh(waarde: float) -> str:
     """Kilowattuur zoals het paneel ze schrijft."""
-    return f"{waarde:.1f} kWh".replace(".", ",")
+    return f"{getal(waarde, 1)} kWh"
 
 
 def _kw(watt: float) -> str:
     """Watt als kilowatt, zoals het paneel ze schrijft."""
-    return f"{watt / 1000.0:.1f} kW".replace(".", ",")
+    return f"{getal(watt / 1000.0, 1)} kW"
 
 
 def _duur(minuten: float) -> str:
     """Een tijdsduur in woorden: twintig minuten, of anderhalf uur."""
     minuten = max(0, int(round(minuten)))
     if minuten < 60:
-        return f"{max(1, minuten)} minuten"
+        # "1 minuten" is wat hier altijd stond; in het Engels "1 minute".
+        return t("1 minuten") if minuten <= 1 else t("{n} minuten", n=minuten)
     uren, rest = divmod(minuten, 60)
     if rest == 0:
-        return "een uur" if uren == 1 else f"{uren} uur"
-    return f"{uren} uur en {rest} minuten"
+        return t("een uur") if uren == 1 else t("{n} uur", n=uren)
+    return t("{uren} uur en {rest} minuten", uren=uren, rest=rest)
 
 
 @dataclass
@@ -2247,22 +2269,23 @@ def timeline(
     )
     plan.solar_only = alleen_zon
     if alleen_zon and klaar is not None:
-        plan.note = (
-            _prijzen_onbekend(window, klaar, now)
-            + f". Tot die binnenkomen, meestal {_dagnaam(klaar - timedelta(days=1), now)} tussen "
-            "13:00 en 15:00, laadt hij alleen op je eigen zon en op uren die goedkoper "
-            "zijn dan het gemiddelde van wat hij al kent; daarna plant hij de rest."
+        plan.note = t(
+            "{begin}. Tot die binnenkomen, meestal {dag} tussen 13:00 en 15:00, laadt hij alleen "
+            "op je eigen zon en op uren die goedkoper zijn dan het gemiddelde van wat hij al kent; "
+            "daarna plant hij de rest.",
+            begin=_prijzen_onbekend(window, klaar, now),
+            dag=_dagnaam(klaar - timedelta(days=1), now),
         )
     if not alle and alleen_zon:
         return plan
     if not alle:
-        plan.note = (
+        plan.note = t(
             "Er zijn nog geen prijzen bekend, en er is ook geen vast bedrag "
             "ingevuld. Kijk de prijssensor na bij Installatie."
         )
         return plan
     if kwh is None:
-        plan.note = (
+        plan.note = t(
             "Zonder accustand weet de coach niet hoeveel er nog in moet. Geef hem "
             "door, dan staat hier het plan."
         )
@@ -2309,30 +2332,30 @@ def timeline(
         if laadt:
             if zonschijf is not None and netschijf is None:
                 waarom = (
-                    "wat zon, aangevuld tot de ondergrens van je paal"
+                    t("wat zon, aangevuld tot de ondergrens van je paal")
                     if zonschijf.kind == "vloer"
-                    else "je eigen zon is hier het goedkoopst"
+                    else t("je eigen zon is hier het goedkoopst")
                 )
             else:
-                waarom = "een van de goedkoopste manieren"
+                waarom = t("een van de goedkoopste manieren")
         elif begin is not None and rij["end"] <= begin:
-            waarom = "voor je begintijd"
+            waarom = t("voor je begintijd")
         elif not schijven_hier and piek_dicht(prices) and in_evening_peak(start):
-            waarom = "de avondpiek, daar komt niets van het net bij"
+            waarom = t("de avondpiek, daar komt niets van het net bij")
         elif not schijven_hier and netto_vanaf is not None and rij["end"] <= netto_vanaf:
-            waarom = f"geen zon over, en voor {_clock(netto_vanaf)} geen net"
+            waarom = t("geen zon over, en voor {klok} geen net", klok=_clock(netto_vanaf))
         elif not schijven_hier and gemiddeld is not None and rij["price"] >= gemiddeld:
-            waarom = "duurder dan gemiddeld, dus hij wacht eerst op de nieuwe prijzen"
+            waarom = t("duurder dan gemiddeld, dus hij wacht eerst op de nieuwe prijzen")
         elif not schijven_hier:
-            waarom = "buiten je tijden"
+            waarom = t("buiten je tijden")
         elif vlak:
             # Bij gelijke prijzen is geen enkel uur duurder dan een ander; het
             # enige dat er aan de hand is, is dat de auto dan al vol is. "Duurder
             # dan wat hij nodig heeft" stond er boven drie uren van € 0,242 naast
             # een uur van € 0,242.
-            waarom = "hij is dan al klaar"
+            waarom = t("hij is dan al klaar")
         else:
-            waarom = "duurder dan wat hij nodig heeft"
+            waarom = t("duurder dan wat hij nodig heeft")
 
         # Het tempo over het deel van het blok dat nog komt: het uur waar we
         # in zitten is korter dan een uur.
@@ -2360,7 +2383,7 @@ def timeline(
             kw = watts_for(blok_ceiling, car.phases) / 1000.0
             klaar_om = van + timedelta(hours=kwh_blok / kw) if kw > 0 else rij["end"]
             klaar_om = klaar_om.replace(second=0, microsecond=0)
-            waarom = f"nog {_kwh(kwh_blok)}, vol rond {_clock(klaar_om)}"
+            waarom = t("nog {kwh}, vol rond {klok}", kwh=_kwh(kwh_blok), klok=_clock(klaar_om))
         elif laadt and zonschijf is None and kw < vloer_kw - 0.01:
             # Een uur waarin de paal minder dan zijn ondergrens zou leveren
             # bestaat niet. Hij levert de ondergrens en is dus eerder klaar;
@@ -2385,7 +2408,7 @@ def timeline(
                 klaar_om = (van + timedelta(hours=kwh_blok / kw)).replace(
                     second=0, microsecond=0
                 )
-                waarom = f"nog {_kwh(kwh_blok)}, vol rond {_clock(klaar_om)}"
+                waarom = t("nog {kwh}, vol rond {klok}", kwh=_kwh(kwh_blok), klok=_clock(klaar_om))
         plan.blocks.append(
             Blok(
                 start=start,
@@ -2406,7 +2429,7 @@ def timeline(
         plan.expected_done = klaar_om
     plan.planned_kwh = sum(genomen.values())
     if not plan.blocks:
-        plan.note = "Er is niets te plannen voor deze periode."
+        plan.note = t("Er is niets te plannen voor deze periode.")
     return plan
 
 
@@ -2449,11 +2472,11 @@ def _doorladen(
         stroom = amps if rij["start"] <= now < rij["end"] else structureel
         kwh_blok = kwh * (tot - van).total_seconds() / 3600.0 / uren if laadt else 0.0
         if not laadt:
-            waarom = "hij is dan al klaar"
+            waarom = t("hij is dan al klaar")
         elif rij["start"] <= klaar_om <= rij["end"]:
-            waarom = f"nog {_kwh(kwh_blok)}, vol rond {_clock(klaar_om)}"
+            waarom = t("nog {kwh}, vol rond {klok}", kwh=_kwh(kwh_blok), klok=_clock(klaar_om))
         else:
-            waarom = "op vol vermogen, anders is hij niet op tijd vol"
+            waarom = t("op vol vermogen, anders is hij niet op tijd vol")
         plan.blocks.append(
             Blok(
                 start=rij["start"],
@@ -2520,7 +2543,7 @@ def price_now(prices: list[dict], now: datetime) -> dict | None:
 
 def _euro(value: float) -> str:
     """A price the way the panel writes it."""
-    return f"€ {value:.3f}".replace(".", ",")
+    return f"€ {getal(value, 3)}"
 
 
 def _clock(moment: datetime) -> str:
@@ -2534,10 +2557,10 @@ def _dagnaam(moment: datetime, now: datetime) -> str:
     """Vandaag, morgen, of de naam van de dag."""
     verschil = (moment.date() - now.date()).days
     if verschil <= 0:
-        return "vandaag"
+        return t("vandaag")
     if verschil == 1:
-        return "morgen"
-    return DAGNAMEN[moment.weekday()]
+        return t("morgen")
+    return t(DAGNAMEN[moment.weekday()])
 
 
 def _wanneer(moment: datetime, now: datetime) -> str:
@@ -2551,7 +2574,7 @@ def _wanneer(moment: datetime, now: datetime) -> str:
     """
     if (moment.date() - now.date()).days <= 1:
         return _clock(moment)
-    return f"{DAGNAMEN[moment.weekday()]} {_clock(moment)}"
+    return t("{dag} {klok}", dag=t(DAGNAMEN[moment.weekday()]), klok=_clock(moment))
 
 
 def _dag_klok(moment: datetime, now: datetime) -> str:
@@ -2563,7 +2586,7 @@ def _dag_klok(moment: datetime, now: datetime) -> str:
     12-09-2026).
     """
     if (moment.date() - now.date()).days == 1:
-        return f"morgen {_clock(moment)}"
+        return t("morgen {klok}", klok=_clock(moment))
     return _wanneer(moment, now)
 
 
@@ -2571,21 +2594,22 @@ def _dag_om(moment: datetime, now: datetime) -> str:
     """"om 13:00", "morgen om 13:00" of "zondag om 13:00"."""
     verschil = (moment.date() - now.date()).days
     if verschil <= 0:
-        return f"om {_clock(moment)}"
-    dag = "morgen" if verschil == 1 else DAGNAMEN[moment.weekday()]
-    return f"{dag} om {_clock(moment)}"
+        return t("om {klok}", klok=_clock(moment))
+    if verschil == 1:
+        return t("morgen om {klok}", klok=_clock(moment))
+    return t("{dag} om {klok}", dag=t(DAGNAMEN[moment.weekday()]), klok=_clock(moment))
 
 
 def _prijzen_komen(end: datetime | None, now: datetime) -> str:
     """Wanneer de prijzen tot de klaar-tijd er zijn: de middag ervoor."""
     if end is None:
-        return "Plant de rest zodra de prijzen er zijn, meestal tussen 13:00 en 15:00."
+        return t("Plant de rest zodra de prijzen er zijn, meestal tussen 13:00 en 15:00.")
     # De prijzen van een dag komen de middag ervoor. Een klaar-tijd van
     # zondag 06:00 valt in de dag die zaterdag rond 13:00 bekend wordt; bij
     # de klantwoning kwamen ze op 05-09-2026 om 13:24, en de eigenaar: "op internet
     # staat dat de energieprijzen tussen 13 en 15 bekend kunnen worden."
     dag = _dagnaam(end - timedelta(days=1), now)
-    return f"Plant de rest zodra de prijzen er zijn, meestal {dag} tussen 13:00 en 15:00."
+    return t("Plant de rest zodra de prijzen er zijn, meestal {dag} tussen 13:00 en 15:00.", dag=dag)
 
 
 def _prijzen_onbekend(window: Window, end: datetime, now: datetime) -> str:
@@ -2599,25 +2623,27 @@ def _prijzen_onbekend(window: Window, end: datetime, now: datetime) -> str:
     """
     uitleg = _uitgezet(window, now)
     if uitleg:
-        return uitleg + "De prijzen tot dan zijn nog niet bekend"
-    return f"De prijzen tot {_wanneer(end, now)} zijn nog niet bekend"
+        return uitleg + t("De prijzen tot dan zijn nog niet bekend")
+    return t("De prijzen tot {wanneer} zijn nog niet bekend", wanneer=_wanneer(end, now))
 
 
 def _uitgezet(window: Window, now: datetime) -> str:
     """Waarom de klaar-tijd zo ver weg ligt, als er dagen uit staan."""
     if not window.skipped or window.deadline is None:
         return ""
-    dagen = list(window.skipped)
-    if len(dagen) == 1:
-        welke = dagen[0].capitalize()
-        staat = "staat"
-    else:
-        welke = (", ".join(dagen[:-1]) + " en " + dagen[-1]).capitalize()
-        staat = "staan"
-    return (
-        f"{welke} {staat} in je schema uit, dus hij moet "
-        f"{_dagnaam(window.deadline, now)} om {_clock(window.deadline)} vol zijn. "
-    )
+    # De namen in `skipped` zijn Nederlands (DAGNAMEN) en worden pas hier
+    # vertaald. Een hoofdletter vooraan en niet `capitalize`, want dat maakt in
+    # het Engels "Saturday and sunday".
+    dagen = [t(dag) for dag in window.skipped]
+    welke = dagen[0] if len(dagen) == 1 else t("{a} en {b}", a=", ".join(dagen[:-1]), b=dagen[-1])
+    return tn(
+        len(dagen),
+        "{welke} staat in je schema uit, dus hij moet {dag} om {klok} vol zijn.",
+        "{welke} staan in je schema uit, dus hij moet {dag} om {klok} vol zijn.",
+        welke=welke[:1].upper() + welke[1:],
+        dag=_dagnaam(window.deadline, now),
+        klok=_clock(window.deadline),
+    ) + " "
 
 
 # Hoeveel tijd er bovenop de laadtijd over moet blijven voordat de coach het
@@ -2846,8 +2872,10 @@ def decide(
         return Decision(
             True,
             decision.amps,
-            "De lastbewaking van je aansluiting heeft het laden stilgelegd. "
-            "Zodra er ruimte is, gaat hij vanzelf verder.",
+            t(
+                "De lastbewaking van je aansluiting heeft het laden stilgelegd. "
+                "Zodra er ruimte is, gaat hij vanzelf verder."
+            ),
             plan=decision.plan,
             rule="balancer-paused",
         )
@@ -2878,8 +2906,12 @@ def decide(
             return Decision(
                 True,
                 decision.amps,
-                f"De lastbewaking houdt het laden op {held} A, want je aansluiting "
-                f"zit vol. De coach vraagt {decision.amps} A en pakt die zodra het kan.",
+                t(
+                    "De lastbewaking houdt het laden op {held} A, want je aansluiting "
+                    "zit vol. De coach vraagt {amps} A en pakt die zodra het kan.",
+                    held=held,
+                    amps=decision.amps,
+                ),
                 plan=decision.plan,
                 rule=f"{decision.rule}+held-back",
                 needs_soc=decision.needs_soc,
@@ -2912,9 +2944,12 @@ def _wake(
             return Decision(
                 True,
                 amps,
-                f"De auto is nog niet begonnen, dus hij biedt even {amps} A aan om hem "
-                "wakker te maken.",
-                plan="Zakt terug naar het zuinige tempo zodra de auto laadt.",
+                t(
+                    "De auto is nog niet begonnen, dus hij biedt even {amps} A aan om hem "
+                    "wakker te maken.",
+                    amps=amps,
+                ),
+                plan=t("Zakt terug naar het zuinige tempo zodra de auto laadt."),
                 rule=f"{decision.rule}+wake",
                 holding=decision.holding,
                 needs_soc=decision.needs_soc,
@@ -2933,10 +2968,15 @@ def _wake(
             return Decision(
                 True,
                 decision.amps,
-                f"De paal wacht op goedkeuring en biedt nog niets aan. Hij vraagt "
-                f"om {decision.amps} A zodra hij mag.",
-                plan="De coach blijft het proberen. Staat de paal op privé, dan "
-                     "hoort hij dit zelf goed te keuren.",
+                t(
+                    "De paal wacht op goedkeuring en biedt nog niets aan. Hij vraagt "
+                    "om {amps} A zodra hij mag.",
+                    amps=decision.amps,
+                ),
+                plan=t(
+                    "De coach blijft het proberen. Staat de paal op privé, dan "
+                    "hoort hij dit zelf goed te keuren."
+                ),
                 rule=f"{decision.rule}+waiting-for-auth",
                 holding=decision.holding,
                 needs_soc=decision.needs_soc,
@@ -2944,8 +2984,8 @@ def _wake(
         return Decision(
             True,
             decision.amps,
-            f"De paal biedt {decision.amps} A aan, maar de auto neemt nog niets af.",
-            plan="Kijk of het laden in de auto zelf is uitgesteld of geblokkeerd.",
+            t("De paal biedt {amps} A aan, maar de auto neemt nog niets af.", amps=decision.amps),
+            plan=t("Kijk of het laden in de auto zelf is uitgesteld of geblokkeerd."),
             rule=f"{decision.rule}+waiting-for-car",
             holding=decision.holding,
             needs_soc=decision.needs_soc,
@@ -2994,7 +3034,7 @@ def _decide(
     if not charger.connected:
         # Geen spreektaal (v0.130.1). De eigenaar op 19-10-2026, bij "Er hangt geen
         # auto aan de lader": "iets teveel spreektaal".
-        return Decision(False, 0, "Er is geen auto aangesloten op de laadpaal.", rule="disconnected")
+        return Decision(False, 0, t("Er is geen auto aangesloten op de laadpaal."), rule="disconnected")
 
     if charger.complete:
         # Er hangt nog een kabel, maar de auto neemt niets meer af. Zonder deze
@@ -3050,14 +3090,16 @@ def _decide(
         return Decision(
             False,
             0,
-            "Je hebt het laden zelf gepauzeerd."
+            t("Je hebt het laden zelf gepauzeerd.")
             + (
-                f" Zo haalt de auto {_clock(eind)} niet meer: hervat het laden of "
-                "verzet je klaar-tijd."
+                " " + t(
+                    "Zo haalt de auto {klok} niet meer: hervat het laden of verzet je klaar-tijd.",
+                    klok=_clock(eind),
+                )
                 if krap
                 else ""
             ),
-            plan="Blijft stilstaan tot je het hervat of de kabel eruit gaat.",
+            plan=t("Blijft stilstaan tot je het hervat of de kabel eruit gaat."),
             rule="user-hold",
             deadline_risk=krap,
         )
@@ -3077,14 +3119,20 @@ def _decide(
             return Decision(
                 True,
                 MIN_AMPS,
-                f"{_aansluiting(grid, car, charger)} zit bijna vol, dus hij laadt door op de laagste stand.",
-                plan="Gaat weer omhoog zodra er ruimte is.",
+                t(
+                    "{wie} zit bijna vol, dus hij laadt door op de laagste stand.",
+                    wie=_aansluiting(grid, car, charger),
+                ),
+                plan=t("Gaat weer omhoog zodra er ruimte is."),
                 rule="tight",
             )
         return Decision(
             False,
             0,
-            f"{_aansluiting(grid, car, charger)} is te zwaar belast om te laden. Zodra er ruimte is, gaat hij verder.",
+            t(
+                "{wie} is te zwaar belast om te laden. Zodra er ruimte is, gaat hij verder.",
+                wie=_aansluiting(grid, car, charger),
+            ),
             rule="no-room",
         )
 
@@ -3097,11 +3145,11 @@ def _decide(
             True,
             ceiling,
             (
-                f"Snelladen staat aan, dus hij laadt op {ceiling} A. {waarom_minder}"
+                t("Snelladen staat aan, dus hij laadt op {amps} A.", amps=ceiling) + " " + waarom_minder
                 if waarom_minder
-                else f"Snelladen staat aan, dus hij laadt op {ceiling} A, ongeacht de prijs."
+                else t("Snelladen staat aan, dus hij laadt op {amps} A, ongeacht de prijs.", amps=ceiling)
             ),
-            plan="Blijft op vol vermogen tot je het uitzet of de kabel eruit gaat.",
+            plan=t("Blijft op vol vermogen tot je het uitzet of de kabel eruit gaat."),
             rule="boost",
         )
 
@@ -3109,8 +3157,8 @@ def _decide(
         return Decision(
             True,
             ceiling,
-            "Er is een gastauto aangesloten op de laadpaal, die laadt meteen.",
-            plan="Laadt door tot de kabel eruit gaat.",
+            t("Er is een gastauto aangesloten op de laadpaal, die laadt meteen."),
+            plan=t("Laadt door tot de kabel eruit gaat."),
             rule="guest",
         )
 
@@ -3130,8 +3178,8 @@ def _decide(
         return Decision(
             False,
             0,
-            f"Laden mag vanaf {_clock(start)}.",
-            plan=f"Begint na {_clock(start)}, op het goedkoopste moment dat past.",
+            t("Laden mag vanaf {klok}.", klok=_clock(start)),
+            plan=t("Begint na {klok}, op het goedkoopste moment dat past.", klok=_clock(start)),
             rule="too-early",
             hold_minutes=_hold_until(now, start),
         )
@@ -3148,9 +3196,11 @@ def _decide(
         return Decision(
             True,
             ceiling,
-            f"Je hebt ingesteld dat hij uiterlijk om {_clock(window.start_by)} "
-            "begint, dus hij laadt nu.",
-            plan="Laadt door tot de auto vol is.",
+            t(
+                "Je hebt ingesteld dat hij uiterlijk om {klok} begint, dus hij laadt nu.",
+                klok=_clock(window.start_by),
+            ),
+            plan=t("Laadt door tot de auto vol is."),
             rule="start-by",
         )
 
@@ -3186,8 +3236,8 @@ def _decide(
         return Decision(
             True,
             ceiling,
-            "De klaar-tijd is voorbij en de auto is nog niet vol, dus hij laadt door.",
-            plan="Blijft op vol vermogen tot de auto vol is.",
+            t("De klaar-tijd is voorbij en de auto is nog niet vol, dus hij laadt door."),
+            plan=t("Blijft op vol vermogen tot de auto vol is."),
             rule="overdue",
         )
 
@@ -3215,12 +3265,15 @@ def _decide(
                 True,
                 ceiling,
                 (
-                    f"Je hebt niet doorgegeven hoe vol de auto is, dus hij gaat uit "
-                    f"van een lege accu en laadt nu door om {_wanneer(end, now)} te halen."
+                    t(
+                        "Je hebt niet doorgegeven hoe vol de auto is, dus hij gaat uit "
+                        "van een lege accu en laadt nu door om {wanneer} te halen.",
+                        wanneer=_wanneer(end, now),
+                    )
                     if soc_unknown
-                    else f"Nu doorladen, anders is de auto om {_wanneer(end, now)} niet vol."
+                    else t("Nu doorladen, anders is de auto om {wanneer} niet vol.", wanneer=_wanneer(end, now))
                 ) + (" " + gemeten if (gemeten := measured_ceiling_note(car, charger)) else ""),
-                plan="Laadt op vol vermogen tot de auto klaar is.",
+                plan=t("Laadt op vol vermogen tot de auto klaar is."),
                 rule="deadline",
                 needs_soc=soc_unknown,
             )
@@ -3253,12 +3306,12 @@ def _decide(
 
     if nodig_kwh is None:
         if genoeg_zon:
-            hoeveel = f"{grid.surplus_w / 1000:.1f}".replace(".", ",")
+            hoeveel = getal(grid.surplus_w / 1000, 1)
             return Decision(
                 True,
                 amps_zon,
-                f"Er is {hoeveel} kW zon over, dus die gaat nu in de auto.",
-                plan="Loopt mee met wat de zon geeft.",
+                t("Er is {hoeveel} kW zon over, dus die gaat nu in de auto.", hoeveel=hoeveel),
+                plan=t("Loopt mee met wat de zon geeft."),
                 rule="surplus",
                 needs_soc=soc_unknown,
             )
@@ -3273,11 +3326,13 @@ def _decide(
             return Decision(
                 False,
                 0,
-                "Hij weet niet hoe vol de auto is, dus hij wacht met laden uit het "
-                "net. Geef je accustand door, dan kiest hij het gunstigste moment.",
-                plan=(
-                    f"Begint hoe dan ook op tijd voor {_wanneer(end, now)}, uitgaand van "
-                    "een lege accu."
+                t(
+                    "Hij weet niet hoe vol de auto is, dus hij wacht met laden uit het "
+                    "net. Geef je accustand door, dan kiest hij het gunstigste moment."
+                ),
+                plan=t(
+                    "Begint hoe dan ook op tijd voor {wanneer}, uitgaand van een lege accu.",
+                    wanneer=_wanneer(end, now),
                 ),
                 rule="no-soc",
                 hold_minutes=_hold_until_start(now, end, needed),
@@ -3289,9 +3344,8 @@ def _decide(
         return Decision(
             True,
             ceiling,
-            "Hij weet niet hoeveel er nog in moet, dus hij laadt gewoon binnen je "
-            "tijden.",
-            plan="Laadt tot de auto zelf stopt.",
+            t("Hij weet niet hoeveel er nog in moet, dus hij laadt gewoon binnen je tijden."),
+            plan=t("Laadt tot de auto zelf stopt."),
             rule="fixed-tariff",
             needs_soc=soc_unknown,
         )
@@ -3318,10 +3372,12 @@ def _decide(
         return Decision(
             False,
             0,
-            _prijzen_onbekend(window, end, now)
-            + ", dus tot die binnenkomen laadt hij alleen op je eigen zon en op uren "
-            "die goedkoper zijn dan het gemiddelde van wat hij al kent, en die zijn "
-            "er nu niet.",
+            t(
+                "{begin}, dus tot die binnenkomen laadt hij alleen op je eigen zon en op uren "
+                "die goedkoper zijn dan het gemiddelde van wat hij al kent, en die zijn "
+                "er nu niet.",
+                begin=_prijzen_onbekend(window, end, now),
+            ),
             plan=_prijzen_komen(end, now),
             rule="wait-for-prices",
             hold_minutes=_hold_until_start(now, end, needed),
@@ -3343,18 +3399,22 @@ def _decide(
                 return Decision(
                     False,
                     0,
-                    "Er komen geen prijzen binnen, dus hij wacht met laden uit het "
-                    "net. Controleer de prijssensor bij Installatie.",
-                    plan=f"Begint hoe dan ook op tijd voor {_wanneer(end, now)}.",
+                    t(
+                        "Er komen geen prijzen binnen, dus hij wacht met laden uit het "
+                        "net. Controleer de prijssensor bij Installatie."
+                    ),
+                    plan=t("Begint hoe dan ook op tijd voor {wanneer}.", wanneer=_wanneer(end, now)),
                     rule="no-prices",
                     hold_minutes=_hold_until_start(now, end, needed),
                 )
         return Decision(
             True,
             ceiling,
-            "Er komen geen prijzen binnen, dus hij laadt gewoon binnen je tijden. "
-            "Controleer de prijssensor bij Installatie.",
-            plan="Laadt door tot de auto vol is.",
+            t(
+                "Er komen geen prijzen binnen, dus hij laadt gewoon binnen je tijden. "
+                "Controleer de prijssensor bij Installatie."
+            ),
+            plan=t("Laadt door tot de auto vol is."),
             rule="fixed-tariff",
         )
 
@@ -3370,9 +3430,12 @@ def _decide(
         return Decision(
             True,
             ceiling,
-            f"Wat er nog in moet past niet meer in de uren die overblijven, dus hij "
-            f"laadt nu door om {_wanneer(end, now)} te halen.",
-            plan="Laadt op vol vermogen tot de auto klaar is.",
+            t(
+                "Wat er nog in moet past niet meer in de uren die overblijven, dus hij "
+                "laadt nu door om {wanneer} te halen.",
+                wanneer=_wanneer(end, now),
+            ),
+            plan=t("Laadt op vol vermogen tot de auto klaar is."),
             rule="deadline",
         )
 
@@ -3444,9 +3507,11 @@ def _decide(
             return Decision(
                 True,
                 amps,
-                "Elk uur kost hetzelfde, dus haasten levert niets op. Hij laadt "
-                f"rustig door en is op tijd klaar; zo belast hij je aansluiting "
-                "het minst.",
+                t(
+                    "Elk uur kost hetzelfde, dus haasten levert niets op. Hij laadt "
+                    "rustig door en is op tijd klaar; zo belast hij je aansluiting "
+                    "het minst."
+                ),
                 plan=plan_zin,
                 # Een eigen naam, want dit is niet "dit uur is goedkoop" maar
                 # "alle uren zijn even duur". Op het scherm leest dat als een
@@ -3458,8 +3523,12 @@ def _decide(
         return Decision(
             True,
             amps,
-            f"Dit uur kost {_euro(nu_net.price)} per kWh en dat is een van de "
-            f"goedkoopste manieren om de {_kwh(nodig_kwh)} erin te krijgen.",
+            t(
+                "Dit uur kost {prijs} per kWh en dat is een van de "
+                "goedkoopste manieren om de {kwh} erin te krijgen.",
+                prijs=_euro(nu_net.price),
+                kwh=_kwh(nodig_kwh),
+            ),
             plan=plan_zin,
             rule="cheap-hour",
         )
@@ -3477,9 +3546,12 @@ def _decide(
             return Decision(
                 True,
                 ceiling,
-                f"Dit uur kost {_euro(hier.price)} per kWh en dat scheelt niets met "
-                "de uren die hij gepland had, dus hij laadt door in plaats van te "
-                "stoppen en zo weer te beginnen.",
+                t(
+                    "Dit uur kost {prijs} per kWh en dat scheelt niets met "
+                    "de uren die hij gepland had, dus hij laadt door in plaats van te "
+                    "stoppen en zo weer te beginnen.",
+                    prijs=_euro(hier.price),
+                ),
                 plan=plan_zin,
                 rule="cheap-hour+near",
             )
@@ -3498,9 +3570,13 @@ def _decide(
                 return Decision(
                     True,
                     ceiling,
-                    f"Dit uur kost {_euro(hier.price)} per kWh, iets meer dan de uren "
-                    f"die hij gepland had, maar stoppen laat te weinig speling over "
-                    f"voor {_wanneer(end, now)}. Dus hij laadt door.",
+                    t(
+                        "Dit uur kost {prijs} per kWh, iets meer dan de uren "
+                        "die hij gepland had, maar stoppen laat te weinig speling over "
+                        "voor {wanneer}. Dus hij laadt door.",
+                        prijs=_euro(hier.price),
+                        wanneer=_wanneer(end, now),
+                    ),
                     plan=plan_zin,
                     rule="cheap-hour+reserve",
                 )
@@ -3513,13 +3589,16 @@ def _decide(
         hier_zon = next((s for s in alle if s.solar and s.start <= now < s.end), None)
         duurste = max((s.price for s, _ in gekozen), default=None)
         if hier_zon is not None and duurste is not None and hier_zon.price <= duurste + STOP_MARGIN:
-            hoeveel = f"{grid.surplus_w / 1000:.1f}".replace(".", ",")
+            hoeveel = getal(grid.surplus_w / 1000, 1)
             return Decision(
                 True,
                 MIN_AMPS if hier_zon.kind == "vloer" else amps_zon,
-                f"Er is {hoeveel} kW zon over, en dit uur scheelt bijna niets met de "
-                "uren die hij gepland had, dus hij laadt door in plaats van te stoppen "
-                "en zo weer te beginnen.",
+                t(
+                    "Er is {hoeveel} kW zon over, en dit uur scheelt bijna niets met de "
+                    "uren die hij gepland had, dus hij laadt door in plaats van te stoppen "
+                    "en zo weer te beginnen.",
+                    hoeveel=hoeveel,
+                ),
                 plan=plan_zin,
                 rule="surplus+near",
             )
@@ -3529,20 +3608,22 @@ def _decide(
         # op te laden, dan loopt hij daarmee mee; geeft het minder, dan is de
         # ondergrens van de paal het antwoord en zit het bijkopen al in de prijs
         # waarop dit uur gekozen is.
-        hoeveel = f"{grid.surplus_w / 1000:.1f}".replace(".", ",")
+        hoeveel = getal(grid.surplus_w / 1000, 1)
         # "Er is 0,0 kW zon over. ... goedkoper" zei de kaart bij de eigenaar op
         # 11-10-2026 om 16:06 en 17:09. Is het overschot te klein om in een
         # tiende kW te noemen, dan noemt hij het niet.
-        zon_zin = f"Er is {hoeveel} kW zon over. " if hoeveel != "0,0" else ""
+        zon_zin = t("Er is {hoeveel} kW zon over.", hoeveel=hoeveel) + " " if hoeveel != getal(0.0, 1) else ""
         return Decision(
             True,
             MIN_AMPS if nu_vloer else amps_zon,
             (
-                f"{zon_zin}Met de ondergrens van je paal erbij is dit uur goedkoper "
-                "dan wachten op het net."
+                zon_zin + t("Met de ondergrens van je paal erbij is dit uur goedkoper dan wachten op het net.")
                 if nu_vloer
-                else f"Er is {hoeveel} kW zon over en die is goedkoper dan het net. "
-                "De rest haalt hij op een uur dat minder kost."
+                else t(
+                    "Er is {hoeveel} kW zon over en die is goedkoper dan het net. "
+                    "De rest haalt hij op een uur dat minder kost.",
+                    hoeveel=hoeveel,
+                )
             ),
             plan=plan_zin,
             rule="surplus",
@@ -3558,33 +3639,34 @@ def _decide(
         if begint is None:
             straks = ""
         elif eerste is not None and eerste.solar:
-            straks = f" De volgende zon verwacht hij om {_clock(begint)}."
+            straks = " " + t("De volgende zon verwacht hij om {klok}.", klok=_clock(begint))
         else:
-            straks = f" Het eerstvolgende goedkope uur is {_clock(begint)}."
-        reden = (
-            _prijzen_onbekend(window, end, now)
-            + ", dus tot die binnenkomen laadt hij alleen op je eigen zon en op uren "
-            "die goedkoper zijn dan het gemiddelde van wat hij al kent."
-            + straks
-        )
+            straks = " " + t("Het eerstvolgende goedkope uur is {klok}.", klok=_clock(begint))
+        reden = t(
+            "{begin}, dus tot die binnenkomen laadt hij alleen op je eigen zon en op uren "
+            "die goedkoper zijn dan het gemiddelde van wat hij al kent.",
+            begin=_prijzen_onbekend(window, end, now),
+        ) + straks
         regel = "wait-for-prices"
     elif begint is None:
-        reden, regel = "Het is nu niet het goedkoopste moment om te laden.", "wait-for-price"
+        reden, regel = t("Het is nu niet het goedkoopste moment om te laden."), "wait-for-price"
     elif eerste is not None and eerste.solar:
-        reden = (
-            f"Hij wacht op je eigen zon van {_clock(begint)}; die is goedkoper dan "
-            "wat het net op dit moment kost."
+        reden = t(
+            "Hij wacht op je eigen zon van {klok}; die is goedkoper dan "
+            "wat het net op dit moment kost.",
+            klok=_clock(begint),
         )
         regel = "wait-for-sun"
     elif not prices:
-        reden = (
-            f"Hij wacht tot {_clock(begint)}. Elk uur kost hetzelfde, en dan zijn "
+        reden = t(
+            "Hij wacht tot {klok}. Elk uur kost hetzelfde, en dan zijn "
             "de pieken van koken en wassen voorbij en belast het laden je "
-            "aansluiting het minst."
+            "aansluiting het minst.",
+            klok=_clock(begint),
         )
         regel = "wait-for-sun"
     else:
-        reden = f"Stroom is straks goedkoper dan nu, dus hij wacht tot {_clock(begint)}."
+        reden = t("Stroom is straks goedkoper dan nu, dus hij wacht tot {klok}.", klok=_clock(begint))
         regel = "wait-for-price"
 
     # Wacht hij op zon, dan hoort erbij te staan of hij de voorspelling nog
@@ -3891,7 +3973,7 @@ def _modus_zonder_planning(
     zon_amps = min(ceiling, int(amps_for(grid.surplus_w, car.phases)))
     vanaf_w = watts_for(MIN_AMPS, car.phases) * charger.zon_start
     genoeg_zon = grid.surplus_w >= vanaf_w
-    hoeveel = _kw(grid.surplus_w) if grid.surplus_w > 0 else "geen zon"
+    hoeveel = _kw(grid.surplus_w) if grid.surplus_w > 0 else t("geen zon")
     drempel = _kw(vanaf_w)
 
     piek = piek_dicht(prices) and in_evening_peak(now)
@@ -3899,16 +3981,16 @@ def _modus_zonder_planning(
         vast = max(MIN_AMPS, min(ceiling, int(charger.continu_amps or MIN_AMPS)))
         amps = max(vast, zon_amps)
         if amps > vast:
-            reden = f"Continu laden op {vast} A, en de zon geeft meer, dus {amps} A."
+            reden = t("Continu laden op {vast} A, en de zon geeft meer, dus {amps} A.", vast=vast, amps=amps)
+        elif grid.surplus_w > 0:
+            reden = t("Continu laden op {vast} A, met {hoeveel} zon erin.", vast=vast, hoeveel=hoeveel)
         else:
-            reden = f"Continu laden op {vast} A" + (
-                f", met {hoeveel} zon erin." if grid.surplus_w > 0 else "."
-            )
+            reden = t("Continu laden op {vast} A.", vast=vast)
         return Decision(
             True,
             amps,
             reden,
-            plan="Laadt door tot de auto vol is of de kabel eruit gaat.",
+            plan=t("Laadt door tot de auto vol is of de kabel eruit gaat."),
             rule="continu",
         )
 
@@ -3918,27 +4000,35 @@ def _modus_zonder_planning(
         return Decision(
             True,
             amps,
-            f"Er is {hoeveel} zon over, dus die gaat in de auto"
-            + (f", met {_kw(bij)} van het net erbij." if bij >= 100 else "."),
+            (
+                t("Er is {hoeveel} zon over, dus die gaat in de auto, met {bij} van het net erbij.", hoeveel=hoeveel, bij=_kw(bij))
+                if bij >= 100
+                else t("Er is {hoeveel} zon over, dus die gaat in de auto.", hoeveel=hoeveel)
+            ),
             plan=(
-                "Loopt mee met wat het dak geeft; tot de ondergrens van de paal vult het net aan."
-                if bij >= 100 else "Laadt alleen op je eigen zon en loopt mee met wat het dak geeft."
+                t("Loopt mee met wat het dak geeft; tot de ondergrens van de paal vult het net aan.")
+                if bij >= 100 else t("Laadt alleen op je eigen zon en loopt mee met wat het dak geeft.")
             ),
             rule="zon-modus",
         )
 
     if piek and charger.modus == "continu":
-        reden = (
+        reden = t(
             "Continu laden, maar in de avondpiek komt er niets van het net bij. "
-            f"Er is nu {hoeveel} over, en hij begint vanaf {drempel}."
+            "Er is nu {hoeveel} over, en hij begint vanaf {drempel}.",
+            hoeveel=hoeveel,
+            drempel=drempel,
         )
-        plan = f"Gaat om {EVENING_START:%H:%M} weer verder."
+        plan = t("Gaat om {klok} weer verder.", klok=f"{EVENING_START:%H:%M}")
     else:
-        reden = (
-            f"Hij laadt {'alleen ' if charger.zon_start >= 1.0 else ''}op zon, en er is nu {hoeveel} over. "
-            f"Hij begint vanaf {drempel}."
+        reden = t(
+            "Hij laadt alleen op zon, en er is nu {hoeveel} over. Hij begint vanaf {drempel}."
+            if charger.zon_start >= 1.0
+            else "Hij laadt op zon, en er is nu {hoeveel} over. Hij begint vanaf {drempel}.",
+            hoeveel=hoeveel,
+            drempel=drempel,
         )
-        plan = "Begint vanzelf zodra het dak genoeg geeft. Wil je nu laden, kies dan Snel of Continu."
+        plan = t("Begint vanzelf zodra het dak genoeg geeft. Wil je nu laden, kies dan Snel of Continu.")
     return Decision(False, 0, reden, plan=plan, rule="zon-wacht")
 
 
@@ -4089,11 +4179,14 @@ def _keep_alive(
 
     amps = max(MIN_AMPS, min(ceiling, int(amps_for(grid.surplus_w, car.phases))))
     reason = (
-        "Net begonnen met laden, dus hij houdt het nog even vol op de laagste stand."
+        t("Net begonnen met laden, dus hij houdt het nog even vol op de laagste stand.")
         if net_begonnen
-        else f"Om {_clock(straks)} begint het volgende laaduur, dus hij laadt tot dan door op de laagste stand."
+        else t(
+            "Om {klok} begint het volgende laaduur, dus hij laadt tot dan door op de laagste stand.",
+            klok=_clock(straks),
+        )
         if zo_verder
-        else "Hij laadt nog even door op de laagste stand. Een auto stopt niet graag steeds."
+        else t("Hij laadt nog even door op de laagste stand. Een auto stopt niet graag steeds.")
     )
     return Decision(
         True,
@@ -4113,9 +4206,11 @@ def _describe(hours: list[dict]) -> str:
     first = hours[0]["start"]
     last = hours[-1]["end"]
     total = sum(row["price"] for row in hours) / len(hours)
-    return (
-        f"Van plan te laden tussen {_clock(first)} en {_clock(last)}, "
-        f"gemiddeld {_euro(total)} per kWh."
+    return t(
+        "Van plan te laden tussen {van} en {tot}, gemiddeld {prijs} per kWh.",
+        van=_clock(first),
+        tot=_clock(last),
+        prijs=_euro(total),
     )
 
 
@@ -4421,7 +4516,8 @@ KLAAR = frozenset({"finished"})
 
 def _en_nu(vrijgave: str) -> str:
     """De keuze "nu starten" zoals de knop heet: "ingeruimd en nu starten", of "nu starten"."""
-    return f"{vrijgave} en nu starten" if vrijgave else "nu starten"
+    # `vrijgave` is het Nederlandse woord uit `VRIJGAVE_WOORD`, vertaald pas hier.
+    return t("{vrijgave} en nu starten", vrijgave=t(vrijgave)) if vrijgave else t("nu starten")
 
 
 def _in_avondpiek(start: datetime, einde: datetime) -> bool:
@@ -4584,23 +4680,23 @@ def plan_programma(
     `charge` betekent hier: nu starten (of: hij draait).
     """
     if apparaat.status in KLAAR:
-        return Decision(False, 0, "Het programma is klaar.", rule="finished")
+        return Decision(False, 0, t("Het programma is klaar."), rule="finished")
     if apparaat.status in DRAAIT:
         return Decision(
-            True, 0, "Hij draait.", plan="De coach doet niets tot het programma af is.",
+            True, 0, t("Hij draait."), plan=t("De coach doet niets tot het programma af is."),
             rule="running",
         )
     if not apparaat.released and apparaat.door_release:
         # De eigenaar op 29-09-2026: "als die optie uit staat dan is het klep
         # dicht van de vaatwasser en dan is die al vrijgegeven."
         waarom = {
-            "open": "Wacht tot de klep dicht is.",
-            "remote": "De klep is dicht, maar starten op afstand staat uit. Zet dat aan op de machine.",
-            "unload": "Het programma is klaar. Hij start pas weer als de klep open en weer dicht is geweest.",
-        }.get(apparaat.door_release, "Wacht tot de klep dicht is; de coach ziet de deurstand nu niet.")
+            "open": t("Wacht tot de klep dicht is."),
+            "remote": t("De klep is dicht, maar starten op afstand staat uit. Zet dat aan op de machine."),
+            "unload": t("Het programma is klaar. Hij start pas weer als de klep open en weer dicht is geweest."),
+        }.get(apparaat.door_release) or t("Wacht tot de klep dicht is; de coach ziet de deurstand nu niet.")
         return Decision(
             False, 0, waarom,
-            plan="Daarna kiest de coach het goedkoopste moment binnen je schema.",
+            plan=t("Daarna kiest de coach het goedkoopste moment binnen je schema."),
             rule="not-released",
         )
     if not apparaat.released:
@@ -4608,20 +4704,24 @@ def plan_programma(
         return Decision(
             False, 0,
             (
-                f"Wacht tot je hem vrijgeeft. {_clock(gemist)} is vandaag voorbij: kies of hij "
-                f"{_dagnaam(window.deadline, now)} op het goedkoopste moment start, of nu."
+                t(
+                    "Wacht tot je hem vrijgeeft. {klok} is vandaag voorbij: kies of hij "
+                    "{dag} op het goedkoopste moment start, of nu.",
+                    klok=_clock(gemist),
+                    dag=_dagnaam(window.deadline, now),
+                )
                 if gemist is not None
-                else f"Wacht tot je hem vrijgeeft: {apparaat.vrijgave} en dicht."
+                else t("Wacht tot je hem vrijgeeft: {vrijgave} en dicht.", vrijgave=t(apparaat.vrijgave))
                 if apparaat.vrijgave
-                else "Wacht tot je hem vrijgeeft."
+                else t("Wacht tot je hem vrijgeeft.")
             ),
-            plan="Daarna kiest de coach het goedkoopste moment binnen je schema.",
+            plan=t("Daarna kiest de coach het goedkoopste moment binnen je schema."),
             rule="not-released",
         )
 
     # Een apparaat zonder startknop: de coach zegt het, de bewoner drukt.
     hand = apparaat.manual
-    start_nu = "zet hem nu aan" if hand else "hij start nu"
+    start_nu = t("zet hem nu aan") if hand else t("hij start nu")
 
     programma = apparaat.program
 
@@ -4630,10 +4730,10 @@ def plan_programma(
     if apparaat.start_now:
         return Decision(
             True, 0,
-            f"Zet hem nu aan: je koos {_en_nu(apparaat.vrijgave)}." if hand
-            else f"Je koos {_en_nu(apparaat.vrijgave)}, dus hij start nu.",
+            t("Zet hem nu aan: je koos {keuze}.", keuze=_en_nu(apparaat.vrijgave)) if hand
+            else t("Je koos {keuze}, dus hij start nu.", keuze=_en_nu(apparaat.vrijgave)),
             plan=(
-                f"Klaar rond {_dag_klok(now + timedelta(minutes=programma.minutes), now)}."
+                t("Klaar rond {wanneer}.", wanneer=_dag_klok(now + timedelta(minutes=programma.minutes), now))
                 if programma is not None and programma.minutes else ""
             ),
             rule="start-now",
@@ -4646,7 +4746,11 @@ def plan_programma(
     if uiterlijk is not None and now >= uiterlijk:
         return Decision(
             True, 0,
-            f"Je hebt ingesteld dat hij uiterlijk om {_wanneer(uiterlijk, now)} begint, dus {start_nu}.",
+            t(
+                "Je hebt ingesteld dat hij uiterlijk om {wanneer} begint, dus {start}.",
+                wanneer=_wanneer(uiterlijk, now),
+                start=start_nu,
+            ),
             rule="start-by",
         )
 
@@ -4656,15 +4760,20 @@ def plan_programma(
         if einde is not None and now + PROGRAMMA_SPELING >= einde - timedelta(hours=1):
             return Decision(
                 True, 0,
-                f"De coach kent het gekozen programma niet en {_wanneer(einde, now)} komt dichtbij, dus {start_nu}.",
+                t(
+                    "De coach kent het gekozen programma niet en {wanneer} komt dichtbij, dus {start}.",
+                    wanneer=_wanneer(einde, now),
+                    start=start_nu,
+                ),
                 rule="deadline",
             )
         return Decision(
             False, 0,
-            "De coach herkent het gekozen programma niet en weet dus niet hoe lang het duurt. "
-            + ("Kies hieronder welk programma erop staat." if hand
-               else "Kies een programma op het apparaat, of zet 'uiterlijk starten' in het schema."),
-            plan="Zonder programma start hij pas op de uiterste starttijd.",
+            t("De coach herkent het gekozen programma niet en weet dus niet hoe lang het duurt.")
+            + " "
+            + (t("Kies hieronder welk programma erop staat.") if hand
+               else t("Kies een programma op het apparaat, of zet 'uiterlijk starten' in het schema.")),
+            plan=t("Zonder programma start hij pas op de uiterste starttijd."),
             rule="no-program",
         )
 
@@ -4674,10 +4783,11 @@ def plan_programma(
         return Decision(
             True, 0,
             (
-                (f"Zet hem nu aan, anders is hij om {_wanneer(einde, now)} niet klaar." if hand
-                 else f"Nu starten, anders is hij om {_wanneer(einde, now)} niet klaar.")
+                (t("Zet hem nu aan, anders is hij om {wanneer} niet klaar.", wanneer=_wanneer(einde, now)) if hand
+                 else t("Nu starten, anders is hij om {wanneer} niet klaar.", wanneer=_wanneer(einde, now)))
                 if haalt
-                else f"Hij haalt {_wanneer(einde, now)} niet meer, dus " + ("zet hem meteen aan." if hand else "hij start meteen.")
+                else t("Hij haalt {wanneer} niet meer, dus zet hem meteen aan.", wanneer=_wanneer(einde, now)) if hand
+                else t("Hij haalt {wanneer} niet meer, dus hij start meteen.", wanneer=_wanneer(einde, now))
             ),
             rule="deadline",
         )
@@ -4695,7 +4805,7 @@ def plan_programma(
     eerste = now if vanaf is None else max(now, vanaf)
     if eerste > laatste:
         # Het venster is al dicht: starten zolang het nog kan.
-        return Decision(True, 0, f"Later past het niet meer, dus {start_nu}.", rule="deadline")
+        return Decision(True, 0, t("Later past het niet meer, dus {start}.", start=start_nu), rule="deadline")
 
     kandidaten: list[tuple[float, datetime]] = []
     onbekend = 0
@@ -4719,12 +4829,15 @@ def plan_programma(
         return Decision(
             False, 0,
             (
-                f"De prijzen tot {_wanneer(einde, now)} zijn nog niet bekend. Tot die binnenkomen, "
-                "meestal tussen 13:00 en 15:00, wacht hij."
+                t(
+                    "De prijzen tot {wanneer} zijn nog niet bekend. Tot die binnenkomen, "
+                    "meestal tussen 13:00 en 15:00, wacht hij.",
+                    wanneer=_wanneer(einde, now),
+                )
                 if einde is not None
-                else "De prijzen zijn nog niet bekend, dus hij wacht."
+                else t("De prijzen zijn nog niet bekend, dus hij wacht.")
             ),
-            plan="Zodra de prijzen er zijn kiest hij het goedkoopste moment.",
+            plan=t("Zodra de prijzen er zijn kiest hij het goedkoopste moment."),
             rule="wait-for-prices",
         )
 
@@ -4780,28 +4893,32 @@ def plan_programma(
         if gemiddeld is not None and per_kwh is not None and per_kwh >= gemiddeld:
             return Decision(
                 False, 0,
-                f"De prijzen tot {_wanneer(einde, now)} zijn nog niet allemaal bekend, en wat bekend is "
-                "is niet goedkoop. Tot de rest binnenkomt, meestal tussen 13:00 en 15:00, wacht hij."
+                t(
+                    "De prijzen tot {wanneer} zijn nog niet allemaal bekend, en wat bekend is "
+                    "is niet goedkoop. Tot de rest binnenkomt, meestal tussen 13:00 en 15:00, wacht hij.",
+                    wanneer=_wanneer(einde, now),
+                )
                 if einde is not None
-                else "De prijzen zijn nog niet allemaal bekend, en wat bekend is is niet goedkoop, dus hij wacht.",
-                plan="Zodra de prijzen er zijn kiest hij het goedkoopste moment.",
+                else t("De prijzen zijn nog niet allemaal bekend, en wat bekend is is niet goedkoop, dus hij wacht."),
+                plan=t("Zodra de prijzen er zijn kiest hij het goedkoopste moment."),
                 rule="wait-for-prices",
             )
 
     # Een minuut speling voor een ronde die net voor het kwartier valt, maar
     # niet over "niet eerder dan" heen: vanaf 08:00 is vanaf 08:00.
     if start <= now + timedelta(minutes=1) and (vanaf is None or now >= vanaf):
+        kop = (
+            t("Zet hem nu aan: dit is het goedkoopste moment") if hand else t("Dit is het goedkoopste moment")
+        ) + (" " + t("tot {wanneer}", wanneer=_wanneer(einde, now)) if einde is not None else "")
         return Decision(
             True, 0,
-            ("Zet hem nu aan: dit is het goedkoopste moment" if hand else "Dit is het goedkoopste moment")
-            + (f" tot {_wanneer(einde, now)}" if einde is not None else "")
-            + (
-                f": {programma.label} kost nu ongeveer {_euro(goedkoopst)}."
+            (
+                t("{kop}: {programma} kost nu ongeveer {euro}.", kop=kop, programma=t(programma.label), euro=_euro(goedkoopst))
                 if programma.kwh_bekend
                 # Zonder verbruik geen bedrag (v0.124.0): het is een gewicht.
-                else f" voor {programma.label}."
+                else t("{kop} voor {programma}.", kop=kop, programma=t(programma.label))
             ),
-            plan=f"Klaar rond {_wanneer(now + duur, now)}.",
+            plan=t("Klaar rond {wanneer}.", wanneer=_wanneer(now + duur, now)),
             rule="cheapest-start",
         )
 
@@ -4813,25 +4930,37 @@ def plan_programma(
         now, programma, prices, tariff, forecast, now=now, surplus_w=surplus_w
     )
     if kosten_echt_nu is not None and kosten_echt_nu - goedkoopst >= 0.005 and programma.kwh_bekend:
-        verschil = f" Nu starten zou ongeveer {_euro(kosten_echt_nu)} kosten, dan {_euro(goedkoopst)}."
+        verschil = " " + t(
+            "Nu starten zou ongeveer {nu} kosten, dan {dan}.",
+            nu=_euro(kosten_echt_nu),
+            dan=_euro(goedkoopst),
+        )
     # Even duur als nu en toch later: dan is het de avondpiek die nu dichtzit.
     waarom = (
-        f"na de avondpiek"
+        t("na de avondpiek")
         if kosten_nu is not None and kosten_nu - goedkoopst < 0.005 and _in_avondpiek(eerste, eerste + duur)
-        else f"dan is {programma.label} het goedkoopst"
+        else t("dan is {programma} het goedkoopst", programma=t(programma.label))
     )
     # Na de klaar-tijd van vandaag schuift hij een dag op; dat hoort er dan
     # met zoveel woorden bij, met de weg terug.
     gemist = window.missed if window.enabled and start.date() > now.date() else None
-    tekst = ("Zet hem aan" if hand else "Hij start") + f" {_dag_om(start, now)}: {waarom}.{verschil}"
+    tekst = t(
+        "{kop} {wanneer}: {waarom}.",
+        kop=t("Zet hem aan") if hand else t("Hij start"),
+        wanneer=_dag_om(start, now),
+        waarom=waarom,
+    ) + verschil
     if gemist is not None:
-        tekst = f"{_clock(gemist)} is vandaag voorbij, dus " + tekst[0].lower() + tekst[1:]
+        tekst = t("{klok} is vandaag voorbij, dus {rest}", klok=_clock(gemist), rest=tekst[0].lower() + tekst[1:])
     return Decision(
         False, 0,
         tekst,
-        plan=f"Klaar rond {_dag_klok(start + duur, now)}"
-        + (f", ruim voor {_dag_klok(einde, now)}." if einde is not None else ".")
-        + (" Liever nu? Kies dan nu starten." if gemist is not None else ""),
+        plan=(
+            t("Klaar rond {wanneer}, ruim voor {einde}.", wanneer=_dag_klok(start + duur, now), einde=_dag_klok(einde, now))
+            if einde is not None
+            else t("Klaar rond {wanneer}.", wanneer=_dag_klok(start + duur, now))
+        )
+        + (" " + t("Liever nu? Kies dan nu starten.") if gemist is not None else ""),
         rule="wait-for-start",
         starts_at=start.isoformat(),
     )
@@ -5090,8 +5219,8 @@ def plan_boiler(
     if not window.enabled:
         return Decision(
             True, 0,
-            "Het schema van deze boiler staat uit, dus de coach stuurt hem niet en laat de stroom erop staan.",
-            plan="Zet het schema aan met een tijd waarop er warm water moet zijn, dan zoekt hij de goedkoopste uren.",
+            t("Het schema van deze boiler staat uit, dus de coach stuurt hem niet en laat de stroom erop staan."),
+            plan=t("Zet het schema aan met een tijd waarop er warm water moet zijn, dan zoekt hij de goedkoopste uren."),
             rule="schema-uit",
         )
 
@@ -5102,10 +5231,10 @@ def plan_boiler(
     if boiler.full:
         return Decision(
             False, 0,
-            "Het vat is vol: er stond stroom op en hij vroeg niets meer.",
+            t("Het vat is vol: er stond stroom op en hij vroeg niets meer."),
             plan=(
-                f"De volgende keer verwarmt hij op de goedkoopste uren vóór {_dag_klok(einde, now)}."
-                if einde is not None else "Hij houdt in de gaten wanneer er weer warmte bij moet."
+                t("De volgende keer verwarmt hij op de goedkoopste uren vóór {wanneer}.", wanneer=_dag_klok(einde, now))
+                if einde is not None else t("Hij houdt in de gaten wanneer er weer warmte bij moet.")
             ),
             rule="full",
         )
@@ -5125,14 +5254,14 @@ def plan_boiler(
         if vers_vol:
             return Decision(
                 False, 0,
-                "Het vat was net nog vol, dus er hoeft niets bij. Zodra er een keer warmte in moet meet de coach hoeveel hij trekt.",
-                plan="Tot die tijd kijkt hij af en toe of het vat nog warm is.",
+                t("Het vat was net nog vol, dus er hoeft niets bij. Zodra er een keer warmte in moet meet de coach hoeveel hij trekt."),
+                plan=t("Tot die tijd kijkt hij af en toe of het vat nog warm is."),
                 rule="genoeg",
             )
         return Decision(
             True, 0,
-            "De coach weet nog niet hoeveel deze boiler trekt en hoe lang hij erover doet, dus hij zet hem aan en meet het.",
-            plan="Zodra het vat een keer vol is geweest kent hij de opwarmtijd en kiest hij zelf de goedkoopste uren.",
+            t("De coach weet nog niet hoeveel deze boiler trekt en hoe lang hij erover doet, dus hij zet hem aan en meet het."),
+            plan=t("Zodra het vat een keer vol is geweest kent hij de opwarmtijd en kiest hij zelf de goedkoopste uren."),
             rule="leren",
         )
 
@@ -5143,8 +5272,8 @@ def plan_boiler(
     if boiler.proef_nodig:
         return Decision(
             True, 0,
-            "Even kijken of er nog warm water is: met de stroom eraf kan de boiler niet zeggen dat hij warmte wil.",
-            plan="Vraagt hij niets, dan gaat de stroom er meteen weer af.",
+            t("Even kijken of er nog warm water is: met de stroom eraf kan de boiler niet zeggen dat hij warmte wil."),
+            plan=t("Vraagt hij niets, dan gaat de stroom er meteen weer af."),
             rule="proef",
         )
 
@@ -5155,8 +5284,8 @@ def plan_boiler(
     if boiler.vergeefs >= BOILER_VERGEEFS:
         return Decision(
             False, 0,
-            "De coach zet de boiler wel aan, maar er loopt geen stroom. Kijk of de stekker en de schakelaar doen wat ze horen te doen.",
-            plan="Hij probeert het over een paar uur opnieuw.",
+            t("De coach zet de boiler wel aan, maar er loopt geen stroom. Kijk of de stekker en de schakelaar doen wat ze horen te doen."),
+            plan=t("Hij probeert het over een paar uur opnieuw."),
             rule="geen-stroom",
         )
 
@@ -5165,9 +5294,9 @@ def plan_boiler(
         # thermostaat zou de warmte niet eens aannemen.
         return Decision(
             False, 0,
-            f"Er zit genoeg warm water in voor {_wanneer(einde, now)}." if einde is not None
-            else "Er zit genoeg warm water in.",
-            plan="Hij kijkt af en toe of dat nog zo is.",
+            t("Er zit genoeg warm water in voor {wanneer}.", wanneer=_wanneer(einde, now)) if einde is not None
+            else t("Er zit genoeg warm water in."),
+            plan=t("Hij kijkt af en toe of dat nog zo is."),
             rule="genoeg",
         )
 
@@ -5179,11 +5308,13 @@ def plan_boiler(
     if einde is not None and now + duur + BOILER_SPELING >= einde:
         return Decision(
             True, 0,
-            (
-                f"Er moet nog ongeveer {_duur(minuten)} verwarmd worden en om {_wanneer(einde, now)} "
-                "hoort er warm water te zijn, dus hij gaat nu aan."
+            t(
+                "Er moet nog ongeveer {duur} verwarmd worden en om {wanneer} "
+                "hoort er warm water te zijn, dus hij gaat nu aan.",
+                duur=_duur(minuten),
+                wanneer=_wanneer(einde, now),
             ),
-            plan="Hij gaat uit zodra de boiler zelf afslaat.",
+            plan=t("Hij gaat uit zodra de boiler zelf afslaat."),
             rule="deadline",
         )
 
@@ -5193,8 +5324,11 @@ def plan_boiler(
     if surplus_w is not None and surplus_w >= boiler.heat_w:
         return Decision(
             True, 0,
-            f"Je levert op dit moment {_kw(surplus_w)} terug, genoeg om de boiler er helemaal op te laten draaien.",
-            plan="Hij gaat uit zodra de boiler vol is of de zon wegvalt.",
+            t(
+                "Je levert op dit moment {kw} terug, genoeg om de boiler er helemaal op te laten draaien.",
+                kw=_kw(surplus_w),
+            ),
+            plan=t("Hij gaat uit zodra de boiler vol is of de zon wegvalt."),
             rule="zon",
         )
 
@@ -5208,17 +5342,17 @@ def plan_boiler(
         return Decision(
             False, 0,
             (
-                f"De prijzen tot {_wanneer(einde, now)} zijn nog niet bekend, dus hij wacht."
-                if einde is not None else "De prijzen zijn nog niet bekend, dus hij wacht."
+                t("De prijzen tot {wanneer} zijn nog niet bekend, dus hij wacht.", wanneer=_wanneer(einde, now))
+                if einde is not None else t("De prijzen zijn nog niet bekend, dus hij wacht.")
             ),
-            plan="Zodra ze er zijn kiest hij de goedkoopste uren. De klaar-tijd blijft het vangnet.",
+            plan=t("Zodra ze er zijn kiest hij de goedkoopste uren. De klaar-tijd blijft het vangnet."),
             rule="wait-for-prices",
         )
 
     gekozen = goedkoopste(alle, nodig * BOILER_RUIM)
     if not gekozen:
         return Decision(
-            False, 0, "Er hoeft niets bij.", rule="genoeg",
+            False, 0, t("Er hoeft niets bij."), rule="genoeg",
         )
 
     eerste = gekozen[0][0]
@@ -5227,20 +5361,20 @@ def plan_boiler(
     if eerste.start <= now < eerste.end:
         return Decision(
             True, 0,
-            f"Dit is een van de goedkoopste uren tot {_wanneer(einde, now)}, dus hij verwarmt nu."
-            if einde is not None else "Dit is een van de goedkoopste uren, dus hij verwarmt nu.",
-            plan="Hij gaat uit zodra de boiler zelf afslaat.",
+            t("Dit is een van de goedkoopste uren tot {wanneer}, dus hij verwarmt nu.", wanneer=_wanneer(einde, now))
+            if einde is not None else t("Dit is een van de goedkoopste uren, dus hij verwarmt nu."),
+            plan=t("Hij gaat uit zodra de boiler zelf afslaat."),
             rule="cheapest-hour",
             blokken=blokken,
         )
 
     return Decision(
         False, 0,
-        f"Hij verwarmt {_dag_om(eerste.start, now)}: dan is het het goedkoopst."
-        + (f" Er moet ongeveer {_duur(minuten)} bij." if minuten >= 1 else ""),
+        t("Hij verwarmt {wanneer}: dan is het het goedkoopst.", wanneer=_dag_om(eerste.start, now))
+        + (" " + t("Er moet ongeveer {duur} bij.", duur=_duur(minuten)) if minuten >= 1 else ""),
         plan=(
-            f"Op tijd vol voor {_dag_klok(einde, now)}." if einde is not None
-            else "Hij houdt het vat op peil."
+            t("Op tijd vol voor {wanneer}.", wanneer=_dag_klok(einde, now)) if einde is not None
+            else t("Hij houdt het vat op peil.")
         ),
         rule="wait-for-cheap",
         starts_at=eerste.start.isoformat(),
@@ -5319,12 +5453,12 @@ class AircoBesluit:
 
 def _graden(waarde: float) -> str:
     """Een temperatuur zoals het paneel hem schrijft: 21 °C, 21,5 °C."""
-    tekst = f"{waarde:.1f}".rstrip("0").rstrip(".")
-    return f"{tekst} °C".replace(".", ",")
+    tekst = getal(waarde, 1).rstrip("0").rstrip(".,")
+    return f"{tekst} °C"
 
 
 def _kw(watt: float) -> str:
-    return f"{watt / 1000:.1f} kW".replace(".", ",")
+    return f"{getal(watt / 1000, 1)} kW"
 
 
 def airco_goedkoop(prices: list[dict], now: datetime) -> tuple[bool, float | None, float | None]:
@@ -5380,7 +5514,7 @@ def plan_airco(
     if airco.kamer_c is None or airco.doel_c is None:
         return AircoBesluit(
             aan=False if eigen else None, modus=None, stand="geen_meting", rule="geen-meting",
-            reason="De coach weet de temperatuur in de kamer niet, dus hij laat de airco met rust.",
+            reason=t("De coach weet de temperatuur in de kamer niet, dus hij laat de airco met rust."),
         )
 
     nodig = airco_nodig(airco)
@@ -5396,10 +5530,14 @@ def plan_airco(
 
     def waarom(werk: str) -> str:
         if zon:
-            return f"Er is {_kw(surplus_w)} zon over. Hij {werk} naar {doel}; het is nu {kamer}."
-        return (
-            f"Stroom kost nu {_euro(prijs)}, onder het gemiddelde van vandaag ({_euro(gemiddeld)}). "
-            f"Hij {werk} naar {doel}; het is nu {kamer}."
+            return t(
+                "Er is {kw} zon over. Hij {werk} naar {doel}; het is nu {kamer}.",
+                kw=_kw(surplus_w), werk=werk, doel=doel, kamer=kamer,
+            )
+        return t(
+            "Stroom kost nu {prijs}, onder het gemiddelde van vandaag ({gemiddeld}). "
+            "Hij {werk} naar {doel}; het is nu {kamer}.",
+            prijs=_euro(prijs), gemiddeld=_euro(gemiddeld), werk=werk, doel=doel, kamer=kamer,
         )
 
     if eigen:
@@ -5408,11 +5546,11 @@ def plan_airco(
             if not nodig:
                 return AircoBesluit(
                     aan=None, modus=airco.modus, stand="op_temperatuur", rule="op-temperatuur",
-                    reason=f"Het is {kamer}, en je wilt {doel}. De airco houdt het zo.",
+                    reason=t("Het is {kamer}, en je wilt {doel}. De airco houdt het zo.", kamer=kamer, doel=doel),
                 )
             return AircoBesluit(
                 aan=None, modus=airco.modus, stand=stand, rule=stand,
-                reason=waarom("verwarmt" if airco.modus == "heat" else "koelt"),
+                reason=waarom(t("verwarmt") if airco.modus == "heat" else t("koelt")),
             )
         # Een wolk: hij blijft even aan, want een airco gaat niet graag steeds
         # aan en uit. Dezelfde tien minuten als de paal (`MIN_RUN_MINUTES`).
@@ -5421,52 +5559,60 @@ def plan_airco(
             return AircoBesluit(
                 aan=None, modus=airco.modus, stand=stand, rule="hold",
                 reason=(
-                    "Er is even minder zon. Hij blijft nog even aan: een airco gaat niet graag steeds aan en uit."
+                    t("Er is even minder zon. Hij blijft nog even aan: een airco gaat niet graag steeds aan en uit.")
                     if stand == "zon" else
-                    "Hij blijft nog even aan: een airco gaat niet graag steeds aan en uit."
+                    t("Hij blijft nog even aan: een airco gaat niet graag steeds aan en uit.")
                 ),
             )
         return AircoBesluit(
             aan=False, modus=None, stand="uit", rule="uit",
             reason=(
-                "Het goedkope uur is voorbij, dus de coach zet hem uit."
+                t("Het goedkope uur is voorbij, dus de coach zet hem uit.")
                 if airco.coach_reden == "goedkoop" else
-                "Er is geen zon meer over, dus de coach zet hem uit."
+                t("Er is geen zon meer over, dus de coach zet hem uit.")
             ),
         )
 
     if nodig is None:
         return AircoBesluit(
             aan=None, modus=None, stand="op_temperatuur", rule="op-temperatuur",
-            reason=f"Het is {kamer}, en je wilt {doel}. Er hoeft niets te gebeuren.",
+            reason=t("Het is {kamer}, en je wilt {doel}. Er hoeft niets te gebeuren.", kamer=kamer, doel=doel),
         )
-    werk = "verwarmen" if nodig == "heat" else "koelen"
+    werk = t("verwarmen") if nodig == "heat" else t("koelen")
     if zon or goedkoop:
         stand = "zon" if zon else "goedkoop"
-        return AircoBesluit(aan=True, modus=nodig, stand=stand, rule=stand, reason=waarom(f"gaat {werk}"))
+        return AircoBesluit(aan=True, modus=nodig, stand=stand, rule=stand, reason=waarom(t("gaat {werk}", werk=werk)))
     if not op_zon:
         return AircoBesluit(
             aan=None, modus=None, stand="uit", rule="wacht",
             reason=(
-                f"Het is {kamer}, en je wilt {doel}. Hij gaat {werk} op een uur onder het gemiddelde van vandaag."
+                t(
+                    "Het is {kamer}, en je wilt {doel}. Hij gaat {werk} op een uur onder het gemiddelde van vandaag.",
+                    kamer=kamer, doel=doel, werk=werk,
+                )
                 if prices else
-                f"Het is {kamer}, en je wilt {doel}. Je koos goedkope uren, maar bij een vast contract "
-                f"kost elk uur hetzelfde. Kies zon of beide, dan gaat hij aan als er zon over is."
+                t(
+                    "Het is {kamer}, en je wilt {doel}. Je koos goedkope uren, maar bij een vast contract "
+                    "kost elk uur hetzelfde. Kies zon of beide, dan gaat hij aan als er zon over is.",
+                    kamer=kamer, doel=doel,
+                )
             ),
         )
     if airco.vermogen_w is None or airco.vermogen_w <= 0:
         return AircoBesluit(
             aan=None, modus=None, stand="geen_meting", rule="geen-vermogen",
-            reason=(
+            reason=t(
                 "De coach weet niet hoeveel de airco trekt, dus ook niet wanneer er genoeg zon voor is. "
                 "Vul het vermogen van het typeplaatje in bij Apparaten; met een vermogenssensor ziet hij "
                 "het ook zodra de airco een keer gedraaid heeft."
             ),
         )
-    wanneer = f"zodra er {_kw(airco.vermogen_w)} zon over is"
-    if op_prijs and prices:
-        wanneer += ", of op een uur onder het gemiddelde van vandaag"
+    wanneer = (
+        t("zodra er {kw} zon over is, of op een uur onder het gemiddelde van vandaag", kw=_kw(airco.vermogen_w))
+        if op_prijs and prices
+        else t("zodra er {kw} zon over is", kw=_kw(airco.vermogen_w))
+    )
     return AircoBesluit(
         aan=None, modus=None, stand="uit", rule="wacht",
-        reason=f"Het is {kamer}, en je wilt {doel}. Hij gaat {werk} {wanneer}.",
+        reason=t("Het is {kamer}, en je wilt {doel}. Hij gaat {werk} {wanneer}.", kamer=kamer, doel=doel, werk=werk, wanneer=wanneer),
     )

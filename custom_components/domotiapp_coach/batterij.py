@@ -43,10 +43,21 @@ from .planner import (
     piek_dicht,
     price_now,
 )
+from .taal import t
+
+
+def nt(zin: str) -> str:
+    """Een zin in een tabel: blijft Nederlands, vertaald wordt hij waar hij getoond
+    wordt (`t(zin)`). Zoals `nt` in i18n.js; tools/vertaalcheck.py ziet hem zo."""
+    return zin
+
 
 # --- De standen ---------------------------------------------------------------
 # De namen zijn die van de bewoner van de eerste woning, 21-09-2026: "alleen
 # zonneladen" en "standby" zijn zijn woorden, en "handelen" ook.
+#
+# De namen blijven Nederlands (de tijdlijn in Historie leest er oude meldingen
+# mee); `stand_naam` geeft ze in de taal van nu.
 NUL = "nul"                  # nul op de meter: overschot erin, tekort eruit
 ZONNELADEN = "zonneladen"    # alleen zonoverschot erin, er komt niets uit
 ONTLADEN = "ontladen"        # het huis voeden, maar geen zon opslaan
@@ -56,14 +67,19 @@ HANDELEN = "handelen"        # ontladen naar het net
 STANDBY = "standby"          # 0 W
 
 STAND_NAMEN = {
-    NUL: "Nul op de meter",
-    ZONNELADEN: "Alleen zonneladen",
-    ONTLADEN: "Alleen ontladen",
-    NETLADEN: "Laden van het net",
-    MAX_LADEN: "Maximaal laden",
-    HANDELEN: "Handelen",
-    STANDBY: "Standby",
+    NUL: nt("Nul op de meter"),
+    ZONNELADEN: nt("Alleen zonneladen"),
+    ONTLADEN: nt("Alleen ontladen"),
+    NETLADEN: nt("Laden van het net"),
+    MAX_LADEN: nt("Maximaal laden"),
+    HANDELEN: nt("Handelen"),
+    STANDBY: nt("Standby"),
 }
+
+
+def stand_naam(stand: str) -> str:
+    """De naam van een stand in de taal van nu ("Nul op de meter", "Zero at the meter")."""
+    return t(STAND_NAMEN.get(stand, stand))
 
 # In hoeveel stappen de inhoud van de batterij verdeeld wordt voor de som over
 # de tijd. Geen getal over de batterij maar over de rekenmachine: fijner dan
@@ -312,8 +328,9 @@ def _mag_handelen(b: Batterij, rij: dict) -> bool:
 
 # Wat de kaart zegt als handelen aanstaat en niet kan (v0.128.2). Het paneel
 # zegt het ook, bij het vinkje (`HANDELEN_KAN_NIET` in voorkeur-velden.js) en
-# bij het marktveld van Contract.
-HANDELEN_KAN_NIET = (
+# bij het marktveld van Contract. Nederlands, zoals de tabel hierboven; op de
+# kaart `t(HANDELEN_KAN_NIET)`.
+HANDELEN_KAN_NIET = nt(
     "Handelen staat aan, maar kan nu niet: de coach kent je terugleverprijs niet. "
     "Daarvoor is bij Contract een marktprijssensor nodig, of salderen."
 )
@@ -880,20 +897,23 @@ def _vooruitkijk_zin(
     balans = balans_kwh(now, forecast, b, auto / eta) or 0.0
     # Wat erin zit komt er niet helemaal uit; de conclusie rekent met het
     # rendement, dus de zin zegt erbij waar hij mee rekent.
-    eruit = f", goed voor {_kwh(bruikbaar * b.rte)} na het verlies" if b.rte and bruikbaar > 0 else ""
+    eruit = t(", goed voor {kwh} na het verlies", kwh=_kwh(bruikbaar * b.rte)) if b.rte and bruikbaar > 0 else ""
     # En zon die er niet meer in past gaat naar het net: dat verklaart waarom
     # de optelsom van zon en batterij meer is dan wat er morgenvroeg over is.
-    past_niet = f" Van die zon past {_kwh(weg)} niet meer in de accu; die gaat naar het net." if weg > 0.05 else ""
-    naar_auto = f", de auto krijgt er {_kwh(auto)} uit" if auto > 0.05 else ""
-    zin = (
-        f"Tot morgenvroeg verwacht hij {_kwh(zon)} zon, het huis vraagt {_kwh(huis)}{naar_auto} "
-        f"en er zit {_kwh(bruikbaar)} in de batterij{eruit}.{past_niet} "
+    past_niet = (
+        " " + t("Van die zon past {kwh} niet meer in de accu; die gaat naar het net.", kwh=_kwh(weg))
+        if weg > 0.05 else ""
     )
+    naar_auto = t(", de auto krijgt er {kwh} uit", kwh=_kwh(auto)) if auto > 0.05 else ""
+    zin = t(
+        "Tot morgenvroeg verwacht hij {zon} zon, het huis vraagt {huis}{auto} en er zit {accu} in de batterij{eruit}.",
+        zon=_kwh(zon), huis=_kwh(huis), auto=naar_auto, accu=_kwh(bruikbaar), eruit=eruit,
+    ) + past_niet + " "
     if balans >= 0:
-        return zin + f"Je houdt naar verwachting {_kwh(balans)} over in je accu."
+        return zin + t("Je houdt naar verwachting {kwh} over in je accu.", kwh=_kwh(balans))
     return (
-        zin + f"Je komt naar verwachting {_kwh(-balans)} tekort om de nacht te overbruggen; "
-        + (_bijladen_zin(now, b, uren or [], -balans) if bijladen else "dat komt van het net.")
+        zin + t("Je komt naar verwachting {kwh} tekort om de nacht te overbruggen;", kwh=_kwh(-balans)) + " "
+        + (_bijladen_zin(now, b, uren or [], -balans) if bijladen else t("dat komt van het net."))
     )
 
 
@@ -913,19 +933,21 @@ def _bijladen_zin(now: datetime, b: Batterij, uren: list[Uur], tekort: float) ->
     erbij = sum(max(0.0, u.net_kwh) for u in nacht if u.stand == NETLADEN)
     if erbij > 0.05:
         if erbij >= tekort - 0.05:
-            return "dat laadt hij op de goedkoopste momenten van het net bij."
-        return (
-            f"hij laadt er {_kwh(erbij)} van op de goedkoopste momenten van het net bij, "
-            "de rest komt rechtstreeks van het net."
+            return t("dat laadt hij op de goedkoopste momenten van het net bij.")
+        return t(
+            "hij laadt er {kwh} van op de goedkoopste momenten van het net bij, "
+            "de rest komt rechtstreeks van het net.",
+            kwh=_kwh(erbij),
         )
     if not nacht or not b.rte:
-        return "hij laadt bij als de stroom goedkoop genoeg is."
+        return t("hij laadt bij als de stroom goedkoop genoeg is.")
     goedkoopst = min(nacht, key=lambda u: u.price)
-    bekend = "" if nacht[-1].end >= eind else " in de bekende uren"
-    return (
-        f"dat komt van het net, want bijladen kost via de batterij{bekend} minstens "
-        f"{_euro(goedkoopst.price / b.rte)} per kWh ({_euro(goedkoopst.price)} om "
-        f"{_clock(goedkoopst.start)}, plus het verlies)."
+    bekend = "" if nacht[-1].end >= eind else " " + t("in de bekende uren")
+    return t(
+        "dat komt van het net, want bijladen kost via de batterij{bekend} minstens "
+        "{prijs} per kWh ({kale} om {tijd}, plus het verlies).",
+        bekend=bekend, prijs=_euro(goedkoopst.price / b.rte), kale=_euro(goedkoopst.price),
+        tijd=_clock(goedkoopst.start),
     )
 
 
@@ -952,14 +974,14 @@ def plan_batterij(
     if not enabled:
         return Besluit(
             STANDBY,
-            reason="De sturing van deze batterij staat uit.",
+            reason=t("De sturing van deze batterij staat uit."),
             rule="uit",
         )
     if b.soc is None or b.capacity_kwh is None:
         return Besluit(
             STANDBY,
-            reason="De coach weet niet hoe vol de batterij is, dus hij laat hem stilstaan.",
-            plan="Zodra de accustand er weer is gaat hij verder.",
+            reason=t("De coach weet niet hoe vol de batterij is, dus hij laat hem stilstaan."),
+            plan=t("Zodra de accustand er weer is gaat hij verder."),
             rule="geen-accustand",
         )
 
@@ -973,8 +995,8 @@ def plan_batterij(
         return _met_paal(
             Besluit(
                 NUL,
-                reason="De prijs van dit uur is niet bekend, dus hij houdt alleen de meter op nul.",
-                plan="Van het net laden doet hij pas weer als de prijzen er zijn.",
+                reason=t("De prijs van dit uur is niet bekend, dus hij houdt alleen de meter op nul."),
+                plan=t("Van het net laden doet hij pas weer als de prijzen er zijn."),
                 rule="geen-prijs",
             ),
             paal_laadt, b,
@@ -989,8 +1011,11 @@ def plan_batterij(
         return Besluit(
             MAX_LADEN,
             power_w=b.max_charge_w,
-            reason=f"Stroom kost nu {_euro(koop)} per kWh: je krijgt geld toe. Hij laadt op vol vermogen en geeft niets af.",
-            plan="Zodra de prijs weer boven nul komt rekent hij gewoon verder.",
+            reason=t(
+                "Stroom kost nu {prijs} per kWh: je krijgt geld toe. Hij laadt op vol vermogen en geeft niets af.",
+                prijs=_euro(koop),
+            ),
+            plan=t("Zodra de prijs weer boven nul komt rekent hij gewoon verder."),
             rule="negatieve-prijs",
         )
 
@@ -1001,7 +1026,7 @@ def plan_batterij(
         if terug is not None and terug >= koop - PRICE_MARGIN and not b.zelf_nul:
             return Besluit(
                 STANDBY,
-                reason="Terugleveren brengt nu evenveel op als stroom kost, dus opslaan kost alleen het verlies in de batterij.",
+                reason=t("Terugleveren brengt nu evenveel op als stroom kost, dus opslaan kost alleen het verlies in de batterij."),
                 rule="salderen",
             )
         if _vlak(blokken):
@@ -1010,8 +1035,8 @@ def plan_batterij(
             return _met_paal(
                 Besluit(
                     NUL,
-                    reason="Hij houdt de meter op nul: overschot gaat erin, wat het huis vraagt komt eruit.",
-                    plan="Stroom kost bij je contract elk uur hetzelfde, dus van het net laden levert nooit iets op.",
+                    reason=t("Hij houdt de meter op nul: overschot gaat erin, wat het huis vraagt komt eruit."),
+                    plan=t("Stroom kost bij je contract elk uur hetzelfde, dus van het net laden levert nooit iets op."),
                     rule="nul",
                 ),
                 paal_laadt, b,
@@ -1019,8 +1044,8 @@ def plan_batterij(
         return _met_paal(
             Besluit(
                 NUL,
-                reason="Hij houdt de meter op nul. Het rendement van de batterij is nog niet bekend, dus van het net laden doet hij nog niet.",
-                plan="Met een kWh-meter op de batterij meet de coach het zelf; anders vul je het in bij Apparaten.",
+                reason=t("Hij houdt de meter op nul. Het rendement van de batterij is nog niet bekend, dus van het net laden doet hij nog niet."),
+                plan=t("Met een kWh-meter op de batterij meet de coach het zelf; anders vul je het in bij Apparaten."),
                 rule="rendement-onbekend",
             ),
             paal_laadt, b,
@@ -1029,7 +1054,7 @@ def plan_batterij(
     som = _waarde_vooruit(now, blokken, forecast, b, piek=dicht)
     if som is None:
         return _met_paal(
-            Besluit(NUL, reason="Hij houdt de meter op nul.", rule="nul"), paal_laadt, b
+            Besluit(NUL, reason=t("Hij houdt de meter op nul."), rule="nul"), paal_laadt, b
         )
 
     e = b.soc / 100.0 * b.capacity_kwh
@@ -1092,20 +1117,21 @@ def plan_batterij(
             if _kw(vermogen) == _kw(0.0):
                 # Het einde van een beurt die al liep: er moet bijna niets meer
                 # bij, en hij houdt de batterij vast tot het blok om is.
-                hoe = f"Hij maakt het laden van het net af tot {_clock(tot)} en geeft tot dan niets af."
+                hoe = t("Hij maakt het laden van het net af tot {tijd} en geeft tot dan niets af.", tijd=_clock(tot))
+            elif rustig and tot:
+                hoe = t("Hij laadt van het net op {kw}, rustig verdeeld tot {tijd}.", kw=_kw(vermogen), tijd=_clock(tot))
             else:
-                hoe = f"Hij laadt van het net op {_kw(vermogen)}" + (
-                    f", rustig verdeeld tot {_clock(tot)}." if rustig and tot else "."
-                )
+                hoe = t("Hij laadt van het net op {kw}.", kw=_kw(vermogen))
             return Besluit(
                 NETLADEN,
                 power_w=vermogen,
                 reason=(
-                    f"Stroom kost nu {_euro(koop)} en dat is goedkoper dan wat de batterij je straks bespaart. "
-                    + hoe
-                ) if b.vol_voor is None else (
+                    t("Stroom kost nu {prijs} en dat is goedkoper dan wat de batterij je straks bespaart.", prijs=_euro(koop))
+                    + " " + hoe
+                ) if b.vol_voor is None else t(
                     "Vandaag hoort de batterij een keer helemaal vol, voor het balanceren van de cellen. "
-                    f"Dit zijn daar de goedkoopste uren voor: hij laadt van het net op {_kw(vermogen)}."
+                    "Dit zijn daar de goedkoopste uren voor: hij laadt van het net op {kw}.",
+                    kw=_kw(vermogen),
                 ),
                 plan=kijk,
                 rule="netladen" if b.vol_voor is None else "volle-beurt",
@@ -1129,7 +1155,10 @@ def plan_batterij(
             return Besluit(
                 HANDELEN,
                 power_w=vermogen,
-                reason=f"Terugleveren brengt nu {_euro(terug or 0.0)} op, meer dan het straks kost om bij te laden. Hij levert aan het net.",
+                reason=t(
+                    "Terugleveren brengt nu {prijs} op, meer dan het straks kost om bij te laden. Hij levert aan het net.",
+                    prijs=_euro(terug or 0.0),
+                ),
                 plan=kijk,
                 rule="handelen",
                 waarde=eraf,
@@ -1143,16 +1172,19 @@ def plan_batterij(
         # zon opslaan of alleen ontladen kan hij in zijn eigen stand niet.
         besluit = Besluit(
             NUL,
-            reason="Hij houdt de meter op nul: overschot gaat erin, wat het huis vraagt komt eruit.",
+            reason=t("Hij houdt de meter op nul: overschot gaat erin, wat het huis vraagt komt eruit."),
             plan=kijk, rule="nul", waarde=eraf, uren=uren, auto_weg=auto_weg,
         )
     elif mag_zon:
         besluit = Besluit(
             ZONNELADEN,
             reason=(
-                "De batterij is leeg tot aan zijn ondergrens. Zonoverschot gaat er wel in."
+                t("De batterij is leeg tot aan zijn ondergrens. Zonoverschot gaat er wel in.")
                 if leeg else
-                f"Stroom kost nu {_euro(koop)}, en wat er in de batterij zit bespaart straks meer. Hij bewaart het; zonoverschot gaat er wel in."
+                t(
+                    "Stroom kost nu {prijs}, en wat er in de batterij zit bespaart straks meer. Hij bewaart het; zonoverschot gaat er wel in.",
+                    prijs=_euro(koop),
+                )
             ),
             plan=kijk, rule="leeg" if leeg else "bewaren", waarde=eraf, uren=uren,
             auto_weg=auto_weg,
@@ -1161,9 +1193,12 @@ def plan_batterij(
         besluit = Besluit(
             ONTLADEN,
             reason=(
-                "De batterij is vol. Wat het huis vraagt komt eruit."
+                t("De batterij is vol. Wat het huis vraagt komt eruit.")
                 if vol else
-                f"Terugleveren brengt nu {_euro(terug or 0.0)} op, meer dan opslaan oplevert. Wat het huis vraagt komt wel uit de batterij."
+                t(
+                    "Terugleveren brengt nu {prijs} op, meer dan opslaan oplevert. Wat het huis vraagt komt wel uit de batterij.",
+                    prijs=_euro(terug or 0.0),
+                )
             ),
             plan=kijk, rule="vol" if vol else "niet-opslaan", waarde=eraf, uren=uren,
             auto_weg=auto_weg,
@@ -1172,9 +1207,9 @@ def plan_batterij(
         besluit = Besluit(
             STANDBY,
             reason=(
-                "Terugleveren brengt nu evenveel op als stroom kost, dus opslaan kost alleen het verlies in de batterij."
+                t("Terugleveren brengt nu evenveel op als stroom kost, dus opslaan kost alleen het verlies in de batterij.")
                 if terug is not None and terug >= koop - PRICE_MARGIN else
-                "Nu laden of ontladen levert niets op, dus hij staat stil."
+                t("Nu laden of ontladen levert niets op, dus hij staat stil.")
             ),
             plan=kijk, rule="standby", waarde=eraf, uren=uren, auto_weg=auto_weg,
         )
@@ -1372,10 +1407,10 @@ def _met_paal(
         besluit.stand = NUL
         besluit.power_w = 0.0
         besluit.reason = (
-            f"De laadpaal laadt, en de batterij heeft meer dan de nacht nodig: tot "
-            f"{grens:.0f}% helpt hij de auto."
+            t("De laadpaal laadt, en de batterij heeft meer dan de nacht nodig: tot {grens}% helpt hij de auto.",
+              grens=f"{grens:.0f}")
             if b.nacht else
-            f"De laadpaal laadt, en de batterij zit boven {grens:.0f}%: tot daar helpt hij de auto."
+            t("De laadpaal laadt, en de batterij zit boven {grens}%: tot daar helpt hij de auto.", grens=f"{grens:.0f}")
         )
         besluit.rule = "auto-helpen"
         return besluit
@@ -1384,11 +1419,12 @@ def _met_paal(
     om = besluit.auto_hulp_om
     besluit.reason = (
         (
-            f"De laadpaal laadt. De batterij helpt de auto om {om:%H:%M}, op een duurder laaduur, en geeft nu niets af."
+            t("De laadpaal laadt. De batterij helpt de auto om {tijd}, op een duurder laaduur, en geeft nu niets af.",
+              tijd=f"{om:%H:%M}")
             if later and om is not None else
-            "De laadpaal laadt, dus de batterij geeft niets af."
+            t("De laadpaal laadt, dus de batterij geeft niets af.")
         )
-        + (" Zonoverschot gaat er nog wel in." if besluit.stand == ZONNELADEN else "")
+        + (" " + t("Zonoverschot gaat er nog wel in.") if besluit.stand == ZONNELADEN else "")
     )
     besluit.rule = "paal-laadt"
     return besluit

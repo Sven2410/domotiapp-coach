@@ -11,10 +11,12 @@ import { APPARATEN } from "./en/apparaten.js";
 import { CONTRACT } from "./en/contract.js";
 import { HISTORIE } from "./en/historie.js";
 import { INSTELLINGEN } from "./en/instellingen.js";
+import { LEVERANCIERS } from "./en/leveranciers.js";
 import { OVERIG } from "./en/overig.js";
 import { OVERZICHT } from "./en/overzicht.js";
+import { RAPPORT } from "./en/rapport.js";
 
 /** De delen apart, voor de proef die kijkt of een zin overal hetzelfde vertaald is. */
-export const DELEN = { ALGEMEEN, APPARATEN, CONTRACT, HISTORIE, INSTELLINGEN, OVERIG, OVERZICHT };
+export const DELEN = { ALGEMEEN, APPARATEN, CONTRACT, HISTORIE, INSTELLINGEN, LEVERANCIERS, OVERIG, OVERZICHT, RAPPORT };
 
 export const EN = Object.assign({}, ...Object.values(DELEN));

@@ -56,9 +56,17 @@ const WIDTHS = {
   ],
 };
 
-// Tekens buiten het gewone bereik die in een Nederlands rapport voorkomen, met
-// de bytewaarde die de pdf ervoor gebruikt en hun breedte.
+// Tekens buiten het gewone bereik die in het rapport voorkomen, met de bytewaarde
+// die de pdf ervoor gebruikt en hun breedte. Het Engels (v0.140.0) gebruikt geen
+// andere letters dan het Nederlands: gewone Latijnse tekens, en de datums van
+// en-GB ("Mon 7 Sept", "07/09", "14:05") ook.
+//
+// Het minteken (U+2212, bij Teruglevering onder In geld) staat er sinds v0.140.0 bij,
+// als het streepje van WinAnsi. Helvetica heeft geen eigen minteken; daarvoor kwam
+// er een vraagteken te staan. Het streepje is even breed als een cijfer, net als een
+// minteken, en zo breed rekende textWidth hem al.
 const EXTRA = {
+  "−": { byte: 0x96, normal: 556, bold: 556 },
   "€": { byte: 0x80, normal: 556, bold: 556 }, // euro
   "‘": { byte: 0x91, normal: 222, bold: 278 },
   "’": { byte: 0x92, normal: 222, bold: 278 },

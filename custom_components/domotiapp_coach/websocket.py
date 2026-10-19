@@ -46,6 +46,7 @@ from .const import (
 from .ontvangers import SOORTEN, huishouden_bijwerken, nieuwe_persoon, zet_eigen_soorten
 from .entiteit import async_accustand
 from .storage import async_get_store, met_soort, schema_bijwerken, voorkeuren_bijwerken
+from .taal import t
 
 
 def _schema(mapping: dict) -> vol.Schema:
@@ -763,7 +764,7 @@ async def async_set_my_notifications(
     if mensen is None:
         connection.send_error(
             msg["id"], "not_found",
-            "Er is nog geen persoon aan jouw account gekoppeld. Vraag de beheerder om je toe te voegen bij Meldingen.",
+            t("Er is nog geen persoon aan jouw account gekoppeld. Vraag de beheerder om je toe te voegen bij Meldingen."),
         )
         return
     settings = await async_get_store(hass).async_save({"notifications": {"people": mensen}})
@@ -860,7 +861,7 @@ async def async_set_device_program(
             gevonden = True
         devices.append(device)
     if not gevonden:
-        connection.send_error(msg["id"], "not_found", "Dat apparaat bestaat niet.")
+        connection.send_error(msg["id"], "not_found", t("Dat apparaat bestaat niet."))
         return
     settings = await store.async_save({"devices": devices})
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
@@ -1064,7 +1065,7 @@ async def async_set_device_preferences(
     try:
         devices = voorkeuren_bijwerken(settings.get("devices"), msg["device_id"], wijziging)
     except KeyError:
-        connection.send_error(msg["id"], "not_found", "Dit apparaat of deze auto bestaat niet meer.")
+        connection.send_error(msg["id"], "not_found", t("Dit apparaat of deze auto bestaat niet meer."))
         return
     except ValueError as fout:
         connection.send_error(msg["id"], "invalid_format", str(fout))
@@ -1194,7 +1195,7 @@ async def async_history_quarters(
     start = dt_util.parse_datetime(msg["start"])
     einde = dt_util.parse_datetime(msg["end"])
     if start is None or einde is None:
-        connection.send_error(msg["id"], "invalid_format", "start of end is geen tijd")
+        connection.send_error(msg["id"], "invalid_format", t("start of end is geen tijd"))
         return
 
     rijen = await async_get_archive(hass).async_lees(
@@ -1356,7 +1357,7 @@ async def async_battery_recalculate(
     from .coach import async_get_coach
 
     if not msg.get("from"):
-        connection.send_error(msg["id"], "invalid_format", "geen dag gekozen")
+        connection.send_error(msg["id"], "invalid_format", t("geen dag gekozen"))
         return
     settings = await async_get_store(hass).async_load()
     uit = await async_get_coach(hass).async_herreken_batterij(
@@ -1392,7 +1393,7 @@ async def async_savings_recalculate(
     from .coach import async_get_coach
 
     if not msg.get("from"):
-        connection.send_error(msg["id"], "invalid_format", "geen dag gekozen")
+        connection.send_error(msg["id"], "invalid_format", t("geen dag gekozen"))
         return
     settings = await async_get_store(hass).async_load()
     uit = await async_get_coach(hass).async_herreken_beurten(
@@ -1423,7 +1424,7 @@ async def async_afrekening(
     from .coach import async_get_coach
 
     if not msg.get("van") or not msg.get("tot"):
-        connection.send_error(msg["id"], "invalid_format", "geen periode")
+        connection.send_error(msg["id"], "invalid_format", t("geen periode"))
         return
     settings = await async_get_store(hass).async_load()
     connection.send_result(msg["id"], await async_get_coach(hass).async_afrekening(
@@ -1569,14 +1570,14 @@ def async_store_report(
     try:
         pdf = base64.b64decode(msg["pdf"], validate=True)
     except (ValueError, binascii.Error):
-        connection.send_error(msg["id"], "invalid_format", "Dit is geen leesbaar rapport.")
+        connection.send_error(msg["id"], "invalid_format", t("Dit is geen leesbaar rapport."))
         return
 
     if not pdf.startswith(b"%PDF-"):
-        connection.send_error(msg["id"], "invalid_format", "Dit is geen pdf.")
+        connection.send_error(msg["id"], "invalid_format", t("Dit is geen pdf."))
         return
     if len(pdf) > report.MAX_BYTES:
-        connection.send_error(msg["id"], "too_large", "Dit rapport is te groot.")
+        connection.send_error(msg["id"], "too_large", t("Dit rapport is te groot."))
         return
 
     # De naam komt uit de browser en belandt in een kopregel, dus alles wat daar

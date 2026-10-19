@@ -62,11 +62,26 @@ def kies_uit(settings: dict | None, ha_taal: str | None = None) -> str:
 
 
 def t(nl: str, **waarden: object) -> str:
-    """Een zin in de taal van nu, met de waarden tussen accolades ingevuld."""
+    """Een zin in de taal van nu, met de waarden tussen accolades ingevuld.
+
+    In het Engels krijgt een ingevulde naam die met een lidwoord begint ("The freezer", de
+    naam van een apparaat zonder eigen naam) midden in een zin een kleine letter: "The door
+    of the freezer", niet "of The freezer". Het Nederlands blijft zoals het was.
+    """
     zin = _engels().get(nl, nl) if _taal == "en" else nl
     if not waarden:
         return zin
-    return re.sub(r"\{(\w+)\}", lambda m: str(waarden[m.group(1)]) if m.group(1) in waarden else m.group(0), zin)
+
+    def invullen(m: re.Match) -> str:
+        if m.group(1) not in waarden:
+            return m.group(0)
+        tekst = str(waarden[m.group(1)])
+        vooraan = re.search(r"(?:^|[.!?:\n])\s*$", zin[: m.start()]) is not None
+        if _taal == "en" and not vooraan and re.match(r"(?:The|A|An) ", tekst):
+            tekst = tekst[0].lower() + tekst[1:]
+        return tekst
+
+    return re.sub(r"\{(\w+)\}", invullen, zin)
 
 
 def tn(n: float, een: str, meer: str, **waarden: object) -> str:

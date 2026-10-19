@@ -73,7 +73,8 @@ from .batterij import (
     vol_voor,
     zon_in_accu,
 )
-from . import berichten, prijsopbouw, tarifas
+from . import berichten, prijsopbouw, taal, tarifas
+from .taal import getal, t, tn
 from .planner import (
     _dag_om,
     DAGNAMEN,
@@ -155,6 +156,27 @@ from .storage import async_get_berichten, async_get_beurten, async_get_meldingen
 from .units import hour_to_watts, to_kwh, to_watts
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def nt(nl: str) -> str:
+    """Een zin in een tabel die er al staat voor de taal bekend is (v0.140.0).
+
+    Blijft Nederlands, en wordt vertaald waar hij in een zin komt: `t(tekst)`.
+    Het merkteken is er voor `tools/vertaalcheck.py`, dat zo ook deze zinnen
+    vindt, net als `nt` in het paneel (i18n.js).
+    """
+    return nl
+
+
+def _rond(waarde: float, decimalen: int) -> str:
+    """`str(round(...))` met het scheidingsteken van de taal: 0,5 of 0.5.
+
+    Niet `getal`: die schrijft altijd alle decimalen ("0,50"), en de meldingen
+    die hiermee gemaakt worden lieten ze altijd weg.
+    """
+    tekst = str(round(waarde, decimalen))
+    return tekst if taal.taal() == "en" else tekst.replace(".", ",")
+
 
 # Hoe lang een sensor niets mag zeggen voordat de bewoner het hoort. Bij het
 # opstarten van Home Assistant is van alles een paar minuten `unavailable`, en
@@ -1059,13 +1081,19 @@ def _stekker_naam(device: dict[str, Any]) -> str:
     # Bij een smart plug wat eraan hangt, bij een ander type het type zelf.
     soort = device.get("appliance") if device.get("type") == "smartplug" else device.get("type")
     label, lidwoord = STEKKER_APPARATEN.get(str(soort or ""), STEKKER_APPARATEN["overig"])
-    return f"{lidwoord.capitalize()} {label.lower()}"
+    # In het Engels "The freezer": het label uit de tabel vertaald, het lidwoord per taal.
+    apparaat = t(label).lower()
+    if lidwoord == "de":
+        return t("De {apparaat}", apparaat=apparaat)
+    if lidwoord == "het":
+        return t("Het {apparaat}", apparaat=apparaat)
+    return f"{lidwoord.capitalize()} {apparaat}"
 
 
 def _graden(waarde: float) -> str:
     """46,2 °C, of 45 °C als er niets achter de komma staat."""
-    tekst = f"{waarde:.1f}".replace(".", ",")
-    return f"{tekst[:-2] if tekst.endswith(',0') else tekst} °C"
+    tekst = getal(waarde, 1)
+    return f"{tekst[:-2] if tekst.endswith((',0', '.0')) else tekst} °C"
 
 
 def _watts(hass: HomeAssistant, entity_id: str | None) -> float | None:
@@ -1079,7 +1107,7 @@ def _watts(hass: HomeAssistant, entity_id: str | None) -> float | None:
 
 def _kwh_tekst(waarde: float) -> str:
     """Kilowattuur zoals in de meldingen: 3,4 kWh."""
-    return f"{waarde:.1f} kWh".replace(".", ",")
+    return f"{getal(waarde, 1)} kWh"
 
 
 def _bedrag(waarde: float, grootste: float | None = None) -> str:
@@ -1088,7 +1116,7 @@ def _bedrag(waarde: float, grootste: float | None = None) -> str:
     in twee, want "€ 6,720" leest als een prijs per kWh. Staan er meer bedragen
     in één zin, dan bepaalt het grootste (`grootste`) het voor allemaal."""
     maat = abs(grootste if grootste is not None else waarde)
-    return (f"€ {waarde:.2f}" if maat >= 1.0 else f"€ {waarde:.3f}").replace(".", ",")
+    return f"€ {getal(waarde, 2)}" if maat >= 1.0 else f"€ {getal(waarde, 3)}"
 
 
 
@@ -1116,20 +1144,20 @@ def _herkomst_zin(zon: float, accu: float, net: float, net_eur: float | None) ->
     bedrag = f" ({_bedrag(net_eur)})" if net_eur is not None and net_eur >= 0.005 else ""
     delen = []
     if zon >= HERKOMST_MIN_KWH:
-        delen.append(("zon", f"{_kwh_tekst(zon)} zon"))
+        delen.append(("zon", t("{kwh} zon", kwh=_kwh_tekst(zon))))
     if accu >= HERKOMST_MIN_KWH:
-        delen.append(("accu", f"{_kwh_tekst(accu)} thuisbatterij"))
+        delen.append(("accu", t("{kwh} thuisbatterij", kwh=_kwh_tekst(accu))))
     if net >= HERKOMST_MIN_KWH:
-        delen.append(("net", f"{_kwh_tekst(net)} net{bedrag}"))
+        delen.append(("net", t("{kwh} net{bedrag}", kwh=_kwh_tekst(net), bedrag=bedrag)))
     if not delen:
         return ""
     if len(delen) == 1:
         soort = delen[0][0]
         if soort == "zon":
-            return "Alles van je zon."
+            return t("Alles van je zon.")
         if soort == "accu":
-            return "Alles uit je thuisbatterij."
-        return f"Alles van het net{bedrag}."
+            return t("Alles uit je thuisbatterij.")
+        return t("Alles van het net{bedrag}.", bedrag=bedrag)
     return ", ".join(tekst for _, tekst in delen) + "."
 
 
@@ -1214,7 +1242,7 @@ def _programma_alleen_lezen(device: dict[str, Any]) -> bool:
 
 
 # Hoe een programma-apparaat in een melding heet zonder eigen naam.
-PROGRAMMA_NAAM = {"vaatwasser": "De vaatwasser", "wasmachine": "De wasmachine", "droger": "De droger"}
+PROGRAMMA_NAAM = {"vaatwasser": nt("De vaatwasser"), "wasmachine": nt("De wasmachine"), "droger": nt("De droger")}
 
 # Wat Miele zegt als er geen programma gekozen is.
 GEEN_PROGRAMMA = frozenset({"", "no_program", "unknown", "unavailable", "none"})
@@ -1222,7 +1250,7 @@ GEEN_PROGRAMMA = frozenset({"", "no_program", "unknown", "unavailable", "none"})
 
 def _programma_naam(device: dict[str, Any]) -> str:
     """De naam van een programma-apparaat vooraan in een melding."""
-    return device.get("name") or PROGRAMMA_NAAM.get(str(device.get("type") or ""), "Het apparaat")
+    return device.get("name") or t(PROGRAMMA_NAAM.get(str(device.get("type") or ""), nt("Het apparaat")))
 
 
 def _eindtijd(
@@ -1305,9 +1333,8 @@ def _wanneer(now: datetime, moment: datetime) -> str:
     if moment.date() == now.date():
         return f"{moment:%H:%M}"
     if moment.date() == (now + timedelta(days=1)).date():
-        return f"morgen om {moment:%H:%M}"
-    dagen = ("maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag")
-    return f"{dagen[moment.weekday()]} om {moment:%H:%M}"
+        return t("morgen om {klok}", klok=f"{moment:%H:%M}")
+    return t("{dag} om {klok}", dag=t(DAGNAMEN[moment.weekday()]), klok=f"{moment:%H:%M}")
 
 
 def _time(value: str | None) -> time | None:
@@ -1764,15 +1791,17 @@ class ChargerCoach:
 
         self._warned_silent = True
         minuten = (
-            "onbekend hoe lang"
+            t("onbekend hoe lang")
             if self._last_round is None
-            else f"al {int((moment - self._last_round).total_seconds() // 60)} minuten"
+            else t("al {n} minuten", n=int((moment - self._last_round).total_seconds() // 60))
         )
         _LOGGER.error("de coach heeft %s geen ronde afgemaakt", minuten)
         await self._async_tell(
-            f"De coach heeft {minuten} niets meer beslist. Wat er nu op je "
-            "laadpaal staat blijft staan tot hij weer draait. Kijk in het "
-            "logboek van Home Assistant wat er misging.",
+            t(
+                "De coach heeft {minuten} niets meer beslist. Wat er nu op je laadpaal staat "
+                "blijft staan tot hij weer draait. Kijk in het logboek van Home Assistant wat er misging.",
+                minuten=minuten,
+            ),
             kritiek=True,
         )
 
@@ -1901,10 +1930,15 @@ class ChargerCoach:
         if self._besluit_genoteerd.get(device_id) == kern:
             return
         self._besluit_genoteerd[device_id] = kern
-        naam = device.get("name") or "De laadpaal"
-        kop = f"laden op {st.get('amps')} A" if st.get("charge") else "niet laden"
-        if not st.get("applied"):
-            kop = f"zou {kop}, maar de coach stuurt nu niet"
+        naam = device.get("name") or t("De laadpaal")
+        if st.get("applied"):
+            kop = t("laden op {a} A", a=st.get("amps")) if st.get("charge") else t("niet laden")
+        else:
+            kop = (
+                t("zou laden op {a} A, maar de coach stuurt nu niet", a=st.get("amps"))
+                if st.get("charge")
+                else t("zou niet laden, maar de coach stuurt nu niet")
+            )
         reden = (st.get("reason") or "").strip()
         await self._async_noteer(f"{naam}: {kop}. {reden}".strip(), now, {
             "device": device_id, "rule": st.get("rule"), "charge": bool(st.get("charge")),
@@ -1976,10 +2010,10 @@ class ChargerCoach:
         uit: dict[str, str] = {}
         bronnen = settings.get("sources") or {}
         for i, zon in enumerate(zonsensoren(settings)):
-            uit[zon] = "de zonnesensor" if i == 0 else f"de zonnesensor van omvormer {i + 1}"
+            uit[zon] = t("de zonnesensor") if i == 0 else t("de zonnesensor van omvormer {n}", n=i + 1)
         for fase, velden in (bronnen.get("phases") or {}).items():
             if isinstance(velden, dict) and velden.get("current"):
-                uit[velden["current"]] = f"de stroommeting van fase {str(fase).upper()}"
+                uit[velden["current"]] = t("de stroommeting van fase {fase}", fase=str(fase).upper())
         installation = settings.get("installation") or {}
         for groep in installation.get("circuits") or []:
             if not isinstance(groep, dict):
@@ -1987,52 +2021,54 @@ class ChargerCoach:
             for fase, velden in (groep.get("sensors") or {}).items():
                 if isinstance(velden, dict) and velden.get("current"):
                     uit[velden["current"]] = (
-                        f"de stroommeting van fase {str(fase).upper()} van de "
-                        f"{'onderverdeelkast' if groep.get('kind') == 'kast' else 'groep'} "
-                        f"{groep.get('name') or groep.get('id')}"
+                        t("de stroommeting van fase {fase} van de onderverdeelkast {naam}",
+                          fase=str(fase).upper(), naam=groep.get("name") or groep.get("id"))
+                        if groep.get("kind") == "kast"
+                        else t("de stroommeting van fase {fase} van de groep {naam}",
+                               fase=str(fase).upper(), naam=groep.get("name") or groep.get("id"))
                     )
         if installation.get("load_balancer") and installation.get("balancer_entity"):
-            uit[installation["balancer_entity"]] = "je lastbewaker"
+            uit[installation["balancer_entity"]] = t("je lastbewaker")
         contract = settings.get("contract") or {}
         if contract.get("type") == "dynamic":
             dynamic = contract.get("dynamic") or {}
             if dynamic.get("source") == "all_in" and dynamic.get("all_in_entity"):
-                uit[dynamic["all_in_entity"]] = "je prijssensor"
+                uit[dynamic["all_in_entity"]] = t("je prijssensor")
             elif dynamic.get("market_entity"):
-                uit[dynamic["market_entity"]] = "je marktprijssensor"
+                uit[dynamic["market_entity"]] = t("je marktprijssensor")
             if dynamic.get("fallback_entity"):
-                uit.setdefault(dynamic["fallback_entity"], "je reserveprijssensor")
+                uit.setdefault(dynamic["fallback_entity"], t("je reserveprijssensor"))
         stekker_meldt = _altijd_aan_melden(settings)
         for device in settings.get("devices") or []:
-            naam = device.get("name") or "een apparaat"
+            naam = device.get("name") or t("een apparaat")
             # Een smart plug die altijd aan moet staan heeft zijn eigen melding,
             # na twee minuten (v0.120.0). Na tien minuten nog een over zijn
             # vermogen zou twee berichten zijn over één stekker die van het net is.
             if device.get("entity") and not (stekker_meldt and _altijd_aan(device)):
-                uit[device["entity"]] = f"het vermogen van {naam}"
+                uit[device["entity"]] = t("het vermogen van {naam}", naam=naam)
             entities = device.get("entities") or {}
             for sleutel, wat in (
-                ("status", "de status"),
-                ("connected", "de kabelmelding"),
-                ("charging", "de laadmelding"),
-                ("limit", "de stroomlimiet"),
-                ("current", "de stroommeting"),
-                ("dynamic_limit", "de dynamische laadgrens"),
-                ("max_limit", "de laderlimiet"),
+                ("status", t("de status")),
+                ("connected", t("de kabelmelding")),
+                ("charging", t("de laadmelding")),
+                ("limit", t("de stroomlimiet")),
+                ("current", t("de stroommeting")),
+                ("dynamic_limit", t("de dynamische laadgrens")),
+                ("max_limit", t("de laderlimiet")),
             ):
                 if entities.get(sleutel):
-                    uit[entities[sleutel]] = f"{wat} van {naam}"
+                    uit[entities[sleutel]] = t("{wat} van {naam}", wat=wat, naam=naam)
             # De temperatuur alleen als er een melding of een ventilator aan
             # hangt (v0.108.0): wie daarop rekent, hoort het als de sensor zwijgt.
             if _temp_nodig(settings, device):
-                uit[entities["temperature"]] = f"de temperatuur van {naam}"
+                uit[entities["temperature"]] = t("de temperatuur van {naam}", naam=naam)
             for car in device.get("cars") or []:
                 # Een auto met een wekknop slaapt als hij niet laadt en meldt
                 # dan niets; dat is geen storing maar zijn aard. De eigenaar op
                 # 22-09-2026: "daardoor krijg ik telkens een melding van tesla
                 # meldt al 10 min niks."
                 if car.get("soc_entity") and not car.get("wake_entity"):
-                    uit[car["soc_entity"]] = f"de accustand van {car.get('name') or 'de auto'}"
+                    uit[car["soc_entity"]] = t("de accustand van {naam}", naam=car.get("name") or t("de auto"))
         return uit
 
     def _slaapt(self, entity_id: str | None) -> bool:
@@ -2136,7 +2172,7 @@ class ChargerCoach:
                 if entity_id in self._sensor_gemeld:
                     self._sensor_gemeld.discard(entity_id)
                     await self._async_tell(
-                        f"{naam[0].upper()}{naam[1:]} doet het weer.", telefoon=False
+                        t("{naam} doet het weer.", naam=f"{naam[0].upper()}{naam[1:]}"), telefoon=False
                     )
                 self._sensor_stil.pop(entity_id, None)
                 continue
@@ -2158,16 +2194,18 @@ class ChargerCoach:
             )
             # Valt de reserveprijsbron in, dan rekent de coach niet zonder maar
             # daarmee (v0.101.3).
-            zolang = "De coach rekent zolang zonder."
+            zolang = t("De coach rekent zolang zonder.")
             if self._reserve_valt_in(settings, entity_id):
-                zolang = "De coach rekent zolang met je reserveprijzen."
+                zolang = t("De coach rekent zolang met je reserveprijzen.")
             # Met de temperatuur rekent de coach niet; die is er voor de
             # melding en de ventilator.
             if entity_id in temperaturen:
-                zolang = "Zolang weet de coach niet of hij te warm wordt."
+                zolang = t("Zolang weet de coach niet of hij te warm wordt.")
             await self._async_tell(
-                f"{naam[0].upper()}{naam[1:]} meldt al {minuten} minuten niets. "
-                f"Waarschijnlijk hapert de integratie erachter. {zolang}",
+                t(
+                    "{naam} meldt al {minuten} minuten niets. Waarschijnlijk hapert de integratie erachter. {zolang}",
+                    naam=f"{naam[0].upper()}{naam[1:]}", minuten=minuten, zolang=zolang,
+                ),
                 kritiek=True,
             )
 
@@ -2391,7 +2429,7 @@ class ChargerCoach:
             temp = _celsius(self.hass, entity_id)
             if temp is None:
                 continue
-            naam = device.get("name") or "de thuisbatterij"
+            naam = device.get("name") or t("de thuisbatterij")
             await self._async_ventilator(device, naam, temp, level)
             if grens is None:
                 continue
@@ -2400,7 +2438,8 @@ class ChargerCoach:
                 if sleutel not in self._temp_gemeld and now - sinds >= TEMP_AANHOUDEND:
                     self._temp_gemeld.add(sleutel)
                     await self._async_tell(
-                        f"De temperatuur van {naam} is {_graden(temp)}, boven je grens van {_graden(grens)}.",
+                        t("De temperatuur van {naam} is {temp}, boven je grens van {grens}.",
+                          naam=naam, temp=_graden(temp), grens=_graden(grens)),
                         kritiek=True,
                     )
                 continue
@@ -2408,7 +2447,7 @@ class ChargerCoach:
             if sleutel in self._temp_gemeld and temp <= grens - TEMP_TERUG:
                 self._temp_gemeld.discard(sleutel)
                 await self._async_tell(
-                    f"De temperatuur van {naam} is weer {_graden(temp)}.", telefoon=False
+                    t("De temperatuur van {naam} is weer {temp}.", naam=naam, temp=_graden(temp)), telefoon=False
                 )
 
     def _vriezer_temp(self, entity_id: str | None) -> float | None:
@@ -2439,6 +2478,7 @@ class ChargerCoach:
             if device.get("type") not in KOELWAREN:
                 continue
             standaard, grens = KOELWAREN[device["type"]]
+            standaard = t(standaard)
             entities = device.get("entities") or {}
             sleutel = str(device.get("id") or "")
             eigen = str(device.get("name") or "").strip()
@@ -2449,8 +2489,9 @@ class ChargerCoach:
             if deur in ("on", "open", "off", "closed"):
                 await self._vriezer_stand(
                     (sleutel, "deur"), deur in ("on", "open"), now, VRIEZER_DEUR, actief,
-                    f"De deur van {van} staat al {int(VRIEZER_DEUR.total_seconds() // 60)} minuten open.",
-                    f"De deur van {van} is weer dicht.",
+                    t("De deur van {naam} staat al {n} minuten open.",
+                      naam=van, n=int(VRIEZER_DEUR.total_seconds() // 60)),
+                    t("De deur van {naam} is weer dicht.", naam=van),
                 )
             temp = self._vriezer_temp(entities.get("temperature"))
             if temp is not None:
@@ -2459,8 +2500,9 @@ class ChargerCoach:
                 if warm or koud:
                     await self._vriezer_stand(
                         (sleutel, "warm"), warm, now, VRIEZER_WARM, actief,
-                        f"{naam} is al een half uur warmer dan {_graden(grens)}: nu {_graden(temp)}.",
-                        f"{naam} is weer {_graden(temp)}.",
+                        t("{naam} is al een half uur warmer dan {grens}: nu {temp}.",
+                          naam=naam, grens=_graden(grens), temp=_graden(temp)),
+                        t("{naam} is weer {temp}.", naam=naam, temp=_graden(temp)),
                     )
                 elif (sleutel, "warm") in self._vriezer_sinds or (sleutel, "warm") in self._vriezer_gemeld:
                     # Tussen de grens en een graad eronder blijft het zoals het was.
@@ -2469,8 +2511,8 @@ class ChargerCoach:
             if storing in ("on", "off"):
                 await self._vriezer_stand(
                     (sleutel, "storing"), storing == "on", now, timedelta(0), actief,
-                    f"{naam} meldt een storing.",
-                    f"{naam} meldt geen storing meer.",
+                    t("{naam} meldt een storing.", naam=naam),
+                    t("{naam} meldt geen storing meer.", naam=naam),
                 )
         # Een vriezer die er niet meer is, of een sensor die verdween: vergeten.
         for weg in set(self._vriezer_sinds) - actief:
@@ -2529,7 +2571,9 @@ class ChargerCoach:
         if not await self._async_schakelen(device, aan, "fan"):
             return
         await self._async_tell(
-            f"De ventilator van {naam} staat {'aan' if aan else 'uit'}: {_graden(temp)}.",
+            t("De ventilator van {naam} staat aan: {temp}.", naam=naam, temp=_graden(temp))
+            if aan
+            else t("De ventilator van {naam} staat uit: {temp}.", naam=naam, temp=_graden(temp)),
             telefoon=False,
         )
 
@@ -2572,9 +2616,11 @@ class ChargerCoach:
                 self._stekker_klok_stop(sleutel)
                 if sleutel in self._stekker_gemeld:
                     self._stekker_gemeld.discard(sleutel)
-                    await self._async_tell(f"{naam} staat weer aan.", telefoon=False)
+                    await self._async_tell(t("{naam} staat weer aan.", naam=naam), telefoon=False)
                 elif sleutel in self._stekker_gezet:
-                    await self._async_tell(f"{naam} stond uit; de coach heeft hem weer aangezet.", telefoon=False)
+                    await self._async_tell(
+                        t("{naam} stond uit; de coach heeft hem weer aangezet.", naam=naam), telefoon=False
+                    )
                 self._stekker_gezet.discard(sleutel)
                 continue
             if sleutel not in self._stekker_uit:
@@ -2597,11 +2643,13 @@ class ChargerCoach:
             # De entiteit-id in het log en niet in de melding, zoals bij de sensorwacht.
             _LOGGER.warning("%s (%s) staat al %d minuten %s", naam, plug, minuten, stand or "nergens")
             if stand != "off":
-                tekst = f"{naam} is al {minuten} minuten niet bereikbaar; de coach weet niet of hij aan staat."
+                tekst = t("{naam} is al {minuten} minuten niet bereikbaar; de coach weet niet of hij aan staat.",
+                          naam=naam, minuten=minuten)
             elif mag:
-                tekst = f"{naam} staat al {minuten} minuten uit en de coach krijgt hem niet aan."
+                tekst = t("{naam} staat al {minuten} minuten uit en de coach krijgt hem niet aan.",
+                          naam=naam, minuten=minuten)
             else:
-                tekst = f"{naam} staat al {minuten} minuten uit."
+                tekst = t("{naam} staat al {minuten} minuten uit.", naam=naam, minuten=minuten)
             await self._async_tell(tekst, kritiek=True, telefoon=telefoon)
 
         # Een stekker die er niet meer is, of niet meer aan hoeft, telt niet meer.
@@ -2660,8 +2708,11 @@ class ChargerCoach:
                     self._water_gemeld = True
                     minuten = int(_tussen(sinds, now).total_seconds() // 60)
                     await self._async_tell(
-                        f"Er loopt al {minuten} minuten onafgebroken water ({str(round(debiet, 1)).replace('.', ',')} L/min). "
-                        "Mogelijk een lekkage of een kraan die openstaat.",
+                        t(
+                            "Er loopt al {minuten} minuten onafgebroken water ({debiet} L/min). "
+                            "Mogelijk een lekkage of een kraan die openstaat.",
+                            minuten=minuten, debiet=_rond(debiet, 1),
+                        ),
                         kritiek=True,
                     )
             else:
@@ -2728,11 +2779,13 @@ class ChargerCoach:
             if sleutel in self._verbruik_gemeld:
                 continue
             self._verbruik_gemeld.add(sleutel)
-            naam = "gas" if meter == "gas" else "water"
+            naam = t("gas") if meter == "gas" else t("water")
             await self._async_tell(
-                f"Gisteren ging er {str(round(float(gisteren['m3']), 2)).replace('.', ',')} m³ {naam} doorheen, "
-                f"normaal is dat rond {str(round(mediaan, 2)).replace('.', ',')} m³ per dag. "
-                "Kijk of er iets lekt of aan is blijven staan.",
+                t(
+                    "Gisteren ging er {m3} m³ {naam} doorheen, normaal is dat rond {mediaan} m³ per dag. "
+                    "Kijk of er iets lekt of aan is blijven staan.",
+                    m3=_rond(float(gisteren["m3"]), 2), naam=naam, mediaan=_rond(mediaan, 2),
+                ),
                 kritiek=True,
             )
 
@@ -2938,6 +2991,9 @@ class ChargerCoach:
         except Exception:  # noqa: BLE001 - never let a bad read stop the timer
             _LOGGER.exception("kon de instellingen niet lezen")
             return False
+        # De taal van wat de coach deze ronde schrijft (v0.140.0): de instelling bij
+        # Installatie, en bij automatisch die van Home Assistant. Zie taal.py.
+        taal.kies_uit(settings, getattr(self.hass.config, "language", None))
 
         if not self._restored:
             # Eén keer, vóór de eerste ronde: de beurten die nog liepen toen
@@ -3336,7 +3392,7 @@ class ChargerCoach:
             surplus_w=self._meter_zeker(now),
         )
         if alleen_lezen and decision.rule not in ("running", "finished"):
-            decision = Decision(False, 0, "Alleen uitlezen: de coach start hem niet.", rule="read-only")
+            decision = Decision(False, 0, t("Alleen uitlezen: de coach start hem niet."), rule="read-only")
         if sessie.pop("knop_melden", False):
             await self._async_tell(self._knop_zin(naam, decision, now, handmatig))
 
@@ -3398,16 +3454,20 @@ class ChargerCoach:
             sessie["gemeld"].add("gestart")
             zelf = sessie.get("door_coach", False)
             dit = programma or sessie.get("programma")
-            wat = f" ({dit.label})" if dit is not None else ""
+            wat = f" ({t(dit.label)})" if dit is not None else ""
             # Het apparaat zelf weet het beste wanneer hij klaar is;
             # zonder die sensor de duur uit de tabel.
             if eind is not None and eind > now:
-                klaar = f", klaar rond {eind:%H:%M}"
+                klaar = t(", klaar rond {klok}", klok=f"{eind:%H:%M}")
             elif dit is not None and dit.minutes:
-                klaar = f", klaar rond {(sessie['gestart'] + timedelta(minutes=dit.minutes)):%H:%M}"
+                klaar = t(", klaar rond {klok}", klok=f"{(sessie['gestart'] + timedelta(minutes=dit.minutes)):%H:%M}")
             else:
                 klaar = ""
-            await self._async_tell(f"{naam} {'is gestart' if zelf else 'draait'}{wat}{klaar}.")
+            await self._async_tell(
+                t("{naam} is gestart{wat}{klaar}.", naam=naam, wat=wat, klaar=klaar)
+                if zelf
+                else t("{naam} draait{wat}{klaar}.", naam=naam, wat=wat, klaar=klaar)
+            )
         # Geen vermogenssensor maar wel een energieteller (Miele, v0.124.0): dan
         # telt de coach per stap van de teller (`_teller_tellen`).
         op_teller = watts is None and not device.get("entity") and bool(device.get("energy_entity"))
@@ -3436,7 +3496,7 @@ class ChargerCoach:
 
         mag = level == LEVEL_STEER or (level == LEVEL_PROPOSE and device_id in self._approved)
         if draait and eind is not None and eind > now and decision.rule == "running":
-            decision = replace(decision, reason=f"Hij draait, klaar rond {eind:%H:%M}.")
+            decision = replace(decision, reason=t("Hij draait, klaar rond {klok}.", klok=f"{eind:%H:%M}"))
         self.state[device_id] = {
             **asdict(decision),
             "kind": "programma",
@@ -3493,7 +3553,8 @@ class ChargerCoach:
             # De reden zegt al "zet hem nu aan"; met de naam erin wordt dat
             # "Zet Vaatwasser nu aan: dit is het goedkoopste moment ...".
             reden = decision.reason
-            for kop in ("Zet hem nu aan", "Zet hem meteen aan"):
+            # De reden komt uit planner.py, in de taal van nu; het begin dus ook.
+            for kop in (t("Zet hem nu aan"), t("Zet hem meteen aan")):
                 if reden.startswith(kop):
                     reden = reden[len(kop):]
                     break
@@ -3501,11 +3562,12 @@ class ChargerCoach:
                 reden = ". " + reden
             if gevraagd is None:
                 sessie["gevraagd"] = now
-                await self._async_tell(f"Zet {naam} nu aan{reden}", kritiek=True)
+                await self._async_tell(t("Zet {naam} nu aan{reden}", naam=naam, reden=reden), kritiek=True)
             elif now - gevraagd >= HERINNERING and "herinnerd" not in sessie["gemeld"]:
                 sessie["gemeld"].add("herinnerd")
                 await self._async_tell(
-                    f"{naam} staat nog steeds uit; de coach vroeg om {gevraagd:%H:%M} om hem aan te zetten"
+                    t("{naam} staat nog steeds uit; de coach vroeg om {klok} om hem aan te zetten",
+                      naam=naam, klok=f"{gevraagd:%H:%M}")
                     + (reden if reden.startswith(":") else "."),
                     kritiek=True,
                 )
@@ -3527,19 +3589,20 @@ class ChargerCoach:
             waarom = None
             if knop == "unavailable":
                 waarom = (
-                    " De deur staat open."
+                    t("De deur staat open.")
                     if deur_open
-                    else " Zet de machine aan en kijk of starten op afstand aan staat."
+                    else t("Zet de machine aan en kijk of starten op afstand aan staat.")
                 )
             elif afstand == "off":
-                waarom = " Zet starten op afstand aan op het apparaat."
+                waarom = t("Zet starten op afstand aan op het apparaat.")
             if waarom is not None:
                 weg = sessie.get("knop_weg") or now
                 sessie["knop_weg"] = weg
                 if now - weg >= START_WACHT and "knop-weg" not in sessie["gemeld"]:
                     sessie["gemeld"].add("knop-weg")
                     await self._async_tell(
-                        f"De coach wil {naam} starten, maar de machine neemt nu geen start aan.{waarom}",
+                        t("De coach wil {naam} starten, maar de machine neemt nu geen start aan. {waarom}",
+                          naam=naam, waarom=waarom),
                         kritiek=True,
                     )
                 return
@@ -3554,13 +3617,13 @@ class ChargerCoach:
         if now - gedrukt >= START_WACHT and "start-mislukt" not in sessie["gemeld"]:
             sessie["gemeld"].add("start-mislukt")
             waarom = (
-                " De deur staat open."
+                t("De deur staat open.")
                 if deur_open
-                else " Kijk of starten op afstand aan staat op het apparaat en of de deur dicht is."
+                else t("Kijk of starten op afstand aan staat op het apparaat en of de deur dicht is.")
             )
             await self._async_tell(
-                f"De coach heeft {naam} om {gedrukt:%H:%M} gestart, maar hij is niet gaan "
-                f"draaien.{waarom}",
+                t("De coach heeft {naam} om {klok} gestart, maar hij is niet gaan draaien. {waarom}",
+                  naam=naam, klok=f"{gedrukt:%H:%M}", waarom=waarom),
                 kritiek=True,
             )
         if now - gedrukt >= START_OPNIEUW and sessie["pogingen"] < START_POGINGEN:
@@ -3961,7 +4024,7 @@ class ChargerCoach:
         verslag te lang voor een telefoon. De uitsplitsing staat in het paneel,
         onder Bespaard (`zon_winst` in de beurt).
         """
-        return f"Bespaard {_bedrag(totaal)}."
+        return t("Bespaard {bedrag}.", bedrag=_bedrag(totaal))
 
     async def _async_programma_klaar(
         self,
@@ -3993,7 +4056,7 @@ class ChargerCoach:
         kwh = sessie["kwh"]
         betaald = sessie["betaald"]
         maat = None if sessie["maat_onbekend"] or sessie["vrijgegeven"] is None else sessie["maat"]
-        wat = f" ({programma.label})" if programma is not None else ""
+        wat = f" ({t(programma.label)})" if programma is not None else ""
         # Waar het vandaan kwam, en het bedrag bij het net: de eigenaar op
         # 28-09-2026 las "ongeveer € 0,199" bij een beurt op zon en
         # thuisbatterij, en "er is niks van het net af gehaald" (v0.101.0).
@@ -4001,19 +4064,23 @@ class ChargerCoach:
         bespaard = ""
         if maat is not None and kwh > 0 and maat - betaald >= 0.005:
             bespaard = self._bespaard_zin(maat - betaald)
-        wanneer = f"{gestart:%H:%M} tot {einde:%H:%M}."
+        wanneer = t("{van} tot {tot}.", van=f"{gestart:%H:%M}", tot=f"{einde:%H:%M}")
         onderbroken = sessie.get("onderbroken_om") if afgebroken else None
         if onderbroken is not None:
             # De eigenaar op 16-10-2026: "ik wil een compleet verslag". Tot
             # v0.128.1 stond er alleen van de start tot het uitgaan, en zag je
             # niet dat hij het grootste deel daarvan stillag.
+            klokken = {"start": f"{gestart:%H:%M}", "stil": f"{onderbroken:%H:%M}", "einde": f"{einde:%H:%M}"}
             wanneer = (
-                f"gestart om {gestart:%H:%M}, onderbroken om {onderbroken:%H:%M}, "
-                f"{'uit' if uit else 'afgebroken'} om {einde:%H:%M}."
+                t("gestart om {start}, onderbroken om {stil}, uit om {einde}.", **klokken)
+                if uit
+                else t("gestart om {start}, onderbroken om {stil}, afgebroken om {einde}.", **klokken)
             )
         wanneer = f"{_kwh_tekst(kwh)}, {wanneer}" if kwh > 0 else wanneer[:1].upper() + wanneer[1:]
         await self._async_tell(_verslag(
-            f"{naam} is {'afgebroken' if afgebroken else 'klaar'}{wat}.",
+            t("{naam} is afgebroken{wat}.", naam=naam, wat=wat)
+            if afgebroken
+            else t("{naam} is klaar{wat}.", naam=naam, wat=wat),
             wanneer,
             herkomst,
             bespaard,
@@ -4506,7 +4573,11 @@ class ChargerCoach:
     def _knop_zin(naam: str, decision: Decision, now: datetime, handmatig: bool) -> str:
         """De melding na een druk op de vrijgaveknop: vrijgegeven, en wanneer hij start."""
         if decision.charge:
-            return f"{naam} is vrijgegeven. " + ("Zet hem nu aan." if handmatig else "Hij start nu.")
+            return (
+                t("{naam} is vrijgegeven. Zet hem nu aan.", naam=naam)
+                if handmatig
+                else t("{naam} is vrijgegeven. Hij start nu.", naam=naam)
+            )
         if decision.rule == "wait-for-start" and decision.starts_at:
             try:
                 moment = datetime.fromisoformat(str(decision.starts_at)).replace(tzinfo=None)
@@ -4514,10 +4585,12 @@ class ChargerCoach:
                 moment = None
             if moment is not None:
                 wanneer = _dag_om(moment, now)
-                return f"{naam} is vrijgegeven. " + (
-                    f"Zet hem aan {wanneer}." if handmatig else f"Hij start {wanneer}."
+                return (
+                    t("{naam} is vrijgegeven. Zet hem aan {wanneer}.", naam=naam, wanneer=wanneer)
+                    if handmatig
+                    else t("{naam} is vrijgegeven. Hij start {wanneer}.", naam=naam, wanneer=wanneer)
                 )
-        return f"{naam} is vrijgegeven. {decision.reason}".strip()
+        return t("{naam} is vrijgegeven. {reden}", naam=naam, reden=decision.reason).strip()
 
     async def _async_klep_volgen(
         self,
@@ -4747,18 +4820,18 @@ class ChargerCoach:
         self._besluit_genoteerd[device_id] = kern
         naam = _programma_naam(device)
         if st.get("rule") == "read-only":
-            await self._async_noteer(f"{naam}: alleen uitlezen, de coach start hem niet.", now, {
+            await self._async_noteer(t("{naam}: alleen uitlezen, de coach start hem niet.", naam=naam), now, {
                 "device": device_id, "rule": "read-only", "charge": False, "applied": False,
             })
             return
         if st.get("rule") == "running":
-            kop = "draait"
+            kop = t("draait")
         elif st.get("charge"):
-            kop = "zet hem aan" if st.get("manual") else "start nu"
+            kop = t("zet hem aan") if st.get("manual") else t("start nu")
         else:
-            kop = "wacht"
+            kop = t("wacht")
         if not st.get("applied") and st.get("charge") and st.get("rule") != "running":
-            kop = "zou nu starten, maar de coach stuurt nu niet"
+            kop = t("zou nu starten, maar de coach stuurt nu niet")
         reden = (st.get("reason") or "").strip()
         await self._async_noteer(f"{naam}: {kop}. {reden}".strip(), now, {
             "device": device_id, "rule": st.get("rule"), "charge": bool(st.get("charge")),
@@ -4845,7 +4918,7 @@ class ChargerCoach:
         device_id = device.get("id", "")
         entities = device.get("entities") or {}
         eigen = device.get("airco") or {}
-        naam = device.get("name") or "De airco"
+        naam = device.get("name") or t("De airco")
         klimaat = entities.get("climate")
         sessie = self._airco_sessie(device_id)
         hvac, attrs = self._airco_staat(device)
@@ -4947,15 +5020,15 @@ class ChargerCoach:
             besluit = AircoBesluit(
                 aan=False if sessie["aan_sinds"] is not None and aan else None, modus=None,
                 stand="pauze", rule="pauze",
-                reason="Gepauzeerd: de coach doet niets met de airco.",
+                reason=t("Gepauzeerd: de coach doet niets met de airco."),
             )
         elif sessie["bewoner_tot"] is not None or (aan and sessie["aan_sinds"] is None):
             besluit = AircoBesluit(
                 aan=None, modus=airco.modus, stand="bewoner", rule="bewoner",
                 reason=(
-                    "Je zette hem zelf aan of uit, dus de coach blijft er vandaag vanaf."
+                    t("Je zette hem zelf aan of uit, dus de coach blijft er vandaag vanaf.")
                     if sessie["bewoner_tot"] is not None
-                    else "Hij staat aan, maar niet door de coach. De coach laat hem met rust."
+                    else t("Hij staat aan, maar niet door de coach. De coach laat hem met rust.")
                 ),
             )
 
@@ -5008,7 +5081,7 @@ class ChargerCoach:
             if ruimte is not None and vermogen > ruimte:
                 self.state[device_id].update(
                     charge=False, rule="no-room", stand="uit",
-                    reason="Er is nu geen ruimte op de aansluiting voor de airco. Zodra er ruimte is, gaat hij aan.",
+                    reason=t("Er is nu geen ruimte op de aansluiting voor de airco. Zodra er ruimte is, gaat hij aan."),
                 )
                 return
             await self._async_airco_zetten(device, sessie, now, besluit.modus, airco.doel_c)
@@ -5093,8 +5166,8 @@ class ChargerCoach:
             return
         self._besluit_genoteerd[device_id] = kern
         kop = {
-            "zon": "aan op zon", "goedkoop": "aan op een goedkoop uur", "op_temperatuur": "op temperatuur",
-            "uit": "uit", "bewoner": "door jou bediend", "pauze": "gepauzeerd", "geen_meting": "weet het niet",
+            "zon": t("aan op zon"), "goedkoop": t("aan op een goedkoop uur"), "op_temperatuur": t("op temperatuur"),
+            "uit": t("uit"), "bewoner": t("door jou bediend"), "pauze": t("gepauzeerd"), "geen_meting": t("weet het niet"),
         }.get(str(st.get("stand")), str(st.get("stand")))
         await self._async_noteer(f"{naam}: {kop}. {(st.get('reason') or '').strip()}".strip(), now, {
             "device": device_id, "rule": st.get("rule"), "charge": bool(st.get("charge")),
@@ -5125,7 +5198,7 @@ class ChargerCoach:
     ) -> None:
         device_id = device.get("id", "")
         entities = device.get("entities") or {}
-        naam = device.get("name") or "De boiler"
+        naam = device.get("name") or t("De boiler")
         schakelaar = entities.get("switch")
         sessie = self._boiler.setdefault(device_id, self._lege_boiler_sessie(now))
         geleerd = self._boiler_rij(settings, device_id)
@@ -5303,7 +5376,7 @@ class ChargerCoach:
             self.state[device_id].update(
                 charge=False,
                 rule="no-room",
-                reason=(
+                reason=t(
                     "Er is nu geen ruimte op de aansluiting voor de boiler: wat hoger staat in "
                     "de voorrang gaat voor. Zodra er ruimte is, gaat hij aan."
                 ),
@@ -5385,7 +5458,11 @@ class ChargerCoach:
             # Het verslag gaat naar de geschiedenis en niet naar de telefoon:
             # een boiler die om drie uur 's nachts warm wordt hoeft niemand te
             # wekken. De eigenaar op 06-09-2026: "niet telkens onnodig meldingen."
-            vanaf = f" vanaf {sessie['gestart']:%H:%M}" if sessie.get("gestart") else ""
+            erin_tekst = (
+                t("{kwh} vanaf {klok}.", kwh=_kwh_tekst(erin), klok=f"{sessie['gestart']:%H:%M}")
+                if sessie.get("gestart")
+                else f"{_kwh_tekst(erin)}."
+            )
             # Dezelfde regels als bij de andere apparaten (v0.101.0, v0.102.1).
             herkomst = self._herkomst_tekst(sessie)
             maat = None if sessie["maat_onbekend"] or sessie.get("nodig_sinds") is None else sessie["maat"]
@@ -5393,7 +5470,7 @@ class ChargerCoach:
             if maat is not None and maat - sessie["betaald"] >= 0.005:
                 bespaard = self._bespaard_zin(maat - sessie["betaald"])
             await self._async_tell(
-                _verslag(f"{naam} is weer warm.", f"{_kwh_tekst(erin)}{vanaf}.", herkomst, bespaard),
+                _verslag(t("{naam} is weer warm.", naam=naam), erin_tekst, herkomst, bespaard),
                 telefoon=False,
             )
             self._beurt_schrijven(self._boiler_regel(device, naam, sessie, now))
@@ -5420,9 +5497,12 @@ class ChargerCoach:
             if sessie["vergeefs"] >= BOILER_VERGEEFS and "vergeefs" not in sessie["gemeld"]:
                 sessie["gemeld"].add("vergeefs")
                 await self._async_tell(
-                    f"De coach zet {naam} wel aan, maar er loopt geen stroom: "
-                    f"{sessie['vergeefs']} keer achter elkaar vroeg hij niets terwijl er warm water "
-                    "bij moest. Kijk of de stekker en de schakelaar doen wat ze horen te doen.",
+                    t(
+                        "De coach zet {naam} wel aan, maar er loopt geen stroom: {n} keer achter elkaar "
+                        "vroeg hij niets terwijl er warm water bij moest. Kijk of de stekker en de "
+                        "schakelaar doen wat ze horen te doen.",
+                        naam=naam, n=sessie["vergeefs"],
+                    ),
                     kritiek=True,
                 )
 
@@ -6169,7 +6249,7 @@ class ChargerCoach:
         self, now: datetime, settings: dict[str, Any], device: dict[str, Any], level: str
     ) -> None:
         device_id = device.get("id", "")
-        naam = device.get("name") or "De batterij"
+        naam = device.get("name") or t("De batterij")
         rij = self._batterij_rij(settings, device_id)
         sessie = self._batterij.setdefault(device_id, {"regelaar": Regelaar()})
         if "voorraad" not in sessie:
@@ -6224,8 +6304,9 @@ class ChargerCoach:
 
         vakantie = self._vakantie(device)
         if vakantie is not None:
-            besluit.reason = (
-                f"Vakantiestand: hij houdt de batterij onder {vakantie:.0f}%. " + besluit.reason
+            besluit.reason = t(
+                "Vakantiestand: hij houdt de batterij onder {pct}%. {reden}",
+                pct=f"{vakantie:.0f}", reden=besluit.reason,
             )
 
         # "Nu leegladen tot X%": naar het net op het ontlaadvermogen tot de
@@ -6238,15 +6319,17 @@ class ChargerCoach:
             if b.soc is not None and b.soc <= grens + VOL_MARGE - 1.0:
                 self._drain.pop(device_id, None)
                 self._remember(device_id)
-                await self._async_noteer(f"{naam} is leeggeladen tot {grens:.0f}%; hij volgt het plan weer.", now,
+                await self._async_noteer(t("{naam} is leeggeladen tot {pct}%; hij volgt het plan weer.",
+                                           naam=naam, pct=f"{grens:.0f}"), now,
                                          {"device": device_id})
             elif b.soc is not None and b.max_discharge_w > 0 and not self._paal_laadt(settings):
                 besluit = Besluit(
                     HANDELEN,
                     power_w=b.max_discharge_w,
-                    reason=(
-                        f"Je hebt gevraagd hem nu leeg te laden tot {grens:.0f}%, dus hij levert aan het net op "
-                        f"{b.max_discharge_w / 1000:.1f} kW, wat de prijs ook is.".replace(".", ",", 1)
+                    reason=t(
+                        "Je hebt gevraagd hem nu leeg te laden tot {pct}%, dus hij levert aan het net op "
+                        "{kw} kW, wat de prijs ook is.",
+                        pct=f"{grens:.0f}", kw=getal(b.max_discharge_w / 1000, 1),
                     ),
                     plan=besluit.plan,
                     rule="leeg-laden",
@@ -6264,14 +6347,16 @@ class ChargerCoach:
             if b.soc is not None and b.soc >= b.soc_max - VOL_MARGE:
                 self._boost.discard(device_id)
                 self._remember(device_id)
-                await self._async_noteer(f"{naam} is vol; hij volgt het plan weer.", now, {"device": device_id})
+                await self._async_noteer(t("{naam} is vol; hij volgt het plan weer.", naam=naam), now,
+                                         {"device": device_id})
             elif b.soc is not None and b.max_charge_w > 0:
                 besluit = Besluit(
                     MAX_LADEN,
                     power_w=b.max_charge_w,
-                    reason=(
-                        f"Je hebt gevraagd hem nu vol te laden, dus hij laadt van het net op "
-                        f"{b.max_charge_w / 1000:.1f} kW tot {b.soc_max:.0f}%, wat de prijs ook is.".replace(".", ",", 1)
+                    reason=t(
+                        "Je hebt gevraagd hem nu vol te laden, dus hij laadt van het net op "
+                        "{kw} kW tot {pct}%, wat de prijs ook is.",
+                        kw=getal(b.max_charge_w / 1000, 1), pct=f"{b.soc_max:.0f}",
                     ),
                     plan=besluit.plan,
                     rule="vol-laden",
@@ -6415,15 +6500,15 @@ class ChargerCoach:
             ],
             # Iets dat alleen de bewoner of de installateur kan verhelpen, naast
             # de reden op de kaart (v0.128.2). Zie `handelen_kan_niet`.
-            "tip": HANDELEN_KAN_NIET if handelen_kan_niet(b, prijzen, now) else "",
+            "tip": t(HANDELEN_KAN_NIET) if handelen_kan_niet(b, prijzen, now) else "",
         }
 
         kern = (besluit.stand, besluit.rule, stuurt)
         if self._besluit_genoteerd.get(device_id) != kern:
             self._besluit_genoteerd[device_id] = kern
-            kop = STAND_NAMEN.get(besluit.stand, besluit.stand).lower()
+            kop = t(STAND_NAMEN.get(besluit.stand, besluit.stand)).lower()
             if not stuurt:
-                kop = f"zou op {kop} staan, maar de coach stuurt nu niet"
+                kop = t("zou op {stand} staan, maar de coach stuurt nu niet", stand=kop)
             await self._async_noteer(f"{naam}: {kop}. {besluit.reason}".strip(), now, {
                 "device": device_id, "mode": besluit.stand, "rule": besluit.rule, "applied": stuurt,
             })
@@ -6461,9 +6546,12 @@ class ChargerCoach:
                 _LOGGER.warning("%s: de modus staat op %s en niet op %s; iets anders stuurt, de coach laat los",
                                 device_id, staat.state, wil)
                 await self._async_tell(
-                    f"Iets anders stuurt {naam}: de bedrijfsmodus staat niet meer op wat de coach zette. "
-                    f"De coach laat hem los en probeert het over een uur opnieuw. Zet de andere sturing uit, "
-                    f"of haal bij de coach het vinkje 'mag sturen' weg.",
+                    t(
+                        "Iets anders stuurt {naam}: de bedrijfsmodus staat niet meer op wat de coach zette. "
+                        "De coach laat hem los en probeert het over een uur opnieuw. Zet de andere sturing uit, "
+                        "of haal bij de coach het vinkje 'mag sturen' weg.",
+                        naam=naam,
+                    ),
                     kritiek=True,
                 )
         if sessie.get("vreemd") is not None:
@@ -6505,8 +6593,8 @@ class ChargerCoach:
             # er bij de eigenaar op 30-09-2026 een ronde lang "De laadpaal
             # laadt, dus de batterij geeft niets af. De batterij doet dat zelf."
             if besluit.stand == NUL:
-                self.state[device_id]["reason"] = (
-                    besluit.reason + " De batterij doet dat zelf, met zijn eigen meter."
+                self.state[device_id]["reason"] = t(
+                    "{reden} De batterij doet dat zelf, met zijn eigen meter.", reden=besluit.reason
                 ).strip()
             self.state[device_id]["setpoint_w"] = None
 
@@ -6653,18 +6741,18 @@ class ChargerCoach:
         als niemand iets toezegde.
         """
         if not self._zelf_instelling(device):
-            return "je hebt het uitgezet"
+            return t("je hebt het uitgezet")
         if besluit.stand != NUL:
             if besluit.rule == "paal-laadt":
-                return "de laadpaal laadt"
-            return f"het plan zegt {STAND_NAMEN.get(besluit.stand, besluit.stand).lower()}"
+                return t("de laadpaal laadt")
+            return t("het plan zegt {stand}", stand=t(STAND_NAMEN.get(besluit.stand, besluit.stand)).lower())
         if self._vakantie(device) is not None:
-            return "de vakantiestand staat aan"
+            return t("de vakantiestand staat aan")
         if b.soc is None:
-            return "de accustand is niet bekend"
+            return t("de accustand is niet bekend")
         # Zijn eigen ondergrens kent hij; een hogere reserve van de bewoner niet.
         if b.bodem > b.soc_min and b.soc <= b.bodem + ZELF_MARGE:
-            return "hij zit bij de reserve voor noodstroom"
+            return t("hij zit bij de reserve voor noodstroom")
         eigen_w = max(0.0, batterij_w or 0.0)
         if ruimte_w is not None and ruimte_w - eigen_w < ZELF_ZEKERING_W:
             # Is het krap door wat een ander apparaat toezegde en nog niet
@@ -6673,8 +6761,8 @@ class ChargerCoach:
             # van de batterij stond op 4 A, en de melding zei "want de zekering
             # wordt krap".
             if kaal_w is not None and kaal_w - eigen_w >= ZELF_ZEKERING_W:
-                return "de laadpaal gaat laden" if paal_belooft else "een ander apparaat krijgt de ruimte"
-            return "de zekering wordt krap"
+                return t("de laadpaal gaat laden") if paal_belooft else t("een ander apparaat krijgt de ruimte")
+            return t("de zekering wordt krap")
         return None
 
     def _paal_belooft(self, settings: dict[str, Any]) -> bool:
@@ -6712,7 +6800,7 @@ class ChargerCoach:
         op een oude opdracht. Hoe dat gaat als de stuurknop in zijn eigen stand
         onbereikbaar is staat bij `_async_overnemen_op_nul`.
         """
-        naam = device.get("name") or "De batterij"
+        naam = device.get("name") or t("De batterij")
         zelf = sessie.get("zelf")
         if waarom is None:
             sessie.setdefault("zelf_sinds", nu)
@@ -6722,7 +6810,7 @@ class ChargerCoach:
                 sessie["zelf"] = True
                 sessie["nul_open"] = False
                 sessie["regelaar"] = Regelaar()
-                await self._async_noteer(f"{naam} doet zelf nul op de meter, met zijn eigen meter.", nu,
+                await self._async_noteer(t("{naam} doet zelf nul op de meter, met zijn eigen meter.", naam=naam), nu,
                                          {"device": device.get("id"), "self_zero": True})
             return
         sessie.pop("zelf_sinds", None)
@@ -6733,7 +6821,7 @@ class ChargerCoach:
         sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=_regelklok(), bezonken=False)
         sessie["zelf"] = False
         if zelf:
-            await self._async_noteer(f"{naam}: de coach neemt het over, want {waarom}.", nu,
+            await self._async_noteer(t("{naam}: de coach neemt het over, want {waarom}.", naam=naam, waarom=waarom), nu,
                                      {"device": device.get("id"), "self_zero": False})
 
     def _knop_weg(self, device: dict[str, Any]) -> bool:
@@ -7261,7 +7349,7 @@ class ChargerCoach:
             # beurt één verslag, plus wat de bewoner zelf moet oplossen.
             uitleg = not nettip and not fasetip
             await self._async_tell(
-                f"{device.get('name') or 'De laadpaal'}: {tip}",
+                f"{device.get('name') or t('De laadpaal')}: {tip}",
                 kritiek=not uitleg, telefoon=not uitleg,
             )
 
@@ -7276,8 +7364,11 @@ class ChargerCoach:
         elif gewaarschuwd is None or now - gewaarschuwd >= PAUSE_WARN_AGAIN:
             self._warned[device_id] = now
             await self._async_tell(
-                f"De pauze op {device.get('name') or 'de laadpaal'} staat nog aan, en zo "
-                "is de auto niet op tijd vol. Hervat het laden of verzet je klaar-tijd.",
+                t(
+                    "De pauze op {naam} staat nog aan, en zo is de auto niet op tijd vol. "
+                    "Hervat het laden of verzet je klaar-tijd.",
+                    naam=device.get("name") or t("de laadpaal"),
+                ),
                 kritiek=True,
             )
 
@@ -7376,7 +7467,7 @@ class ChargerCoach:
         # het met een auto die alleen één fase kan, en dan zegt de klaar-tijd al
         # gauw "nu van het net" terwijl drie fasen straks ruim op tijd zijn.
         if fasen_nu == 1 and op_zon(een):
-            huidig = replace(een, reason=f"{een.reason} Hij laadt op één fase.".strip())
+            huidig = replace(een, reason=t("{reden} Hij laadt op één fase.", reden=een.reason).strip())
         elif drie.rule == een.rule == "zon-wacht":
             # Allebei wachten op zon: dan begint hij op één fase, en is dat de
             # drempel die de bewoner hoort te lezen (v0.106.3). In de eerste
@@ -7409,19 +7500,21 @@ class ChargerCoach:
             self._fase_gewisseld[device_id] = now
             return huidig, fasen_nu == 1, None
 
-        kw = f"{grid.surplus_w / 1000:.1f}".replace(".", ",")
+        kw = getal(grid.surplus_w / 1000, 1)
         if wens == 1:
-            reden = (
-                f"Er is {kw} kW zon over, te weinig voor drie fasen. "
-                "Hij zet de paal op één fase: even stil, dan verder."
+            reden = t(
+                "Er is {kw} kW zon over, te weinig voor drie fasen. "
+                "Hij zet de paal op één fase: even stil, dan verder.",
+                kw=kw,
             )
         elif op_zon(drie):
-            reden = (
-                f"Er is {kw} kW zon over, genoeg voor drie fasen. "
-                "Hij zet de paal op drie fasen: even stil, dan verder."
+            reden = t(
+                "Er is {kw} kW zon over, genoeg voor drie fasen. "
+                "Hij zet de paal op drie fasen: even stil, dan verder.",
+                kw=kw,
             )
         else:
-            reden = "Hij zet de paal op drie fasen om op vol vermogen te laden: even stil, dan verder."
+            reden = t("Hij zet de paal op drie fasen om op vol vermogen te laden: even stil, dan verder.")
         doel = een if wens == 1 else drie
         stop = Decision(False, 0, reden, plan=doel.plan, rule="fasewissel")
         return stop, fasen_nu == 1, (wens if stil and not bezig.get("omgezet") else None)
@@ -7767,10 +7860,10 @@ class ChargerCoach:
         einde = max([r["end"] for r in prijzen] + [van + timedelta(hours=12)])
         einde = min(einde, datetime.combine(nu.date() + timedelta(days=2), time()))
         uren: list[datetime] = []
-        t = van
-        while t < einde:
-            uren.append(t)
-            t += timedelta(hours=1)
+        stap = van
+        while stap < einde:
+            uren.append(stap)
+            stap += timedelta(hours=1)
 
         def lees(waarde: Any) -> datetime | None:
             moment = waarde if isinstance(waarde, datetime) else _tijdstip(waarde)
@@ -7804,26 +7897,27 @@ class ChargerCoach:
                     blokken.append(uur)
             elif soort == "thuisbatterij":
                 for u in (self._batterij.get(device_id) or {}).get("uren") or []:
-                    blokken.append(blok(u.start, u.end, u.kwh, wat=STAND_NAMEN.get(u.stand, u.stand),
+                    blokken.append(blok(u.start, u.end, u.kwh, wat=t(STAND_NAMEN.get(u.stand, u.stand)),
                                         stand=u.stand, soc=round(u.soc), net_kw=None))
             elif soort == "boiler":
                 for b in st.get("blokken") or []:
-                    blokken.append(blok(b.get("start"), b.get("end"), float(b.get("kwh") or 0), wat="verwarmt"))
+                    blokken.append(blok(b.get("start"), b.get("end"), float(b.get("kwh") or 0), wat=t("verwarmt")))
             elif soort in PROGRAMMA_TYPES:
                 programma = (self._programma.get(device_id) or {}).get("programma")
                 kwh = programma.kwh if programma is not None and programma.kwh_bekend else None
                 if st.get("running") and st.get("started_at") and st.get("ends_at"):
-                    blokken.append(blok(st["started_at"], st["ends_at"], None, wat="draait"))
+                    blokken.append(blok(st["started_at"], st["ends_at"], None, wat=t("draait")))
                 elif st.get("starts_at") and programma is not None:
                     begin = lees(st["starts_at"])
                     if begin is not None:
                         blokken.append(blok(begin, begin + timedelta(minutes=programma.minutes), kwh,
-                                            wat=f"start, {programma.label}" if programma.label else "start"))
+                                            wat=t("start, {programma}", programma=t(programma.label))
+                                            if programma.label else t("start")))
             elif soort == "airco":
                 if st.get("on"):
                     vermogen = st.get("power_w") or st.get("vermogen_w")
                     blokken.append(blok(van, van + timedelta(hours=1),
-                                        None if vermogen is None else float(vermogen) / 1000.0, wat="aan"))
+                                        None if vermogen is None else float(vermogen) / 1000.0, wat=t("aan")))
             else:
                 continue
             gevonden = [b for b in blokken if b is not None]
@@ -9318,7 +9412,7 @@ class ChargerCoach:
         chosen, profile = self._chosen_car(settings, device)
 
         if chosen == "__guest__":
-            return Car(guest=True, phases=3, name="Gast")
+            return Car(guest=True, phases=3, name=t("Gast"))
 
         if profile is None:
             return Car(phases=3)
@@ -9990,18 +10084,18 @@ class ChargerCoach:
     # geformuleerd, zodat er "20 minuten naar ..." voor kan staan zonder dat het
     # kromme taal wordt.
     VERTRAGING = {
-        "user-hold": "de pauze die je zelf aanzette",
-        "no-room": "een aansluiting die vol zat",
-        "held-back": "de lastbewaking van je aansluiting",
-        "balancer-paused": "de lastbewaking van je aansluiting",
-        "waiting-for-car": "een auto die geen stroom afnam",
-        "waiting-for-auth": "een paal die op goedkeuring wachtte",
-        "no-soc": "wachten op je accustand",
-        "wait-for-sun": "wachten op je eigen zon",
-        "wait-for-sun-today": "wachten op je eigen zon",
-        "zon-wacht": "wachten op genoeg zon",
-        "wait-for-price": "wachten op een goedkoper uur",
-        "too-early": "de tijden die je hebt ingesteld",
+        "user-hold": nt("de pauze die je zelf aanzette"),
+        "no-room": nt("een aansluiting die vol zat"),
+        "held-back": nt("de lastbewaking van je aansluiting"),
+        "balancer-paused": nt("de lastbewaking van je aansluiting"),
+        "waiting-for-car": nt("een auto die geen stroom afnam"),
+        "waiting-for-auth": nt("een paal die op goedkeuring wachtte"),
+        "no-soc": nt("wachten op je accustand"),
+        "wait-for-sun": nt("wachten op je eigen zon"),
+        "wait-for-sun-today": nt("wachten op je eigen zon"),
+        "zon-wacht": nt("wachten op genoeg zon"),
+        "wait-for-price": nt("wachten op een goedkoper uur"),
+        "too-early": nt("de tijden die je hebt ingesteld"),
     }
 
     # ------------------------------------------------------------------
@@ -10264,7 +10358,7 @@ class ChargerCoach:
         return {
             "id": f"{device.get('id', '')}:{ingeplugd.replace(microsecond=0).isoformat()}",
             "device": device.get("id", ""),
-            "name": device.get("name") or "Laadpaal",
+            "name": device.get("name") or t("Laadpaal"),
             "kind": "laden",
             "car": self._hoe_heet(car) if car is not None else "",
             "plugged_at": ingeplugd.replace(microsecond=0).isoformat(),
@@ -10437,13 +10531,13 @@ class ChargerCoach:
         device = next((d for d in settings.get("devices") or []
                        if d.get("id") == device_id and d.get("type") == "thuisbatterij"), None)
         if device is None:
-            return {"fout": "Die batterij bestaat niet."}
+            return {"fout": t("Die batterij bestaat niet.")}
         nu = _moment(None)
         # Tot het begin van dit uur: wat daarna komt telt de ronde zelf.
         tot = nu.replace(minute=0, second=0, microsecond=0)
         begin = datetime(van.year, van.month, van.day)
         if begin >= tot:
-            return {"fout": "Kies een dag in het verleden."}
+            return {"fout": t("Kies een dag in het verleden.")}
         rij = self._batterij_rij(settings, device_id)
         b = self._batterij_van(nu, settings, device, rij)
         bronnen = settings.get("sources") or {}
@@ -11441,7 +11535,7 @@ class ChargerCoach:
         het overzicht staat de naam nog verkeerd en neemt hij het niet mee."
         """
         naam = ((car.name if car else "") or "").strip()
-        return naam if naam else "de auto"
+        return naam if naam else t("de auto")
 
     def _waarom(self, sessie: dict[str, Any]) -> str:
         """De twee dingen waar de meeste tijd aan op is gegaan, in gewone taal.
@@ -11462,15 +11556,16 @@ class ChargerCoach:
         if not kwijt:
             return ""
         kwijt.sort(reverse=True)
-        stukken = [f"{int(minuten)} minuten naar {tekst}" for minuten, tekst in kwijt[:2]]
+        stukken = [t("{n} minuten naar {wat}", n=int(minuten), wat=t(tekst)) for minuten, tekst in kwijt[:2]]
         # Is de coach midden in de laadbeurt ingestapt, dan weet hij niet hoe
         # lang de kabel er al in zat en zegt hij wat hij wél weet.
         sinds = (
-            "Sinds de coach begon te kijken"
+            t("Sinds de coach begon te kijken")
             if sessie.get("ingestapt")
-            else "Sinds de kabel erin ging"
+            else t("Sinds de kabel erin ging")
         )
-        return f"{sinds} is er " + " en ".join(stukken) + " gegaan"
+        samen = t("{een} en {twee}", een=stukken[0], twee=stukken[1]) if len(stukken) > 1 else stukken[0]
+        return t("{sinds} is er {stukken} gegaan", sinds=sinds, stukken=samen)
 
     @staticmethod
     def _soc_bezonken(
@@ -11522,7 +11617,7 @@ class ChargerCoach:
         en is dezelfde vraag aan de orde.
         """
         device_id = device.get("id", "")
-        naam = device.get("name") or "de laadpaal"
+        naam = device.get("name") or t("de laadpaal")
 
         # De kabel is eruit gegaan. Deze staat vooraan omdat de beurt dan al uit
         # `_sessie` gehaald is en de controle hieronder er dus overheen zou
@@ -11562,16 +11657,18 @@ class ChargerCoach:
             gemeld.add("stil")
             minuten = int(_tussen(sinds, now).total_seconds() // 60)
             stand = (
-                f" Hij staat op {round(car.soc_percent)}%."
+                " " + t("Hij staat op {pct}%.", pct=round(car.soc_percent))
                 if car.soc_percent is not None
                 else ""
             )
             await self._async_tell(
-                f"{_hoofdletter(self._hoe_heet(car))} aan {naam} neemt al {minuten} "
-                "minuten geen stroom af "
-                f"terwijl de coach hem aanbiedt.{stand} Zo wordt "
-                f"{window.deadline:%H:%M} niet gehaald. Meestal helpt het om de "
-                "kabel er even uit te trekken en er weer in te doen.",
+                t(
+                    "{auto} aan {naam} neemt al {minuten} minuten geen stroom af terwijl de coach hem "
+                    "aanbiedt.{stand} Zo wordt {klok} niet gehaald. Meestal helpt het om de kabel er "
+                    "even uit te trekken en er weer in te doen.",
+                    auto=_hoofdletter(self._hoe_heet(car)), naam=naam, minuten=minuten, stand=stand,
+                    klok=f"{window.deadline:%H:%M}",
+                ),
                 kritiek=True,
             )
 
@@ -11586,13 +11683,15 @@ class ChargerCoach:
             # leest "dat is niet vol" bij een doel van 90% als een coach die de
             # instelling niet kent.
             heen = (
-                "" if doel_van(car) >= FULL_PERCENT else f" en hij moet naar {int(doel_van(car))}%"
+                "" if doel_van(car) >= FULL_PERCENT else " " + t("en hij moet naar {pct}%", pct=int(doel_van(car)))
             )
             await self._async_tell(
-                f"{naam} zei dat {self._hoe_heet(car)} klaar was, maar hij staat op"
-                f"{stand}{heen} en dat is niet vol. De coach heeft de paal een keer "
-                "opnieuw gestart. Gaat de auto niet binnen een kwartier verder, dan "
-                "laat hij het daarbij.",
+                t(
+                    "{naam} zei dat {auto} klaar was, maar hij staat op{stand}{heen} en dat is niet vol. "
+                    "De coach heeft de paal een keer opnieuw gestart. Gaat de auto niet binnen een "
+                    "kwartier verder, dan laat hij het daarbij.",
+                    naam=naam, auto=self._hoe_heet(car), stand=stand, heen=heen,
+                ),
                 kritiek=True,
             )
 
@@ -11638,23 +11737,23 @@ class ChargerCoach:
             heel = doel_van(car) >= FULL_PERCENT
             accu = self._accu_verloop(sessie, car)
             if car.soc_percent is None:
-                klaar = f"{wie} is vol."
+                klaar = t("{wie} is vol.", wie=wie)
             elif not doel_bereikt(car):
                 # Een laadgrens is één reden, een storing in de auto een andere:
                 # de Ford op 10-10-2026 stond op 36% met een doel van 100%.
-                klaar = (
-                    f"{wie} laadt niet verder en staat op "
-                    f"{round(car.soc_percent)}%. Mogelijk staat er een laadgrens in "
-                    "de auto, of meldt hij een storing."
+                klaar = t(
+                    "{wie} laadt niet verder en staat op {pct}%. Mogelijk staat er een laadgrens in "
+                    "de auto, of meldt hij een storing.",
+                    wie=wie, pct=round(car.soc_percent),
                 )
                 sessie["niet_vol"] = True
             elif heel:
-                klaar = f"{wie} is vol, {accu}." if accu else f"{wie} is vol."
+                klaar = t("{wie} is vol, {accu}.", wie=wie, accu=accu) if accu else t("{wie} is vol.", wie=wie)
             elif accu:
-                klaar = f"{wie} geladen {accu}."
+                klaar = t("{wie} geladen {accu}.", wie=wie, accu=accu)
             else:
-                geschat = " (geschat)" if car.soc_estimated else ""
-                klaar = f"{wie} geladen tot {round(car.soc_percent)}%{geschat}."
+                geschat = " " + t("(geschat)") if car.soc_estimated else ""
+                klaar = t("{wie} geladen tot {pct}%{geschat}.", wie=wie, pct=round(car.soc_percent), geschat=geschat)
             # Is de coach midden in de laadbeurt ingestapt, dan weet hij niet
             # hoe laat die begon en hoort hij dat ook niet te suggereren.
             # Vandaar "sinds" en niet "van ... tot"; dat ene woord zegt het al.
@@ -11663,16 +11762,16 @@ class ChargerCoach:
             # meldingen moeten gewoon duidelijk en kort zijn."
             begon = sessie["begon"]
             if sessie.get("ingestapt"):
-                verloop = f"{kwh} sinds {begon:%H:%M}." if kwh else ""
+                verloop = t("{kwh} sinds {klok}.", kwh=kwh, klok=f"{begon:%H:%M}") if kwh else ""
             elif kwh:
-                verloop = f"{kwh}, {begon:%H:%M} tot {now:%H:%M}."
+                verloop = f"{kwh}, " + t("{van} tot {tot}.", van=f"{begon:%H:%M}", tot=f"{now:%H:%M}")
             else:
-                verloop = f"{begon:%H:%M} tot {now:%H:%M}."
+                verloop = t("{van} tot {tot}.", van=f"{begon:%H:%M}", tot=f"{now:%H:%M}")
             # "Zonder gevolg" alleen bij een auto die ook echt niet verder kwam;
             # niet in het verslag van een auto die daarna alsnog vol werd.
             nog = (
-                f"De coach heeft de paal om {herstart:%H:%M} nog een keer opnieuw "
-                "gestart, zonder gevolg."
+                t("De coach heeft de paal om {klok} nog een keer opnieuw gestart, zonder gevolg.",
+                  klok=f"{herstart:%H:%M}")
                 if herstart is not None and sessie.get("niet_vol")
                 else ""
             )
@@ -11700,16 +11799,17 @@ class ChargerCoach:
 
         gemeld.add("laat")
         stand = (
-            f" Hij staat nu op {round(car.soc_percent)}%."
+            " " + t("Hij staat nu op {pct}%.", pct=round(car.soc_percent))
             if car.soc_percent is not None
             else ""
         )
         waarom = self._waarom(sessie)
         await self._async_tell(
-            f"{_hoofdletter(self._hoe_heet(car))} aan {naam} was om {vorig:%H:%M} "
-            f"nog niet vol.{stand}"
+            t("{auto} aan {naam} was om {klok} nog niet vol.",
+              auto=_hoofdletter(self._hoe_heet(car)), naam=naam, klok=f"{vorig:%H:%M}")
+            + stand
             + (f" {waarom}." if waarom else "")
-            + " Hij laadt door tot hij vol is.",
+            + " " + t("Hij laadt door tot hij vol is."),
             kritiek=True,
         )
 
@@ -11724,7 +11824,7 @@ class ChargerCoach:
         eigen = ((car.name if car else "") or "").strip()
         if eigen and not (car is not None and car.guest):
             return _hoofdletter(eigen)
-        return f"{_hoofdletter(ChargerCoach._hoe_heet(car))} aan {naam}"
+        return t("{auto} aan {naam}", auto=_hoofdletter(ChargerCoach._hoe_heet(car)), naam=naam)
 
     @staticmethod
     def _accu_verloop(sessie: dict[str, Any], car: Car | None) -> str:
@@ -11737,8 +11837,8 @@ class ChargerCoach:
         eind = car.soc_percent if car is not None else None
         if begin is None or eind is None or round(eind) <= round(begin):
             return ""
-        geschat = " (geschat)" if car.soc_estimated else ""
-        return f"van {int(round(begin))} naar {int(round(eind))}%{geschat}"
+        geschat = " " + t("(geschat)") if car.soc_estimated else ""
+        return t("van {van} naar {tot}%{geschat}", van=int(round(begin)), tot=int(round(eind)), geschat=geschat)
 
     @staticmethod
     def _beurt_cijfers(sessie: dict[str, Any]) -> str:
@@ -11804,7 +11904,11 @@ class ChargerCoach:
         accu = self._accu_verloop(sessie, car)
         verloop = ""
         if kwh:
-            verloop = f"{kwh} sinds {begon:%H:%M}" + (f", {accu}" if accu else "") + "."
+            verloop = (
+                t("{kwh} sinds {klok}, {accu}.", kwh=kwh, klok=f"{begon:%H:%M}", accu=accu)
+                if accu
+                else t("{kwh} sinds {klok}.", kwh=kwh, klok=f"{begon:%H:%M}")
+            )
         elif accu:
             verloop = f"{_hoofdletter(accu)}."
 
@@ -11812,7 +11916,7 @@ class ChargerCoach:
         # dezelfde beurt: wel in de geschiedenis, niet nog eens op de telefoon.
         await self._async_tell(
             _verslag(
-                f"{self._wie(car, naam)} is afgekoppeld om {moment:%H:%M}.",
+                t("{wie} is afgekoppeld om {klok}.", wie=self._wie(car, naam), klok=f"{moment:%H:%M}"),
                 verloop,
                 self._beurt_cijfers(sessie),
                 self._beurt_bespaard(sessie),
@@ -11829,23 +11933,23 @@ class ChargerCoach:
         zeuren, en wie gezeurd wordt zet zijn meldingen uit.
         """
         device_id = device.get("id", "")
-        naam = device.get("name") or "de laadpaal"
+        naam = device.get("name") or t("de laadpaal")
         merk = f"{device_id}:deadline" if decision.rule == "deadline" else device_id
         if merk in self._soc_asked:
             return
         self._soc_asked.add(merk)
 
         if decision.rule == "deadline":
-            bericht = (
-                f"De accustand van de auto aan {naam} is nog steeds niet doorgegeven, "
-                "dus de coach gaat uit van een lege accu en laadt nu door om op tijd "
-                "klaar te zijn."
+            bericht = t(
+                "De accustand van de auto aan {naam} is nog steeds niet doorgegeven, dus de coach gaat "
+                "uit van een lege accu en laadt nu door om op tijd klaar te zijn.",
+                naam=naam,
             )
         else:
-            bericht = (
-                f"De coach wil de auto aan {naam} gaan laden, maar weet niet hoe vol "
-                "hij is. Geef de accustand door op de laadpaalkaart, dan laadt hij op "
-                "het gunstigste moment."
+            bericht = t(
+                "De coach wil de auto aan {naam} gaan laden, maar weet niet hoe vol hij is. Geef de "
+                "accustand door op de laadpaalkaart, dan laadt hij op het gunstigste moment.",
+                naam=naam,
             )
         await self._async_tell(bericht, kritiek=True)
 
@@ -11935,11 +12039,11 @@ class ChargerCoach:
             and staat_op != "one"
             and gemeten == 1
         ):
-            return (
-                "Hij laadt op één fase, want de maximale limiet van je lader staat "
-                f"op {charger.max_amps:.0f} A. Op {PHASE_START_AMPS:.0f} A of hoger "
-                "begint elke laadbeurt op drie fasen, en gaat er ongeveer drie keer "
-                "zoveel in per uur."
+            return t(
+                "Hij laadt op één fase, want de maximale limiet van je lader staat op {max} A. Op "
+                "{start} A of hoger begint elke laadbeurt op drie fasen, en gaat er ongeveer drie "
+                "keer zoveel in per uur.",
+                max=f"{charger.max_amps:.0f}", start=f"{PHASE_START_AMPS:.0f}",
             )
 
         # 2. Het profiel klopt niet met wat er gemeten wordt. Dit is het vangnet
@@ -11949,14 +12053,14 @@ class ChargerCoach:
         # meting gebruikt waar hij hoort: om te zeggen dat de instelling niet
         # klopt, in plaats van er stilletjes omheen te rekenen.
         if staat_op == "three" and gemeten == 1:
-            return (
+            return t(
                 "Dit profiel staat op driefasig, maar er wordt nu op één fase "
                 "geladen. Laden duurt daardoor ongeveer drie keer zo lang; de coach "
                 "rekent deze beurt met die ene fase. Gebeurt dit elke beurt, zet de "
                 "auto dan op eenfasig bij Apparaten."
             )
         if staat_op == "one" and gemeten == 3:
-            return (
+            return t(
                 "Dit profiel staat op eenfasig, maar er wordt op drie fasen geladen. "
                 "De coach rekent daardoor met een auto die veel trager is dan hij "
                 "werkelijk is en begint onnodig vroeg. Zet de auto op driefasig bij "
@@ -12173,17 +12277,19 @@ class ChargerCoach:
         minuten = int(_tussen(self._net_stil_sinds, now).total_seconds() // 60)
         if minuten < 1:
             return ""
-        duur = "een minuut" if minuten == 1 else f"{minuten} minuten"
+        duur = tn(minuten, "een minuut", "{n} minuten")
         if self._net_stil_wat == "paal":
-            return (
-                f"De coach kan het vermogen van je laadpaal al {duur} niet lezen, "
+            return t(
+                "De coach kan het vermogen van je laadpaal al {duur} niet lezen, "
                 "dus hij ziet niet hoeveel zon er over is en stuurt alleen op prijs "
-                "en op je klaar-tijd. Kijk of de integratie van je laadpaal nog draait."
+                "en op je klaar-tijd. Kijk of de integratie van je laadpaal nog draait.",
+                duur=duur,
             )
-        return (
-            f"De coach kan je netmeting al {duur} niet lezen, dus hij "
+        return t(
+            "De coach kan je netmeting al {duur} niet lezen, dus hij "
             "ziet niet hoeveel zon er over is en stuurt alleen op prijs en op je "
-            "klaar-tijd. Kijk of de integratie van je slimme meter nog draait."
+            "klaar-tijd. Kijk of de integratie van je slimme meter nog draait.",
+            duur=duur,
         )
 
     def _bewakertip(
@@ -12206,11 +12312,12 @@ class ChargerCoach:
             return ""
         if not charger.max_amps or vrij >= charger.max_amps:
             return ""
-        return (
-            f"Je lastbewaker geeft op dit moment {vrij:.0f} A vrij en je lader "
-            f"kan {charger.max_amps:.0f} A. Meer vraagt de coach dus niet: "
+        return t(
+            "Je lastbewaker geeft op dit moment {vrij} A vrij en je lader "
+            "kan {max} A. Meer vraagt de coach dus niet: "
             "daarboven knijpt de bewaker toch. Dat getal beweegt mee met wat de "
-            "rest van je huis gebruikt."
+            "rest van je huis gebruikt.",
+            vrij=f"{vrij:.0f}", max=f"{charger.max_amps:.0f}",
         )
 
     def _fasen_stabiel(self, device: dict[str, Any]) -> int | None:
