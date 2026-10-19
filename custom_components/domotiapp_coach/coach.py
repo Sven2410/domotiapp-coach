@@ -827,6 +827,52 @@ def _afrekenstart(waarde: Any, vandaag: date) -> date | None:
         begin = volgende
 
 
+def _periode_op(contract: dict[str, Any], dag: str) -> dict[str, Any] | None:
+    """Het eerdere stroomcontract waar die dag in valt, zoals `contractAt` in data-source.js."""
+    for periode in contract.get("periods") or []:
+        if not isinstance(periode, dict):
+            continue
+        if (not periode.get("from") or periode["from"] <= dag) and (not periode.get("to") or dag <= periode["to"]):
+            return periode
+    return None
+
+
+def _herreken_beurt(beurt: dict[str, Any], koop: float, terug: float) -> dict[str, Any]:
+    """Een opgeslagen beurt met een andere vaste prijs (v0.136.0).
+
+    Dezelfde som als `_geld_bij`, `_herkomst_bij` en `_beurt_regel`, maar over
+    de kilowatturen die de beurt al telde: wat niet van de zon kwam tegen de
+    inkoopprijs (ook wat uit de thuisbatterij kwam, zoals `betaald` dat doet),
+    de zon tegen wat teruglevering had opgebracht, en de maat alles van het net.
+    Bij een vaste prijs is de maat hetzelfde aantal kWh tegen dezelfde prijs.
+    Kilowatturen zonder prijs blijven erbuiten, net als toen. Een beurt zonder
+    maat houdt die: dan was het inplugmoment onbekend, en dat verandert een
+    andere prijs niet.
+    """
+    uit = dict(beurt)
+    kwh = float(beurt.get("kwh") or 0.0)
+    zon = float(beurt.get("solar_kwh") or 0.0)
+    accu = float(beurt.get("battery_kwh") or 0.0)
+    bekend = max(0.0, kwh - float(beurt.get("unknown_kwh") or 0.0))
+    zon_bekend = zon * bekend / kwh if kwh > 0 else 0.0
+    betaald = (bekend - zon_bekend) * koop + zon_bekend * terug
+    uit["paid"] = round(betaald, 4)
+    uit["solar_saved"] = round(zon_bekend * max(0.0, koop - terug), 4)
+    uit["ref_price"] = koop
+    uit["ref_feed_in"] = terug
+    if beurt.get("ref_cost") is not None:
+        uit["ref_cost"] = round(bekend * koop, 4)
+        uit["saved"] = round(max(0.0, uit["ref_cost"] - uit["paid"]), 4)
+    if beurt.get("grid_cost") is not None:
+        uit["grid_cost"] = round(max(0.0, kwh - zon - accu) * koop, 4)
+    if isinstance(beurt.get("baseline"), dict):
+        maat = dict(beurt["baseline"])
+        maat["cost"] = round(float(maat.get("kwh") or 0.0) * koop, 4)
+        maat["points"] = [[k, round(float(k) * koop, 4)] for k, _ in (maat.get("points") or [])]
+        uit["baseline"] = maat
+    return uit
+
+
 # Zonvoorspellers die een uurwaarde op het EIND van de periode zetten, per
 # domein van hun integratie. De rest zet hem op het begin.
 VOORSPELLER_OP_EIND = frozenset({"forecast_solar"})
@@ -10148,13 +10194,18 @@ class ChargerCoach:
         lat = getattr(self.hass.config, "latitude", None)
         lon = getattr(self.hass.config, "longitude", None)
         zone = dt_util.get_default_time_zone()
-        vast = self._tarief({"contract": contract})
         zonder_prijs = 0
 
         def prijs(moment: datetime) -> tuple[float | None, float | None]:
             nonlocal zonder_prijs
-            if not dynamisch:
-                return vast.buy, vast.feed_in
+            # Een vast contract, of een eerder vast contract van die dag: de
+            # prijs van toen (v0.136.0). Tot dan het tarief van nu, voor elk
+            # kwartier, ook van voor een contractwissel.
+            koop, terug = self._vast_op(contract, moment)
+            if koop is not None or not dynamisch:
+                if koop is None:
+                    zonder_prijs += 1
+                return koop, terug
             u = moment.replace(minute=0, second=0, microsecond=0)
             markt = kwartier_markt.get(moment.replace(second=0, microsecond=0))
             if markt is None and markt_id:
@@ -10220,6 +10271,99 @@ class ChargerCoach:
         sessie = self._batterij.setdefault(device_id, {"regelaar": Regelaar()})
         sessie.update(geld={}, opgeleverd={}, zon={}, voorraad=voorraad, bewaard_op=nu)
         uit["toegepast"] = True
+        return uit
+
+    def _vast_op(self, contract: dict[str, Any], moment: datetime) -> tuple[float | None, float | None]:
+        """Wat een kWh op een moment in het verleden kostte en opbracht, bij een vaste prijs (v0.136.0).
+
+        Zoals `prijsOp` in geld.js zonder de verdeling per afrekenperiode: een
+        eerder contract van die dag gaat voor; anders het contract van nu, met
+        na `NETTING_ENDS` de bedragen van na salderen. Met salderen de
+        inkoopprijs min de kosten per kWh (`prijsopbouw.kosten_per_kwh`); in de
+        lopende afrekenperiode ook zoals de coach het nu ziet (`_saldeert`).
+        (None, None) bij een dynamisch contract zonder eerder vast contract van
+        die dag: dan komt de prijs uit de prijssensor.
+        """
+        dag = moment.date().isoformat()
+        periode = _periode_op(contract, dag)
+        fixed = contract.get("fixed") or {}
+        if periode is not None and periode.get("type") == "dynamic":
+            return None, None
+        if periode is not None and float(periode.get("all_in_price") or 0) > 0:
+            koop: float | None = float(periode["all_in_price"])
+        elif contract.get("type") == "dynamic":
+            return None, None
+        else:
+            koop = float(fixed["all_in_price"]) if fixed.get("all_in_price") is not None else None
+        if koop is None:
+            return None, None
+        saldeert = self._salderen(contract, moment)
+        begin = _afrekenstart(contract.get("billing_start"), _moment(None).date())
+        if saldeert and begin is not None and moment.date() >= begin and self._netto_terug() is True:
+            saldeert = False
+        if saldeert:
+            return koop, koop - prijsopbouw.kosten_per_kwh(fixed, True)
+        if periode is not None and float(periode.get("feed_in_tariff") or 0) > 0:
+            return koop, float(periode["feed_in_tariff"])
+        vergoeding, kosten = self._teruglevering(fixed, moment, False)
+        return koop, vergoeding - kosten
+
+    async def async_herreken_beurten(
+        self, settings: dict[str, Any], van: date, toepassen: bool = False
+    ) -> dict[str, Any]:
+        """De opgeslagen beurten opnieuw uitrekenen met het contract van die dag (v0.136.0).
+
+        De eigenaar op 19-10-2026, nadat zijn contract was rechtgezet: "Kan je dan
+        ook de prijzen die eerder genoemd werden in de coach aanpassen de
+        historie want ik denk dat dat dan ook niet meer klopt?" Historie In geld
+        rekent elke keer opnieuw met het contract; Sessies niet, want elke beurt
+        bewaart wat hij kostte en bespaarde toen hij liep. Daar rekende de zon
+        nog tegen de terugleverprijs van het oude formulier.
+
+        Alleen bij een vaste prijs, van nu of van een eerder contract van die
+        dag (`_vast_op`): dan is de prijs over de hele beurt dezelfde, en volgt
+        alles uit de kilowatturen die de beurt al telde (`_herreken_beurt`). Bij
+        een dynamisch contract hing de prijs van het uur af en bewaart een beurt
+        niet wanneer hij welke kWh nam; die blijven zoals ze zijn. Lopende
+        beurten ook: die rekent de ronde zelf.
+
+        Zonder `toepassen` alleen wat het zou worden.
+        """
+        contract = settings.get("contract") or {}
+        vanaf = van.isoformat()
+        nieuw: list[dict[str, Any]] = []
+        overgeslagen = 0
+        voor = {"paid": 0.0, "saved": 0.0, "solar_saved": 0.0}
+        na = dict(voor)
+        for beurt in await async_get_beurten(self.hass).async_list():
+            begin = str(beurt.get("plugged_at") or beurt.get("started") or "")
+            if begin[:10] < vanaf or not beurt.get("complete"):
+                continue
+            try:
+                moment = datetime.fromisoformat(begin)
+            except ValueError:
+                overgeslagen += 1
+                continue
+            koop, terug = self._vast_op(contract, moment.replace(tzinfo=None))
+            if koop is None or terug is None:
+                overgeslagen += 1
+                continue
+            herrekend = _herreken_beurt(beurt, koop, terug)
+            for sleutel in voor:
+                voor[sleutel] += float(beurt.get(sleutel) or 0.0)
+                na[sleutel] += float(herrekend.get(sleutel) or 0.0)
+            nieuw.append(herrekend)
+        uit = {
+            "van": vanaf, "beurten": len(nieuw), "overgeslagen": overgeslagen,
+            "voor": {k: round(v, 2) for k, v in voor.items()},
+            "na": {k: round(v, 2) for k, v in na.items()},
+            "toegepast": False,
+        }
+        if toepassen and nieuw:
+            store = async_get_beurten(self.hass)
+            for beurt in nieuw:
+                await store.async_upsert(beurt)
+            uit["toegepast"] = True
         return uit
 
     async def _async_kwartieren(

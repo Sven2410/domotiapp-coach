@@ -245,7 +245,9 @@ dan de andere in dezelfde uitgave.
   v0.134.0 saldeert de coach niet meer als het huis over de afrekenperiode netto teruglevert
   (`_saldeert`, `_tarief`; Historie rekent nog met het vinkje), en heeft een vast contract
   een vergoeding en kosten voor na 1-1-2027: `_teruglevering` in coach.py tegenover
-  `vasteTeruglevering` in geld.js (`docs/contract.md`).
+  `vasteTeruglevering` in geld.js (`docs/contract.md`). Opnieuw uitrekenen (v0.136.0) neemt de
+  prijs van toen met `_vast_op` in coach.py, dat `prijsOp` volgt zonder de verdeling per
+  afrekenperiode.
 - **De zon in de thuisbatterij**: `zon_in_accu` in batterij.py (per dag in
   `solar_stored_days`) en de schatting `zonInAccu` in `huisMetAccu`
   (views/history.js) voor de uren daarvoor; `balans` in geld.js telt ze op
@@ -333,11 +335,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 518 controles op het denkwerk
 python tests/test_batterij.py    # 206 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1309 op de bedrading, met een nagebouwde HA
+python tests/test_coach.py       # 1322 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2572 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 python tests/test_prijsopbouw.py # 45 op de prijsopbouw, de controle en zonsopkomst
-node   tests/test_rapport.mjs    # 222 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 223 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```
