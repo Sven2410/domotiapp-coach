@@ -817,6 +817,49 @@ proef("het filter zeeft op soort en op dag", () => {
   ], "de dagkeuze kent elke dag één keer, de nieuwste eerst");
 });
 
+// Meldingen in groepen die uitklappen (v0.133.2). De eigenaar op 20-10-2026: "ik wil wel bij
+// meldingen dat je alles groepeert en alles kan uitklappen, nu staat alles op een vaste
+// positie onder elkaar en wordt het onoverzichtelijk."
+proef("Meldingen: vier groepen die uitklappen, met de stand in de kop (v0.133.2)", async () => {
+  const { geschiedenisStand, STANDAARD_OPEN } = await import("../custom_components/domotiapp_coach/frontend/src/views/notifications.js");
+  const html = Object.create(Meldingen.prototype).render();
+  for (const groep of ["wie", "herinnering", "waarschuwingen", "geschiedenis"]) {
+    assert.ok(html.includes(`<details class="groep" data-groep="${groep}"`), `de groep ${groep}`);
+  }
+  for (const id of ["belasting", "verbruik", "warmte", "stekker"]) {
+    assert.ok(html.includes(`<details class="blok sub" id="${id}" hidden>`) && html.includes(`id="stand-${id}"`), `${id} klapt apart uit`);
+  }
+  assert.deepEqual(STANDAARD_OPEN, { wie: false, herinnering: false, waarschuwingen: false, geschiedenis: true });
+  const nu = new Date(2026, 9, 20, 12, 0);
+  assert.equal(geschiedenisStand([], nu), "Niets vandaag");
+  assert.equal(geschiedenisStand([
+    { at: "2026-10-20T09:00:00", message: "a", kind: "kritiek" },
+    { at: "2026-10-20T10:00:00", message: "b" },
+    { at: "2026-10-19T10:00:00", message: "c" },
+  ], nu), "2 vandaag, 1 kritiek");
+  // De stand in de kop: wie, de herinnering, en hoeveel waarschuwingen aan staan.
+  const tekst = new Map();
+  const knoop = (id) => ({ hidden: false, textContent: "", classList: { toggle() {} }, set text(v) { tekst.set(id, v); } });
+  const knopen = new Map(["#stand-wie", "#stand-herinnering", "#stand-waarschuwingen", "#stand-geschiedenis", "#waarschuwingen",
+    "#belasting", "#verbruik", "#warmte", "#stekker", "#stand-belasting", "#stand-verbruik", "#stand-warmte", "#stand-stekker"]
+    .map((id) => [id, knoop(id)]));
+  knopen.get("#warmte").hidden = true;
+  knopen.get("#stekker").hidden = true;
+  const el = Object.create(Meldingen.prototype);
+  el.$ = (id) => knopen.get(id) ?? null;
+  el.hass_ = { user: { is_admin: false } };
+  el.geladen_ = true;
+  el.items_ = [];
+  el.settings_ = { notifications: { people: [{ target: "mobile_app_a" }, { target: "mobile_app_b" }],
+    load_alert: { enabled: true }, usage_alert: { enabled: false } }, reminders: {} };
+  el.paintStanden_();
+  assert.equal(knopen.get("#stand-wie").textContent, "2 personen");
+  assert.equal(knopen.get("#stand-herinnering").textContent, "Niets ingesteld");
+  assert.equal(knopen.get("#stand-waarschuwingen").textContent, "1 van 2 aan", "alleen de waarschuwingen die er zijn");
+  assert.equal(knopen.get("#stand-belasting").textContent, "aan");
+  assert.equal(knopen.get("#stand-verbruik").textContent, "uit");
+});
+
 // De eigenaar op 10-10-2026: "ook wil ik een melding kunnen laten sturen wanneer de
 // temperatuur te hoog is en dat je zelf een doel kan instellen zoals boven x dan melding."
 proef("Thuisbatterij te warm in Meldingen: alleen met een batterij, en de hint zegt wat er nog moet (v0.108.0)", () => {
@@ -881,19 +924,24 @@ proef("het scherm tekent een kop per dag en een rij per melding", () => {
     { at: `${dag}T09:42:00`, message: "Laadpaal: laden op 6 A.", kind: "besluit" },
   ];
   el.paint_();
+  // Sinds v0.133.2 is elke dag een blok dat uitklapt: een kop met het aantal, en de rijen erin.
   const lijst = knopen.get("#lijst").kinderen;
-  assert.equal(lijst.length, 4, "een dagkop en drie rijen");
+  assert.equal(lijst.length, 1, "één dag");
   assert.equal(lijst[0].className, "dag");
-  assert.equal(lijst[1].className, "rij kritiek", "kritiek valt op");
-  assert.equal(lijst[2].className, "rij melding", "een melding krijgt een kader");
-  assert.equal(lijst[3].className, "rij besluit", "een besluit staat er kaal tussen");
+  assert.equal(lijst[0].open, true, "zonder meldingen van vandaag staat de eerste dag open");
+  const dagblok = lijst[0].kinderen;
+  assert.equal(dagblok.length, 4, "een kop en drie rijen");
+  assert.deepEqual(dagblok[0].kinderen.map((k) => k.textContent), ["Gisteren", "3, 1 kritiek"]);
+  assert.equal(dagblok[1].className, "rij kritiek", "kritiek valt op");
+  assert.equal(dagblok[2].className, "rij melding", "een melding krijgt een kader");
+  assert.equal(dagblok[3].className, "rij besluit", "een besluit staat er kaal tussen");
   // Vóór de volgende paint_, want die leegt dezelfde kinderen-lijst.
-  assert.deepEqual(lijst[1].kinderen.map((k) => k.textContent),
+  assert.deepEqual(dagblok[1].kinderen.map((k) => k.textContent),
     ["13:40", "De accustand van Ford meldt al 10 minuten niets."]);
 
   el.filter_ = { soort: "kritiek", dag: "" };
   el.paint_();
-  assert.equal(knopen.get("#lijst").kinderen.length, 2, "met het filter op kritiek blijft één rij over");
+  assert.equal(knopen.get("#lijst").kinderen[0].kinderen.length, 2, "met het filter op kritiek blijft één rij over");
   el.filter_ = { soort: "kritiek", dag: "2026-09-04" };
   el.paint_();
   assert.match(knopen.get("#lijst").kinderen[0].textContent, /aan dit filter/, "een leeg filter zegt dat het het filter is");

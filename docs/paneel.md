@@ -326,3 +326,26 @@ Het geldt overal waar een prijs een kleur heeft: de vooruitblik, de prijsgrafiek
 tegeltje, het tegeltje Energieprijs zelf, en de zin van de coach ("Stroom is nu duur",
 "Goedkoop moment"). De legenda van de prijsgrafiek noemt dan geen bedragen maar derden. Proef
 "prijskleuren naar de bekende prijzen" in test_rapport.mjs.
+
+## Meldingen in groepen die uitklappen (v0.133.2)
+
+De eigenaar op 20-10-2026: "ik wil wel bij meldingen dat je alles groepeert en alles kan
+uitklappen, nu staat alles op een vaste positie onder elkaar en wordt het onoverzichtelijk."
+
+Meldingen bestaat nu uit vier groepen (`details.groep` in views/notifications.js), elk met een
+korte stand in de kop, zodat je niet hoeft uit te klappen om te zien hoe het staat
+(`paintStanden_`):
+
+| groep | stand in de kop |
+|---|---|
+| Wie krijgt wat | hoeveel personen |
+| Herinneringen | wanneer de meterstanden weer aan de beurt zijn |
+| Waarschuwingen | hoeveel van de waarschuwingen aan staan; daarbinnen zware belasting, lekkage, batterij te warm en apparaat staat uit elk apart uit te klappen, met aan of uit |
+| Geschiedenis | hoeveel meldingen er vandaag waren, en hoeveel kritiek (`geschiedenisStand`); daarbinnen elke dag apart, met het aantal |
+
+Standaard staat alleen de geschiedenis open, en daarin vandaag (of de eerste dag als er vandaag
+niets was, of de dag die je koos). Wat je open- of dichtklapt onthoudt het scherm
+(`dac-meldingen-open` in localStorage), want het is een voorkeur van wie kijkt. Een waarschuwing
+die in dit huis niet kan (geen batterij, niets dat altijd aan moet) staat er niet, en zijn er
+geen, dan ook de groep niet. Proeven "Meldingen: vier groepen die uitklappen" en "het scherm
+tekent een kop per dag en een rij per melding" in test_rapport.mjs.
