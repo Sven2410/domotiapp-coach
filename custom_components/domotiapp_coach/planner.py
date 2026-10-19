@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 
 try:
     from .taal import getal, t, tn
@@ -44,6 +44,127 @@ except ImportError:
         _sys.modules["taal"] = _taal
         _spec.loader.exec_module(_taal)
     getal, t, tn = _taal.getal, _taal.t, _taal.tn
+
+# --- De klok van het huis: zomer- en wintertijd (v0.140.1) -------------------
+#
+# De eigenaar op 19-10-2026: "ik wil dat je sowieso rekening houd met de zomer en
+# wintertijd. Dat moet allemaal vanzelf gaan." Het denkwerk rekent in lokale tijd
+# zonder tijdzone, op de klok van het huis, want daar staan de klaar-tijd en de
+# avondpiek op. Maar een uur op die klok is niet altijd een echt uur. Op de dag van
+# de zomertijd (28-03-2027) bestaat 02:00 tot 03:00 niet: een prijsblok van 01:00 tot
+# 03:00 duurt één echt uur, en op de klok gerekend telde het als twee. Dat is een uur
+# laden dat er niet is, en dus een uur reserve voor de klaar-tijd minder (eis 2). Bij de
+# wintertijd (25-10-2026) is het omgekeerd: het blok van 02:00 tot 03:00 duurt twee
+# echte uren (`_naast_elkaar` in coach.py).
+#
+# Daarom hier de tijdzone van het huis, een keer voor het hele proces zoals de taal in
+# taal.py; de coach zet hem bij elke ronde (`zet_zone`). Elke duur en elke capaciteit
+# die uit een begin en een einde komt gaat via UTC (`echte_duur`, `echt_verder`); wat
+# op de klok staat blijft op de klok. Zonder zone (de proeven, en een coach die nog
+# geen ronde deed) is alles zoals het was: gewoon het verschil op de klok.
+
+_zone: tzinfo | None = None
+
+
+def zet_zone(zone: tzinfo | None) -> None:
+    """De tijdzone van het huis, of None: dan rekent alles op de klok, zoals vóór v0.140.1."""
+    global _zone
+    _zone = zone
+
+
+def huiszone() -> tzinfo | None:
+    """De tijdzone waarmee het denkwerk nu rekent."""
+    return _zone
+
+
+def _echt(moment: datetime) -> datetime:
+    """Het echte moment, om te vergelijken en af te trekken: in UTC, of zonder zone zichzelf.
+
+    Twee lokale tijden vergelijkt Python op de klok, ook met `fold`: de tweede keer 02:10
+    (`fold=1`) komt dan vóór de eerste keer 02:50. In UTC niet.
+    """
+    if _zone is None:
+        return moment
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=_zone).astimezone(timezone.utc)
+    return moment.astimezone(timezone.utc)
+
+
+def echte_duur(van: datetime, tot: datetime) -> timedelta:
+    """Hoe lang het echt duurt van `van` tot `tot`, ook over de klokwissel heen.
+
+    Via UTC, en niet door twee tijden met dezelfde tijdzone af te trekken: dat geeft in
+    Python het verschil op de klok. Zonder zone is het dat verschil (`tot - van`).
+    """
+    if _zone is None:
+        return tot - van
+    return _echt(tot) - _echt(van)
+
+
+def echte_uren(van: datetime, tot: datetime) -> float:
+    """`echte_duur` in uren."""
+    return echte_duur(van, tot).total_seconds() / 3600.0
+
+
+def echt_verder(moment: datetime, duur: timedelta) -> datetime:
+    """De tijd op de klok van het huis die `duur` echte tijd na `moment` komt.
+
+    Een uur vóór 03:00 op 28-03-2027 is 01:00, niet 02:00 (dat bestaat niet). En een uur na
+    02:30 op 25-10-2026 is de tweede keer 02:30 (`fold=1`). Zonder zone: `moment + duur`.
+    """
+    if _zone is None:
+        return moment + duur
+    if moment.tzinfo is not None:
+        return (moment.astimezone(timezone.utc) + duur).astimezone(moment.tzinfo)
+    return (_echt(moment) + duur).astimezone(_zone).replace(tzinfo=None)
+
+
+def _klokuren(van: datetime, tot: datetime) -> list[tuple[datetime, datetime]]:
+    """De uren op de klok van het huis, van het uur van `van` tot `tot`: (begin, einde).
+
+    Elk is een echt uur, met twee uitzonderingen die de klok zelf maakt. Bij de zomertijd
+    is er geen uur van 02:00: het uur van 01:00 loopt tot 03:00. Bij de wintertijd komt
+    02:00 twee keer, en dat is één uur op de klok dat twee echte uren duurt, zoals een
+    prijssensor het dan geeft (`_naast_elkaar` in coach.py). Zo heeft elk uur een eigen
+    begintijd, en dat moet, want het plan houdt de uren bij op hun begin.
+    """
+    uur = van.replace(minute=0, second=0, microsecond=0)
+    stap = timedelta(hours=1)
+    uit: list[tuple[datetime, datetime]] = []
+    if _zone is None:
+        while uur < tot:
+            uit.append((uur, uur + stap))
+            uur += stap
+        return uit
+    echt, eind = _echt(uur), _echt(tot)
+    while echt < eind:
+        begin = echt.astimezone(_zone).replace(tzinfo=None)
+        einde = (echt + stap).astimezone(_zone).replace(tzinfo=None)
+        if uit and uit[-1][0] == begin:
+            # Hetzelfde uur op de klok, de tweede keer: het eerste duurt een uur langer.
+            uit[-1] = (uit[-1][0], einde)
+        else:
+            uit.append((begin, einde))
+        echt += stap
+    return uit
+
+
+def _klokuur_verder(moment: datetime, uren: int = 1) -> datetime:
+    """Het begin van het uur dat `uren` uur verder (of terug) op de klok staat.
+
+    Op de klok en niet in echte tijd, want het plan houdt zijn uren bij op hun begin op
+    de klok: na 02:00 op 25-10-2026 komt 03:00, ook al duurt dat uur er twee. Alleen
+    het uur dat niet bestaat slaat hij over: op 28-03-2027 komt na 01:00 meteen 03:00,
+    en voor 03:00 ligt 01:00. Zonder zone: `moment + uren` uur.
+    """
+    uur = moment + timedelta(hours=uren)
+    if _zone is None:
+        return uur
+    # In het gat van de zomertijd telt `fold=0` met de tijd van ervoor en `fold=1` met
+    # die van erna (PEP 495): vooruit landt hij zo op 03:00, terug op 01:00.
+    uur = uur.replace(fold=0 if uren > 0 else 1)
+    return _echt(uur).astimezone(_zone).replace(tzinfo=None)
+
 
 # --- The hard limits ------------------------------------------------------
 
@@ -1046,7 +1167,7 @@ def charging_pace(now: datetime, charger: Charger, wanted: int) -> int:
     """
     if not charger.charging or charger.started_at is None or charger.actual_amps <= 0:
         return wanted
-    if now - charger.started_at < timedelta(minutes=RAMP_MINUTES):
+    if echte_duur(charger.started_at, now) < timedelta(minutes=RAMP_MINUTES):
         return wanted
     if charger.actual_amps >= wanted - STEP_AMPS:
         return wanted
@@ -1370,7 +1491,19 @@ def cheapest_hours(
     if not usable:
         return []
 
-    slot_hours = (usable[0]["end"] - usable[0]["start"]).total_seconds() / 3600
+    slot_hours = echte_uren(usable[0]["start"], usable[0]["end"])
+    if _zone is not None and hours:
+        # Met de klok van het huis duurt niet elk blok even lang: op de dag van de
+        # zomertijd is het blok van 01:00 tot 03:00 een echt uur, op die van de
+        # wintertijd dat van 02:00 tot 03:00 twee. Dus tellen tot de echte uren
+        # er zijn, met dezelfde speling als hieronder.
+        chosen, som = [], 0.0
+        for row in sorted(usable, key=lambda row: row["price"]):
+            if chosen and som >= hours - 0.001 * slot_hours:
+                break
+            chosen.append(row)
+            som += echte_uren(row["start"], row["end"])
+        return sorted(chosen, key=lambda row: _echt(row["start"]))
     wanted = max(1, int(hours / slot_hours + 0.999)) if hours else len(usable)
 
     chosen = sorted(usable, key=lambda row: row["price"])[:wanted]
@@ -1517,20 +1650,19 @@ def _vlakke_blokken(
     """
     if tariff.buy is None:
         return []
-    grens = end or (now + PLAN_HORIZON)
-    blokken = []
-    uur = now.replace(minute=0, second=0, microsecond=0)
-    while uur < grens:
-        blokken.append(
-            {
-                "start": uur,
-                "end": uur + timedelta(hours=1),
-                "price": tariff.buy,
-                "feed_in": tariff.feed_in,
-            }
-        )
-        uur += timedelta(hours=1)
-    return blokken
+    grens = end or echt_verder(now, PLAN_HORIZON)
+    # Per uur op de klok van het huis (`_klokuren`): bij de zomertijd geen uur van
+    # 02:00, want dat bestaat niet, en bij de wintertijd één uur van 02:00 dat twee
+    # echte uren duurt, zoals een prijssensor het dan ook geeft.
+    return [
+        {
+            "start": begin,
+            "end": einde,
+            "price": tariff.buy,
+            "feed_in": tariff.feed_in,
+        }
+        for begin, einde in _klokuren(now, grens)
+    ]
 
 
 def zekering_plafond(grid: Grid | None) -> tuple[float, str] | None:
@@ -1645,7 +1777,7 @@ def schijven(
     if not blokken or vermogen_kw <= 0:
         return []
 
-    vanaf = max(now, start) if start else now
+    vanaf = max(now, start, key=_echt) if start else now
 
     # De avondregel, en die gaat niet over prijs.
     #
@@ -1685,20 +1817,22 @@ def schijven(
     gemiddeld_bekend = _gemiddeld_bekend(prices)
     uit: list[Schijf] = []
     for rij in blokken:
-        if rij["end"] <= vanaf or (end is not None and rij["start"] >= end):
+        if _echt(rij["end"]) <= _echt(vanaf) or (end is not None and _echt(rij["start"]) >= _echt(end)):
             continue
-        van = max(rij["start"], vanaf)
-        tot = min(rij["end"], end) if end is not None else rij["end"]
-        deel = (tot - van).total_seconds() / 3600.0
+        van = max(rij["start"], vanaf, key=_echt)
+        tot = min(rij["end"], end, key=_echt) if end is not None else rij["end"]
+        # Echte uren, niet die op de klok: op de dag van de zomertijd past er in het
+        # blok van 01:00 tot 03:00 maar een uur laden (`echte_uren`).
+        deel = echte_uren(van, tot)
         if deel <= 0:
             continue
-        nu_blok = rij["start"] <= now < rij["end"]
+        nu_blok = _echt(rij["start"]) <= _echt(now) < _echt(rij["end"])
         plafond_kwh = (vermogen_kw if nu_blok else vermogen_later_kw) * deel
 
         if nu_blok:
             over = max(0.0, grid.surplus_w) / 1000.0 * deel
         else:
-            heel = (rij["end"] - rij["start"]).total_seconds() / 3600.0
+            heel = echte_uren(rij["start"], rij["end"])
             over = overschot_kwh(forecast, rij["start"], deel, heel)
 
         terug = rij.get("feed_in")
@@ -1826,27 +1960,26 @@ def capaciteit_kwh(
     """
     if end is None:
         return float("inf")
-    vanaf = max(now, start) if start else now
+    vanaf = max(now, start, key=_echt) if start else now
     avond = _evening_before(end) if vast else None
     vermogen = watts_for(ceiling_later, car.phases) / 1000.0
     som = 0.0
-    uur = now.replace(minute=0, second=0, microsecond=0)
-    while uur < end:
-        volgend = uur + timedelta(hours=1)
-        van = max(uur, vanaf)
-        tot = min(volgend, end)
-        deel = (tot - van).total_seconds() / 3600.0
+    # Per uur op de klok, met de echte duur: de nacht van de zomertijd heeft een uur
+    # minder om in te laden, die van de wintertijd een uur meer (`_klokuren`).
+    for uur, volgend in _klokuren(now, end):
+        van = max(uur, vanaf, key=_echt)
+        tot = min(volgend, end, key=_echt)
+        deel = echte_uren(van, tot)
         if deel > 0:
             net_mag = not (vast and in_evening_peak(uur)) and (avond is None or volgend > avond)
             if net_mag:
                 som += vermogen * deel
             else:
-                if uur <= now < volgend:
+                if _echt(uur) <= _echt(now) < _echt(volgend):
                     over = max(0.0, grid.surplus_w) / 1000.0 * deel
                 else:
                     over = overschot_kwh(forecast, uur) * deel
                 som += min(over, vermogen * deel)
-        uur = volgend
     return som
 
 
@@ -1949,9 +2082,9 @@ def _rustig_spreiden(
     duren: dict[datetime, float] = {}
     for schijf in alle:
         ruimte[schijf.start] = ruimte.get(schijf.start, 0.0) + schijf.kwh
-        tot = min(schijf.end, grens) if grens is not None else schijf.end
+        tot = min(schijf.end, grens, key=_echt) if grens is not None else schijf.end
         duren[schijf.start] = max(
-            0.0, (tot - max(schijf.start, now)).total_seconds() / 3600.0
+            0.0, echte_uren(max(schijf.start, now, key=_echt), tot)
         )
     # Nooit langzamer dan het dak op dit moment geeft. Diezelfde regel staat in
     # `_decide`: die zon is er nu en is straks weg, en rustig aan doen is goed
@@ -1968,7 +2101,7 @@ def _rustig_spreiden(
         if rest <= SCHIJF_MINIMUM:
             break
         tempo_kwh = kw * duren[start]
-        if start <= now < start + timedelta(hours=1):
+        if start <= now < _klokuur_verder(start):
             tempo_kwh = max(tempo_kwh, nu_zon)
         hoeveel = min(rest, tempo_kwh, ruimte[start])
         if hoeveel > SCHIJF_MINIMUM:
@@ -2001,7 +2134,6 @@ def _restje_naar_achteren(
     for schijf in alle:
         ruimte[schijf.start] = ruimte.get(schijf.start, 0.0) + schijf.kwh
     zon_uren = {schijf.start for schijf in alle if schijf.solar}
-    uur = timedelta(hours=1)
 
     for start in sorted(uit):
         # `sorted(uit)` is een momentopname en de lus hieronder wist uren uit
@@ -2012,7 +2144,8 @@ def _restje_naar_achteren(
             continue
         vol = ruimte.get(start, 0.0)
         tekort = vol - uit[start]
-        volgende = start + uur
+        # Het volgende uur op de klok; op de dag van de zomertijd komt na 01:00 03:00.
+        volgende = _klokuur_verder(start)
         volgende_vol = (
             uit.get(volgende, 0.0) > SCHIJF_MINIMUM
             and uit[volgende] >= ruimte.get(volgende, 0.0) - SCHIJF_MINIMUM
@@ -2022,15 +2155,15 @@ def _restje_naar_achteren(
         # Dit uur gaat vol; het verschil komt van het eind van de reeks af.
         uit[start] = vol
         laatste = volgende
-        while uit.get(laatste + uur, 0.0) > SCHIJF_MINIMUM and (laatste + uur) not in zon_uren:
-            laatste += uur
+        while uit.get(_klokuur_verder(laatste), 0.0) > SCHIJF_MINIMUM and _klokuur_verder(laatste) not in zon_uren:
+            laatste = _klokuur_verder(laatste)
         while tekort > SCHIJF_MINIMUM and laatste > start:
             weg = min(tekort, uit.get(laatste, 0.0))
             uit[laatste] = uit.get(laatste, 0.0) - weg
             tekort -= weg
             if uit[laatste] <= SCHIJF_MINIMUM:
                 uit.pop(laatste, None)
-                laatste -= uur
+                laatste = _klokuur_verder(laatste, -1)
     return uit
 
 
@@ -2320,9 +2453,9 @@ def timeline(
         per_uur.setdefault(schijf.start, []).append(schijf)
 
     blokken = prices or _vlakke_blokken(now, einde, tariff)
-    grens = einde or (now + PLAN_HORIZON)
+    grens = einde or echt_verder(now, PLAN_HORIZON)
     for rij in blokken:
-        if rij["end"] <= now or rij["start"] >= grens:
+        if _echt(rij["end"]) <= _echt(now) or _echt(rij["start"]) >= _echt(grens):
             continue
         start = rij["start"]
         schijven_hier = per_uur.get(start, [])
@@ -2360,9 +2493,9 @@ def timeline(
         # Het tempo over het deel van het blok dat nog komt: het uur waar we
         # in zitten is korter dan een uur.
         vloer_kw = watts_for(MIN_AMPS, car.phases) / 1000.0
-        van = max(start, now)
-        tot = min(rij["end"], grens)
-        duur = max(0.0, (tot - van).total_seconds() / 3600.0)
+        van = max(start, now, key=_echt)
+        tot = min(rij["end"], grens, key=_echt)
+        duur = max(0.0, echte_uren(van, tot))
         kwh_blok = genomen.get(start, 0.0)
         kw = kwh_blok / duur if duur > 0 else 0.0
         blok_amps = int(round(amps_for(kw * 1000.0, car.phases))) if laadt else 0
@@ -2370,18 +2503,19 @@ def timeline(
         # paal laadt dan niet het hele uur zachtjes, wat hij onder de
         # ondergrens niet eens kan, maar op vol vermogen tot hij vol is. Dus
         # de stroom die hij dan vraagt, en wanneer hij klaar is.
-        vorige = genomen.get(start - timedelta(hours=1), 0.0)
+        uur_ervoor = _klokuur_verder(start, -1)
+        vorige = genomen.get(uur_ervoor, 0.0)
         laatste = not any(u > start and v > SCHIJF_MINIMUM for u, v in genomen.items())
         if (
             laadt and zonschijf is None and netschijf is not None
             and kwh_blok < ruimte_per_uur.get(start, 0.0) - SCHIJF_MINIMUM
-            and vorige >= ruimte_per_uur.get(start - timedelta(hours=1), 0.0) - SCHIJF_MINIMUM
+            and vorige >= ruimte_per_uur.get(uur_ervoor, 0.0) - SCHIJF_MINIMUM
             and vorige > SCHIJF_MINIMUM
         ):
             blok_ceiling = amps if start <= now < rij["end"] else structureel
             blok_amps = blok_ceiling
             kw = watts_for(blok_ceiling, car.phases) / 1000.0
-            klaar_om = van + timedelta(hours=kwh_blok / kw) if kw > 0 else rij["end"]
+            klaar_om = echt_verder(van, timedelta(hours=kwh_blok / kw)) if kw > 0 else rij["end"]
             klaar_om = klaar_om.replace(second=0, microsecond=0)
             waarom = t("nog {kwh}, vol rond {klok}", kwh=_kwh(kwh_blok), klok=_clock(klaar_om))
         elif laadt and zonschijf is None and kw < vloer_kw - 0.01:
@@ -2405,7 +2539,7 @@ def timeline(
             blok_amps = MIN_AMPS
             kw = watts_for(MIN_AMPS, car.phases) / 1000.0
             if laatste and kw > 0:
-                klaar_om = (van + timedelta(hours=kwh_blok / kw)).replace(
+                klaar_om = echt_verder(van, timedelta(hours=kwh_blok / kw)).replace(
                     second=0, microsecond=0
                 )
                 waarom = t("nog {kwh}, vol rond {klok}", kwh=_kwh(kwh_blok), klok=_clock(klaar_om))
@@ -2425,7 +2559,7 @@ def timeline(
 
     geladen = [blok for blok in plan.blocks if blok.charging]
     plan.expected_done = geladen[-1].end if geladen else None
-    if klaar_om is not None and geladen and geladen[-1].start <= klaar_om <= geladen[-1].end:
+    if klaar_om is not None and geladen and _echt(geladen[-1].start) <= _echt(klaar_om) <= _echt(geladen[-1].end):
         plan.expected_done = klaar_om
     plan.planned_kwh = sum(genomen.values())
     if not plan.blocks:
@@ -2459,21 +2593,23 @@ def _doorladen(
     """
     kw_vol = watts_for(structureel, car.phases) / 1000.0
     uren = hours_needed(car, structureel) or (kwh / kw_vol if kw_vol > 0 else 0.0)
-    vol = now + timedelta(hours=uren)
+    # Echte uren vanaf nu: wie om 01:00 begint met vijf uur te gaan is op de dag van
+    # de zomertijd om 07:00 vol, niet om 06:00 (`echt_verder`).
+    vol = echt_verder(now, timedelta(hours=uren))
     klaar_om = vol.replace(second=0, microsecond=0)
-    grens = max(einde or vol, vol)
+    grens = max(einde or vol, vol, key=_echt)
     blokken = prices or _vlakke_blokken(now, grens, tariff)
     for rij in blokken:
-        if rij["end"] <= now or rij["start"] >= grens:
+        if _echt(rij["end"]) <= _echt(now) or _echt(rij["start"]) >= _echt(grens):
             continue
-        van = max(rij["start"], now)
-        tot = min(rij["end"], vol)
-        laadt = tot > van and uren > 0
+        van = max(rij["start"], now, key=_echt)
+        tot = min(rij["end"], vol, key=_echt)
+        laadt = _echt(tot) > _echt(van) and uren > 0
         stroom = amps if rij["start"] <= now < rij["end"] else structureel
-        kwh_blok = kwh * (tot - van).total_seconds() / 3600.0 / uren if laadt else 0.0
+        kwh_blok = kwh * echte_duur(van, tot).total_seconds() / 3600.0 / uren if laadt else 0.0
         if not laadt:
             waarom = t("hij is dan al klaar")
-        elif rij["start"] <= klaar_om <= rij["end"]:
+        elif _echt(rij["start"]) <= _echt(klaar_om) <= _echt(rij["end"]):
             waarom = t("nog {kwh}, vol rond {klok}", kwh=_kwh(kwh_blok), klok=_clock(klaar_om))
         else:
             waarom = t("op vol vermogen, anders is hij niet op tijd vol")
@@ -2519,11 +2655,11 @@ def accu_in_plan(
     for blok in plan.blocks:
         if not blok.charging:
             continue
-        van = max(blok.start, now)
+        van = max(blok.start, now, key=_echt)
         erbij = 0.0
         for begin, eind, kwh in hulp:
-            lengte = (eind - begin).total_seconds()
-            overlap = (min(eind, blok.end) - max(begin, van)).total_seconds()
+            lengte = echte_duur(begin, eind).total_seconds()
+            overlap = echte_duur(max(begin, van, key=_echt), min(eind, blok.end, key=_echt)).total_seconds()
             if lengte > 0 and overlap > 0:
                 erbij += max(0.0, kwh) * overlap / lengte
         blok.accu_kwh = round(min(erbij, max(0.0, blok.kwh - blok.solar_kwh)), 3)
@@ -2753,14 +2889,15 @@ def plan_end(end: datetime | None) -> datetime | None:
     """
     if end is None:
         return None
-    return end - timedelta(hours=_slack_hours(end))
+    # Een echt uur: op 28-03-2027 is een uur voor 03:00 01:00 (`echt_verder`).
+    return echt_verder(end, -timedelta(hours=_slack_hours(end)))
 
 
 def _latest_start(end: datetime | None, needed: float | None) -> datetime | None:
     """Het moment waarop de coach uiterlijk begint om op tijd vol te zijn."""
     if end is None or needed is None:
         return None
-    return end - timedelta(hours=needed + _slack_hours(end))
+    return echt_verder(end, -timedelta(hours=needed + _slack_hours(end)))
 
 
 def _evening_before(end: datetime | None) -> datetime | None:
@@ -2812,7 +2949,8 @@ def _hold_until(now: datetime, moment: datetime | None) -> int:
     """
     if moment is None:
         return MIN_HOLD_MINUTES
-    minuten = int((moment - now).total_seconds() // 60)
+    # De paal telt echte minuten: van 01:30 tot 03:30 op 28-03-2027 is een uur.
+    minuten = int(echte_duur(now, moment).total_seconds() // 60)
     return max(MIN_HOLD_MINUTES, min(MAX_HOLD_MINUTES, minuten))
 
 
@@ -3085,7 +3223,7 @@ def _decide(
         krap = bool(
             eind
             and uren is not None
-            and (eind - now).total_seconds() / 3600 - uren <= _slack_hours(eind)
+            and echte_duur(now, eind).total_seconds() / 3600 - uren <= _slack_hours(eind)
         )
         return Decision(
             False,
@@ -3253,7 +3391,8 @@ def _decide(
     # besluit dat blijft staan: wie op het laatste moment begonnen is, kan niet
     # halverwege gas terugnemen zonder alsnog te laat te zijn.
     if window.enabled and end and needed is not None:
-        slack = (end - now).total_seconds() / 3600 - needed
+        # In echte uren: op de dag van de zomertijd heeft de nacht er een minder.
+        slack = echte_duur(now, end).total_seconds() / 3600 - needed
         # Vasthouden zolang het krap is, en loslaten zodra het ruim is. De twee
         # grenzen verschillen (`DEADLINE_RELEASE_HOURS`), anders wisselt hij om
         # de minuut; ze zijn er allebei, anders blijft een sessie op vol
@@ -3394,7 +3533,7 @@ def _decide(
         # en dat is wat de eigenaar zag: "wanneer ik de auto inplugde ging hij gelijk
         # laden." Sinds 04-09-2026.
         if window.enabled and end and needed is not None:
-            slack = (end - now).total_seconds() / 3600 - needed
+            slack = echte_duur(now, end).total_seconds() / 3600 - needed
             if slack > _slack_hours(end):
                 return Decision(
                     False,
@@ -3752,7 +3891,7 @@ def _zon_dekt_vandaag(
     if end is None or needed is None or not _zon_verwacht(sun, car):
         return False
 
-    over = (end - now).total_seconds() / 3600
+    over = echte_duur(now, end).total_seconds() / 3600
     return over >= needed + _slack_hours(end)
 
 
@@ -3786,7 +3925,7 @@ def _beter_straks(
         return False
 
     if end is not None and needed is not None:
-        over = (end - now).total_seconds() / 3600 - 1.0
+        over = echte_duur(now, end).total_seconds() / 3600 - 1.0
         if over < needed + _slack_hours(end):
             return False
 
@@ -4153,7 +4292,7 @@ def _keep_alive(
     if not charger.charging or charger.started_at is None:
         return decision
 
-    net_begonnen = now - charger.started_at < timedelta(minutes=MIN_RUN_MINUTES)
+    net_begonnen = echte_duur(charger.started_at, now) < timedelta(minutes=MIN_RUN_MINUTES)
     # **Zo weer verder** (v0.99.0). Begint het volgende laadblok binnen
     # `DOORLADEN_BINNEN`, dan is stoppen zinloos: in de eerste woning liep het
     # vasthouden op 25-09-2026 om 01:58:57 af, een minuut voor het blok van
@@ -4162,7 +4301,7 @@ def _keep_alive(
         straks = datetime.fromisoformat(decision.starts_at) if decision.starts_at else None
     except ValueError:
         straks = None
-    zo_verder = straks is not None and timedelta(0) <= straks - now <= DOORLADEN_BINNEN
+    zo_verder = straks is not None and timedelta(0) <= echte_duur(now, straks) <= DOORLADEN_BINNEN
     if not net_begonnen and holding >= STOP_ROUNDS and not zo_verder:
         return decision
 
@@ -4567,11 +4706,13 @@ def programma_kosten(
     rest tegen de inkoopprijs van dat uur. Precies zoals `schijven` dat voor
     een laadpaal doet.
     """
-    einde = start + timedelta(minutes=programma.minutes)
+    # Echte minuten: een programma van twee uur dat om 01:30 begint is op 28-03-2027
+    # om 04:30 klaar, niet om 03:30.
+    einde = echt_verder(start, timedelta(minutes=programma.minutes))
     kosten = 0.0
     for moment, volgend, kwh in _programma_stukken(start, einde, programma):
         uur = moment.replace(minute=0, second=0, microsecond=0)
-        deel_uur = (volgend - moment).total_seconds() / 3600.0
+        deel_uur = echte_uren(moment, volgend)
 
         rij = price_now(prices, moment) if prices else None
         koop = rij["price"] if rij is not None else (tariff.buy if not prices else None)
@@ -4625,20 +4766,21 @@ def _programma_stukken(
     stukken: list[tuple[datetime, datetime, float]] = []
 
     def knip(moment: datetime, tot: datetime, watt: float) -> None:
-        # Op de uurgrens knippen, want de prijs en de zon zijn per uur.
+        # Op de uurgrens knippen, want de prijs en de zon zijn per uur. Op de klok,
+        # met de echte duur per stuk (`_klokuur_verder`, `echte_duur`).
         binnen = moment
-        while binnen < tot:
-            grens = binnen.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-            volgend = min(grens, tot)
-            stukken.append((binnen, volgend, watt / 1000.0 * (volgend - binnen).total_seconds() / 3600.0))
+        while _echt(binnen) < _echt(tot):
+            grens = _klokuur_verder(binnen.replace(minute=0, second=0, microsecond=0))
+            volgend = min(grens, tot, key=_echt)
+            stukken.append((binnen, volgend, watt / 1000.0 * echte_duur(binnen, volgend).total_seconds() / 3600.0))
             binnen = volgend
 
     if programma.profile:
         stap = timedelta(minutes=PROFIEL_STAP_MIN)
         moment = start
         for watt in programma.profile:
-            tot = min(moment + stap, einde)
-            if tot <= moment:
+            tot = min(echt_verder(moment, stap), einde, key=_echt)
+            if _echt(tot) <= _echt(moment):
                 break
             knip(moment, tot, watt)
             moment = tot
@@ -4646,7 +4788,7 @@ def _programma_stukken(
     duur_uren = programma.minutes / 60.0 if programma.minutes else 0.0
     piek_uren = programma.kwh / (programma.peak_w / 1000.0) if programma.peak_w > 0 else duur_uren
     if 0 < piek_uren < duur_uren:
-        piek_tot = start + timedelta(hours=piek_uren)
+        piek_tot = echt_verder(start, timedelta(hours=piek_uren))
         knip(start, piek_tot, float(programma.peak_w))
         # De staart trekt niets meer, maar hoort er wel bij: de prijs van
         # elk uur waarin hij draait moet bekend zijn.
@@ -4733,7 +4875,7 @@ def plan_programma(
             t("Zet hem nu aan: je koos {keuze}.", keuze=_en_nu(apparaat.vrijgave)) if hand
             else t("Je koos {keuze}, dus hij start nu.", keuze=_en_nu(apparaat.vrijgave)),
             plan=(
-                t("Klaar rond {wanneer}.", wanneer=_dag_klok(now + timedelta(minutes=programma.minutes), now))
+                t("Klaar rond {wanneer}.", wanneer=_dag_klok(echt_verder(now, timedelta(minutes=programma.minutes)), now))
                 if programma is not None and programma.minutes else ""
             ),
             rule="start-now",
@@ -4757,7 +4899,7 @@ def plan_programma(
     if programma is None:
         # Zonder duur valt er niets te plannen. Niet raden: zeggen, en de
         # klaar-tijd niet laten verlopen.
-        if einde is not None and now + PROGRAMMA_SPELING >= einde - timedelta(hours=1):
+        if einde is not None and echte_duur(now, einde) <= PROGRAMMA_SPELING + timedelta(hours=1):
             return Decision(
                 True, 0,
                 t(
@@ -4778,8 +4920,10 @@ def plan_programma(
         )
 
     duur = timedelta(minutes=programma.minutes)
-    if einde is not None and now + duur + PROGRAMMA_SPELING >= einde:
-        haalt = now + duur <= einde
+    # In echte tijd tot de klaar-tijd: op de dag van de zomertijd heeft de nacht een
+    # uur minder (`echte_duur`); de klaar-tijd zelf staat op de klok.
+    if einde is not None and echte_duur(now, einde) <= duur + PROGRAMMA_SPELING:
+        haalt = echte_duur(now, einde) >= duur
         return Decision(
             True, 0,
             (
@@ -4795,22 +4939,25 @@ def plan_programma(
     # Alle startmomenten tussen nu en het laatste moment dat nog past.
     laatste = None
     if einde is not None:
-        laatste = einde - duur - PROGRAMMA_SPELING
+        laatste = echt_verder(einde, -(duur + PROGRAMMA_SPELING))
     if uiterlijk is not None:
-        laatste = uiterlijk if laatste is None else min(laatste, uiterlijk)
+        laatste = uiterlijk if laatste is None else min(laatste, uiterlijk, key=_echt)
     if laatste is None:
         # Geen klaar-tijd: tot waar de prijzen reiken, of een etmaal bij een
         # vast contract.
-        laatste = max((rij["end"] for rij in prices), default=now) - duur if prices else now + timedelta(hours=24)
-    eerste = now if vanaf is None else max(now, vanaf)
-    if eerste > laatste:
+        laatste = (
+            echt_verder(max((rij["end"] for rij in prices), key=_echt), -duur)
+            if prices else echt_verder(now, timedelta(hours=24))
+        )
+    eerste = now if vanaf is None else max(now, vanaf, key=_echt)
+    if _echt(eerste) > _echt(laatste):
         # Het venster is al dicht: starten zolang het nog kan.
         return Decision(True, 0, t("Later past het niet meer, dus {start}.", start=start_nu), rule="deadline")
 
     kandidaten: list[tuple[float, datetime]] = []
     onbekend = 0
     moment = eerste
-    while moment <= laatste:
+    while _echt(moment) <= _echt(laatste):
         kosten = programma_kosten(
             moment, programma, prices, tariff, forecast, now=now, surplus_w=surplus_w
         )
@@ -4818,12 +4965,14 @@ def plan_programma(
             onbekend += 1
         else:
             kandidaten.append((kosten, moment))
+        # Per echt kwartier: het kwartier van 02:00 op 28-03-2027 bestaat niet, en dat
+        # van 02:00 op 25-10-2026 komt twee keer (`echt_verder`).
         if moment == eerste:
             # Van nu naar het eerstvolgende kwartier, daarna per kwartier.
             rest = (PROGRAMMA_STAP - timedelta(minutes=moment.minute % 15, seconds=moment.second, microseconds=moment.microsecond))
-            moment = moment + (rest if rest < PROGRAMMA_STAP else PROGRAMMA_STAP)
+            moment = echt_verder(moment, rest if rest < PROGRAMMA_STAP else PROGRAMMA_STAP)
         else:
-            moment += PROGRAMMA_STAP
+            moment = echt_verder(moment, PROGRAMMA_STAP)
 
     if not kandidaten:
         return Decision(
@@ -4843,11 +4992,11 @@ def plan_programma(
 
     # Buiten de avondpiek als het kan (eis 4): niets van het net tussen
     # EVENING_PEAK_START en EVENING_START. Past alleen de piek, dan de piek.
-    buiten = [k for k in kandidaten if not _in_avondpiek(k[1], k[1] + duur)]
+    buiten = [k for k in kandidaten if not _in_avondpiek(k[1], echt_verder(k[1], duur))]
     # Bij een dynamisch contract telt de piek gewoon mee op zijn prijs; zie
     # `piek_dicht`.
     keuze = (buiten or kandidaten) if piek_dicht(prices) else kandidaten
-    goedkoopst, start = min(keuze, key=lambda k: (round(k[0], 4), k[1]))
+    goedkoopst, start = min(keuze, key=lambda k: (round(k[0], 4), _echt(k[1])))
     kosten_nu = next((k for k, m in kandidaten if m == eerste), None)
     # Laat de meter genoeg zon zien om het hele programma nu op eigen zon te
     # draaien, en is dat op geen enkel later moment goedkoper, dan nu. Het
@@ -4906,7 +5055,7 @@ def plan_programma(
 
     # Een minuut speling voor een ronde die net voor het kwartier valt, maar
     # niet over "niet eerder dan" heen: vanaf 08:00 is vanaf 08:00.
-    if start <= now + timedelta(minutes=1) and (vanaf is None or now >= vanaf):
+    if echte_duur(now, start) <= timedelta(minutes=1) and (vanaf is None or now >= vanaf):
         kop = (
             t("Zet hem nu aan: dit is het goedkoopste moment") if hand else t("Dit is het goedkoopste moment")
         ) + (" " + t("tot {wanneer}", wanneer=_wanneer(einde, now)) if einde is not None else "")
@@ -4918,7 +5067,7 @@ def plan_programma(
                 # Zonder verbruik geen bedrag (v0.124.0): het is een gewicht.
                 else t("{kop} voor {programma}.", kop=kop, programma=t(programma.label))
             ),
-            plan=t("Klaar rond {wanneer}.", wanneer=_wanneer(now + duur, now)),
+            plan=t("Klaar rond {wanneer}.", wanneer=_wanneer(echt_verder(now, duur), now)),
             rule="cheapest-start",
         )
 
@@ -4938,7 +5087,7 @@ def plan_programma(
     # Even duur als nu en toch later: dan is het de avondpiek die nu dichtzit.
     waarom = (
         t("na de avondpiek")
-        if kosten_nu is not None and kosten_nu - goedkoopst < 0.005 and _in_avondpiek(eerste, eerste + duur)
+        if kosten_nu is not None and kosten_nu - goedkoopst < 0.005 and _in_avondpiek(eerste, echt_verder(eerste, duur))
         else t("dan is {programma} het goedkoopst", programma=t(programma.label))
     )
     # Na de klaar-tijd van vandaag schuift hij een dag op; dat hoort er dan
@@ -4956,9 +5105,9 @@ def plan_programma(
         False, 0,
         tekst,
         plan=(
-            t("Klaar rond {wanneer}, ruim voor {einde}.", wanneer=_dag_klok(start + duur, now), einde=_dag_klok(einde, now))
+            t("Klaar rond {wanneer}, ruim voor {einde}.", wanneer=_dag_klok(echt_verder(start, duur), now), einde=_dag_klok(einde, now))
             if einde is not None
-            else t("Klaar rond {wanneer}.", wanneer=_dag_klok(start + duur, now))
+            else t("Klaar rond {wanneer}.", wanneer=_dag_klok(echt_verder(start, duur), now))
         )
         + (" " + t("Liever nu? Kies dan nu starten.") if gemist is not None else ""),
         rule="wait-for-start",
@@ -5106,7 +5255,7 @@ def boiler_nodig(
     # 19-09-2026 in `boiler-nacht`: drie keer aan en uit binnen tien minuten,
     # met een valse melding dat er geen stroom liep. Bij het volgende
     # kijkmoment telt de som weer.
-    if vers_telt and boiler.vol_sinds is not None and now - boiler.vol_sinds < BOILER_KIJKEN:
+    if vers_telt and boiler.vol_sinds is not None and echte_duur(boiler.vol_sinds, now) < BOILER_KIJKEN:
         return 0.0
 
     if boiler.verbruik_kwh_h is None:
@@ -5116,8 +5265,8 @@ def boiler_nodig(
         # volgende volle beurt leert hem het echte getal.
         return max(0.0, boiler.vol_kwh - al_in)
 
-    tot = deadline if deadline is not None and deadline > now else now
-    uren = max(0.0, (tot - vanaf).total_seconds() / 3600.0)
+    tot = deadline if deadline is not None and _echt(deadline) > _echt(now) else now
+    uren = max(0.0, echte_uren(vanaf, tot))
     leeg = min(boiler.vol_kwh, uren * boiler.verbruik_kwh_h)
     return max(0.0, leeg - al_in)
 
@@ -5150,24 +5299,25 @@ def boiler_schijven(
     if not blokken:
         return []
 
-    begin = max(now, vanaf) if vanaf else now
+    begin = max(now, vanaf, key=_echt) if vanaf else now
     vermogen_kw = boiler.heat_w / 1000.0
     uit: list[Schijf] = []
     for rij in blokken:
-        if rij["end"] <= begin or (tot is not None and rij["start"] >= tot):
+        if _echt(rij["end"]) <= _echt(begin) or (tot is not None and _echt(rij["start"]) >= _echt(tot)):
             continue
-        van = max(rij["start"], begin)
-        tot_blok = min(rij["end"], tot) if tot is not None else rij["end"]
-        deel = (tot_blok - van).total_seconds() / 3600.0
+        van = max(rij["start"], begin, key=_echt)
+        tot_blok = min(rij["end"], tot, key=_echt) if tot is not None else rij["end"]
+        # Echte uren, zoals bij de paal (`schijven`).
+        deel = echte_uren(van, tot_blok)
         if deel <= 0:
             continue
 
         past_kwh = vermogen_kw * deel
-        nu_blok = rij["start"] <= now < rij["end"]
+        nu_blok = _echt(rij["start"]) <= _echt(now) < _echt(rij["end"])
         if nu_blok and surplus_w is not None:
             over = max(0.0, surplus_w) / 1000.0 * deel
         else:
-            heel = (rij["end"] - rij["start"]).total_seconds() / 3600.0
+            heel = echte_uren(rij["start"], rij["end"])
             over = overschot_kwh(forecast, rij["start"], deel, heel)
 
         terug = rij.get("feed_in")
@@ -5245,7 +5395,7 @@ def plan_boiler(
     # verder nog weinig van deze boiler weet. Zonder deze regel stond een
     # boiler die bij het installeren toevallig vol was elke vijf minuten aan en
     # uit; gezien op 19-09-2026 in `boiler-leert`.
-    vers_vol = boiler.vol_sinds is not None and now - boiler.vol_sinds < BOILER_KIJKEN
+    vers_vol = boiler.vol_sinds is not None and echte_duur(boiler.vol_sinds, now) < BOILER_KIJKEN
 
     # De eerste keer weet hij niets: geen vermogen en geen vol vat. Dan niet
     # rekenen maar meten. Zodra er één volle beurt in zit kan hij plannen,
@@ -5305,7 +5455,7 @@ def plan_boiler(
 
     # De klaar-tijd is heilig (eis 2), en gaat over de avondpiek en over de
     # prijs heen.
-    if einde is not None and now + duur + BOILER_SPELING >= einde:
+    if einde is not None and echte_duur(now, einde) <= duur + BOILER_SPELING:
         return Decision(
             True, 0,
             t(
@@ -5554,7 +5704,7 @@ def plan_airco(
             )
         # Een wolk: hij blijft even aan, want een airco gaat niet graag steeds
         # aan en uit. Dezelfde tien minuten als de paal (`MIN_RUN_MINUTES`).
-        if now - airco.coach_sinds < timedelta(minutes=MIN_RUN_MINUTES):
+        if echte_duur(airco.coach_sinds, now) < timedelta(minutes=MIN_RUN_MINUTES):
             stand = airco.coach_reden if airco.coach_reden in ("zon", "goedkoop") else "zon"
             return AircoBesluit(
                 aan=None, modus=airco.modus, stand=stand, rule="hold",

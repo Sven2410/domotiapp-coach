@@ -34,11 +34,16 @@ from .planner import (
     Forecast,
     Tariff,
     _clock,
+    _echt,
     _euro,
     _gemiddeld_bekend,
+    _klokuren,
     _kw,
     _kwh,
     _vlakke_blokken,
+    echt_verder,
+    echte_duur,
+    echte_uren,
     in_evening_peak,
     piek_dicht,
     price_now,
@@ -249,7 +254,7 @@ def vol_voor(
     """
     if not aan or dag is None:
         return None
-    if laatst_vol is not None and now - laatst_vol < VOL_NA:
+    if laatst_vol is not None and echte_duur(laatst_vol, now) < VOL_NA:
         return None
     if now.weekday() != dag:
         return None
@@ -489,8 +494,10 @@ def _waarde_vooruit(
 
     delen, huis = [], []
     for rij in blokken:
-        van = max(rij["start"], now)
-        deel = max(0.0, (rij["end"] - van).total_seconds() / 3600.0)
+        # Echte uren (`echte_uren` in planner.py): het blok van 01:00 tot 03:00 op
+        # 28-03-2027 duurt er een, dat van 02:00 tot 03:00 op 25-10-2026 twee.
+        van = max(rij["start"], now, key=_echt)
+        deel = max(0.0, echte_uren(van, rij["end"]))
         delen.append(deel)
         huis.append(_netto_huis_kwh(forecast, rij, deel))
 
@@ -593,7 +600,7 @@ def _vooruit(som: _Som, b: Batterij) -> list[Uur]:
         net = max(0.0, ac - max(0.0, -h)) if ac > 0 else min(0.0, ac + max(0.0, h))
         uit.append(
             Uur(
-                max(rij["start"], rij["end"] - timedelta(hours=som.delen[k])),
+                max(rij["start"], echt_verder(rij["end"], -timedelta(hours=som.delen[k])), key=_echt),
                 rij["end"],
                 _stand_van(ac, h),
                 ac,
@@ -690,7 +697,7 @@ def _rustig_vermogen(
         if abs(uur.price - prijs) > PRICE_MARGIN or dicht(uur):
             break
         energie += naar_net(uur)
-        tijd += (uur.end - uur.start).total_seconds() / 3600.0
+        tijd += echte_uren(uur.start, uur.end)
         tot = uur.end
         n += 1
     if tijd <= 0 or energie <= 1e-6:
@@ -733,15 +740,15 @@ def _morgenvroeg(now: datetime) -> datetime:
 def _nacht_uren(now: datetime, forecast: Forecast) -> list[tuple[float, float]]:
     """Per uur tot morgenvroeg: (zon, huis) in kWh, het lopende uur naar rato."""
     uren = []
-    uur = now.replace(minute=0, second=0, microsecond=0)
     eind = _morgenvroeg(now)
-    while uur < eind:
-        deel = 1.0 if uur >= now else (uur + timedelta(hours=1) - now).total_seconds() / 3600.0
+    # Per uur op de klok, met de echte duur (`_klokuren` in planner.py): de nacht van
+    # de zomertijd heeft een uur minder huisverbruik, die van de wintertijd een meer.
+    for uur, volgend in _klokuren(now, eind):
+        deel = echte_uren(max(uur, now, key=_echt), volgend)
         opbrengst = max(0.0, forecast.solar_kwh.get(uur, 0.0))
         if forecast.solar_factor is not None and uur.date() == forecast.solar_day:
             opbrengst *= forecast.solar_factor
         uren.append((opbrengst * deel, forecast.house_kwh.get(uur.hour, 0.0) * deel))
-        uur += timedelta(hours=1)
     return uren
 
 
@@ -1299,11 +1306,11 @@ def auto_hulp(
     # boven zijn grens heeft zonder hulp (accukant).
     wil, ruimte, boven = [], [], []
     for uur in uren:
-        deel = max(0.0, (uur.end - uur.start).total_seconds() / 3600.0)
+        deel = max(0.0, echte_uren(uur.start, uur.end))
         w = 0.0
         for van, tot, kwh in laden:
-            lengte = (tot - van).total_seconds()
-            overlap = (min(tot, uur.end) - max(van, uur.start)).total_seconds()
+            lengte = echte_duur(van, tot).total_seconds()
+            overlap = echte_duur(max(van, uur.start, key=_echt), min(tot, uur.end, key=_echt)).total_seconds()
             if lengte > 0 and overlap > 0:
                 w += max(0.0, kwh) * overlap / lengte
         mag = w > 0.005 and uur.stand not in (NETLADEN, MAX_LADEN) and deel > 0

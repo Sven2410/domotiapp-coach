@@ -3533,6 +3533,169 @@ controle("en het vol-moment komt uit dezelfde som als de klaar-tijdregel",
          abs((door77.expected_done - nu77).total_seconds() / 3600 - door77.hours_needed) < 1 / 60,
          f"{door77.expected_done} tegen {door77.hours_needed}")
 
+print("=== 78. de zomertijd: 28-03-2027 in echte uren, en de wintertijd ook (v0.140.1) ===")
+# De eigenaar op 19-10-2026: "ik wil dat je sowieso rekening houd met de zomer en
+# wintertijd. Dat moet allemaal vanzelf gaan." Op 28-03-2027 gaat de klok om 02:00 naar
+# 03:00: het prijsblok van 01:00 tot 03:00 duurt één echt uur. Op de klok gerekend telde
+# het als twee, en dan kwam de auto een uur laden tekort en was het uur reserve voor de
+# klaar-tijd op (eis 2). Op 25-10-2026 is het omgekeerd. De zone van het huis zet de
+# coach bij elke ronde (`zet_zone`); hier met de echte Europese regels (tests/zomertijd.py).
+from zomertijd import AMSTERDAM, LISSABON, UTC as UTC78  # noqa: E402
+
+
+def blokken78(dag, prijzen, zone=AMSTERDAM):
+    """Uurprijzen zoals de coach ze uit een prijssensor maakt: per uur in UTC, naar de klok
+    van het huis, en het uur dat twee keer komt samen (`_naast_elkaar` in coach.py)."""
+    begin = dt.datetime.combine(dag, dt.time(0), zone).astimezone(UTC78) - dt.timedelta(hours=2)
+    uit = {}
+    for i in range(30):
+        van = (begin + dt.timedelta(hours=i)).astimezone(zone).replace(tzinfo=None)
+        tot = (begin + dt.timedelta(hours=i + 1)).astimezone(zone).replace(tzinfo=None)
+        if van in uit:
+            uit[van]["end"] = tot
+        else:
+            uit[van] = {"start": van, "end": tot, "price": prijzen.get(van.hour, 0.30)}
+    return sorted(uit.values(), key=lambda r: r["start"])
+
+
+ZOMER78 = dt.date(2027, 3, 28)
+WINTER78 = dt.date(2026, 10, 25)
+# Vier uur laden op 16 A driefasig: 44,16 kWh op 11,04 kW.
+auto78 = Car(capacity_kwh=55.2, phases=3, soc_percent=20.0, efficiency=1.0, max_amps=16.0)
+paal78 = Charger(connected=True, max_amps=16)
+kw78 = planner.watts_for(16, 3) / 1000.0
+klaar78 = dt.datetime(2027, 3, 28, 7, 0)
+venster78 = Window(enabled=True, deadline=klaar78)
+# Goedkoop van 01:00 tot 06:00, en het goedkoopste uur pas na het plan (06:00 tot 07:00).
+prijzen78 = blokken78(ZOMER78, {0: 0.40, 1: 0.10, 3: 0.11, 4: 0.12, 5: 0.13, 6: 0.05})
+nacht78 = dt.datetime(2027, 3, 28, 0, 0)
+try:
+    planner.zet_zone(AMSTERDAM)
+    print(f"  blokken: {[(r['start'].strftime('%H:%M'), r['end'].strftime('%H:%M')) for r in prijzen78 if r['start'].date() == ZOMER78][:6]}")
+    controle("de prijslijst van die nacht heeft geen uur van 02:00, en het uur van 01:00 loopt tot 03:00",
+             not any(r["start"] == dt.datetime(2027, 3, 28, 2) for r in prijzen78)
+             and any(r["start"] == dt.datetime(2027, 3, 28, 1) and r["end"] == dt.datetime(2027, 3, 28, 3) for r in prijzen78), "")
+    # Een blok van 01:00 tot 03:00 heeft één uur capaciteit.
+    s78 = planner.schijven(nacht78, prijzen78, Grid(), auto78, 16, None, planner.plan_end(klaar78))
+    een78 = sum(s.kwh for s in s78 if s.start == dt.datetime(2027, 3, 28, 1))
+    print(f"  in het blok van 01:00 tot 03:00 past {een78:.2f} kWh (een echt uur is {kw78:.2f})")
+    controle("het blok van 01:00 tot 03:00 heeft één uur capaciteit, niet twee", abs(een78 - kw78) < 1e-6, f"{een78}")
+    controle("de capaciteit tot 06:00 is vijf echte uren",
+             abs(planner.capaciteit_kwh(nacht78, None, planner.plan_end(klaar78), Grid(), auto78, 16) - 5 * kw78) < 1e-6,
+             f"{planner.capaciteit_kwh(nacht78, None, planner.plan_end(klaar78), Grid(), auto78, 16)}")
+    # Het plan eindigt een echt uur voor de klaar-tijd, en het uiterste begin is vijf echte uren ervoor.
+    controle("het plan eindigt een echt uur voor 07:00: om 06:00",
+             planner.plan_end(klaar78) == dt.datetime(2027, 3, 28, 6) and planner.echte_uren(planner.plan_end(klaar78), klaar78) == 1.0, "")
+    controle("vier uur laden en een uur reserve: uiterlijk beginnen om 01:00, niet om 02:00 (dat bestaat niet)",
+             planner._latest_start(klaar78, 4.0) == dt.datetime(2027, 3, 28, 1), f"{planner._latest_start(klaar78, 4.0)}")
+    plan78 = planner.timeline(nacht78, prijzen78, Grid(), auto78, paal78, venster78, 16)
+    laden78 = [b for b in plan78.blocks if b.charging]
+    print(f"  plan: {[(b.start.strftime('%H:%M'), b.end.strftime('%H:%M'), round(b.kwh, 2)) for b in laden78]}, "
+          f"vol om {plan78.expected_done:%H:%M}")
+    controle("het plan laadt alles wat er in moet", abs(plan78.planned_kwh - 4 * kw78) < 0.01, f"{plan78.planned_kwh}")
+    controle("en geen blok krijgt meer dan er in echte uren in past",
+             all(b.kwh <= kw78 * planner.echte_uren(b.start, b.end) + 1e-6 for b in laden78),
+             f"{[(b.start, b.kwh) for b in laden78]}")
+    controle("de auto is met echte uren een uur voor 07:00 vol",
+             plan78.expected_done is not None and planner.echte_uren(plan78.expected_done, klaar78) >= 1.0 - 1e-9,
+             f"{plan78.expected_done}")
+    controle("en het goedkope uur na 06:00 blijft van de bewoner", not any(b.start.hour == 6 for b in laden78), "")
+    # Wie om 00:30 een kwartier meer nodig heeft dan de goedkope uren dragen, begint nu.
+    auto78b = Car(capacity_kwh=55.2, phases=3, soc_percent=15.0, efficiency=1.0, max_amps=16.0)
+    d78 = decide(dt.datetime(2027, 3, 28, 0, 30), prijzen78, Grid(), auto78b, paal78, venster78)
+    print(f"  00:30, {planner.energy_needed_kwh(auto78b):.1f} kWh te gaan: {d78.rule} laden={d78.charge}")
+    controle("om 00:30 laadt hij al, want de goedkope uren tot 06:00 zijn samen maar vier echte uren",
+             d78.charge, f"{d78.rule}: {d78.reason}")
+    # De klaar-tijdregel telt de echte uren: om 01:10 is het nog 4 uur en 50 minuten.
+    d78c = decide(dt.datetime(2027, 3, 28, 1, 10), prijzen78, Grid(), auto78, paal78, venster78)
+    print(f"  01:10, vier uur te gaan: {d78c.rule}")
+    controle("om 01:10 met vier uur te gaan grijpt de klaar-tijdregel in", d78c.rule == "deadline", f"{d78c.rule}: {d78c.reason}")
+    # De veiligheidspauze telt echte minuten.
+    controle("een pauze van 01:30 tot 03:30 duurt een uur",
+             planner._hold_until(dt.datetime(2027, 3, 28, 1, 30), dt.datetime(2027, 3, 28, 3, 30)) == 60, "")
+    # Een vast contract: geen uur dat niet bestaat.
+    vast78 = planner._vlakke_blokken(dt.datetime(2027, 3, 27, 22, 10), klaar78, VAST)
+    print(f"  vast contract: {[b['start'].strftime('%H') for b in vast78]}")
+    controle("een vast contract heeft die nacht geen blok om 02:00",
+             not any(b["start"].hour == 2 for b in vast78)
+             and any(b["start"].hour == 1 and b["end"] == dt.datetime(2027, 3, 28, 3) for b in vast78), "")
+    controle("en telt van 22:00 tot 07:00 acht echte uren",
+             sum(planner.echte_uren(b["start"], b["end"]) for b in vast78) == 8.0, "")
+    plan78v = planner.timeline(dt.datetime(2027, 3, 27, 22, 10), [], Grid(), auto78, paal78, venster78, 16, VAST)
+    controle("en de tijdlijn ook niet", not any(b.start.hour == 2 for b in plan78v.blocks),
+             f"{[b.start.strftime('%H') for b in plan78v.blocks]}")
+    # Een programma van twee uur dat om 01:30 begint is om 04:30 klaar.
+    prog78 = planner.Programma("proef", "Proef", 120, 2.0, 2000)
+    stukken78 = planner._programma_stukken(dt.datetime(2027, 3, 28, 1, 30), planner.echt_verder(dt.datetime(2027, 3, 28, 1, 30), dt.timedelta(minutes=120)), prog78)
+    print(f"  programma: {[(v.strftime('%H:%M'), t_.strftime('%H:%M'), round(k, 2)) for v, t_, k in stukken78]}")
+    controle("een programma van twee uur vanaf 01:30 is om 04:30 klaar, met al zijn kilowatturen",
+             stukken78[-1][1] == dt.datetime(2027, 3, 28, 4, 30) and not any(v.hour == 2 for v, _t, _k in stukken78)
+             and abs(sum(k for _v, _t, k in stukken78) - 2.0) < 1e-9,
+             f"{[(v.strftime('%H:%M'), t_.strftime('%H:%M')) for v, t_, _k in stukken78]}")
+    # En het startmoment houdt de echte uren tot de klaar-tijd aan: drie uur draaien en een
+    # half uur speling voor 05:00 is uiterlijk 00:30, niet 01:30.
+    vrij78 = planner.Apparaat(status="ready", released=True, program=planner.Programma("proef3", "Proef", 180, 1.5, 2000))
+    p78 = planner.plan_programma(nacht78, blokken78(ZOMER78, {0: 0.40, 1: 0.10, 3: 0.10, 4: 0.10}), Tariff(), Forecast(),
+                                 Window(enabled=True, deadline=dt.datetime(2027, 3, 28, 5, 0)), vrij78)
+    start78 = dt.datetime.fromisoformat(p78.starts_at) if p78.starts_at else nacht78
+    print(f"  programma van drie uur, klaar om 05:00: {p78.rule}, start {start78:%H:%M}")
+    controle("een programma van drie uur voor 05:00 begint uiterlijk om 00:30",
+             planner.echte_uren(start78, dt.datetime(2027, 3, 28, 5, 0)) >= 3.5 - 1e-9, f"{p78.rule} {start78}")
+
+    # Portugal: daar bestaat 01:00 tot 02:00 niet.
+    planner.zet_zone(LISSABON)
+    pt78 = blokken78(ZOMER78, {}, LISSABON)
+    controle("in Portugal loopt het uur van 00:00 tot 02:00, en dat is een echt uur",
+             any(r["start"] == dt.datetime(2027, 3, 28, 0) and r["end"] == dt.datetime(2027, 3, 28, 2)
+                 and planner.echte_uren(r["start"], r["end"]) == 1.0 for r in pt78), "")
+
+    # De wintertijd, 25-10-2026: het blok van 02:00 tot 03:00 duurt twee echte uren.
+    planner.zet_zone(AMSTERDAM)
+    klaar78w = dt.datetime(2026, 10, 25, 7, 0)
+    venster78w = Window(enabled=True, deadline=klaar78w)
+    prijzen78w = blokken78(WINTER78, {0: 0.40, 1: 0.30, 2: 0.10, 3: 0.11, 4: 0.12, 5: 0.13})
+    twee78 = next(r for r in prijzen78w if r["start"] == dt.datetime(2026, 10, 25, 2))
+    controle("de wintertijd: één blok van 02:00 tot 03:00", twee78["end"] == dt.datetime(2026, 10, 25, 3), f"{twee78}")
+    nacht78w = dt.datetime(2026, 10, 25, 0, 0)
+    s78w = planner.schijven(nacht78w, prijzen78w, Grid(), auto78, 16, None, planner.plan_end(klaar78w))
+    twee78k = sum(s.kwh for s in s78w if s.start == dt.datetime(2026, 10, 25, 2))
+    print(f"  wintertijd: in het blok van 02:00 tot 03:00 past {twee78k:.2f} kWh")
+    controle("en dat blok telt twee uur", abs(twee78k - 2 * kw78) < 1e-6, f"{twee78k}")
+    plan78w = planner.timeline(nacht78w, prijzen78w, Grid(), auto78, paal78, venster78w, 16)
+    laden78w = [b for b in plan78w.blocks if b.charging]
+    print(f"  plan: {[(b.start.strftime('%H:%M'), round(b.kwh, 2)) for b in laden78w]}, vol om {plan78w.expected_done:%H:%M}")
+    controle("het plan haalt twee uur uit het goedkope blok en is om 05:00 vol",
+             abs(laden78w[0].kwh - 2 * kw78) < 0.01 and plan78w.expected_done == dt.datetime(2026, 10, 25, 5), "")
+    controle("het uiterste begin is vijf echte uren voor 07:00: de tweede keer 02:00",
+             planner.echte_uren(planner._latest_start(klaar78w, 4.0), klaar78w) == 5.0
+             and planner._latest_start(klaar78w, 4.0).fold == 1, f"{planner._latest_start(klaar78w, 4.0)}")
+    vast78w = planner._vlakke_blokken(dt.datetime(2026, 10, 24, 22, 0), klaar78w, VAST)
+    controle("een vast contract heeft één uur van 02:00, en dat duurt twee echte uren",
+             [b["start"].hour for b in vast78w].count(2) == 1
+             and planner.echte_uren(*next((b["start"], b["end"]) for b in vast78w if b["start"].hour == 2)) == 2.0, "")
+    controle("de pauze van de eerste keer 02:30 tot de tweede telt een uur",
+             planner._hold_until(dt.datetime(2026, 10, 25, 2, 30), dt.datetime(2026, 10, 25, 2, 30, fold=1)) == 60, "")
+finally:
+    planner.zet_zone(None)
+
+# Zonder zone, zoals elke proef hierboven: alles op de klok, zoals het altijd was.
+controle("zonder zone is de echte duur het verschil op de klok",
+         planner.huiszone() is None
+         and planner.echte_uren(dt.datetime(2027, 3, 28, 1), dt.datetime(2027, 3, 28, 3)) == 2.0
+         and planner.echt_verder(dt.datetime(2027, 3, 28, 1), dt.timedelta(hours=1)) == dt.datetime(2027, 3, 28, 2), "")
+s78n = planner.schijven(nacht78, prijzen78, Grid(), auto78, 16, None, planner.plan_end(klaar78))
+controle("en het blok van 01:00 tot 03:00 telt dan twee uur, zoals voorheen",
+         abs(sum(s.kwh for s in s78n if s.start == dt.datetime(2027, 3, 28, 1)) - 2 * kw78) < 1e-6, "")
+controle("het plan eindigt om 06:00 en uiterlijk beginnen is om 02:00, zoals voorheen",
+         planner.plan_end(klaar78) == dt.datetime(2027, 3, 28, 6) and planner._latest_start(klaar78, 4.0) == dt.datetime(2027, 3, 28, 2), "")
+d78n = decide(dt.datetime(2027, 3, 28, 0, 30), prijzen78, Grid(), auto78b, paal78, venster78)
+controle("en om 00:30 wacht hij dan op de goedkope uren, zoals voorheen", not d78n.charge, f"{d78n.rule}")
+p78n = planner.plan_programma(nacht78, blokken78(ZOMER78, {0: 0.40, 1: 0.10, 3: 0.10, 4: 0.10}), Tariff(), Forecast(),
+                              Window(enabled=True, deadline=dt.datetime(2027, 3, 28, 5, 0)), vrij78)
+controle("en het programma start dan om 01:00, zoals voorheen", p78n.starts_at == "2027-03-28T01:00:00", f"{p78n.starts_at}")
+controle("een vast contract heeft dan wel een uur van 02:00, zoals voorheen",
+         any(b["start"].hour == 2 for b in planner._vlakke_blokken(dt.datetime(2027, 3, 27, 22, 10), klaar78, VAST)), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

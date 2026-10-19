@@ -73,7 +73,7 @@ schoon.
   rekening houd met de zomer en wintertijd. Dat moet allemaal vanzelf gaan." Bij elke wijziging aan
   tijden, prijzen per uur, planningen of opslag: denk aan de dag van 25 en die van 23 uur, gebruik
   geen lokale tijd als sleutel waar het herhaalde uur kan botsen, en meet een duur met `_tussen`
-  (`docs/zomertijd.md`).
+  (coach.py) of `echte_duur` en `echt_verder` (planner.py, batterij.py) (`docs/zomertijd.md`).
 - Niets bouwen zonder zijn seintje. Wat er op de lijst staat betekent niet dat
   het aan mag.
 - **Meldingen naar de telefoon: per beurt één verslag, plus wat de bewoner
@@ -211,7 +211,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de vriezer en de koelkast: uitlezen en melden (deur open, te warm, storing), niet sturen | `docs/vriezer.md` |
 | het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat, de vooruitblik op het overzicht en "Wat gaat hij doen" voor boiler en programma's | `docs/paneel.md` |
 | de berichtenbox (het belletje), de herinnering voor de meterstanden, het bericht dat een contract afloopt of dat de prijscontrole omslaat | `docs/berichten.md` |
-| zomer- en wintertijd: wat de coach daar zelf goed doet (de kwartieropslag in UTC, de klok van de regelaar, het uur dat twee keer komt, `_tussen`), en wat er vóór 28-03-2027 nog moet | `docs/zomertijd.md` |
+| zomer- en wintertijd: wat de coach daar zelf goed doet (de kwartieropslag in UTC, de klok van de regelaar, het uur dat twee keer komt, `_tussen`), de planner en de batterij in echte uren (`zet_zone`, `echte_duur`, `_klokuren`), en wat er nog open staat | `docs/zomertijd.md` |
 | de taal: Nederlands en Engels, de instelling Taal bij Installatie, `t()` en de Engelse lijsten (`i18n.js`, `i18n/en/`), de woordenlijst, en wat (nog) Nederlands blijft | `docs/taal.md` |
 | het contract: de leverancierscatalogus, de prijsopbouw en de controle tegen de all-in sensor, "Ja, dit klopt", de kale marktprijs als reserve, gas en water per energiebron, vast/variabel/dynamisch, looptijden en "nieuw contract afgesloten", teruglevering voor en na 1-1-2027 en salderen per afrekenperiode, de schaal in de coach, Portugal | `docs/contract.md` |
 
@@ -351,13 +351,13 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 518 controles op het denkwerk
-python tests/test_batterij.py    # 206 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_planner.py     # 548 controles op het denkwerk
+python tests/test_batterij.py    # 214 op het denkwerk van de thuisbatterij en op de regelaar
 python tests/test_coach.py       # 1368 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2586 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 48 op de kwartieropslag
 python tests/test_prijsopbouw.py # 53 op de prijsopbouw, de controle, zonsopkomst en Portugal
-node   tests/test_rapport.mjs    # 228 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 229 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 node   tools/vertaalcheck.mjs    # welke zinnen in het paneel nog geen Engels hebben
 python tools/vertaalcheck.py     # en welke zinnen van de coach

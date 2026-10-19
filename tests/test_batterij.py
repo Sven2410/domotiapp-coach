@@ -1195,6 +1195,74 @@ vrij45 = plan_batterij(D45.replace(hour=8, minute=56), L45, Tariff(), V45, datac
 controle("zonder nachtstrategie mag hij verder leeg", vrij45.uren[-1].soc < plan45.uren[-1].soc - 5,
          f"{vrij45.uren[-1].soc:.0f}% tegen {plan45.uren[-1].soc:.0f}%")
 
+print("=== 46. de zomertijd: de nacht van 28-03-2027 heeft een uur minder (v0.140.1) ===")
+# De eigenaar op 19-10-2026: "ik wil dat je sowieso rekening houd met de zomer en
+# wintertijd. Dat moet allemaal vanzelf gaan." Op 28-03-2027 gaat de klok om 02:00 naar
+# 03:00: de nacht tot morgenvroeg heeft een uur minder huisverbruik, en het goedkope blok
+# van 01:00 tot 03:00 is maar een uur laden. Op 25-10-2026 is het omgekeerd. De zone van
+# het huis zet de coach bij elke ronde (`zet_zone` in planner.py).
+from zomertijd import AMSTERDAM, UTC as UTC46  # noqa: E402
+
+
+def uurlijst46(dag, prijs, terug=0.05, uren=48):
+    """Uurprijzen zoals de coach ze uit een prijssensor maakt: per uur in UTC, naar de klok
+    van het huis, en het uur dat twee keer komt samen (`_naast_elkaar` in coach.py)."""
+    begin = dt.datetime.combine(dag, dt.time(0), AMSTERDAM).astimezone(UTC46)
+    uit = {}
+    for i in range(uren):
+        van = (begin + dt.timedelta(hours=i)).astimezone(AMSTERDAM).replace(tzinfo=None)
+        tot = (begin + dt.timedelta(hours=i + 1)).astimezone(AMSTERDAM).replace(tzinfo=None)
+        if van in uit:
+            uit[van]["end"] = tot
+        else:
+            uit[van] = {"start": van, "end": tot, "price": prijs(van.hour), "feed_in": terug}
+    return sorted(uit.values(), key=lambda r: r["start"])
+
+
+def prijs46(uur):
+    return 0.13 if uur < 5 else 0.25 if uur < 17 else 0.42 if uur < 21 else 0.28
+
+
+Z46 = dt.date(2027, 3, 28)
+W46 = dt.date(2026, 10, 25)
+LIJST46 = uurlijst46(Z46, prijs46)
+try:
+    planner.zet_zone(AMSTERDAM)
+    # Tot morgenvroeg (07:00): van 22:00 is dat op 28-03-2027 acht echte uren, op 25-10-2026 tien.
+    huis46 = sum(h for _z, h in bat._nacht_uren(dt.datetime(2027, 3, 27, 22, 0), verwachting(huis=0.3, dag=dt.datetime(2027, 3, 27))))
+    huis46w = sum(h for _z, h in bat._nacht_uren(dt.datetime(2026, 10, 24, 22, 0), verwachting(huis=0.3, dag=dt.datetime(2026, 10, 24))))
+    print(f"  het huis vraagt tot morgenvroeg {huis46:.2f} kWh (zomertijd) en {huis46w:.2f} kWh (wintertijd)")
+    controle("de nacht van de zomertijd heeft acht uur huisverbruik", abs(huis46 - 8 * 0.3) < 1e-9, f"{huis46}")
+    controle("die van de wintertijd tien", abs(huis46w - 10 * 0.3) < 1e-9, f"{huis46w}")
+    # De som over de tijd: het blok van 01:00 tot 03:00 is een uur.
+    nu46 = dt.datetime(2027, 3, 28, 0, 1)
+    V46 = verwachting(huis=0.5, dag=dt.datetime(2027, 3, 28))
+    som46 = bat._waarde_vooruit(nu46, [r for r in LIJST46 if r["end"] > nu46], V46, anker(soc=10.0))
+    deel46 = next(d for r, d in zip(som46.blokken, som46.delen) if r["start"] == dt.datetime(2027, 3, 28, 1))
+    controle("in de som duurt het blok van 01:00 tot 03:00 een uur", abs(deel46 - 1.0) < 1e-9, f"{deel46}")
+    # En van het net laden smeert hij uit over de echte uren van de goedkope nacht.
+    b46 = plan_batterij(nu46, LIJST46, Tariff(), V46, anker(soc=10.0))
+    geladen46 = sum(u.net_kwh for u in b46.uren if u.start < dt.datetime(2027, 3, 28, 5))
+    print(f"  00:01  {b46.stand} op {b46.power_w:.0f} W, {geladen46:.2f} kWh van het net voor 05:00")
+    controle("in de goedkope nacht laadt hij van het net", b46.stand == NETLADEN, b46.stand)
+    controle("uitgesmeerd over vier echte uren, niet over vijf op de klok",
+             abs(b46.power_w - geladen46 / (4 - 1 / 60) * 1000.0) < 25.0,
+             f"{b46.power_w:.0f} W tegen {geladen46:.2f} kWh")
+    controle("en geen blok in het plan krijgt meer dan de batterij in zijn echte uren kan",
+             all(u.kwh <= 3.5 * planner.echte_uren(u.start, u.end) + 1e-6 for u in b46.uren), "")
+    # De wintertijd: het blok van 02:00 tot 03:00 is twee uur.
+    LIJST46W = uurlijst46(W46, prijs46)
+    nu46w = dt.datetime(2026, 10, 25, 0, 1)
+    som46w = bat._waarde_vooruit(nu46w, [r for r in LIJST46W if r["end"] > nu46w], verwachting(huis=0.5, dag=dt.datetime(2026, 10, 25)), anker(soc=10.0))
+    deel46w = next(d for r, d in zip(som46w.blokken, som46w.delen) if r["start"] == dt.datetime(2026, 10, 25, 2))
+    controle("bij de wintertijd duurt het blok van 02:00 tot 03:00 twee uur", abs(deel46w - 2.0) < 1e-9, f"{deel46w}")
+finally:
+    planner.zet_zone(None)
+
+# Zonder zone, zoals elke proef hierboven: alles op de klok, zoals het altijd was.
+huis46n = sum(h for _z, h in bat._nacht_uren(dt.datetime(2027, 3, 27, 22, 0), verwachting(huis=0.3, dag=dt.datetime(2027, 3, 27))))
+controle("zonder zone telt de nacht negen uur op de klok, zoals voorheen", abs(huis46n - 9 * 0.3) < 1e-9, f"{huis46n}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

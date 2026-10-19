@@ -150,6 +150,7 @@ from .planner import (
     should_send,
     VOLTS,
     watts_for,
+    zet_zone,
 )
 from .ontvangers import ontvangers
 from .storage import async_get_berichten, async_get_beurten, async_get_meldingen, async_get_store
@@ -2994,6 +2995,9 @@ class ChargerCoach:
         # De taal van wat de coach deze ronde schrijft (v0.140.0): de instelling bij
         # Installatie, en bij automatisch die van Home Assistant. Zie taal.py.
         taal.kies_uit(settings, getattr(self.hass.config, "language", None))
+        # En de tijdzone van het huis, voor de planner en de batterij: elke duur over de
+        # zomer- en wintertijd heen in echte uren (`zet_zone` in planner.py).
+        zet_zone(dt_util.get_default_time_zone())
 
         if not self._restored:
             # Eén keer, vóór de eerste ronde: de beurten die nog liepen toen
