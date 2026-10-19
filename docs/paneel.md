@@ -389,11 +389,25 @@ UTC nam), de tijdlijn in Historie en wat er per kwartier van het net kwam (`herk
 onder Meldingen en in de berichtenbox, en de schaal in geld.js.
 
 Wat er niet onder valt: `ptPrijsOp` (tarifas.js) rekent zelf vanuit UTC in de tijd van Lissabon en
-krijgt dus het echte moment. De dagen en perioden van Historie (`periodStart` in statistics.js)
-zijn nog die van de browser, want daar vraagt het paneel de recorder om echte momenten; een
-installateur in een ander land ziet de grafieken van Historie dus nog in zijn eigen tijd.
+krijgt dus het echte moment.
+
+**Historie sinds v0.138.2.** De eigenaar op 19-10-2026: "waarom is er nog iets niet opgelost kan dat
+niet of?", en daarna "ja bouw het maar". Historie werkt nu ook op de klok van het huis, en zet om aan
+de randen. Een dag, week, maand of jaar begint om middernacht in het huis (`periodStart` met
+`huisNu`). Wat het paneel aan Home Assistant vraagt gaat met het echte moment (`vanHuis(...)
+.toISOString()` bij de recorder en de kwartieropslag), en wat terugkomt gaat weer naar de klok van
+het huis (`alsHuis` op `row.start`). `prijsOp` in geld.js geeft `ptPrijsOp` en zon op en onder het
+echte moment. De afrekening (`domotiapp_coach/afrekening`) krijgt gewoon de dag van het huis.
+
+**De wintertijd.** Een Date op de klok van het huis kan het uur dat bij het ingaan van de wintertijd
+twee keer komt (02:00 tot 03:00 in Nederland) maar één keer aanwijzen. Zou het paneel altijd omzetten,
+dan vielen die twee uren samen en verloor Historie een uur verbruik, ook bij een Nederlands huis vanuit
+Nederland. Daarom geeft `alsHuis` het moment zelf terug zolang de klok van de browser op dat moment
+hetzelfde aanwijst als die van het huis (v0.138.2). Alleen wie vanuit een andere tijdzone kijkt ziet
+op die dag twee uren als één.
 
 **Een nieuwe vergelijking met een tijd van de coach gaat tegen `huisNu()`, niet tegen
 `new Date()`.** Proef "de klok van het huis" in test_rapport.mjs rekent het na in Lissabon en
-Kiritimati, wat de tijdzone van de machine ook is, en kijkt of de bekende plekken geen
+Kiritimati, wat de tijdzone van de machine ook is (en "Historie op de klok van het huis" de
+perioden, de vragen aan de recorder en de wintertijd), en kijkt of de bekende plekken geen
 `new Date()` meer hebben. In de preview: `?pt=1&tz=Europe/Lisbon`.

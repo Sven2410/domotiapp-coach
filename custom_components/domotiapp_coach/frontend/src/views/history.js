@@ -1493,7 +1493,7 @@ class DacViewHistory extends DacElement {
       beknopt,
       metZon: hasSolar,
       metAccu: Boolean(this.accuTegels_),
-      gemaakt: new Date().toLocaleDateString("nl-NL", {
+      gemaakt: huisNu().toLocaleDateString("nl-NL", {
         day: "numeric",
         month: "long",
         year: "numeric",

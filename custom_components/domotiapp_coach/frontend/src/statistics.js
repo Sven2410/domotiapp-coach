@@ -18,6 +18,8 @@
  * the hard way which one this is.
  */
 
+import { alsHuis, huisNu, vanHuis } from "./format.js";
+
 /** How a period is cut into bars. */
 export const PERIODS = [
   { id: "day", label: "Dag", bucket: "hour" },
@@ -33,7 +35,8 @@ export const PERIODS = [
  * year in Historie can run with the contract, from July to June for instance.
  */
 export function periodStart(period, offset, startMaand = 1) {
-  const at = new Date();
+  // Op de klok van het huis (v0.138.2): een dag begint om middernacht waar het huis staat.
+  const at = huisNu();
   at.setHours(0, 0, 0, 0);
 
   switch (period) {
@@ -144,8 +147,8 @@ export async function fetchPeriod(hass, ids, period, start) {
   try {
     const result = await hass.callWS({
       type: "recorder/statistics_during_period",
-      start_time: start.toISOString(),
-      end_time: periodEnd(period, start).toISOString(),
+      start_time: vanHuis(start).toISOString(),
+      end_time: vanHuis(periodEnd(period, start)).toISOString(),
       statistic_ids: wanted,
       period: bucket,
       types: ["change"],
@@ -160,7 +163,7 @@ export async function fetchPeriod(hass, ids, period, start) {
         (rows ?? [])
           .filter((row) => row.change !== null && row.change !== undefined)
           // `start` arrives as milliseconds since the epoch, not as a string.
-          .map((row) => ({ start: new Date(row.start), change: Number(row.change) }))
+          .map((row) => ({ start: alsHuis(row.start), change: Number(row.change) }))
       );
     }
   } catch (error) {
@@ -194,8 +197,8 @@ export async function fetchPrices(hass, entityId, period, start) {
   try {
     const result = await hass.callWS({
       type: "recorder/statistics_during_period",
-      start_time: start.toISOString(),
-      end_time: periodEnd(period, start).toISOString(),
+      start_time: vanHuis(start).toISOString(),
+      end_time: vanHuis(periodEnd(period, start)).toISOString(),
       statistic_ids: [entityId],
       period: bucket,
       types: ["mean"],
@@ -203,7 +206,7 @@ export async function fetchPrices(hass, entityId, period, start) {
 
     for (const row of result?.[entityId] ?? []) {
       if (row.mean === null || row.mean === undefined) continue;
-      out.set(new Date(row.start).getTime(), Number(row.mean));
+      out.set(alsHuis(row.start).getTime(), Number(row.mean));
     }
   } catch (error) {
     console.warn("[DomotiApp Coach] kon de prijsgeschiedenis niet ophalen", error);
@@ -250,8 +253,8 @@ export async function fetchDevices(hass, devices, period, start) {
       return (
         (await hass.callWS({
           type: "recorder/statistics_during_period",
-          start_time: start.toISOString(),
-          end_time: periodEnd(period, start).toISOString(),
+          start_time: vanHuis(start).toISOString(),
+          end_time: vanHuis(periodEnd(period, start)).toISOString(),
           statistic_ids: ids,
           period: vak,
           types,
@@ -269,12 +272,12 @@ export async function fetchDevices(hass, devices, period, start) {
     ask(meters.map((device) => device.power), ["mean"], fijn),
   ]);
 
-  const middernacht = new Date();
+  const middernacht = huisNu();
   middernacht.setHours(0, 0, 0, 0);
   const uren = (tijd) => {
     if (fijn === "hour") return 1;
     // Het gemiddelde van vandaag gaat alleen over de uren die er al zijn.
-    if (tijd >= middernacht.getTime()) return Math.max(0, Math.floor((Date.now() - tijd) / 3600000));
+    if (tijd >= middernacht.getTime()) return Math.max(0, Math.floor((huisNu().getTime() - tijd) / 3600000));
     return 24;
   };
 
@@ -282,7 +285,7 @@ export async function fetchDevices(hass, devices, period, start) {
     const rows = new Map();
     for (const row of sums[device.energy] ?? []) {
       if (row.change === null || row.change === undefined) continue;
-      rows.set(new Date(row.start).getTime(), Number(row.change));
+      rows.set(alsHuis(row.start).getTime(), Number(row.change));
     }
     if (rows.size) out.set(device.id, { rows, exact: true });
   }
@@ -292,7 +295,7 @@ export async function fetchDevices(hass, devices, period, start) {
     for (const row of means[device.power] ?? []) {
       if (row.mean === null || row.mean === undefined) continue;
       // Gemiddeld vermogen maal de uren van het uur of de dag, van watt naar kWh.
-      const tijd = new Date(row.start).getTime();
+      const tijd = alsHuis(row.start).getTime();
       rows.set(tijd, (Number(row.mean) * uren(tijd)) / 1000);
     }
     if (rows.size) out.set(device.id, { rows, exact: false });
@@ -368,8 +371,8 @@ export async function fetchBattery(hass, batteries, period, start) {
       return (
         (await hass.callWS({
           type: "recorder/statistics_during_period",
-          start_time: start.toISOString(),
-          end_time: periodEnd(period, start).toISOString(),
+          start_time: vanHuis(start).toISOString(),
+          end_time: vanHuis(periodEnd(period, start)).toISOString(),
           statistic_ids: ids,
           period: vak,
           types,
@@ -388,12 +391,12 @@ export async function fetchBattery(hass, batteries, period, start) {
     ask(ids((b) => b.metTeken), ["mean"], "hour"),
   ]);
 
-  const middernacht = new Date();
+  const middernacht = huisNu();
   middernacht.setHours(0, 0, 0, 0);
   const uren = (tijd, vak = fijn) => {
     if (vak === "hour") return 1;
     // Het gemiddelde van vandaag gaat alleen over de uren die er al zijn.
-    if (tijd >= middernacht.getTime()) return Math.max(0, Math.floor((Date.now() - tijd) / 3600000));
+    if (tijd >= middernacht.getTime()) return Math.max(0, Math.floor((huisNu().getTime() - tijd) / 3600000));
     return 24;
   };
 
@@ -412,7 +415,7 @@ export async function fetchBattery(hass, batteries, period, start) {
       for (const row of bak[entityId] ?? []) {
         const waarde = bron.teller ? row.change : row.mean;
         if (waarde === null || waarde === undefined) continue;
-        const tijd = new Date(row.start).getTime();
+        const tijd = alsHuis(row.start).getTime();
         const kwh = bron.teller ? Number(waarde) : (Number(waarde) * uren(tijd, bron.metTeken ? "hour" : fijn)) / 1000;
         const rij = bij(tijd);
         rij.kwh += teken * kwh;
@@ -480,14 +483,15 @@ export async function quarters(hass, entityIds, start, end) {
     const result = await hass.callWS({
       type: "domotiapp_coach/history/quarters",
       entity_ids: wanted,
-      start: start.toISOString(),
-      end: end.toISOString(),
+      start: vanHuis(start).toISOString(),
+      end: vanHuis(end).toISOString(),
     });
     for (const [id, rows] of Object.entries(result ?? {})) {
       uit.set(
         id,
         (rows ?? []).map((row) => ({
-          start: new Date(row.start * 1000),
+          // Seconden sinds 1970: een echt moment, op de klok van het huis gezet.
+          start: alsHuis(row.start * 1000),
           laagste: Number(row.laagste),
           piek: Number(row.piek),
           gemiddeld: Number(row.gemiddeld),

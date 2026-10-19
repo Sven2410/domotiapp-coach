@@ -38,7 +38,7 @@
 
 import { contractAt } from "./data-source.js";
 import { ptPrijsOp } from "./tarifas.js";
-import { huisNu } from "./format.js";
+import { huisNu, vanHuis } from "./format.js";
 
 /**
  * De dag waarop salderen ophoudt. Gelijk aan `NETTING_ENDS` in const.py: de
@@ -116,7 +116,7 @@ export function vasteTeruglevering(fixed, when, saldeert = false) {
  * laat hem open: dezelfde sensor twee keer telt niet. Zonder kan een
  * thuisbatterij niet handelen (`_mag_handelen` in batterij.py).
  */
-export function terugleverBekend(contract, when = new Date()) {
+export function terugleverBekend(contract, when = huisNu()) {
   if (contract?.type !== "dynamic") return true;
   if (salderen(contract, when)) return true;
   const d = contract.dynamic ?? {};
@@ -258,7 +258,8 @@ export function prijsOp(contract, rate, prijzen, when, ligging = null, lengte = 
   const c = contractAt(contract, when);
   const t = new Date(when).getTime();
   // Portugal (v0.137.0): de tijdvakken van de ERSE, zoals `_pt_rijen` in coach.py.
-  if (contract?.country === "PT" && !c.period) return ptPrijsOp(contract.pt, when, lengte);
+  // Historie rekent op de klok van het huis; de tijdvakken willen het echte moment (v0.138.2).
+  if (contract?.country === "PT" && !c.period) return ptPrijsOp(contract.pt, vanHuis(new Date(when)), lengte);
   const koop = c.period?.all_in_price > 0 ? c.buy : (prijzen?.get(t) ?? rate?.buy ?? null);
   if (koop === null || koop === undefined) return { koop: null, terug: null };
   const metSalderen = salderen(contract, when);
@@ -266,7 +267,8 @@ export function prijsOp(contract, rate, prijzen, when, ligging = null, lengte = 
     const d = contract.dynamic ?? {};
     if (!terugleverBekend(contract, when)) return { koop, terug: c.feedIn ?? rate?.feedIn ?? null };
     const markt = koop / (1 + (Number(d.vat_percent) || 0) / 100) - (Number(d.energy_tax) || 0) - (Number(d.supplier_markup) || 0);
-    const begin = new Date(when);
+    // Zon op en onder rekent met het echte moment (v0.138.2).
+    const begin = vanHuis(new Date(when));
     const dag = overdag(begin, new Date(begin.getTime() + lengte), ligging);
     if (metSalderen && aandeel !== null && aandeel < 1) {
       const gesaldeerd = terugOp(markt, koop, d, true, dag);
