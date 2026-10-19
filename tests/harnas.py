@@ -108,6 +108,8 @@ dtutil = types.ModuleType("homeassistant.util.dt")
 dtutil.now = lambda: dt.datetime.now()
 dtutil.utcnow = lambda: dt.datetime.now(dt.timezone.utc)
 dtutil.as_local = lambda moment: moment
+# Zoals in Home Assistant: een moment met tijdzone naar UTC (v0.133.3).
+dtutil.as_utc = lambda moment: moment.astimezone(dt.timezone.utc) if moment.tzinfo else moment.replace(tzinfo=dt.timezone.utc)
 
 
 def _lees_tijd(waarde):

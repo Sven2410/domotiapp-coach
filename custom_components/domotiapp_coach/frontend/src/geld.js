@@ -58,6 +58,23 @@ export function salderen(contract, when) {
 }
 
 /**
+ * De vergoeding en de kosten per kWh van een vast contract op die dag (v0.134.0),
+ * zoals `_teruglevering` in coach.py: vanaf `SALDEREN_TOT` wat het contract voor na
+ * salderen zegt, en een leeg veld houdt het bedrag van ervoor.
+ */
+export function vasteTeruglevering(fixed, when) {
+  let vergoeding = Number(fixed?.feed_in_tariff) || 0;
+  let kosten = Number(fixed?.feed_in_costs) || 0;
+  const dag = lokaleDag(when);
+  const ingevuld = (v) => v !== null && v !== undefined && v !== "";
+  if (dag !== "" && dag >= SALDEREN_TOT) {
+    if (ingevuld(fixed?.feed_in_tariff_after)) vergoeding = Number(fixed.feed_in_tariff_after) || 0;
+    if (ingevuld(fixed?.feed_in_costs_after)) kosten = Number(fixed.feed_in_costs_after) || 0;
+  }
+  return { vergoeding, kosten };
+}
+
+/**
  * Of de coach weet wat teruglevering opbrengt, zoals `_prices` en `_tariff` in
  * coach.py (v0.128.2). Een vast contract heeft een terugleververgoeding, bij
  * salderen volgt hij uit de inkoopprijs, en een zelf opgebouwde prijs heeft de
@@ -185,6 +202,10 @@ export function prijsOp(contract, rate, prijzen, when, ligging = null, lengte = 
     return { koop, terug: terugOp(markt, koop, d, metSalderen, dag) };
   }
   if (metSalderen) return { koop, terug: koop - (Number(contract?.fixed?.feed_in_costs) || 0) };
+  if (contract?.type !== "dynamic" && !c.period) {
+    const { vergoeding, kosten } = vasteTeruglevering(contract?.fixed, when);
+    return { koop, terug: vergoeding - kosten };
+  }
   return { koop, terug: c.feedIn ?? rate?.feedIn ?? null };
 }
 

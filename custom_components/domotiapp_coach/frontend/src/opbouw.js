@@ -52,6 +52,40 @@ export function salderenNoot(check, nu = new Date()) {
 }
 
 /**
+ * Of een teruggeleverde kWh wegstreept tegen inkoop, over de afrekenperiode
+ * (v0.134.0): wat er sinds het begin van de jaarafrekening van het net kwam en
+ * terugging, en wat er tot het einde van salderen nog bij komt (dezelfde weken
+ * vorig jaar). Uit de meterstanden (`_async_jaarsaldo` in coach.py). Leeg als
+ * de coach de begindatum of de meter niet kent.
+ */
+export function jaarNoot(check) {
+  if (!check?.salderen || !check?.jaar) return "";
+  const j = check.jaar;
+  if (!j.compleet) {
+    return `<p class="ob-noot">Nog niet uit te rekenen of je over je afrekenperiode meer teruglevert dan je afneemt: de meter heeft geen metingen van dezelfde weken vorig jaar. De coach rekent tot dan met salderen.</p>`;
+  }
+  const kwh = (n) => `${Math.round(Number(n) || 0).toLocaleString("nl-NL")} kWh`;
+  const d = new Date(`${j.van}T00:00:00`);
+  const sinds = Number.isNaN(d.getTime()) ? "het begin van je afrekenperiode" : d.toLocaleDateString("nl-NL", { day: "numeric", month: "long" });
+  const zin = `Sinds ${sinds} nam je ${kwh(j.afname)} af en leverde je ${kwh(j.terug)} terug. Tot 1 januari 2027 komt daar naar verwachting ${kwh(j.afname_rest)} afname en ${kwh(j.terug_rest)} teruglevering bij, zoals in dezelfde weken vorig jaar.`;
+  if (check.netto_terug === true) {
+    return `<p class="ob-noot">${zin} Je levert meer terug dan je afneemt, dus een kWh extra naar het net krijgt de vergoeding na saldering.</p>`;
+  }
+  return `<p class="ob-noot">${zin} Alles wat je teruglevert valt dus weg tegen inkoop.</p>`;
+}
+
+/** Wat een vast contract na salderen zegt (v0.134.0): `na_salderen` van `contract/check`. */
+function naSalderenBlok(na) {
+  if (!na) return "";
+  return `<div class="ob-blok"><h4>Teruglevering vanaf 1 januari 2027</h4>
+    ${rij("", "Terugleververgoeding", euro4(na.vergoeding))}
+    ${rij("−", "Terugleverkosten", euro4(na.kosten))}
+    ${rij("=", "Per teruggeleverde kWh", euro4(na.terug), "ob-totaal")}
+    <p class="ob-noot">Dan stopt salderen, en geldt dit voor alles wat je teruglevert.</p>
+  </div>`;
+}
+
+/**
  * De regels van de teruglevering tot aan de vergoeding, in dezelfde vorm als
  * de inkoop: de kale marktprijs, dan wat er bij komt. Met salderen de
  * energiebelasting en de btw, en de opslag alleen als de leverancier die ook
@@ -147,8 +181,10 @@ export function opbouwHtml(check, namen = {}) {
     const terug = check.terug;
     delen.push(`<div class="ob-blok"><h4>Stroom</h4>
       ${rij("", "All-in prijs, zoals in je contract", check.inkoop === null || check.inkoop === undefined ? "niet ingevuld" : euro4(check.inkoop), "ob-totaal")}
-      ${rij("", check.salderen ? "Teruglevering (je saldeert: je inkoopprijs min de kosten)" : "Teruglevering (vergoeding min de kosten)", terug === null || terug === undefined ? "onbekend" : euro4(terug))}
+      ${rij("", check.salderen && check.netto_terug !== true ? "Teruglevering (je saldeert: je inkoopprijs min de kosten)" : "Teruglevering (vergoeding min de kosten)", terug === null || terug === undefined ? "onbekend" : euro4(terug))}
+      ${jaarNoot(check)}
     </div>`);
+    delen.push(naSalderenBlok(check.na_salderen));
   } else {
     const blok = check.blok;
     const tijd = blok ? ` (${klok(blok.start)} tot ${klok(blok.einde)})` : "";
@@ -194,6 +230,7 @@ export function opbouwHtml(check, namen = {}) {
       const regels = terugRegels(check, t, w);
       regels.push(rij("=", "Per teruggeleverde kWh", euro4(t.bedrag), "ob-totaal"));
       delen.push(`<div class="ob-blok"><h4>Teruglevering nu</h4>${regels.join("")}
+        ${jaarNoot(check)}
         <p class="ob-noot">${t.vast ? "Het vaste bedrag uit je contract." : `Niet te controleren: ${esc(w.leverancier)} geeft de terugleverprijs niet door. Zo rekent de coach.`}</p>
         ${salderenNoot(check)}</div>`);
     } else {

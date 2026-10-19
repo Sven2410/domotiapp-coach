@@ -270,6 +270,9 @@ def overdag(start: datetime, einde: datetime, lat: float | None, lon: float | No
 # Velden van een dynamisch contract die er later bij kwamen, met hun standaard
 # (v0.132.0); zie `vingerafdruk`.
 LATER = {"feed_in_mode": "market", "feed_in_fixed": 0.0}
+# En van een vast contract: wat er na salderen geldt (v0.134.0). Leeg is hetzelfde
+# als ervoor, dus telt pas mee als het is ingevuld.
+LATER_VAST = {"feed_in_tariff_after": None, "feed_in_costs_after": None}
 
 
 def vingerafdruk(contract: dict) -> str:
@@ -286,18 +289,18 @@ def vingerafdruk(contract: dict) -> str:
             return waarde if waarde is not None else ""
         return round(float(waarde), 6)
 
-    def dynamisch(velden: dict) -> dict:
+    def later(velden: dict, standaard: dict) -> dict:
         # Een veld dat later kwam telt pas mee als het iets anders zegt dan
         # zijn standaard: anders gold elke bevestiging van voor die uitgave
         # niet meer, terwijl er niets aan de prijs veranderde.
-        return {k: gewoon(v) for k, v in velden.items() if LATER.get(k, object()) != v}
+        return {k: gewoon(v) for k, v in velden.items() if standaard.get(k, object()) != v}
 
     deel = {
         "type": contract.get("type"),
         "netting": bool(contract.get("netting")),
         "supplier": contract.get("supplier") or "",
-        "fixed": {k: gewoon(v) for k, v in (contract.get("fixed") or {}).items()},
-        "dynamic": dynamisch(contract.get("dynamic") or {}),
+        "fixed": later(contract.get("fixed") or {}, LATER_VAST),
+        "dynamic": later(contract.get("dynamic") or {}, LATER),
         "gas": {k: gewoon(v) for k, v in (contract.get("gas") or {}).items() if k != "periods"},
         "water": {k: gewoon(v) for k, v in (contract.get("water") or {}).items() if k != "periods"},
     }

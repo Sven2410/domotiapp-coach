@@ -168,3 +168,67 @@ niet meer, terwijl er aan de prijs niets veranderde.
 
 Proef 173 in test_coach.py, de vaste teruglevering in test_prijsopbouw.py, en twee proeven in
 test_rapport.mjs.
+
+## Teruglevering voor en na 1-1-2027, en salderen per afrekenperiode (v0.134.0)
+
+De eigenaar op 19-10-2026, bij een vast contract met salderen aan (all-in € 0,24171,
+vergoeding € 0,0721, terugleverkosten € 0,052756) en "Teruglevering (je saldeert: je
+inkoopprijs min de kosten) € 0,1890": "ik had verwacht dat mijn teruglevering is:
+0,0721-0,052756". Daarna liet hij de prijsopbouw van zijn leverancier zien en twee
+jaarafrekeningen. Daarin stonden drie dingen die de coach niet kende.
+
+**Twee terugleverprijzen in één contract.** "Terugleververgoeding na saldering tot 1-1-2027
+€ 0,124000", "Terugleververgoeding vanaf 1-1-2027 € 0,072100" en "Terugleverkosten vanaf
+1-1-2027 € 0,052756 per kWh"; tot dan waren de terugleverkosten een vast bedrag per schaal.
+De bedragen die hij had ingevuld waren die van na 1-1-2027, en met één veld rekende de coach
+óf nu met de kosten van 2027, óf in 2027 met de vergoeding van nu. Een vast contract heeft
+daarom bij Contract een blok "Vanaf 1 januari 2027" (`feed_in_tariff_after`,
+`feed_in_costs_after`); leeg is hetzelfde als erboven. Vanaf `NETTING_ENDS` rekent de coach
+daarmee (`_teruglevering` in coach.py), en Historie ook (`vasteTeruglevering` in geld.js). De
+opbouw laat het als eigen blok zien (`na_salderen` bij `contract/check`, `naSalderenBlok` in
+opbouw.js), zolang het contract na die datum nog loopt. Alleen bij vast en variabel: een
+dynamisch contract volgt de markt, en wat de leverancier daar per 2027 verandert vult de klant
+dan in. "Ik heb een nieuw contract afgesloten" maakt het blok leeg.
+
+**Vaste terugleverkosten per schaal horen niet in de kosten per kWh.** Een vast bedrag per jaar
+naar de schaal van de teruglevering (de tabel van de leverancier: 0 tot 500 kWh niets, daarboven
+stappen van 250 of 500 kWh) verandert niet met elke kWh. Op de jaarafrekening werd de schaal
+bepaald op wat er in het stuk van de afrekenperiode onder het nieuwe contract terugging, niet
+omgerekend naar een jaar: 235 kWh in veertien dagen was schaal 1, € 0. Tot 1-1-2027 is dat stuk
+voor de meeste huizen een najaar, onder de 500 kWh. Dus 0 per kWh tot 1-1-2027, en de hint bij
+het veld zegt dat.
+
+**Salderen telt per afrekenperiode, ook over een nieuw contract heen.** De jaarafrekening liep
+van half september tot half september; het contract wisselde op 1 september, en de saldering
+ging over de twee samen. Pas wat er aan het eind van die periode meer terugging dan er werd
+afgenomen kreeg de vergoeding, verdeeld over de twee contracten. De begindatum staat bij Contract
+(`billing_start`, "Je afrekenperiode begon op", alleen met salderen aan en voor 1-1-2027). Een
+datum van langer dan een jaar geleden schuift per jaar op (`_afrekenstart`).
+
+De coach rekent eens per dag (`_async_jaarsaldo`): wat er sinds die datum van het net kwam en
+terugging, uit de kWh-tellers van de meter (`meters` onder Installatie) via de statistiek van
+Home Assistant, plus wat er tot `NETTING_ENDS` nog bij komt, gemeten op dezelfde dagen een jaar
+eerder. Levert het huis zo over de periode netto terug, dan saldeert een teruggeleverde kWh niet
+meer (`_saldeert`), en rekent hij met de vergoeding na saldering min de kosten (vast, `_tarief`)
+of met de marktprijs (dynamisch, `prijsopbouw.terug` zonder salderen). Zonder begindatum, zonder
+tellers of zonder metingen van vorig jaar is het onbekend, en telt het vinkje.
+
+In v0.133.3 (niet uitgebracht) was dit het afgelopen jaar. In de woning van de eigenaar
+scheelden afname en teruglevering daarover op 19-10-2026 nog geen 0,2 procent, met de zomer van
+het vorige contract erin: een schakelaar die elke dag kon omslaan, over een periode die niet
+telt. Met de afrekenperiode en de verwachting voor de rest beweegt de balans per dag alleen met
+wat die dag anders ging dan vorig jaar. Er zit geen marge op: wie er precies op de rand zit, voor
+die zijn beide prijzen even goed.
+
+Het vinkje zelf blijft wat het is (`salderen` in `contract/check`): de opbouw zegt erbij waarom,
+met de kWh van de periode en van de verwachting (`jaarNoot` in opbouw.js). De inkoopprijs blijft de
+all-in prijs.
+
+Wat nog niet: Historie rekent per uur met het vinkje en niet met de afrekenperiode, en een schaal
+als vast bedrag per dag staat niet in Historie.
+
+Proef 175 in test_coach.py; in test_rapport.mjs "de opbouw zegt of je over je afrekenperiode
+netto teruglevert" en "Historie: een vast contract rekent na 1-1-2027 met wat het contract voor
+daarna zegt"; in het virtuele huis `vast-na-salderen` en `vast-na-salderen-leeg`, op 4 januari
+2027: de zon in de bus kost € 0,30 (15,4 kWh maal 0,0193) en zonder de bedragen voor na
+salderen € 1,91 (maal 0,124).

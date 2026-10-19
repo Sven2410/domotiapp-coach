@@ -4352,6 +4352,51 @@ proef("elk merk dat het paneel aanbiedt neemt de coach aan bij het opslaan (v0.1
   assert.ok(/ALL_BRANDS: Final = sorted\(\s*\{[^}]*\*AIRCO_BRANDS/.test(bron), "AIRCO_BRANDS zit in ALL_BRANDS");
 });
 
+// Salderen tot aan wat je afneemt (v0.133.3). De eigenaar op 19-10-2026, bij "Teruglevering
+// (je saldeert: je inkoopprijs min de kosten) € 0,1890": "ik had verwacht dat mijn
+// teruglevering is: 0,0721-0,052756". Levert het huis over een jaar meer terug dan het
+// afneemt, dan zegt de opbouw dat, met de kWh van dat jaar erbij (proef 175 in test_coach.py).
+proef("de opbouw zegt of je over je afrekenperiode netto teruglevert, en wat er na 1-1-2027 geldt (v0.134.0)", async () => {
+  const { opbouwHtml, jaarNoot } = await import("../custom_components/domotiapp_coach/frontend/src/opbouw.js");
+  const jaar = { van: "2026-04-01", afname: 1500, terug: 3200, afname_rest: 700, terug_rest: 200, compleet: true };
+  const vast = { soort: "fixed", salderen: true, inkoop: 0.25, terug: 0.124, netto_terug: true, jaar, controle: { status: "vast" } };
+  const html = opbouwHtml(vast);
+  assert.ok(html.includes("Teruglevering (vergoeding min de kosten)") && !html.includes("je saldeert: je inkoopprijs"), html);
+  assert.ok(html.includes("Sinds 1 april nam je 1.500 kWh af en leverde je 3.200 kWh terug")
+    && html.includes("700 kWh afname en 200 kWh teruglevering bij")
+    && html.includes("krijgt de vergoeding na saldering"), html);
+  const afname = opbouwHtml({ ...vast, terug: 0.25, netto_terug: false,
+    jaar: { van: "2026-09-15", afname: 350, terug: 170, afname_rest: 1300, terug_rest: 150, compleet: true } });
+  assert.ok(afname.includes("je saldeert: je inkoopprijs min de kosten") && afname.includes("Sinds 15 september")
+    && afname.includes("Alles wat je teruglevert valt dus weg tegen inkoop"), afname);
+  assert.ok(jaarNoot({ ...vast, netto_terug: null, jaar: { ...jaar, compleet: false } }).includes("geen metingen van dezelfde weken vorig jaar"),
+    "zonder vorig jaar zegt hij dat hij het niet weet");
+  assert.equal(jaarNoot({ ...vast, jaar: null }), "", "zonder begindatum of meter geen noot");
+  assert.equal(jaarNoot({ ...vast, salderen: false }), "", "zonder salderen niets uit te leggen");
+  // Een vast contract dat over 1 januari 2027 heen loopt.
+  const na = opbouwHtml({ ...vast, na_salderen: { vanaf: "2027-01-01", vergoeding: 0.0721, kosten: 0.052756, terug: 0.019344 } });
+  assert.ok(na.includes("Teruglevering vanaf 1 januari 2027") && na.includes("€ 0,0721") && na.includes("€ 0,0528")
+    && na.includes("€ 0,0193"), na);
+  assert.ok(!html.includes("vanaf 1 januari 2027"), "zonder na salderen geen blok");
+});
+
+proef("Historie: een vast contract rekent na 1-1-2027 met wat het contract voor daarna zegt (v0.134.0)", () => {
+  const twee = { ...VAST, fixed: { all_in_price: 0.24171, feed_in_tariff: 0.124, feed_in_costs: 0,
+    feed_in_tariff_after: 0.0721, feed_in_costs_after: 0.052756 } };
+  const voor = geld.prijsOp(twee, TARIEF, new Map(), new Date(2026, 9, 19, 12));
+  assert.ok(Math.abs(voor.terug - 0.24171) < 1e-9, `met salderen de inkoopprijs min de kosten van nu: ${voor.terug}`);
+  const buiten = geld.prijsOp({ ...twee, netting: false }, TARIEF, new Map(), new Date(2026, 9, 19, 12));
+  assert.ok(Math.abs(buiten.terug - 0.124) < 1e-9, `zonder salderen de vergoeding van nu: ${buiten.terug}`);
+  const na = geld.prijsOp(twee, TARIEF, new Map(), new Date(2027, 0, 1, 12));
+  assert.ok(Math.abs(na.terug - (0.0721 - 0.052756)) < 1e-9, `${na.terug}`);
+  const leeg = { ...twee, fixed: { ...twee.fixed, feed_in_tariff_after: null, feed_in_costs_after: "" } };
+  assert.ok(Math.abs(geld.prijsOp(leeg, TARIEF, new Map(), new Date(2027, 0, 1, 12)).terug - 0.124) < 1e-9, "leeg houdt het bedrag van ervoor");
+  const nul = { ...twee, fixed: { ...twee.fixed, feed_in_tariff_after: 0, feed_in_costs_after: 0 } };
+  assert.equal(geld.prijsOp(nul, TARIEF, new Map(), new Date(2027, 0, 1, 12)).terug, 0, "nul is een bedrag, geen leeg veld");
+  assert.deepEqual(geld.vasteTeruglevering(twee.fixed, new Date(2026, 11, 31, 23)), { vergoeding: 0.124, kosten: 0 });
+  assert.deepEqual(geld.vasteTeruglevering(twee.fixed, new Date(2027, 0, 1, 0)), { vergoeding: 0.0721, kosten: 0.052756 });
+});
+
 // Prijskleuren naar de bekende prijzen (v0.133.1). De bewoner van de eerste woning op
 // 19-10-2026: "relatief gezien naar de spread op de dag", en "Worden de nieuwe prijzen om
 // 14u bekend, dan past ie zijn kleurstelling aan. Het kán dan zo zijn dat een kolom die

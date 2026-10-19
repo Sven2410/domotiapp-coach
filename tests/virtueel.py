@@ -1107,6 +1107,10 @@ class Scenario:
     vast_prijs: float = 0.28
     vast_teruglevering: float = 0.07
     vast_terugleverkosten: float = 0.0
+    # Wat een vast contract vanaf 1 januari 2027 zegt (v0.134.0); None houdt het
+    # bedrag erboven, zoals `_teruglevering` in coach.py.
+    vast_teruglevering_na: float | None = None
+    vast_terugleverkosten_na: float | None = None
     # (tijd, actie, argument): ("13:10", "kabel_uit", None), ("18:00", "pauze", True),
     # ("12:00", "snelladen", True), ("09:30", "soc_opgeven", 40), ("11:00", "p1_weg", 3),
     # ("20:00", "oven", 30)
@@ -1403,6 +1407,8 @@ def instellingen(s: Scenario) -> dict:
                 "all_in_price": s.vast_prijs,
                 "feed_in_tariff": s.vast_teruglevering,
                 "feed_in_costs": s.vast_terugleverkosten,
+                "feed_in_tariff_after": s.vast_teruglevering_na,
+                "feed_in_costs_after": s.vast_terugleverkosten_na,
             },
         }
     else:

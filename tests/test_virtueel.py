@@ -340,6 +340,16 @@ if (vl := v("vast-salderen")):
              f"net {vl.uit_net_kwh:.2f}")
     controle("salderen: op tijd vol", gehaald(vl), "")
 
+# Na 1-1-2027 de terugleverprijs van na salderen, ook met het vinkje aan (v0.134.0).
+if (vn := v("vast-na-salderen")) and (vl := v("vast-na-salderen-leeg")):
+    print(f"  na salderen: €{vn.kosten:.2f}, zonder bedragen €{vl.kosten:.2f}, zon {vn.uit_zon_kwh:.1f} kWh")
+    controle("na 1-1-2027: de zon kost de vergoeding min de kosten van na salderen",
+             abs(vn.kosten - vn.betaald - vn.uit_zon_kwh * (0.0721 - 0.052756)) < 0.01, f"€{vn.kosten:.2f}")
+    controle("zonder bedragen voor na salderen de vergoeding en de kosten van ervoor",
+             abs(vl.kosten - vl.betaald - vl.uit_zon_kwh * 0.124) < 0.01, f"€{vl.kosten:.2f}")
+    controle("na 1-1-2027: op tijd vol, van de zon", gehaald(vn) and vn.uit_net_kwh < 0.3,
+             f"net {vn.uit_net_kwh:.2f}")
+
 if (vl := v("vast-avond-erin")):
     controle("avond erin: wacht tot acht uur", not laadt_tussen(vl, "18:30", "20:00"), "")
     controle("avond erin: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
