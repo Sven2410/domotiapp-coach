@@ -29,7 +29,7 @@
  * narekenen.
  */
 
-import { alsHuis, huisNu } from "./format.js";
+import { huisNu } from "./format.js";
 
 /** De kleuren, met de naam in de legenda. Oranje is eigen stroom, blauw het net. */
 export const KLASSEN = {
@@ -344,14 +344,14 @@ const KWARTIER_MS = 15 * 60 * 1000;
  */
 export function herkomst(stuk, vermogen, net) {
   if (!vermogen?.length) return null;
-  // De kwartieren zijn echte momenten, de stukken staan op de klok van het huis zoals
-  // de besluiten van de coach (v0.138.1): de kwartieren dus ook op die klok.
-  const netOp = new Map((net ?? []).map((rij) => [alsHuis(rij.start).getTime(), rij]));
+  // De kwartieren komen op de klok van het huis binnen (`quarters` in statistics.js,
+  // v0.138.2), net als de besluiten van de coach.
+  const netOp = new Map((net ?? []).map((rij) => [rij.start.getTime(), rij]));
   let kwh = 0;
   let netKwh = 0;
   let gedekt = 0;
   for (const rij of vermogen) {
-    const begin = alsHuis(rij.start).getTime();
+    const begin = rij.start.getTime();
     const einde = begin + KWARTIER_MS;
     const deel = (Math.min(einde, stuk.tot.getTime()) - Math.max(begin, stuk.van.getTime())) / KWARTIER_MS;
     if (deel <= 0) continue;

@@ -213,12 +213,43 @@ export function zetHuisZone(zone) {
   }
 }
 
-/** Een echt moment zoals de klok van het huis het aanwijst, als Date in de tijd van de browser. */
+/** De velden van een Date in de tijd van de browser, als één getal om te vergelijken. */
+const veld_ = (x) => Date.UTC(x.getFullYear(), x.getMonth(), x.getDate(), x.getHours(), x.getMinutes(), x.getSeconds(), x.getMilliseconds());
+
+/**
+ * Een echt moment zoals de klok van het huis het aanwijst, als Date in de tijd van de browser.
+ *
+ * Wijst de browser op dat moment hetzelfde aan als het huis, dan het moment zelf (v0.138.2).
+ * Anders vielen bij het ingaan van de wintertijd de twee uren van 02:00 samen, ook bij een
+ * Nederlands huis vanuit Nederland, en verloor Historie zo een uur verbruik.
+ */
 export function alsHuis(moment) {
   const echt = moment instanceof Date ? moment : new Date(moment);
   if (!huisKlok_ || Number.isNaN(echt.getTime())) return echt;
   const d = Object.fromEntries(huisKlok_.formatToParts(echt).map((deel) => [deel.type, deel.value]));
-  return new Date(Number(d.year), Number(d.month) - 1, Number(d.day), Number(d.hour), Number(d.minute), Number(d.second), echt.getMilliseconds());
+  const huis = new Date(Number(d.year), Number(d.month) - 1, Number(d.day), Number(d.hour), Number(d.minute), Number(d.second), echt.getMilliseconds());
+  return veld_(huis) === veld_(echt) ? echt : huis;
+}
+
+/**
+ * Het omgekeerde van `alsHuis` (v0.138.2): een Date op de klok van het huis terug naar het
+ * echte moment, voor wat Home Assistant om echte momenten vraagt (de recorder, de
+ * kwartieropslag) of ermee rekent (`ptPrijsOp`). Twee of drie stappen, omdat het verschil
+ * tussen de twee klokken zelf van het moment afhangt (zomertijd).
+ */
+export function vanHuis(huis) {
+  const d = huis instanceof Date ? huis : new Date(huis);
+  if (!huisKlok_ || Number.isNaN(d.getTime())) return d;
+  // Dezelfde klok als de browser: het moment is er al.
+  if (alsHuis(d) === d) return d;
+  const doel = veld_(d);
+  let t = doel;
+  for (let stap = 0; stap < 3; stap += 1) {
+    const afwijking = doel - veld_(alsHuis(new Date(t)));
+    if (!afwijking) break;
+    t += afwijking;
+  }
+  return new Date(t);
 }
 
 /** Nu, op de klok van het huis. Vergelijk tijden van de coach hiermee, niet met `new Date()`. */

@@ -5409,6 +5409,55 @@ proef("de klok van het huis: nu in de tijd van Home Assistant, niet van de brows
   assert.ok(lees("src/views/overview.js").includes("Math.round((huisNu().getTime() - toen) / 60000)"), "De coach heeft N minuten niets beslist");
 });
 
+// "ja bouw het maar" (de eigenaar op 19-10-2026): ook Historie op de klok van het huis. En
+// wat er bij een Nederlands huis vanuit Nederland niet mag veranderen, ook niet op de dag
+// dat de wintertijd ingaat en 02:00 twee keer komt.
+proef("Historie op de klok van het huis, en de wintertijd (v0.138.2)", async () => {
+  const f = await import("../custom_components/domotiapp_coach/frontend/src/format.js");
+  const st = await import("../custom_components/domotiapp_coach/frontend/src/statistics.js");
+  const geld = await import("../custom_components/domotiapp_coach/frontend/src/geld.js");
+  const eigen = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const opKlok = (iso, zone) => new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso));
+  try {
+    // Dezelfde klok als de machine: het moment zelf, ook voor de twee uren van 02:00.
+    f.zetHuisZone(eigen);
+    const a = new Date(Date.UTC(2026, 9, 25, 0, 30));
+    const b = new Date(Date.UTC(2026, 9, 25, 1, 30));
+    assert.ok(f.alsHuis(a) === a && f.alsHuis(b) === b && f.vanHuis(a) === a, "dezelfde klok: niets omgerekend");
+
+    for (const zone of ["Europe/Lisbon", "Pacific/Kiritimati", "America/New_York"]) {
+      f.zetHuisZone(zone);
+      // Heen en terug geeft hetzelfde moment.
+      for (const t of [Date.UTC(2026, 9, 19, 14, 57), Date.UTC(2026, 0, 15, 23, 30), Date.UTC(2026, 6, 1, 0, 0)]) {
+        assert.equal(f.vanHuis(f.alsHuis(t)).getTime(), t, `${zone} ${new Date(t).toISOString()}`);
+      }
+      // Een dag begint om middernacht in het huis, en zo vraagt het paneel het ook op.
+      const van = st.periodStart("day", 0);
+      const nuHuis = f.huisNu();
+      assert.deepEqual([van.getFullYear(), van.getMonth(), van.getDate(), van.getHours()], [nuHuis.getFullYear(), nuHuis.getMonth(), nuHuis.getDate(), 0], zone);
+      let gevraagd = null;
+      const hass = { callWS: async (msg) => { gevraagd = msg; return {}; } };
+      await st.fetchPeriod(hass, ["sensor.x"], "day", van);
+      assert.ok(opKlok(gevraagd.start_time, zone).endsWith("00:00") && opKlok(gevraagd.end_time, zone).endsWith("00:00"), `${zone}: ${gevraagd.start_time}`);
+      await st.quarters(hass, ["sensor.x"], van, st.periodEnd("day", van));
+      assert.ok(opKlok(gevraagd.start, zone).endsWith("00:00"), `${zone}: kwartieren vanaf ${gevraagd.start}`);
+      // Wat terugkomt staat op de klok van het huis.
+      const moment = Date.UTC(2026, 9, 19, 14, 0);
+      const terug = await st.quarters({ callWS: async () => ({ "sensor.x": [{ start: moment / 1000, laagste: 1, piek: 2, gemiddeld: 1.5, seconden: 900 }] }) }, ["sensor.x"], van, van);
+      assert.equal(terug.get("sensor.x")[0].start.getTime(), f.alsHuis(moment).getTime(), zone);
+    }
+
+    // Portugal: een uur in Historie op de klok van het huis krijgt de prijs van dat tijdvak.
+    f.zetHuisZone("Europe/Lisbon");
+    const pt = { tarifa: "bi", ciclo: "diario", energia: { vazio: 0.134, fora_vazio: 0.2198 }, iec: 0.001, iva: 23, excedente: { modo: "nenhum" } };
+    const tienUur = f.alsHuis(Date.UTC(2026, 9, 19, 21, 0));
+    assert.equal(tienUur.getHours(), 22);
+    assert.equal(geld.prijsOp({ type: "fixed", country: "PT", pt }, { buy: 0.3, feedIn: 0 }, new Map(), tienUur).koop, 0.16605, "22:00 in Lissabon is vazio");
+  } finally {
+    f.zetHuisZone(null);
+  }
+});
+
 for (const [naam, fn] of proeven) {
   try {
     await fn();
