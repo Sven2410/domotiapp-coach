@@ -1034,7 +1034,8 @@ net levert (`_nacht_vloer`): de ondergrens plus wat er nodig is tot morgenvroeg 
 onderweg nog komt). Het huis voeden mag eronder; handelen niet (`vloer` in `_mogelijk`).
 Zonder nachtstrategie of zonder handelen verandert er niets. Met de prijzen van die dag zegt
 het plan nu: handelen van 17:00 tot 19:00 tot 41%, daarna nul op de meter, 29% om 23:00.
-Proef 45 in test_batterij.py.
+Proef 45 in test_batterij.py. In het virtuele huis levert `batterij-handelen` daardoor € 1,01 op
+in plaats van € 1,33: de prijs van de nacht vasthouden op een avond van tachtig cent.
 
 ## De optimizer in het virtuele huis (v0.132.0)
 
@@ -1061,7 +1062,7 @@ Gemeten op 19-10-2026, 36 scenario's met een batterij (coach, optimizer, zonder 
 | batterij-volle-beurt | € 3,12 | € 2,73 | € 0,40 (de volle beurt, bewust) |
 | batterij-dynamisch-zon-zelf | € -0,54 | € -0,93 | € 0,38 |
 | batterij-kwartier-voorloper | € 2,91 | € 2,53 | € 0,38 |
-| batterij-handelen | € -1,33 | € -1,62 | € 0,28 |
+| batterij-handelen | € -1,01 | € -1,30 | € 0,29 (sinds v0.133.1; met de nacht in de som, daarvoor € -1,33 tegen € -1,62) |
 | planning-auto-eerst | € 10,88 | € 10,67 | € 0,20 |
 | batterij-dynamisch-zon | € -1,01 | € -1,16 | € 0,15 |
 | batterij-rendement-onbekend | € 1,29 | € 1,14 | € 0,15 (de coach kent het rendement niet) |
