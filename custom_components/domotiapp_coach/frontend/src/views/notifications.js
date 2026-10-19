@@ -22,6 +22,14 @@
  * De eigenaar op 05-09-2026: "dat je op normale en kritieke meldingen kan filteren
  * en op de tijd." Vandaar de knoppen boven de lijst en de dagkeuze.
  *
+ * Sinds v0.133.2 in groepen die uitklappen: Wie krijgt wat, Herinneringen,
+ * Waarschuwingen (met elke waarschuwing apart) en Geschiedenis (met elke dag
+ * apart), elk met een korte stand in de kop. De eigenaar op 20-10-2026: "ik wil
+ * wel bij meldingen dat je alles groepeert en alles kan uitklappen, nu staat
+ * alles op een vaste positie onder elkaar en wordt het onoverzichtelijk." Wat
+ * openstaat onthoudt het scherm (`OPEN_SLEUTEL`), want dat is een voorkeur van
+ * wie kijkt.
+ *
  * De lijst komt van `domotiapp_coach/notifications/list` en groeit live mee via
  * het event `domotiapp_coach_notification`, sinds v0.108.1 via
  * `domotiapp_coach/subscribe` (`volgCoach`), zodat ook een bewoner zonder
@@ -203,7 +211,7 @@ export function groepeer(items, nu = new Date()) {
     const kop = dagkop(moment, nu);
     let groep = groepen[groepen.length - 1];
     if (!groep || groep.kop !== kop) {
-      groep = { kop, rijen: [] };
+      groep = { kop, sleutel: dagsleutel(moment), rijen: [] };
       groepen.push(groep);
     }
     groep.rijen.push({
@@ -213,6 +221,40 @@ export function groepeer(items, nu = new Date()) {
     });
   }
   return groepen;
+}
+
+/**
+ * Wat er in de kop van de geschiedenis staat (v0.133.2): hoeveel er vandaag
+ * was, en hoeveel daarvan kritiek.
+ */
+export function geschiedenisStand(items, nu = new Date()) {
+  const vandaag = (items ?? []).filter((item) => {
+    const moment = new Date(item?.at ?? "");
+    return !Number.isNaN(moment.getTime()) && dagsleutel(moment) === dagsleutel(nu);
+  });
+  if (!vandaag.length) return "Niets vandaag";
+  const kritiek = vandaag.filter((item) => soortVan(item) === "kritiek").length;
+  return `${vandaag.length} vandaag${kritiek ? `, ${kritiek} kritiek` : ""}`;
+}
+
+/** Wat er per groep openstaat, per scherm (v0.133.2). Standaard alleen de geschiedenis. */
+const OPEN_SLEUTEL = "dac-meldingen-open";
+export const STANDAARD_OPEN = { wie: false, herinnering: false, waarschuwingen: false, geschiedenis: true };
+
+function leesOpen() {
+  try {
+    return { ...STANDAARD_OPEN, ...JSON.parse(localStorage.getItem(OPEN_SLEUTEL) || "{}") };
+  } catch {
+    return { ...STANDAARD_OPEN };
+  }
+}
+
+function bewaarOpen(open) {
+  try {
+    localStorage.setItem(OPEN_SLEUTEL, JSON.stringify(open));
+  } catch {
+    // Privé venster of vol: dan geldt het tot het scherm ververst.
+  }
 }
 
 const SOORTEN = [
@@ -245,8 +287,34 @@ const css = /* css */ `
   h2 { font-size: 15px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
   h2 svg { width: 17px; height: 17px; color: var(--dac-accent-hi); }
   .sub, .hint { margin: 0 0 14px; color: var(--dac-ink-3); font-size: 13.5px; line-height: 1.5; }
-  .blok { margin: 0 0 26px; }
+  .blok { margin: 0; }
   .blok[hidden] { display: none; }
+
+  /* ---- de groepen (v0.133.2) ---- */
+  .groep {
+    border: 1px solid var(--dac-border); border-radius: var(--dac-radius-sm);
+    background: rgba(var(--dac-veil),0.02); margin: 0 0 12px;
+  }
+  .groep[hidden] { display: none; }
+  .groep > summary, .sub > summary, details.dag > summary {
+    display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none;
+  }
+  .groep > summary::-webkit-details-marker, .sub > summary::-webkit-details-marker,
+  details.dag > summary::-webkit-details-marker { display: none; }
+  .groep > summary { padding: 14px 16px; min-height: 24px; }
+  .groep > summary .kop { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; min-width: 0; }
+  .groep > summary .kop svg { width: 17px; height: 17px; color: var(--dac-accent-hi); flex: 0 0 auto; }
+  .stand { margin-left: auto; font-size: 12.5px; color: var(--dac-ink-3); text-align: right; }
+  .groep > summary::after, .sub > summary::after, details.dag > summary::after {
+    content: "›"; color: var(--dac-ink-3); font-size: 18px; line-height: 1; transition: transform 150ms ease;
+  }
+  .groep[open] > summary::after, .sub[open] > summary::after, details.dag[open] > summary::after { transform: rotate(90deg); }
+  .groep > .inhoud { padding: 0 16px 14px; }
+  .sub { border-top: 1px solid var(--dac-border); }
+  .sub > summary { padding: 12px 0; }
+  .sub > summary .titel { font-size: 14px; font-weight: 600; }
+  .sub > .inhoud { padding: 0 0 12px; }
+  .stand.aan { color: var(--dac-accent-hi); font-weight: 600; }
 
   /* ---- de personen ---- */
   .personen { display: grid; gap: 12px; }
@@ -349,11 +417,13 @@ const css = /* css */ `
     border: 1px solid var(--dac-border); background: transparent; color: var(--dac-ink); max-width: 100%;
     width: auto; min-height: 0;
   }
-  .dag {
-    font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 700;
-    color: var(--dac-ink-3); margin: 18px 0 6px;
+  details.dag { border-top: 1px solid var(--dac-border); }
+  details.dag:first-child { border-top: 0; }
+  details.dag > summary { padding: 10px 0; }
+  details.dag > summary .titel {
+    font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 700; color: var(--dac-ink-3);
   }
-  .dag:first-child { margin-top: 0; }
+  details.dag[open] > summary { margin-bottom: 4px; }
   .rij {
     display: grid; grid-template-columns: 52px 1fr; gap: 10px; align-items: start;
     padding: 10px 12px; border-radius: var(--dac-radius-sm);
@@ -421,8 +491,10 @@ class DacViewNotifications extends DacElement {
         <h1>${icons.bell} Meldingen</h1>
         <p class="sub">Wie welke berichten op zijn telefoon krijgt, en alles wat de coach deed en meldde.</p>
 
+        <details class="groep" data-groep="wie">
+          <summary><span class="kop">${icons.devices}<span>Wie krijgt wat</span></span><span class="stand" id="stand-wie"></span></summary>
+          <div class="inhoud">
         <section class="blok" id="wie">
-          <h2>${icons.devices} Wie krijgt wat</h2>
           <p class="hint" id="wie-hint"></p>
           <div class="personen" id="personen"></div>
           <div id="toevoegen" hidden>
@@ -444,12 +516,16 @@ class DacViewNotifications extends DacElement {
           </div>
           <div class="status" id="mijn-status"></div>
         </section>
+          </div>
+        </details>
 
         <!-- De herinnering voor de meterstanden (v0.130.0). De eigenaar op
              18-10-2026: "ook wil ik een invulveld voor herinnering meterstanden
              doorgeven." Komt in de berichtenbox (het belletje) en op de telefoon. -->
+        <details class="groep" data-groep="herinnering">
+          <summary><span class="kop">${icons.bell}<span>Herinneringen</span></span><span class="stand" id="stand-herinnering"></span></summary>
+          <div class="inhoud">
         <section class="blok" id="herinnering">
-          <h2>${icons.bell} Herinneringen</h2>
           <p class="hint">Een bericht in je berichtenbox (het belletje bovenin) en op je telefoon, zodat je het niet vergeet.</p>
           <div class="velden twee">
             <div class="veld">
@@ -469,9 +545,16 @@ class DacViewNotifications extends DacElement {
           </div>
           <div class="status" id="meter-status"></div>
         </section>
+          </div>
+        </details>
 
-        <section class="blok" id="belasting" hidden>
-          <h2>${icons.warning} Zware belasting</h2>
+        <!-- De meldingen met een drempel, elk apart uit te klappen (v0.133.2). -->
+        <details class="groep" data-groep="waarschuwingen" id="waarschuwingen">
+          <summary><span class="kop">${icons.warning}<span>Waarschuwingen</span></span><span class="stand" id="stand-waarschuwingen"></span></summary>
+          <div class="inhoud">
+        <details class="blok sub" id="belasting" hidden>
+          <summary><span class="titel">Zware belasting</span><span class="stand" id="stand-belasting"></span></summary>
+          <div class="inhoud">
           <p class="hint">Een bericht zodra je aansluiting te zwaar belast wordt. De coach kijkt naar de zwaarst belaste fase als die bekend is, anders naar je totale netvermogen. Wie het krijgt staat hierboven per persoon.</p>
           <div class="aanzet">
             <div>
@@ -498,10 +581,12 @@ class DacViewNotifications extends DacElement {
             </div>
           </div>
           <div class="status" id="belasting-status"></div>
-        </section>
+          </div>
+        </details>
 
-        <section class="blok" id="verbruik" hidden>
-          <h2>${icons.warning} Lekkage of abnormaal verbruik</h2>
+        <details class="blok sub" id="verbruik" hidden>
+          <summary><span class="titel">Lekkage of abnormaal verbruik</span><span class="stand" id="stand-verbruik"></span></summary>
+          <div class="inhoud">
           <p class="hint">Een bericht als er te lang onafgebroken water loopt, of als een dag veel meer gas of water vraagt dan gewoon. Water vraagt een watermeter onder Installatie; voor het lopende water ook de sensor van het verbruik nu.</p>
           <div class="aanzet">
             <div>
@@ -523,10 +608,12 @@ class DacViewNotifications extends DacElement {
             </div>
           </div>
           <div class="status" id="verbruik-status"></div>
-        </section>
+          </div>
+        </details>
 
-        <section class="blok" id="warmte" hidden>
-          <h2>${icons.warning} Thuisbatterij te warm</h2>
+        <details class="blok sub" id="warmte" hidden>
+          <summary><span class="titel">Thuisbatterij te warm</span><span class="stand" id="stand-warmte"></span></summary>
+          <div class="inhoud">
           <p class="hint">Een bericht als de temperatuur van de thuisbatterij boven je grens komt, en blijft. Welke temperatuur te hoog is staat in de handleiding van de batterij. Het gaat naar wie Kritiek aan heeft staan.</p>
           <div class="aanzet">
             <div>
@@ -543,10 +630,12 @@ class DacViewNotifications extends DacElement {
             </div>
           </div>
           <div class="status" id="warmte-status"></div>
-        </section>
+          </div>
+        </details>
 
-        <section class="blok" id="stekker" hidden>
-          <h2>${icons.warning} Apparaat staat uit</h2>
+        <details class="blok sub" id="stekker" hidden>
+          <summary><span class="titel">Apparaat staat uit</span><span class="stand" id="stand-stekker"></span></summary>
+          <div class="inhoud">
           <p class="hint">Een bericht als een apparaat dat altijd aan moet staan uit gaat en de coach het na 2 minuten nog niet weer aan heeft gekregen. Het gaat naar wie Kritiek aan heeft staan.</p>
           <div class="aanzet">
             <div>
@@ -556,10 +645,15 @@ class DacViewNotifications extends DacElement {
             <button type="button" class="schuif" role="switch" aria-checked="false" id="stekker-aan" aria-label="Apparaat staat uit aan"><span class="knob"></span></button>
           </div>
           <div class="status" id="stekker-status"></div>
-        </section>
+          </div>
+        </details>
+          </div>
+        </details>
 
+        <details class="groep" data-groep="geschiedenis">
+          <summary><span class="kop">${icons.bell}<span>Geschiedenis</span></span><span class="stand" id="stand-geschiedenis"></span></summary>
+          <div class="inhoud">
         <section class="blok">
-          <h2>${icons.bell} Geschiedenis</h2>
           <p class="hint">Alles wat de coach deed en meldde in de afgelopen twee weken, de nieuwste bovenaan. Wat ook naar een telefoon ging staat in een kader; kritiek is wat je zelf moet oplossen.</p>
           <div class="filter" id="filter">
             ${SOORTEN.map(([id, label]) =>
@@ -568,11 +662,21 @@ class DacViewNotifications extends DacElement {
           </div>
           <div id="lijst"></div>
         </section>
+          </div>
+        </details>
       </section>
     `;
   }
 
   afterRender() {
+    // Wat openstaat, per scherm (v0.133.2).
+    const open = leesOpen();
+    for (const groep of this.$$("details.groep[data-groep]")) {
+      groep.open = Boolean(open[groep.dataset.groep]);
+      groep.addEventListener("toggle", () => {
+        bewaarOpen({ ...leesOpen(), [groep.dataset.groep]: groep.open });
+      });
+    }
     this.$("#meter-datum").addEventListener("change", (ev) => this.bewaarHerinnering_({ meter_date: ev.target.value || "" }));
     this.$("#meter-herhaling").addEventListener("change", (ev) => this.bewaarHerinnering_({ meter_repeat: ev.target.value }));
     this.$("#filter")?.addEventListener("click", (e) => {
@@ -643,6 +747,40 @@ class DacViewNotifications extends DacElement {
     this.paintWarmte_();
     this.paintStekker_();
     this.paint_();
+  }
+
+  /**
+   * De korte stand in de kop van elke groep (v0.133.2), zodat je niet hoeft
+   * uit te klappen om te zien hoe het staat.
+   */
+  paintStanden_() {
+    const zet = (id, tekst, aan = false) => {
+      const el = this.$(id);
+      if (!el) return;
+      el.textContent = tekst;
+      el.classList?.toggle("aan", aan);
+    };
+    const mensen = zichtbaar(this.meldingen_().people, this.hass_?.user).length;
+    zet("#stand-wie", mensen ? `${mensen} ${mensen === 1 ? "persoon" : "personen"}` : "Nog niemand");
+    const r = this.settings_?.reminders ?? {};
+    const volgende = volgendeMeterstand(new Date(), r.meter_date, r.meter_repeat || "year");
+    zet("#stand-herinnering", !r.meter_date ? "Niets ingesteld"
+      : volgende ? `Meterstanden op ${volgende.toLocaleDateString("nl-NL", { day: "numeric", month: "long" })}` : "Geweest");
+    const meldingen = this.meldingen_();
+    let aan = 0;
+    let zichtbaarAantal = 0;
+    for (const [id, sleutel] of [["belasting", "load_alert"], ["verbruik", "usage_alert"], ["warmte", "temp_alert"], ["stekker", "always_on_alert"]]) {
+      const blok = this.$(`#${id}`);
+      if (!blok || blok.hidden) continue;
+      zichtbaarAantal += 1;
+      const staat = Boolean((meldingen[sleutel] ?? {}).enabled);
+      if (staat) aan += 1;
+      zet(`#stand-${id}`, staat ? "aan" : "uit", staat);
+    }
+    const groep = this.$("#waarschuwingen");
+    if (groep) groep.hidden = !zichtbaarAantal;
+    zet("#stand-waarschuwingen", `${aan} van ${zichtbaarAantal} aan`);
+    zet("#stand-geschiedenis", this.geladen_ ? geschiedenisStand(recent(this.items_)) : "");
   }
 
   // ------------------------------------------------------------------
@@ -845,6 +983,7 @@ class DacViewNotifications extends DacElement {
     } finally {
       this.bezig_ = false;
       this.paintPersonen_();
+      this.paintStanden_();
     }
   }
 
@@ -876,6 +1015,7 @@ class DacViewNotifications extends DacElement {
       this.status_("#meter-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
     }
     this.paintHerinnering_();
+    this.paintStanden_();
   }
 
   status_(kiezer, tekst, fout) {
@@ -923,6 +1063,7 @@ class DacViewNotifications extends DacElement {
       this.status_("#verbruik-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
     }
     this.paintVerbruik_();
+    this.paintStanden_();
   }
 
   // ------------------------------------------------------------------
@@ -988,6 +1129,7 @@ class DacViewNotifications extends DacElement {
       this.status_("#warmte-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
     }
     this.paintWarmte_();
+    this.paintStanden_();
   }
 
   // ------------------------------------------------------------------
@@ -1034,6 +1176,7 @@ class DacViewNotifications extends DacElement {
       this.status_("#stekker-status", `Opslaan mislukt: ${error?.message ?? error}`, true);
     }
     this.paintStekker_();
+    this.paintStanden_();
   }
 
   paintBelasting_() {
@@ -1074,6 +1217,7 @@ class DacViewNotifications extends DacElement {
     }
     this.paintBelasting_();
     this.paintVerbruik_();
+    this.paintStanden_();
   }
 
   // ------------------------------------------------------------------
@@ -1132,6 +1276,7 @@ class DacViewNotifications extends DacElement {
     }
     this.dagen_();
     lijst.replaceChildren();
+    this.paintStanden_();
     const groepen = groepeer(zeef(recent(this.items_), this.filter_));
     if (!groepen.length) {
       const leeg = document.createElement("div");
@@ -1144,11 +1289,27 @@ class DacViewNotifications extends DacElement {
       lijst.append(leeg);
       return;
     }
-    for (const groep of groepen) {
-      const kop = document.createElement("div");
-      kop.className = "dag";
-      kop.textContent = groep.kop;
-      lijst.append(kop);
+    // Elke dag apart uit te klappen (v0.133.2). Vandaag staat open, of de
+    // eerste dag als er vandaag niets was, of de dag die je koos; wat je zelf
+    // open- of dichtklapt blijft zo tot het scherm ververst.
+    this.dagOpen_ ??= new Map();
+    groepen.forEach((groep, i) => {
+      const blok = document.createElement("details");
+      blok.className = "dag";
+      const vanzelf = groep.kop === "Vandaag" || Boolean(this.filter_.dag) || (i === 0 && groepen[0].kop !== "Vandaag");
+      blok.open = this.dagOpen_.has(groep.sleutel) ? this.dagOpen_.get(groep.sleutel) : vanzelf;
+      blok.addEventListener?.("toggle", () => this.dagOpen_.set(groep.sleutel, blok.open));
+      const kop = document.createElement("summary");
+      const titel = document.createElement("span");
+      titel.className = "titel";
+      titel.textContent = groep.kop;
+      const aantal = document.createElement("span");
+      aantal.className = "stand";
+      const kritiek = groep.rijen.filter((r) => r.soort === "kritiek").length;
+      aantal.textContent = `${groep.rijen.length}${kritiek ? `, ${kritiek} kritiek` : ""}`;
+      kop.append(titel, aantal);
+      blok.append(kop);
+      lijst.append(blok);
       for (const rij of groep.rijen) {
         const el = document.createElement("div");
         el.className = `rij ${rij.soort}`;
@@ -1159,9 +1320,9 @@ class DacViewNotifications extends DacElement {
         tekst.className = "tekst";
         tekst.textContent = rij.tekst;
         el.append(tijd, tekst);
-        lijst.append(el);
+        blok.append(el);
       }
-    }
+    });
   }
 }
 
