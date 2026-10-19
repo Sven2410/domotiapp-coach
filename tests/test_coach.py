@@ -10016,6 +10016,65 @@ asyncio.run(ws139.async_set_display(hass173, v173, {"id": 3, "type": "domotiapp_
 controle("de bewoner zet het jaar op juli", (store173.instellingen.get("history") or {}).get("year_start_month") == 7,
          f"{store173.instellingen.get('history')}")
 
+print("=== 174. de vooruitblik: per uur de prijs, de zon, het huis en elk plan (v0.133.0) ===")
+# De eigenaar op 19-10-2026: "Dan zie je in één oogopslag wat er toekomstig gaat
+# gebeuren, en krijg je een visuele bevestiging of je ingestelde prioriteiten ook
+# kloppen." De coach rekent hier niets nieuws uit: hij geeft door wat hij al had.
+from domotiapp_coach.batterij import Uur as Uur174  # noqa: E402
+from domotiapp_coach.planner import Programma as Programma174  # noqa: E402
+
+inst174 = instellingen(devices=[LAADPAAL, BATTERIJ, BOILER, VAATWASSER, AIRCO])
+inst174["contract"] = dict(DYN166)
+hass174, store174, coach174 = bouw(huis166, inst174)
+NU174 = dt.datetime(2026, 10, 18, 18, 20)
+u174 = lambda h, m=0: dt.datetime(2026, 10, 18, h, m)  # noqa: E731
+coach174._zon_kwh = {u174(18): 0.4, u174(19): 0.1, dt.datetime(2026, 10, 17, 12): 3.0}
+coach174._huis_kwh = {18: 0.6, 19: 0.8, 20: 0.7}
+coach174._batterij["dev-batterij"] = {"uren": [
+    Uur174(u174(18, 15), u174(18, 30), "nul", -0.25, 0.0, 61, 0.40),
+    Uur174(u174(19), u174(20), "handelen", -2.5, -2.1, 44, 0.46),
+]}
+coach174.state[LAADPAAL["id"]] = {"plan_ahead": {"blocks": [
+    {"start": u174(19).isoformat(), "end": u174(20).isoformat(), "charging": False, "why": "duurder dan nodig",
+     "kwh": 0, "solar_kwh": 0, "accu_kwh": 0},
+    {"start": u174(23).isoformat(), "end": dt.datetime(2026, 10, 19, 0).isoformat(), "charging": True, "why": "goedkoop",
+     "kwh": 11.0, "solar_kwh": 0.0, "accu_kwh": 1.0},
+]}}
+coach174.state["dev-boiler"] = {"blokken": [{"start": u174(21).isoformat(), "end": u174(22).isoformat(), "kwh": 2.0}]}
+coach174.state["dev-vaatwasser"] = {"starts_at": u174(22).isoformat(), "running": False}
+coach174._programma["dev-vaatwasser"] = {"programma": Programma174("eco_50", "Eco 50 °C", 90, 0.9, 2100)}
+coach174.state["dev-airco"] = {"on": True, "power_w": 650}
+vb174 = coach174.vooruitblik(inst174, NU174)
+per174 = {a["id"]: a for a in vb174["apparaten"]}
+print(f"  {vb174['van']} tot {vb174['tot']}, zon {vb174['zon']}, huis {len(vb174['huis'])} uur, "
+      f"apparaten {[(a['id'], len(a['blokken'])) for a in vb174['apparaten']]}")
+controle("vanaf het begin van dit uur, minstens twaalf uur", vb174["van"] == u174(18).isoformat()
+         and vb174["tot"] >= dt.datetime(2026, 10, 19, 6).isoformat(), f"{vb174['van']} {vb174['tot']}")
+controle("de zon per uur, alleen binnen de vooruitblik", vb174["zon"] == {u174(18).isoformat(): 0.4, u174(19).isoformat(): 0.1},
+         f"{vb174['zon']}")
+controle("het huis per uur uit de mediaan van de week", vb174["huis"].get(u174(19).isoformat()) == 0.8, f"{vb174['huis']}")
+paal174 = per174[LAADPAAL["id"]]["blokken"]
+controle("de laadpaal: het geplande vermogen, met de uitleg van een uur dat hij wacht",
+         any(b["wat"] == "laadt" and abs(b["kw"] - 11.0) < 1e-9 and abs(b["accu_kw"] - 1.0) < 1e-9 for b in paal174)
+         and any(b["wat"] == "wacht" and b["why"] == "duurder dan nodig" for b in paal174), f"{paal174}")
+accu174 = per174["dev-batterij"]["blokken"]
+controle("de batterij: vermogen per uur met de stand en de accustand",
+         abs(accu174[0]["kw"] - (-1.0)) < 1e-9 and accu174[1]["soc"] == 44 and accu174[1]["stand"] == "handelen", f"{accu174}")
+controle("de boiler: de uren die hij koos", per174["dev-boiler"]["blokken"][0]["kw"] == 2.0, f"{per174['dev-boiler']}")
+vw174 = per174["dev-vaatwasser"]["blokken"][0]
+controle("de vaatwasser: de start en de duur van het programma, met het verbruik",
+         vw174["start"] == u174(22).isoformat() and vw174["end"] == u174(23, 30).isoformat() and abs(vw174["kw"] - 0.6) < 1e-9,
+         f"{vw174}")
+controle("de airco: alleen wat hij nu doet", per174["dev-airco"]["blokken"][0]["kw"] == 0.65
+         and len(per174["dev-airco"]["blokken"]) == 1, f"{per174['dev-airco']}")
+controle("en de voorrang, zoals Voorkeuren hem zet", isinstance(vb174["voorrang_zon"], list)
+         and "dev-batterij" in vb174["voorrang_zon"] and isinstance(vb174["voorrang_plan"], list), f"{vb174['voorrang_zon']}")
+controle("de prijzen gaan mee", isinstance(vb174["prijzen"], list), "")
+# Een programma waarvan het verbruik niet bekend is: geen verzonnen vermogen.
+coach174._programma["dev-vaatwasser"]["programma"] = Programma174("x", "Katoen", 120, 1.0, 0, kwh_bekend=False)
+controle("een onbekend verbruik blijft onbekend", coach174.vooruitblik(inst174, NU174)["apparaten"][3]["blokken"][0]["kw"] is None,
+         "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

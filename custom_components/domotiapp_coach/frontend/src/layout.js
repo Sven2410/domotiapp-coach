@@ -22,6 +22,8 @@
  */
 export const OVERVIEW_CARDS = [
   { id: "coach", label: "Energiecoach" },
+  // Sinds v0.133.0: wat er de komende uren gebeurt (vooruitblik.js).
+  { id: "vooruit", label: "Vooruitblik" },
   { id: "tiles", label: "Meetwaarden" },
   { id: "phases", label: "Belasting per fase" },
   { id: "meters", label: "Je meter" },
@@ -42,8 +44,9 @@ export const defaultLayout = () =>
  *
  * A card added in a later version is in nobody's stored layout, and dropping it
  * would mean a new feature silently never appears for existing customers. So
- * unknown ids are thrown away and missing ones are appended in their default
- * order, visible.
+ * unknown ids are thrown away and missing ones are put in, visible, right after
+ * the card that comes before them by default (sinds v0.133.0; tot dan achteraan,
+ * en dan stond de vooruitblik onder de energiestroom).
  */
 function reconcile(cards) {
   const seen = new Set();
@@ -55,9 +58,13 @@ function reconcile(cards) {
     out.push({ id: card.id, hidden: Boolean(card.hidden) });
   }
 
-  for (const card of OVERVIEW_CARDS) {
-    if (!seen.has(card.id)) out.push({ id: card.id, hidden: false });
-  }
+  OVERVIEW_CARDS.forEach((card, index) => {
+    if (seen.has(card.id)) return;
+    const voorganger = index > 0 ? OVERVIEW_CARDS[index - 1].id : null;
+    const plek = voorganger === null ? -1 : out.findIndex((c) => c.id === voorganger);
+    out.splice(plek + 1, 0, { id: card.id, hidden: false });
+    seen.add(card.id);
+  });
 
   return out;
 }

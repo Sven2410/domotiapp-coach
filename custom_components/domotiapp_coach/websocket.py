@@ -1327,6 +1327,20 @@ async def async_battery_recalculate(
     connection.send_result(msg["id"], uit)
 
 
+@websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/forecast"})
+@websocket_api.async_response
+async def async_forecast(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De vooruitblik op het overzicht (v0.133.0): zie `vooruitblik` in coach.py."""
+    from .coach import async_get_coach
+
+    settings = await async_get_store(hass).async_load()
+    connection.send_result(msg["id"], async_get_coach(hass).vooruitblik(settings))
+
+
 @websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/berichten/list"})
 @websocket_api.async_response
 async def async_berichten_list(
@@ -1678,6 +1692,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_contract_check)
     websocket_api.async_register_command(hass, async_contract_confirm)
     websocket_api.async_register_command(hass, async_berichten_list)
+    websocket_api.async_register_command(hass, async_forecast)
     websocket_api.async_register_command(hass, async_battery_recalculate)
     websocket_api.async_register_command(hass, async_berichten_read)
     websocket_api.async_register_command(hass, async_reminders_set)

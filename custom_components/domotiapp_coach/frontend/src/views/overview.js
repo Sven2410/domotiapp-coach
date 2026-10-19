@@ -44,6 +44,7 @@ import {
 } from "../schedule-sheet.js";
 import { heeftVoorkeuren } from "../voorkeur-velden.js";
 import "../plan-ahead-sheet.js";
+import "../vooruitblik.js";
 import {
   OVERVIEW_CARDS,
   defaultLayout,
@@ -464,6 +465,7 @@ class DacViewOverview extends DacElement {
 
     /* ---- per phase ---- */
     .phases[hidden] { display: none; }
+    .vooruit[hidden] { display: none; }
     .phase-rows { margin-top: 14px; display: grid; gap: 10px; }
     .phase-group {
       margin: 10px 0 4px;
@@ -1199,6 +1201,16 @@ class DacViewOverview extends DacElement {
           <p class="coach-sun" id="coach-sun" hidden></p>
         </article>
 
+        <!-- De vooruitblik (v0.133.0): wat er de komende uren gebeurt, in één
+             grafiek. Verborgen tot de coach hem stuurt. -->
+        <article class="card panel vooruit" id="vooruit" data-card="vooruit" hidden>
+          <div class="panel-head">
+            <div class="eyebrow">Vooruitblik</div>
+            <h2>Wat er de komende uren gebeurt</h2>
+          </div>
+          <dac-vooruitblik id="vooruitblik"></dac-vooruitblik>
+        </article>
+
         <!-- Tot de bewoner de prijsopbouw bevestigt (v0.129.0, sinds v0.130.1 op Contract). Geen
              verwijzing naar een tabblad: de bewoner van de eerste woning op
              19-10-2026, bij "Kijk onder Voorkeuren": "voorkeuren ken ik niet".
@@ -1663,6 +1675,8 @@ class DacViewOverview extends DacElement {
     // flat line saying what the tile already says.
     this.forecast_ = priceForecast(this.feed_, this.settings_?.contract);
     this.priceBounds_ = thresholds.price;
+    // De vooruitblik eens per vijf minuten opnieuw (v0.133.0).
+    if (Date.now() - (this.vooruitOp_ ?? 0) >= 300000) this.haalVooruit_(true);
     this.tiles_.price.action = this.forecast_.length > 1 ? () => this.openPrices_() : null;
     if (this.$("#prices").open) this.drawPrices_();
 
@@ -1769,6 +1783,7 @@ class DacViewOverview extends DacElement {
     // heeft of de reserve invalt (v0.101.3). Bij elk besluit opnieuw, hooguit
     // eens per minuut.
     laadCoachPrijzen(this.hass).then(() => this.paintPrijsMelding_());
+    this.haalVooruit_(true);
 
     try {
       this.coachOff_ = await volgCoach(this.hass, "decision", (data) => {
@@ -1776,10 +1791,46 @@ class DacViewOverview extends DacElement {
         laadCoachPrijzen(this.hass);
         this.coach_ = { ...(this.coach_ ?? {}), [data.device]: data };
         if (this.rendered_) this.updateSteerable_(this.lastDevices_ ?? []);
+        this.haalVooruit_();
       });
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de coach niet volgen", error);
     }
+  }
+
+  /**
+   * De vooruitblik ophalen (v0.133.0), bij een besluit van de coach hooguit eens
+   * per minuut en anders eens per vijf minuten (`tick_`). Een coach van voor
+   * v0.133.0 kent het commando niet; dan blijft de kaart weg.
+   */
+  async haalVooruit_(nu = false) {
+    if (!this.hass?.callWS) return;
+    const sinds = Date.now() - (this.vooruitOp_ ?? 0);
+    if (!nu && sinds < 60000) return;
+    this.vooruitOp_ = Date.now();
+    try {
+      this.vooruit_ = await this.hass.callWS({ type: "domotiapp_coach/forecast" });
+    } catch (error) {
+      this.vooruit_ = null;
+    }
+    this.paintVooruit_();
+  }
+
+  paintVooruit_() {
+    if (!this.rendered_) return;
+    const kaart = this.$("#vooruit");
+    const data = this.vooruit_;
+    const iets = Boolean(data) && ((data.prijzen ?? []).length || Object.keys(data.zon ?? {}).length
+      || (data.apparaten ?? []).some((a) => (a.blokken ?? []).length));
+    kaart.hidden = !iets;
+    if (!iets) return;
+    const devices = this.settings_?.devices ?? [];
+    this.$("#vooruitblik").update({
+      data,
+      devices,
+      labels: deviceLabelMap(devices),
+      drempels: this.settings_?.thresholds?.price ?? { low: 0.2, high: 0.3 },
+    });
   }
 
   /** Ja zeggen tegen wat de coach voorstelt, voor deze laadbeurt. */
@@ -2087,9 +2138,15 @@ class DacViewOverview extends DacElement {
     // Een batterij heeft geen `plan_ahead` maar een plan per uur (`hours`);
     // dat opent dezelfde pop-up (v0.85.0).
     const vooruit = this.$(`[data-ahead="${slot}"]`);
+    // Sinds v0.133.0 ook de boiler (de blokken die hij koos) en een apparaat
+    // met een programma (een start, of hij draait).
     vooruit.hidden = besluit.kind === "batterij"
       ? !(besluit.hours ?? []).length
-      : !besluit.plan_ahead || besluit.rule === "disconnected";
+      : besluit.kind === "boiler"
+        ? !(besluit.blokken ?? []).length
+        : besluit.kind === "programma"
+          ? !(besluit.starts_at || (besluit.running && besluit.ends_at))
+          : !besluit.plan_ahead || besluit.rule === "disconnected";
 
     // En bijwerken terwijl hij openstaat, want de coach denkt elke minuut
     // opnieuw en een tijdlijn van vijf minuten geleden is een verkeerde. Het

@@ -3246,6 +3246,8 @@ class ChargerCoach:
             "program": programma.key if programma is not None else "",
             # De naam zoals de machine hem noemt, voor de kaart (v0.124.0).
             "program_label": programma.label if programma is not None else "",
+            # Hoe lang het programma duurt, voor "Wat gaat hij doen" (v0.133.0).
+            "program_minutes": programma.minutes if programma is not None else None,
             "tip": "",
         }
         await self._async_noteer_programma(device, device_id, now)
@@ -6144,6 +6146,9 @@ class ChargerCoach:
             "stock_euro": round(sessie["voorraad"].euro, 2),
         }
 
+        # Het hele plan, voor de vooruitblik op het overzicht (v0.133.0): de
+        # toestand neemt er 48 blokken van, met kwartierprijzen maar twaalf uur.
+        sessie["uren"] = list(besluit.uren)
         self.state[device_id] = {
             "charge": besluit.stand in (NETLADEN, MAX_LADEN),
             "amps": 0,
@@ -7522,6 +7527,110 @@ class ChargerCoach:
             return False
         vandaag = dt_util.as_local(now or dt_util.utcnow()).date()
         return vandaag < NETTING_ENDS
+
+    def vooruitblik(self, settings: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
+        """Wat er de komende uren gebeurt, per uur, voor de vooruitblik op het overzicht (v0.133.0).
+
+        De eigenaar op 19-10-2026, bij voorbeelden van andere apps: "Dan zie je
+        in één oogopslag wat er toekomstig gaat gebeuren, en krijg je een
+        visuele bevestiging of je ingestelde prioriteiten ook kloppen." Er wordt
+        hier niets nieuws uitgerekend: de prijzen, de zonverwachting en het
+        huisverbruik waar de coach zelf mee plant, en per apparaat het plan dat
+        hij al had. Wat hij niet weet staat er niet in; een airco heeft geen
+        plan, alleen wat hij nu doet.
+
+        Tot het eind van de bekende prijzen, minstens twaalf uur en hooguit tot
+        morgen 24:00. Momenten als tekst, lokaal en zonder tijdzone, zoals de
+        rest van de toestand.
+        """
+        nu = _moment(now)
+        van = nu.replace(minute=0, second=0, microsecond=0)
+        prijzen = self._prices(settings, nu)
+        einde = max([r["end"] for r in prijzen] + [van + timedelta(hours=12)])
+        einde = min(einde, datetime.combine(nu.date() + timedelta(days=2), time()))
+        uren: list[datetime] = []
+        t = van
+        while t < einde:
+            uren.append(t)
+            t += timedelta(hours=1)
+
+        def lees(waarde: Any) -> datetime | None:
+            moment = waarde if isinstance(waarde, datetime) else _tijdstip(waarde)
+            if moment is not None and moment.tzinfo is not None:
+                moment = dt_util.as_local(moment).replace(tzinfo=None)
+            return moment
+
+        def blok(start: datetime | str, eind: datetime | str, kwh: float | None, **meer) -> dict | None:
+            a, b = lees(start), lees(eind)
+            if a is None or b is None or b <= van or a >= einde or b <= a:
+                return None
+            uur = (b - a).total_seconds() / 3600
+            return {"start": a.isoformat(), "end": b.isoformat(),
+                    "kw": None if kwh is None else round(kwh / uur, 3), **meer}
+
+        apparaten: list[dict[str, Any]] = []
+        for device in settings.get("devices") or []:
+            device_id = device.get("id") or ""
+            soort = device.get("type")
+            st = self.state.get(device_id) or {}
+            blokken: list[dict | None] = []
+            if soort == "laadpaal":
+                for b in (st.get("plan_ahead") or {}).get("blocks") or []:
+                    laadt = bool(b.get("charging")) and float(b.get("kwh") or 0) > 0
+                    uur = blok(b.get("start"), b.get("end"), float(b.get("kwh") or 0) if laadt else 0.0,
+                               zon_kw=None, wat="laadt" if laadt else "wacht", why=b.get("why") or "")
+                    if uur is not None and laadt:
+                        duur = (lees(b["end"]) - lees(b["start"])).total_seconds() / 3600
+                        uur["zon_kw"] = round(float(b.get("solar_kwh") or 0) / duur, 3)
+                        uur["accu_kw"] = round(float(b.get("accu_kwh") or 0) / duur, 3)
+                    blokken.append(uur)
+            elif soort == "thuisbatterij":
+                for u in (self._batterij.get(device_id) or {}).get("uren") or []:
+                    blokken.append(blok(u.start, u.end, u.kwh, wat=STAND_NAMEN.get(u.stand, u.stand),
+                                        stand=u.stand, soc=round(u.soc), net_kw=None))
+            elif soort == "boiler":
+                for b in st.get("blokken") or []:
+                    blokken.append(blok(b.get("start"), b.get("end"), float(b.get("kwh") or 0), wat="verwarmt"))
+            elif soort in PROGRAMMA_TYPES:
+                programma = (self._programma.get(device_id) or {}).get("programma")
+                kwh = programma.kwh if programma is not None and programma.kwh_bekend else None
+                if st.get("running") and st.get("started_at") and st.get("ends_at"):
+                    blokken.append(blok(st["started_at"], st["ends_at"], None, wat="draait"))
+                elif st.get("starts_at") and programma is not None:
+                    begin = lees(st["starts_at"])
+                    if begin is not None:
+                        blokken.append(blok(begin, begin + timedelta(minutes=programma.minutes), kwh,
+                                            wat=f"start, {programma.label}" if programma.label else "start"))
+            elif soort == "airco":
+                if st.get("on"):
+                    vermogen = st.get("power_w") or st.get("vermogen_w")
+                    blokken.append(blok(van, van + timedelta(hours=1),
+                                        None if vermogen is None else float(vermogen) / 1000.0, wat="aan"))
+            else:
+                continue
+            gevonden = [b for b in blokken if b is not None]
+            if gevonden or soort in ("laadpaal", "thuisbatterij", "boiler") and device.get("controllable"):
+                apparaten.append({"id": device_id, "type": soort, "blokken": gevonden})
+
+        _regels, zon_rang = self._zon_voorrang(settings)
+        plan_rang = self._plan_voorrang(settings)
+        return {
+            "van": van.isoformat(),
+            "tot": einde.isoformat(),
+            "prijzen": [
+                {"start": r["start"].isoformat(), "end": r["end"].isoformat(), "price": r["price"], "feed_in": r["feed_in"]}
+                for r in prijzen if r["end"] > van and r["start"] < einde
+            ],
+            # kWh per uur, op het begin van het uur.
+            "zon": {u.isoformat(): round(self._zon_kwh[u], 3) for u in uren if u in self._zon_kwh},
+            "zon_geschat": bool(self._zon_geschat),
+            # Het huis zonder de apparaten die de coach stuurt: de mediaan per uur
+            # van de afgelopen week (`_async_huisverbruik`).
+            "huis": {u.isoformat(): round(self._huis_kwh[u.hour], 3) for u in uren if u.hour in self._huis_kwh},
+            "apparaten": apparaten,
+            "voorrang_zon": [d for d, _ in sorted(zon_rang.items(), key=lambda x: x[1])],
+            "voorrang_plan": [d for d, _ in sorted(plan_rang.items(), key=lambda x: x[1])],
+        }
 
     def _prices(self, settings: dict[str, Any], now: datetime | None = None) -> list[dict]:
         """De prijslijst, met per blok wat het kost én wat teruglevering opbrengt.

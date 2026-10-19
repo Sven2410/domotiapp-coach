@@ -260,3 +260,48 @@ Sinds v0.119.3 ook in de pop-up van een bel in de energiestroom (`openDetail_` i
 `components/energy-flow.js`), want daar staan dezelfde regels. De eigenaar op
 15-10-2026, bij de pop-up van de batterij met "laadt" en "ongeveer 93%, gemeten in
 de accu": "hier ook hoofdletters toepassen."
+
+## De vooruitblik (v0.133.0)
+
+De eigenaar op 19-10-2026, bij voorbeelden van andere apps (een dynamisch-contract-app, een
+energie-app met een prijsgrafiek en de bèta van een optimizer): "Wat helemaal vet zou zijn is als
+er nog een overall predictive modus komt op je hoofd dashboard", en "Dan zie je in één oogopslag
+wat er toekomstig gaat gebeuren, en krijg je een visuele bevestiging of je ingestelde
+prioriteiten ook kloppen."
+
+Een kaart op het overzicht, direct onder de coach (`vooruit` in `OVERVIEW_CARDS`). Wie de
+volgorde al eens veranderde krijgt hem ook daar, na zijn voorganger, en niet achteraan:
+`reconcile` in layout.js zet een nieuwe kaart sindsdien op zijn plek.
+
+- **De gegevens** komen van de coach: `domotiapp_coach/forecast` (websocket.py) roept
+  `vooruitblik` in coach.py aan. De prijzen, de zonverwachting per uur (`_zon_kwh`) en het
+  huisverbruik per uur (`_huis_kwh`, de mediaan van de afgelopen week) waar de coach zelf mee
+  plant, en per apparaat het plan dat hij al had: de blokken van de laadpaal (`plan_ahead`), het
+  hele uurplan van de batterij (`uren` in het geheugen, de toestand neemt er maar 48 van), de
+  blokken die de boiler koos (`blokken` op `Decision`, uit `plan_boiler`), de start en de duur
+  van een programma, en van een airco alleen wat hij nu doet. Van nu tot het eind van de bekende
+  prijzen, minstens twaalf uur, hooguit tot morgen 24:00. Plus de volgorde van de voorrang bij
+  zon en bij planningen.
+- **De kaart** (`vooruitblik.js`, element `dac-vooruitblik`): bovenaan de prijs per uur in de
+  kleuren van Voorkeuren, daaronder de vermogens. De apparaten staan gestapeld in de volgorde
+  van de voorrang, ontladen van de batterij onder de lijn, de zon als geel vlak, het huis als
+  stippellijn en de accustand als lijn op zijn eigen schaal (0 tot 100%). Een programma waarvan
+  het verbruik niet bekend is krijgt een streepje en geen hoogte. Vegen gaat vooruit, tikken op
+  een uur zet het in het vlak erboven: de prijs en per laag wat er gebeurt ("Thuisbatterij:
+  Handelen, 2,5 kW eruit, naar 55%"). Met de keuzeknoppen zet je lagen aan en uit; dat onthoudt
+  het scherm (`dac-vooruitblik` in localStorage), want het is een voorkeur van wie kijkt.
+  Onderaan de voorrang in woorden.
+- **Haalt op** bij het openen, bij een besluit van de coach hooguit eens per minuut, en anders
+  eens per vijf minuten (`haalVooruit_` in overview.js). Een coach van voor v0.133.0 kent het
+  commando niet: dan blijft de kaart weg.
+
+**Wat gaat hij doen** bestond voor de laadpaal en de batterij. Sinds v0.133.0 ook voor de boiler
+en een apparaat met een programma: dezelfde pop-up met de prijsgrafiek, groen waar hij draait,
+en de vakken en de uren eronder (`apparaatVooruit` en `paintAnder_` in plan-ahead-sheet.js). De
+prijzen zijn die van de coach (`coachRijen` in data-source.js); de duur van een programma
+staat sinds deze uitgave in de toestand (`program_minutes`). De eigenaar op 18-10-2026: "Zou bij
+zowel batterij, als ev laden, als boiler, etc op dezelfde manier weergegeven mogen worden." Een
+airco heeft geen plan en dus geen knop.
+
+Proef 174 in test_coach.py, de boiler in test_planner.py, en in test_rapport.mjs "de
+vooruitblik" en "Wat gaat hij doen: de boiler en een programma".

@@ -249,7 +249,7 @@ export const reserveValtIn = () => coachPrijzen.reserve;
 /** False als de bewoner de prijsopbouw nog niet bevestigde (v0.129.0). */
 export const prijsBevestigd = () => coachPrijzen.bevestigd;
 
-function coachRijen() {
+export function coachRijen() {
   return coachPrijzen.rows.map((rij) => ({ start: rij.start, end: rij.end, price: rij.price }));
 }
 
