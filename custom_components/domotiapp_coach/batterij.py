@@ -289,6 +289,9 @@ class _Som:
     eta: float
     # Of de avondpiek dicht is voor het net (vast contract). Zie `piek_dicht`.
     piek: bool = True
+    # Per blok de inhoud waaronder hij aan het eind niet aan het net levert, met
+    # de nachtstrategie aan (v0.133.1); None zonder. Zie `_nacht_vloer`.
+    vloer: list[float] | None = None
 
 
 def _mag_handelen(b: Batterij, rij: dict) -> bool:
@@ -338,18 +341,27 @@ def handelen_kan_niet(b: Batterij, prijzen: list[dict], now: datetime) -> bool:
 
 def _mogelijk(
     e: float, rij: dict, deel: float, huis: float, b: Batterij, som_laag: float,
-    hoog: float, eta: float, piek: bool = True,
+    hoog: float, eta: float, piek: bool = True, vloer: float | None = None,
 ) -> tuple[float, float]:
-    """Tussen welke inhoud de batterij aan het eind van dit blok kan zitten."""
+    """Tussen welke inhoud de batterij aan het eind van dit blok kan zitten.
+
+    `vloer` is de inhoud waaronder hij niet aan het net levert (v0.133.1): het
+    huis voeden mag eronder, handelen niet. Zie `_nacht_vloer`.
+    """
     op = min(hoog, e + b.max_charge_w / 1000.0 * deel * eta)
     if piek and in_evening_peak(rij["start"]):
         # Eis 4: in de avondpiek komt er niets van het net bij. Zon mag.
         op = min(op, e + max(0.0, -huis) * eta)
     neer_w = b.max_discharge_w / 1000.0 * deel
-    if not _mag_handelen(b, rij):
+    handelt = _mag_handelen(b, rij)
+    if not handelt:
         # Zonder handelen gaat er niets naar het net: hooguit wat het huis vraagt.
         neer_w = min(neer_w, max(0.0, huis))
     neer = max(min(som_laag, e), e - neer_w / eta)
+    if handelt and vloer is not None:
+        # Aan het net leveren alleen tot de vloer; het huis voeden mag verder.
+        alleen_huis = max(min(som_laag, e), e - min(neer_w, max(0.0, huis)) / eta)
+        neer = min(alleen_huis, max(neer, min(e, vloer)))
     return max(op, e), min(neer, e)
 
 
@@ -465,6 +477,8 @@ def _waarde_vooruit(
         delen.append(deel)
         huis.append(_netto_huis_kwh(forecast, rij, deel))
 
+    vloer = _nacht_vloer(blokken, forecast, b, bodem)
+
     eind_prijs = _gemiddeld_bekend(blokken) or 0.0
     volgende = [-(max(0.0, e - bodem)) * eta * eind_prijs for e in rooster]
 
@@ -478,7 +492,7 @@ def _waarde_vooruit(
         na[k] = volgende
         begin = []
         for e in rooster:
-            op, neer = _mogelijk(e, rij, deel, h, b, bodem, hoog, eta, piek)
+            op, neer = _mogelijk(e, rij, deel, h, b, bodem, hoog, eta, piek, None if vloer is None else vloer[k])
             kandidaten = {e, op, neer}
             if h > 0:
                 kandidaten.add(max(neer, e - h / eta))
@@ -500,14 +514,15 @@ def _waarde_vooruit(
             )
         volgende = begin
 
-    return _Som(blokken, delen, huis, na, laag, hoog, stap, eta, piek)
+    return _Som(blokken, delen, huis, na, laag, hoog, stap, eta, piek, vloer)
 
 
 def _beste_stap(som: _Som, k: int, e: float, b: Batterij) -> float:
     """Naar welke inhoud de batterij in blok k het beste kan gaan."""
     rij, deel, h = som.blokken[k], som.delen[k], som.huis[k]
     bodem = b.bodem / 100.0 * (b.capacity_kwh or 0.0)
-    op, neer = _mogelijk(e, rij, deel, h, b, bodem, som.hoog, som.eta, som.piek)
+    op, neer = _mogelijk(e, rij, deel, h, b, bodem, som.hoog, som.eta, som.piek,
+                         None if som.vloer is None else som.vloer[k])
     kandidaten = {e, op, neer}
     if h > 0:
         kandidaten.add(max(neer, e - h / som.eta))
@@ -773,6 +788,41 @@ def nachtverloop(
                 tekort += nodig - kan
                 inhoud = 0.0
     return inhoud, tekort, weg
+
+
+def _nacht_nodig(t: datetime, forecast: Forecast, b: Batterij) -> float:
+    """Wat er op `t` boven de ondergrens in moet zitten om zonder net morgenvroeg te halen.
+
+    Dezelfde som als `nachtverloop`, achterstevoren: van morgenvroeg terug naar
+    `t`, per uur wat het huis vraagt min de zon, met het verlies zoals daar.
+    Zon in een uur maakt het tekort van de uren erna kleiner.
+    """
+    eta = b.rte if b.rte else 1.0
+    nodig = 0.0
+    for zon, huis in reversed(_nacht_uren(t, forecast)):
+        netto = zon - huis
+        nodig = nodig - netto / eta if netto < 0 else max(0.0, nodig - netto)
+    return nodig
+
+
+def _nacht_vloer(blokken: list[dict], forecast: Forecast, b: Batterij, bodem: float) -> list[float] | None:
+    """Per blok de inhoud waaronder de som aan het eind niet aan het net levert (v0.133.1).
+
+    De bewoner van de eerste woning op 20-10-2026, met de nachtstrategie aan,
+    een volle batterij en de prijzen tot middernacht: "Ondanks dat handelen aan
+    staat, zou ik verwachten dat ie om 19u nog zo'n 20 a 30% over heeft om de
+    nacht door te komen." Het besluit van het moment hield zich daar al aan
+    ("handelen alleen met wat er boven de nacht uitkomt", `plan_batterij`), maar
+    de som niet: die gaf wat er om middernacht nog in zat de gemiddelde prijs
+    als waarde, verkocht de rest op de dure avond, en zo stond er in het plan en
+    in de vooruitblik 5% om 23:00. Nu heeft de som dezelfde grens, zodat het
+    plan laat zien wat hij doet.
+
+    None zonder nachtstrategie, zonder handelen of zonder huisprofiel.
+    """
+    if not b.nacht or not b.handelen or not forecast.house_kwh:
+        return None
+    return [bodem + _nacht_nodig(rij["end"], forecast, b) for rij in blokken]
 
 
 def balans_kwh(now: datetime, forecast: Forecast, b: Batterij, weg: float = 0.0) -> float | None:

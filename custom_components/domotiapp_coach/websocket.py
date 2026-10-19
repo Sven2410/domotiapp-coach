@@ -459,6 +459,8 @@ _THRESHOLDS = _schema(
             {
                 vol.Optional("low"): vol.All(vol.Coerce(float), vol.Range(0, 10)),
                 vol.Optional("high"): vol.All(vol.Coerce(float), vol.Range(0, 10)),
+                # De kleuren naar de bekende prijzen (v0.133.1).
+                vol.Optional("relative"): bool,
             }
         ),
     }

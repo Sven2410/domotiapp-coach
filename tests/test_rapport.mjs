@@ -4304,6 +4304,37 @@ proef("elk merk dat het paneel aanbiedt neemt de coach aan bij het opslaan (v0.1
   assert.ok(/ALL_BRANDS: Final = sorted\(\s*\{[^}]*\*AIRCO_BRANDS/.test(bron), "AIRCO_BRANDS zit in ALL_BRANDS");
 });
 
+// Prijskleuren naar de bekende prijzen (v0.133.1). De bewoner van de eerste woning op
+// 20-10-2026: "relatief gezien naar de spread op de dag", en "Worden de nieuwe prijzen om
+// 14u bekend, dan past ie zijn kleurstelling aan. Het kán dan zo zijn dat een kolom die
+// om 13.59 nog groen was, rood wordt, omdat de prijzen morgen veel lager zijn."
+proef("prijskleuren naar de bekende prijzen: groen blijft niet groen als morgen goedkoper is (v0.133.1)", async () => {
+  const { prijsGrenzen, level } = await import("../custom_components/domotiapp_coach/frontend/src/format.js");
+  const uur = (h) => new Date(2026, 9, 20, h);
+  const rij = (h, prijs) => ({ start: uur(h), end: uur(h + 1), price: prijs });
+  const vandaag = [rij(10, 0.50), rij(11, 0.40), rij(12, 0.38), rij(13, 0.45), rij(18, 0.47), rij(19, 0.46)];
+  const nu = new Date(2026, 9, 20, 11, 30);
+  // Vast: alles boven 0,30 is rood.
+  assert.equal(level(0.38, prijsGrenzen({ low: 0.2, high: 0.3 }, vandaag, nu)(), true), "bad");
+  // Naar de bekende prijzen: 0,38 is het goedkoopste van wat nog komt, dus groen.
+  const relatief = prijsGrenzen({ low: 0.2, high: 0.3, relative: true }, vandaag, nu);
+  assert.equal(level(0.38, relatief(), true), "good", JSON.stringify(relatief()));
+  assert.equal(level(0.47, relatief(), true), "bad");
+  assert.ok(Math.abs(relatief().low - (0.38 + 0.09 / 3)) < 1e-12, "het uur van 10:00 is voorbij en telt niet mee");
+  // Om 14:00 komen de prijzen van morgen erbij, en die zijn veel lager: 0,38 wordt rood.
+  const morgen = [...vandaag, ...[0.12, 0.10, 0.15, 0.20].map((p, i) => ({ start: new Date(2026, 9, 21, 1 + i), end: new Date(2026, 9, 21, 2 + i), price: p }))];
+  const later = prijsGrenzen({ low: 0.2, high: 0.3, relative: true }, morgen, new Date(2026, 9, 20, 11, 30));
+  assert.equal(level(0.38, later(), true), "bad", "naast een goedkope nacht is 0,38 duur");
+  assert.equal(level(0.10, later(), true), "good");
+  assert.deepEqual(prijsGrenzen({ low: 0.2, high: 0.3, relative: true }, [], nu)(), { low: 0.2, high: 0.3 }, "zonder prijzen de vaste grenzen");
+  const vk = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/strategy.js", import.meta.url), "utf8");
+  assert.ok(vk.includes('id="prijs-relatief"') && vk.includes("thresholds: { price: { relative: event.target.checked } }"));
+  for (const bestand of ["vooruitblik.js", "components/price-chart.js", "views/overview.js"]) {
+    const bron = readFileSync(new URL(`../custom_components/domotiapp_coach/frontend/src/${bestand}`, import.meta.url), "utf8");
+    assert.ok(bron.includes("prijsGrenzen("), `${bestand} kleurt met prijsGrenzen`);
+  }
+});
+
 // De vooruitblik op het overzicht (v0.133.0). De eigenaar op 19-10-2026: "Dan zie je in
 // één oogopslag wat er toekomstig gaat gebeuren, en krijg je een visuele bevestiging of je
 // ingestelde prioriteiten ook kloppen." De vorm van de gegevens is die van `vooruitblik`

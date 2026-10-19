@@ -305,3 +305,24 @@ airco heeft geen plan en dus geen knop.
 
 Proef 174 in test_coach.py, de boiler in test_planner.py, en in test_rapport.mjs "de
 vooruitblik" en "Wat gaat hij doen: de boiler en een programma".
+
+## Prijskleuren naar de bekende prijzen (v0.133.1)
+
+De bewoner van de eerste woning op 20-10-2026, bij de vooruitblik waarin alle staven rood
+waren: "elke app kiest ervoor om de kleurstelling van de kolommen aan te passen, relatief gezien
+naar de spread op de dag. In de huidige versie is alles oranje omdat de prijs inderdaad hoog is.
+Sommige mensen vinden dit misschien fijn!" en "Als je namelijk móet laden (ev) wil je dat op het
+goedkoopste moment doen van de dag." En meteen daarna: "Worden de nieuwe prijzen om 14u bekend,
+dan past ie zijn kleurstelling aan. Het kán dan zo zijn dat een kolom die om 13.59 nog groen
+was, rood wordt, omdat de prijzen morgen veel lager zijn."
+
+Onder Voorkeuren, bij Het overzicht, het vinkje **Prijskleuren naar de bekende prijzen**
+(`thresholds.price.relative`, via `display/set`, dus ook voor de bewoner). Aan: het goedkoopste
+derde van het verschil tussen de goedkoopste en de duurste bekende prijs is groen, het duurste
+derde rood, van het lopende uur af (`prijsGrenzen` in format.js). Een uur dat voorbij is telt
+niet mee. De vaste grenzen verdwijnen dan van het scherm. Uit: de vaste grenzen, zoals altijd.
+
+Het geldt overal waar een prijs een kleur heeft: de vooruitblik, de prijsgrafiek achter het
+tegeltje, het tegeltje Energieprijs zelf, en de zin van de coach ("Stroom is nu duur",
+"Goedkoop moment"). De legenda van de prijsgrafiek noemt dan geen bedragen maar derden. Proef
+"prijskleuren naar de bekende prijzen" in test_rapport.mjs.

@@ -17,7 +17,7 @@
  */
 
 import { DacElement, define } from "../base.js";
-import { clock, price as fmtPrice, level, levelTone } from "../format.js";
+import { clock, price as fmtPrice, level, levelTone, prijsGrenzen } from "../format.js";
 
 /**
  * The drawing is measured in real pixels, not in an abstract grid.
@@ -249,7 +249,12 @@ class DacPriceChart extends DacElement {
 
   drawLegend_() {
     const { low, high } = this.bounds_;
-    const rows = [
+    // Naar de bekende prijzen (v0.133.1): geen bedragen, want die schuiven mee.
+    const rows = this.bounds_?.relative ? [
+      { name: "good", text: "Goedkoopste derde" },
+      { name: "warn", text: "Middelste derde" },
+      { name: "bad", text: "Duurste derde, van de bekende prijzen" },
+    ] : [
       { name: "good", text: `Laag (tot ${fmtPrice(low).value})` },
       { name: "warn", text: `Gemiddeld (tot ${fmtPrice(high).value})` },
       { name: "bad", text: `Hoog (boven ${fmtPrice(high).value})` },
@@ -312,6 +317,8 @@ class DacPriceChart extends DacElement {
       : -1;
 
     const step = labelStep(Math.round(PLOT / 46), rows.length);
+    // De kleur per staaf: vast, of naar de bekende prijzen (v0.133.1).
+    const grens = prijsGrenzen(this.bounds_, rows);
 
     const bars = rows
       .map((row, index) => {
@@ -320,7 +327,7 @@ class DacPriceChart extends DacElement {
         const up = row.price >= 0;
         const height = Math.abs(value - zero);
         const past = row.end <= this.now_;
-        const tone = levelTone(level(row.price, this.bounds_, true));
+        const tone = levelTone(level(row.price, grens(row.start), true));
         return `<path class="bar${past ? " past" : ""}" data-index="${index}" fill="${tone}"
                       d="${barPath(x, barW, zero, height, up, radius)}"/>`;
       })

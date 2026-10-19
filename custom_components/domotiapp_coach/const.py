@@ -735,7 +735,9 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # Zelfbenutting in percent: below `low` is bad, above `high` is good.
         "self_use": {"low": 30, "high": 70},
         # Energy price in euro per kWh: below `low` is good, above `high` is bad.
-        "price": {"low": 0.20, "high": 0.30},
+        # `relative` (v0.133.1): de kleuren naar alle bekende prijzen in plaats
+        # van deze grenzen; zie `prijsGrenzen` in format.js.
+        "price": {"low": 0.20, "high": 0.30, "relative": False},
     },
     # Historie (v0.132.0): de maand waarin een jaar begint, zodat het jaar kan
     # gelijklopen met het contract. Uit de voorbeelden van de eigenaar op
