@@ -1111,6 +1111,8 @@ class Scenario:
     # bedrag erboven, zoals `_teruglevering` in coach.py.
     vast_teruglevering_na: float | None = None
     vast_terugleverkosten_na: float | None = None
+    # Een contract in Portugal (v0.137.0): `contract.pt` zoals in const.py. None is Nederland.
+    pt: dict | None = None
     # Hoe de leverancier terugleverkosten rekent (v0.135.0): "kwh", "overschot",
     # "schalen" of "geen"; zie `kosten_per_kwh` in prijsopbouw.py.
     kosten_vorm: str = "kwh"
@@ -1408,7 +1410,9 @@ def instellingen(s: Scenario) -> dict:
         } if s.voorspeller != "geen" else {},
     }
     salderen = s.contract.endswith("salderen")
-    if s.contract.startswith("vast"):
+    if s.pt is not None:
+        contract = {"type": "fixed", "netting": False, "country": "PT", "pt": s.pt}
+    elif s.contract.startswith("vast"):
         contract = {
             "type": "fixed",
             "netting": salderen,

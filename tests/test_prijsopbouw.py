@@ -193,6 +193,67 @@ controle("18:30 tot 18:45 nog wel, 18:45 tot 19:00 niet meer",
          and not po.overdag(grens + dt.timedelta(minutes=15), grens + dt.timedelta(minutes=30), 52.09, 5.12))
 controle("zonder ligging van de woning telt het niet", not po.overdag(middag, middag + dt.timedelta(hours=1), None, None))
 
+print("=== Portugal: de tijdvakken van de ERSE en de prijs (v0.137.0) ===")
+spec_t = importlib.util.spec_from_file_location("tarifas", BRON / "tarifas.py")
+ta = importlib.util.module_from_spec(spec_t)
+spec_t.loader.exec_module(ta)
+UTC = dt.timezone.utc
+
+
+def u(*a):
+    return dt.datetime(*a, tzinfo=UTC)
+
+
+controle("zomertijd volgens de EU-regel, rond 29-03 en 25-10-2026",
+         not ta.zomertijd(u(2026, 3, 29, 0, 59)) and ta.zomertijd(u(2026, 3, 29, 1, 0))
+         and ta.zomertijd(u(2026, 10, 25, 0, 59)) and not ta.zomertijd(u(2026, 10, 25, 1, 0)))
+controle("Lissabon is UTC in de winter en een uur later in de zomer",
+         ta.lissabon(u(2026, 1, 15, 12, 0))[0] == dt.datetime(2026, 1, 15, 12, 0)
+         and ta.lissabon(u(2026, 7, 15, 12, 0))[0] == dt.datetime(2026, 7, 15, 13, 0))
+# De gevallen die test_rapport.mjs ook uitrekent met tarifas.js (dezelfde tabel).
+GEVALLEN = [
+    # (UTC, tarifa, ciclo, verwacht)
+    ((2026, 1, 15, 21, 59), "bi", "diario", "fora_vazio"),
+    ((2026, 1, 15, 22, 0), "bi", "diario", "vazio"),
+    ((2026, 1, 16, 7, 59), "bi", "diario", "vazio"),
+    ((2026, 1, 16, 8, 0), "bi", "diario", "fora_vazio"),
+    ((2026, 7, 15, 20, 59), "bi", "diario", "fora_vazio"),   # 21:59 in Lissabon
+    ((2026, 7, 15, 21, 0), "bi", "diario", "vazio"),         # 22:00 in Lissabon
+    ((2026, 1, 15, 9, 0), "tri", "diario", "ponta"),
+    ((2026, 1, 15, 10, 30), "tri", "diario", "cheias"),
+    ((2026, 1, 15, 18, 0), "tri", "diario", "ponta"),
+    ((2026, 7, 15, 9, 30), "tri", "diario", "ponta"),        # 10:30 in Lissabon
+    ((2026, 7, 15, 12, 0), "tri", "diario", "cheias"),       # 13:00 in Lissabon
+    ((2026, 1, 14, 6, 59), "bi", "semanal", "vazio"),        # woensdag
+    ((2026, 1, 14, 7, 0), "bi", "semanal", "fora_vazio"),
+    ((2026, 1, 14, 9, 30), "tri", "semanal", "ponta"),
+    ((2026, 1, 14, 12, 0), "tri", "semanal", "cheias"),
+    ((2026, 1, 14, 23, 0), "tri", "semanal", "cheias"),
+    ((2026, 7, 15, 8, 15), "tri", "semanal", "ponta"),       # 09:15 zomer
+    ((2026, 1, 17, 9, 30), "bi", "semanal", "fora_vazio"),   # zaterdag
+    ((2026, 1, 17, 13, 0), "tri", "semanal", "vazio"),
+    ((2026, 1, 17, 18, 30), "tri", "semanal", "cheias"),
+    ((2026, 1, 18, 12, 0), "bi", "semanal", "vazio"),        # zondag
+    ((2026, 1, 18, 12, 0), "simples", "diario", "simples"),
+]
+fout_t = [(g, ta.periodo(u(*g[0]), g[1], g[2])) for g in GEVALLEN if ta.periodo(u(*g[0]), g[1], g[2]) != g[3]]
+controle(f"de tijdvakken van de ERSE, {len(GEVALLEN)} gevallen", not fout_t, f"{fout_t}")
+EDP = {"tarifa": "bi", "ciclo": "diario", "energia": {"vazio": 0.1340, "fora_vazio": 0.2198}, "iec": 0.001, "iva": 23}
+controle("de prijs: (energie + IEC) maal 1 + IVA",
+         ta.preco(EDP, "vazio") == round((0.1340 + 0.001) * 1.23, 6) and ta.preco(EDP, "fora_vazio") == round((0.2198 + 0.001) * 1.23, 6),
+         f"{ta.preco(EDP, 'vazio')} {ta.preco(EDP, 'fora_vazio')}")
+controle("zonder prijs onbekend", ta.preco(EDP, "ponta") is None and ta.preco({}, "vazio") is None)
+controle("de opbouw per tijdvak, in de volgorde van het scherm",
+         [r["periodo"] for r in ta.opbouw(EDP)] == ["vazio", "fora_vazio"]
+         and ta.opbouw(EDP)[0]["all_in"] == ta.preco(EDP, "vazio")
+         and [r["periodo"] for r in ta.opbouw({**EDP, "tarifa": "tri"})] == ["vazio", "cheias", "ponta"])
+controle("teruglevering: nog niet gekozen is onbekend en niet nul",
+         ta.terug(EDP) is None and ta.terug({}) is None and ta.terug({"excedente": {"modo": "onbekend"}}) is None)
+controle("teruglevering: niet verkocht is nul, vast is de prijs, OMIE maal de factor",
+         ta.terug({"excedente": {"modo": "nenhum"}}) == 0.0 and ta.terug({"excedente": {"modo": "fixo", "preco": 0.03}}) == 0.03
+         and ta.terug({"excedente": {"modo": "omie", "fator": 75}}, 0.08) == 0.06
+         and ta.terug({"excedente": {"modo": "omie", "fator": 75}}) is None)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

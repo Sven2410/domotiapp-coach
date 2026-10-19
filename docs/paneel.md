@@ -349,3 +349,12 @@ niets was, of de dag die je koos). Wat je open- of dichtklapt onthoudt het scher
 die in dit huis niet kan (geen batterij, niets dat altijd aan moet) staat er niet, en zijn er
 geen, dan ook de groep niet. Proeven "Meldingen: vier groepen die uitklappen" en "het scherm
 tekent een kop per dag en een rij per melding" in test_rapport.mjs.
+
+## De accustand boven de 0-lijn (v0.137.0)
+
+De eigenaar op 19-10-2026, bij een schermafdruk van de vooruitblik: "Er is nu een 0-lijn, maar hier
+kijkt de soc niet naar." De accustand liep van 0 tot 100% over de hele hoogte van de vermogens, dus
+ook onder de lijn, en 20% leek dan ontladen. Nu staat 0% op de 0-lijn en 100% bovenaan (`vooruitSvg`
+in vooruitblik.js), en krijgt de ruimte boven de lijn minstens evenveel hoogte als die eronder zodra
+er een accustand te tekenen is (`schalen`). De legenda zegt "Accustand: 0% op de lijn, 100%
+bovenaan". Proef in test_rapport.mjs.

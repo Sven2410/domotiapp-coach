@@ -206,7 +206,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de vriezer en de koelkast: uitlezen en melden (deur open, te warm, storing), niet sturen | `docs/vriezer.md` |
 | het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat, de vooruitblik op het overzicht en "Wat gaat hij doen" voor boiler en programma's | `docs/paneel.md` |
 | de berichtenbox (het belletje), de herinnering voor de meterstanden, het bericht dat een contract afloopt of dat de prijscontrole omslaat | `docs/berichten.md` |
-| het contract: de leverancierscatalogus, de prijsopbouw en de controle tegen de all-in sensor, "Ja, dit klopt", de kale marktprijs als reserve, gas en water per energiebron, vast/variabel/dynamisch, looptijden en "nieuw contract afgesloten", teruglevering voor en na 1-1-2027 en salderen per afrekenperiode | `docs/contract.md` |
+| het contract: de leverancierscatalogus, de prijsopbouw en de controle tegen de all-in sensor, "Ja, dit klopt", de kale marktprijs als reserve, gas en water per energiebron, vast/variabel/dynamisch, looptijden en "nieuw contract afgesloten", teruglevering voor en na 1-1-2027 en salderen per afrekenperiode, de schaal in de coach, Portugal | `docs/contract.md` |
 
 ## Wat gelijk moet blijven
 
@@ -252,6 +252,8 @@ dan de andere in dezelfde uitgave.
   `solar_stored_days`) en de schatting `zonInAccu` in `huisMetAccu`
   (views/history.js) voor de uren daarvoor; `balans` in geld.js telt ze op
   dezelfde manier (`docs/eerste-woning.md`).
+- **Portugal** (v0.137.0): `periodo`, `preco`, `terug` en `zomertijd` in tarifas.py tegenover dezelfde
+  namen in tarifas.js; test_prijsopbouw.py en test_rapport.mjs rekenen dezelfde 22 gevallen na (`docs/contract.md`).
 - **De prijsopbouw** (v0.129.0): `zon_op_onder`, `overdag`, `bonus`, `markt_terug` en `terug` in
   prijsopbouw.py tegenover `zonOpOnder`, `overdag`, `bonusOp`, `marktTerug` en `terugOp` in geld.js
   (`docs/contract.md`). Sinds v0.135.0 ook `kosten_per_kwh` en `schaal_per_jaar` tegenover
@@ -303,6 +305,7 @@ dan de andere in dezelfde uitgave.
 | `frontend/src/geld.js` | In geld in Historie en het rapport (v0.101.0): uitgegeven, bespaard in zon, thuisbatterij en coach, en salderen zoals de coach. Geen terugverdientijd en geen aankoopprijzen, sinds v0.101.1 (`docs/eerste-woning.md`) |
 | `frontend/src/savings.js` | Sessies (tot v0.116.0 Bespaard, tot v0.126.4 Beurten), onder Historie: de laadbeurten uit `BeurtenStore` (storage.py) opgeteld per periode en per apparaat. De coach telt per ronde wat een beurt kost (`_geld_bij`) en wat dezelfde tijd op vol vermogen vanaf het inpluggen met alles van het net gekost had (`_basis_bij`, de maat); bespaard is maat min betaald, nooit onder nul, in twee delen: door de zon (`zon_winst`) en door te wachten. Stapt hij midden in een beurt in, dan rekent `_async_terugrekenen` het begin terug uit de recorder en de kwartieropslag |
 | `prijsopbouw.py` | De prijsopbouw (v0.129.0): de inkoopprijs uit de kale prijs en de velden, de controle tegen de all-in sensor (uur tegen kwartier), de terugleverprijs met bonus, zonsopkomst en -ondergang, de vingerafdruk voor "Ja, dit klopt". Kent Home Assistant niet; `async_prijscontrole` in coach.py en `contract/check` in websocket.py gebruiken hem (`docs/contract.md`) |
+| `tarifas.py`, `frontend/src/tarifas.js` | Portugal (v0.137.0): de tijdvakken van de ERSE (simples, bi-horário, tri-horário; ciclo diário en semanal; winter en zomer) in de tijd van Lissabon, de prijs per kWh met IEC en IVA, en wat teruglevering opbrengt. Geen salderen. Kent Home Assistant niet; `_pt_rijen` in coach.py maakt er de prijslijst van, Historie rekent met de tweeling in tarifas.js (`docs/contract.md`) |
 | `frontend/src/leveranciers.js`, `leveranciers-data.js` | De leverancierscatalogus (v0.129.0): per leverancier en soort de velden die Contract voorinvult, de woorden voor de opbouw, bronnen, peildatum en wat onzeker is, en de energiebelasting per jaar. Een voorstel; de coach rekent alleen met wat de klant bevestigde |
 | `berichten.py`, `frontend/src/berichten-sheet.js` | De berichtenbox (v0.130.0): wanneer een herinnering aan de beurt is (meterstanden, een vast contract dat afloopt, de prijscontrole die omslaat), en de pop-up achter het belletje in de kop. Bewaard in `BerichtenStore` (storage.py) (`docs/berichten.md`) |
 | `frontend/src/opbouw.js` | "Zo komt je prijs tot stand" (v0.129.0), op Contract (sinds v0.130.1 ook voor de bewoner): toont wat de coach uitrekent, in woorden en cijfers, in de volgorde van de leverancier |
@@ -335,11 +338,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 518 controles op het denkwerk
 python tests/test_batterij.py    # 206 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1322 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2572 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 1346 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 2586 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-python tests/test_prijsopbouw.py # 45 op de prijsopbouw, de controle en zonsopkomst
-node   tests/test_rapport.mjs    # 223 op het rapport en op het paneel
+python tests/test_prijsopbouw.py # 53 op de prijsopbouw, de controle, zonsopkomst en Portugal
+node   tests/test_rapport.mjs    # 225 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

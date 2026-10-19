@@ -529,6 +529,27 @@ _SETTINGS = _schema(
             {
                 vol.Optional("type"): vol.In([CONTRACT_FIXED, CONTRACT_VARIABLE, CONTRACT_DYNAMIC]),
                 vol.Optional("netting"): bool,
+                # Het land en het Portugese contract (v0.137.0); zie tarifas.py.
+                vol.Optional("country"): vol.In(["NL", "PT"]),
+                vol.Optional("pt"): _schema(
+                    {
+                        vol.Optional("tarifa"): vol.In(["simples", "bi", "tri"]),
+                        vol.Optional("ciclo"): vol.In(["diario", "semanal"]),
+                        vol.Optional("fornecedor"): vol.All(str, vol.Length(max=60)),
+                        vol.Optional("energia"): _schema({vol.Optional(k): _EURO for k in ("simples", "vazio", "fora_vazio", "cheias", "ponta")}),
+                        vol.Optional("iec"): _EURO,
+                        vol.Optional("iva"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
+                        vol.Optional("kva"): vol.All(vol.Coerce(float), vol.Range(0, 1000)),
+                        vol.Optional("potencia_dia"): _EURO,
+                        vol.Optional("servicos_mes"): _EURO,
+                        vol.Optional("excedente"): _schema({
+                            vol.Optional("modo"): vol.In(["onbekend", "nenhum", "fixo", "omie"]),
+                            vol.Optional("preco"): _EURO,
+                            vol.Optional("fator"): vol.All(vol.Coerce(float), vol.Range(0, 200)),
+                            vol.Optional("omie_entity"): _ENTITY,
+                        }),
+                    }
+                ),
                 # Het begin van de afrekenperiode, voor salderen (v0.134.0).
                 vol.Optional("billing_start"): _DATUM,
                 # De leverancier uit de catalogus en de bevestiging (v0.129.0).
@@ -1274,7 +1295,7 @@ async def async_contract_check(
 def _merge_contract(oud: dict[str, Any], nieuw: dict[str, Any]) -> dict[str, Any]:
     """Het concept over het opgeslagen contract heen, per onderdeel."""
     uit = {**oud, **nieuw}
-    for deel in ("fixed", "dynamic", "gas", "water", "confirmed"):
+    for deel in ("fixed", "dynamic", "gas", "water", "confirmed", "pt"):
         if isinstance(oud.get(deel), dict) or isinstance(nieuw.get(deel), dict):
             uit[deel] = {**(oud.get(deel) or {}), **(nieuw.get(deel) or {})}
     return uit

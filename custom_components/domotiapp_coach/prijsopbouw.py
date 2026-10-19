@@ -151,6 +151,26 @@ def schaal_per_jaar(schalen: list | None, kwh: float) -> float | None:
     return bedrag
 
 
+def schaal_rij(schalen: list | None, kwh: float) -> dict | None:
+    """De schaal waar `kwh` in valt: vanaf, tot (of None voor de laatste) en het jaarbedrag (v0.137.0).
+
+    Zoals `schaal_per_jaar`, maar met de grenzen erbij, voor de zin op Contract. Onder de
+    eerste rij: vanaf 0 tot die rij, zonder bedrag.
+    """
+    rijen = sorted(
+        (_getal(r.get("vanaf")), _getal(r.get("per_jaar"))) for r in schalen or [] if isinstance(r, dict)
+    )
+    if not rijen:
+        return None
+    vanaf, per_jaar, tot = 0.0, 0.0, rijen[0][0]
+    for i, (begin, bedrag) in enumerate(rijen):
+        if kwh < begin:
+            break
+        vanaf, per_jaar = begin, bedrag
+        tot = rijen[i + 1][0] if i + 1 < len(rijen) else None
+    return {"vanaf": vanaf, "tot": tot, "per_jaar": per_jaar}
+
+
 def terug(markt: float | None, all_in: float | None, d: dict, salderen: bool, overdag: bool) -> dict:
     """Wat een teruggeleverde kWh opbrengt, en waaruit.
 
@@ -353,6 +373,11 @@ def vingerafdruk(contract: dict) -> str:
         "gas": {k: gewoon(v) for k, v in (contract.get("gas") or {}).items() if k != "periods"},
         "water": {k: gewoon(v) for k, v in (contract.get("water") or {}).items() if k != "periods"},
     }
+    # Het land en het Portugese contract (v0.137.0) tellen alleen in Portugal: een
+    # bevestiging van een Nederlands contract van voor deze uitgave blijft gelden.
+    if (contract.get("country") or "NL") != "NL":
+        deel["country"] = contract.get("country")
+        deel["pt"] = json.loads(json.dumps(contract.get("pt") or {}, default=str))
     tekst = json.dumps(deel, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha1(tekst.encode("utf-8")).hexdigest()[:16]
 
