@@ -232,3 +232,66 @@ netto teruglevert" en "Historie: een vast contract rekent na 1-1-2027 met wat he
 daarna zegt"; in het virtuele huis `vast-na-salderen` en `vast-na-salderen-leeg`, op 4 januari
 2027: de zon in de bus kost € 0,30 (15,4 kWh maal 0,0193) en zonder de bedragen voor na
 salderen € 1,91 (maal 0,124).
+
+## Terugleverkosten in vier vormen, en Historie per afrekenperiode (v0.135.0)
+
+De eigenaar op 19-10-2026, na v0.134.0: "je mag alles maken, ik wil het zo goed mogelijk
+hebben". Drie dingen die toen nog openstonden.
+
+**Terugleverkosten in vier vormen** (`feed_in_costs_mode`, bij vast en bij dynamisch). De catalogus
+kent ze alle vier:
+
+| vorm | wat een kWh extra kost | voorbeelden in de catalogus |
+|---|---|---|
+| `kwh` | het bedrag, over alle teruglevering (de standaard, en tot v0.135.0 de enige) | Eneco sinds juni 2024 |
+| `overschot` | het bedrag alleen als hij niet wegstreept tegen afname | |
+| `schalen` | niets; een vast bedrag per jaar naar de schaal van de teruglevering | Budget (26), Energiedirect (42), Vattenfall (73) |
+| `geen` | niets | ANWB, Coolblue, easyEnergy |
+
+Eén regel, `kosten_per_kwh` in prijsopbouw.py, met de tweeling `kostenPerKwh` in geld.js; de coach
+gebruikt hem in `_teruglevering`, `prijsopbouw.terug` en het geld van een laadbeurt. Bij Contract
+kies je de vorm; bij schalen staat er een tabel (`feed_in_scales`: vanaf hoeveel kWh, het bedrag per
+jaar met btw; onder de eerste rij niets) en een einddatum (`feed_in_scales_until`; leeg is de hele
+afrekenperiode). De catalogus vult bij Budget, Energiedirect en Vattenfall, vast en variabel,
+"schalen" tot 1-1-2027 voor: alle zes de beschrijvingen zeggen dat het vanaf 2027 per kWh gaat. De
+tabel zelf vult de klant of de installateur in. De opbouw zegt wat de vorm betekent (`kostenNoot` in
+opbouw.js). Na 1-1-2027 gaan de kosten van na salderen (`feed_in_costs_after`) per kWh over alles.
+
+**De schaal.** Uit de productvoorwaarden van een vast contract van Vattenfall (Groen uit Nederland
+Vast, 6127_013), die de sessie op thuis op 19-10-2026 in de contractbevestiging van de eigenaar las:
+een afrekening over een periode die deels vóór 1-1-2027 ligt saldeert "vanaf uw vorige jaarafrekening
+tot 1 januari 2027", en "In welke terugleverschaal u valt, wordt dan vastgesteld op basis van de door
+u in deze periode teruggeleverde elektriciteit"; "De vaste terugleverkosten komen vanaf dat moment
+te vervallen." En de schaal gaat over alle teruglevering, ook wat saldeert (bruto). Dus de schaal
+naar de teruglevering van het begin van de afrekenperiode onder dit contract (het laatste van
+`billing_start` en de ingangsdatum) tot de einddatum van de schalen: gemeten tot vandaag, plus
+dezelfde dagen een jaar eerder (`async_afrekening` in coach.py, `schaal_per_jaar`). Mijn Vattenfall
+schatte op dezelfde dag "Schaal 20 (6500 t/m 7000 kWh) € 833,00" over de hele afrekenperiode; dat
+rekent daar nog niet mee.
+
+**Wat niet vaststaat:** of een leverancier het jaarbedrag van een schaal voor een kortere periode
+naar rato rekent. De voorwaarden zeggen alleen dat de schaal op de teruglevering in die periode
+wordt bepaald. Historie rekent het jaarbedrag per dag (gedeeld door 365, `schaalKosten` in geld.js),
+over de dagen die voorbij zijn, zoals Budget en Energiedirect hun schalen per dag rekenen. Een kWh
+extra kost voor de coach hoe dan ook niets.
+
+**Historie per afrekenperiode.** Tot v0.135.0 telde Historie met salderen aan elke teruggeleverde
+kWh als gesaldeerd. Op de jaarafrekening van de eigenaar ging het per afrekenperiode: de
+teruglevering streept weg tegen de afname, en wat er overblijft krijgt de vergoeding na saldering,
+naar rato over de contracten in die periode (29 kWh werd 27 maal de oude en 2 maal de nieuwe
+vergoeding, naar wat er onder elk contract terugging). `domotiapp_coach/afrekening` (websocket.py,
+`async_afrekening`) geeft per afrekenperiode die het getoonde stuk raakt het deel dat wegstreept
+(`gesaldeerd`: afname gedeeld door teruglevering, hooguit één), voor de periode van nu met de
+verwachting tot 1-1-2027. Historie rekent elke teruggeleverde kWh voor dat deel als de inkoopprijs
+en voor de rest als de vergoeding na saldering (`aandeelOp`, `prijsOp` met `aandeel` in geld.js), en
+trekt de schaal per dag af van wat teruglevering opleverde (`vasteKosten` in `balans`). Zonder
+begindatum, tellers of metingen van het begin: het vinkje, zoals tot nu. Onder In geld staat het in
+een zin, met het percentage en de schaal.
+
+**Het virtuele huis** prijst een moment nu met `_tarief` en niet `_tariff` (`_prijs_nu`), zodat het
+rekent zoals de coach het ziet, ook met de jaarbalans (`netto_terug` als scenarioveld, `jaarbalans`
+in virtueel.py). Scenario's: `vast-kosten-per-kwh` (de zon in de bus kost 0,25 min 0,05),
+`vast-kosten-schalen` en `vast-kosten-overschot` (0,25), `vast-kosten-overschot-netto-terug` (0,12
+min 0,05), en `dynamisch-salderen-vol` naast `dynamisch-salderen` (de hele all-in prijs terug is
+meer waard). Proef 176 in test_coach.py, de vormen en de schaal in test_prijsopbouw.py, en
+"terugleverkosten in vier vormen, en Historie per afrekenperiode" in test_rapport.mjs.

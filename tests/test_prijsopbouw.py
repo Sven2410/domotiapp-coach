@@ -150,6 +150,25 @@ controle("de nieuwe velden op hun standaard laten een bevestiging staan",
 controle("maar een vast bedrag kiezen vraagt opnieuw om Ja, dit klopt",
          po.vingerafdruk(basis) != po.vingerafdruk({**basis, "dynamic": {**met_standaard["dynamic"], "feed_in_mode": "fixed"}}))
 
+# De vier vormen van terugleverkosten (v0.135.0).
+v = {"feed_in_costs": 0.05}
+controle("per kWh over alles", po.kosten_per_kwh(v, True) == 0.05 and po.kosten_per_kwh(v, False) == 0.05)
+controle("alleen over het overschot: gesaldeerd niets",
+         po.kosten_per_kwh({**v, "feed_in_costs_mode": "overschot"}, True) == 0.0
+         and po.kosten_per_kwh({**v, "feed_in_costs_mode": "overschot"}, False) == 0.05)
+controle("schalen en geen: niets per kWh", po.kosten_per_kwh({**v, "feed_in_costs_mode": "schalen"}, False) == 0.0
+         and po.kosten_per_kwh({**v, "feed_in_costs_mode": "geen"}, False) == 0.0)
+t = po.terug(0.15, 0.40, {"supplier_markup": 0.0, "vat_percent": 21, **v, "feed_in_costs_mode": "overschot"}, salderen=True, overdag=False)
+controle("de terugleverprijs volgt de vorm", abs(t["bedrag"] - 0.40) < 1e-12, f"{t}")
+schalen = [{"vanaf": 500, "per_jaar": 70}, {"vanaf": 0, "per_jaar": 0}, {"vanaf": 750, "per_jaar": 140}]
+controle("de schaal: onder 500 niets, 500 tot 750 het tweede bedrag, daarboven het derde",
+         po.schaal_per_jaar(schalen, 499.9) == 0 and po.schaal_per_jaar(schalen, 500) == 70
+         and po.schaal_per_jaar(schalen, 6800) == 140 and po.schaal_per_jaar([], 100) is None)
+basis_v = {"type": "fixed", "netting": True, "supplier": "", "fixed": {"all_in_price": 0.25}, "dynamic": {}}
+controle("de nieuwe velden op hun standaard laten een bevestiging staan",
+         po.vingerafdruk(basis_v) == po.vingerafdruk({**basis_v, "fixed": {**basis_v["fixed"], "feed_in_costs_mode": "kwh",
+                                                                          "feed_in_scales": [], "feed_in_scales_until": ""}}))
+
 print("4. zonsopkomst en zonsondergang")
 def lokaal(d, lat=52.09, lon=5.12, uren=2):
     op, onder = po.zon_op_onder(d, lat, lon)

@@ -64,7 +64,7 @@ export const LEVERANCIERS_DATA = [
         ],
       },
       vast: {
-        velden: {},
+        velden: { feed_in_costs_mode: "schalen", feed_in_scales_until: "2027-01-01" },
         uitleg: "Terugleverkosten in 26 schalen: een vast bedrag per dag naar je teruglevering (nooit boven je jaarverbruik), van € 0 tot € 7,73 per dag met btw; de tabel staat op de pagina terugleverkosten. Vanaf 2027 een bedrag per kWh. De terugleververgoeding boven salderen staat in het tariefblad bij je contract en is niet openbaar.",
         bronnen: [
           "https://www.budgetthuis.nl/energie/terugleverkosten",
@@ -72,7 +72,7 @@ export const LEVERANCIERS_DATA = [
         ],
       },
       variabel: {
-        velden: {},
+        velden: { feed_in_costs_mode: "schalen", feed_in_scales_until: "2027-01-01" },
         uitleg: "Terugleverkosten in dezelfde 26 schalen als bij vast, per dag naar je teruglevering. Vanaf 2027 een bedrag per kWh. De terugleververgoeding boven salderen wordt maandelijks herzien en staat in het tariefblad bij je contract.",
         bronnen: [
           "https://www.budgetthuis.nl/energie/terugleverkosten",
@@ -533,12 +533,12 @@ export const LEVERANCIERS_DATA = [
         ],
       },
       vast: {
-        velden: {},
+        velden: { feed_in_costs_mode: "schalen", feed_in_scales_until: "2027-01-01" },
         uitleg: "Terugleverkosten in 42 schalen: een vast bedrag per dag naar je teruglevering, met btw ('geldig per 1 januari 2025'); de tabel staat op de pagina terugleverkosten. Boven salderen € 0,15 per kWh. Vanaf 2027 per kWh in plaats van schalen.",
         bronnen: ["https://www.energiedirect.nl/zonnepanelen/kosten/terugleverkosten"],
       },
       variabel: {
-        velden: {},
+        velden: { feed_in_costs_mode: "schalen", feed_in_scales_until: "2027-01-01" },
         uitleg: "Terugleverkosten in dezelfde 42 schalen als bij vast, per dag. Boven salderen € 0,15 per kWh. Vanaf 2027 per kWh in plaats van schalen.",
         bronnen: ["https://www.energiedirect.nl/zonnepanelen/kosten/terugleverkosten"],
       },
@@ -1995,7 +1995,7 @@ export const LEVERANCIERS_DATA = [
         ],
       },
       vast: {
-        velden: {},
+        velden: { feed_in_costs_mode: "schalen", feed_in_scales_until: "2027-01-01" },
         uitleg: "Tot 2027 vaste terugleverkosten per schaal, naar je totale teruglevering; onder 500 kWh niets. De tabel staat in je aanbod en in Mijn Vattenfall (Keuze.nl noemt 60 schalen). Vanaf 2027 terugleverkosten per kWh. De terugleververgoeding na salderen staat in je contract. Bij Groen met ZonBonus een bonus per teruggeleverde kWh, tot 10.000 kWh per jaar; het bedrag is niet gevonden.",
         bronnen: [
           "https://www.vattenfall.nl/zonnepanelen/vaste-terugleverkosten/",
@@ -2004,7 +2004,7 @@ export const LEVERANCIERS_DATA = [
         ],
       },
       variabel: {
-        velden: {},
+        velden: { feed_in_costs_mode: "schalen", feed_in_scales_until: "2027-01-01" },
         uitleg: "Tot 2027 vaste terugleverkosten per schaal, naar je totale teruglevering; onder 500 kWh niets. De tabel staat in je aanbod en in Mijn Vattenfall. Vanaf 2027 terugleverkosten per kWh. De terugleververgoeding na salderen staat in je contract.",
         bronnen: [
           "https://www.vattenfall.nl/zonnepanelen/vaste-terugleverkosten/",

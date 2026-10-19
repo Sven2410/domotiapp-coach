@@ -1111,6 +1111,15 @@ class Scenario:
     # bedrag erboven, zoals `_teruglevering` in coach.py.
     vast_teruglevering_na: float | None = None
     vast_terugleverkosten_na: float | None = None
+    # Hoe de leverancier terugleverkosten rekent (v0.135.0): "kwh", "overschot",
+    # "schalen" of "geen"; zie `kosten_per_kwh` in prijsopbouw.py.
+    kosten_vorm: str = "kwh"
+    # Of het huis over de afrekenperiode netto teruglevert (v0.135.0); None is
+    # onbekend, en dan telt het vinkje. Het virtuele huis heeft geen recorder,
+    # dus de coach krijgt de balans die hij anders uit de meter had gehaald.
+    netto_terug: bool | None = None
+    # Een dynamisch contract dat binnen salderen de hele all-in prijs teruggeeft.
+    salderen_vol: bool = False
     # (tijd, actie, argument): ("13:10", "kabel_uit", None), ("18:00", "pauze", True),
     # ("12:00", "snelladen", True), ("09:30", "soc_opgeven", 40), ("11:00", "p1_weg", 3),
     # ("20:00", "oven", 30)
@@ -1409,6 +1418,7 @@ def instellingen(s: Scenario) -> dict:
                 "feed_in_costs": s.vast_terugleverkosten,
                 "feed_in_tariff_after": s.vast_teruglevering_na,
                 "feed_in_costs_after": s.vast_terugleverkosten_na,
+                "feed_in_costs_mode": s.kosten_vorm,
             },
         }
     else:
@@ -1425,6 +1435,8 @@ def instellingen(s: Scenario) -> dict:
                 "supplier_markup": s.prijzen.opslag,
                 "vat_percent": s.prijzen.btw,
                 "feed_in_costs": s.prijzen.terugleverkosten,
+                "feed_in_costs_mode": s.kosten_vorm,
+                "netting_full": s.salderen_vol,
             },
         }
     apparaten = []
@@ -2248,14 +2260,18 @@ class Diensten:
 
 
 def _prijs_nu(coach, inst, nu) -> tuple[float | None, float | None]:
-    """Wat een kWh op dit moment kost en opbrengt, zoals de coach het ziet."""
+    """Wat een kWh op dit moment kost en opbrengt, zoals de coach het ziet.
+
+    Met `_tarief` en niet `_tariff` (v0.135.0): ook wat de coach weet van de
+    afrekenperiode, of het huis netto teruglevert (`_saldeert`).
+    """
     prijzen = coach._prices(inst)
     if prijzen:
         rij = planner.price_now(prijzen, nu)
         if rij is None:
             return None, None
         return rij["price"], rij.get("feed_in")
-    tarief = coach._tariff(inst)
+    tarief = coach._tarief(inst)
     return tarief.buy, tarief.feed_in
 
 
@@ -2290,7 +2306,7 @@ def optimum(s: Scenario, coach, inst, kabel_in: dt.datetime) -> float | None:
             coach.hass.states.zet(sleutel, {"state": "0", "attributes": {
                 "prices": w.prijzen.lijst(kabel_in.replace(hour=23), all_in, grens.date())}})
     prijzen = coach._prices(inst)
-    tarief = coach._tariff(inst)
+    tarief = coach._tarief(inst)
     fasen = min(auto.fasen, s.paal.fasen)
     ceiling = int(min(s.paal.max_amps, auto.max_amps))
     car = planner.Car(capacity_kwh=auto.capaciteit_kwh, phases=fasen,
@@ -2304,6 +2320,20 @@ def optimum(s: Scenario, coach, inst, kabel_in: dt.datetime) -> float | None:
     if sum(k for _, k in gekozen) < nodig - 0.05:
         return None   # het paste niet, dan is er geen eerlijk optimum
     return sum(schijf.price * kwh for schijf, kwh in gekozen)
+
+
+def jaarbalans(coach, s: Scenario) -> None:
+    """De balans over de afrekenperiode die de coach anders uit de meter haalt (v0.135.0).
+
+    Het virtuele huis heeft geen statistiek van Home Assistant. Met `netto_terug`
+    krijgt de coach de uitkomst van `_async_jaarsaldo` vooraf, en haalt hij hem
+    die dag niet opnieuw.
+    """
+    if s.netto_terug is None:
+        return
+    coach._jaarsaldo = {"van": "2026-01-01", "afname": 3000.0, "terug": 4200.0 if s.netto_terug else 2000.0,
+                        "afname_rest": 0.0, "terug_rest": 0.0, "compleet": True}
+    coach._jaarsaldo_tot = dt.datetime(2100, 1, 1)
 
 
 def draai(s: Scenario, toon: bool = False) -> Verloop:
@@ -2320,6 +2350,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
     coach._async_zon_uit_dashboard = wereld.zonkromme
     coach._async_zon_uit_integratie = wereld.zonkromme_via_sensor
     coachmod.async_get_archive = lambda hass: wereld.archief()
+    jaarbalans(coach, s)
 
     # De klok van Home Assistant is de klok van de wereld.
     dtutil.now = lambda: wereld.nu
@@ -2359,6 +2390,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
         c._sleep = lambda seconds: asyncio.sleep(0)
         c._async_zon_uit_dashboard = wereld.zonkromme
         c._async_zon_uit_integratie = wereld.zonkromme_via_sensor
+        jaarbalans(c, s)
         return c
 
     async def lus():

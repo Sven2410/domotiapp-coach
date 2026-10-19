@@ -10230,6 +10230,120 @@ finally:
         else:
             sys.modules[k] = v
 
+print("=== 176. terugleverkosten in vier vormen, en salderen per afrekenperiode voor Historie (v0.135.0) ===")
+# De eigenaar op 19-10-2026: "ik wil het zo goed mogelijk hebben", bij de vier vormen die de
+# catalogus kent: per kWh over alles, alleen over het overschot, schalen, of geen.
+inst176 = instellingen()
+inst176["contract"] = {"type": "fixed", "netting": True, "billing_start": "2025-09-15", "start": "2026-09-01",
+                       "fixed": {"all_in_price": 0.25, "feed_in_tariff": 0.12, "feed_in_costs": 0.05}}
+inst176["sources"] = {**inst176["sources"], "meters": {
+    "import_low": "sensor.meter_afname_laag", "import_high": "sensor.meter_afname_hoog",
+    "export_low": "sensor.meter_terug_laag", "export_high": "sensor.meter_terug_hoog"}}
+hass176, _, coach176 = bouw(huis(), inst176)
+NU176 = dt.datetime(2026, 10, 19, 12, 0)
+
+
+def tarief176(**velden):
+    inst = {**inst176, "contract": {**inst176["contract"], "fixed": {**inst176["contract"]["fixed"], **velden}}}
+    return coachmod.ChargerCoach._tariff(inst, True, NU176), coachmod.ChargerCoach._tariff(inst, False, NU176)
+
+
+met, zonder = tarief176()
+controle("per kWh over alles: met en zonder salderen gaat de 0,05 eraf",
+         abs(met.feed_in - 0.20) < 1e-9 and abs(zonder.feed_in - 0.07) < 1e-9, f"{met} {zonder}")
+met, zonder = tarief176(feed_in_costs_mode="overschot")
+controle("alleen over het overschot: gesaldeerd de hele inkoopprijs",
+         abs(met.feed_in - 0.25) < 1e-9 and abs(zonder.feed_in - 0.07) < 1e-9, f"{met} {zonder}")
+met, zonder = tarief176(feed_in_costs_mode="schalen", feed_in_scales=[{"vanaf": 500, "per_jaar": 70}])
+controle("in schalen: een kWh extra kost niets", abs(met.feed_in - 0.25) < 1e-9 and abs(zonder.feed_in - 0.12) < 1e-9,
+         f"{met} {zonder}")
+met, zonder = tarief176(feed_in_costs_mode="geen")
+controle("geen: niets", abs(met.feed_in - 0.25) < 1e-9 and abs(zonder.feed_in - 0.12) < 1e-9, f"{met} {zonder}")
+
+
+def statistiek176(begin_data=dt.date(2024, 1, 1)):
+    """Een meter: 10 kWh afname per dag, terug 15 per dag van april tot en met september en 2 daarbuiten."""
+    def per_dag(eid, van, tot):
+        rijen = []
+        dag = max(van.date(), begin_data)
+        while dag < tot.date():
+            if "afname" in eid:
+                kwh = 5.0
+            else:
+                kwh = 7.5 if 4 <= dag.month <= 9 else 1.0
+            moment = dt.datetime.combine(dag, dt.time(0), tzinfo=dt.timezone.utc)
+            rijen.append({"start": moment.timestamp(), "change": kwh})
+            dag += dt.timedelta(days=1)
+        return rijen
+
+    def statistics_during_period(hass, van, tot, ids, periode, eenheden, soorten):
+        return {e: per_dag(e, van, tot) for e in ids}
+
+    rec = types.ModuleType("homeassistant.components.recorder")
+
+    class _Rec:
+        async def async_add_executor_job(self, fn, *args):
+            return fn(*args)
+
+    rec.get_instance = lambda hass: _Rec()
+    stats = types.ModuleType("homeassistant.components.recorder.statistics")
+    stats.statistics_during_period = statistics_during_period
+    sys.modules["homeassistant.components.recorder"] = rec
+    sys.modules["homeassistant.components.recorder.statistics"] = stats
+
+
+oud176 = {k: sys.modules.get(k) for k in ("homeassistant.components.recorder", "homeassistant.components.recorder.statistics")}
+try:
+    statistiek176()
+    af176 = asyncio.run(coach176.async_afrekening(inst176, dt.date(2025, 1, 1), dt.date(2026, 10, 20), NU176))
+    for p in af176["perioden"]:
+        print(f"  periode {p['van']} tot {p['tot']}: afname {p['afname']}+{p['afname_rest']}, terug {p['terug']}+{p['terug_rest']}, "
+              f"gesaldeerd {p['gesaldeerd']}")
+    vorige176, nu176 = af176["perioden"][0], af176["perioden"][-1]
+    controle("twee perioden: de vorige van september tot september, de huidige tot het einde van salderen",
+             len(af176["perioden"]) == 3 and vorige176["tot"] == "2025-09-15" and nu176["van"] == "2026-09-15"
+             and nu176["tot"] == "2027-01-01", f"{[(p['van'], p['tot']) for p in af176['perioden']]}")
+    # 2025-09-15 tot 2026-09-15: afname 365 x 10 = 3650, terug in de zomer 183 x 15 + 182 x 2 = 3109.
+    controle("een periode met meer afname dan teruglevering saldeert alles",
+             af176["perioden"][1]["gesaldeerd"] == 1.0, f"{af176['perioden'][1]}")
+    controle("de huidige telt tot vandaag gemeten en de rest van vorig jaar mee",
+             nu176["afname"] == 340.0 and nu176["afname_rest"] == 740.0, f"{nu176}")
+    # Een zomer met meer teruglevering dan afname: een deel saldeert niet.
+    zomer176 = {**inst176, "contract": {**inst176["contract"], "billing_start": "2026-04-01"}}
+    z176 = asyncio.run(coach176.async_afrekening(zomer176, dt.date(2026, 4, 1), dt.date(2026, 10, 20), NU176))["perioden"][-1]
+    print(f"  vanaf april: {z176}")
+    controle("met meer teruglevering dan afname is het gesaldeerde deel de afname gedeeld door de teruglevering",
+             z176["gesaldeerd"] is not None and z176["gesaldeerd"] < 1.0
+             and abs(z176["gesaldeerd"] - round((z176["afname"] + z176["afname_rest"]) / (z176["terug"] + z176["terug_rest"]), 4)) < 1e-9,
+             f"{z176}")
+    # Schalen: naar de teruglevering in het deel onder het contract (vanaf 1 september), tot de einddatum.
+    schalen176 = [{"vanaf": 0, "per_jaar": 0}, {"vanaf": 500, "per_jaar": 70}, {"vanaf": 750, "per_jaar": 140}]
+    s_inst = {**inst176, "contract": {**inst176["contract"], "fixed": {**inst176["contract"]["fixed"],
+              "feed_in_costs_mode": "schalen", "feed_in_scales": schalen176}}}
+    s176 = asyncio.run(coach176.async_afrekening(s_inst, dt.date(2026, 10, 1), dt.date(2026, 10, 20), NU176))["schaal"]
+    print(f"  schaal over de hele periode: {s176}")
+    controle("de schaal over het deel onder het contract, tot het eind van de afrekenperiode",
+             s176["van"] == "2026-09-15" and s176["tot"] == "2027-09-15" and s176["kwh"] >= 750 and s176["per_jaar"] == 140.0
+             and abs(s176["per_dag"] - 140 / 365) < 1e-4, f"{s176}")
+    s_inst["contract"]["fixed"]["feed_in_scales_until"] = "2027-01-01"
+    s176b = asyncio.run(coach176.async_afrekening(s_inst, dt.date(2026, 10, 1), dt.date(2026, 10, 20), NU176))["schaal"]
+    print(f"  schaal tot 1-1-2027: {s176b}")
+    controle("met een einddatum telt alleen de teruglevering tot dan", s176b["tot"] == "2027-01-01" and s176b["kwh"] < 500
+             and s176b["per_jaar"] == 0.0, f"{s176b}")
+    controle("zonder begindatum van de afrekenperiode: niets, Historie rekent met het vinkje",
+             asyncio.run(coach176.async_afrekening({**inst176, "contract": {**inst176["contract"], "billing_start": ""}},
+                                                   dt.date(2026, 1, 1), dt.date(2026, 10, 20), NU176)) == {"perioden": [], "schaal": None}, "")
+    # Een meter die pas sinds kort meetelt: de periode is niet compleet en zegt niets.
+    statistiek176(begin_data=dt.date(2026, 10, 1))
+    kort176 = asyncio.run(coach176.async_afrekening(inst176, dt.date(2026, 10, 1), dt.date(2026, 10, 20), NU176))["perioden"][-1]
+    controle("een meter zonder het begin van de periode: onbekend", kort176["gesaldeerd"] is None, f"{kort176}")
+finally:
+    for k, v in oud176.items():
+        if v is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = v
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

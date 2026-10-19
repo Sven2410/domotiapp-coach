@@ -1469,6 +1469,37 @@ vast_na_salderen_leeg = vast_na_salderen.kopie(
     uitleg="hetzelfde zonder bedragen voor na salderen: dan de vergoeding en de kosten van ervoor",
     vast_teruglevering_na=None, vast_terugleverkosten_na=None,
 )
+# Terugleverkosten in vier vormen (v0.135.0). De eigenaar op 19-10-2026: "ik wil het zo goed
+# mogelijk hebben". Een vast contract met salderen, inkoop € 0,25, vergoeding € 0,12 en
+# kosten € 0,05. Wat de zon in de bus kost is wat hij anders had opgebracht: met salderen
+# de inkoopprijs min de kosten van een kWh extra, en bij een huis dat over de
+# afrekenperiode netto teruglevert de vergoeding min de kosten.
+vast_kosten_kwh = vast_zonnig.kopie(
+    naam="vast-kosten-per-kwh",
+    uitleg="vast, salderen, terugleverkosten per kWh over alles: de zon kost 0,25 min 0,05",
+    contract="vast-salderen", vast_prijs=0.25, vast_teruglevering=0.12, vast_terugleverkosten=0.05,
+    netto_terug=False,
+)
+vast_kosten_schalen = vast_kosten_kwh.kopie(
+    naam="vast-kosten-schalen",
+    uitleg="hetzelfde met terugleverkosten in schalen: een kWh extra kost niets, de zon kost 0,25",
+    kosten_vorm="schalen",
+)
+vast_kosten_overschot = vast_kosten_kwh.kopie(
+    naam="vast-kosten-overschot",
+    uitleg="kosten alleen over het overschot, een huis dat netto afneemt: alles saldeert, de zon kost 0,25",
+    kosten_vorm="overschot",
+)
+vast_kosten_overschot_netto = vast_kosten_overschot.kopie(
+    naam="vast-kosten-overschot-netto-terug",
+    uitleg="kosten alleen over het overschot, een huis dat netto teruglevert: de zon kost 0,12 min 0,05",
+    netto_terug=True,
+)
+dyn_salderen_vol = dyn_salderen.kopie(
+    naam="dynamisch-salderen-vol",
+    uitleg="dynamisch mét salderen en de hele all-in prijs terug: zon is evenveel waard als inkoop",
+    salderen_vol=True,
+)
 
 
 ALLE = [
@@ -1503,6 +1534,7 @@ ALLE = [
     vast_zon_modus, bewolkt_zon_modus, half_zon_modus, dyn_continu,
     batterij_helpt_auto, batterij_helpt_auto_nacht, batterij_helpt_auto_zonder_nacht,
     voorrang_auto_eerst, voorrang_accu_eerst, vast_kruimelzon, vast_na_salderen, vast_na_salderen_leeg,
+    vast_kosten_kwh, vast_kosten_schalen, vast_kosten_overschot, vast_kosten_overschot_netto, dyn_salderen_vol,
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,
 ]

@@ -252,7 +252,9 @@ dan de andere in dezelfde uitgave.
   dezelfde manier (`docs/eerste-woning.md`).
 - **De prijsopbouw** (v0.129.0): `zon_op_onder`, `overdag`, `bonus`, `markt_terug` en `terug` in
   prijsopbouw.py tegenover `zonOpOnder`, `overdag`, `bonusOp`, `marktTerug` en `terugOp` in geld.js
-  (`docs/contract.md`).
+  (`docs/contract.md`). Sinds v0.135.0 ook `kosten_per_kwh` en `schaal_per_jaar` tegenover
+  `kostenPerKwh` en `schaalPerJaar`, en salderen per afrekenperiode: `async_afrekening` in coach.py
+  levert wat `aandeelOp` en `schaalKosten` in geld.js voor Historie lezen.
 - **De volgende keer meterstanden** (v0.130.0): `meterstand_volgende` in berichten.py en
   `volgendeMeterstand` in views/notifications.js (`docs/berichten.md`).
 - **Het contract met de kaarten van DomotiApp Lovelace** (v0.110.0, `CONTRACT` in
@@ -331,11 +333,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 518 controles op het denkwerk
 python tests/test_batterij.py    # 206 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1297 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2509 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 1309 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 2572 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
-python tests/test_prijsopbouw.py # 39 op de prijsopbouw, de controle en zonsopkomst
-node   tests/test_rapport.mjs    # 221 op het rapport en op het paneel
+python tests/test_prijsopbouw.py # 45 op de prijsopbouw, de controle en zonsopkomst
+node   tests/test_rapport.mjs    # 222 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

@@ -78,6 +78,37 @@ function datumLang(tekst) {
   return Number.isNaN(d.getTime()) ? tekst : d.toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" });
 }
 
+/** De vier vormen van terugleverkosten (v0.135.0), zoals `kosten_per_kwh` in prijsopbouw.py. */
+const KOSTEN_VORMEN = [
+  ["kwh", "Per kWh, over alles wat je teruglevert"],
+  ["overschot", "Per kWh, alleen over wat er na salderen overblijft"],
+  ["schalen", "Een vast bedrag per jaar, in schalen"],
+  ["geen", "Geen terugleverkosten"],
+];
+
+/**
+ * De keuze hoe de leverancier terugleverkosten rekent, en bij schalen de tabel
+ * (v0.135.0). De eigenaar op 19-10-2026: "ik wil het zo goed mogelijk hebben".
+ */
+const kostenVorm = (prefix) => `
+  <div class="row">
+    <label for="${prefix}-kostvorm">Hoe rekent je leverancier terugleverkosten?</label>
+    <select id="${prefix}-kostvorm" data-kostvorm="${prefix}">
+      ${KOSTEN_VORMEN.map(([id, tekst]) => `<option value="${id}">${tekst}</option>`).join("")}
+    </select>
+  </div>
+  <div class="schalen" id="${prefix}-schalen-blok">
+    <span class="sub">De tabel van je leverancier: vanaf hoeveel kWh teruglevering over je afrekenperiode een schaal geldt, en wat hij per jaar kost met btw. Onder de eerste schaal kost het niets. Een kWh extra kost dan niets; het bedrag staat in Historie per dag.</span>
+    <div class="schaal-kop"><span>Vanaf (kWh)</span><span>Per jaar (€)</span><span></span></div>
+    <div id="${prefix}-schalen"></div>
+    <div class="circuit-actions"><button type="button" data-schaal-erbij="${prefix}">Schaal toevoegen</button></div>
+    <div class="row">
+      <label for="${prefix}-schalen-tot">De schalen gelden tot</label>
+      <input type="date" id="${prefix}-schalen-tot" data-schalen-tot="${prefix}">
+      <span class="sub">Leeg is de hele afrekenperiode. Stoppen de vaste terugleverkosten op 1 januari 2027, zoals bij veel leveranciers, vul dan die datum in: dan telt de teruglevering tot die dag voor de schaal.</span>
+    </div>
+  </div>`;
+
 const soortKnoppen = (id) => `
   <div class="segmented drie" id="${id}">
     ${SOORTEN.map((s) => `
@@ -180,10 +211,11 @@ class DacViewContract extends DacEditorElement {
                   <span class="sub">Wat je krijgt voor wat je teruglevert boven je eigen verbruik.</span>
                 </div>
               </div>
-              <div class="row">
+              ${kostenVorm("fx")}
+              <div class="row" id="fx-feedcost-rij">
                 <label for="fx-feedcost" id="fx-feedcost-label">Terugleverkosten (€ per kWh)</label>
                 <input type="number" id="fx-feedcost" min="0" step="0.0001" inputmode="decimal">
-                <span class="sub" id="fx-feedcost-hint">Wat je leverancier per teruggeleverde kWh rekent. Een vast bedrag per maand of per schaal (een staffel) hoort hier niet: dat verandert niet met elke kWh die je teruglevert.</span>
+                <span class="sub" id="fx-feedcost-hint">Wat je leverancier per teruggeleverde kWh rekent. Rekent hij een vast bedrag per jaar in schalen, kies dat hierboven.</span>
               </div>
               <!-- wat het contract na salderen zegt (v0.134.0) -->
               <div id="fx-na">
@@ -277,8 +309,9 @@ class DacViewContract extends DacEditorElement {
                 <label for="dyn-feedfixed">Vaste terugleververgoeding (€ per kWh)</label>
                 <input type="number" id="dyn-feedfixed" min="0" step="0.0001" inputmode="decimal">
               </div>
+              ${kostenVorm("dyn")}
               <div class="two">
-                <div class="row">
+                <div class="row" id="dyn-feedcost-rij">
                   <label for="dyn-feedcost">Terugleverkosten (€ per kWh)</label>
                   <input type="number" id="dyn-feedcost" min="0" step="0.0001" inputmode="decimal">
                 </div>
@@ -467,6 +500,31 @@ class DacViewContract extends DacEditorElement {
     bind("dyn-markup", (v) => (c().dynamic.supplier_markup = getal(v)));
     bind("dyn-vat", (v) => (c().dynamic.vat_percent = getal(v)));
     bind("dyn-feedcost", (v) => (c().dynamic.feed_in_costs = getal(v)));
+    // De vorm van de terugleverkosten en de schalen (v0.135.0), bij vast en bij dynamisch.
+    const velden = (prefix) => (prefix === "fx" ? c().fixed : c().dynamic);
+    for (const keuze of this.$$("[data-kostvorm]")) {
+      keuze.addEventListener("change", () => {
+        velden(keuze.dataset.kostvorm).feed_in_costs_mode = keuze.value;
+        this.paintSchalen_(keuze.dataset.kostvorm);
+        this.wijziging_();
+      });
+    }
+    for (const veld of this.$$("[data-schalen-tot]")) {
+      veld.addEventListener("input", () => {
+        velden(veld.dataset.schalenTot).feed_in_scales_until = veld.value || "";
+        this.wijziging_();
+      });
+    }
+    for (const knop of this.$$("[data-schaal-erbij]")) {
+      knop.addEventListener("click", () => {
+        const v = velden(knop.dataset.schaalErbij);
+        const rijen = (v.feed_in_scales ??= []);
+        const laatste = rijen[rijen.length - 1];
+        rijen.push({ vanaf: laatste ? (Number(laatste.vanaf) || 0) + 250 : 0, per_jaar: 0 });
+        this.paintSchalen_(knop.dataset.schaalErbij);
+        this.wijziging_();
+      });
+    }
     bind("dyn-feedbonus", (v) => (c().dynamic.feed_in_bonus = getal(v)));
     bind("dyn-feedvat", (v) => (c().dynamic.feed_in_vat = Boolean(v)));
     bind("dyn-nettingfull", (v) => (c().dynamic.netting_full = Boolean(v)));
@@ -645,9 +703,11 @@ class DacViewContract extends DacEditorElement {
       contract.end = "";
       // De afrekenperiode blijft: die loopt over een nieuw contract heen (v0.134.0).
       contract.fixed = { ...contract.fixed, all_in_price: 0, feed_in_tariff: 0, feed_in_costs: 0,
-        feed_in_tariff_after: null, feed_in_costs_after: null };
+        feed_in_tariff_after: null, feed_in_costs_after: null,
+        feed_in_costs_mode: "kwh", feed_in_scales: [], feed_in_scales_until: "" };
       contract.dynamic = { ...contract.dynamic, supplier_markup: 0, feed_in_costs: 0, feed_in_bonus: 0,
-        feed_in_bonus_percent: 0, bonus_daytime: false, feed_in_vat: false };
+        feed_in_bonus_percent: 0, bonus_daytime: false, feed_in_vat: false,
+        feed_in_costs_mode: "kwh", feed_in_scales: [], feed_in_scales_until: "" };
     } else if (bron === "gas") {
       const gas = this.gas_();
       this.periodsVan_("gas").unshift({
@@ -740,6 +800,8 @@ class DacViewContract extends DacEditorElement {
     this.$("#dyn-markup").value = d.supplier_markup ?? "";
     this.$("#dyn-vat").value = d.vat_percent ?? "";
     this.$("#dyn-feedcost").value = d.feed_in_costs ?? "";
+    this.paintSchalen_("fx");
+    this.paintSchalen_("dyn");
     this.$("#dyn-feedbonus").value = d.feed_in_bonus ?? "";
     this.$("#dyn-feedvat").checked = Boolean(d.feed_in_vat);
     this.$("#dyn-nettingfull").checked = Boolean(d.netting_full);
@@ -867,6 +929,45 @@ class DacViewContract extends DacEditorElement {
       : "Mag een andere zijn dan die van je stroom.";
   }
 
+  /**
+   * De vorm van de terugleverkosten en de tabel met schalen (v0.135.0). De rijen
+   * opnieuw alleen bij een andere vorm of een rij erbij of eraf, zodat een veld
+   * waar iemand in typt blijft staan.
+   */
+  paintSchalen_(prefix) {
+    const contract = this.draft_?.contract;
+    if (!contract) return;
+    const v = (prefix === "fx" ? contract.fixed : contract.dynamic) ?? {};
+    const vorm = v.feed_in_costs_mode || "kwh";
+    this.$(`#${prefix}-kostvorm`).value = vorm;
+    this.$(`#${prefix}-feedcost-rij`).style.display = vorm === "kwh" || vorm === "overschot" ? "" : "none";
+    this.$(`#${prefix}-schalen-blok`).style.display = vorm === "schalen" ? "" : "none";
+    const tot = this.$(`#${prefix}-schalen-tot`);
+    if (this.shadowRoot?.activeElement !== tot) tot.value = v.feed_in_scales_until || "";
+    const host = this.$(`#${prefix}-schalen`);
+    const rijen = v.feed_in_scales ?? [];
+    host.innerHTML = rijen.map((r, i) => `
+      <div class="schaal">
+        <input type="number" min="0" step="1" inputmode="numeric" data-schaal="${prefix}:${i}:vanaf" value="${esc(r.vanaf ?? "")}" aria-label="Vanaf kWh">
+        <input type="number" min="0" step="0.01" inputmode="decimal" data-schaal="${prefix}:${i}:per_jaar" value="${esc(r.per_jaar ?? "")}" aria-label="Bedrag per jaar">
+        <button type="button" class="remove" data-schaal-weg="${prefix}:${i}">Weghalen</button>
+      </div>`).join("") || `<p class="sub geen">Nog geen schalen.</p>`;
+    for (const veld of host.querySelectorAll("[data-schaal]")) {
+      veld.addEventListener("input", () => {
+        const [, i, sleutel] = veld.dataset.schaal.split(":");
+        rijen[Number(i)][sleutel] = Number(veld.value) || 0;
+        this.wijziging_();
+      });
+    }
+    for (const knop of host.querySelectorAll("[data-schaal-weg]")) {
+      knop.addEventListener("click", () => {
+        rijen.splice(Number(knop.dataset.schaalWeg.split(":")[1]), 1);
+        this.paintSchalen_(prefix);
+        this.wijziging_();
+      });
+    }
+  }
+
   /** De eerdere contracten van een bron, een per rij. */
   paintPeriods_(bron) {
     const host = this.$(`#periods-${bron}`);
@@ -964,6 +1065,15 @@ DacViewContract.css = /* css */ `
   }
   select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
   .sub a { color: var(--dac-accent-hi); }
+
+  /* De schalen van de terugleverkosten (v0.135.0). */
+  .schalen { display: grid; gap: 8px; }
+  .schaal-kop, .schaal { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .schaal-kop { font-size: 12px; color: var(--dac-ink-3); }
+  .schaal .remove {
+    font: inherit; font-size: 12.5px; padding: 8px 10px; border-radius: var(--dac-radius-sm); cursor: pointer;
+    border: 1px solid var(--dac-border); background: transparent; color: var(--dac-danger, #e5484d);
+  }
 
   /* De bewoner leest (v0.130.1): wat de installateur kiest is er niet. */
   :host([readonly]) [data-installateur] { display: none !important; }

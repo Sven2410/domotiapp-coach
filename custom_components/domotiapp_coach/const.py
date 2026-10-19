@@ -519,6 +519,16 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             # Zie `_teruglevering` in coach.py.
             "feed_in_tariff_after": None,
             "feed_in_costs_after": None,
+            # Hoe de leverancier terugleverkosten rekent (v0.135.0): per kWh over
+            # alles (`kwh`), alleen over het overschot na salderen (`overschot`), in
+            # schalen met een vast bedrag per jaar (`schalen`, met de tabel in
+            # `feed_in_scales`), of niet (`geen`). Zie `kosten_per_kwh` in prijsopbouw.py.
+            "feed_in_costs_mode": "kwh",
+            "feed_in_scales": [],
+            # Tot wanneer de schalen gelden (v0.135.0); leeg is de hele
+            # afrekenperiode. Een leverancier die vanaf 1-1-2027 per kWh rekent kan
+            # de schalen dan laten stoppen, of doorlopen tot de jaarafrekening.
+            "feed_in_scales_until": "",
         },
         "dynamic": {
             "source": DYNAMIC_ALL_IN,
@@ -543,6 +553,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             "supplier_markup": 0.02,
             "vat_percent": 21,
             "feed_in_costs": 0.0,
+            # Zoals bij vast (v0.135.0).
+            "feed_in_costs_mode": "kwh",
+            "feed_in_scales": [],
+            "feed_in_scales_until": "",
             # Wat de leverancier per teruggeleverde kWh bovenop de marktprijs
             # betaalt. Uit een artikel over het einde van het salderen dat de
             # eigenaar op 22-09-2026 doorstuurde: Zonneplan, Frank Energie en

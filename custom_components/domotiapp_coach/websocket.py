@@ -65,6 +65,9 @@ _ENTITY = vol.Any("", vol.Match(r"^[a-z_]+\.[a-zA-Z0-9_]+$"))
 
 # A euro amount per kWh. Negative is real: market prices go below zero.
 _EURO = vol.All(vol.Coerce(float), vol.Range(-100, 100))
+# Een schaal van terugleverkosten (v0.135.0): vanaf hoeveel kWh, en het bedrag per jaar.
+_SCHAAL = {vol.Required("vanaf"): vol.All(vol.Coerce(float), vol.Range(0, 1_000_000)),
+           vol.Required("per_jaar"): vol.All(vol.Coerce(float), vol.Range(0, 100_000))}
 
 _PHASE = _schema(
     {
@@ -572,6 +575,10 @@ _SETTINGS = _schema(
                         # zegt; None is hetzelfde als erboven (v0.134.0).
                         vol.Optional("feed_in_tariff_after"): vol.Any(None, _EURO),
                         vol.Optional("feed_in_costs_after"): vol.Any(None, _EURO),
+                        # De vorm van de terugleverkosten en de schalen (v0.135.0).
+                        vol.Optional("feed_in_costs_mode"): vol.In(["kwh", "overschot", "schalen", "geen"]),
+                        vol.Optional("feed_in_scales"): [_SCHAAL],
+                        vol.Optional("feed_in_scales_until"): _DATUM,
                     }
                 ),
                 vol.Optional("dynamic"): _schema(
@@ -588,6 +595,9 @@ _SETTINGS = _schema(
                         vol.Optional("supplier_markup"): _EURO,
                         vol.Optional("vat_percent"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
                         vol.Optional("feed_in_costs"): _EURO,
+                        vol.Optional("feed_in_costs_mode"): vol.In(["kwh", "overschot", "schalen", "geen"]),
+                        vol.Optional("feed_in_scales"): [_SCHAAL],
+                        vol.Optional("feed_in_scales_until"): _DATUM,
                         vol.Optional("feed_in_bonus"): vol.All(vol.Coerce(float), vol.Range(-1, 1)),
                         vol.Optional("feed_in_bonus_percent"): vol.All(vol.Coerce(float), vol.Range(0, 100)),
                         vol.Optional("bonus_daytime"): bool,
@@ -1335,6 +1345,36 @@ async def async_battery_recalculate(
     connection.send_result(msg["id"], uit)
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/afrekening",
+        vol.Required("van"): _DATUM,
+        vol.Required("tot"): _DATUM,
+    }
+)
+@websocket_api.async_response
+async def async_afrekening(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Salderen per afrekenperiode en de schaal van de terugleverkosten, voor Historie (v0.135.0).
+
+    Zie `async_afrekening` in coach.py.
+    """
+    from datetime import date as _date
+
+    from .coach import async_get_coach
+
+    if not msg.get("van") or not msg.get("tot"):
+        connection.send_error(msg["id"], "invalid_format", "geen periode")
+        return
+    settings = await async_get_store(hass).async_load()
+    connection.send_result(msg["id"], await async_get_coach(hass).async_afrekening(
+        settings, _date.fromisoformat(msg["van"]), _date.fromisoformat(msg["tot"])
+    ))
+
+
 @websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/forecast"})
 @websocket_api.async_response
 async def async_forecast(
@@ -1701,6 +1741,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_contract_confirm)
     websocket_api.async_register_command(hass, async_berichten_list)
     websocket_api.async_register_command(hass, async_forecast)
+    websocket_api.async_register_command(hass, async_afrekening)
     websocket_api.async_register_command(hass, async_battery_recalculate)
     websocket_api.async_register_command(hass, async_berichten_read)
     websocket_api.async_register_command(hass, async_reminders_set)

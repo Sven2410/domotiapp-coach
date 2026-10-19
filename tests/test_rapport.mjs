@@ -4352,6 +4352,60 @@ proef("elk merk dat het paneel aanbiedt neemt de coach aan bij het opslaan (v0.1
   assert.ok(/ALL_BRANDS: Final = sorted\(\s*\{[^}]*\*AIRCO_BRANDS/.test(bron), "AIRCO_BRANDS zit in ALL_BRANDS");
 });
 
+// Terugleverkosten in vier vormen en Historie per afrekenperiode (v0.135.0). De eigenaar op
+// 19-10-2026: "ik wil het zo goed mogelijk hebben". De regels zijn die van prijsopbouw.py
+// (test_prijsopbouw.py) en `async_afrekening` in coach.py (proef 176 in test_coach.py).
+proef("terugleverkosten in vier vormen, en Historie per afrekenperiode (v0.135.0)", async () => {
+  const g = await import("../custom_components/domotiapp_coach/frontend/src/geld.js");
+  const v = { feed_in_costs: 0.05 };
+  assert.equal(g.kostenPerKwh(v, true), 0.05);
+  assert.equal(g.kostenPerKwh({ ...v, feed_in_costs_mode: "overschot" }, true), 0);
+  assert.equal(g.kostenPerKwh({ ...v, feed_in_costs_mode: "overschot" }, false), 0.05);
+  assert.equal(g.kostenPerKwh({ ...v, feed_in_costs_mode: "schalen" }, false), 0);
+  assert.equal(g.kostenPerKwh({ ...v, feed_in_costs_mode: "geen" }, false), 0);
+  const schalen = [{ vanaf: 500, per_jaar: 70 }, { vanaf: 0, per_jaar: 0 }, { vanaf: 750, per_jaar: 140 }];
+  assert.deepEqual([g.schaalPerJaar(schalen, 499.9), g.schaalPerJaar(schalen, 500), g.schaalPerJaar(schalen, 6800), g.schaalPerJaar([], 1)],
+    [0, 70, 140, null], "dezelfde schaal als schaal_per_jaar in prijsopbouw.py");
+  // Per afrekenperiode: 75% saldeert, de rest krijgt de vergoeding na saldering.
+  const afrekening = {
+    perioden: [{ van: "2026-04-01", tot: "2027-01-01", gesaldeerd: 0.75 }, { van: "2025-04-01", tot: "2026-04-01", gesaldeerd: null }],
+    schaal: { van: "2026-09-15", tot: "2027-01-01", per_jaar: 73, per_dag: 0.2, kwh: 600 },
+  };
+  assert.equal(g.aandeelOp(afrekening, new Date(2026, 9, 19, 12)), 0.75);
+  assert.equal(g.aandeelOp(afrekening, new Date(2025, 9, 19, 12)), null, "een periode zonder metingen: het vinkje");
+  assert.equal(g.aandeelOp(null, new Date(2026, 9, 19)), null);
+  const vast = { type: "fixed", netting: true, fixed: { all_in_price: 0.25, feed_in_tariff: 0.12, feed_in_costs: 0.05 } };
+  const p = g.prijsOp(vast, { buy: 0.25, feedIn: null }, new Map(), new Date(2026, 9, 19, 12), null, 3600000, 0.75);
+  assert.ok(Math.abs(p.terug - (0.75 * 0.20 + 0.25 * 0.07)) < 1e-12, `vast: 75% inkoopprijs min kosten, 25% vergoeding min kosten: ${p.terug}`);
+  const zonder = g.prijsOp(vast, { buy: 0.25, feedIn: null }, new Map(), new Date(2026, 9, 19, 12));
+  assert.ok(Math.abs(zonder.terug - 0.20) < 1e-12, "zonder afrekening alles gesaldeerd, zoals tot nu");
+  const overschot = g.prijsOp({ ...vast, fixed: { ...vast.fixed, feed_in_costs_mode: "overschot" } }, { buy: 0.25 }, new Map(),
+    new Date(2026, 9, 19, 12), null, 3600000, 0.75);
+  assert.ok(Math.abs(overschot.terug - (0.75 * 0.25 + 0.25 * 0.07)) < 1e-12, `alleen over het overschot: ${overschot.terug}`);
+  // De schaal per dag, alleen over de dagen die al voorbij zijn.
+  const kosten = g.schaalKosten(afrekening, new Date(2026, 9, 1), new Date(2026, 10, 1), new Date(2026, 9, 11));
+  assert.ok(Math.abs(kosten - 10 * 0.2) < 1e-9, `tien dagen van 1 tot 11 oktober: ${kosten}`);
+  assert.equal(g.schaalKosten({ schaal: null }, new Date(2026, 9, 1), new Date(2026, 10, 1)), 0);
+  const b = g.balans({ rijen: [{ start: new Date(2026, 9, 2), bought: 1, own: 0, sold: 2 }], prijs: () => ({ koop: 0.25, terug: 0.2 }),
+    contract: vast, vasteKosten: 2 });
+  assert.ok(Math.abs(b.terug - (0.4 - 2)) < 1e-12 && b.vasteKosten === 2, "de schaal gaat van wat teruglevering opleverde af");
+  // De opbouw zegt wat de vorm betekent, en Contract heeft de keuze en de tabel.
+  const { kostenNoot } = await import("../custom_components/domotiapp_coach/frontend/src/opbouw.js");
+  assert.match(kostenNoot({ kosten_vorm: "schalen" }), /vast bedrag per jaar, in schalen: een kWh extra kost niets/);
+  assert.equal(kostenNoot({ kosten_vorm: "kwh" }), "");
+  const Contract = geregistreerd.get("dac-view-contract");
+  const html = Object.create(Contract.prototype).render();
+  for (const id of ["fx-kostvorm", "dyn-kostvorm", "fx-schalen", "fx-schalen-tot", "dyn-schalen-tot"]) assert.ok(html.includes(`id="${id}"`), id);
+  const cat = await import("../custom_components/domotiapp_coach/frontend/src/leveranciers.js");
+  assert.deepEqual(
+    ["vattenfall", "budget-thuis", "energiedirect"].map((id) => cat.voorstel(id, "fixed")?.velden?.feed_in_costs_mode),
+    ["schalen", "schalen", "schalen"], "de catalogus kent de schalen tot 2027");
+  assert.equal(cat.voorstel("vattenfall", "fixed").velden.feed_in_scales_until, "2027-01-01");
+  const hist = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/history.js", import.meta.url), "utf8");
+  assert.ok(hist.includes('type: "domotiapp_coach/afrekening"') && hist.includes("aandeelOp(this.afrekening_, when)")
+    && hist.includes("vasteKosten: schaalKosten(this.afrekening_, start, end)"));
+});
+
 // Salderen tot aan wat je afneemt (v0.133.3). De eigenaar op 19-10-2026, bij "Teruglevering
 // (je saldeert: je inkoopprijs min de kosten) € 0,1890": "ik had verwacht dat mijn
 // teruglevering is: 0,0721-0,052756". Levert het huis over een jaar meer terug dan het
@@ -4920,7 +4974,9 @@ proef("Contract per energiebron: soort, leverancier, looptijd, opbouw, bevestige
 proef("de catalogus: elk voorstel rust op een bron en een datum, en vult alleen bekende velden (v0.129.0)", async () => {
   const cat = await import("../custom_components/domotiapp_coach/frontend/src/leveranciers.js");
   const VELDEN = new Set(["supplier_markup", "feed_in_costs", "feed_in_bonus", "feed_in_vat", "feed_in_bonus_percent",
-    "bonus_daytime", "bonus_base", "energy_tax", "vat_percent", "feed_in_tariff", "all_in_price", "price", "netting_full"]);
+    "bonus_daytime", "bonus_base", "energy_tax", "vat_percent", "feed_in_tariff", "all_in_price", "price", "netting_full",
+    // De vorm van de terugleverkosten (v0.135.0).
+    "feed_in_costs_mode", "feed_in_scales_until"]);
   assert.ok(cat.LEVERANCIERS.length >= 1);
   const ids = new Set();
   for (const l of cat.LEVERANCIERS) {
