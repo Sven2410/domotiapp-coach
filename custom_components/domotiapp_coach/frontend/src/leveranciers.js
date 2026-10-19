@@ -23,6 +23,7 @@
  * Energiebelasting per kalenderjaar, zonder btw, eerste schijf (tot 10.000 kWh
  * stroom, tot 1.000 m³ gas). Verandert elk jaar op 1 januari.
  */
+import { nt, t } from "./i18n.js";
 import { LEVERANCIERS_DATA } from "./leveranciers-data.js";
 
 const BELASTINGDIENST = "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/overige_belastingen/belastingen_op_milieugrondslag/energiebelasting/";
@@ -53,11 +54,14 @@ export function belastingGas(jaar = new Date().getFullYear()) {
   return BELASTING[jaar]?.gas ?? null;
 }
 
-/** De soorten contract, zoals Contract ze aanbiedt. */
+/**
+ * De soorten contract, zoals Contract ze aanbiedt. Gemerkt met `nt` en vertaald waar ze
+ * getoond worden (`soortKnoppen` in views/contract.js); hun Engels staat in i18n/en/contract.js.
+ */
 export const SOORTEN = [
-  { key: "fixed", label: "Vast", uitleg: "Eén prijs voor de hele looptijd." },
-  { key: "variable", label: "Variabel", uitleg: "De leverancier past de prijs aan, maandelijks opzegbaar." },
-  { key: "dynamic", label: "Dynamisch", uitleg: "Per uur of kwartier de marktprijs, maandelijks opzegbaar." },
+  { key: "fixed", label: nt("Vast"), uitleg: nt("Eén prijs voor de hele looptijd.") },
+  { key: "variable", label: nt("Variabel"), uitleg: nt("De leverancier past de prijs aan, maandelijks opzegbaar.") },
+  { key: "dynamic", label: nt("Dynamisch"), uitleg: nt("Per uur of kwartier de marktprijs, maandelijks opzegbaar.") },
 ];
 
 const SLEUTEL = { fixed: "vast", variable: "variabel", dynamic: "dynamisch" };
@@ -84,9 +88,9 @@ const ZONNEPLAN = {
           bonus_daytime: true,
           bonus_base: "market_plus_fee",
         },
-        namen: { opslag: "Inkoopvergoeding", vergoeding: "Inkoopvergoeding, terug", bonus: "Zonnebonus", opslagNaBtw: true },
-        uitleg: "Je betaalt per kWh (marktprijs per kwartier + energiebelasting) × 1,21, plus € 0,02 inkoopvergoeding met btw. Vaste leveringskosten € 6,25 per maand.",
-        terug: "Je krijgt de marktprijs met btw plus de € 0,02 inkoopvergoeding terug, zonder energiebelasting. Overdag, van zonsopkomst tot zonsondergang en als marktprijs + € 0,02 positief is, komt er 10% Zonnebonus bij over (marktprijs + € 0,02), tot 7.500 kWh per jaar. Niet over teruglevering uit de thuisbatterij van Zonneplan. Geen terugleverkosten.",
+        namen: { opslag: nt("Inkoopvergoeding"), vergoeding: nt("Inkoopvergoeding, terug"), bonus: nt("Zonnebonus"), opslagNaBtw: true },
+        uitleg: nt("Je betaalt per kWh (marktprijs per kwartier + energiebelasting) × 1,21, plus € 0,02 inkoopvergoeding met btw. Vaste leveringskosten € 6,25 per maand."),
+        terug: nt("Je krijgt de marktprijs met btw plus de € 0,02 inkoopvergoeding terug, zonder energiebelasting. Overdag, van zonsopkomst tot zonsondergang en als marktprijs + € 0,02 positief is, komt er 10% Zonnebonus bij over (marktprijs + € 0,02), tot 7.500 kWh per jaar. Niet over teruglevering uit de thuisbatterij van Zonneplan. Geen terugleverkosten."),
         bronnen: [
           "https://www.zonneplan.nl/energie/dynamisch-energiecontract",
           "https://www.zonneplan.nl/energie/zonnebonus/",
@@ -96,7 +100,7 @@ const ZONNEPLAN = {
     },
     gas: {},
     ha: { stroom: ["zonneplan_current_electricity_tariff"], gas: ["zonneplan_current_gas_tariff"] },
-    onzeker: ["Of de vaste leveringskosten van € 6,25 per maand met of zonder btw zijn, zeggen alleen vergelijkers."],
+    onzeker: [nt("Of de vaste leveringskosten van € 6,25 per maand met of zonder btw zijn, zeggen alleen vergelijkers.")],
 };
 
 export const LEVERANCIERS = [ZONNEPLAN, ...LEVERANCIERS_DATA];
@@ -122,6 +126,10 @@ export function leveranciersVoor(bron = "stroom") {
 /**
  * Het voorstel voor een contract: de velden om in te vullen, de woorden voor de
  * opbouw, en waar het vandaan komt. Null als de leverancier dit niet heeft.
+ *
+ * De tekst komt in de taal van nu (v0.140.0): de tabellen houden het Nederlands, gemerkt
+ * met `nt`, en hier vertaalt `t` de uitleg, de teruglevering, wat onzeker is en de woorden
+ * voor de opbouw. De naam van de leverancier, de bronnen en de velden blijven zoals ze zijn.
  */
 export function voorstel(id, soort, bron = "stroom", jaar = new Date().getFullYear()) {
   const l = leverancier(id);
@@ -137,13 +145,18 @@ export function voorstel(id, soort, bron = "stroom", jaar = new Date().getFullYe
     leverancier: l.naam,
     interval: deel.interval ?? null,
     velden,
-    namen: { ...(deel.namen ?? {}), leverancier: l.naam },
-    uitleg: deel.uitleg ?? "",
-    terug: deel.terug ?? "",
+    namen: { ...vertaalNamen(deel.namen), leverancier: l.naam },
+    uitleg: deel.uitleg ? t(deel.uitleg) : "",
+    terug: deel.terug ? t(deel.terug) : "",
     bronnen: deel.bronnen ?? [],
     peildatum: l.peildatum,
-    onzeker: l.onzeker ?? [],
+    onzeker: (l.onzeker ?? []).map((zin) => t(zin)),
   };
+}
+
+/** De woorden voor de opbouw in de taal van nu; `opslagNaBtw` en andere vlaggen blijven. */
+function vertaalNamen(namen = {}) {
+  return Object.fromEntries(Object.entries(namen).map(([k, w]) => [k, typeof w === "string" ? t(w) : w]));
 }
 
 /** De woorden voor de opbouw van deze leverancier (`opbouwHtml` in opbouw.js). */

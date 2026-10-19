@@ -37,6 +37,7 @@ from .const import (
     STORAGE_KEY,
     STORAGE_VERSION,
 )
+from .taal import t
 
 
 def schema_bijwerken(
@@ -133,20 +134,20 @@ def voorkeuren_bijwerken(
     for veld, waarde in wijziging.items():
         if veld == "battery":
             if soort != "thuisbatterij" or not set(waarde) <= VOORKEUREN_ACCU:
-                raise ValueError(f"{veld} hoort niet bij een {soort}")
+                raise ValueError(t("{veld} hoort niet bij een {soort}", veld=veld, soort=soort))
             apparaat["battery"] = {**(apparaat.get("battery") or {}), **waarde}
         elif veld == "airco":
             if soort != "airco" or not set(waarde) <= VOORKEUREN_AIRCO:
-                raise ValueError(f"{veld} hoort niet bij een {soort}")
+                raise ValueError(t("{veld} hoort niet bij een {soort}", veld=veld, soort=soort))
             apparaat["airco"] = {**(apparaat.get("airco") or {}), **waarde}
         elif veld == "cars":
             if soort != "laadpaal":
-                raise ValueError(f"{veld} hoort niet bij een {soort}")
+                raise ValueError(t("{veld} hoort niet bij een {soort}", veld=veld, soort=soort))
             autos = [dict(auto) for auto in (apparaat.get("cars") or []) if isinstance(auto, dict)]
             for rij in waarde:
                 velden = {k: v for k, v in rij.items() if k != "id"}
                 if not set(velden) <= VOORKEUREN_AUTO:
-                    raise ValueError("alleen laden tot en wekken horen bij de auto")
+                    raise ValueError(t("alleen laden tot en wekken horen bij de auto"))
                 auto = next((a for a in autos if a.get("id") == rij.get("id")), None)
                 if auto is None:
                     raise KeyError(rij.get("id"))
@@ -155,7 +156,7 @@ def voorkeuren_bijwerken(
         elif veld in mag:
             apparaat[veld] = waarde
         else:
-            raise ValueError(f"{veld} hoort niet bij een {soort}")
+            raise ValueError(t("{veld} hoort niet bij een {soort}", veld=veld, soort=soort))
     return lijst
 
 

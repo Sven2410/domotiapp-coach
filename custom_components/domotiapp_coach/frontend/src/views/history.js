@@ -20,7 +20,7 @@ import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
 import { energy, euro, huisNu, percent, signedPower } from "../format.js";
 import { deviceLabel, deviceLabelMap } from "../devices.js";
-import { datum, getal, nt, t, tn } from "../i18n.js";
+import { datum, getal, locale, nt, t, tijd, tn } from "../i18n.js";
 
 /** Het merkteken op het rapport. */
 const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
@@ -75,9 +75,12 @@ const MIN_W = 240;
 const TOP = 18;
 const BOTTOM_PAD = 22;
 
-/** Getallen voor het rapport, dat tot stap 3 van het Engels Nederlands blijft (docs/taal.md). */
-const nl = (value, digits = 1) =>
-  value.toLocaleString("nl-NL", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+/**
+ * Getallen voor het rapport, in de taal van het paneel (v0.140.0). Met punt of komma bij
+ * duizendtallen, zoals het rapport ze altijd schreef: een jaar gas is 1.234,5 m³.
+ */
+const aantal = (value, digits = 1) =>
+  value.toLocaleString(locale(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
 /**
  * Wat het huis in één vak gebruikte, met de thuisbatterij erbij (v0.101.2).
@@ -235,45 +238,57 @@ function watt(value) {
  * een gegevensbestand. De piek blijft in elk tijdvak de echte piek: bij het
  * samenvoegen wordt de hoogste van de kwartieren genomen en niet een nieuw
  * gemiddelde.
+ *
+ * De kop en de uitleg blijven Nederlands (`nt`) en worden vertaald waar het rapport
+ * ze neerzet, want bij het laden van de module is de taal nog niet bekend.
  */
 const KORRELS = {
   quarter: {
-    kop: "Kwartier",
+    kop: nt("Kwartier"),
     sleutel: (d) => d.getTime(),
-    label: (d) => d.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }),
-    uitleg:
-      "Elk kwartier van deze dag, met het laagste, het gemiddelde en de piek. De piek is de " +
-      "hoogste waarde die de sensor binnen dat kwartier gemeld heeft, dus zo scherp als je " +
-      "meter meet. Kwartieren waarin de sensor niets liet horen staan er niet in.",
+    label: (d) => tijd(d, { hour: "2-digit", minute: "2-digit" }),
+    uitleg: [
+      nt("Elk kwartier van deze dag, met het laagste, het gemiddelde en de piek."),
+      nt("De piek is de hoogste waarde die de sensor binnen dat kwartier gemeld heeft, dus zo scherp als je meter meet."),
+      nt("Kwartieren waarin de sensor niets liet horen staan er niet in."),
+    ],
   },
   hour: {
-    kop: "Uur",
+    kop: nt("Uur"),
     sleutel: (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()).getTime(),
     label: (d) =>
-      `${d.toLocaleDateString("nl-NL", { weekday: "short" }).replace(".", "")} ` +
+      `${datum(d, { weekday: "short" }).replace(".", "")} ` +
       `${String(d.getHours()).padStart(2, "0")}:00`,
-    uitleg:
-      "Elk uur van deze week, samengesteld uit de kwartieren eronder. De piek is de hoogste " +
-      "waarde binnen dat uur. Wil je het fijner of grover, kies dan een andere korrel boven de grafiek.",
+    uitleg: [
+      nt("Elk uur van deze week, samengesteld uit de kwartieren eronder."),
+      nt("De piek is de hoogste waarde binnen dat uur."),
+      nt("Wil je het fijner of grover, kies dan een andere korrel boven de grafiek."),
+    ],
   },
   day: {
-    kop: "Dag",
+    kop: nt("Dag"),
     sleutel: (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(),
-    label: (d) => d.toLocaleDateString("nl-NL", { weekday: "short", day: "numeric", month: "short" })
+    label: (d) => datum(d, { weekday: "short", day: "numeric", month: "short" })
       .replace(/\./g, ""),
-    uitleg:
-      "Elke dag van deze maand, samengesteld uit de kwartieren eronder. De piek is de hoogste " +
-      "waarde die er die dag in een kwartier stond. Wil je het fijner of grover, kies dan een andere korrel boven de grafiek.",
+    uitleg: [
+      nt("Elke dag van deze maand, samengesteld uit de kwartieren eronder."),
+      nt("De piek is de hoogste waarde die er die dag in een kwartier stond."),
+      nt("Wil je het fijner of grover, kies dan een andere korrel boven de grafiek."),
+    ],
   },
   month: {
-    kop: "Maand",
+    kop: nt("Maand"),
     sleutel: (d) => new Date(d.getFullYear(), d.getMonth()).getTime(),
-    label: (d) => d.toLocaleDateString("nl-NL", { month: "long" }),
-    uitleg:
-      "Elke maand van dit jaar, samengesteld uit de kwartieren eronder. De piek is de hoogste " +
-      "waarde die er die maand in een kwartier stond.",
+    label: (d) => datum(d, { month: "long" }),
+    uitleg: [
+      nt("Elke maand van dit jaar, samengesteld uit de kwartieren eronder."),
+      nt("De piek is de hoogste waarde die er die maand in een kwartier stond."),
+    ],
   },
 };
+
+/** Zinnen in de taal van het paneel, met een spatie ertussen. */
+const alsZinnen = (lijst) => lijst.map((zin) => t(zin)).join(" ");
 
 /** De knoppen waarmee de klant de fijnheid kiest, van fijn naar grof; vertaald waar ze getoond worden. */
 const KORREL_KNOPPEN = [
@@ -326,14 +341,14 @@ function netBronnen(bronnen) {
     return [
       {
         entity: bronnen.grid_signed,
-        label: "Het net",
+        label: t("Het net"),
         omkeren: Boolean(bronnen.grid_signed_invert),
       },
     ];
   }
   return [
-    { entity: bronnen.grid_import, label: "Van het net" },
-    { entity: bronnen.grid_export, label: "Naar het net" },
+    { entity: bronnen.grid_import, label: t("Van het net") },
+    { entity: bronnen.grid_export, label: t("Naar het net") },
   ];
 }
 
@@ -394,9 +409,9 @@ function vakken(rows, korrel) {
  * zonder de dag erbij niets waard: "19:45" zegt dan niet welke avond.
  */
 function piekMoment(period, date) {
-  const klok = date.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" });
+  const klok = tijd(date, { hour: "2-digit", minute: "2-digit" });
   if (period === "day") return klok;
-  const dag = date.toLocaleDateString("nl-NL", { day: "numeric", month: "short" });
+  const dag = datum(date, { day: "numeric", month: "short" });
   return `${dag.replace(".", "")} ${klok}`;
 }
 
@@ -1372,17 +1387,20 @@ class DacViewHistory extends DacElement {
     // grafiek en Alle cijfers volgen de periode, het verloop volgt wat de klant
     // gekozen heeft. "Per uur" in de kop terwijl er Kwartier aanstond leest als
     // een fout, ook al klopte het over de grafiek. Dus staat er nu bij waar het
-    // over gaat.
-    const grafiekKorrel = { day: "uur", week: "dag", month: "dag", year: "maand" }[
+    // over gaat. Vergeleken op de korrel zelf, het woord is voor de lezer.
+    const grafiekKorrel = { day: "hour", week: "day", month: "day", year: "month" }[
       this.period_
     ];
-    const detailKorrel = KORRELS[this.korrel_id()]?.kop.toLowerCase();
+    const detailKorrel = this.korrel_id();
+    const woord = (id) => t(KORRELS[id]?.kop ?? "").toLowerCase();
     const korrel =
-      detailKorrel && detailKorrel !== grafiekKorrel
-        ? `Grafiek per ${grafiekKorrel}, verloop per ${detailKorrel}`
-        : `Per ${grafiekKorrel}`;
+      KORRELS[detailKorrel] && detailKorrel !== grafiekKorrel
+        ? t("Grafiek per {grafiek}, verloop per {verloop}", { grafiek: woord(grafiekKorrel), verloop: woord(detailKorrel) })
+        : t("Per {korrel}", { korrel: woord(grafiekKorrel) });
 
-    const cel = (label, waarde) => ({ label, waarde });
+    // Een vakje vertaalt zijn naam zelf: de namen komen hier als Nederlandse tekst
+    // binnen, ook die van geldDelen_ en voorraadRegel_ (`nt`), die het scherm deelt.
+    const cel = (label, waarde) => ({ label: t(label), waarde });
 
     const kwh = (value) => {
       if (value === null || value === undefined) return "";
@@ -1399,20 +1417,20 @@ class DacViewHistory extends DacElement {
       rows.reduce((total, row) => total + row[key] * (prijsBij(row) ?? 0), 0);
 
     // ---- de tabel per tijdvak ----
-    const kop = ["Periode"];
-    if (hasSolar) kop.push("Opgewekt", "Verbruikt", "Eigen zon");
-    kop.push("Van het net", "Naar het net");
-    if (gas.size) kop.push("Gas");
-    if (water.size) kop.push("Water");
-    if (rate.buy !== null) kop.push("Prijs", "Kosten");
+    const kop = [t("Periode")];
+    if (hasSolar) kop.push(t("Opgewekt"), t("Verbruikt"), t("Eigen zon"));
+    kop.push(t("Van het net"), t("Naar het net"));
+    if (gas.size) kop.push(t("Gas"));
+    if (water.size) kop.push(t("Water"));
+    if (rate.buy !== null) kop.push(t("Prijs"), t("Kosten"));
 
     const regels = rows.map((row) => {
       const prijs = prijsBij(row);
       const cellen = [bucketTitle(this.period_, row.start)];
       if (hasSolar) cellen.push(kwh(row.own + row.sold), kwh(row.used), kwh(row.own));
       cellen.push(kwh(row.bought), kwh(row.sold));
-      if (gas.size) cellen.push(`${nl(gas.get(row.start.getTime()) ?? 0, 2)} m³`);
-      if (water.size) cellen.push(`${nl(water.get(row.start.getTime()) ?? 0, 2)} m³`);
+      if (gas.size) cellen.push(`${aantal(gas.get(row.start.getTime()) ?? 0, 2)} m³`);
+      if (water.size) cellen.push(`${aantal(water.get(row.start.getTime()) ?? 0, 2)} m³`);
       if (rate.buy !== null) {
         cellen.push(prijs === null ? "" : euro(prijs), euro(row.bought * (prijs ?? 0)));
       }
@@ -1420,14 +1438,14 @@ class DacViewHistory extends DacElement {
     });
 
     const som = (key) => rows.reduce((total, row) => total + row[key], 0);
-    const totaalCellen = ["Totaal"];
+    const totaalCellen = [t("Totaal")];
     if (hasSolar) totaalCellen.push(kwh(som("own") + som("sold")), kwh(som("used")), kwh(som("own")));
     totaalCellen.push(kwh(som("bought")), kwh(som("sold")));
     if (gas.size) {
-      totaalCellen.push(`${nl([...gas.values()].reduce((a, b) => a + b, 0), 2)} m³`);
+      totaalCellen.push(`${aantal([...gas.values()].reduce((a, b) => a + b, 0), 2)} m³`);
     }
     if (water.size) {
-      totaalCellen.push(`${nl([...water.values()].reduce((a, b) => a + b, 0), 2)} m³`);
+      totaalCellen.push(`${aantal([...water.values()].reduce((a, b) => a + b, 0), 2)} m³`);
     }
     if (rate.buy !== null) totaalCellen.push("", euro(waarde("bought")));
 
@@ -1440,13 +1458,13 @@ class DacViewHistory extends DacElement {
     // een zin die zegt waarom.
     const aandeelKlopt = Boolean(totals.used) && samen <= totals.used * 1.02;
 
-    const apparaatKop = ["Apparaat", "Verbruik"];
-    if (rate.buy !== null) apparaatKop.push("Kosten");
-    if (aandeelKlopt) apparaatKop.push("Aandeel");
+    const apparaatKop = [t("Apparaat"), t("Verbruik")];
+    if (rate.buy !== null) apparaatKop.push(t("Kosten"));
+    if (aandeelKlopt) apparaatKop.push(t("Aandeel"));
 
     const apparaatRijen = apparaten.map((device) => {
       const cellen = [
-        device.exact ? device.label : `${device.label} (bij benadering)`,
+        device.exact ? device.label : t("{naam} (bij benadering)", { naam: device.label }),
         kwh(device.kwh),
       ];
       if (rate.buy !== null) cellen.push(euro(device.euro));
@@ -1454,14 +1472,14 @@ class DacViewHistory extends DacElement {
       return cellen;
     });
 
-    const apparaatUitleg =
-      "Van apparaten zonder eigen energieteller wordt het verbruik afgeleid uit het " +
-      "gemiddelde vermogen. Dat is nauwkeurig genoeg om te zien waar je stroom heen gaat, " +
-      "maar het is geen meterstand. Vul bij Apparaten een energieteller in als je die hebt, " +
-      "dan klopt het tot op de komma." +
-      (aandeelKlopt
-        ? ""
-        : " Deze schattingen tellen samen op tot meer dan het verbruik van de woning, dus staat er geen aandeel bij.");
+    const apparaatUitleg = [
+      t("Van apparaten zonder eigen energieteller wordt het verbruik afgeleid uit het gemiddelde vermogen."),
+      t("Dat is nauwkeurig genoeg om te zien waar je stroom heen gaat, maar het is geen meterstand."),
+      t("Vul bij Apparaten een energieteller in als je die hebt, dan klopt het tot op de komma."),
+      aandeelKlopt
+        ? null
+        : t("Deze schattingen tellen samen op tot meer dan het verbruik van de woning, dus staat er geen aandeel bij."),
+    ].filter(Boolean).join(" ");
 
     const energieVakjes = [
       hasSolar ? cel("Opgewekt", kwh(totals.solar)) : null,
@@ -1477,10 +1495,10 @@ class DacViewHistory extends DacElement {
         ? null
         : cel("Zelfvoorzienend", `${percent(totals.selfSufficient).value} %`),
       gas.size
-        ? cel("Gas", `${nl([...gas.values()].reduce((a, b) => a + b, 0), 1)} m³`)
+        ? cel("Gas", `${aantal([...gas.values()].reduce((a, b) => a + b, 0), 1)} m³`)
         : null,
       water.size
-        ? cel("Water", `${nl([...water.values()].reduce((a, b) => a + b, 0), 1)} m³`)
+        ? cel("Water", `${aantal([...water.values()].reduce((a, b) => a + b, 0), 1)} m³`)
         : null,
     ].filter(Boolean);
 
@@ -1506,11 +1524,11 @@ class DacViewHistory extends DacElement {
       logoUrl: LOGO_URL,
       woning,
       periode,
-      korrel: beknopt ? "Beknopt" : korrel,
+      korrel: beknopt ? t("Beknopt") : korrel,
       beknopt,
       metZon: hasSolar,
       metAccu: Boolean(this.accuTegels_),
-      gemaakt: huisNu().toLocaleDateString("nl-NL", {
+      gemaakt: datum(huisNu(), {
         day: "numeric",
         month: "long",
         year: "numeric",
@@ -1539,10 +1557,10 @@ class DacViewHistory extends DacElement {
     const namen = deviceLabelMap(this.settings_?.devices ?? []);
     return [
       ...netBronnen(bronnen),
-      { entity: bronnen.solar, label: "Zon" },
+      { entity: bronnen.solar, label: t("Zon") },
       ...(Array.isArray(bronnen.solar_extra) ? bronnen.solar_extra : [])
         .filter(Boolean)
-        .map((entity, i) => ({ entity, label: `Zon ${i + 2}` })),
+        .map((entity, i) => ({ entity, label: t("Zon {n}", { n: i + 2 }) })),
       ...(this.settings_?.devices ?? []).map((device) => ({
         entity: device.entity,
         label: namen.get(device.id) ?? deviceLabel(device),
@@ -1603,7 +1621,7 @@ class DacViewHistory extends DacElement {
    */
   tekenUitleg_() {
     return this.settings_?.sources?.grid_mode === "signed"
-      ? " Bij Het net is een plus wat er van het net kwam en een min wat er naartoe ging."
+      ? ` ${t("Bij Het net is een plus wat er van het net kwam en een min wat er naartoe ging.")}`
       : "";
   }
 
@@ -1624,15 +1642,15 @@ class DacViewHistory extends DacElement {
     if (!rijen.length) return null;
 
     return {
-      kop: ["", "Laagste", "Gemiddeld", "Piek", "Piek op"],
+      kop: ["", t("Laagste"), t("Gemiddeld"), t("Piek"), t("Piek op")],
       rijen,
       uitleg:
-        "Per kwartier wordt het laagste, het gemiddelde en de piek bewaard, twee jaar lang. " +
-        "De piek is de hoogste waarde die de sensor zelf gemeld heeft, dus zo scherp als je " +
-        "meter meet. Het gemiddelde weegt naar tijd en niet naar het aantal metingen. " +
-        "Deze geschiedenis begint op de dag dat de coach hem is gaan bijhouden; wat daarvoor " +
-        "ligt is overgenomen uit Home Assistant voor zover dat er nog was." +
-        this.tekenUitleg_(),
+        [
+          t("Per kwartier wordt het laagste, het gemiddelde en de piek bewaard, twee jaar lang."),
+          t("De piek is de hoogste waarde die de sensor zelf gemeld heeft, dus zo scherp als je meter meet."),
+          t("Het gemiddelde weegt naar tijd en niet naar het aantal metingen."),
+          t("Deze geschiedenis begint op de dag dat de coach hem is gaan bijhouden; wat daarvoor ligt is overgenomen uit Home Assistant voor zover dat er nog was."),
+        ].join(" ") + this.tekenUitleg_(),
     };
   }
 
@@ -1657,10 +1675,10 @@ class DacViewHistory extends DacElement {
     if (!tabellen.length) return null;
 
     return {
-      korrel: korrel.kop,
-      kop: [korrel.kop, "Laagste", "Gemiddeld", "Piek"],
+      korrel: t(korrel.kop),
+      kop: [t(korrel.kop), t("Laagste"), t("Gemiddeld"), t("Piek")],
       tabellen,
-      uitleg: korrel.uitleg + this.tekenUitleg_(),
+      uitleg: alsZinnen(korrel.uitleg) + this.tekenUitleg_(),
     };
   }
 
@@ -1687,7 +1705,7 @@ class DacViewHistory extends DacElement {
 
     try {
       const blob = await reportPdf(gegevens);
-      const naam = `DomotiApp Coach ${gegevens.periode}${beknopt ? " (beknopt)" : ""}.pdf`.replace(/[\\/:*?"<>|]/g, "-");
+      const naam = `DomotiApp Coach ${gegevens.periode}${beknopt ? ` (${t("beknopt")})` : ""}.pdf`.replace(/[\\/:*?"<>|]/g, "-");
       const uitkomst = await this.bezorg_(blob, naam);
       if (label && uitkomst === "mislukt") label.textContent = t("Niet gelukt");
       else if (label) label.textContent = oud;
@@ -1895,28 +1913,31 @@ class DacViewHistory extends DacElement {
       return `${getal} ${unit}`;
     };
     const wanneer = (b) => {
-      const t = new Date(b.plugged_at);
-      if (Number.isNaN(t.getTime())) return "";
-      return `${String(t.getDate()).padStart(2, "0")}-${String(t.getMonth() + 1).padStart(2, "0")} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+      const op = new Date(b.plugged_at);
+      if (Number.isNaN(op.getTime())) return "";
+      // 19-10 of 19/10, naar de taal, zoals in de lijst op het scherm.
+      return `${datum(op, { day: "2-digit", month: "2-digit" })} ${String(op.getHours()).padStart(2, "0")}:${String(op.getMinutes()).padStart(2, "0")}`;
     };
     const w = woorden(items);
     const metAccu = totaal.battery_kwh >= 0.05;
     return {
       vakjes: [
-        { label: "Bespaard", waarde: euro(totaal.saved) },
-        { label: "Door de zon", waarde: euro(totaal.solar_saved) },
-        { label: "Door te wachten", waarde: euro(totaal.wait_saved) },
-        { label: "Betaald", waarde: euro(totaal.paid) },
-        { label: w.hoeveel, waarde: kwh(totaal.kwh) },
-        { label: "Waarvan zon", waarde: kwh(totaal.solar_kwh) },
-        ...(metAccu ? [{ label: "Uit je thuisbatterij", waarde: kwh(totaal.battery_kwh) }] : []),
+        { label: t("Bespaard"), waarde: euro(totaal.saved) },
+        { label: t("Door de zon"), waarde: euro(totaal.solar_saved) },
+        { label: t("Door te wachten"), waarde: euro(totaal.wait_saved) },
+        { label: t("Betaald"), waarde: euro(totaal.paid) },
+        { label: t(w.hoeveel), waarde: kwh(totaal.kwh) },
+        { label: t("Waarvan zon"), waarde: kwh(totaal.solar_kwh) },
+        ...(metAccu ? [{ label: t("Uit je thuisbatterij"), waarde: kwh(totaal.battery_kwh) }] : []),
       ],
       uitleg:
-        w.uitleg +
+        t(w.uitleg) +
         (totaal.onbekend
-          ? ` ${totaal.onbekend === 1 ? "Eén sessie telt" : `${totaal.onbekend} sessies tellen`} niet mee in het geld, omdat de prijs toen niet bekend was.`
+          ? ` ${tn(totaal.onbekend,
+            "Eén sessie telt niet mee in het geld, omdat de prijs toen niet bekend was.",
+            "{n} sessies tellen niet mee in het geld, omdat de prijs toen niet bekend was.")}`
           : ""),
-      kop: [w.wanneer, "Apparaat", w.hoeveel, "Zon", ...(metAccu ? ["Accu"] : []), w.vanaf, "Betaald", "Bespaard", "Door zon"],
+      kop: [t(w.wanneer), t("Apparaat"), t(w.hoeveel), t("Zon"), ...(metAccu ? [t("Accu")] : []), t(w.vanaf), t("Betaald"), t("Bespaard"), t("Door zon")],
       rijen: items.map((b) => [
         wanneer(b),
         b.car ? `${b.name}, ${b.car}` : b.name,
@@ -1929,7 +1950,7 @@ class DacViewHistory extends DacElement {
         delen(b).zon === null ? "" : euro(delen(b).zon),
       ]),
       totaal: [
-        "Totaal", "", kwh(totaal.kwh), kwh(totaal.solar_kwh), ...(metAccu ? [kwh(totaal.battery_kwh)] : []),
+        t("Totaal"), "", kwh(totaal.kwh), kwh(totaal.solar_kwh), ...(metAccu ? [kwh(totaal.battery_kwh)] : []),
         euro(totaal.ref_cost), euro(totaal.paid), euro(totaal.saved), euro(totaal.solar_saved),
       ],
     };

@@ -9,6 +9,8 @@ hij onthoudt of juist vergeet.
 
 import asyncio
 import datetime as dt
+import importlib
+import importlib.util
 import pathlib
 
 # De nagemaakte Home Assistant en de modules van de coach staan in harnas.py,
@@ -10654,6 +10656,45 @@ try:
              len(rijen181) == 188 and all(r["price"] == round((0.1340 + 0.001) * 1.23, 6) for r in rijen181 if r["start"].date() == dt.date(2026, 10, 25) and r["start"].hour == 1), f"{len(rijen181)}")
 finally:
     du181.as_local, du181.as_utc, du181.get_default_time_zone = oud181
+
+print("=== 182. wat de coach schrijft ook in het Engels (v0.140.0) ===")
+# De eigenaar op 19-10-2026: "ik wil ook dat het hele coach in het engels ingesteld kan
+# worden." Stap 2: de meldingen, de redenen, het verslag en de berichten. Een taal per
+# installatie, dezelfde keuze als het paneel (kiesTaal in i18n.js).
+taal182 = sys.modules.get("domotiapp_coach.taal") or importlib.import_module("domotiapp_coach.taal")
+try:
+    controle("Nederlands is de standaard", taal182.taal() == "nl" and taal182.t("niet laden") == "niet laden")
+    controle("automatisch volgt Home Assistant, net als het paneel",
+             taal182.kies_uit({"installation": {"language": "auto"}}, "en-GB") == "en"
+             and taal182.kies_uit({"installation": {"language": "auto"}}, "nl") == "nl"
+             and taal182.kies_uit({"installation": {"language": "en"}}, "nl") == "en"
+             and taal182.kies_uit({}, "de") == "nl")
+    taal182.kies("en")
+    controle("een getal met een punt in het Engels", taal182.getal(1.5) == "1.5")
+    controle("een zin zonder vertaling blijft Nederlands", taal182.t("Een zin die er niet is") == "Een zin die er niet is")
+    taal182.kies("nl")
+    controle("en met een komma in het Nederlands", taal182.getal(1.5) == "1,5")
+    # Het Engels zelf.
+    taal182.kies("en")
+    controle("de startsensor zegt precies 'now', want DomotiApp Lovelace herkent dat (0.80.2 en eerder)",
+             taal182.t("nu") == "now")
+    controle("een besluit en een bericht in het Engels",
+             taal182.t("laden op {a} A", a=16) == "charging at 16 A" and taal182.t("niet laden") == "not charging"
+             and bm170.meterstand_bericht(V170, H180)["titel"] == "Submit your meter readings")
+    controle("een naam met een lidwoord midden in een zin met een kleine letter",
+             taal182.t("De deur van {naam} staat al {n} minuten open.", naam="The freezer", n=3) == "The door of the freezer has been open for 3 minutes.")
+    taal182.kies("nl")
+    controle("en in het Nederlands zoals het was",
+             taal182.t("De deur van {naam} staat al {n} minuten open.", naam="De vriezer", n=3) == "De deur van De vriezer staat al 3 minuten open.")
+finally:
+    taal182.kies("nl")
+spec182 = importlib.util.spec_from_file_location("vertaalcheck", pathlib.Path(__file__).resolve().parent.parent / "tools" / "vertaalcheck.py")
+vc182 = importlib.util.module_from_spec(spec182)
+spec182.loader.exec_module(vc182)
+uit182 = vc182.controle()
+controle("elke zin van de coach heeft Engels (python tools/vertaalcheck.py)",
+         not uit182["ontbreekt"] and not uit182["verschillend"] and not uit182["scheef"] and not uit182["streep"],
+         f"{ {k: len(v) for k, v in uit182['ontbreekt'].items()} } {uit182['verschillend'][:3]} {uit182['scheef'][:3]} {uit182['streep'][:3]}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

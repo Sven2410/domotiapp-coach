@@ -6,11 +6,24 @@ dus nu is het alleen nederlands maar dan wil ik ook engels." Zijn keuzes die dag
 - **Eén taal per installatie.** Installatie, Taal / Language (`installation.language`):
   automatisch (de taal van Home Assistant, `hass.config.language`), Nederlands of English. Het
   paneel, en vanaf stap 2 ook de meldingen, redenen en kaarten, in dezelfde taal.
-- **In stappen**, elk een eigen uitgave, met Nederlands als standaard:
+- **In stappen**, met Nederlands als standaard:
   1. het paneel (v0.139.0);
-  2. wat de coach zelf schrijft: meldingen, redenen bij een besluit, het verslag, de berichten;
+  2. wat de coach zelf schrijft: meldingen, redenen bij een besluit, het verslag, de berichten,
+     de toestand van de tekstsensoren (v0.140.0);
   3. het rapport (report.js, pdf.js en de teksten daarvoor in views/history.js) en de
-     leverancierslijst (leveranciers.js, leveranciers-data.js).
+     leverancierslijst (leveranciers.js, leveranciers-data.js), ook in v0.140.0. De eigenaar op
+     19-10-2026: "je doet alles gefaseerd maar wel in 1 keer afmaken toch?"
+
+  Wat Nederlands blijft: de namen die de bewoner koos, de namen van leveranciers en producten
+  ("Zonnebonus"), de Portugese tijdvakken tussen haakjes, wat al bewaard is (oude meldingen en
+  berichten), en de modelnamen van de apparaten in Home Assistant (`MODELLEN` in entiteit.py),
+  want DomotiApp Lovelace vindt de coach-apparaten daaraan. De kaarten van DomotiApp Lovelace zelf
+  zijn Nederlands; of die ook Engels worden ligt bij de eigenaar. De startsensor zegt in het
+  Engels precies "now": de programmakaart herkende "nu" aan de toestand (sinds lovelace 0.80.2
+  aan `stand`).
+
+  In het Engels krijgt een ingevulde naam met een lidwoord midden in een zin een kleine letter
+  ("The door of the freezer"), in `t` van taal.py.
 
 ## Hoe het werkt
 
@@ -60,6 +73,38 @@ de verkeerde taal zit hem toch vindt.
    meldingen: stap 2). Ook niet de namen die de bewoner zelf koos.
 7. **Het Nederlands blijft letterlijk hetzelfde.** In het Nederlands moet het paneel precies
    tonen wat het toonde; de proeven zien dat.
+
+## Wat de coach schrijft (stap 2, v0.140.0)
+
+`taal.py`, het tegenstuk van i18n.js voor Python: `t`, `tn`, `getal`, en `kies_uit(settings,
+hass.config.language)`, dat de coach bij elke ronde aanroept. Dezelfde keuze als het paneel. Het
+Engels staat in `engels/*.json` (JSON en geen Python, zodat taal.py ook los werkt: planner.py wordt
+in de proeven zonder pakket ingeladen en laadt taal.py dan zelf). `python tools/vertaalcheck.py`
+(en proef 182 in test_coach.py) zegt welke zin nog geen Engels heeft.
+
+```python
+from .taal import getal, t, tn          # planner.py heeft er een terugval voor
+
+kop = t("laden op {a} A", a=stroom)
+reden = t("Het net kost nu {prijs} per kWh.", prijs=_euro(prijs))
+tn(n, "{n} minuut", "{n} minuten")
+f"{getal(kwh)} kWh"                      # 1,5 of 1.5
+```
+
+Daarbij, naast de regels hierboven:
+
+- De sleutel is een gewone string tussen dubbele aanhalingstekens, geen f-string; de waarden gaan
+  als `naam=waarde` mee. Een zin die nu uit stukjes bestaat (`f"{naam}: {kop}. {reden}"`) wordt
+  per stukje vertaald, of als geheel met waarden, zolang het Nederlands letterlijk gelijk blijft.
+- Niet vertalen: `_LOGGER`-regels, de namen van regels (`rule`), standen en soorten die als sleutel
+  dienen, en de waarden in tabellen die met het paneel of de instellingen vergeleken worden
+  (`PROGRAMMAS`, `STEKKER_APPARATEN`, `STAND_NAMEN`): die vertalen waar ze in een zin komen.
+- Het contract met de kaarten van DomotiApp Lovelace (`CONTRACT` in entiteit.py) blijft: de namen
+  van de attributen en de vaste waarden (`stand`, `type`, `modus`, ...) veranderen niet. Alleen de
+  tekst die een kaart toont (`reason`, `plan`, `why`, de toestand van een tekstsensor) wordt Engels.
+- Wat al bewaard is (meldingen in de geschiedenis, berichten in de box) blijft in de taal waarin
+  het geschreven werd. De tijdlijn in Historie leest bij nieuwe meldingen de vaste velden (`rule`,
+  `mode`, `charge`, `device`), niet de tekst, dus die kan Engels zijn.
 
 ## Schrijfwijze van het Engels
 

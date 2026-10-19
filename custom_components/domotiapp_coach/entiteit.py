@@ -26,13 +26,23 @@ from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN, EVENT_SETTINGS_UPDATED
 from .storage import async_get_store
+from .taal import t
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def nt(zin: str) -> str:
+    """Een zin in een tabel: blijft Nederlands, vertaald wordt hij waar hij getoond
+    wordt (`t(zin)`). Zoals `nt` in i18n.js; tools/vertaalcheck.py ziet hem zo."""
+    return zin
 
 # Hoger zodra een kaart iets nieuws nodig heeft. Een kaart die een hoger
 # contract verwacht dan er staat, zegt "werk DomotiApp Coach bij".
 CONTRACT = 1
 
+# Het model blijft Nederlands, in elke taal: een kaart van DomotiApp Lovelace
+# vindt de apparaten van de coach aan fabrikant en model (`PROGRAMMA_MODELLEN`
+# en `BATTERIJ_MODELLEN` daar), dus dit hoort bij het contract.
 MODELLEN = {
     "vaatwasser": "Vaatwasser",
     "wasmachine": "Wasmachine",
@@ -307,14 +317,15 @@ def oude_coach_opruimen(hass: HomeAssistant, entry_id: str) -> None:
 
 PAAL_ZON = frozenset({"surplus", "zon-modus"})
 PAAL_STORING = frozenset({"fault", "error", "storing"})
+# De toestand van de sensor, voor mensen; vertaald in `paal_tekst`.
 PAAL_TEKST = {
-    "laadt_zon": "Laadt op zon",
-    "laadt": "Laadt",
-    "wacht": "Wacht",
-    "vol": "Vol",
-    "geen_auto": "Geen auto",
-    "pauze": "Pauze",
-    "storing": "Storing",
+    "laadt_zon": nt("Laadt op zon"),
+    "laadt": nt("Laadt"),
+    "wacht": nt("Wacht"),
+    "vol": nt("Vol"),
+    "geen_auto": nt("Geen auto"),
+    "pauze": nt("Pauze"),
+    "storing": nt("Storing"),
 }
 # De modus van een beurt op de kaart, en hoe de coach hem kent (`async_mode`).
 PAAL_MODI = {"planning": "goedkoopst", "snel": "snel", "continu": "continu", "zon": "zon"}
@@ -407,12 +418,12 @@ def paal_blokken(stand: dict[str, Any] | None) -> list[dict[str, Any]]:
 def paal_tekst(stand: dict[str, Any] | None) -> str:
     """Wat de coach doet, kort, voor mensen. De kaart leest `stand`, niet dit."""
     sleutel = paal_stand(stand)
-    tekst = PAAL_TEKST[sleutel]
+    tekst = t(PAAL_TEKST[sleutel])
     if sleutel == "wacht":
         volgende = next((b for b in ((stand or {}).get("plan_ahead") or {}).get("blocks") or []
                          if b.get("charging")), None)
         if volgende and volgende.get("start"):
-            tekst = f"Wacht tot {str(volgende['start'])[11:16]}"
+            tekst = t("Wacht tot {tijd}", tijd=str(volgende['start'])[11:16])
     return tekst
 
 
@@ -670,15 +681,16 @@ async def async_batterij_veld(hass: HomeAssistant, device_id: str, veld: str, wa
 # naar de airco: één schrijver, de coach. Afgesproken met de lovelace-sessie op
 # 14-10-2026; zie docs/airco.md.
 
-# De stand als vaste sleutel, met de woorden voor de toestand van de sensor.
+# De stand als vaste sleutel, met de woorden voor de toestand van de sensor
+# (vertaald in `AircoCoachSensor`, sensor.py).
 AIRCO_STAND_NAMEN = {
-    "zon": "Aan op zon",
-    "goedkoop": "Aan op een goedkoop uur",
-    "op_temperatuur": "Op temperatuur",
-    "uit": "Uit",
-    "bewoner": "Door jou bediend",
-    "pauze": "Gepauzeerd",
-    "geen_meting": "Weet het niet",
+    "zon": nt("Aan op zon"),
+    "goedkoop": nt("Aan op een goedkoop uur"),
+    "op_temperatuur": nt("Op temperatuur"),
+    "uit": nt("Uit"),
+    "bewoner": nt("Door jou bediend"),
+    "pauze": nt("Gepauzeerd"),
+    "geen_meting": nt("Weet het niet"),
 }
 
 

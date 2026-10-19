@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from .taal import getal, t, taal
+
 # Hoeveel dagen voor het einde van een vast contract het bericht komt, als de
 # klant niets anders koos (v0.130.0). Een keuze en geen meting: een maand is
 # genoeg om te vergelijken en over te stappen, en hij staat als veld bij de
@@ -100,15 +102,28 @@ def meterstand_bericht(vandaag: date, herinnering: dict, land: str = "NL") -> di
     return {
         "sleutel": f"meterstanden:{wanneer.isoformat()}",
         "soort": "meterstanden",
-        "titel": "Geef je meterstanden door",
-        "tekst": "Je leverancier vraagt je meterstanden. Ze staan op het overzicht onder Je meter.",
+        "titel": t("Geef je meterstanden door"),
+        "tekst": t("Je leverancier vraagt je meterstanden. Ze staan op het overzicht onder Je meter."),
     }
 
 
+MAANDEN = ("januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus",
+           "september", "oktober", "november", "december")
+MAANDEN_EN = ("January", "February", "March", "April", "May", "June", "July", "August",
+              "September", "October", "November", "December")
+
+
 def _lang(dag: date) -> str:
-    maanden = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus",
-               "september", "oktober", "november", "december"]
+    """De datum voluit, "1 januari 2027", of in het Engels "1 January 2027"."""
+    maanden = MAANDEN_EN if taal() == "en" else MAANDEN
     return f"{dag.day} {maanden[dag.month - 1]} {dag.year}"
+
+
+def _contract_naam(bron: str, naam: str) -> str:
+    """Je stroomcontract, of je gascontract, met de leverancier erbij als die bekend is."""
+    if bron == "gas":
+        return t("Je gascontract bij {naam}", naam=naam) if naam else t("Je gascontract")
+    return t("Je stroomcontract bij {naam}", naam=naam) if naam else t("Je stroomcontract")
 
 
 def contract_berichten(vandaag: date, contract: dict, namen: dict | None = None) -> list[dict]:
@@ -130,20 +145,20 @@ def contract_berichten(vandaag: date, contract: dict, namen: dict | None = None)
         except (TypeError, ValueError):
             dagen = HERINNER_DAGEN
         naam = (namen or {}).get(deel.get("supplier") or "", "")
-        wat = f"Je {bron}contract{f' bij {naam}' if naam else ''}"
+        wat = _contract_naam(bron, naam)
         if dagen > 0 and einde - timedelta(days=dagen) <= vandaag < einde:
             uit.append({
                 "sleutel": f"contract:{bron}:{einde.isoformat()}:voor",
                 "soort": "contract",
-                "titel": f"{wat} loopt af op {_lang(einde)}",
-                "tekst": "Kijk of je verlengt of overstapt. Een nieuw contract vul je in bij Contract.",
+                "titel": t("{wat} loopt af op {datum}", wat=wat, datum=_lang(einde)),
+                "tekst": t("Kijk of je verlengt of overstapt. Een nieuw contract vul je in bij Contract."),
             })
         if einde <= vandaag <= einde + NA_AFLOOP:
             uit.append({
                 "sleutel": f"contract:{bron}:{einde.isoformat()}:af",
                 "soort": "contract",
-                "titel": f"{wat} is afgelopen",
-                "tekst": "Vul je nieuwe contract in bij Contract, zodat de coach met de goede prijzen rekent.",
+                "titel": t("{wat} is afgelopen", wat=wat),
+                "tekst": t("Vul je nieuwe contract in bij Contract, zodat de coach met de goede prijzen rekent."),
             })
     return uit
 
@@ -160,9 +175,10 @@ def controle_bericht(vandaag: date, oud: str | None, nieuw: dict) -> dict | None
     return {
         "sleutel": f"controle:{vandaag.isoformat()}",
         "soort": "prijs",
-        "titel": "Je energieprijs klopt niet meer",
-        "tekst": (
-            f"De opbouw in de coach wijkt € {f'{verschil:.4f}'.replace('.', ',')} per kWh af van wat je leverancier zegt. "
-            "Kijk na hoe de coach hem opbouwt."
+        "titel": t("Je energieprijs klopt niet meer"),
+        "tekst": t(
+            "De opbouw in de coach wijkt {bedrag} per kWh af van wat je leverancier zegt. "
+            "Kijk na hoe de coach hem opbouwt.",
+            bedrag=f"€ {getal(verschil, 4)}",
         ),
     }

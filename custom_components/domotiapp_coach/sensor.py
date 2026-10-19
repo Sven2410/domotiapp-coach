@@ -46,6 +46,7 @@ from .entiteit import (
 )
 from .planner import _dag_om
 from .storage import async_get_store
+from .taal import t
 
 # Besluiten waarin de coach nu start: het moment is er, dus geen klok.
 NU_STARTEN = frozenset({"cheapest-start", "start-now", "start-by", "deadline"})
@@ -82,7 +83,9 @@ def start_tekst(stand: dict[str, Any] | None, now: datetime) -> str | None:
     if not stand or stand.get("running"):
         return None
     if stand.get("rule") in NU_STARTEN and stand.get("charge"):
-        return "nu"
+        # Precies "now" in het Engels: de programmakaart van DomotiApp Lovelace
+        # herkende tot 0.80.2 het moment aan deze toestand (`/^(nu|now)$/i`).
+        return t("nu")
     moment = gepland_om(stand)
     if moment is None:
         return None
@@ -349,8 +352,10 @@ class BatterijCoachSensor(CoachEntiteit, SensorEntity):
         # Een batterij die de coach alleen uitleest heeft geen stand (v0.123.1);
         # leeg las als een fout.
         if not self._stand.get("mode_name") and accu_alleen_lezen(self._device):
-            return "Alleen uitlezen"
-        return str(self._stand.get("mode_name") or "")
+            return t("Alleen uitlezen")
+        # De naam uit `STAND_NAMEN`, in de taal van nu; een naam die al vertaald
+        # is komt er ongewijzigd door.
+        return t(str(self._stand.get("mode_name") or ""))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -425,7 +430,7 @@ class AircoCoachSensor(CoachEntiteit, SensorEntity):
 
     @property
     def native_value(self) -> str:
-        return AIRCO_STAND_NAMEN[airco_stand(self._stand)]
+        return t(AIRCO_STAND_NAMEN[airco_stand(self._stand)])
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

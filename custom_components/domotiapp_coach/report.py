@@ -30,6 +30,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .taal import t
 
 try:  # Home Assistant 2024.6 en nieuwer
     from homeassistant.components.http import KEY_HASS
@@ -106,7 +107,7 @@ class ReportView(HomeAssistantView):
 
         if report is None or report["expires"] <= time.monotonic():
             reports.pop(token, None)
-            return web.Response(status=404, text="Dit rapport is niet meer beschikbaar.")
+            return web.Response(status=404, text=t("Dit rapport is niet meer beschikbaar."))
 
         return web.Response(
             body=report["pdf"],
