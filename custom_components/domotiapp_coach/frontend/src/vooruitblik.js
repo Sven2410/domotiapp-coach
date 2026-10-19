@@ -212,7 +212,10 @@ export function schalen(uren, { ids, zichtbaar }) {
     boven = Math.max(boven, op, zichtbaar.zon ? u.zon ?? 0 : 0, zichtbaar.huis ? u.huis ?? 0 : 0);
     onder = Math.max(onder, neer);
   }
-  return { prijsMax: Math.max(prijsMax, 0.01), prijsMin, boven: Math.max(boven, 0.5), onder };
+  // De accustand staat boven de 0-lijn (v0.137.0), dus daar hoort minstens de
+  // helft van de hoogte te zijn, ook als de batterij harder ontlaadt dan er erbij komt.
+  const accu = zichtbaar.soc && uren.some((u) => ids.some((id) => u.apparaten[id]?.soc !== null && u.apparaten[id]?.soc !== undefined));
+  return { prijsMax: Math.max(prijsMax, 0.01), prijsMin, boven: Math.max(boven, 0.5, accu ? onder : 0), onder };
 }
 
 /** De grafiek als svg, een kolom per uur. */
@@ -291,13 +294,15 @@ export function vooruitSvg(uren, { ids, soorten, zichtbaar, drempels, gekozen, k
     const punten = uren.map((u, i) => `${midden(i)},${(y0 - (u.zon ?? 0) * schaal).toFixed(1)}`);
     delen.push(`<polyline class="zonlijn" points="${punten.join(" ")}"/>`);
   }
-  // De accustand, op zijn eigen schaal: 0 tot 100% over de hoogte van de vermogens.
+  // De accustand, op zijn eigen schaal: 0% op de 0-lijn en 100% bovenaan (v0.137.0).
+  // Tot dan liep hij over de hele hoogte, ook onder de lijn, en leek 20% ontladen.
+  // De eigenaar op 19-10-2026: "Er is nu een 0-lijn, maar hier kijkt de soc niet naar."
   if (zichtbaar.soc) {
     for (const id of ids) {
       if (soorten.get(id) !== "thuisbatterij") continue;
       const punten = uren
         .map((u, i) => (u.apparaten[id]?.soc === null || u.apparaten[id]?.soc === undefined ? null
-          : `${midden(i)},${(top + VERMOGEN_H * (1 - u.apparaten[id].soc / 100)).toFixed(1)}`))
+          : `${midden(i)},${(y0 - (y0 - top) * Math.min(100, Math.max(0, u.apparaten[id].soc)) / 100).toFixed(1)}`))
         .filter(Boolean);
       if (punten.length > 1) delen.push(`<polyline class="soc" points="${punten.join(" ")}"/>`);
     }
@@ -512,7 +517,7 @@ export class DacVooruitblik extends DacElement {
     const legenda = [];
     if (zichtbaar.zon) legenda.push(`<span><i class="lijn" style="border-color:${KLEUR.zon}"></i>Zon, verwacht</span>`);
     if (zichtbaar.huis) legenda.push(`<span><i class="stip" style="border-color:${KLEUR.huis}"></i>Huis, verwacht</span>`);
-    if (accu && zichtbaar.soc) legenda.push(`<span><i class="lijn" style="border-color:${KLEUR.soc}"></i>Accustand, 0 tot 100%</span>`);
+    if (accu && zichtbaar.soc) legenda.push(`<span><i class="lijn" style="border-color:${KLEUR.soc}"></i>Accustand: 0% op de lijn, 100% bovenaan</span>`);
     if (accu) legenda.push(`<span>Onder de lijn: de batterij ontlaadt</span>`);
     this.$("#legenda").innerHTML = legenda.join("");
 

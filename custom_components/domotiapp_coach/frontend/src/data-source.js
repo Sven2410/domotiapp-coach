@@ -18,6 +18,7 @@
 
 import { brandFields, canAlwaysOn, carsFor, programOf, valueLabel } from "./devices.js";
 import { countdown, duration, toKwh, toWatts } from "./format.js";
+import { ptPrijsOp } from "./tarifas.js";
 
 const PHASES = ["l1", "l2", "l3"];
 
@@ -475,6 +476,11 @@ export function contractAt(contract, when) {
  * @returns {{buy: number|null, feedIn: number, basis: string}}
  */
 export function tariff(feed, contract) {
+  // Portugal (v0.137.0): de prijs van het tijdvak van nu.
+  if (contract?.country === "PT") {
+    const nu = ptPrijsOp(contract.pt, new Date(), 900000);
+    return { buy: nu.koop, feedIn: nu.terug, basis: "je tarief van nu" };
+  }
   const fixed = contract?.type !== "dynamic";
 
   if (fixed) {

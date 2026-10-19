@@ -197,12 +197,28 @@ class DacViewContract extends DacEditorElement {
           <h2>${icons.bolt} Mijn huidige stroomcontract</h2>
           <p class="hint" id="stroom-samenvatting"></p>
           <div class="fields">
+            <!-- Het land (v0.137.0). De eigenaar op 19-10-2026: "bij contract bovenaan wil ik
+                 dat je een land kan kiezen dus Nederland en Portugal." -->
             <div class="row" data-installateur>
+              <label>Land</label>
+              <div class="segmented" id="land">
+                <button type="button" data-land="NL" aria-pressed="false">
+                  <strong>Nederland</strong>
+                  Een all-in prijs of een dynamisch contract, salderen tot 2027.
+                </button>
+                <button type="button" data-land="PT" aria-pressed="false">
+                  <strong>Portugal</strong>
+                  Een prijs per tijdvak, zonder salderen.
+                </button>
+              </div>
+            </div>
+
+            <div class="row" data-installateur id="soort-rij">
               <label>Soort contract</label>
               ${soortKnoppen("stroom-soort")}
             </div>
 
-            <div class="row" data-installateur>
+            <div class="row" data-installateur id="lev-rij">
               <label for="stroom-lev">Leverancier</label>
               ${levKeuze("stroom-lev", "stroom")}
               <span class="sub" id="stroom-lev-hint"></span>
@@ -219,6 +235,89 @@ class DacViewContract extends DacEditorElement {
                 <span class="sub">Alleen bij een vast contract. Variabel en dynamisch zijn maandelijks opzegbaar.</span>
                 <label for="stroom-dagen" class="klein">Herinner me zoveel dagen vooraf</label>
                 <input type="number" id="stroom-dagen" min="0" max="365" step="1" inputmode="numeric">
+              </div>
+            </div>
+
+            <!-- Portugal (v0.137.0): een prijs per tijdvak van de ERSE; zie tarifas.py. -->
+            <div id="pt-fields" class="fields" data-installateur>
+              <div class="row">
+                <label for="pt-lev">Leverancier</label>
+                <input type="text" id="pt-lev" maxlength="60" placeholder="Bijvoorbeeld EDP Comercial">
+              </div>
+              <div class="row">
+                <label>Opção horária</label>
+                <div class="segmented drie" id="pt-tarifa">
+                  <button type="button" data-tarifa="simples" aria-pressed="false"><strong>Simples</strong>Eén prijs, de hele dag.</button>
+                  <button type="button" data-tarifa="bi" aria-pressed="false"><strong>Bi-horário</strong>Daluren (vazio) en de rest.</button>
+                  <button type="button" data-tarifa="tri" aria-pressed="false"><strong>Tri-horário</strong>Daluren, normaal (cheias) en piek (ponta).</button>
+                </div>
+              </div>
+              <div class="row" id="pt-ciclo-rij">
+                <label>Ciclo</label>
+                <div class="segmented" id="pt-ciclo">
+                  <button type="button" data-ciclo="diario" aria-pressed="false"><strong>Ciclo diário</strong>Elke dag hetzelfde, daluren van 22:00 tot 08:00.</button>
+                  <button type="button" data-ciclo="semanal" aria-pressed="false"><strong>Ciclo semanal</strong>Doordeweeks daluren van 00:00 tot 07:00, in het weekend meer.</button>
+                </div>
+                <span class="sub">Staat op je factuur. De tijden zijn die van Portugal.</span>
+              </div>
+              <div class="two">
+                <div class="row" data-periodo="simples"><label for="pt-simples">Prijs (€ per kWh)</label><input type="number" id="pt-simples" min="0" step="0.0001" inputmode="decimal"></div>
+                <div class="row" data-periodo="vazio"><label for="pt-vazio">Daluren, vazio (€ per kWh)</label><input type="number" id="pt-vazio" min="0" step="0.0001" inputmode="decimal"></div>
+                <div class="row" data-periodo="fora_vazio"><label for="pt-fora">Buiten de daluren, fora do vazio (€ per kWh)</label><input type="number" id="pt-fora" min="0" step="0.0001" inputmode="decimal"></div>
+                <div class="row" data-periodo="cheias"><label for="pt-cheias">Normaal, cheias (€ per kWh)</label><input type="number" id="pt-cheias" min="0" step="0.0001" inputmode="decimal"></div>
+                <div class="row" data-periodo="ponta"><label for="pt-ponta">Piek, ponta (€ per kWh)</label><input type="number" id="pt-ponta" min="0" step="0.0001" inputmode="decimal"></div>
+              </div>
+              <div class="row"><span class="sub">De prijs na korting en zonder belastingen, zoals in de tabel van je contract (preço a pagar).</span></div>
+              <div class="two">
+                <div class="row">
+                  <label for="pt-iva">IVA (%)</label>
+                  <input type="number" id="pt-iva" min="0" max="100" step="1" inputmode="numeric">
+                  <span class="sub">Meestal 23%. Alleen de eerste 200 kWh per 30 dagen vallen onder 6%, en alleen bij hooguit 6,9 kVA. Wat de coach verschuift valt daarboven.</span>
+                </div>
+                <div class="row">
+                  <label for="pt-iec">IEC (€ per kWh)</label>
+                  <input type="number" id="pt-iec" min="0" step="0.0001" inputmode="decimal">
+                  <span class="sub">De belasting op elektriciteit: € 0,001 in 2026.</span>
+                </div>
+              </div>
+              <div class="row">
+                <label>Teruglevering (excedentes)</label>
+                <div class="segmented drie" id="pt-excedente">
+                  <button type="button" data-modo="nenhum" aria-pressed="false"><strong>Niet verkocht</strong>Wat je teruglevert brengt niets op.</button>
+                  <button type="button" data-modo="fixo" aria-pressed="false"><strong>Vaste prijs</strong>Een verkoopcontract met een prijs per kWh.</button>
+                  <button type="button" data-modo="omie" aria-pressed="false"><strong>OMIE-prijs</strong>Een deel van de marktprijs, zoals bij EDP.</button>
+                </div>
+                <span class="sub" id="pt-excedente-hint">In Portugal is er geen salderen.</span>
+              </div>
+              <div class="row" id="pt-preco-rij">
+                <label for="pt-preco">Prijs per teruggeleverde kWh (€)</label>
+                <input type="number" id="pt-preco" min="0" step="0.0001" inputmode="decimal">
+              </div>
+              <div class="two" id="pt-omie-rij">
+                <div class="row">
+                  <label>OMIE-prijs</label>
+                  <dac-entity-picker id="pt-omie"></dac-entity-picker>
+                </div>
+                <div class="row">
+                  <label for="pt-fator">Deel van de OMIE-prijs (%)</label>
+                  <input type="number" id="pt-fator" min="0" max="200" step="1" inputmode="numeric">
+                  <span class="sub">EDP betaalt 75%.</span>
+                </div>
+              </div>
+              <div class="two">
+                <div class="row">
+                  <label for="pt-kva">Potência contratada (kVA)</label>
+                  <input type="number" id="pt-kva" min="0" step="0.01" inputmode="decimal">
+                </div>
+                <div class="row">
+                  <label for="pt-potencia">Potência (€ per dag, zonder IVA)</label>
+                  <input type="number" id="pt-potencia" min="0" step="0.0001" inputmode="decimal">
+                </div>
+              </div>
+              <div class="row">
+                <label for="pt-servicos">Diensten (€ per maand)</label>
+                <input type="number" id="pt-servicos" min="0" step="0.0001" inputmode="decimal">
+                <span class="sub">Zoals EDP Smart. Vaste kosten staan er voor het overzicht; de coach stuurt er niet op.</span>
               </div>
             </div>
 
@@ -374,7 +473,7 @@ class DacViewContract extends DacEditorElement {
               </label>
             </div>
 
-            <label class="check" for="netting" data-installateur>
+            <label class="check" for="netting" data-installateur id="netting-rij">
               <input type="checkbox" id="netting">
               <span>
                 <strong>Je levert nog gesaldeerd terug</strong>
@@ -533,6 +632,40 @@ class DacViewContract extends DacEditorElement {
     bind("fx-feedin-na", (v) => (c().fixed.feed_in_tariff_after = leegOfGetal(v)));
     bind("fx-feedcost-na", (v) => (c().fixed.feed_in_costs_after = leegOfGetal(v)));
     bind("afreken-start", (v) => (c().billing_start = v));
+    // Portugal (v0.137.0).
+    const pt = () => {
+      const deel = (c().pt ??= {});
+      deel.energia ??= {};
+      deel.excedente ??= {};
+      return deel;
+    };
+    bind("pt-lev", (v) => (pt().fornecedor = v));
+    for (const [id, sleutel] of [["pt-simples", "simples"], ["pt-vazio", "vazio"], ["pt-fora", "fora_vazio"], ["pt-cheias", "cheias"], ["pt-ponta", "ponta"]]) {
+      bind(id, (v) => (pt().energia[sleutel] = getal(v)));
+    }
+    bind("pt-iva", (v) => (pt().iva = v === "" ? 23 : getal(v)));
+    bind("pt-iec", (v) => (pt().iec = getal(v)));
+    bind("pt-preco", (v) => (pt().excedente.preco = getal(v)));
+    bind("pt-fator", (v) => (pt().excedente.fator = getal(v)));
+    bind("pt-kva", (v) => (pt().kva = getal(v)));
+    bind("pt-potencia", (v) => (pt().potencia_dia = getal(v)));
+    bind("pt-servicos", (v) => (pt().servicos_mes = getal(v)));
+    for (const [lijst, zet] of [
+      ["#land button", (b) => {
+        c().country = b.dataset.land;
+        // Een Portugees contract is een vaste prijs per tijdvak, zonder salderen.
+        if (b.dataset.land === "PT") { c().type = "fixed"; c().netting = false; }
+      }],
+      ["#pt-tarifa button", (b) => (pt().tarifa = b.dataset.tarifa)],
+      ["#pt-ciclo button", (b) => (pt().ciclo = b.dataset.ciclo)],
+      ["#pt-excedente button", (b) => (pt().excedente.modo = b.dataset.modo)],
+    ]) {
+      for (const knop of this.$$(lijst)) knop.addEventListener("click", () => { zet(knop); this.wijziging_(); this.paint_(); });
+    }
+    const omie = this.$("#pt-omie");
+    omie.filter = "price";
+    omie.placeholder = "Zoek een OMIE-prijssensor…";
+    omie.addEventListener("dac-entity-change", (ev) => { pt().excedente.omie_entity = ev.detail.value; this.wijziging_(); });
     bind("dyn-tax", (v) => (c().dynamic.energy_tax = getal(v)));
     bind("dyn-markup", (v) => (c().dynamic.supplier_markup = getal(v)));
     bind("dyn-vat", (v) => (c().dynamic.vat_percent = getal(v)));
@@ -870,6 +1003,22 @@ class DacViewContract extends DacEditorElement {
     this.$("#fx-feedin-na").value = contract.fixed.feed_in_tariff_after ?? "";
     this.$("#fx-feedcost-na").value = contract.fixed.feed_in_costs_after ?? "";
     this.$("#afreken-start").value = contract.billing_start || "";
+    const p = contract.pt ?? {};
+    const e = p.energia ?? {};
+    this.$("#pt-lev").value = p.fornecedor ?? "";
+    this.$("#pt-simples").value = e.simples || "";
+    this.$("#pt-vazio").value = e.vazio || "";
+    this.$("#pt-fora").value = e.fora_vazio || "";
+    this.$("#pt-cheias").value = e.cheias || "";
+    this.$("#pt-ponta").value = e.ponta || "";
+    this.$("#pt-iva").value = p.iva ?? 23;
+    this.$("#pt-iec").value = p.iec ?? 0.001;
+    this.$("#pt-preco").value = p.excedente?.preco || "";
+    this.$("#pt-fator").value = p.excedente?.fator ?? 75;
+    this.$("#pt-omie").value = p.excedente?.omie_entity ?? "";
+    this.$("#pt-kva").value = p.kva || "";
+    this.$("#pt-potencia").value = p.potencia_dia || "";
+    this.$("#pt-servicos").value = p.servicos_mes || "";
     const d = contract.dynamic;
     this.$("#dyn-allin").value = d.source === "all_in" ? d.all_in_entity ?? "" : (d.all_in_entity ?? "");
     this.$("#dyn-market").value = d.market_entity ?? "";
@@ -924,6 +1073,34 @@ class DacViewContract extends DacEditorElement {
     this.$("#fx-feedin-label").textContent = `Terugleververgoeding${naSalderen ? " tot 1 januari 2027" : ""} (€ per kWh)`;
     this.$("#fx-feedcost-label").textContent = `Terugleverkosten${naSalderen ? " tot 1 januari 2027" : ""} (€ per kWh)`;
     this.$("#afreken-rij").style.display = contract.netting && dagTekst(new Date()) < SALDEREN_TOT ? "" : "none";
+
+    // Portugal (v0.137.0): de velden van het land, en de Nederlandse weg.
+    const portugal = contract.country === "PT";
+    for (const knop of this.$$("#land button")) knop.setAttribute("aria-pressed", String(knop.dataset.land === (portugal ? "PT" : "NL")));
+    this.$("#pt-fields").style.display = portugal ? "" : "none";
+    if (portugal) {
+      for (const id of ["#soort-rij", "#lev-rij", "#fixed-fields", "#dynamic-fields", "#netting-rij", "#afreken-rij", "#fx-na"]) {
+        this.$(id).style.display = "none";
+      }
+      const p = contract.pt ?? {};
+      const tarifa = p.tarifa ?? "bi";
+      for (const knop of this.$$("#pt-tarifa button")) knop.setAttribute("aria-pressed", String(knop.dataset.tarifa === tarifa));
+      for (const knop of this.$$("#pt-ciclo button")) knop.setAttribute("aria-pressed", String(knop.dataset.ciclo === (p.ciclo ?? "diario")));
+      const modo = p.excedente?.modo ?? "onbekend";
+      this.$("#pt-excedente-hint").textContent = modo === "onbekend"
+        ? "Nog niet gekozen: dan weet de coach niet wat teruglevering opbrengt. In Portugal is er geen salderen."
+        : "In Portugal is er geen salderen.";
+      for (const knop of this.$$("#pt-excedente button")) knop.setAttribute("aria-pressed", String(knop.dataset.modo === modo));
+      this.$("#pt-ciclo-rij").style.display = tarifa === "simples" ? "none" : "";
+      const zichtbaar = { simples: ["simples"], bi: ["vazio", "fora_vazio"], tri: ["vazio", "cheias", "ponta"] }[tarifa] ?? [];
+      for (const rij of this.$$("[data-periodo]")) rij.style.display = zichtbaar.includes(rij.dataset.periodo) ? "" : "none";
+      this.$("#pt-preco-rij").style.display = modo === "fixo" ? "" : "none";
+      this.$("#pt-omie-rij").style.display = modo === "omie" ? "" : "none";
+    } else {
+      this.$("#soort-rij").style.display = "";
+      this.$("#lev-rij").style.display = "";
+      this.$("#netting-rij").style.display = "";
+    }
     for (const button of this.$$("#dynamic-interval button")) {
       button.setAttribute("aria-pressed", String(button.dataset.interval === (d.interval ?? "hour")));
     }
@@ -942,6 +1119,10 @@ class DacViewContract extends DacEditorElement {
     if (l) delen[0] += ` bij ${l.naam}`;
     if (contract.start) delen.push(`ingegaan op ${datumLang(contract.start)}`);
     if (vast && contract.end) delen.push(`loopt af op ${datumLang(contract.end)}`);
+    if (contract.country === "PT") {
+      const p = contract.pt ?? {};
+      delen[0] = `Portugal, ${{ simples: "simples", bi: "bi-horário", tri: "tri-horário" }[p.tarifa ?? "bi"]}${p.fornecedor ? ` bij ${p.fornecedor}` : ""}`;
+    }
     this.$("#stroom-samenvatting").textContent = `${delen.join(", ")}.`;
 
     // Waar het voorstel vandaan kwam.

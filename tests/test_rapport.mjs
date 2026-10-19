@@ -4391,7 +4391,7 @@ proef("terugleverkosten in vier vormen, en Historie per afrekenperiode (v0.135.0
   assert.ok(Math.abs(b.terug - (0.4 - 2)) < 1e-12 && b.vasteKosten === 2, "de schaal gaat van wat teruglevering opleverde af");
   // De opbouw zegt wat de vorm betekent, en Contract heeft de keuze en de tabel.
   const { kostenNoot } = await import("../custom_components/domotiapp_coach/frontend/src/opbouw.js");
-  assert.match(kostenNoot({ kosten_vorm: "schalen" }), /vast bedrag per jaar, in schalen: een kWh extra kost niets/);
+  assert.match(kostenNoot({ kosten_vorm: "schalen" }), /vast bedrag per jaar, in schalen. Wat je schaal kost staat in Historie/);
   assert.equal(kostenNoot({ kosten_vorm: "kwh" }), "");
   const Contract = geregistreerd.get("dac-view-contract");
   const html = Object.create(Contract.prototype).render();
@@ -5175,6 +5175,107 @@ proef("de eerdere contracten hebben hun inhoud in een eigen raster, en de beurte
     .includes("1 beurt met een dynamische prijs blijft zoals hij was. Overgenomen."));
   assert.ok(contractMod.beurtenZin({ van: "2026-09-01", beurten: 0, overgeslagen: 0 }).includes("geen afgeronde beurt"));
   assert.equal(contractMod.beurtenZin({ fout: "Uitrekenen mislukt: x" }), "Uitrekenen mislukt: x");
+});
+
+// De schaal op Contract, "Jaar vanaf" in Historie en de accustand in de vooruitblik (v0.137.0).
+proef("de schaal met en zonder thuisbatterij, het jaar vanaf een maand, en de accustand boven de 0-lijn (v0.137.0)", async () => {
+  const { schaalNoot } = await import("../custom_components/domotiapp_coach/frontend/src/opbouw.js");
+  const schaal = { van: "2026-09-15", tot: "2027-01-01", terug: 193.2, terug_rest: 143, kwh: 336.2, accu_kwh: 172.8,
+    rij: { vanaf: 0, tot: 500, per_jaar: 0 }, kosten_per_kwh: 0, zonder_accu: { kwh: 509, rij: { vanaf: 500, tot: 750, per_jaar: 70 } } };
+  const zin = schaalNoot({ schaal });
+  assert.ok(zin.includes("Tot 1 januari 2027 naar verwachting 336 kWh teruglevering: de schaal van 0 tot 500 kWh, € 0 per jaar.")
+    && zin.includes("Zonder je thuisbatterij 509 kWh: 500 tot 750 kWh, € 70 per jaar.") && !zin.includes("scheelt nu"), zin);
+  const duur = schaalNoot({ schaal: { ...schaal, kosten_per_kwh: 0.1375, rij: { vanaf: 500, tot: 750, per_jaar: 70 } } });
+  assert.ok(duur.includes("Elke kWh die je minder teruglevert scheelt nu € 0,1375"), duur);
+  assert.ok(!schaalNoot({ schaal: { ...schaal, accu_kwh: 0 } }).includes("Zonder je thuisbatterij"), "zonder wat de batterij opnam geen vergelijking");
+  assert.equal(schaalNoot({}), "");
+
+  // Historie: Jaar vanaf een maand, met de maand van het contract erbij.
+  const hist = await import("../custom_components/domotiapp_coach/frontend/src/views/history.js");
+  assert.equal(hist.jaarMaandContract({ start: "2026-09-01" }), 9);
+  assert.equal(hist.jaarMaandContract({ start: "", gas: { start: "2025-07-01" } }), 7);
+  assert.equal(hist.jaarMaandContract({}), null);
+  const Historie = geregistreerd.get("dac-view-history");
+  const html = Object.create(Historie.prototype).render();
+  assert.ok(html.includes('id="jaar-vanaf-rij" hidden') && html.includes('id="jaar-vanaf"'), "alleen bij Jaar");
+  assert.ok(Historie.css.includes(".keuze[hidden] { display: none; }"), "verborgen is ook echt weg");
+
+  // De vooruitblik: 0% op de 0-lijn en 100% bovenaan.
+  const vb = await import("../custom_components/domotiapp_coach/frontend/src/vooruitblik.js");
+  const uur = (h, soc, kw) => ({ start: new Date(2026, 9, 19, h), prijs: 0.3, terug: null, zon: 0, huis: 0.4,
+    apparaten: { acc: { kw, onbekend: false, zonKw: 0, accuKw: 0, wat: "", why: "", soc } } });
+  const uren = [uur(15, 100, 0.5), uur(16, 0, -2.5)];
+  const zichtbaar = { prijs: true, zon: true, huis: true, soc: true, acc: true };
+  const s = vb.schalen(uren, { ids: ["acc"], zichtbaar });
+  assert.ok(s.boven >= s.onder, `boven de lijn minstens zoveel als eronder: ${JSON.stringify(s)}`);
+  const svg = vb.vooruitSvg(uren, { ids: ["acc"], soorten: new Map([["acc", "thuisbatterij"]]), zichtbaar, drempels: { low: 0.2, high: 0.3 }, gekozen: -1 });
+  const nul = Number(/class="nul"[^>]*y1="([\d.]+)"/.exec(svg)?.[1]);
+  const punten = /class="soc" points="([^"]+)"/.exec(svg)?.[1].split(" ").map((p) => Number(p.split(",")[1]));
+  assert.ok(punten && Math.abs(punten[1] - nul) < 0.11, `0% op de 0-lijn: ${punten} tegen ${nul}`);
+  assert.ok(punten && Math.abs(punten[0] - 68) < 0.11, `100% bovenaan: ${punten}`);
+});
+
+// Portugal (v0.137.0): tarifas.js rekent hetzelfde als tarifas.py, Historie rekent ermee, en
+// Contract toont het land en de opbouw per tijdvak.
+proef("Portugal: dezelfde tijdvakken als de coach, Historie per tijdvak, en de opbouw op Contract (v0.137.0)", async () => {
+  const ta = await import("../custom_components/domotiapp_coach/frontend/src/tarifas.js");
+  // Dezelfde gevallen als in test_prijsopbouw.py.
+  const GEVALLEN = [
+    [[2026, 1, 15, 21, 59], "bi", "diario", "fora_vazio"], [[2026, 1, 15, 22, 0], "bi", "diario", "vazio"],
+    [[2026, 1, 16, 7, 59], "bi", "diario", "vazio"], [[2026, 1, 16, 8, 0], "bi", "diario", "fora_vazio"],
+    [[2026, 7, 15, 20, 59], "bi", "diario", "fora_vazio"], [[2026, 7, 15, 21, 0], "bi", "diario", "vazio"],
+    [[2026, 1, 15, 9, 0], "tri", "diario", "ponta"], [[2026, 1, 15, 10, 30], "tri", "diario", "cheias"],
+    [[2026, 1, 15, 18, 0], "tri", "diario", "ponta"], [[2026, 7, 15, 9, 30], "tri", "diario", "ponta"],
+    [[2026, 7, 15, 12, 0], "tri", "diario", "cheias"], [[2026, 1, 14, 6, 59], "bi", "semanal", "vazio"],
+    [[2026, 1, 14, 7, 0], "bi", "semanal", "fora_vazio"], [[2026, 1, 14, 9, 30], "tri", "semanal", "ponta"],
+    [[2026, 1, 14, 12, 0], "tri", "semanal", "cheias"], [[2026, 1, 14, 23, 0], "tri", "semanal", "cheias"],
+    [[2026, 7, 15, 8, 15], "tri", "semanal", "ponta"], [[2026, 1, 17, 9, 30], "bi", "semanal", "fora_vazio"],
+    [[2026, 1, 17, 13, 0], "tri", "semanal", "vazio"], [[2026, 1, 17, 18, 30], "tri", "semanal", "cheias"],
+    [[2026, 1, 18, 12, 0], "bi", "semanal", "vazio"], [[2026, 1, 18, 12, 0], "simples", "diario", "simples"],
+  ];
+  const fout = GEVALLEN.filter(([[j, m, d, u, mi], tarifa, ciclo, verwacht]) => ta.periodo(Date.UTC(j, m - 1, d, u, mi), tarifa, ciclo) !== verwacht);
+  assert.deepEqual(fout, [], "tarifas.js wijkt af van tarifas.py");
+  assert.ok(!ta.zomertijd(Date.UTC(2026, 2, 29, 0, 59)) && ta.zomertijd(Date.UTC(2026, 2, 29, 1, 0))
+    && ta.zomertijd(Date.UTC(2026, 9, 25, 0, 59)) && !ta.zomertijd(Date.UTC(2026, 9, 25, 1, 0)), "zomertijd");
+  const pt = { tarifa: "bi", ciclo: "diario", energia: { vazio: 0.134, fora_vazio: 0.2198 }, iec: 0.001, iva: 23, excedente: { modo: "nenhum" } };
+  assert.equal(ta.preco(pt, "vazio"), 0.16605);
+  assert.equal(ta.preco(pt, "fora_vazio"), 0.271584);
+  // Een uur dat in de daluren begint (22:00 in Lissabon is 21:00 UTC in de zomer).
+  assert.deepEqual(ta.ptPrijsOp(pt, Date.UTC(2026, 9, 19, 21, 0)), { koop: 0.16605, terug: 0 });
+  assert.equal(ta.ptPrijsOp(pt, Date.UTC(2026, 9, 19, 10, 0)).koop, 0.271584);
+  // Historie: prijsOp rekent met de tijdvakken, en er is geen salderen.
+  const contract = { type: "fixed", netting: true, country: "PT", pt };
+  assert.equal(geld.salderen(contract, new Date(2026, 9, 19, 12)), false, "geen salderen in Portugal");
+  const p = geld.prijsOp(contract, { buy: 0.3, feedIn: 0.1 }, new Map(), new Date(Date.UTC(2026, 9, 19, 21, 0)));
+  assert.deepEqual(p, { koop: 0.16605, terug: 0 }, JSON.stringify(p));
+  // Een eerder contract gaat voor.
+  const eerder = { ...contract, periods: [{ from: "2026-01-01", to: "2026-12-31", type: "fixed", all_in_price: 0.3, feed_in_tariff: 0.05 }] };
+  assert.equal(geld.prijsOp(eerder, { buy: 0.3, feedIn: 0.1 }, new Map(), new Date(2026, 5, 1, 12)).koop, 0.3);
+
+  // De opbouw op Contract.
+  const { opbouwHtml } = await import("../custom_components/domotiapp_coach/frontend/src/opbouw.js");
+  const html = opbouwHtml({ soort: "pt", salderen: false, inkoop: 0.271584, terug: 0, controle: { status: "vast" },
+    pt: { tarifa: "bi", ciclo: "diario", fornecedor: "EDP Comercial", nu: "fora_vazio", excedente: "nenhum", kva: 20.7, potencia_dia: 0.8543, servicos_mes: 8.89,
+      periodos: [{ periodo: "vazio", energia: 0.134, iec: 0.001, iva: 23, all_in: 0.16605 }, { periodo: "fora_vazio", energia: 0.2198, iec: 0.001, iva: 23, all_in: 0.271584 }] } });
+  assert.ok(html.includes("Stroom in Portugal, EDP Comercial") && html.includes("Daluren (vazio): € 0,1340 + IEC € 0,0010, plus 23% IVA")
+    && html.includes("€ 0,1661") && html.includes("Buiten de daluren (fora do vazio), nu") && html.includes("€ 0,2716")
+    && html.includes("Daluren elke dag van 22:00 tot 08:00") && html.includes("niet verkocht") && html.includes("20,7 kVA"), html);
+  assert.ok(!html.includes("—"), "geen gedachtestreepjes");
+  const onbekend = opbouwHtml({ soort: "pt", salderen: false, inkoop: 0.27, terug: null, controle: { status: "vast" },
+    pt: { tarifa: "bi", ciclo: "diario", nu: "vazio", excedente: "onbekend", periodos: [] } });
+  assert.ok(onbekend.includes("nog niet ingevuld, dus weet de coach niet wat het opbrengt"), onbekend);
+  assert.equal(ta.terug({}), null, "nog niet gekozen is onbekend, niet nul");
+  assert.equal(ta.terug({ excedente: { modo: "nenhum" } }), 0);
+
+  // Het formulier: het land bovenaan, het Portugese blok voor de installateur.
+  await import("../custom_components/domotiapp_coach/frontend/src/views/contract.js");
+  const Contract = geregistreerd.get("dac-view-contract");
+  const vorm = Object.create(Contract.prototype).render();
+  assert.ok(vorm.includes('data-land="NL"') && vorm.includes('data-land="PT"') && vorm.includes('id="pt-fields" class="fields" data-installateur'));
+  for (const id of ["pt-tarifa", "pt-ciclo", "pt-vazio", "pt-fora", "pt-iva", "pt-iec", "pt-excedente", "pt-omie", "pt-kva", "pt-potencia", "pt-servicos"]) {
+    assert.ok(vorm.includes(`id="${id}"`), id);
+  }
+  assert.ok(vorm.indexOf('data-land="PT"') < vorm.indexOf('id="soort-rij"'), "het land staat bovenaan");
 });
 
 for (const [naam, fn] of proeven) {

@@ -586,3 +586,15 @@ afhankelijk van of die maand al geweest is. Elke periode in Historie gaat via `p
 (views/history.js), zodat de grafiek, In geld, de tijdlijn en het rapport hetzelfde jaar nemen.
 Een jaar dat niet in januari begint heet "juli 2026 tot juni 2027". Proef 173 in test_coach.py
 (het opslaan) en "Historie: het jaar begint in de gekozen maand" in test_rapport.mjs.
+
+## Jaar vanaf, in Historie zelf (v0.137.0)
+
+De eigenaar op 19-10-2026: "In historie kan ik nu verloop energie kiezen en dan periode jaar maar
+ik kan niet van 1 sept tot 1 sept bijvoorbeeld kiezen? En dat is wel handig als je je jaar contract
+periode wilt vergelijken." Die instelling bestond (v0.132.0), maar alleen onder Voorkeuren. Bij
+Periode Jaar staat er nu in Historie zelf een keuze **Jaar vanaf**, met de maand van het contract
+erbij ("september (je contract)", `jaarMaandContract`). Het is dezelfde instelling
+(`year_start_month` via `display/set`): kiezen slaat meteen op en tekent de periode opnieuw
+(`jaarVanaf_` in views/history.js). Een jaar begint op de eerste van de maand; een afrekenperiode van
+15 september tot 14 september valt daar dus net naast. Proef "de schaal met en zonder thuisbatterij,
+het jaar vanaf een maand, en de accustand boven de 0-lijn" in test_rapport.mjs.

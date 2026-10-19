@@ -331,3 +331,98 @@ beurten zijn opnieuw uit te rekenen" in test_rapport.mjs. Die proef gaat ook ove
 contracten zelf: een `<details>` legt zijn kinderen niet als raster uit, dus kwamen Van, Tot, de
 prijs en Weghalen tegen elkaar aan te staan (de eigenaar: "weghalen staat niet lekker uitgelijnd",
 "ook van tot etc staat niet mooi"). De inhoud staat nu in `.p-inhoud`.
+
+## De schaal in de coach, met en zonder thuisbatterij (v0.137.0)
+
+De eigenaar op 19-10-2026, toen bleek dat zijn batterij met salderen per kWh niets opbracht: "Dus je
+zegt nu eigenlijk dat iedereen die een batterij heeft gekocht het voor niks heeft gekocht?" Per kWh
+niet, zolang je saldeert en minder teruglevert dan je afneemt: een kWh zon opsparen is dan evenveel
+waard als hem terugleveren, en de verliezen kosten geld. Maar een schaal hangt aan wat er terugging,
+en wat de batterij opnam ging niet terug.
+
+**Wat de coach uitrekent** (`_async_schaal`, eens per dag): de teruglevering van het stuk van de
+afrekenperiode tot de einddatum van de schalen (`async_afrekening`: gemeten plus dezelfde dagen
+vorig jaar), de schaal waar die in valt (`prijsopbouw.schaal_rij`, met de grenzen), en wat de
+thuisbatterijen in die tijd tegenhielden (`_async_accu_vermeden`): per kwartier het net met en zonder
+wat de batterijen deden, uit de eigen kwartieropslag. Contract zegt het onder de opbouw (`schaalNoot`
+in opbouw.js): "Tot 1 januari 2027 naar verwachting 336 kWh teruglevering: de schaal van 0 tot 500
+kWh, € 0 per jaar. Zonder je thuisbatterij 509 kWh: 500 tot 750 kWh, € 70 per jaar."
+
+**Wat een kWh teruglevering dan kost** (`kosten_per_kwh`): komt het huis volgens die verwachting in
+een duurdere schaal dan waar het nu staat, dan is dat verschil het werk van wat er nog teruggaat:
+naar rato over de dagen van de periode, zoals Historie het jaarbedrag telt, en verdeeld over de
+teruglevering die nog verwacht wordt. Blijft het huis in dezelfde schaal, dan kost een kWh niets.
+`_tarief` (vast) en `_prices` (dynamisch) trekken het van de terugleverprijs af (`_minder`: een
+positieve prijs niet onder nul), zodat de coach de zon dan liever zelf gebruikt. Historie rekent de
+schaal zelf als jaarbedrag per dag (v0.135.0); dit is alleen wat de coach beslist.
+
+In de woning van de eigenaar op 19-10-2026: 193 kWh terug sinds 15-09, 143 verwacht tot 1 januari,
+samen 336: de schaal tot 500 kWh, dus niets per kWh. De batterij nam sinds 28-09 173,5 kWh op (haar
+eigen teller); zonder haar had het huis de grens van 500 kWh gehaald.
+
+**Twee metingen van de batterij die niet overeenkomen.** Haar vermogenssensoren gaven van 28-09 tot
+19-10-2026 190,6 kWh laden en 163,8 ontladen, haar eigen kWh-tellers 173,5 en 161,2. De coach rekent
+met de vermogens (Opgeleverd min € 6,27, ruim 26 kWh verlies); de tellers zeggen 12,3 kWh. Welke de
+kant van de meter meet, is uit deze gegevens niet te halen.
+
+Proef 178 in test_coach.py, de proef "de schaal met en zonder thuisbatterij" in test_rapport.mjs.
+
+## Portugal (v0.137.0)
+
+De eigenaar op 19-10-2026: "Hun wonen in portugal dus bij contract bovenaan wil ik dat je een land
+kan kiezen dus Nederland en Portugal. Als je Nederland kiest dan heb je gewoon de invulvelden van nu
+en Portugal gaat het even wat anders." Hun contract (een foto): EDP Comercial, bi-horário, met 6%
+korting vazio 0,1340 en fora do vazio 0,2198 per kWh, potência 0,8543 per dag, EDP Smart 8,89 per
+maand, en "Aos preços indicados acrescem quaisquer outros custos, encargos, impostos, taxas e
+contribuições": de prijzen zijn zonder belastingen.
+
+**Wat er anders is dan in Nederland** (uitgezocht op 19-10-2026; bronnen hieronder):
+- **Geen salderen.** Wat je teruglevert brengt alleen iets op met een verkoopcontract: EDP betaalt
+  de OMIE-prijs van het uur maal 75% ("OMIE x (1 - 25%)"), andere kopers een vaste prijs van een
+  paar cent. Zonder contract gaat het gratis het net op.
+- **Tijdvakken van de ERSE**, in de wettelijke tijd van het vasteland. Bi-horário: vazio en fora do
+  vazio (alles daarbuiten). Tri-horário: vazio, cheias en ponta. Ciclo diário is elke dag hetzelfde
+  (vazio van 22:00 tot 08:00); ciclo semanal heeft werkdagen (vazio 00:00 tot 07:00), zaterdag (cheias
+  in twee blokken, de rest vazio) en zondag (vazio). Cheias en ponta schuiven met winter- en
+  zomertijd. Super vazio (02:00 tot 06:00) valt voor een huishouden onder vazio.
+- **Belastingen:** IVA 23%, behalve op de eerste 200 kWh per 30 dagen (300 bij vijf of meer
+  personen) bij hooguit 6,9 kVA: 6% (Lei 38/2024, sinds 1-1-2025). IEC 0,001 per kWh, met IVA. Vaste
+  bedragen per maand (CAV 2,85 plus 6%, DGEG 0,07 plus 23%) en de potência rekent de coach niet.
+- De nettarieven zitten al in de energieprijs van de leverancier.
+
+**Hoe de coach het doet.** Contract heeft bovenaan **Land**: Nederland of Portugal (`country`). Bij
+Portugal verdwijnen de soort, de leverancierslijst, de all-in prijs, salderen en de afrekenperiode,
+en komen de velden van `contract.pt`: de leverancier (vrij), de opção horária, de ciclo, per
+tijdvak de prijs na korting zonder belastingen, de IVA (standaard 23) en de IEC, wat er met
+teruglevering gebeurt (niet verkocht, vaste prijs, of OMIE maal een percentage met een
+prijssensor), en voor het overzicht de kVA, de potência per dag en de diensten per maand.
+
+`tarifas.py` deelt een moment in (`periodo`) in de tijd van Lissabon, zelf uitgerekend (UTC, met
+een uur erbij in de EU-zomertijd), zodat het ook klopt als Home Assistant op een andere tijdzone
+staat en op een machine zonder tzdata. De prijs per kWh is (energie + IEC) maal (1 + IVA)
+(`preco`). `_pt_rijen` in coach.py maakt er per kwartier een prijslijst van, twee dagen vooruit,
+want bij tri-horário en ciclo semanal begint een tijdvak soms op een kwart of een half uur; zonder
+prijs voor een tijdvak is er geen lijst, en geen verzonnen bedrag. Daarmee plant de coach zoals bij
+een dynamisch contract: de daluren zijn goedkoper, dus daar laadt hij (de avondpiek is dan geen
+harde grens, `piek_dicht`). `_salderen` is in Portugal altijd uit. Historie rekent met de tweeling
+`tarifas.js` (`ptPrijsOp` in `prijsOp`, het gemiddelde van de vier kwartieren van een uur), Contract
+toont per tijdvak de opbouw (`ptBlok` in opbouw.js), en "Ja, dit klopt" telt het land en het
+Portugese contract alleen mee in Portugal (`vingerafdruk`).
+
+Bij de klant in Portugal: 20,7 kVA (dus alles tegen 23%), ciclo diário. Vazio kost dan
+(0,1340 + 0,001) x 1,23 = 0,1661 per kWh, fora do vazio 0,2716.
+
+**Wat nog niet.** De nieuwe tijden van de ERSE (Diretiva 3/2026) gaan per meter in tussen 1-7 en
+31-12-2027 (bi diário: vazio 22:30 tot 08:30); de coach kent nog alleen de huidige. Zaterdag in
+ciclo semanal komt uit de ERSE van 2025 (een folder van 2018 tekent hem anders): kijk het na tegen
+een echte meter. De 6% IVA op de eerste 200 kWh rekent de coach niet; wie daaronder blijft zet de
+IVA lager. Feestdagen gelden als een gewone dag.
+
+Bronnen: ERSE, "ERSExplica: perguntas e respostas, períodos horários" (14-11-2025), en de diretiva
+3/2026; Lei 38/2024 en DL 60/2019 (Portal das Finanças); EDP, FAQ over belastingen op de factuur en
+over de verkoop van overschot; DECO Proteste over de factuur (13-07-2026); ERSE, FAQ autoconsumo.
+
+Proeven: Portugal in test_prijsopbouw.py (22 gevallen van tijdvakken), proef 179 in test_coach.py,
+"Portugal: dezelfde tijdvakken als de coach" in test_rapport.mjs (dezelfde 22 gevallen met
+tarifas.js), en het scenario `pt-bihorario` in het virtuele huis: de bus gaat om 18:30 aan de paal
+en laadt in de daluren, alles tegen 0,1661.

@@ -10432,6 +10432,154 @@ dynamisch177 = asyncio.run(coach177.async_herreken_beurten({**inst177, "contract
 controle("bij een dynamisch contract blijven de beurten zonder vaste prijs zoals ze waren",
          dynamisch177["beurten"] == 1 and dynamisch177["overgeslagen"] == 2, f"{dynamisch177}")
 
+print("=== 178. de schaal van de terugleverkosten in de coach, met en zonder thuisbatterij (v0.137.0) ===")
+# De eigenaar op 19-10-2026: "Dus je zegt nu eigenlijk dat iedereen die een batterij heeft
+# gekocht het voor niks heeft gekocht?" Met salderen niet per kWh, maar een schaal hangt aan
+# wat er terugging, en wat de batterij opnam ging niet terug.
+SCHALEN178 = [{"vanaf": 0, "per_jaar": 0}, {"vanaf": 500, "per_jaar": 70}, {"vanaf": 750, "per_jaar": 102}]
+VAST178 = {"type": "fixed", "netting": True, "start": "2026-09-01", "billing_start": "2026-09-15",
+           "fixed": {"all_in_price": 0.24171, "feed_in_tariff": 0.124, "feed_in_costs": 0.0,
+                     "feed_in_costs_mode": "schalen", "feed_in_scales": SCHALEN178,
+                     "feed_in_scales_until": "2027-01-01"}}
+inst178 = instellingen()
+inst178["contract"] = VAST178
+inst178["sources"] = {**inst178["sources"], "grid_mode": "split", "grid_import": "sensor.net_in", "grid_export": "sensor.net_uit"}
+inst178["devices"] = [*inst178.get("devices", []), {"id": "dev-accu178", "type": "thuisbatterij", "name": "Accu",
+                                                    "entity": "", "entities": {"charge_power": "sensor.accu_laad",
+                                                                               "discharge_power": "sensor.accu_ontlaad"}}]
+hass178, _, coach178 = bouw(huis(), inst178)
+NU178 = dt.datetime(2026, 10, 19, 12, 0)
+
+controle("_minder: een positieve prijs niet onder nul, een negatieve blijft",
+         coachmod._minder(0.24, 0.1) == 0.24 - 0.1 and coachmod._minder(0.05, 0.1) == 0.0
+         and coachmod._minder(-0.02, 0.1) == -0.02, "")
+controle("de schaal waar je in valt, met de grenzen",
+         po166.schaal_rij(SCHALEN178, 336) == {"vanaf": 0.0, "tot": 500.0, "per_jaar": 0.0}
+         and po166.schaal_rij(SCHALEN178, 509) == {"vanaf": 500.0, "tot": 750.0, "per_jaar": 70.0}
+         and po166.schaal_rij(SCHALEN178, 900) == {"vanaf": 750.0, "tot": None, "per_jaar": 102.0}
+         and po166.schaal_rij([], 10) is None, "")
+
+
+def afrekening178(terug, rest, compleet=True):
+    async def nep(settings, van, tot, now=None):
+        return {"perioden": [], "schaal": {"van": "2026-09-15", "tot": "2027-01-01", "terug": terug, "terug_rest": rest,
+                                          "kwh": round(terug + rest, 1), "compleet": compleet,
+                                          "per_jaar": 0.0, "per_dag": 0.0}}
+    return nep
+
+
+# Twee kwartieren: één waarin de accu 2 kW zon opnam terwijl het huis 1 kW terugleverde,
+# en één waarin hij 1 kW ontlaadde terwijl het huis afnam.
+def kwartieren178(ids, start, einde):
+    async def nep(ids_, start_, einde_):
+        t1, t2 = int(dt.datetime(2026, 10, 1, 12).timestamp()), int(dt.datetime(2026, 10, 1, 20).timestamp())
+        return {"sensor.net_in": [{"start": t1, "gemiddeld": 0.0}, {"start": t2, "gemiddeld": 300.0}],
+                "sensor.net_uit": [{"start": t1, "gemiddeld": 1000.0}, {"start": t2, "gemiddeld": 0.0}],
+                "sensor.accu_laad": [{"start": t1, "gemiddeld": 2000.0}, {"start": t2, "gemiddeld": 0.0}],
+                "sensor.accu_ontlaad": [{"start": t1, "gemiddeld": 0.0}, {"start": t2, "gemiddeld": 1000.0}]}
+    return nep(ids, start, einde)
+
+
+coach178._async_kwartieren = kwartieren178
+coach178.async_afrekening = afrekening178(193.2, 143.0)
+asyncio.run(coach178._async_schaal(inst178, NU178))
+s178 = coach178._schaal
+print(f"  schaal: {s178}")
+controle("met de batterij in dezelfde schaal: een kWh teruglevering kost niets",
+         s178["rij"] == {"vanaf": 0.0, "tot": 500.0, "per_jaar": 0.0} and s178["kosten_per_kwh"] == 0.0, f"{s178}")
+controle("wat de accu tegenhield, per kwartier: 2 kW laden bij 1 kW teruglevering is een half uur aan 2 kW",
+         s178["accu_kwh"] == 0.5 and s178["zonder_accu"]["kwh"] == round(336.2 + 0.5, 1), f"{s178}")
+controle("het tarief blijft dan de inkoopprijs",
+         abs(coach178._tarief(inst178, NU178).feed_in - 0.24171) < 1e-9, f"{coach178._tarief(inst178, NU178)}")
+
+# Over de grens: 450 gemeten en 100 verwacht, dus 550: schaal van 70 euro.
+coach178._schaal_tot = None
+coach178.async_afrekening = afrekening178(450.0, 100.0)
+asyncio.run(coach178._async_schaal(inst178, NU178))
+s178b = coach178._schaal
+verwacht178 = 70 * (dt.date(2027, 1, 1) - dt.date(2026, 9, 15)).days / 365 / 100
+controle("komt het huis in een duurdere schaal, dan kost wat er nog teruggaat dat verschil, naar rato",
+         abs(s178b["kosten_per_kwh"] - round(verwacht178, 4)) < 1e-9 and s178b["rij"]["per_jaar"] == 70.0, f"{s178b}")
+t178 = coach178._tarief(inst178, NU178)
+controle("en de coach trekt dat van de terugleverprijs af",
+         abs(t178.feed_in - (0.24171 - round(verwacht178, 4))) < 1e-9 and t178.buy == 0.24171, f"{t178}")
+controle("na de einddatum van de schalen niet meer",
+         coach178._schaal_per_kwh(inst178, dt.datetime(2027, 1, 2, 12)) == 0.0, "")
+controle("zonder schalen niet",
+         coach178._schaal_per_kwh({"contract": {**VAST178, "fixed": {**VAST178["fixed"], "feed_in_costs_mode": "kwh"}}}, NU178) == 0.0, "")
+c178 = asyncio.run(coach178.async_prijscontrole(inst178, now=NU178))
+controle("de controle geeft de schaal mee voor Contract",
+         c178.get("schaal", {}).get("rij", {}).get("per_jaar") == 70.0, f"{c178.get('schaal')}")
+# Onvolledige metingen: dan geen schaal, en ook geen kosten.
+coach178._schaal_tot = None
+coach178.async_afrekening = afrekening178(450.0, 100.0, compleet=False)
+asyncio.run(coach178._async_schaal(inst178, NU178))
+controle("zonder volledige metingen geen schaal en geen kosten",
+         coach178._schaal is None and coach178._schaal_per_kwh(inst178, NU178) == 0.0, "")
+controle("niet opnieuw binnen een dag",
+         (coach178.__setattr__("async_afrekening", afrekening178(450.0, 100.0)),
+          asyncio.run(coach178._async_schaal(inst178, NU178 + dt.timedelta(hours=1))))
+         and coach178._schaal is None, "")
+
+print("=== 179. een stroomcontract in Portugal: tijdvakken in plaats van salderen (v0.137.0) ===")
+# De eigenaar op 19-10-2026: "Hun wonen in portugal dus bij contract bovenaan wil ik dat je
+# een land kan kiezen dus Nederland en Portugal." Hun contract: EDP Comercial, bi-horário,
+# ciclo diário, vazio 0,1340 en fora do vazio 0,2198 per kWh zonder belastingen.
+PT179 = {"type": "fixed", "netting": True, "country": "PT",
+         "pt": {"tarifa": "bi", "ciclo": "diario", "fornecedor": "EDP Comercial",
+                "energia": {"vazio": 0.1340, "fora_vazio": 0.2198}, "iec": 0.001, "iva": 23,
+                "kva": 20.7, "potencia_dia": 0.8543, "servicos_mes": 8.89,
+                "excedente": {"modo": "nenhum", "preco": 0.0, "fator": 75, "omie_entity": ""}}}
+inst179 = instellingen()
+inst179["contract"] = PT179
+hass179, _, coach179 = bouw(huis(), inst179)
+VAZIO179 = round((0.1340 + 0.001) * 1.23, 6)
+FORA179 = round((0.2198 + 0.001) * 1.23, 6)
+# De nagemaakte Home Assistant staat op UTC+2. Op 19-10-2026 is het in Lissabon zomertijd
+# (UTC+1): daluren van 22:00 tot 08:00 daar zijn hier 23:00 tot 09:00.
+NU179 = dt.datetime(2026, 10, 19, 12, 7)
+rijen179 = coach179._prices(inst179, NU179)
+print(f"  {len(rijen179)} rijen, eerste {rijen179[0]['start']} {rijen179[0]['price']}")
+controle("twee dagen vooruit, per kwartier, vanaf het kwartier van nu",
+         len(rijen179) == 192 and rijen179[0]["start"] == dt.datetime(2026, 10, 19, 12, 0)
+         and all(r["end"] - r["start"] == dt.timedelta(minutes=15) for r in rijen179), "")
+prijs_op179 = {r["start"]: r["price"] for r in rijen179}
+controle("daluren in de tijd van Lissabon, ook als Home Assistant op een andere tijdzone staat",
+         prijs_op179[dt.datetime(2026, 10, 19, 22, 45)] == FORA179
+         and prijs_op179[dt.datetime(2026, 10, 19, 23, 0)] == VAZIO179
+         and prijs_op179[dt.datetime(2026, 10, 20, 8, 45)] == VAZIO179
+         and prijs_op179[dt.datetime(2026, 10, 20, 9, 0)] == FORA179, "")
+controle("niet verkocht: teruglevering brengt niets op", all(r["feed_in"] == 0.0 for r in rijen179), "")
+controle("geen salderen in Portugal, ook met het vinkje",
+         coachmod.ChargerCoach._salderen(PT179, NU179) is False and coach179._saldeert(PT179, NU179) is False, "")
+t179 = coachmod.ChargerCoach._tariff(inst179, None, NU179)
+controle("het tarief van nu: het tijdvak van nu", t179.buy == FORA179 and t179.feed_in == 0.0, f"{t179}")
+controle("de prijs van toen voor opnieuw uitrekenen",
+         coach179._vast_op(PT179, dt.datetime(2026, 10, 20, 3, 0)) == (VAZIO179, 0.0), "")
+c179 = asyncio.run(coach179.async_prijscontrole(inst179, now=NU179))
+print(f"  controle: {c179.get('pt')}")
+controle("de controle voor Contract: per tijdvak de opbouw, en het tijdvak van nu",
+         c179["soort"] == "pt" and c179["salderen"] is False and c179["inkoop"] == FORA179
+         and c179["pt"]["nu"] == "fora_vazio" and [r["all_in"] for r in c179["pt"]["periodos"]] == [VAZIO179, FORA179]
+         and c179["pt"]["fornecedor"] == "EDP Comercial", f"{c179}")
+verkoop179 = {**PT179, "pt": {**PT179["pt"], "excedente": {"modo": "fixo", "preco": 0.03}}}
+controle("een vaste verkoopprijs komt in elke rij",
+         all(r["feed_in"] == 0.03 for r in coach179._prices({**inst179, "contract": verkoop179}, NU179)), "")
+leeg179 = {**PT179, "pt": {**PT179["pt"], "energia": {"vazio": 0.1340}}}
+onbekend179 = {**PT179, "pt": {k: v for k, v in PT179["pt"].items() if k != "excedente"}}
+controle("teruglevering nog niet gekozen: onbekend, niet nul, en de controle zegt het",
+         all(r["feed_in"] is None for r in coach179._prices({**inst179, "contract": onbekend179}, NU179))
+         and asyncio.run(coach179.async_prijscontrole({**inst179, "contract": onbekend179}, now=NU179))["pt"]["excedente"] == "onbekend", "")
+controle("zonder prijs voor een tijdvak geen lijst: geen verzonnen bedrag",
+         coach179._prices({**inst179, "contract": leeg179}, NU179) == [], "")
+controle("een Nederlands contract blijft zoals het was",
+         coachmod.ChargerCoach._salderen({**PT179, "country": "NL"}, NU179) is True
+         and coach179._prices({**inst179, "contract": {**PT179, "country": "NL"}}, NU179) == [], "")
+from_nl179 = {"type": "fixed", "netting": True, "fixed": {"all_in_price": 0.25}}
+controle("de bevestiging van een Nederlands contract blijft gelden; in Portugal telt het contract daar",
+         po166.vingerafdruk(from_nl179) == po166.vingerafdruk({**from_nl179, "country": "NL", "pt": PT179["pt"]})
+         and po166.vingerafdruk(PT179) != po166.vingerafdruk({**PT179, "pt": {**PT179["pt"], "iva": 6}}), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

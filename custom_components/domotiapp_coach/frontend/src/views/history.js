@@ -44,6 +44,16 @@ import {
   withStatistics,
 } from "../statistics.js";
 
+const MAANDEN = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus",
+  "september", "oktober", "november", "december"];
+
+/** De maand waarin het stroomcontract (of anders het gascontract) ingaat, 1 tot 12, of null (v0.137.0). */
+export function jaarMaandContract(contract) {
+  const start = contract?.start || contract?.gas?.start || "";
+  const m = /^\d{4}-(\d{2})-\d{2}$/.exec(start);
+  return m ? Number(m[1]) : null;
+}
+
 /** Waar de terugknop je heen brengt, per tijdvak. */
 const NOW_LABEL = {
   day: "Vandaag",
@@ -472,6 +482,13 @@ class DacViewHistory extends DacElement {
               ${PERIODS.map((item) => `<option value="${item.id}">${item.label}</option>`).join("")}
             </select></span>
           </label>
+          <!-- Waar een jaar begint, hier en niet alleen onder Voorkeuren (v0.137.0). De
+               eigenaar op 19-10-2026: "ik kan niet van 1 sept tot 1 sept kiezen? En dat is
+               wel handig als je je jaar contract periode wilt vergelijken." -->
+          <label class="keuze" id="jaar-vanaf-rij" hidden>
+            <span class="keuze-kop">Jaar vanaf</span>
+            <span class="kies"><select id="jaar-vanaf"></select></span>
+          </label>
           <label class="keuze" title="Hoe fijn het verloop in het rapport komt te staan">
             <span class="keuze-kop">Verloop in het rapport</span>
             <span class="kies"><select id="korrel">
@@ -590,6 +607,7 @@ class DacViewHistory extends DacElement {
       this.offset_ = 0;
       this.load_();
     });
+    this.$("#jaar-vanaf").addEventListener("change", (event) => this.jaarVanaf_(Number(event.target.value)));
     this.$("#korrel").addEventListener("change", (event) => {
       this.korrel_ = event.target.value;
       this.paintKorrel_();
@@ -841,9 +859,33 @@ class DacViewHistory extends DacElement {
     lijst.value = this.korrel_id();
   }
 
+  /**
+   * Een jaar laten beginnen in een andere maand (v0.137.0): dezelfde instelling als
+   * onder Voorkeuren (`year_start_month`, `display/set`), voor iedereen die kijkt.
+   */
+  async jaarVanaf_(maand) {
+    if (!maand || !this.hass_?.callWS) return;
+    this.settings_ = { ...(this.settings_ ?? {}), history: { ...(this.settings_?.history ?? {}), year_start_month: maand } };
+    this.offset_ = 0;
+    this.load_();
+    try {
+      await this.hass_.callWS({ type: "domotiapp_coach/display/set", year_start_month: maand });
+    } catch (error) {
+      console.warn("domotiapp coach: kon het begin van het jaar niet bewaren", error);
+    }
+  }
+
   paintPeriod_() {
     this.paintKorrel_();
     this.$("#periode").value = this.period_;
+    const jaarRij = this.$("#jaar-vanaf-rij");
+    jaarRij.hidden = this.period_ !== "year";
+    if (!jaarRij.hidden) {
+      const contractMaand = jaarMaandContract(this.settings_?.contract);
+      this.$("#jaar-vanaf").innerHTML = MAANDEN.map((naam, i) =>
+        `<option value="${i + 1}">${naam}${contractMaand === i + 1 ? " (je contract)" : ""}</option>`).join("");
+      this.$("#jaar-vanaf").value = String(this.settings_?.history?.year_start_month ?? 1);
+    }
     this.$("#onderwerp").value = this.onderwerp_;
     this.$("#period-label").textContent = periodLabel(
       this.period_,
@@ -2595,6 +2637,7 @@ DacViewHistory.css = /* css */ `
 
   /* Elke keuze een uitklaplijst met een opschrift erboven (v0.116.0). */
   .keuze { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .keuze[hidden] { display: none; }
   .keuze-kop {
     font-size: 11px; font-weight: 600; letter-spacing: .02em;
     color: var(--dac-ink-3); text-transform: uppercase;

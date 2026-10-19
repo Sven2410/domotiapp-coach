@@ -73,7 +73,7 @@ from .batterij import (
     vol_voor,
     zon_in_accu,
 )
-from . import berichten, prijsopbouw
+from . import berichten, prijsopbouw, tarifas
 from .planner import (
     _dag_om,
     DAGNAMEN,
@@ -827,6 +827,24 @@ def _afrekenstart(waarde: Any, vandaag: date) -> date | None:
         begin = volgende
 
 
+def _bewust(moment: datetime | None) -> datetime:
+    """Een moment met tijdzone: zonder is het de lokale tijd van Home Assistant (v0.137.0)."""
+    if moment is None:
+        return dt_util.utcnow()
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=dt_util.get_default_time_zone())
+    return moment
+
+
+def _minder(terug: float, kosten: float) -> float:
+    """De terugleverprijs min `kosten`, maar een positieve prijs niet onder nul (v0.137.0).
+
+    Een schaal maakt teruglevering duur, niet de zon zelf: zon die je gebruikt
+    kost hooguit niets. Een negatieve prijs die er al was blijft staan.
+    """
+    return terug - kosten if terug - kosten >= 0 else min(terug, 0.0)
+
+
 def _periode_op(contract: dict[str, Any], dag: str) -> dict[str, Any] | None:
     """Het eerdere stroomcontract waar die dag in valt, zoals `contractAt` in data-source.js."""
     for periode in contract.get("periods") or []:
@@ -1386,6 +1404,11 @@ class ChargerCoach:
         # Zie `_async_jaarsaldo`.
         self._jaarsaldo: dict[str, Any] | None = None
         self._jaarsaldo_tot: datetime | None = None
+        # De schaal van de terugleverkosten die eraan komt, met en zonder
+        # thuisbatterij, en wat een kWh minder teruglevering nu scheelt (v0.137.0).
+        # Zie `_async_schaal`.
+        self._schaal: dict[str, Any] | None = None
+        self._schaal_tot: datetime | None = None
         self._zon_kwh: dict[datetime, float] = {}
         self._zon_geschat = True
         # Wat de zonverwachting per ronde beloofde en wat de meter gaf, als
@@ -2150,6 +2173,14 @@ class ChargerCoach:
         # Of de bewoner de opbouw bevestigde (v0.129.0): het overzicht vraagt
         # het anders tot hij dat doet.
         bevestigd = (contract.get("confirmed") or {}).get("values") == prijsopbouw.vingerafdruk(contract)
+        if contract.get("country") == "PT":
+            # Portugal (v0.137.0): de tijdvakken als prijslijst, zodat de grafiek en de
+            # vooruitblik dezelfde prijzen tekenen als de coach gebruikt.
+            return {"reserve": False, "bevestigd": bevestigd, "rows": [
+                {"start": rij["start"].isoformat(), "end": rij["end"].isoformat(),
+                 "price": rij["price"], "feed_in": rij["feed_in"]}
+                for rij in self._prices(settings)
+            ]}
         if contract.get("type") != "dynamic":
             return {"reserve": False, "rows": [], "bevestigd": bevestigd}
         _, reserve = self._prijsbron(contract.get("dynamic") or {})
@@ -2185,11 +2216,28 @@ class ChargerCoach:
             "kosten_vorm": ((contract.get("dynamic") if contract.get("type") == "dynamic" else contract.get("fixed")) or {}
                             ).get("feed_in_costs_mode") or "kwh",
             "jaar": dict(self._jaarsaldo) if self._jaarsaldo else None,
+            # De schaal die eraan komt, met en zonder thuisbatterij (v0.137.0).
+            "schaal": dict(self._schaal) if self._schaal else None,
             "bevestigd": bool(bevestigd.get("values"))
             and bevestigd.get("values") == prijsopbouw.vingerafdruk(contract),
             "bevestigd_op": bevestigd.get("at") or None,
             "bevestigd_door": bevestigd.get("by") or None,
         }
+        if contract.get("country") == "PT":
+            pt = contract.get("pt") or {}
+            moment = _bewust(now)
+            nu = tarifas.periodo(moment, pt.get("tarifa"), pt.get("ciclo"))
+            rijen = self._pt_rijen(contract, now)
+            terug_nu = rijen[0]["feed_in"] if rijen else tarifas.terug(pt)
+            uit.update(
+                soort="pt", salderen=False, inkoop=tarifas.preco(pt, nu), terug=terug_nu,
+                pt={"tarifa": pt.get("tarifa") or "bi", "ciclo": pt.get("ciclo") or "diario",
+                    "fornecedor": pt.get("fornecedor") or "", "nu": nu, "periodos": tarifas.opbouw(pt),
+                    "excedente": (pt.get("excedente") or {}).get("modo") or "onbekend",
+                    "kva": pt.get("kva"), "potencia_dia": pt.get("potencia_dia"), "servicos_mes": pt.get("servicos_mes")},
+                controle={"status": "vast"},
+            )
+            return uit
         if contract.get("type") != "dynamic":
             vast = self._tarief({"contract": contract}, now)
             vergoeding, kosten = self._teruglevering(contract.get("fixed") or {}, now)
@@ -2940,6 +2988,7 @@ class ChargerCoach:
         # buiten zichzelf kijkt.
         await self._async_huisverbruik(settings, moment)
         await self._async_jaarsaldo(settings, moment)
+        await self._async_schaal(settings, moment)
         await self._async_sensorwacht(settings, moment)
         await self._async_verbruikswacht(settings, moment)
         await self._async_temperatuurwacht(settings, moment, level)
@@ -4244,6 +4293,8 @@ class ChargerCoach:
         contract = settings.get("contract") or {}
         dynamic = contract.get("dynamic") or {}
         tarief = self._tarief(settings)
+        if contract.get("country") == "PT":
+            return lambda moment: self._vast_op(contract, moment)
         if contract.get("type") != "dynamic":
             return lambda moment: (tarief.buy, tarief.feed_in)
         bron = dynamic.get("all_in_entity") if dynamic.get("source") == "all_in" else dynamic.get("market_entity")
@@ -7644,7 +7695,7 @@ class ChargerCoach:
         maandenlang een belastingteruggave blijven inrekenen die niet meer
         bestaat. Het vinkje blijft staan; het telt alleen niet meer mee.
         """
-        if not contract.get("netting"):
+        if not contract.get("netting") or contract.get("country") == "PT":
             return False
         vandaag = dt_util.as_local(now or dt_util.utcnow()).date()
         return vandaag < NETTING_ENDS
@@ -7768,6 +7819,8 @@ class ChargerCoach:
         gaan bijkopen.
         """
         contract = settings.get("contract") or {}
+        if contract.get("country") == "PT":
+            return self._pt_rijen(contract, now)
         if contract.get("type") != "dynamic":
             return []
 
@@ -7815,6 +7868,10 @@ class ChargerCoach:
             # marktprijssensor voor nodig, behalve voor een bonus in procenten.
             dag = prijsopbouw.overdag(start.replace(tzinfo=zone), end.replace(tzinfo=zone), lat, lon)
             terug = prijsopbouw.terug(kaal, prijs, dynamic, salderen, dag)["bedrag"]
+            # Wat een kWh teruglevering aan schaal kost (v0.137.0, `_async_schaal`).
+            schaal = self._schaal_per_kwh(settings, start)
+            if schaal and terug is not None:
+                terug = _minder(terug, schaal)
 
             rows.append({"start": start, "end": end, "price": prijs, "feed_in": terug})
         # Verder dan de lijst reikt weet de coach niets, en dat hoort zo.
@@ -7823,6 +7880,35 @@ class ChargerCoach:
         # geen gegokte prijzen. Reikt de lijst niet tot de klaar-tijd, dan
         # laadt hij tot die tijd alleen op zon. Zie `alleen_zon` in planner.py.
         return sorted(rows, key=lambda item: item["start"])
+
+    def _pt_rijen(self, contract: dict[str, Any], now: datetime | None = None) -> list[dict]:
+        """De prijslijst van een Portugees contract, per kwartier, twee dagen vooruit (v0.137.0).
+
+        Uit de tijdvakken van de ERSE in de tijd van Lissabon (`tarifas.periodo`), dus
+        ook goed als Home Assistant op een andere tijdzone staat. Per kwartier, want bij
+        tri-horário en ciclo semanal begint een tijdvak soms op een kwart of een half uur.
+        De terugleverprijs is wat het verkoopcontract geeft; bij OMIE de prijs uit de
+        sensor van dat kwartier. Leeg zolang er een prijs ontbreekt: dan kent de coach
+        het contract niet, en rekent hij niet met een verzonnen bedrag.
+        """
+        pt = contract.get("pt") or {}
+        zone = dt_util.get_default_time_zone()
+        nu = _moment(now)
+        begin = nu.replace(minute=nu.minute - nu.minute % 15, second=0, microsecond=0)
+        start_utc = begin.replace(tzinfo=zone).astimezone(timezone.utc)
+        e = pt.get("excedente") or {}
+        omie = self._slots(e.get("omie_entity")) if e.get("modo") == "omie" and e.get("omie_entity") else {}
+        rijen: list[dict] = []
+        for i in range(48 * 4):
+            s_utc = start_utc + timedelta(minutes=15 * i)
+            start = s_utc.astimezone(zone).replace(tzinfo=None)
+            einde = (s_utc + timedelta(minutes=15)).astimezone(zone).replace(tzinfo=None)
+            prijs = tarifas.preco(pt, tarifas.periodo(s_utc, pt.get("tarifa"), pt.get("ciclo")))
+            if prijs is None:
+                return []
+            markt = next((p for s, (eind, p) in omie.items() if s <= start < eind), None)
+            rijen.append({"start": start, "end": einde, "price": prijs, "feed_in": tarifas.terug(pt, markt)})
+        return rijen
 
     def _sun(self, settings: dict[str, Any]) -> Sun:
         """De zonverwachting, voor zover die is ingevuld.
@@ -8107,8 +8193,132 @@ class ChargerCoach:
         return self._salderen(contract, now) and self._netto_terug() is not True
 
     def _tarief(self, settings: dict[str, Any], now: datetime | None = None) -> Tariff:
-        """`_tariff` met wat de coach van dit huis weet: levert het netto terug (v0.133.3)."""
-        return self._tariff(settings, self._saldeert(settings.get("contract") or {}, now), now)
+        """`_tariff` met wat de coach van dit huis weet: levert het netto terug (v0.133.3),
+        en wat een kWh teruglevering aan schaal kost (v0.137.0, `_schaal_per_kwh`)."""
+        tarief = self._tariff(settings, self._saldeert(settings.get("contract") or {}, now), now)
+        kosten = self._schaal_per_kwh(settings, now)
+        if kosten and tarief.feed_in is not None:
+            tarief = replace(tarief, feed_in=_minder(tarief.feed_in, kosten))
+        return tarief
+
+    def _schaal_per_kwh(self, settings: dict[str, Any], now: datetime | None = None) -> float:
+        """Wat een kWh teruglevering nu aan schaal kost, of 0 (v0.137.0). Zie `_async_schaal`."""
+        s = self._schaal
+        if not s or not s.get("kosten_per_kwh"):
+            return 0.0
+        contract = settings.get("contract") or {}
+        velden = (contract.get("dynamic") if contract.get("type") == "dynamic" else contract.get("fixed")) or {}
+        if velden.get("feed_in_costs_mode") != "schalen":
+            return 0.0
+        if _moment(now).date().isoformat() >= str(s.get("tot") or ""):
+            return 0.0
+        return float(s["kosten_per_kwh"])
+
+    async def _async_schaal(self, settings: dict[str, Any], now: datetime) -> None:
+        """De schaal van de terugleverkosten die eraan komt, met en zonder thuisbatterij (v0.137.0).
+
+        De eigenaar op 19-10-2026, toen bleek dat de batterij met salderen per kWh
+        niets opbracht: "Dus je zegt nu eigenlijk dat iedereen die een batterij
+        heeft gekocht het voor niks heeft gekocht?" Niet helemaal: een schaal hangt
+        aan wat er terugging, en wat de batterij opnam ging niet terug. Dit telt
+        dat: de teruglevering van de periode (`async_afrekening`, gemeten plus
+        dezelfde dagen vorig jaar), en daarbovenop wat de batterijen per kwartier
+        opnamen terwijl het huis terugleverde (`_async_accu_vermeden`).
+
+        En wat een kWh teruglevering nu kost (`kosten_per_kwh`): komt het huis
+        volgens die verwachting in een duurdere schaal dan waar het nu staat, dan
+        is dat verschil het werk van wat er nog teruggaat. Naar rato over de dagen
+        van de periode, zoals Historie het jaarbedrag telt, en verdeeld over de
+        teruglevering die er nog verwacht wordt. Blijft het huis in dezelfde
+        schaal, dan kost een kWh niets. `_tarief` en `_prices` trekken het van de
+        terugleverprijs af, zodat de coach de zon dan liever zelf gebruikt.
+        Eens per dag.
+        """
+        if self._schaal_tot is not None and now < self._schaal_tot:
+            return
+        self._schaal_tot = now + JAARSALDO_VERVERSEN
+        self._schaal = None
+        contract = settings.get("contract") or {}
+        velden = (contract.get("dynamic") if contract.get("type") == "dynamic" else contract.get("fixed")) or {}
+        if velden.get("feed_in_costs_mode") != "schalen" or not velden.get("feed_in_scales"):
+            return
+        try:
+            s = (await self.async_afrekening(settings, now.date(), now.date() + timedelta(days=1), now)).get("schaal")
+        except Exception:  # noqa: BLE001 - zonder schaal rekent hij gewoon door
+            _LOGGER.exception("kon de schaal van de terugleverkosten niet uitrekenen")
+            return
+        if not s or not s.get("compleet"):
+            return
+        van, tot = date.fromisoformat(s["van"]), date.fromisoformat(s["tot"])
+        if now.date() >= tot:
+            return
+        tabel = velden["feed_in_scales"]
+        nu = prijsopbouw.schaal_per_jaar(tabel, float(s["terug"])) or 0.0
+        straks = prijsopbouw.schaal_per_jaar(tabel, float(s["kwh"])) or 0.0
+        rest = float(s.get("terug_rest") or 0.0)
+        kosten = (straks - nu) * (tot - van).days / 365.0 / rest if rest > 0 and straks > nu else 0.0
+        vermeden = await self._async_accu_vermeden(settings, van, min(tot, now.date()))
+        self._schaal = {
+            **s,
+            "rij": prijsopbouw.schaal_rij(tabel, float(s["kwh"])),
+            "kosten_per_kwh": round(kosten, 4),
+            "accu_kwh": vermeden,
+            "zonder_accu": None if vermeden is None else {
+                "kwh": round(float(s["kwh"]) + vermeden, 1),
+                "rij": prijsopbouw.schaal_rij(tabel, float(s["kwh"]) + vermeden),
+            },
+        }
+
+    async def _async_accu_vermeden(self, settings: dict[str, Any], van: date, tot: date) -> float | None:
+        """Hoeveel teruglevering de thuisbatterijen in [van, tot) tegenhielden, in kWh (v0.137.0).
+
+        Per kwartier uit de eigen opslag: het net met en zonder wat de batterijen
+        deden. Zonder batterij was het net `net - batterij` geweest (laden telt
+        positief); wat er dan meer naar buiten ging, ging nu de batterij in. None
+        zonder batterij of zonder kwartieren.
+        """
+        accus = [d for d in settings.get("devices") or [] if d.get("type") == "thuisbatterij"]
+        if not accus or van >= tot:
+            return None
+        bronnen = settings.get("sources") or {}
+        getekend = bronnen.get("grid_mode") == "signed"
+        net_ids = [bronnen.get("grid_signed")] if getekend else [bronnen.get("grid_import"), bronnen.get("grid_export")]
+        bat_ids: list[str | None] = []
+        for d in accus:
+            eigen = d.get("entities") or {}
+            bat_ids += [d.get("entity"), eigen.get("charge_power"), eigen.get("discharge_power")]
+        ids = sorted({e for e in net_ids + bat_ids if e})
+        kwartieren = await self._async_kwartieren(
+            ids, datetime(van.year, van.month, van.day), datetime(tot.year, tot.month, tot.day)
+        )
+        per = {e: {int(r["start"]): r for r in kwartieren.get(e, [])} for e in ids}
+
+        def gemiddeld(entity_id: str | None, moment: int) -> float | None:
+            r = per.get(entity_id, {}).get(moment) if entity_id else None
+            return None if r is None or r.get("gemiddeld") is None else float(r["gemiddeld"])
+
+        totaal, gezien = 0.0, False
+        for moment in sorted({t for e in ids for t in per.get(e, {})}):
+            if getekend:
+                g = gemiddeld(bronnen.get("grid_signed"), moment)
+                net_w = None if g is None else (-g if bronnen.get("grid_signed_invert") else g)
+            else:
+                invoer, export = gemiddeld(bronnen.get("grid_import"), moment), gemiddeld(bronnen.get("grid_export"), moment)
+                net_w = None if invoer is None and export is None else (invoer or 0.0) - (export or 0.0)
+            if net_w is None:
+                continue
+            bat_w = 0.0
+            for d in accus:
+                eigen = d.get("entities") or {}
+                getal = gemiddeld(d.get("entity"), moment)
+                if getal is not None:
+                    bat_w += -getal if (d.get("battery") or {}).get("power_invert") else getal
+                else:
+                    laden, ontladen = gemiddeld(eigen.get("charge_power"), moment), gemiddeld(eigen.get("discharge_power"), moment)
+                    bat_w += (laden or 0.0) - (ontladen or 0.0)
+            gezien = True
+            totaal += (max(0.0, -(net_w - bat_w)) - max(0.0, -net_w)) * 0.25 / 1000.0
+        return round(totaal, 1) if gezien else None
 
     async def _async_huisverbruik(self, settings: dict[str, Any], now: datetime) -> None:
         """Wat het huis zelf gebruikt, per uur van de dag, uit de eigen opslag.
@@ -8410,6 +8620,13 @@ class ChargerCoach:
         reden die er is om het ene moment boven het andere te verkiezen.
         """
         contract = settings.get("contract") or {}
+        if contract.get("country") == "PT":
+            # Portugal (v0.137.0): de prijs van het tijdvak van nu, en wat het
+            # verkoopcontract voor teruglevering geeft (`tarifas.py`).
+            pt = contract.get("pt") or {}
+            moment = _bewust(now)
+            return Tariff(buy=tarifas.preco(pt, tarifas.periodo(moment, pt.get("tarifa"), pt.get("ciclo"))),
+                          feed_in=tarifas.terug(pt))
         if contract.get("type") == "dynamic":
             return Tariff()
 
@@ -10287,6 +10504,11 @@ class ChargerCoach:
         dag = moment.date().isoformat()
         periode = _periode_op(contract, dag)
         fixed = contract.get("fixed") or {}
+        if periode is None and contract.get("country") == "PT":
+            # Portugal (v0.137.0): het tijdvak van dat moment.
+            pt = contract.get("pt") or {}
+            koop = tarifas.preco(pt, tarifas.periodo(_bewust(moment), pt.get("tarifa"), pt.get("ciclo")))
+            return (koop, tarifas.terug(pt)) if koop is not None else (None, None)
         if periode is not None and periode.get("type") == "dynamic":
             return None, None
         if periode is not None and float(periode.get("all_in_price") or 0) > 0:
@@ -10446,6 +10668,8 @@ class ChargerCoach:
             return waarde
 
         def prijs_op(moment: datetime) -> tuple[float | None, float | None]:
+            if contract.get("country") == "PT":
+                return self._vast_op(contract, moment)
             if contract.get("type") != "dynamic":
                 return tarief.buy, tarief.feed_in
             koop = laatste(prijzen, moment)

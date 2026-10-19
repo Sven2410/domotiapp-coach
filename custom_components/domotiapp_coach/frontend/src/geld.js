@@ -37,6 +37,7 @@
  */
 
 import { contractAt } from "./data-source.js";
+import { ptPrijsOp } from "./tarifas.js";
 
 /**
  * De dag waarop salderen ophoudt. Gelijk aan `NETTING_ENDS` in const.py: de
@@ -54,7 +55,8 @@ function lokaleDag(when) {
 /** Of er op die dag nog gesaldeerd wordt: het vinkje én de datum, zoals `_salderen` in coach.py. */
 export function salderen(contract, when) {
   const dag = lokaleDag(when);
-  return Boolean(contract?.netting) && dag !== "" && dag < SALDEREN_TOT;
+  // Portugal kent geen salderen (v0.137.0).
+  return Boolean(contract?.netting) && contract?.country !== "PT" && dag !== "" && dag < SALDEREN_TOT;
 }
 
 /**
@@ -254,6 +256,8 @@ export function schaalKosten(afrekening, start, end, nu = new Date()) {
 export function prijsOp(contract, rate, prijzen, when, ligging = null, lengte = 3600000, aandeel = null) {
   const c = contractAt(contract, when);
   const t = new Date(when).getTime();
+  // Portugal (v0.137.0): de tijdvakken van de ERSE, zoals `_pt_rijen` in coach.py.
+  if (contract?.country === "PT" && !c.period) return ptPrijsOp(contract.pt, when, lengte);
   const koop = c.period?.all_in_price > 0 ? c.buy : (prijzen?.get(t) ?? rate?.buy ?? null);
   if (koop === null || koop === undefined) return { koop: null, terug: null };
   const metSalderen = salderen(contract, when);

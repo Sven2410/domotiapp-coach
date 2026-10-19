@@ -453,6 +453,20 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # onder Meldingen. Zie berichten.py.
     "reminders": {"meter_date": "", "meter_repeat": "year"},
     "contract": {
+        # Het land (v0.137.0): "NL" of "PT". In Portugal geen salderen, en een prijs per
+        # tijdvak van de ERSE in plaats van een all-in prijs (`pt`, zie tarifas.py).
+        "country": "NL",
+        "pt": {
+            "tarifa": "bi", "ciclo": "diario", "fornecedor": "",
+            # Per tijdvak de prijs per kWh zonder belastingen, met de korting.
+            "energia": {"simples": 0.0, "vazio": 0.0, "fora_vazio": 0.0, "cheias": 0.0, "ponta": 0.0},
+            "iec": 0.001, "iva": 23.0,
+            # Alleen voor het scherm: de coach stuurt niet op vaste kosten.
+            "kva": 0.0, "potencia_dia": 0.0, "servicos_mes": 0.0,
+            # Teruglevering: onbekend (nog niet gekozen), nenhum (niet verkocht), fixo (vaste
+            # prijs) of omie (OMIE maal de factor).
+            "excedente": {"modo": "onbekend", "preco": 0.0, "fator": 75.0, "omie_entity": ""},
+        },
         "type": CONTRACT_FIXED,
         # De leverancier uit de catalogus (`LEVERANCIERS` in leveranciers.js), of
         # leeg voor een andere (v0.129.0). Kiezen vult de velden hieronder voor;

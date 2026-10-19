@@ -340,6 +340,15 @@ if (vl := v("vast-salderen")):
              f"net {vl.uit_net_kwh:.2f}")
     controle("salderen: op tijd vol", gehaald(vl), "")
 
+# Portugal (v0.137.0): een contract met tijdvakken laadt in de daluren, en zonder salderen.
+if (vp := v("pt-bihorario")):
+    dal = round((0.1340 + 0.001) * 1.23, 6)
+    print(f"  portugal: €{vp.kosten:.2f} voor {vp.geladen_kwh:.1f} kWh, daltarief {dal}")
+    controle("portugal: niets van het net voor de daluren", not laadt_tussen(vp, "18:30", "23:00"), "")
+    controle("portugal: op tijd vol", gehaald(vp), f"{vp.soc_bij_klaar_tijd}")
+    controle("portugal: alles tegen het daltarief", abs(vp.kosten - vp.geladen_kwh * dal) < 0.02,
+             f"€{vp.kosten:.2f} tegen €{vp.geladen_kwh * dal:.2f}")
+
 # Na 1-1-2027 de terugleverprijs van na salderen, ook met het vinkje aan (v0.134.0).
 if (vn := v("vast-na-salderen")) and (vl := v("vast-na-salderen-leeg")):
     print(f"  na salderen: €{vn.kosten:.2f}, zonder bedragen €{vl.kosten:.2f}, zon {vn.uit_zon_kwh:.1f} kWh")

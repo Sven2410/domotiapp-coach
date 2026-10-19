@@ -1500,6 +1500,18 @@ dyn_salderen_vol = dyn_salderen.kopie(
     uitleg="dynamisch mét salderen en de hele all-in prijs terug: zon is evenveel waard als inkoop",
     salderen_vol=True,
 )
+# Portugal (v0.137.0): een contract met tijdvakken en zonder salderen, zoals bij een klant
+# daar (EDP Comercial, bi-horário, ciclo diário). Daluren van 22:00 tot 08:00 in Lissabon;
+# het virtuele huis staat op UTC+2, dus hier van 23:00 tot 09:00. De bus gaat om 18:00 aan
+# de paal en moet om 07:00 klaar zijn: laden in de daluren, niet ervoor.
+PT_EDP = {"tarifa": "bi", "ciclo": "diario", "fornecedor": "EDP Comercial",
+          "energia": {"vazio": 0.1340, "fora_vazio": 0.2198}, "iec": 0.001, "iva": 23.0,
+          "excedente": {"modo": "nenhum", "preco": 0.0, "fator": 75.0, "omie_entity": ""}}
+pt_bihorario = vast_avond.kopie(
+    naam="pt-bihorario",
+    uitleg="Portugal, bi-horário ciclo diário, kabel om 18:30 erin, klaar om 06:00: in de daluren laden",
+    pt=PT_EDP,
+)
 
 
 ALLE = [
@@ -1533,7 +1545,7 @@ ALLE = [
     *BATTERIJ,
     vast_zon_modus, bewolkt_zon_modus, half_zon_modus, dyn_continu,
     batterij_helpt_auto, batterij_helpt_auto_nacht, batterij_helpt_auto_zonder_nacht,
-    voorrang_auto_eerst, voorrang_accu_eerst, vast_kruimelzon, vast_na_salderen, vast_na_salderen_leeg,
+    voorrang_auto_eerst, voorrang_accu_eerst, vast_kruimelzon, vast_na_salderen, vast_na_salderen_leeg, pt_bihorario,
     vast_kosten_kwh, vast_kosten_schalen, vast_kosten_overschot, vast_kosten_overschot_netto, dyn_salderen_vol,
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,

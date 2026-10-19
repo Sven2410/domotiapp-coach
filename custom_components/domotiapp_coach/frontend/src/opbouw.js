@@ -11,6 +11,8 @@
  * tonen het allebei, met dezelfde woorden.
  */
 
+import { NAMEN } from "./tarifas.js";
+
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 
 /** € 0,4090: vier decimalen, want een leverancier noemt zijn opslag in tienden van centen. */
@@ -64,11 +66,33 @@ export function salderenNoot(check, nu = new Date()) {
  */
 export function kostenNoot(check) {
   const tekst = {
-    schalen: "Je terugleverkosten zijn een vast bedrag per jaar, in schalen: een kWh extra kost niets. Wat je schaal kost staat in Historie, per dag.",
+    schalen: "Je terugleverkosten zijn een vast bedrag per jaar, in schalen. Wat je schaal kost staat in Historie, per dag.",
     overschot: "Je leverancier rekent terugleverkosten alleen over wat er na salderen overblijft: een gesaldeerde kWh kost niets.",
     geen: "Je leverancier rekent geen terugleverkosten.",
   }[check?.kosten_vorm];
   return tekst ? `<p class="ob-noot">${tekst}</p>` : "";
+}
+
+/**
+ * De schaal van de terugleverkosten die eraan komt, met en zonder thuisbatterij (v0.137.0):
+ * `schaal` van `contract/check` (`_async_schaal` in coach.py). Leeg zonder schalen.
+ */
+export function schaalNoot(check) {
+  const s = check?.schaal;
+  if (!s?.rij) return "";
+  const getal = (n) => Math.round(Number(n) || 0).toLocaleString("nl-NL");
+  const vak = (r) => (r.tot ? `${getal(r.vanaf)} tot ${getal(r.tot)} kWh` : `vanaf ${getal(r.vanaf)} kWh`);
+  const d = new Date(`${s.tot}T00:00:00`);
+  const tot = Number.isNaN(d.getTime()) ? "het einde" : d.toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" });
+  const zinnen = [`Tot ${tot} naar verwachting ${getal(s.kwh)} kWh teruglevering: de schaal van ${vak(s.rij)}, € ${getal(s.rij.per_jaar)} per jaar.`];
+  const z = s.zonder_accu;
+  if (z?.rij && Number(s.accu_kwh) > 0) {
+    zinnen.push(`Zonder je thuisbatterij ${getal(z.kwh)} kWh: ${vak(z.rij)}, € ${getal(z.rij.per_jaar)} per jaar.`);
+  }
+  if (Number(s.kosten_per_kwh) > 0) {
+    zinnen.push(`Elke kWh die je minder teruglevert scheelt nu ${euro4(s.kosten_per_kwh)}, dus gebruikt de coach je zon liever zelf.`);
+  }
+  return `<p class="ob-noot">${zinnen.join(" ")}</p>`;
 }
 
 export function jaarNoot(check) {
@@ -190,6 +214,13 @@ export function opbouwHtml(check, namen = {}) {
   const w = woorden(namen);
   const delen = [];
 
+  if (check.soort === "pt") {
+    delen.push(ptBlok(check));
+    const zin = controleZin(check, namen);
+    delen.push(`<p class="ob-controle ${zin.toon}">${esc(zin.tekst)}</p>`);
+    return delen.join("");
+  }
+
   if (check.soort !== "dynamic") {
     const terug = check.terug;
     delen.push(`<div class="ob-blok"><h4>Stroom</h4>
@@ -197,6 +228,7 @@ export function opbouwHtml(check, namen = {}) {
       ${rij("", check.salderen && check.netto_terug !== true ? "Teruglevering (je saldeert: je inkoopprijs min de kosten)" : "Teruglevering (vergoeding min de kosten)", terug === null || terug === undefined ? "onbekend" : euro4(terug))}
       ${jaarNoot(check)}
       ${kostenNoot(check)}
+      ${schaalNoot(check)}
     </div>`);
     delen.push(naSalderenBlok(check.na_salderen));
   } else {
@@ -246,6 +278,7 @@ export function opbouwHtml(check, namen = {}) {
       delen.push(`<div class="ob-blok"><h4>Teruglevering nu</h4>${regels.join("")}
         ${jaarNoot(check)}
       ${kostenNoot(check)}
+      ${schaalNoot(check)}
         <p class="ob-noot">${t.vast ? "Het vaste bedrag uit je contract." : `Niet te controleren: ${esc(w.leverancier)} geeft de terugleverprijs niet door. Zo rekent de coach.`}</p>
         ${salderenNoot(check)}</div>`);
     } else {
@@ -258,6 +291,39 @@ export function opbouwHtml(check, namen = {}) {
   const zin = controleZin(check, namen);
   delen.push(`<p class="ob-controle ${zin.toon}">${esc(zin.tekst)}</p>`);
   return delen.join("");
+}
+
+/**
+ * Een Portugees contract (v0.137.0): per tijdvak de prijs zonder belastingen, de IEC en
+ * de IVA, en wat het samen kost. `pt` van `contract/check` (`tarifas.opbouw`).
+ */
+export function ptBlok(check) {
+  const p = check?.pt ?? {};
+  const procent = (n) => `${String(Number(n) || 0).replace(".", ",")}%`;
+  const regels = (p.periodos ?? []).map((r) => {
+    const nu = r.periodo === p.nu ? ", nu" : "";
+    const som = r.energia > 0 ? `${euro4(r.energia)} + IEC ${euro4(r.iec)}, plus ${procent(r.iva)} IVA` : "niet ingevuld";
+    return rij("", `${esc(NAMEN[r.periodo] ?? r.periodo)}${nu}: ${som}`, r.all_in === null || r.all_in === undefined ? "onbekend" : euro4(r.all_in), r.periodo === p.nu ? "ob-totaal" : "");
+  });
+  const tijden = p.tarifa === "simples" ? ""
+    : p.ciclo === "semanal"
+      ? "Daluren doordeweeks van 00:00 tot 07:00, op zaterdag het grootste deel van de dag en op zondag de hele dag, in de tijd van Portugal."
+      : "Daluren elke dag van 22:00 tot 08:00, in de tijd van Portugal.";
+  const terug = {
+    onbekend: "Teruglevering: nog niet ingevuld, dus weet de coach niet wat het opbrengt. In Portugal is er geen salderen.",
+    nenhum: "Teruglevering: niet verkocht, dus niets. In Portugal is er geen salderen.",
+    fixo: `Teruglevering: ${euro4(check.terug)} per kWh, uit je verkoopcontract. In Portugal is er geen salderen.`,
+    omie: "Teruglevering: een deel van de OMIE-prijs van dat moment. In Portugal is er geen salderen.",
+  }[p.excedente] ?? "";
+  const vast = [];
+  if (Number(p.potencia_dia) > 0) vast.push(`potência ${euro4(p.potencia_dia)} per dag${Number(p.kva) > 0 ? ` (${String(p.kva).replace(".", ",")} kVA)` : ""}`);
+  if (Number(p.servicos_mes) > 0) vast.push(`diensten € ${Number(p.servicos_mes).toLocaleString("nl-NL", { minimumFractionDigits: 2 })} per maand`);
+  return `<div class="ob-blok"><h4>Stroom in Portugal${p.fornecedor ? `, ${esc(p.fornecedor)}` : ""}</h4>
+    ${regels.join("")}
+    ${tijden ? `<p class="ob-noot">${tijden}</p>` : ""}
+    ${terug ? `<p class="ob-noot">${terug}</p>` : ""}
+    ${vast.length ? `<p class="ob-noot">Vaste kosten, zonder IVA en niet in de sturing: ${vast.join(", ")}.</p>` : ""}
+  </div>`;
 }
 
 /** Wie bevestigde en wanneer, of dat het nog moet. */
