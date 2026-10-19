@@ -24,7 +24,7 @@
  */
 
 import { DacElement, define } from "./base.js";
-import { level, levelTone } from "./format.js";
+import { level, levelTone, prijsGrenzen } from "./format.js";
 
 const UUR = 3600000;
 
@@ -234,7 +234,8 @@ export function vooruitSvg(uren, { ids, soorten, zichtbaar, drempels, gekozen, k
     }
   });
 
-  // De prijs.
+  // De prijs, in de kleuren van Voorkeuren: vast, of naar de bekende prijzen (v0.133.1).
+  const grens = prijsGrenzen(drempels, uren.map((u) => ({ start: u.start, price: u.prijs })));
   if (zichtbaar.prijs) {
     const bereik = s.prijsMax - s.prijsMin;
     const nul = PRIJS_H * (s.prijsMax / bereik);
@@ -242,7 +243,7 @@ export function vooruitSvg(uren, { ids, soorten, zichtbaar, drempels, gekozen, k
       if (u.prijs === null) return;
       const h = Math.max(1.5, (Math.abs(u.prijs) / bereik) * PRIJS_H);
       const y = u.prijs >= 0 ? nul - h : nul;
-      delen.push(`<rect class="prijs" x="${i * kolom + 3}" y="${y.toFixed(1)}" width="${kolom - 6}" height="${h.toFixed(1)}" rx="2" fill="${levelTone(level(u.prijs, drempels, true))}"/>`);
+      delen.push(`<rect class="prijs" x="${i * kolom + 3}" y="${y.toFixed(1)}" width="${kolom - 6}" height="${h.toFixed(1)}" rx="2" fill="${levelTone(level(u.prijs, grens(u.start), true))}"/>`);
     });
   }
 
@@ -485,7 +486,8 @@ export class DacVooruitblik extends DacElement {
     const regels = momentRegels(uur, { ids, labels: this.labels_, soorten: this.soorten_, zichtbaar });
     this.$("#moment").innerHTML = `
       <div class="kop"><span class="wanneer">${morgen}${twee(uur.start.getHours())}:00 tot ${twee(uur.end.getHours())}:00</span>
-        <span class="prijs"${uur.prijs === null ? "" : ` style="color:${levelTone(level(uur.prijs, this.drempels_, true))}"`}>${prijs}</span></div>
+        <span class="prijs"${uur.prijs === null ? "" : ` style="color:${levelTone(level(uur.prijs,
+          prijsGrenzen(this.drempels_, uren.map((u) => ({ start: u.start, price: u.prijs })))(uur.start), true))}"`}>${prijs}</span></div>
       ${regels.length ? `<ul>${regels.map((r) => `<li><i style="background:${r.kleur}"></i><span>${esc(r.tekst)}</span></li>`).join("")}</ul>` : ""}`;
 
     // De grafiek; waar je naartoe veegde blijft staan.

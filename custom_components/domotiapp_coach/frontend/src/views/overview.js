@@ -65,6 +65,7 @@ import {
   power,
   powerText,
   price as fmtPrice,
+  prijsGrenzen,
   signedPower,
   zonderMinNul,
 } from "../format.js";
@@ -1180,6 +1181,8 @@ class DacViewOverview extends DacElement {
     // reaches the tablet in the hall without a reload.
     this.applyLayout_();
     this.tick_();
+    // De kleuren van Voorkeuren en de namen van de apparaten (v0.133.1).
+    this.paintVooruit_();
   }
 
   render() {
@@ -1657,7 +1660,10 @@ class DacViewOverview extends DacElement {
       series: this.source_.series("selfUse"),
     });
 
-    const priceLevel = level(r.price, thresholds.price, true);
+    // Met de kleuren naar de bekende prijzen (v0.133.1) de grenzen uit de
+    // prijzen die er van nu af zijn; anders die van Voorkeuren.
+    const prijsGrens = prijsGrenzen(thresholds.price, priceForecast(this.feed_, this.settings_?.contract))(new Date());
+    const priceLevel = level(r.price, prijsGrens, true);
     this.tiles_.price.update({
       tone: levelTone(priceLevel),
       icon: "euro",
@@ -1709,7 +1715,7 @@ class DacViewOverview extends DacElement {
     this.flow_.update(r);
     this.updateLegend_();
     this.updateCoach_(
-      advise(r, thresholds, configured, alertAt, this.steeringNow_(), this.settings_?.devices, this.batterijNu_())
+      advise(r, { ...thresholds, price: prijsGrens }, configured, alertAt, this.steeringNow_(), this.settings_?.devices, this.batterijNu_())
     );
   }
 

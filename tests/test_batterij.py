@@ -5,6 +5,7 @@ verdient en het rendement uit de tellers. De getallen komen waar het kan uit
 de eerste woning, gemeten op 21-09-2026.
 """
 
+import dataclasses
 import datetime as dt
 import random
 import sys
@@ -1157,6 +1158,42 @@ controle("met 0,30 kost hij wat het terugleveren had opgebracht: 0,5 kWh maal 0,
 controle("een kwartier zonder netmeting telt niet", abs(nieuw44[dag44]["earned"] - (0.15 - 0.15)) < 1e-9)
 controle("de zon die erin ging telt mee voor Historie", nieuw44[dag44]["solar"] != 0.0, f"{nieuw44}")
 controle("en de voorraad komt eruit", voorraad44 is not None)
+
+print()
+print("=== 45. Het plan houdt de nacht vast, net als het besluit (v0.133.1) ===")
+# De bewoner van de eerste woning op 20-10-2026, met de nachtstrategie aan, een volle
+# batterij en de prijzen tot middernacht: "Ondanks dat handelen aan staat, zou ik
+# verwachten dat ie om 19u nog zo'n 20 a 30% over heeft om de nacht door te komen."
+# Het plan liet de batterij om 23:00 op 5% staan; het besluit van het moment stopte wel
+# op tijd. Nagebouwd: de prijzen van die dag ongeveer, terugleveren tegen de
+# inkoopprijs (salderen), het huis 0,35 kWh per uur.
+D45 = dt.datetime(2026, 10, 20)
+P45 = [0.36, 0.35, 0.35, 0.35, 0.36, 0.38, 0.40, 0.44, 0.469, 0.45, 0.42, 0.40, 0.38, 0.38, 0.39, 0.40,
+       0.42, 0.45, 0.469, 0.45, 0.44, 0.43, 0.43, 0.43]
+L45 = [{"start": D45 + dt.timedelta(hours=i), "end": D45 + dt.timedelta(hours=i + 1), "price": p, "feed_in": p}
+       for i, p in enumerate(P45)]
+Z45 = {9: 0.6, 10: 1.6, 11: 2.4, 12: 3.0, 13: 3.3, 14: 2.8, 15: 1.8, 16: 1.0, 17: 0.4}
+V45 = verwachting(Z45, huis=0.35, dag=D45)
+A45 = anker(95.0, rte=0.74, handelen=True, zelf_nul=True)
+plan45 = plan_batterij(D45.replace(hour=8, minute=56), L45, Tariff(), V45, A45)
+soc45 = {u.start.hour: round(u.soc) for u in plan45.uren}
+print(f"  accustand in het plan: 17:00 {soc45.get(17)}%, 19:00 {soc45.get(19)}%, 23:00 {soc45.get(23)}%")
+controle("hij handelt op de dure avond", any(u.stand == HANDELEN for u in plan45.uren if 17 <= u.start.hour <= 19),
+         f"{[(u.start.hour, u.stand) for u in plan45.uren]}")
+nacht45 = bat._nacht_nodig(D45 + dt.timedelta(hours=24), V45, A45)
+controle("en om middernacht zit er nog genoeg in tot morgenvroeg",
+         plan45.uren[-1].soc / 100 * 14.6 >= 0.05 * 14.6 + nacht45 - 0.15,
+         f"{plan45.uren[-1].soc:.0f}% tegen {(0.05 * 14.6 + nacht45) / 14.6 * 100:.0f}% nodig")
+controle("na het handelen geen handelen meer: de rest is voor het huis",
+         all(u.stand != HANDELEN for u in plan45.uren if u.start.hour >= 20), f"{[(u.start.hour, u.stand) for u in plan45.uren]}")
+# Het besluit van het moment en het plan zeggen hetzelfde: op 40% om 18:05 geen handelen meer.
+nu45 = plan_batterij(D45.replace(hour=18, minute=5), L45, Tariff(), V45, dataclasses.replace(A45, soc=40.0))
+controle("op 40% om 18:05 levert hij niet meer aan het net", nu45.stand != HANDELEN, nu45.stand)
+controle("en ook zijn plan niet", all(u.stand != HANDELEN for u in nu45.uren), f"{[(u.start.hour, u.stand) for u in nu45.uren]}")
+# Zonder nachtstrategie mag de som alles verkopen, zoals voorheen.
+vrij45 = plan_batterij(D45.replace(hour=8, minute=56), L45, Tariff(), V45, dataclasses.replace(A45, nacht=False))
+controle("zonder nachtstrategie mag hij verder leeg", vrij45.uren[-1].soc < plan45.uren[-1].soc - 5,
+         f"{vrij45.uren[-1].soc:.0f}% tegen {plan45.uren[-1].soc:.0f}%")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

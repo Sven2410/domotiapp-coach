@@ -1013,6 +1013,30 @@ scheelt dat ongeveer 2 cent per kWh; met de Zonnebonus van die leverancier erbij
 de kale prijs overdag, die de coach niet kent) ongeveer niets. Handelen tegen eigen zon
 levert bij salderen weinig op: een teruggeleverde kWh is dan bijna de inkoopprijs waard.
 
+## Het plan houdt de nacht vast (v0.133.1)
+
+De bewoner van de eerste woning op 20-10-2026, bij de vooruitblik, met de nachtstrategie aan,
+een volle batterij en de prijzen tot middernacht: "Ondanks dat handelen aan staat (volle bak
+vandaag!), zou ik verwachten dat ie om 19u nog zo'n 20 a 30% over heeft om de nacht door te
+komen." Het plan liet hem om 17:00 tot 21:00 handelen en om 23:00 op 5% staan.
+
+Het besluit van het moment hield zich al aan de nacht: handelen alleen zolang er morgenvroeg
+nog iets over is (`balans_kwh` in `plan_batterij`, sinds 22-09-2026). De som niet. Die gaf
+wat er aan het eind van de bekende prijzen nog in zat de gemiddelde prijs als waarde, en een
+kWh die om 18:00 € 0,469 opbrengt is dan meer waard dan een die om middernacht blijft zitten.
+Dus verkocht de som alles, en dat stond in het uurplan en in de vooruitblik. Nagebouwd met de
+prijzen van die dag: in het plan 5% om 23:00, terwijl het besluit om 18:05 op 40% al nul op de
+meter deed ("morgenvroeg 0,74 kWh tekort").
+
+Nu heeft de som dezelfde grens. Per blok de inhoud waaronder hij aan het eind niet aan het
+net levert (`_nacht_vloer`): de ondergrens plus wat er nodig is tot morgenvroeg 07:00
+(`_nacht_nodig`, dezelfde som als `nachtverloop` maar achterstevoren, met de zon die
+onderweg nog komt). Het huis voeden mag eronder; handelen niet (`vloer` in `_mogelijk`).
+Zonder nachtstrategie of zonder handelen verandert er niets. Met de prijzen van die dag zegt
+het plan nu: handelen van 17:00 tot 19:00 tot 41%, daarna nul op de meter, 29% om 23:00.
+Proef 45 in test_batterij.py. In het virtuele huis levert `batterij-handelen` daardoor € 1,01 op
+in plaats van € 1,33: de prijs van de nacht vasthouden op een avond van tachtig cent.
+
 ## De optimizer in het virtuele huis (v0.132.0)
 
 De bewoner van de eerste woning stuurde op 18-10-2026 het plan van de optimizer van evcc
@@ -1038,7 +1062,7 @@ Gemeten op 19-10-2026, 36 scenario's met een batterij (coach, optimizer, zonder 
 | batterij-volle-beurt | € 3,12 | € 2,73 | € 0,40 (de volle beurt, bewust) |
 | batterij-dynamisch-zon-zelf | € -0,54 | € -0,93 | € 0,38 |
 | batterij-kwartier-voorloper | € 2,91 | € 2,53 | € 0,38 |
-| batterij-handelen | € -1,33 | € -1,62 | € 0,28 |
+| batterij-handelen | € -1,01 | € -1,30 | € 0,29 (sinds v0.133.1; met de nacht in de som, daarvoor € -1,33 tegen € -1,62) |
 | planning-auto-eerst | € 10,88 | € 10,67 | € 0,20 |
 | batterij-dynamisch-zon | € -1,01 | € -1,16 | € 0,15 |
 | batterij-rendement-onbekend | € 1,29 | € 1,14 | € 0,15 (de coach kent het rendement niet) |

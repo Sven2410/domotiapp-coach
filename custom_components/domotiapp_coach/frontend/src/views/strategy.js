@@ -210,7 +210,7 @@ class DacViewStrategy extends DacEditorElement {
             </div>
             <div class="row">
               <label>Energieprijs (€ per kWh)</label>
-              <div class="two">
+              <div class="two" id="prijs-grenzen">
                 <div class="row">
                   <span class="sub">Tot deze prijs groen</span>
                   <input type="number" id="price-low" data-drempel="price.low" min="0" max="10" step="0.01" inputmode="decimal">
@@ -221,6 +221,14 @@ class DacViewStrategy extends DacEditorElement {
                 </div>
               </div>
             </div>
+            <!-- De kleuren naar de bekende prijzen (v0.133.1). -->
+            <label class="check" for="prijs-relatief">
+              <input type="checkbox" id="prijs-relatief">
+              <span>
+                <strong>Prijskleuren naar de bekende prijzen</strong>
+                Het goedkoopste derde van alle prijzen die bekend zijn groen en het duurste derde rood, wat de prijzen ook zijn. Dan zie je meteen de beste uren, ook op een dure dag. Komen rond 14:00 de prijzen van morgen erbij, dan kunnen de kleuren verschuiven.
+              </span>
+            </label>
             <!-- Historie (v0.132.0): het jaar kan met het contract meelopen. -->
             <div class="row">
               <label for="jaar-start">Het jaar in Historie begint in</label>
@@ -274,6 +282,9 @@ class DacViewStrategy extends DacEditorElement {
     this.$("#phases-overview").addEventListener("change", (event) => {
       this.weergave_({ phases_on_overview: event.target.checked });
     });
+    this.$("#prijs-relatief").addEventListener("change", (event) => {
+      this.weergave_({ thresholds: { price: { relative: event.target.checked } } });
+    });
     this.$("#jaar-start").addEventListener("change", (event) => {
       this.weergave_({ year_start_month: Number(event.target.value) });
     });
@@ -317,6 +328,10 @@ class DacViewStrategy extends DacEditorElement {
     }
     this.$("#phases-overview").checked = Boolean(d?.sources?.phases_on_overview);
     this.$("#jaar-start").value = String(d?.history?.year_start_month ?? 1);
+    const relatief = Boolean(d?.thresholds?.price?.relative);
+    this.$("#prijs-relatief").checked = relatief;
+    // Naar de dag tellen de vaste grenzen voor de prijs niet.
+    this.$("#prijs-grenzen").style.display = relatief ? "none" : "";
     // Alleen waar de fasen ook gemeten worden; anders is er geen kaart te tonen.
     const rij = this.$("#phases-overview-row");
     rij.hidden = !d?.sources?.phases_enabled;

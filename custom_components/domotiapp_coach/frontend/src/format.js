@@ -284,6 +284,50 @@ export function level(value, bounds, lowIsGood) {
   return value < high ? "warn" : "good";
 }
 
+/**
+ * De grenzen waarmee een prijs zijn kleur krijgt (v0.133.1).
+ *
+ * Vast zijn het die van Voorkeuren. Met `relative` aan schalen ze mee met alle
+ * prijzen die bekend zijn, van het lopende uur af: het goedkoopste derde van
+ * het verschil tussen de goedkoopste en de duurste is groen, het duurste derde
+ * rood. De bewoner van de eerste woning op 20-10-2026: "elke app kiest ervoor om
+ * de kleurstelling van de kolommen aan te passen, relatief gezien naar de spread
+ * op de dag", "Als je namelijk móet laden (ev) wil je dat op het goedkoopste
+ * moment doen", en "Worden de nieuwe prijzen om 14u bekend, dan past ie zijn
+ * kleurstelling aan. Het kán dan zo zijn dat een kolom die om 13.59 nog groen
+ * was, rood wordt, omdat de prijzen morgen veel lager zijn." Een uur dat voorbij
+ * is telt niet mee: daar valt niets meer te kiezen. Zonder bekende prijzen
+ * gelden de vaste grenzen.
+ *
+ * Een functie per moment, zodat wie hem gebruikt niet hoeft te weten welke van
+ * de twee het is.
+ *
+ * @param {{low:number, high:number, relative?:boolean}} bounds
+ * @param {Array<{start: Date|string, end?: Date|string, price: number|null}>} rijen
+ * @param {Date} [nu]
+ * @returns {(moment?: Date|string) => {low:number, high:number}}
+ */
+export function prijsGrenzen(bounds, rijen, nu = new Date()) {
+  const vast = { low: Number(bounds?.low ?? 0.2), high: Number(bounds?.high ?? 0.3) };
+  if (!bounds?.relative) return () => vast;
+  const uur = new Date(nu);
+  uur.setMinutes(0, 0, 0);
+  let laag = Infinity;
+  let hoog = -Infinity;
+  for (const rij of rijen ?? []) {
+    const prijs = Number(rij?.price);
+    if (rij?.price === null || rij?.price === undefined || !Number.isFinite(prijs)) continue;
+    const eind = rij.end !== undefined ? new Date(rij.end) : null;
+    if ((eind && eind <= uur) || (!eind && new Date(rij.start) < uur)) continue;
+    laag = Math.min(laag, prijs);
+    hoog = Math.max(hoog, prijs);
+  }
+  if (!Number.isFinite(laag)) return () => vast;
+  const derde = (hoog - laag) / 3;
+  const grens = { low: laag + derde, high: laag + 2 * derde };
+  return () => grens;
+}
+
 /** CSS variable for a status level. */
 export const levelTone = (name) =>
   ({
