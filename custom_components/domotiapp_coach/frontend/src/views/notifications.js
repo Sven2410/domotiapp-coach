@@ -42,6 +42,7 @@ import { DacElement, define } from "../base.js";
 import { volgCoach } from "../data-source.js";
 import { canAlwaysOn, deviceLabel, deviceLabelMap } from "../devices.js";
 import { icons } from "../icons.js";
+import { huisNu } from "../format.js";
 
 /**
  * Wanneer de meterstanden de volgende keer aan de beurt zijn, voor onder het
@@ -131,7 +132,7 @@ export function soortVan(item) {
 }
 
 /** "Vandaag", "Gisteren", of "vrijdag 4 september". */
-export function dagkop(moment, nu = new Date()) {
+export function dagkop(moment, nu = huisNu()) {
   const dag = new Date(moment.getFullYear(), moment.getMonth(), moment.getDate());
   const vandaag = new Date(nu.getFullYear(), nu.getMonth(), nu.getDate());
   const verschil = Math.round((vandaag - dag) / 86400000);
@@ -173,7 +174,7 @@ export function zeef(items, { soort = "alles", dag = "" } = {}) {
 export const GESCHIEDENIS_DAGEN = 14;
 
 /** Alleen wat binnen `GESCHIEDENIS_DAGEN` valt, gerekend vanaf middernacht. */
-export function recent(items, nu = new Date(), aantal = GESCHIEDENIS_DAGEN) {
+export function recent(items, nu = huisNu(), aantal = GESCHIEDENIS_DAGEN) {
   const grens = new Date(nu);
   grens.setHours(0, 0, 0, 0);
   grens.setDate(grens.getDate() - (aantal - 1));
@@ -184,7 +185,7 @@ export function recent(items, nu = new Date(), aantal = GESCHIEDENIS_DAGEN) {
 }
 
 /** De dagen die in de lijst voorkomen, de nieuwste eerst, voor de dagkeuze. */
-export function dagen(items, nu = new Date()) {
+export function dagen(items, nu = huisNu()) {
   const uit = [];
   const gezien = new Set();
   for (const item of items ?? []) {
@@ -203,7 +204,7 @@ export function dagen(items, nu = new Date()) {
  * melding zonder leesbaar tijdstip valt weg: liever een regel minder dan een
  * streepje in de tijdkolom.
  */
-export function groepeer(items, nu = new Date()) {
+export function groepeer(items, nu = huisNu()) {
   const groepen = [];
   for (const item of items ?? []) {
     const moment = new Date(item?.at ?? "");
@@ -227,7 +228,7 @@ export function groepeer(items, nu = new Date()) {
  * Wat er in de kop van de geschiedenis staat (v0.133.2): hoeveel er vandaag
  * was, en hoeveel daarvan kritiek.
  */
-export function geschiedenisStand(items, nu = new Date()) {
+export function geschiedenisStand(items, nu = huisNu()) {
   const vandaag = (items ?? []).filter((item) => {
     const moment = new Date(item?.at ?? "");
     return !Number.isNaN(moment.getTime()) && dagsleutel(moment) === dagsleutel(nu);

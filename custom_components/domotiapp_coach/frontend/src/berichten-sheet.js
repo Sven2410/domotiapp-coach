@@ -13,6 +13,7 @@
 
 import { DacElement, define } from "./base.js";
 import { icons } from "./icons.js";
+import { huisNu, huisTijd } from "./format.js";
 import { sheetCss } from "./theme.js";
 
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -21,8 +22,8 @@ const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;"
 export const ongelezen = (items) => (items ?? []).filter((b) => b && !b.read).length;
 
 /** "vandaag 08:00", "gisteren", of "12 oktober". */
-export function wanneerTekst(iso, nu = new Date()) {
-  const d = new Date(iso);
+export function wanneerTekst(iso, nu = huisNu()) {
+  const d = huisTijd(iso);
   if (Number.isNaN(d.getTime())) return "";
   const dag = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const verschil = Math.round((dag(nu) - dag(d)) / 86400000);
@@ -38,7 +39,7 @@ export function wanneerTekst(iso, nu = new Date()) {
 const NAAR = { prijs: { id: "contract", tekst: "Bekijk je energieprijs" } };
 
 /** De lijst als html: nieuwste bovenaan, ongelezen met een knop "Gelezen". */
-export function berichtenHtml(items, nu = new Date()) {
+export function berichtenHtml(items, nu = huisNu()) {
   const lijst = [...(items ?? [])].sort((a, b) => String(b.at).localeCompare(String(a.at)));
   if (!lijst.length) return `<p class="leeg">Geen berichten. Als je iets moet doen, zoals je meterstanden doorgeven, staat het hier.</p>`;
   return lijst.map((b) => `

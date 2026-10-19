@@ -17,7 +17,7 @@
  */
 
 import { brandFields, canAlwaysOn, carsFor, programOf, valueLabel } from "./devices.js";
-import { countdown, duration, toKwh, toWatts } from "./format.js";
+import { countdown, duration, huisNu, huisTijd, toKwh, toWatts } from "./format.js";
 import { ptPrijsOp } from "./tarifas.js";
 
 const PHASES = ["l1", "l2", "l3"];
@@ -205,8 +205,8 @@ export async function laadCoachPrijzen(hass, nu = Date.now()) {
       bevestigd: antwoord?.bevestigd,
       rows: (antwoord?.rows ?? [])
         .map((rij) => ({
-          start: new Date(rij.start),
-          end: new Date(rij.end),
+          start: huisTijd(rij.start),
+          end: huisTijd(rij.end),
           price: Number(rij.price),
           feedIn: rij.feed_in === null || rij.feed_in === undefined ? null : Number(rij.feed_in),
         }))
@@ -289,8 +289,9 @@ function readSchedule(attributes) {
   const rows = [];
 
   const push = (start, end, value) => {
-    const from = start instanceof Date ? start : new Date(start);
-    const till = end === null || end === undefined ? null : new Date(end);
+    // Op de klok van het huis, net als de lijst van de coach (v0.138.1).
+    const from = huisTijd(start);
+    const till = end === null || end === undefined ? null : huisTijd(end);
     const number = Number(value);
     if (Number.isNaN(from.getTime()) || !Number.isFinite(number)) return;
     rows.push({ start: from, end: till && !Number.isNaN(till.getTime()) ? till : null, value: number });
@@ -322,7 +323,7 @@ function readSchedule(attributes) {
   // Bare hourly numbers carry no timestamps of their own: they are 24 values
   // starting at local midnight, and tomorrow's list follows on from today's.
   if (!rows.length) {
-    const midnight = new Date();
+    const midnight = huisNu();
     midnight.setHours(0, 0, 0, 0);
     const bare = [...list(attributes?.today), ...list(attributes?.tomorrow)];
     bare.forEach((value, index) => {
@@ -383,7 +384,7 @@ export function priceForecast(feed, contract) {
 }
 
 /** The entry covering a moment, or undefined when the forecast does not reach it. */
-export const priceAt = (forecast, when = new Date()) =>
+export const priceAt = (forecast, when = huisNu()) =>
   forecast.find((row) => when >= row.start && when < row.end);
 
 /**
@@ -506,7 +507,8 @@ export function tariff(feed, contract) {
   }
 
   const mean = (rows) => {
-    const today = rows.filter((row) => row.start.toDateString() === new Date().toDateString());
+    const vandaag = huisNu().toDateString();
+    const today = rows.filter((row) => row.start.toDateString() === vandaag);
     const used = today.length ? today : rows;
     return used.length ? used.reduce((total, row) => total + row.price, 0) / used.length : null;
   };

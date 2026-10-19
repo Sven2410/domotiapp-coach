@@ -5340,9 +5340,73 @@ proef("Portugal op het overzicht en op Contract: de prijs van nu, de grafiek, ga
   assert.deepEqual(stuk, { contract: { type: "fixed" }, sources: { meters: { gas_enabled: true, water_enabled: false } } },
     "alleen de twee vinkjes, zodat opslaan de sensoren van Installatie niet terugzet");
 
-  // Meldingen: de herinnering voor de meterstanden niet in Portugal.
+  // Meldingen: de herinnering voor de meterstanden niet in Portugal (hieronder verder).
   const meld = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/notifications.js", import.meta.url), "utf8");
   assert.ok(meld.includes(`this.$('details.groep[data-groep="herinnering"]').hidden = this.settings_?.contract?.country === "PT";`));
+});
+
+// Gemeten op 19-10-2026 bij de woning in Portugal, vanaf een pc op Nederlandse tijd: de
+// vooruitblik zei "15:00 tot 16:00", de prijsgrafiek eronder "Nu 16:45 tot 17:00". De
+// eigenaar: "bouw inderdaad een reparatie voor een installatie niet in NL".
+proef("de klok van het huis: nu in de tijd van Home Assistant, niet van de browser (v0.138.1)", async () => {
+  const f = await import("../custom_components/domotiapp_coach/frontend/src/format.js");
+  const ds = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
+  const MOMENT = new Date(Date.UTC(2026, 9, 19, 14, 57));
+  try {
+    // Lissabon is op 19-10-2026 UTC+1, wat de tijdzone van deze machine ook is.
+    f.zetHuisZone("Europe/Lisbon");
+    const h = f.alsHuis(MOMENT);
+    assert.deepEqual([h.getFullYear(), h.getMonth(), h.getDate(), h.getHours(), h.getMinutes()], [2026, 9, 19, 15, 57]);
+    // Een dag verder aan de andere kant van de wereld.
+    f.zetHuisZone("Pacific/Kiritimati");
+    const k = f.alsHuis(MOMENT);
+    assert.deepEqual([k.getDate(), k.getHours()], [20, 4]);
+    // Een tijd met een tijdzone wordt omgerekend, een tijd van de coach (zonder) niet.
+    f.zetHuisZone("Europe/Lisbon");
+    assert.equal(f.huisTijd("2026-10-19T14:57:00Z").getHours(), 15);
+    assert.equal(f.huisTijd("2026-10-19T16:57:00+02:00").getHours(), 15);
+    const naief = f.huisTijd("2026-10-19T15:45:00");
+    assert.deepEqual([naief.getHours(), naief.getMinutes()], [15, 45]);
+    assert.equal(f.huisTijd(MOMENT.getTime()).getHours(), 15, "milliseconden zijn een echt moment");
+
+    // Nu: hetzelfde uur als de klok van het huis.
+    const deel = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Pacific/Kiritimati", hour: "2-digit", hourCycle: "h23" })
+      .formatToParts(new Date()).map((p) => [p.type, p.value]));
+    f.zetHuisZone("Pacific/Kiritimati");
+    assert.equal(f.huisNu().getHours(), Number(deel.hour));
+
+    // De prijs van nu uit de lijst van de coach: het kwartier van het huis.
+    const begin = f.huisNu();
+    begin.setMinutes(begin.getMinutes() - (begin.getMinutes() % 15), 0, 0);
+    const rijen = [0, 1, 2].map((i) => ({ start: new Date(begin.getTime() + i * 900000), end: new Date(begin.getTime() + (i + 1) * 900000), price: 0.1 + i }));
+    assert.equal(ds.priceAt(rijen).price, 0.1, "het kwartier van nu op de klok van het huis");
+    // Laag 0,1 en hoog 2,1: zonder het kwartier van nu zou de grens bij 1,1 beginnen.
+    assert.ok(Math.abs(f.prijsGrenzen({ low: 0.2, high: 0.3, relative: true }, rijen)().low - (0.1 + 2 / 3)) < 1e-9, "het kwartier van nu telt mee");
+
+    // Een prijssensor met tijdzone (Nord Pool) komt op dezelfde klok.
+    f.zetHuisZone("Europe/Lisbon");
+    const feed = { get: () => ({ state: "0.25", attributes: { raw_today: [{ start: "2026-10-19T14:00:00+00:00", end: "2026-10-19T15:00:00+00:00", value: 0.25 }] } }) };
+    const rij = ds.priceForecast(feed, { type: "dynamic", dynamic: { source: "all_in", all_in_entity: "sensor.p" } })[0];
+    assert.deepEqual([rij.start.getHours(), rij.end.getHours()], [15, 16]);
+
+    // Een tijdzone die niet bestaat, of geen: de klok van de browser.
+    f.zetHuisZone("Nergens/Niets");
+    assert.ok(Math.abs(f.huisNu() - new Date()) < 2000);
+    f.zetHuisZone(null);
+    assert.ok(Math.abs(f.huisNu() - new Date()) < 2000);
+  } finally {
+    f.zetHuisZone(null);
+  }
+
+  // Het paneel zet de tijdzone, en de plekken die "nu" naast een tijd van de coach leggen
+  // gebruiken de klok van het huis.
+  const lees = (pad) => readFileSync(new URL(`../custom_components/domotiapp_coach/frontend/${pad}`, import.meta.url), "utf8");
+  assert.ok(lees("domotiapp-coach-panel.js").includes("zetHuisZone(value?.config?.time_zone);"));
+  for (const pad of ["src/components/price-chart.js", "src/plan-ahead-sheet.js", "src/tijdlijn.js", "src/views/notifications.js",
+    "src/berichten-sheet.js", "src/schedule-sheet.js", "src/vooruitblik.js"]) {
+    assert.ok(!/nu = new Date\(\)|now_ = new Date\(\)|from = new Date\(\)|new Date\(\)\.getDate\(\)/.test(lees(pad)), pad);
+  }
+  assert.ok(lees("src/views/overview.js").includes("Math.round((huisNu().getTime() - toen) / 60000)"), "De coach heeft N minuten niets beslist");
 });
 
 for (const [naam, fn] of proeven) {

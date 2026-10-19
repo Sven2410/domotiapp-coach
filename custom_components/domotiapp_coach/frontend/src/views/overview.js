@@ -59,6 +59,8 @@ import {
 } from "../layout.js";
 import {
   clock,
+  huisNu,
+  huisTijd,
   level,
   levelTone,
   metHoofdletter,
@@ -92,9 +94,11 @@ const COACH_SILENT_MINUTES = 10;
 /** Hoe lang geleden een beslissing genomen is, in hele minuten. */
 function minutenGeleden(stempel) {
   if (!stempel) return null;
-  const toen = new Date(stempel).getTime();
+  // Beide op de klok van het huis (v0.138.1); anders stond een uur tijdsverschil hier
+  // als "De coach heeft 60 minuten niets beslist".
+  const toen = huisTijd(stempel).getTime();
   if (Number.isNaN(toen)) return null;
-  return Math.max(0, Math.round((Date.now() - toen) / 60000));
+  return Math.max(0, Math.round((huisNu().getTime() - toen) / 60000));
 }
 
 /** Tot welke accustand "Nu leegladen" gaat: het getal in het veld, tussen 5 en 95. */
@@ -2490,7 +2494,7 @@ class DacViewOverview extends DacElement {
     this.$("#price-chart").update({ forecast, thresholds: this.priceBounds_ });
 
     const last = forecast[forecast.length - 1]?.end;
-    const tomorrow = new Date();
+    const tomorrow = huisNu();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(23, 0, 0, 0);
 

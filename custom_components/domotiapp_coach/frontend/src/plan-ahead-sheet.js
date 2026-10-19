@@ -49,6 +49,7 @@ export function paalPerUur(blokken = []) {
 }
 import { DacElement, define } from "./base.js";
 import { coachRijen } from "./data-source.js";
+import { huisNu } from "./format.js";
 import { icons } from "./icons.js";
 import { sheetCss } from "./theme.js";
 
@@ -157,7 +158,7 @@ const wanneer = (iso) => {
   if (!iso) return "–";
   const moment = new Date(iso);
   if (Number.isNaN(moment.getTime())) return "–";
-  const vandaag = new Date();
+  const vandaag = huisNu();
   const zelfde =
     moment.getFullYear() === vandaag.getFullYear() &&
     moment.getMonth() === vandaag.getMonth() &&
@@ -206,7 +207,7 @@ function welkeDag(d, nu) {
  *
  * @returns {{kop: Array, rijen: Array, woorden: object, uren: Array}|null}
  */
-export function apparaatVooruit(besluit, rijen, nu = new Date()) {
+export function apparaatVooruit(besluit, rijen, nu = huisNu()) {
   if (!besluit) return null;
   let vensters = [];
   let woorden;
@@ -464,7 +465,7 @@ export class DacPlanAheadSheet extends DacElement {
       "laden"
     );
 
-    const nu = Date.now();
+    const nu = huisNu().getTime();
     for (const blok of paalPerUur(plan.blocks ?? [])) {
       const rij = document.createElement("div");
       rij.className = "uur";
@@ -675,7 +676,7 @@ export class DacPlanAheadSheet extends DacElement {
     this.paintKop_(ander.kop);
     this.paintPrijs_(ander.rijen, ander.woorden);
     const uurlijst = this.$("#vooruit-uren");
-    const nu = Date.now();
+    const nu = huisNu().getTime();
     for (const uur of ander.uren) {
       const rij = document.createElement("div");
       rij.className = "uur laadt";
@@ -707,7 +708,7 @@ export class DacPlanAheadSheet extends DacElement {
       { groen: "Laden van het net", leveren: "Ontladen aan het net", wacht: "Nul op de meter", gemiddelde: false }
     );
     const uurlijst = this.$("#vooruit-uren");
-    const nu = Date.now();
+    const nu = huisNu().getTime();
     for (const uur of accu.uren) {
       const rij = document.createElement("div");
       rij.className = "uur accu";

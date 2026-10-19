@@ -22,7 +22,7 @@ import { icons } from "./icons.js";
 import { DEADLINE_ONLY_TYPES, PROGRAM_TYPES, canHaveDeadline, needsRelease, programOf, typeMeta } from "./devices.js";
 import { heeftVoorkeuren, voorkeurHtml, voorkeurWijziging, vulVoorkeuren } from "./voorkeur-velden.js";
 import { priceForecast } from "./data-source.js";
-import { clock, duration } from "./format.js";
+import { clock, duration, huisNu } from "./format.js";
 import { sheetCss } from "./theme.js";
 
 /** Maandag eerst, zoals een week hier opgeschreven wordt. */
@@ -178,7 +178,7 @@ export function planSummary(plan, modus = "") {
 }
 
 /** Het eerstvolgende moment dat de klok deze tijd aanwijst, vandaag of morgen. */
-function nextAt(time, from = new Date()) {
+function nextAt(time, from = huisNu()) {
   const [hours, minutes] = String(time).split(":").map(Number);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
   const at = new Date(from);
@@ -187,7 +187,7 @@ function nextAt(time, from = new Date()) {
   return at;
 }
 
-const sameDayAsToday = (date) => date.toDateString() === new Date().toDateString();
+const sameDayAsToday = (date) => date.toDateString() === huisNu().toDateString();
 
 const css = /* css */ `
   :host { display: contents; }
@@ -697,7 +697,7 @@ export class DacScheduleSheet extends DacElement {
     }
 
     const [hours, minutes] = doneBy.split(":").map(Number);
-    const start = new Date();
+    const start = huisNu();
     start.setHours(hours, minutes - program.minutes, 0, 0);
     hint.textContent = `${program.label} duurt ${program.measured ? "gemeten" : "ongeveer"} ${duration(program.minutes)}, dus starten moet uiterlijk om ${clock(start)}.`;
   }

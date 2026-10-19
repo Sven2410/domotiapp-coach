@@ -259,6 +259,9 @@ dan de andere in dezelfde uitgave.
   (`docs/contract.md`). Sinds v0.135.0 ook `kosten_per_kwh` en `schaal_per_jaar` tegenover
   `kostenPerKwh` en `schaalPerJaar`, en salderen per afrekenperiode: `async_afrekening` in coach.py
   levert wat `aandeelOp` en `schaalKosten` in geld.js voor Historie lezen.
+- **De klok van het huis** (v0.138.1): de coach schrijft zijn tijden zonder tijdzone, in de tijd van
+  Home Assistant. Leg ze in het paneel naast `huisNu()` uit format.js, niet naast `new Date()`, en zet
+  een tijd met tijdzone uit Home Assistant om met `huisTijd` (`docs/paneel.md`).
 - **De volgende keer meterstanden** (v0.130.0): `meterstand_volgende` in berichten.py en
   `volgendeMeterstand` in views/notifications.js (`docs/berichten.md`). In Portugal geen van
   beide (v0.138.0): `meterstand_bericht` met het land, en de groep Herinneringen weg.
@@ -343,7 +346,7 @@ python tests/test_coach.py       # 1349 op de bedrading, met een nagebouwde HA
 python tests/test_virtueel.py    # 2586 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 python tests/test_prijsopbouw.py # 53 op de prijsopbouw, de controle, zonsopkomst en Portugal
-node   tests/test_rapport.mjs    # 226 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 227 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

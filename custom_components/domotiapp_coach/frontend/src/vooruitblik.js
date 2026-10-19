@@ -24,7 +24,7 @@
  */
 
 import { DacElement, define } from "./base.js";
-import { level, levelTone, prijsGrenzen } from "./format.js";
+import { huisNu, level, levelTone, prijsGrenzen } from "./format.js";
 
 const UUR = 3600000;
 
@@ -486,7 +486,7 @@ export class DacVooruitblik extends DacElement {
 
     // Het gekozen uur.
     const uur = uren[Math.min(this.gekozen_, uren.length - 1)];
-    const morgen = uur.start.getDate() !== new Date().getDate() ? "morgen " : "";
+    const morgen = uur.start.getDate() !== huisNu().getDate() ? "morgen " : "";
     const prijs = uur.prijs === null ? "" : `€ ${getal(uur.prijs, 3)}`;
     const regels = momentRegels(uur, { ids, labels: this.labels_, soorten: this.soorten_, zichtbaar });
     this.$("#moment").innerHTML = `
