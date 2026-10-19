@@ -482,6 +482,12 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # afspraak met je leverancier en geen sensor. De regeling loopt af op
         # 1 januari 2027, dus dit vinkje gaat vanzelf uit de praktijk verdwijnen.
         "netting": False,
+        # Het begin van de afrekenperiode, als "2026-09-15", of leeg (v0.134.0).
+        # Salderen telt per jaarafrekening, ook over een nieuw contract heen, en
+        # pas wat er aan het eind van die periode meer terugging dan er werd
+        # afgenomen krijgt de vergoeding na saldering. Zie `_async_jaarsaldo`
+        # in coach.py.
+        "billing_start": "",
         # Eerdere stroomcontracten, voor wie van leverancier wisselde: de
         # historie rekent elke dag met de prijs die toen gold. Per contract van,
         # tot (leeg is nog lopend), de all-in stroomprijs en de
@@ -508,6 +514,11 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
             "all_in_price": 0.28,
             "feed_in_tariff": 0.07,
             "feed_in_costs": 0.0,
+            # Wat een vast contract vanaf 1 januari 2027 (`NETTING_ENDS`) zegt,
+            # als dat iets anders is (v0.134.0); None houdt het bedrag erboven.
+            # Zie `_teruglevering` in coach.py.
+            "feed_in_tariff_after": None,
+            "feed_in_costs_after": None,
         },
         "dynamic": {
             "source": DYNAMIC_ALL_IN,

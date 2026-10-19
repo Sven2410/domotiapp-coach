@@ -1451,6 +1451,24 @@ vast_kruimelzon = Scenario(
     batterij=Batterij(soc=10.0, eigen_nul=True, zelf_nul=True),
     begin="2026-09-07 14:55", kabel_erin="15:00", duur_uren=16, stap_seconden=15,
 )
+# Een vast contract dat over 1 januari 2027 heen loopt (v0.134.0). De eigenaar op
+# 19-10-2026: tot dan "Terugleververgoeding na saldering € 0,124000" met vaste
+# terugleverkosten per schaal, vanaf 1-1-2027 "€ 0,072100" en "Terugleverkosten
+# vanaf 1-1-2027 € 0,052756 per kWh". Op 4 januari 2027 saldeert niemand meer, ook
+# met het vinkje aan: de zon die de bus in gaat kost wat hij anders had opgebracht,
+# en dat is wat het contract voor na salderen zegt.
+vast_na_salderen = vast_zonnig.kopie(
+    naam="vast-na-salderen",
+    uitleg="vast contract, salderen aangevinkt, op 4 januari 2027: de terugleverprijs van na salderen",
+    contract="vast-salderen", vast_prijs=0.24171, vast_teruglevering=0.124, vast_terugleverkosten=0.0,
+    vast_teruglevering_na=0.0721, vast_terugleverkosten_na=0.052756,
+    begin="2027-01-04 06:55",
+)
+vast_na_salderen_leeg = vast_na_salderen.kopie(
+    naam="vast-na-salderen-leeg",
+    uitleg="hetzelfde zonder bedragen voor na salderen: dan de vergoeding en de kosten van ervoor",
+    vast_teruglevering_na=None, vast_terugleverkosten_na=None,
+)
 
 
 ALLE = [
@@ -1484,7 +1502,7 @@ ALLE = [
     *BATTERIJ,
     vast_zon_modus, bewolkt_zon_modus, half_zon_modus, dyn_continu,
     batterij_helpt_auto, batterij_helpt_auto_nacht, batterij_helpt_auto_zonder_nacht,
-    voorrang_auto_eerst, voorrang_accu_eerst, vast_kruimelzon,
+    voorrang_auto_eerst, voorrang_accu_eerst, vast_kruimelzon, vast_na_salderen, vast_na_salderen_leeg,
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,
 ]

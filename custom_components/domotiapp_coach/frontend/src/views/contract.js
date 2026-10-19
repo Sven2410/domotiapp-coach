@@ -32,7 +32,7 @@ import {
   saveBarHtml,
 } from "./editor-base.js";
 import "../components/entity-picker.js";
-import { salderen } from "../geld.js";
+import { SALDEREN_TOT, salderen } from "../geld.js";
 import { bevestigdZin, opbouwCss, opbouwHtml } from "../opbouw.js";
 import {
   SOORTEN,
@@ -175,15 +175,32 @@ class DacViewContract extends DacEditorElement {
                   <span class="sub">Inclusief energiebelasting, opslag en btw, zoals op je contract.</span>
                 </div>
                 <div class="row">
-                  <label for="fx-feedin">Terugleververgoeding (€ per kWh)</label>
+                  <label for="fx-feedin" id="fx-feedin-label">Terugleververgoeding (€ per kWh)</label>
                   <input type="number" id="fx-feedin" min="0" step="0.0001" inputmode="decimal">
                   <span class="sub">Wat je krijgt voor wat je teruglevert boven je eigen verbruik.</span>
                 </div>
               </div>
               <div class="row">
-                <label for="fx-feedcost">Terugleverkosten (€ per kWh)</label>
+                <label for="fx-feedcost" id="fx-feedcost-label">Terugleverkosten (€ per kWh)</label>
                 <input type="number" id="fx-feedcost" min="0" step="0.0001" inputmode="decimal">
-                <span class="sub" id="fx-feedcost-hint">Wat je leverancier per teruggeleverde kWh rekent. Een vast bedrag per maand (een staffel) hoort hier niet: dat verandert niet met wat je teruglevert.</span>
+                <span class="sub" id="fx-feedcost-hint">Wat je leverancier per teruggeleverde kWh rekent. Een vast bedrag per maand of per schaal (een staffel) hoort hier niet: dat verandert niet met elke kWh die je teruglevert.</span>
+              </div>
+              <!-- wat het contract na salderen zegt (v0.134.0) -->
+              <div id="fx-na">
+                <div class="row">
+                  <label>Vanaf 1 januari 2027</label>
+                  <span class="sub">Dan stopt salderen. Vul in wat je contract voor daarna zegt; leeg is hetzelfde als hierboven.</span>
+                </div>
+                <div class="two">
+                  <div class="row">
+                    <label for="fx-feedin-na">Terugleververgoeding (€ per kWh)</label>
+                    <input type="number" id="fx-feedin-na" min="0" step="0.0001" inputmode="decimal">
+                  </div>
+                  <div class="row">
+                    <label for="fx-feedcost-na">Terugleverkosten (€ per kWh)</label>
+                    <input type="number" id="fx-feedcost-na" min="0" step="0.0001" inputmode="decimal">
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -308,6 +325,11 @@ class DacViewContract extends DacEditorElement {
                 regeling loopt af op 1 januari 2027.
               </span>
             </label>
+            <div class="row" id="afreken-rij" data-installateur>
+              <label for="afreken-start">Je afrekenperiode begon op</label>
+              <input type="date" id="afreken-start">
+              <span class="sub">De dag na de einddatum op je laatste jaarafrekening. Salderen telt per afrekenperiode, ook over een nieuw contract heen. Wat je daarin meer teruglevert dan je afneemt krijgt de vergoeding.</span>
+            </div>
 
             <div class="row">
               <label>Zo komt je prijs tot stand</label>
@@ -428,6 +450,8 @@ class DacViewContract extends DacEditorElement {
       }
     };
     const getal = (v) => (v === "" ? 0 : Number(v) || 0);
+    // Leeg is iets anders dan nul: hetzelfde als ervoor (v0.134.0).
+    const leegOfGetal = (v) => (v === "" ? null : Number(v) || 0);
 
     bind("stroom-start", (v) => (c().start = v));
     bind("stroom-end", (v) => (c().end = v));
@@ -436,6 +460,9 @@ class DacViewContract extends DacEditorElement {
     bind("fx-price", (v) => (c().fixed.all_in_price = getal(v)));
     bind("fx-feedin", (v) => (c().fixed.feed_in_tariff = getal(v)));
     bind("fx-feedcost", (v) => (c().fixed.feed_in_costs = getal(v)));
+    bind("fx-feedin-na", (v) => (c().fixed.feed_in_tariff_after = leegOfGetal(v)));
+    bind("fx-feedcost-na", (v) => (c().fixed.feed_in_costs_after = leegOfGetal(v)));
+    bind("afreken-start", (v) => (c().billing_start = v));
     bind("dyn-tax", (v) => (c().dynamic.energy_tax = getal(v)));
     bind("dyn-markup", (v) => (c().dynamic.supplier_markup = getal(v)));
     bind("dyn-vat", (v) => (c().dynamic.vat_percent = getal(v)));
@@ -616,7 +643,9 @@ class DacViewContract extends DacEditorElement {
       contract.supplier = "";
       contract.start = dagTekst(nu);
       contract.end = "";
-      contract.fixed = { ...contract.fixed, all_in_price: 0, feed_in_tariff: 0, feed_in_costs: 0 };
+      // De afrekenperiode blijft: die loopt over een nieuw contract heen (v0.134.0).
+      contract.fixed = { ...contract.fixed, all_in_price: 0, feed_in_tariff: 0, feed_in_costs: 0,
+        feed_in_tariff_after: null, feed_in_costs_after: null };
       contract.dynamic = { ...contract.dynamic, supplier_markup: 0, feed_in_costs: 0, feed_in_bonus: 0,
         feed_in_bonus_percent: 0, bonus_daytime: false, feed_in_vat: false };
     } else if (bron === "gas") {
@@ -700,6 +729,9 @@ class DacViewContract extends DacEditorElement {
     this.$("#fx-price").value = contract.fixed.all_in_price || "";
     this.$("#fx-feedin").value = contract.fixed.feed_in_tariff || "";
     this.$("#fx-feedcost").value = contract.fixed.feed_in_costs || "";
+    this.$("#fx-feedin-na").value = contract.fixed.feed_in_tariff_after ?? "";
+    this.$("#fx-feedcost-na").value = contract.fixed.feed_in_costs_after ?? "";
+    this.$("#afreken-start").value = contract.billing_start || "";
     const d = contract.dynamic;
     this.$("#dyn-allin").value = d.source === "all_in" ? d.all_in_entity ?? "" : (d.all_in_entity ?? "");
     this.$("#dyn-market").value = d.market_entity ?? "";
@@ -745,6 +777,13 @@ class DacViewContract extends DacEditorElement {
     this.$("#fixed-fields").style.display = dynamic ? "none" : "";
     this.$("#dynamic-fields").style.display = dynamic ? "" : "none";
     this.$("#stroom-eind-rij").style.display = vast ? "" : "none";
+    // Twee terugleverprijzen als het contract over 1 januari 2027 heen loopt (v0.134.0).
+    const naSalderen = (!contract.start || contract.start < SALDEREN_TOT)
+      && (!vast || !contract.end || contract.end >= SALDEREN_TOT);
+    this.$("#fx-na").style.display = naSalderen ? "" : "none";
+    this.$("#fx-feedin-label").textContent = `Terugleververgoeding${naSalderen ? " tot 1 januari 2027" : ""} (€ per kWh)`;
+    this.$("#fx-feedcost-label").textContent = `Terugleverkosten${naSalderen ? " tot 1 januari 2027" : ""} (€ per kWh)`;
+    this.$("#afreken-rij").style.display = contract.netting && dagTekst(new Date()) < SALDEREN_TOT ? "" : "none";
     for (const button of this.$$("#dynamic-interval button")) {
       button.setAttribute("aria-pressed", String(button.dataset.interval === (d.interval ?? "hour")));
     }

@@ -206,7 +206,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de vriezer en de koelkast: uitlezen en melden (deur open, te warm, storing), niet sturen | `docs/vriezer.md` |
 | het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat, de vooruitblik op het overzicht en "Wat gaat hij doen" voor boiler en programma's | `docs/paneel.md` |
 | de berichtenbox (het belletje), de herinnering voor de meterstanden, het bericht dat een contract afloopt of dat de prijscontrole omslaat | `docs/berichten.md` |
-| het contract: de leverancierscatalogus, de prijsopbouw en de controle tegen de all-in sensor, "Ja, dit klopt", de kale marktprijs als reserve, gas en water per energiebron, vast/variabel/dynamisch, looptijden en "nieuw contract afgesloten" | `docs/contract.md` |
+| het contract: de leverancierscatalogus, de prijsopbouw en de controle tegen de all-in sensor, "Ja, dit klopt", de kale marktprijs als reserve, gas en water per energiebron, vast/variabel/dynamisch, looptijden en "nieuw contract afgesloten", teruglevering voor en na 1-1-2027 en salderen per afrekenperiode | `docs/contract.md` |
 
 ## Wat gelijk moet blijven
 
@@ -241,7 +241,11 @@ dan de andere in dezelfde uitgave.
 - **Salderen en de terugleverprijs**: `_salderen`, `_tariff`, `_prices` en
   `NETTING_ENDS` in coach.py en const.py tegenover `salderen`, `prijsOp` en
   `SALDEREN_TOT` in geld.js (`docs/eerste-woning.md`), en `terugleverBekend`
-  in geld.js, dat zegt of een batterij kan handelen (v0.128.2, `docs/batterij.md`).
+  in geld.js, dat zegt of een batterij kan handelen (v0.128.2, `docs/batterij.md`). Sinds
+  v0.134.0 saldeert de coach niet meer als het huis over de afrekenperiode netto teruglevert
+  (`_saldeert`, `_tarief`; Historie rekent nog met het vinkje), en heeft een vast contract
+  een vergoeding en kosten voor na 1-1-2027: `_teruglevering` in coach.py tegenover
+  `vasteTeruglevering` in geld.js (`docs/contract.md`).
 - **De zon in de thuisbatterij**: `zon_in_accu` in batterij.py (per dag in
   `solar_stored_days`) en de schatting `zonInAccu` in `huisMetAccu`
   (views/history.js) voor de uren daarvoor; `balans` in geld.js telt ze op
@@ -327,11 +331,11 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ```
 python tests/test_planner.py     # 518 controles op het denkwerk
 python tests/test_batterij.py    # 206 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1276 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2484 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 1297 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 2509 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 41 op de kwartieropslag
 python tests/test_prijsopbouw.py # 39 op de prijsopbouw, de controle en zonsopkomst
-node   tests/test_rapport.mjs    # 219 op het rapport en op het paneel
+node   tests/test_rapport.mjs    # 221 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```

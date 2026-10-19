@@ -526,6 +526,8 @@ _SETTINGS = _schema(
             {
                 vol.Optional("type"): vol.In([CONTRACT_FIXED, CONTRACT_VARIABLE, CONTRACT_DYNAMIC]),
                 vol.Optional("netting"): bool,
+                # Het begin van de afrekenperiode, voor salderen (v0.134.0).
+                vol.Optional("billing_start"): _DATUM,
                 # De leverancier uit de catalogus en de bevestiging (v0.129.0).
                 vol.Optional("supplier"): vol.All(str, vol.Length(max=60)),
                 vol.Optional("start"): _DATUM,
@@ -566,6 +568,10 @@ _SETTINGS = _schema(
                         vol.Optional("all_in_price"): _EURO,
                         vol.Optional("feed_in_tariff"): _EURO,
                         vol.Optional("feed_in_costs"): _EURO,
+                        # Vanaf 1 januari 2027, als het contract dan iets anders
+                        # zegt; None is hetzelfde als erboven (v0.134.0).
+                        vol.Optional("feed_in_tariff_after"): vol.Any(None, _EURO),
+                        vol.Optional("feed_in_costs_after"): vol.Any(None, _EURO),
                     }
                 ),
                 vol.Optional("dynamic"): _schema(

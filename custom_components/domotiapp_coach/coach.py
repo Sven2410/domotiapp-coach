@@ -550,6 +550,10 @@ STIL_AANBOD = timedelta(minutes=20)
 # vragen zou een databaselezing per minuut betekenen voor een getal dat niet
 # beweegt.
 HUIS_VERVERSEN = timedelta(hours=1)
+# De balans van de afrekenperiode (v0.134.0): wat er sinds het begin van de
+# jaarafrekening van het net kwam en wat er terugging, en wat er tot het einde
+# van salderen nog bij komt, eens per dag uit de statistiek van Home Assistant.
+JAARSALDO_VERVERSEN = timedelta(hours=24)
 ZON_VERVERSEN = timedelta(minutes=30)
 
 # Over hoeveel dagen het huisverbruik wordt gemeten. Een week vangt het verschil
@@ -773,6 +777,38 @@ def _moment(now: datetime | None = None) -> datetime:
     in het echt, en dat is het soort dat je maar één keer wilt hebben.
     """
     return dt_util.as_local(now or dt_util.utcnow()).replace(tzinfo=None)
+
+
+def _jaar_eerder(dag: date) -> date:
+    """Dezelfde dag een jaar eerder; 29 februari wordt 28 februari."""
+    try:
+        return dag.replace(year=dag.year - 1)
+    except ValueError:
+        return dag.replace(year=dag.year - 1, day=28)
+
+
+def _afrekenstart(waarde: Any, vandaag: date) -> date | None:
+    """Het begin van de afrekenperiode waar vandaag in valt (v0.134.0).
+
+    De klant vult de begindatum van zijn jaarafrekening in (`billing_start`).
+    Een jaarafrekening gaat over een jaar, dus een datum van langer geleden
+    schuift per jaar op: wie hem vorig jaar invulde hoeft hem niet bij te
+    werken. Leeg, onleesbaar of in de toekomst: onbekend.
+    """
+    try:
+        begin = date.fromisoformat(str(waarde or ""))
+    except ValueError:
+        return None
+    if begin > vandaag:
+        return None
+    while True:
+        try:
+            volgende = begin.replace(year=begin.year + 1)
+        except ValueError:
+            volgende = begin.replace(year=begin.year + 1, day=28)
+        if volgende > vandaag:
+            return begin
+        begin = volgende
 
 
 # Zonvoorspellers die een uurwaarde op het EIND van de periode zetten, per
@@ -1283,6 +1319,11 @@ class ChargerCoach:
         self._gewekt: dict[str, datetime] = {}
         self._kabel_erin: dict[str, bool] = {}
         self._huis_tot: datetime | None = None
+        # Wat er in de afrekenperiode van het net kwam en wat er terugging, en
+        # wat er tot het einde van salderen nog bij komt, in kWh (v0.134.0).
+        # Zie `_async_jaarsaldo`.
+        self._jaarsaldo: dict[str, Any] | None = None
+        self._jaarsaldo_tot: datetime | None = None
         self._zon_kwh: dict[datetime, float] = {}
         self._zon_geschat = True
         # Wat de zonverwachting per ronde beloofde en wat de meter gaf, als
@@ -2075,14 +2116,25 @@ class ChargerCoach:
         uit: dict[str, Any] = {
             "soort": contract.get("type") or "fixed",
             "salderen": self._salderen(contract, now),
+            # Levert het huis over het jaar meer terug dan het afneemt (v0.133.3)?
+            # Dan is een teruggeleverde kWh de vergoeding waard, ook met salderen.
+            "netto_terug": self._netto_terug(),
+            "jaar": dict(self._jaarsaldo) if self._jaarsaldo else None,
             "bevestigd": bool(bevestigd.get("values"))
             and bevestigd.get("values") == prijsopbouw.vingerafdruk(contract),
             "bevestigd_op": bevestigd.get("at") or None,
             "bevestigd_door": bevestigd.get("by") or None,
         }
         if contract.get("type") != "dynamic":
-            vast = self._tariff({"contract": contract})
-            uit.update(inkoop=vast.buy, terug=vast.feed_in, controle={"status": "vast"})
+            vast = self._tarief({"contract": contract}, now)
+            vergoeding, kosten = self._teruglevering(contract.get("fixed") or {}, now)
+            uit.update(inkoop=vast.buy, terug=vast.feed_in, vergoeding=vergoeding, kosten=kosten,
+                       controle={"status": "vast"})
+            # Wat er na salderen geldt, als het contract dan nog loopt (v0.134.0).
+            if moment.date() < NETTING_ENDS and (contract.get("end") or "9999-12-31") >= NETTING_ENDS.isoformat():
+                v2, k2 = self._teruglevering(contract.get("fixed") or {}, datetime.combine(NETTING_ENDS, time(0)))
+                uit["na_salderen"] = {"vanaf": NETTING_ENDS.isoformat(), "vergoeding": v2, "kosten": k2,
+                                      "terug": round(v2 - k2, 6)}
             return uit
 
         d = contract.get("dynamic") or {}
@@ -2115,7 +2167,7 @@ class ChargerCoach:
             if blok.get("markt") is not None:
                 opbouw = prijsopbouw.inkoop(blok["markt"], d)
             prijs = blok.get("all_in") if all_in_id else (opbouw or {}).get("totaal")
-            terug = prijsopbouw.terug(blok.get("markt"), prijs, d, uit["salderen"], dag)
+            terug = prijsopbouw.terug(blok.get("markt"), prijs, d, self._saldeert(contract, now), dag)
 
         def tijd(waarde):
             return waarde.isoformat() if isinstance(waarde, datetime) else waarde
@@ -2822,6 +2874,7 @@ class ChargerCoach:
         # enige twee plekken waar de coach naar de database of naar een dienst
         # buiten zichzelf kijkt.
         await self._async_huisverbruik(settings, moment)
+        await self._async_jaarsaldo(settings, moment)
         await self._async_sensorwacht(settings, moment)
         await self._async_verbruikswacht(settings, moment)
         await self._async_temperatuurwacht(settings, moment, level)
@@ -3109,7 +3162,7 @@ class ChargerCoach:
             vrijgave=VRIJGAVE_WOORD.get(soort, ""),
         )
         decision = plan_programma(
-            now, self._prices(settings), self._tariff(settings),
+            now, self._prices(settings), self._tarief(settings),
             Forecast(solar_kwh=self._zon_kwh, house_kwh=self._huis_kwh,
                      estimated=self._zon_geschat, solar_factor=self._zon_gemeten(now),
                      solar_day=now.date()),
@@ -4125,7 +4178,7 @@ class ChargerCoach:
         """
         contract = settings.get("contract") or {}
         dynamic = contract.get("dynamic") or {}
-        tarief = self._tariff(settings)
+        tarief = self._tarief(settings)
         if contract.get("type") != "dynamic":
             return lambda moment: (tarief.buy, tarief.feed_in)
         bron = dynamic.get("all_in_entity") if dynamic.get("source") == "all_in" else dynamic.get("market_entity")
@@ -4142,7 +4195,7 @@ class ChargerCoach:
         if not prijzen:
             return None
         markt: list[tuple[datetime, float]] = []
-        if not self._salderen(contract) and dynamic.get("market_entity"):
+        if not self._saldeert(contract) and dynamic.get("market_entity"):
             for moment, toestand in await self._async_geschiedenis(
                 dynamic.get("market_entity"), van - timedelta(hours=1), tot
             ):
@@ -4152,7 +4205,7 @@ class ChargerCoach:
                     continue
         kosten = float(dynamic.get("feed_in_costs") or 0) - float(dynamic.get("feed_in_bonus") or 0)
         opslag = float(dynamic.get("supplier_markup") or 0) * (1 + float(dynamic.get("vat_percent") or 0) / 100)
-        salderen = self._salderen(contract)
+        salderen = self._saldeert(contract)
 
         def laatste(reeks: list[tuple[datetime, float]], moment: datetime) -> float | None:
             waarde = None
@@ -5011,7 +5064,7 @@ class ChargerCoach:
             gemeten = kaal + self._zon_correctie(settings, device, kaal)
         surplus = None if gemeten is None else gemeten + eigen
         decision = plan_boiler(
-            now, self._prices(settings), self._tariff(settings),
+            now, self._prices(settings), self._tarief(settings),
             Forecast(solar_kwh=self._zon_kwh, house_kwh=self._huis_kwh,
                      estimated=self._zon_geschat, solar_factor=self._zon_gemeten(now),
                      solar_day=now.date()),
@@ -5986,7 +6039,7 @@ class ChargerCoach:
             rij = self._batterij_rij(settings, device_id)
 
         prijzen = self._prices(settings)
-        tarief = self._tariff(settings)
+        tarief = self._tarief(settings)
         verwachting = Forecast(
             solar_kwh=self._zon_kwh, house_kwh=self._huis_kwh, estimated=self._zon_geschat,
             solar_factor=self._zon_gemeten(now), solar_day=now.date(),
@@ -6779,7 +6832,7 @@ class ChargerCoach:
             device_id not in self._woken or (wektijd is not None and now < wektijd)
         )
         prijzen = self._prices(settings)
-        tarief = self._tariff(settings)
+        tarief = self._tarief(settings)
         zon = self._sun(settings)
         verwachting = Forecast(
             solar_kwh=self._zon_kwh,
@@ -7653,7 +7706,7 @@ class ChargerCoach:
         # De prijsbron die er nu is: de eigen, en anders de reserve (v0.101.3).
         dynamic, _ = self._prijsbron(contract.get("dynamic") or {}, now)
         all_in = dynamic.get("source") == "all_in"
-        salderen = self._salderen(contract)
+        salderen = self._saldeert(contract)
         # De opslag van de leverancier zit wel in wat je betaalt en niet in wat
         # je terugkrijgt. Bij salderen streept de energiebelasting weg tegen die
         # bij afname, maar die opslag niet: die betaal je per ingekochte kWh en
@@ -7733,6 +7786,126 @@ class ChargerCoach:
         rauw = _text(self.hass, bron.get("peak_today"))
         moment = dt_util.parse_datetime(rauw) if rauw else None
         return None if moment is None else _moment(moment)
+
+    async def _async_jaarsaldo(self, settings: dict[str, Any], now: datetime) -> None:
+        """Of het huis over de afrekenperiode meer teruglevert dan het afneemt (v0.134.0).
+
+        Salderen streept een teruggeleverde kWh weg tegen een afgenomen, maar
+        alleen tot aan wat je afneemt, en per afrekenperiode: van de begindatum
+        tot de einddatum van de jaarafrekening, ook over een nieuw contract
+        heen. Op een jaarafrekening van half september tot half september die
+        de eigenaar op 19-10-2026 liet zien, ging de saldering zo over het oude
+        en het nieuwe contract samen. Wat er daarna nog over is, is de
+        vergoeding na saldering waard. De regeling stopt op `NETTING_ENDS`, dus
+        de periode die nu telt loopt van het begin van de afrekenperiode
+        (`billing_start` bij Contract) tot die dag.
+
+        Wat er al was komt uit de kWh-tellers van de meter (`meters` onder
+        Installatie), via de statistiek van Home Assistant; wat er tot
+        `NETTING_ENDS` nog bij komt uit dezelfde dagen een jaar eerder. Zonder
+        begindatum, zonder tellers of zonder dat jaar ervoor is het onbekend,
+        en telt het vinkje salderen zoals het staat.
+
+        In v0.133.3 (niet uitgebracht) was dit het afgelopen jaar. In de woning
+        van de eigenaar scheelden afname en teruglevering daarover op 19-10-2026
+        nog geen 0,2 procent, met de zomer van het vorige contract erin: een
+        schakelaar die elke dag kon omslaan, over een periode die niet telt.
+        """
+        if self._jaarsaldo_tot is not None and now < self._jaarsaldo_tot:
+            return
+        self._jaarsaldo_tot = now + JAARSALDO_VERVERSEN
+        self._jaarsaldo = None
+        contract = settings.get("contract") or {}
+        vandaag = now.date()
+        if not contract.get("netting") or vandaag >= NETTING_ENDS:
+            return
+        begin = _afrekenstart(contract.get("billing_start"), vandaag)
+        meters = (settings.get("sources") or {}).get("meters") or {}
+        afname_ids = [e for e in (meters.get("import_low"), meters.get("import_high")) if e]
+        terug_ids = [e for e in (meters.get("export_low"), meters.get("export_high")) if e]
+        if begin is None or not afname_ids or not terug_ids:
+            return
+
+        zone = dt_util.get_default_time_zone()
+
+        def middernacht(dag: date) -> datetime:
+            return dt_util.as_utc(datetime.combine(dag, time(0)).replace(tzinfo=zone))
+
+        # Tot vandaag gemeten, en vanaf vandaag tot het einde van salderen
+        # dezelfde dagen een jaar eerder.
+        al = (middernacht(begin), middernacht(vandaag))
+        rest = (middernacht(_jaar_eerder(vandaag)), middernacht(_jaar_eerder(NETTING_ENDS)))
+        rijen: list[dict] = []
+        try:
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.statistics import statistics_during_period
+
+            ids = set(afname_ids + terug_ids)
+            for van, tot in (al, rest):
+                if van >= tot:
+                    rijen.append({})
+                    continue
+                rijen.append(
+                    await get_instance(self.hass).async_add_executor_job(
+                        statistics_during_period, self.hass, van, tot, ids, "day",
+                        {"energy": "kWh"}, {"change"},
+                    ) or {}
+                )
+        except Exception as fout:  # noqa: BLE001 - zonder recorder geen balans
+            _LOGGER.debug("kon de statistiek van de meter niet lezen: %s", fout)
+            return
+
+        def som(deel: dict, lijst: list[str]) -> float:
+            return round(sum(float(r.get("change") or 0.0) for e in lijst for r in deel.get(e) or []), 1)
+
+        def gedekt(deel: dict, van: datetime, tot: datetime) -> bool:
+            # De statistiek moet het begin van het venster halen: een meter die
+            # pas sinds gisteren meetelt zegt niets over vorig jaar.
+            if van >= tot:
+                return True
+            eerste = None
+            for e in afname_ids + terug_ids:
+                for r in deel.get(e) or []:
+                    moment = r.get("start")
+                    if isinstance(moment, (int, float)):
+                        moment = datetime.fromtimestamp(moment, tz=timezone.utc)
+                    if isinstance(moment, datetime) and (eerste is None or moment < eerste):
+                        eerste = moment
+            return eerste is not None and eerste <= van + timedelta(days=1)
+
+        self._jaarsaldo = {
+            "van": begin.isoformat(),
+            "afname": som(rijen[0], afname_ids),
+            "terug": som(rijen[0], terug_ids),
+            "afname_rest": som(rijen[1], afname_ids),
+            "terug_rest": som(rijen[1], terug_ids),
+            "compleet": gedekt(rijen[0], *al) and gedekt(rijen[1], *rest),
+        }
+
+    def _netto_terug(self) -> bool | None:
+        """Of het huis over de afrekenperiode meer teruglevert dan het afneemt (v0.134.0).
+
+        Wat er al was plus wat er tot het einde van salderen nog bij komt. None
+        als dat niet bekend is; zie `_async_jaarsaldo`.
+        """
+        s = self._jaarsaldo
+        if not s or not s.get("compleet"):
+            return None
+        return s["terug"] + s["terug_rest"] > s["afname"] + s["afname_rest"]
+
+    def _saldeert(self, contract: dict[str, Any], now: datetime | None = None) -> bool:
+        """Of een teruggeleverde kWh nu wegstreept tegen een afgenomen (v0.133.3).
+
+        Het vinkje en de datum (`_salderen`), en het huis levert over de
+        afrekenperiode niet meer terug dan het afneemt. Anders is de volgende
+        kWh die naar het net gaat er een boven het eigen verbruik, en geldt de
+        vergoeding na saldering.
+        """
+        return self._salderen(contract, now) and self._netto_terug() is not True
+
+    def _tarief(self, settings: dict[str, Any], now: datetime | None = None) -> Tariff:
+        """`_tariff` met wat de coach van dit huis weet: levert het netto terug (v0.133.3)."""
+        return self._tariff(settings, self._saldeert(settings.get("contract") or {}, now), now)
 
     async def _async_huisverbruik(self, settings: dict[str, Any], now: datetime) -> None:
         """Wat het huis zelf gebruikt, per uur van de dag, uit de eigen opslag.
@@ -8017,8 +8190,16 @@ class ChargerCoach:
         return uit
 
     @staticmethod
-    def _tariff(settings: dict[str, Any]) -> Tariff:
+    def _tariff(settings: dict[str, Any], saldeert: bool | None = None, now: datetime | None = None) -> Tariff:
         """Wat een kWh kost en opbrengt als de prijslijst niets zegt.
+
+        `saldeert` is of een teruggeleverde kWh nu wegstreept (`_saldeert`,
+        v0.133.3); zonder is het het vinkje en de datum.
+
+        Een vast contract dat over 1 januari 2027 heen loopt heeft twee
+        terugleverprijzen (v0.134.0): tot dan de vergoeding na saldering en de
+        kosten van nu, daarna wat er in het contract staat voor na salderen
+        (`_teruglevering`).
 
         Bij een vast contract staat het hele jaar hetzelfde getal, dus is er geen
         lijst en is dit alles wat de coach heeft. Juist daar telt het zwaar: het
@@ -8032,17 +8213,40 @@ class ChargerCoach:
         fixed = contract.get("fixed") or {}
         prijs = fixed.get("all_in_price")
         koop = float(prijs) if prijs is not None else None
-        kosten = float(fixed.get("feed_in_costs") or 0)
+        vergoeding, kosten = ChargerCoach._teruglevering(fixed, now)
 
-        if ChargerCoach._salderen(contract):
+        if ChargerCoach._salderen(contract, now) if saldeert is None else saldeert:
             # Salderen: wat je teruglevert streept weg tegen wat je inkoopt, dus
             # is het de inkoopprijs waard. Het ingevulde terugleverbedrag geldt
             # dan niet; dat is pas aan de orde boven wat je zelf verbruikt.
             terug = None if koop is None else koop - kosten
         else:
-            terug = float(fixed.get("feed_in_tariff") or 0) - kosten
+            terug = vergoeding - kosten
 
         return Tariff(buy=koop, feed_in=terug)
+
+    @staticmethod
+    def _teruglevering(fixed: dict[str, Any], now: datetime | None = None) -> tuple[float, float]:
+        """De vergoeding en de kosten per kWh van een vast contract op dit moment (v0.134.0).
+
+        Tot `NETTING_ENDS` de gewone velden. Daarna, als ze ingevuld zijn, wat
+        het contract voor na salderen zegt (`feed_in_tariff_after`,
+        `feed_in_costs_after`); een leeg veld houdt het bedrag van ervoor. De
+        eigenaar op 19-10-2026, met een vast contract tot na die datum:
+        "Terugleververgoeding na saldering tot 1-1-2027 € 0,124000",
+        "Terugleververgoeding vanaf 1-1-2027 € 0,072100" en "Terugleverkosten
+        vanaf 1-1-2027 € 0,052756 per kWh", met tot dan vaste terugleverkosten
+        per schaal. Met één veld rekende de coach óf nu met de kosten van
+        2027, óf in 2027 met de vergoeding van nu.
+        """
+        vergoeding = float(fixed.get("feed_in_tariff") or 0)
+        kosten = float(fixed.get("feed_in_costs") or 0)
+        if dt_util.as_local(now or dt_util.utcnow()).date() >= NETTING_ENDS:
+            if fixed.get("feed_in_tariff_after") is not None:
+                vergoeding = float(fixed["feed_in_tariff_after"])
+            if fixed.get("feed_in_costs_after") is not None:
+                kosten = float(fixed["feed_in_costs_after"])
+        return vergoeding, kosten
 
     @staticmethod
     def _all_in(market: float, dynamic: dict[str, Any]) -> float:
@@ -9344,7 +9548,7 @@ class ChargerCoach:
                 if rij["start"] <= now < rij["end"]:
                     return rij["price"], rij.get("feed_in")
             return None, None
-        tarief = self._tariff(settings)
+        tarief = self._tarief(settings)
         return tarief.buy, tarief.feed_in
 
     @staticmethod
@@ -9784,7 +9988,7 @@ class ChargerCoach:
         lat = getattr(self.hass.config, "latitude", None)
         lon = getattr(self.hass.config, "longitude", None)
         zone = dt_util.get_default_time_zone()
-        vast = self._tariff({"contract": contract})
+        vast = self._tarief({"contract": contract})
         zonder_prijs = 0
 
         def prijs(moment: datetime) -> tuple[float | None, float | None]:
@@ -9802,7 +10006,7 @@ class ChargerCoach:
                 zonder_prijs += 1
                 return None, None
             dag = prijsopbouw.overdag(u.replace(tzinfo=zone), (u + timedelta(hours=1)).replace(tzinfo=zone), lat, lon)
-            return all_in, prijsopbouw.terug(markt, all_in, d, self._salderen(contract, moment), dag)["bedrag"]
+            return all_in, prijsopbouw.terug(markt, all_in, d, self._saldeert(contract, moment), dag)["bedrag"]
 
         stappen = []
         for moment in sorted({t for e in ids for t in per.get(e, {})}):
@@ -9910,7 +10114,7 @@ class ChargerCoach:
                 prijzen = [(m, self._all_in(p, dynamic)) for m, p in prijzen]
             if not prijzen:
                 prijzen = await self._async_reserveverloop(dynamic, plug - timedelta(hours=1), tot)
-            if not self._salderen(contract) and dynamic.get("market_entity"):
+            if not self._saldeert(contract) and dynamic.get("market_entity"):
                 for moment, toestand in await self._async_geschiedenis(
                     dynamic.get("market_entity"), plug - timedelta(hours=1), tot
                 ):
@@ -9920,7 +10124,7 @@ class ChargerCoach:
                         continue
             if not prijzen:
                 return None
-        tarief = self._tariff(settings)
+        tarief = self._tarief(settings)
         kosten = float(dynamic.get("feed_in_costs") or 0) - float(dynamic.get("feed_in_bonus") or 0)
         opslag = float(dynamic.get("supplier_markup") or 0) * (
             1 + float(dynamic.get("vat_percent") or 0) / 100
@@ -9941,7 +10145,7 @@ class ChargerCoach:
             koop = laatste(prijzen, moment)
             if koop is None:
                 return None, None
-            if self._salderen(contract):
+            if self._saldeert(contract):
                 return koop, koop - opslag - kosten
             m = laatste(markt, moment)
             return koop, (m - kosten) if m is not None else None
@@ -11240,7 +11444,7 @@ class ChargerCoach:
             charger,
             window,
             ceiling_amps(grid, car, charger),
-            self._tariff(settings),
+            self._tarief(settings),
             Forecast(
                 solar_kwh=self._zon_kwh,
                 house_kwh=self._huis_kwh,

@@ -10075,6 +10075,161 @@ coach174._programma["dev-vaatwasser"]["programma"] = Programma174("x", "Katoen",
 controle("een onbekend verbruik blijft onbekend", coach174.vooruitblik(inst174, NU174)["apparaten"][3]["blokken"][0]["kw"] is None,
          "")
 
+print("=== 175. salderen per afrekenperiode, en teruglevering na 1-1-2027 (v0.134.0) ===")
+# De eigenaar op 19-10-2026, met een vast contract dat over 1 januari 2027 heen loopt:
+# "Terugleververgoeding na saldering tot 1-1-2027 € 0,124000", "Terugleververgoeding vanaf
+# 1-1-2027 € 0,072100" en "Terugleverkosten vanaf 1-1-2027 € 0,052756 per kWh", met tot dan
+# vaste terugleverkosten per schaal (nul per kWh). Zijn jaarafrekening liep van half
+# september tot half september, en de saldering ging over het oude en het nieuwe contract
+# samen. Tot v0.133.3 (niet uitgebracht) telde de coach het afgelopen jaar, met de zomer
+# van het vorige contract erin.
+VAST175 = {"type": "fixed", "netting": True, "billing_start": "2026-09-15",
+           "fixed": {"all_in_price": 0.25, "feed_in_tariff": 0.124, "feed_in_costs": 0.0,
+                     "feed_in_tariff_after": 0.0721, "feed_in_costs_after": 0.052756}}
+inst175 = instellingen()
+inst175["contract"] = VAST175
+inst175["sources"] = {**inst175["sources"], "meters": {
+    "import_low": "sensor.meter_afname_laag", "import_high": "sensor.meter_afname_hoog",
+    "export_low": "sensor.meter_terug_laag", "export_high": "sensor.meter_terug_hoog"}}
+hass175, _, coach175 = bouw(huis(), inst175)
+NU175 = dt.datetime(2026, 10, 19, 12, 0)
+gevraagd175 = []
+
+
+def statistiek175(tot_nu, rest, data_vanaf=None):
+    """Een nagemaakte recorder, per sensor per dag een gelijk deel van het venster.
+
+    `tot_nu` en `rest` zijn (afname, terug) in kWh: wat er sinds het begin van de
+    afrekenperiode kwam, en wat er in dezelfde weken vorig jaar kwam. `data_vanaf` is de
+    eerste dag waarvan de meter iets weet.
+    """
+    def statistics_during_period(hass, begin, eind, ids, periode, eenheden, soorten):
+        gevraagd175.append((begin, eind, periode, eenheden, soorten))
+        afname, terug = rest if begin.year < 2026 else tot_nu
+        van = max(begin, data_vanaf) if data_vanaf else begin
+        dagen = max(1, (eind - van).days)
+
+        def rijen(totaal):
+            if van >= eind:
+                return []
+            return [{"start": (van + dt.timedelta(days=i)).timestamp(), "change": totaal / dagen / 2}
+                    for i in range(dagen)]
+
+        return {e: rijen(afname if "afname" in e else terug) for e in ids}
+
+    rec = types.ModuleType("homeassistant.components.recorder")
+
+    class _Rec:
+        async def async_add_executor_job(self, fn, *args):
+            return fn(*args)
+
+    rec.get_instance = lambda hass: _Rec()
+    stats = types.ModuleType("homeassistant.components.recorder.statistics")
+    stats.statistics_during_period = statistics_during_period
+    sys.modules["homeassistant.components.recorder"] = rec
+    sys.modules["homeassistant.components.recorder.statistics"] = stats
+
+
+def balans175(inst, nu, tot_nu, rest, data_vanaf=None):
+    statistiek175(tot_nu, rest, data_vanaf)
+    coach175._jaarsaldo_tot = None
+    asyncio.run(coach175._async_jaarsaldo(inst, nu))
+    return coach175._jaarsaldo
+
+
+oud175 = {k: sys.modules.get(k) for k in ("homeassistant.components.recorder", "homeassistant.components.recorder.statistics")}
+try:
+    controle("zonder balans: met salderen de inkoopprijs min de kosten van nu",
+             abs(coach175._tarief(inst175, NU175).feed_in - 0.25) < 1e-9, f"{coach175._tarief(inst175, NU175)}")
+    # Een huis dat in het najaar meer afneemt dan het teruglevert, zoals in de woning van
+    # de eigenaar: salderen telt voor alles.
+    s175 = balans175(inst175, NU175, tot_nu=(350.0, 170.0), rest=(1300.0, 150.0))
+    print(f"  balans: {s175}")
+    print(f"  gevraagd: {[(b.isoformat(), e.isoformat()) for b, e, *_ in gevraagd175[-2:]]}")
+    controle("de balans vanaf het begin van de afrekenperiode, en tot 1-1-2027 dezelfde weken vorig jaar",
+             s175 == {"van": "2026-09-15", "afname": 350.0, "terug": 170.0, "afname_rest": 1300.0,
+                      "terug_rest": 150.0, "compleet": True}, f"{s175}")
+    controle("tot vandaag gemeten, de rest een jaar eerder, per dag en in kWh",
+             [(b.date().isoformat(), e.date().isoformat()) for b, e, *_ in gevraagd175[-2:]]
+             == [("2026-09-14", "2026-10-18"), ("2025-10-18", "2025-12-31")]
+             and gevraagd175[-1][2:] == ("day", {"energy": "kWh"}, {"change"}), f"{gevraagd175[-2:]}")
+    controle("netto afname: salderen telt, de inkoopprijs min de kosten",
+             coach175._netto_terug() is False and abs(coach175._tarief(inst175, NU175).feed_in - 0.25) < 1e-9, "")
+    # Een afrekenperiode die in het voorjaar begon: de zomer telt mee, en de winter is te kort.
+    voorjaar175 = {**inst175, "contract": {**VAST175, "billing_start": "2026-04-01"}}
+    s175 = balans175(voorjaar175, NU175, tot_nu=(1500.0, 3200.0), rest=(700.0, 200.0))
+    t175 = coach175._tarief(voorjaar175, NU175)
+    controle("netto terug over de afrekenperiode: de vergoeding na saldering min de kosten",
+             coach175._netto_terug() is True and abs(t175.feed_in - 0.124) < 1e-9 and t175.buy == 0.25, f"{s175} {t175}")
+    controle("de controle voor het paneel houdt het vinkje en zegt waarom",
+             asyncio.run(coach175.async_prijscontrole(voorjaar175, now=NU175)).get("netto_terug") is True
+             and asyncio.run(coach175.async_prijscontrole(voorjaar175, now=NU175)).get("salderen") is True, "")
+    controle("niet opnieuw binnen een dag",
+             (statistiek175((9999.0, 0.0), (0.0, 0.0)), asyncio.run(coach175._async_jaarsaldo(voorjaar175, NU175 + dt.timedelta(hours=1))))
+             and coach175._netto_terug() is True, f"{coach175._jaarsaldo}")
+    # Geen metingen van vorig jaar: dan weet de coach het niet, en telt het vinkje.
+    s175 = balans175(voorjaar175, NU175, tot_nu=(1500.0, 3200.0), rest=(700.0, 200.0),
+                     data_vanaf=dt.datetime(2026, 3, 1, tzinfo=dt.timezone.utc))
+    controle("zonder dezelfde weken vorig jaar is het onbekend en telt het vinkje",
+             s175["compleet"] is False and coach175._netto_terug() is None
+             and abs(coach175._tarief(voorjaar175, NU175).feed_in - 0.25) < 1e-9, f"{s175}")
+    leeg175 = {**inst175, "contract": {**VAST175, "billing_start": ""}}
+    controle("zonder begindatum geen balans",
+             balans175(leeg175, NU175, (1500.0, 3200.0), (700.0, 200.0)) is None and coach175._netto_terug() is None, "")
+    controle("zonder salderen geen balans",
+             balans175({**inst175, "contract": {**VAST175, "netting": False}}, NU175, (1500.0, 3200.0), (700.0, 200.0)) is None, "")
+    controle("na 1-1-2027 geen balans",
+             balans175(voorjaar175, dt.datetime(2027, 1, 2, 12), (1500.0, 3200.0), (700.0, 200.0)) is None, "")
+    # De begindatum schuift per jaar op: wie hem vorig jaar invulde hoeft niets bij te werken.
+    controle("een begindatum van vorig jaar schuift een jaar op",
+             coachmod._afrekenstart("2025-09-16", dt.date(2026, 10, 19)) == dt.date(2026, 9, 16)
+             and coachmod._afrekenstart("2025-11-01", dt.date(2026, 10, 19)) == dt.date(2025, 11, 1)
+             and coachmod._afrekenstart("2026-11-01", dt.date(2026, 10, 19)) is None
+             and coachmod._afrekenstart("", dt.date(2026, 10, 19)) is None
+             and coachmod._afrekenstart("2024-02-29", dt.date(2026, 10, 19)) == dt.date(2026, 2, 28), "")
+    # Een dynamisch contract: dan rekent de terugleverprijs zonder salderen, op de marktprijs.
+    balans175(voorjaar175, NU175, tot_nu=(1500.0, 3200.0), rest=(700.0, 200.0))
+    controle("bij een dynamisch contract saldeert hij dan ook niet",
+             coach175._saldeert({**DYN166, "netting": True}, NU175) is False, "")
+
+    # Na 1 januari 2027: wat het contract voor daarna zegt.
+    NA175 = dt.datetime(2027, 1, 2, 12, 0)
+    t175 = coachmod.ChargerCoach._tariff(inst175, None, NA175)
+    controle("na 1-1-2027 de vergoeding en de kosten van na salderen",
+             abs(t175.feed_in - (0.0721 - 0.052756)) < 1e-9 and t175.buy == 0.25, f"{t175}")
+    controle("tot 1-1-2027 de vergoeding en de kosten van nu, buiten salderen",
+             abs(coachmod.ChargerCoach._tariff({"contract": {**VAST175, "netting": False}}, None, NU175).feed_in - 0.124) < 1e-9, "")
+    zonder175 = {"contract": {**VAST175, "fixed": {"all_in_price": 0.25, "feed_in_tariff": 0.124, "feed_in_costs": 0.01,
+                                                   "feed_in_tariff_after": None, "feed_in_costs_after": None}}}
+    controle("leeg na 1-1-2027 houdt het bedrag van ervoor",
+             abs(coachmod.ChargerCoach._tariff(zonder175, None, NA175).feed_in - (0.124 - 0.01)) < 1e-9, "")
+    alleen175 = {"contract": {**VAST175, "fixed": {**zonder175["contract"]["fixed"], "feed_in_costs_after": 0.05}}}
+    controle("en per veld: alleen de kosten ingevuld",
+             abs(coachmod.ChargerCoach._tariff(alleen175, None, NA175).feed_in - (0.124 - 0.05)) < 1e-9, "")
+    c175 = asyncio.run(coach175.async_prijscontrole(inst175, now=NU175))
+    print(f"  na salderen: {c175.get('na_salderen')}")
+    controle("de controle geeft wat er vanaf 1-1-2027 geldt",
+             c175.get("na_salderen") == {"vanaf": "2027-01-01", "vergoeding": 0.0721, "kosten": 0.052756,
+                                         "terug": 0.019344}
+             and c175.get("vergoeding") == 0.124 and c175.get("kosten") == 0.0, f"{c175}")
+    kort175 = {**VAST175, "end": "2026-12-31"}
+    controle("een contract dat voor 1-1-2027 afloopt heeft geen na salderen",
+             "na_salderen" not in asyncio.run(coach175.async_prijscontrole({"contract": kort175}, kort175, now=NU175)), "")
+    controle("na 1-1-2027 zelf geen apart blok meer",
+             "na_salderen" not in asyncio.run(coach175.async_prijscontrole(inst175, now=NA175)), "")
+    po175 = po166
+    zonder_na175 = {**VAST175, "fixed": {"all_in_price": 0.25, "feed_in_tariff": 0.124, "feed_in_costs": 0.0}}
+    leeg_na175 = {**VAST175, "fixed": {**zonder_na175["fixed"], "feed_in_tariff_after": None, "feed_in_costs_after": None}}
+    controle("een bevestiging van voor deze uitgave blijft gelden zolang na salderen leeg is",
+             po175.vingerafdruk(zonder_na175) == po175.vingerafdruk(leeg_na175)
+             and po175.vingerafdruk(VAST175) != po175.vingerafdruk(leeg_na175), "")
+finally:
+    for k, v in oud175.items():
+        if v is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = v
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
