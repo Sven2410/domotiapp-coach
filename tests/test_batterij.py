@@ -1161,7 +1161,7 @@ controle("en de voorraad komt eruit", voorraad44 is not None)
 
 print()
 print("=== 45. Het plan houdt de nacht vast, net als het besluit (v0.133.1) ===")
-# De bewoner van de eerste woning op 20-10-2026, met de nachtstrategie aan, een volle
+# De bewoner van de eerste woning op 19-10-2026, met de nachtstrategie aan, een volle
 # batterij en de prijzen tot middernacht: "Ondanks dat handelen aan staat, zou ik
 # verwachten dat ie om 19u nog zo'n 20 a 30% over heeft om de nacht door te komen."
 # Het plan liet de batterij om 23:00 op 5% staan; het besluit van het moment stopte wel

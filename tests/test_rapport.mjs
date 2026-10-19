@@ -817,7 +817,7 @@ proef("het filter zeeft op soort en op dag", () => {
   ], "de dagkeuze kent elke dag één keer, de nieuwste eerst");
 });
 
-// Meldingen in groepen die uitklappen (v0.133.2). De eigenaar op 20-10-2026: "ik wil wel bij
+// Meldingen in groepen die uitklappen (v0.133.2). De eigenaar op 19-10-2026: "ik wil wel bij
 // meldingen dat je alles groepeert en alles kan uitklappen, nu staat alles op een vaste
 // positie onder elkaar en wordt het onoverzichtelijk."
 proef("Meldingen: vier groepen die uitklappen, met de stand in de kop (v0.133.2)", async () => {
@@ -4353,7 +4353,7 @@ proef("elk merk dat het paneel aanbiedt neemt de coach aan bij het opslaan (v0.1
 });
 
 // Prijskleuren naar de bekende prijzen (v0.133.1). De bewoner van de eerste woning op
-// 20-10-2026: "relatief gezien naar de spread op de dag", en "Worden de nieuwe prijzen om
+// 19-10-2026: "relatief gezien naar de spread op de dag", en "Worden de nieuwe prijzen om
 // 14u bekend, dan past ie zijn kleurstelling aan. Het kán dan zo zijn dat een kolom die
 // om 13.59 nog groen was, rood wordt, omdat de prijzen morgen veel lager zijn."
 proef("prijskleuren naar de bekende prijzen: groen blijft niet groen als morgen goedkoper is (v0.133.1)", async () => {

@@ -24,7 +24,7 @@
  *
  * Sinds v0.133.2 in groepen die uitklappen: Wie krijgt wat, Herinneringen,
  * Waarschuwingen (met elke waarschuwing apart) en Geschiedenis (met elke dag
- * apart), elk met een korte stand in de kop. De eigenaar op 20-10-2026: "ik wil
+ * apart), elk met een korte stand in de kop. De eigenaar op 19-10-2026: "ik wil
  * wel bij meldingen dat je alles groepeert en alles kan uitklappen, nu staat
  * alles op een vaste positie onder elkaar en wordt het onoverzichtelijk." Wat
  * openstaat onthoudt het scherm (`OPEN_SLEUTEL`), want dat is een voorkeur van
