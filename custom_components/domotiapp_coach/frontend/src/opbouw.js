@@ -58,6 +58,19 @@ export function salderenNoot(check, nu = new Date()) {
  * vorig jaar). Uit de meterstanden (`_async_jaarsaldo` in coach.py). Leeg als
  * de coach de begindatum of de meter niet kent.
  */
+/**
+ * Wat de vorm van de terugleverkosten betekent voor een kWh extra (v0.135.0), of
+ * leeg bij per kWh over alles: dan staan de kosten gewoon in de regels.
+ */
+export function kostenNoot(check) {
+  const tekst = {
+    schalen: "Je terugleverkosten zijn een vast bedrag per jaar, in schalen: een kWh extra kost niets. Wat je schaal kost staat in Historie, per dag.",
+    overschot: "Je leverancier rekent terugleverkosten alleen over wat er na salderen overblijft: een gesaldeerde kWh kost niets.",
+    geen: "Je leverancier rekent geen terugleverkosten.",
+  }[check?.kosten_vorm];
+  return tekst ? `<p class="ob-noot">${tekst}</p>` : "";
+}
+
 export function jaarNoot(check) {
   if (!check?.salderen || !check?.jaar) return "";
   const j = check.jaar;
@@ -183,6 +196,7 @@ export function opbouwHtml(check, namen = {}) {
       ${rij("", "All-in prijs, zoals in je contract", check.inkoop === null || check.inkoop === undefined ? "niet ingevuld" : euro4(check.inkoop), "ob-totaal")}
       ${rij("", check.salderen && check.netto_terug !== true ? "Teruglevering (je saldeert: je inkoopprijs min de kosten)" : "Teruglevering (vergoeding min de kosten)", terug === null || terug === undefined ? "onbekend" : euro4(terug))}
       ${jaarNoot(check)}
+      ${kostenNoot(check)}
     </div>`);
     delen.push(naSalderenBlok(check.na_salderen));
   } else {
@@ -231,6 +245,7 @@ export function opbouwHtml(check, namen = {}) {
       regels.push(rij("=", "Per teruggeleverde kWh", euro4(t.bedrag), "ob-totaal"));
       delen.push(`<div class="ob-blok"><h4>Teruglevering nu</h4>${regels.join("")}
         ${jaarNoot(check)}
+      ${kostenNoot(check)}
         <p class="ob-noot">${t.vast ? "Het vaste bedrag uit je contract." : `Niet te controleren: ${esc(w.leverancier)} geeft de terugleverprijs niet door. Zo rekent de coach.`}</p>
         ${salderenNoot(check)}</div>`);
     } else {

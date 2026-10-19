@@ -106,6 +106,51 @@ def bonus(markt: float, d: dict, overdag: bool) -> float:
     return procent / 100.0 * over
 
 
+# Hoe een leverancier terugleverkosten rekent (v0.135.0). De catalogus
+# (leveranciers-data.js) kent ze alle vier: per kWh over alle teruglevering
+# (Eneco sinds juni 2024), alleen over wat er na salderen overblijft, in schalen
+# met een vast bedrag naar de teruglevering over de afrekenperiode (Budget 26
+# schalen, Energiedirect 42, Vattenfall 73), of niet (ANWB, Coolblue, easyEnergy).
+KOSTEN_VORMEN = ("kwh", "overschot", "schalen", "geen")
+
+
+def kosten_per_kwh(velden: dict, saldeert: bool) -> float:
+    """Wat een extra teruggeleverde kWh aan terugleverkosten kost (v0.135.0).
+
+    `kwh` (de standaard, en tot v0.135.0 de enige vorm): elke kWh het bedrag.
+    `overschot`: alleen een kWh die niet wegstreept tegen inkoop. `schalen` en
+    `geen`: niets per kWh; een schaal is een vast bedrag per jaar, en dat staat in
+    Historie per dag (`schaal_per_jaar`). De eigenaar op 19-10-2026, bij een
+    contract met schalen tot 2027: "ik wil het zo goed mogelijk hebben".
+    """
+    vorm = velden.get("feed_in_costs_mode") or "kwh"
+    if vorm in ("schalen", "geen"):
+        return 0.0
+    if vorm == "overschot" and saldeert:
+        return 0.0
+    return _getal(velden.get("feed_in_costs"))
+
+
+def schaal_per_jaar(schalen: list | None, kwh: float) -> float | None:
+    """Het jaarbedrag van de schaal waar `kwh` teruglevering in valt (v0.135.0).
+
+    `schalen` is de tabel van de leverancier: per rij vanaf hoeveel kWh hij geldt
+    (`vanaf`) en het bedrag per jaar met btw (`per_jaar`). Onder de eerste rij
+    kost het niets. None zonder tabel.
+    """
+    rijen = sorted(
+        (_getal(r.get("vanaf")), _getal(r.get("per_jaar"))) for r in schalen or [] if isinstance(r, dict)
+    )
+    if not rijen:
+        return None
+    bedrag = 0.0
+    for vanaf, per_jaar in rijen:
+        if kwh < vanaf:
+            break
+        bedrag = per_jaar
+    return bedrag
+
+
 def terug(markt: float | None, all_in: float | None, d: dict, salderen: bool, overdag: bool) -> dict:
     """Wat een teruggeleverde kWh opbrengt, en waaruit.
 
@@ -116,7 +161,8 @@ def terug(markt: float | None, all_in: float | None, d: dict, salderen: bool, ov
     bij, als het contract hem heeft. `bedrag` is None als de prijs waar hij op
     rust er niet is.
     """
-    kosten = _getal(d.get("feed_in_costs"))
+    # Per kWh, in de vorm die het contract zegt (v0.135.0).
+    kosten = kosten_per_kwh(d, salderen)
     vergoeding = _getal(d.get("feed_in_bonus"))
     opslag = _getal(d.get("supplier_markup")) * btw_factor(d)
     extra = bonus(markt, d, overdag) if markt is not None else 0.0
@@ -269,10 +315,13 @@ def overdag(start: datetime, einde: datetime, lat: float | None, lon: float | No
 
 # Velden van een dynamisch contract die er later bij kwamen, met hun standaard
 # (v0.132.0); zie `vingerafdruk`.
-LATER = {"feed_in_mode": "market", "feed_in_fixed": 0.0}
+LATER = {"feed_in_mode": "market", "feed_in_fixed": 0.0, "feed_in_costs_mode": "kwh", "feed_in_scales": [],
+         "feed_in_scales_until": ""}
 # En van een vast contract: wat er na salderen geldt (v0.134.0). Leeg is hetzelfde
 # als ervoor, dus telt pas mee als het is ingevuld.
-LATER_VAST = {"feed_in_tariff_after": None, "feed_in_costs_after": None}
+LATER_VAST = {"feed_in_tariff_after": None, "feed_in_costs_after": None,
+              # De vorm van de terugleverkosten en de schalen (v0.135.0).
+              "feed_in_costs_mode": "kwh", "feed_in_scales": [], "feed_in_scales_until": ""}
 
 
 def vingerafdruk(contract: dict) -> str:

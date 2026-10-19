@@ -350,6 +350,22 @@ if (vn := v("vast-na-salderen")) and (vl := v("vast-na-salderen-leeg")):
     controle("na 1-1-2027: op tijd vol, van de zon", gehaald(vn) and vn.uit_net_kwh < 0.3,
              f"net {vn.uit_net_kwh:.2f}")
 
+# Terugleverkosten in vier vormen (v0.135.0): wat de zon in de bus kost is wat hij anders
+# had opgebracht, in de vorm van het contract.
+for naam, waard in (("vast-kosten-per-kwh", 0.25 - 0.05), ("vast-kosten-schalen", 0.25),
+                    ("vast-kosten-overschot", 0.25), ("vast-kosten-overschot-netto-terug", 0.12 - 0.05)):
+    if (vk := v(naam)):
+        per_kwh = (vk.kosten - vk.betaald) / vk.uit_zon_kwh if vk.uit_zon_kwh else None
+        print(f"  {naam}: zon {vk.uit_zon_kwh:.1f} kWh, kost {vk.kosten - vk.betaald:.2f}, per kWh {per_kwh}")
+        controle(f"{naam}: de zon kost {waard:.2f} per kWh",
+                 vk.uit_zon_kwh > 1 and abs(vk.kosten - vk.betaald - vk.uit_zon_kwh * waard) < 0.01,
+                 f"€{vk.kosten - vk.betaald:.2f} voor {vk.uit_zon_kwh:.1f} kWh")
+        controle(f"{naam}: op tijd vol", gehaald(vk), "")
+if (vv := v("dynamisch-salderen-vol")) and (vg := v("dynamisch-salderen")):
+    print(f"  salderen vol: misgelopen €{vv.misgelopen:.2f}, gewoon €{vg.misgelopen:.2f}, zon {vv.uit_zon_kwh:.1f} kWh")
+    controle("met de hele all-in prijs terug is de zon meer waard dan zonder", vv.misgelopen > vg.misgelopen,
+             f"€{vv.misgelopen:.2f} tegen €{vg.misgelopen:.2f}")
+
 if (vl := v("vast-avond-erin")):
     controle("avond erin: wacht tot acht uur", not laadt_tussen(vl, "18:30", "20:00"), "")
     controle("avond erin: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")

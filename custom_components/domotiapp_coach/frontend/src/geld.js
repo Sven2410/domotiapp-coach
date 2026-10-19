@@ -58,13 +58,44 @@ export function salderen(contract, when) {
 }
 
 /**
+ * Wat een extra teruggeleverde kWh aan terugleverkosten kost (v0.135.0), zoals
+ * `kosten_per_kwh` in prijsopbouw.py: per kWh over alles (`kwh`), alleen als hij
+ * niet wegstreept (`overschot`), of niets per kWh (`schalen`, `geen`).
+ */
+export function kostenPerKwh(velden, saldeert) {
+  const vorm = velden?.feed_in_costs_mode || "kwh";
+  if (vorm === "schalen" || vorm === "geen") return 0;
+  if (vorm === "overschot" && saldeert) return 0;
+  return Number(velden?.feed_in_costs) || 0;
+}
+
+/**
+ * Het jaarbedrag van de schaal waar `kwh` teruglevering in valt (v0.135.0), zoals
+ * `schaal_per_jaar` in prijsopbouw.py. Null zonder tabel.
+ */
+export function schaalPerJaar(schalen, kwh) {
+  const rijen = (schalen ?? [])
+    .filter((r) => r && typeof r === "object")
+    .map((r) => [Number(r.vanaf) || 0, Number(r.per_jaar) || 0])
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (!rijen.length) return null;
+  let bedrag = 0;
+  for (const [vanaf, perJaar] of rijen) {
+    if (kwh < vanaf) break;
+    bedrag = perJaar;
+  }
+  return bedrag;
+}
+
+/**
  * De vergoeding en de kosten per kWh van een vast contract op die dag (v0.134.0),
  * zoals `_teruglevering` in coach.py: vanaf `SALDEREN_TOT` wat het contract voor na
- * salderen zegt, en een leeg veld houdt het bedrag van ervoor.
+ * salderen zegt, en een leeg veld houdt het bedrag van ervoor. De kosten in de
+ * vorm van het contract (v0.135.0, `kostenPerKwh`).
  */
-export function vasteTeruglevering(fixed, when) {
+export function vasteTeruglevering(fixed, when, saldeert = false) {
   let vergoeding = Number(fixed?.feed_in_tariff) || 0;
-  let kosten = Number(fixed?.feed_in_costs) || 0;
+  let kosten = kostenPerKwh(fixed, saldeert);
   const dag = lokaleDag(when);
   const ingevuld = (v) => v !== null && v !== undefined && v !== "";
   if (dag !== "" && dag >= SALDEREN_TOT) {
@@ -147,7 +178,7 @@ export function bonusOp(markt, d, isOverdag) {
  * plus de vergoeding; en in allebei een bonus in procenten.
  */
 export function terugOp(markt, allIn, d, metSalderen, isOverdag) {
-  const kosten = Number(d?.feed_in_costs) || 0;
+  const kosten = kostenPerKwh(d, metSalderen);
   const vergoeding = Number(d?.feed_in_bonus) || 0;
   const opslag = (Number(d?.supplier_markup) || 0) * (1 + (Number(d?.vat_percent) || 0) / 100);
   const extra = markt === null || markt === undefined ? 0 : bonusOp(markt, d, isOverdag);
@@ -187,7 +218,40 @@ export function terugOp(markt, allIn, d, metSalderen, isOverdag) {
  * @param {number} [lengte] hoe lang het vak duurt, in ms; standaard een uur
  * @returns {{koop: number|null, terug: number|null}}
  */
-export function prijsOp(contract, rate, prijzen, when, ligging = null, lengte = 3600000) {
+/**
+ * Het deel van de teruglevering dat in de afrekenperiode van dat moment wegstreept
+ * tegen afname (v0.135.0), van `async_afrekening` in coach.py, of null als dat
+ * niet bekend is. Dan telt het vinkje: alles gesaldeerd.
+ */
+export function aandeelOp(afrekening, when) {
+  const dag = lokaleDag(when);
+  if (!dag) return null;
+  for (const p of afrekening?.perioden ?? []) {
+    if (p.van <= dag && dag < p.tot) return p.gesaldeerd ?? null;
+  }
+  return null;
+}
+
+/**
+ * Wat de schaal van de terugleverkosten kost in [start, end) (v0.135.0): het
+ * jaarbedrag per dag, over de dagen van de schaal die al voorbij zijn.
+ */
+export function schaalKosten(afrekening, start, end, nu = new Date()) {
+  const s = afrekening?.schaal;
+  if (!s || !(Number(s.per_dag) > 0)) return 0;
+  const van = Math.max(new Date(`${s.van}T00:00:00`).getTime(), new Date(start).getTime());
+  const tot = Math.min(new Date(`${s.tot}T00:00:00`).getTime(), new Date(end).getTime(), new Date(nu).getTime());
+  return tot > van ? ((tot - van) / 86400000) * Number(s.per_dag) : 0;
+}
+
+/**
+ * `aandeel` (v0.135.0) is het deel dat in die afrekenperiode wegstreept
+ * (`aandeelOp`): met salderen is een teruggeleverde kWh dan voor dat deel de
+ * inkoopprijs waard en voor de rest wat er na salderen geldt, naar rato over
+ * elke kWh, zoals de jaarafrekening het overschot over de contracten verdeelt.
+ * Null of 1 is alles gesaldeerd.
+ */
+export function prijsOp(contract, rate, prijzen, when, ligging = null, lengte = 3600000, aandeel = null) {
   const c = contractAt(contract, when);
   const t = new Date(when).getTime();
   const koop = c.period?.all_in_price > 0 ? c.buy : (prijzen?.get(t) ?? rate?.buy ?? null);
@@ -199,9 +263,24 @@ export function prijsOp(contract, rate, prijzen, when, ligging = null, lengte = 
     const markt = koop / (1 + (Number(d.vat_percent) || 0) / 100) - (Number(d.energy_tax) || 0) - (Number(d.supplier_markup) || 0);
     const begin = new Date(when);
     const dag = overdag(begin, new Date(begin.getTime() + lengte), ligging);
+    if (metSalderen && aandeel !== null && aandeel < 1) {
+      const gesaldeerd = terugOp(markt, koop, d, true, dag);
+      const overschot = terugOp(markt, koop, d, false, dag);
+      if (gesaldeerd !== null && overschot !== null) return { koop, terug: aandeel * gesaldeerd + (1 - aandeel) * overschot };
+    }
     return { koop, terug: terugOp(markt, koop, d, metSalderen, dag) };
   }
-  if (metSalderen) return { koop, terug: koop - (Number(contract?.fixed?.feed_in_costs) || 0) };
+  if (metSalderen) {
+    const gesaldeerd = koop - kostenPerKwh(contract?.fixed, true);
+    if (aandeel !== null && aandeel < 1) {
+      // Het overschot: de vergoeding na saldering van dit contract, of van een eerder.
+      const overschot = c.period
+        ? (c.feedIn ?? null)
+        : (() => { const { vergoeding, kosten } = vasteTeruglevering(contract?.fixed, when, false); return vergoeding - kosten; })();
+      if (overschot !== null) return { koop, terug: aandeel * gesaldeerd + (1 - aandeel) * overschot };
+    }
+    return { koop, terug: gesaldeerd };
+  }
   if (contract?.type !== "dynamic" && !c.period) {
     const { vergoeding, kosten } = vasteTeruglevering(contract?.fixed, when);
     return { koop, terug: vergoeding - kosten };
@@ -284,7 +363,7 @@ export function accuZon(settings, start, end) {
  * @param {{saved: number, solar_saved: number, wait_saved: number}} [o.coach]
  *   de beurten van deze periode opgeteld (`totalen` in savings.js)
  */
-export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], contract, accu = 0, accuVoorraad = 0, accuZon = 0, coach = null }) {
+export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], contract, accu = 0, accuVoorraad = 0, accuZon = 0, coach = null, vasteKosten = 0 }) {
   let stroom = 0;
   let terug = 0;
   let eigen = 0;
@@ -307,6 +386,10 @@ export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], 
     // Van voor de coach het telde: de zon die de batterij in ging, uit het vak zelf.
     zonInAccu += (Number(r.zonInAccu) || 0) * (p.koop - (terugPrijs ?? 0));
   }
+  // Terugleverkosten in schalen (v0.135.0): een vast bedrag per dag, van wat
+  // teruglevering opleverde af (`schaalKosten`).
+  const vast = Number(vasteKosten) || 0;
+  terug -= vast;
   const volume = (rijenVan, sleutel, perVak = null) => {
     let euro = 0;
     let met = false;
@@ -343,6 +426,7 @@ export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], 
     stroom,
     terug,
     metTerug,
+    vasteKosten: vast,
     gas: g.euro,
     metGas: g.met,
     water: w.euro,

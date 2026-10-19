@@ -28,7 +28,7 @@ import { balkSoort, legenda, metHerkomst, netReeks, stippen, tekenTijdlijn, teke
 import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
 import { beurtenIn, delen, opmerking, perApparaat, totalen, woorden } from "../savings.js";
-import { SALDEREN_TOT, accuVerdiend, accuZon, balans, prijsOp, salderen } from "../geld.js";
+import { SALDEREN_TOT, aandeelOp, accuVerdiend, accuZon, balans, prijsOp, salderen, schaalKosten } from "../geld.js";
 import {
   PERIODS,
   combine,
@@ -796,7 +796,7 @@ class DacViewHistory extends DacElement {
     }));
 
     const batterijen = (this.settings_?.devices ?? []).filter((device) => device.type === "thuisbatterij");
-    const [series, prices, reservePrijzen, devices, accu, , gasPrijzen] = await Promise.all([
+    const [series, prices, reservePrijzen, devices, accu, , gasPrijzen, afrekening] = await Promise.all([
       fetchPeriod(this.hass_, ids, this.period_, start),
       fetchPrices(this.hass_, this.priceEntity_(), this.period_, start),
       fetchPrices(this.hass_, this.reserveEntity_(), this.period_, start),
@@ -804,8 +804,10 @@ class DacViewHistory extends DacElement {
       fetchBattery(this.hass_, batterijen, this.period_, start),
       laadCoachPrijzen(this.hass_),
       fetchPrices(this.hass_, this.gasEntity_(), this.period_, start),
+      this.laadAfrekening_(start, periodEnd(this.period_, start)),
     ]);
     if (run !== this.run_) return;
+    this.afrekening_ = afrekening;
     this.prices_ = allInPrijzen(prices, reservePrijzen, this.settings_?.contract);
     this.gasPrijzen_ = gasPrijzen;
     this.devices_ = devices;
@@ -2003,6 +2005,24 @@ class DacViewHistory extends DacElement {
   }
 
   /**
+   * Salderen per afrekenperiode en de schaal van de terugleverkosten (v0.135.0),
+   * van de coach (`async_afrekening` in coach.py). Alleen met salderen aan en een
+   * begindatum van de afrekenperiode; anders null, en rekent Historie met het
+   * vinkje: elke teruggeleverde kWh gesaldeerd.
+   */
+  async laadAfrekening_(start, end) {
+    const c = this.settings_?.contract;
+    if (!c?.netting || !c?.billing_start || !this.hass_?.callWS) return null;
+    const dag = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    try {
+      return await this.hass_.callWS({ type: "domotiapp_coach/afrekening", van: dag(start), tot: dag(end) });
+    } catch {
+      // Een coach van voor v0.135.0 kent het commando niet.
+      return null;
+    }
+  }
+
+  /**
    * De som van In geld voor de getoonde periode, zoals het scherm en het rapport
    * hem allebei gebruiken. Zie geld.js.
    */
@@ -2028,7 +2048,7 @@ class DacViewHistory extends DacElement {
       beurtenGeladen: Array.isArray(this.beurten_),
       ...balans({
         rijen: rows,
-        prijs: (when) => prijsOp(contract, rate, prices, when, this.ligging_(), this.vakLengte_()),
+        prijs: (when) => prijsOp(contract, rate, prices, when, this.ligging_(), this.vakLengte_(), aandeelOp(this.afrekening_, when)),
         gas: this.rows_?.gas ?? [],
         gasPrijzen: this.gasPrijzen_ ?? null,
         water: this.rows_?.water ?? [],
@@ -2037,6 +2057,7 @@ class DacViewHistory extends DacElement {
         accuVoorraad: accu.voorraad,
         accuZon: zonInAccu.euro,
         coach: totalen(beurten),
+        vasteKosten: schaalKosten(this.afrekening_, start, end),
       }),
     };
   }
@@ -2215,8 +2236,18 @@ class DacViewHistory extends DacElement {
             : `Gerekend met ${this.period_ === "year" ? "maandgemiddelden" : "daggemiddelden"} van de prijs, dus ongeveer.`
           : `Gerekend met ${rate.basis}, ${euro(rate.buy)} per kWh.`
     );
+    // Salderen per afrekenperiode (v0.135.0): hoeveel ervan wegstreept.
+    const periode = (this.afrekening_?.perioden ?? []).find((p) => p.gesaldeerd !== null && p.gesaldeerd < 1);
+    if (periode) {
+      const datum = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" });
+      zinnen.push(`Van ${datum(periode.van)} tot ${datum(periode.tot)} lever je naar verwachting meer terug dan je afneemt: ${Math.round(periode.gesaldeerd * 100)}% van je teruglevering saldeert, de rest krijgt de vergoeding na saldering.`);
+    }
+    if (g.vasteKosten > 0.005 && this.afrekening_?.schaal) {
+      const s = this.afrekening_.schaal;
+      zinnen.push(`Terugleverkosten in schalen: naar verwachting ${Math.round(s.kwh).toLocaleString("nl-NL")} kWh teruglevering, ${euro(s.per_jaar)} per jaar, ${euro(g.vasteKosten)} in deze periode.`);
+    }
     if (rijen.some((r) => salderen(contract, r.start))) {
-      const p = prijsOp(contract, rate, g.prices, g.start);
+      const p = prijsOp(contract, rate, g.prices, g.start, null, 3600000, aandeelOp(this.afrekening_, g.start));
       const jaar = SALDEREN_TOT.slice(0, 4);
       zinnen.push(
         p.terug !== null && p.koop !== null
