@@ -308,7 +308,7 @@ vooruitblik" en "Wat gaat hij doen: de boiler en een programma".
 
 ## Prijskleuren naar de bekende prijzen (v0.133.1)
 
-De bewoner van de eerste woning op 20-10-2026, bij de vooruitblik waarin alle staven rood
+De bewoner van de eerste woning op 19-10-2026, bij de vooruitblik waarin alle staven rood
 waren: "elke app kiest ervoor om de kleurstelling van de kolommen aan te passen, relatief gezien
 naar de spread op de dag. In de huidige versie is alles oranje omdat de prijs inderdaad hoog is.
 Sommige mensen vinden dit misschien fijn!" en "Als je namelijk móet laden (ev) wil je dat op het
@@ -329,7 +329,7 @@ tegeltje, het tegeltje Energieprijs zelf, en de zin van de coach ("Stroom is nu 
 
 ## Meldingen in groepen die uitklappen (v0.133.2)
 
-De eigenaar op 20-10-2026: "ik wil wel bij meldingen dat je alles groepeert en alles kan
+De eigenaar op 19-10-2026: "ik wil wel bij meldingen dat je alles groepeert en alles kan
 uitklappen, nu staat alles op een vaste positie onder elkaar en wordt het onoverzichtelijk."
 
 Meldingen bestaat nu uit vier groepen (`details.groep` in views/notifications.js), elk met een

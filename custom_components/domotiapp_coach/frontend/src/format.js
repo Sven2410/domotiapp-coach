@@ -290,7 +290,7 @@ export function level(value, bounds, lowIsGood) {
  * Vast zijn het die van Voorkeuren. Met `relative` aan schalen ze mee met alle
  * prijzen die bekend zijn, van het lopende uur af: het goedkoopste derde van
  * het verschil tussen de goedkoopste en de duurste is groen, het duurste derde
- * rood. De bewoner van de eerste woning op 20-10-2026: "elke app kiest ervoor om
+ * rood. De bewoner van de eerste woning op 19-10-2026: "elke app kiest ervoor om
  * de kleurstelling van de kolommen aan te passen, relatief gezien naar de spread
  * op de dag", "Als je namelijk móet laden (ev) wil je dat op het goedkoopste
  * moment doen", en "Worden de nieuwe prijzen om 14u bekend, dan past ie zijn

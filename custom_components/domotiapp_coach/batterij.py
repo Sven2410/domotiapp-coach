@@ -808,7 +808,7 @@ def _nacht_nodig(t: datetime, forecast: Forecast, b: Batterij) -> float:
 def _nacht_vloer(blokken: list[dict], forecast: Forecast, b: Batterij, bodem: float) -> list[float] | None:
     """Per blok de inhoud waaronder de som aan het eind niet aan het net levert (v0.133.1).
 
-    De bewoner van de eerste woning op 20-10-2026, met de nachtstrategie aan,
+    De bewoner van de eerste woning op 19-10-2026, met de nachtstrategie aan,
     een volle batterij en de prijzen tot middernacht: "Ondanks dat handelen aan
     staat, zou ik verwachten dat ie om 19u nog zo'n 20 a 30% over heeft om de
     nacht door te komen." Het besluit van het moment hield zich daar al aan
