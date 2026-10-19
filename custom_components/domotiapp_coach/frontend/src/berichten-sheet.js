@@ -15,6 +15,7 @@ import { DacElement, define } from "./base.js";
 import { icons } from "./icons.js";
 import { huisNu, huisTijd } from "./format.js";
 import { sheetCss } from "./theme.js";
+import { datum, nt, t } from "./i18n.js";
 
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 
@@ -28,20 +29,20 @@ export function wanneerTekst(iso, nu = huisNu()) {
   const dag = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const verschil = Math.round((dag(nu) - dag(d)) / 86400000);
   const klok = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  if (verschil === 0) return `vandaag ${klok}`;
-  if (verschil === 1) return `gisteren ${klok}`;
-  return d.toLocaleDateString("nl-NL", { day: "numeric", month: "long", ...(d.getFullYear() !== nu.getFullYear() ? { year: "numeric" } : {}) });
+  if (verschil === 0) return t("vandaag {klok}", { klok });
+  if (verschil === 1) return t("gisteren {klok}", { klok });
+  return datum(d, { day: "numeric", month: "long", ...(d.getFullYear() !== nu.getFullYear() ? { year: "numeric" } : {}) });
 }
 
 // Een bericht dat ergens heen wijst krijgt een knop erheen, in plaats van een
 // tabblad in de tekst (v0.130.1). De bewoner van de eerste woning op 19-10-2026,
 // bij "Kijk onder Voorkeuren": "voorkeuren ken ik niet".
-const NAAR = { prijs: { id: "contract", tekst: "Bekijk je energieprijs" } };
+const NAAR = { prijs: { id: "contract", tekst: nt("Bekijk je energieprijs") } };
 
 /** De lijst als html: nieuwste bovenaan, ongelezen met een knop "Gelezen". */
 export function berichtenHtml(items, nu = huisNu()) {
   const lijst = [...(items ?? [])].sort((a, b) => String(b.at).localeCompare(String(a.at)));
-  if (!lijst.length) return `<p class="leeg">Geen berichten. Als je iets moet doen, zoals je meterstanden doorgeven, staat het hier.</p>`;
+  if (!lijst.length) return `<p class="leeg">${t("Geen berichten. Als je iets moet doen, zoals je meterstanden doorgeven, staat het hier.")}</p>`;
   return lijst.map((b) => `
     <article class="bericht${b.read ? " gelezen" : ""}">
       <div class="b-kop">
@@ -50,8 +51,8 @@ export function berichtenHtml(items, nu = huisNu()) {
       </div>
       <p>${esc(b.body)}</p>
       ${NAAR[b.kind] || !b.read ? `<div class="knoppen">
-        ${NAAR[b.kind] ? `<button type="button" class="gelezen-knop naar" data-naar="${esc(NAAR[b.kind].id)}">${esc(NAAR[b.kind].tekst)}${icons.chevronRight}</button>` : ""}
-        ${b.read ? "" : `<button type="button" class="gelezen-knop" data-gelezen="${esc(b.id)}">${icons.check}<span>Gelezen</span></button>`}
+        ${NAAR[b.kind] ? `<button type="button" class="gelezen-knop naar" data-naar="${esc(NAAR[b.kind].id)}">${esc(t(NAAR[b.kind].tekst))}${icons.chevronRight}</button>` : ""}
+        ${b.read ? "" : `<button type="button" class="gelezen-knop" data-gelezen="${esc(b.id)}">${icons.check}<span>${t("Gelezen")}</span></button>`}
       </div>` : ""}
     </article>`).join("");
 }
@@ -93,12 +94,12 @@ export class DacBerichtenSheet extends DacElement {
       <dialog class="sheet" tabindex="-1" aria-labelledby="berichten-titel">
         <div class="sheet-head">
           <div>
-            <div class="eyebrow">Berichten</div>
-            <h3 id="berichten-titel">Wat je zelf moet doen</h3>
+            <div class="eyebrow">${t("Berichten")}</div>
+            <h3 id="berichten-titel">${t("Wat je zelf moet doen")}</h3>
           </div>
-          <button class="sheet-close" type="button" id="berichten-dicht" aria-label="Sluiten">${icons.close}</button>
+          <button class="sheet-close" type="button" id="berichten-dicht" aria-label="${t("Sluiten")}">${icons.close}</button>
         </div>
-        <button type="button" class="alles" id="alles-gelezen" hidden>${icons.check}<span>Alles gelezen</span></button>
+        <button type="button" class="alles" id="alles-gelezen" hidden>${icons.check}<span>${t("Alles gelezen")}</span></button>
         <div class="lijst" id="lijst"></div>
       </dialog>
     `;

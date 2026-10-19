@@ -11,13 +11,26 @@
  * tonen het allebei, met dezelfde woorden.
  */
 
+import { datum, locale, t } from "./i18n.js";
 import { NAMEN } from "./tarifas.js";
 
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 
 /** € 0,4090: vier decimalen, want een leverancier noemt zijn opslag in tienden van centen. */
 export const euro4 = (v) =>
-  `€ ${Number(v ?? 0).toLocaleString("nl-NL", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`;
+  `€ ${Number(v ?? 0).toLocaleString(locale(), { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`;
+
+/** Een procent of kVA zoals hij is, met het scheidingsteken van de taal: 21, 2,5 of 2.5. */
+const los = (n) => Number(n).toLocaleString(locale(), { maximumFractionDigits: 6, useGrouping: false });
+
+/** Een heel getal met de duizendtallen van de taal: 1.500 of 1,500. */
+const heel = (n) => Math.round(Number(n) || 0).toLocaleString(locale());
+
+/** Een datum als "1 januari 2027", of zonder jaar; leeg als hij niet te lezen is. */
+const lang = (tekst, jaar = true) => {
+  const d = new Date(tekst);
+  return Number.isNaN(d.getTime()) ? "" : datum(d, jaar ? { day: "numeric", month: "long", year: "numeric" } : { day: "numeric", month: "long" });
+};
 
 const klok = (iso) => {
   const d = new Date(iso);
@@ -33,11 +46,11 @@ const rij = (teken, woord, bedrag, extra = "") =>
  */
 function woorden(namen = {}) {
   return {
-    opslag: namen.opslag || "Opslag van je leverancier",
-    vergoeding: namen.vergoeding || "Vergoeding van je leverancier",
-    kosten: namen.kosten || "Terugleverkosten",
-    bonus: namen.bonus || "Bonus",
-    leverancier: namen.leverancier || "je leverancier",
+    opslag: namen.opslag || t("Opslag van je leverancier"),
+    vergoeding: namen.vergoeding || t("Vergoeding van je leverancier"),
+    kosten: namen.kosten || t("Terugleverkosten"),
+    bonus: namen.bonus || t("Bonus"),
+    leverancier: namen.leverancier || t("je leverancier"),
   };
 }
 
@@ -50,7 +63,7 @@ function woorden(namen = {}) {
  */
 export function salderenNoot(check, nu = new Date()) {
   if (!check || check.salderen || nu >= new Date(2027, 0, 1)) return "";
-  return `<p class="ob-noot ob-let">Je saldeert niet volgens de instellingen. Tot 1 januari 2027 krijg je over wat je teruglevert, tot aan je eigen verbruik, ook de energiebelasting en btw terug. Klopt dat bij jou, zet dan bij Contract "Je levert nog gesaldeerd terug" aan.</p>`;
+  return `<p class="ob-noot ob-let">${t("Je saldeert niet volgens de instellingen. Tot 1 januari 2027 krijg je over wat je teruglevert, tot aan je eigen verbruik, ook de energiebelasting en btw terug. Klopt dat bij jou, zet dan bij Contract \"Je levert nog gesaldeerd terug\" aan.")}</p>`;
 }
 
 /**
@@ -66,9 +79,9 @@ export function salderenNoot(check, nu = new Date()) {
  */
 export function kostenNoot(check) {
   const tekst = {
-    schalen: "Je terugleverkosten zijn een vast bedrag per jaar, in schalen. Wat je schaal kost staat in Historie, per dag.",
-    overschot: "Je leverancier rekent terugleverkosten alleen over wat er na salderen overblijft: een gesaldeerde kWh kost niets.",
-    geen: "Je leverancier rekent geen terugleverkosten.",
+    schalen: t("Je terugleverkosten zijn een vast bedrag per jaar, in schalen. Wat je schaal kost staat in Historie, per dag."),
+    overschot: t("Je leverancier rekent terugleverkosten alleen over wat er na salderen overblijft: een gesaldeerde kWh kost niets."),
+    geen: t("Je leverancier rekent geen terugleverkosten."),
   }[check?.kosten_vorm];
   return tekst ? `<p class="ob-noot">${tekst}</p>` : "";
 }
@@ -80,17 +93,20 @@ export function kostenNoot(check) {
 export function schaalNoot(check) {
   const s = check?.schaal;
   if (!s?.rij) return "";
-  const getal = (n) => Math.round(Number(n) || 0).toLocaleString("nl-NL");
-  const vak = (r) => (r.tot ? `${getal(r.vanaf)} tot ${getal(r.tot)} kWh` : `vanaf ${getal(r.vanaf)} kWh`);
-  const d = new Date(`${s.tot}T00:00:00`);
-  const tot = Number.isNaN(d.getTime()) ? "het einde" : d.toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" });
-  const zinnen = [`Tot ${tot} naar verwachting ${getal(s.kwh)} kWh teruglevering: de schaal van ${vak(s.rij)}, € ${getal(s.rij.per_jaar)} per jaar.`];
+  const vak = (r) => (r.tot
+    ? t("{van} tot {tot} kWh", { van: heel(r.vanaf), tot: heel(r.tot) })
+    : t("vanaf {van} kWh", { van: heel(r.vanaf) }));
+  const tot = lang(`${s.tot}T00:00:00`) || t("het einde");
+  const zinnen = [t("Tot {datum} naar verwachting {kwh} kWh teruglevering: de schaal van {vak}, € {bedrag} per jaar.",
+    { datum: tot, kwh: heel(s.kwh), vak: vak(s.rij), bedrag: heel(s.rij.per_jaar) })];
   const z = s.zonder_accu;
   if (z?.rij && Number(s.accu_kwh) > 0) {
-    zinnen.push(`Zonder je thuisbatterij ${getal(z.kwh)} kWh: ${vak(z.rij)}, € ${getal(z.rij.per_jaar)} per jaar.`);
+    zinnen.push(t("Zonder je thuisbatterij {kwh} kWh: {vak}, € {bedrag} per jaar.",
+      { kwh: heel(z.kwh), vak: vak(z.rij), bedrag: heel(z.rij.per_jaar) }));
   }
   if (Number(s.kosten_per_kwh) > 0) {
-    zinnen.push(`Elke kWh die je minder teruglevert scheelt nu ${euro4(s.kosten_per_kwh)}, dus gebruikt de coach je zon liever zelf.`);
+    zinnen.push(t("Elke kWh die je minder teruglevert scheelt nu {bedrag}, dus gebruikt de coach je zon liever zelf.",
+      { bedrag: euro4(s.kosten_per_kwh) }));
   }
   return `<p class="ob-noot">${zinnen.join(" ")}</p>`;
 }
@@ -99,26 +115,26 @@ export function jaarNoot(check) {
   if (!check?.salderen || !check?.jaar) return "";
   const j = check.jaar;
   if (!j.compleet) {
-    return `<p class="ob-noot">Nog niet uit te rekenen of je over je afrekenperiode meer teruglevert dan je afneemt: de meter heeft geen metingen van dezelfde weken vorig jaar. De coach rekent tot dan met salderen.</p>`;
+    return `<p class="ob-noot">${t("Nog niet uit te rekenen of je over je afrekenperiode meer teruglevert dan je afneemt: de meter heeft geen metingen van dezelfde weken vorig jaar. De coach rekent tot dan met salderen.")}</p>`;
   }
-  const kwh = (n) => `${Math.round(Number(n) || 0).toLocaleString("nl-NL")} kWh`;
-  const d = new Date(`${j.van}T00:00:00`);
-  const sinds = Number.isNaN(d.getTime()) ? "het begin van je afrekenperiode" : d.toLocaleDateString("nl-NL", { day: "numeric", month: "long" });
-  const zin = `Sinds ${sinds} nam je ${kwh(j.afname)} af en leverde je ${kwh(j.terug)} terug. Tot 1 januari 2027 komt daar naar verwachting ${kwh(j.afname_rest)} afname en ${kwh(j.terug_rest)} teruglevering bij, zoals in dezelfde weken vorig jaar.`;
+  const kwh = (n) => `${heel(n)} kWh`;
+  const sinds = lang(`${j.van}T00:00:00`, false) || t("het begin van je afrekenperiode");
+  const zin = t("Sinds {sinds} nam je {afname} af en leverde je {terug} terug. Tot 1 januari 2027 komt daar naar verwachting {afname_rest} afname en {terug_rest} teruglevering bij, zoals in dezelfde weken vorig jaar.",
+    { sinds, afname: kwh(j.afname), terug: kwh(j.terug), afname_rest: kwh(j.afname_rest), terug_rest: kwh(j.terug_rest) });
   if (check.netto_terug === true) {
-    return `<p class="ob-noot">${zin} Je levert meer terug dan je afneemt, dus een kWh extra naar het net krijgt de vergoeding na saldering.</p>`;
+    return `<p class="ob-noot">${zin} ${t("Je levert meer terug dan je afneemt, dus een kWh extra naar het net krijgt de vergoeding na saldering.")}</p>`;
   }
-  return `<p class="ob-noot">${zin} Alles wat je teruglevert valt dus weg tegen inkoop.</p>`;
+  return `<p class="ob-noot">${zin} ${t("Alles wat je teruglevert valt dus weg tegen inkoop.")}</p>`;
 }
 
 /** Wat een vast contract na salderen zegt (v0.134.0): `na_salderen` van `contract/check`. */
 function naSalderenBlok(na) {
   if (!na) return "";
-  return `<div class="ob-blok"><h4>Teruglevering vanaf 1 januari 2027</h4>
-    ${rij("", "Terugleververgoeding", euro4(na.vergoeding))}
-    ${rij("−", "Terugleverkosten", euro4(na.kosten))}
-    ${rij("=", "Per teruggeleverde kWh", euro4(na.terug), "ob-totaal")}
-    <p class="ob-noot">Dan stopt salderen, en geldt dit voor alles wat je teruglevert.</p>
+  return `<div class="ob-blok"><h4>${t("Teruglevering vanaf 1 januari 2027")}</h4>
+    ${rij("", t("Terugleververgoeding"), euro4(na.vergoeding))}
+    ${rij("−", t("Terugleverkosten"), euro4(na.kosten))}
+    ${rij("=", t("Per teruggeleverde kWh"), euro4(na.terug), "ob-totaal")}
+    <p class="ob-noot">${t("Dan stopt salderen, en geldt dit voor alles wat je teruglevert.")}</p>
   </div>`;
 }
 
@@ -128,51 +144,53 @@ function naSalderenBlok(na) {
  * energiebelasting en de btw, en de opslag alleen als de leverancier die ook
  * teruggeeft (`netting_full`); zonder salderen de btw als hij met btw uitbetaalt.
  */
-function terugRegels(check, t, w) {
+function terugRegels(check, tr, w) {
   // Een vaste terugleververgoeding (v0.132.0): het bedrag, en de kosten eraf.
-  if (t.vast) {
-    const regels = [rij("", "Vaste terugleververgoeding", euro4(t.basis))];
-    if (t.kosten) regels.push(rij("−", esc(w.kosten), euro4(t.kosten)));
+  if (tr.vast) {
+    const regels = [rij("", t("Vaste terugleververgoeding"), euro4(tr.basis))];
+    if (tr.kosten) regels.push(rij("−", esc(w.kosten), euro4(tr.kosten)));
     return regels;
   }
   const o = check.inkoop;
   if (!o) {
     // Zonder opbouw (geen kale marktprijs): alleen wat er is.
-    return [rij("", t.salderen ? "All-in prijs (je saldeert)" : "Kale marktprijs", euro4(t.basis))];
+    return [rij("", tr.salderen ? t("All-in prijs (je saldeert)") : t("Kale marktprijs"), euro4(tr.basis))];
   }
   const procent = Number(o.btw_procent) || 0;
   const factor = 1 + procent / 100;
   // Wordt er met btw uitbetaald (bij salderen, of als de leverancier dat zo
   // doet), dan staan de vergoeding, de kosten en de bonus hier zonder btw,
   // net als bij de inkoop, en komt de btw er als een regel bij.
-  const metBtw = t.salderen || t.met_btw;
+  const metBtw = tr.salderen || tr.met_btw;
   const zonder = (bedrag) => (metBtw ? bedrag / factor : bedrag);
-  const regels = [rij("", "Kale marktprijs", euro4(o.markt))];
+  const regels = [rij("", t("Kale marktprijs"), euro4(o.markt))];
   let som = o.markt;
-  if (t.salderen) {
-    regels.push(rij("+", "Energiebelasting, terug omdat je saldeert", euro4(o.belasting)));
+  if (tr.salderen) {
+    regels.push(rij("+", t("Energiebelasting, terug omdat je saldeert"), euro4(o.belasting)));
     som += o.belasting;
-    if (t.vol) {
-      regels.push(rij("+", `${esc(w.opslag)}, ook terug`, euro4(o.opslag)));
+    if (tr.vol) {
+      regels.push(rij("+", t("{opslag}, ook terug", { opslag: esc(w.opslag) }), euro4(o.opslag)));
       som += o.opslag;
     }
   }
-  if (t.vergoeding) {
-    regels.push(rij(t.vergoeding < 0 ? "−" : "+", esc(w.vergoeding), euro4(Math.abs(zonder(t.vergoeding)))));
-    som += zonder(t.vergoeding);
+  if (tr.vergoeding) {
+    regels.push(rij(tr.vergoeding < 0 ? "−" : "+", esc(w.vergoeding), euro4(Math.abs(zonder(tr.vergoeding)))));
+    som += zonder(tr.vergoeding);
   }
-  if (t.kosten) {
-    regels.push(rij("−", esc(w.kosten), euro4(zonder(t.kosten))));
-    som -= zonder(t.kosten);
+  if (tr.kosten) {
+    regels.push(rij("−", esc(w.kosten), euro4(zonder(tr.kosten))));
+    som -= zonder(tr.kosten);
   }
   if (check.bonus_procent) {
-    const wanneer = check.bonus_overdag ? (check.overdag ? ", overdag" : ", alleen overdag: nu niet") : "";
-    regels.push(rij("+", `${esc(w.bonus)} ${String(check.bonus_procent).replace(".", ",")}%${wanneer}`, euro4(zonder(t.bonus || 0))));
-    som += zonder(t.bonus || 0);
+    const bonus = { bonus: esc(w.bonus), procent: los(check.bonus_procent) };
+    const woord = !check.bonus_overdag ? `${bonus.bonus} ${bonus.procent}%`
+      : check.overdag ? t("{bonus} {procent}%, overdag", bonus) : t("{bonus} {procent}%, alleen overdag: nu niet", bonus);
+    regels.push(rij("+", woord, euro4(zonder(tr.bonus || 0))));
+    som += zonder(tr.bonus || 0);
   }
   if (metBtw) {
-    regels.push(rij("=", "Samen, zonder btw", euro4(som), "ob-tussen"));
-    regels.push(rij("+", `Btw ${String(procent).replace(".", ",")}%`, euro4(som * (factor - 1))));
+    regels.push(rij("=", t("Samen, zonder btw"), euro4(som), "ob-tussen"));
+    regels.push(rij("+", t("Btw {procent}%", { procent: los(procent) }), euro4(som * (factor - 1))));
   }
   return regels;
 }
@@ -182,25 +200,34 @@ export function controleZin(check, namen = {}) {
   const w = woorden(namen);
   const c = check?.controle ?? {};
   if (check?.soort !== "dynamic") {
-    return { toon: "neutraal", tekst: "Niet te controleren: een vaste of variabele prijs staat in je contract, en er is geen sensor om hem mee te vergelijken." };
+    return { toon: "neutraal", tekst: t("Niet te controleren: een vaste of variabele prijs staat in je contract, en er is geen sensor om hem mee te vergelijken.") };
   }
   if (c.status === "correct") {
-    const uren = c.stap_minuten === 15 ? `${c.blokken} kwartieren` : `${c.blokken} uur`;
-    return { toon: "goed", tekst: `De ingevoerde gegevens zijn correct. Nagerekend over ${uren}.` };
+    return { toon: "goed", tekst: c.stap_minuten === 15
+      ? t("De ingevoerde gegevens zijn correct. Nagerekend over {n} kwartieren.", { n: c.blokken })
+      : t("De ingevoerde gegevens zijn correct. Nagerekend over {n} uur.", { n: c.blokken }) };
   }
   if (c.status === "afwijking") {
     const verschil = -Number(c.grootste ?? 0);
-    const richting = verschil > 0 ? "hoger" : "lager";
+    const waarden = { bedrag: euro4(Math.abs(verschil)), leverancier: w.leverancier };
     if (c.vast) {
-      return { toon: "fout", tekst: `Dit klopt niet: de opbouw komt elk ${c.stap_minuten === 15 ? "kwartier" : "uur"} ${euro4(Math.abs(verschil))} ${richting} uit dan ${w.leverancier} zegt. Dat zit in een bedrag per kWh: kijk de energiebelasting en de ${w.opslag.toLowerCase()} na.` };
+      const v = { ...waarden, opslag: w.opslag.toLowerCase() };
+      const tekst = c.stap_minuten === 15
+        ? (verschil > 0
+          ? t("Dit klopt niet: de opbouw komt elk kwartier {bedrag} hoger uit dan {leverancier} zegt. Dat zit in een bedrag per kWh: kijk de energiebelasting en de {opslag} na.", v)
+          : t("Dit klopt niet: de opbouw komt elk kwartier {bedrag} lager uit dan {leverancier} zegt. Dat zit in een bedrag per kWh: kijk de energiebelasting en de {opslag} na.", v))
+        : (verschil > 0
+          ? t("Dit klopt niet: de opbouw komt elk uur {bedrag} hoger uit dan {leverancier} zegt. Dat zit in een bedrag per kWh: kijk de energiebelasting en de {opslag} na.", v)
+          : t("Dit klopt niet: de opbouw komt elk uur {bedrag} lager uit dan {leverancier} zegt. Dat zit in een bedrag per kWh: kijk de energiebelasting en de {opslag} na.", v));
+      return { toon: "fout", tekst };
     }
-    return { toon: "fout", tekst: `Dit klopt niet: de opbouw wijkt tot ${euro4(Math.abs(verschil))} af van wat ${w.leverancier} zegt, en niet elk uur even veel. Kijk de btw na, en of je leverancier per uur of per kwartier rekent.` };
+    return { toon: "fout", tekst: t("Dit klopt niet: de opbouw wijkt tot {bedrag} af van wat {leverancier} zegt, en niet elk uur even veel. Kijk de btw na, en of je leverancier per uur of per kwartier rekent.", waarden) };
   }
   const bron = check?.bron ?? {};
-  if (bron.zelfde) return { toon: "fout", tekst: "Niet te controleren: bij de marktprijs staat dezelfde sensor als bij de all-in prijs. Kies een kale marktprijs, zoals de ingebouwde Nord Pool." };
-  if (!bron.all_in) return { toon: "neutraal", tekst: `Niet te controleren: er is geen all-in sensor van ${w.leverancier} om mee te vergelijken. De coach rekent met de kale marktprijs plus de bedragen hierboven.` };
-  if (!bron.markt) return { toon: "fout", tekst: "Niet te controleren: er is geen kale marktprijs (zoals de ingebouwde Nord Pool). Zonder kan de coach je prijs niet nagaan, en valt hij niet terug als je leverancier wegvalt." };
-  return { toon: "neutraal", tekst: "Nog niet te controleren: de twee sensoren hebben nog geen uur samen. Kijk over een uur nog eens." };
+  if (bron.zelfde) return { toon: "fout", tekst: t("Niet te controleren: bij de marktprijs staat dezelfde sensor als bij de all-in prijs. Kies een kale marktprijs, zoals de ingebouwde Nord Pool.") };
+  if (!bron.all_in) return { toon: "neutraal", tekst: t("Niet te controleren: er is geen all-in sensor van {leverancier} om mee te vergelijken. De coach rekent met de kale marktprijs plus de bedragen hierboven.", { leverancier: w.leverancier }) };
+  if (!bron.markt) return { toon: "fout", tekst: t("Niet te controleren: er is geen kale marktprijs (zoals de ingebouwde Nord Pool). Zonder kan de coach je prijs niet nagaan, en valt hij niet terug als je leverancier wegvalt.") };
+  return { toon: "neutraal", tekst: t("Nog niet te controleren: de twee sensoren hebben nog geen uur samen. Kijk over een uur nog eens.") };
 }
 
 /**
@@ -210,7 +237,7 @@ export function controleZin(check, namen = {}) {
  * @param {object} [namen] de woorden van de leverancier (`namenVan` in leveranciers.js)
  */
 export function opbouwHtml(check, namen = {}) {
-  if (!check) return `<p class="ob-leeg">De opbouw wordt opgehaald.</p>`;
+  if (!check) return `<p class="ob-leeg">${t("De opbouw wordt opgehaald.")}</p>`;
   const w = woorden(namen);
   const delen = [];
 
@@ -223,9 +250,9 @@ export function opbouwHtml(check, namen = {}) {
 
   if (check.soort !== "dynamic") {
     const terug = check.terug;
-    delen.push(`<div class="ob-blok"><h4>Stroom</h4>
-      ${rij("", "All-in prijs, zoals in je contract", check.inkoop === null || check.inkoop === undefined ? "niet ingevuld" : euro4(check.inkoop), "ob-totaal")}
-      ${rij("", check.salderen && check.netto_terug !== true ? "Teruglevering (je saldeert: je inkoopprijs min de kosten)" : "Teruglevering (vergoeding min de kosten)", terug === null || terug === undefined ? "onbekend" : euro4(terug))}
+    delen.push(`<div class="ob-blok"><h4>${t("Stroom")}</h4>
+      ${rij("", t("All-in prijs, zoals in je contract"), check.inkoop === null || check.inkoop === undefined ? t("niet ingevuld") : euro4(check.inkoop), "ob-totaal")}
+      ${rij("", check.salderen && check.netto_terug !== true ? t("Teruglevering (je saldeert: je inkoopprijs min de kosten)") : t("Teruglevering (vergoeding min de kosten)"), terug === null || terug === undefined ? t("onbekend") : euro4(terug))}
       ${jaarNoot(check)}
       ${kostenNoot(check)}
       ${schaalNoot(check)}
@@ -233,57 +260,60 @@ export function opbouwHtml(check, namen = {}) {
     delen.push(naSalderenBlok(check.na_salderen));
   } else {
     const blok = check.blok;
-    const tijd = blok ? ` (${klok(blok.start)} tot ${klok(blok.einde)})` : "";
+    const inkoopNu = blok ? t("Inkoop nu ({van} tot {tot})", { van: klok(blok.start), tot: klok(blok.einde) }) : t("Inkoop nu");
     const o = check.inkoop;
     if (o) {
       // Een leverancier per uur tegenover een marktprijs per kwartier: het uurgemiddelde.
       const blokMin = blok ? Math.round((new Date(blok.einde) - new Date(blok.start)) / 60000) : 0;
       const marktMin = Number(check.bron?.markt_minuten) || 0;
       const markt = marktMin && blokMin > marktMin
-        ? `Kale marktprijs, gemiddelde van ${blokMin / marktMin === 4 ? "vier" : blokMin / marktMin} ${marktMin === 15 ? "kwartieren" : "blokken"}`
-        : "Kale marktprijs";
+        ? t("Kale marktprijs, gemiddelde van {n} {blokken}", {
+          n: blokMin / marktMin === 4 ? t("vier") : blokMin / marktMin,
+          blokken: marktMin === 15 ? t("kwartieren") : t("blokken"),
+        })
+        : t("Kale marktprijs");
       // Alles zonder btw, dan een regel btw (v0.129.1). De eigenaar op
       // 19-10-2026: "Doe alles mét, of alles zónder btw. Alles op dezelfde
       // manier is eenvoudiger vergelijken en checken." Een leverancier die zijn
       // opslag met btw noemt (Zonneplan: € 0,02) staat hier dus zonder.
       const stappen = [
         rij("", esc(markt), euro4(o.markt)),
-        rij("+", "Energiebelasting", euro4(o.belasting)),
+        rij("+", t("Energiebelasting"), euro4(o.belasting)),
         rij("+", esc(w.opslag), euro4(o.opslag)),
-        rij("=", "Samen, zonder btw", euro4(o.subtotaal), "ob-tussen"),
-        rij("+", `Btw ${String(o.btw_procent).replace(".", ",")}%`, euro4(o.btw)),
+        rij("=", t("Samen, zonder btw"), euro4(o.subtotaal), "ob-tussen"),
+        rij("+", t("Btw {procent}%", { procent: los(o.btw_procent) }), euro4(o.btw)),
       ];
-      delen.push(`<div class="ob-blok"><h4>Inkoop nu${tijd}</h4>
+      delen.push(`<div class="ob-blok"><h4>${inkoopNu}</h4>
         ${stappen.join("")}
-        ${rij("=", "All-in", euro4(o.totaal), "ob-totaal")}
-        ${check.all_in !== null && check.all_in !== undefined ? rij("", `Wat ${esc(w.leverancier)} zegt`, euro4(check.all_in), "ob-sensor") : ""}
+        ${rij("=", t("All-in"), euro4(o.totaal), "ob-totaal")}
+        ${check.all_in !== null && check.all_in !== undefined ? rij("", t("Wat {leverancier} zegt", { leverancier: esc(w.leverancier) }), euro4(check.all_in), "ob-sensor") : ""}
       </div>`);
     } else if (check.all_in !== null && check.all_in !== undefined) {
-      delen.push(`<div class="ob-blok"><h4>Inkoop nu${tijd}</h4>
-        ${rij("", `All-in, van ${esc(w.leverancier)}`, euro4(check.all_in), "ob-totaal")}
+      delen.push(`<div class="ob-blok"><h4>${inkoopNu}</h4>
+        ${rij("", t("All-in, van {leverancier}", { leverancier: esc(w.leverancier) }), euro4(check.all_in), "ob-totaal")}
       </div>`);
     } else {
-      delen.push(`<div class="ob-blok"><h4>Inkoop</h4><p class="ob-leeg">Er is nu geen prijs: de sensoren geven niets voor dit moment.</p></div>`);
+      delen.push(`<div class="ob-blok"><h4>${t("Inkoop")}</h4><p class="ob-leeg">${t("Er is nu geen prijs: de sensoren geven niets voor dit moment.")}</p></div>`);
     }
 
-    const t = check.terug;
-    if (t && t.bedrag !== null && t.bedrag !== undefined) {
+    const tr = check.terug;
+    if (tr && tr.bedrag !== null && tr.bedrag !== undefined) {
       // Dezelfde opbouw als de inkoop erboven (v0.129.1). De bewoner van de
       // eerste woning op 19-10-2026: "identiek opbouwen als het overzicht van
       // de afnameprijs. Bij afname geef je de post kale marktprijs, bij
       // teruglevering zeg je marktprijs met btw." Dus ook hier de kale prijs,
       // en de btw en de energiebelasting als eigen regel.
-      const regels = terugRegels(check, t, w);
-      regels.push(rij("=", "Per teruggeleverde kWh", euro4(t.bedrag), "ob-totaal"));
-      delen.push(`<div class="ob-blok"><h4>Teruglevering nu</h4>${regels.join("")}
+      const regels = terugRegels(check, tr, w);
+      regels.push(rij("=", t("Per teruggeleverde kWh"), euro4(tr.bedrag), "ob-totaal"));
+      delen.push(`<div class="ob-blok"><h4>${t("Teruglevering nu")}</h4>${regels.join("")}
         ${jaarNoot(check)}
       ${kostenNoot(check)}
       ${schaalNoot(check)}
-        <p class="ob-noot">${t.vast ? "Het vaste bedrag uit je contract." : `Niet te controleren: ${esc(w.leverancier)} geeft de terugleverprijs niet door. Zo rekent de coach.`}</p>
+        <p class="ob-noot">${tr.vast ? t("Het vaste bedrag uit je contract.") : t("Niet te controleren: {leverancier} geeft de terugleverprijs niet door. Zo rekent de coach.", { leverancier: esc(w.leverancier) })}</p>
         ${salderenNoot(check)}</div>`);
     } else {
-      delen.push(`<div class="ob-blok"><h4>Teruglevering</h4><p class="ob-leeg">${
-        check.salderen ? "Onbekend: er is nu geen all-in prijs." : "Onbekend: zonder kale marktprijs weet de coach niet wat teruglevering opbrengt, en kan een thuisbatterij niet handelen."
+      delen.push(`<div class="ob-blok"><h4>${t("Teruglevering")}</h4><p class="ob-leeg">${
+        check.salderen ? t("Onbekend: er is nu geen all-in prijs.") : t("Onbekend: zonder kale marktprijs weet de coach niet wat teruglevering opbrengt, en kan een thuisbatterij niet handelen.")
       }</p></div>`);
     }
   }
@@ -301,8 +331,8 @@ export function opbouwHtml(check, namen = {}) {
 export function ptTijden(pt) {
   if (pt?.tarifa === "simples") return "";
   return pt?.ciclo === "semanal"
-    ? "Daluren doordeweeks van 00:00 tot 07:00, op zaterdag het grootste deel van de dag en op zondag de hele dag, in de tijd van Portugal."
-    : "Daluren elke dag van 22:00 tot 08:00, in de tijd van Portugal.";
+    ? t("Daluren doordeweeks van 00:00 tot 07:00, op zaterdag het grootste deel van de dag en op zondag de hele dag, in de tijd van Portugal.")
+    : t("Daluren elke dag van 22:00 tot 08:00, in de tijd van Portugal.");
 }
 
 /**
@@ -311,27 +341,34 @@ export function ptTijden(pt) {
  */
 export function ptBlok(check) {
   const p = check?.pt ?? {};
-  const procent = (n) => `${String(Number(n) || 0).replace(".", ",")}%`;
+  const procent = (n) => `${los(Number(n) || 0)}%`;
   const regels = (p.periodos ?? []).map((r) => {
-    const nu = r.periodo === p.nu ? ", nu" : "";
-    const som = r.energia > 0 ? `${euro4(r.energia)} + IEC ${euro4(r.iec)}, plus ${procent(r.iva)} IVA` : "niet ingevuld";
-    return rij("", `${esc(NAMEN[r.periodo] ?? r.periodo)}${nu}: ${som}`, r.all_in === null || r.all_in === undefined ? "onbekend" : euro4(r.all_in), r.periodo === p.nu ? "ob-totaal" : "");
+    const naam = esc(NAMEN[r.periodo] ? t(NAMEN[r.periodo]) : r.periodo);
+    const som = r.energia > 0
+      ? t("{energia} + IEC {iec}, plus {iva} IVA", { energia: euro4(r.energia), iec: euro4(r.iec), iva: procent(r.iva) })
+      : t("niet ingevuld");
+    const woord = r.periodo === p.nu ? t("{naam}, nu: {som}", { naam, som }) : `${naam}: ${som}`;
+    return rij("", woord, r.all_in === null || r.all_in === undefined ? t("onbekend") : euro4(r.all_in), r.periodo === p.nu ? "ob-totaal" : "");
   });
   const tijden = ptTijden(p);
   const terug = {
-    onbekend: "Teruglevering: nog niet ingevuld, dus weet de coach niet wat het opbrengt. In Portugal is er geen salderen.",
-    nenhum: "Teruglevering: niet verkocht, dus niets. In Portugal is er geen salderen.",
-    fixo: `Teruglevering: ${euro4(check.terug)} per kWh, uit je verkoopcontract. In Portugal is er geen salderen.`,
-    omie: "Teruglevering: een deel van de OMIE-prijs van dat moment. In Portugal is er geen salderen.",
+    onbekend: t("Teruglevering: nog niet ingevuld, dus weet de coach niet wat het opbrengt. In Portugal is er geen salderen."),
+    nenhum: t("Teruglevering: niet verkocht, dus niets. In Portugal is er geen salderen."),
+    fixo: t("Teruglevering: {bedrag} per kWh, uit je verkoopcontract. In Portugal is er geen salderen.", { bedrag: euro4(check.terug) }),
+    omie: t("Teruglevering: een deel van de OMIE-prijs van dat moment. In Portugal is er geen salderen."),
   }[p.excedente] ?? "";
   const vast = [];
-  if (Number(p.potencia_dia) > 0) vast.push(`potência ${euro4(p.potencia_dia)} per dag${Number(p.kva) > 0 ? ` (${String(p.kva).replace(".", ",")} kVA)` : ""}`);
-  if (Number(p.servicos_mes) > 0) vast.push(`diensten € ${Number(p.servicos_mes).toLocaleString("nl-NL", { minimumFractionDigits: 2 })} per maand`);
-  return `<div class="ob-blok"><h4>Stroom in Portugal${p.fornecedor ? `, ${esc(p.fornecedor)}` : ""}</h4>
+  if (Number(p.potencia_dia) > 0) {
+    vast.push(`${t("potência {bedrag} per dag", { bedrag: euro4(p.potencia_dia) })}${Number(p.kva) > 0 ? ` (${los(p.kva)} kVA)` : ""}`);
+  }
+  if (Number(p.servicos_mes) > 0) {
+    vast.push(t("diensten {bedrag} per maand", { bedrag: `€ ${Number(p.servicos_mes).toLocaleString(locale(), { minimumFractionDigits: 2 })}` }));
+  }
+  return `<div class="ob-blok"><h4>${t("Stroom in Portugal")}${p.fornecedor ? `, ${esc(p.fornecedor)}` : ""}</h4>
     ${regels.join("")}
     ${tijden ? `<p class="ob-noot">${tijden}</p>` : ""}
     ${terug ? `<p class="ob-noot">${terug}</p>` : ""}
-    ${vast.length ? `<p class="ob-noot">Vaste kosten, zonder IVA en niet in de sturing: ${vast.join(", ")}.</p>` : ""}
+    ${vast.length ? `<p class="ob-noot">${t("Vaste kosten, zonder IVA en niet in de sturing: {kosten}.", { kosten: vast.join(", ") })}</p>` : ""}
   </div>`;
 }
 
@@ -339,11 +376,13 @@ export function ptBlok(check) {
 export function bevestigdZin(check) {
   if (!check) return "";
   if (check.bevestigd) {
-    const d = new Date(check.bevestigd_op);
-    const datum = Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" });
-    return `Bevestigd${check.bevestigd_door ? ` door ${esc(check.bevestigd_door)}` : ""}${datum ? ` op ${datum}` : ""}.`;
+    const op = lang(check.bevestigd_op);
+    const door = check.bevestigd_door ? esc(check.bevestigd_door) : "";
+    if (door && op) return t("Bevestigd door {naam} op {datum}.", { naam: door, datum: op });
+    if (door) return t("Bevestigd door {naam}.", { naam: door });
+    return op ? t("Bevestigd op {datum}.", { datum: op }) : t("Bevestigd.");
   }
-  return check.bevestigd_op ? "Er is iets veranderd sinds de vorige bevestiging. Kijk het na en bevestig opnieuw." : "Nog niet bevestigd.";
+  return check.bevestigd_op ? t("Er is iets veranderd sinds de vorige bevestiging. Kijk het na en bevestig opnieuw.") : t("Nog niet bevestigd.");
 }
 
 export const opbouwCss = /* css */ `

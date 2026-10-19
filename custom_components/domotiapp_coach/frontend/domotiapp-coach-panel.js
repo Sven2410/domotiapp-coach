@@ -20,6 +20,18 @@ import { DacElement, define } from "./src/base.js";
 import { StateFeed } from "./src/state-feed.js";
 import { setLight } from "./src/theme.js";
 import { zetHuisZone } from "./src/format.js";
+import { kiesTaal, taal } from "./src/i18n.js";
+
+// De taal van de vorige keer (v0.139.0), zodat het eerste beeld al in de goede taal staat
+// en niet eerst Nederlands en dan Engels. Zonder opslag in de browser: automatisch.
+const TAAL_BEWAARD = (() => {
+  try {
+    return localStorage.getItem("dac-taal");
+  } catch {
+    return null;
+  }
+})();
+if (TAAL_BEWAARD) kiesTaal(TAAL_BEWAARD);
 import { volgCoach } from "./src/data-source.js";
 import { navItemsFor } from "./src/header.js";
 import "./src/header.js";
@@ -103,6 +115,7 @@ class DomotiAppCoachPanel extends DacElement {
     // De klok van het huis (format.js, `zetHuisZone`): de tijden van de coach staan in
     // de tijd van Home Assistant, ook als de browser in een ander land staat (v0.138.1).
     zetHuisZone(value?.config?.time_zone);
+    this.kiesTaal_();
     // Seeds the feed and, the first time, starts the subscription that keeps it
     // current regardless of whether this property is ever set again.
     this.feed_.connect(value);
@@ -193,6 +206,37 @@ class DomotiAppCoachPanel extends DacElement {
     if (!settings) return;
     this.settings_ = settings;
     for (const view of this.views_.values()) view.settings = settings;
+    this.kiesTaal_();
+  }
+
+  /**
+   * De taal (v0.139.0): de instelling bij Installatie, en bij automatisch de taal van Home
+   * Assistant. Zolang de instellingen er niet zijn blijft de taal van de vorige keer staan.
+   * Verandert hij, dan bouwt het paneel zich opnieuw op, want elk scherm tekent zijn tekst
+   * maar een keer (base.js).
+   */
+  kiesTaal_() {
+    if (!this.settings_ && TAAL_BEWAARD) return;
+    const veranderd = kiesTaal(this.settings_?.installation?.language ?? "auto", this.hass_?.config?.language);
+    try {
+      localStorage.setItem("dac-taal", taal());
+    } catch {
+      // Zonder opslag kiest het paneel de volgende keer gewoon opnieuw.
+    }
+    if (veranderd && this.rendered_) this.herbouw_();
+  }
+
+  /** Kop, schermen en berichtenbox opnieuw, in de taal van nu. */
+  herbouw_() {
+    for (const view of this.views_.values()) view.remove();
+    this.views_.clear();
+    this.shown_ = null;
+    const kop = document.createElement("dac-header");
+    this.$("dac-header").replaceWith(kop);
+    this.verbindKop_(kop);
+    this.$("dac-berichten-sheet").replaceWith(document.createElement("dac-berichten-sheet"));
+    if (this.berichten_) this.zetBerichten_(this.berichten_);
+    this.syncRoute_();
   }
 
   // --- rendering ---------------------------------------------------------
@@ -208,15 +252,20 @@ class DomotiAppCoachPanel extends DacElement {
     `;
   }
 
-  afterRender() {
-    const header = this.$("dac-header");
+  /** De kop aansluiten, bij het opbouwen en na een andere taal. */
+  verbindKop_(header) {
     header.toggleAttribute("narrow", !!this.narrow_);
     header.isAdmin = this.isAdmin_();
+    header.active = this.active_;
+    header.addEventListener("dac-home", () => this.goHome_());
+    header.addEventListener("dac-berichten", () => this.$("dac-berichten-sheet").open());
+  }
+
+  afterRender() {
+    this.verbindKop_(this.$("dac-header"));
     // On the panel, not on the header: a view opening one of its own sub-screens
     // sends the same event, and it has to be routed the same way.
     this.addEventListener("dac-navigate", (ev) => this.navigate_(ev.detail.id));
-    header.addEventListener("dac-home", () => this.goHome_());
-    header.addEventListener("dac-berichten", () => this.$("dac-berichten-sheet").open());
     this.addEventListener("dac-bericht-gelezen", (ev) => this.berichtGelezen_(ev.detail?.id ?? null));
     if (this.berichten_) this.zetBerichten_(this.berichten_);
     // Deliberately no button that opens Home Assistant's sidebar. Customers run

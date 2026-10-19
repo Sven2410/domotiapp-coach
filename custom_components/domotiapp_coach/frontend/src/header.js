@@ -15,22 +15,23 @@
 
 import { DacElement, define } from "./base.js";
 import { icons } from "./icons.js";
+import { nt, t } from "./i18n.js";
 
 export const NAV_ITEMS = [
-  { id: "overzicht", label: "Overzicht", icon: "gauge" },
-  { id: "historie", label: "Historie", icon: "gauge" },
-  { id: "meldingen", label: "Meldingen", icon: "bell" },
+  { id: "overzicht", label: nt("Overzicht"), icon: "gauge" },
+  { id: "historie", label: nt("Historie"), icon: "gauge" },
+  { id: "meldingen", label: nt("Meldingen"), icon: "bell" },
   // Heette Strategie tot v0.114.0; het id blijft, zodat een bladwijzer werkt.
-  { id: "strategie", label: "Voorkeuren", icon: "compass" },
+  { id: "strategie", label: nt("Voorkeuren"), icon: "compass" },
   // Van de installateur, en de bewoner ziet ze niet, ook niet grijs (v0.114.0).
   // De eigenaar op 08-10-2026: "voorop staat dat de klant geen entiteiten moet
   // kunnen kiezen". Wat hij wel instelt staat achter de kaart (Instellen), onder
   // Voorkeuren en onder Meldingen. Instellingen is opgegaan in Installatie.
-  { id: "apparaten", label: "Apparaten", icon: "devices", adminOnly: true },
-  { id: "installatie", label: "Installatie", icon: "plug", adminOnly: true },
+  { id: "apparaten", label: nt("Apparaten"), icon: "devices", adminOnly: true },
+  { id: "installatie", label: nt("Installatie"), icon: "plug", adminOnly: true },
   // Sinds v0.130.1 ook voor de bewoner, om te lezen en zijn prijs te
   // bevestigen; wijzigen blijft van de installateur (`views/contract.js`).
-  { id: "contract", label: "Contract", icon: "euro" },
+  { id: "contract", label: nt("Contract"), icon: "euro" },
 ];
 
 /** The sections this user may open. */
@@ -264,7 +265,7 @@ class DacHeader extends DacElement {
     if (!teller) return;
     teller.hidden = !this.ongelezen_;
     teller.textContent = this.ongelezen_ > 9 ? "9+" : String(this.ongelezen_ || "");
-    this.$("#berichten").setAttribute("aria-label", this.ongelezen_ ? `Berichten, ${this.ongelezen_} ongelezen` : "Berichten");
+    this.$("#berichten").setAttribute("aria-label", this.ongelezen_ ? t("Berichten, {n} ongelezen", { n: this.ongelezen_ }) : t("Berichten"));
   }
 
   /** Rebuild the bar when the user's rights become known. */
@@ -287,7 +288,7 @@ class DacHeader extends DacElement {
     const pills = navItemsFor(this.isAdmin_).map(
       (item) => `
         <button class="pill" type="button" data-id="${item.id}">
-          ${icons[item.icon]}<span>${item.label}</span>
+          ${icons[item.icon]}<span>${t(item.label)}</span>
         </button>`
     ).join("");
 
@@ -300,17 +301,17 @@ class DacHeader extends DacElement {
             <span class="brand-2">Coach</span>
           </div>
         </div>
-        <nav aria-label="Dashboardsecties">
+        <nav aria-label="${t("Dashboardsecties")}">
           <div class="pill-bg" aria-hidden="true"></div>
           ${pills}
         </nav>
         <div class="actions">
           <!-- De berichtenbox (v0.130.0). Het getal is een <i> en geen <span>:
                op een smal scherm verdwijnt de tekst van een knop hier. -->
-          <button class="ghost bel" type="button" id="berichten" title="Berichten" aria-label="Berichten">
-            ${icons.bell}<span>Berichten</span><i class="teller" id="teller" hidden></i>
+          <button class="ghost bel" type="button" id="berichten" title="${t("Berichten")}" aria-label="${t("Berichten")}">
+            ${icons.bell}<span>${t("Berichten")}</span><i class="teller" id="teller" hidden></i>
           </button>
-          <button class="ghost" type="button" id="home" title="Terug naar je eigen dashboard">
+          <button class="ghost" type="button" id="home" title="${t("Terug naar je eigen dashboard")}">
             ${icons.home}<span>Home</span>
           </button>
         </div>

@@ -420,6 +420,9 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     },
     "installation": {
         "home_name": "",
+        # De taal van het paneel en, vanaf stap 2, van wat de coach schrijft (v0.139.0):
+        # "auto" volgt de taal van Home Assistant, of "nl" of "en". Een taal per installatie.
+        "language": "auto",
         # 1 or 3. With the main fuse it gives the connection's power ceiling.
         "phases": 3,
         "fuse_amps": 25,

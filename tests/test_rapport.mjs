@@ -1557,7 +1557,7 @@ proef("op de kaart kies je per beurt tot hoeveel procent hij laadt (v0.88.0)", (
 proef("onder 'hoe vol is de auto nu' staat wat de coach van de opgave maakt, en het veld heeft een %", () => {
   const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
   assert.ok(kaart.includes('<span class="soc-procent" aria-hidden="true">%</span>'));
-  assert.ok(kaart.includes("sinds je ${Math.round(opgegeven)}% doorgaf is er "), "de zin met de kWh sinds de opgave");
+  assert.ok(kaart.includes('t("Dit loopt mee met wat de paal erin doet: sinds je {pct}% doorgaf is er {kwh} kWh geladen."'), "de zin met de kWh sinds de opgave");
   assert.ok(kaart.includes("Zegt de auto iets anders, vul dat in en druk op Doorgeven."));
 });
 
@@ -1646,12 +1646,12 @@ proef("de rij apparaten: het knopje van Indeling aanpassen, zonder tekst, en dan
   // passen." Sinds v0.102.1 dus alleen nog de pijltjes, bij de apparaten en bij
   // de kaarten.
   const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
-  assert.ok(/id="steer-sort"[^>]*aria-label="Volgorde aanpassen"[^>]*>\$\{icons\.sliders\}<\/button>/.test(kaart),
+  assert.ok(/id="steer-sort"[^>]*aria-label="\$\{t\("Volgorde aanpassen"\)\}"[^>]*>\$\{icons\.sliders\}<\/button>/.test(kaart),
     "hetzelfde icoon als Indeling aanpassen, zonder tekst");
-  assert.ok(kaart.includes("${icons.sliders} Indeling aanpassen"), "dat is het icoon van de knop onderaan");
+  assert.ok(kaart.includes('${icons.sliders} ${t("Indeling aanpassen")}'), "dat is het icoon van de knop onderaan");
   assert.ok(!/startTabDrag_|startDrag_|setPointerCapture|\.grip|dragging/.test(kaart), "er wordt nergens meer gesleept");
-  assert.ok(!/[Ss]leep de apparaten/.test(kaart) && kaart.includes("<span>Schuif het gekozen apparaat:</span>"), "en de tekst belooft het ook niet meer");
-  assert.ok(kaart.includes('data-move="-1" aria-label="Omhoog"') && kaart.includes('data-move="1" aria-label="Omlaag"'),
+  assert.ok(!/[Ss]leep de apparaten/.test(kaart) && kaart.includes('<span>${t("Schuif het gekozen apparaat:")}</span>'), "en de tekst belooft het ook niet meer");
+  assert.ok(kaart.includes('data-move="-1" aria-label="${t("Omhoog")}"') && kaart.includes('data-move="1" aria-label="${t("Omlaag")}"'),
     "de kaarten houden hun pijltjes omhoog en omlaag");
   assert.ok(!kaart.includes('aria-label="Verslepen"'), "zonder de greep om aan te slepen");
   assert.ok(kaart.includes('this.$("#steer-sort").hidden = list.length < 2;'), "alleen als er iets te ordenen valt");
@@ -1678,7 +1678,7 @@ proef("de laadlimiet per planning: het veld, de samenvatting en de zin op de kaa
   assert.ok(blad.includes("window_.target = doelUit(doelVeld.value)") && blad.includes("entry.target = doelUit(doelVeld.value)"),
     "het doel gaat mee bij elke dag hetzelfde en per dag");
   const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
-  assert.ok(kaart.includes("Deze beurt laadt tot ${Math.round(oordeel.target_plan)}%, volgens je planning"), "de zin op de kaart");
+  assert.ok(kaart.includes('t("Deze beurt laadt tot {pct}%, volgens je planning'), "de zin op de kaart");
   assert.ok(kaart.includes("const algemeen = oordeel.target_general ?? oordeel.target_percent;"), "de keuzelijst is de algemene limiet");
 });
 
@@ -3437,7 +3437,7 @@ proef("Voorkeuren heeft het overzicht erbij, en slaat dat meteen op via display/
 
 proef("op de kaart heet het Instellen, en de batterij krijgt een eigen knop", () => {
   const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf8");
-  assert.ok(bron.includes("${icons.sliders} Instellen") && !bron.includes("Schema instellen"));
+  assert.ok(bron.includes('${icons.sliders} ${t("Instellen")}') && !bron.includes("Schema instellen"));
   assert.ok(bron.includes('data-settings="${slot}"'), "de knop voor een apparaat zonder schema");
   assert.ok(bron.includes("instellen.hidden = !blok.hidden || !heeftVoorkeuren(device)"), "alleen waar geen schema is en wel iets in te stellen");
   assert.equal(heeftVoorkeuren({ type: "thuisbatterij" }), true);
@@ -5407,6 +5407,44 @@ proef("de klok van het huis: nu in de tijd van Home Assistant, niet van de brows
     assert.ok(!/nu = new Date\(\)|now_ = new Date\(\)|from = new Date\(\)|new Date\(\)\.getDate\(\)/.test(lees(pad)), pad);
   }
   assert.ok(lees("src/views/overview.js").includes("Math.round((huisNu().getTime() - toen) / 60000)"), "De coach heeft N minuten niets beslist");
+});
+
+// De eigenaar op 19-10-2026: "ik wil ook dat het hele coach in het engels ingesteld kan worden".
+proef("Engels: de taal kiezen, en elke zin heeft een vertaling (v0.139.0)", async () => {
+  const i = await import("../custom_components/domotiapp_coach/frontend/src/i18n.js");
+  const { EN } = await import("../custom_components/domotiapp_coach/frontend/src/i18n/en.js");
+  const f = await import("../custom_components/domotiapp_coach/frontend/src/format.js");
+  try {
+    assert.equal(i.taal(), "nl", "Nederlands is de standaard");
+    assert.equal(i.t("Klaar"), "Klaar");
+    assert.equal(f.duration(105), "1 u 45 min");
+    assert.equal(i.kiesTaal("auto", "en-GB"), true, "automatisch volgt Home Assistant");
+    assert.equal(i.taal(), "en");
+    assert.equal(i.t("Klaar"), "Done");
+    assert.equal(f.duration(105), "1 h 45 min");
+    assert.equal(i.t("nog {duur}", { duur: "5 min" }), "5 min left");
+    assert.equal(i.t("Een zin die er niet is"), "Een zin die er niet is", "zonder vertaling blijft het Nederlands");
+    assert.equal(i.getal(1.5), "1.5");
+    assert.equal(i.tn(1, "{n} proefje", "{n} proefjes"), "1 proefje", "meervoud, zonder vertaling Nederlands");
+    i.kiesTaal("nl");
+    assert.equal(i.getal(1.5), "1,5");
+    assert.equal(i.kiesTaal("auto", "nl"), false);
+    assert.equal(i.kiesTaal("auto", "de"), false, "een andere taal dan Engels: Nederlands");
+    assert.equal(i.taal(), "nl");
+  } finally {
+    i.kiesTaal("nl");
+  }
+
+  // Elke t("..."), tn(n, "...", "...") en nt("...") in het paneel heeft een Engelse zin, overal
+  // dezelfde, met dezelfde waarden tussen accolades en zonder gedachtestreepje. Hetzelfde als
+  // tools/vertaalcheck.mjs, dat per bestand zegt wat er mist.
+  const { controle } = await import("../tools/vertaalcheck.mjs");
+  const uit = await controle();
+  const mist = Object.entries(uit.ontbreekt).map(([pad, zinnen]) => `${pad}: ${zinnen.length}`);
+  assert.deepEqual(mist, [], `zinnen zonder Engels (node tools/vertaalcheck.mjs): ${mist.join(", ")}`);
+  assert.deepEqual(uit.verschillend, [], "anders vertaald in twee delen");
+  assert.deepEqual(uit.scheef, [], "andere waarden tussen accolades");
+  assert.deepEqual(uit.streep, [], "gedachtestreepje in het Engels");
 });
 
 // "ja bouw het maar" (de eigenaar op 19-10-2026): ook Historie op de klok van het huis. En

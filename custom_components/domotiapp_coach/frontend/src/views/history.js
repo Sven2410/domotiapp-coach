@@ -20,6 +20,7 @@ import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
 import { energy, euro, huisNu, percent, signedPower } from "../format.js";
 import { deviceLabel, deviceLabelMap } from "../devices.js";
+import { datum, getal, nt, t, tn } from "../i18n.js";
 
 /** Het merkteken op het rapport. */
 const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
@@ -44,9 +45,6 @@ import {
   withStatistics,
 } from "../statistics.js";
 
-const MAANDEN = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus",
-  "september", "oktober", "november", "december"];
-
 /** De maand waarin het stroomcontract (of anders het gascontract) ingaat, 1 tot 12, of null (v0.137.0). */
 export function jaarMaandContract(contract) {
   const start = contract?.start || contract?.gas?.start || "";
@@ -54,12 +52,12 @@ export function jaarMaandContract(contract) {
   return m ? Number(m[1]) : null;
 }
 
-/** Waar de terugknop je heen brengt, per tijdvak. */
+/** Waar de terugknop je heen brengt, per tijdvak; vertaald waar hij getoond wordt. */
 const NOW_LABEL = {
-  day: "Vandaag",
-  week: "Deze week",
-  month: "Deze maand",
-  year: "Dit jaar",
+  day: nt("Vandaag"),
+  week: nt("Deze week"),
+  month: nt("Deze maand"),
+  year: nt("Dit jaar"),
 };
 
 /** Hoe oud de kwartieren van de tijdlijn van vandaag mogen zijn voor ze opnieuw komen. */
@@ -77,6 +75,7 @@ const MIN_W = 240;
 const TOP = 18;
 const BOTTOM_PAD = 22;
 
+/** Getallen voor het rapport, dat tot stap 3 van het Engels Nederlands blijft (docs/taal.md). */
 const nl = (value, digits = 1) =>
   value.toLocaleString("nl-NL", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
@@ -179,7 +178,7 @@ export function perVak(rijen, tijden, einde) {
 export function apparaatReeksen(devices, stats, tijden, einde) {
   const labels = deviceLabelMap(devices ?? []);
   const reeksen = [];
-  const overig = { id: "__overig__", label: "Overige apparaten", kleur: "rest", vakken: tijden.map(() => 0), totaal: 0, exact: true };
+  const overig = { id: "__overig__", label: t("Overige apparaten"), kleur: "rest", vakken: tijden.map(() => 0), totaal: 0, exact: true };
   let plek = 0;
   for (const device of devices ?? []) {
     if (!device || device.type === "thuisbatterij" || (!device.entity && !device.energy_entity)) continue;
@@ -204,10 +203,13 @@ export function apparaatReeksen(devices, stats, tijden, einde) {
 /** How one bucket is named in the read-out above the chart. */
 function bucketTitle(period, date) {
   if (period === "day") {
-    return `${String(date.getHours()).padStart(2, "0")}:00 tot ${String((date.getHours() + 1) % 24).padStart(2, "0")}:00`;
+    return t("{van} tot {tot}", {
+      van: `${String(date.getHours()).padStart(2, "0")}:00`,
+      tot: `${String((date.getHours() + 1) % 24).padStart(2, "0")}:00`,
+    });
   }
-  if (period === "year") return date.toLocaleDateString("nl-NL", { month: "long", year: "numeric" });
-  return date.toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long" });
+  if (period === "year") return datum(date, { month: "long", year: "numeric" });
+  return datum(date, { weekday: "long", day: "numeric", month: "long" });
 }
 
 /**
@@ -273,12 +275,12 @@ const KORRELS = {
   },
 };
 
-/** De knoppen waarmee de klant de fijnheid kiest, van fijn naar grof. */
+/** De knoppen waarmee de klant de fijnheid kiest, van fijn naar grof; vertaald waar ze getoond worden. */
 const KORREL_KNOPPEN = [
-  { id: "quarter", label: "Kwartier" },
-  { id: "hour", label: "Uur" },
-  { id: "day", label: "Dag" },
-  { id: "month", label: "Maand" },
+  { id: "quarter", label: nt("Kwartier") },
+  { id: "hour", label: nt("Uur") },
+  { id: "day", label: nt("Dag") },
+  { id: "month", label: nt("Maand") },
 ];
 
 /** Wat er bij een periode past zolang de klant zelf niets aanwijst. */
@@ -401,7 +403,7 @@ function piekMoment(period, date) {
 /** What each bucket is called under the chart. */
 function bucketLabel(period, date) {
   if (period === "day") return String(date.getHours()).padStart(2, "0");
-  if (period === "year") return date.toLocaleDateString("nl-NL", { month: "short" }).replace(".", "");
+  if (period === "year") return datum(date, { month: "short" }).replace(".", "");
   return String(date.getDate());
 }
 
@@ -459,9 +461,9 @@ class DacViewHistory extends DacElement {
     return `
       <div class="wrap">
         <header class="intro">
-          <div class="eyebrow">Historie</div>
-          <h1>Wat je huis heeft gedaan</h1>
-          <p id="intro-lijn">Boven de lijn wat je verbruikte, onder de lijn wat je teruggaf.</p>
+          <div class="eyebrow">${t("Historie")}</div>
+          <h1>${t("Wat je huis heeft gedaan")}</h1>
+          <p id="intro-lijn">${t("Boven de lijn wat je verbruikte, onder de lijn wat je teruggaf.")}</p>
         </header>
 
         <!-- De keuzes als uitklaplijst, en een knop Rapport. De eigenaar op
@@ -470,29 +472,29 @@ class DacViewHistory extends DacElement {
              en een regel over 768 rapportregels was te veel. -->
         <div class="controls">
           <label class="keuze">
-            <span class="keuze-kop">Onderwerp</span>
+            <span class="keuze-kop">${t("Onderwerp")}</span>
             <span class="kies"><select id="onderwerp">
               <option value="energie">Energie</option>
               <option value="bespaard">Sessies</option>
             </select></span>
           </label>
           <label class="keuze">
-            <span class="keuze-kop">Periode</span>
+            <span class="keuze-kop">${t("Periode")}</span>
             <span class="kies"><select id="periode">
-              ${PERIODS.map((item) => `<option value="${item.id}">${item.label}</option>`).join("")}
+              ${PERIODS.map((item) => `<option value="${item.id}">${t(item.label)}</option>`).join("")}
             </select></span>
           </label>
           <!-- Waar een jaar begint, hier en niet alleen onder Voorkeuren (v0.137.0). De
                eigenaar op 19-10-2026: "ik kan niet van 1 sept tot 1 sept kiezen? En dat is
                wel handig als je je jaar contract periode wilt vergelijken." -->
           <label class="keuze" id="jaar-vanaf-rij" hidden>
-            <span class="keuze-kop">Jaar vanaf</span>
+            <span class="keuze-kop">${t("Jaar vanaf")}</span>
             <span class="kies"><select id="jaar-vanaf"></select></span>
           </label>
-          <label class="keuze" title="Hoe fijn het verloop in het rapport komt te staan">
-            <span class="keuze-kop">Verloop in het rapport</span>
+          <label class="keuze" title="${t("Hoe fijn het verloop in het rapport komt te staan")}">
+            <span class="keuze-kop">${t("Verloop in het rapport")}</span>
             <span class="kies"><select id="korrel">
-              ${KORREL_KNOPPEN.map((item) => `<option value="${item.id}">${item.label}</option>`).join("")}
+              ${KORREL_KNOPPEN.map((item) => `<option value="${item.id}">${t(item.label)}</option>`).join("")}
             </select></span>
           </label>
           <!-- Twee rapporten achter één knop. De bewoner van de eerste woning op
@@ -501,18 +503,18 @@ class DacViewHistory extends DacElement {
                uitgebreide." -->
           <div class="rapport">
             <button type="button" class="download" id="rapport-knop" aria-haspopup="true" aria-expanded="false">
-              ${icons.compass}<span>Rapport</span>
+              ${icons.compass}<span>${t("Rapport")}</span>
             </button>
             <div class="rapport-menu" id="rapport-menu" hidden>
-              <button type="button" id="report-short"><span>Kort rapport</span><small>Eén pagina: de cijfers, het geld en bespaard</small></button>
-              <button type="button" id="report"><span>Uitgebreid rapport</span><small>Alles, met het verloop per apparaat</small></button>
+              <button type="button" id="report-short"><span>${t("Kort rapport")}</span><small>${t("Eén pagina: de cijfers, het geld en bespaard")}</small></button>
+              <button type="button" id="report"><span>${t("Uitgebreid rapport")}</span><small>${t("Alles, met het verloop per apparaat")}</small></button>
             </div>
           </div>
           <div class="stepper">
             <button type="button" class="now" id="now" hidden></button>
-            <button type="button" id="prev" aria-label="Vorige">${icons.arrowLeft}</button>
+            <button type="button" id="prev" aria-label="${t("Vorige")}">${icons.arrowLeft}</button>
             <span id="period-label"></span>
-            <button type="button" id="next" aria-label="Volgende">${icons.arrowRight}</button>
+            <button type="button" id="next" aria-label="${t("Volgende")}">${icons.arrowRight}</button>
           </div>
         </div>
 
@@ -529,8 +531,8 @@ class DacViewHistory extends DacElement {
              per apparaat kunnen zien in historie", bij elke periode. -->
         <section class="card" id="apparaten-card" hidden>
           <div class="panel-head">
-            <div class="eyebrow">Per apparaat</div>
-            <h2 id="apparaten-titel">Wat je apparaten verbruikten</h2>
+            <div class="eyebrow">${t("Per apparaat")}</div>
+            <h2 id="apparaten-titel">${t("Wat je apparaten verbruikten")}</h2>
           </div>
           <div id="apparaten-stage"></div>
           <ul class="app-lijst" id="apparaten-lijst"></ul>
@@ -543,8 +545,8 @@ class DacViewHistory extends DacElement {
              tijdlijn.js. -->
         <section class="card" id="tijdlijn-card" hidden>
           <div class="panel-head">
-            <div class="eyebrow">Tijdlijn</div>
-            <h2>Wat de coach deed</h2>
+            <div class="eyebrow">${t("Tijdlijn")}</div>
+            <h2>${t("Wat de coach deed")}</h2>
           </div>
           <div id="tijdlijn"></div>
           <div class="legend" id="tijdlijn-legenda"></div>
@@ -558,8 +560,8 @@ class DacViewHistory extends DacElement {
              staat in geld.js, zodat het rapport precies hetzelfde zegt. -->
         <section class="card money" id="money-card" hidden>
           <div class="panel-head">
-            <div class="eyebrow">In geld</div>
-            <h2 id="money-title">Wat deze periode kostte en opleverde</h2>
+            <div class="eyebrow">${t("In geld")}</div>
+            <h2 id="money-title">${t("Wat deze periode kostte en opleverde")}</h2>
           </div>
           <div class="geld-kop" id="money-hero"></div>
           <div class="geld-balk" id="money-bar" role="img"></div>
@@ -569,7 +571,7 @@ class DacViewHistory extends DacElement {
 
         <section class="card gas" id="gas-card" hidden>
           <div class="panel-head">
-            <div class="eyebrow">Gas</div>
+            <div class="eyebrow">${t("Gas")}</div>
             <h2 id="gas-total"></h2>
           </div>
           <div id="gas-stage"></div>
@@ -577,7 +579,7 @@ class DacViewHistory extends DacElement {
 
         <section class="card gas water" id="water-card" hidden>
           <div class="panel-head">
-            <div class="eyebrow">Water</div>
+            <div class="eyebrow">${t("Water")}</div>
             <h2 id="water-total"></h2>
           </div>
           <div id="water-stage"></div>
@@ -586,7 +588,7 @@ class DacViewHistory extends DacElement {
         <section class="card saved" id="saved-card" hidden>
           <div class="panel-head">
             <div class="eyebrow">Sessies</div>
-            <h2>Wat de coach je bespaarde</h2>
+            <h2>${t("Wat de coach je bespaarde")}</h2>
           </div>
           <div class="totals" id="saved-totals"></div>
           <p class="note" id="saved-note"></p>
@@ -597,6 +599,12 @@ class DacViewHistory extends DacElement {
   }
 
   afterRender() {
+    // Deze drie staan letterlijk Nederlands in render(), want de proef "Energie en
+    // Sessies" leest ze in de bron; hier krijgen ze de taal van het paneel.
+    this.$('#onderwerp option[value="energie"]').textContent = t("Energie");
+    this.$('#onderwerp option[value="bespaard"]').textContent = t("Sessies");
+    this.$("#saved-card .eyebrow").textContent = t("Sessies");
+
     this.$("#onderwerp").addEventListener("change", (event) => {
       this.onderwerp_ = event.target.value;
       if (this.onderwerp_ === "bespaard") this.laadBeurten_();
@@ -882,8 +890,9 @@ class DacViewHistory extends DacElement {
     jaarRij.hidden = this.period_ !== "year";
     if (!jaarRij.hidden) {
       const contractMaand = jaarMaandContract(this.settings_?.contract);
-      this.$("#jaar-vanaf").innerHTML = MAANDEN.map((naam, i) =>
-        `<option value="${i + 1}">${naam}${contractMaand === i + 1 ? " (je contract)" : ""}</option>`).join("");
+      // De namen van de maanden in de taal van het paneel: januari, January.
+      this.$("#jaar-vanaf").innerHTML = Array.from({ length: 12 }, (_, i) =>
+        `<option value="${i + 1}">${datum(new Date(2026, i, 1), { month: "long" })}${contractMaand === i + 1 ? ` (${t("je contract")})` : ""}</option>`).join("");
       this.$("#jaar-vanaf").value = String(this.settings_?.history?.year_start_month ?? 1);
     }
     this.$("#onderwerp").value = this.onderwerp_;
@@ -898,8 +907,9 @@ class DacViewHistory extends DacElement {
     // anders eerst uitrekenen hoe vaak hij op het pijltje moet drukken. De knop
     // draagt de naam van waar hij je heen brengt en verdwijnt zodra je er bent.
     const nu = this.$("#now");
-    nu.textContent = NOW_LABEL[this.period_] ?? "Nu";
-    nu.title = `Terug naar ${(NOW_LABEL[this.period_] ?? "nu").toLowerCase()}`;
+    const terug = t(NOW_LABEL[this.period_] ?? "Nu");
+    nu.textContent = terug;
+    nu.title = t("Terug naar {waar}", { waar: terug.toLowerCase() });
     nu.hidden = this.offset_ === 0;
   }
 
@@ -935,13 +945,14 @@ class DacViewHistory extends DacElement {
       this.$("#apparaten-card").hidden = true;
       this.$("#gas-card").hidden = true;
       this.$("#water-card").hidden = true;
-      note.textContent =
-        "Er zijn nog geen meterstanden gekozen. Onder Installatie bij Meterstanden wijs je de tellers aan; daarna staat hier je geschiedenis.";
+      note.textContent = t(
+        "Er zijn nog geen meterstanden gekozen. Onder Installatie bij Meterstanden wijs je de tellers aan; daarna staat hier je geschiedenis."
+      );
       return;
     }
 
     if (!this.rows_) {
-      note.textContent = "Bezig met ophalen…";
+      note.textContent = t("Bezig met ophalen…");
       return;
     }
 
@@ -951,13 +962,14 @@ class DacViewHistory extends DacElement {
 
     const zinnen = [];
     if (!roles.solar.length) {
-      zinnen.push(
+      zinnen.push(t(
         "Je opwekteller staat nog niet ingesteld, dus je ziet hier alleen wat er van het net kwam en wat er naar het net ging. Vul bij Installatie onder Meterstanden de teller van je omvormer in, dan komen je opwek, je verbruik en je zelfbenutting er ook bij te staan."
-      );
+      ));
     }
     if (missing.length) {
       zinnen.push(
-        `Van ${missing.length === 1 ? "één teller" : `${missing.length} tellers`} houdt Home Assistant geen geschiedenis bij. Dat gebeurt alleen bij sensoren die zichzelf als oplopende totaalstand aanbieden.`
+        tn(missing.length, "Van één teller houdt Home Assistant geen geschiedenis bij.", "Van {n} tellers houdt Home Assistant geen geschiedenis bij."),
+        t("Dat gebeurt alleen bij sensoren die zichzelf als oplopende totaalstand aanbieden.")
       );
     }
     note.textContent = zinnen.join(" ");
@@ -966,7 +978,7 @@ class DacViewHistory extends DacElement {
     this.paintApparaten_();
     this.paintMoney_();
     this.paintGas_();
-    this.paintVolume_("water", "Waterverbruik per periode");
+    this.paintVolume_("water", t("Waterverbruik per periode"));
   }
 
   /** De apparaten die een balk op de tijdlijn krijgen: wat de coach stuurt. */
@@ -1042,7 +1054,7 @@ class DacViewHistory extends DacElement {
       stage.innerHTML = "";
       legendaVak.replaceChildren();
       uitleg.hidden = true;
-      note.textContent = "De tijdlijn staat bij Dag en Week.";
+      note.textContent = t("De tijdlijn staat bij Dag en Week.");
       return;
     }
     const van = this.periodeStart_();
@@ -1052,7 +1064,7 @@ class DacViewHistory extends DacElement {
       stage.innerHTML = "";
       legendaVak.replaceChildren();
       uitleg.hidden = true;
-      note.textContent = "Bezig met ophalen…";
+      note.textContent = t("Bezig met ophalen…");
       return;
     }
 
@@ -1074,11 +1086,16 @@ class DacViewHistory extends DacElement {
       legendaVak.replaceChildren();
       uitleg.hidden = true;
       const oudste = tl.meldingen.reduce((min, item) => (item?.at && item.at < min ? item.at : min), "9999");
-      const deze = this.period_ === "day" ? "deze dag" : "deze week";
+      const dag = this.period_ === "day";
+      const begin = oudste !== "9999" ? datum(oudste, { day: "numeric", month: "long" }) : "";
       note.textContent =
         oudste !== "9999" && new Date(oudste) >= tot
-          ? `Van ${deze} heeft de coach niets bewaard. De tijdlijn begint op ${new Date(oudste).toLocaleDateString("nl-NL", { day: "numeric", month: "long" })}.`
-          : `In ${deze} heeft de coach geen apparaten gestuurd.`;
+          ? dag
+            ? t("Van deze dag heeft de coach niets bewaard. De tijdlijn begint op {datum}.", { datum: begin })
+            : t("Van deze week heeft de coach niets bewaard. De tijdlijn begint op {datum}.", { datum: begin })
+          : dag
+            ? t("In deze dag heeft de coach geen apparaten gestuurd.")
+            : t("In deze week heeft de coach geen apparaten gestuurd.");
       return;
     }
 
@@ -1090,7 +1107,7 @@ class DacViewHistory extends DacElement {
     const tekst = gekozen ? tekenUitleg({ rijen, stippen: punten, gekozen, van, tot, nu, metAccu }) : "";
     uitleg.innerHTML = tekst;
     uitleg.hidden = !tekst;
-    note.textContent = tekst ? "" : "Tik op een balk of een stip voor wat er gebeurde.";
+    note.textContent = tekst ? "" : t("Tik op een balk of een stip voor wat er gebeurde.");
   }
 
   /** The buckets of this period, in order, with everything that belongs to one. */
@@ -1168,7 +1185,7 @@ class DacViewHistory extends DacElement {
       stage.innerHTML = "";
       this.$("#totals").replaceChildren();
       this.$("#legend").replaceChildren();
-      this.$("#note").textContent = "Over deze periode is nog niets vastgelegd.";
+      this.$("#note").textContent = t("Over deze periode is nog niets vastgelegd.");
       return;
     }
 
@@ -1201,8 +1218,8 @@ class DacViewHistory extends DacElement {
     this.paintTotals_(totals);
     this.paintLegend_();
     this.$("#intro-lijn").textContent = this.accuTegels_
-      ? "Boven de lijn wat je verbruikte, onder de lijn wat naar de batterij of het net ging."
-      : "Boven de lijn wat je verbruikte, onder de lijn wat je teruggaf.";
+      ? t("Boven de lijn wat je verbruikte, onder de lijn wat naar de batterij of het net ging.")
+      : t("Boven de lijn wat je verbruikte, onder de lijn wat je teruggaf.");
 
     // De breedte van het tekenvlak zelf, niet die van het scherm: de kaart
     // heeft eigen marges, en meten op het verkeerde element schaalt de hele
@@ -1271,7 +1288,7 @@ class DacViewHistory extends DacElement {
       .join("");
 
     stage.innerHTML = `
-      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Verbruik en teruglevering per periode">
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${t("Verbruik en teruglevering per periode")}">
         <line class="zero" x1="0" y1="${zero}" x2="${W}" y2="${zero}"/>
         ${bars}
         ${ticks}
@@ -1666,17 +1683,17 @@ class DacViewHistory extends DacElement {
     const label = knop?.querySelector("span");
     const oud = label?.textContent;
     if (knop) knop.disabled = true;
-    if (label) label.textContent = "Bezig";
+    if (label) label.textContent = t("Bezig");
 
     try {
       const blob = await reportPdf(gegevens);
       const naam = `DomotiApp Coach ${gegevens.periode}${beknopt ? " (beknopt)" : ""}.pdf`.replace(/[\\/:*?"<>|]/g, "-");
       const uitkomst = await this.bezorg_(blob, naam);
-      if (label && uitkomst === "mislukt") label.textContent = "Niet gelukt";
+      if (label && uitkomst === "mislukt") label.textContent = t("Niet gelukt");
       else if (label) label.textContent = oud;
     } catch (fout) {
       console.error("[DomotiApp Coach] het rapport kon niet gemaakt worden", fout);
-      if (label) label.textContent = "Niet gelukt";
+      if (label) label.textContent = t("Niet gelukt");
     } finally {
       if (knop) knop.disabled = false;
       // Een knop die "Niet gelukt" blijft zeggen is na een minuut alleen nog
@@ -1779,18 +1796,18 @@ class DacViewHistory extends DacElement {
 
     const rows = [];
     if (totals.solar !== null) {
-      rows.push({ label: "Opgewekt", value: energy(totals.solar), tone: "var(--dac-solar)" });
-      rows.push({ label: "Verbruikt", value: energy(totals.used), tone: "var(--dac-house)" });
+      rows.push({ label: t("Opgewekt"), value: energy(totals.solar), tone: "var(--dac-solar)" });
+      rows.push({ label: t("Verbruikt"), value: energy(totals.used), tone: "var(--dac-house)" });
     }
-    rows.push({ label: "Van het net", value: energy(totals.bought), tone: "var(--dac-grid-in)" });
-    rows.push({ label: "Naar het net", value: energy(totals.sold), tone: "var(--dac-grid-out)" });
+    rows.push({ label: t("Van het net"), value: energy(totals.bought), tone: "var(--dac-grid-in)" });
+    rows.push({ label: t("Naar het net"), value: energy(totals.sold), tone: "var(--dac-grid-out)" });
     // De thuisbatterij (v0.126.0), zoals het energiedashboard haar toont. De
     // eigenaar op 16-10-2026: "bij historie zie ik nu niet de thuisbatterij van
     // zoveel geladen en zoveel ontladen". Wat erin ging komt van je zon of van
     // het net, dus het staat naast die twee en telt nergens bij op.
     if (this.accuTegels_) {
-      rows.push({ label: "Batterij geladen", value: energy(totals.accuIn ?? 0), tone: "var(--dac-good)" });
-      rows.push({ label: "Batterij ontladen", value: energy(totals.accuUit ?? 0), tone: "var(--dac-good)" });
+      rows.push({ label: t("Batterij geladen"), value: energy(totals.accuIn ?? 0), tone: "var(--dac-good)" });
+      rows.push({ label: t("Batterij ontladen"), value: energy(totals.accuUit ?? 0), tone: "var(--dac-good)" });
     }
     // Twee percentages, zoals het energiedashboard ze naast elkaar zet. Van
     // v0.116.0 tot v0.126.5 stond alleen Zelfvoorzienend er, omdat "Zelf
@@ -1799,10 +1816,10 @@ class DacViewHistory extends DacElement {
     // het deel van je eigen zon dat je niet teruggaf (ook wat de batterij in
     // ging), Zelfvoorzienend het deel van je verbruik dat niet van het net kwam.
     if (totals.selfUse !== null && totals.selfUse !== undefined) {
-      rows.push({ label: "Zon zelf gebruikt", value: percent(totals.selfUse), tone: "var(--dac-solar)" });
+      rows.push({ label: t("Zon zelf gebruikt"), value: percent(totals.selfUse), tone: "var(--dac-solar)" });
     }
     if (totals.selfSufficient !== null && totals.selfSufficient !== undefined) {
-      rows.push({ label: "Zelfvoorzienend", value: percent(totals.selfSufficient), tone: "var(--dac-good)" });
+      rows.push({ label: t("Zelfvoorzienend"), value: percent(totals.selfSufficient), tone: "var(--dac-good)" });
     }
 
     this.$("#totals").replaceChildren(
@@ -1831,11 +1848,13 @@ class DacViewHistory extends DacElement {
   }
 
   paintLegend_() {
+    // De namen vertaald bij het tekenen; "Batterij" staat er letterlijk, want de proef
+    // van de batterij in de grafiek (v0.126.2) zoekt `label: "Batterij"`.
     const entries = [
-      { tone: "var(--dac-solar)", label: "Eigen zon gebruikt" },
+      { tone: "var(--dac-solar)", label: nt("Eigen zon gebruikt") },
       ...(this.accuTegels_ ? [{ tone: "var(--dac-device-1)", label: "Batterij" }] : []),
-      { tone: "var(--dac-grid-in)", label: "Van het net" },
-      { tone: "var(--dac-grid-out)", label: "Naar het net" },
+      { tone: "var(--dac-grid-in)", label: nt("Van het net") },
+      { tone: "var(--dac-grid-out)", label: nt("Naar het net") },
     ];
 
     this.$("#legend").replaceChildren(
@@ -1843,7 +1862,7 @@ class DacViewHistory extends DacElement {
         const item = document.createElement("span");
         const swatch = document.createElement("i");
         swatch.style.background = entry.tone;
-        item.append(swatch, document.createTextNode(` ${entry.label}`));
+        item.append(swatch, document.createTextNode(` ${t(entry.label)}`));
         return item;
       })
     );
@@ -1955,14 +1974,14 @@ class DacViewHistory extends DacElement {
     lijst.replaceChildren();
 
     if (this.beurten_ === undefined || this.beurten_ === null) {
-      note.textContent = "Bezig met ophalen…";
+      note.textContent = t("Bezig met ophalen…");
       return;
     }
     const { items, totaal } = this.bespaard_();
     if (!items.length) {
       note.textContent = this.beurten_.length
-        ? "Geen sessies in deze periode."
-        : "Nog geen sessies. Vanaf de volgende sessie staat hier wat die kostte en bespaarde.";
+        ? t("Geen sessies in deze periode.")
+        : t("Nog geen sessies. Vanaf de volgende sessie staat hier wat die kostte en bespaarde.");
       return;
     }
 
@@ -1997,22 +2016,24 @@ class DacViewHistory extends DacElement {
     // goedkoper moment (de eigenaar op 09-09-2026); waar de stroom vandaan kwam
     // (op 28-09-2026: "moet daar niet iets van de batterij bij?").
     tegels.append(
-      tegel("Bespaard", euro(totaal.saved), "var(--dac-solar)",
-        `${euro(totaal.solar_saved)} door zon, ${euro(totaal.wait_saved)} door wachten`),
-      tegel("Betaald", euro(totaal.paid), "var(--dac-grid-in)"),
-      tegel(w.hoeveel, kwh(totaal.kwh), "",
-        `${kwh(totaal.solar_kwh)} zon${metAccu ? `, ${kwh(totaal.battery_kwh)} uit de batterij` : ""}`)
+      tegel(t("Bespaard"), euro(totaal.saved), "var(--dac-solar)",
+        t("{zon} door zon, {wachten} door wachten", { zon: euro(totaal.solar_saved), wachten: euro(totaal.wait_saved) })),
+      tegel(t("Betaald"), euro(totaal.paid), "var(--dac-grid-in)"),
+      tegel(t(w.hoeveel), kwh(totaal.kwh), "",
+        metAccu
+          ? t("{zon} zon, {accu} uit de batterij", { zon: kwh(totaal.solar_kwh), accu: kwh(totaal.battery_kwh) })
+          : t("{zon} zon", { zon: kwh(totaal.solar_kwh) }))
     );
 
     // De eigenaar op 13-10-2026: "leg eens beurten uit dat snap ik niet."
-    const zinnen = ["Een sessie is één keer dat de coach een apparaat liet draaien, zoals de auto laden of de vaatwasser.", w.uitleg];
-    if (metAccu) zinnen.push("Stroom uit de batterij telt als netstroom, zodat niets dubbel telt.");
+    const zinnen = [t("Een sessie is één keer dat de coach een apparaat liet draaien, zoals de auto laden of de vaatwasser."), t(w.uitleg)];
+    if (metAccu) zinnen.push(t("Stroom uit de batterij telt als netstroom, zodat niets dubbel telt."));
     if (totaal.onbekend) {
       zinnen.push(
-        `${totaal.onbekend === 1 ? "Eén sessie telt" : `${totaal.onbekend} sessies tellen`} niet mee: de prijs was niet bekend.`
+        tn(totaal.onbekend, "Eén sessie telt niet mee: de prijs was niet bekend.", "{n} sessies tellen niet mee: de prijs was niet bekend.")
       );
     }
-    if (totaal.lopend) zinnen.push("Een sessie die nog loopt telt mee tot nu.");
+    if (totaal.lopend) zinnen.push(t("Een sessie die nog loopt telt mee tot nu."));
     note.textContent = zinnen.join(" ");
 
     const rij = (cellen, kop = false) => {
@@ -2025,13 +2046,14 @@ class DacViewHistory extends DacElement {
       return tr;
     };
     const wanneer = (b) => {
-      const t = new Date(b.plugged_at);
-      if (Number.isNaN(t.getTime())) return "";
-      const dag = `${String(t.getDate()).padStart(2, "0")}-${String(t.getMonth() + 1).padStart(2, "0")}`;
-      const klok = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+      const op = new Date(b.plugged_at);
+      if (Number.isNaN(op.getTime())) return "";
+      // 19-10 of 19/10, naar de taal.
+      const dag = datum(op, { day: "2-digit", month: "2-digit" });
+      const klok = `${String(op.getHours()).padStart(2, "0")}:${String(op.getMinutes()).padStart(2, "0")}`;
       return this.period_ === "day" ? klok : `${dag} ${klok}`;
     };
-    lijst.append(rij([w.wanneer, "Apparaat", w.hoeveel, "Betaald", "Bespaard"], true));
+    lijst.append(rij([t(w.wanneer), t("Apparaat"), t(w.hoeveel), t("Betaald"), t("Bespaard")], true));
     for (const b of items) {
       const extra = opmerking(b);
       lijst.append(
@@ -2104,13 +2126,17 @@ class DacViewHistory extends DacElement {
     };
   }
 
-  /** De delen van bespaard, in de volgorde en kleur van de balk. */
+  /**
+   * De delen van bespaard, in de volgorde en kleur van de balk. De namen blijven
+   * Nederlands (`nt`), want het rapport neemt ze over; het scherm vertaalt ze, en
+   * `kort` is het woord achter "door" bovenaan In geld.
+   */
   geldDelen_(g) {
     const heeftZon = this.meters_().solar.length > 0;
     return [
-      heeftZon ? { naam: "Door je zon", waarde: g.delen.zon, tone: "var(--dac-solar)" } : null,
-      g.metAccu ? { naam: "Door je thuisbatterij", waarde: g.delen.accu, tone: "var(--dac-good)" } : null,
-      g.metCoach ? { naam: "Door de coach", waarde: g.delen.coach, tone: "var(--dac-accent-hi)" } : null,
+      heeftZon ? { naam: nt("Door je zon"), kort: nt("zon"), waarde: g.delen.zon, tone: "var(--dac-solar)" } : null,
+      g.metAccu ? { naam: nt("Door je thuisbatterij"), kort: nt("thuisbatterij"), waarde: g.delen.accu, tone: "var(--dac-good)" } : null,
+      g.metCoach ? { naam: nt("Door de coach"), kort: nt("de coach"), waarde: g.delen.coach, tone: "var(--dac-accent-hi)" } : null,
     ].filter(Boolean);
   }
 
@@ -2124,8 +2150,12 @@ class DacViewHistory extends DacElement {
     card.hidden = false;
     const vandaag = this.period_ === "day" && this.offset_ === 0;
     this.$("#money-title").textContent = vandaag
-      ? "Wat vandaag tot nu kostte en opleverde"
-      : `Wat deze ${{ day: "dag", week: "week", month: "maand", year: "periode" }[this.period_]} kostte en opleverde`;
+      ? t("Wat vandaag tot nu kostte en opleverde")
+      : {
+        day: t("Wat deze dag kostte en opleverde"),
+        week: t("Wat deze week kostte en opleverde"),
+        month: t("Wat deze maand kostte en opleverde"),
+      }[this.period_] ?? t("Wat deze periode kostte en opleverde");
 
     // Twee getallen bovenaan. Levert teruglevering meer op dan de rest kost,
     // dan heet het verdiend: een minteken voor een euroteken leest als een fout.
@@ -2145,21 +2175,25 @@ class DacViewHistory extends DacElement {
       box.append(l, v, u);
       return box;
     };
-    const bespaardDelen = this.geldDelen_(g);
+    // Op het scherm in de taal van het paneel; geldDelen_ houdt de namen voor het rapport.
+    const bespaardDelen = this.geldDelen_(g).map((d) => ({ ...d, naam: t(d.naam), kort: t(d.kort) }));
     const verdiend = g.uitgegeven < 0;
-    const wat = [g.metGas ? "gas" : null, g.metWater ? "water" : null].filter(Boolean);
-    const door = bespaardDelen.map((d) => d.naam.replace(/^Door (je )?/, ""));
+    const wat = [g.metGas ? t("gas") : null, g.metWater ? t("water") : null].filter(Boolean);
+    const door = bespaardDelen.map((d) => d.kort);
+    // "a en b", en bij meer "a, b en c".
+    const opsomming = (lijst) => (lijst.length > 1 ? t("{a} en {b}", { a: lijst.slice(0, -1).join(", "), b: lijst.at(-1) }) : lijst[0]);
+    const waaraan = wat.length ? t("stroom, {rest}", { rest: opsomming(wat) }) : t("stroom");
     const hero = [
       kop(
-        verdiend ? "Verdiend" : "Uitgegeven",
+        verdiend ? t("Verdiend") : t("Uitgegeven"),
         Math.abs(g.uitgegeven),
-        `stroom${wat.length ? `, ${wat.join(" en ")}` : ""}${g.metTerug ? ", min wat teruglevering opbracht" : ""}`,
+        g.metTerug ? t("{wat}, min wat teruglevering opbracht", { wat: waaraan }) : waaraan,
         verdiend ? "var(--dac-good)" : "var(--dac-grid-in)"
       ),
       kop(
-        "Bespaard",
+        t("Bespaard"),
         g.bespaard,
-        door.length ? `door ${door.length > 1 ? `${door.slice(0, -1).join(", ")} en ${door.at(-1)}` : door[0]}` : "",
+        door.length ? t("door {wie}", { wie: opsomming(door) }) : "",
         "var(--dac-solar)"
       ),
     ];
@@ -2177,7 +2211,7 @@ class DacViewHistory extends DacElement {
     const metVoorraad = Math.abs(g.voorraad) >= 0.005;
     const stukken = [
       {
-        naam: metVoorraad ? "Uitgegeven aan wat je gebruikte" : "Uitgegeven",
+        naam: metVoorraad ? t("Uitgegeven aan wat je gebruikte") : t("Uitgegeven"),
         waarde: g.uitgegeven - g.voorraad,
         tone: "var(--dac-grid-in)",
       },
@@ -2227,16 +2261,16 @@ class DacViewHistory extends DacElement {
       }
       return box;
     };
-    const uit = [{ naam: "Stroom van het net", tekst: euro(g.stroom), tone: "var(--dac-grid-in)" }];
-    if (g.metTerug) uit.push({ naam: "Teruglevering", tekst: `− ${euro(g.terug)}`, tone: "var(--dac-grid-out)" });
-    if (g.metGas) uit.push({ naam: "Gas", tekst: euro(g.gas), tone: "var(--dac-warn)" });
-    if (g.metWater) uit.push({ naam: "Water", tekst: euro(g.water), tone: "var(--dac-grid-in)" });
+    const uit = [{ naam: t("Stroom van het net"), tekst: euro(g.stroom), tone: "var(--dac-grid-in)" }];
+    if (g.metTerug) uit.push({ naam: t("Teruglevering"), tekst: `− ${euro(g.terug)}`, tone: "var(--dac-grid-out)" });
+    if (g.metGas) uit.push({ naam: t("Gas"), tekst: euro(g.gas), tone: "var(--dac-warn)" });
+    if (g.metWater) uit.push({ naam: t("Water"), tekst: euro(g.water), tone: "var(--dac-grid-in)" });
     const batterijRegel = this.voorraadRegel_(g);
-    if (batterijRegel) uit.push({ ...batterijRegel, tone: "var(--dac-ink-3)" });
+    if (batterijRegel) uit.push({ ...batterijRegel, naam: t(batterijRegel.naam), tone: "var(--dac-ink-3)" });
     const bij = bespaardDelen.map((d) => ({ naam: d.naam, tekst: euro(d.waarde), tone: d.tone }));
     this.$("#money-parts").replaceChildren(
-      kolom(verdiend ? "Verdiend" : "Uitgegeven", uit),
-      ...(bij.length ? [kolom("Bespaard", bij)] : [])
+      kolom(verdiend ? t("Verdiend") : t("Uitgegeven"), uit),
+      ...(bij.length ? [kolom(t("Bespaard"), bij)] : [])
     );
 
     this.$("#money-note").textContent = this.geldUitleg_(g);
@@ -2249,9 +2283,10 @@ class DacViewHistory extends DacElement {
    */
   voorraadRegel_(g) {
     if (!g.metAccu || Math.abs(g.voorraad) < 0.005) return null;
+    // De naam blijft Nederlands voor het rapport; het scherm vertaalt hem (`paintMoney_`).
     return g.voorraad > 0
-      ? { naam: "Waarvan nog in je batterij", tekst: euro(g.voorraad) }
-      : { naam: "En uit je batterij, eerder betaald", tekst: euro(-g.voorraad) };
+      ? { naam: nt("Waarvan nog in je batterij"), tekst: euro(g.voorraad) }
+      : { naam: nt("En uit je batterij, eerder betaald"), tekst: euro(-g.voorraad) };
   }
 
   /** Hoe hard de getallen van In geld zijn, en waar ze vandaan komen. Ook voor het rapport. */
@@ -2268,56 +2303,72 @@ class DacViewHistory extends DacElement {
     const vast = rate.basis === "je vaste tarief";
     const contract = this.settings_?.contract;
     const rijen = this.rowsShown_ ?? [];
-    const zinnen = ["Bespaard is wat alles van het net gekost had, min wat je betaalde."];
+    const zinnen = [t("Bespaard is wat alles van het net gekost had, min wat je betaalde.")];
+    // `rate.basis` is de Nederlandse tekst van `tariff` in data-source.js; de twee die
+    // er naast het vaste tarief zijn hebben hier een eigen zin, zodat de taal klopt.
+    const prijs = euro(rate.buy);
     zinnen.push(
       vast
-        ? `Stroom kost ${euro(rate.buy)} per kWh.`
+        ? t("Stroom kost {prijs} per kWh.", { prijs })
         : perBucket
           ? this.period_ === "day"
-            ? "Gerekend met de prijs van elk uur."
-            : `Gerekend met ${this.period_ === "year" ? "maandgemiddelden" : "daggemiddelden"} van de prijs, dus ongeveer.`
-          : `Gerekend met ${rate.basis}, ${euro(rate.buy)} per kWh.`
+            ? t("Gerekend met de prijs van elk uur.")
+            : this.period_ === "year"
+              ? t("Gerekend met maandgemiddelden van de prijs, dus ongeveer.")
+              : t("Gerekend met daggemiddelden van de prijs, dus ongeveer.")
+          : rate.basis === "je tarief van nu"
+            ? t("Gerekend met je tarief van nu, {prijs} per kWh.", { prijs })
+            : rate.basis === "het gemiddelde tarief van vandaag"
+              ? t("Gerekend met het gemiddelde tarief van vandaag, {prijs} per kWh.", { prijs })
+              : t("Gerekend met {basis}, {prijs} per kWh.", { basis: rate.basis, prijs })
     );
     // Salderen per afrekenperiode (v0.135.0): hoeveel ervan wegstreept.
     const periode = (this.afrekening_?.perioden ?? []).find((p) => p.gesaldeerd !== null && p.gesaldeerd < 1);
     if (periode) {
-      const datum = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" });
-      zinnen.push(`Van ${datum(periode.van)} tot ${datum(periode.tot)} lever je naar verwachting meer terug dan je afneemt: ${Math.round(periode.gesaldeerd * 100)}% van je teruglevering saldeert, de rest krijgt de vergoeding na saldering.`);
+      const dag = (iso) => datum(`${iso}T12:00:00`, { day: "numeric", month: "long", year: "numeric" });
+      zinnen.push(t(
+        "Van {van} tot {tot} lever je naar verwachting meer terug dan je afneemt: {procent}% van je teruglevering saldeert, de rest krijgt de vergoeding na saldering.",
+        { van: dag(periode.van), tot: dag(periode.tot), procent: Math.round(periode.gesaldeerd * 100) }
+      ));
     }
     if (g.vasteKosten > 0.005 && this.afrekening_?.schaal) {
       const s = this.afrekening_.schaal;
-      zinnen.push(`Terugleverkosten in schalen: naar verwachting ${Math.round(s.kwh).toLocaleString("nl-NL")} kWh teruglevering, ${euro(s.per_jaar)} per jaar, ${euro(g.vasteKosten)} in deze periode.`);
+      zinnen.push(t(
+        "Terugleverkosten in schalen: naar verwachting {kwh} kWh teruglevering, {jaar} per jaar, {periode} in deze periode.",
+        { kwh: getal(Math.round(s.kwh), 0), jaar: euro(s.per_jaar), periode: euro(g.vasteKosten) }
+      ));
     }
     if (rijen.some((r) => salderen(contract, r.start))) {
       const p = prijsOp(contract, rate, g.prices, g.start, null, 3600000, aandeelOp(this.afrekening_, g.start));
       const jaar = SALDEREN_TOT.slice(0, 4);
       zinnen.push(
         p.terug !== null && p.koop !== null
-          ? `Tot 1 januari ${jaar} saldeer je: terugleveren levert ${euro(p.terug)} per kWh op, dus zelf gebruiken of opslaan scheelt maar ${euro(p.koop - p.terug)} per kWh.`
-          : `Tot 1 januari ${jaar} saldeer je: zelf gebruiken of opslaan scheelt dan alleen de terugleverkosten.`
+          ? t("Tot 1 januari {jaar} saldeer je: terugleveren levert {terug} per kWh op, dus zelf gebruiken of opslaan scheelt maar {verschil} per kWh.",
+            { jaar, terug: euro(p.terug), verschil: euro(p.koop - p.terug) })
+          : t("Tot 1 januari {jaar} saldeer je: zelf gebruiken of opslaan scheelt dan alleen de terugleverkosten.", { jaar })
       );
     }
     if (rijen.some((row) => contractAt(contract, row.start).period)) {
-      zinnen.push("Dagen in een eerder contract rekenen met dat contract.");
+      zinnen.push(t("Dagen in een eerder contract rekenen met dat contract."));
     }
     if (g.metAccu) {
       zinnen.push(
         g.accuDagen
-          ? "Thuisbatterij: wat ontladen opbracht, min wat het laden kostte. Wat er nog in zit staat bij Uitgegeven."
-          : "Thuisbatterij: telt vanaf de dag dat de coach haar volgt."
+          ? t("Thuisbatterij: wat ontladen opbracht, min wat het laden kostte. Wat er nog in zit staat bij Uitgegeven.")
+          : t("Thuisbatterij: telt vanaf de dag dat de coach haar volgt.")
       );
     }
     if (g.metCoach) {
       zinnen.push(
         g.beurtenGeladen
-          ? "Coach: zon naar een apparaat sturen en wachten op een goedkoper moment."
-          : "Wat de coach bespaarde wordt nog opgehaald."
+          ? t("Coach: zon naar een apparaat sturen en wachten op een goedkoper moment.")
+          : t("Wat de coach bespaarde wordt nog opgehaald.")
       );
     }
     if (!g.metTerug) {
-      zinnen.push("Wat terugleveren opbrengt ontbreekt: uit een all-in prijs is de marktprijs niet te halen.");
+      zinnen.push(t("Wat terugleveren opbrengt ontbreekt: uit een all-in prijs is de marktprijs niet te halen."));
     }
-    if (g.onbekend) zinnen.push("Van een deel van de periode is de prijs niet bekend; dat deel telt niet mee.");
+    if (g.onbekend) zinnen.push(t("Van een deel van de periode is de prijs niet bekend; dat deel telt niet mee."));
     return zinnen.join(" ");
   }
 
@@ -2342,7 +2393,7 @@ class DacViewHistory extends DacElement {
     const huis = this.meters_().solar.length > 0 ? vakken.map((row) => row.used) : null;
     this.appReeksen_ = reeksen;
     this.appHuis_ = huis;
-    this.$("#apparaten-titel").textContent = "Wat je apparaten verbruikten";
+    this.$("#apparaten-titel").textContent = t("Wat je apparaten verbruikten");
     this.paintAppLijst_(null);
 
     const stage = this.$("#apparaten-stage");
@@ -2390,7 +2441,7 @@ class DacViewHistory extends DacElement {
       .map((_, index) => `<rect class="hit" data-index="${index}" x="${inset + index * colW}" y="0" width="${colW}" height="${BOTTOM}"/>`)
       .join("");
 
-    stage.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Verbruik per apparaat">${balken}${ticks}${hits}</svg>`;
+    stage.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${t("Verbruik per apparaat")}">${balken}${ticks}${hits}</svg>`;
 
     const svg = stage.querySelector("svg");
     const at = (event) => {
@@ -2399,7 +2450,7 @@ class DacViewHistory extends DacElement {
       return Math.min(tijden.length - 1, Math.max(0, Math.floor((x - inset) / colW)));
     };
     const pick = (index) => {
-      this.$("#apparaten-titel").textContent = `Wat je apparaten verbruikten op ${bucketTitle(this.period_, vakken[index].start)}`;
+      this.$("#apparaten-titel").textContent = t("Wat je apparaten verbruikten op {wanneer}", { wanneer: bucketTitle(this.period_, vakken[index].start) });
       this.paintAppLijst_(index);
       svg.querySelectorAll(".b").forEach((balk, i) => balk.classList.toggle("dim", i !== index));
     };
@@ -2444,7 +2495,7 @@ class DacViewHistory extends DacElement {
         exact: reeks.exact,
       }));
     if (deelKlopt && huis - samen >= 0.05) {
-      rijen.push({ label: "Rest van het huis", kleur: null, kwh: huis - samen, exact: true, rest: true });
+      rijen.push({ label: t("Rest van het huis"), kleur: null, kwh: huis - samen, exact: true, rest: true });
     }
 
     // Zonder deel geen lege kolom: op een smal scherm is dat ruimte voor de naam.
@@ -2460,7 +2511,7 @@ class DacViewHistory extends DacElement {
         naam.textContent = rij.label;
         const kwh = document.createElement("span");
         kwh.className = "app-kwh";
-        kwh.textContent = `${rij.exact ? "" : "≈ "}${nl(rij.kwh, rij.kwh < 10 ? 2 : 1)} kWh`;
+        kwh.textContent = `${rij.exact ? "" : "≈ "}${getal(rij.kwh, rij.kwh < 10 ? 2 : 1)} kWh`;
         const deel = document.createElement("span");
         deel.className = "app-deel";
         deel.textContent = deelKlopt ? `${Math.round((rij.kwh / huis) * 100)}%` : "";
@@ -2470,23 +2521,23 @@ class DacViewHistory extends DacElement {
     );
 
     const zinnen = [];
-    if (!rijen.length) zinnen.push("In dit vak verbruikte geen van je apparaten iets.");
-    if (rijen.some((rij) => !rij.exact)) zinnen.push("≈ is geschat uit het vermogen, voor een apparaat zonder energieteller.");
+    if (!rijen.length) zinnen.push(t("In dit vak verbruikte geen van je apparaten iets."));
+    if (rijen.some((rij) => !rij.exact)) zinnen.push(t("≈ is geschat uit het vermogen, voor een apparaat zonder energieteller."));
     if (huis !== null && !deelKlopt && samen > 0) {
-      zinnen.push("Samen komen de schattingen boven wat het huis verbruikte, dus er staat geen deel bij.");
+      zinnen.push(t("Samen komen de schattingen boven wat het huis verbruikte, dus er staat geen deel bij."));
     }
     this.$("#apparaten-note").textContent = zinnen.join(" ");
   }
 
   clearAppPick_() {
     if (!this.appReeksen_ || this.$("#apparaten-card")?.hidden) return;
-    this.$("#apparaten-titel").textContent = "Wat je apparaten verbruikten";
+    this.$("#apparaten-titel").textContent = t("Wat je apparaten verbruikten");
     this.paintAppLijst_(null);
     for (const balk of this.$$("#apparaten-stage .b")) balk.classList.remove("dim");
   }
 
   paintGas_() {
-    this.paintVolume_("gas", "Gasverbruik per periode");
+    this.paintVolume_("gas", t("Gasverbruik per periode"));
   }
 
   /**
@@ -2501,7 +2552,7 @@ class DacViewHistory extends DacElement {
     if (!rows.length) return;
 
     const total = rows.reduce((sum, row) => sum + row.value, 0);
-    this.$(`#${soort}-total`).textContent = `${nl(total, 1)} m³ verbruikt`;
+    this.$(`#${soort}-total`).textContent = t("{m3} m³ verbruikt", { m3: getal(total, 1) });
 
     const gasStage = this.$(`#${soort}-stage`);
     const W = Math.max(MIN_W, Math.round(gasStage.getBoundingClientRect().width) || MIN_W);
@@ -2554,7 +2605,7 @@ class DacViewHistory extends DacElement {
 
     // Net als de stroomgrafiek: aanwijzen zet de kop erboven op die ene balk.
     const svg = gasStage.querySelector("svg");
-    const heel = `${nl(total, 1)} m³ verbruikt`;
+    const heel = t("{m3} m³ verbruikt", { m3: getal(total, 1) });
     const at = (event) => {
       const box = svg.getBoundingClientRect();
       const x = ((event.clientX - box.left) / box.width) * W;
@@ -2563,7 +2614,7 @@ class DacViewHistory extends DacElement {
     const pick = (index) => {
       const row = rows[index];
       if (!row) return;
-      this.$(`#${soort}-total`).textContent = `${nl(row.value, 1)} m³ op ${bucketTitle(this.period_, row.start)}`;
+      this.$(`#${soort}-total`).textContent = t("{m3} m³ op {wanneer}", { m3: getal(row.value, 1), wanneer: bucketTitle(this.period_, row.start) });
       for (const bar of svg.querySelectorAll(".b")) bar.classList.add("dim");
       svg.querySelectorAll(".b")[index]?.classList.remove("dim");
     };

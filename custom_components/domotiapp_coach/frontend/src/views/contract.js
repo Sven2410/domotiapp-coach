@@ -33,6 +33,7 @@ import {
 } from "./editor-base.js";
 import "../components/entity-picker.js";
 import { SALDEREN_TOT, salderen } from "../geld.js";
+import { datum, locale, nt, t, tn } from "../i18n.js";
 import { bevestigdZin, opbouwCss, opbouwHtml } from "../opbouw.js";
 import {
   SOORTEN,
@@ -47,10 +48,24 @@ import {
 
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 
-const SOORT_NAAM = { fixed: "vast", variable: "variabel", dynamic: "dynamisch" };
+/** De soort in een zin; vertaald waar hij getoond wordt, met `soortNaam`. */
+const SOORT_NAAM = { fixed: nt("vast"), variable: nt("variabel"), dynamic: nt("dynamisch") };
 
-/** Een datum als "18-10-2026", voor een naam. */
-const kortDatum = (tekst) => (tekst ? tekst.split("-").reverse().join("-") : "");
+/** De soort in de taal van nu, "vast" als hij onbekend is; met een hoofdletter vooraan voor een zin. */
+const soortNaam = (soort) => t(SOORT_NAAM[soort] ?? "vast");
+const hoofd = (tekst) => tekst.replace(/^./, (x) => x.toUpperCase());
+
+/** Een datum als "18-10-2026" (in het Engels 18/10/2026), voor een naam. */
+const kortDatum = (tekst) => {
+  if (!tekst) return "";
+  const d = new Date(`${tekst}T12:00:00`);
+  return Number.isNaN(d.getTime())
+    ? tekst.split("-").reverse().join("-")
+    : datum(d, { day: "2-digit", month: "2-digit", year: "numeric" });
+};
+
+/** Van wanneer tot wanneer, met "?" en "nu" voor wat er niet is. */
+const vanTot = (van, tot) => t("{van} tot {tot}", { van: kortDatum(van) || "?", tot: kortDatum(tot) || t("nu") });
 
 /**
  * De naam die een eerder contract voorgesteld krijgt (v0.129.0): leverancier,
@@ -60,13 +75,13 @@ const kortDatum = (tekst) => (tekst ? tekst.split("-").reverse().join("-") : "")
  */
 function voorgesteldeNaam(bron, supplier, soort, van, tot) {
   const naam = leverancier(supplier)?.naam ?? "";
-  const wat = { stroom: "stroom", gas: "gas", water: "water" }[bron];
-  const datums = van || tot ? `${kortDatum(van) || "?"} tot ${kortDatum(tot) || "nu"}` : "";
-  return [naam, soort ? `${wat}, ${SOORT_NAAM[soort] ?? ""}` : wat, datums].filter(Boolean).join(" ");
+  const wat = { stroom: t("stroom"), gas: t("gas"), water: t("water") }[bron];
+  const datums = van || tot ? vanTot(van, tot) : "";
+  return [naam, soort ? `${wat}, ${t(SOORT_NAAM[soort] ?? "")}` : wat, datums].filter(Boolean).join(" ");
 }
 
 /** Vandaag en gisteren als "2026-10-18", in de tijd van het huis. */
-const euro2 = (n) => `€ ${Number(n || 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const euro2 = (n) => `€ ${Number(n || 0).toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /**
  * Wat het opnieuw uitrekenen van de beurten gaf (v0.136.0), in een paar zinnen.
@@ -75,19 +90,24 @@ const euro2 = (n) => `€ ${Number(n || 0).toLocaleString("nl-NL", { minimumFrac
 export function beurtenZin(uit) {
   if (!uit) return "";
   if (uit.fout) return uit.fout;
-  const datum = new Date(`${uit.van}T12:00:00`).toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" });
+  const vanaf = datum(new Date(`${uit.van}T12:00:00`), { day: "numeric", month: "long", year: "numeric" });
   const zinnen = [];
   if (!uit.beurten) {
-    zinnen.push(`Vanaf ${datum} is er geen afgeronde beurt met een vaste prijs.`);
+    zinnen.push(t("Vanaf {datum} is er geen afgeronde beurt met een vaste prijs.", { datum: vanaf }));
   } else {
-    zinnen.push(`Vanaf ${datum}, ${uit.beurten} ${uit.beurten === 1 ? "beurt" : "beurten"}: betaald was ${euro2(uit.voor?.paid)} en wordt ${euro2(uit.na?.paid)}, bespaard was ${euro2(uit.voor?.saved)} en wordt ${euro2(uit.na?.saved)}.`);
+    const bedragen = { datum: vanaf, betaaldVoor: euro2(uit.voor?.paid), betaaldNa: euro2(uit.na?.paid),
+      bespaardVoor: euro2(uit.voor?.saved), bespaardNa: euro2(uit.na?.saved) };
+    zinnen.push(tn(uit.beurten,
+      "Vanaf {datum}, {n} beurt: betaald was {betaaldVoor} en wordt {betaaldNa}, bespaard was {bespaardVoor} en wordt {bespaardNa}.",
+      "Vanaf {datum}, {n} beurten: betaald was {betaaldVoor} en wordt {betaaldNa}, bespaard was {bespaardVoor} en wordt {bespaardNa}.",
+      bedragen));
   }
   if (uit.overgeslagen) {
-    zinnen.push(uit.overgeslagen === 1
-      ? "1 beurt met een dynamische prijs blijft zoals hij was."
-      : `${uit.overgeslagen} beurten met een dynamische prijs blijven zoals ze waren.`);
+    zinnen.push(tn(uit.overgeslagen,
+      "{n} beurt met een dynamische prijs blijft zoals hij was.",
+      "{n} beurten met een dynamische prijs blijven zoals ze waren."));
   }
-  if (uit.toegepast) zinnen.push("Overgenomen.");
+  if (uit.toegepast) zinnen.push(t("Overgenomen."));
   return zinnen.join(" ");
 }
 
@@ -95,20 +115,20 @@ function dagTekst(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-const euroTekst = (n) => `€ ${Number(n).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+const euroTekst = (n) => `€ ${Number(n).toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
 
 function datumLang(tekst) {
   if (!tekst) return "";
   const d = new Date(`${tekst}T12:00:00`);
-  return Number.isNaN(d.getTime()) ? tekst : d.toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" });
+  return Number.isNaN(d.getTime()) ? tekst : datum(d, { day: "numeric", month: "long", year: "numeric" });
 }
 
 /** De vier vormen van terugleverkosten (v0.135.0), zoals `kosten_per_kwh` in prijsopbouw.py. */
 const KOSTEN_VORMEN = [
-  ["kwh", "Per kWh, over alles wat je teruglevert"],
-  ["overschot", "Per kWh, alleen over wat er na salderen overblijft"],
-  ["schalen", "Een vast bedrag per jaar, in schalen"],
-  ["geen", "Geen terugleverkosten"],
+  ["kwh", nt("Per kWh, over alles wat je teruglevert")],
+  ["overschot", nt("Per kWh, alleen over wat er na salderen overblijft")],
+  ["schalen", nt("Een vast bedrag per jaar, in schalen")],
+  ["geen", nt("Geen terugleverkosten")],
 ];
 
 /**
@@ -117,35 +137,37 @@ const KOSTEN_VORMEN = [
  */
 const kostenVorm = (prefix) => `
   <div class="row">
-    <label for="${prefix}-kostvorm">Hoe rekent je leverancier terugleverkosten?</label>
+    <label for="${prefix}-kostvorm">${t("Hoe rekent je leverancier terugleverkosten?")}</label>
     <select id="${prefix}-kostvorm" data-kostvorm="${prefix}">
-      ${KOSTEN_VORMEN.map(([id, tekst]) => `<option value="${id}">${tekst}</option>`).join("")}
+      ${KOSTEN_VORMEN.map(([id, tekst]) => `<option value="${id}">${t(tekst)}</option>`).join("")}
     </select>
   </div>
   <div class="schalen" id="${prefix}-schalen-blok">
-    <span class="sub">De tabel van je leverancier: vanaf hoeveel kWh teruglevering over je afrekenperiode een schaal geldt, en wat hij per jaar kost met btw. Onder de eerste schaal kost het niets. Een kWh extra kost dan niets; het bedrag staat in Historie per dag.</span>
-    <div class="schaal-kop"><span>Vanaf (kWh)</span><span>Per jaar (€)</span><span></span></div>
+    <span class="sub">${t("De tabel van je leverancier: vanaf hoeveel kWh teruglevering over je afrekenperiode een schaal geldt, en wat hij per jaar kost met btw. Onder de eerste schaal kost het niets. Een kWh extra kost dan niets; het bedrag staat in Historie per dag.")}</span>
+    <div class="schaal-kop"><span>${t("Vanaf (kWh)")}</span><span>${t("Per jaar (€)")}</span><span></span></div>
     <div id="${prefix}-schalen"></div>
-    <div class="circuit-actions"><button type="button" data-schaal-erbij="${prefix}">Schaal toevoegen</button></div>
+    <div class="circuit-actions"><button type="button" data-schaal-erbij="${prefix}">${t("Schaal toevoegen")}</button></div>
     <div class="row">
-      <label for="${prefix}-schalen-tot">De schalen gelden tot</label>
+      <label for="${prefix}-schalen-tot">${t("De schalen gelden tot")}</label>
       <input type="date" id="${prefix}-schalen-tot" data-schalen-tot="${prefix}">
-      <span class="sub">Leeg is de hele afrekenperiode. Stoppen de vaste terugleverkosten op 1 januari 2027, zoals bij veel leveranciers, vul dan die datum in: dan telt de teruglevering tot die dag voor de schaal.</span>
+      <span class="sub">${t("Leeg is de hele afrekenperiode. Stoppen de vaste terugleverkosten op 1 januari 2027, zoals bij veel leveranciers, vul dan die datum in: dan telt de teruglevering tot die dag voor de schaal.")}</span>
     </div>
   </div>`;
 
+// De drie soorten staan in leveranciers.js (stap 3 van het Engels); hun Engels staat al in
+// i18n/en/contract.js, want het zijn de knoppen van dit scherm.
 const soortKnoppen = (id) => `
   <div class="segmented drie" id="${id}">
     ${SOORTEN.map((s) => `
       <button type="button" data-soort="${s.key}" aria-pressed="false">
-        <strong>${s.label}</strong>
-        ${s.uitleg}
+        <strong>${t(s.label)}</strong>
+        ${t(s.uitleg)}
       </button>`).join("")}
   </div>`;
 
 const levKeuze = (id, bron) => `
   <select id="${id}">
-    <option value="">Andere leverancier</option>
+    <option value="">${t("Andere leverancier")}</option>
     ${leveranciersVoor(bron).map((l) => `<option value="${esc(l.id)}">${esc(l.naam)}</option>`).join("")}
   </select>`;
 
@@ -154,13 +176,13 @@ const levKeuze = (id, bron) => `
  * de naam, de datums en de prijs, zonder velden.
  */
 export function periodesLezen(bron, lijst) {
-  if (!lijst?.length) return `<p class="sub geen">Geen eerdere contracten.</p>`;
+  if (!lijst?.length) return `<p class="sub geen">${t("Geen eerdere contracten.")}</p>`;
   return lijst.map((p) => {
-    const titel = p.name || leverancier(p.supplier)?.naam || "Eerder contract";
-    const wanneer = p.from || p.to ? `${kortDatum(p.from) || "?"} tot ${kortDatum(p.to) || "nu"}` : "";
+    const titel = p.name || leverancier(p.supplier)?.naam || t("Eerder contract");
+    const wanneer = p.from || p.to ? vanTot(p.from, p.to) : "";
     let prijs = "";
     if (bron === "stroom") {
-      prijs = p.type === "dynamic" ? "Dynamisch" : Number(p.all_in_price) > 0 ? `${euroTekst(p.all_in_price)} per kWh` : "";
+      prijs = p.type === "dynamic" ? t("Dynamisch") : Number(p.all_in_price) > 0 ? `${euroTekst(p.all_in_price)} per kWh` : "";
     } else if (Number(p.price) > 0) {
       prijs = `${euroTekst(p.price)} per m³`;
     }
@@ -201,15 +223,15 @@ class DacViewContract extends DacEditorElement {
     return `
       <div class="wrap">
         <header class="intro">
-          <div class="eyebrow">Contract</div>
-          <h1>Wat je energie kost</h1>
-          <p>Per energiebron je contract van nu en wat je eerder had. De coach rekent met je stroomcontract; gas en water zijn voor de historie en het rapport.</p>
-          <p class="bewoner-uitleg">Je installateur vult je contract in. Kijk hieronder of je stroomprijs klopt met de app of site van je leverancier, en bevestig hem. Klopt er iets niet, laat het je installateur dan weten.</p>
+          <div class="eyebrow">${t("Contract")}</div>
+          <h1>${t("Wat je energie kost")}</h1>
+          <p>${t("Per energiebron je contract van nu en wat je eerder had. De coach rekent met je stroomcontract; gas en water zijn voor de historie en het rapport.")}</p>
+          <p class="bewoner-uitleg">${t("Je installateur vult je contract in. Kijk hieronder of je stroomprijs klopt met de app of site van je leverancier, en bevestig hem. Klopt er iets niet, laat het je installateur dan weten.")}</p>
         </header>
 
         <!-- ================= stroom ================= -->
         <section class="card" id="stroom">
-          <h2>${icons.bolt} Mijn huidige stroomcontract</h2>
+          <h2>${icons.bolt} ${t("Mijn huidige stroomcontract")}</h2>
           <p class="hint" id="stroom-samenvatting"></p>
           <div class="fields">
             <!-- Het land (v0.137.0). De eigenaar op 19-10-2026: "bij contract bovenaan wil ik
@@ -217,35 +239,35 @@ class DacViewContract extends DacEditorElement {
                  keuzelijst: "ik wil een dropdown menu van het land hebben nu staat er 2 velden
                  groot in beeld." -->
             <div class="row" data-installateur>
-              <label for="land">Land</label>
+              <label for="land">${t("Land")}</label>
               <select id="land">
-                <option value="NL">Nederland</option>
+                <option value="NL">${t("Nederland")}</option>
                 <option value="PT">Portugal</option>
               </select>
               <span class="sub" id="land-hint"></span>
             </div>
 
             <div class="row" data-installateur id="soort-rij">
-              <label>Soort contract</label>
+              <label>${t("Soort contract")}</label>
               ${soortKnoppen("stroom-soort")}
             </div>
 
             <div class="row" data-installateur id="lev-rij">
-              <label for="stroom-lev">Leverancier</label>
+              <label for="stroom-lev">${t("Leverancier")}</label>
               ${levKeuze("stroom-lev", "stroom")}
               <span class="sub" id="stroom-lev-hint"></span>
             </div>
 
             <div class="two" data-installateur>
               <div class="row">
-                <label for="stroom-start">Mijn contract is ingegaan op</label>
+                <label for="stroom-start">${t("Mijn contract is ingegaan op")}</label>
                 <input type="date" id="stroom-start">
               </div>
               <div class="row" id="stroom-eind-rij">
-                <label for="stroom-end">Mijn contract loopt af op</label>
+                <label for="stroom-end">${t("Mijn contract loopt af op")}</label>
                 <input type="date" id="stroom-end">
-                <span class="sub">Alleen bij een vast contract. Variabel en dynamisch zijn maandelijks opzegbaar.</span>
-                <label for="stroom-dagen" class="klein">Herinner me zoveel dagen vooraf</label>
+                <span class="sub">${t("Alleen bij een vast contract. Variabel en dynamisch zijn maandelijks opzegbaar.")}</span>
+                <label for="stroom-dagen" class="klein">${t("Herinner me zoveel dagen vooraf")}</label>
                 <input type="number" id="stroom-dagen" min="0" max="365" step="1" inputmode="numeric">
               </div>
             </div>
@@ -253,67 +275,67 @@ class DacViewContract extends DacEditorElement {
             <!-- Portugal (v0.137.0): een prijs per tijdvak van de ERSE; zie tarifas.py. -->
             <div id="pt-fields" class="fields" data-installateur>
               <div class="row">
-                <label for="pt-lev">Leverancier</label>
-                <input type="text" id="pt-lev" maxlength="60" placeholder="Bijvoorbeeld EDP Comercial">
+                <label for="pt-lev">${t("Leverancier")}</label>
+                <input type="text" id="pt-lev" maxlength="60" placeholder="${t("Bijvoorbeeld EDP Comercial")}">
               </div>
               <div class="row">
                 <label>Opção horária</label>
                 <div class="segmented drie" id="pt-tarifa">
-                  <button type="button" data-tarifa="simples" aria-pressed="false"><strong>Simples</strong>Eén prijs, de hele dag.</button>
-                  <button type="button" data-tarifa="bi" aria-pressed="false"><strong>Bi-horário</strong>Daluren (vazio) en de rest.</button>
-                  <button type="button" data-tarifa="tri" aria-pressed="false"><strong>Tri-horário</strong>Daluren, normaal (cheias) en piek (ponta).</button>
+                  <button type="button" data-tarifa="simples" aria-pressed="false"><strong>Simples</strong>${t("Eén prijs, de hele dag.")}</button>
+                  <button type="button" data-tarifa="bi" aria-pressed="false"><strong>Bi-horário</strong>${t("Daluren (vazio) en de rest.")}</button>
+                  <button type="button" data-tarifa="tri" aria-pressed="false"><strong>Tri-horário</strong>${t("Daluren, normaal (cheias) en piek (ponta).")}</button>
                 </div>
               </div>
               <div class="row" id="pt-ciclo-rij">
                 <label>Ciclo</label>
                 <div class="segmented" id="pt-ciclo">
-                  <button type="button" data-ciclo="diario" aria-pressed="false"><strong>Ciclo diário</strong>Elke dag hetzelfde, daluren van 22:00 tot 08:00.</button>
-                  <button type="button" data-ciclo="semanal" aria-pressed="false"><strong>Ciclo semanal</strong>Doordeweeks daluren van 00:00 tot 07:00, in het weekend meer.</button>
+                  <button type="button" data-ciclo="diario" aria-pressed="false"><strong>Ciclo diário</strong>${t("Elke dag hetzelfde, daluren van 22:00 tot 08:00.")}</button>
+                  <button type="button" data-ciclo="semanal" aria-pressed="false"><strong>Ciclo semanal</strong>${t("Doordeweeks daluren van 00:00 tot 07:00, in het weekend meer.")}</button>
                 </div>
-                <span class="sub">Staat op je factuur. De tijden zijn die van Portugal.</span>
+                <span class="sub">${t("Staat op je factuur. De tijden zijn die van Portugal.")}</span>
               </div>
               <div class="two">
-                <div class="row" data-periodo="simples"><label for="pt-simples">Prijs (€ per kWh)</label><input type="number" id="pt-simples" min="0" step="0.0001" inputmode="decimal"></div>
-                <div class="row" data-periodo="vazio"><label for="pt-vazio">Daluren, vazio (€ per kWh)</label><input type="number" id="pt-vazio" min="0" step="0.0001" inputmode="decimal"></div>
-                <div class="row" data-periodo="fora_vazio"><label for="pt-fora">Buiten de daluren, fora do vazio (€ per kWh)</label><input type="number" id="pt-fora" min="0" step="0.0001" inputmode="decimal"></div>
-                <div class="row" data-periodo="cheias"><label for="pt-cheias">Normaal, cheias (€ per kWh)</label><input type="number" id="pt-cheias" min="0" step="0.0001" inputmode="decimal"></div>
-                <div class="row" data-periodo="ponta"><label for="pt-ponta">Piek, ponta (€ per kWh)</label><input type="number" id="pt-ponta" min="0" step="0.0001" inputmode="decimal"></div>
+                <div class="row" data-periodo="simples"><label for="pt-simples">${t("Prijs (€ per kWh)")}</label><input type="number" id="pt-simples" min="0" step="0.0001" inputmode="decimal"></div>
+                <div class="row" data-periodo="vazio"><label for="pt-vazio">${t("Daluren, vazio (€ per kWh)")}</label><input type="number" id="pt-vazio" min="0" step="0.0001" inputmode="decimal"></div>
+                <div class="row" data-periodo="fora_vazio"><label for="pt-fora">${t("Buiten de daluren, fora do vazio (€ per kWh)")}</label><input type="number" id="pt-fora" min="0" step="0.0001" inputmode="decimal"></div>
+                <div class="row" data-periodo="cheias"><label for="pt-cheias">${t("Normaal, cheias (€ per kWh)")}</label><input type="number" id="pt-cheias" min="0" step="0.0001" inputmode="decimal"></div>
+                <div class="row" data-periodo="ponta"><label for="pt-ponta">${t("Piek, ponta (€ per kWh)")}</label><input type="number" id="pt-ponta" min="0" step="0.0001" inputmode="decimal"></div>
               </div>
-              <div class="row"><span class="sub">De prijs na korting en zonder belastingen, zoals in de tabel van je contract (preço a pagar).</span></div>
+              <div class="row"><span class="sub">${t("De prijs na korting en zonder belastingen, zoals in de tabel van je contract (preço a pagar).")}</span></div>
               <div class="two">
                 <div class="row">
                   <label for="pt-iva">IVA (%)</label>
                   <input type="number" id="pt-iva" min="0" max="100" step="1" inputmode="numeric">
-                  <span class="sub">Meestal 23%. Alleen de eerste 200 kWh per 30 dagen vallen onder 6%, en alleen bij hooguit 6,9 kVA. Wat de coach verschuift valt daarboven.</span>
+                  <span class="sub">${t("Meestal 23%. Alleen de eerste 200 kWh per 30 dagen vallen onder 6%, en alleen bij hooguit 6,9 kVA. Wat de coach verschuift valt daarboven.")}</span>
                 </div>
                 <div class="row">
                   <label for="pt-iec">IEC (€ per kWh)</label>
                   <input type="number" id="pt-iec" min="0" step="0.0001" inputmode="decimal">
-                  <span class="sub">De belasting op elektriciteit: € 0,001 in 2026.</span>
+                  <span class="sub">${t("De belasting op elektriciteit: € 0,001 in 2026.")}</span>
                 </div>
               </div>
               <div class="row">
-                <label>Teruglevering (excedentes)</label>
+                <label>${t("Teruglevering (excedentes)")}</label>
                 <div class="segmented drie" id="pt-excedente">
-                  <button type="button" data-modo="nenhum" aria-pressed="false"><strong>Niet verkocht</strong>Wat je teruglevert brengt niets op.</button>
-                  <button type="button" data-modo="fixo" aria-pressed="false"><strong>Vaste prijs</strong>Een verkoopcontract met een prijs per kWh.</button>
-                  <button type="button" data-modo="omie" aria-pressed="false"><strong>OMIE-prijs</strong>Een deel van de marktprijs, zoals bij EDP.</button>
+                  <button type="button" data-modo="nenhum" aria-pressed="false"><strong>${t("Niet verkocht")}</strong>${t("Wat je teruglevert brengt niets op.")}</button>
+                  <button type="button" data-modo="fixo" aria-pressed="false"><strong>${t("Vaste prijs")}</strong>${t("Een verkoopcontract met een prijs per kWh.")}</button>
+                  <button type="button" data-modo="omie" aria-pressed="false"><strong>${t("OMIE-prijs")}</strong>${t("Een deel van de marktprijs, zoals bij EDP.")}</button>
                 </div>
-                <span class="sub" id="pt-excedente-hint">In Portugal is er geen salderen.</span>
+                <span class="sub" id="pt-excedente-hint">${t("In Portugal is er geen salderen.")}</span>
               </div>
               <div class="row" id="pt-preco-rij">
-                <label for="pt-preco">Prijs per teruggeleverde kWh (€)</label>
+                <label for="pt-preco">${t("Prijs per teruggeleverde kWh (€)")}</label>
                 <input type="number" id="pt-preco" min="0" step="0.0001" inputmode="decimal">
               </div>
               <div class="two" id="pt-omie-rij">
                 <div class="row">
-                  <label>OMIE-prijs</label>
+                  <label>${t("OMIE-prijs")}</label>
                   <dac-entity-picker id="pt-omie"></dac-entity-picker>
                 </div>
                 <div class="row">
-                  <label for="pt-fator">Deel van de OMIE-prijs (%)</label>
+                  <label for="pt-fator">${t("Deel van de OMIE-prijs (%)")}</label>
                   <input type="number" id="pt-fator" min="0" max="200" step="1" inputmode="numeric">
-                  <span class="sub">EDP betaalt 75%.</span>
+                  <span class="sub">${t("EDP betaalt 75%.")}</span>
                 </div>
               </div>
               <div class="two">
@@ -322,14 +344,14 @@ class DacViewContract extends DacEditorElement {
                   <input type="number" id="pt-kva" min="0" step="0.01" inputmode="decimal">
                 </div>
                 <div class="row">
-                  <label for="pt-potencia">Potência (€ per dag, zonder IVA)</label>
+                  <label for="pt-potencia">${t("Potência (€ per dag, zonder IVA)")}</label>
                   <input type="number" id="pt-potencia" min="0" step="0.0001" inputmode="decimal">
                 </div>
               </div>
               <div class="row">
-                <label for="pt-servicos">Diensten (€ per maand)</label>
+                <label for="pt-servicos">${t("Diensten (€ per maand)")}</label>
                 <input type="number" id="pt-servicos" min="0" step="0.0001" inputmode="decimal">
-                <span class="sub">Zoals EDP Smart. Vaste kosten staan er voor het overzicht; de coach stuurt er niet op.</span>
+                <span class="sub">${t("Zoals EDP Smart. Vaste kosten staan er voor het overzicht; de coach stuurt er niet op.")}</span>
               </div>
             </div>
 
@@ -337,35 +359,35 @@ class DacViewContract extends DacEditorElement {
             <div id="fixed-fields" class="fields" data-installateur>
               <div class="two">
                 <div class="row">
-                  <label for="fx-price">All-in prijs (€ per kWh)</label>
+                  <label for="fx-price">${t("All-in prijs (€ per kWh)")}</label>
                   <input type="number" id="fx-price" min="0" step="0.0001" inputmode="decimal">
-                  <span class="sub">Inclusief energiebelasting, opslag en btw, zoals op je contract.</span>
+                  <span class="sub">${t("Inclusief energiebelasting, opslag en btw, zoals op je contract.")}</span>
                 </div>
                 <div class="row">
-                  <label for="fx-feedin" id="fx-feedin-label">Terugleververgoeding (€ per kWh)</label>
+                  <label for="fx-feedin" id="fx-feedin-label">${t("Terugleververgoeding (€ per kWh)")}</label>
                   <input type="number" id="fx-feedin" min="0" step="0.0001" inputmode="decimal">
-                  <span class="sub">Wat je krijgt voor wat je teruglevert boven je eigen verbruik.</span>
+                  <span class="sub">${t("Wat je krijgt voor wat je teruglevert boven je eigen verbruik.")}</span>
                 </div>
               </div>
               ${kostenVorm("fx")}
               <div class="row" id="fx-feedcost-rij">
-                <label for="fx-feedcost" id="fx-feedcost-label">Terugleverkosten (€ per kWh)</label>
+                <label for="fx-feedcost" id="fx-feedcost-label">${t("Terugleverkosten (€ per kWh)")}</label>
                 <input type="number" id="fx-feedcost" min="0" step="0.0001" inputmode="decimal">
-                <span class="sub" id="fx-feedcost-hint">Wat je leverancier per teruggeleverde kWh rekent. Rekent hij een vast bedrag per jaar in schalen, kies dat hierboven.</span>
+                <span class="sub" id="fx-feedcost-hint">${t("Wat je leverancier per teruggeleverde kWh rekent. Rekent hij een vast bedrag per jaar in schalen, kies dat hierboven.")}</span>
               </div>
               <!-- wat het contract na salderen zegt (v0.134.0) -->
               <div id="fx-na">
                 <div class="row">
-                  <label>Vanaf 1 januari 2027</label>
-                  <span class="sub">Dan stopt salderen. Vul in wat je contract voor daarna zegt; leeg is hetzelfde als hierboven.</span>
+                  <label>${t("Vanaf 1 januari 2027")}</label>
+                  <span class="sub">${t("Dan stopt salderen. Vul in wat je contract voor daarna zegt; leeg is hetzelfde als hierboven.")}</span>
                 </div>
                 <div class="two">
                   <div class="row">
-                    <label for="fx-feedin-na">Terugleververgoeding (€ per kWh)</label>
+                    <label for="fx-feedin-na">${t("Terugleververgoeding (€ per kWh)")}</label>
                     <input type="number" id="fx-feedin-na" min="0" step="0.0001" inputmode="decimal">
                   </div>
                   <div class="row">
-                    <label for="fx-feedcost-na">Terugleverkosten (€ per kWh)</label>
+                    <label for="fx-feedcost-na">${t("Terugleverkosten (€ per kWh)")}</label>
                     <input type="number" id="fx-feedcost-na" min="0" step="0.0001" inputmode="decimal">
                   </div>
                 </div>
@@ -375,162 +397,160 @@ class DacViewContract extends DacEditorElement {
             <!-- dynamisch -->
             <div id="dynamic-fields" class="fields" data-installateur>
               <div class="row">
-                <label>Hoe vaak verandert de prijs?</label>
+                <label>${t("Hoe vaak verandert de prijs?")}</label>
                 <div class="segmented" id="dynamic-interval">
                   <button type="button" data-interval="hour" aria-pressed="false">
-                    <strong>Per uur</strong>
-                    Eén prijs per klokuur.
+                    <strong>${t("Per uur")}</strong>
+                    ${t("Eén prijs per klokuur.")}
                   </button>
                   <button type="button" data-interval="quarter" aria-pressed="false">
-                    <strong>Per kwartier</strong>
-                    Vier prijzen per uur.
+                    <strong>${t("Per kwartier")}</strong>
+                    ${t("Vier prijzen per uur.")}
                   </button>
                 </div>
-                <span class="sub">De lengte van de blokken waarin de coach plant. Met kwartieren komt hij dichter bij het goedkoopste moment, als je leverancier ook zo afrekent.</span>
+                <span class="sub">${t("De lengte van de blokken waarin de coach plant. Met kwartieren komt hij dichter bij het goedkoopste moment, als je leverancier ook zo afrekent.")}</span>
               </div>
 
               <div class="row">
-                <label>All-in prijssensor van je leverancier</label>
+                <label>${t("All-in prijssensor van je leverancier")}</label>
                 <dac-entity-picker id="dyn-allin"></dac-entity-picker>
-                <span class="sub">De prijs zoals je hem betaalt. Dit is de prijs waar de coach mee rekent.</span>
+                <span class="sub">${t("De prijs zoals je hem betaalt. Dit is de prijs waar de coach mee rekent.")}</span>
               </div>
               <div class="row">
-                <label>Kale marktprijs</label>
+                <label>${t("Kale marktprijs")}</label>
                 <dac-entity-picker id="dyn-market"></dac-entity-picker>
-                <span class="sub">Zonder belasting en btw, zoals de ingebouwde Nord Pool van Home Assistant. Hiermee rekent de coach je prijs na, weet hij wat teruglevering opbrengt, en neemt hij het over als je leverancier geen prijs geeft. Zonder all-in sensor rekent hij er je prijs mee uit.</span>
+                <span class="sub">${t("Zonder belasting en btw, zoals de ingebouwde Nord Pool van Home Assistant. Hiermee rekent de coach je prijs na, weet hij wat teruglevering opbrengt, en neemt hij het over als je leverancier geen prijs geeft. Zonder all-in sensor rekent hij er je prijs mee uit.")}</span>
               </div>
               <div class="notice" id="dyn-same" hidden>
                 ${icons.warning}
                 <span id="dyn-same-text"></span>
               </div>
               <div class="row" id="dyn-reserve-row">
-                <label>Reserveprijssensor</label>
+                <label>${t("Reserveprijssensor")}</label>
                 <dac-entity-picker id="dyn-reserve"></dac-entity-picker>
-                <span class="sub">Een tweede all-in prijs voor als die van je leverancier wegvalt. Meestal niet nodig: de kale marktprijs neemt het dan al over.</span>
+                <span class="sub">${t("Een tweede all-in prijs voor als die van je leverancier wegvalt. Meestal niet nodig: de kale marktprijs neemt het dan al over.")}</span>
               </div>
 
               <div class="two">
                 <div class="row">
-                  <label for="dyn-tax">Energiebelasting (€ per kWh, zonder btw)</label>
+                  <label for="dyn-tax">${t("Energiebelasting (€ per kWh, zonder btw)")}</label>
                   <input type="number" id="dyn-tax" min="0" step="0.00001" inputmode="decimal">
                   <span class="sub" id="dyn-tax-hint"></span>
                 </div>
                 <div class="row">
-                  <label for="dyn-vat">Btw (%)</label>
+                  <label for="dyn-vat">${t("Btw (%)")}</label>
                   <input type="number" id="dyn-vat" min="0" max="100" step="1" inputmode="numeric">
                 </div>
               </div>
               <div class="row">
-                <label for="dyn-markup" id="dyn-markup-label">Opslag van je leverancier (€ per kWh, zonder btw)</label>
+                <label for="dyn-markup" id="dyn-markup-label">${t("{opslag} (€ per kWh, zonder btw)", { opslag: t("Opslag van je leverancier") })}</label>
                 <input type="number" id="dyn-markup" min="0" step="0.000001" inputmode="decimal">
                 <span class="sub" id="dyn-markup-hint"></span>
               </div>
               <!-- Teruglevering apart (v0.132.0): de marktprijs, of een vast bedrag
                    naast de dynamische inkoop. -->
               <div class="row">
-                <label>Teruglevering</label>
+                <label>${t("Teruglevering")}</label>
                 <div class="segmented" id="dyn-terug">
                   <button type="button" data-terug="market" aria-pressed="false">
-                    <strong>Marktprijs</strong>
-                    Per uur of kwartier, zoals de inkoop.
+                    <strong>${t("Marktprijs")}</strong>
+                    ${t("Per uur of kwartier, zoals de inkoop.")}
                   </button>
                   <button type="button" data-terug="fixed" aria-pressed="false">
-                    <strong>Vast bedrag</strong>
-                    Een vaste vergoeding per kWh.
+                    <strong>${t("Vast bedrag")}</strong>
+                    ${t("Een vaste vergoeding per kWh.")}
                   </button>
                 </div>
-                <span class="sub">Zolang je saldeert telt een teruggeleverde kWh tot aan je eigen verbruik als je inkoopprijs, wat je hier ook kiest.</span>
+                <span class="sub">${t("Zolang je saldeert telt een teruggeleverde kWh tot aan je eigen verbruik als je inkoopprijs, wat je hier ook kiest.")}</span>
               </div>
               <div class="row" id="dyn-vast-rij">
-                <label for="dyn-feedfixed">Vaste terugleververgoeding (€ per kWh)</label>
+                <label for="dyn-feedfixed">${t("Vaste terugleververgoeding (€ per kWh)")}</label>
                 <input type="number" id="dyn-feedfixed" min="0" step="0.0001" inputmode="decimal">
               </div>
               ${kostenVorm("dyn")}
               <div class="two">
                 <div class="row" id="dyn-feedcost-rij">
-                  <label for="dyn-feedcost">Terugleverkosten (€ per kWh)</label>
+                  <label for="dyn-feedcost">${t("Terugleverkosten (€ per kWh)")}</label>
                   <input type="number" id="dyn-feedcost" min="0" step="0.0001" inputmode="decimal">
                 </div>
                 <div class="row alleen-markt">
-                  <label for="dyn-feedbonus">Vergoeding bij teruglevering (€ per kWh)</label>
+                  <label for="dyn-feedbonus">${t("Vergoeding bij teruglevering (€ per kWh)")}</label>
                   <input type="number" id="dyn-feedbonus" step="0.0001" inputmode="decimal">
-                  <span class="sub">Wat je leverancier per teruggeleverde kWh bovenop de marktprijs betaalt. Haalt hij er iets af, dan een negatief getal.</span>
+                  <span class="sub">${t("Wat je leverancier per teruggeleverde kWh bovenop de marktprijs betaalt. Haalt hij er iets af, dan een negatief getal.")}</span>
                 </div>
               </div>
               <label class="check" for="dyn-nettingfull">
                 <input type="checkbox" id="dyn-nettingfull">
-                <span><strong>Binnen salderen de hele all-in prijs terug</strong> Ook de opslag. Anders rekent de coach binnen salderen met de all-in prijs min de opslag.</span>
+                <span><strong>${t("Binnen salderen de hele all-in prijs terug")}</strong> ${t("Ook de opslag. Anders rekent de coach binnen salderen met de all-in prijs min de opslag.")}</span>
               </label>
               <label class="check alleen-markt" for="dyn-feedvat">
                 <input type="checkbox" id="dyn-feedvat">
-                <span><strong>Teruglevering met btw</strong> De leverancier betaalt de marktprijs voor teruglevering inclusief btw.</span>
+                <span><strong>${t("Teruglevering met btw")}</strong> ${t("De leverancier betaalt de marktprijs voor teruglevering inclusief btw.")}</span>
               </label>
               <div class="two alleen-markt">
                 <div class="row">
-                  <label for="dyn-bonuspct">Bonus op teruglevering (%)</label>
+                  <label for="dyn-bonuspct">${t("Bonus op teruglevering (%)")}</label>
                   <input type="number" id="dyn-bonuspct" min="0" max="100" step="0.1" inputmode="decimal">
-                  <span class="sub">Een bonus in procenten, zoals de Zonnebonus. Leeg of 0 is geen bonus.</span>
+                  <span class="sub">${t("Een bonus in procenten, zoals de Zonnebonus. Leeg of 0 is geen bonus.")}</span>
                 </div>
                 <div class="row">
-                  <label for="dyn-bonusbase">Over</label>
+                  <label for="dyn-bonusbase">${t("Over")}</label>
                   <select id="dyn-bonusbase">
-                    <option value="market">de marktprijs</option>
-                    <option value="market_plus_fee">de marktprijs plus de vergoeding</option>
+                    <option value="market">${t("de marktprijs")}</option>
+                    <option value="market_plus_fee">${t("de marktprijs plus de vergoeding")}</option>
                   </select>
                 </div>
               </div>
               <label class="check alleen-markt" for="dyn-bonusdag">
                 <input type="checkbox" id="dyn-bonusdag">
-                <span><strong>Bonus alleen overdag</strong> Van zonsopkomst tot zonsondergang, uitgerekend voor waar het huis staat.</span>
+                <span><strong>${t("Bonus alleen overdag")}</strong> ${t("Van zonsopkomst tot zonsondergang, uitgerekend voor waar het huis staat.")}</span>
               </label>
             </div>
 
             <label class="check" for="netting" data-installateur id="netting-rij">
               <input type="checkbox" id="netting">
               <span>
-                <strong>Je levert nog gesaldeerd terug</strong>
-                Dan streept elke teruggeleverde kWh weg tegen een ingekochte, tot aan wat je zelf
-                verbruikt, en is hij je inkoopprijs waard in plaats van je terugleververgoeding. De
-                regeling loopt af op 1 januari 2027.
+                <strong>${t("Je levert nog gesaldeerd terug")}</strong>
+                ${t("Dan streept elke teruggeleverde kWh weg tegen een ingekochte, tot aan wat je zelf verbruikt, en is hij je inkoopprijs waard in plaats van je terugleververgoeding. De regeling loopt af op 1 januari 2027.")}
               </span>
             </label>
             <div class="row" id="afreken-rij" data-installateur>
-              <label for="afreken-start">Je afrekenperiode begon op</label>
+              <label for="afreken-start">${t("Je afrekenperiode begon op")}</label>
               <input type="date" id="afreken-start">
-              <span class="sub">De dag na de einddatum op je laatste jaarafrekening. Salderen telt per afrekenperiode, ook over een nieuw contract heen. Wat je daarin meer teruglevert dan je afneemt krijgt de vergoeding.</span>
+              <span class="sub">${t("De dag na de einddatum op je laatste jaarafrekening. Salderen telt per afrekenperiode, ook over een nieuw contract heen. Wat je daarin meer teruglevert dan je afneemt krijgt de vergoeding.")}</span>
             </div>
 
             <div class="row">
-              <label>Zo komt je prijs tot stand</label>
+              <label>${t("Zo komt je prijs tot stand")}</label>
               <div class="ob" id="opbouw"></div>
             </div>
             <div class="bevestig">
-              <button type="button" class="primary vrij" id="bevestig">Ja, dit klopt</button>
+              <button type="button" class="primary vrij" id="bevestig">${t("Ja, dit klopt")}</button>
               <span class="sub" id="bevestigd-zin"></span>
             </div>
 
             <div class="nieuw" data-installateur>
-              <button type="button" data-nieuw="stroom">Ik heb een nieuw stroomcontract afgesloten</button>
-              <span class="sub">Zet dit contract bij de eerdere, en begin een nieuw formulier.</span>
+              <button type="button" data-nieuw="stroom">${t("Ik heb een nieuw stroomcontract afgesloten")}</button>
+              <span class="sub">${t("Zet dit contract bij de eerdere, en begin een nieuw formulier.")}</span>
             </div>
 
             <div class="row">
-              <label>Eerdere stroomcontracten</label>
-              <span class="sub">Historie en rapport rekenen elke dag met de prijs van toen. Wat de coach nu doet rekent altijd met het contract hierboven.</span>
+              <label>${t("Eerdere stroomcontracten")}</label>
+              <span class="sub">${t("Historie en rapport rekenen elke dag met de prijs van toen. Wat de coach nu doet rekent altijd met het contract hierboven.")}</span>
             </div>
             <div id="periods-stroom"></div>
             <div class="circuit-actions" data-installateur>
-              <button type="button" data-period-add="stroom">Eerder stroomcontract toevoegen</button>
+              <button type="button" data-period-add="stroom">${t("Eerder stroomcontract toevoegen")}</button>
             </div>
 
             <!-- de opgeslagen beurten opnieuw uitrekenen (v0.136.0) -->
             <div class="row" data-installateur>
-              <label for="beurten-van">Laadbeurten en programma's opnieuw uitrekenen</label>
-              <span class="sub">Na een gewijzigde prijs: wat de opgeslagen beurten kostten en bespaarden, opnieuw met het contract van die dag. Alleen bij een vaste of variabele prijs. Eerst zie je wat het wordt.</span>
+              <label for="beurten-van">${t("Laadbeurten en programma's opnieuw uitrekenen")}</label>
+              <span class="sub">${t("Na een gewijzigde prijs: wat de opgeslagen beurten kostten en bespaarden, opnieuw met het contract van die dag. Alleen bij een vaste of variabele prijs. Eerst zie je wat het wordt.")}</span>
               <input type="date" id="beurten-van">
               <div class="herreken-knoppen">
-                <button type="button" id="beurten-bekijk">Uitrekenen</button>
-                <button type="button" id="beurten-over" hidden>Overnemen</button>
+                <button type="button" id="beurten-bekijk">${t("Uitrekenen")}</button>
+                <button type="button" id="beurten-over" hidden>${t("Overnemen")}</button>
               </div>
               <p class="sub" id="beurten-uit"></p>
             </div>
@@ -539,84 +559,84 @@ class DacViewContract extends DacEditorElement {
 
         <!-- ================= gas ================= -->
         <section class="card" id="gas">
-          <h2>${icons.vlam} Mijn huidige gascontract</h2>
+          <h2>${icons.vlam} ${t("Mijn huidige gascontract")}</h2>
           <p class="hint" id="gas-samenvatting"></p>
           <!-- Gas en water uit te zetten (v0.138.0). De eigenaar op 19-10-2026: "ook onder
                contract staat gas etc maar dat heeft deze klant niet je moet het kunnen
                uitzetten." Hetzelfde vinkje als bij Installatie (sources.meters), zie slice_. -->
           <label class="check" for="gas-aan" data-installateur>
             <input type="checkbox" id="gas-aan">
-            <span><strong>Deze woning gebruikt gas</strong> Staat dit uit, dan blijft gas weg, hier en op het overzicht.</span>
+            <span><strong>${t("Deze woning gebruikt gas")}</strong> ${t("Staat dit uit, dan blijft gas weg, hier en op het overzicht.")}</span>
           </label>
           <div class="fields" id="gas-velden">
             <div class="row" data-installateur>
-              <label>Soort contract</label>
+              <label>${t("Soort contract")}</label>
               ${soortKnoppen("gas-soort")}
             </div>
             <div class="row" data-installateur>
-              <label for="gas-lev">Leverancier</label>
+              <label for="gas-lev">${t("Leverancier")}</label>
               ${levKeuze("gas-lev", "gas")}
-              <span class="sub" id="gas-lev-hint">Mag een andere zijn dan die van je stroom.</span>
+              <span class="sub" id="gas-lev-hint">${t("Mag een andere zijn dan die van je stroom.")}</span>
             </div>
             <div class="two" data-installateur>
               <div class="row">
-                <label for="gas-start">Mijn contract is ingegaan op</label>
+                <label for="gas-start">${t("Mijn contract is ingegaan op")}</label>
                 <input type="date" id="gas-start">
               </div>
               <div class="row" id="gas-eind-rij">
-                <label for="gas-end">Mijn contract loopt af op</label>
+                <label for="gas-end">${t("Mijn contract loopt af op")}</label>
                 <input type="date" id="gas-end">
-                <label for="gas-dagen" class="klein">Herinner me zoveel dagen vooraf</label>
+                <label for="gas-dagen" class="klein">${t("Herinner me zoveel dagen vooraf")}</label>
                 <input type="number" id="gas-dagen" min="0" max="365" step="1" inputmode="numeric">
               </div>
             </div>
             <div class="row" id="gas-prijs-rij" data-installateur>
-              <label for="gas-price">Gasprijs, all-in (€ per m³)</label>
+              <label for="gas-price">${t("Gasprijs, all-in (€ per m³)")}</label>
               <input type="number" id="gas-price" min="0" step="0.0001" inputmode="decimal">
-              <span class="sub">Inclusief energiebelasting, opslag en btw. Leeg laten als je geen gas hebt.</span>
+              <span class="sub">${t("Inclusief energiebelasting, opslag en btw. Leeg laten als je geen gas hebt.")}</span>
             </div>
             <div class="row" id="gas-sensor-rij" data-installateur>
-              <label>Sensor met de all-in gasprijs</label>
+              <label>${t("Sensor met de all-in gasprijs")}</label>
               <dac-entity-picker id="gas-entity"></dac-entity-picker>
-              <span class="sub" id="gas-sensor-hint">Een dynamische gasprijs verandert per dag. Historie neemt de prijs van elke dag uit deze sensor.</span>
+              <span class="sub" id="gas-sensor-hint">${t("Een dynamische gasprijs verandert per dag. Historie neemt de prijs van elke dag uit deze sensor.")}</span>
             </div>
             <div class="nieuw" data-installateur>
-              <button type="button" data-nieuw="gas">Ik heb een nieuw gascontract afgesloten</button>
+              <button type="button" data-nieuw="gas">${t("Ik heb een nieuw gascontract afgesloten")}</button>
             </div>
             <div class="row">
-              <label>Eerdere gascontracten</label>
+              <label>${t("Eerdere gascontracten")}</label>
             </div>
             <div id="periods-gas"></div>
             <div class="circuit-actions" data-installateur>
-              <button type="button" data-period-add="gas">Eerder gascontract toevoegen</button>
+              <button type="button" data-period-add="gas">${t("Eerder gascontract toevoegen")}</button>
             </div>
           </div>
         </section>
 
         <!-- ================= water ================= -->
         <section class="card" id="water">
-          <h2>${icons.druppel} Mijn huidige waterprijs</h2>
+          <h2>${icons.druppel} ${t("Mijn huidige waterprijs")}</h2>
           <p class="hint" id="water-samenvatting"></p>
           <label class="check" for="water-aan" data-installateur>
             <input type="checkbox" id="water-aan">
-            <span><strong>Deze woning heeft een watermeter in Home Assistant</strong> Staat dit uit, dan blijft water weg, hier en op het overzicht.</span>
+            <span><strong>${t("Deze woning heeft een watermeter in Home Assistant")}</strong> ${t("Staat dit uit, dan blijft water weg, hier en op het overzicht.")}</span>
           </label>
           <div class="fields" id="water-velden">
             <div class="row" data-installateur>
-              <label for="water-lev">Waterbedrijf</label>
-              <input type="text" id="water-lev" maxlength="60" placeholder="Bijvoorbeeld Vitens">
+              <label for="water-lev">${t("Waterbedrijf")}</label>
+              <input type="text" id="water-lev" maxlength="60" placeholder="${t("Bijvoorbeeld Vitens")}">
             </div>
             <div class="row" data-installateur>
-              <label for="water-price">Waterprijs, all-in (€ per m³)</label>
+              <label for="water-price">${t("Waterprijs, all-in (€ per m³)")}</label>
               <input type="number" id="water-price" min="0" step="0.0001" inputmode="decimal">
-              <span class="sub">Inclusief belasting. Leeg laten zonder watermeter.</span>
+              <span class="sub">${t("Inclusief belasting. Leeg laten zonder watermeter.")}</span>
             </div>
             <div class="row">
-              <label>Eerdere waterprijzen</label>
+              <label>${t("Eerdere waterprijzen")}</label>
             </div>
             <div id="periods-water"></div>
             <div class="circuit-actions" data-installateur>
-              <button type="button" data-period-add="water">Eerdere waterprijs toevoegen</button>
+              <button type="button" data-period-add="water">${t("Eerdere waterprijs toevoegen")}</button>
             </div>
           </div>
         </section>
@@ -696,7 +716,7 @@ class DacViewContract extends DacEditorElement {
     }
     const omie = this.$("#pt-omie");
     omie.filter = "price";
-    omie.placeholder = "Zoek een OMIE-prijssensor…";
+    omie.placeholder = t("Zoek een OMIE-prijssensor…");
     omie.addEventListener("dac-entity-change", (ev) => { pt().excedente.omie_entity = ev.detail.value; this.wijziging_(); });
     bind("dyn-tax", (v) => (c().dynamic.energy_tax = getal(v)));
     bind("dyn-markup", (v) => (c().dynamic.supplier_markup = getal(v)));
@@ -768,7 +788,7 @@ class DacViewContract extends DacEditorElement {
     for (const [id, key] of [["dyn-allin", "all_in_entity"], ["dyn-market", "market_entity"], ["dyn-reserve", "fallback_entity"]]) {
       const picker = this.$(`#${id}`);
       picker.filter = "price";
-      picker.placeholder = "Zoek een prijssensor…";
+      picker.placeholder = t("Zoek een prijssensor…");
       picker.addEventListener("dac-entity-change", (ev) => {
         const d = c().dynamic;
         d[key] = ev.detail.value;
@@ -781,7 +801,7 @@ class DacViewContract extends DacEditorElement {
     }
     const gasPicker = this.$("#gas-entity");
     gasPicker.filter = "price";
-    gasPicker.placeholder = "Zoek een gasprijssensor…";
+    gasPicker.placeholder = t("Zoek een gasprijssensor…");
     gasPicker.addEventListener("dac-entity-change", (ev) => {
       this.gas_().entity = ev.detail.value;
       this.wijziging_();
@@ -961,9 +981,9 @@ class DacViewContract extends DacEditorElement {
       this.saved_ = JSON.parse(JSON.stringify(settings));
       this.draft_ = JSON.parse(JSON.stringify(settings));
       this.fire("dac-settings-saved", { settings });
-      this.toast_("Bevestigd", true);
+      this.toast_(t("Bevestigd"), true);
     } catch (error) {
-      this.toast_(`Bevestigen mislukt: ${error?.message ?? error}`, false);
+      this.toast_(t("Bevestigen mislukt: {fout}", { fout: error?.message ?? error }), false);
     }
     this.paint_();
     this.vraagControle_();
@@ -978,7 +998,7 @@ class DacViewContract extends DacEditorElement {
     if (!this.hass_?.callWS) return;
     const stand = this.beurten_ ?? {};
     if (!stand.van) {
-      this.toast_("Kies eerst een dag.", false);
+      this.toast_(t("Kies eerst een dag."), false);
       return;
     }
     if (this.dirty_()) {
@@ -990,9 +1010,9 @@ class DacViewContract extends DacEditorElement {
     try {
       const uit = await this.hass_.callWS({ type: "domotiapp_coach/savings/recalculate", from: stand.van, apply: toepassen });
       this.beurten_ = { van: stand.van, uit };
-      if (uit?.toegepast) this.toast_("De beurten zijn opnieuw uitgerekend", true);
+      if (uit?.toegepast) this.toast_(t("De beurten zijn opnieuw uitgerekend"), true);
     } catch (error) {
-      this.beurten_ = { van: stand.van, uit: { fout: `Uitrekenen mislukt: ${error?.message ?? error}` } };
+      this.beurten_ = { van: stand.van, uit: { fout: t("Uitrekenen mislukt: {fout}", { fout: error?.message ?? error }) } };
     }
     this.paintBeurten_();
   }
@@ -1002,7 +1022,7 @@ class DacViewContract extends DacEditorElement {
     const stand = this.beurten_ ?? {};
     const knop = this.$("#beurten-bekijk");
     knop.disabled = Boolean(stand.bezig);
-    knop.textContent = stand.bezig ? "Bezig…" : "Uitrekenen";
+    knop.textContent = stand.bezig ? t("Bezig…") : t("Uitrekenen");
     this.$("#beurten-over").hidden = !(stand.uit && !stand.uit.fout && !stand.uit.toegepast && stand.uit.beurten > 0);
     this.$("#beurten-uit").textContent = stand.uit ? beurtenZin(stand.uit) : "";
   }
@@ -1102,16 +1122,18 @@ class DacViewContract extends DacEditorElement {
     const naSalderen = (!contract.start || contract.start < SALDEREN_TOT)
       && (!vast || !contract.end || contract.end >= SALDEREN_TOT);
     this.$("#fx-na").style.display = naSalderen ? "" : "none";
-    this.$("#fx-feedin-label").textContent = `Terugleververgoeding${naSalderen ? " tot 1 januari 2027" : ""} (€ per kWh)`;
-    this.$("#fx-feedcost-label").textContent = `Terugleverkosten${naSalderen ? " tot 1 januari 2027" : ""} (€ per kWh)`;
+    this.$("#fx-feedin-label").textContent = naSalderen
+      ? t("Terugleververgoeding tot 1 januari 2027 (€ per kWh)") : t("Terugleververgoeding (€ per kWh)");
+    this.$("#fx-feedcost-label").textContent = naSalderen
+      ? t("Terugleverkosten tot 1 januari 2027 (€ per kWh)") : t("Terugleverkosten (€ per kWh)");
     this.$("#afreken-rij").style.display = contract.netting && dagTekst(new Date()) < SALDEREN_TOT ? "" : "none";
 
     // Portugal (v0.137.0): de velden van het land, en de Nederlandse weg.
     const portugal = contract.country === "PT";
     this.$("#land").value = portugal ? "PT" : "NL";
     this.$("#land-hint").textContent = portugal
-      ? "Een prijs per tijdvak, zonder salderen."
-      : "Een all-in prijs of een dynamisch contract, salderen tot 2027.";
+      ? t("Een prijs per tijdvak, zonder salderen.")
+      : t("Een all-in prijs of een dynamisch contract, salderen tot 2027.");
     this.$("#pt-fields").style.display = portugal ? "" : "none";
     if (portugal) {
       for (const id of ["#soort-rij", "#lev-rij", "#fixed-fields", "#dynamic-fields", "#netting-rij", "#afreken-rij", "#fx-na"]) {
@@ -1123,8 +1145,8 @@ class DacViewContract extends DacEditorElement {
       for (const knop of this.$$("#pt-ciclo button")) knop.setAttribute("aria-pressed", String(knop.dataset.ciclo === (p.ciclo ?? "diario")));
       const modo = p.excedente?.modo ?? "onbekend";
       this.$("#pt-excedente-hint").textContent = modo === "onbekend"
-        ? "Nog niet gekozen: dan weet de coach niet wat teruglevering opbrengt. In Portugal is er geen salderen."
-        : "In Portugal is er geen salderen.";
+        ? t("Nog niet gekozen: dan weet de coach niet wat teruglevering opbrengt. In Portugal is er geen salderen.")
+        : t("In Portugal is er geen salderen.");
       for (const knop of this.$$("#pt-excedente button")) knop.setAttribute("aria-pressed", String(knop.dataset.modo === modo));
       this.$("#pt-ciclo-rij").style.display = tarifa === "simples" ? "none" : "";
       const zichtbaar = { simples: ["simples"], bi: ["vazio", "fora_vazio"], tri: ["vazio", "cheias", "ponta"] }[tarifa] ?? [];
@@ -1150,41 +1172,45 @@ class DacViewContract extends DacEditorElement {
 
     // De samenvatting bovenaan: wat voor contract, bij wie, sinds wanneer, tot wanneer.
     const l = leverancier(contract.supplier);
-    const delen = [`${(SOORT_NAAM[contract.type] ?? "vast").replace(/^./, (x) => x.toUpperCase())} contract`];
-    if (l) delen[0] += ` bij ${l.naam}`;
-    if (contract.start) delen.push(`ingegaan op ${datumLang(contract.start)}`);
-    if (vast && contract.end) delen.push(`loopt af op ${datumLang(contract.end)}`);
+    const soort = hoofd(soortNaam(contract.type));
+    const delen = [l ? t("{soort} contract bij {naam}", { soort, naam: l.naam }) : t("{soort} contract", { soort })];
+    if (contract.start) delen.push(t("ingegaan op {datum}", { datum: datumLang(contract.start) }));
+    if (vast && contract.end) delen.push(t("loopt af op {datum}", { datum: datumLang(contract.end) }));
     if (contract.country === "PT") {
       const p = contract.pt ?? {};
-      delen[0] = `Portugal, ${{ simples: "simples", bi: "bi-horário", tri: "tri-horário" }[p.tarifa ?? "bi"]}${p.fornecedor ? ` bij ${p.fornecedor}` : ""}`;
+      // De opção horária in het Portugees, zoals op de factuur.
+      const tarifa = { simples: "simples", bi: "bi-horário", tri: "tri-horário" }[p.tarifa ?? "bi"];
+      delen[0] = p.fornecedor ? t("Portugal, {tarifa} bij {naam}", { tarifa, naam: p.fornecedor }) : `Portugal, ${tarifa}`;
     }
     this.$("#stroom-samenvatting").textContent = `${delen.join(", ")}.`;
 
-    // Waar het voorstel vandaan kwam.
+    // Waar het voorstel vandaan kwam. De uitleg zelf komt uit de catalogus (leveranciers.js).
     const v = l ? voorstel(l.id, contract.type, "stroom") : null;
     const hint = this.$("#stroom-lev-hint");
     if (l && v) {
-      hint.innerHTML = `${esc(v.uitleg)}${v.terug ? ` ${esc(v.terug)}` : ""} Ingevuld uit de gegevens van ${esc(l.naam)}, nagekeken op ${esc(datumLang(v.peildatum))}${
-        v.bronnen.length ? ` (<a href="${esc(v.bronnen[0])}" target="_blank" rel="noopener">bron</a>)` : ""}. Kijk ze na en bevestig onderaan.${
-        v.onzeker.length ? ` <strong>Niet zeker:</strong> ${v.onzeker.map(esc).join(" ")}` : ""}`;
+      hint.innerHTML = `${esc(v.uitleg)}${v.terug ? ` ${esc(v.terug)}` : ""} ${t("Ingevuld uit de gegevens van {naam}, nagekeken op {datum}", { naam: esc(l.naam), datum: esc(datumLang(v.peildatum)) })}${
+        v.bronnen.length ? ` (<a href="${esc(v.bronnen[0])}" target="_blank" rel="noopener">${t("bron")}</a>)` : ""}. ${t("Kijk ze na en bevestig onderaan.")}${
+        v.onzeker.length ? ` <strong>${t("Niet zeker:")}</strong> ${v.onzeker.map(esc).join(" ")}` : ""}`;
     } else if (l) {
-      hint.textContent = `${l.naam} heeft geen ${SOORT_NAAM[contract.type] ?? ""} stroomcontract in de lijst. Vul de bedragen van je contract zelf in.`;
+      hint.textContent = t("{naam} heeft geen {soort} stroomcontract in de lijst. Vul de bedragen van je contract zelf in.",
+        { naam: l.naam, soort: t(SOORT_NAAM[contract.type] ?? "") });
     } else {
-      hint.textContent = "Staat je leverancier er niet tussen? Vul de bedragen van je contract zelf in.";
+      hint.textContent = t("Staat je leverancier er niet tussen? Vul de bedragen van je contract zelf in.");
     }
 
     const namen = namenVan(contract.supplier, contract.type);
-    this.$("#dyn-markup-label").textContent = `${namen.opslag || "Opslag van je leverancier"} (€ per kWh, zonder btw)`;
+    this.$("#dyn-markup-label").textContent = t("{opslag} (€ per kWh, zonder btw)", { opslag: namen.opslag || t("Opslag van je leverancier") });
     const markup = Number(d.supplier_markup) || 0;
     const vat = Number(d.vat_percent) || 0;
     this.$("#dyn-markup-hint").textContent = markup
-      ? `Met btw € ${(markup * (1 + vat / 100)).toLocaleString("nl-NL", { minimumFractionDigits: 4, maximumFractionDigits: 4 })} per kWh. Bij salderen komt dit bedrag niet terug: het hangt aan wat je afneemt.`
-      : "Wat je leverancier per kWh bovenop de marktprijs rekent, zonder btw.";
+      ? t("Met btw {bedrag} per kWh. Bij salderen komt dit bedrag niet terug: het hangt aan wat je afneemt.", {
+        bedrag: `€ ${(markup * (1 + vat / 100)).toLocaleString(locale(), { minimumFractionDigits: 4, maximumFractionDigits: 4 })}` })
+      : t("Wat je leverancier per kWh bovenop de marktprijs rekent, zonder btw.");
     const jaar = new Date().getFullYear();
     const eb = belastingStroom(jaar);
     this.$("#dyn-tax-hint").textContent = eb !== null
-      ? `In ${jaar} € ${eb.toLocaleString("nl-NL", { minimumFractionDigits: 5 })} zonder btw. Verandert elk jaar op 1 januari.`
-      : "Verandert elk jaar op 1 januari; kijk het na op je jaarnota.";
+      ? t("In {jaar} {bedrag} zonder btw. Verandert elk jaar op 1 januari.", { jaar, bedrag: `€ ${eb.toLocaleString(locale(), { minimumFractionDigits: 5 })}` })
+      : t("Verandert elk jaar op 1 januari; kijk het na op je jaarnota.");
 
     // Dezelfde sensor twee keer laat de coach het marktveld leeg (`_prices` in
     // coach.py), en tot v0.128.2 stond dat alleen in de kleine letters erboven.
@@ -1193,8 +1219,8 @@ class DacViewContract extends DacEditorElement {
     const zelfde = Boolean(d.market_entity) && d.market_entity === d.all_in_entity;
     this.$("#dyn-same").hidden = !zelfde;
     this.$("#dyn-same-text").textContent = !zelfde ? "" : salderen(contract, new Date())
-      ? "Dit is dezelfde sensor als de all-in prijs, en die telt niet als marktprijs. Zolang je saldeert rekent de coach de terugleverprijs uit de all-in prijs; daarna heeft hij een kale marktprijs nodig, zoals de ingebouwde Nord Pool."
-      : "Dit is dezelfde sensor als de all-in prijs, en die telt niet als marktprijs. Zo kent de coach je terugleverprijs niet, en kan een thuisbatterij niet handelen. Kies een kale marktprijs, zoals de ingebouwde Nord Pool.";
+      ? t("Dit is dezelfde sensor als de all-in prijs, en die telt niet als marktprijs. Zolang je saldeert rekent de coach de terugleverprijs uit de all-in prijs; daarna heeft hij een kale marktprijs nodig, zoals de ingebouwde Nord Pool.")
+      : t("Dit is dezelfde sensor als de all-in prijs, en die telt niet als marktprijs. Zo kent de coach je terugleverprijs niet, en kan een thuisbatterij niet handelen. Kies een kale marktprijs, zoals de ingebouwde Nord Pool.");
 
     // Gas.
     const gas = this.gas_();
@@ -1206,10 +1232,10 @@ class DacViewContract extends DacEditorElement {
     this.$("#gas-prijs-rij").style.display = gasType === "dynamic" ? "none" : "";
     this.$("#gas-sensor-rij").style.display = gasType === "dynamic" ? "" : "none";
     const gl = leverancier(gas.supplier);
-    const gdelen = [`${(SOORT_NAAM[gasType] ?? "vast").replace(/^./, (x) => x.toUpperCase())} contract`];
-    if (gl) gdelen[0] += ` bij ${gl.naam}`;
-    if (gas.start) gdelen.push(`ingegaan op ${datumLang(gas.start)}`);
-    if (gasType === "fixed" && gas.end) gdelen.push(`loopt af op ${datumLang(gas.end)}`);
+    const gsoort = hoofd(soortNaam(gasType));
+    const gdelen = [gl ? t("{soort} contract bij {naam}", { soort: gsoort, naam: gl.naam }) : t("{soort} contract", { soort: gsoort })];
+    if (gas.start) gdelen.push(t("ingegaan op {datum}", { datum: datumLang(gas.start) }));
+    if (gasType === "fixed" && gas.end) gdelen.push(t("loopt af op {datum}", { datum: datumLang(gas.end) }));
     if (gasType !== "dynamic" && Number(gas.price) > 0) gdelen.push(`${euroTekst(gas.price)} per m³`);
     // Geen gas of geen watermeter (v0.138.0): dan alleen het vinkje en een zin.
     const meters = this.draft_.sources?.meters ?? {};
@@ -1217,17 +1243,17 @@ class DacViewContract extends DacEditorElement {
     this.$("#water-aan").checked = Boolean(meters.water_enabled);
     this.$("#gas-velden").style.display = meters.gas_enabled ? "" : "none";
     this.$("#water-velden").style.display = meters.water_enabled ? "" : "none";
-    this.$("#gas-samenvatting").textContent = meters.gas_enabled ? `${gdelen.join(", ")}.` : "Geen gas.";
+    this.$("#gas-samenvatting").textContent = meters.gas_enabled ? `${gdelen.join(", ")}.` : t("Geen gas.");
     // Water (v0.130.1): het waterbedrijf en de prijs in een zin, voor wie de
     // velden niet ziet.
     const water = this.water_();
-    const wdelen = [water.supplier ? `Bij ${water.supplier}` : "", Number(water.price) > 0 ? `${euroTekst(water.price)} per m³` : ""].filter(Boolean);
-    this.$("#water-samenvatting").textContent = !meters.water_enabled ? "Geen watermeter."
-      : wdelen.length ? `${wdelen.join(", ")}.` : "Nog geen waterprijs ingevuld.";
+    const wdelen = [water.supplier ? t("Bij {naam}", { naam: water.supplier }) : "", Number(water.price) > 0 ? `${euroTekst(water.price)} per m³` : ""].filter(Boolean);
+    this.$("#water-samenvatting").textContent = !meters.water_enabled ? t("Geen watermeter.")
+      : wdelen.length ? `${wdelen.join(", ")}.` : t("Nog geen waterprijs ingevuld.");
     const gv = gl ? voorstel(gl.id, gasType, "gas") : null;
     this.$("#gas-lev-hint").textContent = gv
-      ? `${gv.uitleg} Uit de gegevens van ${gl.naam}, nagekeken op ${datumLang(gv.peildatum)}.`
-      : "Mag een andere zijn dan die van je stroom.";
+      ? `${gv.uitleg} ${t("Uit de gegevens van {naam}, nagekeken op {datum}.", { naam: gl.naam, datum: datumLang(gv.peildatum) })}`
+      : t("Mag een andere zijn dan die van je stroom.");
   }
 
   /**
@@ -1249,10 +1275,10 @@ class DacViewContract extends DacEditorElement {
     const rijen = v.feed_in_scales ?? [];
     host.innerHTML = rijen.map((r, i) => `
       <div class="schaal">
-        <input type="number" min="0" step="1" inputmode="numeric" data-schaal="${prefix}:${i}:vanaf" value="${esc(r.vanaf ?? "")}" aria-label="Vanaf kWh">
-        <input type="number" min="0" step="0.01" inputmode="decimal" data-schaal="${prefix}:${i}:per_jaar" value="${esc(r.per_jaar ?? "")}" aria-label="Bedrag per jaar">
-        <button type="button" class="remove" data-schaal-weg="${prefix}:${i}">Weghalen</button>
-      </div>`).join("") || `<p class="sub geen">Nog geen schalen.</p>`;
+        <input type="number" min="0" step="1" inputmode="numeric" data-schaal="${prefix}:${i}:vanaf" value="${esc(r.vanaf ?? "")}" aria-label="${t("Vanaf kWh")}">
+        <input type="number" min="0" step="0.01" inputmode="decimal" data-schaal="${prefix}:${i}:per_jaar" value="${esc(r.per_jaar ?? "")}" aria-label="${t("Bedrag per jaar")}">
+        <button type="button" class="remove" data-schaal-weg="${prefix}:${i}">${t("Weghalen")}</button>
+      </div>`).join("") || `<p class="sub geen">${t("Nog geen schalen.")}</p>`;
     for (const veld of host.querySelectorAll("[data-schaal]")) {
       veld.addEventListener("input", () => {
         const [, i, sleutel] = veld.dataset.schaal.split(":");
@@ -1282,31 +1308,32 @@ class DacViewContract extends DacEditorElement {
       `<input type="${type}" data-period-field="${key}" data-index="${i}" ${extra} value="${esc(waarde)}">`;
     const getal = 'min="0" step="0.0001" inputmode="decimal"';
     host.innerHTML = lijst.map((p, i) => {
-      const voorbeeld = { stroom: "Bijvoorbeeld Zonneplan Elektra 2026", gas: "Bijvoorbeeld Delta Gas 07/26 tot 06/27", water: "Bijvoorbeeld Waterbedrijf 2025" }[bron];
+      const voorbeeld = { stroom: t("Bijvoorbeeld Zonneplan Elektra 2026"), gas: t("Bijvoorbeeld Delta Gas 07/26 tot 06/27"), water: t("Bijvoorbeeld Waterbedrijf 2025") }[bron];
       const kop = `
-        <div class="row"><label>Naam</label>${veld(i, "name", "text", `maxlength="80" placeholder="${voorbeeld}"`, p.name ?? "")}</div>
+        <div class="row"><label>${t("Naam")}</label>${veld(i, "name", "text", `maxlength="80" placeholder="${voorbeeld}"`, p.name ?? "")}</div>
         <div class="two">
-          <div class="row"><label>Van</label>${veld(i, "from", "date", "", p.from)}</div>
-          <div class="row"><label>Tot</label>${veld(i, "to", "date", "", p.to)}</div>
+          <div class="row"><label>${t("Van")}</label>${veld(i, "from", "date", "", p.from)}</div>
+          <div class="row"><label>${t("Tot")}</label>${veld(i, "to", "date", "", p.to)}</div>
         </div>`;
       let prijzen;
       if (bron === "stroom") {
         const naam = leverancier(p.supplier)?.naam;
-        const wat = `${(SOORT_NAAM[p.type] ?? "vast").replace(/^./, (x) => x.toUpperCase())}${naam ? ` bij ${esc(naam)}` : ""}`;
+        const soort = hoofd(soortNaam(p.type));
+        const wat = naam ? t("{soort} bij {naam}", { soort, naam: esc(naam) }) : soort;
         prijzen = p.type === "dynamic"
-          ? `<p class="sub">${wat}: Historie neemt de prijzen van toen uit de prijssensor.</p>`
+          ? `<p class="sub">${t("{wat}: Historie neemt de prijzen van toen uit de prijssensor.", { wat })}</p>`
           : `<p class="sub">${wat}</p>
             <div class="two">
-              <div class="row"><label>Stroom, all-in (€ per kWh)</label>${veld(i, "all_in_price", "number", getal, p.all_in_price || "")}</div>
-              <div class="row"><label>Terugleververgoeding (€ per kWh)</label>${veld(i, "feed_in_tariff", "number", getal, p.feed_in_tariff || "")}</div>
+              <div class="row"><label>${t("Stroom, all-in (€ per kWh)")}</label>${veld(i, "all_in_price", "number", getal, p.all_in_price || "")}</div>
+              <div class="row"><label>${t("Terugleververgoeding (€ per kWh)")}</label>${veld(i, "feed_in_tariff", "number", getal, p.feed_in_tariff || "")}</div>
             </div>`;
       } else {
-        prijzen = `<div class="row"><label>${bron === "gas" ? "Gas" : "Water"}, all-in (€ per m³)</label>${veld(i, "price", "number", getal, p.price || "")}</div>`;
+        prijzen = `<div class="row"><label>${bron === "gas" ? t("Gas, all-in (€ per m³)") : t("Water, all-in (€ per m³)")}</label>${veld(i, "price", "number", getal, p.price || "")}</div>`;
       }
       // Ingeklapt een regel, zoals een lijst van contracten in de app van een
       // meter (19-10-2026): naam of leverancier, en van wanneer tot wanneer.
-      const titel = p.name || leverancier(p.supplier)?.naam || "Eerder contract";
-      const wanneer = p.from || p.to ? `${kortDatum(p.from) || "?"} tot ${kortDatum(p.to) || "nu"}` : "nog geen datums";
+      const titel = p.name || leverancier(p.supplier)?.naam || t("Eerder contract");
+      const wanneer = p.from || p.to ? vanTot(p.from, p.to) : t("nog geen datums");
       const open = this.openPeriode_ === `${bron}:${i}` ? " open" : "";
       return `
         <details class="circuit period" data-period="${i}"${open}>
@@ -1315,7 +1342,7 @@ class DacViewContract extends DacEditorElement {
             ${kop}
             ${prijzen}
             <div class="circuit-actions">
-              <button type="button" class="remove" data-period-remove="${i}">Weghalen</button>
+              <button type="button" class="remove" data-period-remove="${i}">${t("Weghalen")}</button>
             </div>
           </div>
         </details>`;
@@ -1350,7 +1377,7 @@ class DacViewContract extends DacEditorElement {
     const contract = this.draft_.contract;
     this.$("#opbouw").innerHTML = opbouwHtml(this.check_, namenVan(contract.supplier, contract.type));
     const zin = bevestigdZin(this.check_);
-    this.$("#bevestigd-zin").textContent = this.dirty_() ? "Je wijzigingen worden eerst opgeslagen." : zin;
+    this.$("#bevestigd-zin").textContent = this.dirty_() ? t("Je wijzigingen worden eerst opgeslagen.") : zin;
     this.$("#bevestig").hidden = Boolean(this.check_?.bevestigd) && !this.dirty_();
   }
 }

@@ -30,6 +30,7 @@ import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
 import { metHoofdletter, power, powerText } from "../format.js";
 import { ACTIVE_WATTS, deviceIcon, deviceLabel, deviceLabelMap } from "../devices.js";
+import { t } from "../i18n.js";
 
 /** Below this width the wide layout stops being legible and it goes portrait. */
 const NARROW_AT = 470;
@@ -235,8 +236,8 @@ class DacEnergyFlow extends DacElement {
       <div id="stage"></div>
       <div class="detail" id="detail" hidden>
         <div class="detail-head">
-          <span id="detail-title">Ook aan</span>
-          <button type="button" id="detail-close" aria-label="Sluiten">${icons.close}</button>
+          <span id="detail-title">${t("Ook aan")}</span>
+          <button type="button" id="detail-close" aria-label="${t("Sluiten")}">${icons.close}</button>
         </div>
         <ul id="detail-list"></ul>
       </div>
@@ -320,7 +321,7 @@ class DacEnergyFlow extends DacElement {
 
     this.$("#stage").innerHTML = `
       <svg viewBox="0 0 ${L.width} ${L.height}" role="img"
-           aria-label="Live energiestroom tussen zon, net, woning en apparaten">
+           aria-label="${t("Live energiestroom tussen zon, net, woning en apparaten")}">
         <g id="links">
           ${link("solar", L.sun, L.house, "var(--dac-solar)")}
           ${link("grid", L.grid, L.house, "var(--dac-grid-in)")}
@@ -382,12 +383,12 @@ class DacEnergyFlow extends DacElement {
     const gridPower = reading.grid === null ? null : Math.abs(reading.grid);
     const gridTone = exporting ? "var(--dac-grid-out)" : "var(--dac-grid-in)";
 
-    this.setNode_("solar", reading.solar, "Opwek");
-    this.setNode_("house", reading.house, "Woning");
+    this.setNode_("solar", reading.solar, t("Opwek"));
+    this.setNode_("house", reading.house, t("Woning"));
     this.setNode_(
       "grid",
       gridPower,
-      exporting ? "Naar het net" : "Van het net",
+      exporting ? t("Naar het net") : t("Van het net"),
       gridTone,
       exporting ? "grid" : "grid"
     );
@@ -427,7 +428,7 @@ class DacEnergyFlow extends DacElement {
       }
 
       const rolled = device.rolled?.length ?? 0;
-      const label = rolled ? `+ ${rolled} andere` : this.labelFor_(device);
+      const label = rolled ? t("+ {n} andere", { n: rolled }) : this.labelFor_(device);
       const iconKey = rolled ? "overig" : deviceIcon(device);
 
       node.querySelector("[data-icon]").innerHTML = icons[iconKey];
@@ -476,7 +477,7 @@ class DacEnergyFlow extends DacElement {
   get bubbles() {
     return (this.slots_ ?? []).map((device, index) => ({
       tone: index === 0 ? "var(--dac-device-1)" : "var(--dac-device-2)",
-      label: device.rolled?.length ? `+ ${device.rolled.length} andere` : this.labelFor_(device),
+      label: device.rolled?.length ? t("+ {n} andere", { n: device.rolled.length }) : this.labelFor_(device),
     }));
   }
 
@@ -577,7 +578,7 @@ class DacEnergyFlow extends DacElement {
     const rows = rolled.length
       ? rolled.map((dev) => ({ k: this.labelFor_(dev), v: powerText(dev.watts) }))
       : [
-          { k: "Vermogen", v: powerText(device.watts) },
+          { k: t("Vermogen"), v: powerText(device.watts) },
           ...(device.details ?? []).map((row) => ({ k: row.label, v: row.text })),
         ];
 
@@ -586,7 +587,7 @@ class DacEnergyFlow extends DacElement {
 
     const detail = this.$("#detail");
     this.openSlot_ = slot;
-    this.$("#detail-title").textContent = rolled.length ? "Ook aan" : this.labelFor_(device);
+    this.$("#detail-title").textContent = rolled.length ? t("Ook aan") : this.labelFor_(device);
 
     // Values come from the customer's own sensors, so they go in as text.
     this.$("#detail-list").replaceChildren(

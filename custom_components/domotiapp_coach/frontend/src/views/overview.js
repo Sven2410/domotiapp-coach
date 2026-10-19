@@ -73,6 +73,7 @@ import {
   zonderMinNul,
 } from "../format.js";
 import { sheetCss } from "../theme.js";
+import { getal, locale, t, tn } from "../i18n.js";
 import "../components/stat-tile.js";
 import "../components/energy-flow.js";
 import "../components/price-chart.js";
@@ -109,8 +110,7 @@ export function leegTot(waarde) {
 /** Import worth mentioning, in watts. */
 const HEAVY_IMPORT_W = 2500;
 
-const nl = (value, digits) =>
-  value.toLocaleString("nl-NL", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const nl = (value, digits) => getal(value, digits);
 
 /**
  * Rule-based advice -- the first, deliberately simple version of the coach.
@@ -121,29 +121,29 @@ const nl = (value, digits) =>
  */
 /** Wat er op dit moment met het net gebeurt, in één zin achter een advies. */
 function netZin(r) {
-  if ((r.exportW ?? 0) > TRICKLE_W) return `Er gaat nog ${powerText(r.exportW)} naar het net.`;
-  if ((r.importW ?? 0) > TRICKLE_W) return `Je haalt er ${powerText(r.importW)} bij uit het net.`;
-  return "Je gebruikt vrijwel precies wat je zelf opwekt.";
+  if ((r.exportW ?? 0) > TRICKLE_W) return t("Er gaat nog {vermogen} naar het net.", { vermogen: powerText(r.exportW) });
+  if ((r.importW ?? 0) > TRICKLE_W) return t("Je haalt er {vermogen} bij uit het net.", { vermogen: powerText(r.importW) });
+  return t("Je gebruikt vrijwel precies wat je zelf opwekt.");
 }
 
 export function advise(r, thresholds, configured, alertAt, sturing, devices, batterij = null) {
   if (!configured) {
     return {
       tone: "var(--dac-accent-hi)",
-      tag: "Instellen",
-      title: "Koppel je sensoren",
+      tag: t("Instellen"),
+      title: t("Koppel je sensoren"),
       body:
-        "De coach weet nog niet welke sensoren jouw opwek, verbruik en meterstand meten. Ga naar Installatie en kies ze onder Energiebronnen. Daarna vult dit scherm zich met je eigen cijfers.",
+        t("De coach weet nog niet welke sensoren jouw opwek, verbruik en meterstand meten. Ga naar Installatie en kies ze onder Energiebronnen. Daarna vult dit scherm zich met je eigen cijfers."),
     };
   }
 
   if (r.solar === null && r.grid === null) {
     return {
       tone: "var(--dac-warn)",
-      tag: "Let op",
-      title: "Geen meetwaarden",
+      tag: t("Let op"),
+      title: t("Geen meetwaarden"),
       body:
-        "De gekozen sensoren geven op dit moment niets bruikbaars terug. Controleer onder Installatie of ze nog bestaan en of ze een waarde hebben.",
+        t("De gekozen sensoren geven op dit moment niets bruikbaars terug. Controleer onder Installatie of ze nog bestaan en of ze een waarde hebben."),
     };
   }
 
@@ -152,12 +152,12 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
   if (r.load !== null && r.load >= alertAt) {
     return {
       tone: "var(--dac-bad)",
-      tag: "Let op",
-      title: "Je aansluiting wordt zwaar belast",
+      tag: t("Let op"),
+      title: t("Je aansluiting wordt zwaar belast"),
       body:
         r.loadBasis === "phase"
-          ? `Fase ${r.loadWorstPhase} zit op ${percent(r.load).value}% van je hoofdzekering. Zet iets zwaars uit of wacht ermee, anders loop je kans dat de zekering eruit gaat.`
-          : `Je trekt nu ${percent(r.load).value}% van wat je aansluiting aankan. Zet iets zwaars uit of wacht ermee.`,
+          ? t("Fase {fase} zit op {pct}% van je hoofdzekering. Zet iets zwaars uit of wacht ermee, anders loop je kans dat de zekering eruit gaat.", { fase: r.loadWorstPhase, pct: percent(r.load).value })
+          : t("Je trekt nu {pct}% van wat je aansluiting aankan. Zet iets zwaars uit of wacht ermee.", { pct: percent(r.load).value }),
     };
   }
 
@@ -174,27 +174,27 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
     if (sturing.manual && !sturing.running) {
       return {
         tone: "var(--dac-warn)",
-        tag: "Doe iets",
-        title: `Zet ${sturing.name} nu aan`,
+        tag: t("Doe iets"),
+        title: t("Zet {naam} nu aan", { naam: sturing.name }),
         body: `${sturing.reason} ${sturing.plan}`.trim(),
       };
     }
     return {
       tone: "var(--dac-accent-hi)",
-      tag: "Aan het werk",
-      title: sturing.running ? `${sturing.name} draait` : `${sturing.name} start nu`,
+      tag: t("Aan het werk"),
+      title: sturing.running ? t("{naam} draait", { naam: sturing.name }) : t("{naam} start nu", { naam: sturing.name }),
       body: `${sturing.reason} ${sturing.plan}`.trim(),
     };
   }
   if (sturing?.wants || sturing?.needsSoc) {
     const titel = sturing.charging
-      ? `${sturing.name} laadt op ${sturing.amps} A`
+      ? t("{naam} laadt op {amps} A", { naam: sturing.name, amps: sturing.amps })
       : sturing.needsSoc
-        ? `${sturing.name} wacht op je accustand`
-        : `${sturing.name} wacht op de auto`;
+        ? t("{naam} wacht op je accustand", { naam: sturing.name })
+        : t("{naam} wacht op de auto", { naam: sturing.name });
     return {
       tone: sturing.needsSoc ? "var(--dac-warn)" : "var(--dac-accent-hi)",
-      tag: sturing.needsSoc ? "Doe iets" : "Aan het werk",
+      tag: sturing.needsSoc ? t("Doe iets") : t("Aan het werk"),
       title: titel,
       body: sturing.charging
         ? `${sturing.reason} ${netZin(r)}`.trim()
@@ -215,22 +215,22 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
     const over = Number.isFinite(batterij.balance_kwh) ? batterij.balance_kwh : null;
     return {
       tone: "var(--dac-good)",
-      tag: "Aan het werk",
-      title: `${batterij.name} handelt`,
+      tag: t("Aan het werk"),
+      title: t("{naam} handelt", { naam: batterij.name }),
       body:
         // En de volgorde, de eigenaar op 22-09-2026: "nul op de meter heeft
         // prioriteit, het overschot verhandelen met hoge tarieven."
-        "Je hebt toegestaan om te handelen met je batterij. De spread is groot genoeg en je batterij is vol genoeg om de nacht door te komen. Je huis gaat voor; wat de accu meer heeft dan de nacht vraagt, verkoopt hij. "
-        + (watt ? `De komende uren ontlaadt hij op ${watt.toLocaleString("nl-NL")} W om te profiteren van de hoge stroomprijs.` : "De komende uren ontlaadt hij om te profiteren van de hoge stroomprijs.")
-        + (over !== null && over > 0 ? ` Je kunt nog ${over.toLocaleString("nl-NL", { maximumFractionDigits: 1 })} kWh ontladen en alsnog de nacht doorkomen.` : "")
+        `${t("Je hebt toegestaan om te handelen met je batterij. De spread is groot genoeg en je batterij is vol genoeg om de nacht door te komen. Je huis gaat voor; wat de accu meer heeft dan de nacht vraagt, verkoopt hij.")} `
+        + (watt ? t("De komende uren ontlaadt hij op {watt} W om te profiteren van de hoge stroomprijs.", { watt: watt.toLocaleString(locale()) }) : t("De komende uren ontlaadt hij om te profiteren van de hoge stroomprijs."))
+        + (over !== null && over > 0 ? ` ${t("Je kunt nog {kwh} kWh ontladen en alsnog de nacht doorkomen.", { kwh: over.toLocaleString(locale(), { maximumFractionDigits: 1 }) })}` : "")
         // De bewoner van de eerste woning, via de eigenaar: "in dit geval had ie
         // alle apparaten juist uit moeten schakelen; zo min mogelijk stroom
         // gebruiken, zo veel mogelijk terugleveren."
         + (() => {
           const apparaten = apparatenZin(devices, "en");
-          return apparaten
-            ? ` Gebruik nu zo min mogelijk stroom: stel ${apparaten} uit tot de prijs weer zakt, dan kan alles wat de accu geeft naar het net.`
-            : " Gebruik nu zo min mogelijk stroom, dan kan alles wat de accu geeft naar het net.";
+          return ` ${apparaten
+            ? t("Gebruik nu zo min mogelijk stroom: stel {apparaten} uit tot de prijs weer zakt, dan kan alles wat de accu geeft naar het net.", { apparaten })
+            : t("Gebruik nu zo min mogelijk stroom, dan kan alles wat de accu geeft naar het net.")}`;
         })(),
     };
   }
@@ -248,14 +248,14 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
   if (echtOverschot > SURPLUS_W) {
     return {
       tone: "var(--dac-grid-out)",
-      tag: "Kans",
-      title: "Gebruik je overschot",
+      tag: t("Kans"),
+      title: t("Gebruik je overschot"),
       body: (() => {
         const apparaten = apparatenZin(devices);
         const zet = apparaten
-          ? `Zet ${apparaten} aan.`
-          : "Zet iets aan dat toch nog moet draaien.";
-        return `Je levert nu ${powerText(r.exportW)} terug aan het net. ${zet} Dan gebruik je stroom die je anders voor een lagere prijs weggeeft.`;
+          ? t("Zet {apparaten} aan.", { apparaten })
+          : t("Zet iets aan dat toch nog moet draaien.");
+        return t("Je levert nu {vermogen} terug aan het net. {zet} Dan gebruik je stroom die je anders voor een lagere prijs weggeeft.", { vermogen: powerText(r.exportW), zet });
       })(),
     };
   }
@@ -268,35 +268,35 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
     const apparaten = apparatenZin(devices, "en");
     return {
       tone: "var(--dac-good)",
-      tag: "Kans",
-      title: "De stroomprijs is negatief",
+      tag: t("Kans"),
+      title: t("De stroomprijs is negatief"),
       body:
-        `Je krijgt nu ${fmtPrice(-r.price).value} per kWh toe voor wat je gebruikt, en terugleveren kost je geld. `
-        + (apparaten ? `Zet ${apparaten} aan. ` : "Zet aan wat toch nog moet draaien. ")
-        + "Wat de coach zelf stuurt laadt nu al zoveel het kan.",
+        `${t("Je krijgt nu {prijs} per kWh toe voor wat je gebruikt, en terugleveren kost je geld.", { prijs: fmtPrice(-r.price).value })} `
+        + `${apparaten ? t("Zet {apparaten} aan.", { apparaten }) : t("Zet aan wat toch nog moet draaien.")} `
+        + t("Wat de coach zelf stuurt laadt nu al zoveel het kan."),
     };
   }
 
   if (r.price !== null && r.price >= thresholds.price.high) {
     return {
       tone: "var(--dac-bad)",
-      tag: "Let op",
-      title: "Stroom is nu duur",
-      body: `Je betaalt op dit moment ${fmtPrice(r.price).value} per kWh. Stel zware apparaten uit tot na de avondpiek, dat scheelt direct op je rekening.`,
+      tag: t("Let op"),
+      title: t("Stroom is nu duur"),
+      body: t("Je betaalt op dit moment {prijs} per kWh. Stel zware apparaten uit tot na de avondpiek, dat scheelt direct op je rekening.", { prijs: fmtPrice(r.price).value }),
     };
   }
 
   if (r.price !== null && r.price <= thresholds.price.low && (r.importW ?? 0) > 0) {
     return {
       tone: "var(--dac-good)",
-      tag: "Kans",
-      title: "Goedkoop moment",
+      tag: t("Kans"),
+      title: t("Goedkoop moment"),
       body: (() => {
         const apparaten = apparatenZin(devices, "en");
         const wat = apparaten
-          ? `Een goed moment voor ${apparaten}.`
-          : "Een goed moment om iets zwaars te laten draaien.";
-        return `Met ${fmtPrice(r.price).value} per kWh zit je onder je normale tarief. ${wat}`;
+          ? t("Een goed moment voor {apparaten}.", { apparaten })
+          : t("Een goed moment om iets zwaars te laten draaien.");
+        return t("Met {prijs} per kWh zit je onder je normale tarief. {wat}", { prijs: fmtPrice(r.price).value, wat });
       })(),
     };
   }
@@ -304,18 +304,18 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
   if (r.selfUse !== null && r.selfUse < thresholds.self_use.low) {
     return {
       tone: "var(--dac-warn)",
-      tag: "Signaal",
-      title: "Je zon gaat het net op",
-      body: `Van je eigen opwek gebruik je nu ${percent(r.selfUse).value}% zelf. De rest gaat naar het net, waar je er minder voor terugkrijgt dan het je kost om het later in te kopen.`,
+      tag: t("Signaal"),
+      title: t("Je zon gaat het net op"),
+      body: t("Van je eigen opwek gebruik je nu {pct}% zelf. De rest gaat naar het net, waar je er minder voor terugkrijgt dan het je kost om het later in te kopen.", { pct: percent(r.selfUse).value }),
     };
   }
 
   if ((r.importW ?? 0) > HEAVY_IMPORT_W) {
     return {
       tone: "var(--dac-grid-in)",
-      tag: "Signaal",
-      title: "Veel vraag uit het net",
-      body: `Je woning trekt nu ${powerText(r.importW)} uit het net terwijl de zon weinig levert. Kijk of er iets aan staat dat kan wachten.`,
+      tag: t("Signaal"),
+      title: t("Veel vraag uit het net"),
+      body: t("Je woning trekt nu {vermogen} uit het net terwijl de zon weinig levert. Kijk of er iets aan staat dat kan wachten.", { vermogen: powerText(r.importW) }),
     };
   }
 
@@ -325,8 +325,8 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
   if (sturing) {
     return {
       tone: "var(--dac-accent-hi)",
-      tag: "Aan het werk",
-      title: `${sturing.name} staat klaar`,
+      tag: t("Aan het werk"),
+      title: t("{naam} staat klaar", { naam: sturing.name }),
       body: `${sturing.reason} ${sturing.plan}`.trim(),
     };
   }
@@ -338,17 +338,17 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
   if (echtOverschot > TRICKLE_W) {
     return {
       tone: "var(--dac-accent-hi)",
-      tag: "Rustig",
-      title: "Je levert een beetje terug",
-      body: `Je levert nu ${powerText(r.exportW)} terug. Dat is te weinig om iets zwaars mee te draaien, dus de coach laat het zo.`,
+      tag: t("Rustig"),
+      title: t("Je levert een beetje terug"),
+      body: t("Je levert nu {vermogen} terug. Dat is te weinig om iets zwaars mee te draaien, dus de coach laat het zo.", { vermogen: powerText(r.exportW) }),
     };
   }
 
   return {
     tone: "var(--dac-accent-hi)",
-    tag: "Rustig",
-    title: "Je woning draait rustig",
-    body: "Er is nu niets dat om actie vraagt. De coach kijkt mee en meldt zich zodra er iets te winnen valt.",
+    tag: t("Rustig"),
+    title: t("Je woning draait rustig"),
+    body: t("Er is nu niets dat om actie vraagt. De coach kijkt mee en meldt zich zodra er iets te winnen valt."),
   };
 }
 
@@ -1200,11 +1200,11 @@ class DacViewOverview extends DacElement {
             <div class="coach-mark">${icons.spark}</div>
             <div class="coach-where">
               <span class="home" id="home-name" hidden></span>
-              <span class="eyebrow">Energiecoach</span>
+              <span class="eyebrow">${t("Energiecoach")}</span>
             </div>
-            <span class="coach-tag" id="coach-tag">Rustig</span>
+            <span class="coach-tag" id="coach-tag">${t("Rustig")}</span>
           </div>
-          <h1 id="coach-title">Je woning draait rustig</h1>
+          <h1 id="coach-title">${t("Je woning draait rustig")}</h1>
           <p id="coach-body"></p>
           <p class="coach-sun" id="coach-sun" hidden></p>
         </article>
@@ -1213,8 +1213,8 @@ class DacViewOverview extends DacElement {
              grafiek. Verborgen tot de coach hem stuurt. -->
         <article class="card panel vooruit" id="vooruit" data-card="vooruit" hidden>
           <div class="panel-head">
-            <div class="eyebrow">Vooruitblik</div>
-            <h2>Wat er de komende uren gebeurt</h2>
+            <div class="eyebrow">${t("Vooruitblik")}</div>
+            <h2>${t("Wat er de komende uren gebeurt")}</h2>
           </div>
           <dac-vooruitblik id="vooruitblik"></dac-vooruitblik>
         </article>
@@ -1226,87 +1226,87 @@ class DacViewOverview extends DacElement {
              zelf de knop erheen (v0.130.1). -->
         <button type="button" class="prijs-melding" id="prijs-melding" hidden>
           ${icons.euro}
-          <span class="tekst"><strong>Klopt je energieprijs?</strong> Tik hier en zie hoe de coach hem opbouwt. Klopt hij, bevestig hem dan.</span>
+          <span class="tekst"><strong>${t("Klopt je energieprijs?")}</strong> ${t("Tik hier en zie hoe de coach hem opbouwt. Klopt hij, bevestig hem dan.")}</span>
           <span class="pijl">${icons.chevronRight}</span>
         </button>
 
-        <section class="tiles" aria-label="Live meetwaarden" data-card="tiles">
+        <section class="tiles" aria-label="${t("Live meetwaarden")}" data-card="tiles">
           ${tile("t-solar")}${tile("t-house")}${tile("t-grid")}${tile("t-load")}${tile("t-self")}${tile("t-price")}
         </section>
 
         <article class="card panel phases" id="phases" data-card="phases" hidden>
           <div class="panel-head">
-            <div class="eyebrow">Per fase</div>
-            <h2 id="phases-title">Belasting van je aansluiting</h2>
+            <div class="eyebrow">${t("Per fase")}</div>
+            <h2 id="phases-title">${t("Belasting van je aansluiting")}</h2>
           </div>
           <div class="phase-rows" id="phase-rows"></div>
         </article>
 
         <article class="card panel meters" id="meters" data-card="meters" hidden>
           <div class="panel-head">
-            <div class="eyebrow">Standen</div>
-            <h2>Je meter</h2>
+            <div class="eyebrow">${t("Standen")}</div>
+            <h2>${t("Je meter")}</h2>
           </div>
-          <p class="panel-sub">De tellers zoals ze op je meter staan.</p>
+          <p class="panel-sub">${t("De tellers zoals ze op je meter staan.")}</p>
           <div class="meter-rows" id="meter-rows"></div>
         </article>
 
         <article class="card panel steerable" id="steerable" data-card="steerable" hidden>
           <div class="panel-head">
-            <div class="eyebrow">Sturing</div>
-            <h2>Aanstuurbare apparaten</h2>
+            <div class="eyebrow">${t("Sturing")}</div>
+            <h2>${t("Aanstuurbare apparaten")}</h2>
           </div>
           <!-- De volgorde van de rij aanpassen (v0.96.0). De eigenaar op
                23-09-2026: "het zelfde icoontje als indeling aanpassen beneden,
                alleen dan zonder tekst." Slepen kon toen ook; dat is er sinds
                v0.102.1 uit, zie bij de pijltjes hieronder. -->
           <button type="button" class="steer-sort" id="steer-sort" aria-pressed="false"
-                  aria-label="Volgorde aanpassen" title="Volgorde aanpassen" hidden>${icons.sliders}</button>
-          <p class="panel-sub">Wat de coach straks zelf mag inschakelen.</p>
-          <div class="steer-tabs" id="steer-tabs" role="tablist" aria-label="Aanstuurbare apparaten" hidden></div>
+                  aria-label="${t("Volgorde aanpassen")}" title="${t("Volgorde aanpassen")}" hidden>${icons.sliders}</button>
+          <p class="panel-sub">${t("Wat de coach straks zelf mag inschakelen.")}</p>
+          <div class="steer-tabs" id="steer-tabs" role="tablist" aria-label="${t("Aanstuurbare apparaten")}" hidden></div>
           <!-- Tijdens het indelen, of na het knopje hierboven: het gekozen
                apparaat een plek opschuiven. Alleen met de pijltjes: de eigenaar
                op 30-09-2026, "drag en drop werkt niet, dat moet weg en wel de
                pijltjes behouden." -->
           <div class="steer-order" id="steer-order" hidden>
-            <span>Schuif het gekozen apparaat:</span>
-            <button type="button" id="steer-left" aria-label="Naar links">${icons.arrowLeft}</button>
-            <button type="button" id="steer-right" aria-label="Naar rechts">${icons.arrowRight}</button>
-            <button type="button" class="steer-klaar" id="steer-klaar" hidden>Klaar</button>
+            <span>${t("Schuif het gekozen apparaat:")}</span>
+            <button type="button" id="steer-left" aria-label="${t("Naar links")}">${icons.arrowLeft}</button>
+            <button type="button" id="steer-right" aria-label="${t("Naar rechts")}">${icons.arrowRight}</button>
+            <button type="button" class="steer-klaar" id="steer-klaar" hidden>${t("Klaar")}</button>
           </div>
           <div class="steer-grid" id="steer-grid"></div>
         </article>
 
         <article class="card panel" id="flow-card" data-card="flow">
           <div class="panel-head">
-            <div class="eyebrow">Realtime</div>
-            <h2>Energiestroom</h2>
+            <div class="eyebrow">${t("Realtime")}</div>
+            <h2>${t("Energiestroom")}</h2>
           </div>
           <div class="flow-holder"><dac-energy-flow id="flow"></dac-energy-flow></div>
           <div class="legend" id="legend"></div>
         </article>
 
         <button class="arrange-link" type="button" id="arrange-open">
-          ${icons.sliders} Indeling aanpassen
+          ${icons.sliders} ${t("Indeling aanpassen")}
         </button>
 
         <div class="arrange-bar" id="arrange-bar" hidden>
-          <span class="where">Deze indeling geldt op dit scherm.</span>
-          <button type="button" id="arrange-reset">Standaard terugzetten</button>
-          <button type="button" class="primary" id="arrange-done">Klaar</button>
+          <span class="where">${t("Deze indeling geldt op dit scherm.")}</span>
+          <button type="button" id="arrange-reset">${t("Standaard terugzetten")}</button>
+          <button type="button" class="primary" id="arrange-done">${t("Klaar")}</button>
         </div>
 
         <dialog class="sheet" id="manual" tabindex="-1" aria-labelledby="manual-title">
           <div class="sheet-head">
             <div>
-              <div class="eyebrow">Handmatige besturing</div>
+              <div class="eyebrow">${t("Handmatige besturing")}</div>
               <h3 id="manual-title"></h3>
             </div>
-            <button class="sheet-close" type="button" id="manual-close" aria-label="Sluiten">${icons.close}</button>
+            <button class="sheet-close" type="button" id="manual-close" aria-label="${t("Sluiten")}">${icons.close}</button>
           </div>
           <p class="sheet-sub" id="manual-sub"></p>
           <div class="cmd-pick" id="manual-pick" hidden>
-            <label for="manual-program">Programma</label>
+            <label for="manual-program">${t("Programma")}</label>
             <select id="manual-program"></select>
             <p class="cmd-note" id="manual-program-note"></p>
           </div>
@@ -1320,10 +1320,10 @@ class DacViewOverview extends DacElement {
         <dialog class="sheet wide" id="prices" tabindex="-1" aria-labelledby="prices-title">
           <div class="sheet-head">
             <div>
-              <div class="eyebrow" id="prices-eyebrow">Dynamisch tarief</div>
-              <h3 id="prices-title">Wat stroom kost</h3>
+              <div class="eyebrow" id="prices-eyebrow">${t("Dynamisch tarief")}</div>
+              <h3 id="prices-title">${t("Wat stroom kost")}</h3>
             </div>
-            <button class="sheet-close" type="button" id="prices-close" aria-label="Sluiten">${icons.close}</button>
+            <button class="sheet-close" type="button" id="prices-close" aria-label="${t("Sluiten")}">${icons.close}</button>
           </div>
           <dac-price-chart id="price-chart"></dac-price-chart>
           <p class="sheet-sub" id="prices-note"></p>
@@ -1476,9 +1476,9 @@ class DacViewOverview extends DacElement {
         bar.className = "card-edit";
         bar.innerHTML = `
           <span class="name"></span>
-          <button type="button" data-move="-1" aria-label="Omhoog">${icons.arrowLeft}</button>
-          <button type="button" data-move="1" aria-label="Omlaag">${icons.arrowRight}</button>
-          <button type="button" data-toggle-card aria-label="Tonen of verbergen">${icons.check}</button>
+          <button type="button" data-move="-1" aria-label="${t("Omhoog")}">${icons.arrowLeft}</button>
+          <button type="button" data-move="1" aria-label="${t("Omlaag")}">${icons.arrowRight}</button>
+          <button type="button" data-toggle-card aria-label="${t("Tonen of verbergen")}">${icons.check}</button>
         `;
         // The arrows are the horizontal icons turned a quarter, which keeps one
         // pair of icons rather than two that have to stay in step.
@@ -1496,14 +1496,14 @@ class DacViewOverview extends DacElement {
         );
       }
 
-      bar.querySelector(".name").textContent = meta?.label ?? card.id;
+      bar.querySelector(".name").textContent = meta?.label ? t(meta.label) : card.id;
       bar.querySelector('[data-move="-1"]').disabled = index === 0;
       bar.querySelector('[data-move="1"]').disabled = index === order.length - 1;
 
       const eye = bar.querySelector("[data-toggle-card]");
       eye.classList.toggle("off", card.hidden);
       eye.innerHTML = card.hidden ? icons.close : icons.check;
-      eye.title = card.hidden ? "Verborgen, tik om te tonen" : "Zichtbaar, tik om te verbergen";
+      eye.title = card.hidden ? t("Verborgen, tik om te tonen") : t("Zichtbaar, tik om te verbergen");
     });
   }
 
@@ -1620,27 +1620,27 @@ class DacViewOverview extends DacElement {
     this.tiles_.solar.update({
       tone: "var(--dac-solar)",
       icon: "sun",
-      label: "Opwek zon",
+      label: t("Opwek zon"),
       ...power(r.solar),
-      sub: this.sub_(r.solar, (v) => (v > 50 ? "Zonnepanelen leveren nu" : "Geen opbrengst")),
+      sub: this.sub_(r.solar, (v) => (v > 50 ? t("Zonnepanelen leveren nu") : t("Geen opbrengst"))),
       series: this.source_.series("solar"),
     });
 
     this.tiles_.house.update({
       tone: "var(--dac-house)",
       icon: "house",
-      label: "Verbruik woning",
+      label: t("Verbruik woning"),
       ...power(r.house),
-      sub: this.sub_(r.house, (v) => (v > 2000 ? "Zware verbruiker actief" : "Basisverbruik")),
+      sub: this.sub_(r.house, (v) => (v > 2000 ? t("Zware verbruiker actief") : t("Basisverbruik"))),
       series: this.source_.series("house"),
     });
 
     this.tiles_.grid.update({
       tone: exporting ? "var(--dac-grid-out)" : "var(--dac-grid-in)",
       icon: "grid",
-      label: r.grid === null ? "Net" : exporting ? "Naar het net" : "Van het net",
+      label: r.grid === null ? t("Net") : exporting ? t("Naar het net") : t("Van het net"),
       ...power(r.grid),
-      sub: this.sub_(r.grid, () => (exporting ? "Je levert terug" : "Je koopt in")),
+      sub: this.sub_(r.grid, () => (exporting ? t("Je levert terug") : t("Je koopt in"))),
       series: this.source_.series("grid"),
     });
 
@@ -1650,17 +1650,17 @@ class DacViewOverview extends DacElement {
     this.tiles_.self.update({
       tone: levelTone(selfLevel),
       icon: "leaf",
-      label: "Zelfbenutting",
+      label: t("Zelfbenutting"),
       ...percent(r.selfUse),
       sub:
         r.selfUse === null
           ? configured
-            ? "Geen opwek op dit moment"
-            : "Nog niet ingesteld"
+            ? t("Geen opwek op dit moment")
+            : t("Nog niet ingesteld")
           : {
-              good: "Je gebruikt je zon goed",
-              warn: "Een deel gaat naar het net",
-              bad: "Het meeste gaat naar het net",
+              good: t("Je gebruikt je zon goed"),
+              warn: t("Een deel gaat naar het net"),
+              bad: t("Het meeste gaat naar het net"),
             }[selfLevel],
       series: this.source_.series("selfUse"),
     });
@@ -1672,12 +1672,12 @@ class DacViewOverview extends DacElement {
     this.tiles_.price.update({
       tone: levelTone(priceLevel),
       icon: "euro",
-      label: "Energieprijs",
+      label: t("Energieprijs"),
       ...fmtPrice(r.price),
       sub:
         r.price === null
-          ? "Nog geen contract ingevuld"
-          : { good: "Laag tarief", warn: "Gemiddeld tarief", bad: "Hoog tarief" }[priceLevel],
+          ? t("Nog geen contract ingevuld")
+          : { good: t("Laag tarief"), warn: t("Gemiddeld tarief"), bad: t("Hoog tarief") }[priceLevel],
       series: this.source_.series("price"),
     });
 
@@ -1702,16 +1702,16 @@ class DacViewOverview extends DacElement {
     this.tiles_.load.update({
       tone: levelTone(loadLevel),
       icon: "plug",
-      label: "Belastbaarheid",
+      label: t("Belastbaarheid"),
       ...percent(r.load),
       sub:
         r.load === null
-          ? "Aansluiting nog niet ingevuld"
+          ? t("Aansluiting nog niet ingevuld")
           : r.loadBasis === "phase"
             ? (String(r.loadWorstPhase).includes("(")
-              ? `Zwaarst belaste fase ${r.loadWorstPhase}`
-              : `Zwaarst belaste fase (${r.loadWorstPhase})`)
-            : "Van het maximale netvermogen",
+              ? t("Zwaarst belaste fase {fase}", { fase: r.loadWorstPhase })
+              : t("Zwaarst belaste fase ({fase})", { fase: r.loadWorstPhase }))
+            : t("Van het maximale netvermogen"),
       series: this.source_.series("load"),
     });
 
@@ -1748,20 +1748,20 @@ class DacViewOverview extends DacElement {
       // niets: de zon is onder. Een zin die op dat moment doet alsof er nog
       // iets aankomt, klopt gewoon niet.
       if (sun.remainingToday < 0.05) {
-        parts.push("Vandaag levert de zon niets meer op");
+        parts.push(t("Vandaag levert de zon niets meer op"));
       } else if (sun.remainingToday < 0.2) {
-        parts.push("Vandaag komt er nog maar weinig bij");
+        parts.push(t("Vandaag komt er nog maar weinig bij"));
       } else {
-        parts.push(`Vandaag komt er nog ongeveer ${nl(sun.remainingToday, 1)} kWh bij`);
+        parts.push(t("Vandaag komt er nog ongeveer {kwh} kWh bij", { kwh: nl(sun.remainingToday, 1) }));
       }
     }
     // Only worth naming while it is still ahead: at eight in the evening
     // "the peak is at 13:00" is a fact about this afternoon.
     if (sun.peakToday && sun.peakToday > new Date()) {
-      parts.push(`met de meeste zon rond ${clock(sun.peakToday)}`);
+      parts.push(t("met de meeste zon rond {klok}", { klok: clock(sun.peakToday) }));
     }
     if (sun.tomorrow !== null) {
-      parts.push(`morgen ongeveer ${nl(sun.tomorrow, 1)} kWh`);
+      parts.push(t("morgen ongeveer {kwh} kWh", { kwh: nl(sun.tomorrow, 1) }));
     }
 
     const mark = document.createElement("span");
@@ -1986,12 +1986,12 @@ class DacViewOverview extends DacElement {
     const tekst = this.$(`[data-wake-text="${slot}"]`);
     try {
       const uit = await this.hass.callWS({ type: "domotiapp_coach/coach/wake", device_id: device.id });
-      if (tekst) tekst.textContent = uit?.woken ? "Opgevraagd, even geduld" : "Geen wekknop";
+      if (tekst) tekst.textContent = uit?.woken ? t("Opgevraagd, even geduld") : t("Geen wekknop");
     } catch (error) {
       console.warn("[DomotiApp Coach] kon de auto niet wekken", error);
-      if (tekst) tekst.textContent = "Wekken mislukt";
+      if (tekst) tekst.textContent = t("Wekken mislukt");
     }
-    setTimeout(() => { if (tekst) tekst.textContent = "Accustand opvragen"; }, 8000);
+    setTimeout(() => { if (tekst) tekst.textContent = t("Accustand opvragen"); }, 8000);
   }
 
   /**
@@ -2048,7 +2048,7 @@ class DacViewOverview extends DacElement {
     const stil = minutenGeleden(besluit.at);
     this.$(`[data-coach-reason="${slot}"]`).textContent =
       stil !== null && stil >= COACH_SILENT_MINUTES
-        ? `De coach heeft ${stil} minuten niets beslist. Dit vond hij het laatst: ${besluit.reason ?? ""}`
+        ? t("De coach heeft {n} minuten niets beslist. Dit vond hij het laatst: {reden}", { n: stil, reden: besluit.reason ?? "" })
         : (besluit.reason ?? "");
     const planTekst = this.$(`[data-coach-plan="${slot}"]`);
     // Bij een batterij alleen de conclusie; de hele nachtzin staat in de
@@ -2074,7 +2074,7 @@ class DacViewOverview extends DacElement {
     const vraagt = besluit.level === "propose" && !besluit.approved && besluit.charge;
     knop.hidden = !vraagt;
     knop.textContent = vraagt
-      ? (besluit.charging ? "Ja, neem het over" : "Ja, doe maar")
+      ? (besluit.charging ? t("Ja, neem het over") : t("Ja, doe maar"))
       : "";
 
     // Snelladen alleen aanbieden waar de coach ook echt kan sturen en er een
@@ -2107,12 +2107,12 @@ class DacViewOverview extends DacElement {
       knop.setAttribute("aria-pressed", String(modi && besluit.mode === knop.dataset.modusNaam));
     }
     this.$(`[data-boost-text="${slot}"]`).textContent = batterij
-      ? (besluit.boost ? "Laadt nu vol" : "Nu vol laden")
+      ? (besluit.boost ? t("Laadt nu vol") : t("Nu vol laden"))
       : modi
-        ? "Snel"
+        ? t("Snel")
         : besluit.boost
-          ? "Snelladen staat aan"
-          : "Snelladen";
+          ? t("Snelladen staat aan")
+          : t("Snelladen");
     // Een batterij krijgt zijn eigen icoon (een accu met een pijl erin), de
     // paal houdt de bliksem. De eigenaar op 23-09-2026: het pauzeteken bij
     // "Nu leegladen" klopte niet, en dan hoort vol laden ook geen bliksem te zijn.
@@ -2131,8 +2131,8 @@ class DacViewOverview extends DacElement {
     leegRij.style.display = magLeeg ? "" : "none";
     leeg.setAttribute("aria-pressed", String(Number.isFinite(besluit.drain_to)));
     this.$(`[data-drain-text="${slot}"]`).textContent = Number.isFinite(besluit.drain_to)
-      ? `Laadt leeg tot ${Math.round(besluit.drain_to)}%`
-      : "Nu leegladen";
+      ? t("Laadt leeg tot {pct}%", { pct: Math.round(besluit.drain_to) })
+      : t("Nu leegladen");
     this.syncLeegVeld_(slot, besluit);
 
     const wek = this.$(`[data-wake="${slot}"]`);
@@ -2143,8 +2143,8 @@ class DacViewOverview extends DacElement {
     pauze.hidden = !kan;
     pauze.setAttribute("aria-pressed", String(Boolean(besluit.paused)));
     this.$(`[data-pause-text="${slot}"]`).textContent = besluit.paused
-      ? "Gepauzeerd"
-      : "Pauzeren";
+      ? t("Gepauzeerd")
+      : t("Pauzeren");
 
     // De tijdlijn alleen aanbieden waar de coach er een heeft. Een apparaat dat
     // de coach niet plant, of een kaart zonder kabel, levert een leeg scherm op
@@ -2262,12 +2262,12 @@ class DacViewOverview extends DacElement {
         const el = document.createElement("option");
         el.value = "";
         // De naam komt van de machine, dus als tekst.
-        el.textContent = naam || "Nog geen programma gekozen";
+        el.textContent = naam || t("Nog geen programma gekozen");
         select.replaceChildren(el);
       }
       select.disabled = true;
       this.$(`[data-program-hint="${slot}"]`).textContent =
-        "Het programma kies je op de machine zelf. De coach leest het en start hem op het goedkoopste moment.";
+        t("Het programma kies je op de machine zelf. De coach leest het en start hem op het goedkoopste moment.");
       return;
     }
     if (picker.kind === "missing") {
@@ -2275,7 +2275,7 @@ class DacViewOverview extends DacElement {
       select.disabled = true;
       select.dataset.key = "missing";
       this.$(`[data-program-hint="${slot}"]`).textContent =
-        "Om hier een programma te kiezen vul je bij Apparaten \"Programma kiezen\" in: de select-entiteit van de machine.";
+        t("Om hier een programma te kiezen vul je bij Apparaten \"Programma kiezen\" in: de select-entiteit van de machine.");
       return;
     }
     let options;
@@ -2290,7 +2290,8 @@ class DacViewOverview extends DacElement {
     } else {
       options = picker.options.map((program) => ({
         value: program.key || programKey(program.label),
-        label: program.label,
+        // Een vaste naam ("Eco 50 °C") in de taal van het scherm; een eigen naam blijft.
+        label: t(program.label),
       }));
       current = device.program ?? "";
     }
@@ -2300,7 +2301,7 @@ class DacViewOverview extends DacElement {
       select.dataset.key = key;
       const leeg = document.createElement("option");
       leeg.value = "";
-      leeg.textContent = "Kies een programma";
+      leeg.textContent = t("Kies een programma");
       select.replaceChildren(
         leeg,
         ...options.map((option) => {
@@ -2317,10 +2318,10 @@ class DacViewOverview extends DacElement {
     }
     select.disabled = !options.length;
     this.$(`[data-program-hint="${slot}"]`).textContent = !options.length
-      ? "Deze entiteit geeft geen keuzes terug, dus er valt hier niets te kiezen."
+      ? t("Deze entiteit geeft geen keuzes terug, dus er valt hier niets te kiezen.")
       : picker.kind === "entity"
-        ? "Kiezen zet het programma klaar op de machine; de coach start hem op het goedkoopste moment."
-        : "De coach kiest nooit zelf een programma. Kies hier wat je op de machine hebt ingesteld, dan weet hij hoe lang het duurt en wat het kost.";
+        ? t("Kiezen zet het programma klaar op de machine; de coach start hem op het goedkoopste moment.")
+        : t("De coach kiest nooit zelf een programma. Kies hier wat je op de machine hebt ingesteld, dan weet hij hoe lang het duurt en wat het kost.");
   }
 
   async chooseProgramOnCard_(slot, value) {
@@ -2501,7 +2502,7 @@ class DacViewOverview extends DacElement {
     // Portugal (v0.138.0): geen leverancier die morgen publiceert, maar vaste tijdvakken.
     const contract = this.settings_?.contract;
     const portugal = contract?.country === "PT";
-    this.$("#prices-eyebrow").textContent = portugal ? "Tarief per tijdvak" : "Dynamisch tarief";
+    this.$("#prices-eyebrow").textContent = portugal ? t("Tarief per tijdvak") : t("Dynamisch tarief");
 
     // Suppliers publish the next day somewhere in the afternoon, so a list that
     // stops tonight is normal rather than broken -- and saying so beats leaving
@@ -2511,8 +2512,8 @@ class DacViewOverview extends DacElement {
       : portugal
         ? ptTijden(contract.pt)
         : last >= tomorrow
-        ? "De prijzen van je leverancier voor vandaag en morgen."
-        : "Alleen vandaag is bekend. De prijzen voor morgen komen meestal in de loop van de middag binnen.";
+        ? t("De prijzen van je leverancier voor vandaag en morgen.")
+        : t("Alleen vandaag is bekend. De prijzen voor morgen komen meestal in de loop van de middag binnen.");
   }
 
   /**
@@ -2527,10 +2528,10 @@ class DacViewOverview extends DacElement {
    */
   updateLegend_() {
     const entries = [
-      { tone: "var(--dac-solar)", label: "Zon" },
-      { tone: "var(--dac-house)", label: "Woning" },
-      { tone: "var(--dac-grid-in)", label: "Van het net" },
-      { tone: "var(--dac-grid-out)", label: "Naar het net" },
+      { tone: "var(--dac-solar)", label: t("Zon") },
+      { tone: "var(--dac-house)", label: t("Woning") },
+      { tone: "var(--dac-grid-in)", label: t("Van het net") },
+      { tone: "var(--dac-grid-out)", label: t("Naar het net") },
       ...this.flow_.bubbles,
     ];
 
@@ -2561,8 +2562,8 @@ class DacViewOverview extends DacElement {
 
     const fuse = Number(this.settings_?.installation?.fuse_amps) || 0;
     this.$("#phases-title").textContent = fuse
-      ? `Belasting per fase, tegen ${fuse} A`
-      : "Belasting per fase";
+      ? t("Belasting per fase, tegen {amps} A", { amps: fuse })
+      : t("Belasting per fase");
 
     const bounds = { low: Math.round(alertAt * 0.75), high: alertAt };
 
@@ -2602,13 +2603,13 @@ class DacViewOverview extends DacElement {
           <div class="phase-row" style="--tone: ${tone}">
             <span class="name">${phase.label}</span>
             <span class="bar"><i style="width: ${pct.toFixed(1)}%"></i></span>
-            <span class="values">${bits.join("") || "<span class=\"none\">geen meetwaarde</span>"}</span>
+            <span class="values">${bits.join("") || `<span class="none">${t("geen meetwaarde")}</span>`}</span>
           </div>`;
       })
       .join("");
 
     const groepen = (r.circuits ?? [])
-      .map((g) => `<div class="phase-group">${g.name}${g.fuse ? `, tegen ${g.fuse} A` : ""}</div>${rijen(g.phases, g.fuse)}`)
+      .map((g) => `<div class="phase-group">${g.fuse ? t("{naam}, tegen {amps} A", { naam: g.name, amps: g.fuse }) : g.name}</div>${rijen(g.phases, g.fuse)}`)
       .join("");
     this.$("#phase-rows").innerHTML = rijen(r.phases, fuse) + groepen;
   }
@@ -2704,36 +2705,36 @@ class DacViewOverview extends DacElement {
               <button type="button" class="says-yes" data-coach-yes="${slot}" hidden></button>
             </div>
             <div class="car-pick" data-car-pick="${slot}" hidden>
-              <label for="car-${slot}">Welke auto hangt eraan?</label>
+              <label for="car-${slot}">${t("Welke auto hangt eraan?")}</label>
               <select id="car-${slot}" data-car-select="${slot}"></select>
             </div>
             <div class="car-pick soc-pick" data-soc-pick="${slot}" hidden>
-              <label for="soc-${slot}">Hoe vol is de auto nu?</label>
+              <label for="soc-${slot}">${t("Hoe vol is de auto nu?")}</label>
               <div class="soc-row">
                 <input id="soc-${slot}" class="soc-input tnum" type="number" min="0" max="100"
                        step="1" inputmode="numeric" enterkeyhint="done"
                        data-soc-input="${slot}" placeholder="%">
                 <span class="soc-procent" aria-hidden="true">%</span>
-                <button type="button" class="soc-save" data-soc-save="${slot}">Doorgeven</button>
+                <button type="button" class="soc-save" data-soc-save="${slot}">${t("Doorgeven")}</button>
               </div>
               <p class="soc-hint" data-soc-hint="${slot}"></p>
             </div>
             <!-- Tot hoeveel procent deze beurt laadt (v0.88.0), zoals de schuif
                  van evcc. De laadgrens in de auto blijft de bovengrens. -->
             <div class="car-pick" data-target-pick="${slot}" hidden>
-              <label for="target-${slot}">Laden tot</label>
+              <label for="target-${slot}">${t("Laden tot")}</label>
               <select id="target-${slot}" data-target-select="${slot}"></select>
               <p class="soc-hint" data-target-hint="${slot}"></p>
             </div>
             <div class="car-pick" data-program-pick="${slot}" hidden>
-              <label for="program-${slot}">Welk programma staat erop?</label>
+              <label for="program-${slot}">${t("Welk programma staat erop?")}</label>
               <select id="program-${slot}" data-program-select="${slot}"></select>
               <p class="soc-hint" data-program-hint="${slot}"></p>
             </div>
             <div class="plan-pick" data-plan="${slot}" hidden>
               <div class="plan-head">
                 <div class="plan-words">
-                  <span class="plan-title" id="plan-title-${slot}">Schema</span>
+                  <span class="plan-title" id="plan-title-${slot}">${t("Schema")}</span>
                   <p class="plan-note" data-plan-note="${slot}"></p>
                 </div>
                 <button type="button" class="plan-toggle" role="switch" aria-checked="false"
@@ -2746,7 +2747,7 @@ class DacViewOverview extends DacElement {
                      voorgaat op de aansluiting staat nu op Voorkeuren, in de
                      voorrang bij planningen, voor alle apparaten samen. -->
                 <button type="button" class="plan-link" data-plan-link="${slot}">
-                  ${icons.sliders} Instellen
+                  ${icons.sliders} ${t("Instellen")}
                 </button>
               </div>
             </div>
@@ -2756,7 +2757,7 @@ class DacViewOverview extends DacElement {
                  pop-up. Over de hele breedte, anders komt hij naast "tot 50 %"
                  van Nu leegladen te staan en leest dat als één knop. -->
             <button class="manual instellen" type="button" data-settings="${slot}" hidden>
-              ${icons.sliders}<span>Instellen</span>
+              ${icons.sliders}<span>${t("Instellen")}</span>
             </button>
             <button class="release" type="button" data-release="${slot}" aria-pressed="false">
               <span class="mark" data-mark="${slot}"></span>
@@ -2767,43 +2768,43 @@ class DacViewOverview extends DacElement {
               <span data-release-now-text="${slot}"></span>
             </button>
             <button class="boost" type="button" data-boost="${slot}" aria-pressed="false" hidden>
-              <span class="ico" data-boost-icon="${slot}">${icons.bolt}</span><span data-boost-text="${slot}">Snelladen</span>
+              <span class="ico" data-boost-icon="${slot}">${icons.bolt}</span><span data-boost-text="${slot}">${t("Snelladen")}</span>
             </button>
             <!-- De laadmodus zonder planning (v0.87.0), naast Snel: zoals evcc.
                  Alleen op een laadpaal en alleen als er geen schema aanstaat,
                  want een planning wint. -->
             <button class="boost" type="button" data-modus="${slot}" data-modus-naam="continu" aria-pressed="false" hidden>
-              ${icons.plug}<span>Continu</span>
+              ${icons.plug}<span>${t("Continu")}</span>
             </button>
             <button class="boost" type="button" data-modus="${slot}" data-modus-naam="zon" aria-pressed="false" hidden>
-              ${icons.sun}<span>Zon</span>
+              ${icons.sun}<span>${t("Zon")}</span>
             </button>
             <button class="boost" type="button" data-pause="${slot}" aria-pressed="false" hidden>
-              ${icons.pause}<span data-pause-text="${slot}">Pauzeren</span>
+              ${icons.pause}<span data-pause-text="${slot}">${t("Pauzeren")}</span>
             </button>
             <!-- De thuisbatterij: nu leegladen tot een accustand naar keuze, en
                  daarna weer het gewone plan. De bewoner van de eerste woning op
                  22-09-2026: "nu maximaal ontladen tot 50%, daarna terug naar
                  normale modus." -->
             <button class="boost" type="button" data-drain="${slot}" aria-pressed="false" hidden>
-              ${icons.accuLeeg}<span data-drain-text="${slot}">Nu leegladen</span>
+              ${icons.accuLeeg}<span data-drain-text="${slot}">${t("Nu leegladen")}</span>
             </button>
             <label class="drain-to" data-drain-to-row="${slot}" hidden>
-              tot <input type="number" min="5" max="95" step="5" value="50" data-drain-to="${slot}" inputmode="numeric"> %
+              ${t("tot")} <input type="number" min="5" max="95" step="5" value="50" data-drain-to="${slot}" inputmode="numeric"> %
             </label>
             <!-- Een Tesla slaapt als hij niet laadt en meldt dan geen accustand;
                  deze knop wekt hem. Alleen als de auto een wekknop heeft. -->
             <button class="boost" type="button" data-wake="${slot}" hidden>
-              ${icons.spark}<span data-wake-text="${slot}">Accustand opvragen</span>
+              ${icons.spark}<span data-wake-text="${slot}">${t("Accustand opvragen")}</span>
             </button>
             <button class="manual" type="button" data-manual="${slot}" hidden>
-              ${icons.sliders}<span>Handmatige besturing</span>
+              ${icons.sliders}<span>${t("Handmatige besturing")}</span>
             </button>
             <!-- Achteraan, want dit is de enige knop die niets doet: hij laat
                  alleen zien wat er al besloten is. Dezelfde vorm als de rest,
                  anders breekt hij de rij. -->
             <button class="boost" type="button" data-ahead="${slot}" hidden>
-              ${icons.compass}<span>Wat gaat hij doen</span>
+              ${icons.compass}<span>${t("Wat gaat hij doen")}</span>
             </button>
           </div>
           <p class="steer-hint" data-hint="${slot}"></p>
@@ -2955,7 +2956,7 @@ class DacViewOverview extends DacElement {
             ...cars.map((car) => {
               const option = document.createElement("option");
               option.value = car.id;
-              option.textContent = car.name?.trim() || (car.guest ? "Gast" : "Naamloze auto");
+              option.textContent = car.name?.trim() || (car.guest ? t("Gast") : t("Naamloze auto"));
               return option;
             })
           );
@@ -2995,20 +2996,18 @@ class DacViewOverview extends DacElement {
         // Een auto met een sensor die zwijgt (v0.116.2). Zag de coach eerder in
         // deze beurt een stand, dan rekent hij daarmee verder (`_onthouden_soc`)
         // en staat dat erbij; anders wacht hij net als bij een auto zonder sensor.
-        const stil = gekozen.soc_entity ? "De auto geeft zijn accustand nu niet door. " : "";
+        const stil = gekozen.soc_entity ? t("De auto geeft zijn accustand nu niet door. ") : "";
         this.$(`[data-soc-hint="${slot}"]`).textContent = !opgave && stil && oordeel?.soc_estimated
           && Number.isFinite(nu)
-          ? `${stil}De coach rekent met wat hij het laatst zei, nu ongeveer ${Math.round(nu)}%. `
-            + "Klopt dat niet, vul het in en druk op Doorgeven."
+          ? stil + t("De coach rekent met wat hij het laatst zei, nu ongeveer {pct}%. Klopt dat niet, vul het in en druk op Doorgeven.", { pct: Math.round(nu) })
           : opgave
-          ? (Number.isFinite(erbij) && erbij >= 0.05
-            ? `Dit loopt mee met wat de paal erin doet: sinds je ${Math.round(opgegeven)}% doorgaf is er `
-              + `${erbij.toFixed(1).replace(".", ",")} kWh geladen. `
-            : "Dit loopt mee met wat de paal erin doet. ")
-            + "Zegt de auto iets anders, vul dat in en druk op Doorgeven."
+          ? `${Number.isFinite(erbij) && erbij >= 0.05
+            ? t("Dit loopt mee met wat de paal erin doet: sinds je {pct}% doorgaf is er {kwh} kWh geladen.", { pct: Math.round(opgegeven), kwh: getal(erbij, 1) })
+            : t("Dit loopt mee met wat de paal erin doet.")} `
+            + t("Zegt de auto iets anders, vul dat in en druk op Doorgeven.")
           : stil + (oordeel?.needs_soc
-            ? "Hier wacht de coach op. Zonder dit gaat hij uit van een lege accu."
-            : "Geef dit door, dan kan de coach het gunstigste moment kiezen.");
+            ? t("Hier wacht de coach op. Zonder dit gaat hij uit van een lege accu.")
+            : t("Geef dit door, dan kan de coach het gunstigste moment kiezen."));
       }
 
       // Tot hoeveel procent: bij elke auto van het huis die er hangt. Een gast
@@ -3026,14 +3025,15 @@ class DacViewOverview extends DacElement {
         const nu = oordeel.target_session ? String(Math.round(algemeen)) : "";
         const doelHint = this.$(`[data-target-hint="${slot}"]`);
         if (doelHint) {
-          doelHint.textContent = Number.isFinite(oordeel.target_plan)
-            ? `Deze beurt laadt tot ${Math.round(oordeel.target_plan)}%, volgens je planning`
-              + (oordeel.target_day ? ` van ${oordeel.target_day}` : "")
-              + ". Wat je hier kiest geldt voor Snel, Continu en Zon, en voor een planning zonder eigen limiet."
-            : "";
+          const doelPct = Math.round(oordeel.target_plan);
+          doelHint.textContent = !Number.isFinite(oordeel.target_plan)
+            ? ""
+            : oordeel.target_day
+              ? t("Deze beurt laadt tot {pct}%, volgens je planning van {dag}. Wat je hier kiest geldt voor Snel, Continu en Zon, en voor een planning zonder eigen limiet.", { pct: doelPct, dag: oordeel.target_day })
+              : t("Deze beurt laadt tot {pct}%, volgens je planning. Wat je hier kiest geldt voor Snel, Continu en Zon, en voor een planning zonder eigen limiet.", { pct: doelPct });
           doelHint.hidden = !doelHint.textContent;
         }
-        const opties = [["", `Zoals het autoprofiel (${profiel}%)`],
+        const opties = [["", t("Zoals het autoprofiel ({pct}%)", { pct: profiel })],
           ...[50, 60, 70, 80, 90, 100].map((p) => [String(p), `${p}%`])];
         if (keuze.dataset.opties !== JSON.stringify(opties)) {
           keuze.dataset.opties = JSON.stringify(opties);
@@ -3059,23 +3059,23 @@ class DacViewOverview extends DacElement {
       // 13-09-2026, na een vrijgave om 16:33 bij klaar om 16:30.
       const besluit = this.coach_?.[device.id];
       const gemist = asks && Boolean(besluit?.missed) && !besluit?.running;
-      const later = besluit?.later || "morgen";
+      const later = besluit?.later || t("morgen");
       const nu = on && (this.settings_?.ready_now ?? []).includes(device.id);
       const button = this.$(`[data-release="${slot}"]`);
       button.hidden = !asks;
       button.setAttribute("aria-pressed", String(on));
       this.$(`[data-mark="${slot}"]`).innerHTML = on ? icons.check : "";
       this.$(`[data-release-text="${slot}"]`).textContent = on
-        ? nu ? "Vrijgegeven, start nu" : gemist ? `Vrijgegeven, start ${later}` : "Vrijgegeven"
-        : gemist ? `${copy.short}, ${later} starten` : copy.label;
+        ? nu ? t("Vrijgegeven, start nu") : gemist ? t("Vrijgegeven, start {later}", { later }) : t("Vrijgegeven")
+        : gemist ? t("{knop}, {later} starten", { knop: copy.short, later }) : copy.label;
       this.$(`[data-release-now="${slot}"]`).hidden = !gemist || nu;
       this.$(`[data-release-now-text="${slot}"]`).textContent = on
-        ? "Toch nu starten"
-        : `${copy.short}, nu starten`;
+        ? t("Toch nu starten")
+        : t("{knop}, nu starten", { knop: copy.short });
       this.$(`[data-hint="${slot}"]`).textContent = !asks || on
         ? ""
         : gemist
-          ? `${String(besluit.missed).slice(11, 16)} is vandaag voorbij. Kies of hij ${later} op het goedkoopste moment start, of nu meteen.`
+          ? t("{klok} is vandaag voorbij. Kies of hij {later} op het goedkoopste moment start, of nu meteen.", { klok: String(besluit.missed).slice(11, 16), later })
           : copy.hint;
 
       // Only where there is something to send to: a brand that takes commands,
@@ -3102,17 +3102,18 @@ class DacViewOverview extends DacElement {
         const doet = !aan
           ? ""
           : accu
-            ? (w > 0 ? " (laadt)" : " (ontlaadt)")
+            ? (w > 0 ? t("laadt") : t("ontlaadt"))
             : device.type === "laadpaal"
-              ? " (laadt)"
+              ? t("laadt")
               : device.type === "boiler"
-                ? " (verwarmt)"
+                ? t("verwarmt")
                 : asks
-                  ? " (draait)"
-                  : " (aan)";
+                  ? t("draait")
+                  : t("aan");
         this.$(`[data-tab-dot="${slot}"]`).classList.toggle("on", (asks && (on || draait)) || aan);
-        this.$(`[data-tab-state="${slot}"]`).textContent =
-          doet || (draait ? " (draait)" : asks && on ? " (vrijgegeven)" : "");
+        // Een woord tussen haakjes achter de naam, voor een schermlezer.
+        const staat = doet || (draait ? t("draait") : asks && on ? t("vrijgegeven") : "");
+        this.$(`[data-tab-state="${slot}"]`).textContent = staat ? ` (${staat})` : "";
       }
     });
 
@@ -3328,9 +3329,7 @@ class DacViewOverview extends DacElement {
 
     this.$("#manual-title").textContent = this.labelFor_(device);
     this.$("#manual-sub").textContent =
-      "Deze opdrachten gaan rechtstreeks naar het apparaat, langs de coach om. "
-      + "Pauzeren blijft staan tot je hervat, maar stuurt de coach wel, dus die "
-      + "kan het binnen een minuut weer overnemen.";
+      t("Deze opdrachten gaan rechtstreeks naar het apparaat, langs de coach om. Pauzeren blijft staan tot je hervat, maar stuurt de coach wel, dus die kan het binnen een minuut weer overnemen.");
     this.setManualStatus_("", "");
     this.paintProgramPicker_(device);
 
@@ -3390,8 +3389,8 @@ class DacViewOverview extends DacElement {
 
     select.disabled = !options.length;
     this.$("#manual-program-note").textContent = options.length
-      ? "Kiezen zet het programma klaar; starten doe je met de knop eronder."
-      : "Deze entiteit geeft geen keuzes terug, dus er valt hier niets te kiezen.";
+      ? t("Kiezen zet het programma klaar; starten doe je met de knop eronder.")
+      : t("Deze entiteit geeft geen keuzes terug, dus er valt hier niets te kiezen.");
   }
 
   /** Put the chosen program on the machine. */
@@ -3400,7 +3399,7 @@ class DacViewOverview extends DacElement {
 
     this.sending_ = true;
     this.setManualButtons_(true);
-    this.setManualStatus_("Programma instellen…", "");
+    this.setManualStatus_(t("Programma instellen…"), "");
 
     const [domain] = this.programEntity_.split(".");
     try {
@@ -3408,11 +3407,11 @@ class DacViewOverview extends DacElement {
         entity_id: this.programEntity_,
         option: value,
       });
-      this.setManualStatus_("Programma ingesteld.", "good");
+      this.setManualStatus_(t("Programma ingesteld."), "good");
     } catch (error) {
       console.warn("[DomotiApp Coach] programma instellen mislukt", error);
       this.setManualStatus_(
-        `Het programma instellen is niet gelukt: ${error?.message || "het apparaat gaf geen antwoord"}.`,
+        t("Het programma instellen is niet gelukt: {fout}.", { fout: error?.message || t("het apparaat gaf geen antwoord") }),
         "bad"
       );
       // Back to what the machine actually has, so the dropdown never shows a
@@ -3442,11 +3441,11 @@ class DacViewOverview extends DacElement {
 
     try {
       await this.hass.callService(domain, service, data);
-      this.setManualStatus_(`${action.label} verstuurd.`, "good");
+      this.setManualStatus_(t("{opdracht} verstuurd.", { opdracht: action.label }), "good");
     } catch (error) {
       console.warn("[DomotiApp Coach] opdracht mislukt", error);
       this.setManualStatus_(
-        `${action.label} is niet gelukt: ${error?.message || "het apparaat gaf geen antwoord"}.`,
+        t("{opdracht} is niet gelukt: {fout}.", { opdracht: action.label, fout: error?.message || t("het apparaat gaf geen antwoord") }),
         "bad"
       );
     } finally {
@@ -3470,7 +3469,7 @@ class DacViewOverview extends DacElement {
 
   /** Supporting line for a tile, or an honest blank when there is no reading. */
   sub_(value, describe) {
-    if (value === null || !Number.isFinite(value)) return "Geen meetwaarde";
+    if (value === null || !Number.isFinite(value)) return t("Geen meetwaarde");
     return describe(value);
   }
 

@@ -8,10 +8,11 @@
  */
 
 import { huisNu } from "./format.js";
+import { locale, nt, t, tn } from "./i18n.js";
 import { perUur } from "./prijsgrafiek.js";
 
 const euro = (bedrag, cijfers = 2) =>
-  `€ ${Number(bedrag).toLocaleString("nl-NL", { minimumFractionDigits: cijfers, maximumFractionDigits: cijfers })}`;
+  `€ ${Number(bedrag).toLocaleString(locale(), { minimumFractionDigits: cijfers, maximumFractionDigits: cijfers })}`;
 
 const klok = (iso) => String(iso ?? "").slice(11, 16);
 
@@ -19,7 +20,7 @@ const datum = (iso) => {
   const d = new Date(`${iso}T12:00:00`);
   return Number.isNaN(d.getTime())
     ? iso
-    : d.toLocaleDateString("nl-NL", { month: "long", year: "numeric" });
+    : d.toLocaleDateString(locale(), { month: "long", year: "numeric" });
 };
 
 /** De eerste aaneengesloten reeks uren waarin het plan van het net wil laden. */
@@ -34,19 +35,24 @@ export function volgendeNetlading(hours = []) {
 
 /** De naam van een stand met een hoofdletter, voor de grafiek ("Nul op de meter"). */
 export function standNaam(stand) {
-  const naam = STAND_NAMEN[stand] ?? stand ?? "";
+  const naam = naamVan(stand) ?? "";
   return naam.charAt(0).toUpperCase() + naam.slice(1);
 }
 
+// Nederlands, zoals `STAND_NAMEN` in batterij.py; vertaald waar hij getoond wordt
+// (`naamVan`, v0.139.0).
 const STAND_NAMEN = {
-  nul: "nul op de meter",
-  zonneladen: "alleen zonneladen",
-  ontladen: "alleen ontladen",
-  netladen: "laden van het net",
-  "max-laden": "maximaal laden",
-  handelen: "handelen",
-  standby: "standby",
+  nul: nt("nul op de meter"),
+  zonneladen: nt("alleen zonneladen"),
+  ontladen: nt("alleen ontladen"),
+  netladen: nt("laden van het net"),
+  "max-laden": nt("maximaal laden"),
+  handelen: nt("handelen"),
+  standby: nt("standby"),
 };
+
+/** De naam van een stand in de taal van nu; een onbekende stand zoals hij is. */
+const naamVan = (stand) => (STAND_NAMEN[stand] ? t(STAND_NAMEN[stand]) : stand);
 
 /**
  * Het plan van de coach voor de komende uren, samengevat per stand.
@@ -85,25 +91,25 @@ export function planRegels(hours = [], maxRegels = 8) {
     const n = huisNu();
     const vandaag = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
     const dag = String(iso ?? "").slice(0, 10);
-    return `${dag && dag !== vandaag && dag > vandaag ? "morgen " : ""}${klok(iso)}`;
+    return dag && dag !== vandaag && dag > vandaag ? t("morgen {klok}", { klok: klok(iso) }) : klok(iso);
   };
   return blokken.slice(0, maxRegels).map((b) => {
-    let text = STAND_NAMEN[b.mode] ?? b.mode;
+    let text = naamVan(b.mode);
     if (Number.isFinite(b.socEind)) {
       text += Number.isFinite(b.socBegin) && Math.round(b.socBegin) !== Math.round(b.socEind)
-        ? `, van ${Math.round(b.socBegin)} naar ${Math.round(b.socEind)}%`
+        ? `, ${t("van {van} naar {naar}%", { van: Math.round(b.socBegin), naar: Math.round(b.socEind) })}`
         : `, ${Math.round(b.socEind)}%`;
     }
     if (b.kwh > 0.05) {
-      text += `, ${b.kwh.toLocaleString("nl-NL", { maximumFractionDigits: 1 })} kWh`;
-      if (b.prijsN) text += ` tegen ${euro(b.prijsSom / b.prijsN, 3)}`;
+      const kwh = `${b.kwh.toLocaleString(locale(), { maximumFractionDigits: 1 })} kWh`;
+      text += `, ${b.prijsN ? t("{kwh} tegen {prijs}", { kwh, prijs: euro(b.prijsSom / b.prijsN, 3) }) : kwh}`;
     }
-    return { label: `${dagKlok(b.start)} tot ${dagKlok(b.end)}`, text };
+    return { label: t("{van} tot {tot}", { van: dagKlok(b.start), tot: dagKlok(b.end) }), text };
   });
 }
 
 const kwhTekst = (kwh) =>
-  `${Number(kwh).toLocaleString("nl-NL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kWh`;
+  `${Number(kwh).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kWh`;
 
 /**
  * De conclusie van de nachtzin: de laatste zin van `plan`, "Je houdt naar
@@ -139,30 +145,30 @@ export function batterijVooruit(besluit) {
   const kop = [];
   if (Number.isFinite(besluit.soc)) {
     kop.push({
-      label: "Accu nu",
+      label: t("Accu nu"),
       waarde: `${Math.round(besluit.soc)}%`,
       bij: Number.isFinite(besluit.capacity_kwh)
-        ? `van ${kwhTekst(besluit.capacity_kwh)}`
+        ? t("van {kwh}", { kwh: kwhTekst(besluit.capacity_kwh) })
         : "",
     });
   }
   if (Number.isFinite(besluit.balance_kwh)) {
     const over = besluit.balance_kwh >= 0;
     kop.push({
-      label: "Morgenvroeg",
+      label: t("Morgenvroeg"),
       waarde: `${over ? "" : "−"}${kwhTekst(Math.abs(besluit.balance_kwh))}`,
-      bij: over ? "over na de nacht" : "tekort voor de nacht",
+      bij: over ? t("over na de nacht") : t("tekort voor de nacht"),
     });
   }
   const netUren = uren.filter((u) => Number(u.grid_kwh) > 0.05);
   const netKwh = netUren.reduce((som, u) => som + Number(u.grid_kwh), 0);
   const prijzen = netUren.filter((u) => Number.isFinite(u.price));
   kop.push({
-    label: "Van het net",
-    waarde: netKwh > 0.05 ? kwhTekst(netKwh) : "niets",
+    label: t("Van het net"),
+    waarde: netKwh > 0.05 ? kwhTekst(netKwh) : t("niets"),
     bij: prijzen.length
-      ? `gemiddeld ${euro(prijzen.reduce((s, u) => s + u.price, 0) / prijzen.length, 3)}`
-      : "in de uren die er bekend zijn",
+      ? t("gemiddeld {prijs}", { prijs: euro(prijzen.reduce((s, u) => s + u.price, 0) / prijzen.length, 3) })
+      : t("in de uren die er bekend zijn"),
   });
   // Onder welke prijs bijkopen nu loont (v0.102.3), in plaats van "Een kWh
   // erin, is straks waard". De eigenaar op 30-09-2026 bij € 0,301 en een nacht
@@ -172,9 +178,9 @@ export function batterijVooruit(besluit) {
   if (Number.isFinite(besluit.buy_below)) {
     const nu = Number(uren[0]?.price);
     kop.push({
-      label: "Bijkopen loont",
-      waarde: `onder ${euro(besluit.buy_below, 3)}`,
-      bij: Number.isFinite(nu) ? `nu ${euro(nu, 3)}` : "per kWh van het net",
+      label: t("Bijkopen loont"),
+      waarde: t("onder {prijs}", { prijs: euro(besluit.buy_below, 3) }),
+      bij: Number.isFinite(nu) ? t("nu {prijs}", { prijs: euro(nu, 3) }) : t("per kWh van het net"),
     });
   }
   // De uren waarin hij de auto helpt, opgeteld (v0.95.0). De bewoner van de
@@ -183,9 +189,9 @@ export function batterijVooruit(besluit) {
   const naarAuto = uren.reduce((t, u) => t + (Number(u.car_kwh) || 0), 0);
   if (naarAuto > 0.05) {
     kop.push({
-      label: "Naar de auto",
+      label: t("Naar de auto"),
       waarde: kwhTekst(naarAuto),
-      bij: Number.isFinite(besluit.car_floor) ? `tot hij op ${Math.round(besluit.car_floor)}% staat` : "als de paal laadt",
+      bij: Number.isFinite(besluit.car_floor) ? t("tot hij op {n}% staat", { n: Math.round(besluit.car_floor) }) : t("als de paal laadt"),
     });
   }
 
@@ -218,22 +224,22 @@ export function batterijVooruit(besluit) {
     const net = Number(u.grid_kwh) || 0;
     const auto = Number(u.car_kwh) || 0;
     let wat = Array.isArray(u.mode)
-      ? u.mode.map((m) => STAND_NAMEN[m] ?? m).join(" en ")
-      : STAND_NAMEN[u.mode] ?? u.mode ?? "";
+      ? u.mode.map((m) => naamVan(m)).join(` ${t("en")} `)
+      : naamVan(u.mode) ?? "";
     // Komt alles wat erin gaat van het net, dan is "waarvan" dubbel.
-    if (net > 0.05 && Math.abs(net - kwh) < 0.05) wat += `, ${kwhTekst(net)} van het net`;
+    if (net > 0.05 && Math.abs(net - kwh) < 0.05) wat += `, ${t("{kwh} van het net", { kwh: kwhTekst(net) })}`;
     else {
-      if (kwh > 0.05) wat += `, ${kwhTekst(kwh)} erin`;
-      else if (kwh < -0.05) wat += `, ${kwhTekst(-kwh)} eruit`;
+      if (kwh > 0.05) wat += `, ${t("{kwh} erin", { kwh: kwhTekst(kwh) })}`;
+      else if (kwh < -0.05) wat += `, ${t("{kwh} eruit", { kwh: kwhTekst(-kwh) })}`;
       // Wat daarvan naar de auto gaat (v0.95.0): de uren waarin hij helpt.
-      if (auto > 0.05) wat += `, waarvan ${kwhTekst(auto)} naar de auto`;
-      if (net > 0.05) wat += `, waarvan ${kwhTekst(net)} van het net`;
+      if (auto > 0.05) wat += `, ${t("waarvan {kwh} naar de auto", { kwh: kwhTekst(auto) })}`;
+      if (net > 0.05) wat += `, ${t("waarvan {kwh} van het net", { kwh: kwhTekst(net) })}`;
     }
     wat = wat.charAt(0).toUpperCase() + wat.slice(1);
     return {
       start: u.start,
       end: u.end,
-      tijd: nieuweDag ? `morgen ${klok(u.start)}` : klok(u.start),
+      tijd: nieuweDag ? t("morgen {klok}", { klok: klok(u.start) }) : klok(u.start),
       prijs: Number.isFinite(u.price) ? euro(u.price, 3) : "",
       soc: Number.isFinite(u.soc) ? `${Math.round(u.soc)}%` : "",
       wat,
@@ -267,25 +273,27 @@ export function opgeleverdTekst(earned) {
   const dagen = Number(earned.days);
   // Laden is inkopen (v0.107.0): wat de stroom die erin zit kostte, telt pas
   // bij Opgeleverd als hij eruit gaat. Zie `Voorraad` in batterij.py.
-  return [{ label: "Opgeleverd", text: `${euro(Number(earned.euro ?? 0))} in ${dagen} ${dagen === 1 ? "dag" : "dagen"}` }];
+  return [{ label: t("Opgeleverd"), text: tn(dagen, "{bedrag} in {n} dag", "{bedrag} in {n} dagen", { bedrag: euro(Number(earned.euro ?? 0)) }) }];
 }
 
 /** De regels op de kaart van een batterij. */
 export function batteryRows(besluit) {
   if (!besluit || besluit.kind !== "batterij") return [];
-  const rijen = [{ label: "Stand", text: besluit.mode_name ?? besluit.mode ?? "—" }];
+  const rijen = [{ label: t("Stand"), text: besluit.mode_name ?? besluit.mode ?? "—" }];
 
   // Sinds v0.97.0 kan de batterij het zelf doen, met een eigen meter; dan is er
   // geen opdracht van de coach en zegt de kaart wie het doet.
   if (besluit.applied && besluit.self_zero) {
-    rijen.push({ label: "Wie regelt", text: "de batterij zelf, met zijn eigen meter; de coach kijkt mee" });
+    rijen.push({ label: t("Wie regelt"), text: t("de batterij zelf, met zijn eigen meter; de coach kijkt mee") });
   }
 
   if (besluit.applied && Number.isFinite(besluit.setpoint_w)) {
     const w = Math.round(besluit.setpoint_w);
     rijen.push({
-      label: "Opdracht van de coach",
-      text: w === 0 ? "0 W" : `${w > 0 ? "laden" : "ontladen"} op ${Math.abs(w).toLocaleString("nl-NL")} W`,
+      label: t("Opdracht van de coach"),
+      text: w === 0 ? "0 W" : w > 0
+        ? t("laden op {w} W", { w: Math.abs(w).toLocaleString(locale()) })
+        : t("ontladen op {w} W", { w: Math.abs(w).toLocaleString(locale()) }),
     });
   }
 
@@ -295,19 +303,23 @@ export function batteryRows(besluit) {
   const net = volgendeNetlading(besluit.hours);
   if (net) {
     rijen.push({
-      label: "Laadt van het net",
-      text: `${klok(net.start)} tot ${klok(net.end)}, ongeveer ${net.kwh.toLocaleString("nl-NL", { maximumFractionDigits: 1 })} kWh`,
+      label: t("Laadt van het net"),
+      text: t("{van} tot {tot}, ongeveer {kwh} kWh", {
+        van: klok(net.start), tot: klok(net.end), kwh: net.kwh.toLocaleString(locale(), { maximumFractionDigits: 1 }),
+      }),
     });
   }
 
   if (besluit.full_before) {
-    rijen.push({ label: "Volle beurt", text: "vandaag een keer helemaal vol, voor het balanceren van de cellen" });
+    rijen.push({ label: t("Volle beurt"), text: t("vandaag een keer helemaal vol, voor het balanceren van de cellen") });
   }
 
   if (besluit.holiday) {
     rijen.push({
-      label: "Vakantiestand",
-      text: `hij houdt de batterij onder ${Number.isFinite(besluit.ceiling) ? Math.round(besluit.ceiling) : "de grens"}%, en de wekelijkse volle beurt slaat hij over`,
+      label: t("Vakantiestand"),
+      text: t("hij houdt de batterij onder {grens}%, en de wekelijkse volle beurt slaat hij over", {
+        grens: Number.isFinite(besluit.ceiling) ? Math.round(besluit.ceiling) : t("de grens"),
+      }),
     });
   }
 

@@ -25,6 +25,7 @@
 
 import { DacElement, define } from "./base.js";
 import { huisNu, level, levelTone, prijsGrenzen } from "./format.js";
+import { getal, t } from "./i18n.js";
 
 const UUR = 3600000;
 
@@ -42,7 +43,6 @@ export const KLEUR = {
   soc: "#9ec2ff",
 };
 
-const getal = (n, d = 1) => Number(n).toLocaleString("nl-NL", { minimumFractionDigits: d, maximumFractionDigits: d });
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 const twee = (n) => String(n).padStart(2, "0");
 
@@ -150,8 +150,8 @@ export function volgorde(data) {
 export function momentRegels(uur, { ids, labels, soorten, zichtbaar }) {
   if (!uur) return [];
   const regels = [];
-  if (zichtbaar.zon && uur.zon !== null && uur.zon > 0.005) regels.push({ kleur: KLEUR.zon, tekst: `Zon: ${getal(uur.zon)} kW verwacht` });
-  if (zichtbaar.huis && uur.huis !== null) regels.push({ kleur: KLEUR.huis, tekst: `Huis: ${getal(uur.huis)} kW verwacht` });
+  if (zichtbaar.zon && uur.zon !== null && uur.zon > 0.005) regels.push({ kleur: KLEUR.zon, tekst: t("Zon: {kw} kW verwacht", { kw: getal(uur.zon) }) });
+  if (zichtbaar.huis && uur.huis !== null) regels.push({ kleur: KLEUR.huis, tekst: t("Huis: {kw} kW verwacht", { kw: getal(uur.huis) }) });
   for (const id of ids) {
     if (!zichtbaar[id]) continue;
     const naam = labels.get(id) ?? id;
@@ -159,18 +159,19 @@ export function momentRegels(uur, { ids, labels, soorten, zichtbaar }) {
     const d = uur.apparaten[id];
     let tekst;
     if (!d) {
-      tekst = `${naam}: niets gepland`;
+      tekst = t("{naam}: niets gepland", { naam });
     } else if (soort === "thuisbatterij") {
-      const richting = d.kw > 0.05 ? `, ${getal(d.kw)} kW erin` : d.kw < -0.05 ? `, ${getal(-d.kw)} kW eruit` : "";
-      tekst = `${naam}: ${d.wat}${richting}${d.soc !== null ? `, naar ${d.soc}%` : ""}`;
+      const richting = d.kw > 0.05 ? `, ${t("{kw} kW erin", { kw: getal(d.kw) })}` : d.kw < -0.05 ? `, ${t("{kw} kW eruit", { kw: getal(-d.kw) })}` : "";
+      tekst = `${naam}: ${d.wat}${richting}${d.soc !== null ? `, ${t("naar {pct}%", { pct: d.soc })}` : ""}`;
     } else if (soort === "laadpaal") {
       if (d.kw > 0.05) {
         const delen = [];
-        if (d.zonKw > 0.05) delen.push(`${getal(d.zonKw)} uit de zon`);
-        if (d.accuKw > 0.05) delen.push(`${getal(d.accuKw)} uit de batterij`);
-        tekst = `${naam}: laadt ${getal(d.kw)} kW${delen.length ? ` (${delen.join(", ")})` : ""}`;
+        if (d.zonKw > 0.05) delen.push(t("{kw} uit de zon", { kw: getal(d.zonKw) }));
+        if (d.accuKw > 0.05) delen.push(t("{kw} uit de batterij", { kw: getal(d.accuKw) }));
+        tekst = t("{naam}: laadt {kw} kW", { naam, kw: getal(d.kw) }) + (delen.length ? ` (${delen.join(", ")})` : "");
       } else {
-        tekst = `${naam}: wacht${d.why ? `, ${d.why}` : ""}`;
+        // De reden komt van de coach en blijft zoals hij is.
+        tekst = t("{naam}: wacht", { naam }) + (d.why ? `, ${d.why}` : "");
       }
     } else {
       const kw = d.onbekend || d.kw === null ? "" : `, ${getal(d.kw)} kW`;
@@ -315,7 +316,7 @@ export function vooruitSvg(uren, { ids, soorten, zichtbaar, drempels, gekozen, k
     }
   });
 
-  return `<svg class="vb" width="${breed}" height="${HOOGTE}" viewBox="0 0 ${breed} ${HOOGTE}" role="img" aria-label="Vooruitblik per uur">${delen.join("")}</svg>`;
+  return `<svg class="vb" width="${breed}" height="${HOOGTE}" viewBox="0 0 ${breed} ${HOOGTE}" role="img" aria-label="${t("Vooruitblik per uur")}">${delen.join("")}</svg>`;
 }
 
 const ZICHT_SLEUTEL = "dac-vooruitblik";
@@ -464,7 +465,7 @@ export class DacVooruitblik extends DacElement {
     this.uren_ = vooruitUren(data);
     const uren = this.uren_;
     if (!uren.length) {
-      this.$("#moment").innerHTML = `<p class="leeg">Nog niets om vooruit te kijken: de coach heeft nog geen plan.</p>`;
+      this.$("#moment").innerHTML = `<p class="leeg">${t("Nog niets om vooruit te kijken: de coach heeft nog geen plan.")}</p>`;
       for (const id of ["#chips", "#as", "#veeg", "#legenda", "#voorrang"]) this.$(id).replaceChildren();
       return;
     }
@@ -475,22 +476,22 @@ export class DacVooruitblik extends DacElement {
 
     // De keuzeknoppen.
     const lagen = [
-      ["prijs", "Prijs", "var(--dac-good)"],
-      ["zon", "Zon", KLEUR.zon],
-      ["huis", "Huis", KLEUR.huis],
+      ["prijs", t("Prijs"), "var(--dac-good)"],
+      ["zon", t("Zon"), KLEUR.zon],
+      ["huis", t("Huis"), KLEUR.huis],
       ...ids.map((id) => [id, naam(id), KLEUR[this.soorten_.get(id)] ?? "#888"]),
-      ...(accu ? [["soc", "Accustand", KLEUR.soc]] : []),
+      ...(accu ? [["soc", t("Accustand"), KLEUR.soc]] : []),
     ];
     this.$("#chips").innerHTML = lagen.map(([laag, tekst, kleur]) =>
       `<button type="button" class="chip" data-laag="${esc(laag)}" aria-pressed="${zichtbaar[laag] !== false}"><i style="background:${kleur}"></i>${esc(tekst)}</button>`).join("");
 
     // Het gekozen uur.
     const uur = uren[Math.min(this.gekozen_, uren.length - 1)];
-    const morgen = uur.start.getDate() !== huisNu().getDate() ? "morgen " : "";
+    const morgen = uur.start.getDate() !== huisNu().getDate() ? `${t("morgen")} ` : "";
     const prijs = uur.prijs === null ? "" : `€ ${getal(uur.prijs, 3)}`;
     const regels = momentRegels(uur, { ids, labels: this.labels_, soorten: this.soorten_, zichtbaar });
     this.$("#moment").innerHTML = `
-      <div class="kop"><span class="wanneer">${morgen}${twee(uur.start.getHours())}:00 tot ${twee(uur.end.getHours())}:00</span>
+      <div class="kop"><span class="wanneer">${morgen}${t("{van} tot {tot}", { van: `${twee(uur.start.getHours())}:00`, tot: `${twee(uur.end.getHours())}:00` })}</span>
         <span class="prijs"${uur.prijs === null ? "" : ` style="color:${levelTone(level(uur.prijs,
           prijsGrenzen(this.drempels_, uren.map((u) => ({ start: u.start, price: u.prijs })))(uur.start), true))}"`}>${prijs}</span></div>
       ${regels.length ? `<ul>${regels.map((r) => `<li><i style="background:${r.kleur}"></i><span>${esc(r.tekst)}</span></li>`).join("")}</ul>` : ""}`;
@@ -515,18 +516,18 @@ export class DacVooruitblik extends DacElement {
 
     // De legenda.
     const legenda = [];
-    if (zichtbaar.zon) legenda.push(`<span><i class="lijn" style="border-color:${KLEUR.zon}"></i>Zon, verwacht</span>`);
-    if (zichtbaar.huis) legenda.push(`<span><i class="stip" style="border-color:${KLEUR.huis}"></i>Huis, verwacht</span>`);
-    if (accu && zichtbaar.soc) legenda.push(`<span><i class="lijn" style="border-color:${KLEUR.soc}"></i>Accustand: 0% op de lijn, 100% bovenaan</span>`);
-    if (accu) legenda.push(`<span>Onder de lijn: de batterij ontlaadt</span>`);
+    if (zichtbaar.zon) legenda.push(`<span><i class="lijn" style="border-color:${KLEUR.zon}"></i>${t("Zon, verwacht")}</span>`);
+    if (zichtbaar.huis) legenda.push(`<span><i class="stip" style="border-color:${KLEUR.huis}"></i>${t("Huis, verwacht")}</span>`);
+    if (accu && zichtbaar.soc) legenda.push(`<span><i class="lijn" style="border-color:${KLEUR.soc}"></i>${t("Accustand: 0% op de lijn, 100% bovenaan")}</span>`);
+    if (accu) legenda.push(`<span>${t("Onder de lijn: de batterij ontlaadt")}</span>`);
     this.$("#legenda").innerHTML = legenda.join("");
 
     // De voorrang zoals Voorkeuren hem zet.
     const zonVolgorde = (data.voorrang_zon ?? []).filter((id) => ids.includes(id)).map(naam);
     const planVolgorde = (data.voorrang_plan ?? []).filter((id) => ids.includes(id)).map(naam);
     const zinnen = [];
-    if (zonVolgorde.length > 1) zinnen.push(`Voorrang bij zon: ${zonVolgorde.join(", ")}.`);
-    if (planVolgorde.length > 1) zinnen.push(`Bij planningen: ${planVolgorde.join(", ")}.`);
+    if (zonVolgorde.length > 1) zinnen.push(t("Voorrang bij zon: {lijst}.", { lijst: zonVolgorde.join(", ") }));
+    if (planVolgorde.length > 1) zinnen.push(t("Bij planningen: {lijst}.", { lijst: planVolgorde.join(", ") }));
     this.$("#voorrang").textContent = zinnen.join(" ");
   }
 }

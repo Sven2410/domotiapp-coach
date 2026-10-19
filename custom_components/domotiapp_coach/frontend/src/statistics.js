@@ -19,13 +19,14 @@
  */
 
 import { alsHuis, huisNu, vanHuis } from "./format.js";
+import { datum, nt, t } from "./i18n.js";
 
-/** How a period is cut into bars. */
+/** How a period is cut into bars. The label is shown with `t(item.label)`. */
 export const PERIODS = [
-  { id: "day", label: "Dag", bucket: "hour" },
-  { id: "week", label: "Week", bucket: "day" },
-  { id: "month", label: "Maand", bucket: "day" },
-  { id: "year", label: "Jaar", bucket: "month" },
+  { id: "day", label: nt("Dag"), bucket: "hour" },
+  { id: "week", label: nt("Week"), bucket: "day" },
+  { id: "month", label: nt("Maand"), bucket: "day" },
+  { id: "year", label: nt("Jaar"), bucket: "month" },
 ];
 
 /**
@@ -94,15 +95,15 @@ export function periodLabel(period, start) {
 
   if (period === "week") {
     const end = new Date(periodEnd(period, start).getTime() - 1);
-    return `${start.toLocaleDateString("nl-NL", opts)} tot ${end.toLocaleDateString("nl-NL", opts)}`;
+    return t("{van} tot {tot}", { van: datum(start, opts), tot: datum(end, opts) });
   }
   // Een jaar dat niet in januari begint (v0.132.0): "juli 2026 tot juni 2027".
   if (period === "year" && start.getMonth() !== 0) {
     const end = new Date(periodEnd(period, start).getTime() - 1);
     const maand = { month: "long", year: "numeric" };
-    return `${start.toLocaleDateString("nl-NL", maand)} tot ${end.toLocaleDateString("nl-NL", maand)}`;
+    return t("{van} tot {tot}", { van: datum(start, maand), tot: datum(end, maand) });
   }
-  return start.toLocaleDateString("nl-NL", opts);
+  return datum(start, opts);
 }
 
 /**

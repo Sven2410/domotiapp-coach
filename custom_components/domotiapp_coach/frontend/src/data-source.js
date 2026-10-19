@@ -19,6 +19,10 @@
 import { brandFields, canAlwaysOn, carsFor, programOf, valueLabel } from "./devices.js";
 import { countdown, duration, huisNu, huisTijd, toKwh, toWatts } from "./format.js";
 import { ptPrijsOp } from "./tarifas.js";
+import { locale, nt, t } from "./i18n.js";
+
+/** Een woord uit een tabel van devices.js, in de taal van nu (v0.139.0). */
+const vertaald = (woord) => (woord === null || woord === undefined ? woord : t(woord));
 
 const PHASES = ["l1", "l2", "l3"];
 
@@ -491,7 +495,7 @@ export function tariff(feed, contract) {
   // Portugal (v0.137.0): de prijs van het tijdvak van nu.
   if (contract?.country === "PT") {
     const nu = ptPrijsOp(contract.pt, new Date(), 900000);
-    return { buy: nu.koop, feedIn: nu.terug, basis: "je tarief van nu" };
+    return { buy: nu.koop, feedIn: nu.terug, basis: nt("je tarief van nu") };
   }
   const fixed = contract?.type !== "dynamic";
 
@@ -502,7 +506,7 @@ export function tariff(feed, contract) {
       feedIn:
         (Number(contract?.fixed?.feed_in_tariff) || 0) -
         (Number(contract?.fixed?.feed_in_costs) || 0),
-      basis: "je vaste tarief",
+      basis: nt("je vaste tarief"),
     };
   }
 
@@ -536,17 +540,17 @@ export function tariff(feed, contract) {
     if (market !== null) feedIn = market - (Number(dynamic.feed_in_costs) || 0) + (Number(dynamic.feed_in_bonus) || 0);
   }
 
-  return { buy: mean(priceForecast(feed, contract)), feedIn, basis: "het gemiddelde tarief van vandaag" };
+  return { buy: mean(priceForecast(feed, contract)), feedIn, basis: nt("het gemiddelde tarief van vandaag") };
 }
 
 /** The meter counters, in the order a Dutch meter lists them. */
 const METERS = [
-  { key: "import_low", label: "Geleverd laag" },
-  { key: "import_high", label: "Geleverd hoog" },
-  { key: "export_low", label: "Teruggeleverd laag" },
-  { key: "export_high", label: "Teruggeleverd hoog" },
-  { key: "gas", label: "Gas" },
-  { key: "water", label: "Water" },
+  { key: "import_low", label: nt("Geleverd laag") },
+  { key: "import_high", label: nt("Geleverd hoog") },
+  { key: "export_low", label: nt("Teruggeleverd laag") },
+  { key: "export_high", label: nt("Teruggeleverd hoog") },
+  { key: "gas", label: nt("Gas") },
+  { key: "water", label: nt("Water") },
 ];
 
 /**
@@ -579,7 +583,8 @@ export function meterReadings(feed, sources) {
       // three and electricity to three on most Dutch meters.
       return {
         ...meter,
-        value: number.toLocaleString("nl-NL", { maximumFractionDigits: 3 }),
+        label: t(meter.label),
+        value: number.toLocaleString(locale(), { maximumFractionDigits: 3 }),
         unit: state.attributes?.unit_of_measurement ?? "",
       };
     })
@@ -627,10 +632,10 @@ function readNumber(feed, entityId) {
  * geschatte kWh op een onbekende accu zou een verzonnen getal zijn.
  */
 export function accuTekst(procent, inhoudKwh) {
-  const kwh = (v) => v.toLocaleString("nl-NL", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  const pct = `${procent.toLocaleString("nl-NL", { maximumFractionDigits: 0 })} %`;
+  const kwh = (v) => v.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const pct = `${procent.toLocaleString(locale(), { maximumFractionDigits: 0 })} %`;
   return Number.isFinite(inhoudKwh) && inhoudKwh > 0
-    ? `${pct} · ${kwh((procent / 100) * inhoudKwh)} van ${kwh(inhoudKwh)} kWh`
+    ? t("{pct} · {kwh} van {totaal} kWh", { pct, kwh: kwh((procent / 100) * inhoudKwh), totaal: kwh(inhoudKwh) })
     : pct;
 }
 
@@ -685,9 +690,9 @@ export function actieradius(feed, car) {
 /** "28% · 138 van 493 km", of "6% · 30 km" als de volle radius niet na te rekenen is. */
 export function radiusTekst(procent, radius) {
   const pct = `${Math.round(procent)}%`;
-  const km = Math.round(radius.km).toLocaleString("nl-NL");
+  const km = Math.round(radius.km).toLocaleString(locale());
   return radius.perProcent
-    ? `${pct} · ${km} van ${Math.round(radius.perProcent * 100).toLocaleString("nl-NL")} km`
+    ? t("{pct} · {km} van {max} km", { pct, km, max: Math.round(radius.perProcent * 100).toLocaleString(locale()) })
     : `${pct} · ${km} km`;
 }
 
@@ -708,16 +713,16 @@ export function radiusTekst(procent, radius) {
 export function laadbeurtRegels(feed, device, settings, besluit) {
   const beurt = besluit?.session;
   if (device?.type !== "laadpaal" || !beurt || !Number.isFinite(beurt.kwh)) return [];
-  const label = beurt.active ? "Deze laadbeurt" : "Laatste laadbeurt";
-  if (beurt.kwh < 0.05) return [{ label, text: "nog niets" }];
-  const delen = [`${beurt.kwh.toLocaleString("nl-NL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kWh`];
+  const label = beurt.active ? t("Deze laadbeurt") : t("Laatste laadbeurt");
+  if (beurt.kwh < 0.05) return [{ label, text: t("nog niets") }];
+  const delen = [`${beurt.kwh.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kWh`];
   const erbij = Number.isFinite(beurt.soc_start) && Number.isFinite(beurt.soc_end) && !beurt.soc_estimated
     ? Math.round(beurt.soc_end) - Math.round(beurt.soc_start)
     : 0;
   if (erbij >= 1) {
     delen.push(`+${erbij}%`);
     const radius = actieradius(feed, gekozenAutoMetStand(device, settings));
-    if (radius?.perProcent) delen.push(`+${Math.round(erbij * radius.perProcent).toLocaleString("nl-NL")} km`);
+    if (radius?.perProcent) delen.push(`+${Math.round(erbij * radius.perProcent).toLocaleString(locale())} km`);
   }
   return [{ label, text: delen.join(" · ") }];
 }
@@ -738,7 +743,7 @@ function deviceDetails(feed, device, settings) {
       state = feed.get(device.entities.program_select);
     }
     if (!usable(state)) {
-      rows.push({ label: field.label, text: "—" });
+      rows.push({ label: vertaald(field.label), text: "—" });
       continue;
     }
 
@@ -749,11 +754,11 @@ function deviceDetails(feed, device, settings) {
     // we know them and passed through where we do not.
     const text =
       (field.format === "countdown" ? countdown(raw, unit) : null) ??
-      valueLabel(field.values, raw) ??
+      vertaald(valueLabel(field.values, raw)) ??
       // Een woord dat Home Assistant zelf vertaalt, zoals de standen van Miele (v0.124.0).
       (!Number.isFinite(number) ? feed.label?.(state.entity_id ?? entityId) : undefined) ??
       (Number.isFinite(number)
-        ? `${number.toLocaleString("nl-NL", { maximumFractionDigits: field.decimals ?? 2 })}${unit ? ` ${unit}` : ""}`
+        ? `${number.toLocaleString(locale(), { maximumFractionDigits: field.decimals ?? 2 })}${unit ? ` ${unit}` : ""}`
         // A word we have no translation for is still shown -- readable, but
         // recognisably the sensor's own wording rather than something invented.
         : raw.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()));
@@ -765,11 +770,11 @@ function deviceDetails(feed, device, settings) {
       const inhoud = usable(cap)
         ? toKwh(cap.state, cap.attributes?.unit_of_measurement)
         : Number(device.battery?.capacity_kwh);
-      rows.push({ label: field.label, text: accuTekst(number, Number(inhoud)) });
+      rows.push({ label: vertaald(field.label), text: accuTekst(number, Number(inhoud)) });
       continue;
     }
 
-    rows.push({ label: field.label, text });
+    rows.push({ label: vertaald(field.label), text });
 
     // What the selected program costs to run comes from the panel's own table
     // rather than from a sensor, so it is spelled out as an estimate. It is the
@@ -779,8 +784,8 @@ function deviceDetails(feed, device, settings) {
       const program = programOf(device, raw, settings);
       if (program) {
         rows.push({
-          label: program.measured ? "Duurt gemeten" : "Duurt ongeveer",
-          text: `${duration(program.minutes)} · ${Number(program.kwh).toLocaleString("nl-NL", {
+          label: program.measured ? t("Duurt gemeten") : t("Duurt ongeveer"),
+          text: `${duration(program.minutes)} · ${Number(program.kwh).toLocaleString(locale(), {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
           })} kWh`,
@@ -805,7 +810,7 @@ function deviceDetails(feed, device, settings) {
     if (car && Number.isFinite(procent)) {
       const radius = actieradius(feed, car);
       rows.push({
-        label: "Accu auto",
+        label: t("Accu auto"),
         text: radius ? radiusTekst(procent, radius) : accuTekst(procent, Number(car.capacity_kwh)),
       });
     }
@@ -816,8 +821,8 @@ function deviceDetails(feed, device, settings) {
   // die uit staat meet ook niets.
   if (canAlwaysOn(device) && device.entities?.switch) {
     const stand = feed.get(device.entities.switch);
-    const tekst = usable(stand) ? valueLabel({ on: "Aan", off: "Uit" }, String(stand.state)) : null;
-    rows.push({ label: "Stekker", text: tekst ?? "—" });
+    const tekst = usable(stand) ? valueLabel({ on: t("Aan"), off: t("Uit") }, String(stand.state)) : null;
+    rows.push({ label: t("Stekker"), text: tekst ?? "—" });
   }
 
   // Een thuisbatterij: wat de coach zelf bijhoudt. Het rendement is een meting
@@ -828,14 +833,14 @@ function deviceDetails(feed, device, settings) {
     const rij = (settings?.battery_state ?? []).find((r) => r?.device === device.id) ?? {};
     const opgave = device.battery?.rte_percent;
     rows.push({
-      label: "Rendement",
+      label: t("Rendement"),
       text: rij.rte
-        ? `${(rij.rte * 100).toLocaleString("nl-NL", { maximumFractionDigits: 1 })}% gemeten`
+        ? t("{pct}% gemeten", { pct: (rij.rte * 100).toLocaleString(locale(), { maximumFractionDigits: 1 }) })
         : opgave
-          ? `${Number(opgave).toLocaleString("nl-NL", { maximumFractionDigits: 1 })}% opgegeven`
+          ? t("{pct}% opgegeven", { pct: Number(opgave).toLocaleString(locale(), { maximumFractionDigits: 1 }) })
           : rij.rte_accu
-            ? `ongeveer ${Math.round(rij.rte_accu * 100)}%, gemeten in de accu`
-            : "nog niet bekend",
+            ? t("ongeveer {pct}%, gemeten in de accu", { pct: Math.round(rij.rte_accu * 100) })
+            : t("nog niet bekend"),
     });
   }
 
@@ -847,11 +852,11 @@ function deviceDetails(feed, device, settings) {
     const geleerd = (settings?.boiler_learned ?? []).find((rij) => rij?.device === device.id) ?? {};
     const getal = (waarde, eenheid, cijfers = 1) =>
       waarde === null || waarde === undefined || waarde === ""
-        ? "nog niet gemeten"
-        : `${Number(waarde).toLocaleString("nl-NL", { maximumFractionDigits: cijfers })} ${eenheid}`;
-    rows.push({ label: "Element", text: getal(geleerd.heat_w ? geleerd.heat_w / 1000 : null, "kW", 1) });
-    rows.push({ label: "Vol vat", text: getal(geleerd.vol_kwh, "kWh", 1) });
-    rows.push({ label: "Eruit per uur", text: getal(geleerd.verbruik_kwh_h, "kWh", 2) });
+        ? t("nog niet gemeten")
+        : `${Number(waarde).toLocaleString(locale(), { maximumFractionDigits: cijfers })} ${eenheid}`;
+    rows.push({ label: t("Element"), text: getal(geleerd.heat_w ? geleerd.heat_w / 1000 : null, "kW", 1) });
+    rows.push({ label: t("Vol vat"), text: getal(geleerd.vol_kwh, "kWh", 1) });
+    rows.push({ label: t("Eruit per uur"), text: getal(geleerd.verbruik_kwh_h, "kWh", 2) });
   }
 
   return rows;
@@ -1071,13 +1076,13 @@ export class LiveSource {
       // Op de kaart het vermogen zonder teken, met erbij welke kant het op
       // gaat: een bolletje met een minteken leest als een storing.
       const w = batteryWatts(feed, device);
-      const richting = w === null ? null : w > 3 ? "laadt" : w < -3 ? "ontlaadt" : "staat stil";
+      const richting = w === null ? null : w > 3 ? t("laadt") : w < -3 ? t("ontlaadt") : t("staat stil");
       return {
         ...device,
         watts: w === null ? null : Math.abs(w),
         batteryWatts: w,
         details: [
-          ...(richting ? [{ label: "Doet nu", text: richting }] : []),
+          ...(richting ? [{ label: t("Doet nu"), text: richting }] : []),
           ...deviceDetails(feed, device, settings),
         ],
       };

@@ -516,6 +516,7 @@ _SETTINGS = _schema(
         vol.Optional("installation"): _schema(
             {
                 vol.Optional("home_name"): str,
+                vol.Optional("language"): vol.In(["auto", "nl", "en"]),
                 vol.Optional("phases"): vol.In([1, 3]),
                 vol.Optional("fuse_amps"): vol.All(vol.Coerce(float), vol.Range(1, 1000)),
                 vol.Optional("max_grid_watts"): vol.All(vol.Coerce(float), vol.Range(0, 1_000_000)),

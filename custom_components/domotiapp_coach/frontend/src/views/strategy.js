@@ -17,6 +17,7 @@
 
 import { define } from "../base.js";
 import { deviceLabelMap } from "../devices.js";
+import { datum, nt, t } from "../i18n.js";
 import { icons } from "../icons.js";
 import { planRegels, regelUitleg, zonRegels } from "../voorrang.js";
 import {
@@ -37,23 +38,23 @@ import {
 const LEVELS = [
   {
     key: "read",
-    label: "Alleen uitlezen",
-    blurb: "Je ziet wat je huis doet. De coach zegt en doet verder niets.",
+    label: nt("Alleen uitlezen"),
+    blurb: nt("Je ziet wat je huis doet. De coach zegt en doet verder niets."),
   },
   {
     key: "advise",
-    label: "Adviseren",
-    blurb: "Hij vertelt wat er te winnen valt, maar raakt niets aan.",
+    label: nt("Adviseren"),
+    blurb: nt("Hij vertelt wat er te winnen valt, maar raakt niets aan."),
   },
   {
     key: "propose",
-    label: "Voorstellen",
-    blurb: "Hij rekent het uit en laat het zien. Pas als jij ja zegt, voert hij het uit.",
+    label: nt("Voorstellen"),
+    blurb: nt("Hij rekent het uit en laat het zien. Pas als jij ja zegt, voert hij het uit."),
   },
   {
     key: "steer",
-    label: "Zelf sturen",
-    blurb: "Hij doet het en vertelt achteraf wat hij gedaan heeft.",
+    label: nt("Zelf sturen"),
+    blurb: nt("Hij doet het en vertelt achteraf wat hij gedaan heeft."),
   },
 ];
 
@@ -89,32 +90,29 @@ class DacViewStrategy extends DacEditorElement {
     return `
       <div class="wrap">
         <header class="intro">
-          <div class="eyebrow">Voorkeuren</div>
-          <h1>Wat de coach uit zichzelf doet</h1>
-          <p>Hier bepaal je hoeveel de coach zelf mag, wie voorgaat en hoe het overzicht eruitziet. Wat je per apparaat wilt stel je in op de kaart van dat apparaat, onder Instellen. Wie welke berichten krijgt staat onder Meldingen.</p>
+          <div class="eyebrow">${t("Voorkeuren")}</div>
+          <h1>${t("Wat de coach uit zichzelf doet")}</h1>
+          <p>${t("Hier bepaal je hoeveel de coach zelf mag, wie voorgaat en hoe het overzicht eruitziet. Wat je per apparaat wilt stel je in op de kaart van dat apparaat, onder Instellen. Wie welke berichten krijgt staat onder Meldingen.")}</p>
         </header>
 
         ${adminNoticeHtml}
 
         <section class="card">
-          <h2>${icons.compass} Hoeveel doet de coach zelf?</h2>
-          <p class="hint">Van alleen meekijken tot zelf schakelen. Begin gerust bij Voorstellen: dan zie je precies wat hij zou doen en gebeurt er niets zonder jouw akkoord.</p>
+          <h2>${icons.compass} ${t("Hoeveel doet de coach zelf?")}</h2>
+          <p class="hint">${t("Van alleen meekijken tot zelf schakelen. Begin gerust bij Voorstellen: dan zie je precies wat hij zou doen en gebeurt er niets zonder jouw akkoord.")}</p>
           <div class="fields">
             <div class="segmented levels" id="level">
               ${LEVELS.map(
                 (item) => `
                 <button type="button" data-level="${item.key}" aria-pressed="false">
-                  <strong>${item.label}</strong>
-                  ${item.blurb}
+                  <strong>${t(item.label)}</strong>
+                  ${t(item.blurb)}
                 </button>`
               ).join("")}
             </div>
 
             <p class="hint">
-              Waar hij op mikt staat vast: zo min mogelijk geld uitgeven. De coach legt
-              alle manieren om je auto vol te krijgen naast elkaar, van je eigen zon tot
-              elk uur tussen nu en je klaar-tijd, en kiest de goedkoopste. Je eigen zon
-              wint daarbij vanzelf zodra hij goedkoper is dan het net.
+              ${t("Waar hij op mikt staat vast: zo min mogelijk geld uitgeven. De coach legt alle manieren om je auto vol te krijgen naast elkaar, van je eigen zon tot elk uur tussen nu en je klaar-tijd, en kiest de goedkoopste. Je eigen zon wint daarbij vanzelf zodra hij goedkoper is dan het net.")}
             </p>
           </div>
         </section>
@@ -123,25 +121,20 @@ class DacViewStrategy extends DacEditorElement {
              woning op 23-09-2026: "niet automatisch de auto voorrang geven op
              alles dus"; te verslepen zoals de kaarten op het overzicht. -->
         <section class="card">
-          <h2>${icons.sun} Voorrang bij zonoverschot</h2>
+          <h2>${icons.sun} ${t("Voorrang bij zonoverschot")}</h2>
           <p class="hint">
-            Wie het overschot van je zonnepanelen als eerste krijgt, van boven naar beneden.
-            Elke regel krijgt wat hij kan opnemen tot zijn grens, en wat er dan over is gaat
-            naar de volgende. Boven zijn grens laadt een apparaat gewoon verder met wat er dan
-            nog over is; waar het laden van de auto stopt, stel je in op de kaart van de
-            laadpaal, onder Instellen. Dit geldt alleen voor overschot: wat er volgens een
-            planning van het net geladen wordt staat hier los van.
+            ${t("Wie het overschot van je zonnepanelen als eerste krijgt, van boven naar beneden. Elke regel krijgt wat hij kan opnemen tot zijn grens, en wat er dan over is gaat naar de volgende. Boven zijn grens laadt een apparaat gewoon verder met wat er dan nog over is; waar het laden van de auto stopt, stel je in op de kaart van de laadpaal, onder Instellen. Dit geldt alleen voor overschot: wat er volgens een planning van het net geladen wordt staat hier los van.")}
           </p>
           <div class="zon-rij vast" aria-hidden="false">
             <span class="greep"></span><span class="nr">0</span>
-            <span class="wie"><strong>Warmtepomp, koken en de rest van je huis</strong>
-              <small>gaat altijd voor: de coach stuurt dit niet en geeft alleen wat er daarna over is</small></span>
+            <span class="wie"><strong>${t("Warmtepomp, koken en de rest van je huis")}</strong>
+              <small>${t("gaat altijd voor: de coach stuurt dit niet en geeft alleen wat er daarna over is")}</small></span>
           </div>
           <ol class="zon-lijst" id="zon-lijst"></ol>
           <div class="zon-voeg">
-            <select id="zon-nieuw" aria-label="Apparaat voor een nieuwe regel"></select>
-            <button type="button" id="zon-voeg">${icons.plus}<span>Regel toevoegen</span></button>
-            <button type="button" class="zacht" id="zon-standaard">Standaard terugzetten</button>
+            <select id="zon-nieuw" aria-label="${t("Apparaat voor een nieuwe regel")}"></select>
+            <button type="button" id="zon-voeg">${icons.plus}<span>${t("Regel toevoegen")}</span></button>
+            <button type="button" class="zacht" id="zon-standaard">${t("Standaard terugzetten")}</button>
           </div>
         </section>
 
@@ -150,12 +143,9 @@ class DacViewStrategy extends DacEditorElement {
              accu maar met 3500 W en heb ik nog ruimte op mijn aansluiting, dan
              kan ik ook mijn boiler nog vol laden." -->
         <section class="card">
-          <h2>${icons.plug} Voorrang bij planningen</h2>
+          <h2>${icons.plug} ${t("Voorrang bij planningen")}</h2>
           <p class="hint">
-            Wie als eerste de ruimte op je aansluiting krijgt als er volgens een planning van
-            het net geladen wordt. Wie hoger staat krijgt wat er onder je zekeringen past; wie
-            lager staat krijgt wat er daarna over is, en een boiler gaat pas aan als hij er
-            nog bij past.
+            ${t("Wie als eerste de ruimte op je aansluiting krijgt als er volgens een planning van het net geladen wordt. Wie hoger staat krijgt wat er onder je zekeringen past; wie lager staat krijgt wat er daarna over is, en een boiler gaat pas aan als hij er nog bij past.")}
           </p>
           <!-- De eigenaar op 23-09-2026: "warmtepomp moet prio 1 zijn, net als bij
                de tweede woning, waar de paal geknepen werd omdat de warmtepomp
@@ -164,27 +154,24 @@ class DacViewStrategy extends DacEditorElement {
                hij verdeelt is wat er daarna onder de zekering over is. -->
           <div class="zon-rij plan-rij vast">
             <span class="greep"></span><span class="nr">0</span>
-            <span class="wie"><strong>Warmtepomp, koken en de rest van je huis</strong>
-              <small>gaat altijd voor: de coach verdeelt alleen wat er daarna onder je zekering over is</small></span>
+            <span class="wie"><strong>${t("Warmtepomp, koken en de rest van je huis")}</strong>
+              <small>${t("gaat altijd voor: de coach verdeelt alleen wat er daarna onder je zekering over is")}</small></span>
           </div>
           <ol class="zon-lijst" id="plan-lijst"></ol>
           <div class="zon-voeg">
-            <button type="button" class="zacht" id="plan-standaard">Standaard terugzetten</button>
+            <button type="button" class="zacht" id="plan-standaard">${t("Standaard terugzetten")}</button>
           </div>
         </section>
 
         <!-- De nachtstrategie (v0.90.0), in de woorden van de bewoner van de
              eerste woning op 23-09-2026. -->
         <section class="card">
-          <h2>${icons.thuisbatterij} Nachtstrategie</h2>
+          <h2>${icons.thuisbatterij} ${t("Nachtstrategie")}</h2>
           <label class="check" for="night">
             <input type="checkbox" id="night">
             <span>
-              <strong>Houd rekening met de nacht.</strong>
-              De coach houdt genoeg in de thuisbatterij om de nacht door te komen met
-              opgeslagen energie. Zet je dit uit, dan mag de batterij voor de auto en
-              voor handelen leeg tot zijn ingestelde minimum, maar haal je mogelijk de
-              nacht niet met nul op de meter.
+              <strong>${t("Houd rekening met de nacht.")}</strong>
+              ${t("De coach houdt genoeg in de thuisbatterij om de nacht door te komen met opgeslagen energie. Zet je dit uit, dan mag de batterij voor de auto en voor handelen leeg tot zijn ingestelde minimum, maar haal je mogelijk de nacht niet met nul op de meter.")}
             </span>
           </label>
         </section>
@@ -192,31 +179,31 @@ class DacViewStrategy extends DacEditorElement {
         <!-- Uit Instellingen (v0.114.0): hoe het overzicht eruitziet. Slaat
              meteen op, los van de balk hieronder. -->
         <section class="card" id="weergave">
-          <h2>${icons.sliders} Het overzicht</h2>
-          <p class="hint">Waar de kleuren op het overzicht omslaan van groen naar oranje naar rood. Een wijziging hier slaat meteen op.</p>
+          <h2>${icons.sliders} ${t("Het overzicht")}</h2>
+          <p class="hint">${t("Waar de kleuren op het overzicht omslaan van groen naar oranje naar rood. Een wijziging hier slaat meteen op.")}</p>
           <div class="fields">
             <div class="row">
-              <label>Zelfbenutting (%)</label>
+              <label>${t("Zelfbenutting (%)")}</label>
               <div class="two">
                 <div class="row">
-                  <span class="sub">Onder deze waarde rood</span>
+                  <span class="sub">${t("Onder deze waarde rood")}</span>
                   <input type="number" id="self-low" data-drempel="self_use.low" min="0" max="100" step="1" inputmode="numeric">
                 </div>
                 <div class="row">
-                  <span class="sub">Vanaf deze waarde groen</span>
+                  <span class="sub">${t("Vanaf deze waarde groen")}</span>
                   <input type="number" id="self-high" data-drempel="self_use.high" min="0" max="100" step="1" inputmode="numeric">
                 </div>
               </div>
             </div>
             <div class="row">
-              <label>Energieprijs (€ per kWh)</label>
+              <label>${t("Energieprijs (€ per kWh)")}</label>
               <div class="two" id="prijs-grenzen">
                 <div class="row">
-                  <span class="sub">Tot deze prijs groen</span>
+                  <span class="sub">${t("Tot deze prijs groen")}</span>
                   <input type="number" id="price-low" data-drempel="price.low" min="0" max="10" step="0.01" inputmode="decimal">
                 </div>
                 <div class="row">
-                  <span class="sub">Boven deze prijs rood</span>
+                  <span class="sub">${t("Boven deze prijs rood")}</span>
                   <input type="number" id="price-high" data-drempel="price.high" min="0" max="10" step="0.01" inputmode="decimal">
                 </div>
               </div>
@@ -225,21 +212,22 @@ class DacViewStrategy extends DacEditorElement {
             <label class="check" for="prijs-relatief">
               <input type="checkbox" id="prijs-relatief">
               <span>
-                <strong>Prijskleuren naar de bekende prijzen</strong>
-                Het goedkoopste derde van alle prijzen die bekend zijn groen en het duurste derde rood, wat de prijzen ook zijn. Dan zie je meteen de beste uren, ook op een dure dag. Komen rond 14:00 de prijzen van morgen erbij, dan kunnen de kleuren verschuiven.
+                <strong>${t("Prijskleuren naar de bekende prijzen")}</strong>
+                ${t("Het goedkoopste derde van alle prijzen die bekend zijn groen en het duurste derde rood, wat de prijzen ook zijn. Dan zie je meteen de beste uren, ook op een dure dag. Komen rond 14:00 de prijzen van morgen erbij, dan kunnen de kleuren verschuiven.")}
               </span>
             </label>
             <!-- Historie (v0.132.0): het jaar kan met het contract meelopen. -->
             <div class="row">
-              <label for="jaar-start">Het jaar in Historie begint in</label>
-              <select id="jaar-start"><option value="1">januari</option><option value="2">februari</option><option value="3">maart</option><option value="4">april</option><option value="5">mei</option><option value="6">juni</option><option value="7">juli</option><option value="8">augustus</option><option value="9">september</option><option value="10">oktober</option><option value="11">november</option><option value="12">december</option></select>
-              <span class="sub">Kies de maand waarin je contract ingaat, dan loopt het jaar daarmee gelijk.</span>
+              <label for="jaar-start">${t("Het jaar in Historie begint in")}</label>
+              <select id="jaar-start">${Array.from({ length: 12 }, (_, i) =>
+                `<option value="${i + 1}">${datum(new Date(2026, i, 1), { month: "long" })}</option>`).join("")}</select>
+              <span class="sub">${t("Kies de maand waarin je contract ingaat, dan loopt het jaar daarmee gelijk.")}</span>
             </div>
             <label class="check" for="phases-overview" id="phases-overview-row">
               <input type="checkbox" id="phases-overview">
               <span>
-                <strong>De fasen tonen op het overzicht</strong>
-                Een kaart met de belasting per fase.
+                <strong>${t("De fasen tonen op het overzicht")}</strong>
+                ${t("Een kaart met de belasting per fase.")}
               </span>
             </label>
           </div>
@@ -312,9 +300,9 @@ class DacViewStrategy extends DacEditorElement {
     try {
       const saved = await this.hass_.callWS({ type: "domotiapp_coach/display/set", ...wijziging });
       this.fire("dac-settings-saved", { settings: saved });
-      this.toast_("Opgeslagen", true);
+      this.toast_(t("Opgeslagen"), true);
     } catch (error) {
-      this.toast_(`Opslaan mislukt: ${error?.message ?? error}`, false);
+      this.toast_(t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), false);
     }
   }
 
@@ -391,7 +379,7 @@ class DacViewStrategy extends DacEditorElement {
       const greep = document.createElement("button");
       greep.type = "button";
       greep.className = "greep";
-      greep.setAttribute("aria-label", "Verslepen");
+      greep.setAttribute("aria-label", t("Verslepen"));
       greep.innerHTML = icons.menu;
       greep.addEventListener("pointerdown", (ev) =>
         this.sleepIn_(ev, plek, "#zon-lijst", (volgorde) => {
@@ -415,7 +403,7 @@ class DacViewStrategy extends DacEditorElement {
       const grens = document.createElement("span");
       grens.className = "grens";
       if (type === "boiler") {
-        grens.textContent = "tot warm";
+        grens.textContent = t("tot warm");
       } else {
         const veld = document.createElement("input");
         veld.type = "number";
@@ -423,9 +411,9 @@ class DacViewStrategy extends DacEditorElement {
         veld.max = "100";
         veld.step = "5";
         veld.inputMode = "numeric";
-        veld.placeholder = type === "laadpaal" ? "doel" : "vol";
+        veld.placeholder = type === "laadpaal" ? t("doel") : t("vol");
         veld.value = rij.limit ?? "";
-        veld.setAttribute("aria-label", `Voorrang voor ${naam.textContent} tot hoeveel procent`);
+        veld.setAttribute("aria-label", t("Voorrang voor {naam} tot hoeveel procent", { naam: naam.textContent }));
         veld.addEventListener("change", () => {
           const nieuw = this.zonRegels_();
           const waarde = veld.value.trim();
@@ -433,11 +421,13 @@ class DacViewStrategy extends DacEditorElement {
           this.zetZon_(nieuw);
         });
         grens.append("eerst tot ", veld, " %");
+        // In de taal van nu; de regel erboven leest de proef letterlijk.
+        grens.firstChild.nodeValue = t("eerst tot ");
       }
 
       const knoppen = document.createElement("span");
       knoppen.className = "knoppen";
-      for (const [stap, icoon, label] of [[-1, icons.arrowLeft, "Omhoog"], [1, icons.arrowRight, "Omlaag"]]) {
+      for (const [stap, icoon, label] of [[-1, icons.arrowLeft, t("Omhoog")], [1, icons.arrowRight, t("Omlaag")]]) {
         const knop = document.createElement("button");
         knop.type = "button";
         knop.innerHTML = icoon;
@@ -455,7 +445,7 @@ class DacViewStrategy extends DacEditorElement {
       const weg = document.createElement("button");
       weg.type = "button";
       weg.innerHTML = icons.close;
-      weg.setAttribute("aria-label", "Regel weghalen");
+      weg.setAttribute("aria-label", t("Regel weghalen"));
       // De laatste regel van een apparaat weghalen kan niet: dan komt hij
       // toch weer achteraan (zie `zonRegels`). Zeg dat liever met een
       // uitgeschakelde knop dan met een regel die terugkomt.
@@ -566,7 +556,7 @@ class DacViewStrategy extends DacEditorElement {
     const namen = deviceLabelMap(apparaten);
     const soort = new Map(apparaten.map((a) => [a.id, a.type]));
     const ids = this.planRegels_();
-    const uitleg = { laadpaal: "volgens zijn laadplanning", thuisbatterij: "als hij van het net laadt", boiler: "als hij nog past" };
+    const uitleg = { laadpaal: t("volgens zijn laadplanning"), thuisbatterij: t("als hij van het net laadt"), boiler: t("als hij nog past") };
 
     lijst.replaceChildren(...ids.map((id, plek) => {
       const li = document.createElement("li");
@@ -575,7 +565,7 @@ class DacViewStrategy extends DacEditorElement {
       const greep = document.createElement("button");
       greep.type = "button";
       greep.className = "greep";
-      greep.setAttribute("aria-label", "Verslepen");
+      greep.setAttribute("aria-label", t("Verslepen"));
       greep.innerHTML = icons.menu;
       greep.addEventListener("pointerdown", (ev) =>
         this.sleepIn_(ev, plek, "#plan-lijst", (volgorde) => {
@@ -598,7 +588,7 @@ class DacViewStrategy extends DacEditorElement {
 
       const knoppen = document.createElement("span");
       knoppen.className = "knoppen";
-      for (const [stap, icoon, label] of [[-1, icons.arrowLeft, "Omhoog"], [1, icons.arrowRight, "Omlaag"]]) {
+      for (const [stap, icoon, label] of [[-1, icons.arrowLeft, t("Omhoog")], [1, icons.arrowRight, t("Omlaag")]]) {
         const knop = document.createElement("button");
         knop.type = "button";
         knop.innerHTML = icoon;

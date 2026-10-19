@@ -9,6 +9,7 @@
  */
 
 import { define } from "../base.js";
+import { locale, t } from "../i18n.js";
 import { icons } from "../icons.js";
 import {
   DacEditorElement,
@@ -50,43 +51,55 @@ class DacViewInstallation extends DacEditorElement {
     return `
       <div class="wrap">
         <header class="intro">
-          <div class="eyebrow">Installatie</div>
-          <h1>Hoe je huis gemeten wordt</h1>
-          <p>Je aansluiting, je kasten en groepen, en welke sensoren meten wat er gebeurt. Hierop rekent de coach. Je hoeft niet alles in te vullen; zonder gekoppelde sensoren blijven de cijfers leeg.</p>
+          <div class="eyebrow">${t("Installatie")}</div>
+          <h1>${t("Hoe je huis gemeten wordt")}</h1>
+          <p>${t("Je aansluiting, je kasten en groepen, en welke sensoren meten wat er gebeurt. Hierop rekent de coach. Je hoeft niet alles in te vullen; zonder gekoppelde sensoren blijven de cijfers leeg.")}</p>
         </header>
 
         ${adminNoticeHtml}
 
         <section class="card">
-          <h2>${icons.house} Woning en aansluiting</h2>
-          <p class="hint">De naam van de woning komt ook boven het overzicht te staan.</p>
+          <h2>${icons.house} ${t("Woning en aansluiting")}</h2>
+          <p class="hint">${t("De naam van de woning komt ook boven het overzicht te staan.")}</p>
           <div class="fields">
             <div class="row">
-              <label for="home-name">Naam van de woning</label>
-              <input type="text" id="home-name" placeholder="Bijvoorbeeld: Dorpsstraat 12" autocomplete="off">
+              <label for="home-name">${t("Naam van de woning")}</label>
+              <input type="text" id="home-name" placeholder="${t("Bijvoorbeeld: Dorpsstraat 12")}" autocomplete="off">
+            </div>
+
+            <!-- De taal (v0.139.0). De eigenaar op 19-10-2026: "ik wil ook dat het hele coach in
+                 het engels ingesteld kan worden", een taal voor de hele installatie. -->
+            <div class="row">
+              <label for="taal">Taal / Language</label>
+              <select id="taal">
+                <option value="auto">Automatisch / Automatic</option>
+                <option value="nl">Nederlands</option>
+                <option value="en">English</option>
+              </select>
+              <span class="sub">Automatisch volgt de taal van Home Assistant. / Automatic follows the language of Home Assistant.</span>
             </div>
 
             <div class="row">
-              <label>Aantal fasen</label>
+              <label>${t("Aantal fasen")}</label>
               <div class="segmented" id="phases">
                 <button type="button" data-phases="1" aria-pressed="false">
-                  <strong>1 fase</strong>
-                  Eén fase van 230 V.
+                  <strong>${t("1 fase")}</strong>
+                  ${t("Eén fase van 230 V.")}
                 </button>
                 <button type="button" data-phases="3" aria-pressed="false">
-                  <strong>3 fasen</strong>
-                  Drie fasen van 230 V.
+                  <strong>${t("3 fasen")}</strong>
+                  ${t("Drie fasen van 230 V.")}
                 </button>
               </div>
             </div>
 
             <div class="two">
               <div class="row">
-                <label for="fuse">Hoofdzekering per fase (A)</label>
+                <label for="fuse">${t("Hoofdzekering per fase (A)")}</label>
                 <input type="number" id="fuse" min="1" max="1000" step="1" inputmode="numeric">
               </div>
               <div class="row">
-                <label for="max-grid">Maximaal netvermogen (W)</label>
+                <label for="max-grid">${t("Maximaal netvermogen (W)")}</label>
                 <input type="number" id="max-grid" min="0" step="50" inputmode="numeric">
                 <span class="sub" id="max-grid-hint"></span>
               </div>
@@ -95,32 +108,24 @@ class DacViewInstallation extends DacEditorElement {
             <label class="check" for="max-auto">
               <input type="checkbox" id="max-auto">
               <span>
-                <strong>Automatisch berekenen</strong>
-                Uit fasen × zekering × 230 V. Zet dit uit als je aansluiting begrensd of juist verzwaard is.
+                <strong>${t("Automatisch berekenen")}</strong>
+                ${t("Uit fasen × zekering × 230 V. Zet dit uit als je aansluiting begrensd of juist verzwaard is.")}
               </span>
             </label>
 
             <label class="check" for="balancer">
               <input type="checkbox" id="balancer">
               <span>
-                <strong>Er zit een lastbewaker op de aansluiting</strong>
-                Zoals een Easee Equalizer. Die bewaakt dezelfde zekering en kan het laden zelf
-                terugschroeven. Staat dit aan, dan houdt de coach een ruimere marge aan en stapt
-                hij als eerste terug, zodat de lastbewaker een vangnet blijft dat niet hoeft in
-                te grijpen. Meet je lastbewaker de fasen, kies die sensoren dan hieronder bij de
-                stroom per fase; dat is de zuiverste meting die je hebt.
+                <strong>${t("Er zit een lastbewaker op de aansluiting")}</strong>
+                ${t("Zoals een Easee Equalizer. Die bewaakt dezelfde zekering en kan het laden zelf terugschroeven. Staat dit aan, dan houdt de coach een ruimere marge aan en stapt hij als eerste terug, zodat de lastbewaker een vangnet blijft dat niet hoeft in te grijpen. Meet je lastbewaker de fasen, kies die sensoren dan hieronder bij de stroom per fase; dat is de zuiverste meting die je hebt.")}
               </span>
             </label>
 
             <div class="row" id="balancer-row">
-              <label>Sensor: wat je lastbewaker vrijgeeft</label>
+              <label>${t("Sensor: wat je lastbewaker vrijgeeft")}</label>
               <dac-entity-picker id="balancer-limit"></dac-entity-picker>
               <span class="sub">
-                Optioneel, en alleen als je bewaker meldt hoeveel hij op dit moment vrijgeeft
-                voor het laden. Bij een Easee Equalizer heet die sensor "Equalizer limiet".
-                Dat getal beweegt mee met wat de rest van je huis gebruikt: het is wat er
-                overblijft, niet je hoofdzekering. Vul je hem in, dan vraagt de coach er nooit
-                meer overheen en hoeft je bewaker niet in te grijpen.
+                ${t("Optioneel, en alleen als je bewaker meldt hoeveel hij op dit moment vrijgeeft voor het laden. Bij een Easee Equalizer heet die sensor \"Equalizer limiet\". Dat getal beweegt mee met wat de rest van je huis gebruikt: het is wat er overblijft, niet je hoofdzekering. Vul je hem in, dan vraagt de coach er nooit meer overheen en hoeft je bewaker niet in te grijpen.")}
               </span>
             </div>
           </div>
@@ -131,86 +136,78 @@ class DacViewInstallation extends DacEditorElement {
              3x25A en dan een onderverdeelkast in de lounge", en de sensoren per
              fase pas als de kast of groep een eigen kWh-meter heeft. -->
         <section class="card">
-          <h2>${icons.plug} Onderverdeelkasten</h2>
+          <h2>${icons.plug} ${t("Onderverdeelkasten")}</h2>
           <p class="hint">
-            Heb je naast je hoofdkast een onderverdeelkast, bijvoorbeeld in de garage, met een
-            eigen zekering? Zet hem hier neer. De coach blijft dan onder de zekering van die
-            kast én onder die van je hoofdkast. Heeft de kast een eigen kWh-meter, dan weet de
-            coach ook wat er de rest van de kast gebruikt wordt; zonder meter telt hij alleen
-            wat hij er zelf naartoe stuurt.
+            ${t("Heb je naast je hoofdkast een onderverdeelkast, bijvoorbeeld in de garage, met een eigen zekering? Zet hem hier neer. De coach blijft dan onder de zekering van die kast én onder die van je hoofdkast. Heeft de kast een eigen kWh-meter, dan weet de coach ook wat er de rest van de kast gebruikt wordt; zonder meter telt hij alleen wat hij er zelf naartoe stuurt.")}
           </p>
           <div class="fields">
             <div id="kasten"></div>
             <div class="circuit-actions">
-              <button type="button" id="kast-add">Onderverdeelkast toevoegen</button>
+              <button type="button" id="kast-add">${t("Onderverdeelkast toevoegen")}</button>
             </div>
           </div>
         </section>
 
         <section class="card">
-          <h2>${icons.plug} Groepen</h2>
+          <h2>${icons.plug} ${t("Groepen")}</h2>
           <p class="hint">
-            Een groep met een eigen zekering, in je hoofdkast of in een onderverdeelkast,
-            bijvoorbeeld een laadpaal op een eigen B20. Kies bij Apparaten welke apparaten
-            eraan hangen. Een groep zonder eigen kWh-meter telt alleen wat de coach er zelf
-            naartoe stuurt.
+            ${t("Een groep met een eigen zekering, in je hoofdkast of in een onderverdeelkast, bijvoorbeeld een laadpaal op een eigen B20. Kies bij Apparaten welke apparaten eraan hangen. Een groep zonder eigen kWh-meter telt alleen wat de coach er zelf naartoe stuurt.")}
           </p>
           <div class="fields">
             <div id="circuits"></div>
             <div class="circuit-actions">
-              <button type="button" id="circuit-add">Groep toevoegen</button>
+              <button type="button" id="circuit-add">${t("Groep toevoegen")}</button>
             </div>
           </div>
         </section>
 
         <section class="card">
-          <h2>${icons.grid} Energiebronnen</h2>
-          <p class="hint">Welke sensoren meten je opwek en je meterstand. Of de sensor in watt of kilowatt meet maakt niet uit, dat rekent de coach zelf om. Het verbruik van de woning wordt hieruit berekend.</p>
+          <h2>${icons.grid} ${t("Energiebronnen")}</h2>
+          <p class="hint">${t("Welke sensoren meten je opwek en je meterstand. Of de sensor in watt of kilowatt meet maakt niet uit, dat rekent de coach zelf om. Het verbruik van de woning wordt hieruit berekend.")}</p>
           <div class="fields">
             <div class="row">
-              <label>Opwek zonnepanelen</label>
+              <label>${t("Opwek zonnepanelen")}</label>
               <dac-entity-picker id="src-solar" data-key="solar"></dac-entity-picker>
             </div>
             <div id="solar-extra"></div>
             <div class="row">
-              <button type="button" class="add" id="solar-extra-add">Nog een omvormer</button>
-              <span class="sub">Heb je meer omvormers, zet ze hier erbij; de coach telt ze op.</span>
+              <button type="button" class="add" id="solar-extra-add">${t("Nog een omvormer")}</button>
+              <span class="sub">${t("Heb je meer omvormers, zet ze hier erbij; de coach telt ze op.")}</span>
             </div>
             <div class="row">
-              <label>Hoe meet je slimme meter?</label>
+              <label>${t("Hoe meet je slimme meter?")}</label>
               <div class="segmented" id="grid-mode">
                 <button type="button" data-mode="split" aria-pressed="false">
-                  <strong>Afzonderlijk</strong>
-                  Twee sensoren: verbruik en productie. Eén van de twee staat altijd op nul.
+                  <strong>${t("Afzonderlijk")}</strong>
+                  ${t("Twee sensoren: verbruik en productie. Eén van de twee staat altijd op nul.")}
                 </button>
                 <button type="button" data-mode="signed" aria-pressed="false">
-                  <strong>Gecombineerd</strong>
-                  Eén sensor die negatief wordt zodra je teruglevert.
+                  <strong>${t("Gecombineerd")}</strong>
+                  ${t("Eén sensor die negatief wordt zodra je teruglevert.")}
                 </button>
               </div>
             </div>
 
             <div id="grid-split" class="two">
               <div class="row">
-                <label>Energieverbruik (van het net)</label>
+                <label>${t("Energieverbruik (van het net)")}</label>
                 <dac-entity-picker id="src-import" data-key="grid_import"></dac-entity-picker>
               </div>
               <div class="row">
-                <label>Energieproductie (naar het net)</label>
+                <label>${t("Energieproductie (naar het net)")}</label>
                 <dac-entity-picker id="src-export" data-key="grid_export"></dac-entity-picker>
               </div>
             </div>
 
             <div class="row" id="grid-signed">
-              <label>Netvermogen</label>
+              <label>${t("Netvermogen")}</label>
               <dac-entity-picker id="src-signed" data-key="grid_signed"></dac-entity-picker>
-              <span class="sub">Normaal is positief inkoop en negatief teruglevering.</span>
+              <span class="sub">${t("Normaal is positief inkoop en negatief teruglevering.")}</span>
               <label class="check" for="src-invert">
                 <input type="checkbox" id="src-invert">
                 <span>
-                  <strong>Meting omgekeerd</strong>
-                  Aanvinken als je meter het andersom doet: positief bij teruglevering.
-                  Herken je aan een diagram dat precies verkeerd om staat.
+                  <strong>${t("Meting omgekeerd")}</strong>
+                  ${t("Aanvinken als je meter het andersom doet: positief bij teruglevering. Herken je aan een diagram dat precies verkeerd om staat.")}
                 </span>
               </label>
             </div>
@@ -219,14 +216,14 @@ class DacViewInstallation extends DacEditorElement {
         </section>
 
         <section class="card">
-          <h2>${icons.plug} Fasen</h2>
-          <p class="hint">Heeft de meter van deze woning losse waarden per fase, vul ze dan hier in. Daarmee wordt de belastbaarheid per fase berekend in plaats van op het totaal. Een zekering gaat er immers uit op de zwaarste fase en niet op het gemiddelde.</p>
+          <h2>${icons.plug} ${t("Fasen")}</h2>
+          <p class="hint">${t("Heeft de meter van deze woning losse waarden per fase, vul ze dan hier in. Daarmee wordt de belastbaarheid per fase berekend in plaats van op het totaal. Een zekering gaat er immers uit op de zwaarste fase en niet op het gemiddelde.")}</p>
           <div class="fields">
             <label class="check" for="phases-enabled">
               <input type="checkbox" id="phases-enabled">
               <span>
-                <strong>Fasen beschikbaar</strong>
-                Aanzetten als deze woning per fase meet.
+                <strong>${t("Fasen beschikbaar")}</strong>
+                ${t("Aanzetten als deze woning per fase meet.")}
               </span>
             </label>
 
@@ -237,15 +234,15 @@ class DacViewInstallation extends DacEditorElement {
                 <div class="phase-block">
                   <div class="phase-title">${phase.toUpperCase()}</div>
                   <div class="row">
-                    <label>Stroom (A)</label>
+                    <label>${t("Stroom (A)")}</label>
                     <dac-entity-picker data-phase="${phase}" data-kind="current"></dac-entity-picker>
                   </div>
                   <div class="row">
-                    <label>Vermogen</label>
+                    <label>${t("Vermogen")}</label>
                     <dac-entity-picker data-phase="${phase}" data-kind="power"></dac-entity-picker>
                   </div>
                   <div class="row">
-                    <label>Spanning (V)</label>
+                    <label>${t("Spanning (V)")}</label>
                     <dac-entity-picker data-phase="${phase}" data-kind="voltage"></dac-entity-picker>
                   </div>
                 </div>`
@@ -256,72 +253,69 @@ class DacViewInstallation extends DacEditorElement {
         </section>
 
         <section class="card">
-          <h2>${icons.sun} Zonverwachting</h2>
-          <p class="hint">Wat er vandaag en morgen aan zon verwacht wordt. Daarmee kan de coach besluiten of het de moeite is om te wachten, of dat hij beter vannacht op de goedkope uren kan draaien. Integraties als Forecast.Solar en Solcast leveren deze waarden als sensoren; vul in wat je hebt.</p>
+          <h2>${icons.sun} ${t("Zonverwachting")}</h2>
+          <p class="hint">${t("Wat er vandaag en morgen aan zon verwacht wordt. Daarmee kan de coach besluiten of het de moeite is om te wachten, of dat hij beter vannacht op de goedkope uren kan draaien. Integraties als Forecast.Solar en Solcast leveren deze waarden als sensoren; vul in wat je hebt.")}</p>
           <div class="fields">
             <div class="two">
               <div class="row">
-                <label>Verwacht vandaag nog</label>
+                <label>${t("Verwacht vandaag nog")}</label>
                 <dac-entity-picker data-forecast="remaining_today"></dac-entity-picker>
               </div>
               <div class="row">
-                <label>Verwacht morgen</label>
+                <label>${t("Verwacht morgen")}</label>
                 <dac-entity-picker data-forecast="tomorrow"></dac-entity-picker>
               </div>
             </div>
             <div class="two">
               <div class="row">
-                <label>Verwacht dit uur</label>
+                <label>${t("Verwacht dit uur")}</label>
                 <dac-entity-picker data-forecast="this_hour"></dac-entity-picker>
               </div>
               <div class="row">
-                <label>Verwacht volgend uur</label>
+                <label>${t("Verwacht volgend uur")}</label>
                 <dac-entity-picker data-forecast="next_hour"></dac-entity-picker>
               </div>
               <span class="sub">
-                In kWh over dat uur. Dit zijn de twee die de coach echt gebruikt om te
-                beslissen: moet hij nu stroom bijkopen om op de zon te laden terwijl er
-                volgend uur veel meer aankomt, dan wacht hij dat uur af. Met alleen
-                dagtotalen kan hij dat niet weten.
+                ${t("In kWh over dat uur. Dit zijn de twee die de coach echt gebruikt om te beslissen: moet hij nu stroom bijkopen om op de zon te laden terwijl er volgend uur veel meer aankomt, dan wacht hij dat uur af. Met alleen dagtotalen kan hij dat niet weten.")}
               </span>
             </div>
             <div class="row">
-              <label>Tijdstip hoogste opwek vandaag</label>
+              <label>${t("Tijdstip hoogste opwek vandaag")}</label>
               <dac-entity-picker data-forecast="peak_today"></dac-entity-picker>
-              <span class="sub">Optioneel. Hiermee kan de coach zeggen rond welk uur het overschot het grootst is.</span>
+              <span class="sub">${t("Optioneel. Hiermee kan de coach zeggen rond welk uur het overschot het grootst is.")}</span>
             </div>
           </div>
         </section>
 
         <section class="card">
-          <h2>${icons.gauge} Meterstanden</h2>
-          <p class="hint">De tellers van je slimme meter, zoals ze op de meter zelf staan. Vul in wat je hebt; alleen de ingevulde standen komen op het overzicht te staan. Dit zijn totalen in kWh en m³, dus geen vermogens.</p>
+          <h2>${icons.gauge} ${t("Meterstanden")}</h2>
+          <p class="hint">${t("De tellers van je slimme meter, zoals ze op de meter zelf staan. Vul in wat je hebt; alleen de ingevulde standen komen op het overzicht te staan. Dit zijn totalen in kWh en m³, dus geen vermogens.")}</p>
           <div class="fields">
             <div class="row">
-              <label>Opwek totaal (teller)</label>
+              <label>${t("Opwek totaal (teller)")}</label>
               <dac-entity-picker data-meter="solar_total"></dac-entity-picker>
-              <span class="sub">De teller van je omvormer in kWh, niet het vermogen. Zonder deze kan het paneel niet terugkijken op wat je hebt opgewekt.</span>
+              <span class="sub">${t("De teller van je omvormer in kWh, niet het vermogen. Zonder deze kan het paneel niet terugkijken op wat je hebt opgewekt.")}</span>
             </div>
             <div id="solar-total-extra"></div>
             <div class="row">
-              <button type="button" class="add" id="solar-total-extra-add">Nog een opwekteller</button>
-              <span class="sub">De teller van elke andere omvormer; het paneel telt ze op.</span>
+              <button type="button" class="add" id="solar-total-extra-add">${t("Nog een opwekteller")}</button>
+              <span class="sub">${t("De teller van elke andere omvormer; het paneel telt ze op.")}</span>
             </div>
             <div class="two">
               <div class="row">
-                <label>Geleverd, laag tarief</label>
+                <label>${t("Geleverd, laag tarief")}</label>
                 <dac-entity-picker data-meter="import_low"></dac-entity-picker>
               </div>
               <div class="row">
-                <label>Geleverd, hoog tarief</label>
+                <label>${t("Geleverd, hoog tarief")}</label>
                 <dac-entity-picker data-meter="import_high"></dac-entity-picker>
               </div>
               <div class="row">
-                <label>Teruggeleverd, laag tarief</label>
+                <label>${t("Teruggeleverd, laag tarief")}</label>
                 <dac-entity-picker data-meter="export_low"></dac-entity-picker>
               </div>
               <div class="row">
-                <label>Teruggeleverd, hoog tarief</label>
+                <label>${t("Teruggeleverd, hoog tarief")}</label>
                 <dac-entity-picker data-meter="export_high"></dac-entity-picker>
               </div>
             </div>
@@ -329,47 +323,47 @@ class DacViewInstallation extends DacEditorElement {
             <label class="check" for="gas-enabled">
               <input type="checkbox" id="gas-enabled">
               <span>
-                <strong>Deze woning gebruikt gas</strong>
-                Staat dit uit, dan blijft gas van het overzicht weg.
+                <strong>${t("Deze woning gebruikt gas")}</strong>
+                ${t("Staat dit uit, dan blijft gas van het overzicht weg.")}
               </span>
             </label>
 
             <div class="row" id="gas-field">
-              <label>Gasmeter (m³)</label>
+              <label>${t("Gasmeter (m³)")}</label>
               <dac-entity-picker data-meter="gas"></dac-entity-picker>
             </div>
 
             <label class="check" for="water-enabled">
               <input type="checkbox" id="water-enabled">
               <span>
-                <strong>Deze woning heeft een watermeter in Home Assistant</strong>
-                Bijvoorbeeld de HomeWizard Watermeter. Dan staat water bij de standen, in de historie en in het rapport.
+                <strong>${t("Deze woning heeft een watermeter in Home Assistant")}</strong>
+                ${t("Bijvoorbeeld de HomeWizard Watermeter. Dan staat water bij de standen, in de historie en in het rapport.")}
               </span>
             </label>
 
             <div class="fields" id="water-field">
               <div class="row">
-                <label>Watermeter (m³)</label>
+                <label>${t("Watermeter (m³)")}</label>
                 <dac-entity-picker data-meter="water"></dac-entity-picker>
-                <span class="sub">De teller, in m³.</span>
+                <span class="sub">${t("De teller, in m³.")}</span>
               </div>
               <div class="row">
-                <label>Waterverbruik nu (L/min)</label>
+                <label>${t("Waterverbruik nu (L/min)")}</label>
                 <dac-entity-picker data-meter="water_flow"></dac-entity-picker>
-                <span class="sub">Optioneel. Met deze sensor kan de coach melden als er te lang onafgebroken water loopt; zie Meldingen.</span>
+                <span class="sub">${t("Optioneel. Met deze sensor kan de coach melden als er te lang onafgebroken water loopt; zie Meldingen.")}</span>
               </div>
             </div>
           </div>
         </section>
 
         <section class="card">
-          <h2>${icons.home} Navigatie</h2>
-          <p class="hint">De Home-knop rechtsboven brengt je terug naar je eigen dashboard. Draai je Kiosk Mode, dan is dat de enige weg terug.</p>
+          <h2>${icons.home} ${t("Navigatie")}</h2>
+          <p class="hint">${t("De Home-knop rechtsboven brengt je terug naar je eigen dashboard. Draai je Kiosk Mode, dan is dat de enige weg terug.")}</p>
           <div class="fields">
             <div class="row">
-              <label for="home-path">Pad van je thuisdashboard</label>
+              <label for="home-path">${t("Pad van je thuisdashboard")}</label>
               <input type="text" id="home-path" inputmode="url" placeholder="/lovelace/0" autocomplete="off">
-              <span class="sub">Bijvoorbeeld <code>/lovelace/0</code> of <code>/dashboard-woning/overzicht</code>.</span>
+              <span class="sub">${t("Bijvoorbeeld {a} of {b}.", { a: "<code>/lovelace/0</code>", b: "<code>/dashboard-woning/overzicht</code>" })}</span>
             </div>
           </div>
         </section>
@@ -390,6 +384,7 @@ class DacViewInstallation extends DacEditorElement {
     };
 
     bind("home-name", (v) => (this.draft_.installation.home_name = v));
+    bind("taal", (v) => (this.draft_.installation.language = v));
     bind("fuse", (v) => {
       this.draft_.installation.fuse_amps = Number(v);
       this.recalculate_();
@@ -405,7 +400,7 @@ class DacViewInstallation extends DacEditorElement {
 
     for (const picker of this.$$("dac-entity-picker[data-key]")) {
       picker.filter = "power";
-      picker.placeholder = "Zoek een vermogenssensor…";
+      picker.placeholder = t("Zoek een vermogenssensor…");
       picker.addEventListener("dac-entity-change", (ev) => {
         this.draft_.sources[picker.dataset.key] = ev.detail.value;
         this.afterChange_();
@@ -416,9 +411,9 @@ class DacViewInstallation extends DacEditorElement {
       const { phase, kind } = picker.dataset;
       picker.filter = kind === "power" ? "power" : "all";
       picker.placeholder =
-        kind === "current" ? "Zoek een stroomsensor…"
-        : kind === "voltage" ? "Zoek een spanningssensor…"
-        : "Zoek een vermogenssensor…";
+        kind === "current" ? t("Zoek een stroomsensor…")
+        : kind === "voltage" ? t("Zoek een spanningssensor…")
+        : t("Zoek een vermogenssensor…");
       picker.addEventListener("dac-entity-change", (ev) => {
         this.draft_.sources.phases[phase][kind] = ev.detail.value;
         this.afterChange_();
@@ -431,7 +426,7 @@ class DacViewInstallation extends DacEditorElement {
     for (const picker of this.$$("dac-entity-picker[data-forecast]")) {
       picker.filter = "all";
       picker.placeholder =
-        picker.dataset.forecast === "peak_today" ? "Zoek een tijdstip…" : "Zoek een verwachting in kWh…";
+        picker.dataset.forecast === "peak_today" ? t("Zoek een tijdstip…") : t("Zoek een verwachting in kWh…");
       picker.addEventListener("dac-entity-change", (ev) => {
         (this.draft_.sources.solar_forecast ??= {})[picker.dataset.forecast] = ev.detail.value;
         this.afterChange_();
@@ -452,7 +447,7 @@ class DacViewInstallation extends DacEditorElement {
     for (const picker of this.$$("dac-entity-picker[data-meter]")) {
       picker.filter = "all";
       picker.placeholder =
-        picker.dataset.meter === "gas" ? "Zoek je gasmeter…" : "Zoek een meterstand…";
+        picker.dataset.meter === "gas" ? t("Zoek je gasmeter…") : t("Zoek een meterstand…");
       picker.addEventListener("dac-entity-change", (ev) => {
         // Created on demand: settings written before this section existed have
         // no `meters` at all until the server merges its defaults in.
@@ -530,7 +525,7 @@ class DacViewInstallation extends DacEditorElement {
 
     const balancer = this.$("#balancer-limit");
     balancer.filter = "current";
-    balancer.placeholder = "Zoek een stroomsensor…";
+    balancer.placeholder = t("Zoek een stroomsensor…");
     balancer.addEventListener("dac-entity-change", (ev) => {
       this.draft_.installation.balancer_entity = ev.detail.value;
       this.paintBalancer_();
@@ -582,6 +577,7 @@ class DacViewInstallation extends DacEditorElement {
     const inst = this.draft_.installation;
 
     this.$("#home-name").value = inst.home_name ?? "";
+    this.$("#taal").value = inst.language ?? "auto";
     this.$("#fuse").value = inst.fuse_amps;
     this.$("#max-grid").value = inst.max_grid_watts;
     this.$("#max-auto").checked = Boolean(inst.max_grid_auto);
@@ -648,19 +644,18 @@ class DacViewInstallation extends DacEditorElement {
     const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     const fasen = Number(g.phases) === 1 ? ["l1"] : ["l1", "l2", "l3"];
     const kast = g.kind === "kast";
-    const wat = kast ? "onderverdeelkast" : "groep";
     // Een kast hangt onder de hoofdkast of een andere kast, een groep ook onder een groep.
     const anderen = groepen.filter((o) => o !== g && o.id !== g.id && (!kast || o.kind === "kast"));
-    const soortVan = (o) => (o.kind === "kast" ? "" : " (groep)");
+    const soortVan = (o) => (o.kind === "kast" ? "" : ` (${t("groep")})`);
     const onder = kast && !anderen.length
       ? ""
       : `
           <div class="row">
-            <label for="circuit-parent-${index}">Hangt onder</label>
+            <label for="circuit-parent-${index}">${t("Hangt onder")}</label>
             <select id="circuit-parent-${index}" data-circuit-field="parent" data-index="${index}">
-              <option value=""${g.parent ? "" : " selected"}>Hoofdkast</option>
+              <option value=""${g.parent ? "" : " selected"}>${t("Hoofdkast")}</option>
               ${anderen
-                .map((o) => `<option value="${esc(o.id)}"${g.parent === o.id ? " selected" : ""}>${esc(o.name || (o.kind === "kast" ? "Nieuwe onderverdeelkast" : "Nieuwe groep"))}${o.name ? soortVan(o) : ""}</option>`)
+                .map((o) => `<option value="${esc(o.id)}"${g.parent === o.id ? " selected" : ""}>${esc(o.name || (o.kind === "kast" ? t("Nieuwe onderverdeelkast") : t("Nieuwe groep")))}${o.name ? soortVan(o) : ""}</option>`)
                 .join("")}
             </select>
           </div>`;
@@ -668,29 +663,29 @@ class DacViewInstallation extends DacEditorElement {
       <div class="circuit" data-circuit="${index}">
         <div class="two">
           <div class="row">
-            <label for="circuit-name-${index}">Naam</label>
+            <label for="circuit-name-${index}">${t("Naam")}</label>
             <input type="text" id="circuit-name-${index}" data-circuit-field="name" data-index="${index}"
-                   value="${esc(g.name)}" placeholder="${kast ? "Bijvoorbeeld: Garage" : "Bijvoorbeeld: Laadpaal"}" autocomplete="off">
+                   value="${esc(g.name)}" placeholder="${kast ? t("Bijvoorbeeld: Garage") : t("Bijvoorbeeld: Laadpaal")}" autocomplete="off">
           </div>
           <div class="row">
-            <label for="circuit-fuse-${index}">Zekering per fase (A)</label>
+            <label for="circuit-fuse-${index}">${t("Zekering per fase (A)")}</label>
             <input type="number" id="circuit-fuse-${index}" data-circuit-field="fuse_amps" data-index="${index}"
                    min="1" max="1000" step="1" inputmode="numeric" value="${esc(g.fuse_amps)}">
           </div>
         </div>
         <div class="two">
           <div class="row">
-            <label for="circuit-phases-${index}">Aantal fasen</label>
+            <label for="circuit-phases-${index}">${t("Aantal fasen")}</label>
             <select id="circuit-phases-${index}" data-circuit-field="phases" data-index="${index}">
-              <option value="1"${Number(g.phases) === 1 ? " selected" : ""}>1 fase</option>
-              <option value="3"${Number(g.phases) !== 1 ? " selected" : ""}>3 fasen</option>
+              <option value="1"${Number(g.phases) === 1 ? " selected" : ""}>${t("1 fase")}</option>
+              <option value="3"${Number(g.phases) !== 1 ? " selected" : ""}>${t("3 fasen")}</option>
             </select>
           </div>
           ${onder}
         </div>
         <label class="check">
           <input type="checkbox" data-circuit-meter="${index}"${g.meter ? " checked" : ""}>
-          <span><strong>Deze ${wat} heeft een eigen kWh-meter</strong> Dan vul je hieronder per fase de sensoren in.</span>
+          <span><strong>${kast ? t("Deze onderverdeelkast heeft een eigen kWh-meter") : t("Deze groep heeft een eigen kWh-meter")}</strong> ${t("Dan vul je hieronder per fase de sensoren in.")}</span>
         </label>
         ${(g.meter ? fasen : [])
           .map(
@@ -698,22 +693,22 @@ class DacViewInstallation extends DacEditorElement {
         <div class="phase-block">
           <div class="phase-title">${phase.toUpperCase()}</div>
           <div class="row">
-            <label>Stroom (A)</label>
+            <label>${t("Stroom (A)")}</label>
             <dac-entity-picker data-circuit="${index}" data-phase="${phase}" data-kind="current"></dac-entity-picker>
           </div>
           <div class="row">
-            <label>Vermogen</label>
+            <label>${t("Vermogen")}</label>
             <dac-entity-picker data-circuit="${index}" data-phase="${phase}" data-kind="power"></dac-entity-picker>
           </div>
           <div class="row">
-            <label>Spanning (V)</label>
+            <label>${t("Spanning (V)")}</label>
             <dac-entity-picker data-circuit="${index}" data-phase="${phase}" data-kind="voltage"></dac-entity-picker>
           </div>
         </div>`
           )
           .join("")}
         <div class="circuit-actions">
-          <button type="button" class="remove" data-circuit-remove="${index}">${kast ? "Onderverdeelkast" : "Groep"} verwijderen</button>
+          <button type="button" class="remove" data-circuit-remove="${index}">${kast ? t("Onderverdeelkast verwijderen") : t("Groep verwijderen")}</button>
         </div>
       </div>`;
   }
@@ -780,9 +775,9 @@ class DacViewInstallation extends DacEditorElement {
       const { phase, kind } = picker.dataset;
       picker.filter = kind === "power" ? "power" : kind === "current" ? "current" : "all";
       picker.placeholder =
-        kind === "current" ? "Zoek een stroomsensor…"
-        : kind === "voltage" ? "Zoek een spanningssensor…"
-        : "Zoek een vermogenssensor…";
+        kind === "current" ? t("Zoek een stroomsensor…")
+        : kind === "voltage" ? t("Zoek een spanningssensor…")
+        : t("Zoek een vermogenssensor…");
       if (this.feed_) picker.stateFeed = this.feed_;
       picker.value = g.sensors?.[phase]?.[kind] ?? "";
       picker.addEventListener("dac-entity-change", (ev) => {
@@ -827,10 +822,10 @@ class DacViewInstallation extends DacEditorElement {
         .map(
           (_, i) => `
           <div class="row extra-row">
-            <label>${kind === "solar" ? `Omvormer ${i + 2}` : `Opwekteller ${i + 2}`}</label>
+            <label>${kind === "solar" ? t("Omvormer {n}", { n: i + 2 }) : t("Opwekteller {n}", { n: i + 2 })}</label>
             <div class="extra-line">
               <dac-entity-picker data-extra="${kind}" data-index="${i}"></dac-entity-picker>
-              <button type="button" class="remove" data-extra-remove="${kind}:${i}" aria-label="Weghalen">${icons.trash}</button>
+              <button type="button" class="remove" data-extra-remove="${kind}:${i}" aria-label="${t("Weghalen")}">${icons.trash}</button>
             </div>
           </div>`
         )
@@ -854,8 +849,8 @@ class DacViewInstallation extends DacEditorElement {
         });
       }
     };
-    teken(this.$("#solar-extra"), (d.sources.solar_extra ??= []), "solar", "Zoek een vermogenssensor…");
-    teken(this.$("#solar-total-extra"), ((d.sources.meters ??= {}).solar_total_extra ??= []), "meter", "Zoek een meterstand…");
+    teken(this.$("#solar-extra"), (d.sources.solar_extra ??= []), "solar", t("Zoek een vermogenssensor…"));
+    teken(this.$("#solar-total-extra"), ((d.sources.meters ??= {}).solar_total_extra ??= []), "meter", t("Zoek een meterstand…"));
   }
 
 
@@ -886,14 +881,14 @@ class DacViewInstallation extends DacEditorElement {
     const phases = Number(inst.phases) || 1;
     const fuse = Number(inst.fuse_amps) || 0;
     const kw = (watts) =>
-      (watts / 1000).toLocaleString("nl-NL", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+      (watts / 1000).toLocaleString(locale(), { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
     const computed = phases * fuse * VOLTAGE;
     // Once it has been overridden, showing the formula would claim an arithmetic
     // the number no longer follows.
     this.$("#max-grid-hint").textContent = inst.max_grid_auto
       ? `${phases} × ${fuse} A × ${VOLTAGE} V = ${kw(computed)} kW`
-      : `Handmatig ingesteld op ${kw(Number(inst.max_grid_watts) || 0)} kW; berekend zou ${kw(computed)} kW zijn`;
+      : t("Handmatig ingesteld op {kw} kW; berekend zou {berekend} kW zijn", { kw: kw(Number(inst.max_grid_watts) || 0), berekend: kw(computed) });
   }
 }
 

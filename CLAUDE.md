@@ -206,6 +206,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de vriezer en de koelkast: uitlezen en melden (deur open, te warm, storing), niet sturen | `docs/vriezer.md` |
 | het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat, de vooruitblik op het overzicht en "Wat gaat hij doen" voor boiler en programma's | `docs/paneel.md` |
 | de berichtenbox (het belletje), de herinnering voor de meterstanden, het bericht dat een contract afloopt of dat de prijscontrole omslaat | `docs/berichten.md` |
+| de taal: Nederlands en Engels, de instelling Taal bij Installatie, `t()` en de Engelse lijsten (`i18n.js`, `i18n/en/`), de woordenlijst, en wat (nog) Nederlands blijft | `docs/taal.md` |
 | het contract: de leverancierscatalogus, de prijsopbouw en de controle tegen de all-in sensor, "Ja, dit klopt", de kale marktprijs als reserve, gas en water per energiebron, vast/variabel/dynamisch, looptijden en "nieuw contract afgesloten", teruglevering voor en na 1-1-2027 en salderen per afrekenperiode, de schaal in de coach, Portugal | `docs/contract.md` |
 
 ## Wat gelijk moet blijven
@@ -259,6 +260,9 @@ dan de andere in dezelfde uitgave.
   (`docs/contract.md`). Sinds v0.135.0 ook `kosten_per_kwh` en `schaal_per_jaar` tegenover
   `kostenPerKwh` en `schaalPerJaar`, en salderen per afrekenperiode: `async_afrekening` in coach.py
   levert wat `aandeelOp` en `schaalKosten` in geld.js voor Historie lezen.
+- **De taal** (v0.139.0): `kiesTaal` in i18n.js (het paneel) en `kies` in taal.py (wat de coach
+  schrijft) kiezen dezelfde taal uit `installation.language` en die van Home Assistant. Elke tekst die
+  iemand leest gaat door `t()`; het Nederlands is de sleutel en blijft in de bron (`docs/taal.md`).
 - **De klok van het huis** (v0.138.1): de coach schrijft zijn tijden zonder tijdzone, in de tijd van
   Home Assistant. Leg ze in het paneel naast `huisNu()` uit format.js, niet naast `new Date()`, en zet
   een tijd met tijdzone uit Home Assistant om met `huisTijd`; wat Home Assistant om een echt moment
@@ -349,6 +353,7 @@ python tests/test_archive.py     # 41 op de kwartieropslag
 python tests/test_prijsopbouw.py # 53 op de prijsopbouw, de controle, zonsopkomst en Portugal
 node   tests/test_rapport.mjs    # 228 op het rapport en op het paneel
 node   tools/laadcheck.mjs       # laadt elke paneelmodule echt in
+node   tools/vertaalcheck.mjs    # welke zinnen in het paneel nog geen Engels hebben
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```
 
