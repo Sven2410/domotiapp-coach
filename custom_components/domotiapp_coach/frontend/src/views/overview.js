@@ -43,6 +43,7 @@ import {
   planTimes,
 } from "../schedule-sheet.js";
 import { heeftVoorkeuren } from "../voorkeur-velden.js";
+import { ptTijden } from "../opbouw.js";
 import "../plan-ahead-sheet.js";
 import "../vooruitblik.js";
 import {
@@ -1315,7 +1316,7 @@ class DacViewOverview extends DacElement {
         <dialog class="sheet wide" id="prices" tabindex="-1" aria-labelledby="prices-title">
           <div class="sheet-head">
             <div>
-              <div class="eyebrow">Dynamisch tarief</div>
+              <div class="eyebrow" id="prices-eyebrow">Dynamisch tarief</div>
               <h3 id="prices-title">Wat stroom kost</h3>
             </div>
             <button class="sheet-close" type="button" id="prices-close" aria-label="Sluiten">${icons.close}</button>
@@ -1683,7 +1684,9 @@ class DacViewOverview extends DacElement {
     this.priceBounds_ = thresholds.price;
     // De vooruitblik eens per vijf minuten opnieuw (v0.133.0).
     if (Date.now() - (this.vooruitOp_ ?? 0) >= 300000) this.haalVooruit_(true);
-    this.tiles_.price.action = this.forecast_.length > 1 ? () => this.openPrices_() : null;
+    // Meer dan een prijs, niet meer dan een rij: een Portugees contract met een prijs
+    // (simples) heeft ook een lijst, maar dan een rechte lijn (v0.138.0).
+    this.tiles_.price.action = new Set(this.forecast_.map((rij) => rij.price)).size > 1 ? () => this.openPrices_() : null;
     if (this.$("#prices").open) this.drawPrices_();
 
     // The alert threshold is the one number that says "too much" here, so the
@@ -1787,8 +1790,9 @@ class DacViewOverview extends DacElement {
     }
     // De prijslijst waar de coach mee rekent, voor als de sensor zelf er geen
     // heeft of de reserve invalt (v0.101.3). Bij elk besluit opnieuw, hooguit
-    // eens per minuut.
-    laadCoachPrijzen(this.hass).then(() => this.paintPrijsMelding_());
+    // eens per minuut. Daarna de tegels opnieuw: in Portugal komen de kleur en de
+    // grafiek van de prijs uit die lijst (v0.138.0).
+    laadCoachPrijzen(this.hass).then(() => { this.paintPrijsMelding_(); this.requestTick_(); });
     this.haalVooruit_(true);
 
     try {
@@ -2420,9 +2424,13 @@ class DacViewOverview extends DacElement {
    * The whole card disappears when nothing is mapped: a house with no meter
    * sensors gets no empty frame, and one without gas gets four rows rather than
    * five with a hole where gas would be.
+   *
+   * In Portugal niet (v0.138.0): daar leest de netbeheerder de meter op afstand en
+   * geeft niemand een stand door met laag en hoog. De eigenaar op 19-10-2026:
+   * "portugal heeft geen meterstanden dit is iets in Nederland."
    */
   updateMeters_() {
-    const rows = meterReadings(this.feed_, this.settings_?.sources);
+    const rows = this.settings_?.contract?.country === "PT" ? [] : meterReadings(this.feed_, this.settings_?.sources);
     this.$("#meters").hidden = !rows.length;
     if (!rows.length) return;
 
@@ -2486,12 +2494,19 @@ class DacViewOverview extends DacElement {
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(23, 0, 0, 0);
 
+    // Portugal (v0.138.0): geen leverancier die morgen publiceert, maar vaste tijdvakken.
+    const contract = this.settings_?.contract;
+    const portugal = contract?.country === "PT";
+    this.$("#prices-eyebrow").textContent = portugal ? "Tarief per tijdvak" : "Dynamisch tarief";
+
     // Suppliers publish the next day somewhere in the afternoon, so a list that
     // stops tonight is normal rather than broken -- and saying so beats leaving
     // somebody wondering why tomorrow is missing.
     this.$("#prices-note").textContent = !last
       ? ""
-      : last >= tomorrow
+      : portugal
+        ? ptTijden(contract.pt)
+        : last >= tomorrow
         ? "De prijzen van je leverancier voor vandaag en morgen."
         : "Alleen vandaag is bekend. De prijzen voor morgen komen meestal in de loop van de middag binnen.";
   }

@@ -85,8 +85,15 @@ def meterstand_volgende(vandaag: date, start, herhaling: str) -> date | None:
     return _plus_maanden(eerste, (_keer(vandaag, eerste, stap) + 1) * stap)
 
 
-def meterstand_bericht(vandaag: date, herinnering: dict) -> dict | None:
-    """Het bericht over de meterstanden als het aan de beurt is (op die dag of de week erna)."""
+def meterstand_bericht(vandaag: date, herinnering: dict, land: str = "NL") -> dict | None:
+    """Het bericht over de meterstanden als het aan de beurt is (op die dag of de week erna).
+
+    Niet in Portugal (v0.138.0): daar leest de netbeheerder de slimme meter op afstand,
+    en de afrekening kent geen jaarlijkse stand met laag en hoog. De eigenaar op
+    19-10-2026: "portugal heeft geen meterstanden dit is iets in Nederland."
+    """
+    if land == "PT":
+        return None
     wanneer = meterstand_wanneer(vandaag, herinnering.get("meter_date"), herinnering.get("meter_repeat") or "year")
     if wanneer is None or vandaag - wanneer > NA_AFLOOP:
         return None

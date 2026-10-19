@@ -5271,11 +5271,78 @@ proef("Portugal: dezelfde tijdvakken als de coach, Historie per tijdvak, en de o
   await import("../custom_components/domotiapp_coach/frontend/src/views/contract.js");
   const Contract = geregistreerd.get("dac-view-contract");
   const vorm = Object.create(Contract.prototype).render();
-  assert.ok(vorm.includes('data-land="NL"') && vorm.includes('data-land="PT"') && vorm.includes('id="pt-fields" class="fields" data-installateur'));
+  // Sinds v0.138.0 een keuzelijst in plaats van twee knoppen.
+  assert.ok(vorm.includes('<select id="land">') && vorm.includes('<option value="NL">Nederland</option>')
+    && vorm.includes('<option value="PT">Portugal</option>') && !vorm.includes("data-land=")
+    && vorm.includes('id="pt-fields" class="fields" data-installateur'));
   for (const id of ["pt-tarifa", "pt-ciclo", "pt-vazio", "pt-fora", "pt-iva", "pt-iec", "pt-excedente", "pt-omie", "pt-kva", "pt-potencia", "pt-servicos"]) {
     assert.ok(vorm.includes(`id="${id}"`), id);
   }
-  assert.ok(vorm.indexOf('data-land="PT"') < vorm.indexOf('id="soort-rij"'), "het land staat bovenaan");
+  assert.ok(vorm.indexOf('<select id="land">') < vorm.indexOf('id="soort-rij"'), "het land staat bovenaan");
+});
+
+// De eigenaar op 19-10-2026, bij de klant in Portugal: "ik wil een dropdown menu van het land",
+// "ook onder contract staat gas etc maar dat heeft deze klant niet je moet het kunnen uitzetten",
+// "portugal heeft geen meterstanden", "hij zegt gemiddeld tarief maar de grafiek is rood", en
+// "ik wil op de prijs kunnen klikken ... hier heb je 2 prijzen".
+proef("Portugal op het overzicht en op Contract: de prijs van nu, de grafiek, gas uit, geen meterstanden (v0.138.0)", async () => {
+  const ds = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");
+  const ta = await import("../custom_components/domotiapp_coach/frontend/src/tarifas.js");
+  const { level, prijsGrenzen } = await import("../custom_components/domotiapp_coach/frontend/src/format.js");
+  const pt = { tarifa: "bi", ciclo: "diario", energia: { vazio: 0.134, fora_vazio: 0.2198 }, iec: 0.001, iva: 23 };
+  // Een Portugees contract is type fixed, met de Nederlandse standaard van 0,28 er nog in.
+  const contract = { type: "fixed", country: "PT", fixed: { all_in_price: 0.28 }, pt };
+  const leeg = { get: () => undefined };
+
+  // De tegel: het tijdvak van nu, niet de vaste prijs van Nederland.
+  ds.zetCoachPrijzen({});
+  assert.equal(ds.priceNow(leeg, contract), ta.ptPrijsOp(pt, new Date(), 900000).koop);
+  assert.notEqual(ds.priceNow(leeg, contract), 0.28);
+  assert.equal(ds.priceNow(leeg, { ...contract, country: "NL" }), 0.28, "Nederland blijft zoals het was");
+
+  // De lijst: die van de coach, zoals de vooruitblik, ook bij type fixed.
+  const nu = new Date();
+  nu.setMinutes(0, 0, 0);
+  const uur = (h) => new Date(nu.getTime() + h * 3600000);
+  const rijen = [
+    { start: uur(0), end: uur(1), price: 0.271584, feedIn: null },
+    { start: uur(1), end: uur(2), price: 0.16605, feedIn: null },
+  ];
+  ds.zetCoachPrijzen({ rows: rijen });
+  assert.deepEqual(ds.priceForecast(leeg, contract).map((r) => r.price), [0.271584, 0.16605]);
+  assert.deepEqual(ds.priceForecast(leeg, { ...contract, country: "NL" }), [], "een Nederlands vast contract heeft geen lijst");
+
+  // Dezelfde kleur als de grafiek: met de grenzen uit dezelfde lijst is fora do vazio hoog
+  // en vazio laag. Tot v0.138.0 kreeg de tegel geen lijst en zei hij bij 0,28 "Gemiddeld".
+  const grens = prijsGrenzen({ low: 0.2, high: 0.3, relative: true }, ds.priceForecast(leeg, contract))(new Date());
+  assert.equal(level(0.271584, grens, true), "bad");
+  assert.equal(level(0.16605, grens, true), "good");
+  assert.equal(level(0.28, prijsGrenzen({ low: 0.2, high: 0.3, relative: true }, [])(new Date()), true), "warn", "zo stond het er");
+  ds.zetCoachPrijzen({});
+
+  // Onder de grafiek: wanneer de daluren zijn, dezelfde zin als op Contract.
+  const { ptTijden } = await import("../custom_components/domotiapp_coach/frontend/src/opbouw.js");
+  assert.equal(ptTijden(pt), "Daluren elke dag van 22:00 tot 08:00, in de tijd van Portugal.");
+  assert.equal(ptTijden({ ...pt, tarifa: "simples" }), "");
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf8");
+  assert.ok(bron.includes("new Set(this.forecast_.map((rij) => rij.price)).size > 1"), "klikbaar bij meer dan een prijs");
+  assert.ok(bron.includes('this.settings_?.contract?.country === "PT" ? [] : meterReadings('), "geen kaart Je meter in Portugal");
+
+  // Contract: gas en water uit te zetten, met dezelfde vinkjes als Installatie en alleen die.
+  await import("../custom_components/domotiapp_coach/frontend/src/views/contract.js");
+  const Contract = geregistreerd.get("dac-view-contract");
+  const vorm = Object.create(Contract.prototype).render();
+  for (const id of ["gas-aan", "gas-velden", "water-aan", "water-velden"]) assert.ok(vorm.includes(`id="${id}"`), id);
+  const stuk = Object.create(Contract.prototype).slice_({
+    contract: { type: "fixed" },
+    sources: { solar: "sensor.zon", meters: { gas_enabled: true, gas: "sensor.gas", import_low: "sensor.in" } },
+  });
+  assert.deepEqual(stuk, { contract: { type: "fixed" }, sources: { meters: { gas_enabled: true, water_enabled: false } } },
+    "alleen de twee vinkjes, zodat opslaan de sensoren van Installatie niet terugzet");
+
+  // Meldingen: de herinnering voor de meterstanden niet in Portugal.
+  const meld = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/notifications.js", import.meta.url), "utf8");
+  assert.ok(meld.includes(`this.$('details.groep[data-groep="herinnering"]').hidden = this.settings_?.contract?.country === "PT";`));
 });
 
 for (const [naam, fn] of proeven) {

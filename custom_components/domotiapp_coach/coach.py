@@ -1743,10 +1743,10 @@ class ChargerCoach:
         self._berichten_op = now
         vandaag = now.date()
         nieuw = []
-        meter = berichten.meterstand_bericht(vandaag, settings.get("reminders") or {})
+        contract = settings.get("contract") or {}
+        meter = berichten.meterstand_bericht(vandaag, settings.get("reminders") or {}, contract.get("country") or "NL")
         if meter:
             nieuw.append(meter)
-        contract = settings.get("contract") or {}
         nieuw.extend(berichten.contract_berichten(vandaag, contract))
         if contract.get("type") == "dynamic" and (
             self._controle_op is None or now - self._controle_op >= CONTROLE_RONDE

@@ -175,6 +175,21 @@ export function periodesLezen(bron, lijst) {
 class DacViewContract extends DacEditorElement {
   static sections = ["contract"];
 
+  /**
+   * Het contract, en sinds v0.138.0 ook of de woning gas en een watermeter heeft:
+   * dezelfde twee vinkjes als bij Installatie. Alleen die twee uit `sources`, zodat
+   * opslaan hier de sensoren van Installatie niet terugzet; de server voegt ze samen
+   * (`_merge` in storage.py).
+   */
+  slice_(settings) {
+    if (!settings) return {};
+    const meters = settings.sources?.meters ?? {};
+    return {
+      contract: settings.contract,
+      sources: { meters: { gas_enabled: Boolean(meters.gas_enabled), water_enabled: Boolean(meters.water_enabled) } },
+    };
+  }
+
   constructor() {
     super();
     this.check_ = null;
@@ -198,19 +213,16 @@ class DacViewContract extends DacEditorElement {
           <p class="hint" id="stroom-samenvatting"></p>
           <div class="fields">
             <!-- Het land (v0.137.0). De eigenaar op 19-10-2026: "bij contract bovenaan wil ik
-                 dat je een land kan kiezen dus Nederland en Portugal." -->
+                 dat je een land kan kiezen dus Nederland en Portugal." Sinds v0.138.0 een
+                 keuzelijst: "ik wil een dropdown menu van het land hebben nu staat er 2 velden
+                 groot in beeld." -->
             <div class="row" data-installateur>
-              <label>Land</label>
-              <div class="segmented" id="land">
-                <button type="button" data-land="NL" aria-pressed="false">
-                  <strong>Nederland</strong>
-                  Een all-in prijs of een dynamisch contract, salderen tot 2027.
-                </button>
-                <button type="button" data-land="PT" aria-pressed="false">
-                  <strong>Portugal</strong>
-                  Een prijs per tijdvak, zonder salderen.
-                </button>
-              </div>
+              <label for="land">Land</label>
+              <select id="land">
+                <option value="NL">Nederland</option>
+                <option value="PT">Portugal</option>
+              </select>
+              <span class="sub" id="land-hint"></span>
             </div>
 
             <div class="row" data-installateur id="soort-rij">
@@ -529,7 +541,14 @@ class DacViewContract extends DacEditorElement {
         <section class="card" id="gas">
           <h2>${icons.vlam} Mijn huidige gascontract</h2>
           <p class="hint" id="gas-samenvatting"></p>
-          <div class="fields">
+          <!-- Gas en water uit te zetten (v0.138.0). De eigenaar op 19-10-2026: "ook onder
+               contract staat gas etc maar dat heeft deze klant niet je moet het kunnen
+               uitzetten." Hetzelfde vinkje als bij Installatie (sources.meters), zie slice_. -->
+          <label class="check" for="gas-aan" data-installateur>
+            <input type="checkbox" id="gas-aan">
+            <span><strong>Deze woning gebruikt gas</strong> Staat dit uit, dan blijft gas weg, hier en op het overzicht.</span>
+          </label>
+          <div class="fields" id="gas-velden">
             <div class="row" data-installateur>
               <label>Soort contract</label>
               ${soortKnoppen("gas-soort")}
@@ -578,7 +597,11 @@ class DacViewContract extends DacEditorElement {
         <section class="card" id="water">
           <h2>${icons.druppel} Mijn huidige waterprijs</h2>
           <p class="hint" id="water-samenvatting"></p>
-          <div class="fields">
+          <label class="check" for="water-aan" data-installateur>
+            <input type="checkbox" id="water-aan">
+            <span><strong>Deze woning heeft een watermeter in Home Assistant</strong> Staat dit uit, dan blijft water weg, hier en op het overzicht.</span>
+          </label>
+          <div class="fields" id="water-velden">
             <div class="row" data-installateur>
               <label for="water-lev">Waterbedrijf</label>
               <input type="text" id="water-lev" maxlength="60" placeholder="Bijvoorbeeld Vitens">
@@ -650,12 +673,21 @@ class DacViewContract extends DacEditorElement {
     bind("pt-kva", (v) => (pt().kva = getal(v)));
     bind("pt-potencia", (v) => (pt().potencia_dia = getal(v)));
     bind("pt-servicos", (v) => (pt().servicos_mes = getal(v)));
+    for (const [id, sleutel] of [["gas-aan", "gas_enabled"], ["water-aan", "water_enabled"]]) {
+      this.$(`#${id}`).addEventListener("change", (ev) => {
+        ((this.draft_.sources ??= {}).meters ??= {})[sleutel] = ev.target.checked;
+        this.wijziging_();
+        this.paint_();
+      });
+    }
+    this.$("#land").addEventListener("change", (ev) => {
+      c().country = ev.target.value;
+      // Een Portugees contract is een vaste prijs per tijdvak, zonder salderen.
+      if (ev.target.value === "PT") { c().type = "fixed"; c().netting = false; }
+      this.wijziging_();
+      this.paint_();
+    });
     for (const [lijst, zet] of [
-      ["#land button", (b) => {
-        c().country = b.dataset.land;
-        // Een Portugees contract is een vaste prijs per tijdvak, zonder salderen.
-        if (b.dataset.land === "PT") { c().type = "fixed"; c().netting = false; }
-      }],
       ["#pt-tarifa button", (b) => (pt().tarifa = b.dataset.tarifa)],
       ["#pt-ciclo button", (b) => (pt().ciclo = b.dataset.ciclo)],
       ["#pt-excedente button", (b) => (pt().excedente.modo = b.dataset.modo)],
@@ -1076,7 +1108,10 @@ class DacViewContract extends DacEditorElement {
 
     // Portugal (v0.137.0): de velden van het land, en de Nederlandse weg.
     const portugal = contract.country === "PT";
-    for (const knop of this.$$("#land button")) knop.setAttribute("aria-pressed", String(knop.dataset.land === (portugal ? "PT" : "NL")));
+    this.$("#land").value = portugal ? "PT" : "NL";
+    this.$("#land-hint").textContent = portugal
+      ? "Een prijs per tijdvak, zonder salderen."
+      : "Een all-in prijs of een dynamisch contract, salderen tot 2027.";
     this.$("#pt-fields").style.display = portugal ? "" : "none";
     if (portugal) {
       for (const id of ["#soort-rij", "#lev-rij", "#fixed-fields", "#dynamic-fields", "#netting-rij", "#afreken-rij", "#fx-na"]) {
@@ -1176,12 +1211,19 @@ class DacViewContract extends DacEditorElement {
     if (gas.start) gdelen.push(`ingegaan op ${datumLang(gas.start)}`);
     if (gasType === "fixed" && gas.end) gdelen.push(`loopt af op ${datumLang(gas.end)}`);
     if (gasType !== "dynamic" && Number(gas.price) > 0) gdelen.push(`${euroTekst(gas.price)} per m³`);
-    this.$("#gas-samenvatting").textContent = `${gdelen.join(", ")}.`;
+    // Geen gas of geen watermeter (v0.138.0): dan alleen het vinkje en een zin.
+    const meters = this.draft_.sources?.meters ?? {};
+    this.$("#gas-aan").checked = Boolean(meters.gas_enabled);
+    this.$("#water-aan").checked = Boolean(meters.water_enabled);
+    this.$("#gas-velden").style.display = meters.gas_enabled ? "" : "none";
+    this.$("#water-velden").style.display = meters.water_enabled ? "" : "none";
+    this.$("#gas-samenvatting").textContent = meters.gas_enabled ? `${gdelen.join(", ")}.` : "Geen gas.";
     // Water (v0.130.1): het waterbedrijf en de prijs in een zin, voor wie de
     // velden niet ziet.
     const water = this.water_();
     const wdelen = [water.supplier ? `Bij ${water.supplier}` : "", Number(water.price) > 0 ? `${euroTekst(water.price)} per m³` : ""].filter(Boolean);
-    this.$("#water-samenvatting").textContent = wdelen.length ? `${wdelen.join(", ")}.` : "Nog geen waterprijs ingevuld.";
+    this.$("#water-samenvatting").textContent = !meters.water_enabled ? "Geen watermeter."
+      : wdelen.length ? `${wdelen.join(", ")}.` : "Nog geen waterprijs ingevuld.";
     const gv = gl ? voorstel(gl.id, gasType, "gas") : null;
     this.$("#gas-lev-hint").textContent = gv
       ? `${gv.uitleg} Uit de gegevens van ${gl.naam}, nagekeken op ${datumLang(gv.peildatum)}.`
@@ -1320,9 +1362,14 @@ DacViewContract.css = /* css */ `
   .segmented.drie { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   @media (max-width: 720px) { .segmented.drie { grid-template-columns: minmax(0, 1fr); } }
   select {
-    width: 100%; min-height: 44px; padding: 10px 12px; border-radius: var(--dac-radius-sm);
-    border: 1px solid var(--dac-border-hi); background: rgba(var(--dac-veil),0.04); color: var(--dac-ink);
+    width: 100%; min-height: 44px; padding: 10px 36px 10px 12px; border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border-hi); background-color: rgba(var(--dac-veil),0.04); color: var(--dac-ink);
     font: inherit; font-size: 14px; color-scheme: var(--dac-scheme);
+    /* Het pijltje van de lijst (v0.138.0), want appearance none haalt dat van de browser weg;
+       zonder pijltje leek het land op een gewoon veld. */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%238a8f98' stroke-width='1.6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 14px center;
+    cursor: pointer;
   }
   select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
   .sub a { color: var(--dac-accent-hi); }
