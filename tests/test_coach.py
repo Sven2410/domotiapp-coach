@@ -10344,6 +10344,94 @@ finally:
         else:
             sys.modules[k] = v
 
+print("=== 177. de opgeslagen beurten opnieuw uitrekenen met het contract van die dag (v0.136.0) ===")
+# De eigenaar op 19-10-2026, nadat zijn contract was rechtgezet: "Kan je dan ook de prijzen
+# die eerder genoemd werden in de coach aanpassen de historie want ik denk dat dat dan ook
+# niet meer klopt?" Zijn beurten telden de zon tegen 0,24171 - 0,052756, terwijl hij
+# saldeert en zijn terugleverkosten tot 1-1-2027 een vast bedrag per schaal zijn.
+VAST177 = {
+    "type": "fixed", "netting": True, "start": "2026-09-01", "end": "2027-07-31", "billing_start": "2026-09-15",
+    "fixed": {"all_in_price": 0.24171, "feed_in_tariff": 0.124, "feed_in_costs": 0.0,
+              "feed_in_costs_mode": "schalen", "feed_in_scales": [{"vanaf": 0, "per_jaar": 0}, {"vanaf": 500, "per_jaar": 70}],
+              "feed_in_scales_until": "2027-01-01",
+              "feed_in_tariff_after": 0.0721, "feed_in_costs_after": 0.052756},
+    "periods": [{"name": "Vorig contract 2026", "from": "2026-01-01", "to": "2026-08-31", "type": "fixed",
+                 "all_in_price": 0.283908, "feed_in_tariff": 0.045}],
+}
+inst177 = instellingen()
+inst177["contract"] = VAST177
+hass177, _, coach177 = bouw(huis(), inst177)
+
+
+def beurt177(dag, kwh, zon, accu=0.0, betaald=0.0, maat=0.0, klaar=True, onbekend=0.0):
+    return {"id": f"dev-laadpaal:{dag}T10:00:00", "device": "dev-laadpaal", "name": "Laadpaal", "kind": "laden",
+            "plugged_at": f"{dag}T10:00:00", "started": f"{dag}T10:05:00", "ended": f"{dag}T14:00:00" if klaar else None,
+            "kwh": kwh, "solar_kwh": zon, "battery_kwh": accu, "paid": betaald, "ref_cost": maat,
+            "saved": round(max(0.0, maat - betaald), 4), "solar_saved": 0.05, "grid_cost": 0.0,
+            "unknown_kwh": onbekend, "baseline": {"kwh": kwh, "cost": maat, "points": [[kwh / 2, maat / 2]]},
+            "complete": klaar}
+
+
+opslag177 = coachmod.async_get_beurten(hass177)
+for b in (beurt177("2026-10-03", 0.98, 0.98, betaald=0.1859, maat=0.2369),
+          beurt177("2026-08-20", 10.0, 2.0, accu=0.5, betaald=2.4, maat=2.84),
+          beurt177("2026-07-01", 5.0, 1.0, betaald=1.0, maat=1.4),
+          beurt177("2026-10-18", 3.0, 1.0, klaar=False),
+          beurt177("2027-01-05", 4.0, 2.0, betaald=0.6, maat=0.97)):
+    asyncio.run(opslag177.async_upsert(b))
+
+# De som per beurt.
+h177 = coachmod._herreken_beurt(beurt177("2026-10-03", 0.98, 0.98, betaald=0.1859, maat=0.2369), 0.24171, 0.24171)
+controle("met salderen is eigen zon de inkoopprijs waard: bespaard nul",
+         h177["paid"] == round(0.98 * 0.24171, 4) and h177["saved"] == 0.0 and h177["solar_saved"] == 0.0
+         and h177["ref_cost"] == round(0.98 * 0.24171, 4), f"{h177}")
+h177b = coachmod._herreken_beurt(beurt177("2026-08-20", 10.0, 2.0, accu=0.5, betaald=2.4, maat=2.84), 0.28, 0.05)
+controle("wat niet van de zon kwam tegen de inkoopprijs, de zon tegen de terugleverprijs",
+         h177b["paid"] == round(8 * 0.28 + 2 * 0.05, 4) and h177b["solar_saved"] == round(2 * 0.23, 4)
+         and h177b["grid_cost"] == round(7.5 * 0.28, 4) and h177b["saved"] == round(max(0.0, 2.8 - 2.34), 4)
+         and h177b["baseline"]["cost"] == 2.8 and h177b["baseline"]["points"] == [[5.0, 1.4]], f"{h177b}")
+zonder_maat177 = coachmod._herreken_beurt({**beurt177("2026-10-03", 1.0, 0.0), "ref_cost": None, "saved": None}, 0.25, 0.1)
+controle("een beurt zonder maat houdt die", zonder_maat177["ref_cost"] is None and zonder_maat177["saved"] is None, "")
+onbekend177 = coachmod._herreken_beurt(beurt177("2026-10-03", 4.0, 2.0, onbekend=1.0, maat=1.0), 0.2, 0.1)
+controle("kilowatturen zonder prijs blijven erbuiten",
+         onbekend177["paid"] == round(1.5 * 0.2 + 1.5 * 0.1, 4) and onbekend177["ref_cost"] == round(3 * 0.2, 4), f"{onbekend177}")
+
+# De prijs van die dag.
+op177 = coach177._vast_op
+controle("het contract van nu, met salderen en schalen: de inkoopprijs",
+         op177(VAST177, dt.datetime(2026, 10, 3, 10)) == (0.24171, 0.24171), f"{op177(VAST177, dt.datetime(2026, 10, 3, 10))}")
+controle("een eerder contract van die dag gaat voor",
+         op177(VAST177, dt.datetime(2026, 8, 20, 10)) == (0.283908, 0.283908), f"{op177(VAST177, dt.datetime(2026, 8, 20, 10))}")
+zonder177 = {**VAST177, "netting": False}
+controle("zonder salderen de vergoeding: van nu, en van het eerdere contract",
+         op177(zonder177, dt.datetime(2026, 10, 3, 10)) == (0.24171, 0.124)
+         and op177(zonder177, dt.datetime(2026, 8, 20, 10)) == (0.283908, 0.045), "")
+na177 = op177(VAST177, dt.datetime(2027, 1, 5, 10))
+controle("na 1-1-2027 de bedragen van na salderen",
+         na177[0] == 0.24171 and abs(na177[1] - (0.0721 - 0.052756)) < 1e-9, f"{na177}")
+dyn177 = {**DYN166, "periods": VAST177["periods"]}
+controle("dynamisch: alleen een eerder vast contract heeft een vaste prijs",
+         op177(dyn177, dt.datetime(2026, 10, 3, 10)) == (None, None)
+         and op177(dyn177, dt.datetime(2026, 8, 20, 10))[0] == 0.283908, "")
+
+# Alles bij elkaar: eerst laten zien, dan overnemen.
+voor177 = asyncio.run(coach177.async_herreken_beurten(inst177, dt.date(2026, 8, 1)))
+print(f"  voorbeeld: {voor177}")
+controle("vanaf de gekozen dag, alleen afgeronde beurten",
+         voor177["beurten"] == 3 and voor177["overgeslagen"] == 0 and voor177["toegepast"] is False, f"{voor177}")
+controle("het voorbeeld verandert niets",
+         next(b for b in asyncio.run(opslag177.async_list()) if b["plugged_at"].startswith("2026-10-03"))["paid"] == 0.1859, "")
+na177b = asyncio.run(coach177.async_herreken_beurten(inst177, dt.date(2026, 8, 1), True))
+opgeslagen177 = {b["plugged_at"][:10]: b for b in asyncio.run(opslag177.async_list())}
+controle("overgenomen: de beurten van na de dag zijn herrekend, de rest niet",
+         na177b["toegepast"] is True and opgeslagen177["2026-10-03"]["paid"] == round(0.98 * 0.24171, 4)
+         and opgeslagen177["2026-10-03"]["saved"] == 0.0
+         and opgeslagen177["2026-07-01"]["paid"] == 1.0 and opgeslagen177["2026-10-18"]["paid"] == 0.0
+         and abs(opgeslagen177["2027-01-05"]["paid"] - (2 * 0.24171 + 2 * (0.0721 - 0.052756))) < 1e-4, f"{opgeslagen177}")
+dynamisch177 = asyncio.run(coach177.async_herreken_beurten({**inst177, "contract": dyn177}, dt.date(2026, 8, 1)))
+controle("bij een dynamisch contract blijven de beurten zonder vaste prijs zoals ze waren",
+         dynamisch177["beurten"] == 1 and dynamisch177["overgeslagen"] == 2, f"{dynamisch177}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

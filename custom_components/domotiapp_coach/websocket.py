@@ -1345,6 +1345,40 @@ async def async_battery_recalculate(
     connection.send_result(msg["id"], uit)
 
 
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/savings/recalculate",
+        vol.Required("from"): _DATUM,
+        # Zonder: alleen laten zien wat het zou worden.
+        vol.Optional("apply", default=False): bool,
+    }
+)
+@websocket_api.async_response
+async def async_savings_recalculate(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """De opgeslagen sessies opnieuw uitrekenen met het contract van die dag (v0.136.0).
+
+    Eerst zonder `apply`, zodat de installateur ziet wat het wordt; dan met.
+    Zie `async_herreken_beurten` in coach.py.
+    """
+    from datetime import date as _date
+
+    from .coach import async_get_coach
+
+    if not msg.get("from"):
+        connection.send_error(msg["id"], "invalid_format", "geen dag gekozen")
+        return
+    settings = await async_get_store(hass).async_load()
+    uit = await async_get_coach(hass).async_herreken_beurten(
+        settings, _date.fromisoformat(msg["from"]), bool(msg.get("apply"))
+    )
+    connection.send_result(msg["id"], uit)
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "domotiapp_coach/afrekening",
@@ -1743,6 +1777,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_forecast)
     websocket_api.async_register_command(hass, async_afrekening)
     websocket_api.async_register_command(hass, async_battery_recalculate)
+    websocket_api.async_register_command(hass, async_savings_recalculate)
     websocket_api.async_register_command(hass, async_berichten_read)
     websocket_api.async_register_command(hass, async_reminders_set)
     websocket_api.async_register_command(hass, async_notifications_list)

@@ -5147,6 +5147,36 @@ proef("de berichtenbox: het tellertje, de lijst met Gelezen, en de herinnering v
   assert.ok(c.includes('id="stroom-dagen"') && c.includes('id="gas-dagen"'));
 });
 
+// De eerdere contracten (v0.136.0). De eigenaar op 19-10-2026: "weghalen staat niet lekker
+// uitgelijnd" en "ook van tot etc staat niet mooi". Een <details> legt zijn kinderen niet als
+// raster uit, dus de afstand van .circuit kwam er niet in.
+proef("de eerdere contracten hebben hun inhoud in een eigen raster, en de beurten zijn opnieuw uit te rekenen (v0.136.0)", async () => {
+  const contractMod = await import("../custom_components/domotiapp_coach/frontend/src/views/contract.js");
+  const Contract = geregistreerd.get("dac-view-contract");
+  const host = { innerHTML: "", querySelectorAll: () => [] };
+  const nep = Object.create(Contract.prototype);
+  nep.$ = () => host;
+  nep.periodsVan_ = () => [{ name: "Gas 2023", from: "2023-09-01", to: "2023-12-31", price: 1.370204 }];
+  nep.canEdit_ = () => true;
+  Contract.prototype.paintPeriods_.call(nep, "gas");
+  const binnen = host.innerHTML.split('<div class="p-inhoud">')[1] ?? "";
+  assert.ok(binnen.includes("Van") && binnen.includes("Tot") && binnen.includes("Weghalen"), host.innerHTML);
+  assert.ok(Contract.css.includes("details.period > .p-inhoud { display: grid; gap: 12px;"), "de afstand zit in de inhoud");
+  // Opnieuw uitrekenen staat bij de installateur, met eerst laten zien.
+  const html = Object.create(Contract.prototype).render();
+  const plek = html.indexOf('id="beurten-van"');
+  assert.ok(plek > 0 && html.lastIndexOf("data-installateur", plek) > html.lastIndexOf("</div>", plek - 400), "in een blok van de installateur");
+  assert.ok(html.includes('id="beurten-over" hidden'), "Overnemen pas na het voorbeeld");
+  const zin = contractMod.beurtenZin({ van: "2026-09-01", beurten: 30, overgeslagen: 0,
+    voor: { paid: 6.12, saved: 1.31 }, na: { paid: 7.57, saved: 0.05 }, toegepast: false });
+  assert.ok(zin.includes("Vanaf 1 september 2026, 30 beurten") && zin.includes("betaald was € 6,12 en wordt € 7,57")
+    && zin.includes("bespaard was € 1,31 en wordt € 0,05") && !zin.includes("Overgenomen"), zin);
+  assert.ok(contractMod.beurtenZin({ van: "2026-09-01", beurten: 1, overgeslagen: 1, voor: {}, na: {}, toegepast: true })
+    .includes("1 beurt met een dynamische prijs blijft zoals hij was. Overgenomen."));
+  assert.ok(contractMod.beurtenZin({ van: "2026-09-01", beurten: 0, overgeslagen: 0 }).includes("geen afgeronde beurt"));
+  assert.equal(contractMod.beurtenZin({ fout: "Uitrekenen mislukt: x" }), "Uitrekenen mislukt: x");
+});
+
 for (const [naam, fn] of proeven) {
   try {
     await fn();

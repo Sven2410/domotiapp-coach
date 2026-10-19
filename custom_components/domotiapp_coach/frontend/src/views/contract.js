@@ -66,6 +66,31 @@ function voorgesteldeNaam(bron, supplier, soort, van, tot) {
 }
 
 /** Vandaag en gisteren als "2026-10-18", in de tijd van het huis. */
+const euro2 = (n) => `€ ${Number(n || 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Wat het opnieuw uitrekenen van de beurten gaf (v0.136.0), in een paar zinnen.
+ * `uit` komt van `savings/recalculate` (`async_herreken_beurten` in coach.py).
+ */
+export function beurtenZin(uit) {
+  if (!uit) return "";
+  if (uit.fout) return uit.fout;
+  const datum = new Date(`${uit.van}T12:00:00`).toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" });
+  const zinnen = [];
+  if (!uit.beurten) {
+    zinnen.push(`Vanaf ${datum} is er geen afgeronde beurt met een vaste prijs.`);
+  } else {
+    zinnen.push(`Vanaf ${datum}, ${uit.beurten} ${uit.beurten === 1 ? "beurt" : "beurten"}: betaald was ${euro2(uit.voor?.paid)} en wordt ${euro2(uit.na?.paid)}, bespaard was ${euro2(uit.voor?.saved)} en wordt ${euro2(uit.na?.saved)}.`);
+  }
+  if (uit.overgeslagen) {
+    zinnen.push(uit.overgeslagen === 1
+      ? "1 beurt met een dynamische prijs blijft zoals hij was."
+      : `${uit.overgeslagen} beurten met een dynamische prijs blijven zoals ze waren.`);
+  }
+  if (uit.toegepast) zinnen.push("Overgenomen.");
+  return zinnen.join(" ");
+}
+
 function dagTekst(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -386,6 +411,18 @@ class DacViewContract extends DacEditorElement {
             <div class="circuit-actions" data-installateur>
               <button type="button" data-period-add="stroom">Eerder stroomcontract toevoegen</button>
             </div>
+
+            <!-- de opgeslagen beurten opnieuw uitrekenen (v0.136.0) -->
+            <div class="row" data-installateur>
+              <label for="beurten-van">Laadbeurten en programma's opnieuw uitrekenen</label>
+              <span class="sub">Na een gewijzigde prijs: wat de opgeslagen beurten kostten en bespaarden, opnieuw met het contract van die dag. Alleen bij een vaste of variabele prijs. Eerst zie je wat het wordt.</span>
+              <input type="date" id="beurten-van">
+              <div class="herreken-knoppen">
+                <button type="button" id="beurten-bekijk">Uitrekenen</button>
+                <button type="button" id="beurten-over" hidden>Overnemen</button>
+              </div>
+              <p class="sub" id="beurten-uit"></p>
+            </div>
           </div>
         </section>
 
@@ -601,6 +638,9 @@ class DacViewContract extends DacEditorElement {
       knop.addEventListener("click", () => this.nieuwContract_(knop.dataset.nieuw));
     }
     this.$("#bevestig").addEventListener("click", () => this.bevestig_());
+    this.$("#beurten-van").addEventListener("input", (ev) => { this.beurten_ = { van: ev.target.value }; this.paintBeurten_(); });
+    this.$("#beurten-bekijk").addEventListener("click", () => this.herrekenBeurten_(false));
+    this.$("#beurten-over").addEventListener("click", () => this.herrekenBeurten_(true));
 
     this.wireSaveBar_();
     this.paint_();
@@ -762,6 +802,44 @@ class DacViewContract extends DacEditorElement {
     }
     this.paint_();
     this.vraagControle_();
+  }
+
+  /**
+   * De opgeslagen beurten opnieuw uitrekenen (v0.136.0): eerst laten zien,
+   * dan overnemen. De coach rekent met het opgeslagen contract, dus wat hier
+   * nog niet is opgeslagen gaat eerst.
+   */
+  async herrekenBeurten_(toepassen) {
+    if (!this.hass_?.callWS) return;
+    const stand = this.beurten_ ?? {};
+    if (!stand.van) {
+      this.toast_("Kies eerst een dag.", false);
+      return;
+    }
+    if (this.dirty_()) {
+      await this.save_();
+      if (this.dirty_()) return;
+    }
+    this.beurten_ = { ...stand, bezig: true };
+    this.paintBeurten_();
+    try {
+      const uit = await this.hass_.callWS({ type: "domotiapp_coach/savings/recalculate", from: stand.van, apply: toepassen });
+      this.beurten_ = { van: stand.van, uit };
+      if (uit?.toegepast) this.toast_("De beurten zijn opnieuw uitgerekend", true);
+    } catch (error) {
+      this.beurten_ = { van: stand.van, uit: { fout: `Uitrekenen mislukt: ${error?.message ?? error}` } };
+    }
+    this.paintBeurten_();
+  }
+
+  paintBeurten_() {
+    if (!this.rendered_) return;
+    const stand = this.beurten_ ?? {};
+    const knop = this.$("#beurten-bekijk");
+    knop.disabled = Boolean(stand.bezig);
+    knop.textContent = stand.bezig ? "Bezig…" : "Uitrekenen";
+    this.$("#beurten-over").hidden = !(stand.uit && !stand.uit.fout && !stand.uit.toegepast && stand.uit.beurten > 0);
+    this.$("#beurten-uit").textContent = stand.uit ? beurtenZin(stand.uit) : "";
   }
 
   afterSave_() {
@@ -1010,10 +1088,12 @@ class DacViewContract extends DacEditorElement {
       return `
         <details class="circuit period" data-period="${i}"${open}>
           <summary><span class="p-naam">${esc(titel)}</span><span class="p-wanneer">${esc(wanneer)}</span></summary>
-          ${kop}
-          ${prijzen}
-          <div class="circuit-actions">
-            <button type="button" class="remove" data-period-remove="${i}">Weghalen</button>
+          <div class="p-inhoud">
+            ${kop}
+            ${prijzen}
+            <div class="circuit-actions">
+              <button type="button" class="remove" data-period-remove="${i}">Weghalen</button>
+            </div>
           </div>
         </details>`;
     }).join("");
@@ -1116,6 +1196,11 @@ DacViewContract.css = /* css */ `
   details.period > summary .p-naam { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
   details.period > summary .p-wanneer { margin-left: auto; font-size: 12.5px; color: var(--dac-ink-2); white-space: nowrap; }
   details.period:not([open]) { gap: 0; }
+  /* De inhoud in een eigen raster (v0.136.0): een <details> legt zijn kinderen niet
+     als raster uit, dus de afstand van .circuit kwam er niet in, en Van, Tot, de
+     prijs en Weghalen plakten tegen elkaar (de eigenaar op 19-10-2026). */
+  details.period { display: block; }
+  details.period > .p-inhoud { display: grid; gap: 12px; margin-top: 14px; }
   .circuit-actions { display: flex; justify-content: flex-end; }
   .circuit-actions button {
     font: inherit;
@@ -1128,6 +1213,12 @@ DacViewContract.css = /* css */ `
     cursor: pointer;
   }
   .circuit-actions button.remove { color: var(--dac-danger, #e5484d); }
+  .herreken-knoppen { display: flex; flex-wrap: wrap; gap: 8px; }
+  .herreken-knoppen button {
+    font: inherit; font-size: 13px; padding: 8px 14px; border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.04); color: var(--dac-ink); cursor: pointer;
+  }
+  .herreken-knoppen button[hidden] { display: none; }
 `;
 
 define("dac-view-contract", DacViewContract);

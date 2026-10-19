@@ -295,3 +295,39 @@ in virtueel.py). Scenario's: `vast-kosten-per-kwh` (de zon in de bus kost 0,25 m
 min 0,05), en `dynamisch-salderen-vol` naast `dynamisch-salderen` (de hele all-in prijs terug is
 meer waard). Proef 176 in test_coach.py, de vormen en de schaal in test_prijsopbouw.py, en
 "terugleverkosten in vier vormen, en Historie per afrekenperiode" in test_rapport.mjs.
+
+## Opnieuw uitrekenen met het contract van toen (v0.136.0)
+
+De eigenaar op 19-10-2026, nadat zijn contract was rechtgezet: "Kan je dan ook de prijzen die
+eerder genoemd werden in de coach aanpassen de historie want ik denk dat dat dan ook niet meer
+klopt?" Historie In geld rekent elke keer opnieuw met het contract, ook met de eerdere contracten.
+Twee dingen bewaren een bedrag van toen: elke beurt in Sessies (`BeurtenStore`) en het kasboek van
+een thuisbatterij (`battery_state`).
+
+**De beurten.** Contract heeft onder de eerdere stroomcontracten "Laadbeurten en programma's
+opnieuw uitrekenen", vanaf een dag, eerst als voorbeeld en dan Overnemen (`savings/recalculate`,
+`async_herreken_beurten` in coach.py). Alleen bij een vaste prijs, van nu of van een eerder contract
+van die dag: dan is de prijs over de hele beurt dezelfde, en volgt alles uit de kilowatturen die de
+beurt al telde (`_herreken_beurt`): wat niet van de zon kwam tegen de inkoopprijs, de zon tegen wat
+teruglevering had opgebracht, de maat alles van het net. Een beurt bij een dynamische prijs blijft
+zoals hij was, want een beurt bewaart niet wanneer hij welke kWh nam. Lopende beurten ook.
+
+**De prijs van toen** komt uit `_vast_op` in coach.py: een eerder contract van die dag gaat voor,
+anders het contract van nu met salderen naar het vinkje en de datum (in de lopende afrekenperiode
+zoals `_saldeert`), en na 1-1-2027 de bedragen van na salderen. Dat volgt `prijsOp` in geld.js,
+zonder de verdeling per afrekenperiode. Bij salderen trekt hij de kosten per kWh van het contract
+van nu af (`kosten_per_kwh`), net als `prijsOp`.
+
+**De batterij.** "Opgeleverd opnieuw uitrekenen" (v0.130.1) rekende bij een vast contract elk
+kwartier met het tarief van nu, ook van voor een contractwissel. Nu ook met `_vast_op`.
+
+In de woning van de eigenaar zag het er na het rechtzetten zo uit: met salderen is eigen zon
+precies de inkoopprijs waard, dus bespaarde een beurt op zon niets meer, en verdiende de batterij
+niets aan het verschuiven; alleen haar verliezen kosten geld. Opgeleverd ging van 28-09 tot
+19-10-2026 van € 4,58 naar min € 6,27.
+
+Proef 177 in test_coach.py, en "de eerdere contracten hebben hun inhoud in een eigen raster, en de
+beurten zijn opnieuw uit te rekenen" in test_rapport.mjs. Die proef gaat ook over de eerdere
+contracten zelf: een `<details>` legt zijn kinderen niet als raster uit, dus kwamen Van, Tot, de
+prijs en Weghalen tegen elkaar aan te staan (de eigenaar: "weghalen staat niet lekker uitgelijnd",
+"ook van tot etc staat niet mooi"). De inhoud staat nu in `.p-inhoud`.
