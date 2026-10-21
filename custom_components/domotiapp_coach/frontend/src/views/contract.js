@@ -1441,6 +1441,9 @@ DacViewContract.css = /* css */ `
   .schalen { display: grid; gap: 8px; }
   .schaal-kop, .schaal { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; }
   .schaal-kop { font-size: 12px; color: var(--dac-ink-3); }
+  /* De rijen staan samen in een eigen div, en daar komt de afstand van .schalen
+     niet in: de vakken lagen tegen elkaar (de eigenaar op 21-10-2026). */
+  .schaal + .schaal { margin-top: 8px; }
   .schaal .remove {
     font: inherit; font-size: 12.5px; padding: 8px 10px; border-radius: var(--dac-radius-sm); cursor: pointer;
     border: 1px solid var(--dac-border); background: transparent; color: var(--dac-danger, #e5484d);
