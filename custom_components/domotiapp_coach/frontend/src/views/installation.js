@@ -59,7 +59,7 @@ class DacViewInstallation extends DacEditorElement {
         ${adminNoticeHtml}
 
         <section class="card">
-          <h2>${icons.house} ${t("Woning en aansluiting")}</h2>
+          <h2>${icons.house} ${t("Woning")}</h2>
           <p class="hint">${t("De naam van de woning komt ook boven het overzicht te staan.")}</p>
           <div class="fields">
             <div class="row">
@@ -78,7 +78,14 @@ class DacViewInstallation extends DacEditorElement {
               </select>
               <span class="sub">Automatisch volgt de taal van Home Assistant. / Automatic follows the language of Home Assistant.</span>
             </div>
+          </div>
+        </section>
 
+        <section class="card">
+          <h2>${icons.plug} ${t("Aansluiting")}</h2>
+          <div class="fields">
+            <div class="block">
+            <div class="block-title">${t("Zekering")}</div>
             <div class="row">
               <label>${t("Aantal fasen")}</label>
               <div class="segmented" id="phases">
@@ -113,6 +120,9 @@ class DacViewInstallation extends DacEditorElement {
               </span>
             </label>
 
+            </div>
+            <div class="block">
+            <div class="block-title">${t("Lastbewaker")}</div>
             <label class="check" for="balancer">
               <input type="checkbox" id="balancer">
               <span>
@@ -127,6 +137,7 @@ class DacViewInstallation extends DacEditorElement {
               <span class="sub">
                 ${t("Optioneel, en alleen als je bewaker meldt hoeveel hij op dit moment vrijgeeft voor het laden. Bij een Easee Equalizer heet die sensor \"Equalizer limiet\". Dat getal beweegt mee met wat de rest van je huis gebruikt: het is wat er overblijft, niet je hoofdzekering. Vul je hem in, dan vraagt de coach er nooit meer overheen en hoeft je bewaker niet in te grijpen.")}
               </span>
+            </div>
             </div>
           </div>
         </section>
@@ -165,6 +176,8 @@ class DacViewInstallation extends DacEditorElement {
           <h2>${icons.grid} ${t("Energiebronnen")}</h2>
           <p class="hint">${t("Welke sensoren meten je opwek en je meterstand. Of de sensor in watt of kilowatt meet maakt niet uit, dat rekent de coach zelf om. Het verbruik van de woning wordt hieruit berekend.")}</p>
           <div class="fields">
+            <div class="block fields">
+            <div class="block-title">${t("Zonnepanelen")}</div>
             <div class="row">
               <label>${t("Opwek zonnepanelen")}</label>
               <dac-entity-picker id="src-solar" data-key="solar"></dac-entity-picker>
@@ -174,6 +187,9 @@ class DacViewInstallation extends DacEditorElement {
               <button type="button" class="add" id="solar-extra-add">${t("Nog een omvormer")}</button>
               <span class="sub">${t("Heb je meer omvormers, zet ze hier erbij; de coach telt ze op.")}</span>
             </div>
+            </div>
+            <div class="block fields">
+            <div class="block-title">${t("Slimme meter")}</div>
             <div class="row">
               <label>${t("Hoe meet je slimme meter?")}</label>
               <div class="segmented" id="grid-mode">
@@ -210,6 +226,7 @@ class DacViewInstallation extends DacEditorElement {
                   ${t("Aanvinken als je meter het andersom doet: positief bij teruglevering. Herken je aan een diagram dat precies verkeerd om staat.")}
                 </span>
               </label>
+            </div>
             </div>
 
           </div>
@@ -256,33 +273,37 @@ class DacViewInstallation extends DacEditorElement {
           <h2>${icons.sun} ${t("Zonverwachting")}</h2>
           <p class="hint">${t("Wat er vandaag en morgen aan zon verwacht wordt. Daarmee kan de coach besluiten of het de moeite is om te wachten, of dat hij beter vannacht op de goedkope uren kan draaien. Integraties als Forecast.Solar en Solcast leveren deze waarden als sensoren; vul in wat je hebt.")}</p>
           <div class="fields">
-            <div class="two">
-              <div class="row">
-                <label>${t("Verwacht vandaag nog")}</label>
-                <dac-entity-picker data-forecast="remaining_today"></dac-entity-picker>
+            <div class="block fields">
+              <div class="block-title">${t("Per uur")}</div>
+              <div class="two">
+                <div class="row">
+                  <label>${t("Verwacht dit uur")}</label>
+                  <dac-entity-picker data-forecast="this_hour"></dac-entity-picker>
+                </div>
+                <div class="row">
+                  <label>${t("Verwacht volgend uur")}</label>
+                  <dac-entity-picker data-forecast="next_hour"></dac-entity-picker>
+                </div>
               </div>
-              <div class="row">
-                <label>${t("Verwacht morgen")}</label>
-                <dac-entity-picker data-forecast="tomorrow"></dac-entity-picker>
-              </div>
+              <p class="sub">${t("In kWh over dat uur. Dit zijn de twee die de coach echt gebruikt om te beslissen: moet hij nu stroom bijkopen om op de zon te laden terwijl er volgend uur veel meer aankomt, dan wacht hij dat uur af. Met alleen dagtotalen kan hij dat niet weten.")}</p>
             </div>
-            <div class="two">
-              <div class="row">
-                <label>${t("Verwacht dit uur")}</label>
-                <dac-entity-picker data-forecast="this_hour"></dac-entity-picker>
+            <div class="block fields">
+              <div class="block-title">${t("Per dag")}</div>
+              <div class="two">
+                <div class="row">
+                  <label>${t("Verwacht vandaag nog")}</label>
+                  <dac-entity-picker data-forecast="remaining_today"></dac-entity-picker>
+                </div>
+                <div class="row">
+                  <label>${t("Verwacht morgen")}</label>
+                  <dac-entity-picker data-forecast="tomorrow"></dac-entity-picker>
+                </div>
               </div>
               <div class="row">
-                <label>${t("Verwacht volgend uur")}</label>
-                <dac-entity-picker data-forecast="next_hour"></dac-entity-picker>
+                <label>${t("Tijdstip hoogste opwek vandaag")}</label>
+                <dac-entity-picker data-forecast="peak_today"></dac-entity-picker>
+                <span class="sub">${t("Optioneel. Hiermee kan de coach zeggen rond welk uur het overschot het grootst is.")}</span>
               </div>
-              <span class="sub">
-                ${t("In kWh over dat uur. Dit zijn de twee die de coach echt gebruikt om te beslissen: moet hij nu stroom bijkopen om op de zon te laden terwijl er volgend uur veel meer aankomt, dan wacht hij dat uur af. Met alleen dagtotalen kan hij dat niet weten.")}
-              </span>
-            </div>
-            <div class="row">
-              <label>${t("Tijdstip hoogste opwek vandaag")}</label>
-              <dac-entity-picker data-forecast="peak_today"></dac-entity-picker>
-              <span class="sub">${t("Optioneel. Hiermee kan de coach zeggen rond welk uur het overschot het grootst is.")}</span>
             </div>
           </div>
         </section>
@@ -291,6 +312,8 @@ class DacViewInstallation extends DacEditorElement {
           <h2>${icons.gauge} ${t("Meterstanden")}</h2>
           <p class="hint">${t("De tellers van je slimme meter, zoals ze op de meter zelf staan. Vul in wat je hebt; alleen de ingevulde standen komen op het overzicht te staan. Dit zijn totalen in kWh en m³, dus geen vermogens.")}</p>
           <div class="fields">
+            <div class="block fields">
+            <div class="block-title">${t("Stroom")}</div>
             <div class="row">
               <label>${t("Opwek totaal (teller)")}</label>
               <dac-entity-picker data-meter="solar_total"></dac-entity-picker>
@@ -319,7 +342,10 @@ class DacViewInstallation extends DacEditorElement {
                 <dac-entity-picker data-meter="export_high"></dac-entity-picker>
               </div>
             </div>
+            </div>
 
+            <div class="block fields">
+            <div class="block-title">${t("Gas")}</div>
             <label class="check" for="gas-enabled">
               <input type="checkbox" id="gas-enabled">
               <span>
@@ -332,7 +358,10 @@ class DacViewInstallation extends DacEditorElement {
               <label>${t("Gasmeter (m³)")}</label>
               <dac-entity-picker data-meter="gas"></dac-entity-picker>
             </div>
+            </div>
 
+            <div class="block fields">
+            <div class="block-title">${t("Water")}</div>
             <label class="check" for="water-enabled">
               <input type="checkbox" id="water-enabled">
               <span>
@@ -352,6 +381,7 @@ class DacViewInstallation extends DacEditorElement {
                 <dac-entity-picker data-meter="water_flow"></dac-entity-picker>
                 <span class="sub">${t("Optioneel. Met deze sensor kan de coach melden als er te lang onafgebroken water loopt; zie Meldingen.")}</span>
               </div>
+            </div>
             </div>
           </div>
         </section>

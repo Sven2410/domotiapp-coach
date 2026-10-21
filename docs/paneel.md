@@ -437,3 +437,47 @@ Daarbij nagemeten in Chrome op 390, 320 en 280 px, alle tabbladen met elke groep
 niets breder dan het scherm. De pop-up met de schuif en Instellen van een batterij ook; daar viel
 "de coach bepaalt" in de prijsvelden af, die zijn nu 190 px. En de ring om vol of leeg laden had
 een doorschijnend binnenvlak, waardoor het draaiende verloop door de knop scheen.
+
+## Koppen en blokken per onderwerp (21-10-2026)
+
+De eigenaar op 21-10-2026: "alle menus dan maar eens door lopen, en een beetje herstructureren
+met koppen en aparte blokken per onderwerp", en na de eerste ronde, bij Onderverdeelkasten: "Ik
+vind de opzet zoals je bij installatie gebruikt wel echt duidelijk", "daar zou over de hele app
+meer uniformiteit in mogen komen."
+
+**Eén vorm.** Een kaart (`section.card` met een `h2` en een korte uitleg) per onderwerp, en
+daarbinnen per deelonderwerp een omkaderd blok met de kop erin: `.block` en `.block-title` in
+`baseCss` (theme.js), hetzelfde vak als een kast of groep bij Installatie (`.circuit`). Elk element
+heeft hem, ook de pop-up Instellen. Een kaart met maar één onderwerp houdt zijn velden los. Een
+vinkje in een blok heeft geen eigen kader (editorCss): het blok is het kader.
+
+**Elke functie een vinkje.** Wat aan of uit kan is een vinkje met een vette titel en uitleg; een
+getal dat erbij hoort staat in hetzelfde blok en verschijnt pas als het vinkje aan staat. De
+eigenaar: "Vakantiestand is een optie, maar accu inzetten bij auto is ook een optie. Ene is een
+checkbox (bold font), ander is gewoon een regel." Zo nu ook "De accu mag de auto helpen"
+(`car_above`) en "De coach zet de ventilator aan" (`fan_above_c`), die tot dan een veld waren met
+"leeg is nooit". Het vinkje bewaart niets eigens (`data-vk-aan` in voorkeur-velden.js): aan is een
+getal, uit is null, zoals altijd. Aanzetten zet alleen het veld neer; zonder getal blijft het uit,
+want de coach verzint geen grens. Net zo de herinnering voor de meterstanden in Meldingen: een
+schuif zoals de waarschuwingen, en de datum pas als hij aan staat; uit wist de datum.
+
+- **Voorkeuren**: Hoeveel doet de coach zelf, de twee voorrangen en de nacht los; Weergave met de
+  blokken Kleuren, Kaarten (weg zonder fasen) en Historie.
+- **Installatie**: Woning (los), Aansluiting (Zekering, Lastbewaker), Onderverdeelkasten, Groepen,
+  Energiebronnen (Zonnepanelen, Slimme meter), Fasen, Zonverwachting (Per uur, Per dag),
+  Meterstanden (Stroom, Gas, Water), Navigatie (los).
+- **Contract**: stroom begint met Leverancier en looptijd (het land, de soort, de leverancier of
+  die van Portugal, de datums). Dan bij vast of variabel Prijs, Teruglevering en Vanaf 1 januari
+  2027; bij dynamisch Prijssensoren, Belasting en opslag en Teruglevering; in Portugal Prijs per
+  tijdvak, Teruglevering en Vaste kosten. Daarna Salderen (in Portugal weg, `#salderen-blok`), Zo
+  komt je prijs tot stand, Eerdere stroomcontracten en het opnieuw uitrekenen. Gas: Leverancier en
+  looptijd, Prijs, Eerdere gascontracten. Water: Prijs, Eerdere waterprijzen.
+- **Apparaten**: per apparaat Apparaat (type, naam, ruimte, energieteller, merk; `brandHtml_` met
+  `deel` "kop"), dan Koppeling of Stekker, Bediening, Opdrachten, Programma's, Auto's, De batterij,
+  Hoe de coach hem aanstuurt, Opgeleverd opnieuw uitrekenen, De airco en als laatste Sturen.
+- **Instellen**: Schema; bij de laadpaal Zonder planning en Auto's; bij de thuisbatterij
+  Noodstroom, Handelen, Balanceren, Vakantiestand, De auto en Ventilator; bij een vaatwasser
+  Vrijgeven, bij een airco Zo wil je het.
+- **Meldingen**: de groepen die uitklappen bleven (v0.133.2); elke waarschuwing staat nu in een
+  eigen vak. Elke `.velden[hidden]` is echt weg: bij Lekkage en Thuisbatterij te warm bleven de
+  velden staan met de melding uit.

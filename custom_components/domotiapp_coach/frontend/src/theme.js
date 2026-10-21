@@ -208,6 +208,26 @@ export const baseCss = /* css */ `
     color: var(--dac-ink-3);
   }
 
+  /* Een blok: een onderwerp binnen een kaart of een pop-up, in een eigen kader met
+     de kop erin. De eigenaar op 21-10-2026, over Installatie: "Ik vind de opzet
+     zoals je bij installatie gebruikt wel echt duidelijk", en "daar zou over de
+     hele app meer uniformiteit in mogen komen". Hetzelfde vak als een kast of een
+     groep daar (.circuit), en elk scherm gebruikt dit. */
+  .block {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+    padding: 14px;
+    border-radius: var(--dac-radius-sm);
+    border: 1px solid var(--dac-border);
+    background: rgba(var(--dac-veil),0.022);
+  }
+  .block[hidden] { display: none; }
+  .block-title { font-size: 14px; font-weight: 600; color: var(--dac-ink); }
+  .block > .block-title { margin-bottom: -6px; }
+  .block > .sub { margin: 0; font-size: 12px; line-height: 1.5; color: var(--dac-ink-3); }
+  .block > .block-title + .sub { margin-top: -4px; }
+
   /* Numerals must line up as values change -- never let them jitter. */
   .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 

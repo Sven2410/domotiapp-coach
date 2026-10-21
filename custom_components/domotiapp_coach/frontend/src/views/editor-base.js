@@ -43,6 +43,7 @@ export const editorCss = /* css */ `
   section .hint { margin: 8px 0 0; font-size: 13px; line-height: 1.55; color: var(--dac-ink-2); }
 
   .fields { margin-top: 18px; display: grid; gap: 14px; }
+
   /* align-content, not the default stretch: two fields side by side where only
      one carries a hint line would otherwise hand the spare height to the other
      one's input, leaving two boxes of different sizes that do not line up. */
@@ -50,6 +51,14 @@ export const editorCss = /* css */ `
   .row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; }
   .row > label { font-size: 13px; font-weight: 500; color: var(--dac-ink); }
   .row > .sub { font-size: 12px; color: var(--dac-ink-3); line-height: 1.45; }
+
+  /* Het blok zelf (.block) staat in baseCss (theme.js), voor elk scherm en de
+     pop-up. In een blok staat een vinkje zonder eigen kader: het blok is het
+     kader, zoals in de pop-up Instellen. */
+  .block.fields { margin-top: 0; }
+  .block label.check, .block label.check:has(input:checked) {
+    padding: 0; border: 0; background: none;
+  }
 
   /* De datum hoort erbij sinds v0.130.1: de velden op Contract en onder de
      batterij stonden kaal, met de stijl van de browser. */

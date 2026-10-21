@@ -1615,6 +1615,18 @@ proef("bij de batterij de grens voor de auto, op Voorkeuren de nachtstrategie (v
   assert.equal(velden.veld("data-vk-accu", "car_above").value, 40, "het veld met de grens, in Instellen (v0.114.0)");
   velden.veld("data-vk-accu", "car_above").value = "";
   assert.deepEqual(voorkeurWijziging(velden.veld("data-vk-accu", "car_above")), { battery: { car_above: null } }, "leeg is nooit");
+  // Sinds 21-10-2026 een vinkje erboven: aan volgt de grens, uit wist hem, en aanzetten
+  // zonder getal bewaart niets, want de coach verzint geen grens.
+  const vinkAuto = velden.veld("data-vk-aan", "car_above");
+  assert.equal(vinkAuto.checked, true, "met een grens staat het vinkje aan");
+  vinkAuto.checked = false;
+  assert.deepEqual(voorkeurWijziging(vinkAuto), { battery: { car_above: null } }, "uit is geen grens");
+  vinkAuto.checked = true;
+  assert.equal(voorkeurWijziging(vinkAuto), null, "aan zonder getal: niets op te slaan");
+  const zonder = nepVelden(voorkeurHtml({ ...accu, battery: { ...accu.battery, car_above: null } }));
+  vulVoorkeuren(zonder, { ...accu, battery: { ...accu.battery, car_above: null } });
+  assert.equal(zonder.veld("data-vk-aan", "car_above").checked, false, "zonder grens uit");
+  assert.equal(zonder.rijen.find((r) => r.sleutel === "car_above").hidden, true, "en de grens weg");
   const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/strategy.js", import.meta.url), "utf-8");
   assert.ok(bron.includes('id="night"') && bron.includes("night_strategy"), "de schakelaar op Voorkeuren");
   assert.ok(bron.includes("night_strategy !== false"), "standaard aan");
@@ -3070,8 +3082,9 @@ proef("de rijen onder een vinkje van de batterij verdwijnen echt als het vinkje 
   vulVoorkeuren(velden, { id: "b", type: "thuisbatterij", battery: {} });
   assert.deepEqual(velden.rijen.filter((r) => r.hidden).map((r) => r.sleutel).sort(),
     // En de melding bij Handelen zonder terugleverprijs (v0.128.2), die hier geen contract heeft,
-    // en de grens bij ontladen naar het net, dat standaard uit staat (v0.141.0).
-    ["holiday_max_percent", "reserve_percent", "trade_above", "trade_kan_niet", "weekly_full_day"], "reserve, de dag en de vakantiestand");
+    // en de grens bij ontladen naar het net, dat standaard uit staat (v0.141.0). En de grens
+    // voor de auto, die sinds 21-10-2026 onder een eigen vinkje staat.
+    ["car_above", "holiday_max_percent", "reserve_percent", "trade_above", "trade_kan_niet", "weekly_full_day"], "reserve, de dag en de vakantiestand");
   // Laden van het net staat standaard aan, dus de grens daarbij staat er.
   assert.ok(!velden.rijen.find((r) => r.sleutel === "grid_charge_below").hidden, "de grens bij laden van het net");
   const uit = nepVelden(voorkeurHtml({ id: "b", type: "thuisbatterij", battery: { grid_charge: false, trade: true } }));

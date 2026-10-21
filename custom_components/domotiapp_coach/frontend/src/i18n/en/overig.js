@@ -196,4 +196,9 @@ export const OVERIG = {
   "laadt": "charging",
   "ontlaadt": "discharging",
   "staat stil": "idle",
+  // Elk onderwerp een blok, en een vinkje bij elke functie (21-10-2026).
+  "Meterstanden doorgeven": "Submit meter readings",
+  "Een herinnering om je meterstanden aan je leverancier door te geven.": "A reminder to submit your meter readings to your supplier.",
+  "Herinnering meterstanden aan": "Meter readings reminder on",
+  "Kies een datum; zonder datum staat de herinnering uit.": "Choose a date; without a date the reminder is off.",
 };

@@ -300,12 +300,9 @@ const css = /* css */ `
     border: 1px solid var(--dac-border);
     background: rgba(var(--dac-veil),0.022);
   }
-  /* De twee delen van Instellen (v0.114.0). */
-  .sheet-kop {
-    margin: 22px 0 0; font-size: 12px; font-weight: 700; letter-spacing: 0.1em;
-    text-transform: uppercase; color: var(--dac-accent-hi);
-  }
-  #plan-blok > .sheet-kop:first-child { margin-top: 16px; }
+  /* De delen van Instellen, elk in een blok (.block in theme.js), onder elkaar. */
+  #plan-blok, #vk-blok { margin-top: 16px; }
+  #plan-blok > .fields, #vk-blok > .fields { margin-top: 0; }
   .row select, input.getal {
     min-height: 44px; padding: 10px 12px; min-width: 0;
     border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border-hi);
@@ -383,9 +380,9 @@ export class DacScheduleSheet extends DacElement {
             ${icons.close}
           </button>
         </div>
-        <section id="plan-blok">
-        <h4 class="sheet-kop" id="plan-kop">${t("Schema")}</h4>
-        <p class="sheet-sub">${t("Zeg binnen welke grenzen de coach mag werken. Vul alleen in wat je belangrijk vindt, want elk van de drie tijden mag leeg blijven.")}</p>
+        <section id="plan-blok" class="block">
+        <div class="block-title" id="plan-kop">${t("Schema")}</div>
+        <p class="sub">${t("Zeg binnen welke grenzen de coach mag werken. Vul alleen in wat je belangrijk vindt, want elk van de drie tijden mag leeg blijven.")}</p>
 
         <div class="fields">
           <div class="row">
@@ -419,8 +416,8 @@ export class DacScheduleSheet extends DacElement {
         </div>
         </section>
 
+        <!-- Elk onderwerp een eigen blok met de kop erin (voorkeur-velden.js). -->
         <section id="vk-blok" hidden>
-          <h4 class="sheet-kop">${t("Zo wil je het")}</h4>
           <div class="fields" id="vk"></div>
         </section>
 
