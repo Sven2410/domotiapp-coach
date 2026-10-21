@@ -442,6 +442,12 @@ voorbij is: dan zegt het paneel "Ingeruimd, morgen starten"), `entiteiten` (wat 
 de coach invulde, zodat de kaart het niet nog eens vraagt) en sinds v0.127.0 `alleen_lezen`
 (zie "Alleen uitlezen" onder Miele).
 
+Sinds v0.140.2 staat op alle vier de sensoren van de coach (programma, laadpaal, thuisbatterij,
+airco) ook `taal`: `nl` of `en`, de taal waarin de coach schrijft (Installatie > Taal, bij
+automatisch die van Home Assistant). Een kaart die Automatisch staat volgt die; zonder `taal`
+(een coach van daarvoor) neemt hij die van Home Assistant. Het contract blijft 1: het is
+alleen iets erbij.
+
 De knoppen doen dezelfde som als de knop in het paneel (`async_vrijgave`, dat
 `domotiapp_coach/device/ready` nu ook gebruikt) en laten de coach meteen kijken. De
 vrijgaveschakelaar van de klant volgt in de ronde erna, zoals altijd: wie het laatst bewoog

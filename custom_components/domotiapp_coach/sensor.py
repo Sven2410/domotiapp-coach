@@ -46,7 +46,7 @@ from .entiteit import (
 )
 from .planner import _dag_om
 from .storage import async_get_store
-from .taal import t
+from .taal import t, taal
 
 # Besluiten waarin de coach nu start: het moment is er, dus geen klok.
 NU_STARTEN = frozenset({"cheapest-start", "start-now", "start-by", "deadline"})
@@ -240,8 +240,10 @@ class StartOmSensor(SensorEntity):
             "released": bool(self._stand.get("released")),
             "running": bool(self._stand.get("running")),
             "release_switch": self._schakelaar,
-            # Het contract met de kaarten (v0.110.0), zie entiteit.py.
+            # Het contract met de kaarten (v0.110.0), zie entiteit.py. En de taal waarin de
+            # coach schrijft (v0.140.2), zodat een kaart de keuze bij Installatie volgt.
             "contract": CONTRACT,
+            "taal": taal(),
             "type": self._soort,
             "stand": programma_stand(self._stand),
             "vrijgegeven": bool(self._stand.get("released")),
@@ -287,6 +289,7 @@ class LaadpaalCoachSensor(CoachEntiteit, SensorEntity):
         fabrikant, model = paal_apparaat(self.hass, self._device) if self.hass is not None else ("", "")
         return {
             "contract": CONTRACT,
+            "taal": taal(),
             "type": "laadpaal",
             "stand": paal_stand(st),
             "rule": st.get("rule") or "",
@@ -372,6 +375,7 @@ class BatterijCoachSensor(CoachEntiteit, SensorEntity):
         fabrikant, model = accu_apparaat(self.hass, self._device) if self.hass is not None else ("", "")
         return {
             "contract": CONTRACT,
+            "taal": taal(),
             "type": "thuisbatterij",
             "stand": accu_stand(st),
             # Wat de integratie van de batterij zelf zegt, voor de foto (v0.112.1).
@@ -438,6 +442,7 @@ class AircoCoachSensor(CoachEntiteit, SensorEntity):
         eigen = self._device.get("airco") or {}
         return {
             "contract": CONTRACT,
+            "taal": taal(),
             "type": "airco",
             "stand": airco_stand(st),
             # De stand die de coach koos of zou kiezen: "heat" of "cool".

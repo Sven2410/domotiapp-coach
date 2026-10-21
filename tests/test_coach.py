@@ -9801,6 +9801,10 @@ controle("de bewoner bevestigt: wie, wanneer en de vingerafdruk van de waarden",
 # De controle: een bewoner krijgt het opgeslagen contract, ook als hij een concept stuurt.
 inst169["contract"] = dict(DYN166)
 v169b = _Verbinding169(False)
+# Op de klok van de prijzen in de proef (18-10), niet op die van vandaag: anders zijn er geen prijzen
+# en valt deze proef vanaf 21-10-2026 om, los van de coach.
+_controle169 = coach169.async_prijscontrole
+coach169.async_prijscontrole = lambda settings, concept=None, now=None: _controle169(settings, concept, now or NU166)
 concept169 = {**DYN166, "dynamic": {**DYN166["dynamic"], "energy_tax": 0.5}}
 asyncio.run(ws139.async_contract_check(hass169, v169b, {"id": 2, "contract": concept169}))
 c169 = v169b.resultaten[-1] if v169b.resultaten else {}
@@ -10695,6 +10699,21 @@ uit182 = vc182.controle()
 controle("elke zin van de coach heeft Engels (python tools/vertaalcheck.py)",
          not uit182["ontbreekt"] and not uit182["verschillend"] and not uit182["scheef"] and not uit182["streep"],
          f"{ {k: len(v) for k, v in uit182['ontbreekt'].items()} } {uit182['verschillend'][:3]} {uit182['scheef'][:3]} {uit182['streep'][:3]}")
+
+print("=== 183. de taal van de coach op zijn sensoren, voor de kaarten (v0.140.2) ===")
+# De eigenaar op 21-10-2026: de kaarten van DomotiApp Lovelace worden ook Engels. Een kaart op
+# Automatisch volgt de keuze bij Installatie; die ziet hij aan het attribuut `taal`.
+try:
+    taal182.kies("nl")
+    nl183 = [x.extra_state_attributes.get("taal") for x in (sensor143[0], coach144s, accu146, coach_s156)]
+    taal182.kies("en")
+    en183 = [x.extra_state_attributes.get("taal") for x in (sensor143[0], coach144s, accu146, coach_s156)]
+    print(f"  nl: {nl183}, en: {en183}")
+    controle("programma, laadpaal, thuisbatterij en airco zeggen nl of en, zoals de coach schrijft",
+             nl183 == ["nl"] * 4 and en183 == ["en"] * 4, f"{nl183} {en183}")
+    controle("het contract blijft 1", sensor143[0].extra_state_attributes["contract"] == 1)
+finally:
+    taal182.kies("nl")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
