@@ -4,7 +4,6 @@ export const INSTELLINGEN = {
   "Hoe je huis gemeten wordt": "How your home is measured",
   "Je aansluiting, je kasten en groepen, en welke sensoren meten wat er gebeurt. Hierop rekent de coach. Je hoeft niet alles in te vullen; zonder gekoppelde sensoren blijven de cijfers leeg.":
     "Your grid connection, your panels and circuits, and which sensors measure what happens. The coach calculates with this. You do not have to fill in everything; without linked sensors the figures stay empty.",
-  "Woning en aansluiting": "Home and grid connection",
   "De naam van de woning komt ook boven het overzicht te staan.": "The name of the home also appears above the overview.",
   "Naam van de woning": "Name of the home",
   "Bijvoorbeeld: Dorpsstraat 12": "For example: 12 High Street",
@@ -231,7 +230,6 @@ export const INSTELLINGEN = {
   "Die telefoon staat er al.": "That phone is already on the list.",
   "Opgeslagen": "Saved",
   "Opslaan mislukt: {fout}": "Saving failed: {fout}",
-  "Leeg is geen herinnering.": "Empty means no reminder.",
   "De volgende keer: {datum}.": "Next time: {datum}.",
   "Dit was eenmalig; er komt geen herinnering meer.": "This was a one-off; there will be no more reminders.",
   "Thuisbatterij": "Home battery",
@@ -287,9 +285,6 @@ export const INSTELLINGEN = {
   "Houd rekening met de nacht.": "Plan for the night.",
   "De coach houdt genoeg in de thuisbatterij om de nacht door te komen met opgeslagen energie. Zet je dit uit, dan mag de batterij voor de auto en voor handelen leeg tot zijn ingestelde minimum, maar haal je mogelijk de nacht niet met nul op de meter.":
     "The coach keeps enough in the home battery to get through the night on stored energy. If you turn this off, the battery may empty to its set minimum for the car and for trading, but you may not get through the night with zero at the meter.",
-  "Het overzicht": "The overview",
-  "Waar de kleuren op het overzicht omslaan van groen naar oranje naar rood. Een wijziging hier slaat meteen op.":
-    "Where the colours on the overview change from green to orange to red. A change here is saved straight away.",
   "Zelfbenutting (%)": "Self-consumption (%)",
   "Onder deze waarde rood": "Red below this value",
   "Vanaf deze waarde groen": "Green from this value",
@@ -385,4 +380,16 @@ export const INSTELLINGEN = {
   "De prijzen zijn bekend tot {wanneer}. Een klaar-tijd daarna kan de coach niet doorrekenen. Hij plant dan met wat hij weet, en dat is zelden het goedkoopste moment. De prijzen voor de volgende dag komen meestal in de loop van de middag binnen; daarna klopt de planning weer.":
     "Prices are known until {wanneer}. The coach cannot work out a ready time after that. It then plans with what it knows, and that is rarely the cheapest moment. Prices for the next day usually come in during the afternoon; after that the schedule is right again.",
   "Dit is niet opgeslagen. Probeer het nog een keer.": "This was not saved. Please try again.",
+  // De koppen van de blokken (21-10-2026).
+  "Weergave": "Display",
+  "Hoe het overzicht en Historie eruitzien. Een wijziging hier slaat meteen op.": "How the overview and History look. A change here is saved straight away.",
+  "Kleuren": "Colours",
+  "Waar de kleuren op het overzicht omslaan van groen naar oranje naar rood.": "Where the colours on the overview change from green to orange to red.",
+  "Kaarten": "Cards",
+  "Aansluiting": "Grid connection",
+  "Lastbewaker": "Load balancer",
+  "Zonnepanelen": "Solar panels",
+  "Slimme meter": "Smart meter",
+  // Elk onderwerp een blok, en een vinkje bij elke functie (21-10-2026).
+  "Zekering": "Fuse",
 };

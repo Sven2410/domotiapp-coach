@@ -299,8 +299,6 @@ export const CONTRACT = {
   "Staat dit uit, dan blijft gas weg, hier en op het overzicht.": "If this is off, gas is left out, here and on the overview.",
   "Mag een andere zijn dan die van je stroom.": "May be different from your electricity supplier.",
   "Gasprijs, all-in (€ per m³)": "Gas price, all-in (€ per m³)",
-  "Inclusief energiebelasting, opslag en btw. Leeg laten als je geen gas hebt.":
-    "Including energy tax, supplier markup and VAT. Leave empty if you have no gas.",
   "Sensor met de all-in gasprijs": "Sensor with the all-in gas price",
   "Een dynamische gasprijs verandert per dag. Historie neemt de prijs van elke dag uit deze sensor.":
     "A dynamic gas price changes per day. History takes each day's price from this sensor.",
@@ -313,7 +311,6 @@ export const CONTRACT = {
   "Waterbedrijf": "Water company",
   "Bijvoorbeeld Vitens": "For example Vitens",
   "Waterprijs, all-in (€ per m³)": "Water price, all-in (€ per m³)",
-  "Inclusief belasting. Leeg laten zonder watermeter.": "Including tax. Leave empty without a water meter.",
   "Eerdere waterprijzen": "Previous water prices",
   "Eerdere waterprijs toevoegen": "Add previous water price",
   "Zoek een OMIE-prijssensor…": "Search for an OMIE price sensor…",
@@ -375,4 +372,15 @@ export const CONTRACT = {
   "Water, all-in (€ per m³)": "Water, all-in (€ per m³)",
   "nog geen datums": "no dates yet",
   "Je wijzigingen worden eerst opgeslagen.": "Your changes are saved first.",
+  // De koppen van de blokken (21-10-2026).
+  "Prijs per tijdvak": "Price per time period",
+  "Vaste kosten": "Fixed costs",
+  "Prijssensoren": "Price sensors",
+  "Belasting en opslag": "Tax and markup",
+  "Vergoeding": "Compensation",
+  "Salderen": "Net metering",
+  // Elk onderwerp een blok, en een vinkje bij elke functie (21-10-2026).
+  "Leverancier en looptijd": "Supplier and term",
+  "Inclusief energiebelasting, opslag en btw.": "Including energy tax, supplier markup and VAT.",
+  "Inclusief belasting.": "Including tax.",
 };

@@ -359,8 +359,13 @@ class DacViewDevices extends DacEditorElement {
    * straight to its power sensor, which every device has -- it is what puts it
    * on the energy flow at all.
    */
-  brandHtml_(device, index) {
-    if (isSmartPlug(device)) return this.plugHtml_(device, index);
+  /**
+   * Het merk en wat erbij hoort. `deel` is "kop" (alleen de keuze van het merk, voor het
+   * blok Apparaat bovenaan de kaart), "rest" (de blokken eronder) of "alles".
+   */
+  brandHtml_(device, index, deel = "alles") {
+    if (isSmartPlug(device)) return this.plugHtml_(device, index, deel);
+    const uit = (kop, rest) => (deel === "kop" ? kop : deel === "rest" ? rest : kop + rest);
     const brands = brandsFor(device.type);
     const brand = brandMeta(device);
     const what = typeMeta(device.type).label.toLowerCase();
@@ -380,7 +385,7 @@ class DacViewDevices extends DacEditorElement {
         </div>`;
 
     // Something with brands but none picked has nothing to ask for yet.
-    if (brands.length && !brand) return brandRow;
+    if (brands.length && !brand) return uit(brandRow, "");
 
     // Een merk dat alleen uitgelezen wordt (Growatt, v0.123.0) heeft geen
     // vermogenssensor met een teken: laden en ontladen staan in zijn velden.
@@ -408,7 +413,16 @@ class DacViewDevices extends DacEditorElement {
         ? `<p class="sub">${t("Voor dit merk zijn de velden nog niet uitgewerkt. Het vermogen wordt wel meegenomen.")}</p>`
         : "";
 
-    return `${brandRow}${this.integrationHtml_(device, index)}${power}${extra}${this.buttonsHtml_(device, index)}${this.actionsHtml_(device, index)}${this.programsHtml_(device, index)}${note}${this.dishwasherPlugHtml_(device, index)}`;
+    // Wat de coach uit Home Assistant leest in een eigen blok, onder het merk.
+    const koppeling = `${this.integrationHtml_(device, index)}${power}${extra}`;
+    const koppelBlok = koppeling.trim()
+      ? `
+      <div class="block">
+        <div class="block-title">${t("Koppeling")}</div>${koppeling}
+      </div>`
+      : "";
+
+    return uit(brandRow, `${koppelBlok}${this.buttonsHtml_(device, index)}${this.actionsHtml_(device, index)}${this.programsHtml_(device, index)}${note}${this.dishwasherPlugHtml_(device, index)}`);
   }
 
   /**
@@ -418,7 +432,8 @@ class DacViewDevices extends DacEditorElement {
    * energieteller, vermogensteller en een belangrijke optie, dit apparaat moet
    * altijd aan staan." Wat de coach daarmee doet: `_async_altijd_aan` in coach.py.
    */
-  plugHtml_(device, index) {
+  plugHtml_(device, index, deel = "alles") {
+    const uit = (kop, rest) => (deel === "kop" ? kop : deel === "rest" ? rest : kop + rest);
     const gekozen = plugAppliance(device);
     // Op naam in de taal van nu, met "Iets anders" onderaan; in het Nederlands de volgorde
     // van de tabel zelf.
@@ -429,7 +444,7 @@ class DacViewDevices extends DacEditorElement {
     ];
     const keuze = `
         <div class="row">
-          <label for="appliance-${index}">${t("Apparaat")}</label>
+          <label for="appliance-${index}">${t("Wat eraan hangt")}</label>
           <select id="appliance-${index}" data-field="appliance" data-index="${index}">
             <option value=""${gekozen ? "" : " selected"}>${t("Kies wat eraan hangt…")}</option>
             ${keuzes.map(
@@ -442,9 +457,11 @@ class DacViewDevices extends DacEditorElement {
               : t("Daarmee krijgt hij zijn naam en zijn icoon.")
           }</span>
         </div>`;
-    if (!gekozen) return keuze;
+    if (!gekozen) return uit(keuze, "");
     const schakelaar = inTaal(PLUG_SWITCH_FIELD);
-    return `${keuze}
+    return uit(keuze, `
+      <div class="block">
+        <div class="block-title">${t("Stekker")}</div>
         <div class="row">
           <label>${schakelaar.label}</label>
           <dac-entity-picker data-entity-key="${schakelaar.key}" data-index="${index}"></dac-entity-picker>
@@ -455,7 +472,8 @@ class DacViewDevices extends DacEditorElement {
           <dac-entity-picker data-power data-index="${index}"></dac-entity-picker>
         </div>
         ${this.energyHtml_(device, index)}
-        ${this.alwaysOnHtml_(device, index)}`;
+        ${this.alwaysOnHtml_(device, index)}
+      </div>`);
   }
 
   /**
@@ -550,10 +568,10 @@ class DacViewDevices extends DacEditorElement {
       .join("");
 
     return `
-      <div class="row">
-        <label>${t("Bediening")}</label>
-        <span class="sub">${t("Wat er ingedrukt wordt om dit apparaat te laten lopen. Dit is wat de knoppen onder Handmatige besturing op het overzicht doen; de coach doet het nog niet uit zichzelf.")}</span>
-        <div class="fields">${rows}</div>
+      <div class="block">
+        <div class="block-title">${t("Bediening")}</div>
+        <p class="sub">${t("Wat er ingedrukt wordt om dit apparaat te laten lopen. Dit is wat de knoppen onder Handmatige besturing op het overzicht doen; de coach doet het nog niet uit zichzelf.")}</p>
+        ${rows}
       </div>`;
   }
 
@@ -644,9 +662,9 @@ class DacViewDevices extends DacEditorElement {
         : t("Vul hierboven \"Programma kiezen\" in, dan komen hier de programma's van je machine te staan. Tot die tijd rekent de coach met de opgaven van de fabrikant hieronder.")) + gemetenUitleg;
 
     return `
-      <div class="row">
-        <label>${t("Programma's")}</label>
-        <span class="sub">${uitleg}</span>
+      <div class="block">
+        <div class="block-title">${t("Programma's")}</div>
+        <p class="sub">${uitleg}</p>
         <div class="table-scroll">
           <table class="programs edit">
             <thead><tr><th>${t("Programma")}</th><th>${t("Duur")}</th><th>${t("Energie")}</th><th>${t("Piek")}</th><th>${t("Gemeten")}</th>${vast ? "" : "<th></th>"}</tr></thead>
@@ -672,9 +690,9 @@ class DacViewDevices extends DacEditorElement {
     const uitleg = t("Het programma kies je op de machine. Zolang het klaarstaat geeft de machine de duur, en daarmee plant de coach; het verbruik weet hij dan nog niet. Na een beurt staat het programma hieronder met wat hij gemeten heeft, en dan rekent hij daarmee.");
     if (!measured.length) {
       return `
-      <div class="row">
-        <label>${t("Programma's")}</label>
-        <span class="sub">${uitleg} ${t("Er is nog niets gemeten.")}</span>
+      <div class="block">
+        <div class="block-title">${t("Programma's")}</div>
+        <p class="sub">${uitleg} ${t("Er is nog niets gemeten.")}</p>
       </div>`;
     }
     const rows = measured
@@ -688,9 +706,9 @@ class DacViewDevices extends DacEditorElement {
       </tr>`)
       .join("");
     return `
-      <div class="row">
-        <label>${t("Programma's")}</label>
-        <span class="sub">${uitleg}</span>
+      <div class="block">
+        <div class="block-title">${t("Programma's")}</div>
+        <p class="sub">${uitleg}</p>
         <div class="table-scroll">
           <table class="programs">
             <thead><tr><th>${t("Programma")}</th><th>${t("Duur")}</th><th>${t("Energie")}</th><th>${t("Gemeten")}</th></tr></thead>
@@ -840,9 +858,9 @@ class DacViewDevices extends DacEditorElement {
       .join("");
 
     return `
-      <div class="row">
-        <label>${t("Opdrachten")}</label>
-        <span class="sub">${t("Wat er naar <code>{dienst}</code> gestuurd wordt als <code>{veld}</code>. De ingevulde woorden zijn wat Easee vandaag gebruikt; wijkt jouw paal af, dan pas je ze hier aan. Pauzeren en hervatten staan er niet bij: die schrijven een getal in de dynamische laderlimiet en hebben geen woord nodig.", { dienst: brand.service, veld: brand.field })}</span>
+      <div class="block">
+        <div class="block-title">${t("Opdrachten")}</div>
+        <p class="sub">${t("Wat er naar <code>{dienst}</code> gestuurd wordt als <code>{veld}</code>. De ingevulde woorden zijn wat Easee vandaag gebruikt; wijkt jouw paal af, dan pas je ze hier aan. Pauzeren en hervatten staan er niet bij: die schrijven een getal in de dynamische laderlimiet en hebben geen woord nodig.", { dienst: brand.service, veld: brand.field })}</p>
         <div class="two commands">${fields}</div>
       </div>`;
   }
@@ -858,7 +876,10 @@ class DacViewDevices extends DacEditorElement {
       const wat = koelUitleg(device.type)
         || t("De coach leest deze batterij alleen uit: hoe vol hij is, wat hij laadt en ontlaadt, en zijn tellers. Sturen doet hij hem niet.");
       return `
-      <p class="sub" data-read-only="${index}">${wat}</p>`;
+      <div class="block">
+        <div class="block-title">${t("Sturen")}</div>
+        <p class="sub" data-read-only="${index}">${wat}</p>
+      </div>`;
     }
 
     const missing = missingForControl(device);
@@ -924,7 +945,9 @@ class DacViewDevices extends DacEditorElement {
         </span>
       </label>`
       : "";
-    return `${groepHtml}${faseHtml}
+    return `
+      <div class="block">
+      <div class="block-title">${t("Sturen")}</div>${groepHtml}${faseHtml}
       <label class="check" for="control-${index}">
         <input type="checkbox" id="control-${index}" data-field="controllable" data-index="${index}"
                ${device.controllable ? "checked" : ""}>
@@ -936,6 +959,7 @@ class DacViewDevices extends DacEditorElement {
       <div class="notice"${missing.length ? "" : " hidden"} data-missing="${index}">
         ${icons.warning}
         <span>${missingSentence(missing)}</span>
+      </div>
       </div>`;
   }
 
@@ -1162,6 +1186,10 @@ class DacViewDevices extends DacEditorElement {
           </select>
           <span class="sub">${t("Voor de zekeringbewaking: laadt de auto tegelijk, dan blijft de batterij onder wat die fase nog overlaat. Weet je het niet, dan telt de zwaarste fase.")}</span>
         </div>
+        <p class="sub">${t("Wat de bewoner wil (de reserve, handelen, een keer per week vol, de vakantiestand, de auto helpen en de ventilator) staat sinds v0.114.0 op de kaart van de batterij, onder Instellen.")}</p>
+      </div>
+      <div class="block">
+        <div class="block-title">${t("Hoe de coach hem aanstuurt")}</div>
         ${vink("power_invert", t("De vermogenssensor is positief bij ontladen."), t("Standaard leest de coach plus als laden."))}
         ${device.entities?.direction ? "" : vink("setpoint_invert", t("Het stuurgetal is positief bij ontladen."), t("Alleen van belang zonder aparte richting."))}
         <div class="two">
@@ -1177,8 +1205,7 @@ class DacViewDevices extends DacEditorElement {
         <p class="sub">${t("Stopt de coach, dan zet hij het vermogen op nul en geeft hij de batterij terug aan zijn eigen modus, zodat hij nooit op zijn laatste opdracht blijft staan.")}</p>
         ${vink("self_zero", t("De batterij doet zelf nul op de meter."), t("Staat standaard aan. Zet hem alleen uit bij een batterij zonder eigen meter in de meterkast; dan regelt de coach de meter via Home Assistant, en dat is trager. De coach zet hem in zijn eigen modus (hierboven: als de coach stopt) en kijkt mee. Hij neemt het alleen over voor laden van het net, handelen, als de laadpaal laadt, in de vakantiestand, bij de reserve en als de zekering krap wordt, en geeft hem na vijf rustige minuten terug. Stilstaan of alleen ontladen plant hij dan niet, want dat kan de batterij in zijn eigen stand niet."))}
       </div>
-      ${this.herrekenHtml_(device, index)}
-      <p class="sub">${t("Wat de bewoner wil (de reserve, handelen, een keer per week vol, de vakantiestand, de auto helpen en de ventilator) staat sinds v0.114.0 op de kaart van de batterij, onder Instellen.")}</p>`;
+      ${this.herrekenHtml_(device, index)}`;
   }
 
   /**
@@ -1380,6 +1407,8 @@ class DacViewDevices extends DacEditorElement {
             <button class="remove" type="button" data-remove="${index}" aria-label="${t("Verwijderen")}">${icons.trash}</button>
           </div>
           <div class="fields"${open ? "" : " hidden"}>
+            <div class="block">
+            <div class="block-title">${t("Apparaat")}</div>
             <div class="two">
               <div class="row">
                 <label>${t("Type")}</label>
@@ -1414,7 +1443,9 @@ class DacViewDevices extends DacEditorElement {
                 : ""
             }
             ${isSmartPlug(device) ? "" : this.energyHtml_(device, index)}
-            ${this.brandHtml_(device, index)}
+            ${this.brandHtml_(device, index, "kop")}
+            </div>
+            ${this.brandHtml_(device, index, "rest")}
             ${this.carsHtml_(device, index)}
             ${this.batteryHtml_(device, index)}
             ${this.aircoHtml_(device, index)}
@@ -1923,17 +1954,7 @@ class DacViewDevices extends DacEditorElement {
 }
 
 DacViewDevices.css = /* css */ `
-  /* Een blok is een onderwerp binnen de kaart, met lucht eromheen en een lijn
-     erboven; zonder dat plakt de knop eronder tegen het volgende blok aan. */
-  .block {
-    display: grid;
-    gap: 8px;
-    padding-top: 16px;
-    margin-top: 4px;
-    border-top: 1px solid var(--dac-border);
-  }
-  .block-title { font-size: 13px; font-weight: 600; color: var(--dac-ink); }
-  .block > .sub { font-size: 12px; line-height: 1.5; color: var(--dac-ink-3); margin: 0; }
+  /* Het blok zelf staat in editorCss (editor-base.js), voor elk scherm. */
   .block button.add { margin-top: 4px; }
   .herreken-knoppen { display: flex; flex-wrap: wrap; gap: 8px; }
   .herreken-uit { color: var(--dac-ink-2) !important; }

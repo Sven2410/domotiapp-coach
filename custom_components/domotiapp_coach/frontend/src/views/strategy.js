@@ -179,57 +179,68 @@ class DacViewStrategy extends DacEditorElement {
         <!-- Uit Instellingen (v0.114.0): hoe het overzicht eruitziet. Slaat
              meteen op, los van de balk hieronder. -->
         <section class="card" id="weergave">
-          <h2>${icons.sliders} ${t("Het overzicht")}</h2>
-          <p class="hint">${t("Waar de kleuren op het overzicht omslaan van groen naar oranje naar rood. Een wijziging hier slaat meteen op.")}</p>
+          <h2>${icons.sliders} ${t("Weergave")}</h2>
+          <p class="hint">${t("Hoe het overzicht en Historie eruitzien. Een wijziging hier slaat meteen op.")}</p>
           <div class="fields">
-            <div class="row">
-              <label>${t("Zelfbenutting (%)")}</label>
-              <div class="two">
-                <div class="row">
-                  <span class="sub">${t("Onder deze waarde rood")}</span>
-                  <input type="number" id="self-low" data-drempel="self_use.low" min="0" max="100" step="1" inputmode="numeric">
-                </div>
-                <div class="row">
-                  <span class="sub">${t("Vanaf deze waarde groen")}</span>
-                  <input type="number" id="self-high" data-drempel="self_use.high" min="0" max="100" step="1" inputmode="numeric">
-                </div>
-              </div>
-            </div>
-            <div class="row">
-              <label>${t("Energieprijs (€ per kWh)")}</label>
-              <div class="two" id="prijs-grenzen">
-                <div class="row">
-                  <span class="sub">${t("Tot deze prijs groen")}</span>
-                  <input type="number" id="price-low" data-drempel="price.low" min="0" max="10" step="0.01" inputmode="decimal">
-                </div>
-                <div class="row">
-                  <span class="sub">${t("Boven deze prijs rood")}</span>
-                  <input type="number" id="price-high" data-drempel="price.high" min="0" max="10" step="0.01" inputmode="decimal">
+            <div class="block fields">
+              <div class="block-title">${t("Kleuren")}</div>
+              <p class="sub">${t("Waar de kleuren op het overzicht omslaan van groen naar oranje naar rood.")}</p>
+              <div class="row">
+                <label>${t("Zelfbenutting (%)")}</label>
+                <div class="two">
+                  <div class="row">
+                    <span class="sub">${t("Onder deze waarde rood")}</span>
+                    <input type="number" id="self-low" data-drempel="self_use.low" min="0" max="100" step="1" inputmode="numeric">
+                  </div>
+                  <div class="row">
+                    <span class="sub">${t("Vanaf deze waarde groen")}</span>
+                    <input type="number" id="self-high" data-drempel="self_use.high" min="0" max="100" step="1" inputmode="numeric">
+                  </div>
                 </div>
               </div>
+              <div class="row">
+                <label>${t("Energieprijs (€ per kWh)")}</label>
+                <div class="two" id="prijs-grenzen">
+                  <div class="row">
+                    <span class="sub">${t("Tot deze prijs groen")}</span>
+                    <input type="number" id="price-low" data-drempel="price.low" min="0" max="10" step="0.01" inputmode="decimal">
+                  </div>
+                  <div class="row">
+                    <span class="sub">${t("Boven deze prijs rood")}</span>
+                    <input type="number" id="price-high" data-drempel="price.high" min="0" max="10" step="0.01" inputmode="decimal">
+                  </div>
+                </div>
+              </div>
+              <!-- De kleuren naar de bekende prijzen (v0.133.1). -->
+              <label class="check" for="prijs-relatief">
+                <input type="checkbox" id="prijs-relatief">
+                <span>
+                  <strong>${t("Prijskleuren naar de bekende prijzen")}</strong>
+                  ${t("Het goedkoopste derde van alle prijzen die bekend zijn groen en het duurste derde rood, wat de prijzen ook zijn. Dan zie je meteen de beste uren, ook op een dure dag. Komen rond 14:00 de prijzen van morgen erbij, dan kunnen de kleuren verschuiven.")}
+                </span>
+              </label>
             </div>
-            <!-- De kleuren naar de bekende prijzen (v0.133.1). -->
-            <label class="check" for="prijs-relatief">
-              <input type="checkbox" id="prijs-relatief">
-              <span>
-                <strong>${t("Prijskleuren naar de bekende prijzen")}</strong>
-                ${t("Het goedkoopste derde van alle prijzen die bekend zijn groen en het duurste derde rood, wat de prijzen ook zijn. Dan zie je meteen de beste uren, ook op een dure dag. Komen rond 14:00 de prijzen van morgen erbij, dan kunnen de kleuren verschuiven.")}
-              </span>
-            </label>
+            <!-- Alleen waar de fasen gemeten worden; het hele blok gaat weg (paint_). -->
+            <div class="block" id="phases-overview-row">
+              <div class="block-title">${t("Kaarten")}</div>
+              <label class="check" for="phases-overview">
+                <input type="checkbox" id="phases-overview">
+                <span>
+                  <strong>${t("De fasen tonen op het overzicht")}</strong>
+                  ${t("Een kaart met de belasting per fase.")}
+                </span>
+              </label>
+            </div>
             <!-- Historie (v0.132.0): het jaar kan met het contract meelopen. -->
-            <div class="row">
-              <label for="jaar-start">${t("Het jaar in Historie begint in")}</label>
-              <select id="jaar-start">${Array.from({ length: 12 }, (_, i) =>
-                `<option value="${i + 1}">${datum(new Date(2026, i, 1), { month: "long" })}</option>`).join("")}</select>
-              <span class="sub">${t("Kies de maand waarin je contract ingaat, dan loopt het jaar daarmee gelijk.")}</span>
+            <div class="block">
+              <div class="block-title">${t("Historie")}</div>
+              <div class="row">
+                <label for="jaar-start">${t("Het jaar in Historie begint in")}</label>
+                <select id="jaar-start">${Array.from({ length: 12 }, (_, i) =>
+                  `<option value="${i + 1}">${datum(new Date(2026, i, 1), { month: "long" })}</option>`).join("")}</select>
+                <span class="sub">${t("Kies de maand waarin je contract ingaat, dan loopt het jaar daarmee gelijk.")}</span>
+              </div>
             </div>
-            <label class="check" for="phases-overview" id="phases-overview-row">
-              <input type="checkbox" id="phases-overview">
-              <span>
-                <strong>${t("De fasen tonen op het overzicht")}</strong>
-                ${t("Een kaart met de belasting per fase.")}
-              </span>
-            </label>
           </div>
         </section>
       </div>

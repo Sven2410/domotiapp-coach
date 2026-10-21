@@ -33,6 +33,32 @@ const vink = (attr, sleutel, kop, uitleg) => `
     <span><strong>${kop}</strong> ${uitleg}</span>
   </label>`;
 
+/**
+ * Een onderwerp in een eigen vak met de kop erin (.block in theme.js), zoals elk
+ * scherm. De eigenaar op 21-10-2026: "Ik vind de opzet zoals je bij installatie
+ * gebruikt wel echt duidelijk", en "daar zou over de hele app meer uniformiteit in
+ * mogen komen".
+ */
+const blok = (kop, inhoud) => `
+  <div class="block">
+    <div class="block-title">${kop}</div>
+    ${inhoud}
+  </div>`;
+
+/**
+ * Een functie die aan of uit kan, met een getal dat erbij hoort (21-10-2026). Tot
+ * dan was het alleen het getal, met "leeg is nooit". De eigenaar: "Ene is een checkbox
+ * (bold font), ander is gewoon een regel." Het vinkje bewaart zelf niets: aan is een
+ * getal in `sleutel`, uit is null, zoals altijd. Aanzetten zet alleen het veld neer;
+ * pas met een getal erin staat het aan, want de coach verzint geen grens. Een leeg
+ * veld blijft uit. `data-open` onthoudt dat iemand het vinkje net aanzette.
+ */
+const vinkMetGetal = (sleutel, kop, uitleg) => `
+  <label class="check">
+    <input type="checkbox" data-vk-aan="${sleutel}">
+    <span><strong>${kop}</strong> ${uitleg}</span>
+  </label>`;
+
 const getal = (attr, sleutel, label, grenzen, leeg, uitleg = "") => `
   <div class="row"${attr === "data-vk-accu" ? ` data-vk-rij="${sleutel}"` : ""}>
     <label>${label}</label>
@@ -64,9 +90,9 @@ function laadpaal(device) {
   const autoUitleg = (device.cars ?? []).length
     ? `<p class="sub">${t("Staat er een laadgrens in de auto, zet hem hier ook. Dan weet de coach wanneer hij klaar is in plaats van het achteraf te merken.")}</p>`
     : "";
-  return `
+  return `${blok(t("Zonder planning"), `
     <div class="row">
-      <label for="vk-modus">${t("Zonder planning")}</label>
+      <label for="vk-modus">${t("Modus")}</label>
       <select id="vk-modus" data-vk="charge_mode">
         <option value="zon">${t("Zon: alleen op zonoverschot")}</option>
         <option value="continu">${t("Continu: altijd, met zon erbovenop")}</option>
@@ -77,9 +103,8 @@ function laadpaal(device) {
     ${getal("data-vk", "continuous_amps", t("Continu laden op (A)"), 'min="6" max="32" step="1"', "6",
       t("Het vaste vermogen van Continu. Geeft de zon meer, dan laadt hij mee omhoog; nooit boven je zekering."))}
     ${getal("data-vk", "solar_start_percent", t("Zon: beginnen vanaf (%)"), 'min="10" max="100" step="5"', "90",
-      t("Van het kleinste laadvermogen: 6 A, op drie fasen 4,1 kW. Bij 50% begint Zon al op 2,1 kW zon en komt de rest van het net. Op 100% begint hij pas als de zon het hele vermogen geeft."))}
-    ${autos}
-    ${autoUitleg}`;
+      t("Van het kleinste laadvermogen: 6 A, op drie fasen 4,1 kW. Bij 50% begint Zon al op 2,1 kW zon en komt de rest van het net. Op 100% begint hij pas als de zon het hele vermogen geeft."))}`)}
+    ${(device.cars ?? []).length ? blok(t("Auto's"), `${autos}${autoUitleg}`) : ""}`;
 }
 
 /**
@@ -92,31 +117,37 @@ export const HANDELEN_KAN_NIET =
 
 function thuisbatterij(device) {
   const ventilator = device.entities?.fan
-    ? getal("data-vk-accu", "fan_above_c", t("Ventilator aan boven (°C)"), 'min="0" max="100" step="0.5"', t("nooit"),
-      t("De coach zet de ventilator aan zodra de batterij warmer is dan dit, en weer uit als hij een graad eronder zakt. Niet als de coach op Alleen uitlezen of Adviseren staat. Leeg is nooit."))
+    ? blok(t("Ventilator"), `
+    ${vinkMetGetal("fan_above_c", t("De coach zet de ventilator aan."),
+      t("Zodra de batterij warmer is dan de grens, en weer uit een graad eronder. Niet als de coach op Alleen uitlezen of Adviseren staat."))}
+    ${getal("data-vk-accu", "fan_above_c", t("Aan boven (°C)"), 'min="0" max="100" step="0.5"', "", t("Zonder grens staat dit uit."))}`)
     : "";
   return `
-    ${vink("data-vk-accu", "reserve_enabled", t("Reserve houden voor noodstroom."), t("Onder deze accustand komt er niets meer uit, wat de prijzen ook zeggen."))}
-    ${getal("data-vk-accu", "reserve_percent", t("Reserve (%)"), 'min="0" max="100" step="5"', "20")}
-    <h4 class="sheet-kop">${t("Handelen")}</h4>
+    ${blok(t("Noodstroom"), `
+    ${vink("data-vk-accu", "reserve_enabled", t("Reserve aanhouden."), t("Onder deze accustand komt er niets meer uit, wat de prijzen ook zeggen."))}
+    ${getal("data-vk-accu", "reserve_percent", t("Reserve (%)"), 'min="0" max="100" step="5"', "20")}`)}
+    ${blok(t("Handelen"), `
     ${vink("data-vk-accu", "grid_charge", t("Laden uit het net tijdens lage tarieven."), t("De batterij mag dan ook van het net laden, als dat minder kost dan wat hij je straks bespaart. Staat dit uit, dan gaat er alleen zon in."))}
-    ${getal("data-vk-accu", "grid_charge_below", t("Alleen als de prijs onder (€/kWh)"), 'min="-1" max="2" step="0.01"', t("de coach bepaalt"),
-      t("De all-in prijs, met belasting en opslag. Leeg: de coach kiest zelf de beste uren."))}
+    ${getal("data-vk-accu", "grid_charge_below", t("Alleen als de prijs onder (€/kWh)"), 'min="-1" max="2" step="0.01"', t("de coach bepaalt"))}
     ${vink("data-vk-accu", "trade", t("Ontladen naar het net tijdens hoge tarieven."), t("De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis."))}
     <div class="notice" data-vk-rij="trade_kan_niet" hidden>${t(HANDELEN_KAN_NIET)}</div>
-    ${getal("data-vk-accu", "trade_above", t("Alleen als de prijs boven (€/kWh)"), 'min="-1" max="2" step="0.01"', t("de coach bepaalt"),
-      t("De all-in prijs, met belasting en opslag. Leeg: de coach kiest zelf de beste uren."))}
+    ${getal("data-vk-accu", "trade_above", t("Alleen als de prijs boven (€/kWh)"), 'min="-1" max="2" step="0.01"', t("de coach bepaalt"))}
+    <p class="sub">${t("De prijzen zijn all-in, met belasting en opslag. Leeg: de coach kiest zelf de beste uren.")}</p>`)}
+    ${blok(t("Balanceren"), `
     ${vink("data-vk-accu", "weekly_full", t("Een keer per week helemaal vol."), t("Tot 100%, voor het balanceren van de cellen. De coach kiest op die dag het goedkoopste moment, en slaat de beurt over als de batterij die week al vol was."))}
     <div class="row" data-vk-rij="weekly_full_day">
       <label for="vk-dag">${t("Op")}</label>
       <select id="vk-dag" data-vk-accu="weekly_full_day">
         ${WEEKDAGEN.map((_, i) => `<option value="${i}">${weekdag(i)}</option>`).join("")}
       </select>
-    </div>
-    ${vink("data-vk-accu", "holiday", t("Vakantiestand."), t("Ben je weg en is er veel zon en weinig verbruik, dan staat een batterij dagenlang vol, en dat is slecht voor de cellen. In deze stand houdt de coach hem onder de grens hieronder; de wekelijkse volle beurt slaat hij over."))}
-    ${getal("data-vk-accu", "holiday_max_percent", t("Hoogste accustand in vakantiestand (%)"), 'min="10" max="90" step="5"', "50")}
-    ${getal("data-vk-accu", "car_above", t("De auto mag de accu gebruiken boven (%)"), 'min="0" max="100" step="5"', t("nooit"),
-      t("Laadt de auto, dan geeft de batterij normaal niets af: laden en ontladen van de accu en laden van de auto is drie keer verlies. Vul je hier een accustand in, dan mag wat er dáárboven zit naar de auto. Met de nachtstrategie aan (Voorkeuren) houdt hij altijd genoeg over voor de nacht. Leeg is nooit."))}
+    </div>`)}
+    ${blok(t("Vakantiestand"), `
+    ${vink("data-vk-accu", "holiday", t("Aan zolang je weg bent."), t("Bij veel zon en weinig verbruik staat een batterij anders dagenlang vol, en dat is slecht voor de cellen. De coach houdt hem onder de grens hieronder en slaat de wekelijkse volle beurt over."))}
+    ${getal("data-vk-accu", "holiday_max_percent", t("Hoogste accustand (%)"), 'min="10" max="90" step="5"', "50")}`)}
+    ${blok(t("De auto"), `
+    ${vinkMetGetal("car_above", t("De accu mag de auto helpen."),
+      t("Laadt de auto, dan geeft de batterij normaal niets af: laden en ontladen van de accu en laden van de auto is drie keer verlies. Met dit aan mag wat boven de grens zit naar de auto. Met de nachtstrategie aan (Voorkeuren) houdt hij altijd genoeg over voor de nacht."))}
+    ${getal("data-vk-accu", "car_above", t("Boven deze accustand (%)"), 'min="0" max="100" step="5"', "", t("Zonder grens staat dit uit."))}`)}
     ${ventilator}`;
 }
 
@@ -125,10 +156,10 @@ function vaatwasser(device) {
   // heet daar "Mag draaien" (`releaseCopy`).
   const vaat = device?.type === "vaatwasser";
   const knop = releaseCopy(device).label;
-  return vink("data-vk", "release_required", t("Moet eerst vrijgegeven worden."),
+  return blok(t("Vrijgeven"), vink("data-vk", "release_required", t("Moet eerst vrijgegeven worden."),
     vaat
       ? t("Aan: de coach wacht tot je hem vrijgeeft met \"Ingeruimd en dicht\" op de kaart. Uit: klep dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de klep open en weer dicht is geweest, zodat hij niet opnieuw start met de schone vaat erin.")
-      : t("Aan: de coach wacht tot je hem vrijgeeft met \"{knop}\" op de kaart. Uit: deur dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de deur open en weer dicht is geweest, zodat hij niet opnieuw start met de schone was erin.", { knop }));
+      : t("Aan: de coach wacht tot je hem vrijgeeft met \"{knop}\" op de kaart. Uit: deur dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de deur open en weer dicht is geweest, zodat hij niet opnieuw start met de schone was erin.", { knop })));
 }
 
 /**
@@ -137,7 +168,7 @@ function vaatwasser(device) {
  * temperatuur op de airco en kiest zelf verwarmen of koelen; zie docs/airco.md.
  */
 function airco() {
-  return `
+  return blok(t("Zo wil je het"), `
     ${getal("data-vk-airco", "target_c", t("Gewenste temperatuur (°C)"), 'min="7" max="35" step="0.5"', t("wat er op de airco staat"),
       t("Kouder dan dit: hij verwarmt bij. Warmer: hij koelt bij. Op temperatuur doet hij niets."))}
     <div class="row">
@@ -150,7 +181,7 @@ function airco() {
       <span class="sub">${t("De coach zet de airco nooit zomaar aan om de temperatuur te houden: alleen om bij te verwarmen of bij te koelen als er zon over is, of op een uur dat goedkoper is dan gemiddeld, zoals je hier kiest. Bij een vast contract is geen uur goedkoper dan een ander.")}</span>
     </div>
     ${vink("data-vk-airco", "paused", t("Pauze."),
-      t("De coach doet niets met de airco. Wat hij zelf aanzette, zet hij uit."))}`;
+      t("De coach doet niets met de airco. Wat hij zelf aanzette, zet hij uit."))}`);
 }
 
 /** De velden voor dit apparaat, zonder waarden; `vulVoorkeuren` zet ze. */
@@ -195,6 +226,10 @@ export function vulVoorkeuren(root, device, actief = null, contract = null) {
     const auto = (device?.cars ?? []).find((c) => c.id === id);
     zet(el, auto?.[sleutel] ?? 100);
   }
+  for (const el of root.querySelectorAll("[data-vk-aan]")) {
+    if (el === actief) continue;
+    el.checked = b[el.dataset.vkAan] != null || el.dataset.open === "1";
+  }
   for (const knop of root.querySelectorAll("[data-vk-wek]")) {
     const [id, modus] = knop.dataset.vkWek.split(":");
     const auto = (device?.cars ?? []).find((c) => c.id === id);
@@ -210,6 +245,10 @@ export function vulVoorkeuren(root, device, actief = null, contract = null) {
   // De grens per richting alleen als die richting aanstaat (v0.141.0).
   rij("grid_charge_below", b.grid_charge !== false);
   rij("trade_above", Boolean(b.trade));
+  // Een grens die bij een vinkje hoort, zolang het vinkje aan staat (21-10-2026).
+  for (const el of root.querySelectorAll("[data-vk-aan]")) {
+    rij(el.dataset.vkAan, b[el.dataset.vkAan] != null || el.dataset.open === "1" || el.checked);
+  }
   // Handelen zonder terugleverprijs: uitzetten mag, aanzetten niet.
   const handel = [...root.querySelectorAll("[data-vk-accu]")].find((el) => el.dataset.vkAccu === "trade");
   const kanNiet = Boolean(handel) && contract !== null && !terugleverBekend(contract);
@@ -235,6 +274,11 @@ export function voorkeurWijziging(el) {
     if (sleutel === "solar_start_percent") return { solar_start_percent: binnen(n, 10, 100) };
     return null;
   }
+  if (el.dataset.vkAan) {
+    const sleutel = el.dataset.vkAan;
+    el.dataset.open = el.checked ? "1" : "";
+    return el.checked ? null : { battery: { [sleutel]: null } };
+  }
   if (el.dataset.vkAccu) {
     const sleutel = el.dataset.vkAccu;
     if (el.type === "checkbox") return { battery: { [sleutel]: el.checked } };
@@ -246,9 +290,14 @@ export function voorkeurWijziging(el) {
       if (!Number.isFinite(n)) return null;
       return { battery: { [sleutel]: Math.min(2, Math.max(-1, Math.round(n * 10000) / 10000)) } };
     }
-    // Leeg is "nooit" bij deze twee; bij de rest is leeg niets om op te slaan.
+    // Leeg is uit bij deze twee; bij de rest is leeg niets om op te slaan. Het vinkje
+    // erboven gaat dan ook uit (21-10-2026).
     if (sleutel === "car_above" || sleutel === "fan_above_c") {
-      if (n === null) return { battery: { [sleutel]: null } };
+      if (n === null) {
+        const aan = el.closest?.(".block")?.querySelector?.("[data-vk-aan]");
+        if (aan) aan.dataset.open = "";
+        return { battery: { [sleutel]: null } };
+      }
       if (!Number.isFinite(n)) return null;
       return { battery: { [sleutel]: Math.min(100, Math.max(0, n)) } };
     }

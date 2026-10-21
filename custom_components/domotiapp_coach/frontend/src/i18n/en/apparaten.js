@@ -622,11 +622,7 @@ export const APPARATEN = {
     "Of the lowest charging power: 6 A, on three phases 4.1 kW. At 50%, Solar already starts at 2.1 kW of solar and the rest comes from the grid. At 100% it only starts when the sun gives all the power.",
   "Handelen kan nu niet: de coach kent je terugleverprijs niet. Daarvoor is bij Contract een marktprijssensor nodig, of salderen.":
     "Trading is not possible now: the coach does not know your export price. That needs a market price sensor under Contract, or net metering.",
-  "Ventilator aan boven (°C)": "Fan on above (°C)",
   "nooit": "never",
-  "De coach zet de ventilator aan zodra de batterij warmer is dan dit, en weer uit als hij een graad eronder zakt. Niet als de coach op Alleen uitlezen of Adviseren staat. Leeg is nooit.":
-    "The coach turns the fan on as soon as the battery is warmer than this, and off again when it drops a degree below. Not when the coach is set to Read only or Advise. Empty is never.",
-  "Reserve houden voor noodstroom.": "Keep a reserve for backup power.",
   "Onder deze accustand komt er niets meer uit, wat de prijzen ook zeggen.": "Below this charge level nothing more comes out, whatever the prices say.",
   "Reserve (%)": "Reserve (%)",
   "Handelen": "Trading",
@@ -636,8 +632,6 @@ export const APPARATEN = {
   "Alleen als de prijs onder (€/kWh)": "Only when the price is below (€/kWh)",
   "Alleen als de prijs boven (€/kWh)": "Only when the price is above (€/kWh)",
   "de coach bepaalt": "the coach decides",
-  "De all-in prijs, met belasting en opslag. Leeg: de coach kiest zelf de beste uren.":
-    "The all-in price, including tax and markup. Empty: the coach picks the best hours itself.",
   "Ontladen naar het net tijdens hoge tarieven.": "Discharge to the grid at high prices.",
   "De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis.":
     "The battery may then also discharge to the grid, if that earns more than recharging later costs. If this is off, it only powers your own home.",
@@ -645,13 +639,6 @@ export const APPARATEN = {
   "Tot 100%, voor het balanceren van de cellen. De coach kiest op die dag het goedkoopste moment, en slaat de beurt over als de batterij die week al vol was.":
     "To 100%, for balancing the cells. The coach picks the cheapest moment on that day, and skips it if the battery was already full that week.",
   "Op": "On",
-  "Vakantiestand.": "Holiday mode.",
-  "Ben je weg en is er veel zon en weinig verbruik, dan staat een batterij dagenlang vol, en dat is slecht voor de cellen. In deze stand houdt de coach hem onder de grens hieronder; de wekelijkse volle beurt slaat hij over.":
-    "If you are away with lots of sun and little consumption, a battery stays full for days, and that is bad for the cells. In this mode the coach keeps it below the limit below; it skips the weekly full charge.",
-  "Hoogste accustand in vakantiestand (%)": "Highest charge level in holiday mode (%)",
-  "De auto mag de accu gebruiken boven (%)": "The car may use the battery above (%)",
-  "Laadt de auto, dan geeft de batterij normaal niets af: laden en ontladen van de accu en laden van de auto is drie keer verlies. Vul je hier een accustand in, dan mag wat er dáárboven zit naar de auto. Met de nachtstrategie aan (Voorkeuren) houdt hij altijd genoeg over voor de nacht. Leeg is nooit.":
-    "While the car charges, the battery normally gives nothing: charging and discharging the battery and charging the car is three times loss. If you fill in a charge level here, what is above it may go to the car. With the night strategy on (Preferences) it always keeps enough for the night. Empty is never.",
   "Moet eerst vrijgegeven worden.": "Must be released first.",
   "Aan: de coach wacht tot je hem vrijgeeft met \"Ingeruimd en dicht\" op de kaart. Uit: klep dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de klep open en weer dicht is geweest, zodat hij niet opnieuw start met de schone vaat erin.":
     "On: the coach waits until you release it with \"Loaded and closed\" on the card. Off: a closed door is enough, and the coach starts it itself at the cheapest moment. After a run it then waits until the door has been opened and closed again, so it does not start again with the clean dishes inside.",
@@ -669,4 +656,27 @@ export const APPARATEN = {
     "The coach never just turns the air conditioner on to hold the temperature: only to heat or cool when there is spare solar, or at an hour that is cheaper than average, as you choose here. With a fixed contract no hour is cheaper than another.",
   "Pauze.": "Pause.",
   "De coach doet niets met de airco. Wat hij zelf aanzette, zet hij uit.": "The coach does nothing with the air conditioner. What it turned on itself, it turns off.",
+  // De koppen van de blokken (21-10-2026).
+  "Koppeling": "Connection",
+  "Sturen": "Control",
+  "Hoe de coach hem aanstuurt": "How the coach controls it",
+  "Noodstroom": "Backup power",
+  "Balanceren": "Balancing",
+  "De auto": "The car",
+  // Elk onderwerp een blok, en een vinkje bij elke functie (21-10-2026).
+  "Wat eraan hangt": "What is plugged in",
+  "Modus": "Mode",
+  "De coach zet de ventilator aan.": "The coach turns the fan on.",
+  "Zodra de batterij warmer is dan de grens, en weer uit een graad eronder. Niet als de coach op Alleen uitlezen of Adviseren staat.": "As soon as the battery is warmer than the limit, and off again one degree below it. Not when the coach is set to Read only or Advise.",
+  "Aan boven (°C)": "On above (°C)",
+  "Zonder grens staat dit uit.": "Without a limit this is off.",
+  "Reserve aanhouden.": "Keep a reserve.",
+  "De prijzen zijn all-in, met belasting en opslag. Leeg: de coach kiest zelf de beste uren.": "The prices are all-in, with tax and markup. Empty: the coach picks the best hours itself.",
+  "Aan zolang je weg bent.": "On while you are away.",
+  "Bij veel zon en weinig verbruik staat een batterij anders dagenlang vol, en dat is slecht voor de cellen. De coach houdt hem onder de grens hieronder en slaat de wekelijkse volle beurt over.": "With lots of sun and little consumption a battery would otherwise stay full for days, and that is bad for the cells. The coach keeps it below the limit below and skips the weekly full charge.",
+  "Hoogste accustand (%)": "Highest charge level (%)",
+  "De accu mag de auto helpen.": "The battery may help the car.",
+  "Laadt de auto, dan geeft de batterij normaal niets af: laden en ontladen van de accu en laden van de auto is drie keer verlies. Met dit aan mag wat boven de grens zit naar de auto. Met de nachtstrategie aan (Voorkeuren) houdt hij altijd genoeg over voor de nacht.": "While the car charges, the battery normally gives nothing: charging and discharging the battery and charging the car is three times loss. With this on, what is above the limit may go to the car. With the night strategy on (Preferences) it always keeps enough for the night.",
+  "Boven deze accustand (%)": "Above this charge level (%)",
+  "Vrijgeven": "Release",
 };

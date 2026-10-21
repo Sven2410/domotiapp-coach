@@ -309,7 +309,12 @@ const css = /* css */ `
   }
   .groep[open] > summary::after, .sub[open] > summary::after, details.dag[open] > summary::after { transform: rotate(90deg); }
   .groep > .inhoud { padding: 0 16px 14px; }
-  .sub { border-top: 1px solid var(--dac-border); }
+  /* Elke waarschuwing in een eigen vak, zoals een blok op de andere schermen
+     (.block in theme.js); de eigenaar op 21-10-2026: "meer uniformiteit". */
+  details.sub {
+    border: 1px solid var(--dac-border); border-radius: var(--dac-radius-sm);
+    background: rgba(var(--dac-veil),0.022); padding: 0 14px; margin: 0 0 10px;
+  }
   .sub > summary { padding: 12px 0; }
   .sub > summary .titel { font-size: 14px; font-weight: 600; }
   .sub > .inhoud { padding: 0 0 12px; }
@@ -403,7 +408,9 @@ const css = /* css */ `
   .aanzet { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; margin-top: 6px; }
   .aanzet strong { font-size: 13.5px; }
   .aanzet span { display: block; font-size: 12.5px; color: var(--dac-ink-3); margin-top: 2px; line-height: 1.45; }
-  #belasting-velden[hidden] { display: none; }
+  /* Voor elk blok velden, niet alleen dat van de zware belasting: bij Lekkage en
+     Thuisbatterij te warm bleven de velden staan met de melding uit (21-10-2026). */
+  .velden[hidden] { display: none; }
   @media (min-width: 620px) { .velden.twee { grid-template-columns: 1fr 1fr; } }
 
   /* ---- de geschiedenis ---- */
@@ -528,7 +535,14 @@ class DacViewNotifications extends DacElement {
           <div class="inhoud">
         <section class="blok" id="herinnering">
           <p class="hint">${t("Een bericht in je berichtenbox (het belletje bovenin) en op je telefoon, zodat je het niet vergeet.")}</p>
-          <div class="velden twee">
+          <div class="aanzet">
+            <div>
+              <strong>${t("Meterstanden doorgeven")}</strong>
+              <span>${t("Een herinnering om je meterstanden aan je leverancier door te geven.")}</span>
+            </div>
+            <button type="button" class="schuif" role="switch" aria-checked="false" id="meter-aan" aria-label="${t("Herinnering meterstanden aan")}"><span class="knob"></span></button>
+          </div>
+          <div class="velden twee" id="meter-velden" hidden>
             <div class="veld">
               <label for="meter-datum">${t("Meterstanden doorgeven, de eerste keer op")}</label>
               <input id="meter-datum" type="date">
@@ -680,6 +694,14 @@ class DacViewNotifications extends DacElement {
     }
     this.$("#meter-datum").addEventListener("change", (ev) => this.bewaarHerinnering_({ meter_date: ev.target.value || "" }));
     this.$("#meter-herhaling").addEventListener("change", (ev) => this.bewaarHerinnering_({ meter_repeat: ev.target.value }));
+    // Aan zet alleen de velden neer: zonder datum is er geen herinnering, en de coach
+    // verzint er geen. Uit wist de datum, zoals een leeg datumveld altijd deed.
+    this.$("#meter-aan").addEventListener("click", () => {
+      const aan = this.$("#meter-aan").getAttribute("aria-checked") !== "true";
+      this.meterOpen_ = aan;
+      if (aan) this.paintHerinnering_();
+      else this.bewaarHerinnering_({ meter_date: "" });
+    });
     this.$("#filter")?.addEventListener("click", (e) => {
       const knop = e.target?.closest?.("button[data-soort]");
       if (!knop) return;
@@ -1002,9 +1024,12 @@ class DacViewNotifications extends DacElement {
     this.$('details.groep[data-groep="herinnering"]').hidden = this.settings_?.contract?.country === "PT";
     if (this.shadowRoot?.activeElement !== datum) datum.value = r.meter_date || "";
     this.$("#meter-herhaling").value = r.meter_repeat || "year";
+    const aan = Boolean(r.meter_date) || Boolean(this.meterOpen_);
+    this.$("#meter-aan").setAttribute("aria-checked", String(aan));
+    this.$("#meter-velden").hidden = !aan;
     const volgende = volgendeMeterstand(new Date(), r.meter_date, r.meter_repeat || "year");
     this.$("#meter-volgende").textContent = !r.meter_date
-      ? t("Leeg is geen herinnering.")
+      ? t("Kies een datum; zonder datum staat de herinnering uit.")
       : volgende
         ? t("De volgende keer: {datum}.", { datum: volgende.toLocaleDateString(locale(), { day: "numeric", month: "long", year: "numeric" }) })
         : t("Dit was eenmalig; er komt geen herinnering meer.");

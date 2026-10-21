@@ -238,7 +238,9 @@ class DacViewContract extends DacEditorElement {
                  dat je een land kan kiezen dus Nederland en Portugal." Sinds v0.138.0 een
                  keuzelijst: "ik wil een dropdown menu van het land hebben nu staat er 2 velden
                  groot in beeld." -->
-            <div class="row" data-installateur>
+            <div class="block" data-installateur>
+            <div class="block-title">${t("Leverancier en looptijd")}</div>
+            <div class="row">
               <label for="land">${t("Land")}</label>
               <select id="land">
                 <option value="NL">${t("Nederland")}</option>
@@ -258,7 +260,12 @@ class DacViewContract extends DacEditorElement {
               <span class="sub" id="stroom-lev-hint"></span>
             </div>
 
-            <div class="two" data-installateur>
+            <div class="row" id="pt-lev-rij">
+              <label for="pt-lev">${t("Leverancier")}</label>
+              <input type="text" id="pt-lev" maxlength="60" placeholder="${t("Bijvoorbeeld EDP Comercial")}">
+            </div>
+
+            <div class="two">
               <div class="row">
                 <label for="stroom-start">${t("Mijn contract is ingegaan op")}</label>
                 <input type="date" id="stroom-start">
@@ -271,13 +278,12 @@ class DacViewContract extends DacEditorElement {
                 <input type="number" id="stroom-dagen" min="0" max="365" step="1" inputmode="numeric">
               </div>
             </div>
+            </div>
 
             <!-- Portugal (v0.137.0): een prijs per tijdvak van de ERSE; zie tarifas.py. -->
             <div id="pt-fields" class="fields" data-installateur>
-              <div class="row">
-                <label for="pt-lev">${t("Leverancier")}</label>
-                <input type="text" id="pt-lev" maxlength="60" placeholder="${t("Bijvoorbeeld EDP Comercial")}">
-              </div>
+              <div class="block fields">
+              <div class="block-title">${t("Prijs per tijdvak")}</div>
               <div class="row">
                 <label>Opção horária</label>
                 <div class="segmented drie" id="pt-tarifa">
@@ -314,6 +320,9 @@ class DacViewContract extends DacEditorElement {
                   <span class="sub">${t("De belasting op elektriciteit: € 0,001 in 2026.")}</span>
                 </div>
               </div>
+              </div>
+              <div class="block fields">
+              <div class="block-title">${t("Teruglevering")}</div>
               <div class="row">
                 <label>${t("Teruglevering (excedentes)")}</label>
                 <div class="segmented drie" id="pt-excedente">
@@ -338,6 +347,9 @@ class DacViewContract extends DacEditorElement {
                   <span class="sub">${t("EDP betaalt 75%.")}</span>
                 </div>
               </div>
+              </div>
+              <div class="block fields">
+              <div class="block-title">${t("Vaste kosten")}</div>
               <div class="two">
                 <div class="row">
                   <label for="pt-kva">Potência contratada (kVA)</label>
@@ -353,21 +365,25 @@ class DacViewContract extends DacEditorElement {
                 <input type="number" id="pt-servicos" min="0" step="0.0001" inputmode="decimal">
                 <span class="sub">${t("Zoals EDP Smart. Vaste kosten staan er voor het overzicht; de coach stuurt er niet op.")}</span>
               </div>
+              </div>
             </div>
 
             <!-- vast en variabel -->
             <div id="fixed-fields" class="fields" data-installateur>
-              <div class="two">
+              <div class="block fields">
+                <div class="block-title">${t("Prijs")}</div>
                 <div class="row">
                   <label for="fx-price">${t("All-in prijs (€ per kWh)")}</label>
                   <input type="number" id="fx-price" min="0" step="0.0001" inputmode="decimal">
                   <span class="sub">${t("Inclusief energiebelasting, opslag en btw, zoals op je contract.")}</span>
                 </div>
-                <div class="row">
-                  <label for="fx-feedin" id="fx-feedin-label">${t("Terugleververgoeding (€ per kWh)")}</label>
-                  <input type="number" id="fx-feedin" min="0" step="0.0001" inputmode="decimal">
-                  <span class="sub">${t("Wat je krijgt voor wat je teruglevert boven je eigen verbruik.")}</span>
-                </div>
+              </div>
+              <div class="block fields">
+              <div class="block-title">${t("Teruglevering")}</div>
+              <div class="row">
+                <label for="fx-feedin" id="fx-feedin-label">${t("Terugleververgoeding (€ per kWh)")}</label>
+                <input type="number" id="fx-feedin" min="0" step="0.0001" inputmode="decimal">
+                <span class="sub">${t("Wat je krijgt voor wat je teruglevert boven je eigen verbruik.")}</span>
               </div>
               ${kostenVorm("fx")}
               <div class="row" id="fx-feedcost-rij">
@@ -375,12 +391,11 @@ class DacViewContract extends DacEditorElement {
                 <input type="number" id="fx-feedcost" min="0" step="0.0001" inputmode="decimal">
                 <span class="sub" id="fx-feedcost-hint">${t("Wat je leverancier per teruggeleverde kWh rekent. Rekent hij een vast bedrag per jaar in schalen, kies dat hierboven.")}</span>
               </div>
+              </div>
               <!-- wat het contract na salderen zegt (v0.134.0) -->
-              <div id="fx-na">
-                <div class="row">
-                  <label>${t("Vanaf 1 januari 2027")}</label>
-                  <span class="sub">${t("Dan stopt salderen. Vul in wat je contract voor daarna zegt; leeg is hetzelfde als hierboven.")}</span>
-                </div>
+              <div id="fx-na" class="block fields">
+                <div class="block-title">${t("Vanaf 1 januari 2027")}</div>
+                <p class="sub">${t("Dan stopt salderen. Vul in wat je contract voor daarna zegt; leeg is hetzelfde als hierboven.")}</p>
                 <div class="two">
                   <div class="row">
                     <label for="fx-feedin-na">${t("Terugleververgoeding (€ per kWh)")}</label>
@@ -396,6 +411,8 @@ class DacViewContract extends DacEditorElement {
 
             <!-- dynamisch -->
             <div id="dynamic-fields" class="fields" data-installateur>
+              <div class="block fields">
+              <div class="block-title">${t("Prijssensoren")}</div>
               <div class="row">
                 <label>${t("Hoe vaak verandert de prijs?")}</label>
                 <div class="segmented" id="dynamic-interval">
@@ -430,7 +447,10 @@ class DacViewContract extends DacEditorElement {
                 <dac-entity-picker id="dyn-reserve"></dac-entity-picker>
                 <span class="sub">${t("Een tweede all-in prijs voor als die van je leverancier wegvalt. Meestal niet nodig: de kale marktprijs neemt het dan al over.")}</span>
               </div>
+              </div>
 
+              <div class="block fields">
+              <div class="block-title">${t("Belasting en opslag")}</div>
               <div class="two">
                 <div class="row">
                   <label for="dyn-tax">${t("Energiebelasting (€ per kWh, zonder btw)")}</label>
@@ -447,10 +467,13 @@ class DacViewContract extends DacEditorElement {
                 <input type="number" id="dyn-markup" min="0" step="0.000001" inputmode="decimal">
                 <span class="sub" id="dyn-markup-hint"></span>
               </div>
+              </div>
               <!-- Teruglevering apart (v0.132.0): de marktprijs, of een vast bedrag
                    naast de dynamische inkoop. -->
+              <div class="block fields">
+              <div class="block-title">${t("Teruglevering")}</div>
               <div class="row">
-                <label>${t("Teruglevering")}</label>
+                <label>${t("Vergoeding")}</label>
                 <div class="segmented" id="dyn-terug">
                   <button type="button" data-terug="market" aria-pressed="false">
                     <strong>${t("Marktprijs")}</strong>
@@ -505,8 +528,11 @@ class DacViewContract extends DacEditorElement {
                 <input type="checkbox" id="dyn-bonusdag">
                 <span><strong>${t("Bonus alleen overdag")}</strong> ${t("Van zonsopkomst tot zonsondergang, uitgerekend voor waar het huis staat.")}</span>
               </label>
+              </div>
             </div>
 
+            <div class="block fields" id="salderen-blok" data-installateur>
+            <div class="block-title">${t("Salderen")}</div>
             <label class="check" for="netting" data-installateur id="netting-rij">
               <input type="checkbox" id="netting">
               <span>
@@ -519,33 +545,33 @@ class DacViewContract extends DacEditorElement {
               <input type="date" id="afreken-start">
               <span class="sub">${t("De dag na de einddatum op je laatste jaarafrekening. Salderen telt per afrekenperiode, ook over een nieuw contract heen. Wat je daarin meer teruglevert dan je afneemt krijgt de vergoeding.")}</span>
             </div>
-
-            <div class="row">
-              <label>${t("Zo komt je prijs tot stand")}</label>
-              <div class="ob" id="opbouw"></div>
             </div>
+
+            <div class="block fields">
+            <div class="block-title">${t("Zo komt je prijs tot stand")}</div>
+            <div class="ob" id="opbouw"></div>
             <div class="bevestig">
               <button type="button" class="primary vrij" id="bevestig">${t("Ja, dit klopt")}</button>
               <span class="sub" id="bevestigd-zin"></span>
             </div>
+            </div>
 
+            <div class="block fields">
+            <div class="block-title">${t("Eerdere stroomcontracten")}</div>
+            <p class="sub">${t("Historie en rapport rekenen elke dag met de prijs van toen. Wat de coach nu doet rekent altijd met het contract hierboven.")}</p>
             <div class="nieuw" data-installateur>
               <button type="button" data-nieuw="stroom">${t("Ik heb een nieuw stroomcontract afgesloten")}</button>
               <span class="sub">${t("Zet dit contract bij de eerdere, en begin een nieuw formulier.")}</span>
-            </div>
-
-            <div class="row">
-              <label>${t("Eerdere stroomcontracten")}</label>
-              <span class="sub">${t("Historie en rapport rekenen elke dag met de prijs van toen. Wat de coach nu doet rekent altijd met het contract hierboven.")}</span>
             </div>
             <div id="periods-stroom"></div>
             <div class="circuit-actions" data-installateur>
               <button type="button" data-period-add="stroom">${t("Eerder stroomcontract toevoegen")}</button>
             </div>
+            </div>
 
             <!-- de opgeslagen beurten opnieuw uitrekenen (v0.136.0) -->
-            <div class="row" data-installateur>
-              <label for="beurten-van">${t("Laadbeurten en programma's opnieuw uitrekenen")}</label>
+            <div class="block" data-installateur>
+              <label class="block-title" for="beurten-van">${t("Laadbeurten en programma's opnieuw uitrekenen")}</label>
               <span class="sub">${t("Na een gewijzigde prijs: wat de opgeslagen beurten kostten en bespaarden, opnieuw met het contract van die dag. Alleen bij een vaste of variabele prijs. Eerst zie je wat het wordt.")}</span>
               <input type="date" id="beurten-van">
               <div class="herreken-knoppen">
@@ -569,16 +595,18 @@ class DacViewContract extends DacEditorElement {
             <span><strong>${t("Deze woning gebruikt gas")}</strong> ${t("Staat dit uit, dan blijft gas weg, hier en op het overzicht.")}</span>
           </label>
           <div class="fields" id="gas-velden">
-            <div class="row" data-installateur>
+            <div class="block" data-installateur>
+            <div class="block-title">${t("Leverancier en looptijd")}</div>
+            <div class="row">
               <label>${t("Soort contract")}</label>
               ${soortKnoppen("gas-soort")}
             </div>
-            <div class="row" data-installateur>
+            <div class="row">
               <label for="gas-lev">${t("Leverancier")}</label>
               ${levKeuze("gas-lev", "gas")}
               <span class="sub" id="gas-lev-hint">${t("Mag een andere zijn dan die van je stroom.")}</span>
             </div>
-            <div class="two" data-installateur>
+            <div class="two">
               <div class="row">
                 <label for="gas-start">${t("Mijn contract is ingegaan op")}</label>
                 <input type="date" id="gas-start">
@@ -590,25 +618,29 @@ class DacViewContract extends DacEditorElement {
                 <input type="number" id="gas-dagen" min="0" max="365" step="1" inputmode="numeric">
               </div>
             </div>
+            </div>
+            <div class="block fields" data-installateur>
+            <div class="block-title">${t("Prijs")}</div>
             <div class="row" id="gas-prijs-rij" data-installateur>
               <label for="gas-price">${t("Gasprijs, all-in (€ per m³)")}</label>
               <input type="number" id="gas-price" min="0" step="0.0001" inputmode="decimal">
-              <span class="sub">${t("Inclusief energiebelasting, opslag en btw. Leeg laten als je geen gas hebt.")}</span>
+              <span class="sub">${t("Inclusief energiebelasting, opslag en btw.")}</span>
             </div>
             <div class="row" id="gas-sensor-rij" data-installateur>
               <label>${t("Sensor met de all-in gasprijs")}</label>
               <dac-entity-picker id="gas-entity"></dac-entity-picker>
               <span class="sub" id="gas-sensor-hint">${t("Een dynamische gasprijs verandert per dag. Historie neemt de prijs van elke dag uit deze sensor.")}</span>
             </div>
+            </div>
+            <div class="block fields">
+            <div class="block-title">${t("Eerdere gascontracten")}</div>
             <div class="nieuw" data-installateur>
               <button type="button" data-nieuw="gas">${t("Ik heb een nieuw gascontract afgesloten")}</button>
-            </div>
-            <div class="row">
-              <label>${t("Eerdere gascontracten")}</label>
             </div>
             <div id="periods-gas"></div>
             <div class="circuit-actions" data-installateur>
               <button type="button" data-period-add="gas">${t("Eerder gascontract toevoegen")}</button>
+            </div>
             </div>
           </div>
         </section>
@@ -622,21 +654,24 @@ class DacViewContract extends DacEditorElement {
             <span><strong>${t("Deze woning heeft een watermeter in Home Assistant")}</strong> ${t("Staat dit uit, dan blijft water weg, hier en op het overzicht.")}</span>
           </label>
           <div class="fields" id="water-velden">
-            <div class="row" data-installateur>
+            <div class="block" data-installateur>
+            <div class="block-title">${t("Prijs")}</div>
+            <div class="row">
               <label for="water-lev">${t("Waterbedrijf")}</label>
               <input type="text" id="water-lev" maxlength="60" placeholder="${t("Bijvoorbeeld Vitens")}">
             </div>
             <div class="row" data-installateur>
               <label for="water-price">${t("Waterprijs, all-in (€ per m³)")}</label>
               <input type="number" id="water-price" min="0" step="0.0001" inputmode="decimal">
-              <span class="sub">${t("Inclusief belasting. Leeg laten zonder watermeter.")}</span>
+              <span class="sub">${t("Inclusief belasting.")}</span>
             </div>
-            <div class="row">
-              <label>${t("Eerdere waterprijzen")}</label>
             </div>
+            <div class="block fields">
+            <div class="block-title">${t("Eerdere waterprijzen")}</div>
             <div id="periods-water"></div>
             <div class="circuit-actions" data-installateur>
               <button type="button" data-period-add="water">${t("Eerdere waterprijs toevoegen")}</button>
+            </div>
             </div>
           </div>
         </section>
@@ -1135,8 +1170,9 @@ class DacViewContract extends DacEditorElement {
       ? t("Een prijs per tijdvak, zonder salderen.")
       : t("Een all-in prijs of een dynamisch contract, salderen tot 2027.");
     this.$("#pt-fields").style.display = portugal ? "" : "none";
+    this.$("#pt-lev-rij").style.display = portugal ? "" : "none";
     if (portugal) {
-      for (const id of ["#soort-rij", "#lev-rij", "#fixed-fields", "#dynamic-fields", "#netting-rij", "#afreken-rij", "#fx-na"]) {
+      for (const id of ["#soort-rij", "#lev-rij", "#fixed-fields", "#dynamic-fields", "#salderen-blok", "#afreken-rij", "#fx-na"]) {
         this.$(id).style.display = "none";
       }
       const p = contract.pt ?? {};
@@ -1156,7 +1192,7 @@ class DacViewContract extends DacEditorElement {
     } else {
       this.$("#soort-rij").style.display = "";
       this.$("#lev-rij").style.display = "";
-      this.$("#netting-rij").style.display = "";
+      this.$("#salderen-blok").style.display = "";
     }
     for (const button of this.$$("#dynamic-interval button")) {
       button.setAttribute("aria-pressed", String(button.dataset.interval === (d.interval ?? "hour")));
@@ -1423,6 +1459,7 @@ DacViewContract.css = /* css */ `
 
   .bevestig, .nieuw { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
   .bevestig[hidden], .nieuw[hidden] { display: none; }
+  .bevestig .sub, .nieuw .sub { font-size: 12.5px; line-height: 1.45; color: var(--dac-ink-2); }
   .bevestig button, .nieuw button {
     font: inherit; font-size: 14px; padding: 10px 16px; border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.04); color: var(--dac-ink); cursor: pointer;
