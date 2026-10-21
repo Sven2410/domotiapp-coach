@@ -18,7 +18,8 @@ dus nu is het alleen nederlands maar dan wil ik ook engels." Zijn keuzes die dag
   ("Zonnebonus"), de Portugese tijdvakken tussen haakjes, wat al bewaard is (oude meldingen en
   berichten), en de modelnamen van de apparaten in Home Assistant (`MODELLEN` in entiteit.py),
   want DomotiApp Lovelace vindt de coach-apparaten daaraan. De kaarten van DomotiApp Lovelace zelf
-  zijn Nederlands; of die ook Engels worden ligt bij de eigenaar. De startsensor zegt in het
+  worden ook Engels (de eigenaar op 21-10-2026: ja); sinds v0.140.2 staat de taal van de coach als
+  attribuut `taal` (`nl`/`en`) op zijn sensoren, zodat de kaarten de keuze bij Installatie volgen. De startsensor zegt in het
   Engels precies "now": de programmakaart herkende "nu" aan de toestand (sinds lovelace 0.80.2
   aan `stand`).
 
