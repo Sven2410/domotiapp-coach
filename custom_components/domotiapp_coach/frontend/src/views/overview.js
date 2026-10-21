@@ -705,12 +705,16 @@ class DacViewOverview extends DacElement {
     button.boost.ring[aria-pressed="true"]::before {
       content: ""; position: absolute; z-index: -2;
       left: 50%; top: 50%; width: 300%; aspect-ratio: 1; translate: -50% -50%;
-      background: conic-gradient(var(--dac-accent-hi) 0 25%, transparent 25% 100%);
+      background: conic-gradient(var(--dac-accent-hi) 0 25%,
+        color-mix(in srgb, var(--dac-accent-hi) 28%, transparent) 25% 100%);
       animation: ring-draait 1.6s linear infinite;
     }
     button.boost.ring[aria-pressed="true"]::after {
       content: ""; position: absolute; z-index: -1; inset: 2px;
-      border-radius: inherit; background: var(--dac-surface);
+      /* Dicht: in het donkere thema is het oppervlak doorschijnend, en dan schijnt
+         het draaiende verloop door de knop heen. */
+      border-radius: inherit;
+      background: linear-gradient(var(--dac-surface), var(--dac-surface)), var(--dac-bg-raise);
     }
     @keyframes ring-draait { to { rotate: 1turn; } }
     @media (prefers-reduced-motion: reduce) {

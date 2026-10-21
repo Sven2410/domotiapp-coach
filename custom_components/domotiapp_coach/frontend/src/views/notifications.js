@@ -393,6 +393,8 @@ const css = /* css */ `
      color-scheme kwam hij wit met onze lichte letters erin: onleesbaar. De eigenaar
      op 06-09-2026, met een schermafdruk waarop hij "amper wat kon lezen". */
   select { color-scheme: var(--dac-scheme); }
+  /* Even hoog als de keuzelijst ernaast, ook leeg (v0.141.2, iOS). */
+  input[type="date"] { color-scheme: var(--dac-scheme); height: 40px; line-height: 22px; }
   select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
   @media (pointer: coarse) { input, select { font-size: 16px; } }
   .rij-knoppen { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

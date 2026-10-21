@@ -419,3 +419,21 @@ staat nu op hooguit twee regels van 18 tekens (12 op een smal scherm), op woorde
 wat er dan nog overblijft wordt afgekapt met "…" (`naamRegels` in components/energy-flow.js). Boven
 de zon groeit de naam omhoog. En het vermogen van de woning staat op één regel, "178 W", zoals bij
 de andere bollen.
+
+## Datum en tijd op een iPhone (v0.141.2)
+
+De eigenaar op 21-10-2026, met schermafdrukken van Contract op zijn iPhone: "op telefoon zien de
+velden er heel raar uit". De datumvelden ("ingegaan op", "loopt af op", "opnieuw uitrekenen
+vanaf") liepen rechts buiten de kaart, een leeg datumveld was hoger dan de rest, en de datum stond
+in het midden. iOS geeft een datumveld een eigen minimale breedte en zet de waarde neer met de
+flexbox van het veld zelf, en die centreert; Chrome laat daar niets van zien. Nu staat in
+`baseCss` (theme.js) voor elk datum- en tijdveld in het paneel `appearance: none`, `min-width: 0`,
+`max-width: 100%` en een flexbox die links begint, en `::-webkit-date-and-time-value` zonder marge
+en links; de velden onder Contract en Apparaten zijn 44 px hoog, ook leeg. Dezelfde oplossing als
+de laadpaalkaart van DomotiApp Lovelace (valkuil 78 daar). Op een iPhone niet nagemeten: er staat
+op de Mac geen Simulator. Proef "datum en tijd op een iPhone" in test_rapport.mjs.
+
+Daarbij nagemeten in Chrome op 390, 320 en 280 px, alle tabbladen met elke groep opengeklapt:
+niets breder dan het scherm. De pop-up met de schuif en Instellen van een batterij ook; daar viel
+"de coach bepaalt" in de prijsvelden af, die zijn nu 190 px. En de ring om vol of leeg laden had
+een doorschijnend binnenvlak, waardoor het draaiende verloop door de knop scheen.
