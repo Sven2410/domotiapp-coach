@@ -10761,6 +10761,36 @@ controle("boven de laadgrens laadt hij tot de laadgrens", "95%" in (b185.get("re
 coach185.async_boost("dev-batterij", False)
 controle("uit is ook het doel weg", "dev-batterij" not in coach185._vol_tot)
 
+print("=== 186. Miele komt terug met 0,0: een plaatshouder, geen meting (v0.141.1) ===")
+# Een klantwoning op 21-10-2026: de cloud van Miele weg van 15:51 tot 16:29 UTC, en bij het
+# terugkomen meldden vriezer en koelkast ruim twintig seconden 0,0 voor de echte -18 en 5.
+hass186, _, coach186 = bouw({**huis(), "sensor.vriezer_temp": {"state": "-18.0", "attributes": {"unit_of_measurement": "°C"}},
+                             "binary_sensor.vriezer_deur": "off", "binary_sensor.vriezer_probleem": "off"}, inst161)
+T186 = dt.datetime(2026, 10, 21, 17, 0)
+
+
+def wacht186(minuten):
+    asyncio.run(coach186._async_vriezerwacht(inst161, T186 + dt.timedelta(minutes=minuten)))
+
+
+wacht186(0)
+hass186.states.zet("sensor.vriezer_temp", "unknown")
+wacht186(1)
+hass186.states.zet("sensor.vriezer_temp", {"state": "0.0", "attributes": {"unit_of_measurement": "°C"}})
+wacht186(2)
+controle("0,0 vlak na niets telt niet als te warm", ("dev-vriezer", "warm") not in coach186._vriezer_sinds,
+         f"{coach186._vriezer_sinds}")
+wacht186(5)
+controle("blijft hij 0,0, dan is het na twee minuten wel een meting", ("dev-vriezer", "warm") in coach186._vriezer_sinds,
+         f"{coach186._vriezer_sinds}")
+hass186.states.zet("sensor.vriezer_temp", {"state": "-18.0", "attributes": {"unit_of_measurement": "°C"}})
+wacht186(6)
+controle("en weer -18: niets aan de hand", ("dev-vriezer", "warm") not in coach186._vriezer_sinds, f"{coach186._vriezer_sinds}")
+taal186 = sys.modules.get("domotiapp_coach.taal")
+controle("de Engelse zinnen zijn in te lezen buiten de lus (v0.141.1)", callable(getattr(taal186, "laden", None)))
+bron186 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach" / "__init__.py").read_text()
+controle("en de coach doet dat bij het opstarten in een executor", "async_add_executor_job(taal.laden)" in bron186)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
