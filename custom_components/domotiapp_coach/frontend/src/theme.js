@@ -226,6 +226,26 @@ export const baseCss = /* css */ `
     input, select, textarea { font-size: 16px; }
   }
 
+  /* Datum en tijd zoals de andere velden (v0.141.2). iOS geeft een datumveld een
+     eigen minimale breedte en hoogte en zet de waarde in het midden: op Contract
+     liepen "ingegaan op" en "loopt af op" op een iPhone rechts buiten de kaart, een
+     leeg datumveld werd hoger dan de rest, en de datum stond gecentreerd (de
+     eigenaar op 21-10-2026). Dezelfde oplossing als de laadpaalkaart van DomotiApp
+     Lovelace (valkuil 78 daar). */
+  input[type="date"], input[type="time"], input[type="datetime-local"], input[type="month"] {
+    -webkit-appearance: none; appearance: none;
+    min-width: 0; max-width: 100%;
+    /* iOS zet de waarde neer met de flexbox van het veld zelf, en die centreert. */
+    display: flex; align-items: center; justify-content: flex-start;
+    text-align: left;
+  }
+  input[type="date"]::-webkit-date-and-time-value,
+  input[type="time"]::-webkit-date-and-time-value,
+  input[type="datetime-local"]::-webkit-date-and-time-value,
+  input[type="month"]::-webkit-date-and-time-value { margin: 0; min-width: 0; text-align: left; }
+  input[type="date"]::-webkit-datetime-edit,
+  input[type="time"]::-webkit-datetime-edit { padding: 0; }
+
   :focus-visible {
     outline: 2px solid var(--dac-accent-hi);
     outline-offset: 2px;

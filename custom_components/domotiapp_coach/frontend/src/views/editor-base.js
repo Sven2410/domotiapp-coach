@@ -72,8 +72,9 @@ export const editorCss = /* css */ `
     input[type="text"], input[type="number"], input[type="time"], input[type="date"], select, textarea { font-size: 16px; }
   }
   input:focus, select:focus { border-color: var(--dac-accent-hi); outline: none; }
-  /* Anders is het kalendertje zwart op het donkere thema. */
-  input[type="date"] { color-scheme: var(--dac-scheme); }
+  /* Anders is het kalendertje zwart op het donkere thema. En even hoog als de
+     andere velden, ook leeg: op iOS kreeg een leeg datumveld een eigen hoogte. */
+  input[type="date"], input[type="time"] { color-scheme: var(--dac-scheme); height: 44px; line-height: 22px; }
   select { appearance: none; background-image: none; }
   select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
 

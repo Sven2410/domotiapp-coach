@@ -5505,6 +5505,24 @@ proef("de energiestroom: een lange naam over twee regels, anders met … (v0.141
   assert.deepEqual(naamRegels("", 12), []);
 });
 
+// De eigenaar op 21-10-2026, met schermafdrukken van Contract op een iPhone: de datumvelden
+// liepen rechts buiten de kaart, een leeg datumveld was hoger, en de datum stond in het midden.
+// iOS geeft een datumveld een eigen minimale breedte en centreert de waarde met de flexbox van
+// het veld zelf; in Chrome is daar niets van te zien, dus deze proef leest de stijl zelf.
+proef("datum en tijd op een iPhone: niet breder dan het vak, links, en even hoog (v0.141.2)", async () => {
+  const { baseCss } = await import("../custom_components/domotiapp_coach/frontend/src/theme.js");
+  const regel = baseCss.slice(baseCss.indexOf('input[type="date"], input[type="time"]'));
+  assert.match(regel, /appearance: none/);
+  assert.match(regel, /min-width: 0; max-width: 100%/);
+  assert.match(regel, /justify-content: flex-start/);
+  assert.match(baseCss, /::-webkit-date-and-time-value[^}]*text-align: left/);
+  const editor = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/editor-base.js", import.meta.url), "utf8");
+  assert.match(editor, /input\[type="date"\], input\[type="time"\] \{[^}]*height: 44px/, "even hoog als de andere velden, ook leeg");
+  // En de ring om vol of leeg laden: het binnenvlak is dicht, anders schijnt het verloop door.
+  const ov = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf8");
+  assert.match(ov, /::after \{[^}]*var\(--dac-bg-raise\)/);
+});
+
 for (const [naam, fn] of proeven) {
   try {
     await fn();

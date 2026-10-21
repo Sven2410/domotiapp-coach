@@ -194,7 +194,10 @@ async def _async_register_static_path(hass: HomeAssistant, version: str) -> None
 async def _async_register_panel(hass: HomeAssistant, version: str) -> None:
     """Add the DomotiApp Coach panel to the sidebar."""
     # A reload re-registers the panel, so drop any previous registration first.
-    frontend.async_remove_panel(hass, PANEL_URL_PATH)
+    # Alleen als hij er staat (v0.141.2): bij het opstarten is hij er nog niet, en
+    # dan schreef Home Assistant "Removing unknown panel domotiapp-coach" in het log.
+    if PANEL_URL_PATH in hass.data.get("frontend_panels", {}):
+        frontend.async_remove_panel(hass, PANEL_URL_PATH)
 
     await panel_custom.async_register_panel(
         hass,
