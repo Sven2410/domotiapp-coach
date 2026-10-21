@@ -1264,5 +1264,47 @@ huis46n = sum(h for _z, h in bat._nacht_uren(dt.datetime(2027, 3, 27, 22, 0), ve
 controle("zonder zone telt de nacht negen uur op de klok, zoals voorheen", abs(huis46n - 9 * 0.3) < 1e-9, f"{huis46n}")
 
 print()
+print("=== 47. handelen in twee: laden van het net en ontladen naar het net, met een grens (v0.141.0) ===")
+# De eigenaar op 19-10-2026: "Batterij mag laden van het net tijdens lage tarieven / Batterij
+# mag ontladen naar het net tijdens hoge tarieven." En op 21-10-2026 per richting "laat coach
+# de beste strategie bepalen, of" alleen onder of boven een prijs, met de all-in prijs.
+UUR47 = [0.12, 0.12, 0.13, 0.14, 0.18, 0.22, 0.30, 0.38, 0.40, 0.33, 0.28, 0.25,
+         0.22, 0.21, 0.22, 0.26, 0.30, 0.42, 0.45, 0.44, 0.36, 0.30, 0.25, 0.20]
+L47 = prijzen(UUR47 + UUR47, terug=[p - 0.02 for p in UUR47 + UUR47])
+V47 = verwachting(huis=0.4)
+NU47 = DAG.replace(hour=0, minute=5)
+
+
+def plan47(**kw):
+    return plan_batterij(NU47, L47, Tariff(), V47, anker(20.0, **kw))
+
+
+vrij47 = plan47()
+geladen47 = [(u.start.hour, u.price) for u in vrij47.uren if u.stand == NETLADEN]
+print(f"  de coach bepaalt: {vrij47.stand}, van het net in {geladen47}")
+controle("zonder grens laadt hij 's nachts van het net, zoals altijd",
+         vrij47.stand == NETLADEN and geladen47, f"{vrij47.stand} {geladen47}")
+uit47 = plan47(net_laden=False)
+controle("laden van het net uit: nergens in het plan van het net",
+         uit47.stand != NETLADEN and not [u for u in uit47.uren if u.stand == NETLADEN],
+         f"{uit47.stand} {[(u.start.hour, u.stand) for u in uit47.uren if u.stand == NETLADEN]}")
+onder47 = plan47(net_laden_onder=0.13)
+geladen47b = [(u.start.hour, u.price) for u in onder47.uren if u.stand == NETLADEN]
+print(f"  alleen onder 0,13: {onder47.stand}, van het net in {geladen47b}")
+controle("met een grens van 0,13 alleen in de uren daaronder",
+         geladen47b and all(p < 0.13 for _, p in geladen47b), f"{geladen47b}")
+neg47 = plan_batterij(NU47, prijzen([-0.05] * 24 + UUR47, terug=-0.07), Tariff(), V47, anker(20.0, net_laden=False))
+controle("ook bij een negatieve prijs niet, als het uit staat", neg47.stand != "max-laden", neg47.stand)
+# Ontladen naar het net: alleen boven de grens, en zonder grens bepaalt de som het.
+vol47 = dict(handelen=True, nacht=False)
+h47 = plan_batterij(DAG.replace(hour=17, minute=5), L47, Tariff(), V47, anker(90.0, **vol47))
+h47b = plan_batterij(DAG.replace(hour=17, minute=5), L47, Tariff(), V47, anker(90.0, handelen_boven=0.43, **vol47))
+weg47 = [(u.start.hour, u.price) for u in h47b.uren if u.stand == HANDELEN]
+print(f"  17:05 op 90%: zonder grens {h47.stand}; boven 0,43 {h47b.stand}, naar het net in {weg47}")
+controle("zonder grens handelt hij op de dure avond", h47.stand == HANDELEN, h47.stand)
+controle("met een grens van 0,43 niet om 17:00 (0,42), wel in de uren erboven",
+         h47b.stand != HANDELEN and weg47 and all(p > 0.43 for _, p in weg47), f"{h47b.stand} {weg47}")
+
+print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

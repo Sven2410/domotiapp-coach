@@ -18,7 +18,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import PROGRAMMA_TYPES
 from .entiteit import (
-    LEEG_TOT, AccuBediening, CoachEntiteit, ProgrammaBediening, async_per_apparaat, async_vrijgave, coach_verversen,
+    LEEG_TOT, VOL_TOT, AccuBediening, CoachEntiteit, ProgrammaBediening, async_per_apparaat, async_vrijgave, coach_verversen,
 )
 
 # sleutel: (vrijgeven, nu starten, icoon)
@@ -84,7 +84,13 @@ class BatterijKnop(AccuBediening, CoachEntiteit, ButtonEntity):
 
         coach = async_get_coach(self.hass)
         if self._sleutel == "vol_laden":
-            coach.async_boost(self._device_id, True)
+            # Tot `vol_tot` als dat onder de laadgrens staat (v0.141.0).
+            plafond = float(self._stand.get("ceiling") or 100.0)
+            tot = VOL_TOT.get(self._device_id)
+            if tot is not None and tot < plafond:
+                coach.async_boost(self._device_id, True, tot)
+            else:
+                coach.async_boost(self._device_id, True)
         elif self._sleutel == "leegladen":
             ondergrens = float(self._stand.get("floor") or 0.0)
             coach.async_drain(self._device_id, max(ondergrens, LEEG_TOT.get(self._device_id, ondergrens)))

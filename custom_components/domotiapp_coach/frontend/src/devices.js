@@ -1120,6 +1120,11 @@ export const defaultBattery = (brandId) => ({
   reserve_enabled: false,
   reserve_percent: 20,
   trade: false,
+  // Handelen in twee (v0.141.0): laden van het net mag, en per richting een grens
+  // in de all-in prijs; leeg is "de coach bepaalt".
+  grid_charge: true,
+  grid_charge_below: null,
+  trade_above: null,
   weekly_full: false,
   weekly_full_day: 6,
   holiday: false,

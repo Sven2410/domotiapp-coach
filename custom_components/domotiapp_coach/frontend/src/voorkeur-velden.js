@@ -98,8 +98,14 @@ function thuisbatterij(device) {
   return `
     ${vink("data-vk-accu", "reserve_enabled", t("Reserve houden voor noodstroom."), t("Onder deze accustand komt er niets meer uit, wat de prijzen ook zeggen."))}
     ${getal("data-vk-accu", "reserve_percent", t("Reserve (%)"), 'min="0" max="100" step="5"', "20")}
-    ${vink("data-vk-accu", "trade", t("Handelen: terugleveren op dure uren."), t("De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis."))}
+    <h4 class="sheet-kop">${t("Handelen")}</h4>
+    ${vink("data-vk-accu", "grid_charge", t("Laden uit het net tijdens lage tarieven."), t("De batterij mag dan ook van het net laden, als dat minder kost dan wat hij je straks bespaart. Staat dit uit, dan gaat er alleen zon in."))}
+    ${getal("data-vk-accu", "grid_charge_below", t("Alleen als de prijs onder (€/kWh)"), 'min="-1" max="2" step="0.01"', t("de coach bepaalt"),
+      t("De all-in prijs, met belasting en opslag. Leeg: de coach kiest zelf de beste uren."))}
+    ${vink("data-vk-accu", "trade", t("Ontladen naar het net tijdens hoge tarieven."), t("De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis."))}
     <div class="notice" data-vk-rij="trade_kan_niet" hidden>${t(HANDELEN_KAN_NIET)}</div>
+    ${getal("data-vk-accu", "trade_above", t("Alleen als de prijs boven (€/kWh)"), 'min="-1" max="2" step="0.01"', t("de coach bepaalt"),
+      t("De all-in prijs, met belasting en opslag. Leeg: de coach kiest zelf de beste uren."))}
     ${vink("data-vk-accu", "weekly_full", t("Een keer per week helemaal vol."), t("Tot 100%, voor het balanceren van de cellen. De coach kiest op die dag het goedkoopste moment, en slaat de beurt over als de batterij die week al vol was."))}
     <div class="row" data-vk-rij="weekly_full_day">
       <label for="vk-dag">${t("Op")}</label>
@@ -177,7 +183,7 @@ export function vulVoorkeuren(root, device, actief = null, contract = null) {
   }
   for (const el of root.querySelectorAll("[data-vk-accu]")) {
     const sleutel = el.dataset.vkAccu;
-    const standaard = { reserve_percent: 20, weekly_full_day: 6, holiday_max_percent: 50 }[sleutel];
+    const standaard = { reserve_percent: 20, weekly_full_day: 6, holiday_max_percent: 50, grid_charge: true }[sleutel];
     zet(el, b[sleutel] ?? standaard);
   }
   for (const el of root.querySelectorAll("[data-vk-airco]")) {
@@ -201,6 +207,9 @@ export function vulVoorkeuren(root, device, actief = null, contract = null) {
   rij("reserve_percent", b.reserve_enabled);
   rij("weekly_full_day", b.weekly_full);
   rij("holiday_max_percent", b.holiday);
+  // De grens per richting alleen als die richting aanstaat (v0.141.0).
+  rij("grid_charge_below", b.grid_charge !== false);
+  rij("trade_above", Boolean(b.trade));
   // Handelen zonder terugleverprijs: uitzetten mag, aanzetten niet.
   const handel = [...root.querySelectorAll("[data-vk-accu]")].find((el) => el.dataset.vkAccu === "trade");
   const kanNiet = Boolean(handel) && contract !== null && !terugleverBekend(contract);
@@ -231,6 +240,12 @@ export function voorkeurWijziging(el) {
     if (el.type === "checkbox") return { battery: { [sleutel]: el.checked } };
     if (sleutel === "weekly_full_day") return { battery: { weekly_full_day: Number(el.value) } };
     const n = getalVan();
+    // Leeg is "de coach bepaalt" bij de grenzen van handelen (v0.141.0), in euro per kWh.
+    if (sleutel === "grid_charge_below" || sleutel === "trade_above") {
+      if (n === null) return { battery: { [sleutel]: null } };
+      if (!Number.isFinite(n)) return null;
+      return { battery: { [sleutel]: Math.min(2, Math.max(-1, Math.round(n * 10000) / 10000)) } };
+    }
     // Leeg is "nooit" bij deze twee; bij de rest is leeg niets om op te slaan.
     if (sleutel === "car_above" || sleutel === "fan_above_c") {
       if (n === null) return { battery: { [sleutel]: null } };

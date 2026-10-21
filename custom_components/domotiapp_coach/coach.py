@@ -1496,6 +1496,9 @@ class ChargerCoach:
         # herstart heen en afgelopen zodra de kabel eruit gaat: snelladen is
         # iets voor nu, niet iets wat stilletjes blijft staan.
         self._boost: set[str] = set()
+        # Tot welke accustand "Nu vol laden" bij een thuisbatterij gaat (v0.141.0),
+        # als de bewoner dat in de pop-up koos; zonder is het de laadgrens.
+        self._vol_tot: dict[str, float] = {}
         # De modus die de bewoner op de kaart koos voor deze beurt, "zon" of
         # "continu" (v0.87.0). Leeg is de voorkeur van de paal (`charge_mode`
         # bij Apparaten). Zelfde levensduur als snelladen: de kabel eruit en
@@ -6193,6 +6196,10 @@ class ChargerCoach:
             reserve=float(eigen.get("reserve_percent") or 0) if eigen.get("reserve_enabled") else None,
             rte=rte,
             handelen=bool(eigen.get("trade")),
+            # Handelen in twee, met een grens per richting (v0.141.0).
+            net_laden=bool(eigen.get("grid_charge", True)),
+            net_laden_onder=getal("grid_charge_below"),
+            handelen_boven=getal("trade_above"),
             auto_boven=getal("car_above"),
             nacht=bool((settings.get("strategy") or {}).get("night_strategy", True)),
             power_w=self._batterij_w(device),
@@ -6348,11 +6355,16 @@ class ChargerCoach:
         # geladen." Gaat vanzelf uit zodra hij vol is; boven de avondpiek, net
         # als snelladen.
         if device_id in self._boost:
-            if b.soc is not None and b.soc >= b.soc_max - VOL_MARGE:
+            # Met een doel uit de pop-up tot daar, nooit boven de laadgrens (v0.141.0).
+            doel = min(self._vol_tot.get(device_id, b.soc_max), b.soc_max)
+            if b.soc is not None and b.soc >= doel - VOL_MARGE:
                 self._boost.discard(device_id)
+                self._vol_tot.pop(device_id, None)
                 self._remember(device_id)
-                await self._async_noteer(t("{naam} is vol; hij volgt het plan weer.", naam=naam), now,
-                                         {"device": device_id})
+                await self._async_noteer(
+                    t("{naam} is vol; hij volgt het plan weer.", naam=naam) if doel >= b.soc_max else
+                    t("{naam} is geladen tot {pct}%; hij volgt het plan weer.", naam=naam, pct=f"{doel:.0f}"),
+                    now, {"device": device_id})
             elif b.soc is not None and b.max_charge_w > 0:
                 besluit = Besluit(
                     MAX_LADEN,
@@ -6360,7 +6372,7 @@ class ChargerCoach:
                     reason=t(
                         "Je hebt gevraagd hem nu vol te laden, dus hij laadt van het net op "
                         "{kw} kW tot {pct}%, wat de prijs ook is.",
-                        kw=getal(b.max_charge_w / 1000, 1), pct=f"{b.soc_max:.0f}",
+                        kw=getal(b.max_charge_w / 1000, 1), pct=f"{doel:.0f}",
                     ),
                     plan=besluit.plan,
                     rule="vol-laden",
@@ -6491,6 +6503,8 @@ class ChargerCoach:
             "full_before": b.vol_voor.isoformat() if b.vol_voor else None,
             "earned": opgeleverd,
             "boost": device_id in self._boost,
+            # Tot waar "Nu vol laden" gaat, als de bewoner een doel koos (v0.141.0).
+            "boost_to": self._vol_tot.get(device_id) if device_id in self._boost else None,
             "drain_to": self._drain.get(device_id),
             "holiday": vakantie is not None,
             "hours": [
@@ -7188,9 +7202,13 @@ class ChargerCoach:
             # Behalve in de modus zon of continu zonder planning (v0.87.0): dan
             # volgt hij het nu en is er niets vooruit te plannen, en een lijst
             # met goedkoopste uren zou iets beloven wat hij niet doet.
+            # En zonder auto aan de paal ook niet (v0.141.0): de eigenaar op 19-10-2026
+            # over laadblokken bij een lege paal, "niet weergeven of meenemen". Anders
+            # plant de vooruitblik ze en rekent de batterij erop (`_auto_laden`).
             "plan_ahead": (
                 None
-                if not window.enabled and charger.modus in MODI_ZONDER_SOM
+                if decision.rule == "disconnected"
+                or (not window.enabled and charger.modus in MODI_ZONDER_SOM)
                 else self._tijdlijn(
                     now, settings, grid, car, charger, window,
                     # Laadt de klaar-tijdregel, dan zegt de tijdlijn dat ook
@@ -7198,6 +7216,9 @@ class ChargerCoach:
                     doorladen=decision.charge and decision.rule.startswith("deadline"),
                 )
             ),
+            # De klaar-tijd van het schema, ook zonder plan: de kaart toont de volgende
+            # deadline als er geen auto hangt (v0.141.0).
+            "deadline_next": window.deadline.isoformat() if window.enabled and window.deadline is not None else None,
             # Op hoeveel fasen een Alfen die mag wisselen nu staat (v0.104.0),
             # of niets als de coach daar niet over gaat.
             "phases_now": fasen_nu,
@@ -7925,6 +7946,9 @@ class ChargerCoach:
             else:
                 continue
             gevonden = [b for b in blokken if b is not None]
+            # Een laadpaal zonder auto staat er niet in (v0.141.0, "niet weergeven of meenemen").
+            if soort == "laadpaal" and st.get("rule") == "disconnected":
+                continue
             if gevonden or soort in ("laadpaal", "thuisbatterij", "boiler") and device.get("controllable"):
                 apparaten.append({"id": device_id, "type": soort, "blokken": gevonden})
 
@@ -12404,6 +12428,11 @@ class ChargerCoach:
                     self._drain[device_id] = float(row["drain_to"])
                 except (TypeError, ValueError):
                     pass
+            if row.get("boost_to") is not None:
+                try:
+                    self._vol_tot[device_id] = float(row["boost_to"])
+                except (TypeError, ValueError):
+                    pass
             if row.get("airco_on") or row.get("resident_until") or row.get("airco_w"):
                 sessie = self._airco_sessie(device_id)
                 try:
@@ -12434,6 +12463,7 @@ class ChargerCoach:
             "boost": device_id in self._boost,
             "paused": device_id in self._paused,
             "drain_to": self._drain.get(device_id),
+            "boost_to": self._vol_tot.get(device_id),
             "mode": self._modus.get(device_id),
             "target": self._doel.get(device_id),
         }
@@ -12478,8 +12508,17 @@ class ChargerCoach:
         self.async_refresh()
 
     @callback
-    def async_boost(self, device_id: str, on: bool) -> None:
-        """Snelladen aan of uit: laden op vol vermogen, ongeacht de prijs."""
+    def async_boost(self, device_id: str, on: bool, to_percent: float | None = None) -> None:
+        """Snelladen aan of uit: laden op vol vermogen, ongeacht de prijs.
+
+        Bij een thuisbatterij met een doel (v0.141.0): "Nu vol laden" tot die
+        accustand, gekozen met de schuif in de pop-up.
+        """
+        if on and to_percent is not None:
+            self._vol_tot[device_id] = float(to_percent)
+            self._drain.pop(device_id, None)
+        else:
+            self._vol_tot.pop(device_id, None)
         if on:
             self._boost.add(device_id)
             # Twee tegengestelde opdrachten van dezelfde persoon: de laatste
@@ -12505,6 +12544,7 @@ class ChargerCoach:
         else:
             self._drain[device_id] = float(to_percent)
             self._boost.discard(device_id)
+            self._vol_tot.pop(device_id, None)
         self._remember(device_id)
         self.async_refresh()
 

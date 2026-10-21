@@ -319,7 +319,7 @@ class LaadpaalCoachSensor(CoachEntiteit, SensorEntity):
             "schema_aan": schema["schema_aan"],
             "per_dag": schema["per_dag"],
             "schema_dagen": schema["schema_dagen"],
-            "klaar_om_volgende": met_zone(plan.get("deadline")),
+            "klaar_om_volgende": met_zone(plan.get("deadline") or st.get("deadline_next")),
             "entiteiten": {**entiteiten_van(self._device), **self._auto_entiteiten()},
         }
 
@@ -397,6 +397,8 @@ class BatterijCoachSensor(CoachEntiteit, SensorEntity):
             **accu_opgeleverd(self._settings, self._device_id, st),
             "override": override,
             "leeg_tot": st.get("drain_to"),
+            # Tot waar "Nu vol laden" gaat, als er een doel gekozen is (v0.141.0).
+            "vol_tot": st.get("boost_to"),
             "vakantie": bool(eigen.get("holiday")),
             # Ook als hij uit staat, en met de grens waarmee de coach rekent als
             # de installateur er geen invulde (v0.112.1).

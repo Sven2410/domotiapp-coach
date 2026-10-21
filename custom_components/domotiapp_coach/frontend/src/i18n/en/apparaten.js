@@ -629,7 +629,16 @@ export const APPARATEN = {
   "Reserve houden voor noodstroom.": "Keep a reserve for backup power.",
   "Onder deze accustand komt er niets meer uit, wat de prijzen ook zeggen.": "Below this charge level nothing more comes out, whatever the prices say.",
   "Reserve (%)": "Reserve (%)",
-  "Handelen: terugleveren op dure uren.": "Trading: export to the grid at expensive hours.",
+  "Handelen": "Trading",
+  "Laden uit het net tijdens lage tarieven.": "Charge from the grid at low prices.",
+  "De batterij mag dan ook van het net laden, als dat minder kost dan wat hij je straks bespaart. Staat dit uit, dan gaat er alleen zon in.":
+    "The battery may then also charge from the grid, if that costs less than it saves you later. If this is off, only solar goes in.",
+  "Alleen als de prijs onder (€/kWh)": "Only when the price is below (€/kWh)",
+  "Alleen als de prijs boven (€/kWh)": "Only when the price is above (€/kWh)",
+  "de coach bepaalt": "the coach decides",
+  "De all-in prijs, met belasting en opslag. Leeg: de coach kiest zelf de beste uren.":
+    "The all-in price, including tax and markup. Empty: the coach picks the best hours itself.",
+  "Ontladen naar het net tijdens hoge tarieven.": "Discharge to the grid at high prices.",
   "De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis.":
     "The battery may then also discharge to the grid, if that earns more than recharging later costs. If this is off, it only powers your own home.",
   "Een keer per week helemaal vol.": "Completely full once a week.",

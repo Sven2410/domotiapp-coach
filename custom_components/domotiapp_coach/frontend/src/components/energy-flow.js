@@ -72,6 +72,41 @@ const LAYOUTS = {
   },
 };
 
+/**
+ * Een naam over hooguit twee regels van `max` tekens, en anders afgekapt met "…"
+ * (v0.141.0). De eigenaar op 19-10-2026: "Anker Solix Solarbank Max AC" liep bij
+ * een bol over de rand. Op woorden gebroken; een woord dat zelf te lang is wordt
+ * afgekapt.
+ */
+export function naamRegels(naam, max) {
+  const woorden = String(naam ?? "").trim().split(/\s+/).filter(Boolean);
+  const kap = (tekst) => (tekst.length > max ? `${tekst.slice(0, max - 1).trimEnd()}…` : tekst);
+  const regels = [];
+  let regel = "";
+  for (const [i, woord] of woorden.entries()) {
+    const erbij = regel ? `${regel} ${woord}` : woord;
+    if (erbij.length <= max || !regel) {
+      regel = erbij;
+      continue;
+    }
+    regels.push(regel);
+    if (regels.length === 2) break;
+    regel = woord;
+    if (i === woorden.length - 1) break;
+  }
+  if (regels.length < 2 && regel) regels.push(regel);
+  const rest = woorden.join(" ").length > regels.join(" ").length;
+  const uit = regels.slice(0, 2).map(kap);
+  if (rest && uit.length === 2 && !uit[1].endsWith("…")) {
+    uit[1] = `${uit[1].slice(0, max - 1).trimEnd()}…`;
+  }
+  return uit;
+}
+
+// Hoeveel tekens een regel van een naam mag hebben, per indeling: de ruimte tussen
+// de bol aan de zijkant en de rand, bij 11,5 px in hoofdletters.
+const NAAM_TEKENS = { wide: 18, narrow: 12 };
+
 /** Straight segment between the edges of two circles. */
 function segment(a, b) {
   const dx = b.x - a.x;
@@ -291,15 +326,15 @@ class DacEnergyFlow extends DacElement {
         </foreignObject>
         ${
           big
-            ? `<text class="h-value" x="${pos.x}" y="${pos.y + 14}" text-anchor="middle">—</text>
-               <text class="h-unit" x="${pos.x}" y="${pos.y + 33}" text-anchor="middle"></text>`
+            ? // "178 W" op één regel, zoals bij de andere bollen (v0.141.0).
+              `<text class="h-value" x="${pos.x}" y="${pos.y + 20}" text-anchor="middle">—<tspan class="h-unit" dx="4"></tspan></text>`
             : // Waarde en eenheid op één regel. Drie regels onder elkaar passen
               // niet in een bol van deze maat: op een telefoon liep het icoon
               // dwars door de cijfers heen. Bij elkaar leest "248 W" bovendien
               // als één ding, wat het ook is.
               `<text class="n-value" x="${pos.x}" y="${pos.y + 13}" text-anchor="middle">—<tspan class="n-unit" dx="3"></tspan></text>`
         }
-        <text class="n-name" x="${pos.x}"
+        <text class="n-name" x="${pos.x}" data-boven="${labelAbove ? 1 : 0}"
               y="${
                 labelInside
                   ? pos.y + 50
@@ -495,13 +530,27 @@ class DacEnergyFlow extends DacElement {
       tspan.textContent = unit;
     } else {
       cell.textContent = text;
-      node.querySelector("text.h-unit").textContent = unit;
     }
-    node.querySelector("text.n-name").textContent = name;
+    this.setNaam_(node.querySelector("text.n-name"), name);
 
     // The halo brightens with activity, so an idle node visibly goes quiet.
     const level = Number.isFinite(value) ? Math.min(Math.abs(value) / 7000, 1) : 0;
     node.querySelector(".halo").style.opacity = (0.05 + level * 0.16).toFixed(3);
+  }
+
+  /** De naam onder (of boven) een bol, over hooguit twee regels. */
+  setNaam_(el, name) {
+    const regels = naamRegels(name, NAAM_TEKENS[this.mode_] ?? 18);
+    const x = el.getAttribute("x");
+    // Boven de bol groeit de naam omhoog, zodat hij niet in de bol loopt.
+    const boven = el.getAttribute("data-boven") === "1" && regels.length > 1;
+    el.replaceChildren(...regels.map((regel, i) => {
+      const tspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+      tspan.setAttribute("x", x);
+      tspan.setAttribute("dy", i ? "1.25em" : boven ? "-1.25em" : "0");
+      tspan.textContent = regel;
+      return tspan;
+    }));
   }
 
   /**
