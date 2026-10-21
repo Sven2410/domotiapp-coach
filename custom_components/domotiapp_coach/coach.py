@@ -209,6 +209,8 @@ TEMP_TERUG = 1.0
 VRIEZER_DEUR = timedelta(minutes=3)
 VRIEZER_GRENS_C = -15.0
 VRIEZER_WARM = timedelta(minutes=30)
+# Hoe lang na een temperatuur die niets zei een 0,0 als plaatshouder telt (v0.141.1).
+KOEL_NUL = timedelta(minutes=2)
 # De koelkast (v0.131.0): dezelfde drie meldingen, met dezelfde 3 minuten voor de
 # deur en hetzelfde half uur, maar een eigen grens. De eigenaar op 19-10-2026:
 # "boven de 10 graden". Met die van de vriezer zou een koelkast op 5 °C elke keer
@@ -1459,6 +1461,9 @@ class ChargerCoach:
         # De vriezerwacht (v0.125.0): per vriezer en per soort (deur, warm,
         # storing) sinds wanneer, en wat al gemeld is. Zie `_async_vriezerwacht`.
         self._vriezer_sinds: dict[tuple[str, str], datetime] = {}
+        # Wanneer de temperatuur van een vriezer of koelkast voor het laatst niets zei,
+        # voor de 0,0 waarmee Miele terugkomt (`KOEL_NUL`, v0.141.1).
+        self._koel_weg: dict[str, datetime] = {}
         self._vriezer_gemeld: set[tuple[str, str]] = set()
         # De smart plugs die altijd aan moeten staan (v0.120.0): sinds wanneer
         # hij uit is, welke al gemeld zijn, welke de coach zelf weer aanzette, en
@@ -2193,9 +2198,9 @@ class ChargerCoach:
             # volledig, zeg gewoon dat er iets mis is met de integratie". Wie
             # hem moet opzoeken kijkt in het log; wie hem leest heeft genoeg aan
             # de naam die hij zelf heeft ingevuld.
-            _LOGGER.warning(
-                "%s (%s) meldt al %d minuten niets", naam, entity_id, minuten
-            )
+            # Alleen de id (v0.141.1): het log blijft Nederlands, en de naam ging door
+            # `t()`, dus in het Engels kwam er "the temperature of ..." midden in.
+            _LOGGER.warning("%s meldt al %d minuten niets", entity_id, minuten)
             # Valt de reserveprijsbron in, dan rekent de coach niet zonder maar
             # daarmee (v0.101.3).
             zolang = t("De coach rekent zolang zonder.")
@@ -2498,6 +2503,16 @@ class ChargerCoach:
                     t("De deur van {naam} is weer dicht.", naam=van),
                 )
             temp = self._vriezer_temp(entities.get("temperature"))
+            # Miele komt na een storing in de cloud terug met 0,0 en pas na zo'n twintig
+            # seconden met de echte temperatuur (een klantwoning, 21-10-2026: vriezer en
+            # koelkast om 16:29:53 UTC 0,0 en om 16:30:15 weer -18 en 5). Vlak na niets is
+            # 0,0 dus een plaatshouder en geen meting.
+            if temp is None:
+                self._koel_weg[sleutel] = now
+            elif temp == 0.0 and sleutel in self._koel_weg and _tussen(self._koel_weg[sleutel], now) <= KOEL_NUL:
+                temp = None
+            else:
+                self._koel_weg.pop(sleutel, None)
             if temp is not None:
                 warm = temp > grens
                 koud = temp <= grens - TEMP_TERUG

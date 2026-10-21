@@ -41,6 +41,16 @@ def _engels() -> dict[str, str]:
     return _en
 
 
+def laden() -> None:
+    """De vertalingen inlezen, buiten de lus van Home Assistant (v0.141.1).
+
+    `_engels` leest een map, en Home Assistant meldde dat bij het opstarten drie keer
+    als "blocking call to scandir" (een klantwoning, 21-10-2026). De coach roept dit
+    daarom een keer aan in een executor (`async_setup_entry`); daarna is alles er.
+    """
+    _engels()
+
+
 def taal() -> str:
     """De taal van nu: "nl" of "en"."""
     return _taal

@@ -69,3 +69,12 @@ Een koelkast aan een smart plug blijft ook kunnen (`STEKKER_APPARATEN`): dan mee
 verbruik en kan hij hem altijd aan houden, maar meldt hij niets over de temperatuur.
 
 Proef 172 in test_coach.py, de proef "de koelkast" in test_rapport.mjs.
+
+## Miele komt terug met 0,0 (v0.141.1)
+
+Een klantwoning op 21-10-2026: de cloud van Miele viel weg van 15:51:08 tot 16:29:53 UTC, en
+bij het terugkomen meldden vriezer en koelkast ruim twintig seconden 0,0 voor de echte -18 en
+5; de koelkast deed hetzelfde om 10:21:57 (16 seconden). Een melding gaf dat niet, want "te
+warm" wacht een half uur, maar de wacht begon wel te lopen. Nu telt een 0,0 binnen twee minuten
+nadat de temperatuur niets zei (`KOEL_NUL`) niet als meting. Blijft hij 0,0, dan wel. Proef 186
+in test_coach.py.

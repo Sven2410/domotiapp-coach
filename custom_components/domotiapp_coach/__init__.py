@@ -20,7 +20,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.loader import async_get_integration
 
-from . import report, websocket
+from . import report, taal, websocket
 from .archive import async_get_archive
 from .coach import async_get_coach
 from .monitor import LoadMonitor
@@ -52,6 +52,8 @@ PLATFORMS = ["sensor", "binary_sensor", "button", "select", "switch", "time", "n
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up DomotiApp Coach from a config entry."""
     version = await _async_frontend_version(hass)
+    # De Engelse zinnen inlezen voordat iets ze vraagt: dat leest een map (v0.141.1).
+    await hass.async_add_executor_job(taal.laden)
 
     _async_register_websocket(hass)
     report.async_register(hass)
