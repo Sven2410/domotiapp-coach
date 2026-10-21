@@ -832,9 +832,17 @@ function deviceDetails(feed, device, settings) {
   if (device?.type === "thuisbatterij") {
     const rij = (settings?.battery_state ?? []).find((r) => r?.device === device.id) ?? {};
     const opgave = device.battery?.rte_percent;
+    // Per vermogen (v0.142.0): heen en terug, en per richting het rendement bij
+    // elk vermogen dat de coach gemeten heeft. Gaat voor alles, zoals in de coach.
+    const macht = rij.rte_power;
+    const pct = (x) => Math.round(x * 100);
+    const kw = (x) => x.toLocaleString(locale(), { maximumFractionDigits: 1 });
+    const punten = (lijst) => (lijst ?? []).map(([k, e]) => t("{pct}% bij {kw} kW", { pct: pct(e), kw: kw(k) })).join(", ");
     rows.push({
       label: t("Rendement"),
-      text: rij.rte
+      text: macht?.rte
+        ? t("{pct}% gemeten", { pct: (macht.rte * 100).toLocaleString(locale(), { maximumFractionDigits: 1 }) })
+        : rij.rte
         ? t("{pct}% gemeten", { pct: (rij.rte * 100).toLocaleString(locale(), { maximumFractionDigits: 1 }) })
         : opgave
           ? t("{pct}% opgegeven", { pct: Number(opgave).toLocaleString(locale(), { maximumFractionDigits: 1 }) })
@@ -842,6 +850,10 @@ function deviceDetails(feed, device, settings) {
             ? t("ongeveer {pct}%, gemeten in de accu", { pct: Math.round(rij.rte_accu * 100) })
             : t("nog niet bekend"),
     });
+    if (macht?.rte) {
+      rows.push({ label: t("Laden"), text: punten(macht.in) });
+      rows.push({ label: t("Ontladen"), text: punten(macht.out) });
+    }
   }
 
   // Een boiler heeft geen tabel en geen programma: wat de coach van hem weet

@@ -116,6 +116,44 @@ AUTO_MARGE = 5.0
 
 
 @dataclass
+class Rendement:
+    """Het rendement per richting en per vermogen, gemeten (v0.142.0).
+
+    Per richting punten (kW aan de accukant, rendement), oplopend in vermogen;
+    zie `Rendementmeter`, die ze leert. Tussen twee punten recht getrokken,
+    buiten de punten het dichtstbijzijnde: verder dan de metingen reiken neemt
+    de coach niets aan. In de eerste woning op 19-10-2026, tien dagen: laden
+    92% boven 1,2 kW; ontladen 88% bij 0,6 kW, 93% bij 0,9 kW en 96% bij
+    2,6 kW. 's Nachts nul op de meter is dus duurder dan de 83% heen en terug
+    laat zien.
+
+    Laden is wat er van een kWh aan de wisselstroomkant in de cellen komt,
+    ontladen wat er van een kWh uit de cellen aan de wisselstroomkant
+    overblijft.
+    """
+
+    laden: list[tuple[float, float]]
+    ontladen: list[tuple[float, float]]
+    # Per richting over alles wat er gemeten is, gewogen naar de energie. Voor
+    # wat geen vermogen kent: wat een kWh erin straks waard is, de nachtbalans.
+    gem_laden: float
+    gem_ontladen: float
+
+    @property
+    def rte(self) -> float:
+        return self.gem_laden * self.gem_ontladen
+
+
+def _op_vermogen(punten: list[tuple[float, float]], kw: float) -> float:
+    if kw <= punten[0][0]:
+        return punten[0][1]
+    for (k0, e0), (k1, e1) in zip(punten, punten[1:]):
+        if kw <= k1:
+            return e0 + (e1 - e0) * (kw - k0) / (k1 - k0) if k1 > k0 else e1
+    return punten[-1][1]
+
+
+@dataclass
 class Batterij:
     """Een thuisbatterij zoals de coach hem deze ronde ziet.
 
@@ -140,6 +178,9 @@ class Batterij:
     # een kWh-meter op de batterij, of door de bewoner ingevuld. None is "weet
     # hij niet", en dan wordt er niet gepland.
     rte: float | None = None
+    # Het rendement per richting en per vermogen, als dat gemeten is (v0.142.0).
+    # Dan is `rte` wat daar heen en terug uit komt. Zie `eta_in`.
+    rendement: Rendement | None = None
     # Of ontladen naar het net mag. Standaard uit.
     handelen: bool = False
     # Handelen in twee (v0.141.0). De eigenaar op 19-10-2026: "Batterij mag laden van
@@ -188,6 +229,66 @@ class Batterij:
         if self.soc is None or self.capacity_kwh is None:
             return None
         return self.soc / 100.0 * self.capacity_kwh
+
+
+def _wortel(rte: float | None) -> float:
+    """Eén richting uit het rendement heen en terug; zonder rendement geen verlies."""
+    return sqrt(min(max(rte, 0.05), 1.0)) if rte else 1.0
+
+
+def eta_in(b: Batterij, kw: float | None = None) -> float:
+    """Wat er van een kWh aan de wisselstroomkant in de cellen komt.
+
+    Bij `kw` aan de accukant als het rendement per vermogen gemeten is
+    (v0.142.0), anders gemiddeld; zonder dat de helft van het verlies heen en
+    terug, zoals tot dan overal.
+    """
+    r = b.rendement
+    if r is None:
+        return _wortel(b.rte)
+    return r.gem_laden if kw is None else _op_vermogen(r.laden, kw)
+
+
+def eta_uit(b: Batterij, kw: float | None = None) -> float:
+    """Wat er van een kWh uit de cellen aan de wisselstroomkant overblijft. Zie `eta_in`."""
+    r = b.rendement
+    if r is None:
+        return _wortel(b.rte)
+    return r.gem_ontladen if kw is None else _op_vermogen(r.ontladen, kw)
+
+
+def _ac(b: Batterij, e: float, naar: float, deel: float) -> float:
+    """Wat de batterij aan de wisselstroomkant doet als de inhoud in `deel` uur van `e` naar `naar` gaat.
+
+    In kWh, laden positief. Het vermogen is gelijk verdeeld over het blok.
+    """
+    d = naar - e
+    if d >= 0:
+        return d / eta_in(b, d / deel if deel > 0 else None)
+    return d * eta_uit(b, -d / deel if deel > 0 else None)
+
+
+def _cel_in(b: Batterij, ac: float, deel: float) -> float:
+    """Hoeveel er in de cellen komt van `ac` kWh laden in `deel` uur; het omgekeerde van `_ac`.
+
+    Het rendement hangt af van het vermogen aan de accukant, en dat hangt weer
+    af van het rendement; na een paar rondes ligt het vast (het rendement
+    verandert maar een paar procent over het hele bereik).
+    """
+    eta = eta_in(b)
+    if b.rendement is not None and deel > 0:
+        for _ in range(4):
+            eta = eta_in(b, ac * eta / deel)
+    return ac * eta
+
+
+def _cel_uit(b: Batterij, ac: float, deel: float) -> float:
+    """Hoeveel er uit de cellen moet voor `ac` kWh ontladen in `deel` uur. Zie `_cel_in`."""
+    eta = eta_uit(b)
+    if b.rendement is not None and deel > 0:
+        for _ in range(4):
+            eta = eta_uit(b, ac / eta / deel)
+    return ac / eta
 
 
 @dataclass
@@ -315,7 +416,6 @@ class _Som:
     laag: float
     hoog: float
     stap: float
-    eta: float
     # Of de avondpiek dicht is voor het net (vast contract). Zie `piek_dicht`.
     piek: bool = True
     # Per blok de inhoud waaronder hij aan het eind niet aan het net levert, met
@@ -390,34 +490,34 @@ def handelen_kan_niet(b: Batterij, prijzen: list[dict], now: datetime) -> bool:
 
 def _mogelijk(
     e: float, rij: dict, deel: float, huis: float, b: Batterij, som_laag: float,
-    hoog: float, eta: float, piek: bool = True, vloer: float | None = None,
+    hoog: float, piek: bool = True, vloer: float | None = None,
 ) -> tuple[float, float]:
     """Tussen welke inhoud de batterij aan het eind van dit blok kan zitten.
 
     `vloer` is de inhoud waaronder hij niet aan het net levert (v0.133.1): het
     huis voeden mag eronder, handelen niet. Zie `_nacht_vloer`.
     """
-    op = min(hoog, e + b.max_charge_w / 1000.0 * deel * eta)
+    op = min(hoog, e + _cel_in(b, b.max_charge_w / 1000.0 * deel, deel))
     if (piek and in_evening_peak(rij["start"])) or not _mag_netladen(b, rij):
         # Eis 4: in de avondpiek komt er niets van het net bij. Zon mag. En ook
         # niet als de bewoner het hier niet wil (v0.141.0).
-        op = min(op, e + max(0.0, -huis) * eta)
+        op = min(op, e + _cel_in(b, max(0.0, -huis), deel))
     neer_w = b.max_discharge_w / 1000.0 * deel
     handelt = _mag_handelen(b, rij)
     if not handelt:
         # Zonder handelen gaat er niets naar het net: hooguit wat het huis vraagt.
         neer_w = min(neer_w, max(0.0, huis))
-    neer = max(min(som_laag, e), e - neer_w / eta)
+    neer = max(min(som_laag, e), e - _cel_uit(b, neer_w, deel))
     if handelt and vloer is not None:
         # Aan het net leveren alleen tot de vloer; het huis voeden mag verder.
-        alleen_huis = max(min(som_laag, e), e - min(neer_w, max(0.0, huis)) / eta)
+        alleen_huis = max(min(som_laag, e), e - _cel_uit(b, min(neer_w, max(0.0, huis)), deel))
         neer = min(alleen_huis, max(neer, min(e, vloer)))
     return max(op, e), min(neer, e)
 
 
 def _zelf_toegestaan(
     kandidaten: set[float], e: float, deel: float, huis: float, b: Batterij,
-    som_laag: float, hoog: float, eta: float, stap: float = 0.0, handelen: bool | None = None,
+    som_laag: float, hoog: float, stap: float = 0.0, handelen: bool | None = None,
 ) -> set[float]:
     """Wat er van de kandidaten overblijft als de batterij zelf nul op de meter doet.
 
@@ -448,16 +548,16 @@ def _zelf_toegestaan(
     if handelen is None:
         handelen = b.handelen
     if huis > 0:
-        nul = max(min(som_laag, e), e - min(b.max_discharge_w / 1000.0 * deel, huis) / eta)
+        nul = max(min(som_laag, e), e - _cel_uit(b, min(b.max_discharge_w / 1000.0 * deel, huis), deel))
     elif huis < 0:
-        nul = min(max(hoog, e), e + min(b.max_charge_w / 1000.0 * deel, -huis) * eta)
+        nul = min(max(hoog, e), e + _cel_in(b, min(b.max_charge_w / 1000.0 * deel, -huis), deel))
     else:
         nul = e
     uit = {nul}
     boven, onder = max(e, nul), min(e, nul)
     # Wat het blok in tijd en vermogen toelaat, zonder de grenzen van de accustand.
-    op_blok = e + b.max_charge_w / 1000.0 * deel * eta
-    neer_blok = e - b.max_discharge_w / 1000.0 * deel / eta
+    op_blok = e + _cel_in(b, b.max_charge_w / 1000.0 * deel, deel)
+    neer_blok = e - _cel_uit(b, b.max_discharge_w / 1000.0 * deel, deel)
     erop = boven + min(stap, max(0.0, op_blok - boven)) - 1e-9
     eraf = onder - min(stap, max(0.0, onder - neer_blok)) + 1e-9
     for k in kandidaten:
@@ -483,13 +583,14 @@ def _loopt_al(b: Batterij, rij: dict) -> bool:
     )
 
 
-def _blok_kosten(e: float, naar: float, huis: float, rij: dict, eta: float) -> float:
-    """Wat dit blok kost als de inhoud van `e` naar `naar` gaat."""
-    if naar >= e:
-        ac = (naar - e) / eta
-    else:
-        ac = -(e - naar) * eta
-    return _kosten(huis + ac, rij)
+def _blok_kosten(e: float, naar: float, huis: float, rij: dict, b: Batterij, deel: float) -> float:
+    """Wat dit blok kost als de inhoud van `e` naar `naar` gaat.
+
+    Met het rendement bij het vermogen van dat blok (v0.142.0): 's nachts het
+    huis voeden op een paar honderd watt kost meer verlies dan op twee kilowatt
+    aan het net leveren.
+    """
+    return _kosten(huis + _ac(b, e, naar, deel), rij)
 
 
 def _waarde_vooruit(
@@ -510,7 +611,6 @@ def _waarde_vooruit(
     """
     if b.rte is None or b.capacity_kwh is None or b.soc is None or not blokken:
         return None
-    eta = sqrt(min(max(b.rte, 0.05), 1.0))
     inhoud = b.soc / 100.0 * b.capacity_kwh
     hoog = max(b.soc_max / 100.0 * b.capacity_kwh, inhoud)
     bodem = b.bodem / 100.0 * b.capacity_kwh
@@ -532,7 +632,7 @@ def _waarde_vooruit(
     vloer = _nacht_vloer(blokken, forecast, b, bodem)
 
     eind_prijs = _gemiddeld_bekend(blokken) or 0.0
-    volgende = [-(max(0.0, e - bodem)) * eta * eind_prijs for e in rooster]
+    volgende = [-(max(0.0, e - bodem)) * eta_uit(b) * eind_prijs for e in rooster]
 
     # `na[k]` is wat de rest nog kost vanaf het einde van blok k.
     na: list[list[float]] = [[] for _ in blokken]
@@ -544,48 +644,48 @@ def _waarde_vooruit(
         na[k] = volgende
         begin = []
         for e in rooster:
-            op, neer = _mogelijk(e, rij, deel, h, b, bodem, hoog, eta, piek, None if vloer is None else vloer[k])
+            op, neer = _mogelijk(e, rij, deel, h, b, bodem, hoog, piek, None if vloer is None else vloer[k])
             kandidaten = {e, op, neer}
             if h > 0:
-                kandidaten.add(max(neer, e - h / eta))
+                kandidaten.add(max(neer, e - _cel_uit(b, h, deel)))
             elif h < 0:
-                kandidaten.add(min(op, e + (-h) * eta))
+                kandidaten.add(min(op, e + _cel_in(b, -h, deel)))
             eerste = int((neer - laag) / stap) + 1
             laatste = int((op - laag) / stap)
             for i in range(max(0, eerste), min(STAPPEN, laatste) + 1):
                 kandidaten.add(rooster[i])
             kandidaten = _zelf_toegestaan(
-                kandidaten, e, deel, h, b, bodem, hoog, eta, 0.0 if k == 0 and _loopt_al(b, rij) else stap,
+                kandidaten, e, deel, h, b, bodem, hoog, 0.0 if k == 0 and _loopt_al(b, rij) else stap,
                 handelen=_mag_handelen(b, rij),
             )
             begin.append(
                 min(
-                    _blok_kosten(e, naar, h, rij, eta) + _tussen(volgende, stap, laag, naar)
+                    _blok_kosten(e, naar, h, rij, b, deel) + _tussen(volgende, stap, laag, naar)
                     for naar in kandidaten
                 )
             )
         volgende = begin
 
-    return _Som(blokken, delen, huis, na, laag, hoog, stap, eta, piek, vloer)
+    return _Som(blokken, delen, huis, na, laag, hoog, stap, piek, vloer)
 
 
 def _beste_stap(som: _Som, k: int, e: float, b: Batterij) -> float:
     """Naar welke inhoud de batterij in blok k het beste kan gaan."""
     rij, deel, h = som.blokken[k], som.delen[k], som.huis[k]
     bodem = b.bodem / 100.0 * (b.capacity_kwh or 0.0)
-    op, neer = _mogelijk(e, rij, deel, h, b, bodem, som.hoog, som.eta, som.piek,
+    op, neer = _mogelijk(e, rij, deel, h, b, bodem, som.hoog, som.piek,
                          None if som.vloer is None else som.vloer[k])
     kandidaten = {e, op, neer}
     if h > 0:
-        kandidaten.add(max(neer, e - h / som.eta))
+        kandidaten.add(max(neer, e - _cel_uit(b, h, deel)))
     elif h < 0:
-        kandidaten.add(min(op, e + (-h) * som.eta))
+        kandidaten.add(min(op, e + _cel_in(b, -h, deel)))
     i = int((neer - som.laag) / som.stap) + 1
     while i <= STAPPEN and som.laag + i * som.stap <= op:
         kandidaten.add(som.laag + i * som.stap)
         i += 1
     kandidaten = _zelf_toegestaan(
-        kandidaten, e, deel, h, b, bodem, som.hoog, som.eta, 0.0 if k == 0 and _loopt_al(b, rij) else som.stap,
+        kandidaten, e, deel, h, b, bodem, som.hoog, 0.0 if k == 0 and _loopt_al(b, rij) else som.stap,
         handelen=_mag_handelen(b, rij),
     )
     # Bij gelijke kosten wint niets doen, en daarna het kleinste gebaar: een
@@ -594,7 +694,7 @@ def _beste_stap(som: _Som, k: int, e: float, b: Batterij) -> float:
         kandidaten,
         key=lambda naar: (
             round(
-                _blok_kosten(e, naar, h, rij, som.eta)
+                _blok_kosten(e, naar, h, rij, b, deel)
                 + _tussen(som.na[k], som.stap, som.laag, naar),
                 6,
             ),
@@ -623,7 +723,7 @@ def _vooruit(som: _Som, b: Batterij) -> list[Uur]:
         if som.delen[k] <= 0:
             continue
         naar = _beste_stap(som, k, e, b)
-        ac = (naar - e) / som.eta if naar >= e else -(e - naar) * som.eta
+        ac = _ac(b, e, naar, som.delen[k])
         h = som.huis[k]
         net = max(0.0, ac - max(0.0, -h)) if ac > 0 else min(0.0, ac + max(0.0, h))
         uit.append(
@@ -765,8 +865,8 @@ def _morgenvroeg(now: datetime) -> datetime:
     return eind + timedelta(days=1) if eind <= now else eind
 
 
-def _nacht_uren(now: datetime, forecast: Forecast) -> list[tuple[float, float]]:
-    """Per uur tot morgenvroeg: (zon, huis) in kWh, het lopende uur naar rato."""
+def _nacht_uren(now: datetime, forecast: Forecast) -> list[tuple[float, float, float]]:
+    """Per uur tot morgenvroeg: (zon, huis) in kWh, het lopende uur naar rato, en hoeveel uur dat is."""
     uren = []
     eind = _morgenvroeg(now)
     # Per uur op de klok, met de echte duur (`_klokuren` in planner.py): de nacht van
@@ -776,7 +876,7 @@ def _nacht_uren(now: datetime, forecast: Forecast) -> list[tuple[float, float]]:
         opbrengst = max(0.0, forecast.solar_kwh.get(uur, 0.0))
         if forecast.solar_factor is not None and uur.date() == forecast.solar_day:
             opbrengst *= forecast.solar_factor
-        uren.append((opbrengst * deel, forecast.house_kwh.get(uur.hour, 0.0) * deel))
+        uren.append((opbrengst * deel, forecast.house_kwh.get(uur.hour, 0.0) * deel, deel))
     return uren
 
 
@@ -789,8 +889,8 @@ def nachtbalans(now: datetime, forecast: Forecast, b: Batterij) -> tuple[float, 
     if not forecast.house_kwh or b.inhoud_kwh is None:
         return None
     uren = _nacht_uren(now, forecast)
-    zon = sum(z for z, _ in uren)
-    huis = sum(h for _, h in uren)
+    zon = sum(z for z, _h, _d in uren)
+    huis = sum(h for _z, h, _d in uren)
     bruikbaar = max(0.0, b.inhoud_kwh - b.bodem / 100.0 * (b.capacity_kwh or 0.0))
     return zon, huis, bruikbaar
 
@@ -805,7 +905,8 @@ def nachtverloop(
     je ooit 16 kWh in een accu hebben van 14 kWh?" De som telde alle zon tot
     morgenvroeg bij wat erin zat, en een accu is geen emmer zonder rand. Nu per
     uur: overschot gaat erin tot de laadgrens (`soc_max`) en de rest naar het
-    net; wat het huis vraagt komt eruit met het rendement, tot de ondergrens;
+    net; wat het huis vraagt komt eruit met het rendement van het ontladen, op
+    het vermogen van dat uur (v0.142.0; tot dan het hele verlies heen en terug), tot de ondergrens;
     en wat er dan nog ontbreekt is tekort, dat van het net komt en niet meer
     terugkomt als 's ochtends de zon opkomt. Zonder gemeten rendement telt
     wat erin zit voor de volle inhoud, want een gok is geen meting.
@@ -823,9 +924,8 @@ def nachtverloop(
     cap = b.capacity_kwh or 0.0
     ruimte = max(0.0, (b.soc_max - b.bodem) / 100.0 * cap)
     inhoud = min(inhoud, ruimte) if ruimte else inhoud
-    eta = b.rte if b.rte else 1.0
     tekort = weg = 0.0
-    for zon, huis in _nacht_uren(now, forecast):
+    for zon, huis, deel in _nacht_uren(now, forecast):
         netto = zon - huis
         if netto >= 0:
             erbij = min(netto, max(0.0, ruimte - inhoud))
@@ -833,6 +933,7 @@ def nachtverloop(
             weg += netto - erbij
         else:
             nodig = -netto
+            eta = nodig / _cel_uit(b, nodig, deel)
             kan = inhoud * eta
             if kan >= nodig:
                 inhoud -= nodig / eta
@@ -849,11 +950,10 @@ def _nacht_nodig(t: datetime, forecast: Forecast, b: Batterij) -> float:
     `t`, per uur wat het huis vraagt min de zon, met het verlies zoals daar.
     Zon in een uur maakt het tekort van de uren erna kleiner.
     """
-    eta = b.rte if b.rte else 1.0
     nodig = 0.0
-    for zon, huis in reversed(_nacht_uren(t, forecast)):
+    for zon, huis, deel in reversed(_nacht_uren(t, forecast)):
         netto = zon - huis
-        nodig = nodig - netto / eta if netto < 0 else max(0.0, nodig - netto)
+        nodig = nodig + _cel_uit(b, -netto, deel) if netto < 0 else max(0.0, nodig - netto)
     return nodig
 
 
@@ -890,7 +990,7 @@ def balans_kwh(now: datetime, forecast: Forecast, b: Batterij, weg: float = 0.0)
     inhoud, tekort, _weg = verloop
     if tekort > 0.05:
         return -tekort
-    return inhoud * (b.rte if b.rte else 1.0)
+    return inhoud * eta_uit(b)
 
 
 def _vlak(blokken: list[dict]) -> bool:
@@ -921,7 +1021,7 @@ def _vooruitkijk_zin(
     accu, of je hebt X kWh tekort om de nacht te overbruggen."
     """
     som = nachtbalans(now, forecast, b)
-    eta = sqrt(min(max(b.rte, 0.05), 1.0)) if b.rte else 1.0
+    eta = eta_uit(b)
     # `auto` is aan de wisselstroomkant, zoals de bewoner hem in de auto ziet
     # gaan; de nachtbalans rekent aan de accukant.
     verloop = nachtverloop(now, forecast, b, auto / eta)
@@ -932,7 +1032,7 @@ def _vooruitkijk_zin(
     balans = balans_kwh(now, forecast, b, auto / eta) or 0.0
     # Wat erin zit komt er niet helemaal uit; de conclusie rekent met het
     # rendement, dus de zin zegt erbij waar hij mee rekent.
-    eruit = t(", goed voor {kwh} na het verlies", kwh=_kwh(bruikbaar * b.rte)) if b.rte and bruikbaar > 0 else ""
+    eruit = t(", goed voor {kwh} na het verlies", kwh=_kwh(bruikbaar * eta)) if b.rte and bruikbaar > 0 else ""
     # En zon die er niet meer in past gaat naar het net: dat verklaart waarom
     # de optelsom van zon en batterij meer is dan wat er morgenvroeg over is.
     past_niet = (
@@ -1080,7 +1180,7 @@ def plan_batterij(
             Besluit(
                 NUL,
                 reason=t("Hij houdt de meter op nul. Het rendement van de batterij is nog niet bekend, dus van het net laden doet hij nog niet."),
-                plan=t("Met een kWh-meter op de batterij meet de coach het zelf; anders vul je het in bij Apparaten."),
+                plan=t("De coach meet het zelf terwijl hij de batterij laadt en ontlaadt; je kunt het ook invullen bij Apparaten."),
                 rule="rendement-onbekend",
             ),
             paal_laadt, b,
@@ -1121,7 +1221,7 @@ def plan_batterij(
     hulp_nu = (hulp[0] > 0.005) if laadt_gepland and hulp else None
     hulp_om = next((u.start for u, h in zip(uren, hulp) if h > 0.005), None)
     auto_ac = _met_auto(uren, b, hulp)
-    auto_weg = auto_ac / som.eta
+    auto_weg = auto_ac / eta_uit(b)
     kijk = _vooruitkijk_zin(now, forecast, b, auto_ac, bijladen=not _vlak(blokken), uren=uren)
     piek = dicht and in_evening_peak(now)
     # Onder welke prijs een kWh van het net erbij nu loont: wat hij in de
@@ -1129,7 +1229,7 @@ def plan_batterij(
     # eigenaar op 30-09-2026 bij "Een kWh erin € 0,301, is straks waard" en een
     # nacht van € 0,313: "is het niet goedkoper om iets bij te kopen?" Die
     # € 0,301 is per kWh ín de batterij; naast de prijslijst hoort € 0,259.
-    inkoop = None if vol else erbij * som.eta
+    inkoop = None if vol else erbij * eta_in(b)
 
     # Zon opslaan en het huis voeden: elk tegen wat een kilowattuur in de
     # batterij straks waard is.
@@ -1138,8 +1238,14 @@ def plan_batterij(
     # batterij hoe dan ook vol, en dan is een kilowattuur zon nu opslaan precies
     # evenveel waard als hem straks opslaan; wie dan "niet" kiest rekent op een
     # zon die er nog niet is. Hetzelfde voor het huis voeden.
-    mag_zon = not vol and (terug is None or terug <= erbij * som.eta + PRICE_MARGIN)
-    mag_huis = not leeg and koop * som.eta >= eraf - PRICE_MARGIN
+    # Met het rendement bij het vermogen van dit blok: wat het huis nu vraagt of
+    # wat er nu over is (v0.142.0). 's Nachts op 300 W levert een kWh uit de
+    # batterij minder op dan het gemiddelde zegt.
+    nu_kw = som.huis[0] / som.delen[0] if som.delen and som.delen[0] > 0 else 0.0
+    zon_eta = nu_kw < 0 and _cel_in(b, -nu_kw, 1.0) / -nu_kw or eta_in(b)
+    huis_eta = nu_kw > 0 and nu_kw / _cel_uit(b, nu_kw, 1.0) or eta_uit(b)
+    mag_zon = not vol and (terug is None or terug <= erbij * zon_eta + PRICE_MARGIN)
+    mag_huis = not leeg and koop * huis_eta >= eraf - PRICE_MARGIN
 
     # Van het net laden en handelen: die volgen het plan zelf. Zie
     # `_rustig_vermogen`.
@@ -1269,7 +1375,7 @@ def _overname_drempel(som: _Som, b: Batterij) -> float:
     """
     if not b.zelf_nul or b.overgenomen:
         return 0.0
-    return som.stap / som.eta
+    return som.stap / eta_in(b)
 
 
 def auto_hulp(
@@ -1318,7 +1424,7 @@ def auto_hulp(
     uit = [0.0] * len(uren)
     if b.auto_boven is None or b.capacity_kwh is None or b.soc is None or not laden:
         return uit
-    eta = sqrt(min(max(b.rte, 0.05), 1.0)) if b.rte else 1.0
+    eta = eta_uit(b)
     cap = b.capacity_kwh
     vrij = float("inf")
     if b.nacht:
@@ -1326,7 +1432,7 @@ def auto_hulp(
             return uit
         # Dezelfde maat als `auto_grens`: wat er morgenvroeg over is, terug naar
         # de accukant.
-        vrij = max(0.0, over_kwh) / (b.rte if b.rte else 1.0)
+        vrij = max(0.0, over_kwh) / eta
     grens = max(float(b.auto_boven), b.bodem) / 100.0 * cap
     marge = AUTO_MARGE / 100.0 * cap
     # Per blok: wat de auto van het net zou nemen, wat er naast het huis van het
@@ -1367,7 +1473,7 @@ def _met_auto(uren: list[Uur], b: Batterij, hulp: list[float]) -> float:
     """Wat `auto_hulp` zegt in het uurplan zetten, en het totaal teruggeven."""
     if not any(hulp) or not b.capacity_kwh:
         return 0.0
-    eta = sqrt(min(max(b.rte, 0.05), 1.0)) if b.rte else 1.0
+    eta = eta_uit(b)
     weg = 0.0
     for uur, geef in zip(uren, hulp):
         if geef > 0:
@@ -1414,7 +1520,7 @@ def auto_grens(b: Batterij, over_kwh: float | None) -> float | None:
     if b.nacht:
         if over_kwh is None:
             return None
-        vrij = max(0.0, over_kwh) / (b.rte if b.rte else 1.0)
+        vrij = max(0.0, over_kwh) / eta_uit(b)
         grens = max(grens, b.soc - vrij / b.capacity_kwh * 100.0)
     return grens
 
@@ -2000,3 +2106,200 @@ def rendement_uit_tellers(
         return None
     rte = eruit_kwh / erin_kwh
     return rte if 0.3 <= rte <= 1.0 else None
+
+
+# --- Het rendement per vermogen leren (v0.142.0) -----------------------------
+#
+# De eigenaar op 19-10-2026, bij een grafiek van een thuisbatterij die bij 200 W
+# ongeveer 70% haalt en vanaf 1.200 W 92 tot 93%: "RTE is dramatisch op lage
+# vermogens.. NoM in de nacht niet bevorderlijk dus." Eerst gemeten, in de
+# eerste woning over tien dagen (notities van 19-10-2026): 896 schone stappen van
+# één procent, met de wisselstroom uit het vermogen van de batterij zelf
+# (nagemeten op de fase van de meter waar hij aan hangt, op 0,2 tot 0,4%) en de
+# cellen uit de accustand maal de capaciteit. Dezelfde som doet de coach nu zelf,
+# terwijl hij de batterij volgt; dan werkt hij ook zonder kWh-meter.
+
+# De vermogensbanden aan de wisselstroomkant, in watt: de ondergrens van elke
+# band. Die van de meting van 19-10-2026, met de bovenste gesplitst bij 2 kW.
+RTE_BANDEN = (0.0, 300.0, 700.0, 1200.0, 2000.0)
+# Alleen stappen tussen deze accustanden: daarbuiten kwamen er in de meting
+# waarden boven 100% uit (de batterij kalibreert zich bovenin en onderin).
+RTE_SOC_LAAG = 10.0
+RTE_SOC_HOOG = 90.0
+# Hoeveel er tijdens een stap de andere kant op mag gaan, als deel van wat er
+# de goede kant op ging. Meer is geen stap van laden of van ontladen.
+RTE_TEGEN = 0.02
+# Hoeveel van de tijd van een stap in één band moet liggen om bij die band te
+# horen (0,5 in de meting: `band.py 0.5`).
+RTE_BAND_DEEL = 0.5
+# Een stap met een rendement daarbuiten is een hapering van een sensor en geen
+# meting. Binnen die grenzen middelt het uit: een procent is nooit precies een
+# procent, en in de meting lag een op de tien stappen boven de 98%.
+RTE_STAP_LAAG = 0.4
+RTE_STAP_HOOG = 1.6
+# Hoeveel stappen een band minstens heeft voordat hij telt, en per richting in
+# totaal voordat de coach ermee rekent. Een dag laden en ontladen is er ruim
+# genoeg voor: in de meting 40 tot 90 stappen per richting per dag.
+RTE_MIN_BAND = 10
+RTE_MIN_RICHTING = 30
+# Boven zoveel stappen in een band telt alles voor de helft, zodat een batterij
+# die ouder wordt of een nieuwe omvormer krijgt het rendement meeneemt.
+RTE_MAX_BAND = 400
+# Een gat tussen twee metingen van langer dan dit maakt de stap ongeldig: wat er
+# in dat gat gebeurde weet de coach niet.
+RTE_GAT = timedelta(seconds=90)
+
+
+def _band(watt: float) -> int:
+    for i in range(len(RTE_BANDEN) - 1, -1, -1):
+        if watt >= RTE_BANDEN[i]:
+            return i
+    return 0
+
+
+@dataclass
+class Rendementmeter:
+    """Leert het rendement per richting en per vermogen, tussen twee omslagen van de accustand.
+
+    Een stap begint op het moment dat de accustand een procent omslaat en eindigt
+    bij de volgende omslag dezelfde kant op. In die tijd ging er precies een
+    procent van de capaciteit in of uit de cellen, en telt de meter wat er aan
+    de wisselstroomkant doorheen ging: uit een kWh-meter op de batterij als die
+    er is, anders uit het vermogen. Een sprong van meer dan een procent, een
+    omkering, een gat in de metingen of te veel de andere kant op, en de stap
+    telt niet; de volgende begint dan bij deze omslag.
+
+    `sommen` is wat er bewaard wordt: per richting ("in", "uit") per band de
+    wisselstroom en de cellen in kWh, de seconden en het aantal stappen.
+    """
+
+    sommen: dict = field(default_factory=dict)
+    _soc: float | None = None
+    _richting: int = 0
+    _geldig: bool = False
+    _op: datetime | None = None
+    _erin: float = 0.0
+    _eruit: float = 0.0
+    _seconden: float = 0.0
+    _in_band: dict = field(default_factory=dict)
+    _teller: tuple[float, float] | None = None
+    _w: float | None = None
+
+    def tik(
+        self, now: datetime, soc: float | None, watt: float | None, capaciteit_kwh: float | None,
+        teller_in: float | None = None, teller_uit: float | None = None,
+    ) -> bool:
+        """Eén meting: de accustand, het vermogen (laden positief) en eventueel de tellers.
+
+        True als er een stap bij kwam, zodat de coach weet dat er iets te bewaren is.
+        """
+        if soc is None or watt is None or not capaciteit_kwh:
+            self._opnieuw(None)
+            self._w = None
+            return False
+        if self._op is not None and self._w is not None:
+            # Het vermogen van de vorige meting gold tot nu.
+            vorig = self._w
+            dt = (now - self._op).total_seconds()
+            if dt < 0 or dt > RTE_GAT.total_seconds():
+                self._geldig = False
+            elif self._geldig:
+                kwh = vorig * dt / 3_600_000.0
+                if kwh >= 0:
+                    self._erin += kwh
+                else:
+                    self._eruit -= kwh
+                self._seconden += dt
+                band = _band(abs(vorig))
+                self._in_band[band] = self._in_band.get(band, 0.0) + dt
+        self._op = now
+        self._w = watt
+        teller = (teller_in, teller_uit) if teller_in is not None and teller_uit is not None else None
+        if self._soc is None:
+            self._opnieuw(soc, teller)
+            return False
+        if soc == self._soc:
+            return False
+        d = soc - self._soc
+        richting = 1 if d > 0 else -1
+        bij = False
+        if abs(d) == 1.0 and self._geldig and richting == self._richting:
+            bij = self._stap(richting, min(soc, self._soc), capaciteit_kwh, teller)
+        self._opnieuw(soc, teller, richting if abs(d) == 1.0 else 0)
+        return bij
+
+    def _opnieuw(self, soc: float | None, teller: tuple[float, float] | None = None, richting: int = 0) -> None:
+        self._soc = soc
+        self._richting = richting
+        self._geldig = richting != 0
+        self._erin = self._eruit = self._seconden = 0.0
+        self._in_band = {}
+        self._teller = teller
+
+    def _stap(self, richting: int, soc: float, capaciteit_kwh: float, teller: tuple[float, float] | None) -> bool:
+        if soc < RTE_SOC_LAAG or soc + 1.0 > RTE_SOC_HOOG or self._seconden <= 0:
+            return False
+        erin, eruit = self._erin, self._eruit
+        if teller is not None and self._teller is not None:
+            # Een kWh-meter op de batterij weet het beter dan het vermogen.
+            erin, eruit = teller[0] - self._teller[0], teller[1] - self._teller[1]
+            if erin < 0 or eruit < 0:
+                return False
+        goed, tegen = (erin, eruit) if richting > 0 else (eruit, erin)
+        if goed <= 0 or tegen > RTE_TEGEN * goed:
+            return False
+        ac = goed - tegen
+        cel = capaciteit_kwh / 100.0
+        eta = cel / ac if richting > 0 else ac / cel
+        if not RTE_STAP_LAAG <= eta <= RTE_STAP_HOOG:
+            return False
+        band, tijd = max(self._in_band.items(), key=lambda kv: kv[1])
+        if tijd < RTE_BAND_DEEL * self._seconden:
+            return False
+        kant = self.sommen.setdefault("in" if richting > 0 else "uit", {})
+        som = kant.setdefault(str(int(RTE_BANDEN[band])), {"ac": 0.0, "cel": 0.0, "s": 0.0, "n": 0})
+        if som["n"] >= RTE_MAX_BAND:
+            for sleutel in ("ac", "cel", "s"):
+                som[sleutel] /= 2.0
+            som["n"] //= 2
+        som["ac"] += ac
+        som["cel"] += cel
+        som["s"] += self._seconden
+        som["n"] += 1
+        return True
+
+
+def rendement_uit_stappen(sommen: dict | None) -> Rendement | None:
+    """Het rendement per vermogen uit wat `Rendementmeter` bewaarde, of None als het nog te weinig is.
+
+    Per band een punt: het gemiddelde vermogen aan de accukant en het rendement
+    over al zijn stappen samen. Beide richtingen moeten er zijn, want de som
+    heeft ze allebei nodig, en een richting telt pas met `RTE_MIN_RICHTING`
+    stappen in banden die er elk minstens `RTE_MIN_BAND` hebben.
+    """
+    if not isinstance(sommen, dict):
+        return None
+    punten: dict[str, list[tuple[float, float]]] = {}
+    gem: dict[str, float] = {}
+    for kant in ("in", "uit"):
+        banden = [
+            som for som in (sommen.get(kant) or {}).values()
+            if isinstance(som, dict) and int(som.get("n") or 0) >= RTE_MIN_BAND
+            and float(som.get("ac") or 0) > 0 and float(som.get("cel") or 0) > 0 and float(som.get("s") or 0) > 0
+        ]
+        if sum(int(som["n"]) for som in banden) < RTE_MIN_RICHTING:
+            return None
+        rij = []
+        for som in banden:
+            ac, cel = float(som["ac"]), float(som["cel"])
+            rij.append((cel / float(som["s"]) * 3600.0, cel / ac if kant == "in" else ac / cel))
+        punten[kant] = sorted(rij)
+        ac = sum(float(som["ac"]) for som in banden)
+        cel = sum(float(som["cel"]) for som in banden)
+        gem[kant] = cel / ac if kant == "in" else ac / cel
+    # Heen en terug moet onder de honderd procent blijven, anders klopt er iets
+    # niet (een capaciteit die te hoog staat telt bij laden te veel en bij
+    # ontladen te weinig, maar heen en terug valt dat weg).
+    if not 0.3 <= gem["in"] * gem["uit"] <= 1.0:
+        return None
+    return Rendement(punten["in"], punten["uit"], gem["in"], gem["uit"])
