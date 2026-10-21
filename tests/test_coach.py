@@ -9180,7 +9180,7 @@ controle("de sensor zegt Alleen uitlezen in plaats van niets", kaart159.native_v
          f"{kaart159.native_value!r}")
 controle("vol laden, leegladen, terug naar het plan, de vakantiestand en leegladen tot: niet beschikbaar",
          sorted(e.unique_id.split("_", 1)[1] for e in accu_bediening159)
-         == ["leeg_tot", "leegladen", "terug_naar_plan", "vakantiestand", "vol_laden"]
+         == ["leeg_tot", "leegladen", "terug_naar_plan", "vakantiestand", "vol_laden", "vol_tot"]
          and not any(e.available for e in accu_bediening159), f"{[(e.unique_id, e.available) for e in accu_bediening159]}")
 
 # Een Anker met hetzelfde vinkje stuurt hij gewoon.
@@ -9201,7 +9201,7 @@ for module159 in (knopmod, schakelmod, getalmod):
     asyncio.run(module159.async_setup_entry(hass159b, Invoer110(), lambda nieuw: bediening159b.extend(nieuw)))
 anker159 = [e for e in bediening159b if e.unique_id.startswith("dev-batterij_")]
 controle("bij een Anker die hij stuurt is alles beschikbaar, en de sensor heeft zijn stand",
-         len(anker159) == 5 and all(e.available for e in anker159)
+         len(anker159) == 6 and all(e.available for e in anker159)  # vol_tot sinds v0.141.0
          and kaart159b.native_value not in ("", "Alleen uitlezen"), f"{kaart159b.native_value!r}")
 controle("zonder capaciteit: null",
          sys.modules["domotiapp_coach.entiteit"].accu_capaciteit(None, {"battery": {"capacity_kwh": None}}) is None
@@ -10714,6 +10714,52 @@ try:
     controle("het contract blijft 1", sensor143[0].extra_state_attributes["contract"] == 1)
 finally:
     taal182.kies("nl")
+
+print("=== 184. een laadpaal zonder auto plant niets (v0.141.0) ===")
+# De eigenaar op 19-10-2026, over laadblokken in de vooruitblik bij een lege paal: "niet
+# weergeven of meenemen". De batterij rekende er ook op (`_auto_laden`).
+inst184 = instellingen(devices=[PAAL144])
+inst184["strategy"]["schedules"][0].update(per_day=False, window={"not_before": "", "start_by": "", "done_by": "06:00"})
+hass184, store184, coach184 = bouw(dict(huis(status="disconnected"), **{"sensor.auto_soc": "42", "sensor.auto_bereik": "120"}), inst184)
+hass184.data["domotiapp_coach"]["coach"] = coach184
+asyncio.run(ronde(coach184, inst184, nu=dt.datetime(2026, 10, 19, 21, 30), paal=PAAL144))
+st184 = coach184.state["dev-laadpaal"]
+print(f"  regel {st184['rule']}, plan_ahead {st184['plan_ahead']}, deadline_next {st184.get('deadline_next')}")
+controle("geen kabel: geen plan", st184["rule"] == "disconnected" and st184["plan_ahead"] is None, f"{st184['rule']}")
+controle("en dus niets voor de batterij", coach184._auto_laden() == [], f"{coach184._auto_laden()}")
+vb184 = coach184.vooruitblik(inst184, dt.datetime(2026, 10, 19, 21, 30))
+controle("en niet in de vooruitblik", not any(a["type"] == "laadpaal" for a in vb184["apparaten"]), f"{vb184['apparaten']}")
+sensoren184 = []
+asyncio.run(sensormod.async_setup_entry(hass184, Invoer110(), lambda nieuw: sensoren184.extend(nieuw)))
+a184 = next(x for x in sensoren184 if x._attr_translation_key == "coach").extra_state_attributes
+controle("de kaart houdt de volgende klaar-tijd, zonder blokken",
+         a184["plan"] == [] and str(a184["klaar_om_volgende"]).startswith("2026-10-20T06:00") and a184["stand"] == "geen_auto",
+         f"{a184['plan']} {a184['klaar_om_volgende']} {a184['stand']}")
+
+print("=== 185. de thuisbatterij: vol laden tot een doel, met de schuif (v0.141.0) ===")
+# De eigenaar op 19-10-2026: "Nu vol laden" opent een pop-up met een schuif tussen
+# ondergrens en plafond; hij laadt tot daar en volgt dan het plan weer.
+hass185, store185, coach185 = bouw(huis75(soc="60"), instellingen(devices=[LAADPAAL, BATTERIJ]))
+NU185 = dt.datetime(2026, 9, 22, 18, 30)
+coach185.async_boost("dev-batterij", True, 80.0)
+b185 = asyncio.run(ronde75(hass185, coach185, NU185))
+print(f"  {b185.get('rule')}: {b185.get('reason')}")
+controle("tot 80%: hij laadt maximaal en de stand zegt het doel",
+         b185.get("rule") == "vol-laden" and b185.get("boost_to") == 80.0 and "80%" in (b185.get("reason") or ""),
+         f"{b185.get('rule')} {b185.get('boost_to')} {b185.get('reason')}")
+controle("leegladen gaat eruit als hij gaat volladen", "dev-batterij" not in coach185._drain)
+hass185.states.zet("sensor.batterij_soc", "80")
+b185 = asyncio.run(ronde75(hass185, coach185, NU185 + dt.timedelta(minutes=1)))
+controle("op 80% gaat de knop uit en volgt hij het plan weer",
+         b185.get("boost") is False and b185.get("boost_to") is None and b185.get("rule") != "vol-laden",
+         f"{b185.get('boost')} {b185.get('boost_to')} {b185.get('rule')}")
+# Een doel boven de laadgrens telt als vol.
+hass185.states.zet("sensor.batterij_soc", "60")
+coach185.async_boost("dev-batterij", True, 100.0)
+b185 = asyncio.run(ronde75(hass185, coach185, NU185 + dt.timedelta(minutes=2)))
+controle("boven de laadgrens laadt hij tot de laadgrens", "95%" in (b185.get("reason") or ""), b185.get("reason"))
+coach185.async_boost("dev-batterij", False)
+controle("uit is ook het doel weg", "dev-batterij" not in coach185._vol_tot)
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

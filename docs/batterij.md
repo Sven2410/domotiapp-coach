@@ -1243,6 +1243,7 @@ laadpaal (contract 1, `entiteit.py`, docs/vaatwasser.md): een eigen apparaat per
 | button | `leegladen` | nu leegladen tot `leeg_tot` (`async_drain`), nooit onder de ondergrens |
 | button | `terug_naar_plan` | vol en leeg eraf |
 | number | `leeg_tot` | tot welk % leegladen gaat; staat in het geheugen, na een herstart weer de ondergrens |
+| number | `vol_tot` | tot welk % vol laden gaat (v0.141.0); leeg is de laadgrens, nooit erboven |
 | switch | `vakantiestand` | `battery.holiday` in Apparaten; de grens blijft een instelling van de installateur |
 
 Attributen van de sensor: `contract`, `type`, `stand` (`nul_op_de_meter`, `zonneladen`,
@@ -1344,3 +1345,47 @@ een Growatt en vroeg: "Die doen bij een Growatt niets." Niet weggehaald, want da
 als wees in het register staan, en bij een batterij die de coach later wel mag sturen komen
 ze vanzelf terug. De accustand blijft bewust leeg op de sensor: die wordt alleen bij een
 besluit of een wijziging in Apparaten opnieuw geschreven, en zou dus een oude waarde tonen.
+
+## Handelen in twee, met een grens per richting (v0.141.0)
+
+De eigenaar op 19-10-2026, bij de pop-up van een batterij met Handelen aan: "ik zou van
+Handelen een kop maken, en vervolgens 2 opties eronder hangen: Batterij mag laden van het net
+tijdens lage tarieven / Batterij mag ontladen naar het net tijdens hoge tarieven. Ik wil bijv
+NIET dat ie gaat laden, maar WEL dat ie overschot in de accu dat ik niet meer nodig heb bovenop
+mijn nachtverbruik, gaat verkopen." En op 21-10-2026, per richting: "laat coach de beste
+strategie bepalen, óf laad uitsluitend uit het net als de energieprijs onder x is", hetzelfde
+voor ontladen boven x, "in alle gevallen met de all-in energieprijs". Een bewoner wil wel van
+het net laden "als de prijs bijv. <15 cent is".
+
+In Instellen van de batterij staat nu een kop Handelen met twee vinkjes, elk met een veld voor
+de grens in euro per kWh; leeg is "de coach bepaalt":
+
+| instelling | standaard | in batterij.py |
+|---|---|---|
+| `grid_charge` Laden uit het net tijdens lage tarieven | aan, zoals het altijd was | `Batterij.net_laden` |
+| `grid_charge_below` Alleen als de prijs onder | leeg | `Batterij.net_laden_onder` |
+| `trade` Ontladen naar het net tijdens hoge tarieven | uit, zoals het altijd was | `Batterij.handelen` |
+| `trade_above` Alleen als de prijs boven | leeg | `Batterij.handelen_boven` |
+
+`_mag_netladen` zegt per blok of er iets van het net bij mag; mag het niet, dan rekent
+`_mogelijk` net als in de avondpiek: alleen zon erin. Ook de negatieve prijs (`max-laden`) volgt
+het. `_mag_handelen` zegt hetzelfde voor naar het net, met de grens erbij. Beide vergelijken
+met `price` van het blok, de all-in inkoopprijs; ook bij ontladen, zoals gevraagd, en niet de
+terugleverprijs. Er hoeft niets omgezet te worden: een batterij zonder de nieuwe velden laadt
+van het net en handelt zoals voorheen.
+
+Proef 47 in test_batterij.py, de scenario's `batterij-netladen-onder` (grens 0,16 bij prijzen
+van 0,156 tot 0,41: alleen het uur van 0,156) en `batterij-netladen-uit` in het virtuele huis.
+
+## Vol laden tot een doel, met de schuif (v0.141.0)
+
+De eigenaar op 19-10-2026: "Nu vol laden" en "Nu leegladen" openen een pop-up met een schuif
+tussen de ondergrens en het plafond (`floor` en `ceiling` in de stand), het vak "tot 50 %" naast
+de knop is weg, en zolang het loopt draait er een blauwe ring om de knop (`accu-doel-sheet.js`,
+`openDoel_` en `kiesDoel_` in overview.js). Vol laden kreeg daarvoor een doel:
+`domotiapp_coach/coach/boost` neemt een optionele `to_percent`, de coach houdt het bij in
+`_vol_tot` en bewaart het over een herstart (`boost_to`), en stopt op de laagste van het doel en
+de laadgrens ("{naam} is geladen tot 80%; hij volgt het plan weer."). Voor de kaarten van
+DomotiApp Lovelace: de number `vol_tot` en het attribuut `vol_tot` op de sensor; het contract
+blijft 1, want er komt alleen iets bij. Proef 185 in test_coach.py.
+

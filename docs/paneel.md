@@ -411,3 +411,11 @@ op die dag twee uren als één.
 Kiritimati, wat de tijdzone van de machine ook is (en "Historie op de klok van het huis" de
 perioden, de vragen aan de recorder en de wintertijd), en kijkt of de bekende plekken geen
 `new Date()` meer hebben. In de preview: `?pt=1&tz=Europe/Lisbon`.
+
+## Lange namen in de energiestroom (v0.141.0)
+
+De eigenaar op 19-10-2026: "Anker Solix Solarbank Max AC" liep bij een bol over de rand. Een naam
+staat nu op hooguit twee regels van 18 tekens (12 op een smal scherm), op woorden gebroken, en
+wat er dan nog overblijft wordt afgekapt met "…" (`naamRegels` in components/energy-flow.js). Boven
+de zon groeit de naam omhoog. En het vermogen van de woning staat op één regel, "178 W", zoals bij
+de andere bollen.

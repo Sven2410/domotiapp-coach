@@ -614,6 +614,9 @@ ACCU_ACTIE = {
 # Tot hoeveel procent "leegladen" gaat, per batterij; de number `leeg_tot` zet het,
 # de knop `leegladen` leest het. Leeg is de eigen ondergrens van de batterij.
 LEEG_TOT: dict[str, float] = {}
+# En tot hoeveel procent "vol laden" gaat (v0.141.0): de number `vol_tot`, de knop
+# `vol_laden`. Leeg is de laadgrens van de batterij.
+VOL_TOT: dict[str, float] = {}
 
 
 def accu_stand(stand: dict[str, Any] | None) -> str:

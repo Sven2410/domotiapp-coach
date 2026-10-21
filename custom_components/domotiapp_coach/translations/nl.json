@@ -89,6 +89,9 @@
       "leeg_tot": {
         "name": "Leegladen tot"
       },
+      "vol_tot": {
+        "name": "Vol laden tot"
+      },
       "doeltemperatuur": {
         "name": "Gewenste temperatuur"
       }

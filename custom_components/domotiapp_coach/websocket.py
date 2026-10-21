@@ -241,6 +241,11 @@ _BATTERY = _schema(
         vol.Optional("reserve_percent", default=20): vol.All(vol.Coerce(int), vol.Range(0, 100)),
         # Ontladen naar het net op dure uren.
         vol.Optional("trade", default=False): bool,
+        # Handelen in twee (v0.141.0): laden van het net mag (standaard aan), en per
+        # richting een grens in de all-in prijs in euro per kWh; leeg is "de coach bepaalt".
+        vol.Optional("grid_charge", default=True): bool,
+        vol.Optional("grid_charge_below", default=None): _LEEG_OF(float, -1, 2),
+        vol.Optional("trade_above", default=None): _LEEG_OF(float, -1, 2),
         # Een keer per week helemaal vol, voor het balanceren van de cellen.
         vol.Optional("weekly_full", default=False): bool,
         vol.Optional("weekly_full_day", default=6): vol.All(vol.Coerce(int), vol.Range(0, 6)),
@@ -1016,6 +1021,9 @@ _BATTERY_VOORKEUREN = vol.Schema(
         vol.Optional("reserve_enabled"): bool,
         vol.Optional("reserve_percent"): vol.All(vol.Coerce(int), vol.Range(0, 100)),
         vol.Optional("trade"): bool,
+        vol.Optional("grid_charge"): bool,
+        vol.Optional("grid_charge_below"): _LEEG_OF(float, -1, 2),
+        vol.Optional("trade_above"): _LEEG_OF(float, -1, 2),
         vol.Optional("weekly_full"): bool,
         vol.Optional("weekly_full_day"): vol.All(vol.Coerce(int), vol.Range(0, 6)),
         vol.Optional("holiday"): bool,
@@ -1594,6 +1602,8 @@ def async_store_report(
         vol.Required("type"): "domotiapp_coach/coach/boost",
         vol.Required("device_id"): str,
         vol.Required("boost"): bool,
+        # Bij een thuisbatterij: tot welke accustand (v0.141.0); zonder is het vol.
+        vol.Optional("to_percent"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(0, 100))),
     }
 )
 @callback
@@ -1610,7 +1620,7 @@ def async_coach_boost(
     """
     from .coach import async_get_coach
 
-    async_get_coach(hass).async_boost(msg["device_id"], msg["boost"])
+    async_get_coach(hass).async_boost(msg["device_id"], msg["boost"], msg.get("to_percent"))
     connection.send_result(msg["id"], {"boost": msg["boost"]})
 
 

@@ -1243,6 +1243,19 @@ batterij_dynamisch_zelf = batterij_winter.kopie(
     uitleg="dynamisch, bewolkt, de accu doet zelf nul op de meter: de coach neemt hem alleen over om goedkoop bij te laden",
     batterij=Batterij(soc=8.0, eigen_nul=True, zelf_nul=True),
 )
+# Handelen in twee (v0.141.0). Een bewoner op 21-10-2026: van het net laden mag, "als de
+# prijs bijv. <15 cent is". Dezelfde bewolkte dagen, met een grens onder de goedkoopste
+# uren van het scenario hierboven, en een met laden van het net helemaal uit.
+batterij_netladen_onder = batterij_winter.kopie(
+    naam="batterij-netladen-onder",
+    uitleg="dynamisch, bewolkt, zelf nul, en van het net laden alleen onder een prijs",
+    batterij=Batterij(soc=8.0, eigen_nul=True, zelf_nul=True, net_laden_onder=0.16),
+)
+batterij_netladen_uit = batterij_winter.kopie(
+    naam="batterij-netladen-uit",
+    uitleg="dynamisch, bewolkt, zelf nul, en van het net laden uit: alleen zon",
+    batterij=Batterij(soc=8.0, eigen_nul=True, zelf_nul=True, net_laden=False),
+)
 batterij_dynamisch_zon_zelf = batterij_zomer.kopie(
     naam="batterij-dynamisch-zon-zelf",
     uitleg="dynamisch, heldere dag, de accu doet zelf nul op de meter",
@@ -1337,7 +1350,8 @@ BATTERIJ = [
     batterij_meter_weg, batterij_herstart, batterij_anker_sensor, batterij_uurlast,
     batterij_klapperlast, batterij_wisselende_last, batterij_zonder_rendement,
     batterij_zelf_nul, batterij_zelf_knop_weg, batterij_zelf_knop_traag, batterij_knop_traag_start,
-    batterij_dynamisch_zelf, batterij_dynamisch_zon_zelf, batterij_zelf_wisselend,
+    batterij_dynamisch_zelf, batterij_netladen_onder, batterij_netladen_uit,
+    batterij_dynamisch_zon_zelf, batterij_zelf_wisselend,
     batterij_kwartier_zelf, batterij_kwartier_voorloper,
 ]
 HERSTART = [herstart_groep, herstart_groep_zonder]

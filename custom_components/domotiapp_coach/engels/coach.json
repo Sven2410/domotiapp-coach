@@ -164,6 +164,7 @@
   "{naam} is leeggeladen tot {pct}%; hij volgt het plan weer.": "{naam} has been discharged to {pct}%; it follows the plan again.",
   "Je hebt gevraagd hem nu leeg te laden tot {pct}%, dus hij levert aan het net op {kw} kW, wat de prijs ook is.": "You asked to discharge it to {pct}% now, so it exports to the grid at {kw} kW, whatever the price.",
   "{naam} is vol; hij volgt het plan weer.": "{naam} is full; it follows the plan again.",
+  "{naam} is geladen tot {pct}%; hij volgt het plan weer.": "{naam} is charged to {pct}%; it follows the plan again.",
   "Je hebt gevraagd hem nu vol te laden, dus hij laadt van het net op {kw} kW tot {pct}%, wat de prijs ook is.": "You asked to charge it fully now, so it charges from the grid at {kw} kW up to {pct}%, whatever the price.",
   "Iets anders stuurt {naam}: de bedrijfsmodus staat niet meer op wat de coach zette. De coach laat hem los en probeert het over een uur opnieuw. Zet de andere sturing uit, of haal bij de coach het vinkje 'mag sturen' weg.": "Something else is controlling {naam}: the operating mode is no longer what the coach set. The coach lets go and tries again in an hour. Turn off the other control, or untick 'The coach may control this device' in the coach.",
   "{reden} De batterij doet dat zelf, met zijn eigen meter.": "{reden} The battery does that itself, with its own meter.",

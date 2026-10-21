@@ -160,6 +160,13 @@ export const OVERZICHT = {
   "Ja, neem het over": "Yes, take over",
   "Ja, doe maar": "Yes, go ahead",
   "Laadt nu vol": "Charging to full",
+  "Laadt tot {pct}%": "Charging to {pct}%",
+  "Nu {pct}%.": "Now {pct}%.",
+  "Hij laadt van het net op vol vermogen tot deze accustand, wat de prijs ook is, en volgt daarna het plan weer.":
+    "It charges from the grid at full power up to this level, whatever the price, and then follows the plan again.",
+  "Hij levert aan het net op vol vermogen tot deze accustand, wat de prijs ook is, en volgt daarna het plan weer.":
+    "It exports to the grid at full power down to this level, whatever the price, and then follows the plan again.",
+  "Aanpassen": "Adjust",
   "Nu vol laden": "Charge to full now",
   "Snel": "Fast",
   "Snelladen staat aan": "Fast charge is on",

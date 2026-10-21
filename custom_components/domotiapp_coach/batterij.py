@@ -142,6 +142,14 @@ class Batterij:
     rte: float | None = None
     # Of ontladen naar het net mag. Standaard uit.
     handelen: bool = False
+    # Handelen in twee (v0.141.0). De eigenaar op 19-10-2026: "Batterij mag laden van
+    # het net tijdens lage tarieven / Batterij mag ontladen naar het net tijdens hoge
+    # tarieven." Van het net laden mag standaard, zoals altijd. En per richting een
+    # grens in de all-in prijs, of None: dan bepaalt de coach het zelf. Zie
+    # `_mag_netladen` en `_mag_handelen`.
+    net_laden: bool = True
+    net_laden_onder: float | None = None
+    handelen_boven: float | None = None
     # Boven welke accustand de batterij de auto mag helpen als de paal laadt,
     # in procent, of None: dan geeft hij de auto niets (v0.90.0). Zie `auto_grens`.
     auto_boven: float | None = None
@@ -315,8 +323,24 @@ class _Som:
     vloer: list[float] | None = None
 
 
+def _mag_netladen(b: Batterij, rij: dict) -> bool:
+    """Of de batterij in dit blok van het net mag laden (v0.141.0).
+
+    Met het vinkje aan, en met een grens alleen als de all-in prijs van het blok
+    eronder ligt. Een bewoner op 21-10-2026: hij mag wel van het net laden "als de
+    prijs bijv. <15 cent is". Zon opslaan gaat hier niet over; dat mag altijd.
+    """
+    if not b.net_laden:
+        return False
+    return b.net_laden_onder is None or rij["price"] < b.net_laden_onder
+
+
 def _mag_handelen(b: Batterij, rij: dict) -> bool:
     """Of de batterij in dit blok aan het net mag leveren.
+
+    Met een grens (v0.141.0) alleen als de all-in prijs van het blok erboven ligt;
+    de eigenaar op 21-10-2026: "zou dan in alle gevallen met de all-in energieprijs
+    rekenen". Zonder grens bepaalt de som het.
 
     Alleen met handelen aan en een terugleverprijs die bekend is (v0.106.2).
     Zonder die prijs telt teruglevering in `_kosten` als nul, en dan is aan het
@@ -328,7 +352,10 @@ def _mag_handelen(b: Batterij, rij: dict) -> bool:
     21% en gaf er 0,48 kWh bij, "Terugleveren brengt nu € 0,000 op". Om 12:16
     kwam de auto en die ging voor, dus die zon kwam er die dag niet meer in.
     """
-    return b.handelen and rij.get("feed_in") is not None
+    return (
+        b.handelen and rij.get("feed_in") is not None
+        and (b.handelen_boven is None or rij["price"] > b.handelen_boven)
+    )
 
 
 # Wat de kaart zegt als handelen aanstaat en niet kan (v0.128.2). Het paneel
@@ -371,8 +398,9 @@ def _mogelijk(
     huis voeden mag eronder, handelen niet. Zie `_nacht_vloer`.
     """
     op = min(hoog, e + b.max_charge_w / 1000.0 * deel * eta)
-    if piek and in_evening_peak(rij["start"]):
-        # Eis 4: in de avondpiek komt er niets van het net bij. Zon mag.
+    if (piek and in_evening_peak(rij["start"])) or not _mag_netladen(b, rij):
+        # Eis 4: in de avondpiek komt er niets van het net bij. Zon mag. En ook
+        # niet als de bewoner het hier niet wil (v0.141.0).
         op = min(op, e + max(0.0, -huis) * eta)
     neer_w = b.max_discharge_w / 1000.0 * deel
     handelt = _mag_handelen(b, rij)
@@ -1014,7 +1042,7 @@ def plan_batterij(
     # Een negatieve prijs gaat voor alles: elk verlies levert dan geld op. Het
     # gaat om wat de bewoner betaalt, met belasting en opslag erin; dat kwam in
     # 2026 een paar keer voor (de eigenaar, 21-09-2026).
-    if koop < 0 and not (dicht and in_evening_peak(now)) and b.soc < b.soc_max - VOL_MARGE:
+    if koop < 0 and not (dicht and in_evening_peak(now)) and b.soc < b.soc_max - VOL_MARGE and _mag_netladen(b, nu):
         return Besluit(
             MAX_LADEN,
             power_w=b.max_charge_w,

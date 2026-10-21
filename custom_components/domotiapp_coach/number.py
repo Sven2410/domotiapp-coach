@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .entiteit import (
-    LEEG_TOT, AccuBediening, CoachEntiteit, async_accustand, async_per_apparaat, coach_verversen, klimaat_attributen,
+    LEEG_TOT, VOL_TOT, AccuBediening, CoachEntiteit, async_accustand, async_per_apparaat, coach_verversen, klimaat_attributen,
 )
 
 
@@ -31,7 +31,7 @@ async def async_setup_entry(
     await async_per_apparaat(
         hass, entry, async_add_entities,
         lambda device: device.get("type") == "thuisbatterij",
-        lambda device, stand, settings: [LeegTotNumber(device, stand)],
+        lambda device, stand, settings: [LeegTotNumber(device, stand), VolTotNumber(device, stand)],
     )
     # De airco (v0.119.0).
     await async_per_apparaat(
@@ -157,6 +157,35 @@ class LeegTotNumber(AccuBediening, CoachEntiteit, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         LEEG_TOT[self._device_id] = max(float(self._stand.get("floor") or 0.0), float(value))
+        self._schrijf()
+
+
+class VolTotNumber(AccuBediening, CoachEntiteit, NumberEntity):
+    """Tot welk % "vol laden" gaat (v0.141.0); nooit boven de laadgrens van de batterij.
+
+    Zoals `LeegTotNumber`: leeg is die laadgrens, het getal staat in het geheugen van de
+    coach, en de knop `vol_laden` leest het op het moment dat je drukt.
+    """
+
+    _attr_icon = "mdi:battery-high"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 5
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, device: dict[str, Any], stand: dict[str, Any] | None) -> None:
+        super().__init__(device, stand, "vol_tot")
+
+    def _kern(self) -> Any:
+        return self.native_value
+
+    @property
+    def native_value(self) -> float:
+        plafond = float(self._stand.get("ceiling") or 100.0)
+        return min(plafond, VOL_TOT.get(self._device_id, plafond))
+
+    async def async_set_native_value(self, value: float) -> None:
+        VOL_TOT[self._device_id] = min(float(self._stand.get("ceiling") or 100.0), float(value))
         self._schrijf()
 
 

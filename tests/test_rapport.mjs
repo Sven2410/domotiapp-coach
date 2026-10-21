@@ -2400,67 +2400,50 @@ proef("de knoppen van de batterij hebben eigen iconen: een accu met een pijl eri
   assert.ok(bron.includes('const wilIcoon = batterij ? "accuVol" : "bolt"'), "vol laden draagt de accu met de pijl erin, de paal de bliksem");
 });
 
-// De eigenaar op 05-10-2026, op een iPhone in de eerste woning: "Kan die 50%
-// niet aanpassen. Ik kan er 30 van maken, maar verandert hem weer naar 50."
-// Het veld keek naar `document.activeElement`, dat binnen een shadow root nooit
-// het veld is, en een ander getal ging nooit naar de coach.
-proef("leegladen: wat de bewoner in het veld zet blijft staan en gaat naar de coach", async () => {
-  const { leegTot } = await import("../custom_components/domotiapp_coach/frontend/src/views/overview.js");
-  assert.equal(leegTot("30"), 30);
-  assert.equal(leegTot("2"), 5);
-  assert.equal(leegTot("120"), 95);
-  assert.equal(leegTot(""), 50);
+// Sinds v0.141.0 is het vak "tot 50 %" weg: "Nu vol laden" en "Nu leegladen" openen
+// een pop-up met een schuif tussen de ondergrens en het plafond (de eigenaar op
+// 19-10-2026), en zolang het loopt draait er een ring om de knop.
+proef("vol en leeg laden van de batterij: de pop-up met de schuif (v0.141.0)", async () => {
+  const { opSchuif } = await import("../custom_components/domotiapp_coach/frontend/src/accu-doel-sheet.js");
+  assert.equal(opSchuif(52, 10, 95), 50);
+  assert.equal(opSchuif(3, 10, 95), 10, "nooit onder de ondergrens");
+  assert.equal(opSchuif(100, 10, 95), 95, "nooit boven het plafond");
 
   const Overzicht = geregistreerd.get("dac-view-overview");
-  const veld = { value: "50", dataset: {} };
+  const geopend = [];
   const verstuurd = [];
   const el = Object.create(Overzicht.prototype);
-  el.$ = (kiezer) => (kiezer === '[data-drain-to="0"]' ? veld : null);
-  el.steerDevices_ = [{ id: "accu" }];
+  el.$ = (kiezer) => (kiezer === "#doel-sheet" ? { open: (k) => geopend.push(k) } : null);
+  el.steerDevices_ = [{ id: "accu", name: "Batterij" }];
   el.lastDevices_ = [];
-  el.coach_ = { accu: { kind: "batterij", drain_to: 50 } };
-  el.updateSteerable_ = () => el.syncLeegVeld_(0, el.coach_.accu);
-  el.hass = {
-    callWS: async (msg) => {
-      if (msg.type === "domotiapp_coach/coach/drain") {
-        verstuurd.push(msg.to_percent);
-        el.coach_.accu.drain_to = msg.to_percent;
-        return {};
-      }
-      return el.coach_;
-    },
-  };
+  el.labelFor_ = () => "Batterij";
+  el.updateSteerable_ = () => {};
+  el.coach_ = { accu: { kind: "batterij", floor: 10, ceiling: 95, soc: 40, boost: false, drain_to: null } };
+  el.hass = { callWS: async (msg) => { if (msg.type !== "domotiapp_coach/coach/state") verstuurd.push(msg); return el.coach_; } };
 
-  // Terwijl hij typt: een ververs van de coach laat het veld met rust.
-  el.shadowRoot = { activeElement: veld };
-  veld.value = "30";
-  veld.dataset.bewerkt = "1";
-  el.syncLeegVeld_(0, el.coach_.accu);
-  assert.equal(veld.value, "30", "het veld met de focus wordt niet overschreven");
-  // Het toetsenbord dicht, nog niets doorgegeven: ook dan niet.
-  el.shadowRoot = { activeElement: null };
-  el.syncLeegVeld_(0, el.coach_.accu);
-  assert.equal(veld.value, "30", "wat ingetypt is blijft staan tot het doorgegeven is");
-  // De change van het veld: loopt hij al leeg, dan gaat 30 meteen naar de coach.
-  await el.zetLeegTot_(0);
-  assert.deepEqual(verstuurd, [30]);
-  assert.equal(veld.dataset.bewerkt, undefined);
-  assert.equal(Number(veld.value), 30, "daarna volgt het veld de coach, en die zegt 30");
+  await el.toggleBoost_(0);
+  assert.equal(verstuurd.length, 0, "eerst de pop-up, nog niets naar de coach");
+  assert.deepEqual([geopend[0].soort, geopend[0].laag, geopend[0].hoog, geopend[0].actief], ["vol", 10, 95, false]);
+  el.toggleDrain_(0);
+  assert.equal(geopend[1].soort, "leeg");
 
-  // Loopt hij nog niet leeg, dan gaat er niets heen en blijft het getal staan.
-  el.coach_.accu.drain_to = null;
-  veld.value = "40";
-  veld.dataset.bewerkt = "1";
-  await el.zetLeegTot_(0);
-  assert.deepEqual(verstuurd, [30]);
-  assert.equal(Number(veld.value), 40);
-  // De knop neemt dat getal mee.
-  await el.toggleDrain_(0);
-  assert.deepEqual(verstuurd, [30, 40]);
+  await el.kiesDoel_({ slot: 0, soort: "vol", pct: 80 });
+  await el.kiesDoel_({ slot: 0, soort: "leeg", pct: 30 });
+  await el.kiesDoel_({ slot: 0, soort: "leeg", pct: null });
+  assert.deepEqual(verstuurd, [
+    { type: "domotiapp_coach/coach/boost", device_id: "accu", boost: true, to_percent: 80 },
+    { type: "domotiapp_coach/coach/drain", device_id: "accu", to_percent: 30 },
+    { type: "domotiapp_coach/coach/drain", device_id: "accu", to_percent: null },
+  ]);
 
-  // De bron kijkt nergens meer naar document.activeElement.
+  // Loopt het, dan staat de schuif op het doel van nu, met een knop om te stoppen.
+  el.coach_.accu = { ...el.coach_.accu, boost: true, boost_to: 80 };
+  await el.toggleBoost_(0);
+  assert.deepEqual([geopend[2].waarde, geopend[2].actief], [80, true]);
+
   const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf8");
-  assert.ok(!/document\.activeElement\s*[!=]==/.test(bron), "binnen een shadow root is dat nooit het veld");
+  assert.ok(!bron.includes("data-drain-to"), "het vak naast Nu leegladen is weg");
+  assert.match(bron, /button\.boost\.ring\[aria-pressed="true"\]::before/, "de ring om de knop");
 });
 
 proef("de woning telt mee wat de batterij afgeeft", () => {
@@ -3086,8 +3069,19 @@ proef("de rijen onder een vinkje van de batterij verdwijnen echt als het vinkje 
   const velden = nepVelden(voorkeurHtml({ id: "b", type: "thuisbatterij", battery: {} }));
   vulVoorkeuren(velden, { id: "b", type: "thuisbatterij", battery: {} });
   assert.deepEqual(velden.rijen.filter((r) => r.hidden).map((r) => r.sleutel).sort(),
-    // En de melding bij Handelen zonder terugleverprijs (v0.128.2), die hier geen contract heeft.
-    ["holiday_max_percent", "reserve_percent", "trade_kan_niet", "weekly_full_day"], "reserve, de dag en de vakantiestand");
+    // En de melding bij Handelen zonder terugleverprijs (v0.128.2), die hier geen contract heeft,
+    // en de grens bij ontladen naar het net, dat standaard uit staat (v0.141.0).
+    ["holiday_max_percent", "reserve_percent", "trade_above", "trade_kan_niet", "weekly_full_day"], "reserve, de dag en de vakantiestand");
+  // Laden van het net staat standaard aan, dus de grens daarbij staat er.
+  assert.ok(!velden.rijen.find((r) => r.sleutel === "grid_charge_below").hidden, "de grens bij laden van het net");
+  const uit = nepVelden(voorkeurHtml({ id: "b", type: "thuisbatterij", battery: { grid_charge: false, trade: true } }));
+  vulVoorkeuren(uit, { id: "b", type: "thuisbatterij", battery: { grid_charge: false, trade: true } });
+  assert.ok(uit.rijen.find((r) => r.sleutel === "grid_charge_below").hidden, "laden van het net uit: geen grens");
+  assert.ok(!uit.rijen.find((r) => r.sleutel === "trade_above").hidden, "handelen aan: de grens");
+  // Leeg is "de coach bepaalt", en een getal gaat in euro per kWh mee.
+  const veld = (sleutel, value) => ({ dataset: { vkAccu: sleutel }, type: "number", value });
+  assert.deepEqual(voorkeurWijziging(veld("grid_charge_below", "")), { battery: { grid_charge_below: null } });
+  assert.deepEqual(voorkeurWijziging(veld("trade_above", "0.35")), { battery: { trade_above: 0.35 } });
 });
 
 proef("de keuzelijst zet temperatuursensoren bovenaan bij de temperatuur van de batterij", () => {
@@ -5494,6 +5488,21 @@ proef("Historie op de klok van het huis, en de wintertijd (v0.138.2)", async () 
   } finally {
     f.zetHuisZone(null);
   }
+});
+
+// De eigenaar op 19-10-2026: lange namen in de energiestroom ("Anker Solix Solarbank Max AC"
+// liep over de rand) over twee regels, en anders afgekapt.
+proef("de energiestroom: een lange naam over twee regels, anders met … (v0.141.0)", async () => {
+  const { naamRegels } = await import("../custom_components/domotiapp_coach/frontend/src/components/energy-flow.js");
+  assert.deepEqual(naamRegels("Batterij", 12), ["Batterij"]);
+  assert.deepEqual(naamRegels("Anker Solix Solarbank Max AC", 18), ["Anker Solix", "Solarbank Max AC"]);
+  const smal = naamRegels("Anker Solix Solarbank Max AC", 12);
+  assert.equal(smal.length, 2);
+  assert.ok(smal.every((r) => r.length <= 12), JSON.stringify(smal));
+  assert.ok(smal[1].endsWith("…"), JSON.stringify(smal));
+  const woord = naamRegels("Warmtepompboilerinstallatie", 12);
+  assert.deepEqual(woord, ["Warmtepompb…"]);
+  assert.deepEqual(naamRegels("", 12), []);
 });
 
 for (const [naam, fn] of proeven) {

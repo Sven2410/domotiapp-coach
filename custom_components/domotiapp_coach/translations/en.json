@@ -89,6 +89,9 @@
       "leeg_tot": {
         "name": "Discharge to"
       },
+      "vol_tot": {
+        "name": "Charge battery to"
+      },
       "doeltemperatuur": {
         "name": "Target temperature"
       }

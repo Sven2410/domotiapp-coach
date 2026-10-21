@@ -45,6 +45,7 @@ import {
 import { heeftVoorkeuren } from "../voorkeur-velden.js";
 import { ptTijden } from "../opbouw.js";
 import "../plan-ahead-sheet.js";
+import "../accu-doel-sheet.js";
 import "../vooruitblik.js";
 import {
   OVERVIEW_CARDS,
@@ -102,10 +103,6 @@ function minutenGeleden(stempel) {
   return Math.max(0, Math.round((huisNu().getTime() - toen) / 60000));
 }
 
-/** Tot welke accustand "Nu leegladen" gaat: het getal in het veld, tussen 5 en 95. */
-export function leegTot(waarde) {
-  return Math.round(Math.min(95, Math.max(5, Number(waarde) || 50)));
-}
 
 /** Import worth mentioning, in watts. */
 const HEAVY_IMPORT_W = 2500;
@@ -699,6 +696,26 @@ class DacViewOverview extends DacElement {
       border-color: var(--dac-accent-hi);
       color: var(--dac-accent-hi);
     }
+    /* Vol of leeg laden van de batterij loopt (v0.141.0): een blauwe ring die
+       rondgaat, zolang het duurt. Een groot vierkant met een kegelverloop draait
+       achter de knop, en het binnenste dekt alles af behalve een rand van 2 px. */
+    button.boost.ring[aria-pressed="true"] {
+      position: relative; overflow: hidden; isolation: isolate; border-color: transparent;
+    }
+    button.boost.ring[aria-pressed="true"]::before {
+      content: ""; position: absolute; z-index: -2;
+      left: 50%; top: 50%; width: 300%; aspect-ratio: 1; translate: -50% -50%;
+      background: conic-gradient(var(--dac-accent-hi) 0 25%, transparent 25% 100%);
+      animation: ring-draait 1.6s linear infinite;
+    }
+    button.boost.ring[aria-pressed="true"]::after {
+      content: ""; position: absolute; z-index: -1; inset: 2px;
+      border-radius: inherit; background: var(--dac-surface);
+    }
+    @keyframes ring-draait { to { rotate: 1turn; } }
+    @media (prefers-reduced-motion: reduce) {
+      button.boost.ring[aria-pressed="true"]::before { animation: none; background: var(--dac-accent-hi); }
+    }
     button.release:hover, button.manual:hover { color: var(--dac-ink); border-color: rgba(25,143,217,0.55); }
     /* Een icoon zonder maat is geen klein icoon maar een enorm icoon: het svg
        rekt zich uit tot alles wat de knop hem geeft. Vandaar dat alle drie de
@@ -763,9 +780,6 @@ class DacViewOverview extends DacElement {
     .says-mark .icon { width: 16px; height: 16px; }
     .says-plan { margin: 0 0 0 25px; font-size: 12.5px; line-height: 1.5; color: var(--dac-ink-2); }
     .says-plan:empty { display: none; }
-    .drain-to { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--dac-ink-2); }
-    .drain-to[hidden] { display: none; }
-    .drain-to input { width: 56px; font: inherit; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.04); color: var(--dac-ink); }
     .says-plan.good { color: var(--dac-good); }
     .says-plan.warn { color: var(--dac-warn); }
     /* Iets aan de installatie dat de bewoner zelf moet verhelpen. Apart van de
@@ -1316,6 +1330,7 @@ class DacViewOverview extends DacElement {
 
         <dac-schedule-sheet id="plan-sheet"></dac-schedule-sheet>
         <dac-plan-ahead-sheet id="ahead-sheet"></dac-plan-ahead-sheet>
+        <dac-accu-doel-sheet id="doel-sheet"></dac-accu-doel-sheet>
 
         <dialog class="sheet wide" id="prices" tabindex="-1" aria-labelledby="prices-title">
           <div class="sheet-head">
@@ -1874,6 +1889,11 @@ class DacViewOverview extends DacElement {
   async toggleBoost_(slot) {
     const device = this.steerDevices_?.[slot];
     if (!device || !this.hass) return;
+    // Een thuisbatterij: eerst kiezen tot waar, in de pop-up (v0.141.0).
+    if (this.coach_?.[device.id]?.kind === "batterij") {
+      this.openDoel_(slot, "vol");
+      return;
+    }
 
     const aan = !this.coach_?.[device.id]?.boost;
     try {
@@ -1887,6 +1907,42 @@ class DacViewOverview extends DacElement {
     } catch (error) {
       console.warn("[DomotiApp Coach] kon snelladen niet omzetten", error);
     }
+  }
+
+  /**
+   * De pop-up met de schuif voor vol of leeg laden van de batterij (v0.141.0),
+   * tussen de ondergrens en het plafond. Loopt het al, dan staat de schuif op
+   * het doel van nu en is er een knop om te stoppen.
+   */
+  openDoel_(slot, soort) {
+    const device = this.steerDevices_?.[slot];
+    const besluit = this.coach_?.[device?.id];
+    if (!device || !besluit) return;
+    const vol = soort === "vol";
+    const actief = vol ? Boolean(besluit.boost) : Number.isFinite(besluit.drain_to);
+    this.$("#doel-sheet").open({
+      slot, soort, naam: this.labelFor_(device),
+      laag: Number.isFinite(besluit.floor) ? besluit.floor : 0,
+      hoog: Number.isFinite(besluit.ceiling) ? besluit.ceiling : 100,
+      soc: Number.isFinite(besluit.soc) ? besluit.soc : null,
+      waarde: vol ? (actief ? (besluit.boost_to ?? besluit.ceiling) : null) : (actief ? besluit.drain_to : null),
+      actief,
+    });
+  }
+
+  /** Wat er in de pop-up gekozen is: een doel, of `pct` null voor stoppen. */
+  async kiesDoel_({ slot, soort, pct }) {
+    const device = this.steerDevices_?.[slot];
+    if (!device || !this.hass) return;
+    try {
+      await this.hass.callWS(soort === "vol"
+        ? { type: "domotiapp_coach/coach/boost", device_id: device.id, boost: pct !== null, to_percent: pct }
+        : { type: "domotiapp_coach/coach/drain", device_id: device.id, to_percent: pct });
+      this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
+    } catch (error) {
+      console.warn("[DomotiApp Coach] kon vol of leeg laden niet omzetten", error);
+    }
+    this.updateSteerable_(this.lastDevices_ ?? []);
   }
 
   /**
@@ -1912,66 +1968,9 @@ class DacViewOverview extends DacElement {
     }
   }
 
-  /**
-   * De batterij nu leegladen tot de accustand in het veld ernaast, of daarmee
-   * ophouden. Gaat vanzelf uit zodra hij daar is.
-   */
-  async toggleDrain_(slot) {
-    const device = this.steerDevices_?.[slot];
-    if (!device || !this.hass) return;
-    const aan = !Number.isFinite(this.coach_?.[device.id]?.drain_to);
-    const veld = this.$(`[data-drain-to="${slot}"]`);
-    await this.zendLeeg_(slot, device, aan ? leegTot(veld?.value) : null);
-  }
-
-  /**
-   * Een ander getal in het veld terwijl hij al leegloopt: meteen doorgeven.
-   * Loopt hij nog niet leeg, dan blijft het staan tot de knop.
-   *
-   * De eigenaar op 05-10-2026, op een iPhone in de eerste woning: "Kan die
-   * 50% niet aanpassen. Ik kan er 30 van maken, maar verandert hem weer naar
-   * 50." Er ging niets naar de coach, en elke ververs zette zijn 50 terug.
-   */
-  async zetLeegTot_(slot) {
-    const device = this.steerDevices_?.[slot];
-    const veld = this.$(`[data-drain-to="${slot}"]`);
-    if (!device || !this.hass || !veld) return;
-    const tot = leegTot(veld.value);
-    veld.value = tot;
-    if (!Number.isFinite(this.coach_?.[device.id]?.drain_to)) return;
-    await this.zendLeeg_(slot, device, tot);
-  }
-
-  async zendLeeg_(slot, device, tot) {
-    try {
-      await this.hass.callWS({
-        type: "domotiapp_coach/coach/drain",
-        device_id: device.id,
-        to_percent: tot,
-      });
-      this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
-    } catch (error) {
-      console.warn("[DomotiApp Coach] kon het leegladen niet omzetten", error);
-    }
-    // Ook als het misging: dan zet de kaart terug wat de coach werkelijk doet.
-    const veld = this.$(`[data-drain-to="${slot}"]`);
-    if (veld) delete veld.dataset.bewerkt;
-    this.updateSteerable_(this.lastDevices_ ?? []);
-  }
-
-  /**
-   * Het veld naast "Nu leegladen" volgt de coach, behalve terwijl iemand erin
-   * typt of iets invulde dat nog niet doorgegeven is.
-   *
-   * Tot v0.106.4 stond hier `document.activeElement`, en dat is binnen een
-   * shadow root nooit het veld zelf maar het element eromheen: elke ververs
-   * overschreef wat de bewoner aan het typen was.
-   */
-  syncLeegVeld_(slot, besluit) {
-    const veld = this.$(`[data-drain-to="${slot}"]`);
-    if (!veld || !Number.isFinite(besluit?.drain_to)) return;
-    if (this.shadowRoot?.activeElement === veld || veld.dataset.bewerkt === "1") return;
-    veld.value = Math.round(besluit.drain_to);
+  /** De batterij nu leegladen: eerst kiezen tot waar, in de pop-up (v0.141.0). */
+  toggleDrain_(slot) {
+    this.openDoel_(slot, "leeg");
   }
 
   /**
@@ -2107,7 +2106,11 @@ class DacViewOverview extends DacElement {
       knop.setAttribute("aria-pressed", String(modi && besluit.mode === knop.dataset.modusNaam));
     }
     this.$(`[data-boost-text="${slot}"]`).textContent = batterij
-      ? (besluit.boost ? t("Laadt nu vol") : t("Nu vol laden"))
+      ? (besluit.boost
+        ? (Number.isFinite(besluit.boost_to) && besluit.boost_to < besluit.ceiling
+          ? t("Laadt tot {pct}%", { pct: Math.round(besluit.boost_to) })
+          : t("Laadt nu vol"))
+        : t("Nu vol laden"))
       : modi
         ? t("Snel")
         : besluit.boost
@@ -2123,17 +2126,15 @@ class DacViewOverview extends DacElement {
       boostIcoon.innerHTML = icons[wilIcoon];
     }
 
+    // De ring om de knop zolang vol of leeg laden loopt, alleen bij de batterij.
+    boost.classList.toggle("ring", batterij);
     const leeg = this.$(`[data-drain="${slot}"]`);
-    const leegRij = this.$(`[data-drain-to-row="${slot}"]`);
     const magLeeg = batterij && besluit.level !== "advise" && besluit.applied;
     leeg.hidden = !magLeeg;
-    leegRij.hidden = !magLeeg;
-    leegRij.style.display = magLeeg ? "" : "none";
     leeg.setAttribute("aria-pressed", String(Number.isFinite(besluit.drain_to)));
     this.$(`[data-drain-text="${slot}"]`).textContent = Number.isFinite(besluit.drain_to)
       ? t("Laadt leeg tot {pct}%", { pct: Math.round(besluit.drain_to) })
       : t("Nu leegladen");
-    this.syncLeegVeld_(slot, besluit);
 
     const wek = this.$(`[data-wake="${slot}"]`);
     wek.hidden = !(besluit.wake && besluit.level !== "advise" && besluit.kind !== "programma"
@@ -2754,8 +2755,8 @@ class DacViewOverview extends DacElement {
             <!-- Instellen (v0.114.0): wat de bewoner aan dit apparaat kiest, voor
                  een apparaat zonder schema, op de plek waar anders het schema
                  staat. Met een schema zit het achter de knop daar, in dezelfde
-                 pop-up. Over de hele breedte, anders komt hij naast "tot 50 %"
-                 van Nu leegladen te staan en leest dat als één knop. -->
+                 pop-up. Over de hele breedte, zodat hij niet als een van de
+                 knoppen van de batterij leest. -->
             <button class="manual instellen" type="button" data-settings="${slot}" hidden>
               ${icons.sliders}<span>${t("Instellen")}</span>
             </button>
@@ -2786,12 +2787,9 @@ class DacViewOverview extends DacElement {
                  daarna weer het gewone plan. De bewoner van de eerste woning op
                  22-09-2026: "nu maximaal ontladen tot 50%, daarna terug naar
                  normale modus." -->
-            <button class="boost" type="button" data-drain="${slot}" aria-pressed="false" hidden>
+            <button class="boost ring" type="button" data-drain="${slot}" aria-pressed="false" hidden>
               ${icons.accuLeeg}<span data-drain-text="${slot}">${t("Nu leegladen")}</span>
             </button>
-            <label class="drain-to" data-drain-to-row="${slot}" hidden>
-              ${t("tot")} <input type="number" min="5" max="95" step="5" value="50" data-drain-to="${slot}" inputmode="numeric"> %
-            </label>
             <!-- Een Tesla slaapt als hij niet laadt en meldt dan geen accustand;
                  deze knop wekt hem. Alleen als de auto een wekknop heeft. -->
             <button class="boost" type="button" data-wake="${slot}" hidden>
@@ -2831,12 +2829,7 @@ class DacViewOverview extends DacElement {
     for (const button of this.$$("[data-drain]")) {
       button.addEventListener("click", () => this.toggleDrain_(Number(button.dataset.drain)));
     }
-    for (const veld of this.$$("[data-drain-to]")) {
-      veld.addEventListener("input", () => { veld.dataset.bewerkt = "1"; });
-      veld.addEventListener("change", () => this.zetLeegTot_(Number(veld.dataset.drainTo)));
-      // Enter laat het veld los, en dan volgt de change hierboven.
-      veld.addEventListener("keydown", (event) => { if (event.key === "Enter") veld.blur(); });
-    }
+    this.$("#doel-sheet")?.addEventListener?.("dac-accu-doel", (event) => this.kiesDoel_(event.detail));
     for (const select of this.$$("[data-car-select]")) {
       select.addEventListener("change", () =>
         this.chooseCar_(Number(select.dataset.carSelect), select.value)

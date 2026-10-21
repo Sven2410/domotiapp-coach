@@ -1165,3 +1165,16 @@ verandert er niets.
 Proef 74 in test_planner.py, met de cijfers van die middag: de zin zegt nu "tussen 20:00 en
 00:00" boven een tijdlijn van 20:00 tot 23:07 (de proef rekent met 90% laadrendement, thuis
 gold 94,8%, vandaar 22:57 daar).
+
+## Een laadpaal zonder auto plant niets (v0.141.0)
+
+Een klantwoning op 19-10-2026: er hing de hele dag geen auto aan de paal, de accustand van de
+auto was van 01:15 tot 20:27 onbekend en toen weer 42%, en vanaf dat moment toonde de vooruitblik
+laadblokken van 9,66 kW tot 08:00 ("vol rond 01:55" en daarna nog twee blokken), terwijl de paal
+op `disconnected` stond. `plan_ahead` werd ook zonder kabel gemaakt. De eigenaar: "niet weergeven
+of meenemen".
+
+Nu is `plan_ahead` leeg bij de regel `disconnected`, dus geen tijdlijn, geen blokken voor de
+batterij (`_auto_laden`) en geen rij in de vooruitblik (`vooruitblik` slaat een paal zonder auto
+over). De kaart houdt de volgende klaar-tijd: `klaar_om_volgende` komt dan uit `deadline_next` in
+de stand, de klaar-tijd van het schema. Proef 184 in test_coach.py.

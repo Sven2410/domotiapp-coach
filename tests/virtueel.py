@@ -814,6 +814,9 @@ class Batterij:
     # Wat de bewoner instelt.
     reserve: float | None = None
     handelen: bool = False
+    # Handelen in twee (v0.141.0): laden van het net mag, en alleen onder deze all-in prijs.
+    net_laden: bool = True
+    net_laden_onder: float | None = None
     # Boven welke accustand hij de auto mag helpen (v0.90.0), of None: nooit.
     auto_boven: float | None = None
     wekelijks_vol_dag: int | None = None
@@ -1567,6 +1570,8 @@ def instellingen(s: Scenario) -> dict:
                 "reserve_enabled": bat.reserve is not None,
                 "reserve_percent": bat.reserve or 0,
                 "trade": bat.handelen,
+                "grid_charge": bat.net_laden,
+                "grid_charge_below": bat.net_laden_onder,
                 "car_above": bat.auto_boven,
                 "weekly_full": bat.wekelijks_vol_dag is not None,
                 "weekly_full_day": bat.wekelijks_vol_dag or 0,

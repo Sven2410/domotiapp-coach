@@ -2024,6 +2024,16 @@ if (vl := v("batterij-dynamisch-zelf")) and (heel := v("batterij-dynamisch-winte
              len(vl.bat_opdrachten) <= 30, f"{len(vl.bat_opdrachten)}")
     controle("dynamisch-zelf: en het kost hooguit een paar cent meer dan alles sturen",
              vl.bat_kosten_met <= heel.bat_kosten_met + 0.05, f"€ {vl.bat_kosten_met:.2f} tegen € {heel.bat_kosten_met:.2f}")
+# Handelen in twee (v0.141.0): laden van het net alleen onder een prijs, of helemaal niet.
+if (vl := v("batterij-netladen-onder")):
+    geladen = sorted({(r[0].strftime("%d %H"), round(vl.scenario.prijzen.all_in(r[0]), 3))
+                      for r in vl.bat_verloop if r[4] == "netladen"})
+    print(f"  netladen-onder 0,16: van het net in {geladen}, € {vl.bat_kosten_met:.2f}")
+    controle("netladen-onder: van het net alleen in uren onder de grens",
+             geladen and all(p < 0.16 for _, p in geladen), f"{geladen}")
+if (vl := v("batterij-netladen-uit")):
+    standen = {r[4] for r in vl.bat_verloop}
+    controle("netladen-uit: nooit van het net", "netladen" not in standen and "max-laden" not in standen, f"{sorted(standen)}")
 if (vl := v("batterij-dynamisch-zon-zelf")):
     standen = {r[4] for r in vl.bat_verloop}
     controle("dynamisch-zon-zelf: op een zonnige dag doet de batterij alles zelf",
