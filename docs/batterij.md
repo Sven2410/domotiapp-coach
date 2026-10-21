@@ -47,7 +47,67 @@ van het net wil halen wordt over al die uren uitgesmeerd; dezelfde gedachte als
 van zijn vermogen het zuinigst is. **Dat getal staat er niet in**: het is een
 vuistregel en geen meting van deze batterij. Uitsmeren over even dure uren kost
 nooit geld; een duurder uur erbij nemen om rustiger te laden is pas een som als
-het rendement per vermogen gemeten is, en dat is het nog niet.
+het rendement per vermogen gemeten is. Dat is het sinds v0.142.0 (hieronder), en
+de som rekent nu met het rendement bij het vermogen van elk blok; het uitsmeren
+over even dure uren is gebleven zoals het was.
+
+**Het rendement per vermogen, zelf geleerd** (v0.142.0). De eigenaar op
+19-10-2026, bij een grafiek van een thuisbatterij die bij 200 W ongeveer 70% haalt
+en vanaf 1.200 W 92 tot 93%: "RTE is dramatisch op lage vermogens.. NoM in de
+nacht niet bevorderlijk dus." Eerst gemeten in de eerste woning, tien dagen, 896
+schone stappen van een procent (de scripts en de uitkomst staan in de
+privénotities): laden 92% boven 1,2 kW; ontladen 88% bij gemiddeld 0,58 kW (vooral
+'s nachts nul op de meter), 93% bij 0,7 tot 1,2 kW en 96% daarboven; een vast
+verlies bij ontladen van ongeveer 68 W. Heen en terug over die tien dagen 83,2%.
+De eigenaar: "ja, bouwen" (21-10-2026).
+
+De coach doet die som nu zelf (`Rendementmeter` in batterij.py), in de regelaar
+(`_async_regel`), dus alleen bij een batterij die hij stuurt. Een stap begint als
+de accustand een procent omslaat en eindigt bij de volgende omslag dezelfde kant
+op: dan ging er een procent van de capaciteit in of uit de cellen. Daartegenover
+wat er aan de wisselstroomkant doorheen ging, uit de tellers van een kWh-meter op
+de batterij als die er is en anders uit het vermogen van de batterij zelf (de
+sensor, niet de opdracht). Niet geteld: een sprong van twee procent, een
+omkering, een gat van meer dan 90 seconden in de metingen, meer dan 2% de andere
+kant op (`RTE_TEGEN`), onder 10 of boven 90% (`RTE_SOC_LAAG`, `RTE_SOC_HOOG`; daar
+kalibreert de batterij zich en kwamen er in de meting waarden boven 100% uit), en
+een stap waarvan niet de helft van de tijd in één vermogensband lag. De banden
+(`RTE_BANDEN`): onder 300 W, 300 tot 700, 700 tot 1.200, 1.200 tot 2.000 en
+daarboven. Per band per richting gaan de sommen naar `rte_steps` in
+`battery_state`; boven 400 stappen in een band telt alles voor de helft, zodat
+een batterij die ouder wordt meegenomen wordt.
+
+`rendement_uit_stappen` maakt daar per richting punten van (het gemiddelde
+vermogen aan de accukant, het rendement over de band), zodra een band tien
+stappen heeft en een richting dertig. Tussen twee punten recht getrokken, buiten
+de punten het dichtstbijzijnde: verder dan de metingen reiken neemt de coach
+niets aan, ook niet bij 100 W als hij alleen vanaf 300 W gemeten heeft. **Het
+gaat voor alles**: voor de kWh-meter heen en terug, en voor wat de bewoner
+invulde, want het is een meting en per richting. In het virtuele huis
+(`batterij-rendement-leren`, een batterij met 68 W vast verlies en 92% laden,
+zonder kWh-meter) leert hij in zestig uur 79% bij 0,33 kW, 90% bij 0,68, 93% bij
+0,97 en 96% bij 1,83 kW, en laden 92%, op een procent na wat de batterij doet.
+
+Waar het meetelt (`eta_in`, `eta_uit`, `_ac`, `_cel_in`, `_cel_uit`): in de som
+over de tijd per blok, bij het vermogen dat de batterij in dat blok zou draaien;
+in het besluit van het moment of zon opslaan en het huis voeden lonen, bij wat het
+huis nu vraagt of er nu over is; en in de nachtbalans per uur, bij wat het huis in
+dat uur vraagt. Wat geen vermogen kent (wat een kWh in de batterij straks waard is,
+onder welke prijs inkopen loont) rekent met het gemiddelde per richting. Zonder
+rendement per vermogen is het per richting de wortel van het rendement heen en
+terug, zoals altijd. **Daarbij rechtgezet:** de nachtbalans, de grens voor de auto
+en de hulp aan de auto rekenden het hele verlies heen en terug als ontlaadverlies,
+en hielden dus te veel over (in `batterij-helpt-auto-nacht` 6% om 07:00 in plaats
+van ruim 8; de accu haalt de ochtend nog steeds zonder de bodem te raken).
+
+In de pop-up staat het als "83% gemeten", met per richting de punten ("Laden 92%
+bij 2,3 kW", "Ontladen 88% bij 0,6 kW, 96% bij 2,1 kW"), uit `rte_power` in
+`battery_state`. Wissen van de metingen (`device/measurements/clear`) haalt
+`rte_steps` en `rte_power` weg, en de regelaar begint opnieuw. Wat er bij een
+batterij die zelf nul doet uit komt, kan hij alleen als hij hem stuurt: stilstaan
+mag daar niet (de eigenaar op 21-10-2026), dus 's nachts op 300 W het huis voeden
+blijft wat die batterij doet; het rendement maakt dan vooral de sommen en de
+nachtbalans eerlijker.
 
 **Het rendement is een meting of een opgave, nooit een aanname.** In de eerste
 woning kwam van elke kilowattuur die de kWh-meter op de batterij erin zag gaan
@@ -58,7 +118,9 @@ aan doorzet (`RTE_MIN_DOORZET`) en weigert alles buiten 30 tot 100%. Zonder
 kWh-meter geldt wat de bewoner invult, en alleen dat: tot v0.101.2 ging een
 ingevuld rendement ook de opslag in (`rte` in `battery_state`) en won die daarna
 van het veld, zodat aanpassen of leegmaken niets deed. Nu staat daar alleen een
-meting, en telt die alleen met een kWh-meter (`_batterij_van`, proef 114). De
+meting, en telt die alleen met een kWh-meter (`_batterij_van`, proef 114). Sinds
+v0.142.0 gaat het rendement per vermogen daar nog boven, ook zonder kWh-meter (zie
+hierboven). De
 eigenaar op 29-09-2026: "ik wil wel het rendement erin zetten als ik geen kWh
 meter heb." Zolang er gesaldeerd wordt levert opslaan niet meer op dan de
 terugleverkosten: onder (prijs min terugleverkosten) gedeeld door de prijs, bij

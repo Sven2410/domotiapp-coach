@@ -10791,6 +10791,61 @@ controle("de Engelse zinnen zijn in te lezen buiten de lus (v0.141.1)", callable
 bron186 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach" / "__init__.py").read_text()
 controle("en de coach doet dat bij het opstarten in een executor", "async_add_executor_job(taal.laden)" in bron186)
 
+print("=== 187. het rendement per vermogen: geleerd in de regelaar, bewaard en meegerekend (v0.142.0) ===")
+# De eigenaar op 19-10-2026: "RTE is dramatisch op lage vermogens." Zonder kWh-meter
+# stond er in de eerste woning "rendement nog niet bekend" en plande de coach niet;
+# nu leert hij het rendement zelf uit het vermogen van de batterij en de accustand.
+inst187 = instellingen(devices=[LAADPAAL, ZONDER_METER])
+hass187, store187, coach187 = bouw(huis75(batterij="-500", soc="50"), inst187)
+NU187 = dt.datetime(2026, 10, 20, 21, 0)
+b187 = asyncio.run(ronde75(hass187, coach187, NU187))
+controle("zonder kWh-meter en zonder opgave eerst: geen rendement", b187.get("rte") is None, f"{b187.get('rte')}")
+klok187 = [dt.datetime(2026, 10, 20, 21, 0)]
+_moment187 = coachmod._moment
+coachmod._moment = lambda moment=None: _moment187(moment) if moment is not None else klok187[0]
+
+
+def accu187(soc, stappen, watt, elke=15):
+    """De batterij op `watt`, 92% bij laden en 68 W vast verlies bij ontladen, tot `stappen` procent verder."""
+    echt = soc + 0.5
+    doel = soc + stappen if watt > 0 else soc - stappen
+    hass187.states.zet("sensor.batterij_vermogen", {"state": str(watt), "attributes": {"unit_of_measurement": "W"}})
+    while (echt < doel + 0.5) if watt > 0 else (echt > doel + 0.5):
+        cel = watt / 1000 * 0.92 if watt > 0 else -(abs(watt) / 1000 + 0.068)
+        echt += cel * elke / 3600 / 14.6 * 100
+        hass187.states.zet("sensor.batterij_soc", str(int(echt)))
+        klok187[0] += dt.timedelta(seconds=elke)
+        asyncio.run(coach187._async_regel("dev-batterij", inst187, ZONDER_METER))
+    return int(echt)
+
+
+try:
+    s187 = accu187(50, 36, -500)
+    s187 = accu187(s187, 34, 2500)
+finally:
+    coachmod._moment = _moment187
+asyncio.run(ronde75(hass187, coach187, NU187 + dt.timedelta(hours=14)))
+# De ronde die bewaart rekende nog zonder; de volgende minuut met.
+b187 = asyncio.run(ronde75(hass187, coach187, NU187 + dt.timedelta(hours=14, minutes=1)))
+rij187 = (store187.instellingen.get("battery_state") or [{}])[0]
+macht187 = rij187.get("rte_power") or {}
+print(f"  geleerd: {macht187}; de coach rekent met {b187.get('rte')}, {b187.get('rule')}")
+controle("de stappen staan in de opslag, per richting en per band",
+         sum(x["n"] for x in (rij187.get("rte_steps") or {}).get("uit", {}).values()) >= 30
+         and sum(x["n"] for x in (rij187.get("rte_steps") or {}).get("in", {}).values()) >= 30, f"{rij187.get('rte_steps')}")
+controle("ontladen op 500 W: 88%, laden 92%",
+         macht187 and abs(macht187["out"][0][1] - 0.5 / 0.568) < 0.015 and abs(macht187["in"][0][1] - 0.92) < 0.015,
+         f"{macht187}")
+controle("en de coach rekent ermee",
+         b187.get("rte") == round(macht187.get("rte", 0), 3),
+         f"{b187.get('rte')} {b187.get('rule')}")
+# De metingen wissen (Apparaten): dan begint hij opnieuw.
+store187.instellingen["battery_state"] = [{**rij187, "rte_steps": None, "rte_power": None}]
+b187 = asyncio.run(ronde75(hass187, coach187, NU187 + dt.timedelta(hours=15)))
+controle("gewist: weer onbekend, en de regelaar vergeet wat hij had",
+         b187.get("rte") is None and not coach187._batterij["dev-batterij"]["rte_meter"].sommen,
+         f"{b187.get('rte')} {coach187._batterij['dev-batterij']['rte_meter'].sommen}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

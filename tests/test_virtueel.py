@@ -1721,7 +1721,9 @@ for naam, vl in V.items():
     if vl.bat_optimizer is not None:
         print(f"  {naam}: coach €{vl.bat_kosten_met:.2f}, optimizer €{vl.bat_optimizer:.2f}, "
               f"zonder batterij €{vl.bat_kosten_zonder:.2f}")
-        if bat.wekelijks_vol_dag is None:
+        # Een batterij met een vast verlies (v0.142.0) kent de optimizer niet: die rekent
+        # met de wortel van `rte` per richting, en dan is zijn uitkomst geen optimum.
+        if bat.wekelijks_vol_dag is None and not bat.vast_ontladen_w:
             controle(f"{naam}: niet verder dan € 0,75 boven de optimizer",
                      vl.bat_kosten_met <= vl.bat_optimizer + 0.75,
                      f"coach {vl.bat_kosten_met:.2f}, optimizer {vl.bat_optimizer:.2f}")
@@ -2110,6 +2112,19 @@ if (vl := v("batterij-zelf-wisselend")):
     controle("zelf-wisselend: en geeft daarna geen enkele opdracht meer", len(vl.bat_opdrachten) <= 1,
              f"{vl.bat_opdrachten}")
 
+if (vl := v("batterij-rendement-leren")):
+    # Het rendement per vermogen (v0.142.0): de batterij verliest bij ontladen 68 W
+    # vast en laadt met 92%; geen kWh-meter, niets opgegeven.
+    macht = vl.bat_stand.get("rte_power") or {}
+    print(f"  rendement-leren: {macht}")
+    controle("rendement leren: zonder kWh-meter geleerd, laden 92%",
+             macht and all(abs(e - 0.92) < 0.01 for _, e in macht["in"]), f"{macht}")
+    controle("rendement leren: ontladen per vermogen zoals de batterij het doet (68 W vast verlies)",
+             macht and len(macht["out"]) >= 3 and all(
+                 abs(e - (kw - 0.068) / kw) < 0.02 for kw, e in macht["out"]), f"{macht}")
+    controle("rendement leren: op laag vermogen een lager rendement",
+             macht and macht["out"][0][1] < macht["out"][-1][1] - 0.1, f"{macht}")
+
 if (vl := v("batterij-rendement-onbekend")):
     controle("rendement onbekend: alleen nul op de meter",
              {r[4] for r in vl.bat_verloop[5:]} <= {"nul"}, f"{sorted({r[4] for r in vl.bat_verloop})}")
@@ -2171,8 +2186,14 @@ if (vl := v("batterij-helpt-auto")) and basis_bat:
              f"eind {bat_eind(vl):.0f}% tegen {bat_eind(basis_bat):.0f}%, €{vl.bat_kosten_met:.2f} tegen €{basis_bat.bat_kosten_met:.2f}")
     controle("helpen boven 40%: de auto is op tijd vol, zoals zonder", vl.klaar_op is not None and gehaald(vl), f"{vl.klaar_op}")
 if (met := v("batterij-helpt-auto-nacht")) and (zonder := v("batterij-helpt-auto-zonder-nacht")):
-    controle("nachtstrategie aan: de accu houdt meer over dan met de strategie uit",
-             bat_eind(met) > bat_eind(zonder) + 2, f"{bat_eind(met):.0f}% tegen {bat_eind(zonder):.0f}%")
+    # Sinds v0.142.0 rekent de nachtbalans met het verlies van het ontladen alleen, en
+    # niet meer met het hele verlies heen en terug; daarvoor hield hij ruim 2% te veel
+    # over. Wat de strategie belooft: de accu haalt de ochtend zonder de bodem te raken.
+    bodem_met = next((r[0] for r in met.bat_verloop if r[3] <= 5.5), None)
+    bodem_zonder = next((r[0] for r in zonder.bat_verloop if r[3] <= 5.5), None)
+    controle("nachtstrategie aan: de accu haalt de ochtend, met de strategie uit niet",
+             bodem_met is None and bodem_zonder is not None and bat_eind(met) >= bat_eind(zonder),
+             f"bodem {bodem_met} tegen {bodem_zonder}, eind {bat_eind(met):.1f}% tegen {bat_eind(zonder):.1f}%")
     controle("nachtstrategie aan: geen slinger rond de grens die 's nachts zakt",
              met.bat_wissels() <= 8, f"{met.bat_wissels()} wissels")
     controle("nachtstrategie uit: tot de eigen ondergrens en niet eronder",

@@ -61,6 +61,7 @@ from .batterij import (
     VOL_MARGE,
     Batterij,
     Regelaar,
+    Rendementmeter,
     Voorraad,
     auto_grens,
     balans_kwh,
@@ -68,6 +69,7 @@ from .batterij import (
     herreken,
     met_paal,
     plan_batterij,
+    rendement_uit_stappen,
     rendement_uit_tellers,
     verdiend,
     vol_voor,
@@ -6194,6 +6196,12 @@ class ChargerCoach:
         bewaard = float(rij["rte"]) if rij.get("rte") else None
         met_meter = bool(entities.get("energy_in") and entities.get("energy_out"))
         rte = gemeten or ((bewaard or ingevuld_rte) if met_meter else ingevuld_rte)
+        # Het rendement per vermogen gaat voor alles (v0.142.0): het is een
+        # meting, per richting, en hij werkt ook zonder kWh-meter. Zie
+        # `Rendementmeter` in batterij.py.
+        rendement = rendement_uit_stappen(rij.get("rte_steps"))
+        if rendement is not None:
+            rte = rendement.rte
 
         laatst_vol = _tijdstip(rij.get("full_at"))
         return Batterij(
@@ -6210,6 +6218,7 @@ class ChargerCoach:
             ),
             reserve=float(eigen.get("reserve_percent") or 0) if eigen.get("reserve_enabled") else None,
             rte=rte,
+            rendement=rendement,
             handelen=bool(eigen.get("trade")),
             # Handelen in twee, met een grens per richting (v0.141.0).
             net_laden=bool(eigen.get("grid_charge", True)),
@@ -6410,6 +6419,24 @@ class ChargerCoach:
         accu = self._rte_gemeten(device, b.capacity_kwh, ("accu_in", "accu_out"))
         if accu is not None and abs(float(rij.get("rte_accu") or 0.0) - accu) > 0.002:
             nieuw["rte_accu"] = round(accu, 4)
+        # Wat de regelaar aan stappen van een procent leerde (v0.142.0), en voor
+        # de pop-up wat daar per richting uit komt. Zijn de metingen gewist, dan
+        # begint hij opnieuw.
+        meter = sessie.get("rte_meter")
+        if meter is not None and rij.get("rte_steps") is None and sessie.get("rte_bewaard"):
+            meter.sommen = {}
+            sessie["rte_bewaard"] = False
+        if meter is not None and sessie.get("rte_nieuw") and (
+            sessie.get("rte_op") is None or now - sessie["rte_op"] >= BATTERIJ_BEWAREN
+        ):
+            nieuw["rte_steps"] = meter.sommen
+            r = rendement_uit_stappen(meter.sommen)
+            nieuw["rte_power"] = None if r is None else {
+                "rte": round(r.rte, 4),
+                "in": [[round(kw, 3), round(e, 4)] for kw, e in r.laden],
+                "out": [[round(kw, 3), round(e, 4)] for kw, e in r.ontladen],
+            }
+            sessie.update(rte_nieuw=False, rte_op=now, rte_bewaard=True)
         if vol_nu:
             vorige = _tijdstip(rij.get("full_at"))
             if vorige is None or now - vorige.replace(tzinfo=None) > timedelta(hours=1):
@@ -6652,6 +6679,19 @@ class ChargerCoach:
             soc = _number(self.hass, (device.get("entities") or {}).get("soc"))
             if soc is not None:
                 b.soc = soc
+
+            # Het rendement per vermogen leren (v0.142.0): de sensor van de
+            # batterij en niet de opdracht, want het gaat om wat er echt liep,
+            # en de tellers van een kWh-meter op de batterij als die er zijn.
+            meter = sessie.get("rte_meter")
+            if meter is None:
+                bewaard = self._batterij_rij(settings, device_id).get("rte_steps")
+                meter = sessie["rte_meter"] = Rendementmeter(sommen=dict(bewaard) if isinstance(bewaard, dict) else {})
+                sessie["rte_bewaard"] = isinstance(bewaard, dict)
+            entities = device.get("entities") or {}
+            if meter.tik(nu, soc, batterij_w, b.capacity_kwh,
+                         _kwh(self.hass, entities.get("energy_in")), _kwh(self.hass, entities.get("energy_out"))):
+                sessie["rte_nieuw"] = True
 
             # Het kasboek: wat de batterij sinds de vorige stap opleverde. Doet
             # hij zelf nul op de meter, dan is de sensor de enige bron.

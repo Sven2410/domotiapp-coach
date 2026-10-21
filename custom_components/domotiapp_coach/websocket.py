@@ -912,11 +912,12 @@ async def async_clear_measurements(
         row for row in (settings.get("boiler_learned") or [])
         if not (isinstance(row, dict) and row.get("device") == msg["device_id"])
     ]
-    # En van een thuisbatterij het gemeten rendement. Wat hij verdiend heeft
+    # En van een thuisbatterij het gemeten rendement, ook dat per vermogen
+    # (v0.142.0). Wat hij verdiend heeft
     # blijft staan: dat is geen meting die verkeerd kan zijn gegaan maar een
     # kasboek.
     batterijen = [
-        {**row, "rte": None, "rte_accu": None}
+        {**row, "rte": None, "rte_accu": None, "rte_steps": None, "rte_power": None}
         if isinstance(row, dict) and row.get("device") == msg["device_id"]
         else row
         for row in (settings.get("battery_state") or [])

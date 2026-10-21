@@ -184,6 +184,7 @@ export const OVERIG = {
   "Uit": "Off",
   "Rendement": "Efficiency",
   "{pct}% gemeten": "{pct}% measured",
+  "{pct}% bij {kw} kW": "{pct}% at {kw} kW",
   "{pct}% opgegeven": "{pct}% specified",
   "ongeveer {pct}%, gemeten in de accu": "about {pct}%, measured in the battery",
   "nog niet bekend": "not yet known",

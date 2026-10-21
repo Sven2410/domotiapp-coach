@@ -32,7 +32,7 @@
   "Hij houdt de meter op nul: overschot gaat erin, wat het huis vraagt komt eruit.": "It keeps the meter at zero: surplus goes in, what the home needs comes out.",
   "Stroom kost bij je contract elk uur hetzelfde, dus van het net laden levert nooit iets op.": "On your contract electricity costs the same every hour, so charging from the grid never pays off.",
   "Hij houdt de meter op nul. Het rendement van de batterij is nog niet bekend, dus van het net laden doet hij nog niet.": "It keeps the meter at zero. The efficiency of the battery is not known yet, so it does not charge from the grid yet.",
-  "Met een kWh-meter op de batterij meet de coach het zelf; anders vul je het in bij Apparaten.": "With a kWh meter on the battery the coach measures it itself; otherwise fill it in under Devices.",
+  "De coach meet het zelf terwijl hij de batterij laadt en ontlaadt; je kunt het ook invullen bij Apparaten.": "The coach measures it itself while it charges and discharges the battery; you can also enter it under Devices.",
   "Hij houdt de meter op nul.": "It keeps the meter at zero.",
   "Hij maakt het laden van het net af tot {tijd} en geeft tot dan niets af.": "It finishes charging from the grid until {tijd} and discharges nothing until then.",
   "Hij laadt van het net op {kw}, rustig verdeeld tot {tijd}.": "It charges from the grid at {kw}, spread out until {tijd}.",

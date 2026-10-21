@@ -1343,6 +1343,16 @@ batterij_zonder_rendement = batterij_winter.kopie(
     uitleg="geen kWh-meter en niets opgegeven: alleen nul op de meter, niet van het net laden",
     batterij=Batterij(soc=8.0, meter=False), duur_uren=20,
 )
+# Het rendement per vermogen (v0.142.0): geen kWh-meter en niets opgegeven, een batterij
+# met een vast verlies van 68 W bij ontladen en 92% bij laden, zoals gemeten in de
+# eerste woning op 19-10-2026. De coach leert het zelf uit het vermogen en de accustand.
+batterij_rendement_leren = batterij_winter.kopie(
+    naam="batterij-rendement-leren",
+    uitleg="dynamisch, wisselend, zelf nul, geen kWh-meter: de coach leert het rendement per vermogen uit de accustand",
+    zon=Zon(wolken="wisselend"),
+    batterij=Batterij(soc=30.0, meter=False, eigen_nul=True, zelf_nul=True, vast_ontladen_w=68.0),
+    begin="2026-09-07 06:55", duur_uren=60,
+)
 
 BATTERIJ = [
     batterij_vast_zon, batterij_zonder_terug, batterij_vast_salderen, batterij_winter, batterij_zomer, batterij_handelen,
@@ -1352,7 +1362,7 @@ BATTERIJ = [
     batterij_zelf_nul, batterij_zelf_knop_weg, batterij_zelf_knop_traag, batterij_knop_traag_start,
     batterij_dynamisch_zelf, batterij_netladen_onder, batterij_netladen_uit,
     batterij_dynamisch_zon_zelf, batterij_zelf_wisselend,
-    batterij_kwartier_zelf, batterij_kwartier_voorloper,
+    batterij_kwartier_zelf, batterij_kwartier_voorloper, batterij_rendement_leren,
 ]
 HERSTART = [herstart_groep, herstart_groep_zonder]
 

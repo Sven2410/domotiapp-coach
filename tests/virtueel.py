@@ -811,6 +811,12 @@ class Batterij:
     # opgeven (`rte_opgegeven`), en anders weet de coach het niet.
     meter: bool = True
     rte_opgegeven: float | None = None
+    # Een rendement dat van het vermogen afhangt (v0.142.0), zoals gemeten in de
+    # eerste woning op 19-10-2026: laden 92%, ontladen een vast verlies van 68 W
+    # bovenop wat er aan de wisselstroomkant uitkomt. Nul is het oude model, de
+    # wortel van `rte` per richting.
+    vast_ontladen_w: float = 0.0
+    laden_eta: float = 0.92
     # Wat de bewoner instelt.
     reserve: float | None = None
     handelen: bool = False
@@ -941,7 +947,14 @@ class Batterij:
             self.sensor_verloop.pop(0)
         eta = math.sqrt(self.rte)
         kwh = w / 1000 * seconden / 3600
-        if kwh >= 0:
+        if self.vast_ontladen_w and w:
+            if kwh >= 0:
+                self.soc += kwh * self.laden_eta / self.capaciteit_kwh * 100
+                self.teller_in += kwh
+            else:
+                self.soc += (kwh - self.vast_ontladen_w / 1000 * seconden / 3600) / self.capaciteit_kwh * 100
+                self.teller_uit += -kwh
+        elif kwh >= 0:
             self.soc += kwh * eta / self.capaciteit_kwh * 100
             self.teller_in += kwh
         else:

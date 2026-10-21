@@ -521,7 +521,8 @@ controle("de zon die er niet in past gaat naar het net en wordt genoemd",
 # ook als de zon morgenvroeg weer komt.
 nacht31 = bat.balans_kwh(DAG.replace(hour=20), verwachting({}, huis=1.0), anker(soc=20.0))
 controle("een lege accu in de nacht: tekort, uitgerekend uur voor uur",
-         nacht31 is not None and nacht31 < 0 and abs(nacht31 - (-(11.0 - (0.15 * 14.6) * 0.736))) < 0.05,
+         # Sinds v0.142.0 het verlies van het ontladen alleen, de helft heen en terug.
+         nacht31 is not None and nacht31 < 0 and abs(nacht31 - (-(11.0 - (0.15 * 14.6) * 0.736 ** 0.5))) < 0.05,
          f"{nacht31}")
 
 print("32. de batterij helpt de auto alleen met wat er echt over is (v0.90.0)")
@@ -530,10 +531,11 @@ print("32. de batterij helpt de auto alleen met wat er echt over is (v0.90.0)")
 # nachtbalans gaat voor, "auto laden vanuit de batterij doe je echt alleen als er
 # te veel capaciteit over is; drie keer verlies."
 a32 = anker(soc=80.0, auto_boven=40.0)
-# 14,6 kWh, rendement 0,736: morgenvroeg 3,0 kWh over is 3,0 / 0,736 = 4,08 kWh
-# aan de accukant, 27,9 procentpunt: de nacht heeft 52,1% nodig.
-controle("de nacht gaat voor: grens 52% en niet de 40% van de bewoner",
-         abs(bat.auto_grens(a32, 3.0) - (80.0 - 3.0 / 0.736 / 14.6 * 100)) < 0.01, f"{bat.auto_grens(a32, 3.0)}")
+# 14,6 kWh, rendement 0,736: morgenvroeg 3,0 kWh over is 3,0 / 0,858 = 3,50 kWh
+# aan de accukant (sinds v0.142.0 met het verlies van het ontladen alleen, tot dan
+# met het hele verlies heen en terug), 24,0 procentpunt: de nacht heeft 56,0% nodig.
+controle("de nacht gaat voor: grens 56% en niet de 40% van de bewoner",
+         abs(bat.auto_grens(a32, 3.0) - (80.0 - 3.0 / 0.736 ** 0.5 / 14.6 * 100)) < 0.01, f"{bat.auto_grens(a32, 3.0)}")
 controle("is er ruim genoeg over, dan is de grens van de bewoner de ondergrens",
          bat.auto_grens(a32, 20.0) == 40.0, f"{bat.auto_grens(a32, 20.0)}")
 controle("weet hij de nacht niet, dan helpt hij niet", bat.auto_grens(a32, None) is None, "")
@@ -594,7 +596,7 @@ nacht33 = anker(soc=78.0, auto_boven=50.0, nacht=True, max_discharge_w=3500.0)
 uren33b = [bat.Uur(N33, N33 + dt.timedelta(hours=1), bat.NUL, 0.0, 0.0, 78.0, 0.30)]
 kort33 = bat.auto_hulp(uren33b, nacht33, 0.5, [(N33, N33 + dt.timedelta(hours=1), 9.0)])
 controle("met de nachtstrategie nooit meer dan wat er morgenvroeg over zou zijn",
-         abs(kort33[0] - 0.5 / 0.736 * eta33) < 1e-6, f"{kort33}")
+         abs(kort33[0] - 0.5) < 1e-6, f"{kort33}")
 controle("weet hij de nacht niet, dan helpt hij in het plan ook niet",
          bat.auto_hulp(uren33b, nacht33, None, [(N33, N33 + dt.timedelta(hours=1), 9.0)]) == [0.0], "")
 dicht33 = anker(soc=74.0, auto_boven=70.0, nacht=False, max_discharge_w=3500.0)
@@ -1229,8 +1231,8 @@ LIJST46 = uurlijst46(Z46, prijs46)
 try:
     planner.zet_zone(AMSTERDAM)
     # Tot morgenvroeg (07:00): van 22:00 is dat op 28-03-2027 acht echte uren, op 25-10-2026 tien.
-    huis46 = sum(h for _z, h in bat._nacht_uren(dt.datetime(2027, 3, 27, 22, 0), verwachting(huis=0.3, dag=dt.datetime(2027, 3, 27))))
-    huis46w = sum(h for _z, h in bat._nacht_uren(dt.datetime(2026, 10, 24, 22, 0), verwachting(huis=0.3, dag=dt.datetime(2026, 10, 24))))
+    huis46 = sum(h for _z, h, _d in bat._nacht_uren(dt.datetime(2027, 3, 27, 22, 0), verwachting(huis=0.3, dag=dt.datetime(2027, 3, 27))))
+    huis46w = sum(h for _z, h, _d in bat._nacht_uren(dt.datetime(2026, 10, 24, 22, 0), verwachting(huis=0.3, dag=dt.datetime(2026, 10, 24))))
     print(f"  het huis vraagt tot morgenvroeg {huis46:.2f} kWh (zomertijd) en {huis46w:.2f} kWh (wintertijd)")
     controle("de nacht van de zomertijd heeft acht uur huisverbruik", abs(huis46 - 8 * 0.3) < 1e-9, f"{huis46}")
     controle("die van de wintertijd tien", abs(huis46w - 10 * 0.3) < 1e-9, f"{huis46w}")
@@ -1260,7 +1262,7 @@ finally:
     planner.zet_zone(None)
 
 # Zonder zone, zoals elke proef hierboven: alles op de klok, zoals het altijd was.
-huis46n = sum(h for _z, h in bat._nacht_uren(dt.datetime(2027, 3, 27, 22, 0), verwachting(huis=0.3, dag=dt.datetime(2027, 3, 27))))
+huis46n = sum(h for _z, h, _d in bat._nacht_uren(dt.datetime(2027, 3, 27, 22, 0), verwachting(huis=0.3, dag=dt.datetime(2027, 3, 27))))
 controle("zonder zone telt de nacht negen uur op de klok, zoals voorheen", abs(huis46n - 9 * 0.3) < 1e-9, f"{huis46n}")
 
 print()
@@ -1304,6 +1306,95 @@ print(f"  17:05 op 90%: zonder grens {h47.stand}; boven 0,43 {h47b.stand}, naar 
 controle("zonder grens handelt hij op de dure avond", h47.stand == HANDELEN, h47.stand)
 controle("met een grens van 0,43 niet om 17:00 (0,42), wel in de uren erboven",
          h47b.stand != HANDELEN and weg47 and all(p > 0.43 for _, p in weg47), f"{h47b.stand} {weg47}")
+
+print("=== 48. het rendement per vermogen: leren en rekenen (v0.142.0) ===")
+# De eigenaar op 19-10-2026: "RTE is dramatisch op lage vermogens.. NoM in de nacht
+# niet bevorderlijk dus." Gemeten in de eerste woning: ontladen een vast verlies van
+# ongeveer 68 W, dan 81% bij 300 W en 96% bij 2 kW; laden 92% boven 1,2 kW.
+Rendementmeter, rendement_uit_stappen, Rendement = bat.Rendementmeter, bat.rendement_uit_stappen, bat.Rendement
+
+
+def accu48(meter, soc, stappen, ac_w, cap=14.3, elke=5, start=None, tegen_w=0.0):
+    """Een batterij met 68 W vast verlies bij ontladen en 92% bij laden, de accustand in hele procenten."""
+    t = start or dt.datetime(2026, 10, 20, 0, 0)
+    echt = soc + 0.5
+    doel = soc + stappen if ac_w > 0 else soc - stappen
+    n = 0
+    while (echt < doel + 0.5) if ac_w > 0 else (echt > doel + 0.5):
+        cel_kw = ac_w / 1000 * 0.92 if ac_w > 0 else -(abs(ac_w) / 1000 + 0.068)
+        echt += cel_kw * elke / 3600 / cap * 100
+        w = ac_w + (tegen_w if n % 10 == 0 else 0.0)
+        meter.tik(t, float(int(echt)), w, cap)
+        t += dt.timedelta(seconds=elke)
+        n += 1
+    return t, int(echt)
+
+
+m48 = Rendementmeter()
+t48, s48 = accu48(m48, 20, 50, 2500.0)
+t48, s48 = accu48(m48, s48, 25, -500.0, start=t48)
+t48, s48 = accu48(m48, s48, 20, -2000.0, start=t48)
+som48 = m48.sommen
+print(f"  stappen: laden {sum(b['n'] for b in som48['in'].values())}, ontladen "
+      f"{ {k: b['n'] for k, b in som48['uit'].items()} }")
+r48 = rendement_uit_stappen(som48)
+print(f"  laden {r48.laden}, ontladen {[(round(k, 3), round(e, 3)) for k, e in r48.ontladen]}")
+controle("laden: 92% geleerd", r48 is not None and abs(r48.gem_laden - 0.92) < 0.01, f"{r48}")
+controle("ontladen op 500 W: 500 / 568 = 88%",
+         abs(r48.ontladen[0][1] - 0.5 / 0.568) < 0.012, f"{r48.ontladen}")
+controle("ontladen op 2 kW: 2000 / 2068 = 96,7%",
+         abs(r48.ontladen[-1][1] - 2.0 / 2.068) < 0.012, f"{r48.ontladen}")
+controle("bij een lager vermogen een lager rendement, en ertussen recht getrokken",
+         r48.ontladen[0][1] < bat._op_vermogen(r48.ontladen, 1.0) < r48.ontladen[-1][1], "")
+controle("buiten de metingen het dichtstbijzijnde punt, niets aangenomen",
+         bat._op_vermogen(r48.ontladen, 0.1) == r48.ontladen[0][1]
+         and bat._op_vermogen(r48.ontladen, 5.0) == r48.ontladen[-1][1], "")
+# Wat niet telt: boven 90%, een sprong, een omkering, tegenstroom, een gat.
+m48b = Rendementmeter()
+accu48(m48b, 88, 7, 2500.0)
+controle("boven de 90% telt geen stap", not m48b.sommen or sum(b["n"] for b in m48b.sommen["in"].values()) <= 1,
+         f"{m48b.sommen}")
+m48c = Rendementmeter()
+nu48 = dt.datetime(2026, 10, 20, 3, 0)
+for i, soc in enumerate([50, 51, 52, 54, 55, 54, 55, 56]):
+    m48c.tik(nu48 + dt.timedelta(seconds=60 * i), float(soc), 2500.0, 14.3)
+controle("een sprong van twee procent en een omkering tellen niet", not m48c.sommen, f"{m48c.sommen}")
+m48d = Rendementmeter()
+accu48(m48d, 40, 20, -1000.0, tegen_w=1500.0)
+controle("te veel de andere kant op is geen stap", not m48d.sommen, f"{m48d.sommen}")
+m48e = Rendementmeter()
+m48e.tik(nu48, 50.0, -1000.0, 14.3)
+m48e.tik(nu48 + dt.timedelta(seconds=30), 49.0, -1000.0, 14.3)
+m48e.tik(nu48 + dt.timedelta(minutes=10), 48.0, -1000.0, 14.3)
+controle("een gat van tien minuten zonder metingen telt niet", not m48e.sommen, f"{m48e.sommen}")
+weinig48 = Rendementmeter()
+accu48(weinig48, 20, 50, 2500.0)
+controle("met alleen laden gemeten rekent hij er nog niet mee", rendement_uit_stappen(weinig48.sommen) is None, "")
+
+# Rekenen: van cellen naar wisselstroom en terug komt op hetzelfde uit.
+b48 = anker(soc=60.0, rendement=r48, rte=r48.rte)
+for ac48 in (0.2, 0.6, 2.4):
+    cel = bat._cel_uit(b48, ac48, 1.0)
+    controle(f"ontladen {ac48} kWh in een uur: heen en terug gelijk", abs(-bat._ac(b48, 10.0, 10.0 - cel, 1.0) - ac48) < 1e-4,
+             f"{bat._ac(b48, 10.0, 10.0 - cel, 1.0)}")
+# De som, zonder handelen: 's nachts 0,30, morgenvroeg 0,25. Met de helft van het
+# verlies heen en terug voedt hij 's nachts het huis; met het rendement per
+# vermogen ziet hij dat 300 W uit de batterij maar 70% oplevert, en bewaart hij het.
+sterk48 = Rendement([(2.3, 0.92)], [(0.15, 0.70), (0.6, 0.88), (2.0, 0.96)], 0.92, 0.90)
+nacht48 = [0.25] * 20 + [0.30] * 11 + [0.25] * 17
+lijst48 = prijzen(nacht48, terug=0.02)
+nu48b = DAG.replace(hour=21, minute=5)
+vast48 = plan_batterij(nu48b, lijst48, Tariff(), verwachting(huis=0.3), anker(70.0, nacht=False, rte=0.828))
+per48 = plan_batterij(nu48b, lijst48, Tariff(), verwachting(huis=0.3),
+                      anker(70.0, nacht=False, rte=sterk48.rte, rendement=sterk48))
+print(f"  21:05, 's nachts 0,30 en morgen 0,25: vast rendement {vast48.stand}, per vermogen {per48.stand}")
+controle("vast rendement: 's nachts het huis voeden", vast48.stand in (NUL, ONTLADEN), vast48.stand)
+controle("per vermogen: 300 W uit de batterij loont dan niet", per48.stand not in (NUL, ONTLADEN, HANDELEN), per48.stand)
+# De nachtbalans rekent met het ontladen op het vermogen van het huis.
+nb48 = bat.balans_kwh(DAG.replace(hour=20), verwachting({}, huis=0.3), anker(50.0, rte=sterk48.rte, rendement=sterk48))
+nbv48 = bat.balans_kwh(DAG.replace(hour=20), verwachting({}, huis=0.3), anker(50.0, rte=sterk48.rte))
+print(f"  nachtbalans op 300 W: per vermogen {nb48:.2f}, met de helft heen en terug {nbv48:.2f}")
+controle("'s nachts op 300 W houdt hij minder over dan het gemiddelde zegt", nb48 < nbv48 - 0.2, f"{nb48} {nbv48}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
