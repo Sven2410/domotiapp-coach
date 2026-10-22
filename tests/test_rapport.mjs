@@ -4156,7 +4156,7 @@ async function herkomstHuis({ uren, batterijen, periode = "day", start, zon = tr
     totaal: {
       solar: zon ? som("solar") : null,
       used,
-      zonZelf: som("zonZelf"),
+      zonZelf: Math.max(0, som("zonZelfSom")),
       eigen: som("ownUse"),
       zelfvoorzienend: used > 0 ? Math.max(0, (1 - som("fromGrid") / used) * 100) : null,
     },
@@ -4192,6 +4192,7 @@ proef("zelfvoorzienend: 's nachts van het net geladen en 's ochtends ontladen is
   // Het rapport en het aanwijzen per vak rekenen met dezelfde velden.
   const bron = Historie.toString();
   assert.ok(bron.includes("kwh(row.solar), kwh(row.used), kwh(row.zonZelf)"));
+  assert.ok(bron.includes('Math.max(0, sum("zonZelfSom"))') && bron.includes('kwh(Math.max(0, som("zonZelfSom")))'));
   assert.ok(bron.includes("solar: row.solar,") && bron.includes("(row.zonZelf / row.solar)"));
   assert.ok(bron.includes('solar: hasSolar ? sum("solar") : null'));
 });
@@ -4252,7 +4253,7 @@ proef("zelfvoorzienend: handelen, een lege batterij, gaten, en de capaciteit (v0
   // Handelen: 's nachts 5 van het net erin, om 19:00 4 eruit naar het net en 0,5 naar
   // het huis. Teruglevering zonder zon is geen zon naar het net, en niets is eigen.
   let r = herkomst([u(1, { bought: 5, erin: 5 }), u(19, { sold: 4, eruit: 4.5 })]);
-  assert.deepEqual(r.get(19), { opwek: 0, zonHuis: 0, accuZon: 0, zonNet: 0 });
+  assert.deepEqual(r.get(19), { opwek: 0, zonHuis: 0, accuZon: 0, zonNet: 0, zonAccuNet: 0 });
   // Meer terug dan zon en batterij samen: de opwekmeter miste iets (een omvormer die er
   // later bij kwam). Dat deel is zon, zoals Opgewekt het zonder batterij ook telt.
   r = herkomst([u(1, { solar: 0, sold: 3, bought: 1, eruit: 0.5 })]);
@@ -4262,6 +4263,7 @@ proef("zelfvoorzienend: handelen, een lege batterij, gaten, en de capaciteit (v0
   r = herkomst([u(12, { solar: 4, erin: 4 }), u(20, { sold: 3, eruit: 3.5 })]);
   assert.equal(r.get(20).zonNet, 0);
   assert.equal(rond(r.get(20).accuZon), 0.5, "wat het huis kreeg was zon");
+  assert.equal(rond(r.get(20).zonAccuNet), 3, "en wat naar het net ging ook: dat is niet zelf gebruikt");
   // Leeg: eerst 5 net erin, dan leeg (alles eruit), daarna zon erin en eruit: dat is zon.
   r = herkomst([
     u(1, { bought: 5, erin: 5 }),
@@ -4283,6 +4285,50 @@ proef("zelfvoorzienend: handelen, een lege batterij, gaten, en de capaciteit (v0
   // De capaciteit: het verlies valt naar verhouding weg, de verhouding blijft.
   r = herkomst([u(1, { bought: 10, erin: 10 }), u(12, { solar: 10, erin: 10 }), u(20, { eruit: 4 })], { capaciteit: 10 });
   assert.equal(rond(r.get(20).accuZon), 2, "half zon, half net");
+});
+
+proef("zelfvoorzienend: de batterij laadt eerst uit zon, eigen is per uur nooit meer dan voor v0.144.0, en handelen is geen zon zelf gebruikt (v0.144.1)", async () => {
+  const { herkomst, huisMetAccu } = await import("../custom_components/domotiapp_coach/frontend/src/views/history.js");
+  // Een klantwoning op 22-10-2026 om 11:00: zon 6,0, af 0,5, terug 0,1, de batterij in 1,6.
+  // De batterij laadt uit zon, het huis kreeg het netdeel; zoals het energiedashboard.
+  const r = herkomst([{ start: 11, solar: 6, bought: 0.5, sold: 0.1, erin: 1.6 }]).get(11);
+  assert.equal(rond(r.zonHuis), 4.3);
+  const oud = huisMetAccu(6 - 0.1, 0.5, { battery: 1.6, voor: 0 });
+  assert.equal(rond(r.zonHuis + r.accuZon), rond(oud.ownUse));
+  // Willekeurige dagen zonder teruglevering uit de batterij: per uur nooit meer eigen
+  // dan zoals Historie het voor v0.144.0 telde (`huisMetAccu` zonder herkomst).
+  let zaad = 7;
+  const kans = () => ((zaad = (zaad * 16807) % 2147483647) / 2147483647);
+  for (let dag = 0; dag < 50; dag += 1) {
+    const uren = [];
+    for (let h = 0; h < 48; h += 1) {
+      const solar = h % 24 >= 8 && h % 24 < 18 ? kans() * 5 : 0;
+      const huis = 0.2 + kans() * 2;
+      const erin = kans() < 0.4 ? kans() * 3 : 0;
+      const eruit = erin === 0 && kans() < 0.5 ? kans() * 2 : 0;
+      const netto = huis + erin - eruit - solar;
+      uren.push({ start: h, solar, erin, eruit, bought: Math.max(0, netto), sold: Math.max(0, -netto) });
+    }
+    const herk = herkomst(uren, { capaciteit: 10 });
+    for (const x of uren) {
+      const oudUur = huisMetAccu(Math.max(0, x.solar - x.sold), x.bought, { battery: x.erin - x.eruit, voor: 0 });
+      const nu = huisMetAccu(x.solar - x.sold, x.bought, { battery: x.erin - x.eruit, voor: 0 }, herk.get(x.start));
+      assert.ok(nu.ownUse <= oudUur.ownUse + 1e-9, `dag ${dag} uur ${x.start}: ${nu.ownUse} > ${oudUur.ownUse}`);
+    }
+  }
+  // Handelen: zon die de batterij in ging en 's avonds naar het net, is niet zelf gebruikt.
+  const dag = new Date(2026, 9, 20);
+  const uren = [];
+  for (let h = 0; h < 24; h += 1) {
+    const x = { t: H(dag, h), zon: 0, af: 0.2, terug: 0, a: { erin: 0, eruit: 0, soc: 50 } };
+    if (h >= 11 && h < 13) Object.assign(x, { zon: 3, af: 0, a: { erin: 2.8, eruit: 0, soc: 70 } });
+    if (h === 20) Object.assign(x, { af: 0, terug: 4, a: { erin: 0, eruit: 4.2, soc: 30 } });
+    uren.push(x);
+  }
+  const { totaal } = await herkomstHuis({ uren, batterijen: [ACCU_TELLER], start: dag });
+  // 6 opgewekt: 0,4 meteen het huis in, 5,6 de batterij in; daarvan 0,2 naar het huis en 4 naar het net.
+  assert.equal(rond(totaal.solar), 6);
+  assert.equal(rond(totaal.zonZelf), 2, "6 min de 4 die via de batterij terugging");
 });
 
 proef("zelfvoorzienend: twee batterijen, een zonder tellers en een met, en de lege batterij uit de accustand (v0.144.0)", async () => {
