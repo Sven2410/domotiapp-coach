@@ -18,7 +18,7 @@
 
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
-import { energy, euro, huisNu, percent, signedPower } from "../format.js";
+import { energy, euro, geldBedrag, huisNu, percent, signedPower } from "../format.js";
 import { deviceLabel, deviceLabelMap } from "../devices.js";
 import { datum, getal, locale, nt, t, tijd, tn } from "../i18n.js";
 
@@ -226,7 +226,10 @@ export function herkomst(uren, { capaciteit = null, rte = null, prijs = null } =
     const zonHuis = Math.min(opwek - zonNet - zonIn, huis);
     const p = prijs ? prijs(uur.start) : null;
     const koop = p?.koop ?? null;
-    const terugPrijs = p?.terug ?? koop;
+    // Een onbekende terugleverprijs telt als nul, zoals de coach zelf plant (`_kosten` in
+    // batterij.py). De eigenaar op 22-10-2026, bij een negatieve opgeslagen zon in een
+    // woning met twee tijdvakken: "onbekende teruglevering 0 inderdaad" (v0.147.1).
+    const terugPrijs = p?.terug ?? 0;
 
     // Eerst wat er al in zat, dan wat er dit uur bij kwam.
     const nodig = eruit / rendement;
@@ -1791,13 +1794,13 @@ class DacViewHistory extends DacElement {
       ? []
       : [
           cel(this.kostenNaam_(g.uitgegeven < 0), euro(Math.abs(g.uitgegeven))),
-          cel("Bespaard", euro(g.bespaard)),
+          cel("Bespaard", geldBedrag(g.bespaard)),
           cel("Stroom van het net", euro(g.stroom)),
           g.metTerug ? cel("Teruglevering", `− ${euro(g.terug)}`) : null,
           g.metGas ? cel("Gas", euro(g.gas)) : null,
           g.metWater ? cel("Water", euro(g.water)) : null,
           batterijRegel ? cel(batterijRegel.naam, batterijRegel.tekst) : null,
-          ...this.geldDelen_(g).map((d) => cel(d.naam, euro(d.waarde))),
+          ...this.geldDelen_(g).map((d) => cel(d.naam, geldBedrag(d.waarde))),
         ].filter(Boolean);
 
     const bespaard = this.bespaardRapport_();
@@ -2472,7 +2475,7 @@ class DacViewHistory extends DacElement {
       l.textContent = label;
       const v = document.createElement("span");
       v.className = "geld-waarde";
-      v.textContent = euro(waarde);
+      v.textContent = geldBedrag(waarde);
       const u = document.createElement("span");
       u.className = "geld-uitleg";
       u.textContent = uitleg;
@@ -2538,7 +2541,7 @@ class DacViewHistory extends DacElement {
     if (g.metWater) uit.push({ naam: t("Water"), tekst: euro(g.water), tone: "var(--dac-grid-in)" });
     const batterijRegel = this.voorraadRegel_(g);
     if (batterijRegel) uit.push({ ...batterijRegel, naam: t(batterijRegel.naam), tone: "var(--dac-ink-3)" });
-    const bij = bespaardDelen.map((d) => ({ naam: d.naam, tekst: euro(d.waarde), tone: d.tone }));
+    const bij = bespaardDelen.map((d) => ({ naam: d.naam, tekst: geldBedrag(d.waarde), tone: d.tone }));
     this.$("#money-parts").replaceChildren(
       kolom(kostenKop, uit),
       ...(bij.length ? [kolom(t("Bespaard"), bij)] : [])
@@ -2596,7 +2599,10 @@ class DacViewHistory extends DacElement {
     // er naast het vaste tarief zijn hebben hier een eigen zin, zodat de taal klopt.
     const prijs = euro(rate.buy);
     zinnen.push(
-      vast
+      // Portugal (v0.147.1): de som rekent per tijdvak (`ptPrijsOp`), dus geen tarief van nu.
+      contract?.country === "PT"
+        ? t("Gerekend met de tijdvakken van je contract.")
+        : vast
         ? t("Stroom kost {prijs} per kWh.", { prijs })
         : perBucket
           ? this.period_ === "day"

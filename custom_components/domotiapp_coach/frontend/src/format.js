@@ -351,6 +351,16 @@ export function euro(value) {
 }
 
 /**
+ * Een bedrag in In geld (v0.147.1): een tekort met het minteken vooraan, zoals bij
+ * teruglevering ("− € 0,05"), en wat op nul afrondt als "€ 0,00", niet "€ -0,00".
+ * Thuis stond er op 22-10-2026 "€ -0,05" en "€ -0,00" naast "− € 0,09".
+ */
+export function geldBedrag(value) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  return value <= -0.005 ? `− ${euro(-value)}` : euro(Math.max(0, value));
+}
+
+/**
  * Pick a status colour from a value and two thresholds.
  *
  * @param {number|null} value

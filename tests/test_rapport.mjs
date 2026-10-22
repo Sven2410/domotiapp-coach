@@ -4482,6 +4482,27 @@ proef("bespaard: directe zon, opgeslagen zon en de coach, met de voorbeelden van
   assert.ok(!Historie.toString().includes('t("Verdiend")'), "Verdiend staat nergens meer op het scherm");
 });
 
+proef("opgeslagen zon nooit onder nul, onbekende teruglevering is nul, en een tekort met het minteken vooraan (v0.147.1)", async () => {
+  const { herkomst } = await import("../custom_components/domotiapp_coach/frontend/src/views/history.js");
+  const { geldBedrag } = await import("../custom_components/domotiapp_coach/frontend/src/format.js");
+  // Thuis op 22-10-2026: vast met salderen, 91% rendement: opslaan kostte het verlies (−€ 0,05).
+  const b = geld.balans({ rijen: [{ start: new Date(2026, 9, 22, 20), own: 0, bought: 0, sold: 0, zonEuro: 1.24, accuEuro: -0.05, handelEuro: 0 }],
+    prijs: () => ({ koop: 0.3, terug: 0.3 }) });
+  assert.equal(b.delen.accu, 0, "op nul");
+  assert.ok(Math.abs(b.bespaard - 1.24) < 1e-9);
+  // Maertens: twee tijdvakken en geen terugleverprijs. Zon erin overdag (vol tarief), eruit
+  // 's nachts (goedkoop): telt nu tegen nul, dus de hele prijs van 's nachts is bespaard.
+  const pt = (start) => (start === 13 ? { koop: 0.22, terug: null } : { koop: 0.12, terug: null });
+  const r = herkomst([{ start: 13, solar: 2, erin: 2 }, { start: 23, eruit: 2 }], { prijs: pt });
+  assert.ok(Math.abs(r.get(23).accuEuro - 2 * 0.12) < 1e-9, `${r.get(23).accuEuro}`);
+  // De opmaak.
+  assert.equal(geldBedrag(-0.05), "− € 0,05");
+  assert.equal(geldBedrag(-0.001), "€ 0,00", "geen min-nul");
+  assert.equal(geldBedrag(1.24), "€ 1,24");
+  // De uitleg in Portugal noemt geen tarief van nu.
+  assert.ok(Historie.toString().includes('t("Gerekend met de tijdvakken van je contract.")'));
+});
+
 proef("de afschrijving in Instellen van de batterij: per kWh, of met de hulp uit aanschafprijs en laadcycli (v0.146.0)", async () => {
   const vv = await import("../custom_components/domotiapp_coach/frontend/src/voorkeur-velden.js");
   const html = vv.voorkeurHtml({ type: "thuisbatterij", battery: {} });

@@ -445,7 +445,10 @@ export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], 
   // op een goedkoper moment.
   const wachten = (Number(coach?.saved) || 0) - (Number(coach?.solar_saved) || 0);
   // Zonder uren van de herkomst (de statistiek ontbrak) het kasboek van de coach.
-  const accuEuro = metHerkomst ? accuUitHerkomst : Number(accu) || 0;
+  // Opgeslagen zon nooit onder nul (v0.147.1): bij een vast contract met salderen kost
+  // opslaan alleen het verlies, en een negatieve besparing leest als een fout. De
+  // eigenaar op 22-10-2026: "0 tonen dan."
+  const accuEuro = metHerkomst ? Math.max(0, accuUitHerkomst) : Number(accu) || 0;
   const coachEuro = wachten + (metHerkomst ? handel : 0);
   const bespaard = zon + accuEuro + coachEuro;
   const uitgegeven = stroom - terug + g.euro + w.euro;
