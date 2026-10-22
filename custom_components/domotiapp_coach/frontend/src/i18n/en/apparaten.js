@@ -612,6 +612,7 @@ export const APPARATEN = {
   "Zon: alleen op zonoverschot": "Solar: only on solar surplus",
   "Continu: altijd, met zon erbovenop": "Continuous: always, with solar on top",
   "Goedkoopst: de goedkoopste bekende uren": "Cheapest: the cheapest known hours",
+  "Slim: eerst zon, dan het net buiten de avondpiek": "Smart: solar first, then the grid outside the evening peak",
   "Staat het schema aan, dan wint de planning. Op de kaart kies je per beurt Snel, Continu of Zon; als de kabel eruit gaat, geldt dit weer.":
     "If the schedule is on, the schedule wins. On the card you choose Fast, Continuous or Solar per session; when the cable comes out, this applies again.",
   "Continu laden op (A)": "Continuous charging at (A)",

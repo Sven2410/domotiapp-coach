@@ -43,6 +43,7 @@ import {
   planTimes,
 } from "../schedule-sheet.js";
 import { heeftVoorkeuren } from "../voorkeur-velden.js";
+import { vlakkePrijs } from "../geld.js";
 import { ptTijden } from "../opbouw.js";
 import "../plan-ahead-sheet.js";
 import "../accu-doel-sheet.js";
@@ -123,7 +124,9 @@ function netZin(r) {
   return t("Je gebruikt vrijwel precies wat je zelf opwekt.");
 }
 
-export function advise(r, thresholds, configured, alertAt, sturing, devices, batterij = null) {
+// `vlak` (v0.149.0): stroom kost bij dit contract elk uur hetzelfde (`vlakkePrijs`).
+// Dan zijn "Stroom is nu duur" en "Goedkoop moment" geen moment maar altijd waar.
+export function advise(r, thresholds, configured, alertAt, sturing, devices, batterij = null, vlak = false) {
   if (!configured) {
     return {
       tone: "var(--dac-accent-hi)",
@@ -274,7 +277,7 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
     };
   }
 
-  if (r.price !== null && r.price >= thresholds.price.high) {
+  if (!vlak && r.price !== null && r.price >= thresholds.price.high) {
     return {
       tone: "var(--dac-bad)",
       tag: t("Let op"),
@@ -283,7 +286,7 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
     };
   }
 
-  if (r.price !== null && r.price <= thresholds.price.low && (r.importW ?? 0) > 0) {
+  if (!vlak && r.price !== null && r.price <= thresholds.price.low && (r.importW ?? 0) > 0) {
     return {
       tone: "var(--dac-good)",
       tag: t("Kans"),
@@ -1693,7 +1696,10 @@ class DacViewOverview extends DacElement {
     // Met de kleuren naar de bekende prijzen (v0.133.1) de grenzen uit de
     // prijzen die er van nu af zijn; anders die van Voorkeuren.
     const prijsGrens = prijsGrenzen(thresholds.price, priceForecast(this.feed_, this.settings_?.contract))(new Date());
-    const priceLevel = level(r.price, prijsGrens, true);
+    // Bij een vlakke prijs (v0.149.0) geen laag of hoog en geen kleur: er is geen
+    // ander uur om het mee te vergelijken. De prijs zelf blijft staan.
+    const vlak = vlakkePrijs(this.settings_?.contract);
+    const priceLevel = vlak ? "none" : level(r.price, prijsGrens, true);
     this.tiles_.price.update({
       tone: levelTone(priceLevel),
       icon: "euro",
@@ -1702,7 +1708,9 @@ class DacViewOverview extends DacElement {
       sub:
         r.price === null
           ? t("Nog geen contract ingevuld")
-          : { good: t("Laag tarief"), warn: t("Gemiddeld tarief"), bad: t("Hoog tarief") }[priceLevel],
+          : vlak
+            ? t("Elk uur dezelfde prijs")
+            : { good: t("Laag tarief"), warn: t("Gemiddeld tarief"), bad: t("Hoog tarief") }[priceLevel],
       series: this.source_.series("price"),
     });
 
@@ -1747,7 +1755,7 @@ class DacViewOverview extends DacElement {
     this.flow_.update(r);
     this.updateLegend_();
     this.updateCoach_(
-      advise(r, { ...thresholds, price: prijsGrens }, configured, alertAt, this.steeringNow_(), this.settings_?.devices, this.batterijNu_())
+      advise(r, { ...thresholds, price: prijsGrens }, configured, alertAt, this.steeringNow_(), this.settings_?.devices, this.batterijNu_(), vlakkePrijs(this.settings_?.contract))
     );
   }
 

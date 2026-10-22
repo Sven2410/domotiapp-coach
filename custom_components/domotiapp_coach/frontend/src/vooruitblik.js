@@ -471,12 +471,16 @@ export class DacVooruitblik extends DacElement {
     }
     const ids = volgorde(data);
     const zichtbaar = this.zichtbaar_();
+    // Eén prijs voor elk uur (v0.149.0): een vast contract levert geen prijzen, een
+    // Portugees simples een rechte lijn. Dan geen laag Prijs, geen as en geen bedrag.
+    const prijsWisselt = new Set(uren.map((u) => u.prijs).filter((p) => p !== null && p !== undefined)).size > 1;
+    if (!prijsWisselt) zichtbaar.prijs = false;
     const accu = ids.some((id) => this.soorten_.get(id) === "thuisbatterij");
     const naam = (id) => this.labels_.get(id) ?? id;
 
     // De keuzeknoppen.
     const lagen = [
-      ["prijs", t("Prijs"), "var(--dac-good)"],
+      ...(prijsWisselt ? [["prijs", t("Prijs"), "var(--dac-good)"]] : []),
       ["zon", t("Zon"), KLEUR.zon],
       ["huis", t("Huis"), KLEUR.huis],
       ...ids.map((id) => [id, naam(id), KLEUR[this.soorten_.get(id)] ?? "#888"]),
@@ -488,7 +492,7 @@ export class DacVooruitblik extends DacElement {
     // Het gekozen uur.
     const uur = uren[Math.min(this.gekozen_, uren.length - 1)];
     const morgen = uur.start.getDate() !== huisNu().getDate() ? `${t("morgen")} ` : "";
-    const prijs = uur.prijs === null ? "" : `€ ${getal(uur.prijs, 3)}`;
+    const prijs = uur.prijs === null || !prijsWisselt ? "" : `€ ${getal(uur.prijs, 3)}`;
     const regels = momentRegels(uur, { ids, labels: this.labels_, soorten: this.soorten_, zichtbaar });
     this.$("#moment").innerHTML = `
       <div class="kop"><span class="wanneer">${morgen}${t("{van} tot {tot}", { van: `${twee(uur.start.getHours())}:00`, tot: `${twee(uur.end.getHours())}:00` })}</span>

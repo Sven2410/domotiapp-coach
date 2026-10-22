@@ -481,3 +481,43 @@ schuif zoals de waarschuwingen, en de datum pas als hij aan staat; uit wist de d
 - **Meldingen**: de groepen die uitklappen bleven (v0.133.2); elke waarschuwing staat nu in een
   eigen vak. Elke `.velden[hidden]` is echt weg: bij Lekkage en Thuisbatterij te warm bleven de
   velden staan met de melding uit.
+
+## Eén prijs voor elk uur: wat er dan niet staat (v0.149.0)
+
+De eigenaar op 22-10-2026: "als iemand een vast contract heeft ingesteld moeten er opties verborgen
+worden voor opties die niet van toepassing zijn op verschillende apparaten. Zoals de accu met
+handelen etc dat is niet van toepassing op een vast contract." Bij één prijs voor elk uur doet niets
+iets dat op een goedkoper of duurder uur wacht. `vlakkePrijs(contract)` in geld.js zegt wanneer dat
+zo is: een vast of variabel contract in Nederland, of in Portugal het tarief simples zolang
+teruglevering niet de marktprijs volgt (zonder tarief rekent Portugal met bi-horário, dus niet
+vlak). Zonder contract of bij een dynamisch contract blijft alles staan. Het is de gedachte van
+`_vlak` in batterij.py, maar uit het contract in plaats van uit de prijzen.
+
+Wat er dan niet staat:
+
+- Instellen van de thuisbatterij: het blok Handelen (laden uit het net, ontladen naar het net en
+  de grenzen erbij), `data-vk-rij="handelen"` in voorkeur-velden.js.
+- Instellen van een airco: de keuze Aan op (zon, goedkope uren, beide), `data-vk-rij="run_on"`.
+  Er is geen uur onder het daggemiddelde, dus hij draait op zon (`airco_goedkoop` in planner.py).
+- Overzicht: de adviezen "Stroom is nu duur" en "Goedkoop moment" (`advise(..., vlak)`); die
+  stonden bij een vaste prijs boven of onder de grens anders altijd in beeld. Bij Energieprijs
+  geen laag, gemiddeld of hoog en geen kleur, maar "Elk uur dezelfde prijs".
+- De vooruitblik: geen laag Prijs, geen as en geen bedrag zolang er niet minstens twee prijzen
+  zijn (vooruitblik.js, uit de gegevens zelf; een vast contract levert er geen).
+- Voorkeuren: de prijskleuren (`#prijs-kleuren` en "Prijskleuren naar de bekende prijzen").
+- Historie, Sessies: "Door te wachten", tenzij er in die periode toch iets door wachten bespaard
+  is (een eerdere periode met een dynamisch contract).
+
+Wat verandert maar blijft: Goedkoopst bij de laadpaal heet dan "Slim: eerst zon, dan het net buiten
+de avondpiek", want zo werkt de som bij een vaste prijs (de avondpiek is dicht, `piek_dicht`). De
+eigenaar koos hernoemen boven verbergen. Bij Voorrang bij planningen blijft de thuisbatterij in de
+lijst, met "laadt bij één prijs voor elk uur niet van het net", zodat haar plek bewaard blijft.
+
+Wat er bewust blijft staan: Nu leegladen op de kaart van de batterij (een handmatige knop, keuze van
+de eigenaar), de afschrijving (die weegt ook zon opslaan tegen terugleveren), noodstroom,
+balanceren, de auto helpen, de schema's, en de prijsgrafiek in "Wat gaat hij doen" (die laat ook
+zien wanneer een apparaat laadt).
+
+Wat er stond wordt niet gewist. De coach doet er bij een vlakke prijs niets mee, en na een overstap
+naar een dynamisch contract staat het er weer zoals het was. Proef "één prijs voor elk uur" in
+test_rapport.mjs.
