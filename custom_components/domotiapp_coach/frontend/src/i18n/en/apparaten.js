@@ -638,6 +638,7 @@ export const APPARATEN = {
   "Help me dit uit te rekenen.": "Help me work this out.",
   "Vul de aanschafprijs en het aantal laadcycli van de leverancier in.": "Enter the purchase price and the number of charge cycles the supplier states.",
   "Aanschafprijs (€)": "Purchase price (€)",
+  "Ook voor Terugverdiend op de kaart. Zonder laadcycli telt hij niet mee in de afschrijving.": "Also used for Paid back on the card. Without charge cycles it does not count towards depreciation.",
   "Laadcycli volgens de leverancier": "Charge cycles according to the supplier",
   "De coach deelt de aanschafprijs door het aantal cycli maal de capaciteit van de batterij.": "The coach divides the purchase price by the number of cycles times the battery's capacity.",
   "Dat is € {bedrag} per kWh uit de batterij.": "That is € {bedrag} per kWh out of the battery.",

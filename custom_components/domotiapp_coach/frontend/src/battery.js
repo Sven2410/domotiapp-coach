@@ -259,9 +259,10 @@ export function batterijVooruit(besluit) {
  * laadde: de eigenaar op 05-10-2026, "dat geld fluctueert telkens en klopt
  * niet." Nu telt ontladen pas, min wat die stroom kostte.
  *
- * Geen terugverdientijd (v0.101.1): de eigenaar op 29-09-2026 kan geen datum
- * in het paneel verdedigen die afwijkt van wat een installateur de klant
- * voorrekende.
+ * Geen datum waarop hij terugverdiend is (v0.101.1): de eigenaar op 29-09-2026
+ * kan geen datum in het paneel verdedigen die afwijkt van wat een installateur
+ * de klant voorrekende. Wat er al terug is staat er sinds v0.148.0 wel weer,
+ * zie `terugverdiendRegel`.
  *
  * Geen "Wat erin zit" meer (v0.118.1): "ingekocht voor € 2,02" las als stroom
  * die gekocht was, terwijl het bij een vast contract zon is die niet werd
@@ -276,8 +277,40 @@ export function opgeleverdTekst(earned) {
   return [{ label: t("Opgeleverd"), text: tn(dagen, "{bedrag} in {n} dag", "{bedrag} in {n} dagen", { bedrag: euro(Number(earned.euro ?? 0)) }) }];
 }
 
-/** De regels op de kaart van een batterij. */
-export function batteryRows(besluit) {
+/**
+ * Hoeveel van de aanschafprijs er al terug is (v0.148.0), of niets.
+ *
+ * De eigenaar op 22-10-2026: "ja ik wil hem toch terug hebben", alleen voor de
+ * thuisbatterij, als wat er al terugverdiend is en zonder datum: een datum is
+ * een belofte, en die viel in v0.101.1 af. Het bedrag is Opgeleverd, dus alleen
+ * wat de batterij opleverde sinds de coach haar volgt. De aanschafprijs is die
+ * van de afschrijving (`wear_price`); de bewoner ziet de regel alleen met het
+ * vinkje bij Installatie (`payback_resident`), dat beslist de kaart.
+ *
+ * @param {{euro?: number, days?: number}|undefined} earned het kasboek van de coach
+ * @param {number|null|undefined} aanschaf de aanschafprijs in euro
+ */
+export function terugverdiendRegel(earned, aanschaf) {
+  const prijs = Number(aanschaf);
+  if (!earned?.days || aanschaf == null || !(prijs > 0)) return [];
+  const terug = Number(earned.euro ?? 0);
+  const deel = Math.max(0, Math.min(1, terug / prijs));
+  return [{
+    label: t("Terugverdiend"),
+    // Een batterij die tot nu toe kostte staat er met het minteken vooraan, zoals in In geld.
+    text: t("{bedrag} van {prijs}", { bedrag: terug <= -0.005 ? `− ${euro(-terug)}` : euro(Math.max(0, terug)), prijs: euro(prijs, 0) }),
+    deel,
+  }];
+}
+
+/**
+ * De regels op de kaart van een batterij.
+ *
+ * @param {object} besluit de stand van de coach voor deze batterij
+ * @param {{aanschaf?: number|null}} [opties] de aanschafprijs, alleen als deze
+ *   kijker Terugverdiend mag zien
+ */
+export function batteryRows(besluit, { aanschaf = null } = {}) {
   if (!besluit || besluit.kind !== "batterij") return [];
   const rijen = [{ label: t("Stand"), text: besluit.mode_name ?? besluit.mode ?? "—" }];
 
@@ -323,5 +356,5 @@ export function batteryRows(besluit) {
     });
   }
 
-  return [...rijen, ...opgeleverdTekst(besluit.earned)];
+  return [...rijen, ...opgeleverdTekst(besluit.earned), ...terugverdiendRegel(besluit.earned, aanschaf)];
 }

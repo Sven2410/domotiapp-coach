@@ -6,6 +6,9 @@ export const INSTELLINGEN = {
     "Your grid connection, your panels and circuits, and which sensors measure what happens. The coach calculates with this. You do not have to fill in everything; without linked sensors the figures stay empty.",
   "De naam van de woning komt ook boven het overzicht te staan.": "The name of the home also appears above the overview.",
   "Naam van de woning": "Name of the home",
+  "Terugverdiend ook aan de bewoner tonen": "Also show Paid back to the resident",
+  "Op de kaart van de thuisbatterij: hoeveel van de aanschafprijs er al terug is, uit wat ze opleverde sinds de coach haar volgt. Zonder datum. De aanschafprijs vul je in bij de batterij, onder Afschrijving.":
+    "On the home battery's card: how much of the purchase price has been earned back, from what it earned since the coach has been following it. Without a date. Enter the purchase price at the battery, under Depreciation.",
   "Bijvoorbeeld: Dorpsstraat 12": "For example: 12 High Street",
   "Aantal fasen": "Number of phases",
   "1 fase": "1 phase",

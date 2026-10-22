@@ -272,7 +272,10 @@ Wat blijft is wat gemeten is, zonder belofte: In geld, en "Opgeleverd" op de
 kaart van de batterij (`earned` in de stand van de coach, `opgeleverdTekst` in
 battery.js). Een oude `investments` valt bij het laden weg (`_prune` in
 storage.py), een oude `purchase_price` bij de volgende opslag (`REMOVE_EXTRA`).
-Proef "geen terugverdientijd" in test_rapport.mjs houdt de woorden uit de bron.
+Proef "geen datum, geen investeringen" in test_rapport.mjs houdt de woorden uit de bron.
+Sinds v0.148.0 staat er op de kaart van de thuisbatterij weer Terugverdiend: wat er al
+terug is, zonder datum, en voor de bewoner alleen met een vinkje bij Installatie. Historie
+en het rapport blijven zonder; zie `docs/batterij.md`, onderaan.
 
 **De thuisbatterij in Historie (v0.101.2).** Bij de eigenaar op 29-09-2026 om 10:00 stond er
 onder In geld "Door je zon € -0,56" naast "Door je thuisbatterij € 0,60". Alle

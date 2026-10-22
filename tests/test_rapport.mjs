@@ -2334,7 +2334,8 @@ proef("de kaart van een batterij: stand, opdracht, waarde, netlading en wat hij 
   assert.equal(rijen["Een kWh erin is straks waard"], undefined, "staat sinds v0.85.0 in de pop-up");
   assert.equal(rijen["Laadt van het net"], "02:00 tot 04:00, ongeveer 3,5 kWh");
   assert.equal(rijen["Opgeleverd"], "€ 45,00 in 30 dagen");
-  // Geen terugverdientijd meer (v0.101.1), ook niet als er een oude stand binnenkomt.
+  // Geen oude terugverdientijd van de coach (v0.101.1), ook niet als er een oude stand
+  // binnenkomt; Terugverdiend komt sinds v0.148.0 alleen uit de aanschafprijs van de kaart.
   const oud = batteryRows({ ...BESLUIT_BATTERIJ, payback: { earned: 45, price: 4500, days: 30, date: "2034-11-08" } });
   assert.ok(!oud.some((r) => /Terugverdiend/.test(r.label)));
 });
@@ -2574,10 +2575,13 @@ proef("de kaart van de batterij zegt wat ze opleverde, en niet meer wat erin zit
   assert.doesNotMatch(bron, /`ingekocht voor|label: "Wat erin zit"/, "alleen nog in de uitleg");
 });
 
-proef("geen terugverdientijd en geen aankoopprijzen meer, nergens (v0.101.1)", () => {
+proef("geen datum, geen investeringen; Terugverdiend alleen op de kaart van de batterij (v0.101.1, v0.148.0)", () => {
   // De eigenaar op 29-09-2026: een datum in het paneel die afwijkt van wat een
   // installateur de klant voorrekende is niet te verdedigen. "Haal het invullen
   // van de kosten van de panelen weg en de batterij", met de teksten erbij.
+  // Op 22-10-2026: "ja ik wil hem toch terug hebben", alleen voor de
+  // thuisbatterij, als wat er al terug is en zonder datum, met een vinkje voor
+  // de bewoner. Investeringen, een datum en Historie of het rapport blijven weg.
   assert.equal(geld.terugverdienen, undefined);
   assert.equal(Historie.prototype.terugRijen_, undefined);
   const lees = (pad) => readFileSync(new URL(`../custom_components/domotiapp_coach/${pad}`, import.meta.url), "utf8");
@@ -2586,15 +2590,47 @@ proef("geen terugverdientijd en geen aankoopprijzen meer, nergens (v0.101.1)", (
     "frontend/src/views/installation.js": lees("frontend/src/views/installation.js"),
     "frontend/src/views/devices.js": lees("frontend/src/views/devices.js"),
     "frontend/src/devices.js": lees("frontend/src/devices.js"),
+    "frontend/src/battery.js": lees("frontend/src/battery.js"),
     "frontend/src/report.js": lees("frontend/src/report.js"),
     "websocket.py": lees("websocket.py"),
     "const.py": lees("const.py"),
   };
   for (const [pad, bron] of Object.entries(bronnen)) {
-    for (const woord of ["purchase_price", "investments", "Aankoopprijs", "Investeringen", "payback", "Terugverdiend"]) {
+    for (const woord of ["purchase_price", "investments", "Aankoopprijs", "Investeringen", "Terugverdiend rond"]) {
       assert.ok(!bron.includes(woord), `${woord} staat nog in ${pad}`);
     }
   }
+  for (const pad of ["frontend/src/views/history.js", "frontend/src/report.js"]) {
+    for (const woord of ["payback", "Terugverdiend", "wear_price"]) {
+      assert.ok(!bronnen[pad].includes(woord), `${woord} staat in ${pad}`);
+    }
+  }
+});
+
+proef("Terugverdiend op de kaart van de batterij: wat er al terug is, met een balk, zonder datum (v0.148.0)", () => {
+  const regel = (earned, aanschaf) => batteryRows({ ...BESLUIT_BATTERIJ, earned }, { aanschaf }).find((r) => r.label === "Terugverdiend");
+  const r = regel({ euro: 45, days: 30 }, 4500);
+  assert.equal(r.text, "€ 45,00 van € 4.500");
+  assert.equal(r.deel, 0.01);
+  // Zonder aanschafprijs, of voor wie hem niet mag zien (de kaart geeft dan null), geen regel.
+  assert.equal(regel({ euro: 45, days: 30 }, null), undefined);
+  assert.equal(regel({ euro: 45, days: 30 }, 0), undefined);
+  assert.equal(batteryRows({ ...BESLUIT_BATTERIJ, earned: { euro: 45, days: 30 } }).find((r) => r.label === "Terugverdiend"), undefined);
+  // Nog niets gemeten: geen regel, ook niet met een prijs.
+  assert.equal(regel({ euro: 0, days: 0 }, 4500), undefined);
+  // Een batterij die tot nu toe kostte: het minteken vooraan, de balk op nul.
+  const min = regel({ euro: -0.4, days: 3 }, 4500);
+  assert.equal(min.text, "− € 0,40 van € 4.500");
+  assert.equal(min.deel, 0);
+  // Terugverdiend: de balk vol, en nog steeds geen datum of "klaar".
+  const vol = regel({ euro: 5200, days: 900 }, 4500);
+  assert.equal(vol.text, "€ 5.200,00 van € 4.500");
+  assert.equal(vol.deel, 1);
+  assert.ok(!batteryRows({ ...BESLUIT_BATTERIJ, earned: { euro: 5200, days: 900 } }, { aanschaf: 4500 }).some((x) => /rond|klaar|\d{4}-\d{2}/.test(`${x.label} ${x.text}`)));
+  // Het vinkje voor de bewoner staat bij Installatie, en gaat mee bij opslaan.
+  assert.ok(Object.create(Installatie.prototype).render().includes('id="terug-bewoner"'));
+  const uit = Object.create(Installatie.prototype).payload_({ installation: { payback_resident: true, circuits: [] }, contract: {} });
+  assert.equal(uit.installation.payback_resident, true);
 });
 
 proef("Historie: Energie en Sessies, niet meer Beurten (v0.126.4)", () => {

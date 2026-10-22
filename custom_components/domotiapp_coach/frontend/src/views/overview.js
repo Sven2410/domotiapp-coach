@@ -655,6 +655,12 @@ class DacViewOverview extends DacElement {
     .steer-rows { display: grid; gap: 6px; }
     .steer-rows div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
     .steer-rows .k { font-size: 12.5px; color: var(--dac-ink-3); }
+    .steer-rows .met-balk { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    .steer-rows .balk {
+      display: block; height: 4px; border-radius: 2px; overflow: hidden;
+      background: var(--dac-accent-soft);
+    }
+    .steer-rows .balk span { display: block; height: 100%; background: var(--dac-accent-hi); }
     .steer-rows .v {
       font-size: 12.5px; font-weight: 500; color: var(--dac-ink);
       font-variant-numeric: tabular-nums; text-align: right;
@@ -2892,6 +2898,18 @@ class DacViewOverview extends DacElement {
     }
   }
 
+  /**
+   * De aanschafprijs van een thuisbatterij voor Terugverdiend (v0.148.0), of null.
+   * De installateur ziet hem altijd; de bewoner alleen met het vinkje bij
+   * Installatie. De prijs is die van de afschrijving (`wear_price`).
+   */
+  aanschaf_(device) {
+    const eigen = (this.settings_?.devices ?? []).find((d) => d.id === device.id);
+    if (eigen?.type !== "thuisbatterij") return null;
+    const mag = this.hass?.user?.is_admin !== false || Boolean(this.settings_?.installation?.payback_resident);
+    return mag ? eigen.battery?.wear_price ?? null : null;
+  }
+
   fillSteerable_(list) {
     this.steerDevices_ = list;
     this.lastDevices_ = list;
@@ -2909,7 +2927,7 @@ class DacViewOverview extends DacElement {
       // opdracht, en wat hij opleverde. Een laadpaal wat er deze beurt in ging.
       const details = [
         ...(device.details ?? []),
-        ...batteryRows(this.coach_?.[device.id]),
+        ...batteryRows(this.coach_?.[device.id], { aanschaf: this.aanschaf_(device) }),
         ...laadbeurtRegels(this.feed_, device, this.settings_, this.coach_?.[device.id]),
       ];
       const rows = this.$(`[data-rows="${slot}"]`);
@@ -2923,6 +2941,18 @@ class DacViewOverview extends DacElement {
           value.className = "v";
           value.textContent = metHoofdletter(row.text);
           line.append(key, value);
+          // Terugverdiend (v0.148.0) krijgt er een balk onder: hoe ver het al is.
+          if (Number.isFinite(row.deel)) {
+            const blok = document.createElement("div");
+            blok.className = "met-balk";
+            const balk = document.createElement("span");
+            balk.className = "balk";
+            const vol = document.createElement("span");
+            vol.style.width = `${Math.round(row.deel * 1000) / 10}%`;
+            balk.append(vol);
+            blok.append(line, balk);
+            return blok;
+          }
           return line;
         })
       );

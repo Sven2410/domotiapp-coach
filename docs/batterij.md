@@ -1504,3 +1504,28 @@ batterij gaat. Het voorbeeld van de eigenaar (laden op 0,290 tot 0,296, ontladen
 0,379, 85%): zonder afschrijving laadt hij 's nachts, met 4 cent per kWh niet meer; bij een ochtend
 van 0,45 wel. Proef 49 in test_batterij.py, 191 in test_coach.py. Het kasboek boekt de afschrijving
 (nog) niet.
+
+## Terugverdiend op de kaart, zonder datum (v0.148.0)
+
+De eigenaar op 22-10-2026, na de afschrijving: "ja ik wil hem toch terug hebben", over de
+terugverdientijd die in v0.101.1 verdween. Gekozen: alleen voor de thuisbatterij, alleen wat er al
+terug is, en per installatie een vinkje of de bewoner het ziet. De reden van 29-09-2026 blijft
+staan: een datum is een belofte, en een datum die afwijkt van wat een installateur de klant
+voorrekende is niet te verdedigen. Er komt dus geen datum, geen "klaar", en niets in Historie of
+het rapport.
+
+Op de kaart van de batterij staat onder Opgeleverd de regel Terugverdiend, "€ 45,00 van € 4.500",
+met een balk eronder (`terugverdiendRegel` in battery.js, `aanschaf_` in views/overview.js). Het
+bedrag is Opgeleverd zelf, dus wat de batterij opleverde sinds de coach haar volgt; wat ze daarvoor
+verdiende weet de coach niet en schat hij niet. Het kasboek boekt de afschrijving niet (v0.146.0),
+dus die gaat er niet twee keer af. Kostte de batterij tot nu toe geld, dan staat er "− € 0,40" en
+blijft de balk leeg.
+
+De aanschafprijs is die van de afschrijving (`wear_price`, onder "Help me dit uit te rekenen"), zodat
+hij maar op één plek staat. Zonder laadcycli (`wear_cycles`) telt hij niet mee in de afschrijving
+(`_slijtage` in coach.py), dus wie alleen Terugverdiend wil hoeft de coach niet anders te laten
+sturen. De installateur ziet de regel altijd (`hass.user.is_admin`), de bewoner alleen met
+"Terugverdiend ook aan de bewoner tonen" bij Installatie, onder Woning
+(`installation.payback_resident`, standaard uit). De proef "geen datum, geen investeringen" in
+test_rapport.mjs houdt investeringen, een datum en Terugverdiend in Historie en het rapport buiten
+de bron.

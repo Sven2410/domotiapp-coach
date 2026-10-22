@@ -70,6 +70,8 @@ export const OVERIG = {
   "Opgeleverd": "Earned",
   "{bedrag} in {n} dag": "{bedrag} in {n} day",
   "{bedrag} in {n} dagen": "{bedrag} in {n} days",
+  "Terugverdiend": "Paid back",
+  "{bedrag} van {prijs}": "{bedrag} of {prijs}",
   "Stand": "Mode",
   "Wie regelt": "In control",
   "de batterij zelf, met zijn eigen meter; de coach kijkt mee": "the battery itself, with its own meter; the coach is watching",
