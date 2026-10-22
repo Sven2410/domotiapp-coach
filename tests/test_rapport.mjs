@@ -3090,7 +3090,9 @@ proef("de rijen onder een vinkje van de batterij verdwijnen echt als het vinkje 
     // En de melding bij Handelen zonder terugleverprijs (v0.128.2), die hier geen contract heeft,
     // en de grens bij ontladen naar het net, dat standaard uit staat (v0.141.0). En de grens
     // voor de auto, die sinds 21-10-2026 onder een eigen vinkje staat.
-    ["car_above", "holiday_max_percent", "reserve_percent", "trade_above", "trade_kan_niet", "weekly_full_day"], "reserve, de dag en de vakantiestand");
+    // En de hulp bij de afschrijving, die dicht staat (v0.146.0).
+    ["afschrijving_uitkomst", "car_above", "holiday_max_percent", "reserve_percent", "trade_above", "trade_kan_niet",
+      "wear_cycles", "wear_price", "weekly_full_day"], "reserve, de dag en de vakantiestand");
   // Laden van het net staat standaard aan, dus de grens daarbij staat er.
   assert.ok(!velden.rijen.find((r) => r.sleutel === "grid_charge_below").hidden, "de grens bij laden van het net");
   const uit = nepVelden(voorkeurHtml({ id: "b", type: "thuisbatterij", battery: { grid_charge: false, trade: true } }));
@@ -4426,6 +4428,23 @@ proef("zelfvoorzienend: zonder batterij verandert er niets, en zonder zon staat 
   const l = await herkomstHuis({ uren: later, batterijen: [ACCU_TELLER], start: dag });
   assert.equal(rond(l.totaal.solar), 4, "2 zonder meter uit wat terugging, 2 van de meter");
   assert.equal(rond(geenZon.totaal.eigen, 6), 0);
+});
+
+proef("de afschrijving in Instellen van de batterij: per kWh, of met de hulp uit aanschafprijs en laadcycli (v0.146.0)", async () => {
+  const vv = await import("../custom_components/domotiapp_coach/frontend/src/voorkeur-velden.js");
+  const html = vv.voorkeurHtml({ type: "thuisbatterij", battery: {} });
+  for (const sleutel of ["wear_per_kwh", "wear_price", "wear_cycles"]) assert.ok(html.includes(`data-vk-accu="${sleutel}"`), sleutel);
+  assert.ok(html.includes("data-vk-hulp"), "het vinkje voor de hulp");
+  const veld = (sleutel, value) => ({ dataset: { vkAccu: sleutel }, type: "number", value });
+  assert.deepEqual(vv.voorkeurWijziging(veld("wear_per_kwh", "0.04")), { battery: { wear_per_kwh: 0.04 } });
+  assert.deepEqual(vv.voorkeurWijziging(veld("wear_per_kwh", "")), { battery: { wear_per_kwh: null } }, "leeg is geen");
+  assert.deepEqual(vv.voorkeurWijziging(veld("wear_price", "6999.6")), { battery: { wear_price: 7000 } });
+  assert.deepEqual(vv.voorkeurWijziging(veld("wear_cycles", "0")), { battery: { wear_cycles: 1 } });
+  const hulp = { dataset: { vkHulp: "afschrijving" }, checked: false };
+  assert.deepEqual(vv.voorkeurWijziging(hulp), { battery: { wear_price: null, wear_cycles: null } }, "de hulp uit wist beide");
+  assert.equal(vv.voorkeurWijziging({ dataset: { vkHulp: "afschrijving" }, checked: true }), null, "aan zet alleen de velden neer");
+  assert.ok(Math.abs(vv.afschrijvingPerKwh({ wear_price: 7000, wear_cycles: 6000, capacity_kwh: 14.6 }) - 7000 / 87600) < 1e-12);
+  assert.equal(vv.afschrijvingPerKwh({ wear_price: 7000, wear_cycles: 6000 }), null, "zonder capaciteit rekent de coach het");
 });
 
 // --- per apparaat in Historie (v0.121.0) -------------------------------------------

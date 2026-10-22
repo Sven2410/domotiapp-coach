@@ -1396,6 +1396,38 @@ nbv48 = bat.balans_kwh(DAG.replace(hour=20), verwachting({}, huis=0.3), anker(50
 print(f"  nachtbalans op 300 W: per vermogen {nb48:.2f}, met de helft heen en terug {nbv48:.2f}")
 controle("'s nachts op 300 W houdt hij minder over dan het gemiddelde zegt", nb48 < nbv48 - 0.2, f"{nb48} {nbv48}")
 
+print("=== 49. de afschrijving hoort bij de minimale spread (v0.146.0) ===")
+# De eigenaar op 22-10-2026: "Nu rekent coach alleen met het rendementsverlies. Maar ook
+# afschrijving moet meegerekend worden om de minimale prijsspread te bepalen." Zijn voorbeeld
+# uit een klantwoning: 's nachts laden op 0,290 tot 0,296, 's ochtends ontladen op 0,353 tot
+# 0,379, met salderen (teruglevering tegen dezelfde prijs).
+UUR49 = [0.296, 0.294, 0.292, 0.290, 0.291, 0.293, 0.330, 0.353, 0.379, 0.365, 0.340, 0.320,
+         0.300, 0.300, 0.305, 0.310, 0.320, 0.330, 0.330, 0.325, 0.320, 0.310, 0.300, 0.298]
+L49 = prijzen(UUR49 + UUR49, terug=UUR49 + UUR49)
+NU49 = DAG.replace(hour=0, minute=5)
+
+
+def plan49(**kw):
+    return plan_batterij(NU49, L49, Tariff(), verwachting(huis=0.3), anker(20.0, rte=0.85, handelen=True, nacht=False, **kw))
+
+
+zonder49 = plan49()
+met49 = plan49(slijtage=0.04)
+net49 = lambda p: [(u.start.hour, u.price) for u in p.uren if u.stand == NETLADEN]  # noqa: E731
+print(f"  zonder afschrijving: {zonder49.stand}, van het net in {net49(zonder49)}")
+print(f"  met 4 cent per kWh: {met49.stand}, van het net in {net49(met49)}")
+controle("zonder afschrijving laadt hij 's nachts van het net: 0,296 / 0,85 = 0,348 < 0,379",
+         bool(net49(zonder49)), f"{zonder49.stand} {net49(zonder49)}")
+controle("met 4 cent per kWh niet meer: 0,348 + 0,04 boven 0,379",
+         met49.stand != NETLADEN and not net49(met49), f"{met49.stand} {net49(met49)}")
+# Een spread die het wel dekt: 's ochtends 0,45, dan laadt hij ook met afschrijving.
+L49b = prijzen([p if i not in (7, 8, 9) else 0.45 for i, p in enumerate(UUR49)] * 2,
+               terug=[p if i not in (7, 8, 9) else 0.45 for i, p in enumerate(UUR49)] * 2)
+ruim49 = plan_batterij(NU49, L49b, Tariff(), verwachting(huis=0.3),
+                       anker(20.0, rte=0.85, handelen=True, nacht=False, slijtage=0.04))
+controle("bij een ochtend van 0,45 dekt de spread het wel, en laadt hij toch",
+         bool(net49(ruim49)), f"{ruim49.stand} {net49(ruim49)}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

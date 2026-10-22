@@ -1477,3 +1477,30 @@ na laden op 0,296 rekende hij met 85% winst (omslag 0,348); met 76% ligt de omsl
 Een meting gaat dus altijd voor wat er ingevuld is; tot v0.145.0 ging een ingevuld rendement voor
 de eigen tellers. De pop-up volgt dezelfde volgorde ("gemeten met de kWh-meter", "zelf geleerd",
 "gemeten in de accu", "opgegeven"; `data-source.js`). Proef 154 en 190 in test_coach.py.
+
+## De afschrijving in de minimale spread (v0.146.0)
+
+De eigenaar op 22-10-2026: "Nu rekent coach alleen met het rendementsverlies. Maar ook afschrijving
+moet meegerekend worden om de minimale prijsspread te bepalen", met een veld dat de bewoner invult en
+een hulp: "wil je dat ik je help met het berekenen van je afschrijving? Bij klik, verschijnen extra
+velden waar je de aanschafprijs en minimum laadcycli (door leverancier) kunt invullen." En: "Voor de
+eenvoud.. aanschafprijs/minimaal aantal cycli. Zou restwaarde oid niet meenemen, die weet je toch
+niet."
+
+In Instellen van de batterij staat een vak Afschrijving: `wear_per_kwh` (euro per kWh uit de
+batterij, leeg is geen), en onder het vinkje "Help me dit uit te rekenen." `wear_price` (de
+aanschafprijs) en `wear_cycles` (de laadcycli volgens de leverancier). Met beide ingevuld rekent de
+coach aanschafprijs / (cycli × capaciteit) en gaat dat voor het veld (`_slijtage` in coach.py; het
+paneel toont het bedrag als het de capaciteit kent, `afschrijvingPerKwh` in voorkeur-velden.js). Een
+cyclus is de hele inhoud er een keer uit, dus het bedrag geldt per kWh die uit de cellen komt. De
+namen zijn bewust niet `purchase_price`: dat was de aankoopprijs voor een terugverdientijd, en die
+blijft weg (v0.101.1).
+
+In de som (`Batterij.slijtage`): `_blok_kosten` telt de slijtage op voor elke kWh die uit de cellen
+gaat, en wat er aan het eind van de bekende uren nog in zit is waard wat het ontladen oplevert min
+die slijtage. Laden en later ontladen loont dus pas als het verschil in prijs het verlies in de
+batterij én de afschrijving dekt; dat geldt voor van het net laden, handelen en zon die eerst in de
+batterij gaat. Het voorbeeld van de eigenaar (laden op 0,290 tot 0,296, ontladen op 0,353 tot
+0,379, 85%): zonder afschrijving laadt hij 's nachts, met 4 cent per kWh niet meer; bij een ochtend
+van 0,45 wel. Proef 49 in test_batterij.py, 191 in test_coach.py. Het kasboek boekt de afschrijving
+(nog) niet.

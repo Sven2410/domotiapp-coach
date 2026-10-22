@@ -191,6 +191,11 @@ class Batterij:
     net_laden: bool = True
     net_laden_onder: float | None = None
     handelen_boven: float | None = None
+    # De afschrijving (v0.146.0): wat elke kWh die uit de cellen komt aan slijtage
+    # kost, in euro. De eigenaar op 22-10-2026: "Nu rekent coach alleen met het
+    # rendementsverlies. Maar ook afschrijving moet meegerekend worden om de minimale
+    # prijsspread te bepalen." Nul is alleen het verlies, zoals tot dan. Zie `_blok_kosten`.
+    slijtage: float = 0.0
     # Boven welke accustand de batterij de auto mag helpen als de paal laadt,
     # in procent, of None: dan geeft hij de auto niets (v0.90.0). Zie `auto_grens`.
     auto_boven: float | None = None
@@ -590,7 +595,9 @@ def _blok_kosten(e: float, naar: float, huis: float, rij: dict, b: Batterij, dee
     huis voeden op een paar honderd watt kost meer verlies dan op twee kilowatt
     aan het net leveren.
     """
-    return _kosten(huis + _ac(b, e, naar, deel), rij)
+    # Met de afschrijving per kWh die uit de cellen komt (v0.146.0): laden en later
+    # ontladen loont pas als het verschil in prijs het verlies én de slijtage dekt.
+    return _kosten(huis + _ac(b, e, naar, deel), rij) + b.slijtage * max(0.0, e - naar)
 
 
 def _waarde_vooruit(
@@ -632,7 +639,8 @@ def _waarde_vooruit(
     vloer = _nacht_vloer(blokken, forecast, b, bodem)
 
     eind_prijs = _gemiddeld_bekend(blokken) or 0.0
-    volgende = [-(max(0.0, e - bodem)) * eta_uit(b) * eind_prijs for e in rooster]
+    # Wat er aan het eind nog in zit, min de slijtage die het ontladen ervan kost.
+    volgende = [-(max(0.0, e - bodem)) * max(0.0, eta_uit(b) * eind_prijs - b.slijtage) for e in rooster]
 
     # `na[k]` is wat de rest nog kost vanaf het einde van blok k.
     na: list[list[float]] = [[] for _ in blokken]

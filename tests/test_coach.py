@@ -10876,6 +10876,25 @@ meter190 = coach190._rendement_bron({**BATTERIJ, "entities": {**BATTERIJ["entiti
 controle("een kWh-meter die nog niets gemeten heeft: dan wat zonder meter zou gelden",
          meter190[1] is not None, f"{meter190}")
 
+print("=== 191. de afschrijving per kWh, ingevuld of uit aanschafprijs en laadcycli (v0.146.0) ===")
+# De eigenaar op 22-10-2026: "Voor de eenvoud.. aanschafprijs/minimaal aantal cycli. Zou
+# restwaarde oid niet meenemen, die weet je toch niet."
+S191 = coachmod.ChargerCoach._slijtage
+controle("niets ingevuld: geen afschrijving", S191({}, 14.6) == 0.0)
+controle("ingevuld per kWh: dat", S191({"wear_per_kwh": 0.04}, 14.6) == 0.04)
+controle("aanschafprijs 7000 en 6000 cycli bij 14,6 kWh: 0,0799 per kWh",
+         abs(S191({"wear_price": 7000, "wear_cycles": 6000}, 14.6) - 7000 / (6000 * 14.6)) < 1e-12)
+controle("de hulp gaat voor het veld", abs(S191({"wear_per_kwh": 0.01, "wear_price": 7000, "wear_cycles": 6000}, 14.6)
+                                           - 7000 / 87600) < 1e-12)
+controle("zonder capaciteit telt de hulp niet, wel het veld",
+         S191({"wear_per_kwh": 0.01, "wear_price": 7000, "wear_cycles": 6000}, None) == 0.01)
+inst191 = instellingen(devices=[LAADPAAL, {**BATTERIJ, "battery": {**BATTERIJ["battery"], "wear_price": 7000, "wear_cycles": 6000}}])
+coach191 = bouw(huis75(), inst191)[2]
+b191 = coach191._batterij_van(dt.datetime(2026, 10, 22, 21, 0), inst191, inst191["devices"][1], {"device": "dev-batterij"})
+print(f"  de batterij in de som: slijtage {b191.slijtage:.4f} bij {b191.capacity_kwh} kWh")
+controle("en de batterij in de som krijgt hem mee", b191.capacity_kwh and abs(b191.slijtage - 7000 / (6000 * b191.capacity_kwh)) < 1e-9,
+         f"{b191.slijtage} {b191.capacity_kwh}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
