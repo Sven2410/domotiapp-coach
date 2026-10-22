@@ -145,8 +145,13 @@ export function huisMetAccu(own, bought, accu = { battery: 0, voor: 0 }, herk = 
  *   batterij (handelen) en is geen opwek. Ging er meer terug dan zon en batterij
  *   samen gaven, dan miste de opwekmeter iets (een omvormer die er later bij kwam):
  *   dat deel telt als zon, zoals Opgewekt het zonder batterij ook altijd deed.
- * - De overige zon gaat eerst naar het huis, wat dan nog over is de batterij in;
- *   wat de batterij verder opnam kwam van het net.
+ * - De overige zon gaat eerst de batterij in, de rest naar het huis; wat de
+ *   batterij verder opnam kwam van het net. Zo verdeelt het energiedashboard van
+ *   Home Assistant het ook, en zo telde Historie het voor v0.144.0. In v0.144.0
+ *   ging de zon eerst naar het huis en het net de batterij in, en dan steeg
+ *   zelfvoorzienend op een dag met zon (in een klantwoning op 20-10-2026 van
+ *   43,1 naar 46,4 %), terwijl er alleen netstroom bij hoort te komen die niet
+ *   meer als eigen telt. Nu is eigen per uur nooit meer dan voorheen.
  * - Wat eruit kwam heeft de verhouding zon en net van wat erin zat. Wat eruit
  *   kwam zonder dat er iets bekend in zat (geen aanloop, een gat) telt als net:
  *   beter een procent te weinig dan stroom van het net als eigen zon.
@@ -159,9 +164,10 @@ export function huisMetAccu(own, bought, accu = { battery: 0, voor: 0 }, herk = 
  * @param {{start: number, solar?: number, bought?: number, sold?: number, erin?: number,
  *   eruit?: number, leeg?: boolean}[]} uren op volgorde van tijd, in kWh
  * @param {{capaciteit?: number|null}} [opties]
- * @returns {Map<number, {opwek: number, zonHuis: number, accuZon: number, zonNet: number}>}
- *   per uur de opwek, de zon die meteen het huis in ging, het zondeel van wat de
- *   batterij aan het huis gaf, en de zon die naar het net ging
+ * @returns {Map<number, {opwek: number, zonHuis: number, accuZon: number, zonNet: number,
+ *   zonAccuNet: number}>} per uur de opwek, de zon die meteen het huis in ging, het
+ *   zondeel van wat de batterij aan het huis gaf, de zon die meteen naar het net ging,
+ *   en het zondeel van wat de batterij aan het net gaf
  */
 export function herkomst(uren, { capaciteit = null } = {}) {
   const uit = new Map();
@@ -187,8 +193,8 @@ export function herkomst(uren, { capaciteit = null } = {}) {
     const huis = Math.max(0, opwek + kwh(uur.bought) + eruit - terug - erin);
     const zonNet = Math.min(terug, opwek);
     const accuNet = Math.min(eruit, terug - zonNet);
-    const zonHuis = Math.min(opwek - zonNet, huis);
-    const zonIn = Math.min(erin, opwek - zonNet - zonHuis);
+    const zonIn = Math.min(erin, opwek - zonNet);
+    const zonHuis = Math.min(opwek - zonNet - zonIn, huis);
 
     // Eerst wat er al in zat, dan wat er dit uur bij kwam.
     const [weg, zonUit1] = neem(eruit);
@@ -202,8 +208,10 @@ export function herkomst(uren, { capaciteit = null } = {}) {
     zon = Math.min(zon, inhoud);
 
     const naarHuis = eruit - accuNet;
-    const accuZon = eruit > 0 ? Math.min(((zonUit1 + zonUit2) * naarHuis) / eruit, huis - zonHuis) : 0;
-    uit.set(uur.start, { opwek, zonHuis, accuZon: Math.max(0, accuZon), zonNet });
+    const zonUit = zonUit1 + zonUit2;
+    const accuZon = eruit > 0 ? Math.min((zonUit * naarHuis) / eruit, huis - zonHuis) : 0;
+    const zonAccuNet = eruit > 0 ? (zonUit * accuNet) / eruit : 0;
+    uit.set(uur.start, { opwek, zonHuis, accuZon: Math.max(0, accuZon), zonNet, zonAccuNet });
   }
   return uit;
 }
@@ -1316,7 +1324,13 @@ class DacViewHistory extends DacElement {
         bought,
         sold,
         solar: opwek,
-        zonZelf: herk ? Math.max(0, opwek - herk[index].zonNet) : own,
+        // Zon zelf gebruikt is zon die niet terugging, ook niet later via de
+        // batterij. De eigenaar op 22-10-2026: zon die eerst de batterij in gaat en
+        // daarna naar het net (handelen) telt niet (v0.144.1). Dat gaat af in het vak
+        // waarin hij terugging, ook als daar geen zon was; per vak nooit onder nul,
+        // over de periode telt de som (`zonZelfSom`).
+        zonZelf: herk ? Math.max(0, opwek - herk[index].zonNet - herk[index].zonAccuNet) : own,
+        zonZelfSom: herk ? opwek - herk[index].zonNet - herk[index].zonAccuNet : own,
         ...huisMetAccu(herk ? opwek - sold : own, bought, accu[index], herk?.[index]),
         accuIn: accu[index].erin,
         accuUit: accu[index].eruit,
@@ -1327,7 +1341,7 @@ class DacViewHistory extends DacElement {
   /** De uren van `herkomst` opgeteld per vak van de grafiek, of null zonder herkomst. */
   herkomstPerVak_(tijden, vakEinde) {
     if (!this.herkomst_?.size) return null;
-    const uit = tijden.map(() => ({ opwek: 0, zonHuis: 0, accuZon: 0, zonNet: 0 }));
+    const uit = tijden.map(() => ({ opwek: 0, zonHuis: 0, accuZon: 0, zonNet: 0, zonAccuNet: 0 }));
     let index = 0;
     for (const [tijd, uur] of this.herkomst_) {
       while (index < tijden.length && tijd >= vakEinde(index)) index += 1;
@@ -1337,6 +1351,7 @@ class DacViewHistory extends DacElement {
       uit[index].zonHuis += uur.zonHuis;
       uit[index].accuZon += uur.accuZon;
       uit[index].zonNet += uur.zonNet;
+      uit[index].zonAccuNet += uur.zonAccuNet;
     }
     return uit;
   }
@@ -1404,7 +1419,7 @@ class DacViewHistory extends DacElement {
     };
     this.accuTegels_ = totals.accuIn + totals.accuUit >= 0.05;
     totals.selfUse =
-      hasSolar && totals.solar > 0 ? (sum("zonZelf") / totals.solar) * 100 : null;
+      hasSolar && totals.solar > 0 ? (Math.max(0, sum("zonZelfSom")) / totals.solar) * 100 : null;
     // Zelfvoorzienend, zoals het energiedashboard van Home Assistant het noemt:
     // welk deel van je verbruik niet van het net kwam. De bewoner van de eerste
     // woning op 22-09-2026: "daar mag zelfvoorzienend nog wel bij."
@@ -1623,7 +1638,7 @@ class DacViewHistory extends DacElement {
 
     const som = (key) => rows.reduce((total, row) => total + row[key], 0);
     const totaalCellen = [t("Totaal")];
-    if (hasSolar) totaalCellen.push(kwh(som("solar")), kwh(som("used")), kwh(som("zonZelf")));
+    if (hasSolar) totaalCellen.push(kwh(som("solar")), kwh(som("used")), kwh(Math.max(0, som("zonZelfSom"))));
     totaalCellen.push(kwh(som("bought")), kwh(som("sold")));
     if (gas.size) {
       totaalCellen.push(`${aantal([...gas.values()].reduce((a, b) => a + b, 0), 2)} m³`);

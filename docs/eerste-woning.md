@@ -617,8 +617,11 @@ zon is, over de periode plus een aanloop van twee dagen (`laadHerkomst_`, `AANLO
 de grens van een dag, een week of een maand. Per uur:
 
 - wat terugging is eerst zon, tot er geen zon meer is; de rest kwam uit de batterij en is geen opwek;
-- de overige zon gaat eerst naar het huis, wat dan nog over is de batterij in; wat de batterij verder
-  opnam kwam van het net;
+- de overige zon gaat eerst de batterij in, de rest naar het huis; wat de batterij verder opnam kwam
+  van het net (sinds v0.144.1, zoals het energiedashboard van Home Assistant en Historie voor v0.144.0;
+  in v0.144.0 ging de zon eerst naar het huis, en dan steeg zelfvoorzienend in een klantwoning op
+  20-10-2026 van 43,1 naar 46,4 %, omdat een uur waarin de batterij op zon laadde en het huis wat net
+  nam het net de batterij in schoof);
 - wat eruit kwam heeft de verhouding zon en net van wat erin zat; wat eruit kwam zonder dat er iets
   bekend in zat telt als net (liever een procent te weinig dan netstroom als eigen zon).
 
@@ -643,5 +646,14 @@ klantwoning op 21-10-2026 12,3 kWh, nu 3,9).
 Zonder batterij is er geen herkomst en rekent alles precies zoals voorheen. In geld (`balans` in
 geld.js) rekent nog met `own` zoals voorheen.
 
-Open: tellen zonkWh die eerst in de batterij gingen en later naar het net (handelen) als Zon zelf
-gebruikt? Nu wel, want ze gingen niet direct terug. Proeven "zelfvoorzienend: ..." in test_rapport.mjs.
+Zon die eerst de batterij in ging en daarna naar het net (handelen) is geen Zon zelf gebruikt; de
+eigenaar op 22-10-2026, uitgebracht in v0.144.1 (`zonAccuNet` in `herkomst`). Het gaat af in het vak
+waarin hij terugging; per vak nooit onder nul, over de periode telt de som (`zonZelfSom`).
+
+**Per uur is eigen nooit meer dan voorheen** (proef met vijftig willekeurige dagen). Dat een week, een
+maand of een jaar toch hoger kan uitvallen komt doordat de oude som per vak van die periode rekende: een
+dag of een maand als één blok, zodat laden en ontladen tegen elkaar wegvielen. In de klantwoning, week
+van 19-10-2026: eigen voor 10,5 kWh, maar de dagen zelf opgeteld 38,6, en nu 8,2; 2026 tot 22-10: voor
+623, per uur 829, nu 703. En Verbruikt daalt op dagen met handelen. Nameten:
+`notities/domotiapp-coach/gereedschap/zelfvoorzienend/meet.mjs` (privé). Proeven "zelfvoorzienend: ..."
+in test_rapport.mjs.
