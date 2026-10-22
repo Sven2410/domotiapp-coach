@@ -4096,7 +4096,7 @@ async function herkomstHuis({ uren, batterijen, periode = "day", start, zon = tr
     return new Date(d.getFullYear(), d.getMonth()).getTime();
   };
   const reeks = (id) => {
-    if (id === "sensor.zon") return uren.map((u) => [u.t, u.zon ?? 0]);
+    if (id === "sensor.zon") return uren.filter((u) => u.zon !== undefined).map((u) => [u.t, u.zon]);
     if (id === "sensor.af") return uren.map((u) => [u.t, u.af ?? 0]);
     if (id === "sensor.terug") return uren.map((u) => [u.t, u.terug ?? 0]);
     for (const b of batterijen) {
@@ -4259,6 +4259,10 @@ proef("zelfvoorzienend: handelen, een lege batterij, gaten, en de capaciteit (v0
   r = herkomst([u(1, { solar: 0, sold: 3, bought: 1, eruit: 0.5 })]);
   assert.equal(rond(r.get(1).opwek), 2.5);
   assert.equal(rond(r.get(1).zonNet), 2.5);
+  // Meldde de opwekmeter dat uur wel iets, dan is het verschil ruis en geen opwek (v0.144.2).
+  r = herkomst([u(1, { solar: 1, sold: 1.2, bought: 0.3, eruit: 0.1, zonGemeten: true })]);
+  assert.equal(rond(r.get(1).opwek), 1);
+  assert.equal(rond(r.get(1).zonNet), 1);
   // Zon in de batterij, verkocht om 20:00: geen zon naar het net dat uur (er is geen zon).
   r = herkomst([u(12, { solar: 4, erin: 4 }), u(20, { sold: 3, eruit: 3.5 })]);
   assert.equal(r.get(20).zonNet, 0);
@@ -4403,6 +4407,18 @@ proef("zelfvoorzienend: zonder batterij verandert er niets, en zonder zon staat 
   for (let h = 0; h < 24; h += 1) netAccu.push({ t: H(dag, h), af: h < 4 ? 2.5 : 0.1, a: { erin: h < 4 ? 2 : 0, eruit: h >= 17 && h < 21 ? 1 : 0, soc: 50 } });
   const geenZon = await herkomstHuis({ uren: netAccu, batterijen: [ACCU_TELLER], start: dag, zon: false });
   assert.equal(geenZon.totaal.solar, null);
+  // Een opwekmeter die er pas later bij kwam: in de uren zonder meting is wat terugging
+  // (en niet uit de batterij kwam) zon; in de uren met meting telt alleen de meter.
+  const later = [];
+  for (let h = 0; h < 24; h += 1) {
+    const x = { t: H(dag, h), af: 0.2, a: { erin: 0, eruit: 0, soc: 50 } };
+    if (h >= 10 && h < 12) Object.assign(x, { terug: 1 });
+    if (h >= 13 && h < 15) Object.assign(x, { zon: 1, terug: 1.05, af: 0.25 });
+    later.push(x);
+  }
+  for (const x of later) if (x.t < H(dag, 13)) delete x.zon;
+  const l = await herkomstHuis({ uren: later, batterijen: [ACCU_TELLER], start: dag });
+  assert.equal(rond(l.totaal.solar), 4, "2 zonder meter uit wat terugging, 2 van de meter");
   assert.equal(rond(geenZon.totaal.eigen, 6), 0);
 });
 

@@ -143,8 +143,11 @@ export function huisMetAccu(own, bought, accu = { battery: 0, voor: 0 }, herk = 
  *
  * - Wat terugging is eerst zon, tot er geen zon meer is; de rest kwam uit de
  *   batterij (handelen) en is geen opwek. Ging er meer terug dan zon en batterij
- *   samen gaven, dan miste de opwekmeter iets (een omvormer die er later bij kwam):
- *   dat deel telt als zon, zoals Opgewekt het zonder batterij ook altijd deed.
+ *   samen gaven in een uur waarin de opwekmeter niets meldde (een omvormer die er
+ *   later bij kwam), dan telt dat deel als zon, zoals Opgewekt het zonder batterij
+ *   ook altijd deed. Meldde de meter wel iets (`zonGemeten`), dan is het verschil
+ *   ruis tussen twee meters die op andere momenten tellen, en geen opwek: thuis
+ *   telde dat in oktober 2026 3,1 kWh bij (v0.144.2).
  * - De overige zon gaat eerst de batterij in, de rest naar het huis; wat de
  *   batterij verder opnam kwam van het net. Zo verdeelt het energiedashboard van
  *   Home Assistant het ook, en zo telde Historie het voor v0.144.0. In v0.144.0
@@ -162,7 +165,7 @@ export function huisMetAccu(own, bought, accu = { battery: 0, voor: 0 }, herk = 
  * voorraad. Kent Home Assistant niet.
  *
  * @param {{start: number, solar?: number, bought?: number, sold?: number, erin?: number,
- *   eruit?: number, leeg?: boolean}[]} uren op volgorde van tijd, in kWh
+ *   eruit?: number, leeg?: boolean, zonGemeten?: boolean}[]} uren op volgorde van tijd, in kWh
  * @param {{capaciteit?: number|null}} [opties]
  * @returns {Map<number, {opwek: number, zonHuis: number, accuZon: number, zonNet: number,
  *   zonAccuNet: number}>} per uur de opwek, de zon die meteen het huis in ging, het
@@ -189,7 +192,7 @@ export function herkomst(uren, { capaciteit = null } = {}) {
     const erin = kwh(uur.erin);
     const eruit = kwh(uur.eruit);
     const terug = kwh(uur.sold);
-    const opwek = Math.max(kwh(uur.solar), terug - eruit);
+    const opwek = uur.zonGemeten ? kwh(uur.solar) : Math.max(kwh(uur.solar), terug - eruit);
     const huis = Math.max(0, opwek + kwh(uur.bought) + eruit - terug - erin);
     const zonNet = Math.min(terug, opwek);
     const accuNet = Math.min(eruit, terug - zonNet);
@@ -1003,7 +1006,11 @@ class DacViewHistory extends DacElement {
       return uren.get(tijd);
     };
     for (const [sleutel, rol] of [["solar", "solar"], ["bought", "import"], ["sold", "export"]]) {
-      for (const rij of combine(reeks, roles[rol])) uur(rij.start.getTime())[sleutel] += rij.value;
+      for (const rij of combine(reeks, roles[rol])) {
+        const u = uur(rij.start.getTime());
+        u[sleutel] += rij.value;
+        if (rol === "solar") u.zonGemeten = true;
+      }
     }
     for (const rijen of accu.values()) {
       for (const rij of rijen) {

@@ -637,7 +637,9 @@ die meteen het huis in ging plus het zondeel van wat de batterij aan het huis ga
 totalen, het aanwijzen van een vak, de grafiek (`accuEigen` in `stapel`: het netdeel van het ontladen
 staat bij van het net) en het rapport. Opgewekt is met een batterij de opwekmeter, plus wat er
 terugging boven zon en batterij samen (`opwek` in `herkomst`): in de klantwoning bestaat de opwekmeter
-pas sinds juli 2026, en daarvoor ging er per maand tot 515 kWh terug. Zon zelf gebruikt (en de kolom
+pas sinds juli 2026, en daarvoor ging er per maand tot 515 kWh terug. Sinds v0.144.2 alleen in uren
+waarin de opwekmeter niets meldde (`zonGemeten`): meldde hij wel iets, dan is een verschil ruis tussen
+meters die op andere momenten tellen (thuis in oktober 2026 3,1 kWh) en geen opwek. Zon zelf gebruikt (en de kolom
 Eigen zon in het rapport) is opwek min de zon die naar het net ging (`zonZelf`). Verbruikt is met een
 batterij opwek plus afname min teruglevering min wat de batterij netto opnam, zonder eerst de eigen zon
 op nul af te kappen; voorheen telde een uur waarin de batterij terugleverde dat als verbruik (in de
