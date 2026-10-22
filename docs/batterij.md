@@ -1518,8 +1518,8 @@ Op de kaart van de batterij staat onder Opgeleverd de regel Terugverdiend, "€ 
 met een balk eronder (`terugverdiendRegel` in battery.js, `aanschaf_` in views/overview.js). Het
 bedrag is Opgeleverd zelf, dus wat de batterij opleverde sinds de coach haar volgt; wat ze daarvoor
 verdiende weet de coach niet en schat hij niet. Het kasboek boekt de afschrijving niet (v0.146.0),
-dus die gaat er niet twee keer af. Kostte de batterij tot nu toe geld, dan staat er "− € 0,40" en
-blijft de balk leeg.
+dus die gaat er niet twee keer af. Kostte de batterij tot nu toe geld, dan staat er "€ 0,00" en
+blijft de balk leeg (v0.148.1, zie hieronder).
 
 De aanschafprijs is die van de afschrijving (`wear_price`, onder "Help me dit uit te rekenen"), zodat
 hij maar op één plek staat. Zonder laadcycli (`wear_cycles`) telt hij niet mee in de afschrijving
@@ -1529,3 +1529,11 @@ sturen. De installateur ziet de regel altijd (`hass.user.is_admin`), de bewoner 
 (`installation.payback_resident`, standaard uit). De proef "geen datum, geen investeringen" in
 test_rapport.mjs houdt investeringen, een datum en Terugverdiend in Historie en het rapport buiten
 de bron.
+
+**Geen min op de kaart (v0.148.1).** Thuis stond er na de eerste installatie "Opgeleverd € -7,46 in
+25 dagen" en "Terugverdiend − € 7,46 van € 3.682": bij een vast contract met salderen levert
+opslaan niets op en kost het het verlies in de batterij. De eigenaar op 22-10-2026: "min getal wil
+ik niet, zet dan nul tot dat hij boven de nul is." Opgeleverd en Terugverdiend op de kaart tonen
+daarom nooit minder dan € 0,00 (`nietOnderNul` in battery.js). Het kasboek houdt het echte bedrag:
+een tekort moet eerst ingelopen worden voor er iets boven nul verschijnt. Opgeleverd opnieuw
+uitrekenen (Apparaten) toont wel het echte bedrag, want daar kijkt de installateur na.

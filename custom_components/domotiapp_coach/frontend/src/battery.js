@@ -14,6 +14,11 @@ import { perUur } from "./prijsgrafiek.js";
 const euro = (bedrag, cijfers = 2) =>
   `€ ${Number(bedrag).toLocaleString(locale(), { minimumFractionDigits: cijfers, maximumFractionDigits: cijfers })}`;
 
+// Op de kaart nooit onder nul (v0.148.1). De eigenaar op 22-10-2026, bij "Opgeleverd € -7,46"
+// en "Terugverdiend − € 7,46" thuis: "min getal wil ik niet, zet dan nul tot dat hij boven de
+// nul is." Het kasboek zelf houdt het echte bedrag, zodat een tekort eerst ingelopen wordt.
+const nietOnderNul = (bedrag) => euro(Math.max(0, Number(bedrag) || 0));
+
 const klok = (iso) => String(iso ?? "").slice(11, 16);
 
 const datum = (iso) => {
@@ -274,7 +279,7 @@ export function opgeleverdTekst(earned) {
   const dagen = Number(earned.days);
   // Laden is inkopen (v0.107.0): wat de stroom die erin zit kostte, telt pas
   // bij Opgeleverd als hij eruit gaat. Zie `Voorraad` in batterij.py.
-  return [{ label: t("Opgeleverd"), text: tn(dagen, "{bedrag} in {n} dag", "{bedrag} in {n} dagen", { bedrag: euro(Number(earned.euro ?? 0)) }) }];
+  return [{ label: t("Opgeleverd"), text: tn(dagen, "{bedrag} in {n} dag", "{bedrag} in {n} dagen", { bedrag: nietOnderNul(earned.euro ?? 0) }) }];
 }
 
 /**
@@ -297,8 +302,8 @@ export function terugverdiendRegel(earned, aanschaf) {
   const deel = Math.max(0, Math.min(1, terug / prijs));
   return [{
     label: t("Terugverdiend"),
-    // Een batterij die tot nu toe kostte staat er met het minteken vooraan, zoals in In geld.
-    text: t("{bedrag} van {prijs}", { bedrag: terug <= -0.005 ? `− ${euro(-terug)}` : euro(Math.max(0, terug)), prijs: euro(prijs, 0) }),
+    // Een batterij die tot nu toe kostte staat op nul, met een lege balk (v0.148.1).
+    text: t("{bedrag} van {prijs}", { bedrag: nietOnderNul(terug), prijs: euro(prijs, 0) }),
     deel,
   }];
 }

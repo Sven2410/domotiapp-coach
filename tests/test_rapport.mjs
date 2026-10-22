@@ -2618,10 +2618,15 @@ proef("Terugverdiend op de kaart van de batterij: wat er al terug is, met een ba
   assert.equal(batteryRows({ ...BESLUIT_BATTERIJ, earned: { euro: 45, days: 30 } }).find((r) => r.label === "Terugverdiend"), undefined);
   // Nog niets gemeten: geen regel, ook niet met een prijs.
   assert.equal(regel({ euro: 0, days: 0 }, 4500), undefined);
-  // Een batterij die tot nu toe kostte: het minteken vooraan, de balk op nul.
-  const min = regel({ euro: -0.4, days: 3 }, 4500);
-  assert.equal(min.text, "− € 0,40 van € 4.500");
+  // Een batterij die tot nu toe kostte: nul en een lege balk, geen min (v0.148.1). De
+  // eigenaar op 22-10-2026: "min getal wil ik niet, zet dan nul tot dat hij boven de nul is."
+  const min = regel({ euro: -7.46, days: 25 }, 3682.35);
+  assert.equal(min.text, "€ 0,00 van € 3.682");
   assert.equal(min.deel, 0);
+  assert.equal(opgeleverdTekst({ euro: -7.46, days: 25 })[0].text, "€ 0,00 in 25 dagen");
+  assert.equal(opgeleverdTekst({ euro: -0.004, days: 1 })[0].text, "€ 0,00 in 1 dag", "ook geen -0,00");
+  // Daarboven gewoon het bedrag.
+  assert.equal(regel({ euro: 0.5, days: 26 }, 3682.35).text, "€ 0,50 van € 3.682");
   // Terugverdiend: de balk vol, en nog steeds geen datum of "klaar".
   const vol = regel({ euro: 5200, days: 900 }, 4500);
   assert.equal(vol.text, "€ 5.200,00 van € 4.500");
