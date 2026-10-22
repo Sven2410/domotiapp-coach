@@ -140,7 +140,7 @@ function thuisbatterij(device) {
       <input type="checkbox" data-vk-hulp="afschrijving">
       <span><strong>${t("Help me dit uit te rekenen.")}</strong> ${t("Vul de aanschafprijs en het aantal laadcycli van de leverancier in.")}</span>
     </label>
-    ${getal("data-vk-accu", "wear_price", t("Aanschafprijs (€)"), 'min="0" max="100000" step="1"', "")}
+    ${getal("data-vk-accu", "wear_price", t("Aanschafprijs (€)"), 'min="0" max="100000" step="1"', "", t("Ook voor Terugverdiend op de kaart. Zonder laadcycli telt hij niet mee in de afschrijving."))}
     ${getal("data-vk-accu", "wear_cycles", t("Laadcycli volgens de leverancier"), 'min="1" max="100000" step="1"', "")}
     <p class="sub" data-vk-rij="afschrijving_uitkomst" hidden></p>`)}
     ${blok(t("Balanceren"), `

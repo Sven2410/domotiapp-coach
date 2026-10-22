@@ -78,6 +78,16 @@ class DacViewInstallation extends DacEditorElement {
               </select>
               <span class="sub">Automatisch volgt de taal van Home Assistant. / Automatic follows the language of Home Assistant.</span>
             </div>
+
+            <!-- Terugverdiend (v0.148.0): de installateur ziet het altijd op de kaart van de
+                 thuisbatterij, de bewoner alleen als dit aan staat. -->
+            <label class="check" for="terug-bewoner">
+              <input type="checkbox" id="terug-bewoner">
+              <span>
+                <strong>${t("Terugverdiend ook aan de bewoner tonen")}</strong>
+                ${t("Op de kaart van de thuisbatterij: hoeveel van de aanschafprijs er al terug is, uit wat ze opleverde sinds de coach haar volgt. Zonder datum. De aanschafprijs vul je in bij de batterij, onder Afschrijving.")}
+              </span>
+            </label>
           </div>
         </section>
 
@@ -538,6 +548,11 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#kast-add").addEventListener("click", nieuw("kast"));
     this.$("#circuit-add").addEventListener("click", nieuw("groep"));
 
+    this.$("#terug-bewoner").addEventListener("change", (ev) => {
+      this.draft_.installation.payback_resident = ev.target.checked;
+      this.afterChange_();
+    });
+
     this.$("#balancer").addEventListener("change", (ev) => {
       this.draft_.installation.load_balancer = ev.target.checked;
       this.paintBalancer_();
@@ -611,6 +626,7 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#fuse").value = inst.fuse_amps;
     this.$("#max-grid").value = inst.max_grid_watts;
     this.$("#max-auto").checked = Boolean(inst.max_grid_auto);
+    this.$("#terug-bewoner").checked = Boolean(inst.payback_resident);
     this.$("#balancer").checked = Boolean(inst.load_balancer);
     this.$("#balancer-limit").value = inst.balancer_entity ?? "";
     this.paintBalancer_();
