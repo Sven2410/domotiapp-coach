@@ -138,18 +138,20 @@ export async function withStatistics(hass, ids) {
  *
  * @returns {Promise<Map<string, Array<{start: Date, change: number}>>>}
  */
-export async function fetchPeriod(hass, ids, period, start) {
+export async function fetchPeriod(hass, ids, period, start, bereik = null) {
   const wanted = [...new Set(ids.filter(Boolean))];
   const out = new Map();
   if (!wanted.length || !hass) return out;
 
-  const bucket = PERIODS.find((item) => item.id === period)?.bucket ?? "day";
+  // `bereik` vraagt een ander stuk tijd in een andere korrel (v0.144.0): de uren
+  // van de herkomst in de batterij, met een aanloop vóór de periode.
+  const bucket = bereik?.vak ?? PERIODS.find((item) => item.id === period)?.bucket ?? "day";
 
   try {
     const result = await hass.callWS({
       type: "recorder/statistics_during_period",
-      start_time: vanHuis(start).toISOString(),
-      end_time: vanHuis(periodEnd(period, start)).toISOString(),
+      start_time: vanHuis(bereik?.van ?? start).toISOString(),
+      end_time: vanHuis(bereik?.tot ?? periodEnd(period, start)).toISOString(),
       statistic_ids: wanted,
       period: bucket,
       types: ["change"],
@@ -344,11 +346,13 @@ export async function fetchDevices(hass, devices, period, start) {
  * @returns {Promise<Map<string, {start: number, kwh: number, erin: number, eruit: number}[]>>}
  *   per apparaat, op volgorde van tijd
  */
-export async function fetchBattery(hass, batteries, period, start) {
+export async function fetchBattery(hass, batteries, period, start, bereik = null) {
   const out = new Map();
   if (!hass || !batteries.length) return out;
 
-  const fijn = period === "year" ? "day" : "hour";
+  const fijn = bereik ? "hour" : period === "year" ? "day" : "hour";
+  const van = bereik?.van ?? start;
+  const tot = bereik?.tot ?? periodEnd(period, start);
   const kandidaten = batteries
     .map((device) => {
       const e = device.entities ?? {};
@@ -372,8 +376,8 @@ export async function fetchBattery(hass, batteries, period, start) {
       return (
         (await hass.callWS({
           type: "recorder/statistics_during_period",
-          start_time: vanHuis(start).toISOString(),
-          end_time: vanHuis(periodEnd(period, start)).toISOString(),
+          start_time: vanHuis(van).toISOString(),
+          end_time: vanHuis(tot).toISOString(),
           statistic_ids: ids,
           period: vak,
           types,
@@ -443,6 +447,45 @@ export async function fetchBattery(hass, batteries, period, start) {
       out.set(id, [...per.values()].sort((a, b) => a.start - b.start));
       break;
     }
+  }
+  return out;
+}
+
+/**
+ * De laagste accustand per uur van elke thuisbatterij (v0.144.0), voor de herkomst
+ * in de batterij: is hij leeg geweest, dan zit er daarna alleen in wat er opnieuw
+ * in ging. Uit de statistiek die Home Assistant van elke procentsensor bijhoudt.
+ *
+ * @returns {Promise<Map<string, Map<number, number>>>} per apparaat het begin van
+ *   het uur (tijd van het huis) op de laagste stand in procent
+ */
+export async function fetchSoc(hass, batteries, van, tot) {
+  const out = new Map();
+  const ids = batteries.map((device) => [device.id, device.entities?.soc]).filter(([, soc]) => soc);
+  if (!hass || !ids.length) return out;
+  let result = {};
+  try {
+    result =
+      (await hass.callWS({
+        type: "recorder/statistics_during_period",
+        start_time: vanHuis(van).toISOString(),
+        end_time: vanHuis(tot).toISOString(),
+        statistic_ids: [...new Set(ids.map(([, soc]) => soc))],
+        period: "hour",
+        types: ["min"],
+      })) ?? {};
+  } catch (error) {
+    console.warn("[DomotiApp Coach] kon de accustand niet ophalen", error);
+    return out;
+  }
+  for (const [id, soc] of ids) {
+    const per = new Map();
+    for (const row of result[soc] ?? []) {
+      const waarde = Number(row.min);
+      if (row.min === null || row.min === undefined || !Number.isFinite(waarde)) continue;
+      per.set(alsHuis(row.start).getTime(), waarde);
+    }
+    if (per.size) out.set(id, per);
   }
   return out;
 }

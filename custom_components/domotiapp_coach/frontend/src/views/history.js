@@ -37,6 +37,7 @@ import {
   fetchDevices,
   fetchPeriod,
   fetchPrices,
+  fetchSoc,
   periodEnd,
   periodLabel,
   periodStart,
@@ -70,6 +71,12 @@ const TIJDLIJN_VERS_MS = 5 * 60 * 1000;
  */
 const TIJDLIJN_PERIODES = new Set(["day", "week"]);
 
+/** Hoe ver vóór de periode de herkomst in de batterij begint te tellen (`laadHerkomst_`). */
+const AANLOOP_MS = 2 * 24 * 3600 * 1000;
+
+/** Tot welke accustand de laagste van de aanloop en de periode als leeg telt, in procent. */
+const LEEG_HOOGSTENS = 25;
+
 /** Drawing units; the chart measures itself in pixels like the price chart. */
 const MIN_W = 240;
 const TOP = 18;
@@ -87,24 +94,118 @@ const aantal = (value, digits = 1) =>
  *
  * `battery` is wat de batterijen netto opnamen, laden positief. Verbruik is dan
  * de eigen zon plus wat er van het net kwam, min wat de batterij opnam: een
- * nacht op de batterij is verbruik, een middag laden niet. Van het net naar het
- * huis is wat er binnenkwam min wat daarvan de batterij in ging; die laadt eerst
- * uit de eigen zon, zoals het energiedashboard van Home Assistant het ook
- * verdeelt. `zonInAccu` is de zon die de batterij in ging, voor In geld over de
- * tijd dat de coach dat nog niet zelf telde (`voor`).
+ * nacht op de batterij is verbruik, een middag laden niet. `zonInAccu` is de zon
+ * die de batterij in ging, voor In geld over de tijd dat de coach dat nog niet
+ * zelf telde (`voor`).
+ *
+ * Met `herk`, de som van `herkomst` over de uren van dit vak (v0.144.0), is wat
+ * niet van het net kwam de zon die meteen het huis in ging plus het zondeel van
+ * wat de batterij aan het huis gaf. De eigenaar op 22-10-2026: "Als mijn accu is
+ * geladen met netstroom, kan dat nooit resultaat hebben in mijn
+ * zelfvoorzienendheid." Daarvoor haalde dit alleen binnen één vak netladen eraf,
+ * en telde alles wat de batterij gaf als eigen stroom: 's nachts van het net
+ * geladen en 's ochtends ontladen stond als zelfvoorzienend. `own` is dan de zon
+ * min wat er terugging, ook onder nul, want wat terugging kan uit de batterij
+ * komen. Zonder batterij is er geen `herk` en blijft het zoals het was.
  */
-export function huisMetAccu(own, bought, accu = { battery: 0, voor: 0 }) {
+export function huisMetAccu(own, bought, accu = { battery: 0, voor: 0 }, herk = null) {
   const battery = Number(accu?.battery) || 0;
   const used = Math.max(0, own + bought - battery);
-  const vanNetInAccu = Math.max(0, Math.max(0, battery) - own);
-  const fromGrid = Math.min(used, Math.max(0, bought - vanNetInAccu));
-  return {
+  let fromGrid;
+  let accuEigen;
+  if (herk) {
+    const eigen = Math.min(used, Math.max(0, (Number(herk.zonHuis) || 0) + (Number(herk.accuZon) || 0)));
+    fromGrid = used - eigen;
+    accuEigen = Math.min(Math.max(0, Number(herk.accuZon) || 0), eigen);
+  } else {
+    const vanNetInAccu = Math.max(0, Math.max(0, battery) - Math.max(0, own));
+    fromGrid = Math.min(used, Math.max(0, bought - vanNetInAccu));
+  }
+  const uit = {
     used,
     fromGrid,
     ownUse: used - fromGrid,
     battery,
-    zonInAccu: Math.min(Math.max(0, Number(accu?.voor) || 0), own),
+    zonInAccu: Math.min(Math.max(0, Number(accu?.voor) || 0), Math.max(0, own)),
   };
+  if (accuEigen !== undefined) uit.accuEigen = accuEigen;
+  return uit;
+}
+
+/**
+ * Waar de stroom in de thuisbatterij vandaan kwam, uur voor uur (v0.144.0).
+ *
+ * De eigenaar op 22-10-2026: "Zelfvoorzienend kan alleen maar door gebruikte
+ * stroom afkomstig van de zon die ik direct verbruik, óf eerst in de accu is
+ * opgeslagen." Dus wordt bijgehouden wat er in de batterij zit (`E`) en hoeveel
+ * daarvan zon is (`Z`), op volgorde van tijd en over de grenzen van een dag of
+ * een week heen. Per uur:
+ *
+ * - Wat terugging is eerst zon, tot er geen zon meer is; de rest kwam uit de
+ *   batterij (handelen) en is geen opwek. Ging er meer terug dan zon en batterij
+ *   samen gaven, dan miste de opwekmeter iets (een omvormer die er later bij kwam):
+ *   dat deel telt als zon, zoals Opgewekt het zonder batterij ook altijd deed.
+ * - De overige zon gaat eerst naar het huis, wat dan nog over is de batterij in;
+ *   wat de batterij verder opnam kwam van het net.
+ * - Wat eruit kwam heeft de verhouding zon en net van wat erin zat. Wat eruit
+ *   kwam zonder dat er iets bekend in zat (geen aanloop, een gat) telt als net:
+ *   beter een procent te weinig dan stroom van het net als eigen zon.
+ *
+ * Het verlies in de batterij valt naar verhouding weg zodra hij boven de
+ * opgegeven capaciteit zou komen (`capaciteit`, de som van de batterijen), en een
+ * uur waarin hij leeg was (`leeg`) begint opnieuw. Meerdere batterijen zijn één
+ * voorraad. Kent Home Assistant niet.
+ *
+ * @param {{start: number, solar?: number, bought?: number, sold?: number, erin?: number,
+ *   eruit?: number, leeg?: boolean}[]} uren op volgorde van tijd, in kWh
+ * @param {{capaciteit?: number|null}} [opties]
+ * @returns {Map<number, {opwek: number, zonHuis: number, accuZon: number, zonNet: number}>}
+ *   per uur de opwek, de zon die meteen het huis in ging, het zondeel van wat de
+ *   batterij aan het huis gaf, en de zon die naar het net ging
+ */
+export function herkomst(uren, { capaciteit = null } = {}) {
+  const uit = new Map();
+  const kwh = (waarde) => Math.max(0, Number(waarde) || 0);
+  let inhoud = 0;
+  let zon = 0;
+  const neem = (deel) => {
+    const weg = Math.min(deel, inhoud);
+    const zonWeg = inhoud > 0 ? (weg * zon) / inhoud : 0;
+    inhoud -= weg;
+    zon = Math.max(0, zon - zonWeg);
+    return [weg, zonWeg];
+  };
+  for (const uur of uren ?? []) {
+    if (uur.leeg) {
+      inhoud = 0;
+      zon = 0;
+    }
+    const erin = kwh(uur.erin);
+    const eruit = kwh(uur.eruit);
+    const terug = kwh(uur.sold);
+    const opwek = Math.max(kwh(uur.solar), terug - eruit);
+    const huis = Math.max(0, opwek + kwh(uur.bought) + eruit - terug - erin);
+    const zonNet = Math.min(terug, opwek);
+    const accuNet = Math.min(eruit, terug - zonNet);
+    const zonHuis = Math.min(opwek - zonNet, huis);
+    const zonIn = Math.min(erin, opwek - zonNet - zonHuis);
+
+    // Eerst wat er al in zat, dan wat er dit uur bij kwam.
+    const [weg, zonUit1] = neem(eruit);
+    inhoud += erin;
+    zon += zonIn;
+    const [, zonUit2] = neem(eruit - weg);
+    if (capaciteit > 0 && inhoud > capaciteit) {
+      zon *= capaciteit / inhoud;
+      inhoud = capaciteit;
+    }
+    zon = Math.min(zon, inhoud);
+
+    const naarHuis = eruit - accuNet;
+    const accuZon = eruit > 0 ? Math.min(((zonUit1 + zonUit2) * naarHuis) / eruit, huis - zonHuis) : 0;
+    uit.set(uur.start, { opwek, zonHuis, accuZon: Math.max(0, accuZon), zonNet });
+  }
+  return uit;
 }
 
 /**
@@ -119,9 +220,10 @@ export function huisMetAccu(own, bought, accu = { battery: 0, voor: 0 }) {
  * energiedashboard.
  *
  * Uit de batterij is hooguit wat het huis niet van het net kreeg (`ownUse`),
- * zodat de balk precies Verbruikt blijft. In een vak van een dag kan de batterij
- * 's nachts van het net geladen en 's avonds ontladen zijn; die stroom telt dan
- * als van het net, net als in Zelfvoorzienend.
+ * zodat de balk precies Verbruikt blijft. Sinds v0.144.0 staat er alleen het
+ * zondeel van wat de batterij gaf (`accuEigen`, uit `herkomst`); wat er 's nachts
+ * van het net in ging en later het huis in, staat bij van het net, net als in
+ * Zelfvoorzienend.
  *
  * @returns {{boven: [string, number][], onder: [string, number][]}} per deel de
  *   klasse en de kWh, van de lijn af
@@ -129,7 +231,7 @@ export function huisMetAccu(own, bought, accu = { battery: 0, voor: 0 }) {
 export function stapel(row) {
   const kwh = (waarde) => Math.max(0, Number(waarde) || 0);
   const nietNet = kwh(row.ownUse);
-  const uit = Math.min(kwh(row.accuUit), nietNet);
+  const uit = Math.min(kwh(row.accuEigen ?? row.accuUit), nietNet);
   return {
     boven: [
       ["own", nietNet - uit],
@@ -837,7 +939,7 @@ class DacViewHistory extends DacElement {
     }));
 
     const batterijen = (this.settings_?.devices ?? []).filter((device) => device.type === "thuisbatterij");
-    const [series, prices, reservePrijzen, devices, accu, , gasPrijzen, afrekening] = await Promise.all([
+    const [series, prices, reservePrijzen, devices, accu, , gasPrijzen, afrekening, herk] = await Promise.all([
       fetchPeriod(this.hass_, ids, this.period_, start),
       fetchPrices(this.hass_, this.priceEntity_(), this.period_, start),
       fetchPrices(this.hass_, this.reserveEntity_(), this.period_, start),
@@ -846,6 +948,7 @@ class DacViewHistory extends DacElement {
       laadCoachPrijzen(this.hass_),
       fetchPrices(this.hass_, this.gasEntity_(), this.period_, start),
       this.laadAfrekening_(start, periodEnd(this.period_, start)),
+      this.laadHerkomst_(roles, batterijen, start),
     ]);
     if (run !== this.run_) return;
     this.afrekening_ = afrekening;
@@ -853,6 +956,7 @@ class DacViewHistory extends DacElement {
     this.gasPrijzen_ = gasPrijzen;
     this.devices_ = devices;
     this.accu_ = accu;
+    this.herkomst_ = herk;
     // Voor In geld: wat de coach bespaarde. De kaart tekent zichzelf bij als
     // de beurten binnen zijn.
     this.laadBeurten_();
@@ -865,6 +969,61 @@ class DacViewHistory extends DacElement {
       water: combine(series, roles.water),
     };
     this.paint_();
+  }
+
+  /**
+   * De herkomst in de thuisbatterij per uur (`herkomst`, v0.144.0), over de periode
+   * plus een aanloop van twee dagen, zodat wat er de nacht ervoor van het net in
+   * ging ook in de eerste uren als net telt. Leeg is een uur waarin elke batterij
+   * met een accustand op zijn laagste stand van die dagen stond, als die laag is.
+   * Zonder batterij of zonder één uur aan gegevens null, en dan rekent `huisMetAccu`
+   * zoals voor v0.144.0.
+   */
+  async laadHerkomst_(roles, batterijen, start) {
+    if (!batterijen.length || !this.hass_) return null;
+    const van = new Date(start.getTime() - AANLOOP_MS);
+    const tot = periodEnd(this.period_, start);
+    const bereik = { van, tot, vak: "hour" };
+    const [reeks, accu, soc] = await Promise.all([
+      fetchPeriod(this.hass_, [...roles.solar, ...roles.import, ...roles.export], this.period_, start, bereik),
+      fetchBattery(this.hass_, batterijen, this.period_, start, bereik),
+      fetchSoc(this.hass_, batterijen, van, tot),
+    ]);
+    const uren = new Map();
+    const uur = (tijd) => {
+      if (!uren.has(tijd)) uren.set(tijd, { start: tijd, solar: 0, bought: 0, sold: 0, erin: 0, eruit: 0 });
+      return uren.get(tijd);
+    };
+    for (const [sleutel, rol] of [["solar", "solar"], ["bought", "import"], ["sold", "export"]]) {
+      for (const rij of combine(reeks, roles[rol])) uur(rij.start.getTime())[sleutel] += rij.value;
+    }
+    for (const rijen of accu.values()) {
+      for (const rij of rijen) {
+        const u = uur(rij.start);
+        u.erin += rij.erin ?? 0;
+        u.eruit += rij.eruit ?? 0;
+      }
+    }
+    if (!uren.size) return null;
+    // Leeg: elke batterij heeft een accustand, en die stond dit uur op zijn
+    // laagste van deze dagen (op een procent na), en dat laagste is hooguit een
+    // kwart. Een batterij die nooit onder de helft kwam is nooit leeg geweest.
+    const bodems = new Map(
+      [...soc].map(([id, per]) => {
+        const laagst = Math.min(...per.values());
+        return [id, laagst <= LEEG_HOOGSTENS ? laagst + 1 : -Infinity];
+      })
+    );
+    const metStand = batterijen.every((device) => soc.has(device.id));
+    const lijst = [...uren.values()].sort((a, b) => a.start - b.start);
+    if (metStand) {
+      for (const u of lijst) {
+        u.leeg = batterijen.every((device) => (soc.get(device.id).get(u.start) ?? Infinity) <= bodems.get(device.id));
+      }
+    }
+    const capaciteiten = batterijen.map((device) => Number(device.battery?.capacity_kwh));
+    const capaciteit = capaciteiten.every((c) => c > 0) ? capaciteiten.reduce((a, b) => a + b, 0) : null;
+    return herkomst(lijst, { capaciteit });
   }
 
   /** Welke fijnheid er gekozen is, en wat dat aan regels gaat kosten. */
@@ -1137,6 +1296,7 @@ class DacViewHistory extends DacElement {
     const einde = periodEnd(this.period_, this.periodeStart_()).getTime();
     const vakEinde = (index) => tijden[index + 1] ?? einde;
     const accu = this.accuPerVak_(tijden, vakEinde);
+    const herk = this.herkomstPerVak_(tijden, vakEinde);
 
     return tijden.map((time, index) => {
       const solar = at("solar", time);
@@ -1146,16 +1306,39 @@ class DacViewHistory extends DacElement {
       // meters are read at slightly different moments and a rounding of a few
       // watt-hours must not turn into a negative bar.
       const own = Math.max(0, solar - sold);
+      // Opgewekt is eigen zon plus wat er terugging. Met een batterij kan wat er
+      // terugging uit de batterij komen (v0.144.0), en dat is geen opwek en geen
+      // eigen zon; `herkomst` zegt per uur hoeveel zon er was.
+      const opwek = herk ? herk[index].opwek : own + sold;
       return {
         start: new Date(time),
         own,
         bought,
         sold,
-        ...huisMetAccu(own, bought, accu[index]),
+        solar: opwek,
+        zonZelf: herk ? Math.max(0, opwek - herk[index].zonNet) : own,
+        ...huisMetAccu(herk ? opwek - sold : own, bought, accu[index], herk?.[index]),
         accuIn: accu[index].erin,
         accuUit: accu[index].eruit,
       };
     });
+  }
+
+  /** De uren van `herkomst` opgeteld per vak van de grafiek, of null zonder herkomst. */
+  herkomstPerVak_(tijden, vakEinde) {
+    if (!this.herkomst_?.size) return null;
+    const uit = tijden.map(() => ({ opwek: 0, zonHuis: 0, accuZon: 0, zonNet: 0 }));
+    let index = 0;
+    for (const [tijd, uur] of this.herkomst_) {
+      while (index < tijden.length && tijd >= vakEinde(index)) index += 1;
+      if (index >= tijden.length) break;
+      if (tijd < tijden[index]) continue;
+      uit[index].opwek += uur.opwek;
+      uit[index].zonHuis += uur.zonHuis;
+      uit[index].accuZon += uur.accuZon;
+      uit[index].zonNet += uur.zonNet;
+    }
+    return uit;
   }
 
   /**
@@ -1212,7 +1395,7 @@ class DacViewHistory extends DacElement {
     // dan een getal dat nergens op slaat.
     const hasSolar = this.meters_().solar.length > 0;
     const totals = {
-      solar: hasSolar ? sum("own") + sum("sold") : null,
+      solar: hasSolar ? sum("solar") : null,
       used: hasSolar ? sum("used") : null,
       bought: sum("bought"),
       sold: sum("sold"),
@@ -1221,12 +1404,13 @@ class DacViewHistory extends DacElement {
     };
     this.accuTegels_ = totals.accuIn + totals.accuUit >= 0.05;
     totals.selfUse =
-      hasSolar && totals.solar > 0 ? (sum("own") / totals.solar) * 100 : null;
+      hasSolar && totals.solar > 0 ? (sum("zonZelf") / totals.solar) * 100 : null;
     // Zelfvoorzienend, zoals het energiedashboard van Home Assistant het noemt:
     // welk deel van je verbruik niet van het net kwam. De bewoner van de eerste
     // woning op 22-09-2026: "daar mag zelfvoorzienend nog wel bij."
-    // Met een thuisbatterij telt alleen wat er van het net naar het huis ging;
-    // wat van het net de batterij in ging telt pas als hij het afgeeft.
+    // Met een thuisbatterij telt wat er uit de batterij kwam alleen als eigen
+    // stroom voor het deel dat zon was (`herkomst`, v0.144.0): wat er 's nachts
+    // van het net in ging blijft van het net, ook als hij het pas later afgeeft.
     totals.selfSufficient =
       hasSolar && totals.used > 0 ? Math.max(0, (1 - sum("fromGrid") / totals.used) * 100) : null;
 
@@ -1326,13 +1510,13 @@ class DacViewHistory extends DacElement {
       if (!row) return;
       this.paintTotals_(
         {
-          solar: row.own + row.sold,
+          solar: row.solar,
           used: row.used,
           bought: row.bought,
           sold: row.sold,
           accuIn: row.accuIn,
           accuUit: row.accuUit,
-          selfUse: row.own + row.sold > 0 ? (row.own / (row.own + row.sold)) * 100 : null,
+          selfUse: row.solar > 0 ? (row.zonZelf / row.solar) * 100 : null,
           selfSufficient: row.used > 0 ? Math.max(0, (1 - row.fromGrid / row.used) * 100) : null,
         },
         bucketTitle(this.period_, row.start)
@@ -1427,7 +1611,7 @@ class DacViewHistory extends DacElement {
     const regels = rows.map((row) => {
       const prijs = prijsBij(row);
       const cellen = [bucketTitle(this.period_, row.start)];
-      if (hasSolar) cellen.push(kwh(row.own + row.sold), kwh(row.used), kwh(row.own));
+      if (hasSolar) cellen.push(kwh(row.solar), kwh(row.used), kwh(row.zonZelf));
       cellen.push(kwh(row.bought), kwh(row.sold));
       if (gas.size) cellen.push(`${aantal(gas.get(row.start.getTime()) ?? 0, 2)} m³`);
       if (water.size) cellen.push(`${aantal(water.get(row.start.getTime()) ?? 0, 2)} m³`);
@@ -1439,7 +1623,7 @@ class DacViewHistory extends DacElement {
 
     const som = (key) => rows.reduce((total, row) => total + row[key], 0);
     const totaalCellen = [t("Totaal")];
-    if (hasSolar) totaalCellen.push(kwh(som("own") + som("sold")), kwh(som("used")), kwh(som("own")));
+    if (hasSolar) totaalCellen.push(kwh(som("solar")), kwh(som("used")), kwh(som("zonZelf")));
     totaalCellen.push(kwh(som("bought")), kwh(som("sold")));
     if (gas.size) {
       totaalCellen.push(`${aantal([...gas.values()].reduce((a, b) => a + b, 0), 2)} m³`);
