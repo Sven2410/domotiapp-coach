@@ -312,7 +312,9 @@ const css = /* css */ `
   input.getal { width: 124px; font-variant-numeric: tabular-nums; }
   /* De prijsgrenzen bij Handelen (v0.141.0) zeggen leeg "de coach bepaalt"; op
      124 px viel dat af tot "de coach bep". */
-  input.getal[data-vk-accu="grid_charge_below"], input.getal[data-vk-accu="trade_above"] { width: min(100%, 190px); }
+  input.getal[data-vk-accu="grid_charge_below"], input.getal[data-vk-accu="trade_above"],
+  input.getal[data-vk-accu="wear_per_kwh"], input.getal[data-vk-accu="wear_price"],
+  input.getal[data-vk-accu="wear_cycles"] { width: min(100%, 190px); }
   /* De uitklaplijst tekent de browser zelf; zonder deze twee kwam hij wit met
      lichte letters erin, zoals op 06-09-2026 bij Meldingen. De eigenaar op
      12-10-2026 zag het hier opnieuw: "dit is wit moet ook donker zijn". */

@@ -6159,6 +6159,27 @@ class ChargerCoach:
         if accu is not None and abs(float(rij.get("rte_accu") or 0.0) - accu) > 0.002:
             await self._async_batterij_bewaren(settings, device_id, {"rte_accu": round(accu, 4)})
 
+    @staticmethod
+    def _slijtage(eigen: dict[str, Any], capaciteit: float | None) -> float:
+        """De afschrijving per kWh uit de cellen (v0.146.0), of nul.
+
+        Uit de aanschafprijs en het aantal laadcycli als beide er zijn, anders wat de
+        bewoner per kWh invulde. Een cyclus is de hele inhoud er een keer uit. De
+        eigenaar op 22-10-2026: "Voor de eenvoud.. aanschafprijs/minimaal aantal cycli.
+        Zou restwaarde oid niet meenemen, die weet je toch niet."
+        """
+        def getal(sleutel: str) -> float | None:
+            try:
+                waarde = eigen.get(sleutel)
+                return None if waarde in (None, "") else float(waarde)
+            except (TypeError, ValueError):
+                return None
+
+        prijs, cycli = getal("wear_price"), getal("wear_cycles")
+        if prijs is not None and cycli and capaciteit:
+            return max(0.0, prijs / (cycli * capaciteit))
+        return max(0.0, getal("wear_per_kwh") or 0.0)
+
     def _rendement_bron(
         self, device: dict[str, Any], capaciteit: float | None, rij: dict[str, Any], ingevuld: float | None
     ) -> tuple[float | None, Rendement | None]:
@@ -6243,6 +6264,7 @@ class ChargerCoach:
             net_laden=bool(eigen.get("grid_charge", True)),
             net_laden_onder=getal("grid_charge_below"),
             handelen_boven=getal("trade_above"),
+            slijtage=self._slijtage(eigen, capaciteit),
             auto_boven=getal("car_above"),
             nacht=bool((settings.get("strategy") or {}).get("night_strategy", True)),
             power_w=self._batterij_w(device),

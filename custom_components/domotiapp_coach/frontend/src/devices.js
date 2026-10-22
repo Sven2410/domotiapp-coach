@@ -1125,6 +1125,10 @@ export const defaultBattery = (brandId) => ({
   grid_charge: true,
   grid_charge_below: null,
   trade_above: null,
+  // De afschrijving (v0.146.0): per kWh, of uit de aanschafprijs en de laadcycli.
+  wear_per_kwh: null,
+  wear_price: null,
+  wear_cycles: null,
   weekly_full: false,
   weekly_full_day: 6,
   holiday: false,

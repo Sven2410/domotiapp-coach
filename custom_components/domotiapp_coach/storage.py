@@ -112,6 +112,7 @@ VOORKEUREN_ACCU = frozenset({
     "reserve_enabled", "reserve_percent", "trade", "grid_charge", "grid_charge_below", "trade_above",
     "weekly_full", "weekly_full_day",
     "holiday", "holiday_max_percent", "car_above", "fan_above_c",
+    "wear_per_kwh", "wear_price", "wear_cycles",
 })
 
 

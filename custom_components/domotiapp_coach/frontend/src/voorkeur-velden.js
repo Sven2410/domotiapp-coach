@@ -17,7 +17,7 @@
 
 import { WAKE_MODES, WEEKDAGEN, canSkipRelease, inTaal, releaseCopy, weekdag } from "./devices.js";
 import { terugleverBekend } from "./geld.js";
-import { nt, t } from "./i18n.js";
+import { locale, nt, t } from "./i18n.js";
 
 const esc = (s) =>
   String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -133,6 +133,16 @@ function thuisbatterij(device) {
     <div class="notice" data-vk-rij="trade_kan_niet" hidden>${t(HANDELEN_KAN_NIET)}</div>
     ${getal("data-vk-accu", "trade_above", t("Alleen als de prijs boven (€/kWh)"), 'min="-1" max="2" step="0.01"', t("de coach bepaalt"))}
     <p class="sub">${t("De prijzen zijn all-in, met belasting en opslag. Leeg: de coach kiest zelf de beste uren.")}</p>`)}
+    ${blok(t("Afschrijving"), `
+    ${getal("data-vk-accu", "wear_per_kwh", t("Afschrijving (€ per kWh)"), 'min="0" max="1" step="0.001"', t("geen"),
+      t("Wat elke kWh die uit de batterij komt aan slijtage kost. De coach laadt en ontlaadt pas als het verschil in prijs het verlies in de batterij én dit bedrag dekt. Leeg: alleen het verlies."))}
+    <label class="check">
+      <input type="checkbox" data-vk-hulp="afschrijving">
+      <span><strong>${t("Help me dit uit te rekenen.")}</strong> ${t("Vul de aanschafprijs en het aantal laadcycli van de leverancier in.")}</span>
+    </label>
+    ${getal("data-vk-accu", "wear_price", t("Aanschafprijs (€)"), 'min="0" max="100000" step="1"', "")}
+    ${getal("data-vk-accu", "wear_cycles", t("Laadcycli volgens de leverancier"), 'min="1" max="100000" step="1"', "")}
+    <p class="sub" data-vk-rij="afschrijving_uitkomst" hidden></p>`)}
     ${blok(t("Balanceren"), `
     ${vink("data-vk-accu", "weekly_full", t("Een keer per week helemaal vol."), t("Tot 100%, voor het balanceren van de cellen. De coach kiest op die dag het goedkoopste moment, en slaat de beurt over als de batterij die week al vol was."))}
     <div class="row" data-vk-rij="weekly_full_day">
@@ -249,6 +259,24 @@ export function vulVoorkeuren(root, device, actief = null, contract = null) {
   for (const el of root.querySelectorAll("[data-vk-aan]")) {
     rij(el.dataset.vkAan, b[el.dataset.vkAan] != null || el.dataset.open === "1" || el.checked);
   }
+  // De afschrijving (v0.146.0): het veld per kWh, of met de hulp de aanschafprijs en
+  // de laadcycli, en wat dat per kWh is. Een cyclus is de hele inhoud er een keer uit.
+  const hulp = root.querySelector("[data-vk-hulp]");
+  const hulpOpen = b.wear_price != null || b.wear_cycles != null || hulp?.dataset.open === "1";
+  if (hulp && hulp !== actief) hulp.checked = hulpOpen;
+  rij("wear_per_kwh", !hulpOpen);
+  rij("wear_price", hulpOpen);
+  rij("wear_cycles", hulpOpen);
+  const uitkomst = root.querySelector('[data-vk-rij="afschrijving_uitkomst"]');
+  if (uitkomst) {
+    const per = afschrijvingPerKwh(b);
+    uitkomst.textContent = !hulpOpen || b.wear_price == null || !b.wear_cycles
+      ? ""
+      : per === null
+        ? t("De coach deelt de aanschafprijs door het aantal cycli maal de capaciteit van de batterij.")
+        : t("Dat is € {bedrag} per kWh uit de batterij.", { bedrag: per.toLocaleString(locale(), { minimumFractionDigits: 3, maximumFractionDigits: 3 }) });
+    uitkomst.hidden = !uitkomst.textContent;
+  }
   // Handelen zonder terugleverprijs: uitzetten mag, aanzetten niet.
   const handel = [...root.querySelectorAll("[data-vk-accu]")].find((el) => el.dataset.vkAccu === "trade");
   const kanNiet = Boolean(handel) && contract !== null && !terugleverBekend(contract);
@@ -257,6 +285,19 @@ export function vulVoorkeuren(root, device, actief = null, contract = null) {
 }
 
 const binnen = (waarde, laag, hoog) => Math.min(hoog, Math.max(laag, Math.round(waarde)));
+
+/**
+ * De afschrijving per kWh uit de aanschafprijs en de laadcycli, zoals `_slijtage` in
+ * coach.py: prijs gedeeld door cycli maal capaciteit. Null als de capaciteit hier niet
+ * bekend is (een sensor leest alleen de coach).
+ */
+export function afschrijvingPerKwh(b) {
+  const prijs = Number(b?.wear_price);
+  const cycli = Number(b?.wear_cycles);
+  const cap = Number(b?.capacity_kwh);
+  if (!(prijs >= 0) || !(cycli > 0) || !(cap > 0) || b?.wear_price == null) return null;
+  return prijs / (cycli * cap);
+}
 
 /**
  * Wat er naar `device/preferences` gaat voor een veld dat veranderde, of null
@@ -274,6 +315,10 @@ export function voorkeurWijziging(el) {
     if (sleutel === "solar_start_percent") return { solar_start_percent: binnen(n, 10, 100) };
     return null;
   }
+  if (el.dataset.vkHulp) {
+    el.dataset.open = el.checked ? "1" : "";
+    return el.checked ? null : { battery: { wear_price: null, wear_cycles: null } };
+  }
   if (el.dataset.vkAan) {
     const sleutel = el.dataset.vkAan;
     el.dataset.open = el.checked ? "1" : "";
@@ -285,6 +330,14 @@ export function voorkeurWijziging(el) {
     if (sleutel === "weekly_full_day") return { battery: { weekly_full_day: Number(el.value) } };
     const n = getalVan();
     // Leeg is "de coach bepaalt" bij de grenzen van handelen (v0.141.0), in euro per kWh.
+    // De afschrijving (v0.146.0): leeg is geen.
+    if (sleutel === "wear_per_kwh" || sleutel === "wear_price" || sleutel === "wear_cycles") {
+      if (n === null) return { battery: { [sleutel]: null } };
+      if (!Number.isFinite(n)) return null;
+      const grens = { wear_per_kwh: [0, 1], wear_price: [0, 100000], wear_cycles: [1, 100000] }[sleutel];
+      const afgerond = sleutel === "wear_per_kwh" ? Math.round(n * 10000) / 10000 : Math.round(n);
+      return { battery: { [sleutel]: Math.min(grens[1], Math.max(grens[0], afgerond)) } };
+    }
     if (sleutel === "grid_charge_below" || sleutel === "trade_above") {
       if (n === null) return { battery: { [sleutel]: null } };
       if (!Number.isFinite(n)) return null;

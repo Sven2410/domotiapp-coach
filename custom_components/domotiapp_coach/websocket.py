@@ -246,6 +246,11 @@ _BATTERY = _schema(
         vol.Optional("grid_charge", default=True): bool,
         vol.Optional("grid_charge_below", default=None): _LEEG_OF(float, -1, 2),
         vol.Optional("trade_above", default=None): _LEEG_OF(float, -1, 2),
+        # De afschrijving (v0.146.0): wat een kWh uit de batterij aan slijtage kost, in
+        # euro, of de aanschafprijs en het aantal laadcycli waar de coach dat uit rekent.
+        vol.Optional("wear_per_kwh", default=None): _LEEG_OF(float, 0, 1),
+        vol.Optional("wear_price", default=None): _LEEG_OF(float, 0, 100000),
+        vol.Optional("wear_cycles", default=None): _LEEG_OF(float, 1, 100000),
         # Een keer per week helemaal vol, voor het balanceren van de cellen.
         vol.Optional("weekly_full", default=False): bool,
         vol.Optional("weekly_full_day", default=6): vol.All(vol.Coerce(int), vol.Range(0, 6)),
@@ -1025,6 +1030,9 @@ _BATTERY_VOORKEUREN = vol.Schema(
         vol.Optional("grid_charge"): bool,
         vol.Optional("grid_charge_below"): _LEEG_OF(float, -1, 2),
         vol.Optional("trade_above"): _LEEG_OF(float, -1, 2),
+        vol.Optional("wear_per_kwh"): _LEEG_OF(float, 0, 1),
+        vol.Optional("wear_price"): _LEEG_OF(float, 0, 100000),
+        vol.Optional("wear_cycles"): _LEEG_OF(float, 1, 100000),
         vol.Optional("weekly_full"): bool,
         vol.Optional("weekly_full_day"): vol.All(vol.Coerce(int), vol.Range(0, 6)),
         vol.Optional("holiday"): bool,
