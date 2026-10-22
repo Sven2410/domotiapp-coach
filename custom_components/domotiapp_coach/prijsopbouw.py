@@ -37,6 +37,13 @@ from math import acos, cos, degrees, pi, radians, sin, tan
 # twee en een halve cent.
 TOLERANTIE = 0.001
 
+# Hoeveel decimalen een prijslijst hoogstens heeft voor ze telt als niet afgerond.
+# Frank Energie geeft zijn toestand op vijf decimalen en zijn lijst `prices` op drie;
+# bij een klant op 20-10-2026 kwam de opbouw daardoor € 0,00103 naast de lijst uit, en
+# meldde de coach "Je energieprijs klopt niet meer" over een opbouw die tot op de
+# vijfde decimaal klopte.
+DECIMALEN = 6
+
 # Over hoeveel tijd terug de controle kijkt. De prijslijsten reiken van
 # vandaag tot morgen; wat de sensor van gisteren nog heeft telt ook.
 TERUG = timedelta(hours=24)
@@ -242,6 +249,23 @@ def lengte(blokken: Blokken) -> timedelta:
     return lengtes[len(lengtes) // 2] if lengtes else timedelta(hours=1)
 
 
+def afronding(blokken: Blokken) -> float:
+    """De grootste fout die de afronding van een prijslijst kan geven: een halve laatste decimaal.
+
+    De lijst zegt het zelf: staat elke prijs op drie decimalen, dan is hij op drie
+    afgerond. Een lijst met een prijs op meer dan `DECIMALEN` geeft nul.
+    """
+    fijnst = 0
+    for _, prijs in blokken.values():
+        for n in range(DECIMALEN + 1):
+            if abs(prijs - round(prijs, n)) < 1e-9:
+                fijnst = max(fijnst, n)
+                break
+        else:
+            return 0.0
+    return 0.5 * 10.0 ** -fijnst
+
+
 def controleer(all_in: Blokken, markt: Blokken, d: dict, now: datetime) -> dict:
     """De opbouw naast de all-in sensor, over alle blokken die allebei kennen.
 
@@ -252,6 +276,9 @@ def controleer(all_in: Blokken, markt: Blokken, d: dict, now: datetime) -> dict:
     ze hebben geen blok samen). Bij een afwijking zegt `vast` of het verschil
     in elk blok even groot is: dan zit het in een bedrag per kWh (de
     energiebelasting of de opslag), en niet in de btw.
+
+    De tolerantie is `TOLERANTIE` plus wat de afronding van de twee lijsten kan
+    schelen; die van de marktprijs gaat door de btw heen (`afronding`).
     """
     if not all_in or not markt:
         return {"status": "onbekend", "blokken": 0}
@@ -272,14 +299,16 @@ def controleer(all_in: Blokken, markt: Blokken, d: dict, now: datetime) -> dict:
         return {"status": "onbekend", "blokken": 0}
     alle = [v for *_, v in verschillen]
     grootste = max(alle, key=abs)
+    marge = afronding(all_in) + afronding(markt) * btw_factor(d)
     nu = next((v for v in verschillen if v[0] <= now < v[0] + stap), verschillen[-1])
     return {
-        "status": "correct" if abs(grootste) <= TOLERANTIE else "afwijking",
+        "status": "correct" if abs(grootste) <= TOLERANTIE + marge else "afwijking",
         "blokken": len(verschillen),
         "stap_minuten": int(stap.total_seconds() // 60),
         "grootste": grootste,
         "gemiddeld": sum(alle) / len(alle),
-        "vast": max(alle) - min(alle) <= TOLERANTIE,
+        "vast": max(alle) - min(alle) <= TOLERANTIE + 2 * marge,
+        "afronding": marge,
         "blok": {"start": nu[0], "einde": nu[0] + stap, "all_in": nu[1], "markt": nu[2],
                  "verschil": nu[3]},
     }
@@ -383,7 +412,7 @@ def vingerafdruk(contract: dict) -> str:
 
 
 __all__ = [
-    "TOLERANTIE", "bonus", "btw_factor", "controleer", "gemiddeld", "inkoop", "lengte", "markt_terug", "overdag",
+    "DECIMALEN", "TOLERANTIE", "afronding", "bonus", "btw_factor", "controleer", "gemiddeld", "inkoop", "lengte", "markt_terug", "overdag",
     "terug",
     "vingerafdruk", "zon_op_onder",
 ]
