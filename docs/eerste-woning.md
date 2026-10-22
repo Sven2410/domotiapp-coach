@@ -702,3 +702,11 @@ gaf): 22-10 Bespaard 9,68 → 1,36 (directe zon 8,15 → 0,16, opgeslagen zon 1,
 1,18); week vanaf 19-10 35,97 → 2,95; oktober 161,18 → 20,53, waarin opgeslagen zon −1,00 (het
 verlies bij salderen). Kosten blijven gelijk. Proef "bespaard: directe zon, opgeslagen zon en de
 coach" in test_rapport.mjs.
+
+**v0.147.1**, na de controle van 22-10-2026 op vijf woningen. Opgeslagen zonnestroom kwam thuis op −€ 0,05
+(vast met salderen: opslaan kost alleen het verlies) en in een woning met twee tijdvakken en zonder
+terugleverprijs op −€ 0,33. De eigenaar: "0 tonen dan. bij maertens ja onbekende teruglevering 0
+inderdaad." Dus: `balans` toont opgeslagen zon nooit onder nul, en `herkomst` telt een onbekende
+terugleverprijs als nul (zoals `_kosten` in batterij.py), niet meer als de inkoopprijs van dat uur. Een
+tekort staat er als "− € 0,05" en een afgerond nul als "€ 0,00" (`geldBedrag` in format.js), en in
+Portugal zegt de uitleg "Gerekend met de tijdvakken van je contract." in plaats van een tarief van nu.

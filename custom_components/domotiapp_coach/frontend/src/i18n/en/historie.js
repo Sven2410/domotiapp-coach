@@ -125,6 +125,7 @@ export const HISTORIE = {
   "Opgeslagen zonnestroom, later verbruikt": "Stored solar, used later",
   "opgeslagen zon": "stored solar",
   "Kosten vandaag": "Costs today",
+  "Gerekend met de tijdvakken van je contract.": "Calculated with the time periods of your contract.",
   "Kosten deze dag": "Costs this day",
   "Kosten deze week": "Costs this week",
   "Kosten deze maand": "Costs this month",
