@@ -2510,11 +2510,13 @@ proef("de balans: uitgegeven en bespaard, en de drie delen tellen samen op tot b
   assert.ok(Math.abs(b.stroom - 4 * 0.24171) < 1e-9);
   assert.ok(Math.abs(b.terug - 6 * terug) < 1e-9);
   assert.ok(Math.abs(b.uitgegeven - (4 * 0.24171 - 6 * terug + 2 * 1.33)) < 1e-9, `${b.uitgegeven}`);
-  // Sinds v0.101.2 telt het kasboek van de batterij erbij: de meters zien haar niet.
-  assert.ok(Math.abs(b.bespaard - (10 * 0.24171 + 6 * terug + 0.034 + 0.1)) < 1e-9, `${b.bespaard}`);
+  // Sinds v0.147.0 is bespaard een aparte som: de zon die je zelf gebruikte tegen de
+  // inkoopprijs, zonder teruglevering (die zit in de kosten). Zonder uren van de herkomst
+  // het kasboek van de batterij, en van de beurten het wachten.
+  assert.ok(Math.abs(b.bespaard - (10 * 0.24171 + 0.034 + 0.1)) < 1e-9, `${b.bespaard}`);
   const som = b.delen.zon + b.delen.accu + b.delen.coach;
   assert.ok(Math.abs(som - b.bespaard) < 1e-9, `${som} tegen ${b.bespaard}`);
-  assert.ok(Math.abs(b.zonder - (b.uitgegeven + b.bespaard)) < 1e-9);
+  assert.equal(b.zonder, undefined, "geen zonder meer: de twee sommen staan los");
 });
 
 proef("het kasboek van de batterij telt alleen de dagen van de periode", () => {
@@ -2540,16 +2542,17 @@ proef("laden is inkopen: Historie telt opgeleverd, en wat er in de batterij bij 
   const oud = geld.accuVerdiend(settings, new Date(2026, 8, 27), new Date(2026, 8, 28));
   assert.ok(Math.abs(oud.euro - 0.5) < 1e-9 && oud.voorraad === 0, "een dag van voor v0.107.0 telt zoals hij geteld is");
 
-  // Zonder telt de stroom die er nog in zit niet als verbruik: zonder is wat het
-  // gekost had zonder batterij, en die had die € 0,40 niet ingekocht.
+  // Zonder uren van de herkomst telt het kasboek bij de batterij, en wat er nog in zit
+  // staat als regel onder de kosten.
   const rij = { start: new Date(2026, 8, 28, 12), own: 0, bought: 10, sold: 0 };
   const prijs = () => ({ koop: 0.3, terug: 0.1 });
   const met = geld.balans({ rijen: [rij], prijs, accu: dag.euro, accuVoorraad: dag.voorraad });
-  const kasboek = geld.balans({ rijen: [rij], prijs, accu: -0.2 });
   assert.ok(Math.abs(met.uitgegeven - 3) < 1e-9 && Math.abs(met.delen.accu - 0.2) < 1e-9);
-  assert.ok(Math.abs(met.zonder - kasboek.zonder) < 1e-9,
-    `zonder hoort niet te veranderen door anders te boeken: ${met.zonder} tegen ${kasboek.zonder}`);
   assert.ok(Math.abs(met.voorraad - 0.4) < 1e-9);
+  // Met uren van de herkomst (v0.147.0) gaan die voor het kasboek.
+  const metUren = geld.balans({ rijen: [{ ...rij, zonEuro: 0.5, accuEuro: 0.1, handelEuro: 0.3 }], prijs, accu: 9 });
+  assert.ok(Math.abs(metUren.delen.zon - 0.5) < 1e-9 && Math.abs(metUren.delen.accu - 0.1) < 1e-9
+    && Math.abs(metUren.delen.coach - 0.3) < 1e-9, JSON.stringify(metUren.delen));
 
   // De regel onder Uitgegeven, en in het rapport.
   const el = Object.create(Historie.prototype);
@@ -2636,7 +2639,6 @@ proef("de eigenaar, 29-09 tot 09:00: de nacht op de batterij is verbruik, en de 
   assert.ok(Math.abs(b.delen.zon - 0.15 * 0.24171) < 1e-9, `zon ${b.delen.zon}`);
   assert.ok(Math.abs(b.bespaard - (0.15 * 0.24171 + 0.60)) < 1e-9, `bespaard ${b.bespaard}`);
   assert.ok(Math.abs(b.delen.zon + b.delen.accu + b.delen.coach - b.bespaard) < 1e-9);
-  assert.ok(Math.abs(b.zonder - (b.uitgegeven + b.bespaard)) < 1e-9);
 });
 
 proef("huisMetAccu: laden uit de zon is geen verbruik, laden van het net telt niet als van het net naar het huis", () => {
@@ -2653,11 +2655,13 @@ proef("de zon die de batterij in ging: uit de telling van de coach, en daarvoor 
   const terug = 0.24171 - 0.052756;
   const rij = { start: dag, own: 3, bought: 0.2, sold: 1, ...huisMetAccu(3, 0.2, { battery: 2, voor: 2 }) };
   const b = geld.balans({ rijen: [rij], prijs: (w) => geld.prijsOp(VAST, TARIEF, new Map(), w), contract: VAST, accu: 0 });
-  assert.ok(Math.abs(b.delen.zon - (3 * 0.24171 + 1 * terug - 2 * 0.052756)) < 1e-9, `${b.delen.zon}`);
+  // Sinds v0.147.0 zonder teruglevering: die zit in de kosten.
+  assert.ok(Math.abs(b.delen.zon - (3 * 0.24171 - 2 * 0.052756)) < 1e-9, `${b.delen.zon}`);
+  assert.ok(terug > 0);
   const geteld = geld.balans({
     rijen: [{ ...rij, zonInAccu: 0 }], prijs: (w) => geld.prijsOp(VAST, TARIEF, new Map(), w), contract: VAST, accuZon: 0.1,
   });
-  assert.ok(Math.abs(geteld.delen.zon - (3 * 0.24171 + 1 * terug - 0.1)) < 1e-9, `${geteld.delen.zon}`);
+  assert.ok(Math.abs(geteld.delen.zon - (3 * 0.24171 - 0.1)) < 1e-9, `${geteld.delen.zon}`);
   const settings = { battery_state: [{ device: "b", solar_stored_days: { "2026-09-30": 0.5, "2026-10-01": 0.1 } }] };
   assert.ok(Math.abs(geld.accuZon(settings, new Date(2026, 9, 1), new Date(2026, 9, 2)).euro - 0.1) < 1e-9);
 });
@@ -3236,7 +3240,9 @@ function geldweergave() {
 proef("In geld rekent met het kasboek van de batterij en met de beurten van die dag", () => {
   const g = geldweergave().geld_();
   assert.ok(Math.abs(g.delen.accu - 0.034) < 1e-9, `${g.delen.accu}`);
-  assert.ok(Math.abs(g.delen.coach - 0.018) < 1e-9, `${g.delen.coach}`);
+  // De beurt was helemaal zon (saved 0,018 = solar_saved): sinds v0.147.0 staat die bij
+  // de zon, en de coach houdt alleen het wachten op een goedkoper moment.
+  assert.ok(Math.abs(g.delen.coach - 0) < 1e-9, `${g.delen.coach}`);
   assert.ok(Math.abs(g.delen.zon + g.delen.accu + g.delen.coach - g.bespaard) < 1e-9);
   assert.equal(g.metAccu, true);
   assert.equal(g.metCoach, true);
@@ -3246,7 +3252,8 @@ proef("de uitleg van In geld noemt het salderen en waar de delen vandaan komen",
   const el = geldweergave();
   const zin = el.geldUitleg_(el.geld_());
   assert.match(zin, /Tot 1 januari 2027 saldeer je/);
-  assert.match(zin, /Thuisbatterij: wat ontladen opbracht, min wat het laden kostte/);
+  assert.match(zin, /Opgeslagen zon: de prijs toen hij je huis in ging/);
+  assert.match(zin, /^Kosten is wat je betaalde. Bespaard is een aparte som/);
   assert.match(zin, /Coach: /);
   // De eigenaar op 13-10-2026: "zo duidelijk mogelijk en zo kort mogelijk". Met
   // salderen staat erbij wat opslaan per kWh scheelt: de stroomprijs min wat
@@ -4148,12 +4155,13 @@ async function herkomstHuis({ uren, batterijen, periode = "day", start, zon = tr
   const roles = { solar: zon ? ["sensor.zon"] : [], import: ["sensor.af"], export: ["sensor.terug"], gas: [], water: [] };
   const { fetchPeriod, fetchBattery, combine } = await import("../custom_components/domotiapp_coach/frontend/src/statistics.js");
   const ids = [...roles.solar, ...roles.import, ...roles.export];
-  const [series, accu, herk] = await Promise.all([
+  const [series, accu, ruw] = await Promise.all([
     fetchPeriod(hass, ids, periode, start),
     fetchBattery(hass, batterijen, periode, start),
     el.laadHerkomst_(roles, batterijen, start),
   ]);
   el.accu_ = accu;
+  const herk = ruw ? el.rekenHerkomst_(ruw) : null;
   el.herkomst_ = herk;
   el.rows_ = { solar: combine(series, roles.solar), import: combine(series, roles.import), export: combine(series, roles.export), gas: [], water: [] };
   const rows = el.buckets_();
@@ -4164,7 +4172,7 @@ async function herkomstHuis({ uren, batterijen, periode = "day", start, zon = tr
     totaal: {
       solar: zon ? som("solar") : null,
       used,
-      zonZelf: Math.max(0, som("zonZelfSom")),
+      zonZelf: som("zonZelf"),
       eigen: som("ownUse"),
       zelfvoorzienend: used > 0 ? Math.max(0, (1 - som("fromGrid") / used) * 100) : null,
     },
@@ -4200,7 +4208,7 @@ proef("zelfvoorzienend: 's nachts van het net geladen en 's ochtends ontladen is
   // Het rapport en het aanwijzen per vak rekenen met dezelfde velden.
   const bron = Historie.toString();
   assert.ok(bron.includes("kwh(row.solar), kwh(row.used), kwh(row.zonZelf)"));
-  assert.ok(bron.includes('Math.max(0, sum("zonZelfSom"))') && bron.includes('kwh(Math.max(0, som("zonZelfSom")))'));
+  assert.ok(bron.includes('(sum("zonZelf") / totals.solar)') && bron.includes('kwh(som("zonZelf"))'));
   assert.ok(bron.includes("solar: row.solar,") && bron.includes("(row.zonZelf / row.solar)"));
   assert.ok(bron.includes('solar: hasSolar ? sum("solar") : null'));
 });
@@ -4340,7 +4348,9 @@ proef("zelfvoorzienend: de batterij laadt eerst uit zon, eigen is per uur nooit 
   const { totaal } = await herkomstHuis({ uren, batterijen: [ACCU_TELLER], start: dag });
   // 6 opgewekt: 0,4 meteen het huis in, 5,6 de batterij in; daarvan 0,2 naar het huis en 4 naar het net.
   assert.equal(rond(totaal.solar), 6);
-  assert.equal(rond(totaal.zonZelf), 2, "6 min de 4 die via de batterij terugging");
+  // Sinds v0.147.0 alleen wat je huis in ging: 0,4 meteen en 0,2 uit de batterij. De 4 die
+  // terugging en de 1,4 die er nog in zit tellen niet.
+  assert.equal(rond(totaal.zonZelf), 0.6, "0,4 meteen en 0,2 via de batterij");
 });
 
 proef("zelfvoorzienend: twee batterijen, een zonder tellers en een met, en de lege batterij uit de accustand (v0.144.0)", async () => {
@@ -4428,6 +4438,48 @@ proef("zelfvoorzienend: zonder batterij verandert er niets, en zonder zon staat 
   const l = await herkomstHuis({ uren: later, batterijen: [ACCU_TELLER], start: dag });
   assert.equal(rond(l.totaal.solar), 4, "2 zonder meter uit wat terugging, 2 van de meter");
   assert.equal(rond(geenZon.totaal.eigen, 6), 0);
+});
+
+proef("bespaard: directe zon, opgeslagen zon en de coach, met de voorbeelden van 22-10-2026 (v0.147.0)", async () => {
+  const { herkomst } = await import("../custom_components/domotiapp_coach/frontend/src/views/history.js");
+  const som = (r, sleutel) => [...r.values()].reduce((t, u) => t + (u[sleutel] ?? 0), 0);
+  // Vast contract met salderen: zon erin om 13:00 en eruit om 20:00 tegen dezelfde prijs.
+  // De bewoner: "Dus de besparing bij vast is op dat moment nog €0."
+  const vast = () => ({ koop: 0.3, terug: 0.3 });
+  let r = herkomst([{ start: 13, solar: 3, erin: 2, sold: 0 }, { start: 20, eruit: 2 }], { prijs: vast });
+  assert.ok(Math.abs(som(r, "zonEuro") - 1 * 0.3) < 1e-9, "1 kWh meteen het huis in: de inkoopprijs");
+  assert.ok(Math.abs(som(r, "accuEuro")) < 1e-9, `opgeslagen zon bij vast: ${som(r, "accuEuro")}`);
+  // Dynamisch: om 13:00 levert terugleveren 0,20 op, 's avonds kost afnemen 0,40.
+  // "Besparing bij dynamisch is op dat moment 0,20."
+  const dyn = (start) => (start === 13 ? { koop: 0.22, terug: 0.2 } : { koop: 0.4, terug: 0.38 });
+  r = herkomst([{ start: 13, solar: 2, erin: 2 }, { start: 20, eruit: 2 }], { prijs: dyn });
+  assert.ok(Math.abs(som(r, "accuEuro") - 2 * 0.2) < 1e-9, `${som(r, "accuEuro")}`);
+  // Netstroom: "Inkopen op €0,10, en gebruiken op €0,30 levert een besparing op van €0,20!"
+  const net = (start) => (start === 3 ? { koop: 0.1, terug: 0.08 } : { koop: 0.3, terug: 0.28 });
+  r = herkomst([{ start: 3, bought: 1, erin: 1 }, { start: 19, eruit: 1 }], { prijs: net });
+  assert.ok(Math.abs(som(r, "handelEuro") - 0.2) < 1e-9, `${som(r, "handelEuro")}`);
+  assert.ok(Math.abs(som(r, "accuEuro")) < 1e-9, "netstroom is geen opgeslagen zon");
+  // Met het verlies: wat eruit komt kostte meer om erin te krijgen (80%: 1 kWh eruit kostte 1,25 erin).
+  r = herkomst([{ start: 3, bought: 2, erin: 2 }, { start: 19, eruit: 1 }], { prijs: net, rte: 0.8 });
+  assert.ok(Math.abs(som(r, "handelEuro") - (0.3 - 1.25 * 0.1)) < 1e-9, `${som(r, "handelEuro")}`);
+  // Verkopen uit de batterij: wat het opbracht min wat die stroom kostte.
+  r = herkomst([{ start: 3, bought: 1, erin: 1 }, { start: 19, eruit: 1, sold: 1 }], { prijs: net });
+  assert.ok(Math.abs(som(r, "handelEuro") - (0.28 - 0.1)) < 1e-9, `${som(r, "handelEuro")}`);
+  // Zonder prijzen geen euro's, en de kWh blijven gelijk.
+  r = herkomst([{ start: 13, solar: 2, erin: 2 }, { start: 20, eruit: 2 }]);
+  assert.equal(r.get(20).accuEuro, undefined);
+  assert.equal(r.get(20).accuZon, 2);
+  // Op het scherm: de namen van de bewoner, en kosten per periode.
+  const el = Object.create(Historie.prototype);
+  el.meters_ = () => ({ solar: ["sensor.zon"] });
+  const delen = el.geldDelen_({ metAccu: true, metCoach: false, delen: { zon: 1, accu: 0.2, coach: 0.3 } });
+  assert.deepEqual(delen.map((d) => d.naam), ["Direct verbruikte zonnestroom", "Opgeslagen zonnestroom, later verbruikt", "Door de coach"]);
+  el.period_ = "day"; el.offset_ = 0;
+  assert.equal(el.kostenNaam_(false), "Kosten vandaag");
+  assert.equal(el.kostenNaam_(true), "Opbrengst vandaag");
+  el.period_ = "year"; el.offset_ = 1;
+  assert.equal(el.kostenNaam_(false), "Kosten dit jaar");
+  assert.ok(!Historie.toString().includes('t("Verdiend")'), "Verdiend staat nergens meer op het scherm");
 });
 
 proef("de afschrijving in Instellen van de batterij: per kWh, of met de hulp uit aanschafprijs en laadcycli (v0.146.0)", async () => {

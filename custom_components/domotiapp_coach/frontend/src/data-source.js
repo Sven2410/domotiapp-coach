@@ -225,6 +225,24 @@ export async function laadCoachPrijzen(hass, nu = Date.now()) {
 }
 
 /**
+ * Met welk rendement heen en terug de coach een thuisbatterij rekent, in dezelfde
+ * volgorde als `_rendement_bron` in coach.py (v0.145.0): een kWh-meter op de batterij,
+ * het zelf geleerde, de eigen tellers, wat er is ingevuld. `bron` zegt welke het is.
+ */
+export function accuRendementBron(device, batteryState) {
+  const rij = (batteryState ?? []).find((r) => r?.device === device?.id) ?? {};
+  if (device?.entities?.energy_in && device?.entities?.energy_out && rij.rte) return { rte: Number(rij.rte), bron: "meter" };
+  if (rij.rte_power?.rte) return { rte: Number(rij.rte_power.rte), bron: "geleerd" };
+  if (rij.rte_accu) return { rte: Number(rij.rte_accu), bron: "accu" };
+  const opgave = Number(device?.battery?.rte_percent);
+  if (opgave > 0) return { rte: opgave / 100, bron: "opgave" };
+  return { rte: null, bron: null };
+}
+
+/** Het rendement heen en terug van `accuRendementBron`, of null. */
+export const accuRendement = (device, batteryState) => accuRendementBron(device, batteryState).rte;
+
+/**
  * De prijs per vak uit de statistieken, all-in (v0.101.3).
  *
  * Een marktprijssensor geeft de kale beursprijs; tot v0.101.3 rekende Historie
@@ -832,7 +850,7 @@ function deviceDetails(feed, device, settings) {
   if (device?.type === "thuisbatterij") {
     const rij = (settings?.battery_state ?? []).find((r) => r?.device === device.id) ?? {};
     const opgave = device.battery?.rte_percent;
-    const metMeter = Boolean(device.entities?.energy_in && device.entities?.energy_out && rij.rte);
+    const metMeter = accuRendementBron(device, settings?.battery_state).bron === "meter";
     // Per vermogen (v0.142.0): heen en terug, en per richting het rendement bij
     // elk vermogen dat de coach gemeten heeft, als de coach ermee rekent.
     const macht = metMeter ? null : rij.rte_power;
