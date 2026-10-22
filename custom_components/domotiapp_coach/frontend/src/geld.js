@@ -350,7 +350,24 @@ export function accuZon(settings, start, end) {
 }
 
 /**
- * De hele som voor één periode.
+ * De hele som voor één periode: wat het kostte, en los daarvan wat er bespaard werd.
+ *
+ * Twee aparte sommen sinds v0.147.0. De bewoner van een klantwoning op 22-10-2026:
+ * "Het zijn twee opzichzelfstaande berekeningen, terwijl je het n de huidige versie
+ * mogelijk denkt dat ze met elkaar te maken hebben." Kosten (`uitgegeven`) is wat je
+ * betaalde: stroom, gas en water, min wat alle teruglevering opbracht, ook wat de
+ * batterij verkocht. Bespaard is wat zon, batterij en coach scheelden tegenover inkopen
+ * op hetzelfde moment: de zon die meteen het huis in ging tegen de prijs van dat uur,
+ * de zon die via de batterij het huis in ging tegen die prijs min wat terugleveren had
+ * opgeleverd, en bij de coach wat hij met de batterij verdiende door goedkoop in te
+ * kopen en duur te gebruiken of te verkopen, naast de beurten. Met een thuisbatterij
+ * komt dat per vak uit `herkomst` in views/history.js (`zonEuro`, `accuEuro`,
+ * `handelEuro`); zonder is de zon de eigen zon tegen de prijs van het vak. Tot
+ * v0.147.0 telde alle teruglevering bij de zon, ook wat de batterij verkocht, terwijl
+ * dat ook al in het kasboek van de batterij stond: in die klantwoning stond er die dag
+ * "Door je zon € 7,54" bij 10,7 kWh. De afschrijving telt hier niet mee, alleen in de
+ * keuze wanneer de batterij laadt (de bewoner: "Want je rekent je afschrijving van
+ * zonnepanelen etc ook niet mee").
  *
  * @param {object} o
  * @param {{start: Date, own: number, bought: number, sold: number, zonInAccu?: number}[]} o.rijen
@@ -373,8 +390,10 @@ export function accuZon(settings, start, end) {
 export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], contract, accu = 0, accuVoorraad = 0, accuZon = 0, coach = null, vasteKosten = 0 }) {
   let stroom = 0;
   let terug = 0;
-  let eigen = 0;
-  let zonInAccu = Number(accuZon) || 0;
+  let zon = 0;
+  let accuUitHerkomst = 0;
+  let handel = 0;
+  let metHerkomst = false;
   let metTerug = false;
   let onbekend = 0;
   for (const r of rijen ?? []) {
@@ -384,15 +403,24 @@ export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], 
       continue;
     }
     stroom += r.bought * p.koop;
-    eigen += r.own * p.koop;
     const terugPrijs = p.terug ?? null;
     if (terugPrijs !== null) {
       terug += r.sold * terugPrijs;
       metTerug = true;
     }
-    // Van voor de coach het telde: de zon die de batterij in ging, uit het vak zelf.
-    zonInAccu += (Number(r.zonInAccu) || 0) * (p.koop - (terugPrijs ?? 0));
+    if (r.zonEuro !== undefined) {
+      zon += r.zonEuro;
+      accuUitHerkomst += r.accuEuro ?? 0;
+      handel += r.handelEuro ?? 0;
+      metHerkomst = true;
+    } else {
+      // Zonder herkomst: de eigen zon, min wat de zon die de batterij in ging minder
+      // waard was dan zelf gebruikt (`zonInAccu`, uit het vak zelf).
+      zon += r.own * p.koop - (Number(r.zonInAccu) || 0) * (p.koop - (terugPrijs ?? 0));
+    }
   }
+  // En daarna uit de telling van de coach (`accuZon`), als er geen herkomst is.
+  if (!metHerkomst) zon -= Number(accuZon) || 0;
   // Terugleverkosten in schalen (v0.135.0): een vast bedrag per dag, van wat
   // teruglevering opleverde af (`schaalKosten`).
   const vast = Number(vasteKosten) || 0;
@@ -413,16 +441,13 @@ export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], 
   const g = volume(gas, "gas", gasPrijzen);
   const w = volume(water, "water");
 
-  const coachTotaal = Number(coach?.saved) || 0;
-  const coachZon = Number(coach?.solar_saved) || 0;
-  const wachten = coachTotaal - coachZon;
-  // Wat de zon opleverde: de eigen zon tegen de prijs van het net, teruglevering
-  // tegen wat die opbracht, min wat de zon in de batterij minder waard was dan
-  // zelf gebruikt. Wat de batterij er daarna mee deed staat in haar kasboek.
-  const zonWaarde = eigen + terug - zonInAccu;
-  const accuEuro = Number(accu) || 0;
-  const zon = zonWaarde - coachZon;
-  const bespaard = zonWaarde + accuEuro + wachten;
+  // De beurten: wat er op zon ging staat al bij de zon, de coach houdt het wachten
+  // op een goedkoper moment.
+  const wachten = (Number(coach?.saved) || 0) - (Number(coach?.solar_saved) || 0);
+  // Zonder uren van de herkomst (de statistiek ontbrak) het kasboek van de coach.
+  const accuEuro = metHerkomst ? accuUitHerkomst : Number(accu) || 0;
+  const coachEuro = wachten + (metHerkomst ? handel : 0);
+  const bespaard = zon + accuEuro + coachEuro;
   const uitgegeven = stroom - terug + g.euro + w.euro;
   // Wat er aan stroom in de batterij bij kwam is uitgegeven maar nog niet
   // gebruikt; telt opgeleverd het pas als het eruit gaat, dan hoort het hier
@@ -440,10 +465,8 @@ export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], 
     metWater: w.met,
     uitgegeven,
     bespaard,
-    delen: { zon, accu: accuEuro, coach: coachTotaal },
+    delen: { zon, accu: accuEuro, coach: coachEuro },
     voorraad,
-    // Wat dezelfde periode gekost had zonder zon, batterij en coach.
-    zonder: uitgegeven + bespaard - voorraad,
     onbekend,
   };
 }

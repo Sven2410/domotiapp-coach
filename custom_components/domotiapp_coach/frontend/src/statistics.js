@@ -191,17 +191,19 @@ export async function fetchPeriod(hass, ids, period, start, bereik = null) {
  *
  * @returns {Promise<Map<number, number>>} bucket start in milliseconds to price
  */
-export async function fetchPrices(hass, entityId, period, start) {
+export async function fetchPrices(hass, entityId, period, start, bereik = null) {
   const out = new Map();
   if (!entityId || !hass) return out;
 
-  const bucket = PERIODS.find((item) => item.id === period)?.bucket ?? "day";
+  // `bereik` zoals bij `fetchPeriod` (v0.147.0): de prijs per uur over de aanloop en de
+  // periode, voor wat de batterij bespaarde (`herkomst` in history.js).
+  const bucket = bereik?.vak ?? PERIODS.find((item) => item.id === period)?.bucket ?? "day";
 
   try {
     const result = await hass.callWS({
       type: "recorder/statistics_during_period",
-      start_time: vanHuis(start).toISOString(),
-      end_time: vanHuis(periodEnd(period, start)).toISOString(),
+      start_time: vanHuis(bereik?.van ?? start).toISOString(),
+      end_time: vanHuis(bereik?.tot ?? periodEnd(period, start)).toISOString(),
       statistic_ids: [entityId],
       period: bucket,
       types: ["mean"],

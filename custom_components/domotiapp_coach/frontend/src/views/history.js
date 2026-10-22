@@ -24,7 +24,7 @@ import { datum, getal, locale, nt, t, tijd, tn } from "../i18n.js";
 
 /** Het merkteken op het rapport. */
 const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
-import { allInPrijzen, contractAt, laadCoachPrijzen, tariff, volgCoach } from "../data-source.js";
+import { accuRendement, allInPrijzen, contractAt, laadCoachPrijzen, tariff, volgCoach } from "../data-source.js";
 import { balkSoort, legenda, metHerkomst, netReeks, stippen, tekenTijdlijn, tekenUitleg, tijdlijn } from "../tijdlijn.js";
 import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
@@ -164,30 +164,56 @@ export function huisMetAccu(own, bought, accu = { battery: 0, voor: 0 }, herk = 
  * uur waarin hij leeg was (`leeg`) begint opnieuw. Meerdere batterijen zijn één
  * voorraad. Kent Home Assistant niet.
  *
+ * Met `rte` (het rendement heen en terug, v0.147.0) haalt wat eruit komt er
+ * `eruit / rte` uit: wat de batterij afgeeft kostte meer om erin te krijgen. Met
+ * `prijs` (een functie van het begin van het uur naar `{koop, terug}`) rekent hij
+ * ook wat het bespaarde, zoals de eigenaar en de bewoner van een klantwoning het op
+ * 22-10-2026 vastlegden: zon die meteen het huis in ging scheelt de inkoopprijs van
+ * dat uur (`zonEuro`). Zon die eerst de batterij in ging kost wat terugleveren op dat
+ * moment had opgeleverd, en scheelt de inkoopprijs als hij later het huis in gaat
+ * (`accuEuro`): "Dus de besparing bij vast is op dat moment nog €0. Besparing bij
+ * dynamisch is op dat moment 0,20." Stroom die de batterij van het net kocht scheelt
+ * alleen het verschil met de prijs als hij het huis in gaat ("Inkopen op €0,10, en
+ * gebruiken op €0,30 levert een besparing op van €0,20"), en wat de batterij aan het
+ * net verkocht levert op wat het opbracht min wat die stroom kostte (`handelEuro`,
+ * bij de coach: "de acuu goedkoop laten inkopen en duur ontladen dat is wel besparen
+ * door de coach"). Stroom waarvan niet bekend is wat erin ging telt niet mee.
+ *
  * @param {{start: number, solar?: number, bought?: number, sold?: number, erin?: number,
  *   eruit?: number, leeg?: boolean, zonGemeten?: boolean}[]} uren op volgorde van tijd, in kWh
- * @param {{capaciteit?: number|null}} [opties]
+ * @param {{capaciteit?: number|null, rte?: number|null,
+ *   prijs?: ((start: number) => {koop: number|null, terug: number|null})|null}} [opties]
  * @returns {Map<number, {opwek: number, zonHuis: number, accuZon: number, zonNet: number,
- *   zonAccuNet: number}>} per uur de opwek, de zon die meteen het huis in ging, het
- *   zondeel van wat de batterij aan het huis gaf, de zon die meteen naar het net ging,
- *   en het zondeel van wat de batterij aan het net gaf
+ *   zonAccuNet: number, zonEuro?: number, accuEuro?: number, handelEuro?: number}>} per uur
+ *   de opwek, de zon die meteen het huis in ging, het zondeel van wat de batterij aan het
+ *   huis gaf, de zon die meteen naar het net ging, het zondeel van wat de batterij aan het
+ *   net gaf, en met `prijs` wat elk daarvan bespaarde in euro
  */
-export function herkomst(uren, { capaciteit = null } = {}) {
+export function herkomst(uren, { capaciteit = null, rte = null, prijs = null } = {}) {
   const uit = new Map();
   const kwh = (waarde) => Math.max(0, Number(waarde) || 0);
+  const rendement = rte > 0.3 && rte <= 1 ? rte : 1;
+  // De inhoud, het zondeel ervan, en wat beide kostten om erin te krijgen (euro).
   let inhoud = 0;
   let zon = 0;
+  let zonWaarde = 0;
+  let netWaarde = 0;
   const neem = (deel) => {
     const weg = Math.min(deel, inhoud);
-    const zonWeg = inhoud > 0 ? (weg * zon) / inhoud : 0;
+    if (weg <= 0 || inhoud <= 0) return [0, 0, 0, 0];
+    const zonWeg = (weg * zon) / inhoud;
+    const zw = zon > 0 ? (zonWaarde * zonWeg) / zon : 0;
+    const net = inhoud - zon;
+    const nw = net > 0 ? (netWaarde * (weg - zonWeg)) / net : 0;
     inhoud -= weg;
     zon = Math.max(0, zon - zonWeg);
-    return [weg, zonWeg];
+    zonWaarde -= zw;
+    netWaarde -= nw;
+    return [weg, zonWeg, zw, nw];
   };
   for (const uur of uren ?? []) {
     if (uur.leeg) {
-      inhoud = 0;
-      zon = 0;
+      inhoud = zon = zonWaarde = netWaarde = 0;
     }
     const erin = kwh(uur.erin);
     const eruit = kwh(uur.eruit);
@@ -198,23 +224,44 @@ export function herkomst(uren, { capaciteit = null } = {}) {
     const accuNet = Math.min(eruit, terug - zonNet);
     const zonIn = Math.min(erin, opwek - zonNet);
     const zonHuis = Math.min(opwek - zonNet - zonIn, huis);
+    const p = prijs ? prijs(uur.start) : null;
+    const koop = p?.koop ?? null;
+    const terugPrijs = p?.terug ?? koop;
 
     // Eerst wat er al in zat, dan wat er dit uur bij kwam.
-    const [weg, zonUit1] = neem(eruit);
+    const nodig = eruit / rendement;
+    const [weg1, zon1, zw1, nw1] = neem(nodig);
     inhoud += erin;
     zon += zonIn;
-    const [, zonUit2] = neem(eruit - weg);
+    zonWaarde += zonIn * (terugPrijs ?? 0);
+    netWaarde += (erin - zonIn) * (koop ?? 0);
+    const [weg2, zon2, zw2, nw2] = neem(nodig - weg1);
     if (capaciteit > 0 && inhoud > capaciteit) {
-      zon *= capaciteit / inhoud;
+      const deel = capaciteit / inhoud;
+      zon *= deel;
+      zonWaarde *= deel;
+      netWaarde *= deel;
       inhoud = capaciteit;
     }
     zon = Math.min(zon, inhoud);
 
     const naarHuis = eruit - accuNet;
-    const zonUit = zonUit1 + zonUit2;
-    const accuZon = eruit > 0 ? Math.min((zonUit * naarHuis) / eruit, huis - zonHuis) : 0;
-    const zonAccuNet = eruit > 0 ? (zonUit * accuNet) / eruit : 0;
-    uit.set(uur.start, { opwek, zonHuis, accuZon: Math.max(0, accuZon), zonNet, zonAccuNet });
+    // Wat eruit kwam als deel van wat er nodig was; de rest is onbekend en telt als net.
+    const zonDeel = nodig > 0 ? (zon1 + zon2) / nodig : 0;
+    const netDeel = nodig > 0 ? (weg1 + weg2 - zon1 - zon2) / nodig : 0;
+    const accuZon = eruit > 0 ? Math.min(naarHuis * zonDeel, huis - zonHuis) : 0;
+    const zonAccuNet = accuNet * zonDeel;
+    const rij = { opwek, zonHuis, accuZon: Math.max(0, accuZon), zonNet, zonAccuNet };
+    if (prijs && koop !== null) {
+      const thuis = eruit > 0 ? naarHuis / eruit : 0;
+      const weg = eruit > 0 ? accuNet / eruit : 0;
+      const zw = zw1 + zw2;
+      const nw = nw1 + nw2;
+      rij.zonEuro = zonHuis * koop;
+      rij.accuEuro = naarHuis * zonDeel * koop - thuis * zw;
+      rij.handelEuro = naarHuis * netDeel * koop - thuis * nw + accuNet * (zonDeel + netDeel) * (terugPrijs ?? 0) - weg * (zw + nw);
+    }
+    uit.set(uur.start, rij);
   }
   return uit;
 }
@@ -692,7 +739,6 @@ class DacViewHistory extends DacElement {
             <h2 id="money-title">${t("Wat deze periode kostte en opleverde")}</h2>
           </div>
           <div class="geld-kop" id="money-hero"></div>
-          <div class="geld-balk" id="money-bar" role="img"></div>
           <div class="geld-delen" id="money-parts"></div>
           <p class="note" id="money-note"></p>
         </section>
@@ -967,7 +1013,8 @@ class DacViewHistory extends DacElement {
     this.gasPrijzen_ = gasPrijzen;
     this.devices_ = devices;
     this.accu_ = accu;
-    this.herkomst_ = herk;
+    // De herkomst pas nu: de som in euro heeft de afrekenperiode nodig (v0.147.0).
+    this.herkomst_ = herk ? this.rekenHerkomst_(herk) : null;
     // Voor In geld: wat de coach bespaarde. De kaart tekent zichzelf bij als
     // de beurten binnen zijn.
     this.laadBeurten_();
@@ -995,10 +1042,12 @@ class DacViewHistory extends DacElement {
     const van = new Date(start.getTime() - AANLOOP_MS);
     const tot = periodEnd(this.period_, start);
     const bereik = { van, tot, vak: "hour" };
-    const [reeks, accu, soc] = await Promise.all([
+    const [reeks, accu, soc, uurPrijs, uurReserve] = await Promise.all([
       fetchPeriod(this.hass_, [...roles.solar, ...roles.import, ...roles.export], this.period_, start, bereik),
       fetchBattery(this.hass_, batterijen, this.period_, start, bereik),
       fetchSoc(this.hass_, batterijen, van, tot),
+      fetchPrices(this.hass_, this.priceEntity_(), this.period_, start, bereik),
+      fetchPrices(this.hass_, this.reserveEntity_(), this.period_, start, bereik),
     ]);
     const uren = new Map();
     const uur = (tijd) => {
@@ -1038,7 +1087,26 @@ class DacViewHistory extends DacElement {
     }
     const capaciteiten = batterijen.map((device) => Number(device.battery?.capacity_kwh));
     const capaciteit = capaciteiten.every((c) => c > 0) ? capaciteiten.reduce((a, b) => a + b, 0) : null;
-    return herkomst(lijst, { capaciteit });
+    const rendementen = batterijen.map((device) => accuRendement(device, this.settings_?.battery_state)).filter((r) => r > 0);
+    const rte = rendementen.length === batterijen.length
+      ? rendementen.reduce((a, b) => a + b, 0) / rendementen.length
+      : null;
+    return { lijst, capaciteit, rte, uurPrijzen: allInPrijzen(uurPrijs, uurReserve, this.settings_?.contract) };
+  }
+
+  /**
+   * De herkomst uit wat `laadHerkomst_` ophaalde, met de prijs van elk uur zoals In geld
+   * die rekent (`prijsOp`), voor wat zon, batterij en handelen bespaarden (v0.147.0).
+   */
+  rekenHerkomst_({ lijst, capaciteit, rte, uurPrijzen }) {
+    const contract = this.settings_?.contract;
+    // De live toestanden kunnen er bij het eerste laden nog niet zijn; een vast tarief
+    // staat in het contract, een dynamische prijs per uur in `uurPrijzen`.
+    const rate = tariff(this.feed_ ?? { get: () => undefined }, contract);
+    const prijs = rate.buy === null && !uurPrijzen?.size
+      ? null
+      : (start) => prijsOp(contract, rate, uurPrijzen, start, this.ligging_(), 3600000, aandeelOp(this.afrekening_, start));
+    return herkomst(lijst, { capaciteit, rte, prijs });
   }
 
   /** Welke fijnheid er gekozen is, en wat dat aan regels gaat kosten. */
@@ -1331,16 +1399,18 @@ class DacViewHistory extends DacElement {
         bought,
         sold,
         solar: opwek,
-        // Zon zelf gebruikt is zon die niet terugging, ook niet later via de
-        // batterij. De eigenaar op 22-10-2026: zon die eerst de batterij in gaat en
-        // daarna naar het net (handelen) telt niet (v0.144.1). Dat gaat af in het vak
-        // waarin hij terugging, ook als daar geen zon was; per vak nooit onder nul,
-        // over de periode telt de som (`zonZelfSom`).
-        zonZelf: herk ? Math.max(0, opwek - herk[index].zonNet - herk[index].zonAccuNet) : own,
-        zonZelfSom: herk ? opwek - herk[index].zonNet - herk[index].zonAccuNet : own,
+        // Zon zelf gebruikt is zon die je huis in ging: meteen, of eerst via de batterij
+        // (v0.147.0). Dezelfde twee als bij Bespaard; de bewoner van een klantwoning op
+        // 22-10-2026: "Eigenlijk zouden die eerste twee exact overeen moeten komen met
+        // zelf verbruikt." Zon die nog in de batterij zit, verloren ging of later naar het
+        // net ging telt niet (de eigenaar op 22-10-2026 over handelen).
+        zonZelf: herk ? herk[index].zonHuis + herk[index].accuZon : own,
         ...huisMetAccu(herk ? opwek - sold : own, bought, accu[index], herk?.[index]),
         accuIn: accu[index].erin,
         accuUit: accu[index].eruit,
+        ...(herk && herk[index].zonEuro !== undefined
+          ? { zonEuro: herk[index].zonEuro, accuEuro: herk[index].accuEuro, handelEuro: herk[index].handelEuro }
+          : {}),
       };
     });
   }
@@ -1349,6 +1419,7 @@ class DacViewHistory extends DacElement {
   herkomstPerVak_(tijden, vakEinde) {
     if (!this.herkomst_?.size) return null;
     const uit = tijden.map(() => ({ opwek: 0, zonHuis: 0, accuZon: 0, zonNet: 0, zonAccuNet: 0 }));
+    const euro = ["zonEuro", "accuEuro", "handelEuro"];
     let index = 0;
     for (const [tijd, uur] of this.herkomst_) {
       while (index < tijden.length && tijd >= vakEinde(index)) index += 1;
@@ -1359,6 +1430,10 @@ class DacViewHistory extends DacElement {
       uit[index].accuZon += uur.accuZon;
       uit[index].zonNet += uur.zonNet;
       uit[index].zonAccuNet += uur.zonAccuNet;
+      // Wat het bespaarde (v0.147.0), alleen als de prijs van dat uur bekend was.
+      for (const sleutel of euro) {
+        if (uur[sleutel] !== undefined) uit[index][sleutel] = (uit[index][sleutel] ?? 0) + uur[sleutel];
+      }
     }
     return uit;
   }
@@ -1426,7 +1501,7 @@ class DacViewHistory extends DacElement {
     };
     this.accuTegels_ = totals.accuIn + totals.accuUit >= 0.05;
     totals.selfUse =
-      hasSolar && totals.solar > 0 ? (Math.max(0, sum("zonZelfSom")) / totals.solar) * 100 : null;
+      hasSolar && totals.solar > 0 ? (sum("zonZelf") / totals.solar) * 100 : null;
     // Zelfvoorzienend, zoals het energiedashboard van Home Assistant het noemt:
     // welk deel van je verbruik niet van het net kwam. De bewoner van de eerste
     // woning op 22-09-2026: "daar mag zelfvoorzienend nog wel bij."
@@ -1538,7 +1613,7 @@ class DacViewHistory extends DacElement {
           sold: row.sold,
           accuIn: row.accuIn,
           accuUit: row.accuUit,
-          selfUse: row.solar > 0 ? (row.zonZelf / row.solar) * 100 : null,
+          selfUse: row.solar > 0 ? Math.min(100, (row.zonZelf / row.solar) * 100) : null,
           selfSufficient: row.used > 0 ? Math.max(0, (1 - row.fromGrid / row.used) * 100) : null,
         },
         bucketTitle(this.period_, row.start)
@@ -1645,7 +1720,7 @@ class DacViewHistory extends DacElement {
 
     const som = (key) => rows.reduce((total, row) => total + row[key], 0);
     const totaalCellen = [t("Totaal")];
-    if (hasSolar) totaalCellen.push(kwh(som("solar")), kwh(som("used")), kwh(Math.max(0, som("zonZelfSom"))));
+    if (hasSolar) totaalCellen.push(kwh(som("solar")), kwh(som("used")), kwh(som("zonZelf")));
     totaalCellen.push(kwh(som("bought")), kwh(som("sold")));
     if (gas.size) {
       totaalCellen.push(`${aantal([...gas.values()].reduce((a, b) => a + b, 0), 2)} m³`);
@@ -1715,7 +1790,7 @@ class DacViewHistory extends DacElement {
     const geldVakjes = !g
       ? []
       : [
-          cel(g.uitgegeven < 0 ? "Verdiend" : "Uitgegeven", euro(Math.abs(g.uitgegeven))),
+          cel(this.kostenNaam_(g.uitgegeven < 0), euro(Math.abs(g.uitgegeven))),
           cel("Bespaard", euro(g.bespaard)),
           cel("Stroom van het net", euro(g.stroom)),
           g.metTerug ? cel("Teruglevering", `− ${euro(g.terug)}`) : null,
@@ -2361,9 +2436,12 @@ class DacViewHistory extends DacElement {
   geldDelen_(g) {
     const heeftZon = this.meters_().solar.length > 0;
     return [
-      heeftZon ? { naam: nt("Door je zon"), kort: nt("zon"), waarde: g.delen.zon, tone: "var(--dac-solar)" } : null,
-      g.metAccu ? { naam: nt("Door je thuisbatterij"), kort: nt("thuisbatterij"), waarde: g.delen.accu, tone: "var(--dac-good)" } : null,
-      g.metCoach ? { naam: nt("Door de coach"), kort: nt("de coach"), waarde: g.delen.coach, tone: "var(--dac-accent-hi)" } : null,
+      // De namen van de bewoner van een klantwoning op 22-10-2026: "direct verbruikte
+      // zonnestroom, opgeslagen zonnestroom in je accu, bespaard door coach" (v0.147.0).
+      heeftZon ? { naam: nt("Direct verbruikte zonnestroom"), kort: nt("directe zon"), waarde: g.delen.zon, tone: "var(--dac-solar)" } : null,
+      g.metAccu ? { naam: nt("Opgeslagen zonnestroom, later verbruikt"), kort: nt("opgeslagen zon"), waarde: g.delen.accu, tone: "var(--dac-good)" } : null,
+      // Met een batterij ook zonder ander apparaat: het handelen is van de coach (v0.147.0).
+      g.metCoach || g.metAccu ? { naam: nt("Door de coach"), kort: nt("de coach"), waarde: g.delen.coach, tone: "var(--dac-accent-hi)" } : null,
     ].filter(Boolean);
   }
 
@@ -2384,8 +2462,7 @@ class DacViewHistory extends DacElement {
         month: t("Wat deze maand kostte en opleverde"),
       }[this.period_] ?? t("Wat deze periode kostte en opleverde");
 
-    // Twee getallen bovenaan. Levert teruglevering meer op dan de rest kost,
-    // dan heet het verdiend: een minteken voor een euroteken leest als een fout.
+    // Twee getallen bovenaan.
     const kop = (label, waarde, uitleg, tone) => {
       const box = document.createElement("div");
       box.className = "geld-getal";
@@ -2404,18 +2481,24 @@ class DacViewHistory extends DacElement {
     };
     // Op het scherm in de taal van het paneel; geldDelen_ houdt de namen voor het rapport.
     const bespaardDelen = this.geldDelen_(g).map((d) => ({ ...d, naam: t(d.naam), kort: t(d.kort) }));
-    const verdiend = g.uitgegeven < 0;
+    const opbrengst = g.uitgegeven < 0;
+    const kostenKop = t(this.kostenNaam_(opbrengst));
     const wat = [g.metGas ? t("gas") : null, g.metWater ? t("water") : null].filter(Boolean);
     const door = bespaardDelen.map((d) => d.kort);
     // "a en b", en bij meer "a, b en c".
     const opsomming = (lijst) => (lijst.length > 1 ? t("{a} en {b}", { a: lijst.slice(0, -1).join(", "), b: lijst.at(-1) }) : lijst[0]);
     const waaraan = wat.length ? t("stroom, {rest}", { rest: opsomming(wat) }) : t("stroom");
+    // Twee losse sommen (v0.147.0): wat het kostte, en wat er bespaard werd. Tot dan
+    // stond er een balk onder die ze optelde tot "zonder", en die las alsof ze bij
+    // elkaar hoorden. De bewoner van een klantwoning op 22-10-2026: "Het zijn twee
+    // opzichzelfstaande berekeningen." Levert teruglevering meer op dan de rest kost,
+    // dan heet het opbrengst: een minteken voor een euroteken leest als een fout.
     const hero = [
       kop(
-        verdiend ? t("Verdiend") : t("Uitgegeven"),
+        kostenKop,
         Math.abs(g.uitgegeven),
         g.metTerug ? t("{wat}, min wat teruglevering opbracht", { wat: waaraan }) : waaraan,
-        verdiend ? "var(--dac-good)" : "var(--dac-grid-in)"
+        opbrengst ? "var(--dac-good)" : "var(--dac-grid-in)"
       ),
       kop(
         t("Bespaard"),
@@ -2424,46 +2507,7 @@ class DacViewHistory extends DacElement {
         "var(--dac-solar)"
       ),
     ];
-    // Een derde getal "Zonder zon, batterij en coach" stond hier tot v0.116.0;
-    // dat is Uitgegeven plus Bespaard, en de balk eronder laat het al zien.
     this.$("#money-hero").replaceChildren(...hero);
-
-    // De balk: wat het gekost had, verdeeld in wat je uitgaf en wat er bespaard
-    // werd. Alleen als alle delen positief zijn; een negatief deel valt niet te
-    // tekenen zonder te liegen over de lengte.
-    // Wat er aan stroom in de batterij bij kwam is uitgegeven maar nog niet
-    // gebruikt, en telt pas bij Bespaard als het eruit gaat (v0.107.0). In de
-    // balk staat daarom wat je uitgaf aan wat je gebruikte, zodat hij precies
-    // op "Zonder" uitkomt.
-    const metVoorraad = Math.abs(g.voorraad) >= 0.005;
-    const stukken = [
-      {
-        naam: metVoorraad ? t("Uitgegeven aan wat je gebruikte") : t("Uitgegeven"),
-        waarde: g.uitgegeven - g.voorraad,
-        tone: "var(--dac-grid-in)",
-      },
-      ...bespaardDelen,
-    ];
-    const balk = this.$("#money-bar");
-    const totaal = stukken.reduce((som, d) => som + d.waarde, 0);
-    if (stukken.every((d) => d.waarde >= 0) && totaal > 0.005) {
-      balk.hidden = false;
-      balk.setAttribute("aria-label", stukken.map((d) => `${d.naam} ${euro(d.waarde)}`).join(", "));
-      balk.replaceChildren(
-        ...stukken
-          .filter((d) => d.waarde / totaal >= 0.004)
-          .map((d) => {
-            const stuk = document.createElement("i");
-            stuk.style.setProperty("--tone", d.tone);
-            stuk.style.flexGrow = String(d.waarde);
-            stuk.title = `${d.naam}: ${euro(d.waarde)}`;
-            return stuk;
-          })
-      );
-    } else {
-      balk.hidden = true;
-      balk.replaceChildren();
-    }
 
     // Twee kolommen: waar het geld heen ging, en waardoor er bespaard werd.
     const kolom = (kopTekst, regels) => {
@@ -2496,11 +2540,28 @@ class DacViewHistory extends DacElement {
     if (batterijRegel) uit.push({ ...batterijRegel, naam: t(batterijRegel.naam), tone: "var(--dac-ink-3)" });
     const bij = bespaardDelen.map((d) => ({ naam: d.naam, tekst: euro(d.waarde), tone: d.tone }));
     this.$("#money-parts").replaceChildren(
-      kolom(verdiend ? t("Verdiend") : t("Uitgegeven"), uit),
+      kolom(kostenKop, uit),
       ...(bij.length ? [kolom(t("Bespaard"), bij)] : [])
     );
 
     this.$("#money-note").textContent = this.geldUitleg_(g);
+  }
+
+  /**
+   * De naam van wat het kostte, per periode (v0.147.0). De bewoner van een klantwoning
+   * op 22-10-2026: "kosten vandaag / de week / deze maand / dit jaar. Klinkt wat
+   * informeler." Tot dan "Uitgegeven", of "Verdiend" als teruglevering meer opbracht, en
+   * verdienen las als hetzelfde als besparen. Nederlands (`nt`), want het rapport neemt
+   * hem over.
+   */
+  kostenNaam_(opbrengst) {
+    const vandaag = this.period_ === "day" && this.offset_ === 0;
+    const sleutel = vandaag ? "vandaag" : this.period_;
+    return (opbrengst
+      ? { vandaag: nt("Opbrengst vandaag"), day: nt("Opbrengst deze dag"), week: nt("Opbrengst deze week"),
+          month: nt("Opbrengst deze maand"), year: nt("Opbrengst dit jaar") }
+      : { vandaag: nt("Kosten vandaag"), day: nt("Kosten deze dag"), week: nt("Kosten deze week"),
+          month: nt("Kosten deze maand"), year: nt("Kosten dit jaar") })[sleutel] ?? nt("Kosten");
   }
 
   /**
@@ -2530,7 +2591,7 @@ class DacViewHistory extends DacElement {
     const vast = rate.basis === "je vaste tarief";
     const contract = this.settings_?.contract;
     const rijen = this.rowsShown_ ?? [];
-    const zinnen = [t("Bespaard is wat alles van het net gekost had, min wat je betaalde.")];
+    const zinnen = [t("Kosten is wat je betaalde. Bespaard is een aparte som: wat zon, batterij en coach scheelden tegenover inkopen op hetzelfde moment.")];
     // `rate.basis` is de Nederlandse tekst van `tariff` in data-source.js; de twee die
     // er naast het vaste tarief zijn hebben hier een eigen zin, zodat de taal klopt.
     const prijs = euro(rate.buy);
@@ -2579,16 +2640,12 @@ class DacViewHistory extends DacElement {
       zinnen.push(t("Dagen in een eerder contract rekenen met dat contract."));
     }
     if (g.metAccu) {
-      zinnen.push(
-        g.accuDagen
-          ? t("Thuisbatterij: wat ontladen opbracht, min wat het laden kostte. Wat er nog in zit staat bij Uitgegeven.")
-          : t("Thuisbatterij: telt vanaf de dag dat de coach haar volgt.")
-      );
+      zinnen.push(t("Opgeslagen zon: de prijs toen hij je huis in ging, min wat terugleveren had opgeleverd toen hij erin ging."));
     }
-    if (g.metCoach) {
+    if (g.metCoach || g.metAccu) {
       zinnen.push(
-        g.beurtenGeladen
-          ? t("Coach: zon naar een apparaat sturen en wachten op een goedkoper moment.")
+        g.beurtenGeladen || !g.metCoach
+          ? t("Coach: wachten op een goedkoper moment, en de batterij goedkoop laden om duur te gebruiken of te verkopen.")
           : t("Wat de coach bespaarde wordt nog opgehaald.")
       );
     }
@@ -3200,12 +3257,6 @@ DacViewHistory.css = /* css */ `
     font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.15;
   }
   .geld-uitleg { font-size: 12.5px; line-height: 1.4; color: var(--dac-ink-2); }
-  .geld-balk {
-    display: flex; gap: 3px; height: 14px; margin: 18px 0 0;
-    border-radius: var(--dac-radius-pill); overflow: hidden;
-  }
-  .geld-balk[hidden] { display: none; }
-  .geld-balk i { display: block; flex: 1 1 0; min-width: 3px; background: var(--tone); }
   .geld-delen {
     display: grid;
     /* Nooit breder dan de kaart: op 280 px is er 211 px en liep hij 14 px over. */

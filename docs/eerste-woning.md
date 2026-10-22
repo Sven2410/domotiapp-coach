@@ -659,3 +659,46 @@ van 19-10-2026: eigen voor 10,5 kWh, maar de dagen zelf opgeteld 38,6, en nu 8,2
 623, per uur 829, nu 703. En Verbruikt daalt op dagen met handelen. Nameten:
 `notities/domotiapp-coach/gereedschap/zelfvoorzienend/meet.mjs` (privé). Proeven "zelfvoorzienend: ..."
 in test_rapport.mjs.
+
+## Kosten en Bespaard: twee losse sommen (v0.147.0)
+
+De eigenaar en de bewoner van een klantwoning op 22-10-2026, bij "Verdiend € 0,94" en "Bespaard
+€ 8,88, door je zon € 7,54" bij 10,7 kWh opgewekt: "verdienen is een verkeerde benaming. Het is
+altijd besparen", "Het zijn twee opzichzelfstaande berekeningen", en "Financieel resultaat zou
+evntueel ook gewoon kosten vandaag / de week / deze maand / dit jaar kunnen zijn."
+
+- **Kosten** (`kostenNaam_` in views/history.js): "Kosten vandaag", "Kosten deze week" enzovoort, of
+  "Opbrengst ..." als teruglevering meer opbracht. Dezelfde som als voorheen (`uitgegeven` in
+  `balans`): stroom, gas en water, min alle teruglevering, ook wat de batterij verkocht. De balk die
+  kosten en bespaard optelde tot "zonder" is weg, en `zonder` ook.
+- **Bespaard** (`balans` in geld.js), met de namen van de bewoner:
+  - *Direct verbruikte zonnestroom*: zon die meteen het huis in ging, maal de inkoopprijs van dat uur
+    (`zonEuro` uit `herkomst`; zonder batterij de eigen zon van het vak). Teruglevering telt hier
+    niet meer: die zit in de kosten, en wat de batterij verkocht stond ook in haar kasboek.
+  - *Opgeslagen zonnestroom, later verbruikt*: de inkoopprijs toen hij het huis in ging, min wat
+    terugleveren had opgeleverd toen hij erin ging (`accuEuro`). De bewoner: "Dus de besparing bij
+    vast is op dat moment nog €0. Besparing bij dynamisch is op dat moment 0,20." Met het verlies in
+    de batterij erbij (`rte`) kan dat bij salderen onder nul uitkomen: opslaan kost dan het verlies.
+  - *Door de coach*: wachten op een goedkoper moment bij de beurten (wat er op zon ging staat bij de
+    zon), plus het handelen met de batterij (`handelEuro`): netstroom die later het huis in ging tegen
+    de prijs van toen min de inkoop ("Inkopen op €0,10, en gebruiken op €0,30 levert een besparing op
+    van €0,20!"), en verkoop uit de batterij min wat die stroom kostte. De eigenaar: "de acuu goedkoop
+    laten inkopen en duur ontladen dat is wel besparen door de coach"; nul op de meter door de batterij
+    zelf niet.
+  - De afschrijving telt niet mee, alleen in de spread (v0.146.0). De bewoner: "Want je rekent je
+    afschrijving van zonnepanelen etc ook niet mee."
+- **Zon zelf gebruikt** is sindsdien zon die het huis in ging, meteen of via de batterij
+  (`zonHuis + accuZon`), gedeeld door opgewekt; dezelfde twee als bij Bespaard. De bewoner: "Eigenlijk
+  zouden die eerste twee exact overeen moeten komen met zelf verbruikt."
+
+`herkomst` houdt daarvoor naast de kWh ook bij wat de inhoud kostte om erin te krijgen (zon tegen de
+terugleverprijs van dat uur, net tegen de inkoopprijs), en haalt er `eruit / rte` uit
+(`accuRendement` in data-source.js, dezelfde volgorde als `_rendement_bron`). De prijs per uur komt
+over de aanloop en de periode (`fetchPrices` met `bereik`, `rekenHerkomst_`). Zonder herkomst valt
+`balans` terug op het kasboek en `zonInAccu`.
+
+In de klantwoning, nagerekend tegen de echte statistiek (oud is v0.146.0, dat precies de schermafdruk
+gaf): 22-10 Bespaard 9,68 → 1,36 (directe zon 8,15 → 0,16, opgeslagen zon 1,53 → 0,02, coach 0 →
+1,18); week vanaf 19-10 35,97 → 2,95; oktober 161,18 → 20,53, waarin opgeslagen zon −1,00 (het
+verlies bij salderen). Kosten blijven gelijk. Proef "bespaard: directe zon, opgeslagen zon en de
+coach" in test_rapport.mjs.
