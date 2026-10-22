@@ -2950,7 +2950,7 @@ proef("de ventilator van de thuisbatterij: een veld, een grens die leeg begint, 
 
 // De eigenaar op 14-10-2026, over "Rendement: nog niet bekend" zonder kWh-meter op de batterij:
 // "ja alleen op de kaart". De eigen tellers van de batterij als benadering, met dat erbij.
-proef("het rendement op de batterijkaart: gemeten, opgegeven, ongeveer uit de accu, of nog niet bekend", () => {
+proef("het rendement op de batterijkaart: kWh-meter, zelf geleerd, uit de accu, opgegeven, of nog niet bekend (v0.145.0)", () => {
   const velden = veldenVan({ type: "thuisbatterij", brand: "anker" });
   for (const key of ["accu_in", "accu_out"]) {
     const veld = velden.find((f) => f.key === key);
@@ -2958,14 +2958,20 @@ proef("het rendement op de batterijkaart: gemeten, opgegeven, ongeveer uit de ac
   }
   const staten = { "sensor.batterij_soc": { state: "39", attributes: { unit_of_measurement: "%" } } };
   const feed = { get: (id) => staten[id] };
-  const regel = (battery, rij) => new LiveSource().sample(feed, {
+  const regel = (battery, rij, meter = false) => new LiveSource().sample(feed, {
     sources: {},
-    devices: [{ id: "b", type: "thuisbatterij", brand: "overig", entity: "", entities: { soc: "sensor.batterij_soc" }, battery }],
+    devices: [{ id: "b", type: "thuisbatterij", brand: "overig", entity: "", battery,
+      entities: { soc: "sensor.batterij_soc", ...(meter ? { energy_in: "sensor.in", energy_out: "sensor.uit" } : {}) } }],
     battery_state: [{ device: "b", ...rij }],
   }).devices[0].details.find((d) => d.label === "Rendement")?.text;
+  // Dezelfde volgorde als `_rendement_bron` in coach.py (v0.145.0).
+  const geleerd = { rte: 0.85, in: [[2, 0.92]], out: [[2, 0.92]] };
   assert.equal(regel({}, { rte_accu: 0.8792 }), "ongeveer 88%, gemeten in de accu");
-  assert.equal(regel({ rte_percent: 80 }, { rte_accu: 0.8792 }), "80% opgegeven", "wat de coach gebruikt gaat voor");
-  assert.equal(regel({}, { rte: 0.736, rte_accu: 0.8792 }), "73,6% gemeten", "een kWh-meter gaat voor");
+  assert.equal(regel({ rte_percent: 80 }, { rte_accu: 0.8792 }), "ongeveer 88%, gemeten in de accu", "een meting gaat voor de opgave");
+  assert.equal(regel({ rte_percent: 80 }, {}), "80% opgegeven");
+  assert.equal(regel({}, { rte_power: geleerd, rte_accu: 0.8792 }), "85% zelf geleerd", "het zelf geleerde gaat voor de eigen tellers");
+  assert.equal(regel({}, { rte: 0.76, rte_power: geleerd }, true), "76% gemeten met de kWh-meter", "een kWh-meter gaat voor alles");
+  assert.equal(regel({}, { rte: 0.736, rte_accu: 0.8792 }), "ongeveer 88%, gemeten in de accu", "een oude meting zonder meter telt niet");
   assert.equal(regel({}, {}), "nog niet bekend");
 });
 

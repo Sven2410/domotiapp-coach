@@ -827,28 +827,30 @@ function deviceDetails(feed, device, settings) {
 
   // Een thuisbatterij: wat de coach zelf bijhoudt. Het rendement is een meting
   // of een opgave, nooit een aanname; zonder staat er dat het niet bekend is.
-  // Daartussen, sinds v0.118.0, wat de tellers van de batterij zelf zeggen: een
-  // benadering die alleen hier staat, de coach rekent er niet mee (`rte_accu`).
+  // Dezelfde volgorde als `_rendement_bron` in coach.py (v0.145.0): een kWh-meter
+  // op de batterij, dan het zelf geleerde, dan de eigen tellers, dan de opgave.
   if (device?.type === "thuisbatterij") {
     const rij = (settings?.battery_state ?? []).find((r) => r?.device === device.id) ?? {};
     const opgave = device.battery?.rte_percent;
+    const metMeter = Boolean(device.entities?.energy_in && device.entities?.energy_out && rij.rte);
     // Per vermogen (v0.142.0): heen en terug, en per richting het rendement bij
-    // elk vermogen dat de coach gemeten heeft. Gaat voor alles, zoals in de coach.
-    const macht = rij.rte_power;
+    // elk vermogen dat de coach gemeten heeft, als de coach ermee rekent.
+    const macht = metMeter ? null : rij.rte_power;
     const pct = (x) => Math.round(x * 100);
     const kw = (x) => x.toLocaleString(locale(), { maximumFractionDigits: 1 });
+    const precies = (x) => (x * 100).toLocaleString(locale(), { maximumFractionDigits: 1 });
     const punten = (lijst) => (lijst ?? []).map(([k, e]) => t("{pct}% bij {kw} kW", { pct: pct(e), kw: kw(k) })).join(", ");
     rows.push({
       label: t("Rendement"),
-      text: macht?.rte
-        ? t("{pct}% gemeten", { pct: (macht.rte * 100).toLocaleString(locale(), { maximumFractionDigits: 1 }) })
-        : rij.rte
-        ? t("{pct}% gemeten", { pct: (rij.rte * 100).toLocaleString(locale(), { maximumFractionDigits: 1 }) })
-        : opgave
-          ? t("{pct}% opgegeven", { pct: Number(opgave).toLocaleString(locale(), { maximumFractionDigits: 1 }) })
+      text: metMeter
+        ? t("{pct}% gemeten met de kWh-meter", { pct: precies(rij.rte) })
+        : macht?.rte
+          ? t("{pct}% zelf geleerd", { pct: precies(macht.rte) })
           : rij.rte_accu
-            ? t("ongeveer {pct}%, gemeten in de accu", { pct: Math.round(rij.rte_accu * 100) })
-            : t("nog niet bekend"),
+            ? t("ongeveer {pct}%, gemeten in de accu", { pct: pct(rij.rte_accu) })
+            : opgave
+              ? t("{pct}% opgegeven", { pct: Number(opgave).toLocaleString(locale(), { maximumFractionDigits: 1 }) })
+              : t("nog niet bekend"),
     });
     if (macht?.rte) {
       rows.push({ label: t("Laden"), text: punten(macht.in) });

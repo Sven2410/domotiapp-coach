@@ -8593,11 +8593,12 @@ controle("zonder sensor: vragen, maar geen sensor", b153b["soc_ask"] is True and
 controle("een gast: niet vragen", b153c["soc_ask"] is False and b153c["soc_sensor"] is False, f"{b153c}")
 controle("zonder kabel: niet vragen", b153d["rule"] == "disconnected" and b153d["soc_ask"] is False, f"{b153d}")
 
-print("=== 154. het rendement uit de eigen tellers van de batterij, alleen voor de kaart (v0.118.0) ===")
+print("=== 154. het rendement uit de eigen tellers van de batterij (v0.118.0, v0.145.0) ===")
 # Zonder kWh-meter op de batterij stond er "Rendement: nog niet bekend". De eigen
 # tellers van de batterij meten aan de accukant en zien het verlies in de
-# omvormer niet; in de eerste woning telden ze zelfs meer eruit dan erin. De
-# eigenaar op 14-10-2026: "ja alleen op de kaart". Dus wel bewaard, nooit gerekend.
+# omvormer niet; in de eerste woning telden ze zelfs meer eruit dan erin. Tot
+# v0.145.0 alleen op de kaart; sinds dan rekent de coach ermee zonder kWh-meter en
+# zonder zelf geleerd rendement (de eigenaar op 22-10-2026, `_rendement_bron`).
 
 
 def tellers154(erin, eruit, apparaat=None, rte_percent=None):
@@ -8619,11 +8620,13 @@ print(f"  250 erin, 220 eruit, 14,6 kWh: rte_accu {rij154.get('rte_accu')}, reke
       f"{b154.get('rule')}")
 controle("de tellers van de batterij zelf: 88%, bewaard voor de kaart",
          rij154.get("rte_accu") == 0.88, f"{rij154}")
-controle("en de coach rekent er niet mee: geen rendement, geen meting in `rte`",
-         b154.get("rte") is None and rij154.get("rte") is None, f"{b154.get('rte')} {rij154.get('rte')}")
+controle("en de coach rekent ermee, zonder het als meting van een kWh-meter te bewaren",
+         b154.get("rte") == 0.88 and rij154.get("rte") is None, f"{b154.get('rte')} {rij154.get('rte')}")
 b154b, rij154b = tellers154(250.0, 220.0, rte_percent=80)
-controle("met een ingevuld rendement rekent hij met dat, de tellers ernaast veranderen niets",
-         b154b.get("rte") == 0.8 and rij154b.get("rte_accu") == 0.88, f"{b154b.get('rte')} {rij154b}")
+controle("een meting gaat voor wat er ingevuld is",
+         b154b.get("rte") == 0.88 and rij154b.get("rte_accu") == 0.88, f"{b154b.get('rte')} {rij154b}")
+b154f, _ = tellers154(100.0, 88.0, rte_percent=80)
+controle("te weinig doorzet voor de tellers: dan wat er ingevuld is", b154f.get("rte") == 0.8, f"{b154f.get('rte')}")
 _, rij154c = tellers154(100.0, 88.0)
 _, rij154d = tellers154(221.0, 226.7)
 print(f"  te weinig doorzet: {rij154c.get('rte_accu')}, meer eruit dan erin: {rij154d.get('rte_accu')}")
@@ -10845,6 +10848,33 @@ b187 = asyncio.run(ronde75(hass187, coach187, NU187 + dt.timedelta(hours=15)))
 controle("gewist: weer onbekend, en de regelaar vergeet wat hij had",
          b187.get("rte") is None and not coach187._batterij["dev-batterij"]["rte_meter"].sommen,
          f"{b187.get('rte')} {coach187._batterij['dev-batterij']['rte_meter'].sommen}")
+
+print("=== 190. met een kWh-meter rekent de coach met de meter, niet met het zelf geleerde (v0.145.0) ===")
+# De eigenaar op 22-10-2026: "ik zou bij rendement altijd het gemeten rendement hanteren
+# uit de aparte kwh meter, mits die aanwezig is." In een klantwoning leerde de coach 85%
+# uit stappen van een procent, terwijl de kWh-meter over alles samen 76% telde.
+geleerd190 = {"in": {"700": {"ac": 10.0, "cel": 9.2, "s": 36000.0, "n": 40}},
+              "uit": {"700": {"ac": 9.2, "cel": 10.0, "s": 36000.0, "n": 40}}}
+coach190 = bouw(huis75(), instellingen(devices=[LAADPAAL, BATTERIJ]))[2]
+met190 = coach190._rendement_bron(BATTERIJ, 14.6, {"rte": 0.76, "rte_steps": geleerd190}, None)
+print(f"  met kWh-meter: {met190[0]}, per vermogen {met190[1]}")
+controle("met een kWh-meter: zijn meting (73,6% in het nagemaakte huis), geen rendement per vermogen",
+         met190 == (0.736, None), f"{met190}")
+controle("en de laatste meting als de meter even niets zegt",
+         coach190._rendement_bron({**BATTERIJ, "entities": {**BATTERIJ["entities"], "energy_in": "sensor.weg",
+                                   "energy_out": "sensor.ook_weg"}}, 14.6, {"rte": 0.76, "rte_steps": geleerd190}, None)
+         == (0.76, None))
+zonder190 = coach190._rendement_bron(ZONDER_METER, 14.6, {"rte_steps": geleerd190, "rte_accu": 0.95}, 80)
+print(f"  zonder kWh-meter: {zonder190[0]}")
+controle("zonder kWh-meter: het zelf geleerde gaat voor de eigen tellers en voor wat er ingevuld is",
+         zonder190[1] is not None and abs(zonder190[0] - 0.92 * 0.92) < 1e-6, f"{zonder190}")
+controle("zonder geleerd: de eigen tellers", coach190._rendement_bron(ZONDER_METER, 14.6, {"rte_accu": 0.9}, 80) == (0.9, None))
+controle("zonder alles: wat er ingevuld is", coach190._rendement_bron(ZONDER_METER, 14.6, {}, 80) == (0.8, None))
+controle("en anders onbekend", coach190._rendement_bron(ZONDER_METER, 14.6, {}, None) == (None, None))
+meter190 = coach190._rendement_bron({**BATTERIJ, "entities": {**BATTERIJ["entities"], "energy_in": "sensor.weg",
+                                    "energy_out": "sensor.ook_weg"}}, 14.6, {"rte_steps": geleerd190}, None)
+controle("een kWh-meter die nog niets gemeten heeft: dan wat zonder meter zou gelden",
+         meter190[1] is not None, f"{meter190}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
