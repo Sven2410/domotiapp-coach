@@ -4074,6 +4074,292 @@ proef("vaatwasser: een eigen stekker en altijd aan, zodra het merk gekozen is (v
   assert.match(knopen.get("#stekker-wie").textContent, /^Geldt voor Vaatwasser\./);
 });
 
+// --- zelfvoorzienend: waar de stroom in de batterij vandaan kwam (v0.144.0) -----------
+//
+// De eigenaar op 22-10-2026: "Als mijn accu is geladen met netstroom, kan dat nooit
+// resultaat hebben in mijn zelfvoorzienendheid. Zelfvoorzienend kan alleen maar door
+// gebruikte stroom afkomstig van de zon die ik direct verbruik, óf eerst in de accu is
+// opgeslagen." En: "ik heb ook andere klanten", dus elke vorm van installatie.
+
+/**
+ * Een nagemaakt huis voor `laadHerkomst_` en `buckets_`: per uur (tijd van het huis) zon,
+ * afname, teruglevering en per batterij wat erin en eruit ging en de laagste accustand.
+ * Antwoordt op de recorder zoals Home Assistant: per uur, per dag of per maand opgeteld.
+ */
+async function herkomstHuis({ uren, batterijen, periode = "day", start, zon = true }) {
+  const { vanHuis, alsHuis } = await import("../custom_components/domotiapp_coach/frontend/src/format.js");
+  const { periodEnd } = await import("../custom_components/domotiapp_coach/frontend/src/statistics.js");
+  const vak = (tijd, korrel) => {
+    const d = new Date(tijd);
+    if (korrel === "hour") return d.getTime();
+    if (korrel === "day") return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    return new Date(d.getFullYear(), d.getMonth()).getTime();
+  };
+  const reeks = (id) => {
+    if (id === "sensor.zon") return uren.map((u) => [u.t, u.zon ?? 0]);
+    if (id === "sensor.af") return uren.map((u) => [u.t, u.af ?? 0]);
+    if (id === "sensor.terug") return uren.map((u) => [u.t, u.terug ?? 0]);
+    for (const b of batterijen) {
+      if (b.entities?.energy_in === id) return uren.filter((u) => u[b.id]).map((u) => [u.t, u[b.id].erin ?? 0]);
+      if (b.entities?.energy_out === id) return uren.filter((u) => u[b.id]).map((u) => [u.t, u[b.id].eruit ?? 0]);
+      // Een vermogenssensor met een teken: het gemiddelde in watt, laden positief.
+      if (b.entity === id) return uren.filter((u) => u[b.id]).map((u) => [u.t, ((u[b.id].erin ?? 0) - (u[b.id].eruit ?? 0)) * 1000]);
+      // Losse sensoren voor laden en ontladen, zoals een Growatt die alleen uitgelezen wordt.
+      if (b.entities?.charge_power === id) return uren.filter((u) => u[b.id]).map((u) => [u.t, (u[b.id].erin ?? 0) * 1000]);
+      if (b.entities?.discharge_power === id) return uren.filter((u) => u[b.id]).map((u) => [u.t, (u[b.id].eruit ?? 0) * 1000]);
+      if (b.entities?.soc === id) return uren.filter((u) => u[b.id]?.soc !== undefined).map((u) => [u.t, u[b.id].soc]);
+    }
+    return [];
+  };
+  const vragen = [];
+  const hass = {
+    callWS: async (msg) => {
+      vragen.push(msg);
+      const van = alsHuis(new Date(msg.start_time)).getTime();
+      const tot = alsHuis(new Date(msg.end_time)).getTime();
+      const uit = {};
+      for (const id of msg.statistic_ids) {
+        const per = new Map();
+        for (const [t, w] of reeks(id)) {
+          if (t < van || t >= tot) continue;
+          const k = vak(t, msg.period);
+          const soort = msg.types[0];
+          const oud = per.get(k);
+          per.set(k, soort === "min" ? Math.min(oud ?? Infinity, w) : soort === "mean" ? w : (oud ?? 0) + w);
+        }
+        uit[id] = [...per].sort((a, b) => a[0] - b[0]).map(([k, w]) => ({ start: vanHuis(new Date(k)).getTime(), [msg.types[0]]: w }));
+      }
+      return uit;
+    },
+  };
+  const el = Object.create(Historie.prototype);
+  el.hass_ = hass;
+  el.period_ = periode;
+  el.periodeStart_ = () => start;
+  el.settings_ = { devices: batterijen, battery_state: [] };
+  const roles = { solar: zon ? ["sensor.zon"] : [], import: ["sensor.af"], export: ["sensor.terug"], gas: [], water: [] };
+  const { fetchPeriod, fetchBattery, combine } = await import("../custom_components/domotiapp_coach/frontend/src/statistics.js");
+  const ids = [...roles.solar, ...roles.import, ...roles.export];
+  const [series, accu, herk] = await Promise.all([
+    fetchPeriod(hass, ids, periode, start),
+    fetchBattery(hass, batterijen, periode, start),
+    el.laadHerkomst_(roles, batterijen, start),
+  ]);
+  el.accu_ = accu;
+  el.herkomst_ = herk;
+  el.rows_ = { solar: combine(series, roles.solar), import: combine(series, roles.import), export: combine(series, roles.export), gas: [], water: [] };
+  const rows = el.buckets_();
+  const som = (key) => rows.reduce((t, r) => t + (r[key] ?? 0), 0);
+  const used = som("used");
+  return {
+    el, rows, herk, vragen, eind: periodEnd(periode, start),
+    totaal: {
+      solar: zon ? som("solar") : null,
+      used,
+      zonZelf: som("zonZelf"),
+      eigen: som("ownUse"),
+      zelfvoorzienend: used > 0 ? Math.max(0, (1 - som("fromGrid") / used) * 100) : null,
+    },
+  };
+}
+
+const ACCU_TELLER = { id: "a", type: "thuisbatterij", entities: { energy_in: "sensor.a_in", energy_out: "sensor.a_uit", soc: "sensor.a_soc" }, battery: { capacity_kwh: 10 } };
+const ACCU_GROWATT = { id: "g", type: "thuisbatterij", entities: { charge_power: "sensor.g_in_w", discharge_power: "sensor.g_uit_w", soc: "sensor.g_soc" }, battery: { capacity_kwh: 5 } };
+const ACCU_TEKEN = { id: "s", type: "thuisbatterij", entity: "sensor.s_w", entities: {}, battery: { capacity_kwh: 8 } };
+const H = (d, h) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), h).getTime();
+const rond = (x, n = 3) => Math.round(x * 10 ** n) / 10 ** n;
+
+proef("zelfvoorzienend: 's nachts van het net geladen en 's ochtends ontladen is 0 %, en teruglevering uit de batterij is geen opwek (v0.144.0)", async () => {
+  // De schermafdruk van 22-10-2026, 08:45: 10,3 van het net, 9,1 geladen tussen 03 en
+  // 05, 174 Wh ontladen, 4 Wh naar het net, geen zon. Stond er 12 % en Opgewekt 4 Wh.
+  const dag = new Date(2026, 9, 22);
+  const uren = [];
+  for (let h = 0; h < 9; h += 1) {
+    const u = { t: H(dag, h), zon: 0, af: 0.15, terug: 0 };
+    if (h === 3 || h === 4) Object.assign(u, { af: 4.55 + 0.15, a: { erin: 4.55, eruit: 0, soc: 50 } });
+    else if (h >= 5) Object.assign(u, { af: 0.25, a: { erin: 0, eruit: 0.0435 + (h === 8 ? 0.004 : 0), soc: 90 } });
+    else u.a = { erin: 0, eruit: 0, soc: 50 };
+    if (h === 8) u.terug = 0.004;
+    uren.push(u);
+  }
+  const { totaal, rows } = await herkomstHuis({ uren, batterijen: [ACCU_TELLER], start: dag });
+  assert.equal(rond(totaal.zelfvoorzienend, 6), 0, JSON.stringify(totaal));
+  assert.equal(rond(totaal.solar), 0, "geen zon, geen opwek");
+  assert.equal(rond(totaal.zonZelf), 0);
+  assert.ok(Math.abs(totaal.used - (9 * 0.15 + 4 * 0.1 + 0.174)) < 1e-6, `verbruikt ${totaal.used}`);
+  const { stapel } = await import("../custom_components/domotiapp_coach/frontend/src/views/history.js");
+  for (const r of rows) assert.equal(rond(stapel(r).boven[1][1], 6), 0, "uit de batterij staat bij van het net");
+  // Het rapport en het aanwijzen per vak rekenen met dezelfde velden.
+  const bron = Historie.toString();
+  assert.ok(bron.includes("kwh(row.solar), kwh(row.used), kwh(row.zonZelf)"));
+  assert.ok(bron.includes("solar: row.solar,") && bron.includes("(row.zonZelf / row.solar)"));
+  assert.ok(bron.includes('solar: hasSolar ? sum("solar") : null'));
+});
+
+proef("zelfvoorzienend: zon in de batterij die 's avonds ontladen wordt telt mee, half zon is half (v0.144.0)", async () => {
+  const dag = new Date(2026, 9, 20);
+  const uren = [];
+  for (let h = 0; h < 24; h += 1) {
+    const u = { t: H(dag, h), zon: 0, af: 0, terug: 0, a: { erin: 0, eruit: 0, soc: 40 } };
+    // Middag: 3 zon, 0,5 naar het huis, 2 de batterij in, 0,5 naar het net.
+    if (h >= 11 && h < 14) Object.assign(u, { zon: 3, terug: 0.5, a: { erin: 2, eruit: 0, soc: 60 } });
+    // Avond: 1 per uur uit de batterij naar het huis.
+    if (h >= 18 && h < 24) Object.assign(u, { a: { erin: 0, eruit: 1, soc: 40 } });
+    uren.push(u);
+  }
+  const { totaal, rows } = await herkomstHuis({ uren, batterijen: [ACCU_TELLER], start: dag });
+  // Verbruikt: 3 × 0,5 overdag plus 6 uit de batterij. Alles is zon.
+  assert.ok(Math.abs(totaal.used - 7.5) < 1e-9, `${totaal.used}`);
+  assert.equal(rond(totaal.zelfvoorzienend), 100);
+  assert.equal(rond(totaal.solar), 9);
+  assert.equal(rond(totaal.zonZelf), 7.5, "wat de batterij in ging is zon zelf gebruikt");
+  assert.equal(rond(rows[18].accuEigen), 1, "in de grafiek staat het als uit de batterij");
+
+  // Dezelfde batterij, maar 's nachts eerst 6 van het net erin: half zon, half net.
+  const gemengd = uren.map((u) => ({ ...u, a: { ...u.a } }));
+  gemengd[2] = { ...gemengd[2], af: 6, a: { erin: 6, eruit: 0, soc: 60 } };
+  const twee = await herkomstHuis({ uren: gemengd, batterijen: [ACCU_TELLER], start: dag });
+  // 6 net en 6 zon, 6 eruit: 3 zon. Eigen is 1,5 direct plus 3.
+  assert.ok(Math.abs(twee.totaal.eigen - 4.5) < 1e-6, `${twee.totaal.eigen}`);
+});
+
+proef("zelfvoorzienend: wat de vorige dag van het net in de batterij ging telt de volgende dag als net, ook over een week (v0.144.0)", async () => {
+  const zondag = new Date(2026, 9, 18);
+  const maandag = new Date(2026, 9, 19);
+  const uren = [];
+  // Zondagnacht 22-24: 8 van het net erin.
+  for (const h of [22, 23]) uren.push({ t: H(zondag, h), af: 4, a: { erin: 4, eruit: 0, soc: 50 } });
+  // Maandag: geen zon, 's ochtends 0,5 per uur uit de batterij.
+  for (let h = 6; h < 12; h += 1) uren.push({ t: H(maandag, h), af: 0, a: { erin: 0, eruit: 0.5, soc: 80 } });
+  const dag = await herkomstHuis({ uren, batterijen: [ACCU_TELLER], start: maandag });
+  assert.equal(rond(dag.totaal.zelfvoorzienend, 6), 0, "de dag zelf");
+  // De week die op maandag begint, en de maand: zelfde antwoord.
+  const week = await herkomstHuis({ uren, batterijen: [ACCU_TELLER], start: maandag, periode: "week" });
+  assert.equal(rond(week.totaal.zelfvoorzienend, 6), 0, "de week");
+  assert.equal(week.rows.length, 1, "één vak van een dag");
+  // Om de aanloop: de recorder wordt per uur gevraagd vanaf twee dagen eerder.
+  const perUur = dag.vragen.filter((v) => v.period === "hour" && v.types[0] === "change");
+  assert.ok(perUur.some((v) => v.statistic_ids.includes("sensor.af") && new Date(v.start_time) <= new Date(maandag.getTime() - 47 * 3600000)), "aanloop");
+  // Zonder aanloop zou het 100 % zijn geweest (zo stond het voor v0.144.0).
+  const { huisMetAccu } = await import("../custom_components/domotiapp_coach/frontend/src/views/history.js");
+  const oud = huisMetAccu(0, 0, { battery: -3, voor: 0 });
+  assert.equal(oud.ownUse, 3);
+});
+
+proef("zelfvoorzienend: handelen, een lege batterij, gaten, en de capaciteit (v0.144.0)", async () => {
+  const { herkomst } = await import("../custom_components/domotiapp_coach/frontend/src/views/history.js");
+  const u = (start, x) => ({ start, ...x });
+  // Handelen: 's nachts 5 van het net erin, om 19:00 4 eruit naar het net en 0,5 naar
+  // het huis. Teruglevering zonder zon is geen zon naar het net, en niets is eigen.
+  let r = herkomst([u(1, { bought: 5, erin: 5 }), u(19, { sold: 4, eruit: 4.5 })]);
+  assert.deepEqual(r.get(19), { opwek: 0, zonHuis: 0, accuZon: 0, zonNet: 0 });
+  // Meer terug dan zon en batterij samen: de opwekmeter miste iets (een omvormer die er
+  // later bij kwam). Dat deel is zon, zoals Opgewekt het zonder batterij ook telt.
+  r = herkomst([u(1, { solar: 0, sold: 3, bought: 1, eruit: 0.5 })]);
+  assert.equal(rond(r.get(1).opwek), 2.5);
+  assert.equal(rond(r.get(1).zonNet), 2.5);
+  // Zon in de batterij, verkocht om 20:00: geen zon naar het net dat uur (er is geen zon).
+  r = herkomst([u(12, { solar: 4, erin: 4 }), u(20, { sold: 3, eruit: 3.5 })]);
+  assert.equal(r.get(20).zonNet, 0);
+  assert.equal(rond(r.get(20).accuZon), 0.5, "wat het huis kreeg was zon");
+  // Leeg: eerst 5 net erin, dan leeg (alles eruit), daarna zon erin en eruit: dat is zon.
+  r = herkomst([
+    u(1, { bought: 5, erin: 5 }),
+    u(2, { eruit: 4 }),
+    u(3, { leeg: true }),
+    u(12, { solar: 2, erin: 2 }),
+    u(20, { eruit: 2 }),
+  ]);
+  assert.equal(rond(r.get(20).accuZon), 2, "na leeg alleen de zon");
+  // Zonder de lege batterij zou er 1 kWh net blijven hangen: 2 van 3 is zon.
+  r = herkomst([u(1, { bought: 5, erin: 5 }), u(2, { eruit: 4 }), u(12, { solar: 2, erin: 2 }), u(20, { eruit: 2 })]);
+  assert.equal(rond(r.get(20).accuZon), rond(4 / 3));
+  // Een gat: uren zonder gegevens houden de inhoud zoals hij was.
+  r = herkomst([u(12, { solar: 3, erin: 3 }), u(40, { eruit: 1 })]);
+  assert.equal(rond(r.get(40).accuZon), 1);
+  // Eruit zonder dat er iets bekend in zat telt als net.
+  r = herkomst([u(5, { eruit: 1 })]);
+  assert.equal(r.get(5).accuZon, 0);
+  // De capaciteit: het verlies valt naar verhouding weg, de verhouding blijft.
+  r = herkomst([u(1, { bought: 10, erin: 10 }), u(12, { solar: 10, erin: 10 }), u(20, { eruit: 4 })], { capaciteit: 10 });
+  assert.equal(rond(r.get(20).accuZon), 2, "half zon, half net");
+});
+
+proef("zelfvoorzienend: twee batterijen, een zonder tellers en een met, en de lege batterij uit de accustand (v0.144.0)", async () => {
+  const dag = new Date(2026, 9, 21);
+  const uren = [];
+  for (let h = 0; h < 24; h += 1) {
+    const x = { t: H(dag, h), zon: 0, af: 0.1, terug: 0, a: { erin: 0, eruit: 0, soc: 50 }, s: { erin: 0, eruit: 0 } };
+    // 's Nachts laadt de batterij met tellers van het net, die met een vermogenssensor (alleen uitlezen) niet.
+    if (h === 2) Object.assign(x, { af: 4.1, a: { erin: 4, eruit: 0, soc: 90 } });
+    // De ochtend: de batterij met tellers gaat leeg tot de bodem van 10 %.
+    if (h >= 6 && h < 10) Object.assign(x, { af: 0, a: { erin: 0, eruit: 1, soc: h === 9 ? 10 : 50 } });
+    // Middag: zon in de batterij met een vermogenssensor.
+    if (h >= 12 && h < 14) Object.assign(x, { zon: 2, s: { erin: 1.9, eruit: 0 } });
+    // Avond: die geeft het weer af.
+    if (h >= 19 && h < 21) Object.assign(x, { af: 0, s: { erin: 0, eruit: 1.9 } });
+    uren.push(x);
+  }
+  const { totaal } = await herkomstHuis({ uren, batterijen: [ACCU_TELLER, ACCU_TEKEN], start: dag });
+  // Zon direct: 2 × 0,1. Uit de batterijen naar het huis: 4 (net, 's ochtends) en 3,8 's avonds.
+  // Zonder accustand voor de tweede batterij weet de coach niet wanneer alles leeg was, dus
+  // zijn de 3,8 kWh van de avond een mengsel: 3,8 zon bij 0 net over (de ochtend nam de 4 net).
+  assert.ok(Math.abs(totaal.eigen - (0.2 + 3.8)) < 1e-6, `${totaal.eigen}`);
+  assert.ok(Math.abs(totaal.used - 9.8) < 1e-6, `${totaal.used}`);
+  // Een Growatt met losse sensoren voor laden en ontladen, zonder teller van het net
+  // naar de batterij: zelfde uitkomst als met tellers.
+  const growatt = uren.map((x) => ({ ...x, g: x.a, a: undefined }));
+  const g = await herkomstHuis({ uren: growatt, batterijen: [ACCU_GROWATT, ACCU_TEKEN], start: dag });
+  assert.ok(Math.abs(g.totaal.eigen - totaal.eigen) < 1e-6, `${g.totaal.eigen}`);
+  // De lege batterij uit de accustand: 5 van het net erin, 4 eruit en dan op de bodem
+  // (het verlies), daarna 2 zon erin en eruit. Dat is helemaal zon, niet 2 van 3.
+  const leeg = [];
+  for (let h = 0; h < 24; h += 1) {
+    const x = { t: H(dag, h), af: 0, a: { erin: 0, eruit: 0, soc: 60 } };
+    if (h === 2) Object.assign(x, { af: 5, a: { erin: 5, eruit: 0, soc: 90 } });
+    if (h >= 6 && h < 10) x.a = { erin: 0, eruit: 1, soc: h === 9 ? 10 : 50 };
+    if (h === 10) x.a = { erin: 0, eruit: 0, soc: 10 };
+    if (h === 12) Object.assign(x, { zon: 2, a: { erin: 2, eruit: 0, soc: 40 } });
+    if (h === 20) x.a = { erin: 0, eruit: 2, soc: 20 };
+    leeg.push(x);
+  }
+  const l = await herkomstHuis({ uren: leeg, batterijen: [ACCU_TELLER], start: dag });
+  assert.equal(rond(l.herk.get(H(dag, 20)).accuZon), 2, "na de bodem alleen de zon");
+  // Komt de batterij niet laag (nooit onder een kwart), dan is hij nooit leeg geweest.
+  const hoog = leeg.map((x) => ({ ...x, a: { ...x.a, soc: Math.max(40, x.a.soc) } }));
+  const h2 = await herkomstHuis({ uren: hoog, batterijen: [ACCU_TELLER], start: dag });
+  assert.equal(rond(h2.herk.get(H(dag, 20)).accuZon), rond(4 / 3));
+  const el = Object.create(Historie.prototype);
+  assert.equal(await el.laadHerkomst_({ solar: [], import: [], export: [] }, [], dag), null, "zonder batterij geen herkomst");
+});
+
+proef("zelfvoorzienend: zonder batterij verandert er niets, en zonder zon staat er geen opwek (v0.144.0)", async () => {
+  const dag = new Date(2026, 9, 21);
+  const uren = [];
+  for (let h = 0; h < 24; h += 1) uren.push({ t: H(dag, h), zon: h >= 10 && h < 16 ? 2 : 0, af: h >= 10 && h < 16 ? 0 : 0.4, terug: h >= 10 && h < 16 ? 1.5 : 0 });
+  const zonder = await herkomstHuis({ uren, batterijen: [], start: dag });
+  assert.equal(zonder.herk, null);
+  // Zoals voor v0.144.0: eigen is zon min teruggeleverd, per vak.
+  assert.equal(rond(zonder.totaal.eigen), 3);
+  assert.equal(rond(zonder.totaal.solar), 12);
+  assert.equal(rond(zonder.totaal.zelfvoorzienend, 2), rond((3 / (3 + 18 * 0.4)) * 100, 2));
+  for (const r of zonder.rows) assert.equal(r.accuEigen, undefined);
+  for (const r of zonder.rows) assert.equal(r.solar, r.own + r.sold, "Opgewekt zoals voor v0.144.0");
+  const zonderMeter = await herkomstHuis({ uren: uren.map((x) => ({ ...x, zon: 0 })), batterijen: [], start: dag });
+  assert.equal(rond(zonderMeter.totaal.solar), 9, "geen opwekmeter: wat terugging blijft opwek, zoals altijd");
+  // Week, maand en jaar zonder batterij: dezelfde som per vak.
+  for (const periode of ["week", "month", "year"]) {
+    const p = await herkomstHuis({ uren, batterijen: [], start: dag, periode });
+    assert.equal(rond(p.totaal.eigen), 3, periode);
+  }
+  // Geen zonnepanelen, wel een batterij die van het net laadt: nul procent, geen opwek.
+  const netAccu = [];
+  for (let h = 0; h < 24; h += 1) netAccu.push({ t: H(dag, h), af: h < 4 ? 2.5 : 0.1, a: { erin: h < 4 ? 2 : 0, eruit: h >= 17 && h < 21 ? 1 : 0, soc: 50 } });
+  const geenZon = await herkomstHuis({ uren: netAccu, batterijen: [ACCU_TELLER], start: dag, zon: false });
+  assert.equal(geenZon.totaal.solar, null);
+  assert.equal(rond(geenZon.totaal.eigen, 6), 0);
+});
+
 // --- per apparaat in Historie (v0.121.0) -------------------------------------------
 //
 // De eigenaar op 15-10-2026: "ik wil ook het energieverbruik per apparaat kunnen zien in

@@ -375,9 +375,9 @@ het oranje ("Eigen zon en batterij") en stond laden nergens.
 De stapeling staat in `stapel` (views/history.js), en het rapport tekent
 dezelfde (`schrijfGrafiek` in report.js); die tekende tot nu toe nog zon plus
 inkoop zonder de batterij. Uit de batterij is hooguit wat het huis niet van het
-net kreeg, zodat de balk precies Verbruikt blijft; in een vak van een dag telt
-stroom die 's nachts van het net de batterij in ging en 's avonds eruit dus als
-van het net, net als in Zelfvoorzienend. De kleuren zijn nagemeten met het
+net kreeg, zodat de balk precies Verbruikt blijft; sinds v0.144.0 alleen het
+zondeel ervan (`herkomst`, zie onderaan), dus stroom die 's nachts van het net de
+batterij in ging en later eruit staat als van het net, ook over vakken heen. De kleuren zijn nagemeten met het
 script van de dataviz-richtlijn, op #161613 en op wit, alle paren: slechtste
 paar het bestaande van het net tegen naar het net (ΔE 8,2 voor kleurenblinden),
 batterij tegen naar het net ΔE 19,4. In het rapport haalde dat bestaande paar in
@@ -598,3 +598,50 @@ erbij ("september (je contract)", `jaarMaandContract`). Het is dezelfde instelli
 (`jaarVanaf_` in views/history.js). Een jaar begint op de eerste van de maand; een afrekenperiode van
 15 september tot 14 september valt daar dus net naast. Proef "de schaal met en zonder thuisbatterij,
 het jaar vanaf een maand, en de accustand boven de 0-lijn" in test_rapport.mjs.
+
+## Zelfvoorzienend: waar de stroom in de batterij vandaan kwam (v0.144.0)
+
+De eigenaar op 22-10-2026, bij een schermafdruk van Historie in een klantwoning (een dag tot 08:45,
+verbruikt 1,4 kWh, van het net 10,3, batterij geladen 9,1 tussen 03 en 05 van het net, ontladen 174 Wh,
+geen zon): "Als mijn accu is geladen met netstroom, kan dat nooit resultaat hebben in mijn
+zelfvoorzienendheid. Zelfvoorzienend kan alleen maar door gebruikte stroom afkomstig van de zon die ik
+direct verbruik, óf eerst in de accu is opgeslagen." Er stond 12 %, en Opgewekt 4 Wh.
+
+De oorzaak: `huisMetAccu` haalde netladen alleen binnen één vak van het verbruik af, en alles wat de
+batterij afgaf telde als niet van het net. Een nacht laden en een ochtend ontladen zijn twee vakken.
+En Opgewekt was eigen zon plus teruglevering, dus teruglevering uit de batterij (of 4 Wh meterruis)
+werd opwek.
+
+Nu houdt `herkomst` (views/history.js) uur voor uur bij wat er in de batterij zit en hoeveel daarvan
+zon is, over de periode plus een aanloop van twee dagen (`laadHerkomst_`, `AANLOOP_MS`), dus ook over
+de grens van een dag, een week of een maand. Per uur:
+
+- wat terugging is eerst zon, tot er geen zon meer is; de rest kwam uit de batterij en is geen opwek;
+- de overige zon gaat eerst naar het huis, wat dan nog over is de batterij in; wat de batterij verder
+  opnam kwam van het net;
+- wat eruit kwam heeft de verhouding zon en net van wat erin zat; wat eruit kwam zonder dat er iets
+  bekend in zat telt als net (liever een procent te weinig dan netstroom als eigen zon).
+
+Het verlies in de batterij valt naar verhouding weg zodra de inhoud boven de opgegeven capaciteit
+zou komen (de som van alle batterijen, alleen als ze allemaal een capaciteit hebben). Een uur waarin
+elke batterij op de laagste accustand van die dagen stond (op een procent na, en dat laagste hooguit
+25 %, `LEEG_HOOGSTENS`) begint opnieuw: daarna zit er alleen in wat er opnieuw in ging. De accustand
+komt uit de statistiek van Home Assistant (`fetchSoc` in statistics.js, het laagste per uur).
+Meerdere batterijen zijn één voorraad.
+
+Per vak telt `herkomstPerVak_` de uren op, en `huisMetAccu` maakt er met `herk` van: eigen is de zon
+die meteen het huis in ging plus het zondeel van wat de batterij aan het huis gaf. Dat geldt voor de
+totalen, het aanwijzen van een vak, de grafiek (`accuEigen` in `stapel`: het netdeel van het ontladen
+staat bij van het net) en het rapport. Opgewekt is met een batterij de opwekmeter, plus wat er
+terugging boven zon en batterij samen (`opwek` in `herkomst`): in de klantwoning bestaat de opwekmeter
+pas sinds juli 2026, en daarvoor ging er per maand tot 515 kWh terug. Zon zelf gebruikt (en de kolom
+Eigen zon in het rapport) is opwek min de zon die naar het net ging (`zonZelf`). Verbruikt is met een
+batterij opwek plus afname min teruglevering min wat de batterij netto opnam, zonder eerst de eigen zon
+op nul af te kappen; voorheen telde een uur waarin de batterij terugleverde dat als verbruik (in de
+klantwoning op 21-10-2026 12,3 kWh, nu 3,9).
+
+Zonder batterij is er geen herkomst en rekent alles precies zoals voorheen. In geld (`balans` in
+geld.js) rekent nog met `own` zoals voorheen.
+
+Open: tellen zonkWh die eerst in de batterij gingen en later naar het net (handelen) als Zon zelf
+gebruikt? Nu wel, want ze gingen niet direct terug. Proeven "zelfvoorzienend: ..." in test_rapport.mjs.
