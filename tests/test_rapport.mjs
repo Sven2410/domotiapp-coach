@@ -4490,7 +4490,7 @@ proef("opgeslagen zon nooit onder nul, onbekende teruglevering is nul, en een te
     prijs: () => ({ koop: 0.3, terug: 0.3 }) });
   assert.equal(b.delen.accu, 0, "op nul");
   assert.ok(Math.abs(b.bespaard - 1.24) < 1e-9);
-  // Maertens: twee tijdvakken en geen terugleverprijs. Zon erin overdag (vol tarief), eruit
+  // Een woning met twee tijdvakken en geen terugleverprijs. Zon erin overdag (vol tarief), eruit
   // 's nachts (goedkoop): telt nu tegen nul, dus de hele prijs van 's nachts is bespaard.
   const pt = (start) => (start === 13 ? { koop: 0.22, terug: null } : { koop: 0.12, terug: null });
   const r = herkomst([{ start: 13, solar: 2, erin: 2 }, { start: 23, eruit: 2 }], { prijs: pt });

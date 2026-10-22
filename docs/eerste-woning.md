@@ -705,7 +705,7 @@ coach" in test_rapport.mjs.
 
 **v0.147.1**, na de controle van 22-10-2026 op vijf woningen. Opgeslagen zonnestroom kwam thuis op −€ 0,05
 (vast met salderen: opslaan kost alleen het verlies) en in een woning met twee tijdvakken en zonder
-terugleverprijs op −€ 0,33. De eigenaar: "0 tonen dan. bij maertens ja onbekende teruglevering 0
+terugleverprijs op −€ 0,33. De eigenaar: "0 tonen dan", en over die woning: "onbekende teruglevering 0
 inderdaad." Dus: `balans` toont opgeslagen zon nooit onder nul, en `herkomst` telt een onbekende
 terugleverprijs als nul (zoals `_kosten` in batterij.py), niet meer als de inkoopprijs van dat uur. Een
 tekort staat er als "− € 0,05" en een afgerond nul als "€ 0,00" (`geldBedrag` in format.js), en in
