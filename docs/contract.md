@@ -67,6 +67,16 @@ kwartieren + 0,10814) x 1,21. Tolerantie een tiende cent (`TOLERANTIE`). Bij een
 zegt `vast` of het verschil elk uur even groot is: dan zit het in een bedrag per kWh. Met de
 belasting van 2024 was dat in die woning 2,5 cent per kWh.
 
+Sinds v0.144.3 telt de afronding van de lijsten mee (`afronding`): een halve laatste decimaal
+van de all-in lijst, plus die van de marktprijs maal de btw, bovenop de tiende cent. De lijst
+zegt zelf op hoeveel decimalen hij staat. Frank Energie geeft zijn toestand op vijf decimalen
+en zijn lijst `prices` op drie; bij een klant op 20-10-2026 kwam de opbouw daardoor
+€ 0,00103 naast de lijst uit (gemiddeld € 0,00003 over 192 kwartieren), en stond er
+"Je energieprijs klopt niet meer" over een opbouw die op de toestand tot op de vijfde
+decimaal klopte (0,25818 + 0,09161 + 0,015, maal 1,21, is 0,44140). De grens is daar nu
+€ 0,0021; een energiebelasting van een ander jaar (2,2 cent) en een opslag die 0,2 cent te
+hoog staat (0,35 cent) vallen er op dezelfde lijsten nog steeds uit.
+
 `terug`: met salderen de all-in prijs min de opslag (die hangt aan de afname en komt niet
 terug; uit een energienota van 27-08-2026), min de terugleverkosten, plus de vergoeding. Of,
 met `netting_full` (v0.129.1), de hele all-in prijs: Essent en Energiedirect geven binnen

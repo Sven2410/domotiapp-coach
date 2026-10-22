@@ -84,6 +84,29 @@ c = po.controleer(kw_all_in, MARKT, GOED_CONTRACT, uur(21))
 controle("allebei per kwartier: per kwartier vergeleken", c["status"] == "correct" and c["stap_minuten"] == 15
          and c["blokken"] == 8, f"{c}")
 
+# Een leverancier die zijn lijsten op drie decimalen afrondt (Frank Energie bij een
+# klant op 20-10-2026): de toestand klopt tot op de vijfde decimaal, de lijsten
+# wijken door de afronding tot ruim een tiende cent af. Dat is geen afwijking.
+FRANK = {"energy_tax": 0.09161, "supplier_markup": 0.015, "vat_percent": 21}
+kw = [0.2584, 0.2905, 0.25818, 0.2496]
+f_markt = {uur(20) + dt.timedelta(minutes=15 * i): (uur(20) + dt.timedelta(minutes=15 * (i + 1)), p)
+           for i, p in enumerate(kw)}
+f_all_in = {k: (e, po.inkoop(p, FRANK)["totaal"]) for k, (e, p) in f_markt.items()}
+drie = lambda b: {k: (e, round(p, 3)) for k, (e, p) in b.items()}
+c = po.controleer(drie(f_all_in), drie(f_markt), FRANK, uur(20))
+print(f"  op drie decimalen: {c['status']}, grootste {c['grootste']:+.5f}, afronding {c['afronding']:.5f}")
+controle("de afronding van de lijst ging over de oude grens heen", abs(c["grootste"]) > po.TOLERANTIE, f"{c}")
+controle("een lijst op drie decimalen geeft geen afwijking", c["status"] == "correct", f"{c}")
+controle("de afronding is een halve tiende cent plus die van de marktprijs maal de btw",
+         abs(c["afronding"] - (0.0005 + 0.0005 * 1.21)) < 1e-12, f"{c['afronding']}")
+c = po.controleer(drie(f_all_in), drie(f_markt), {**FRANK, "energy_tax": 0.1088}, uur(20))
+controle("een energiebelasting van een ander jaar valt er nog steeds uit", c["status"] == "afwijking" and c["vast"],
+         f"{c}")
+controle("lijsten op vijf decimalen houden de grens bijna gelijk",
+         po.controleer(f_all_in, MARKT, GOED_CONTRACT, uur(21))["afronding"] < 0.0001)
+controle("een lijst met een prijs op meer decimalen heeft geen afronding",
+         po.afronding({uur(20): (uur(21), 0.4482672)}) < 1e-6 and po.afronding(ALL_IN) == 0.0)
+
 print("3. teruglevering")
 d = {**GOED_CONTRACT, "feed_in_bonus": 0.02, "feed_in_costs": 0.0}
 t = po.terug(0.22989, 0.4090149, d, salderen=True, overdag=False)
