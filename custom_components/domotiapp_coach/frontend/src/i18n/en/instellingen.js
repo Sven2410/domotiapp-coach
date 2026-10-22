@@ -313,6 +313,7 @@ export const INSTELLINGEN = {
   "Regel weghalen": "Remove rule",
   "volgens zijn laadplanning": "according to its charging schedule",
   "als hij van het net laadt": "when it charges from the grid",
+  "laadt bij één prijs voor elk uur niet van het net": "does not charge from the grid when every hour has the same price",
   "als hij nog past": "when it still fits",
 
   // voorrang.js

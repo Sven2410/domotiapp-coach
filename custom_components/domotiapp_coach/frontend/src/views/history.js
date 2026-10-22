@@ -29,7 +29,7 @@ import { balkSoort, legenda, metHerkomst, netReeks, stippen, tekenTijdlijn, teke
 import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
 import { beurtenIn, delen, opmerking, perApparaat, totalen, woorden } from "../savings.js";
-import { SALDEREN_TOT, aandeelOp, accuVerdiend, accuZon, balans, prijsOp, salderen, schaalKosten } from "../geld.js";
+import { SALDEREN_TOT, aandeelOp, accuVerdiend, accuZon, balans, prijsOp, salderen, schaalKosten, vlakkePrijs } from "../geld.js";
 import {
   PERIODS,
   combine,
@@ -2188,6 +2188,15 @@ class DacViewHistory extends DacElement {
    * Alleen als de beurten al opgehaald zijn en er iets in de periode valt;
    * anders komt het hoofdstuk niet in het rapport.
    */
+  /**
+   * Of "door te wachten" bij Sessies hoort (v0.149.0). Bij één prijs voor elk uur
+   * levert wachten niets op, en een vakje dat altijd € 0,00 zegt laat hij weg. Wat
+   * er in een eerdere periode met een dynamisch contract wel bespaard is blijft staan.
+   */
+  wachtenTelt_(totaal) {
+    return !vlakkePrijs(this.settings_?.contract) || Math.abs(totaal?.wait_saved ?? 0) >= 0.005;
+  }
+
   bespaardRapport_() {
     if (!Array.isArray(this.beurten_)) return null;
     const { items, totaal } = this.bespaard_();
@@ -2204,11 +2213,12 @@ class DacViewHistory extends DacElement {
     };
     const w = woorden(items);
     const metAccu = totaal.battery_kwh >= 0.05;
+    const wachten = this.wachtenTelt_(totaal);
     return {
       vakjes: [
         { label: t("Bespaard"), waarde: euro(totaal.saved) },
         { label: t("Door de zon"), waarde: euro(totaal.solar_saved) },
-        { label: t("Door te wachten"), waarde: euro(totaal.wait_saved) },
+        ...(wachten ? [{ label: t("Door te wachten"), waarde: euro(totaal.wait_saved) }] : []),
         { label: t("Betaald"), waarde: euro(totaal.paid) },
         { label: t(w.hoeveel), waarde: kwh(totaal.kwh) },
         { label: t("Waarvan zon"), waarde: kwh(totaal.solar_kwh) },
@@ -2322,7 +2332,9 @@ class DacViewHistory extends DacElement {
     // (op 28-09-2026: "moet daar niet iets van de batterij bij?").
     tegels.append(
       tegel(t("Bespaard"), euro(totaal.saved), "var(--dac-solar)",
-        t("{zon} door zon, {wachten} door wachten", { zon: euro(totaal.solar_saved), wachten: euro(totaal.wait_saved) })),
+        this.wachtenTelt_(totaal)
+          ? t("{zon} door zon, {wachten} door wachten", { zon: euro(totaal.solar_saved), wachten: euro(totaal.wait_saved) })
+          : t("{zon} door zon", { zon: euro(totaal.solar_saved) })),
       tegel(t("Betaald"), euro(totaal.paid), "var(--dac-grid-in)"),
       tegel(t(w.hoeveel), kwh(totaal.kwh), "",
         metAccu

@@ -127,6 +127,28 @@ export function terugleverBekend(contract, when = huisNu()) {
 }
 
 /**
+ * Of stroom bij dit contract elk uur hetzelfde kost, van het net en terug (v0.149.0).
+ *
+ * Een vast of variabel contract in Nederland heeft één prijs voor elk uur; in
+ * Portugal het tarief simples, zolang teruglevering niet de marktprijs volgt. Dan
+ * doet niets dat op een goedkoper of duurder uur wacht iets: handelen, laden van het
+ * net, een airco op goedkope uren, prijskleuren. De eigenaar op 22-10-2026: "als
+ * iemand een vast contract heeft ingesteld moeten er opties verborgen worden voor
+ * opties die niet van toepassing zijn." Zonder contract, of bij een dynamisch
+ * contract of tijdvakken, is de prijs niet vlak en blijft alles staan. Dezelfde
+ * gedachte als `_vlak` in batterij.py, maar uit het contract in plaats van de prijzen.
+ */
+export function vlakkePrijs(contract) {
+  if (!contract) return false;
+  if (contract.country === "PT") {
+    const pt = contract.pt ?? {};
+    // Zonder tarief rekent tarifas.js met bi-horário, dus met tijdvakken.
+    return (pt.tarifa ?? "bi") === "simples" && pt.excedente?.modo !== "omie";
+  }
+  return contract.type === "fixed" || contract.type === "variable";
+}
+
+/**
  * Zonsopkomst en zonsondergang op die dag, in UTC, of null als de zon niet op
  * of onder gaat (v0.129.0). De vergelijking van de NOAA, zoals `zon_op_onder`
  * in prijsopbouw.py: dezelfde uren voor een bonus die alleen overdag geldt.

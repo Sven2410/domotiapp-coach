@@ -17,6 +17,7 @@
 
 import { define } from "../base.js";
 import { deviceLabelMap } from "../devices.js";
+import { vlakkePrijs } from "../geld.js";
 import { datum, nt, t } from "../i18n.js";
 import { icons } from "../icons.js";
 import { planRegels, regelUitleg, zonRegels } from "../voorrang.js";
@@ -198,7 +199,8 @@ class DacViewStrategy extends DacEditorElement {
                   </div>
                 </div>
               </div>
-              <div class="row">
+              <!-- Bij een vlakke prijs (v0.149.0) gaan de prijskleuren weg: er is geen uur om mee te vergelijken. -->
+              <div class="row" id="prijs-kleuren">
                 <label>${t("Energieprijs (€ per kWh)")}</label>
                 <div class="two" id="prijs-grenzen">
                   <div class="row">
@@ -331,6 +333,10 @@ class DacViewStrategy extends DacEditorElement {
     this.$("#prijs-relatief").checked = relatief;
     // Naar de dag tellen de vaste grenzen voor de prijs niet.
     this.$("#prijs-grenzen").style.display = relatief ? "none" : "";
+    // Eén prijs voor elk uur (v0.149.0): geen prijskleuren om in te stellen.
+    const vlak = vlakkePrijs(d?.contract);
+    this.$("#prijs-kleuren").style.display = vlak ? "none" : "";
+    this.$("#prijs-relatief").closest("label").style.display = vlak ? "none" : "";
     // Alleen waar de fasen ook gemeten worden; anders is er geen kaart te tonen.
     const rij = this.$("#phases-overview-row");
     rij.hidden = !d?.sources?.phases_enabled;
@@ -567,7 +573,10 @@ class DacViewStrategy extends DacEditorElement {
     const namen = deviceLabelMap(apparaten);
     const soort = new Map(apparaten.map((a) => [a.id, a.type]));
     const ids = this.planRegels_();
-    const uitleg = { laadpaal: t("volgens zijn laadplanning"), thuisbatterij: t("als hij van het net laadt"), boiler: t("als hij nog past") };
+    // Bij een vlakke prijs (v0.149.0) laadt de batterij nooit van het net; hij blijft
+    // in de lijst, zodat zijn plek bewaard blijft voor een overstap naar dynamisch.
+    const accu = vlakkePrijs(this.draft_?.contract) ? t("laadt bij één prijs voor elk uur niet van het net") : t("als hij van het net laadt");
+    const uitleg = { laadpaal: t("volgens zijn laadplanning"), thuisbatterij: accu, boiler: t("als hij nog past") };
 
     lijst.replaceChildren(...ids.map((id, plek) => {
       const li = document.createElement("li");

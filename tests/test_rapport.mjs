@@ -6023,6 +6023,61 @@ proef("datum en tijd op een iPhone: niet breder dan het vak, links, en even hoog
   assert.match(ov, /::after \{[^}]*var\(--dac-bg-raise\)/);
 });
 
+proef("één prijs voor elk uur: wat op een goedkoper uur wacht staat er niet (v0.149.0)", async () => {
+  // De eigenaar op 22-10-2026: "als iemand een vast contract heeft ingesteld moeten er
+  // opties verborgen worden voor opties die niet van toepassing zijn."
+  const { vlakkePrijs } = await import("../custom_components/domotiapp_coach/frontend/src/geld.js");
+  assert.equal(vlakkePrijs({ type: "fixed" }), true);
+  assert.equal(vlakkePrijs({ type: "variable" }), true);
+  assert.equal(vlakkePrijs({ type: "dynamic" }), false);
+  assert.equal(vlakkePrijs(null), false, "zonder contract blijft alles staan");
+  assert.equal(vlakkePrijs({ type: "fixed", country: "PT", pt: { tarifa: "simples" } }), true);
+  assert.equal(vlakkePrijs({ type: "fixed", country: "PT", pt: { tarifa: "bi" } }), false, "tijdvakken");
+  assert.equal(vlakkePrijs({ type: "fixed", country: "PT", pt: {} }), false, "zonder tarief rekent Portugal met bi-horário");
+  assert.equal(vlakkePrijs({ type: "fixed", country: "PT", pt: { tarifa: "simples", excedente: { modo: "omie" } } }), false, "teruglevering op de marktprijs");
+
+  // Instellen: Handelen en de keuze van de airco weg, Goedkoopst heet Slim; wat er stond blijft.
+  const accu = { id: "b", type: "thuisbatterij", brand: "anker", battery: { trade: true, grid_charge: true } };
+  const accuHtml = voorkeurHtml(accu);
+  assert.ok(accuHtml.includes('data-vk-rij="handelen"'));
+  const velden = nepVelden(accuHtml);
+  const handelen = velden.rijen.find((r) => r.sleutel === "handelen");
+  vulVoorkeuren(velden, accu, null, { type: "fixed" });
+  assert.equal(handelen.hidden, true);
+  assert.equal(velden.veld("data-vk-accu", "trade").checked, true, "niet gewist");
+  vulVoorkeuren(velden, accu, null, { type: "dynamic" });
+  assert.equal(handelen.hidden, false);
+  const airco = { id: "a", type: "airco", airco: { run_on: "goedkoop" } };
+  const aircoVelden = nepVelden(voorkeurHtml(airco));
+  const aanOp = aircoVelden.rijen.find((r) => r.sleutel === "run_on");
+  vulVoorkeuren(aircoVelden, airco, null, { type: "fixed" });
+  assert.equal(aanOp.hidden, true);
+  vulVoorkeuren(aircoVelden, airco, null, { type: "dynamic" });
+  assert.equal(aanOp.hidden, false);
+  const paalVelden = nepVelden(voorkeurHtml({ id: "p", type: "laadpaal", cars: [] }));
+  const optie = { textContent: "" };
+  const zoek = paalVelden.querySelector.bind(paalVelden);
+  paalVelden.querySelector = (k) => (k === "[data-vk-goedkoopst]" ? optie : zoek(k));
+  vulVoorkeuren(paalVelden, { id: "p", type: "laadpaal", charge_mode: "goedkoopst" }, null, { type: "fixed" });
+  assert.equal(optie.textContent, "Slim: eerst zon, dan het net buiten de avondpiek");
+  vulVoorkeuren(paalVelden, { id: "p", type: "laadpaal", charge_mode: "goedkoopst" }, null, { type: "dynamic" });
+  assert.equal(optie.textContent, "Goedkoopst: de goedkoopste bekende uren");
+  assert.equal(paalVelden.veld("data-vk", "charge_mode").value, "goedkoopst", "de waarde blijft goedkoopst");
+
+  // Het overzicht: geen "duur" of "goedkoop moment" bij een vaste prijs.
+  const drempels = { price: { high: 0.3, low: 0.25 }, self_use: { low: 20 } };
+  const duur = { solar: 0, grid: 500, exportW: 0, importW: 500, load: 1, loadBasis: "phase", price: 0.31, selfUse: null };
+  assert.equal(advise(duur, drempels, true, 80, null, [], null).title, "Stroom is nu duur");
+  assert.notEqual(advise(duur, drempels, true, 80, null, [], null, true).title, "Stroom is nu duur");
+  const goedkoop = { ...duur, price: 0.24 };
+  assert.equal(advise(goedkoop, drempels, true, 80, null, [], null).title, "Goedkoop moment");
+  assert.notEqual(advise(goedkoop, drempels, true, 80, null, [], null, true).title, "Goedkoop moment");
+
+  // Voorkeuren: de prijskleuren hebben een eigen rij om te verbergen.
+  const strategie = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/strategy.js", import.meta.url), "utf8");
+  assert.ok(strategie.includes('id="prijs-kleuren"') && strategie.includes("vlakkePrijs(d?.contract)"));
+});
+
 for (const [naam, fn] of proeven) {
   try {
     await fn();

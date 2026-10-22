@@ -189,6 +189,7 @@ export const HISTORIE = {
   "Geen sessies in deze periode.": "No sessions in this period.",
   "Nog geen sessies. Vanaf de volgende sessie staat hier wat die kostte en bespaarde.": "No sessions yet. From the next session on, this shows what it cost and saved.",
   "{zon} door zon, {wachten} door wachten": "{zon} from solar, {wachten} from waiting",
+  "{zon} door zon": "{zon} from solar",
   "Betaald": "Paid",
   "{zon} zon, {accu} uit de batterij": "{zon} solar, {accu} from the battery",
   "{zon} zon": "{zon} solar",

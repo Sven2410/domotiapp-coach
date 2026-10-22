@@ -134,6 +134,7 @@ export const OVERZICHT = {
   "Energieprijs": "Energy price",
   "Nog geen contract ingevuld": "No contract entered yet",
   "Laag tarief": "Low tariff",
+  "Elk uur dezelfde prijs": "Same price every hour",
   "Gemiddeld tarief": "Average tariff",
   "Hoog tarief": "High tariff",
   "Belastbaarheid": "Load",

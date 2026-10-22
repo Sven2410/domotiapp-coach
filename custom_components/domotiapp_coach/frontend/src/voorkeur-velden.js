@@ -16,7 +16,7 @@
  */
 
 import { WAKE_MODES, WEEKDAGEN, canSkipRelease, inTaal, releaseCopy, weekdag } from "./devices.js";
-import { terugleverBekend } from "./geld.js";
+import { terugleverBekend, vlakkePrijs } from "./geld.js";
 import { locale, nt, t } from "./i18n.js";
 
 const esc = (s) =>
@@ -39,8 +39,8 @@ const vink = (attr, sleutel, kop, uitleg) => `
  * gebruikt wel echt duidelijk", en "daar zou over de hele app meer uniformiteit in
  * mogen komen".
  */
-const blok = (kop, inhoud) => `
-  <div class="block">
+const blok = (kop, inhoud, rij = "") => `
+  <div class="block"${rij ? ` data-vk-rij="${rij}"` : ""}>
     <div class="block-title">${kop}</div>
     ${inhoud}
   </div>`;
@@ -96,7 +96,7 @@ function laadpaal(device) {
       <select id="vk-modus" data-vk="charge_mode">
         <option value="zon">${t("Zon: alleen op zonoverschot")}</option>
         <option value="continu">${t("Continu: altijd, met zon erbovenop")}</option>
-        <option value="goedkoopst">${t("Goedkoopst: de goedkoopste bekende uren")}</option>
+        <option value="goedkoopst" data-vk-goedkoopst>${t("Goedkoopst: de goedkoopste bekende uren")}</option>
       </select>
       <span class="sub">${t("Staat het schema aan, dan wint de planning. Op de kaart kies je per beurt Snel, Continu of Zon; als de kabel eruit gaat, geldt dit weer.")}</span>
     </div>
@@ -132,7 +132,7 @@ function thuisbatterij(device) {
     ${vink("data-vk-accu", "trade", t("Ontladen naar het net tijdens hoge tarieven."), t("De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis."))}
     <div class="notice" data-vk-rij="trade_kan_niet" hidden>${t(HANDELEN_KAN_NIET)}</div>
     ${getal("data-vk-accu", "trade_above", t("Alleen als de prijs boven (€/kWh)"), 'min="-1" max="2" step="0.01"', t("de coach bepaalt"))}
-    <p class="sub">${t("De prijzen zijn all-in, met belasting en opslag. Leeg: de coach kiest zelf de beste uren.")}</p>`)}
+    <p class="sub">${t("De prijzen zijn all-in, met belasting en opslag. Leeg: de coach kiest zelf de beste uren.")}</p>`, "handelen")}
     ${blok(t("Afschrijving"), `
     ${getal("data-vk-accu", "wear_per_kwh", t("Afschrijving (€ per kWh)"), 'min="0" max="1" step="0.001"', t("geen"),
       t("Wat elke kWh die uit de batterij komt aan slijtage kost. De coach laadt en ontlaadt pas als het verschil in prijs het verlies in de batterij én dit bedrag dekt. Leeg: alleen het verlies."))}
@@ -181,7 +181,7 @@ function airco() {
   return blok(t("Zo wil je het"), `
     ${getal("data-vk-airco", "target_c", t("Gewenste temperatuur (°C)"), 'min="7" max="35" step="0.5"', t("wat er op de airco staat"),
       t("Kouder dan dit: hij verwarmt bij. Warmer: hij koelt bij. Op temperatuur doet hij niets."))}
-    <div class="row">
+    <div class="row" data-vk-rij="run_on">
       <label for="vk-aan-op">${t("Aan op")}</label>
       <select id="vk-aan-op" data-vk-airco="run_on">
         <option value="zon">${t("Zon: alleen met zon over")}</option>
@@ -208,7 +208,10 @@ export function voorkeurHtml(device) {
  * in typt. En de rijen die bij een vinkje horen alleen als dat aanstaat.
  *
  * `contract` is dat uit de instellingen, voor het vinkje Handelen; zonder
- * contract blijft dat vinkje vrij.
+ * contract blijft dat vinkje vrij. Bij een vlakke prijs (v0.149.0, `vlakkePrijs`)
+ * verdwijnen Handelen en de keuze waarop een airco aan mag, en heet Goedkoopst
+ * bij de laadpaal Slim. Wat er stond blijft bewaard: de coach doet er bij een
+ * vlakke prijs niets mee, en na een overstap naar dynamisch staat het er weer.
  */
 export function vulVoorkeuren(root, device, actief = null, contract = null) {
   const b = device?.battery ?? {};
@@ -276,6 +279,16 @@ export function vulVoorkeuren(root, device, actief = null, contract = null) {
         ? t("De coach deelt de aanschafprijs door het aantal cycli maal de capaciteit van de batterij.")
         : t("Dat is € {bedrag} per kWh uit de batterij.", { bedrag: per.toLocaleString(locale(), { minimumFractionDigits: 3, maximumFractionDigits: 3 }) });
     uitkomst.hidden = !uitkomst.textContent;
+  }
+  // Een vlakke prijs (v0.149.0): wat op een goedkoper of duurder uur wacht doet niets.
+  const vlak = vlakkePrijs(contract);
+  rij("handelen", !vlak);
+  rij("run_on", !vlak);
+  const goedkoopst = root.querySelector("[data-vk-goedkoopst]");
+  if (goedkoopst) {
+    goedkoopst.textContent = vlak
+      ? t("Slim: eerst zon, dan het net buiten de avondpiek")
+      : t("Goedkoopst: de goedkoopste bekende uren");
   }
   // Handelen zonder terugleverprijs: uitzetten mag, aanzetten niet.
   const handel = [...root.querySelectorAll("[data-vk-accu]")].find((el) => el.dataset.vkAccu === "trade");
