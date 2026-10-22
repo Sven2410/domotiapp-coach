@@ -61,6 +61,7 @@ from .batterij import (
     VOL_MARGE,
     Batterij,
     Regelaar,
+    Rendement,
     Rendementmeter,
     Voorraad,
     auto_grens,
@@ -6158,6 +6159,40 @@ class ChargerCoach:
         if accu is not None and abs(float(rij.get("rte_accu") or 0.0) - accu) > 0.002:
             await self._async_batterij_bewaren(settings, device_id, {"rte_accu": round(accu, 4)})
 
+    def _rendement_bron(
+        self, device: dict[str, Any], capaciteit: float | None, rij: dict[str, Any], ingevuld: float | None
+    ) -> tuple[float | None, Rendement | None]:
+        """Met welk rendement de coach rekent (v0.145.0): het rendement heen en terug, en per vermogen of None.
+
+        De eigenaar op 22-10-2026: "ik zou bij rendement altijd het gemeten rendement
+        hanteren uit de aparte kwh meter, mits die aanwezig is. Is er geen aparte meter
+        aanwezig, dan moet je de interne RTE hanteren", en die interne "zouden de eigen
+        tellers moeten zijn, of het zelf geleerde mits dat betrouwbaarder is".
+
+        1. Een kWh-meter op de batterij: wat die over alles samen meet, of de laatste
+           meting als hij even niets zegt. Daar zit alles in, ook wat de batterij stil
+           verbruikt. Het zelf geleerde (v0.142.0) telt alleen stappen van een procent
+           tussen 10 en 90%, en kwam in een klantwoning op 85% waar de meter 76% zag.
+        2. Zonder meter het zelf geleerde, als er genoeg stappen zijn: dat meet aan de
+           wisselstroomkant, met het verlies in de omvormer erbij.
+        3. Anders de eigen tellers van de batterij. Die meten aan de accukant en zien
+           de omvormer niet, en tellen pas na tien keer de inhoud aan doorzet.
+        4. Anders wat de bewoner invulde; zonder dat is het onbekend.
+        """
+        if (device.get("entities") or {}).get("energy_in") and (device.get("entities") or {}).get("energy_out"):
+            meter = self._rte_gemeten(device, capaciteit) or (float(rij["rte"]) if rij.get("rte") else None)
+            if meter is not None:
+                return meter, None
+        geleerd = rendement_uit_stappen(rij.get("rte_steps"))
+        if geleerd is not None:
+            return geleerd.rte, geleerd
+        accu = self._rte_gemeten(device, capaciteit, ("accu_in", "accu_out")) or (
+            float(rij["rte_accu"]) if rij.get("rte_accu") else None
+        )
+        if accu is not None:
+            return accu, None
+        return (ingevuld / 100.0 if ingevuld else None), None
+
     def _batterij_van(
         self, now: datetime, settings: dict[str, Any], device: dict[str, Any], rij: dict[str, Any]
     ) -> Batterij:
@@ -6185,23 +6220,7 @@ class ChargerCoach:
             return None
 
         capaciteit = _kwh(self.hass, entities.get("capacity")) or getal("capacity_kwh")
-        gemeten = self._rte_gemeten(device, capaciteit)
-        # Met een kWh-meter op de batterij wint de meting, en de laatste meting
-        # als de meter even niets zegt. Zonder meter geldt wat de bewoner invulde.
-        # Tot v0.101.2 kwam ook een ingevuld rendement in `rte` in de opslag, en
-        # die ging vóór het veld: wat er één keer stond bleef staan, ook na
-        # aanpassen of leegmaken. Nu staat daar alleen een meting (`_one_batterij`).
-        ingevuld = getal("rte_percent")
-        ingevuld_rte = ingevuld / 100.0 if ingevuld else None
-        bewaard = float(rij["rte"]) if rij.get("rte") else None
-        met_meter = bool(entities.get("energy_in") and entities.get("energy_out"))
-        rte = gemeten or ((bewaard or ingevuld_rte) if met_meter else ingevuld_rte)
-        # Het rendement per vermogen gaat voor alles (v0.142.0): het is een
-        # meting, per richting, en hij werkt ook zonder kWh-meter. Zie
-        # `Rendementmeter` in batterij.py.
-        rendement = rendement_uit_stappen(rij.get("rte_steps"))
-        if rendement is not None:
-            rte = rendement.rte
+        rte, rendement = self._rendement_bron(device, capaciteit, rij, getal("rte_percent"))
 
         laatst_vol = _tijdstip(rij.get("full_at"))
         return Batterij(
@@ -6412,10 +6431,10 @@ class ChargerCoach:
         gemeten = self._rte_gemeten(device, b.capacity_kwh)
         if gemeten is not None and abs(float(rij.get("rte") or 0.0) - gemeten) > 0.002:
             nieuw["rte"] = round(gemeten, 4)
-        # Wat de eigen tellers van de batterij zeggen, alleen voor de kaart
-        # (v0.118.0). Die meten aan de accukant en zien het verlies in de
-        # omvormer niet, dus `_batterij_van` leest dit nooit. De eigenaar op
-        # 14-10-2026: "ja alleen op de kaart".
+        # Wat de eigen tellers van de batterij zeggen (v0.118.0). Die meten aan de
+        # accukant en zien het verlies in de omvormer niet; sinds v0.145.0 rekent de
+        # coach ermee als er geen kWh-meter en geen zelf geleerd rendement is
+        # (`_rendement_bron`).
         accu = self._rte_gemeten(device, b.capacity_kwh, ("accu_in", "accu_out"))
         if accu is not None and abs(float(rij.get("rte_accu") or 0.0) - accu) > 0.002:
             nieuw["rte_accu"] = round(accu, 4)

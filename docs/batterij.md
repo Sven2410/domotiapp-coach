@@ -1451,3 +1451,29 @@ de laadgrens ("{naam} is geladen tot 80%; hij volgt het plan weer."). Voor de ka
 DomotiApp Lovelace: de number `vol_tot` en het attribuut `vol_tot` op de sensor; het contract
 blijft 1, want er komt alleen iets bij. Proef 185 in test_coach.py.
 
+
+## Met welk rendement de coach rekent (v0.145.0)
+
+De eigenaar op 22-10-2026: "ik zou bij rendement altijd het gemeten rendement hanteren uit de aparte
+kwh meter, mits die aanwezig is. Is er geen aparte meter aanwezig, dan moet je de interne RTE
+hanteren", en die interne "zouden de eigen tellers moeten zijn, of het zelf geleerde mits dat
+betrouwbaarder is". Aanleiding: in een klantwoning leerde de coach uit stappen van een procent 85%
+rond 2 kW, terwijl de kWh-meter op de batterij over alles samen 76% telde. Bij een verkoop op 0,353
+na laden op 0,296 rekende hij met 85% winst (omslag 0,348); met 76% ligt de omslag rond 0,39.
+
+`_rendement_bron` in coach.py, in deze volgorde:
+
+1. een kWh-meter op de batterij (`energy_in`, `energy_out`): wat die over alles samen meet
+   (`rendement_uit_tellers`, na tien keer de inhoud aan doorzet), of de laatste meting (`rte` in
+   `battery_state`). Geen rendement per vermogen: de meter telt ook wat de batterij stil verbruikt
+   en wat er buiten 10 tot 90% gebeurt, het zelf geleerde niet;
+2. zonder meter het zelf geleerde per vermogen (`rte_steps`, v0.142.0), als het genoeg stappen heeft.
+   Dat gaat voor de eigen tellers, omdat het aan de wisselstroomkant meet, met het verlies in de
+   omvormer erbij;
+3. de eigen tellers van de batterij (`accu_in`, `accu_out`, of de laatste `rte_accu`); tot v0.145.0
+   stonden die alleen in de pop-up;
+4. wat de bewoner invulde (`rte_percent`); zonder dat is het onbekend en plant hij niet.
+
+Een meting gaat dus altijd voor wat er ingevuld is; tot v0.145.0 ging een ingevuld rendement voor
+de eigen tellers. De pop-up volgt dezelfde volgorde ("gemeten met de kWh-meter", "zelf geleerd",
+"gemeten in de accu", "opgegeven"; `data-source.js`). Proef 154 en 190 in test_coach.py.
