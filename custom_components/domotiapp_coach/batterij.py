@@ -2342,6 +2342,9 @@ GROWATT_SPELING_SOC = 3
 # Hoe lang voor een vak de coach het vermogen en de stopgrens nog bijstelt. Daarvoor
 # schuift het plan mee met hoe leeg de avond hem maakt.
 GROWATT_VOORAF = timedelta(minutes=30)
+# Over hoeveel nachten de coach zijn schema bijstelt, en vanaf hoeveel (v0.151.0).
+GROWATT_NACHTEN = 7
+GROWATT_MIN_NACHTEN = 3
 GROWATT_MIN_VERMOGEN = 6
 
 
@@ -2435,7 +2438,7 @@ def _klok(moment: datetime) -> str:
     return moment.strftime("%H:%M")
 
 
-def growatt_schema(uren: list[Uur], now: datetime, b: Batterij) -> GrowattSchema:
+def growatt_schema(uren: list[Uur], now: datetime, b: Batterij, bijstel_kwh: float = 0.0) -> GrowattSchema:
     """Het laadschema voor een Growatt uit het plan van de batterij.
 
     Wat het plan in de komende uren van het net wil halen, uitgesmeerd over het hele
@@ -2497,16 +2500,19 @@ def growatt_schema(uren: list[Uur], now: datetime, b: Batterij) -> GrowattSchema
         gebruikt.append(vak)
     if not gebruikt:
         return GrowattSchema()
+    # Wat de nachten hiervoor leerden (`growatt_bijstelling`): meer of minder dan het plan.
+    begin, eind, kwh, soc_eind = gebruikt[0]
+    kwh_plan = kwh
+    kwh = kwh + bijstel_kwh
+    if kwh < GROWATT_MIN_KWH:
+        return GrowattSchema()
+    soc_eind = soc_eind + (kwh - kwh_plan) / b.capacity_kwh * 100.0
     # Het vermogen over wat er van het vak nog over is.
-    watt = max(
-        kwh / max(echte_duur(max(begin, now), eind).total_seconds() / 3600.0, 1 / 60) * 1000.0
-        for begin, eind, kwh, _ in gebruikt
-    )
+    watt = kwh / max(echte_duur(max(begin, now), eind).total_seconds() / 3600.0, 1 / 60) * 1000.0
     pct = min(100, max(1, int(-(-watt * 100 // b.max_charge_w))))
-    stop = min(int(b.soc_max), max(int(b.soc or 0) + 1, int(-(-gebruikt[-1][3] // 1))))
+    stop = min(int(b.soc_max), max(int(b.soc or 0) + 1, int(-(-soc_eind // 1))))
     return GrowattSchema(
-        net=True, vermogen_pct=pct, stop_soc=stop, vakken=klok, tot=gebruikt[-1][1],
-        kwh=sum(vak[2] for vak in gebruikt),
+        net=True, vermogen_pct=pct, stop_soc=stop, vakken=klok, tot=eind, kwh=kwh,
     )
 
 
@@ -2551,3 +2557,29 @@ def growatt_max_w(metingen: list | None) -> float | None:
     if len(rij) < GROWATT_MIN_VERMOGEN:
         return None
     return rij[len(rij) // 2]
+
+
+def growatt_nacht(teveel_kwh: float, tekort_kwh: float, net_kwh: float) -> float:
+    """Wat een nacht had moeten laden boven op wat hij laadde, in kWh (v0.151.0).
+
+    `teveel_kwh` is de zon die de volgende dag naar het net ging terwijl de batterij vol
+    was; hooguit wat er die nacht van het net in ging (`net_kwh`), want meer had minder
+    laden niet gescheeld. `tekort_kwh` is wat het huis buiten het goedkope stuk van het net
+    haalde terwijl de batterij op zijn vloer stond. Positief: meer laden; negatief: minder.
+    """
+    return max(0.0, tekort_kwh) - min(max(0.0, teveel_kwh), max(0.0, net_kwh))
+
+
+def growatt_bijstelling(nachten: list | None, capaciteit_kwh: float | None) -> float:
+    """Hoeveel het schema boven of onder het plan laadt, in kWh, uit de laatste nachten.
+
+    De mediaan van de laatste `GROWATT_NACHTEN`, vanaf `GROWATT_MIN_NACHTEN`; nooit meer
+    dan de inhoud. Eén nacht met een feest of een dag zonder zon bepaalt het dus niet.
+    """
+    rij = [float(n) for n in (nachten or [])[-GROWATT_NACHTEN:] if isinstance(n, (int, float))]
+    if len(rij) < GROWATT_MIN_NACHTEN or not capaciteit_kwh:
+        return 0.0
+    rij.sort()
+    m = len(rij) // 2
+    mediaan = rij[m] if len(rij) % 2 else (rij[m - 1] + rij[m]) / 2
+    return max(-capaciteit_kwh, min(capaciteit_kwh, mediaan))

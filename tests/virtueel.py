@@ -1114,6 +1114,9 @@ class Scenario:
     # zonder energiedashboard: de kromme alleen via de integratie van de
     # ingevulde sensoren, en die sensoren zelf een uur achter (v0.100.1).
     voorspeller: str = "dashboard"
+    # Een weerentiteit met een uurverwachting en een plek op de kaart (v0.151.0), voor de
+    # zon uit eigen opwek: de bewolking volgt het weer van `zon` (`Wereld.bewolking`).
+    weer: bool = False
     # Wat de coach bij een eerdere beurt over deze auto leerde: kW per band van
     # tien procent, zoals `car_pace` in de instellingen, of (kW, vanaf welke
     # accustand hij remde). Zie `_tempo_leren`.
@@ -1948,6 +1951,8 @@ class Wereld:
             return {"state": waarde, "attributes": {"unit_of_measurement": eenheid}}
 
         z(E["zon"], weg if p1_weg else w(f"{self.zon_w:.0f}", "W"))
+        if self.s.weer:
+            z("weather.v_weer", {"state": "cloudy", "attributes": {"cloud_coverage": self.bewolking(nu)}})
         z(E["afname"], weg if p1_weg else w(f"{max(0.0, gemeld):.0f}", "W"), last_updated=stempel)
         z(E["teruglevering"], weg if p1_weg else w(f"{max(0.0, -gemeld):.0f}", "W"), last_updated=stempel)
         teken = -1 if self.s.net == "signed-omgekeerd" else 1
@@ -2143,6 +2148,13 @@ class Wereld:
                 uit[uur] = kwh
         return self._als_forecast_solar(uit)
 
+    # Hoeveel bewolking bij elk weer van `Zon` hoort, in procent, zoals een weerbericht het zegt.
+    BEWOLKING = {"helder": 10.0, "half": 50.0, "wisselend": 50.0, "bewolkt": 75.0, "geen": 100.0,
+                 "middag-dicht": 60.0}
+
+    def bewolking(self, moment: dt.datetime) -> float:
+        return self.BEWOLKING.get(self.zon.weer_op(moment), 50.0)
+
     def archief(self):
         """Zeven dagen kwartieren van vóór de proef, zoals archive.py ze bewaart."""
         wereld = self
@@ -2275,6 +2287,12 @@ class Diensten:
     async def async_call(self, domein, dienst, data, blocking=False, return_response=False):
         if domein == "growatt_server":
             return self._growatt(dienst, data)
+        if domein == "weather" and dienst == "get_forecasts" and self.wereld.s.weer:
+            nu = self.wereld.nu.replace(minute=0, second=0, microsecond=0)
+            return {data.get("entity_id"): {"forecast": [
+                {"datetime": (nu + dt.timedelta(hours=i)).replace(tzinfo=dt.timezone.utc).isoformat(),
+                 "cloud_coverage": self.wereld.bewolking(nu + dt.timedelta(hours=i))}
+                for i in range(48)]}}
         # Home Assistant slaat een dienst aan een onbereikbare entiteit stil
         # over: de stuurknop van een Anker in zijn eigen stand (`knop_weg`).
         if data.get("entity_id") in (E["bat_stuur"], E["bat_richting"]):
@@ -2378,6 +2396,37 @@ class Diensten:
 # --- draaien -----------------------------------------------------------------
 
 
+def plek_voor(zon: Zon, nu: dt.datetime) -> tuple[float, float]:
+    """Een plek waar de echte zon op deze dag opkomt en ondergaat zoals `Zon` hem tekent.
+
+    De wereld rekent lokaal en in UTC tegelijk, en zijn zon komt op om `opkomst` en gaat
+    onder om `onder`. De zon uit eigen opwek (v0.151.0) rekent met de stand van de echte zon;
+    op die plek valt die samen met de zon van de wereld.
+    """
+    hoogte = sys.modules["domotiapp_coach.zon"].zonhoogte
+    dag = dt.datetime.combine(nu.date(), dt.time(0), tzinfo=dt.timezone.utc)
+    middag = (zon.opkomst + zon.onder) / 2
+
+    def boog(breedte: float, lengte: float) -> float:
+        # Hoe lang de zon boven de horizon staat, in uren, per minuut geteld.
+        return sum(hoogte(dag + dt.timedelta(minutes=m), breedte, lengte) > 0 for m in range(1440)) / 60
+
+    lengte = 0.0
+    for _ in range(3):
+        top = max(range(1440), key=lambda m: hoogte(dag + dt.timedelta(minutes=m), 0.0, lengte)) / 60
+        lengte += (top - middag) * 15
+    laag, hoog = -60.0, 60.0
+    nodig = zon.onder - zon.opkomst
+    stijgt = boog(30.0, lengte) > boog(-30.0, lengte)
+    for _ in range(20):
+        midden = (laag + hoog) / 2
+        if (boog(midden, lengte) < nodig) == stijgt:
+            laag = midden
+        else:
+            hoog = midden
+    return round((laag + hoog) / 2, 2), round(lengte, 2)
+
+
 def _prijs_nu(coach, inst, nu) -> tuple[float | None, float | None]:
     """Wat een kWh op dit moment kost en opbrengt, zoals de coach het ziet.
 
@@ -2461,6 +2510,10 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
     stap_s = s.stap_seconden
     verloop = Verloop(scenario=s, stap_uur=stap_s / 3600)
     hass = NepHass({})
+    if s.weer:
+        hass.config.latitude, hass.config.longitude = plek_voor(wereld.zon, wereld.nu)
+        hass.states.async_all = lambda domein: (
+            [types.SimpleNamespace(entity_id="weather.v_weer")] if domein == "weather" else [])
     hass.services = Diensten(wereld, hass, verloop)
     store = NepStore(inst)
     hass.data["domotiapp_coach"] = {"store": store}

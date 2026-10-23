@@ -2397,6 +2397,17 @@ if (vl := v("growatt-zon")):
              not nacht, f"{len(nacht)} minuten")
     controle("growatt-zon: en daarvoor hooguit twee schrijfacties",
              len(vl.gw_schrijf) <= 2, f"{vl.gw_schrijf}")
+# Zonder zonvoorspeller, alleen het weer van Home Assistant (v0.151.0): de zon van morgen uit
+# de eigen opwek. Bij de bouw: de eerste nacht niets van het net, € 0,63 tegen € 2,62 zonder
+# batterij; dezelfde dag als `growatt-zon`, waar de voorspeller van het dashboard het zei.
+if (vl := v("growatt-eigen-zon")):
+    nacht = [r for r in vl.bat_verloop if r[2] > 100 and r[1] > 100 and r[0] < bat_moment(vl, "09:00")]
+    print(f"  growatt-eigen-zon: {[(f'{t:%a %H:%M}', aan, pct) for t, aan, pct, _, _ in vl.gw_schrijf]}, "
+          f"€{vl.bat_kosten_met:.2f} tegen €{vl.bat_kosten_zonder:.2f}")
+    controle("growatt-eigen-zon: zonder voorspeller ziet hij de zon van morgen in zijn eigen opwek, en laadt hij "
+             "de eerste nacht niets van het net", not nacht, f"{len(nacht)} minuten")
+    controle("growatt-eigen-zon: en dat kost minder dan zonder batterij", vl.bat_kosten_met < vl.bat_kosten_zonder,
+             f"€{vl.bat_kosten_met:.2f} tegen €{vl.bat_kosten_zonder:.2f}")
 if (vl := v("growatt-schaduw")):
     zou = [g.get("message") or "" for g in vl.geschiedenis if "zou dit schrijven" in (g.get("message") or "")]
     print(f"  growatt-schaduw: {zou}")

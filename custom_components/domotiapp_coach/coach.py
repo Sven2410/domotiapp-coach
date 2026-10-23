@@ -70,8 +70,10 @@ from .batterij import (
     Voorraad,
     auto_grens,
     balans_kwh,
+    growatt_bijstelling,
     growatt_inhoud,
     growatt_max_w,
+    growatt_nacht,
     growatt_schema,
     growatt_vol,
     handelen_kan_niet,
@@ -164,7 +166,8 @@ from .planner import (
     zet_zone,
 )
 from .ontvangers import ontvangers
-from .storage import async_get_berichten, async_get_beurten, async_get_meldingen, async_get_store
+from .storage import async_get_berichten, async_get_beurten, async_get_meldingen, async_get_store, async_get_zon
+from .zon import ZON_DAGEN, zon_uit_opwek
 from .units import hour_to_watts, to_kwh, to_watts
 
 _LOGGER = logging.getLogger(__name__)
@@ -365,8 +368,9 @@ GROWATT_WACHT = timedelta(seconds=45)
 GROWATT_OPNIEUW = timedelta(hours=1)
 GROWATT_FOUTEN = 3
 GROWATT_BESTENDIG = timedelta(minutes=5)
-# Hoeveel metingen van de inhoud en van het laadvermogen hij bewaart.
+# Hoeveel metingen van de inhoud en van het laadvermogen hij bewaart, en hoeveel nachten.
 GROWATT_BEWAAR = 30
+GROWATT_NACHTEN_BEWAAR = 14
 # Onder hoeveel watt zon het laadvermogen een meting van het net is.
 GROWATT_ZON_W = 50.0
 # De vloer: onder hoeveel watt de batterij stil staat, en boven hoeveel watt het huis
@@ -609,6 +613,8 @@ HUIS_VERVERSEN = timedelta(hours=1)
 # van salderen nog bij komt, eens per dag uit de statistiek van Home Assistant.
 JAARSALDO_VERVERSEN = timedelta(hours=24)
 ZON_VERVERSEN = timedelta(minutes=30)
+# Hoeveel uur vooruit de zon uit de eigen opwek gaat (v0.151.0): tot morgenavond.
+ZON_VOORUIT_UREN = 40
 
 # Over hoeveel dagen het huisverbruik wordt gemeten. Een week vangt het verschil
 # tussen doordeweeks en weekend en is kort genoeg om een seizoen te volgen.
@@ -7325,7 +7331,10 @@ class ChargerCoach:
         if stuurt:
             # Het kasboek, zoals bij een batterij met een regelaar, maar eens per ronde.
             self._kasboek(sessie, settings, device_id, now, self._net_nu(settings)[0], self._batterij_w(device), b)
-        wil = growatt_schema(besluit.uren, now, b)
+            await self._async_growatt_nacht(now, settings, device, b, sessie)
+            rij = self._batterij_rij(settings, device_id)
+        bijstel = growatt_bijstelling(rij.get("growatt_nachten"), b.capacity_kwh)
+        wil = growatt_schema(besluit.uren, now, b, bijstel)
         if not b.max_charge_w:
             self.state[device_id]["tip"] = t(
                 "De coach weet nog niet hoe snel deze Growatt laadt, dus hij laadt hem niet van het net. Vul "
@@ -7530,6 +7539,48 @@ class ChargerCoach:
     def _growatt_vroeg(self, wil: GrowattSchema, staat: GrowattSchema, now: datetime) -> bool:
         """Of het vak nog niet loopt: dan schrijft hij alleen andere vakken, niet een ander vermogen."""
         return bool(wil.net and staat.net and not self._growatt_in_vak(wil, now))
+
+    async def _async_growatt_nacht(
+        self, now: datetime, settings: dict[str, Any], device: dict[str, Any], b: Batterij,
+        sessie: dict[str, Any],
+    ) -> None:
+        """Na elke nacht nakijken of het schema te veel of te weinig laadde (v0.151.0).
+
+        Vanaf het eind van een vak dat de coach schreef tot het begin van het volgende telt
+        hij twee dingen: zon die naar het net gaat terwijl de batterij vol is (te veel van het
+        net geladen), en wat het huis van het net haalt terwijl de batterij op zijn vloer staat
+        (te weinig). En in het vak zelf wat er van het net in ging. Begint het volgende vak,
+        dan gaat de nacht met `growatt_nacht` in `growatt_nachten`, en stelt
+        `growatt_bijstelling` het schema daarop bij.
+        """
+        geschreven: GrowattSchema | None = sessie.get("growatt_geschreven")
+        dag = sessie.setdefault("growatt_dag", {"net": 0.0, "teveel": 0.0, "tekort": 0.0, "in_vak": None})
+        vorige = sessie.get("growatt_dag_op")
+        sessie["growatt_dag_op"] = now
+        in_vak = bool(geschreven is not None and geschreven.net and self._growatt_in_vak(geschreven, now))
+        if dag["in_vak"] is False and in_vak and (dag["net"] > 0 or dag["teveel"] > 0 or dag["tekort"] > 0):
+            # Een nieuw vak: de dag ervoor is klaar.
+            fout = growatt_nacht(dag["teveel"], dag["tekort"], dag["net"])
+            rij = self._batterij_rij(settings, device.get("id", ""))
+            nachten = [*list(rij.get("growatt_nachten") or [])[-(GROWATT_NACHTEN_BEWAAR - 1):], round(fout, 3)]
+            _LOGGER.info("%s: nacht nagekeken: %.2f kWh van het net, %.2f te veel, %.2f te weinig",
+                         device.get("id"), dag["net"], dag["teveel"], dag["tekort"])
+            await self._async_batterij_bewaren(settings, device.get("id", ""), {"growatt_nachten": nachten})
+            dag.update(net=0.0, teveel=0.0, tekort=0.0)
+        dag["in_vak"] = in_vak
+        net_w, _ = self._net_nu(settings)
+        bat_w = self._batterij_w(device)
+        if vorige is None or net_w is None or bat_w is None or b.soc is None:
+            return
+        uren = min(60.0, max(0.0, (now - vorige).total_seconds())) / 3600.0
+        if in_vak:
+            if bat_w > 0 and net_w > 0:
+                dag["net"] += min(bat_w, net_w) / 1000.0 * uren
+        else:
+            if net_w < 0 and b.soc >= b.soc_max - VOL_MARGE:
+                dag["teveel"] += -net_w / 1000.0 * uren
+            if net_w > 0 and b.soc <= b.soc_min + 1.0 and abs(bat_w) < GROWATT_STIL_W:
+                dag["tekort"] += net_w / 1000.0 * uren
 
     @staticmethod
     def _growatt_begint(schema: GrowattSchema, now: datetime) -> timedelta:
@@ -9194,7 +9245,102 @@ class ChargerCoach:
             self._zon_kwh, self._zon_geschat = kromme, False
             return
 
-        self._zon_kwh, self._zon_geschat = self._zon_uit_sensoren(settings, now), True
+        sensoren = self._zon_uit_sensoren(settings, now)
+        # Zegt de klant niets over de rest van de dag, dan de eigen opwek met het weer
+        # (v0.151.0, zon.py). Dit uur en het volgende uit de sensoren gaan voor: dat zijn
+        # metingen.
+        uur = now.replace(minute=0, second=0, microsecond=0)
+        if not any(k > uur + timedelta(hours=1) for k in sensoren):
+            eigen = await self._async_zon_uit_opwek(settings, now)
+            if eigen:
+                sensoren = {**eigen, **sensoren}
+        self._zon_kwh, self._zon_geschat = sensoren, True
+
+    async def _async_zon_uit_opwek(self, settings: dict[str, Any], now: datetime) -> dict[datetime, float]:
+        """De zonverwachting uit de eigen opwek en het weer, zonder paneelgegevens (v0.151.0).
+
+        De opwek per uur uit de eigen kwartieropslag, het weer uit de eerste weerentiteit die
+        een uurverwachting met bewolking geeft, en wat dat weer op elk voorbij uur zei uit
+        `ZonStore`. Het rekenwerk staat in zon.py. Alles in UTC; de uitkomst in de tijd van
+        het huis, zoals de andere bronnen.
+        """
+        zonnen = zonsensoren(settings)
+        breedte = getattr(self.hass.config, "latitude", None)
+        lengte = getattr(self.hass.config, "longitude", None)
+        if not zonnen or breedte is None or lengte is None:
+            return {}
+        einde = dt_util.utcnow()
+        try:
+            rijen = await async_get_archive(self.hass).async_lees(
+                zonnen, einde - timedelta(days=ZON_DAGEN + 1), einde
+            )
+        except Exception:  # noqa: BLE001 - zonder geschiedenis geen verwachting
+            _LOGGER.debug("geen eigen opwek voor de zonverwachting", exc_info=True)
+            return {}
+        # Per uur in UTC, alleen hele uren: vier kwartieren van elke omvormer.
+        per_uur: dict[datetime, list[float]] = {}
+        for zon_id in zonnen:
+            for rij in rijen.get(zon_id, []):
+                start = datetime.fromtimestamp(int(rij["start"]), tz=timezone.utc)
+                sleutel = (start.replace(minute=0, second=0, microsecond=0), zon_id)
+                per_uur.setdefault(sleutel, []).append(max(0.0, float(rij.get("gemiddeld") or 0.0)))
+        opwek: dict[datetime, float] = {}
+        for (uur, _), watts in per_uur.items():
+            if len(watts) == 4:
+                opwek[uur] = opwek.get(uur, 0.0) + sum(watts) / 4.0 / 1000.0
+        if not opwek:
+            return {}
+
+        nu_utc = dt_util.utcnow().replace(minute=0, second=0, microsecond=0)
+        nu_bewolking, straks = await self._async_weer()
+        geheugen = async_get_zon(self.hass)
+        if nu_bewolking is not None:
+            await geheugen.async_noteer(nu_utc, nu_bewolking)
+        toen: dict[datetime, float] = {}
+        for sleutel, procent in (await geheugen.async_bewolking()).items():
+            try:
+                toen[datetime.fromisoformat(sleutel)] = procent
+            except ValueError:
+                continue
+        uren = [nu_utc + timedelta(hours=i) for i in range(ZON_VOORUIT_UREN)]
+        uit = await self.hass.async_add_executor_job(
+            partial(zon_uit_opwek, opwek, uren, breedte, lengte, toen, straks, dt_util.utcnow())
+        )
+        return {dt_util.as_local(uur).replace(tzinfo=None): kwh for uur, kwh in uit.items()}
+
+    async def _async_weer(self) -> tuple[float | None, dict[datetime, float]]:
+        """De bewolking nu en per komend uur, uit de eerste weerentiteit die dat geeft (v0.151.0).
+
+        `weather.get_forecasts` met een uurverwachting, zoals elke weerintegratie van Home
+        Assistant die uren kent hem geeft (Met.no, de standaard van een nieuwe installatie,
+        doet dat). Zonder weer: niets, en dan rekent de coach met hoe het de laatste dagen ging.
+        """
+        try:
+            namen = sorted(s.entity_id for s in self.hass.states.async_all("weather"))
+        except Exception:  # noqa: BLE001 - zonder weer gewoon zonder
+            return None, {}
+        for naam in namen:
+            staat = self.hass.states.get(naam)
+            nu = (getattr(staat, "attributes", None) or {}).get("cloud_coverage")
+            try:
+                async with asyncio.timeout(10):
+                    antwoord = await self.hass.services.async_call(
+                        "weather", "get_forecasts", {"entity_id": naam, "type": "hourly"},
+                        blocking=True, return_response=True,
+                    )
+            except Exception:  # noqa: BLE001 - een weerentiteit zonder uren
+                continue
+            rijen = ((antwoord or {}).get(naam) or {}).get("forecast") or []
+            straks: dict[datetime, float] = {}
+            for rij in rijen:
+                tijd = dt_util.parse_datetime(str(rij.get("datetime") or ""))
+                bewolking = rij.get("cloud_coverage")
+                if tijd is None or not isinstance(bewolking, (int, float)):
+                    continue
+                straks[dt_util.as_utc(tijd).replace(minute=0, second=0, microsecond=0)] = float(bewolking)
+            if straks:
+                return (float(nu) if isinstance(nu, (int, float)) else None), straks
+        return None, {}
 
     async def _async_zon_uit_dashboard(self) -> dict[datetime, float]:
         """De uurkromme die het energiedashboard van Home Assistant zelf toont.

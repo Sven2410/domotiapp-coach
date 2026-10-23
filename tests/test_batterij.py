@@ -1513,6 +1513,80 @@ controle("een stuk waarin de teller sprong telt niet zwaar: de mediaan",
 controle("het laadvermogen pas na zes metingen, en dan de mediaan: 1570 W bij 20% is 7850 W",
          bat.growatt_max_w([7850] * 5) is None and bat.growatt_max_w([7850, 7800, 7900, 7850, 7700, 7850]) == 7850)
 
+print("=== 51. de zon zonder paneelgegevens, en het schema bijstellen na elke nacht (v0.151.0) ===")
+# De eigenaar op 22-10-2026: "Zon ZONDER paneelgegevens. Leer per uur van de dag een
+# helderhemel-omhullende uit de eigen opwek, meegeschoven met de zonnestand, en schaal die met
+# de weersverwachting die HA al heeft." Een dak in Nederland (52 N, 5 O), in UTC.
+zon = sys.modules["domotiapp_coach.zon"] if "domotiapp_coach.zon" in sys.modules else __import__(
+    "domotiapp_coach.zon", fromlist=["zon"])
+import math as _m
+UTC = dt.timezone.utc
+hoog = lambda t: _m.degrees(_m.asin(zon.zonhoogte(t, 52.0, 5.0)))  # noqa: E731
+print(f"  zonnestand 23-10 11:30 UTC {hoog(dt.datetime(2026, 10, 23, 11, 30, tzinfo=UTC)):.1f} graden, "
+      f"21-06 11:40 {hoog(dt.datetime(2026, 6, 21, 11, 40, tzinfo=UTC)):.1f}")
+controle("de zon staat eind oktober 's middags rond 26 graden en in juni rond 61",
+         abs(hoog(dt.datetime(2026, 10, 23, 11, 30, tzinfo=UTC)) - 26.2) < 1.0
+         and abs(hoog(dt.datetime(2026, 6, 21, 11, 40, tzinfo=UTC)) - 61.5) < 1.0)
+
+
+def dak51(dag, factor):
+    """Een dak van 4 kWp: wat het per uur deed, evenredig met de zonnestand, maal het weer."""
+    uit = {}
+    for h in range(24):
+        t = dt.datetime(2026, 10, dag, h, tzinfo=UTC)
+        s = zon.zonhoogte(t + dt.timedelta(minutes=30), 52.0, 5.0)
+        uit[t] = round(max(0.0, 4.0 * s) * factor(dag, h), 3)
+    return uit
+
+
+# Twee weken: elke derde dag helder, de rest half bewolkt (de helft).
+opwek51 = {}
+for d in range(8, 22):
+    opwek51.update(dak51(d, lambda dag, h: 1.0 if dag % 3 == 0 else 0.5))
+uren51 = [dt.datetime(2026, 10, 22, h, tzinfo=UTC) for h in range(24)]
+helder51 = zon.heldere_kromme(opwek51, uren51, 52.0, 5.0)
+echt51 = dak51(22, lambda dag, h: 1.0)
+print(f"  heldere dag 22-10 om 12 UTC: {helder51[uren51[12]]:.3f} kWh, het dak helder {echt51[uren51[12]]:.3f}")
+controle("de heldere dag is de hoogste opwek van de laatste weken, meegeschoven met de zonnestand",
+         all(abs(helder51[u] - echt51[u]) < 0.01 for u in uren51 if echt51[u] > 0.2), "")
+controle("'s nachts nul", helder51[uren51[2]] == 0.0)
+
+# Het weer: helder (10%) gaf de hele dag, half bewolkt (60%) de helft.
+bewolking51 = {u: (10.0 if u.day % 3 == 0 else 60.0) for u in opwek51}
+nu51 = dt.datetime(2026, 10, 22, 0, tzinfo=UTC)
+straks51 = {u: 60.0 for u in uren51}
+v51 = zon.zon_uit_opwek(opwek51, uren51, 52.0, 5.0, bewolking51, straks51, nu51)
+print(f"  morgen 60% bewolkt: {sum(v51.values()):.2f} kWh, helder {sum(echt51.values()):.2f}")
+controle("bij 60% bewolking verwacht hij wat het dak bij 60% deed: de helft",
+         abs(sum(v51.values()) - sum(echt51.values()) / 2) < 0.2, f"{sum(v51.values()):.2f}")
+v51b = zon.zon_uit_opwek(opwek51, uren51, 52.0, 5.0, bewolking51, {u: 5.0 for u in uren51}, nu51)
+controle("en bij helder weer de hele heldere dag", abs(sum(v51b.values()) - sum(echt51.values())) < 0.2,
+         f"{sum(v51b.values()):.2f}")
+# Zonder weerbericht: zoals de laatste dagen ging (19, 20 en 21 oktober: 0,5, 0,5 en 1,0).
+v51c = zon.zon_uit_opwek(opwek51, uren51, 52.0, 5.0, None, None, nu51)
+controle("zonder weer: de mediaan van de laatste drie dagen, de helft",
+         abs(sum(v51c.values()) - sum(echt51.values()) / 2) < 0.2, f"{sum(v51c.values()):.2f}")
+controle("zonder eigen opwek: niets", zon.zon_uit_opwek({}, uren51, 52.0, 5.0) == {})
+
+# Na elke nacht: te veel van het net als de zon de volgende dag naar het net ging terwijl hij
+# vol zat (nooit meer dan er van het net in ging), te weinig als hij op zijn vloer stond.
+controle("een nacht met 6 kWh van het net en 2 kWh zon naar het net bij een volle batterij: 2 te veel",
+         bat.growatt_nacht(2.0, 0.0, 6.0) == -2.0)
+controle("meer zon naar het net dan er van het net in ging telt tot wat er in ging",
+         bat.growatt_nacht(9.0, 0.0, 6.0) == -6.0)
+controle("1,5 kWh van het net op de vloer: 1,5 te weinig", bat.growatt_nacht(0.0, 1.5, 6.0) == 1.5)
+controle("bijstellen pas na drie nachten", bat.growatt_bijstelling([-2.0, -2.0], 12.5) == 0.0
+         and bat.growatt_bijstelling([-2.0, -2.0, 5.0], 12.5) == -2.0)
+controle("nooit meer dan de inhoud", bat.growatt_bijstelling([20.0] * 3, 12.5) == 12.5)
+s51 = bat.growatt_schema(p50.uren, NU50, b50)
+s51b = bat.growatt_schema(p50.uren, NU50, b50, bijstel_kwh=-2.0)
+print(f"  zonder bijstelling {s51.kwh:.1f} kWh tot {s51.stop_soc}%, met -2 kWh {s51b.kwh:.1f} kWh tot {s51b.stop_soc}%")
+controle("2 kWh minder: lager vermogen en een lagere stopgrens, dezelfde vakken",
+         abs(s51b.kwh - (s51.kwh - 2.0)) < 0.01 and s51b.stop_soc < s51.stop_soc
+         and s51b.vermogen_pct <= s51.vermogen_pct and s51b.vakken == s51.vakken, f"{s51} {s51b}")
+controle("zoveel minder dat er niets overblijft: geen schema",
+         not bat.growatt_schema(p50.uren, NU50, b50, bijstel_kwh=-50.0).net)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

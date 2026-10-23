@@ -1631,7 +1631,30 @@ van zijn vermogen, om 09:00 vol, en € 2,98 tegen € 4,13 zonder batterij. Op 
 zon hem en laadt hij de eerste nacht niet van het net. Proef 50 in test_batterij.py, 192 in
 test_coach.py.
 
-**Nog niet:** een MIN, ontladen naar het net met een schema, vol laden en leegladen vanaf de kaart, en
-de tweede stap (de zon leren zonder paneelgegevens, en de correctie na elke nacht). In het echt nog niet
+**Nog niet:** een MIN (blijft alleen uitlezen tot iemand er een gezien heeft), vol laden en leegladen
+vanaf de kaart. Ontladen stuurt de coach bewust niet: de eigenaar op 23-10-2026, "ontladen gaat zoals
+de omvormer het nu zelf doet"; in de uurdata van de klantwoning kostte 's nachts vasthouden precies
+hetzelfde, want daar is de accu aan het begin van vazio al leeg. In het echt nog niet
 beproefd: of de omvormer zelf op de stopgrens stopt, en of hij met mains uit toch van het net bijlaadt
 bij zijn vloer (in de klantwoning stond `acChargeEnergyToday` vóór de test al op 2 kWh).
+
+## Growatt, stap 2: de zon en het schema na elke nacht bijstellen (v0.151.0)
+
+De eigenaar op 23-10-2026, via de beheersessie: "Sven wil alles: bouw stap 2 ook, niet wachten op de
+schaduw van stap 1." De zon zonder paneelgegevens staat in `docs/laadpaal.md` (het geldt voor de paal
+net zo goed). Hier het bijstellen.
+
+**Na elke nacht nakijken** (`_async_growatt_nacht` in coach.py). Vanaf het eind van een vak dat de coach
+schreef tot het begin van het volgende telt hij, elke ronde:
+
+* in het vak: wat er van het net de batterij in ging;
+* erna: zon die naar het net gaat terwijl de batterij vol is (te veel van het net geladen, want die zon
+  had erin gekund), en wat het huis van het net haalt terwijl de batterij op zijn vloer staat (te weinig).
+
+Begint het volgende vak, dan gaat `growatt_nacht` (te weinig min te veel, waarbij te veel nooit meer is
+dan wat er van het net in ging) als één getal in `growatt_nachten` (14 bewaard). `growatt_bijstelling`
+neemt daar de mediaan van de laatste zeven van, vanaf drie nachten en nooit meer dan de inhoud, en
+`growatt_schema` laadt zoveel meer of minder dan het plan: het vermogen en de stopgrens schuiven mee,
+de vakken niet. Eén nacht met een feest of een dag zonder zon bepaalt het dus niet. Proef 51 (de som) en
+193 (het tellen).
+

@@ -40,6 +40,10 @@ MELDINGEN_MAX: Final = 3000
 # De berichtenbox (v0.130.0): wat de bewoner zelf moet doen, met gelezen of niet.
 BERICHTEN_KEY: Final = f"{DOMAIN}.berichten"
 BERICHTEN_VERSION: Final = 1
+# De bewolking per uur, voor de zon zonder paneelgegevens (v0.151.0, `ZonStore`).
+ZON_KEY: Final = f"{DOMAIN}.zon"
+ZON_VERSION: Final = 1
+ZON_BEWAAR_DAGEN: Final = 30
 BERICHTEN_MAX: Final = 200
 EVENT_BERICHTEN: Final = f"{DOMAIN}_berichten"
 

@@ -1178,3 +1178,34 @@ Nu is `plan_ahead` leeg bij de regel `disconnected`, dus geen tijdlijn, geen blo
 batterij (`_auto_laden`) en geen rij in de vooruitblik (`vooruitblik` slaat een paal zonder auto
 over). De kaart houdt de volgende klaar-tijd: `klaar_om_volgende` komt dan uit `deadline_next` in
 de stand, de klaar-tijd van het schema. Proef 184 in test_coach.py.
+
+## De zon zonder paneelgegevens (v0.151.0)
+
+De eigenaar op 22-10-2026, via de beheersessie, bij de Growatt: "Zon ZONDER paneelgegevens. Leer per
+uur van de dag een helderhemel-omhullende uit de eigen opwek, meegeschoven met de zonnestand. Schaal
+die met de weersverwachting die HA al heeft. Staat Forecast.Solar of Solcast er, gebruik die dan."
+Hij wil niet afhangen van kWp, helling en richting.
+
+De vierde bron in `_async_zonkromme`, na het energiedashboard, de integratie en de ingevulde sensoren,
+en alleen als die laatste niets zeggen over de rest van de dag. Dit uur en het volgende uit de sensoren
+gaan voor, want dat zijn metingen. Het rekenwerk staat in zon.py (kent Home Assistant niet), alles in
+UTC:
+
+* **de heldere dag** (`heldere_kromme`): per uur het meeste dat het dak de laatste 14 dagen op dat uur
+  deed, uit de eigen kwartieropslag, omgerekend naar de stand van de zon op de verwachte dag
+  (`zonhoogte`, de benadering van NOAA, met de plek uit Home Assistant);
+* **welk deel daarvan komt** (`zonfactor`): de verhouding tussen wat het dak deed en de heldere dag, per
+  klasse bewolking (vijf, van 20%), geleerd uit de eigen uren vanaf zes uren per klasse. De bewolking
+  komt uit de eerste weerentiteit met een uurverwachting (`weather.get_forecasts`, Met.no doet dat bij
+  elke nieuwe installatie), en wat die op elk uur zei bewaart `ZonStore` 30 dagen (eigen bestand, niet
+  in de instellingen). Zonder weer, of zolang een klasse te weinig uren heeft: de mediaan van de laatste
+  drie dagen;
+* **de verwachting** (`zon_uit_opwek`): de heldere dag maal die factor, 40 uur vooruit, in de tijd van
+  het huis. Een schatting, en het scherm zegt dat erbij; wat het dak nu doet stuurt de coach bij zoals
+  altijd (`_zon_gemeten`).
+
+In het virtuele huis (`growatt-eigen-zon`, met een weerentiteit en een plek waar de echte zon opkomt en
+ondergaat zoals die van de wereld, `plek_voor`) volgt de verwachting de zon per uur op een paar procent
+(13:00: 5,96 tegen 6,00 kWh), en laadt een Growatt de nacht voor een zonnige dag niets van het net:
+€ 0,63 tegen € 2,62 zonder batterij. Proef 51 in test_batterij.py, 193 in test_coach.py.
+
