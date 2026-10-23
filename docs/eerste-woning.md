@@ -428,6 +428,16 @@ uitleest, en een batterij in de schaduw, staan er niet meer in. De eigenaar op
 23-10-2026: "wordt helemaal niet aangestuurd door de coach". De meldingen erover
 blijven als stippen.
 
+**Inzoomen** (v0.154.0). De eigenaar op 23-10-2026, op een telefoon: de stippen "staan te
+dicht op elkaar kan je het niet scrollable maken met in en uitzoomenn en scrollen". De banen
+en de uren staan op een doek dat `--zoom` keer zo breed is als de kaart en opzij scrolt; de
+namen blijven staan (`position: sticky`). Zoomen met + en − (1, 2, 4, 8, 12×, `zoomStap`),
+met twee vingers knijpen, of op een trackpad (een wiel met ctrl). Het moment tussen de
+vingers blijft op zijn plek (`zoomTijdlijn_` in history.js). Tijdens het knijpen schuift
+alleen `--zoom`; daarna tekent hij opnieuw, met een tijd om de 6, 3, 2 of 1 uur (`urenStap`)
+en een lijntje elk uur vanaf 3×. Opnieuw tekenen houdt de scrollplek vast. Op 390 px breed
+is 12× twee uur op het scherm, en liggen meldingen van vijf minuten uit elkaar los.
+
 **Wat er gebeurde komt uit Meldingen.** Elk besluit staat daar al op het moment
 dat het veranderde (`_async_noteer` in coach.py), en daar bouwt `tijdlijn` de
 stukken uit: een stand loopt tot het volgende besluit dat iets anders zegt, de
@@ -718,3 +728,12 @@ inderdaad." Dus: `balans` toont opgeslagen zon nooit onder nul, en `herkomst` te
 terugleverprijs als nul (zoals `_kosten` in batterij.py), niet meer als de inkoopprijs van dat uur. Een
 tekort staat er als "− € 0,05" en een afgerond nul als "€ 0,00" (`geldBedrag` in format.js), en in
 Portugal zegt de uitleg "Gerekend met de tijdvakken van je contract." in plaats van een tarief van nu.
+
+**v0.154.0: goedkoop laden is alleen van de coach als hij de batterij stuurt.** In een klantwoning
+stond op 23-10-2026 "Door de coach − € 0,02" bij een batterij die de coach niet stuurde (in de
+schaduw): een laadtest had in de goedkope uren geladen en weer ontladen, en dat kost alleen het
+verlies. `balans` krijgt `handelCoach` (een thuisbatterij met het vinkje "mag sturen"); zonder
+staat `handelEuro` in `delen.accuNet`, en Historie toont het als "Goedkoop geladen, later verbruikt",
+alleen als er iets was. "Door de coach" staat er alleen bij een apparaat of een batterij die de coach
+stuurt. Bespaard blijft hetzelfde getal. De eigenaar: "ja bouw dat maar". Proef "goedkoop laden is
+van de coach alleen als hij de batterij stuurt" in test_rapport.mjs.
