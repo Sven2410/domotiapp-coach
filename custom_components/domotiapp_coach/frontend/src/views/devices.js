@@ -41,6 +41,7 @@ import {
   inTaal,
   isBattery,
   isReadOnly,
+  isSchema,
   KOELWAREN,
   koelUitleg,
   alleenUitlezen,
@@ -1078,7 +1079,8 @@ class DacViewDevices extends DacEditorElement {
     // twice.
     // Een merk dat alleen uitgelezen wordt heeft geen vermogenssensor (v0.123.0).
     const what = device.entity
-      || (isReadOnly(device) ? (KOELWAREN[device.type] ? t("meldingen") : t("alleen uitlezen")) : t("geen vermogenssensor"));
+      || (isReadOnly(device) ? (KOELWAREN[device.type] ? t("meldingen") : t("alleen uitlezen"))
+        : isSchema(device) ? t("laadschema") : t("geen vermogenssensor"));
     const merk = brandMeta(device)?.label;
     const brand = merk === undefined ? undefined : t(merk);
     const prefix = brand ?? ((device.name ?? "").trim() ? kindLabel(device) : "");
@@ -1130,9 +1132,10 @@ class DacViewDevices extends DacEditorElement {
     const getal = (key, attrs, placeholder) => `
       <input type="number" inputmode="decimal" ${attrs} data-bat-field="${key}" data-index="${index}"
              value="${b[key] ?? ""}" placeholder="${placeholder}">`;
-    // Alleen uitlezen (Growatt, v0.123.0): alleen de capaciteit, de rest is om
-    // te sturen. Die integratie heeft er geen sensor voor.
-    if (isReadOnly(device)) {
+    // Een Growatt (v0.123.0, sturen met een schema sinds v0.150.0): de capaciteit en
+    // het laadvermogen. De integratie heeft er geen sensor voor, en de coach leert ze
+    // allebei zelf; tot dan rekent hij met wat hier staat.
+    if (isReadOnly(device) || isSchema(device)) {
       return `
       <div class="block">
         <div class="block-title">${t("De batterij")}</div>
@@ -1141,6 +1144,18 @@ class DacViewDevices extends DacEditorElement {
           ${getal("capacity_kwh", 'min="0" step="0.1"', t("de inhoud van de accu"))}
           <span class="sub">${t("De integratie geeft hem niet door, dus vul hem hier in.")}</span>
         </div>
+        ${isSchema(device) ? `
+        <div class="two">
+          <div class="row">
+            <label>${t("Hoogste laadvermogen (W)")}</label>
+            ${getal("max_charge_w", 'min="0" step="50"', t("bijvoorbeeld {n}", { n: 7500 }))}
+          </div>
+          <div class="row">
+            <label>${t("Hoogste ontlaadvermogen (W)")}</label>
+            ${getal("max_discharge_w", 'min="0" step="50"', t("bijvoorbeeld {n}", { n: 7500 }))}
+          </div>
+        </div>
+        <p class="sub">${t("Het laadvermogen is wat hij van het net laadt op 100% in het laadschema. Leeg mag: de coach meet allebei zelf, en rekent met wat hij meet zodra hij genoeg heeft.")}</p>` : ""}
       </div>`;
     }
     const vink = (key, kop, uitleg) => `

@@ -1026,11 +1026,11 @@ export const BATTERY_BRANDS = [
   {
     id: "growatt",
     label: "Growatt",
-    note: nt("Een Growatt leest de coach alleen uit, via de Growatt-integratie."),
+    note: nt("Een Growatt stuurt de coach met een laadschema, via de Growatt-integratie: een SPH met een API-token. Kan de omvormer dat niet, dan leest hij hem alleen uit."),
     fields: GROWATT_FIELDS,
-    // Alleen uitlezen: geen vinkje om te sturen en geen instellingen daarvoor.
-    // Dezelfde lijst als `BATTERIJ_ALLEEN_LEZEN` in const.py.
-    readOnly: true,
+    // Sturen met een laadschema in plaats van een stuurgetal (v0.150.0); tot dan
+    // alleen uitlezen. Dezelfde lijst als `BATTERIJ_SCHEMA` in const.py.
+    schema: true,
     // En geen vermogenssensor met een teken: laden en ontladen staan in de velden.
     noPower: true,
     battery: { control_mode: "", idle_mode: "" },
@@ -1047,8 +1047,11 @@ export const BATTERY_BRANDS = [
 /** De types die een thuisbatterij zijn, met hun eigen blok instellingen. */
 export const isBattery = (device) => device?.type === "thuisbatterij";
 
-/** Een merk dat de coach alleen uitleest (v0.123.0): Growatt. */
+/** Een merk dat de coach alleen uitleest (v0.123.0): een vriezer, een koelkast. */
 export const isReadOnly = (device) => Boolean(brandMeta(device)?.readOnly);
+
+/** Een batterij die de coach met een laadschema stuurt (v0.150.0): Growatt. */
+export const isSchema = (device) => Boolean(brandMeta(device)?.schema);
 
 /**
  * Een batterij die naar een merk gaat dat alleen uitgelezen wordt (v0.123.0): niet
@@ -1056,11 +1059,12 @@ export const isReadOnly = (device) => Boolean(brandMeta(device)?.readOnly);
  * anders nog lezen; een vermogenssensor met een teken gaat bij hem zelfs voor.
  */
 export function alleenUitlezen(device) {
-  if (!isReadOnly(device)) return device;
+  if (!isReadOnly(device) && !isSchema(device)) return device;
   const velden = brandFields(device).map((veld) => veld.key);
   return {
     ...device,
-    controllable: false,
+    // Een Growatt houdt het vinkje (v0.150.0): die stuurt de coach met een schema.
+    controllable: isSchema(device) ? Boolean(device.controllable) : false,
     entity: "",
     entities: Object.fromEntries(Object.entries(device.entities ?? {}).filter(([key]) => velden.includes(key))),
   };

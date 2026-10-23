@@ -184,12 +184,18 @@ BATTERY_BRANDS: Final = [
     "overig",
 ]
 
-# De merken die de coach alleen uitleest (v0.123.0). De eigenaar op 15-10-2026:
-# "nee sturen niet voor growatt alleen uitlezen." De Growatt-integratie van Home
-# Assistant haalt alles eens per vijf minuten uit de cloud en heeft voor een MIX
-# alleen sensoren. Zo'n batterij stuurt de coach nooit, ook niet met het vinkje
-# aan; dezelfde lijst als `readOnly` in devices.js.
-BATTERIJ_ALLEEN_LEZEN: Final = ("growatt",)
+# De merken die de coach alleen uitleest (v0.123.0), dezelfde lijst als `readOnly` in
+# devices.js. Tot v0.150.0 stond Growatt hier: de eigenaar op 15-10-2026, "nee sturen
+# niet voor growatt alleen uitlezen". Op 22-10-2026 de andere kant op: sturen, voor
+# elke klant met een Growatt die dat kan (`BATTERIJ_SCHEMA`).
+BATTERIJ_ALLEEN_LEZEN: Final = ()
+
+# De merken die de coach met een laadschema stuurt in plaats van met een stuurgetal
+# (v0.150.0): drie vakken per dag, een vermogen in procent en een accustand om te
+# stoppen, via de acties van de integratie. Alleen als de omvormer dat kan (een SPH
+# op het API-token); anders leest hij hem uit zoals tot dan. Zie `_async_growatt` in
+# coach.py en `schema` in `BATTERY_BRANDS` (devices.js).
+BATTERIJ_SCHEMA: Final = ("growatt",)
 
 # Every brand id the panel may send, whatever the device type. Kept as one set
 # so the websocket schema does not have to know which brands belong to which

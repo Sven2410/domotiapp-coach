@@ -1652,7 +1652,8 @@ for naam, vl in V.items():
     uren = max(1.0, len(vl.bat_verloop) * vl.stap_uur)
     # Doet de batterij zelf nul op de meter (v0.97.0), dan zet de coach hem pas
     # in de externe stand als hij het moet overnemen; zie hieronder.
-    if not bat.zelf_nul:
+    # Een Growatt heeft geen modus: die stuurt de coach met een laadschema (v0.150.0).
+    if not bat.zelf_nul and not bat.growatt:
         controle(f"{naam}: de coach zette de batterij in de modus voor externe sturing",
                  bool(vl.bat_modi) and vl.bat_modi[0][1] == "third_party_control", f"{vl.bat_modi}")
     # Het antwoord op "hoe zorgen we dat we niet gaan pendelen": in de eerste
@@ -1695,6 +1696,10 @@ for naam, vl in V.items():
     # Wat de coach in zijn kasboek schreef is wat het huis werkelijk scheelde.
     # De laatste minuten staan nog niet in de opslag: die gaat om de vijf minuten.
     geboekt = float(vl.bat_stand.get("earned_total") or 0.0)
+    # Een Growatt in de schaduw stuurt de coach niet, en dan boekt hij niets, net als bij
+    # elke batterij die hij niet stuurt.
+    if bat.growatt and not bat.growatt_vinkje:
+        continue
     controle(f"{naam}: het kasboek klopt met wat de dag werkelijk scheelde",
              abs(geboekt - (vl.bat_kosten_zonder - vl.bat_kosten_met)) <= 0.10,
              f"geboekt {geboekt:.2f}, werkelijk {vl.bat_kosten_zonder - vl.bat_kosten_met:.2f}")
@@ -2357,6 +2362,47 @@ if (vl := v("vast-kruimelzon")):
     controle("kruimelzon: de klaar-tijd gehaald", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
     controle("kruimelzon: en het kost niet meer dan het optimum met een dubbeltje marge",
              vl.optimum is not None and vl.kosten <= vl.optimum + 0.10, f"€{vl.kosten:.2f} tegen €{vl.optimum}")
+
+# Een Growatt met een laadschema (v0.150.0). De eigenaar op 22-10-2026: de Growatt sturen
+# vanuit de coach, universeel en zelflerend; in de klantwoning eerst in de schaduw. Wat de
+# bewoner merkt: één schema per nacht, rustig laden in vazio, en overdag het huis uit de
+# batterij. Bij de bouw gaf dit scenario eerst 49 schrijfacties in 38 uur (het eind schoof
+# elk kwartier, de stopgrens zette hem uit en weer aan); nu drie.
+if (vl := v("growatt-bihorario")):
+    print(f"  growatt: {len(vl.gw_schrijf)} schrijfacties, {vl.gw_gefaald} gefaald: "
+          f"{[(f'{t:%a %H:%M}', aan, pct, stop, vak) for t, aan, pct, stop, vak in vl.gw_schrijf]}")
+    # Van het net: hij laadt terwijl het huis van het net haalt.
+    laden = [r for r in vl.bat_verloop if r[2] > 100 and r[1] > 100]
+    buiten = [r for r in laden if 9 <= r[0].hour < 23]
+    print(f"  growatt: geladen {sum(r[2] for r in laden) * vl.stap_uur / 1000:.1f} kWh, waarvan buiten vazio "
+          f"{sum(r[2] for r in buiten) * vl.stap_uur / 1000:.2f}; kosten €{vl.bat_kosten_met:.2f} tegen "
+          f"€{vl.bat_kosten_zonder:.2f} zonder batterij")
+    controle("growatt: hooguit vier schrijfacties in een dag en een nacht, en geen die faalt",
+             len(vl.gw_schrijf) <= 4 and vl.gw_gefaald == 0, f"{len(vl.gw_schrijf)} {vl.gw_gefaald}")
+    controle("growatt: het schema voor de nacht ligt in vazio, 23:00 tot 09:00",
+             any(aan and vak == [("23:00", "23:59"), ("00:00", "09:00")] for _, aan, _, _, vak in vl.gw_schrijf),
+             f"{vl.gw_schrijf}")
+    controle("growatt: hij laadt alleen in vazio", not buiten, f"{len(buiten)} minuten")
+    controle("growatt: rustig, op hooguit de helft van zijn vermogen",
+             max((r[2] for r in laden), default=0) <= 0.5 * 7800, f"{max((r[2] for r in laden), default=0):.0f} W")
+    om9 = next((r[3] for r in vl.bat_verloop if r[0] >= bat_moment(vl, "09:00")), None)
+    controle("growatt: om 09:00 is hij vol voor de dure dag", om9 is not None and om9 >= 95, f"{om9}")
+    controle("growatt: het kost minder dan zonder batterij", vl.bat_kosten_met < vl.bat_kosten_zonder - 0.5,
+             f"€{vl.bat_kosten_met:.2f} tegen €{vl.bat_kosten_zonder:.2f}")
+    controle("growatt: geen melding naar de telefoon", not vl.meldingen, f"{vl.meldingen}")
+if (vl := v("growatt-zon")):
+    print(f"  growatt-zon: {[(f'{t:%a %H:%M}', aan, pct, stop, vak) for t, aan, pct, stop, vak in vl.gw_schrijf]}")
+    nacht = [r for r in vl.bat_verloop if r[2] > 100 and r[1] > 100 and r[0] < bat_moment(vl, "09:00")]
+    controle("growatt-zon: de zon van morgen vult hem, dus de eerste nacht niets van het net",
+             not nacht, f"{len(nacht)} minuten")
+    controle("growatt-zon: en daarvoor hooguit twee schrijfacties",
+             len(vl.gw_schrijf) <= 2, f"{vl.gw_schrijf}")
+if (vl := v("growatt-schaduw")):
+    zou = [g.get("message") or "" for g in vl.geschiedenis if "zou dit schrijven" in (g.get("message") or "")]
+    print(f"  growatt-schaduw: {zou}")
+    controle("growatt-schaduw: zonder het vinkje schrijft hij niets", not vl.gw_schrijf, f"{vl.gw_schrijf}")
+    controle("growatt-schaduw: en zegt in de geschiedenis wat hij zou schrijven, kort voor vazio",
+             any("23:00-23:59, 00:00-09:00" in m for m in zou) and len(zou) <= 3, f"{zou}")
 
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

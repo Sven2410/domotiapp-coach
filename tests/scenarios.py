@@ -1538,6 +1538,36 @@ pt_bihorario = vast_avond.kopie(
 )
 
 
+# Een Growatt (v0.150.0). De eigenaar op 22-10-2026: de Growatt sturen vanuit de coach, voor
+# elke klant met een Growatt. Zoals in de klantwoning: bi-horário, een SPH met een
+# laadschema, ongeveer 12,5 kWh per 100%, de vloer op 15%, ongeveer 7,8 kW bij 100% laden
+# (1,6 kW bij 20%), 90% uit de eigen tellers. De coach weet van tevoren niet wat hij eruit kan;
+# dat ziet hij 's avonds. Op een bewolkte dag vult de zon hem en laadt hij niet van het net;
+# `growatt-zon` laat zien dat hij dan ook niets schrijft.
+GROWATT_SPH = dict(growatt=True, soc=45.0, capaciteit_kwh=12.5, max_laden_w=7800.0, max_ontladen_w=6000.0,
+                   soc_min=15.0, soc_max=100.0, rte=0.81, meter=False, teller_in=311.9, teller_uit=280.7)
+growatt_bihorario = batterij_winter.kopie(
+    naam="growatt-bihorario",
+    uitleg="Portugal, bi-horário, een Growatt met een laadschema: in vazio rustig van het net, overdag het huis",
+    pt=PT_EDP, batterij=Batterij(**GROWATT_SPH), begin="2026-10-22 18:00", duur_uren=29,
+    # Een donkere dag, zoals er in de winter een paar zijn: dan loont vazio.
+    zon=Zon(wolken="geen"), voorspeller="geen",
+    # Wat de coach op eerdere dagen zag: hij laadde op zon met 3,2 kW. Meer weet hij niet van
+    # het laadvermogen; dat het 7,8 kW is meet hij in het eerste vak.
+    batterij_stand={"growatt_in_w": 3200},
+)
+growatt_zon = growatt_bihorario.kopie(
+    naam="growatt-zon",
+    uitleg="dezelfde Growatt op een bewolkte dag: de zon van morgen vult hem, dus geen laden van het net",
+    zon=Zon(wolken="bewolkt"), voorspeller=batterij_winter.voorspeller,
+)
+growatt_schaduw = growatt_bihorario.kopie(
+    naam="growatt-schaduw",
+    uitleg="dezelfde Growatt zonder het vinkje: de coach rekent en zegt wat hij zou schrijven, maar schrijft niets",
+    batterij=Batterij(**GROWATT_SPH, growatt_vinkje=False),
+)
+
+
 ALLE = [
     alfen_zonnig, alfen_dyn, alfen_doel_80, alfen_laadgrens,
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,
@@ -1573,6 +1603,7 @@ ALLE = [
     vast_kosten_kwh, vast_kosten_schalen, vast_kosten_overschot, vast_kosten_overschot_netto, dyn_salderen_vol,
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,
+    growatt_bihorario, growatt_zon, growatt_schaduw,
 ]
 
 

@@ -1346,6 +1346,10 @@ Daarvoor bleef ze in haar eigen stand.
 
 ## Growatt: alleen uitlezen (v0.123.0)
 
+*Sinds v0.150.0 stuurt de coach een Growatt die dat kan met een laadschema; zie "Growatt sturen
+met een laadschema" hieronder. Wat hier staat geldt nog voor een Growatt die het niet kan (een MIX,
+de klassieke inlog).*
+
 De eigenaar op 15-10-2026: "nee sturen niet voor growatt alleen uitlezen", en "dat ik dus
 alleen invulvelden krijg die noodzakelijk zijn voor growatt". De Growatt-integratie van Home
 Assistant (`growatt_server`) haalt alles eens per vijf minuten uit de cloud, en heeft voor
@@ -1537,3 +1541,97 @@ ik niet, zet dan nul tot dat hij boven de nul is." Opgeleverd en Terugverdiend o
 daarom nooit minder dan € 0,00 (`nietOnderNul` in battery.js). Het kasboek houdt het echte bedrag:
 een tekort moet eerst ingelopen worden voor er iets boven nul verschijnt. Opgeleverd opnieuw
 uitrekenen (Apparaten) toont wel het echte bedrag, want daar kijkt de installateur na.
+
+## Growatt sturen met een laadschema (v0.150.0)
+
+De eigenaar op 22-10-2026, via de beheersessie: de Growatt-thuisbatterij sturen vanuit de coach,
+universeel voor elke klant met een Growatt, en zelflerend. Zijn keuze van 15-10-2026 ("nee sturen
+niet voor growatt alleen uitlezen") vervalt waar sturen kan. In twee stappen (zijn keuze): eerst
+sturen, met de inhoud en het vermogen zelf geleerd; daarna de zon zelf leren zonder paneelgegevens
+en na elke nacht nakijken of er te veel of te weinig geladen is. En bij de klantwoning eerst in de
+schaduw: zonder het vinkje rekent de coach en zegt hij wat hij zou schrijven.
+
+**Wat er kan.** De integratie `growatt_server` heeft voor een SPH op het API-token geen stuurgetal en
+geen number of switch, wel acties: `write_ac_charge_times` (laadvermogen in procent, de accustand
+waar hij stopt, `mains_enabled` voor laden van het net, drie vakken met een begin- en eindtijd) en
+`read_ac_charge_times`, dat alleen met `return_response` antwoord geeft. Bewezen in de klantwoning
+op 22-10-2026 (beheer): mains aan, 20%, vakken 23:40-23:59 en 00:00-00:30; om 23:41 had de omvormer
+het, en de volgende meting laadde hij met 1.570 W. Daarbij gezien: de sensoren lopen vijf tot tien
+minuten achter, een tweede schrijfactie vlak na de eerste faalt ("Error during writing ...") en lukt
+een minuut later wel, het schema herhaalt zich elke dag, en het teruglezen gaf als stopgrens 100
+terwijl er 25 in stond (de omvormer heeft er twee velden voor). Een MIN heeft tijdsegmenten
+(`read_time_segments`, `update_time_segment`); die stuurt de coach nog niet.
+
+**Herkennen** (`_async_growatt_soort` in coach.py). Niet uit een naam of model, want dat geeft de
+integratie niet: de coach vraagt het laadschema op, op het apparaat van de accustand in het
+register (`_growatt_apparaat`). Geeft de omvormer zijn vakken terug, dan is het een SPH die hij kan
+sturen; anders een uur later opnieuw. Een MIX of de klassieke inlog heeft de acties niet en blijft
+alleen uitlezen. In const.py staat Growatt daarom niet meer in `BATTERIJ_ALLEEN_LEZEN` maar in
+`BATTERIJ_SCHEMA`; in devices.js `schema` in plaats van `readOnly`, met het vinkje.
+
+**Het plan** is dezelfde som als bij een batterij die zelf nul op de meter doet (`zelf_nul`),
+zonder handelen: een schema kan niet op een prijs naar het net ontladen. Van het plan neemt
+`growatt_schema` (batterij.py) alleen de blokken van het net, en dan alleen het eerstvolgende stuk
+even dure uren waar ze in vallen: de Growatt heeft één stopgrens voor alle vakken, en het schema
+herhaalt zich elke dag. Uitgesmeerd over dat hele stuk (het plan zelf vult het liefst de laatste
+goedkope uren op vol vermogen; uitsmeren over even dure uren kost nooit geld, zoals bij rustig
+laden), het vermogen naar boven afgerond op een procent van wat hij kan, en de stopgrens waar het
+plan na het stuk zit. Over middernacht worden het twee vakken (23:00-23:59 en 00:00-09:00), want een
+vak loopt van een kloktijd naar een latere. Een vak reikt hooguit een etmaal vooruit, behalve als nu
+even goedkoop is; het begin staat op het kwartier.
+
+**Schrijven** (`_async_growatt`). Eén schema per goedkoop stuk:
+
+* over het volgende stuk beslist hij pas `GROWATT_VOORAF` (30 minuten) voordat het begint
+  (`_growatt_wacht`), want het plan schuift overdag mee met de zon en de prijzen;
+* daarvoor alleen als de vakken of aan en uit veranderen, binnen het vak ook als er meer vermogen of
+  een hogere stopgrens nodig is (`wijkt_af`, vanaf 5 procentpunt en 3%); lager schrijft hij niet,
+  want dan zet het plan het schema zelf uit zodra er genoeg in zit;
+* aan of uit pas als het plan dat vijf minuten wil (`GROWATT_BESTENDIG`);
+* nooit twee keer binnen twee minuten (`GROWATT_PAUZE`), en na anderhalve minuut teruglezen
+  (`GROWATT_TERUG`; `gelijk` vergelijkt aan, vermogen en vakken, niet de stopgrens);
+* na drie keer niet aangenomen één melding, kritiek als het laden van het net er niet uit wil.
+
+**De stopgrens bewaakt hij zelf** (`growatt_vol`): zit de accustand erop, dan zet hij het schema uit
+en in dat stuk niet opnieuw aan. Behalve bij een stopgrens van 100%: vol stopt hij zelf, en zolang het
+vak loopt staat hij stil terwijl het huis goedkoop van het net haalt. Zou de coach het schema dan
+uitzetten, dan voedde de batterij het huis in de goedkope uren en laadde de coach hem daarna weer bij,
+met het verlies twee keer; zo ging het in het virtuele huis zeventien keer aan en uit in een nacht.
+
+**Het vinkje eraf** zet het laden van het net eruit, en daarna schrijft hij niets meer. Bij een herstart
+van Home Assistant niet: daarna schrijft de coach meteen opnieuw, en twee opdrachten vlak na elkaar
+faalt de tweede. Zonder het vinkje (de schaduw) schrijft hij niets en noteert hij op dezelfde momenten
+"zou dit schrijven" met het schema erbij, alleen bij andere vakken of aan en uit.
+
+**Zelf geleerd** (`_async_growatt_leren`, bewaard in `battery_state`; een meting gaat voor een opgave,
+net als bij het rendement):
+
+* de inhoud: per stuk alleen laden van minstens 10% wat de eigen teller "geladen" per procent opliep
+  (`growatt_kwh_pct`, `growatt_inhoud`, de mediaan na drie stukken). In de klantwoning ongeveer 12 kWh
+  per 100% tegen 15,3 op het typeplaatje;
+* het laadvermogen bij 100%: in een vak dat de coach schreef en dat teruggelezen klopte, zonder zon,
+  wat hij laadt gedeeld door het deel in het schema (`growatt_w_pct`, `growatt_max_w`, de mediaan na
+  zes metingen). Tot dan wat de installateur invulde, of anders het hoogste dat de coach hem ooit zag
+  laden (`growatt_in_w`): een ondergrens, dus eerder te snel dan te langzaam. Zonder dat laadt hij niet
+  van het net en zegt de kaart het;
+* wat hij eruit kan: ingevuld, of het hoogste dat de coach hem zag ontladen (`growatt_uit_w`);
+* zijn vloer: de accustand waarop hij stil staat terwijl het huis van het net haalt, buiten een vak
+  (`growatt_vloer`). Die staat in geen entiteit; in de klantwoning 15%, terwijl het ontlaadschema 10
+  zei.
+
+Het kasboek ("Opgeleverd") boekt hij eens per ronde met de sensor van de batterij (`_kasboek`, sinds
+v0.150.0 uit de regelaar gehaald). Vol laden, leegladen en de vakantiestand op de kaart blijven bij een
+Growatt niet beschikbaar; `alleen_lezen` op de sensor voor DomotiApp Lovelace is waar tot de coach er
+een schema in schrijft.
+
+**In het virtuele huis** (`growatt-bihorario`, `growatt-zon`, `growatt-schaduw`; een Growatt met een
+schema, sensoren eens per vijf minuten, en een tweede schrijfactie binnen een minuut die faalt): op een
+donkere dag met bi-horário drie schrijfacties in 29 uur, in vazio rustig van 15 naar 100% op 33 tot 35%
+van zijn vermogen, om 09:00 vol, en € 2,98 tegen € 4,13 zonder batterij. Op een bewolkte dag vult de
+zon hem en laadt hij de eerste nacht niet van het net. Proef 50 in test_batterij.py, 192 in
+test_coach.py.
+
+**Nog niet:** een MIN, ontladen naar het net met een schema, vol laden en leegladen vanaf de kaart, en
+de tweede stap (de zon leren zonder paneelgegevens, en de correctie na elke nacht). In het echt nog niet
+beproefd: of de omvormer zelf op de stopgrens stopt, en of hij met mains uit toch van het net bijlaadt
+bij zijn vloer (in de klantwoning stond `acChargeEnergyToday` vóór de test al op 2 kWh).

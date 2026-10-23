@@ -1428,6 +1428,91 @@ ruim49 = plan_batterij(NU49, L49b, Tariff(), verwachting(huis=0.3),
 controle("bij een ochtend van 0,45 dekt de spread het wel, en laadt hij toch",
          bool(net49(ruim49)), f"{ruim49.stand} {net49(ruim49)}")
 
+print("=== 50. Growatt: het plan als laadschema, drie vakken per dag (v0.150.0) ===")
+# De eigenaar op 22-10-2026: de Growatt sturen, voor elke klant met een Growatt. Een SPH
+# neemt een laadschema: drie vakken, een vermogen in procent, een accustand om te stoppen.
+# Zoals in de klantwoning: bi-horário, vazio van 22:00 tot 08:00 op 0,166 en
+# daarbuiten 0,272, geen teruglevering; 12,5 kWh per 100%, de vloer op 15%, 1,6 kW bij 20%.
+VAZIO50 = [0.166] * 8 + [0.272] * 14 + [0.166] * 2
+L50 = prijzen(VAZIO50 * 2, terug=0.0)
+NU50 = DAG.replace(hour=21, minute=30)
+
+
+def growatt50(soc=16.0, **kw):
+    basis = dict(soc=soc, capacity_kwh=12.5, max_charge_w=7800.0, max_discharge_w=7800.0,
+                 soc_min=15.0, soc_max=100.0, rte=0.90, zelf_nul=True)
+    basis.update(kw)
+    return Batterij(**basis)
+
+
+b50 = growatt50()
+p50 = plan_batterij(NU50, L50, Tariff(), verwachting(huis=0.7), b50)
+s50 = bat.growatt_schema(p50.uren, NU50, b50)
+net50 = [(u.start.strftime("%d %H:%M"), round(u.net_kwh, 2), round(u.soc)) for u in p50.uren if u.net_kwh > 0.05]
+print(f"  plan van het net: {net50}")
+print(f"  schema: net {s50.net}, {s50.vermogen_pct}%, tot {s50.stop_soc}%, vakken {s50.vakken}, {s50.kwh:.1f} kWh")
+controle("zonder zon laadt hij in de nacht van het net voor de dure dag", s50.net and s50.kwh > 3.0,
+         f"{s50}")
+controle("de vakken liggen in vazio en het schema telt hooguit drie",
+         0 < len(s50.vakken) <= 3 and all(a >= "22:00" or b <= "08:00" for a, b in s50.vakken), f"{s50.vakken}")
+controle("over middernacht in tweeën: een vak eindigt om 23:59 en een begint om 00:00",
+         any(b == "23:59" for _, b in s50.vakken) and any(a == "00:00" for a, _ in s50.vakken), f"{s50.vakken}")
+# Het plan laadt het liefst in de laatste goedkope uren op vol vermogen; de Growatt krijgt
+# het uitgesmeerd over het hele stuk vazio, van 22:00 tot 08:00.
+watt50 = s50.kwh / 10 * 1000
+controle("uitgesmeerd over het hele goedkope stuk: 22:00 tot 08:00",
+         s50.vakken == [("22:00", "23:59"), ("00:00", "08:00")], f"{s50.vakken}")
+controle("het vermogen is wat erin moet gedeeld door die tien uur, naar boven afgerond op een procent",
+         s50.vermogen_pct >= watt50 / 7800 * 100 > s50.vermogen_pct - 1, f"{s50.vermogen_pct}% tegen {watt50:.0f} W")
+laatste50 = max((u for u in p50.uren if u.net_kwh > 0.05), key=lambda u: u.end)
+controle("hij stopt waar het plan aan het eind van het laatste vak zit",
+         s50.stop_soc == int(-(-laatste50.soc // 1)), f"{s50.stop_soc} tegen {laatste50.soc:.1f}")
+velden50 = s50.velden()
+controle("de velden voor write_ac_charge_times: mains aan, drie vakken, de lege uit",
+         velden50["mains_enabled"] is True and velden50["charge_power"] == s50.vermogen_pct
+         and sum(velden50[f"period_{i}_enabled"] for i in (1, 2, 3)) == len(s50.vakken), f"{velden50}")
+
+# Zonder dal- en piektarief valt er niets te halen: geen laden van het net, mains uit.
+vlak50 = plan_batterij(NU50, prijzen([0.25] * 48, terug=0.0), Tariff(), verwachting(huis=0.7), growatt50())
+s50b = bat.growatt_schema(vlak50.uren, NU50, growatt50())
+controle("bij één prijs: geen vakken en mains uit", not s50b.net and s50b.velden()["mains_enabled"] is False
+         and not any(s50b.velden()[f"period_{i}_enabled"] for i in (1, 2, 3)), f"{s50b}")
+controle("zonder laadvermogen of inhoud geen schema", not bat.growatt_schema(p50.uren, NU50, growatt50(max_charge_w=0.0)).net)
+
+# Wat de Growatt teruggeeft: de stopgrens telt niet mee (twee velden in de omvormer, de
+# klantwoning 22-10-2026), het vermogen en de vakken wel.
+gelezen50 = {"charge_power": s50.vermogen_pct, "charge_stop_soc": 100, "mains_enabled": True,
+             "periods": [{"period_id": i + 1, "start_time": a, "end_time": b, "enabled": True}
+                         for i, (a, b) in enumerate(s50.vakken)]}
+controle("teruggelezen met een andere stopgrens is toch gelijk", s50.gelijk(gelezen50))
+controle("met mains uit niet", not s50.gelijk({**gelezen50, "mains_enabled": False}))
+controle("met een ander vermogen niet", not s50.gelijk({**gelezen50, "charge_power": s50.vermogen_pct + 1}))
+
+# Niet elke minuut schrijven: een procent verschil is geen nieuw schema, een vak dat al loopt
+# en korter wordt ook niet; ander vak of uit wel.
+eerst50 = bat.GrowattSchema(net=True, vermogen_pct=20, stop_soc=60, vakken=[("22:00", "23:59"), ("00:00", "05:00")])
+controle("een procent meer vermogen of stopgrens: niet opnieuw schrijven",
+         not dataclasses.replace(eerst50, vermogen_pct=21, stop_soc=61).wijkt_af(eerst50))
+controle("na middernacht valt het eerste vak weg en begint het tweede later: niet opnieuw",
+         not dataclasses.replace(eerst50, vakken=[("01:00", "05:00")]).wijkt_af(eerst50))
+controle("een ander eind wel", dataclasses.replace(eerst50, vakken=[("00:00", "06:00")]).wijkt_af(eerst50))
+controle("uit wel", bat.GrowattSchema().wijkt_af(eerst50))
+controle("vijf procent vermogen wel", dataclasses.replace(eerst50, vermogen_pct=25).wijkt_af(eerst50))
+
+# Op de stopgrens zet de coach het zelf uit, gemeten en niet teruggelezen.
+controle("op 60% bij een stop op 60: vol", bat.growatt_vol(eerst50, 60.0))
+controle("op 58%: nog niet", not bat.growatt_vol(eerst50, 58.0))
+controle("tot vol niet: dan stopt hij zelf en staat hij stil tot het vak om is",
+         not bat.growatt_vol(dataclasses.replace(eerst50, stop_soc=100), 100.0))
+
+# Zelf leren: de inhoud uit de eigen teller per procent, het vermogen uit wat hij haalt.
+controle("de inhoud pas na drie stukken", bat.growatt_inhoud([0.125, 0.12]) is None
+         and abs(bat.growatt_inhoud([0.125, 0.12, 0.13]) - 12.5) < 1e-9)
+controle("een stuk waarin de teller sprong telt niet zwaar: de mediaan",
+         abs(bat.growatt_inhoud([0.12, 0.125, 0.9, 0.124]) - 12.5) < 1e-9)
+controle("het laadvermogen pas na zes metingen, en dan de mediaan: 1570 W bij 20% is 7850 W",
+         bat.growatt_max_w([7850] * 5) is None and bat.growatt_max_w([7850, 7800, 7900, 7850, 7700, 7850]) == 7850)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

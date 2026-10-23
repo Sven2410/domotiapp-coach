@@ -32,6 +32,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     BATTERIJ_ALLEEN_LEZEN,
+    BATTERIJ_SCHEMA,
     NETTING_ENDS,
     HOLIDAY_MAX_DEFAULT,
     CHARGER_CONTROL,
@@ -60,12 +61,19 @@ from .batterij import (
     STAND_NAMEN,
     VOL_MARGE,
     Batterij,
+    GROWATT_STUK_PCT,
+    GROWATT_VOORAF,
+    GrowattSchema,
     Regelaar,
     Rendement,
     Rendementmeter,
     Voorraad,
     auto_grens,
     balans_kwh,
+    growatt_inhoud,
+    growatt_max_w,
+    growatt_schema,
+    growatt_vol,
     handelen_kan_niet,
     herreken,
     met_paal,
@@ -347,6 +355,24 @@ STOP_WACHT_STAPPEN = 30
 # daarvan bewaard blijven: ruim een jaar, zodat In geld in Historie ook over een
 # heel jaar weet wat de batterij opleverde.
 BATTERIJ_BEWAREN = timedelta(minutes=5)
+# Een Growatt met een laadschema (v0.150.0). De acties horen bij de integratie
+# `growatt_server`. Een tweede opdracht vlak na de eerste faalt, en een minuut later
+# lukt hij wel (de klantwoning, 22-10-2026): daarom de pauze, en teruglezen pas daarna.
+GROWATT_DOMEIN = "growatt_server"
+GROWATT_PAUZE = timedelta(minutes=2)
+GROWATT_TERUG = timedelta(seconds=90)
+GROWATT_WACHT = timedelta(seconds=45)
+GROWATT_OPNIEUW = timedelta(hours=1)
+GROWATT_FOUTEN = 3
+GROWATT_BESTENDIG = timedelta(minutes=5)
+# Hoeveel metingen van de inhoud en van het laadvermogen hij bewaart.
+GROWATT_BEWAAR = 30
+# Onder hoeveel watt zon het laadvermogen een meting van het net is.
+GROWATT_ZON_W = 50.0
+# De vloer: onder hoeveel watt de batterij stil staat, en boven hoeveel watt het huis
+# dan van het net haalt.
+GROWATT_STIL_W = 30.0
+GROWATT_VLOER_NET_W = 150.0
 BATTERIJ_DAGEN_MAX = 400
 
 # How long to wait for the charger to confirm a new limit before starting.
@@ -1439,6 +1465,9 @@ class ChargerCoach:
         # Per thuisbatterij: de regelaar, het besluit van deze minuut, en wat
         # hij sinds de laatste opslag verdiende. Zie `_one_batterij`.
         self._batterij: dict[str, dict[str, Any]] = {}
+        # Per Growatt wat de coach ervan weet (v0.150.0): het apparaat in Home Assistant,
+        # of hij een laadschema kan schrijven en wanneer hij dat het laatst probeerde.
+        self._growatt: dict[str, dict[str, Any]] = {}
         self._batterij_meters: set[str] = set()
         self._unwatch_batterij = None
         self._cancel_regel = None
@@ -3055,13 +3084,14 @@ class ChargerCoach:
             for device in settings.get("devices") or []
             if device.get("type") == "boiler" and device.get("controllable")
         ]
-        # Een merk dat de coach alleen uitleest (Growatt, v0.123.0) stuurt hij
-        # nooit, ook niet met het vinkje aan.
+        # Een merk dat de coach alleen uitleest stuurt hij nooit, ook niet met het
+        # vinkje aan. Een Growatt komt er hieronder bij als hij een laadschema kan
+        # krijgen (v0.150.0), ook zonder het vinkje.
         batterijen = [
             device
             for device in settings.get("devices") or []
             if device.get("type") == "thuisbatterij" and device.get("controllable")
-            and device.get("brand") not in BATTERIJ_ALLEEN_LEZEN
+            and device.get("brand") not in BATTERIJ_ALLEEN_LEZEN + BATTERIJ_SCHEMA
         ]
         self._watch_batterij(settings, batterijen)
         self._watch(
@@ -3126,6 +3156,14 @@ class ChargerCoach:
         await self._async_zonkromme(settings, moment)
         self._meter_bijhouden(settings, moment)
 
+        # Een Growatt die een laadschema kan krijgen (v0.150.0) gaat door dezelfde
+        # ronde. Zonder het vinkje rekent hij in de schaduw en schrijft hij niets: de
+        # eigenaar op 22-10-2026, "eerst de schaduw".
+        for device in settings.get("devices") or []:
+            if device.get("type") == "thuisbatterij" and device.get("brand") in BATTERIJ_SCHEMA:
+                if await self._async_growatt_soort(device, moment) == "sph":
+                    batterijen.append(device)
+
         # De batterij eerst: wat hij deze minuut doet bepaalt wat de meter de
         # andere apparaten laat zien.
         for device in batterijen:
@@ -3150,7 +3188,7 @@ class ChargerCoach:
             if device_id in {d.get("id") for d in batterijen}:
                 continue
             oud = next((d for d in settings.get("devices") or [] if d.get("id") == device_id), None)
-            if sessie.get("stuurt") and oud is not None:
+            if (sessie.get("stuurt") or sessie.get("growatt_stuurt")) and oud is not None:
                 await self._async_batterij_loslaten(oud)
             self._batterij.pop(device_id, None)
             self.state.pop(device_id, None)
@@ -6331,6 +6369,9 @@ class ChargerCoach:
         if "voorraad" not in sessie:
             sessie["voorraad"] = self._voorraad_uit(rij)
         b = self._batterij_van(now, settings, device, rij)
+        schema = device.get("brand") in BATTERIJ_SCHEMA
+        if schema:
+            self._growatt_batterij(b, device, rij)
         # Een beurt van het net die al loopt maakt het plan af, en voor een
         # kleine neemt hij een batterij die zelf nul doet niet over (v0.102.3,
         # `_rustig_vermogen` in batterij.py).
@@ -6341,6 +6382,10 @@ class ChargerCoach:
         entities = device.get("entities") or {}
         mag = level == LEVEL_STEER or (level == LEVEL_PROPOSE and device_id in self._approved)
         stuurt = mag and level not in (LEVEL_READ, LEVEL_ADVISE) and bool(entities.get("setpoint"))
+        if schema:
+            # Een Growatt heeft geen stuurgetal: het schema is de opdracht, en het vinkje
+            # zegt of de coach dat mag schrijven (v0.150.0).
+            stuurt = mag and level not in (LEVEL_READ, LEVEL_ADVISE) and bool(device.get("controllable"))
 
         # De wekelijkse volle beurt gaat tot honderd procent, want daar is hij
         # voor: het balanceren van de cellen. De laadgrens van de batterij is
@@ -6353,7 +6398,9 @@ class ChargerCoach:
         grens_terug = rij.get("limit_restore")
         vol_grens = 100.0 if stuurt and entities.get("charge_limit") else b.soc_max
         vol_nu = b.soc is not None and b.soc >= vol_grens - VOL_MARGE
-        if grens_terug is None and b.vol_voor is not None and stuurt and not vol_nu:
+        if schema:
+            pass
+        elif grens_terug is None and b.vol_voor is not None and stuurt and not vol_nu:
             if await self._async_laadgrens_omhoog(settings, device, b.soc_max):
                 b.soc_max = 100.0
                 rij = self._batterij_rij(settings, device_id)
@@ -6663,6 +6710,10 @@ class ChargerCoach:
         self.state[device_id]["applied"] = stuurt
         self.state[device_id]["foreign"] = sessie.get("vreemd") is not None
 
+        if schema:
+            await self._async_growatt(now, settings, device, b, besluit, stuurt, sessie)
+            return
+
         if stuurt and not sessie.get("stuurt"):
             if self._zelf_instelling(device):
                 # Welke modus het wordt kiest `_async_regel` meteen hieronder.
@@ -6698,6 +6749,57 @@ class ChargerCoach:
                     "{reden} De batterij doet dat zelf, met zijn eigen meter.", reden=besluit.reason
                 ).strip()
             self.state[device_id]["setpoint_w"] = None
+
+    def _kasboek(
+        self, sessie: dict[str, Any], settings: dict[str, Any], device_id: str, nu: datetime,
+        net_w: float | None, bat_w: float | None, b: Batterij,
+    ) -> None:
+        """Het kasboek van een batterij: wat ze sinds de vorige stap opleverde.
+
+        Uit de regelaar gehaald in v0.150.0, zodat een Growatt, die geen regelaar heeft,
+        hetzelfde boekt: eens per ronde, met zijn eigen sensor.
+        """
+        vorige = sessie.get("geteld_op")
+        sessie["geteld_op"] = nu
+        if vorige is not None and net_w is not None:
+            seconden = min(60.0, max(0.0, (nu - vorige).total_seconds()))
+            # Nooit meer dan de batterij kan. De ontlaadsensor van de Anker
+            # in de klantwoning gaf tussen 30-09 en 10-10-2026 2.856 keer meer
+            # dan 3.600 W, tot 7.000 W, bij een batterij van 3.500 W; op
+            # 02-10-2026 om 15:52:30 zag de meter op zijn fase 5,1 kW
+            # teruglevering met 6,0 kW zon over drie fasen, en dat past bij
+            # 3,5 kW uit de batterij, niet bij 7. Elk van die tikken telde
+            # in het kasboek als stroom die het huis niet hoefde te kopen.
+            if bat_w is not None:
+                if b.max_charge_w > 0:
+                    bat_w = min(bat_w, b.max_charge_w)
+                if b.max_discharge_w > 0:
+                    bat_w = max(bat_w, -b.max_discharge_w)
+            # Doet hij het zelf en is zijn sensor weg, dan valt er deze stap
+            # niets te tellen. Tot v0.112.1 viel `verdiend` hier om, en daarmee
+            # alles hieronder: thuis bij de eigenaar op 11-10-2026 rond de
+            # herstarts, en een paal die toen ging laden had de batterij niet
+            # uit haar eigen stand gekregen (proef 148).
+            euro = verdiend(net_w, bat_w,
+                            sessie.get("koop"), sessie.get("terug"), seconden) if bat_w is not None else None
+            if euro is not None:
+                dag = nu.date().isoformat()
+                geld = sessie.setdefault("geld", {})
+                geld[dag] = geld.get(dag, 0.0) + euro
+                # En wat ze werkelijk opleverde: laden is inkopen, pas
+                # ontladen levert op (v0.107.0, `Voorraad`).
+                if "voorraad" not in sessie:
+                    sessie["voorraad"] = self._voorraad_uit(self._batterij_rij(settings, device_id))
+                opgeleverd = sessie.setdefault("opgeleverd", {})
+                opgeleverd[dag] = opgeleverd.get(dag, 0.0) + sessie["voorraad"].stap(
+                    euro, bat_w * seconden / 3_600_000.0, b.soc, b.bodem, b.capacity_kwh, b.rte)
+                # En wat de zon die erin ging minder waard was dan zelf
+                # gebruikt, voor "Door je zon" in Historie (v0.101.2).
+                zon = sessie.setdefault("zon", {})
+                zon[dag] = zon.get(dag, 0.0) + (
+                    zon_in_accu(net_w, bat_w, sessie.get("koop"), sessie.get("terug"), seconden) or 0.0
+                )
+                sessie.setdefault("zon_vanaf", nu)
 
     async def _async_regel(
         self, device_id: str, settings: dict[str, Any], device: dict[str, Any]
@@ -6736,48 +6838,8 @@ class ChargerCoach:
 
             # Het kasboek: wat de batterij sinds de vorige stap opleverde. Doet
             # hij zelf nul op de meter, dan is de sensor de enige bron.
-            vorige = sessie.get("geteld_op")
-            sessie["geteld_op"] = nu
-            if vorige is not None and net_w is not None:
-                seconden = min(60.0, max(0.0, (nu - vorige).total_seconds()))
-                bat_w = batterij_w if sessie.get("zelf") else regelaar.vermogen_w(batterij_w)
-                # Nooit meer dan de batterij kan. De ontlaadsensor van de Anker
-                # in de klantwoning gaf tussen 30-09 en 10-10-2026 2.856 keer meer
-                # dan 3.600 W, tot 7.000 W, bij een batterij van 3.500 W; op
-                # 02-10-2026 om 15:52:30 zag de meter op zijn fase 5,1 kW
-                # teruglevering met 6,0 kW zon over drie fasen, en dat past bij
-                # 3,5 kW uit de batterij, niet bij 7. Elk van die tikken telde
-                # in het kasboek als stroom die het huis niet hoefde te kopen.
-                if bat_w is not None:
-                    if b.max_charge_w > 0:
-                        bat_w = min(bat_w, b.max_charge_w)
-                    if b.max_discharge_w > 0:
-                        bat_w = max(bat_w, -b.max_discharge_w)
-                # Doet hij het zelf en is zijn sensor weg, dan valt er deze stap
-                # niets te tellen. Tot v0.112.1 viel `verdiend` hier om, en daarmee
-                # alles hieronder: thuis bij de eigenaar op 11-10-2026 rond de
-                # herstarts, en een paal die toen ging laden had de batterij niet
-                # uit haar eigen stand gekregen (proef 148).
-                euro = verdiend(net_w, bat_w,
-                                sessie.get("koop"), sessie.get("terug"), seconden) if bat_w is not None else None
-                if euro is not None:
-                    dag = nu.date().isoformat()
-                    geld = sessie.setdefault("geld", {})
-                    geld[dag] = geld.get(dag, 0.0) + euro
-                    # En wat ze werkelijk opleverde: laden is inkopen, pas
-                    # ontladen levert op (v0.107.0, `Voorraad`).
-                    if "voorraad" not in sessie:
-                        sessie["voorraad"] = self._voorraad_uit(self._batterij_rij(settings, device_id))
-                    opgeleverd = sessie.setdefault("opgeleverd", {})
-                    opgeleverd[dag] = opgeleverd.get(dag, 0.0) + sessie["voorraad"].stap(
-                        euro, bat_w * seconden / 3_600_000.0, b.soc, b.bodem, b.capacity_kwh, b.rte)
-                    # En wat de zon die erin ging minder waard was dan zelf
-                    # gebruikt, voor "Door je zon" in Historie (v0.101.2).
-                    zon = sessie.setdefault("zon", {})
-                    zon[dag] = zon.get(dag, 0.0) + (
-                        zon_in_accu(net_w, bat_w, sessie.get("koop"), sessie.get("terug"), seconden) or 0.0
-                    )
-                    sessie.setdefault("zon_vanaf", nu)
+            self._kasboek(sessie, settings, device_id, nu, net_w,
+                          batterij_w if sessie.get("zelf") else regelaar.vermogen_w(batterij_w), b)
 
             # Laadt er intussen een paal, dan geeft de batterij niets af, ook
             # als het besluit van deze minuut dat nog niet wist: de regelaar
@@ -7108,6 +7170,382 @@ class ChargerCoach:
             "select", "select_option", {"entity_id": entity, "option": keuze}, blocking=True
         )
 
+    async def _async_growatt_soort(self, device: dict[str, Any], now: datetime) -> str | None:
+        """Of de coach deze Growatt een laadschema kan geven (v0.150.0): "sph", "min" of None.
+
+        Niet uit een naam of een model, want dat geeft de integratie niet: de coach
+        vraagt het schema op. Geeft de omvormer zijn laadvakken terug, dan is het een
+        SPH op het API-token en kan hij gestuurd worden. Een MIN heeft tijdsegmenten
+        (`read_time_segments`); die stuurt de coach (nog) niet. Een MIX of de
+        klassieke inlog heeft geen van beide acties: dan leest hij hem uit zoals
+        sinds v0.123.0. Lukt het vragen niet, dan een uur later opnieuw.
+        """
+        device_id = device.get("id", "")
+        info = self._growatt.setdefault(device_id, {})
+        if info.get("soort") == "sph" or (
+            info.get("gevraagd") is not None and now - info["gevraagd"] < GROWATT_OPNIEUW
+        ):
+            return info.get("soort")
+        info["gevraagd"] = now
+        info["soort"] = None
+        diensten = self.hass.services
+        heeft = getattr(diensten, "has_service", None)
+        if heeft is None or not heeft(GROWATT_DOMEIN, "read_ac_charge_times"):
+            if heeft is not None and heeft(GROWATT_DOMEIN, "read_time_segments"):
+                info["soort"] = "min"
+            return info["soort"]
+        apparaat = self._growatt_apparaat(device)
+        if apparaat is None:
+            return None
+        info["apparaat"] = apparaat
+        antwoord = await self._async_growatt_lees(device)
+        if isinstance(antwoord, dict) and isinstance(antwoord.get("periods"), list):
+            info["soort"] = "sph"
+            _LOGGER.info("%s: een Growatt met laadvakken; de coach kan hem sturen", device_id)
+        elif heeft(GROWATT_DOMEIN, "read_time_segments"):
+            info["soort"] = "min"
+        return info["soort"]
+
+    def _growatt_apparaat(self, device: dict[str, Any]) -> str | None:
+        """Het apparaat in Home Assistant waar de acties van de Growatt-integratie op werken.
+
+        Dat van de accustand, want die hangt aan de omvormer en niet aan het apparaat
+        met de totalen.
+        """
+        entities = device.get("entities") or {}
+        for sleutel in ("soc", "charge_power", "discharge_power", "accu_in"):
+            entity_id = entities.get(sleutel)
+            if not entity_id:
+                continue
+            try:
+                from homeassistant.helpers import entity_registry as er
+
+                rij = er.async_get(self.hass).async_get(entity_id)
+            except Exception:  # noqa: BLE001 - zonder register geen apparaat
+                return None
+            if rij is not None and getattr(rij, "device_id", None):
+                return rij.device_id
+        return None
+
+    async def _async_growatt_lees(self, device: dict[str, Any]) -> dict[str, Any] | None:
+        """Het laadschema zoals de Growatt het teruggeeft, of None."""
+        apparaat = self._growatt.get(device.get("id", ""), {}).get("apparaat")
+        if not apparaat:
+            return None
+        try:
+            async with asyncio.timeout(GROWATT_WACHT.total_seconds()):
+                antwoord = await self.hass.services.async_call(
+                    GROWATT_DOMEIN, "read_ac_charge_times", {"device_id": apparaat},
+                    blocking=True, return_response=True,
+                )
+        except Exception as err:  # noqa: BLE001 - de cloud zegt soms niets
+            _LOGGER.info("%s: het laadschema lezen lukte niet: %s", device.get("id"), err)
+            return None
+        return antwoord if isinstance(antwoord, dict) else None
+
+    async def _async_growatt_schrijf(self, device: dict[str, Any], schema: GrowattSchema) -> bool:
+        """Het laadschema naar de Growatt. Of de cloud het aannam; of het er ook staat zegt het teruglezen."""
+        apparaat = self._growatt.get(device.get("id", ""), {}).get("apparaat")
+        if not apparaat:
+            return False
+        try:
+            async with asyncio.timeout(GROWATT_WACHT.total_seconds()):
+                await self.hass.services.async_call(
+                    GROWATT_DOMEIN, "write_ac_charge_times", {"device_id": apparaat, **schema.velden()},
+                    blocking=True,
+                )
+        except Exception as err:  # noqa: BLE001 - een tweede opdracht vlak na de eerste faalt
+            _LOGGER.warning("%s: het laadschema schrijven lukte niet: %s", device.get("id"), err)
+            return False
+        return True
+
+    def _growatt_batterij(self, b: Batterij, device: dict[str, Any], rij: dict[str, Any]) -> None:
+        """Wat een Growatt anders maakt dan een batterij met een stuurgetal (v0.150.0).
+
+        Hij doet zelf nul op de meter, en de coach laat hem alleen van het net laden;
+        naar het net ontladen kan met een schema niet op een prijs. De inhoud en het
+        laadvermogen leert de coach zelf (`growatt_inhoud`, `growatt_max_w`); tot dan
+        geldt wat de installateur invulde. Een meting gaat voor een opgave, net als bij
+        het rendement.
+        """
+        b.zelf_nul = True
+        b.handelen = False
+        inhoud = growatt_inhoud(rij.get("growatt_kwh_pct"))
+        if inhoud is not None:
+            b.capacity_kwh = inhoud
+        max_w = growatt_max_w(rij.get("growatt_w_pct"))
+        if max_w is not None:
+            b.max_charge_w = max_w
+        elif not b.max_charge_w:
+            # Zonder opgave en zonder meting bij een schema: het hoogste dat de coach hem
+            # ooit zag laden. Een ondergrens: het schema laadt daardoor eerder te snel dan
+            # te langzaam, en op de stopgrens zet de coach het zelf uit.
+            try:
+                b.max_charge_w = float(rij.get("growatt_in_w") or 0.0)
+            except (TypeError, ValueError):
+                b.max_charge_w = 0.0
+        # De vloer van de Growatt zelf staat in geen entiteit; de coach ziet hem waar de
+        # batterij stopt met ontladen terwijl het huis van het net haalt.
+        try:
+            vloer = float(rij["growatt_vloer"]) if rij.get("growatt_vloer") is not None else None
+        except (TypeError, ValueError):
+            vloer = None
+        if vloer is not None and vloer > b.soc_min:
+            b.soc_min = vloer
+        # Wat hij eruit kan: ingevuld, of het hoogste dat de coach hem zag doen. Dat is
+        # een ondergrens en geen aanname; zonder beide kan de som niet ontladen.
+        if not b.max_discharge_w:
+            try:
+                b.max_discharge_w = float(rij.get("growatt_uit_w") or 0.0)
+            except (TypeError, ValueError):
+                b.max_discharge_w = 0.0
+
+    async def _async_growatt(
+        self, now: datetime, settings: dict[str, Any], device: dict[str, Any], b: Batterij,
+        besluit: Besluit, stuurt: bool, sessie: dict[str, Any],
+    ) -> None:
+        """Het plan van de batterij als laadschema in de Growatt (v0.150.0).
+
+        Elke ronde rekent de coach het schema uit het plan (`growatt_schema`), en
+        schrijft hij het alleen als het genoeg verschilt van wat er staat, nooit twee
+        keer binnen `GROWATT_PAUZE` (een tweede opdracht vlak na de eerste faalt), en
+        leest hij na `GROWATT_TERUG` terug. Zit de batterij waar het schema hem laat
+        stoppen, dan zet hij het schema zelf uit: het teruglezen van die grens is niet
+        te vertrouwen. Na het laatste vak gaat het schema uit, want het herhaalt zich
+        elke dag. Zonder het vinkje schrijft hij niets en zegt hij wat hij zou doen.
+        """
+        device_id = device.get("id", "")
+        naam = device.get("name") or t("De batterij")
+        rij = self._batterij_rij(settings, device_id)
+        await self._async_growatt_leren(now, settings, device, b, sessie, rij)
+        # Een eigen vlag en niet "stuurt": daar hangt de regelaar aan, en die heeft een
+        # Growatt niet.
+        sessie["growatt_stuurt"] = stuurt
+
+        if stuurt:
+            # Het kasboek, zoals bij een batterij met een regelaar, maar eens per ronde.
+            self._kasboek(sessie, settings, device_id, now, self._net_nu(settings)[0], self._batterij_w(device), b)
+        wil = growatt_schema(besluit.uren, now, b)
+        if not b.max_charge_w:
+            self.state[device_id]["tip"] = t(
+                "De coach weet nog niet hoe snel deze Growatt laadt, dus hij laadt hem niet van het net. Vul "
+                "bij de batterij het hoogste laadvermogen in, of wacht tot de coach hem een keer op zon ziet laden."
+            )
+        geschreven: GrowattSchema | None = sessie.get("growatt_geschreven")
+        if geschreven is not None and growatt_vol(geschreven, b.soc, b.soc_max):
+            # Op de stopgrens: uit, en in dit stuk niet opnieuw.
+            sessie["growatt_vol_tot"] = geschreven.tot
+        vol_tot = sessie.get("growatt_vol_tot")
+        if vol_tot is not None and now >= vol_tot:
+            sessie.pop("growatt_vol_tot", None)
+            vol_tot = None
+        elif vol_tot is not None:
+            wil = GrowattSchema()
+        # Aan of uit pas na `GROWATT_BESTENDIG`: het plan twijfelde in het virtuele huis
+        # (`growatt-zon`) een ochtend lang of er vannacht nog 1 kWh bij moest, en dan ging
+        # het schema om de paar minuten aan en uit. De stopgrens wacht niet.
+        if geschreven is not None and wil.net != geschreven.net and vol_tot is None:
+            sinds = sessie.get("growatt_wissel")
+            if sinds is None or sinds[0] != wil.net:
+                sessie["growatt_wissel"] = (wil.net, now)
+            if now - sessie["growatt_wissel"][1] < GROWATT_BESTENDIG:
+                wil = geschreven
+        else:
+            sessie.pop("growatt_wissel", None)
+        sessie["growatt_wil"] = wil
+        self.state[device_id]["schedule"] = {
+            "grid": wil.net, "power_pct": wil.vermogen_pct if wil.net else None,
+            "stop_soc": wil.stop_soc if wil.net else None, "periods": [list(v) for v in wil.vakken],
+            "kwh": round(wil.kwh, 2), "written": None if geschreven is None else geschreven.net,
+            "confirmed": sessie.get("growatt_bevestigd") is not None,
+        }
+
+        if not stuurt:
+            # De schaduw: zeggen wat hij zou schrijven, op dezelfde momenten als hij het zou
+            # schrijven. Alleen andere vakken of aan en uit: in de schaduw laadt er niets, dus
+            # het vermogen loopt 's nachts elk uur op, en dat zegt niets over het schema.
+            schaduw = sessie.get("growatt_schaduw")
+            if schaduw is None or (not self._growatt_wacht(wil, schaduw, now)
+                                   and wil.wijkt_af(schaduw, alleen_vakken=True)):
+                sessie["growatt_schaduw"] = wil
+                await self._async_noteer(
+                    t("{naam}: zou dit schrijven, maar de coach stuurt nu niet: {schema}",
+                      naam=naam, schema=self._growatt_zin(wil)), now,
+                    {"device": device_id, "mode": besluit.stand, "rule": "growatt-schaduw", "applied": False},
+                )
+            # Stond er van de coach nog laden van het net in, dan dat er meteen uit.
+            if geschreven is not None and geschreven.net:
+                wil = GrowattSchema()
+            else:
+                return
+
+        laatst = sessie.get("growatt_op")
+        if geschreven is None or (not stuurt and wil.wijkt_af(geschreven)) or (
+            not self._growatt_wacht(wil, geschreven, now)
+            and wil.wijkt_af(geschreven, alleen_vakken=self._growatt_vroeg(wil, geschreven, now))
+        ):
+            if laatst is not None and now - laatst < GROWATT_PAUZE:
+                return
+            sessie["growatt_op"] = now
+            if await self._async_growatt_schrijf(device, wil):
+                sessie["growatt_geschreven"] = wil
+                sessie["growatt_bevestigd"] = None
+                sessie["growatt_terug_om"] = now + GROWATT_TERUG
+                if stuurt or wil.net:
+                    await self._async_noteer(f"{naam}: {self._growatt_zin(wil)}", now, {
+                        "device": device_id, "mode": besluit.stand, "rule": "growatt-schema", "applied": True,
+                    })
+            else:
+                await self._async_growatt_fout(now, device, sessie, wil)
+            return
+
+        terug_om = sessie.get("growatt_terug_om")
+        if terug_om is not None and now >= terug_om and geschreven is not None:
+            sessie["growatt_terug_om"] = None
+            gelezen = await self._async_growatt_lees(device)
+            if geschreven.gelijk(gelezen):
+                sessie["growatt_bevestigd"] = now
+                sessie["growatt_fouten"] = 0
+                self.state[device_id]["schedule"]["confirmed"] = True
+                if sessie.pop("growatt_gemeld", False):
+                    await self._async_tell(t("{naam} neemt het laadschema weer aan.", naam=naam), telefoon=False)
+            else:
+                _LOGGER.warning("%s: het laadschema staat er niet zoals geschreven: %s", device_id, gelezen)
+                # Opnieuw schrijven na de pauze.
+                sessie["growatt_geschreven"] = None
+                await self._async_growatt_fout(now, device, sessie, geschreven)
+
+    async def _async_growatt_fout(
+        self, now: datetime, device: dict[str, Any], sessie: dict[str, Any], wil: GrowattSchema
+    ) -> None:
+        """Een schema dat er niet in kwam: na `GROWATT_FOUTEN` keer één melding."""
+        sessie["growatt_fouten"] = int(sessie.get("growatt_fouten") or 0) + 1
+        if sessie["growatt_fouten"] >= GROWATT_FOUTEN and not sessie.get("growatt_gemeld"):
+            sessie["growatt_gemeld"] = True
+            naam = device.get("name") or t("De batterij")
+            await self._async_tell(
+                t(
+                    "{naam} neemt het laadschema van de coach niet aan. Kijk in de Growatt-app of laden "
+                    "van het net nu aan staat.", naam=naam,
+                ) if not wil.net else t(
+                    "{naam} neemt het laadschema van de coach niet aan; hij laadt vannacht niet van het net.",
+                    naam=naam,
+                ),
+                kritiek=not wil.net,
+            )
+
+    @staticmethod
+    def _growatt_zin(schema: GrowattSchema) -> str:
+        """Het schema in woorden, voor het logboek."""
+        if not schema.net:
+            return t("geen laden van het net; hij doet zelf nul op de meter.")
+        vakken = ", ".join(f"{a}-{b}" for a, b in schema.vakken)
+        return t(
+            "laden van het net {vakken}, op {pct}% van zijn vermogen, tot {soc}% ({kwh} kWh).",
+            vakken=vakken, pct=schema.vermogen_pct, soc=schema.stop_soc, kwh=getal(schema.kwh, 1),
+        )
+
+    async def _async_growatt_leren(
+        self, now: datetime, settings: dict[str, Any], device: dict[str, Any], b: Batterij,
+        sessie: dict[str, Any], rij: dict[str, Any],
+    ) -> None:
+        """De inhoud en het laadvermogen van een Growatt zelf leren (v0.150.0).
+
+        De inhoud: een stuk alleen laden van minstens `GROWATT_STUK_PCT` procent, en
+        hoeveel de eigen teller "geladen" daarbij per procent opliep. Loopt de teller
+        "ontladen" ertussen op, of zakt de accustand, dan begint het stuk opnieuw.
+
+        Het laadvermogen: in een vak van het net dat de coach schreef en dat de Growatt
+        teruggaf, zonder zon, wat hij laadt gedeeld door het deel dat in het schema
+        staat. Eén meting per verse waarde van de sensor, want die komt eens per vijf
+        minuten.
+        """
+        entities = device.get("entities") or {}
+        device_id = device.get("id", "")
+        nieuw: dict[str, Any] = {}
+        soc = b.soc
+        erin = _kwh(self.hass, entities.get("accu_in"))
+        eruit = _kwh(self.hass, entities.get("accu_out"))
+        stuk = sessie.get("growatt_stuk")
+        if soc is None or erin is None or eruit is None:
+            sessie["growatt_stuk"] = None
+        elif stuk is None or soc < stuk["soc_nu"] or eruit > stuk["uit"] + 0.05:
+            sessie["growatt_stuk"] = {"soc": soc, "soc_nu": soc, "in": erin, "uit": eruit}
+        else:
+            stuk["soc_nu"] = soc
+            if soc - stuk["soc"] >= GROWATT_STUK_PCT:
+                per_pct = (erin - stuk["in"]) / (soc - stuk["soc"])
+                rij_stukken = list(rij.get("growatt_kwh_pct") or [])[-(GROWATT_BEWAAR - 1):]
+                nieuw["growatt_kwh_pct"] = [*rij_stukken, round(per_pct, 4)]
+                sessie["growatt_stuk"] = {"soc": soc, "soc_nu": soc, "in": erin, "uit": eruit}
+
+        geschreven: GrowattSchema | None = sessie.get("growatt_geschreven")
+        laden_w = self._batterij_w(device)
+        if laden_w is not None and -laden_w > float(rij.get("growatt_uit_w") or 0.0) + 50.0:
+            nieuw["growatt_uit_w"] = round(-laden_w)
+        if laden_w is not None and laden_w > float(rij.get("growatt_in_w") or 0.0) + 50.0:
+            nieuw["growatt_in_w"] = round(laden_w)
+        # De vloer: stil, en toch haalt het huis van het net. Buiten een vak van het net,
+        # want daar staat hij ook stil als hij vol is.
+        net_w, _ = self._net_nu(settings)
+        if (
+            soc is not None and laden_w is not None and abs(laden_w) < GROWATT_STIL_W and net_w is not None
+            and net_w > GROWATT_VLOER_NET_W and soc < 50.0
+            and not (geschreven is not None and geschreven.net and self._growatt_in_vak(geschreven, now))
+            and (rij.get("growatt_vloer") is None or soc < float(rij["growatt_vloer"]) - 0.5)
+        ):
+            nieuw["growatt_vloer"] = round(soc)
+        # Zonder panelen is er geen zon, en dat is iets anders dan een omvormer die zwijgt.
+        zon = self._zon_w(settings) if zonsensoren(settings) else 0.0
+        staat = self.hass.states.get(entities.get("charge_power")) if entities.get("charge_power") else None
+        vers = getattr(staat, "last_updated", None)
+        if (
+            geschreven is not None and geschreven.net and sessie.get("growatt_bevestigd") is not None
+            and self._growatt_in_vak(geschreven, now) and laden_w is not None and laden_w > 0
+            and zon is not None and zon < GROWATT_ZON_W and vers is not None
+            and vers != sessie.get("growatt_vers") and b.soc is not None and b.soc < geschreven.stop_soc - 1
+        ):
+            sessie["growatt_vers"] = vers
+            metingen = list(rij.get("growatt_w_pct") or [])[-(GROWATT_BEWAAR - 1):]
+            nieuw["growatt_w_pct"] = [*metingen, round(laden_w * 100.0 / geschreven.vermogen_pct)]
+        if nieuw:
+            await self._async_batterij_bewaren(settings, device_id, nieuw)
+
+    def _growatt_wacht(self, wil: GrowattSchema, staat: GrowattSchema, now: datetime) -> bool:
+        """Of de coach een nieuw schema nog even laat liggen (v0.150.0).
+
+        Over het volgende goedkope stuk beslist hij pas `GROWATT_VOORAF` voordat het
+        begint: het plan schuift overdag mee met de zon en de prijzen, en wat hij om 09:30
+        over de nacht zou schrijven, schreef hij om 13:00 weer anders. De beheersessie in
+        de klantwoning: één keer per dag, vóór het goedkope blok. Loopt er een vak, dan
+        wacht hij niet.
+        """
+        vakken = [s for s in (wil, staat) if s.net]
+        if not vakken:
+            return False
+        if any(self._growatt_in_vak(s, now) for s in vakken):
+            return False
+        return min(self._growatt_begint(s, now) for s in vakken) > GROWATT_VOORAF
+
+    def _growatt_vroeg(self, wil: GrowattSchema, staat: GrowattSchema, now: datetime) -> bool:
+        """Of het vak nog niet loopt: dan schrijft hij alleen andere vakken, niet een ander vermogen."""
+        return bool(wil.net and staat.net and not self._growatt_in_vak(wil, now))
+
+    @staticmethod
+    def _growatt_begint(schema: GrowattSchema, now: datetime) -> timedelta:
+        """Hoe lang het nog duurt tot het eerste vak begint, op de klok."""
+        klok = now.hour * 60 + now.minute
+        minuten = []
+        for begin, _ in schema.vakken:
+            uur, minuut = (int(x) for x in begin.split(":"))
+            minuten.append((uur * 60 + minuut - klok) % (24 * 60))
+        return timedelta(minutes=min(minuten)) if minuten else timedelta(0)
+
+    @staticmethod
+    def _growatt_in_vak(schema: GrowattSchema, now: datetime) -> bool:
+        klok = now.strftime("%H:%M")
+        return any(begin <= klok < eind for begin, eind in schema.vakken)
+
     async def _async_batterij_loslaten(self, device: dict[str, Any], herstart: bool = False) -> None:
         """De batterij teruggeven: vermogen op nul, en zijn eigen stand terug.
 
@@ -7117,6 +7555,18 @@ class ChargerCoach:
         externe modus (v0.96.0); zie `_async_bij_stop`.
         """
         sessie = self._batterij.get(device.get("id", ""))
+        if device.get("brand") in BATTERIJ_SCHEMA:
+            # Een Growatt: het laden van het net eruit, want het schema herhaalt zich
+            # elke dag (v0.150.0). Wat er niet van de coach was laat hij staan. Bij een
+            # herstart niet: dan schrijft de coach daarna meteen opnieuw, en twee
+            # opdrachten vlak na elkaar faalt de tweede.
+            geschreven = (sessie or {}).get("growatt_geschreven")
+            if geschreven is not None and geschreven.net and not herstart:
+                if await self._async_growatt_schrijf(device, GrowattSchema()) and sessie is not None:
+                    sessie["growatt_geschreven"] = GrowattSchema()
+            if sessie is not None:
+                sessie["growatt_stuurt"] = False
+            return
         zelf = bool(sessie and sessie.get("zelf"))
         if sessie is not None:
             sessie["stuurt"] = False
@@ -7144,7 +7594,8 @@ class ChargerCoach:
         for device in settings.get("devices") or []:
             if device.get("type") != "thuisbatterij":
                 continue
-            if not (self._batterij.get(device.get("id", "")) or {}).get("stuurt"):
+            sessie = self._batterij.get(device.get("id", "")) or {}
+            if not (sessie.get("stuurt") or sessie.get("growatt_stuurt")):
                 continue
             try:
                 await self._async_batterij_loslaten(device, herstart=herstart)

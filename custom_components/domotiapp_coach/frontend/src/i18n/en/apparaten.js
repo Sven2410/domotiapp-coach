@@ -297,7 +297,9 @@ export const APPARATEN = {
   "En van alles wat er ooit uit ging.": "And of everything that ever went out.",
   "Voor Anker is dat de officiele Anker SOLIX-integratie, die lokaal met de batterij praat.":
     "For Anker that is the official Anker SOLIX integration, which talks to the battery locally.",
-  "Een Growatt leest de coach alleen uit, via de Growatt-integratie.": "The coach only reads a Growatt, through the Growatt integration.",
+  "Een Growatt stuurt de coach met een laadschema, via de Growatt-integratie: een SPH met een API-token. Kan de omvormer dat niet, dan leest hij hem alleen uit.": "The coach controls a Growatt with a charging schedule, through the Growatt integration: an SPH with an API token. If the inverter cannot do that, the coach only reads it.",
+  "laadschema": "charging schedule",
+  "Het laadvermogen is wat hij van het net laadt op 100% in het laadschema. Leeg mag: de coach meet allebei zelf, en rekent met wat hij meet zodra hij genoeg heeft.": "The charging power is what it draws from the grid at 100% in the charging schedule. Empty is fine: the coach measures both itself, and uses what it measures once it has enough.",
   "Onder Overig past elke batterij die in Home Assistant een getal heeft waarmee je het vermogen zet.":
     "Any battery that has a number in Home Assistant to set its power fits under Other.",
 

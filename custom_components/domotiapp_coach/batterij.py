@@ -2311,3 +2311,243 @@ def rendement_uit_stappen(sommen: dict | None) -> Rendement | None:
     if not 0.3 <= gem["in"] * gem["uit"] <= 1.0:
         return None
     return Rendement(punten["in"], punten["uit"], gem["in"], gem["uit"])
+
+
+# --- Growatt: sturen met een laadschema (v0.150.0) --------------------------------
+#
+# De eigenaar op 22-10-2026: de Growatt-thuisbatterij sturen vanuit de coach, voor
+# elke klant met een Growatt, en zelflerend. Een Growatt heeft geen stuurgetal in
+# watt waar de regelaar op kan draaien: de integratie haalt alles eens per vijf
+# minuten uit de cloud. Wat wel kan, bij een SPH op het API-token: een laadschema
+# schrijven, drie vakken per dag met een laadvermogen in procent, een accustand
+# waar hij stopt en of hij van het net mag laden. Daarbuiten doet de batterij
+# zelf nul op de meter. Dus dezelfde som als bij een batterij die zelf nul doet
+# (`zelf_nul`), en van het plan alleen de blokken van het net.
+
+# Hoeveel er in een blok van het net moet komen voordat het een vak wordt, in kWh.
+# Daaronder is het afronding in de som en geen plan.
+GROWATT_MIN_KWH = 0.05
+# Hoeveel vakken een Growatt heeft.
+GROWATT_VAKKEN = 3
+# Hoever vooruit het schema reikt. Het schema herhaalt zich elke dag op dezelfde
+# kloktijden, dus een vak van morgen mag niet in een vak van vandaag vallen.
+GROWATT_VOORUIT = timedelta(hours=23)
+# Hoe lang een stuk alleen laden moet zijn om de inhoud te meten, in procent; na hoeveel
+# stukken de coach de gemeten inhoud gelooft, en na hoeveel metingen het laadvermogen.
+GROWATT_STUK_PCT = 10
+GROWATT_MIN_STUKKEN = 3
+# Vanaf hoeveel procent verschil in vermogen of stopgrens een nieuw schema loont.
+GROWATT_SPELING_PCT = 5
+GROWATT_SPELING_SOC = 3
+# Hoe lang voor een vak de coach het vermogen en de stopgrens nog bijstelt. Daarvoor
+# schuift het plan mee met hoe leeg de avond hem maakt.
+GROWATT_VOORAF = timedelta(minutes=30)
+GROWATT_MIN_VERMOGEN = 6
+
+
+@dataclass
+class GrowattSchema:
+    """Wat er in de Growatt hoort te staan: laden van het net in vakken, of niet."""
+
+    # Of hij in de vakken van het net mag laden. Uit is gewoon zelf nul op de meter.
+    net: bool = False
+    # Het laadvermogen in procent van wat hij kan, en tot welke accustand.
+    vermogen_pct: int = 100
+    stop_soc: int = 100
+    # Tot drie vakken, als kloktijden "HH:MM" in de tijd van het huis.
+    vakken: list[tuple[str, str]] = field(default_factory=list)
+    # Wanneer het laatste vak afloopt; daarna hoort het schema weer uit.
+    tot: datetime | None = None
+    # Hoeveel er volgens het plan van het net in gaat, in kWh, voor de reden.
+    kwh: float = 0.0
+
+    def velden(self) -> dict:
+        """Wat er naar `growatt_server.write_ac_charge_times` gaat, zonder het apparaat."""
+        uit: dict = {
+            "charge_power": self.vermogen_pct,
+            "charge_stop_soc": self.stop_soc,
+            "mains_enabled": self.net,
+        }
+        for i in range(GROWATT_VAKKEN):
+            vak = self.vakken[i] if i < len(self.vakken) else None
+            uit[f"period_{i + 1}_start"] = vak[0] if vak else "00:00"
+            uit[f"period_{i + 1}_end"] = vak[1] if vak else "00:00"
+            uit[f"period_{i + 1}_enabled"] = vak is not None
+        return uit
+
+    def gelijk(self, gelezen: dict | None) -> bool:
+        """Of wat de Growatt teruggeeft hierop lijkt.
+
+        Zonder de accustand waar hij stopt: in de klantwoning gaf het teruglezen op
+        22-10-2026 vlak na het schrijven 25 en een uur later 100, terwijl er 25 in
+        stond (de omvormer heeft er twee velden voor). Dat de batterij daar stopt
+        bewaakt de coach dus zelf (`growatt_vol`).
+        """
+        if not isinstance(gelezen, dict):
+            return False
+        if bool(gelezen.get("mains_enabled")) != self.net:
+            return False
+        if not self.net:
+            return True
+        try:
+            if int(gelezen.get("charge_power")) != self.vermogen_pct:
+                return False
+        except (TypeError, ValueError):
+            return False
+        aan = sorted(
+            (str(p.get("start_time")), str(p.get("end_time")))
+            for p in gelezen.get("periods") or []
+            if isinstance(p, dict) and p.get("enabled")
+        )
+        return aan == sorted(self.vakken)
+
+    def wijkt_af(self, ander: "GrowattSchema | None", alleen_vakken: bool = False) -> bool:
+        """Of dit zoveel van een eerder schema verschilt dat schrijven loont.
+
+        Het plan schuift elke minuut een beetje mee met de accustand. Elke procent
+        verschil schrijven zou de cloud elke ronde een opdracht geven, en een tweede
+        opdracht vlak na de eerste faalt (de klantwoning, 22-10-2026). Andere vakken
+        of aan en uit zijn altijd een verschil. Het vermogen en de stopgrens alleen
+        omhoog, en pas vanaf `GROWATT_SPELING_PCT` en `GROWATT_SPELING_SOC`: wil het plan
+        minder, dan zet het het schema zelf uit zodra er genoeg in zit.
+        """
+        if ander is None or self.net != ander.net:
+            return True
+        if not self.net:
+            return False
+        # Een vak dat al loopt valt na elk blok een stukje korter uit het plan; zolang het
+        # oude vak het nieuwe dekt en op dezelfde tijd eindigt, staat het goed.
+        dekt = all(
+            any(eind == oud_eind and oud_begin <= begin for oud_begin, oud_eind in ander.vakken)
+            for begin, eind in self.vakken
+        )
+        if alleen_vakken:
+            return not dekt or len(self.vakken) > len(ander.vakken)
+        return (
+            not dekt
+            or len(self.vakken) > len(ander.vakken)
+            or self.vermogen_pct - ander.vermogen_pct >= GROWATT_SPELING_PCT
+            or self.stop_soc - ander.stop_soc >= GROWATT_SPELING_SOC
+        )
+
+
+def _klok(moment: datetime) -> str:
+    return moment.strftime("%H:%M")
+
+
+def growatt_schema(uren: list[Uur], now: datetime, b: Batterij) -> GrowattSchema:
+    """Het laadschema voor een Growatt uit het plan van de batterij.
+
+    Wat het plan in de komende uren van het net wil halen, uitgesmeerd over het hele
+    stuk even dure uren waar het in valt: dezelfde gedachte als rustig laden
+    (`_rustig_vermogen`), en het kost nooit geld. Het plan zelf vult het liefst de
+    laatste goedkope uren op vol vermogen; een Growatt krijgt toch één vak per
+    goedkoop stuk, en op een laag vermogen is hij zuiniger. Het vermogen is het
+    hoogste dat een stuk zo vraagt, naar boven afgerond op een procent van wat hij
+    kan; hij stopt waar het plan zegt dat hij na het laatste stuk zit. Een vak over
+    middernacht wordt er twee, want een vak van de Growatt loopt van een kloktijd
+    naar een latere. Meer dan drie vakken passen er niet in: dan de eerste, en daarna
+    rekent de coach opnieuw.
+    """
+    if not b.max_charge_w or not b.capacity_kwh:
+        return GrowattSchema()
+    rij = [u for u in uren if u.end > now]
+    # Stukken even dure uren die aan elkaar liggen.
+    stukken: list[list[Uur]] = []
+    for u in rij:
+        if stukken and stukken[-1][-1].end == u.start and abs(stukken[-1][0].price - u.price) <= PRICE_MARGIN:
+            stukken[-1].append(u)
+        else:
+            stukken.append([u])
+    # Alleen het eerstvolgende stuk: de Growatt heeft één stopgrens voor alle vakken,
+    # en het schema herhaalt zich elke dag. Is dat stuk voorbij, dan schrijft de coach
+    # het volgende; zo is het één schema per goedkoop stuk, zoals de beheersessie het
+    # in de klantwoning voorstelde.
+    #
+    # Een vak reikt hooguit een etmaal vooruit, want daarna staat het op de klok weer bij
+    # nu. Valt het eind van het stuk later, dan mag het toch blijven als nu even goedkoop
+    # is: dan laadt het schema nu ook niet duurder. Anders afkappen. Zonder dat schoof het
+    # eind elk blok een stukje op en schreef de coach elk kwartier een nieuw schema.
+    rand = now + timedelta(hours=24)
+    vakken: list[tuple[datetime, datetime, float, float]] = []
+    for stuk in stukken:
+        net = [u for u in stuk if u.net_kwh >= GROWATT_MIN_KWH and u.kwh > 0 and u.start < rand]
+        if net and stuk[0].start < now + GROWATT_VOORUIT:
+            eind = stuk[-1].end
+            if eind > rand and not (rij and rij[0].price <= stuk[0].price + PRICE_MARGIN):
+                eind = max((u.end for u in stuk if u.end <= rand), default=stuk[0].end)
+            vakken.append((stuk[0].start, eind, sum(u.kwh for u in net), net[-1].soc))
+            break
+    if not vakken:
+        return GrowattSchema()
+    # Kloktijden, en over middernacht in tweeën.
+    klok: list[tuple[str, str]] = []
+    gebruikt: list[tuple[datetime, datetime, float, float]] = []
+    for vak in vakken:
+        # Op het kwartier: het eerste blok van het plan begint op nu, en een begin dat
+        # elke ronde een minuut opschuift is geen nieuw vak.
+        begin, eind = vak[0].replace(minute=vak[0].minute // 15 * 15, second=0, microsecond=0), vak[1]
+        if eind.date() != begin.date() and _klok(eind) != "00:00":
+            stukjes = [(_klok(begin), "23:59"), ("00:00", _klok(eind))]
+        else:
+            stukjes = [(_klok(begin), "23:59" if _klok(eind) == "00:00" else _klok(eind))]
+        if len(klok) + len(stukjes) > GROWATT_VAKKEN:
+            break
+        klok.extend(stukjes)
+        gebruikt.append(vak)
+    if not gebruikt:
+        return GrowattSchema()
+    # Het vermogen over wat er van het vak nog over is.
+    watt = max(
+        kwh / max(echte_duur(max(begin, now), eind).total_seconds() / 3600.0, 1 / 60) * 1000.0
+        for begin, eind, kwh, _ in gebruikt
+    )
+    pct = min(100, max(1, int(-(-watt * 100 // b.max_charge_w))))
+    stop = min(int(b.soc_max), max(int(b.soc or 0) + 1, int(-(-gebruikt[-1][3] // 1))))
+    return GrowattSchema(
+        net=True, vermogen_pct=pct, stop_soc=stop, vakken=klok, tot=gebruikt[-1][1],
+        kwh=sum(vak[2] for vak in gebruikt),
+    )
+
+
+def growatt_vol(schema: GrowattSchema, soc: float | None, soc_max: float = 100.0) -> bool:
+    """Of de batterij al zit waar het schema hem laat stoppen, gemeten en niet teruggelezen.
+
+    Niet als het schema tot vol gaat: vol stopt hij zelf, en zolang het vak loopt staat hij
+    dan stil terwijl het huis goedkoop van het net haalt. Zou de coach het schema uitzetten,
+    dan gaf de batterij in de goedkope uren stroom aan het huis en laadde de coach hem
+    daarna weer bij, met het verlies twee keer. In het virtuele huis (`growatt-bihorario`)
+    ging het schema zo tussen 05:20 en 08:46 zeventien keer aan en uit.
+    """
+    if not schema.net or soc is None or schema.stop_soc >= soc_max - 0.5:
+        return False
+    return soc >= schema.stop_soc - 0.5
+
+
+def growatt_inhoud(stukken: list | None) -> float | None:
+    """De bruikbare inhoud bij honderd procent in kWh, uit wat de eigen teller per procent telde.
+
+    Elk stuk is een stuk alleen laden van minstens `GROWATT_STUK_PCT` procent, en
+    wat de teller van de batterij zelf ("geladen") daarbij per procent opliep. Een
+    stuk en niet elke procent, want de teller telt per 0,1 kWh en een procent is
+    daar maar iets meer dan. In de klantwoning kwam er op 15-10-2026 ongeveer 12 kWh
+    per 100% uit, tegen 15,3 op het typeplaatje. De mediaan, zodat één stuk waarin
+    de cloud een meting oversloeg het niet bepaalt.
+    """
+    rij = sorted(float(s) for s in stukken or [] if isinstance(s, (int, float)) and 0.0 < s < 1.0)
+    if len(rij) < GROWATT_MIN_STUKKEN:
+        return None
+    return rij[len(rij) // 2] * 100.0
+
+
+def growatt_max_w(metingen: list | None) -> float | None:
+    """Wat hij bij honderd procent van het net laadt, in watt, uit wat hij bij een deel haalde.
+
+    Elke meting is het laadvermogen gedeeld door het deel dat in het schema stond,
+    gemeten in een vak van het net zonder zon. In de klantwoning laadde hij op
+    22-10-2026 bij 20% met 1.570 W aan de accukant: ongeveer 7,8 kW bij 100%.
+    """
+    rij = sorted(float(m) for m in metingen or [] if isinstance(m, (int, float)) and m > 0)
+    if len(rij) < GROWATT_MIN_VERMOGEN:
+        return None
+    return rij[len(rij) // 2]

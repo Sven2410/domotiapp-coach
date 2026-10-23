@@ -309,9 +309,19 @@ class Staten:
 class Diensten:
     def __init__(self):
         self.verstuurd = []
+        # Acties die een antwoord geven (v0.150.0, de Growatt): per (domein, dienst)
+        # een functie van de data naar het antwoord. Gooit die, dan faalt de actie.
+        self.antwoorden = {}
 
-    async def async_call(self, domein, dienst, data, blocking=False):
+    def has_service(self, domein, dienst):
+        return (domein, dienst) in self.antwoorden
+
+    async def async_call(self, domein, dienst, data, blocking=False, return_response=False):
         self.verstuurd.append((domein, dienst, dict(data)))
+        doe = self.antwoorden.get((domein, dienst))
+        if doe is not None:
+            return doe(dict(data))
+        return None
 
 
 class Bus:
