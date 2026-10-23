@@ -23,6 +23,7 @@
 
   "De sturing van deze batterij staat uit.": "Control of this battery is switched off.",
   "De coach weet niet hoe vol de batterij is, dus hij laat hem stilstaan.": "The coach does not know how full the battery is, so it leaves it idle.",
+  "Hij houdt de batterij vast: wat erin zit is straks meer waard dan nu. Het huis haalt zolang van het net, tegen {prijs}.": "It holds the battery: what is in it is worth more later than now. Meanwhile the home runs on the grid, at {prijs}.",
   "Zodra de accustand er weer is gaat hij verder.": "As soon as the battery level is back, it carries on.",
   "De prijs van dit uur is niet bekend, dus hij houdt alleen de meter op nul.": "The price for this hour is not known, so it only keeps the meter at zero.",
   "Van het net laden doet hij pas weer als de prijzen er zijn.": "It only charges from the grid again once the prices are in.",

@@ -1606,6 +1606,17 @@ growatt_schaduw = growatt_bihorario.kopie(
     batterij=Batterij(**GROWATT_SPH, growatt_vinkje=False),
 )
 
+# Vasthouden (v0.155.0). De eigenaar op 23-10-2026: "kunnen we de accu net als anker ook op
+# hold zetten? Dus pas als het dure uur in gaat dan pas ontladen?" Een avond die de batterij
+# niet leegtrekt: om 21:30 zit hij nog op 50%. In vazio houdt de coach dat vast met een vak
+# op de stopgrens, en laadt hij aan het eind alleen bij wat er dan nog mist. Deze Growatt
+# stopt zelf op de stopgrens en staat daar stil zolang het vak loopt.
+growatt_vasthouden = growatt_bihorario.kopie(
+    naam="growatt-vasthouden",
+    uitleg="dezelfde Growatt met nog 50% om 21:30: in vazio vasthouden, en pas in de dure uren ontladen",
+    batterij=Batterij(**{**GROWATT_SPH, "soc": 50.0}, growatt_stopt_zelf=True),
+    begin="2026-10-22 21:30", duur_uren=26,
+)
 
 ALLE = [
     alfen_zonnig, alfen_dyn, alfen_doel_80, alfen_laadgrens,
@@ -1643,7 +1654,7 @@ ALLE = [
     vast_kosten_kwh, vast_kosten_schalen, vast_kosten_overschot, vast_kosten_overschot_netto, dyn_salderen_vol,
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,
-    growatt_bihorario, growatt_zon, growatt_eigen_zon, growatt_schaduw,
+    growatt_bihorario, growatt_zon, growatt_eigen_zon, growatt_schaduw, growatt_vasthouden,
 ]
 
 

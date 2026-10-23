@@ -7310,6 +7310,8 @@ class ChargerCoach:
         """
         b.zelf_nul = True
         b.handelen = False
+        # In een vak met de stopgrens op de accustand staat hij stil (v0.155.0).
+        b.kan_vasthouden = True
         inhoud = growatt_inhoud(rij.get("growatt_kwh_pct"))
         if inhoud is not None:
             b.capacity_kwh = inhoud
@@ -7369,7 +7371,8 @@ class ChargerCoach:
             rij = self._batterij_rij(settings, device_id)
         bijstel = growatt_bijstelling(rij.get("growatt_nachten"), b.capacity_kwh)
         geschreven: GrowattSchema | None = sessie.get("growatt_geschreven")
-        loopt = bool(stuurt and geschreven is not None and geschreven.net and self._growatt_in_vak(geschreven, now))
+        loopt = bool(stuurt and geschreven is not None and geschreven.net and not geschreven.houden
+                     and self._growatt_in_vak(geschreven, now))
         wil = growatt_schema(besluit.uren, now, b, bijstel, loopt=loopt)
         if not b.max_charge_w:
             self.state[device_id]["tip"] = t(
@@ -7383,7 +7386,9 @@ class ChargerCoach:
         if vol_tot is not None and now >= vol_tot:
             sessie.pop("growatt_vol_tot", None)
             vol_tot = None
-        elif vol_tot is not None:
+        elif vol_tot is not None and not wil.houden:
+            # Op de stopgrens uit, behalve als het plan hem daarna vasthoudt (v0.155.0): dan
+            # zou hij anders het huis voeden in de goedkope uren.
             wil = GrowattSchema()
         # Aan of uit pas na `GROWATT_BESTENDIG`: het plan twijfelde in het virtuele huis
         # (`growatt-zon`) een ochtend lang of er vannacht nog 1 kWh bij moest, en dan ging
@@ -7483,6 +7488,11 @@ class ChargerCoach:
         """Het schema in woorden, voor het logboek."""
         if not schema.net:
             return t("geen laden van het net; hij doet zelf nul op de meter.")
+        if schema.houden:
+            return t(
+                "vasthouden {vakken}, op {soc}%: niet laden en niet ontladen, het huis van het net.",
+                vakken=", ".join(f"{a}-{b}" for a, b in schema.vakken), soc=schema.stop_soc,
+            )
         vakken = ", ".join(f"{a}-{b}" for a, b in schema.vakken)
         return t(
             "laden van het net {vakken}, op {pct}% van zijn vermogen, tot {soc}% ({kwh} kWh).",
