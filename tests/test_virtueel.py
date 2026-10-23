@@ -14,6 +14,7 @@ klaar-tijd gehaald is.
 """
 
 import datetime as dt
+import re
 import sys
 
 import scenarios
@@ -2379,9 +2380,14 @@ if (vl := v("growatt-bihorario")):
           f"€{vl.bat_kosten_zonder:.2f} zonder batterij")
     controle("growatt: hooguit vier schrijfacties in een dag en een nacht, en geen die faalt",
              len(vl.gw_schrijf) <= 4 and vl.gw_gefaald == 0, f"{len(vl.gw_schrijf)} {vl.gw_gefaald}")
-    controle("growatt: het schema voor de nacht ligt in vazio, 23:00 tot 09:00",
-             any(aan and vak == [("23:00", "23:59"), ("00:00", "09:00")] for _, aan, _, _, vak in vl.gw_schrijf),
+    # Sinds v0.152.0 aan het eind van vazio, zo laat als het kan (de eigenaar op 23-10-2026: "de
+    # laatste 2 uur van de goedkope uren de accu vol laden"), en een vak dat loopt blijft lopen.
+    controle("growatt: het schema voor de nacht ligt aan het eind van vazio, tot 09:00, en begint na 23:00",
+             any(aan and len(vak) == 1 and vak[0][1] == "09:00" and vak[0][0] < "09:00" for _, aan, _, _, vak in vl.gw_schrijf),
              f"{vl.gw_schrijf}")
+    ontladen = [r for r in vl.bat_verloop if r[2] < -100 and (r[0].hour >= 23 or r[0].hour < 9)]
+    controle("growatt: in vazio geeft de batterij het huis (bijna) niets",
+             sum(-r[2] for r in ontladen) * vl.stap_uur / 1000 < 0.2, f"{len(ontladen)} minuten")
     controle("growatt: hij laadt alleen in vazio", not buiten, f"{len(buiten)} minuten")
     controle("growatt: rustig, op hooguit de helft van zijn vermogen",
              max((r[2] for r in laden), default=0) <= 0.5 * 7800, f"{max((r[2] for r in laden), default=0):.0f} W")
@@ -2413,7 +2419,7 @@ if (vl := v("growatt-schaduw")):
     print(f"  growatt-schaduw: {zou}")
     controle("growatt-schaduw: zonder het vinkje schrijft hij niets", not vl.gw_schrijf, f"{vl.gw_schrijf}")
     controle("growatt-schaduw: en zegt in de geschiedenis wat hij zou schrijven, kort voor vazio",
-             any("23:00-23:59, 00:00-09:00" in m for m in zou) and len(zou) <= 3, f"{zou}")
+             any(re.search(r"laden van het net \d\d:\d\d-09:00,", m) for m in zou) and len(zou) <= 3, f"{zou}")
 
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

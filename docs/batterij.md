@@ -1573,10 +1573,23 @@ alleen uitlezen. In const.py staat Growatt daarom niet meer in `BATTERIJ_ALLEEN_
 zonder handelen: een schema kan niet op een prijs naar het net ontladen. Van het plan neemt
 `growatt_schema` (batterij.py) alleen de blokken van het net, en dan alleen het eerstvolgende stuk
 even dure uren waar ze in vallen: de Growatt heeft één stopgrens voor alle vakken, en het schema
-herhaalt zich elke dag. Uitgesmeerd over dat hele stuk (het plan zelf vult het liefst de laatste
-goedkope uren op vol vermogen; uitsmeren over even dure uren kost nooit geld, zoals bij rustig
-laden), het vermogen naar boven afgerond op een procent van wat hij kan, en de stopgrens waar het
-plan na het stuk zit. Over middernacht worden het twee vakken (23:00-23:59 en 00:00-09:00), want een
+herhaalt zich elke dag. Sinds v0.152.0 aan het eind van dat stuk, zo laat als het kan: de eigenaar op
+23-10-2026, "de laatste 2 uur van de goedkope uren de accu vol laden", en "je wilt uiteindelijk gewoon
+dat je de goedkope uren en de zon zoveel mogelijk gebruikt". Het vak eindigt met het stuk en duurt
+minstens `GROWATT_LAAT_MIN` (twee uur), en langer als hij anders boven `GROWATT_LAAT_DEEL` (de helft)
+van zijn vermogen moet: die marge vangt een opdracht op die een keer niet aankomt, en een accu die
+trager laadt dan gedacht. Past het er zo niet in, dan begint het vak waar het stuk begint. De duur is
+in echte uren (`echt_verder`): in de nacht van de wintertijd begint zeven uur voor 08:00 om 02:00, niet
+om 01:00. Zo laat mogelijk betekent ook dat hij over de hoeveelheid beslist met de verste
+zonverwachting, een half uur voor het vak (`GROWATT_VOORAF`), en binnen het stuk kost het niets extra.
+Tot v0.152.0 was het uitgesmeerd over het hele stuk. Loopt het vak dat de coach schreef al
+(`loopt`), dan blijft het lopen tot het eind, met wat er nog moet over de rest: terwijl hij laadt
+schuift het berekende begin anders voorbij nu, en dan stond de batterij tot dat nieuwe begin buiten een
+vak en voedde hij het huis in de goedkope uren. Om dezelfde reden kijkt `_growatt_vroeg` naar het vak
+dat in de Growatt staat, niet naar het nieuwe; zonder dat bleef in het virtuele huis een hogere
+stopgrens liggen en stond hij om 09:00 op 76% in plaats van vol. Het vermogen is wat erin moet over wat er van het
+vak over is, naar boven afgerond op een procent van wat hij kan, en de stopgrens waar het plan na het
+stuk zit. Een vak over middernacht wordt er twee (23:00-23:59 en 00:00-09:00), want een
 vak loopt van een kloktijd naar een latere. Een vak reikt hooguit een etmaal vooruit, behalve als nu
 even goedkoop is; het begin staat op het kwartier.
 
@@ -1588,8 +1601,16 @@ even goedkoop is; het begin staat op het kwartier.
   een hogere stopgrens nodig is (`wijkt_af`, vanaf 5 procentpunt en 3%); lager schrijft hij niet,
   want dan zet het plan het schema zelf uit zodra er genoeg in zit;
 * aan of uit pas als het plan dat vijf minuten wil (`GROWATT_BESTENDIG`);
-* nooit twee keer binnen twee minuten (`GROWATT_PAUZE`), en na anderhalve minuut teruglezen
-  (`GROWATT_TERUG`; `gelijk` vergelijkt aan, vermogen en vakken, niet de stopgrens);
+* nooit twee keer binnen vijf minuten (`GROWATT_PAUZE`), en na zes minuten teruglezen (`GROWATT_TERUG`;
+  `gelijk` vergelijkt aan, vermogen en vakken, niet de stopgrens). Uitgezocht op 23-10-2026 in de bron
+  van `growatt_server` en `growattServer` 2.2.0: Growatt neemt per onderdeel van zijn API één vraag per
+  vijf minuten aan (fout 10012, "Access Frequency Limitation of 5 Minutes/Time"); Home Assistant vraagt
+  elke vijf minuten (`SCAN_INTERVAL`) vier dingen op, plus elk uur drie voor een scan.
+  `read_ac_charge_times` vraagt Growatt niets, maar leest wat Home Assistant onthield, en na een
+  schrijfopdracht zet Home Assistant daar zelf in wat er geschreven werd. Wat de omvormer echt heeft,
+  staat er pas na de volgende ronde; tot v0.152.0 las de coach na 90 seconden dus zijn eigen opdracht
+  terug. Schrijven is één aanroep (`mixSet`). Een daggrens voor een token is niet gevonden; de blokkade
+  van 24 uur geldt alleen voor de oude inlog met wachtwoord;
 * na drie keer niet aangenomen één melding, kritiek als het laden van het net er niet uit wil.
 
 **De stopgrens bewaakt hij zelf** (`growatt_vol`): zit de accustand erop, dan zet hij het schema uit
@@ -1626,8 +1647,10 @@ een schema in schrijft.
 
 **In het virtuele huis** (`growatt-bihorario`, `growatt-zon`, `growatt-schaduw`; een Growatt met een
 schema, sensoren eens per vijf minuten, en een tweede schrijfactie binnen een minuut die faalt): op een
-donkere dag met bi-horário drie schrijfacties in 29 uur, in vazio rustig van 15 naar 100% op 33 tot 35%
-van zijn vermogen, om 09:00 vol, en € 2,98 tegen € 4,13 zonder batterij. Op een bewolkte dag vult de
+donkere dag met bi-horário sinds v0.152.0 drie schrijfacties in 29 uur, laden vanaf 02:30 tot 09:00 (de
+coach rekent de eerste nacht met het laadvermogen dat hij op zon zag, een ondergrens, dus de echte
+Growatt laadt sneller), om 09:00 op 97%, in vazio 0,08 kWh uit de batterij, en € 2,91 tegen € 4,13
+zonder batterij (v0.151.0: uitgesmeerd over vazio, € 2,98). Op een bewolkte dag vult de
 zon hem en laadt hij de eerste nacht niet van het net. Proef 50 in test_batterij.py, 192 in
 test_coach.py.
 

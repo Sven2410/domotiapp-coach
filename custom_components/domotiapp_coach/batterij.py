@@ -2346,6 +2346,11 @@ GROWATT_VOORAF = timedelta(minutes=30)
 GROWATT_NACHTEN = 7
 GROWATT_MIN_NACHTEN = 3
 GROWATT_MIN_VERMOGEN = 6
+# Het vak ligt aan het eind van het goedkope stuk (v0.152.0): minstens zo lang, en zo lang
+# dat hij op hooguit dit deel van zijn vermogen laadt. Die marge vangt een opdracht op die
+# een keer niet aankomt, en een accu die trager laadt dan gedacht.
+GROWATT_LAAT_MIN = timedelta(hours=2)
+GROWATT_LAAT_DEEL = 0.5
 
 
 @dataclass
@@ -2438,19 +2443,28 @@ def _klok(moment: datetime) -> str:
     return moment.strftime("%H:%M")
 
 
-def growatt_schema(uren: list[Uur], now: datetime, b: Batterij, bijstel_kwh: float = 0.0) -> GrowattSchema:
+def growatt_schema(
+    uren: list[Uur], now: datetime, b: Batterij, bijstel_kwh: float = 0.0, loopt: bool = False,
+) -> GrowattSchema:
     """Het laadschema voor een Growatt uit het plan van de batterij.
 
-    Wat het plan in de komende uren van het net wil halen, uitgesmeerd over het hele
-    stuk even dure uren waar het in valt: dezelfde gedachte als rustig laden
-    (`_rustig_vermogen`), en het kost nooit geld. Het plan zelf vult het liefst de
-    laatste goedkope uren op vol vermogen; een Growatt krijgt toch één vak per
-    goedkoop stuk, en op een laag vermogen is hij zuiniger. Het vermogen is het
-    hoogste dat een stuk zo vraagt, naar boven afgerond op een procent van wat hij
-    kan; hij stopt waar het plan zegt dat hij na het laatste stuk zit. Een vak over
+    Wat het plan in de komende uren van het net wil halen, in de laatste uren van het
+    stuk even dure uren waar het in valt (v0.152.0; tot dan uitgesmeerd over het hele
+    stuk). De eigenaar op 23-10-2026: "de laatste 2 uur van de goedkope uren de accu vol
+    laden", en "je wilt uiteindelijk gewoon dat je de goedkope uren en de zon zoveel
+    mogelijk gebruikt". Zo laat mogelijk betekent dat de coach over de hoeveelheid
+    beslist met de verste zonverwachting (`GROWATT_VOORAF` voor het vak), en binnen het
+    stuk kost het niets extra. Het vak duurt `GROWATT_LAAT_MIN`, of langer als hij
+    anders boven `GROWATT_LAAT_DEEL` van zijn vermogen moet. Het vermogen is wat erin
+    moet over wat er van het vak over is, naar boven afgerond op een procent van wat
+    hij kan; hij stopt waar het plan zegt dat hij na het laatste stuk zit. Een vak over
     middernacht wordt er twee, want een vak van de Growatt loopt van een kloktijd
-    naar een latere. Meer dan drie vakken passen er niet in: dan de eerste, en daarna
-    rekent de coach opnieuw.
+    naar een latere.
+
+    `loopt`: het vak dat de coach schreef loopt al. Dan blijft het lopen tot het eind van
+    het stuk, met wat er nog moet over de rest: anders schoof het begin terwijl hij laadde
+    voorbij nu, en stond de batterij tot dat nieuwe begin buiten een vak, en voedde hij het
+    huis in de goedkope uren (het virtuele huis, `growatt-bihorario`).
     """
     if not b.max_charge_w or not b.capacity_kwh:
         return GrowattSchema()
@@ -2483,30 +2497,27 @@ def growatt_schema(uren: list[Uur], now: datetime, b: Batterij, bijstel_kwh: flo
             break
     if not vakken:
         return GrowattSchema()
-    # Kloktijden, en over middernacht in tweeën.
-    klok: list[tuple[str, str]] = []
-    gebruikt: list[tuple[datetime, datetime, float, float]] = []
-    for vak in vakken:
-        # Op het kwartier: het eerste blok van het plan begint op nu, en een begin dat
-        # elke ronde een minuut opschuift is geen nieuw vak.
-        begin, eind = vak[0].replace(minute=vak[0].minute // 15 * 15, second=0, microsecond=0), vak[1]
-        if eind.date() != begin.date() and _klok(eind) != "00:00":
-            stukjes = [(_klok(begin), "23:59"), ("00:00", _klok(eind))]
-        else:
-            stukjes = [(_klok(begin), "23:59" if _klok(eind) == "00:00" else _klok(eind))]
-        if len(klok) + len(stukjes) > GROWATT_VAKKEN:
-            break
-        klok.extend(stukjes)
-        gebruikt.append(vak)
-    if not gebruikt:
-        return GrowattSchema()
     # Wat de nachten hiervoor leerden (`growatt_bijstelling`): meer of minder dan het plan.
-    begin, eind, kwh, soc_eind = gebruikt[0]
+    begin, eind, kwh, soc_eind = vakken[0]
     kwh_plan = kwh
     kwh = kwh + bijstel_kwh
     if kwh < GROWATT_MIN_KWH:
         return GrowattSchema()
     soc_eind = soc_eind + (kwh - kwh_plan) / b.capacity_kwh * 100.0
+    # Aan het eind van het stuk, in echte uren: de nacht van de wintertijd duurt er een langer.
+    duur = max(GROWATT_LAAT_MIN, timedelta(hours=kwh / (b.max_charge_w * GROWATT_LAAT_DEEL / 1000.0)))
+    duur = timedelta(minutes=-(-duur.total_seconds() // 900) * 15)
+    laat = echt_verder(eind, -duur)
+    if loopt and _echt(now) < _echt(laat):
+        laat = now
+    begin = max(begin, laat, key=_echt)
+    # Op het kwartier: het eerste blok van het plan begint op nu, en een begin dat elke
+    # ronde een minuut opschuift is geen nieuw vak. Kloktijden, en over middernacht in tweeën.
+    begin = begin.replace(minute=begin.minute // 15 * 15, second=0, microsecond=0)
+    if eind.date() != begin.date() and _klok(eind) != "00:00":
+        klok = [(_klok(begin), "23:59"), ("00:00", _klok(eind))]
+    else:
+        klok = [(_klok(begin), "23:59" if _klok(eind) == "00:00" else _klok(eind))]
     # Het vermogen over wat er van het vak nog over is.
     watt = kwh / max(echte_duur(max(begin, now), eind).total_seconds() / 3600.0, 1 / 60) * 1000.0
     pct = min(100, max(1, int(-(-watt * 100 // b.max_charge_w))))

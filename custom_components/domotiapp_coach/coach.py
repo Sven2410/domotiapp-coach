@@ -359,11 +359,15 @@ STOP_WACHT_STAPPEN = 30
 # heel jaar weet wat de batterij opleverde.
 BATTERIJ_BEWAREN = timedelta(minutes=5)
 # Een Growatt met een laadschema (v0.150.0). De acties horen bij de integratie
-# `growatt_server`. Een tweede opdracht vlak na de eerste faalt, en een minuut later
-# lukt hij wel (de klantwoning, 22-10-2026): daarom de pauze, en teruglezen pas daarna.
+# `growatt_server`. Een tweede opdracht vlak na de eerste faalt (de klantwoning,
+# 22-10-2026): Growatt neemt per onderdeel van zijn API één vraag per vijf minuten aan
+# (fout 10012 in growattServer), daarom de pauze. Teruglezen leest wat Home Assistant
+# onthield, en dat zet hij na een schrijfopdracht zelf op wat er geschreven werd; wat de
+# omvormer echt heeft staat er pas na de volgende ronde, en die komt elke vijf minuten
+# (`SCAN_INTERVAL` van growatt_server). Daarom zes minuten (v0.152.0; tot dan 2 en 1,5).
 GROWATT_DOMEIN = "growatt_server"
-GROWATT_PAUZE = timedelta(minutes=2)
-GROWATT_TERUG = timedelta(seconds=90)
+GROWATT_PAUZE = timedelta(minutes=5)
+GROWATT_TERUG = timedelta(minutes=6)
 GROWATT_WACHT = timedelta(seconds=45)
 GROWATT_OPNIEUW = timedelta(hours=1)
 GROWATT_FOUTEN = 3
@@ -4271,6 +4275,13 @@ class ChargerCoach:
         if gestart is None:
             return
         sessie["gestart"] = gestart
+        # Een apparaat dat de coach alleen uitleest staat nooit in de opslag. Liep hij langer
+        # dan de melding op zich laat wachten, dan kwam "draait" al voor de herstart; zonder
+        # dit kwam hij na elke herstart opnieuw (de klantwoning, 23-10-2026: "Droger draait"
+        # om 11:29 en om 11:56). Een apparaat dat hij stuurt zonder regel is iets anders: dan
+        # was de coach er niet bij toen het begon, en dan hoort de melding er wel.
+        if _programma_alleen_lezen(device) and _tussen(gestart, now) > EINDTIJD_WACHT:
+            sessie["gemeld"].add("gestart")
         sessie["vrijgegeven"] = vrij
         sessie["terugrekenen"] = (gestart, now)
         sessie["terugrekenen_na"] = now + TERUGREKENEN_WACHT
@@ -7334,13 +7345,14 @@ class ChargerCoach:
             await self._async_growatt_nacht(now, settings, device, b, sessie)
             rij = self._batterij_rij(settings, device_id)
         bijstel = growatt_bijstelling(rij.get("growatt_nachten"), b.capacity_kwh)
-        wil = growatt_schema(besluit.uren, now, b, bijstel)
+        geschreven: GrowattSchema | None = sessie.get("growatt_geschreven")
+        loopt = bool(stuurt and geschreven is not None and geschreven.net and self._growatt_in_vak(geschreven, now))
+        wil = growatt_schema(besluit.uren, now, b, bijstel, loopt=loopt)
         if not b.max_charge_w:
             self.state[device_id]["tip"] = t(
                 "De coach weet nog niet hoe snel deze Growatt laadt, dus hij laadt hem niet van het net. Vul "
                 "bij de batterij het hoogste laadvermogen in, of wacht tot de coach hem een keer op zon ziet laden."
             )
-        geschreven: GrowattSchema | None = sessie.get("growatt_geschreven")
         if geschreven is not None and growatt_vol(geschreven, b.soc, b.soc_max):
             # Op de stopgrens: uit, en in dit stuk niet opnieuw.
             sessie["growatt_vol_tot"] = geschreven.tot
@@ -7537,8 +7549,15 @@ class ChargerCoach:
         return min(self._growatt_begint(s, now) for s in vakken) > GROWATT_VOORAF
 
     def _growatt_vroeg(self, wil: GrowattSchema, staat: GrowattSchema, now: datetime) -> bool:
-        """Of het vak nog niet loopt: dan schrijft hij alleen andere vakken, niet een ander vermogen."""
-        return bool(wil.net and staat.net and not self._growatt_in_vak(wil, now))
+        """Of het vak nog niet loopt: dan schrijft hij alleen andere vakken, niet een ander vermogen.
+
+        Het vak dat in de Growatt staat telt, niet het nieuwe: sinds v0.152.0 ligt het vak aan
+        het eind van het goedkope stuk, en terwijl hij laadt schuift het begin van het nieuwe
+        vak voorbij nu. Met het nieuwe vak hier bleef in het virtuele huis een hogere stopgrens
+        liggen, stond hij om 05:20 op 94%, en gaf hij daarna tot 09:00 het huis stroom uit de
+        accu in de goedkope uren.
+        """
+        return bool(wil.net and staat.net and not self._growatt_in_vak(staat, now))
 
     async def _async_growatt_nacht(
         self, now: datetime, settings: dict[str, Any], device: dict[str, Any], b: Batterij,

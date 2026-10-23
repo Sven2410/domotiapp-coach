@@ -1455,15 +1455,27 @@ controle("zonder zon laadt hij in de nacht van het net voor de dure dag", s50.ne
          f"{s50}")
 controle("de vakken liggen in vazio en het schema telt hooguit drie",
          0 < len(s50.vakken) <= 3 and all(a >= "22:00" or b <= "08:00" for a, b in s50.vakken), f"{s50.vakken}")
-controle("over middernacht in tweeën: een vak eindigt om 23:59 en een begint om 00:00",
-         any(b == "23:59" for _, b in s50.vakken) and any(a == "00:00" for a, _ in s50.vakken), f"{s50.vakken}")
-# Het plan laadt het liefst in de laatste goedkope uren op vol vermogen; de Growatt krijgt
-# het uitgesmeerd over het hele stuk vazio, van 22:00 tot 08:00.
-watt50 = s50.kwh / 10 * 1000
-controle("uitgesmeerd over het hele goedkope stuk: 22:00 tot 08:00",
-         s50.vakken == [("22:00", "23:59"), ("00:00", "08:00")], f"{s50.vakken}")
-controle("het vermogen is wat erin moet gedeeld door die tien uur, naar boven afgerond op een procent",
-         s50.vermogen_pct >= watt50 / 7800 * 100 > s50.vermogen_pct - 1, f"{s50.vermogen_pct}% tegen {watt50:.0f} W")
+# De eigenaar op 23-10-2026: "de laatste 2 uur van de goedkope uren de accu vol laden"
+# (v0.152.0). Het vak eindigt met vazio, duurt minstens twee uur, en zo lang dat hij op
+# hooguit de helft van zijn vermogen laadt: ruim 11 kWh op 3,9 kW is drie uur.
+uren50 = -(-s50.kwh / 3.9 * 4 // 1) / 4
+controle("aan het eind van vazio: tot 08:00, en zo laat als het op de helft van zijn vermogen kan",
+         s50.vakken == [((dt.datetime(2026, 9, 22, 8) - dt.timedelta(hours=uren50)).strftime("%H:%M"), "08:00")],
+         f"{s50.vakken} tegen {uren50} uur")
+watt50 = s50.kwh / uren50 * 1000
+controle("het vermogen is wat erin moet gedeeld door die uren, naar boven afgerond op een procent, hooguit de helft",
+         s50.vermogen_pct >= watt50 / 7800 * 100 > s50.vermogen_pct - 1 and s50.vermogen_pct <= 50,
+         f"{s50.vermogen_pct}% tegen {watt50:.0f} W")
+weinig50 = bat.growatt_schema(p50.uren, NU50, b50, bijstel_kwh=2.0 - s50.kwh)
+controle("2 kWh: toch twee uur, van 06:00 tot 08:00", weinig50.vakken == [("06:00", "08:00")], f"{weinig50}")
+# Te weinig tijd voor de helft: dan begint het vak waar het goedkope stuk begint, over middernacht in tweeën.
+traag50 = bat.growatt_schema(p50.uren, NU50, growatt50(max_charge_w=1500.0))
+controle("bij 1,5 kW past het niet aan het eind: over het hele stuk, 22:00 tot 23:59 en 00:00 tot 08:00",
+         traag50.vakken == [("22:00", "23:59"), ("00:00", "08:00")], f"{traag50}")
+# Binnen het vak, met minder dan het vak nog vraagt: het vermogen over wat er over is.
+binnen50 = bat.growatt_schema(p50.uren, DAG.replace(day=22, hour=7, minute=0), b50)
+controle("om 07:00 in het vak: nog hooguit een uur, dus een hoger vermogen of geen schema",
+         not binnen50.net or binnen50.vakken[-1][1] == "08:00", f"{binnen50}")
 laatste50 = max((u for u in p50.uren if u.net_kwh > 0.05), key=lambda u: u.end)
 controle("hij stopt waar het plan aan het eind van het laatste vak zit",
          s50.stop_soc == int(-(-laatste50.soc // 1)), f"{s50.stop_soc} tegen {laatste50.soc:.1f}")
@@ -1581,11 +1593,31 @@ controle("nooit meer dan de inhoud", bat.growatt_bijstelling([20.0] * 3, 12.5) =
 s51 = bat.growatt_schema(p50.uren, NU50, b50)
 s51b = bat.growatt_schema(p50.uren, NU50, b50, bijstel_kwh=-2.0)
 print(f"  zonder bijstelling {s51.kwh:.1f} kWh tot {s51.stop_soc}%, met -2 kWh {s51b.kwh:.1f} kWh tot {s51b.stop_soc}%")
-controle("2 kWh minder: lager vermogen en een lagere stopgrens, dezelfde vakken",
+controle("2 kWh minder: een lagere stopgrens, en een vak dat even laat of later begint en ook om 08:00 eindigt",
          abs(s51b.kwh - (s51.kwh - 2.0)) < 0.01 and s51b.stop_soc < s51.stop_soc
-         and s51b.vermogen_pct <= s51.vermogen_pct and s51b.vakken == s51.vakken, f"{s51} {s51b}")
+         and s51b.vermogen_pct <= 50 and s51b.vakken[-1][1] == "08:00"
+         and s51b.vakken[0][0] >= s51.vakken[0][0] and not s51b.wijkt_af(s51, alleen_vakken=True), f"{s51} {s51b}")
 controle("zoveel minder dat er niets overblijft: geen schema",
          not bat.growatt_schema(p50.uren, NU50, b50, bijstel_kwh=-50.0).net)
+
+print("=== 52. Growatt: het vak aan het eind van vazio, ook in de nacht van de wintertijd (v0.152.0) ===")
+# Op 25-10-2026 komt 02:00 twee keer. Zeven echte uren voor 08:00 is dan 02:00 op de klok, niet 01:00.
+try:
+    planner.zet_zone(AMSTERDAM)
+    NU52 = dt.datetime(2026, 10, 24, 21, 30)
+    L52 = prijzen(VAZIO50 * 2, terug=0.0, dag=dt.datetime(2026, 10, 24))
+    b52 = growatt50(max_charge_w=3000.0)
+    p52 = plan_batterij(NU52, L52, Tariff(), verwachting(huis=0.7, dag=dt.datetime(2026, 10, 24)), b52)
+    s52 = bat.growatt_schema(p52.uren, NU52, b52)
+    duur52 = dt.timedelta(minutes=-(-s52.kwh / 1.5 * 4 // 1) * 15)
+    acht52 = dt.datetime(2026, 10, 25, 8, 0)
+    echt52 = planner.echt_verder(acht52, -duur52)
+    print(f"  {s52.kwh:.1f} kWh, {duur52}, schema {s52.vakken}; op de klok zou het {(acht52 - duur52):%H:%M} zijn")
+    controle("het vak begint de echte duur voor 08:00", s52.vakken == [(echt52.strftime("%H:%M"), "08:00")],
+             f"{s52.vakken} tegen {echt52}")
+    controle("en dat is een uur later dan op de klok", echt52 - (acht52 - duur52) == dt.timedelta(hours=1), f"{echt52}")
+finally:
+    planner.zet_zone(None)
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

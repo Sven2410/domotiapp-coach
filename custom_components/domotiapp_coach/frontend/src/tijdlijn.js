@@ -222,8 +222,13 @@ export function tijdlijn(items, devices, van, tot, nu = huisNu()) {
       const s = standVan(item, device);
       if (s === undefined) continue;
       const tekst = reden(item, device);
-      eigen.push({ at, stand: s, reden: tekst, bijzaak: bijzaak(item, tekst) });
+      eigen.push({ at, stand: s, reden: tekst, bijzaak: bijzaak(item, tekst), uitgevoerd: item.applied !== false });
     }
+    // Wat de coach deed: een apparaat dat hij alleen uitleest of in de schaduw volgt, deed
+    // hij niets mee (v0.152.0). De eigenaar op 23-10-2026, over een wasmachine en een droger
+    // in die baan: "wordt helemaal niet aangestuurd door de coach". Een besluit van voor
+    // `applied` telt als uitgevoerd.
+    if (!eigen.some((r) => r.uitgevoerd)) continue;
     eigen.sort((a, b) => a.at - b.at);
 
     const stukken = [];
