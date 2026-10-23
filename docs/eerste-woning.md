@@ -421,7 +421,12 @@ apparaat dat de coach stuurt (laadpaal, thuisbatterij, vaatwasser, wasmachine,
 droger, boiler; `balkSoort` in tijdlijn.js), de uren eronder, een streep op nu,
 en de meldingen en verslagen van die dag als stippen erboven (kritiek rood).
 Een tik op een stuk of een stip zet een korte tekst eronder: wanneer, wat,
-hoeveel, en waarom. Wie de coach niets laat sturen ziet de kaart niet.
+hoeveel, en waarom. Wie de coach niets laat sturen ziet de kaart niet. Sinds
+v0.152.0 krijgt een apparaat alleen een baan als minstens één besluit die dag echt
+uitgevoerd is (`applied` niet false): een wasmachine of droger die hij alleen
+uitleest, en een batterij in de schaduw, staan er niet meer in. De eigenaar op
+23-10-2026: "wordt helemaal niet aangestuurd door de coach". De meldingen erover
+blijven als stippen.
 
 **Wat er gebeurde komt uit Meldingen.** Elk besluit staat daar al op het moment
 dat het veranderde (`_async_noteer` in coach.py), en daar bouwt `tijdlijn` de

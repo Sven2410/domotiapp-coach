@@ -196,6 +196,12 @@ beurt zijn verslag met wat er bewaard stond en gaat de vrijgave eraf,
 anders start hij zo nog een keer. Proef 62 in test_coach.py, scenario
 `vaatwasser-herstart`.
 
+Een apparaat dat de coach alleen uitleest staat nooit in de opslag. Liep het bij
+de herstart al langer dan `EINDTIJD_WACHT`, dan was "draait" al gemeld en komt die
+melding niet nog een keer (v0.152.0; in de klantwoning op 23-10-2026 "Droger draait"
+om 11:29 en na een herstart om 11:56). Een apparaat dat hij stuurt zonder regel in de
+opslag meldt hij wel, want dan was de coach er niet toen het begon. Proef 194.
+
 **De eindtijd van het apparaat zelf** (v0.58.0, de eigenaar: "pak de eindtijd van
 de integratie"): het veld Resterende tijd (`remaining`) mag een tijdstip
 zijn (Home Connect) of minuten of seconden (`_eindtijd` in coach.py). "Klaar

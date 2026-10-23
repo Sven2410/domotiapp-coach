@@ -3707,6 +3707,20 @@ proef("Tijdlijn: alleen wat de coach stuurt krijgt een baan, en een boiler en ee
   assert.equal(T.klikTekst({ naam: "Vaatwasser" }, vaat).wat, "Draait, 1,2 kWh, van het net.");
 });
 
+proef("Tijdlijn: een apparaat dat de coach alleen uitleest of in de schaduw volgt krijgt geen baan (v0.152.0)", () => {
+  // De eigenaar op 23-10-2026, over een wasmachine en een droger in "Wat de coach deed":
+  // "wordt helemaal niet aangestuurd door de coach".
+  const items = [
+    tlBesluit("09:36", "v", "Vaatwasser: draait. Hij draait.", { rule: "running", charge: true, applied: false }),
+    tlBesluit("10:53", "v", "Vaatwasser: wacht. Het programma is klaar.", { rule: "finished", charge: false, applied: false }),
+    tlBesluit("11:00", "b", "Boiler: start nu. Er is zon over.", { rule: "zon", charge: true, applied: true }),
+    tlBesluit("12:00", "b", "Boiler: wacht. Het vat is vol.", { rule: "vol", charge: false, applied: false }),
+  ];
+  const rijen = T.tijdlijn(items, TL_APPARATEN, TL_DAG, tlTot, tlOm("23:59", 1));
+  assert.deepEqual(rijen.map((r) => r.device), ["b"], "alleen de boiler deed de coach iets mee");
+  assert.equal(T.klok(rijen[0].stukken[0].tot), "12:00", "een niet uitgevoerd besluit sluit een stuk wel af");
+});
+
 proef("Tijdlijn: een kort tussenstuk gaat op in de beurt eromheen", () => {
   const items = [
     tlBesluit("12:00", "p", "Laadpaal: laden op 6 A. Er is zon over.", { rule: "surplus", charge: true }),

@@ -10999,15 +10999,16 @@ st192, v192 = asyncio.run(ronde192(NU192))
 print(f"  21:30 schaduw: {st192.get("mode")} {st192.get("rule")} {st192.get("reason")} {st192.get("rte")} {st192.get("capacity_kwh")} {[(h["start"][11:16], h["mode"], h["grid_kwh"], h["price"]) for h in st192.get("hours", [])[:14]]}")
 controle("hij herkent een SPH: hij vraagt het schema op, op het apparaat van de accustand",
          any(d[1] == "read_ac_charge_times" and d[2] == {"device_id": "ha-growatt-omvormer"} for d in v192), f"{v192}")
-controle("zonder het vinkje rekent hij wel: laden van het net in vazio, 22:00 tot 08:00",
+# Aan het eind van vazio (v0.152.0): ruim 11 kWh op hooguit de helft van 7,8 kW is drie uur.
+controle("zonder het vinkje rekent hij wel: laden van het net aan het eind van vazio, 05:00 tot 08:00",
          (st192.get("schedule") or {}).get("grid") is True
-         and st192["schedule"]["periods"] == [["22:00", "23:59"], ["00:00", "08:00"]], f"{st192.get('schedule')}")
+         and st192["schedule"]["periods"] == [["05:00", "08:00"]], f"{st192.get('schedule')}")
 controle("maar schrijft niets", geschreven192(v192) == [] and st192.get("applied") is False, f"{v192}")
 schaduw192 = [d.get("message") for soort, d in hass192.bus.gebeurtenissen
               if soort == coachmod.EVENT_NOTIFICATION and "zou dit schrijven" in str(d.get("message"))]
 print(f"  {schaduw192}")
 controle("en zegt in de geschiedenis wat hij zou schrijven, met de vakken",
-         len(schaduw192) == 1 and "22:00-23:59, 00:00-08:00" in schaduw192[0], f"{schaduw192}")
+         len(schaduw192) == 1 and "05:00-08:00" in schaduw192[0], f"{schaduw192}")
 st192, v192 = asyncio.run(ronde192(NU192 + dt.timedelta(minutes=1)))
 controle("een minuut later vraagt hij het schema niet opnieuw op", v192 == [], f"{v192}")
 
@@ -11016,15 +11017,19 @@ GROWATT192["controllable"] = True
 st192, v192 = asyncio.run(ronde192(NU192 + dt.timedelta(minutes=2)))
 w192 = geschreven192(v192)
 print(f"  21:32 met het vinkje: {w192}")
-controle("met het vinkje schrijft hij het schema: mains aan, de twee vakken, het derde uit",
+controle("met het vinkje schrijft hij het schema: mains aan, één vak, de andere twee uit",
          len(w192) == 1 and w192[0]["mains_enabled"] is True and w192[0]["device_id"] == "ha-growatt-omvormer"
-         and (w192[0]["period_1_start"], w192[0]["period_1_end"], w192[0]["period_2_start"], w192[0]["period_2_end"])
-         == ("22:00", "23:59", "00:00", "08:00") and w192[0]["period_3_enabled"] is False, f"{w192}")
-controle("op een laag vermogen: uitgesmeerd over tien uur", 0 < w192[0]["charge_power"] <= 25, f"{w192}")
+         and (w192[0]["period_1_start"], w192[0]["period_1_end"]) == ("05:00", "08:00")
+         and w192[0]["period_2_enabled"] is False and w192[0]["period_3_enabled"] is False, f"{w192}")
+controle("op hooguit de helft van zijn vermogen", 25 < w192[0]["charge_power"] <= 50, f"{w192}")
 st192, v192 = asyncio.run(ronde192(NU192 + dt.timedelta(minutes=3)))
 controle("een minuut later schrijft hij niet opnieuw, en leest hij nog niet terug", v192 == [], f"{v192}")
-st192, v192 = asyncio.run(ronde192(NU192 + dt.timedelta(minutes=4)))
-controle("na anderhalve minuut leest hij terug, en het staat er", [d[1] for d in v192] == ["read_ac_charge_times"]
+# Home Assistant zet na het schrijven zelf in zijn geheugen wat er geschreven werd; wat de
+# omvormer echt heeft komt pas na de volgende ronde van vijf minuten (v0.152.0).
+st192, v192 = asyncio.run(ronde192(NU192 + dt.timedelta(minutes=7)))
+controle("na vijf minuten leest hij nog niet terug", v192 == [], f"{v192}")
+st192, v192 = asyncio.run(ronde192(NU192 + dt.timedelta(minutes=8)))
+controle("na zes minuten leest hij terug, en het staat er", [d[1] for d in v192] == ["read_ac_charge_times"]
          and st192["schedule"]["confirmed"] is True, f"{v192} {st192.get('schedule')}")
 
 # Het teruglezen van de stopgrens geeft iets anders dan er staat (de klantwoning, 22-10-2026):
@@ -11060,24 +11065,26 @@ hass192.states.zet("sensor.growatt_soc", {"state": "16", "attributes": {"unit_of
 hass192.states.zet("sensor.prijs", {"state": "0.272", "attributes": {"unit_of_measurement": "€/kWh",
                                                                      "prices": prijzen192(22)}})
 fout192["n"] = 3
-# Aan pas als het plan het vijf minuten wil (`GROWATT_BESTENDIG`): om 21:30 nog niet, om 21:36 wel.
-tijden192 = [dt.datetime(2026, 9, 22, 21, 30) + dt.timedelta(minutes=m) for m in (0, 6, 7, 8, 10, 11, 12, 14)]
+# Over het vak beslist hij pas een half uur ervoor (`GROWATT_VOORAF`), en aan pas als het plan
+# het vijf minuten wil (`GROWATT_BESTENDIG`): om 04:25 nog niet, om 04:31 wel. Daarna elke vijf
+# minuten een poging (`GROWATT_PAUZE`), want Growatt neemt er één per vijf minuten aan.
+tijden192 = [dt.datetime(2026, 9, 23, 4, 25) + dt.timedelta(minutes=m) for m in (0, 6, 7, 10, 11, 16, 21)]
 pogingen192 = []
 for t192 in tijden192:
     _, v192 = asyncio.run(ronde192(t192))
     pogingen192.append(len(geschreven192(v192)))
 print(f"  pogingen per ronde: {pogingen192}")
-controle("aan pas na vijf minuten, en na een mislukte opdracht wacht hij twee minuten",
-         pogingen192[:4] == [0, 1, 0, 1], f"{pogingen192}")
+controle("aan pas na vijf minuten, en na een mislukte opdracht wacht hij vijf minuten",
+         pogingen192 == [0, 1, 0, 0, 1, 1, 1], f"{pogingen192}")
 controle("de vierde poging lukt", sum(pogingen192) == 4 and omvormer192["mains_enabled"] is True, f"{pogingen192} {omvormer192}")
 meldingen192 = [d for d in hass192.services.verstuurd if d[0] == "notify"]
 
 # Het vinkje eraf: wat de coach erin zette gaat eruit, want het schema herhaalt zich elke dag.
 GROWATT192["controllable"] = False
-st192, v192 = asyncio.run(ronde192(dt.datetime(2026, 9, 22, 21, 50)))
+st192, v192 = asyncio.run(ronde192(dt.datetime(2026, 9, 23, 4, 52)))
 w192c = geschreven192(v192)
 controle("het vinkje eraf: laden van het net eruit", len(w192c) == 1 and w192c[0]["mains_enabled"] is False, f"{w192c}")
-st192, v192 = asyncio.run(ronde192(dt.datetime(2026, 9, 22, 21, 55)))
+st192, v192 = asyncio.run(ronde192(dt.datetime(2026, 9, 23, 4, 58)))
 controle("en daarna schrijft hij niets meer", geschreven192(v192) == [], f"{v192}")
 # Ook als het vak pas over uren begint: dan wacht hij niet tot vlak ervoor.
 coach192._batterij["dev-growatt"]["growatt_geschreven"] = coachmod.GrowattSchema(
@@ -11091,22 +11098,22 @@ controle("het vinkje eraf om 10:00 met een vak om 22:00: laden van het net er me
 GROWATT192["controllable"] = True
 coach192._batterij.clear()
 omvormer192.update(mains_enabled=False)
-asyncio.run(ronde192(dt.datetime(2026, 9, 22, 22, 0)))
-asyncio.run(ronde192(dt.datetime(2026, 9, 22, 22, 2)))
+asyncio.run(ronde192(dt.datetime(2026, 9, 23, 4, 40)))
+asyncio.run(ronde192(dt.datetime(2026, 9, 23, 4, 46)))
 sessie192 = coach192._batterij["dev-growatt"]
 pct192 = sessie192["growatt_geschreven"].vermogen_pct
 for m in range(6):
     hass192.states.zet("sensor.growatt_laden",
                        {"state": str(round(7.85 * pct192 / 100, 3)), "attributes": {"unit_of_measurement": "kW"}},
-                       last_updated=dt.datetime(2026, 9, 22, 20, 10 + m, tzinfo=dt.timezone.utc))
-    asyncio.run(ronde192(dt.datetime(2026, 9, 22, 22, 10 + m)))
+                       last_updated=dt.datetime(2026, 9, 23, 3, 10 + m, tzinfo=dt.timezone.utc))
+    asyncio.run(ronde192(dt.datetime(2026, 9, 23, 5, 10 + m)))
 rij192 = next((r for r in store192.instellingen.get("battery_state") or [] if r.get("device") == "dev-growatt"), {})
 print(f"  geleerd: {rij192.get('growatt_w_pct')}")
 
 controle("zes metingen van het laadvermogen bij 100%, rond de 7,85 kW",
          len(rij192.get("growatt_w_pct") or []) == 6
          and all(abs(w - 7850) < 60 for w in rij192["growatt_w_pct"]), f"{rij192.get('growatt_w_pct')}")
-b192 = coach192._batterij_van(dt.datetime(2026, 9, 22, 22, 20), inst192, GROWATT192, rij192)
+b192 = coach192._batterij_van(dt.datetime(2026, 9, 23, 5, 20), inst192, GROWATT192, rij192)
 coach192._growatt_batterij(b192, GROWATT192, rij192)
 controle("en daarmee rekent hij, in plaats van wat ingevuld is", abs(b192.max_charge_w - 7850) < 60, f"{b192.max_charge_w}")
 
@@ -11198,6 +11205,50 @@ print(f"  nacht: {sessie193.get('growatt_dag')}, bewaard {rij193.get('growatt_na
 controle("na de nacht: 6 kWh van het net, 2 kWh zon naar het net bij een volle batterij, dus 2 te veel",
          rij193.get("growatt_nachten") and abs(rij193["growatt_nachten"][-1] + 2.0) < 0.2,
          f"{rij193.get('growatt_nachten')}")
+
+print("=== 194. een herstart midden in een beurt die de coach alleen uitleest: geen tweede 'draait' (v0.152.0) ===")
+# De klantwoning op 23-10-2026: een Miele-droger die de coach alleen uitleest, "Droger draait"
+# om 11:29 en na een herstart om 11:56 nog een keer. Zo'n beurt staat niet in de opslag.
+hass194, store194, coach194, ronde194 = bouw162({**WAS162, "controllable": False})
+alles194 = []
+for stap in [(19, 0, None, None), (19, 5, "in_use", "0.0"), (19, 10, None, "0.1"), (19, 15, None, "0.2")]:
+    _, v194 = ronde194(*stap)
+    alles194 += v194
+draait194 = [m for m in telefoon160(alles194) if "draait" in m]
+controle("alleen uitgelezen: één keer 'draait'", len(draait194) == 1, f"{telefoon160(alles194)}")
+
+
+async def _begin194(*_args, **_kw):
+    """De recorder: hij draait sinds 19:05."""
+    return dt.datetime(2026, 9, 7, 19, 5), None
+
+
+coach194._async_programma_begin = _begin194
+# De herstart: de coach weet niets meer van deze beurt.
+coach194._programma.pop("dev-was", None)
+alles194b = []
+for stap in [(19, 30, None, "0.4"), (19, 31, None, "0.4"), (19, 36, None, "0.5")]:
+    _, v194 = ronde194(*stap)
+    alles194b += v194
+print(f"  na de herstart: {telefoon160(alles194b)}")
+controle("na de herstart, 25 minuten na de start: geen tweede 'draait'",
+         not [m for m in telefoon160(alles194b) if "draait" in m or "gestart" in m], f"{telefoon160(alles194b)}")
+# Begon hij vlak voor de herstart, dan kwam de melding er nog niet uit: die komt dan wel.
+hass194c, store194c, coach194c, ronde194c = bouw162({**WAS162, "controllable": False})
+ronde194c(19, 0)
+
+
+async def _begin194c(*_args, **_kw):
+    return dt.datetime(2026, 9, 7, 19, 4), None
+
+
+coach194c._async_programma_begin = _begin194c
+alles194c = []
+for stap in [(19, 5, "in_use", "0.0"), (19, 6, None, "0.0"), (19, 10, None, "0.1")]:
+    _, v194 = ronde194c(*stap)
+    alles194c += v194
+controle("begon hij een minuut voor de coach hem zag: dan komt 'draait' wel, één keer",
+         len([m for m in telefoon160(alles194c) if "draait" in m]) == 1, f"{telefoon160(alles194c)}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
