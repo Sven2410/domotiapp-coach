@@ -2490,6 +2490,7 @@ class DacViewHistory extends DacElement {
       accuDagen: accu.dagen,
       metAccu: (this.settings_?.devices ?? []).some((d) => d.type === "thuisbatterij"),
       metCoach: (this.settings_?.devices ?? []).some((d) => d.controllable && d.type !== "thuisbatterij"),
+      accuGestuurd: (this.settings_?.devices ?? []).some((d) => d.controllable && d.type === "thuisbatterij"),
       beurtenGeladen: Array.isArray(this.beurten_),
       ...balans({
         rijen: rows,
@@ -2498,6 +2499,7 @@ class DacViewHistory extends DacElement {
         gasPrijzen: this.gasPrijzen_ ?? null,
         water: this.rows_?.water ?? [],
         contract,
+        handelCoach: (this.settings_?.devices ?? []).some((d) => d.controllable && d.type === "thuisbatterij"),
         accu: accu.euro,
         accuVoorraad: accu.voorraad,
         accuZon: zonInAccu.euro,
@@ -2519,8 +2521,13 @@ class DacViewHistory extends DacElement {
       // zonnestroom, opgeslagen zonnestroom in je accu, bespaard door coach" (v0.147.0).
       heeftZon ? { naam: nt("Direct verbruikte zonnestroom"), kort: nt("directe zon"), waarde: g.delen.zon, tone: "var(--dac-solar)" } : null,
       g.metAccu ? { naam: nt("Opgeslagen zonnestroom, later verbruikt"), kort: nt("opgeslagen zon"), waarde: g.delen.accu, tone: "var(--dac-good)" } : null,
-      // Met een batterij ook zonder ander apparaat: het handelen is van de coach (v0.147.0).
-      g.metCoach || g.metAccu ? { naam: nt("Door de coach"), kort: nt("de coach"), waarde: g.delen.coach, tone: "var(--dac-accent-hi)" } : null,
+      // Met een batterij ook zonder ander apparaat: het handelen is van de coach (v0.147.0), maar
+      // alleen als hij haar stuurt (v0.154.0). Anders deed de batterij het zelf, en staat het er
+      // alleen als er iets was.
+      g.metCoach || g.accuGestuurd ? { naam: nt("Door de coach"), kort: nt("de coach"), waarde: g.delen.coach, tone: "var(--dac-accent-hi)" } : null,
+      g.metAccu && !g.accuGestuurd && Math.abs(g.delen.accuNet) >= 0.005
+        ? { naam: nt("Goedkoop geladen, later verbruikt"), kort: nt("goedkoop laden"), waarde: g.delen.accuNet, tone: "var(--dac-device-1)" }
+        : null,
     ].filter(Boolean);
   }
 
@@ -2724,7 +2731,10 @@ class DacViewHistory extends DacElement {
     if (g.metAccu) {
       zinnen.push(t("Opgeslagen zon: de prijs toen hij je huis in ging, min wat terugleveren had opgeleverd toen hij erin ging."));
     }
-    if (g.metCoach || g.metAccu) {
+    if (g.metAccu && !g.accuGestuurd && Math.abs(g.delen.accuNet) >= 0.005) {
+      zinnen.push(t("Goedkoop geladen: wat de batterij zelf van het net laadde en later gebruikte. Dat deed de batterij, niet de coach."));
+    }
+    if (g.metCoach || g.accuGestuurd) {
       zinnen.push(
         g.beurtenGeladen || !g.metCoach
           ? t("Coach: wachten op een goedkoper moment, en de batterij goedkoop laden om duur te gebruiken of te verkopen.")

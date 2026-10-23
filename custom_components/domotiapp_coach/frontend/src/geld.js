@@ -408,8 +408,12 @@ export function accuZon(settings, start, end) {
  *   telling van de coach (`accuZon`)
  * @param {{saved: number, solar_saved: number, wait_saved: number}} [o.coach]
  *   de beurten van deze periode opgeteld (`totalen` in savings.js)
+ * @param {boolean} [o.handelCoach] of de coach de batterij stuurt. Zo niet, dan is goedkoop
+ *   laden en duur gebruiken iets van de batterij zelf (`delen.accuNet`), niet van de coach
+ *   (v0.154.0). In een klantwoning op 23-10-2026 stond er "Door de coach − € 0,02" bij een
+ *   batterij die de coach niet stuurde: een laadtest die in de goedkope uren laadde en ontlaadde.
  */
-export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], contract, accu = 0, accuVoorraad = 0, accuZon = 0, coach = null, vasteKosten = 0 }) {
+export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], contract, accu = 0, accuVoorraad = 0, accuZon = 0, coach = null, vasteKosten = 0, handelCoach = true }) {
   let stroom = 0;
   let terug = 0;
   let zon = 0;
@@ -471,8 +475,9 @@ export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], 
   // opslaan alleen het verlies, en een negatieve besparing leest als een fout. De
   // eigenaar op 22-10-2026: "0 tonen dan."
   const accuEuro = metHerkomst ? Math.max(0, accuUitHerkomst) : Number(accu) || 0;
-  const coachEuro = wachten + (metHerkomst ? handel : 0);
-  const bespaard = zon + accuEuro + coachEuro;
+  const coachEuro = wachten + (metHerkomst && handelCoach ? handel : 0);
+  const accuNet = metHerkomst && !handelCoach ? handel : 0;
+  const bespaard = zon + accuEuro + coachEuro + accuNet;
   const uitgegeven = stroom - terug + g.euro + w.euro;
   // Wat er aan stroom in de batterij bij kwam is uitgegeven maar nog niet
   // gebruikt; telt opgeleverd het pas als het eruit gaat, dan hoort het hier
@@ -490,7 +495,7 @@ export function balans({ rijen, prijs, gas = [], gasPrijzen = null, water = [], 
     metWater: w.met,
     uitgegeven,
     bespaard,
-    delen: { zon, accu: accuEuro, coach: coachEuro },
+    delen: { zon, accu: accuEuro, coach: coachEuro, accuNet },
     voorraad,
     onbekend,
   };

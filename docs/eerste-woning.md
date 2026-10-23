@@ -728,3 +728,12 @@ inderdaad." Dus: `balans` toont opgeslagen zon nooit onder nul, en `herkomst` te
 terugleverprijs als nul (zoals `_kosten` in batterij.py), niet meer als de inkoopprijs van dat uur. Een
 tekort staat er als "− € 0,05" en een afgerond nul als "€ 0,00" (`geldBedrag` in format.js), en in
 Portugal zegt de uitleg "Gerekend met de tijdvakken van je contract." in plaats van een tarief van nu.
+
+**v0.154.0: goedkoop laden is alleen van de coach als hij de batterij stuurt.** In een klantwoning
+stond op 23-10-2026 "Door de coach − € 0,02" bij een batterij die de coach niet stuurde (in de
+schaduw): een laadtest had in de goedkope uren geladen en weer ontladen, en dat kost alleen het
+verlies. `balans` krijgt `handelCoach` (een thuisbatterij met het vinkje "mag sturen"); zonder
+staat `handelEuro` in `delen.accuNet`, en Historie toont het als "Goedkoop geladen, later verbruikt",
+alleen als er iets was. "Door de coach" staat er alleen bij een apparaat of een batterij die de coach
+stuurt. Bespaard blijft hetzelfde getal. De eigenaar: "ja bouw dat maar". Proef "goedkoop laden is
+van de coach alleen als hij de batterij stuurt" in test_rapport.mjs.
