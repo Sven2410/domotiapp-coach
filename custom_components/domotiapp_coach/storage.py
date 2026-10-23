@@ -8,7 +8,7 @@ adding the integration asks nothing at all.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import copy
 from typing import Any
@@ -31,6 +31,9 @@ from .const import (
     BERICHTEN_KEY,
     BERICHTEN_MAX,
     BERICHTEN_VERSION,
+    ZON_BEWAAR_DAGEN,
+    ZON_KEY,
+    ZON_VERSION,
     MELDINGEN_KEY,
     MELDINGEN_MAX,
     MELDINGEN_VERSION,
@@ -597,3 +600,45 @@ def async_get_meldingen(hass: HomeAssistant) -> MeldingenStore:
     if "meldingen" not in data:
         data["meldingen"] = MeldingenStore(hass)
     return data["meldingen"]
+
+
+class ZonStore:
+    """Wat het weerbericht per uur over de bewolking zei (v0.151.0), voor de zon zonder panelen.
+
+    Per uur in UTC de bewolking in procent, zoals het weer van Home Assistant die op dat
+    uur gaf. Daaruit leert de coach welk deel van een heldere dag er bij welke bewolking
+    komt (`zonfactor` in zon.py). Los van de instellingen, want die gaan bij elke wijziging
+    over de websocket. Nooit ouder dan `ZON_BEWAAR_DAGEN`.
+    """
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._store: Store[dict[str, Any]] = Store(hass, ZON_VERSION, ZON_KEY)
+        self._uren: dict[str, float] | None = None
+
+    async def async_bewolking(self) -> dict[str, float]:
+        if self._uren is None:
+            data = await self._store.async_load()
+            uren = (data or {}).get("bewolking") if isinstance(data, dict) else None
+            self._uren = {
+                str(k): float(v) for k, v in (uren or {}).items() if isinstance(v, (int, float))
+            }
+        return dict(self._uren)
+
+    async def async_noteer(self, uur: datetime, bewolking: float) -> None:
+        """De bewolking van dit uur (UTC); een uur dat er al staat blijft staan."""
+        uren = await self.async_bewolking()
+        sleutel = uur.isoformat()
+        if sleutel in uren:
+            return
+        uren[sleutel] = round(float(bewolking), 1)
+        grens = (uur - timedelta(days=ZON_BEWAAR_DAGEN)).isoformat()
+        self._uren = {k: v for k, v in uren.items() if k >= grens}
+        await self._store.async_save({"bewolking": self._uren})
+
+
+def async_get_zon(hass: HomeAssistant) -> ZonStore:
+    """De ene bewolkingsgeschiedenis van deze installatie (v0.151.0)."""
+    data = hass.data.setdefault(DOMAIN, {})
+    if "zon" not in data:
+        data["zon"] = ZonStore(hass)
+    return data["zon"]

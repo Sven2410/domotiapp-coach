@@ -1561,6 +1561,14 @@ growatt_zon = growatt_bihorario.kopie(
     uitleg="dezelfde Growatt op een bewolkte dag: de zon van morgen vult hem, dus geen laden van het net",
     zon=Zon(wolken="bewolkt"), voorspeller=batterij_winter.voorspeller,
 )
+# Zonder zonvoorspeller, met alleen het weer van Home Assistant (v0.151.0): de coach haalt de
+# zon van morgen uit zijn eigen opwek van de dagen ervoor. De eigenaar op 22-10-2026: "Sven wil
+# niet afhangen van kWp/helling/richting."
+growatt_eigen_zon = growatt_zon.kopie(
+    naam="growatt-eigen-zon",
+    uitleg="dezelfde Growatt zonder zonvoorspeller: de zon van morgen uit de eigen opwek en het weer",
+    zon=Zon(wolken="helder"), voorspeller="geen", weer=True,
+)
 growatt_schaduw = growatt_bihorario.kopie(
     naam="growatt-schaduw",
     uitleg="dezelfde Growatt zonder het vinkje: de coach rekent en zegt wat hij zou schrijven, maar schrijft niets",
@@ -1603,7 +1611,7 @@ ALLE = [
     vast_kosten_kwh, vast_kosten_schalen, vast_kosten_overschot, vast_kosten_overschot_netto, dyn_salderen_vol,
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,
-    growatt_bihorario, growatt_zon, growatt_schaduw,
+    growatt_bihorario, growatt_zon, growatt_eigen_zon, growatt_schaduw,
 ]
 
 

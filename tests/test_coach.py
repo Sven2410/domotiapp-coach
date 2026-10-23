@@ -11110,6 +11110,95 @@ b192 = coach192._batterij_van(dt.datetime(2026, 9, 22, 22, 20), inst192, GROWATT
 coach192._growatt_batterij(b192, GROWATT192, rij192)
 controle("en daarmee rekent hij, in plaats van wat ingevuld is", abs(b192.max_charge_w - 7850) < 60, f"{b192.max_charge_w}")
 
+print("=== 193. de zon uit eigen opwek en het weer, en de nacht nakijken (v0.151.0) ===")
+# Een woning zonder zonvoorspeller, zoals de klantwoning met de Growatt: een omvormer, een
+# weerentiteit met een uurverwachting (Met.no) en twee weken eigen opwek in de opslag.
+zonmod = sys.modules["domotiapp_coach.zon"]
+inst193 = instellingen(devices=[LAADPAAL])
+inst193["sources"] = dict(inst193["sources"], solar="sensor.omvormer",
+                          solar_forecast={"remaining_today": "", "tomorrow": "", "peak_today": "",
+                                          "this_hour": "", "next_hour": ""})
+hass193, store193, coach193 = bouw(huis(), inst193)
+hass193.config.latitude, hass193.config.longitude = 52.0, 5.0
+NU193 = dt.datetime(2026, 10, 22, 4, 0, tzinfo=dt.timezone.utc)
+utcnow193 = coachmod.dt_util.utcnow
+coachmod.dt_util.utcnow = lambda: NU193
+
+
+class Archief193:
+    """Twee weken een dak van 4 kWp per kwartier, de even dagen helder en de oneven half."""
+
+    async def async_lees(self, ids, start, einde):
+        rijen = []
+        t = start.replace(minute=0, second=0, microsecond=0)
+        while t < einde:
+            s = zonmod.zonhoogte(t + dt.timedelta(minutes=7, seconds=30), 52.0, 5.0)
+            factor = 1.0 if t.day % 2 == 0 else 0.5
+            rijen.append({"start": t.timestamp(), "gemiddeld": max(0.0, 4000.0 * s) * factor})
+            t += dt.timedelta(minutes=15)
+        return {"sensor.omvormer": rijen}
+
+
+oud193 = coachmod.async_get_archive
+coachmod.async_get_archive = lambda hass: Archief193()
+hass193.states.zet("weather.forecast_home", {"state": "cloudy", "attributes": {"cloud_coverage": 60.0}})
+hass193.states.async_all = lambda domein: [types.SimpleNamespace(entity_id="weather.forecast_home")]
+hass193.services.antwoorden[("weather", "get_forecasts")] = lambda data: {"weather.forecast_home": {"forecast": [
+    {"datetime": (NU193 + dt.timedelta(hours=i)).isoformat(), "cloud_coverage": 5.0} for i in range(48)]}}
+# Wat het weer de afgelopen twee weken per uur zei: helder op de even dagen, 60% op de oneven.
+geheugen193 = sys.modules["domotiapp_coach.storage"].async_get_zon(hass193)
+for d in range(8, 22):
+    for h in range(24):
+        uur = dt.datetime(2026, 10, d, h, tzinfo=dt.timezone.utc)
+        asyncio.run(geheugen193.async_noteer(uur, 5.0 if d % 2 == 0 else 60.0))
+asyncio.run(coach193._async_zonkromme(inst193, dt.datetime(2026, 10, 22, 6, 0)))
+kromme193 = coach193._zon_kwh
+helder193 = sum(max(0.0, 4.0 * zonmod.zonhoogte(dt.datetime(2026, 10, 22, h, 30, tzinfo=dt.timezone.utc), 52.0, 5.0))
+                for h in range(24))
+vandaag193 = sum(k for t, k in kromme193.items() if t.date() == dt.date(2026, 10, 22))
+print(f"  vandaag helder voorspeld: {vandaag193:.2f} kWh, een heldere dag {helder193:.2f}; geschat {coach193._zon_geschat}")
+controle("zonder voorspeller verwacht hij de zon uit zijn eigen opwek: helder weer is een heldere dag",
+         abs(vandaag193 - helder193) < 0.6 and coach193._zon_geschat is True, f"{vandaag193:.2f} {helder193:.2f}")
+controle("in de tijd van het huis, zonder tijdzone, zoals de andere bronnen",
+         all(t.tzinfo is None for t in kromme193), "")
+bewaard193 = asyncio.run(geheugen193.async_bewolking())
+controle("de bewolking van nu gaat de opslag in", bewaard193.get(NU193.isoformat()) == 60.0,
+         f"{bewaard193.get(NU193.isoformat())}")
+coachmod.async_get_archive = oud193
+coachmod.dt_util.utcnow = utcnow193
+
+# De nacht nakijken: een vak van het net, en de dag erna zon naar het net bij een volle batterij.
+sessie193 = {"growatt_geschreven": coachmod.GrowattSchema(net=True, vermogen_pct=20, stop_soc=100,
+                                                         vakken=[("01:00", "05:00")])}
+inst193b = instellingen(devices=[GROWATT192], battery_state=[{"device": "dev-growatt"}])
+hass193b, store193b, coach193b = bouw(waarden192, inst193b)
+b193 = coachmod.Batterij(soc=50.0, capacity_kwh=12.5, soc_min=15.0, soc_max=100.0)
+
+
+def stap193(tijd, soc, afname, laden_kw):
+    hass193b.states.zet("sensor.afname", str(max(0.0, afname)))
+    hass193b.states.zet("sensor.teruglevering", str(max(0.0, -afname)))
+    hass193b.states.zet("sensor.growatt_laden", {"state": str(max(0.0, laden_kw)), "attributes": {"unit_of_measurement": "kW"}})
+    hass193b.states.zet("sensor.growatt_ontladen", {"state": str(max(0.0, -laden_kw)), "attributes": {"unit_of_measurement": "kW"}})
+    b193.soc = soc
+    asyncio.run(coach193b._async_growatt_nacht(tijd, inst193b, GROWATT192, b193, sessie193))
+
+
+dag193 = dt.datetime(2026, 10, 22)
+stap193(dag193.replace(hour=0, minute=50), 20, 300.0, 0.0)
+for m in range(0, 240):        # 01:00-05:00, elke minuut: 1,5 kW van het net de batterij in
+    stap193(dag193.replace(hour=1) + dt.timedelta(minutes=m), 20 + m / 4, 1800.0, 1.5)
+for m in range(0, 120):        # 12:00-14:00, elke minuut: vol, en 1 kW zon naar het net
+    stap193(dag193.replace(hour=12) + dt.timedelta(minutes=m), 100, -1000.0, 0.0)
+stap193(dag193.replace(hour=23, minute=50), 60, 300.0, 0.0)
+for m in (0, 1):                   # het volgende vak begint
+    stap193((dag193 + dt.timedelta(days=1)).replace(hour=1, minute=m), 60, 300.0, 1.5)
+rij193 = next(r for r in store193b.instellingen["battery_state"] if r.get("device") == "dev-growatt")
+print(f"  nacht: {sessie193.get('growatt_dag')}, bewaard {rij193.get('growatt_nachten')}")
+controle("na de nacht: 6 kWh van het net, 2 kWh zon naar het net bij een volle batterij, dus 2 te veel",
+         rij193.get("growatt_nachten") and abs(rij193["growatt_nachten"][-1] + 2.0) < 0.2,
+         f"{rij193.get('growatt_nachten')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

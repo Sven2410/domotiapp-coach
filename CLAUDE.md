@@ -199,7 +199,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 
 | werk je aan | lees eerst |
 |---|---|
-| de laadpaal: de zonverwachting per voorspeller (Forecast.Solar telt op het eind van het uur), een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla, de laadbeurt en de actieradius op de kaart | `docs/laadpaal.md` |
+| de laadpaal: de zonverwachting per voorspeller (Forecast.Solar telt op het eind van het uur), de zon zonder paneelgegevens (eigen opwek en het weer, zon.py), een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla, de laadbeurt en de actieradius op de kaart | `docs/laadpaal.md` |
 | een Alfen, of iets aan de paalsturing | `docs/alfen.md` |
 | onderverdeelkasten en groepen met een eigen zekering | `docs/groepen.md` |
 | de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, hoe de coach prijslijsten leest, de temperatuur met de melding en de ventilator, en Growatt (uitlezen, en sinds v0.150.0 sturen met een laadschema) | `docs/batterij.md` |
@@ -320,6 +320,7 @@ dan de andere in dezelfde uitgave.
 | `frontend/src/views/notifications.js` | Meldingen, twee in een sinds 06-09-2026: bovenaan de personen (sinds v0.114.0 voegt de bewoner ze zelf toe en ziet hij iedereen, via `notifications/household`), de zekeringmelding "Zware belasting" (uit Strategie verhuisd), en daaronder alles wat de coach de afgelopen twee weken stuurde én elk besluit dat hij nam (`_async_noteer_besluit`, `recent` in notifications.js, sinds v0.101.5), uit `MeldingenStore` in storage.py |
 | `frontend/src/geld.js` | In geld in Historie en het rapport (v0.101.0): uitgegeven, bespaard in zon, thuisbatterij en coach, en salderen zoals de coach. Geen terugverdientijd en geen aankoopprijzen, sinds v0.101.1 (`docs/eerste-woning.md`) |
 | `frontend/src/savings.js` | Sessies (tot v0.116.0 Bespaard, tot v0.126.4 Beurten), onder Historie: de laadbeurten uit `BeurtenStore` (storage.py) opgeteld per periode en per apparaat. De coach telt per ronde wat een beurt kost (`_geld_bij`) en wat dezelfde tijd op vol vermogen vanaf het inpluggen met alles van het net gekost had (`_basis_bij`, de maat); bespaard is maat min betaald, nooit onder nul, in twee delen: door de zon (`zon_winst`) en door te wachten. Stapt hij midden in een beurt in, dan rekent `_async_terugrekenen` het begin terug uit de recorder en de kwartieropslag |
+| `zon.py` | De zon zonder paneelgegevens (v0.151.0): de heldere dag uit de eigen opwek, meegeschoven met de zonnestand, maal wat er bij de bewolking van het weerbericht kwam. Kent Home Assistant niet; `_async_zon_uit_opwek` in coach.py gebruikt hem als vierde bron (`docs/laadpaal.md`) |
 | `prijsopbouw.py` | De prijsopbouw (v0.129.0): de inkoopprijs uit de kale prijs en de velden, de controle tegen de all-in sensor (uur tegen kwartier), de terugleverprijs met bonus, zonsopkomst en -ondergang, de vingerafdruk voor "Ja, dit klopt". Kent Home Assistant niet; `async_prijscontrole` in coach.py en `contract/check` in websocket.py gebruiken hem (`docs/contract.md`) |
 | `tarifas.py`, `frontend/src/tarifas.js` | Portugal (v0.137.0): de tijdvakken van de ERSE (simples, bi-horário, tri-horário; ciclo diário en semanal; winter en zomer) in de tijd van Lissabon, de prijs per kWh met IEC en IVA, en wat teruglevering opbrengt. Geen salderen. Kent Home Assistant niet; `_pt_rijen` in coach.py maakt er de prijslijst van, Historie rekent met de tweeling in tarifas.js (`docs/contract.md`) |
 | `frontend/src/leveranciers.js`, `leveranciers-data.js` | De leverancierscatalogus (v0.129.0): per leverancier en soort de velden die Contract voorinvult, de woorden voor de opbouw, bronnen, peildatum en wat onzeker is, en de energiebelasting per jaar. Een voorstel; de coach rekent alleen met wat de klant bevestigde |
@@ -353,9 +354,9 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 
 ```
 python tests/test_planner.py     # 548 controles op het denkwerk
-python tests/test_batterij.py    # 262 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1422 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2663 op hele laadbeurten in het virtuele huis
+python tests/test_batterij.py    # 276 op het denkwerk van de thuisbatterij en op de regelaar
+python tests/test_coach.py       # 1426 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 2676 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 48 op de kwartieropslag
 python tests/test_prijsopbouw.py # 59 op de prijsopbouw, de controle, zonsopkomst en Portugal
 node   tests/test_rapport.mjs    # 243 op het rapport en op het paneel
