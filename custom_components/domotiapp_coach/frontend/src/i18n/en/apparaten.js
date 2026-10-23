@@ -693,4 +693,9 @@ export const APPARATEN = {
   "Laadt de auto, dan geeft de batterij normaal niets af: laden en ontladen van de accu en laden van de auto is drie keer verlies. Met dit aan mag wat boven de grens zit naar de auto. Met de nachtstrategie aan (Voorkeuren) houdt hij altijd genoeg over voor de nacht.": "While the car charges, the battery normally gives nothing: charging and discharging the battery and charging the car is three times loss. With this on, what is above the limit may go to the car. With the night strategy on (Preferences) it always keeps enough for the night.",
   "Boven deze accustand (%)": "Above this charge level (%)",
   "Vrijgeven": "Release",
+  "Laadstatus (optioneel)": "Charging status (optional)",
+  "Zegt de auto in Home Assistant of hij laadt of in storing staat, wijs die sensor dan aan. Meldt hij een storing terwijl hij wacht, dan start de coach het laden even om hem eruit te halen.": "If the car tells Home Assistant whether it is charging or in a fault, point to that sensor. If it reports a fault while it waits, the coach starts charging briefly to get it out.",
+  "Proefladen bij inpluggen": "Test charge when plugged in",
+  "Wacht de coach op een goedkoper uur, dan laadt hij eerst even om te zien of de auto stroom aanneemt. Lukt dat niet, dan probeert hij het opnieuw en meldt hij het als het niet lukt. Kost een paar cent.": "If the coach waits for a cheaper hour, it first charges briefly to see whether the car takes power. If not, it tries again and tells you if it still fails. Costs a few cents.",
+  "Zoek de laadstatus…": "Search for the charging status…",
 };

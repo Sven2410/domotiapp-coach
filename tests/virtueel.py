@@ -251,8 +251,8 @@ class Auto:
     # schroeven vanaf een bepaald procent zelf hun doorlaatbaarheid terug."
     afbouw_vanaf: float | None = None
     afbouw_deel: float = 0.5
-    # Zoveel ampère trekt hij bóven de limiet die hij krijgt. De Ford bij Van
-    # den Dam trok op 06-09-2026 16,9 A op een limiet van 16 op één fase.
+    # Zoveel ampère trekt hij bóven de limiet die hij krijgt. De Ford in de
+    # klantwoning trok op 06-09-2026 16,9 A op een limiet van 16 op één fase.
     overschot_amps: float = 0.0
     # En zoveel neemt hij mínder dan de limiet, op hoeveel fasen ook: de auto
     # van de eigenaar trok op 30-09-2026 15,4 A op een limiet van 16 en 11,9 op 12.
@@ -263,8 +263,22 @@ class Auto:
     # minuten over (de Ford: negen, van 05:18 tot 05:27).
     storing_bij_herstart: bool = False
     storing_herstel_min: int = 9
-    # Een auto die na een lange verlaging niet meteen terugkomt. De Ford bij Van
-    # den Dam, nacht van 18 op 19-09-2026: na negen en na zestien minuten op
+    # Een auto die bij het inpluggen in storing gaat terwijl de paal nog niets
+    # aanbiedt. De Ford in de klantwoning op 23-10-2026: kabel erin om 19:29,
+    # FAULT om 19:30, de paal bleef op "wacht" staan (niet "completed"), en om
+    # 21:24 haalde een start met stroom hem er binnen een minuut uit.
+    storing_bij_inpluggen: bool = False
+    # En een die er met een start niet uit komt, alleen met de kabel eruit.
+    storing_alleen_kabel: bool = False
+    # Of de auto zijn laadstatus aan Home Assistant meldt (`status_entity`),
+    # en of het proefladen bij het inpluggen in zijn profiel aanstaat.
+    meldt_status: bool = False
+    # Uit in het virtuele huis: de scenario's van voor v0.153.0 meten de planregels, en
+    # die proef zou elk "niets bijkopen na het inpluggen" een minuut breken. De
+    # `ford-storing-*`- en `*-proef`-scenario's zetten hem aan, zoals in het echt.
+    proefladen: bool = False
+    # Een auto die na een lange verlaging niet meteen terugkomt. De Ford in de
+    # klantwoning, nacht van 18 op 19-09-2026: na negen en na zestien minuten op
     # 7 tot 9 A bleef hij op 16 A nog negen (01:35 tot 01:44) en elf minuten
     # (03:33 tot 03:44) op de oude stroom hangen; na een dip van een minuut
     # kwam hij binnen een halve minuut terug. Nul is een auto die meteen volgt.
@@ -279,6 +293,7 @@ class Auto:
     soc_gemeld: list = field(default_factory=list)
     storing: bool = False
     herstel_op: dt.datetime | None = None
+    inplug_storingen: int = 0
     vorig_aanbod: float = 0.0
     laag_sinds: dt.datetime | None = None
     vast_tot: dt.datetime | None = None
@@ -338,6 +353,8 @@ class Auto:
 
     def start_ontvangen(self, nu: dt.datetime) -> None:
         """De paal stuurde een start. In storing telt vanaf nu het herstel."""
+        if self.storing_alleen_kabel:
+            return
         if self.storing and self.herstel_op is None:
             self.herstel_op = nu + dt.timedelta(minutes=self.storing_herstel_min)
 
@@ -477,7 +494,7 @@ class Paal:
     def status(self, auto: Auto) -> str:
         if not self.kabel:
             return "disconnected"
-        if auto.klaar or auto.storing:
+        if auto.klaar or (auto.storing and not auto.storing_bij_inpluggen):
             return "completed"
         if auto.trekt_amps > 0:
             return "charging"
@@ -1402,6 +1419,7 @@ E = {
     "net": "sensor.v_net",
     "l1": "sensor.v_l1", "l2": "sensor.v_l2", "l3": "sensor.v_l3",
     "soc": "sensor.v_auto_soc",
+    "auto_status": "sensor.v_auto_laadstatus",
     "equalizer": "sensor.v_equalizer",
     "reden": "sensor.v_paal_reden",
     "prijs": "sensor.v_prijs",
@@ -1689,6 +1707,8 @@ def instellingen(s: Scenario) -> dict:
                 "max_amps": auto.max_amps,
                 "target_percent": auto.doel,
                 "soc_entity": E["soc"] if auto.meldt_soc else "",
+                "status_entity": E["auto_status"] if auto.meldt_status else "",
+                "proefladen": auto.proefladen,
             }],
         }],
         "installation": {
@@ -2025,6 +2045,9 @@ class Wereld:
 
         soc = self.auto.gemelde_soc(nu)
         z(E["soc"], "unavailable" if soc is None else w(str(soc), "%"))
+        # De laadstatus in de woorden van de Ford-integratie.
+        z(E["auto_status"], "NOT_READY" if not self.paal.kabel else "FAULT" if self.auto.storing
+          else "IN_PROGRESS" if self.auto.trekt_amps > 0 else "PAUSED")
         if self.vaatwasser is not None and self.vaatwasser.miele:
             vw = self.vaatwasser
             draait = vw.status == "run"
@@ -2190,6 +2213,8 @@ class Wereld:
 
     def gebeurtenis(self, actie: str, arg, coach, inst: dict) -> str:
         if actie == "kabel_uit":
+            self.auto.storing = False
+            self.auto.herstel_op = None
             self.paal.kabel = False
             self.paal.gestart = False
             self.auto.wakker = False
@@ -2200,6 +2225,10 @@ class Wereld:
             if arg is not None:
                 self.auto.soc = float(arg)
                 self.auto.klaar = False
+            # Alleen de eerste keer: daarna is het de kabel die hem eruit haalde.
+            if self.auto.storing_bij_inpluggen and not self.auto.inplug_storingen:
+                self.auto.inplug_storingen += 1
+                self.auto.ga_in_storing()
             return f"de kabel gaat erin, auto op {self.auto.soc:.0f}%"
         if actie == "pauze":
             coach.async_pause("paal", bool(arg))
@@ -2223,6 +2252,11 @@ class Wereld:
         if actie == "paal_max":
             self.paal.max_amps = float(arg)
             return f"de paal staat nu op maximaal {arg} A"
+        if actie == "storing_wachtend":
+            # In storing terwijl de paal niets aanbiedt: de paal blijft op wacht.
+            self.auto.storing_bij_inpluggen = True
+            self.auto.ga_in_storing()
+            return "de auto gaat wachtend in storing"
         if actie == "storing":
             self.auto.ga_in_storing()
             return "de auto gaat in storing, de paal meldt 'completed'"

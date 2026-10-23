@@ -224,5 +224,7 @@
   "{naam} neemt het laadschema van de coach niet aan; hij laadt vannacht niet van het net.": "{naam} does not accept the coach's charging schedule; it will not charge from the grid tonight.",
   "{naam} neemt het laadschema weer aan.": "{naam} accepts the charging schedule again.",
   "{naam}: zou dit schrijven, maar de coach stuurt nu niet: {schema}": "{naam}: would write this, but the coach is not controlling it now: {schema}",
-  "De coach weet nog niet hoe snel deze Growatt laadt, dus hij laadt hem niet van het net. Vul bij de batterij het hoogste laadvermogen in, of wacht tot de coach hem een keer op zon ziet laden.": "The coach does not know yet how fast this Growatt charges, so it does not charge it from the grid. Enter the highest charging power at the battery, or wait until the coach has seen it charge on solar once."
+  "De coach weet nog niet hoe snel deze Growatt laadt, dus hij laadt hem niet van het net. Vul bij de batterij het hoogste laadvermogen in, of wacht tot de coach hem een keer op zon ziet laden.": "The coach does not know yet how fast this Growatt charges, so it does not charge it from the grid. Enter the highest charging power at the battery, or wait until the coach has seen it charge on solar once.",
+  "{auto} aan {naam} nam eerst geen stroom aan. Na een nieuwe start van de coach wel.": "{auto} on {naam} did not take any power at first. After a new start from the coach it did.",
+  "{auto} aan {naam} neemt geen stroom aan. De coach probeerde het {keer} keer. Trek de kabel er even uit en doe hem er weer in.": "{auto} on {naam} is not taking any power. The coach tried {keer} times. Unplug the cable for a moment and plug it back in."
 }

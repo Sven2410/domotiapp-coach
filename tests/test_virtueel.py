@@ -633,6 +633,57 @@ if (vl := v("ford-storing-traag")):
     controle("storing traag: dat verslag zegt niet dat de herstart zonder gevolg was",
              not any("zonder gevolg" in m for m in meldingen(vl, "is vol")), f"{meldingen(vl, 'is vol')}")
 
+# Proefladen bij het inpluggen (v0.153.0): de Ford in de klantwoning op 23-10-2026.
+def avond_kwh(vl, tot_uur=24):
+    return sum(r.paal_w for r in vl.regels if r.tijd.day == vl.regels[0].tijd.day and r.tijd.hour < tot_uur) / 60000
+
+
+if (vl := v("ford-storing-inpluggen")):
+    proef = [r for r in vl.regels if r.regel.endswith("+proef")]
+    controle("storing bij inpluggen: meteen een proef", bool(proef) and proef[0].tijd.strftime("%H:%M") == "19:30",
+             f"{[r.tijd.strftime('%H:%M') for r in proef]}")
+    controle("storing bij inpluggen: binnen vijf minuten laadt de auto",
+             any(r.paal_w > 0 and r.tijd.strftime("%H:%M") <= "19:35" for r in vl.regels), "")
+    controle("storing bij inpluggen: de proef kost hooguit een halve kWh, daarna wacht hij op de nacht",
+             avond_kwh(vl) < 0.5, f"{avond_kwh(vl):.2f} kWh voor middernacht")
+    controle("storing bij inpluggen: op tijd vol, dicht bij het optimum",
+             gehaald(vl) and vl.optimum is not None and vl.kosten <= vl.optimum + 0.15,
+             f"kosten {vl.kosten:.2f}, optimum {vl.optimum}")
+    controle("storing bij inpluggen: geen melding behalve het verslag",
+             [m for _, m in vl.meldingen if "is vol" not in m] == [], f"{[m for _, m in vl.meldingen]}")
+
+if (vl := v("ford-storing-inpluggen-zonder-proef")):
+    controle("zonder proef: geen proef, en de auto laadt pas op het goedkope uur",
+             not [r for r in vl.regels if r.regel.endswith("+proef")] and avond_kwh(vl) == 0, f"{avond_kwh(vl):.2f}")
+
+if (vl := v("ford-storing-kabel")):
+    kabel = meldingen(vl, "neemt geen stroom aan")
+    controle("alleen de kabel helpt: één melding, binnen het uur na het inpluggen",
+             len(kabel) == 1 and any("neemt geen stroom aan" in m and t.strftime("%H:%M") < "20:30"
+                                     for t, m in vl.meldingen), f"{[(t.strftime('%H:%M'), m) for t, m in vl.meldingen]}")
+    controle("alleen de kabel helpt: na het opnieuw insteken een nieuwe proef die lukt",
+             any(r.regel.endswith("+proef") and r.tijd.strftime("%H:%M") >= "21:02" for r in vl.regels)
+             and any(r.paal_w > 0 and "21:02" <= r.tijd.strftime("%H:%M") <= "21:06" for r in vl.regels), "")
+    controle("alleen de kabel helpt: op tijd vol, en de proeven zetten de klaar-tijdregel niet aan",
+             gehaald(vl) and not [r for r in vl.regels if r.regel.startswith("deadline")],
+             f"{sorted({r.regel for r in vl.regels})}")
+
+if (vl := v("vast-avond-proef")) and (vo := v("vast-avond-erin")):
+    controle("vast contract, 18:30 erin: geen proef in de avondpiek",
+             not [r for r in vl.regels if r.regel.endswith("+proef") and r.tijd.strftime("%H:%M") < "20:00"], "")
+    piek = sum(r.paal_w for r in vl.regels if "18:00" <= r.tijd.strftime("%H:%M") < "20:00") / 60000
+    controle("vast contract, 18:30 erin: de paal neemt niets in de avondpiek", piek == 0, f"{piek:.2f} kWh")
+    controle("vast contract, 18:30 erin: de proef kost hooguit tien cent",
+             vl.kosten <= vo.kosten + 0.10 and gehaald(vl), f"{vl.kosten:.2f} tegen {vo.kosten:.2f}")
+
+if (vl := v("ford-storing-wachtend")):
+    controle("storing terwijl hij wacht: de laadstatus geeft om 22:00 een proef",
+             any(r.regel.endswith("+proef") and r.tijd.strftime("%H:%M") == "22:00" for r in vl.regels), "")
+    controle("storing terwijl hij wacht: daarna laadt hij gewoon in de nacht en is hij op tijd vol",
+             gehaald(vl) and avond_kwh(vl) < 1.0, f"{avond_kwh(vl):.2f}")
+    controle("storing terwijl hij wacht: niets kritieks naar de telefoon",
+             [m for _, m in vl.meldingen if "is vol" not in m] == [], f"{[m for _, m in vl.meldingen]}")
+
 if (vl := v("easee-een-fase-groep")):
     controle("één fase, groep zichtbaar: de paal hoeft nooit zelf te herstarten",
              vl.paal_herstarts == 0, f"{vl.paal_herstarts}")

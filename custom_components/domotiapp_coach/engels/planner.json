@@ -234,5 +234,6 @@
   "De coach weet niet hoeveel de airco trekt, dus ook niet wanneer er genoeg zon voor is. Vul het vermogen van het typeplaatje in bij Apparaten; met een vermogenssensor ziet hij het ook zodra de airco een keer gedraaid heeft.": "The coach does not know how much the air conditioner draws, so it cannot tell when there is enough solar for it either. Fill in the power from the rating plate under Devices; with a power sensor it also sees it once the air conditioner has run.",
   "zodra er {kw} zon over is": "as soon as there is {kw} of spare solar",
   "zodra er {kw} zon over is, of op een uur onder het gemiddelde van vandaag": "as soon as there is {kw} of spare solar, or during an hour below today's average",
-  "Het is {kamer}, en je wilt {doel}. Hij gaat {werk} {wanneer}.": "It is {kamer}, and you want {doel}. It will start {werk} {wanneer}."
+  "Het is {kamer}, en je wilt {doel}. Hij gaat {werk} {wanneer}.": "It is {kamer}, and you want {doel}. It will start {werk} {wanneer}.",
+  "Even proefladen: de coach kijkt of de auto stroom aanneemt, en wacht daarna weer.": "A short test charge: the coach checks that the car takes power, then waits again."
 }

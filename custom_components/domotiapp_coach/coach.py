@@ -480,6 +480,23 @@ FASEMETING_AMPS = 5.0
 # aan het laden). Een kwartier, dezelfde maat als `MIN_HOLD_MINUTES`.
 HERSTART_WACHT = timedelta(minutes=15)
 
+# Proefladen bij het inpluggen (v0.153.0). De eigenaar op 23-10-2026, nadat de
+# Ford in de klantwoning om 19:30 bij het inpluggen in storing ging en de coach
+# tot 00:45 zou wachten: "alles moet zo fail safe mogelijk", en per auto in te
+# stellen (`proefladen` in het autoprofiel, standaard aan). Hoe lang één poging
+# duurt: zolang er niets loopt kost wachten niets, en de Ford deed er na een
+# start eens negen minuten over (06-09-2026). Na `PROEF_POGINGEN` mislukte
+# pogingen, elk na een ronde op 0 A, meldt de coach het en houdt hij op.
+PROEF_DUUR = timedelta(minutes=10)
+PROEF_POGINGEN = 3
+PROEF_PAUZE = timedelta(minutes=1)
+
+# Wat de laadstatus van een auto zegt als hij in storing staat (`status_entity`
+# in het autoprofiel, v0.153.0). De Ford-integratie zegt FAULT; andere merken
+# zeggen error of iets met fault erin. Kleine letters, en een deel van het woord
+# telt ook ("charging_fault").
+AUTO_STORING = ("fault", "error", "storing")
+
 # Apparaten met een programma die de coach start: `PROGRAMMA_TYPES` in
 # const.py. De eigenaar op 06-09-2026: eerst alleen de vaatwasser.
 # Hoe lang de coach na een druk op de startknop wacht op "run" voordat hij
@@ -1231,8 +1248,8 @@ def _tijdstip(waarde: Any) -> datetime | None:
 
     `dt_util.parse_datetime` wil alleen tekst en geeft op een `datetime` een
     TypeError. Die viel in `_slots` stilletjes weg in de `except`, waardoor er
-    per blok een regel werd overgeslagen zonder spoor in enig logboek. Bij Van
-    den Dam sneuvelden op 29-08-2026 zo alle 24 uurblokken tegelijk en zei de
+    per blok een regel werd overgeslagen zonder spoor in enig logboek. In de
+    klantwoning sneuvelden op 29-08-2026 zo alle 24 uurblokken tegelijk en zei de
     coach dat er geen prijzen binnenkwamen, terwijl zijn sensor gewoon gevuld
     was. Hij laadde daardoor op vol vermogen van het net terwijl hij op de zon
     had horen te wachten.
@@ -1610,6 +1627,12 @@ class ChargerCoach:
         self._meter: list[tuple[datetime, float]] = []
         self._herstart_open: set[str] = set()
         self._herstart_gedaan: dict[str, datetime] = {}
+        # Per laadpunt waar het proefladen staat (v0.153.0): `fase` (open,
+        # bezig, pauze, klaar, gedaan, mislukt), `sinds`, `pogingen`. Zie
+        # `_proef_stand` en `_async_proef_na`. En of er bij de vorige ronde een
+        # kabel in zat, want alleen een kabel die erin gaat opent een proef.
+        self._proef: dict[str, dict[str, Any]] = {}
+        self._proef_kabel: dict[str, bool] = {}
         self._herstart_melden: set[str] = set()
         # Sinds wanneer de paal van dit laadpunt "klaar" zegt. Het ijkpunt voor
         # `_soc_bezonken`: een accustand van vóór dit moment hoort nog bij het
@@ -7733,9 +7756,15 @@ class ChargerCoach:
             solar_day=now.date(),
         )
 
+        proef = self._proef_stand(
+            now, device_id, self._chosen_car(settings, device)[1], charger,
+            mag=level == LEVEL_STEER or (level == LEVEL_PROPOSE and device_id in self._approved),
+        )
+
         def besluit(auto: Car) -> Decision:
             return decide(
                 now, prijzen, grid, auto, charger, window, tarief, zon, verwachting,
+                proef=proef,
                 holding=self._holding.get(device_id, 0),
                 waking=waking,
                 asking_seconds=(
@@ -7768,6 +7797,7 @@ class ChargerCoach:
                 if een_fase:
                     car_nu = car_een
 
+        await self._async_proef_na(now, device, car, charger, decision)
         if decision.rule == "complete":
             self._te_laat.discard(device_id)
         if decision.rule.startswith("deadline") and window.deadline is not None:
@@ -10323,6 +10353,152 @@ class ChargerCoach:
             percent = float(percent) + geladen / capacity * 100.0
         return min(100.0, float(percent))
 
+    def _auto_storing(self, profiel: dict[str, Any] | None) -> bool:
+        """Of de laadstatus van de auto zegt dat hij in storing staat.
+
+        Alleen met een `status_entity` in het profiel. Onbekend, onbeschikbaar of
+        een woord dat de integratie niet kent ("Unsupported" bij de Ford, net na
+        een herstart van Home Assistant) is geen storing.
+        """
+        entiteit = (profiel or {}).get("status_entity")
+        if not entiteit:
+            return False
+        staat = self.hass.states.get(entiteit)
+        if staat is None:
+            return False
+        woord = str(staat.state).lower()
+        return any(deel in woord for deel in AUTO_STORING)
+
+    def _proef_stand(
+        self,
+        now: datetime,
+        device_id: str,
+        profiel: dict[str, Any] | None,
+        charger: Charger,
+        mag: bool,
+    ) -> str:
+        """Wat het proefladen deze ronde aan de planner vraagt: "laden", "klaar" of niets.
+
+        Een proef gaat open als de kabel erin gaat en het profiel het niet
+        uitzet, en opnieuw als de laadstatus van de auto een storing meldt
+        terwijl hij stilstaat. Dat laatste hooguit eens per `HERSTART_WACHT`
+        en binnen dezelfde `PROEF_POGINGEN`. Alleen als de coach mag sturen:
+        op een stand waarin hij alleen voorstelt laadt er niets, en dan zou
+        een geslaagde proef er als een mislukte uitzien.
+        """
+        zat_erin = self._proef_kabel.get(device_id)
+        self._proef_kabel[device_id] = charger.connected
+        if not charger.connected:
+            self._proef.pop(device_id, None)
+            return ""
+        proef = self._proef.get(device_id)
+        # Alleen een kabel die erin gaat, niet een coach die opstart terwijl hij
+        # er al in zat: dan zou elke herstart van Home Assistant een proef geven.
+        if zat_erin is False and proef is None and (profiel or {}).get("proefladen", True):
+            proef = self._proef[device_id] = {"fase": "open", "sinds": None, "pogingen": 0}
+        if (
+            self._auto_storing(profiel)
+            and not charger.charging
+            and (proef is None or proef["fase"] in ("klaar", "gedaan"))
+        ):
+            # Ook een geslaagde keer telt mee (`keer`): een laadstatus die na het
+            # laden nog een tijd FAULT blijft zeggen, omdat de auto zijn stand pas
+            # bij de volgende peiling bijwerkt, mag geen proef per kwartier geven.
+            vorige = (proef or {}).get("laatste")
+            keer = (proef or {}).get("keer", 0)
+            if keer < PROEF_POGINGEN and (vorige is None or now - vorige >= HERSTART_WACHT):
+                proef = self._proef[device_id] = {
+                    "fase": "open", "sinds": None, "pogingen": (proef or {}).get("pogingen", 0),
+                    "storing": True, "keer": keer + 1, "laatste": vorige,
+                }
+        if proef is None or not mag:
+            return ""
+        # Laadt de paal, dan neemt de auto stroom aan: geslaagd, en in déze ronde
+        # al weer stoppen, zodat de proef niet langer duurt dan het aanlopen.
+        if charger.charging and proef["fase"] in ("open", "bezig", "pauze"):
+            proef["laatste"] = now
+            if proef["fase"] == "open":
+                proef["fase"] = "gedaan"
+                return ""
+            proef["fase"] = "klaar"
+            proef["melden"] = bool(proef["pogingen"] or proef.get("storing"))
+        # Een pauze is pas om als er ook echt een ronde 0 A naar de paal ging
+        # (`gepauzeerd`); een ronde die eerder komt (een statuswissel) telt niet.
+        if proef["fase"] == "pauze" and proef.get("gepauzeerd") and now - proef["sinds"] >= PROEF_PAUZE:
+            proef["fase"], proef["gepauzeerd"] = "open", False
+        if proef["fase"] in ("open", "bezig"):
+            return "laden"
+        if proef["fase"] == "klaar" and charger.charging:
+            return "klaar"
+        return ""
+
+    async def _async_proef_na(
+        self, now: datetime, device: dict[str, Any], car: Car, charger: Charger, decision: Decision
+    ) -> None:
+        """Bijhouden hoe de proef afliep, en het zeggen als hij niet lukt.
+
+        Laadt de paal, dan neemt de auto stroom aan en is de proef geslaagd.
+        Laadt hij na `PROEF_DUUR` nog niet, dan één ronde 0 A en een nieuwe
+        start: dat is wat de Ford op 23-10-2026 uit zijn storing haalde. Na
+        `PROEF_POGINGEN` keer één kritieke melding, want dan moet de bewoner
+        er zelf bij, en dat kan nu nog: hij heeft net ingeplugd.
+        """
+        device_id = device.get("id", "")
+        proef = self._proef.get(device_id)
+        if proef is None:
+            return
+        fase = proef["fase"]
+        if proef.pop("melden", False):
+            # Gelukt na een mislukte poging of een storing (`_proef_stand`).
+            await self._async_tell(
+                t(
+                    "{auto} aan {naam} nam eerst geen stroom aan. Na een nieuwe start van de "
+                    "coach wel.",
+                    auto=_hoofdletter(self._hoe_heet(car)),
+                    naam=device.get("name") or t("de laadpaal"),
+                ),
+                telefoon=False,
+            )
+            return
+        if fase == "klaar" and not charger.charging:
+            proef["fase"] = "gedaan"
+            return
+        if fase == "pauze" and not decision.charge:
+            proef["gepauzeerd"] = True
+            return
+        if fase not in ("open", "bezig"):
+            return
+        if not decision.rule.endswith("+proef"):
+            # Geen proef deze ronde (de avondpiek, de zekering, de lastbewaking):
+            # de tijd van een poging telt pas als er ook echt stroom aangeboden wordt.
+            proef["fase"], proef["sinds"] = "open", None
+            return
+        if fase == "open":
+            proef["fase"], proef["sinds"] = "bezig", now
+            return
+        if now - proef["sinds"] < PROEF_DUUR:
+            return
+        proef["pogingen"] += 1
+        proef["laatste"] = now
+        if proef["pogingen"] < PROEF_POGINGEN:
+            proef["fase"], proef["sinds"] = "pauze", now
+            _LOGGER.info(
+                "%s: de auto nam bij het proefladen niets af; poging %s, opnieuw na een ronde 0 A",
+                device_id, proef["pogingen"],
+            )
+            return
+        proef["fase"] = "mislukt"
+        await self._async_tell(
+            t(
+                "{auto} aan {naam} neemt geen stroom aan. De coach probeerde het {keer} keer. "
+                "Trek de kabel er even uit en doe hem er weer in.",
+                auto=_hoofdletter(self._hoe_heet(car)),
+                naam=device.get("name") or t("de laadpaal"),
+                keer=PROEF_POGINGEN,
+            ),
+            kritiek=True,
+        )
+
     @staticmethod
     def _niet_vol(car: Car) -> bool:
         """Of de accustand zegt dat er nog iets in moet.
@@ -11990,7 +12166,12 @@ class ChargerCoach:
             # zegt niets over de zekering (v0.99.0): dan telt wat de zekering
             # toeliet en niet de nul die er liep. Na "klaar" zakte het in de
             # eerste woning op 25-09-2026 van 12 naar "gemiddeld 7 A over".
-            auto_neemt_niets = charger.complete or "waiting-for-car" in decision.rule
+            # Een proef (v0.153.0) ook niet: daar wordt de auto juist op getest,
+            # en een Ford in storing zette het plafond anders op nul en de
+            # klaar-tijdregel om 20:01 aan het werk.
+            auto_neemt_niets = (
+                charger.complete or "waiting-for-car" in decision.rule or "+proef" in decision.rule
+            )
             if grid is not None:
                 plafond = ceiling_amps(grid, car, charger)
                 if plafond < MIN_AMPS:

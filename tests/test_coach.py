@@ -11250,6 +11250,108 @@ for stap in [(19, 5, "in_use", "0.0"), (19, 6, None, "0.0"), (19, 10, None, "0.1
 controle("begon hij een minuut voor de coach hem zag: dan komt 'draait' wel, één keer",
          len([m for m in telefoon160(alles194c) if "draait" in m]) == 1, f"{telefoon160(alles194c)}")
 
+print("=== 195. proefladen bij het inpluggen, en een auto in storing (v0.153.0) ===")
+# De klantwoning op 23-10-2026: kabel erin om 19:29, de Ford om 19:30 in storing
+# (`elvehcharging` FAULT), de coach wachtte tot 00:45. Om 21:24 haalde een start
+# met stroom hem eruit. Nu laadt de coach bij het inpluggen even, ziet hij het
+# meteen, en probeert hij het opnieuw.
+AUTO195 = {**LAADPAAL["cars"][0], "status_entity": "sensor.ford_laadstatus"}
+PAAL195 = {**LAADPAAL, "cars": [AUTO195]}
+inst195 = instellingen(devices=[PAAL195])
+avond195 = dt.datetime(2026, 8, 18, 20, 30)
+
+
+def paal195(hass, status, stroom=0.05):
+    hass.states.zet("sensor.laadpaal_status", status)
+    hass.states.zet("sensor.laadpaal_stroom", str(stroom))
+
+
+def rondes195(coach, inst, van, minuten, paal=PAAL195):
+    uit = []
+    for m in range(minuten):
+        besluit, verstuurd = asyncio.run(ronde(coach, inst, van + dt.timedelta(minutes=m), paal))
+        uit.append((besluit["rule"], besluit["amps"], [d[2]["message"] for d in verstuurd if d[0] == "notify"],
+                    [d for d in verstuurd if d[1] == "action_command"]))
+    return uit
+
+
+hass195, store195, coach195 = bouw(huis(status="disconnected", teruglevering=0.0, afname=300.0), inst195)
+asyncio.run(ronde(coach195, inst195, avond195 - dt.timedelta(minutes=1), PAAL195))
+paal195(hass195, "awaiting_start")
+r195 = rondes195(coach195, inst195, avond195, 1)
+print(f"  kabel erin: {r195[0][0]} {r195[0][1]} A, {r195[0][3]}")
+controle("bij het inpluggen een proef, op het wekaanbod binnen het plafond (14 A)",
+         r195[0][0].endswith("+proef") and r195[0][1] == 14, f"{r195[0]}")
+controle("met een start erbij", bool(r195[0][3]), f"{r195[0][3]}")
+paal195(hass195, "charging", 14.0)
+r195b = rondes195(coach195, inst195, avond195 + dt.timedelta(minutes=1), 2)
+print(f"  de auto laadt: {[r[:2] for r in r195b]}")
+controle("laadt hij, dan stopt de coach de ronde erna meteen, zonder vasthouden",
+         r195b[1][1] == 0 and not r195b[1][0].endswith("+hold"), f"{r195b}")
+paal195(hass195, "awaiting_start")
+r195c = rondes195(coach195, inst195, avond195 + dt.timedelta(minutes=3), 3)
+controle("en daarna geen nieuwe proef", all(not r[0].endswith("+proef") for r in r195c), f"{r195c}")
+
+# Proefladen uit in het profiel: zoals het altijd was.
+PAAL195u = {**LAADPAAL, "cars": [{**LAADPAAL["cars"][0], "proefladen": False}]}
+inst195u = instellingen(devices=[PAAL195u])
+hass195u, _s, coach195u = bouw(huis(status="disconnected", teruglevering=0.0, afname=300.0), inst195u)
+asyncio.run(ronde(coach195u, inst195u, avond195 - dt.timedelta(minutes=1), PAAL195u))
+paal195(hass195u, "awaiting_start")
+u195 = rondes195(coach195u, inst195u, avond195, 2, PAAL195u)
+controle("proefladen uit: geen proef", all(not r[0].endswith("+proef") for r in u195), f"{u195}")
+
+# Een coach die opstart terwijl de kabel er al in zit: geen proef (anders bij elke herstart).
+hass195h, _s, coach195h = bouw(huis(status="awaiting_start", teruglevering=0.0, afname=300.0), inst195)
+h195 = rondes195(coach195h, inst195, avond195, 2)
+controle("opstarten met de kabel erin: geen proef", all(not r[0].endswith("+proef") for r in h195), f"{h195}")
+
+# De auto neemt niets: drie pogingen van tien minuten, elk na een ronde 0 A, dan één melding.
+hass195f, _s, coach195f = bouw(huis(status="disconnected", teruglevering=0.0, afname=300.0), inst195)
+asyncio.run(ronde(coach195f, inst195, avond195 - dt.timedelta(minutes=1), PAAL195))
+paal195(hass195f, "awaiting_start")
+f195 = rondes195(coach195f, inst195, avond195, 40)
+pauzes195 = [i for i, r in enumerate(f195) if r[1] == 0 and i < 34]
+meld195 = [(i, m) for i, r in enumerate(f195) for m in r[2] if "stroom" in m]
+print(f"  pauzes op minuut {pauzes195}, meldingen {meld195}")
+controle("twee pauzes van één ronde 0 A tussen de pogingen", len(pauzes195) == 2, f"{pauzes195}")
+controle("na de derde poging één kritieke melding, zonder entiteit-id",
+         len(meld195) == 1 and "neemt geen stroom aan" in meld195[0][1] and "sensor." not in meld195[0][1], f"{meld195}")
+controle("en daarna geen proef meer", all(not r[0].endswith("+proef") for r in f195[35:]), f"{f195[35:]}")
+
+# De laadstatus meldt een storing terwijl hij wacht: dan een nieuwe proef, en lukt die,
+# alleen een regel in de geschiedenis.
+hass195.states.zet("sensor.ford_laadstatus", "FAULT")
+s195 = rondes195(coach195, inst195, avond195 + dt.timedelta(minutes=20), 1)
+controle("storing terwijl hij wacht: een nieuwe proef", s195[0][0].endswith("+proef"), f"{s195}")
+paal195(hass195, "charging", 14.0)
+s195b = rondes195(coach195, inst195, avond195 + dt.timedelta(minutes=21), 1)
+controle("gelukt: niets naar de telefoon", not s195b[0][2], f"{s195b}")
+hass195.states.zet("sensor.ford_laadstatus", "FAULT")
+paal195(hass195, "awaiting_start")
+s195c = rondes195(coach195, inst195, avond195 + dt.timedelta(minutes=23), 5)
+controle("een laadstatus die FAULT blijft zeggen geeft binnen het kwartier geen nieuwe proef",
+         all(not r[0].endswith("+proef") for r in s195c), f"{s195c}")
+hass195.states.zet("sensor.ford_laadstatus", "Unsupported")
+controle("Unsupported is geen storing", not coach195._auto_storing(AUTO195), "")
+
+# En voor een Alfen (de paalsturing is voor beide merken gelijk): de proef is daar een
+# limiet in de number, zonder startcommando; de rest van de proef kent geen merk.
+inst195a = instellingen(devices=[ALFEN])
+hass195a, _s, coach195a = bouw(huis90(), inst195a)
+lader195a = coachmod.Charger(connected=True, charging=False, max_amps=14)
+asyncio.run(coach195a._apply(ALFEN, lader195a, coachmod.Decision(True, 14, rule="wait-for-price+proef"), avond195))
+va195 = list(hass195a.services.verstuurd)
+print(f"  Alfen: {va195}")
+controle("Alfen: de proef schrijft de limiet, zonder startcommando",
+         any(d[1] == "set_value" and d[2].get("value") == 14 for d in va195)
+         and not [d for d in va195 if d[1] == "action_command"], f"{va195}")
+hass195a.services.verstuurd.clear()
+asyncio.run(coach195a._apply(ALFEN, lader195a, coachmod.Decision(False, 0, rule="wait-for-price"), avond195))
+controle("Alfen: daarna weer een 0",
+         any(d[1] == "set_value" and d[2].get("value") == 0 for d in hass195a.services.verstuurd),
+         f"{hass195a.services.verstuurd}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
