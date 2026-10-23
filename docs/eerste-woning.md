@@ -428,6 +428,16 @@ uitleest, en een batterij in de schaduw, staan er niet meer in. De eigenaar op
 23-10-2026: "wordt helemaal niet aangestuurd door de coach". De meldingen erover
 blijven als stippen.
 
+**Inzoomen** (v0.154.0). De eigenaar op 23-10-2026, op een telefoon: de stippen "staan te
+dicht op elkaar kan je het niet scrollable maken met in en uitzoomenn en scrollen". De banen
+en de uren staan op een doek dat `--zoom` keer zo breed is als de kaart en opzij scrolt; de
+namen blijven staan (`position: sticky`). Zoomen met + en − (1, 2, 4, 8, 12×, `zoomStap`),
+met twee vingers knijpen, of op een trackpad (een wiel met ctrl). Het moment tussen de
+vingers blijft op zijn plek (`zoomTijdlijn_` in history.js). Tijdens het knijpen schuift
+alleen `--zoom`; daarna tekent hij opnieuw, met een tijd om de 6, 3, 2 of 1 uur (`urenStap`)
+en een lijntje elk uur vanaf 3×. Opnieuw tekenen houdt de scrollplek vast. Op 390 px breed
+is 12× twee uur op het scherm, en liggen meldingen van vijf minuten uit elkaar los.
+
 **Wat er gebeurde komt uit Meldingen.** Elk besluit staat daar al op het moment
 dat het veranderde (`_async_noteer` in coach.py), en daar bouwt `tijdlijn` de
 stukken uit: een stand loopt tot het volgende besluit dat iets anders zegt, de

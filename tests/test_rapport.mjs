@@ -3734,6 +3734,23 @@ proef("Tijdlijn: een kort tussenstuk gaat op in de beurt eromheen", () => {
   assert.equal(rijen[0].stukken[0].bron, "net", "88 minuten goedkoop uur tegen 30 minuten zon");
 });
 
+proef("Tijdlijn: inzoomen, met meer tijden eronder hoe verder ingezoomd (v0.154.0)", () => {
+  // De eigenaar op 23-10-2026, op een telefoon: de stippen "staan te dicht op elkaar, kan je het
+  // niet scrollable maken met in en uitzoomen".
+  assert.deepEqual([1, 2, 4, 8].map((z) => T.zoomStap(z, 1)), [2, 4, 8, 12]);
+  assert.deepEqual([12, 8, 3, 1].map((z) => T.zoomStap(z, -1)), [8, 4, 2, 1]);
+  const items = [...TL_BEURT];
+  const rijen = T.tijdlijn(items, TL_APPARATEN, TL_DAG, tlTot, tlOm("23:59", 1));
+  const tijden = (zoom) => (T.tekenTijdlijn({ rijen, van: TL_DAG, tot: tlTot, nu: tlOm("15:00"), zoom })
+    .match(/<span style="left:[^"]*">\d\d:00<\/span>/g) ?? []).length;
+  assert.deepEqual([1, 2, 4, 12].map(tijden), [5, 9, 13, 25], "om de 6, 3, 2 en 1 uur");
+  const html = T.tekenTijdlijn({ rijen, van: TL_DAG, tot: tlTot, nu: tlOm("15:00"), zoom: 4 });
+  assert.ok(html.includes("--zoom:4") && html.includes('class="tl-scroll"') && html.includes('class="tl-doek"'));
+  assert.ok(/data-zoom="-1"[^>]*>/.test(html) && !/data-zoom="-1"[^>]*disabled/.test(html), "uitzoomen kan");
+  assert.ok(/data-zoom="-1"[^>]*disabled/.test(T.tekenTijdlijn({ rijen, van: TL_DAG, tot: tlTot, zoom: 1 })), "op 1× niet verder uit");
+  assert.ok(T.tekenTijdlijn({ rijen, van: TL_DAG, tot: tlTot, zoom: 99 }).includes("--zoom:12"), "hooguit 12×");
+});
+
 proef("Tijdlijn: de tekening, met een knop per stuk, de stippen en de streep op nu", () => {
   const items = [...TL_BEURT,
     { at: tlOm("08:10").toISOString(), kind: "kritiek", message: "De accustand meldt al 60 minuten niets." },

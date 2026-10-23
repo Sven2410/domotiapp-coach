@@ -25,7 +25,7 @@ import { datum, getal, locale, nt, t, tijd, tn } from "../i18n.js";
 /** Het merkteken op het rapport. */
 const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
 import { accuRendement, allInPrijzen, contractAt, laadCoachPrijzen, tariff, volgCoach } from "../data-source.js";
-import { balkSoort, legenda, metHerkomst, netReeks, stippen, tekenTijdlijn, tekenUitleg, tijdlijn } from "../tijdlijn.js";
+import { ZOOM_MAX, balkSoort, legenda, metHerkomst, netReeks, stippen, tekenTijdlijn, tekenUitleg, tijdlijn, zoomStap } from "../tijdlijn.js";
 import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
 import { beurtenIn, delen, opmerking, perApparaat, totalen, woorden } from "../savings.js";
@@ -853,6 +853,12 @@ class DacViewHistory extends DacElement {
     // Een tik op een stuk van de tijdlijn zet de korte tekst eronder; nog een
     // keer op hetzelfde stuk haalt hem weg.
     this.$("#tijdlijn").addEventListener("click", (event) => {
+      const zoom = event.target.closest?.("button[data-zoom]");
+      if (zoom) {
+        this.zoomTijdlijn_(zoomStap(this.tlZoom_ ?? 1, Number(zoom.dataset.zoom)));
+        this.paintTijdlijn_();
+        return;
+      }
       const knop = event.target.closest?.("button[data-rij], button[data-stip]");
       if (!knop) return;
       const sleutel = knop.dataset.stip !== undefined ? `stip:${knop.dataset.stip}` : `${knop.dataset.rij}:${knop.dataset.stuk}`;
@@ -867,6 +873,37 @@ class DacViewHistory extends DacElement {
         this.$(`#tijdlijn ${selector}`)?.focus({ preventScroll: true });
       }
     });
+
+    // Knijpen met twee vingers, of op een trackpad (dat geeft een wiel met ctrl), zoomt
+    // rond de plek tussen de vingers. Tijdens het knijpen schuift alleen `--zoom`; de tijden
+    // eronder komen erbij als het knijpen ophoudt (v0.154.0).
+    const stage = this.$("#tijdlijn");
+    const afstand = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    stage.addEventListener("touchstart", (event) => {
+      if (event.touches.length !== 2 || !event.target.closest?.(".tl-scroll")) return;
+      const [a, b] = event.touches;
+      this.tlKnijp_ = { afstand: afstand(a, b), zoom: this.tlZoom_ ?? 1 };
+    }, { passive: true });
+    stage.addEventListener("touchmove", (event) => {
+      if (!this.tlKnijp_ || event.touches.length !== 2) return;
+      event.preventDefault();
+      const [a, b] = event.touches;
+      this.zoomTijdlijn_(this.tlKnijp_.zoom * (afstand(a, b) / Math.max(1, this.tlKnijp_.afstand)), (a.clientX + b.clientX) / 2);
+    }, { passive: false });
+    const klaar = (event) => {
+      if (!this.tlKnijp_ || event.touches.length >= 2) return;
+      this.tlKnijp_ = null;
+      this.paintTijdlijn_();
+    };
+    stage.addEventListener("touchend", klaar);
+    stage.addEventListener("touchcancel", klaar);
+    stage.addEventListener("wheel", (event) => {
+      if (!event.ctrlKey || !event.target.closest?.(".tl-scroll")) return;
+      event.preventDefault();
+      this.zoomTijdlijn_((this.tlZoom_ ?? 1) * Math.exp(-event.deltaY / 100), event.clientX);
+      clearTimeout(this.tlWiel_);
+      this.tlWiel_ = setTimeout(() => this.paintTijdlijn_(), 200);
+    }, { passive: false });
 
     this.load_();
   }
@@ -1297,6 +1334,29 @@ class DacViewHistory extends DacElement {
     this.tlAf_ = af;
   }
 
+  /**
+   * Zoom de tijdlijn naar `nieuw`, met het moment onder `kernX` (een x op het scherm; anders
+   * het midden) op dezelfde plek. Alleen `--zoom` en de scrollplek: opnieuw tekenen doet
+   * `paintTijdlijn_`, dat de tijden onder de banen bij de zoom zet.
+   */
+  zoomTijdlijn_(nieuw, kernX = null) {
+    const oud = this.tlZoom_ ?? 1;
+    nieuw = Math.min(ZOOM_MAX, Math.max(1, nieuw));
+    this.tlZoom_ = nieuw;
+    const scroll = this.$("#tijdlijn .tl-scroll");
+    const doek = scroll?.firstElementChild;
+    const baan = scroll?.querySelector(".baan");
+    if (!scroll || !doek || !baan) return;
+    const vak = scroll.getBoundingClientRect();
+    const x = (kernX ?? vak.left + vak.width / 2) - vak.left;
+    // Waar de banen beginnen: naast de namen, of op een telefoon helemaal links.
+    const begin = baan.getBoundingClientRect().left - doek.getBoundingClientRect().left;
+    const breed = Math.max(1, doek.getBoundingClientRect().width - begin);
+    const deel = (scroll.scrollLeft + x - begin) / breed;
+    this.$("#tijdlijn .tijdlijn")?.style.setProperty("--zoom", String(Math.round(nieuw * 100) / 100));
+    scroll.scrollLeft = begin + deel * breed * (nieuw / oud) - x;
+  }
+
   paintTijdlijn_() {
     const kaart = this.$("#tijdlijn-card");
     if (!kaart) return;
@@ -1360,14 +1420,18 @@ class DacViewHistory extends DacElement {
     }
 
     const gekozen = this.tlGekozen_ ?? "";
-    stage.innerHTML = tekenTijdlijn({ rijen, stippen: punten, van, tot, nu, gekozen, metAccu });
+    // Opnieuw tekenen zet de scrollplek op nul; ingezoomd blijft hij waar hij was.
+    const scrollPlek = this.$("#tijdlijn .tl-scroll")?.scrollLeft ?? 0;
+    stage.innerHTML = tekenTijdlijn({ rijen, stippen: punten, van, tot, nu, gekozen, metAccu, zoom: this.tlZoom_ ?? 1 });
+    const scroll = this.$("#tijdlijn .tl-scroll");
+    if (scroll) scroll.scrollLeft = scrollPlek;
     legendaVak.innerHTML = legenda(rijen, metAccu)
       .map((item) => `<span><i class="vlek ${item.klasse}"></i>${item.label}</span>`)
       .join("");
     const tekst = gekozen ? tekenUitleg({ rijen, stippen: punten, gekozen, van, tot, nu, metAccu }) : "";
     uitleg.innerHTML = tekst;
     uitleg.hidden = !tekst;
-    note.textContent = tekst ? "" : t("Tik op een balk of een stip voor wat er gebeurde.");
+    note.textContent = tekst ? "" : t("Tik op een balk of een stip voor wat er gebeurde. Knijp, of tik op + en −, om in te zoomen.");
   }
 
   /** The buckets of this period, in order, with everything that belongs to one. */
@@ -3172,12 +3236,29 @@ DacViewHistory.css = /* css */ `
   /* De tijdlijn (v0.115.0): een baan per apparaat over de hele dag. Oranje is
      eigen stroom en blauw het net, net als in de grafiek erboven. De lijntjes in
      de baan staan om de drie uur. */
-  .tijdlijn { margin-top: 18px; }
+  .tijdlijn { position: relative; margin-top: 18px; }
+  /* Inzoomen (v0.154.0): het doek is --zoom keer zo breed en scrolt opzij, de namen
+     blijven staan. touch-action laat de browser schuiven maar het knijpen aan ons. */
+  .tijdlijn .tl-scroll {
+    overflow-x: auto; overflow-y: hidden; touch-action: pan-x pan-y;
+    overscroll-behavior-x: contain; scrollbar-width: thin; padding-bottom: 4px;
+  }
+  .tijdlijn .tl-doek { width: calc(124px + (100% - 124px) * var(--zoom, 1)); }
+  .tijdlijn .tl-zoom { display: flex; justify-content: flex-end; gap: 6px; margin: -6px 0 8px; }
+  .tijdlijn .tl-zoom button {
+    width: 32px; height: 28px; padding: 0; border-radius: 8px;
+    border: 1px solid rgba(var(--dac-veil), 0.14); background: rgba(var(--dac-veil), 0.04);
+    color: var(--dac-ink); font: inherit; font-size: 16px; line-height: 1; cursor: pointer;
+  }
+  .tijdlijn .tl-zoom button:disabled { opacity: 0.35; cursor: default; }
   .tijdlijn .rijen { position: relative; display: flex; flex-direction: column; gap: 10px; }
   .tijdlijn .rij { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 12px; }
   .tijdlijn .naam {
     font-size: 13px; color: var(--dac-ink-2);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    position: sticky; left: 0; z-index: 3; align-self: stretch; display: flex; align-items: center;
+    /* Dekkend: de kaart is een laagje over de achtergrond, en de banen schuiven eronder. */
+    background: linear-gradient(var(--dac-surface), var(--dac-surface)), var(--dac-bg);
   }
   .tijdlijn .baan {
     position: relative; height: 28px; border-radius: 8px;
@@ -3309,7 +3390,8 @@ DacViewHistory.css = /* css */ `
     .t-value { font-size: 19px; }
     /* Op een telefoon de naam boven de baan: de baan krijgt de hele breedte. */
     .tijdlijn .rij { grid-template-columns: minmax(0, 1fr); gap: 4px; }
-    .tijdlijn .naam { font-size: 12px; }
+    .tijdlijn .naam { font-size: 12px; justify-self: start; max-width: calc(100vw - 48px); background: none; }
+    .tijdlijn .tl-doek { width: calc(100% * var(--zoom, 1)); }
     .tijdlijn .uren { margin-left: 0; }
   }
 `;

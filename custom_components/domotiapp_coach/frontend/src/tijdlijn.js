@@ -526,7 +526,24 @@ export function legenda(rijen, metAccu = false) {
  * `data-stip`), zodat een klik in history.js de tekst eronder kan zetten.
  * `gekozen` is wat er nu open staat, als `"rij:stuk"` of `"stip:i"`.
  */
-export function tekenTijdlijn({ rijen, stippen: punten = [], van, tot, nu, gekozen = "", metAccu = false }) {
+/** Hoever de tijdlijn in kan zoomen: bij een dag is 12× twee uur op de breedte (v0.154.0). */
+export const ZOOM_MAX = 12;
+
+/** De stappen van + en −. */
+export function zoomStap(zoom, richting) {
+  const stappen = [1, 2, 4, 8, ZOOM_MAX];
+  return richting > 0
+    ? stappen.find((stap) => stap > zoom + 0.01) ?? ZOOM_MAX
+    : [...stappen].reverse().find((stap) => stap < zoom - 0.01) ?? 1;
+}
+
+/** Om de hoeveel uur er een tijd onder een dag staat: hoe verder ingezoomd, hoe vaker. */
+export function urenStap(zoom) {
+  return zoom >= 6 ? 1 : zoom >= 3 ? 2 : zoom >= 1.5 ? 3 : 6;
+}
+
+export function tekenTijdlijn({ rijen, stippen: punten = [], van, tot, nu, gekozen = "", metAccu = false, zoom = 1 }) {
+  zoom = Math.min(ZOOM_MAX, Math.max(1, Number(zoom) || 1));
   const lengte = tot - van;
   const metDag = meerDagen(van, tot);
   const plek = (moment) => Math.max(0, Math.min(100, ((moment - van) / lengte) * 100));
@@ -573,15 +590,29 @@ export function tekenTijdlijn({ rijen, stippen: punten = [], van, tot, nu, gekoz
           return `<span class="dag" style="left:${rond(plek(midden))}%">${dagKort(dag)}</span>`;
         })
         .join("")
-    : [0, 6, 12, 18, 24]
-        .map((uur) => `<span style="left:${(uur / 24) * 100}%">${String(uur).padStart(2, "0")}:00</span>`)
+    : Array.from({ length: 24 / urenStap(zoom) + 1 }, (_, i) => i * urenStap(zoom))
+        .map((uur) => `<span style="left:${rond((uur / 24) * 100)}%">${String(uur).padStart(2, "0")}:00</span>`)
         .join("");
-  // Het lijntje in de baan: om de drie uur op een dag, om de dag in een week.
-  const raster = metDag ? rond(100 / Math.max(1, dagen.length)) : 12.5;
+  // Het lijntje in de baan: om de drie uur op een dag (ingezoomd elk uur), om de dag in
+  // een week (ingezoomd om de zes uur).
+  const raster = metDag
+    ? rond(100 / Math.max(1, dagen.length) / (zoom >= 4 ? 4 : 1))
+    : zoom >= 3 ? rond(100 / 24) : 12.5;
+  // Op een telefoon stonden de stippen van een drukke ochtend over elkaar (de eigenaar op
+  // 23-10-2026: "kan je het niet scrollable maken met in en uitzoomen"). Het doek is
+  // `--zoom` keer zo breed als het vak en scrolt opzij; de namen blijven staan.
   return `
-    <div class="tijdlijn" style="--raster:${raster}%">
-      <div class="rijen">${stipRij}${balken}</div>
-      <div class="uren" aria-hidden="true">${uren}</div>
+    <div class="tijdlijn" style="--raster:${raster}%;--zoom:${rond(zoom)}">
+      <div class="tl-zoom">
+        <button type="button" data-zoom="-1" aria-label="${escape(t("Uitzoomen"))}"${zoom <= 1 ? " disabled" : ""}>−</button>
+        <button type="button" data-zoom="1" aria-label="${escape(t("Inzoomen"))}"${zoom >= ZOOM_MAX ? " disabled" : ""}>+</button>
+      </div>
+      <div class="tl-scroll">
+        <div class="tl-doek">
+          <div class="rijen">${stipRij}${balken}</div>
+          <div class="uren" aria-hidden="true">${uren}</div>
+        </div>
+      </div>
     </div>`;
 }
 
