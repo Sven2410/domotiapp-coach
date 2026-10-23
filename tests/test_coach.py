@@ -9158,7 +9158,10 @@ print(f"  1000 erin, 901,5 eruit: rte_accu {rij159.get('rte_accu')}")
 controle("het rendement uit zijn eigen tellers staat klaar voor de pop-up: ongeveer 90%",
          rij159.get("rte_accu") == 0.9015, f"{rij159}")
 controle("en verder bewaart hij niets van hem", set(rij159) == {"device", "rte_accu"}, f"{rij159}")
-controle("Growatt is een merk dat alleen gelezen wordt", coachmod.BATTERIJ_ALLEEN_LEZEN == ("growatt",), "")
+# Sinds v0.150.0 stuurt de coach een Growatt met een laadschema, maar alleen als de
+# omvormer dat kan. Een MIX zonder de acties van de integratie, zoals hier: alleen uitlezen.
+controle("Growatt stuurt hij met een laadschema als dat kan, anders leest hij hem alleen uit",
+         coachmod.BATTERIJ_ALLEEN_LEZEN == () and coachmod.BATTERIJ_SCHEMA == ("growatt",), "")
 
 # Voor de batterijkaart van DomotiApp Lovelace: het merk, en dat hij alleen uitgelezen
 # wordt. Dat komt erbij; het contract blijft hetzelfde.
@@ -10894,6 +10897,218 @@ b191 = coach191._batterij_van(dt.datetime(2026, 10, 22, 21, 0), inst191, inst191
 print(f"  de batterij in de som: slijtage {b191.slijtage:.4f} bij {b191.capacity_kwh} kWh")
 controle("en de batterij in de som krijgt hem mee", b191.capacity_kwh and abs(b191.slijtage - 7000 / (6000 * b191.capacity_kwh)) < 1e-9,
          f"{b191.slijtage} {b191.capacity_kwh}")
+
+print("=== 192. Growatt: sturen met een laadschema, eerst in de schaduw (v0.150.0) ===")
+# De eigenaar op 22-10-2026: de Growatt sturen, universeel en zelflerend; bij de klantwoning
+# eerst in de schaduw. Een SPH op het API-token heeft acties voor een laadschema en geen
+# stuurgetal. Zoals in de klantwoning: bi-horário, vazio 22:00 tot 08:00 op 0,166 en
+# daarbuiten 0,272, 12,5 kWh per 100%, de vloer op 15%, ongeveer 7,8 kW bij 100%.
+import types as types192
+register192 = types192.ModuleType("homeassistant.helpers.entity_registry")
+register192.async_get = lambda hass: types192.SimpleNamespace(
+    async_get=lambda entity_id: types192.SimpleNamespace(device_id="ha-growatt-omvormer")
+    if str(entity_id).startswith("sensor.growatt") else None)
+sys.modules["homeassistant.helpers.entity_registry"] = register192
+
+
+def prijzen192(dag):
+    rijen = []
+    for i in range(48):
+        start = dt.datetime(2026, 9, dag, 0, 0) + dt.timedelta(hours=i)
+        prijs = 0.166 if (start.hour >= 22 or start.hour < 8) else 0.272
+        rijen.append({"from": start.isoformat() + "+02:00",
+                      "till": (start + dt.timedelta(hours=1)).isoformat() + "+02:00", "price": prijs})
+    return rijen
+
+
+GROWATT192 = {
+    "id": "dev-growatt", "type": "thuisbatterij", "name": "", "brand": "growatt",
+    "controllable": False, "entity": "",
+    "entities": {
+        "soc": "sensor.growatt_soc", "charge_power": "sensor.growatt_laden",
+        "discharge_power": "sensor.growatt_ontladen", "accu_in": "sensor.growatt_in",
+        "accu_out": "sensor.growatt_uit",
+    },
+    "battery": {"capacity_kwh": 12.5, "max_charge_w": 7800, "rte_percent": 90},
+}
+# Wat hij er eerder uit gaf (de coach houdt het hoogste bij): 2,1 kW.
+inst192_rij = {"device": "dev-growatt", "growatt_uit_w": 2100}
+waarden192 = {
+    **huis(status="disconnected", teruglevering=0.0, afname=700.0, zon_rest=0.0),
+    "sensor.growatt_soc": {"state": "16", "attributes": {"unit_of_measurement": "%"}},
+    "sensor.growatt_laden": {"state": "0", "attributes": {"unit_of_measurement": "kW"}},
+    "sensor.growatt_ontladen": {"state": "0", "attributes": {"unit_of_measurement": "kW"}},
+    "sensor.growatt_in": {"state": "311.9", "attributes": {"unit_of_measurement": "kWh"}},
+    "sensor.growatt_uit": {"state": "280.0", "attributes": {"unit_of_measurement": "kWh"}},
+    "sensor.prijs": {"state": "0.272", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen192(21)}},
+}
+inst192 = instellingen(devices=[GROWATT192], battery_state=[inst192_rij])
+inst192["contract"] = {
+    "type": "dynamic", "netting": False,
+    "dynamic": {"source": "all_in", "interval": "hour", "all_in_entity": "sensor.prijs",
+                "market_entity": "", "energy_tax": 0, "supplier_markup": 0, "vat_percent": 0,
+                "feed_in_costs": 0},
+}
+hass192, store192, coach192 = bouw(waarden192, inst192)
+coach192._huis_kwh = {u: 0.7 for u in range(24)}
+
+
+async def _huis192(*_args, **_kw):
+    """Het huisverbruik staat vast; een lege opslag zou het anders wissen."""
+
+
+coach192._async_huisverbruik = _huis192
+# Wat de omvormer onthoudt: het laatste schema dat de cloud aannam.
+omvormer192 = {"charge_power": 100, "charge_stop_soc": 100, "mains_enabled": False,
+               "periods": [{"period_id": i, "start_time": "00:00", "end_time": "00:00", "enabled": i == 1}
+                           for i in (1, 2, 3)]}
+fout192 = {"n": 0}
+
+
+def schrijf192(data):
+    if fout192["n"]:
+        fout192["n"] -= 1
+        raise RuntimeError("Growatt API error: Error during writing AC charge time periods")
+    omvormer192.update(charge_power=data["charge_power"], charge_stop_soc=data["charge_stop_soc"],
+                       mains_enabled=data["mains_enabled"],
+                       periods=[{"period_id": i, "start_time": data[f"period_{i}_start"],
+                                 "end_time": data[f"period_{i}_end"], "enabled": data[f"period_{i}_enabled"]}
+                                for i in (1, 2, 3)])
+
+
+hass192.services.antwoorden = {
+    ("growatt_server", "read_ac_charge_times"): lambda data: dict(omvormer192),
+    ("growatt_server", "write_ac_charge_times"): schrijf192,
+}
+
+
+async def ronde192(nu):
+    hass192.services.verstuurd.clear()
+    await hass192.afmaken()
+    await coach192._round(nu)
+    await hass192.afmaken()
+    return coach192.state.get("dev-growatt") or {}, [d for d in hass192.services.verstuurd if d[0] == "growatt_server"]
+
+
+def geschreven192(verstuurd):
+    return [d[2] for d in verstuurd if d[1] == "write_ac_charge_times"]
+
+
+NU192 = dt.datetime(2026, 9, 21, 21, 30)
+st192, v192 = asyncio.run(ronde192(NU192))
+print(f"  21:30 schaduw: {st192.get("mode")} {st192.get("rule")} {st192.get("reason")} {st192.get("rte")} {st192.get("capacity_kwh")} {[(h["start"][11:16], h["mode"], h["grid_kwh"], h["price"]) for h in st192.get("hours", [])[:14]]}")
+controle("hij herkent een SPH: hij vraagt het schema op, op het apparaat van de accustand",
+         any(d[1] == "read_ac_charge_times" and d[2] == {"device_id": "ha-growatt-omvormer"} for d in v192), f"{v192}")
+controle("zonder het vinkje rekent hij wel: laden van het net in vazio, 22:00 tot 08:00",
+         (st192.get("schedule") or {}).get("grid") is True
+         and st192["schedule"]["periods"] == [["22:00", "23:59"], ["00:00", "08:00"]], f"{st192.get('schedule')}")
+controle("maar schrijft niets", geschreven192(v192) == [] and st192.get("applied") is False, f"{v192}")
+schaduw192 = [d.get("message") for soort, d in hass192.bus.gebeurtenissen
+              if soort == coachmod.EVENT_NOTIFICATION and "zou dit schrijven" in str(d.get("message"))]
+print(f"  {schaduw192}")
+controle("en zegt in de geschiedenis wat hij zou schrijven, met de vakken",
+         len(schaduw192) == 1 and "22:00-23:59, 00:00-08:00" in schaduw192[0], f"{schaduw192}")
+st192, v192 = asyncio.run(ronde192(NU192 + dt.timedelta(minutes=1)))
+controle("een minuut later vraagt hij het schema niet opnieuw op", v192 == [], f"{v192}")
+
+# Het vinkje aan: nu schrijft hij.
+GROWATT192["controllable"] = True
+st192, v192 = asyncio.run(ronde192(NU192 + dt.timedelta(minutes=2)))
+w192 = geschreven192(v192)
+print(f"  21:32 met het vinkje: {w192}")
+controle("met het vinkje schrijft hij het schema: mains aan, de twee vakken, het derde uit",
+         len(w192) == 1 and w192[0]["mains_enabled"] is True and w192[0]["device_id"] == "ha-growatt-omvormer"
+         and (w192[0]["period_1_start"], w192[0]["period_1_end"], w192[0]["period_2_start"], w192[0]["period_2_end"])
+         == ("22:00", "23:59", "00:00", "08:00") and w192[0]["period_3_enabled"] is False, f"{w192}")
+controle("op een laag vermogen: uitgesmeerd over tien uur", 0 < w192[0]["charge_power"] <= 25, f"{w192}")
+st192, v192 = asyncio.run(ronde192(NU192 + dt.timedelta(minutes=3)))
+controle("een minuut later schrijft hij niet opnieuw, en leest hij nog niet terug", v192 == [], f"{v192}")
+st192, v192 = asyncio.run(ronde192(NU192 + dt.timedelta(minutes=4)))
+controle("na anderhalve minuut leest hij terug, en het staat er", [d[1] for d in v192] == ["read_ac_charge_times"]
+         and st192["schedule"]["confirmed"] is True, f"{v192} {st192.get('schedule')}")
+
+# Het teruglezen van de stopgrens geeft iets anders dan er staat (de klantwoning, 22-10-2026):
+# daar kijkt hij niet naar, wel naar de accustand zelf.
+omvormer192["charge_stop_soc"] = 100
+stop192 = w192[0]["charge_stop_soc"]
+hass192.states.zet("sensor.growatt_soc", {"state": str(stop192), "attributes": {"unit_of_measurement": "%"}})
+st192, v192 = asyncio.run(ronde192(dt.datetime(2026, 9, 22, 6, 0)))
+w192b = geschreven192(v192)
+print(f"  06:00 op {stop192}%: {w192b}")
+# Onder vol wel: daar vertrouwt de coach het teruglezen van de stopgrens niet.
+sessie192 = coach192._batterij["dev-growatt"]
+sessie192["growatt_geschreven"] = coachmod.GrowattSchema(
+    net=True, vermogen_pct=15, stop_soc=60, vakken=[("22:00", "23:59"), ("00:00", "08:00")],
+    tot=dt.datetime(2026, 9, 22, 8, 0))
+sessie192["growatt_op"] = None
+hass192.states.zet("sensor.growatt_soc", {"state": "60", "attributes": {"unit_of_measurement": "%"}})
+st192, v192 = asyncio.run(ronde192(dt.datetime(2026, 9, 22, 6, 10)))
+w192d = geschreven192(v192)
+print(f"  06:10 op 60% bij een stop op 60: {w192d}")
+controle("op een stopgrens onder vol zet de coach het laden van het net zelf uit",
+         len(w192d) == 1 and w192d[0]["mains_enabled"] is False
+         and not any(w192d[0][f"period_{i}_enabled"] for i in (1, 2, 3)), f"{w192d}")
+st192, v192 = asyncio.run(ronde192(dt.datetime(2026, 9, 22, 6, 30)))
+controle("en in hetzelfde vak zet hij het niet opnieuw aan", geschreven192(v192) == [], f"{v192}")
+# Tot vol: dan stopt hij zelf en staat hij tot het eind van het vak stil, terwijl het huis
+# goedkoop van het net haalt. Uitzetten zou hem in de goedkope uren het huis laten voeden.
+controle("op een stopgrens van 100% laat de coach het schema staan", w192b == [], f"{w192b}")
+
+# Een schrijfactie die faalt: na de pauze opnieuw, en na drie keer een melding.
+hass192.states.zet("sensor.growatt_soc", {"state": "16", "attributes": {"unit_of_measurement": "%"}})
+# De prijzen van de volgende dag zijn er.
+hass192.states.zet("sensor.prijs", {"state": "0.272", "attributes": {"unit_of_measurement": "€/kWh",
+                                                                     "prices": prijzen192(22)}})
+fout192["n"] = 3
+# Aan pas als het plan het vijf minuten wil (`GROWATT_BESTENDIG`): om 21:30 nog niet, om 21:36 wel.
+tijden192 = [dt.datetime(2026, 9, 22, 21, 30) + dt.timedelta(minutes=m) for m in (0, 6, 7, 8, 10, 11, 12, 14)]
+pogingen192 = []
+for t192 in tijden192:
+    _, v192 = asyncio.run(ronde192(t192))
+    pogingen192.append(len(geschreven192(v192)))
+print(f"  pogingen per ronde: {pogingen192}")
+controle("aan pas na vijf minuten, en na een mislukte opdracht wacht hij twee minuten",
+         pogingen192[:4] == [0, 1, 0, 1], f"{pogingen192}")
+controle("de vierde poging lukt", sum(pogingen192) == 4 and omvormer192["mains_enabled"] is True, f"{pogingen192} {omvormer192}")
+meldingen192 = [d for d in hass192.services.verstuurd if d[0] == "notify"]
+
+# Het vinkje eraf: wat de coach erin zette gaat eruit, want het schema herhaalt zich elke dag.
+GROWATT192["controllable"] = False
+st192, v192 = asyncio.run(ronde192(dt.datetime(2026, 9, 22, 21, 50)))
+w192c = geschreven192(v192)
+controle("het vinkje eraf: laden van het net eruit", len(w192c) == 1 and w192c[0]["mains_enabled"] is False, f"{w192c}")
+st192, v192 = asyncio.run(ronde192(dt.datetime(2026, 9, 22, 21, 55)))
+controle("en daarna schrijft hij niets meer", geschreven192(v192) == [], f"{v192}")
+# Ook als het vak pas over uren begint: dan wacht hij niet tot vlak ervoor.
+coach192._batterij["dev-growatt"]["growatt_geschreven"] = coachmod.GrowattSchema(
+    net=True, vermogen_pct=15, stop_soc=100, vakken=[("22:00", "23:59"), ("00:00", "08:00")],
+    tot=dt.datetime(2026, 9, 24, 8, 0))
+st192, v192 = asyncio.run(ronde192(dt.datetime(2026, 9, 23, 10, 0)))
+controle("het vinkje eraf om 10:00 met een vak om 22:00: laden van het net er meteen uit",
+         [w["mains_enabled"] for w in geschreven192(v192)] == [False], f"{v192}")
+
+# Zelf leren: in een vak dat hij schreef, zonder zon, wat hij laadt bij het deel in het schema.
+GROWATT192["controllable"] = True
+coach192._batterij.clear()
+omvormer192.update(mains_enabled=False)
+asyncio.run(ronde192(dt.datetime(2026, 9, 22, 22, 0)))
+asyncio.run(ronde192(dt.datetime(2026, 9, 22, 22, 2)))
+sessie192 = coach192._batterij["dev-growatt"]
+pct192 = sessie192["growatt_geschreven"].vermogen_pct
+for m in range(6):
+    hass192.states.zet("sensor.growatt_laden",
+                       {"state": str(round(7.85 * pct192 / 100, 3)), "attributes": {"unit_of_measurement": "kW"}},
+                       last_updated=dt.datetime(2026, 9, 22, 20, 10 + m, tzinfo=dt.timezone.utc))
+    asyncio.run(ronde192(dt.datetime(2026, 9, 22, 22, 10 + m)))
+rij192 = next((r for r in store192.instellingen.get("battery_state") or [] if r.get("device") == "dev-growatt"), {})
+print(f"  geleerd: {rij192.get('growatt_w_pct')}")
+
+controle("zes metingen van het laadvermogen bij 100%, rond de 7,85 kW",
+         len(rij192.get("growatt_w_pct") or []) == 6
+         and all(abs(w - 7850) < 60 for w in rij192["growatt_w_pct"]), f"{rij192.get('growatt_w_pct')}")
+b192 = coach192._batterij_van(dt.datetime(2026, 9, 22, 22, 20), inst192, GROWATT192, rij192)
+coach192._growatt_batterij(b192, GROWATT192, rij192)
+controle("en daarmee rekent hij, in plaats van wat ingevuld is", abs(b192.max_charge_w - 7850) < 60, f"{b192.max_charge_w}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

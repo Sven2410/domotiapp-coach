@@ -4689,21 +4689,28 @@ proef("per apparaat: de lijst met kWh, het deel van het huis, en de rest van het
 //
 // De eigenaar op 15-10-2026: "nee sturen niet voor growatt alleen uitlezen", en "dat ik
 // dus alleen invulvelden krijg die noodzakelijk zijn voor growatt".
-proef("Growatt: alleen de velden om uit te lezen, en niets om te sturen (v0.123.0)", async () => {
+proef("Growatt: de velden om uit te lezen, en sturen met een laadschema (v0.123.0, v0.150.0)", async () => {
   const devs = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
   const accu = { id: "g", type: "thuisbatterij", brand: "growatt", name: "", entity: "", entities: {}, controllable: false, battery: {} };
   assert.deepEqual(devs.brandFields(accu).map((f) => f.key), ["soc", "charge_power", "discharge_power", "accu_in", "accu_out"]);
   assert.ok(!devs.brandFields(accu).some((f) => f.needed), "geen veld met 'nodig zodra de coach mag sturen'");
-  assert.equal(devs.isReadOnly(accu), true);
-  assert.equal(devs.canSteer(accu), false, "een Growatt is niet te sturen");
-  assert.deepEqual(devs.missingForControl({ ...accu, controllable: true }), [], "en mist dus ook niets om te sturen");
-  assert.equal(devs.isReadOnly({ ...accu, brand: "anker" }), false);
+  // Sinds v0.150.0 stuurt de coach een Growatt met een laadschema: het vinkje is er, en
+  // er hoeft geen stuurgetal bij. Of de omvormer het kan zegt de coach zelf.
+  assert.equal(devs.isReadOnly(accu), false);
+  assert.equal(devs.isSchema(accu), true);
+  assert.equal(devs.canSteer(accu), true, "een Growatt is te sturen, met een schema");
+  assert.deepEqual(devs.missingForControl({ ...accu, controllable: true }), [], "en mist daarvoor niets");
+  assert.equal(devs.isSchema({ ...accu, brand: "anker" }), false);
 
-  // Dezelfde lijst als const.py.
+  // Dezelfde lijsten als const.py.
   const bron = readFileSync(new URL("../custom_components/domotiapp_coach/const.py", import.meta.url), "utf8");
-  const blok = bron.slice(bron.indexOf("BATTERIJ_ALLEEN_LEZEN: Final = ("));
-  const python = [...blok.slice(0, blok.indexOf(")")).matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(python, devs.BATTERY_BRANDS.filter((b) => b.readOnly).map((b) => b.id));
+  const lijst = (naam) => {
+    const blok = bron.slice(bron.indexOf(`${naam}: Final = (`));
+    return [...blok.slice(0, blok.indexOf(")")).matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  };
+  assert.deepEqual(lijst("BATTERIJ_ALLEEN_LEZEN"), devs.BATTERY_BRANDS.filter((b) => b.readOnly).map((b) => b.id));
+  assert.deepEqual(lijst("BATTERIJ_SCHEMA"), devs.BATTERY_BRANDS.filter((b) => b.schema).map((b) => b.id));
+  assert.deepEqual(lijst("BATTERIJ_SCHEMA"), ["growatt"]);
 
   await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
   const Apparaten = geregistreerd.get("dac-view-devices");
@@ -4719,19 +4726,20 @@ proef("Growatt: alleen de velden om uit te lezen, en niets om te sturen (v0.123.
   }
   assert.ok(!html.includes("data-power"), "geen vermogenssensor met een teken");
   assert.ok(!html.includes("Nodig zodra de coach mag sturen"));
-  assert.match(html, /Een Growatt leest de coach alleen uit/, "het merk zegt het");
+  assert.match(html, /Een Growatt stuurt de coach met een laadschema/, "het merk zegt het");
 
   const vink = el.controlHtml_({ ...accu, controllable: true }, 0);
-  assert.ok(!vink.includes('data-field="controllable"'), "geen vinkje om te sturen");
-  assert.match(vink, /alleen uit/);
+  assert.ok(vink.includes('data-field="controllable"'), "het vinkje om te sturen");
 
   const blokHtml = el.batteryHtml_(accu, 0);
-  assert.ok(blokHtml.includes('data-bat-field="capacity_kwh"'), "de capaciteit als getal");
-  for (const veld of ["rte_percent", "max_charge_w", "max_discharge_w", "phase", "power_invert", "setpoint_invert", "control_mode", "idle_mode", "self_zero"]) {
+  for (const veld of ["capacity_kwh", "max_charge_w", "max_discharge_w"]) {
+    assert.ok(blokHtml.includes(`data-bat-field="${veld}"`), `${veld} als getal`);
+  }
+  for (const veld of ["rte_percent", "phase", "power_invert", "setpoint_invert", "control_mode", "idle_mode", "self_zero"]) {
     assert.ok(!blokHtml.includes(`data-bat-field="${veld}"`), `geen ${veld}`);
   }
   assert.ok(!blokHtml.includes("onder Instellen"), "en geen verwijzing naar de instellingen van de bewoner");
-  assert.equal(el.summary_(accu).text, "Growatt · alleen uitlezen");
+  assert.equal(el.summary_(accu).text, "Growatt · laadschema");
 
   // Een Anker houdt alles.
   const anker = el.batteryHtml_({ ...accu, brand: "anker" }, 0);
@@ -4739,14 +4747,14 @@ proef("Growatt: alleen de velden om uit te lezen, en niets om te sturen (v0.123.
   assert.ok(el.brandHtml_({ ...accu, brand: "anker" }, 0).includes("data-power"));
 });
 
-proef("Growatt: van een ander merk naar Growatt laat niets staan om te sturen (v0.123.0)", async () => {
+proef("Growatt: van een ander merk naar Growatt laat geen stuurgetal staan, wel het vinkje (v0.123.0, v0.150.0)", async () => {
   const { alleenUitlezen } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
   const was = {
     id: "g", type: "thuisbatterij", brand: "growatt", controllable: true, entity: "sensor.accu_w",
     entities: { soc: "sensor.soc", setpoint: "number.accu", energy_in: "sensor.in", accu_in: "sensor.accu_in" },
   };
   const nu = alleenUitlezen(was);
-  assert.equal(nu.controllable, false);
+  assert.equal(nu.controllable, true, "het vinkje blijft: de coach stuurt hem met een schema");
   assert.equal(nu.entity, "", "de vermogenssensor met een teken gaat eraf, want die gaat bij de coach voor");
   assert.deepEqual(nu.entities, { soc: "sensor.soc", accu_in: "sensor.accu_in" });
   const anker = { ...was, brand: "anker" };

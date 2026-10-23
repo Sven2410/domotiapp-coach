@@ -27,11 +27,13 @@ De scenario's zelf staan in `scenarios.py`; de controles erop in
 
 import asyncio
 import calendar
+import copy
 import dataclasses
 import datetime as dt
 import math
 import random
 import sys
+import types
 from dataclasses import dataclass, field
 
 from harnas import *  # noqa: F401,F403
@@ -869,6 +871,22 @@ class Batterij:
     extern_op: dt.datetime | None = None
     # En wat de bewoner bij de coach instelt: "de batterij doet zelf nul op de meter".
     zelf_nul: bool = False
+    # --- een Growatt (v0.150.0) ---
+    # Een SPH op het API-token: geen stuurgetal, wel een laadschema met drie vakken,
+    # een vermogen in procent, een accustand om te stoppen en of hij van het net mag
+    # laden. Daarbuiten doet hij zelf nul op de meter. Zijn sensoren komen eens per
+    # vijf minuten uit de cloud, en een tweede schrijfactie binnen een minuut faalt
+    # (de klantwoning, 22-10-2026). Of hij zelf bij de stopgrens stopt is daar niet
+    # zeker: het teruglezen gaf een ander getal dan er stond. Hier standaard niet, zodat
+    # te zien is dat de coach het zelf bewaakt.
+    growatt: bool = False
+    growatt_stopt_zelf: bool = False
+    growatt_vinkje: bool = True
+    schema: dict = field(default_factory=lambda: {
+        "charge_power": 100, "charge_stop_soc": 100, "mains_enabled": False,
+        "periods": [{"period_id": i, "start_time": "00:00", "end_time": "00:00", "enabled": i == 1}
+                    for i in (1, 2, 3)]})
+    schema_op: dt.datetime | None = None
     # --- toestand ---
     modus: str = "self_consumption"
     richting: str = "charge"
@@ -884,7 +902,17 @@ class Batterij:
 
     @property
     def zelf(self) -> bool:
-        return self.eigen_nul and self.modus == "self_consumption"
+        return self.growatt or (self.eigen_nul and self.modus == "self_consumption")
+
+    def schema_laadt(self, nu: dt.datetime) -> bool:
+        """Of het laadschema van een Growatt hem nu van het net laat laden."""
+        if not self.growatt or not self.schema.get("mains_enabled"):
+            return False
+        if self.growatt_stopt_zelf and self.soc >= float(self.schema.get("charge_stop_soc") or 100):
+            return False
+        klok = nu.strftime("%H:%M")
+        return any(p.get("enabled") and p["start_time"] <= klok < p["end_time"]
+                   for p in self.schema.get("periods") or [])
 
     def opdracht(self, watt: float, nu: dt.datetime) -> None:
         # In zijn eigen stand onthoudt hij het getal wel (het staat in het
@@ -910,6 +938,9 @@ class Batterij:
             return
         self.eigen_op = nu
         doel = max(-self.max_ontladen_w, min(self.max_laden_w, -rest_w))
+        if self.schema_laadt(nu):
+            # In een vak van het net: laden op het deel van zijn vermogen, het huis van het net.
+            doel = self.max_laden_w * float(self.schema.get("charge_power") or 0) / 100.0
         laatste = self.wachtrij[-1][1] if self.wachtrij else self.vermogen_w
         if abs(doel - laatste) > 20.0:
             self.wachtrij.append((nu + dt.timedelta(seconds=self.eigen_na_s), doel))
@@ -1293,6 +1324,10 @@ class Verloop:
     # die alles vooraf wist, per kwartier; zie `bat_optimizer`.
     bat_optimizer: float | None = None
     bat_stand: dict = field(default_factory=dict)
+    # Een Growatt (v0.150.0): elke schrijfactie (tijd, mains, vermogen, stop, vakken), en
+    # hoeveel er faalden omdat ze te snel na de vorige kwamen.
+    gw_schrijf: list = field(default_factory=list)
+    gw_gefaald: int = 0
 
     def bat_wissels(self) -> int:
         """Hoe vaak de batterij van richting wisselde of aan- en uitging."""
@@ -1395,6 +1430,10 @@ E = {
     "bat_hoog": "number.v_batterij_laadgrens",
     "bat_laag": "number.v_batterij_ontlaadgrens",
     "bat_in": "sensor.v_batterij_meter_in",
+    "gw_laden": "sensor.v_growatt_accu_laden",
+    "gw_ontladen": "sensor.v_growatt_accu_ontladen",
+    "gw_in": "sensor.v_growatt_accu_geladen_levenslang",
+    "gw_uit": "sensor.v_growatt_accu_ontladen_levenslang",
     "bat_uit": "sensor.v_batterij_meter_uit",
     "alfen_limit": "number.v_paal_limiet",
     "alfen_connected": "sensor.v_paal_auto_aangesloten",
@@ -1556,7 +1595,18 @@ def instellingen(s: Scenario) -> dict:
             "airco": {"power_w": s.airco.vermogen_w, "target_c": s.airco_doel,
                       "run_on": s.airco_aan_op, "paused": False},
         })
-    if s.batterij is not None:
+    if s.batterij is not None and s.batterij.growatt:
+        bat = s.batterij
+        apparaten.append({
+            "id": "batterij", "type": "thuisbatterij", "name": "Thuisbatterij", "brand": "growatt",
+            "controllable": bat.growatt_vinkje, "entity": "",
+            "entities": {"soc": E["bat_soc"], "charge_power": E["gw_laden"], "discharge_power": E["gw_ontladen"],
+                         "accu_in": E["gw_in"], "accu_out": E["gw_uit"]},
+            "battery": {"capacity_kwh": bat.capaciteit_kwh, "max_charge_w": None, "max_discharge_w": None,
+                        "reserve_enabled": bat.reserve is not None, "reserve_percent": bat.reserve or 0,
+                        "grid_charge": bat.net_laden, "grid_charge_below": bat.net_laden_onder},
+        })
+    elif s.batterij is not None:
         bat = s.batterij
         apparaten.append({
             "id": "batterij",
@@ -1712,7 +1762,8 @@ class Wereld:
         self.boiler_w = 0.0
         self.airco = dataclasses.replace(s.airco, wachtrij=[]) if s.airco is not None else None
         self.airco_w = 0.0
-        self.batterij = (dataclasses.replace(s.batterij, wachtrij=[], sensor_verloop=[])
+        self.batterij = (dataclasses.replace(s.batterij, wachtrij=[], sensor_verloop=[],
+                                             schema=copy.deepcopy(s.batterij.schema))
                          if s.batterij is not None else None)
         self.bat_w = 0.0
         self.vw_w = 0.0
@@ -1737,6 +1788,8 @@ class Wereld:
         self.p1_weg_tot: dt.datetime | None = None
         # De laatste melding van een P1 die niet elke stap meldt: (tijd, netto).
         self.meter_melding: tuple[dt.datetime, float] | None = None
+        # Wanneer de Growatt zijn sensoren voor het laatst uit de cloud kreeg.
+        self.gw_gemeld: dt.datetime | None = None
         self.stroom_gemeld: tuple[str, dt.datetime | None] = ("", None)
         self.prijzen_weg_tot: dt.datetime | None = None
         self.oven_tot: dt.datetime | None = None
@@ -1899,7 +1952,18 @@ class Wereld:
         z(E["teruglevering"], weg if p1_weg else w(f"{max(0.0, -gemeld):.0f}", "W"), last_updated=stempel)
         teken = -1 if self.s.net == "signed-omgekeerd" else 1
         z(E["net"], weg if p1_weg else w(f"{teken * gemeld:.0f}", "W"), last_updated=stempel)
-        if self.batterij is not None:
+        if self.batterij is not None and self.batterij.growatt:
+            # Eens per vijf minuten uit de cloud, in kW, zoals `growatt_server`.
+            bat = self.batterij
+            if self.gw_gemeld is None or (nu - self.gw_gemeld).total_seconds() >= 300:
+                self.gw_gemeld = nu
+                stempel_gw = nu.replace(tzinfo=dt.timezone.utc)
+                z(E["bat_soc"], w(f"{bat.soc:.0f}", "%"), last_updated=stempel_gw)
+                z(E["gw_laden"], w(f"{max(0.0, self.bat_w) / 1000:.3f}", "kW"), last_updated=stempel_gw)
+                z(E["gw_ontladen"], w(f"{max(0.0, -self.bat_w) / 1000:.3f}", "kW"), last_updated=stempel_gw)
+                z(E["gw_in"], w(f"{bat.teller_in:.1f}", "kWh"), last_updated=stempel_gw)
+                z(E["gw_uit"], w(f"{bat.teller_uit:.1f}", "kWh"), last_updated=stempel_gw)
+        elif self.batterij is not None:
             bat = self.batterij
             z(E["bat_soc"], w(f"{bat.soc:.0f}", "%"))
             z(E["bat_vermogen"], w(f"{bat.sensor_w(nu):.0f}", "W"))
@@ -2203,7 +2267,14 @@ class Diensten:
         self.verloop = verloop
         self.verstuurd = []
 
-    async def async_call(self, domein, dienst, data, blocking=False):
+    def has_service(self, domein, dienst):
+        bat = self.wereld.batterij
+        return domein == "growatt_server" and bat is not None and bat.growatt and dienst in (
+            "read_ac_charge_times", "write_ac_charge_times", "read_ac_discharge_times", "write_ac_discharge_times")
+
+    async def async_call(self, domein, dienst, data, blocking=False, return_response=False):
+        if domein == "growatt_server":
+            return self._growatt(dienst, data)
         # Home Assistant slaat een dienst aan een onbereikbare entiteit stil
         # over: de stuurknop van een Anker in zijn eigen stand (`knop_weg`).
         if data.get("entity_id") in (E["bat_stuur"], E["bat_richting"]):
@@ -2276,6 +2347,32 @@ class Diensten:
             knop = self.hass.states.get(E["vw_start"])
             if self.wereld.vaatwasser is not None and not (knop is not None and knop.state == "unavailable"):
                 self.wereld.vaatwasser.druk_start(self.wereld.nu)
+
+
+    def _growatt(self, dienst: str, data: dict):
+        """De acties van `growatt_server` voor een SPH, met het schema in de omvormer."""
+        bat = self.wereld.batterij
+        nu = self.wereld.nu
+        self.verstuurd.append(("growatt_server", dienst, dict(data)))
+        if dienst == "read_ac_charge_times":
+            return {**bat.schema, "periods": [dict(p) for p in bat.schema["periods"]]}
+        if dienst != "write_ac_charge_times":
+            return None
+        # Een tweede opdracht binnen een minuut faalt, zoals in de klantwoning op 22-10-2026.
+        if bat.schema_op is not None and (nu - bat.schema_op).total_seconds() < 60:
+            self.verloop.gw_gefaald += 1
+            raise RuntimeError("Growatt API error: Error during writing AC charge time periods")
+        bat.schema_op = nu
+        bat.schema = {
+            "charge_power": int(data["charge_power"]), "charge_stop_soc": int(data["charge_stop_soc"]),
+            "mains_enabled": bool(data["mains_enabled"]),
+            "periods": [{"period_id": i, "start_time": data[f"period_{i}_start"], "end_time": data[f"period_{i}_end"],
+                         "enabled": bool(data[f"period_{i}_enabled"])} for i in (1, 2, 3)],
+        }
+        self.verloop.gw_schrijf.append((nu, bat.schema["mains_enabled"], bat.schema["charge_power"],
+                                        bat.schema["charge_stop_soc"],
+                                        [(p["start_time"], p["end_time"]) for p in bat.schema["periods"] if p["enabled"]]))
+        return None
 
 
 # --- draaien -----------------------------------------------------------------
@@ -2373,6 +2470,12 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
     coach._async_zon_uit_integratie = wereld.zonkromme_via_sensor
     coachmod.async_get_archive = lambda hass: wereld.archief()
     jaarbalans(coach, s)
+    # Het register van Home Assistant: de sensoren van de Growatt hangen aan zijn omvormer.
+    register = types.ModuleType("homeassistant.helpers.entity_registry")
+    register.async_get = lambda _hass: types.SimpleNamespace(
+        async_get=lambda entity_id: types.SimpleNamespace(device_id="v-growatt-omvormer")
+        if entity_id in (E["bat_soc"], E["gw_laden"], E["gw_ontladen"], E["gw_in"], E["gw_uit"]) else None)
+    sys.modules["homeassistant.helpers.entity_registry"] = register
 
     # De klok van Home Assistant is de klok van de wereld.
     dtutil.now = lambda: wereld.nu

@@ -562,7 +562,12 @@ class AccuBediening:
 
     @property
     def available(self) -> bool:
-        return not accu_alleen_lezen(self._device)  # type: ignore[attr-defined]
+        # Een Growatt met een laadschema (v0.150.0) kent vol laden, leegladen en de
+        # vakantiestand (nog) niet; die knoppen blijven daar uit.
+        from .const import BATTERIJ_SCHEMA
+
+        device = self._device  # type: ignore[attr-defined]
+        return not accu_alleen_lezen(device) and device.get("brand") not in BATTERIJ_SCHEMA
 
 
 def accu_capaciteit(hass: HomeAssistant | None, device: dict[str, Any]) -> float | None:
