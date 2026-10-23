@@ -119,8 +119,8 @@ def _lees_tijd(waarde):
     Op iets anders dan een string geeft de echte een TypeError. Dat verschil
     stond hier weggepoetst met `except TypeError: return None`, en daarmee was
     dit harnas vergevingsgezinder dan de werkelijkheid. Een `datetime` in een
-    attribuut kwam er zo ongemerkt doorheen, en juist daarop liep het bij Van
-    den Dam op 29-08-2026 stuk: de hele prijslijst sneuvelde en de coach zei dat
+    attribuut kwam er zo ongemerkt doorheen, en juist daarop liep het in de
+    klantwoning op 29-08-2026 stuk: de hele prijslijst sneuvelde en de coach zei dat
     er geen prijzen binnenkwamen.
     """
     if not isinstance(waarde, str):

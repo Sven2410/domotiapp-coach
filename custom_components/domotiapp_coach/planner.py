@@ -272,6 +272,21 @@ MIN_RUN_MINUTES = 10
 # zekering en onder de lastbewaker komt hij niet uit.
 WAKE_AMPS = 16
 
+# Proefladen bij het inpluggen (v0.153.0). Bij welke besluiten om te wachten de
+# coach eerst even kijkt of de auto stroom aanneemt. Alleen wachten op een
+# prijs, op zon of op de bewoner; nooit bij een auto die vol is, een bewoner die
+# pauzeert of een zekering die vol zit. Een regel die hier niet staat krijgt
+# geen proef, en dat is de veilige kant: dan doet hij wat hij altijd deed.
+#
+# In de klantwoning op 23-10-2026 ging de Ford om 19:30, een halve minuut na
+# het inpluggen, in storing terwijl de coach tot 00:45 wachtte. Om 21:24 kwam
+# er stroom (de bewoner zette Snel aan) en om 21:25 laadde hij. Pas op het
+# goedkope uur hadden de coach en de bewoner het geweten.
+PROEF_REGELS = frozenset({
+    "too-early", "no-soc", "no-prices", "wait-for-prices", "wait-for-price",
+    "wait-for-sun", "fixed-tariff", "zon-wacht",
+})
+
 # Hoe lang een auto de tijd krijgt voordat de kaart zegt dat hij niets afneemt.
 # In seconden en niet in ronden, want een ronde is niet altijd een minuut: een
 # statuswissel van de paal start er ook een. Op ronden geteld stond er drie
@@ -2972,6 +2987,7 @@ def decide(
     asking_seconds: float = 0.0,
     must_finish: bool = False,
     overdue: bool = False,
+    proef: str = "",
 ) -> Decision:
     """What to do with this charging point, and how to say it.
 
@@ -2992,6 +3008,12 @@ def decide(
     over hetzelfde soort geheugen: of de wekpoging van deze sessie nog openstaat,
     en hoe lang de coach al stroom aanbiedt zonder dat de auto iets afneemt.
 
+    `proef` gaat over het proefladen bij het inpluggen (v0.153.0): "laden" als
+    de coach nog moet zien dat de auto stroom aanneemt, "klaar" in de ronde
+    nadat dat gelukt is (dan stopt hij meteen, zonder het vasthouden van een
+    sessie die net begon), en leeg voor al het andere. De coach houdt bij
+    waar een beurt staat; zie `_proef_stand` in coach.py.
+
     Note what is *not* done here. The coach never withdraws its request when it
     is being held back. It keeps asking, because the balancer works on the
     lowest of all the limits and the moment it lets go, the request has to be
@@ -3004,6 +3026,12 @@ def decide(
     )
 
     if not decision.charge:
+        if proef == "laden":
+            proef_besluit = _proefladen(now, prices, grid, car, charger, decision)
+            if proef_besluit is not None:
+                return proef_besluit
+        if proef == "klaar":
+            return decision
         return _keep_alive(now, grid, car, charger, decision, holding, piek=piek_dicht(prices))
 
     if charger.paused_by_balancer:
@@ -3059,6 +3087,41 @@ def decide(
         return _wake(grid, car, charger, decision, waking, asking_seconds)
 
     return decision
+
+
+def _proefladen(
+    now: datetime,
+    prices: list[dict],
+    grid: Grid,
+    car: Car,
+    charger: Charger,
+    decision: Decision,
+) -> Decision | None:
+    """Even laden om te zien of de auto stroom aanneemt, of niets.
+
+    Op het wekaanbod (`WAKE_AMPS`), want een auto die niet wakker wordt van het
+    minimum zou anders als een auto in storing tellen. Begrensd door het
+    plafond, dus nooit boven de zekering, de groep of de lastbewaker. Een paal
+    die door de lastbewaking stilgelegd is krijgt geen proef: daar valt niets
+    aan de auto te zien. In de avondpiek bij een vast contract alleen als de
+    zon het draagt (eis 4); anders blijft de proef staan tot na de piek.
+    """
+    if decision.rule not in PROEF_REGELS or not charger.connected or charger.paused_by_balancer:
+        return None
+    ceiling = ceiling_amps(grid, car, charger)
+    if ceiling < MIN_AMPS:
+        return None
+    if piek_dicht(prices) and in_evening_peak(now) and amps_for(grid.surplus_w, car.phases) < MIN_AMPS:
+        return None
+    return Decision(
+        True,
+        min(ceiling, WAKE_AMPS),
+        t("Even proefladen: de coach kijkt of de auto stroom aanneemt, en wacht daarna weer."),
+        plan=decision.reason,
+        rule=f"{decision.rule}+proef",
+        needs_soc=decision.needs_soc,
+        starts_at=decision.starts_at,
+    )
 
 
 def _wake(

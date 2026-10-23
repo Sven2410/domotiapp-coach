@@ -1209,3 +1209,52 @@ ondergaat zoals die van de wereld, `plek_voor`) volgt de verwachting de zon per 
 (13:00: 5,96 tegen 6,00 kWh), en laadt een Growatt de nacht voor een zonnige dag niets van het net:
 € 0,63 tegen € 2,62 zonder batterij. Proef 51 in test_batterij.py, 193 in test_coach.py.
 
+
+## Proefladen bij het inpluggen, en een auto in storing (v0.153.0)
+
+In de klantwoning op 23-10-2026 ging de kabel om 19:29:13 in de paal, om 19:29:24 eruit en om 19:29:29
+weer erin. Om 19:30:04 zei de Ford-integratie FAULT. De paal stond op "wacht op goedkeuring", de coach op
+0 A met "wacht tot 00:45", en niemand wist het. Om 21:24:19 zette de bewoner Snel aan: limiet 16 A en een
+start. Om 21:24:35 laadde de paal, om 21:25:13 zei de Ford IN_PROGRESS. Op 19-10 ging het inpluggen
+precies zo, maar toen bleef de Ford op PAUSED en laadde hij om 21:45 gewoon. De eigenaar: "alles moet zo
+fail safe mogelijk", en het proefladen per auto instelbaar.
+
+**Proefladen** (`proefladen` in het autoprofiel, standaard aan). Gaat de kabel erin en wil de coach
+wachten (op een prijs, op zon of op de bewoner: `PROEF_REGELS` in planner.py), dan laadt hij eerst even
+op het wekaanbod (`WAKE_AMPS`, binnen het plafond), met een start erbij. Zodra de paal "laadt" zegt is de
+proef geslaagd, en in diezelfde ronde stopt hij weer, zonder het vasthouden van een sessie die net begon
+(`proef="klaar"` in `decide`, `_proef_stand` in coach.py). Een statuswissel van de paal start een ronde,
+dus de proef duurt niet langer dan het aanlopen van de auto. Laadt de auto na `PROEF_DUUR` (tien minuten) niet, dan één ronde 0 A en
+een nieuwe poging; na `PROEF_POGINGEN` (drie) één kritieke melding: "neemt geen stroom aan, trek de
+kabel er even uit en doe hem er weer in". Dat komt binnen het uur na het inpluggen, terwijl de bewoner
+er nog is, en niet pas op het goedkope uur.
+
+Wat er niet bij hoort: een volle auto, een bewoner die pauzeert, een zekering of groep die vol zit, een
+paal die de lastbewaking stillegt, en bij een vast contract de avondpiek (eis 4: dan wacht de proef tot
+20:00, tenzij de zon de ondergrens draagt). Een coach die opstart terwijl de kabel er al in zit doet
+geen proef, anders gaf elke herstart van Home Assistant er een. Een proefronde telt niet mee in het
+gemeten plafond: een auto in storing zette het anders op nul, en dan begon de klaar-tijdregel om 20:01
+alsnog te laden (`_bijhouden`).
+
+**De laadstatus van de auto** (`status_entity`, optioneel). Zegt die iets met fault, error of storing
+(`AUTO_STORING`) terwijl de auto stilstaat, dan opent de coach een nieuwe proef, hooguit eens per
+`HERSTART_WACHT` en `PROEF_POGINGEN` keer per beurt. Een geslaagde keer gaat alleen in de
+geschiedenis. "Unsupported" of onbekend is geen storing; dat zegt de Ford-integratie bij een herstart.
+
+Wat het kost: in het virtuele huis (`ford-storing-inpluggen`) bood de proef 19:30 en 19:31 stroom aan
+(de auto loopt daar een minuut aan), en de beurt kostte € 12,43 tegen € 12,40 zonder proef
+(`ford-storing-inpluggen-zonder-proef`). Daar kwam de auto er op
+het goedkope uur ook uit, net als de Ford: Snel deed om 21:24 wat de coach om 00:45 gedaan had. De proef
+gaat dus over de auto die er met een start niet uit komt (`ford-storing-kabel`: drie pogingen, melding om
+20:04, opnieuw ingestoken om 21:02, op tijd vol) en over weten dat het werkt voordat de bewoner wegloopt.
+
+In het virtuele huis staat het proefladen standaard uit (`Auto.proefladen`): de scenario's van voor
+v0.153.0 meten de planregels, en met de proef aan vielen er 62 van de 2729 controles om, allemaal op een
+minuut laden na het inpluggen (zoals "niets van het net voor acht uur" of "vrijdagnacht 0 A" in de
+klantwoning, waar 19:01 tot 19:03 0,37 kWh van het net kwam bij een dynamisch contract met nog onbekende
+prijzen). Dat is de afweging die de eigenaar maakte: een paar cent tegen weten dat de auto laadt. De
+`ford-storing-*`-scenario's en `vast-avond-proef` zetten hem aan.
+
+Proef 79 in test_planner.py, proef 195 in test_coach.py (ook voor een Alfen: daar is de proef de limiet,
+zonder startcommando), de vier `ford-storing-*`-scenario's in test_virtueel.py. **Nog niet aan een echte
+paal gezien.**

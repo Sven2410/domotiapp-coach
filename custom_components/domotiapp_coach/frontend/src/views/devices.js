@@ -1347,6 +1347,19 @@ class DacViewDevices extends DacEditorElement {
           </div>
           ${wekken}
           <div class="row">
+            <label>${t("Laadstatus (optioneel)")}</label>
+            <dac-entity-picker data-car-status="${index}:${slot}"></dac-entity-picker>
+            <span class="sub">${t("Zegt de auto in Home Assistant of hij laadt of in storing staat, wijs die sensor dan aan. Meldt hij een storing terwijl hij wacht, dan start de coach het laden even om hem eruit te halen.")}</span>
+          </div>
+          <label class="check" for="proef-${index}-${slot}">
+            <input type="checkbox" id="proef-${index}-${slot}" data-car-proef="${index}:${slot}"
+                   ${car.proefladen === false ? "" : "checked"}>
+            <span>
+              <strong>${t("Proefladen bij inpluggen")}</strong>
+              ${t("Wacht de coach op een goedkoper uur, dan laadt hij eerst even om te zien of de auto stroom aanneemt. Lukt dat niet, dan probeert hij het opnieuw en meldt hij het als het niet lukt. Kost een paar cent.")}
+            </span>
+          </label>
+          <div class="row">
             <label>${t("Laadt op")}</label>
             <div class="segmented three">
               ${CAR_PHASES.map(inTaal).map(
@@ -1544,6 +1557,26 @@ class DacViewDevices extends DacEditorElement {
       });
     }
 
+    for (const picker of list.querySelectorAll("[data-car-status]")) {
+      const [index, slot] = picker.dataset.carStatus.split(":").map(Number);
+      picker.filter = "all";
+      picker.placeholder = t("Zoek de laadstatus…");
+      picker.stateFeed = this.feed_;
+      picker.value = this.draft_.devices[index].cars[slot].status_entity ?? "";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        this.draft_.devices[index].cars[slot].status_entity = ev.detail.value;
+        this.syncSaveBar_();
+      });
+    }
+
+    for (const box of list.querySelectorAll("[data-car-proef]")) {
+      const [index, slot] = box.dataset.carProef.split(":").map(Number);
+      box.addEventListener("change", () => {
+        this.draft_.devices[index].cars[slot].proefladen = box.checked;
+        this.syncSaveBar_();
+      });
+    }
+
     for (const picker of list.querySelectorAll("[data-car-wake]")) {
       const [index, slot] = picker.dataset.carWake.split(":").map(Number);
       picker.filter = "all";
@@ -1581,6 +1614,8 @@ class DacViewDevices extends DacEditorElement {
           brand: "",
           wake_entity: "",
           wake_mode: "manual",
+          status_entity: "",
+          proefladen: true,
         });
         this.paintDevices_();
         this.syncSaveBar_();

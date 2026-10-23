@@ -3696,6 +3696,51 @@ controle("en het programma start dan om 01:00, zoals voorheen", p78n.starts_at =
 controle("een vast contract heeft dan wel een uur van 02:00, zoals voorheen",
          any(b["start"].hour == 2 for b in planner._vlakke_blokken(dt.datetime(2027, 3, 27, 22, 10), klaar78, VAST)), "")
 
+print("=== 79. proefladen bij het inpluggen (v0.153.0) ===")
+# De klantwoning op 23-10-2026: de Ford ging om 19:30, een halve minuut na het
+# inpluggen, in storing terwijl de coach tot 00:45 wachtte. Met een proef laadt hij
+# eerst even op het wekaanbod, binnen het plafond, en wacht daarna gewoon.
+avond79 = dt.datetime(2026, 10, 23, 19, 30)
+dag79 = avond79.replace(hour=0)
+prijzen79 = [{"start": dag79 + dt.timedelta(hours=u), "end": dag79 + dt.timedelta(hours=u + 1),
+              "price": 0.40 if u < 24 else 0.15} for u in range(36)]
+for rij in prijzen79:
+    if rij["start"].hour < 7 and rij["start"].day == 24:
+        rij["price"] = 0.15
+auto79 = Car(capacity_kwh=70.0, phases=3, soc_percent=38.0, max_amps=16.0)
+paal79 = Charger(connected=True, max_amps=16)
+venster79 = Window(enabled=True, deadline=dt.datetime(2026, 10, 24, 7, 0))
+gewoon79 = decide(avond79, prijzen79, Grid(), auto79, paal79, venster79)
+proef79 = decide(avond79, prijzen79, Grid(), auto79, paal79, venster79, proef="laden")
+print(f"  zonder proef: {gewoon79.rule} {gewoon79.amps} A; met: {proef79.rule} {proef79.amps} A")
+controle("zonder proef wacht hij op de nacht", not gewoon79.charge and gewoon79.rule == "wait-for-price", gewoon79.rule)
+controle("met proef laadt hij even, op het wekaanbod",
+         proef79.charge and proef79.rule == "wait-for-price+proef" and proef79.amps == 16, f"{proef79}")
+controle("de reden van het wachten staat eronder", proef79.plan == gewoon79.reason, proef79.plan)
+krap79 = decide(avond79, prijzen79, Grid(), auto79, Charger(connected=True, max_amps=10), venster79, proef="laden")
+controle("nooit boven het plafond van de paal", krap79.charge and krap79.amps == 10, f"{krap79.amps}")
+vol79 = decide(avond79, prijzen79, Grid(), Car(capacity_kwh=70.0, phases=3, soc_percent=100.0), paal79,
+               venster79, proef="laden")
+controle("een volle auto krijgt geen proef", not vol79.charge, vol79.rule)
+pauze79 = decide(avond79, prijzen79, Grid(), auto79, Charger(connected=True, max_amps=16, paused_by_user=True),
+                 venster79, proef="laden")
+controle("een bewoner die pauzeert krijgt geen proef", not pauze79.charge, pauze79.rule)
+bewaker79 = decide(avond79, prijzen79, Grid(), auto79, Charger(connected=True, max_amps=16, paused_by_balancer=True),
+                   venster79, proef="laden")
+controle("een paal die de lastbewaking stillegt krijgt geen proef", not bewaker79.rule.endswith("+proef"), bewaker79.rule)
+# Eis 4: bij een vast contract komt er in de avondpiek niets van het net, ook geen proef.
+piek79 = decide(avond79.replace(hour=18, minute=30), [], Grid(), auto79, paal79, venster79, VAST, proef="laden")
+controle("vast contract, 18:30 zonder zon: de proef wacht", not piek79.charge, piek79.rule)
+na79 = decide(avond79.replace(hour=20, minute=5), [], Grid(), auto79, paal79, venster79, VAST, proef="laden")
+controle("na de piek laadt hij wel (hier gewoon volgens plan)", na79.charge, na79.rule)
+# Gelukt: de ronde erna stopt hij meteen, en niet pas na het vasthouden van een sessie die net begon.
+loopt79 = Charger(connected=True, charging=True, max_amps=16, actual_amps=15.0,
+                  started_at=avond79 - dt.timedelta(minutes=1))
+vast79 = decide(avond79, prijzen79, Grid(), auto79, loopt79, venster79)
+klaar79 = decide(avond79, prijzen79, Grid(), auto79, loopt79, venster79, proef="klaar")
+controle("zonder 'klaar' houdt hij een sessie die net begon vast", vast79.charge and vast79.rule.endswith("+hold"), vast79.rule)
+controle("na een geslaagde proef stopt hij meteen", not klaar79.charge and klaar79.rule == "wait-for-price", klaar79.rule)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

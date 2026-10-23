@@ -185,6 +185,10 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    remronden vanaf de accustand waar hij begon te remmen, niet het laagste
    punt voor de hele band (`docs/laadpaal.md`). En is de klaar-tijd voorbij terwijl de
    auto niet vol is, dan laadt hij op vol vermogen door (`overdue`).
+   Sinds v0.153.0 laadt hij bij het inpluggen even proef als hij wil wachten
+   (`proefladen` in het autoprofiel, standaard aan): neemt de auto niets, dan
+   probeert hij het opnieuw en meldt hij het binnen het uur, en een laadstatus
+   met een storing (`status_entity`) geeft een nieuwe proef (`docs/laadpaal.md`).
 
 ## Waar de rest staat
 
@@ -199,7 +203,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 
 | werk je aan | lees eerst |
 |---|---|
-| de laadpaal: de zonverwachting per voorspeller (Forecast.Solar telt op het eind van het uur), de zon zonder paneelgegevens (eigen opwek en het weer, zon.py), een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla, de laadbeurt en de actieradius op de kaart | `docs/laadpaal.md` |
+| de laadpaal: proefladen bij het inpluggen en een auto in storing, de zonverwachting per voorspeller (Forecast.Solar telt op het eind van het uur), de zon zonder paneelgegevens (eigen opwek en het weer, zon.py), een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla, de laadbeurt en de actieradius op de kaart | `docs/laadpaal.md` |
 | een Alfen, of iets aan de paalsturing | `docs/alfen.md` |
 | onderverdeelkasten en groepen met een eigen zekering | `docs/groepen.md` |
 | de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, hoe de coach prijslijsten leest, de temperatuur met de melding en de ventilator, en Growatt (uitlezen, en sinds v0.150.0 sturen met een laadschema) | `docs/batterij.md` |
@@ -353,10 +357,10 @@ zon is daarmee uit Strategie verdwenen: zon wint vanzelf zodra hij goedkoper is.
 ## Proeven draaien
 
 ```
-python tests/test_planner.py     # 548 controles op het denkwerk
+python tests/test_planner.py     # 559 controles op het denkwerk
 python tests/test_batterij.py    # 280 op het denkwerk van de thuisbatterij en op de regelaar
-python tests/test_coach.py       # 1430 op de bedrading, met een nagebouwde HA
-python tests/test_virtueel.py    # 2677 op hele laadbeurten in het virtuele huis
+python tests/test_coach.py       # 1445 op de bedrading, met een nagebouwde HA
+python tests/test_virtueel.py    # 2743 op hele laadbeurten in het virtuele huis
 python tests/test_archive.py     # 48 op de kwartieropslag
 python tests/test_prijsopbouw.py # 59 op de prijsopbouw, de controle, zonsopkomst en Portugal
 node   tests/test_rapport.mjs    # 244 op het rapport en op het paneel

@@ -521,6 +521,37 @@ ford_storing_traag = ford_storing.kopie(
     # coach om 00:55:19, de Ford laadde om 01:22:01 weer en was om 06:48 vol.
     auto=replace(GROTE, soc=60.0, storing_bij_herstart=True, storing_herstel_min=27),
 )
+# De klantwoning op 23-10-2026 (v0.153.0): de Ford ging bij het inpluggen om
+# 19:29 in storing terwijl de coach tot 00:45 wachtte. Om 21:24 kwam er stroom
+# met een start (de bewoner zette Snel aan) en binnen een minuut laadde hij.
+FORD_INPLUG = replace(GROTE, soc=38.0, storing_bij_inpluggen=True, storing_herstel_min=1, proefladen=True)
+ford_inpluggen = dyn_geen_zon.kopie(
+    naam="ford-storing-inpluggen",
+    uitleg="dynamisch, auto op 38% om 19:30 erin en meteen in storing; het proefladen haalt hem eruit en daarna wacht hij op de nacht",
+    auto=FORD_INPLUG, begin="2026-09-07 19:25", kabel_erin="19:30", klaar_om="07:00", duur_uren=13,
+)
+ford_inpluggen_zonder = ford_inpluggen.kopie(
+    naam="ford-storing-inpluggen-zonder-proef",
+    uitleg="hetzelfde met proefladen uit: pas de start op het goedkope uur haalt hem eruit",
+    auto=replace(FORD_INPLUG, proefladen=False),
+)
+# Vast contract, kabel om 18:30 erin: de proef wacht tot na de avondpiek (eis 4).
+vast_avond_proef = vast_avond.kopie(
+    naam="vast-avond-proef", uitleg="vast contract, kabel om 18:30 erin, proefladen aan: de proef komt pas om 20:00",
+    auto=replace(vast_avond.auto, proefladen=True),
+)
+ford_inpluggen_kabel = ford_inpluggen.kopie(
+    naam="ford-storing-kabel",
+    uitleg="de auto komt met een start niet uit zijn storing, alleen met de kabel: drie pogingen en een melding binnen het uur, de bewoner steekt hem om 21:00 opnieuw in",
+    auto=replace(FORD_INPLUG, storing_alleen_kabel=True),
+    gebeurtenissen=[("21:00", "kabel_uit", None), ("21:02", "kabel_in", None)],
+)
+ford_storing_wachtend = ford_inpluggen.kopie(
+    naam="ford-storing-wachtend",
+    uitleg="de auto meldt zijn laadstatus; de proef bij het inpluggen lukt, om 22:00 gaat hij wachtend in storing en de coach haalt hem eruit",
+    auto=replace(GROTE, soc=38.0, storing_herstel_min=1, meldt_status=True, proefladen=True),
+    gebeurtenissen=[("22:00", "storing_wachtend", None)],
+)
 een_fase_groep = dyn_zonnig.kopie(
     naam="easee-een-fase-groep", uitleg="de Easee kiest bij de start één fase, de auto trekt 0,9 A boven de limiet, de groep is 16 A en de coach ziet die",
     auto=replace(GROTE, soc=60.0, overschot_amps=0.9, storing_bij_herstart=True),
@@ -1592,7 +1623,8 @@ ALLE = [
     p1_weg, p1_lang_weg, paal_traag,
     tien_uur, tien_uur_zon, tien_uur_valt_tegen, tien_uur_vast, equalizer, prijzen_weg,
     weekend, weekend_geen_zon, weekend_voorspelling_mis,
-    ford_storing, ford_storing_traag, een_fase_groep, een_fase_blind, afbouw, afbouw_geleerd,
+    ford_storing, ford_storing_traag, ford_inpluggen, ford_inpluggen_zonder, ford_inpluggen_kabel,
+    ford_storing_wachtend, vast_avond_proef, een_fase_groep, een_fase_blind, afbouw, afbouw_geleerd,
     afbouw_krap, afbouw_krap_geleerd, afbouw_bovenin, afbouw_bovenin_oud, fasekeuze, zon_belofte, zon_belofte_dyn,
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,

@@ -120,6 +120,13 @@ _CAR = _schema(
         # "hourly": elk uur wekken als hij stilstaat en niets meldt. "manual":
         # alleen op de knop op de kaart, het zuinigst voor de accu.
         vol.Optional("wake_mode", default="manual"): vol.In(["manual", "hourly"]),
+        # De laadstatus volgens de auto zelf (v0.153.0). Zegt die een storing
+        # terwijl de auto wacht, dan haalt de coach hem eruit met een proef;
+        # zie `_auto_storing` in coach.py.
+        vol.Optional("status_entity", default=""): _ENTITY,
+        # Bij het inpluggen eerst even laden om te zien of de auto stroom
+        # aanneemt (v0.153.0). De eigenaar op 23-10-2026: per auto in te stellen.
+        vol.Optional("proefladen", default=True): bool,
     }
 )
 
