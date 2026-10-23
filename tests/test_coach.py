@@ -11000,15 +11000,17 @@ print(f"  21:30 schaduw: {st192.get("mode")} {st192.get("rule")} {st192.get("rea
 controle("hij herkent een SPH: hij vraagt het schema op, op het apparaat van de accustand",
          any(d[1] == "read_ac_charge_times" and d[2] == {"device_id": "ha-growatt-omvormer"} for d in v192), f"{v192}")
 # Aan het eind van vazio (v0.152.0): ruim 11 kWh op hooguit de helft van 7,8 kW is drie uur.
-controle("zonder het vinkje rekent hij wel: laden van het net aan het eind van vazio, 05:00 tot 08:00",
+# Om 21:30 kent hij de vloer nog niet (0%) en houdt hij wat er na 22:00 in zit vast tot 08:00
+# (v0.155.0); een minuut later ziet hij de vloer op 16% en is er niets meer vast te houden.
+controle("zonder het vinkje rekent hij wel: een vak in vazio tot 08:00",
          (st192.get("schedule") or {}).get("grid") is True
-         and st192["schedule"]["periods"] == [["05:00", "08:00"]], f"{st192.get('schedule')}")
+         and st192["schedule"]["periods"][-1][1] == "08:00", f"{st192.get('schedule')}")
 controle("maar schrijft niets", geschreven192(v192) == [] and st192.get("applied") is False, f"{v192}")
 schaduw192 = [d.get("message") for soort, d in hass192.bus.gebeurtenissen
               if soort == coachmod.EVENT_NOTIFICATION and "zou dit schrijven" in str(d.get("message"))]
 print(f"  {schaduw192}")
 controle("en zegt in de geschiedenis wat hij zou schrijven, met de vakken",
-         len(schaduw192) == 1 and "05:00-08:00" in schaduw192[0], f"{schaduw192}")
+         len(schaduw192) == 1 and "-08:00" in schaduw192[0], f"{schaduw192}")
 st192, v192 = asyncio.run(ronde192(NU192 + dt.timedelta(minutes=1)))
 controle("een minuut later vraagt hij het schema niet opnieuw op", v192 == [], f"{v192}")
 

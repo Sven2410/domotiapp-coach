@@ -921,11 +921,15 @@ class Batterij:
     def zelf(self) -> bool:
         return self.growatt or (self.eigen_nul and self.modus == "self_consumption")
 
-    def schema_laadt(self, nu: dt.datetime) -> bool:
-        """Of het laadschema van een Growatt hem nu van het net laat laden."""
+    def schema_vak(self, nu: dt.datetime) -> bool:
+        """Of een Growatt nu in een vak van zijn laadschema zit, met laden van het net aan.
+
+        In zo'n vak ontlaadt hij niet: het huis haalt van het net. Hij laadt op het deel van
+        zijn vermogen, en stopt hij zelf op de stopgrens (`growatt_stopt_zelf`), dan staat hij
+        daar stil tot het vak om is (v0.155.0, vasthouden). Tot v0.155.0 deed hij op de
+        stopgrens hier weer nul op de meter, alsof het vak er niet was.
+        """
         if not self.growatt or not self.schema.get("mains_enabled"):
-            return False
-        if self.growatt_stopt_zelf and self.soc >= float(self.schema.get("charge_stop_soc") or 100):
             return False
         klok = nu.strftime("%H:%M")
         return any(p.get("enabled") and p["start_time"] <= klok < p["end_time"]
@@ -955,9 +959,10 @@ class Batterij:
             return
         self.eigen_op = nu
         doel = max(-self.max_ontladen_w, min(self.max_laden_w, -rest_w))
-        if self.schema_laadt(nu):
+        if self.schema_vak(nu):
             # In een vak van het net: laden op het deel van zijn vermogen, het huis van het net.
-            doel = self.max_laden_w * float(self.schema.get("charge_power") or 0) / 100.0
+            vol = self.growatt_stopt_zelf and self.soc >= float(self.schema.get("charge_stop_soc") or 100)
+            doel = 0.0 if vol else self.max_laden_w * float(self.schema.get("charge_power") or 0) / 100.0
         laatste = self.wachtrij[-1][1] if self.wachtrij else self.vermogen_w
         if abs(doel - laatste) > 20.0:
             self.wachtrij.append((nu + dt.timedelta(seconds=self.eigen_na_s), doel))

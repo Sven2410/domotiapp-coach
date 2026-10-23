@@ -1593,6 +1593,40 @@ stuk zit. Een vak over middernacht wordt er twee (23:00-23:59 en 00:00-09:00), w
 vak loopt van een kloktijd naar een latere. Een vak reikt hooguit een etmaal vooruit, behalve als nu
 even goedkoop is; het begin staat op het kwartier.
 
+**Vasthouden** (v0.155.0). De eigenaar op 23-10-2026: "kunnen we de accu net als anker ook op hold
+zetten? Dus pas als het dure uur in gaat dan pas ontladen?", en over bi-horário: "Bij [de klantwoning] moet de
+accu vanwege de 2 prijzen weer op nul op de meter op de dure prijs". Een Growatt heeft geen stand om
+stil te staan, maar in een vak van zijn laadschema ontlaadt hij niet; met de stopgrens op de accustand
+staat hij daar stil en haalt het huis van het net. Dus:
+
+* de som mag bij een Growatt (`kan_vasthouden`, gezet in `_growatt_batterij`) stilstaan als het huis
+  vraagt (`_zelf_toegestaan`), maar alleen in een blok waarna nog een duurder blok komt
+  (`_duurder_later`). Zonder die regel koos de som bij gelijke kosten stilstaan ook op de dure prijs,
+  omdat morgen even duur was, en hield hij in het virtuele huis de hele dure dag vast (€ 1,93 tegen
+  € 1,82). Bij twee prijzen is dat precies vazio; bij een dynamisch contract kiest de som per uur, en
+  kiest hij niet voor vasthouden als het goedkoper is nu te gebruiken en straks bij te laden;
+* `Uur.vast` zegt welke blokken dat zijn: het huis vraagt, er zit iets in, en hij geeft niets. Stilstaan
+  omdat het huis niets vraagt of omdat hij leeg is, is iets anders;
+* `growatt_schema` begint het vak waar het vasthouden begint, met `houden`, de stopgrens op wat er dan
+  in zit (niet de stand van nu: een vak dat om 18:00 geschreven wordt begint om 22:00) en 1% vermogen.
+  Moet er later bij, dan wordt het op het late moment een schema om te laden in hetzelfde vak; van
+  `houden` naar laden is altijd een nieuw schema (`wijkt_af`), terug niet als de oude stopgrens niet
+  hoger ligt (na vol laden tot 100% staat hij al stil);
+* vanaf `GROWATT_HOUDEN_KWH` (0,5 kWh) boven de vloer, want minder is een schrijfopdracht niet waard;
+* `growatt_vol` zet een vasthoudschema niet uit, en na een laadschema op de stopgrens houdt de coach
+  hem vast als het plan dat wil, in plaats van het schema uit te zetten;
+* het besluit heet dan "vasthouden" (`STANDBY`, regel `vasthouden`);
+* komt het laden in het plan vóór het vasthouden (een beetje bij, dan vast), dan eerst een schema om te
+  laden; op de stopgrens houdt de coach hem daarna vast;
+* een vak dat later begint mag op de klok nu niet al lopen, want een vak herhaalt zich elke dag. In het
+  virtuele huis schreef hij om 05:50 het vasthouden van morgen vanaf 05:15, en hield hij hem meteen vast.
+
+Alleen voor een Growatt: elke andere batterij die zelf nul doet rekent als voorheen (proef 53 in
+test_batterij.py). In het virtuele huis (`growatt-vasthouden`, de batterij om 21:30 op 50%): in vazio
+0,0 kWh uit de batterij tegen 2,3 kWh, € 1,75 tegen € 1,82. Het virtuele huis staat in een vak op de
+stopgrens nu stil (`schema_vak` in virtueel.py), en niet meer op nul op de meter. In het echt nog niet
+gezien: dat de SPH op de stopgrens in zijn vak echt stilstaat.
+
 **Schrijven** (`_async_growatt`). Eén schema per goedkoop stuk:
 
 * over het volgende stuk beslist hij pas `GROWATT_VOORAF` (30 minuten) voordat het begint

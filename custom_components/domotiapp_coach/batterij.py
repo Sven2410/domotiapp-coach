@@ -215,6 +215,10 @@ class Batterij:
     # Stilstaan, alleen zon opslaan en alleen ontladen zijn er dan niet; zie
     # `_zelf_toegestaan`.
     zelf_nul: bool = False
+    # Of hij met `zelf_nul` toch kan vasthouden: een Growatt in een vak van zijn laadschema
+    # met de stopgrens op de accustand ontlaadt niet (v0.155.0). De som mag dan stilstaan
+    # als het huis stroom vraagt; zie `_zelf_toegestaan` en `growatt_schema`.
+    kan_vasthouden: bool = False
     # Of de coach hem nu zelf in de externe stand heeft. Zonder `zelf_nul`
     # altijd zodra hij stuurt; met alleen als hij hem overnam. Voor een kleine
     # laadbeurt neemt hij hem niet over; zie `_rustig_vermogen`.
@@ -314,6 +318,9 @@ class Uur:
     # Wat daarvan naar de auto gaat, in kWh aan de wisselstroomkant, positief
     # (v0.95.0). Zit al in `kwh`. Zie `auto_hulp`.
     auto_kwh: float = 0.0
+    # Of de som hem hier vasthoudt (v0.155.0): het huis vraagt, er zit iets in, en toch geeft
+    # hij niets. Stilstaan omdat het huis niets vraagt of omdat hij leeg is, is iets anders.
+    vast: bool = False
 
 
 @dataclass
@@ -426,6 +433,24 @@ class _Som:
     # Per blok de inhoud waaronder hij aan het eind niet aan het net levert, met
     # de nachtstrategie aan (v0.133.1); None zonder. Zie `_nacht_vloer`.
     vloer: list[float] | None = None
+    # Per blok of er daarna nog een duurder blok komt (v0.155.0): alleen dan kan
+    # vasthouden lonen. Zie `_duurder_later`.
+    duurder: list[bool] | None = None
+
+
+def _duurder_later(blokken: list[dict]) -> list[bool]:
+    """Per blok of er later een blok komt dat meer kost dan dit, boven de marge.
+
+    Vasthouden mag alleen in zo'n blok (v0.155.0). Bij gelijke kosten kiest de som het
+    kleinste gebaar, en dat is stilstaan: in het virtuele huis (`growatt-vasthouden`) hield
+    hij de batterij zo de hele dure dag vast, omdat morgen even duur was, terwijl het huis
+    van het net haalde. Dat kostte € 1,93 tegen € 1,82 zonder vasthouden.
+    """
+    uit, hoogste = [], float("-inf")
+    for rij in reversed(blokken):
+        uit.append(hoogste > rij["price"] + PRICE_MARGIN)
+        hoogste = max(hoogste, rij["price"])
+    return list(reversed(uit))
 
 
 def _mag_netladen(b: Batterij, rij: dict) -> bool:
@@ -523,6 +548,7 @@ def _mogelijk(
 def _zelf_toegestaan(
     kandidaten: set[float], e: float, deel: float, huis: float, b: Batterij,
     som_laag: float, hoog: float, stap: float = 0.0, handelen: bool | None = None,
+    vasthouden: bool = False,
 ) -> set[float]:
     """Wat er van de kandidaten overblijft als de batterij zelf nul op de meter doet.
 
@@ -559,6 +585,10 @@ def _zelf_toegestaan(
     else:
         nul = e
     uit = {nul}
+    # Vasthouden (v0.155.0): de eigenaar op 23-10-2026, "pas als het dure uur in gaat dan pas
+    # ontladen". Alleen als het huis vraagt; bij zon over is stilstaan zon weggeven.
+    if b.kan_vasthouden and vasthouden and huis > 0:
+        uit.add(e)
     boven, onder = max(e, nul), min(e, nul)
     # Wat het blok in tijd en vermogen toelaat, zonder de grenzen van de accustand.
     op_blok = e + _cel_in(b, b.max_charge_w / 1000.0 * deel, deel)
@@ -637,6 +667,7 @@ def _waarde_vooruit(
         huis.append(_netto_huis_kwh(forecast, rij, deel))
 
     vloer = _nacht_vloer(blokken, forecast, b, bodem)
+    duurder = _duurder_later(blokken)
 
     eind_prijs = _gemiddeld_bekend(blokken) or 0.0
     # Wat er aan het eind nog in zit, min de slijtage die het ontladen ervan kost.
@@ -664,7 +695,7 @@ def _waarde_vooruit(
                 kandidaten.add(rooster[i])
             kandidaten = _zelf_toegestaan(
                 kandidaten, e, deel, h, b, bodem, hoog, 0.0 if k == 0 and _loopt_al(b, rij) else stap,
-                handelen=_mag_handelen(b, rij),
+                handelen=_mag_handelen(b, rij), vasthouden=duurder[k],
             )
             begin.append(
                 min(
@@ -674,7 +705,7 @@ def _waarde_vooruit(
             )
         volgende = begin
 
-    return _Som(blokken, delen, huis, na, laag, hoog, stap, piek, vloer)
+    return _Som(blokken, delen, huis, na, laag, hoog, stap, piek, vloer, duurder)
 
 
 def _beste_stap(som: _Som, k: int, e: float, b: Batterij) -> float:
@@ -694,7 +725,7 @@ def _beste_stap(som: _Som, k: int, e: float, b: Batterij) -> float:
         i += 1
     kandidaten = _zelf_toegestaan(
         kandidaten, e, deel, h, b, bodem, som.hoog, 0.0 if k == 0 and _loopt_al(b, rij) else som.stap,
-        handelen=_mag_handelen(b, rij),
+        handelen=_mag_handelen(b, rij), vasthouden=bool(som.duurder and som.duurder[k]),
     )
     # Bij gelijke kosten wint niets doen, en daarna het kleinste gebaar: een
     # batterij die zonder reden beweegt slijt voor niets.
@@ -734,15 +765,20 @@ def _vooruit(som: _Som, b: Batterij) -> list[Uur]:
         ac = _ac(b, e, naar, som.delen[k])
         h = som.huis[k]
         net = max(0.0, ac - max(0.0, -h)) if ac > 0 else min(0.0, ac + max(0.0, h))
+        stand = _stand_van(ac, h)
         uit.append(
             Uur(
                 max(rij["start"], echt_verder(rij["end"], -timedelta(hours=som.delen[k])), key=_echt),
                 rij["end"],
-                _stand_van(ac, h),
+                stand,
                 ac,
                 net,
                 naar / (b.capacity_kwh or 1.0) * 100.0,
                 rij["price"],
+                # Alleen in een goedkoper blok dan wat er nog komt: op de dure prijs doet hij
+                # gewoon nul op de meter (de eigenaar op 23-10-2026, over bi-horário).
+                vast=b.kan_vasthouden and stand == STANDBY and h > 0.005 and bool(som.duurder and som.duurder[k])
+                and e > b.bodem / 100.0 * (b.capacity_kwh or 0.0) + 0.01,
             )
         )
         e = naar
@@ -1254,6 +1290,19 @@ def plan_batterij(
     huis_eta = nu_kw > 0 and nu_kw / _cel_uit(b, nu_kw, 1.0) or eta_uit(b)
     mag_zon = not vol and (terug is None or terug <= erbij * zon_eta + PRICE_MARGIN)
     mag_huis = not leeg and koop * huis_eta >= eraf - PRICE_MARGIN
+
+    if b.kan_vasthouden and uren and uren[0].vast and not leeg:
+        # Een Growatt die het plan nu vasthoudt (v0.155.0): wat erin zit is straks meer waard. Voor
+        # het laden, want dat komt later in het vak, en de bewoner leest wat hij nu doet.
+        return Besluit(
+            STANDBY,
+            reason=t(
+                "Hij houdt de batterij vast: wat erin zit is straks meer waard dan nu. Het huis haalt zolang "
+                "van het net, tegen {prijs}.",
+                prijs=_euro(koop),
+            ),
+            plan=kijk, rule="vasthouden", waarde=eraf, uren=uren, auto_weg=auto_weg,
+        )
 
     # Van het net laden en handelen: die volgen het plan zelf. Zie
     # `_rustig_vermogen`.
@@ -2351,6 +2400,10 @@ GROWATT_MIN_VERMOGEN = 6
 # een keer niet aankomt, en een accu die trager laadt dan gedacht.
 GROWATT_LAAT_MIN = timedelta(hours=2)
 GROWATT_LAAT_DEEL = 0.5
+# Vasthouden (v0.155.0) pas vanaf zoveel kWh boven de vloer. Bij bi-horário in de klantwoning
+# (0,166 tegen 0,272) is een halve kWh vasthouden ruim vijf cent waard; minder is een extra
+# schrijfopdracht naar de cloud van Growatt niet waard.
+GROWATT_HOUDEN_KWH = 0.5
 
 
 @dataclass
@@ -2368,6 +2421,9 @@ class GrowattSchema:
     tot: datetime | None = None
     # Hoeveel er volgens het plan van het net in gaat, in kWh, voor de reden.
     kwh: float = 0.0
+    # Vasthouden (v0.155.0): een vak met de stopgrens op de accustand, zodat hij niet laadt en
+    # niet ontlaadt. Moet er later bij, dan wordt het een schema om te laden.
+    houden: bool = False
 
     def velden(self) -> dict:
         """Wat er naar `growatt_server.write_ac_charge_times` gaat, zonder het apparaat."""
@@ -2423,6 +2479,15 @@ class GrowattSchema:
             return True
         if not self.net:
             return False
+        if self.houden != ander.houden:
+            # Een schema om te laden met een stopgrens op of onder het vasthouden doet al
+            # hetzelfde: hij staat in zijn vak stil. Zoals na vol laden tot 100%.
+            if self.houden and ander.stop_soc <= self.stop_soc and all(
+                any(eind == oud_eind and oud_begin <= begin for oud_begin, oud_eind in ander.vakken)
+                for begin, eind in self.vakken
+            ):
+                return False
+            return True
         # Een vak dat al loopt valt na elk blok een stukje korter uit het plan; zolang het
         # oude vak het nieuwe dekt en op dezelfde tijd eindigt, staat het goed.
         dekt = all(
@@ -2486,31 +2551,60 @@ def growatt_schema(
     # is: dan laadt het schema nu ook niet duurder. Anders afkappen. Zonder dat schoof het
     # eind elk blok een stukje op en schreef de coach elk kwartier een nieuw schema.
     rand = now + timedelta(hours=24)
-    vakken: list[tuple[datetime, datetime, float, float]] = []
+
+    def laadt(u: Uur) -> bool:
+        return u.net_kwh >= GROWATT_MIN_KWH and u.kwh > 0 and u.start < rand
+
+    def houdt(u: Uur) -> bool:
+        # Vasthouden (v0.155.0): stil terwijl het huis vraagt, en er zit iets in om vast te houden.
+        # Minstens `GROWATT_HOUDEN_KWH` boven de vloer: voor minder is een opdracht de moeite niet.
+        boven = (u.soc - b.soc_min) / 100.0 * (b.capacity_kwh or 0.0)
+        return u.vast and boven >= GROWATT_HOUDEN_KWH and u.start < rand
+
+    gekozen = None
     for stuk in stukken:
-        net = [u for u in stuk if u.net_kwh >= GROWATT_MIN_KWH and u.kwh > 0 and u.start < rand]
-        if net and stuk[0].start < now + GROWATT_VOORUIT:
+        if stuk[0].start < now + GROWATT_VOORUIT and any(laadt(u) or houdt(u) for u in stuk):
             eind = stuk[-1].end
             if eind > rand and not (rij and rij[0].price <= stuk[0].price + PRICE_MARGIN):
                 eind = max((u.end for u in stuk if u.end <= rand), default=stuk[0].end)
-            vakken.append((stuk[0].start, eind, sum(u.kwh for u in net), net[-1].soc))
+            gekozen = (stuk, eind)
             break
-    if not vakken:
+    if gekozen is None:
         return GrowattSchema()
+    stuk, eind = gekozen
+    net = [u for u in stuk if laadt(u)]
+    vast = [u for u in stuk if houdt(u)]
     # Wat de nachten hiervoor leerden (`growatt_bijstelling`): meer of minder dan het plan.
-    begin, eind, kwh, soc_eind = vakken[0]
-    kwh_plan = kwh
-    kwh = kwh + bijstel_kwh
-    if kwh < GROWATT_MIN_KWH:
+    kwh = kwh_plan = sum(u.kwh for u in net)
+    if net:
+        kwh = kwh + bijstel_kwh
+    laden = bool(net) and kwh >= GROWATT_MIN_KWH
+    if not laden and not vast:
         return GrowattSchema()
-    soc_eind = soc_eind + (kwh - kwh_plan) / b.capacity_kwh * 100.0
-    # Aan het eind van het stuk, in echte uren: de nacht van de wintertijd duurt er een langer.
-    duur = max(GROWATT_LAAT_MIN, timedelta(hours=kwh / (b.max_charge_w * GROWATT_LAAT_DEEL / 1000.0)))
-    duur = timedelta(minutes=-(-duur.total_seconds() // 900) * 15)
-    laat = echt_verder(eind, -duur)
-    if loopt and _echt(now) < _echt(laat):
-        laat = now
-    begin = max(begin, laat, key=_echt)
+    laat = eind
+    if laden:
+        soc_eind = net[-1].soc + (kwh - kwh_plan) / b.capacity_kwh * 100.0
+        # Aan het eind van het stuk, in echte uren: de nacht van de wintertijd duurt er een langer.
+        duur = max(GROWATT_LAAT_MIN, timedelta(hours=kwh / (b.max_charge_w * GROWATT_LAAT_DEEL / 1000.0)))
+        duur = timedelta(minutes=-(-duur.total_seconds() // 900) * 15)
+        laat = max(stuk[0].start, echt_verder(eind, -duur), key=_echt)
+        if loopt and _echt(now) < _echt(laat):
+            laat = now
+    # Het vak begint waar hij gaat vasthouden, en anders waar hij gaat laden. Vasthouden is
+    # één vak met de stopgrens op de accustand; komt het late moment om te laden, dan gaat de
+    # stopgrens omhoog (`wijkt_af` met `houden`).
+    begin = vast[0].start if vast else laat
+    if laden and vast and _echt(laat) < _echt(vast[0].start):
+        begin = laat
+    # Komt het laden eerst (een beetje bij, en dan vasthouden), dan eerst een schema om te laden;
+    # op de stopgrens houdt de coach hem daarna vast (`_async_growatt`).
+    eerst_laden = laden and bool(vast) and _echt(net[0].start) <= _echt(vast[0].start)
+    houden = bool(vast) and not eerst_laden and not (laden and _echt(now) >= _echt(laat))
+    # Een vak is een kloktijd die zich elke dag herhaalt: begint het later, dan mag die kloktijd
+    # nu niet al lopen, anders geldt hij vandaag al (v0.155.0). In het virtuele huis schreef hij
+    # om 05:50 het vasthouden van morgen vanaf 05:15, en hield hij hem dus meteen vast.
+    if _echt(begin) > _echt(now) and _echt(now) < _echt(eind) - timedelta(hours=24):
+        return GrowattSchema()
     # Op het kwartier: het eerste blok van het plan begint op nu, en een begin dat elke
     # ronde een minuut opschuift is geen nieuw vak. Kloktijden, en over middernacht in tweeën.
     begin = begin.replace(minute=begin.minute // 15 * 15, second=0, microsecond=0)
@@ -2518,8 +2612,17 @@ def growatt_schema(
         klok = [(_klok(begin), "23:59"), ("00:00", _klok(eind))]
     else:
         klok = [(_klok(begin), "23:59" if _klok(eind) == "00:00" else _klok(eind))]
-    # Het vermogen over wat er van het vak nog over is.
-    watt = kwh / max(echte_duur(max(begin, now), eind).total_seconds() / 3600.0, 1 / 60) * 1000.0
+    if houden:
+        # Niet laden en niet ontladen: de stopgrens op wat er in zit als het vasthouden begint,
+        # het kleinste vermogen. Niet de stand van nu: een vak dat om 18:00 geschreven wordt
+        # begint om 22:00, en dan zit er minder in; met een hogere grens laadt hij op 1%.
+        stop = max(int(b.soc_min), int(min(b.soc or 0, vast[0].soc)))
+        return GrowattSchema(
+            net=True, vermogen_pct=1, stop_soc=stop, vakken=klok, tot=eind,
+            kwh=kwh if laden else 0.0, houden=True,
+        )
+    # Het vermogen over wat er van het laden nog over is.
+    watt = kwh / max(echte_duur(max(laat, now, key=_echt), eind).total_seconds() / 3600.0, 1 / 60) * 1000.0
     pct = min(100, max(1, int(-(-watt * 100 // b.max_charge_w))))
     stop = min(int(b.soc_max), max(int(b.soc or 0) + 1, int(-(-soc_eind // 1))))
     return GrowattSchema(
@@ -2536,7 +2639,7 @@ def growatt_vol(schema: GrowattSchema, soc: float | None, soc_max: float = 100.0
     daarna weer bij, met het verlies twee keer. In het virtuele huis (`growatt-bihorario`)
     ging het schema zo tussen 05:20 en 08:46 zeventien keer aan en uit.
     """
-    if not schema.net or soc is None or schema.stop_soc >= soc_max - 0.5:
+    if not schema.net or schema.houden or soc is None or schema.stop_soc >= soc_max - 0.5:
         return False
     return soc >= schema.stop_soc - 0.5
 

@@ -1619,6 +1619,79 @@ try:
 finally:
     planner.zet_zone(None)
 
+print("=== 53. Growatt: vasthouden in de goedkope uren, nul op de meter in de dure (v0.155.0) ===")
+# De eigenaar op 23-10-2026: "kunnen we de accu net als anker ook op hold zetten? Dus pas als het
+# dure uur in gaat dan pas ontladen?", en "bij [de klantwoning] moet de accu vanwege de 2 prijzen weer op
+# nul op de meter op de dure prijs". Een avond die de batterij niet leegtrekt: om 22:30 zit er
+# nog 50% in, vazio van 22:00 tot 08:00.
+HUIS53 = {u: (3.0 if 6 <= u < 9 or 18 <= u < 22 else 1.5) for u in range(24)}
+V53 = Forecast(solar_kwh={}, house_kwh=HUIS53)
+
+
+def growatt53(soc=50.0, **kw):
+    return growatt50(soc=soc, capacity_kwh=15.3, kan_vasthouden=True, **kw)
+
+
+nu53 = DAG.replace(hour=22, minute=30)
+p53 = plan_batterij(nu53, L50, Tariff(), V53, growatt53())
+s53 = bat.growatt_schema(p53.uren, nu53, growatt53())
+print(f"  22:30 {p53.stand} {p53.rule}: {s53}")
+controle("in vazio houdt hij vast: het besluit zegt het", p53.stand == bat.STANDBY and p53.rule == "vasthouden",
+         f"{p53.stand} {p53.rule}")
+controle("en het schema is een vak tot 08:00 met de stopgrens op wat erin zit, op 1%",
+         s53.houden and s53.net and s53.vakken[-1][1] == "08:00" and s53.stop_soc == 50 and s53.vermogen_pct == 1,
+         f"{s53}")
+controle("vasthouden zet de coach niet uit op de stopgrens", not bat.growatt_vol(s53, 50.0), "")
+# In de dure uren nul op de meter: om 19:00 geeft hij het huis wat het vraagt.
+nu53b = DAG.replace(hour=19, minute=0)
+p53b = plan_batterij(nu53b, L50, Tariff(), V53, growatt53())
+controle("in de dure uren nul op de meter, ook al komen er morgen weer dure uren",
+         p53b.stand == bat.NUL and not any(u.vast for u in p53b.uren if u.price > 0.2), f"{p53b.stand}")
+# Een batterij die niet kan vasthouden (een Anker die zelf nul doet) rekent als altijd.
+p53c = plan_batterij(nu53, L50, Tariff(), V53, growatt50(soc=50.0, capacity_kwh=15.3))
+controle("zonder kan_vasthouden geen enkel blok vast, en nul op de meter",
+         p53c.stand != bat.STANDBY and not any(u.vast for u in p53c.uren), f"{p53c.stand}")
+# Moet er later toch bij, dan wordt het om het late moment een schema om te laden, in hetzelfde
+# vak, en dat is een nieuw schema.
+V53d = Forecast(solar_kwh={}, house_kwh={u: 3.0 for u in range(24)})
+p53d = plan_batterij(nu53, L50, Tariff(), V53d, growatt53(soc=30.0))
+s53d = bat.growatt_schema(p53d.uren, nu53, growatt53(soc=30.0))
+nu53e = DAG.replace(day=22, hour=6, minute=30)
+p53e = plan_batterij(nu53e, L50, Tariff(), V53d, growatt53(soc=30.0))
+s53e = bat.growatt_schema(p53e.uren, nu53e, growatt53(soc=30.0))
+print(f"  22:30 {s53d}\n  06:30 {s53e}")
+controle("eerst vasthouden, en op het late moment laden tot boven de stand van nu",
+         s53d.houden and not s53e.houden and s53e.stop_soc > 30 and s53e.vakken[-1][1] == "08:00", f"{s53d} {s53e}")
+controle("van vasthouden naar laden is altijd een nieuw schema", s53e.wijkt_af(s53d), "")
+controle("na vol laden tot 100% is vasthouden geen nieuwe opdracht",
+         not dataclasses.replace(s53, stop_soc=100, vakken=[("06:00", "08:00")])
+         .wijkt_af(dataclasses.replace(s53, houden=False, vermogen_pct=48, stop_soc=100, vakken=[("05:00", "08:00")])), "")
+# Weinig boven de vloer: niet de moeite van een opdracht (`GROWATT_HOUDEN_KWH`).
+s53f = bat.growatt_schema(plan_batterij(nu53, L50, Tariff(), V53, growatt53(soc=17.0)).uren, nu53, growatt53(soc=17.0))
+controle("0,3 kWh boven de vloer houdt hij niet vast", not s53f.houden, f"{s53f}")
+# Dynamisch: nu gebruiken en straks goedkoper bijladen wint van vasthouden; de som kiest.
+DYN53 = [0.24, 0.22, 0.19, 0.12, 0.11, 0.17, 0.23, 0.30, 0.33, 0.29, 0.27, 0.26,
+         0.25, 0.25, 0.26, 0.28, 0.31, 0.36, 0.41, 0.38, 0.33, 0.29, 0.27, 0.25]
+p53g = plan_batterij(nu53, prijzen(DYN53 * 2, terug=0.0), Tariff(), V53, growatt53(soc=22.0))
+controle("dynamisch, met om 03:00 bijladen voor 0,12: om 22:30 niet vasthouden maar het huis voeden",
+         p53g.stand != bat.STANDBY, f"{p53g.stand} {p53g.rule}")
+# Een vak is een kloktijd die elke dag terugkomt. Om 06:30 het vasthouden van morgen vanaf 05:15
+# schrijven zou vandaag al gelden, en hem nu vasthouden (het virtuele huis, `growatt-zon`).
+def uur53(van, tot, prijs, vast=False, soc=15.0):
+    return bat.Uur(van, tot, bat.STANDBY if vast else bat.NUL, 0.0, 0.0, soc, prijs, vast=vast)
+
+
+m53 = DAG.replace(day=22)
+uren53h = [uur53(DAG.replace(hour=6, minute=30), DAG.replace(hour=9), 0.166),
+           uur53(DAG.replace(hour=9), DAG.replace(hour=23), 0.272),
+           uur53(DAG.replace(hour=23), m53.replace(hour=5, minute=15), 0.166),
+           uur53(m53.replace(hour=5, minute=15), m53.replace(hour=9), 0.166, vast=True, soc=40.0),
+           uur53(m53.replace(hour=9), m53.replace(hour=12), 0.272)]
+s53h = bat.growatt_schema(uren53h, DAG.replace(hour=6, minute=30), growatt53(soc=15.0))
+controle("om 06:30 nog niets voor het vasthouden van morgen vanaf 05:15", not s53h.net, f"{s53h}")
+s53i = bat.growatt_schema(uren53h[2:], DAG.replace(hour=22, minute=30), growatt53(soc=40.0))
+controle("om 22:30 wel, het vak van 05:15 tot 09:00", s53i.houden and s53i.vakken == [("05:15", "09:00")], f"{s53i}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

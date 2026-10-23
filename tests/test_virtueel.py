@@ -2452,8 +2452,9 @@ if (vl := v("growatt-zon")):
     nacht = [r for r in vl.bat_verloop if r[2] > 100 and r[1] > 100 and r[0] < bat_moment(vl, "09:00")]
     controle("growatt-zon: de zon van morgen vult hem, dus de eerste nacht niets van het net",
              not nacht, f"{len(nacht)} minuten")
+    # De volgende avond houdt hij vast wat de zon erin stopte (v0.155.0); dat is de nacht erna.
     controle("growatt-zon: en daarvoor hooguit twee schrijfacties",
-             len(vl.gw_schrijf) <= 2, f"{vl.gw_schrijf}")
+             len([w for w in vl.gw_schrijf if w[0] < bat_moment(vl, "09:00")]) <= 2, f"{vl.gw_schrijf}")
 # Zonder zonvoorspeller, alleen het weer van Home Assistant (v0.151.0): de zon van morgen uit
 # de eigen opwek. Bij de bouw: de eerste nacht niets van het net, € 0,63 tegen € 2,62 zonder
 # batterij; dezelfde dag als `growatt-zon`, waar de voorspeller van het dashboard het zei.
@@ -2465,6 +2466,22 @@ if (vl := v("growatt-eigen-zon")):
              "de eerste nacht niets van het net", not nacht, f"{len(nacht)} minuten")
     controle("growatt-eigen-zon: en dat kost minder dan zonder batterij", vl.bat_kosten_met < vl.bat_kosten_zonder,
              f"€{vl.bat_kosten_met:.2f} tegen €{vl.bat_kosten_zonder:.2f}")
+# Vasthouden (v0.155.0). De eigenaar op 23-10-2026: "pas als het dure uur in gaat dan pas
+# ontladen", en bij twee prijzen "op de dure prijs weer nul op de meter". Bij de bouw: € 1,75
+# tegen € 1,82 zonder vasthouden, in vazio 0,0 kWh uit de batterij tegen 2,3 kWh.
+if (vl := v("growatt-vasthouden")):
+    vazio = [r for r in vl.bat_verloop if bat_moment(vl, "23:00") <= r[0] < bat_moment(vl, "09:00")]
+    uit = sum(-r[2] for r in vazio if r[2] < -100) * vl.stap_uur / 1000
+    duur = [r for r in vl.bat_verloop if bat_moment(vl, "21:30") <= r[0] < bat_moment(vl, "23:00")]
+    print(f"  growatt-vasthouden: {uit:.2f} kWh uit de batterij in vazio, €{vl.bat_kosten_met:.2f} tegen "
+          f"€{vl.bat_kosten_zonder:.2f}; {[(f'{t:%a %H:%M}', aan, pct, stop, vak) for t, aan, pct, stop, vak in vl.gw_schrijf]}")
+    controle("growatt-vasthouden: in vazio geeft de batterij het huis niets", uit < 0.1, f"{uit:.2f} kWh")
+    controle("growatt-vasthouden: voor vazio, op de dure prijs, voedt hij het huis wel",
+             any(r[2] < -100 for r in duur), f"{len(duur)} minuten")
+    controle("growatt-vasthouden: hooguit vijf schrijfacties en geen die faalt",
+             len(vl.gw_schrijf) <= 5 and vl.gw_gefaald == 0, f"{len(vl.gw_schrijf)} {vl.gw_gefaald}")
+    controle("growatt-vasthouden: en het kost minder dan zonder batterij",
+             vl.bat_kosten_met < vl.bat_kosten_zonder - 0.5, f"€{vl.bat_kosten_met:.2f} tegen €{vl.bat_kosten_zonder:.2f}")
 if (vl := v("growatt-schaduw")):
     zou = [g.get("message") or "" for g in vl.geschiedenis if "zou dit schrijven" in (g.get("message") or "")]
     print(f"  growatt-schaduw: {zou}")
