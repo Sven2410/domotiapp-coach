@@ -2412,6 +2412,11 @@ GROWATT_LAAT_DEEL = 0.5
 # (0,166 tegen 0,272) is een halve kWh vasthouden ruim vijf cent waard; minder is een extra
 # schrijfopdracht naar de cloud van Growatt niet waard.
 GROWATT_HOUDEN_KWH = 0.5
+# Het vermogen in een vak om vast te houden (v0.156.1). Met de stopgrens op de accustand laadt hij
+# niet, dus het getal zegt alleen hoe snel hij terugkomt als hij eronder zakt. In de klantwoning
+# weigerde de Growatt-API op 24-10-2026 elk schema met 1% (zeven keer, ook na uren zonder opdracht),
+# en nam hij om 22:37 hetzelfde vasthouden met 10% en de stopgrens op de accustand meteen aan.
+GROWATT_HOUDEN_PCT = 10
 
 
 @dataclass
@@ -2624,11 +2629,12 @@ def growatt_schema(
         klok = [(_klok(begin), "23:59" if _klok(eind) == "00:00" else _klok(eind))]
     if houden:
         # Niet laden en niet ontladen: de stopgrens op wat er in zit als het vasthouden begint,
-        # het kleinste vermogen. Niet de stand van nu: een vak dat om 18:00 geschreven wordt
-        # begint om 22:00, en dan zit er minder in; met een hogere grens laadt hij op 1%.
+        # een klein vermogen (`GROWATT_HOUDEN_PCT`). Niet de stand van nu: een vak dat om 18:00 geschreven wordt
+        # begint om 22:00, en dan zit er minder in; met een hogere grens laadt hij bij op
+        # `GROWATT_HOUDEN_PCT`.
         stop = max(int(b.soc_min), int(min(b.soc or 0, vast[0].soc)))
         return GrowattSchema(
-            net=True, vermogen_pct=1, stop_soc=stop, vakken=klok, tot=eind,
+            net=True, vermogen_pct=GROWATT_HOUDEN_PCT, stop_soc=stop, vakken=klok, tot=eind,
             kwh=kwh if laden else 0.0, houden=True,
         )
     # Het vermogen over wat er van het laden nog over is.

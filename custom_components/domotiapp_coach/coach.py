@@ -7428,6 +7428,15 @@ class ChargerCoach:
             # klantwoning wilde de coach op 24-10-2026 om 07:45 nog "vasthouden op 32%" schrijven
             # in plaats van laden tot 35%, voor het laatste kwartier; de cloud weigerde dat drie keer.
             wil = geschreven
+        elif (
+            geschreven is not None and geschreven.houden and wil.net and not wil.houden
+            and wil.tot == geschreven.tot and self._growatt_in_vak(geschreven, now)
+            and (wil.stop_soc - geschreven.stop_soc) / 100.0 * (b.capacity_kwh or 0.0) < GROWATT_HOUDEN_KWH
+        ):
+            # En andersom: van vasthouden naar laden in hetzelfde vak voor minder dan een halve kWh
+            # (v0.156.1). In het virtuele huis (`growatt-vasthouden`) schreef hij om 08:57 nog laden
+            # tot 81% voor de laatste drie minuten, op 100%, en ging de zekering eroverheen.
+            wil = geschreven
         # Aan of uit pas na `GROWATT_BESTENDIG`: het plan twijfelde in het virtuele huis
         # (`growatt-zon`) een ochtend lang of er vannacht nog 1 kWh bij moest, en dan ging
         # het schema om de paar minuten aan en uit. De stopgrens wacht niet.
