@@ -61,6 +61,7 @@ from .batterij import (
     STAND_NAMEN,
     VOL_MARGE,
     Batterij,
+    GROWATT_HOUDEN_KWH,
     GROWATT_STUK_PCT,
     GROWATT_VOORAF,
     GrowattSchema,
@@ -70,7 +71,11 @@ from .batterij import (
     Voorraad,
     auto_grens,
     balans_kwh,
+    growatt_besluit,
     growatt_bijstelling,
+    growatt_duur,
+    growatt_nachten,
+    GROWATT_NACHTEN_V,
     growatt_inhoud,
     growatt_max_w,
     growatt_nacht,
@@ -6412,6 +6417,13 @@ class ChargerCoach:
         schema = device.get("brand") in BATTERIJ_SCHEMA
         if schema:
             self._growatt_batterij(b, device, rij)
+            # Handmatig vol laden of leegladen bestaat bij een Growatt niet (v0.156.0). De eigenaar
+            # op 24-10-2026: "ik wil niet kunnen handmatig laden en ontladen bij growatt".
+            if device_id in self._boost or device_id in self._drain:
+                self._boost.discard(device_id)
+                self._drain.pop(device_id, None)
+                self._vol_tot.pop(device_id, None)
+                self._remember(device_id)
         # Een beurt van het net die al loopt maakt het plan af, en voor een
         # kleine neemt hij een batterij die zelf nul doet niet over (v0.102.3,
         # `_rustig_vermogen` in batterij.py).
@@ -6637,6 +6649,16 @@ class ChargerCoach:
             "stock_euro": round(sessie["voorraad"].euro, 2),
         }
 
+        # Een Growatt doet wat zijn schema zegt (v0.156.0): het besluit en de reden komen daaruit,
+        # niet uit het plan van dit kwartier. Met de coach aan het stuur wat erin staat, in de
+        # schaduw wat hij zou schrijven; de conclusie voor de nacht uit wat hij gaat schrijven.
+        if schema:
+            wil_nu = sessie.get("growatt_wil")
+            besluit = growatt_besluit(
+                besluit, sessie.get("growatt_geschreven") if stuurt else wil_nu, now, b,
+                balans_kwh(now, verwachting, b, besluit.auto_weg), wil=wil_nu,
+            )
+
         # Het hele plan, voor de vooruitblik op het overzicht (v0.133.0): de
         # toestand neemt er 48 blokken van, met kwartierprijzen maar twaalf uur.
         sessie["uren"] = list(besluit.uren)
@@ -6661,7 +6683,8 @@ class ChargerCoach:
             "approved": device_id in self._approved,
             "soc": b.soc,
             "power_w": None if b.power_w is None else round(b.power_w),
-            "setpoint_w": round(sessie["regelaar"].opdracht_w) if stuurt else None,
+            # Een Growatt heeft geen stuurgetal maar een schema (`schedule`, v0.156.0).
+            "setpoint_w": round(sessie["regelaar"].opdracht_w) if stuurt and not schema else None,
             "target_w": round(besluit.power_w),
             "value": None if besluit.waarde is None else round(besluit.waarde, 4),
             # Onder welke prijs bijkopen nu loont, voor de pop-up (v0.102.3).
@@ -7367,13 +7390,17 @@ class ChargerCoach:
         if stuurt:
             # Het kasboek, zoals bij een batterij met een regelaar, maar eens per ronde.
             self._kasboek(sessie, settings, device_id, now, self._net_nu(settings)[0], self._batterij_w(device), b)
-            await self._async_growatt_nacht(now, settings, device, b, sessie)
+            await self._async_growatt_nacht(now, settings, device, b, sessie, besluit.uren)
             rij = self._batterij_rij(settings, device_id)
-        bijstel = growatt_bijstelling(rij.get("growatt_nachten"), b.capacity_kwh)
+        bijstel = growatt_bijstelling(growatt_nachten(rij), b.capacity_kwh)
         geschreven: GrowattSchema | None = sessie.get("growatt_geschreven")
         loopt = bool(stuurt and geschreven is not None and geschreven.net and not geschreven.houden
                      and self._growatt_in_vak(geschreven, now))
-        wil = growatt_schema(besluit.uren, now, b, bijstel, loopt=loopt)
+        mis = sessie.get("growatt_houden_mis")
+        if mis is not None and now >= mis:
+            sessie.pop("growatt_houden_mis", None)
+            mis = None
+        wil = growatt_schema(besluit.uren, now, b, bijstel, loopt=loopt, vasthouden=mis is None)
         if not b.max_charge_w:
             self.state[device_id]["tip"] = t(
                 "De coach weet nog niet hoe snel deze Growatt laadt, dus hij laadt hem niet van het net. Vul "
@@ -7390,6 +7417,17 @@ class ChargerCoach:
             # Op de stopgrens uit, behalve als het plan hem daarna vasthoudt (v0.155.0): dan
             # zou hij anders het huis voeden in de goedkope uren.
             wil = GrowattSchema()
+        elif (
+            wil.houden and geschreven is not None and geschreven.net and not geschreven.houden
+            and wil.tot == geschreven.tot and self._growatt_in_vak(geschreven, now)
+            and (vol_tot is not None or (geschreven.stop_soc - wil.stop_soc) / 100.0 * (b.capacity_kwh or 0.0)
+                 < GROWATT_HOUDEN_KWH)
+        ):
+            # Van laden naar vasthouden in hetzelfde vak, voor minder dan `GROWATT_HOUDEN_KWH`, of
+            # terwijl hij al op de stopgrens stilstaat: een opdracht voor niets (v0.156.0). In de
+            # klantwoning wilde de coach op 24-10-2026 om 07:45 nog "vasthouden op 32%" schrijven
+            # in plaats van laden tot 35%, voor het laatste kwartier; de cloud weigerde dat drie keer.
+            wil = geschreven
         # Aan of uit pas na `GROWATT_BESTENDIG`: het plan twijfelde in het virtuele huis
         # (`growatt-zon`) een ochtend lang of er vannacht nog 1 kWh bij moest, en dan ging
         # het schema om de paar minuten aan en uit. De stopgrens wacht niet.
@@ -7402,10 +7440,14 @@ class ChargerCoach:
         else:
             sessie.pop("growatt_wissel", None)
         sessie["growatt_wil"] = wil
+        # Op de kaart: in een lopend vak wat er in de Growatt staat, zoals de reden (v0.156.0);
+        # daarbuiten wat de coach erin gaat zetten.
+        toon = geschreven if (stuurt and geschreven is not None and geschreven.net
+                              and self._growatt_in_vak(geschreven, now)) else wil
         self.state[device_id]["schedule"] = {
-            "grid": wil.net, "power_pct": wil.vermogen_pct if wil.net else None,
-            "stop_soc": wil.stop_soc if wil.net else None, "periods": [list(v) for v in wil.vakken],
-            "kwh": round(wil.kwh, 2), "written": None if geschreven is None else geschreven.net,
+            "grid": toon.net, "hold": toon.houden, "power_pct": toon.vermogen_pct if toon.net else None,
+            "stop_soc": toon.stop_soc if toon.net else None, "periods": [list(v) for v in toon.vakken],
+            "kwh": round(toon.kwh, 2), "written": None if geschreven is None else geschreven.net,
             "confirmed": sessie.get("growatt_bevestigd") is not None,
         }
 
@@ -7445,7 +7487,7 @@ class ChargerCoach:
                         "device": device_id, "mode": besluit.stand, "rule": "growatt-schema", "applied": True,
                     })
             else:
-                await self._async_growatt_fout(now, device, sessie, wil)
+                await self._async_growatt_fout(now, device, sessie, wil, staat=geschreven)
             return
 
         terug_om = sessie.get("growatt_terug_om")
@@ -7465,19 +7507,49 @@ class ChargerCoach:
                 await self._async_growatt_fout(now, device, sessie, geschreven)
 
     async def _async_growatt_fout(
-        self, now: datetime, device: dict[str, Any], sessie: dict[str, Any], wil: GrowattSchema
+        self, now: datetime, device: dict[str, Any], sessie: dict[str, Any], wil: GrowattSchema,
+        staat: GrowattSchema | None = None,
     ) -> None:
-        """Een schema dat er niet in kwam: na `GROWATT_FOUTEN` keer één melding."""
+        """Een schema dat er niet in kwam: na `GROWATT_FOUTEN` keer één melding.
+
+        `staat` is wat er volgens de coach nog in de Growatt staat, of None als dat niet zeker
+        is. Laadt dat net zo goed of net zo min van het net als wat hij wilde schrijven, dan is
+        er voor de bewoner niets aan de hand en gaat het alleen in de geschiedenis (v0.156.0).
+        In de klantwoning op 24-10-2026 weigerde de cloud om 07:45-07:55 drie keer het
+        vasthouden voor het laatste kwartier van vazio; de telefoon kreeg "hij laadt vannacht niet
+        van het net", terwijl hij al tot zijn stopgrens geladen had.
+        """
         sessie["growatt_fouten"] = int(sessie.get("growatt_fouten") or 0) + 1
+        if wil.houden and sessie["growatt_fouten"] >= GROWATT_FOUTEN:
+            # Vasthouden dat de Growatt niet aanneemt: voor dit goedkope stuk laat de coach het weg,
+            # en schrijft hij het schema zonder (v0.156.0). In de klantwoning weigerde de cloud op
+            # 24-10-2026 elk vasthouden (om 07:45 en om 21:31), en bleef het schema van die ochtend
+            # staan terwijl de coach het om de vijf minuten opnieuw probeerde.
+            sessie["growatt_houden_mis"] = wil.tot or now + timedelta(hours=12)
+            sessie["growatt_fouten"] = 0
+            naam = device.get("name") or t("De batterij")
+            _LOGGER.warning("%s: vasthouden niet aangenomen; tot %s zonder", device.get("id"), wil.tot)
+            await self._async_tell(
+                t("{naam} neemt vasthouden niet aan; de coach laat dat voor deze goedkope uren weg.", naam=naam),
+                telefoon=False,
+            )
+            return
         if sessie["growatt_fouten"] >= GROWATT_FOUTEN and not sessie.get("growatt_gemeld"):
             sessie["growatt_gemeld"] = True
             naam = device.get("name") or t("De batterij")
+            if staat is not None and staat.net == wil.net:
+                await self._async_tell(
+                    t("{naam} neemt het nieuwe laadschema van de coach niet aan; het vorige blijft staan. "
+                      "De coach probeert het opnieuw.", naam=naam),
+                    telefoon=False,
+                )
+                return
             await self._async_tell(
                 t(
                     "{naam} neemt het laadschema van de coach niet aan. Kijk in de Growatt-app of laden "
                     "van het net nu aan staat.", naam=naam,
                 ) if not wil.net else t(
-                    "{naam} neemt het laadschema van de coach niet aan; hij laadt vannacht niet van het net.",
+                    "{naam} neemt het laadschema van de coach niet aan; hij laadt niet van het net zoals gepland.",
                     naam=naam,
                 ),
                 kritiek=not wil.net,
@@ -7594,14 +7666,15 @@ class ChargerCoach:
 
     async def _async_growatt_nacht(
         self, now: datetime, settings: dict[str, Any], device: dict[str, Any], b: Batterij,
-        sessie: dict[str, Any],
+        sessie: dict[str, Any], plan_uren: list | None = None,
     ) -> None:
         """Na elke nacht nakijken of het schema te veel of te weinig laadde (v0.151.0).
 
         Vanaf het eind van een vak dat de coach schreef tot het begin van het volgende telt
         hij twee dingen: zon die naar het net gaat terwijl de batterij vol is (te veel van het
         net geladen), en wat het huis van het net haalt terwijl de batterij op zijn vloer staat
-        (te weinig). En in het vak zelf wat er van het net in ging. Begint het volgende vak,
+        (te weinig), maar dat laatste alleen in een duurder uur dan het goedkoopste van het
+        komende etmaal (`growatt_duur`, v0.156.0). En in het vak zelf wat er van het net in ging. Begint het volgende vak,
         dan gaat de nacht met `growatt_nacht` in `growatt_nachten`, en stelt
         `growatt_bijstelling` het schema daarop bij.
         """
@@ -7614,10 +7687,12 @@ class ChargerCoach:
             # Een nieuw vak: de dag ervoor is klaar.
             fout = growatt_nacht(dag["teveel"], dag["tekort"], dag["net"])
             rij = self._batterij_rij(settings, device.get("id", ""))
-            nachten = [*list(rij.get("growatt_nachten") or [])[-(GROWATT_NACHTEN_BEWAAR - 1):], round(fout, 3)]
+            nachten = [*growatt_nachten(rij)[-(GROWATT_NACHTEN_BEWAAR - 1):], round(fout, 3)]
             _LOGGER.info("%s: nacht nagekeken: %.2f kWh van het net, %.2f te veel, %.2f te weinig",
                          device.get("id"), dag["net"], dag["teveel"], dag["tekort"])
-            await self._async_batterij_bewaren(settings, device.get("id", ""), {"growatt_nachten": nachten})
+            await self._async_batterij_bewaren(settings, device.get("id", ""), {
+                "growatt_nachten": nachten, "growatt_nachten_v": GROWATT_NACHTEN_V,
+            })
             dag.update(net=0.0, teveel=0.0, tekort=0.0)
         dag["in_vak"] = in_vak
         net_w, _ = self._net_nu(settings)
@@ -7631,7 +7706,8 @@ class ChargerCoach:
         else:
             if net_w < 0 and b.soc >= b.soc_max - VOL_MARGE:
                 dag["teveel"] += -net_w / 1000.0 * uren
-            if net_w > 0 and b.soc <= b.soc_min + 1.0 and abs(bat_w) < GROWATT_STIL_W:
+            if (net_w > 0 and b.soc <= b.soc_min + 1.0 and abs(bat_w) < GROWATT_STIL_W
+                    and growatt_duur(plan_uren or [], now)):
                 dag["tekort"] += net_w / 1000.0 * uren
 
     @staticmethod

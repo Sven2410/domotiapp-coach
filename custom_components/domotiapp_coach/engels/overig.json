@@ -103,5 +103,9 @@
   "Dit rapport is te groot.": "This report is too large.",
   "{veld} hoort niet bij een {soort}": "{veld} does not belong to a device of type {soort}",
   "alleen laden tot en wekken horen bij de auto": "only charge to and wake-up belong to the car",
-  "Dit rapport is niet meer beschikbaar.": "This report is no longer available."
+  "Dit rapport is niet meer beschikbaar.": "This report is no longer available.",
+  "Hij houdt de batterij vast tot {eind}: wat erin zit is straks meer waard. Het huis haalt zolang van het net, tegen {prijs}.": "It holds the battery until {eind}: what is in it is worth more later. Meanwhile the home runs on the grid, at {prijs}.",
+  "Hij laadt van het net tot {soc}%, tot {eind}, tegen {prijs}.": "It charges from the grid to {soc}%, until {eind}, at {prijs}.",
+  "In de goedkope uren houdt hij de batterij vast op {soc}% ({vakken}); het huis haalt dan van het net.": "In the cheap hours it holds the battery at {soc}% ({vakken}); the home then runs on the grid.",
+  "In de goedkope uren laadt hij {kwh} van het net bij ({vakken}), tot {soc}%.": "In the cheap hours it tops up {kwh} from the grid ({vakken}), to {soc}%."
 }

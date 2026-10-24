@@ -1053,9 +1053,12 @@ def _vlak(blokken: list[dict]) -> bool:
 
 def _vooruitkijk_zin(
     now: datetime, forecast: Forecast, b: Batterij, auto: float = 0.0, bijladen: bool = True,
-    uren: list[Uur] | None = None,
+    uren: list[Uur] | None = None, conclusie: bool = True,
 ) -> str:
     """Twee zinnen: zon, huis en batterij tot morgenvroeg, en de conclusie.
+
+    Zonder `conclusie` alleen de eerste: bij een Growatt komt die uit zijn schema
+    (`growatt_besluit`, v0.156.0).
 
     De bewoner van de eerste woning liet op 21-09-2026 zien wat hij van zijn
     oude sturing het meest miste als het weg zou zijn: een regel die zegt
@@ -1088,6 +1091,8 @@ def _vooruitkijk_zin(
         "Tot morgenvroeg verwacht hij {zon} zon, het huis vraagt {huis}{auto} en er zit {accu} in de batterij{eruit}.",
         zon=_kwh(zon), huis=_kwh(huis), auto=naar_auto, accu=_kwh(bruikbaar), eruit=eruit,
     ) + past_niet + " "
+    if not conclusie:
+        return zin.strip()
     if balans >= 0:
         return zin + t("Je houdt naar verwachting {kwh} over in je accu.", kwh=_kwh(balans))
     return (
@@ -1266,7 +1271,8 @@ def plan_batterij(
     hulp_om = next((u.start for u, h in zip(uren, hulp) if h > 0.005), None)
     auto_ac = _met_auto(uren, b, hulp)
     auto_weg = auto_ac / eta_uit(b)
-    kijk = _vooruitkijk_zin(now, forecast, b, auto_ac, bijladen=not _vlak(blokken), uren=uren)
+    kijk = _vooruitkijk_zin(now, forecast, b, auto_ac, bijladen=not _vlak(blokken), uren=uren,
+                            conclusie=not b.kan_vasthouden)
     piek = dicht and in_evening_peak(now)
     # Onder welke prijs een kWh van het net erbij nu loont: wat hij in de
     # batterij waard is, min het verlies bij het laden. Voor de kaart; de
@@ -2394,6 +2400,8 @@ GROWATT_VOORAF = timedelta(minutes=30)
 # Over hoeveel nachten de coach zijn schema bijstelt, en vanaf hoeveel (v0.151.0).
 GROWATT_NACHTEN = 7
 GROWATT_MIN_NACHTEN = 3
+# Nachten van voor v0.156.0 telden het tekort ook in de goedkope uren; die tellen niet mee.
+GROWATT_NACHTEN_V = 2
 GROWATT_MIN_VERMOGEN = 6
 # Het vak ligt aan het eind van het goedkope stuk (v0.152.0): minstens zo lang, en zo lang
 # dat hij op hooguit dit deel van zijn vermogen laadt. Die marge vangt een opdracht op die
@@ -2510,6 +2518,7 @@ def _klok(moment: datetime) -> str:
 
 def growatt_schema(
     uren: list[Uur], now: datetime, b: Batterij, bijstel_kwh: float = 0.0, loopt: bool = False,
+    vasthouden: bool = True,
 ) -> GrowattSchema:
     """Het laadschema voor een Growatt uit het plan van de batterij.
 
@@ -2558,8 +2567,9 @@ def growatt_schema(
     def houdt(u: Uur) -> bool:
         # Vasthouden (v0.155.0): stil terwijl het huis vraagt, en er zit iets in om vast te houden.
         # Minstens `GROWATT_HOUDEN_KWH` boven de vloer: voor minder is een opdracht de moeite niet.
+        # Zonder `vasthouden` niet: de Growatt nam het niet aan (v0.156.0, `_async_growatt_fout`).
         boven = (u.soc - b.soc_min) / 100.0 * (b.capacity_kwh or 0.0)
-        return u.vast and boven >= GROWATT_HOUDEN_KWH and u.start < rand
+        return vasthouden and u.vast and boven >= GROWATT_HOUDEN_KWH and u.start < rand
 
     gekozen = None
     for stuk in stukken:
@@ -2644,6 +2654,89 @@ def growatt_vol(schema: GrowattSchema, soc: float | None, soc_max: float = 100.0
     return soc >= schema.stop_soc - 0.5
 
 
+def growatt_vakken_tekst(vakken: list) -> str:
+    """De vakken van een schema als "22:00-08:00": een vak over middernacht staat er in twee."""
+    rij: list[list[str]] = []
+    for begin, eind in vakken:
+        if rij and rij[-1][1] == "23:59" and begin == "00:00":
+            rij[-1][1] = eind
+        else:
+            rij.append([begin, eind])
+    return ", ".join(f"{a}-{b}" for a, b in rij)
+
+
+def growatt_besluit(
+    besluit: Besluit, schema: GrowattSchema | None, now: datetime, b: Batterij, balans: float | None = None,
+    wil: GrowattSchema | None = None,
+) -> Besluit:
+    """Wat een Growatt doet, uit het schema dat erin staat, en niet uit het plan van dit kwartier.
+
+    De Growatt volgt zijn schema; het plan per kwartier is daar alleen de som achter. In de
+    klantwoning op 24-10-2026 laadde hij van 06:00 tot 07:57 rustig op 1,2 kW, terwijl het
+    besluit elk kwartier tussen laden en vasthouden wisselde: in de laatste minuut van elk
+    kwartier zag het plan laden, daarna weer vasthouden. Twaalf besluiten, en een reden
+    ("het huis haalt zolang van het net") die niet klopte. Sinds v0.156.0: in een vak om te
+    laden laadt hij, in een vak om vast te houden houdt hij vast, en daarbuiten doet hij zelf
+    nul op de meter. De conclusie van de nacht zegt wat het schema gaat doen.
+
+    `schema` is wat er in de Growatt staat (wat hij nu doet), `wil` wat de coach erin gaat
+    zetten (voor de conclusie); zonder `wil` beide uit `schema`.
+    """
+    plan_schema = wil if wil is not None else schema
+    nu = next((u for u in besluit.uren if u.start <= now < u.end), None)
+    prijs = _euro(nu.price) if nu is not None else None
+    klok = now.strftime("%H:%M")
+    # Een vak dat om 23:59 eindigt loopt door in het vak van 00:00; die laatste minuut hoort erbij.
+    in_vak = bool(schema is not None and schema.net and any(
+        a <= klok < e or (e == "23:59" and klok >= a) for a, e in schema.vakken))
+    plan = besluit.plan
+    # Alleen de besluiten van de som zelf; geen accustand of geen prijzen blijft zoals het is.
+    eigen = besluit.stand in (NUL, NETLADEN, STANDBY) and besluit.rule in ("nul", "netladen", "vasthouden")
+    if not eigen:
+        return besluit
+    if plan_schema is not None and plan_schema.net:
+        vakken = growatt_vakken_tekst(plan_schema.vakken)
+        # De laatste zin van de nachtzin is de conclusie op de kaart (`nachtConclusie`).
+        zin = (
+            t("In de goedkope uren houdt hij de batterij vast op {soc}% ({vakken}); het huis haalt dan van het net.",
+              soc=plan_schema.stop_soc, vakken=vakken)
+            if plan_schema.houden else
+            t("In de goedkope uren laadt hij {kwh} van het net bij ({vakken}), tot {soc}%.",
+              kwh=_kwh(plan_schema.kwh), vakken=vakken, soc=plan_schema.stop_soc)
+        )
+        plan = f"{plan} {zin}".strip()
+    elif plan and balans is not None:
+        # Geen schema: dezelfde conclusie als bij elke andere batterij.
+        zin = (
+            t("Je houdt naar verwachting {kwh} over in je accu.", kwh=_kwh(balans)) if balans >= 0 else
+            t("Je komt naar verwachting {kwh} tekort om de nacht te overbruggen;", kwh=_kwh(-balans)) + " "
+            + _bijladen_zin(now, b, besluit.uren, -balans)
+        )
+        plan = f"{plan} {zin}".strip()
+    if in_vak and schema.houden:
+        return Besluit(
+            STANDBY,
+            reason=t("Hij houdt de batterij vast tot {eind}: wat erin zit is straks meer waard. Het huis haalt "
+                     "zolang van het net, tegen {prijs}.", eind=schema.vakken[-1][1], prijs=prijs or "—"),
+            plan=plan, rule="vasthouden", waarde=besluit.waarde, uren=besluit.uren,
+            auto_weg=besluit.auto_weg, inkoop_tot=besluit.inkoop_tot,
+        )
+    if in_vak and b.soc is not None and b.soc < schema.stop_soc - 0.5:
+        return Besluit(
+            NETLADEN,
+            reason=t("Hij laadt van het net tot {soc}%, tot {eind}, tegen {prijs}.",
+                     soc=schema.stop_soc, eind=schema.vakken[-1][1], prijs=prijs or "—"),
+            plan=plan, rule="netladen", waarde=besluit.waarde, uren=besluit.uren,
+            auto_weg=besluit.auto_weg, inkoop_tot=besluit.inkoop_tot,
+        )
+    return Besluit(
+        NUL,
+        reason=t("Hij houdt de meter op nul: overschot gaat erin, wat het huis vraagt komt eruit."),
+        plan=plan, rule="nul", waarde=besluit.waarde, uren=besluit.uren,
+        auto_weg=besluit.auto_weg, inkoop_tot=besluit.inkoop_tot,
+    )
+
+
 def growatt_inhoud(stukken: list | None) -> float | None:
     """De bruikbare inhoud bij honderd procent in kWh, uit wat de eigen teller per procent telde.
 
@@ -2682,6 +2775,30 @@ def growatt_nacht(teveel_kwh: float, tekort_kwh: float, net_kwh: float) -> float
     haalde terwijl de batterij op zijn vloer stond. Positief: meer laden; negatief: minder.
     """
     return max(0.0, tekort_kwh) - min(max(0.0, teveel_kwh), max(0.0, net_kwh))
+
+
+def growatt_duur(uren: list[Uur], now: datetime) -> bool:
+    """Of nu een duurder uur is dan het goedkoopste van het komende etmaal (v0.156.0).
+
+    Alleen dan telt een batterij op de vloer als tekort. In de klantwoning op 24-10-2026
+    telde de coach de eerste echte nacht het huis van 23:53 tot 06:00 mee, in vazio, op de
+    vloer en zonder vak: 11 kWh "te weinig", terwijl het huis daar juist van het net hoort
+    te draaien. Zonder prijzen telt er niets: dan is het niet te zeggen.
+    """
+    nu = next((u for u in uren if u.start <= now < u.end), None)
+    rand = now + timedelta(hours=24)
+    prijzen = [u.price for u in uren if u.end > now and u.start < rand]
+    if nu is None or not prijzen:
+        return False
+    return nu.price > min(prijzen) + PRICE_MARGIN
+
+
+def growatt_nachten(rij: dict | None) -> list:
+    """De nachten die de coach nakeek, zonder die van voor v0.156.0 (daar telde vazio mee)."""
+    rij = rij or {}
+    if rij.get("growatt_nachten_v") != GROWATT_NACHTEN_V:
+        return []
+    return list(rij.get("growatt_nachten") or [])
 
 
 def growatt_bijstelling(nachten: list | None, capaciteit_kwh: float | None) -> float:

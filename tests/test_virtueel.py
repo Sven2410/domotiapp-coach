@@ -2482,6 +2482,15 @@ if (vl := v("growatt-vasthouden")):
              len(vl.gw_schrijf) <= 5 and vl.gw_gefaald == 0, f"{len(vl.gw_schrijf)} {vl.gw_gefaald}")
     controle("growatt-vasthouden: en het kost minder dan zonder batterij",
              vl.bat_kosten_met < vl.bat_kosten_zonder - 0.5, f"€{vl.bat_kosten_met:.2f} tegen €{vl.bat_kosten_zonder:.2f}")
+for naam_gw in ("growatt-bihorario", "growatt-vasthouden"):
+    if (vl := v(naam_gw)):
+        # De klantwoning op 24-10-2026: elk kwartier wisselde het besluit tussen laden en vasthouden,
+        # terwijl de Growatt gewoon zijn schema volgde. Het besluit volgt nu het schema (v0.156.0).
+        stand_gw = [g for g in vl.geschiedenis if g.get("kind") == "besluit"
+                    and g.get("rule") in ("netladen", "vasthouden", "nul")]
+        print(f"  {naam_gw}: {len(stand_gw)} besluiten over de batterij: "
+              f"{[(str(g.get('at'))[11:16], g.get('rule')) for g in stand_gw]}")
+        controle(f"{naam_gw}: het besluit wisselt niet elk kwartier", len(stand_gw) <= 8, f"{len(stand_gw)}")
 if (vl := v("growatt-schaduw")):
     zou = [g.get("message") or "" for g in vl.geschiedenis if "zou dit schrijven" in (g.get("message") or "")]
     print(f"  growatt-schaduw: {zou}")

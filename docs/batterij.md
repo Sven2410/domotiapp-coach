@@ -1688,8 +1688,8 @@ zonder batterij (v0.151.0: uitgesmeerd over vazio, € 2,98). Op een bewolkte da
 zon hem en laadt hij de eerste nacht niet van het net. Proef 50 in test_batterij.py, 192 in
 test_coach.py.
 
-**Nog niet:** een MIN (blijft alleen uitlezen tot iemand er een gezien heeft), vol laden en leegladen
-vanaf de kaart. Ontladen stuurt de coach bewust niet: de eigenaar op 23-10-2026, "ontladen gaat zoals
+**Nog niet:** een MIN (blijft alleen uitlezen tot iemand er een gezien heeft). Vol laden en leegladen
+vanaf de kaart komen er bij een Growatt bewust niet (v0.156.0, zie onder). Ontladen stuurt de coach bewust niet: de eigenaar op 23-10-2026, "ontladen gaat zoals
 de omvormer het nu zelf doet"; in de uurdata van de klantwoning kostte 's nachts vasthouden precies
 hetzelfde, want daar is de accu aan het begin van vazio al leeg. In het echt nog niet
 beproefd: of de omvormer zelf op de stopgrens stopt, en of hij met mains uit toch van het net bijlaadt
@@ -1715,3 +1715,57 @@ neemt daar de mediaan van de laatste zeven van, vanaf drie nachten en nooit meer
 de vakken niet. Eén nacht met een feest of een dag zonder zon bepaalt het dus niet. Proef 51 (de som) en
 193 (het tellen).
 
+## Growatt: de eerste echte nacht, en wat daaruit kwam (v0.156.0)
+
+De klantwoning stuurde vanaf 23-10-2026 23:53 echt. Geschreven: laden van het net 06:00-08:00, 15%, tot
+32%. Gemeten: tot 06:00 op de vloer (15%), van 06:00 tot 07:57 laden op ~1,2 kW tot 35% (2,4 kWh), van
+08:00 tot 08:55 1,0 kWh ontladen voor het huis, vol om 13:31 en daarna teruglevering. Het schema deed
+wat het moest. Vijf dingen klopten niet; alle vijf zijn in v0.156.0 opgelost.
+
+**De nacht telde het tekort ook in de goedkope uren.** Na die eerste nacht stond er +11 kWh in
+`growatt_nachten`: het huis haalde van 23:53 tot 06:00 op de vloer van het net, in vazio, en dat telde
+als "te weinig". Na drie nachten had de mediaan het schema elke nacht ruim 10 kWh extra laten laden.
+Nu telt het tekort alleen in een uur dat duurder is dan het goedkoopste van het komende etmaal
+(`growatt_duur`), en tellen de nachten van voor v0.156.0 niet mee (`growatt_nachten`, met
+`growatt_nachten_v` in `battery_state`).
+
+**Het besluit wisselde elk kwartier.** Van 06:15 tot 07:45 twaalf besluiten: in de laatste minuut van
+elk kwartier zag het plan laden, daarna weer vasthouden, terwijl de Growatt gewoon zijn schema afwerkte.
+Nu komt het besluit uit het schema (`growatt_besluit` in batterij.py): in een vak om te laden "laden van
+het net" met de stopgrens en het eind in de reden, in een vak om vast te houden "standby", daarbuiten
+nul op de meter. Met de coach aan het stuur is dat het schema dat erin staat, in de schaduw wat hij zou
+schrijven. Het plan per kwartier blijft de som erachter (`sessie["besluit"]`). Een vak tot 23:59 dat om
+00:00 doorgaat telt in die laatste minuut mee. In het virtuele huis van twaalf naar drie à vijf
+besluiten per nacht.
+
+**De conclusie zei "tekort, dat komt van het net".** Bij een schema zegt de laatste zin van de nachtzin
+wat het schema doet ("In de goedkope uren laadt hij 2,3 kWh van het net bij (06:00-08:00), tot 32%"),
+zonder oranje, en staat "Morgenvroeg" niet in de pop-up: dat tekort telde de goedkope uren mee
+(`conclusie` in `_vooruitkijk_zin`). Zonder schema blijft de gewone conclusie.
+
+**De Growatt-API weigerde elk vasthouden.** Om 07:45 (1%, stopgrens 32, het laatste kwartier van vazio)
+en om 21:31 en 21:36 (1%, stopgrens 27, 22:00-08:00): "Growatt API error: Error during writing AC charge
+time periods". De schema's om te laden (15% en 22%, stopgrens boven de accustand) kwamen wel aan.
+Welk veld de omvormer weigert (het vermogen van 1% of de stopgrens onder de accustand) is nog niet
+uitgezocht; daarvoor is een proef in de klantwoning nodig. Tot dan twee vangnetten: van laden naar
+vasthouden in hetzelfde vak schrijft de coach niet meer voor minder dan `GROWATT_HOUDEN_KWH`, of als hij
+op de stopgrens al stilstaat; en drie keer geweigerd vasthouden laat de coach voor dat goedkope stuk
+weg (`growatt_houden_mis`, `vasthouden` in `growatt_schema`), met een regel in de geschiedenis.
+
+**De melding "hij laadt vannacht niet van het net"** kwam om 07:55 op de telefoon, terwijl hij al
+geladen had. Een geweigerd schema gaat nu alleen naar de telefoon als wat er nog in staat anders van
+het net laadt dan wat de coach wilde; anders alleen in de geschiedenis. En zonder "vannacht".
+
+**De kaart** (de eigenaar op 23-10-2026, met een schermafdruk): de stand in de taal van het paneel
+(`standNaam` in plaats van `mode_name`, het Nederlands van de coach), het schema in plaats van de
+blokken van het plan ("Laadt van het net 06:00-08:00, tot 32%, ongeveer 2,3 kWh" of "Houdt vast
+22:00-08:00, op 24%"; `schedule.hold` is nieuw), en geen "Opdracht van de coach" (`setpoint_w` is bij
+een Growatt leeg). In een lopend vak toont de kaart het schema dat in de Growatt staat, daarbuiten wat
+de coach erin gaat zetten.
+
+**Geen vol laden en leegladen.** De eigenaar op 24-10-2026: "knoppen weg want ik wil niet kunnen
+handmatig laden en ontladen bij growatt". De knoppen staan er niet bij een Growatt (`isSchema` in
+overview.js), en een opdracht die toch binnenkomt laat de coach meteen vallen.
+
+Proef 54 in test_batterij.py, 196 in test_coach.py, de proef "de kaart van een Growatt" in
+test_rapport.mjs, en "het besluit wisselt niet elk kwartier" in test_virtueel.py.
