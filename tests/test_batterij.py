@@ -1692,6 +1692,52 @@ controle("om 06:30 nog niets voor het vasthouden van morgen vanaf 05:15", not s5
 s53i = bat.growatt_schema(uren53h[2:], DAG.replace(hour=22, minute=30), growatt53(soc=40.0))
 controle("om 22:30 wel, het vak van 05:15 tot 09:00", s53i.houden and s53i.vakken == [("05:15", "09:00")], f"{s53i}")
 
+print("=== 54. Growatt: het besluit uit het schema, en het tekort alleen in de dure uren (v0.156.0) ===")
+# De klantwoning op 24-10-2026: van 06:00 tot 07:57 laden op 1,2 kW, en het besluit wisselde elk kwartier
+# tussen laden en vasthouden. Nu zegt het schema wat hij doet.
+laad54 = bat.GrowattSchema(net=True, vermogen_pct=15, stop_soc=32, vakken=[("06:00", "08:00")], kwh=2.3)
+houd54 = bat.GrowattSchema(net=True, vermogen_pct=1, stop_soc=24, vakken=[("22:00", "23:59"), ("00:00", "08:00")],
+                           houden=True)
+for minuut in (0, 14, 15, 44, 59):
+    nu54 = DAG.replace(day=22, hour=6, minute=minuut)
+    p54 = plan_batterij(nu54, L50, Tariff(), V53, growatt53(soc=20.0))
+    g54 = bat.growatt_besluit(p54, laad54, nu54, growatt53(soc=20.0), balans=-14.6)
+    controle(f"06:{minuut:02d} in het vak om te laden: laden van het net, wat het plan van dit kwartier ook zegt",
+             g54.stand == bat.NETLADEN and g54.rule == "netladen" and "32%" in g54.reason, f"{g54.stand} {g54.reason}")
+controle("de conclusie zegt wat het schema laadt, niet het tekort van de hele nacht",
+         g54.plan.endswith("In de goedkope uren laadt hij 2,3 kWh van het net bij (06:00-08:00), tot 32%.")
+         and "tekort" not in g54.plan, g54.plan)
+g54b = bat.growatt_besluit(p54, laad54, DAG.replace(day=22, hour=7, minute=30), growatt53(soc=32.0))
+controle("op de stopgrens in het vak: geen laden meer, nul op de meter", g54b.stand == bat.NUL, f"{g54b.stand}")
+nu54c = DAG.replace(hour=23, minute=59)
+p54c = plan_batterij(nu54c, L50, Tariff(), V53, growatt53(soc=40.0))
+g54c = bat.growatt_besluit(p54c, houd54, nu54c, growatt53(soc=40.0))
+controle("om 23:59 in een vak tot 23:59 dat om 00:00 doorgaat: nog steeds vasthouden",
+         g54c.stand == bat.STANDBY and g54c.rule == "vasthouden" and "08:00" in g54c.reason, f"{g54c.stand} {g54c.reason}")
+controle("en de conclusie noemt het vak over middernacht als één", "(22:00-08:00)" in g54c.plan, g54c.plan)
+nu54d = DAG.replace(day=22, hour=12)
+p54d = plan_batterij(nu54d, L50, Tariff(), V53, growatt53(soc=60.0))
+g54d = bat.growatt_besluit(p54d, laad54, nu54d, growatt53(soc=60.0), wil=houd54)
+controle("buiten het vak: nul op de meter, en de conclusie volgt het schema dat de coach gaat schrijven",
+         g54d.stand == bat.NUL and g54d.plan.endswith("op 24% (22:00-08:00); het huis haalt dan van het net."), g54d.plan)
+g54e = bat.growatt_besluit(p54d, None, nu54d, growatt53(soc=60.0), balans=3.2)
+controle("zonder schema dezelfde conclusie als elke batterij", g54e.plan.endswith("3,2 kWh over in je accu."), g54e.plan)
+geen54 = bat.Besluit(bat.STANDBY, reason="x", plan="y", rule="geen-accustand")
+controle("een besluit dat niet uit de som komt blijft staan", bat.growatt_besluit(geen54, laad54, nu54d, growatt53()) is geen54)
+controle("vakken over middernacht als één", bat.growatt_vakken_tekst([("22:00", "23:59"), ("00:00", "08:00")]) == "22:00-08:00")
+# Het tekort telt alleen buiten het goedkoopste: vazio 0,166, fora vazio 0,272.
+uren54 = [uur53(DAG.replace(hour=22), DAG.replace(day=23, hour=8), 0.166),
+          uur53(DAG.replace(day=23, hour=8), DAG.replace(day=23, hour=22), 0.272),
+          uur53(DAG.replace(day=23, hour=22), DAG.replace(day=24, hour=8), 0.166)]
+controle("om 02:00 in vazio is er geen tekort te tellen", not bat.growatt_duur(uren54, DAG.replace(day=23, hour=2)))
+controle("om 09:00 in fora vazio wel", bat.growatt_duur(uren54, DAG.replace(day=23, hour=9)))
+controle("zonder prijzen niet", not bat.growatt_duur([], DAG.replace(day=23, hour=9)))
+s54 = bat.growatt_schema(p53.uren, nu53, growatt53(), vasthouden=False)
+controle("neemt de Growatt vasthouden niet aan, dan een schema zonder", s53.houden and not s54.houden, f"{s53} {s54}")
+controle("de nachten van voor v0.156.0 tellen niet mee",
+         bat.growatt_nachten({"growatt_nachten": [10.995]}) == []
+         and bat.growatt_nachten({"growatt_nachten": [-2.4], "growatt_nachten_v": bat.GROWATT_NACHTEN_V}) == [-2.4])
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

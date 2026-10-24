@@ -38,6 +38,20 @@ export function volgendeNetlading(hours = []) {
   return { start: hours[eerste].start, end: hours[laatste].end, kwh };
 }
 
+/**
+ * De vakken van een Growatt-schema als "22:00-08:00": een vak over middernacht staat er in
+ * twee (`growatt_vakken_tekst` in batterij.py).
+ */
+export function vakkenTekst(periods = []) {
+  const rij = [];
+  for (const [begin, eind] of periods) {
+    const vorige = rij[rij.length - 1];
+    if (vorige && vorige[1] === "23:59" && begin === "00:00") vorige[1] = eind;
+    else rij.push([begin, eind]);
+  }
+  return rij.map(([a, b]) => `${a}-${b}`).join(", ");
+}
+
 /** De naam van een stand met een hoofdletter, voor de grafiek ("Nul op de meter"). */
 export function standNaam(stand) {
   const naam = naamVan(stand) ?? "";
@@ -157,7 +171,9 @@ export function batterijVooruit(besluit) {
         : "",
     });
   }
-  if (Number.isFinite(besluit.balance_kwh)) {
+  // Bij een Growatt met een schema niet: dat tekort telde de goedkope uren mee, waarin het huis
+  // juist van het net hoort te draaien (v0.156.0).
+  if (Number.isFinite(besluit.balance_kwh) && !besluit.schedule?.grid) {
     const over = besluit.balance_kwh >= 0;
     kop.push({
       label: t("Morgenvroeg"),
@@ -317,7 +333,9 @@ export function terugverdiendRegel(earned, aanschaf) {
  */
 export function batteryRows(besluit, { aanschaf = null } = {}) {
   if (!besluit || besluit.kind !== "batterij") return [];
-  const rijen = [{ label: t("Stand"), text: besluit.mode_name ?? besluit.mode ?? "—" }];
+  // De naam in de taal van het paneel; `mode_name` is het Nederlands van de coach, en dat stond
+  // op 23-10-2026 zo in het Engelse paneel ("Mode: Laden van het net").
+  const rijen = [{ label: t("Stand"), text: besluit.mode ? standNaam(besluit.mode) : (besluit.mode_name ?? "—") }];
 
   // Sinds v0.97.0 kan de batterij het zelf doen, met een eigen meter; dan is er
   // geen opdracht van de coach en zegt de kaart wie het doet.
@@ -338,7 +356,22 @@ export function batteryRows(besluit, { aanschaf = null } = {}) {
   // Wat een kWh straks waard is en het plan per uur staan sinds v0.85.0 in de
   // pop-up "Wat gaat hij doen" (`batterijVooruit`); de kaart werd er te lang
   // van. De eerstvolgende netlading blijft, want dat is nieuws.
-  const net = volgendeNetlading(besluit.hours);
+  // Een Growatt laadt zoals zijn schema zegt, niet zoals de blokken van het plan (v0.156.0):
+  // in de klantwoning stond "07:30 tot 08:00" op de kaart bij een schema van 06:00-08:00.
+  const schema = besluit.schedule;
+  if (schema?.grid && (schema.periods ?? []).length) {
+    const vakken = vakkenTekst(schema.periods);
+    rijen.push(schema.hold
+      ? { label: t("Houdt vast"), text: t("{vakken}, op {soc}%", { vakken, soc: schema.stop_soc }) }
+      : {
+        label: t("Laadt van het net"),
+        text: t("{vakken}, tot {soc}%, ongeveer {kwh} kWh", {
+          vakken, soc: schema.stop_soc,
+          kwh: Number(schema.kwh ?? 0).toLocaleString(locale(), { maximumFractionDigits: 1 }),
+        }),
+      });
+  }
+  const net = schema ? null : volgendeNetlading(besluit.hours);
   if (net) {
     rijen.push({
       label: t("Laadt van het net"),

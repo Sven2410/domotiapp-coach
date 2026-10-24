@@ -2340,6 +2340,35 @@ proef("de kaart van een batterij: stand, opdracht, waarde, netlading en wat hij 
   assert.ok(!oud.some((r) => /Terugverdiend/.test(r.label)));
 });
 
+// Een Growatt (v0.156.0): de kaart toont het schema en geen stuurgetal, en de stand in de taal van het
+// paneel. In de klantwoning op 23-10-2026 stond er "Mode: Laden van het net", "Command from the coach 0 W"
+// en "07:30 to 08:00" bij een schema van 06:00-08:00.
+proef("de kaart van een Growatt: het schema, geen opdracht, de stand vertaald (v0.156.0)", async () => {
+  const growatt = {
+    kind: "batterij", mode: "netladen", mode_name: "laden van het net", applied: true, setpoint_w: null,
+    hours: [{ start: "2026-10-24T07:30:00", end: "2026-10-24T08:00:00", grid_kwh: 2.3 }],
+    schedule: { grid: true, hold: false, power_pct: 15, stop_soc: 32, periods: [["06:00", "08:00"]], kwh: 2.33 },
+  };
+  const rijen = Object.fromEntries(batteryRows(growatt).map((r) => [r.label, r.text]));
+  assert.equal(rijen["Laadt van het net"], "06:00-08:00, tot 32%, ongeveer 2,3 kWh");
+  assert.equal(rijen["Opdracht van de coach"], undefined);
+  const vast = Object.fromEntries(batteryRows({
+    ...growatt, mode: "standby",
+    schedule: { grid: true, hold: true, power_pct: 1, stop_soc: 24, periods: [["22:00", "23:59"], ["00:00", "08:00"]], kwh: 0 },
+  }).map((r) => [r.label, r.text]));
+  assert.equal(vast["Houdt vast"], "22:00-08:00, op 24%");
+  assert.equal(vast["Laadt van het net"], undefined, "niet de blokken van het plan");
+  const i = await import("../custom_components/domotiapp_coach/frontend/src/i18n.js");
+  try {
+    i.kiesTaal("en");
+    const en = Object.fromEntries(batteryRows(growatt).map((r) => [r.label, r.text]));
+    assert.equal(en["Mode"], "Charging from the grid");
+    assert.equal(en["Charges from the grid"], "06:00-08:00, to 32%, about 2.3 kWh");
+  } finally {
+    i.kiesTaal("nl");
+  }
+});
+
 proef("alleen de eerste aaneengesloten netlading staat erop", () => {
   const net = volgendeNetlading(BESLUIT_BATTERIJ.hours);
   assert.equal(net.start, "2026-09-22T02:00:00");

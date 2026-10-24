@@ -11354,6 +11354,121 @@ controle("Alfen: daarna weer een 0",
          any(d[1] == "set_value" and d[2].get("value") == 0 for d in hass195a.services.verstuurd),
          f"{hass195a.services.verstuurd}")
 
+print("=== 196. Growatt: het besluit uit het schema, geen handmatig laden, en de nacht in de dure uren (v0.156.0) ===")
+# De klantwoning op 24-10-2026: van 06:00 tot 07:57 laden op 1,2 kW, terwijl het besluit elk kwartier
+# tussen laden en vasthouden wisselde. Nu volgt het besluit het schema dat in de Growatt staat.
+GROWATT192["controllable"] = True
+coach192._batterij.clear()
+coach192._besluit_genoteerd.clear()
+fout192["n"] = 0
+hass192.states.zet("sensor.prijs", {"state": "0.166", "attributes": {"unit_of_measurement": "€/kWh",
+                                                                     "prices": prijzen192(24)}})
+hass192.states.zet("sensor.growatt_soc", {"state": "20", "attributes": {"unit_of_measurement": "%"}})
+schema196 = coachmod.GrowattSchema(net=True, vermogen_pct=15, stop_soc=60, vakken=[("06:00", "08:00")],
+                                   tot=dt.datetime(2026, 9, 24, 8, 0), kwh=5.0)
+omvormer192.update(charge_power=15, charge_stop_soc=60, mains_enabled=True,
+                   periods=[{"period_id": 1, "start_time": "06:00", "end_time": "08:00", "enabled": True},
+                            {"period_id": 2, "start_time": "00:00", "end_time": "00:00", "enabled": False},
+                            {"period_id": 3, "start_time": "00:00", "end_time": "00:00", "enabled": False}])
+asyncio.run(ronde192(dt.datetime(2026, 9, 24, 6, 10)))
+coach192._batterij["dev-growatt"].update(growatt_geschreven=schema196, growatt_bevestigd=dt.datetime(2026, 9, 24, 6, 0),
+                                         growatt_op=dt.datetime(2026, 9, 24, 6, 0))
+standen196 = []
+for m196 in (12, 14, 15, 29, 30, 44, 45):
+    st196, _ = asyncio.run(ronde192(dt.datetime(2026, 9, 24, 6, m196)))
+    standen196.append((m196, st196.get("mode"), st196.get("rule")))
+print(f"  {standen196} {st196.get('schedule')} {st196.get('setpoint_w')}")
+controle("in een vak om te laden zegt het besluit elke minuut laden van het net",
+         all(s[1] == "netladen" and s[2] == "netladen" for s in standen196), f"{standen196}")
+besluiten196 = [d for soort, d in hass192.bus.gebeurtenissen if soort == coachmod.EVENT_NOTIFICATION
+                and d.get("device") == "dev-growatt" and d.get("rule") in ("netladen", "vasthouden", "nul")
+                and str(d.get("at", "")) >= "2026-09-24T06:12"]
+controle("en noteert dat één keer, niet elk kwartier", len(besluiten196) <= 1, f"{[d.get('at') for d in besluiten196]}")
+controle("met de stopgrens in de reden en geen stuurgetal",
+         f"{(st196.get('schedule') or {}).get('stop_soc')}%" in st196.get("reason", "")
+         and st196.get("setpoint_w") is None and "hold" in (st196.get("schedule") or {}), f"{st196.get('reason')}")
+
+# Handmatig vol laden of leegladen bestaat bij een Growatt niet. De eigenaar op 24-10-2026.
+coach192._boost.add("dev-growatt")
+coach192._drain["dev-growatt"] = 30.0
+st196, v196 = asyncio.run(ronde192(dt.datetime(2026, 9, 24, 6, 50)))
+controle("vol laden en leegladen vallen meteen weg, en er komt geen ander schema",
+         "dev-growatt" not in coach192._boost and "dev-growatt" not in coach192._drain
+         and not st196.get("boost") and st196.get("drain_to") is None and geschreven192(v196) == [],
+         f"{coach192._boost} {coach192._drain} {geschreven192(v196)}")
+
+# Een nieuw schema dat de cloud weigert terwijl het oude net zo goed van het net laadt: alleen in de
+# geschiedenis. In de klantwoning ging om 07:55 "hij laadt vannacht niet van het net" naar de telefoon.
+telefoon196 = []
+
+
+async def _versturen196(bericht, soort):
+    telefoon196.append(bericht)
+
+
+oud_versturen196 = coach192._async_versturen
+coach192._async_versturen = _versturen196
+sessie196 = {}
+later196 = coachmod.GrowattSchema(
+    net=True, vermogen_pct=20, stop_soc=60, vakken=[("06:30", "08:00")], tot=schema196.tot, kwh=5.0)
+for _ in range(3):
+    asyncio.run(coach192._async_growatt_fout(dt.datetime(2026, 9, 24, 6, 20), GROWATT192, sessie196, later196,
+                                             staat=schema196))
+geschiedenis196 = [d.get("message") for soort, d in hass192.bus.gebeurtenissen if soort == coachmod.EVENT_NOTIFICATION
+                   and "het vorige blijft staan" in str(d.get("message"))]
+controle("een geweigerd schema dat niets aan het laden verandert: niet naar de telefoon, wel in de geschiedenis",
+         telefoon196 == [] and len(geschiedenis196) == 1, f"{telefoon196} {geschiedenis196}")
+# Vasthouden dat de cloud weigert (de klantwoning, 24-10-2026 om 07:45 en om 21:31): na drie keer laat
+# de coach het voor dit goedkope stuk weg, zonder telefoon.
+sessie196 = {}
+houd196 = coachmod.GrowattSchema(net=True, vermogen_pct=1, stop_soc=27, vakken=[("22:00", "23:59"), ("00:00", "08:00")],
+                                 tot=dt.datetime(2026, 9, 25, 8, 0), houden=True)
+for _ in range(3):
+    asyncio.run(coach192._async_growatt_fout(dt.datetime(2026, 9, 24, 21, 31), GROWATT192, sessie196, houd196,
+                                             staat=schema196))
+controle("vasthouden drie keer geweigerd: tot het eind van het stuk zonder, en niet op de telefoon",
+         sessie196.get("growatt_houden_mis") == houd196.tot and telefoon196 == [], f"{sessie196} {telefoon196}")
+sessie196 = {}
+for _ in range(3):
+    asyncio.run(coach192._async_growatt_fout(dt.datetime(2026, 9, 24, 21, 30), GROWATT192, sessie196, schema196,
+                                             staat=coachmod.GrowattSchema()))
+controle("een schema om te laden dat er niet in komt wel, zonder 'vannacht'",
+         len(telefoon196) == 1 and "zoals gepland" in telefoon196[0], f"{telefoon196}")
+coach192._async_versturen = oud_versturen196
+
+# De nacht nakijken: het huis op de vloer telt alleen als tekort in een duurder uur. In de klantwoning
+# telde de eerste echte nacht 23:53-06:00 in vazio mee: 11 kWh "te weinig".
+Uur196 = sys.modules["domotiapp_coach.batterij"].Uur
+dag196 = dt.datetime(2026, 10, 22)
+uren196 = [Uur196(dag196 + dt.timedelta(hours=h), dag196 + dt.timedelta(hours=h + 1), "nul", 0.0, 0.0, 15.0,
+                  0.166 if (h % 24 >= 22 or h % 24 < 8) else 0.272) for h in range(0, 48)]
+sessie196 = {"growatt_geschreven": coachmod.GrowattSchema(net=True, vermogen_pct=20, stop_soc=40,
+                                                          vakken=[("06:00", "08:00")])}
+b196 = coachmod.Batterij(soc=15.0, capacity_kwh=12.5, soc_min=15.0, soc_max=100.0)
+
+
+def stap196(tijd):
+    hass193b.states.zet("sensor.afname", "1000.0")
+    hass193b.states.zet("sensor.teruglevering", "0.0")
+    hass193b.states.zet("sensor.growatt_laden", {"state": "0", "attributes": {"unit_of_measurement": "kW"}})
+    hass193b.states.zet("sensor.growatt_ontladen", {"state": "0", "attributes": {"unit_of_measurement": "kW"}})
+    asyncio.run(coach193b._async_growatt_nacht(tijd, inst193b, GROWATT192, b196, sessie196, uren196))
+
+
+for m196 in range(0, 121):      # 02:00-04:00, vazio, op de vloer
+    stap196(dag196.replace(hour=2) + dt.timedelta(minutes=m196))
+tekort196a = sessie196["growatt_dag"]["tekort"]
+sessie196.pop("growatt_dag_op", None)
+for m196 in range(0, 61):       # 20:00-21:00, fora vazio, op de vloer
+    stap196(dag196.replace(hour=20) + dt.timedelta(minutes=m196))
+tekort196b = sessie196["growatt_dag"]["tekort"]
+print(f"  tekort na vazio {tekort196a:.2f}, na een uur fora vazio {tekort196b:.2f}")
+controle("in vazio op de vloer is geen tekort, in fora vazio wel (1 kWh per uur)",
+         tekort196a < 0.01 and abs(tekort196b - 1.0) < 0.05, f"{tekort196a} {tekort196b}")
+rij196 = {"device": "dev-growatt", "growatt_nachten": [10.995]}
+controle("de nacht van voor v0.156.0 telt niet mee in de bijstelling",
+         coachmod.growatt_bijstelling(coachmod.growatt_nachten(rij196), 12.5) == 0.0, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

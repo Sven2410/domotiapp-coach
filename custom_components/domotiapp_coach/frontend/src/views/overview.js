@@ -29,6 +29,7 @@ import {
   programKey,
   programPicker,
   isReadOnly,
+  isSchema,
   releaseCopy,
   socVeld,
   deviceIcon,
@@ -2073,7 +2074,10 @@ class DacViewOverview extends DacElement {
     planTekst.textContent = besluit.kind === "batterij" ? nachtConclusie(besluit) : (besluit.plan ?? "");
     // De conclusie van de batterij: groen als de nacht rond komt, oranje als
     // er tekort is. De bewoner van de eerste woning op 22-09-2026.
-    const balans = besluit.kind === "batterij" && Number.isFinite(besluit.balance_kwh) ? besluit.balance_kwh : null;
+    // Met een schema om te laden of vast te houden zegt de conclusie wat dat schema doet; dan
+    // geen oranje (v0.156.0).
+    const balans = besluit.kind === "batterij" && Number.isFinite(besluit.balance_kwh) && !besluit.schedule?.grid
+      ? besluit.balance_kwh : null;
     planTekst.classList.toggle("good", balans !== null && balans >= 0);
     planTekst.classList.toggle("warn", balans !== null && balans < 0);
 
@@ -2113,7 +2117,10 @@ class DacViewOverview extends DacElement {
       // pauzeren: wie hem wil stilzetten haalt het vinkje "mag sturen" weg.
       // Wel kan hij nu vol: dezelfde knop, andere woorden (22-09-2026).
       && !batterij;
-    boost.hidden = !(kan || (batterij && besluit.level !== "advise" && besluit.applied));
+    // Een Growatt kent geen handmatig vol laden of leegladen (v0.156.0). De eigenaar op
+    // 24-10-2026: "ik wil niet kunnen handmatig laden en ontladen bij growatt".
+    const handmatig = batterij && besluit.level !== "advise" && besluit.applied && !isSchema(device);
+    boost.hidden = !(kan || handmatig);
     boost.setAttribute("aria-pressed", String(Boolean(besluit.boost)));
     // Zonder planning is de paal in een modus: Snel, Continu of Zon (v0.87.0).
     // Met een planning blijft alleen Snelladen, want dan rekent hij naar de
@@ -2147,7 +2154,7 @@ class DacViewOverview extends DacElement {
     // De ring om de knop zolang vol of leeg laden loopt, alleen bij de batterij.
     boost.classList.toggle("ring", batterij);
     const leeg = this.$(`[data-drain="${slot}"]`);
-    const magLeeg = batterij && besluit.level !== "advise" && besluit.applied;
+    const magLeeg = handmatig;
     leeg.hidden = !magLeeg;
     leeg.setAttribute("aria-pressed", String(Number.isFinite(besluit.drain_to)));
     this.$(`[data-drain-text="${slot}"]`).textContent = Number.isFinite(besluit.drain_to)
