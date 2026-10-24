@@ -1608,7 +1608,8 @@ staat hij daar stil en haalt het huis van het net. Dus:
 * `Uur.vast` zegt welke blokken dat zijn: het huis vraagt, er zit iets in, en hij geeft niets. Stilstaan
   omdat het huis niets vraagt of omdat hij leeg is, is iets anders;
 * `growatt_schema` begint het vak waar het vasthouden begint, met `houden`, de stopgrens op wat er dan
-  in zit (niet de stand van nu: een vak dat om 18:00 geschreven wordt begint om 22:00) en 1% vermogen.
+  in zit (niet de stand van nu: een vak dat om 18:00 geschreven wordt begint om 22:00) en 10% vermogen
+  (`GROWATT_HOUDEN_PCT`, sinds v0.156.1; 1% nam de Growatt niet aan).
   Moet er later bij, dan wordt het op het late moment een schema om te laden in hetzelfde vak; van
   `houden` naar laden is altijd een nieuw schema (`wijkt_af`), terug niet als de oude stopgrens niet
   hoger ligt (na vol laden tot 100% staat hij al stil);
@@ -1746,10 +1747,15 @@ zonder oranje, en staat "Morgenvroeg" niet in de pop-up: dat tekort telde de goe
 **De Growatt-API weigerde elk vasthouden.** Om 07:45 (1%, stopgrens 32, het laatste kwartier van vazio)
 en om 21:31 en 21:36 (1%, stopgrens 27, 22:00-08:00): "Growatt API error: Error during writing AC charge
 time periods". De schema's om te laden (15% en 22%, stopgrens boven de accustand) kwamen wel aan.
-Welk veld de omvormer weigert (het vermogen van 1% of de stopgrens onder de accustand) is nog niet
-uitgezocht; daarvoor is een proef in de klantwoning nodig. Tot dan twee vangnetten: van laden naar
+Het is het vermogen (v0.156.1): de beheersessie schreef om 22:37 hetzelfde vasthouden met 10% en de
+stopgrens op de accustand (22%), en dat nam hij meteen aan, 53 seconden na een geslaagde opdracht van de
+coach. Een grens van één opdracht per vijf minuten is het dus niet; van de schema's zonder 1% werd er die
+dag één van de vijf geweigerd (22:31), wat een hapering van de cloud lijkt. Vasthouden gaat sindsdien op
+`GROWATT_HOUDEN_PCT` (10%). De twee vangnetten blijven: van laden naar
 vasthouden in hetzelfde vak schrijft de coach niet meer voor minder dan `GROWATT_HOUDEN_KWH`, of als hij
-op de stopgrens al stilstaat; en drie keer geweigerd vasthouden laat de coach voor dat goedkope stuk
+op de stopgrens al stilstaat (en sinds v0.156.1 andersom: van vasthouden naar laden in hetzelfde vak ook
+pas vanaf een halve kWh; met 10% schreef hij in het virtuele huis om 08:57 nog laden op 100% voor de
+laatste drie minuten, en ging de zekering eroverheen); en drie keer geweigerd vasthouden laat de coach voor dat goedkope stuk
 weg (`growatt_houden_mis`, `vasthouden` in `growatt_schema`), met een regel in de geschiedenis.
 
 **De melding "hij laadt vannacht niet van het net"** kwam om 07:55 op de telefoon, terwijl hij al

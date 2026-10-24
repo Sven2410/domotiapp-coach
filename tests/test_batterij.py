@@ -1638,8 +1638,8 @@ s53 = bat.growatt_schema(p53.uren, nu53, growatt53())
 print(f"  22:30 {p53.stand} {p53.rule}: {s53}")
 controle("in vazio houdt hij vast: het besluit zegt het", p53.stand == bat.STANDBY and p53.rule == "vasthouden",
          f"{p53.stand} {p53.rule}")
-controle("en het schema is een vak tot 08:00 met de stopgrens op wat erin zit, op 1%",
-         s53.houden and s53.net and s53.vakken[-1][1] == "08:00" and s53.stop_soc == 50 and s53.vermogen_pct == 1,
+controle("en het schema is een vak tot 08:00 met de stopgrens op wat erin zit, op 10% (v0.156.1)",
+         s53.houden and s53.net and s53.vakken[-1][1] == "08:00" and s53.stop_soc == 50 and s53.vermogen_pct == 10,
          f"{s53}")
 controle("vasthouden zet de coach niet uit op de stopgrens", not bat.growatt_vol(s53, 50.0), "")
 # In de dure uren nul op de meter: om 19:00 geeft hij het huis wat het vraagt.
@@ -1732,6 +1732,7 @@ uren54 = [uur53(DAG.replace(hour=22), DAG.replace(day=23, hour=8), 0.166),
 controle("om 02:00 in vazio is er geen tekort te tellen", not bat.growatt_duur(uren54, DAG.replace(day=23, hour=2)))
 controle("om 09:00 in fora vazio wel", bat.growatt_duur(uren54, DAG.replace(day=23, hour=9)))
 controle("zonder prijzen niet", not bat.growatt_duur([], DAG.replace(day=23, hour=9)))
+controle("vasthouden op 10%: 1% nam de Growatt niet aan (v0.156.1)", s53.houden and s53.vermogen_pct == 10, f"{s53}")
 s54 = bat.growatt_schema(p53.uren, nu53, growatt53(), vasthouden=False)
 controle("neemt de Growatt vasthouden niet aan, dan een schema zonder", s53.houden and not s54.houden, f"{s53} {s54}")
 controle("de nachten van voor v0.156.0 tellen niet mee",
