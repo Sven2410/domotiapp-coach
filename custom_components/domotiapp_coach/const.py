@@ -817,3 +817,7 @@ TEMPO_ONDERGRENS = 6 * 230.0 / 1000.0
 # procent. De coach rekent ermee (`_vakantie`) en de sensor van de batterij
 # toont hem (`vakantie_max`), dus allebei hier vandaan.
 HOLIDAY_MAX_DEFAULT = 50
+
+# Met hoeveel van de vorige dagen de lekmelding een dag gas vergelijkt (v0.157.0). Gas volgt het
+# seizoen, dus een week en geen dertig dagen; water vergelijkt met alles wat er bewaard is.
+GAS_VERGELIJK_DAGEN = 7

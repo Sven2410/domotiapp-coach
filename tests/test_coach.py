@@ -3872,7 +3872,11 @@ controle("een kloppende voorspelling blijft staan", klopt69 == 1.0, f"{klopt69}"
 # plan-ahead-sheet.js er wel naar keek. Elk veld van `Plan` dat het scherm
 # gebruikt hoort hier langs te komen.
 plan69 = coach69._tijdlijn.__doc__ is not None
-velden69 = set(coachmod.ChargerCoach._tijdlijn.__code__.co_consts)
+# Uit de bron en niet uit `co_consts`: Python 3.13 bewaart een sleutel die alleen in een
+# dict-letterlijke staat daar niet altijd (gezien 25-10-2026, `blocks` ontbrak).
+import inspect  # noqa: E402
+import re as _re69  # noqa: E402
+velden69 = set(_re69.findall(r'"([a-z_]+)"', inspect.getsource(coachmod.ChargerCoach._tijdlijn)))
 kaartvelden = {"deadline", "latest_start", "expected_done", "kwh_needed", "hours_needed",
                "amps", "planned_kwh", "solar_only", "note", "estimated", "measured",
                "solar_note", "blocks"}
@@ -11468,6 +11472,91 @@ controle("in vazio op de vloer is geen tekort, in fora vazio wel (1 kWh per uur)
 rij196 = {"device": "dev-growatt", "growatt_nachten": [10.995]}
 controle("de nacht van voor v0.156.0 telt niet mee in de bijstelling",
          coachmod.growatt_bijstelling(coachmod.growatt_nachten(rij196), 12.5) == 0.0, "")
+
+print("=== 197. de naijl van de meter telt vanaf de eerste ronde op nul, niet vanaf de laatste die laadde (v0.157.0) ===")
+# In een klantwoning op 24-10-2026: een ronde om 00:07:46 zag 15 A, de Easee herstartte om
+# 00:08:43, de ronde van 00:08:46 viel net buiten de minuut, de fasen droegen de auto nog
+# (18 A tot 00:09:02), en de coach schreef 0 A ("te zwaar belast"). Zie `_read`.
+hass197, _, coach197 = bouw(huis(status="charging", stroom=15.2, vermogen=10300.0, teruglevering=0.0,
+                                 afname=10300.0), instellingen())
+for fase197 in ("sensor.l1", "sensor.l2", "sensor.l3"):
+    hass197.states.zet(fase197, "18")
+hass197.states.zet("sensor.laadpaal_dyn", "16")
+NU197 = coachmod._moment()
+coach197._read(NU197, instellingen(), LAADPAAL)
+hass197.states.zet("sensor.laadpaal_status", "awaiting_start")
+hass197.states.zet("sensor.laadpaal_stroom", "0")
+hass197.states.zet("sensor.laadpaal_vermogen", "0")
+net197, auto197, paal197, _ = coach197._read(NU197 + dt.timedelta(seconds=57), instellingen(), LAADPAAL)
+controle("de eerste ronde op nul rekent de 15 A nog aan de paal", net197.recent_charger_amps == 15.2,
+         f"{net197.recent_charger_amps}")
+net197, auto197, paal197, _ = coach197._read(NU197 + dt.timedelta(seconds=61), instellingen(), LAADPAAL)
+plafond197 = planner.ceiling_amps(net197, auto197, paal197)
+print(f"  61 s na de laatste ronde met stroom, fasen nog 18 A: recent {net197.recent_charger_amps} A, plafond {plafond197} A")
+controle("ook ruim een minuut na de laatste ronde met stroom", net197.recent_charger_amps == 15.2,
+         f"{net197.recent_charger_amps}")
+controle("dus geen 'te zwaar belast' op de eigen stroom van de auto", plafond197 >= planner.MIN_AMPS, f"{plafond197}")
+net197, _, _, _ = coach197._read(NU197 + dt.timedelta(seconds=57 + 61), instellingen(), LAADPAAL)
+controle("na een minuut op nul is hij vergeten", net197.recent_charger_amps == 0.0 and not coach197._laatste_stroom,
+         f"{net197.recent_charger_amps} {coach197._laatste_stroom}")
+
+print("=== 198. het setpoint blijft binnen het bereik dat de knop nu toelaat (v0.157.0) ===")
+# In een klantwoning op 25-10-2026 om 14:55, de Anker op 99%: 2376 W naar een knop met
+# bereik 0-1428, een ServiceValidationError, en de regelaar struikelde.
+hass198, _, coach198 = bouw(huis75(soc="99"), instellingen(devices=[LAADPAAL, BATTERIJ]))
+hass198.states.zet("number.batterij_vermogen", {"state": "0", "attributes": {"min": 0, "max": 1428}})
+
+
+def schrijf198(apparaat, watt):
+    hass198.services.verstuurd.clear()
+    asyncio.run(coach198._async_batterij_zetten(apparaat, watt))
+    return [d[2]["value"] for d in hass198.services.verstuurd if d[2].get("entity_id") == "number.batterij_vermogen"]
+
+
+controle("met een richting: laden boven de max wordt de max", schrijf198(BATTERIJ, 2376.0) == [1428], "")
+controle("en ontladen ook", schrijf198(BATTERIJ, -2376.0) == [1428], "")
+controle("binnen het bereik blijft het getal zoals het was", schrijf198(BATTERIJ, 900.0) == [900], "")
+TEKEN198 = {**BATTERIJ, "entities": {k: v for k, v in BATTERIJ["entities"].items() if k != "direction"}}
+hass198.states.zet("number.batterij_vermogen", {"state": "0", "attributes": {"min": -800, "max": 1428}})
+controle("met een teken: laden tot de max", schrijf198(TEKEN198, 2376.0) == [1428], "")
+controle("en ontladen tot de min", schrijf198(TEKEN198, -2376.0) == [-800], "")
+hass198.states.zet("number.batterij_vermogen", {"state": "0", "attributes": {"max_charge_power": 7000}})
+controle("zonder min en max op de knop: zoals het was", schrijf198(TEKEN198, 2376.0) == [2376], "")
+
+print("=== 199. de lekmelding vergelijkt gas met de laatste week, water met alles (v0.157.0) ===")
+# In een klantwoning op 25-10-2026: "Gisteren ging er 4,1 m³ gas doorheen, normaal is dat rond
+# 0,72 m³ per dag", terwijl het huis sinds half oktober stookte. Vijftien zomerdagen, veertien
+# stookdagen en dan een koude dag.
+inst199 = instellingen()
+inst199["sources"]["meters"] = {"gas_enabled": True, "gas": "sensor.gasmeter",
+                                "water_enabled": True, "water": "sensor.watermeter"}
+inst199["notifications"] = {**(inst199.get("notifications") or {}),
+                            "usage_alert": {"enabled": True, "factor": 3, "min_days": 5}}
+hass199, _, coach199 = bouw({**huis89}, inst199)
+T199 = dt.datetime(2026, 9, 25, 8, 0)
+dagen199 = [(0.4, 0.3)] * 15 + [(2.0, 0.3)] * 14 + [(4.1, 0.3)]
+gas199, water199 = 9130.0, 50.0
+for i, (g, w) in enumerate(dagen199 + [(0.0, 0.0)]):
+    hass199.states.zet("sensor.gasmeter", {"state": f"{gas199:.3f}", "attributes": {"unit_of_measurement": "m³"}})
+    hass199.states.zet("sensor.watermeter", {"state": f"{water199:.3f}", "attributes": {"unit_of_measurement": "m³"}})
+    asyncio.run(ronde75(hass199, coach199, T199 + dt.timedelta(days=i)))
+    if i == len(dagen199):
+        na199 = meldingen89(hass199)
+    gas199 += g
+    water199 += w
+print(f"  na de koude dag: {na199}")
+controle("een koude dag in het stookseizoen is geen lek", not na199, f"{na199}")
+for g in (6.5, 0.0):
+    hass199.states.zet("sensor.gasmeter", {"state": f"{gas199:.3f}", "attributes": {"unit_of_measurement": "m³"}})
+    hass199.states.zet("sensor.watermeter", {"state": f"{water199:.3f}", "attributes": {"unit_of_measurement": "m³"}})
+    gas199 += g
+    water199 += 0.3
+    T199 += dt.timedelta(days=1)
+    asyncio.run(ronde75(hass199, coach199, T199 + dt.timedelta(days=len(dagen199))))
+lek199 = meldingen89(hass199)
+print(f"  na een dag van 6,5 m³: {lek199}")
+controle("drie keer de laatste week geeft wel een melding, met de mediaan van die week",
+         len(lek199) == 1 and "6,5 m³ gas" in lek199[0] and "2,0 m³" in lek199[0], f"{lek199}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

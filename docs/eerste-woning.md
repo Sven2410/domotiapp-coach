@@ -191,7 +191,11 @@ de laatste punten van de eerste woning op 22-09-2026).
   water dat langer dan `water_flow_minutes` (twee uur) onafgebroken loopt
   volgens de debietsensor, één melding per keer; en een dag die meer dan
   `factor` (drie) keer de mediaan van de dagen ervoor vroeg, na `min_days`
-  gemeten dagen, één melding per dag. Het dagverbruik komt uit de tellers
+  gemeten dagen, één melding per dag. Voor gas zijn dat sinds v0.157.0 alleen
+  de laatste zeven dagen (`GAS_VERGELIJK_DAGEN`): in een klantwoning kwam op
+  25-10-2026 een kritieke melding over 4,1 m³ tegen "normaal 0,72", omdat de
+  helft van de dertig dagen nog zomer was. Water heeft geen seizoen en houdt
+  alles wat er bewaard is. Proef 199. Het dagverbruik komt uit de tellers
   zelf: de coach bewaart per meter de stand waarmee de dag begon
   (`usage_start`) en schrijft bij de eerste ronde van een nieuwe dag het
   verschil weg (`usage_days`, hooguit dertig dagen per meter). Lijsten, want

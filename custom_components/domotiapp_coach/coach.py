@@ -31,6 +31,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    GAS_VERGELIJK_DAGEN,
     BATTERIJ_ALLEEN_LEZEN,
     BATTERIJ_SCHEMA,
     NETTING_ENDS,
@@ -1445,9 +1446,10 @@ class ChargerCoach:
         # When a charging point that was not following was last prodded.
         self._nudged: dict[str, datetime] = {}
         # Per laadpunt de laatste stroom die er werkelijk liep, met het moment
-        # erbij. Alleen om de na-ijl van de fasemeting op te vangen als de paal
-        # net gestopt is; zie `_read`.
-        self._laatste_stroom: dict[str, tuple[float, datetime]] = {}
+        # waarop de coach hem voor het eerst op nul zag (None zolang hij loopt).
+        # Alleen om de na-ijl van de fasemeting op te vangen als de paal net
+        # gestopt is; zie `_read`.
+        self._laatste_stroom: dict[str, tuple[float, datetime | None]] = {}
         # Sinds wanneer een laadpunt onder zijn limiet blijft, en bij welke
         # limiet die klok begon. Zie `achter_s` in planner.py.
         self._achter_sinds: dict[str, tuple[datetime, float]] = {}
@@ -2860,7 +2862,11 @@ class ChargerCoach:
             if len(lijst) < min_dagen + 1:
                 continue
             gisteren = lijst[-1]
-            eerder = sorted(float(d.get("m3") or 0) for d in lijst[:-1])
+            # Gas tegen de laatste week, water tegen alles wat er is (v0.157.0). Gas volgt het seizoen:
+            # in een klantwoning op 25-10-2026 een kritieke melding over 4,1 m³ tegen "normaal 0,72",
+            # omdat de helft van de dertig dagen nog zomer was. Over zeven dagen lag de mediaan rond 2.
+            vorige = lijst[:-1][-GAS_VERGELIJK_DAGEN:] if meter == "gas" else lijst[:-1]
+            eerder = sorted(float(d.get("m3") or 0) for d in vorige)
             mediaan = eerder[len(eerder) // 2]
             if mediaan <= 0 or float(gisteren.get("m3") or 0) <= factor * mediaan:
                 continue
@@ -7179,6 +7185,17 @@ class ChargerCoach:
             waarde = abs(watt)
         else:
             waarde = -watt if eigen.get("setpoint_invert") else watt
+        # Binnen het bereik dat de knop nu toelaat (v0.157.0). Een Anker Solix maakt zijn `max`
+        # kleiner als hij bijna vol is: in een klantwoning op 25-10-2026 om 14:55, op 99%, van
+        # 10000 naar 1428 W, en de 2376 W van de regelaar gaf een ServiceValidationError in plaats
+        # van een batterij die laadt wat hij nog kan. Zonder `min` of `max` blijft het getal zoals het was.
+        attrs = getattr(self.hass.states.get(knop), "attributes", None) or {}
+        for grens, kies in (("max", min), ("min", max)):
+            try:
+                if attrs.get(grens) is not None:
+                    waarde = kies(waarde, float(attrs[grens]))
+            except (TypeError, ValueError):
+                continue
         await self.hass.services.async_call(
             "number", "set_value", {"entity_id": knop, "value": round(waarde)}, blocking=True
         )
@@ -9916,14 +9933,28 @@ class ChargerCoach:
         # terwijl hij zelf al op nul staat. Zonder dit geheugen wordt dat aan het
         # huis toegerekend en meldt de coach dat de aansluiting vol zit terwijl er
         # niets loopt. Zie `meter_loopt_achter` in planner.py.
+        #
+        # De minuut telt vanaf de eerste ronde die de paal op nul zag, niet
+        # vanaf de laatste die hem zag laden (v0.157.0). In een klantwoning
+        # herstartte de Easee op 24-10-2026 om 00:08:43 zijn laadbeurt; de
+        # ronde daarvoor was om 00:07:46, en die van 00:08:46 viel net buiten
+        # de minuut. De fasen stonden tot 00:09:02 nog op 18 A, dat werd huis,
+        # de coach schreef 0 A ("te zwaar belast"), en de Ford pauzeerde
+        # veertig seconden later voorgoed op 78%.
         recent = self._laatste_stroom.get(device_id)
         if charger_amps > STEP_AMPS:
-            self._laatste_stroom[device_id] = (charger_amps, now)
+            self._laatste_stroom[device_id] = (charger_amps, None)
             recent_amps = charger_amps
-        elif recent is not None and now - recent[1] <= METER_NAIJL:
-            recent_amps = recent[0]
+        elif recent is not None:
+            weg = recent[1] or now
+            if recent[1] is None:
+                self._laatste_stroom[device_id] = (recent[0], now)
+            if now - weg <= METER_NAIJL:
+                recent_amps = recent[0]
+            else:
+                self._laatste_stroom.pop(device_id, None)
+                recent_amps = 0.0
         else:
-            self._laatste_stroom.pop(device_id, None)
             recent_amps = 0.0
 
         grid = Grid(

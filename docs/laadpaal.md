@@ -1258,3 +1258,23 @@ prijzen). Dat is de afweging die de eigenaar maakte: een paar cent tegen weten d
 Proef 79 in test_planner.py, proef 195 in test_coach.py (ook voor een Alfen: daar is de proef de limiet,
 zonder startcommando), de vier `ford-storing-*`-scenario's in test_virtueel.py. **Nog niet aan een echte
 paal gezien.**
+
+## De naijl na een stop telt vanaf de eerste ronde op nul (v0.157.0)
+
+In een klantwoning in de nacht van 23 op 24-10-2026 laadde een bus op snelladen met
+15 A. Om 00:08:43 herstartte de Easee zijn laadbeurt: twee seconden `disconnected`,
+daarna `awaiting_authorization` en `awaiting_start`, en de eigen meter van de paal op
+nul. De fasemeting van het huis droeg de 15 A nog tot 00:09:02 (18 A per fase). De
+vorige ronde van de coach was om 00:07:46, de volgende om 00:08:46: één minuut en een
+paar honderdsten later. `METER_NAIJL` telde vanaf de laatste ronde die de paal zag laden,
+dus de 15 A was vergeten, het huis kwam op 18 A, er paste 4 A onder de zekering van
+25 A, en de coach schreef 0 A met "je aansluiting is te zwaar belast" (`no-room`). Een
+minuut later bood hij weer 16 A aan, maar de auto had om 00:09:26 zelf gepauzeerd en
+nam de rest van de nacht en de hele volgende dag niets meer, ook niet na de herhaalde herstarts
+van de paal. Hij bleef op 78% staan; in de auto stond geen laadgrens.
+
+Nu begint de minuut bij de eerste ronde die de paal op nul ziet (`_laatste_stroom` in
+coach.py bewaart dat moment). Een echte stop is daarmee hooguit een ronde langer
+"de paal" in de som, en die som mag in die tijd toch al niet hoger dan er gevraagd
+was (de rail in `ceiling_amps`). Proef 197 in test_coach.py speelt die nacht na: zonder
+de reparatie een plafond van 4 A, met 14 A.
