@@ -370,6 +370,10 @@ python tools/vertaalcheck.py     # en welke zinnen van de coach
 python tools/stijlcheck.py       # backticks in css-commentaar
 ```
 
+Het virtuele huis draait zijn scenario's sinds 25-10-2026 naast elkaar, op elke kern
+(`VIRTUEEL_KERNEN=4` voor minder, `=1` voor één voor één); op de mini-pc 8 minuten in
+plaats van 35, met dezelfde uitvoer. Alleen met `fork`, dus op Windows nog één voor één.
+
 De nagebouwde Home Assistant staat in `tests/harnas.py` en wordt door
 `test_coach.py` en het virtuele huis gedeeld.
 
