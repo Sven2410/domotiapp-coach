@@ -11,11 +11,15 @@ klaar-tijd gehaald is.
 
     python tests/test_virtueel.py             # alles, met de samenvatting per scenario
     python tests/test_virtueel.py vast        # alleen de scenario's met "vast" in de naam
+    VIRTUEEL_KERNEN=4 python tests/test_virtueel.py   # hooguit vier scenario's tegelijk
 """
 
 import datetime as dt
+import multiprocessing
+import os
 import re
 import sys
+from concurrent.futures import ProcessPoolExecutor
 
 import scenarios
 import virtueel
@@ -37,12 +41,43 @@ def controle(naam, gelukt, uitleg=""):
 
 
 filter_ = sys.argv[1] if len(sys.argv) > 1 else ""
+gekozen = [sc for sc in scenarios.ALLE if not filter_ or filter_ in sc.naam]
+
+
+def _kernen():
+    """Hoeveel scenario's tegelijk: `VIRTUEEL_KERNEN`, anders elke kern.
+
+    Sinds 25-10-2026 naast elkaar. De scenario's hangen niet van elkaar af, en één voor
+    één duurde een ronde op een machine met twaalf kernen 35 minuten op één ervan. Alleen
+    met `fork` (Linux, macOS): `spawn` laadt dit bestand opnieuw in elk proces en draait
+    dan alles daar nog eens. Elders, of met `VIRTUEEL_KERNEN=1`, één voor één zoals vroeger.
+    """
+    try:
+        gevraagd = int(os.environ.get("VIRTUEEL_KERNEN") or 0)
+    except ValueError:
+        gevraagd = 0
+    if "fork" not in multiprocessing.get_all_start_methods():
+        return 1
+    return max(1, gevraagd or os.cpu_count() or 1)
+
+
 V = {}
-for sc in scenarios.ALLE:
-    if filter_ and filter_ not in sc.naam:
-        continue
-    V[sc.naam] = draai(sc)
-    print(samenvatting(V[sc.naam]))
+kernen = min(_kernen(), len(gekozen))
+if kernen > 1:
+    with ProcessPoolExecutor(kernen, mp_context=multiprocessing.get_context("fork")) as pool:
+        # Elk scenario apart ingediend, zodat een vrije kern meteen het volgende pakt; de
+        # uitkomsten in de volgorde van `scenarios.ALLE`, dus dezelfde uitvoer als één voor één.
+        # De batterijscenario's eerst: die rekenen tot vier minuten per stuk (de rest een paar
+        # seconden), en achteraan in de lijst werden ze een staart van minuten op een paar kernen.
+        zwaar = sorted(gekozen, key=lambda sc: sc.batterij is None)
+        lopend = {sc.naam: pool.submit(draai, sc) for sc in zwaar}
+        for sc in gekozen:
+            V[sc.naam] = lopend[sc.naam].result()
+            print(samenvatting(V[sc.naam]), flush=True)
+else:
+    for sc in gekozen:
+        V[sc.naam] = draai(sc)
+        print(samenvatting(V[sc.naam]))
 print()
 
 
