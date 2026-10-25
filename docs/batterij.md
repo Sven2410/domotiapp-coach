@@ -1775,3 +1775,18 @@ overview.js), en een opdracht die toch binnenkomt laat de coach meteen vallen.
 
 Proef 54 in test_batterij.py, 196 in test_coach.py, de proef "de kaart van een Growatt" in
 test_rapport.mjs, en "het besluit wisselt niet elk kwartier" in test_virtueel.py.
+
+## Het setpoint binnen het bereik van de knop van dat moment (v0.157.0)
+
+Een Anker Solix maakt het bereik van zijn vermogensknop kleiner als hij bijna vol is. In
+een klantwoning op 25-10-2026 om 14:55, op 99%, ging de `max` van 10000 naar 1428 W; de
+regelaar schreef 2376 W, Home Assistant weigerde dat met een `ServiceValidationError`, en de
+regelaar struikelde. Een uur later stond er weer 10000.
+
+`_async_batterij_zetten` leest nu vlak voor het schrijven `min` en `max` van de knop en
+houdt het getal daartussen, met een richting-entiteit (zonder teken) en met een teken
+(ook `setpoint_invert`). Een knop zonder `min` en `max` krijgt het getal zoals het was.
+Het lage `max` wordt nergens onthouden: `max_charge_w` komt elke ronde opnieuw uit de knop
+(`uit_knop` in `_batterij_van`), dus alleen de som van die ene ronde rekent met minder.
+Proef 198 in test_coach.py.
+
