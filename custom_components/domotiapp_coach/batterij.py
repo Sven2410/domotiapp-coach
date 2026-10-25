@@ -219,6 +219,13 @@ class Batterij:
     # met de stopgrens op de accustand ontlaadt niet (v0.155.0). De som mag dan stilstaan
     # als het huis stroom vraagt; zie `_zelf_toegestaan` en `growatt_schema`.
     kan_vasthouden: bool = False
+    # Of hij met `zelf_nul` vol mag blijven staan (v0.158.0): een batterij met een stuurgetal
+    # die de coach overneemt en op 0 W zet. Alleen op het bovenste punt van de som, en alleen
+    # zolang de volle beurt open staat (`_vol_open`). Zonder dit was vol met een huis dat vraagt altijd
+    # ontladen, en dan een kwartier later weer bijladen: in een klantwoning op 25-10-2026, de dag
+    # van de volle beurt, van 14:30 tot 16:00 acht keer om en om nul en laden, en elke keer de
+    # Anker naar zijn eigen stand en terug. Zie `_zelf_toegestaan`.
+    vol_vasthouden: bool = False
     # Of de coach hem nu zelf in de externe stand heeft. Zonder `zelf_nul`
     # altijd zodra hij stuurt; met alleen als hij hem overnam. Voor een kleine
     # laadbeurt neemt hij hem niet over; zie `_rustig_vermogen`.
@@ -548,7 +555,7 @@ def _mogelijk(
 def _zelf_toegestaan(
     kandidaten: set[float], e: float, deel: float, huis: float, b: Batterij,
     som_laag: float, hoog: float, stap: float = 0.0, handelen: bool | None = None,
-    vasthouden: bool = False,
+    vasthouden: bool = False, vol_vanaf: float | None = None, vol_open: bool = False,
 ) -> set[float]:
     """Wat er van de kandidaten overblijft als de batterij zelf nul op de meter doet.
 
@@ -588,6 +595,14 @@ def _zelf_toegestaan(
     # Vasthouden (v0.155.0): de eigenaar op 23-10-2026, "pas als het dure uur in gaat dan pas
     # ontladen". Alleen als het huis vraagt; bij zon over is stilstaan zon weggeven.
     if b.kan_vasthouden and vasthouden and huis > 0:
+        uit.add(e)
+    # Vol blijven (v0.158.0): hetzelfde voor een batterij die op het bovenste punt van de som
+    # staat (`vol_vanaf`, een stap onder de grens) terwijl de volle beurt nog open is. Daar kan
+    # van het net laden niets meer toevoegen, dus zonder dit bleef alleen ontladen over, en
+    # daarna weer bijladen voor de beurt. Niet voor elk duurder blok verderop, zoals bij een
+    # Growatt: dan werd bovenin staan elk middaguur waard, laadde hij in batterij-kwartier-zelf
+    # 's middags vol en hield hij dat vast door de dure avond (€ 6,62 tegen € 2,94 zonder batterij).
+    elif b.vol_vasthouden and vol_open and huis > 0 and vol_vanaf is not None and e >= vol_vanaf - 1e-9:
         uit.add(e)
     boven, onder = max(e, nul), min(e, nul)
     # Wat het blok in tijd en vermogen toelaat, zonder de grenzen van de accustand.
@@ -695,7 +710,8 @@ def _waarde_vooruit(
                 kandidaten.add(rooster[i])
             kandidaten = _zelf_toegestaan(
                 kandidaten, e, deel, h, b, bodem, hoog, 0.0 if k == 0 and _loopt_al(b, rij) else stap,
-                handelen=_mag_handelen(b, rij), vasthouden=duurder[k],
+                handelen=_mag_handelen(b, rij), vasthouden=duurder[k], vol_vanaf=hoog - stap,
+                vol_open=_vol_open(b, rij),
             )
             begin.append(
                 min(
@@ -706,6 +722,11 @@ def _waarde_vooruit(
         volgende = begin
 
     return _Som(blokken, delen, huis, na, laag, hoog, stap, piek, vloer, duurder)
+
+
+def _vol_open(b: Batterij, rij: dict) -> bool:
+    """Of de volle beurt in dit blok nog open staat: er is een `vol_voor`, en die komt nog."""
+    return b.vol_voor is not None and rij["start"] < b.vol_voor
 
 
 def _beste_stap(som: _Som, k: int, e: float, b: Batterij) -> float:
@@ -726,6 +747,7 @@ def _beste_stap(som: _Som, k: int, e: float, b: Batterij) -> float:
     kandidaten = _zelf_toegestaan(
         kandidaten, e, deel, h, b, bodem, som.hoog, 0.0 if k == 0 and _loopt_al(b, rij) else som.stap,
         handelen=_mag_handelen(b, rij), vasthouden=bool(som.duurder and som.duurder[k]),
+        vol_vanaf=som.hoog - som.stap, vol_open=_vol_open(b, rij),
     )
     # Bij gelijke kosten wint niets doen, en daarna het kleinste gebaar: een
     # batterij die zonder reden beweegt slijt voor niets.
@@ -777,8 +799,11 @@ def _vooruit(som: _Som, b: Batterij) -> list[Uur]:
                 rij["price"],
                 # Alleen in een goedkoper blok dan wat er nog komt: op de dure prijs doet hij
                 # gewoon nul op de meter (de eigenaar op 23-10-2026, over bi-horário).
-                vast=b.kan_vasthouden and stand == STANDBY and h > 0.005 and bool(som.duurder and som.duurder[k])
-                and e > b.bodem / 100.0 * (b.capacity_kwh or 0.0) + 0.01,
+                vast=stand == STANDBY and h > 0.005 and (
+                    b.kan_vasthouden and bool(som.duurder and som.duurder[k])
+                    and e > b.bodem / 100.0 * (b.capacity_kwh or 0.0) + 0.01
+                    or b.vol_vasthouden and _vol_open(b, rij) and e >= som.hoog - som.stap - 1e-9
+                ),
             )
         )
         e = naar
@@ -1297,7 +1322,7 @@ def plan_batterij(
     mag_zon = not vol and (terug is None or terug <= erbij * zon_eta + PRICE_MARGIN)
     mag_huis = not leeg and koop * huis_eta >= eraf - PRICE_MARGIN
 
-    if b.kan_vasthouden and uren and uren[0].vast and not leeg:
+    if (b.kan_vasthouden or b.vol_vasthouden) and uren and uren[0].vast and not leeg:
         # Een Growatt die het plan nu vasthoudt (v0.155.0): wat erin zit is straks meer waard. Voor
         # het laden, want dat komt later in het vak, en de bewoner leest wat hij nu doet.
         return Besluit(
