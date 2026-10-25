@@ -1078,7 +1078,7 @@ def _vlak(blokken: list[dict]) -> bool:
 
 def _vooruitkijk_zin(
     now: datetime, forecast: Forecast, b: Batterij, auto: float = 0.0, bijladen: bool = True,
-    uren: list[Uur] | None = None, conclusie: bool = True,
+    uren: list[Uur] | None = None, conclusie: bool = True, inkoop: float | None = None,
 ) -> str:
     """Twee zinnen: zon, huis en batterij tot morgenvroeg, en de conclusie.
 
@@ -1122,11 +1122,13 @@ def _vooruitkijk_zin(
         return zin + t("Je houdt naar verwachting {kwh} over in je accu.", kwh=_kwh(balans))
     return (
         zin + t("Je komt naar verwachting {kwh} tekort om de nacht te overbruggen;", kwh=_kwh(-balans)) + " "
-        + (_bijladen_zin(now, b, uren or [], -balans) if bijladen else t("dat komt van het net."))
+        + (_bijladen_zin(now, b, uren or [], -balans, inkoop) if bijladen else t("dat komt van het net."))
     )
 
 
-def _bijladen_zin(now: datetime, b: Batterij, uren: list[Uur], tekort: float) -> str:
+def _bijladen_zin(
+    now: datetime, b: Batterij, uren: list[Uur], tekort: float, inkoop: float | None = None
+) -> str:
     """Het slot van de nachtzin bij een tekort: laadt hij bij, en zo niet, waarom niet.
 
     Tot v0.102.3 stond hier altijd "hij laadt bij als de stroom goedkoop genoeg
@@ -1152,6 +1154,42 @@ def _bijladen_zin(now: datetime, b: Batterij, uren: list[Uur], tekort: float) ->
         return t("hij laadt bij als de stroom goedkoop genoeg is.")
     goedkoopst = min(nacht, key=lambda u: u.price)
     bekend = "" if nacht[-1].end >= eind else " " + t("in de bekende uren")
+    if inkoop is None:
+        return _minstens_zin(goedkoopst, b, bekend)
+    # Sinds v0.159.0 zegt hij waaróm het niet loont. De eigenaar op 25-10-2026 om 21:33, bij een
+    # batterij op de vloer, een nacht van € 0,166 en een ochtend van € 0,272: "waarom gaat hij niet
+    # laden?" Er stond alleen "minstens € 0,184", en dat naast € 0,272 leest als een fout.
+    #
+    # Valt het tekort in uren die zelf niet duurder zijn dan bijladen via de batterij, dan is dat de
+    # reden. Wat voor het goedkoopste uur valt, haalt bijladen toch niet meer in.
+    leeg = [u for u in nacht if u.start >= goedkoopst.start and u.soc <= b.bodem + 0.5 and u.kwh <= 0.005]
+    goedkope_nacht = bool(leeg) and all(u.price <= goedkoopst.price / b.rte for u in leeg)
+    if not goedkope_nacht and inkoop >= goedkoopst.price - 0.0005:
+        return _minstens_zin(goedkoopst, b, bekend)
+    # En maakt de zon hem daarna toch vol, dan is wat er 's nachts bij komt morgen niets meer waard.
+    vol = next(
+        (u for u in uren if u.start >= now and u.stand != NETLADEN and u.kwh > 0.005
+         and u.soc >= b.soc_max - VOL_MARGE and u.start.date() <= eind.date()),
+        None,
+    )
+    waarden = dict(kale=_euro(goedkoopst.price), prijs=_euro(goedkoopst.price / b.rte), grens=_euro(inkoop))
+    if vol is not None:
+        waarden.update(tijd=_clock(vol.end), soc=round(vol.soc))
+    if goedkope_nacht:
+        if vol is not None:
+            return t("dat komt van het net tegen {kale}, goedkoper dan via de batterij ({prijs} met het "
+                     "verlies), en om {tijd} is hij op zon vol ({soc}%).", **waarden)
+        return t("dat komt van het net tegen {kale}, goedkoper dan via de batterij ({prijs} met het verlies).",
+                 **waarden)
+    if vol is not None:
+        return t("dat komt van het net tegen {kale}, want een kWh erbij loont pas onder {grens}: om {tijd} "
+                 "is hij op zon vol ({soc}%).", **waarden)
+    return t("dat komt van het net tegen {kale}, want een kWh erbij loont pas onder {grens} (wat hij straks "
+             "waard is, min het verlies).", **waarden)
+
+
+def _minstens_zin(goedkoopst: Uur, b: Batterij, bekend: str) -> str:
+    """Wat een kWh via de batterij minstens kost (v0.102.3), als de som er niets naast zet."""
     return t(
         "dat komt van het net, want bijladen kost via de batterij{bekend} minstens "
         "{prijs} per kWh ({kale} om {tijd}, plus het verlies).",
@@ -1296,15 +1334,15 @@ def plan_batterij(
     hulp_om = next((u.start for u, h in zip(uren, hulp) if h > 0.005), None)
     auto_ac = _met_auto(uren, b, hulp)
     auto_weg = auto_ac / eta_uit(b)
-    kijk = _vooruitkijk_zin(now, forecast, b, auto_ac, bijladen=not _vlak(blokken), uren=uren,
-                            conclusie=not b.kan_vasthouden)
-    piek = dicht and in_evening_peak(now)
     # Onder welke prijs een kWh van het net erbij nu loont: wat hij in de
     # batterij waard is, min het verlies bij het laden. Voor de kaart; de
     # eigenaar op 30-09-2026 bij "Een kWh erin € 0,301, is straks waard" en een
     # nacht van € 0,313: "is het niet goedkoper om iets bij te kopen?" Die
     # € 0,301 is per kWh ín de batterij; naast de prijslijst hoort € 0,259.
     inkoop = None if vol else erbij * eta_in(b)
+    kijk = _vooruitkijk_zin(now, forecast, b, auto_ac, bijladen=not _vlak(blokken), uren=uren,
+                            conclusie=not b.kan_vasthouden, inkoop=inkoop)
+    piek = dicht and in_evening_peak(now)
 
     # Zon opslaan en het huis voeden: elk tegen wat een kilowattuur in de
     # batterij straks waard is.
@@ -2741,7 +2779,7 @@ def growatt_besluit(
         zin = (
             t("Je houdt naar verwachting {kwh} over in je accu.", kwh=_kwh(balans)) if balans >= 0 else
             t("Je komt naar verwachting {kwh} tekort om de nacht te overbruggen;", kwh=_kwh(-balans)) + " "
-            + _bijladen_zin(now, b, besluit.uren, -balans)
+            + _bijladen_zin(now, b, besluit.uren, -balans, besluit.inkoop_tot)
         )
         plan = f"{plan} {zin}".strip()
     if in_vak and schema.houden:

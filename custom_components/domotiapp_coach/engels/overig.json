@@ -20,6 +20,10 @@
   "hij laadt bij als de stroom goedkoop genoeg is.": "it tops up when electricity is cheap enough.",
   "in de bekende uren": "in the known hours",
   "dat komt van het net, want bijladen kost via de batterij{bekend} minstens {prijs} per kWh ({kale} om {tijd}, plus het verlies).": "that comes from the grid, because topping up via the battery costs at least {prijs} per kWh{bekend} ({kale} at {tijd}, plus losses).",
+  "dat komt van het net tegen {kale}, goedkoper dan via de batterij ({prijs} met het verlies), en om {tijd} is hij op zon vol ({soc}%).": "that comes from the grid at {kale}, cheaper than via the battery ({prijs} with losses), and at {tijd} it is full on solar ({soc}%).",
+  "dat komt van het net tegen {kale}, goedkoper dan via de batterij ({prijs} met het verlies).": "that comes from the grid at {kale}, cheaper than via the battery ({prijs} with losses).",
+  "dat komt van het net tegen {kale}, want een kWh erbij loont pas onder {grens}: om {tijd} is hij op zon vol ({soc}%).": "that comes from the grid at {kale}, because an extra kWh only pays off below {grens}: at {tijd} it is full on solar ({soc}%).",
+  "dat komt van het net tegen {kale}, want een kWh erbij loont pas onder {grens} (wat hij straks waard is, min het verlies).": "that comes from the grid at {kale}, because an extra kWh only pays off below {grens} (what it is worth later, minus losses).",
 
   "De sturing van deze batterij staat uit.": "Control of this battery is switched off.",
   "De coach weet niet hoe vol de batterij is, dus hij laat hem stilstaan.": "The coach does not know how full the battery is, so it leaves it idle.",

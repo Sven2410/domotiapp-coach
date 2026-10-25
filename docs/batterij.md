@@ -1817,3 +1817,29 @@ Proef 55 in test_batterij.py, en het scenario batterij-volle-beurt-zelf (de prij
 die middag): zonder 13 richtingwissels, vijf keer de modus om en bovenin blijven hangen op
 98,3%; met 3 wissels, om 17:00 op 99% en daarna het huis voeden in de dure avond.
 
+
+## De nachtzin zegt waarom hij niet bijlaadt (v0.159.0)
+
+In de klantwoning op 25-10-2026 om 21:33 (Growatt, een nacht van € 0,166 tot 08:00 en daarna
+€ 0,272) stond de batterij op de vloer en eindigde de kaart met "bijladen kost via de batterij
+minstens € 0,184 per kWh". De eigenaar: "waarom gaat hij niet laden en houdt hij de batterij niet
+vast tot het dure uur dat om 8 uur begint?" Die € 0,184 stond naast niets, en naast € 0,272 leest
+hij als een fout. Het plan had een goede reden: het tekort viel in de nacht zelf, die goedkoper was
+dan dezelfde stroom via de batterij, en vanaf 09:00 laadde hij op zon tot 100% om 14:00. De som
+zette een kWh erbij op € 0,150 (`buy_below`), onder de € 0,166 van de nacht.
+
+Nu zegt `_bijladen_zin` dat zelf, met de grens van de som (`inkoop_tot`) erbij, in één zin:
+
+- valt het tekort vanaf het goedkoopste uur alleen in uren die niet duurder zijn dan dat uur
+  gedeeld door het rendement: "dat komt van het net tegen € 0,166, goedkoper dan via de batterij
+  (€ 0,184 met het verlies)";
+- anders, als de grens van de som onder de goedkoopste prijs ligt: "dat komt van het net tegen
+  € 0,200, want een kWh erbij loont pas onder € 0,150";
+- en komt hij morgen op zon aan zijn laadgrens, dan het moment erbij: "en om 14:00 is hij op zon
+  vol (100%)", of na de grens ": om 14:00 is hij op zon vol (100%)";
+- zegt de som dat bijladen wel loont en laadt hij toch niet (een stap van het rooster, een grens
+  van de batterij), of is er geen grens, dan blijft de zin van v0.102.3.
+
+Wat voor het goedkoopste uur valt telt niet mee: dat haalt bijladen toch niet meer in. Voor elke
+batterij, ook een Growatt zonder schema voor vannacht (`growatt_besluit`), en met vaste tijdvakken of
+dynamische prijzen. Proef 37 in test_batterij.py.
