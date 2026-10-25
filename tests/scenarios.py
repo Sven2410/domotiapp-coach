@@ -1327,6 +1327,26 @@ KWARTIER_30_09 = {
         0.468, 0.453, 0.434, 0.407, 0.432, 0.407, 0.397, 0.376, 0.397, 0.380, 0.376, 0.355, 0.373, 0.359, 0.350, 0.336,
     ],
 }
+# De klantwoning op zondag 25-10-2026, de dag van de wekelijkse volle beurt (v0.158.0): een
+# Anker die zelf nul doet, om 09:40 op 5%, van het net naar 95% om 14:00, en daarna tot 16:00
+# acht wissels tussen nul op de meter en laden van het net. De uurprijzen van die middag en
+# avond, all-in; de ochtend (tot 16:00) is in de proef 0,15, zoals in proef 55 van
+# test_batterij.py. Het huis op 1,5 kW. Tot 22:00: daarna laadt hij in de goedkope nacht
+# rustig in kleine stapjes, en dat pendelen staat los hiervan open (batterij-kwartier-voorloper).
+UREN_25_10 = [0.15] * 16 + [0.15, 0.235, 0.291, 0.26, 0.236, 0.22, 0.194, 0.169]
+UREN_26_10 = [0.179, 0.168, 0.155, 0.15, 0.165, 0.192, 0.324, 0.467, 0.43, 0.371, 0.314, 0.264,
+              0.241, 0.273, 0.306, 0.341, 0.375, 0.421, 0.438, 0.411, 0.365, 0.322, 0.285, 0.256]
+batterij_volle_beurt_zelf = Scenario(
+    "batterij-volle-beurt-zelf",
+    "dynamisch, de zondag van de volle beurt met een accu die zelf nul doet: eenmaal bovenin blijft hij vol tot de beurt geboekt is, in plaats van elk kwartier om te slaan",
+    contract="dynamisch", zon=Zon(wolken="geen"),
+    huis=Huis(profiel={u: 1500.0 for u in range(24)}),
+    batterij=Batterij(soc=5.0, capaciteit_kwh=14.5, max_laden_w=3500.0, max_ontladen_w=3500.0, soc_max=100.0,
+                      meter=False, rte_opgegeven=0.736, eigen_nul=True, zelf_nul=True, knop_weg=True,
+                      knop_terug_s=14.0, wekelijks_vol_dag=6, **ANKER_SENSOR),
+    prijzen=Prijzen(per_dag={"2026-10-25": UREN_25_10, "2026-10-26": UREN_26_10}),
+    begin="2026-10-25 09:30:40", duur_uren=12.5, **ZONDER_AUTO,
+)
 batterij_kwartier_zelf = Scenario(
     "batterij-kwartier-zelf",
     "dynamisch in kwartieren, de accu doet zelf nul en 's nachts draait een warmtepomp: de coach laadt goedkoop bij zonder tussendoor te ontladen, en houdt hem het hele laadvenster vast",
@@ -1387,7 +1407,7 @@ batterij_rendement_leren = batterij_winter.kopie(
 
 BATTERIJ = [
     batterij_vast_zon, batterij_zonder_terug, batterij_vast_salderen, batterij_winter, batterij_zomer, batterij_handelen,
-    batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_paal, batterij_paal_stopt, batterij_sprong,
+    batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_volle_beurt_zelf, batterij_paal, batterij_paal_stopt, batterij_sprong,
     batterij_meter_weg, batterij_herstart, batterij_anker_sensor, batterij_uurlast,
     batterij_klapperlast, batterij_wisselende_last, batterij_zonder_rendement,
     batterij_zelf_nul, batterij_zelf_knop_weg, batterij_zelf_knop_traag, batterij_knop_traag_start,

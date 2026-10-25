@@ -6363,6 +6363,8 @@ class ChargerCoach:
                 laatst_vol.replace(tzinfo=None) if laatst_vol is not None else None,
             ),
             zelf_nul=self._zelf_instelling(device),
+            # Vol blijven kan alleen als de coach hem kan overnemen en op 0 W zetten (v0.158.0).
+            vol_vasthouden=self._zelf_instelling(device) and bool((device.get("entities") or {}).get("setpoint")),
         )
 
     @staticmethod
@@ -7352,6 +7354,7 @@ class ChargerCoach:
         b.handelen = False
         # In een vak met de stopgrens op de accustand staat hij stil (v0.155.0).
         b.kan_vasthouden = True
+        b.vol_vasthouden = False
         inhoud = growatt_inhoud(rij.get("growatt_kwh_pct"))
         if inhoud is not None:
             b.capacity_kwh = inhoud

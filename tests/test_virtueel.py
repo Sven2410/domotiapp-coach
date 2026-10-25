@@ -2134,6 +2134,19 @@ if (vl := v("batterij-dynamisch-zon-zelf")):
              standen == {"nul"} and not [m for _, m in vl.bat_modi if m == "third_party_control"],
              f"{sorted(standen)} {vl.bat_modi}")
 
+# De zondag van de volle beurt in een klantwoning, 25-10-2026, met een Anker die zelf nul
+# doet (v0.158.0). Zonder vol blijven bij het bouwen: 13 richtingwissels, vijf keer de modus
+# om, bovenin blijven hangen op 98,3%, € 5,21. Met: 3 wissels, twee keer de modus om, om 17:00
+# op 99% en daarna het huis voeden in de dure avond, € 4,07.
+if (vl := v("batterij-volle-beurt-zelf")):
+    top = max(r[3] for r in vl.bat_verloop if r[0].hour < 18)
+    print(f"  volle-beurt-zelf: {vl.bat_wissels()} wissels, {len(vl.bat_modi)} keer de modus om, "
+          f"voor 18:00 hooguit {top:.1f}%")
+    controle("volle-beurt-zelf: bovenin slaat hij niet om tussen laden en nul op de meter",
+             vl.bat_wissels() <= 10, f"{vl.bat_wissels()}")
+    controle("volle-beurt-zelf: de modus gaat niet heen en weer", len(vl.bat_modi) <= 3, f"{vl.bat_modi}")
+    controle("volle-beurt-zelf: de beurt is af voor de dure avond", top >= 99.0, f"{top:.1f}")
+
 # De klantwoning op 30-09-2026, in kwartieren, met een Anker die zelf nul doet
 # (v0.102.3). Met v0.102.2 in dit scenario: 44 keer de modus om, elk kwartier terug
 # en een minuut later weer over, 160 opdrachten, en in tien kwartieren laden én

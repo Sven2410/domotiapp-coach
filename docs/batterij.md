@@ -1790,3 +1790,30 @@ Het lage `max` wordt nergens onthouden: `max_charge_w` komt elke ronde opnieuw u
 (`uit_knop` in `_batterij_van`), dus alleen de som van die ene ronde rekent met minder.
 Proef 198 in test_coach.py.
 
+## Een volle batterij die zelf nul doet blijft vol zolang de volle beurt open staat (v0.158.0)
+
+Een batterij die zelf nul op de meter doet kan in zijn eigen stand niet stilstaan, en
+daarom liet de som voor hem stilstaan nooit toe (`_zelf_toegestaan`). Op het bovenste
+punt van de som bleef er dan maar één ding over als het huis stroom vroeg: ontladen. Op
+de dag van de wekelijkse volle beurt moest hij daarna weer bijladen, en zo sloeg hij om.
+
+In een klantwoning op zondag 25-10-2026: om 09:40 van het net van 5 naar 95% om 14:00, en
+daarna van 14:30 tot 16:00 acht wissels tussen nul op de meter en laden van het net, elke
+keer met de Anker naar zijn eigen stand en terug, en kort ontladen van 1 tot 2,8 kW. Van
+95 naar 98% duurde ruim twee uur.
+
+Nu mag een batterij met een stuurgetal (`vol_vasthouden`; de coach neemt hem over en zet
+0 W) op het bovenste punt van de som stilstaan als het huis stroom vraagt, zolang de volle
+beurt nog open staat (`_vol_open`: er is een `vol_voor` en die komt nog). Het besluit is
+dan `vasthouden`. Is de beurt geboekt, dan voedt hij het huis weer gewoon. Een Growatt
+houdt zijn eigen regel (`vol_vasthouden` staat daar uit).
+
+Eerst stond het vol blijven open voor elk duurder blok verderop, zoals bij een Growatt.
+Dat brak batterij-kwartier-zelf: bovenin staan werd elk middaguur waard, hij laadde 's
+middags vol van het net en hield dat vast door de dure avond, voor de nog duurdere uren
+van de volgende dag (21,2 kWh erin, € 6,62 tegen € 2,94 zonder batterij, eindigend op 95%).
+
+Proef 55 in test_batterij.py, en het scenario batterij-volle-beurt-zelf (de prijzen van
+die middag): zonder 13 richtingwissels, vijf keer de modus om en bovenin blijven hangen op
+98,3%; met 3 wissels, om 17:00 op 99% en daarna het huis voeden in de dure avond.
+

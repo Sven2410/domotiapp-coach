@@ -1739,6 +1739,62 @@ controle("de nachten van voor v0.156.0 tellen niet mee",
          bat.growatt_nachten({"growatt_nachten": [10.995]}) == []
          and bat.growatt_nachten({"growatt_nachten": [-2.4], "growatt_nachten_v": bat.GROWATT_NACHTEN_V}) == [-2.4])
 
+print("=== 55. een volle batterij die zelf nul doet blijft vol zolang de volle beurt open staat (v0.158.0) ===")
+# In een klantwoning op 25-10-2026, de dag van de volle beurt: de Anker stond om 14:00 op 95% en
+# wisselde tot 16:00 elk kwartier tussen nul op de meter en laden van het net. Vol met een
+# huis dat vraagt liet de som alleen ontladen toe, en een kwartier later weer bijladen. De
+# uurprijzen van die middag en avond (all-in, gemiddeld per uur), het huis op 1,5 kW.
+UREN55 = [0.15] * 16 + [0.15, 0.235, 0.291, 0.26, 0.236, 0.22, 0.194, 0.169,
+                        0.179, 0.168, 0.155, 0.15, 0.165, 0.192, 0.324, 0.467, 0.43, 0.371, 0.314, 0.264,
+                        0.241, 0.273, 0.306, 0.341, 0.375, 0.421, 0.438, 0.411, 0.365, 0.322, 0.285, 0.256]
+L55 = prijzen(UREN55, terug=[p - 0.031 for p in UREN55])
+NU55 = DAG.replace(hour=16, minute=15)
+
+
+def anker55(**kw):
+    basis = dict(soc=100.0, capacity_kwh=14.5, max_charge_w=3500.0, max_discharge_w=3500.0, soc_min=5.0,
+                 soc_max=100.0, rte=0.736, zelf_nul=True, vol_voor=DAG + dt.timedelta(days=1))
+    basis.update(kw)
+    return Batterij(**basis)
+
+
+V55 = verwachting(huis=1.5)
+oud55 = plan_batterij(NU55, L55, Tariff(), V55, anker55())
+nieuw55 = plan_batterij(NU55, L55, Tariff(), V55, anker55(vol_vasthouden=True))
+
+
+def tot17(p):
+    return [(u.start.strftime("%H:%M"), u.stand, round(u.soc)) for u in p.uren if u.start < DAG.replace(hour=17)]
+
+
+print(f"  zonder: {oud55.stand} {oud55.rule} {tot17(oud55)}")
+print(f"  met:    {nieuw55.stand} {nieuw55.rule} {tot17(nieuw55)}")
+controle("zonder vol blijven: hij ontlaadt in het goedkoopste uur van de avond (zoals het ging)",
+         oud55.stand == bat.NUL and oud55.uren[0].soc < 95, f"{tot17(oud55)}")
+controle("met: hij houdt hem vol, en zegt dat", nieuw55.stand == bat.STANDBY and nieuw55.rule == "vasthouden",
+         f"{nieuw55.stand} {nieuw55.rule}")
+controle("en laadt voor 17:00 niets van het net bij",
+         not any(u.stand == bat.NETLADEN for u in nieuw55.uren if u.start < DAG.replace(hour=17)), f"{tot17(nieuw55)}")
+dure55 = [u for u in nieuw55.uren if DAG.replace(hour=18) <= u.start < DAG.replace(hour=20)]
+controle("in de avondpiek voedt hij het huis", dure55 and all(u.stand == bat.NUL for u in dure55),
+         f"{[(u.start.strftime('%H:%M'), u.stand) for u in dure55]}")
+
+
+def kosten55(p):
+    # Het net van het huis met de batterij erbij, tegen de prijs van elk blok.
+    return sum(u.net_kwh * u.price for u in p.uren)
+
+
+print(f"  netkosten van het plan: zonder € {kosten55(oud55):.3f}, met € {kosten55(nieuw55):.3f}")
+controle("en het kost niet meer dan zonder", kosten55(nieuw55) <= kosten55(oud55) + 0.005,
+         f"{kosten55(nieuw55):.3f} tegen {kosten55(oud55):.3f}")
+klaar55 = plan_batterij(NU55, L55, Tariff(), V55, anker55(vol_vasthouden=True, vol_voor=None))
+controle("is de volle beurt geboekt, dan geen vasthouden: dan voedt hij het huis weer",
+         klaar55.rule != "vasthouden" and not any(u.vast for u in klaar55.uren), f"{klaar55.stand} {klaar55.rule}")
+half55 = plan_batterij(NU55, L55, Tariff(), V55, anker55(soc=60.0, vol_vasthouden=True))
+controle("halfvol mag hij niet stilstaan: dat blijft zoals het was",
+         half55.stand != bat.STANDBY and not any(u.vast for u in half55.uren if u.soc < 95), f"{half55.stand}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
