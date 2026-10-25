@@ -16,7 +16,7 @@ bat = sys.modules["domotiapp_coach.batterij"]
 planner = sys.modules["domotiapp_coach.planner"]
 
 from domotiapp_coach.batterij import (  # noqa: E402
-    Batterij, Besluit, Regelaar, plan_batterij,
+    Batterij, Besluit, Regelaar, Uur, plan_batterij, _bijladen_zin, _euro,
     NUL, ZONNELADEN, ONTLADEN, NETLADEN, MAX_LADEN, HANDELEN, STANDBY,
 )
 from domotiapp_coach.planner import Forecast, Tariff  # noqa: E402
@@ -744,7 +744,7 @@ DAL36 = prijzen([0.20] * 7 + [0.26] * 16 + [0.20] + [0.20] * 7 + [0.26] * 16 + [
 p36 = plan_batterij(DAG.replace(hour=21), DAL36, Tariff(), verwachting(ZON, huis=1.0), anker(soc=20.0))
 # Sinds v0.102.3 zegt hij daar waarom het vannacht niet loont, met de prijs erbij.
 controle("een vast contract met dal- en piektarief: bijladen kan lonen, dus hij rekent het voor",
-         p36.stand == NETLADEN or ("via de batterij" in (p36.plan or "") and "nooit" not in (p36.plan or "")),
+         p36.stand == NETLADEN or ("loont pas onder" in (p36.plan or "") and "nooit" not in (p36.plan or "")),
          f"{p36.stand} {p36.plan}")
 
 
@@ -847,8 +847,9 @@ print(f"    {slot}")
 netuur = [u for u in avond.uren if u.stand == NETLADEN and u.net_kwh > 0.05
           and u.start < dt.datetime(2026, 10, 1, 7)]
 if not netuur:
-    controle("geen bijladen vannacht: de zin zegt wat een kWh via de batterij minstens kost",
-             "via de batterij minstens € 0,425" in slot and "€ 0,313 om 00:15" in slot, slot)
+    # Sinds v0.159.0 met de grens van de som ernaast in plaats van "minstens € 0,425".
+    controle("geen bijladen vannacht: de zin zegt waarom, met de prijs via de batterij ernaast",
+             "tegen € 0,313, goedkoper dan via de batterij (€ 0,425 met het verlies)." in slot, slot)
 else:
     controle("bijladen vannacht: de zin zegt hoeveel", "van het net bij" in slot, slot)
 controle("de conclusie op de kaart is één zin met het tekort erin", "tekort" in slot, slot)
@@ -856,6 +857,57 @@ controle("bijkopen loont onder de waarde in de batterij min het laadverlies",
          avond.inkoop_tot is not None and 0 < avond.inkoop_tot < avond.waarde, f"{avond.inkoop_tot} {avond.waarde}")
 vol37 = plan_batterij(dt.datetime(2026, 9, 30, 14, 0), K37, Tariff(), V37, klant37(95.0))
 controle("een volle batterij: geen prijs om onder bij te kopen", vol37.inkoop_tot is None, f"{vol37.inkoop_tot}")
+
+# 37b. Waarom hij niet bijlaadt (v0.159.0). De eigenaar op 25-10-2026 om 21:33, bij een batterij op
+# de vloer, een nacht van € 0,166 tot 08:00 en daarna € 0,272: "waarom gaat hij niet laden?" Er
+# stond "bijladen kost minstens € 0,184", zonder iets ernaast. De zon maakt hem morgen vol, dus een
+# kWh erbij is minder waard dan de nacht kost; dat zegt de zin nu, met het moment dat hij vol is.
+DAG37b = dt.datetime(2026, 10, 25)
+P37b = prijzen(([0.166] * 8 + [0.272] * 14 + [0.166] * 2) * 2, dag=DAG37b)
+Z37b = {8: 0.5, 9: 1.5, 10: 3.0, 11: 4.0, 12: 4.5, 13: 4.5, 14: 4.0, 15: 3.0, 16: 2.0, 17: 1.0}
+z37b = plan_batterij(dt.datetime(2026, 10, 25, 21, 33), P37b, Tariff(), verwachting(Z37b, huis=0.8, dag=DAG37b),
+                     anker(15.0, soc_min=15.0, soc_max=100.0, rte=0.901))
+slot37b = re.split(r"(?<=\.)\s+(?=[A-Z])", z37b.plan)[-1]
+print(f"  21:33 {z37b.stand}, loont onder {z37b.inkoop_tot}")
+print(f"    {slot37b}")
+vol37b = next((u for u in z37b.uren if u.soc >= 99.0), None)
+controle("geen bijladen bij een nacht die duurder is dan wat een kWh erbij oplevert",
+         not any(u.stand == NETLADEN for u in z37b.uren if u.start < dt.datetime(2026, 10, 26, 7)), slot37b)
+controle("het tekort valt in de goedkope nacht zelf: dat zegt hij, met de prijs via de batterij ernaast",
+         "tegen € 0,166, goedkoper dan via de batterij (€ 0,184 met het verlies)" in slot37b, slot37b)
+controle("en het blijft één zin, want de kaart toont alleen de laatste", "tekort" in slot37b, slot37b)
+# Een tekort van alleen de nacht en een ochtend die de zon dekt: een kWh erbij verdringt morgen zon.
+Z37c = {**Z37b, 8: 1.5}
+c37 = plan_batterij(dt.datetime(2026, 10, 25, 21, 33), P37b, Tariff(), verwachting(Z37c, huis=0.8, dag=DAG37b),
+                    anker(15.0, soc_min=15.0, soc_max=100.0, rte=0.901))
+slot37c = re.split(r"(?<=\.)\s+(?=[A-Z])", c37.plan)[-1]
+vol37c = next((u for u in c37.uren if u.soc >= 99.0 and u.stand != NETLADEN), None)
+print(f"  21:33, zonnige ochtend: {c37.stand}, loont onder {c37.inkoop_tot}")
+print(f"    {slot37c}")
+controle("komt hij morgen toch op zon vol, dan zegt hij dat erbij, met het moment",
+         vol37c is not None and "tegen € 0,166, goedkoper dan via de batterij (€ 0,184 met het verlies), "
+         f"en om {vol37c.end:%H:%M} is hij op zon vol (100%)." in slot37c, slot37c)
+
+# De andere reden, rechtstreeks op een plan: het tekort valt deels in een duur uur, maar de som
+# zegt dat een kWh erbij minder oplevert dan de nacht kost.
+def blok37(uur, prijs, soc, kwh=0.0, stand=STANDBY):
+    van = dt.datetime(2026, 10, 26, uur) if uur < 21 else dt.datetime(2026, 10, 25, uur)
+    return Uur(van, van + dt.timedelta(hours=1), stand, kwh, 0.0, soc, prijs)
+
+
+plan37d = [blok37(22, 0.20, 15), blok37(3, 0.30, 15), blok37(10, 0.30, 60, 2.0, NUL), blok37(13, 0.30, 100, 1.0, NUL)]
+b37d = anker(15.0, soc_min=15.0, soc_max=100.0)
+nu37d = dt.datetime(2026, 10, 25, 21, 33)
+d37 = _bijladen_zin(nu37d, b37d, plan37d, 5.0, 0.15)
+controle("is de nacht niet overal goedkoop, dan de grens van de som en het moment dat hij op zon vol is",
+         d37 == "dat komt van het net tegen € 0,200, want een kWh erbij loont pas onder € 0,150: om 14:00 is hij "
+         "op zon vol (100%).", d37)
+e37 = _bijladen_zin(nu37d, b37d, plan37d[:2], 5.0, 0.15)
+controle("en zonder dat hij vol komt: alleen de grens", "loont pas onder € 0,150 (wat hij straks" in e37, e37)
+f37b = _bijladen_zin(nu37d, b37d, plan37d, 5.0, 0.25)
+controle("zegt de som dat bijladen wel loont en laadt hij toch niet, dan de oude zin zonder reden",
+         "minstens € 0,272 per kWh (€ 0,200 om 22:00" in f37b, f37b)
+controle("zonder grens van de som ook de oude zin", "minstens" in _bijladen_zin(nu37d, b37d, plan37d, 5.0), "")
 
 print("=== 38. zelf nul: geen restje van het net bij, ook niet onder de bovengrens (v0.103.0) ===")
 # De eerste woning op 30-09-2026 om 22:43, uurprijzen tot morgen 23:00. De nacht
