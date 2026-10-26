@@ -1353,8 +1353,10 @@ batterij_kwartier_zelf = Scenario(
     contract="dynamisch-salderen", zon=Zon(piek_kw=2.4, wolken="helder"),
     huis=Huis(profiel={**{u: 600.0 for u in range(24)}, 3: 1600.0, 4: 1600.0, 5: 1600.0,
                        7: 900.0, 8: 900.0, 17: 1800.0, 18: 1800.0, 19: 1800.0, 20: 1200.0, 21: 1200.0}),
+    # Zonder de ondergrens van v0.160.0: dit scenario is er voor de nachtbeurt zelf, en die
+    # levert hier € 0,022 op. Met de grens slaat hij hem over (€ 2,15 tegen € 2,45 met de beurt).
     batterij=Batterij(soc=5.0, capaciteit_kwh=14.5, max_ontladen_w=3500.0, meter=False, rte_opgegeven=0.736,
-                      eigen_nul=True, zelf_nul=True, knop_weg=True, knop_terug_s=14.0, **ANKER_SENSOR),
+                      eigen_nul=True, zelf_nul=True, knop_weg=True, knop_terug_s=14.0, min_winst=0.0, **ANKER_SENSOR),
     prijzen=Prijzen(per_dag=KWARTIER_30_09),
     begin="2026-09-30 02:30:40", duur_uren=22, **{**ZONDER_AUTO, "stap_seconden": 5},
 )
@@ -1385,7 +1387,7 @@ batterij_kwartier_voorloper = batterij_kwartier_zelf.kopie(
     naam="batterij-kwartier-voorloper",
     uitleg="de nacht van 05 op 06-10-2026: rustig bijladen in kwartieren met een accu die zelf nul doet; loopt zijn stand een tik voor op het plan, dan houdt de coach hem vast tot het kwartier om is in plaats van nul op de meter",
     batterij=Batterij(soc=47.0, capaciteit_kwh=14.5, max_ontladen_w=3500.0, meter=False, rte_opgegeven=0.736,
-                      eigen_nul=True, zelf_nul=True, knop_weg=True, knop_terug_s=14.0, **ANKER_SENSOR),
+                      eigen_nul=True, zelf_nul=True, knop_weg=True, knop_terug_s=14.0, min_winst=0.0, **ANKER_SENSOR),
     prijzen=Prijzen(per_dag=KWARTIER_05_10),
     begin="2026-10-05 22:30:40", duur_uren=12,
 )
@@ -1638,6 +1640,29 @@ growatt_vasthouden = growatt_bihorario.kopie(
     begin="2026-10-22 21:30", duur_uren=26,
 )
 
+# De zon binnen het uur en een ondergrens aan bijladen (v0.160.0). In de klantwoning op
+# 26-10-2026 was de Growatt om 21:30 leeg, en in het eerste dure uur (08:00 in de tijd van het huis daar, hier
+# 09:00) kwam de zon op: 2,95 kWh in dat uur tegen 3,06 van het huis. De coach zag 0,1 kWh
+# tekort omdat elk kwartier een kwart van de zon kreeg; het was meer, want de zon loopt op.
+# Bijladen levert dan een paar cent op, en de eigenaar wil een ondergrens van € 0,05.
+OCHTEND_ZON = {9: 2.95, 10: 4.5, 11: 5.5, 12: 6.0, 13: 6.0, 14: 5.5, 15: 4.5, 16: 3.0, 17: 1.5, 18: 0.4}
+growatt_ochtend = growatt_bihorario.kopie(
+    naam="growatt-ochtend",
+    uitleg="dezelfde Growatt leeg om 21:30 en een zonnige ochtend die het dure uur bijna dekt: bijladen levert minder op dan € 0,05",
+    batterij=Batterij(**{**GROWATT_SPH, "soc": 15.0}),
+    zon=Zon(kromme=OCHTEND_ZON), voorspeller=batterij_winter.voorspeller,
+    huis=Huis(profiel={**{u: 300.0 for u in range(24)}, 9: 3600.0}),
+    begin="2026-10-22 21:30", duur_uren=14,
+    # Wat hij op eerdere avonden zag: 3,2 kW erin en 2,25 kW eruit. Zonder dat laatste weet
+    # de coach niet dat de batterij het huis kan voeden, en dan is bijladen niets waard.
+    batterij_stand={"growatt_in_w": 3200, "growatt_uit_w": 2250},
+)
+growatt_ochtend_zonder_grens = growatt_ochtend.kopie(
+    naam="growatt-ochtend-zonder-grens",
+    uitleg="dezelfde ochtend met de ondergrens op nul: dan laadt hij voor die paar cent wel bij",
+    batterij=Batterij(**{**GROWATT_SPH, "soc": 15.0}, min_winst=0.0),
+)
+
 ALLE = [
     alfen_zonnig, alfen_dyn, alfen_doel_80, alfen_laadgrens,
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,
@@ -1675,6 +1700,7 @@ ALLE = [
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,
     growatt_bihorario, growatt_zon, growatt_eigen_zon, growatt_schaduw, growatt_vasthouden,
+    growatt_ochtend, growatt_ochtend_zonder_grens,
 ]
 
 

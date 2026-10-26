@@ -252,6 +252,8 @@ _BATTERY = _schema(
         # richting een grens in de all-in prijs in euro per kWh; leeg is "de coach bepaalt".
         vol.Optional("grid_charge", default=True): bool,
         vol.Optional("grid_charge_below", default=None): _LEEG_OF(float, -1, 2),
+        # Hoeveel bijladen van het net minstens oplevert, in euro (v0.160.0); leeg is € 0,05.
+        vol.Optional("grid_charge_min_gain", default=None): _LEEG_OF(float, 0, 5),
         vol.Optional("trade_above", default=None): _LEEG_OF(float, -1, 2),
         # De afschrijving (v0.146.0): wat een kWh uit de batterij aan slijtage kost, in
         # euro, of de aanschafprijs en het aantal laadcycli waar de coach dat uit rekent.
@@ -1038,6 +1040,7 @@ _BATTERY_VOORKEUREN = vol.Schema(
         vol.Optional("trade"): bool,
         vol.Optional("grid_charge"): bool,
         vol.Optional("grid_charge_below"): _LEEG_OF(float, -1, 2),
+        vol.Optional("grid_charge_min_gain"): _LEEG_OF(float, 0, 5),
         vol.Optional("trade_above"): _LEEG_OF(float, -1, 2),
         vol.Optional("wear_per_kwh"): _LEEG_OF(float, 0, 1),
         vol.Optional("wear_price"): _LEEG_OF(float, 0, 100000),

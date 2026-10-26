@@ -2546,5 +2546,24 @@ if (vl := v("growatt-schaduw")):
     controle("growatt-schaduw: en zegt in de geschiedenis wat hij zou schrijven, kort voor vazio",
              any(re.search(r"laden van het net \d\d:\d\d-09:00,", m) for m in zou) and len(zou) <= 3, f"{zou}")
 
+# De zon binnen het uur en een ondergrens aan bijladen (v0.160.0). De klantwoning op 26-10-2026:
+# leeg om 21:30, een zonnige ochtend die het eerste dure uur bijna dekt. Bijladen levert dan een
+# paar cent op; met de ondergrens van € 0,05 laat hij het, en hij schrijft het schema minder vaak.
+def _nacht_net(vl):
+    return sum(r[2] for r in vl.bat_verloop if r[0] < bat_moment(vl, "09:00") and r[2] > 0 and r[1] > 0) * vl.stap_uur / 1000
+
+
+if (met_gr := v("growatt-ochtend")) and (zonder_gr := v("growatt-ochtend-zonder-grens")):
+    print(f"  growatt-ochtend: met grens {_nacht_net(met_gr):.2f} kWh bijgeladen, €{met_gr.bat_kosten_met:.3f}, "
+          f"{len(met_gr.gw_schrijf)} schrijfacties; zonder {_nacht_net(zonder_gr):.2f} kWh, "
+          f"€{zonder_gr.bat_kosten_met:.3f}, {len(zonder_gr.gw_schrijf)} schrijfacties")
+    controle("growatt-ochtend: zonder grens laadt hij 's nachts bij voor het dure uur", _nacht_net(zonder_gr) > 0.5,
+             f"{_nacht_net(zonder_gr):.2f} kWh")
+    controle("growatt-ochtend: met de grens van € 0,05 niet", _nacht_net(met_gr) < 0.05, f"{_nacht_net(met_gr):.2f} kWh")
+    controle("growatt-ochtend: en dat kost minder dan de grens", met_gr.bat_kosten_met - zonder_gr.bat_kosten_met < 0.05,
+             f"€{met_gr.bat_kosten_met:.3f} tegen €{zonder_gr.bat_kosten_met:.3f}")
+    controle("growatt-ochtend: met de grens hooguit twee schrijfacties", len(met_gr.gw_schrijf) <= 2 and met_gr.gw_gefaald == 0,
+             f"{len(met_gr.gw_schrijf)}")
+
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

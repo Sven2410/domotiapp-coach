@@ -1128,6 +1128,8 @@ export const defaultBattery = (brandId) => ({
   // in de all-in prijs; leeg is "de coach bepaalt".
   grid_charge: true,
   grid_charge_below: null,
+  // Hoeveel bijladen van het net minstens oplevert, in euro (v0.160.0); leeg is € 0,05.
+  grid_charge_min_gain: null,
   trade_above: null,
   // De afschrijving (v0.146.0): per kWh, of uit de aanschafprijs en de laadcycli.
   wear_per_kwh: null,

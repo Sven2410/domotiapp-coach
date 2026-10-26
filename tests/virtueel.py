@@ -842,6 +842,8 @@ class Batterij:
     # Handelen in twee (v0.141.0): laden van het net mag, en alleen onder deze all-in prijs.
     net_laden: bool = True
     net_laden_onder: float | None = None
+    # Hoeveel bijladen van het net minstens oplevert (v0.160.0); None is de standaard van de coach.
+    min_winst: float | None = None
     # Boven welke accustand hij de auto mag helpen (v0.90.0), of None: nooit.
     auto_boven: float | None = None
     wekelijks_vol_dag: int | None = None
@@ -1630,7 +1632,8 @@ def instellingen(s: Scenario) -> dict:
                          "accu_in": E["gw_in"], "accu_out": E["gw_uit"]},
             "battery": {"capacity_kwh": bat.capaciteit_kwh, "max_charge_w": None, "max_discharge_w": None,
                         "reserve_enabled": bat.reserve is not None, "reserve_percent": bat.reserve or 0,
-                        "grid_charge": bat.net_laden, "grid_charge_below": bat.net_laden_onder},
+                        "grid_charge": bat.net_laden, "grid_charge_below": bat.net_laden_onder,
+                        "grid_charge_min_gain": bat.min_winst},
         })
     elif s.batterij is not None:
         bat = s.batterij
@@ -1661,6 +1664,7 @@ def instellingen(s: Scenario) -> dict:
                 "trade": bat.handelen,
                 "grid_charge": bat.net_laden,
                 "grid_charge_below": bat.net_laden_onder,
+                "grid_charge_min_gain": bat.min_winst,
                 "car_above": bat.auto_boven,
                 "weekly_full": bat.wekelijks_vol_dag is not None,
                 "weekly_full_day": bat.wekelijks_vol_dag or 0,

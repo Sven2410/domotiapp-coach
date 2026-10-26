@@ -1278,3 +1278,12 @@ coach.py bewaart dat moment). Een echte stop is daarmee hooguit een ronde langer
 "de paal" in de som, en die som mag in die tijd toch al niet hoger dan er gevraagd
 was (de rail in `ceiling_amps`). Proef 197 in test_coach.py speelt die nacht na: zonder
 de reparatie een plafond van 4 A, met 14 A.
+
+## De zon binnen het uur, ook voor de paal (v0.160.0)
+
+De zonverwachting staat per uur. Met kwartierprijzen zocht `schijven` (en `boiler_schijven`) de zon op
+met het begin van het kwartier (`overschot_kwh`), en dan kreeg het eerste kwartier van een uur de hele
+zon van dat uur en de andere drie niets. Nu komt het overschot van een blok uit `overschot_tussen`:
+per uur op de klok de zon van dat stuk, oplopend of aflopend binnen het uur (`zon_tussen`), min het
+huis van dat stuk. Over een heel uur is de som dezelfde als voorheen. Waarom: `docs/batterij.md`, De
+zon binnen het uur.

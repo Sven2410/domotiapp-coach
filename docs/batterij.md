@@ -1843,3 +1843,43 @@ Nu zegt `_bijladen_zin` dat zelf, met de grens van de som (`inkoop_tot`) erbij, 
 Wat voor het goedkoopste uur valt telt niet mee: dat haalt bijladen toch niet meer in. Voor elke
 batterij, ook een Growatt zonder schema voor vannacht (`growatt_besluit`), en met vaste tijdvakken of
 dynamische prijzen. Proef 37 in test_batterij.py.
+
+## De zon binnen het uur, en een ondergrens aan bijladen (v0.160.0)
+
+In de klantwoning op 26-10-2026 (Growatt, tijdvakken: nacht € 0,166 tot 08:00, daarna € 0,272,
+rendement 0,901) was de batterij om 21:28 leeg. De coach laadde 's nachts niet bij voor het dure uur
+van 08:00, want hij zag daar 0,1 kWh tekort (zon 2,95, huis 3,06 kWh). Er kwam 0,8 kWh van het net;
+vanaf 08:45 draaide er een apparaat, en zonder dat was het ongeveer 0,3.
+
+**De zon binnen het uur.** Tot v0.160.0 kreeg elk kwartier een kwart van de zon van zijn uur
+(`_netto_huis_kwh`). In het eerste zonuur loopt de zon op, dus het tekort aan het begin van de dag
+leek kleiner dan het was, en aan het eind van de middag net zo. Nu loopt het vermogen binnen een uur
+recht op of af, met de helling van het uur ervoor naar het uur erna (`zon_tussen` in planner.py); een
+heel uur houdt zijn eigen opbrengst, en het vermogen komt nooit onder nul. Voor dat uur van 08:00
+geeft dat 0,53, 0,67, 0,81 en 0,95 kWh per kwartier, en 0,34 kWh tekort in plaats van 0,11. De paal
+rekent met dezelfde verdeling (`overschot_tussen`). Met kwartierprijzen kreeg die tot dan de hele zon
+van het uur in het eerste kwartier, omdat de verwachting per uur staat en hij die op het begin van
+het kwartier opzocht.
+
+**Een ondergrens aan bijladen.** De eigenaar op 26-10-2026: bijladen van het net pas als het verwacht
+meer dan € 0,05 oplevert, tegen een verwachting die net niet uitkomt. Een keuze, geen meting. Het is
+een instelling van de batterij (Instellen, Handelen: "Alleen als het minstens oplevert", leeg is
+€ 0,05, nul is geen grens; `grid_charge_min_gain`, `BIJLADEN_MIN_WINST` in const.py).
+
+De som toetst het per laadbeurt en niet per kwartier (`_bijladen_loont`): vanaf het eerste blok
+waarin het plan van het net laadt tot het plan de batterij weer laat leveren, de som zonder laden van
+het net in die tijd naast die met. Levert dat minder op dan de grens, dan rekent hij verder alsof hij
+daar niet van het net mag laden (`net_laden_vanaf`), en zegt de kaart waarom: "dat komt van het net,
+want bijladen zou € 0,026 opleveren, minder dan de ondergrens van € 0,050." Een latere beurt toetst
+hij als hij aan de beurt is; zo telt een beurt aan het eind van de bekende prijzen niet mee bij de
+ochtend van nu. Een beurt die al loopt maakt hij af (de vorige ronde laadde hij van het net, of hij
+laadt nu zonder zon over), want aan het eind levert de rest altijd weinig op: zonder dat schreef de
+Growatt in `growatt-bihorario` vanaf 04:10 elk half uur een nieuw schema. Laden om terug te leveren is
+ook laden van het net, dus de grens geldt daar evengoed.
+
+In het virtuele huis: `growatt-ochtend` (de ochtend van 26-10, met de grens) laadt 's nachts niets en
+schrijft twee keer een schema, voor € 0,775; `growatt-ochtend-zonder-grens` laadt 1,03 kWh bij,
+schrijft vijf keer, voor € 0,748. In `batterij-kwartier-zelf` levert de nachtbeurt € 0,022 op; met de
+grens slaat hij hem over en kost de dag € 2,15 in plaats van € 2,45, met 21 opdrachten in plaats van
+108. Dat scenario en `batterij-kwartier-voorloper` staan op nul, want ze zijn er voor de nachtbeurt
+zelf. Proef 56 in test_batterij.py.

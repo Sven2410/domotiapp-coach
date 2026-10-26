@@ -633,6 +633,8 @@ export const APPARATEN = {
   "De batterij mag dan ook van het net laden, als dat minder kost dan wat hij je straks bespaart. Staat dit uit, dan gaat er alleen zon in.":
     "The battery may then also charge from the grid, if that costs less than it saves you later. If this is off, only solar goes in.",
   "Alleen als de prijs onder (€/kWh)": "Only when the price is below (€/kWh)",
+  "Alleen als het minstens oplevert (€)": "Only when it saves at least (€)",
+  "Per laadbeurt van het net. Een verwachting komt niet altijd uit; onder dit bedrag laat hij het. Nul is geen ondergrens.": "Per charge from the grid. A forecast does not always come true; below this amount it skips it. Zero is no minimum.",
   "Alleen als de prijs boven (€/kWh)": "Only when the price is above (€/kWh)",
   "Afschrijving": "Depreciation",
   "Afschrijving (€ per kWh)": "Depreciation (€ per kWh)",

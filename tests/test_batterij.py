@@ -19,7 +19,8 @@ from domotiapp_coach.batterij import (  # noqa: E402
     Batterij, Besluit, Regelaar, Uur, plan_batterij, _bijladen_zin, _euro,
     NUL, ZONNELADEN, ONTLADEN, NETLADEN, MAX_LADEN, HANDELEN, STANDBY,
 )
-from domotiapp_coach.planner import Forecast, Tariff  # noqa: E402
+from domotiapp_coach.planner import Forecast, Tariff, overschot_tussen, zon_tussen  # noqa: E402
+from domotiapp_coach.batterij import _netto_huis_kwh  # noqa: E402
 
 FOUT = 0
 GOED = 0
@@ -1846,6 +1847,79 @@ controle("is de volle beurt geboekt, dan geen vasthouden: dan voedt hij het huis
 half55 = plan_batterij(NU55, L55, Tariff(), V55, anker55(soc=60.0, vol_vasthouden=True))
 controle("halfvol mag hij niet stilstaan: dat blijft zoals het was",
          half55.stand != bat.STANDBY and not any(u.vast for u in half55.uren if u.soc < 95), f"{half55.stand}")
+
+print("=== 56. de zon binnen het uur, en een ondergrens aan bijladen (v0.160.0) ===")
+# In de klantwoning op 26-10-2026 (tijdvakken, nacht € 0,166 tot 08:00, daarna € 0,272, rendement
+# 0,901) zag de som in het uur van 08:00 0,1 kWh tekort (zon 2,95, huis 3,06), want elk kwartier
+# kreeg een kwart van de zon. Er kwam 0,8 van het net. En de eigenaar wil een ondergrens: bijladen
+# pas als het meer dan € 0,05 oplevert.
+DAG56 = dt.datetime(2026, 10, 26)
+Z56 = {8: 2.95, 9: 4.5, 10: 5.5, 11: 6.0, 12: 6.0, 13: 5.5, 14: 4.5, 15: 3.0, 16: 1.5, 17: 0.4}
+V56 = verwachting(Z56, huis=0.8, dag=DAG56)
+V56.house_kwh[8] = 3.06
+kw56 = [zon_tussen(V56, DAG56.replace(hour=8, minute=15 * i), DAG56.replace(hour=8, minute=15 * i) + dt.timedelta(minutes=15))
+        for i in range(4)]
+print("  zon per kwartier van 08:00: " + ", ".join(f"{z:.3f}" for z in kw56))
+controle("de vier kwartieren samen zijn de zon van het uur", abs(sum(kw56) - 2.95) < 1e-9, f"{sum(kw56)}")
+controle("in het eerste zonuur loopt hij op", kw56[0] < kw56[1] < kw56[2] < kw56[3], f"{kw56}")
+controle("een heel uur is zoals het was", abs(zon_tussen(V56, DAG56.replace(hour=12), DAG56.replace(hour=13)) - 6.0) < 1e-9, "")
+controle("nooit onder nul, ook in het laatste zonuur",
+         all(zon_tussen(V56, DAG56.replace(hour=17, minute=15 * i), DAG56.replace(hour=17, minute=15 * i + 14)) >= 0
+             for i in range(4)), "")
+rijen56 = [{"start": DAG56.replace(hour=8, minute=15 * i), "end": DAG56.replace(hour=8, minute=15 * i) + dt.timedelta(minutes=15),
+            "price": 0.272} for i in range(4)]
+tekort56 = sum(max(0.0, _netto_huis_kwh(V56, r, 0.25)) for r in rijen56)
+print(f"  tekort in het uur van 08:00, per kwartier opgeteld: {tekort56:.3f} kWh (was 0,11)")
+controle("het tekort aan het begin van de dag is groter dan een kwart per kwartier zei", tekort56 > 0.25, f"{tekort56:.3f}")
+controle("met de zon van het uur zelf, gebruikt en bijgesteld", abs(sum(_netto_huis_kwh(V56, r, 0.25) for r in rijen56) - (3.06 - 2.95)) < 1e-9, "")
+vf56 = Forecast(solar_kwh=dict(V56.solar_kwh), house_kwh=dict(V56.house_kwh), solar_factor=0.5, solar_day=DAG56.date())
+controle("de bijstelling van vandaag telt ook voor de helling",
+         abs(zon_tussen(vf56, DAG56.replace(hour=8), DAG56.replace(hour=9)) - 1.475) < 1e-9, "")
+over56 = overschot_tussen(V56, DAG56.replace(hour=8), DAG56.replace(hour=8, minute=15))
+controle("het overschot voor de paal ook: het eerste kwartier van 08:00 heeft er niets", over56 == 0.0, f"{over56}")
+over56b = overschot_tussen(V56, DAG56.replace(hour=12), DAG56.replace(hour=12, minute=15))
+controle("en een kwartier om 12:00 een kwart van het uur", abs(over56b - (6.0 - 0.8) / 4) < 0.05, f"{over56b:.3f}")
+
+P56 = prijzen(([0.166] * 8 + [0.272] * 14 + [0.166] * 2) * 2, dag=DAG56 - dt.timedelta(days=1))
+NU56 = dt.datetime(2026, 10, 25, 21, 30)
+OCHTEND56 = DAG56.replace(hour=8)
+
+
+def accu56(**kw):
+    return anker(15.0, soc_min=15.0, soc_max=100.0, rte=0.901, **kw)
+
+
+def ochtend56(huis8):
+    v = verwachting(Z56, huis=0.3, dag=DAG56)
+    v.house_kwh[8] = huis8
+    return v
+
+
+def bij56(besluit):
+    return sum(u.net_kwh for u in besluit.uren if u.stand == NETLADEN and u.start < OCHTEND56)
+
+
+# Een ochtend met een klein tekort: zonder grens laadt hij om 07:00 een stap bij, voor een paar cent.
+zonder56 = plan_batterij(NU56, P56, Tariff(), ochtend56(3.3), accu56())
+met56 = plan_batterij(NU56, P56, Tariff(), ochtend56(3.3), accu56(min_winst=0.05))
+slot56 = re.split(r"(?<=\.)\s+(?=[A-Z])", met56.plan)[-1]
+print(f"  klein tekort: zonder grens {bij56(zonder56):.2f} kWh bijladen, met grens {bij56(met56):.2f} "
+      f"(had {met56.bijladen_winst} opgeleverd)")
+print(f"    {slot56}")
+controle("zonder grens laadt hij voor de dure ochtend bij", bij56(zonder56) > 0.1, f"{bij56(zonder56):.2f}")
+controle("met de grens niet: het levert minder op dan € 0,05",
+         bij56(met56) < 0.005 and met56.bijladen_winst is not None and 0 < met56.bijladen_winst < 0.05,
+         f"{bij56(met56):.2f} {met56.bijladen_winst}")
+controle("en de kaart zegt dat de grens de reden is", "minder dan de ondergrens van € 0,050" in slot56, slot56)
+controle("per laadbeurt: de beurt van de nacht erna blijft staan, die wordt getoetst als hij aan de beurt is",
+         any(u.stand == NETLADEN for u in met56.uren if u.start >= OCHTEND56 + dt.timedelta(hours=12)), "")
+groot56 = plan_batterij(NU56, P56, Tariff(), ochtend56(4.5), accu56(min_winst=0.05))
+print(f"  groot tekort: {bij56(groot56):.2f} kWh bijladen")
+controle("loont het meer dan de grens, dan laadt hij gewoon bij", bij56(groot56) > 1.0 and groot56.bijladen_winst is None,
+         f"{bij56(groot56):.2f}")
+loopt56 = plan_batterij(DAG56.replace(hour=7, minute=5), P56, Tariff(), ochtend56(3.3),
+                        accu56(min_winst=5.0, vorige_stand=NETLADEN, vorige_op=DAG56.replace(hour=7, minute=4)))
+controle("een beurt die al loopt toetst hij niet opnieuw", loopt56.bijladen_winst is None, f"{loopt56.bijladen_winst}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

@@ -3177,6 +3177,12 @@ proef("de rijen onder een vinkje van de batterij verdwijnen echt als het vinkje 
   const veld = (sleutel, value) => ({ dataset: { vkAccu: sleutel }, type: "number", value });
   assert.deepEqual(voorkeurWijziging(veld("grid_charge_below", "")), { battery: { grid_charge_below: null } });
   assert.deepEqual(voorkeurWijziging(veld("trade_above", "0.35")), { battery: { trade_above: 0.35 } });
+  // De ondergrens aan bijladen (v0.160.0): bij laden van het net, leeg is de standaard van € 0,05.
+  assert.ok(!velden.rijen.find((r) => r.sleutel === "grid_charge_min_gain").hidden, "de ondergrens bij laden van het net");
+  assert.ok(uit.rijen.find((r) => r.sleutel === "grid_charge_min_gain").hidden, "laden van het net uit: geen ondergrens");
+  assert.deepEqual(voorkeurWijziging(veld("grid_charge_min_gain", "")), { battery: { grid_charge_min_gain: null } });
+  assert.deepEqual(voorkeurWijziging(veld("grid_charge_min_gain", "0.1")), { battery: { grid_charge_min_gain: 0.1 } });
+  assert.deepEqual(voorkeurWijziging(veld("grid_charge_min_gain", "-3")), { battery: { grid_charge_min_gain: 0 } });
 });
 
 proef("de keuzelijst zet temperatuursensoren bovenaan bij de temperatuur van de batterij", () => {
