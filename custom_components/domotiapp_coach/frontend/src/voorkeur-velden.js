@@ -129,11 +129,11 @@ function thuisbatterij(device) {
     ${blok(t("Handelen"), `
     ${vink("data-vk-accu", "grid_charge", t("Laden uit het net tijdens lage tarieven."), t("De batterij mag dan ook van het net laden, als dat minder kost dan wat hij je straks bespaart. Staat dit uit, dan gaat er alleen zon in."))}
     ${getal("data-vk-accu", "grid_charge_below", t("Alleen als de prijs onder (€/kWh)"), 'min="-1" max="2" step="0.01"', t("de coach bepaalt"))}
-    ${getal("data-vk-accu", "grid_charge_min_gain", t("Alleen als het minstens oplevert (€)"), 'min="0" max="5" step="0.01"', "0.05",
-      t("Per laadbeurt van het net. Een verwachting komt niet altijd uit; onder dit bedrag laat hij het. Nul is geen ondergrens."))}
     ${vink("data-vk-accu", "trade", t("Ontladen naar het net tijdens hoge tarieven."), t("De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis."))}
     <div class="notice" data-vk-rij="trade_kan_niet" hidden>${t(HANDELEN_KAN_NIET)}</div>
     ${getal("data-vk-accu", "trade_above", t("Alleen als de prijs boven (€/kWh)"), 'min="-1" max="2" step="0.01"', t("de coach bepaalt"))}
+    ${getal("data-vk-accu", "grid_charge_min_gain", t("Alleen als het minstens oplevert (€)"), 'min="0" max="5" step="0.01"', "0.05",
+      t("Per beurt van of naar het net, na belasting, verlies en afschrijving. Een verwachting komt niet altijd uit; onder dit bedrag laat hij het. Nul is geen ondergrens."))}
     <p class="sub">${t("De prijzen zijn all-in, met belasting en opslag. Leeg: de coach kiest zelf de beste uren.")}</p>`, "handelen")}
     ${blok(t("Afschrijving"), `
     ${getal("data-vk-accu", "wear_per_kwh", t("Afschrijving (€ per kWh)"), 'min="0" max="1" step="0.001"', t("geen"),
@@ -259,7 +259,7 @@ export function vulVoorkeuren(root, device, actief = null, contract = null) {
   rij("holiday_max_percent", b.holiday);
   // De grens per richting alleen als die richting aanstaat (v0.141.0).
   rij("grid_charge_below", b.grid_charge !== false);
-  rij("grid_charge_min_gain", b.grid_charge !== false);
+  rij("grid_charge_min_gain", b.grid_charge !== false || Boolean(b.trade));
   rij("trade_above", Boolean(b.trade));
   // Een grens die bij een vinkje hoort, zolang het vinkje aan staat (21-10-2026).
   for (const el of root.querySelectorAll("[data-vk-aan]")) {

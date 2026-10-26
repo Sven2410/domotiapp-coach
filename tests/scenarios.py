@@ -1025,6 +1025,23 @@ batterij_handelen = batterij_winter.kopie(
     }),
     begin="2026-09-07 17:55", duur_uren=8,
 )
+# Handelen alleen als de beurt na alle kosten iets oplevert (v0.162.0). Een avond van veertig
+# cent levert terug € 0,20 op; wat er dan uit gaat koopt het huis 's nachts en 's ochtends terug
+# voor € 0,22 tot € 0,25. Onder de streep een paar cent, en de eigenaar: "onder aan de streep
+# moet het geld opleveren en niet gaan pendelen."
+batterij_handelen_krap = batterij_handelen.kopie(
+    naam="batterij-handelen-krap",
+    uitleg="handelen aan, een avond van veertig cent: onder de streep minder dan de ondergrens, dus hij levert niet aan het net",
+    prijzen=Prijzen(per_dag={
+        "2026-09-07": [0.23] * 12 + [0.16] * 4 + [0.25] * 3 + [0.40] * 2 + [0.30] * 3,
+        "2026-09-08": [0.22] * 12 + [0.15] * 4 + [0.25] * 8,
+    }),
+)
+batterij_handelen_krap_zonder = batterij_handelen_krap.kopie(
+    naam="batterij-handelen-krap-zonder-grens",
+    uitleg="dezelfde avond met de ondergrens op nul: dan levert hij voor die paar cent wel",
+    batterij=Batterij(soc=85.0, handelen=True, min_winst=0.0),
+)
 batterij_reserve = batterij_vast_zon.kopie(
     naam="batterij-reserve",
     uitleg="vast contract, reserve van 40% voor noodstroom: daaronder komt er niets uit",
@@ -1408,7 +1425,7 @@ batterij_rendement_leren = batterij_winter.kopie(
 )
 
 BATTERIJ = [
-    batterij_vast_zon, batterij_zonder_terug, batterij_vast_salderen, batterij_winter, batterij_zomer, batterij_handelen,
+    batterij_vast_zon, batterij_zonder_terug, batterij_vast_salderen, batterij_winter, batterij_zomer, batterij_handelen, batterij_handelen_krap, batterij_handelen_krap_zonder,
     batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_volle_beurt_zelf, batterij_paal, batterij_paal_stopt, batterij_sprong,
     batterij_meter_weg, batterij_herstart, batterij_anker_sensor, batterij_uurlast,
     batterij_klapperlast, batterij_wisselende_last, batterij_zonder_rendement,
@@ -1609,6 +1626,13 @@ growatt_bihorario = batterij_winter.kopie(
     # het laadvermogen; dat het 7,8 kW is meet hij in het eerste vak.
     batterij_stand={"growatt_in_w": 3200},
 )
+# Een herstart waarbij de Growatt-integratie later klaar is dan de coach (v0.162.0). In een
+# klantwoning op 26-10-2026 stond de batterij daarna een uur buiten de coach.
+growatt_herstart = growatt_bihorario.kopie(
+    naam="growatt-herstart",
+    uitleg="dezelfde Growatt, Home Assistant herstart om 21:00 en de Growatt-integratie is er pas drie minuten later",
+    gebeurtenissen=[("21:00", "sensor_weg", ("bat_soc", 3)), ("21:00", "herstart", None)],
+)
 growatt_zon = growatt_bihorario.kopie(
     naam="growatt-zon",
     uitleg="dezelfde Growatt op een bewolkte dag: de zon van morgen vult hem, dus geen laden van het net",
@@ -1700,7 +1724,7 @@ ALLE = [
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,
     growatt_bihorario, growatt_zon, growatt_eigen_zon, growatt_schaduw, growatt_vasthouden,
-    growatt_ochtend, growatt_ochtend_zonder_grens,
+    growatt_ochtend, growatt_ochtend_zonder_grens, growatt_herstart,
 ]
 
 

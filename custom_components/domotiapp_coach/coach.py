@@ -377,6 +377,11 @@ GROWATT_PAUZE = timedelta(minutes=5)
 GROWATT_TERUG = timedelta(minutes=6)
 GROWATT_WACHT = timedelta(seconds=45)
 GROWATT_OPNIEUW = timedelta(hours=1)
+# Na een herstart is de Growatt-integratie soms later klaar dan de coach (v0.162.0). Zolang
+# de accustand er niet is vraagt hij elke ronde opnieuw; lukte het lezen niet, dan na
+# `GROWATT_NOG_NIET`, en na `GROWATT_WACHT_MELDEN` wachten een waarschuwing in het log.
+GROWATT_NOG_NIET = timedelta(minutes=5)
+GROWATT_WACHT_MELDEN = timedelta(minutes=10)
 GROWATT_FOUTEN = 3
 GROWATT_BESTENDIG = timedelta(minutes=5)
 # Hoeveel metingen van de inhoud en van het laadvermogen hij bewaart, en hoeveel nachten.
@@ -7266,33 +7271,76 @@ class ChargerCoach:
         SPH op het API-token en kan hij gestuurd worden. Een MIN heeft tijdsegmenten
         (`read_time_segments`); die stuurt de coach (nog) niet. Een MIX of de
         klassieke inlog heeft geen van beide acties: dan leest hij hem uit zoals
-        sinds v0.123.0. Lukt het vragen niet, dan een uur later opnieuw.
+        sinds v0.123.0, en vraagt hij het een uur later opnieuw.
+
+        Alleen een echt antwoord onthoudt hij een uur (v0.162.0). In een klantwoning op
+        26-10-2026 vroeg hij het na een herstart van Home Assistant om 12:51:22, terwijl de
+        accustand van de Growatt pas om 12:51:42 terugkwam; een uur lang stond de batterij
+        daarna buiten de coach, zonder besluit en met een lege kaart. De eigenaar: "zodra de
+        batterij weer communicatie heeft moet ie niet dat uur afwachten." Dus: zonder
+        accustand elke ronde opnieuw, en gaf het lezen geen antwoord, na `GROWATT_NOG_NIET`.
         """
         device_id = device.get("id", "")
         info = self._growatt.setdefault(device_id, {})
         if info.get("soort") == "sph" or (
-            info.get("gevraagd") is not None and now - info["gevraagd"] < GROWATT_OPNIEUW
+            info.get("gevraagd") is not None and now - info["gevraagd"] < info.get("over", GROWATT_OPNIEUW)
         ):
             return info.get("soort")
-        info["gevraagd"] = now
         info["soort"] = None
+        if not self._growatt_klaar(device):
+            self._growatt_wacht_op(device, info, now)
+            return None
+        info["gevraagd"] = now
+        info["over"] = GROWATT_OPNIEUW
         diensten = self.hass.services
         heeft = getattr(diensten, "has_service", None)
         if heeft is None or not heeft(GROWATT_DOMEIN, "read_ac_charge_times"):
             if heeft is not None and heeft(GROWATT_DOMEIN, "read_time_segments"):
                 info["soort"] = "min"
+            self._growatt_klaar_met_wachten(info)
             return info["soort"]
         apparaat = self._growatt_apparaat(device)
         if apparaat is None:
+            info["over"] = GROWATT_NOG_NIET
+            self._growatt_wacht_op(device, info, now)
             return None
         info["apparaat"] = apparaat
         antwoord = await self._async_growatt_lees(device)
-        if isinstance(antwoord, dict) and isinstance(antwoord.get("periods"), list):
+        if antwoord is None:
+            # Geen antwoord is geen nee: de cloud of de integratie is er nog niet.
+            info["over"] = GROWATT_NOG_NIET
+            self._growatt_wacht_op(device, info, now)
+            return None
+        self._growatt_klaar_met_wachten(info)
+        if isinstance(antwoord.get("periods"), list):
             info["soort"] = "sph"
             _LOGGER.info("%s: een Growatt met laadvakken; de coach kan hem sturen", device_id)
         elif heeft(GROWATT_DOMEIN, "read_time_segments"):
             info["soort"] = "min"
         return info["soort"]
+
+    def _growatt_klaar(self, device: dict[str, Any]) -> bool:
+        """Of de Growatt-integratie er is: de accustand heeft een waarde (v0.162.0)."""
+        entity_id = (device.get("entities") or {}).get("soc")
+        if not entity_id:
+            return True
+        staat = self.hass.states.get(entity_id)
+        return staat is not None and staat.state not in ("unavailable", "unknown", "")
+
+    def _growatt_wacht_op(self, device: dict[str, Any], info: dict[str, Any], now: datetime) -> None:
+        """Hoe lang de coach al op de Growatt wacht; na `GROWATT_WACHT_MELDEN` één keer in het log."""
+        sinds = info.setdefault("wacht_sinds", now)
+        if not info.get("wacht_gemeld") and now - sinds >= GROWATT_WACHT_MELDEN:
+            info["wacht_gemeld"] = True
+            _LOGGER.warning(
+                "%s: de Growatt-integratie geeft sinds %s geen antwoord; de coach stuurt de batterij nog niet",
+                device.get("name") or device.get("id"), sinds.strftime("%H:%M"),
+            )
+
+    @staticmethod
+    def _growatt_klaar_met_wachten(info: dict[str, Any]) -> None:
+        info.pop("wacht_sinds", None)
+        info.pop("wacht_gemeld", None)
 
     def _growatt_apparaat(self, device: dict[str, Any]) -> str | None:
         """Het apparaat in Home Assistant waar de acties van de Growatt-integratie op werken.

@@ -1882,6 +1882,39 @@ if (vl := v("batterij-handelen")):
     controle("handelen: en daarbuiten niet",
              len([r for r in bat_tussen(vl, "21:05", "23:55") if r[1] < -200]) <= 2, "")
 
+
+
+def _handelbeurten(vl):
+    standen = [r[4] for r in vl.bat_verloop]
+    return sum(1 for a, b in zip(standen, standen[1:]) if b == "handelen" and a != "handelen")
+
+
+def _naar_net(vl):
+    return sum(-r[1] for r in vl.bat_verloop if r[1] < -200) * vl.stap_uur / 1000
+
+
+if (vl := v("batterij-handelen")):
+    controle("handelen: één beurt op de dure avond, geen aan en uit", _handelbeurten(vl) == 1, f"{_handelbeurten(vl)}")
+if (met_h := v("batterij-handelen-krap")) and (zonder_h := v("batterij-handelen-krap-zonder-grens")):
+    print(f"  handelen op een avond van 0,40: met grens {_naar_net(met_h):.2f} kWh naar het net in "
+          f"{_handelbeurten(met_h)} beurten, zonder {_naar_net(zonder_h):.2f} kWh in {_handelbeurten(zonder_h)}")
+    controle("handelen krap: zonder grens levert hij voor een paar cent", _handelbeurten(zonder_h) == 1 and _naar_net(zonder_h) > 1,
+             f"{_handelbeurten(zonder_h)} {_naar_net(zonder_h):.2f}")
+    controle("handelen krap: met de grens van € 0,05 niet", _handelbeurten(met_h) == 0 and _naar_net(met_h) < 0.2,
+             f"{_handelbeurten(met_h)} {_naar_net(met_h):.2f}")
+    controle("handelen krap: en hij houdt het voor het huis", met_h.bat_verloop[-1][3] > zonder_h.bat_verloop[-1][3] + 10,
+             f"{met_h.bat_verloop[-1][3]:.0f}% tegen {zonder_h.bat_verloop[-1][3]:.0f}%")
+
+if (vl := v("growatt-herstart")):
+    weg_h = [r[0] for r in vl.bat_verloop if not r[4] and r[0].strftime("%H:%M") >= "20:59"]
+    terug_h = next((r[0] for r in vl.bat_verloop if r[4] and r[0].strftime("%H:%M") >= "21:00"), None)
+    print(f"  growatt-herstart: weg {len(weg_h) * vl.stap_uur * 60:.0f} minuten, terug om "
+          f"{terug_h.strftime('%H:%M') if terug_h else '-'}, schrijfacties {[w[0].strftime('%H:%M') for w in vl.gw_schrijf]}")
+    controle("growatt-herstart: de batterij is binnen een paar minuten na de integratie terug, niet na een uur",
+             terug_h is not None and terug_h.strftime("%H:%M") <= "21:06", f"{terug_h}")
+    controle("growatt-herstart: en het nachtvak staat er meteen", any("21:00" <= w[0].strftime("%H:%M") <= "21:10" for w in vl.gw_schrijf),
+             f"{[w[0].strftime('%H:%M') for w in vl.gw_schrijf]}")
+
 if (vl := v("batterij-reserve")):
     controle("reserve: onder de veertig procent komt er niets uit",
              min(r[3] for r in vl.bat_verloop) >= 39.0, f"{min(r[3] for r in vl.bat_verloop):.1f}%")

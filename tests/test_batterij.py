@@ -1921,6 +1921,43 @@ loopt56 = plan_batterij(DAG56.replace(hour=7, minute=5), P56, Tariff(), ochtend5
                         accu56(min_winst=5.0, vorige_stand=NETLADEN, vorige_op=DAG56.replace(hour=7, minute=4)))
 controle("een beurt die al loopt toetst hij niet opnieuw", loopt56.bijladen_winst is None, f"{loopt56.bijladen_winst}")
 
+print("=== 57. handelen: alleen als de beurt na alle kosten iets oplevert, en niet pendelen (v0.162.0) ===")
+# De eigenaar op 26-10-2026: "Handelen moet alleen wat opleveren als alle kosten er afgehaald zijn
+# zoals belasting rendament etc dus onder aan de streep moet het geld opleveren en niet gaan
+# pendelen." De som rekent al met de all-in prijs, de terugleverprijs na kosten, het rendement en
+# de slijtage; nu moet een beurt aan het net ook de ondergrens van bijladen halen.
+def handel57(nacht, piek, **kw):
+    h = [nacht] * 6 + [0.25] * 12 + [piek] * 3 + [0.25] * 3
+    t = [p - 0.13 for p in h]
+    lijst = prijzen(h, terug=t) + prijzen(h, terug=t, dag=DAG + dt.timedelta(days=1))
+    return plan_batterij(DAG.replace(hour=19), lijst, Tariff(), verwachting(huis=0.3),
+                         anker(soc=90.0, handelen=True, net_laden=False, **kw))
+
+
+zonder57 = handel57(0.20, 0.40)
+met57 = handel57(0.20, 0.40, min_winst=0.05)
+print(f"  nacht 0,20, piek 0,40: zonder grens {zonder57.stand}, met grens {met57.stand} (had {met57.handelen_winst} opgeleverd)")
+print(f"    {met57.reason}")
+controle("zonder grens levert hij op de piek aan het net", zonder57.stand == HANDELEN, zonder57.stand)
+controle("met de grens niet: de beurt levert na verlies en terugkopen minder op dan € 0,05",
+         met57.stand != HANDELEN and met57.handelen_winst is not None and 0 < met57.handelen_winst < 0.05,
+         f"{met57.stand} {met57.handelen_winst}")
+controle("en hij zegt waarom", "minder dan de ondergrens van € 0,050" in met57.reason, met57.reason)
+controle("in het plan staat dan ook geen beurt meer naar het net",
+         not [u for u in met57.uren if u.stand == HANDELEN], f"{[u.start for u in met57.uren if u.stand == HANDELEN]}")
+ruim57 = handel57(0.10, 0.40, min_winst=0.05)
+controle("levert het meer op dan de grens, dan handelt hij gewoon", ruim57.stand == HANDELEN and ruim57.handelen_winst is None,
+         f"{ruim57.stand} {ruim57.handelen_winst}")
+loopt57 = handel57(0.20, 0.40, min_winst=5.0, vorige_stand=HANDELEN, vorige_op=DAG.replace(hour=18, minute=59))
+controle("een beurt die al loopt toetst hij niet opnieuw: geen aan en uit", loopt57.stand == HANDELEN and loopt57.handelen_winst is None,
+         f"{loopt57.stand} {loopt57.handelen_winst}")
+nul57 = handel57(0.20, 0.40, min_winst=0.0)
+controle("nul is geen grens", nul57.stand == HANDELEN, nul57.stand)
+uit57b = plan_batterij(DAG.replace(hour=19), prijzen([0.20] * 6 + [0.25] * 12 + [0.40] * 3 + [0.25] * 3, terug=0.02), Tariff(),
+                       verwachting(huis=0.3), anker(soc=90.0, net_laden=False, min_winst=0.05))
+controle("met handelen uit zegt hij er niets over", uit57b.handelen_winst is None and "ondergrens" not in uit57b.reason,
+         uit57b.reason)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
