@@ -1670,7 +1670,8 @@ net als bij het rendement):
   zes metingen). Tot dan wat de installateur invulde, of anders het hoogste dat de coach hem ooit zag
   laden (`growatt_in_w`): een ondergrens, dus eerder te snel dan te langzaam. Zonder dat laadt hij niet
   van het net en zegt de kaart het;
-* wat hij eruit kan: ingevuld, of het hoogste dat de coach hem zag ontladen (`growatt_uit_w`);
+* wat hij eruit kan: ingevuld, of het hoogste dat de coach hem zag ontladen (`growatt_uit_w`), en
+  zolang hij dat nog niet zag het hoogste uur uit de statistiek van Home Assistant (v0.161.0);
 * zijn vloer: de accustand waarop hij stil staat terwijl het huis van het net haalt, buiten een vak
   (`growatt_vloer`). Die staat in geen entiteit; in de klantwoning 15%, terwijl het ontlaadschema 10
   zei.
@@ -1883,3 +1884,19 @@ schrijft vijf keer, voor € 0,748. In `batterij-kwartier-zelf` levert de nachtb
 grens slaat hij hem over en kost de dag € 2,15 in plaats van € 2,45, met 21 opdrachten in plaats van
 108. Dat scenario en `batterij-kwartier-voorloper` staan op nul, want ze zijn er voor de nachtbeurt
 zelf. Proef 56 in test_batterij.py.
+
+## Een Growatt die de coach nog nooit zag ontladen (v0.161.0)
+
+Wat een Growatt eruit kan leert de coach door te kijken (`growatt_uit_w`). Zolang hij dat niet
+zag, rekende de som met 0 W eruit: de batterij kon in het plan niets leveren, dus laden van het
+net leverde ook niets op, en sinds de ondergrens aan bijladen (v0.160.0) laadde hij dan nooit van
+het net. Bij een nieuwe klant die 's avonds leeg begint kan dat dagen duren, want zonder bijladen
+ontlaadt hij pas na een dag met genoeg zon. Gevonden bij het bouwen van v0.160.0; in de klantwoning
+was het ontlaadvermogen al geleerd.
+
+Nu kijkt de coach zolang er geen meting is eens per dag in de statistiek van Home Assistant
+(`_async_hoogste_ontladen`): het hoogste uur van de sensor voor ontladen over de laatste dertig
+dagen (`GROWATT_TERUGKIJK_DAGEN`), of het laagste van een sensor met een teken. Dat is wat de
+batterij vóór de coach deed, dus een meting en net als `growatt_uit_w` een ondergrens. Staat het er
+ook niet in, dan blijft het 0 W en zegt de kaart waarom hij niet van het net laadt, zoals bij een
+onbekend laadvermogen. Proef 200 in test_coach.py.

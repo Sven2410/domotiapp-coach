@@ -11558,6 +11558,95 @@ print(f"  na een dag van 6,5 m³: {lek199}")
 controle("drie keer de laatste week geeft wel een melding, met de mediaan van die week",
          len(lek199) == 1 and "6,5 m³ gas" in lek199[0] and "2,0 m³" in lek199[0], f"{lek199}")
 
+print("=== 200. Growatt die nog nooit ontlaadde: wat hij eruit kan uit de statistiek (v0.161.0) ===")
+# Gevonden bij v0.160.0: zonder `growatt_uit_w` rekent de som met 0 W eruit, en is bijladen
+# niets waard. Bijvoorbeeld een nieuwe klant die 's avonds leeg begint. Wat hij vóór de coach
+# deed staat in de statistiek van Home Assistant.
+gevraagd200 = []
+
+
+def statistiek200(rijen):
+    def statistics_during_period(hass, begin, eind, ids, periode, eenheden, soorten):
+        gevraagd200.append((begin, eind, set(ids), periode, eenheden, soorten))
+        return {e: list(rijen.get(e, [])) for e in ids}
+
+    rec = types.ModuleType("homeassistant.components.recorder")
+
+    class _Rec:
+        async def async_add_executor_job(self, fn, *args):
+            return fn(*args)
+
+    rec.get_instance = lambda hass: _Rec()
+    stats = types.ModuleType("homeassistant.components.recorder.statistics")
+    stats.statistics_during_period = statistics_during_period
+    sys.modules["homeassistant.components.recorder"] = rec
+    sys.modules["homeassistant.components.recorder.statistics"] = stats
+
+
+oud200 = {k: sys.modules.get(k) for k in ("homeassistant.components.recorder", "homeassistant.components.recorder.statistics")}
+NU200 = dt.datetime(2026, 9, 24, 21, 0)
+try:
+    statistiek200({"sensor.growatt_ontladen": [{"max": 0.0, "min": 0.0}, {"max": 2350.0, "min": 0.0},
+                                               {"max": 1800.0, "min": 0.0}, {"max": None}]})
+    w200 = asyncio.run(coach192._async_hoogste_ontladen(GROWATT192, NU200))
+    print(f"  los: {w200} {gevraagd200[-1][3:]} {(gevraagd200[-1][1] - gevraagd200[-1][0]).days} dagen")
+    controle("het hoogste uur van de sensor voor ontladen, in watt, per uur over dertig dagen",
+             w200 == 2350.0 and gevraagd200[-1][3:] == ("hour", {"power": "W"}, {"min", "max"})
+             and (gevraagd200[-1][1] - gevraagd200[-1][0]).days == 30, f"{w200} {gevraagd200[-1]}")
+    teken200 = {**GROWATT192, "entity": "sensor.accu_w",
+                "entities": {k: v for k, v in GROWATT192["entities"].items() if k not in ("charge_power", "discharge_power")}}
+    statistiek200({"sensor.accu_w": [{"min": -3100.0, "max": 2000.0}, {"min": -900.0, "max": 400.0}]})
+    w200 = asyncio.run(coach192._async_hoogste_ontladen(teken200, NU200))
+    om200 = asyncio.run(coach192._async_hoogste_ontladen(
+        {**teken200, "battery": {**GROWATT192["battery"], "power_invert": True}}, NU200))
+    controle("met een teken: het laagste is ontladen, en omgekeerd het hoogste", w200 == 3100.0 and om200 == 2000.0,
+             f"{w200} {om200}")
+    statistiek200({"sensor.growatt_ontladen": [{"max": 0.0, "min": 0.0}]})
+    controle("nooit ontladen in die weken: niets, geen getal",
+             asyncio.run(coach192._async_hoogste_ontladen(GROWATT192, NU200)) is None, "")
+
+    # Het leren: één keer per dag kijken, en wat hij vond bewaren.
+    bewaard200 = []
+    oud_bewaren200 = coach192._async_batterij_bewaren
+
+    async def _bewaren200(settings, device_id, nieuw):
+        bewaard200.append(dict(nieuw))
+
+    coach192._async_batterij_bewaren = _bewaren200
+    statistiek200({"sensor.growatt_ontladen": [{"max": 2350.0, "min": 0.0}]})
+    sessie200 = {}
+    b200 = coachmod.Batterij(soc=16.0)
+    n200 = len(gevraagd200)
+    asyncio.run(coach192._async_growatt_leren(NU200, inst192, GROWATT192, b200, sessie200, {"device": "dev-growatt"}))
+    asyncio.run(coach192._async_growatt_leren(NU200 + dt.timedelta(minutes=1), inst192, GROWATT192, b200, sessie200,
+                                              {"device": "dev-growatt"}))
+    print(f"  bewaard: {bewaard200}, {len(gevraagd200) - n200} keer gevraagd")
+    controle("zonder eigen meting zoekt hij het op en bewaart hij het, één keer per dag",
+             any(r.get("growatt_uit_w") == 2350 for r in bewaard200) and len(gevraagd200) - n200 == 1, f"{bewaard200}")
+    n200 = len(gevraagd200)
+    asyncio.run(coach192._async_growatt_leren(NU200, inst192, GROWATT192, b200, {}, {"device": "dev-growatt",
+                                                                                   "growatt_uit_w": 1500}))
+    controle("met een eigen meting kijkt hij niet", len(gevraagd200) == n200, "")
+    coach192._async_batterij_bewaren = oud_bewaren200
+
+    # Ook niet in de statistiek: de kaart zegt het, zoals bij het laadvermogen.
+    statistiek200({})
+    rij200 = next(r for r in store192.instellingen["battery_state"] if r.get("device") == "dev-growatt")
+    uit200 = rij200.pop("growatt_uit_w", None)
+    coach192._batterij.clear()
+    st200, _ = asyncio.run(ronde192(NU200))
+    print(f"  tip: {st200.get('tip')}")
+    controle("zonder ontlaadvermogen zegt de kaart waarom hij niet van het net laadt",
+             "hoeveel deze Growatt kan leveren" in str(st200.get("tip")), f"{st200.get('tip')}")
+    if uit200 is not None:
+        rij200["growatt_uit_w"] = uit200
+finally:
+    for k, v in oud200.items():
+        if v is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = v
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

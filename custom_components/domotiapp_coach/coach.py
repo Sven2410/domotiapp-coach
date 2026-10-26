@@ -388,6 +388,9 @@ GROWATT_ZON_W = 50.0
 # dan van het net haalt.
 GROWATT_STIL_W = 30.0
 GROWATT_VLOER_NET_W = 150.0
+# Hoeveel dagen hij in de statistiek terugkijkt naar wat een Growatt eruit gaf, zolang hij
+# dat zelf nog niet zag (v0.161.0); zie `_async_hoogste_ontladen`.
+GROWATT_TERUGKIJK_DAGEN = 30
 BATTERIJ_DAGEN_MAX = 400
 
 # How long to wait for the charger to confirm a new limit before starting.
@@ -7429,6 +7432,11 @@ class ChargerCoach:
                 "De coach weet nog niet hoe snel deze Growatt laadt, dus hij laadt hem niet van het net. Vul "
                 "bij de batterij het hoogste laadvermogen in, of wacht tot de coach hem een keer op zon ziet laden."
             )
+        elif not b.max_discharge_w:
+            self.state[device_id]["tip"] = t(
+                "De coach weet nog niet hoeveel deze Growatt kan leveren, dus hij laadt hem niet van het net. "
+                "Vul bij de batterij het hoogste ontlaadvermogen in, of wacht tot de coach hem een keer ziet ontladen."
+            )
         if geschreven is not None and growatt_vol(geschreven, b.soc, b.soc_max):
             # Op de stopgrens: uit, en in dit stuk niet opnieuw.
             sessie["growatt_vol_tot"] = geschreven.tot
@@ -7643,6 +7651,15 @@ class ChargerCoach:
             nieuw["growatt_uit_w"] = round(-laden_w)
         if laden_w is not None and laden_w > float(rij.get("growatt_in_w") or 0.0) + 50.0:
             nieuw["growatt_in_w"] = round(laden_w)
+        # Nog nooit zien ontladen, bijvoorbeeld een nieuwe klant die 's avonds leeg begint:
+        # dan rekent de som met 0 W eruit en is bijladen niets waard. Wat hij vóór de coach
+        # deed staat in de statistiek van Home Assistant; eens per dag kijken (v0.161.0).
+        if not nieuw.get("growatt_uit_w") and not float(rij.get("growatt_uit_w") or 0.0) \
+                and sessie.get("growatt_uit_gezocht") != now.date():
+            sessie["growatt_uit_gezocht"] = now.date()
+            hoogste = await self._async_hoogste_ontladen(device, now)
+            if hoogste is not None and hoogste > 50.0:
+                nieuw["growatt_uit_w"] = round(hoogste)
         # De vloer: stil, en toch haalt het huis van het net. Buiten een vak van het net,
         # want daar staat hij ook stil als hij vol is.
         net_w, _ = self._net_nu(settings)
@@ -7668,6 +7685,56 @@ class ChargerCoach:
             nieuw["growatt_w_pct"] = [*metingen, round(laden_w * 100.0 / geschreven.vermogen_pct)]
         if nieuw:
             await self._async_batterij_bewaren(settings, device_id, nieuw)
+
+    async def _async_hoogste_ontladen(self, device: dict[str, Any], now: datetime) -> float | None:
+        """Het hoogste dat deze batterij de afgelopen weken ontlaadde, in watt, uit de statistiek (v0.161.0).
+
+        Het maximum per uur van de sensor voor ontladen, of het minimum van een sensor met
+        een teken. Een meting, en net als `growatt_uit_w` een ondergrens. None zonder
+        sensor, zonder recorder of zonder een uur waarin hij ontlaadde.
+        """
+        entities = device.get("entities") or {}
+        getekend = device.get("entity") or None
+        los = entities.get("discharge_power") or None
+        if not getekend and not los:
+            return None
+        zone = dt_util.get_default_time_zone()
+        eind = dt_util.as_utc(now if now.tzinfo else now.replace(tzinfo=zone))
+        begin = eind - timedelta(days=GROWATT_TERUGKIJK_DAGEN)
+        try:
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.statistics import statistics_during_period
+
+            rijen = await get_instance(self.hass).async_add_executor_job(
+                statistics_during_period, self.hass, begin, eind, {e for e in (getekend, los) if e}, "hour",
+                {"power": "W"}, {"min", "max"},
+            ) or {}
+        except Exception as fout:  # noqa: BLE001 - zonder recorder geen geschiedenis
+            _LOGGER.debug("kon de statistiek van de batterij niet lezen: %s", fout)
+            return None
+
+        def uiterste(entity_id: str | None, soort: str) -> float | None:
+            waarden = []
+            for r in rijen.get(entity_id) or []:
+                try:
+                    waarden.append(float(r[soort]))
+                except (KeyError, TypeError, ValueError):
+                    continue
+            if not waarden:
+                return None
+            return max(waarden) if soort == "max" else min(waarden)
+
+        kandidaten = []
+        if los:
+            kandidaten.append(uiterste(los, "max"))
+        if getekend:
+            if (device.get("battery") or {}).get("power_invert"):
+                kandidaten.append(uiterste(getekend, "max"))
+            else:
+                laagste = uiterste(getekend, "min")
+                kandidaten.append(-laagste if laagste is not None else None)
+        hoogste = max((k for k in kandidaten if k is not None), default=None)
+        return hoogste if hoogste is not None and hoogste > 0 else None
 
     def _growatt_wacht(self, wil: GrowattSchema, staat: GrowattSchema, now: datetime) -> bool:
         """Of de coach een nieuw schema nog even laat liggen (v0.150.0).
