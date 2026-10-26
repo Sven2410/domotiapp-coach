@@ -1534,6 +1534,9 @@ class ChargerCoach:
         self._sensor_gemeld: set[str] = set()
         # Per laadpaal sinds wanneer een opdracht niet aankomt, en welke al gemeld zijn (v0.163.3).
         self._paal_weg: dict[str, datetime] = {}
+        # Wat elke paal deze ronde in totaal trekt of gaat trekken, per fase (v0.164.1): voor een
+        # groep zonder meter, waar een toezegging bovenop de meting niets zegt.
+        self._paal_stroom: dict[str, float] = {}
         self._paal_gemeld: set[str] = set()
         # Wat daarvan in de opslag staat, zodat er alleen bij een verandering
         # geschreven wordt. Zie `sensor_quiet`.
@@ -3285,7 +3288,9 @@ class ChargerCoach:
                 sleutels = self._groep_sleutels(settings, device)
                 for sleutel in sleutels:
                     vergeven[sleutel] = vergeven.get(sleutel, 0.0) + claim
-                self._toezeggingen[device.get("id", "")] = {"amps": claim, "sleutels": sleutels}
+                self._toezeggingen[device.get("id", "")] = {
+                    "amps": claim, "totaal": self._paal_stroom.get(device.get("id", ""), claim), "sleutels": sleutels,
+                }
             except ServiceNotFound as fout:
                 # Gebeurt bij het opstarten: de coach draait al voordat de
                 # integratie van het merk zijn diensten heeft klaargezet. Geen
@@ -5928,7 +5933,8 @@ class ChargerCoach:
         return rang
 
     def _hogere_toezeggingen(
-        self, settings: dict[str, Any], device: dict[str, Any], *, zonder_palen: bool = False
+        self, settings: dict[str, Any], device: dict[str, Any], *, zonder_palen: bool = False,
+        totaal: bool = False,
     ) -> dict[str, float]:
         """Per zekering wat apparaten hoger in de voorrang bij planningen toezegden.
 
@@ -5938,6 +5944,9 @@ class ChargerCoach:
         maar met 3500 W en heb ik nog ruimte op mijn aansluiting, dan kan ik
         ook mijn boiler nog vol laden." `zonder_palen` voor de palen zelf: die
         tellen elkaar in de ronde al via `vergeven`.
+
+        `totaal` (v0.164.1): niet wat er bovenop de meting komt, maar alles wat een paal trekt. Voor
+        een groep zonder meter: daar ziet niemand de stroom die al loopt.
         """
         rang = self._plan_voorrang(settings)
         mijn = rang.get(device.get("id", ""))
@@ -5951,8 +5960,9 @@ class ChargerCoach:
                 continue
             if zonder_palen and soort.get(apparaat_id) == "laadpaal":
                 continue
+            amps = toezegging.get("totaal", toezegging.get("amps")) if totaal else toezegging.get("amps")
             for sleutel in toezegging.get("sleutels") or []:
-                uit[sleutel] = uit.get(sleutel, 0.0) + float(toezegging.get("amps") or 0.0)
+                uit[sleutel] = uit.get(sleutel, 0.0) + float(amps or 0.0)
         return uit
 
     def _zon_voorrang(self, settings: dict[str, Any]) -> tuple[list[dict], dict[str, int]]:
@@ -6103,7 +6113,7 @@ class ChargerCoach:
 
         Een batterij hangt meestal op één fase, en 3,5 kW is daar vijftien
         ampère. Laadt de auto tegelijk op drie fasen, dan zit die fase zo vol.
-        Zonder fasesensoren bewaakt de coach dit niet: None.
+        Zonder fasesensoren en zonder groep bewaakt de coach dit niet: None.
         """
         sources = settings.get("sources") or {}
         installation = settings.get("installation") or {}
@@ -6120,24 +6130,36 @@ class ChargerCoach:
             return uit
 
         ruimten: list[float] = []
+        # Voor een groep zonder meter: alles wat wie voor gaat trekt, niet alleen wat erbij komt.
+        alles = self._hogere_toezeggingen(settings, device, totaal=True) if hoger is not None else {}
+        # Wat ze zelf laadt staat in de meting van haar fase; dat mag ze houden.
+        eigen_a = max(0.0, batterij_w or 0.0) / VOLTS
         if sources.get("phases_enabled"):
             zekering = float(installation.get("fuse_amps") or 25)
             marge = BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
             stromen = stromen_uit(sources.get("phases") or {}, True)
             if stromen:
                 ruimten.append(zekering - max(marge, zekering * FUSE_MARGIN_SHARE) - max(stromen)
-                               - (hoger or {}).get("", 0.0))
+                               - (hoger or {}).get("", 0.0) + eigen_a)
         # En elke groep waar de batterij aan hangt, met haar eigen zekering en
         # meter. Op een eenfasige groep is er maar één meting en telt die.
+        # Een groep zonder meter telt ook (v0.164.1), met wat er bekend is: de
+        # toezeggingen van wie voor gaat, geen huis. Zoals `ruimten` in planner.py
+        # het voor een paal doet. Tot dan sloeg de coach zo'n groep over, en laadde
+        # een batterij daar op haar volle vermogen naast een paal die voor ging.
         for groep in self._groepen_keten(settings, device):
             zekering = float(groep.get("fuse_amps") or 16)
             stromen = stromen_uit(groep.get("sensors") or {}, int(groep.get("phases") or 3) == 3)
+            # Wat ze zelf laadt zit alleen in een meting; zonder meter komt het er niet weer bij.
             if stromen:
                 ruimten.append(zekering - max(FUSE_MARGIN_AMPS, zekering * FUSE_MARGIN_SHARE) - max(stromen)
-                               - (hoger or {}).get(str(groep.get("id")), 0.0))
+                               - (hoger or {}).get(str(groep.get("id")), 0.0) + eigen_a)
+            else:
+                ruimten.append(zekering - max(FUSE_MARGIN_AMPS, zekering * FUSE_MARGIN_SHARE)
+                               - alles.get(str(groep.get("id")), 0.0))
         if not ruimten:
             return None
-        return min(ruimten) * VOLTS + max(0.0, batterij_w or 0.0)
+        return min(ruimten) * VOLTS
 
     def _laadruimte_plan(
         self, settings: dict[str, Any], device: dict[str, Any]
@@ -6151,10 +6173,12 @@ class ChargerCoach:
         200 W, en het plan rekende met goedkope kWh die niet kwamen.
 
         Alleen een paal die voor gaat in de voorrang bij planningen (zoals in `_hogere_toezeggingen`),
-        alleen een zekering die ze delen, en alleen een zekering die de regelaar ook bewaakt: de
-        hoofdaansluiting met fasesensoren, een groep met een meter. Het huis op die zekering telt niet
+        alleen een zekering die ze delen, en dezelfde zekeringen als de regelaar: de hoofdaansluiting
+        met fasesensoren, en elke groep, ook zonder meter (v0.164.1). Het huis op die zekering telt niet
         mee, want dat weet de coach van tevoren niet. De paal laadt met de stroom van zijn plan op elke
         fase waar hij op laadt; bij één fase weet de coach niet welke, dus telt hij die van de batterij.
+        Twee palen op dezelfde zekering tellen samen (v0.164.1): tot dan nam de coach de laagste ruimte
+        per paal apart, en lieten twee palen van 6 A op een groep van 16 A de batterij 8 A in plaats van 2.
         """
         sources = settings.get("sources") or {}
         installation = settings.get("installation") or {}
@@ -6177,18 +6201,17 @@ class ChargerCoach:
             marge = BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
             eigen_zekeringen[""] = zekering - max(marge, zekering * FUSE_MARGIN_SHARE)
         for groep in self._groepen_keten(settings, device):
-            drie = int(groep.get("phases") or 3) == 3
-            if bewaakt(groep.get("sensors") or {}, fase if drie and fasen == 1 else None):
-                zekering = float(groep.get("fuse_amps") or 16)
-                eigen_zekeringen[str(groep.get("id"))] = zekering - max(FUSE_MARGIN_AMPS, zekering * FUSE_MARGIN_SHARE)
+            zekering = float(groep.get("fuse_amps") or 16)
+            eigen_zekeringen[str(groep.get("id"))] = zekering - max(FUSE_MARGIN_AMPS, zekering * FUSE_MARGIN_SHARE)
         if not eigen_zekeringen:
             return []
 
-        uit: list[tuple[datetime, datetime, float]] = []
+        # Per zekering de blokken van elke paal die eronder hangt: van, tot, ampère.
+        last: dict[str, list[tuple[datetime, datetime, float]]] = {k: [] for k in eigen_zekeringen}
         for paal in settings.get("devices") or []:
             if paal.get("type") != "laadpaal" or rang.get(paal.get("id", ""), len(rang)) >= eigen:
                 continue
-            gedeeld = [eigen_zekeringen[k] for k in self._groep_sleutels(settings, paal) if k in eigen_zekeringen]
+            gedeeld = [k for k in self._groep_sleutels(settings, paal) if k in eigen_zekeringen]
             stand = self.state.get(paal.get("id", ""))
             plan = stand.get("plan_ahead") if isinstance(stand, dict) else None
             if not gedeeld or not isinstance(plan, dict):
@@ -6207,7 +6230,21 @@ class ChargerCoach:
                 except (KeyError, TypeError, ValueError):
                     continue
                 if tot > van:
-                    uit.append((van, tot, max(0.0, min(gedeeld) - float(amps)) * VOLTS * fasen))
+                    for k in gedeeld:
+                        last[k].append((van, tot, float(amps)))
+        # Op elke grens van een blok een nieuw stuk, en per stuk de laagste ruimte over de zekeringen,
+        # met de palen onder dezelfde zekering opgeteld.
+        grenzen = sorted({t for blokken in last.values() for van, tot, _ in blokken for t in (van, tot)})
+        uit: list[tuple[datetime, datetime, float]] = []
+        for van, tot in zip(grenzen, grenzen[1:]):
+            bezet = {
+                k: sum(a for b_van, b_tot, a in blokken if b_van < tot and b_tot > van)
+                for k, blokken in last.items()
+            }
+            if not any(bezet.values()):
+                continue
+            ruimte = min(eigen_zekeringen[k] - bezet[k] for k in eigen_zekeringen)
+            uit.append((van, tot, max(0.0, ruimte) * VOLTS * fasen))
         return uit
 
     @staticmethod
@@ -8379,6 +8416,9 @@ class ChargerCoach:
             max(0.0, decision.amps - charger.actual_amps)
             if may_act and decision.charge
             else 0.0
+        )
+        self._paal_stroom[device_id] = max(
+            float(decision.amps) if may_act and decision.charge else 0.0, float(charger.actual_amps or 0.0)
         )
 
         if not may_act:

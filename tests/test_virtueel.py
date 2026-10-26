@@ -1548,6 +1548,12 @@ if (vl := v("groep-paal-en-batterij")):
              los is not None and vl.klaar_op is not None and vl.klaar_op <= vl.klaar_tijd,
              f"klaar {vl.klaar_op}")
     print(f"  groep-paal-en-batterij: kast hoogstens {vl.groep_max_a:.1f} A")
+if (vl := v("groep-paal-en-batterij-zonder-meter")):
+    print(f"  groep-paal-en-batterij-zonder-meter: kast hoogstens {vl.groep_max_a:.1f} A")
+    controle("groep-paal-en-batterij-zonder-meter: ook zonder meter komt de kast niet boven 16 A",
+             vl.groep_max_a <= 16.0 + 0.5 and vl.paal_herstarts == 0, f"{vl.groep_max_a:.1f} A, {vl.paal_herstarts} herstarts")
+    controle("groep-paal-en-batterij-zonder-meter: en de auto is op tijd vol",
+             vl.klaar_op is not None and vl.klaar_op <= vl.klaar_tijd, f"klaar {vl.klaar_op}")
 
 if (vl := v("klantwoning-prijssensor-weg-om-13")):
     klant_basis(vl, "prijssensor weg om 13")

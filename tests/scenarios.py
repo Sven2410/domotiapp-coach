@@ -1728,9 +1728,15 @@ groep_paal_batterij_los = groep_paal_batterij.kopie(
     naam="groep-paal-en-batterij-los", uitleg="dezelfde nacht met de batterij buiten de kast",
     batterij_in_groep=False,
 )
+# Dezelfde kast zonder eigen meter (v0.164.1). Tot dan sloeg de coach zo'n kast over, en laadde de
+# batterij er naast de paal op haar volle vermogen: 13 + 10,9 A op 16 A.
+groep_paal_batterij_zonder_meter = groep_paal_batterij.kopie(
+    naam="groep-paal-en-batterij-zonder-meter", uitleg="dezelfde nacht, en de kast heeft geen eigen meter",
+    groep_meter=False,
+)
 
 ALLE = [
-    groep_paal_batterij, groep_paal_batterij_los,
+    groep_paal_batterij, groep_paal_batterij_los, groep_paal_batterij_zonder_meter,
     alfen_zonnig, alfen_dyn, alfen_paal_weg, klant_paal_weg, alfen_doel_80, alfen_laadgrens,
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,
     alfen_een_fase, alfen_een_fase_vers,

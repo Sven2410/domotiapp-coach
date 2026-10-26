@@ -121,3 +121,28 @@ overlaat. De paal houdt zijn voorrang; hem omlaag zetten als dat samen goedkoper
 Proef 60 in test_batterij.py, 205 in test_coach.py, en in het virtuele huis `groep-paal-en-batterij`
 (de batterij nu ook in de kast, `batterij_in_groep`). Daar scheelde het 2 cent en vijf opdrachten,
 omdat de regelaar het al opving; het verschil zit vooral in een plan dat klopt.
+
+## Ook zonder meter, en twee palen samen (v0.164.1)
+
+Sven, 26-10-2026, na v0.164.0: "Ik wil dat het ook universeel is he. Dat is een harde afspraak." Bij het
+nalezen bleek de batterij een groep zonder kWh-meter over te slaan (`_laadruimte_w`, `_laadruimte_plan`):
+daar laadde ze op haar volle vermogen naast een paal die voor ging, 13 + 10,9 A op 16 A, en niemand
+greep in. Twee dingen speelden mee:
+
+- Een groep zonder meter telt nu met wat er bekend is, zoals `ruimten` in planner.py het voor een paal
+  al deed: de zekering min de marge min wat wie voor gaat trekt, geen huis.
+- Een toezegging is wat er bovenop de meting bijkomt. Zonder meter is dat niet genoeg: een paal die al
+  op 13 A loopt zegt 0 toe. Daarom houdt de coach per paal ook bij wat hij in totaal trekt
+  (`_paal_stroom`, `totaal` in `_toezeggingen`), en rekent een groep zonder meter daarmee
+  (`_hogere_toezeggingen(..., totaal=True)`). Wat de batterij zelf laadt komt er alleen bij een meting
+  weer bij, want alleen daar zat het in.
+
+In het plan tellen twee palen op dezelfde zekering samen: tot dan nam de coach de laagste ruimte per
+paal apart, en lieten twee palen van 6 A op 16 A de batterij 8 A in plaats van 2.
+
+Proef 206 in test_coach.py (zonder meter, twee palen, de batterij op L1, L2, L3 en drie fasen, kast onder
+kast), en `groep-paal-en-batterij-zonder-meter` in het virtuele huis: op de oude code 22,6 A op de kast,
+nu hoogstens 14,9.
+
+Nog niet: het plan van een paal die na een batterij komt kent haar uurplan niet, en boiler en airco
+plannen vooruit nog zonder de paal.
