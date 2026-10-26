@@ -2581,6 +2581,10 @@ GROWATT_MIN_STUKKEN = 3
 # Vanaf hoeveel procent verschil in vermogen of stopgrens een nieuw schema loont.
 GROWATT_SPELING_PCT = 5
 GROWATT_SPELING_SOC = 3
+# Vanaf hoeveel procent een lagere stopgrens wel een nieuw schema is (v0.163.1). Een stopgrens die
+# te hoog staat laadt meer dan het plan wil, en op 100 zet de coach het schema niet zelf uit
+# (`growatt_vol`); dan is het vermogen de enige rem.
+GROWATT_ZAK_SOC = 10
 # Hoe lang voor een vak de coach het vermogen en de stopgrens nog bijstelt. Daarvoor
 # schuift het plan mee met hoe leeg de avond hem maakt.
 GROWATT_VOORAF = timedelta(minutes=30)
@@ -2671,7 +2675,7 @@ class GrowattSchema:
         )
         return aan == sorted(self.vakken)
 
-    def wijkt_af(self, ander: "GrowattSchema | None", alleen_vakken: bool = False) -> bool:
+    def wijkt_af(self, ander: "GrowattSchema | None", alleen_vakken: bool = False, zakken: bool = True) -> bool:
         """Of dit zoveel van een eerder schema verschilt dat schrijven loont.
 
         Het plan schuift elke minuut een beetje mee met de accustand. Elke procent
@@ -2679,7 +2683,9 @@ class GrowattSchema:
         opdracht vlak na de eerste faalt (de klantwoning, 22-10-2026). Andere vakken
         of aan en uit zijn altijd een verschil. Het vermogen en de stopgrens alleen
         omhoog, en pas vanaf `GROWATT_SPELING_PCT` en `GROWATT_SPELING_SOC`: wil het plan
-        minder, dan zet het het schema zelf uit zodra er genoeg in zit.
+        minder, dan zet het het schema zelf uit zodra er genoeg in zit; behalve een stopgrens die
+        `GROWATT_ZAK_SOC` of meer zakt (v0.163.1). `zakken=False` voor de schaduw: daar laadt er
+        niets, dus het plan zakt de hele nacht, en dat zegt niets over het schema.
         """
         if ander is None or self.net != ander.net:
             return True
@@ -2701,12 +2707,18 @@ class GrowattSchema:
             for begin, eind in self.vakken
         )
         if alleen_vakken:
-            return not dekt or len(self.vakken) > len(ander.vakken)
+            return (not dekt or len(self.vakken) > len(ander.vakken)
+                    or (zakken and ander.stop_soc - self.stop_soc >= GROWATT_ZAK_SOC))
+        # Een veel lagere stopgrens wel (v0.163.1). In een klantwoning schreef de coach op 26-10-2026
+        # om 13:51, bij 84% en met zon, tot 100% voor 1,1 kWh om 06:00; om 21:30 stond de accu op 15%,
+        # en dan laadt dat schema van 15 tot 100%. Om 05:30 wilde hij een lagere grens, maar die schreef
+        # hij niet: alleen omhoog telde.
         return (
             not dekt
             or len(self.vakken) > len(ander.vakken)
             or self.vermogen_pct - ander.vermogen_pct >= GROWATT_SPELING_PCT
             or self.stop_soc - ander.stop_soc >= GROWATT_SPELING_SOC
+            or (zakken and ander.stop_soc - self.stop_soc >= GROWATT_ZAK_SOC)
         )
 
 

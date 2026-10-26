@@ -1969,3 +1969,26 @@ bewaakt (`growatt_vol`). Een te hoog vermogen kost dus geen extra kWh.
 Proef 58 in test_batterij.py, 202 in test_coach.py. In het virtuele huis weigert de Growatt sindsdien
 alles onder 10% (`growatt_min_pct` in `GROWATT_SPH`), en in `growatt-weigert` alles onder 30%: de coach
 schrijft 10, 20 en 30, en daarna niet meer.
+
+## Een te hoge stopgrens, en een schema dat niet bleef staan (v0.163.1)
+
+Twee dingen die na v0.163.0 in dezelfde klantwoning naar boven kwamen.
+
+**De stopgrens van de middag bleef 's nachts staan.** De coach schreef op 26-10-2026 om 13:51, vlak na
+een herstart, bij 84% en met zon: een vak van 06:00 tot 08:00 tot 100% voor 1,1 kWh. Het plan dacht
+toen dat de accu de nacht vol in zou gaan. 's Avonds liep hij leeg tot zijn vloer van 15%, en dan laadt
+dat vak van 15 tot 100%. Om 05:30 (`GROWATT_VOORAF`) wilde de coach een veel lagere grens, maar die
+schreef hij niet: `wijkt_af` telde alleen een hogere stopgrens, omdat het plan elke minuut een beetje
+schuift, en een lagere zou `growatt_vol` vanzelf afvangen. Op 100 doet `growatt_vol` dat bewust niet.
+Het lage vermogen (8%) was daar dus de enige rem, en de correctie bij v0.163.0 ("de stopgrens begrenst
+de hoeveelheid al") klopte niet. Nu is een stopgrens die `GROWATT_ZAK_SOC` (10%) of meer lager uitkomt
+wel een nieuw schema, ook voor het vak begint (`alleen_vakken`). Een paar procent lager niet.
+
+**Een bevestigd schema dat er niet stond.** Na de herstart van 15:21 schreef de coach 8%, las hij zes
+minuten later 8 terug en bevestigde hij het; de Growatt zelf gaf daarna 100. Het eerste teruglezen kan
+nog de buffer van Home Assistant zijn, van voor de eigen ronde van de Growatt. Nu leest de coach een
+schema dat van het net laadt elk half uur opnieuw terug (`GROWATT_CONTROLE`), en wijkt het af, dan
+schrijft hij het opnieuw. Geeft zo'n controle geen antwoord, dan kijkt hij na `GROWATT_TERUG` nog eens,
+zonder te schrijven.
+
+Proef 51 in test_batterij.py (100 naar 84 is een nieuw schema, 5% lager niet), 203 in test_coach.py.

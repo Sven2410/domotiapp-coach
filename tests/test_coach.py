@@ -11746,6 +11746,51 @@ controle("en mains uit ook", not coach192._growatt_vermogen_geweigerd(geschreven
 controle("hetzelfde vermogen is niet geweigerd",
          not coach192._growatt_vermogen_geweigerd(geschreven202, {**gelezen202, "charge_power": 8}), "")
 
+print("=== 203. Growatt: een bevestigd schema blijft hij nakijken (v0.163.1) ===")
+# In de klantwoning op 26-10-2026 bevestigde de coach na een herstart 8%, terwijl de Growatt na zijn eigen
+# ronde 100 teruggaf: het eerste teruglezen was nog de buffer van Home Assistant. Daarna keek hij niet meer.
+coach192._growatt.clear()
+coach192._batterij.clear()
+NU203 = dt.datetime(2026, 9, 25, 15, 21)
+hass192.states.zet("sensor.growatt_soc", {"state": "15", "attributes": {"unit_of_measurement": "%"}})
+schema203 = coachmod.GrowattSchema(net=True, vermogen_pct=20, stop_soc=40, vakken=[("06:00", "08:00")],
+                                   tot=dt.datetime(2026, 9, 26, 8, 0), kwh=3.0)
+asyncio.run(ronde192(NU203))
+omvormer192.update(charge_power=20, charge_stop_soc=40, mains_enabled=True,
+                   periods=[{"period_id": 1, "start_time": "06:00", "end_time": "08:00", "enabled": True},
+                            {"period_id": 2, "start_time": "00:00", "end_time": "00:00", "enabled": False},
+                            {"period_id": 3, "start_time": "00:00", "end_time": "00:00", "enabled": False}])
+sessie203 = coach192._batterij["dev-growatt"]
+sessie203.update(growatt_geschreven=schema203, growatt_bevestigd=None, growatt_terug_om=NU203,
+                 growatt_op=NU203 - dt.timedelta(minutes=10))
+coachmod.GrowattSchema.wijkt_af, oud_wijkt203 = (lambda self, ander, alleen_vakken=False: False), coachmod.GrowattSchema.wijkt_af
+try:
+    asyncio.run(ronde192(NU203 + dt.timedelta(minutes=1)))
+    terug203 = sessie203.get("growatt_terug_om")
+    print(f"  bevestigd {sessie203.get('growatt_bevestigd')}, volgende controle {terug203}")
+    controle("na het bevestigen leest hij over een half uur opnieuw terug",
+             sessie203.get("growatt_bevestigd") is not None and terug203 == NU203 + dt.timedelta(minutes=31),
+             f"{terug203}")
+    # De Growatt geeft na zijn eigen ronde iets anders terug.
+    omvormer192.update(charge_power=100)
+    asyncio.run(ronde192(NU203 + dt.timedelta(minutes=31)))
+    print(f"  na de controle: geschreven {sessie203.get('growatt_geschreven')}")
+    controle("dan ziet hij dat het er niet staat, en schrijft hij het opnieuw",
+             sessie203.get("growatt_geschreven") is None, f"{sessie203.get('growatt_geschreven')}")
+    # Een controle zonder antwoord van de cloud is geen reden om opnieuw te schrijven.
+    omvormer192.update(charge_power=20)
+    sessie203.update(growatt_geschreven=schema203, growatt_bevestigd=NU203, growatt_terug_om=NU203)
+    fout203 = hass192.services.antwoorden[("growatt_server", "read_ac_charge_times")]
+    hass192.services.antwoorden[("growatt_server", "read_ac_charge_times")] = lambda data: (_ for _ in ()).throw(
+        RuntimeError("Growatt API error"))
+    asyncio.run(ronde192(NU203 + dt.timedelta(minutes=40)))
+    hass192.services.antwoorden[("growatt_server", "read_ac_charge_times")] = fout203
+    controle("een controle zonder antwoord: het schema blijft staan en hij kijkt later nog eens",
+             sessie203.get("growatt_geschreven") == schema203
+             and sessie203.get("growatt_terug_om") == NU203 + dt.timedelta(minutes=46), f"{sessie203.get('growatt_terug_om')}")
+finally:
+    coachmod.GrowattSchema.wijkt_af = oud_wijkt203
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
