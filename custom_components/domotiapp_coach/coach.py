@@ -6139,6 +6139,77 @@ class ChargerCoach:
             return None
         return min(ruimten) * VOLTS + max(0.0, batterij_w or 0.0)
 
+    def _laadruimte_plan(
+        self, settings: dict[str, Any], device: dict[str, Any]
+    ) -> list[tuple[datetime, datetime, float]]:
+        """Per blok van het plan van een paal hoeveel watt de zekeringen deze batterij laten (v0.164.0).
+
+        Dezelfde zekeringen als `_laadruimte_w`, maar vooruit: wat de regelaar straks op het
+        moment zelf doet, rekent het uurplan van de batterij nu al mee. In een klantwoning plande
+        de batterij op 26-10-2026 voor 02:00-05:00 2,5 kW van het net op L3, terwijl de paal op
+        dezelfde kast van 3x16 A dan 13 A per fase plande. De regelaar gaf haar daar hooguit
+        200 W, en het plan rekende met goedkope kWh die niet kwamen.
+
+        Alleen een paal die voor gaat in de voorrang bij planningen (zoals in `_hogere_toezeggingen`),
+        alleen een zekering die ze delen, en alleen een zekering die de regelaar ook bewaakt: de
+        hoofdaansluiting met fasesensoren, een groep met een meter. Het huis op die zekering telt niet
+        mee, want dat weet de coach van tevoren niet. De paal laadt met de stroom van zijn plan op elke
+        fase waar hij op laadt; bij één fase weet de coach niet welke, dus telt hij die van de batterij.
+        """
+        sources = settings.get("sources") or {}
+        installation = settings.get("installation") or {}
+        rang = self._plan_voorrang(settings)
+        eigen = rang.get(device.get("id", ""), len(rang))
+        fase = str((device.get("battery") or {}).get("phase") or "")
+        fasen = 1 if fase in ("l1", "l2", "l3") else 3
+
+        def bewaakt(sensoren: dict[str, Any], alleen: str | None) -> bool:
+            return any(
+                ((sensoren or {}).get(key) or {}).get("current")
+                for key in ("l1", "l2", "l3")
+                if alleen is None or key == alleen
+            )
+
+        # Elke zekering van de batterij die de regelaar bewaakt: sleutel, grens in ampère na de marge.
+        eigen_zekeringen: dict[str, float] = {}
+        if sources.get("phases_enabled") and bewaakt(sources.get("phases") or {}, fase if fasen == 1 else None):
+            zekering = float(installation.get("fuse_amps") or 25)
+            marge = BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
+            eigen_zekeringen[""] = zekering - max(marge, zekering * FUSE_MARGIN_SHARE)
+        for groep in self._groepen_keten(settings, device):
+            drie = int(groep.get("phases") or 3) == 3
+            if bewaakt(groep.get("sensors") or {}, fase if drie and fasen == 1 else None):
+                zekering = float(groep.get("fuse_amps") or 16)
+                eigen_zekeringen[str(groep.get("id"))] = zekering - max(FUSE_MARGIN_AMPS, zekering * FUSE_MARGIN_SHARE)
+        if not eigen_zekeringen:
+            return []
+
+        uit: list[tuple[datetime, datetime, float]] = []
+        for paal in settings.get("devices") or []:
+            if paal.get("type") != "laadpaal" or rang.get(paal.get("id", ""), len(rang)) >= eigen:
+                continue
+            gedeeld = [eigen_zekeringen[k] for k in self._groep_sleutels(settings, paal) if k in eigen_zekeringen]
+            stand = self.state.get(paal.get("id", ""))
+            plan = stand.get("plan_ahead") if isinstance(stand, dict) else None
+            if not gedeeld or not isinstance(plan, dict):
+                continue
+            try:
+                toen = datetime.fromisoformat(str(stand.get("at")))
+            except ValueError:
+                continue
+            for blok in plan.get("blocks") or []:
+                amps = blok.get("amps")
+                if not blok.get("charging") or not isinstance(amps, (int, float)) or amps <= 0:
+                    continue
+                try:
+                    van = max(datetime.fromisoformat(blok["start"]), toen)
+                    tot = datetime.fromisoformat(blok["end"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if tot > van:
+                    uit.append((van, tot, max(0.0, min(gedeeld) - float(amps)) * VOLTS * fasen))
+        return uit
+
     @staticmethod
     def _groepen_keten(settings: dict[str, Any], device: dict[str, Any]) -> list[dict[str, Any]]:
         """De groepen waar dit apparaat aan hangt, van onder naar boven.
@@ -6520,6 +6591,7 @@ class ChargerCoach:
                 enabled=True, paal_laadt=self._paal_laadt(settings),
                 helpt=bool(sessie.get("helpt")),
                 auto_laden=self._auto_laden(),
+                laadruimte=self._laadruimte_plan(settings, device),
             )
         )
 

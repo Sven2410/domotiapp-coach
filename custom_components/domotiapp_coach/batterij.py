@@ -550,6 +550,29 @@ def handelen_kan_niet(b: Batterij, prijzen: list[dict], now: datetime) -> bool:
     return bool(komend) and all(rij.get("feed_in") is None for rij in komend)
 
 
+def _laad_w(b: Batterij, rij: dict) -> float:
+    """Met hoeveel watt de batterij in dit blok kan laden: haar vermogen, of minder als de
+    zekering die ze met een laadpaal deelt dan vol zit (`laad_max_w`, v0.164.0)."""
+    grens = rij.get("laad_max_w")
+    return b.max_charge_w if grens is None else max(0.0, min(b.max_charge_w, grens))
+
+
+def _met_laadruimte(blokken: list[dict], laadruimte: list[tuple[datetime, datetime, float]]) -> list[dict]:
+    """De blokken met de laagste laadruimte die erin valt, als `laad_max_w` (v0.164.0).
+
+    `laadruimte` komt van de coach: per blok van het plan van een paal hoeveel watt de zekeringen
+    die de batterij met die paal deelt haar nog laten. In een klantwoning plande de batterij op
+    26-10-2026 2,5 kW van het net op een fase waar de paal in dezelfde uren 13 A trok, op een kast
+    van 16 A; de regelaar hield de zekering heel, maar het plan rekende met kWh die niet kwamen.
+    Kopieën, want de prijslijst is van de coach.
+    """
+    uit = []
+    for rij in blokken:
+        grenzen = [w for van, tot, w in laadruimte if van < rij["end"] and tot > rij["start"]]
+        uit.append(dict(rij, laad_max_w=min(grenzen)) if grenzen else rij)
+    return uit
+
+
 def _mogelijk(
     e: float, rij: dict, deel: float, huis: float, b: Batterij, som_laag: float,
     hoog: float, piek: bool = True, vloer: float | None = None,
@@ -559,7 +582,7 @@ def _mogelijk(
     `vloer` is de inhoud waaronder hij niet aan het net levert (v0.133.1): het
     huis voeden mag eronder, handelen niet. Zie `_nacht_vloer`.
     """
-    op = min(hoog, e + _cel_in(b, b.max_charge_w / 1000.0 * deel, deel))
+    op = min(hoog, e + _cel_in(b, _laad_w(b, rij) / 1000.0 * deel, deel))
     if (piek and in_evening_peak(rij["start"])) or not _mag_netladen(b, rij):
         # Eis 4: in de avondpiek komt er niets van het net bij. Zon mag. En ook
         # niet als de bewoner het hier niet wil (v0.141.0).
@@ -1323,6 +1346,7 @@ def plan_batterij(
     paal_laadt: bool = False,
     helpt: bool = False,
     auto_laden: list[tuple[datetime, datetime, float]] | None = None,
+    laadruimte: list[tuple[datetime, datetime, float]] | None = None,
 ) -> Besluit:
     """Welke stand de batterij nu hoort te hebben.
 
@@ -1331,6 +1355,9 @@ def plan_batterij(
     `auto_laden` is het plan van de paal: per blok wat de auto van het net
     zou nemen (v0.95.0). Daarmee zegt het uurplan welke uren de batterij de
     auto helpt, en rekent de nachtbalans ermee; zie `auto_hulp`.
+
+    `laadruimte` is per blok hoeveel watt de zekeringen die ze met een paal deelt haar
+    laten (v0.164.0); zie `_met_laadruimte`.
     """
     if not enabled:
         return Besluit(
@@ -1347,6 +1374,8 @@ def plan_batterij(
         )
 
     blokken = [rij for rij in prices if rij["end"] > now] or _vlakke_blokken(now, None, tariff)
+    if laadruimte:
+        blokken = _met_laadruimte(blokken, laadruimte)
     # Bij een dynamisch contract is de avondpiek een gewoon uur op zijn prijs.
     dicht = piek_dicht(prices)
     nu = price_now(blokken, now)

@@ -1708,8 +1708,29 @@ alfen_paal_weg = alfen_dyn.kopie(
     uitleg="alfen-dynamisch-zonnig, en de Alfen neemt van 18:56 tot 19:08 geen opdrachten aan, in de pauze",
     gebeurtenissen=[("18:56", "paal_onbereikbaar", 12)],
 )
+# Een paal en een batterij op dezelfde kast (v0.164.0). In een klantwoning plande de batterij op 26-10-2026
+# 2,5 kW van het net in de uren dat de paal er 13 A per fase op zette, op een kast van 3x16 A. De regelaar
+# hield de zekering heel, maar het uurplan rekende met goedkope kWh die niet kwamen.
+groep_paal_batterij = Scenario(
+    "groep-paal-en-batterij",
+    "dynamisch, een grote auto en een batterij op L3 aan dezelfde kast van 3x16 A, een goedkope nacht",
+    contract="dynamisch", zon=Zon(wolken="geen"), auto=replace(GROTE, soc=40.0, meldt_soc=False),
+    batterij=Batterij(soc=10.0, max_laden_w=2500.0, max_ontladen_w=2500.0, fase=2),
+    groep_amps=16.0, groep_last_w=200.0, batterij_in_groep=True,
+    begin="2026-09-07 21:55", kabel_erin="22:00", klaar_om="08:00", duur_uren=24, stap_seconden=15,
+    prijzen=Prijzen(per_dag={
+        "2026-09-07": [0.30] * 22 + [0.32, 0.32],
+        "2026-09-08": [0.30, 0.30, 0.18, 0.18, 0.18, 0.22, 0.22, 0.30] + [0.32] * 9 + [0.45] * 4 + [0.32] * 3,
+    }),
+    gebeurtenissen=[("22:05", "soc_opgeven", 40)],
+)
+groep_paal_batterij_los = groep_paal_batterij.kopie(
+    naam="groep-paal-en-batterij-los", uitleg="dezelfde nacht met de batterij buiten de kast",
+    batterij_in_groep=False,
+)
 
 ALLE = [
+    groep_paal_batterij, groep_paal_batterij_los,
     alfen_zonnig, alfen_dyn, alfen_paal_weg, klant_paal_weg, alfen_doel_80, alfen_laadgrens,
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,
     alfen_een_fase, alfen_een_fase_vers,

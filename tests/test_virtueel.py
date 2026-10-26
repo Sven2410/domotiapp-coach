@@ -1538,6 +1538,17 @@ if (vl := v("alfen-paal-weg")):
              and abs(vl.uit_zon_kwh + vl.uit_net_kwh - basis.uit_zon_kwh - basis.uit_net_kwh) < 0.2,
              f"{vl.kosten:.2f} {vl.uit_zon_kwh + vl.uit_net_kwh:.1f}")
 
+# Een paal en een batterij op dezelfde kast (v0.164.0): de kast blijft heel, de batterij laadt in de
+# goedkope uren die de paal overlaat, en het plan belooft niet wat er niet past.
+if (vl := v("groep-paal-en-batterij")):
+    controle("groep-paal-en-batterij: de kast komt niet boven 16 A", vl.groep_max_a <= 16.0 + 0.5 and vl.paal_herstarts == 0,
+             f"{vl.groep_max_a:.1f} A, {vl.paal_herstarts} herstarts")
+    los = v("groep-paal-en-batterij-los")
+    controle("groep-paal-en-batterij: de auto is even vol als met de batterij buiten de kast",
+             los is not None and vl.klaar_op is not None and vl.klaar_op <= vl.klaar_tijd,
+             f"klaar {vl.klaar_op}")
+    print(f"  groep-paal-en-batterij: kast hoogstens {vl.groep_max_a:.1f} A")
+
 if (vl := v("klantwoning-prijssensor-weg-om-13")):
     klant_basis(vl, "prijssensor weg om 13")
     controle("prijssensor weg: gemeld na tien minuten, om 13:00",

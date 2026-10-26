@@ -1999,6 +1999,35 @@ in59 = bat.growatt_schema(p59.uren, DAG.replace(day=DAG.day + 1, hour=6, minute=
                           bijstel_kwh=1.1 - vol59.kwh)
 controle("in het vak blijft hij boven de accustand van nu", not in59.net or in59.stop_soc >= 61, f"{in59}")
 
+print("=== 60. de zekering die de batterij met een paal deelt, in het uurplan (v0.164.0) ===")
+# In een klantwoning op 26-10-2026: de batterij plande 02:00-05:00 2,5 kW van het net, terwijl de paal op
+# dezelfde kast van 3x16 A dan 13 A per fase plande. Er bleef op haar fase hooguit 200 W over.
+NU60 = DAG.replace(hour=21)
+P60 = [0.40] * 26 + [0.10] * 3 + [0.20] * 2 + [0.40] * 17
+L60 = prijzen(P60, terug=0.0)
+morgen60 = DAG + dt.timedelta(days=1)
+paal60 = [(morgen60.replace(hour=2), morgen60.replace(hour=5), 200.0)]
+b60 = anker(soc=10.0, max_charge_w=2500.0)
+vrij60 = plan_batterij(NU60, L60, Tariff(), verwachting(huis=0.5), b60)
+krap60 = plan_batterij(NU60, L60, Tariff(), verwachting(huis=0.5), b60, laadruimte=paal60)
+
+
+def net60(plan, van, tot):
+    return sum(u.net_kwh for u in plan.uren if van <= u.start.hour < tot and u.start.date() == morgen60.date())
+
+
+print(f"  02-05 van het net: vrij {net60(vrij60, 2, 5):.2f} kWh, naast de paal {net60(krap60, 2, 5):.2f}; "
+      f"05-07: {net60(vrij60, 5, 7):.2f} tegen {net60(krap60, 5, 7):.2f}")
+controle("zonder paal laadt hij in de goedkoopste uren op zijn vermogen", net60(vrij60, 2, 5) > 6.0,
+         f"{net60(vrij60, 2, 5):.2f}")
+controle("naast de paal hooguit wat de zekering laat: 0,2 kWh per uur", net60(krap60, 2, 5) <= 3 * 0.2 + 1e-6,
+         f"{net60(krap60, 2, 5):.2f}")
+controle("in de goedkope uren daarna laadt hij op zijn volle vermogen", net60(krap60, 5, 7) >= 2 * 2.5 - 0.05,
+         f"{net60(krap60, 5, 7):.2f}")
+controle("en het uurplan belooft niet meer dan er past", net60(krap60, 2, 7) < net60(vrij60, 2, 7) - 6.0,
+         f"{net60(krap60, 2, 7):.2f} tegen {net60(vrij60, 2, 7):.2f}")
+controle("de prijslijst van de coach blijft zoals hij was", all("laad_max_w" not in rij for rij in L60))
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

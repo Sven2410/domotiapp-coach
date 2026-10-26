@@ -1212,6 +1212,8 @@ class Scenario:
     # met een eigen kWh-meter. None is geen groep.
     groep_amps: float | None = None
     groep_last_w: float = 0.0
+    # De thuisbatterij hangt ook in die groep, op haar eigen fase (v0.164.0).
+    batterij_in_groep: bool = False
     # De meter meldt de fasestromen in hele ampères, en Home Assistant geeft
     # alleen door wat verandert: zo doet een slimme meter op de P1-poort het.
     # De coach krijgt dan alleen de wissels, niet elke stap een meting, en een
@@ -1286,6 +1288,8 @@ class Verloop:
     geschiedenis: list = field(default_factory=list)
     # Hoe vaak de paal zelf de sessie herstartte omdat de auto over de groep ging.
     paal_herstarts: int = 0
+    # De hoogste stroom op een fase van de groep, gemeten (v0.164.0).
+    groep_max_a: float = 0.0
     # Opdrachten aan de paal die niet aankwamen (`paal_onbereikbaar`, v0.163.3).
     paal_geweigerd: int = 0
     # Hoe vaak een Alfen op zijn veilige stroom terugviel omdat de coach
@@ -1648,6 +1652,7 @@ def instellingen(s: Scenario) -> dict:
             "name": "Thuisbatterij",
             "brand": "anker",
             "controllable": True,
+            **({"circuit": "garage"} if s.groep_amps is not None and s.batterij_in_groep else {}),
             "entity": E["bat_vermogen"],
             "entities": {
                 "soc": E["bat_soc"],
@@ -1803,6 +1808,7 @@ class Wereld:
                                              schema=copy.deepcopy(s.batterij.schema))
                          if s.batterij is not None else None)
         self.bat_w = 0.0
+        self.groep_max_a = 0.0
         self.vw_w = 0.0
         self.vw_gevraagd: dt.datetime | None = None
         self.auto = dataclasses.replace(s.auto, soc_gemeld=[])
@@ -2022,6 +2028,9 @@ class Wereld:
                 a = (self.auto.trekt_amps if i < self.paal_fasen else 0.0)
                 if i == 0:
                     a += self.s.groep_last_w / VOLT
+                if self.s.batterij_in_groep and self.batterij is not None and i == self.batterij.fase:
+                    a += abs(self.bat_w) / VOLT
+                self.groep_max_a = max(self.groep_max_a, a)
                 z(E[f"g_{naam}"], weg if p1_weg else w(f"{a:.2f}", "A"))
         cijfers = 0 if self.s.fase_hele_amps else 2
         for naam, a in zip(("l1", "l2", "l3"), self.fase_amps()):
@@ -2823,6 +2832,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
         verloop.beurten = asyncio.run(coachmod.async_get_beurten(hass).async_list())
         verloop.geschiedenis = asyncio.run(coachmod.async_get_meldingen(hass).async_list())
         verloop.paal_herstarts = wereld.paal.herstarts
+        verloop.groep_max_a = wereld.groep_max_a
         verloop.paal_terugvallen = wereld.paal.terugvallen
         verloop.geleerd = {int(r["band"]): float(r["kw"]) for r in inst.get("car_pace") or []
                            if isinstance(r, dict) and r.get("car") == "auto"}
