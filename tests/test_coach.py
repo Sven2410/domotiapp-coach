@@ -11866,6 +11866,42 @@ except Exception as fout:  # noqa: BLE001
     soort204 = type(fout).__name__
 controle("een dienst die nog niet bestaat blijft ServiceNotFound", soort204 == "ServiceNotFound", f"{soort204}")
 
+print("=== 205. de zekering die de batterij met een paal deelt, vooruit (v0.164.0) ===")
+# In een klantwoning op 26-10-2026: een kast van 3x16 A met een meter, de paal op drie fasen en de batterij
+# op L3, allebei eronder. De paal plande 02:00-05:00 13 A per fase.
+PAAL205 = {**LAADPAAL, "id": "dev-paal205", "circuit": "g-kast"}
+ACCU205 = {"id": "dev-accu205", "type": "thuisbatterij", "controllable": True, "circuit": "g-kast",
+           "battery": {"phase": "l3", "max_charge_w": 2500}}
+KAST205 = {"id": "g-kast", "name": "Kast", "fuse_amps": 16, "phases": 3,
+           "sensors": {k: {"current": f"sensor.kast_{k}"} for k in ("l1", "l2", "l3")}}
+inst205 = instellingen(devices=[PAAL205, ACCU205])
+inst205["installation"] = {**(inst205.get("installation") or {}), "circuits": [KAST205]}
+hass205, store205, coach205 = bouw(huis(), inst205)
+T205 = dt.datetime(2026, 10, 26, 21, 46)
+coach205.state["dev-paal205"] = {"at": T205.isoformat(), "plan_ahead": {"blocks": [
+    {"start": "2026-10-27T02:00:00", "end": "2026-10-27T05:00:00", "charging": True, "amps": 13.0, "kwh": 27.0},
+    {"start": "2026-10-27T05:00:00", "end": "2026-10-27T06:00:00", "charging": False, "amps": 0, "kwh": 0.0},
+]}}
+ruimte205 = coach205._laadruimte_plan(inst205, ACCU205)
+print(f"  {ruimte205}")
+# 16 A min de marge (2 A) min 13 A: 1 A op L3, 230 W.
+controle("naast een paal op 13 A blijft er op een kast van 16 A 1 A over op haar fase",
+         len(ruimte205) == 1 and abs(ruimte205[0][2] - 230.0) < 1e-6
+         and ruimte205[0][0] == dt.datetime(2026, 10, 27, 2) and ruimte205[0][1] == dt.datetime(2026, 10, 27, 5),
+         f"{ruimte205}")
+inst205b = {**inst205, "strategy": {**inst205["strategy"], "plan_priority": ["dev-accu205", "dev-paal205"]}}
+controle("staat de batterij eerst in de voorrang, dan rekent ze niet met de paal",
+         coach205._laadruimte_plan(inst205b, ACCU205) == [], f"{coach205._laadruimte_plan(inst205b, ACCU205)}")
+inst205c = {**inst205, "installation": {**inst205["installation"], "circuits": [{**KAST205, "sensors": {}}]}}
+# De hoofdaansluiting (25 A, fasesensoren, lastbewaker: 3 A marge) deelt ze altijd: 25 - 3 - 13 = 9 A.
+controle("een kast zonder meter bewaakt de regelaar niet: dan telt alleen de hoofdaansluiting",
+         [w for _, _, w in coach205._laadruimte_plan(inst205c, ACCU205)] == [9 * 230.0],
+         f"{coach205._laadruimte_plan(inst205c, ACCU205)}")
+ANDER205 = {**ACCU205, "circuit": ""}
+controle("een batterij die de kast niet deelt: ook alleen de hoofdaansluiting",
+         [w for _, _, w in coach205._laadruimte_plan(inst205, ANDER205)] == [9 * 230.0],
+         f"{coach205._laadruimte_plan(inst205, ANDER205)}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

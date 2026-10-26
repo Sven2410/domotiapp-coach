@@ -100,3 +100,24 @@ garage met zijn meter een kast. Dat gebeurt in het klad én in de opgeslagen kop
 zodat het scherm niet meteen op "niet opgeslagen" staat. Proeven in
 test_rapport.mjs (het scherm, het indelen, het opslaan, Apparaten) en proef 117
 in test_coach.py (de zinnen).
+
+## De batterij plant mee met de paal op haar groep (v0.164.0)
+
+Tot nu toe kende alleen de regelaar de zekeringen van een batterij (`_laadruimte_w`): op het moment
+zelf krijgt ze wat de paal en de groep overlaten. Het uurplan van de batterij rekende met haar volle
+laadvermogen. In een klantwoning plande ze op 26-10-2026 voor 02:00-05:00 2,5 kW van het net op L3,
+terwijl de paal op dezelfde kast van 3x16 A dan 13 A per fase plande. De regelaar gaf haar daar hooguit
+200 W, dus het plan beloofde goedkope kWh die niet kwamen, en de bewoner zag 11,5 kW op een kast van 16 A.
+
+Nu geeft de coach het uurplan per blok van het plan van een paal mee hoeveel watt de zekeringen nog
+laten (`_laadruimte_plan` in coach.py, `laadruimte` en `_met_laadruimte` in batterij.py). De regels zijn
+die van de regelaar: alleen een paal die voor gaat in de voorrang bij planningen, alleen een zekering
+die ze delen, alleen een zekering die de coach meet (de hoofdaansluiting met fasesensoren, een groep met
+een meter), met dezelfde marges. De paal telt met de stroom van zijn plan op elke fase; bij één fase
+weet de coach niet welke, dus telt hij die van de batterij. Het huis op die groep telt niet mee, want
+dat is vooraf niet bekend. De som kiest dan zelf: de batterij schuift naar de goedkope uren die de paal
+overlaat. De paal houdt zijn voorrang; hem omlaag zetten als dat samen goedkoper is, doet de coach nog niet.
+
+Proef 60 in test_batterij.py, 205 in test_coach.py, en in het virtuele huis `groep-paal-en-batterij`
+(de batterij nu ook in de kast, `batterij_in_groep`). Daar scheelde het 2 cent en vijf opdrachten,
+omdat de regelaar het al opving; het verschil zit vooral in een plan dat klopt.
