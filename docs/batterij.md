@@ -1992,3 +1992,20 @@ schrijft hij het opnieuw. Geeft zo'n controle geen antwoord, dan kijkt hij na `G
 zonder te schrijven.
 
 Proef 51 in test_batterij.py (100 naar 84 is een nieuw schema, 5% lager niet), 203 in test_coach.py.
+
+## De stopgrens vanaf het plan, niet vanaf nu (v0.163.2)
+
+Na v0.163.1 in dezelfde klantwoning, op 26-10-2026 om 16:01: een vak van 06:00 tot 08:00 voor 1,1 kWh,
+met de stopgrens op 97 bij een accustand van 96. `growatt_schema` legde de stopgrens altijd minstens
+een procent boven de accustand van nu, zodat `growatt_vol` het schema niet meteen uitzette. Maar om
+16:00 is dat de volle batterij van de middag, en om 06:00 zit hij op zijn vloer. 's Avonds zakte de
+stopgrens mee met de batterij, en schreef de coach hem pas opnieuw bij elke 10% (`GROWATT_ZAK_SOC`).
+
+Nu begint die ondergrens bij de accustand die het plan verwacht waar het laden begint, als het vak nog
+moet komen; loopt het vak al, dan bij die van nu. En `growatt_vol` telt alleen binnen een vak: daarbuiten
+doet de stopgrens niets, dus een batterij die er nu nog boven zit is niet "vol".
+
+Wat de Growatt na zijn eigen ronde als stopgrens teruggeeft (100 na een geschreven 97) telt nog steeds
+niet mee: de omvormer heeft er twee velden voor (22-10-2026, `gelijk`).
+
+Proef 59 in test_batterij.py.

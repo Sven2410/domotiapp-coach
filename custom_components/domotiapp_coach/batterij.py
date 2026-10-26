@@ -2845,13 +2845,23 @@ def growatt_schema(
     # Het vermogen over wat er van het laden nog over is.
     watt = kwh / max(echte_duur(max(laat, now, key=_echt), eind).total_seconds() / 3600.0, 1 / 60) * 1000.0
     pct = min(100, max(min_pct, 1, int(-(-watt * 100 // b.max_charge_w))))
-    stop = min(int(b.soc_max), max(int(b.soc or 0) + 1, int(-(-soc_eind // 1))))
+    # Boven de accustand waar het laden begint: nu, of wat het plan dan verwacht als het vak nog
+    # moet komen (v0.163.2). Met de stand van nu volgde de stopgrens 's middags de volle batterij
+    # (97 bij 96, de klantwoning 26-10-2026), en zakte hij 's avonds pas per `GROWATT_ZAK_SOC`.
+    vanaf = b.soc or 0.0
+    if _echt(now) < _echt(laat):
+        voor = [u for u in rij if _echt(u.end) <= _echt(laat)]
+        if voor:
+            vanaf = min(vanaf, voor[-1].soc)
+    stop = min(int(b.soc_max), max(int(vanaf) + 1, int(-(-soc_eind // 1))))
     return GrowattSchema(
         net=True, vermogen_pct=pct, stop_soc=stop, vakken=klok, tot=eind, kwh=kwh,
     )
 
 
-def growatt_vol(schema: GrowattSchema, soc: float | None, soc_max: float = 100.0) -> bool:
+def growatt_vol(
+    schema: GrowattSchema, soc: float | None, soc_max: float = 100.0, now: datetime | None = None,
+) -> bool:
     """Of de batterij al zit waar het schema hem laat stoppen, gemeten en niet teruggelezen.
 
     Niet als het schema tot vol gaat: vol stopt hij zelf, en zolang het vak loopt staat hij
@@ -2859,8 +2869,13 @@ def growatt_vol(schema: GrowattSchema, soc: float | None, soc_max: float = 100.0
     dan gaf de batterij in de goedkope uren stroom aan het huis en laadde de coach hem
     daarna weer bij, met het verlies twee keer. In het virtuele huis (`growatt-bihorario`)
     ging het schema zo tussen 05:20 en 08:46 zeventien keer aan en uit.
+
+    Met `now` alleen binnen een vak (v0.163.2): vóór het vak mag de stopgrens onder de accustand
+    van nu liggen, want hij geldt pas als het vak begint en de batterij dan leger is.
     """
     if not schema.net or schema.houden or soc is None or schema.stop_soc >= soc_max - 0.5:
+        return False
+    if now is not None and not any(a <= now.strftime("%H:%M") < e for a, e in schema.vakken):
         return False
     return soc >= schema.stop_soc - 0.5
 

@@ -7491,7 +7491,7 @@ class ChargerCoach:
                 "De coach weet nog niet hoeveel deze Growatt kan leveren, dus hij laadt hem niet van het net. "
                 "Vul bij de batterij het hoogste ontlaadvermogen in, of wacht tot de coach hem een keer ziet ontladen."
             )
-        if geschreven is not None and growatt_vol(geschreven, b.soc, b.soc_max):
+        if geschreven is not None and growatt_vol(geschreven, b.soc, b.soc_max, now):
             # Op de stopgrens: uit, en in dit stuk niet opnieuw.
             sessie["growatt_vol_tot"] = geschreven.tot
         vol_tot = sessie.get("growatt_vol_tot")

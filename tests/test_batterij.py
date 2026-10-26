@@ -1979,6 +1979,26 @@ controle("met een geleerde ondergrens die", hoger58.vermogen_pct == 30 and hoger
 controle("een groot schema houdt zijn eigen vermogen", bat.growatt_schema(p50.uren, NU50, b50).vermogen_pct == s50.vermogen_pct
          and s50.vermogen_pct > bat.GROWATT_MIN_PCT, f"{s50.vermogen_pct}")
 
+print("=== 59. Growatt: de stopgrens vanaf de accustand van het plan, niet die van nu (v0.163.2) ===")
+# In de klantwoning op 26-10-2026 om 16:01: een vak van 06:00 tot 08:00 voor 1,1 kWh, met de stopgrens
+# op 97 bij een accustand van 96. 's Avonds zakte hij mee met de batterij, steeds pas na 10%.
+NU59 = DAG.replace(hour=16)
+b59 = growatt50(soc=96.0)
+p59 = plan_batterij(NU59, L50, Tariff(), verwachting(huis=0.7), b59)
+vol59 = bat.growatt_schema(p59.uren, NU59, b59)
+s59 = bat.growatt_schema(p59.uren, NU59, b59, bijstel_kwh=1.1 - vol59.kwh)
+voor59 = [u for u in p59.uren if u.end <= DAG.replace(day=DAG.day + 1, hour=6)][-1].soc
+print(f"  16:00 op 96%: plan om 06:00 op {voor59:.0f}%, schema {s59.vermogen_pct}% tot {s59.stop_soc}%, vakken {s59.vakken}")
+controle("de stopgrens volgt het plan om 06:00, niet de accustand van 16:00",
+         s59.net and s59.vakken == [("06:00", "08:00")] and s59.stop_soc < 96
+         and s59.stop_soc <= voor59 + 1.1 / 12.5 * 100 + 1, f"{s59}")
+controle("vóór het vak zet de coach hem niet uit omdat de accustand al boven de stopgrens zit",
+         not bat.growatt_vol(s59, 96.0, now=NU59), "")
+controle("in het vak wel", bat.growatt_vol(s59, 96.0, now=DAG.replace(day=DAG.day + 1, hour=6, minute=30)), "")
+in59 = bat.growatt_schema(p59.uren, DAG.replace(day=DAG.day + 1, hour=6, minute=10), growatt50(soc=60.0), loopt=True,
+                          bijstel_kwh=1.1 - vol59.kwh)
+controle("in het vak blijft hij boven de accustand van nu", not in59.net or in59.stop_soc >= 61, f"{in59}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
