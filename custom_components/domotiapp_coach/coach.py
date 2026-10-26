@@ -64,6 +64,7 @@ from .batterij import (
     VOL_MARGE,
     Batterij,
     GROWATT_HOUDEN_KWH,
+    GROWATT_MIN_PCT,
     GROWATT_STUK_PCT,
     GROWATT_VOORAF,
     GrowattSchema,
@@ -7474,7 +7475,8 @@ class ChargerCoach:
         if mis is not None and now >= mis:
             sessie.pop("growatt_houden_mis", None)
             mis = None
-        wil = growatt_schema(besluit.uren, now, b, bijstel, loopt=loopt, vasthouden=mis is None)
+        wil = growatt_schema(besluit.uren, now, b, bijstel, loopt=loopt, vasthouden=mis is None,
+                             min_pct=self._growatt_min_pct(rij))
         if not b.max_charge_w:
             self.state[device_id]["tip"] = t(
                 "De coach weet nog niet hoe snel deze Growatt laadt, dus hij laadt hem niet van het net. Vul "
@@ -7590,9 +7592,46 @@ class ChargerCoach:
                     await self._async_tell(t("{naam} neemt het laadschema weer aan.", naam=naam), telefoon=False)
             else:
                 _LOGGER.warning("%s: het laadschema staat er niet zoals geschreven: %s", device_id, gelezen)
+                if self._growatt_vermogen_geweigerd(geschreven, gelezen):
+                    # Alles staat er, behalve het vermogen: dat getal neemt hij niet aan (v0.163.0).
+                    # Onthouden, zodat de coach er voortaan boven blijft en niet hetzelfde blijft herhalen.
+                    oud = int(rij.get("growatt_pct_geweigerd") or 0)
+                    if geschreven.vermogen_pct > oud:
+                        await self._async_batterij_bewaren(
+                            settings, device_id, {"growatt_pct_geweigerd": geschreven.vermogen_pct})
+                        _LOGGER.warning(
+                            "%s: de Growatt neemt %s%% laadvermogen niet aan; de coach schrijft voortaan minstens %s%%",
+                            device_id, geschreven.vermogen_pct,
+                            self._growatt_min_pct({"growatt_pct_geweigerd": geschreven.vermogen_pct}),
+                        )
                 # Opnieuw schrijven na de pauze.
                 sessie["growatt_geschreven"] = None
                 await self._async_growatt_fout(now, device, sessie, geschreven)
+
+    @staticmethod
+    def _growatt_min_pct(rij: dict[str, Any]) -> int:
+        """Het laagste laadvermogen dat deze Growatt aanneemt, in procent (v0.163.0).
+
+        `GROWATT_MIN_PCT`, of het volgende tiental boven het hoogste dat hij ooit weigerde: wat hij
+        wel aanneemt weet de coach niet, en met een procent tegelijk schreef hij in het virtuele huis
+        (`growatt-weigert`) achttien keer voordat hij er was.
+        """
+        try:
+            geweigerd = int(rij.get("growatt_pct_geweigerd") or 0)
+        except (TypeError, ValueError):
+            geweigerd = 0
+        return min(100, max(GROWATT_MIN_PCT, (geweigerd // 10 + 1) * 10))
+
+    @staticmethod
+    def _growatt_vermogen_geweigerd(geschreven: GrowattSchema, gelezen: dict[str, Any] | None) -> bool:
+        """Of het teruggelezen schema alleen in het vermogen afwijkt van wat de coach schreef."""
+        if not isinstance(gelezen, dict) or not geschreven.net:
+            return False
+        try:
+            vermogen = int(gelezen.get("charge_power"))
+        except (TypeError, ValueError):
+            return False
+        return vermogen != geschreven.vermogen_pct and replace(geschreven, vermogen_pct=vermogen).gelijk(gelezen)
 
     async def _async_growatt_fout(
         self, now: datetime, device: dict[str, Any], sessie: dict[str, Any], wil: GrowattSchema,

@@ -2604,6 +2604,12 @@ GROWATT_HOUDEN_KWH = 0.5
 # weigerde de Growatt-API op 24-10-2026 elk schema met 1% (zeven keer, ook na uren zonder opdracht),
 # en nam hij om 22:37 hetzelfde vasthouden met 10% en de stopgrens op de accustand meteen aan.
 GROWATT_HOUDEN_PCT = 10
+# Het laagste laadvermogen dat de coach in een schema zet, in procent (v0.163.0). Wat de API
+# lager krijgt neemt hij niet aan: hij houdt het oude getal en zet de rest wel. In de klantwoning
+# op 26-10-2026 werd 8% geweigerd (en 1% op 24-10), en 10% aangenomen. De hoeveelheid begrenst de
+# stopgrens, dus een hoger vermogen laadt niet meer, alleen eerder. Weigert een omvormer ook 10%,
+# dan leert de coach dat (`growatt_pct_geweigerd`, `_async_growatt`).
+GROWATT_MIN_PCT = 10
 
 
 @dataclass
@@ -2710,7 +2716,7 @@ def _klok(moment: datetime) -> str:
 
 def growatt_schema(
     uren: list[Uur], now: datetime, b: Batterij, bijstel_kwh: float = 0.0, loopt: bool = False,
-    vasthouden: bool = True,
+    vasthouden: bool = True, min_pct: int = GROWATT_MIN_PCT,
 ) -> GrowattSchema:
     """Het laadschema voor een Growatt uit het plan van de batterij.
 
@@ -2821,12 +2827,12 @@ def growatt_schema(
         # `GROWATT_HOUDEN_PCT`.
         stop = max(int(b.soc_min), int(min(b.soc or 0, vast[0].soc)))
         return GrowattSchema(
-            net=True, vermogen_pct=GROWATT_HOUDEN_PCT, stop_soc=stop, vakken=klok, tot=eind,
+            net=True, vermogen_pct=min(100, max(GROWATT_HOUDEN_PCT, min_pct)), stop_soc=stop, vakken=klok, tot=eind,
             kwh=kwh if laden else 0.0, houden=True,
         )
     # Het vermogen over wat er van het laden nog over is.
     watt = kwh / max(echte_duur(max(laat, now, key=_echt), eind).total_seconds() / 3600.0, 1 / 60) * 1000.0
-    pct = min(100, max(1, int(-(-watt * 100 // b.max_charge_w))))
+    pct = min(100, max(min_pct, 1, int(-(-watt * 100 // b.max_charge_w))))
     stop = min(int(b.soc_max), max(int(b.soc or 0) + 1, int(-(-soc_eind // 1))))
     return GrowattSchema(
         net=True, vermogen_pct=pct, stop_soc=stop, vakken=klok, tot=eind, kwh=kwh,

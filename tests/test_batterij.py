@@ -1958,6 +1958,19 @@ uit57b = plan_batterij(DAG.replace(hour=19), prijzen([0.20] * 6 + [0.25] * 12 + 
 controle("met handelen uit zegt hij er niets over", uit57b.handelen_winst is None and "ondergrens" not in uit57b.reason,
          uit57b.reason)
 
+print("=== 58. Growatt: nooit een laadvermogen dat de API weigert (v0.163.0) ===")
+# In de klantwoning op 26-10-2026 schreef de coach 8% voor 1,1 kWh in twee uur; de API nam de vakken
+# en de stopgrens aan, maar niet 8%, en hield 100. Gemeten: 1% en 8% geweigerd, 10% aangenomen.
+klein58 = bat.growatt_schema(p50.uren, NU50, b50, bijstel_kwh=1.1 - s50.kwh)
+print(f"  1,1 kWh: {klein58.vermogen_pct}%, tot {klein58.stop_soc}%, vakken {klein58.vakken}")
+controle("een kleine beurt krijgt minstens 10%, de hoeveelheid blijft de stopgrens",
+         klein58.net and klein58.vermogen_pct == bat.GROWATT_MIN_PCT
+         and (klein58.stop_soc - b50.soc_min) / 100 * 12.5 <= 1.1 + 0.125, f"{klein58}")
+hoger58 = bat.growatt_schema(p50.uren, NU50, b50, bijstel_kwh=1.1 - s50.kwh, min_pct=30)
+controle("met een geleerde ondergrens die", hoger58.vermogen_pct == 30 and hoger58.stop_soc == klein58.stop_soc, f"{hoger58}")
+controle("een groot schema houdt zijn eigen vermogen", bat.growatt_schema(p50.uren, NU50, b50).vermogen_pct == s50.vermogen_pct
+         and s50.vermogen_pct > bat.GROWATT_MIN_PCT, f"{s50.vermogen_pct}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

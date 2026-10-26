@@ -1915,6 +1915,18 @@ if (vl := v("growatt-herstart")):
     controle("growatt-herstart: en het nachtvak staat er meteen", any("21:00" <= w[0].strftime("%H:%M") <= "21:10" for w in vl.gw_schrijf),
              f"{[w[0].strftime('%H:%M') for w in vl.gw_schrijf]}")
 
+if (vl := v("growatt-weigert")):
+    schrijf_w = [(w[0].strftime("%H:%M"), w[2]) for w in vl.gw_schrijf]
+    print(f"  growatt-weigert: {schrijf_w}")
+    voor_nacht = [w for w in vl.gw_schrijf if w[0].strftime("%H:%M") < "23:59" and w[0].day == vl.gw_schrijf[0][0].day]
+    controle("growatt-weigert: een geweigerd vermogen leert hij, en hij herhaalt het niet",
+             len(voor_nacht) <= 4 and vl.gw_gefaald == 0, f"{schrijf_w}")
+    controle("growatt-weigert: daarna staat er een vermogen dat hij aanneemt",
+             any(w[2] >= 30 and w[1] for w in vl.gw_schrijf), f"{schrijf_w}")
+if (vl := v("growatt-ochtend-zonder-grens")):
+    controle("growatt: nooit een laadvermogen onder de 10%",
+             all(w[2] >= 10 for w in vl.gw_schrijf if w[1]), f"{[(w[0].strftime('%H:%M'), w[2]) for w in vl.gw_schrijf]}")
+
 if (vl := v("batterij-reserve")):
     controle("reserve: onder de veertig procent komt er niets uit",
              min(r[3] for r in vl.bat_verloop) >= 39.0, f"{min(r[3] for r in vl.bat_verloop):.1f}%")

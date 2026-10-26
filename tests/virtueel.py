@@ -901,6 +901,9 @@ class Batterij:
     growatt: bool = False
     growatt_stopt_zelf: bool = False
     growatt_vinkje: bool = True
+    # Het laagste laadvermogen in procent dat de API aanneemt (v0.163.0). Lager houdt hij het
+    # oude getal en zet hij de rest wel, zoals in de klantwoning op 26-10-2026 (8 geweigerd, 10 niet).
+    growatt_min_pct: int = 0
     schema: dict = field(default_factory=lambda: {
         "charge_power": 100, "charge_stop_soc": 100, "mains_enabled": False,
         "periods": [{"period_id": i, "start_time": "00:00", "end_time": "00:00", "enabled": i == 1}
@@ -2428,8 +2431,11 @@ class Diensten:
             self.verloop.gw_gefaald += 1
             raise RuntimeError("Growatt API error: Error during writing AC charge time periods")
         bat.schema_op = nu
+        vermogen = int(data["charge_power"])
+        if vermogen < bat.growatt_min_pct:
+            vermogen = int(bat.schema["charge_power"])
         bat.schema = {
-            "charge_power": int(data["charge_power"]), "charge_stop_soc": int(data["charge_stop_soc"]),
+            "charge_power": vermogen, "charge_stop_soc": int(data["charge_stop_soc"]),
             "mains_enabled": bool(data["mains_enabled"]),
             "periods": [{"period_id": i, "start_time": data[f"period_{i}_start"], "end_time": data[f"period_{i}_end"],
                          "enabled": bool(data[f"period_{i}_enabled"])} for i in (1, 2, 3)],

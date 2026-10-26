@@ -11724,6 +11724,28 @@ controle("en zodra hij er is gaat het meteen verder",
          asyncio.run(coach192._async_growatt_soort(GROWATT192, NU201 + dt.timedelta(minutes=15))) == "sph", "")
 hass192.services.antwoorden = dict(diensten201)
 
+print("=== 202. Growatt: een geweigerd laadvermogen leert hij, en hij herhaalt het niet (v0.163.0) ===")
+# In de klantwoning op 26-10-2026 nam de API 8% niet aan en hield hij 100; de coach schreef daarna om
+# de paar minuten weer 8. Nu onthoudt hij het en gaat hij naar het volgende tiental.
+controle("de ondergrens: 10, en na een geweigerde 8 nog steeds 10, na 10 dan 20",
+         coach192._growatt_min_pct({}) == 10 and coach192._growatt_min_pct({"growatt_pct_geweigerd": 8}) == 10
+         and coach192._growatt_min_pct({"growatt_pct_geweigerd": 10}) == 20
+         and coach192._growatt_min_pct({"growatt_pct_geweigerd": 100}) == 100, "")
+geschreven202 = coachmod.GrowattSchema(net=True, vermogen_pct=8, stop_soc=100, vakken=[("06:00", "08:00")],
+                                       tot=dt.datetime(2026, 9, 26, 8, 0), kwh=1.1)
+gelezen202 = {"charge_power": 100, "charge_stop_soc": 100, "mains_enabled": True,
+              "periods": [{"period_id": 1, "start_time": "06:00", "end_time": "08:00", "enabled": True},
+                          {"period_id": 2, "start_time": "00:00", "end_time": "00:00", "enabled": False},
+                          {"period_id": 3, "start_time": "00:00", "end_time": "00:00", "enabled": False}]}
+controle("alles staat er behalve het vermogen: dat heet geweigerd",
+         coach192._growatt_vermogen_geweigerd(geschreven202, gelezen202), "")
+controle("een ander vak is iets anders",
+         not coach192._growatt_vermogen_geweigerd(
+             geschreven202, {**gelezen202, "periods": [{"start_time": "05:00", "end_time": "08:00", "enabled": True}]}), "")
+controle("en mains uit ook", not coach192._growatt_vermogen_geweigerd(geschreven202, {**gelezen202, "mains_enabled": False}), "")
+controle("hetzelfde vermogen is niet geweigerd",
+         not coach192._growatt_vermogen_geweigerd(geschreven202, {**gelezen202, "charge_power": 8}), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
