@@ -112,7 +112,8 @@ VOORKEUREN_AUTO = frozenset({"target_percent", "wake_mode"})
 # pauze. Het typeplaatje is van de installateur.
 VOORKEUREN_AIRCO = frozenset({"target_c", "run_on", "paused"})
 VOORKEUREN_ACCU = frozenset({
-    "reserve_enabled", "reserve_percent", "trade", "grid_charge", "grid_charge_below", "trade_above",
+    "reserve_enabled", "reserve_percent", "trade", "grid_charge", "grid_charge_below", "grid_charge_min_gain",
+    "trade_above",
     "weekly_full", "weekly_full_day",
     "holiday", "holiday_max_percent", "car_above", "fan_above_c",
     "wear_per_kwh", "wear_price", "wear_cycles",

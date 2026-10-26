@@ -313,6 +313,7 @@ const css = /* css */ `
   /* De prijsgrenzen bij Handelen (v0.141.0) zeggen leeg "de coach bepaalt"; op
      124 px viel dat af tot "de coach bep". */
   input.getal[data-vk-accu="grid_charge_below"], input.getal[data-vk-accu="trade_above"],
+  input.getal[data-vk-accu="grid_charge_min_gain"],
   input.getal[data-vk-accu="wear_per_kwh"], input.getal[data-vk-accu="wear_price"],
   input.getal[data-vk-accu="wear_cycles"] { width: min(100%, 190px); }
   /* De uitklaplijst tekent de browser zelf; zonder deze twee kwam hij wit met

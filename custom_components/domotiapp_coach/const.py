@@ -821,3 +821,7 @@ HOLIDAY_MAX_DEFAULT = 50
 # Met hoeveel van de vorige dagen de lekmelding een dag gas vergelijkt (v0.157.0). Gas volgt het
 # seizoen, dus een week en geen dertig dagen; water vergelijkt met alles wat er bewaard is.
 GAS_VERGELIJK_DAGEN = 7
+
+# Hoeveel bijladen van het net minstens moet opleveren, in euro, als de bewoner niets invult
+# (v0.160.0). De eigenaar op 26-10-2026; een keuze, geen meting. Zie `min_winst` in batterij.py.
+BIJLADEN_MIN_WINST = 0.05

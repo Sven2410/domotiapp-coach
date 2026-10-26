@@ -1642,6 +1642,62 @@ def overschot_kwh(
     return over * (deel / heel if heel else 1.0)
 
 
+def _zon_uur(forecast: Forecast, uur: datetime) -> float:
+    """De zon van één uur op de klok in kWh, bijgesteld zoals `overschot_kwh` dat doet."""
+    zon = max(0.0, forecast.solar_kwh.get(uur, 0.0))
+    if forecast.solar_factor is not None and uur.date() == forecast.solar_day:
+        zon *= forecast.solar_factor
+    return zon
+
+
+def zon_tussen(forecast: Forecast, van: datetime, tot: datetime) -> float:
+    """De zon tussen twee momenten in kWh, en binnen het uur oplopend of aflopend (v0.160.0).
+
+    Tot v0.160.0 was een kwartier een kwart van het uur. In het eerste zonuur loopt de zon
+    op, dus het tekort aan het begin van de dag leek kleiner dan het was. In de klantwoning
+    op 26-10-2026 zag de batterij in het dure uur van 08:00 0,1 kWh tekort (zon 2,95, huis
+    3,06); er kwam 0,8 van het net, en zonder het apparaat van 08:45 ongeveer 0,3.
+
+    Nu loopt het vermogen binnen een uur recht op of af, met de helling van het uur ervoor
+    naar het uur erna, en houdt het uur zijn eigen opbrengst: over een heel uur is de som
+    dezelfde als voorheen. De helling gaat nooit zo ver dat het vermogen onder nul komt. Een
+    paal met kwartierprijzen kreeg daarvoor de hele zon van het uur in het eerste kwartier,
+    want de verwachting staat per uur (`overschot_kwh` met het begin van het kwartier).
+    """
+    totaal = 0.0
+    for uur, volgend in _klokuren(van, tot):
+        e = _zon_uur(forecast, uur)
+        if e <= 0:
+            continue
+        lengte = echte_uren(uur, volgend)
+        if lengte <= 0:
+            continue
+        a = max(0.0, echte_uren(uur, van)) / lengte
+        b = min(lengte, echte_uren(uur, tot)) / lengte
+        if b <= a:
+            continue
+        helling = (_zon_uur(forecast, uur + timedelta(hours=1)) - _zon_uur(forecast, uur - timedelta(hours=1))) / 2.0
+        helling = max(-2.0 * e, min(2.0 * e, helling))
+        totaal += e * (b - a) + helling * ((b * b - a * a) / 2.0 - 0.5 * (b - a))
+    return totaal
+
+
+def overschot_tussen(forecast: Forecast, van: datetime, tot: datetime) -> float:
+    """Wat er tussen twee momenten aan eigen zon over verwacht wordt, in kWh (v0.160.0).
+
+    Dezelfde som als `overschot_kwh`, met de zon uit `zon_tussen`: per uur op de klok de zon
+    van dat stuk min het huis van dat stuk, nooit onder nul.
+    """
+    totaal = 0.0
+    for uur, volgend in _klokuren(van, tot):
+        begin, einde = max(uur, van, key=_echt), min(volgend, tot, key=_echt)
+        stuk = echte_uren(begin, einde)
+        if stuk <= 0:
+            continue
+        totaal += max(0.0, zon_tussen(forecast, begin, einde) - forecast.house_kwh.get(uur.hour, 0.0) * stuk)
+    return totaal
+
+
 def solar_measured_note(forecast: Forecast) -> str:
     """Eén zin over een zonverwachting die de meter niet waarmaakt, of niets."""
     if forecast.solar_factor is None or forecast.solar_factor > ZON_NOTE_ONDER:
@@ -1847,8 +1903,7 @@ def schijven(
         if nu_blok:
             over = max(0.0, grid.surplus_w) / 1000.0 * deel
         else:
-            heel = echte_uren(rij["start"], rij["end"])
-            over = overschot_kwh(forecast, rij["start"], deel, heel)
+            over = overschot_tussen(forecast, van, tot)
 
         terug = rij.get("feed_in")
         if terug is None:
@@ -5380,8 +5435,7 @@ def boiler_schijven(
         if nu_blok and surplus_w is not None:
             over = max(0.0, surplus_w) / 1000.0 * deel
         else:
-            heel = echte_uren(rij["start"], rij["end"])
-            over = overschot_kwh(forecast, rij["start"], deel, heel)
+            over = overschot_tussen(forecast, van, tot_blok)
 
         terug = rij.get("feed_in")
         if terug is None:

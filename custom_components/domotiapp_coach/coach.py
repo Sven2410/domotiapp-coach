@@ -31,6 +31,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    BIJLADEN_MIN_WINST,
     GAS_VERGELIJK_DAGEN,
     BATTERIJ_ALLEEN_LEZEN,
     BATTERIJ_SCHEMA,
@@ -6354,6 +6355,8 @@ class ChargerCoach:
             net_laden_onder=getal("grid_charge_below"),
             handelen_boven=getal("trade_above"),
             slijtage=self._slijtage(eigen, capaciteit),
+            # De ondergrens aan wat bijladen van het net oplevert (v0.160.0); leeg is de standaard.
+            min_winst=BIJLADEN_MIN_WINST if getal("grid_charge_min_gain") is None else getal("grid_charge_min_gain"),
             auto_boven=getal("car_above"),
             nacht=bool((settings.get("strategy") or {}).get("night_strategy", True)),
             power_w=self._batterij_w(device),
