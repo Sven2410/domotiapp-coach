@@ -1900,3 +1900,48 @@ dagen (`GROWATT_TERUGKIJK_DAGEN`), of het laagste van een sensor met een teken. 
 batterij vóór de coach deed, dus een meting en net als `growatt_uit_w` een ondergrens. Staat het er
 ook niet in, dan blijft het 0 W en zegt de kaart waarom hij niet van het net laadt, zoals bij een
 onbekend laadvermogen. Proef 200 in test_coach.py.
+
+## Handelen alleen als het onder de streep iets oplevert (v0.162.0)
+
+De eigenaar op 26-10-2026: "Handelen moet alleen wat opleveren als alle kosten er afgehaald zijn
+zoals belasting, rendement etc, dus onder aan de streep moet het geld opleveren en niet gaan
+pendelen."
+
+Wat de som al meenam: de all-in prijs met belasting en opslag voor elke kWh van het net, de
+terugleverprijs na de terugleverkosten (en zonder prijs geen handelen, v0.106.2), het rendement
+bij het vermogen van elk blok (v0.142.0) en de afschrijving per kWh uit de cellen (v0.146.0, alleen
+als die is ingevuld). Wat er ontbrak: een beurt naar het net die na dat alles een paar cent oplevert
+deed hij toch, en een verwachting komt niet altijd uit.
+
+Nu geldt de ondergrens van bijladen (`min_winst`, standaard € 0,05, v0.160.0) ook voor een beurt naar
+het net (`_handelen_loont`). Op dezelfde manier: per beurt, van het eerste blok waarin het plan aan het
+net levert tot de batterij weer geladen wordt, de som zonder leveren naast die met. Onder de grens
+levert hij niet, en zegt de kaart "Aan het net leveren zou deze keer € 0,028 opleveren, minder dan de
+ondergrens van € 0,050, dus dat doet hij niet." Een beurt die al loopt toetst hij niet opnieuw, zodat
+hij niet aan en uit gaat. Het veld staat in Instellen bij Handelen, onder beide vinkjes, en is te zien
+zodra een van de twee aanstaat.
+
+Proef 57 in test_batterij.py: nacht € 0,20 en een piek van € 0,40, terugleveren € 0,13 onder de prijs,
+rendement 73,6%: de beurt levert € 0,028 op en gaat niet door; met een nacht van € 0,10 wel. In het
+virtuele huis `batterij-handelen-krap` (een avond van € 0,40): met de grens niets naar het net en op
+42% de nacht in, zonder grens één beurt en op 29%. En `batterij-handelen` (€ 0,80) houdt één beurt.
+
+## Een Growatt na een herstart van Home Assistant (v0.162.0)
+
+Of een Growatt een laadschema kan krijgen vraagt de coach aan de omvormer (`_async_growatt_soort`), en
+tot v0.161.0 onthield hij elk antwoord een uur, ook "geen antwoord". In een klantwoning op 26-10-2026
+herstartte Home Assistant om 12:50; de coach vroeg het om 12:51:22, de accustand van de Growatt kwam
+pas om 12:51:42 terug, en tot 13:51 stond de batterij buiten de coach: geen besluit, een lege kaart,
+en een schema dat er stond bleef staan. De eigenaar: "zodra de batterij weer communicatie heeft moet
+ie niet dat uur afwachten."
+
+Nu onthoudt hij alleen een echt antwoord een uur (een omvormer zonder laadvakken, of een integratie
+zonder de actie). Zolang de accustand er niet is vraagt hij elke ronde opnieuw (`_growatt_klaar`),
+zonder de cloud te storen; gaf het lezen geen antwoord, dan na vijf minuten (`GROWATT_NOG_NIET`).
+Wacht hij langer dan tien minuten (`GROWATT_WACHT_MELDEN`), dan één waarschuwing in het log. De soort
+bewaart hij niet over een herstart heen: dan zou hij sturen op een integratie die er nog niet is, en
+met het opnieuw vragen is hij er binnen een minuut nadat zij er is.
+
+Proef 201 in test_coach.py, en in het virtuele huis `growatt-herstart` (een herstart om 21:00 met de
+integratie drie minuten later): de batterij is om 21:05 terug en het nachtvak staat er meteen; op
+v0.161.0 was hij weg tot 21:59 en kwam het vak om 22:00.

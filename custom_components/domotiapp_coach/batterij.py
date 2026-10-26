@@ -207,6 +207,9 @@ class Batterij:
     # Tot wanneer hij niet van het net laadt omdat die laadbeurt te weinig oplevert, of None.
     # Zet `_bijladen_loont`, niet de coach.
     net_laden_vanaf: datetime | None = None
+    # Tot wanneer hij niet aan het net levert omdat die beurt te weinig oplevert, of None
+    # (v0.162.0). Zet `_handelen_loont`, niet de coach.
+    handelen_vanaf: datetime | None = None
     # Boven welke accustand de batterij de auto mag helpen als de paal laadt,
     # in procent, of None: dan geeft hij de auto niets (v0.90.0). Zie `auto_grens`.
     auto_boven: float | None = None
@@ -366,6 +369,9 @@ class Besluit:
     # Wat bijladen van het net had opgeleverd als dat onder de grens van de bewoner bleef
     # (`min_winst`, v0.160.0), in euro; anders None. Voor de nachtzin.
     bijladen_winst: float | None = None
+    # Wat de eerstvolgende beurt aan het net leveren had opgeleverd als dat onder de grens van
+    # de bewoner bleef (`min_winst`, v0.162.0), in euro; anders None. Voor de kaart.
+    handelen_winst: float | None = None
     # Of de batterij de auto in dit blok helpt volgens het plan (v0.104.1): True,
     # False als de paal nu volgens zijn plan laadt maar de hulp naar een duurder
     # laaduur gaat, en None als de paal nu buiten zijn plan laadt (Snel, of een
@@ -506,6 +512,8 @@ def _mag_handelen(b: Batterij, rij: dict) -> bool:
     21% en gaf er 0,48 kWh bij, "Terugleveren brengt nu € 0,000 op". Om 12:16
     kwam de auto en die ging voor, dus die zon kwam er die dag niet meer in.
     """
+    if b.handelen_vanaf is not None and _echt(rij["start"]) < _echt(b.handelen_vanaf):
+        return False
     return (
         b.handelen and rij.get("feed_in") is not None
         and (b.handelen_boven is None or rij["price"] > b.handelen_boven)
@@ -778,6 +786,45 @@ def _bijladen_loont(
         return b, som, None
     eind = next((u.start for u in uren[eerste + 1:] if u.kwh < -0.005), uren[-1].end)
     zonder_b = replace(b, net_laden_vanaf=eind)
+    zonder = _waarde_vooruit(now, blokken, forecast, zonder_b, piek=dicht)
+    if zonder is None or zonder.begin is None:
+        return b, som, None
+    e = (b.soc or 0.0) / 100.0 * (b.capacity_kwh or 0.0)
+    winst = _tussen(zonder.begin, zonder.stap, zonder.laag, e) - _tussen(som.begin, som.stap, som.laag, e)
+    if winst >= b.min_winst:
+        return b, som, None
+    return zonder_b, zonder, max(0.0, winst)
+
+
+def _handelen_loont(
+    now: datetime, blokken: list[dict], forecast: Forecast, b: Batterij, dicht: bool, som: _Som
+) -> tuple[Batterij, _Som, float | None]:
+    """Laat de som de eerste beurt aan het net leveren weg als die minder oplevert dan `min_winst` (v0.162.0).
+
+    De eigenaar op 26-10-2026: "Handelen moet alleen wat opleveren als alle kosten er
+    afgehaald zijn zoals belasting, rendement etc, dus onder aan de streep moet het geld
+    opleveren en niet gaan pendelen." De som rekent al met de all-in prijs, de
+    terugleverprijs na kosten, het rendement bij elk vermogen en de slijtage; wat hij
+    daarbovenop vraagt is dat een beurt de moeite waard is. Dezelfde grens als bij
+    bijladen (`_bijladen_loont`), en op dezelfde manier: per beurt, niet per kwartier.
+
+    De beurt begint bij het eerste blok waarin het plan aan het net levert en loopt tot de
+    batterij weer geladen wordt: zolang er niets bij komt kan wat hij in het ene blok niet
+    levert in een ander eruit, en dan lijkt elk stuk weinig waard. De som zonder leveren
+    tot het eind van de beurt naast die met, vanaf de accustand van nu; onder de grens
+    rekent hij verder zonder, en geeft hij terug wat het had opgeleverd.
+
+    Een beurt die al loopt (vorige ronde handelen) maakt hij af: aan het eind levert de
+    rest altijd weinig op, en zonder dat zou hij aan en uit gaan.
+    """
+    if b.min_winst <= 0 or not b.handelen or b.vorige_stand == HANDELEN or som.begin is None:
+        return b, som, None
+    uren = _vooruit(som, b)
+    eerste = next((i for i, u in enumerate(uren) if u.stand == HANDELEN and u.net_kwh < -0.005), None)
+    if eerste is None:
+        return b, som, None
+    eind = next((u.start for u in uren[eerste + 1:] if u.kwh > 0.005), uren[-1].end)
+    zonder_b = replace(b, handelen_vanaf=eind)
     zonder = _waarde_vooruit(now, blokken, forecast, zonder_b, piek=dicht)
     if zonder is None or zonder.begin is None:
         return b, som, None
@@ -1371,6 +1418,7 @@ def plan_batterij(
             Besluit(NUL, reason=t("Hij houdt de meter op nul."), rule="nul"), paal_laadt, b
         )
     b, som, te_weinig = _bijladen_loont(now, blokken, forecast, b, dicht, som)
+    b, som, handel_te_weinig = _handelen_loont(now, blokken, forecast, b, dicht, som)
 
     e = b.soc / 100.0 * b.capacity_kwh
     na = som.na[0]
@@ -1550,6 +1598,13 @@ def plan_batterij(
         )
     besluit.inkoop_tot = inkoop
     besluit.bijladen_winst = te_weinig
+    besluit.handelen_winst = handel_te_weinig
+    if handel_te_weinig is not None:
+        # De grens van de bewoner is dan de reden dat hij niet aan het net levert (v0.162.0).
+        besluit.reason += " " + t(
+            "Aan het net leveren zou deze keer {winst} opleveren, minder dan de ondergrens van {grens}, dus dat doet hij niet.",
+            winst=_euro(handel_te_weinig), grens=_euro(b.min_winst),
+        )
     besluit.auto_hulp_nu = hulp_nu
     besluit.auto_hulp_om = hulp_om
     return _met_paal(besluit, paal_laadt, b, nacht, helpt=helpt)

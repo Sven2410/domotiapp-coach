@@ -11647,6 +11647,83 @@ finally:
         else:
             sys.modules[k] = v
 
+print("=== 201. Growatt na een herstart: niet een uur wachten als de integratie later klaar is (v0.162.0) ===")
+# In een klantwoning op 26-10-2026: Home Assistant herstartte om 12:50, de coach vroeg om 12:51:22 of
+# de Growatt een laadschema kan krijgen, en de accustand kwam pas om 12:51:42. Een uur lang stond de
+# batterij buiten de coach. De eigenaar: "zodra de batterij weer communicatie heeft moet ie niet dat
+# uur afwachten."
+import logging as logging201
+NU201 = dt.datetime(2026, 9, 25, 12, 51)
+diensten201 = dict(hass192.services.antwoorden)
+coach192._growatt.clear()
+hass192.services.antwoorden = {}
+hass192.states.zet("sensor.growatt_soc", {"state": "unavailable", "attributes": {}})
+s201 = asyncio.run(coach192._async_growatt_soort(GROWATT192, NU201))
+controle("zonder accustand en zonder dienst: nog geen soort", s201 is None, f"{s201}")
+hass192.services.antwoorden = dict(diensten201)
+hass192.states.zet("sensor.growatt_soc", {"state": "84", "attributes": {"unit_of_measurement": "%"}})
+s201 = asyncio.run(coach192._async_growatt_soort(GROWATT192, NU201 + dt.timedelta(minutes=1)))
+controle("de ronde nadat hij er is: een SPH, niet een uur later", s201 == "sph", f"{s201}")
+
+# Het lezen geeft geen antwoord (de cloud is er nog niet): na vijf minuten opnieuw, niet na een uur.
+coach192._growatt.clear()
+leesfout201 = {"n": 1}
+
+
+def lees201(data):
+    if leesfout201["n"]:
+        leesfout201["n"] -= 1
+        raise RuntimeError("Growatt API error")
+    return dict(omvormer192)
+
+
+hass192.services.antwoorden[("growatt_server", "read_ac_charge_times")] = lees201
+r201 = [asyncio.run(coach192._async_growatt_soort(GROWATT192, NU201 + dt.timedelta(minutes=m))) for m in (0, 2, 5)]
+print(f"  na een leesfout: {r201}")
+controle("een leesfout is geen nee: na vijf minuten vraagt hij opnieuw", r201 == [None, None, "sph"], f"{r201}")
+
+# Een echt antwoord zonder laadvakken (geen SPH) onthoudt hij wel een uur.
+coach192._growatt.clear()
+geteld201 = {"n": 0}
+
+
+def zonder201(data):
+    geteld201["n"] += 1
+    return {"charge_power": 100}
+
+
+hass192.services.antwoorden[("growatt_server", "read_ac_charge_times")] = zonder201
+r201 = [asyncio.run(coach192._async_growatt_soort(GROWATT192, NU201 + dt.timedelta(minutes=m))) for m in (0, 5, 30, 61)]
+controle("een echt nee onthoudt hij een uur", r201 == [None] * 4 and geteld201["n"] == 2, f"{r201} {geteld201}")
+
+# Blijft de integratie weg, dan na tien minuten één waarschuwing in het log.
+coach192._growatt.clear()
+hass192.services.antwoorden = dict(diensten201)
+hass192.states.zet("sensor.growatt_soc", {"state": "unavailable", "attributes": {}})
+gelogd201 = []
+
+
+class _Vang201(logging201.Handler):
+    def emit(self, record):
+        if record.levelno >= logging201.WARNING:
+            gelogd201.append(record.getMessage())
+
+
+vang201 = _Vang201()
+coachmod._LOGGER.addHandler(vang201)
+logging201.disable(logging201.NOTSET)  # het harnas zet waarschuwingen uit
+for m in range(0, 15):
+    asyncio.run(coach192._async_growatt_soort(GROWATT192, NU201 + dt.timedelta(minutes=m)))
+coachmod._LOGGER.removeHandler(vang201)
+logging201.disable(logging201.WARNING)
+print(f"  {gelogd201}")
+controle("na tien minuten wachten één waarschuwing, met de tijd erbij",
+         len(gelogd201) == 1 and "12:51" in gelogd201[0], f"{gelogd201}")
+hass192.states.zet("sensor.growatt_soc", {"state": "84", "attributes": {"unit_of_measurement": "%"}})
+controle("en zodra hij er is gaat het meteen verder",
+         asyncio.run(coach192._async_growatt_soort(GROWATT192, NU201 + dt.timedelta(minutes=15))) == "sph", "")
+hass192.services.antwoorden = dict(diensten201)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

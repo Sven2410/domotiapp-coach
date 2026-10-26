@@ -2324,6 +2324,10 @@ class Diensten:
 
     def has_service(self, domein, dienst):
         bat = self.wereld.batterij
+        # Na een herstart is de Growatt-integratie soms later klaar dan de coach: zolang de
+        # accustand weg is (`sensor_weg` met "bat_soc") zijn haar acties er ook niet (v0.162.0).
+        if "bat_soc" in self.wereld.weg:
+            return False
         return domein == "growatt_server" and bat is not None and bat.growatt and dienst in (
             "read_ac_charge_times", "write_ac_charge_times", "read_ac_discharge_times", "write_ac_discharge_times")
 

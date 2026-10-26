@@ -3179,7 +3179,11 @@ proef("de rijen onder een vinkje van de batterij verdwijnen echt als het vinkje 
   assert.deepEqual(voorkeurWijziging(veld("trade_above", "0.35")), { battery: { trade_above: 0.35 } });
   // De ondergrens aan bijladen (v0.160.0): bij laden van het net, leeg is de standaard van € 0,05.
   assert.ok(!velden.rijen.find((r) => r.sleutel === "grid_charge_min_gain").hidden, "de ondergrens bij laden van het net");
-  assert.ok(uit.rijen.find((r) => r.sleutel === "grid_charge_min_gain").hidden, "laden van het net uit: geen ondergrens");
+  // Sinds v0.162.0 geldt de ondergrens ook voor handelen: zichtbaar zolang een van de twee aanstaat.
+  assert.ok(!uit.rijen.find((r) => r.sleutel === "grid_charge_min_gain").hidden, "handelen aan: de ondergrens blijft");
+  const geen = nepVelden(voorkeurHtml({ id: "b", type: "thuisbatterij", battery: { grid_charge: false, trade: false } }));
+  vulVoorkeuren(geen, { id: "b", type: "thuisbatterij", battery: { grid_charge: false, trade: false } });
+  assert.ok(geen.rijen.find((r) => r.sleutel === "grid_charge_min_gain").hidden, "allebei uit: geen ondergrens");
   assert.deepEqual(voorkeurWijziging(veld("grid_charge_min_gain", "")), { battery: { grid_charge_min_gain: null } });
   assert.deepEqual(voorkeurWijziging(veld("grid_charge_min_gain", "0.1")), { battery: { grid_charge_min_gain: 0.1 } });
   assert.deepEqual(voorkeurWijziging(veld("grid_charge_min_gain", "-3")), { battery: { grid_charge_min_gain: 0 } });
