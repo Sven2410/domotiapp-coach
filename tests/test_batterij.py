@@ -1649,7 +1649,15 @@ print(f"  zonder bijstelling {s51.kwh:.1f} kWh tot {s51.stop_soc}%, met -2 kWh {
 controle("2 kWh minder: een lagere stopgrens, en een vak dat even laat of later begint en ook om 08:00 eindigt",
          abs(s51b.kwh - (s51.kwh - 2.0)) < 0.01 and s51b.stop_soc < s51.stop_soc
          and s51b.vermogen_pct <= 50 and s51b.vakken[-1][1] == "08:00"
-         and s51b.vakken[0][0] >= s51.vakken[0][0] and not s51b.wijkt_af(s51, alleen_vakken=True), f"{s51} {s51b}")
+         and s51b.vakken[0][0] >= s51.vakken[0][0], f"{s51} {s51b}")
+# Sinds v0.163.1 is zo'n lagere stopgrens (100 naar 84) wel een nieuw schema, ook voor het vak: op 100
+# zet de coach het niet zelf uit, en dan laadt hij de 2 kWh die de nachten te veel vonden toch.
+controle("en die lagere stopgrens schrijft hij, ook voor het vak", s51b.wijkt_af(s51, alleen_vakken=True)
+         and s51b.wijkt_af(s51), "")
+klein51 = bat.GrowattSchema(net=True, vermogen_pct=s51.vermogen_pct, stop_soc=s51.stop_soc - 5, vakken=s51.vakken,
+                            tot=s51.tot, kwh=s51.kwh)
+controle("een paar procent lager niet: het plan schuift elke minuut", not klein51.wijkt_af(s51)
+         and not klein51.wijkt_af(s51, alleen_vakken=True), "")
 controle("zoveel minder dat er niets overblijft: geen schema",
          not bat.growatt_schema(p50.uren, NU50, b50, bijstel_kwh=-50.0).net)
 

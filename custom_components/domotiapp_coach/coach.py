@@ -376,6 +376,10 @@ BATTERIJ_BEWAREN = timedelta(minutes=5)
 GROWATT_DOMEIN = "growatt_server"
 GROWATT_PAUZE = timedelta(minutes=5)
 GROWATT_TERUG = timedelta(minutes=6)
+# Hoe vaak de coach een bevestigd schema opnieuw terugleest (v0.163.1). Het eerste teruglezen
+# kan nog de buffer van Home Assistant zijn, van vóór de eigen ronde van de Growatt: in een
+# klantwoning op 26-10-2026 bevestigde hij na een herstart 8%, terwijl er 100 stond.
+GROWATT_CONTROLE = timedelta(minutes=30)
 GROWATT_WACHT = timedelta(seconds=45)
 GROWATT_OPNIEUW = timedelta(hours=1)
 # Na een herstart is de Growatt-integratie soms later klaar dan de coach (v0.162.0). Zolang
@@ -7547,7 +7551,7 @@ class ChargerCoach:
             # het vermogen loopt 's nachts elk uur op, en dat zegt niets over het schema.
             schaduw = sessie.get("growatt_schaduw")
             if schaduw is None or (not self._growatt_wacht(wil, schaduw, now)
-                                   and wil.wijkt_af(schaduw, alleen_vakken=True)):
+                                   and wil.wijkt_af(schaduw, alleen_vakken=True, zakken=False)):
                 sessie["growatt_schaduw"] = wil
                 await self._async_noteer(
                     t("{naam}: zou dit schrijven, maar de coach stuurt nu niet: {schema}",
@@ -7584,9 +7588,16 @@ class ChargerCoach:
         if terug_om is not None and now >= terug_om and geschreven is not None:
             sessie["growatt_terug_om"] = None
             gelezen = await self._async_growatt_lees(device)
+            if gelezen is None and sessie.get("growatt_bevestigd") is not None:
+                # Geen antwoord bij een controle van een schema dat er al stond: later nog eens.
+                sessie["growatt_terug_om"] = now + GROWATT_TERUG
+                return
             if geschreven.gelijk(gelezen):
                 sessie["growatt_bevestigd"] = now
                 sessie["growatt_fouten"] = 0
+                if geschreven.net:
+                    # Zolang het van het net laadt blijft hij het nakijken.
+                    sessie["growatt_terug_om"] = now + GROWATT_CONTROLE
                 self.state[device_id]["schedule"]["confirmed"] = True
                 if sessie.pop("growatt_gemeld", False):
                     await self._async_tell(t("{naam} neemt het laadschema weer aan.", naam=naam), telefoon=False)
