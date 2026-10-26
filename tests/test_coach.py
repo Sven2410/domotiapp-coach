@@ -11893,14 +11893,62 @@ inst205b = {**inst205, "strategy": {**inst205["strategy"], "plan_priority": ["de
 controle("staat de batterij eerst in de voorrang, dan rekent ze niet met de paal",
          coach205._laadruimte_plan(inst205b, ACCU205) == [], f"{coach205._laadruimte_plan(inst205b, ACCU205)}")
 inst205c = {**inst205, "installation": {**inst205["installation"], "circuits": [{**KAST205, "sensors": {}}]}}
-# De hoofdaansluiting (25 A, fasesensoren, lastbewaker: 3 A marge) deelt ze altijd: 25 - 3 - 13 = 9 A.
-controle("een kast zonder meter bewaakt de regelaar niet: dan telt alleen de hoofdaansluiting",
-         [w for _, _, w in coach205._laadruimte_plan(inst205c, ACCU205)] == [9 * 230.0],
+# Sinds v0.164.1 telt een kast zonder meter ook, met wat er bekend is: 16 - 2 - 13 = 1 A.
+controle("een kast zonder meter telt ook: 1 A over op haar fase",
+         [w for _, _, w in coach205._laadruimte_plan(inst205c, ACCU205)] == [230.0],
          f"{coach205._laadruimte_plan(inst205c, ACCU205)}")
 ANDER205 = {**ACCU205, "circuit": ""}
 controle("een batterij die de kast niet deelt: ook alleen de hoofdaansluiting",
          [w for _, _, w in coach205._laadruimte_plan(inst205, ANDER205)] == [9 * 230.0],
          f"{coach205._laadruimte_plan(inst205, ANDER205)}")
+
+print("=== 206. paal en batterij op één zekering: ook zonder meter, met twee palen, op elke fase (v0.164.1) ===")
+# Sven, 26-10-2026: "Ik wil dat het ook universeel is he. Dat is een harde afspraak. Dit kan ook op een
+# andere fase bij iemand anders gebeuren snap je."
+TWEEDE206 = {**PAAL205, "id": "dev-paal206"}
+inst206 = instellingen(devices=[PAAL205, TWEEDE206, ACCU205])
+inst206["installation"] = {**(inst206.get("installation") or {}), "circuits": [{**KAST205, "sensors": {}}]}
+coach205.state["dev-paal206"] = {"at": T205.isoformat(), "plan_ahead": {"blocks": [
+    {"start": "2026-10-27T03:00:00", "end": "2026-10-27T06:00:00", "charging": True, "amps": 6.0, "kwh": 12.0},
+]}}
+coach205.state["dev-paal205"]["plan_ahead"]["blocks"][0]["amps"] = 6.0
+ruimte206 = coach205._laadruimte_plan(inst206, ACCU205)
+print(f"  {[(v.strftime('%H:%M'), t.strftime('%H:%M'), w) for v, t, w in ruimte206]}")
+# 02-03 alleen de eerste paal: 14 - 6 = 8 A; 03-05 allebei: 14 - 12 = 2 A; 05-06 alleen de tweede: 8 A.
+controle("twee palen op één kast tellen samen",
+         [(v.hour, t.hour, w) for v, t, w in ruimte206] == [(2, 3, 8 * 230.0), (3, 5, 2 * 230.0), (5, 6, 8 * 230.0)],
+         f"{ruimte206}")
+for fase206 in ("l1", "l2", "l3"):
+    accu = {**ACCU205, "battery": {**ACCU205["battery"], "phase": fase206}}
+    controle(f"een batterij op {fase206.upper()} net zo", coach205._laadruimte_plan(inst206, accu) == ruimte206,
+             f"{coach205._laadruimte_plan(inst206, accu)}")
+drie206 = {**ACCU205, "battery": {**ACCU205["battery"], "phase": ""}}
+controle("een batterij op drie fasen: dezelfde ampère op elke fase",
+         [w for _, _, w in coach205._laadruimte_plan(inst206, drie206)] == [w * 3 for _, _, w in ruimte206],
+         f"{coach205._laadruimte_plan(inst206, drie206)}")
+coach205.state["dev-paal205"]["plan_ahead"]["blocks"][0]["amps"] = 13.0
+del coach205.state["dev-paal206"]
+# Op het moment zelf: een kast zonder meter met een paal die al op 13 A laadt. Zijn toezegging bovenop de
+# meting is 0, want hij loopt al; zonder meter telt wat hij in totaal trekt.
+inst206m = {**inst206, "sources": {**inst206.get("sources", {}), "phases_enabled": False}}
+coach205._toezeggingen = {"dev-paal205": {"amps": 0.0, "totaal": 13.0, "sleutels": ["", "g-kast"]}}
+hoger206 = coach205._hogere_toezeggingen(inst206m, ACCU205)
+nu206 = coach205._laadruimte_w(inst206m, ACCU205, 0.0, hoger206)
+controle("op het moment zelf: een kast zonder meter met een paal die al 13 A trekt laat 1 A",
+         nu206 == 230.0, f"{nu206} met {hoger206}")
+controle("en wat ze zelf al laadt krijgt ze daar niet terug",
+         coach205._laadruimte_w(inst206m, ACCU205, 1600.0, hoger206) == 230.0, "")
+coach205._toezeggingen = {}
+vrij206 = coach205._laadruimte_w(inst206m, ACCU205, 0.0, {})
+controle("zonder paal erop de kast min de marge: 14 A", vrij206 == 14 * 230.0, f"{vrij206}")
+ONDER206 = {"id": "g-onder", "name": "Onder", "fuse_amps": 25, "phases": 3, "parent": "g-kast", "sensors": {}}
+inst206k = {**inst206m, "installation": {**inst206m["installation"], "circuits": [{**KAST205, "sensors": {}}, ONDER206]}}
+accu206k = {**ACCU205, "circuit": "g-onder"}
+coach205._toezeggingen = {"dev-paal205": {"amps": 0.0, "totaal": 13.0, "sleutels": ["", "g-kast"]}}
+controle("kast onder kast: de bovenste van 16 A begrenst, ook zonder meter",
+         coach205._laadruimte_w(inst206k, accu206k, 0.0, coach205._hogere_toezeggingen(inst206k, accu206k)) == 230.0,
+         f"{coach205._laadruimte_w(inst206k, accu206k, 0.0, {})}")
+coach205._toezeggingen = {}
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

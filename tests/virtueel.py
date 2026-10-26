@@ -1214,6 +1214,8 @@ class Scenario:
     groep_last_w: float = 0.0
     # De thuisbatterij hangt ook in die groep, op haar eigen fase (v0.164.0).
     batterij_in_groep: bool = False
+    # Of die groep een eigen meter heeft (v0.164.1). Zonder kent de coach alleen de toezeggingen.
+    groep_meter: bool = True
     # De meter meldt de fasestromen in hele ampères, en Home Assistant geeft
     # alleen door wat verandert: zo doet een slimme meter op de P1-poort het.
     # De coach krijgt dan alleen de wissels, niet elke stap een meting, en een
@@ -1290,6 +1292,7 @@ class Verloop:
     paal_herstarts: int = 0
     # De hoogste stroom op een fase van de groep, gemeten (v0.164.0).
     groep_max_a: float = 0.0
+    groep_boven: list = field(default_factory=list)
     # Opdrachten aan de paal die niet aankwamen (`paal_onbereikbaar`, v0.163.3).
     paal_geweigerd: int = 0
     # Hoe vaak een Alfen op zijn veilige stroom terugviel omdat de coach
@@ -1737,7 +1740,7 @@ def instellingen(s: Scenario) -> dict:
             "balancer_entity": E["equalizer"] if s.equalizer else "",
             "circuits": [] if s.groep_amps is None else [{
                 "id": "garage", "name": "Garage", "fuse_amps": s.groep_amps, "phases": 3, "parent": "",
-                "sensors": {f: {"current": E[f"g_{f}"]} for f in ("l1", "l2", "l3")},
+                "sensors": {f: {"current": E[f"g_{f}"]} for f in ("l1", "l2", "l3")} if s.groep_meter else {},
             }],
         },
         "sources": bronnen,
@@ -1809,6 +1812,8 @@ class Wereld:
                          if s.batterij is not None else None)
         self.bat_w = 0.0
         self.groep_max_a = 0.0
+        # Elke meting boven de zekering van de groep: tijd, fase, ampère (v0.164.1).
+        self.groep_boven: list = []
         self.vw_w = 0.0
         self.vw_gevraagd: dt.datetime | None = None
         self.auto = dataclasses.replace(s.auto, soc_gemeld=[])
@@ -2031,6 +2036,8 @@ class Wereld:
                 if self.s.batterij_in_groep and self.batterij is not None and i == self.batterij.fase:
                     a += abs(self.bat_w) / VOLT
                 self.groep_max_a = max(self.groep_max_a, a)
+                if a > self.s.groep_amps + 1e-9:
+                    self.groep_boven.append((nu, naam, round(a, 1)))
                 z(E[f"g_{naam}"], weg if p1_weg else w(f"{a:.2f}", "A"))
         cijfers = 0 if self.s.fase_hele_amps else 2
         for naam, a in zip(("l1", "l2", "l3"), self.fase_amps()):
@@ -2833,6 +2840,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
         verloop.geschiedenis = asyncio.run(coachmod.async_get_meldingen(hass).async_list())
         verloop.paal_herstarts = wereld.paal.herstarts
         verloop.groep_max_a = wereld.groep_max_a
+        verloop.groep_boven = wereld.groep_boven
         verloop.paal_terugvallen = wereld.paal.terugvallen
         verloop.geleerd = {int(r["band"]): float(r["kw"]) for r in inst.get("car_pace") or []
                            if isinstance(r, dict) and r.get("car") == "auto"}
