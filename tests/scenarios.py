@@ -1615,7 +1615,8 @@ pt_bihorario = vast_avond.kopie(
 # dat ziet hij 's avonds. Op een bewolkte dag vult de zon hem en laadt hij niet van het net;
 # `growatt-zon` laat zien dat hij dan ook niets schrijft.
 GROWATT_SPH = dict(growatt=True, soc=45.0, capaciteit_kwh=12.5, max_laden_w=7800.0, max_ontladen_w=6000.0,
-                   soc_min=15.0, soc_max=100.0, rte=0.81, meter=False, teller_in=311.9, teller_uit=280.7)
+                   soc_min=15.0, soc_max=100.0, rte=0.81, meter=False, teller_in=311.9, teller_uit=280.7,
+                   growatt_min_pct=10)
 growatt_bihorario = batterij_winter.kopie(
     naam="growatt-bihorario",
     uitleg="Portugal, bi-horário, een Growatt met een laadschema: in vazio rustig van het net, overdag het huis",
@@ -1686,6 +1687,14 @@ growatt_ochtend_zonder_grens = growatt_ochtend.kopie(
     uitleg="dezelfde ochtend met de ondergrens op nul: dan laadt hij voor die paar cent wel bij",
     batterij=Batterij(**{**GROWATT_SPH, "soc": 15.0}, min_winst=0.0),
 )
+# Een Growatt die ook de 10% van de coach weigert (v0.163.0). In de klantwoning op 26-10-2026 nam de
+# API 8% niet aan, hield hij 100 en zette hij de rest wel; de coach schreef daarna om de paar minuten
+# weer 8. Hier weigert hij alles onder 30%: de coach leert het na één keer teruglezen.
+growatt_weigert = growatt_ochtend_zonder_grens.kopie(
+    naam="growatt-weigert",
+    uitleg="dezelfde ochtend, en een Growatt die een laag laadvermogen niet aanneemt: de coach leert het en herhaalt niet",
+    batterij=Batterij(**{**GROWATT_SPH, "soc": 15.0, "growatt_min_pct": 30}, min_winst=0.0),
+)
 
 ALLE = [
     alfen_zonnig, alfen_dyn, alfen_doel_80, alfen_laadgrens,
@@ -1724,7 +1733,7 @@ ALLE = [
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,
     growatt_bihorario, growatt_zon, growatt_eigen_zon, growatt_schaduw, growatt_vasthouden,
-    growatt_ochtend, growatt_ochtend_zonder_grens, growatt_herstart,
+    growatt_ochtend, growatt_ochtend_zonder_grens, growatt_herstart, growatt_weigert,
 ]
 
 

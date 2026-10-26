@@ -1945,3 +1945,27 @@ met het opnieuw vragen is hij er binnen een minuut nadat zij er is.
 Proef 201 in test_coach.py, en in het virtuele huis `growatt-herstart` (een herstart om 21:00 met de
 integratie drie minuten later): de batterij is om 21:05 terug en het nachtvak staat er meteen; op
 v0.161.0 was hij weg tot 21:59 en kwam het vak om 22:00.
+
+## Een Growatt die een laag laadvermogen weigert (v0.163.0)
+
+In een klantwoning op 26-10-2026 schreef de coach om 13:51 een vak van 06:00 tot 08:00 op 8% van het
+vermogen, tot 100% (1,1 kWh). De Growatt-API nam het vak, laden van het net en de stopgrens aan, maar
+niet 8%: na zijn eigen ronde van vijf minuten gaf hij 100 terug. De coach waarschuwde, schreef opnieuw
+8, en zo om de paar minuten. Op 24-10 weigerde dezelfde API zeven keer 1%, en nam hij 10% meteen aan
+(`GROWATT_HOUDEN_PCT`).
+
+Nu zet de coach nooit minder dan 10% in een schema (`GROWATT_MIN_PCT`). Hoeveel erin gaat bepaalt de
+stopgrens, niet het vermogen: een hoger vermogen laadt dezelfde kWh, alleen eerder in het vak, en tegen
+dezelfde prijs. Zegt het teruglezen dat alles er staat behalve het vermogen
+(`_growatt_vermogen_geweigerd`), dan onthoudt hij dat getal (`growatt_pct_geweigerd` in
+`battery_state`) en schrijft hij voortaan het volgende tiental (`_growatt_min_pct`): na 8 is dat 10,
+na 10 is dat 20. Met een procent tegelijk schreef hij in het virtuele huis achttien keer voordat hij
+er was.
+
+Een "veilig schema" als het vermogen afwijkt (het voorstel op de werkbon) is er niet bij gekomen: wat
+er van het net in gaat begrenst de stopgrens, die de API aanneemt, en wat de coach bovendien zelf
+bewaakt (`growatt_vol`). Een te hoog vermogen kost dus geen extra kWh.
+
+Proef 58 in test_batterij.py, 202 in test_coach.py. In het virtuele huis weigert de Growatt sindsdien
+alles onder 10% (`growatt_min_pct` in `GROWATT_SPH`), en in `growatt-weigert` alles onder 30%: de coach
+schrijft 10, 20 en 30, en daarna niet meer.
