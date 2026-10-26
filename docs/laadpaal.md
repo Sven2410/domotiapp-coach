@@ -1287,3 +1287,21 @@ zon van dat uur en de andere drie niets. Nu komt het overschot van een blok uit 
 per uur op de klok de zon van dat stuk, oplopend of aflopend binnen het uur (`zon_tussen`), min het
 huis van dat stuk. Over een heel uur is de som dezelfde als voorheen. Waarom: `docs/batterij.md`, De
 zon binnen het uur.
+
+## Een paal die even geen opdrachten aanneemt (v0.163.3)
+
+In een klantwoning herstartte een Alfen zich op 26-10-2026 twee keer. Zes minuten lang faalde elke
+opdracht met een `ConnectionException` van Modbus, en elke ronde gaf "kon ... niet beoordelen" met de
+hele traceback in het systeemlog. De auto stond al stil, en zodra de paal terug was stuurde de coach hem
+meteen weer goed: een storing buiten de coach, gemeld als een fout in hem.
+
+Nu gaat elke opdracht aan de paal door `_paal_dienst` (de limiet en het startwoord, voor Easee en Alfen).
+Faalt die, dan wordt het `PaalOnbereikbaar`, behalve een dienst die nog niet bestaat (`ServiceNotFound`,
+het opstarten). De lus van de palen schrijft dan één waarschuwing "... is niet bereikbaar, de coach
+probeert het elke ronde opnieuw", en na `SENSOR_STIL` (tien minuten) nog één, met een kritieke melding
+voor de bewoner, zoals bij een sensor die zwijgt (`_async_paal_weg`). Is hij terug, dan staat "doet het
+weer" in de geschiedenis (`_async_paal_terug`). Wat de paal de vorige ronde toezegde blijft zolang staan
+voor de batterij en de lastbewaker, want misschien laadt hij nog.
+
+Proef 204 in test_coach.py; in het virtuele huis `vast-zonnig-paal-weg` (een Easee, zes minuten, geen
+melding) en `alfen-paal-weg` (twaalf minuten, één melding), met de gebeurtenis `paal_onbereikbaar`.

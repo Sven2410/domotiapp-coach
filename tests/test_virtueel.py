@@ -1522,6 +1522,22 @@ for naam, sensor, wat, van, tot in (
              (basis := v("klantwoning")) is not None and abs(vl.kosten - basis.kosten) < 0.10,
              f"{vl.kosten:.2f}")
 
+# Een paal die even geen opdrachten aanneemt (v0.163.3): zes minuten zegt niets, twaalf wel, één keer.
+if (vl := v("vast-zonnig-paal-weg")):
+    controle("vast-zonnig-paal-weg: de paal weigerde echt opdrachten", vl.paal_geweigerd > 0, f"{vl.paal_geweigerd}")
+    controle("vast-zonnig-paal-weg: zes minuten is geen melding", not meldingen(vl, "niet bereikbaar"),
+             f"{meldingen(vl, 'niet bereikbaar')}")
+    controle("vast-zonnig-paal-weg: en is even goedkoop uit als zonder storing",
+             (basis := v("vast-zonnig")) is not None and abs(vl.kosten - basis.kosten) < 0.10, f"{vl.kosten:.2f}")
+if (vl := v("alfen-paal-weg")):
+    weg = meldingen(vl, "niet bereikbaar")
+    controle("alfen-paal-weg: de paal weigerde echt opdrachten", vl.paal_geweigerd > 0, f"{vl.paal_geweigerd}")
+    controle("alfen-paal-weg: na tien minuten één melding", len(weg) == 1 and "10 minuten" in weg[0], f"{weg}")
+    controle("alfen-paal-weg: en even goedkoop uit als zonder storing",
+             (basis := v("alfen-dynamisch-zonnig")) is not None and abs(vl.kosten - basis.kosten) < 0.10
+             and abs(vl.uit_zon_kwh + vl.uit_net_kwh - basis.uit_zon_kwh - basis.uit_net_kwh) < 0.2,
+             f"{vl.kosten:.2f} {vl.uit_zon_kwh + vl.uit_net_kwh:.1f}")
+
 if (vl := v("klantwoning-prijssensor-weg-om-13")):
     klant_basis(vl, "prijssensor weg om 13")
     controle("prijssensor weg: gemeld na tien minuten, om 13:00",

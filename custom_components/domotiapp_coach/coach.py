@@ -1427,6 +1427,16 @@ def _time(value: str | None) -> time | None:
         return None
 
 
+class PaalOnbereikbaar(Exception):
+    """Een opdracht aan de laadpaal die niet aankwam (v0.163.3).
+
+    Een paal die zichzelf herstart of even van het netwerk is, laat elke opdracht falen
+    met een fout van zijn eigen integratie: bij een Alfen een `ConnectionException` van
+    Modbus, bij een Easee een fout van de cloud. Dat is een storing buiten de coach, geen
+    fout in hem; zie `_async_paal_weg`.
+    """
+
+
 class ChargerCoach:
     """Watches every steerable charging point and acts on what it sees."""
 
@@ -1522,6 +1532,9 @@ class ChargerCoach:
         # Per sensor sinds wanneer hij niets zegt, en welke daarvan al gemeld zijn.
         self._sensor_stil: dict[str, datetime] = {}
         self._sensor_gemeld: set[str] = set()
+        # Per laadpaal sinds wanneer een opdracht niet aankomt, en welke al gemeld zijn (v0.163.3).
+        self._paal_weg: dict[str, datetime] = {}
+        self._paal_gemeld: set[str] = set()
         # Wat daarvan in de opslag staat, zodat er alleen bij een verandering
         # geschreven wordt. Zie `sensor_quiet`.
         self._sensor_gemeld_bewaard: set[str] = set()
@@ -3268,6 +3281,7 @@ class ChargerCoach:
                 for sleutel, amps in self._hogere_toezeggingen(settings, device, zonder_palen=True).items():
                     bezet[sleutel] = bezet.get(sleutel, 0.0) + amps
                 claim = await self._one(moment, settings, device, level, bezet)
+                await self._async_paal_terug(device)
                 sleutels = self._groep_sleutels(settings, device)
                 for sleutel in sleutels:
                     vergeven[sleutel] = vergeven.get(sleutel, 0.0) + claim
@@ -3285,6 +3299,14 @@ class ChargerCoach:
                     if getattr(fout, "translation_placeholders", None)
                     else "de opdracht",
                 )
+            except PaalOnbereikbaar as fout:
+                await self._async_paal_weg(device, moment, fout)
+                # Wat hij de vorige ronde toezegde blijft staan: misschien laadt hij nog, en dan
+                # rekenen de batterij en de lastbewaker beter niet met een paal op 0.
+                vorige = self._toezeggingen.get(device.get("id", ""))
+                if vorige:
+                    for sleutel in vorige.get("sleutels") or []:
+                        vergeven[sleutel] = vergeven.get(sleutel, 0.0) + vorige.get("amps", 0.0)
             except Exception:  # noqa: BLE001 - one broken device is not all of them
                 _LOGGER.exception("kon %s niet beoordelen", device.get("id"))
 
@@ -13884,14 +13906,13 @@ class ChargerCoach:
         if control.get("limit_entity"):
             # Een paal met een limiet-entiteit (Alfen): het getal gaat de
             # number in, zonder houdbaarheid, want die heeft de paal zelf.
-            await self.hass.services.async_call(
+            await self._paal_dienst(
                 domain,
                 service,
                 {"entity_id": self._stuuradres(device, control), control["limit_field"]: amps},
-                blocking=True,
             )
             return
-        await self.hass.services.async_call(
+        await self._paal_dienst(
             domain,
             service,
             {
@@ -13899,8 +13920,61 @@ class ChargerCoach:
                 control["limit_field"]: amps,
                 control["ttl_field"]: minutes,
             },
-            blocking=True,
         )
+
+    async def _paal_dienst(self, domain: str, service: str, data: dict[str, Any]) -> None:
+        """Een opdracht aan de laadpaal; komt hij niet aan, dan `PaalOnbereikbaar` (v0.163.3).
+
+        Een dienst die niet bestaat blijft `ServiceNotFound`: dat is het opstarten, met een
+        eigen regel in de lus van de palen.
+        """
+        try:
+            await self.hass.services.async_call(domain, service, data, blocking=True)
+        except ServiceNotFound:
+            raise
+        except Exception as fout:  # noqa: BLE001 - elke integratie heeft zijn eigen fout
+            raise PaalOnbereikbaar(str(fout) or type(fout).__name__) from fout
+
+    async def _async_paal_weg(self, device: dict[str, Any], now: datetime, fout: Exception) -> None:
+        """Een paal waar een opdracht niet aankwam: één regel in het log, en na `SENSOR_STIL` een melding.
+
+        In een klantwoning herstartte een Alfen zich op 26-10-2026 twee keer, en zes minuten lang
+        gaf elke ronde een fout met de hele traceback ("kon ... niet beoordelen"). De auto stond al
+        stil, en zodra de paal terug was stuurde de coach hem weer goed. Net als een sensor die
+        zwijgt: korter dan tien minuten zegt niets.
+        """
+        device_id = device.get("id", "")
+        sinds = self._paal_weg.get(device_id)
+        if sinds is None:
+            self._paal_weg[device_id] = now
+            _LOGGER.warning("%s is niet bereikbaar, de coach probeert het elke ronde opnieuw: %s", device_id, fout)
+            return
+        if device_id in self._paal_gemeld or _tussen(sinds, now) < SENSOR_STIL:
+            return
+        self._paal_gemeld.add(device_id)
+        minuten = int(_tussen(sinds, now).total_seconds() // 60)
+        _LOGGER.warning("%s is al %d minuten niet bereikbaar: %s", device_id, minuten, fout)
+        naam = device.get("name") or t("De laadpaal")
+        await self._async_tell(
+            t(
+                "{naam} is al {minuten} minuten niet bereikbaar. De coach probeert het elke minuut opnieuw.",
+                naam=f"{naam[0].upper()}{naam[1:]}", minuten=minuten,
+            ),
+            kritiek=True,
+        )
+
+    async def _async_paal_terug(self, device: dict[str, Any]) -> None:
+        """Een paal die weer opdrachten aanneemt: een regel in het log, en gemeld ook in de geschiedenis."""
+        device_id = device.get("id", "")
+        if self._paal_weg.pop(device_id, None) is None:
+            return
+        _LOGGER.info("%s is weer bereikbaar", device_id)
+        if device_id in self._paal_gemeld:
+            self._paal_gemeld.discard(device_id)
+            naam = device.get("name") or t("De laadpaal")
+            await self._async_tell(
+                t("{naam} doet het weer.", naam=f"{naam[0].upper()}{naam[1:]}"), telefoon=False
+            )
 
     @staticmethod
     def _stuuradres(device: dict[str, Any], control: dict[str, Any]) -> str:
@@ -14017,11 +14091,10 @@ class ChargerCoach:
             return
         domain, service = control["command_service"]
         word = (device.get("actions") or {}).get(action) or control["words"][action]
-        await self.hass.services.async_call(
+        await self._paal_dienst(
             domain,
             service,
             {"device_id": device["device_id"], control["command_field"]: word},
-            blocking=True,
         )
 
 

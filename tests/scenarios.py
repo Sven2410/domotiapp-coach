@@ -1695,9 +1695,22 @@ growatt_weigert = growatt_ochtend_zonder_grens.kopie(
     uitleg="dezelfde ochtend, en een Growatt die een laag laadvermogen niet aanneemt: de coach leert het en herhaalt niet",
     batterij=Batterij(**{**GROWATT_SPH, "soc": 15.0, "growatt_min_pct": 30}, min_winst=0.0),
 )
+# Een paal die zichzelf herstart (v0.163.3): in een klantwoning nam een Alfen op 26-10-2026 zes
+# minuten lang geen opdracht aan, en elke ronde gaf een fout met traceback. Nu een waarschuwing, en
+# pas na tien minuten een melding; wat de paal deed blijft hij doen.
+klant_paal_weg = vast_zonnig.kopie(
+    naam="vast-zonnig-paal-weg",
+    uitleg="vast-zonnig, en de Easee neemt van 09:03 tot 09:09 geen opdrachten aan, terwijl hij de zon volgt",
+    gebeurtenissen=[("09:03", "paal_onbereikbaar", 6)],
+)
+alfen_paal_weg = alfen_dyn.kopie(
+    naam="alfen-paal-weg",
+    uitleg="alfen-dynamisch-zonnig, en de Alfen neemt van 18:56 tot 19:08 geen opdrachten aan, in de pauze",
+    gebeurtenissen=[("18:56", "paal_onbereikbaar", 12)],
+)
 
 ALLE = [
-    alfen_zonnig, alfen_dyn, alfen_doel_80, alfen_laadgrens,
+    alfen_zonnig, alfen_dyn, alfen_paal_weg, klant_paal_weg, alfen_doel_80, alfen_laadgrens,
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,
     alfen_een_fase, alfen_een_fase_vers,
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,

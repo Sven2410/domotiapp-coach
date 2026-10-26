@@ -1286,6 +1286,8 @@ class Verloop:
     geschiedenis: list = field(default_factory=list)
     # Hoe vaak de paal zelf de sessie herstartte omdat de auto over de groep ging.
     paal_herstarts: int = 0
+    # Opdrachten aan de paal die niet aankwamen (`paal_onbereikbaar`, v0.163.3).
+    paal_geweigerd: int = 0
     # Hoe vaak een Alfen op zijn veilige stroom terugviel omdat de coach
     # zijn limiet niet op tijd opnieuw schreef. Hoort nul te zijn.
     paal_terugvallen: int = 0
@@ -1831,6 +1833,8 @@ class Wereld:
         self.equalizer_vrij: float | None = None
         # Sensoren die tijdelijk `unavailable` zijn, met tot wanneer.
         self.weg: dict[str, dt.datetime] = {}
+        # Tot wanneer een opdracht aan de paal niet aankomt (`paal_onbereikbaar`, v0.163.3).
+        self.paal_weg_tot: dt.datetime | None = None
         self.reden = ""
         self.oven_w = s.oven_w
         if s.kabel_erin is None:
@@ -2312,6 +2316,10 @@ class Wereld:
             naam, minuten = arg
             self.weg[naam] = self.nu + dt.timedelta(minutes=int(minuten))
             return f"de sensor {E[naam]} ({naam}) valt {minuten} minuten weg"
+        if actie == "paal_onbereikbaar":
+            # Een paal die zichzelf herstart: elke opdracht faalt, en hij doet wat hij deed.
+            self.paal_weg_tot = self.nu + dt.timedelta(minutes=int(arg))
+            return f"de paal neemt {arg} minuten geen opdrachten aan"
         raise ValueError(f"onbekende gebeurtenis {actie}")
 
 
@@ -2349,6 +2357,10 @@ class Diensten:
             staat = self.hass.states.get(data.get("entity_id"))
             if staat is not None and staat.state == "unavailable":
                 return
+        if (self.wereld.paal_weg_tot is not None and self.wereld.nu < self.wereld.paal_weg_tot
+                and (domein == "easee" or (domein == "number" and data.get("entity_id") == E["alfen_limit"]))):
+            self.verloop.paal_geweigerd += 1
+            raise OSError("Failed to connect")
         self.verstuurd.append((domein, dienst, dict(data)))
         if domein == "easee":
             self.wereld.paal.opdracht(dienst, data, self.wereld.nu)
