@@ -2228,6 +2228,60 @@ proef("een groep zonder meetwaarde blijft van de kaart", () => {
   assert.equal(groepen[0].phases[0].amps, 12);
 });
 
+// Een groep zonder eigen meter, gemeten via de apparaten die erop hangen (v0.165.0). Dezelfde som als
+// `groep_apparaten_amps` in planner.py.
+proef("een groep zonder meter telt de apparaten die erbij gekozen zijn", () => {
+  const staten = {
+    "sensor.was_w": { state: "2260", attributes: { unit_of_measurement: "W" } },
+    "sensor.droog_w": { state: "0.912", attributes: { unit_of_measurement: "kW" } },
+  };
+  const feed = { get: (id) => staten[id] };
+  const apparaten = [
+    { id: "was", name: "Wasmachine", entity: "sensor.was_w" },
+    { id: "droog", name: "Droger", entity: "sensor.droog_w" },
+  ];
+  const een = groepenVan(feed, { circuits: [
+    { id: "g", name: "Was", fuse_amps: 16, phases: 1, meter: false, sensors: {}, devices: [{ device: "was" }, { device: "droog", phase: "l3" }] },
+  ] }, apparaten);
+  assert.equal(een.length, 1);
+  assert.ok(Math.abs(een[0].phases[0].amps - 3172 / 230) < 1e-9, `${een[0].phases[0].amps}`);
+  assert.deepEqual(een[0].via, ["Wasmachine", "Droger"]);
+  const drie = groepenVan(feed, { circuits: [
+    { id: "g", name: "Was", fuse_amps: 16, phases: 3, meter: false, devices: [{ device: "was", phase: "l2" }, { device: "droog", phase: "l3" }] },
+  ] }, apparaten);
+  assert.deepEqual(drie[0].phases.map((p) => Math.round(p.power)), [0, 2260, 912], "per fase");
+  const weg = groepenVan({ get: (id) => (id === "sensor.was_w" ? staten[id] : { state: "unavailable", attributes: {} }) }, { circuits: [
+    { id: "g", name: "Was", fuse_amps: 16, phases: 1, meter: false, devices: [{ device: "was" }, { device: "droog" }] },
+  ] }, apparaten);
+  assert.equal(weg.length, 0, "zegt een plug niets, dan geen som");
+  const belasting = belastingVan(null, null, { fuse_amps: 25 }, een);
+  assert.equal(belasting.worst, "L1 (Was)");
+});
+
+proef("bij Groepen kies je zonder meter de apparaten, elk hooguit in één groep", () => {
+  const el = Object.create(Installatie.prototype);
+  el.draft_ = { devices: [
+    { id: "was", name: "Wasmachine", type: "overig", entity: "sensor.was_w" },
+    { id: "droog", name: "Droger", type: "overig", entity: "sensor.droog_w" },
+    { id: "paal", name: "Laadpaal", type: "laadpaal", entity: "sensor.paal_w" },
+    { id: "zonder", name: "Zonder sensor", type: "overig", entity: "" },
+  ] };
+  const a = { id: "a", kind: "groep", name: "A", fuse_amps: 16, phases: 3, parent: "", meter: false, sensors: {}, devices: [{ device: "was", phase: "l2" }] };
+  const b = { id: "b", kind: "groep", name: "B", fuse_amps: 16, phases: 1, parent: "", meter: false, sensors: {}, devices: [] };
+  const htmlA = el.circuitHtml_(a, 0, [a, b]);
+  assert.ok(htmlA.includes("Wasmachine") && htmlA.includes('data-circuit-device-phase="0:was"'), "de gekozen wasmachine met zijn fase");
+  assert.ok(/<option value="l2" selected>/.test(htmlA), "op L2");
+  const htmlB = el.circuitHtml_(b, 1, [a, b]);
+  assert.ok(!htmlB.includes('value="was"'), "de wasmachine zit al in groep A");
+  assert.ok(htmlB.includes('value="droog"') && !htmlB.includes('value="paal"') && !htmlB.includes('value="zonder"'),
+    "wel de droger, geen paal en niets zonder vermogenssensor");
+  assert.ok(!htmlB.includes("data-circuit-device-phase"), "een groep op één fase vraagt geen fase");
+  assert.ok(!el.circuitHtml_({ ...a, meter: true }, 0, [a, b]).includes("Gemeten via apparaten"), "met een meter niet");
+  const uit = el.payload_({ installation: { circuits: [a, { ...b, meter: true, devices: [{ device: "droog" }] }] }, contract: {} });
+  assert.deepEqual(uit.installation.circuits[0].devices, [{ device: "was", phase: "l2" }], "zonder meter blijven ze");
+  assert.deepEqual(uit.installation.circuits[1].devices, [], "met meter tellen de sensoren, niet de apparaten");
+});
+
 // Zonneplan geeft zijn prijzen als `forecast`, in tienmiljoensten van een
 // euro en zonder eindtijd. Gemeten in de eerste woning op 22-09-2026.
 const { priceForecast } = await import("../custom_components/domotiapp_coach/frontend/src/data-source.js");

@@ -30,6 +30,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import EVENT_NOTIFICATION, EVENT_SETTINGS_UPDATED, GRID_MODE_SIGNED, LEVEL_STEER
 from .ontvangers import ontvangers
+from .planner import groep_apparaten_amps
 from .storage import async_get_meldingen, async_get_store
 from .taal import getal, t
 from .units import to_watts
@@ -164,6 +165,12 @@ class LoadMonitor:
                 for kind in ("current", "power", "voltage"):
                     if config.get(kind):
                         entities.append(config[kind])
+            # Een groep zonder meter, gemeten via de apparaten die de bewoner erbij koos (v0.165.0).
+            apparaten = {a.get("id"): a for a in self._settings.get("devices") or [] if isinstance(a, dict)}
+            for rij in groep.get("devices") or []:
+                entity = (apparaten.get((rij or {}).get("device")) or {}).get("entity")
+                if entity:
+                    entities.append(entity)
 
         if sources.get("grid_mode") == GRID_MODE_SIGNED:
             if sources.get("grid_signed"):
@@ -314,24 +321,28 @@ class LoadMonitor:
         # Elke zekering met een meter: de hoofdaansluiting en elke groep. De
         # zwaarst belaste wint, als aandeel van haar eigen zekering; een garage
         # van 16 A op 14 A is zwaarder belast dan een aansluiting van 25 A op 15.
-        kandidaten: list[tuple[float, str, dict]] = []
+        # Een groep zonder meter met gekozen apparaten telt met hun som (v0.165.0).
+        kandidaten: list[tuple[float, str, dict, dict | None]] = []
         fuse = float(installation.get("fuse_amps") or 0)
         if sources.get("phases_enabled") and fuse > 0:
-            kandidaten.append((fuse, "", sources.get("phases", {}) or {}))
+            kandidaten.append((fuse, "", sources.get("phases", {}) or {}, None))
         for groep in installation.get("circuits") or []:
             if isinstance(groep, dict) and float(groep.get("fuse_amps") or 0) > 0:
                 kandidaten.append((
                     float(groep["fuse_amps"]),
                     str(groep.get("name") or groep.get("id") or ""),
                     groep.get("sensors") or {},
+                    groep_apparaten_amps(
+                        groep, self._settings.get("devices") or [], lambda e: _watts(states.get(e))
+                    ),
                 ))
 
         zwaarste: tuple[float, float, str] | None = None   # (aandeel, amps, label)
         zwaarste_fuse = 0.0
-        for zekering, naam, sensoren in kandidaten:
+        for zekering, naam, sensoren, som in kandidaten:
             for phase in ("l1", "l2", "l3"):
                 config = sensoren.get(phase, {}) or {}
-                amps = self._phase_amps(config)
+                amps = som.get(phase) if som is not None else self._phase_amps(config)
                 if amps is None:
                     continue
                 aandeel = amps / zekering

@@ -146,3 +146,35 @@ nu hoogstens 14,9.
 
 Nog niet: het plan van een paal die na een batterij komt kent haar uurplan niet, en boiler en airco
 plannen vooruit nog zonder de paal.
+
+## Een groep zonder meter, gemeten via de apparaten die erop hangen (v0.165.0)
+
+De bewoner van een klantwoning op 26-10-2026: wasmachine en droger zitten samen op één groep, elk op
+een eigen plug, en een eigen meter voor die groep past niet meer in de kast. Sven: "Onder Groepen laat
+je het vinkje van aparte kWh-meter dan uit, maar voeg je per groep een of meerdere apparaten toe."
+
+Zo staat het nu. Een groep of kast zonder eigen meter krijgt een lijst `devices`: per apparaat met een
+vermogenssensor (geen laadpaal en geen thuisbatterij, die rekent de coach al zelf) de fase waar het op
+hangt. Een apparaat hoort bij hooguit één groep (`_apparaat_in_een_groep` in websocket.py). De som
+(`groep_apparaten_amps` in planner.py, `readCircuits` in data-source.js) telt overal waar een meter
+telt, als het deel van het huis dat de coach kent:
+
+- de belasting per fase op het overzicht, met "Gemeten via Wasmachine en Droger; wat er verder op deze
+  groep hangt ziet de coach niet.", en de lastbewaking (`async_current_load` in monitor.py);
+- een paal op die groep (`known_amps` op `Circuit`), en een batterij, boiler of airco (`_laadruimte_w`);
+- een eigen melding (`_async_groep_vol`): staat de som `GROEP_VOL_DUUR` (3 minuten) boven
+  `GROEP_VOL_DEEL` (90%) van de zekering, dan één melding, en pas weer na een keer onder
+  `GROEP_VOL_WEER` (80%).
+
+Zegt één van de sensoren niets, dan is er geen som: een som zonder een van de apparaten zou de groep
+leger laten lijken dan hij is. Een meter wint altijd van de apparaten.
+
+De coach schakelt niets uit. Sven: "je wilt niet dat je wasmachine ineens uitschakelt toch?" Uitschakelen
+is een vraag voor later.
+
+Gemeten in die woning van 16-10 tot 26-10-2026: wasmachine hoogstens 2260 W, droger 912 W, samen
+hoogstens 2954 W (12,8 A op 16 A). Daar komt de groep dus niet aan de grens.
+
+Proeven: test_planner.py (de som, op één en drie fasen, een plug die niets zegt, een paal op zo'n groep),
+207 in test_coach.py (de melding onder en boven de grens, de batterij, de lastbewaking), en
+test_rapport.mjs (het overzicht en het scherm Groepen).

@@ -11950,6 +11950,67 @@ controle("kast onder kast: de bovenste van 16 A begrenst, ook zonder meter",
          f"{coach205._laadruimte_w(inst206k, accu206k, 0.0, {})}")
 coach205._toezeggingen = {}
 
+print("=== 207. een groep zonder meter, gemeten via de apparaten die erop hangen (v0.165.0) ===")
+# Een klantwoning op 26-10-2026: wasmachine en droger samen op één groep van 16 A, elk op een eigen plug.
+WAS207 = {"id": "dev-was", "type": "overig", "name": "Wasmachine", "entity": "sensor.was_w"}
+DROOG207 = {"id": "dev-droog", "type": "overig", "name": "Droger", "entity": "sensor.droog_w"}
+GROEP207 = {"id": "g-was", "name": "Was", "kind": "groep", "fuse_amps": 16, "phases": 1, "meter": False,
+            "sensors": {}, "devices": [{"device": "dev-was"}, {"device": "dev-droog"}]}
+inst207 = instellingen(devices=[WAS207, DROOG207])
+inst207["installation"] = {**inst207["installation"], "circuits": [GROEP207]}
+
+
+def watt207(was, droog):
+    return {"sensor.was_w": {"state": str(was), "attributes": {"unit_of_measurement": "W"}},
+            "sensor.droog_w": {"state": str(droog), "attributes": {"unit_of_measurement": "W"}}}
+
+
+hass207, store207, coach207 = bouw({**huis(), **watt207(2260, 912)}, inst207)
+T207 = dt.datetime(2026, 10, 24, 13, 30)
+
+
+def groep207(minuten):
+    for m in minuten:
+        asyncio.run(coach207._async_groep_vol(inst207, T207 + dt.timedelta(minutes=m)))
+    return [g["message"] for g in asyncio.run(coachmod.async_get_meldingen(hass207).async_list()) if "De groep" in g["message"]]
+
+
+som207 = coach207._groep_som(inst207, GROEP207)
+controle("de som van de twee plugs: 3172 W, 13,8 A", som207 is not None and abs(som207["l1"] - 3172 / 230) < 1e-9, f"{som207}")
+controle("onder 90% van 16 A geen melding", groep207(range(0, 10)) == [], "")
+hass207.states.zet("sensor.was_w", {"state": "2600", "attributes": {"unit_of_measurement": "W"}})
+hass207.states.zet("sensor.droog_w", {"state": "900", "attributes": {"unit_of_measurement": "W"}})
+twee207 = groep207([10, 11, 12])
+controle("boven 90% nog geen drie minuten: nog niet", twee207 == [], f"{twee207}")
+drie207 = groep207([13, 14, 20, 30])
+print(f"  {drie207}")
+controle("na drie minuten één melding, met de groep en de apparaten",
+         len(drie207) == 1 and "Was" in drie207[0] and "15,2 A" in drie207[0] and "Wasmachine en Droger" in drie207[0],
+         f"{drie207}")
+hass207.states.zet("sensor.droog_w", "unavailable")
+controle("zegt een plug niets, dan geen som en geen tweede melding",
+         coach207._groep_som(inst207, GROEP207) is None and len(groep207([31, 40])) == 1, "")
+hass207.states.zet("sensor.droog_w", {"state": "0", "attributes": {"unit_of_measurement": "W"}})
+hass207.states.zet("sensor.was_w", {"state": "200", "attributes": {"unit_of_measurement": "W"}})
+groep207([41])
+hass207.states.zet("sensor.was_w", {"state": "3500", "attributes": {"unit_of_measurement": "W"}})
+controle("eerst onder 80% en dan weer erboven: een nieuwe melding", len(groep207([42, 46])) == 2, "")
+# Een batterij op zo'n groep krijgt de ruimte min wat de apparaten trekken.
+ACCU207 = {"id": "dev-accu207", "type": "thuisbatterij", "controllable": True, "circuit": "g-was",
+           "battery": {"phase": "l1", "max_charge_w": 3500}}
+inst207b = {**inst207, "devices": [WAS207, DROOG207, ACCU207],
+            "sources": {**inst207.get("sources", {}), "phases_enabled": False}}
+hass207.states.zet("sensor.was_w", {"state": "2300", "attributes": {"unit_of_measurement": "W"}})
+ruimte207 = coach207._laadruimte_w(inst207b, ACCU207, 0.0, {})
+controle("een batterij op die groep: 16 - 2 - 10 A van de wasmachine = 4 A", abs(ruimte207 - 4 * 230.0) < 1e-6, f"{ruimte207}")
+# De lastbewaking ziet de groep ook.
+hass207m, monitor207 = bewaker(inst207, {**huis(), **watt207(3000, 600)})
+lezing207 = monitor207.async_current_load()
+controle("de lastbewaking rekent met de som: 3600 W op 16 A",
+         lezing207.basis == "phase" and "Was" in (lezing207.worst_phase or "") and abs(lezing207.amps - 3600 / 230) < 1e-6,
+         f"{lezing207}")
+controle("en luistert naar de plugs", {"sensor.was_w", "sensor.droog_w"} <= set(monitor207._watched_entities()), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

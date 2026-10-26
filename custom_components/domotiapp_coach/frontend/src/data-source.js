@@ -943,12 +943,33 @@ function readPhases(feed, sources) {
  *
  * @returns {Array<{id: string, name: string, fuse: number, phases: Array}>}
  */
-export function readCircuits(feed, installation) {
+export function readCircuits(feed, installation, devices = []) {
   const groepen = Array.isArray(installation?.circuits) ? installation.circuits : [];
+  const opId = new Map((devices ?? []).filter((d) => d?.id).map((d) => [d.id, d]));
   return groepen
     .filter((g) => g?.id)
     .map((g) => {
       const keys = Number(g.phases) === 1 ? ["l1"] : PHASES;
+      // Zonder eigen meter: de som van de apparaten die de bewoner bij de groep koos (v0.165.0),
+      // zoals `groep_apparaten_amps` in planner.py. Zegt er één niets, dan is er geen som.
+      const gekozen = g.meter === false && Array.isArray(g.devices) ? g.devices.filter((r) => opId.get(r?.device)?.entity) : [];
+      if (gekozen.length) {
+        const watt = gekozen.map((r) => readPower(feed, opId.get(r.device).entity));
+        const compleet = watt.every((w) => Number.isFinite(w));
+        const phases = keys.map((key) => {
+          const power = compleet
+            ? gekozen.reduce((som, r, i) => som + ((keys.length === 1 ? "l1" : r.phase || "l1") === key ? Math.max(0, watt[i]) : 0), 0)
+            : null;
+          return {
+            key, label: key.toUpperCase(), current: null, power, voltage: null,
+            amps: power === null ? null : power / NOMINAL_VOLTS, ampsDerived: true,
+          };
+        });
+        return {
+          id: g.id, name: g.name || g.id, fuse: Number(g.fuse_amps) || 0, phases,
+          via: gekozen.map((r) => opId.get(r.device).name || r.device),
+        };
+      }
       const phases = keys.map((key) => {
         const config = g.sensors?.[key] ?? {};
         const row = {
@@ -1121,7 +1142,7 @@ export class LiveSource {
     });
 
     const phases = readPhases(feed, sources);
-    const circuits = readCircuits(feed, settings?.installation);
+    const circuits = readCircuits(feed, settings?.installation, settings?.devices);
     const load = loadOf(phases, importW, settings?.installation, circuits);
 
     const reading = {

@@ -140,6 +140,7 @@ from .planner import (
     Car,
     Charger,
     Circuit,
+    groep_apparaten_amps,
     DayWindow,
     Decision,
     Forecast,
@@ -213,6 +214,12 @@ SENSOR_STIL = timedelta(minutes=10)
 # stilstaat verandert niet. De eigenaar op 22-09-2026 over de Ford: "zet dat maar
 # op een uur polling."
 SENSOR_STIL_AUTO = timedelta(minutes=60)
+# Een groep zonder meter, gemeten via de apparaten die erop hangen (v0.165.0): vanaf welk deel van
+# de zekering, en hoe lang, voordat de coach het meldt. Een wasmachine die opwarmt duurt minuten,
+# een motor die aanloopt een seconde. Opnieuw pas als hij onder `GROEP_VOL_WEER` is geweest.
+GROEP_VOL_DEEL = 0.9
+GROEP_VOL_WEER = 0.8
+GROEP_VOL_DUUR = timedelta(minutes=3)
 # De temperatuurmelding van een thuisbatterij (v0.108.0). Zo lang blijft hij
 # boven de grens voor er bericht uitgaat, zodat één verkeerde meting van de
 # integratie niemand wekt; en zoveel graden moet hij weer onder de grens zakken
@@ -1537,6 +1544,9 @@ class ChargerCoach:
         # Wat elke paal deze ronde in totaal trekt of gaat trekken, per fase (v0.164.1): voor een
         # groep zonder meter, waar een toezegging bovenop de meting niets zegt.
         self._paal_stroom: dict[str, float] = {}
+        # Per groep zonder meter sinds wanneer de som boven `GROEP_VOL_DEEL` staat, en welke gemeld zijn.
+        self._groep_vol: dict[str, datetime] = {}
+        self._groep_vol_gemeld: set[str] = set()
         self._paal_gemeld: set[str] = set()
         # Wat daarvan in de opslag staat, zodat er alleen bij een verandering
         # geschreven wordt. Zie `sensor_quiet`.
@@ -3223,6 +3233,7 @@ class ChargerCoach:
         await self._async_jaarsaldo(settings, moment)
         await self._async_schaal(settings, moment)
         await self._async_sensorwacht(settings, moment)
+        await self._async_groep_vol(settings, moment)
         await self._async_verbruikswacht(settings, moment)
         await self._async_temperatuurwacht(settings, moment, level)
         await self._async_vriezerwacht(settings, moment)
@@ -6155,11 +6166,63 @@ class ChargerCoach:
                 ruimten.append(zekering - max(FUSE_MARGIN_AMPS, zekering * FUSE_MARGIN_SHARE) - max(stromen)
                                - (hoger or {}).get(str(groep.get("id")), 0.0) + eigen_a)
             else:
+                # Plus wat de apparaten trekken die bij de groep gekozen zijn (v0.165.0), op haar fase.
+                bekend = self._groep_som(settings, groep) or {}
+                op_fase = bekend.get(fase) if fase in bekend else max(bekend.values(), default=0.0)
                 ruimten.append(zekering - max(FUSE_MARGIN_AMPS, zekering * FUSE_MARGIN_SHARE)
-                               - alles.get(str(groep.get("id")), 0.0))
+                               - alles.get(str(groep.get("id")), 0.0) - (op_fase or 0.0))
         if not ruimten:
             return None
         return min(ruimten) * VOLTS
+
+    async def _async_groep_vol(self, settings: dict[str, Any], now: datetime) -> None:
+        """Melden als een groep zonder meter bijna aan zijn zekering zit, gemeten via zijn apparaten (v0.165.0).
+
+        Eén keer per keer, met de naam van de groep. De coach schakelt niets uit: de eigenaar op
+        26-10-2026, "je wilt niet dat je wasmachine ineens uitschakelt toch?"
+        """
+        apparaten = {a.get("id"): a for a in settings.get("devices") or [] if isinstance(a, dict)}
+        for groep in (settings.get("installation") or {}).get("circuits") or []:
+            if not isinstance(groep, dict) or not groep.get("id"):
+                continue
+            sleutel = str(groep["id"])
+            som = self._groep_som(settings, groep)
+            zekering = float(groep.get("fuse_amps") or 0)
+            if som is None or zekering <= 0:
+                self._groep_vol.pop(sleutel, None)
+                continue
+            amps = max(som.values(), default=0.0)
+            if amps < GROEP_VOL_WEER * zekering:
+                self._groep_vol.pop(sleutel, None)
+                self._groep_vol_gemeld.discard(sleutel)
+                continue
+            if amps < GROEP_VOL_DEEL * zekering:
+                self._groep_vol.pop(sleutel, None)
+                continue
+            sinds = self._groep_vol.setdefault(sleutel, now)
+            if sleutel in self._groep_vol_gemeld or _tussen(sinds, now) < GROEP_VOL_DUUR:
+                continue
+            self._groep_vol_gemeld.add(sleutel)
+            namen = [
+                str((apparaten.get(r.get("device")) or {}).get("name") or "")
+                for r in groep.get("devices") or [] if isinstance(r, dict)
+            ]
+            namen = [n for n in namen if n]
+            _LOGGER.warning("groep %s trekt %.1f A van %.0f A", sleutel, amps, zekering)
+            await self._async_tell(
+                t(
+                    "De groep {naam} trekt {amps} A, bijna de {zekering} A van de zekering. Gemeten via {apparaten}.",
+                    naam=groep.get("name") or t("zonder naam"), amps=getal(amps, 1), zekering=f"{zekering:.0f}",
+                    apparaten=namen[0] if len(namen) == 1 else t("{voor} en {laatste}", voor=", ".join(namen[:-1]), laatste=namen[-1]),
+                ),
+                kritiek=True,
+            )
+
+    def _groep_som(self, settings: dict[str, Any], groep: dict[str, Any]) -> dict[str, float] | None:
+        """Per fase wat de apparaten trekken die bij een groep zonder meter gekozen zijn (v0.165.0)."""
+        return groep_apparaten_amps(
+            groep, settings.get("devices") or [], lambda entity: _watts(self.hass, entity)
+        )
 
     def _laadruimte_plan(
         self, settings: dict[str, Any], device: dict[str, Any]
@@ -10224,7 +10287,10 @@ class ChargerCoach:
                     wijk = wijkt.get((str(groep.get("id")), key), 0.0)
                     stromen.append(max(0.0, amps - wijk))
                     toppen.append(max(0.0, (self._fase_piek(fase, now) or amps) - wijk))
+            # Zonder meter: wat de apparaten trekken die de bewoner bij de groep koos (v0.165.0).
+            bekend = None if stromen else self._groep_som(settings, groep)
             circuits.append(Circuit(
+                known_amps=max(bekend.values(), default=0.0) if bekend else 0.0,
                 name=str(groep.get("name") or groep.get("id") or ""),
                 soort="onderverdeelkast" if groep.get("kind") == "kast" else "groep",
                 phase_amps=stromen,

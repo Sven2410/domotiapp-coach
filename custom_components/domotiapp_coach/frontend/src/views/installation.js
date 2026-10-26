@@ -686,6 +686,48 @@ class DacViewInstallation extends DacEditorElement {
    * hangt, of hij een eigen kWh-meter heeft, en alleen dan per fase de sensoren.
    * Zelfde velden als de fasen van de hoofdaansluiting bij Instellingen.
    */
+  /**
+   * Zonder eigen meter: de apparaten met een vermogenssensor die op deze groep hangen (v0.165.0).
+   * Sven, 26-10-2026: "Onder Groepen laat je het vinkje van aparte kWh-meter dan uit, maar voeg je
+   * per groep een of meerdere apparaten toe." Hun som is wat de coach van de groep weet. Een laadpaal
+   * en een thuisbatterij niet: die rekent de coach al zelf mee. Een apparaat hoort bij één groep.
+   */
+  circuitDevicesHtml_(g, index, groepen, esc) {
+    const apparaten = (this.draft_?.devices ?? []).filter(
+      (d) => d?.id && d.entity && d.type !== "laadpaal" && d.type !== "thuisbatterij"
+    );
+    const naam = (id) => apparaten.find((d) => d.id === id)?.name || id;
+    const elders = new Set(groepen.filter((o) => o !== g).flatMap((o) => (o.devices ?? []).map((r) => r.device)));
+    const gekozen = (g.devices ?? []).filter((r) => apparaten.some((d) => d.id === r.device));
+    const vrij = apparaten.filter((d) => !elders.has(d.id) && !gekozen.some((r) => r.device === d.id));
+    const drie = Number(g.phases) !== 1;
+    const rijen = gekozen
+      .map(
+        (r) => `
+          <div class="extra-line circuit-device">
+            <span class="circuit-device-name">${esc(naam(r.device))}</span>
+            ${drie ? `<select data-circuit-device-phase="${index}:${esc(r.device)}" aria-label="${t("Fase")}">
+              ${["l1", "l2", "l3"].map((f) => `<option value="${f}"${(r.phase || "l1") === f ? " selected" : ""}>${f.toUpperCase()}</option>`).join("")}
+            </select>` : ""}
+            <button type="button" class="remove" data-circuit-device-remove="${index}:${esc(r.device)}" aria-label="${t("Weghalen")}">${icons.trash}</button>
+          </div>`
+      )
+      .join("");
+    const kiezen = vrij.length
+      ? `<select data-circuit-device-add="${index}" aria-label="${t("Apparaat toevoegen")}">
+          <option value="">${t("Apparaat toevoegen…")}</option>
+          ${vrij.map((d) => `<option value="${esc(d.id)}">${esc(d.name || d.id)}</option>`).join("")}
+        </select>`
+      : "";
+    return `
+        <div class="row circuit-devices">
+          <label>${t("Gemeten via apparaten")}</label>
+          <p class="hint">${t("Kies de apparaten met een vermogenssensor die op deze groep hangen. Hun som is wat de coach van de groep weet; wat er verder op hangt ziet hij niet. Zit de groep bijna aan zijn zekering, dan krijg je een melding.")}</p>
+          ${rijen}
+          ${kiezen}
+        </div>`;
+  }
+
   circuitHtml_(g, index, groepen) {
     const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     const fasen = Number(g.phases) === 1 ? ["l1"] : ["l1", "l2", "l3"];
@@ -753,6 +795,7 @@ class DacViewInstallation extends DacEditorElement {
         </div>`
           )
           .join("")}
+        ${g.meter ? "" : this.circuitDevicesHtml_(g, index, groepen, esc)}
         <div class="circuit-actions">
           <button type="button" class="remove" data-circuit-remove="${index}">${kast ? t("Onderverdeelkast verwijderen") : t("Groep verwijderen")}</button>
         </div>
@@ -779,7 +822,8 @@ class DacViewInstallation extends DacEditorElement {
       ...uit,
       installation: {
         ...inst,
-        circuits: inst.circuits.map((g) => (g?.meter === false ? { ...g, sensors: {} } : g)),
+        // Met een eigen meter tellen de sensoren en niet de apparaten (v0.165.0); zonder andersom.
+        circuits: inst.circuits.map((g) => (g?.meter === false ? { ...g, sensors: {} } : { ...g, devices: [] })),
       },
     };
   }
@@ -830,6 +874,32 @@ class DacViewInstallation extends DacEditorElement {
         if (!g.sensors) g.sensors = {};
         if (!g.sensors[phase]) g.sensors[phase] = {};
         g.sensors[phase][kind] = ev.detail.value;
+        this.afterChange_();
+      });
+    }
+    for (const keuze of host.querySelectorAll("[data-circuit-device-add]")) {
+      keuze.addEventListener("change", () => {
+        if (!keuze.value) return;
+        const g = groepen[Number(keuze.dataset.circuitDeviceAdd)];
+        (g.devices ??= []).push({ device: keuze.value, phase: "l1" });
+        this.paintCircuits_();
+        this.afterChange_();
+      });
+    }
+    for (const keuze of host.querySelectorAll("[data-circuit-device-phase]")) {
+      keuze.addEventListener("change", () => {
+        const [i, id] = keuze.dataset.circuitDevicePhase.split(/:(.*)/s);
+        const rij = (groepen[Number(i)].devices ?? []).find((r) => r.device === id);
+        if (rij) rij.phase = keuze.value;
+        this.afterChange_();
+      });
+    }
+    for (const knop of host.querySelectorAll("[data-circuit-device-remove]")) {
+      knop.addEventListener("click", () => {
+        const [i, id] = knop.dataset.circuitDeviceRemove.split(/:(.*)/s);
+        const g = groepen[Number(i)];
+        g.devices = (g.devices ?? []).filter((r) => r.device !== id);
+        this.paintCircuits_();
         this.afterChange_();
       });
     }
@@ -979,6 +1049,9 @@ DacViewInstallation.css = /* css */ `
 
   /* ---- extra omvormers ---- */
   .extra-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .circuit-devices { display: grid; gap: 8px; }
+  .circuit-device { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .circuit-device-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .extra-line .remove, button.add {
     font: inherit; font-size: 13px; padding: 8px 12px;
     border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border);

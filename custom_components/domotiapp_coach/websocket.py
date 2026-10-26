@@ -197,8 +197,25 @@ _CIRCUIT = _schema(
         vol.Optional("sensors", default=dict): _schema(
             {vol.Optional(phase): _PHASE for phase in ("l1", "l2", "l3")}
         ),
+        # Zonder eigen meter: de apparaten met een vermogenssensor die op deze groep hangen, en
+        # op welke fase (v0.165.0). Hun som is wat de coach van de groep weet.
+        vol.Optional("devices", default=list): vol.All(
+            [_schema({vol.Required("device"): str, vol.Optional("phase", default="l1"): vol.In(["l1", "l2", "l3"])})],
+            vol.Length(max=12),
+        ),
     }
 )
+
+
+def _apparaat_in_een_groep(groepen: list) -> list:
+    """Een apparaat meet voor hooguit één groep (v0.165.0): anders telt het twee keer."""
+    gezien: set[str] = set()
+    for groep in groepen:
+        for rij in groep.get("devices") or []:
+            if rij["device"] in gezien:
+                raise vol.Invalid("een apparaat hoort bij hooguit één groep")
+            gezien.add(rij["device"])
+    return groepen
 
 # Een airco (v0.119.0). Het typeplaatje is van de installateur; de rest van de
 # bewoner (`_AIRCO_VOORKEUREN`). De temperatuur binnen wat Home Assistant een
@@ -545,7 +562,7 @@ _SETTINGS = _schema(
                 vol.Optional("max_grid_auto"): bool,
                 vol.Optional("load_balancer"): bool,
                 vol.Optional("balancer_entity"): str,
-                vol.Optional("circuits"): vol.All([_CIRCUIT], vol.Length(max=12)),
+                vol.Optional("circuits"): vol.All([_CIRCUIT], vol.Length(max=12), _apparaat_in_een_groep),
             }
         ),
         vol.Optional("contract"): _schema(
