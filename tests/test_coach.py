@@ -11791,6 +11791,81 @@ try:
 finally:
     coachmod.GrowattSchema.wijkt_af = oud_wijkt203
 
+print("=== 204. Een paal die even niet bereikbaar is: een waarschuwing, geen fout, en na tien minuten een melding (v0.163.3) ===")
+# In een klantwoning herstartte een Alfen zich op 26-10-2026 twee keer; zes minuten lang gaf elke ronde
+# "kon ... niet beoordelen" met de hele traceback, een ConnectionException van Modbus.
+import logging as logging204
+
+
+class Vang204(logging204.Handler):
+    def __init__(self):
+        super().__init__()
+        self.regels = []
+
+    def emit(self, record):
+        self.regels.append((record.levelname, record.getMessage(), record.exc_info is not None))
+
+
+def weg204(data):
+    raise OSError("Failed to connect[ModbusTcpClient 0.0.0.0:502]")
+
+
+inst204 = instellingen(devices=[ALFEN])
+hass204, store204, coach204 = bouw(huis90(), inst204)
+T204 = dt.datetime(2026, 8, 18, 18, 56)
+vang204 = Vang204()
+logging204.getLogger(coachmod.__name__).addHandler(vang204)
+logging204.disable(logging204.NOTSET)
+try:
+    asyncio.run(hass204.afmaken()); asyncio.run(coach204._round(T204))
+    voor204 = dict(coach204._toezeggingen.get("dev-alfen") or {})
+    hass204.services.antwoorden[("number", "set_value")] = weg204
+    for m in range(1, 13):
+        asyncio.run(hass204.afmaken()); asyncio.run(coach204._round(T204 + dt.timedelta(minutes=m)))
+    tijdens204 = [g["message"] for g in asyncio.run(coachmod.async_get_meldingen(hass204).async_list())]
+    del hass204.services.antwoorden[("number", "set_value")]
+    asyncio.run(hass204.afmaken()); asyncio.run(coach204._round(T204 + dt.timedelta(minutes=13)))
+finally:
+    logging204.disable(logging204.WARNING)
+    logging204.getLogger(coachmod.__name__).removeHandler(vang204)
+na204 = [g["message"] for g in asyncio.run(coachmod.async_get_meldingen(hass204).async_list())]
+regels204 = [r for r in vang204.regels if "bereikbaar" in r[1] or "beoordelen" in r[1]]
+for r in regels204:
+    print(f"  {r[0]}: {r[1][:110]}")
+controle("geen fout met traceback", not any(r[2] or "beoordelen" in r[1] for r in vang204.regels), f"{vang204.regels}")
+controle("één waarschuwing bij het begin en één na tien minuten",
+         [r[0] for r in regels204 if "niet bereikbaar" in r[1]] == ["WARNING", "WARNING"], f"{regels204}")
+controle("na tien minuten één melding voor de bewoner",
+         sum("niet bereikbaar" in m for m in tijdens204) == 1, f"{tijdens204}")
+controle("terug: in de geschiedenis, en zonder waarschuwing in het log",
+         any("doet het weer" in m for m in na204) and not any("weer bereikbaar" in r[1] and r[0] == "WARNING" for r in regels204),
+         f"{na204}")
+controle("wat hij toezegde blijft staan zolang hij weg is",
+         coach204._toezeggingen.get("dev-alfen", {}).get("sleutels") == voor204.get("sleutels"), f"{coach204._toezeggingen}")
+
+# Een Easee: dezelfde fout van de cloud wordt `PaalOnbereikbaar`, een dienst die nog niet bestaat niet.
+hass204e, store204e, coach204e = bouw(huis(), instellingen())
+hass204e.services.antwoorden[("easee", "set_charger_dynamic_limit")] = weg204
+try:
+    asyncio.run(ronde(coach204e, instellingen()))
+    soort204 = None
+except Exception as fout:  # noqa: BLE001
+    soort204 = type(fout).__name__
+controle("bij een Easee ook", soort204 == "PaalOnbereikbaar", f"{soort204}")
+
+
+def nog_niet204(data):
+    raise coachmod.ServiceNotFound("easee", "set_charger_dynamic_limit")
+
+
+hass204e.services.antwoorden[("easee", "set_charger_dynamic_limit")] = nog_niet204
+try:
+    asyncio.run(ronde(coach204e, instellingen(), dt.datetime(2026, 8, 18, 14, 50)))
+    soort204 = None
+except Exception as fout:  # noqa: BLE001
+    soort204 = type(fout).__name__
+controle("een dienst die nog niet bestaat blijft ServiceNotFound", soort204 == "ServiceNotFound", f"{soort204}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
