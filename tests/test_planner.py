@@ -3741,6 +3741,31 @@ klaar79 = decide(avond79, prijzen79, Grid(), auto79, loopt79, venster79, proef="
 controle("zonder 'klaar' houdt hij een sessie die net begon vast", vast79.charge and vast79.rule.endswith("+hold"), vast79.rule)
 controle("na een geslaagde proef stopt hij meteen", not klaar79.charge and klaar79.rule == "wait-for-price", klaar79.rule)
 
+print("=== een groep zonder meter, gemeten via de apparaten die erop hangen (v0.165.0) ===")
+# Een klantwoning op 26-10-2026: wasmachine en droger samen op een groep, elk op een eigen plug.
+APP = [{"id": "was", "entity": "sensor.was_w"}, {"id": "droog", "entity": "sensor.droog_w"},
+       {"id": "leeg", "entity": ""}]
+W = {"sensor.was_w": 2260.0, "sensor.droog_w": 912.0}
+een = {"id": "g1", "phases": 1, "fuse_amps": 16, "devices": [{"device": "was"}, {"device": "droog", "phase": "l3"}]}
+som = planner.groep_apparaten_amps(een, APP, W.get)
+controle("op één fase alles op L1: (2260 + 912) / 230", som is not None and set(som) == {"l1"}
+         and abs(som["l1"] - 3172 / 230) < 1e-9, f"{som}")
+drie = {"id": "g3", "phases": 3, "devices": [{"device": "was", "phase": "l2"}, {"device": "droog", "phase": "l3"}]}
+som3 = planner.groep_apparaten_amps(drie, APP, W.get)
+controle("op drie fasen per fase", som3 == {"l1": 0.0, "l2": 2260 / 230, "l3": 912 / 230}, f"{som3}")
+controle("zegt een plug niets, dan geen som", planner.groep_apparaten_amps(een, APP, {"sensor.was_w": 2260.0}.get) is None)
+controle("met een eigen meter wint de meter",
+         planner.groep_apparaten_amps({**een, "sensors": {"l1": {"current": "sensor.groep_a"}}}, APP, W.get) is None)
+controle("zonder gekozen apparaten geen som", planner.groep_apparaten_amps({"id": "g", "phases": 1}, APP, W.get) is None)
+controle("teruglevering telt niet als belasting",
+         planner.groep_apparaten_amps(een, APP, {"sensor.was_w": -500.0, "sensor.droog_w": 0.0}.get) == {"l1": 0.0})
+# De paal op zo'n groep: de zekering min de marge min wat de apparaten trekken.
+gemeten60 = Grid(surplus_w=0.0, phase_amps=[6.0, 4.0, 4.0], fuse_amps=25.0, charger_amps=0.0,
+                 circuits=[Circuit(name="Carport", phase_amps=[], fuse_amps=16.0, known_amps=5.0)])
+controle("een groep zonder meter met 5 A aan apparaten: 16 - 2 - 5 = 9 A",
+         ceiling_amps(gemeten60, sven_auto(), paal(laadt=False)) == 9,
+         f"{ceiling_amps(gemeten60, sven_auto(), paal(laadt=False))}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

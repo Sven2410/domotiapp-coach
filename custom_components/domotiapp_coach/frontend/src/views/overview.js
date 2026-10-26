@@ -482,6 +482,7 @@ class DacViewOverview extends DacElement {
       text-transform: uppercase;
       color: var(--dac-ink-3);
     }
+    .phase-via { margin: -2px 0 2px; font-size: 12px; color: var(--dac-ink-3); }
     .phase-row {
       display: grid;
       grid-template-columns: 34px minmax(0, 1fr) auto;
@@ -2634,8 +2635,16 @@ class DacViewOverview extends DacElement {
       })
       .join("");
 
+    // Een groep zonder meter, gemeten via de apparaten die erop hangen (v0.165.0): zeggen wat de coach
+    // niet ziet.
+    const via = (g) =>
+      g.via?.length
+        ? `<div class="phase-via">${t("Gemeten via {apparaten}; wat er verder op deze groep hangt ziet de coach niet.", {
+            apparaten: g.via.length === 1 ? g.via[0] : t("{voor} en {laatste}", { voor: g.via.slice(0, -1).join(", "), laatste: g.via.at(-1) }),
+          }).replace(/&/g, "&amp;").replace(/</g, "&lt;")}</div>`
+        : "";
     const groepen = (r.circuits ?? [])
-      .map((g) => `<div class="phase-group">${g.fuse ? t("{naam}, tegen {amps} A", { naam: g.name, amps: g.fuse }) : g.name}</div>${rijen(g.phases, g.fuse)}`)
+      .map((g) => `<div class="phase-group">${g.fuse ? t("{naam}, tegen {amps} A", { naam: g.name, amps: g.fuse }) : g.name}</div>${via(g)}${rijen(g.phases, g.fuse)}`)
       .join("");
     this.$("#phase-rows").innerHTML = rijen(r.phases, fuse) + groepen;
   }

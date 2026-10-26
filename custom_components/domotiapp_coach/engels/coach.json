@@ -231,5 +231,8 @@
   "{naam} neemt het laadschema van de coach niet aan; hij laadt niet van het net zoals gepland.": "{naam} does not accept the coach's charging schedule; it will not charge from the grid as planned.",
   "{naam} neemt het nieuwe laadschema van de coach niet aan; het vorige blijft staan. De coach probeert het opnieuw.": "{naam} does not accept the coach's new charging schedule; the previous one stays in place. The coach will try again.",
   "{naam} neemt vasthouden niet aan; de coach laat dat voor deze goedkope uren weg.": "{naam} does not accept holding; the coach leaves it out for these cheap hours.",
-  "{naam} is al {minuten} minuten niet bereikbaar. De coach probeert het elke minuut opnieuw.": "{naam} has been unreachable for {minuten} minutes. The coach tries again every minute."
+  "{naam} is al {minuten} minuten niet bereikbaar. De coach probeert het elke minuut opnieuw.": "{naam} has been unreachable for {minuten} minutes. The coach tries again every minute.",
+  "De groep {naam} trekt {amps} A, bijna de {zekering} A van de zekering. Gemeten via {apparaten}.": "The circuit {naam} draws {amps} A, close to the {zekering} A of its fuse. Measured through {apparaten}.",
+  "{voor} en {laatste}": "{voor} and {laatste}",
+  "zonder naam": "without a name"
 }

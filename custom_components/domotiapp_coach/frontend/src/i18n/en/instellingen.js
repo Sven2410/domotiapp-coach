@@ -396,4 +396,9 @@ export const INSTELLINGEN = {
   "Slimme meter": "Smart meter",
   // Elk onderwerp een blok, en een vinkje bij elke functie (21-10-2026).
   "Zekering": "Fuse",
+  // v0.165.0: een groep gemeten via de apparaten die erop hangen.
+  "Fase": "Phase",
+  "Apparaat toevoegen…": "Add a device…",
+  "Gemeten via apparaten": "Measured through devices",
+  "Kies de apparaten met een vermogenssensor die op deze groep hangen. Hun som is wat de coach van de groep weet; wat er verder op hangt ziet hij niet. Zit de groep bijna aan zijn zekering, dan krijg je een melding.": "Choose the devices with a power sensor on this circuit. Their total is what the coach knows about the circuit; anything else on it he does not see. When the circuit is close to its fuse, you get a notification.",
 };

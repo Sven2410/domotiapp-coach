@@ -27,6 +27,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
+from typing import Callable
 
 try:
     from .taal import getal, t, tn
@@ -394,6 +395,9 @@ class Circuit:
     soort: str = "groep"
     # Per fase de hoogste meting van het venster; zie `Grid.phase_peak_amps`.
     phase_peak_amps: list[float] = field(default_factory=list)
+    # Zonder meter: wat de apparaten die de bewoner bij de groep koos samen trekken, op de
+    # zwaarste fase (v0.165.0). Een deel van het huis op die groep, de rest ziet de coach niet.
+    known_amps: float = 0.0
 
 
 @dataclass
@@ -822,7 +826,7 @@ def ruimten(
             household = max(fasen) - aandeel
             ruimte = groep.fuse_amps - max(0.0, household) - groep.reserved_amps
         else:
-            ruimte = groep.fuse_amps - groep.reserved_amps
+            ruimte = groep.fuse_amps - groep.known_amps - groep.reserved_amps
         if marge:
             ruimte -= fuse_margin_van(groep.fuse_amps, groep.margin_amps)
         uit.append((groep.name, ruimte))
@@ -879,6 +883,37 @@ def _soort(grid: Grid | None, naam: str) -> str:
         if groep.name == naam:
             return groep.soort or "groep"
     return "groep"
+
+
+def groep_apparaten_amps(
+    groep: dict, apparaten: list[dict], watts: Callable[[str], float | None]
+) -> dict[str, float] | None:
+    """Wat de apparaten die bij een groep zonder meter gekozen zijn per fase trekken (v0.165.0).
+
+    De bewoner van een klantwoning op 26-10-2026: wasmachine en droger samen op één groep, elk op
+    een eigen plug, en een eigen meter past niet meer in de kast. Sven: "Onder Groepen laat je het
+    vinkje van aparte kWh-meter dan uit, maar voeg je per groep een of meerdere apparaten toe."
+
+    None als de groep een meter heeft (die wint), als er niets gekozen is, of als één van de sensoren
+    niets zegt: een som zonder een van de apparaten is geen som. `watts` leest een vermogenssensor in
+    watt. Een groep op één fase telt alles op L1.
+    """
+    if any(((groep.get("sensors") or {}).get(k) or {}).get("current") for k in ("l1", "l2", "l3")):
+        return None
+    rijen = [r for r in groep.get("devices") or [] if isinstance(r, dict) and r.get("device")]
+    if not rijen:
+        return None
+    op_id = {a.get("id"): a for a in apparaten if isinstance(a, dict)}
+    een = int(groep.get("phases") or 3) == 1
+    uit = {k: 0.0 for k in (("l1",) if een else ("l1", "l2", "l3"))}
+    for rij in rijen:
+        entity = (op_id.get(rij["device"]) or {}).get("entity") or ""
+        w = watts(entity) if entity else None
+        if w is None:
+            return None
+        key = "l1" if een else (rij.get("phase") if rij.get("phase") in uit else "l1")
+        uit[key] += max(0.0, w) / VOLTS
+    return uit
 
 
 def zekering_van(naam: str | None, grid: Grid | None = None) -> str:
