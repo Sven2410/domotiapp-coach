@@ -3775,6 +3775,54 @@ controle("een groep zonder meter met 5 A aan apparaten: 16 - 2 - 5 = 9 A",
          ceiling_amps(gemeten60, sven_auto(), paal(laadt=False)) == 9,
          f"{ceiling_amps(gemeten60, sven_auto(), paal(laadt=False))}")
 
+print("=== een fase per apparaat, gekozen en niet aangenomen (v0.169.0) ===")
+# Een klantwoning op 27-10-2026: wasmachine en droger stonden bij hun groep stil op L1, en de groep van
+# de batterij heette L1 terwijl de batterij op L3 zat. De eigenaar: "hoe weet de coach dat dit fase 1 is?"
+fase = planner.apparaat_fase
+controle("zonder keuze onbekend, niet L1", fase({"id": "x"}) == "")
+controle("de keuze bij het apparaat", fase({"phase": "l2"}) == "l2" and fase({"phase": "drie"}) == "drie")
+controle("een batterij van voor v0.169.0 houdt haar fase", fase({"battery": {"phase": "l3"}}) == "l3")
+controle("de keuze bij het apparaat wint van de oude batterijfase",
+         fase({"phase": "l1", "battery": {"phase": "l3"}}) == "l1")
+controle("een oude fase bij een groep van drie fasen telt nog (daar was een keuzelijst)",
+         fase({"id": "x"}, {"device": "x", "phase": "l2"}, {"phases": 3}) == "l2")
+controle("een oude L1 bij een groep van één fase telt niet (die was nooit te kiezen)",
+         fase({"id": "x"}, {"device": "x", "phase": "l1"}, {"phases": 1}) == "")
+# Een groep van drie fasen met apparaten op L1, op drie fasen en een onbekende.
+APP3 = [{"id": "a", "entity": "sensor.a", "phase": "l1"}, {"id": "b", "entity": "sensor.b", "phase": "drie"},
+        {"id": "c", "entity": "sensor.c"}]
+W3 = {"sensor.a": 2300.0, "sensor.b": 2070.0, "sensor.c": 460.0}
+g3 = {"id": "g", "phases": 3, "devices": [{"device": "a"}, {"device": "b"}, {"device": "c"}]}
+som4 = planner.groep_apparaten_amps(g3, APP3, W3.get)
+controle("drie fasen: L1 10 + 3, L2 en L3 3, de onbekende 2 A op de zwaarste (L1)",
+         som4 is not None and abs(som4["l1"] - 15.0) < 1e-9 and abs(som4["l2"] - 3.0) < 1e-9
+         and abs(som4["l3"] - 3.0) < 1e-9, f"{som4}")
+APP4 = [{"id": "p", "entity": "sensor.p", "phase": "l2"}, {"id": "q", "entity": "sensor.q", "phase": "l2"}]
+som5 = planner.groep_apparaten_amps({"id": "g", "phases": 3, "devices": [{"device": "p"}, {"device": "q"}]},
+                                    APP4, {"sensor.p": 1150.0, "sensor.q": 1150.0}.get)
+controle("twee plugs op L2 tellen samen op L2", som5 == {"l1": 0.0, "l2": 10.0, "l3": 0.0}, f"{som5}")
+# De fase van een groep van één fase.
+kast = {"id": "kast", "kind": "kast", "phases": 3}
+anker = {"id": "anker", "kind": "groep", "phases": 1, "parent": "kast"}
+was = {"id": "was", "kind": "groep", "phases": 1, "devices": [{"device": "w", "phase": "l1"}, {"device": "d", "phase": "l1"}]}
+GROEPEN = [kast, anker, was]
+batterij = {"id": "bat", "name": "Batterij", "circuit": "anker", "battery": {"phase": "l3"}}
+controle("een groep zonder keuze en zonder apparaten: fase onbekend",
+         planner.groep_fase(was, [{"id": "w", "name": "Wasmachine"}, {"id": "d", "name": "Droger"}], GROEPEN) == ("", []))
+controle("een batterij op L3 in de groep: de groep zit op L3", planner.groep_fase(anker, [batterij], GROEPEN) == ("l3", []))
+controle("hangt de batterij aan de kast, dan zegt ze niets over de groep",
+         planner.groep_fase(anker, [{**batterij, "circuit": "kast"}], GROEPEN) == ("", []))
+onder = {"id": "sub", "kind": "groep", "phases": 1, "parent": "anker"}
+controle("een batterij in een groep onder de groep telt ook (de keten loopt erdoor)",
+         planner.groep_fase(anker, [{**batterij, "circuit": "sub"}], [*GROEPEN, onder]) == ("l3", []))
+controle("Op fase wint, en wie het tegenspreekt staat erbij",
+         planner.groep_fase({**anker, "phase": "l1"}, [batterij], GROEPEN) == ("l1", ["Batterij"]))
+twee = [batterij, {"id": "p", "name": "Plug", "circuit": "anker", "phase": "l2"}]
+controle("twee apparaten met elk een andere fase: onbekend, en allebei genoemd",
+         planner.groep_fase(anker, twee, GROEPEN) == ("", ["Batterij", "Plug"]), f"{planner.groep_fase(anker, twee, GROEPEN)}")
+controle("een apparaat op drie fasen zegt niets over de fase van de groep",
+         planner.groep_fase(anker, [{"id": "p", "circuit": "anker", "phase": "drie"}], GROEPEN) == ("", []))
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

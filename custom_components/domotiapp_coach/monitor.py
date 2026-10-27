@@ -30,7 +30,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import EVENT_NOTIFICATION, EVENT_SETTINGS_UPDATED, GRID_MODE_SIGNED, LEVEL_STEER
 from .ontvangers import ontvangers
-from .planner import groep_apparaten_amps
+from .planner import groep_apparaten_amps, groep_fase
 from .storage import async_get_meldingen, async_get_store
 from .taal import getal, t
 from .units import to_watts
@@ -322,33 +322,41 @@ class LoadMonitor:
         # zwaarst belaste wint, als aandeel van haar eigen zekering; een garage
         # van 16 A op 14 A is zwaarder belast dan een aansluiting van 25 A op 15.
         # Een groep zonder meter met gekozen apparaten telt met hun som (v0.165.0).
-        kandidaten: list[tuple[float, str, dict, dict | None]] = []
+        # Een groep van één fase heeft zijn meting onder "l1"; in de melding heet die naar zijn eigen
+        # fase, of naar niets als die onbekend is (v0.169.0). Tot dan stond er altijd L1.
+        kandidaten: list[tuple[float, str, dict, dict | None, str | None]] = []
         fuse = float(installation.get("fuse_amps") or 0)
         if sources.get("phases_enabled") and fuse > 0:
-            kandidaten.append((fuse, "", sources.get("phases", {}) or {}, None))
-        for groep in installation.get("circuits") or []:
+            kandidaten.append((fuse, "", sources.get("phases", {}) or {}, None, None))
+        circuits = installation.get("circuits") or []
+        apparaten = self._settings.get("devices") or []
+        for groep in circuits:
             if isinstance(groep, dict) and float(groep.get("fuse_amps") or 0) > 0:
                 kandidaten.append((
                     float(groep["fuse_amps"]),
                     str(groep.get("name") or groep.get("id") or ""),
                     groep.get("sensors") or {},
                     groep_apparaten_amps(
-                        groep, self._settings.get("devices") or [], lambda e: _watts(states.get(e)),
+                        groep, apparaten, lambda e: _watts(states.get(e)),
                         lambda e: _number(states.get(e)),
                     ),
+                    groep_fase(groep, apparaten, circuits)[0] if int(groep.get("phases") or 3) == 1 else None,
                 ))
 
         zwaarste: tuple[float, float, str] | None = None   # (aandeel, amps, label)
         zwaarste_fuse = 0.0
-        for zekering, naam, sensoren, som in kandidaten:
-            for phase in ("l1", "l2", "l3"):
+        for zekering, naam, sensoren, som, een in kandidaten:
+            for phase in ("l1",) if een is not None else ("l1", "l2", "l3"):
                 config = sensoren.get(phase, {}) or {}
                 amps = som.get(phase) if som is not None else self._phase_amps(config)
                 if amps is None:
                     continue
                 aandeel = amps / zekering
                 if zwaarste is None or aandeel > zwaarste[0]:
-                    label = phase.upper() + (f" ({naam})" if naam else "")
+                    if een == "":
+                        label = t("onbekend ({naam})", naam=naam)
+                    else:
+                        label = (een or phase).upper() + (f" ({naam})" if naam else "")
                     zwaarste = (aandeel, amps, label)
                     zwaarste_fuse = zekering
 

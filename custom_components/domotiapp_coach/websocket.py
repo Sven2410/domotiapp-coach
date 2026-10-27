@@ -189,8 +189,9 @@ _CIRCUIT = _schema(
         vol.Optional("fuse_amps", default=16): vol.All(vol.Coerce(float), vol.Range(1, 1000)),
         vol.Optional("phases", default=3): vol.In([1, 3]),
         # Op welke fase een groep van één fase zit (v0.168.0), voor het scherm. De sensoren van zo'n
-        # groep blijven onder "l1" staan.
-        vol.Optional("phase", default="l1"): vol.In(["l1", "l2", "l3"]),
+        # groep blijven onder "l1" staan. Sinds v0.169.0 is leeg "weet ik niet": dan volgt hij de
+        # apparaten die erop hangen, en zonder die "fase onbekend" (`groep_fase` in planner.py).
+        vol.Optional("phase", default=""): vol.In(["", "l1", "l2", "l3"]),
         vol.Optional("parent", default=""): str,
         # Een onderverdeelkast of een groep, en of hij een eigen kWh-meter heeft
         # (v0.101.5). Alleen voor het scherm: de coach rekent met elke zekering
@@ -200,10 +201,11 @@ _CIRCUIT = _schema(
         vol.Optional("sensors", default=dict): _schema(
             {vol.Optional(phase): _PHASE for phase in ("l1", "l2", "l3")}
         ),
-        # Zonder eigen meter: de apparaten met een vermogenssensor die op deze groep hangen, en
-        # op welke fase (v0.165.0). Hun som is wat de coach van de groep weet.
+        # Zonder eigen meter: de apparaten met een vermogenssensor die op deze groep hangen (v0.165.0).
+        # Hun som is wat de coach van de groep weet. De fase staat sinds v0.169.0 bij het apparaat
+        # (`phase`); die hier is van daarvoor en telt alleen nog als het apparaat er zelf geen heeft.
         vol.Optional("devices", default=list): vol.All(
-            [_schema({vol.Required("device"): str, vol.Optional("phase", default="l1"): vol.In(["l1", "l2", "l3"])})],
+            [_schema({vol.Required("device"): str, vol.Optional("phase", default=""): vol.In(["", "l1", "l2", "l3"])})],
             vol.Length(max=12),
         ),
     }
@@ -378,6 +380,9 @@ _DEVICE = _schema(
         # De groep waar dit apparaat aan hangt (`installation.circuits`), of ""
         # voor de hoofdaansluiting.
         vol.Optional("circuit", default=""): str,
+        # Op welke fase het apparaat hangt (v0.169.0): "l1", "l2", "l3", "drie" voor drie fasen, of ""
+        # voor "weet ik niet". De bewoner kiest het zelf; de coach vult niets in. Zie `apparaat_fase`.
+        vol.Optional("phase", default=""): vol.In(["", "l1", "l2", "l3", "drie"]),
         # Hoe een laadpaal laadt zolang er geen planning aanstaat (v0.87.0):
         # "zon", "continu" of "goedkoopst". Zonder waarde "goedkoopst", want zo
         # deed hij het tot v0.87.0 en een klant hoort daar niets van te merken;

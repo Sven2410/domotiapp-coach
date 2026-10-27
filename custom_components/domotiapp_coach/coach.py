@@ -144,7 +144,9 @@ from .planner import (
     Car,
     Charger,
     Circuit,
+    apparaat_fase,
     groep_apparaten_amps,
+    groepen_keten,
     DayWindow,
     Decision,
     Forecast,
@@ -6009,7 +6011,7 @@ class ChargerCoach:
                 rang = self._plan_voorrang(settings)
                 if voor is None or rang.get(device_id, 0) <= rang.get(voor.get("id", ""), 0):
                     continue
-            fase = str((device.get("battery") or {}).get("phase") or "")
+            fase = apparaat_fase(device)
             fasen = [fase] if fase in ("l1", "l2", "l3") else ["l1", "l2", "l3"]
             amps = abs(watt) / 230.0 / len(fasen)
             for sleutel in self._groep_sleutels(settings, device):
@@ -6238,7 +6240,7 @@ class ChargerCoach:
         """
         sources = settings.get("sources") or {}
         installation = settings.get("installation") or {}
-        fase = (device.get("battery") or {}).get("phase") or ""
+        fase = apparaat_fase(device)
 
         def stromen_uit(sensoren: dict[str, Any], alleen_fase: bool) -> list[float]:
             uit = []
@@ -6358,7 +6360,7 @@ class ChargerCoach:
         installation = settings.get("installation") or {}
         rang = self._plan_voorrang(settings)
         eigen = rang.get(device.get("id", ""), len(rang))
-        fase = str((device.get("battery") or {}).get("phase") or "")
+        fase = apparaat_fase(device)
         fasen = 1 if fase in ("l1", "l2", "l3") else 3
 
         def bewaakt(sensoren: dict[str, Any], alleen: str | None) -> bool:
@@ -6429,26 +6431,7 @@ class ChargerCoach:
         groep erboven (`parent`). De hoofdaansluiting staat er niet in: die is
         er altijd. Een kring of een groep die niet bestaat eindigt de keten.
         """
-        groepen = {
-            g.get("id"): g
-            for g in ((settings.get("installation") or {}).get("circuits") or [])
-            if isinstance(g, dict) and g.get("id")
-        }
-        keten: list[dict[str, Any]] = []
-        volgende = device.get("circuit") or ""
-        # Staat het apparaat bij een groep onder Groepen (v0.165.0), dan hangt het daaraan: één plek
-        # (v0.168.0). Tot dan kon "Hangt aan" iets anders zeggen dan de groep.
-        for groep in groepen.values():
-            if any(isinstance(r, dict) and r.get("device") == device.get("id") for r in groep.get("devices") or []):
-                volgende = groep.get("id")
-                break
-        while volgende and volgende in groepen and len(keten) < 12:
-            groep = groepen[volgende]
-            if any(g is groep for g in keten):
-                break
-            keten.append(groep)
-            volgende = groep.get("parent") or ""
-        return keten
+        return groepen_keten((settings.get("installation") or {}).get("circuits") or [], device)
 
     def _groep_sleutels(self, settings: dict[str, Any], device: dict[str, Any]) -> list[str]:
         """Onder welke zekeringen een toezegging aan dit apparaat meetelt."""

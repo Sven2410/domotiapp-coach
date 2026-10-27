@@ -45,6 +45,8 @@ import {
   KOELWAREN,
   koelUitleg,
   alleenUitlezen,
+  apparaatFase,
+  faseKeuzes,
   growattVanzelf,
   MEET_VELDEN,
   meetVanzelf,
@@ -890,6 +892,27 @@ class DacViewDevices extends DacEditorElement {
   }
 
   /** Whether the coach may act on this device once it can. */
+  /**
+   * "Hangt op fase" (v0.169.0), bij elk apparaat behalve een laadpaal: die laadt op de fasen van de
+   * auto. De eigenaar op 27-10-2026: "Zou bij álle apparaten er dus voor kiezen om handmatig de
+   * betreffende fase in te vullen." Standaard Weet ik niet; de coach vult niets in. Tot dan had alleen
+   * de batterij dit veld, en kreeg een apparaat bij een groep stil L1.
+   */
+  faseHtml_(device, index) {
+    if (device.type === "laadpaal") return "";
+    const fase = apparaatFase(device);
+    return `
+      <div class="row">
+        <label for="phase-${index}">${t("Hangt op fase")}</label>
+        <select id="phase-${index}" data-field="phase" data-index="${index}">
+          ${faseKeuzes().map(([id, label]) => `<option value="${id}"${fase === id ? " selected" : ""}>${label}</option>`).join("")}
+        </select>
+        <span class="sub">${isBattery(device)
+          ? t("Voor de zekeringbewaking: laadt de auto tegelijk, dan blijft de batterij onder wat die fase nog overlaat. Weet je het niet, dan telt de zwaarste fase.")
+          : t("Voor de zekeringbewaking, en op de kaart Belastingen in je huis. Weet je het niet, dan telt de zwaarste fase.")}</span>
+      </div>`;
+  }
+
   controlHtml_(device, index) {
     // Nothing to decide yet on an appliance whose brand is still unknown.
     if (brandsFor(device.type).length && !brandMeta(device)) return "";
@@ -902,7 +925,7 @@ class DacViewDevices extends DacEditorElement {
       return `
       <div class="block">
         <div class="block-title">${t("Sturen")}</div>
-        <p class="sub" data-read-only="${index}">${wat}</p>
+        <p class="sub" data-read-only="${index}">${wat}</p>${this.faseHtml_(device, index)}
       </div>`;
     }
 
@@ -982,7 +1005,7 @@ class DacViewDevices extends DacEditorElement {
       : "";
     return `
       <div class="block">
-      <div class="block-title">${t("Sturen")}</div>${groepHtml}${faseHtml}
+      <div class="block-title">${t("Sturen")}</div>${groepHtml}${this.faseHtml_(device, index)}${faseHtml}
       <label class="check" for="control-${index}">
         <input type="checkbox" id="control-${index}" data-field="controllable" data-index="${index}"
                ${device.controllable ? "checked" : ""}>
@@ -1225,15 +1248,6 @@ class DacViewDevices extends DacEditorElement {
             <label>${t("Hoogste ontlaadvermogen (W)")}</label>
             ${getal("max_discharge_w", 'min="0" step="50"', t("bijvoorbeeld {n}", { n: 2500 }))}
           </div>
-        </div>
-        <div class="row">
-          <label for="bat-phase-${index}">${t("Hangt op fase")}</label>
-          <select id="bat-phase-${index}" data-bat-field="phase" data-index="${index}">
-            ${[["", t("Weet ik niet")], ["l1", "L1"], ["l2", "L2"], ["l3", "L3"]]
-              .map(([id, label]) => `<option value="${id}"${b.phase === id ? " selected" : ""}>${label}</option>`)
-              .join("")}
-          </select>
-          <span class="sub">${t("Voor de zekeringbewaking: laadt de auto tegelijk, dan blijft de batterij onder wat die fase nog overlaat. Weet je het niet, dan telt de zwaarste fase.")}</span>
         </div>
         <p class="sub">${t("Wat de bewoner wil (de reserve, handelen, een keer per week vol, de vakantiestand, de auto helpen en de ventilator) staat sinds v0.114.0 op de kaart van de batterij, onder Instellen.")}</p>
       </div>
@@ -1782,6 +1796,11 @@ class DacViewDevices extends DacEditorElement {
           device.phase_switching = el.checked;
         } else {
           device[field] = el.value;
+        }
+        // De fase van een batterij stond tot v0.169.0 in `battery.phase`; die volgt mee, anders telt
+        // een oude L3 nog na "Weet ik niet".
+        if (field === "phase" && device.battery) {
+          device.battery = { ...device.battery, phase: ["l1", "l2", "l3"].includes(el.value) ? el.value : "" };
         }
         // Een batterij krijgt bij het kiezen van zijn merk de woorden mee die
         // in zijn bedrijfsmodus horen. Wat de bewoner zelf al invulde blijft.

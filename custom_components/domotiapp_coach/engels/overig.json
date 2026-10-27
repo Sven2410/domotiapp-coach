@@ -91,6 +91,7 @@
   "De opbouw in de coach wijkt {bedrag} per kWh af van wat je leverancier zegt. Kijk na hoe de coach hem opbouwt.": "The breakdown in the coach differs by {bedrag} per kWh from what your supplier says. Check how the coach builds it up.",
 
   "Fase {fase} trekt {a} A": "Phase {fase} draws {a} A",
+  "onbekend ({naam})": "unknown ({naam})",
   ", waarvan {a} A van de laadpaal": ", of which {a} A is the charger",
   "Je trekt {kw} kW uit het net": "You are drawing {kw} kW from the grid",
   ", waarvan {kw} kW van de laadpaal": ", of which {kw} kW is the charger",

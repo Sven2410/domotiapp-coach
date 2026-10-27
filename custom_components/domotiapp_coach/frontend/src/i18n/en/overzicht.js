@@ -318,4 +318,6 @@ export const OVERZICHT = {
   // v0.165.0: een groep gemeten via de apparaten die erop hangen.
   "Gemeten via {apparaten}; wat er verder op deze groep hangt ziet de coach niet.": "Measured through {apparaten}; the coach does not see anything else on this circuit.",
   "{voor} en {laatste}": "{voor} and {laatste}",
+  "Fase onbekend": "Phase unknown",
+  "onbekend ({naam})": "unknown ({naam})",
 };
