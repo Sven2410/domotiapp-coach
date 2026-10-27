@@ -885,6 +885,81 @@ def _soort(grid: Grid | None, naam: str) -> str:
     return "groep"
 
 
+FASEN = ("l1", "l2", "l3")
+
+
+def apparaat_fase(apparaat: dict | None, rij: dict | None = None, groep: dict | None = None) -> str:
+    """Op welke fase een apparaat hangt (v0.169.0): "l1", "l2", "l3", "drie" of "" (weet ik niet).
+
+    De eigenaar op 27-10-2026: "hoe weet de coach dat dit fase 1 is? Die heb ik bij mijn apparaten
+    namelijk nooit ingevuld." Tot dan vulde de coach L1 in. Nu de keuze van de bewoner bij het
+    apparaat (`phase`), en anders wat er van daarvoor stond: de fase van een batterij
+    (`battery.phase`), of die bij een groep van drie fasen (`rij`), waar een keuzelijst voor was. Die
+    bij een groep van één fase was nooit te kiezen en telt niet. Dezelfde regel als `apparaatFase` in
+    devices.js.
+    """
+    apparaat = apparaat or {}
+    eigen = apparaat.get("phase")
+    if eigen in (*FASEN, "drie"):
+        return str(eigen)
+    batterij = (apparaat.get("battery") or {}).get("phase")
+    if batterij in FASEN:
+        return str(batterij)
+    if rij and groep is not None and int(groep.get("phases") or 3) != 1 and rij.get("phase") in FASEN:
+        return str(rij["phase"])
+    return ""
+
+
+def groepen_keten(circuits: list, apparaat: dict) -> list[dict]:
+    """De groepen waar dit apparaat aan hangt, van onder naar boven.
+
+    Een apparaat wijst naar één groep (`circuit`), en een groep naar de groep erboven (`parent`). De
+    hoofdaansluiting staat er niet in: die is er altijd. Een kring of een groep die niet bestaat
+    eindigt de keten. Staat het apparaat bij een groep onder Groepen (v0.165.0), dan hangt het
+    daaraan: één plek (v0.168.0). Tot dan kon "Hangt aan" iets anders zeggen dan de groep.
+    """
+    groepen = {g.get("id"): g for g in circuits or [] if isinstance(g, dict) and g.get("id")}
+    keten: list[dict] = []
+    volgende = apparaat.get("circuit") or ""
+    for groep in groepen.values():
+        if any(isinstance(r, dict) and r.get("device") == apparaat.get("id") for r in groep.get("devices") or []):
+            volgende = groep.get("id")
+            break
+    while volgende and volgende in groepen and len(keten) < 12:
+        groep = groepen[volgende]
+        if any(g is groep for g in keten):
+            break
+        keten.append(groep)
+        volgende = groep.get("parent") or ""
+    return keten
+
+
+def groep_fase(groep: dict, apparaten: list[dict], circuits: list) -> tuple[str, list[str]]:
+    """Op welke fase een groep van één fase zit (v0.169.0), en wie dat tegenspreekt.
+
+    De keuze "Op fase" bij de groep, en anders de fase van de apparaten waarvan de keten door deze
+    groep loopt, als die het met elkaar eens zijn. Anders "": fase onbekend, en dat zegt het paneel
+    ook. De tweede waarde zijn de namen van de apparaten met een andere fase; die horen er niet te
+    zijn. Dezelfde regel als `groepFase` in devices.js.
+    """
+    fasen: dict[str, list[str]] = {}
+    for apparaat in apparaten or []:
+        if not isinstance(apparaat, dict) or not any(g is groep or g.get("id") == groep.get("id")
+                                                     for g in groepen_keten(circuits, apparaat)):
+            continue
+        rij = next((r for r in groep.get("devices") or [] if isinstance(r, dict) and r.get("device") == apparaat.get("id")), None)
+        fase = apparaat_fase(apparaat, rij, groep)
+        if fase in FASEN:
+            fasen.setdefault(fase, []).append(str(apparaat.get("name") or apparaat.get("id") or ""))
+    gekozen = groep.get("phase") if groep.get("phase") in FASEN else ""
+    if not gekozen and len(fasen) == 1:
+        gekozen = next(iter(fasen))
+    anders = [naam for fase, namen in fasen.items() if fase != gekozen for naam in namen] if gekozen else []
+    if not gekozen and len(fasen) > 1:
+        anders = [naam for namen in fasen.values() for naam in namen]
+    return gekozen, anders
+
+
 def groep_apparaten_amps(
     groep: dict, apparaten: list[dict], watts: Callable[[str], float | None],
     getal: Callable[[str], float | None] | None = None,
@@ -897,7 +972,12 @@ def groep_apparaten_amps(
 
     None als de groep een meter heeft (die wint), als er niets gekozen is, of als één van de sensoren
     niets zegt: een som zonder een van de apparaten is geen som. `watts` leest een vermogenssensor in
-    watt. Een groep op één fase telt alles op L1.
+    watt. Een groep op één fase telt alles op L1, de plek van zijn sensoren, welke fase het ook is.
+
+    Op een groep van drie fasen telt een apparaat op zijn eigen fase (`apparaat_fase`, v0.169.0), een
+    apparaat op drie fasen op elke fase (zijn gemeten stroom, of een derde van zijn vermogen), en een
+    apparaat waarvan de fase onbekend is op de zwaarste fase van de rest. Zo doet de batterij het al:
+    "Weet je het niet, dan telt de zwaarste fase."
 
     Sinds v0.168.0 met de stroom en de spanning van een plug als die er zijn (`entities.current`,
     `entities.voltage`, gelezen met `getal`): een gemeten stroom telt zoals hij is, een apparaat zonder
@@ -919,6 +999,7 @@ def groep_apparaten_amps(
         and (v := lees(e)) is not None and v > 0
     ]
     volt = spanningen[0] if spanningen else VOLTS
+    onbekend = 0.0
     for rij in rijen:
         apparaat = op_id.get(rij["device"]) or {}
         entity = apparaat.get("entity") or ""
@@ -927,8 +1008,20 @@ def groep_apparaten_amps(
             return None
         stroom_e = (apparaat.get("entities") or {}).get("current")
         stroom = lees(stroom_e) if stroom_e else None
-        key = "l1" if een else (rij.get("phase") if rij.get("phase") in uit else "l1")
-        uit[key] += abs(stroom) if stroom is not None else max(0.0, w) / volt
+        if een:
+            uit["l1"] += abs(stroom) if stroom is not None else max(0.0, w) / volt
+            continue
+        fase = apparaat_fase(apparaat, rij, groep)
+        if fase == "drie":
+            for key in uit:
+                uit[key] += abs(stroom) if stroom is not None else max(0.0, w) / volt / 3
+        elif fase in uit:
+            uit[fase] += abs(stroom) if stroom is not None else max(0.0, w) / volt
+        else:
+            onbekend += abs(stroom) if stroom is not None else max(0.0, w) / volt
+    if onbekend:
+        zwaarste = max(uit, key=lambda k: uit[k])
+        uit[zwaarste] += onbekend
     return uit
 
 

@@ -205,7 +205,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 |---|---|
 | de laadpaal: proefladen bij het inpluggen en een auto in storing, de zonverwachting per voorspeller (Forecast.Solar telt op het eind van het uur), de zon zonder paneelgegevens (eigen opwek en het weer, zon.py), een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla, de laadbeurt en de actieradius op de kaart | `docs/laadpaal.md` |
 | een Alfen, of iets aan de paalsturing | `docs/alfen.md` |
-| onderverdeelkasten en groepen met een eigen zekering, en de kaart Belastingen in je huis (v0.168.0) | `docs/groepen.md` |
+| onderverdeelkasten en groepen met een eigen zekering, de kaart Belastingen in je huis (v0.168.0), en de fase per apparaat (v0.169.0) | `docs/groepen.md` |
 | de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, hoe de coach prijslijsten leest, de temperatuur met de melding en de ventilator, en Growatt (uitlezen, en sinds v0.150.0 sturen met een laadschema), en een integratie die na een storing niet opkomt (v0.166.0, elke integratie) | `docs/batterij.md` |
 | de vaatwasser: Home Connect, Home Connect Local, een domme vaatwasser, de eindtijd, na de klaar-tijd; en de wasmachine en de droger (Miele, tellen op een energieteller) | `docs/vaatwasser.md` |
 | de boiler | `docs/boiler.md` |
@@ -271,6 +271,9 @@ dan de andere in dezelfde uitgave.
   (`docs/contract.md`). Sinds v0.135.0 ook `kosten_per_kwh` en `schaal_per_jaar` tegenover
   `kostenPerKwh` en `schaalPerJaar`, en salderen per afrekenperiode: `async_afrekening` in coach.py
   levert wat `aandeelOp` en `schaalKosten` in geld.js voor Historie lezen.
+- **De fase van een apparaat en een groep** (v0.169.0): `apparaat_fase`, `groep_fase` en `groepen_keten` in
+  planner.py tegenover `apparaatFase`, `groepFase` en `groepenKeten` in devices.js; test_planner.py en
+  test_rapport.mjs rekenen dezelfde gevallen na (`docs/groepen.md`).
 - **De taal** (v0.139.0): `kiesTaal` in i18n.js (het paneel) en `kies` in taal.py (wat de coach
   schrijft) kiezen dezelfde taal uit `installation.language` en die van Home Assistant. Elke tekst die
   iemand leest gaat door `t()`; het Nederlands is de sleutel en blijft in de bron (`docs/taal.md`).

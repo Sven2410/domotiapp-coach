@@ -16,7 +16,7 @@
  * export (naar het net).
  */
 
-import { brandFields, canAlwaysOn, carsFor, programOf, valueLabel } from "./devices.js";
+import { apparaatFase, brandFields, canAlwaysOn, carsFor, groepFase, programOf, valueLabel } from "./devices.js";
 import { countdown, duration, huisNu, huisTijd, toKwh, toWatts } from "./format.js";
 import { ptPrijsOp } from "./tarifas.js";
 import { locale, nt, t } from "./i18n.js";
@@ -940,8 +940,9 @@ function readPhases(feed, sources) {
  *
  * Dezelfde rijen als `readPhases`, per kast of groep. Sinds v0.168.0 blijft een kast of groep zonder
  * meetwaarde staan, met `measured: false`: de bewoner hoort zijn groep terug te zien, met "niet
- * gemeten" erbij. Een groep van één fase heet naar zijn fase (`phase`), niet altijd L1; de sensoren
- * staan onder "l1". Zie `installation.circuits`.
+ * gemeten" erbij. Een groep van één fase heet naar zijn fase (`groepFase`), niet altijd L1; de
+ * sensoren staan onder "l1". Weet niemand de fase, dan `faseOnbekend` (v0.169.0). Zie
+ * `installation.circuits`.
  *
  * Een groep zonder meter met gekozen apparaten (v0.165.0) telt hun vermogen op, en sinds v0.168.0
  * hun stroom en spanning als die er zijn (`entities.current`, `entities.voltage`): de ampères zijn
@@ -961,12 +962,13 @@ export function readCircuits(feed, installation, devices = []) {
     .map((g) => {
       const een = Number(g.phases) === 1;
       const keys = een ? ["l1"] : PHASES;
-      // Zonder keuze de fase van de batterij die eraan hangt, zoals Installatie hem voorstelt.
-      const fase = g.phase || (devices ?? []).find((d) => d?.circuit === g.id && d.battery?.phase)?.battery.phase || "l1";
-      const label = (key) => (een ? String(fase) : key).toUpperCase();
+      // Zoals Installatie hem toont (v0.169.0): "Op fase", of de fase van de apparaten erop, en
+      // anders onbekend. Tot dan stond hier zonder keuze L1.
+      const fase = een ? groepFase(g, devices, groepen).fase : "";
+      const label = (key) => (een ? (fase ? fase.toUpperCase() : "L?") : key.toUpperCase());
       const basis = {
         id: g.id, name: g.name || g.id, kind: g.kind === "kast" ? "kast" : "groep", parent: g.parent || "",
-        fuse: Number(g.fuse_amps) || 0, count: een ? 1 : 3,
+        fuse: Number(g.fuse_amps) || 0, count: een ? 1 : 3, ...(een && !fase ? { faseOnbekend: true } : {}),
       };
       const gekozen = g.meter === false && Array.isArray(g.devices) ? g.devices.filter((r) => opId.get(r?.device)?.entity) : [];
       if (gekozen.length) {
@@ -975,15 +977,22 @@ export function readCircuits(feed, installation, devices = []) {
         const stroom = gekozen.map((r) => readNumber(feed, apparaat(r).entities?.current));
         const volt = gekozen.map((r) => readNumber(feed, apparaat(r).entities?.voltage)).find((v) => Number.isFinite(v) && v > 0) ?? null;
         const compleet = watt.every((w) => Number.isFinite(w));
+        // Per apparaat de fase (v0.169.0): op drie fasen telt het op elke fase, met een derde van zijn
+        // vermogen; onbekend telt op de zwaarste fase van de rest, zoals `groep_apparaten_amps`.
+        const fasen = gekozen.map((r) => (een ? "l1" : apparaatFase(apparaat(r), r, g)));
+        const deel = (i) => (fasen[i] === "drie" ? 3 : 1);
+        const ampsVan = (i) => (Number.isFinite(stroom[i]) ? Math.abs(stroom[i]) : Math.max(0, watt[i]) / (volt ?? NOMINAL_VOLTS) / deel(i));
+        const opFase = (key) => gekozen.map((r, i) => i).filter((i) => fasen[i] === key || fasen[i] === "drie");
+        const onbekend = gekozen.map((r, i) => i).filter((i) => !keys.includes(fasen[i]) && fasen[i] !== "drie");
+        const bekend = Object.fromEntries(keys.map((key) => [key, compleet ? opFase(key).reduce((som, i) => som + ampsVan(i), 0) : 0]));
+        const zwaarste = keys.reduce((a, b) => (bekend[b] > bekend[a] ? b : a), keys[0]);
         const phases = keys.map((key) => {
-          const hier = gekozen.map((r, i) => i).filter((i) => (een ? "l1" : gekozen[i].phase || "l1") === key);
-          const power = compleet ? hier.reduce((som, i) => som + Math.max(0, watt[i]), 0) : null;
+          const hier = [...opFase(key), ...(key === zwaarste ? onbekend : [])];
+          const power = compleet ? hier.reduce((som, i) => som + Math.max(0, watt[i]) / deel(i), 0) : null;
           const stroomBekend = hier.every((i) => Number.isFinite(stroom[i]));
           // De balk rekent zoals de coach: een gemeten stroom, anders het vermogen door de gemeten
           // spanning, en zonder spanning door 230 V. Een getal in ampère staat er alleen als het gemeten is.
-          const amps = compleet
-            ? hier.reduce((som, i) => som + (Number.isFinite(stroom[i]) ? Math.abs(stroom[i]) : Math.max(0, watt[i]) / (volt ?? NOMINAL_VOLTS)), 0)
-            : null;
+          const amps = compleet ? hier.reduce((som, i) => som + ampsVan(i), 0) : null;
           const current = amps !== null && hier.length && (stroomBekend || volt !== null) ? amps : null;
           const voltage = hier.length ? volt : null;
           return { key, label: label(key), current, power, voltage, amps, ampsDerived: current === null && amps !== null };
@@ -1033,7 +1042,7 @@ export function loadOf(phases, importW, installation, circuits = []) {
   const kandidaten = [];
   if (phases && fuse > 0) kandidaten.push({ fuse, label: "", phases });
   for (const g of circuits ?? []) {
-    if (g?.fuse > 0 && Array.isArray(g.phases)) kandidaten.push({ fuse: g.fuse, label: g.name, phases: g.phases });
+    if (g?.fuse > 0 && Array.isArray(g.phases)) kandidaten.push({ fuse: g.fuse, label: g.name, phases: g.phases, onbekend: g.faseOnbekend });
   }
   let zwaarste = null;
   for (const k of kandidaten) {
@@ -1041,7 +1050,8 @@ export function loadOf(phases, importW, installation, circuits = []) {
       if (!Number.isFinite(p.amps)) continue;
       const share = (p.amps / k.fuse) * 100;
       if (!zwaarste || share > zwaarste.share) {
-        zwaarste = { share, worst: k.label ? `${p.label} (${k.label})` : p.label };
+        // Een groep waarvan niemand de fase weet heet niet L1 (v0.169.0), zoals in de melding van de coach.
+        zwaarste = { share, worst: k.onbekend ? t("onbekend ({naam})", { naam: k.label }) : k.label ? `${p.label} (${k.label})` : p.label };
       }
     }
   }

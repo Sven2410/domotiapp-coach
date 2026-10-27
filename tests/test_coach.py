@@ -12149,6 +12149,32 @@ try:
 finally:
     sys.modules["homeassistant.helpers.entity_registry"] = oud208
 
+print("=== 210. een fase per apparaat: gekozen, niet aangenomen (v0.169.0) ===")
+# Een klantwoning op 27-10-2026: de groep van de batterij heette L1, en wasmachine en droger stonden stil op L1.
+# De eigenaar: "hoe weet de coach dat dit fase 1 is? Die heb ik bij mijn apparaten namelijk nooit ingevuld."
+GROEP210 = {**GROEP207, "devices": [{"device": "dev-was", "phase": "l1"}, {"device": "dev-droog", "phase": "l1"}]}
+inst210 = {**inst207, "installation": {**inst207["installation"], "circuits": [GROEP210]}}
+hass210, monitor210 = bewaker(inst210, {**huis(), **watt207(3000, 600)})
+lezing210 = monitor210.async_current_load()
+controle("de lastbewaking noemt een groep zonder bekende fase niet L1", lezing210.worst_phase == "onbekend (Was)",
+         f"{lezing210.worst_phase}")
+inst210b = {**inst210, "devices": [{**WAS207, "phase": "l2"}, DROOG207],
+            "installation": {**inst210["installation"], "circuits": [GROEP210]}}
+hass210b, monitor210b = bewaker(inst210b, {**huis(), **watt207(3000, 600)})
+controle("kiest de bewoner L2 bij het apparaat, dan heet de groep L2",
+         monitor210b.async_current_load().worst_phase == "L2 (Was)", f"{monitor210b.async_current_load().worst_phase}")
+# Een batterij met de fase bij het apparaat in plaats van in `battery.phase` telt op die fase.
+ACCU210 = {**ACCU207, "phase": "l3", "battery": {"max_charge_w": 3500}}
+drie210 = {**GROEP207, "phases": 3, "devices": [{"device": "dev-was"}, {"device": "dev-droog"}]}
+inst210c = {**inst207b, "devices": [{**WAS207, "phase": "l3"}, {**DROOG207, "phase": "l1"}, ACCU210],
+            "installation": {**inst207b["installation"], "circuits": [drie210]}}
+hass207.states.zet("sensor.was_w", {"state": "2300", "attributes": {"unit_of_measurement": "W"}})
+hass207.states.zet("sensor.droog_w", {"state": "2300", "attributes": {"unit_of_measurement": "W"}})
+ruimte210 = coach207._laadruimte_w(inst210c, ACCU210, 0.0, {})
+controle("een batterij op L3 telt alleen wat er op L3 hangt: 16 - 2 - 10 A = 4 A", abs(ruimte210 - 4 * 230.0) < 1e-6, f"{ruimte210}")
+ruimte210d = coach207._laadruimte_w(inst210c, {**ACCU210, "phase": "l2"}, 0.0, {})
+controle("op L2, waar niets hangt: 16 - 2 = 14 A", abs(ruimte210d - 14 * 230.0) < 1e-6, f"{ruimte210d}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

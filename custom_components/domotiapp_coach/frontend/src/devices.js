@@ -1125,6 +1125,68 @@ export function meetVanzelf(device, entities, states) {
   return uit;
 }
 
+/**
+ * Op welke fase een apparaat hangt (v0.169.0): "l1", "l2", "l3", "drie" of "" (weet ik niet).
+ *
+ * De keuze van de bewoner bij het apparaat (`phase`), en anders wat er van daarvoor stond: de fase van
+ * een batterij, of die bij een groep van drie fasen, waar een keuzelijst voor was. Nooit stil L1: de
+ * eigenaar op 27-10-2026, "hoe weet de coach dat dit fase 1 is?". Dezelfde regel als `apparaat_fase`
+ * in planner.py.
+ */
+export function apparaatFase(device, rij = null, groep = null) {
+  const fasen = ["l1", "l2", "l3"];
+  if ([...fasen, "drie"].includes(device?.phase)) return device.phase;
+  if (fasen.includes(device?.battery?.phase)) return device.battery.phase;
+  if (rij && groep && Number(groep.phases) !== 1 && fasen.includes(rij.phase)) return rij.phase;
+  return "";
+}
+
+/** De keuzes voor "Hangt op fase", met "Weet ik niet" voorop. */
+export function faseKeuzes() {
+  return [["", t("Weet ik niet")], ["l1", "L1"], ["l2", "L2"], ["l3", "L3"], ["drie", t("Drie fasen")]];
+}
+
+/** De groepen waar een apparaat aan hangt, van onder naar boven; `groepen_keten` in planner.py. */
+export function groepenKeten(circuits, device) {
+  const groepen = new Map((circuits ?? []).filter((g) => g?.id).map((g) => [g.id, g]));
+  let volgende = device?.circuit || "";
+  for (const g of groepen.values()) {
+    if ((g.devices ?? []).some((r) => r?.device === device?.id)) {
+      volgende = g.id;
+      break;
+    }
+  }
+  const keten = [];
+  while (volgende && groepen.has(volgende) && keten.length < 12) {
+    const g = groepen.get(volgende);
+    if (keten.includes(g)) break;
+    keten.push(g);
+    volgende = g.parent || "";
+  }
+  return keten;
+}
+
+/**
+ * Op welke fase een groep van één fase zit (v0.169.0): "Op fase" bij de groep, anders de fase van de
+ * apparaten waarvan de keten door de groep loopt als die het eens zijn, anders "" (fase onbekend). En
+ * de namen van de apparaten die het tegenspreken. Dezelfde regel als `groep_fase` in planner.py.
+ */
+export function groepFase(groep, devices, circuits) {
+  const fasen = new Map();
+  for (const device of devices ?? []) {
+    if (!device || !groepenKeten(circuits, device).some((g) => g.id === groep?.id)) continue;
+    const rij = (groep.devices ?? []).find((r) => r?.device === device.id) ?? null;
+    const fase = apparaatFase(device, rij, groep);
+    if (!["l1", "l2", "l3"].includes(fase)) continue;
+    if (!fasen.has(fase)) fasen.set(fase, []);
+    fasen.get(fase).push(device.name || device.id);
+  }
+  let fase = ["l1", "l2", "l3"].includes(groep?.phase) ? groep.phase : "";
+  if (!fase && fasen.size === 1) fase = [...fasen.keys()][0];
+  const anders = [...fasen].filter(([f]) => f !== fase).flatMap(([, namen]) => namen);
+  return { fase, anders: fase || fasen.size > 1 ? anders : [] };
+}
+
 export function growattVanzelf(device, entities) {
   const soc = entities?.[device?.entities?.soc ?? ""];
   if (!soc?.device_id || soc.platform !== "growatt_server") return {};

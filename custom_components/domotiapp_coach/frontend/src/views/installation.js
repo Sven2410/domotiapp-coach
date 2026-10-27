@@ -17,6 +17,7 @@ import {
   editorCss,
   saveBarHtml,
 } from "./editor-base.js";
+import { apparaatFase, groepFase } from "../devices.js";
 import "../components/entity-picker.js";
 
 /** Nominal voltage per phase: 3 x 25 A -> 17250 W, 1 x 25 A -> 5750 W. */
@@ -697,6 +698,9 @@ class DacViewInstallation extends DacEditorElement {
       (d) => d?.id && d.entity && d.type !== "laadpaal" && d.type !== "thuisbatterij"
     );
     const naam = (id) => apparaten.find((d) => d.id === id)?.name || id;
+    const apparaat = (id) => apparaten.find((d) => d.id === id);
+    // De fase staat bij het apparaat (v0.169.0), hier alleen te zien.
+    const faseTekst = (f) => (f === "drie" ? t("Drie fasen") : f ? f.toUpperCase() : t("Fase onbekend"));
     const elders = new Set(groepen.filter((o) => o !== g).flatMap((o) => (o.devices ?? []).map((r) => r.device)));
     const gekozen = (g.devices ?? []).filter((r) => apparaten.some((d) => d.id === r.device));
     const vrij = apparaten.filter((d) => !elders.has(d.id) && !gekozen.some((r) => r.device === d.id));
@@ -706,9 +710,7 @@ class DacViewInstallation extends DacEditorElement {
         (r) => `
           <div class="extra-line circuit-device">
             <span class="circuit-device-name">${esc(naam(r.device))}</span>
-            ${drie ? `<select data-circuit-device-phase="${index}:${esc(r.device)}" aria-label="${t("Fase")}">
-              ${["l1", "l2", "l3"].map((f) => `<option value="${f}"${(r.phase || "l1") === f ? " selected" : ""}>${f.toUpperCase()}</option>`).join("")}
-            </select>` : ""}
+            ${drie ? `<span class="circuit-device-phase">${esc(faseTekst(apparaatFase(apparaat(r.device), r, g)))}</span>` : ""}
             <button type="button" class="remove" data-circuit-device-remove="${index}:${esc(r.device)}" aria-label="${t("Weghalen")}">${icons.trash}</button>
           </div>`
       )
@@ -725,18 +727,41 @@ class DacViewInstallation extends DacEditorElement {
           <p class="hint">${t("Kies de apparaten met een vermogenssensor die op deze groep hangen. Hun som is wat de coach van de groep weet; wat er verder op hangt ziet hij niet. Zit de groep bijna aan zijn zekering, dan krijg je een melding.")}</p>
           ${rijen}
           ${kiezen}
+          ${drie && gekozen.length ? `<span class="sub">${t("De fase kies je bij het apparaat, onder Apparaten. Weet je hem niet, dan telt de zwaarste fase.")}</span>` : ""}
         </div>`;
   }
 
   /**
    * De fase van een groep van één fase (v0.168.0). Tot dan heette zo'n groep altijd L1, ook als de
-   * batterij erop op L3 zat (een klantwoning, 27-10-2026). Zonder keuze de fase van de batterij die
-   * eraan hangt, anders L1. De sensoren blijven onder "l1" staan.
+   * batterij erop op L3 zat (een klantwoning, 27-10-2026). Sinds v0.169.0 vult de coach niets meer
+   * in: "Op fase", anders de fase van de apparaten erop, anders onbekend (`groepFase` in devices.js).
+   * De sensoren blijven onder "l1" staan.
    */
   groepFase_(g) {
-    if (["l1", "l2", "l3"].includes(g.phase)) return g.phase;
-    const batterij = (this.draft_?.devices ?? []).find((d) => d?.circuit === g.id && ["l1", "l2", "l3"].includes(d.battery?.phase));
-    return batterij?.battery.phase ?? "l1";
+    return groepFase(g, this.draft_?.devices ?? [], this.draft_?.installation?.circuits ?? []);
+  }
+
+  /** "Op fase" bij een groep van één fase, met wat de apparaten erop zeggen (v0.169.0). */
+  groepFaseHtml_(g, index, esc) {
+    const { fase, anders } = this.groepFase_(g);
+    const gekozen = ["l1", "l2", "l3"].includes(g.phase) ? g.phase : "";
+    const uitleg = !gekozen && fase
+      ? t("Volgt de apparaten die erop hangen: {fase}.", { fase: fase.toUpperCase() })
+      : t("Op welke fase van de hoofdaansluiting deze groep zit. Alles wat erop hangt zit op dezelfde fase.");
+    const botsing = anders.length
+      ? `<span class="sub circuit-phase-clash">${esc(fase
+          ? t("Op een andere fase dan {fase}: {apparaten}. Kies de juiste fase bij het apparaat of hier.", { fase: fase.toUpperCase(), apparaten: anders.join(", ") })
+          : t("De apparaten op deze groep zeggen elk iets anders: {apparaten}. Kies de juiste fase bij het apparaat of hier.", { apparaten: anders.join(", ") }))}</span>`
+      : "";
+    return `
+        <div class="row">
+          <label for="circuit-phase-${index}">${t("Op fase")}</label>
+          <select id="circuit-phase-${index}" data-circuit-field="phase" data-index="${index}">
+            ${[["", t("Weet ik niet")], ["l1", "L1"], ["l2", "L2"], ["l3", "L3"]].map(([f, label]) => `<option value="${f}"${gekozen === f ? " selected" : ""}>${label}</option>`).join("")}
+          </select>
+          <span class="sub">${uitleg}</span>
+          ${botsing}
+        </div>`;
   }
 
   circuitHtml_(g, index, groepen) {
@@ -782,14 +807,7 @@ class DacViewInstallation extends DacEditorElement {
           </div>
           ${onder}
         </div>
-        ${Number(g.phases) === 1 ? `
-        <div class="row">
-          <label for="circuit-phase-${index}">${t("Op fase")}</label>
-          <select id="circuit-phase-${index}" data-circuit-field="phase" data-index="${index}">
-            ${["l1", "l2", "l3"].map((f) => `<option value="${f}"${this.groepFase_(g) === f ? " selected" : ""}>${f.toUpperCase()}</option>`).join("")}
-          </select>
-          <span class="sub">${t("Op welke fase van de hoofdaansluiting deze groep zit. Alles wat erop hangt zit op dezelfde fase.")}</span>
-        </div>` : ""}
+        ${Number(g.phases) === 1 ? this.groepFaseHtml_(g, index, esc) : ""}
         <label class="check">
           <input type="checkbox" data-circuit-meter="${index}"${g.meter ? " checked" : ""}>
           <span><strong>${kast ? t("Deze onderverdeelkast heeft een eigen kWh-meter") : t("Deze groep heeft een eigen kWh-meter")}</strong> ${t("Dan vul je hieronder per fase de sensoren in.")}</span>
@@ -798,7 +816,7 @@ class DacViewInstallation extends DacEditorElement {
           .map(
             (phase) => `
         <div class="phase-block">
-          <div class="phase-title">${(Number(g.phases) === 1 ? this.groepFase_(g) : phase).toUpperCase()}</div>
+          <div class="phase-title">${Number(g.phases) === 1 ? (this.groepFase_(g).fase.toUpperCase() || "L?") : phase.toUpperCase()}</div>
           <div class="row">
             <label>${t("Stroom (A)")}</label>
             <dac-entity-picker data-circuit="${index}" data-phase="${phase}" data-kind="current"></dac-entity-picker>
@@ -842,11 +860,8 @@ class DacViewInstallation extends DacEditorElement {
       installation: {
         ...inst,
         // Met een eigen meter tellen de sensoren en niet de apparaten (v0.165.0); zonder andersom.
-        // Een groep van één fase krijgt zijn fase mee, ook als de bewoner de voorgestelde liet staan (v0.168.0).
-        circuits: inst.circuits.map((g) => ({
-          ...(g?.meter === false ? { ...g, sensors: {} } : { ...g, devices: [] }),
-          ...(g && Number(g.phases) === 1 ? { phase: this.groepFase_(g) } : {}),
-        })),
+        // De fase van een groep gaat mee zoals de bewoner hem koos, ook leeg (v0.169.0).
+        circuits: inst.circuits.map((g) => (g?.meter === false ? { ...g, sensors: {} } : { ...g, devices: [] })),
       },
     };
   }
@@ -870,10 +885,9 @@ class DacViewInstallation extends DacEditorElement {
       el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
         if (field === "fuse_amps" || field === "phases") g[field] = Number(el.value);
         else g[field] = el.value;
-        if (field === "phases" && g.phases === 1 && !g.phase) g.phase = this.groepFase_(g);
         // Een ander aantal fasen is een ander aantal sensorrijen, en een
         // andere naam hoort meteen in de keuzelijst van de andere groepen.
-        if (field === "phases" || field === "parent") this.paintCircuits_();
+        if (field === "phases" || field === "parent" || field === "phase") this.paintCircuits_();
         this.afterChange_();
       });
     }
@@ -905,16 +919,8 @@ class DacViewInstallation extends DacEditorElement {
       keuze.addEventListener("change", () => {
         if (!keuze.value) return;
         const g = groepen[Number(keuze.dataset.circuitDeviceAdd)];
-        (g.devices ??= []).push({ device: keuze.value, phase: "l1" });
+        (g.devices ??= []).push({ device: keuze.value });
         this.paintCircuits_();
-        this.afterChange_();
-      });
-    }
-    for (const keuze of host.querySelectorAll("[data-circuit-device-phase]")) {
-      keuze.addEventListener("change", () => {
-        const [i, id] = keuze.dataset.circuitDevicePhase.split(/:(.*)/s);
-        const rij = (groepen[Number(i)].devices ?? []).find((r) => r.device === id);
-        if (rij) rij.phase = keuze.value;
         this.afterChange_();
       });
     }
@@ -1076,6 +1082,8 @@ DacViewInstallation.css = /* css */ `
   .circuit-devices { display: grid; gap: 8px; }
   .circuit-device { grid-template-columns: minmax(0, 1fr) auto auto; }
   .circuit-device-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .circuit-device-phase { font-size: 13px; color: var(--dac-ink-2); white-space: nowrap; }
+  .row > .sub.circuit-phase-clash { color: var(--dac-warn); }
   .extra-line .remove, button.add {
     font: inherit; font-size: 13px; padding: 8px 12px;
     border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border);

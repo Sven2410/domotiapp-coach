@@ -2228,7 +2228,9 @@ proef("een groep zonder meetwaarde blijft staan, als niet gemeten (v0.168.0)", (
   assert.equal(groepen[0].phases[0].amps, 12);
   assert.equal(groepen[0].measured, true);
   assert.equal(groepen[1].measured, false, "de lege groep is er, niet gemeten");
-  assert.equal(belastingVan(null, null, {}, groepen).worst, "L1 (Garage)", "en telt niet mee in de belasting");
+  assert.equal(groepen[0].phases[0].label, "L?", "niemand koos een fase: geen stille L1 (v0.169.0)");
+  assert.equal(groepen[0].faseOnbekend, true);
+  assert.equal(belastingVan(null, null, {}, groepen).worst, "onbekend (Garage)", "en telt niet mee in de belasting");
 });
 
 // Een groep zonder eigen meter, gemeten via de apparaten die erop hangen (v0.165.0). Dezelfde som als
@@ -2259,7 +2261,7 @@ proef("een groep zonder meter telt de apparaten die erbij gekozen zijn", () => {
   assert.equal(weg[0].phases[0].power, null, "zegt een plug niets, dan geen som");
   assert.equal(weg[0].phases[0].amps, null, "en geen balk");
   const belasting = belastingVan(null, null, { fuse_amps: 25 }, een);
-  assert.equal(belasting.worst, "L1 (Was)");
+  assert.equal(belasting.worst, "onbekend (Was)", "een oude L3 bij een groep van één fase was nooit gekozen");
 });
 
 const { meetVanzelf } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
@@ -2358,6 +2360,92 @@ proef("stroom en spanning staan bij een plug, niet bij een laadpaal (v0.168.0)",
   assert.equal(el.entityField_(droger, "current").filter, "current");
 });
 
+// Een fase per apparaat (v0.169.0). De eigenaar op 27-10-2026: "hoe weet de coach dat dit fase 1 is? Die heb
+// ik bij mijn apparaten namelijk nooit ingevuld." Dezelfde regels als `apparaat_fase` en `groep_fase` in planner.py.
+const { apparaatFase, groepFase } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+
+proef("een fase per apparaat: gekozen, van voor v0.169.0, of onbekend, nooit stil L1", () => {
+  assert.equal(apparaatFase({ id: "x" }), "");
+  assert.equal(apparaatFase({ phase: "drie" }), "drie");
+  assert.equal(apparaatFase({ battery: { phase: "l3" } }), "l3", "een batterij houdt haar fase");
+  assert.equal(apparaatFase({ phase: "l1", battery: { phase: "l3" } }), "l1", "de keuze wint");
+  assert.equal(apparaatFase({ id: "x" }, { phase: "l2" }, { phases: 3 }), "l2", "bij drie fasen was er een keuzelijst");
+  assert.equal(apparaatFase({ id: "x" }, { phase: "l1" }, { phases: 1 }), "", "bij één fase nooit");
+  const groepen = [
+    { id: "kast", kind: "kast", phases: 3 },
+    { id: "anker", kind: "groep", phases: 1, parent: "kast" },
+    { id: "sub", kind: "groep", phases: 1, parent: "anker" },
+  ];
+  const bat = { id: "bat", name: "Batterij", circuit: "anker", battery: { phase: "l3" } };
+  assert.deepEqual(groepFase(groepen[1], [bat], groepen), { fase: "l3", anders: [] });
+  assert.deepEqual(groepFase(groepen[1], [{ ...bat, circuit: "kast" }], groepen), { fase: "", anders: [] }, "aan de kast zegt ze niets");
+  assert.deepEqual(groepFase(groepen[1], [{ ...bat, circuit: "sub" }], groepen), { fase: "l3", anders: [] }, "de keten loopt erdoor");
+  assert.deepEqual(groepFase({ ...groepen[1], phase: "l1" }, [bat], groepen), { fase: "l1", anders: ["Batterij"] });
+  const twee = [bat, { id: "p", name: "Plug", circuit: "anker", phase: "l2" }];
+  assert.deepEqual(groepFase(groepen[1], twee, groepen), { fase: "", anders: ["Batterij", "Plug"] });
+});
+
+proef("de kaart: fase onbekend, en op drie fasen per apparaat, onbekend op de zwaarste (v0.169.0)", () => {
+  const staten = {
+    "sensor.a": { state: "2300", attributes: { unit_of_measurement: "W" } },
+    "sensor.b": { state: "2070", attributes: { unit_of_measurement: "W" } },
+    "sensor.c": { state: "460", attributes: { unit_of_measurement: "W" } },
+    "sensor.anker_a": { state: "10.9", attributes: { unit_of_measurement: "A" } },
+  };
+  const feed = { get: (id) => staten[id] };
+  const apparaten = [
+    { id: "a", name: "A", entity: "sensor.a", phase: "l1" },
+    { id: "b", name: "B", entity: "sensor.b", phase: "drie" },
+    { id: "c", name: "C", entity: "sensor.c" },
+    { id: "bat", name: "Anker", type: "thuisbatterij", circuit: "kast", battery: { phase: "l3" } },
+  ];
+  const [drie, anker] = groepenVan(feed, { circuits: [
+    { id: "g", name: "G", fuse_amps: 16, phases: 3, meter: false, devices: [{ device: "a" }, { device: "b" }, { device: "c" }] },
+    { id: "anker", name: "Anker", fuse_amps: 16, phases: 1, parent: "kast", sensors: { l1: { current: "sensor.anker_a" } } },
+    { id: "kast", name: "Garage", kind: "kast", fuse_amps: 25, phases: 3, sensors: {} },
+  ] }, apparaten);
+  assert.deepEqual(drie.phases.map((p) => Math.round(p.amps * 10) / 10), [15, 3, 3], "L1 10 + 3 + 2 onbekend, L2 en L3 elk 3");
+  assert.deepEqual(drie.phases.map((p) => Math.round(p.power)), [3450, 690, 690]);
+  assert.equal(anker.faseOnbekend, true, "de batterij hangt aan de kast, dus de groep weet zijn fase niet");
+  assert.equal(anker.phases[0].label, "L?");
+  const Overzicht = geregistreerd.get("dac-view-overview");
+  const el = Object.create(Overzicht.prototype);
+  const host = { innerHTML: "", addEventListener: () => {} };
+  el.$ = (k) => ({ "#phases": { hidden: true }, "#phases-title": { textContent: "" }, "#phase-rows": host })[k];
+  el.settings_ = { sources: { phases_on_overview: true }, installation: { phases: 3, fuse_amps: 25 } };
+  el.belastingOpen_ = {};
+  el.updatePhases_({ phases: null, circuits: [{ ...anker, kind: "groep", parent: "" }] }, 90);
+  assert.ok(host.innerHTML.includes("Fase onbekend"), "op de kaart: fase onbekend");
+});
+
+proef("Hangt op fase bij elk apparaat, standaard Weet ik niet, niet bij een laadpaal (v0.169.0)", () => {
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  const plug = el.faseHtml_({ id: "p", type: "overig" }, 0);
+  assert.ok(plug.includes("Hangt op fase") && plug.includes('data-field="phase"'));
+  assert.ok(/<option value="" selected>Weet ik niet</.test(plug), "standaard Weet ik niet");
+  assert.ok(plug.includes('value="drie"') && plug.includes("Drie fasen"));
+  assert.ok(/<option value="l3" selected>/.test(el.faseHtml_({ type: "thuisbatterij", battery: { phase: "l3" } }, 0)),
+    "een batterij houdt haar fase van voor v0.169.0");
+  assert.equal(el.faseHtml_({ type: "laadpaal" }, 0), "", "een laadpaal laadt op de fasen van de auto");
+});
+
+proef("Op fase bij een groep volgt de apparaten, en zegt het als ze botsen (v0.169.0)", () => {
+  const el = Object.create(Installatie.prototype);
+  const anker = { id: "anker", kind: "groep", name: "Anker", fuse_amps: 16, phases: 1, parent: "", meter: true, sensors: {} };
+  el.draft_ = { installation: { circuits: [anker] }, devices: [{ id: "bat", name: "Batterij", circuit: "anker", battery: { phase: "l3" } }] };
+  const volgt = el.circuitHtml_(anker, 0, [anker]);
+  assert.ok(/<option value="" selected>Weet ik niet</.test(volgt), "niets gekozen");
+  assert.ok(volgt.includes("Volgt de apparaten die erop hangen: L3."));
+  assert.ok(volgt.includes('<div class="phase-title">L3</div>'));
+  const botst = el.circuitHtml_({ ...anker, phase: "l1" }, 0, [anker]);
+  assert.ok(botst.includes("Op een andere fase dan L1: Batterij."), "een batterij op L3 in een groep op L1");
+  el.draft_.devices = [];
+  assert.ok(el.circuitHtml_(anker, 0, [anker]).includes('<div class="phase-title">L?</div>'), "onbekend, geen L1");
+  const uit = el.payload_({ installation: { circuits: [anker] }, contract: {} });
+  assert.equal(uit.installation.circuits[0].phase, undefined, "opslaan vult geen fase in");
+});
+
 proef("stroom en spanning worden voorgesteld uit hetzelfde apparaat als de vermogenssensor", () => {
   const entities = {
     "sensor.was_w": { entity_id: "sensor.was_w", device_id: "d1" },
@@ -2386,13 +2474,14 @@ proef("bij Groepen kies je zonder meter de apparaten, elk hooguit in één groep
   const a = { id: "a", kind: "groep", name: "A", fuse_amps: 16, phases: 3, parent: "", meter: false, sensors: {}, devices: [{ device: "was", phase: "l2" }] };
   const b = { id: "b", kind: "groep", name: "B", fuse_amps: 16, phases: 1, parent: "", meter: false, sensors: {}, devices: [] };
   const htmlA = el.circuitHtml_(a, 0, [a, b]);
-  assert.ok(htmlA.includes("Wasmachine") && htmlA.includes('data-circuit-device-phase="0:was"'), "de gekozen wasmachine met zijn fase");
-  assert.ok(/<option value="l2" selected>/.test(htmlA), "op L2");
+  assert.ok(htmlA.includes("Wasmachine") && /circuit-device-phase">L2</.test(htmlA), "de gekozen wasmachine met zijn fase van voor v0.169.0");
+  assert.ok(!htmlA.includes("<select data-circuit-device-phase"), "de fase kies je bij het apparaat, niet hier (v0.169.0)");
+  assert.ok(htmlA.includes("De fase kies je bij het apparaat"));
   const htmlB = el.circuitHtml_(b, 1, [a, b]);
   assert.ok(!htmlB.includes('value="was"'), "de wasmachine zit al in groep A");
   assert.ok(htmlB.includes('value="droog"') && !htmlB.includes('value="paal"') && !htmlB.includes('value="zonder"'),
     "wel de droger, geen paal en niets zonder vermogenssensor");
-  assert.ok(!htmlB.includes("data-circuit-device-phase"), "een groep op één fase vraagt geen fase");
+  assert.ok(!htmlB.includes("circuit-device-phase"), "een groep op één fase vraagt geen fase per apparaat");
   assert.ok(!el.circuitHtml_({ ...a, meter: true }, 0, [a, b]).includes("Gemeten via apparaten"), "met een meter niet");
   const uit = el.payload_({ installation: { circuits: [a, { ...b, meter: true, devices: [{ device: "droog" }] }] }, contract: {} });
   assert.deepEqual(uit.installation.circuits[0].devices, [{ device: "was", phase: "l2" }], "zonder meter blijven ze");

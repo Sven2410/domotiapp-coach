@@ -200,7 +200,7 @@ heette de kaart "Belasting per fase" en stonden de hoofdaansluiting en elke kast
   hetzelfde getal hebben.
 - **De fase van een groep van één fase** (`phase`, Installatie): tot dan heette zo'n groep altijd L1, ook de
   groep van een batterij op L3. Zonder keuze de fase van de batterij die eraan hangt. De sensoren blijven onder
-  "l1" staan; alleen het label verandert.
+  "l1" staan; alleen het label verandert. Sinds v0.169.0 zonder stille L1, zie hieronder.
 - **Het teken**: een stroom zonder teken op een regel met een negatief vermogen krijgt het teken van het
   vermogen. Er stond "4,9 A, -1,15 kW".
 - **Hangt aan**: staat een apparaat bij een groep onder Groepen, dan hangt het daaraan, ook voor de
@@ -208,3 +208,30 @@ heette de kaart "Belasting per fase" en stonden de hoofdaansluiting en elke kast
   Hoofdkast voor de droger in de groep Wasmachine & Droger.
 
 Gemeten op 390, 320 en 280 px zonder overloop.
+
+## Een fase per apparaat, gekozen en niet aangenomen (v0.169.0)
+
+Na v0.168.0 stond in een klantwoning de groep Wasmachine & Droger op L1, en de groep van de batterij ook,
+terwijl die batterij op L3 zat. Sven op 27-10-2026: "hoe weet de coach dat dit fase 1 is? Die heb ik bij mijn
+apparaten namelijk nooit ingevuld. Zou bij álle apparaten er dus voor kiezen om handmatig de betreffende fase in
+te vullen." De coach vulde het zelf in, op vier plekken: bij Installatie, bij het toevoegen van een apparaat aan
+een groep, op de kaart en in de som. De batterij in die woning hing bovendien aan de kast (`circuit`), niet aan
+haar groep, en dan vond de regel van v0.168.0 haar niet.
+
+- **Hangt op fase bij elk apparaat** (`phase`, onder Sturen naast Hangt aan; `faseHtml_` in views/devices.js):
+  L1, L2, L3, Drie fasen of Weet ik niet, standaard Weet ik niet. Niet bij een laadpaal: die laadt op de fasen
+  van de auto. De batterij had dit veld al (`battery.phase`); dat blijft gelden tot de bewoner hier iets kiest,
+  en volgt dan mee.
+- **Eén regel** voor wat een apparaat is: `apparaat_fase` in planner.py en `apparaatFase` in devices.js. De
+  keuze bij het apparaat, anders `battery.phase`, anders de fase bij een groep van drie fasen (daar was een
+  keuzelijst, dus die was gekozen). Die bij een groep van één fase was nooit te kiezen en telt niet. Bij
+  Groepen staat de fase van een apparaat alleen nog te zien.
+- **De fase van een groep van één fase** (`groep_fase` in planner.py, `groepFase` in devices.js): Op fase bij
+  de groep, en zonder keuze de fase van de apparaten waarvan de keten door de groep loopt (`groepen_keten`), als
+  ze het eens zijn. Anders onbekend: op de kaart "L?" met "Fase onbekend", in de melding van de lastbewaking
+  "onbekend (Was)". Spreken de apparaten elkaar of Op fase tegen, dan zegt Installatie wie.
+- **De som op een groep van drie fasen** (`groep_apparaten_amps`, `readCircuits`): een apparaat op zijn fase,
+  op drie fasen een derde van zijn vermogen op elke fase (of zijn gemeten stroom), en onbekend op de zwaarste
+  fase van de rest. Zo deed de batterij het al.
+- **Nagegaan**: een groepsom telt nergens bij een fase van de kast of de hoofdaansluiting op. De lastbewaking
+  (`async_current_load`), `_laadruimte_w` en `ruimten` nemen elke zekering apart, met zijn eigen meting of som.

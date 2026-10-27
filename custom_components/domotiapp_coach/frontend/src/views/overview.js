@@ -2701,13 +2701,13 @@ class DacViewOverview extends DacElement {
     // Een groep zonder meter, gemeten via de apparaten die erop hangen (v0.165.0): zeggen wat de coach
     // niet ziet. En een kast of groep zonder iets: "niet gemeten" (v0.168.0).
     const via = (g) =>
-      !g.measured
+      (g.faseOnbekend ? `<div class="phase-via">${t("Fase onbekend")}</div>` : "") + (!g.measured
         ? `<div class="phase-via">${t("Niet gemeten")}</div>`
         : g.via?.length
           ? `<div class="phase-via">${esc(t("Gemeten via {apparaten}; wat er verder op deze groep hangt ziet de coach niet.", {
               apparaten: g.via.length === 1 ? g.via[0] : t("{voor} en {laatste}", { voor: g.via.slice(0, -1).join(", "), laatste: g.via.at(-1) }),
             }))}</div>`
-          : "";
+          : "");
     const kop = (naam, amps, onder = "") => `
       <div class="load-head"><span class="load-name">${esc(naam)}</span>${amps ? `<span class="load-fuse">${amps}</span>` : ""}${
         onder ? `<span class="load-under">${esc(onder)}</span>` : ""}</div>`;
