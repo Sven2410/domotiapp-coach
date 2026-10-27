@@ -2071,3 +2071,23 @@ alleen zon of stilstaan wil (behalve als ze de auto helpt). Na `VOLGT_NIET_NA` (
 Het kasboek telt het al als wat het was: de regelaar neemt de sensor zodra die de opdracht een tijdje
 tegenspreekt (`vermogen_w`). Scenario's `batterij-volgt-niet`, `-volgt-niet-zelf` en `-volgt-even-niet` (twee
 minuten: niets), en geen enkel ander scenario zegt "volgt de coach niet".
+
+## Een nieuwe netmeter: het huisverbruik van de week blijft (v0.170.0)
+
+In een klantwoning kwam op 27-10-2026 een meter met een teken bij, naast de twee losse meters die er al stonden.
+`_async_huisverbruik` nam toen "signed zodra die reeks iets heeft", en telde het net voor elk ouder kwartier als
+nul. Het huis werd zon plus batterij, en 's nachts nul: de verwachting voor 06:00 en 07:00 zakte van 2,67 en
+2,31 kWh naar 0,00, een week lang (`HUIS_VENSTER`). Het volgde ook `grid_mode` niet: op split telde een ingevulde
+meter met een teken toch.
+
+- **Eén regel** (`_net_afname` in coach.py): per kwartier de meter van `grid_mode`, en zegt die niets, dan de
+  andere vorm als die nog is ingevuld. Twee losse meters tellen alleen samen. Zegt geen meter iets, dan is het
+  kwartier onbekend en telt het niet mee, in plaats van een net van nul. Zonder enige netmeter rekent het
+  huisverbruik zoals altijd met de zon en de apparaten.
+- **Dezelfde regel** in het terugrekenen van een beurt (`_async_terugrekenen`), in de beurt achteraf en in de
+  tijdlijn van Historie (`netReeks` in tijdlijn.js). Die volgden `grid_mode` al, maar zonder terugval: na een
+  wissel hadden de oude kwartieren geen net.
+- **Nog niet**: het vermogensdeel van het rapport in Historie (`netBronnen` in views/history.js) laat per meter zijn eigen
+  regels zien en valt niet terug; de dagen van voor de wissel staan daar zonder net.
+- Een verkeerde avond op een nieuwe meter (in die woning +2,4 kW door een verkeerd aangesloten klem) weegt nu
+  als één dag tussen de week ervoor, want de mediaan krijgt de oude kwartieren erbij.

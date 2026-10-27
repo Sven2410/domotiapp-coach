@@ -12175,6 +12175,40 @@ controle("een batterij op L3 telt alleen wat er op L3 hangt: 16 - 2 - 10 A = 4 A
 ruimte210d = coach207._laadruimte_w(inst210c, {**ACCU210, "phase": "l2"}, 0.0, {})
 controle("op L2, waar niets hangt: 16 - 2 = 14 A", abs(ruimte210d - 14 * 230.0) < 1e-6, f"{ruimte210d}")
 
+print("=== 211. een nieuwe netmeter: het huisverbruik van de week blijft (v0.170.0) ===")
+# Een klantwoning op 27-10-2026: een meter met een teken kwam bij, naast de twee losse meters die er al waren.
+# Het huis nam "signed zodra die reeks iets heeft" en telde het net voor elk ouder kwartier als nul: om
+# 06:00 0,00 kWh in plaats van 2,67.
+ZES210 = [int(dt.datetime(2026, 10, 20 + d, 6, 0, tzinfo=dt.timezone.utc).timestamp()) for d in range(8)]
+LOS210 = {"sensor.in": [{"start": t, "gemiddeld": 2500.0} for t in ZES210],
+          "sensor.uit": [{"start": t, "gemiddeld": 0.0} for t in ZES210]}
+NIEUW210 = {"sensor.net": [{"start": ZES210[-1], "gemiddeld": 300.0}]}
+BEIDE210 = {"grid_import": "sensor.in", "grid_export": "sensor.uit", "grid_signed": "sensor.net", "solar": "sensor.zon"}
+nieuw210 = huis_uit({**BEIDE210, "grid_mode": "signed"}, {**LOS210, **NIEUW210})
+print(f"  een week los, dan een dag met een teken: {nieuw210}")
+controle("op de nieuwe meter: de oude kwartieren uit de losse meters, 06:00 blijft 2,5 kWh",
+         abs(nieuw210.get(6, 0) - 2.5) < 0.01, f"{nieuw210}")
+alleen210 = huis_uit({**BEIDE210, "grid_mode": "signed"},
+                     {**LOS210, "sensor.net": [{"start": t, "gemiddeld": 300.0} for t in ZES210]})
+controle("zegt de nieuwe meter het elk kwartier, dan wint hij", abs(alleen210.get(6, 0) - 0.3) < 0.01, f"{alleen210}")
+los210 = huis_uit({**BEIDE210, "grid_mode": "split"},
+                  {**LOS210, "sensor.net": [{"start": t, "gemiddeld": 300.0} for t in ZES210]})
+controle("met grid_mode split telt een ingevulde meter met een teken niet", abs(los210.get(6, 0) - 2.5) < 0.01, f"{los210}")
+gat210 = huis_uit({**BEIDE210, "grid_mode": "split"},
+                  {"sensor.zon": [{"start": STEMPEL, "gemiddeld": 2000.0}]})
+controle("een kwartier zonder net telt niet als nul: geen huis van alleen de zon", 12 not in gat210, f"{gat210}")
+zonder210 = huis_uit({"grid_mode": "split", "grid_import": "", "grid_export": "", "grid_signed": "", "solar": "sensor.zon"},
+                     {"sensor.zon": [{"start": STEMPEL, "gemiddeld": 2000.0}]})
+controle("zonder netmeter zoals altijd: de zon", abs(zonder210.get(12, 0) - 2.0) < 0.01, f"{zonder210}")
+half210 = huis_uit({**BEIDE210, "grid_mode": "split", "grid_signed": ""},
+                   {"sensor.in": [{"start": t, "gemiddeld": 2500.0} for t in ZES210]})
+controle("twee losse meters waarvan er één niets zegt: onbekend", 6 not in half210, f"{half210}")
+controle("de regel zelf: de meter van grid_mode, anders de andere, anders None",
+         coachmod._net_afname({"grid_mode": "signed", "grid_signed": "a", "grid_signed_invert": True, "grid_import": "b"},
+                              {"a": {1: 400.0}, "b": {1: 900.0, 2: 700.0}}, 1) == -400.0
+         and coachmod._net_afname({"grid_mode": "signed", "grid_signed": "a", "grid_import": "b"}, {"a": {}, "b": {2: 700.0}}, 2) == 700.0
+         and coachmod._net_afname({"grid_mode": "signed", "grid_signed": "a"}, {"a": {}}, 3) is None, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

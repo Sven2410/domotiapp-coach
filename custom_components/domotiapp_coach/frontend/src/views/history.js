@@ -1298,7 +1298,8 @@ class DacViewHistory extends DacElement {
     if (this.tl_?.dag !== sleutel) this.tlGekozen_ = "";
 
     const bronnen = this.settings_?.sources ?? {};
-    const netId = bronnen.grid_mode === "signed" ? bronnen.grid_signed : bronnen.grid_import;
+    // Allebei de vormen van de meter: `netReeks` valt per kwartier terug op de andere (v0.170.0).
+    const netIds = [bronnen.grid_signed, bronnen.grid_import].filter(Boolean);
     let meldingen = [];
     try {
       meldingen = (await this.hass_.callWS({ type: "domotiapp_coach/notifications/list" })) ?? [];
@@ -1307,7 +1308,7 @@ class DacViewHistory extends DacElement {
     }
     const kwartieren = await quarters(
       this.hass_,
-      [...apparaten.map((device) => device.entity), netId],
+      [...apparaten.map((device) => device.entity), ...netIds],
       van,
       periodEnd(this.period_, van)
     );

@@ -382,14 +382,19 @@ export function herkomst(stuk, vermogen, net) {
  * na het vinkje omkeren van de klant. Zo werkt het voor allebei de vormen.
  */
 export function netReeks(bronnen, kwartieren) {
-  if (bronnen?.grid_mode === "signed") {
-    const teken = bronnen.grid_signed_invert ? -1 : 1;
-    return (kwartieren.get(bronnen.grid_signed) ?? []).map((rij) => ({
-      ...rij,
-      gemiddeld: Math.max(0, teken * Number(rij.gemiddeld)),
-    }));
-  }
-  return kwartieren.get(bronnen?.grid_import) ?? [];
+  const teken = bronnen?.grid_signed_invert ? -1 : 1;
+  const getekend = (kwartieren.get(bronnen?.grid_signed) ?? []).map((rij) => ({
+    ...rij,
+    gemiddeld: Math.max(0, teken * Number(rij.gemiddeld)),
+  }));
+  const los = kwartieren.get(bronnen?.grid_import) ?? [];
+  // De meter van `grid_mode`, en voor een kwartier waar die niets zegt de andere als die nog is
+  // ingevuld (v0.170.0): na een nieuwe meter hebben de oude dagen anders geen net. Zoals
+  // `_net_afname` in coach.py.
+  const [eerst, dan] = bronnen?.grid_mode === "signed" ? [getekend, los] : [los, getekend];
+  const gezien = new Set(eerst.map((rij) => Number(rij.start)));
+  const erbij = dan.filter((rij) => !gezien.has(Number(rij.start)));
+  return erbij.length ? [...eerst, ...erbij].sort((a, b) => Number(a.start) - Number(b.start)) : eerst;
 }
 
 /** Onder dit is er niets gemeten dat een kleur verdient. */
