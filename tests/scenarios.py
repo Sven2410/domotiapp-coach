@@ -1703,6 +1703,24 @@ growatt_terug_100 = growatt_ochtend_zonder_grens.kopie(
     uitleg="dezelfde ochtend, en een Growatt die later 100% teruggeeft: de coach blijft bij zijn eigen vermogen",
     batterij=Batterij(**{**GROWATT_SPH, "soc": 15.0, "growatt_terug_100": 30}, min_winst=0.0),
 )
+# Een batterij die de coach een tijd niet volgt (v0.167.0). In een klantwoning laadde de batterij op
+# 27-10-2026 zeventien minuten 2,5 kW van het net terwijl de coach nul op de meter wilde, en niemand zag
+# het. Hier 25 minuten, extern gestuurd en in zijn eigen stand; en twee minuten, wat geen melding geeft.
+batterij_volgt_niet = batterij_vast_zon.kopie(
+    naam="batterij-volgt-niet",
+    uitleg="vast, heldere dag; 's avonds laadt de batterij 25 minuten van het net, wat de coach ook zegt",
+    batterij=Batterij(soc=20.0, eigenwijs=("19:00", "19:25")),
+)
+batterij_volgt_niet_zelf = batterij_vast_zon.kopie(
+    naam="batterij-volgt-niet-zelf",
+    uitleg="hetzelfde, met een batterij die zelf nul op de meter doet: de coach neemt hem over",
+    batterij=Batterij(soc=20.0, eigen_nul=True, zelf_nul=True, eigenwijs=("19:00", "19:25")),
+)
+batterij_volgt_even_niet = batterij_vast_zon.kopie(
+    naam="batterij-volgt-even-niet",
+    uitleg="hetzelfde, twee minuten: dat is geen storing",
+    batterij=Batterij(soc=20.0, eigen_nul=True, zelf_nul=True, eigenwijs=("19:00", "19:02")),
+)
 # Een paal die zichzelf herstart (v0.163.3): in een klantwoning nam een Alfen op 26-10-2026 zes
 # minuten lang geen opdracht aan, en elke ronde gaf een fout met traceback. Nu een waarschuwing, en
 # pas na tien minuten een melding; wat de paal deed blijft hij doen.
@@ -1782,6 +1800,7 @@ ALLE = [
     *HERSTART,
     growatt_bihorario, growatt_zon, growatt_eigen_zon, growatt_schaduw, growatt_vasthouden,
     growatt_ochtend, growatt_ochtend_zonder_grens, growatt_herstart, growatt_weigert, growatt_terug_100,
+    batterij_volgt_niet, batterij_volgt_niet_zelf, batterij_volgt_even_niet,
 ]
 
 

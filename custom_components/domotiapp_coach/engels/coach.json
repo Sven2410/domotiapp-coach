@@ -236,5 +236,12 @@
   "{voor} en {laatste}": "{voor} and {laatste}",
   "zonder naam": "without a name",
   "De integratie {naam} doet het weer.": "The {naam} integration is working again.",
-  "De integratie {naam} komt niet op. Herlaad hem in Home Assistant, of kijk of het internet het doet.": "The {naam} integration does not start. Reload it in Home Assistant, or check the internet connection."
+  "De integratie {naam} komt niet op. Herlaad hem in Home Assistant, of kijk of het internet het doet.": "The {naam} integration does not start. Reload it in Home Assistant, or check the internet connection.",
+  "hij volgde zijn eigen stand niet": "it did not follow its own mode",
+  "{naam} volgt de coach weer.": "{naam} follows the coach again.",
+  "{naam} laadt zelf van het net, en niet wat de coach wil. De coach probeert het opnieuw.": "{naam} is charging from the grid by itself, not what the coach wants. The coach is trying again.",
+  "{naam} ontlaadt zelf, en niet wat de coach wil. De coach probeert het opnieuw.": "{naam} is discharging by itself, not what the coach wants. The coach is trying again.",
+  "{naam} volgt de coach niet; de coach probeert het opnieuw.": "{naam} does not follow the coach; the coach is trying again.",
+  "{naam} volgt de coach niet en laadt van het net. Kijk of de batterij zelf iets doet, zoals kalibreren of een update.": "{naam} does not follow the coach and is charging from the grid. Check whether the battery is doing something itself, such as calibrating or an update.",
+  "{naam} volgt de coach niet en ontlaadt. Kijk of de batterij zelf iets doet, zoals kalibreren of een update.": "{naam} does not follow the coach and is discharging. Check whether the battery is doing something itself, such as calibrating or an update."
 }
