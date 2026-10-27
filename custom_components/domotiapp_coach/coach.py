@@ -6404,6 +6404,8 @@ class ChargerCoach:
     ) -> None:
         """Wat de coach van deze batterij bijhoudt naar de instellingen."""
         rij = {**self._batterij_rij(settings, device_id), **nieuw}
+        # Van v0.163.x, en niet te vertrouwen (v0.165.1, `_growatt_min_pct`).
+        rij.pop("growatt_pct_geweigerd", None)
         for sleutel in ("earned_days", "realized_days", "solar_stored_days"):
             dagen = rij.get(sleutel) or {}
             if len(dagen) > BATTERIJ_DAGEN_MAX:
@@ -7789,6 +7791,11 @@ class ChargerCoach:
             if geschreven.gelijk(gelezen):
                 sessie["growatt_bevestigd"] = now
                 sessie["growatt_fouten"] = 0
+                aangenomen = self._growatt_pct(rij, "growatt_pct_aangenomen")
+                if geschreven.net and (aangenomen is None or geschreven.vermogen_pct < aangenomen):
+                    # Wat er één keer stond neemt hij aan (v0.165.1).
+                    await self._async_batterij_bewaren(
+                        settings, device_id, {"growatt_pct_aangenomen": geschreven.vermogen_pct})
                 if geschreven.net:
                     # Zolang het van het net laadt blijft hij het nakijken.
                     sessie["growatt_terug_om"] = now + GROWATT_CONTROLE
@@ -7796,36 +7803,73 @@ class ChargerCoach:
                 if sessie.pop("growatt_gemeld", False):
                     await self._async_tell(t("{naam} neemt het laadschema weer aan.", naam=naam), telefoon=False)
             else:
-                _LOGGER.warning("%s: het laadschema staat er niet zoals geschreven: %s", device_id, gelezen)
                 if self._growatt_vermogen_geweigerd(geschreven, gelezen):
-                    # Alles staat er, behalve het vermogen: dat getal neemt hij niet aan (v0.163.0).
-                    # Onthouden, zodat de coach er voortaan boven blijft en niet hetzelfde blijft herhalen.
-                    oud = int(rij.get("growatt_pct_geweigerd") or 0)
-                    if geschreven.vermogen_pct > oud:
-                        await self._async_batterij_bewaren(
-                            settings, device_id, {"growatt_pct_geweigerd": geschreven.vermogen_pct})
-                        _LOGGER.warning(
-                            "%s: de Growatt neemt %s%% laadvermogen niet aan; de coach schrijft voortaan minstens %s%%",
-                            device_id, geschreven.vermogen_pct,
-                            self._growatt_min_pct({"growatt_pct_geweigerd": geschreven.vermogen_pct}),
-                        )
+                    # Alles staat er, behalve het vermogen. Geweigerd is alleen een getal dat er bij het
+                    # eerste teruglezen al niet stond, en dat lager is dan wat hij ooit aannam (v0.165.1).
+                    # In de klantwoning gaf de Growatt in de nacht van 26 op 27-10-2026 na zijn eigen ronde
+                    # telkens 100 terug, ook voor een 48 die drie uur lang wel terugkwam; v0.163.0 telde dat
+                    # elke keer als geweigerd en klom in één nacht van 48 naar 100%.
+                    sleutel = (geschreven.vermogen_pct, tuple(tuple(v) for v in geschreven.vakken), geschreven.stop_soc)
+                    aangenomen = self._growatt_pct(rij, "growatt_pct_aangenomen")
+                    if (sessie.get("growatt_bevestigd") is None and sessie.get("growatt_sprong") != sleutel
+                            and (aangenomen is None or geschreven.vermogen_pct < aangenomen)):
+                        _LOGGER.warning("%s: het laadschema staat er niet zoals geschreven: %s", device_id, gelezen)
+                        oud = self._growatt_pct(rij, "growatt_weigert_pct") or 0
+                        if geschreven.vermogen_pct > oud:
+                            await self._async_batterij_bewaren(
+                                settings, device_id, {"growatt_weigert_pct": geschreven.vermogen_pct})
+                            _LOGGER.warning(
+                                "%s: de Growatt neemt %s%% laadvermogen niet aan; de coach schrijft voortaan minstens %s%%",
+                                device_id, geschreven.vermogen_pct,
+                                self._growatt_min_pct({"growatt_weigert_pct": geschreven.vermogen_pct}),
+                            )
+                    elif sessie.get("growatt_sprong") == sleutel:
+                        # Al een keer opnieuw geschreven, en weer anders teruggelezen: dan laat hij het zo.
+                        # De stopgrens begrenst wat erin gaat, en die staat er wel.
+                        _LOGGER.info("%s: de Growatt geeft %s%% laadvermogen terug, geschreven %s%%; zo gelaten",
+                                     device_id, gelezen.get("charge_power"), geschreven.vermogen_pct)
+                        sessie["growatt_bevestigd"] = now
+                        sessie["growatt_fouten"] = 0
+                        sessie["growatt_terug_om"] = now + GROWATT_CONTROLE
+                        self.state[device_id]["schedule"]["confirmed"] = True
+                        return
+                    else:
+                        # Het stond er al eens: één keer opnieuw schrijven, zonder melding.
+                        _LOGGER.warning("%s: de Growatt geeft %s%% laadvermogen terug, geschreven %s%%; nog één keer",
+                                        device_id, gelezen.get("charge_power"), geschreven.vermogen_pct)
+                        sessie["growatt_sprong"] = sleutel
+                        sessie["growatt_geschreven"] = None
+                        return
+                else:
+                    _LOGGER.warning("%s: het laadschema staat er niet zoals geschreven: %s", device_id, gelezen)
                 # Opnieuw schrijven na de pauze.
                 sessie["growatt_geschreven"] = None
                 await self._async_growatt_fout(now, device, sessie, geschreven)
 
     @staticmethod
-    def _growatt_min_pct(rij: dict[str, Any]) -> int:
+    def _growatt_pct(rij: dict[str, Any], sleutel: str) -> int | None:
+        try:
+            waarde = rij.get(sleutel)
+            return None if waarde is None else int(waarde)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _growatt_min_pct(cls, rij: dict[str, Any]) -> int:
         """Het laagste laadvermogen dat deze Growatt aanneemt, in procent (v0.163.0).
 
         `GROWATT_MIN_PCT`, of het volgende tiental boven het hoogste dat hij ooit weigerde: wat hij
         wel aanneemt weet de coach niet, en met een procent tegelijk schreef hij in het virtuele huis
-        (`growatt-weigert`) achttien keer voordat hij er was.
+        (`growatt-weigert`) achttien keer voordat hij er was. Nooit boven een getal dat er wel eens
+        stond (`growatt_pct_aangenomen`, v0.165.1). `growatt_pct_geweigerd` van v0.163.x telt niet
+        meer: dat klom mee met een Growatt die 100 teruggaf voor een getal dat er wel stond.
         """
-        try:
-            geweigerd = int(rij.get("growatt_pct_geweigerd") or 0)
-        except (TypeError, ValueError):
-            geweigerd = 0
-        return min(100, max(GROWATT_MIN_PCT, (geweigerd // 10 + 1) * 10))
+        geweigerd = cls._growatt_pct(rij, "growatt_weigert_pct") or 0
+        grens = max(GROWATT_MIN_PCT, (geweigerd // 10 + 1) * 10)
+        aangenomen = cls._growatt_pct(rij, "growatt_pct_aangenomen")
+        if aangenomen is not None:
+            grens = min(grens, max(GROWATT_MIN_PCT, aangenomen))
+        return min(100, grens)
 
     @staticmethod
     def _growatt_vermogen_geweigerd(geschreven: GrowattSchema, gelezen: dict[str, Any] | None) -> bool:

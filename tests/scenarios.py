@@ -1695,6 +1695,14 @@ growatt_weigert = growatt_ochtend_zonder_grens.kopie(
     uitleg="dezelfde ochtend, en een Growatt die een laag laadvermogen niet aanneemt: de coach leert het en herhaalt niet",
     batterij=Batterij(**{**GROWATT_SPH, "soc": 15.0, "growatt_min_pct": 30}, min_winst=0.0),
 )
+# Een Growatt die na zijn eigen ronde 100/100 teruggeeft voor een vermogen dat er wel stond (v0.165.1).
+# In de klantwoning las 48% op 26-10-2026 drie uur lang goed terug, en daarna telkens 100; v0.163.0 telde
+# dat als geweigerd en klom in één nacht naar 100%. Hier geeft hij het vanaf een half uur na het schrijven.
+growatt_terug_100 = growatt_ochtend_zonder_grens.kopie(
+    naam="growatt-terug-100",
+    uitleg="dezelfde ochtend, en een Growatt die later 100% teruggeeft: de coach blijft bij zijn eigen vermogen",
+    batterij=Batterij(**{**GROWATT_SPH, "soc": 15.0, "growatt_terug_100": 30}, min_winst=0.0),
+)
 # Een paal die zichzelf herstart (v0.163.3): in een klantwoning nam een Alfen op 26-10-2026 zes
 # minuten lang geen opdracht aan, en elke ronde gaf een fout met traceback. Nu een waarschuwing, en
 # pas na tien minuten een melding; wat de paal deed blijft hij doen.
@@ -1773,7 +1781,7 @@ ALLE = [
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,
     growatt_bihorario, growatt_zon, growatt_eigen_zon, growatt_schaduw, growatt_vasthouden,
-    growatt_ochtend, growatt_ochtend_zonder_grens, growatt_herstart, growatt_weigert,
+    growatt_ochtend, growatt_ochtend_zonder_grens, growatt_herstart, growatt_weigert, growatt_terug_100,
 ]
 
 

@@ -904,6 +904,9 @@ class Batterij:
     # Het laagste laadvermogen in procent dat de API aanneemt (v0.163.0). Lager houdt hij het
     # oude getal en zet hij de rest wel, zoals in de klantwoning op 26-10-2026 (8 geweigerd, 10 niet).
     growatt_min_pct: int = 0
+    # Minuten na een schrijfopdracht waarna het teruglezen 100 vermogen en 100 stopgrens geeft, terwijl
+    # het geschreven schema blijft gelden (v0.165.1), zoals in de klantwoning in de nacht van 26 op 27-10-2026.
+    growatt_terug_100: int = 0
     schema: dict = field(default_factory=lambda: {
         "charge_power": 100, "charge_stop_soc": 100, "mains_enabled": False,
         "periods": [{"period_id": i, "start_time": "00:00", "end_time": "00:00", "enabled": i == 1}
@@ -2451,7 +2454,11 @@ class Diensten:
         nu = self.wereld.nu
         self.verstuurd.append(("growatt_server", dienst, dict(data)))
         if dienst == "read_ac_charge_times":
-            return {**bat.schema, "periods": [dict(p) for p in bat.schema["periods"]]}
+            terug = {**bat.schema, "periods": [dict(p) for p in bat.schema["periods"]]}
+            if (bat.growatt_terug_100 and bat.schema_op is not None
+                    and (nu - bat.schema_op).total_seconds() >= bat.growatt_terug_100 * 60):
+                terug.update(charge_power=100, charge_stop_soc=100)
+            return terug
         if dienst != "write_ac_charge_times":
             return None
         # Een tweede opdracht binnen een minuut faalt, zoals in de klantwoning op 22-10-2026.
