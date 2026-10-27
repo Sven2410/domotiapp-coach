@@ -61,7 +61,10 @@ from .batterij import (
     MAX_LADEN,
     NETLADEN,
     NUL,
+    ONTLADEN,
     STAND_NAMEN,
+    STANDBY,
+    ZONNELADEN,
     VOL_MARGE,
     Batterij,
     GROWATT_HOUDEN_KWH,
@@ -346,6 +349,16 @@ VREEMD_PAUZE = timedelta(hours=1)
 # na een laadbeurt waarin de batterij vijf minuten na een volle auto pas weer
 # zelf regelde: "zet die 5 min terug naar 2 min."
 ZELF_WACHT = timedelta(minutes=2)
+# Een batterij die de coach niet volgt (v0.167.0). In een klantwoning laadde de batterij op
+# 27-10-2026 van 16:00:54 tot 16:17 2,5 kW van het net, eerst terwijl de coach wilde terugleveren
+# en daarna in haar eigen stand op nul op de meter; elke eerdere keer volgde ze binnen 5 tot 15 s.
+# Gemeten met het vermogen van de batterij en de meter, niet met de opdracht. Na `VOLGT_NIET_NA`
+# probeert de coach het één keer opnieuw (in de eigen stand: overnemen op 0 W, en zolang
+# `VOLGT_NIET_EXTERN` niet teruggeven), na `VOLGT_NIET_MELDEN` één melding.
+VOLGT_NIET_W = 500.0
+VOLGT_NIET_NA = timedelta(minutes=3)
+VOLGT_NIET_MELDEN = timedelta(minutes=10)
+VOLGT_NIET_EXTERN = timedelta(minutes=30)
 ZELF_ZEKERING_W = 500.0
 ZELF_MARGE = 1.0
 # Stopt de laadpaal, dan telt hij voor de batterij nog als ladend tot de meter
@@ -7129,6 +7142,78 @@ class ChargerCoach:
                     "{reden} De batterij doet dat zelf, met zijn eigen meter.", reden=besluit.reason
                 ).strip()
             self.state[device_id]["setpoint_w"] = None
+        if stuurt:
+            await self._async_volgt_niet(now, settings, device, sessie, besluit)
+
+    def _volgt_niet(self, settings: dict[str, Any], device: dict[str, Any], sessie: dict[str, Any],
+                    besluit: Besluit) -> str | None:
+        """Wat de batterij nu anders doet dan de coach wil, of None (v0.167.0).
+
+        "net" als ze van het net laadt terwijl de coach niet van het net wil laden, "ontladen" als ze
+        ontlaadt terwijl de coach laden of stilstaan wil. Helpt ze de auto, dan is ontladen de bedoeling.
+        """
+        watt = self._batterij_w(device)
+        if watt is None or not sessie.get("stuurt") or sessie.get("bezig"):
+            return None
+        net_w = self._net_nu(settings)[0]
+        if (watt > VOLGT_NIET_W and net_w is not None and net_w > VOLGT_NIET_W
+                and besluit.stand in (NUL, ZONNELADEN, ONTLADEN, HANDELEN, STANDBY)):
+            return "net"
+        if (watt < -VOLGT_NIET_W and not sessie.get("helpt")
+                and besluit.stand in (NETLADEN, MAX_LADEN, ZONNELADEN, STANDBY)):
+            return "ontladen"
+        return None
+
+    async def _async_volgt_niet(self, now: datetime, settings: dict[str, Any], device: dict[str, Any],
+                                sessie: dict[str, Any], besluit: Besluit) -> None:
+        """Een batterij die de coach niet volgt: zeggen, één keer opnieuw, en na tien minuten melden."""
+        device_id = device.get("id", "")
+        naam = device.get("name") or t("De batterij")
+        wat = self._volgt_niet(settings, device, sessie, besluit)
+        if wat is None:
+            sessie.pop("volgt_niet", None)
+            if sessie.pop("volgt_niet_gemeld", False):
+                await self._async_tell(t("{naam} volgt de coach weer.", naam=naam), telefoon=False)
+            if sessie.get("volgt_extern_tot") is not None and now >= sessie["volgt_extern_tot"]:
+                sessie.pop("volgt_extern_tot", None)
+            return
+        sinds, opnieuw = sessie.get("volgt_niet") or (now, False)
+        sessie["volgt_niet"] = (sinds, opnieuw)
+        if now - sinds < VOLGT_NIET_NA:
+            return
+        self.state[device_id]["reason"] = (
+            t("{naam} laadt zelf van het net, en niet wat de coach wil. De coach probeert het opnieuw.", naam=naam)
+            if wat == "net" else
+            t("{naam} ontlaadt zelf, en niet wat de coach wil. De coach probeert het opnieuw.", naam=naam)
+        )
+        if not opnieuw:
+            sessie["volgt_niet"] = (sinds, True)
+            _LOGGER.warning("%s volgt de coach niet: de coach wil %s, de batterij doet %.0f W (net %s W)",
+                            device_id, besluit.stand, self._batterij_w(device) or 0.0,
+                            None if (n := self._net_nu(settings)[0]) is None else round(n))
+            await self._async_noteer(
+                t("{naam} volgt de coach niet; de coach probeert het opnieuw.", naam=naam), now,
+                {"device": device_id, "mode": besluit.stand, "rule": "volgt-niet", "applied": True},
+            )
+            if sessie.get("zelf"):
+                # In haar eigen stand: overnemen op 0 W, en zolang niet teruggeven.
+                sessie["nul_open"] = not await self._async_overnemen_op_nul(device)
+                sessie["zelf"] = False
+                sessie["volgt_extern_tot"] = now + VOLGT_NIET_EXTERN
+            else:
+                await self._async_batterij_zetten(device, 0.0)
+            sessie["regelaar"] = Regelaar(opdracht_w=0.0, opdracht_op=_regelklok(), bezonken=False)
+            return
+        if now - sinds >= VOLGT_NIET_MELDEN and not sessie.get("volgt_niet_gemeld"):
+            sessie["volgt_niet_gemeld"] = True
+            await self._async_tell(
+                t("{naam} volgt de coach niet en laadt van het net. Kijk of de batterij zelf iets doet, zoals "
+                  "kalibreren of een update.", naam=naam)
+                if wat == "net" else
+                t("{naam} volgt de coach niet en ontlaadt. Kijk of de batterij zelf iets doet, zoals "
+                  "kalibreren of een update.", naam=naam),
+                kritiek=True,
+            )
 
     def _kasboek(
         self, sessie: dict[str, Any], settings: dict[str, Any], device_id: str, nu: datetime,
@@ -7239,7 +7324,8 @@ class ChargerCoach:
             hoger = self._hogere_toezeggingen(settings, device)
             ruimte_w = self._laadruimte_w(settings, device, batterij_w, hoger)
             if self._zelf_instelling(device) or sessie.get("zelf"):
-                waarom = self._zelf_niet(
+                extern_tot = sessie.get("volgt_extern_tot")
+                waarom = t("hij volgde zijn eigen stand niet") if extern_tot is not None and nu < extern_tot else self._zelf_niet(
                     device, besluit, b, batterij_w, ruimte_w,
                     # Zonder wat een ander toezegde, en of dat een laadpaal was:
                     # dan is het niet de zekering maar de paal die gaat laden.

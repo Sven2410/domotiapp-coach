@@ -2047,3 +2047,27 @@ Lukt het na een uur nog niet (`INTEGRATIE_MELDEN`), dan één melding met de naa
 dan één keer "doet het weer" in de geschiedenis. Daarna gaat de gewone weg verder (v0.162.0).
 
 Proef 209 in test_coach.py. De echte toets is de volgende storing.
+
+## Een batterij die de coach niet volgt (v0.167.0)
+
+In een klantwoning laadde de batterij op 27-10-2026 van 16:00:54 tot 16:17 2,5 kW van het net, in het duurste
+uur van de dag. Eerst wilde de coach terugleveren, daarna stond hij op nul op de meter in haar eigen stand. Ze
+ging door tot 99%, boven haar eigen laadgrens van 95. Elke eerdere keer volgde ze binnen 5 tot 15 s. De coach
+bleef 14 minuten "Nul op de meter" zeggen terwijl het huis 4,6 kW van het net nam. Waarom ze het deed is niet
+zeker (een eigen kalibratie bovenin?); het is iets van de batterij, maar de coach hoort het te zien.
+
+Nu kijkt de coach elke ronde naar het gemeten vermogen van de batterij en de meter, niet naar zijn opdracht
+(`_volgt_niet`). Niet volgen is: meer dan `VOLGT_NIET_W` (500 W) laden terwijl het net meer dan 500 W levert en
+de coach nul, alleen zon, ontladen, handelen of stilstaan wil; of meer dan 500 W ontladen terwijl hij laden,
+alleen zon of stilstaan wil (behalve als ze de auto helpt). Na `VOLGT_NIET_NA` (3 min):
+
+- een waarschuwing in het log met wat de coach wil en wat ze doet, en een besluit in de geschiedenis;
+- de reden op de kaart zegt het ("laadt zelf van het net, en niet wat de coach wil");
+- één keer opnieuw: extern gestuurd 0 W en de regelaar opnieuw; in haar eigen stand overnemen op 0 W, en
+  `VOLGT_NIET_EXTERN` (30 min) niet teruggeven;
+- volgt ze na `VOLGT_NIET_MELDEN` (10 min) nog niet, één melding aan de bewoner; volgt ze weer, dan "volgt de
+  coach weer" in de geschiedenis.
+
+Het kasboek telt het al als wat het was: de regelaar neemt de sensor zodra die de opdracht een tijdje
+tegenspreekt (`vermogen_w`). Scenario's `batterij-volgt-niet`, `-volgt-niet-zelf` en `-volgt-even-niet` (twee
+minuten: niets), en geen enkel ander scenario zegt "volgt de coach niet".

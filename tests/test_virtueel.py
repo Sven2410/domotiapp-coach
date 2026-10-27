@@ -1956,6 +1956,23 @@ if (vl := v("growatt-weigert")):
              len(voor_nacht) <= 4 and vl.gw_gefaald == 0, f"{schrijf_w}")
     controle("growatt-weigert: daarna staat er een vermogen dat hij aanneemt",
              any(w[2] >= 30 and w[1] for w in vl.gw_schrijf), f"{schrijf_w}")
+for naam_vn in ("batterij-volgt-niet", "batterij-volgt-niet-zelf"):
+    if (vl := v(naam_vn)):
+        tel_vn = [(t.strftime("%H:%M"), m) for t, m in vl.meldingen if "volgt de coach niet" in m]
+        gesch_vn = [g.get("message") or "" for g in vl.geschiedenis]
+        print(f"  {naam_vn}: {tel_vn}")
+        controle(f"{naam_vn}: na tien minuten één melding op de telefoon", len(tel_vn) == 1
+                 and "19:09" <= tel_vn[0][0] <= "19:12", f"{tel_vn}")
+        controle(f"{naam_vn}: het besluit zegt het na drie minuten, en daarna dat hij weer volgt",
+                 any("probeert het opnieuw" in g for g in gesch_vn) and any("volgt de coach weer" in g for g in gesch_vn),
+                 f"{[g for g in gesch_vn if 'volgt' in g]}")
+if (vl := v("batterij-volgt-even-niet")):
+    controle("batterij-volgt-even-niet: twee minuten is geen storing",
+             not any("volgt de coach" in (g.get("message") or "") for g in vl.geschiedenis), "")
+controle("een batterij die gewoon volgt krijgt nooit 'volgt de coach niet'",
+         not [n for n, vl in V.items() if not n.startswith("batterij-volgt-niet")
+              and any("volgt de coach niet" in (g.get("message") or "") for g in vl.geschiedenis)],
+         f"{[n for n, vl in V.items() if not n.startswith('batterij-volgt-niet') and any('volgt de coach niet' in (g.get('message') or '') for g in vl.geschiedenis)]}")
 if (vl := v("growatt-terug-100")):
     schrijf_t = [(w[0].strftime("%H:%M"), w[2]) for w in vl.gw_schrijf if w[1]]
     print(f"  growatt-terug-100: {schrijf_t}")
