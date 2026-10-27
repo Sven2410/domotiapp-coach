@@ -695,6 +695,46 @@ ZON_VOORUIT_UREN = 40
 HUIS_VENSTER = timedelta(days=7)
 
 
+def _netmeters(bronnen: dict[str, Any]) -> list[str]:
+    """Elke netmeter die is ingevuld, ook die van de andere vorm (v0.170.0); zie `_net_afname`."""
+    return [e for e in (bronnen.get("grid_signed"), bronnen.get("grid_import"), bronnen.get("grid_export")) if e]
+
+
+def _net_afname(bronnen: dict[str, Any], reeksen: dict[str, dict[int, float]], stempel: int) -> float | None:
+    """Wat het huis in dit kwartier van het net nam, in watt, teruglevering negatief, of None.
+
+    Uit de opslag, per kwartier: `reeksen` is per entiteit het gemiddelde per begin van een kwartier.
+    Eerst de meter van `grid_mode`, en zegt die voor dit kwartier niets, dan de andere vorm als die nog
+    is ingevuld. Zegt geen van beide iets, dan None: dat kwartier is onbekend, geen kwartier zonder net.
+
+    In een klantwoning kwam op 27-10-2026 een meter met een teken bij, naast de twee losse meters die
+    er al waren. Het huisverbruik nam toen "signed zodra die reeks iets heeft", en telde het net voor
+    elk ouder kwartier als nul: 's ochtends 0,00 kWh per uur in plaats van 2,67. Twee losse meters
+    tellen alleen als ze er allebei zijn (of als er maar één is ingevuld).
+    """
+    def getekend() -> float | None:
+        naam = bronnen.get("grid_signed")
+        w = (reeksen.get(naam) or {}).get(stempel) if naam else None
+        if w is None:
+            return None
+        return -w if bronnen.get("grid_signed_invert") else w
+
+    def los() -> float | None:
+        erin, eruit = bronnen.get("grid_import"), bronnen.get("grid_export")
+        if not erin and not eruit:
+            return None
+        waarden = [(reeksen.get(e) or {}).get(stempel) if e else 0.0 for e in (erin, eruit)]
+        if any(w is None for w in waarden):
+            return None
+        return waarden[0] - waarden[1]
+
+    for lees in (getekend, los) if bronnen.get("grid_mode") == "signed" else (los, getekend):
+        waarde = lees()
+        if waarde is not None:
+            return waarde
+    return None
+
+
 def _mediaan(waarden: list[float]) -> float:
     """De middelste waarde.
 
@@ -4589,9 +4629,7 @@ class ChargerCoach:
         vrij = sessie.get("vrijgegeven")
         try:
             sources = settings.get("sources") or {}
-            signed = sources.get("grid_mode") == "signed"
-            netten = [sources.get("grid_signed")] if signed else [sources.get("grid_export"), sources.get("grid_import")]
-            netten = [e for e in netten if e]
+            netten = _netmeters(sources)
             # Vanaf het vrijgeven, want de maat wil weten wat er toen aan zon
             # over was.
             rijen = await self._async_kwartieren(
@@ -4603,22 +4641,13 @@ class ChargerCoach:
         except Exception:  # noqa: BLE001 - dan blijft het gat een gat
             _LOGGER.exception("terugrekenen van de beurt van %s mislukt", device.get("id", ""))
             return
-        per_start = {e: {int(r["start"]): r for r in rijen.get(e) or []} for e in netten}
+        per_start = {e: {int(r["start"]): float(r.get("gemiddeld") or 0.0) for r in rijen.get(e) or []} for e in netten}
 
         def netto_op(start: int) -> float | None:
-            if signed and netten:
-                r = per_start.get(netten[0], {}).get(start)
-                if r is None:
-                    return None
-                s = float(r.get("gemiddeld") or 0.0)
-                return -(-s if sources.get("grid_signed_invert") else s)
-            if len(netten) == 2:
-                re_ = per_start[netten[0]].get(start)
-                ri = per_start[netten[1]].get(start)
-                if re_ is None or ri is None:
-                    return None
-                return float(re_.get("gemiddeld") or 0.0) - float(ri.get("gemiddeld") or 0.0)
-            return None
+            # Naar het net positief; met de andere meter voor een kwartier waar die van `grid_mode`
+            # niets zegt (v0.170.0).
+            afname = _net_afname(sources, per_start, start)
+            return None if afname is None else -afname
 
         for rij in rijen.get(device["entity"]) or []:
             t0 = datetime.fromtimestamp(int(rij["start"]))
@@ -9870,9 +9899,7 @@ class ChargerCoach:
 
         bronnen = settings.get("sources") or {}
         zonnen_ids = zonsensoren(settings)
-        erin = bronnen.get("grid_import")
-        eruit = bronnen.get("grid_export")
-        getekend = bronnen.get("grid_signed")
+        netten = _netmeters(bronnen)
         # Elk apparaat met het teken waarmee het van het huisverbruik af gaat.
         # Een thuisbatterij telt twee kanten op: wat hij laadt is geen
         # huisverbruik, en wat hij ontlaadt heeft het huis wel gebruikt.
@@ -9891,7 +9918,7 @@ class ChargerCoach:
             elif device.get("entity"):
                 tekens.append((device["entity"], 1.0))
         apparaten = [naam for naam, _ in tekens]
-        wanted = [e for e in [*zonnen_ids, erin, eruit, getekend, *apparaten] if e]
+        wanted = [e for e in [*zonnen_ids, *netten, *apparaten] if e]
         if not wanted:
             return
 
@@ -9917,28 +9944,19 @@ class ChargerCoach:
         for zon_id in zonnen_ids:
             for stempel, watt in kwartieren(zon_id).items():
                 zonnen[stempel] = zonnen.get(stempel, 0.0) + watt
-        binnen, buiten, getekende = (
-            kwartieren(erin),
-            kwartieren(eruit),
-            kwartieren(getekend),
-        )
+        net_reeksen = {naam: kwartieren(naam) for naam in netten}
         apparaat = [(kwartieren(naam), teken) for naam, teken in tekens]
 
-        # Een meter met een teken meet één getal, en of plus inkoop of
-        # teruglevering betekent verschilt per merk. Dat vinkje staat al bij
-        # Instellingen en wordt overal elders gelezen; hier stond het niet, en
-        # dan zou een woning met een omgekeerde meter een huisverbruik krijgen
-        # met het verkeerde teken. Zie ook `_read` en `monitor.py`.
-        omgekeerd = bool(bronnen.get("grid_signed_invert"))
-
+        # Het net per kwartier volgens `grid_mode`, met de andere meter voor de kwartieren waar die
+        # niets zegt, en het vinkje omgekeerd erbij (`_net_afname`, v0.170.0). Een kwartier zonder net
+        # telt niet mee: als nul maakte het het huis te klein, en na een nieuwe meter een week lang.
+        # Zonder netmeter rekent hij zoals altijd met alleen de zon en de apparaten.
         per_uur: dict[int, list[float]] = {}
-        for stempel in sorted(set(zonnen) | set(binnen) | set(getekende)):
-            if getekende:
-                net = getekende.get(stempel, 0.0)
-                if omgekeerd:
-                    net = -net
-            else:
-                net = binnen.get(stempel, 0.0) - buiten.get(stempel, 0.0)
+        stempels = set(zonnen).union(*net_reeksen.values()) if net_reeksen else set(zonnen)
+        for stempel in sorted(stempels):
+            net = _net_afname(bronnen, net_reeksen, stempel) if netten else 0.0
+            if net is None:
+                continue
             watt = zonnen.get(stempel, 0.0) + net
             for reeks, teken in apparaat:
                 watt -= teken * reeks.get(stempel, 0.0)
@@ -12467,15 +12485,13 @@ class ChargerCoach:
         paal = device.get("entity")
         if not paal:
             return None
-        signed = sources.get("grid_mode") == "signed"
-        netten = [sources.get("grid_signed")] if signed else [sources.get("grid_export"), sources.get("grid_import")]
-        netten = [e for e in netten if e]
+        netten = _netmeters(sources)
         rijen = await self._async_kwartieren([paal, *netten], plug - timedelta(minutes=15), tot)
         paal_rijen = rijen.get(paal) or []
         if not paal_rijen:
             return None
-        per_start: dict[str, dict[int, dict[str, float]]] = {
-            e: {int(r["start"]): r for r in rijen.get(e) or []} for e in netten
+        per_start: dict[str, dict[int, float]] = {
+            e: {int(r["start"]): float(r.get("gemiddeld") or 0.0) for r in rijen.get(e) or []} for e in netten
         }
         # Vol vermogen: het maximum van de paal op de fasen van de auto.
         fasen = 3
@@ -12512,17 +12528,9 @@ class ChargerCoach:
             if sec <= 0:
                 continue
             paal_w = max(0.0, float(rij.get("gemiddeld") or 0.0))
-            netto: float | None = None
-            if signed:
-                r = per_start.get(netten[0], {}).get(int(rij["start"])) if netten else None
-                if r is not None:
-                    s = float(r.get("gemiddeld") or 0.0)
-                    netto = -(-s if sources.get("grid_signed_invert") else s)
-            elif len(netten) == 2:
-                re_ = per_start[netten[0]].get(int(rij["start"]))
-                ri = per_start[netten[1]].get(int(rij["start"]))
-                if re_ is not None and ri is not None:
-                    netto = float(re_.get("gemiddeld") or 0.0) - float(ri.get("gemiddeld") or 0.0)
+            # Naar het net positief, met de andere meter waar die van `grid_mode` niets zegt (v0.170.0).
+            afname = _net_afname(sources, per_start, int(rij["start"]))
+            netto: float | None = None if afname is None else -afname
             over = max(0.0, netto + paal_w) if netto is not None else 0.0
             koop, terug = prijs_op(max(t0, plug))
             if uur is not None and uur != t0.hour:

@@ -3937,6 +3937,18 @@ proef("Tijdlijn: van het net bij een gesplitste meter en bij een meter met een t
   assert.deepEqual(T.netReeks({ grid_mode: "split", grid_import: "" }, new Map()), [], "zonder meter niets");
 });
 
+proef("Tijdlijn: na een nieuwe netmeter de oude kwartieren uit de andere meter (v0.170.0)", () => {
+  const rij = (tijd, watt) => ({ start: tlOm(tijd), laagste: watt, piek: watt, gemiddeld: watt, seconden: 900 });
+  const kwartieren = new Map([
+    ["sensor.af", [rij("11:45", 900), rij("12:00", 700)]],
+    ["sensor.p1", [rij("12:00", 300)]],
+  ]);
+  const nieuw = T.netReeks({ grid_mode: "signed", grid_signed: "sensor.p1", grid_import: "sensor.af" }, kwartieren);
+  assert.deepEqual(nieuw.map((r) => r.gemiddeld), [900, 300], "11:45 uit de losse meter, 12:00 van de nieuwe");
+  const los = T.netReeks({ grid_mode: "split", grid_signed: "sensor.p1", grid_import: "sensor.af" }, kwartieren);
+  assert.deepEqual(los.map((r) => r.gemiddeld), [900, 700], "op split wint de losse meter");
+});
+
 proef("Tijdlijn: aan zonder dat er iets liep is geen zon en geen net", () => {
   // Een auto die niet wakker werd: de paal stond aan, de meter van de paal zag niets.
   const rijen = tlRijen(TL_BEURT, { p: tlWatt("12:00", "13:45", 0) }, tlWatt("00:00", "24:00", 500));
