@@ -12072,6 +12072,78 @@ controle("de lastbewaking rekent met de som: 3600 W op 16 A",
          f"{lezing207}")
 controle("en luistert naar de plugs", {"sensor.was_w", "sensor.droog_w"} <= set(monitor207._watched_entities()), "")
 
+print("=== 209. een integratie die na een storing niet opkwam: de coach herlaadt hem, en alleen die (v0.166.0) ===")
+# In een klantwoning startte Home Assistant op 27-10-2026 na een stroomstoring eerder dan het internet; de
+# integratie van de batterij stond op setup_error, en daaruit probeert Home Assistant het niet zelf opnieuw.
+inst208 = instellingen(devices=[LAADPAAL, {"id": "dev-bat", "type": "battery", "name": "Batterij",
+                                           "entities": {"soc": "sensor.bat_soc", "power": "sensor.bat_w"}}])
+inst208["sources"]["solar_power"] = "sensor.zon_w"
+inst208["installation"]["balancer_entity"] = "sensor.lastbewaker"
+hass208, _, coach208 = bouw({}, inst208)
+entries208 = {
+    "e-bat": types.SimpleNamespace(domain="cloudbatterij", title="Batterijcloud", state="setup_error", disabled_by=None),
+    "e-zon": types.SimpleNamespace(domain="omvormer", title="Omvormer", state="loaded", disabled_by=None),
+    "e-paal": types.SimpleNamespace(domain="paal", title="Paal", state="setup_retry", disabled_by=None),
+    "e-uit": types.SimpleNamespace(domain="meter", title="Meter", state="not_loaded", disabled_by="user"),
+    "e-zelf": types.SimpleNamespace(domain="domotiapp_coach", title="Coach", state="not_loaded", disabled_by=None),
+}
+bij208 = {"sensor.bat_soc": "e-bat", "sensor.bat_w": "e-bat", "sensor.zon_w": "e-zon",
+          LAADPAAL["entities"]["status"]: "e-paal", "sensor.lastbewaker": "e-uit", "sensor.coach_iets": "e-zelf"}
+inst208["sources"]["extra"] = "sensor.coach_iets"
+herladen208 = []
+lukt208 = {"n": False}
+
+
+async def herlaad208(entry_id):
+    herladen208.append(entry_id)
+    if lukt208["n"]:
+        entries208[entry_id].state = "loaded"
+
+
+hass208.config_entries = types.SimpleNamespace(async_get_entry=lambda eid: entries208.get(eid),
+                                               async_reload=herlaad208)
+er208 = types.ModuleType("homeassistant.helpers.entity_registry")
+er208.async_get = lambda hass: types.SimpleNamespace(
+    async_get=lambda eid: types.SimpleNamespace(config_entry_id=bij208[eid]) if eid in bij208 else None)
+oud208 = sys.modules.get("homeassistant.helpers.entity_registry")
+sys.modules["homeassistant.helpers.entity_registry"] = er208
+gemeld208 = []
+
+
+async def tell208(bericht, kritiek=False, telefoon=True):
+    gemeld208.append((bericht, kritiek, telefoon))
+
+
+coach208._async_tell = tell208
+NU208 = dt.datetime(2026, 10, 27, 17, 55)
+try:
+    for m in range(0, 15):
+        asyncio.run(coach208._async_integraties(inst208, NU208 + dt.timedelta(minutes=m)))
+    controle("het eerste kwartier na de start niets: Home Assistant zet zelf nog alles neer", herladen208 == [],
+             f"{herladen208}")
+    asyncio.run(coach208._async_integraties(inst208, NU208 + dt.timedelta(minutes=15)))
+    controle("na een kwartier alleen de integratie op setup_error; geladen, setup_retry, uitgezet en de coach zelf niet",
+             herladen208 == ["e-bat"], f"{herladen208}")
+    for m in range(16, 30):
+        asyncio.run(coach208._async_integraties(inst208, NU208 + dt.timedelta(minutes=m)))
+    controle("niet vaker dan eens per kwartier", herladen208 == ["e-bat"], f"{herladen208}")
+    for m in range(30, 76):
+        asyncio.run(coach208._async_integraties(inst208, NU208 + dt.timedelta(minutes=m)))
+    kritiek208 = [g for g in gemeld208 if g[1]]
+    print(f"  herladen {herladen208}, gemeld {gemeld208}")
+    controle("lukt het na een uur nog niet, dan één melding, met de naam van de integratie en geen entiteit",
+             len(kritiek208) == 1 and "Batterijcloud" in kritiek208[0][0] and "sensor." not in kritiek208[0][0],
+             f"{gemeld208}")
+    lukt208["n"] = True
+    for m in range(76, 140):
+        asyncio.run(coach208._async_integraties(inst208, NU208 + dt.timedelta(minutes=m)))
+    weer208 = [g for g in gemeld208 if "doet het weer" in g[0]]
+    controle("en lukt het, dan één keer doet het weer, alleen in de geschiedenis, en daarna laat hij hem met rust",
+             len(weer208) == 1 and weer208[0][2] is False and herladen208.count("e-bat") == 6
+             and len([g for g in gemeld208 if g[1]]) == 1, f"{herladen208}, {gemeld208}")
+finally:
+    sys.modules["homeassistant.helpers.entity_registry"] = oud208
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

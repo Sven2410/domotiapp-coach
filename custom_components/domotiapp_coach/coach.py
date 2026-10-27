@@ -15,6 +15,7 @@ the two apart.
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 from dataclasses import asdict, replace
 from datetime import date, datetime, time, timedelta, timezone
@@ -380,6 +381,16 @@ BATTERIJ_BEWAREN = timedelta(minutes=5)
 # onthield, en dat zet hij na een schrijfopdracht zelf op wat er geschreven werd; wat de
 # omvormer echt heeft staat er pas na de volgende ronde, en die komt elke vijf minuten
 # (`SCAN_INTERVAL` van growatt_server). Daarom zes minuten (v0.152.0; tot dan 2 en 1,5).
+# Een integratie die niet opkomt (v0.166.0). In een klantwoning startte Home Assistant op 27-10-2026
+# na een stroomstoring eerder dan het internet, en ging de integratie van de batterij naar
+# `setup_error`; daaruit probeert Home Assistant het niet zelf opnieuw. De coach kijkt elk kwartier
+# de integraties achter zijn eigen entiteiten na, herlaadt alleen wat er niet staat, en meldt het na
+# een uur. De eigenaar: "is die wel online dan niet herladen".
+INTEGRATIE_CONTROLE = timedelta(minutes=15)
+INTEGRATIE_MELDEN = timedelta(hours=1)
+INTEGRATIE_WACHT = timedelta(seconds=60)
+INTEGRATIE_HERLADEN = ("setup_error", "not_loaded")
+_ENTITEIT_ID = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 GROWATT_DOMEIN = "growatt_server"
 GROWATT_PAUZE = timedelta(minutes=5)
 GROWATT_TERUG = timedelta(minutes=6)
@@ -1539,6 +1550,10 @@ class ChargerCoach:
         # Per sensor sinds wanneer hij niets zegt, en welke daarvan al gemeld zijn.
         self._sensor_stil: dict[str, datetime] = {}
         self._sensor_gemeld: set[str] = set()
+        # Per integratie die niet opkwam sinds wanneer, welke gemeld is, en de volgende controle (v0.166.0).
+        self._integratie_stuk: dict[str, datetime] = {}
+        self._integratie_gemeld: set[str] = set()
+        self._integratie_om: datetime | None = None
         # Per laadpaal sinds wanneer een opdracht niet aankomt, en welke al gemeld zijn (v0.163.3).
         self._paal_weg: dict[str, datetime] = {}
         # Wat elke paal deze ronde in totaal trekt of gaat trekken, per fase (v0.164.1): voor een
@@ -2341,6 +2356,87 @@ class ChargerCoach:
                 self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
             except Exception:  # noqa: BLE001 - een melding onthouden is geen reden om te stoppen
                 _LOGGER.exception("kon niet bewaren welke sensoren al gemeld zijn")
+
+    @staticmethod
+    def _eigen_entiteiten(settings: dict[str, Any]) -> set[str]:
+        """Elke entiteit die de bewoner in de coach invulde: bij de apparaten, de bronnen, de installatie
+        en het contract (v0.166.0)."""
+        uit: set[str] = set()
+
+        def loop(waarde: Any) -> None:
+            if isinstance(waarde, str):
+                if _ENTITEIT_ID.match(waarde):
+                    uit.add(waarde)
+            elif isinstance(waarde, dict):
+                for v in waarde.values():
+                    loop(v)
+            elif isinstance(waarde, (list, tuple)):
+                for v in waarde:
+                    loop(v)
+
+        for sleutel in ("devices", "sources", "installation", "contract"):
+            loop(settings.get(sleutel))
+        return uit
+
+    async def _async_integraties(self, settings: dict[str, Any], now: datetime) -> None:
+        """Een integratie achter de entiteiten van de coach die niet opkwam: herladen (v0.166.0).
+
+        Elk kwartier, en het eerste kwartier na de start niet: dan zet Home Assistant zelf nog alles
+        neer. Alleen `setup_error`, en `not_loaded` als de gebruiker hem niet uitzette. Een geladen
+        integratie raakt de coach nooit aan, en `setup_retry` ook niet: dat doet Home Assistant zelf.
+        Lukt het na `INTEGRATIE_MELDEN` nog niet, dan één melding; lukt het, dan "doet het weer".
+        """
+        if self._integratie_om is None:
+            self._integratie_om = now + INTEGRATIE_CONTROLE
+            return
+        if now < self._integratie_om:
+            return
+        self._integratie_om = now + INTEGRATIE_CONTROLE
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            register = er.async_get(self.hass)
+            entries: list[str] = []
+            for entity_id in sorted(self._eigen_entiteiten(settings)):
+                rij = register.async_get(entity_id)
+                entry_id = getattr(rij, "config_entry_id", None) if rij is not None else None
+                if entry_id and entry_id not in entries:
+                    entries.append(entry_id)
+        except Exception:  # noqa: BLE001 - zonder register geen controle
+            _LOGGER.debug("kon de integraties niet nakijken", exc_info=True)
+            return
+        for entry_id in entries:
+            entry = self.hass.config_entries.async_get_entry(entry_id)
+            if entry is None or entry.domain == DOMAIN:
+                continue
+            naam = entry.title or entry.domain
+            stand = str(getattr(entry.state, "value", entry.state))
+            if stand not in INTEGRATIE_HERLADEN or getattr(entry, "disabled_by", None):
+                if stand == "loaded" and entry_id in self._integratie_stuk:
+                    self._integratie_stuk.pop(entry_id, None)
+                    self._integratie_gemeld.discard(entry_id)
+                    await self._async_tell(t("De integratie {naam} doet het weer.", naam=naam), telefoon=False)
+                continue
+            sinds = self._integratie_stuk.setdefault(entry_id, now)
+            _LOGGER.warning("de integratie %s (%s) staat op %s; de coach herlaadt hem", naam, entry.domain, stand)
+            try:
+                async with asyncio.timeout(INTEGRATIE_WACHT.total_seconds()):
+                    await self.hass.config_entries.async_reload(entry_id)
+            except Exception as err:  # noqa: BLE001 - het internet kan er nog niet zijn
+                _LOGGER.warning("de integratie %s herladen lukte niet: %s", naam, err)
+            stand = str(getattr(entry.state, "value", entry.state))
+            if stand == "loaded":
+                self._integratie_stuk.pop(entry_id, None)
+                self._integratie_gemeld.discard(entry_id)
+                _LOGGER.warning("de integratie %s is herladen en doet het weer", naam)
+                await self._async_tell(t("De integratie {naam} doet het weer.", naam=naam), telefoon=False)
+            elif entry_id not in self._integratie_gemeld and now - sinds >= INTEGRATIE_MELDEN:
+                self._integratie_gemeld.add(entry_id)
+                await self._async_tell(
+                    t("De integratie {naam} komt niet op. Herlaad hem in Home Assistant, of kijk of het internet "
+                      "het doet.", naam=naam),
+                    kritiek=True,
+                )
 
     async def _async_reserveverloop(
         self, dynamic: dict[str, Any], van: datetime, tot: datetime
@@ -3233,6 +3329,7 @@ class ChargerCoach:
         await self._async_jaarsaldo(settings, moment)
         await self._async_schaal(settings, moment)
         await self._async_sensorwacht(settings, moment)
+        await self._async_integraties(settings, moment)
         await self._async_groep_vol(settings, moment)
         await self._async_verbruikswacht(settings, moment)
         await self._async_temperatuurwacht(settings, moment, level)
