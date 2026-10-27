@@ -2029,3 +2029,21 @@ Nu:
 
 Wat de omvormer zelf laadt na zo'n teruggelezen 100 is nog niet gemeten. Proef 208 in test_coach.py,
 scenario `growatt-terug-100` in het virtuele huis.
+
+## Een integratie die na een storing niet opkomt (v0.166.0)
+
+Geldt voor elke integratie achter de coach, niet alleen die van een batterij. In een klantwoning viel op
+27-10-2026 de stroom uit, en startte Home Assistant eerder dan het internet. De integratie van de Growatt
+(een cloud) ging naar `setup_error`, en daaruit probeert Home Assistant het niet zelf opnieuw, anders dan bij
+`setup_retry`. De coach zag de batterij niet meer en kon 's nachts geen schema schrijven; de eigenaar moest de
+integratie zelf herladen. De eigenaar: "Ik wil dat de coach dat doet. Elk kwartier", en "is die wel online
+dan niet herladen".
+
+Nu kijkt de coach elk kwartier (`INTEGRATIE_CONTROLE`, het eerste kwartier na de start niet) de config
+entries na achter elke entiteit die in zijn instellingen staat (`_eigen_entiteiten`: apparaten, bronnen,
+installatie, contract). Hij herlaadt alleen `setup_error`, en `not_loaded` als de gebruiker hem niet uitzette
+(`disabled_by`); een geladen integratie, `setup_retry` en de coach zelf nooit. Elke poging staat in het log.
+Lukt het na een uur nog niet (`INTEGRATIE_MELDEN`), dan één melding met de naam van de integratie; lukt het,
+dan één keer "doet het weer" in de geschiedenis. Daarna gaat de gewone weg verder (v0.162.0).
+
+Proef 209 in test_coach.py. De echte toets is de volgende storing.

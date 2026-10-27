@@ -234,5 +234,7 @@
   "{naam} is al {minuten} minuten niet bereikbaar. De coach probeert het elke minuut opnieuw.": "{naam} has been unreachable for {minuten} minutes. The coach tries again every minute.",
   "De groep {naam} trekt {amps} A, bijna de {zekering} A van de zekering. Gemeten via {apparaten}.": "The circuit {naam} draws {amps} A, close to the {zekering} A of its fuse. Measured through {apparaten}.",
   "{voor} en {laatste}": "{voor} and {laatste}",
-  "zonder naam": "without a name"
+  "zonder naam": "without a name",
+  "De integratie {naam} doet het weer.": "The {naam} integration is working again.",
+  "De integratie {naam} komt niet op. Herlaad hem in Home Assistant, of kijk of het internet het doet.": "The {naam} integration does not start. Reload it in Home Assistant, or check the internet connection."
 }
