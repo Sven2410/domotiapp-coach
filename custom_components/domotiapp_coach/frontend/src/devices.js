@@ -1088,6 +1088,43 @@ const GROWATT_KEYS = {
   accu_out: ["mix_battery_discharge_lifetime"],
 };
 
+/** Stroom en spanning bij een apparaat (v0.168.0), voor de som van een groep. */
+export const MEET_VELDEN = [
+  {
+    key: "current", filter: "current",
+    label: nt("Stroomsensor (optioneel)"),
+    hint: nt("In ampère, als de stekker die meet. Dan telt de groep waar dit apparaat op hangt met de echte stroom."),
+  },
+  {
+    key: "voltage", filter: "all",
+    label: nt("Spanningssensor (optioneel)"),
+    hint: nt("In volt, als de stekker die meet. Dan rekent de coach het vermogen van de groep om met de echte spanning in plaats van 230 V."),
+  },
+];
+
+/**
+ * Stroom en spanning van hetzelfde apparaat in Home Assistant als de vermogenssensor (v0.168.0), voor wat
+ * nog leeg is. Een sensor telt als stroom of spanning door zijn soort (`device_class`) of zijn eenheid.
+ */
+export function meetVanzelf(device, entities, states) {
+  const vermogen = entities?.[device?.entity ?? ""];
+  if (!vermogen?.device_id) return {};
+  const zelfde = Object.values(entities).filter((e) => e?.device_id === vermogen.device_id && e.entity_id?.startsWith("sensor."));
+  const soort = (e) => {
+    const a = states?.[e.entity_id]?.attributes ?? {};
+    if (a.device_class === "current" || a.unit_of_measurement === "A") return "current";
+    if (a.device_class === "voltage" || a.unit_of_measurement === "V") return "voltage";
+    return null;
+  };
+  const uit = {};
+  for (const key of ["current", "voltage"]) {
+    if (device.entities?.[key]) continue;
+    const treffer = zelfde.find((e) => soort(e) === key);
+    if (treffer) uit[key] = treffer.entity_id;
+  }
+  return uit;
+}
+
 export function growattVanzelf(device, entities) {
   const soc = entities?.[device?.entities?.soc ?? ""];
   if (!soc?.device_id || soc.platform !== "growatt_server") return {};

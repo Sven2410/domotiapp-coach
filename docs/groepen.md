@@ -178,3 +178,33 @@ hoogstens 2954 W (12,8 A op 16 A). Daar komt de groep dus niet aan de grens.
 Proeven: test_planner.py (de som, op één en drie fasen, een plug die niets zegt, een paal op zo'n groep),
 207 in test_coach.py (de melding onder en boven de grens, de batterij, de lastbewaking), en
 test_rapport.mjs (het overzicht en het scherm Groepen).
+
+## Belastingen in je huis, per kast en groep (v0.168.0)
+
+Sven op 27-10-2026, met een tekening erbij: "Hoofdaansluiting 3x25A, Groepen onder hoofdaansluiting
+(inklapbaar) ... Onderverdeelkast Garage 3x16A, Groepen onder onderverdeelkast Garage (inklapbaar)". Tot dan
+heette de kaart "Belasting per fase" en stonden de hoofdaansluiting en elke kast en groep plat onder elkaar.
+
+- **De kaart** (`updatePhases_` in views/overview.js): de hoofdaansluiting met zijn fasen en "3x25 A", en
+  inklapbaar de groepen die eronder hangen. Daaronder de kop Onderverdeelkast(en), per kast zijn fasen en
+  inklapbaar zijn groepen. Een groep hoort bij de eerste kast boven hem; een kast onder een kast staat als eigen
+  blok, met "onder Garage". Ingeklapt is de standaard; wat de kijker openklapt onthoudt zijn browser
+  (`dac-belasting-open`), en een blok met een groep boven de waarschuwingsgrens gaat vanzelf open.
+- **Niet gemeten**: een kast of groep zonder meter en zonder apparaten blijft staan, met "Niet gemeten"
+  (`measured` in `readCircuits`). Hij telt niet mee in de belasting.
+- **Stroom en spanning van een apparaat** (`entities.current`, `entities.voltage`, Apparaten, onder de
+  vermogenssensor; voorgesteld uit hetzelfde apparaat in Home Assistant, `meetVanzelf`). Op een groep zonder
+  meter: de gemeten stroom, of het vermogen gedeeld door de gemeten spanning van de groep. Zonder spanning en
+  niet bij elk apparaat een stroom staat er geen ampère en geen volt, alleen het vermogen, en rekent de balk op
+  230 V. Dezelfde som in `groep_apparaten_amps` (planner.py), zodat de melding bij 90% en `_laadruimte_w`
+  hetzelfde getal hebben.
+- **De fase van een groep van één fase** (`phase`, Installatie): tot dan heette zo'n groep altijd L1, ook de
+  groep van een batterij op L3. Zonder keuze de fase van de batterij die eraan hangt. De sensoren blijven onder
+  "l1" staan; alleen het label verandert.
+- **Het teken**: een stroom zonder teken op een regel met een negatief vermogen krijgt het teken van het
+  vermogen. Er stond "4,9 A, -1,15 kW".
+- **Hangt aan**: staat een apparaat bij een groep onder Groepen, dan hangt het daaraan, ook voor de
+  zekeringbewaking (`_groepen_keten`), en staat dat bij het apparaat zonder keuzelijst. Tot dan zei "Hangt aan"
+  Hoofdkast voor de droger in de groep Wasmachine & Droger.
+
+Gemeten op 390, 320 en 280 px zonder overloop.

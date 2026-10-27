@@ -936,45 +936,66 @@ function readPhases(feed, sources) {
 }
 
 /**
- * De groepen met een eigen zekering en meter, met per fase wat er loopt.
+ * De onderverdeelkasten en groepen met een eigen zekering, met per fase wat er loopt.
  *
- * Dezelfde rijen als `readPhases`, per groep; een groep zonder een enkele
- * meetwaarde blijft weg. Zie `installation.circuits`.
+ * Dezelfde rijen als `readPhases`, per kast of groep. Sinds v0.168.0 blijft een kast of groep zonder
+ * meetwaarde staan, met `measured: false`: de bewoner hoort zijn groep terug te zien, met "niet
+ * gemeten" erbij. Een groep van één fase heet naar zijn fase (`phase`), niet altijd L1; de sensoren
+ * staan onder "l1". Zie `installation.circuits`.
  *
- * @returns {Array<{id: string, name: string, fuse: number, phases: Array}>}
+ * Een groep zonder meter met gekozen apparaten (v0.165.0) telt hun vermogen op, en sinds v0.168.0
+ * hun stroom en spanning als die er zijn (`entities.current`, `entities.voltage`): de ampères zijn
+ * de gemeten stroom, of het vermogen gedeeld door de gemeten spanning van de groep. Zonder enige
+ * spanning en niet bij elk apparaat een stroom: alleen het vermogen, en de balk op 230 V. Dezelfde som
+ * als `groep_apparaten_amps` in planner.py.
+ *
+ * @returns {Array<{id: string, name: string, kind: string, parent: string, fuse: number, count: number,
+ *   phases: Array, via?: string[], measured: boolean}>}
  */
 export function readCircuits(feed, installation, devices = []) {
   const groepen = Array.isArray(installation?.circuits) ? installation.circuits : [];
   const opId = new Map((devices ?? []).filter((d) => d?.id).map((d) => [d.id, d]));
+  const heeft = (row) => row.current !== null || row.power !== null || row.voltage !== null;
   return groepen
     .filter((g) => g?.id)
     .map((g) => {
-      const keys = Number(g.phases) === 1 ? ["l1"] : PHASES;
-      // Zonder eigen meter: de som van de apparaten die de bewoner bij de groep koos (v0.165.0),
-      // zoals `groep_apparaten_amps` in planner.py. Zegt er één niets, dan is er geen som.
+      const een = Number(g.phases) === 1;
+      const keys = een ? ["l1"] : PHASES;
+      // Zonder keuze de fase van de batterij die eraan hangt, zoals Installatie hem voorstelt.
+      const fase = g.phase || (devices ?? []).find((d) => d?.circuit === g.id && d.battery?.phase)?.battery.phase || "l1";
+      const label = (key) => (een ? String(fase) : key).toUpperCase();
+      const basis = {
+        id: g.id, name: g.name || g.id, kind: g.kind === "kast" ? "kast" : "groep", parent: g.parent || "",
+        fuse: Number(g.fuse_amps) || 0, count: een ? 1 : 3,
+      };
       const gekozen = g.meter === false && Array.isArray(g.devices) ? g.devices.filter((r) => opId.get(r?.device)?.entity) : [];
       if (gekozen.length) {
-        const watt = gekozen.map((r) => readPower(feed, opId.get(r.device).entity));
+        const apparaat = (r) => opId.get(r.device);
+        const watt = gekozen.map((r) => readPower(feed, apparaat(r).entity));
+        const stroom = gekozen.map((r) => readNumber(feed, apparaat(r).entities?.current));
+        const volt = gekozen.map((r) => readNumber(feed, apparaat(r).entities?.voltage)).find((v) => Number.isFinite(v) && v > 0) ?? null;
         const compleet = watt.every((w) => Number.isFinite(w));
         const phases = keys.map((key) => {
-          const power = compleet
-            ? gekozen.reduce((som, r, i) => som + ((keys.length === 1 ? "l1" : r.phase || "l1") === key ? Math.max(0, watt[i]) : 0), 0)
+          const hier = gekozen.map((r, i) => i).filter((i) => (een ? "l1" : gekozen[i].phase || "l1") === key);
+          const power = compleet ? hier.reduce((som, i) => som + Math.max(0, watt[i]), 0) : null;
+          const stroomBekend = hier.every((i) => Number.isFinite(stroom[i]));
+          // De balk rekent zoals de coach: een gemeten stroom, anders het vermogen door de gemeten
+          // spanning, en zonder spanning door 230 V. Een getal in ampère staat er alleen als het gemeten is.
+          const amps = compleet
+            ? hier.reduce((som, i) => som + (Number.isFinite(stroom[i]) ? Math.abs(stroom[i]) : Math.max(0, watt[i]) / (volt ?? NOMINAL_VOLTS)), 0)
             : null;
-          return {
-            key, label: key.toUpperCase(), current: null, power, voltage: null,
-            amps: power === null ? null : power / NOMINAL_VOLTS, ampsDerived: true,
-          };
+          const current = amps !== null && hier.length && (stroomBekend || volt !== null) ? amps : null;
+          const voltage = hier.length ? volt : null;
+          return { key, label: label(key), current, power, voltage, amps, ampsDerived: current === null && amps !== null };
         });
-        return {
-          id: g.id, name: g.name || g.id, fuse: Number(g.fuse_amps) || 0, phases,
-          via: gekozen.map((r) => opId.get(r.device).name || r.device),
-        };
+        // Gemeten via apparaten is gemeten, ook als een plug even niets zegt: dan "geen meetwaarde".
+        return { ...basis, phases, via: gekozen.map((r) => apparaat(r).name || r.device), measured: true };
       }
       const phases = keys.map((key) => {
         const config = g.sensors?.[key] ?? {};
         const row = {
           key,
-          label: key.toUpperCase(),
+          label: label(key),
           current: readNumber(feed, config.current),
           power: readPower(feed, config.power),
           voltage: readNumber(feed, config.voltage),
@@ -983,9 +1004,8 @@ export function readCircuits(feed, installation, devices = []) {
         row.ampsDerived = row.amps !== null && !Number.isFinite(row.current);
         return row;
       });
-      return { id: g.id, name: g.name || g.id, fuse: Number(g.fuse_amps) || 0, phases };
-    })
-    .filter((g) => g.phases.some((row) => row.current !== null || row.power !== null || row.voltage !== null));
+      return { ...basis, phases, measured: phases.some(heeft) };
+    });
 }
 
 /**

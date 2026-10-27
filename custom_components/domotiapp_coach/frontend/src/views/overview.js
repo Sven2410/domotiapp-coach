@@ -353,6 +353,26 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
   };
 }
 
+
+// Welke blokken op Belastingen in je huis openstaan, per kijker (v0.168.0). Alleen een gemak: zonder
+// opslag (een privévenster) staat alles ingeklapt.
+const BELASTING_OPEN = "dac-belasting-open";
+function leesOpen() {
+  try {
+    const waarde = JSON.parse(localStorage.getItem(BELASTING_OPEN) || "{}");
+    return waarde && typeof waarde === "object" ? waarde : {};
+  } catch {
+    return {};
+  }
+}
+function schrijfOpen(open) {
+  try {
+    localStorage.setItem(BELASTING_OPEN, JSON.stringify(open));
+  } catch {
+    // Geen opslag: dan onthoudt alleen dit scherm het.
+  }
+}
+
 class DacViewOverview extends DacElement {
   static css = /* css */ `
     /* Klopt je energieprijs? (v0.129.0) Een knop naar Contract (v0.130.1). */
@@ -483,6 +503,41 @@ class DacViewOverview extends DacElement {
       color: var(--dac-ink-3);
     }
     .phase-via { margin: -2px 0 2px; font-size: 12px; color: var(--dac-ink-3); }
+    .load-block { display: grid; gap: 10px; }
+    .load-block + .load-block, .load-section + .load-block { margin-top: 6px; }
+    .load-section {
+      margin: 12px 0 0;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--dac-ink-3);
+    }
+    .load-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; }
+    .load-name { font-size: 14px; font-weight: 700; color: var(--dac-ink); overflow-wrap: anywhere; }
+    .load-fuse { font-size: 12.5px; color: var(--dac-ink-2); font-variant-numeric: tabular-nums; }
+    .load-under { font-size: 12px; color: var(--dac-ink-3); }
+    .load-groups { border-left: 2px solid rgba(var(--dac-veil),0.10); padding-left: 12px; }
+    .load-groups > summary {
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--dac-ink-2);
+      padding: 4px 0;
+      list-style-position: outside;
+      overflow-wrap: anywhere;
+    }
+    .load-count {
+      display: inline-block;
+      min-width: 18px;
+      padding: 0 6px;
+      border-radius: 99px;
+      background: rgba(var(--dac-veil),0.08);
+      font-size: 11.5px;
+      text-align: center;
+      color: var(--dac-ink-3);
+    }
+    .load-group { display: grid; gap: 8px; margin-top: 10px; }
+    .load-group .load-name { font-size: 13px; font-weight: 600; }
     .phase-row {
       display: grid;
       grid-template-columns: 34px minmax(0, 1fr) auto;
@@ -2580,28 +2635,34 @@ class DacViewOverview extends DacElement {
     );
   }
 
-  /** The per-phase card, when the customer has phase sensors and wants them. */
+  /**
+   * Belastingen in je huis (v0.168.0): de hoofdaansluiting met zijn fasen, en per onderverdeelkast de
+   * eigen fasen; daaronder inklapbaar de groepen die eronder hangen. Sven, 27-10-2026, met een tekening:
+   * "Hoofdaansluiting 3x25A, Groepen onder hoofdaansluiting (inklapbaar) ... Onderverdeelkast Garage
+   * 3x16A, Groepen onder onderverdeelkast Garage (inklapbaar)". Tot v0.168.0 stond alles plat onder
+   * elkaar. Ingeklapt of open onthoudt de kijker; een groep boven de waarschuwingsgrens opent zijn blok.
+   */
   updatePhases_(r, alertAt) {
     const card = this.$("#phases");
-    const show = Boolean(r.phases) && this.settings_?.sources?.phases_on_overview;
+    const alle = r.circuits ?? [];
+    const show = Boolean(r.phases || alle.length) && this.settings_?.sources?.phases_on_overview;
     card.hidden = !show;
     if (!show) return;
 
-    const fuse = Number(this.settings_?.installation?.fuse_amps) || 0;
-    this.$("#phases-title").textContent = fuse
-      ? t("Belasting per fase, tegen {amps} A", { amps: fuse })
-      : t("Belasting per fase");
+    const installatie = this.settings_?.installation ?? {};
+    const fuse = Number(installatie.fuse_amps) || 0;
+    const zekering = (aantal, amps) => (amps > 0 ? t("{n}x{amps} A", { n: aantal, amps: getal(amps, Number.isInteger(amps) ? 0 : 1) }) : "");
+    this.$("#phases-title").textContent = t("Belastingen in je huis");
 
     const bounds = { low: Math.round(alertAt * 0.75), high: alertAt };
+    const esc = (tekst) => String(tekst ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const aandeel = (phase, amps) => (amps > 0 && Number.isFinite(phase.amps) ? (phase.amps / amps) * 100 : null);
 
-    // Eerst de hoofdaansluiting, dan elke groep met een eigen zekering, elk
-    // tegen zijn eigen zekering (v0.75.0).
-    const rijen = (phases, zekering) => phases
+    const rijen = (phases, amps) => (phases ?? [])
       .map((phase) => {
         // The bar follows the amps, measured or worked out from the power, so a
         // customer who mapped only one of the two still gets a reading.
-        const share =
-          zekering > 0 && Number.isFinite(phase.amps) ? (phase.amps / zekering) * 100 : null;
+        const share = aandeel(phase, amps);
         // Teruglevering laadt de zekering niet zoals afname dat doet, en een
         // balk kan sowieso niet korter dan niets. Zonder deze bodem werd het
         // `width: -0.1%`, en dat is geen breedte maar ongeldige CSS.
@@ -2613,12 +2674,14 @@ class DacViewOverview extends DacElement {
         //
         // Hier houden de getallen hun teken, anders dan elders in het paneel:
         // op deze kaart staat er geen pijl en geen kleur bij, en dan is de min
-        // het enige dat zegt dat die fase juist terugleverde. Stond het teken
-        // wel bij de ampères en niet bij de watts, dan spraken de twee getallen
-        // op een regel elkaar tegen.
+        // het enige dat zegt dat die fase juist terugleverde. Een stroommeter
+        // zonder teken krijgt dat van het vermogen op dezelfde regel (v0.168.0):
+        // in een klantwoning stond er op 27-10-2026 "4,9 A, -1,15 kW".
+        let current = phase.current;
+        if (Number.isFinite(current) && current > 0 && Number.isFinite(phase.power) && phase.power < 0) current = -current;
         const bits = [];
-        if (Number.isFinite(phase.current)) {
-          bits.push(`<b>${nl(zonderMinNul(phase.current, 1), 1)}</b> A`);
+        if (Number.isFinite(current)) {
+          bits.push(`<b>${nl(zonderMinNul(current, 1), 1)}</b> A`);
         }
         if (Number.isFinite(phase.power)) {
           const { value, unit } = signedPower(phase.power);
@@ -2636,17 +2699,76 @@ class DacViewOverview extends DacElement {
       .join("");
 
     // Een groep zonder meter, gemeten via de apparaten die erop hangen (v0.165.0): zeggen wat de coach
-    // niet ziet.
+    // niet ziet. En een kast of groep zonder iets: "niet gemeten" (v0.168.0).
     const via = (g) =>
-      g.via?.length
-        ? `<div class="phase-via">${t("Gemeten via {apparaten}; wat er verder op deze groep hangt ziet de coach niet.", {
-            apparaten: g.via.length === 1 ? g.via[0] : t("{voor} en {laatste}", { voor: g.via.slice(0, -1).join(", "), laatste: g.via.at(-1) }),
-          }).replace(/&/g, "&amp;").replace(/</g, "&lt;")}</div>`
-        : "";
-    const groepen = (r.circuits ?? [])
-      .map((g) => `<div class="phase-group">${g.fuse ? t("{naam}, tegen {amps} A", { naam: g.name, amps: g.fuse }) : g.name}</div>${via(g)}${rijen(g.phases, g.fuse)}`)
-      .join("");
-    this.$("#phase-rows").innerHTML = rijen(r.phases, fuse) + groepen;
+      !g.measured
+        ? `<div class="phase-via">${t("Niet gemeten")}</div>`
+        : g.via?.length
+          ? `<div class="phase-via">${esc(t("Gemeten via {apparaten}; wat er verder op deze groep hangt ziet de coach niet.", {
+              apparaten: g.via.length === 1 ? g.via[0] : t("{voor} en {laatste}", { voor: g.via.slice(0, -1).join(", "), laatste: g.via.at(-1) }),
+            }))}</div>`
+          : "";
+    const kop = (naam, amps, onder = "") => `
+      <div class="load-head"><span class="load-name">${esc(naam)}</span>${amps ? `<span class="load-fuse">${amps}</span>` : ""}${
+        onder ? `<span class="load-under">${esc(onder)}</span>` : ""}</div>`;
+    const meting = (g) => `${via(g)}${g.measured ? rijen(g.phases, g.fuse) : ""}`;
+
+    // Bij welke kast een groep hoort: de eerste kast boven hem, of de hoofdaansluiting ("").
+    const opId = new Map(alle.map((g) => [g.id, g]));
+    const kastVan = (g) => {
+      let ouder = opId.get(g.parent);
+      for (let i = 0; ouder && i < 12; i += 1) {
+        if (ouder.kind === "kast") return ouder.id;
+        ouder = opId.get(ouder.parent);
+      }
+      return "";
+    };
+    const kasten = alle.filter((g) => g.kind === "kast");
+    const groepenOnder = (id) => alle.filter((g) => g.kind !== "kast" && kastVan(g) === id);
+    const teZwaar = (g) => g.measured && g.phases.some((p) => (aandeel(p, g.fuse) ?? 0) >= alertAt);
+
+    this.belastingOpen_ ??= leesOpen();
+    const blok = (id, titel, groepen) => {
+      if (!groepen.length) return "";
+      const open = groepen.some(teZwaar) || Boolean(this.belastingOpen_[id]);
+      return `
+        <details class="load-groups" data-blok="${esc(id)}"${open ? " open" : ""}>
+          <summary>${esc(titel)} <span class="load-count">${groepen.length}</span></summary>
+          ${groepen.map((g) => `<div class="load-group">${kop(g.name, zekering(g.count, g.fuse))}${meting(g)}</div>`).join("")}
+        </details>`;
+    };
+
+    const fasen = Number(installatie.phases) === 1 ? 1 : 3;
+    const hoofd = `
+      <div class="load-block">
+        ${kop(t("Hoofdaansluiting"), zekering(fasen, fuse))}
+        ${r.phases ? rijen(r.phases, fuse) : `<div class="phase-via">${t("Niet gemeten")}</div>`}
+        ${blok("hoofd", t("Groepen onder hoofdaansluiting"), groepenOnder(""))}
+      </div>`;
+    const kastBlokken = kasten.map((k) => {
+      const boven = opId.get(k.parent);
+      return `
+      <div class="load-block">
+        ${kop(k.name, zekering(k.count, k.fuse), boven ? t("onder {naam}", { naam: boven.name }) : "")}
+        ${meting(k)}
+        ${blok(k.id, t("Groepen onder onderverdeelkast {naam}", { naam: k.name }), groepenOnder(k.id))}
+      </div>`;
+    }).join("");
+    const host = this.$("#phase-rows");
+    host.innerHTML = hoofd + (kasten.length
+      ? `<div class="load-section">${kasten.length === 1 ? t("Onderverdeelkast") : t("Onderverdeelkasten")}</div>${kastBlokken}`
+      : "");
+    if (!this.belastingKlik_) {
+      this.belastingKlik_ = true;
+      // Een klik op de kop klapt in of uit; de browser doet dat na deze klik, dus het wordt het tegendeel.
+      host.addEventListener("click", (ev) => {
+        const kopje = ev.target?.closest?.("summary");
+        const details = kopje?.parentElement;
+        if (!details?.dataset?.blok) return;
+        this.belastingOpen_[details.dataset.blok] = !details.open;
+        schrijfOpen(this.belastingOpen_);
+      });
+    }
   }
 
   /**

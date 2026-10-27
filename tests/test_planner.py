@@ -3759,6 +3759,15 @@ controle("met een eigen meter wint de meter",
 controle("zonder gekozen apparaten geen som", planner.groep_apparaten_amps({"id": "g", "phases": 1}, APP, W.get) is None)
 controle("teruglevering telt niet als belasting",
          planner.groep_apparaten_amps(een, APP, {"sensor.was_w": -500.0, "sensor.droog_w": 0.0}.get) == {"l1": 0.0})
+# Stroom en spanning van een plug (v0.168.0): de gemeten stroom, anders het vermogen door de gemeten spanning.
+APP2 = [{"id": "was", "entity": "sensor.was_w", "entities": {"current": "sensor.was_a", "voltage": "sensor.was_v"}},
+        {"id": "droog", "entity": "sensor.droog_w"}]
+N2 = {"sensor.was_a": 2.1, "sensor.was_v": 229.5}
+som2 = planner.groep_apparaten_amps(een, APP2, W.get, N2.get)
+controle("met stroom en spanning: 2,1 A plus 912 W door 229,5 V", som2 is not None
+         and abs(som2["l1"] - (2.1 + 912 / 229.5)) < 1e-9, f"{som2}")
+controle("zonder lezer voor stroom en spanning zoals voorheen",
+         planner.groep_apparaten_amps(een, APP2, W.get) == som)
 # De paal op zo'n groep: de zekering min de marge min wat de apparaten trekken.
 gemeten60 = Grid(surplus_w=0.0, phase_amps=[6.0, 4.0, 4.0], fuse_amps=25.0, charger_amps=0.0,
                  circuits=[Circuit(name="Carport", phase_amps=[], fuse_amps=16.0, known_amps=5.0)])

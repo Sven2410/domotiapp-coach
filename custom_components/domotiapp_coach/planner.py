@@ -886,7 +886,8 @@ def _soort(grid: Grid | None, naam: str) -> str:
 
 
 def groep_apparaten_amps(
-    groep: dict, apparaten: list[dict], watts: Callable[[str], float | None]
+    groep: dict, apparaten: list[dict], watts: Callable[[str], float | None],
+    getal: Callable[[str], float | None] | None = None,
 ) -> dict[str, float] | None:
     """Wat de apparaten die bij een groep zonder meter gekozen zijn per fase trekken (v0.165.0).
 
@@ -897,6 +898,11 @@ def groep_apparaten_amps(
     None als de groep een meter heeft (die wint), als er niets gekozen is, of als één van de sensoren
     niets zegt: een som zonder een van de apparaten is geen som. `watts` leest een vermogenssensor in
     watt. Een groep op één fase telt alles op L1.
+
+    Sinds v0.168.0 met de stroom en de spanning van een plug als die er zijn (`entities.current`,
+    `entities.voltage`, gelezen met `getal`): een gemeten stroom telt zoals hij is, een apparaat zonder
+    telt als vermogen gedeeld door de gemeten spanning van de groep, en zonder spanning door 230 V.
+    Dezelfde som als `readCircuits` in data-source.js.
     """
     if any(((groep.get("sensors") or {}).get(k) or {}).get("current") for k in ("l1", "l2", "l3")):
         return None
@@ -906,13 +912,23 @@ def groep_apparaten_amps(
     op_id = {a.get("id"): a for a in apparaten if isinstance(a, dict)}
     een = int(groep.get("phases") or 3) == 1
     uit = {k: 0.0 for k in (("l1",) if een else ("l1", "l2", "l3"))}
+    lees = getal or (lambda _e: None)
+    spanningen = [
+        v for r in rijen
+        if (e := ((op_id.get(r["device"]) or {}).get("entities") or {}).get("voltage"))
+        and (v := lees(e)) is not None and v > 0
+    ]
+    volt = spanningen[0] if spanningen else VOLTS
     for rij in rijen:
-        entity = (op_id.get(rij["device"]) or {}).get("entity") or ""
+        apparaat = op_id.get(rij["device"]) or {}
+        entity = apparaat.get("entity") or ""
         w = watts(entity) if entity else None
         if w is None:
             return None
+        stroom_e = (apparaat.get("entities") or {}).get("current")
+        stroom = lees(stroom_e) if stroom_e else None
         key = "l1" if een else (rij.get("phase") if rij.get("phase") in uit else "l1")
-        uit[key] += max(0.0, w) / VOLTS
+        uit[key] += abs(stroom) if stroom is not None else max(0.0, w) / volt
     return uit
 
 

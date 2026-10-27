@@ -29,7 +29,7 @@ export const OVERVIEW_CARDS = [
   // Sinds v0.133.0: wat er de komende uren gebeurt (vooruitblik.js).
   { id: "vooruit", label: nt("Vooruitblik") },
   { id: "tiles", label: nt("Meetwaarden") },
-  { id: "phases", label: nt("Belasting per fase") },
+  { id: "phases", label: nt("Belastingen in je huis") },
   { id: "meters", label: nt("Je meter") },
   { id: "steerable", label: nt("Aanstuurbare apparaten") },
   { id: "flow", label: nt("Energiestroom") },

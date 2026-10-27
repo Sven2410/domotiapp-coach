@@ -400,5 +400,8 @@ export const INSTELLINGEN = {
   "Fase": "Phase",
   "Apparaat toevoegen…": "Add a device…",
   "Gemeten via apparaten": "Measured through devices",
+  // v0.168.0: de fase van een groep van één fase.
+  "Op fase": "On phase",
+  "Op welke fase van de hoofdaansluiting deze groep zit. Alles wat erop hangt zit op dezelfde fase.": "Which phase of the main connection this circuit is on. Everything on it is on the same phase.",
   "Kies de apparaten met een vermogenssensor die op deze groep hangen. Hun som is wat de coach van de groep weet; wat er verder op hangt ziet hij niet. Zit de groep bijna aan zijn zekering, dan krijg je een melding.": "Choose the devices with a power sensor on this circuit. Their total is what the coach knows about the circuit; anything else on it he does not see. When the circuit is close to its fuse, you get a notification.",
 };

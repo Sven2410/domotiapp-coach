@@ -46,6 +46,8 @@ import {
   koelUitleg,
   alleenUitlezen,
   growattVanzelf,
+  MEET_VELDEN,
+  meetVanzelf,
   isSmartPlug,
   kindLabel,
   plugAppliance,
@@ -396,7 +398,7 @@ class DacViewDevices extends DacEditorElement {
       <div class="row">
         <label>${t("Vermogenssensor")}</label>
         <dac-entity-picker data-power data-index="${index}"></dac-entity-picker>
-      </div>`;
+      </div>${this.meetHtml_(device, index)}`;
 
     const extra = brandFields(device)
       .map(
@@ -471,7 +473,7 @@ class DacViewDevices extends DacEditorElement {
         <div class="row">
           <label>${t("Vermogenssensor")}</label>
           <dac-entity-picker data-power data-index="${index}"></dac-entity-picker>
-        </div>
+        </div>${this.meetHtml_(device, index)}
         ${this.energyHtml_(device, index)}
         ${this.alwaysOnHtml_(device, index)}
       </div>`);
@@ -518,7 +520,28 @@ class DacViewDevices extends DacEditorElement {
   }
 
   /** Wat er over een entiteitveld bekend is: van het merk, of de schakelaar van een smart plug. */
+  /**
+   * Stroom en spanning van een apparaat (v0.168.0), allebei optioneel. Sven, 27-10-2026: "Bij losse
+   * apparaten (smart plugs) evt ook spanning en stroom laten ingeven, welke je vervolgens op het dashboard
+   * bij de nieuwe groep ook weer kunt laten weergeven." Niet bij een laadpaal en een thuisbatterij: die
+   * telt de coach al zelf.
+   */
+  meetHtml_(device, index) {
+    if (device?.type === "laadpaal" || device?.type === "thuisbatterij") return "";
+    return MEET_VELDEN.map((veld) => {
+      const v = inTaal(veld);
+      return `
+      <div class="row">
+        <label>${v.label}</label>
+        <dac-entity-picker data-entity-key="${v.key}" data-index="${index}"></dac-entity-picker>
+        <span class="sub">${v.hint}</span>
+      </div>`;
+    }).join("");
+  }
+
   entityField_(device, key) {
+    const meet = MEET_VELDEN.find((veld) => veld.key === key);
+    if (meet && device?.type !== "laadpaal" && device?.type !== "thuisbatterij") return meet;
     if (isSmartPlug(device)) return key === PLUG_SWITCH_FIELD.key ? PLUG_SWITCH_FIELD : undefined;
     if (device?.type === "vaatwasser" && key === DISHWASHER_PLUG_FIELD.key) return DISHWASHER_PLUG_FIELD;
     return brandEntityFields(device).find((field) => field.key === key);
@@ -914,7 +937,18 @@ class DacViewDevices extends DacEditorElement {
     // daarvoor nog niet bij, en dan heet het gewoon een groep.
     const groepen = (this.draft_?.installation?.circuits ?? []).filter((g) => g?.id);
     const soort = (g) => (g.kind === "kast" ? t("onderverdeelkast") : t("groep"));
-    const groepHtml = groepen.length
+    // Staat het apparaat bij een groep onder Groepen (Installatie), dan hangt het daaraan, en kiest de
+    // bewoner dat daar (v0.168.0): één plek. Tot dan zei "Hangt aan" soms Hoofdkast voor de droger in
+    // de groep Wasmachine & Droger.
+    const viaGroep = groepen.find((g) => (g.devices ?? []).some((r) => r?.device === device.id));
+    const groepHtml = viaGroep
+      ? `
+      <div class="row">
+        <label>${t("Hangt aan")}</label>
+        <span class="text">${String(viaGroep.name || viaGroep.id).replace(/&/g, "&amp;").replace(/</g, "&lt;")} (${soort(viaGroep)})</span>
+        <span class="sub">${t("Gekozen bij Groepen, onder Installatie: daar staat dit apparaat bij deze groep.")}</span>
+      </div>`
+      : groepen.length
       ? `
       <div class="row">
         <label for="circuit-${index}">${t("Hangt aan")}</label>
@@ -1662,7 +1696,15 @@ class DacViewDevices extends DacEditorElement {
       picker.stateFeed = this.feed_;
       picker.value = devices[index].entity ?? "";
       picker.addEventListener("dac-entity-change", (ev) => {
-        this.draft_.devices[index].entity = ev.detail.value;
+        const device = this.draft_.devices[index];
+        device.entity = ev.detail.value;
+        // Stroom en spanning van hetzelfde apparaat erbij, als die er zijn en nog niets gekozen is (v0.168.0).
+        const erbij = device.type === "laadpaal" || device.type === "thuisbatterij"
+          ? {} : meetVanzelf(device, this.hass_?.entities, this.hass_?.states);
+        if (Object.keys(erbij).length) {
+          device.entities = { ...(device.entities ?? {}), ...erbij };
+          this.paintDevices_();
+        }
         this.paintSummary_(index);
         this.syncSaveBar_();
       });
