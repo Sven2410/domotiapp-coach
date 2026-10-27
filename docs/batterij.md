@@ -2009,3 +2009,23 @@ Wat de Growatt na zijn eigen ronde als stopgrens teruggeeft (100 na een geschrev
 niet mee: de omvormer heeft er twee velden voor (22-10-2026, `gelijk`).
 
 Proef 59 in test_batterij.py.
+
+## Een vermogen dat er stond is niet geweigerd (v0.165.1)
+
+In dezelfde klantwoning, in de nacht van 26 op 27-10-2026: 48% las van 20:39 tot 23:30 elke vijf minuten
+goed terug, en daarna gaf de Growatt na zijn eigen ronde telkens 100 vermogen en 100 stopgrens terug. Elke
+keer telde v0.163.0 dat als geweigerd en ging hij een tiental omhoog: 50, 60, 70, 80, 90, en om 04:40 100.
+Het plan wilde 11,2 kWh over 05:00-08:00 spreiden; het werd vol vermogen vanaf 05:00 (9,1 kW van het net).
+
+Nu:
+
+- Wat er één keer goed terugkwam onthoudt de coach (`growatt_pct_aangenomen`, het laagste), en de
+  ondergrens komt daar nooit boven (`_growatt_min_pct`).
+- Geweigerd (`growatt_weigert_pct`) is alleen een vermogen dat al bij het eerste teruglezen na het
+  schrijven niet staat, en dat lager is dan wat hij ooit aannam. Zo blijft de 8% van 26-10-2026 geweigerd.
+- Komt een vermogen dat er stond later anders terug, dan schrijft hij het één keer opnieuw, zonder
+  melding. Komt het daarna weer anders terug, dan laat hij het zo: de stopgrens begrenst wat erin gaat.
+- `growatt_pct_geweigerd` van v0.163.x telt niet meer en verdwijnt bij het eerstvolgende bewaren.
+
+Wat de omvormer zelf laadt na zo'n teruggelezen 100 is nog niet gemeten. Proef 208 in test_coach.py,
+scenario `growatt-terug-100` in het virtuele huis.

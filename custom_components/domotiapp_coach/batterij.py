@@ -2641,7 +2641,7 @@ GROWATT_HOUDEN_PCT = 10
 # lager krijgt neemt hij niet aan: hij houdt het oude getal en zet de rest wel. In de klantwoning
 # op 26-10-2026 werd 8% geweigerd (en 1% op 24-10), en 10% aangenomen. De hoeveelheid begrenst de
 # stopgrens, dus een hoger vermogen laadt niet meer, alleen eerder. Weigert een omvormer ook 10%,
-# dan leert de coach dat (`growatt_pct_geweigerd`, `_async_growatt`).
+# dan leert de coach dat (`growatt_weigert_pct`, `_async_growatt`).
 GROWATT_MIN_PCT = 10
 
 

@@ -11728,9 +11728,13 @@ print("=== 202. Growatt: een geweigerd laadvermogen leert hij, en hij herhaalt h
 # In de klantwoning op 26-10-2026 nam de API 8% niet aan en hield hij 100; de coach schreef daarna om
 # de paar minuten weer 8. Nu onthoudt hij het en gaat hij naar het volgende tiental.
 controle("de ondergrens: 10, en na een geweigerde 8 nog steeds 10, na 10 dan 20",
-         coach192._growatt_min_pct({}) == 10 and coach192._growatt_min_pct({"growatt_pct_geweigerd": 8}) == 10
-         and coach192._growatt_min_pct({"growatt_pct_geweigerd": 10}) == 20
-         and coach192._growatt_min_pct({"growatt_pct_geweigerd": 100}) == 100, "")
+         coach192._growatt_min_pct({}) == 10 and coach192._growatt_min_pct({"growatt_weigert_pct": 8}) == 10
+         and coach192._growatt_min_pct({"growatt_weigert_pct": 10}) == 20
+         and coach192._growatt_min_pct({"growatt_weigert_pct": 100}) == 100, "")
+controle("nooit boven een vermogen dat er wel eens stond, en het oude getal van v0.163.x telt niet (v0.165.1)",
+         coach192._growatt_min_pct({"growatt_weigert_pct": 90, "growatt_pct_aangenomen": 48}) == 48
+         and coach192._growatt_min_pct({"growatt_weigert_pct": 8, "growatt_pct_aangenomen": 5}) == 10
+         and coach192._growatt_min_pct({"growatt_pct_geweigerd": 90}) == 10, "")
 geschreven202 = coachmod.GrowattSchema(net=True, vermogen_pct=8, stop_soc=100, vakken=[("06:00", "08:00")],
                                        tot=dt.datetime(2026, 9, 26, 8, 0), kwh=1.1)
 gelezen202 = {"charge_power": 100, "charge_stop_soc": 100, "mains_enabled": True,
@@ -11790,6 +11794,63 @@ try:
              and sessie203.get("growatt_terug_om") == NU203 + dt.timedelta(minutes=46), f"{sessie203.get('growatt_terug_om')}")
 finally:
     coachmod.GrowattSchema.wijkt_af = oud_wijkt203
+
+print("=== 208. Growatt: een vermogen dat er stond en later als 100 terugkomt is niet geweigerd (v0.165.1) ===")
+# In de klantwoning las 48% op 26-10-2026 drie uur lang goed terug; daarna gaf de Growatt na zijn eigen ronde
+# telkens 100/100 terug, en v0.163.0 klom elke keer een tiental: in één nacht van 48 naar 100%.
+coach192._growatt.clear()
+coach192._batterij.clear()
+NU208 = dt.datetime(2026, 9, 25, 20, 39)
+vakken208 = [{"period_id": 1, "start_time": "06:00", "end_time": "08:00", "enabled": True},
+             {"period_id": 2, "start_time": "00:00", "end_time": "00:00", "enabled": False},
+             {"period_id": 3, "start_time": "00:00", "end_time": "00:00", "enabled": False}]
+schema208 = coachmod.GrowattSchema(net=True, vermogen_pct=48, stop_soc=86, vakken=[("06:00", "08:00")],
+                                   tot=dt.datetime(2026, 9, 26, 8, 0), kwh=8.0)
+for r208 in store192.instellingen.get("battery_state") or []:
+    if r208.get("device") == "dev-growatt":
+        r208.pop("growatt_pct_aangenomen", None)
+        r208.pop("growatt_weigert_pct", None)
+asyncio.run(ronde192(NU208))
+sessie208 = coach192._batterij["dev-growatt"]
+omvormer192.update(charge_power=48, charge_stop_soc=86, mains_enabled=True, periods=vakken208)
+sessie208.update(growatt_geschreven=schema208, growatt_bevestigd=None, growatt_terug_om=NU208,
+                 growatt_op=NU208 - dt.timedelta(minutes=10))
+coachmod.GrowattSchema.wijkt_af, oud_wijkt208 = (lambda self, ander, alleen_vakken=False, zakken=True: False), coachmod.GrowattSchema.wijkt_af
+
+
+def rij208():
+    return next((r for r in store192.instellingen.get("battery_state") or [] if r.get("device") == "dev-growatt"), {})
+
+
+try:
+    asyncio.run(ronde192(NU208 + dt.timedelta(minutes=1)))
+    controle("bevestigd, en onthouden dat 48 er stond",
+             sessie208.get("growatt_bevestigd") is not None and rij208().get("growatt_pct_aangenomen") == 48,
+             f"{rij208()}")
+    # Na de ronde van de Growatt: 100 en 100.
+    omvormer192.update(charge_power=100, charge_stop_soc=100)
+    asyncio.run(ronde192(NU208 + dt.timedelta(minutes=31)))
+    controle("bij de controle 100: niet geweigerd, wel één keer opnieuw schrijven",
+             rij208().get("growatt_weigert_pct") is None and sessie208.get("growatt_geschreven") is None, f"{rij208()}")
+    # Het opnieuw geschreven schema komt na de herstart van de coach eerst weer als 100 terug.
+    sessie208.update(growatt_geschreven=schema208, growatt_bevestigd=None,
+                     growatt_terug_om=NU208 + dt.timedelta(minutes=40))
+    asyncio.run(ronde192(NU208 + dt.timedelta(minutes=40)))
+    controle("en komt het weer als 100 terug, dan laat hij het zo en leert hij niets",
+             sessie208.get("growatt_geschreven") == schema208 and sessie208.get("growatt_bevestigd") is not None
+             and rij208().get("growatt_weigert_pct") is None
+             and sessie208.get("growatt_terug_om") == NU208 + dt.timedelta(minutes=70), f"{rij208()}")
+    controle("en hij blijft 48 schrijven", coach192._growatt_min_pct(rij208()) <= 48, f"{rij208()}")
+    # Een lager getal dat bij het eerste teruglezen al niet staat is wel geweigerd.
+    laag208 = coachmod.GrowattSchema(net=True, vermogen_pct=20, stop_soc=86, vakken=[("06:00", "08:00")],
+                                     tot=dt.datetime(2026, 9, 26, 8, 0), kwh=8.0)
+    sessie208.update(growatt_geschreven=laag208, growatt_bevestigd=None,
+                     growatt_terug_om=NU208 + dt.timedelta(minutes=80))
+    asyncio.run(ronde192(NU208 + dt.timedelta(minutes=80)))
+    controle("een lager vermogen dat er meteen niet staat: geweigerd",
+             rij208().get("growatt_weigert_pct") == 20 and coach192._growatt_min_pct(rij208()) == 30, f"{rij208()}")
+finally:
+    coachmod.GrowattSchema.wijkt_af = oud_wijkt208
 
 print("=== 204. Een paal die even niet bereikbaar is: een waarschuwing, geen fout, en na tien minuten een melding (v0.163.3) ===")
 # In een klantwoning herstartte een Alfen zich op 26-10-2026 twee keer; zes minuten lang gaf elke ronde

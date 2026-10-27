@@ -1956,6 +1956,15 @@ if (vl := v("growatt-weigert")):
              len(voor_nacht) <= 4 and vl.gw_gefaald == 0, f"{schrijf_w}")
     controle("growatt-weigert: daarna staat er een vermogen dat hij aanneemt",
              any(w[2] >= 30 and w[1] for w in vl.gw_schrijf), f"{schrijf_w}")
+if (vl := v("growatt-terug-100")):
+    schrijf_t = [(w[0].strftime("%H:%M"), w[2]) for w in vl.gw_schrijf if w[1]]
+    print(f"  growatt-terug-100: {schrijf_t}")
+    basis_t = v("growatt-ochtend-zonder-grens")
+    hoogst_b = max((w[2] for w in basis_t.gw_schrijf if w[1]), default=0) if basis_t else 100
+    controle("growatt-terug-100: een teruggelezen 100 laat het vermogen niet oplopen",
+             schrijf_t and max(w[1] for w in schrijf_t) <= max(hoogst_b, 10), f"{schrijf_t}, zonder: {hoogst_b}")
+    controle("growatt-terug-100: en hij schrijft hetzelfde hoogstens één keer opnieuw",
+             len(schrijf_t) <= 2 * len({w[1] for w in schrijf_t}) and vl.gw_gefaald == 0, f"{schrijf_t}")
 if (vl := v("growatt-ochtend-zonder-grens")):
     controle("growatt: nooit een laadvermogen onder de 10%",
              all(w[2] >= 10 for w in vl.gw_schrijf if w[1]), f"{[(w[0].strftime('%H:%M'), w[2]) for w in vl.gw_schrijf]}")
