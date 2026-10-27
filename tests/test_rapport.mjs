@@ -2215,17 +2215,20 @@ proef("de belasting kijkt ook naar de groepen, elk tegen zijn eigen zekering", (
   assert.ok(Math.abs(zonder.percent - 24) < 0.01);
 });
 
-proef("een groep zonder meetwaarde blijft van de kaart", () => {
+proef("een groep zonder meetwaarde blijft staan, als niet gemeten (v0.168.0)", () => {
   const staten = { "sensor.g1": { state: "12", attributes: { unit_of_measurement: "A" } } };
   const feed = { get: (id) => staten[id] };
   const groepen = groepenVan(feed, { circuits: [
     { id: "garage", name: "Garage", fuse_amps: 16, phases: 1, sensors: { l1: { current: "sensor.g1" } } },
     { id: "leeg", name: "Leeg", fuse_amps: 16, phases: 3, sensors: {} },
   ] });
-  assert.equal(groepen.length, 1);
+  assert.equal(groepen.length, 2);
   assert.equal(groepen[0].name, "Garage");
   assert.equal(groepen[0].phases.length, 1);
   assert.equal(groepen[0].phases[0].amps, 12);
+  assert.equal(groepen[0].measured, true);
+  assert.equal(groepen[1].measured, false, "de lege groep is er, niet gemeten");
+  assert.equal(belastingVan(null, null, {}, groepen).worst, "L1 (Garage)", "en telt niet mee in de belasting");
 });
 
 // Een groep zonder eigen meter, gemeten via de apparaten die erop hangen (v0.165.0). Dezelfde som als
@@ -2253,9 +2256,123 @@ proef("een groep zonder meter telt de apparaten die erbij gekozen zijn", () => {
   const weg = groepenVan({ get: (id) => (id === "sensor.was_w" ? staten[id] : { state: "unavailable", attributes: {} }) }, { circuits: [
     { id: "g", name: "Was", fuse_amps: 16, phases: 1, meter: false, devices: [{ device: "was" }, { device: "droog" }] },
   ] }, apparaten);
-  assert.equal(weg.length, 0, "zegt een plug niets, dan geen som");
+  assert.equal(weg[0].phases[0].power, null, "zegt een plug niets, dan geen som");
+  assert.equal(weg[0].phases[0].amps, null, "en geen balk");
   const belasting = belastingVan(null, null, { fuse_amps: 25 }, een);
   assert.equal(belasting.worst, "L1 (Was)");
+});
+
+const { meetVanzelf } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+
+// Stroom en spanning van een plug (v0.168.0). Sven, 27-10-2026: "Bij losse apparaten (smart plugs) evt ook
+// spanning en stroom laten ingeven". De ampères zijn gemeten, of het vermogen door de gemeten spanning.
+proef("een groep met een plug met stroom en spanning en een met alleen vermogen", () => {
+  const staten = {
+    "sensor.was_w": { state: "460", attributes: { unit_of_measurement: "W" } },
+    "sensor.was_a": { state: "2.1", attributes: { unit_of_measurement: "A" } },
+    "sensor.was_v": { state: "229.5", attributes: { unit_of_measurement: "V" } },
+    "sensor.droog_w": { state: "918", attributes: { unit_of_measurement: "W" } },
+  };
+  const feed = { get: (id) => staten[id] };
+  const apparaten = [
+    { id: "was", name: "Wasmachine", entity: "sensor.was_w", entities: { current: "sensor.was_a", voltage: "sensor.was_v" } },
+    { id: "droog", name: "Droger", entity: "sensor.droog_w" },
+  ];
+  const [g] = groepenVan(feed, { circuits: [
+    { id: "g", name: "Was", fuse_amps: 16, phases: 1, meter: false, devices: [{ device: "was" }, { device: "droog" }] },
+  ] }, apparaten);
+  const fase = g.phases[0];
+  assert.ok(Math.abs(fase.current - (2.1 + 918 / 229.5)) < 1e-9, `${fase.current}`);
+  assert.equal(fase.voltage, 229.5);
+  assert.equal(fase.power, 1378);
+  // Alleen vermogen, zoals een groep met alleen HomeWizard: geen ampère op het scherm, de balk op 230 V.
+  const [kaal] = groepenVan(feed, { circuits: [
+    { id: "g", name: "Was", fuse_amps: 16, phases: 1, meter: false, devices: [{ device: "droog" }] },
+  ] }, apparaten);
+  assert.equal(kaal.phases[0].current, null, "geen gemeten stroom of spanning: geen ampère");
+  assert.equal(kaal.phases[0].voltage, null, "en geen 230 als meetwaarde");
+  assert.ok(Math.abs(kaal.phases[0].amps - 918 / 230) < 1e-9, "de balk rekent op 230 V");
+});
+
+proef("een groep van één fase heet naar zijn fase, en anders naar die van de batterij erop (v0.168.0)", () => {
+  const feed = { get: () => ({ state: "10.9", attributes: { unit_of_measurement: "A" } }) };
+  const sensors = { l1: { current: "sensor.anker_a" } };
+  const [gekozen] = groepenVan(feed, { circuits: [{ id: "a", name: "Anker", phases: 1, phase: "l3", sensors }] });
+  assert.equal(gekozen.phases[0].label, "L3");
+  assert.equal(gekozen.phases[0].key, "l1", "de sensoren blijven onder l1");
+  const [bat] = groepenVan(feed, { circuits: [{ id: "a", name: "Anker", phases: 1, sensors }] },
+    [{ id: "accu", type: "thuisbatterij", circuit: "a", battery: { phase: "l2" } }]);
+  assert.equal(bat.phases[0].label, "L2");
+});
+
+proef("Belastingen in je huis: de hoofdaansluiting, de kasten, en inklapbaar de groepen eronder (v0.168.0)", () => {
+  const Overzicht = geregistreerd.get("dac-view-overview");
+  const el = Object.create(Overzicht.prototype);
+  const host = { innerHTML: "", addEventListener: () => {} };
+  const kaart = { hidden: true };
+  const titel = { textContent: "" };
+  el.$ = (k) => ({ "#phases": kaart, "#phases-title": titel, "#phase-rows": host })[k];
+  el.settings_ = { sources: { phases_on_overview: true }, installation: { phases: 3, fuse_amps: 25 } };
+  el.belastingOpen_ = {};
+  const fase = (label, current, power) => ({ key: label.toLowerCase(), label, current, power, voltage: null, amps: Math.abs(current) });
+  const r = {
+    phases: [fase("L1", 3, 600), fase("L2", 2, 400), fase("L3", -4.7, -1100)],
+    circuits: [
+      { id: "garage", name: "Garage", kind: "kast", parent: "", fuse: 16, count: 3, measured: true,
+        phases: [fase("L1", 1, 200), fase("L2", 1, 200), fase("L3", 4.9, -1150)] },
+      { id: "schuur", name: "Schuur", kind: "kast", parent: "garage", fuse: 16, count: 1, measured: false, phases: [] },
+      { id: "alfen", name: "Alfen", kind: "groep", parent: "garage", fuse: 16, count: 3, measured: false, phases: [] },
+      { id: "anker", name: "Anker", kind: "groep", parent: "garage", fuse: 16, count: 1, measured: true, phases: [fase("L3", 15.5, 3500)] },
+      { id: "was", name: "Wasmachine & Droger", kind: "groep", parent: "", fuse: 16, count: 1, measured: true, phases: [fase("L1", 4, 830)], via: ["Droger", "Wasmachine"] },
+    ],
+  };
+  el.updatePhases_(r, 90);
+  const html = host.innerHTML;
+  assert.equal(kaart.hidden, false);
+  assert.equal(titel.textContent, "Belastingen in je huis");
+  assert.ok(html.includes("Hoofdaansluiting") && html.includes("3x25 A"), "de hoofdaansluiting met 3x25 A");
+  assert.ok(html.includes("Onderverdeelkasten"), "twee kasten: het meervoud");
+  assert.ok(html.includes("Garage") && html.includes("3x16 A"), "de kast met 3x16 A");
+  assert.ok(html.includes("onder Garage"), "een kast onder een kast zegt waaronder");
+  assert.ok(/data-blok="hoofd"[^>]*>\s*<summary>Groepen onder hoofdaansluiting/.test(html), "inklapbaar onder de hoofdaansluiting");
+  assert.ok(!/data-blok="hoofd" open/.test(html), "standaard ingeklapt");
+  assert.ok(html.includes("Wasmachine &amp; Droger"), "met de naam van de bewoner, veilig");
+  assert.ok(/data-blok="garage" open/.test(html), "de Anker zit boven de grens: dat blok gaat vanzelf open");
+  assert.ok(html.includes("Niet gemeten"), "de Alfen-groep zonder meter staat er, niet gemeten");
+  assert.ok(html.includes("<b>-4,9</b> A"), "een stroom zonder teken krijgt het teken van het vermogen");
+  el.belastingOpen_ = { hoofd: true };
+  el.updatePhases_(r, 90);
+  assert.ok(/data-blok="hoofd" open/.test(host.innerHTML), "wat de kijker openklapte blijft open");
+});
+
+proef("stroom en spanning staan bij een plug, niet bij een laadpaal (v0.168.0)", () => {
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  const droger = { id: "droog", name: "Droger", type: "overig", entity: "sensor.droog_w" };
+  el.draft_ = { devices: [droger], installation: { circuits: [
+    { id: "was", name: "Wasmachine & Droger", kind: "groep", devices: [{ device: "droog" }] },
+  ] } };
+  const meet = el.meetHtml_(droger, 0);
+  assert.ok(meet.includes('data-entity-key="current"') && meet.includes('data-entity-key="voltage"'));
+  assert.equal(el.meetHtml_({ type: "laadpaal" }, 0), "", "niet bij een laadpaal");
+  assert.equal(el.entityField_(droger, "current").filter, "current");
+});
+
+proef("stroom en spanning worden voorgesteld uit hetzelfde apparaat als de vermogenssensor", () => {
+  const entities = {
+    "sensor.was_w": { entity_id: "sensor.was_w", device_id: "d1" },
+    "sensor.was_a": { entity_id: "sensor.was_a", device_id: "d1" },
+    "sensor.was_v": { entity_id: "sensor.was_v", device_id: "d1" },
+    "sensor.ander_v": { entity_id: "sensor.ander_v", device_id: "d2" },
+  };
+  const states = {
+    "sensor.was_a": { attributes: { device_class: "current" } },
+    "sensor.was_v": { attributes: { unit_of_measurement: "V" } },
+    "sensor.ander_v": { attributes: { device_class: "voltage" } },
+  };
+  assert.deepEqual(meetVanzelf({ entity: "sensor.was_w" }, entities, states), { current: "sensor.was_a", voltage: "sensor.was_v" });
+  assert.deepEqual(meetVanzelf({ entity: "sensor.was_w", entities: { voltage: "sensor.x" } }, entities, states), { current: "sensor.was_a" });
+  assert.deepEqual(meetVanzelf({ entity: "sensor.los" }, entities, states), {});
 });
 
 proef("bij Groepen kies je zonder meter de apparaten, elk hooguit in één groep", () => {

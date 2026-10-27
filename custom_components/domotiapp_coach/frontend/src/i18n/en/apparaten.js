@@ -437,6 +437,12 @@ export const APPARATEN = {
   "Stekker": "Plug",
   "Energieteller": "Energy meter",
   "Energieteller (optioneel)": "Energy meter (optional)",
+  // v0.168.0: stroom en spanning van een apparaat.
+  "Stroomsensor (optioneel)": "Current sensor (optional)",
+  "In ampère, als de stekker die meet. Dan telt de groep waar dit apparaat op hangt met de echte stroom.": "In amps, if the plug measures it. The circuit this device is on then counts with the real current.",
+  "Spanningssensor (optioneel)": "Voltage sensor (optional)",
+  "In volt, als de stekker die meet. Dan rekent de coach het vermogen van de groep om met de echte spanning in plaats van 230 V.": "In volts, if the plug measures it. The coach then converts the power of the circuit with the real voltage instead of 230 V.",
+  "Gekozen bij Groepen, onder Installatie: daar staat dit apparaat bij deze groep.": "Chosen under Circuits, in Installation: this device is listed with that circuit there.",
   "De teller van de smart plug in kWh, als die er een heeft. Daarmee klopt het verbruik in je rapport tot op de komma; zonder wordt het afgeleid uit het gemiddelde vermogen.":
     "The smart plug's counter in kWh, if it has one. With it the consumption in your report is exact; without it, it is derived from the average power.",
   "De sensor Energieverbruik van de machine, in kWh. Een vermogenssensor heeft hij niet: hieruit telt de coach wat een programma verbruikt en wat het kost. Zonder plant hij alleen op de duur.":

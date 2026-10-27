@@ -6331,7 +6331,8 @@ class ChargerCoach:
     def _groep_som(self, settings: dict[str, Any], groep: dict[str, Any]) -> dict[str, float] | None:
         """Per fase wat de apparaten trekken die bij een groep zonder meter gekozen zijn (v0.165.0)."""
         return groep_apparaten_amps(
-            groep, settings.get("devices") or [], lambda entity: _watts(self.hass, entity)
+            groep, settings.get("devices") or [], lambda entity: _watts(self.hass, entity),
+            lambda entity: _number(self.hass, entity),
         )
 
     def _laadruimte_plan(
@@ -6435,6 +6436,12 @@ class ChargerCoach:
         }
         keten: list[dict[str, Any]] = []
         volgende = device.get("circuit") or ""
+        # Staat het apparaat bij een groep onder Groepen (v0.165.0), dan hangt het daaraan: één plek
+        # (v0.168.0). Tot dan kon "Hangt aan" iets anders zeggen dan de groep.
+        for groep in groepen.values():
+            if any(isinstance(r, dict) and r.get("device") == device.get("id") for r in groep.get("devices") or []):
+                volgende = groep.get("id")
+                break
         while volgende and volgende in groepen and len(keten) < 12:
             groep = groepen[volgende]
             if any(g is groep for g in keten):

@@ -333,7 +333,8 @@ class LoadMonitor:
                     str(groep.get("name") or groep.get("id") or ""),
                     groep.get("sensors") or {},
                     groep_apparaten_amps(
-                        groep, self._settings.get("devices") or [], lambda e: _watts(states.get(e))
+                        groep, self._settings.get("devices") or [], lambda e: _watts(states.get(e)),
+                        lambda e: _number(states.get(e)),
                     ),
                 ))
 

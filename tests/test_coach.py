@@ -4542,6 +4542,11 @@ NU81 = dt.datetime(2026, 9, 22, 12, 0)
 
 controle("de keten van de paal is de garage", [g["id"] for g in coach81._groepen_keten(inst81, LAADPAAL_G)] == ["garage"],
          f"{coach81._groepen_keten(inst81, LAADPAAL_G)}")
+# Een apparaat bij een groep onder Groepen hangt daaraan, wat "Hangt aan" ook zegt (v0.168.0).
+inst81b = {**inst81, "installation": {**inst81["installation"], "circuits": [
+    *inst81["installation"]["circuits"], {"id": "was", "name": "Was", "parent": "", "devices": [{"device": "droger"}]}]}}
+controle("een apparaat in een groep onder Groepen hangt aan die groep",
+         [g["id"] for g in coach81._groepen_keten(inst81b, {"id": "droger", "circuit": ""})] == ["was"], "")
 controle("en een toezegging aan die paal telt onder de hoofdaansluiting en onder de garage",
          coach81._groep_sleutels(inst81, LAADPAAL_G) == ["", "garage"], f"{coach81._groep_sleutels(inst81, LAADPAAL_G)}")
 grid81, _, _, _ = coach81._read(NU81, inst81, LAADPAAL_G)

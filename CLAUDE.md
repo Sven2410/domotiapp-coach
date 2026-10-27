@@ -205,7 +205,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 |---|---|
 | de laadpaal: proefladen bij het inpluggen en een auto in storing, de zonverwachting per voorspeller (Forecast.Solar telt op het eind van het uur), de zon zonder paneelgegevens (eigen opwek en het weer, zon.py), een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla, de laadbeurt en de actieradius op de kaart | `docs/laadpaal.md` |
 | een Alfen, of iets aan de paalsturing | `docs/alfen.md` |
-| onderverdeelkasten en groepen met een eigen zekering | `docs/groepen.md` |
+| onderverdeelkasten en groepen met een eigen zekering, en de kaart Belastingen in je huis (v0.168.0) | `docs/groepen.md` |
 | de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, hoe de coach prijslijsten leest, de temperatuur met de melding en de ventilator, en Growatt (uitlezen, en sinds v0.150.0 sturen met een laadschema), en een integratie die na een storing niet opkomt (v0.166.0, elke integratie) | `docs/batterij.md` |
 | de vaatwasser: Home Connect, Home Connect Local, een domme vaatwasser, de eindtijd, na de klaar-tijd; en de wasmachine en de droger (Miele, tellen op een energieteller) | `docs/vaatwasser.md` |
 | de boiler | `docs/boiler.md` |
