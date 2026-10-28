@@ -2048,6 +2048,28 @@ dan één keer "doet het weer" in de geschiedenis. Daarna gaat de gewone weg ver
 
 Proef 209 in test_coach.py. De echte toets is de volgende storing.
 
+## Een integratie die om opnieuw inloggen vraagt (v0.176.0)
+
+In een klantwoning vroeg de integratie van de auto op 28-10-2026 om opnieuw inloggen, en bleef ze toch op
+`loaded` staan. Daardoor zag `_async_integraties` niets, want die kijkt naar `setup_error` en `not_loaded`.
+De accustand stond van 27-10 15:55 tot de volgende avond op 25%. Een vaatwasser bij dezelfde klant (Home
+Connect) vroeg er al sinds mei om, met de integratie op `setup_error`. De coach herlaadde hem elk kwartier,
+en dat helpt dan niet. De eigenaar: "vang dat ook af en stuur een melding zodra die daarom vraagt. Dit is
+vaak ook zo bij andere integraties."
+
+- **Waar de coach naar kijkt:** in dezelfde kwartierronde, voor elke integratie achter de eigen entiteiten,
+  of er een lopende flow is met `context.source == "reauth"` en dat `entry_id` (`_inloggen_gevraagd`, uit
+  `config_entries.flow.async_progress()`).
+- **De melding:** dan komt er één kritieke melding: "De integratie {naam} vraagt om opnieuw in te loggen.
+  Doe dat in Home Assistant bij Instellingen, Apparaten en diensten."
+- **Niet herladen:** de coach herlaadt de integratie dan niet, ook niet bij `setup_error`.
+- **Na het inloggen:** dan komt "doet het weer", alleen in de geschiedenis.
+- **Een herstart:** `inloggen` in de sleutel `meldingen` van `GeheugenStore` onthoudt dat de melding al
+  verstuurd is.
+
+De melding komt binnen een kwartier na het eerste kwartier na de start, net als die voor een integratie die
+niet opkomt. Proef 217 in test_coach.py.
+
 ## Een batterij die de coach niet volgt (v0.167.0)
 
 In een klantwoning laadde de batterij op 27-10-2026 van 16:00:54 tot 16:17 2,5 kW van het net, in het duurste

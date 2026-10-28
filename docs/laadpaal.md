@@ -1339,3 +1339,50 @@ gevallen:
 - drie minuten later stil valt in dezelfde melding, acht minuten later niet;
 - een droger die de coach alleen uitleest geeft een gewone melding;
 - de oude zin blijft voor één sensor.
+
+## Een accustand die vastzit (v0.176.0)
+
+In een klantwoning stond de accustand van een bus op 28-10-2026 de hele dag op 25%. Er gingen in twee beurten
+52,4 en 20,6 kWh in, met tussendoor een uur zonder kabel. De integratie van de auto vroeg om opnieuw inloggen
+en werkte niets meer bij (`docs/batterij.md`). Wat er daardoor misging:
+- de coach plande 51,8 kWh;
+- om 23:29 zei de paal "klaar";
+- de coach herstartte toen de paal en stuurde een kritieke melding: "staat op 26% en dat is niet vol".
+
+De bus was vol.
+
+**Wat de coach bijhoudt.** Per laadpunt de stand, en wat de teller van de paal er sinds de laatste
+verandering in deed (`_soc_vast_bij`, `self._soc_vast`). Daarvoor dient de teller en niet de eigen meting:
+de teller overleeft een herstart en een nieuwe beurt. Wat een gast of een andere auto aan dezelfde paal laadt,
+telt niet mee.
+
+**Wanneer hij de stand niet meer gelooft.** Zodra een van deze twee waar is:
+- er ging meer in de accu dan er volgens die stand nog in paste, plus `SOC_VAST_MARGE` (10 punt);
+- er ging `SOC_VAST_PROCENT` (50%) van de accu in zonder één verandering.
+
+Gerekend met het laadrendement. Het moeten in beide gevallen minstens `SOC_VAST_MIN` (25 punt) zijn. Een auto op
+100% neemt nog een tijd wat af terwijl zijn stand blijft staan: in het virtuele huis was dat 2,9 kWh, en
+dat is geen storing. Een auto die per tien procent meldt, of eens per uur, haalt geen van beide.
+
+**Wat hij dan doet.**
+- Hij rekent zoals bij een auto zonder accustand (eis 6): wachten met het net, en op tijd beginnen alsof de
+  accu leeg is. Zon gaat er gewoon in.
+- De kaart vraagt hoe vol de auto is (`soc_ask`).
+- "Klaar" van de paal is klaar: geen herstart en geen melding "niet vol".
+- Er komt één kritieke melding: "De accustand van {auto} blijft op 25% staan, terwijl er 36,2 kWh in ging.
+  Waarschijnlijk wordt hij niet meer bijgewerkt. Tot hij weer iets meldt, rekent de coach zonder."
+
+**Wanneer hij hem weer gelooft.** Zodra de sensor een andere stand geeft. Dat komt als één regel in de
+geschiedenis.
+
+**Een herstart:** de sleutel `accustand:<id>` in `GeheugenStore` bewaart dit.
+
+Proef 217 in test_coach.py controleert de volgende gevallen:
+- 25% blijft staan: na 36,2 kWh telt de stand niet meer, met een herstart ervoor en erna;
+- de paal zegt klaar: geen herstart;
+- opnieuw inpluggen: de stand telt nog steeds niet;
+- er komt een nieuwe stand: die telt weer;
+- een stand die per tien procent springt, zit nooit vast;
+- 85% met 14 kWh erin telt nog, met 20 kWh niet meer;
+- een gast aan dezelfde paal telt niet mee.
+

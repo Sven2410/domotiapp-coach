@@ -821,6 +821,17 @@ SOC_SETTLE = timedelta(minutes=3)
 # mee als stap; dat is een auto die ondertussen ergens anders geladen heeft.
 SOC_STAP_START = 1.0
 SOC_STAP_MAX = 25.0
+# Een accustand die niet meer meebeweegt (v0.176.0). In een klantwoning stond de accustand van een bus
+# op 28-10-2026 de hele dag op 25%, terwijl er 72,9 kWh in ging: de integratie van de auto vroeg om
+# opnieuw inloggen en werkte niets meer bij. De coach plande daarop, herstartte de paal bij "klaar" en
+# stuurde een kritieke melding "niet vol". Zo'n stand gelooft hij niet meer zodra er sinds de laatste
+# verandering meer in de accu ging dan er volgens die stand nog in paste (plus `SOC_VAST_MARGE`), of
+# `SOC_VAST_PROCENT` van de accu zonder één verandering. Een auto die per tien procent meldt, of eens per
+# uur, haalt dat geen van beide. En nooit onder `SOC_VAST_MIN`: een auto op 100% neemt nog een tijd wat
+# af terwijl zijn stand blijft staan (in het virtuele huis 2,9 kWh), en dat is geen storing.
+SOC_VAST_PROCENT = 50.0
+SOC_VAST_MARGE = 10.0
+SOC_VAST_MIN = 25.0
 
 # Hoeveel twee ronden van elkaar mogen verschillen voordat het geen meting meer
 # is maar een sensor die nog aan het bijkomen is. Zie `_tempo_leren`. Ruim
@@ -1641,6 +1652,8 @@ class ChargerCoach:
         # Per integratie die niet opkwam sinds wanneer, welke gemeld is, en de volgende controle (v0.166.0).
         self._integratie_stuk: dict[str, datetime] = {}
         self._integratie_gemeld: set[str] = set()
+        # Integraties die om opnieuw inloggen vragen en al gemeld zijn (v0.176.0).
+        self._integratie_inloggen: set[str] = set()
         self._integratie_om: datetime | None = None
         # Per laadpaal sinds wanneer een opdracht niet aankomt, en welke al gemeld zijn (v0.163.3).
         self._paal_weg: dict[str, datetime] = {}
@@ -1803,6 +1816,9 @@ class ChargerCoach:
         # dan zou `_soc_op` nooit meer tot rust komen.
         self._soc_ruw: dict[str, float] = {}
         self._soc_ijk: dict[str, tuple[float, float]] = {}
+        # Per laadpunt: de accustand van de auto, wat de paal er sindsdien in deed, en of die
+        # stand vastzit (v0.176.0, `_soc_vast_bij`). Overleeft een herstart (`accustand:<id>`).
+        self._soc_vast: dict[str, dict[str, Any]] = {}
         # De kleinste sprong die deze sensor liet zien: zijn resolutie.
         self._soc_stap: dict[str, float] = {}
         # Het aantal fasen zoals het deze ronde gemeten is, per laadpunt. Eén
@@ -2560,6 +2576,23 @@ class ChargerCoach:
             loop(settings.get(sleutel))
         return uit
 
+    def _inloggen_gevraagd(self) -> set[str]:
+        """De integraties waarvoor Home Assistant om opnieuw inloggen vraagt: een lopende reauth (v0.176.0).
+
+        Gemeten in een klantwoning op 28-10-2026: de integratie zelf kan daarbij op `loaded` blijven
+        staan (een auto) of op `setup_error` (een vaatwasser, met een token die niet meer geldt).
+        """
+        try:
+            flows = self.hass.config_entries.flow.async_progress()
+        except Exception:  # noqa: BLE001 - zonder flows geen melding
+            return set()
+        uit: set[str] = set()
+        for flow in flows or []:
+            context = (flow.get("context") if isinstance(flow, dict) else None) or {}
+            if context.get("source") == "reauth" and context.get("entry_id"):
+                uit.add(str(context["entry_id"]))
+        return uit
+
     async def _async_integraties(self, settings: dict[str, Any], now: datetime) -> None:
         """Een integratie achter de entiteiten van de coach die niet opkwam: herladen (v0.166.0).
 
@@ -2587,12 +2620,30 @@ class ChargerCoach:
         except Exception:  # noqa: BLE001 - zonder register geen controle
             _LOGGER.debug("kon de integraties niet nakijken", exc_info=True)
             return
+        inloggen = self._inloggen_gevraagd()
         for entry_id in entries:
             entry = self.hass.config_entries.async_get_entry(entry_id)
             if entry is None or entry.domain == DOMAIN:
                 continue
             naam = entry.title or entry.domain
             stand = str(getattr(entry.state, "value", entry.state))
+            # Vraagt hij om opnieuw inloggen (v0.176.0), dan helpt herladen niet: dat moet de
+            # bewoner doen. Eén melding, ook als de integratie op loaded blijft staan.
+            if entry_id in inloggen:
+                if entry_id not in self._integratie_inloggen:
+                    self._integratie_inloggen.add(entry_id)
+                    _LOGGER.warning("de integratie %s (%s) vraagt om opnieuw in te loggen", naam, entry.domain)
+                    await self._async_tell(
+                        t("De integratie {naam} vraagt om opnieuw in te loggen. Doe dat in Home Assistant bij "
+                          "Instellingen, Apparaten en diensten.", naam=naam),
+                        kritiek=True,
+                    )
+                continue
+            if entry_id in self._integratie_inloggen:
+                self._integratie_inloggen.discard(entry_id)
+                if stand == "loaded" and entry_id not in self._integratie_stuk:
+                    _LOGGER.warning("de integratie %s is weer ingelogd", naam)
+                    await self._async_tell(t("De integratie {naam} doet het weer.", naam=naam), telefoon=False)
             if stand not in INTEGRATIE_HERLADEN or getattr(entry, "disabled_by", None):
                 if stand == "loaded" and entry_id in self._integratie_stuk:
                     self._integratie_stuk.pop(entry_id, None)
@@ -8802,6 +8853,7 @@ class ChargerCoach:
         """
         device_id = device.get("id", "")
         grid, car, charger, window = self._read(now, settings, device, reserved)
+        await self._async_soc_vast_melden(device, car)
         try:
             await self._async_auto_wekken(now, settings, device, charger.connected)
         except ServiceNotFound:
@@ -11285,6 +11337,10 @@ class ChargerCoach:
     ) -> Car:
         """The car that is plugged in, as far as anybody has said."""
         chosen, profile = self._chosen_car(settings, device)
+        # Wat een gast of een auto zonder sensor laadt, telt niet bij de stand van een andere auto.
+        vast_rij = self._soc_vast.get(device.get("id", ""))
+        if vast_rij is not None and (profile is None or profile.get("soc_entity") != vast_rij.get("entity")):
+            vast_rij["laatste"] = self._teller(device)
 
         if chosen == "__guest__":
             return Car(guest=True, phases=3, name=t("Gast"))
@@ -11321,6 +11377,11 @@ class ChargerCoach:
         # opgegeven, bijgewerkt met wat de paal er sindsdien in heeft gedaan.
         soc = _number(self.hass, profile.get("soc_entity"))
         geschat = False
+        # Een stand die niet meer meebeweegt is geen stand (v0.176.0): dan rekent de coach
+        # zoals bij een auto zonder accustand, en vraagt de kaart erom (`soc_ask`).
+        vast = soc is not None and self._soc_vast_bij(device, profile, soc)
+        if vast:
+            soc = None
         if soc is not None:
             # Wat de sensor zelf zei blijft apart staan: `_soc_op` hoort tot
             # rust te komen zodra de sensor stilstaat, en de bijgetelde stand
@@ -11333,7 +11394,7 @@ class ChargerCoach:
             self._soc_ruw.pop(device_id, None)
             soc = self._typed_soc(settings, device, profile)
             geschat = soc is not None
-        if soc is None:
+        if soc is None and not vast:
             soc = self._onthouden_soc(device, profile)
             geschat = soc is not None
 
@@ -11428,6 +11489,78 @@ class ChargerCoach:
         if minuten < PLAFOND_MEETTIJD_MIN:
             return None
         return sum(plafond * stap for _, plafond, stap in binnen) / minuten
+
+    def _soc_vast_bij(self, device: dict[str, Any], profile: dict[str, Any], soc: float) -> bool:
+        """Of de accustand van deze auto vastzit: hij verandert niet, en de paal levert (v0.176.0).
+
+        Per laadpunt de stand, en wat de teller van de paal er sinds de laatste verandering in deed.
+        De teller en niet de eigen meting, want die overleeft een herstart en een nieuwe beurt: de
+        bus van 28-10-2026 ging tussendoor een uur van de kabel. Verandert de stand, dan begint het
+        opnieuw, en een vaste stand die weer beweegt is weer gewoon een stand.
+        """
+        device_id = device.get("id", "")
+        entity = profile.get("soc_entity")
+        meter = self._teller(device)
+        rij = self._soc_vast.get(device_id)
+        if rij is None or rij.get("entity") != entity or abs(float(rij.get("waarde", -1.0)) - soc) > 1e-9:
+            terug = bool(rij and rij.get("vast") and rij.get("entity") == entity)
+            if terug:
+                _LOGGER.warning("%s: de accustand van %s beweegt weer (%.0f%%)", device_id, entity, soc)
+            self._soc_vast[device_id] = {"entity": entity, "waarde": soc, "kwh": 0.0, "laatste": meter,
+                                         "vast": False, "gemeld": False, "terug": terug}
+            self._soc_vast_onthouden(device_id)
+            return False
+        if meter is not None:
+            vorige = rij.get("laatste")
+            if vorige is not None and meter > float(vorige):
+                rij["kwh"] = float(rij.get("kwh") or 0.0) + meter - float(vorige)
+                rij["laatste"] = meter
+                self._soc_vast_onthouden(device_id)
+            rij["laatste"] = meter
+        if rij.get("vast"):
+            return True
+        capacity = float(profile.get("capacity_kwh") or 0)
+        if not capacity:
+            return False
+        erin = float(rij.get("kwh") or 0.0) * self._rend_nu.get(device_id, CHARGE_EFFICIENCY) / capacity * 100.0
+        if erin < min(max(100.0 - soc + SOC_VAST_MARGE, SOC_VAST_MIN), SOC_VAST_PROCENT):
+            return False
+        rij["vast"] = True
+        _LOGGER.warning(
+            "%s: de accustand van %s staat op %.0f%% terwijl er sindsdien %.1f kWh in ging; de coach gelooft "
+            "hem niet meer", device_id, entity, soc, float(rij.get("kwh") or 0.0),
+        )
+        self._soc_vast_onthouden(device_id)
+        return True
+
+    def _soc_vast_onthouden(self, device_id: str) -> None:
+        rij = self._soc_vast.get(device_id)
+        data = None
+        if rij is not None:
+            data = {k: rij.get(k) for k in ("entity", "waarde", "kwh", "laatste", "vast", "gemeld")}
+        self._onthoud(f"accustand:{device_id}", data, meteen=bool(rij and rij.get("vast")))
+
+    async def _async_soc_vast_melden(self, device: dict[str, Any], car: Car) -> None:
+        """Eén melding als de accustand vastzit, en één regel in de geschiedenis als hij weer beweegt."""
+        rij = self._soc_vast.get(device.get("id", ""))
+        if rij is None:
+            return
+        auto = _hoofdletter(self._hoe_heet(car))
+        if rij.get("terug"):
+            rij["terug"] = False
+            await self._async_tell(t("De accustand van {auto} wordt weer bijgewerkt.", auto=auto), telefoon=False)
+        if rij.get("vast") and not rij.get("gemeld"):
+            rij["gemeld"] = True
+            self._soc_vast_onthouden(device.get("id", ""))
+            await self._async_tell(
+                t(
+                    "De accustand van {auto} blijft op {stand}% staan, terwijl er {kwh} kWh in ging. Waarschijnlijk "
+                    "wordt hij niet meer bijgewerkt. Tot hij weer iets meldt, rekent de coach zonder.",
+                    auto=auto, stand=round(float(rij.get("waarde") or 0.0)),
+                    kwh=getal(float(rij.get("kwh") or 0.0), 1),
+                ),
+                kritiek=True,
+            )
 
     def _onthouden_soc(
         self, device: dict[str, Any], profile: dict[str, Any]
@@ -14472,6 +14605,15 @@ class ChargerCoach:
                 mikpunt = _uit_geheugen(data.get("mikpunt"))
                 if mikpunt is not None:
                     self._mikpunt_terug[device_id] = mikpunt
+            elif sleutel.startswith("accustand:"):
+                rij = {k: data.get(k) for k in ("entity", "waarde", "kwh", "laatste", "vast", "gemeld")}
+                try:
+                    rij["waarde"] = float(rij["waarde"])
+                except (TypeError, ValueError):
+                    continue
+                rij["kwh"] = float(rij.get("kwh") or 0.0)
+                rij["vast"], rij["gemeld"], rij["terug"] = bool(rij["vast"]), bool(rij["gemeld"]), False
+                self._soc_vast[sleutel.split(":", 1)[1]] = rij
             elif sleutel == "water":
                 self._water_loopt_sinds = _uit_geheugen(data.get("sinds"))
                 self._water_gemeld = bool(data.get("gemeld")) and self._water_loopt_sinds is not None
@@ -14595,6 +14737,7 @@ class ChargerCoach:
         """
         data = {
             "integratie": sorted(self._integratie_gemeld),
+            "inloggen": sorted(self._integratie_inloggen),
             "integratie_stuk": {k: _naar_geheugen(v) for k, v in sorted(self._integratie_stuk.items())},
             "temp": sorted(str(k) for k in self._temp_gemeld),
             "vriezer": sorted([list(k) for k in self._vriezer_gemeld]),
@@ -14620,6 +14763,7 @@ class ChargerCoach:
             return uit
 
         self._integratie_gemeld |= {str(k) for k in lijst("integratie")}
+        self._integratie_inloggen |= {str(k) for k in lijst("inloggen")}
         self._integratie_stuk.update(momenten("integratie_stuk"))
         self._temp_gemeld |= {str(k) for k in lijst("temp")}
         self._vriezer_gemeld |= {(str(k[0]), str(k[1])) for k in lijst("vriezer") if isinstance(k, list) and len(k) == 2}

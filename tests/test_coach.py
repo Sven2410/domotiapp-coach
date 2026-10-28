@@ -12616,6 +12616,186 @@ controle("de eerste ronde na een installatie zet de telling in de opslag", "grow
 coachmod._LOGGER.removeHandler(log215)
 logging.disable(logging.WARNING)
 
+print("=== 217. een accustand die vastzit, en een integratie die om opnieuw inloggen vraagt (v0.176.0) ===")
+# In een klantwoning stond de accustand van een bus op 28-10-2026 de hele dag op 25%, terwijl er 72,9 kWh
+# in ging: de integratie van de auto vroeg om opnieuw inloggen, bleef op loaded staan en werkte niets meer
+# bij. Om 23:33 herstartte de coach de paal bij "klaar" en stuurde hij een kritieke melding "niet vol".
+BUS217 = {**LAADPAAL, "cars": [{**LAADPAAL["cars"][0], "name": "Bus", "soc_entity": "sensor.bus_soc",
+                                "capacity_kwh": 65.0}]}
+inst217 = instellingen(devices=[BUS217])
+T217 = dt.datetime(2026, 10, 28, 12, 42)
+opslagmod217 = sys.modules["domotiapp_coach.storage"]
+
+
+def bus217(teller, status="charging", soc="25.0"):
+    return {**huis(status=status, stroom=16.0, vermogen=11000.0 if status == "charging" else 0.0, teller=teller,
+                   teruglevering=0.0, afname=11500.0), "sensor.bus_soc": soc}
+
+
+def zet217(hass, teller, status="charging", soc="25.0"):
+    for eid, w in bus217(teller, status, soc).items():
+        hass.states.zet(eid, w)
+
+
+def herstart217(hass):
+    oud = coachmod.async_get_geheugen(hass)
+    asyncio.run(oud.async_bewaar(coachmod.dt_util.utcnow()))
+    nieuw = opslagmod217.GeheugenStore(hass)
+    nieuw._store._data = oud._store._data
+    hass.data["domotiapp_coach"]["geheugen"] = nieuw
+    coach = coachmod.ChargerCoach(hass)
+    coach._sleep = lambda seconds: asyncio.sleep(0)
+    asyncio.run(coach._async_geheugen_laden())
+    return coach
+
+
+def meldingen217(hass):
+    return asyncio.run(coachmod.async_get_meldingen(hass).async_list())
+
+
+hass217, _, coach217 = bouw(bus217(100.0), inst217)
+asyncio.run(coach217._async_geheugen_laden())
+teller217 = 100.0
+stand217 = []
+for m in range(0, 301):
+    teller217 = 100.0 + m * 0.18
+    zet217(hass217, teller217)
+    st217, _ = asyncio.run(ronde(coach217, inst217, T217 + dt.timedelta(minutes=m), paal=BUS217))
+    stand217.append((m, st217.get("soc_now"), st217.get("soc_ask")))
+    if m in (150, 250):
+        coach217 = herstart217(hass217)
+eerst217 = next((m for m, soc, _a in stand217 if soc is None), None)
+print(f"  de stand telt niet meer na {eerst217} minuten ({(eerst217 or 0) * 0.18:.1f} kWh), "
+      f"dan soc_now {stand217[-1][1]} en soc_ask {stand217[-1][2]}")
+controle("een stand die op 25% blijft terwijl de helft van de accu erin ging, telt niet meer",
+         eerst217 is not None and 0.5 * 65 / 0.9 <= eerst217 * 0.18 + 0.2 and 150 < eerst217 < 250, f"{eerst217}")
+controle("en dan vraagt de kaart hoe vol de auto is", stand217[-1][1] is None and stand217[-1][2] is True,
+         f"{stand217[-1]}")
+vast217 = [g for g in meldingen217(hass217) if "blijft op 25% staan" in g["message"]]
+print(f"  {[(g['kind'], g['message']) for g in vast217]}")
+controle("één kritieke melding, ook met een herstart halverwege",
+         len(vast217) == 1 and vast217[0]["kind"] == "kritiek" and "sensor." not in vast217[0]["message"], f"{vast217}")
+controle("na de herstart telt de stand nog steeds niet", all(soc is None for m, soc, _a in stand217 if m > 250),
+         f"{[r for r in stand217 if r[0] > 250][:3]}")
+
+# De paal zegt klaar: geen herstart, geen melding "niet vol".
+zet217(hass217, teller217, status="completed")
+for m in range(301, 350):
+    asyncio.run(ronde(coach217, inst217, T217 + dt.timedelta(minutes=m), paal=BUS217))
+nietvol217 = [g for g in meldingen217(hass217) if "niet vol" in g["message"] and g["kind"] == "kritiek"]
+controle("de paal zegt klaar: geen herstart en geen melding niet vol",
+         not nietvol217 and "dev-laadpaal" not in coach217._herstart_open
+         and coach217._herstart_gedaan.get("dev-laadpaal") is None, f"{nietvol217}")
+
+# Een uur van de kabel en weer erin, zoals de bus om 19:12: de stand blijft ongeloofwaardig.
+zet217(hass217, teller217, status="disconnected")
+asyncio.run(ronde(coach217, inst217, T217 + dt.timedelta(minutes=351), paal=BUS217))
+zet217(hass217, teller217, status="awaiting_start")
+st217, _ = asyncio.run(ronde(coach217, inst217, T217 + dt.timedelta(minutes=410), paal=BUS217))
+controle("na opnieuw inpluggen gelooft hij die stand nog steeds niet", st217.get("soc_now") is None, f"{st217.get('soc_now')}")
+
+# Komt er een nieuwe stand, dan telt hij weer, met één regel in de geschiedenis.
+zet217(hass217, teller217, status="awaiting_start", soc="100.0")
+st217, _ = asyncio.run(ronde(coach217, inst217, T217 + dt.timedelta(minutes=411), paal=BUS217))
+weer217 = [g for g in meldingen217(hass217) if "weer bijgewerkt" in g["message"]]
+controle("een nieuwe stand telt weer, en dat staat alleen in de geschiedenis",
+         st217.get("soc_now") == 100.0 and len(weer217) == 1, f"{st217.get('soc_now')} {weer217}")
+
+# Een auto die per tien procent meldt, en een vaste stand bovenin die nog kan kloppen: nooit vast.
+hass217b, _, coach217b = bouw(bus217(100.0, soc="20.0"), inst217)
+for m in range(0, 240):
+    zet217(hass217b, 100.0 + m * 0.18, soc=str(20.0 + 10 * (m // 40)))
+    st217b, _ = asyncio.run(ronde(coach217b, inst217, T217 + dt.timedelta(minutes=m), paal=BUS217))
+controle("een stand die per tien procent springt is nooit vast",
+         not coach217b._soc_vast["dev-laadpaal"]["vast"] and st217b.get("soc_now") is not None, f"{st217b.get('soc_now')}")
+hass217c, _, coach217c = bouw(bus217(100.0, soc="85.0"), inst217)
+for m in range(0, 80):
+    zet217(hass217c, 100.0 + m * 0.18, soc="85.0")
+    asyncio.run(ronde(coach217c, inst217, T217 + dt.timedelta(minutes=m), paal=BUS217))
+controle("85% met 14 kWh erin kan nog net (25 punt), dus nog niet vast",
+         not coach217c._soc_vast["dev-laadpaal"]["vast"], f"{coach217c._soc_vast}")
+for m in range(80, 110):
+    zet217(hass217c, 100.0 + m * 0.18, soc="85.0")
+    asyncio.run(ronde(coach217c, inst217, T217 + dt.timedelta(minutes=m), paal=BUS217))
+controle("met 20 kWh erin niet meer: 28 punt, meer dan de 15 die er nog in pasten plus 10, en minstens 25",
+         coach217c._soc_vast["dev-laadpaal"]["vast"], f"{coach217c._soc_vast}")
+
+# Een gast aan dezelfde paal telt niet bij de stand van de bus.
+hass217d, _, coach217d = bouw(bus217(100.0), inst217)
+asyncio.run(ronde(coach217d, inst217, T217, paal=BUS217))
+gast217 = {**inst217, "active_cars": [{"device": "dev-laadpaal", "car": "__guest__"}]}
+for m in range(1, 200):
+    zet217(hass217d, 100.0 + m * 0.18)
+    asyncio.run(ronde(coach217d, gast217, T217 + dt.timedelta(minutes=m), paal=BUS217))
+asyncio.run(ronde(coach217d, inst217, T217 + dt.timedelta(minutes=201), paal=BUS217))
+controle("wat een gast laadt telt niet bij de stand van de bus",
+         coach217d._soc_vast["dev-laadpaal"]["kwh"] < 1.0 and not coach217d._soc_vast["dev-laadpaal"]["vast"],
+         f"{coach217d._soc_vast}")
+
+# Opnieuw inloggen: de Ford-integratie bleef op loaded, Home Connect stond op setup_error.
+inst217e = instellingen(devices=[BUS217, {"id": "dev-vaat", "type": "vaatwasser", "name": "Vaatwasser",
+                                          "entities": {"status": "sensor.vaat"}}])
+hass217e, _, coach217e = bouw({}, inst217e)
+entries217 = {
+    "e-auto": types.SimpleNamespace(domain="autocloud", title="Autocloud", state="loaded", disabled_by=None),
+    "e-vaat": types.SimpleNamespace(domain="vaatcloud", title="Vaatcloud", state="setup_error", disabled_by=None),
+    "e-paal": types.SimpleNamespace(domain="paal", title="Paal", state="loaded", disabled_by=None),
+}
+flows217 = [{"flow_id": "f1", "handler": "autocloud", "context": {"source": "reauth", "entry_id": "e-auto"}},
+            {"flow_id": "f2", "handler": "vaatcloud", "context": {"source": "reauth", "entry_id": "e-vaat"}},
+            {"flow_id": "f3", "handler": "nieuw", "context": {"source": "user"}}]
+herladen217 = []
+
+
+async def herlaad217(entry_id):
+    herladen217.append(entry_id)
+
+
+def entries_voor217(hass):
+    hass.config_entries = types.SimpleNamespace(
+        async_get_entry=lambda eid: entries217.get(eid), async_reload=herlaad217,
+        flow=types.SimpleNamespace(async_progress=lambda: list(flows217)))
+
+
+entries_voor217(hass217e)
+asyncio.run(coach217e._async_geheugen_laden())     # zoals de eerste ronde
+bij217 = {"sensor.bus_soc": "e-auto", "sensor.vaat": "e-vaat", LAADPAAL["entities"]["status"]: "e-paal"}
+er217 = types.ModuleType("homeassistant.helpers.entity_registry")
+er217.async_get = lambda hass: types.SimpleNamespace(
+    async_get=lambda eid: types.SimpleNamespace(config_entry_id=bij217[eid]) if eid in bij217 else None)
+oud217 = sys.modules.get("homeassistant.helpers.entity_registry")
+sys.modules["homeassistant.helpers.entity_registry"] = er217
+try:
+    for m in range(0, 61):
+        asyncio.run(coach217e._async_integraties(inst217e, T217 + dt.timedelta(minutes=m)))
+    inlog217 = [g for g in meldingen217(hass217e) if "opnieuw in te loggen" in g["message"]]
+    print(f"  {[(g['kind'], g['message']) for g in inlog217]}")
+    controle("een integratie die om opnieuw inloggen vraagt: één kritieke melding, ook als hij op loaded staat",
+             len(inlog217) == 2 and all(g["kind"] == "kritiek" for g in inlog217)
+             and any("Autocloud" in g["message"] for g in inlog217), f"{inlog217}")
+    controle("en een die op setup_error staat herlaadt hij dan niet, want dat helpt niet", herladen217 == [],
+             f"{herladen217}")
+    coach217e._meldingen_onthouden()
+    coach217e = herstart217(hass217e)
+    entries_voor217(hass217e)
+    for m in range(61, 120):
+        asyncio.run(coach217e._async_integraties(inst217e, T217 + dt.timedelta(minutes=m)))
+    controle("na een herstart niet nog eens",
+             len([g for g in meldingen217(hass217e) if "opnieuw in te loggen" in g["message"]]) == 2,
+             f"{[g['message'] for g in meldingen217(hass217e)]} {coach217e._integratie_inloggen}")
+    flows217[:] = [f for f in flows217 if f["context"].get("entry_id") != "e-auto"]
+    for m in range(120, 140):
+        asyncio.run(coach217e._async_integraties(inst217e, T217 + dt.timedelta(minutes=m)))
+    terug217 = [g for g in meldingen217(hass217e) if "Autocloud doet het weer" in g["message"]]
+    controle("na het inloggen doet hij het weer, alleen in de geschiedenis",
+             len(terug217) == 1 and terug217[0]["kind"] == "melding" and "e-auto" not in coach217e._integratie_inloggen,
+             f"{terug217}")
+finally:
+    if oud217 is None:
+        sys.modules.pop("homeassistant.helpers.entity_registry", None)
+    else:
+        sys.modules["homeassistant.helpers.entity_registry"] = oud217
+
 print("=== 216. het internet thuis weg: één melding, niet een per sensor (v0.175.0) ===")
 # In de klantwoning viel op 28-10-2026 het internet weg, en na tien minuten kwamen er in één ronde
 # vier kritieke meldingen: de koelkast, de vriezer, de droger en de wasmachine. Eén oorzaak, en twee
