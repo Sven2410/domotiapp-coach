@@ -248,5 +248,8 @@
   "{namen} melden al {minuten} minuten niets.": "{namen} have reported nothing for {minuten} minutes.",
   "Waarschijnlijk is het internet thuis weg.": "The internet at home is probably down.",
   "Waarschijnlijk hapert de integratie erachter.": "The integration behind them is probably stuck.",
-  "Zolang weet de coach niet of het ergens te warm wordt.": "Meanwhile the coach does not know whether anything gets too warm."
+  "Zolang weet de coach niet of het ergens te warm wordt.": "Meanwhile the coach does not know whether anything gets too warm.",
+  "De accustand van {auto} wordt weer bijgewerkt.": "The battery level of {auto} is being updated again.",
+  "De accustand van {auto} blijft op {stand}% staan, terwijl er {kwh} kWh in ging. Waarschijnlijk wordt hij niet meer bijgewerkt. Tot hij weer iets meldt, rekent de coach zonder.": "The battery level of {auto} stays at {stand}%, while {kwh} kWh went in. It is probably no longer being updated. Until it reports again, the coach works without it.",
+  "De integratie {naam} vraagt om opnieuw in te loggen. Doe dat in Home Assistant bij Instellingen, Apparaten en diensten.": "The {naam} integration asks you to sign in again. Do that in Home Assistant under Settings, Devices & services."
 }
