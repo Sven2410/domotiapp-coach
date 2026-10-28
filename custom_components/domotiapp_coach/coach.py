@@ -225,6 +225,11 @@ SENSOR_STIL = timedelta(minutes=10)
 # stilstaat verandert niet. De eigenaar op 22-09-2026 over de Ford: "zet dat maar
 # op een uur polling."
 SENSOR_STIL_AUTO = timedelta(minutes=60)
+# Sensoren die kort na elkaar stilvallen horen bij één melding (v0.175.0). In de klantwoning viel op
+# 28-10-2026 het internet weg, en na tien minuten kwamen er in één ronde vier kritieke meldingen, voor
+# een koelkast, een vriezer, een droger en een wasmachine. Zwijgt er een sensor, dan neemt de melding
+# elke sensor mee die al zo lang korter zwijgt.
+SENSOR_BUNDEL = timedelta(minutes=5)
 # Een groep zonder meter, gemeten via de apparaten die erop hangen (v0.165.0): vanaf welk deel van
 # de zekering, en hoe lang, voordat de coach het meldt. Een wasmachine die opwarmt duurt minuten,
 # een motor die aanloopt een seconde. Opnieuw pas als hij onder `GROEP_VOL_WEER` is geweest.
@@ -2370,6 +2375,10 @@ class ChargerCoach:
         status houdt hij de laatste (`_laatste_status`), zonder prijzen wacht
         hij (`no-prices`), zonder lastbewaker rekent hij op de zekering. Dit is
         alleen de melding dat er iets stuk is, want daar kijkt niemand naar.
+
+        Sinds v0.175.0 één melding voor alles wat tegelijk stilvalt (`SENSOR_BUNDEL`), met het
+        internet als oorzaak als er twee integraties of meer bij zijn, en kritiek alleen als er een
+        sensor bij zit waar de coach iets mee moet (`_sensoren_meelezen`).
         """
         zonnen = set(zonsensoren(settings))
         auto_sensoren = {
@@ -2378,11 +2387,8 @@ class ChargerCoach:
             for car in device.get("cars") or []
             if car.get("soc_entity")
         }
-        temperaturen = {
-            device["entities"]["temperature"]
-            for device in settings.get("devices") or []
-            if _temp_nodig(settings, device)
-        }
+        stil_nu: list[tuple[str, str, datetime, timedelta]] = []
+        terug: list[str] = []
         for entity_id, naam in self._sensoren(settings).items():
             state = self.hass.states.get(entity_id)
             stil = state is None or state.state in ("unknown", "unavailable", "")
@@ -2395,43 +2401,28 @@ class ChargerCoach:
             if not stil:
                 if entity_id in self._sensor_gemeld:
                     self._sensor_gemeld.discard(entity_id)
-                    await self._async_tell(
-                        t("{naam} doet het weer.", naam=f"{naam[0].upper()}{naam[1:]}"), telefoon=False
-                    )
+                    terug.append(naam)
                 self._sensor_stil.pop(entity_id, None)
                 continue
             if sinds is None:
                 self._sensor_stil[entity_id] = now
                 continue
-            grens = SENSOR_STIL_AUTO if entity_id in auto_sensoren else SENSOR_STIL
-            if entity_id in self._sensor_gemeld or now - sinds < grens:
+            if entity_id in self._sensor_gemeld:
                 continue
-            self._sensor_gemeld.add(entity_id)
-            minuten = int(_tussen(sinds, now).total_seconds() // 60)
-            # De entiteit-id staat in het log en niet in de melding. De eigenaar op
-            # 21-09-2026, over precies deze zin: "meld zo'n sensor niet
-            # volledig, zeg gewoon dat er iets mis is met de integratie". Wie
-            # hem moet opzoeken kijkt in het log; wie hem leest heeft genoeg aan
-            # de naam die hij zelf heeft ingevuld.
-            # Alleen de id (v0.141.1): het log blijft Nederlands, en de naam ging door
-            # `t()`, dus in het Engels kwam er "the temperature of ..." midden in.
-            _LOGGER.warning("%s meldt al %d minuten niets", entity_id, minuten)
-            # Valt de reserveprijsbron in, dan rekent de coach niet zonder maar
-            # daarmee (v0.101.3).
-            zolang = t("De coach rekent zolang zonder.")
-            if self._reserve_valt_in(settings, entity_id):
-                zolang = t("De coach rekent zolang met je reserveprijzen.")
-            # Met de temperatuur rekent de coach niet; die is er voor de
-            # melding en de ventilator.
-            if entity_id in temperaturen:
-                zolang = t("Zolang weet de coach niet of hij te warm wordt.")
+            grens = SENSOR_STIL_AUTO if entity_id in auto_sensoren else SENSOR_STIL
+            stil_nu.append((entity_id, naam, sinds, grens))
+
+        if terug:
+            namen = [f"{terug[0][0].upper()}{terug[0][1:]}", *terug[1:]]
             await self._async_tell(
-                t(
-                    "{naam} meldt al {minuten} minuten niets. Waarschijnlijk hapert de integratie erachter. {zolang}",
-                    naam=f"{naam[0].upper()}{naam[1:]}", minuten=minuten, zolang=zolang,
-                ),
-                kritiek=True,
+                t("{naam} doet het weer.", naam=namen[0]) if len(namen) == 1
+                else t("{namen} doen het weer.", namen=t("{voor} en {laatste}", voor=", ".join(namen[:-1]),
+                                                         laatste=namen[-1])),
+                telefoon=False,
             )
+        if any(now - sinds >= grens for _e, _n, sinds, grens in stil_nu):
+            bundel = [rij for rij in stil_nu if now - rij[2] >= rij[3] - SENSOR_BUNDEL]
+            await self._async_sensoren_stil(settings, bundel, now)
 
         # Een gemelde sensor die de coach niet meer gebruikt telt niet meer.
         self._sensor_gemeld &= set(self._sensoren(settings))
@@ -2444,6 +2435,109 @@ class ChargerCoach:
                 self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
             except Exception:  # noqa: BLE001 - een melding onthouden is geen reden om te stoppen
                 _LOGGER.exception("kon niet bewaren welke sensoren al gemeld zijn")
+
+    async def _async_sensoren_stil(
+        self, settings: dict[str, Any], bundel: list[tuple[str, str, datetime, timedelta]], now: datetime
+    ) -> None:
+        """Eén melding voor de sensoren die samen stilvielen (v0.175.0)."""
+        temperaturen = {
+            device["entities"]["temperature"]
+            for device in settings.get("devices") or []
+            if _temp_nodig(settings, device)
+        }
+        meelezen = self._sensoren_meelezen(settings)
+        entries: set[str] = set()
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            register = er.async_get(self.hass)
+            for entity_id, _naam, _sinds, _grens in bundel:
+                rij = register.async_get(entity_id)
+                entry_id = getattr(rij, "config_entry_id", None) if rij is not None else None
+                if entry_id:
+                    entries.add(entry_id)
+        except Exception:  # noqa: BLE001 - zonder register noemt de melding de integratie
+            _LOGGER.debug("kon de integraties van de stille sensoren niet opzoeken", exc_info=True)
+        minuten = min(int(_tussen(sinds, now).total_seconds() // 60) for _e, _n, sinds, _g in bundel)
+        for entity_id, _naam, sinds, _grens in bundel:
+            self._sensor_gemeld.add(entity_id)
+            # De entiteit-id staat in het log en niet in de melding. De eigenaar op
+            # 21-09-2026, over precies deze zin: "meld zo'n sensor niet
+            # volledig, zeg gewoon dat er iets mis is met de integratie". Wie
+            # hem moet opzoeken kijkt in het log; wie hem leest heeft genoeg aan
+            # de naam die hij zelf heeft ingevuld.
+            # Alleen de id (v0.141.1): het log blijft Nederlands, en de naam ging door
+            # `t()`, dus in het Engels kwam er "the temperature of ..." midden in.
+            _LOGGER.warning("%s meldt al %d minuten niets", entity_id,
+                            int(_tussen(sinds, now).total_seconds() // 60))
+        if len(entries) >= 2:
+            _LOGGER.warning("%d sensoren van %d integraties tegelijk stil; waarschijnlijk het internet",
+                            len(bundel), len(entries))
+        # Kritiek alleen als de coach er iets mee moet. Een status die hij alleen
+        # meeleest laat hem niets anders doen, en de bewoner kan er niets mee.
+        kritiek = any(entity_id not in meelezen for entity_id, _n, _s, _g in bundel)
+        ids = [entity_id for entity_id, _n, _s, _g in bundel]
+        namen = [naam for _e, naam, _s, _g in bundel]
+        namen[0] = f"{namen[0][0].upper()}{namen[0][1:]}"
+        if len(bundel) == 1:
+            entity_id = ids[0]
+            # Valt de reserveprijsbron in, dan rekent de coach niet zonder maar
+            # daarmee (v0.101.3).
+            zolang = t("De coach rekent zolang zonder.")
+            if self._reserve_valt_in(settings, entity_id):
+                zolang = t("De coach rekent zolang met je reserveprijzen.")
+            # Met de temperatuur rekent de coach niet; die is er voor de
+            # melding en de ventilator.
+            if entity_id in temperaturen:
+                zolang = t("Zolang weet de coach niet of hij te warm wordt.")
+            if entity_id in meelezen:
+                zolang = ""
+            tekst = t(
+                "{naam} meldt al {minuten} minuten niets. Waarschijnlijk hapert de integratie erachter. {zolang}",
+                naam=namen[0], minuten=minuten, zolang=zolang,
+            ).strip()
+        else:
+            delen = [
+                t("{namen} melden al {minuten} minuten niets.",
+                  namen=t("{voor} en {laatste}", voor=", ".join(namen[:-1]), laatste=namen[-1]), minuten=minuten),
+                t("Waarschijnlijk is het internet thuis weg.") if len(entries) >= 2
+                else t("Waarschijnlijk hapert de integratie erachter."),
+            ]
+            if any(self._reserve_valt_in(settings, e) for e in ids):
+                delen.append(t("De coach rekent zolang met je reserveprijzen."))
+            if any(e in temperaturen for e in ids):
+                delen.append(t("Zolang weet de coach niet of het ergens te warm wordt."))
+            if any(e not in temperaturen and e not in meelezen and not self._reserve_valt_in(settings, e)
+                   for e in ids):
+                delen.append(t("De coach rekent zolang zonder."))
+            tekst = " ".join(delen)
+        await self._async_tell(tekst, kritiek=kritiek)
+
+    @staticmethod
+    def _sensoren_meelezen(settings: dict[str, Any]) -> set[str]:
+        """De sensoren van een apparaat dat de coach alleen uitleest (v0.175.0).
+
+        Een wasmachine of droger zonder "mag sturen", en een batterij die hij alleen leest: de coach
+        doet er niets mee, dus een sensor die zwijgt is geen kritieke melding. De temperatuur van zo'n
+        apparaat telt wel, als er een melding of een ventilator aan hangt (`_temp_nodig`).
+        """
+        uit: set[str] = set()
+        for device in settings.get("devices") or []:
+            alleen = (
+                (device.get("type") in PROGRAMMA_TYPES and _programma_alleen_lezen(device))
+                or (device.get("type") == "thuisbatterij" and device.get("brand") in BATTERIJ_ALLEEN_LEZEN)
+            )
+            if not alleen:
+                continue
+            entities = device.get("entities") or {}
+            if device.get("entity"):
+                uit.add(device["entity"])
+            for sleutel, waarde in entities.items():
+                if isinstance(waarde, str) and waarde and not (
+                    sleutel == "temperature" and _temp_nodig(settings, device)
+                ):
+                    uit.add(waarde)
+        return uit
 
     @staticmethod
     def _eigen_entiteiten(settings: dict[str, Any]) -> set[str]:

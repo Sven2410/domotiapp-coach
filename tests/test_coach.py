@@ -12616,6 +12616,164 @@ controle("de eerste ronde na een installatie zet de telling in de opslag", "grow
 coachmod._LOGGER.removeHandler(log215)
 logging.disable(logging.WARNING)
 
+print("=== 216. het internet thuis weg: één melding, niet een per sensor (v0.175.0) ===")
+# In de klantwoning viel op 28-10-2026 het internet weg, en na tien minuten kwamen er in één ronde
+# vier kritieke meldingen: de koelkast, de vriezer, de droger en de wasmachine. Eén oorzaak, en twee
+# daarvan leest de coach alleen mee.
+KOEL216 = {"id": "dev-koel", "type": "koelkast", "name": "Koelkast", "brand": "miele", "controllable": False,
+           "entity": "", "entities": {"temperature": "sensor.koel_temp"}}
+VRIES216 = {"id": "dev-vries", "type": "vriezer", "name": "Vriezer", "brand": "miele", "controllable": False,
+            "entity": "", "entities": {"temperature": "sensor.vries_temp"}}
+WAS216 = {"id": "dev-was", "type": "wasmachine", "name": "Wasmachine", "brand": "miele", "controllable": False,
+          "entity": "", "entities": {"status": "sensor.was"}}
+DROOG216 = {"id": "dev-droog", "type": "droger", "name": "Droger", "brand": "miele", "controllable": False,
+            "entity": "", "entities": {"status": "sensor.droog"}}
+inst216 = instellingen(devices=[LAADPAAL, KOEL216, VRIES216, WAS216, DROOG216])
+T216 = dt.datetime(2026, 10, 28, 18, 16)
+STIL216 = ("sensor.koel_temp", "sensor.vries_temp", "sensor.was", "sensor.droog")
+
+
+def huis216():
+    return {**huis(), "sensor.koel_temp": {"state": "4.0", "attributes": {"unit_of_measurement": "°C"}},
+            "sensor.vries_temp": {"state": "-18.0", "attributes": {"unit_of_measurement": "°C"}},
+            "sensor.was": "off", "sensor.droog": "off"}
+
+
+def register216(rijen):
+    er = types.ModuleType("homeassistant.helpers.entity_registry")
+    er.async_get = lambda hass: types.SimpleNamespace(
+        async_get=lambda eid: types.SimpleNamespace(config_entry_id=rijen[eid]) if eid in rijen else None)
+    return er
+
+
+EEN216 = {e: "entry-cloud" for e in STIL216}
+VIER216 = {e: f"entry-{i}" for i, e in enumerate(STIL216)}
+oud216 = sys.modules.get("homeassistant.helpers.entity_registry")
+
+
+def wacht216(coach, inst, minuten):
+    asyncio.run(coach._async_sensorwacht(inst, T216 + dt.timedelta(minutes=minuten)))
+
+
+def meldingen216(hass, vanaf=0):
+    return asyncio.run(coachmod.async_get_meldingen(hass).async_list())[vanaf:]
+
+
+try:
+    # Vier integraties tegelijk stil: één melding, het internet, en kritiek om de temperatuur.
+    sys.modules["homeassistant.helpers.entity_registry"] = register216(VIER216)
+    hass216, _, coach216 = bouw(huis216(), inst216)
+    coach216._restore(inst216)
+    for e in STIL216:
+        hass216.states.zet(e, "unavailable")
+    for m in (0, 5, 9, 10, 11, 12):
+        wacht216(coach216, inst216, m)
+    weg216 = [g for g in meldingen216(hass216) if "niets" in g["message"]]
+    print(f"  {[(g['kind'], g['message']) for g in weg216]}")
+    controle("vier sensoren van vier integraties tegelijk stil: één melding",
+             len(weg216) == 1 and len([d for d in hass216.services.verstuurd if d[0] == "notify"]) <= 1,
+             f"{weg216}")
+    controle("met alle vier de namen erin",
+             weg216 and all(n in weg216[0]["message"] for n in ("Koelkast", "Vriezer", "Droger", "Wasmachine")),
+             f"{weg216}")
+    controle("en het internet als oorzaak, niet de integratie",
+             weg216 and "internet thuis weg" in weg216[0]["message"] and "hapert" not in weg216[0]["message"],
+             f"{weg216}")
+    controle("kritiek, want de temperatuur van een koelkast zit erbij", weg216 and weg216[0]["kind"] == "kritiek",
+             f"{weg216}")
+    controle("alle vier onthouden voor een herstart",
+             sorted(r["entity"] for r in inst216.get("sensor_quiet") or []) == sorted(STIL216),
+             f"{inst216.get('sensor_quiet')}")
+
+    # De herstart halverwege: niets dubbel, en terug is één regel in de geschiedenis.
+    voor216 = len(meldingen216(hass216))
+    hass216.services.verstuurd.clear()
+    coach216b = coachmod.ChargerCoach(hass216)
+    coach216b._restore(inst216)
+    for m in (20, 30, 45):
+        wacht216(coach216b, inst216, m)
+    controle("na een herstart halverwege komt er niets dubbel",
+             not meldingen216(hass216, voor216) and not hass216.services.verstuurd,
+             f"{meldingen216(hass216, voor216)}")
+    for e, w in (("sensor.koel_temp", "4.1"), ("sensor.vries_temp", "-18.2"), ("sensor.was", "off"),
+                 ("sensor.droog", "off")):
+        hass216.states.zet(e, w)
+    wacht216(coach216b, inst216, 46)
+    terug216 = meldingen216(hass216, voor216)
+    print(f"  {[(g['kind'], g['message']) for g in terug216]}")
+    controle("terug is één regel, en die gaat niet naar de telefoon",
+             len(terug216) == 1 and "doen het weer" in terug216[0]["message"]
+             and not [d for d in hass216.services.verstuurd if d[0] == "notify"], f"{terug216}")
+    controle("en de opslag is weer leeg", not inst216.get("sensor_quiet"), f"{inst216.get('sensor_quiet')}")
+
+    # Eén integratie achter alle vier: dan hapert die integratie.
+    sys.modules["homeassistant.helpers.entity_registry"] = register216(EEN216)
+    inst216c = instellingen(devices=[LAADPAAL, KOEL216, VRIES216, WAS216, DROOG216])
+    hass216c, _, coach216c = bouw(huis216(), inst216c)
+    for e in STIL216:
+        hass216c.states.zet(e, "unavailable")
+    for m in (0, 11):
+        wacht216(coach216c, inst216c, m)
+    een216 = [g for g in meldingen216(hass216c) if "niets" in g["message"]]
+    print(f"  {[g['message'] for g in een216]}")
+    controle("vier sensoren van één integratie: één melding, die integratie hapert",
+             len(een216) == 1 and "hapert de integratie" in een216[0]["message"]
+             and "internet" not in een216[0]["message"], f"{een216}")
+
+    # Kort na elkaar stil hoort bij dezelfde melding, later niet.
+    sys.modules["homeassistant.helpers.entity_registry"] = register216(VIER216)
+    inst216d = instellingen(devices=[LAADPAAL, KOEL216, VRIES216, WAS216, DROOG216])
+    hass216d, _, coach216d = bouw(huis216(), inst216d)
+    for e in ("sensor.koel_temp", "sensor.vries_temp"):
+        hass216d.states.zet(e, "unavailable")
+    wacht216(coach216d, inst216d, 0)
+    hass216d.states.zet("sensor.was", "unavailable")      # drie minuten later
+    wacht216(coach216d, inst216d, 3)
+    hass216d.states.zet("sensor.droog", "unavailable")    # acht minuten later
+    wacht216(coach216d, inst216d, 8)
+    for m in (10, 12, 17, 18, 19):
+        wacht216(coach216d, inst216d, m)
+    gespreid216 = [g["message"] for g in meldingen216(hass216d) if "niets" in g["message"]]
+    print(f"  {gespreid216}")
+    controle("een sensor die drie minuten later stilviel zit in dezelfde melding",
+             len(gespreid216) == 2 and "Wasmachine" in gespreid216[0] and "Droger" not in gespreid216[0],
+             f"{gespreid216}")
+    controle("en een die acht minuten later stilviel krijgt er een eigen",
+             len(gespreid216) == 2 and gespreid216[1].startswith("De status van Droger meldt al"), f"{gespreid216}")
+
+    # Een droger die de coach alleen meeleest: een gewone melding, geen kritiek, en geen "rekent zonder".
+    inst216e = instellingen(devices=[LAADPAAL, DROOG216])
+    hass216e, _, coach216e = bouw(huis216(), inst216e)
+    hass216e.states.zet("sensor.droog", "unavailable")
+    for m in (0, 11):
+        wacht216(coach216e, inst216e, m)
+    droog216 = [g for g in meldingen216(hass216e) if "niets" in g["message"]]
+    print(f"  {[(g['kind'], g['message']) for g in droog216]}")
+    controle("een droger die de coach alleen uitleest is geen kritieke melding",
+             len(droog216) == 1 and droog216[0]["kind"] == "melding" and "zolang" not in droog216[0]["message"],
+             f"{droog216}")
+    controle("een droger die de coach mag starten wel",
+             "sensor.droog" not in coachmod.ChargerCoach._sensoren_meelezen(
+                 instellingen(devices=[LAADPAAL, {**DROOG216, "controllable": True}])), "")
+    controle("de temperatuur van een koelkast is nooit meelezen",
+             "sensor.koel_temp" not in coachmod.ChargerCoach._sensoren_meelezen(inst216), "")
+
+    # Eén sensor alleen geeft de melding van voorheen.
+    inst216f = instellingen()
+    hass216f, _, coach216f = bouw({**huis(), "sensor.l3": "unavailable"}, inst216f)
+    for m in (0, 11):
+        wacht216(coach216f, inst216f, m)
+    los216 = [g for g in meldingen216(hass216f) if "niets" in g["message"]]
+    controle("één sensor: de melding van voorheen, kritiek",
+             len(los216) == 1 and los216[0]["kind"] == "kritiek"
+             and los216[0]["message"] == "De stroommeting van fase L3 meldt al 11 minuten niets. Waarschijnlijk "
+                                         "hapert de integratie erachter. De coach rekent zolang zonder.", f"{los216}")
+finally:
+    if oud216 is None:
+        sys.modules.pop("homeassistant.helpers.entity_registry", None)
+    else:
+        sys.modules["homeassistant.helpers.entity_registry"] = oud216
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

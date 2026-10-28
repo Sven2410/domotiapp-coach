@@ -1305,3 +1305,37 @@ voor de batterij en de lastbewaker, want misschien laadt hij nog.
 
 Proef 204 in test_coach.py; in het virtuele huis `vast-zonnig-paal-weg` (een Easee, zes minuten, geen
 melding) en `alfen-paal-weg` (twaalf minuten, één melding), met de gebeurtenis `paal_onbereikbaar`.
+
+## De sensorwacht: één melding als het internet thuis weg is (v0.175.0)
+
+In de klantwoning viel op 28-10-2026 het internet weg, van 18:16 tot 18:54. Home Assistant liep door,
+maar de cloudintegraties zwegen. Om 18:27:55 stuurde de sensorwacht in één ronde vier kritieke meldingen,
+voor de koelkast, de vriezer, de droger en de wasmachine, elk met "waarschijnlijk hapert de integratie
+erachter". Eén oorzaak, en de bewoner kan er maar één ding mee: kijken of het internet het doet. De
+eigenaar zei daarover: "ja graag alles moet helemaal werken en zo fail safe mogelijk zijn".
+
+- **Eén melding per storing** (`_async_sensoren_stil`). Gaat er een sensor over zijn grens, dan neemt de
+  melding elke sensor mee die al minstens `SENSOR_BUNDEL` (vijf minuten) minder lang zwijgt. Een sensor
+  die later stilvalt krijgt een eigen melding. Het getal in de melding is het kleinste aantal minuten,
+  want dat geldt voor allemaal.
+- **Twee integraties of meer** (`config_entry_id` uit het register, zoals `_async_integraties`): dan zegt
+  de melding "Waarschijnlijk is het internet thuis weg." Zijn het er minder, of is het register er niet,
+  dan blijft het "hapert de integratie erachter".
+- **Kritiek alleen als de coach er iets mee moet.** Een wasmachine of droger zonder "mag sturen", en een
+  batterij die hij alleen leest (`_sensoren_meelezen`), geven een gewone melding, zonder "de coach rekent
+  zolang zonder". Zit er één andere sensor in de bundel, dan is de hele melding kritiek. De temperatuur
+  van een vriezer of koelkast telt altijd (`_temp_nodig`).
+- **Terug is één regel in de geschiedenis** ("... doen het weer."), en gaat net als voorheen niet naar de
+  telefoon.
+- **Een herstart** verandert niets: `sensor_quiet` onthoudt per sensor dat hij gemeld is, zoals sinds
+  v0.98.0.
+
+Eén sensor alleen geeft dezelfde melding als voorheen. Proef 216 in test_coach.py dekt de volgende
+gevallen:
+- vier integraties tegelijk geeft één kritieke melding met "internet";
+- de herstart halverwege maakt niets dubbel;
+- terug is één regel;
+- één integratie achter alle vier geeft "hapert";
+- drie minuten later stil valt in dezelfde melding, acht minuten later niet;
+- een droger die de coach alleen uitleest geeft een gewone melding;
+- de oude zin blijft voor één sensor.
