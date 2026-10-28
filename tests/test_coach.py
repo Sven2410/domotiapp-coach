@@ -12276,6 +12276,130 @@ controle("twee uur niet geteld: die dag telt niet mee", not uit212, f"{uit212}")
 controle("na het nakijken begint de bewaarde telling van de nieuwe dag op nul",
          dag_na212 and dag_na212["teveel"] == 0.0 and dag_na212["in_vak"] is True, f"{dag_na212}")
 
+print("=== 213. wat een herstart overleeft: te laat, de boiler, een lek en een vrijgave (v0.172.0) ===")
+# De eigenaar op 28-10-2026: "überhaupt alles wat we maken moet een herstart overleven". In de
+# klantwoning herstartte Home Assistant op 27-10-2026 zes keer. Een herstart is hier een nieuwe
+# coach op dezelfde Home Assistant, met wat er van het geheugen op schijf stond.
+opslagmod213 = sys.modules["domotiapp_coach.storage"]
+
+
+def herstart213(hass, stop=True):
+    oud = coachmod.async_get_geheugen(hass)
+    if stop:
+        asyncio.run(oud.async_bewaar(coachmod.dt_util.utcnow()))
+    nieuw = opslagmod213.GeheugenStore(hass)
+    nieuw._store._data = oud._store._data
+    hass.data["domotiapp_coach"]["geheugen"] = nieuw
+    coach = coachmod.ChargerCoach(hass)
+    coach._sleep = lambda seconds: asyncio.sleep(0)
+    return coach
+
+
+# 1. De klaar-tijd voorbij en niet vol: na een herstart laadt hij door (eis 7).
+def door213():
+    inst = instellingen()
+    inst["strategy"]["schedules"][0]["window"]["done_by"] = "19:00"
+    inst["car_soc"] = [{"device": "dev-laadpaal", "car": "car-1", "percent": 90.0, "meter": 100.0}]
+    hass, _, coach = bouw(huis(status="charging", stroom=13.5, vermogen=3070.0, teruglevering=0.0, afname=1800.0), inst)
+    asyncio.run(coach._async_geheugen_laden())
+    return inst, hass, coach
+
+
+inst213, hass213, coach213 = door213()
+asyncio.run(ronde(coach213, inst213, dt.datetime(2026, 8, 18, 18, 55)))
+voor213, _ = asyncio.run(ronde(coach213, inst213, dt.datetime(2026, 8, 18, 19, 1)))
+coach213 = herstart213(hass213)
+asyncio.run(coach213._async_geheugen_laden())
+na213, _ = asyncio.run(ronde(coach213, inst213, dt.datetime(2026, 8, 18, 19, 3)))
+print(f"  19:01 {voor213['rule']} {voor213['amps']} A, na de herstart 19:03 {na213['rule']} {na213['amps']} A")
+controle("doorladen na de klaar-tijd overleeft een herstart", voor213["rule"] == "overdue" and na213["rule"] == "overdue",
+         f"{voor213['rule']} {na213['rule']}")
+inst213, hass213, coach213 = door213()
+asyncio.run(ronde(coach213, inst213, dt.datetime(2026, 8, 18, 18, 55)))
+coach213 = herstart213(hass213)
+asyncio.run(coach213._async_geheugen_laden())
+over213, _ = asyncio.run(ronde(coach213, inst213, dt.datetime(2026, 8, 18, 19, 4)))
+print(f"  weg van 18:55 tot 19:04, over de klaar-tijd heen: {over213['rule']} {over213['amps']} A")
+controle("ook als de klaar-tijd tijdens de herstart voorbijging", over213["rule"] == "overdue", f"{over213['rule']}")
+
+# 2. Een opwarmbeurt van de boiler: wat er voor de herstart in ging telt mee.
+inst213b = instellingen(devices=[BOILER])
+inst213b["strategy"]["schedules"] = [dict(inst73["strategy"]["schedules"][0])]
+hass213b, store213b, coach213b = bouw(dict(huis73), inst213b)
+
+
+async def boiler213(coach, nu, watt):
+    hass213b.services.verstuurd.clear()
+    await hass213b.afmaken()
+    hass213b.states.zet("sensor.boiler_vermogen", str(watt))
+    await coach._round(nu)
+    await hass213b.afmaken()
+    for domein, dienst, gegevens in hass213b.services.verstuurd:
+        if gegevens.get("entity_id") == "switch.boiler":
+            hass213b.states.zet("switch.boiler", "on" if dienst == "turn_on" else "off")
+    return [d[2]["message"] for d in hass213b.services.verstuurd if d[0] == "notify"]
+
+
+for m in range(0, 16):
+    asyncio.run(boiler213(coach213b, dt.datetime(2026, 9, 7, 22, m), 2000 if m else 0))
+coach213b = herstart213(hass213b)
+for m in range(17, 32):
+    asyncio.run(boiler213(coach213b, dt.datetime(2026, 9, 7, 22, m), 2000))
+for m in range(32, 37):
+    asyncio.run(boiler213(coach213b, dt.datetime(2026, 9, 7, 22, m), 0))
+rij213b = (store213b.instellingen.get("boiler_learned") or [{}])[0]
+beurten213b = [r for r in asyncio.run(coachmod.async_get_beurten(hass213b).async_list()) if r.get("kind") == "boiler"]
+print(f"  geleerd: vol {rij213b.get('vol_kwh')} kWh, {rij213b.get('heat_w')} W; beurt {[(r['kwh'], r['started'][11:16]) for r in beurten213b]}")
+controle("de beurt van voor en na de herstart samen: een vat van een kWh, niet een half",
+         abs(float(rij213b.get("vol_kwh") or 0) - 1.0) < 0.05 and beurten213b and abs(beurten213b[-1]["kwh"] - 1.0) < 0.05
+         and beurten213b[-1]["started"][11:16] == "22:01", f"{rij213b} {beurten213b}")
+
+# 3. Water dat blijft lopen: de twee uur tellen door, en de melding komt één keer.
+inst213c = instellingen()
+inst213c["sources"]["meters"] = {"water_enabled": True, "water": "sensor.watermeter", "water_flow": "sensor.waterflow"}
+inst213c["notifications"] = {**(inst213c.get("notifications") or {}),
+                             "usage_alert": {"enabled": True, "water_flow_minutes": 120, "factor": 3, "min_days": 3}}
+hass213c, _, coach213c = bouw({**huis89, "sensor.waterflow": {"state": "4", "attributes": {"unit_of_measurement": "L/min"}}},
+                              inst213c)
+T213 = dt.datetime(2026, 9, 10, 8, 0)
+lek213 = []
+for minuten, opnieuw in ((0, False), (60, True), (100, True), (121, False), (130, True), (140, False)):
+    if opnieuw:
+        coach213c = herstart213(hass213c)
+    asyncio.run(ronde75(hass213c, coach213c, T213 + dt.timedelta(minutes=minuten)))
+    lek213 += [m for m in meldingen89(hass213c) if "water" in m]
+print(f"  herstarts na 60, 100 en 130 minuten: {lek213}")
+controle("het lek wordt na twee uur gemeld, ook met drie herstarts, en maar één keer",
+         len(lek213) == 1 and "121 minuten" in lek213[0], f"{lek213}")
+
+# 4. Een vaatwasser die vrijgegeven is: "zet hem nu aan" na een herstart niet nog eens.
+inst213d = instellingen(devices=[LAADPAAL, DOM])
+inst213d["contract"] = inst56["contract"]
+inst213d["strategy"]["schedules"].append(dict(inst58["strategy"]["schedules"][-1]))
+inst213d["ready_devices"] = ["dev-dom"]
+hass213d, _, coach213d = bouw(dict(huis58), inst213d)
+
+
+async def dom213(coach, nu):
+    hass213d.services.verstuurd.clear()
+    await hass213d.afmaken()
+    await coach._round(nu)
+    await hass213d.afmaken()
+    return telefoon58(hass213d.services.verstuurd)
+
+
+eerst213 = asyncio.run(dom213(coach213d, dt.datetime(2026, 9, 8, 11, 0, 20)))
+# Zoals `_tick` na elke ronde: een vraag aan de bewoner gaat meteen naar schijf.
+asyncio.run(coachmod.async_get_geheugen(hass213d).async_bewaar(coachmod.dt_util.utcnow(), coachmod.GEHEUGEN_ELKE))
+coach213d = herstart213(hass213d, stop=False)
+na213d = asyncio.run(dom213(coach213d, dt.datetime(2026, 9, 8, 11, 10)))
+later213d = asyncio.run(dom213(coach213d, dt.datetime(2026, 9, 8, 11, 50)))
+print(f"  11:00 {eerst213}, na een stroomstoring 11:10 {na213d}, 11:50 {later213d}")
+controle("de vraag om hem aan te zetten komt na een stroomstoring niet nog eens",
+         len(eerst213) == 1 and not na213d, f"{eerst213} {na213d}")
+controle("en de herinnering noemt het moment van voor de herstart",
+         len(later213d) == 1 and "om 11:00" in later213d[0], f"{later213d}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

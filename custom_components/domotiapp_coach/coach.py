@@ -181,7 +181,10 @@ from .planner import (
     zet_zone,
 )
 from .ontvangers import ontvangers
-from .storage import async_get_berichten, async_get_beurten, async_get_meldingen, async_get_store, async_get_zon
+from .storage import (
+    async_get_berichten, async_get_beurten, async_get_geheugen, async_get_meldingen, async_get_store,
+    async_get_zon,
+)
 from .zon import ZON_DAGEN, zon_uit_opwek
 from .units import hour_to_watts, to_kwh, to_watts
 
@@ -861,6 +864,9 @@ WATCHDOG_SILENCE = timedelta(minutes=10)
 # terechtkomt. Het uittrekken van de kabel wist ze altijd meteen; dit geldt
 # alleen voor wat er tijdens een herstart gebeurd kan zijn.
 SESSION_MEMORY = timedelta(hours=12)
+# Hoe vaak het geheugen over een herstart heen hooguit naar schijf gaat (`GeheugenStore`,
+# v0.172.0); bij het stoppen altijd, en een melding of een vrijgave meteen.
+GEHEUGEN_ELKE = timedelta(minutes=5)
 
 # Hoe lang de wekstroom blijft staan. Een minuut, dus in de praktijk één ronde,
 # maar uitgedrukt in tijd omdat een statuswissel van de laadpaal ook een ronde
@@ -969,6 +975,19 @@ def _tussen(van: datetime, tot: datetime) -> timedelta:
     if van.tzinfo is None and tot.tzinfo is None:
         return dt_util.as_utc(tot) - dt_util.as_utc(van)
     return tot.astimezone(timezone.utc) - van.astimezone(timezone.utc)
+
+
+def _naar_geheugen(moment: datetime | None) -> str | None:
+    """Een moment van de coach (lokaal, zonder tijdzone) voor `GeheugenStore`: in UTC (v0.172.0)."""
+    return None if moment is None else dt_util.as_utc(moment).isoformat()
+
+
+def _uit_geheugen(tekst: Any) -> datetime | None:
+    """En terug naar de klok van de coach, of None."""
+    try:
+        return _moment(datetime.fromisoformat(str(tekst))) if tekst else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _regelklok(moment: datetime | None = None) -> datetime:
@@ -1818,6 +1837,11 @@ class ChargerCoach:
         # was. Die laden door tot ze vol zijn, want vol worden weegt zwaarder dan
         # goedkoop laden. Vervalt zodra de auto vol is of de kabel eruit gaat.
         self._te_laat: set[str] = set()
+        # Het mikpunt van voor een herstart (v0.172.0), voor de eerste ronde daarna: anders
+        # ziet hij een klaar-tijd die tijdens de herstart voorbijging nooit.
+        self._mikpunt_terug: dict[str, datetime] = {}
+        # Wat er van een boiler of een programma in `GeheugenStore` stond, tot de sessie er is.
+        self._geheugen_terug: dict[str, dict[str, Any]] = {}
         # Wat er in deze laadbeurt gebeurd is: wanneer hij begon, hoeveel er in
         # ging en waar de tijd aan op is gegaan. Alleen om het achteraf te
         # kunnen navertellen, nooit om een besluit op te nemen.
@@ -2990,8 +3014,10 @@ class ChargerCoach:
                 sinds = self._water_loopt_sinds or now
                 self._water_loopt_sinds = sinds
                 grens = timedelta(minutes=int(alert.get("water_flow_minutes") or 120))
+                self._water_onthouden()
                 if now - sinds >= grens and not self._water_gemeld:
                     self._water_gemeld = True
+                    self._water_onthouden()
                     minuten = int(_tussen(sinds, now).total_seconds() // 60)
                     await self._async_tell(
                         t(
@@ -3004,6 +3030,7 @@ class ChargerCoach:
             else:
                 self._water_loopt_sinds = None
                 self._water_gemeld = False
+                self._water_onthouden()
 
         # 2. Het dagverbruik bijhouden, en gisteren vergelijken met de dagen ervoor.
         if not tellers:
@@ -3260,6 +3287,10 @@ class ChargerCoach:
             # stille coach die er van buiten uitziet als een werkende.
             if gelukt:
                 self._last_round = dt_util.utcnow()
+            try:
+                await async_get_geheugen(self.hass).async_bewaar(dt_util.utcnow(), GEHEUGEN_ELKE)
+            except Exception:  # noqa: BLE001 - onthouden mag een ronde niet stoppen
+                _LOGGER.exception("kon het geheugen niet bewaren")
         except TimeoutError:
             # De gevaarlijkste storing die er is, want hij is stil: hangt een
             # opdracht naar de laadpaal, dan zou de vlag hierboven blijven staan
@@ -3292,6 +3323,7 @@ class ChargerCoach:
             # Eén keer, vóór de eerste ronde: de beurten die nog liepen toen
             # Home Assistant stopte, zodat hun geld gewoon doortelt.
             await self._async_beurten_laden()
+            await self._async_geheugen_laden()
         self._restore(settings)
 
         level = (settings.get("strategy") or {}).get("level", LEVEL_PROPOSE)
@@ -3494,6 +3526,9 @@ class ChargerCoach:
             try:
                 await self._one_programma(moment, settings, device, level if device.get("controllable") else LEVEL_READ)
                 self._besluit_melden(device.get("id", ""))
+                # Na de hele ronde, ook als die eerder ophield: de vraag en de pogingen
+                # komen pas aan het eind (v0.172.0).
+                self._programma_onthouden(device.get("id", ""))
             except ServiceNotFound:
                 _LOGGER.warning(
                     "%s kan nog niet aangestuurd worden: de startknop bestaat niet (nog niet geladen?)",
@@ -3568,6 +3603,8 @@ class ChargerCoach:
         soort = str(device.get("type") or "")
         # Een Miele noemt zijn programma's zelf en geeft de duur (v0.124.0).
         miele = device.get("brand") == "miele"
+        if device_id not in self._programma:
+            self._programma[device_id] = self._programma_terug(device_id, now)
         sessie = self._programma.setdefault(device_id, self._lege_programma_sessie(now))
         # De eerste ronde waarin deze coach het apparaat ziet: liep er toen al
         # een beurt, dan is dit een herstart middenin.
@@ -5511,7 +5548,9 @@ class ChargerCoach:
         entities = device.get("entities") or {}
         naam = device.get("name") or t("De boiler")
         schakelaar = entities.get("switch")
-        sessie = self._boiler.setdefault(device_id, self._lege_boiler_sessie(now))
+        if device_id not in self._boiler:
+            self._boiler[device_id] = self._boiler_terug(device_id, now)
+        sessie = self._boiler[device_id]
         geleerd = self._boiler_rij(settings, device_id)
 
         watts = _watts(self.hass, device.get("entity"))
@@ -5656,6 +5695,7 @@ class ChargerCoach:
         }
         await self._async_noteer_programma(device, device_id, now)
         self._toezeggingen.pop(device_id, None)
+        self._boiler_onthouden(device_id)
 
         if level in (LEVEL_READ, LEVEL_ADVISE) or not mag or not schakelaar:
             return
@@ -8522,6 +8562,11 @@ class ChargerCoach:
         # eerstvolgende ligt verder weg. Dit moet vóór het besluit gebeuren, want
         # anders schrijft hij eerst nog één keer een 0 naar de paal.
         mikpunt = (self._sessie.get(device_id) or {}).get("mikpunt")
+        terug = self._mikpunt_terug.pop(device_id, None)
+        if terug is not None:
+            # De eerste ronde na een herstart (v0.172.0): de sessie is nieuw en kent alleen
+            # de klaar-tijd van nu, ook als die van voor de herstart al voorbij is.
+            mikpunt = terug
         if (
             mikpunt is not None
             and window.deadline != mikpunt
@@ -8779,6 +8824,7 @@ class ChargerCoach:
             # niets meer goedgekeurd of gepauzeerd.
             await self._async_forget(settings, device_id)
 
+        self._laden_onthouden(device_id)
         self.state[device_id]["applied"] = may_act
         self.state[device_id]["approved"] = device_id in self._approved
         self.state[device_id]["boost"] = device_id in self._boost
@@ -12735,6 +12781,11 @@ class ChargerCoach:
                 )
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("kon de lopende laadbeurt niet bewaren bij het stoppen")
+        try:
+            # Wat de coach onthoudt, voor na de herstart (v0.172.0).
+            await async_get_geheugen(self.hass).async_bewaar(dt_util.utcnow())
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("kon het geheugen niet bewaren bij het stoppen")
         await self._async_batterijen_los(herstart=True)
         await self._async_boilers_aan()
 
@@ -14134,6 +14185,175 @@ class ChargerCoach:
                     except ValueError:
                         sessie[veld] = None
                 sessie["reden"] = row.get("airco_reason")
+
+    # ------------------------------------------------------------------
+    # Wat een herstart overleeft (v0.172.0)
+    #
+    # De eigenaar op 28-10-2026: "überhaupt alles wat we maken moet een herstart
+    # overleven". In de klantwoning herstartte Home Assistant op 27-10-2026 zes keer
+    # (uitgaven en stroomstoringen). Wat de coach van een lopende sessie alleen in het
+    # geheugen had, begon dan opnieuw: een klaar-tijd die voorbij was, een boilerbeurt
+    # half warm, een lek dat al een uur liep, een vaatwasser die al was vrijgegeven.
+    # Per sleutel een klein stuk in `GeheugenStore`, teruggelezen bij de eerste ronde.
+
+    # Wat er van een boilerbeurt over een herstart heen moet (getallen en momenten).
+    _BOILER_GETALLEN = ("beurt_kwh", "draai_seconden", "kwh", "zon_kwh", "betaald", "maat", "zon_winst",
+                        "accu_kwh", "net_eur")
+    _BOILER_MOMENTEN = ("gestart", "gekeken", "nodig_sinds")
+    # En van een programma dat vrijgegeven is maar nog niet draait.
+    _PROGRAMMA_MOMENTEN = ("vrijgegeven", "gedrukt", "gevraagd", "knop_weg")
+
+    async def _async_geheugen_laden(self) -> None:
+        """Wat er voor de herstart onthouden was, terug in de coach."""
+        try:
+            alles = await async_get_geheugen(self.hass).async_alles(dt_util.utcnow())
+        except Exception:  # noqa: BLE001 - zonder geheugen begint hij gewoon opnieuw
+            _LOGGER.exception("kon het geheugen niet lezen")
+            return
+        for sleutel, data in alles.items():
+            if sleutel.startswith("laden:"):
+                device_id = sleutel.split(":", 1)[1]
+                if data.get("te_laat"):
+                    self._te_laat.add(device_id)
+                mikpunt = _uit_geheugen(data.get("mikpunt"))
+                if mikpunt is not None:
+                    self._mikpunt_terug[device_id] = mikpunt
+            elif sleutel == "water":
+                self._water_loopt_sinds = _uit_geheugen(data.get("sinds"))
+                self._water_gemeld = bool(data.get("gemeld")) and self._water_loopt_sinds is not None
+            else:
+                self._geheugen_terug[sleutel] = data
+
+    def _onthoud(self, sleutel: str, data: dict[str, Any] | None, meteen: bool = False) -> None:
+        async_get_geheugen(self.hass).zet(sleutel, data, dt_util.utcnow(), meteen=meteen)
+
+    def _laden_onthouden(self, device_id: str) -> None:
+        """Of de klaar-tijd voorbij is terwijl de auto niet vol is, en het mikpunt (eis 7)."""
+        mikpunt = (self._sessie.get(device_id) or {}).get("mikpunt")
+        te_laat = device_id in self._te_laat
+        data = {"te_laat": te_laat, "mikpunt": _naar_geheugen(mikpunt)} if te_laat or mikpunt else None
+        self._onthoud(f"laden:{device_id}", data, meteen=True)
+
+    def _water_onthouden(self) -> None:
+        """Sinds wanneer het water loopt, en of dat al gemeld is."""
+        data = None
+        if self._water_loopt_sinds is not None:
+            data = {"sinds": _naar_geheugen(self._water_loopt_sinds), "gemeld": self._water_gemeld}
+        self._onthoud("water", data, meteen=True)
+
+    def _boiler_onthouden(self, device_id: str) -> None:
+        """De lopende opwarmbeurt: wat erin ging, wat het kostte, en wat er al gemeld is."""
+        sessie = self._boiler.get(device_id)
+        if sessie is None:
+            return
+        data: dict[str, Any] = {k: round(float(sessie.get(k) or 0.0), 5) for k in self._BOILER_GETALLEN}
+        data.update({k: _naar_geheugen(sessie.get(k)) for k in self._BOILER_MOMENTEN})
+        data["maat_onbekend"] = bool(sessie.get("maat_onbekend"))
+        data["net_eur_onbekend"] = bool(sessie.get("net_eur_onbekend"))
+        data["reden_aan"] = sessie.get("reden_aan") or ""
+        data["vergeefs"] = int(sessie.get("vergeefs") or 0)
+        data["gemeld"] = sorted(sessie.get("gemeld") or ())
+        data["prijzen"] = self._prijzen_naar_geheugen(sessie.get("prijzen"), sessie.get("nodig_sinds"))
+        # Hooguit elke GEHEUGEN_ELKE, want hij telt elke minuut; bij het stoppen altijd.
+        self._onthoud(f"boiler:{device_id}", data)
+
+    def _boiler_terug(self, device_id: str, now: datetime) -> dict[str, Any]:
+        """Een nieuwe boilersessie, met wat er voor de herstart in de beurt zat.
+
+        Of de stroom erop staat en sinds wanneer meet hij opnieuw: bij het stoppen zet
+        `_async_boilers_aan` hem aan, en een herstart is geen bewijs dat hij vol is.
+        """
+        sessie = self._lege_boiler_sessie(now)
+        data = self._geheugen_terug.pop(f"boiler:{device_id}", None)
+        if not data:
+            return sessie
+        for sleutel in self._BOILER_GETALLEN:
+            try:
+                sessie[sleutel] = max(0.0, float(data.get(sleutel) or 0.0))
+            except (TypeError, ValueError):
+                pass
+        for sleutel in self._BOILER_MOMENTEN:
+            sessie[sleutel] = _uit_geheugen(data.get(sleutel))
+        sessie["maat_onbekend"] = bool(data.get("maat_onbekend"))
+        if data.get("net_eur_onbekend"):
+            sessie["net_eur_onbekend"] = True
+        sessie["reden_aan"] = str(data.get("reden_aan") or "")
+        try:
+            sessie["vergeefs"] = max(0, int(data.get("vergeefs") or 0))
+        except (TypeError, ValueError):
+            pass
+        sessie["gemeld"] = {str(g) for g in data.get("gemeld") or []}
+        sessie["prijzen"] = self._prijzen_uit_geheugen(data.get("prijzen"))
+        return sessie
+
+    def _programma_onthouden(self, device_id: str) -> None:
+        """Een programma dat vrijgegeven is maar nog niet draait; een draaiende beurt staat
+        al in de beurten (`_async_programma_hervatten`)."""
+        sessie = self._programma.get(device_id)
+        if sessie is None:
+            return
+        if sessie.get("gestart") is not None or (
+            sessie.get("vrijgegeven") is None and not sessie.get("klep_uitruimen")
+        ):
+            self._onthoud(f"programma:{device_id}", None, meteen=True)
+            return
+        data: dict[str, Any] = {k: _naar_geheugen(sessie.get(k)) for k in self._PROGRAMMA_MOMENTEN}
+        data["pogingen"] = int(sessie.get("pogingen") or 0)
+        data["gemeld"] = sorted(sessie.get("gemeld") or ())
+        data["klep_uitruimen"] = bool(sessie.get("klep_uitruimen"))
+        data["klep_open_gezien"] = bool(sessie.get("klep_open_gezien"))
+        data["prijzen"] = self._prijzen_naar_geheugen(sessie.get("prijzen"), sessie.get("vrijgegeven"))
+        self._onthoud(f"programma:{device_id}", data, meteen=True)
+
+    def _programma_terug(self, device_id: str, now: datetime) -> dict[str, Any]:
+        """Een nieuwe programmasessie, met de vrijgave, de pogingen en de meldingen van voor de herstart.
+
+        Het programma zelf leest hij opnieuw van het apparaat; de vrijgave blijft alleen
+        als die nog in `ready_devices` staat, want zonder vrijgave begint de ronde schoon.
+        """
+        sessie = self._lege_programma_sessie(now)
+        data = self._geheugen_terug.pop(f"programma:{device_id}", None)
+        if not data:
+            return sessie
+        for sleutel in self._PROGRAMMA_MOMENTEN:
+            sessie[sleutel] = _uit_geheugen(data.get(sleutel))
+        try:
+            sessie["pogingen"] = max(0, int(data.get("pogingen") or 0))
+        except (TypeError, ValueError):
+            pass
+        sessie["gemeld"] = {str(g) for g in data.get("gemeld") or []}
+        if data.get("klep_uitruimen"):
+            sessie["klep_uitruimen"] = True
+        if data.get("klep_open_gezien"):
+            sessie["klep_open_gezien"] = True
+        sessie["prijzen"] = self._prijzen_uit_geheugen(data.get("prijzen"))
+        return sessie
+
+    @staticmethod
+    def _prijzen_naar_geheugen(prijzen: Any, vanaf: datetime | None) -> list:
+        """De prijzen vanaf het ijkpunt, als [begin, eind, prijs], voor de maat van Bespaard."""
+        if vanaf is None:
+            return []
+        uit = []
+        for rij in prijzen or []:
+            try:
+                if rij["end"] > vanaf:
+                    uit.append([_naar_geheugen(rij["start"]), _naar_geheugen(rij["end"]), float(rij["price"])])
+            except (KeyError, TypeError, ValueError):
+                continue
+        return uit
+
+    @staticmethod
+    def _prijzen_uit_geheugen(rijen: Any) -> list[dict[str, Any]]:
+        uit = []
+        for rij in rijen or []:
+            try:
+                begin, eind = _uit_geheugen(rij[0]), _uit_geheugen(rij[1])
+                if begin is not None and eind is not None:
+                    uit.append({"start": begin, "end": eind, "price": float(rij[2])})
+            except (IndexError, TypeError, ValueError):
+                continue
+        return uit
 
     def _remember(self, device_id: str) -> None:
         """Vastleggen wat er nu voor dit apparaat aan staat.

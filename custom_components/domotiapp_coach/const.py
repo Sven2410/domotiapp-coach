@@ -47,6 +47,13 @@ ZON_BEWAAR_DAGEN: Final = 30
 BERICHTEN_MAX: Final = 200
 EVENT_BERICHTEN: Final = f"{DOMAIN}_berichten"
 
+# Wat de coach onthoudt over een herstart heen (v0.172.0, `GeheugenStore`): per sleutel
+# een klein stuk van een lopende sessie. Een sleutel die langer dan `GEHEUGEN_MAX` niet
+# bijgewerkt werd, telt niet meer.
+GEHEUGEN_KEY: Final = f"{DOMAIN}.geheugen"
+GEHEUGEN_VERSION: Final = 1
+GEHEUGEN_MAX_UREN: Final = 48
+
 # De laadbeurten, met wat ze kostten en wat ze bespaarden. Eigen bestand, net
 # als de meldingen. Tweeduizend beurten is jaren.
 BEURTEN_KEY: Final = f"{DOMAIN}.beurten"

@@ -216,6 +216,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat, de vooruitblik op het overzicht en "Wat gaat hij doen" voor boiler en programma's | `docs/paneel.md` |
 | de berichtenbox (het belletje), de herinnering voor de meterstanden, het bericht dat een contract afloopt of dat de prijscontrole omslaat | `docs/berichten.md` |
 | zomer- en wintertijd: wat de coach daar zelf goed doet (de kwartieropslag in UTC, de klok van de regelaar, het uur dat twee keer komt, `_tussen`), de planner en de batterij in echte uren (`zet_zone`, `echte_duur`, `_klokuren`), en wat er nog open staat | `docs/zomertijd.md` |
+| wat een herstart overleeft: waar elke sessie bewaard wordt, `GeheugenStore` (v0.172.0), en de proef met een herstart halverwege bij elke nieuwe regel | `docs/herstart.md` |
 | de taal: Nederlands en Engels, de instelling Taal bij Installatie, `t()` en de Engelse lijsten (`i18n.js`, `i18n/en/`), de woordenlijst, en wat (nog) Nederlands blijft | `docs/taal.md` |
 | het contract: de leverancierscatalogus, de prijsopbouw en de controle tegen de all-in sensor, "Ja, dit klopt", de kale marktprijs als reserve, gas en water per energiebron, vast/variabel/dynamisch, looptijden en "nieuw contract afgesloten", teruglevering voor en na 1-1-2027 en salderen per afrekenperiode, de schaal in de coach, Portugal | `docs/contract.md` |
 
