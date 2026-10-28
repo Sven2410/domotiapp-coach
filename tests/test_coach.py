@@ -8,6 +8,7 @@ hij onthoudt of juist vergeet.
 
 
 import asyncio
+import logging
 import datetime as dt
 import importlib
 import importlib.util
@@ -12467,6 +12468,153 @@ controle("alle vlaggen komen terug zoals ze waren",
          and coach214d._soc_asked == {"ford"} and coach214d._getipt == {"dev-laadpaal": "net"}
          and coach214d._warned == {"dev-laadpaal": dt.datetime(2026, 10, 27, 18, 30)},
          f"{coach214d._integratie_stuk} {coach214d._warned} {coach214d._vriezer_gemeld}")
+
+print("=== 215. Growatt: een dag die de coach niet helemaal zag rekent hij na (v0.174.0) ===")
+# In de klantwoning op 28-10-2026: een uitgave om 11:01, na een ochtend waarin er 10,3 kWh van
+# het net in de accu ging en daarna zon naar het net bij 100%. De eerste ronde zonder opslag
+# zette het gat op twee uur, dus die dag telde niet. Hier: op 27-10 een vak van 5 kWh en 1 kWh
+# te veel, op 28-10 een vak van 10 kWh en 8 kWh te veel, en de coach weg van 06:00 tot 10:48.
+# Bij het vak van 29-10 rekent hij beide nachten na uit de kwartieren en de accustand.
+zone215 = coachmod.dt_util.get_default_time_zone()
+dag215 = dt.datetime(2026, 10, 27)
+
+
+def profiel215(moment):
+    """(afname in W, laden in W, accustand) van het huis op dit lokale moment."""
+    dag, klok = (moment.date() - dag215.date()).days, moment.strftime("%H:%M")
+    vak_w = {0: 10000.0 / 3, 1: 20000.0 / 3}.get(dag, 0.0)
+    if "06:30" <= klok < "08:00" and vak_w:
+        return 7000.0, vak_w, 20.0 + (moment.hour * 60 + moment.minute - 390) / 90 * 80
+    if "08:00" <= klok < "14:00" and dag in (0, 1):
+        tot = {0: "11:15", 1: "13:00"}[dag]
+        return (-4000.0 if "11:00" <= klok < tot else 0.0), 0.0, 100.0
+    return 300.0, 0.0, 60.0
+
+
+def kwartieren215(gat=None):
+    async def lees(ids, start, einde):
+        uit = {e: [] for e in ids}
+        moment = start.replace(tzinfo=zone215).astimezone(dt.timezone.utc)
+        moment = moment.replace(minute=moment.minute - moment.minute % 15, second=0, microsecond=0)
+        while moment < einde.replace(tzinfo=zone215).astimezone(dt.timezone.utc):
+            lokaal = moment.astimezone(zone215).replace(tzinfo=None)
+            if not (gat and gat[0] <= lokaal < gat[1]):
+                afname, laden, _ = profiel215(lokaal)
+                for e, w in (("sensor.afname", max(0.0, afname)), ("sensor.teruglevering", max(0.0, -afname)),
+                             ("sensor.growatt_laden", laden), ("sensor.growatt_ontladen", 0.0)):
+                    if e in uit:
+                        uit[e].append({"start": int(moment.timestamp()), "gemiddeld": w, "seconden": 900})
+            moment += dt.timedelta(minutes=15)
+        return uit
+    return lees
+
+
+async def socs215(entity_id, start, einde):
+    uit, moment = [], start.replace(second=0, microsecond=0)
+    while moment < einde:
+        uit.append((moment, f"{profiel215(moment)[2]:.0f}"))
+        moment += dt.timedelta(minutes=5)
+    return uit
+
+
+class Log215(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.INFO)
+        self.regels = []
+
+    def emit(self, record):
+        self.regels.append(record.getMessage())
+
+
+log215 = Log215()
+coachmod._LOGGER.addHandler(log215)
+coachmod._LOGGER.setLevel(logging.INFO)
+logging.disable(logging.NOTSET)  # het harnas zet het log uit
+
+
+def schema215():
+    return {"growatt_geschreven": coachmod.GrowattSchema(net=True, vermogen_pct=90, stop_soc=100,
+                                                         vakken=[("06:30", "08:00")]), "growatt_stuurt": True}
+
+
+def coach215(rij, gat=None):
+    inst = instellingen(devices=[GROWATT192], battery_state=[{"device": "dev-growatt", **rij}])
+    hass, store, coach = bouw(waarden192, inst)
+    coach._batterij["dev-growatt"] = schema215()
+    coach._async_kwartieren = kwartieren215(gat)
+    coach._async_geschiedenis = socs215
+    b = coachmod.Batterij(soc=60.0, capacity_kwh=12.5, soc_min=15.0, soc_max=100.0)
+
+    def stap(tijd):
+        afname, laden, soc = profiel215(tijd)
+        hass.states.zet("sensor.afname", str(max(0.0, afname)))
+        hass.states.zet("sensor.teruglevering", str(max(0.0, -afname)))
+        hass.states.zet("sensor.growatt_laden", {"state": str(laden / 1000.0), "attributes": {"unit_of_measurement": "kW"}})
+        hass.states.zet("sensor.growatt_ontladen", {"state": "0", "attributes": {"unit_of_measurement": "kW"}})
+        b.soc = soc
+        asyncio.run(coach._async_growatt_nacht(tijd, inst, GROWATT192, b, coach._batterij["dev-growatt"]))
+
+    return inst, coach, b, stap
+
+
+def rij215(inst):
+    return next(r for r in inst["battery_state"] if r.get("device") == "dev-growatt")
+
+
+def utc215(moment):
+    return moment.replace(tzinfo=dt.timezone.utc).isoformat()
+
+
+# Wat er in de opslag stond: de telling tot 06:00 op 28-10, vanaf het vak van 27-10.
+bewaard215 = {"growatt_dag": {"net": 5.0, "teveel": 1.0, "tekort": 0.0, "gat": 0.0, "in_vak": False,
+                              "op": utc215(dag215.replace(day=28, hour=6)), "begon": utc215(dag215.replace(hour=6, minute=30))}}
+inst215, c215, b215, stap215 = coach215(bewaard215)
+for tijd in (dag215.replace(day=28, hour=10, minute=48), dag215.replace(day=29, hour=6, minute=29),
+             dag215.replace(day=29, hour=6, minute=30)):
+    stap215(tijd)
+nachten215 = rij215(inst215).get("growatt_nachten")
+print(f"  nagerekend: {nachten215}, daarna in de opslag {rij215(inst215).get('growatt_dag')}")
+controle("de coach weg in het vak: beide nachten nagerekend, -1 en -8 kWh",
+         nachten215 and len(nachten215) == 2 and abs(nachten215[0] + 1.0) < 0.05 and abs(nachten215[1] + 8.0) < 0.05,
+         f"{nachten215}")
+controle("in het log staat dat hij nagerekend is", any("(nagerekend)" in r for r in log215.regels),
+         f"{log215.regels[-3:]}")
+controle("en de nieuwe dag onthoudt wanneer het vak begon",
+         (rij215(inst215).get("growatt_dag") or {}).get("begon", "").startswith("2026-10-29T06:30"),
+         f"{rij215(inst215).get('growatt_dag')}")
+
+# Een gat in de kwartieropslag over het vak van 28-10: die nacht valt weg, de reden in het log.
+log215.regels.clear()
+inst215b, _, _, stap215b = coach215(bewaard215, gat=(dag215.replace(day=28, hour=6), dag215.replace(day=28, hour=8, minute=30)))
+for tijd in (dag215.replace(day=28, hour=10, minute=48), dag215.replace(day=29, hour=6, minute=29),
+             dag215.replace(day=29, hour=6, minute=30)):
+    stap215b(tijd)
+print(f"  met een gat: {rij215(inst215b).get('growatt_nachten')}; {[r for r in log215.regels if 'nagere' in r or 'nagek' in r]}")
+controle("een gat van tweeënhalf uur in de kwartieren: die nacht telt niet",
+         not rij215(inst215b).get("growatt_nachten"), f"{rij215(inst215b).get('growatt_nachten')}")
+controle("en het log zegt waarom", any("zonder kwartieren of accustand" in r for r in log215.regels),
+         f"{log215.regels[-3:]}")
+
+# Een dag die hij helemaal zag: de telling per minuut en de narekening liggen dicht bij elkaar.
+inst215c, c215c, b215c, stap215c = coach215({})
+begin215 = dag215.replace(hour=6, minute=25)
+for m in range(0, 24 * 60 + 4):
+    stap215c(begin215 + dt.timedelta(minutes=m))
+dag215c = dict(c215c._batterij["dev-growatt"]["growatt_dag"])
+na215, _ = asyncio.run(c215c._async_growatt_narekenen(
+    inst215c, GROWATT192, b215c, dag215.replace(hour=6, minute=30), dag215.replace(day=28, hour=6, minute=29)))
+print(f"  geteld {dag215c['net']:.2f} van het net, {dag215c['teveel']:.2f} te veel; nagerekend {na215}")
+controle("een hele dag: telling en narekening binnen 10% van elkaar",
+         na215 and len(na215) == 1 and abs(na215[0][0] - dag215c["net"]) <= 0.1 * dag215c["net"]
+         and abs(na215[0][1] - dag215c["teveel"]) <= 0.1 * dag215c["teveel"], f"{na215} {dag215c}")
+
+# Na de installatie bewaart de eerste ronde de telling al, en een stop daarna ook.
+inst215d, c215d, _, stap215d = coach215({})
+stap215d(dag215.replace(hour=11, minute=2))
+controle("de eerste ronde na een installatie zet de telling in de opslag", "growatt_dag" in rij215(inst215d),
+         f"{rij215(inst215d)}")
+coachmod._LOGGER.removeHandler(log215)
+logging.disable(logging.WARNING)
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

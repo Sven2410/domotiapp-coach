@@ -96,6 +96,14 @@ Proef 214 (v0.173.0):
 - **Te warm**: de temperatuurmelding komt één keer, ook met een herstart terwijl hij te warm blijft.
 - **Alle vlaggen**: ze gaan heen en weer naar de opslag, met de momenten in de tijd van het huis.
 
+## Wat er in een apparaat achterblijft (v0.174.0)
+
+Wat de coach in een apparaat zet, hoort veilig te zijn als hij wegvalt. Het laadschema van een Growatt
+herhaalt zich elke dag, en bleef na een vak staan als de accu de stopgrens niet haalde. Nu gaat het er na
+het vak uit, en schrijft de coach het volgende vak pas een half uur vooraf. En een dag die een herstart
+de nachttelling kostte, rekent hij achteraf na uit de kwartieropslag en de recorder, in plaats van hem
+weg te laten (`docs/batterij.md`, v0.174.0).
+
 ## Wat er nog open staat
 
 Zie de werkbon van 28-10-2026 in de privénotities:

@@ -2029,5 +2029,56 @@ controle("en het uurplan belooft niet meer dan er past", net60(krap60, 2, 7) < n
 controle("de prijslijst van de coach blijft zoals hij was", all("laad_max_w" not in rij for rij in L60))
 
 print()
+print("=== 61. Growatt: een dag achteraf narekenen uit de kwartieren (v0.174.0) ===")
+# Een dag zoals in de klantwoning op 28-10-2026: in het vak 06:30-08:00 laadt hij 7 kW van het
+# net, overdag zit hij vol en gaat er zon naar het net, 's avonds staat hij op de vloer in een
+# duur uur. De accustand per kwartier, laagste en hoogste.
+dag61 = dt.datetime(2026, 10, 28)
+
+
+def kw61(uur, minuut, net_w, bat_w, laag, hoog=None):
+    return {"start": dag61.replace(hour=uur, minute=minuut), "net_w": net_w, "bat_w": bat_w,
+            "soc_laag": laag, "soc_hoog": laag if hoog is None else hoog}
+
+
+k61 = [kw61(6, 30 + 15 * i if i < 2 else 0, 7500.0, 7000.0, 20 + 15 * i) for i in range(2)]
+k61 += [kw61(7, 15 * i, 7500.0, 7000.0, 50 + 12 * i) for i in range(4)]
+k61 += [kw61(11 + i // 4, 15 * (i % 4), -4000.0, 0.0, 100.0) for i in range(8)]
+k61 += [kw61(13, 0, -4000.0, 2000.0, 98.0, 100.0)]   # half vol: telt niet als te veel
+k61 += [kw61(21, 0, 800.0, 0.0, 15.0), kw61(21, 15, 800.0, 0.0, 15.0)]
+k61 += [{"start": dag61.replace(hour=22), "net_w": None, "bat_w": 0.0, "soc_laag": 15.0, "soc_hoog": 15.0}]
+# Wat er voor het eerste vak ligt hoort bij een nacht die hij half ziet.
+voor61 = [kw61(5, 0, -500.0, 0.0, 100.0)]
+nachten61 = bat.growatt_narekening(voor61 + k61, 15.0, 100.0, 30.0, duur=lambda m: m.hour >= 18)
+net61, teveel61, tekort61, weg61 = nachten61[0]
+print(f"  {net61:.2f} kWh van het net, {teveel61:.2f} te veel, {tekort61:.2f} te weinig, {weg61:.2f} uur zonder")
+controle("het vak: wat de batterij laadde terwijl het huis van het net haalde", abs(net61 - 6 * 7.0 * 0.25) < 1e-9,
+         f"{net61:.3f}")
+controle("te veel: alleen de kwartieren die helemaal vol waren", abs(teveel61 - 8 * 4.0 * 0.25) < 1e-9,
+         f"{teveel61:.3f}")
+controle("te weinig: op de vloer in een duur uur", abs(tekort61 - 2 * 0.8 * 0.25) < 1e-9, f"{tekort61:.3f}")
+controle("een kwartier zonder meter telt als ontbrekend", weg61 == 0.25, f"{weg61}")
+controle("één nacht, en wat er voor het vak lag telt niet", len(nachten61) == 1, f"{nachten61}")
+controle("zonder prijzen telt er geen te weinig",
+         bat.growatt_narekening(k61, 15.0, 100.0, 30.0)[0][2] == 0.0)
+# Twee dagen achter elkaar: twee nachten, zoals per ronde.
+morgen61 = [{**k, "start": k["start"] + dt.timedelta(days=1)} for k in k61]
+twee61 = bat.growatt_narekening(k61 + morgen61, 15.0, 100.0, 30.0)
+controle("twee dagen geven twee nachten", len(twee61) == 2 and abs(twee61[1][1] - 8.0) < 1e-9, f"{twee61}")
+# Een vak dat even stilvalt is nog steeds één vak.
+stil61 = k61[:3] + [kw61(7, 0, 600.0, 0.0, 50.0)] + k61[4:]
+controle("een kwartier stil midden in het vak maakt geen tweede nacht",
+         len(bat.growatt_narekening(stil61, 15.0, 100.0, 30.0)) == 1)
+controle("zonder één vak: alles samen, zonder iets van het net",
+         bat.growatt_narekening(k61[6:], 15.0, 100.0, 30.0)[0][:2] == (0.0, 8.0))
+controle("en de nacht die eruit komt: minder laden, hooguit wat er van het net in ging",
+         abs(bat.growatt_nacht(teveel61, tekort61, net61) - (0.4 - 8.0)) < 1e-9,
+         f"{bat.growatt_nacht(teveel61, tekort61, net61):.2f}")
+# Fail-safe: één rare nacht (een netmeter die wisselde, zoals op 27-10-2026) halveert het vak niet.
+controle("één rare nacht bepaalt de bijstelling niet: de mediaan",
+         bat.growatt_bijstelling([-1.0, -0.5, -12.0], 12.5) == -1.0
+         and bat.growatt_bijstelling([-1.0, -0.5, -12.0, -0.8, -1.2], 12.5) == -1.0)
+
+print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
