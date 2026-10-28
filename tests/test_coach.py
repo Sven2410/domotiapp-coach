@@ -11206,9 +11206,12 @@ dag193 = dt.datetime(2026, 10, 22)
 stap193(dag193.replace(hour=0, minute=50), 20, 300.0, 0.0)
 for m in range(0, 240):        # 01:00-05:00, elke minuut: 1,5 kW van het net de batterij in
     stap193(dag193.replace(hour=1) + dt.timedelta(minutes=m), 20 + m / 4, 1800.0, 1.5)
+for m in range(240, 660):      # 05:00-12:00: niets te tellen (elke minuut, want een gat telt sinds v0.171.0)
+    stap193(dag193.replace(hour=1) + dt.timedelta(minutes=m), 60, 300.0, 0.0)
 for m in range(0, 120):        # 12:00-14:00, elke minuut: vol, en 1 kW zon naar het net
     stap193(dag193.replace(hour=12) + dt.timedelta(minutes=m), 100, -1000.0, 0.0)
-stap193(dag193.replace(hour=23, minute=50), 60, 300.0, 0.0)
+for m in range(120, 780):      # 14:00-01:00: niets te tellen
+    stap193(dag193.replace(hour=12) + dt.timedelta(minutes=m), 60, 300.0, 0.0)
 for m in (0, 1):                   # het volgende vak begint
     stap193((dag193 + dt.timedelta(days=1)).replace(hour=1, minute=m), 60, 300.0, 1.5)
 rij193 = next(r for r in store193b.instellingen["battery_state"] if r.get("device") == "dev-growatt")
@@ -12208,6 +12211,70 @@ controle("de regel zelf: de meter van grid_mode, anders de andere, anders None",
                               {"a": {1: 400.0}, "b": {1: 900.0, 2: 700.0}}, 1) == -400.0
          and coachmod._net_afname({"grid_mode": "signed", "grid_signed": "a", "grid_import": "b"}, {"a": {}, "b": {2: 700.0}}, 2) == 700.0
          and coachmod._net_afname({"grid_mode": "signed", "grid_signed": "a"}, {"a": {}}, 3) is None, "")
+
+print("=== 212. de nachttelling van een Growatt overleeft een herstart (v0.171.0) ===")
+# In de klantwoning op 27-10-2026: zes herstarts op een dag, en de zon die bij een volle accu
+# naar het net ging kwam nooit in `growatt_nachten`. Een vak van 01:00 tot 05:00 (6 kWh van
+# het net), van 12:00 tot 14:30 2 kW zon naar het net bij een volle accu (5 kWh te veel), en
+# om 13:15 een herstart: een nieuwe coach met dezelfde opslag.
+dag212 = dt.datetime(2026, 10, 27)
+b212 = coachmod.Batterij(soc=50.0, capacity_kwh=12.5, soc_min=15.0, soc_max=100.0)
+
+
+def schema212():
+    return {"growatt_geschreven": coachmod.GrowattSchema(net=True, vermogen_pct=20, stop_soc=100,
+                                                         vakken=[("01:00", "05:00")])}
+
+
+def nacht212(herstart, stil=dt.timedelta(minutes=2)):
+    inst = instellingen(devices=[GROWATT192], battery_state=[{"device": "dev-growatt"}])
+    hass, store, coach = bouw(waarden192, inst)
+    sessie = coach._batterij.setdefault("dev-growatt", {})
+    sessie.update(schema212(), growatt_stuurt=True)
+
+    def stap(tijd, soc, afname, laden_kw):
+        hass.states.zet("sensor.afname", str(max(0.0, afname)))
+        hass.states.zet("sensor.teruglevering", str(max(0.0, -afname)))
+        hass.states.zet("sensor.growatt_laden", {"state": str(max(0.0, laden_kw)), "attributes": {"unit_of_measurement": "kW"}})
+        hass.states.zet("sensor.growatt_ontladen", {"state": "0", "attributes": {"unit_of_measurement": "kW"}})
+        b212.soc = soc
+        asyncio.run(coach._async_growatt_nacht(tijd, inst, GROWATT192, b212, coach._batterij["dev-growatt"]))
+
+    stap(dag212.replace(hour=0, minute=50), 20, 300.0, 0.0)
+    for m in range(0, 240):
+        stap(dag212.replace(hour=1) + dt.timedelta(minutes=m), 20 + m / 4, 1800.0, 1.5)
+    for m in range(240, 660):   # 05:00-12:00: niets te tellen
+        stap(dag212.replace(hour=1) + dt.timedelta(minutes=m), 60, 300.0, 0.0)
+    weer = dag212.replace(hour=13, minute=14) + stil
+    for m in range(0, 150):
+        tijd = dag212.replace(hour=12) + dt.timedelta(minutes=m)
+        if dag212.replace(hour=13, minute=14) < tijd < weer:
+            continue
+        if tijd >= weer and coach._batterij["dev-growatt"].get("growatt_dag_op", tijd) < weer:
+            if herstart == "stop":
+                asyncio.run(coach._async_batterijen_los(herstart=True))
+            hass, store, coach = bouw(waarden192, inst)
+            coach._batterij["dev-growatt"] = {**schema212(), "growatt_stuurt": True}
+        stap(tijd, 100, -2000.0, 0.0)
+    for m in range(150, 780):   # 14:30-01:00: niets te tellen
+        stap(dag212.replace(hour=12) + dt.timedelta(minutes=m), 60, 300.0, 0.0)
+    for m in (0, 1):
+        stap((dag212 + dt.timedelta(days=1)).replace(hour=1, minute=m), 60, 300.0, 1.5)
+    rij = next(r for r in inst["battery_state"] if r.get("device") == "dev-growatt")
+    return rij.get("growatt_nachten"), rij.get("growatt_dag")
+
+
+stop212, dag_na212 = nacht212("stop")
+stroom212, _ = nacht212("stroom")
+uit212, _ = nacht212("stroom", stil=dt.timedelta(hours=2))
+print(f"  herstart met stop: {stop212}, stroomstoring: {stroom212}, twee uur weg: {uit212}; opslag {dag_na212}")
+controle("een herstart halverwege: de hele 5 kWh te veel staat in growatt_nachten",
+         stop212 and abs(stop212[-1] + 5.0) < 0.1, f"{stop212}")
+controle("een stroomstoring zonder stop: hooguit het laatste kwartier kwijt",
+         stroom212 and -5.0 - 0.1 < stroom212[-1] < -4.4, f"{stroom212}")
+controle("twee uur niet geteld: die dag telt niet mee", not uit212, f"{uit212}")
+controle("na het nakijken begint de bewaarde telling van de nieuwe dag op nul",
+         dag_na212 and dag_na212["teveel"] == 0.0 and dag_na212["in_vak"] is True, f"{dag_na212}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

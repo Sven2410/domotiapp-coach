@@ -425,6 +425,10 @@ GROWATT_BESTENDIG = timedelta(minutes=5)
 # Hoeveel metingen van de inhoud en van het laadvermogen hij bewaart, en hoeveel nachten.
 GROWATT_BEWAAR = 30
 GROWATT_NACHTEN_BEWAAR = 14
+# Hoe vaak de telling van de dag naar de opslag gaat, en hoe lang de coach op een dag
+# niet mag tellen voor die dag niet meer meetelt (v0.171.0, `_async_growatt_nacht`).
+GROWATT_DAG_BEWAREN = timedelta(minutes=15)
+GROWATT_DAG_GAT = timedelta(hours=1)
 # Onder hoeveel watt zon het laadvermogen een meting van het net is.
 GROWATT_ZON_W = 50.0
 # De vloer: onder hoeveel watt de batterij stil staat, en boven hoeveel watt het huis
@@ -8314,24 +8318,55 @@ class ChargerCoach:
         komende etmaal (`growatt_duur`, v0.156.0). En in het vak zelf wat er van het net in ging. Begint het volgende vak,
         dan gaat de nacht met `growatt_nacht` in `growatt_nachten`, en stelt
         `growatt_bijstelling` het schema daarop bij.
+
+        **De telling staat ook in de opslag** (v0.171.0, `growatt_dag` bij de batterijrij),
+        elk kwartier en bij het stoppen. Tot dan stond hij alleen in het geheugen, en wiste
+        elke herstart de dag: in de klantwoning op 27-10-2026 zes herstarts, en de 12,9 kWh
+        zon die bij een volle accu naar het net ging kwam nooit in `growatt_nachten`. Telde
+        de coach op een dag samen langer dan `GROWATT_DAG_GAT` niet (een coach die uit
+        stond), dan telt die dag niet mee: half geteld is te weinig te veel.
         """
+        device_id = device.get("id", "")
         geschreven: GrowattSchema | None = sessie.get("growatt_geschreven")
-        dag = sessie.setdefault("growatt_dag", {"net": 0.0, "teveel": 0.0, "tekort": 0.0, "in_vak": None})
+        if "growatt_dag" not in sessie:
+            dag, vorige = self._growatt_dag_uit(self._batterij_rij(settings, device_id).get("growatt_dag"))
+            sessie["growatt_dag"] = dag
+            sessie["growatt_dag_op"] = vorige
+        dag = sessie["growatt_dag"]
+        dag.setdefault("gat", 0.0)
         vorige = sessie.get("growatt_dag_op")
         sessie["growatt_dag_op"] = now
+        if vorige is not None:
+            # Een ronde is een minuut; wat er langer tussen zat telde hij niet.
+            gemist = (_tussen(vorige, now) - timedelta(minutes=1)).total_seconds() / 3600.0
+            if gemist > 1.0 / 60.0:
+                dag["gat"] += gemist
         in_vak = bool(geschreven is not None and geschreven.net and self._growatt_in_vak(geschreven, now))
-        if dag["in_vak"] is False and in_vak and (dag["net"] > 0 or dag["teveel"] > 0 or dag["tekort"] > 0):
-            # Een nieuw vak: de dag ervoor is klaar.
-            fout = growatt_nacht(dag["teveel"], dag["tekort"], dag["net"])
-            rij = self._batterij_rij(settings, device.get("id", ""))
-            nachten = [*growatt_nachten(rij)[-(GROWATT_NACHTEN_BEWAAR - 1):], round(fout, 3)]
-            _LOGGER.info("%s: nacht nagekeken: %.2f kWh van het net, %.2f te veel, %.2f te weinig",
-                         device.get("id"), dag["net"], dag["teveel"], dag["tekort"])
-            await self._async_batterij_bewaren(settings, device.get("id", ""), {
-                "growatt_nachten": nachten, "growatt_nachten_v": GROWATT_NACHTEN_V,
-            })
-            dag.update(net=0.0, teveel=0.0, tekort=0.0)
+        if dag["in_vak"] is False and in_vak:
+            # Een nieuw vak: de dag ervoor is klaar, en de volgende begint hier.
+            if not (dag["net"] > 0 or dag["teveel"] > 0 or dag["tekort"] > 0):
+                pass
+            elif dag["gat"] * 3600.0 > GROWATT_DAG_GAT.total_seconds():
+                _LOGGER.info("%s: nacht niet nagekeken: %.1f uur niet geteld", device_id, dag["gat"])
+            else:
+                fout = growatt_nacht(dag["teveel"], dag["tekort"], dag["net"])
+                rij = self._batterij_rij(settings, device_id)
+                nachten = [*growatt_nachten(rij)[-(GROWATT_NACHTEN_BEWAAR - 1):], round(fout, 3)]
+                _LOGGER.info("%s: nacht nagekeken: %.2f kWh van het net, %.2f te veel, %.2f te weinig",
+                             device_id, dag["net"], dag["teveel"], dag["tekort"])
+                await self._async_batterij_bewaren(settings, device_id, {
+                    "growatt_nachten": nachten, "growatt_nachten_v": GROWATT_NACHTEN_V,
+                })
+            dag.update(net=0.0, teveel=0.0, tekort=0.0, gat=0.0)
+            sessie["growatt_dag_bewaard"] = None
+        elif dag["in_vak"] is None and in_vak is False and vorige is None:
+            # De eerste ronde zonder iets in de opslag: wat er voor nu lag zag hij niet.
+            dag["gat"] = GROWATT_DAG_GAT.total_seconds() / 3600.0 + 1.0
         dag["in_vak"] = in_vak
+        bewaard = sessie.get("growatt_dag_bewaard")
+        if bewaard is None or _tussen(bewaard, now) >= GROWATT_DAG_BEWAREN:
+            sessie["growatt_dag_bewaard"] = now
+            await self._async_growatt_dag_bewaren(settings, device_id, sessie)
         net_w, _ = self._net_nu(settings)
         bat_w = self._batterij_w(device)
         if vorige is None or net_w is None or bat_w is None or b.soc is None:
@@ -8361,6 +8396,39 @@ class ChargerCoach:
     def _growatt_in_vak(schema: GrowattSchema, now: datetime) -> bool:
         klok = now.strftime("%H:%M")
         return any(begin <= klok < eind for begin, eind in schema.vakken)
+
+    @staticmethod
+    def _growatt_dag_uit(bewaard: Any) -> tuple[dict[str, Any], datetime | None]:
+        """De telling van de dag uit de opslag, en wanneer hij voor het laatst telde (v0.171.0)."""
+        dag: dict[str, Any] = {"net": 0.0, "teveel": 0.0, "tekort": 0.0, "in_vak": None, "gat": 0.0}
+        if not isinstance(bewaard, dict):
+            return dag, None
+        for sleutel in ("net", "teveel", "tekort", "gat"):
+            try:
+                dag[sleutel] = max(0.0, float(bewaard.get(sleutel) or 0.0))
+            except (TypeError, ValueError):
+                pass
+        if isinstance(bewaard.get("in_vak"), bool):
+            dag["in_vak"] = bewaard["in_vak"]
+        try:
+            op = _moment(datetime.fromisoformat(str(bewaard.get("op"))))
+        except (TypeError, ValueError):
+            op = None
+        return dag, op
+
+    async def _async_growatt_dag_bewaren(
+        self, settings: dict[str, Any], device_id: str, sessie: dict[str, Any]
+    ) -> None:
+        """De telling van de dag naar de batterijrij, met het moment in UTC (v0.171.0)."""
+        dag = sessie.get("growatt_dag")
+        op = sessie.get("growatt_dag_op")
+        if not isinstance(dag, dict) or op is None:
+            return
+        await self._async_batterij_bewaren(settings, device_id, {"growatt_dag": {
+            "net": round(dag["net"], 4), "teveel": round(dag["teveel"], 4),
+            "tekort": round(dag["tekort"], 4), "gat": round(dag.get("gat", 0.0), 4),
+            "in_vak": dag["in_vak"], "op": dt_util.as_utc(op).isoformat(),
+        }})
 
     async def _async_batterij_loslaten(self, device: dict[str, Any], herstart: bool = False) -> None:
         """De batterij teruggeven: vermogen op nul, en zijn eigen stand terug.
@@ -8413,6 +8481,12 @@ class ChargerCoach:
             sessie = self._batterij.get(device.get("id", "")) or {}
             if not (sessie.get("stuurt") or sessie.get("growatt_stuurt")):
                 continue
+            if "growatt_dag" in sessie:
+                # De telling van de nacht, zodat een herstart de dag niet wist (v0.171.0).
+                try:
+                    await self._async_growatt_dag_bewaren(settings, device.get("id", ""), sessie)
+                except Exception:  # noqa: BLE001
+                    _LOGGER.exception("kon de nachttelling van %s niet bewaren", device.get("id"))
             try:
                 await self._async_batterij_loslaten(device, herstart=herstart)
             except Exception:  # noqa: BLE001 - één apparaat is niet alle apparaten
