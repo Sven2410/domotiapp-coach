@@ -2643,6 +2643,36 @@ for naam_gw in ("growatt-bihorario", "growatt-vasthouden"):
         print(f"  {naam_gw}: {len(stand_gw)} besluiten over de batterij: "
               f"{[(str(g.get('at'))[11:16], g.get('rule')) for g in stand_gw]}")
         controle(f"{naam_gw}: het besluit wisselt niet elk kwartier", len(stand_gw) <= 8, f"{len(stand_gw)}")
+# Na het vak het schema eruit, ook als de stopgrens niet gehaald is (v0.174.0): het herhaalt zich
+# elke dag. In de klantwoning stond het op 28-10-2026 na een vak dat op 98 eindigde bij stop 100
+# nog bijna twee uur in de Growatt; hier bleef het in `growatt-bihorario` tot de volgende avond.
+def _schema_na_vak(vl):
+    """Elk vak dat langer dan een kwartier na zijn eind nog in de Growatt stond."""
+    if not vl.gw_schrijf or not vl.bat_verloop:
+        return []
+    einde_run = vl.bat_verloop[-1][0]
+    uit = []
+    for i, (op, aan, _, _, vakken) in enumerate(vl.gw_schrijf):
+        tot = vl.gw_schrijf[i + 1][0] if i + 1 < len(vl.gw_schrijf) else einde_run
+        einden = [e for _, e in vakken if e != "23:59"]
+        if not aan or not einden:
+            continue
+        laatste = max(einden)
+        dag = op.replace(hour=0, minute=0, second=0, microsecond=0)
+        while dag <= tot:
+            eind = dag.replace(hour=int(laatste[:2]), minute=int(laatste[3:]))
+            if op < eind and eind + dt.timedelta(minutes=15) < tot:
+                uit.append((f"{eind:%a %H:%M}", f"{tot:%a %H:%M}"))
+            dag += dt.timedelta(days=1)
+    return uit
+
+
+for naam_gw in ("growatt-bihorario", "growatt-herstart", "growatt-vasthouden", "growatt-ochtend",
+                "growatt-ochtend-zonder-grens", "growatt-weigert", "growatt-terug-100", "growatt-zon"):
+    if (vl := v(naam_gw)):
+        blijft = _schema_na_vak(vl)
+        controle(f"{naam_gw}: na het vak staat er binnen een kwartier niets van het net meer in de Growatt",
+                 not blijft, f"{blijft}")
 if (vl := v("growatt-schaduw")):
     zou = [g.get("message") or "" for g in vl.geschiedenis if "zou dit schrijven" in (g.get("message") or "")]
     print(f"  growatt-schaduw: {zou}")

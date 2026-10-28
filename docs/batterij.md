@@ -2113,7 +2113,7 @@ Hij gaat elk kwartier naar de opslag (`GROWATT_DAG_BEWAREN`), en ook bij het sto
 coach weg was. Na een stroomstoring, zonder stop, kost hij hooguit het laatste kwartier.
 
 Telde de coach op een dag samen langer dan `GROWATT_DAG_GAT` (een uur) niet, dan telt die dag niet mee.
-Hij logt dan "nacht niet nagekeken". Een half getelde dag geeft te weinig "te veel", en dat is een getal
+Hij logt dan "nacht niet nagekeken". Sinds v0.174.0 rekent hij zo'n dag eerst na (zie hieronder). Een half getelde dag geeft te weinig "te veel", en dat is een getal
 dat niet klopt. Hetzelfde geldt voor de eerste dag zonder iets in de opslag: wat er voor de eerste ronde
 gebeurde zag hij niet. Bij elk nieuw vak begint de dag met een schone lei. Een coach die vlak voor het vak
 opkomt, telt de volgende dag dus gewoon.
@@ -2127,3 +2127,59 @@ Proef 212 in `test_coach.py` laat een herstart halverwege zien:
 | twee uur geen coach | niets |
 
 Proef 193 telt sindsdien elke minuut van de dag, want een sprong in de tijd is nu een gat.
+
+## Growatt: na het vak het schema eruit, en een dag narekenen (v0.174.0)
+
+**Na het vak.** Het laadschema van een Growatt herhaalt zich elke dag. De coach haalde het er na het vak
+alleen uit als de accu de stopgrens haalde (`growatt_vol`). Haalde hij die niet, dan zag `_growatt_wacht`
+het voorbije vak als het volgende, ruim twintig uur weg, en liet hij het staan. In de klantwoning op
+28-10-2026 eindigde het vak 06:30-08:00 op 98% bij stop 100. Het schema stond er tot 09:49 nog in, en
+ging er alleen uit door een sprong naar 100/100 bij het teruglezen. Was de coach daarna weggevallen, dan
+had de Growatt de volgende ochtend vol geladen van het net, op een dag met 49 kWh zon.
+
+Sindsdien gaat het schema eruit zodra het geschreven vak voorbij is (`verlopen` in `_async_growatt`),
+na `GROWATT_BESTENDIG`. Begint er binnen `GROWATT_VOORAF` een nieuw vak, dan schrijft hij dat. Hetzelfde
+geldt voor vasthouden. Het volgende vak schrijft hij zoals altijd een half uur vooraf. In het virtuele
+huis bleef het schema in `growatt-bihorario` van vrijdag 09:00 tot 22:30 staan. Nu gaat het er om 09:05
+uit. `test_virtueel.py` kijkt het bij elk Growatt-scenario na.
+
+**Een dag narekenen.** Een dag die de coach niet helemaal zag liet hij tot v0.174.0 weg. Dan leerde hij
+juist niets van de dagen die het meest misgaan: een installatie, een stroomstoring, een Home Assistant
+die uren weg was. Op 28-10-2026 kwam er een uitgave om 11:01. Die ochtend ging er 10,3 kWh van het net
+in de accu, en om 11:00 ging er 4,4 kW zon naar het net bij 100%. De eerste ronde zonder opslag zette het
+gat op twee uur, en de dag telde niet.
+
+Nu rekent `_async_growatt_dag_af` zo'n dag na (`_async_growatt_narekenen`, `growatt_narekening` in
+batterij.py):
+
+- **De gegevens**: het net en de batterij uit de kwartieropslag (`archive.py`), de accustand uit de
+  recorder (tien dagen, `GROWATT_NAREKENEN_MAX`).
+- **De periode**: vanaf het begin van het vorige vak (`begon` in `growatt_dag`), of de laatste 24 uur.
+- **Het vak**: een kwartier waarin de batterij laadt terwijl het huis van het net haalt. Buiten een vak
+  doet een Growatt nul op de meter, en dan gebeurt dat niet.
+- **Een nieuwe nacht** begint bij een vak waar drie uur geen vak voor lag (`GROWATT_NIEUWE_NACHT`). Twee
+  gemiste dagen geven zo twee nachten, zoals per ronde.
+- **Vol en leeg** gelden alleen als het het hele kwartier zo was.
+- **Te weinig** telt alleen in een uur met een prijs die de coach nog kent (`growatt_duur`). Bij een
+  prijssensor zonder de dag van gisteren telt het dus minder: liever te weinig bijstellen dan te veel.
+
+Wat ontbreekt blijft ontbreken. Mist er in een nacht meer dan `GROWATT_DAG_GAT` aan kwartieren of
+accustand, dan valt die nacht weg, met de reden in het log. Het log zegt bij elke nacht of hij "geteld"
+of "nagerekend" is. Eén rare nacht, bijvoorbeeld door een netmeter die wisselde, halveert het vak niet:
+de bijstelling is de mediaan van de laatste nachten (`growatt_bijstelling`).
+
+Proef 215 in `test_coach.py`:
+
+| geval | uitkomst |
+|---|---|
+| coach weg van 06:00 tot 10:48, twee nachten gemist | −1 en −8 in `growatt_nachten` |
+| een gat van 2,5 uur in de kwartieren over het vak | niets, met de reden in het log |
+| een dag die hij helemaal zag | telling en narekening gelijk (5,0 en 1,0) |
+
+Proef 61 in `test_batterij.py` rekent de som zelf na.
+
+Over de installatie van v0.173.0 bij de klant (28-10-2026, om 10:48 binnen, om 11:01 herstart). Tot de
+herstart stond er geen `growatt_dag` in de opslag, en dat klopt. Een installatie via HACS zet alleen de
+bestanden neer. Home Assistant draait de nieuwe code pas na de herstart, en de versie die tot dan draaide
+kende `growatt_dag` niet. De eerste ronde na de herstart bewaarde hem meteen (11:02:26). Proef 215 kijkt
+dat na.

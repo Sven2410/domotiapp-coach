@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from math import sqrt
+from typing import Callable
 
 from .planner import (
     PRICE_MARGIN,
@@ -2617,6 +2618,8 @@ GROWATT_ZAK_SOC = 10
 # Hoe lang voor een vak de coach het vermogen en de stopgrens nog bijstelt. Daarvoor
 # schuift het plan mee met hoe leeg de avond hem maakt.
 GROWATT_VOORAF = timedelta(minutes=30)
+# Hoe lang er geen vak mag zijn geweest voor een vak een nieuwe nacht begint, achteraf (v0.174.0).
+GROWATT_NIEUWE_NACHT = timedelta(hours=3)
 # Over hoeveel nachten de coach zijn schema bijstelt, en vanaf hoeveel (v0.151.0).
 GROWATT_NACHTEN = 7
 GROWATT_MIN_NACHTEN = 3
@@ -3046,6 +3049,60 @@ def growatt_duur(uren: list[Uur], now: datetime) -> bool:
     if nu is None or not prijzen:
         return False
     return nu.price > min(prijzen) + PRICE_MARGIN
+
+
+def growatt_narekening(
+    kwartieren: list[dict], soc_min: float, soc_max: float, stil_w: float,
+    duur: Callable[[datetime], bool] | None = None,
+) -> list[tuple[float, float, float, float]]:
+    """De telling van `growatt_nacht` achteraf, uit de kwartieren (v0.174.0).
+
+    Voor dagen die de coach niet helemaal zag: een installatie, een stroomstoring, een
+    Home Assistant die uren weg was. Per kwartier `start`, `net_w` (afname positief), `bat_w`
+    (laden positief), en de laagste en hoogste accustand (`soc_laag`, `soc_hoog`); None
+    waar het niet bekend is. Hetzelfde als per ronde, met drie verschillen:
+
+    - Het vak kent hij niet uit het schema, dus een vak is een kwartier waarin de batterij
+      laadt terwijl het huis van het net haalt. Buiten een vak doet een Growatt nul op de
+      meter, en dan gebeurt dat niet.
+    - Een nacht begint bij een vak waar `GROWATT_NIEUWE_NACHT` geen vak voor lag, zodat een
+      reeks van twee dagen twee nachten geeft, zoals per ronde. Wat er voor het eerste vak
+      ligt hoort bij een nacht die hij maar half ziet, en telt niet.
+    - Vol en leeg alleen als het het hele kwartier zo was: in een kwartier dat half vol was
+      telt de teruglevering niet als te veel.
+
+    Geeft per nacht (van het net, te veel, te weinig, uren zonder gegevens). Zonder één vak
+    is het alles samen één nacht, zonder iets van het net.
+    """
+    def vak(k: dict) -> bool:
+        return (k.get("net_w") is not None and k.get("bat_w") is not None
+                and k["bat_w"] > stil_w and k["net_w"] > stil_w)
+
+    nachten: list[list[float]] = []
+    laatste_vak: datetime | None = None
+    alle_vak = any(vak(k) for k in kwartieren)
+    for k in kwartieren:
+        if vak(k):
+            if laatste_vak is None or k["start"] - laatste_vak > GROWATT_NIEUWE_NACHT:
+                nachten.append([0.0, 0.0, 0.0, 0.0])
+            laatste_vak = k["start"]
+        elif not nachten and not alle_vak:
+            nachten.append([0.0, 0.0, 0.0, 0.0])
+        if not nachten:
+            continue
+        nacht = nachten[-1]
+        net_w, bat_w, laag, hoog = k.get("net_w"), k.get("bat_w"), k.get("soc_laag"), k.get("soc_hoog")
+        if net_w is None or bat_w is None or laag is None or hoog is None:
+            nacht[3] += 0.25
+            continue
+        if vak(k):
+            nacht[0] += min(bat_w, net_w) / 1000.0 * 0.25
+            continue
+        if net_w < 0 and laag >= soc_max - VOL_MARGE:
+            nacht[1] += -net_w / 1000.0 * 0.25
+        if net_w > 0 and hoog <= soc_min + 1.0 and abs(bat_w) < stil_w and duur is not None and duur(k["start"]):
+            nacht[2] += net_w / 1000.0 * 0.25
+    return [tuple(n) for n in nachten]
 
 
 def growatt_nachten(rij: dict | None) -> list:
