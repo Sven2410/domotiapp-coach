@@ -2091,3 +2091,39 @@ meter met een teken toch.
   regels zien en valt niet terug; de dagen van voor de wissel staan daar zonder net.
 - Een verkeerde avond op een nieuwe meter (in die woning +2,4 kW door een verkeerd aangesloten klem) weegt nu
   als één dag tussen de week ervoor, want de mediaan krijgt de oude kwartieren erbij.
+
+## Growatt: de nachttelling overleeft een herstart (v0.171.0)
+
+In de klantwoning op 27-10-2026 laadde de accu 's nachts 11,1 kWh van het net. Vanaf 07:00 stond hij op
+93 tot 100%, en tot 14:49 ging er 12,9 kWh zon naar het net. De volgende ochtend hoorde die dag als "te
+veel" in `growatt_nachten` te komen, maar er kwam niets. `_async_growatt_nacht` telde de dag in
+`sessie["growatt_dag"]`, en dat stond alleen in het geheugen. Home Assistant herstartte die dag zes keer:
+vier uitgaven en twee stroomstoringen. Na de laatste herstart, om 22:12, telde hij alleen nog de nacht, en
+in vazio telt er niets. Om 06:00 stonden alle drie de getallen op nul, en de nacht werd overgeslagen.
+
+Sindsdien staat de telling in de opslag, als `growatt_dag` bij de batterijrij:
+
+- de drie getallen;
+- of hij in het vak zat;
+- hoe lang hij niet telde;
+- het moment van de laatste telling, in UTC.
+
+Hij gaat elk kwartier naar de opslag (`GROWATT_DAG_BEWAREN`), en ook bij het stoppen
+(`_async_batterijen_los`, dat `_async_bij_stop` aanroept). Een herstart kost zo alleen de minuten dat de
+coach weg was. Na een stroomstoring, zonder stop, kost hij hooguit het laatste kwartier.
+
+Telde de coach op een dag samen langer dan `GROWATT_DAG_GAT` (een uur) niet, dan telt die dag niet mee.
+Hij logt dan "nacht niet nagekeken". Een half getelde dag geeft te weinig "te veel", en dat is een getal
+dat niet klopt. Hetzelfde geldt voor de eerste dag zonder iets in de opslag: wat er voor de eerste ronde
+gebeurde zag hij niet. Bij elk nieuw vak begint de dag met een schone lei. Een coach die vlak voor het vak
+opkomt, telt de volgende dag dus gewoon.
+
+Proef 212 in `test_coach.py` laat een herstart halverwege zien:
+
+| geval | in `growatt_nachten` |
+|---|---|
+| herstart met een stop | −4,97 (de twee minuten zonder coach niet) |
+| stroomstoring zonder stop | −4,47 (het kwartier sinds de laatste opslag niet) |
+| twee uur geen coach | niets |
+
+Proef 193 telt sindsdien elke minuut van de dag, want een sprong in de tijd is nu een gat.
