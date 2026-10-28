@@ -3288,6 +3288,7 @@ class ChargerCoach:
             if gelukt:
                 self._last_round = dt_util.utcnow()
             try:
+                self._meldingen_onthouden()
                 await async_get_geheugen(self.hass).async_bewaar(dt_util.utcnow(), GEHEUGEN_ELKE)
             except Exception:  # noqa: BLE001 - onthouden mag een ronde niet stoppen
                 _LOGGER.exception("kon het geheugen niet bewaren")
@@ -3443,6 +3444,7 @@ class ChargerCoach:
             try:
                 await self._one_batterij(moment, settings, device, level)
                 self._besluit_melden(device.get("id", ""))
+                self._batterij_onthouden(device.get("id", ""))
             except ServiceNotFound:
                 _LOGGER.warning(
                     "%s kan nog niet aangestuurd worden: de integratie van de batterij is er nog niet",
@@ -6802,7 +6804,7 @@ class ChargerCoach:
         device_id = device.get("id", "")
         naam = device.get("name") or t("De batterij")
         rij = self._batterij_rij(settings, device_id)
-        sessie = self._batterij.setdefault(device_id, {"regelaar": Regelaar()})
+        sessie = self._batterij_sessie(device_id)
         if "voorraad" not in sessie:
             sessie["voorraad"] = self._voorraad_uit(rij)
         b = self._batterij_van(now, settings, device, rij)
@@ -12405,7 +12407,7 @@ class ChargerCoach:
         })
         # De lopende tellingen beginnen opnieuw vanaf het uur waar de
         # herberekening ophield, met de voorraad die daaruit kwam.
-        sessie = self._batterij.setdefault(device_id, {"regelaar": Regelaar()})
+        sessie = self._batterij_sessie(device_id)
         sessie.update(geld={}, opgeleverd={}, zon={}, voorraad=voorraad, bewaard_op=nu)
         uit["toegepast"] = True
         return uit
@@ -12783,6 +12785,7 @@ class ChargerCoach:
                 _LOGGER.exception("kon de lopende laadbeurt niet bewaren bij het stoppen")
         try:
             # Wat de coach onthoudt, voor na de herstart (v0.172.0).
+            self._meldingen_onthouden()
             await async_get_geheugen(self.hass).async_bewaar(dt_util.utcnow())
         except Exception:  # noqa: BLE001
             _LOGGER.exception("kon het geheugen niet bewaren bij het stoppen")
@@ -14221,6 +14224,8 @@ class ChargerCoach:
             elif sleutel == "water":
                 self._water_loopt_sinds = _uit_geheugen(data.get("sinds"))
                 self._water_gemeld = bool(data.get("gemeld")) and self._water_loopt_sinds is not None
+            elif sleutel == "meldingen":
+                self._meldingen_terug(data)
             else:
                 self._geheugen_terug[sleutel] = data
 
@@ -14285,6 +14290,94 @@ class ChargerCoach:
         sessie["gemeld"] = {str(g) for g in data.get("gemeld") or []}
         sessie["prijzen"] = self._prijzen_uit_geheugen(data.get("prijzen"))
         return sessie
+
+    # Wat er van een thuisbatterij over een herstart heen moet (v0.173.0): of iets anders hem
+    # stuurt (dan laat de coach hem een uur los), of hij de coach niet volgt, en wat de cloud
+    # van een Growatt weigerde. Zonder dit nam de coach hem na een herstart meteen weer over,
+    # en kwam dezelfde kritieke melding opnieuw.
+    _BATTERIJ_MOMENTEN = ("vreemd", "growatt_houden_mis")
+    _BATTERIJ_VLAGGEN = ("volgt_niet_gemeld", "growatt_gemeld")
+
+    def _batterij_sessie(self, device_id: str) -> dict[str, Any]:
+        """De sessie van een batterij, bij de eerste keer met wat er voor de herstart stond."""
+        if device_id in self._batterij:
+            return self._batterij[device_id]
+        sessie: dict[str, Any] = {"regelaar": Regelaar()}
+        data = self._geheugen_terug.pop(f"batterij:{device_id}", None) or {}
+        for sleutel in self._BATTERIJ_MOMENTEN:
+            moment = _uit_geheugen(data.get(sleutel))
+            if moment is not None:
+                sessie[sleutel] = moment
+        for sleutel in self._BATTERIJ_VLAGGEN:
+            if data.get(sleutel):
+                sessie[sleutel] = True
+        sinds = _uit_geheugen(data.get("volgt_niet"))
+        if sinds is not None:
+            sessie["volgt_niet"] = (sinds, bool(data.get("volgt_niet_opnieuw")))
+        self._batterij[device_id] = sessie
+        return sessie
+
+    def _batterij_onthouden(self, device_id: str) -> None:
+        sessie = self._batterij.get(device_id)
+        if sessie is None:
+            return
+        data: dict[str, Any] = {}
+        for sleutel in self._BATTERIJ_MOMENTEN:
+            if sessie.get(sleutel) is not None:
+                data[sleutel] = _naar_geheugen(sessie[sleutel])
+        for sleutel in self._BATTERIJ_VLAGGEN:
+            if sessie.get(sleutel):
+                data[sleutel] = True
+        if sessie.get("volgt_niet"):
+            data["volgt_niet"] = _naar_geheugen(sessie["volgt_niet"][0])
+            data["volgt_niet_opnieuw"] = bool(sessie["volgt_niet"][1])
+        self._onthoud(f"batterij:{device_id}", data or None, meteen=True)
+
+    def _meldingen_onthouden(self) -> None:
+        """Welke meldingen er al gedaan zijn, zodat ze na een herstart niet nog eens komen (v0.173.0).
+
+        Elk van deze komt maar één keer zolang de toestand blijft: een integratie die niet
+        opkomt, een batterij die te warm is, een vriezer die openstaat, een smart plug die
+        uit staat, de vraag naar de accustand, een tip, en de waarschuwing dat de pauze de
+        klaar-tijd kost. Is de toestand na de herstart voorbij, dan ruimt de wacht zijn eigen
+        vlag op zoals altijd.
+        """
+        data = {
+            "integratie": sorted(self._integratie_gemeld),
+            "integratie_stuk": {k: _naar_geheugen(v) for k, v in sorted(self._integratie_stuk.items())},
+            "temp": sorted(str(k) for k in self._temp_gemeld),
+            "vriezer": sorted([list(k) for k in self._vriezer_gemeld]),
+            "stekker": sorted(self._stekker_gemeld),
+            "soc_gevraagd": sorted(self._soc_asked),
+            "getipt": dict(sorted(self._getipt.items())),
+            "gewaarschuwd": {k: _naar_geheugen(v) for k, v in sorted(self._warned.items())},
+        }
+        self._onthoud("meldingen", data if any(data.values()) else None, meteen=True)
+
+    def _meldingen_terug(self, data: dict[str, Any]) -> None:
+        def lijst(sleutel: str) -> list:
+            waarde = data.get(sleutel)
+            return waarde if isinstance(waarde, list) else []
+
+        def momenten(sleutel: str) -> dict[str, datetime]:
+            waarde = data.get(sleutel)
+            uit = {}
+            for k, v in (waarde.items() if isinstance(waarde, dict) else ()):
+                moment = _uit_geheugen(v)
+                if moment is not None:
+                    uit[str(k)] = moment
+            return uit
+
+        self._integratie_gemeld |= {str(k) for k in lijst("integratie")}
+        self._integratie_stuk.update(momenten("integratie_stuk"))
+        self._temp_gemeld |= {str(k) for k in lijst("temp")}
+        self._vriezer_gemeld |= {(str(k[0]), str(k[1])) for k in lijst("vriezer") if isinstance(k, list) and len(k) == 2}
+        self._stekker_gemeld |= {str(k) for k in lijst("stekker")}
+        self._soc_asked |= {str(k) for k in lijst("soc_gevraagd")}
+        getipt = data.get("getipt")
+        if isinstance(getipt, dict):
+            self._getipt.update({str(k): str(v) for k, v in getipt.items()})
+        self._warned.update(momenten("gewaarschuwd"))
 
     def _programma_onthouden(self, device_id: str) -> None:
         """Een programma dat vrijgegeven is maar nog niet draait; een draaiende beurt staat
