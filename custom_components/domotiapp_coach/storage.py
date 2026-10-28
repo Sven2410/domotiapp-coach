@@ -33,6 +33,9 @@ from .const import (
     BERICHTEN_VERSION,
     ZON_BEWAAR_DAGEN,
     ZON_KEY,
+    GEHEUGEN_KEY,
+    GEHEUGEN_MAX_UREN,
+    GEHEUGEN_VERSION,
     ZON_VERSION,
     MELDINGEN_KEY,
     MELDINGEN_MAX,
@@ -635,6 +638,77 @@ class ZonStore:
         grens = (uur - timedelta(days=ZON_BEWAAR_DAGEN)).isoformat()
         self._uren = {k: v for k, v in uren.items() if k >= grens}
         await self._store.async_save({"bewolking": self._uren})
+
+
+class GeheugenStore:
+    """Wat de coach onthoudt over een herstart heen (v0.172.0).
+
+    De eigenaar op 28-10-2026: "überhaupt alles wat we maken moet een herstart overleven".
+    Per sleutel (`boiler:<id>`, `programma:<id>`, `laden:<id>`, `water`) een klein stuk
+    van een lopende sessie, met het moment erbij. Los van de instellingen, want die gaan bij
+    elke wijziging over de websocket, en een boilerbeurt verandert elke minuut.
+
+    `zet` werkt alleen het geheugen bij; `async_bewaar` schrijft, en dat doet de coach
+    hooguit elke `elke` (een paar minuten) en bij het stoppen altijd. Een sleutel die langer
+    dan `GEHEUGEN_MAX_UREN` niet bijgewerkt werd, telt bij het lezen niet meer.
+    """
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._store: Store[dict[str, Any]] = Store(hass, GEHEUGEN_VERSION, GEHEUGEN_KEY)
+        self._items: dict[str, dict[str, Any]] | None = None
+        self._vuil = False
+        self._meteen = False
+        self._geschreven: datetime | None = None
+
+    async def async_alles(self, nu: datetime) -> dict[str, dict[str, Any]]:
+        """Alles wat er staat en niet te oud is, als {sleutel: data}. `nu` in UTC."""
+        if self._items is None:
+            data = await self._store.async_load()
+            items = (data or {}).get("items") if isinstance(data, dict) else None
+            self._items = {
+                str(k): v for k, v in (items or {}).items()
+                if isinstance(v, dict) and isinstance(v.get("data"), dict)
+            }
+        grens = (nu - timedelta(hours=GEHEUGEN_MAX_UREN)).isoformat()
+        return {k: dict(v["data"]) for k, v in self._items.items() if str(v.get("at") or "") >= grens}
+
+    def zet(self, sleutel: str, data: dict[str, Any] | None, nu: datetime, meteen: bool = False) -> None:
+        """Een sleutel bijwerken (None haalt hem weg). Alleen in het geheugen; zie `async_bewaar`."""
+        if self._items is None:
+            return
+        oud = self._items.get(sleutel)
+        if data is None:
+            if oud is None:
+                return
+            self._items.pop(sleutel)
+        else:
+            if oud is not None and oud.get("data") == data:
+                return
+            self._items[sleutel] = {"at": nu.isoformat(), "data": data}
+        self._vuil = True
+        self._meteen = self._meteen or meteen
+
+    async def async_bewaar(self, nu: datetime, elke: timedelta | None = None) -> None:
+        """Naar schijf als er iets veranderde: meteen als dat gevraagd werd, anders na `elke`."""
+        if not self._vuil or self._items is None:
+            return
+        if (elke is not None and not self._meteen and self._geschreven is not None
+                and nu - self._geschreven < elke):
+            return
+        grens = (nu - timedelta(hours=GEHEUGEN_MAX_UREN)).isoformat()
+        self._items = {k: v for k, v in self._items.items() if str(v.get("at") or "") >= grens}
+        await self._store.async_save({"items": self._items})
+        self._vuil = False
+        self._meteen = False
+        self._geschreven = nu
+
+
+def async_get_geheugen(hass: HomeAssistant) -> GeheugenStore:
+    """Het ene geheugen van deze installatie (v0.172.0)."""
+    data = hass.data.setdefault(DOMAIN, {})
+    if "geheugen" not in data:
+        data["geheugen"] = GeheugenStore(hass)
+    return data["geheugen"]
 
 
 def async_get_zon(hass: HomeAssistant) -> ZonStore:
