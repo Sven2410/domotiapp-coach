@@ -12400,6 +12400,74 @@ controle("de vraag om hem aan te zetten komt na een stroomstoring niet nog eens"
 controle("en de herinnering noemt het moment van voor de herstart",
          len(later213d) == 1 and "om 11:00" in later213d[0], f"{later213d}")
 
+print("=== 214. een melding die gedaan is komt na een herstart niet nog eens (v0.173.0) ===")
+# 1. Iets anders stuurt de batterij: de coach laat hem een uur los, ook over een stroomstoring heen.
+hass214, _, coach214 = bouw(huis75(), instellingen(devices=[LAADPAAL, BATTERIJ]))
+NU214 = dt.datetime(2026, 9, 22, 18, 0)
+asyncio.run(ronde75(hass214, coach214, NU214))
+hass214.states.zet("select.batterij_modus", "self_consumption")
+asyncio.run(ronde75(hass214, coach214, NU214 + dt.timedelta(minutes=1)))
+asyncio.run(ronde75(hass214, coach214, NU214 + dt.timedelta(minutes=2)))
+eerst214 = [d[2].get("message", "") for d in hass214.services.verstuurd if d[0] == "notify"]
+# Zoals `_tick` na elke ronde.
+asyncio.run(coachmod.async_get_geheugen(hass214).async_bewaar(coachmod.dt_util.utcnow(), coachmod.GEHEUGEN_ELKE))
+coach214 = herstart213(hass214, stop=False)
+uit214 = []
+for m in (5, 6, 7):
+    b214 = asyncio.run(ronde75(hass214, coach214, NU214 + dt.timedelta(minutes=m)))
+    modus214, _, vermogen214 = zet75(hass214)
+    uit214.append((b214.get("applied"), b214.get("foreign"), modus214, vermogen214,
+                   [d[2].get("message", "") for d in hass214.services.verstuurd if d[0] == "notify"]))
+print(f"  voor de herstart: {eerst214}; erna: {uit214}")
+controle("na een herstart blijft hij los, schrijft hij niets en meldt hij het niet nog eens",
+         any("Iets anders stuurt" in m for m in eerst214)
+         and all(a is False and f is True and not mo and not v and not ms for a, f, mo, v, ms in uit214), f"{uit214}")
+b214 = asyncio.run(ronde75(hass214, coach214, NU214 + dt.timedelta(minutes=62)))
+modus214, _, _ = zet75(hass214)
+controle("en na het uur van voor de herstart neemt hij het weer over", modus214 == ["third_party_control"], f"{modus214}")
+
+# 2. Een batterij die te warm is: het bericht komt na een herstart niet nog eens.
+inst214 = instellingen(devices=[LAADPAAL, BATTERIJ135])
+inst214["notifications"] = {**inst214["notifications"], "temp_alert": {"enabled": True, "max_c": 45}}
+hass214b, _, coach214b = bouw({**huis75(), "sensor.batterij_temp": {"state": "46.2", "attributes": {"unit_of_measurement": "°C"}},
+                               "switch.ventilator": "on"}, inst214)
+
+
+def warm214(coach, minuten):
+    hass214b.services.verstuurd.clear()
+    asyncio.run(coach._async_temperatuurwacht(inst214, T135 + dt.timedelta(minutes=minuten), "steer"))
+    return [d[2]["message"] for d in hass214b.services.verstuurd if d[0] == "notify"]
+
+
+asyncio.run(coach214b._async_geheugen_laden())
+warm214a = [m for i in (1, 2, 3, 4) for m in warm214(coach214b, i)]
+coach214b._meldingen_onthouden()
+coach214b = herstart213(hass214b)
+asyncio.run(coach214b._async_geheugen_laden())
+warm214b = [m for i in (6, 7, 8, 9) for m in warm214(coach214b, i)]
+print(f"  voor de herstart: {warm214a}; erna: {warm214b}")
+controle("de temperatuurmelding komt één keer, ook met een herstart terwijl hij te warm blijft",
+         len(warm214a) == 1 and warm214b == [], f"{warm214a} {warm214b}")
+
+# 3. De vlaggen gaan heen en terug, met de momenten in de tijd van het huis.
+coach214c = coachmod.ChargerCoach(hass214b)
+coach214c._integratie_gemeld = {"e1"}
+coach214c._integratie_stuk = {"e1": dt.datetime(2026, 10, 27, 17, 8)}
+coach214c._vriezer_gemeld = {("dev-vriezer", "warm")}
+coach214c._stekker_gemeld = {"dev-plug"}
+coach214c._soc_asked = {"ford"}
+coach214c._getipt = {"dev-laadpaal": "net"}
+coach214c._warned = {"dev-laadpaal": dt.datetime(2026, 10, 27, 18, 30)}
+coach214c._meldingen_onthouden()
+coach214d = herstart213(hass214b)
+asyncio.run(coach214d._async_geheugen_laden())
+controle("alle vlaggen komen terug zoals ze waren",
+         coach214d._integratie_gemeld == {"e1"} and coach214d._integratie_stuk == {"e1": dt.datetime(2026, 10, 27, 17, 8)}
+         and coach214d._vriezer_gemeld == {("dev-vriezer", "warm")} and coach214d._stekker_gemeld == {"dev-plug"}
+         and coach214d._soc_asked == {"ford"} and coach214d._getipt == {"dev-laadpaal": "net"}
+         and coach214d._warned == {"dev-laadpaal": dt.datetime(2026, 10, 27, 18, 30)},
+         f"{coach214d._integratie_stuk} {coach214d._warned} {coach214d._vriezer_gemeld}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

@@ -22,6 +22,8 @@ stopt niets.
 | een opwarmbeurt van de boiler | `GeheugenStore`, `boiler:<id>` | v0.172.0 |
 | water dat blijft lopen | `GeheugenStore`, `water` | v0.172.0 |
 | een programma dat vrijgegeven is maar nog niet draait, en uitruimen | `GeheugenStore`, `programma:<id>` | v0.172.0 |
+| iets anders stuurt de batterij, hij volgt niet, de Growatt weigert | `GeheugenStore`, `batterij:<id>` | v0.173.0 |
+| meldingen die al gedaan zijn | `GeheugenStore`, `meldingen` | v0.173.0 |
 
 ## GeheugenStore (v0.172.0)
 
@@ -60,6 +62,24 @@ Wat er per sleutel in staat:
   - Het onthouden gebeurt na de hele ronde van het apparaat (in `_round`), want de vraag aan de bewoner
     komt pas aan het eind.
 
+- **`batterij:<id>`** (v0.173.0): sinds wanneer iets anders hem stuurt (`vreemd`).
+  - Dan laat de coach hem een uur los (`VREEMD_PAUZE`). Zonder dit nam hij hem na een herstart meteen weer
+    over, en kwam "Iets anders stuurt" opnieuw.
+  - Ook: of hij de coach niet volgt en dat gemeld is, en wat de cloud van een Growatt weigerde
+    (`growatt_gemeld`, `growatt_houden_mis`).
+  - Ze komen terug zodra de sessie er is (`_batterij_sessie`).
+- **`meldingen`** (v0.173.0): de vlaggen van meldingen die één keer horen te komen zolang de toestand
+  blijft:
+  - een integratie die niet opkomt, met sinds wanneer;
+  - een batterij die te warm is;
+  - een vriezer of koelkast;
+  - een smart plug die uit staat;
+  - de vraag naar de accustand;
+  - een tip;
+  - de waarschuwing dat de pauze de klaar-tijd kost.
+
+  Is de toestand na de herstart voorbij, dan ruimt de wacht zijn vlag op zoals altijd.
+
 Proef 213 in `test_coach.py` laat het zien:
 
 - **Te laat**: doorladen na 19:00 blijft na een herstart, ook als de coach van 18:55 tot 19:04 weg was.
@@ -69,12 +89,18 @@ Proef 213 in `test_coach.py` laat het zien:
 - **Vrijgave**: "Zet Vaatwasser nu aan" komt na een stroomstoring niet nog eens, en de herinnering noemt
   11:00.
 
+Proef 214 (v0.173.0):
+
+- **Iets anders stuurt**: na een stroomstoring blijft de batterij los. De coach schrijft niets en meldt het
+  niet opnieuw. Na het uur van voor de herstart neemt hij hem weer over.
+- **Te warm**: de temperatuurmelding komt één keer, ook met een herstart terwijl hij te warm blijft.
+- **Alle vlaggen**: ze gaan heen en weer naar de opslag, met de momenten in de tijd van het huis.
+
 ## Wat er nog open staat
 
 Zie de werkbon van 28-10-2026 in de privénotities:
 
-- meldingen die na een herstart nog een keer komen (iets anders stuurt de batterij, de cloud van een
-  Growatt, een sensor die stil is);
+- een wekpoging en een proefladen die na een herstart opnieuw beginnen (`_woken`, `_proef`);
 - een laadbeurt die langer dan een half uur uit stond;
 - het kasboek van de batterij tussen twee opslagen;
 - leren dat halverwege was (het laadrendement, de stap van de accustand).
