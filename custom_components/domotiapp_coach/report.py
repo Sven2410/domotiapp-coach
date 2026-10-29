@@ -59,8 +59,11 @@ def _reports(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
     return hass.data.setdefault(DOMAIN, {}).setdefault("reports", {})
 
 
-def async_put(hass: HomeAssistant, pdf: bytes, filename: str) -> str:
-    """Leg een rapport klaar en geef het adres terug waar het op te halen is."""
+def async_put(hass: HomeAssistant, pdf: bytes, filename: str, soort: str = "application/pdf") -> str:
+    """Leg een rapport klaar en geef het adres terug waar het op te halen is.
+
+    Sinds v0.180.0 ook een bestand voor Excel uit Historie (`soort` text/csv).
+    """
     reports = _reports(hass)
     now = time.monotonic()
 
@@ -75,6 +78,7 @@ def async_put(hass: HomeAssistant, pdf: bytes, filename: str) -> str:
     reports[token] = {
         "pdf": pdf,
         "filename": filename,
+        "soort": soort,
         "expires": now + TTL_SECONDS,
     }
     return URL.format(token=token)
@@ -111,7 +115,7 @@ class ReportView(HomeAssistantView):
 
         return web.Response(
             body=report["pdf"],
-            content_type="application/pdf",
+            content_type=report.get("soort", "application/pdf"),
             headers={
                 # Zonder deze regel toont een browser de pdf alleen; met deze
                 # regel biedt hij hem aan om te bewaren, onder de naam die de

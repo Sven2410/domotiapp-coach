@@ -517,7 +517,7 @@ export function combine(series, ids) {
  *
  * Waarden zijn watt, ongeacht wat de sensor van de klant zichzelf noemt.
  *
- * @returns {Promise<Map<string, {start: Date, laagste: number, piek: number,
+ * @returns {Promise<Map<string, {start: Date, utc: Date, laagste: number, piek: number,
  *   gemiddeld: number, seconden: number}[]>>}
  */
 export async function quarters(hass, entityIds, start, end) {
@@ -538,6 +538,9 @@ export async function quarters(hass, entityIds, start, end) {
         (rows ?? []).map((row) => ({
           // Seconden sinds 1970: een echt moment, op de klok van het huis gezet.
           start: alsHuis(row.start * 1000),
+          // En het echte moment zelf (v0.180.0): bij een huis in een andere tijdzone dan de
+          // browser vallen de twee uren van 02:00 op de klok van het huis samen.
+          utc: new Date(row.start * 1000),
           laagste: Number(row.laagste),
           piek: Number(row.piek),
           gemiddeld: Number(row.gemiddeld),

@@ -394,6 +394,54 @@ try:
 finally:
     dtutil.as_utc, dtutil.DEFAULT_TIME_ZONE = oud_utc, oud_zone
 
+print("=== 11. de fasen van de lastbewaker per kwartier, ook over een herstart (v0.180.0) ===")
+# Een bewoner in een klantwoning wilde op 29-10-2026 weten of een aansluiting van 3x25 A
+# past. Dat hangt af van elke fase apart, en de opslag bewaarde ze niet.
+fasen11 = {
+    "sources": {**instellingen["sources"], "phases_enabled": True, "phases": {
+        "l1": {"current": "sensor.l1_a", "power": "sensor.l1_w", "voltage": "sensor.l1_v"},
+        "l2": {"current": "", "power": "sensor.l2_w", "voltage": "sensor.l2_v"},
+        "l3": {"current": "", "power": "sensor.l3_w", "voltage": ""},
+    }},
+    "devices": [],
+}
+volgt11 = archive.Archive._wat_volgen(fasen11)
+controle("de stroom als die er is, anders het vermogen en de spanning",
+         {"sensor.l1_a", "sensor.l2_w", "sensor.l2_v", "sensor.l3_w"} <= volgt11
+         and not {"sensor.l1_w", "sensor.l1_v"} & volgt11 and "" not in volgt11, f"{sorted(volgt11)}")
+uit11 = archive.Archive._wat_volgen({**fasen11, "sources": {**fasen11["sources"], "phases_enabled": False}})
+controle("zonder het vinkje van de fasen geen fasen", not any("sensor.l" in e for e in uit11), f"{sorted(uit11)}")
+
+
+def staat11(waarde, eenheid):
+    toestand = core.State()
+    toestand.state, toestand.attributes = str(waarde), {"unit_of_measurement": eenheid}
+    return toestand
+
+
+# Een stroom in A en een spanning in V gaan zoals ze zijn de opslag in, een vermogen in kW als watt.
+meter11 = archive._Meter("sensor.l1_a")
+archive.Archive._verwerk(meter11, staat11(23.5, "A"), t(19, 0))
+archive.Archive._verwerk(meter11, staat11(31.2, "A"), t(19, 4))
+# Home Assistant gaat om 19:07 uit; bij het stoppen schrijft hij het halve kwartier weg.
+meter11.verloren(t(19, 7))
+meter11._sluit()
+voor11 = meter11.oogst()
+# Na de herstart, om 19:09, meet een nieuwe meter verder.
+na11 = archive._Meter("sensor.l1_a")
+archive.Archive._verwerk(na11, staat11(12.0, "A"), t(19, 9))
+na11.tot(t(19, 30))
+na11 = na11.oogst()
+print(f"  voor de herstart {voor11}, erna {na11}")
+controle("een stroom in ampere blijft ampere", voor11 and voor11[0][2] == 31.2 and voor11[0][1] == 23.5, f"{voor11}")
+controle("het halve kwartier voor de herstart is bewaard, met zijn eigen seconden",
+         voor11 and voor11[0][4] == 420.0, f"{voor11}")
+controle("en erna gaat de opslag gewoon door, op ampere",
+         len(na11) == 2 and na11[0][4] == 360.0 and na11[1][4] == 900.0 and na11[1][3] == 12.0, f"{na11}")
+kw11 = archive._Meter("sensor.l3_w")
+archive.Archive._verwerk(kw11, staat11(5.75, "kW"), t(19, 0))
+controle("een fasevermogen in kW wordt watt", kw11.waarde == 5750.0, f"{kw11.waarde}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

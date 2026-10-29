@@ -1604,6 +1604,8 @@ def async_coach_approve(
         vol.Required("type"): "domotiapp_coach/report/store",
         vol.Required("pdf"): str,
         vol.Required("filename"): str,
+        # Sinds v0.180.0 ook het bestand voor Excel uit Historie, in hetzelfde veld.
+        vol.Optional("soort", default="pdf"): vol.In(["pdf", "csv"]),
     }
 )
 @callback
@@ -1627,7 +1629,14 @@ def async_store_report(
         connection.send_error(msg["id"], "invalid_format", t("Dit is geen leesbaar rapport."))
         return
 
-    if not pdf.startswith(b"%PDF-"):
+    csv = msg["soort"] == "csv"
+    if csv:
+        try:
+            pdf.decode("utf-8")
+        except UnicodeDecodeError:
+            connection.send_error(msg["id"], "invalid_format", t("Dit is geen leesbaar bestand."))
+            return
+    elif not pdf.startswith(b"%PDF-"):
         connection.send_error(msg["id"], "invalid_format", t("Dit is geen pdf."))
         return
     if len(pdf) > report.MAX_BYTES:
@@ -1636,10 +1645,11 @@ def async_store_report(
 
     # De naam komt uit de browser en belandt in een kopregel, dus alles wat daar
     # een tweede regel van zou kunnen maken gaat eruit.
-    filename = re.sub(r'[\r\n"\\]', "", msg["filename"]).strip() or "rapport.pdf"
+    filename = re.sub(r'[\r\n"\\]', "", msg["filename"]).strip() or ("historie.csv" if csv else "rapport.pdf")
 
     connection.send_result(
-        msg["id"], {"url": report.async_put(hass, pdf, filename[:120])}
+        msg["id"],
+        {"url": report.async_put(hass, pdf, filename[:120], "text/csv" if csv else "application/pdf")},
     )
 
 

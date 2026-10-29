@@ -28,6 +28,8 @@ import { accuRendement, allInPrijzen, contractAt, laadCoachPrijzen, tariff, volg
 import { ZOOM_MAX, balkSoort, legenda, metHerkomst, netReeks, stippen, tekenTijdlijn, tekenUitleg, tijdlijn, zoomStap } from "../tijdlijn.js";
 import { afleveren, base64Van } from "../pdf.js";
 import { reportPdf } from "../report.js";
+import { faseBronnen, faseEntiteiten, faseKwartieren, overZekering, zekeringKeuzes } from "../fasen.js";
+import { csvOpmaak, csvTabel, csvTekst } from "../csv.js";
 import { beurtenIn, delen, opmerking, perApparaat, totalen, woorden } from "../savings.js";
 import { SALDEREN_TOT, aandeelOp, accuVerdiend, accuZon, balans, prijsOp, salderen, schaalKosten, vlakkePrijs } from "../geld.js";
 import {
@@ -408,8 +410,11 @@ function watt(value) {
 const KORRELS = {
   quarter: {
     kop: nt("Kwartier"),
-    sleutel: (d) => d.getTime(),
-    label: (d) => tijd(d, { hour: "2-digit", minute: "2-digit" }),
+    // Op het echte moment (v0.180.0), zodat de twee kwartieren van 02:15 bij de wintertijd er
+    // allebei staan.
+    sleutel: (rij) => (rij.utc ?? rij.start).getTime(),
+    begin: (d) => d,
+    label: (d, period) => metDag(d, period, tijd(d, { hour: "2-digit", minute: "2-digit" })),
     uitleg: [
       nt("Elk kwartier van deze dag, met het laagste, het gemiddelde en de piek."),
       nt("De piek is de hoogste waarde die de sensor binnen dat kwartier gemeld heeft, dus zo scherp als je meter meet."),
@@ -418,10 +423,11 @@ const KORRELS = {
   },
   hour: {
     kop: nt("Uur"),
-    sleutel: (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()).getTime(),
-    label: (d) =>
-      `${datum(d, { weekday: "short" }).replace(".", "")} ` +
-      `${String(d.getHours()).padStart(2, "0")}:00`,
+    // Het echte begin van het uur: het uur van 02:00 dat twee keer komt, zijn twee uren.
+    sleutel: (rij) =>
+      (rij.utc ?? rij.start).getTime() - (rij.start.getMinutes() * 60 + rij.start.getSeconds()) * 1000 - rij.start.getMilliseconds(),
+    begin: (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()),
+    label: (d, period) => metDag(d, period, `${String(d.getHours()).padStart(2, "0")}:00`),
     uitleg: [
       nt("Elk uur van deze week, samengesteld uit de kwartieren eronder."),
       nt("De piek is de hoogste waarde binnen dat uur."),
@@ -430,7 +436,8 @@ const KORRELS = {
   },
   day: {
     kop: nt("Dag"),
-    sleutel: (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(),
+    sleutel: (rij) => KORRELS.day.begin(rij.start).getTime(),
+    begin: (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()),
     label: (d) => datum(d, { weekday: "short", day: "numeric", month: "short" })
       .replace(/\./g, ""),
     uitleg: [
@@ -441,7 +448,8 @@ const KORRELS = {
   },
   month: {
     kop: nt("Maand"),
-    sleutel: (d) => new Date(d.getFullYear(), d.getMonth()).getTime(),
+    sleutel: (rij) => KORRELS.month.begin(rij.start).getTime(),
+    begin: (d) => new Date(d.getFullYear(), d.getMonth()),
     label: (d) => datum(d, { month: "long" }),
     uitleg: [
       nt("Elke maand van dit jaar, samengesteld uit de kwartieren eronder."),
@@ -449,6 +457,19 @@ const KORRELS = {
     ],
   },
 };
+
+/**
+ * Een tijd met de dag erbij zodra de periode langer is dan een dag (v0.180.0): "di 27 okt 14:15".
+ * Een bewoner in een klantwoning op 29-10-2026: bij Kwartier stond over een week alleen "14:15", en
+ * bij Uur over een maand "di 14:00", zonder te weten welke dinsdag.
+ */
+function metDag(d, period, klok) {
+  if (period === "day") return klok;
+  return `${datum(d, { weekday: "short", day: "numeric", month: "short" }).replace(/\./g, "")} ${klok}`;
+}
+
+/** Hoe een tijdvak van een korrel heet in het rapport, voor de proeven. */
+export const korrelLabel = (id, d, period) => KORRELS[id].label(d, period);
 
 /** Zinnen in de taal van het paneel, met een spatie ertussen. */
 const alsZinnen = (lijst) => lijst.map((zin) => t(zin)).join(" ");
@@ -542,13 +563,22 @@ function omgekeerd(rows) {
  * elk kwartier werkelijk gedekt heeft, dus een kwartier waarin de sensor tien
  * minuten weg was telt voor een derde mee.
  */
+/** De velden van een Date als één getal, zonder zomertijd: om een verschil op de klok te meten. */
+const klokVeld = (d) =>
+  Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds());
+
 function vakken(rows, korrel) {
   const uit = new Map();
   for (const row of rows) {
     if (!Number.isFinite(row.gemiddeld) || row.seconden <= 0) continue;
-    const sleutel = korrel.sleutel(row.start);
+    const sleutel = korrel.sleutel(row);
+    const begin = korrel.begin(row.start);
     const vak = uit.get(sleutel) ?? {
-      start: new Date(sleutel),
+      start: begin,
+      // Het echte moment van het begin, voor de kolom UTC in het bestand (v0.180.0). Het verschil
+      // op de klok, niet tussen de twee Dates: `begin` van het tweede uur van 02:00 is als Date
+      // het eerste.
+      utc: row.utc ? new Date(row.utc.getTime() - (klokVeld(row.start) - klokVeld(begin))) : null,
       laagste: Infinity,
       piek: -Infinity,
       gewogen: 0,
@@ -561,9 +591,12 @@ function vakken(rows, korrel) {
     uit.set(sleutel, vak);
   }
   return [...uit.values()]
-    .sort((a, b) => a.start - b.start)
+    .sort((a, b) => (a.utc ?? a.start) - (b.utc ?? b.start))
     .map((vak) => ({ ...vak, gemiddeld: vak.gewogen / vak.seconden }));
 }
+
+/** Kwartieren samenvoegen tot de tijdvakken van een korrel, voor de proeven. */
+export const korrelVakken = (rows, id) => vakken(rows, KORRELS[id]);
 
 /**
  * Wanneer een piek viel, zo kort als in deze periode nog eenduidig is.
@@ -576,6 +609,14 @@ function piekMoment(period, date) {
   if (period === "day") return klok;
   const dag = datum(date, { day: "numeric", month: "short" });
   return `${dag.replace(".", "")} ${klok}`;
+}
+
+/** Wat er onder de lijnen van Per fase staat (v0.180.0). */
+function faseTick(period, date) {
+  if (period === "day") return tijd(date, { hour: "2-digit", minute: "2-digit" });
+  if (period === "week") return datum(date, { weekday: "short", day: "numeric" }).replace(/\./g, "");
+  if (period === "year") return datum(date, { month: "short" }).replace(".", "");
+  return String(date.getDate());
 }
 
 /** What each bucket is called under the chart. */
@@ -688,6 +729,12 @@ class DacViewHistory extends DacElement {
               <button type="button" id="report"><span>${t("Uitgebreid rapport")}</span><small>${t("Alles, met het verloop per apparaat")}</small></button>
             </div>
           </div>
+          <!-- De kwartieren als bestand voor Excel (v0.180.0). Een bewoner in een klantwoning
+               wilde op 29-10-2026 scenario's voor een thuisbatterij doorrekenen. Zo fijn als het
+               verloop in het rapport. -->
+          <button type="button" class="download" id="csv-knop" title="${t("Deze periode als bestand voor Excel, zo fijn als het verloop in het rapport")}">
+            ${icons.arrowRight}<span>CSV</span>
+          </button>
           <div class="stepper">
             <button type="button" class="now" id="now" hidden></button>
             <button type="button" id="prev" aria-label="${t("Vorige")}">${icons.arrowLeft}</button>
@@ -702,6 +749,26 @@ class DacViewHistory extends DacElement {
           <div id="stage"></div>
           <div class="legend" id="legend"></div>
           <p class="note" id="note"></p>
+        </section>
+
+        <!-- Per fase (v0.180.0). Of een kleinere aansluiting past, hangt af van elke fase
+             apart; een bewoner in een klantwoning wilde op 29-10-2026 van 3x50 A naar 3x25 A.
+             Alleen als de fasen bij Installatie ingevuld zijn. De som staat in fasen.js. -->
+        <section class="card" id="fasen-card" hidden>
+          <div class="panel-head fasen-kop">
+            <div>
+              <div class="eyebrow">${t("Per fase")}</div>
+              <h2 id="fasen-titel">${t("Hoe zwaar elke fase belast werd")}</h2>
+            </div>
+            <label class="keuze">
+              <span class="keuze-kop">${t("Zekering")}</span>
+              <span class="kies"><select id="fasen-zekering"></select></span>
+            </label>
+          </div>
+          <div id="fasen-stage"></div>
+          <div class="legend" id="fasen-legenda"></div>
+          <ul class="fasen-lijst" id="fasen-lijst"></ul>
+          <p class="note" id="fasen-note"></p>
         </section>
 
         <!-- Per apparaat (v0.121.0), zoals het energiedashboard van Home
@@ -797,6 +864,11 @@ class DacViewHistory extends DacElement {
       this.korrel_ = event.target.value;
       this.paintKorrel_();
     });
+    this.$("#csv-knop").addEventListener("click", () => this.csv_());
+    this.$("#fasen-zekering").addEventListener("change", (event) => {
+      this.zekering_ = Number(event.target.value) || null;
+      this.paintFasen_();
+    });
 
     // Rapport: één knop, en daaronder de keuze tussen kort en uitgebreid.
     const menu = this.$("#rapport-menu");
@@ -843,10 +915,11 @@ class DacViewHistory extends DacElement {
     this.addEventListener("pointerdown", (event) => {
       if (event.pointerType === "mouse") return;
       const path = event.composedPath();
-      if (!path.some((node) => ["stage", "gas-stage", "water-stage", "apparaten-stage"].includes(node?.id))) {
+      if (!path.some((node) => ["stage", "gas-stage", "water-stage", "apparaten-stage", "fasen-stage"].includes(node?.id))) {
         this.clearPick_();
         this.clearGasPick_();
         this.clearAppPick_();
+        this.clearFasePick_();
       }
     });
 
@@ -1010,8 +1083,9 @@ class DacViewHistory extends DacElement {
     const ids = [...roles.solar, ...roles.import, ...roles.export, ...roles.gas, ...roles.water];
 
     this.paintPeriod_();
-    // Los van de meterstanden: de tijdlijn heeft die niet nodig.
+    // Los van de meterstanden: de tijdlijn heeft die niet nodig, en de fasen ook niet.
     this.laadTijdlijn_();
+    this.laadFasen_();
 
     if (!ids.length) {
       this.rows_ = null;
@@ -1227,10 +1301,12 @@ class DacViewHistory extends DacElement {
       this.$("#gas-card").hidden = true;
       this.$("#water-card").hidden = true;
       this.$("#tijdlijn-card").hidden = true;
+      this.$("#fasen-card").hidden = true;
       this.paintSaved_();
       return;
     }
     this.paintTijdlijn_();
+    this.paintFasen_();
 
     const note = this.$("#note");
     const roles = this.meters_();
@@ -2013,7 +2089,7 @@ class DacViewHistory extends DacElement {
       const rijen = [];
       for (const vak of vakken(gevonden.get(entity) ?? [], korrel)) {
         rijen.push([
-          korrel.label(vak.start),
+          korrel.label(vak.start, this.period_),
           watt(vak.laagste),
           watt(vak.gemiddeld),
           watt(vak.piek),
@@ -2094,12 +2170,14 @@ class DacViewHistory extends DacElement {
    * eronder. Een koppeling die zijn eigen venster opent laat het paneel met
    * rust.
    */
-  async bezorg_(blob, naam) {
+  async bezorg_(blob, naam, soort = "pdf") {
     try {
       const { url } = await this.hass_.callWS({
         type: "domotiapp_coach/report/store",
         pdf: await base64Van(blob),
         filename: naam,
+        // Sinds v0.180.0 ook het bestand voor Excel, langs dezelfde weg.
+        ...(soort === "csv" ? { soort } : {}),
       });
       if (url) {
         const link = document.createElement("a");
@@ -2116,7 +2194,249 @@ class DacViewHistory extends DacElement {
     } catch (fout) {
       console.warn("[DomotiApp Coach] rapport kon niet via Home Assistant, nu rechtstreeks", fout);
     }
-    return afleveren(blob, naam);
+    return afleveren(blob, naam, soort === "csv" ? "text/csv" : "application/pdf");
+  }
+
+  /**
+   * De periode als bestand voor Excel (v0.180.0): per tijdvak van de korrel van het rapport het
+   * laagste, het gemiddelde en de piek van het net, de zon, elk apparaat en de fasen. Uit de
+   * kwartieropslag, dezelfde rijen als het verloop in het rapport (`vakken`).
+   */
+  async csv_() {
+    const knop = this.$("#csv-knop");
+    if (!knop || knop.disabled || !this.hass_) return;
+    const label = knop.querySelector("span");
+    const oud = label.textContent;
+    knop.disabled = true;
+    label.textContent = t("Bezig");
+    try {
+      const korrel = KORRELS[this.korrel_id()] ?? KORRELS.quarter;
+      const bronnen = this.vermogenBronnen_();
+      const fasen = faseBronnen(this.settings_?.sources);
+      const start = this.periodeStart_();
+      const gevonden = await quarters(
+        this.hass_,
+        [...bronnen.map((bron) => bron.entity), ...faseEntiteiten(fasen)],
+        start,
+        periodEnd(this.period_, start)
+      );
+      const reeksen = [
+        ...bronnen.map((bron) => ({
+          naam: bron.label,
+          eenheid: "W",
+          decimalen: 0,
+          vakken: vakken(bron.omkeren ? omgekeerd(gevonden.get(bron.entity)) : gevonden.get(bron.entity) ?? [], korrel),
+        })),
+        ...fasen.map((fase) => ({ naam: fase.label, eenheid: "A", decimalen: 2, vakken: vakken(faseKwartieren(fase, gevonden), korrel) })),
+      ].filter((reeks) => reeks.vakken.length);
+      if (!reeksen.length) {
+        label.textContent = t("Niets te bewaren");
+        return;
+      }
+      const opmaak = csvOpmaak();
+      const { kop, rijen } = csvTabel(reeksen, opmaak, {
+        datum: t("Datum"),
+        tijd: t("Tijd"),
+        laagste: t("Laagste").toLowerCase(),
+        gemiddeld: t("Gemiddeld").toLowerCase(),
+        piek: t("Piek").toLowerCase(),
+      });
+      const blob = new Blob([csvTekst(kop, rijen, opmaak)], { type: "text/csv;charset=utf-8" });
+      const naam = `DomotiApp Coach ${periodLabel(this.period_, start)} ${t(korrel.kop).toLowerCase()}.csv`.replace(/[\\/:*?"<>|]/g, "-");
+      const uitkomst = await this.bezorg_(blob, naam, "csv");
+      label.textContent = uitkomst === "mislukt" ? t("Niet gelukt") : oud;
+    } catch (fout) {
+      console.error("[DomotiApp Coach] het bestand kon niet gemaakt worden", fout);
+      label.textContent = t("Niet gelukt");
+    } finally {
+      knop.disabled = false;
+      if (label.textContent !== oud) setTimeout(() => { label.textContent = oud; }, 4000);
+    }
+  }
+
+  /**
+   * De fasen van deze periode, los van de rest (v0.180.0). Zonder fasen bij Installatie
+   * niets, en blijft de kaart weg.
+   */
+  async laadFasen_() {
+    const bronnen = faseBronnen(this.settings_?.sources);
+    const run = (this.fasenRun_ = (this.fasenRun_ ?? 0) + 1);
+    if (!bronnen.length || !this.hass_) {
+      this.fasen_ = null;
+      this.paintFasen_();
+      return;
+    }
+    const start = this.periodeStart_();
+    const gevonden = await quarters(this.hass_, faseEntiteiten(bronnen), start, periodEnd(this.period_, start));
+    if (run !== this.fasenRun_) return;
+    this.fasen_ = bronnen.map((bron) => ({ ...bron, rijen: faseKwartieren(bron, gevonden) }));
+    this.paintFasen_();
+  }
+
+  /**
+   * Per fase: een lijn per fase in ampère, een stippellijn op de zekering, en eronder per fase
+   * hoe vaak hij erboven kwam. De lijn is het gemiddelde per tijdvak (een kwartier op een dag of
+   * een week, een uur over een maand, een dag over een jaar); het tellen gebeurt altijd per
+   * kwartier, want een zekering beslist op minuten en niet op een uur.
+   */
+  paintFasen_() {
+    const card = this.$("#fasen-card");
+    if (!card) return;
+    const fasen = (this.fasen_ ?? []).filter((fase) => fase.rijen.length);
+    card.hidden = this.onderwerp_ !== "energie" || !fasen.length;
+    if (card.hidden) return;
+
+    const eigen = Number(this.settings_?.installation?.fuse_amps) || 0;
+    const zekering = this.zekering_ || eigen || 25;
+    const keuze = this.$("#fasen-zekering");
+    keuze.innerHTML = zekeringKeuzes(eigen)
+      .map((a) => `<option value="${a}">${a === eigen ? t("{a} A (je aansluiting)", { a }) : `${a} A`}</option>`)
+      .join("");
+    keuze.value = String(zekering);
+
+    const id = { day: "quarter", week: "quarter", month: "hour", year: "day" }[this.period_] ?? "quarter";
+    const korrel = KORRELS[id];
+    const reeksen = fasen.map((fase, i) => {
+      const per = new Map(vakken(fase.rijen, korrel).map((vak) => [(vak.utc ?? vak.start).getTime(), vak]));
+      return { ...fase, kleur: `var(--dac-app-${i + 1})`, per };
+    });
+    const tijden = [...new Set(reeksen.flatMap((reeks) => [...reeks.per.keys()]))].sort((a, b) => a - b);
+    const begin = new Map();
+    for (const reeks of reeksen) for (const [moment, vak] of reeks.per) if (!begin.has(moment)) begin.set(moment, vak.start);
+    this.faseKaart_ = { reeksen, tijden, begin, korrel, zekering };
+
+    const stage = this.$("#fasen-stage");
+    const W = Math.max(MIN_W, Math.round(stage.getBoundingClientRect().width) || MIN_W);
+    const H = W < 420 ? 170 : 210;
+    const BOTTOM = H - BOTTOM_PAD;
+    const hoogste = Math.max(
+      zekering,
+      ...reeksen.flatMap((reeks) => [...reeks.per.values()].map((vak) => Math.abs(vak.gemiddeld)))
+    );
+    const schaal = (BOTTOM - TOP) / (hoogste * 1.1);
+    const y = (amps) => BOTTOM - amps * schaal;
+    const stap = W / Math.max(1, tijden.length);
+    const x = (i) => stap * i + stap / 2;
+
+    const lijnen = reeksen
+      .map((reeks) => {
+        let pad = "";
+        let vorige = -2;
+        tijden.forEach((moment, i) => {
+          const vak = reeks.per.get(moment);
+          if (!vak) return;
+          pad += `${i === vorige + 1 ? "L" : "M"}${x(i).toFixed(1)} ${y(Math.abs(vak.gemiddeld)).toFixed(1)} `;
+          vorige = i;
+        });
+        return `<path class="fase-lijn" d="${pad.trim()}" stroke="${reeks.kleur}"/>`;
+      })
+      .join("");
+    const grens = `<line class="fase-zekering" x1="0" x2="${W}" y1="${y(zekering).toFixed(1)}" y2="${y(zekering).toFixed(1)}"/>`
+      + `<text class="tick" x="${W - 4}" y="${(y(zekering) - 4).toFixed(1)}" text-anchor="end">${zekering} A</text>`;
+    const every = Math.max(1, Math.ceil(tijden.length / Math.max(4, Math.floor(W / 70))));
+    const ticks = tijden
+      .map((moment, i) => (i % every === 0
+        ? `<text class="tick" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${faseTick(this.period_, begin.get(moment))}</text>`
+        : ""))
+      .join("");
+    stage.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${t("Stroom per fase")}">${grens}${lijnen}${ticks}<line class="fase-cursor" id="fase-cursor" x1="0" x2="0" y1="${TOP}" y2="${BOTTOM}" hidden/></svg>`;
+
+    const svg = stage.querySelector("svg");
+    const at = (event) => {
+      const box = svg.getBoundingClientRect();
+      const px = ((event.clientX - box.left) / box.width) * W;
+      return Math.min(tijden.length - 1, Math.max(0, Math.floor(px / stap)));
+    };
+    const pick = (index) => {
+      const cursor = svg.querySelector("#fase-cursor");
+      cursor.setAttribute("x1", x(index).toFixed(1));
+      cursor.setAttribute("x2", x(index).toFixed(1));
+      cursor.removeAttribute("hidden");
+      this.paintFaseLijst_(index);
+    };
+    svg.addEventListener("pointerdown", (event) => {
+      this.faseScrub_ = true;
+      pick(at(event));
+    });
+    svg.addEventListener("pointermove", (event) => {
+      if (this.faseScrub_ || event.pointerType === "mouse") pick(at(event));
+    });
+    for (const done of ["pointerup", "pointercancel"]) svg.addEventListener(done, () => { this.faseScrub_ = false; });
+    svg.addEventListener("pointerleave", (event) => {
+      if (event.pointerType === "mouse") this.clearFasePick_();
+    });
+
+    this.$("#fasen-legenda").innerHTML = [
+      ...reeksen.map((reeks) => `<span><i style="background:${reeks.kleur}"></i>${reeks.label}</span>`),
+      `<span><i class="fase-streep"></i>${t("Zekering {a} A", { a: zekering })}</span>`,
+    ].join("");
+    this.paintFaseLijst_(null);
+
+    const zinnen = [
+      t("De lijn is het gemiddelde per {korrel}; geteld wordt per kwartier.", { korrel: t(korrel.kop).toLowerCase() }),
+      t("Gemiddeld erboven zegt hoe lang een fase zwaar belast was, een piek hoe hoog het even ging."),
+      t("Kies een andere zekering om te zien hoe vaak je erboven zou komen."),
+    ];
+    if (fasen.some((fase) => !fase.current)) zinnen.push(t("Zonder stroomsensor rekent de coach de stroom uit het vermogen en de spanning."));
+    const eerste = Math.min(...fasen.map((fase) => fase.rijen[0].start.getTime()));
+    if (eerste - this.periodeStart_().getTime() > 24 * 3600 * 1000) {
+      zinnen.push(t("De fasen staan er pas vanaf {wanneer}: eerder bewaarde de coach ze niet.", {
+        wanneer: datum(new Date(eerste), { day: "numeric", month: "long", year: "numeric" }),
+      }));
+    }
+    this.$("#fasen-note").textContent = zinnen.join(" ");
+  }
+
+  /** De regels onder de lijnen: over de hele periode, of de stroom in één tijdvak. */
+  paintFaseLijst_(index) {
+    const kaart = this.faseKaart_;
+    if (!kaart) return;
+    const { reeksen, tijden, begin, korrel, zekering } = kaart;
+    const lijst = this.$("#fasen-lijst");
+    if (index === null) {
+      this.$("#fasen-titel").textContent = t("Hoe zwaar elke fase belast werd");
+      lijst.innerHTML = reeksen
+        .map((reeks) => {
+          const over = overZekering(reeks.rijen, zekering);
+          // Een piek ligt nooit onder het gemiddelde, dus gemiddeld erboven is ook een piek erboven.
+          let tekst;
+          if (over.gemiddeld) {
+            tekst = `${tn(over.gemiddeld, "Eén kwartier gemiddeld boven {a} A", "{n} kwartieren gemiddeld boven {a} A", { a: zekering })}, `
+              + `${tn(over.piek, "in één een piek erboven.", "in {n} een piek erboven.")}`;
+          } else if (over.piek) {
+            tekst = tn(over.piek, "Gemiddeld nooit boven {a} A, in één kwartier een piek erboven.",
+              "Gemiddeld nooit boven {a} A, in {n} kwartieren een piek erboven.", { a: zekering });
+          } else {
+            tekst = t("Nooit boven {a} A.", { a: zekering });
+          }
+          const wanneer = piekMoment(this.period_, over.hoogste.op);
+          const piek = this.period_ === "day"
+            ? t("Hoogste piek {piek} A om {wanneer}.", { piek: getal(over.hoogste.amps, 1), wanneer })
+            : t("Hoogste piek {piek} A op {wanneer}.", { piek: getal(over.hoogste.amps, 1), wanneer });
+          return `<li><i style="background:${reeks.kleur}"></i><b>${reeks.label}</b><span>${tekst} ${piek}</span></li>`;
+        })
+        .join("");
+      return;
+    }
+    const moment = tijden[index];
+    const start = begin.get(moment);
+    const wanneer = korrel === KORRELS.day ? bucketTitle("month", start) : korrel.label(start, this.period_);
+    this.$("#fasen-titel").textContent = t("Per fase op {wanneer}", { wanneer });
+    lijst.innerHTML = reeksen
+      .map((reeks) => {
+        const vak = reeks.per.get(moment);
+        const tekst = vak
+          ? t("Gemiddeld {gem} A, piek {piek} A.", { gem: getal(Math.abs(vak.gemiddeld), 1), piek: getal(Math.max(Math.abs(vak.piek), Math.abs(vak.laagste)), 1) })
+          : t("Niet gemeten.");
+        return `<li><i style="background:${reeks.kleur}"></i><b>${reeks.label}</b><span>${tekst}</span></li>`;
+      })
+      .join("");
+  }
+
+  clearFasePick_() {
+    if (!this.faseKaart_ || this.$("#fasen-card")?.hidden) return;
+    this.$("#fase-cursor")?.setAttribute("hidden", "");
+    this.paintFaseLijst_(null);
   }
 
   /** Wat elk apparaat deze periode verbruikte, van groot naar klein. */
@@ -3219,6 +3539,25 @@ DacViewHistory.css = /* css */ `
   }
 
   .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
+
+  /* Per fase (v0.180.0): de lijnen in ampère, de zekering gestippeld, en per fase een regel. */
+  .fasen-kop { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .fase-lijn { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+  .fase-zekering { stroke: var(--dac-ink-2); stroke-width: 1; stroke-dasharray: 4 4; }
+  .fase-cursor { stroke: var(--dac-border-hi); stroke-width: 1; }
+  .fase-cursor[hidden] { display: none; }
+  .legend i.fase-streep { height: 0; border-top: 2px dashed var(--dac-ink-2); border-radius: 0; }
+  .fasen-lijst { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 2px; }
+  .fasen-lijst li {
+    display: grid;
+    grid-template-columns: 12px 2.2em minmax(0, 1fr);
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 0;
+    border-top: 1px solid var(--dac-border);
+    font-size: 13px;
+  }
+  .fasen-lijst i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; align-self: center; }
 
   /* Per apparaat (v0.121.0): een regel per apparaat met zijn kleur, zijn naam,
      zijn kWh en zijn deel van het huis. De lijst is ook de legenda. */
